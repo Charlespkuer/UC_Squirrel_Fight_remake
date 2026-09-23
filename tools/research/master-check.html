@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../">
+<meta charset="UTF-8">
+<title>师徒系统检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* 开发检查：师徒系统的完整行为 + 界面结构。
+ * ?battle=1 会真的打一场收徒战（用于截图战斗画面）。
+ * 结果在 window.__report.check。 */
+(function () {
+  const q = new URLSearchParams(location.search);
+  window.addEventListener('load', async () => {
+    document.title = 'LOADING';
+    localStorage.removeItem('ssdz_debug');
+    await new Promise((r) => setTimeout(r, 250));
+    State.newGame('师徒检查');
+    const S = State.state();
+    S.level = 22; S.goldPoint = 500; S.energy = 100; S.maxEnergy = 180;
+    S.weapons = ['1:3'];
+
+    const check = {};
+    // ---- 拜师：自动学会师父驾到 ----
+    const cand = State.genAI(30, '', { levelJitter: 0, gearSelfLevel: true });
+    const joinRes = State.setMaster(cand);
+    check.masterSaved = !!State.state().master;
+    check.masterShape = State.state().master;
+    check.learnedMsg = joinRes.learned && joinRes.learned.msg;
+    check.learnedMasterSkill = State.state().skills.some((x) => Number(String(x).split(':')[0]) === State.MASTER_SKILL_ID);
+    check.masterSkillName = State.MASTER_SKILL_NAME;
+    // 重复拜师不应重复加技能
+    const skillsBefore = State.state().skills.length;
+    State.setMaster(cand);
+    check.noDuplicateSkill = State.state().skills.length === skillsBefore;
+
+    // ---- 收徒上限 ----
+    check.cap5 = State.apprenticeCap(5);
+    check.cap10 = State.apprenticeCap(10);
+    check.cap19 = State.apprenticeCap(19);
+    check.cap20 = State.apprenticeCap(20);
+
+    // ---- 收徒 + 属性记录 ----
+    const ap = State.genAI(18, '', { levelJitter: 0 });
+    const added = State.addPrentice(ap);
+    check.prenticeAdded = added.ok;
+    check.prenticeShape = added.apprentice;
+    check.prenticeHasStats = ['power', 'agility', 'speed', 'hp'].every((k) => Number.isFinite(added.apprentice[k]));
+
+    // ---- 日贡 ----
+    check.daily5 = State.apprenticeDailyExp(5);
+    check.daily18 = State.apprenticeDailyExp(18);
+    check.dailyHigherForHigherLevel = State.apprenticeDailyExp(18) > State.apprenticeDailyExp(5);
+    check.dailyTotal = State.apprenticeDailyTotal();
+    const expBefore = State.state().exp;
+    const claim = State.claimApprenticeExp();
+    check.claim = { ok: claim.ok, total: claim.total, count: claim.count };
+    check.claimSecondFails = !State.claimApprenticeExp().ok;
+    check.expGained = State.state().exp !== expBefore || State.state().level > 22;
+
+    // ---- 踢人每天一次 ----
+    State.addPrentice(State.genAI(16, '', { levelJitter: 0 }));
+    check.canKickFirst = State.canKickToday();
+    check.kickFirst = State.kickPrentice(State.state().prentices[0].name).ok;
+    check.canKickSecond = State.canKickToday();
+    check.kickSecondRefused = !State.kickPrentice(State.state().prentices[0].name).ok;
+
+    // ---- 出师花费 20 金松果 ----
+    const goldBefore = State.state().goldPoint;
+    State.state().goldPoint -= 20; State.clearMaster(); State.save();
+    check.masterCleared = State.state().master === null;
+    check.goldSpent = goldBefore - State.state().goldPoint === 20;
+    check.skillKeptAfterLeave = State.state().skills.some((x) => Number(String(x).split(':')[0]) === State.MASTER_SKILL_ID);
+
+    // ---- 界面结构 ----
+    UI.runAction('village');
+    await new Promise((r) => setTimeout(r, 200));
+    UI.runAction('master');
+    await new Promise((r) => setTimeout(r, 400));
+    const html = document.querySelector('.classic-board') ? document.querySelector('.classic-board').innerHTML : '';
+    check.pageRendered = !!html;
+    check.hasMasterRefresh = html.includes('data-action="master-refresh"');
+    check.hasRecruitRefresh = html.includes('data-action="recruit-refresh"');
+    check.masterCards = (html.match(/data-master="\d+"/g) || []).length;
+    check.recruitCards = (html.match(/data-recruit="\d+"/g) || []).length;
+    check.hasProfileGear = html.includes('profile-gear');
+    check.hasDailyClaim = html.includes('data-action="master-claim"');
+    check.capShown = html.includes('收徒上限随师父等级提升');
+    // 点一张师父卡片，详情应换成那位师父
+    const card = document.querySelector('[data-master="1"]');
+    check.firstMasterName = (html.match(/data-master="0"[\s\S]*?candidate-name">([^<]*)/) || [])[1] || null;
+    if (card) { card.click(); await new Promise((r) => setTimeout(r, 250)); }
+    const html2 = document.querySelector('.classic-board').innerHTML;
+    check.detailChanged = html2 !== html;
+    check.secondMasterName = (html2.match(/data-master="1"[\s\S]*?candidate-name">([^<]*)/) || [])[1] || null;
+    check.selectionHighlighted = html2.includes('data-master="1"') && /candidate-card active[^>]*data-master="1"|data-master="1"[^>]*class="[^"]*active/.test(html2);
+
+    window.__report = { check, errs: window.__errs };
+    document.title = 'READY';
+  });
+})();
+</script>
+</body>
+</html>

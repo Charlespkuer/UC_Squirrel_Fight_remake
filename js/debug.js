@@ -1,0 +1,307 @@
+/* ============================================================
+ * debug.js — 开发调试开关面板
+ *
+ * 用 Ctrl+Shift+D 或右上角「调试」按钮打开。所有开关只读写本地
+ * localStorage 的 ssdz_debug 项，不写进正式存档 ssdz_save_v1，
+ * 删除这一项（或点「全部关闭」）即可完全恢复原状。
+ *
+ * 其它模块按需读取：Debug.enabled('infiniteEnergy')、Debug.numberStretch()。
+ * ============================================================ */
+(function () {
+  'use strict';
+
+  const STORE_KEY = 'ssdz_debug';
+  const defaults = { infiniteEnergy: false, godMode: false, noUpgradeFail: false, freeUpgrade: false, freeShop: false, noStageCost: false };
+  const state = Object.assign({}, defaults);
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) Object.assign(state, JSON.parse(raw));
+  } catch (e) {}
+  // 首页位图数字的横向拉伸比：固定值，图集里的数字比参考图窄
+  const NUMBER_STRETCH = 1.25;
+
+  function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {} }
+  function enabled(key) { return state[key] === true; }
+  function get(key) { return state[key]; }
+  function numberStretch() { return NUMBER_STRETCH; }
+  // 位图可能比脚本晚加载完成，图就绪后按当前宽度重画一次
+  window.addEventListener('load', () => { if (window.UI && UI.renderNumbers) UI.renderNumbers(); });
+
+  // ---------- 开关表 ----------
+  // on(session) 只在玩家本次手动开启时触发（session === true）；
+  // 启动时恢复已保存的开关只还原标记，不做副作用，等游戏自己按标记运行。
+  const TOGGLES = [
+    {
+      key: 'infiniteEnergy', label: '无限体力',
+      note: '战斗与拜师不再扣体力，进入首页自动回满',
+      on() { const S = State.state(); if (!S) return; S.energy = S.maxEnergy; S.lastEnergyTs = Date.now(); State.save(); if (window.UI && UI.refreshHome) UI.refreshHome(); },
+    },
+    {
+      key: 'godMode', label: '无敌模式',
+      note: '战斗里玩家最低保留 1 点血，不会被击倒',
+      on() {},
+    },
+    { key: 'noUpgradeFail', label: '升级必定成功', note: '武器与技能升级不再失败' },
+    { key: 'freeUpgrade', label: '升级无需消耗', note: '升级不扣金松果、不扣武器/技能卷轴，也不受等级限制' },
+    { key: 'freeShop', label: '道具免费', note: '商店购买不扣金松果' },
+    { key: 'noStageCost', label: '关卡不耗挑战书', note: '入场与复活都不消耗挑战书' },
+  ];
+  function set(key, value, session) {
+    if (!(key in defaults)) return false;
+    const changed = state[key] !== (value === true);
+    state[key] = value === true;
+    save();
+    const def = TOGGLES.find((t) => t.key === key);
+    if (changed && state[key] && session === true && def && def.on) def.on();
+    return state[key];
+  }
+  function toggle(key, session) { return set(key, !state[key], session); }
+  function reset() {
+    for (const def of TOGGLES) state[def.key] = false;
+    save();
+    if (window.UI && UI.refreshHome) UI.refreshHome();
+    return state;
+  }
+
+  // 一键升级目标等级：原始经验表到 50 级，之后按 +250/级 顺延，这里统一到 60 级
+  const MAX_LEVEL = 60;
+  // ---------- 一次性工具 ----------
+  const ACTIONS = [
+    { label: '一键满级', note: '直接升到 ' + MAX_LEVEL + ' 级并补满由升级带来的属性成长',
+      run() {
+        const S = State.state();
+        const from = S.level;
+        if (from >= MAX_LEVEL) return '已经是 ' + MAX_LEVEL + ' 级';
+        let gain = { power: 0, agility: 0, speed: 0, hp: 0 };
+        for (let lv = from; lv < MAX_LEVEL; lv++) {
+          // 与 State.gainExp 的升级成长一致：三围各 +1~3、生命 +6~10
+          gain.power += 2; gain.agility += 2; gain.speed += 2; gain.hp += 8;
+        }
+        S.level = MAX_LEVEL; S.exp = 0;
+        S.power += gain.power; S.agility += gain.agility; S.speed += gain.speed; S.maxHp += gain.hp;
+        State.save();
+        if (window.UI && UI.refreshHome) UI.refreshHome();
+        return '等级 ' + from + ' → ' + MAX_LEVEL + '（力量+' + gain.power + ' 敏捷+' + gain.agility +
+          ' 速度+' + gain.speed + ' 生命+' + gain.hp + '）';
+      } },
+    { label: '一键升级（升1级）', note: '按正常升级结算一次经验，属性成长与随机领悟照常',
+      run() {
+        const S = State.state();
+        const ups = State.gainExp(GData.nextExp(S.level));
+        if (!ups.length) return '经验不足，未能升级';
+        const sum = (k) => ups.reduce((a, u) => a + u[k], 0);
+        const last = ups[ups.length - 1];
+        return '升到 ' + last.level + ' 级（力量+' + sum('power') + ' 敏捷+' + sum('agility') +
+          ' 速度+' + sum('speed') + ' 生命+' + sum('hp') + '）' + (last.reward ? '，领悟 ' + last.reward : '');
+      } },
+    { label: '体力全满', run() { const S = State.state(); S.energy = S.maxEnergy; S.lastEnergyTs = Date.now(); State.save(); UI.refreshHome(); return '体力已回满'; } },
+    { label: '金松果 +10000', run() { State.state().goldPoint += 10000; State.save(); UI.refreshHome(); return '金松果 +10000'; } },
+    { label: '全道具 +10', run() {
+        const S = State.state();
+        let n = 0;
+        propMap.each((id) => { if (+id > 0) { S.props[id] = (S.props[id] || 0) + 10; n++; } });
+        State.save(); UI.refreshHome();
+        return n + ' 种道具各 +10';
+      } },
+    { label: '全部武器技能满级', run() {
+        const S = State.state();
+        S.weapons = S.weapons.map((w) => w.split(':')[0] + ':15');
+        S.skills = S.skills.map((s) => s.split(':')[0] + ':15');
+        State.save();
+        return '已有武器与技能已满级';
+      } },
+    { label: '解锁全部关卡', run() {
+        const S = State.state();
+        for (let id = 1; id <= 18; id++) S.stages[id] = { npcIndex: 3, passed: true };
+        State.save();
+        return '18 个关卡已标记通关';
+      } },
+    { label: '重置每日与体力计时', run() {
+        const S = State.state();
+        S.dailyClaimDate = ''; S.dailyStatsDate = ''; S.lotteryDate = ''; S.lotteryFree = 1;
+        S.lastEnergyTs = Date.now(); S.energy = S.maxEnergy;
+        State.save(); UI.refreshHome();
+        return '每日礼包、抽奖与体力计时已重置';
+      } },
+  ];
+
+  /** 彻底重置账号：连 1 级时随机得到的武器与技能一起清掉，回到全新开局。
+   *  State.newGame 会重建 NEW_PLAYER（weapons = ['1:1']、skills = []），
+   *  所以升级过程中随机领悟的武器/技能也会一并消失。
+   *  weaponId 可以指定开局武器；'random' 表示从原版武器表里随机挑一把。 */
+  function resetAccount(name, weaponId) {
+    const S = State.state();
+    const who = typeof name === 'string' && name.trim() ? name.trim() : (S && S.name) || '小松鼠';
+    for (const def of TOGGLES) state[def.key] = false;
+    save();
+    try { localStorage.removeItem(State.saveKey); } catch (e) {}
+    try { localStorage.removeItem(State.saveKey + '_backup'); } catch (e) {}
+    // 决定开局武器：默认沿用原版的方天画戟（NEW_PLAYER.weapons）
+    let chosen = null;
+    const list = State.weaponList ? State.weaponList() : [];
+    if (weaponId === 'random' && list.length) {
+      chosen = list[Math.floor(Math.random() * list.length)];
+    } else if (Number.isSafeInteger(Number(weaponId)) && Number(weaponId) > 0) {
+      chosen = list.find((w) => w.id === Number(weaponId)) || null;
+    }
+    State.newGame(who, chosen ? { weaponId: chosen.id, weaponLevel: 1 } : undefined);
+    if (window.UI && UI.refreshHome) UI.refreshHome();
+    return {
+      name: who, weapons: State.state().weapons.slice(), skills: State.state().skills.slice(),
+      weapon: chosen ? chosen.name : null, random: weaponId === 'random',
+    };
+  }
+
+  /** 开局武器下拉：默认「原版（方天画戟）」+ 全部武器 + 随机。 */
+  function weaponOptions(selected) {
+    const list = State.weaponList ? State.weaponList() : [];
+    const def = GData.NEW_PLAYER.weapons[0].split(':')[0];
+    const defName = (list.find((w) => w.id === Number(def)) || {}).name || '方天画戟';
+    let html = '<option value="default"' + (selected === 'default' ? ' selected' : '') + '>原版：' + esc(defName) + '</option>';
+    html += '<option value="random"' + (selected === 'random' ? ' selected' : '') + '>随机一把</option>';
+    html += list.map((w) => '<option value="' + w.id + '"' + (String(selected) === String(w.id) ? ' selected' : '') + '>' +
+      esc(w.name) + '（' + esc(w.harm) + '）</option>').join('');
+    return html;
+  }
+
+  // ---------- 面板 ----------
+  let panel = null, gear = null, drag = null;
+
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function build() {
+    if (panel) return;
+    panel = document.createElement('aside');
+    panel.className = 'debug-panel';
+    panel.setAttribute('aria-label', '调试面板');
+    panel.innerHTML =
+      '<header class="debug-head"><b>调试面板</b><span class="debug-hint">Ctrl+Shift+D</span><button type="button" class="debug-x" aria-label="关闭调试面板">×</button></header>' +
+      '<div class="debug-body"><ul class="debug-list">' +
+      TOGGLES.map((t) => '<li><label class="debug-row" data-key="' + t.key + '"><input type="checkbox" data-key="' + t.key + '"' + (state[t.key] ? ' checked' : '') + '><span class="debug-name">' + esc(t.label) + '</span><em class="debug-note">' + esc(t.note || '') + '</em></label></li>').join('') +
+      '</ul><div class="debug-actions">' +
+      ACTIONS.map((a, i) => '<button type="button" class="uc-button tiny" data-act="' + i + '" title="' + esc(a.note || a.label) + '">' + esc(a.label) + '</button>').join('') +
+      '</div><div class="debug-danger"><label class="debug-weapon"><span>开局武器</span><select data-weapon-select aria-label="彻底重置后的开局武器">' + weaponOptions('default') + '</select></label>' +
+      '<button type="button" class="debug-reset-account" data-reset-account="1">彻底重置账号</button>' +
+      '<span>清空存档回到全新开局：等级、属性、道具、装备、关卡进度，以及 1 级后随机领悟的武器与技能全部清掉。开局武器可先用上面的下拉选择（默认沿用原版的方天画戟）。</span></div>' +
+      '<p class="debug-foot">开关保存在 <b>ssdz_debug</b>，不写进正式存档。<button type="button" class="debug-link" data-reset="1">全部关闭并清除</button></p>' +
+      '<output class="debug-msg" aria-live="polite"></output></div>';
+
+    gear = document.createElement('button');
+    gear.type = 'button';
+    gear.className = 'debug-gear';
+    gear.textContent = '调试';
+    gear.title = '调试面板（Ctrl+Shift+D）';
+    gear.onclick = () => togglePanel();
+
+    document.body.appendChild(gear);
+    document.body.appendChild(panel);
+
+    panel.querySelector('.debug-x').onclick = () => togglePanel(false);
+    for (const input of panel.querySelectorAll('input[type="checkbox"]')) {
+      input.onchange = () => {
+        const on = set(input.dataset.key, input.checked);
+        msg(input.dataset.key + '：' + (on ? '已开启' : '已关闭'));
+        mark();
+      };
+    }
+    const actions = panel.querySelector('.debug-actions');
+    actions.onclick = (e) => {
+      const b = e.target.closest('[data-act]');
+      if (!b) return;
+      const a = ACTIONS[Number(b.dataset.act)];
+      if (a) msg(a.run());
+    };
+    panel.querySelector('[data-reset-account]').onclick = () => {
+      const S = State.state();
+      const who = S ? S.name : '小松鼠';
+      const picked = panel.querySelector('[data-weapon-select]').value;
+      const pickedName = picked === 'default' ? '原版初始武器'
+        : picked === 'random' ? '随机一把' : (panel.querySelector('[data-weapon-select]').selectedOptions[0].textContent);
+      // 两步确认，避免误点清掉进度
+      msg('再次点击「彻底重置账号」确认：清空 ' + who + ' 的全部进度与随机获得的武器/技能，开局武器「' + pickedName + '」');
+      const btn = panel.querySelector('[data-reset-account]');
+      if (btn.dataset.armed !== '1') {
+        btn.dataset.armed = '1';
+        btn.textContent = '确认彻底重置？';
+        setTimeout(() => { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = '彻底重置账号'; } }, 4000);
+        return;
+      }
+      btn.dataset.armed = ''; btn.textContent = '彻底重置账号';
+      const r = resetAccount(who, picked === 'default' ? undefined : picked);
+      for (const input of panel.querySelectorAll('input[type="checkbox"]')) input.checked = false;
+      mark();
+      msg('账号已彻底重置：' + r.name + ' 回到 1 级，开局武器 ' + JSON.stringify(r.weapons) +
+        '（' + (r.weapon || '方天画戟') + (r.random ? '，随机' : '') + '），技能 ' + JSON.stringify(r.skills));
+    };
+    panel.querySelector('[data-reset]').onclick = () => {
+      reset();
+      for (const input of panel.querySelectorAll('input[type="checkbox"]')) input.checked = false;
+      msg('已关闭全部调试开关并清除记录');
+      mark();
+    };
+
+    // 拖动标题栏移动面板
+    const head = panel.querySelector('.debug-head');
+    head.onpointerdown = (e) => {
+      if (e.target.closest('button')) return;
+      const r = panel.getBoundingClientRect();
+      drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+      head.setPointerCapture(e.pointerId);
+    };
+    head.onpointermove = (e) => {
+      if (!drag) return;
+      const x = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, e.clientX - drag.dx));
+      const y = Math.max(0, Math.min(window.innerHeight - 40, e.clientY - drag.dy));
+      panel.style.left = x + 'px'; panel.style.top = y + 'px';
+      panel.style.right = 'auto';
+    };
+    head.onpointerup = (e) => { drag = null; try { head.releasePointerCapture(e.pointerId); } catch (err) {} };
+
+    mark();
+    // 启动时只还原面板显示；已保存的开关由游戏本身按标记生效，
+    // 这里不再触发副作用（此时存档可能还没读出来）。
+  }
+
+  function msg(text) {
+    if (!panel) return;
+    const out = panel.querySelector('.debug-msg');
+    out.textContent = text ? String(text) : '';
+    clearTimeout(msg.timer);
+    msg.timer = setTimeout(() => { if (out.textContent === String(text)) out.textContent = ''; }, 2600);
+  }
+  /** 同步面板状态与游戏是否真的在跑 */
+  function mark() {
+    if (!panel) return;
+    const live = !!(window.State && State.state && State.state());
+    panel.classList.toggle('debug-off', !live);
+    for (const input of panel.querySelectorAll('input[type="checkbox"]')) input.checked = state[input.dataset.key] === true;
+  }
+  function isOpen() { return !!(panel && panel.classList.contains('open')); }
+  function togglePanel(force) {
+    if (!panel) build();
+    const open = force == null ? !isOpen() : force === true;
+    panel.classList.toggle('open', open);
+    gear.classList.toggle('open', open);
+    if (open) mark();
+    return open;
+  }
+
+  function bindKeys() {
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && isOpen()) { togglePanel(false); return; }
+      if (!(e.ctrlKey && e.shiftKey) || e.altKey || e.metaKey) return;
+      if (String(e.key).toLowerCase() !== 'd') return;
+      e.preventDefault();
+      togglePanel();
+    }, true);
+  }
+
+  function init() { build(); bindKeys(); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+
+  window.Debug = {
+    enabled, get, set, toggle, reset, numberStretch, resetAccount,
+    open: () => togglePanel(true), close: () => togglePanel(false), togglePanel, state: () => Object.assign({}, state),
+  };
+})();

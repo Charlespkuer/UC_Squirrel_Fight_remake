@@ -1,0 +1,7 @@
+/* Screenshot 214628: a cream reward square and outlined “请点击”, above combat. */
+.battle-pickup{position:absolute;left:calc(50% - 85px);top:112px;width:170px;height:239px;padding:0;border:0;background:transparent;cursor:pointer;z-index:24;pointer-events:auto;display:flex;flex-direction:column;align-items:center;animation:pickup-float 2.067s ease-out both}
+.pickup-card{display:flex;align-items:center;justify-content:center;width:160px;height:165px;border:4px solid #6f4c2b;border-radius:30px;background:linear-gradient(135deg,#fffde4,#e6ce9d);box-shadow:inset 0 0 0 5px #fff6d4,0 3px 0 #fff3d5;overflow:hidden}
+.pickup-card img{width:91%;height:91%;object-fit:contain}.pickup-prompt{font-family:UCClassic,"Microsoft YaHei",sans-serif;font-size:49px;line-height:65px;color:#fff;font-weight:bold;-webkit-text-stroke:4px #5b392b;paint-order:stroke fill;text-shadow:0 4px #5b392b;white-space:nowrap}
+.battle-pickup:hover .pickup-card{filter:brightness(1.1)}.battle-pickup-notice{position:absolute;left:20%;right:20%;top:185px;text-align:center;font-size:33px;line-height:54px;color:#fff6bf;text-shadow:0 2px 3px #40200c,-1px -1px #40200c;z-index:25;pointer-events:none}
+.battle-loot-summary{padding:10px 18px;margin:12px 0 0;border-radius:20px;background:#efe1ba;font-size:22px;line-height:1.5;color:#8b672f;text-align:center}
+@keyframes pickup-float{0%{transform:translateY(10px) scale(.9);opacity:0}10%,83%{opacity:1;transform:translateY(0) scale(1)}100%{transform:translateY(-15px);opacity:0}}

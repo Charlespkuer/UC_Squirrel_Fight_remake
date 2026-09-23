@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1170" height="690" viewBox="0 0 1170 690">
+<!-- Reconstructed village scenery, based on the supplied classic UC screenshots. -->
+<defs>
+ <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#7bc0e7"/><stop offset="1" stop-color="#d8efd9"/></linearGradient>
+ <linearGradient id="lawn" x2="0" y2="1"><stop stop-color="#84c52b"/><stop offset=".4" stop-color="#4fa617"/><stop offset="1" stop-color="#216d10"/></linearGradient>
+ <linearGradient id="roof" x2="0" y2="1"><stop stop-color="#b0764c"/><stop offset="1" stop-color="#573c32"/></linearGradient>
+ <linearGradient id="wall" x2="1" y2="1"><stop stop-color="#eed578"/><stop offset="1" stop-color="#ad8d41"/></linearGradient>
+ <linearGradient id="path" x2="0" y2="1"><stop stop-color="#a1c644"/><stop offset="1" stop-color="#70a92c"/></linearGradient>
+ <radialGradient id="light"><stop stop-color="#ffec60"/><stop offset="1" stop-color="#efb517"/></radialGradient>
+ <pattern id="grass" width="95" height="51" patternUnits="userSpaceOnUse"><path d="M8 38l-5-9 10 5 1-16 4 14 9-4-8 10m40-18l-5-10 8 6 6-9-3 13m12 30l-4-9 10 4 6-13 0 13 11-3-8 10" fill="#92bd32" opacity=".26"/></pattern>
+ <g id="shrub"><path d="M0 38C-17 28-14 10 3 11C-1-8 25-13 34 3C47-9 66 0 62 15C82 13 92 36 74 43Z" fill="#6d9f5d"/><path d="M7 39c-9-18 13-30 24-11 0-17 29-25 32-2 17-4 23 10 11 17Z" fill="#86b97a"/></g>
+</defs>
+<path fill="url(#sky)" d="M0 0h1170v690H0z"/>
+<g fill="#daeace" opacity=".85"><path d="M-30 322q142-160 254-45 104-146 224-12 128-160 254-38 124-136 237 6 149-118 278 42v152H-30Z"/><path d="M17 174q54-68 115-15 23-91 96-55 56-62 111-6l15 103Z"/></g>
+<g fill="#aeaec3" opacity=".63"><path d="M33 363l28-100-17-81 19 34 9-110 10 88 40-52-36 74-2 115 29 52ZM319 382l-27-128-16-30 21 16 24-127-7 123 43-41-41 67 13 120ZM530 356l14-134-28-82 39 54 51-52-46 86 4 132ZM690 365l-12-142-37-33 34 10-6-99 30 113 37-52-27 79 4 125Z"/></g>
+<g fill="#76637b" stroke="#67566e" stroke-width="4"><path d="M110 477l13-109-17-122-41-46 33 15-25-82 52 88 24-140 14 38-15 104 38-46-39 87 31 171 19 42Z"/><path d="M258 462l-20-112 17-103-23-64 34 38 18-88 3 101 32 26-37-6-11 117 25 91Z"/><path d="M685 432l-8-140 16-67-10-49 22 24 37-50-27 74-13 93 11 111Z"/><path d="M1090 409l-16-165 30-111-9 122 50-54-41 82 29 127Z"/></g>
+<g fill="#9d93a7"><path d="M122 232l-6-30 17 13 14-38-8 50 9 83-15 32Z"/><path d="M252 366l15-77-2-39 14 10-14 111Z"/></g>
+<g transform="translate(365 293) scale(.63)"><path d="M-64 128V38h124v91" fill="#b7b482" stroke="#82846e" stroke-width="7"/><path d="M-89 40Q-36-94 59-24l42 68Z" fill="#8b8780" stroke="#717077" stroke-width="8"/><path d="M-18 127V76q20-25 39 0v51" fill="#d5c574"/><path d="M-70 125h140" stroke="#698f49" stroke-width="14"/></g>
+<g transform="translate(883 191) rotate(-3)">
+ <path d="M-106 280l15-217 237-2 23 223" fill="url(#wall)" stroke="#775a35" stroke-width="11"/>
+ <path d="M-111 139l31 140m215-129-15 142" stroke="#a28644" stroke-width="7" opacity=".65"/>
+ <path d="M-132 88Q-134 42-89-13Q-44-88 9-66q86-25 148 75 58 43 47 88-61 20-119-5-96 24-217-4Z" fill="url(#roof)" stroke="#594333" stroke-width="11" stroke-linejoin="round"/>
+ <g fill="#a77a56" stroke="#78523f" stroke-width="5"><path d="M-100 10l46 2-9 48-58-5Z"/><path d="M-38-33l45-6 6 47-56 9Z"/><path d="M27-45l46 21-11 43-50-10Z"/><path d="M88-9l41 30-9 48-58-17Z"/><path d="M-48 37l49-9 14 59-61-2Z"/><path d="M31 40l28 7-1 54-46-18Z"/><path d="M139 43l35 27-2 25-54-15Z"/></g>
+ <path d="M-45 234v-48q7-48 66-44 62 1 60 47v48Z" fill="url(#light)" stroke="#8e7534" stroke-width="10"/>
+ <path d="M17 147v87m-56-48H74" stroke="#a98f3e" stroke-width="9"/>
+ <path d="M-83 267q43-18 72-2m59 8q40-17 80-3" fill="none" stroke="#846a42" stroke-width="12"/>
+</g>
+<path d="M0 459q176-18 343 12 150-49 311-9 297-38 516-3v231H0Z" fill="url(#lawn)"/>
+<g><use href="#shrub" x="-20" y="403"/><use href="#shrub" x="192" y="417"/><use href="#shrub" x="332" y="428"/><use href="#shrub" x="663" y="416"/><use href="#shrub" x="1094" y="414"/></g>
+<path d="M-40 554q240 9 459-10 204-19 343-7 194 21 444-17v63q-231-16-417-1-160 7-355 14-228 3-474-6Z" fill="url(#path)" opacity=".77"/>
+<path fill="url(#grass)" d="M0 468h1170v222H0Z"/>
+<g fill="#bdcb52" opacity=".6"><ellipse cx="235" cy="536" rx="33" ry="9"/><ellipse cx="780" cy="589" rx="43" ry="8"/><ellipse cx="425" cy="640" rx="31" ry="7"/><ellipse cx="998" cy="506" rx="29" ry="8"/></g>
+<g fill="#a3ae83" stroke="#727f65" stroke-width="3"><path d="M40 459l12-25 30-4 23 23-7 12Z"/><path d="M740 473l9-17 19-5 21 13-4 15Z"/><path d="M980 594l15-6 15 11-29 1Z"/></g>
+</svg>

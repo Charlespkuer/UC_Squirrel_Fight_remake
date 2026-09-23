@@ -1,0 +1,685 @@
+{
+  "squirrel-berserker-classic.png": {
+    "source": "references/屏幕截图 2026-09-23 161800.png",
+    "crop": [
+      115,
+      184,
+      858,
+      642
+    ],
+    "size": [
+      723,
+      422
+    ],
+    "method": "Reference crop with manually bounded silhouette and boundary-connected background removal.",
+    "note": "Classic purple berserker costume, including the original antennae; taken from the status screen."
+  },
+  "home/activity.png": {
+    "source": "references/屏幕截图 2026-09-23 161746.png",
+    "crop": [
+      25,
+      413,
+      174,
+      568
+    ],
+    "size": [
+      141,
+      149
+    ],
+    "method": "Reference crop with manually bounded silhouette and boundary-connected background removal.",
+    "note": "Includes original 活动 lettering because it overlaps the gift."
+  },
+  "home/chat.png": {
+    "source": "references/屏幕截图 2026-09-23 161746.png",
+    "crop": [
+      17,
+      579,
+      177,
+      707
+    ],
+    "size": [
+      154,
+      122
+    ],
+    "method": "Reference crop with manually bounded silhouette and boundary-connected background removal."
+  },
+  "home/village.png": {
+    "source": "references/屏幕截图 2026-09-23 161746.png",
+    "crop": [
+      1344,
+      545,
+      1543,
+      723
+    ],
+    "size": [
+      196,
+      175
+    ],
+    "method": "Reference crop with manually bounded silhouette and boundary-connected background removal.",
+    "note": "Includes original 村庄 word art and direction arrow."
+  },
+  "reference-cards/weapon-1.png": {
+    "source": "references/屏幕截图 2026-09-23 162315.png",
+    "crop": [
+      161,
+      170,
+      393,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 1,
+    "locked": false,
+    "true": true,
+    "selected": true,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/weapon-2.png": {
+    "source": "references/屏幕截图 2026-09-23 162315.png",
+    "crop": [
+      421,
+      170,
+      653,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 2,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/weapon-3.png": {
+    "source": "references/屏幕截图 2026-09-23 162315.png",
+    "crop": [
+      681,
+      170,
+      913,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 3,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/weapon-4.png": {
+    "source": "references/屏幕截图 2026-09-23 162315.png",
+    "crop": [
+      941,
+      170,
+      1173,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 4,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/weapon-5.png": {
+    "source": "references/屏幕截图 2026-09-23 162315.png",
+    "crop": [
+      1201,
+      170,
+      1433,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 5,
+    "locked": false,
+    "true": true,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/weapon-6.png": {
+    "source": "references/屏幕截图 2026-09-23 162315.png",
+    "crop": [
+      161,
+      477,
+      393,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 6,
+    "locked": false,
+    "true": true,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/weapon-7.png": {
+    "source": "references/屏幕截图 2026-09-23 162315.png",
+    "crop": [
+      421,
+      477,
+      653,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 7,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/weapon-8.png": {
+    "source": "references/屏幕截图 2026-09-23 162315.png",
+    "crop": [
+      681,
+      477,
+      913,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 8,
+    "locked": false,
+    "true": true,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/weapon-9.png": {
+    "source": "references/屏幕截图 2026-09-23 162315.png",
+    "crop": [
+      941,
+      477,
+      1173,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 9,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/weapon-10.png": {
+    "source": "references/屏幕截图 2026-09-23 162315.png",
+    "crop": [
+      1201,
+      477,
+      1433,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 10,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-1.png": {
+    "source": "references/屏幕截图 2026-09-23 162341.png",
+    "crop": [
+      161,
+      170,
+      393,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 1,
+    "locked": false,
+    "true": true,
+    "selected": true,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-2.png": {
+    "source": "references/屏幕截图 2026-09-23 162341.png",
+    "crop": [
+      421,
+      170,
+      653,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 2,
+    "locked": false,
+    "true": true,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-3.png": {
+    "source": "references/屏幕截图 2026-09-23 162341.png",
+    "crop": [
+      681,
+      170,
+      913,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 3,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-4.png": {
+    "source": "references/屏幕截图 2026-09-23 162341.png",
+    "crop": [
+      941,
+      170,
+      1173,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 4,
+    "locked": false,
+    "true": true,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-5.png": {
+    "source": "references/屏幕截图 2026-09-23 162341.png",
+    "crop": [
+      1201,
+      170,
+      1433,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 5,
+    "locked": false,
+    "true": true,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-6.png": {
+    "source": "references/屏幕截图 2026-09-23 162341.png",
+    "crop": [
+      161,
+      477,
+      393,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 6,
+    "locked": false,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-7.png": {
+    "source": "references/屏幕截图 2026-09-23 162341.png",
+    "crop": [
+      421,
+      477,
+      653,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 7,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-8.png": {
+    "source": "references/屏幕截图 2026-09-23 162341.png",
+    "crop": [
+      681,
+      477,
+      913,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 8,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-9.png": {
+    "source": "references/屏幕截图 2026-09-23 162341.png",
+    "crop": [
+      941,
+      477,
+      1173,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 9,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-10.png": {
+    "source": "references/屏幕截图 2026-09-23 162341.png",
+    "crop": [
+      1201,
+      477,
+      1433,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 10,
+    "locked": false,
+    "true": true,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-11.png": {
+    "source": "references/屏幕截图 2026-09-23 162407.png",
+    "crop": [
+      161,
+      170,
+      393,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 11,
+    "locked": false,
+    "true": true,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-12.png": {
+    "source": "references/屏幕截图 2026-09-23 162407.png",
+    "crop": [
+      421,
+      170,
+      653,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 12,
+    "locked": false,
+    "true": true,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-13.png": {
+    "source": "references/屏幕截图 2026-09-23 162407.png",
+    "crop": [
+      681,
+      170,
+      913,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 13,
+    "locked": false,
+    "true": false,
+    "selected": true,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-14.png": {
+    "source": "references/屏幕截图 2026-09-23 162407.png",
+    "crop": [
+      941,
+      170,
+      1173,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 14,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-15.png": {
+    "source": "references/屏幕截图 2026-09-23 162407.png",
+    "crop": [
+      1201,
+      170,
+      1433,
+      403
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 15,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-16.png": {
+    "source": "references/屏幕截图 2026-09-23 162407.png",
+    "crop": [
+      161,
+      477,
+      393,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 16,
+    "locked": false,
+    "true": true,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-17.png": {
+    "source": "references/屏幕截图 2026-09-23 162407.png",
+    "crop": [
+      421,
+      477,
+      653,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 17,
+    "locked": false,
+    "true": true,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-18.png": {
+    "source": "references/屏幕截图 2026-09-23 162407.png",
+    "crop": [
+      681,
+      477,
+      913,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 18,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-23.png": {
+    "source": "references/屏幕截图 2026-09-23 162407.png",
+    "crop": [
+      941,
+      477,
+      1173,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 23,
+    "locked": true,
+    "true": false,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "reference-cards/skill-24.png": {
+    "source": "references/屏幕截图 2026-09-23 162407.png",
+    "crop": [
+      1201,
+      477,
+      1433,
+      710
+    ],
+    "size": [
+      232,
+      233
+    ],
+    "id": 24,
+    "locked": false,
+    "true": true,
+    "selected": false,
+    "note": "Exact screenshot state; no unseen colour or locked variant invented."
+  },
+  "icons/weapon-1-classic.png": {
+    "source": "references/屏幕截图 2026-09-23 162315.png",
+    "crop": [
+      181,
+      190,
+      363,
+      381
+    ],
+    "size": [
+      167,
+      164
+    ],
+    "method": "Classic weapon crop using a one-pixel closed outline barrier; original coloured pixels preserved; true stamp excluded."
+  },
+  "skins/menu-green.png": {
+    "source": "references/屏幕截图 2026-09-23 161746.png",
+    "crop": [
+      989,
+      758,
+      1258,
+      947
+    ],
+    "size": [
+      269,
+      189
+    ],
+    "method": "Original button skin; source text region filled from unoccluded neighbouring pixels on each row."
+  },
+  "skins/return-gold.png": {
+    "source": "references/屏幕截图 2026-09-23 162315.png",
+    "crop": [
+      515,
+      800,
+      1047,
+      943
+    ],
+    "size": [
+      532,
+      143
+    ],
+    "method": "Original button skin; source text region filled from unoccluded neighbouring pixels on each row."
+  },
+  "skins/tab-green.png": {
+    "source": "references/屏幕截图 2026-09-23 161800.png",
+    "crop": [
+      147,
+      27,
+      495,
+      132
+    ],
+    "size": [
+      348,
+      105
+    ],
+    "method": "Original button skin; source text region filled from unoccluded neighbouring pixels on each row."
+  },
+  "skins/tab-gold.png": {
+    "source": "references/屏幕截图 2026-09-23 162315.png",
+    "crop": [
+      147,
+      27,
+      495,
+      132
+    ],
+    "size": [
+      348,
+      105
+    ],
+    "method": "Original button skin; source text region filled from unoccluded neighbouring pixels on each row."
+  },
+  "skins/tab-cream.png": {
+    "source": "references/屏幕截图 2026-09-23 162341.png",
+    "crop": [
+      1027,
+      27,
+      1378,
+      132
+    ],
+    "size": [
+      351,
+      105
+    ],
+    "method": "Original button skin; source text region filled from unoccluded neighbouring pixels on each row."
+  }
+}

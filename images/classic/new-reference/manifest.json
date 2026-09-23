@@ -1,0 +1,1197 @@
+{
+  "note": "Reference crops retain the pictured frame and learned/locked/selected state. They have no true-weapon stamp. Do not use a locked crop for a learned item.",
+  "assets": {
+    "cards/weapon-1-learned.png": {
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        94,
+        103,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 1,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 8,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-2-locked.png": {
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        249,
+        103,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 2,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-3-locked.png": {
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        402,
+        103,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 3,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-4-locked.png": {
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        557,
+        103,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 4,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-5-learned.png": {
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        710,
+        103,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 5,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 8,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-6-locked.png": {
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        94,
+        284,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 6,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-7-learned.png": {
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        249,
+        284,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 7,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 8,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-8-learned.png": {
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        402,
+        284,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 8,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 8,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-9-learned.png": {
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        557,
+        284,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 9,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 8,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-10-locked.png": {
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        710,
+        284,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 10,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-11-locked.png": {
+      "source": "references/new/76c6a7ef6356.webp",
+      "rect": [
+        94,
+        99,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 11,
+      "locked": true,
+      "selected": true,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-12-locked.png": {
+      "source": "references/new/76c6a7ef6356.webp",
+      "rect": [
+        248,
+        99,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 12,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-13-locked.png": {
+      "source": "references/new/76c6a7ef6356.webp",
+      "rect": [
+        403,
+        99,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 13,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-14-locked.png": {
+      "source": "references/new/76c6a7ef6356.webp",
+      "rect": [
+        557,
+        99,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 14,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/weapon-15-learned.png": {
+      "source": "references/new/76c6a7ef6356.webp",
+      "rect": [
+        711,
+        99,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "weapon",
+      "id": 15,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 8,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-1-locked.png": {
+      "source": "references/new/4b745125e.webp",
+      "rect": [
+        98,
+        100,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 1,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-2-learned.png": {
+      "source": "references/new/4b745125e.webp",
+      "rect": [
+        252,
+        100,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 2,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 9,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-3-learned.png": {
+      "source": "references/new/4b745125e.webp",
+      "rect": [
+        406,
+        100,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 3,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 8,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-4-learned.png": {
+      "source": "references/new/4b745125e.webp",
+      "rect": [
+        560,
+        100,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 4,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 8,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-5-locked.png": {
+      "source": "references/new/4b745125e.webp",
+      "rect": [
+        714,
+        100,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 5,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-6-locked.png": {
+      "source": "references/new/4b745125e.webp",
+      "rect": [
+        98,
+        282,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 6,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-7-learned.png": {
+      "source": "references/new/4b745125e.webp",
+      "rect": [
+        252,
+        282,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 7,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 4,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-8-locked.png": {
+      "source": "references/new/4b745125e.webp",
+      "rect": [
+        406,
+        282,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 8,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-9-learned.png": {
+      "source": "references/new/4b745125e.webp",
+      "rect": [
+        560,
+        282,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 9,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 9,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-10-locked.png": {
+      "source": "references/new/4b745125e.webp",
+      "rect": [
+        714,
+        282,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 10,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-11-locked.png": {
+      "source": "references/new/6.webp",
+      "rect": [
+        97,
+        99,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 11,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-12-locked.png": {
+      "source": "references/new/6.webp",
+      "rect": [
+        251,
+        99,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 12,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-13-learned.png": {
+      "source": "references/new/6.webp",
+      "rect": [
+        405,
+        99,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 13,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 1,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-14-locked.png": {
+      "source": "references/new/6.webp",
+      "rect": [
+        559,
+        99,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 14,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-15-learned.png": {
+      "source": "references/new/6.webp",
+      "rect": [
+        713,
+        99,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 15,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 8,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-16-learned.png": {
+      "source": "references/new/6.webp",
+      "rect": [
+        97,
+        281,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 16,
+      "locked": false,
+      "selected": true,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-17-locked.png": {
+      "source": "references/new/6.webp",
+      "rect": [
+        251,
+        281,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 17,
+      "locked": true,
+      "selected": false,
+      "visibleLevel": null,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "cards/skill-18-learned.png": {
+      "source": "references/new/6.webp",
+      "rect": [
+        405,
+        281,
+        137,
+        136
+      ],
+      "size": [
+        137,
+        136
+      ],
+      "kind": "skill",
+      "id": 18,
+      "locked": false,
+      "selected": false,
+      "visibleLevel": 7,
+      "containsFrame": true,
+      "containsTrueStamp": false
+    },
+    "drop-exp-with-caption-reference.png": {
+      "source": "references/new/屏幕截图 2026-09-23 214628.png",
+      "rect": [
+        300,
+        76,
+        111,
+        146
+      ],
+      "size": [
+        111,
+        146
+      ],
+      "note": "Raw screenshot crop includes background and classic 请点击 label; reference evidence, not a transparent original sprite."
+    },
+    "drop-exp-classic.png": {
+      "source": "references/new/屏幕截图 2026-09-23 214628.png",
+      "rect": [
+        305,
+        80,
+        98,
+        100
+      ],
+      "size": [
+        98,
+        100
+      ],
+      "note": "Classic Exp+ card from screenshot; rounded alpha mask clips only exterior corners. Recompressed source pixels retained."
+    },
+    "squirrel-green-outfit-reference.png": {
+      "source": "references/new/8f1d43f8794a4c22672.webp",
+      "rect": [
+        57,
+        110,
+        285,
+        261
+      ],
+      "size": [
+        285,
+        261
+      ],
+      "note": "Actual classic reference outfit: ninja headband/body/shoes and fist gloves. Must not replace unrelated equipped costumes."
+    },
+    "squirrel-green-outfit.png": {
+      "source": "references/new/8f1d43f8794a4c22672.webp",
+      "rect": [
+        57,
+        110,
+        285,
+        261
+      ],
+      "size": [
+        285,
+        261
+      ],
+      "note": "Actual classic reference outfit: ninja headband/body/shoes and fist gloves. Must not replace unrelated equipped costumes.",
+      "processing": "Boundary-connected pale background removed; closed internal pale face pixels remain. Includes original shadow."
+    },
+    "draw/draw-0.png": {
+      "source": "images/draw.png",
+      "rect": [
+        264,
+        125,
+        247,
+        89
+      ],
+      "size": [
+        247,
+        89
+      ],
+      "sheet": "draw",
+      "label": "0",
+      "note": "Exact APK sprite, HD presentation differs from classic screenshot."
+    },
+    "draw/draw-1.png": {
+      "source": "images/draw.png",
+      "rect": [
+        117,
+        229,
+        100,
+        100
+      ],
+      "size": [
+        100,
+        100
+      ],
+      "sheet": "draw",
+      "label": "1",
+      "note": "Exact APK sprite, HD presentation differs from classic screenshot."
+    },
+    "draw/draw-2.png": {
+      "source": "images/draw.png",
+      "rect": [
+        137,
+        116,
+        101,
+        105
+      ],
+      "size": [
+        101,
+        105
+      ],
+      "sheet": "draw",
+      "label": "2",
+      "note": "Exact APK sprite, HD presentation differs from classic screenshot."
+    },
+    "draw/draw-8.png": {
+      "source": "images/draw.png",
+      "rect": [
+        5,
+        3,
+        109,
+        114
+      ],
+      "size": [
+        109,
+        114
+      ],
+      "sheet": "draw",
+      "label": "8",
+      "note": "Exact APK sprite, HD presentation differs from classic screenshot."
+    },
+    "draw/draw-15.png": {
+      "source": "images/draw.png",
+      "rect": [
+        255,
+        243,
+        125,
+        81
+      ],
+      "size": [
+        125,
+        81
+      ],
+      "sheet": "draw",
+      "label": "15",
+      "note": "Exact APK sprite, HD presentation differs from classic screenshot."
+    },
+    "draw/draw-21.png": {
+      "source": "images/draw.png",
+      "rect": [
+        273,
+        0,
+        119,
+        100
+      ],
+      "size": [
+        119,
+        100
+      ],
+      "sheet": "draw",
+      "label": "21",
+      "note": "Exact APK sprite, HD presentation differs from classic screenshot."
+    },
+    "draw/draw-22.png": {
+      "source": "images/draw.png",
+      "rect": [
+        392,
+        3,
+        120,
+        103
+      ],
+      "size": [
+        120,
+        103
+      ],
+      "sheet": "draw",
+      "label": "22",
+      "note": "Exact APK sprite, HD presentation differs from classic screenshot."
+    },
+    "draw/draw-45.png": {
+      "source": "images/draw.png",
+      "rect": [
+        10,
+        229,
+        88,
+        110
+      ],
+      "size": [
+        88,
+        110
+      ],
+      "sheet": "draw",
+      "label": "45",
+      "note": "Exact APK sprite, HD presentation differs from classic screenshot."
+    },
+    "draw/draw-46.png": {
+      "source": "images/draw.png",
+      "rect": [
+        123,
+        18,
+        89,
+        92
+      ],
+      "size": [
+        89,
+        92
+      ],
+      "sheet": "draw",
+      "label": "46",
+      "note": "Exact APK sprite, HD presentation differs from classic screenshot."
+    },
+    "draw/draw-50.png": {
+      "source": "images/draw.png",
+      "rect": [
+        1,
+        121,
+        101,
+        99
+      ],
+      "size": [
+        101,
+        99
+      ],
+      "sheet": "draw",
+      "label": "50",
+      "note": "Exact APK sprite, HD presentation differs from classic screenshot."
+    },
+    "draw/fragment-24.png": {
+      "source": "images/daoju.png",
+      "rect": [
+        330,
+        495,
+        165,
+        165
+      ],
+      "size": [
+        165,
+        165
+      ],
+      "id": 24,
+      "note": "Exact prop atlas icon. APK FightProps does not list fragments as supported floating reward IDs."
+    },
+    "draw/fragment-25.png": {
+      "source": "images/daoju.png",
+      "rect": [
+        495,
+        495,
+        165,
+        165
+      ],
+      "size": [
+        165,
+        165
+      ],
+      "id": 25,
+      "note": "Exact prop atlas icon. APK FightProps does not list fragments as supported floating reward IDs."
+    },
+    "draw/fragment-26.png": {
+      "source": "images/daoju.png",
+      "rect": [
+        660,
+        495,
+        165,
+        165
+      ],
+      "size": [
+        165,
+        165
+      ],
+      "id": 26,
+      "note": "Exact prop atlas icon. APK FightProps does not list fragments as supported floating reward IDs."
+    }
+  },
+  "cards": {
+    "weapon": {
+      "1": {
+        "path": "images/classic/new-reference/cards/weapon-1-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 8,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "2": {
+        "path": "images/classic/new-reference/cards/weapon-2-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "3": {
+        "path": "images/classic/new-reference/cards/weapon-3-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "4": {
+        "path": "images/classic/new-reference/cards/weapon-4-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "5": {
+        "path": "images/classic/new-reference/cards/weapon-5-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 8,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "6": {
+        "path": "images/classic/new-reference/cards/weapon-6-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "7": {
+        "path": "images/classic/new-reference/cards/weapon-7-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 8,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "8": {
+        "path": "images/classic/new-reference/cards/weapon-8-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 8,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "9": {
+        "path": "images/classic/new-reference/cards/weapon-9-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 8,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "10": {
+        "path": "images/classic/new-reference/cards/weapon-10-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "11": {
+        "path": "images/classic/new-reference/cards/weapon-11-locked.png",
+        "locked": true,
+        "selected": true,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "12": {
+        "path": "images/classic/new-reference/cards/weapon-12-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "13": {
+        "path": "images/classic/new-reference/cards/weapon-13-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "14": {
+        "path": "images/classic/new-reference/cards/weapon-14-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "15": {
+        "path": "images/classic/new-reference/cards/weapon-15-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 8,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      }
+    },
+    "skill": {
+      "1": {
+        "path": "images/classic/new-reference/cards/skill-1-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "2": {
+        "path": "images/classic/new-reference/cards/skill-2-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 9,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "3": {
+        "path": "images/classic/new-reference/cards/skill-3-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 8,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "4": {
+        "path": "images/classic/new-reference/cards/skill-4-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 8,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "5": {
+        "path": "images/classic/new-reference/cards/skill-5-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "6": {
+        "path": "images/classic/new-reference/cards/skill-6-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "7": {
+        "path": "images/classic/new-reference/cards/skill-7-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 4,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "8": {
+        "path": "images/classic/new-reference/cards/skill-8-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "9": {
+        "path": "images/classic/new-reference/cards/skill-9-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 9,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "10": {
+        "path": "images/classic/new-reference/cards/skill-10-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "11": {
+        "path": "images/classic/new-reference/cards/skill-11-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "12": {
+        "path": "images/classic/new-reference/cards/skill-12-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "13": {
+        "path": "images/classic/new-reference/cards/skill-13-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 1,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "14": {
+        "path": "images/classic/new-reference/cards/skill-14-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "15": {
+        "path": "images/classic/new-reference/cards/skill-15-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 8,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "16": {
+        "path": "images/classic/new-reference/cards/skill-16-learned.png",
+        "locked": false,
+        "selected": true,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "17": {
+        "path": "images/classic/new-reference/cards/skill-17-locked.png",
+        "locked": true,
+        "selected": false,
+        "visibleLevel": null,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      },
+      "18": {
+        "path": "images/classic/new-reference/cards/skill-18-learned.png",
+        "locked": false,
+        "selected": false,
+        "visibleLevel": 7,
+        "containsFrame": true,
+        "containsTrueStamp": false
+      }
+    }
+  }
+}

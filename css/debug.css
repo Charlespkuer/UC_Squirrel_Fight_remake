@@ -1,0 +1,53 @@
+/* 调试面板（Ctrl+Shift+D）。面板本身不参与游戏逻辑，样式也单独放，
+   不需要时删掉 js/debug.js、css/debug.css 和 index.html 里对应的两行即可。
+   入口按钮固定在窗口右上角，避开首页状态栏里的名字与数值。 */
+.debug-gear{position:fixed;right:6px;top:6px;z-index:9000;border:3px solid #654f2e;border-radius:22px;
+  background:linear-gradient(#fff3a8,#ffc942 55%,#ec9a12);color:#5a3c1c;font:700 14px/1 "Microsoft YaHei",sans-serif;
+  padding:7px 12px;cursor:pointer;box-shadow:inset 0 2px #fffbd0,0 2px 3px #0006}
+.debug-gear:hover{filter:brightness(1.07)}
+.debug-gear.open{background:linear-gradient(#cfe6ff,#7fb6e8 55%,#4a7fb5);color:#0f2438;border-color:#3c5f80}
+.debug-panel{position:fixed;right:8px;top:48px;z-index:9001;width:396px;max-height:calc(100vh - 64px);
+  display:none;flex-direction:column;border:4px solid #94713a;border-radius:24px;
+  background:linear-gradient(#fffdf0,#f4e7c6);box-shadow:0 6px 18px #0007;color:#6b4b2a;
+  font:14px/1.45 "Microsoft YaHei",sans-serif;overflow:hidden}
+.debug-panel.open{display:flex}
+.debug-panel.debug-off{filter:grayscale(.55);opacity:.85}
+.debug-head{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:move;
+  background:linear-gradient(#fff9aa,#ffd94f 55%,#efa411);border-bottom:3px solid #94713a;user-select:none}
+.debug-head b{font-size:16px;color:#5c3d1b}
+.debug-hint{margin-left:auto;font-size:11px;color:#7c5a2c;background:#fff6c9;border-radius:9px;padding:2px 7px}
+.debug-x{border:0;background:transparent;color:#7b5228;font-size:22px;line-height:1;cursor:pointer;padding:0 4px}
+.debug-body{padding:10px 12px 12px;overflow-y:auto}
+.debug-list{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:5px}
+.debug-row{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;align-items:center;
+  background:#fdf6df;border:2px solid #e2d3ab;border-radius:14px;padding:6px 10px;cursor:pointer}
+.debug-row:hover{background:#fffbe9}
+.debug-row input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:#4e9831;cursor:pointer}
+.debug-name{font-weight:700;color:#5c3d1b}
+.debug-note{grid-column:2;font-style:normal;font-size:12px;color:#987a4e}
+.debug-row:has(input:checked){background:#eaf7d2;border-color:#9dc466}
+.debug-actions .uc-button{white-space:normal;line-height:1.2;height:auto;min-height:34px}
+.debug-range{grid-template-columns:auto 1fr auto}
+.debug-range input[type="range"]{width:100%;accent-color:#e0900f;grid-column:2}
+.debug-range .debug-name{grid-column:1}
+.debug-value{grid-column:3;font-size:12px;color:#8a6528;min-width:38px;text-align:right}
+.debug-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.debug-actions .uc-button{font-size:14px;min-height:34px;padding:4px 8px;letter-spacing:0;border-width:2px}
+.debug-danger{margin-top:10px;padding:9px 10px;border:2px solid #d8a08a;border-radius:14px;background:#fdf0e8}
+.debug-weapon{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12.5px;color:#8a5a44}
+.debug-weapon span{flex-shrink:0;font-weight:700}
+.debug-weapon select{flex:1;min-width:0;border:2px solid #c08a72;border-radius:10px;background:#fffaf5;
+  color:#6b4030;font:13px "Microsoft YaHei",sans-serif;padding:4px 6px;cursor:pointer}
+.debug-reset-account{width:100%;border:3px solid #9a4a2c;border-radius:20px;
+  background:linear-gradient(#ffb59a,#e2664a 55%,#c34025);color:#fff6ef;
+  font:700 15px/1.2 "Microsoft YaHei",sans-serif;padding:8px 10px;cursor:pointer;
+  box-shadow:inset 0 2px #ffd9cb,0 2px 3px #0004;text-shadow:0 1px #8c3418}
+.debug-reset-account:hover{filter:brightness(1.06)}
+.debug-reset-account[data-armed="1"]{background:linear-gradient(#ff8f6b,#d43c1c 55%,#a52c11);animation:debug-warn .7s steps(2,end) infinite}
+@keyframes debug-warn{50%{filter:brightness(1.35)}}
+.debug-danger span{display:block;margin-top:6px;font-size:11.5px;line-height:1.5;color:#a2604a}
+.debug-foot{margin:10px 0 0;font-size:12px;color:#957343}
+.debug-foot b{color:#a2731f}
+.debug-link{border:0;background:transparent;color:#b3562c;font:inherit;text-decoration:underline;cursor:pointer;padding:0 2px}
+.debug-msg{display:block;min-height:18px;margin-top:6px;font-size:12.5px;color:#3f7a24}
+@media (max-width:560px){.debug-panel{width:calc(100vw - 20px);right:10px}}

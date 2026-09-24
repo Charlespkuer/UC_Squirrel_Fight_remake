@@ -20,7 +20,9 @@
   let activeBattle = null;
 
   function fitCanvas() {
-    const scale = Math.min(window.innerWidth / W, window.innerHeight / H);
+    // Classic menu screenshots use 920:560; APK combat keeps its native 1170:690.
+    const layoutHeight = $('#ui .classic-page') ? W * 560 / 920 : H;
+    const scale = Math.min(window.innerWidth / W, window.innerHeight / layoutHeight);
     canvas.style.width = W * scale + 'px';
     canvas.style.height = H * scale + 'px';
     const ui = $('#ui');
@@ -204,6 +206,7 @@
         for (let i = 0; i < d.length; i += 4 * 211) if (d[i] > 20 || d[i + 1] > 20) n++;
         return n > 200;
       })());
+      State.state().weapons = ['1:1']; // Explicit test fixture; ordinary new players learn at level 2.
       const up = State.upgradeInfo('weapon', 1, 1);
       ok('upgradeInfo', up && up.rate > 0, JSON.stringify(up));
       const foe = State.genAI(1);
@@ -304,6 +307,7 @@
   function showHome() {
     mode = 'home';
     UI.renderHome();
+    fitCanvas();
     playBgm('main');
     buildHomeScene();
     let last = performance.now();
@@ -356,9 +360,13 @@
     const S = State.state();
     if (opts.cost && !State.consumeEnergy(opts.cost)) { UI.toast('体力不足，无法开始战斗'); return; }
     const stats = State.totalStats({ useProps: opts.useProps !== false });
+    const maxHp = Math.max(1, Math.round(stats.hp));
+    // hpRatio 是关卡连战的入场血量比例：hp 按比例继承，maxHp 仍是不变的上限。
+    const startRatio = opts.hpRatio == null ? 1 : Math.min(1, Math.max(0.01, Number(opts.hpRatio) || 0));
     const me = {
       name: S.name, level: S.level,
-      power: stats.power, agility: stats.agility, speed: stats.speed, hp: stats.hp,
+      power: stats.power, agility: stats.agility, speed: stats.speed,
+      hp: Math.max(1, Math.round(maxHp * startRatio)), maxHp,
       baseStats: { power: S.power, agility: S.agility, speed: S.speed },
       weapons: State.myWeapons().map((w) => ({ id: w.id, level: w.level, harmLo: w.harmLo, harmHi: w.harmHi })),
       skills: State.mySkills().map((s) => ({ id: s.id, level: s.level })),
@@ -369,29 +377,53 @@
     mode = 'battle';
     cancelAnimationFrame(rafId);
     $('#ui').innerHTML = '';
+    fitCanvas();
     playBgm('fight');
     if (opts.region != null && foe && foe.region == null) foe.region = opts.region;
-    activeBattle = await Battle.run({
-      canvas, me, foe, region: opts.region,
-      onEnd: (winner, result) => {
+    let settled = false;
+    const controller = await Battle.run({
+      canvas, me, foe, region: opts.region, collectDrops: opts.collectDrops !== false,
+      dropRandom: window.QA_FIXTURE && QA_FIXTURE.dropRandom,
+      onEnd: (winner, result, loot) => {
+        if (settled) return;
+        settled = true;
         activeBattle = null;
+        if (State.state() !== S) { showHome(); return; }
         State.recordBattle({ me, foe, result, region: opts.region != null ? opts.region : foe.region || 0, kind: opts.kind || 'challenge' });
         playBgm('main');
         // 战斗结束后主界面渲染循环处于暂停态，先恢复它，再弹结果面板
         showHome();
         opts.onEnd && opts.onEnd(winner, result);
+        if (UI.classic && UI.classic.pickupResult) UI.classic.pickupResult(loot);
       },
-      onError: () => { activeBattle = null; showHome(); UI.toast('战斗播放中断，请重新挑战'); if (opts.onError) opts.onError(); },
+      onError: () => {
+        if (settled) return;
+        settled = true; activeBattle = null; showHome();
+        if (State.state() !== S) return;
+        UI.toast('战斗播放中断，请重新挑战'); if (opts.onError) opts.onError();
+      },
     });
+    if (!settled) activeBattle = controller;
   }
 
   async function replayBattle(entry, onEnd) {
     if (!entry || mode === 'battle') return;
-    mode = 'battle'; cancelAnimationFrame(rafId); $('#ui').innerHTML = ''; playBgm('fight');
-    activeBattle = await Battle.run({ canvas, me: entry.me, foe: entry.foe, region: entry.region, result: entry.result,
-      onEnd: () => { activeBattle = null; showHome(); if(onEnd)onEnd(); },
-      onError: () => { activeBattle = null; showHome(); UI.toast('录像播放中断'); },
+    const owner = State.state();
+    let settled = false;
+    mode = 'battle'; cancelAnimationFrame(rafId); $('#ui').innerHTML = ''; fitCanvas(); playBgm('fight');
+    const controller = await Battle.run({ canvas, me: entry.me, foe: entry.foe, region: entry.region, result: entry.result, collectDrops: false,
+      onEnd: () => {
+        if (settled) return;
+        settled = true; activeBattle = null; showHome();
+        if (State.state() === owner && onEnd) onEnd();
+      },
+      onError: () => {
+        if (settled) return;
+        settled = true; activeBattle = null; showHome();
+        if (State.state() === owner) UI.toast('录像播放中断');
+      },
     });
+    if (!settled) activeBattle = controller;
   }
   function setMuted(value) {
     muted = !!value; localStorage.setItem('ssdz_music_muted', muted ? '1' : '0');
@@ -406,7 +438,7 @@
     return value;
   }
 
-  window.Main = { showHome, showTitle, startBattle, replayBattle, setMuted, isMuted: () => muted,
+  window.Main = { showHome, showTitle, startBattle, replayBattle, resizeLayout:fitCanvas, setMuted, isMuted: () => muted,
     volume: volumeValue, setVolume, homePlayer: () => mainPlayer, setHomeFps, W, H };
   window.addEventListener('DOMContentLoaded', boot);
 })();

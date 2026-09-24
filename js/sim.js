@@ -46,19 +46,24 @@
       }
       return { id: w.id, level: w.level, name: base.name, type: base.type, lo, hi };
     }).filter(Boolean);
+    // 关卡连战会带一个「入场血量比例」进来：hp 是当前血量，maxHp 才是上限。
+    // 缺少 maxHp（AI/NPC/旧录像）时，把 hp 当作满血，保持既有行为。
+    const fullHp = stat(f.maxHp != null ? f.maxHp : f.hp, 1);
     return {
       side, name: f.name, level: stat(f.level, 1), npcType: f.npcType || null,
       power: stat(f.power, 1), agility: stat(f.agility, 1), speed: stat(f.speed, 1),
-      maxHp: stat(f.hp, 1), hp: stat(f.hp, 1),
+      maxHp: fullHp, hp: Math.max(1, Math.min(stat(f.hp, 1), fullHp)),
       weapons, skills, lastWeaponId: null,
       effects: f.effects || {}, masterLevel: Math.max(0, Number(f.masterLevel) || 0),
-      // Callers provide bare growth stats, excluding equipment, skills and pills.
+      // 攻略.md 的裸属性解释与 PPT 的含装备解释冲突。本版采用前者，
+      // callers provide growth stats excluding equipment, skills and pills.
       // Older fighter snapshots lack this field, so retain their recorded stats.
       baseStats: Object.fromEntries(['power', 'agility', 'speed'].map((key) => [key, stat(f.baseStats?.[key], stat(f[key], 1))])),
       // 战斗内状态
       ap: 0, restNext: false, pendingWeapon: null, stun: 0, silence: 0, disarm: 0, shellCharges: 0,
-      mustHitNext: false, usedFakeDie: false, usedMaster: false, usedShell: false, usedCosmos: false,
-      swordDodge: 0, debuffs: { power: 0, agility: 0, speed: 0 },
+      mustHitNext: false, usedFakeDie: false, usedMaster: false, usedShell: false, usedCosmos: false, usedSnack: false,
+      usedUlt: false, acted: false,
+      swordDodge: 0, meteorDodge: 0, debuffs: { power: 0, agility: 0, speed: 0 },
       dot: null, // {dmg, rounds}
       buffFlat: { power: 0, agility: 0, speed: 0 },
     };
@@ -68,6 +73,8 @@
   function effAgility(c) { return Math.max(1, Math.round(c.agility * (1 - c.debuffs.agility / 100) + c.buffFlat.agility)); }
   function effSpeed(c) { return Math.max(1, Math.round(c.speed * (1 - c.debuffs.speed / 100) + c.buffFlat.speed)); }
   function effect(c, id) { return Math.max(0, Number(c.effects[id]) || 0); }
+  // 沉默之斧保留四项基础属性技，抑制其余主动、被动及防御技能。
+  function skill(c, id) { return c.silence > 0 && id > 4 ? 0 : c.skills[id] || 0; }
   function weaponEffect(w, base, perLevel, perTrueLevel) {
     return base + perLevel * (Math.min(w.level, 10) - 1) + (perTrueLevel || 0) * Math.max(0, w.level - 10);
   }
@@ -76,14 +83,15 @@
     const wMust = att.mustHitNext;
     if (wMust) return 0;
     let d = 6 + 26 * effAgility(def) / (effAgility(def) + effAgility(att) * 1.2 + 40);
-    if (def.skills[11]) d *= 1 + (5 + 2 * (def.skills[11] - 1)) * (1 + effect(def, 35) / 100) / 100;
-    d += def.swordDodge; // 木剑只有命中之后才生效，不因持有它而加闪避。
+    const shift = skill(def, 11) ? (5 + 2 * (skill(def, 11) - 1)) * (1 + effect(def, 35) / 100) : 0;
+    // PPT问答：木剑、移形、流星锤均相对提升天生闪避率。
+    d *= 1 + (shift + def.swordDodge + def.meteorDodge) / 100;
     return clamp(d, 0, 55);
   }
 
   function critChance(att) {
     let c = 5;
-    if (att.skills[9]) c += 2 * att.skills[9];                   // 暴击
+    if (skill(att, 9)) c += 2 * skill(att, 9);                  // 暴击
     return c;
   }
 
@@ -104,8 +112,8 @@
       out.guiJia = Math.round(out.dmg * pct / 100);
       out.dmg -= out.guiJia;
     }
-    if (def.skills[10]) {                                        // 皮糙肉厚
-      const pct = clamp((5 + (def.skills[10] - 1)) * (1 + effect(def, 34) / 100), 0, 80);
+    if (skill(def, 10)) {                                      // 皮糙肉厚
+      const pct = clamp((5 + (skill(def, 10) - 1)) * (1 + effect(def, 34) / 100), 0, 80);
       out.dmg = Math.round(out.dmg * (100 - pct) / 100);
     }
     out.dmg = Math.max(1, out.dmg);
@@ -167,7 +175,49 @@
       return dmg;
     }
 
+    /** NPC 大招（每场一次）：螳螂低血乱舞、仙鹤开场展翅、熊猫低血震地。 */
+    function npcUlt(att, def) {
+      const r = { attacker: att.side, action: 'skill', npcSkill: true, ult: true };
+      if (att.npcType === 'tl') {
+        // 疾风镰刀舞：生命低于35%时孤注一掷的四连击
+        r.ultName = '疾风镰刀舞'; r.multiHit = 4;
+        if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
+        let total = 0;
+        for (let i = 0; i < 4; i++) {
+          const rr = { dmg: 0 };
+          applyDamage(att, def, Math.round(effPower(att) * 0.55), rr, { action: 'skill' });
+          total += rr.dmg;
+          if (rr.reboundHurt) { r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt; r.jueDui = true; }
+          if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
+        }
+        r.dmg = total; pushRound(r); return;
+      }
+      if (att.npcType === 'xh') {
+        // 仙鹤展翅：开场第一次行动的重击，契合“前期凶猛”
+        r.ultName = '仙鹤展翅';
+        const raw = Math.round((effPower(att) + effSpeed(att)) * 1.6);
+        if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
+        applyDamage(att, def, raw, r, { action: 'skill' });
+        pushRound(r); return;
+      }
+      // 熊掌震地：生命低于40%时的重击，震晕对手一回合
+      r.ultName = '熊掌震地';
+      const raw = Math.round(effPower(att) * 2.2);
+      if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
+      applyDamage(att, def, raw, r, { action: 'skill' });
+      if (def.hp > 0 && !r.fakeDie) { def.stun = Math.max(def.stun, 1); r.stunApplied = true; }
+      pushRound(r);
+    }
+
     function npcAction(att, def) {
+      // 大招（每场一次）：仙鹤开场即放，螳螂/熊猫压低生命后触发
+      const firstAction = !att.acted; att.acted = true;
+      att.npcActs = (att.npcActs || 0) + 1;   // 仙鹤前期凶猛：前3次行动伤害+30%
+      if (!att.usedUlt && (att.npcType === 'xh' ? firstAction
+        : att.npcType === 'tl' ? att.hp < att.maxHp * 0.35
+        : att.npcType === 'xm' ? att.hp < att.maxHp * 0.4 : false)) {
+        att.usedUlt = true; npcUlt(att, def); return;
+      }
       // NPC：70% 普攻，30% 技能
       const useSkill = Object.keys(att.skills).length > 0 && chance(30);
       const r = { attacker: att.side, action: 'common', npcSkill: false };
@@ -179,6 +229,7 @@
         if (att.npcType === 'tl') { raw = Math.round(effPower(att) * (0.6 + Math.random() * 0.3)); r.multiHit = 2; } // 螳螂双击
         else if (att.npcType === 'xh') { raw = Math.round((effPower(att) + effSpeed(att)) * (0.9 + lv * 0.1)); }
         else { raw = Math.round(effPower(att) * (1.3 + lv * 0.1)); } // 熊猫重击
+        if (att.npcType === 'xh' && att.npcActs <= 3) raw = Math.round(raw * 1.3); // 仙鹤前期凶猛
         // 命中
         if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
         let total = 0;
@@ -201,6 +252,7 @@
       // 普攻
       if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
       let raw = Math.round(effPower(att) * (0.8 + Math.random() * 0.4));
+      if (att.npcType === 'xh' && att.npcActs <= 3) raw = Math.round(raw * 1.3); // 仙鹤前期凶猛
       if (att.npcType === 'tl' && att.hp < att.maxHp * 0.3) raw = Math.round(raw * 1.5); // 螳螂低血爆发
       applyDamage(att, def, raw, r, {});
       maybeCounter(att, def, r, true);
@@ -214,7 +266,7 @@
       if (def.npcType === 'xm') chanceBase = 45;                 // 熊猫善反击
       if (!chance(chanceBase)) return;
       let raw = Math.round(effPower(def) * (0.6 + Math.random() * 0.4) * (1 + effect(def, 5) / 100));
-      if (def.skills[24]) raw = Math.round(raw * (1.5 + 0.06 * (def.skills[24] - 1))); // 致命反击
+      if (skill(def, 24)) raw = Math.round(raw * (1.5 + 0.06 * (skill(def, 24) - 1))); // 致命反击
       if (chance(dodgeChance(def, att) * 0.5)) { r.counterDodge = true; return; }
       const counter = { action: 'common' };
       applyDamage(def, att, raw, counter, {});
@@ -237,7 +289,7 @@
       }
       // 行动选择：武器 45% / 技能 35% / 普攻 20%
       const canWeapon = att.weapons.length > 0 && att.disarm <= 0;
-      const actives = ACTIVE_SKILLS.filter((id) => att.skills[id] && !(id === 14 && att.usedCosmos) && !(id === 17 && att.hp >= att.maxHp));
+      const actives = ACTIVE_SKILLS.filter((id) => att.skills[id] && !(id === 14 && att.usedCosmos) && !(id === 17 && (att.usedSnack || att.hp >= att.maxHp)));
       const canSkill = actives.length > 0 && att.silence <= 0;
       let roll = Math.random() * 100;
       let kind;
@@ -270,13 +322,14 @@
         let raw = R(w.lo, w.hi);
         raw = Math.round(raw * (1 + effPower(att) / 120));       // 力量加成
         // 武器好手是额外固定伤害，不随被菜刀削弱的力量一起下降。
-        if (att.skills[5]) raw += (10 + 2 * (att.skills[5] - 1)) * (1 + effect(att, 31) / 100);
+        if (skill(att, 5)) raw += (10 + 2 * (skill(att, 5) - 1)) * (1 + effect(att, 31) / 100);
         raw = Math.round(raw * (1 + (effect(att, w.type === '投掷' ? 7 : 6) + (w.id <= 15 ? effect(att, w.id + 11) : 0)) / 100));
         // 命中
         const mustHit = [9, 15].includes(w.id) || att.mustHitNext;
         att.mustHitNext = false;
+        // 缺陷在使用时即生效，即使这一次被闪避仍持续至战斗结束。
+        if (w.id === 10) def.meteorDodge = 20;
         let dodgePct = dodgeChance(att, def);
-        if (w.id === 10) dodgePct += 20;                          // 流星锤缺陷
         if (!mustHit && chance(dodgePct)) { r.dodge = true; pushRound(r); return; }
         // 暴击
         let cc = critChance(att);
@@ -349,7 +402,8 @@
             applyDamage(att, def, raw, r, { ignoreFakeDie: false });
             break;
           }
-          case 17: { // 来点松果
+          case 17: { // 来点松果：每场战斗限用一次
+            att.usedSnack = true;
             const heal = Math.min(att.maxHp - att.hp, (20 + 2 * (lv - 1)) * Math.max(1, effect(att, 40)));
             att.hp += heal;
             r.healSelf = heal; r.noDmg = true; r.actAgain = true;
@@ -413,7 +467,8 @@
       actions++;
       const def = actor === A ? B : A;
       // 持续伤害
-      if (actor.dot && !followup) {
+      // 原攻略按中招者的四次出手计数，包括小宇宙后的追加行动。
+      if (actor.dot) {
         actor.hp -= actor.dot.dmg;
         if (actor.hp <= 0 && godSave(actor)) actor.hp = 1;
         pushRound({ attacker: actor.side, action: 'dot', dmg: actor.dot.dmg, selfDot: true });

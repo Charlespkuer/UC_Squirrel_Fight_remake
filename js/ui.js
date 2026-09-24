@@ -436,7 +436,7 @@
             onEnd: (winner) => {
               const win = winner === 0;
               if (win) { S.dailyWins++; S.allWins++; } else { S.dailyFails++; S.allFails++; }
-              const rw = State.fightReward(win);
+              const rw = State.fightReward(win, { foeLevel: f.level });
               showResult(win, f, rw);
             },
           });

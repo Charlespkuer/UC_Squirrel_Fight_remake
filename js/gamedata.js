@@ -44,6 +44,13 @@
   function stageTypeOf(stageId) { return STAGE_TYPES[Math.floor((stageId - 1) / 6)]; }
   function stageStar(stageId) { return ((stageId - 1) % 6) + 1; }
 
+  // 攻略记载的关卡NPC血量与经验：同星级同位置三者一致，差异只在攻击模式。
+  // 字典里熊猫4-6星的血量/属性异常膨胀（疑为原数据错误），以此表为准。
+  const STAGE_NPC_HP = [[243, 292, 438], [262, 314, 471], [280, 336, 504], [335, 402, 603], [400, 479, 719], [501, 601, 901]];
+  const STAGE_NPC_EXP = [[3, 4, 18], [3, 4, 19], [3, 4, 20], [3, 4, 21], [3, 4, 22], [3, 4, 23]];
+  function stageNpcHp(stageId, npcIndex) { const row = STAGE_NPC_HP[stageStar(stageId) - 1]; return row ? row[npcIndex - 1] || 0 : 0; }
+  function stageNpcExp(stageId, npcIndex) { const row = STAGE_NPC_EXP[stageStar(stageId) - 1]; return row ? row[npcIndex - 1] || 0 : 0; }
+
   // 随机玩家名字池（怀旧风）
   const AI_NAMES = ['松鼠小弟', '无敌鼠哥', '萌萌小鼠', '狂战无双', '松果大侠', '飞天小鼠', '松鼠妹妹', '啃果群众',
     '鼠来宝', '尾巴翘翘', '松针小王子', '橡果终结者', '闪电鼠', '吃瓜小鼠', '鼠胆英雄', '森林一霸', '松果收藏家',
@@ -54,7 +61,7 @@
   // 新手初始
   const NEW_PLAYER = {
     name: '', level: 1, exp: 0, power: 5, agility: 5, speed: 4, maxHp: 40,
-    energy: 100, maxEnergy: 120, goldPoint: 100, goldCup: 0, integral: null,
+    energy: 90, maxEnergy: 90, goldPoint: 100, goldCup: 0, integral: null,
     weapons: [],              // 2级首次随机获得武器或技能
     skills: [],
     gears: [], wears: {},      // gears: [{id,used,key,ext:[{id,level}]}]
@@ -70,5 +77,33 @@
   // 竞技场 AI 名称前缀
   const ARENA_TITLES = ['经验场', '碎片场'];
 
-  window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, AI_NAMES, NEW_PLAYER, ARENA_TITLES };
+  /* 原版道具说明里写着经验丸「竞技场中无效」，但本版经验竞技场确实吃经验丸加成
+   *（见 js/classic-extras.js 的 gainExpWithBoost 调用与 tools/test-extras.cjs），
+   * 所以按实际行为改写这两条说明。GameDict.js 必须与 APK 保持逐字节一致，
+   * 说明修正只在这里做。
+   * 注意 Map#getValue 每次都会新建对象，改动必须落到 getValue(...).source 这个底层行数组。 */
+  const PROP_REMARK_FIXES = [
+    [7, '增加主动挑战获得经验值40%,持续20次战斗,关卡、竞技场中无效。',
+        '增加主动挑战获得经验值40%,持续20次战斗,关卡中无效。'],
+    [44, '增加主动挑战获得经验值60%,持续20次战斗,关卡,竞技,天梯赛无效。',
+         '增加主动挑战获得经验值60%,持续20次战斗,关卡,天梯赛无效。'],
+  ];
+  function applyPropRemarkFixes() {
+    const map = window.propMap;
+    if (!map || typeof map.getValue !== 'function') return 0;
+    const remarkAt = Array.isArray(map.fields) ? map.fields.indexOf('remark') : -1;
+    let done = 0;
+    for (const [id, from, to] of PROP_REMARK_FIXES) {
+      const row = map.getValue(id);
+      if (!row || !Array.isArray(row.source)) continue;
+      const at = remarkAt >= 0 ? remarkAt : row.source.indexOf(from);
+      if (at < 0 || row.source[at] !== from) { console.warn('[gamedata] 道具说明未按预期匹配，跳过：' + id); continue; }
+      row.source[at] = to;
+      done++;
+    }
+    return done;
+  }
+  applyPropRemarkFixes();
+
+  window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, stageNpcHp, stageNpcExp, AI_NAMES, NEW_PLAYER, ARENA_TITLES, applyPropRemarkFixes };
 })();

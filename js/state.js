@@ -56,7 +56,11 @@
       gearKeys.add(key);
       const used = g.used === true && info.useLevel <= next.level && !usedSlots.has(info.type);
       if (used) usedSlots.add(info.type);
-      return { id: info.id, key, used, ext: normalizeExt(g.ext) };
+      const entry = { id: info.id, key, used, ext: normalizeExt(g.ext) };
+      if (g.orange === true) entry.orange = true;
+      const gemLv = g.gem && gemLevel(g.gem.id);
+      if (gemLv) entry.gem = { id: 100 + gemLv, ext: Math.max(1, Math.min(99, integer(g.gem.ext, 1, 1))) };
+      return entry;
     });
     next.stages = object(next.stages) ? next.stages : {};
     const savedRuns = object(next.stageRuns) ? next.stageRuns : {};
@@ -66,6 +70,7 @@
       if (!npcOf(Number(id), 1) || !object(run)) continue;
       // A page reload interrupts playback, but never charges the entry/revival twice.
       next.stageRuns[id] = { npcIndex: Math.min(3, integer(run.npcIndex, 1, 1)), revives: Math.min(2, integer(run.revives, 0)), needsRevive: run.needsRevive === true };
+      if (Number.isFinite(Number(run.carryHp))) next.stageRuns[id].carryHp = Math.max(0, Math.min(1, Number(run.carryHp)));
     }
     for (const id of Object.keys(next.stages)) {
       const progress = next.stages[id];
@@ -95,13 +100,20 @@
       .map((p) => ({
         name: p.name.slice(0, 20),
         level: integer(p.level, 1, 1),
+        exp: integer(p.exp, 0),
         power: integer(p.power, 0, 0), agility: integer(p.agility, 0, 0),
         speed: integer(p.speed, 0, 0), hp: integer(p.hp, 0, 0),
         weapons: Array.isArray(p.weapons) ? p.weapons.slice(0, 20) : [],
         skills: Array.isArray(p.skills) ? p.skills.slice(0, 20) : [],
-        since: typeof p.since === 'string' ? p.since : '',
+        since: validLocalDate(p.since) ? p.since : localDate(),
+        joinedAt: Number(p.joinedAt) > 0 ? Number(p.joinedAt) : localDateTime(validLocalDate(p.since) ? p.since : localDate(), 0, 0),
         lastExpDate: typeof p.lastExpDate === 'string' ? p.lastExpDate : '',
+        tributeClaimedDate: validLocalDate(p.tributeClaimedDate) ? p.tributeClaimedDate : '',
+        tributeLedger: normalizeTributeLedger(p.tributeLedger),
       }));
+    // Reload cancels an unfinished local recruitment and returns its entry fee.
+    if (object(next.recruitChallenge) && next.recruitChallenge.fee === 10 && typeof next.recruitChallenge.token === 'string') next.goldPoint += 10;
+    next.recruitChallenge = null;
     next.masterKickDate = typeof next.masterKickDate === 'string' ? next.masterKickDate : '';
     next.battles = (Array.isArray(next.battles) ? next.battles : []).filter(validBattle).slice(0, 50);
     next.dailyClaimDate = typeof next.dailyClaimDate === 'string' ? next.dailyClaimDate : '';
@@ -174,12 +186,15 @@
     const row = {
       name: String(foe.name).slice(0, 20),
       level: integer(foe.level, 1, 1),
+      exp: integer(foe.exp, 0),
       power: integer(foe.power, 0, 0), agility: integer(foe.agility, 0, 0),
       speed: integer(foe.speed, 0, 0), hp: integer(foe.hp, 0, 0),
       weapons: Array.isArray(foe.weapons) ? foe.weapons.slice() : [],
       skills: Array.isArray(foe.skills) ? foe.skills.slice() : [],
       since: localDate(),
+      joinedAt: Date.now(), tributeClaimedDate: '', tributeLedger: [],
     };
+    if (!row.skills.some(skill => Number(String(skill).split(':')[0]) === MASTER_SKILL_ID)) row.skills.push(MASTER_SKILL_ID + ':1');
     S.prentices.push(row);
     save();
     return { ok: true, apprentice: row };
@@ -191,29 +206,100 @@
     save();
     return true;
   }
-  /** 单机模式的「日贡」：按徒弟等级算出一个固定经验量（徒弟自身不损失）。 */
-  function apprenticeDailyExp(level) {
-    const lv = integer(level, 1, 1);
-    return Math.max(5, Math.round(lv * 3 + 5));
+  function validLocalDate(date) { return typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date); }
+  function localDateTime(date, hour, minute) { const [y,m,d] = date.split('-').map(Number); return new Date(y,m-1,d,hour,minute).getTime(); }
+  function yesterdayDate() {
+    const date = new Date(Date.now()); date.setDate(date.getDate()-1);
+    return date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
   }
-  /** 徒弟当天为师父产出的经验合计。 */
-  function apprenticeDailyTotal() {
-    return (S.prentices || []).reduce((sum, p) => sum + apprenticeDailyExp(p.level), 0);
+  const TRIBUTE_KINDS = ['challenge', 'challenged', 'stage', 'arena', 'pickup', 'lottery'];
+  function normalizeTributeLedger(ledger) {
+    return (Array.isArray(ledger) ? ledger : []).filter(day => object(day) && validLocalDate(day.date) && Array.isArray(day.activities)).slice(-7).map(day => ({
+      date: day.date, simulated: day.simulated === true,
+      activities: day.activities.filter(a => object(a) && TRIBUTE_KINDS.includes(a.kind)).slice(0,64).map(a => ({
+        kind: a.kind, exp: integer(a.exp,0), entry: a.entry === 'energy' ? 'energy' : a.entry === 'ticket' ? 'ticket' : '',
+        at: integer(a.at,0),
+      })),
+    }));
   }
-  /** 领取徒弟日贡：每个徒弟每天一次，经验最终加到师父身上。 */
-  function claimApprenticeExp() {
-    const today = localDate();
-    let total = 0, count = 0;
-    for (const p of (S.prentices || [])) {
-      if (p.lastExpDate === today) continue;
-      p.lastExpDate = today;
-      total += apprenticeDailyExp(p.level);
-      count++;
+  /** Original ratios: challenge/passive challenge/stage 10%, energy-entry XP arena 5%.
+   * Pickup, lottery and ticket-entry arena XP are deliberately excluded. */
+  function apprenticeTribute(activities) {
+    let tenths = 0, twentieths = 0;
+    for (const a of Array.isArray(activities) ? activities : []) {
+      const exp = integer(a.exp,0);
+      if (['challenge','challenged','stage'].includes(a.kind)) tenths += exp;
+      else if (a.kind === 'arena' && a.entry === 'energy') twentieths += exp;
     }
-    if (!count) return { ok: false, msg: '今天的徒弟日贡已经领过了' };
-    const ups = gainExp(total);
-    save();
-    return { ok: true, total, count, ups, msg: count + ' 个徒弟今天贡献了 ' + total + ' 经验' };
+    return Math.floor((tenths * 2 + twentieths) / 20);
+  }
+  function simulateApprenticeDay(p, date) {
+    let seed = 2166136261;
+    for (const ch of p.name+'|'+p.since+'|'+date) seed = Math.imul(seed ^ ch.charCodeAt(0),16777619) >>> 0;
+    const random = () => { seed = (Math.imul(seed,1664525)+1013904223) >>> 0; return seed / 4294967296; };
+    const joinedAt = Number(p.joinedAt) || localDateTime(p.since,0,0), activities = [];
+    const add = (kind,exp,hour,minute,entry) => { const at = localDateTime(date,hour,minute); if (at >= joinedAt) activities.push({kind,exp,at,entry:entry||''}); };
+    // A finite offline timetable, not a claim about original server activity volumes.
+    add('challenge',10+Math.floor(random()*10),9,10);
+    add('challenge',10+Math.floor(random()*10),12,30);
+    add('challenged',4+Math.floor(random()*4),15,10);
+    add('challenge',10+Math.floor(random()*10),18,40);
+    if (p.level >= 11) add('arena',random()<0.5?75:150,19,20,random()<0.75?'energy':'ticket');
+    if (p.level >= 10) add('stage',stageReward(Math.min(18,Math.max(1,Math.floor((p.level-7)/3)))).exp,20,10);
+    add('pickup',5,21,0);
+    if (random()<0.5) add('lottery',50,22,0);
+    return {date,simulated:true,activities};
+  }
+  function apprenticeDailyStatus(apprentice) {
+    const p = object(apprentice) ? apprentice : null, today = localDate(), date = yesterdayDate();
+    if (!p) return {date,exp:0,claimable:false,claimed:false,activities:[],simulated:true};
+    if (!validLocalDate(p.since)) { p.since=today; p.joinedAt=Date.now(); save(); }
+    const claimed = p.lastExpDate===today || p.tributeClaimedDate===date;
+    if (p.since>date) return {date,exp:0,claimable:false,claimed,activities:[],simulated:true,newApprentice:true};
+    p.tributeLedger = normalizeTributeLedger(p.tributeLedger);
+    let day = p.tributeLedger.find(day=>day.date===date);
+    if (!day) {
+      day=simulateApprenticeDay(p,date);p.tributeLedger.push(day);p.tributeLedger=p.tributeLedger.slice(-7);save();
+    }
+    const exp=apprenticeTribute(day.activities);
+    return {date,exp,claimable:!claimed&&exp>0,claimed,activities:clone(day.activities),simulated:day.simulated};
+  }
+  function apprenticeDailyExp(apprentice) { return apprenticeDailyStatus(apprentice).exp; }
+  function apprenticeDailyTotal() {
+    return (S.prentices||[]).reduce((sum,p)=>{const daily=apprenticeDailyStatus(p);return sum+(daily.claimable?daily.exp:0);},0);
+  }
+  function claimApprenticeExp() {
+    const today=localDate();let total=0,count=0;
+    for (const p of S.prentices||[]) {
+      const daily=apprenticeDailyStatus(p);if(!daily.claimable)continue;
+      p.lastExpDate=today;p.tributeClaimedDate=daily.date;total+=daily.exp;count++;
+    }
+    if (!count) return {ok:false,msg:'暂无可领取的昨日日贡，新收徒需等待次日结算。'};
+    const ups=gainExp(total);save();
+    return {ok:true,total,count,ups,msg:count+'个徒弟昨日战斗贡献了'+total+'经验'};
+  }
+  let recruitSequence=0;
+  function beginRecruitChallenge(candidate) {
+    if (!object(candidate)||!candidate.name) return {ok:false,msg:'请选择收徒对象'};
+    if (S.recruitChallenge) return {ok:false,msg:'收徒挑战尚未结束'};
+    if (S.prentices.length>=apprenticeCap(S.level)) return {ok:false,msg:'收徒名额已满'};
+    if (S.prentices.some(p=>p.name===String(candidate.name).slice(0,20))) return {ok:false,msg:'已经收过这个徒弟了'};
+    if (S.goldPoint<10) return {ok:false,msg:'收徒挑战需要10金松果'};
+    const token='recruit_'+Date.now()+'_'+(++recruitSequence);
+    S.goldPoint-=10;S.recruitChallenge={token,fee:10,candidate:clone(candidate)};save();
+    return {ok:true,token,foe:clone(object(candidate.master)&&candidate.master.name?candidate.master:candidate)};
+  }
+  function cancelRecruitChallenge(token) {
+    if (!S.recruitChallenge||S.recruitChallenge.token!==token)return false;
+    S.goldPoint+=S.recruitChallenge.fee;S.recruitChallenge=null;save();return true;
+  }
+  function finishRecruitChallenge(token,win) {
+    const run=S.recruitChallenge;if(!run||run.token!==token)return {ok:false};
+    S.recruitChallenge=null;
+    const added=win?addPrentice(run.candidate):null;
+    tickPropStates();const exp=win?20:0,ups=gainExp(exp);save();
+    return {ok:true,win,exp,gold:0,ups,recruited:added&&added.ok?added.apprentice:null,
+      msg:win?(added.ok?'收【'+run.candidate.name+'】为徒！':added.msg):'收徒挑战失败，提升实力后再来。'};
   }
   /** 师父每天可踢出 1 个徒弟。 */
   function canKickToday() {
@@ -262,7 +348,7 @@
   }
   function state() { return S; }
 
-  // ---------- 体力（5分钟回1点，上限120） ----------
+  // ---------- 体力（5分钟回1点，初始上限90，升级提升上限） ----------
   function tickEnergy() {
     syncDailyStats();
     const now = Date.now();
@@ -384,7 +470,14 @@
     };
   }
   function myGears() {
-    return S.gears.map((g) => Object.assign(gearInst(g.id, g.ext) || {}, { used: g.used, key: g.key })).filter((g) => g.name);
+    return S.gears.map((g) => {
+      const info = gearInst(g.id, g.ext);
+      if (!info) return null;
+      const out = Object.assign(info, { used: g.used, key: g.key });
+      if (g.orange === true) { out.orange = true; out.quality = 4; }   // 传说（橙）为实例级品质
+      if (g.gem && gemLevel(g.gem.id)) out.gem = { id: Number(g.gem.id), ext: g.gem.ext };
+      return out;
+    }).filter(Boolean);
   }
   // 穿戴位: 0头巾 1手套 2衣服 3鞋
   function wear(gearKey) {
@@ -407,6 +500,63 @@
     S.goldPoint += g.price; save();
     return g.price;
   }
+  // ---------- 宝石（45级开启） ----------
+  function gemLevel(id) { id = Number(id); return id >= 101 && id <= 107 ? id - 100 : 0; }
+  // 合成成功率：1→2 为 60%，逐级 -10%，6→7 仅 10%
+  const GEM_MERGE_RATES = [0.6, 0.5, 0.4, 0.3, 0.2, 0.1];
+  /** 45级起，关卡通关与竞技场获胜有几率获得1级（75%）或2级（25%）宝石。 */
+  function rollGemDrop(chancePct) {
+    if (S.level < 45 || Math.random() * 100 >= chancePct) return null;
+    const id = Math.random() < 0.25 ? 102 : 101;
+    S.props[id] = (S.props[id] || 0) + 1;
+    return { id, name: propMap.getValue(id).name };
+  }
+  /** 3个同级宝石 + 10金松果 → 有几率合成高一级；失败照扣费用，50%几率一颗材料降1级（1级碎裂）。 */
+  function mergeGems(id) {
+    id = Number(id);
+    const lv = gemLevel(id);
+    if (!lv) return { ok: false, msg: '请选择宝石' };
+    if (lv >= 7) return { ok: false, msg: '七级宝石已是最高等级' };
+    if ((S.props[id] || 0) < 3) return { ok: false, msg: '需要 3 个同级宝石' };
+    if (S.goldPoint < 10) return { ok: false, msg: '金松果不足 10 个' };
+    S.props[id] -= 3; S.goldPoint -= 10;
+    if (Math.random() < GEM_MERGE_RATES[lv - 1]) {
+      S.props[id + 1] = (S.props[id + 1] || 0) + 1;
+      save();
+      return { ok: true, success: true, msg: '合成成功：' + propMap.getValue(id + 1).name + ' ×1' };
+    }
+    if (Math.random() < 0.5) {
+      if (lv > 1) S.props[id - 1] = (S.props[id - 1] || 0) + 1;   // 退回一个降1级的
+      save();
+      return { ok: true, success: false, msg: lv > 1 ? '合成失败！一颗宝石降为 ' + propMap.getValue(id - 1).name : '合成失败！一颗宝石碎裂了' };
+    }
+    save();
+    return { ok: true, success: false, msg: '合成失败，宝石没有变化' };
+  }
+  /** 镶嵌免费；每件橙装限1颗；附加属性提升幅度随机，拆卸后重新镶嵌可重随。 */
+  function socketGem(gearKey, gemId) {
+    const g = S.gears.find((x) => x.key === gearKey);
+    if (!g) return { ok: false, msg: '装备不存在' };
+    if (g.orange !== true) return { ok: false, msg: '只有橙色（传说）装备可以镶嵌宝石' };
+    if (g.gem) return { ok: false, msg: '每件装备最多镶嵌 1 颗宝石，请先拆卸原有宝石' };
+    const lv = gemLevel(gemId);
+    if (!lv || !(S.props[gemId] > 0)) return { ok: false, msg: '没有该宝石' };
+    S.props[gemId]--;
+    g.gem = { id: Number(gemId), ext: lv * (2 + Math.floor(Math.random() * 3)) };
+    save();
+    return { ok: true, msg: propMap.getValue(gemId).name + ' 镶嵌成功：主属性 +' + lv * 4 + '%，附加属性效果 +' + g.gem.ext + '%' };
+  }
+  function unsocketGem(gearKey) {
+    const g = S.gears.find((x) => x.key === gearKey);
+    if (!g || !g.gem) return { ok: false, msg: '该装备没有镶嵌宝石' };
+    if (S.goldPoint < 5) return { ok: false, msg: '拆卸需要 5 金松果' };
+    S.goldPoint -= 5;
+    S.props[g.gem.id] = (S.props[g.gem.id] || 0) + 1;
+    delete g.gem;
+    save();
+    return { ok: true, msg: '拆卸成功，宝石已放回背包' };
+  }
+
   // 碎片合成: 24白/25绿/26蓝 ×10 + 50金松果 → 随机装备
   function composeGear(propId) {
     propId = Number(propId);
@@ -421,7 +571,7 @@
     gearMap.each((k, v) => { if (parseInt(v.setId) === setId) gearsOfSet.push(parseInt(v.id)); });
     const gid = gearsOfSet[Math.floor(Math.random() * gearsOfSet.length)];
     S.props[propId] -= 10; S.goldPoint -= 50;
-    const g = addGear(gid, quality >= 2 ? randomExt(1) : []);
+    const g = addGear(gid, quality >= 2 ? randomExt(1, 2) : []);
     save();
     return { ok: true, gear: g };
   }
@@ -436,7 +586,19 @@
     if (new Set(gs.map((g) => g.id)).size !== 1) return { ok: false, msg: '需要三件同名同品质的装备' };
     const set = gearSetMap.getValue(setIds[0]);
     const q = parseInt(set.quality);
-    if (q >= 3) return { ok: false, msg: '已是最高品质，无法融合' };
+    if (gs.some((g) => g.orange)) return { ok: false, msg: '传说装备已是最高品质' };
+    if (q >= 3) {
+      // 3件相同紫装 → 同名橙装（传说），继承三件材料中各词条的最高星级
+      S.goldPoint -= 50;
+      S.gears = S.gears.filter((g) => !keys.includes(g.key));
+      const best = {};
+      for (const g of gs) for (const e of normalizeExt(g.ext)) best[e.id] = Math.max(best[e.id] || 0, e.level);
+      const ext = Object.keys(best).slice(0, 3).map((id) => ({ id: Number(id), level: best[id] }));
+      const made = addGear(gs[0].id, ext);
+      const inst = made && S.gears.find((x) => x.key === made.key);
+      if (inst) { inst.orange = true; save(); }
+      return { ok: true, gear: Object.assign(made || {}, { orange: true, quality: 4 }) };
+    }
     const candidates = [];
     gearSetMap.each((k, v) => { if (parseInt(v.quality) === q + 1) candidates.push(parseInt(v.id)); });
     const newSet = candidates[Math.floor(Math.random() * candidates.length)];
@@ -444,16 +606,17 @@
     gearMap.each((k, v) => { if (parseInt(v.setId) === newSet) gearsOfSet.push(parseInt(v.id)); });
     S.goldPoint -= 50;
     S.gears = S.gears.filter((g) => !keys.includes(g.key));
-    const g = addGear(gearsOfSet[Math.floor(Math.random() * gearsOfSet.length)], q + 1 >= 2 ? randomExt(q >= 2 ? 2 : 1) : []);
+    const g = addGear(gearsOfSet[Math.floor(Math.random() * gearsOfSet.length)], q + 1 >= 2 ? randomExt(q >= 2 ? 2 : 1, q >= 2 ? 3 : 2) : []);
     save();
     return { ok: true, gear: g };
   }
-  function randomExt(n) {
+  function randomExt(n, maxLevel) {
+    maxLevel = Math.max(1, Math.min(3, Number(maxLevel) || 3));
     const ext = [];
     const ids = attachmentMap.keys.slice();
     for (let i = 0; i < n; i++) {
       const aid = parseInt(ids[Math.floor(Math.random() * ids.length)]);
-      ext.push({ id: aid, level: 1 + Math.floor(Math.random() * 3) });
+      ext.push({ id: aid, level: 1 + Math.floor(Math.random() * maxLevel) });
     }
     return ext;
   }
@@ -484,7 +647,8 @@
       if (!info || S.level < info.useLevel) continue;
       for (const ext of normalizeExt(gear.ext)) {
         const values = attachmentMap.getValue(ext.id).ability.split(',').map(Number);
-        effects[ext.id] = Math.max(effects[ext.id] || 0, values[ext.level - 1]);
+        const boost = gear.gem ? 1 + gear.gem.ext / 100 : 1;   // 橙装宝石提升附加属性效果
+        effects[ext.id] = Math.max(effects[ext.id] || 0, Math.round(values[ext.level - 1] * boost));
       }
     }
     return effects;
@@ -498,10 +662,12 @@
       if (!g.used) continue;
       const gi = gearInst(g.id);
       if (!gi || S.level < gi.useLevel) continue;
-      if (gi.type === 0) agility += gi.abilityVal;
-      else if (gi.type === 1) power += gi.abilityVal;
-      else if (gi.type === 2) hp += gi.abilityVal;
-      else speed += gi.abilityVal;
+      let val = gi.abilityVal;
+      if (g.gem) val = Math.round(val * (1 + gemLevel(g.gem.id) * 4 / 100));   // 橙装宝石提升主属性
+      if (gi.type === 0) agility += val;
+      else if (gi.type === 1) power += val;
+      else if (gi.type === 2) hp += val;
+      else speed += val;
     }
     // 被动技能
     const sk = mySkills();
@@ -515,12 +681,12 @@
     // 药剂状态（挑战类战斗生效，关卡/竞技无效）
     if (opts.useProps !== false) {
       const st = S.propsStates || {};
-      if (st[3] > 0) power = Math.max(power + Math.ceil(power * 0.2), power + 5);
-      if (st[4] > 0) agility = Math.max(agility + Math.ceil(agility * 0.2), agility + 5);
-      if (st[5] > 0) speed = Math.max(speed + Math.ceil(speed * 0.2), speed + 5);
-      if (st[41] > 0) power += Math.max(Math.ceil(power * 0.4), 10);
-      if (st[42] > 0) agility += Math.max(Math.ceil(agility * 0.4), 10);
-      if (st[43] > 0) speed += Math.max(Math.ceil(speed * 0.4), 10);
+      if (st[3] > 0) power += Math.max(Math.floor(power * 0.2), 5);
+      if (st[4] > 0) agility += Math.max(Math.floor(agility * 0.2), 5);
+      if (st[5] > 0) speed += Math.max(Math.floor(speed * 0.2), 5);
+      if (st[41] > 0) power += Math.max(Math.floor(power * 0.4), 10);
+      if (st[42] > 0) agility += Math.max(Math.floor(agility * 0.4), 10);
+      if (st[43] > 0) speed += Math.max(Math.floor(speed * 0.4), 10);
     }
     return { power: Math.round(power), agility: Math.round(agility), speed: Math.round(speed), hp: Math.round(hp) };
   }
@@ -690,6 +856,8 @@
       }
       const { power: pw, agility: ag, speed: sp, hp } = growth;
       S.power += pw; S.agility += ag; S.speed += sp; S.maxHp += hp;
+      // 体力上限随等级成长：10级前每级+3，11-20级每级+2，之后每级+1
+      S.maxEnergy += S.level <= 10 ? 3 : S.level <= 20 ? 2 : 1;
       // 升级奖励：概率获得新武器/技能（reward 为 {name,id,kind} 或 null）
       const gained = GData.WS_LEVELS.includes(S.level) ? gainRandomWS() : null;
       if (S.level === 5 && !S.reborn) S.goldPoint += 50;
@@ -721,17 +889,31 @@
       if (S.propsStates[k] > 0) S.propsStates[k]--;
     }
   }
-  // 战斗奖励（挑战/竞技胜利）
+  const EXP_PILL = { 7: 0.4, 44: 0.6 };   // 经验丸 40% / 超级经验丸 60%
+  /** 当前生效的经验加成百分比（经验丸 + 超级经验丸，可叠加）。 */
+  function expBoostPct() {
+    let pct = 0;
+    for (const id of Object.keys(EXP_PILL)) if (S.propsStates[id] > 0) pct += EXP_PILL[id] * 100;
+    return pct;
+  }
+  /** 给一段经验套上经验丸加成并结算（竞技场等也能吃到）。 */
+  function gainExpWithBoost(amount) {
+    const boosted = Math.round(Number(amount || 0) * (1 + expBoostPct() / 100));
+    return { exp: boosted, ups: gainExp(boosted) };
+  }
+  // 战斗奖励（挑战/竞技胜利）；胜利经验在基准值上下浮动，期望值随对手等级提升
   function fightReward(win, opts) {
     opts = opts || {};
-    const expBase = win ? 10 + Math.floor(Math.random() * 10) : 4 + Math.floor(Math.random() * 4);
-    let expMul = 1;
-    if (opts.useProps !== false && S.propsStates[7] > 0) expMul += 0.4;
-    if (opts.useProps !== false && S.propsStates[44] > 0) expMul += 0.6;
+    const foeLevel = Math.max(1, Math.floor(Number(opts.foeLevel) || (S && S.level) || 1));
+    const expBase = win
+      ? Math.round((10 + foeLevel * 1.2) * (0.8 + Math.random() * 0.4))
+      : 4 + Math.floor(Math.random() * 4);
+    const useProps = opts.useProps !== false;
+    const expMul = 1 + (useProps ? expBoostPct() : 0) / 100;
     const gold = win ? 3 + Math.floor(Math.random() * 5) : (Math.random() < 0.3 ? 1 : 0);
     S.goldPoint += gold;
     const ups = gainExp(expBase * expMul);
-    if (opts.useProps !== false) tickPropStates();
+    if (useProps) tickPropStates();
     save();
     return { exp: Math.round(expBase * expMul), gold, ups };
   }
@@ -762,6 +944,7 @@
   /**
    * 生成一个对手。
    * opts.levelJitter：在 level 上下浮动的等级范围（默认 ±2）
+   * opts.minLevel：对手等级的下限（默认 1）
    * opts.gear：是否按等级随机穿戴装备（默认按玩家等级判断）
    * opts.gearSelfLevel：按对手自身等级装备（默认 false，用玩家等级判断解锁）
    * opts.name：直接指定名字
@@ -771,69 +954,100 @@
     level = integer(level, 1, 1);
     const jitter = Number.isFinite(opts.levelJitter) ? Math.max(0, Math.floor(opts.levelJitter)) : 2;
     const rolled = jitter ? integer(level + Math.floor(Math.random() * (2 * jitter + 1)) - jitter, 1, 1) : level;
-    const finalLevel = Math.max(1, rolled);
+    const finalLevel = Math.max(integer(opts.minLevel, 1, 1), rolled);
     const name = (opts.name ? String(opts.name) : randomAIName()) + (nameSuffix || '');
-    // 三围围绕等级浮动，幅度略放大让同級对手也有差异
-    const base = (x) => Math.round(6 + finalLevel * 2 * (0.72 + Math.random() * 0.62) + x);
+    // 离线对手遵循相同的基础成长预算，避免用旧高成长公式压过新建玩家。
+    const base = GData.initialStats();
+    for (let lv = 2; lv <= finalLevel; lv++) {
+      const bookLevel = GData.ATTRIBUTE_BOOK_LEVELS.includes(lv);
+      if (!bookLevel) base.maxHp += 5;
+      for (let point = 0; point < (bookLevel ? 8 : 3); point++) {
+        const key = ['power', 'agility', 'speed', 'maxHp'][Math.floor(Math.random() * (bookLevel ? 3 : 4))];
+        base[key] += key === 'maxHp' ? 5 : 1;
+      }
+    }
     const wsPool = [];
     weaponsMap.each((k, v) => { if (GData.canLearn('weapon', v.id, finalLevel)) wsPool.push(parseInt(v.id)); });
     const skPool = [];
     skillsMap.each((k, v) => { if (GData.canLearn('skill', v.id, finalLevel)) skPool.push(parseInt(v.id)); });
-    const nWS = Math.min(GData.wsLimit(finalLevel), 7);
+    const nWS = GData.wsLimit(finalLevel);
     const weapons = [], skills = [];
     for (let i = 0; i < nWS; i++) {
       const isWeapon = Math.random() < 0.55;
-      const pool = isWeapon ? wsPool : skPool;
+      const chooseWeapon = !skPool.length || isWeapon && wsPool.length;
+      const pool = chooseWeapon ? wsPool : skPool;
       if (!pool.length) break;
       const id = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
-      // 等级越高，武器/技能等级也跟着水涨船高（上限 15）
-      const hi = Math.min(15, 1 + Math.floor(finalLevel / 3));
-      (isWeapon ? weapons : skills).push(id + ':' + (1 + Math.floor(Math.random() * hi)));
+      let hi = 1;
+      while (hi < (chooseWeapon ? 15 : 10) && Number(upgradeMap.getValue(hi).levelLimit) <= finalLevel) hi++;
+      if (!chooseWeapon && [6, 13].includes(id)) hi = 1;
+      (chooseWeapon ? weapons : skills).push(id + ':' + (1 + Math.floor(Math.random() * hi)));
     }
     const foe = {
-      name, level: finalLevel, power: base(0), agility: base(-2), speed: base(-2),
-      hp: 50 + finalLevel * 8 + Math.floor(Math.random() * finalLevel * 3), weapons, skills, isAI: true,
+      name, level: finalLevel, power: base.power, agility: base.agility, speed: base.speed,
+      hp: base.maxHp, baseStats: { power: base.power, agility: base.agility, speed: base.speed, hp: base.maxHp },
+      weapons, skills, isAI: true, effects: {},
     };
     // 装备：等级越高穿得越多、品质越好，并随机带附加属性
     const playerLevel = S && Number.isFinite(S.level) ? S.level : 1;
     const gearLevel = opts.gearSelfLevel ? finalLevel : Math.max(playerLevel, 1);
     if (opts.gear !== false) foe.gears = randomAIGears(finalLevel, gearLevel);
+    for (const gear of foe.gears || []) {
+      const info = gearInst(gear.id);
+      foe[['agility', 'power', 'hp', 'speed'][info.type]] += info.abilityVal;
+      for (const ext of gear.ext) {
+        const values = attachmentMap.getValue(ext.id).ability.split(',').map(Number);
+        foe.effects[ext.id] = Math.max(foe.effects[ext.id] || 0, values[ext.level - 1]);
+      }
+    }
     for (const value of skills) {
       const skill = skillInst(value);
       const stat = { 1: 'power', 2: 'agility', 3: 'speed', 4: 'hp' }[skill.id];
-      if (stat) foe[stat] += GData.passiveBonus(skill.id, skill.level);
+      if (stat) foe[stat] += Math.round(GData.passiveBonus(skill.id, skill.level) * (1 + (foe.effects[26 + skill.id] || 0) / 100));
     }
     return foe;
   }
 
-  /** 按等级随机穿装备：品质随等级放宽，件数随机，附加属性也随机。 */
+  /** 按等级随机穿装备：优先穿当前等级能穿的最好套装（与正常玩家成长一致），偶尔穿低一档的旧装。 */
   function randomAIGears(foeLevel, refLevel) {
-    const level = Math.max(1, Math.floor(refLevel || foeLevel || 1));
+    const level = Math.max(1, Math.min(foeLevel, Math.floor(refLevel || foeLevel || 1)));
     const sets = [];
     gearSetMap.each((id, set) => {
       if (set && Number(set.level) <= level) sets.push({ id: Number(id), level: Number(set.level), quality: parseInt(set.quality) || 0 });
     });
     if (!sets.length) return [];
-    // 等级越高穿得越全
-    const wearChance = Math.min(0.95, 0.35 + level / 60);
+    // 正常玩家闯关到10级后基本穿满当前套装，对手的穿戴率不能差太多
+    const wearChance = Math.min(0.95, 0.5 + level / 40);
+    // 套装按等级从高到低分档；低等级套装的加成远小于高档，不能等概率随机
+    const tiers = [];
+    for (const set of sets.slice().sort((a, b) => b.level - a.level)) {
+      const top = tiers[tiers.length - 1];
+      if (top && top.level === set.level) top.sets.push(set);
+      else tiers.push({ level: set.level, sets: [set] });
+    }
     const out = [];
     const usedType = new Set();
-    for (const set of sets) {
+    for (let slot = 0; slot < 4; slot++) {
       if (Math.random() > wearChance) continue;
-      const gearsOfSet = [];
-      gearMap.each((k, v) => { if (parseInt(v.setId) === set.id) gearsOfSet.push(parseInt(v.id)); });
-      if (!gearsOfSet.length) continue;
-      const gid = gearsOfSet[Math.floor(Math.random() * gearsOfSet.length)];
-      const info = gearInst(gid);
-      if (!info || usedType.has(info.type)) continue;   // 同部位不重复穿
-      usedType.add(info.type);
-      // 附加属性：白装没有，绿/蓝装越到后面越常见
-      let ext = [];
-      const roll = Math.random();
-      if (level >= 8 && roll < 0.28) ext = randomExt(1);
-      else if (level >= 20 && roll < 0.42) ext = randomExt(1 + (Math.random() < 0.35 ? 1 : 0));
-      out.push({ id: gid, used: true, ext });
-      if (usedType.size >= 4) break;
+      // 75% 穿最好一档，20% 次一档，5% 随机一档旧装；同部位冲突时重选
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const roll = Math.random();
+        const tier = roll < 0.75 ? tiers[0]
+          : roll < 0.95 ? tiers[Math.min(1, tiers.length - 1)]
+          : tiers[Math.floor(Math.random() * tiers.length)];
+        const set = tier.sets[Math.floor(Math.random() * tier.sets.length)];
+        const gearsOfSet = [];
+        gearMap.each((k, v) => { if (parseInt(v.setId) === set.id) gearsOfSet.push(parseInt(v.id)); });
+        if (!gearsOfSet.length) break;
+        const gid = gearsOfSet[Math.floor(Math.random() * gearsOfSet.length)];
+        const info = gearInst(gid);
+        if (!info || usedType.has(info.type)) continue;   // 同部位不重复穿
+        usedType.add(info.type);
+        // 原版白绿无词条，蓝装1条且最多2星，紫装2条且最多3星。
+        const ext = info.quality >= 3 ? randomExt(2) : info.quality === 2 ? randomExt(1, 2) : [];
+        out.push({ id: gid, used: true, ext });
+        break;
+      }
     }
     return out;
   }
@@ -859,6 +1073,9 @@
       const actualStage = Number(v.id) === 127 ? 10 : Number(v.stageId);
       if (actualStage === stageId && Number(v.npcIndex) === npcIndex) found = actualStage === Number(v.stageId) ? v : Object.assign({}, v, { stageId: String(actualStage) });
     });
+    // 攻略数值为准：同星级同位置的NPC血量一致（三位师父只差攻击模式）
+    const hp = found && GData.stageNpcHp(stageId, npcIndex);
+    if (found && hp) found = Object.assign({}, found, { hp: String(hp) });
     return found;
   }
 
@@ -879,7 +1096,8 @@
     return { ok: true };
   }
   function stageReward(stageId) {
-    return { exp: 19 + (Number(stageId) - 1) * 3, gold: 25 };
+    // 整轮经验 = 三场逐场经验之和（逐场发放，此处仅用于界面展示与离线估算）
+    return { exp: [1, 2, 3].reduce((sum, i) => sum + GData.stageNpcExp(stageId, i), 0), gold: 25 };
   }
   let stageAttemptSeq = 0;
   function beginStageBattle(stageId) {
@@ -908,36 +1126,51 @@
     save();
     return true;
   }
-  function finishStageBattle(stageId, token, win) {
+  function finishStageBattle(stageId, token, win, carryRatio) {
     stageId = Number(stageId);
     const run = S.stageRuns && S.stageRuns[stageId];
     if (!run || run.attempt !== token) return { ok: false };
     delete run.attempt;
     if (!win) {
       run.needsRevive = true;
+      delete run.carryHp;   // 复活再战回满血
       save();
       return { ok: true, win: false, complete: false, exp: 0, gold: 0, ups: [], run: stageRun(stageId) };
     }
+    // 每场胜利按攻略表发放该NPC的经验
+    const fightExp = GData.stageNpcExp(stageId, run.npcIndex);
     const complete = run.npcIndex === 3;
     const old = stageProgress(stageId);
     const nextNpc = Math.min(3, run.npcIndex + 1);
     S.stages[stageId] = { npcIndex: Math.max(old.npcIndex, nextNpc), passed: old.passed || complete };
     if (complete) delete S.stageRuns[stageId];
-    else run.npcIndex = nextNpc;
-    // 攻略确认末位NPC结算、每次0–6片、螳螂/仙鹤/熊猫以白/绿/蓝为主。
-    // 原服务器概率未留存，沿用离线掉落概率，仅还原能够确认的时点、数量与类别。
+    else {
+      run.npcIndex = nextNpc;
+      // 连续挑战不回满血：下一场只继承本场剩余血量（进入时再回复25%）
+      if (Number.isFinite(carryRatio)) run.carryHp = Math.max(0, Math.min(1, carryRatio));
+    }
+    // 关卡碎片掉落：本次击败的 NPC 就可能掉碎片（不必等到整轮通关）。
+    // 数量 1~6 片；稀有度按关卡类别分层，星数越高越可能掉更高一级的碎片：
+    //   螳螂(1-6) 白为主 / 仙鹤(7-12) 绿为主 / 熊猫(13-18) 蓝为主（蓝为上限）。
+    //   攻略.md：3星螳螂「大多白、小概率绿」，6星「绿色几率提高」——故 ★3-4 越1级、★5-6 越2级。
     const star = GData.stageStar(stageId);
     let drop = null;
-    if (complete && Math.random() < 0.25 + star * 0.05) {
-      const id = 24 + Math.floor((stageId - 1) / 6), count = 1 + Math.floor(Math.random() * 6);
+    if (Math.random() < 0.42 + star * 0.03) {
+      const base = 24 + Math.floor((stageId - 1) / 6);          // 24 白 / 25 绿 / 26 蓝
+      const up = star >= 5 ? 2 : star >= 3 ? 1 : 0;
+      const step = Math.min(base + up, 26);                     // 蓝碎片封顶
+      const id = up > 0 && Math.random() >= 0.72 ? step : base; // 28% 越级，否则主类别
+      const count = 1 + Math.floor(Math.random() * 6);
       S.props[id] = (S.props[id] || 0) + count;
       drop = { id, count, name: propMap.getValue(id).name };
     }
-    const reward = complete ? stageReward(stageId) : { exp: 0, gold: 0 };
-    S.goldPoint += reward.gold;
-    const ups = complete ? gainExp(reward.exp) : [];
+    const gold = complete ? stageReward(stageId).gold : 0;
+    S.goldPoint += gold;
+    // 45级起通关有几率获得1-2级宝石
+    const gem = complete ? rollGemDrop(20) : null;
+    const ups = gainExp(fightExp);
     save();
-    return Object.assign({ ok: true, win: true, complete, drop, ups, run: stageRun(stageId) }, reward);
+    return { ok: true, win: true, complete, drop, gem, ups, run: stageRun(stageId), exp: fightExp, gold };
   }
   function abandonStageRun(stageId) {
     if (!S.stageRuns || !S.stageRuns[stageId] || S.stageRuns[stageId].attempt) return false;
@@ -1008,11 +1241,13 @@
     upgradeInfo, doUpgrade,
     weaponList,
     gearInst, myGears, wear, unwear, sellGear, composeGear, mergeGears, addGear, extText, randomExt,
+    gemLevel, GEM_MERGE_RATES, rollGemDrop, mergeGems, socketGem, unsocketGem,
     totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, gainRandomWS,
-    gainExp, consumeEnergy, tickPropStates, fightReward,
+    gainExp, consumeEnergy, tickPropStates, fightReward, expBoostPct, gainExpWithBoost,
     // 师徒
     apprenticeCap, learnSkill, setMaster, clearMaster, addPrentice, removePrentice,
-    apprenticeDailyExp, apprenticeDailyTotal, claimApprenticeExp, canKickToday, kickPrentice,
+    apprenticeDailyExp, apprenticeDailyTotal, apprenticeDailyStatus, apprenticeTribute, claimApprenticeExp, canKickToday, kickPrentice,
+    beginRecruitChallenge, finishRecruitChallenge, cancelRecruitChallenge,
     MASTER_SKILL_ID, MASTER_SKILL_NAME,
     genAI, stageProgress, setStageProgress, npcOf, highestStageId, stageRun, stageAccess, stageReward,
     beginStageBattle, finishStageBattle, interruptStageBattle, abandonStageRun,

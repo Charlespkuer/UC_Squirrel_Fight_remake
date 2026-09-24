@@ -39,7 +39,7 @@
   const STAGE_TYPES = [
     { name: '螳螂', desc: '身手敏捷，攻击速度快，当生命过低时会有惊人的爆发力', recommend: '建议10-15级玩家挑战', anim: 'tl', sheets: ['tl', 'tl_effect'] },
     { name: '仙鹤', desc: '动作优雅，柔中带刚，前期凶猛但不擅长持久战', recommend: '建议15-20级玩家挑战', anim: 'xh', sheets: ['xh1', 'xh2', 'xh_effect1', 'xh_effect2'] },
-    { name: '熊猫', desc: '憨厚可爱，擅长在对手进攻时抓住破绽进行反击', recommend: '建议20级以上玩家挑战', anim: 'xm', sheets: ['xm1', 'xm2', 'xm_effect'] },
+    { name: '熊猫', desc: '憨厚可爱，擅长在对手进攻时抓住破绽进行反击', recommend: '建议20-25级玩家挑战', anim: 'xm', sheets: ['xm1', 'xm2', 'xm_effect'] },
   ];
   function stageTypeOf(stageId) { return STAGE_TYPES[Math.floor((stageId - 1) / 6)]; }
   function stageStar(stageId) { return ((stageId - 1) % 6) + 1; }
@@ -52,6 +52,14 @@
    * 上面两张表仍是原表原样保留，只在取值时打折：整体挑战强度下调一点。
    * 想回到原版强度把这里全设成 1 即可。 */
   const STAGE_DIFFICULTY = Object.freeze({ hp: 0.85, power: 0.88, agility: 0.96, speed: 0.96 });
+  /* 熊猫 ★4-6（关卡 16/17/18）的攻击三维修正表：原字典这几个数值异常膨胀
+   * （★4 学徒 47、★5 109、★6 213，而 ★1-3 是 20/21/22），按前面星级的斜率顺延。
+   * GameDict.js 里的原表保持逐字节不动，只在这里覆盖取值。 */
+  const STAGE_NPC_STAT_FIX = Object.freeze({
+    16: [{ power: 25, agility: 24, speed: 25 }, { power: 30, agility: 28, speed: 29 }, { power: 46, agility: 43, speed: 45 }],
+    17: [{ power: 28, agility: 27, speed: 28 }, { power: 33, agility: 31, speed: 32 }, { power: 52, agility: 48, speed: 50 }],
+    18: [{ power: 31, agility: 30, speed: 31 }, { power: 36, agility: 34, speed: 35 }, { power: 58, agility: 54, speed: 56 }],
+  });
   /* 关卡奖励倍率：上一轮按需求翻倍过，本轮按用户要求**换回原表数值**（系数保持 1）。
    * 保留这两个常量是为了以后调平衡时只改一处。 */
   const STAGE_REWARD_MULT = 1;
@@ -67,20 +75,69 @@
     return STAGE_FRAGMENT.min + Math.floor((random ? random() : Math.random()) * (span + 1));
   }
   const stageScale = (value, factor) => Math.max(1, Math.round(Number(value) * factor));
+
+  /* ===== 关卡强度模型：按「推荐等级」标定（本轮用 tools/stage-balance.cjs 实测调过） =====
+   * 推荐等级 = [10,15,20][类型] + 星级 − 1 → 螳螂 ★1-6 ↔ 10-15、仙鹤 ↔ 15-20、熊猫 ↔ 20-25。
+   * 实测推荐等级下随机玩家（同等级 AI：同等成长预算 + 该等级装备/武技）的均值：
+   *   三围 ≈ 1.53×等级 − 2.23　生命 ≈ 13.58×等级 − 10.44
+   *   （tools/player-curve.cjs 每级 2000 采样、10~25 级最小二乘；升级改成
+   *    「2 点随机 + 1 点自选（力/敏/速/生命）」后重测，见 apk-alignment D42）
+   * 关卡 NPC 的三维与血量直接按这个基准算：
+   *   学徒/拳师/大侠 三围 = 玩家 × 0.70/0.78/0.72（再乘类型系数，见下）
+   *   学徒/拳师/大侠 血量 = 玩家 × 0.90/1.05/1.20
+   * 字典里的攻击三维只用来保留「同一关三人的相对形状」（螳螂偏敏捷、熊猫偏力量），
+   * 攻略血量表 STAGE_NPC_HP 成为历史参考；想回到旧模型把 STAGE_USE_LEVEL_MODEL 设成 false。
+   * 类型系数是用来抵消三种战斗风格的实际强度差（仙鹤开场展翅/前期 1.3 倍、熊猫 45% 反击、
+   * 螳螂双击+低血爆发），数值同样由测量得出。 */
+  const STAGE_USE_LEVEL_MODEL = true;
+  const STAGE_LEVEL_BAND = Object.freeze([[10, 15], [15, 20], [20, 25]]);
+  const STAGE_ROLE_STAT = Object.freeze([0.70, 0.78, 0.72]);
+  const STAGE_ROLE_HP = Object.freeze([0.90, 1.05, 1.20]);
+  const STAGE_TYPE_SCALE = Object.freeze({ tl: 1.15, xh: 0.92, xm: 1.02 });
+  const STAGE_PLAYER_CURVE = Object.freeze({ statPer: 1.53, statBase: -2.23, hpPer: 13.58, hpBase: -10.44 });
+  function stageTargetLevel(stageId) {
+    const type = Math.max(0, Math.min(2, Math.floor((Number(stageId) - 1) / 6)));
+    return STAGE_LEVEL_BAND[type][0] + stageStar(stageId) - 1;
+  }
+  const stagePlayerStat = (level) => STAGE_PLAYER_CURVE.statPer * level + STAGE_PLAYER_CURVE.statBase;
+  const stagePlayerHp = (level) => STAGE_PLAYER_CURVE.hpPer * level + STAGE_PLAYER_CURVE.hpBase;
+  function stageTypeScale(stageId) {
+    const type = STAGE_TYPES[Math.max(0, Math.min(2, Math.floor((Number(stageId) - 1) / 6)))];
+    return (type && STAGE_TYPE_SCALE[type.anim]) || 1;
+  }
+  const stageRoleIndex = (npcIndex) => Math.max(1, Math.min(3, Math.round(Number(npcIndex) || 1))) - 1;
+
   function stageNpcHp(stageId, npcIndex) {
+    const role = stageRoleIndex(npcIndex);
+    if (STAGE_USE_LEVEL_MODEL) {
+      return Math.max(1, Math.round(stagePlayerHp(stageTargetLevel(stageId)) * STAGE_ROLE_HP[role]));
+    }
     const row = STAGE_NPC_HP[stageStar(stageId) - 1];
-    return row ? stageScale(row[npcIndex - 1] || 0, STAGE_DIFFICULTY.hp) : 0;
+    return row ? stageScale(row[role] || 0, STAGE_DIFFICULTY.hp) : 0;
   }
   function stageNpcExp(stageId, npcIndex) {
     const row = STAGE_NPC_EXP[stageStar(stageId) - 1];
     return row ? stageScale(row[npcIndex - 1] || 0, STAGE_REWARD_MULT) : 0;
   }
-  /** 关卡 NPC 的攻击三维（力量/敏捷/速度）按难度系数打折。 */
+  /** 关卡 NPC 的攻击三维。新模型按推荐等级算；旧模型按字典数值 × STAGE_DIFFICULTY 打折。 */
   function stageNpcStats(npc) {
+    const raw = npc || {};
+    if (STAGE_USE_LEVEL_MODEL) {
+      const stageId = Number(raw.stageId) || 1;
+      const role = stageRoleIndex(raw.npcIndex);
+      const power = Math.max(1, Math.round(stagePlayerStat(stageTargetLevel(stageId)) * STAGE_ROLE_STAT[role] * stageTypeScale(stageId)));
+      // 用字典里（含熊猫 ★4-6 修正表）的比例保留同关三人的相对形状
+      const shape = (key) => { const v = Number(raw[key]), p = Number(raw.power); return v > 0 && p > 0 ? v / p : 1; };
+      return { power, agility: Math.max(1, Math.round(power * shape('agility'))), speed: Math.max(1, Math.round(power * shape('speed'))) };
+    }
+    // 字典里熊猫 ★4-6 的攻击三维异常膨胀（大侠 40 → 47 → 109 → 213，而血量/星级是平滑增长的，
+    // 明显是原数据错误），这里按 ★1-3 的增长斜率修正；血量仍走攻略表。
+    const fix = STAGE_NPC_STAT_FIX[Number(raw.stageId)] && STAGE_NPC_STAT_FIX[Number(raw.stageId)][Number(raw.npcIndex) - 1];
+    const base = fix || raw;
     return {
-      power: stageScale(npc.power, STAGE_DIFFICULTY.power),
-      agility: stageScale(npc.agility, STAGE_DIFFICULTY.agility),
-      speed: stageScale(npc.speed, STAGE_DIFFICULTY.speed),
+      power: stageScale(base.power, STAGE_DIFFICULTY.power),
+      agility: stageScale(base.agility, STAGE_DIFFICULTY.agility),
+      speed: stageScale(base.speed, STAGE_DIFFICULTY.speed),
     };
   }
 
@@ -99,6 +156,7 @@
     skills: [],
     gears: [], wears: {},      // gears: [{id,used,key,ext:[{id,level}]}]
     props: { 1: 3, 2: 2 },     // 小体力药剂x3 大体力药剂x2
+    freePoints: 0,             // 升级发下来、还没分配的自由属性点
     propsStates: {},           // 药剂生效场次 {propId: count}
     stages: {},                // stageId -> {npcIndex, passed}
     dailyWins: 0, allWins: 0, dailyFails: 0, allFails: 0,
@@ -194,5 +252,7 @@
   }
   applyPropRemarkFixes();
 
-  window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_REWARD_MULT, STAGE_GOLD_MULT, STAGE_FRAGMENT, stageFragmentChance, stageFragmentCount, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize };
+  window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
+    STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
+    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, STAGE_FRAGMENT, stageFragmentChance, stageFragmentCount, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize };
 })();

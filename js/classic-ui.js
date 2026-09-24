@@ -167,6 +167,11 @@
   // 原版没有单独的「生命」图标，用同风格的圆形字徽补上。
   const STAT_ICON = { power: 3, agility: 4, speed: 5 };
   const STAT_CHAR = { power: '力', agility: '敏', speed: '速', hp: '命' };
+  /** 系统代选卡片用的图标：力/敏/速沿用彩色道具图标，生命没有贴图，退回「命」字徽。 */
+  const pointArt = (key) => {
+    const id = STAT_ICON[key];
+    return id ? '<img alt="" class="reward-icon-img" src="' + atlasIcon('prop', id) + '">' : '<b class="reward-badge">' + STAT_CHAR[key] + '</b>';
+  };
   /** 升级奖励面板，参考 references/new/13401b861367adab44aede056.webp：
    *  顶部「升级奖励」贴图牌 + 一排属性卡片（图标 + 属性名增量的说明）。 */
   function upgradeReward(ups) {
@@ -191,12 +196,18 @@
         ? '<div class="reward-card skill"><span class="reward-icon">' + icon(u.rewardKind === 'weapon' ? 'weapon' : 'skill', u.rewardId) + '</span>' +
           '<span class="reward-text">' + esc(u.reward) + '</span></div>'
         : '';
+      // 系统代选的那一点：已经进属性了，顺手在面板上说明原因。
+      // （玩家自选的点走升级弹窗，点数不在界面常驻显示。）
+      const point = u.autoPoint
+        ? '<div class="reward-card point"><span class="reward-icon">' + pointArt(u.autoPoint) + '</span>' +
+          '<span class="reward-text" title="' + STAT_CHAR[u.autoPoint] + '占比低于门槛，系统直接代选">' + STAT_CHAR[u.autoPoint] + '+' + State.STAT_GAIN[u.autoPoint] + '<span class="point-tag">系统代选</span></span></div>'
+        : '';
       const giftCards = (u.gifts || []).map((g) =>
         '<div class="reward-card gift"><span class="reward-icon">' + icon('prop', g.id) + '</span>' +
         '<span class="reward-text">' + esc(g.name) + ' ×' + esc(g.count) + '</span></div>').join('');
       return '<div class="reward-panel">' +
         '<div class="reward-title"><img alt="升级奖励" src="' + frameUrl('resource_10', 3) + '"></div>' +
-        '<div class="reward-row">' + cards.join('') + bonus + giftCards + '</div>' +
+        '<div class="reward-row">' + cards.join('') + point + bonus + giftCards + '</div>' +
         '<div class="reward-level">升到 ' + esc(u.level) + ' 级</div></div>';
     }).join('');
   }
@@ -245,20 +256,25 @@
     $('#ui').appendChild(p);
     bind(p, Object.assign({}, actions, {home}));
     if(window.Main?.resizeLayout)Main.resizeLayout();
+    promptFreePoints();
     return p;
   }
   function modal(title, content, buttons, opts) {
     opts = opts || {};
     const wrap = document.createElement('div'); wrap.className = 'classic-modal-overlay';
-    wrap.innerHTML = '<section class="classic-modal ' + (opts.small ? 'small-modal' : '') + '" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h2 class="modal-title cartoon">' + esc(title) + '</h2><button class="modal-close" aria-label="关闭">×</button><div class="modal-body">' + content + '</div><div class="modal-buttons">' + buttons.map((b,i) => btn(b.label, String(i), b.cls || '')).join('') + '</div></section>';
+    // locked=true 时没有关闭叉：用于「必须选完才能继续」的自由属性点分配。
+    wrap.innerHTML = '<section class="classic-modal ' + (opts.small ? 'small-modal' : '') + '" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h2 class="modal-title cartoon">' + esc(title) + '</h2>' + (opts.locked ? '' : '<button class="modal-close" aria-label="关闭">×</button>') + '<div class="modal-body">' + content + '</div><div class="modal-buttons">' + buttons.map((b,i) => btn(b.label, String(i), b.cls || '')).join('') + '</div></section>';
     $('#ui').appendChild(wrap);
     const previousFocus = document.activeElement;
     const close = () => { wrap.remove(); if (previousFocus && previousFocus.isConnected) previousFocus.focus({preventScroll:true}); };
-    $('.modal-close',wrap).onclick = close;
+    const closeBtn = $('.modal-close',wrap);
+    if (closeBtn) closeBtn.onclick = close;
     const map = {};
     buttons.forEach((b,i) => { map[i] = () => { if (b.close !== false) close(); if (b.run) b.run(); }; });
     bind(wrap,map);
     $('.modal-buttons button',wrap)?.focus({preventScroll:true});
+    // 有未分配的自由属性点时，任何新弹窗之上都要先把它选完
+    if (!opts.locked) promptFreePoints();
     return {close,element:wrap};
   }
   function notice(msg, buttons) { return modal('提示', '<p>' + esc(msg) + '</p>', buttons || [{label:'确定'}], {small:true}); }
@@ -271,6 +287,7 @@
     bind($('.classic-home'),actions);buffSignature='';
     refreshHome();
     renderNumbers();
+    promptFreePoints();
   }
   function refreshHome() {
     const S = State.state(); if (!S) return;
@@ -483,7 +500,9 @@
         return '<div class="reward-card gift"><span class="reward-icon">' + icon('prop', g.id) + '</span>' +
           '<span class="reward-text">' + esc(g.name) + ' ×' + esc(g.count) + '</span></div>';
       }).join('');
-      const rows = (u.reward ? '<div class="reward-card skill"><span class="reward-text">' + esc(u.reward) + '</span></div>' : '') + gifts;
+      const rows = (u.reward ? '<div class="reward-card skill"><span class="reward-text">' + esc(u.reward) + '</span></div>' : '')
+        + (u.autoPoint ? '<div class="reward-card point"><span class="reward-icon">' + pointArt(u.autoPoint) + '</span><span class="reward-text">' + STAT_CHAR[u.autoPoint] + '+' + State.STAT_GAIN[u.autoPoint] + '<span class="point-tag">系统代选</span></span></div>' : '')
+        + gifts;
       return '<div class="reward-panel"><div class="reward-level">升到 ' + esc(u.level) + ' 级</div>' +
         (rows ? '<div class="reward-row">' + rows + '</div>' : '') +
         '</div>';
@@ -580,7 +599,8 @@
     const shown=items.slice(bagPage*6,bagPage*6+6);
     if(!shown.some(it=>it.id===selectedProp))selectedProp=shown[0]?.id||0;
     const it=shown.find(it=>it.id===selectedProp),status=shop&&it?State.purchaseStatus(it.id):null;
-    const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个')+'</div>'+btn(shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看','prop-action','small gold'):'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
+    const sellPrice=it&&!shop?State.propSellPrice(it.id):0;
+    const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个'+(sellPrice?'　可回收 '+sellPrice+' 金松果/个':''))+'</div>'+btn(shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看','prop-action','small gold'):'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
     const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
     const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,{cls:'classic-bag-board',counter:(bagPage+1)+'/'+total,left:'<span class="footer-left" style="display:flex;gap:12px">'+(exchange?btn('金杯商店','rank-shop','small'):'')+((shop||exchange)?btn('每日抽奖','lottery','small gold'):'')+'</span>'});
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
@@ -675,7 +695,7 @@
     const buttons=[];
     // 需要连点的（药剂/碎片）设 close:false，点完不关弹窗
     if(label)buttons.push({label,close:!stayOpen,run:useOne});
-    // 能卖的道具（天使果实 100 金松果/个）多给一个卖出入口，卖完原地刷新
+    // 能给个半价回收的道具都多一个卖出入口，卖完原地刷新
     if(State.propSellPrice&&State.propSellPrice(id))buttons.push({label:'卖出',cls:'gold',close:false,run:()=>sellAsk(id,()=>syncLive())});
     buttons.push({label:'返回',cls:'muted',run:()=>openBag(shop,bagPage)});
     const m=modal(shop?'道具商店':'道具详情',content,buttons,{small:true});
@@ -699,12 +719,15 @@
       const main=$('[data-action="0"]',m.element);
       if(main){main.disabled=!!reason;if(label)main.textContent=label;}
       if(shop&&!status.remaining)main.disabled=true;
+      // 卖光之后「卖出」不能再点
+      const sellBtn=$$('.modal-buttons button',m.element).find(b=>b.textContent.trim()==='卖出');
+      if(sellBtn)sellBtn.disabled=(now.props[id]||0)<1;
       refreshHeader();
     }
     syncLive();
     // 注意：天使果实（45）在武技已满时**不再**禁用合成，果实可以先囤着。
   }
-  /** 卖出背包道具（目前只有天使果实，100 金松果一个）：滑动条选数量后确认。 */
+  /** 卖出背包道具（按字典价格的一半回收）：滑动条选数量后确认。 */
   function sellAsk(id,after) {
     const S=State.state(),price=State.propSellPrice(id),held=S.props[id]||0,def=propMap.getValue(id);
     if(!price||held<1){toast('背包里没有可卖的道具');return;}
@@ -739,6 +762,57 @@
     }},{label:'取消',cls:'muted'}],{small:true});
     const refresh=()=>{const values=$$('input',m.element).map(e=>Number(e.value));const remaining=8-values.reduce((sum,n)=>sum+n,0);$('.allocation-remaining',m.element).textContent='剩余 '+remaining+' 点';$('[data-action="0"]',m.element).disabled=remaining!==0||values.some(n=>!Number.isInteger(n)||n<0||n>8);};
     $$('input',m.element).forEach(e=>e.oninput=refresh);refresh();
+  }
+  /* ---------- 自由属性点（升级当场自选，四项平衡，占比过低系统代选） ----------
+   * 规则在 State：allocatePoint 会在某一项占比低于门槛时直接代选（redirected=true），
+   * 所以界面即使被绕过也守得住。这里只负责把「升级时就得选掉」变成一个没有关闭叉的弹窗，
+   * 点数不进背包、不在界面任何地方常驻显示。 */
+  const STAT_LABEL={power:'力量',agility:'敏捷',speed:'速度',hp:'生命'};
+  const statField=(key)=>key==='hp'?'maxHp':key;
+  function freePointDialog() {
+    if(typeof State.pendingPoints!=='function'||State.pendingPoints()<=0)return null;
+    if($$('.classic-modal-overlay').some(o=>o.querySelector('.free-point-box')))return null;
+    const rows=State.STAT_KEYS.map(key=>'<div class="free-point-row" data-row="'+key+'"><span class="fp-name">'+STAT_LABEL[key]+'</span>'+
+      '<b class="fp-value" data-value="'+key+'">0</b><span class="fp-share" data-share="'+key+'">0%</span>'+
+      '<button type="button" class="uc-button small" data-point="'+key+'">+'+State.STAT_GAIN[key]+'</button></div>').join('');
+    const minPct=Math.round(State.STAT_SHARE_MIN*100);
+    const body='<div class="free-point-box"><p class="free-point-tip">升级留了一点属性给你自己加：力量／敏捷／速度各 +1，生命 +5。四项占比（生命按 10 点折算 1 点）任意一项低于 '+minPct+'% 时必须先补它，系统会直接替你选择。</p>'+
+      '<div class="free-point-rows">'+rows+'</div>'+
+      '<p class="free-point-note" data-live="point-note" role="status"></p>'+
+      '<p class="allocation-remaining" data-live="point-left" role="status">剩余 0 点</p></div>';
+    const m=modal('分配自由属性点',body,[
+      {label:'平均分配',cls:'muted',close:false,run:()=>{State.allocateEvenly();refresh();}},
+      {label:'确定',cls:'gold',close:false,run:()=>{if(State.pendingPoints()<=0)m.close();}},
+    ],{small:true,locked:true});
+    m.element.classList.add('point-dialog');
+    const refresh=()=>{
+      const S=State.state(),shares=State.statShares(),force=State.forcedStat(),left=State.pendingPoints();
+      for(const key of State.STAT_KEYS){
+        $('[data-value="'+key+'"]',m.element).textContent=S[statField(key)];
+        $('[data-share="'+key+'"]',m.element).textContent=Math.round(shares[key]*100)+'%';
+        $('[data-row="'+key+'"]',m.element).classList.toggle('forced',force===key);
+        $('[data-point="'+key+'"]',m.element).disabled=left<=0;
+      }
+      $('[data-live="point-left"]',m.element).textContent='剩余 '+left+' 点';
+      $('[data-live="point-note"]',m.element).textContent=force
+        ?STAT_LABEL[force]+'占比 '+Math.round(shares[force]*100)+'%，低于 '+minPct+'%，接下来必须加到'+STAT_LABEL[force]+'（系统代选）'
+        :'四项占比都达标，可以自由选择。';
+      $('[data-action="0"]',m.element).disabled=left<=0;
+      $('[data-action="1"]',m.element).disabled=left>0;
+    };
+    $$('[data-point]',m.element).forEach(b=>b.addEventListener('click',()=>{
+      const r=State.allocatePoint(b.dataset.point);
+      if(r.ok&&r.redirected)toast(r.msg);
+      refresh();
+    }));
+    refresh();
+    return m;
+  }
+  /** 有未分配的自由属性点时立刻弹出（首页、页面切换、弹窗出现时都会检查）。 */
+  function promptFreePoints() {
+    if(typeof State.pendingPoints!=='function'||State.pendingPoints()<=0)return null;
+    if($('.point-dialog'))return null;
+    return freePointDialog();
   }
   function gearImg(g) {
     return '<img alt="" src="images/classic/icons/gear-'+g.id+'.png">';
@@ -981,9 +1055,14 @@
   function runAction(key){if(actions[key])actions[key]();}
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape'){
-      const dialogs=$$('.classic-modal-overlay');if(dialogs.length){$('.modal-close',dialogs[dialogs.length-1]).click();return;}
+      const dialogs=$$('.classic-modal-overlay');
+      if(dialogs.length){
+        // 自由属性点弹窗必须选完，Esc 也不放行
+        const closeBtn=$('.modal-close',dialogs[dialogs.length-1]);
+        if(closeBtn){closeBtn.click();return;}
+      }
       const panels=$$('.panel-close');if(panels.length){panels[panels.length-1].click();return;}
-      if(screen!=='home'&&$('.classic-page'))home();
+      if(screen!=='home'&&$('.classic-page')&&!dialogs.length)home();
     }
     if(e.key==='Tab'){
       const dialogs=$$('.classic-modal-overlay');if(!dialogs.length)return;
@@ -994,7 +1073,7 @@
     }
   });
   window.UI={...legacy,renderHome,drawHomeHud,drawActor,runAction,currentScreen:()=>screen,refreshHome,renderNumbers,refreshHeader,
-    classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult},
+    classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints},
     weaponIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('weapon',id)+'">',
     skillIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('skill',id)+'">',
     propIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('prop',id)+'">'};

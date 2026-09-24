@@ -5,10 +5,6 @@
  * 超过就只让 .modal-body 自己滚，所以不会出现「顶栏被切一半、页脚露出半个返回菜单」那种画面。 */
 .classic-page~.classic-modal-overlay>.classic-modal.small-modal{max-height:466px}
 .classic-page~.classic-modal-overlay>.classic-modal.small-modal>.modal-body{max-height:326px}
-/* 主页上的弹窗（活动/提示）例外：主页没有「顶栏+页脚」可以躲，HUD 和底部主菜单被弹窗切成两半更难看，
- * 所以主页弹窗只留角色与背景。 */
-#ui:has(> .classic-modal-overlay)>.classic-home>*,
-#ui:has(> .panel-overlay)>.classic-home>*{visibility:hidden}
 .classic-tabs{top:5px;left:11px;right:11px;height:99px;border:7px solid #192e32;border-radius:60px;padding:5px 90px;gap:67px;box-shadow:inset 0 5px #fffbc8,inset 0 -5px #e8a619;background:linear-gradient(#fff89b 4%,#ffea67 37%,#ffc321 72%,#f4af12)}
 .classic-tabs .uc-tab{min-height:77px;border:5px solid #815b24;border-radius:48px;font-size:54px;padding:0 20px;line-height:1.1;background:linear-gradient(#fff9b9,#ffde55 45%,#f8ae10 67%,#fbd550);box-shadow:inset 0 3px #fff6aa,inset 0 -3px #ffde50}
 .classic-tabs .uc-tab.active{background:linear-gradient(#d2f497,#9bdf50 54%,#82c13c);border-color:#416727;box-shadow:inset 0 3px #eaffb2,inset 0 -4px #6aa132}
@@ -99,3 +95,23 @@
 .gear-overlay{background:#45384da6}.gear-modal{width:1000px;height:598px;max-height:630px;padding:40px 25px 100px;border-radius:62px}.gear-modal .modal-body{height:100%;padding:0;overflow:hidden}.gear-modal .modal-title{font-size:48px}.gear-modal .modal-buttons{position:absolute;bottom:17px;left:0;right:0}.gear-modal .modal-close{display:none}
 .gear-modal .gear-note{position:static;text-align:center;font-size:27px;margin-bottom:12px;color:#6d321d}.gear-modal .gear-layout{height:365px;grid-template-columns:38% 62%;gap:5px}.gear-modal .gear-slots{position:relative;display:block}.gear-modal .gear-slots .catalog-cell{position:absolute;width:140px;height:134px}.gear-modal .gear-slots .catalog-cell:nth-child(1){top:0;left:119px}.gear-modal .gear-slots .catalog-cell:nth-child(2){top:122px;left:202px}.gear-modal .gear-slots .catalog-cell:nth-child(3){top:122px;left:35px}.gear-modal .gear-slots .catalog-cell:nth-child(4){top:244px;left:119px}.gear-modal .gear-slots .item-icon{width:133px;height:119px;background:#ede0bd;border-radius:29px;border:3px solid #a88256;box-shadow:inset 0 0 0 3px #fff7dc}
 .gear-modal .gear-list{gap:3px 17px;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)}.gear-modal .gear-list .item-icon{width:147px;height:138px;border-radius:30px}.gear-modal .gear-list .item-caption{font:27px/32px "SimSun",serif}.gear-modal .gear-capacity{position:absolute;bottom:80px;right:37px;font-size:25px;color:#7b542d}.gear-modal .page-arrow{top:43%;right:2px}.gear-modal .page-arrow.prev{left:350px}
+
+/* 自由属性点：升级时必选的分配弹窗（无关闭叉）；点数不在其它地方常驻显示 */
+.classic-modal-overlay.point-dialog>.classic-modal.small-modal{max-height:600px;width:800px}
+.classic-modal-overlay.point-dialog>.classic-modal.small-modal>.modal-body{max-height:470px;overflow-y:auto}
+.free-point-box{display:flex;flex-direction:column;gap:8px}
+.free-point-box .free-point-tip{margin:0;font-size:19px;line-height:1.4;color:#7a5326;text-align:left}
+.free-point-rows{display:flex;flex-direction:column;gap:6px}
+.free-point-row{display:grid;grid-template-columns:88px 70px 64px 1fr;align-items:center;gap:10px;
+  padding:6px 12px;border:3px solid #d8bb85;border-radius:16px;background:#fffaea}
+.free-point-row .uc-button{justify-self:end;min-width:210px}
+.free-point-row .fp-name{font-size:23px;color:#7a5326;font-weight:bold}
+.free-point-row .fp-value{font-size:26px;color:#5a3a18;text-align:right}
+.free-point-row .fp-share{font-size:19px;color:#957343;text-align:right}
+.free-point-row.forced{border-color:#c0392b;background:#fff2ee;box-shadow:0 0 0 2px #c0392b33}
+.free-point-box .free-point-note{margin:0;font-size:18px;color:#836120;text-align:center;line-height:1.35}
+.free-point-box .allocation-remaining{margin:0;font-size:22px}
+.reward-card.point .reward-icon{border-color:#7a5bbf;box-shadow:inset 0 0 0 4px #efe8ff,0 0 10px #7a5bbf55}
+.reward-card.point .reward-text{display:flex;flex-direction:column;align-items:center;font-size:18px;color:#5b3f96;line-height:1.2}
+.reward-card.point .reward-badge{color:#4a3579;background:radial-gradient(circle at 38% 32%,#efe8ff,#c3b0ee)}
+.point-tag{font-size:13px;color:#8a4a3a;background:#ffe6df;border-radius:8px;padding:0 5px;font-weight:normal}

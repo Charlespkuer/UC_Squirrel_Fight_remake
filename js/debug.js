@@ -67,7 +67,7 @@
   const MAX_LEVEL = 70;
   // ---------- 一次性工具 ----------
   const ACTIONS = [
-    { label: '一键满级', note: '从当前等级一路走「真实升级流程」到 ' + MAX_LEVEL + ' 级：属性成长、升级礼包（道具）与随机领悟的武器/技能都会照常发放',
+    { label: '一键满级', note: '从当前等级一路走「真实升级流程」到 ' + MAX_LEVEL + ' 级：属性成长、升级礼包（道具）与随机领悟的武器/技能都会照常发放；每级留的 1 点自选属性会攒下来，结束后弹窗一次分配（占比过低的由系统代选）',
       run() {
         const S = State.state();
         const from = S.level;
@@ -89,9 +89,12 @@
         }
         if (window.UI && UI.refreshHome) UI.refreshHome();
         renderOwned();
+        // 一路上攒下的自选属性点：直接弹出分配弹窗（一键满级会有几十点，弹窗里有「平均分配」）
+        if (window.UI && UI.classic && UI.classic.promptFreePoints) UI.classic.promptFreePoints();
         return '等级 ' + from + ' → ' + S.level + '（' + levels + ' 级）：力量+' + gain.power + ' 敏捷+' + gain.agility +
           ' 速度+' + gain.speed + ' 生命+' + gain.hp + '，升级礼包 ' + gifts + ' 件' + (books ? '、属性书 ' + books + ' 本' : '') +
-          (learned.length ? '，领悟 ' + learned.join('、') : '，没有领悟新武技');
+          (learned.length ? '，领悟 ' + learned.join('、') : '，没有领悟新武技') +
+          (S.freePoints ? '，本次分配弹窗里还有 ' + S.freePoints + ' 点没点完' : '');
       } },
     { label: '一键升级（升1级）', note: '按正常升级结算一次经验，属性成长、升级礼包与随机领悟照常；到 ' + MAX_LEVEL + ' 级就停下',
       run() {
@@ -103,18 +106,22 @@
         const last = ups[ups.length - 1];
         const gifts = ups.reduce((a, u) => a + (u.gifts || []).length, 0);
         renderOwned();
+        if (window.UI && UI.classic && UI.classic.promptFreePoints) UI.classic.promptFreePoints();
         return '升到 ' + last.level + ' 级（力量+' + sum('power') + ' 敏捷+' + sum('agility') +
           ' 速度+' + sum('speed') + ' 生命+' + sum('hp') + '）' + (gifts ? '，礼包 ' + gifts + ' 件' : '') +
-          (last.reward ? '，领悟 ' + last.reward : '');
+          (last.reward ? '，领悟 ' + last.reward : '') +
+          (last.autoPoint ? '，' + last.autoPointName + '占比过低已自动补 1 点' : '') +
+          (S.freePoints ? '，本次分配弹窗里还有 ' + S.freePoints + ' 点没点完' : '');
       } },
     { label: '体力全满', run() { const S = State.state(); S.energy = S.maxEnergy; S.lastEnergyTs = Date.now(); State.save(); UI.refreshHome(); return '体力已回满'; } },
     { label: '金松果 +10000', run() { State.state().goldPoint += 10000; State.save(); UI.refreshHome(); return '金松果 +10000'; } },
     { label: '全道具 +10', run() {
         const S = State.state();
         let n = 0;
-        propMap.each((id) => { if (+id > 0) { S.props[id] = (S.props[id] || 0) + 10; n++; } });
+        // 金松果/金杯/经验不是背包道具，跳过（要加它们用上面的「快速获取物品」）
+        propMap.each((id) => { if (+id > 0 && !CURRENCY_PROPS[+id]) { S.props[id] = (S.props[id] || 0) + 10; n++; } });
         State.save(); UI.refreshHome();
-        return n + ' 种道具各 +10';
+        return n + ' 种道具各 +10（货币与经验已跳过）';
       } },
     { label: '全部武器技能满级', run() {
         const S = State.state();
@@ -129,12 +136,26 @@
         State.save();
         return '18 个关卡已标记通关';
       } },
-    { label: '重置每日与体力计时', run() {
+    { label: '重置每日与体力计时', note: '把每日礼包、免费抽奖、天梯今日场次与金杯商店限兑、每日任务进度、弟子日贡、对手刷新费用、体力计时都当成「新的一天」',
+      run() {
         const S = State.state();
-        S.dailyClaimDate = ''; S.dailyStatsDate = ''; S.lotteryDate = ''; S.lotteryFree = 1;
+        const today = State.localDate();
+        S.dailyClaimDate = '';                     // 每日礼包可以再领
+        // 直接标记今天已同步，别再走 syncDailyStats 的「旧档没有日期」分支（那条分支会保留旧计数）
+        S.dailyStatsDate = today;
+        S.dailyWins = 0; S.dailyFails = 0;
+        S.joinRankCount = 0;                       // 天梯赛今日已参赛场次
+        S.rankPurchaseDay = ''; S.rankPurchases = {};   // 金杯商店每日限兑
+        S.lotteryDate = today; S.lotteryFree = 1;  // 每日免费抽奖
+        S.quests = null; S.dailyCounters = null;   // 每日任务：进度与领取状态清空，下次打开活动页重抽
+        S.masterKickDate = '';                     // 师父今天又能让一名徒弟离开
+        S.challengeRefresh = { count: 0, ts: Date.now() };   // 对手刷新费用
+        for (const p of (S.prentices || [])) { p.lastExpDate = ''; p.tributeClaimedDate = ''; }   // 弟子日贡可再领
         S.lastEnergyTs = Date.now(); S.energy = S.maxEnergy;
-        State.save(); UI.refreshHome();
-        return '每日礼包、抽奖与体力计时已重置';
+        State.save();
+        if (window.UI && UI.refreshHome) UI.refreshHome();
+        if (window.UI && UI.refreshHeader) UI.refreshHeader();
+        return '已重置：每日礼包、免费抽奖、天梯次数与限兑、每日任务、弟子日贡、刷新费用、体力计时';
       } },
   ];
 
@@ -175,12 +196,15 @@
     return html;
   }
 
-  /** 快速获取物品用的道具下拉：字典里的全部道具，含碎片、种子与天梯碎片。 */
+  /** 快速获取物品用的道具下拉：字典里的全部道具；金松果/金杯/经验标注成货币。 */
   function itemOptions() {
     const rows = [];
     propMap.each((id, v) => { if (+id > 0) rows.push({ id: +id, name: v.name }); });
     rows.sort((a, b) => a.id - b.id);
-    return rows.map((r) => '<option value="' + r.id + '">' + r.id + ' ' + esc(r.name) + '</option>').join('');
+    return rows.map((r) => {
+      const tag = CURRENCY_PROPS[r.id] === 'gold' ? '（货币·金松果）' : CURRENCY_PROPS[r.id] === 'goldCup' ? '（货币·金杯）' : CURRENCY_PROPS[r.id] === 'exp' ? '（经验值）' : '';
+      return '<option value="' + r.id + '">' + r.id + ' ' + esc(r.name) + tag + '</option>';
+    }).join('');
   }
 
   /** 武器/技能下拉：字典全表，按编号排序。 */
@@ -213,14 +237,33 @@
     return r.ok ? '已遗忘【' + r.name + '】　武技 ' + r.total + '/' + r.limit : r.msg;
   }
 
+  /* 8 金松果 / 15 经验 / 40 金杯在原版里就是货币或经验值，不是背包道具：
+   * 挂进背包只是个用不掉的死物（useType 0/3），所以取物时直接加到对应字段上。 */
+  const CURRENCY_PROPS = { 8: 'gold', 40: 'goldCup', 15: 'exp' };
   /** 直接往背包里加道具（调试用，不扣任何货币），并刷新首页/背包。
-   *  仍然遵守 9999 的单件上限，超出部分不会加进去。 */
+   *  仍然遵守 9999 的单件上限；金松果/金杯/经验走各自的货币字段。 */
   function grantItem(id, count) {
     const S = State.state ? State.state() : null;
     if (!S) return '还没有存档，先开始游戏';
     const n = Math.max(1, Math.min(999, Math.round(Number(count) || 1)));
-    const def = propMap.getValue(Number(id));
+    const key = Number(id);
+    const def = propMap.getValue(key);
     if (!def) return '道具表里没有编号 ' + id;
+    const currency = CURRENCY_PROPS[key];
+    if (currency) {
+      let msg;
+      if (currency === 'gold') { S.goldPoint += n; msg = '金松果 +' + n + '（现有 ' + S.goldPoint + '）'; }
+      else if (currency === 'goldCup') { S.goldCup += n; msg = '金杯 +' + n + '（现有 ' + S.goldCup + '）'; }
+      else {
+        const ups = State.gainExp(n);
+        const last = ups[ups.length - 1];
+        msg = '经验 +' + n + (last ? '（升到 ' + last.level + ' 级）' : '（现有 ' + S.exp + '/' + GData.nextExp(S.level) + '）');
+      }
+      State.save();
+      if (window.UI && UI.refreshHome) UI.refreshHome();
+      if (window.UI && UI.refreshHeader) UI.refreshHeader();
+      return msg;
+    }
     const cap = State.PROP_HARD_CAP || 9999;
     const before = S.props[id] || 0;
     S.props[id] = Math.min(cap, before + n);

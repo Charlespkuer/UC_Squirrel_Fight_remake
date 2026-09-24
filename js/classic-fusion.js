@@ -66,13 +66,16 @@
           '<span class="fusion-frame">' + art(gear) + '<span class="fusion-card-state">' + esc(caption) + '</span></span>' +
           '<span class="fusion-gear-name">' + esc(gear.name) + '</span></button>';
       }).join('');
-      board.innerHTML = '<header class="fusion-heading"><h2>装备融合</h2><span class="fusion-wallet">' + classic.spr('resource_1', 18) + '<span>金松果 <b>' + State.state().goldPoint + '</b></span></span></header>' +
-        '<div class="fusion-recipe"><div class="fusion-materials" aria-label="融合材料">' + materials + '</div>' +
-        '<span class="fusion-arrow" aria-hidden="true">➜</span><div class="fusion-preview ' + (first ? 'q' + (first.quality + 1) : '') + '"><span class="fusion-frame"><span class="fusion-question">?</span></span><span>' + (first ? qualities[first.quality + 1] + '装备' : '更高品质') + '</span></div>' +
-        '<div class="fusion-operation"><span class="fusion-cost">消耗 <b>50</b> 金松果</span><button type="button" class="uc-button gold" data-fusion-action="fuse"' + (reason || busy ? ' disabled' : '') + '>开始融合</button><span class="fusion-guarantee">品质提升一级</span></div></div>' +
-        '<p class="fusion-rules">3 件相同装备 + 50 金松果，获得 1 件随机高一级品质装备；3 件相同卓越（紫）装备融合为同名传说（橙）装备，可镶嵌宝石。材料会被消耗。</p>' +
-        '<div class="fusion-inventory-heading"><h3>选择装备 <span>已放入 ' + selected.length + '/3</span></h3><button type="button" class="uc-button tiny muted" data-fusion-action="clear"' + (selected.length ? '' : ' disabled') + '>清空材料</button><div class="fusion-pagination"><button type="button" class="uc-button tiny" data-fusion-action="previous" aria-label="上一页装备"' + (pageIndex === 0 ? ' disabled' : '') + '>‹</button><span>' + (pageIndex + 1) + ' / ' + pages + '</span><button type="button" class="uc-button tiny" data-fusion-action="next" aria-label="下一页装备"' + (pageIndex + 1 >= pages ? ' disabled' : '') + '>›</button></div></div>' +
-        '<div class="fusion-inventory">' + (cards || '<div class="fusion-empty">还没有可以选择的装备。<br><span>收集装备碎片，可在道具中合成装备。</span></div>') + '</div>' +
+      const pips = [0, 1, 2].map((i) => '<i class="' + (i < selected.length ? 'on' : '') + '"></i>').join('');
+      board.innerHTML = '<header class="fusion-heading"><h2>装备融合</h2>' +
+        '<ol class="fusion-steps"><li class="on">选择材料</li><li>融合</li><li>获得装备</li></ol>' +
+        '<span class="fusion-wallet">' + classic.spr('resource_1', 18) + '<span>金松果 <b>' + State.state().goldPoint + '</b></span></span></header>' +
+        '<div class="fusion-workbench"><div class="fusion-materials" aria-label="融合材料">' + materials + '</div>' +
+        '<span class="fusion-arrow" aria-hidden="true">➜</span><div class="fusion-preview ' + (first ? 'q' + (first.quality + 1) : 'missing') + '"><span class="fusion-frame"><span class="fusion-question">?</span><span class="fusion-glow" aria-hidden="true"></span></span><span class="fusion-preview-label">' + (first ? qualities[first.quality + 1] + '装备' : '更高品质') + '</span></div>' +
+        '<div class="fusion-operation"><span class="fusion-cost">消耗 <b>' + COST + '</b> 金松果</span><button type="button" class="uc-button gold" data-fusion-action="fuse"' + (reason || busy ? ' disabled' : '') + '>开始融合</button><span class="fusion-guarantee">品质提升一级 · 材料会被消耗</span></div></div>' +
+        '<p class="fusion-rules"><b>规则</b>3 件相同装备 + ' + COST + ' 金松果，随机获得 1 件高一级品质的同名装备；3 件相同卓越（紫）装备融合为传说（橙）装备，可镶嵌宝石。</p>' +
+        '<div class="fusion-inventory-panel"><div class="fusion-inventory-heading"><h3>选择装备<span class="fusion-pips" aria-label="已放入 ' + selected.length + ' / 3">' + pips + '</span><span class="fusion-count">已放入 ' + selected.length + '/3</span></h3><button type="button" class="uc-button tiny muted" data-fusion-action="clear"' + (selected.length ? '' : ' disabled') + '>清空材料</button><div class="fusion-pagination"><button type="button" class="uc-button tiny" data-fusion-action="previous" aria-label="上一页装备"' + (pageIndex === 0 ? ' disabled' : '') + '>‹</button><span>' + (pageIndex + 1) + ' / ' + pages + '</span><button type="button" class="uc-button tiny" data-fusion-action="next" aria-label="下一页装备"' + (pageIndex + 1 >= pages ? ' disabled' : '') + '>›</button></div></div>' +
+        '<div class="fusion-inventory">' + (cards || '<div class="fusion-empty">还没有可以选择的装备。<br><span>收集装备碎片，可在道具中合成装备。</span></div>') + '</div></div>' +
         '<p class="fusion-status' + (!reason ? ' ready' : '') + '" role="status" aria-live="polite">' + esc(reason || '材料已齐全，可以融合！') + '</p>';
 
       board.querySelectorAll('[data-fusion-slot]').forEach((button) => {

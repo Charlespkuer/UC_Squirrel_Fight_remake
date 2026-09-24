@@ -19,6 +19,8 @@
 .collection-board .selected .item-caption{color:#648a28;font-family:"SimSun",serif;font-size:34px;font-weight:normal}
 .catalog-cell.selected .item-icon{outline:4px solid #278000;outline-offset:0;box-shadow:inset 0 0 0 6px #ecffa7;background:repeating-conic-gradient(from 15deg,#d9f788 0deg 22deg,#a2ce3e 22deg 42deg)}
 .empty-slot{cursor:default}.collection-board .empty-slot .item-icon,.classic-bag-board .empty-slot .item-icon{background:#e6d5a9;border:0;box-shadow:none;border-radius:30px;opacity:.7}
+/* 翻页箭头保持居中偏侧的原有位置（原版字面坐标 (7,371)/(1094,371) 会把箭头压到
+ * 底板边缘上，观感反而更差，故回退）。 */
 .page-arrow{top:37%;right:9px}.page-arrow.prev{left:8px}.page-arrow .uc-button.arrow{width:62px;height:62px;min-height:0;min-width:0;padding:0 0 21px;border:5px solid #278000;background:#8bd000;box-shadow:inset 0 0 0 3px #d1f48a;border-radius:50%;font-family:Arial,sans-serif;font-size:73px;line-height:43px;-webkit-text-stroke:0;text-shadow:none;color:#fff9ce}
 .classic-tabs.bag-tabs{padding:5px 12px 5px 110px;gap:28px}
 .bag-tabs .uc-tab{flex:0 0 233px;font-size:51px}.bag-tabs .uc-tab.active{background:linear-gradient(#fffdf0,#e6dfce);border-color:#847966;box-shadow:inset 0 0 0 4px #fffdf2}

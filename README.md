@@ -18,12 +18,20 @@ node tools/serve.js 8080
 
 ## 当前内容与本轮变化
 
-- 首页、状态、武器/技能分页、道具、装备、融合、关卡、竞技、天梯、师徒、抽奖、系统及战斗录像。
+- 首页、状态、武器/技能分页、道具、装备、融合、关卡、竞技、天梯、师徒、抽奖、**排行榜**、**超级松鼠**、系统及战斗录像。
 - 武器/技能按新增经典截图调整为5列×2行，优先使用无“真”章且灰色/彩色/选中状态匹配的参考卡片，减少重复边框和混入的高清装饰。
 - 道具页恢复“背包 / 商店 / 兑换”导航、左侧3列×2行物品与右侧说明；兑换页提供碎片、种子合成及金杯商店入口。天使果实种子（45）详情会标注当前**武器/技能 x/y** 是否已达上限，已满时按钮变为“武器技能已满”并禁用合成；恶魔果实种子（46）用于遗忘，不受该上限限制。
 - 装备改为覆盖状态页的弹窗，左侧按部位摆放，右侧显示库存；三件材料融合保留独立页面。
 - 升级奖励显示属性增量与新领悟的武技；53、59、65级获得的属性书可手动分配8点属性。
 - 首页保留循环角色动作、原图集数字和音乐音量滑块；动画与装备绘制继续使用现有高清资源。
+
+### 排行榜与超级松鼠（依照原版 APK 补充）
+
+原版是联网游戏，排行榜与 VIP 都由服务端下发；本版按单机思路补齐，详见 [APK 对齐改动表](tools/apk-alignment.md)。
+
+- **排行榜**：消息页新增一页，按等级／金杯／天梯积分排序，每周固定种子生成 14 名离线松鼠并把玩家插进去，同周内榜单稳定，页面明确标注为离线模拟。
+- **超级松鼠（原版 VIP）**：系统页新增一页。特权文案与 10 级成长表直接取自原客户端内嵌文本（体力恢复最快 1.5 倍、体力上限 180、被动经验上限最高 400/天、永久 +6 装备格子、昵称尊贵标识等 8 条）。原版按天售卖（`buyVIP.do`），本版改为**金松果**购买（7 天 300／30 天 1000，本项目的平衡定价），到期后等级与经验保留，可续期累加。
+
 
 ### 成长、升级与商店
 
@@ -92,21 +100,24 @@ node tools/test-stages.cjs
 - [开发QA](http://127.0.0.1:8080/tools/qa.html)：高等级测试角色、装备、道具与示例录像；[基础外观](http://127.0.0.1:8080/tools/qa.html?outfit=none) 使用未穿装备的角色；[经典参考服装](http://127.0.0.1:8080/tools/qa.html?outfit=reference) 便于对照新增截图的锁定状态和服装。默认QA角色不变；新经典透明肖像只在一阶忍者护额、拳斗手套、忍者服、忍者鞋全部匹配时使用。
 - `tools/research/` 保留首页、奖励、师徒、逐页界面、[天使种子与碎片](http://127.0.0.1:8080/tools/research/seed-check.html)、[经验竞技场加成](http://127.0.0.1:8080/tools/research/arena-exp-check.html)、[跳过战斗](http://127.0.0.1:8080/tools/research/skip-check.html)（`?mode=random|stage`、`?skip=0` 自然结束）与调试检查页。这些检查页加载与 `index.html` 相同的全部样式表（含 `classic-refine.css`），以免截图与线上布局不一致。它们用于开发核对，部分早期断言可能与本轮的新规则不同；当前回归以上述脚本与QA入口为准。
 
-本轮确认：状态23/23、数值17/17、战斗规则24/24、拾取9/9、Main集成10/10、扩展玩法31/31、融合9/9、关卡15/15，战斗动画回归通过。最终浏览器自检21/21通过，控制台无错误；真实点击验证了限购、属性书、拾取、跳过汇总、录像不重复结算、跳过战斗后的正常结算与页面归属，以及天使种子的武器/技能已满提示（已满时禁用合成）、经验竞技场的经验丸加成文案与关卡碎片掉落弹窗。测试通过只说明对应检查项成立，不等于全部玩法组合或视觉细节已与原版一致；证据与限制见 [还原记录](tools/restoration-2026-09-23.md)。
+本轮确认：状态24/24、数值17/17、战斗规则25/25、拾取9/9、Main集成11/11、扩展玩法34/34、融合9/9、关卡15/15，战斗动画回归通过。最终浏览器自检21/21通过，控制台无错误；真实点击验证了限购、属性书、拾取、跳过汇总、录像不重复结算、跳过战斗后的正常结算与页面归属，以及天使种子的武器/技能已满提示（已满时禁用合成）、经验竞技场的经验丸加成文案、关卡碎片掉落弹窗、排行榜与超级松鼠页。测试通过只说明对应检查项成立，不等于全部玩法组合或视觉细节已与原版一致；证据与限制见 [还原记录](tools/restoration-2026-09-23.md) 与 [APK 对齐改动表](tools/apk-alignment.md)。
 
 ## 来源、限制与代码
 
-图片依据包括 `references/`、`references/new/` 和经典状态截图 [classic-status-360.jpg](references/classic-status-360.jpg)。此前从本地 `h5ssdz_9game_4230.apk` 的 `assets/game.zip` 提取出原脚本、图集、音频和数据，保存在项目中；未找到经典版完整动画或SWF。
+图片依据包括 `references/`、`references/new/` 和经典状态截图 [classic-status-360.jpg](references/classic-status-360.jpg)。原始安卓包 `references/h5ssdz_9game_4230.apk` 也在库内（35,572,039 字节）：它是明文 ZIP，内层 `assets/game.zip` 的 456 个资源已与本项目逐字节核对（443 个完全一致、0 个不同），并回收了 13 个此前未入库的原始引擎脚本到 `js/orig/`。未找到经典版完整动画或SWF。
+
+原版是**薄客户端**：战斗结算、掉落、升级奖励、排行榜、VIP 状态全部由 `http://ssdz.u.uc.cn/FightGame` 下发，客户端只负责播放服务端给的 `combatLog`。因此战斗公式无法从 APK「找回」，只能离线设计并明确标注。架构解剖、37 个界面的原始坐标与 76 个服务端接口清单见 [apk-audit/ARCHITECTURE.md](tools/apk-audit/ARCHITECTURE.md)，据此做的改动见 [APK 对齐改动表](tools/apk-alignment.md)。
 
 经典静态角色、卡片、按钮使用截图裁剪或清理，动画仍以APK的高清资源为主。[village.svg](images/classic/village.svg) 是依据截图重新绘制的村庄。原资源清单见 [manifest](images/classic/manifest.json)、[旧参考细节](images/classic/reference-details.json) 和 [新增参考清单](images/classic/new-reference/manifest.json)。每张参考卡只用于匹配的灰色、彩色或选中状态，不代表找回了所有等级变体。
 
-- `js/orig/`：原始数据与动画；`js/engine.js`：图集和动画播放器。
-- `js/state.js`：存档、成长、物品、装备与进度；`js/sim.js`：离线战斗计算。
+- `js/orig/`：原始客户端源码归档（含入口 `index.js`、核心 `ssdz-pkg2.js` 与数据表）；`js/engine.js`：图集和动画播放器。
+- `js/state.js`：存档、成长、物品、装备、进度与超级松鼠；`js/sim.js`：离线战斗计算。
 - `js/battle.js`、`js/battle-drops.js`：战斗演出与可点击奖励。
-- `js/classic-ui.js`、`js/classic-extras.js`、`js/classic-fusion.js`：经典页面、扩展玩法与融合。
+- `js/classic-ui.js`、`js/classic-extras.js`、`js/classic-fusion.js`：经典页面、扩展玩法（竞技/天梯/师徒/排行榜/超级松鼠）与融合。
 - `css/classic-refine.css`：本轮参考图布局修订；其余经典样式与模块同名。
 - `js/main.js`：启动、首页、战斗及声音调度；`js/debug.js`：开发调试。
-- [原始客户端研究](tools/research-original.md)、[数值核对](tools/balance-audit.md)、[战斗规则](tools/research-battle-rules.md)、[点击奖励与新图](tools/research-floating-drops.md)：证据与版本取舍。
+- [原始客户端研究](tools/research-original.md)、[数值核对](tools/balance-audit.md)、[战斗规则](tools/research-battle-rules.md)、[点击奖励与新图](tools/research-floating-drops.md)、[APK 对齐改动表](tools/apk-alignment.md)：证据与版本取舍。
+- `tools/apk-audit/`：APK 取证与架构工具（零依赖直读 APK、界面坐标导出、公共外框统计、资源逐字节核对）。用 `node tools/apk-audit/view-layout.cjs --list` 起步。
 - `tools/extract-ui-assets.py`、`tools/extract-classic-reference-details.py`、`tools/extract-new-reference-assets.py`、`tools/extract-new-reference-props.py`、`tools/extract-new-reference-buttons.py`：素材提取脚本，需Python/Pillow，部分需Node.js。
 
-标题曾用本地下载的「站酷快乐体」（`@font-face UCClassic`）充当原游戏字体，但小字号下发虚发糊，本轮**已彻底弃用并删除 `fonts/` 目录**，全部标题回落到 `"Microsoft YaHei", sans-serif`。项目内不再包含任何第三方字体文件，因此也不涉及字体许可。原游戏素材与数据权利归原权利人。竞技、天梯、好友与师徒均为离线模拟，不提供原服务器、真实玩家对战或公共社交服务。
+标题曾用本地下载的「站酷快乐体」（`@font-face UCClassic`）充当原游戏字体，但小字号下发虚发糊，本轮**已彻底弃用并删除 `fonts/` 目录**，全部标题回落到 `"Microsoft YaHei", sans-serif`。项目内不再包含任何第三方字体文件，因此也不涉及字体许可。原游戏素材与数据权利归原权利人。竞技、天梯、好友、师徒、排行榜与超级松鼠均为离线模拟，不提供原服务器、真实玩家对战或公共社交服务。

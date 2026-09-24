@@ -98,13 +98,18 @@
     const floaters = [], sleepers = new Set();
     let stopped = false, skipped = false, ending = false, raf = 0, round = 99, countdown = null;
     let last = performance.now(), shake = 0, combatStarted = false;
+    // 跳过按钮的绘制与点击区共用这个矩形。原版字面坐标 (983,609) 的 164x60 框会把
+    // 「跳过」两个字挤出圆角格，故保留原来的 190x70 比例。
     const skipRect = { x: 964, y: 605, w: 190, h: 70 };
     const previousClick = canvas.onclick;
     const ui = document.getElementById('ui');
     const pickups = opts.collectDrops && !opts.result && window.BattleDrops ? BattleDrops.create({ root: ui, random: opts.dropRandom }) : null;
     const skipButton = document.createElement('button');
     skipButton.type = 'button'; skipButton.setAttribute('aria-label', '跳过战斗'); skipButton.textContent = '跳过';
-    skipButton.style.cssText = 'position:absolute;left:82.39%;top:87.68%;width:16.24%;height:10.15%;padding:0;border:0;background:transparent;color:transparent;cursor:pointer;pointer-events:auto;z-index:20;';
+    // 无障碍点击层跟着 skipRect 走，避免两处坐标各改一半而错位。
+    const rectStyle = ['left:' + (skipRect.x / W * 100).toFixed(3) + '%', 'top:' + (skipRect.y / H * 100).toFixed(3) + '%',
+      'width:' + (skipRect.w / W * 100).toFixed(3) + '%', 'height:' + (skipRect.h / H * 100).toFixed(3) + '%'].join(';');
+    skipButton.style.cssText = 'position:absolute;' + rectStyle + ';padding:0;border:0;background:transparent;color:transparent;cursor:pointer;pointer-events:auto;z-index:20;';
     if (ui) ui.appendChild(skipButton);
     function clean() {
       cancelAnimationFrame(raf); skipButton.remove();

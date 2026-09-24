@@ -115,8 +115,23 @@
     if (object(next.recruitChallenge) && next.recruitChallenge.fee === 10 && typeof next.recruitChallenge.token === 'string') next.goldPoint += 10;
     next.recruitChallenge = null;
     next.masterKickDate = typeof next.masterKickDate === 'string' ? next.masterKickDate : '';
+    // 超级松鼠（原版 VIP）：旧档没有这个字段，补一份未开通的默认值。
+    {
+      const v = object(raw.vip) ? raw.vip : {};
+      next.vip = {
+        level: Math.max(1, Math.min(VIP_MAX_LEVEL, integer(v.level, 1) || 1)),
+        exp: Math.max(0, integer(v.exp, 0)),
+        until: Math.max(0, integer(v.until, 0)),
+        capAdded: Math.max(0, integer(v.capAdded, 0)),
+        capApplied: v.capApplied === true,
+        lastDaily: typeof v.lastDaily === 'string' ? v.lastDaily : '',
+      };
+    }
     next.battles = (Array.isArray(next.battles) ? next.battles : []).filter(validBattle).slice(0, 50);
     next.dailyClaimDate = typeof next.dailyClaimDate === 'string' ? next.dailyClaimDate : '';
+    // 每日任务：旧档没有就留空，首次打开「活动」时按当天补上
+    next.quests = object(raw.quests) && Array.isArray(raw.quests.list) && typeof raw.quests.date === 'string' ? raw.quests : null;
+    next.dailyCounters = object(raw.dailyCounters) && typeof raw.dailyCounters.date === 'string' ? raw.dailyCounters : null;
     next.dailyStatsDate = typeof next.dailyStatsDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(next.dailyStatsDate) ? next.dailyStatsDate : '';
     next.shopPurchaseDate = typeof next.shopPurchaseDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(next.shopPurchaseDate) ? next.shopPurchaseDate : '';
     next.shopPurchases = {};
@@ -353,12 +368,16 @@
     syncDailyStats();
     const now = Date.now();
     if (debugOn('infiniteEnergy')) { S.energy = S.maxEnergy; S.lastEnergyTs = now; return; }
+    syncVipEnergyCap();
+    tickVipDaily();
+    // 超级松鼠特权 3：体力恢复速度 1.1~1.5 倍
+    const interval = ENERGY_INTERVAL / vipRegenMul();
     if (!Number.isFinite(S.lastEnergyTs) || S.lastEnergyTs <= 0 || S.lastEnergyTs > now) S.lastEnergyTs = now;
     if (S.energy >= S.maxEnergy) { S.lastEnergyTs = now; return; }
-    const gain = Math.floor((now - S.lastEnergyTs) / ENERGY_INTERVAL);
+    const gain = Math.floor((now - S.lastEnergyTs) / interval);
     if (gain > 0) {
       S.energy = Math.min(S.maxEnergy, S.energy + gain);
-      S.lastEnergyTs = S.energy === S.maxEnergy ? now : S.lastEnergyTs + gain * ENERGY_INTERVAL;
+      S.lastEnergyTs = S.energy === S.maxEnergy ? now : S.lastEnergyTs + gain * interval;
       save();
     }
   }
@@ -438,6 +457,7 @@
     }
     const ok = debugOn('noUpgradeFail') ? true : Math.random() * 100 < info.rate;
     if (ok) {
+      bumpDaily('upgrade', 1);
       const arr = kind === 'weapon' ? S.weapons : S.skills;
       for (let i = 0; i < arr.length; i++) {
         const [wid, lv] = arr[i].split(':').map(Number);
@@ -881,6 +901,7 @@
     if (debugOn('infiniteEnergy')) return true;
     if (S.energy < n) return false;
     S.energy -= n;
+    bumpDaily('energy', n);
     save();
     return true;
   }
@@ -901,6 +922,96 @@
     const boosted = Math.round(Number(amount || 0) * (1 + expBoostPct() / 100));
     return { exp: boosted, ups: gainExp(boosted) };
   }
+
+  // ---------- 超级松鼠（原版 VIP） ----------
+  /* 特权与等级表直接取自原客户端 js/ssdz-pkg2.js 的 VIP 界面内嵌文案：
+   *   1、角色等级10级以上的VIP可以跳过战斗；2、被动经验上限最高400/天；
+   *   3、体力恢复速度最快1.5倍；4、昵称以尊贵标识展示；
+   *   5、首次开通永久赠送6个装备格子；6、师父是VIP时徒弟每日额外获得金松果；
+   *   7、主动挑战VIP玩家所得经验上涨30%；8、体力上限增加到180点。
+   * 原版按天售卖（buyVIP.do）；离线版改成金松果购买，价格是按本项目经济定的平衡值。
+   * 「跳过战斗」在本项目对所有10级以上玩家开放（原版也是 VIP 或 等级>9），因此不作为VIP独占。 */
+  const VIP_LEVELS = [   // [等级, 被动经验上限/天, 体力恢复倍率]
+    [1, 150, 1.1], [2, 150, 1.2], [3, 200, 1.2], [4, 200, 1.3], [5, 250, 1.3],
+    [6, 300, 1.4], [7, 300, 1.4], [8, 350, 1.5], [9, 350, 1.5], [10, 400, 1.5],
+  ];
+  const VIP_LEVEL_EXP = [3, 5, 15, 30, 60, 60, 60, 60, 100];   // 升到下一级所需
+  const VIP_MAX_LEVEL = 10;
+  const VIP_ENERGY_CAP = 180;    // 特权 8
+  const VIP_GEAR_BONUS = 6;      // 特权 5
+  const VIP_PLANS = [Object.freeze({ days: 7, gold: 300 }), Object.freeze({ days: 30, gold: 1000 })];
+  const GEAR_CAPACITY = 100;
+
+  function vipState() {
+    if (!S.vip || typeof S.vip !== 'object') S.vip = { level: 1, exp: 0, until: 0, capAdded: 0, capApplied: false, lastDaily: '' };
+    return S.vip;
+  }
+  function vipUntil() { return Math.max(0, Number(vipState().until) || 0); }
+  function vipActive() { return vipUntil() > Date.now(); }
+  function vipLevel() { return vipActive() ? Math.max(1, Math.min(VIP_MAX_LEVEL, Math.floor(Number(vipState().level) || 1))) : 0; }
+  function vipRow(level) { return VIP_LEVELS[Math.max(1, Math.min(VIP_MAX_LEVEL, level)) - 1]; }
+  function vipRegenMul() { const lv = vipLevel(); return lv ? vipRow(lv)[2] : 1; }
+  function vipPassiveExpCap() { const lv = vipLevel(); return lv ? vipRow(lv)[1] : 0; }
+  function vipExpNeed() { const lv = vipLevel() || 1; return VIP_LEVEL_EXP[Math.min(lv, VIP_MAX_LEVEL) - 1]; }
+  function vipDaysLeft() { return Math.max(0, Math.ceil((vipUntil() - Date.now()) / 86400000)); }
+  /** 装备容量：原版特权 5 首次开通永久 +6 格。 */
+  function gearCapacity() { return GEAR_CAPACITY + (vipState().capApplied ? VIP_GEAR_BONUS : 0); }
+  /** 特权 8：VIP 期间体力上限抬到 180。用增量记录，到期可原样退回。 */
+  function syncVipEnergyCap() {
+    const v = vipState(), on = vipActive();
+    if (on && !v.capApplied) {
+      v.capAdded = Math.max(0, VIP_ENERGY_CAP - S.maxEnergy);
+      S.maxEnergy += v.capAdded; v.capApplied = true;
+    } else if (!on && v.capApplied) {
+      S.maxEnergy = Math.max(1, S.maxEnergy - (Number(v.capAdded) || 0));
+      v.capAdded = 0; v.capApplied = false;
+    } else if (on && v.capApplied) {
+      // 期间升级涨了上限也要保住 180 的下限
+      const need = Math.max(0, VIP_ENERGY_CAP - S.maxEnergy);
+      if (need > 0) { S.maxEnergy += need; v.capAdded += need; }
+    }
+    if (S.energy > S.maxEnergy) S.energy = S.maxEnergy;
+    return S.maxEnergy;
+  }
+  /** 特权：每日首次登陆 +1 超级松鼠经验，累积自动升级。 */
+  function tickVipDaily() {
+    const v = vipState();
+    if (!vipActive()) return { gained: false };
+    const today = localDate();
+    if (v.lastDaily === today) return { gained: false };
+    v.lastDaily = today;
+    v.exp = (Number(v.exp) || 0) + 1;
+    let leveled = 0;
+    while (v.level < VIP_MAX_LEVEL && v.exp >= VIP_EXP_NEED(v.level)) { v.exp -= VIP_EXP_NEED(v.level); v.level++; leveled++; }
+    if (v.level >= VIP_MAX_LEVEL) v.exp = 0;
+    save();
+    return { gained: true, level: v.level, leveled: leveled };
+  }
+  function VIP_EXP_NEED(level) { return VIP_LEVEL_EXP[Math.max(1, Math.min(VIP_MAX_LEVEL, Math.floor(Number(level) || 1))) - 1]; }
+  /** 购买/续期超级松鼠。days 必须命中 VIP_PLANS。 */
+  function buyVip(days) {
+    const plan = VIP_PLANS.find((p) => p.days === Number(days));
+    if (!plan) return { ok: false, msg: '没有这个档位' };
+    if (S.goldPoint < plan.gold) return { ok: false, msg: '金松果不足，需要 ' + plan.gold + ' 个' };
+    S.goldPoint -= plan.gold;
+    const v = vipState();
+    const base = Math.max(Date.now(), vipUntil());
+    v.until = base + plan.days * 86400000;
+    if (!v.level) v.level = 1;
+    syncVipEnergyCap();
+    save();
+    return { ok: true, msg: '已成为超级松鼠 ' + plan.days + ' 天', until: v.until, level: v.level };
+  }
+  /** 调试/验证用。 */
+  function grantVip(days, level) {
+    const v = vipState();
+    v.until = Math.max(Date.now(), vipUntil()) + Math.max(1, Number(days) || 1) * 86400000;
+    if (level) v.level = Math.max(1, Math.min(VIP_MAX_LEVEL, Number(level)));
+    if (!v.level) v.level = 1;
+    syncVipEnergyCap(); save();
+    return { until: v.until, level: v.level };
+  }
+
   // 战斗奖励（挑战/竞技胜利）；胜利经验在基准值上下浮动，期望值随对手等级提升
   function fightReward(win, opts) {
     opts = opts || {};
@@ -1194,11 +1305,116 @@
       S.joinRankCount = 0;
     }
     S.dailyStatsDate = date;
+    if (S.quests && S.quests.date !== date) S.quests = null;
+    if (S.dailyCounters && S.dailyCounters.date !== date) S.dailyCounters = null;
     save();
   }
   function dailyStatus() {
     const date = localDate();
     return { date, claimed: S.dailyClaimDate === date, gold: 150, challengeBooks: 1 };
+  }
+
+  // ---------- 每日任务 ----------
+  /* 原版没有每日任务（「活动」由服务端下发），这是按需求的单机补充：
+   * 每天用日期做种子从池子里抽 4 条，进度来自当天真实行为计数，刷新/重开当天不变。
+   * 计数统一走 bumpDaily()，日期跟着 dailyStatsDate 一起重置。 */
+  const QUEST_TYPES = [
+    { key: 'win',     name: '赢下 {n} 场对战',        steps: [2, 3, 5], gold: [120, 180, 300] },
+    { key: 'fight',   name: '进行 {n} 场战斗',        steps: [4, 6, 8], gold: [100, 150, 220] },
+    { key: 'stage',   name: '通关 {n} 次关卡挑战',    steps: [2, 3, 5], gold: [140, 200, 320] },
+    { key: 'arena',   name: '参加 {n} 次竞技场比赛',  steps: [1, 2, 3], gold: [160, 240, 360] },
+    { key: 'lottery', name: '抽取 {n} 次每日幸运抽奖', steps: [1, 1, 2], gold: [80, 120, 200] },
+    { key: 'merge',   name: '合成或融合 {n} 次装备',  steps: [1, 2, 3], gold: [150, 220, 340] },
+    { key: 'upgrade', name: '升级武器或技能 {n} 次',  steps: [2, 4, 6], gold: [130, 190, 300] },
+    { key: 'energy',  name: '消耗 {n} 点体力',        steps: [10, 20, 30], gold: [90, 140, 210] },
+  ];
+  const QUEST_COUNT = 4;
+  const QUEST_BONUS = { 23: 1, 21: 1, 22: 1 };   // 部分任务额外送挑战书/卷轴
+  const QUEST_KEYS = QUEST_TYPES.map((q) => q.key);
+
+  function questSeed(date) {
+    let h = 2166136261;
+    for (const ch of String(date)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function rollQuests() {
+    const date = localDate(), seed = questSeed(date);
+    // 线性同余，够用且不依赖 Math.random，保证同一天结果稳定
+    let state = seed || 1;
+    const next = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    const pool = QUEST_KEYS.slice();
+    // Fisher–Yates
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(next() * (i + 1));
+      const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+    }
+    return pool.slice(0, QUEST_COUNT).map((key) => {
+      const type = QUEST_TYPES.find((q) => q.key === key);
+      const tier = Math.floor(next() * type.steps.length);
+      const bonusId = Object.keys(QUEST_BONUS).map(Number);
+      const bonus = next() < 0.34 ? bonusId[Math.floor(next() * bonusId.length)] : 0;
+      return { key, need: type.steps[tier], gold: type.gold[tier], bonus, claimed: false };
+    });
+  }
+  function questState() {
+    const date = localDate();
+    if (!S.quests || typeof S.quests !== 'object' || S.quests.date !== date || !Array.isArray(S.quests.list) || !S.quests.list.length) {
+      S.quests = { date, list: rollQuests() };
+      S.dailyCounters = { date, win: 0, fight: 0, stage: 0, arena: 0, lottery: 0, merge: 0, upgrade: 0, energy: 0 };
+      save();
+    }
+    if (!S.dailyCounters || S.dailyCounters.date !== date) {
+      S.dailyCounters = { date, win: 0, fight: 0, stage: 0, arena: 0, lottery: 0, merge: 0, upgrade: 0, energy: 0 };
+      save();
+    }
+    return S.quests;
+  }
+  /** 记录一次当天行为，供每日任务计数。 */
+  function bumpDaily(key, n) {
+    if (!QUEST_KEYS.includes(key)) return 0;
+    questState();
+    S.dailyCounters[key] = Math.max(0, (Number(S.dailyCounters[key]) || 0) + (Number(n) || 1));
+    save();
+    return S.dailyCounters[key];
+  }
+  /** 战斗行为统一在这里记：一场算战斗，赢了再算胜场。 */
+  function bumpBattleDaily(win, kind) {
+    bumpDaily('fight', 1);
+    if (win) bumpDaily('win', 1);
+    if (kind === 'stage' && win) bumpDaily('stage', 1);
+    if (kind === 'arena') bumpDaily('arena', 1);
+  }
+  function questStatus() {
+    const quests = questState(), counters = S.dailyCounters;
+    return quests.list.map((q, index) => {
+      const type = QUEST_TYPES.find((t) => t.key === q.key) || { name: q.key };
+      const progress = Math.min(q.need, Number(counters[q.key]) || 0);
+      return {
+        index, key: q.key, need: q.need, gold: q.gold, bonus: q.bonus,
+        name: String(type.name).replace('{n}', q.need),
+        progress, done: progress >= q.need, claimed: q.claimed === true,
+        claimable: progress >= q.need && q.claimed !== true,
+      };
+    });
+  }
+  /** 有可领取的东西时给首页「活动」图标加提示动效。 */
+  function questClaimable() { return questStatus().filter((q) => q.claimable).length; }
+  function claimQuest(index) {
+    const list = questStatus();
+    const row = list[Number(index)];
+    if (!row) return { ok: false, msg: '没有这个任务' };
+    if (row.claimed) return { ok: false, msg: '这条任务已经领过了' };
+    if (!row.done) return { ok: false, msg: '任务还没完成' };
+    questState().list[row.index].claimed = true;
+    S.goldPoint += row.gold;
+    let extra = '';
+    if (row.bonus) {
+      S.props[row.bonus] = (S.props[row.bonus] || 0) + (QUEST_BONUS[row.bonus] || 1);
+      const item = propMap.getValue(row.bonus);
+      extra = '，' + (item ? item.name : '道具') + ' +' + (QUEST_BONUS[row.bonus] || 1);
+    }
+    save();
+    return { ok: true, msg: '领取成功：金松果 +' + row.gold + extra, gold: row.gold, bonus: row.bonus };
   }
   function claimDaily() {
     const daily = dailyStatus();
@@ -1229,6 +1445,7 @@
     snapshot.region = integer(snapshot.region, 0);
     snapshot.winner = snapshot.result.winner;
     S.battles = [snapshot].concat(S.battles || []).slice(0, 50);
+    bumpBattleDaily(snapshot.winner === 0, snapshot.kind);
     save();
     return clone(snapshot);
   }
@@ -1237,6 +1454,9 @@
   window.State = {
     saveKey: SAVE_KEY,
     save, load, newGame, state, tickEnergy, energyCountdown,
+    vipActive, vipLevel, vipUntil, vipDaysLeft, vipRegenMul, vipPassiveExpCap, vipExpNeed,
+    vipRow, buyVip, grantVip, tickVipDaily, gearCapacity, syncVipEnergyCap,
+    VIP_LEVELS, VIP_LEVEL_EXP, VIP_MAX_LEVEL, VIP_PLANS, VIP_ENERGY_CAP, VIP_GEAR_BONUS, GEAR_CAPACITY,
     weaponInst, skillInst, myWeapons, mySkills, wsLimit,
     upgradeInfo, doUpgrade,
     weaponList,
@@ -1252,5 +1472,6 @@
     genAI, stageProgress, setStageProgress, npcOf, highestStageId, stageRun, stageAccess, stageReward,
     beginStageBattle, finishStageBattle, interruptStageBattle, abandonStageRun,
     localDate, dailyStatus, claimDaily, recordBattle, battleHistory,
+    questStatus, questClaimable, claimQuest, bumpDaily, QUEST_TYPES,
   };
 })();

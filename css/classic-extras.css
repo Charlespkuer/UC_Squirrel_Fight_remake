@@ -64,3 +64,47 @@
 .extra-master-main h2{font-size:30px;margin:0 0 4px}
 .extra-master-main h2,.extra-master-main h3{font-size:27px}
 .extra-master-main .extra-note{font-size:17px;margin-top:6px}
+
+/* ---------- 排行榜（原版 STATE.TOPLIST） ---------- */
+.toplist-board{padding:16px 34px 10px}
+.toplist-head{display:flex;justify-content:space-between;align-items:center;font-size:23px;color:#8b672f;margin-bottom:6px}
+.toplist-head b{color:#c0392b;font-size:29px}
+.toplist-tabs{display:flex;gap:14px;margin:4px 0 8px}
+.toplist-tabs .uc-tab{flex:1;min-height:52px;font-size:30px;padding:2px 0}
+.toplist-rows{display:flex;flex-direction:column;gap:3px}
+.toplist-row{display:grid;grid-template-columns:64px 1fr 110px 150px 130px;align-items:center;font-size:24px;line-height:1.25;
+  padding:3px 14px;border-radius:20px;background:#f3e6c4;color:#7b5a2e}
+.toplist-row:nth-child(odd){background:#efe0ba}
+.toplist-row.me{background:#ffe9a8;color:#8a4b12;font-weight:bold;box-shadow:inset 0 0 0 3px #e0b64a}
+.toplist-rank{font-size:27px;text-align:center;color:#b8801d}
+.toplist-name{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.toplist-lv,.toplist-cup,.toplist-score{text-align:right;font-variant-numeric:tabular-nums}
+
+/* ---------- 超级松鼠（原版 VIP） ---------- */
+.vip-board{padding:10px 34px 6px;font-size:19px;color:#7b5a2e;overflow-y:auto}
+.vip-status{display:flex;align-items:center;gap:16px;padding:6px 18px;border-radius:24px;background:#f6e8c6}
+.vip-status.on{background:linear-gradient(#fff6cf,#ffe6a1);box-shadow:inset 0 0 0 4px #e8c46a}
+.vip-crown{font-size:46px;line-height:1;color:#e0a21b}
+.vip-crown.muted{color:#c9b48a}
+.vip-status h2{font-size:26px;margin:0 0 2px;color:#a3701d}
+.vip-status p{margin:0;font-size:19px;line-height:1.3}
+.vip-exp{color:#8b672f}
+.vip-priv{margin-top:5px}
+.vip-priv h3,.vip-table h3{font-size:21px;margin:4px 0 1px;color:#8b672f}
+.vip-priv ol{margin:0;padding-left:30px;columns:2;column-gap:30px}
+.vip-priv li{font-size:17px;line-height:1.3}
+.vip-table table{width:100%;border-collapse:collapse;font-size:15px}
+.vip-table th,.vip-table td{padding:0 8px;text-align:center}
+.vip-table thead th{color:#997033}
+.vip-table tbody tr:nth-child(odd){background:#f3e6c4}
+.vip-table tbody tr.me{background:#ffe9a8;font-weight:bold}
+.vip-table .small-label{font-size:15px;margin:1px 0 0}
+.vip-plans{display:flex;gap:18px;justify-content:center;align-items:center;margin:6px 0 3px}
+.vip-wallet{font-size:18px;color:#8b672f}
+.vip-wallet b{color:#8a4b12}
+.vip-plan{display:flex;flex-direction:column;align-items:center;gap:1px;min-width:168px;padding:5px 16px;cursor:pointer;
+  border:4px solid #8a5f22;border-radius:24px;background:linear-gradient(#fff3ba,#ffd25f)}
+.vip-plan b{font-size:25px;color:#8a4b12}
+.vip-plan span{font-size:17px;color:#7b5a2e}
+/* 首页昵称前的尊贵标识（原版特权 4） */
+.home-name .vip-badge{color:#ffd84d;-webkit-text-stroke:2px #8a5f22;paint-order:stroke fill;margin-right:4px}

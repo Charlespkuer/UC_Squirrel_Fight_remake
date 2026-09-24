@@ -81,6 +81,7 @@
       if (reward.id === 15) upgrades.push(...State.gainExp(reward.count));
       else if (reward.id === 8) owner.goldPoint += reward.count;
       else owner.props[reward.id] = (owner.props[reward.id] || 0) + reward.count;
+      if (State.bumpDaily) State.bumpDaily('pickup', 1);   // 每日任务：拾取 N 次战斗掉落
       State.save(); collected.push({ id: reward.id, name: reward.name, count: reward.count });
       if (root && showNotice) {
         if (notice) notice.remove(); notice = document.createElement('div');

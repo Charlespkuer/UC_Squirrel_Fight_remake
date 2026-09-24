@@ -14,11 +14,29 @@
   /* 单个道具的数量上限：任何来源（掉落、礼包、任务、商店、调试）都不会超过它。
    * 收口放在 save()/normalizeSave 里，这样新增道具的地方不用各自记一遍。 */
   const PROP_HARD_CAP = 9999;
+  /* 这三个编号在原版里是货币/经验值（挂进背包也用不掉），存档里出现就直接忽略。 */
+  const CURRENCY_PROP_IDS = [8, 15, 40];
   /* 满级 70 级（原版也是到 70 级封顶）。
    * 体力上限由等级决定：1 级 90 点，2~3 级每级 +3、4~20 级每级 +2、21~70 级每级 +1，
    * 合计 +6+34+50 = 90 → 69 级正好 179、满级 70 级 180
    * （低等级段从原来的 +3/+2 降下来，成长更多地摊到 21 级以后）。 */
   const MAX_PLAYER_LEVEL = 70;
+  /* 升级成长的点位预算与旧规则完全一致：每级 3 点 + 生命 5。
+   * 变化只在「其中 1 点不再随机」——它留给玩家自选（力/敏/速/生命），
+   * 而且必须在升级时就选掉，不会攒着。 */
+  const FREE_POINT_RANDOM = 2;
+  /* 自选点能加的四项，以及每一点给多少（生命一点 = 5 点血，和随机点、
+   * 永久属性道具 19 的口径一致）。 */
+  const STAT_KEYS = ['power', 'agility', 'speed', 'hp'];
+  const STAT_NAMES = { power: '力量', agility: '敏捷', speed: '速度', hp: '生命' };
+  const STAT_FIELDS = { power: 'power', agility: 'agility', speed: 'speed', hp: 'maxHp' };
+  const STAT_GAIN = { power: 1, agility: 1, speed: 1, hp: 5 };
+  /* 四项平衡的份额口径：生命按 HP_PER_STAT 点折算成 1 点属性。
+   * 自然成长到 15 级时三项约 14.6、生命约 145，折算后四项刚好各占约 25%，
+   * 所以「平均份额」= 25%，门槛取它的八成（20%）：某一项被压到平均的
+   * 80% 以下时必须先补它，由系统直接代选（转化丸的「占比过低」是另一种口径）。 */
+  const HP_PER_STAT = 10;
+  const STAT_SHARE_MIN = 0.20;
   function energyCapForLevel(level) {
     const lv = Math.max(1, Math.min(MAX_PLAYER_LEVEL, Math.round(Number(level) || 1)));
     let cap = GData.NEW_PLAYER.maxEnergy;
@@ -49,7 +67,7 @@
     for (const key of ['power', 'agility', 'speed', 'maxHp']) {
       next[key] = integer(next[key], GData.NEW_PLAYER[key], 1);
     }
-    for (const key of ['exp', 'energy', 'goldPoint', 'goldCup', 'dailyWins', 'allWins', 'dailyFails', 'allFails', 'reborn', 'joinRankCount', 'lotteryFree', 'woodRecord']) {
+    for (const key of ['exp', 'energy', 'goldPoint', 'goldCup', 'dailyWins', 'allWins', 'dailyFails', 'allFails', 'reborn', 'joinRankCount', 'lotteryFree', 'woodRecord', 'freePoints']) {
       next[key] = integer(next[key], GData.NEW_PLAYER[key]);
     }
     // 体力上限由等级直接决定（满级 180），再叠上超级松鼠的增量；旧档的旧曲线超额值在这里被收回。
@@ -68,6 +86,9 @@
       const source = object(next[key]) ? next[key] : {};
       next[key] = {};
       for (const id of Object.keys(source)) {
+        // 8 金松果 / 15 经验 / 40 金杯是货币与经验值（原版 useType 0/3），不该出现在背包里；
+        // 早期调试面板曾经把它们当道具发过，读档时清掉。
+        if (CURRENCY_PROP_IDS.includes(Number(id))) continue;
         const count = Math.min(PROP_HARD_CAP, integer(source[id], 0));
         if (propMap.getValue(id) && count > 0) next[key][id] = count;
       }
@@ -629,11 +650,26 @@
     S.goldPoint += g.price; save();
     return g.price;
   }
-  /* 背包里可以直接卖的道具（装备走 sellGear）：天使果实 100 金松果一个。
-   * 表放在这里，以后要加别的可卖道具只改这一处。 */
-  const SELLABLE_PROPS = { 47: 100 };
-  const propSellPrice = (id) => SELLABLE_PROPS[Number(id)] || 0;
-  const sellableProps = () => Object.keys(SELLABLE_PROPS).map(Number);
+  /* 背包里可以直接卖的道具（装备走 sellGear）：默认按**字典价格的一半**回收
+   * （向下取整），所以商店里买得到的、以及字典里标了价的材料都能卖。
+   * 字典里 price 为 0 或占位 1 的道具（兑换用的卷轴、碎片、礼包、天梯碎片、
+   * 超级药丸、果实种子这类「不可购买」的物品）不开放回收；
+   * PROP_SELL_OVERRIDES 留作个别道具单独定价的例外表。 */
+  const PROP_SELL_OVERRIDES = Object.freeze({});
+  const MIN_SELL_PRICE = 2;   // 半价至少 1 金松果才有意义
+  function propSellPrice(id) {
+    id = Number(id);
+    if (PROP_SELL_OVERRIDES[id] != null) return PROP_SELL_OVERRIDES[id];
+    const item = propMap.getValue(id);
+    const price = item ? Math.max(0, Math.floor(Number(item.price) || 0)) : 0;
+    return price >= MIN_SELL_PRICE ? Math.max(1, Math.floor(price / 2)) : 0;
+  }
+  /** 当前可回收的道具编号（升序），供界面/帮助与测试使用。 */
+  function sellableProps() {
+    const ids = [];
+    propMap.each((id) => { if (propSellPrice(id)) ids.push(Number(id)); });
+    return ids.sort((a, b) => a - b);
+  }
   /** 卖出背包道具（最多持有数量），返回获得的金松果。 */
   function sellProp(id, count) {
     id = Number(id);
@@ -646,6 +682,7 @@
     if (S.props[id] <= 0) delete S.props[id];
     const gold = price * n;
     S.goldPoint += gold;
+    bumpDaily('sell', n);   // 每日任务：卖出 N 个道具
     save();
     const item = propMap.getValue(id);
     return { ok: true, sold: n, gold, price, msg: '卖出 ' + (item ? item.name : '道具') + ' ×' + n + '，获得 ' + gold + ' 金松果' };
@@ -670,6 +707,7 @@
     if ((S.props[id] || 0) < 3) return { ok: false, msg: '需要 3 个同级宝石' };
     if (S.goldPoint < 10) return { ok: false, msg: '金松果不足 10 个' };
     S.props[id] -= 3; S.goldPoint -= 10;
+    bumpDaily('gem', 1);   // 每日任务：合成 N 次宝石（材料已经扣掉就算一次）
     if (Math.random() < GEM_MERGE_RATES[lv - 1]) {
       S.props[id + 1] = (S.props[id + 1] || 0) + 1;
       save();
@@ -722,6 +760,7 @@
     const gid = gearsOfSet[Math.floor(Math.random() * gearsOfSet.length)];
     S.props[propId] -= 10; S.goldPoint -= 50;
     const g = addGear(gid, quality >= 2 ? randomExt(1, 2) : []);
+    bumpDaily('merge', 1);   // 每日任务：合成或融合 N 次装备
     save();
     return { ok: true, gear: g };
   }
@@ -747,6 +786,7 @@
       const made = addGear(gs[0].id, ext);
       const inst = made && S.gears.find((x) => x.key === made.key);
       if (inst) { inst.orange = true; save(); }
+      bumpDaily('merge', 1);   // 每日任务：合成或融合 N 次装备
       return { ok: true, gear: Object.assign(made || {}, { orange: true, quality: 4 }) };
     }
     const candidates = [];
@@ -757,6 +797,7 @@
     S.goldPoint -= 50;
     S.gears = S.gears.filter((g) => !keys.includes(g.key));
     const g = addGear(gearsOfSet[Math.floor(Math.random() * gearsOfSet.length)], q + 1 >= 2 ? randomExt(q >= 2 ? 2 : 1, q >= 2 ? 3 : 2) : []);
+    bumpDaily('merge', 1);   // 每日任务：合成或融合 N 次装备
     save();
     return { ok: true, gear: g };
   }
@@ -877,6 +918,7 @@
     }
     S.props[id] = (S.props[id] || 0) + count;
     S.shopPurchases[id] = status.bought + count;
+    bumpDaily('buy', count);   // 每日任务：在商店购买 N 件道具
     save();
     return { ok: true, msg: `购买了${p.name}x${count}`, ...purchaseStatus(id) };
   }
@@ -971,6 +1013,7 @@
     }
     S.props[id]--;
     if (S.props[id] <= 0) delete S.props[id];
+    bumpDaily('use', 1);   // 每日任务：使用 N 个道具
     save();
     return { ok: true, msg };
   }
@@ -994,6 +1037,76 @@
     return { name: skillsMap.getValue(id).name, id, kind: 'skill' };
   }
 
+  // ---------- 自由属性点（升级自选，四项平衡，占比过低由系统代选） ----------
+  /** 某一项按「属性点」口径的份额（生命 10 点折算 1 点）。 */
+  function statPoints(source, key) {
+    const s = object(source) ? source : S;
+    const raw = Math.max(0, Number(s && s[STAT_FIELDS[key]]) || 0);
+    return key === 'hp' ? raw / HP_PER_STAT : raw;
+  }
+  /** 力/敏/速/生命四项的占比（自然成长时各约 25%）。 */
+  function statShares(source) {
+    let total = 0;
+    for (const key of STAT_KEYS) total += statPoints(source, key);
+    const out = {};
+    for (const key of STAT_KEYS) out[key] = total > 0 ? statPoints(source, key) / total : 1 / STAT_KEYS.length;
+    return out;
+  }
+  /** 占比低于 STAT_SHARE_MIN 的属性里最低的那一项；四项都达标时返回 null。 */
+  function forcedStat(source) {
+    const shares = statShares(source);
+    const low = STAT_KEYS.filter((key) => shares[key] < STAT_SHARE_MIN - 1e-9);
+    if (!low.length) return null;
+    return low.reduce((a, b) => (shares[b] < shares[a] ? b : a));
+  }
+  /** 占比最低的那一项（不管有没有过低）。 */
+  function lowestStat(source) {
+    const shares = statShares(source);
+    return STAT_KEYS.reduce((a, b) => (shares[b] < shares[a] ? b : a));
+  }
+  /** 把一点加到某一项上（生命一点 = 5 点血）。 */
+  function grantPoint(target) {
+    S[STAT_FIELDS[target]] += STAT_GAIN[target];
+    return target;
+  }
+  /** 还没分配的自由属性点：升级时就该选掉，这里只是「弹窗还没点完」的计数。 */
+  function pendingPoints() { return Math.max(0, integer(S && S.freePoints, 0)); }
+  /**
+   * 分配一点自由属性点（力/敏/速各 +1，生命 +5）。
+   * 占比过低的属性必须优先补：requested 不是它时系统直接代选，
+   * 返回值里 redirected=true 供界面提示，规则不靠界面自觉。
+   */
+  function allocatePoint(attr) {
+    if (pendingPoints() <= 0) return { ok: false, msg: '没有待分配的自由属性点' };
+    if (!STAT_KEYS.includes(attr)) return { ok: false, msg: '自由属性点只能加到力量、敏捷、速度或生命' };
+    const forced = forcedStat();
+    const target = forced || attr;
+    grantPoint(target);
+    S.freePoints = pendingPoints() - 1;
+    save();
+    return {
+      ok: true, attr: target, requested: attr, gain: STAT_GAIN[target],
+      forced: !!forced, redirected: !!forced && forced !== attr,
+      remaining: S.freePoints,
+      msg: forced === attr && forced
+        ? STAT_NAMES[target] + '占比过低，这一点已加到' + STAT_NAMES[target]
+        : forced
+          ? STAT_NAMES[target] + '占比过低，系统自动分配到' + STAT_NAMES[target]
+          : STAT_NAMES[target] + ' +' + STAT_GAIN[target],
+    };
+  }
+  /** 一键把待分配点铺平到四项（每次选占比最低的一项，天然满足占比门槛）。 */
+  function allocateEvenly() {
+    const added = { power: 0, agility: 0, speed: 0, hp: 0 };
+    let guard = 0;
+    while (pendingPoints() > 0 && guard++ < 10000) {
+      const r = allocatePoint(lowestStat());
+      if (!r.ok) break;
+      added[r.attr]++;
+    }
+    return { ok: true, added, remaining: pendingPoints() };
+  }
+
   // ---------- 经验 / 升级 ----------
   // 返回升级信息数组（可能连升）
   function gainExp(amount) {
@@ -1008,12 +1121,20 @@
       const bookLevel = GData.ATTRIBUTE_BOOK_LEVELS.includes(S.level);
       const growth = { power: 0, agility: 0, speed: 0, hp: bookLevel ? 0 : 5 };
       if (bookLevel) S.props[37] = (S.props[37] || 0) + 1;
-      else for (let point = 0; point < 3; point++) {
+      else for (let point = 0; point < FREE_POINT_RANDOM; point++) {
         const attr = ['power', 'agility', 'speed', 'hp'][Math.floor(Math.random() * 4)];
         growth[attr] += attr === 'hp' ? 5 : 1;
       }
       const { power: pw, agility: ag, speed: sp, hp } = growth;
       S.power += pw; S.agility += ag; S.speed += sp; S.maxHp += hp;
+      // 第 3 点由玩家在升级弹窗里自选（力/敏/速/生命）；某一项占比过低时
+      // 系统直接代选，那一点立刻进属性，不再挂起等玩家。
+      let freePoint = 0, autoPoint = null;
+      if (!bookLevel) {
+        const forced = forcedStat();
+        if (forced) { grantPoint(forced); autoPoint = forced; }
+        else { S.freePoints = pendingPoints() + 1; freePoint = 1; }
+      }
       // 体力上限按等级重算（2~3 级每级 +3、4~20 每级 +2、21~70 每级 +1，69 级 179、满级 180）
       S.maxEnergy = Math.max(S.maxEnergy, energyCapForLevel(S.level));
       // 升级奖励：概率获得新武器/技能（reward 为 {name,id,kind} 或 null）
@@ -1031,6 +1152,9 @@
         rewardId: gained ? gained.id : null,
         rewardKind: gained ? gained.kind : null,
         attributeBook: bookLevel,
+        freePoint,
+        autoPoint,
+        autoPointName: autoPoint ? STAT_NAMES[autoPoint] : null,
         gifts,
       });
     }
@@ -1315,11 +1439,26 @@
     const base = GData.initialStats();
     for (let lv = 2; lv <= finalLevel; lv++) {
       const bookLevel = GData.ATTRIBUTE_BOOK_LEVELS.includes(lv);
-      if (!bookLevel) base.maxHp += 5;
-      for (let point = 0; point < (bookLevel ? 8 : 3); point++) {
-        const key = ['power', 'agility', 'speed', 'maxHp'][Math.floor(Math.random() * (bookLevel ? 3 : 4))];
+      if (bookLevel) {
+        for (let point = 0; point < 8; point++) base[STAT_KEYS[Math.floor(Math.random() * 3)]] += 1;
+        continue;
+      }
+      base.maxHp += 5;
+      // 与玩家共用同一套点位预算：2 点随机（1/4 概率 +5 生命）+ 1 点自由点。
+      // 对手不弹窗，自由点默认在四项里随机挑；占比过低时一律优先补
+      // （和玩家的代选规则一致）。opts.freePointBias 是给平衡测量用的：
+      // 'lowest' 走平均分配，force/power/agility/speed/hp 走堆单项。
+      for (let point = 0; point < FREE_POINT_RANDOM; point++) {
+        const key = ['power', 'agility', 'speed', 'maxHp'][Math.floor(Math.random() * 4)];
         base[key] += key === 'maxHp' ? 5 : 1;
       }
+      const forced = forcedStat(base);
+      let freeKey = opts.freePointBias;
+      if (freeKey === 'lowest' || !STAT_KEYS.includes(freeKey)) {
+        freeKey = freeKey === 'lowest' ? lowestStat(base) : STAT_KEYS[Math.floor(Math.random() * STAT_KEYS.length)];
+      }
+      const target = forced || freeKey;
+      if (target === 'hp') base.maxHp += STAT_GAIN.hp; else base[target] += STAT_GAIN[target];
     }
     const wsPool = [];
     weaponsMap.each((k, v) => { if (GData.canLearn('weapon', v.id, finalLevel)) wsPool.push(parseInt(v.id)); });
@@ -1565,17 +1704,31 @@
    * 每天用日期做种子从池子里抽 4 条，进度来自当天真实行为计数，刷新/重开当天不变。
    * 计数统一走 bumpDaily()，日期跟着 dailyStatsDate 一起重置。 */
   const QUEST_TYPES = [
-    { key: 'win',     name: '赢下 {n} 场对战',        steps: [2, 3, 5], gold: [120, 180, 300] },
-    { key: 'fight',   name: '进行 {n} 场战斗',        steps: [4, 6, 8], gold: [100, 150, 220] },
-    { key: 'stage',   name: '通关 {n} 次关卡挑战',    steps: [2, 3, 5], gold: [140, 200, 320] },
-    { key: 'arena',   name: '参加 {n} 次竞技场比赛',  steps: [1, 2, 3], gold: [160, 240, 360] },
-    { key: 'lottery', name: '抽取 {n} 次每日幸运抽奖', steps: [1, 1, 2], gold: [80, 120, 200] },
-    { key: 'merge',   name: '合成或融合 {n} 次装备',  steps: [1, 2, 3], gold: [150, 220, 340] },
-    { key: 'upgrade', name: '升级武器或技能 {n} 次',  steps: [2, 4, 6], gold: [130, 190, 300] },
-    { key: 'energy',  name: '消耗 {n} 点体力',        steps: [10, 20, 30], gold: [90, 140, 210] },
+    { key: 'win',       name: '赢下 {n} 场对战',          steps: [2, 3, 5] },
+    { key: 'fight',     name: '进行 {n} 场战斗',          steps: [4, 6, 8] },
+    { key: 'challenge', name: '发起 {n} 次随机挑战',      steps: [2, 3, 5] },
+    { key: 'stage',     name: '通关 {n} 次关卡挑战',      steps: [2, 3, 5] },
+    { key: 'arena',     name: '参加 {n} 次竞技场比赛',    steps: [1, 2, 3] },
+    { key: 'rank',      name: '参加 {n} 场天梯赛',        steps: [2, 3, 5] },
+    { key: 'spar',      name: '和好友切磋 {n} 次',        steps: [1, 2, 3] },
+    { key: 'lottery',   name: '抽取 {n} 次每日幸运抽奖',  steps: [1, 2, 3] },
+    { key: 'merge',     name: '合成或融合 {n} 次装备',    steps: [1, 2, 3] },
+    { key: 'gem',       name: '合成 {n} 次宝石',          steps: [1, 2, 3] },
+    { key: 'upgrade',   name: '升级武器或技能 {n} 次',    steps: [2, 4, 6] },
+    { key: 'use',       name: '使用 {n} 个道具',          steps: [2, 4, 6] },
+    { key: 'buy',       name: '在商店购买 {n} 件道具',    steps: [1, 2, 3] },
+    { key: 'sell',      name: '卖出 {n} 个道具',          steps: [1, 2, 3] },
+    { key: 'pickup',    name: '拾取 {n} 次战斗掉落',      steps: [1, 2, 3] },
+    { key: 'energy',    name: '消耗 {n} 点体力',          steps: [10, 20, 30] },
   ];
   const QUEST_COUNT = 4;
   const QUEST_KEYS = QUEST_TYPES.map((q) => q.key);
+  /** 当天的空计数器：键跟着 QUEST_TYPES 走，加新任务不用再改这里。 */
+  function emptyCounters(date) {
+    const counters = { date };
+    for (const key of QUEST_KEYS) counters[key] = 0;
+    return counters;
+  }
   /* 奖励池：金松果、经验与各种道具**一起加权乱抽**（金松果/经验不再是固定奖励），
    * 每条任务只抽 1~2 项。weight 是权重：越"高级"的东西权重越低
    * （超级经验丸只有 0.06，大约 1/14 的概率）。药丸数量固定 1 个。 */
@@ -1638,11 +1791,11 @@
     const date = localDate();
     if (!S.quests || typeof S.quests !== 'object' || S.quests.date !== date || !Array.isArray(S.quests.list) || !S.quests.list.length) {
       S.quests = { date, list: rollQuests() };
-      S.dailyCounters = { date, win: 0, fight: 0, stage: 0, arena: 0, lottery: 0, merge: 0, upgrade: 0, energy: 0 };
+      S.dailyCounters = emptyCounters(date);
       save();
     }
     if (!S.dailyCounters || S.dailyCounters.date !== date) {
-      S.dailyCounters = { date, win: 0, fight: 0, stage: 0, arena: 0, lottery: 0, merge: 0, upgrade: 0, energy: 0 };
+      S.dailyCounters = emptyCounters(date);
       save();
     }
     return S.quests;
@@ -1655,12 +1808,15 @@
     save();
     return S.dailyCounters[key];
   }
-  /** 战斗行为统一在这里记：一场算战斗，赢了再算胜场。 */
+  /** 战斗行为统一在这里记：一场算战斗，赢了再算胜场；再按战斗类型记各自的计数器。 */
   function bumpBattleDaily(win, kind) {
     bumpDaily('fight', 1);
     if (win) bumpDaily('win', 1);
     if (kind === 'stage' && win) bumpDaily('stage', 1);
     if (kind === 'arena') bumpDaily('arena', 1);
+    if (kind === 'rank') bumpDaily('rank', 1);
+    if (kind === 'friend') bumpDaily('spar', 1);
+    if (kind === 'challenge') bumpDaily('challenge', 1);
   }
   /** 兼容旧档：老任务只有 gold/exp/extras，新任务直接存 rewards。 */
   function questRewards(q) {
@@ -1775,11 +1931,13 @@
     beginStageBattle, finishStageBattle, interruptStageBattle, abandonStageRun,
     localDate, dailyStatus, claimDaily, recordBattle, battleHistory,
     questStatus, questClaimable, claimQuest, bumpDaily, QUEST_TYPES, QUEST_EXTRA_POOL, QUEST_GOLD, QUEST_EXP,
-    sellProp, propSellPrice, sellableProps, SELLABLE_PROPS,
+    sellProp, propSellPrice, sellableProps, PROP_SELL_OVERRIDES, MIN_SELL_PRICE,
     friendLimit, friendList, friendOf, addFriend, removeFriend, friendFoe, rollFriendCandidates, FRIEND_LIMIT,
     weaponList, skillList, setWeapon, setSkill, forgetWeapon, forgetSkill, setWS, forgetWS,
     composeConvertPill, challengeExp, challengeFightsPerLevel, usePropMany, energyHardCap, ENERGY_HARD_CAP, PROP_HARD_CAP,
     MAX_PLAYER_LEVEL, energyCapForLevel,
+    statShares, forcedStat, lowestStat, pendingPoints, allocatePoint, allocateEvenly,
+    STAT_SHARE_MIN, STAT_KEYS, STAT_NAMES, STAT_GAIN, HP_PER_STAT, FREE_POINT_RANDOM,
     CHALLENGE_EXP_BASE, CHALLENGE_EXP_PER_LEVEL, CHALLENGE_EXP_CAP_LEVEL, CHALLENGE_DIFF_RANGE, ARENA_CHAMPION_EXP, ARENA_ENERGY_COST, ARENA_EXP_PER_ENERGY,
   };
 })();

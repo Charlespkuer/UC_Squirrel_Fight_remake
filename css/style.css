@@ -6,6 +6,15 @@ html, body { width: 100%; height: 100%; background: #1a120b; overflow: hidden; f
 #ui { position: absolute; pointer-events: none; }
 #ui > * { pointer-events: auto; }
 #boot-note { position: fixed; left: 8px; bottom: 6px; color: rgba(255,230,109,.65); font-size: 12px; z-index: 999; pointer-events: none; }
+/* 浏览器拦下自动播放时提示点一下开音乐（点任意处都会补播，成功即收起） */
+.audio-hint { display: none; position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 1000;
+  align-items: center; gap: 8px; padding: 7px 20px; border-radius: 22px; pointer-events: none;
+  background: rgba(24,44,52,.82); border: 3px solid #ffe6a0; box-shadow: 0 3px 10px rgba(0,0,0,.45);
+  color: #fff6cf; font-size: 15px; letter-spacing: 1px; animation: audio-hint-pulse 1.6s ease-in-out infinite; }
+.audio-hint span { font-size: 19px; color: #ffd75c; }
+body.audio-blocked .audio-hint { display: flex; }
+@keyframes audio-hint-pulse { 50% { transform: translateX(-50%) scale(1.04); filter: brightness(1.12); } }
+@media (prefers-reduced-motion: reduce) { .audio-hint { animation: none; } }
 
 /* ---------- 标题画面 ---------- */
 .title-screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(180deg, rgba(12,32,10,.62), rgba(18,12,4,.78)); gap: 18px; }

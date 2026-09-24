@@ -96,6 +96,62 @@ window.addEventListener('unhandledrejection', function (e) { window.__errs.push(
     check.api = { grant: Debug.grantWS('skill', kId, 15), forget: Debug.forgetWS('skill', kId) };
     check.apis = Debug.grantWS('weapon', wId, 5);
 
+    // ---------- 金松果 / 金杯 / 经验走货币字段，不进背包 ----------
+    {
+      const goldBefore = S.goldPoint, cupBefore = S.goldCup, expBefore = S.exp, lvBefore = S.level;
+      const msgGold = Debug.grantItem(8, 500);
+      const msgCup = Debug.grantItem(40, 7);
+      const msgExp = Debug.grantItem(15, 200);
+      check.currency = {
+        goldDelta: S.goldPoint - goldBefore, cupDelta: S.goldCup - cupBefore,
+        expOrLevel: S.level > lvBefore ? 'level+' + (S.level - lvBefore) : 'exp+' + (S.exp - expBefore),
+        inBag: [8, 15, 40].filter((id) => (S.props[id] || 0) > 0),
+        msgs: [msgGold, msgCup, msgExp],
+        optionLabels: [8, 40, 15].map((id) => {
+          const o = p.querySelector('[data-item-select] option[value="' + id + '"]');
+          return o ? o.textContent.trim() : null;
+        }),
+      };
+      const gold0 = S.goldPoint;
+      const allBtn = [...p.querySelectorAll('.debug-actions button')].find((b) => b.textContent.trim() === '全道具 +10');
+      if (allBtn) allBtn.click();
+      await wait(150);
+      check.allProps = { msg: p.querySelector('.debug-msg').textContent, bag8: S.props[8] || 0, goldDelta: S.goldPoint - gold0 };
+    }
+
+    // ---------- 重置每日与体力计时：天梯次数、每日任务、抽奖、限兑都要复位 ----------
+    {
+      S.joinRankCount = 7; S.dailyWins = 3; S.dailyFails = 2;
+      S.dailyClaimDate = State.localDate();
+      S.lotteryDate = State.localDate(); S.lotteryFree = 0;
+      S.rankPurchaseDay = State.localDate(); S.rankPurchases = { 11: 1 };
+      S.dailyStatsDate = State.localDate();
+      S.quests = null; S.dailyCounters = null;
+      const quests0 = State.questStatus();
+      State.bumpDaily(quests0[0].key, quests0[0].need);
+      State.claimQuest(0);
+      S.energy = 5; S.lastEnergyTs = Date.now() - 3600000;
+      State.save();
+      const before = { claimed: State.questStatus()[0].claimed, progress: State.questStatus()[0].progress, gifts: State.dailyStatus().claimed };
+      const resetBtn = [...p.querySelectorAll('.debug-actions button')].find((b) => b.textContent.trim() === '重置每日与体力计时');
+      if (resetBtn) resetBtn.click();
+      await wait(200);
+      const after = State.questStatus();
+      check.resetDaily = {
+        before,
+        msg: p.querySelector('.debug-msg').textContent,
+        joinRankCount: S.joinRankCount,
+        dailyWins: S.dailyWins, dailyFails: S.dailyFails,
+        giftClaimable: !State.dailyStatus().claimed,
+        lotteryFree: S.lotteryFree,
+        questsReset: !!after.length && after.every((q) => !q.claimed && q.progress === 0),
+        questCount: after.length,
+        rankPurchases: Object.keys(S.rankPurchases || {}).length,
+        refreshCount: (S.challengeRefresh || {}).count,
+        energyFull: S.energy === S.maxEnergy,
+      };
+    }
+
     // ---------- 一键升级 / 一键满级 ----------
     const propsBefore = JSON.stringify(S.props);
     const act = (label) => [...p.querySelectorAll('.debug-actions button')].find((b) => b.textContent.trim() === label);

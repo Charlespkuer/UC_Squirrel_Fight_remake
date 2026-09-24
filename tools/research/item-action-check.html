@@ -101,6 +101,25 @@ window.addEventListener('unhandledrejection', function (e) { window.__errs.push(
     }
     check.fragmentSteps = steps;
     check.fragmentAfter = { frag: S.props[24], gold: S.goldPoint, gears: S.gears.length - before.gears };
+    check.mergeCounter = { merge: (S.dailyCounters || {}).merge || 0, gem: (S.dailyCounters || {}).gem || 0 };
+    // 活动页：把「合成或融合 3 次装备」塞进今天的任务，看它是否已经完成
+    S.quests = S.quests || { date: State.localDate(), list: [] };
+    S.quests.list[0] = { key: 'merge', need: 3, rewards: [{ kind: 'gold', count: 20 }], claimed: false };
+    State.save();
+    UI.runAction('daily');
+    await wait(250);
+    const questsBox = document.querySelector('.daily-quests');
+    check.dailyMerge = {
+      text: questsBox ? questsBox.textContent.replace(/\s+/g, ' ').slice(0, 120) : null,
+      firstRow: (() => {
+        const row = document.querySelectorAll('.quest-row')[0];
+        return row ? row.textContent.replace(/\s+/g, ' ') : null;
+      })(),
+      claimable: State.questClaimable(),
+    };
+    document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+    UI.runAction('bag');
+    await wait(150);
     // 返回后才刷新背包页
     m1.querySelectorAll('.modal-buttons button')[1].click();
     await wait(200);

@@ -101,12 +101,31 @@
       }
       const started = audio.play();
       // 浏览器可能因为「没有用户手势」拒绝自动播放：被拒时挂一次性监听，在第一次点击/按键时补播
-      if (started && typeof started.catch === 'function') started.catch(armAudioUnlock);
+      if (started && typeof started.catch === 'function') {
+        started.then(() => setAudioBlocked(false)).catch(armAudioUnlock);
+      }
     } catch (e) {}
+  }
+  /** 自动播放被拦下时在页面上提示「点一下开启音乐」；能播了就收起提示。 */
+  let audioBlocked = false;
+  function setAudioBlocked(on) {
+    if (audioBlocked === !!on) return;
+    audioBlocked = !!on;
+    document.body.classList.toggle('audio-blocked', audioBlocked);
+    let hint = document.getElementById('audio-hint');
+    if (audioBlocked && !hint) {
+      hint = document.createElement('div');
+      hint.id = 'audio-hint';
+      hint.className = 'audio-hint';
+      hint.setAttribute('role', 'status');
+      hint.innerHTML = '<span aria-hidden="true">♪</span>点击画面任意处开启音乐';
+      document.body.appendChild(hint);
+    }
   }
   /** 自动播放被拦截时，等第一次用户交互再补播当前场景的 BGM（只挂一次）。 */
   let audioUnlockArmed = false;
   function armAudioUnlock() {
+    setAudioBlocked(true);
     if (audioUnlockArmed) return;
     audioUnlockArmed = true;
     const events = ['pointerdown', 'keydown', 'touchstart'];

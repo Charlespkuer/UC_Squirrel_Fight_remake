@@ -45,12 +45,18 @@ test('2至70逐级固定成长、24个指定领悟等级、53/59/65属性书', (
   const g = setup(), expected = [2,3,4,6,8,10,12,14,16,18,20,23,26,29,32,35,38,41,44,47,50,56,62,68];
   const received = [];
   for (let level = 2; level <= 70; level++) {
-    const before = total(g.s()), ups = g.State.gainExp(g.GData.nextExp(level - 1));
+    const before = total(g.s()), beforeFree = g.s().freePoints || 0;
+    const ups = g.State.gainExp(g.GData.nextExp(level - 1));
     assert.equal(ups.length, 1); assert.equal(ups[0].level, level);
+    const free = (g.s().freePoints || 0) - beforeFree;
     if ([53,59,65].includes(level)) {
-      assert.equal(total(g.s()), before); assert.equal(ups[0].attributeBook, true); assert.equal(ups[0].reward, null);
+      assert.equal(total(g.s()), before); assert.equal(free, 0); assert.equal(ups[0].attributeBook, true); assert.equal(ups[0].reward, null);
     } else {
-      assert.equal(total(g.s()) - before, 4); assert.ok(ups[0].hp >= 5 && ups[0].hp <= 20); assert.equal(ups[0].hp % 5, 0);
+      // 每级 4 个点位：3 点属性 + 生命 5。3 点里 2 点随机、1 点自选；
+      // 自选点占比过低时由系统代选（autoPoint），否则挂在 freePoints 上等玩家分配。
+      assert.equal(total(g.s()) - before + free, 4);
+      assert.equal(free + (ups[0].autoPoint ? 1 : 0), 1);
+      assert.ok(ups[0].hp >= 5 && ups[0].hp <= 15); assert.equal(ups[0].hp % 5, 0);
     }
     if (ups[0].reward) received.push(level);
     if (level < 50) {
@@ -234,15 +240,30 @@ test('关卡每次击败NPC都可能掉0–6片，白绿蓝按螳螂仙鹤熊猫
     runner(6,2);   // ★6 -> 越 2 级
     runner(2,0);   // ★2 -> 不越级
   }
-  // 关卡 HP = 原表 × GData.STAGE_DIFFICULTY.hp（本项目的平衡取舍，原表见 STAGE_NPC_HP）
-  const hpScale=g.GData.STAGE_DIFFICULTY.hp;
-  for(const [stage,values]of [[17,[400,479,719]],[18,[501,601,901]]])for(let i=1;i<=3;i++)
-    assert.equal(+g.State.npcOf(stage,i).hp,Math.max(1,Math.round(values[i-1]*hpScale)));
-  // 三维同样按系数打折
-  const npc=g.State.npcOf(18,3), st=g.GData.stageNpcStats(npc);
-  assert.equal(st.power,Math.max(1,Math.round(+npc.power*g.GData.STAGE_DIFFICULTY.power)));
-  assert.equal(st.agility,Math.max(1,Math.round(+npc.agility*g.GData.STAGE_DIFFICULTY.agility)));
-  assert.ok(hpScale<1&&g.GData.STAGE_DIFFICULTY.power<1,'关卡难度整体低于原表');
+  // 关卡强度按「推荐等级模型」标定：血量/三维由推荐等级下的玩家均值推出
+  // （螳螂 10-15、仙鹤 15-20、熊猫 20-25；见 GData.STAGE_ROLE_* 与 tools/stage-balance.cjs）
+  assert.equal(g.GData.STAGE_USE_LEVEL_MODEL, true);
+  for (const stage of [1, 6, 13, 18]) {
+    const lv = g.GData.stageTargetLevel(stage);
+    const hp = g.GData.stagePlayerHp(lv), st = g.GData.stagePlayerStat(lv);
+    for (let i = 1; i <= 3; i++) {
+      const npc = g.State.npcOf(stage, i);
+      assert.equal(+npc.hp, Math.max(1, Math.round(hp * g.GData.STAGE_ROLE_HP[i - 1])), '关卡 ' + stage + ' 第' + i + '个血量');
+      const three = g.GData.stageNpcStats(npc);
+      const scale = g.GData.stageTypeScale(stage);
+      assert.equal(three.power, Math.max(1, Math.round(st * g.GData.STAGE_ROLE_STAT[i - 1] * scale)), '关卡 ' + stage + ' 第' + i + '个力量');
+      assert.ok(three.agility >= 1 && three.speed >= 1);
+    }
+  }
+  // 推荐等级：螳螂 ★1-6 = 10-15、仙鹤 = 15-20、熊猫 = 20-25
+  assert.equal(g.GData.stageTargetLevel(1), 10); assert.equal(g.GData.stageTargetLevel(6), 15);
+  assert.equal(g.GData.stageTargetLevel(7), 15); assert.equal(g.GData.stageTargetLevel(12), 20);
+  assert.equal(g.GData.stageTargetLevel(13), 20); assert.equal(g.GData.stageTargetLevel(18), 25);
+  // 大侠要比拳师更耐打（boss 感），但三维不再是压倒性优势
+  assert.ok(g.GData.STAGE_ROLE_HP[2] > g.GData.STAGE_ROLE_HP[1], '大侠血量倍率最高');
+  assert.ok(g.GData.STAGE_ROLE_STAT[2] < g.GData.STAGE_ROLE_STAT[1] + 0.001, '大侠三围不再碾压拳师');
+  // 攻略血量表仍是历史参考，没被删掉
+  assert.equal(g.GData.STAGE_NPC_HP[5][2], 901);
   assert.equal(g.State.npcOf(4,1).name,'4星螳螂学徒');assert.equal(g.State.npcOf(10,1).name,'4星仙鹤学徒');
 });
 

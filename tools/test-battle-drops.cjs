@@ -41,6 +41,17 @@ test('没有到出场时刻不可领取，三次逐次出现且按钮实际点�
   assert.equal(g.saved().props[21],1);
 });
 
+test('拾取战斗掉落会计入每日任务的 pickup 计数',()=>{
+  const g=setup(),drop=g.create([0,.4,.4,.4]);
+  g.c.State.questStatus();   // 先建好当天计数器
+  assert.equal(g.s().dailyCounters.pickup,0);
+  g.advance(drop,2000);g.live('button')[0].onclick();
+  assert.equal(g.s().dailyCounters.pickup,1,'点一次算一次');
+  drop.skip();               // 跳过补齐剩下的两枚
+  assert.equal(g.s().dailyCounters.pickup,3,'补领的也要计数');
+  assert.equal(g.saved().dailyCounters.pickup,3);
+});
+
 test('约2秒未点击消失不发奖，过期的旧按钮也不能补领',()=>{
   const g=setup(),drop=g.create();g.advance(drop,2000);const old=g.live('button')[0];
   g.advance(drop,2100);assert.equal(g.live('button').length,0);assert.equal(drop.collect(0),false);old.onclick();
@@ -89,7 +100,10 @@ test('经验掉落走真实升级，跳过3次累计15经验且汇总属性成�
   drop.skip();assert.equal(g.s().level,2);assert.equal(g.s().exp,13);
   const summary=drop.summary();assert.equal(summary.items.length,3);assert.equal(summary.ups.length,1);assert.equal(summary.ups[0].level,2);
   assert.ok(summary.ups[0].reward);assert.ok(summary.ups[0].rewardId);assert.ok(['weapon','skill'].includes(summary.ups[0].rewardKind));
-  assert.equal(summary.ups[0].power+summary.ups[0].agility+summary.ups[0].speed+summary.ups[0].hp/5,4);
+  // 每级 4 个点位：3 点属性 + 生命 5。其中 1 点自选：占比过低时系统代选（autoPoint 已进属性），
+  // 否则挂在 freePoints 上等玩家分配，所以要把这两者一起算进预算。
+  const u = summary.ups[0];
+  assert.equal(u.power + u.agility + u.speed + u.hp / 5 + (u.freePoint || 0) + (u.autoPoint ? 1 : 0), 4);
   assert.equal(g.saved().level,2);assert.equal(g.saved().exp,13);drop.skip();assert.equal(g.s().exp,13);
 });
 

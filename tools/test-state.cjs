@@ -75,20 +75,40 @@ test('单个道具数量上限 9999：存档收口、读档也会夹住', () => 
   assert.equal(loaded.props[1] + loaded.props[26], 10011);
 });
 
-test('卖出天使果实：100 金松果一个，数量与金松果一起结算', () => {
+test('卖出道具：默认回收字典价格的一半，无价/占位价的道具不开放回收', () => {
   const g = game(), S = g.State, s = S.state();
-  assert.equal(S.propSellPrice(47), 100);
-  assert.equal(S.propSellPrice(46), 0, '只有天使果实（47）可卖');
+  // 商店里买得到的：半价（向下取整）
+  assert.equal(S.propSellPrice(1), 1, '小体力药剂 3 → 1');
+  assert.equal(S.propSellPrice(2), 2, '大体力药剂 5 → 2');
+  assert.equal(S.propSellPrice(3), 10, '大力丸 20 → 10');
+  assert.equal(S.propSellPrice(23), 10, '挑战书 20 → 10');
+  assert.equal(S.propSellPrice(13), 150, '转生果 300 → 150');
+  assert.equal(S.propSellPrice(47), 100, '天使果实 200 → 100（旧规则就是这个价）');
+  assert.equal(S.propSellPrice(37), 500, '属性书 1000 → 500');
+  assert.equal(S.propSellPrice(101), 10, '宝石 20 → 10');
+  // 字典里 price 为 0 或占位 1 的（卷轴/碎片/礼包/天梯碎片/种子/超级药丸/恶魔果实）不开放回收
+  for (const id of [6, 9, 16, 21, 22, 24, 25, 26, 28, 32, 40, 41, 44, 45, 46, 48, 49, 50, 51]) {
+    assert.equal(S.propSellPrice(id), 0, id + ' 不该可卖');
+  }
+  assert.equal(S.sellProp(46, 1).ok, false, '不能卖的道具会被拒');
+  const ids = S.sellableProps();
+  assert.ok(ids.includes(47) && ids.includes(2) && ids.includes(101), '可卖清单含药水/果实/宝石');
+  assert.ok(ids.length >= 20, '大部分标了价的道具都能卖：' + ids.length + ' 种');
+  assert.ok(ids.every((id) => S.propSellPrice(id) > 0));
+  // 结算：数量与金松果一起走，超过持有会被夹住，卖光后键被删掉
   assert.equal(S.sellProp(47, 3).ok, false, '背包里没有就不给卖');
   s.props[47] = 5; s.goldPoint = 10;
   const r = S.sellProp(47, 2);
   assert.equal(r.ok, true); assert.equal(r.sold, 2); assert.equal(r.gold, 200);
   assert.equal(s.props[47], 3); assert.equal(s.goldPoint, 210);
-  // 超过持有数量会被夹住，卖光后键被删掉
   const all = S.sellProp(47, 99);
   assert.equal(all.sold, 3); assert.equal(s.props[47], undefined); assert.equal(s.goldPoint, 510);
   assert.equal(S.sellProp(47, 1).ok, false);
   assert.equal(JSON.parse(g.storage.get(S.saveKey)).props[47], undefined);
+  // 药水按半价卖
+  s.props[1] = 4; s.goldPoint = 0;
+  const small = S.sellProp(1, 4);
+  assert.equal(small.gold, 4); assert.equal(s.goldPoint, 4); assert.equal(s.props[1], undefined);
 });
 
 test('调试用武技接口：获得/改等级/遗忘，等级夹在 1~15 且不重复', () => {
@@ -171,6 +191,81 @@ test('好友系统：随机 NPC 也能加为好友，重名/满员有提示，�
   assert.equal(S.removeFriend('老友').ok, true);
   assert.equal(S.friendList().length, 0);
   assert.equal(S.removeFriend('老友').ok, false);
+});
+
+test('每日任务种类够多（16 种挑 4 条），计数器覆盖全部任务', () => {
+  const g = game(), S = g.State, s = S.state();
+  assert.equal(S.QUEST_TYPES.length, 16, '16 种任务');
+  const keys = S.QUEST_TYPES.map((t) => t.key);
+  assert.equal(new Set(keys).size, 16, 'key 不重复');
+  const list = S.questStatus();
+  assert.equal(list.length, 4, '每天 4 条');
+  assert.equal(new Set(list.map((q) => q.key)).size, 4, '同一天不重复抽同一种');
+  for (const key of keys) assert.ok(key in s.dailyCounters, '计数器覆盖 ' + key);
+  for (const q of list) assert.ok(q.need > 0 && q.name && !q.name.includes('{n}'), '任务文案要填好目标：' + q.name);
+});
+
+test('每日任务计数：合成/融合装备、宝石、使用/购买/卖出道具、拾取、天梯/切磋/挑战', () => {
+  const g = game(), S = g.State, s = S.state();
+  S.questStatus();   // 建好当天的计数器
+  const c = (key) => s.dailyCounters[key] || 0;
+  // 碎片合成装备 → merge
+  s.props[24] = 20; s.goldPoint = 1000;
+  assert.equal(S.composeGear(24).ok, true);
+  assert.equal(c('merge'), 1, '碎片合成装备要计入 merge');
+  // 3 件同名装备融合 → merge
+  const trio = [S.addGear(21), S.addGear(21), S.addGear(21)];
+  s.goldPoint = 1000;
+  assert.equal(S.mergeGears(trio.map((x) => x.key)).ok, true);
+  assert.equal(c('merge'), 2, '装备融合也要计入 merge');
+  // 宝石合成 → gem
+  s.props[101] = 3; s.goldPoint = 1000;
+  S.mergeGems(101);
+  assert.equal(c('gem'), 1);
+  // 使用道具 → use
+  s.props[1] = 3;
+  S.useProp(1);
+  assert.equal(c('use'), 1);
+  // 商店购买 → buy
+  s.goldPoint = 1000;
+  S.buyProp(1, 2);
+  assert.equal(c('buy'), 2);
+  // 卖出天使果实 → sell
+  s.props[47] = 3;
+  S.sellProp(47, 2);
+  assert.equal(c('sell'), 2);
+  // 战斗类型 → challenge / rank / spar（另加 fight/win）
+  const entry = (kind) => ({ me: { name: '我' }, foe: { name: '敌' }, kind, region: 0,
+    result: { winner: 0, rounds: [{ attacker: 0, hpAfter: [10, 0] }], maxHp: [40, 40] } });
+  assert.ok(S.recordBattle(entry('challenge')));
+  assert.ok(S.recordBattle(entry('rank')));
+  assert.ok(S.recordBattle(entry('friend')));
+  assert.equal(c('challenge'), 1);
+  assert.equal(c('rank'), 1);
+  assert.equal(c('spar'), 1);
+  assert.equal(c('fight'), 3);
+  assert.equal(c('win'), 3);
+  // 过关胜利只算 stage
+  assert.ok(S.recordBattle(entry('stage')));
+  assert.equal(c('stage'), 1);
+  assert.equal(c('challenge'), 1, '关卡胜利不该算成随机挑战');
+});
+
+test('货币类编号（8 金松果 / 15 经验 / 40 金杯）不会留在背包里', () => {
+  const g = game(), S = g.State;
+  // 旧档里被调试面板当道具发过的货币，读档时清掉
+  g.storage.set(S.saveKey, JSON.stringify({ level: 5, goldPoint: 100, goldCup: 0, props: { 8: 999, 15: 50, 40: 12, 1: 7 } }));
+  S.load();
+  const s = S.state();
+  assert.equal(s.props[8], undefined, '金松果不进背包');
+  assert.equal(s.props[15], undefined, '经验不进背包');
+  assert.equal(s.props[40], undefined, '金杯不进背包');
+  assert.equal(s.props[1], 7, '真正的道具照常保留');
+  // 存回去也不会再写进 props
+  S.save();
+  const saved = JSON.parse(g.storage.get(S.saveKey));
+  assert.equal(saved.props[8], undefined);
+  assert.ok(saved.props[1] >= 7);
 });
 
 test('旧存档保留等级、物品、关卡并独立补全新字段', () => {

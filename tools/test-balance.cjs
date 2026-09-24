@@ -184,8 +184,9 @@ test('新合成蓝装只有1条最高2星词条，已有高星蓝装旧档不被
 
 test('关卡每次击败NPC都可能掉0–6片，白绿蓝按螳螂仙鹤熊猫，高星可越级，HP按攻略数值表', () => {
   const g=setup(),s=g.s();s.level=60;s.props[23]=99;
-  // rng=0：掉率判定必过、数量取 1、普通档分支（<0.72）成立
+  // rng=0：掉率判定必过、数量取下限、普通档分支（<tierUp）成立
   g.math.random=()=>0;
+  const FRAG=g.GData.STAGE_FRAGMENT, MIN=FRAG.min, MAX=FRAG.max;
   for(const id of [1,6,7,12,13,18]) {
     if(id>1)g.State.setStageProgress(id-1,{passed:true,npcIndex:3});
     const base=24+Math.floor((id-1)/6);
@@ -196,9 +197,9 @@ test('关卡每次击败NPC都可能掉0–6片，白绿蓝按螳螂仙鹤熊猫
       // 每一场胜利都可能掉碎片（不再只在最后一个NPC结算）
       assert.ok(rw.drop,'第'+npc+'个NPC胜利应可能掉碎片');
       assert.equal(rw.drop.id,base,'螳螂白/仙鹤绿/熊猫蓝');
-      assert.ok(rw.drop.count>=1&&rw.drop.count<=6);
+      assert.ok(rw.drop.count>=MIN&&rw.drop.count<=MAX,'数量应落在'+MIN+'~'+MAX);
     }
-    assert.equal(s.props[base],before+3,'三次胜利各掉1片');
+    assert.equal(s.props[base],before+3*MIN,'三次胜利各掉下限片数');
   }
   // 越级掉落：★3-4 越 1 级、★5-6 越 2 级；★1-2 没有更高档可越。
   // 随机数序列 [0, 0.99, 0.5] —— 掉率判定 0 必过、越级判定 0.99≥0.72 成立、数量落在 1–6。
@@ -212,7 +213,7 @@ test('关卡每次击败NPC都可能掉0–6片，白绿蓝按螳螂仙鹤熊猫
       const rw=g.State.finishStageBattle(id,start.token,true);
       assert.ok(rw.drop,'★'+star+'关卡应掉碎片');
       assert.equal(rw.drop.id,base+(expectUp?expectUp:0),'★'+star+'越级数='+expectUp);
-      assert.ok(rw.drop.count>=1&&rw.drop.count<=6);
+      assert.ok(rw.drop.count>=MIN&&rw.drop.count<=MAX,'数量应落在'+MIN+'~'+MAX);
       if(expectUp){
         assert.equal(s.props[base+expectUp],beforeUp+rw.drop.count,'碎片进了高一级口袋');
         assert.equal(s.props[base],beforeBase,'没有掉到低一级口袋');
@@ -224,7 +225,15 @@ test('关卡每次击败NPC都可能掉0–6片，白绿蓝按螳螂仙鹤熊猫
     runner(6,2);   // ★6 -> 越 2 级
     runner(2,0);   // ★2 -> 不越级
   }
-  for(const [stage,values]of [[17,[400,479,719]],[18,[501,601,901]]])for(let i=1;i<=3;i++)assert.equal(+g.State.npcOf(stage,i).hp,values[i-1]);
+  // 关卡 HP = 原表 × GData.STAGE_DIFFICULTY.hp（本项目的平衡取舍，原表见 STAGE_NPC_HP）
+  const hpScale=g.GData.STAGE_DIFFICULTY.hp;
+  for(const [stage,values]of [[17,[400,479,719]],[18,[501,601,901]]])for(let i=1;i<=3;i++)
+    assert.equal(+g.State.npcOf(stage,i).hp,Math.max(1,Math.round(values[i-1]*hpScale)));
+  // 三维同样按系数打折
+  const npc=g.State.npcOf(18,3), st=g.GData.stageNpcStats(npc);
+  assert.equal(st.power,Math.max(1,Math.round(+npc.power*g.GData.STAGE_DIFFICULTY.power)));
+  assert.equal(st.agility,Math.max(1,Math.round(+npc.agility*g.GData.STAGE_DIFFICULTY.agility)));
+  assert.ok(hpScale<1&&g.GData.STAGE_DIFFICULTY.power<1,'关卡难度整体低于原表');
   assert.equal(g.State.npcOf(4,1).name,'4星螳螂学徒');assert.equal(g.State.npcOf(10,1).name,'4星仙鹤学徒');
 });
 

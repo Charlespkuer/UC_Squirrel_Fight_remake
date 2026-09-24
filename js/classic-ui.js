@@ -68,6 +68,9 @@
   const numImage = new Image(); numImage.src = NUM_SHEET;
   const numeral = (n) => String(n == null ? '' : n).replace(/[^0-9%×/.,:+-]/g, '');
   const numStretch = () => (window.Debug && Debug.numberStretch ? Debug.numberStretch() : 1.25);
+  // 字距：字形宽度保持不变（沿用上面的横向拉伸），只把推进距离收紧。
+  // 图集里每个数字左右各有 2~7px 空白，收到 0.86 仍然留得住间隙（见 tools/apk-audit/num-ink.cjs）。
+  const NUM_ADVANCE = 0.86;
 
   function renderNumbers(root) {
     if (!numImage.complete || !numImage.naturalWidth) return;
@@ -79,8 +82,10 @@
       const text = block.dataset.text;
       // canvas 的像素尺寸=设计尺寸；外框宽度由 --n/--st 决定，#ui 的
       // --uiscale 统一缩放。这里绝不能写 canvas 的显示尺寸，否则会二次缩放。
-      const k = height / NUM_H, cell = NUM_W * k * stretch;
-      const width = Math.max(1, Math.round(text.length * cell));
+      const k = height / NUM_H;
+      const glyph = NUM_W * k * stretch;            // 单个数字的绘制宽度
+      const adv = glyph * NUM_ADVANCE;              // 数字之间的推进距离
+      const width = Math.max(1, Math.round(Math.max(0, text.length - 1) * adv + glyph));
       if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
       const cx = canvas.getContext('2d');
       cx.clearRect(0, 0, width, height);
@@ -89,7 +94,7 @@
       for (let i = 0; i < text.length; i++) {
         const at = NUM_KEYS.indexOf(text[i]);
         if (at >= 0) {
-          cx.drawImage(numImage, at * NUM_W, 0, NUM_W, NUM_H, i * cell, 0, cell, height);
+          cx.drawImage(numImage, at * NUM_W, 0, NUM_W, NUM_H, i * adv, 0, glyph, height);
         } else {
           // 位图里没有的符号（如 "/"）用文字补齐，字号与数字同高。
           cx.font = 'bold ' + Math.round(height * 0.86) + 'px "Microsoft YaHei",sans-serif';
@@ -98,11 +103,12 @@
           cx.lineWidth = Math.max(1.5, height * 0.09);
           cx.strokeStyle = 'rgba(94,100,106,.95)';
           cx.fillStyle = '#fdfdfa';
-          cx.strokeText(text[i], (i + 0.5) * cell, height * 0.55);
-          cx.fillText(text[i], (i + 0.5) * cell, height * 0.55);
+          cx.strokeText(text[i], i * adv + glyph / 2, height * 0.55);
+          cx.fillText(text[i], i * adv + glyph / 2, height * 0.55);
         }
       }
-      block.style.setProperty('--w', (text.length * (NUM_W / NUM_H) * stretch).toFixed(4) + 'em');
+      const emWidth = ((Math.max(0, text.length - 1) * adv + glyph) / height).toFixed(4);
+      block.style.setProperty('--w', emWidth + 'em');
     }
   }
   function bindNumImage() {
@@ -177,9 +183,12 @@
         ? '<div class="reward-card skill"><span class="reward-icon">' + icon(u.rewardKind === 'weapon' ? 'weapon' : 'skill', u.rewardId) + '</span>' +
           '<span class="reward-text">' + esc(u.reward) + '</span></div>'
         : '';
+      const giftCards = (u.gifts || []).map((g) =>
+        '<div class="reward-card gift"><span class="reward-icon">' + icon('prop', g.id) + '</span>' +
+        '<span class="reward-text">' + esc(g.name) + ' ×' + esc(g.count) + '</span></div>').join('');
       return '<div class="reward-panel">' +
         '<div class="reward-title"><img alt="升级奖励" src="' + frameUrl('resource_10', 3) + '"></div>' +
-        '<div class="reward-row">' + cards.join('') + bonus + '</div>' +
+        '<div class="reward-row">' + cards.join('') + bonus + giftCards + '</div>' +
         '<div class="reward-level">升到 ' + esc(u.level) + ' 级</div></div>';
     }).join('');
   }
@@ -217,7 +226,7 @@
     const old = $('#ui .classic-page'); if (old) old.remove();
     $$('.classic-modal-overlay').forEach(e => e.remove());
     const p = document.createElement('section'); p.className = 'classic-page'; p.dataset.screen = active;
-    p.innerHTML = tabs(group, active) + (opts.above || '') + '<div class="classic-board ' + (opts.cls || '') + '">' + content + '</div><footer class="page-footer">' + (opts.left || '') + btn('返回菜单','home','gold') + (opts.right || '') + '</footer>' + (opts.counter ? '<span class="page-counter">' + opts.counter + '</span>' : '');
+    p.innerHTML = tabs(group, active) + (opts.above || '') + '<div class="classic-board ' + (opts.cls || '') + '">' + content + '</div><footer class="page-footer">' + (opts.left || '') + btn('返回菜单','home','gold') + (opts.right || '') + '</footer>' + (opts.counter ? '<span class="page-counter' + (opts.counterPlace === 'board' ? ' in-board' : '') + '">' + opts.counter + '</span>' : '');
     $('#ui').appendChild(p);
     bind(p, Object.assign({}, actions, {home}));
     if(window.Main?.resizeLayout)Main.resizeLayout();
@@ -255,9 +264,14 @@
     $('.home-name',h).textContent = S.name;
     setNum($('.home-level .num',h), S.level);
     // 体力槽：亮金色填充从左侧开始（0 在左），宽度 = 体力比；右侧剩余为深棕。
-    $('.home-energy>i',h).style.width = (100*S.energy/S.maxEnergy)+'%';
+    // 药剂可以把体力顶到自然上限之上，这时按上限封顶显示并加个 over 标记。
+    const over = S.energy > S.maxEnergy;
+    $('.home-energy>i',h).style.width = Math.min(100, 100*S.energy/S.maxEnergy)+'%';
+    $('.home-energy',h).classList.toggle('over', over);
     setNum($('.home-energy-val .num',h), S.energy + '/' + S.maxEnergy);
-    $('.home-energy',h).title = '每5分钟恢复1点体力' + (State.energyCountdown() ? '，下一点 '+State.energyCountdown() : '');
+    $('.home-energy',h).title = over
+      ? '体力已超过自然上限（' + S.energy + '/' + S.maxEnergy + '），不会自然回复'
+      : '每5分钟恢复1点体力' + (State.energyCountdown() ? '，下一点 '+State.energyCountdown() : '');
     // 经验条只显示具体值 x/y（不再显示百分比），条内填充仍按比例
     const needExp = GData.nextExp(S.level);
     const pct = Math.min(100,100*S.exp/needExp);
@@ -441,8 +455,13 @@
   function stageUpsHtml(ups) {
     if (!ups || !ups.length) return '';
     return '<div class="reward-stack">' + ups.map(function (u) {
+      const gifts = (u.gifts || []).map(function (g) {
+        return '<div class="reward-card gift"><span class="reward-icon">' + icon('prop', g.id) + '</span>' +
+          '<span class="reward-text">' + esc(g.name) + ' ×' + esc(g.count) + '</span></div>';
+      }).join('');
+      const rows = (u.reward ? '<div class="reward-card skill"><span class="reward-text">' + esc(u.reward) + '</span></div>' : '') + gifts;
       return '<div class="reward-panel"><div class="reward-level">升到 ' + esc(u.level) + ' 级</div>' +
-        (u.reward ? '<div class="reward-row"><div class="reward-card skill"><span class="reward-text">' + esc(u.reward) + '</span></div></div>' : '') +
+        (rows ? '<div class="reward-row">' + rows + '</div>' : '') +
         '</div>';
     }).join('') + '</div>';
   }
@@ -487,7 +506,9 @@
     const npc=State.npcOf(stageId,started.npcIndex),type=GData.stageTypeOf(stageId);
     // 连续挑战不回满血：后两场继承上一场剩余血量，并回复25%
     const prevRun=State.stageRun(stageId),carryHp=prevRun&&Number.isFinite(prevRun.carryHp)?Math.min(1,prevRun.carryHp+0.25):undefined;
-    const foe={name:npc.name,level:10+stageId*2,power:+npc.power,agility:+npc.agility,speed:+npc.speed,hp:+npc.hp,weapons:[],skills:(npc.skills||'').split('|').filter(Boolean).map(s=>{const a=s.split(':');return{id:+a[0],level:+a[1]};}),npcType:type.anim};
+    // 对手三维按关卡难度系数打折（GData.stageNpcStats），血量已在 npcOf 里处理过
+    const npcStats=GData.stageNpcStats(npc);
+    const foe={name:npc.name,level:10+stageId*2,power:npcStats.power,agility:npcStats.agility,speed:npcStats.speed,hp:+npc.hp,weapons:[],skills:(npc.skills||'').split('|').filter(Boolean).map(s=>{const a=s.split(':');return{id:+a[0],level:+a[1]};}),npcType:type.anim};
     const backToStage=()=>openDifficulty(Math.floor((stageId-1)/6));
     const interrupted=()=>{State.interruptStageBattle(stageId,started.token);backToStage();notice('战斗播放中断，本轮进度已保留。重新进入关卡即可继续。');};
     try { Promise.resolve(Main.startBattle(foe,{region:type.anim==='tl'?3:type.anim==='xh'?4:1,kind:'stage',useProps:false,hpRatio:carryHp,
@@ -529,13 +550,13 @@
   function openBag(shop,pg) {
     const exchange=shop==='exchange',mode=shop;shop=shop===true;bagPage=pg||0;
     const S=State.state(),items=[];
-    propMap.each((id,v)=>{if(exchange?[24,25,26,45,46].includes(+id):shop?v.buy==='true':S.props[id]>0)items.push({...v,id:+id});});
+    propMap.each((id,v)=>{if(exchange?[24,25,26,45,46,51].includes(+id):shop?v.buy==='true':S.props[id]>0)items.push({...v,id:+id});});
     items.sort((a,b)=>a.id-b.id);
     const total=Math.max(1,Math.ceil(items.length/6));bagPage=Math.min(bagPage,total-1);
     const shown=items.slice(bagPage*6,bagPage*6+6);
     if(!shown.some(it=>it.id===selectedProp))selectedProp=shown[0]?.id||0;
     const it=shown.find(it=>it.id===selectedProp),status=shop&&it?State.purchaseStatus(it.id):null;
-    const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个')+'</div>'+btn(shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看','prop-action','small gold'):'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
+    const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个')+'</div>'+btn(shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看','prop-action','small gold'):'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
     const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':'X'+(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
     const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,{cls:'classic-bag-board',counter:(bagPage+1)+'/'+total,left:'<span class="footer-left" style="display:flex;gap:12px">'+(exchange?btn('金杯商店','rank-shop','small'):'')+((shop||exchange)?btn('每日抽奖','lottery','small gold'):'')+'</span>'});
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
@@ -548,24 +569,44 @@
   function openProp(id,shop) {
     const base=propMap.getValue(id),S=State.state();
     if(!base)return;
-    const isFragment=[24,25,26].includes(id),isSeed=[45,46].includes(id),isGem=State.gemLevel(id)>0,canUse=base.useType==='1';
+    const isFragment=[24,25,26].includes(id),isConvertShard=id===GData.CONVERT_SHARD_ID,isSeed=[45,46].includes(id),isGem=State.gemLevel(id)>0,canUse=base.useType==='1';
     const status=shop?State.purchaseStatus(id):null;
-    // 天使/恶魔果实种子：合成的果实是「获得/遗忘武器技能」，所以这里直接标出武技是否已满
+    // 天使/恶魔果实种子：只提示武技是否已满，不阻止合成 ——
+    // 已满时合成的天使果实仍然可以留着，等有空位再用。
     const wsNow=S.weapons.length+S.skills.length,wsMax=State.wsLimit(),wsFull=wsNow>=wsMax;
-    const seedNote=isSeed?('<p class="small-label">武器/技能：<b class="'+(wsFull?'ws-full':'ws-ok')+'">'+wsNow+'/'+wsMax+(wsFull?'（已满，合成的果实将无法领取新武器/技能）':'（未满，可继续获得）')+'</b></p>'):'';
-    const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-description">'+esc(base.remark||'')+'</div><div class="small-label">拥有 '+(S.props[id]||0)+' 个'+(shop?'　售价 '+base.price+' 金松果<br>每日限购 '+status.limit+' 件，今日剩余 '+status.remaining+' 件':'')+'</div></div></div>'+seedNote+'<p class="small-label">金松果：'+S.goldPoint+'</p>'+(isGem?'<p class="small-label">3 个同级宝石 + 10 金松果合成高一级，成功率 '+(State.GEM_MERGE_RATES[State.gemLevel(id)-1]*100)+'%；失败有 50% 几率一颗材料降 1 级（1级则碎裂）。</p>':'');
-    const label=shop?(status.remaining?'购买':'今日售罄'):isFragment?'合成装备':isSeed?(wsFull&&id===45?'武器技能已满':'合成果实'):isGem?'合成宝石':id===37?'分配属性':canUse?'使用':'返回';
-    const m=modal(shop?'道具商店':'道具详情',content,[{label,run:()=>{
-      if(!shop&&!canUse&&!isFragment&&!isSeed&&!isGem)return;
+    const seedNote=isSeed?('<p class="small-label">武器/技能：<b class="'+(wsFull?'ws-full':'ws-ok')+'">'+wsNow+'/'+wsMax+(wsFull?'（已满，果实仍可合成，等有空位时再使用）':'（未满，可继续获得）')+'</b></p>'):'';
+    const shardNote=isConvertShard?('<p class="small-label">当前 <b>'+(S.props[id]||0)+'</b>/'+GData.CONVERT_SHARD_COST+' 个　天梯赛里点飘出来的碎片获得</p>'):'';
+    // 药剂：可以把体力顶到自然上限之上（最高 999），只提示不再自然回复
+    const isPotion=!shop&&(id===1||id===2);
+    const held=S.props[id]||0,cap=State.energyHardCap();
+    const potionNote=isPotion?('<p class="small-label">体力：<b class="'+(S.energy>S.maxEnergy?'ws-full':'ws-ok')+'">'+S.energy+'/'+S.maxEnergy+'</b>'+
+      '　硬上限 '+cap+'<br>超过自然上限的部分不会自然回复，但仍然可以用来挑战。</p>'):'';
+    const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-description">'+esc(base.remark||'')+'</div><div class="small-label">拥有 '+(S.props[id]||0)+' 个'+(shop?'　售价 '+base.price+' 金松果<br>每日限购 '+status.limit+' 件，今日剩余 '+status.remaining+' 件':'')+'</div></div></div>'+seedNote+shardNote+potionNote+'<p class="small-label">金松果：'+S.goldPoint+'</p>'+(isGem?'<p class="small-label">3 个同级宝石 + 10 金松果合成高一级，成功率 '+(State.GEM_MERGE_RATES[State.gemLevel(id)-1]*100)+'%；失败有 50% 几率一颗材料降 1 级（1级则碎裂）。</p>':'');
+    const label=shop?(status.remaining?'购买':'今日售罄'):isFragment?'合成装备':isConvertShard?'合成转化丸':isSeed?'合成果实':isGem?'合成宝石':id===37?'分配属性':canUse?'使用':'返回';
+    const useOne=()=>{
+      if(!shop&&!canUse&&!isFragment&&!isConvertShard&&!isSeed&&!isGem)return;
       if(!shop&&id===37){allocateAttributes();return;}
+      if(!shop&&isConvertShard){const r=State.composeConvertPill();toast(r.msg);if(r.ok)openBag(false,bagPage);return;}
       if(!shop&&isSeed){if((S.props[id]||0)<10||S.goldPoint<50){toast('合成需要10个种子和50金松果');return;}S.props[id]-=10;S.goldPoint-=50;const fruit=id===45?47:48;S.props[fruit]=(S.props[fruit]||0)+1;State.save();toast('合成成功：'+propMap.getValue(fruit).name);openBag(false,bagPage);return;}
       const r=shop?State.buyProp(id,1):isFragment?State.composeGear(id):isGem?State.mergeGems(id):State.useProp(id);
       toast(r.msg||(r.gear?'合成成功：'+r.gear.name:'操作完成'));
       if(r.ok){openBag(shop,bagPage);if(shop)openProp(id,true);}
-    }},{label:'返回',cls:'muted'}],{small:true});
+    };
+    // 药剂支持批量使用：一次用 1/10/全部，超出自然上限的部分不会被清掉
+    const useBatch=(n)=>{
+      const r=State.usePropMany(id,n);
+      toast(r.msg||'操作完成');
+      if(r.ok){m.close();openBag(false,bagPage);openProp(id,false);}
+    };
+    const buttons=[{label,run:useOne}];
+    if(isPotion){
+      if(held>=10)buttons.push({label:'使用 ×10',run:()=>useBatch(10)});
+      buttons.push({label:'全部使用（'+held+'）',run:()=>useBatch('all')});
+    }
+    buttons.push({label:'返回',cls:'muted'});
+    const m=modal(shop?'道具商店':'道具详情',content,buttons,{small:true});
     if(shop&&!status.remaining)$('[data-action="0"]',m.element).disabled=true;
-    // 天使果实（45）合成的果实用来「获得」新武器/技能，武技已满时禁用合成
-    if(!shop&&isSeed&&wsFull&&id===45)$('[data-action="0"]',m.element).disabled=true;
+    // 注意：天使果实（45）在武技已满时**不再**禁用合成，果实可以先囤着。
   }
   function allocateAttributes() {
     const keys=[['power','力量'],['agility','敏捷'],['speed','速度']];
@@ -629,7 +670,7 @@
       const d=new Date(r.createdAt),time=(d.getMonth()+1)+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
       return '<article class="message-card"><span class="message-stamp '+(r.winner?'loss':'')+'">'+(r.winner?'败':'胜')+'</span>你挑战了【'+esc(r.foe.name)+'】，'+(r.winner?'遗憾落败。':'获得胜利！')+'<time>'+time+'</time><button class="uc-button tiny muted" data-replay="'+esc(r.id)+'">查看录像</button></article>';
     }).join('');
-    const p=page('message',tab,'<div class="message-list">'+(html||'<div class="empty-state">暂时没有'+(tab==='revenge'?'落败记录':'战斗消息')+'<br><span class="small-label">开始一场挑战，精彩战斗会保存在这里。</span></div>')+'</div>'+(pg?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(pg<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(pg+1)+'/'+total,left:'<span class="footer-left">'+btn('村庄','village','small gold')+'</span>',right:'<span class="footer-right">'+btn('好友','friends','small gold')+'</span>'});
+    const p=page('message',tab,'<div class="message-list">'+(html||'<div class="empty-state">暂时没有'+(tab==='revenge'?'落败记录':'战斗消息')+'<br><span class="small-label">开始一场挑战，精彩战斗会保存在这里。</span></div>')+'</div>'+(pg?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(pg<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(pg+1)+'/'+total,left:'<span class="footer-left">'+btn('村庄','village','small gold')+'</span>',right:'<span class="footer-right">'+btn('好友','friends','small gold')+'</span>',counterPlace:'board'});
     $$('[data-replay]',p).forEach(b=>b.onclick=()=>{const r=list.find(x=>x.id===b.dataset.replay);Main.replayBattle(r,()=>openMessages(tab,pg));});
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openMessages(tab,pg-1));
     $('[data-action="next"]',p)?.addEventListener('click',()=>openMessages(tab,pg+1));
@@ -646,14 +687,19 @@
     const quests = State.questStatus();
     const gift = '<div class="daily-gift"><div class="daily-gift-text"><h3>每日礼包</h3><p>每天回家都有一份小礼物：金松果 ×150、挑战书 ×1</p></div>' +
       btn(d.claimed ? '今日已领取' : '领取礼包', 'claim-gift', d.claimed ? 'muted' : 'gold') + '</div>';
+    // 奖励连图标带名字一起显示，金松果不再只剩一个数字
+    const rewardIcon = (r) => r.kind === 'gold' ? spr('resource_1', 18)
+      : r.kind === 'exp' ? '<img alt="" src="images/classic/new-reference/drop-exp-classic.png">'
+        : icon('prop', r.id);
     const rows = quests.map((q) => {
-      const bonusName = q.bonus ? ((propMap.getValue(q.bonus) || {}).name || '道具') : '';
       const pct = Math.round(100 * q.progress / q.need);
+      const chips = q.rewards.map((r) => '<span class="quest-chip ' + r.kind + '" title="' + esc(r.name + ' ×' + r.count) + '">' +
+        '<span class="chip-icon">' + rewardIcon(r) + '</span><span class="chip-name">' + esc(r.name) + '</span><b>×' + r.count + '</b></span>').join('');
       return '<div class="quest-row' + (q.claimed ? ' claimed' : q.done ? ' done' : '') + '">' +
         '<span class="quest-name">' + esc(q.name) + '</span>' +
         '<span class="quest-bar"><i style="width:' + pct + '%"></i></span>' +
         '<span class="quest-progress">' + q.progress + '/' + q.need + '</span>' +
-        '<span class="quest-reward">' + num(q.gold) + (bonusName ? '<i class="quest-bonus">+' + esc(bonusName) + '</i>' : '') + '</span>' +
+        '<span class="quest-reward">' + chips + '</span>' +
         (q.claimed ? '<span class="quest-state">已领取</span>'
           : q.done ? btn('领取', 'quest' + q.index, 'small gold')
             : '<span class="quest-state muted">进行中</span>') +

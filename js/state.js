@@ -8,6 +8,9 @@
   const testMode = typeof location !== 'undefined' && /(?:^|[?&])(?:test=[12]|qa=1)(?:&|$)/.test(location.search || '');
   const SAVE_KEY = testMode ? 'ssdz_test_save_v1' : 'ssdz_save_v1';
   const ENERGY_INTERVAL = 5 * 60 * 1000;
+  /* 使用药剂可以把体力顶到上限之上，最高 999；超过上限的部分只是不再自然回复，
+   * 不会被清掉。maxEnergy 仍然是自然回复/每日回复的目标上限。 */
+  const ENERGY_HARD_CAP = 999;
   let S = null; // 玩家状态
   const clone = (value) => JSON.parse(JSON.stringify(value));
   const object = (value) => value && typeof value === 'object' && !Array.isArray(value);
@@ -34,7 +37,7 @@
     for (const key of ['exp', 'energy', 'goldPoint', 'goldCup', 'dailyWins', 'allWins', 'dailyFails', 'allFails', 'reborn', 'joinRankCount', 'lotteryFree', 'woodRecord']) {
       next[key] = integer(next[key], GData.NEW_PLAYER[key]);
     }
-    next.energy = Math.min(next.maxEnergy, next.energy);
+    next.energy = Math.min(ENERGY_HARD_CAP, next.energy);
     next.integral = next.integral == null ? null : integer(next.integral, 0);
     next.name = typeof next.name === 'string' && next.name.trim() ? next.name : '小松鼠';
     next.lastEnergyTs = Number(next.lastEnergyTs) > 0 ? Math.min(Date.now(), integer(next.lastEnergyTs, Date.now(), 1)) : Date.now();
@@ -388,6 +391,34 @@
     const m = Math.floor(remain / 60000), s = Math.floor((remain % 60000) / 1000);
     return `${m}:${String(s).padStart(2, '0')}`;
   }
+
+  /** 批量使用道具（目前只对药剂有意义）：一次用 count 个，返回合并结果。
+   *  count 传 'all' 就用背包里全部（受硬上限 999 限制）。 */
+  function usePropMany(id, count) {
+    id = parseInt(id);
+    const held = S.props[id] || 0;
+    if (held <= 0) return { ok: false, msg: '没有该道具', used: 0 };
+    let want = count === 'all' ? held : Math.max(1, Math.floor(Number(count) || 1));
+    want = Math.min(want, held);
+    if (id !== 1 && id !== 2) {
+      // 其它道具没有「批量」概念，退化成单个使用
+      const one = useProp(id);
+      return { ok: one.ok, used: one.ok ? 1 : 0, msg: one.msg };
+    }
+    let used = 0, stopMsg = '';
+    for (let i = 0; i < want; i++) {
+      const r = useProp(id);
+      if (!r.ok) { stopMsg = r.msg; break; }
+      used++;
+    }
+    const name = (propMap.getValue(id) || {}).name || '药剂';
+    return {
+      ok: used > 0, used,
+      msg: used ? '使用 ' + name + ' ×' + used + '　体力 ' + S.energy + '/' + S.maxEnergy + '（上限 ' + ENERGY_HARD_CAP + '）'
+        : (stopMsg || '无法使用'),
+    };
+  }
+  function energyHardCap() { return ENERGY_HARD_CAP; }
 
   // ---------- 武器/技能实例（含等级换算，同原版 addWeapons） ----------
   /** 原版武器表里的全部武器（按编号排序），供调试面板选择开局武器。 */
@@ -759,11 +790,13 @@
     switch (id) {
       case 1: case 2: {
         tickEnergy();
-        if (S.energy >= S.maxEnergy) return { ok: false, msg: '体力已满，无需使用药剂' };
-        const restored = Math.min(id === 1 ? 10 : 30, S.maxEnergy - S.energy);
+        if (S.energy >= ENERGY_HARD_CAP) return { ok: false, msg: '体力已达上限 ' + ENERGY_HARD_CAP + ' 点' };
+        // 药剂可以把体力顶到自然上限之上，只是不再自然回复
+        const per = id === 1 ? 10 : 30;
+        const restored = Math.min(per, ENERGY_HARD_CAP - S.energy);
         S.energy += restored;
-        if (S.energy === S.maxEnergy) S.lastEnergyTs = Date.now();
-        msg = '恢复体力' + restored + '点';
+        if (S.energy >= S.maxEnergy) S.lastEnergyTs = Date.now();
+        msg = '恢复体力' + restored + '点（' + S.energy + '/' + S.maxEnergy + '）';
         break;
       }
       case 3: case 4: case 5: case 7: case 41: case 42: case 43: case 44:
@@ -881,12 +914,19 @@
       // 升级奖励：概率获得新武器/技能（reward 为 {name,id,kind} 或 null）
       const gained = GData.WS_LEVELS.includes(S.level) ? gainRandomWS() : null;
       if (S.level === 5 && !S.reborn) S.goldPoint += 50;
+      // 升级礼包：卷轴 / 药剂 / 丹药，逢 5 级与属性书等级再加一份大礼包
+      const gifts = (GData.levelGift ? GData.levelGift(S.level) : []).map((g) => {
+        const item = propMap.getValue(g.id);
+        S.props[g.id] = (S.props[g.id] || 0) + g.count;
+        return { id: g.id, count: g.count, name: item ? item.name : '道具' };
+      });
       ups.push({
         level: S.level, power: pw, agility: ag, speed: sp, hp,
         reward: gained ? gained.name : null,
         rewardId: gained ? gained.id : null,
         rewardKind: gained ? gained.kind : null,
         attributeBook: bookLevel,
+        gifts,
       });
     }
     save();
@@ -910,8 +950,7 @@
       if (S.propsStates[k] > 0) S.propsStates[k]--;
     }
   }
-  const EXP_PILL = { 7: 0.4, 44: 0.6 };   // 经验丸 40% / 超级经验丸 60%
-  /** 当前生效的经验加成百分比（经验丸 + 超级经验丸，可叠加）。 */
+  const EXP_PILL = { 7: 0.4, 44: 0.6 };   // 经验丸 40% / 超级经验丸 60%  /** 当前生效的经验加成百分比（经验丸 + 超级经验丸，可叠加）。 */
   function expBoostPct() {
     let pct = 0;
     for (const id of Object.keys(EXP_PILL)) if (S.propsStates[id] > 0) pct += EXP_PILL[id] * 100;
@@ -921,6 +960,22 @@
   function gainExpWithBoost(amount) {
     const boosted = Math.round(Number(amount || 0) * (1 + expBoostPct() / 100));
     return { exp: boosted, ups: gainExp(boosted) };
+  }
+
+  /** 天梯碎片合成：10 个天梯碎片 + 50 金松果 → 随机一个力量/敏捷/速度转化丸。
+   *  依据 references/new/微信图片_20260924010916_259_2.jpg：天梯战飘出的碎片就是这个用途。 */
+  function composeConvertPill() {
+    const need = GData.CONVERT_SHARD_COST, id = GData.CONVERT_SHARD_ID;
+    if ((S.props[id] || 0) < need) return { ok: false, msg: '需要 ' + need + ' 个' + GData.CONVERT_SHARD_NAME };
+    if (S.goldPoint < 50) return { ok: false, msg: '合成需要 50 金松果' };
+    S.props[id] -= need;
+    S.goldPoint -= 50;
+    const pills = GData.CONVERT_PILLS;
+    const got = pills[Math.floor(Math.random() * pills.length)];
+    S.props[got] = (S.props[got] || 0) + 1;
+    save();
+    const item = propMap.getValue(got);
+    return { ok: true, msg: '合成成功：' + (item ? item.name : '转化丸'), prop: got, name: item ? item.name : '转化丸' };
   }
 
   // ---------- 超级松鼠（原版 VIP） ----------
@@ -970,7 +1025,8 @@
       const need = Math.max(0, VIP_ENERGY_CAP - S.maxEnergy);
       if (need > 0) { S.maxEnergy += need; v.capAdded += need; }
     }
-    if (S.energy > S.maxEnergy) S.energy = S.maxEnergy;
+    // 只按硬上限收口：药剂顶上去的超出部分要保住，不能因为上限变化被清掉
+    if (S.energy > ENERGY_HARD_CAP) S.energy = ENERGY_HARD_CAP;
     return S.maxEnergy;
   }
   /** 特权：每日首次登陆 +1 超级松鼠经验，累积自动升级。 */
@@ -1013,12 +1069,44 @@
   }
 
   // 战斗奖励（挑战/竞技胜利）；胜利经验在基准值上下浮动，期望值随对手等级提升
+  /* 主动挑战的经验：只看「自己的等级」和「与对手的等级差」。
+   * 以前用对手等级的绝对值（10 + 对方等级×1.2），自己等级越高打同级对手给得越多，
+   * 结果高等级时随机挑战反而压过经验竞技场。现在改成：
+   *   基准 = BASE + 自己等级 × PER_LEVEL（跟得上经验表的膨胀）
+   *   倍率 = 1 + 等级差 × STEP（对手比自己高才多给，低了就少给）
+   * 不设硬上限。参数挑成：20 级时一场 50 点，正好是竞技场冠军的单位体力效率
+   * （150/30 = 5），20 级之后挑战的单位体力效率就反超竞技场；
+   * 而单场经验在 1~60 级的实际对手等级差范围内始终低于竞技场冠军。
+   * nextExp 每级涨得比这里快，所以每升一级需要的场次仍然越来越多。 */
+  const CHALLENGE_EXP_BASE = 27;
+  const CHALLENGE_EXP_PER_LEVEL = 1.2;
+  const EXP_DIFF_STEP = 0.14;           // 每高 1 级 +14%
+  const EXP_DIFF_FLOOR = 0.3;           // 对手低很多时的最低倍率
+  const EXP_DIFF_CAP = 2.2;
+  const ARENA_CHAMPION_EXP = 150;
+  const ARENA_ENERGY_COST = 30;
+  const ARENA_EXP_PER_ENERGY = ARENA_CHAMPION_EXP / ARENA_ENERGY_COST;   // 5.0
+  /** 一次主动挑战胜利的经验期望（不含随机浮动与经验丸）。 */
+  function challengeExp(foeLevel, myLevel) {
+    const mine = Math.max(1, Math.round(Number(myLevel) || (S && S.level) || 1));
+    const diff = Math.max(-15, Math.min(15, Math.round(Number(foeLevel) || mine) - mine));
+    const base = CHALLENGE_EXP_BASE + mine * CHALLENGE_EXP_PER_LEVEL;
+    const mult = Math.max(EXP_DIFF_FLOOR, Math.min(EXP_DIFF_CAP, 1 + diff * EXP_DIFF_STEP));
+    return Math.round(base * mult);
+  }
+  /** 随机挑战实际会遇到的等级差范围（classic-ui 的 genOpponents：level-1 ~ level+3）。 */
+  const CHALLENGE_DIFF_RANGE = [-1, 3];
+  /** 通关一级需要的挑战场次（用同级对手估算），用于核对「越来越难」。 */
+  function challengeFightsPerLevel(level) {
+    const gain = challengeExp(level, level);
+    return gain > 0 ? GData.nextExp(level) / gain : Infinity;
+  }
   function fightReward(win, opts) {
     opts = opts || {};
     const foeLevel = Math.max(1, Math.floor(Number(opts.foeLevel) || (S && S.level) || 1));
     const expBase = win
-      ? Math.round((10 + foeLevel * 1.2) * (0.8 + Math.random() * 0.4))
-      : 4 + Math.floor(Math.random() * 4);
+      ? Math.round(challengeExp(foeLevel, S.level) * (0.9 + Math.random() * 0.2))
+      : Math.max(4, Math.round(challengeExp(foeLevel, S.level) * 0.08));
     const useProps = opts.useProps !== false;
     const expMul = 1 + (useProps ? expBoostPct() : 0) / 100;
     const gold = win ? 3 + Math.floor(Math.random() * 5) : (Math.random() < 0.3 ? 1 : 0);
@@ -1208,7 +1296,8 @@
   }
   function stageReward(stageId) {
     // 整轮经验 = 三场逐场经验之和（逐场发放，此处仅用于界面展示与离线估算）
-    return { exp: [1, 2, 3].reduce((sum, i) => sum + GData.stageNpcExp(stageId, i), 0), gold: 25 };
+    const gold = 25 * (GData.STAGE_GOLD_MULT || 1);
+    return { exp: [1, 2, 3].reduce((sum, i) => sum + GData.stageNpcExp(stageId, i), 0), gold };
   }
   let stageAttemptSeq = 0;
   function beginStageBattle(stageId) {
@@ -1261,17 +1350,18 @@
       if (Number.isFinite(carryRatio)) run.carryHp = Math.max(0, Math.min(1, carryRatio));
     }
     // 关卡碎片掉落：本次击败的 NPC 就可能掉碎片（不必等到整轮通关）。
-    // 数量 1~6 片；稀有度按关卡类别分层，星数越高越可能掉更高一级的碎片：
+    // 掉率与数量区间由 GData.STAGE_FRAGMENT 统一控制（掉率调高、数量区间收窄）。
     //   螳螂(1-6) 白为主 / 仙鹤(7-12) 绿为主 / 熊猫(13-18) 蓝为主（蓝为上限）。
     //   攻略.md：3星螳螂「大多白、小概率绿」，6星「绿色几率提高」——故 ★3-4 越1级、★5-6 越2级。
     const star = GData.stageStar(stageId);
+    const frag = GData.STAGE_FRAGMENT;
     let drop = null;
-    if (Math.random() < 0.42 + star * 0.03) {
+    if (Math.random() < GData.stageFragmentChance(star)) {
       const base = 24 + Math.floor((stageId - 1) / 6);          // 24 白 / 25 绿 / 26 蓝
       const up = star >= 5 ? 2 : star >= 3 ? 1 : 0;
       const step = Math.min(base + up, 26);                     // 蓝碎片封顶
-      const id = up > 0 && Math.random() >= 0.72 ? step : base; // 28% 越级，否则主类别
-      const count = 1 + Math.floor(Math.random() * 6);
+      const id = up > 0 && Math.random() >= frag.tierUp ? step : base;
+      const count = GData.stageFragmentCount();
       S.props[id] = (S.props[id] || 0) + count;
       drop = { id, count, name: propMap.getValue(id).name };
     }
@@ -1329,31 +1419,53 @@
     { key: 'energy',  name: '消耗 {n} 点体力',        steps: [10, 20, 30], gold: [90, 140, 210] },
   ];
   const QUEST_COUNT = 4;
-  const QUEST_BONUS = { 23: 1, 21: 1, 22: 1 };   // 部分任务额外送挑战书/卷轴
   const QUEST_KEYS = QUEST_TYPES.map((q) => q.key);
+  /* 奖励：金松果固定 10~30，经验固定 50~80，再从下面这些里抽 1~2 种额外的。
+   * 全部按 id 走 propMap，UI 会连图标和名字一起显示，不会只剩一个数字。 */
+  const QUEST_EXTRA_POOL = [
+    { id: 21, range: [3, 5] },   // 技能卷轴
+    { id: 22, range: [3, 5] },   // 武器卷轴
+    { id: 1, range: [1, 3] },    // 小体力药剂
+    { id: 2, range: [1, 2] },    // 大体力药剂
+    { id: 7, range: [1, 2] },    // 经验丸
+    { id: 44, range: [1, 2] },   // 超级经验丸
+    { id: 23, range: [1, 2] },   // 挑战书
+    { id: 45, range: [1, 2] },   // 天使果实种子
+  ];
 
   function questSeed(date) {
     let h = 2166136261;
     for (const ch of String(date)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
     return h >>> 0;
   }
-  function rollQuests() {
-    const date = localDate(), seed = questSeed(date);
-    // 线性同余，够用且不依赖 Math.random，保证同一天结果稳定
+  function questRng(seed) {
     let state = seed || 1;
-    const next = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+    return () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+  }
+  const questRoll = (rnd, range) => range[0] + Math.floor(rnd() * (range[1] - range[0] + 1));
+
+  function rollQuests() {
+    const date = localDate();
+    const rnd = questRng(questSeed(date));
     const pool = QUEST_KEYS.slice();
-    // Fisher–Yates
+    // Fisher–Yates：同一天的抽取顺序固定，刷新页面不会换题
     for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(next() * (i + 1));
+      const j = Math.floor(rnd() * (i + 1));
       const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
     }
     return pool.slice(0, QUEST_COUNT).map((key) => {
       const type = QUEST_TYPES.find((q) => q.key === key);
-      const tier = Math.floor(next() * type.steps.length);
-      const bonusId = Object.keys(QUEST_BONUS).map(Number);
-      const bonus = next() < 0.34 ? bonusId[Math.floor(next() * bonusId.length)] : 0;
-      return { key, need: type.steps[tier], gold: type.gold[tier], bonus, claimed: false };
+      const tier = Math.floor(rnd() * type.steps.length);
+      // 每单额外 1~2 种，运气好三种
+      const extraCount = rnd() < 0.22 ? 3 : rnd() < 0.55 ? 2 : 1;
+      const bag = QUEST_EXTRA_POOL.slice();
+      const extras = [];
+      for (let i = 0; i < extraCount && bag.length; i++) {
+        const pick = Math.floor(rnd() * bag.length);
+        const item = bag.splice(pick, 1)[0];
+        extras.push({ id: item.id, count: questRoll(rnd, item.range) });
+      }
+      return { key, need: type.steps[tier], gold: questRoll(rnd, [10, 30]), exp: questRoll(rnd, [50, 80]), extras, claimed: false };
     });
   }
   function questState() {
@@ -1389,8 +1501,16 @@
     return quests.list.map((q, index) => {
       const type = QUEST_TYPES.find((t) => t.key === q.key) || { name: q.key };
       const progress = Math.min(q.need, Number(counters[q.key]) || 0);
+      const nameOf = (id) => { const item = propMap.getValue(id); return item ? item.name : '道具'; };
+      const rewards = [{ kind: 'gold', id: 8, name: '金松果', count: q.gold }];
+      if (q.exp) rewards.push({ kind: 'exp', id: 15, name: '经验', count: q.exp });
+      for (const extra of Array.isArray(q.extras) ? q.extras : []) {
+        if (extra && extra.id) rewards.push({ kind: 'prop', id: extra.id, name: nameOf(extra.id), count: Math.max(1, Number(extra.count) || 1) });
+      }
       return {
-        index, key: q.key, need: q.need, gold: q.gold, bonus: q.bonus,
+        index, key: q.key, need: q.need, gold: q.gold, exp: q.exp || 0,
+        extras: (Array.isArray(q.extras) ? q.extras : []).map((e) => ({ ...e })),
+        rewards,
         name: String(type.name).replace('{n}', q.need),
         progress, done: progress >= q.need, claimed: q.claimed === true,
         claimable: progress >= q.need && q.claimed !== true,
@@ -1406,15 +1526,18 @@
     if (row.claimed) return { ok: false, msg: '这条任务已经领过了' };
     if (!row.done) return { ok: false, msg: '任务还没完成' };
     questState().list[row.index].claimed = true;
+    const parts = [];
     S.goldPoint += row.gold;
-    let extra = '';
-    if (row.bonus) {
-      S.props[row.bonus] = (S.props[row.bonus] || 0) + (QUEST_BONUS[row.bonus] || 1);
-      const item = propMap.getValue(row.bonus);
-      extra = '，' + (item ? item.name : '道具') + ' +' + (QUEST_BONUS[row.bonus] || 1);
+    parts.push('金松果 +' + row.gold);
+    if (row.exp) { gainExp(row.exp); parts.push('经验 +' + row.exp); }
+    const ups = row.exp ? [] : [];
+    for (const extra of row.extras) {
+      S.props[extra.id] = (S.props[extra.id] || 0) + extra.count;
+      const item = propMap.getValue(extra.id);
+      parts.push((item ? item.name : '道具') + ' +' + extra.count);
     }
     save();
-    return { ok: true, msg: '领取成功：金松果 +' + row.gold + extra, gold: row.gold, bonus: row.bonus };
+    return { ok: true, msg: '领取成功：' + parts.join('、'), gold: row.gold, exp: row.exp, extras: row.extras, ups };
   }
   function claimDaily() {
     const daily = dailyStatus();
@@ -1473,5 +1596,7 @@
     beginStageBattle, finishStageBattle, interruptStageBattle, abandonStageRun,
     localDate, dailyStatus, claimDaily, recordBattle, battleHistory,
     questStatus, questClaimable, claimQuest, bumpDaily, QUEST_TYPES,
+    composeConvertPill, challengeExp, challengeFightsPerLevel, usePropMany, energyHardCap, ENERGY_HARD_CAP,
+    CHALLENGE_EXP_BASE, CHALLENGE_EXP_PER_LEVEL, CHALLENGE_DIFF_RANGE, ARENA_CHAMPION_EXP, ARENA_ENERGY_COST, ARENA_EXP_PER_ENERGY,
   };
 })();

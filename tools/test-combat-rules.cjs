@@ -235,12 +235,23 @@ test('仙鹤大招「仙鹤展翅」是其首次行动且每场仅一次', () =>
   assert.equal(events[events.findIndex((r) => r.attacker === 1)], ults[0]);
 });
 
-test('螳螂生命低于35%放「疾风镰刀舞」四连击，每场仅一次', () => {
+test('螳螂生命低于20%才放「疾风镰刀舞」四连击，每场仅一次且高血量不放', () => {
   const events = rounds(game(0.9), { power: 50, hp: 100000 }, { npcType: 'tl', power: 5, hp: 1000 });
   const ults = events.filter((r) => r.ultName === '疾风镰刀舞');
   assert.equal(ults.length, 1);
   assert.equal(ults[0].multiHit, 4);
   assert.ok(ults[0].dmg > 0);
+  // 触发那一帧螳螂血量必须已经低于 20%（削弱前是 35%，几乎每场都放）
+  let hp = 1000;
+  let frac = null;
+  for (const r of events) {
+    if (r.ultName === '疾风镰刀舞') { frac = hp / 1000; break; }
+    if (Array.isArray(r.hpAfter)) hp = r.hpAfter[1];
+  }
+  assert.ok(frac != null && frac < 0.25, '触发时血量比例应明显偏低，实际 ' + frac);
+  // 血量一直很高时一次都不该放：给一个打不死的对手
+  const tanky = rounds(game(0.9), { power: 1, hp: 100000 }, { npcType: 'tl', power: 1, hp: 100000 });
+  assert.equal(tanky.some((r) => r.ultName === '疾风镰刀舞'), false, '高血量不放四连击');
 });
 
 test('熊猫生命低于40%放「熊掌震地」并震晕对手一回合，每场仅一次', () => {

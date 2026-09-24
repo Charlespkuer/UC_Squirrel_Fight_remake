@@ -68,7 +68,7 @@ test('10级门槛、18关逐星解锁、跨高手边界全部生效', () => {
     assert.equal(g.c.State.stageAccess(id).ok, true, 'Stage ' + id + ': ' + g.c.State.stageAccess(id).msg);
     g.s().props[23] = 1;
     g.win(id); g.win(id); const reward = g.win(id);
-    assert.equal(reward.complete, true); assert.equal(reward.exp, 18 + ((id - 1) % 6)); assert.equal(reward.gold, 25);
+    assert.equal(reward.complete, true); assert.equal(reward.exp, (18 + ((id - 1) % 6)) * g.c.GData.STAGE_REWARD_MULT); assert.equal(reward.gold, 25 * g.c.GData.STAGE_GOLD_MULT);
     assert.equal(g.c.State.highestStageId(), id + 1);
     if (id < 17) assert.equal(g.c.State.stageAccess(id + 2).ok, false);
   }
@@ -79,12 +79,12 @@ test('三战只付1书，零体力也可开战，整轮总奖励只发一次', (
   let started = g.begin(); assert.equal(s.props[23], 0); assert.equal(s.energy, 0);
   assert.equal(g.c.State.beginStageBattle(1).ok, false);
   let rw = g.c.State.finishStageBattle(1, started.token, true);
-  assert.equal(rw.complete, false); assert.equal(rw.exp, 3); assert.equal(s.goldPoint, 100);
+  assert.equal(rw.complete, false); assert.equal(rw.exp, 3 * g.c.GData.STAGE_REWARD_MULT); assert.equal(s.goldPoint, 100);
   assert.equal(g.c.State.finishStageBattle(1, started.token, true).ok, false);
   started = g.begin(); assert.equal(started.npcIndex, 2); g.c.State.finishStageBattle(1, started.token, true);
-  assert.equal(s.exp, 7); assert.equal(s.goldPoint, 100);
+  assert.equal(s.exp, 7 * g.c.GData.STAGE_REWARD_MULT); assert.equal(s.goldPoint, 100);
   started = g.begin(); assert.equal(started.npcIndex, 3); rw = g.c.State.finishStageBattle(1, started.token, true);
-  assert.equal(rw.complete, true); assert.equal(s.exp, 25); assert.equal(s.goldPoint, 125);
+  assert.equal(rw.complete, true); assert.equal(s.exp, 25 * g.c.GData.STAGE_REWARD_MULT); assert.equal(s.goldPoint, 100 + 25 * g.c.GData.STAGE_GOLD_MULT);
   assert.equal(g.c.State.stageRun(1), null); assert.equal(g.c.State.stageProgress(1).passed, true);
   const saved = JSON.stringify(g.saved());
   assert.equal(g.c.State.finishStageBattle(1, started.token, true).ok, false); assert.equal(JSON.stringify(g.saved()), saved);
@@ -101,7 +101,7 @@ test('续关、刷新和中断重试不会再扣书，旧回调不能推进新�
   const afterReload = g.begin(); assert.equal(afterReload.npcIndex, 2);
   assert.equal(g.c.State.finishStageBattle(1, resumed.token, true).ok, false);
   g.c.State.finishStageBattle(1, afterReload.token, true); g.win();
-  assert.equal(g.s().exp, 25); assert.equal(g.s().goldPoint, 125); assert.equal(g.s().energy, 0);
+  assert.equal(g.s().exp, 25 * g.c.GData.STAGE_REWARD_MULT); assert.equal(g.s().goldPoint, 100 + 25 * g.c.GData.STAGE_GOLD_MULT); assert.equal(g.s().energy, 0);
 });
 
 test('每次复活另付1书，最多2次，资源不足和重载不会绕过限制', () => {
@@ -141,7 +141,8 @@ test('结束、重打和失败不倒退既有通关记录，重打从NPC1开始'
   assert.equal(g.c.State.stageProgress(1).passed, true); assert.equal(g.c.State.highestStageId(), 2);
   started = g.begin(); assert.equal(started.npcIndex, 1);
   g.c.State.finishStageBattle(1, started.token, true); g.win(); g.win();
-  assert.equal(g.s().exp, 50); assert.equal(g.s().goldPoint, 150);
+  // 这一段里前前后后一共通关两次，所以金松果是两轮的 25
+  assert.equal(g.s().exp, 50 * g.c.GData.STAGE_REWARD_MULT); assert.equal(g.s().goldPoint, 100 + 2 * 25 * g.c.GData.STAGE_GOLD_MULT);
 });
 
 test('结束未完局后重载不会从历史NPC记录重新生成免费续局', () => {
@@ -178,13 +179,15 @@ test('UI锁定高手和灰星不会进入战斗或扣书', () => {
 test('UI三战与稍后继续完整连通，只付1书且重复战后回调被忽略', () => {
   const g = setup(); g.s().props[23] = 1;
   g.c.openStages(); g.click('type0'); g.click('star1');
-  assert.match(g.modals.at(-1).html, /每场经验 3\/4\/18/);
+  const expRow = [1, 2, 3].map((i) => g.c.GData.stageNpcExp(1, i)).join('/');
+  assert.match(g.modals.at(-1).html, new RegExp('每场经验 ' + expRow));
   g.modalClick('开始战斗'); assert.equal(g.battles.length, 1); assert.equal(g.battles[0].opts.cost, undefined); assert.equal(g.battles[0].opts.useProps, false);
   g.settle(0); const count = g.modals.length; g.settle(0); assert.equal(g.modals.length, count);
   g.modalClick('稍后继续'); g.click('star1'); assert.match(g.modals.at(-1).html, /不消耗挑战书/);
   g.modalClick('继续战斗'); g.settle(1); g.modalClick('继续挑战'); g.modalClick('继续战斗'); g.settle(2);
   assert.equal(g.battles[1].opts.hpRatio, 0.25); assert.equal(g.battles[2].opts.hpRatio, 0.25);
-  assert.match(g.modals.at(-1).html, /经验 \+18　通关金松果 \+25/); assert.equal(g.s().goldPoint, 125); assert.equal(g.s().props[23], 0);
+  assert.match(g.modals.at(-1).html, new RegExp('经验 \\+' + (18 * g.c.GData.STAGE_REWARD_MULT) + '　通关金松果 \\+' + (25 * g.c.GData.STAGE_GOLD_MULT)));
+  assert.equal(g.s().goldPoint, 100 + 25 * g.c.GData.STAGE_GOLD_MULT); assert.equal(g.s().props[23], 0);
   g.modalClick('继续闯关'); assert.match(g.pages.at(-1).html, /class="small" data-action="star2"/);
   g.click('star1'); assert.match(g.modals.at(-1).html, /（1\/3）/); assert.doesNotMatch(g.modals.at(-1).html, /data-action="npc/);
 });

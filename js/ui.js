@@ -510,15 +510,16 @@
       row.innerHTML =
         '<div class="foe-avatar">' + (['🥷', '🥋', '👹'][idx - 1]) + '</div>' +
         '<div class="foe-info"><b>' + npc.name + '</b>' + (npc.isBoss === 'true' ? ' <span class="boss-tag">BOSS</span>' : '') +
-        '<span class="foe-stats">生命' + npc.hp + ' 力量' + npc.power + ' 敏捷' + npc.agility + ' 速度' + npc.speed + '</span></div>';
+        '<span class="foe-stats">生命' + npc.hp + ' 力量' + GData.stageNpcStats(npc).power + ' 敏捷' + GData.stageNpcStats(npc).agility + ' 速度' + GData.stageNpcStats(npc).speed + '</span></div>';
       const btn = el('button', 'btn btn-primary', prog.passed ? '重打' : (idx < prog.npcIndex ? '重打' : '挑战'));
       btn.disabled = locked;
       btn.onclick = () => {
         if ((S.props[23] || 0) < 1) { toast('需要挑战书！可在商店购买'); return; }
         S.props[23]--; State.save();
         p.close();
+        const npcStats = GData.stageNpcStats(npc);
         const foe = {
-          name: npc.name, level: 10 + stageId * 2, power: +npc.power, agility: +npc.agility, speed: +npc.speed, hp: +npc.hp,
+          name: npc.name, level: 10 + stageId * 2, power: npcStats.power, agility: npcStats.agility, speed: npcStats.speed, hp: +npc.hp,
           weapons: [], skills: (npc.skills || '').split('|').filter(Boolean).map((s) => { const q = s.split(':'); return { id: +q[0], level: +q[1] }; }),
           npcType: type.anim,
         };

@@ -22,33 +22,51 @@
     { id: 1, name: '小体力药剂', count: 1, weight: 5 },
     { id: 2, name: '大体力药剂', count: 1, weight: 1 },
     { id: 45, name: '天使果实种子', count: 1, weight: 2 },
+    { id: 46, name: '恶魔果实种子', count: 1, weight: 1 },
     { id: 24, name: '白色碎片', count: 1, weight: 5 },
     { id: 25, name: '绿色碎片', count: 1, weight: 3 },
     { id: 26, name: '蓝色碎片', count: 1, weight: 1 },
   ];
-  function plan(random) {
+  /* 天梯赛专属：飘出来的碎片就是天梯碎片（合成转化丸），恶魔果实种子多给一些。
+   * 依据 references/new/微信图片_20260924010916_259_2.jpg —— 天梯战里飘的是带「?」的碎片。 */
+  const LADDER_POOL = [
+    { id: 51, name: '天梯碎片', count: 1, weight: 34 },
+    { id: 46, name: '恶魔果实种子', count: 1, weight: 10 },
+    { id: 15, name: '经验', count: 5, weight: 22 },
+    { id: 8, name: '金松果', count: 2, weight: 18 },
+    { id: 21, name: '技能卷轴', count: 1, weight: 8 },
+    { id: 22, name: '武器卷轴', count: 1, weight: 8 },
+    { id: 26, name: '蓝色碎片', count: 1, weight: 6 },
+  ];
+  const poolFor = (kind) => (kind === 'rank' ? LADDER_POOL : POOL);
+  function plan(random, kind) {
     random = random || Math.random;
-    const offset = Math.round(random() * RULES.jitter), total = POOL.reduce((n, p) => n + p.weight, 0);
+    const pool = poolFor(kind);
+    const offset = Math.round(random() * RULES.jitter), total = pool.reduce((n, p) => n + p.weight, 0);
     return RULES.frames.map((frame, index) => {
-      let value = random() * total, reward = POOL[POOL.length - 1];
-      for (const item of POOL) { value -= item.weight; if (value < 0) { reward = item; break; } }
+      let value = random() * total, reward = pool[pool.length - 1];
+      for (const item of pool) { value -= item.weight; if (value < 0) { reward = item; break; } }
       return { ...reward, index, at: (frame + offset) / RULES.fps * 1000 };
     });
   }
   function create(options) {
-    const opts = options || {}, drops = plan(opts.random), collected = [], upgrades = [], awarded = new Set();
+    const opts = options || {}, drops = plan(opts.random, opts.kind), collected = [], upgrades = [], awarded = new Set();
     const owner = State.state();
     let elapsed = 0, next = 0, active = null, closed = false, button = null, notice = null, noticeUntil = 0;
     const root = opts.root;
     function removeButton() { if (button) button.remove(); button = null; active = null; }
+    // 拾取卡图标：经验用经典掉落图，有独立道具图的走 icons/prop-N，其余用原版 draw 图集
+    const ICON_PROPS = [24, 25, 26, 51];
+    const iconSrc = (id) => id === 15 ? 'new-reference/drop-exp-classic.png'
+      : ICON_PROPS.includes(id) ? 'icons/prop-' + id + '.png'
+        : 'sprites/draw-' + id + '.png';
     function show(reward) {
       removeButton(); active = reward;
       if (!root) return;
       button = document.createElement('button'); button.type = 'button';
       button.className = 'battle-pickup';
       button.setAttribute('aria-label', '拾取' + reward.name + ' ×' + reward.count);
-      const source = reward.id === 15 ? 'new-reference/drop-exp-classic.png' : (reward.id >= 24 && reward.id <= 26 ? 'icons/prop-' : 'sprites/draw-') + reward.id + '.png';
-      button.innerHTML = '<span class="pickup-card'+(reward.id===15?' classic-exp':'')+'"><img alt="" src="images/classic/' + source + '"></span><span class="pickup-prompt">请点击</span>';
+      button.innerHTML = '<span class="pickup-card'+(reward.id===15?' classic-exp':'')+'"><img alt="" src="images/classic/' + iconSrc(reward.id) + '"></span><span class="pickup-prompt">请点击</span>';
       button.onclick = () => collect(reward.index);
       root.appendChild(button);
     }
@@ -88,5 +106,5 @@
     function summary() { return { items: collected.map(item => ({ ...item })), ups: upgrades.slice() }; }
     return { tick, collect, close, skip, summary };
   }
-  window.BattleDrops = { create, plan, rules: RULES, pool: POOL };
+  window.BattleDrops = { create, plan, rules: RULES, pool: POOL, ladderPool: LADDER_POOL, poolFor };
 })();

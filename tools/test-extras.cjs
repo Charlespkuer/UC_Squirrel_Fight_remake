@@ -600,7 +600,23 @@ test('排行榜：离线模拟、包含自己、三个排序都成立', () => {
   assert.match(html, /1234/, '自己的天梯积分出现');
   assert.match(html, /data-action="cup"/, '三个排序分页都在');
   assert.match(html, /离线模拟/, '明确标注为单机离线模拟');
+  // 33 级够天梯门槛：自己那一行带真实金杯与积分
+  assert.match(html, /测试鼠（我）<\/span><span class="toplist-lv">Lv 33<\/span><span class="toplist-cup">9 金杯<\/span><span class="toplist-score">1234<\/span>/,
+    '够级时自己那一行显示金杯与积分');
   assertBalanced(g.markup);
+
+  // 天梯赛 30 级才开启：不够级时自己的金杯与积分留空，也不进天梯榜
+  const low = setup(), ls = low.c.State.state();
+  ls.level = 20; ls.goldCup = 9; ls.integral = 1234; ls.name = '小松鼠';
+  low.c.ClassicExtras.toplist();
+  low.click('cup');                       // 切到金杯榜
+  const lowHtml = low.page().html;
+  assert.match(lowHtml, /未参赛/, '不够级显示未参赛');
+  assert.match(lowHtml, /天梯赛需要 30 级才能参加/, '给出等级门槛说明');
+  assert.match(lowHtml, /小松鼠（我）<\/span><span class="toplist-lv">Lv 20<\/span><span class="toplist-cup">—<\/span><span class="toplist-score">—<\/span>/,
+    '不够级时自己那一行两列都是破折号');
+  assert.match(lowHtml, /toplist-row me unranked/, '不够级的自己标记为未上榜');
+  assertBalanced(low.markup);
 });
 
 test('VIP 页面：显示原版 8 条特权与两档价格，不删除系统页原有分页', () => {

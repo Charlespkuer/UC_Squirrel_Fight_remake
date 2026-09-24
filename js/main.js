@@ -15,7 +15,7 @@
   let rafId = null;
   let bgm = null, fightBgm = null;
   let mainBg = null, mainBgSoft = false;
-  const HOME_BG_BLUR = 2.5;
+  const HOME_BG_BLUR = 1.1;
 
   /** 主界面背景：等比铺满 1170×690，可加轻微虚化与淡化作纱。
    *  原版 main.jpg 细节很密，HUD 与角色压上去会互相抢，所以默认轻微虚化 + 提亮。 */
@@ -29,14 +29,14 @@
     ctx.drawImage(mainBg, ox, oy, dw, dh);
     if (blur) ctx.filter = 'none';
     if (blur) {
-      // 淡化作纱：一层暖白，再压一点底部暗角让页脚按钮更清楚
-      ctx.fillStyle = 'rgba(255,250,236,0.20)';
+      // 淡化作纱：只压很薄一层，底图细节尽量保留
+      ctx.fillStyle = 'rgba(255,250,236,0.09)';
       ctx.fillRect(0, 0, W, H);
-      const g = ctx.createLinearGradient(0, H * 0.55, 0, H);
+      const g = ctx.createLinearGradient(0, H * 0.62, 0, H);
       g.addColorStop(0, 'rgba(40,60,35,0)');
-      g.addColorStop(1, 'rgba(30,48,28,0.20)');
+      g.addColorStop(1, 'rgba(30,48,28,0.11)');
       ctx.fillStyle = g;
-      ctx.fillRect(0, H * 0.55, W, H * 0.45);
+      ctx.fillRect(0, H * 0.62, W, H * 0.38);
     }
     ctx.restore();
   }
@@ -410,7 +410,7 @@
     if (opts.region != null && foe && foe.region == null) foe.region = opts.region;
     let settled = false;
     const controller = await Battle.run({
-      canvas, me, foe, region: opts.region, collectDrops: opts.collectDrops !== false,
+      canvas, me, foe, region: opts.region, kind: opts.kind, collectDrops: opts.collectDrops !== false,
       dropRandom: window.QA_FIXTURE && QA_FIXTURE.dropRandom,
       onEnd: (winner, result, loot) => {
         if (settled) return;

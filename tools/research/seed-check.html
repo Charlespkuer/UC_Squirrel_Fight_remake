@@ -41,7 +41,7 @@ window.addEventListener('unhandledrejection', function (e) { window.__errs.push(
 <script src="js/main.js"></script>
 <script>
 /* 开发检查：
- * 1) 天使种子（45）详情要标注「武器/技能 x/y」并说明是否已满；已满时禁用合成。
+ * 1) 天使种子（45）详情要标注「武器/技能 x/y」并说明是否已满；已满时**仍可**合成（果实先囤着）。
  *    恶魔种子（46）用于遗忘，不受上限影响，按钮始终可用。
  * 2) 关卡战果弹窗要显示碎片掉落。
  * 全部走真实 UI 点击路径，结果在 window.__report.check。 */
@@ -114,7 +114,9 @@ window.addEventListener('unhandledrejection', function (e) { window.__errs.push(
     check.full.hasRatio = /武器\/技能：\d+\/\d+/.test(check.full.text || '');
     check.full.saysFull = /已满/.test(check.full.text || '');
     check.full.buttonLabel = check.full.button;
-    check.full.buttonDisabled = check.full.disabled === true;
+    check.full.buttonDisabled = check.full.disabled === true;   // 已满也应该是 false
+    check.full.buttonEnabled = check.full.disabled === false;
+    check.full.saysStillOk = /仍可合成/.test(check.full.text || '');
 
     // ---- 恶魔种子（46）不受武技上限影响，仍可合成
     check.demonSeed = await openAnd(46);

@@ -1,5 +1,6 @@
-﻿/* Classic UC layout: 1170 脳 690 design space, scaled together with the stage. */
-@font-face{font-family:UCClassic;src:url('../fonts/ZCOOLKuaiLe-Regular.ttf') format('truetype');font-display:swap}
+/* Classic UC layout: 1170 × 690 design space, scaled together with the stage.
+   标题字体曾用本地下载的站酷快乐体（@font-face UCClassic），小字号下发虚，已弃用；
+   现在统一回落到系统字体。 */
 :root{--ink:#674624;--cream:#fff8de;--sand:#e9c38f;--edge:#926635;--green:#64b927}
 html,body{background:#203a27;font-family:"Microsoft YaHei","SimHei",sans-serif}
 #app{overflow:hidden;background:radial-gradient(ellipse at center,#456c39,#13251c)}
@@ -29,6 +30,24 @@ button,input,select{font:inherit}button{touch-action:manipulation}button:focus-v
 /* 缁忛獙鍏蜂綋鍊硷細閲戞澗鏋滃紡娣辨鑳跺泭锛屾斁鍦ㄧ粡楠屾潯鍙充晶 */
 
 .home-money{margin-left:auto;display:flex;align-items:center;gap:14px;padding:0 16px 0 10px;height:58px;border:3px solid #8b6231;border-radius:31px;background:linear-gradient(#70441f,#5d2f0c 55%,#63300a);box-shadow:inset 0 0 0 3px #fffaf0,inset 0 4px 8px #3c1c03;color:#fff5cf;text-shadow:2px 2px #573626}.home-money img{width:56px;height:56px;object-fit:contain}
+/* 主页限时药丸角标：经验条下方一排小图标，右下角数字是剩余战斗场次 */
+.home-buffs{position:absolute;top:172px;left:43px;display:flex;gap:10px;z-index:3}
+.home-buff{position:relative;width:58px;height:58px;border-radius:17px;background:#fff8e0d9;border:2px solid #b98d4f;box-shadow:0 1px 2px #4a2c0c55;display:flex;align-items:center;justify-content:center}
+.home-buff img{width:48px;height:48px;object-fit:contain}
+.home-buff i{position:absolute;right:-6px;bottom:-6px;min-width:26px;height:26px;border-radius:14px;background:#835230;color:#fff7d7;font:bold 19px/24px Georgia,serif;text-align:center;padding:0 5px;font-style:normal;border:2px solid #fff3c9}
+/* 帮助页物品图鉴 */
+.help-items-title{font-size:27px;color:#a67d25;margin:18px 8px 8px}
+.help-items{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;padding:0 8px}
+.help-item{border:2px solid #d9bd88;border-radius:16px;background:#fffaf0;display:flex;flex-direction:column;align-items:center;gap:5px;padding:7px 3px;cursor:pointer;font-size:19px;color:#7d5d39}
+.help-item:hover{border-color:#9bc75f;background:#f2fbdd}
+.help-item .item-icon{width:64px;height:64px;border-radius:16px}
+.guide-detail{display:flex;gap:20px;align-items:flex-start}
+.guide-detail .item-icon{width:110px;height:110px;flex-shrink:0}
+.guide-detail p{font-size:24px;margin:8px 0}
+.guide-detail ul{font-size:22px;line-height:1.55;padding-left:26px;margin:4px 0;color:#7d5d39}
+.q4{color:#e8842c}
+.gem-pick{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}
+.gem-pick .help-item{flex:1 1 30%}
 /* 閲戞澗鏋滄暟閲忥細鏁翠釜銆屽浘鏍?+ 鏁板瓧銆嶅叡鐢ㄥ悓涓€涓繁妫曡兌鍥婅儗鏅紙鍙傝€冨浘鏍峰紡锛?*/
 .home-money button{display:flex;align-items:center;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;padding:0}
 .home-menu{position:absolute;bottom:17px;left:22px;right:22px;display:grid;grid-template-columns:1fr 1fr 1.48fr 1fr 1fr;gap:16px}.home-menu .uc-button{height:114px;font-size:40px;padding:8px 15px;border-width:4px}.home-side{position:absolute;left:24px;top:293px;display:grid;gap:24px}.picture-button{border:0;background:transparent;cursor:pointer;display:flex;align-items:center;flex-direction:column;font-size:30px;padding:0;color:#fff;font-weight:bold;text-shadow:2px 2px #5a3b22,-1px -1px #5a3b22}.picture-button img{width:78px;height:76px;object-fit:contain}.village-door{position:absolute;right:42px;bottom:154px;background:linear-gradient(90deg,#452d24,#9b4930,#542823);border:7px solid #a29548;border-radius:55px 55px 8px 8px;width:84px;height:118px;box-shadow:inset 0 0 0 3px #402c20;cursor:pointer}.village-door:before{content:"";position:absolute;top:7px;bottom:9px;left:50%;border-left:3px solid #4a3024}.village-door span{position:absolute;bottom:-6px;left:-5px;white-space:nowrap;font-size:31px}.village-door:after{content:"";position:absolute;width:7px;height:7px;top:69px;left:28px;background:#eedc78;border-radius:50%}
@@ -74,7 +93,7 @@ button,input,select{font:inherit}button{touch-action:manipulation}button:focus-v
 /* Existing secondary features retain their game logic in the classic visual shell. */
 .panel-overlay{background:#193a445b;z-index:35}.panel{width:1020px;max-height:89%;border:5px solid #9b7b43;border-radius:43px;background:linear-gradient(#fffbed,#f4e6c1);box-shadow:inset 0 0 0 4px #fffde9,0 4px 8px #34402666}.panel-head{background:transparent;border-bottom:0;padding:20px 33px 5px}.panel-title{font-size:35px;color:#fff8e4;background:#7c522e;border-radius:28px;padding:4px 28px;text-shadow:1px 2px #553720}.panel-close{background:linear-gradient(#d5eaa4,#93bd4e);color:white;border-color:#7b7942;width:44px;height:44px}.panel-body{padding:16px 30px 27px;color:#735434;max-height:520px}.panel-desc{color:#8c6a41;font-size:23px}.panel-desc b,.help-box b{color:#a67d25}.btn{border:3px solid #7b6941;border-radius:33px;background:linear-gradient(#e4f9b3,#9bd350 50%,#5eaa2c);color:#fffbee;box-shadow:inset 0 2px #ffffd2,0 2px #597f35;font-size:25px;padding:8px 24px;text-shadow:1px 2px #695127;-webkit-text-stroke:1px #71532d;paint-order:stroke fill}.btn-primary{background:linear-gradient(#fff39c,#ffc744 50%,#eca01d)}.btn-danger{background:linear-gradient(#e1cdb0,#bba27e);color:#fff9e9}.foe-row,.ws-row,.shop-row{background:#ebd0a0;border-color:#dec08d;border-radius:25px;color:#7d5d39}.foe-info,.ws-info,.shop-info{font-size:23px}.foe-info b,.ws-info b,.shop-info b{font-size:25px;color:#9f7125}.foe-stats,.ws-remark{color:#8f734e;font-size:20px}.rank-board{background:#ead0a2;border-radius:24px}.rank-row{color:#7b5b3a;font-size:24px}.rank-row.me{color:#4f872b}.rank-title,.gear-sec-title{color:#98702f}.help-box p{font-size:23px}.toast{top:205px;border-radius:30px;border:3px solid #a38547;background:#fff5d8f5;color:#7b512a;font-size:29px;padding:15px 30px;box-shadow:0 4px 9px #38542633;z-index:100}.result-title.win{color:#e39c20;text-shadow:2px 3px #885923}.result-title.lose{color:#837a78}.result-lines{font-size:27px;color:#86623a}.levelup-line{color:#658927}.lottery-result{font-size:37px;color:#bd8b22}.confirm-text{font-size:28px}.panel-body::-webkit-scrollbar-thumb,.modal-body::-webkit-scrollbar-thumb{background:#c9af76}.panel-body::-webkit-scrollbar,.modal-body::-webkit-scrollbar{width:9px}.panel-body::-webkit-scrollbar-track{background:#f0e3bf}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-.uc-button,.uc-tab,.cartoon,.title-logo,.home-exp-label,.energy-label,.picture-button span,.status-lines dt,.modal-title{font-family:UCClassic,"Microsoft YaHei",sans-serif}
+.uc-button,.uc-tab,.cartoon,.title-logo,.home-exp-label,.energy-label,.picture-button span,.status-lines dt,.modal-title{font-family:"Microsoft YaHei",sans-serif}
 .uc-button,.uc-tab{-webkit-text-stroke:3px #6a4a2a;text-shadow:0 3px #6a4a2a;letter-spacing:1px}
 .uc-button.small{-webkit-text-stroke:2px #6a4a2a}.uc-button.tiny{-webkit-text-stroke:1.5px #6a4a2a}
 .classic-tabs .uc-tab{font-size:48px}.classic-tabs.four .uc-tab{font-size:39px}
@@ -125,3 +144,7 @@ button,input,select{font:inherit}button{touch-action:manipulation}button:focus-v
   font-size:40px;font-weight:bold;color:#8a4a3a;background:radial-gradient(circle at 38% 32%,#ffe6df,#f0b3a4);
   border:3px solid #fffdf3;text-shadow:0 1px 0 #fff}
 .reward-card.pink .reward-badge{color:#8a4a5a;background:radial-gradient(circle at 38% 32%,#ffe8f0,#eeb0c6)}
+
+/* 天使种子：标出武器/技能是否已满 */
+.small-label .ws-full{color:#c0392b}
+.small-label .ws-ok{color:#4a8a24}

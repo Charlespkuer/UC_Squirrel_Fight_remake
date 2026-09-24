@@ -65,7 +65,7 @@ test('师父之后的下一击必中，不会被中途对手行动消耗', () =>
 });
 
 test('木剑持有时不加闪避，击中后加闪避，闪避增益不反复叠加', () => {
-  const events = rounds(game(0.2), { weapons: ['3:10'] }, { speed: 11 });
+  const events = rounds(game(0.11), { weapons: ['3:10'] }, { speed: 11 });
   assert.equal(events[0].attacker, 1);
   assert.equal(events[0].dodge, undefined);
   assert.equal(events[1].id, 3);
@@ -75,6 +75,8 @@ test('木剑持有时不加闪避，击中后加闪避，闪避增益不反复�
   const miss = rounds(game(0.9, [0.5, 0.5, 0]), { weapons: ['3:10'] });
   assert.equal(miss[0].dodge, true);
   assert.equal(miss[0].dodgeBuff, undefined);
+  const relative = rounds(game(0.2), { weapons: ['3:10'] }, { speed: 11 });
+  assert.equal(relative[2].dodge, undefined, '加成后的约13%闪避仍低于20%，不是加30个百分点');
 });
 
 test('移形换位按原有闪避率增幅计算，不直接增加百分点', () => {
@@ -177,6 +179,91 @@ test('用户Debug无敌模式保留，反弹后的血量快照仍至少为1', ()
   const events = rounds(g, { hp: 1, power: 1000 }, { skills: ['16:10'], hp: 100000 });
   assert.ok(events.some((r) => r.reboundHurt));
   assert.ok(events.every((r) => r.hpAfter[0] >= 1));
+});
+
+test('流星锤即使未命中也给对手整场相对20%闪避增益', () => {
+  const events = rounds(game(0.9, [0.5, 0.5, 0, 0.9, 0.9, 0.5, 0.9, 0.9, 0.9, 0.11]), { weapons: ['10:1'] });
+  assert.equal(events[0].id, 10);
+  assert.equal(events[0].dodge, true);
+  assert.equal(events[2].action, 'common');
+  assert.equal(events[2].dodge, true, '之后的普通攻击也受到流星锤闪避增益影响');
+  const relative = rounds(game(0.2), { weapons: ['10:1'] });
+  assert.equal(relative[0].dodge, undefined, '相对+20%约为12%，不增加20个百分点');
+});
+
+test('狼牙棒中毒在中招者四次出手掉血，包含不占回合的追加行动', () => {
+  const events = rounds(game(0.8, [0.5, 0.5, 0.5, 0.5, 0.1, 0.9, 0.5, 0]), { weapons: ['12:1'] }, { skills: ['14:1'] });
+  assert.equal(events[0].dotApplied, true);
+  const poison = events.filter((r) => r.action === 'dot');
+  assert.equal(poison.length, 4);
+  assert.ok(poison.every((r) => r.attacker === 1 && r.dmg === 4));
+  const cosmos = events.findIndex((r) => r.id === 14);
+  assert.ok(cosmos > 0);
+  assert.equal(events[cosmos + 1].action, 'dot');
+  assert.equal(events[cosmos + 2].attacker, 1);
+});
+
+test('沉默之斧同时抑制武器好手等被动技能', () => {
+  const attacker = { weapons: ['16:10'] }, defender = { weapons: ['2:1'], skills: ['5:10'] };
+  const events = rounds(game(0.3), attacker, defender);
+  assert.equal(events[0].silenceApplied, true);
+  const muted = events.find((r) => r.attacker === 1 && r.action === 'weapon');
+  const withoutSkill = rounds(game(0.3), attacker, { weapons: ['2:1'] }).find((r) => r.attacker === 1 && r.action === 'weapon');
+  assert.equal(muted.dmg, withoutSkill.dmg);
+});
+
+test('来点松果每场战斗只能使用一次', () => {
+  const events = rounds(game(0.3), { skills: ['17:5'], power: 1 }, { power: 50, hp: 100000 });
+  const snacks = events.filter((r) => r.id === 17);
+  assert.equal(snacks.length, 1);
+  assert.ok(snacks[0].healSelf > 0);
+  assert.ok(events.length > 30, '战斗足够长，排除了“没机会再用”的假象');
+});
+
+test('来点松果每场战斗只能使用一次', () => {
+  const events = rounds(game(0.3), { skills: ['17:5'], power: 1 }, { power: 50, hp: 100000 });
+  const snacks = events.filter((r) => r.id === 17);
+  assert.equal(snacks.length, 1);
+  assert.ok(snacks[0].healSelf > 0);
+  assert.ok(events.length > 30, '战斗足够长，排除了“没机会再用”的假象');
+});
+
+test('仙鹤大招「仙鹤展翅」是其首次行动且每场仅一次', () => {
+  const events = rounds(game(0.9), { hp: 100000, power: 1, speed: 100 }, { npcType: 'xh', power: 30, hp: 8000, speed: 10 });
+  const ults = events.filter((r) => r.ultName === '仙鹤展翅');
+  assert.equal(ults.length, 1);
+  assert.equal(events[events.findIndex((r) => r.attacker === 1)], ults[0]);
+});
+
+test('螳螂生命低于35%放「疾风镰刀舞」四连击，每场仅一次', () => {
+  const events = rounds(game(0.9), { power: 50, hp: 100000 }, { npcType: 'tl', power: 5, hp: 1000 });
+  const ults = events.filter((r) => r.ultName === '疾风镰刀舞');
+  assert.equal(ults.length, 1);
+  assert.equal(ults[0].multiHit, 4);
+  assert.ok(ults[0].dmg > 0);
+});
+
+test('熊猫生命低于40%放「熊掌震地」并震晕对手一回合，每场仅一次', () => {
+  const events = rounds(game(0.9), { power: 50, hp: 100000 }, { npcType: 'xm', power: 5, hp: 1000 });
+  const ults = events.filter((r) => r.ultName === '熊掌震地');
+  assert.equal(ults.length, 1);
+  assert.equal(ults[0].stunApplied, true);
+  assert.ok(events.some((r) => r.attacker === 0 && r.action === 'stunned'));
+});
+
+test('关卡连战入场：当前血量按比例继承，但生命上限保持不变', () => {
+  const g = game();
+  // 满血入场：上限与血量都由 hp 推出，行为不变。
+  const full = g.Sim.simulate(fighter({ hp: 400 }), fighter({ hp: 400 }));
+  assert.deepEqual(Array.from(full.maxHp), [400, 400]);
+  // 残血入场（25%）：hp 是当前血量，maxHp 仍是不变的上限。
+  // 修复前 maxHp 会被写成 100，血条显示成满血且上限被压低。
+  const hurt = g.Sim.simulate(fighter({ hp: 100, maxHp: 400 }), fighter({ hp: 400 }));
+  assert.deepEqual(Array.from(hurt.maxHp), [400, 400]);
+  assert.ok(hurt.rounds.every((r) => r.hpAfter[0] <= 400));
+  // 上限更高的那一方不会因为入场残血就被判定为「血量比例更高」而拖到超时判胜。
+  const short = g.Sim.simulate(fighter({ hp: 10, maxHp: 400, power: 1, weapons: [] }), fighter({ hp: 400, power: 60 }));
+  assert.equal(short.winner, 1, '残血一方应当战败，而不是按 10/10 满血拖到判定');
 });
 
 let failed = 0;

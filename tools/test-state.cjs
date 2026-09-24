@@ -143,20 +143,21 @@ test('只调整设备 Date.now 时，统计与每日奖励共用同一本地日�
 
 test('体力离线恢复保留余秒，满体力时不积攒免费恢复', () => {
   const g = game(), s = g.State.state();
-  s.energy = 100;
+  s.energy = 80;
   g.advance(11 * 60 * 1000); g.State.tickEnergy();
-  assert.equal(s.energy, 102); assert.equal(g.State.energyCountdown(), '4:00');
-  s.energy = 120;
+  assert.equal(s.energy, 82); assert.equal(g.State.energyCountdown(), '4:00');
+  s.energy = s.maxEnergy;
   g.advance(24 * 60 * 60 * 1000);
   assert.equal(g.State.consumeEnergy(10), true);
-  assert.equal(s.energy, 110);
-  g.State.tickEnergy(); assert.equal(s.energy, 110);
-  assert.equal(g.State.consumeEnergy(111), false); assert.equal(g.State.consumeEnergy(-10), false);
-  g.State.load(); assert.equal(g.State.state().energy, 110);
+  assert.equal(s.energy, s.maxEnergy - 10);
+  g.State.tickEnergy(); assert.equal(s.energy, s.maxEnergy - 10);
+  assert.equal(g.State.consumeEnergy(s.maxEnergy - 9), false); assert.equal(g.State.consumeEnergy(-10), false);
+  g.State.load(); assert.equal(g.State.state().energy, s.maxEnergy - 10);
 });
 
 test('升级遵循原表等级与资源限制，零卷轴不会产生 NaN', () => {
   const g = game(), s = g.State.state();
+  s.weapons = ['1:1'];
   assert.equal(g.State.doUpgrade('weapon', 1).ok, false);
   s.level = 5;
   assert.equal(g.State.doUpgrade('weapon', '1').ok, true);
@@ -241,7 +242,7 @@ test('不使用药剂的战斗不消耗有效次数，被动技能按原字典�
   const g = game(), s = g.State.state();
   s.skills = ['1:1', '2:2', '3:3', '4:1']; s.propsStates[3] = 20; s.propsStates[7] = 20;
   const stats = g.State.totalStats({ useProps: false });
-  same(stats, { power: 10, agility: 12, speed: 11, hp: 58 });
+  same(stats, { power: s.power + 2, agility: s.agility + 4, speed: s.speed + 4, hp: s.maxHp + 5 });
   g.State.fightReward(true, { useProps: false });
   assert.equal(s.propsStates[3], 20); assert.equal(s.propsStates[7], 20);
   g.State.fightReward(true); assert.equal(s.propsStates[3], 19);
@@ -332,6 +333,24 @@ test('战报保存独立快照，重载可回放，最多保留最新 50 条', (
   assert.equal(history.length, 50); assert.equal(history[0].foe.name, '53'); assert.equal(history[49].foe.name, '4');
   assert.equal(history[0].result.rounds.length > 0, true);
   history[0].foe.name = '外部修改'; assert.equal(g.State.battleHistory()[0].foe.name, '53');
+});
+
+test('经验丸说明不再声称竞技场无效，其它限制仍保留', () => {
+  const g = game();
+  const pill = g.propMap.getValue(7), superPill = g.propMap.getValue(44);
+  assert.equal(pill.name, '经验丸');
+  assert.doesNotMatch(pill.remark, /竞技/);
+  assert.match(pill.remark, /40%/);
+  assert.match(pill.remark, /关卡中无效/, '关卡的无效说明要保留');
+  assert.doesNotMatch(superPill.remark, /竞技/);
+  assert.match(superPill.remark, /60%/);
+  assert.match(superPill.remark, /天梯赛无效/, '天梯赛的无效说明要保留');
+  // 说明修正必须落在底层行数组上，重新取值也要能看到（Map#getValue 每次新建对象）
+  assert.equal(pill.remark, g.propMap.getValue(7).remark);
+  // 重复执行是幂等的，不会把已改好的文案再改坏
+  g.GData.applyPropRemarkFixes();
+  assert.match(g.propMap.getValue(7).remark, /关卡中无效/);
+  assert.equal(g.propMap.getValue(7).remark, pill.remark);
 });
 
 let failed = 0;

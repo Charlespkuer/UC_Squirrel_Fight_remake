@@ -68,7 +68,7 @@ test('10级门槛、18关逐星解锁、跨高手边界全部生效', () => {
     assert.equal(g.c.State.stageAccess(id).ok, true, 'Stage ' + id + ': ' + g.c.State.stageAccess(id).msg);
     g.s().props[23] = 1;
     g.win(id); g.win(id); const reward = g.win(id);
-    assert.equal(reward.complete, true); assert.equal(reward.exp, 19 + (id - 1) * 3); assert.equal(reward.gold, 25);
+    assert.equal(reward.complete, true); assert.equal(reward.exp, 18 + ((id - 1) % 6)); assert.equal(reward.gold, 25);
     assert.equal(g.c.State.highestStageId(), id + 1);
     if (id < 17) assert.equal(g.c.State.stageAccess(id + 2).ok, false);
   }
@@ -79,12 +79,12 @@ test('三战只付1书，零体力也可开战，整轮总奖励只发一次', (
   let started = g.begin(); assert.equal(s.props[23], 0); assert.equal(s.energy, 0);
   assert.equal(g.c.State.beginStageBattle(1).ok, false);
   let rw = g.c.State.finishStageBattle(1, started.token, true);
-  assert.equal(rw.complete, false); assert.equal(rw.exp, 0); assert.equal(s.goldPoint, 100);
+  assert.equal(rw.complete, false); assert.equal(rw.exp, 3); assert.equal(s.goldPoint, 100);
   assert.equal(g.c.State.finishStageBattle(1, started.token, true).ok, false);
   started = g.begin(); assert.equal(started.npcIndex, 2); g.c.State.finishStageBattle(1, started.token, true);
-  assert.equal(s.exp, 0); assert.equal(s.goldPoint, 100);
+  assert.equal(s.exp, 7); assert.equal(s.goldPoint, 100);
   started = g.begin(); assert.equal(started.npcIndex, 3); rw = g.c.State.finishStageBattle(1, started.token, true);
-  assert.equal(rw.complete, true); assert.equal(s.exp, 19); assert.equal(s.goldPoint, 125);
+  assert.equal(rw.complete, true); assert.equal(s.exp, 25); assert.equal(s.goldPoint, 125);
   assert.equal(g.c.State.stageRun(1), null); assert.equal(g.c.State.stageProgress(1).passed, true);
   const saved = JSON.stringify(g.saved());
   assert.equal(g.c.State.finishStageBattle(1, started.token, true).ok, false); assert.equal(JSON.stringify(g.saved()), saved);
@@ -101,7 +101,7 @@ test('续关、刷新和中断重试不会再扣书，旧回调不能推进新�
   const afterReload = g.begin(); assert.equal(afterReload.npcIndex, 2);
   assert.equal(g.c.State.finishStageBattle(1, resumed.token, true).ok, false);
   g.c.State.finishStageBattle(1, afterReload.token, true); g.win();
-  assert.equal(g.s().exp, 19); assert.equal(g.s().goldPoint, 125); assert.equal(g.s().energy, 0);
+  assert.equal(g.s().exp, 25); assert.equal(g.s().goldPoint, 125); assert.equal(g.s().energy, 0);
 });
 
 test('每次复活另付1书，最多2次，资源不足和重载不会绕过限制', () => {
@@ -141,7 +141,7 @@ test('结束、重打和失败不倒退既有通关记录，重打从NPC1开始'
   assert.equal(g.c.State.stageProgress(1).passed, true); assert.equal(g.c.State.highestStageId(), 2);
   started = g.begin(); assert.equal(started.npcIndex, 1);
   g.c.State.finishStageBattle(1, started.token, true); g.win(); g.win();
-  assert.equal(g.s().exp, 38); assert.equal(g.s().goldPoint, 150);
+  assert.equal(g.s().exp, 50); assert.equal(g.s().goldPoint, 150);
 });
 
 test('结束未完局后重载不会从历史NPC记录重新生成免费续局', () => {
@@ -178,12 +178,13 @@ test('UI锁定高手和灰星不会进入战斗或扣书', () => {
 test('UI三战与稍后继续完整连通，只付1书且重复战后回调被忽略', () => {
   const g = setup(); g.s().props[23] = 1;
   g.c.openStages(); g.click('type0'); g.click('star1');
-  assert.match(g.modals.at(-1).html, /整轮奖励.*经验19/);
+  assert.match(g.modals.at(-1).html, /每场经验 3\/4\/18/);
   g.modalClick('开始战斗'); assert.equal(g.battles.length, 1); assert.equal(g.battles[0].opts.cost, undefined); assert.equal(g.battles[0].opts.useProps, false);
   g.settle(0); const count = g.modals.length; g.settle(0); assert.equal(g.modals.length, count);
   g.modalClick('稍后继续'); g.click('star1'); assert.match(g.modals.at(-1).html, /不消耗挑战书/);
   g.modalClick('继续战斗'); g.settle(1); g.modalClick('继续挑战'); g.modalClick('继续战斗'); g.settle(2);
-  assert.match(g.modals.at(-1).html, /整轮经验 \+19/); assert.equal(g.s().goldPoint, 125); assert.equal(g.s().props[23], 0);
+  assert.equal(g.battles[1].opts.hpRatio, 0.25); assert.equal(g.battles[2].opts.hpRatio, 0.25);
+  assert.match(g.modals.at(-1).html, /经验 \+18　通关金松果 \+25/); assert.equal(g.s().goldPoint, 125); assert.equal(g.s().props[23], 0);
   g.modalClick('继续闯关'); assert.match(g.pages.at(-1).html, /class="small" data-action="star2"/);
   g.click('star1'); assert.match(g.modals.at(-1).html, /（1\/3）/); assert.doesNotMatch(g.modals.at(-1).html, /data-action="npc/);
 });
@@ -202,17 +203,54 @@ test('UI失败复活、结束确认、购买挑战书与错误重试都有出口
   g.c.stageConfirm(1); g.modalClick('继续战斗'); assert.equal(g.battles.length, 5);
 });
 
-test('异步战斗启动失败可继续已付费本轮，清理token并恢复主页', async () => {
+test('战果按最后一帧剩余血量继承，缺少 hpAfter 也不抛错（跳过同样安全）', () => {
+  const g = setup(); g.s().props[23] = 5;
+  g.c.openStages(); g.click('type0'); g.click('star1');
+  g.modalClick('开始战斗');
+  assert.equal(g.battles.length, 1);
+  // Battle 结束时会把最后一帧的 hpAfter 提到 result 上（Sim.simulate 本身只在逐帧里给），
+  // 关卡连战据此继承剩余血量比例：300/400 = 0.75。
+  g.battles.at(-1).opts.onEnd(0, { winner: 0, maxHp: [400, 100], hpAfter: [300, 0], rounds: [
+    { attacker: 0, action: 'common', dmg: 20, hpAfter: [380, 100] },
+    { attacker: 0, action: 'common', dmg: 100, hpAfter: [300, 0] },
+  ] });
+  assert.equal(g.c.State.stageRun(1).carryHp, 0.75);
+  // 旧/异常形状：result 上只有逐帧 hpAfter（修复前这里会抛 TypeError 并被丢回主界面）。
+  g.modalClick('继续挑战'); g.modalClick('继续战斗');
+  assert.doesNotThrow(() => g.battles.at(-1).opts.onEnd(0, { winner: 0, maxHp: [400, 100], rounds: [
+    { attacker: 0, action: 'common', dmg: 100, hpAfter: [120, 0] },
+  ] }));
+  assert.equal(g.c.State.stageRun(1).carryHp, 0);
+  assert.equal(g.c.homeCount, undefined);
+});
+
+test('异步战斗启动失败可继续已付费本轮，清理token并回到关卡页', async () => {
   const g = setup(); g.s().props[23] = 1;
+  const pagesBefore = g.pages.length;
   g.c.Main.startBattle = () => Promise.reject(new Error('Resource unavailable'));
   g.c.stageFight(1); await new Promise(resolve => setImmediate(resolve));
-  assert.equal(g.s().props[23], 0); assert.equal(g.c.State.stageRun(1).attempt, undefined); assert.equal(g.c.homeCount, 1);
+  assert.equal(g.s().props[23], 0); assert.equal(g.c.State.stageRun(1).attempt, undefined);
+  // 中断后应留在关卡页（战果弹窗的背景），而不是被丢回主界面
+  assert.equal(g.c.homeCount, undefined);
+  assert.ok(g.pages.length > pagesBefore, '回到关卡页');
   assert.match(g.modals.at(-1).html, /本轮进度已保留/);
   assert.equal(g.begin().npcIndex, 1); assert.equal(g.s().props[23], 0);
 });
 
 (async () => {
-  let failed = 0;
+  test('连续挑战继承剩余血量（回复25%），失败复活回满，重载保留', () => {
+  const g = setup(); g.s().props[23] = 5;
+  let started = g.begin();
+  g.c.State.finishStageBattle(1, started.token, true, 0.4);
+  assert.equal(g.c.State.stageRun(1).carryHp, 0.4);
+  g.c.State.save(); g.c.State.load();
+  assert.equal(g.c.State.stageRun(1).carryHp, 0.4);
+  started = g.begin();
+  g.c.State.finishStageBattle(1, started.token, false);
+  assert.equal(g.c.State.stageRun(1).carryHp, undefined);
+});
+
+let failed = 0;
   for (const [name, run] of tests) {
     try { await run(); console.log('PASS', name); }
     catch (error) { failed++; console.error('FAIL', name, error.stack); }

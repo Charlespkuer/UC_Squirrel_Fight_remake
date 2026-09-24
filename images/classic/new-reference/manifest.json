@@ -922,6 +922,495 @@
       ],
       "id": 26,
       "note": "Exact prop atlas icon. APK FightProps does not list fragments as supported floating reward IDs."
+    },
+    "props/prop-1.png": {
+      "source": "references/new/3d539b600bc5f.webp",
+      "rect": [
+        88,
+        98,
+        139,
+        140
+      ],
+      "size": [
+        139,
+        140
+      ],
+      "kind": "prop",
+      "id": 1,
+      "name": "小体力药剂",
+      "inventoryPage": 1,
+      "locked": false,
+      "selected": false,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": true,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-2.png": {
+      "source": "references/new/3d539b600bc5f.webp",
+      "rect": [
+        248,
+        98,
+        140,
+        140
+      ],
+      "size": [
+        140,
+        140
+      ],
+      "kind": "prop",
+      "id": 2,
+      "name": "大体力药剂",
+      "inventoryPage": 1,
+      "locked": false,
+      "selected": false,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": true,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-3-selected.png": {
+      "source": "references/new/3d539b600bc5f.webp",
+      "rect": [
+        411,
+        96,
+        141,
+        141
+      ],
+      "size": [
+        141,
+        141
+      ],
+      "kind": "prop",
+      "id": 3,
+      "name": "大力丸",
+      "inventoryPage": 1,
+      "locked": false,
+      "selected": true,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": false,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-4.png": {
+      "source": "references/new/3d539b600bc5f.webp",
+      "rect": [
+        87,
+        280,
+        140,
+        140
+      ],
+      "size": [
+        140,
+        140
+      ],
+      "kind": "prop",
+      "id": 4,
+      "name": "敏捷丸",
+      "inventoryPage": 1,
+      "locked": false,
+      "selected": false,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": true,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-5.png": {
+      "source": "references/new/3d539b600bc5f.webp",
+      "rect": [
+        246,
+        279,
+        141,
+        141
+      ],
+      "size": [
+        141,
+        141
+      ],
+      "kind": "prop",
+      "id": 5,
+      "name": "速度丸",
+      "inventoryPage": 1,
+      "locked": false,
+      "selected": false,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": true,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-10.png": {
+      "source": "references/new/3d539b600bc5f.webp",
+      "rect": [
+        412,
+        280,
+        141,
+        140
+      ],
+      "size": [
+        141,
+        140
+      ],
+      "kind": "prop",
+      "id": 10,
+      "name": "力量转化丸",
+      "inventoryPage": 1,
+      "locked": false,
+      "selected": false,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": true,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-11-selected.png": {
+      "source": "references/new/aec379310a55b319a73912ae49a98226cefc172c.webp",
+      "rect": [
+        86,
+        95,
+        143,
+        143
+      ],
+      "size": [
+        143,
+        143
+      ],
+      "kind": "prop",
+      "id": 11,
+      "name": "敏捷转化丸",
+      "inventoryPage": 2,
+      "locked": false,
+      "selected": true,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": false,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-12.png": {
+      "source": "references/new/aec379310a55b319a73912ae49a98226cefc172c.webp",
+      "rect": [
+        247,
+        97,
+        141,
+        140
+      ],
+      "size": [
+        141,
+        140
+      ],
+      "kind": "prop",
+      "id": 12,
+      "name": "速度转化丸",
+      "inventoryPage": 2,
+      "locked": false,
+      "selected": false,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": true,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-21.png": {
+      "source": "references/new/aec379310a55b319a73912ae49a98226cefc172c.webp",
+      "rect": [
+        411,
+        97,
+        139,
+        139
+      ],
+      "size": [
+        139,
+        139
+      ],
+      "kind": "prop",
+      "id": 21,
+      "name": "技能卷轴",
+      "inventoryPage": 2,
+      "locked": false,
+      "selected": false,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": true,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-22.png": {
+      "source": "references/new/aec379310a55b319a73912ae49a98226cefc172c.webp",
+      "rect": [
+        86,
+        279,
+        142,
+        140
+      ],
+      "size": [
+        142,
+        140
+      ],
+      "kind": "prop",
+      "id": 22,
+      "name": "武器卷轴",
+      "inventoryPage": 2,
+      "locked": false,
+      "selected": false,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": true,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-23.png": {
+      "source": "references/new/aec379310a55b319a73912ae49a98226cefc172c.webp",
+      "rect": [
+        246,
+        279,
+        141,
+        140
+      ],
+      "size": [
+        141,
+        140
+      ],
+      "kind": "prop",
+      "id": 23,
+      "name": "挑战书",
+      "inventoryPage": 2,
+      "locked": false,
+      "selected": false,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": true,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-24.png": {
+      "source": "references/new/aec379310a55b319a73912ae49a98226cefc172c.webp",
+      "rect": [
+        411,
+        280,
+        139,
+        138
+      ],
+      "size": [
+        139,
+        138
+      ],
+      "kind": "prop",
+      "id": 24,
+      "name": "白色碎片",
+      "inventoryPage": 2,
+      "locked": false,
+      "selected": false,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": true,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-25-selected.png": {
+      "source": "references/new/8d3fd1f445f.webp",
+      "rect": [
+        83,
+        95,
+        144,
+        143
+      ],
+      "size": [
+        144,
+        143
+      ],
+      "kind": "prop",
+      "id": 25,
+      "name": "绿色碎片",
+      "inventoryPage": 3,
+      "locked": false,
+      "selected": true,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": false,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-26.png": {
+      "source": "references/new/8d3fd1f445f.webp",
+      "rect": [
+        245,
+        98,
+        140,
+        140
+      ],
+      "size": [
+        140,
+        140
+      ],
+      "kind": "prop",
+      "id": 26,
+      "name": "蓝色碎片",
+      "inventoryPage": 3,
+      "locked": false,
+      "selected": false,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": true,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "props/prop-36.png": {
+      "source": "references/new/8d3fd1f445f.webp",
+      "rect": [
+        409,
+        98,
+        141,
+        140
+      ],
+      "size": [
+        141,
+        140
+      ],
+      "kind": "prop",
+      "id": 36,
+      "name": "英雄帖",
+      "inventoryPage": 3,
+      "locked": false,
+      "selected": false,
+      "containsFrame": true,
+      "containsQuantity": false,
+      "usableForNormalUI": true,
+      "processing": "Lossless rectangular screenshot crop; original card frame retained; quantity caption excluded."
+    },
+    "buttons/status-active.png": {
+      "source": "references/new/8f1d43f8794a4c22672.webp",
+      "rect": [
+        84,
+        12,
+        208,
+        65
+      ],
+      "size": [
+        208,
+        65
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": true,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "buttons/status-normal.png": {
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        84,
+        15,
+        208,
+        66
+      ],
+      "size": [
+        208,
+        66
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": false,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "buttons/weapon-active.png": {
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        344,
+        16,
+        208,
+        66
+      ],
+      "size": [
+        208,
+        66
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": true,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "buttons/weapon-normal.png": {
+      "source": "references/new/8f1d43f8794a4c22672.webp",
+      "rect": [
+        344,
+        12,
+        208,
+        65
+      ],
+      "size": [
+        208,
+        65
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": false,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "buttons/skill-active.png": {
+      "source": "references/new/4b745125e.webp",
+      "rect": [
+        607,
+        15,
+        206,
+        66
+      ],
+      "size": [
+        206,
+        66
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": true,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "buttons/skill-normal.png": {
+      "source": "references/new/8f1d43f8794a4c22672.webp",
+      "rect": [
+        605,
+        12,
+        206,
+        65
+      ],
+      "size": [
+        206,
+        65
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": false,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "buttons/return-menu.png": {
+      "source": "references/new/8f1d43f8794a4c22672.webp",
+      "rect": [
+        304,
+        474,
+        312,
+        82
+      ],
+      "size": [
+        312,
+        82
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": false,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "buttons/change-equipment.png": {
+      "source": "references/new/8f1d43f8794a4c22672.webp",
+      "rect": [
+        461,
+        275,
+        221,
+        94
+      ],
+      "size": [
+        221,
+        94
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": false,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
     }
   },
   "cards": {
@@ -1192,6 +1681,283 @@
         "containsFrame": true,
         "containsTrueStamp": false
       }
+    },
+    "prop": {
+      "1": {
+        "path": "images/classic/new-reference/props/prop-1.png",
+        "name": "小体力药剂",
+        "selected": false,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": true
+      },
+      "2": {
+        "path": "images/classic/new-reference/props/prop-2.png",
+        "name": "大体力药剂",
+        "selected": false,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": true
+      },
+      "3": {
+        "path": "images/classic/new-reference/props/prop-3-selected.png",
+        "name": "大力丸",
+        "selected": true,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": false
+      },
+      "4": {
+        "path": "images/classic/new-reference/props/prop-4.png",
+        "name": "敏捷丸",
+        "selected": false,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": true
+      },
+      "5": {
+        "path": "images/classic/new-reference/props/prop-5.png",
+        "name": "速度丸",
+        "selected": false,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": true
+      },
+      "10": {
+        "path": "images/classic/new-reference/props/prop-10.png",
+        "name": "力量转化丸",
+        "selected": false,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": true
+      },
+      "11": {
+        "path": "images/classic/new-reference/props/prop-11-selected.png",
+        "name": "敏捷转化丸",
+        "selected": true,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": false
+      },
+      "12": {
+        "path": "images/classic/new-reference/props/prop-12.png",
+        "name": "速度转化丸",
+        "selected": false,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": true
+      },
+      "21": {
+        "path": "images/classic/new-reference/props/prop-21.png",
+        "name": "技能卷轴",
+        "selected": false,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": true
+      },
+      "22": {
+        "path": "images/classic/new-reference/props/prop-22.png",
+        "name": "武器卷轴",
+        "selected": false,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": true
+      },
+      "23": {
+        "path": "images/classic/new-reference/props/prop-23.png",
+        "name": "挑战书",
+        "selected": false,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": true
+      },
+      "24": {
+        "path": "images/classic/new-reference/props/prop-24.png",
+        "name": "白色碎片",
+        "selected": false,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": true
+      },
+      "25": {
+        "path": "images/classic/new-reference/props/prop-25-selected.png",
+        "name": "绿色碎片",
+        "selected": true,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": false
+      },
+      "26": {
+        "path": "images/classic/new-reference/props/prop-26.png",
+        "name": "蓝色碎片",
+        "selected": false,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": true
+      },
+      "36": {
+        "path": "images/classic/new-reference/props/prop-36.png",
+        "name": "英雄帖",
+        "selected": false,
+        "containsFrame": true,
+        "containsQuantity": false,
+        "usableForNormalUI": true
+      }
+    }
+  },
+  "propReferenceNote": "Three inventory pages contain 15 items, not 18. IDs 3, 11 and 25 are selected green cards and must not be used as normal-state icons. Page 2 is 11/12/21/22/23/24; page 3 is 25/26/36. No prop 13 rebirth fruit appears in these screenshots. All crops exclude quantity captions.",
+  "buttons": {
+    "status-active": {
+      "path": "images/classic/new-reference/buttons/status-active.png",
+      "source": "references/new/8f1d43f8794a4c22672.webp",
+      "rect": [
+        84,
+        12,
+        208,
+        65
+      ],
+      "size": [
+        208,
+        65
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": true,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "status-normal": {
+      "path": "images/classic/new-reference/buttons/status-normal.png",
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        84,
+        15,
+        208,
+        66
+      ],
+      "size": [
+        208,
+        66
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": false,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "weapon-active": {
+      "path": "images/classic/new-reference/buttons/weapon-active.png",
+      "source": "references/new/b8535e5dde7116e5e.webp",
+      "rect": [
+        344,
+        16,
+        208,
+        66
+      ],
+      "size": [
+        208,
+        66
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": true,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "weapon-normal": {
+      "path": "images/classic/new-reference/buttons/weapon-normal.png",
+      "source": "references/new/8f1d43f8794a4c22672.webp",
+      "rect": [
+        344,
+        12,
+        208,
+        65
+      ],
+      "size": [
+        208,
+        65
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": false,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "skill-active": {
+      "path": "images/classic/new-reference/buttons/skill-active.png",
+      "source": "references/new/4b745125e.webp",
+      "rect": [
+        607,
+        15,
+        206,
+        66
+      ],
+      "size": [
+        206,
+        66
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": true,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "skill-normal": {
+      "path": "images/classic/new-reference/buttons/skill-normal.png",
+      "source": "references/new/8f1d43f8794a4c22672.webp",
+      "rect": [
+        605,
+        12,
+        206,
+        65
+      ],
+      "size": [
+        206,
+        65
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": false,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "return-menu": {
+      "path": "images/classic/new-reference/buttons/return-menu.png",
+      "source": "references/new/8f1d43f8794a4c22672.webp",
+      "rect": [
+        304,
+        474,
+        312,
+        82
+      ],
+      "size": [
+        312,
+        82
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": false,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
+    },
+    "change-equipment": {
+      "path": "images/classic/new-reference/buttons/change-equipment.png",
+      "source": "references/new/8f1d43f8794a4c22672.webp",
+      "rect": [
+        461,
+        275,
+        221,
+        94
+      ],
+      "size": [
+        221,
+        94
+      ],
+      "containsLabel": true,
+      "containsBackground": true,
+      "completeButton": true,
+      "active": false,
+      "processing": "Boundary flood fill outside original outline; center component; one source-pixel antialias fringe; transparent pixels zeroed."
     }
   }
 }

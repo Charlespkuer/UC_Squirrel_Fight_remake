@@ -112,7 +112,7 @@ test('重复选择会移除材料，支持槽位移除和清空，错ID及最高
   game.click('slot', '0');
   assert.ok(game.board.innerHTML.includes('已放入 0/3'));
   assert.equal(game.get('gear', game.gears[3].key).disabled, false);
-  assert.equal(game.get('gear', game.gears[4].key).disabled, true);
+  assert.equal(game.get('gear', game.gears[4].key).disabled, false); // 紫装现在可以继续融合为橙装
   game.click('gear', first.key);
   game.click('action', 'clear');
   assert.ok(game.board.innerHTML.includes('已放入 0/3'));

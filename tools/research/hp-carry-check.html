@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../">
+<meta charset="UTF-8">
+<title>关卡连战血量继承检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.__texts = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+(function () {
+  const proto = (window.CanvasRenderingContext2D || {}).prototype;
+  if (proto && proto.fillText) {
+    const orig = proto.fillText;
+    proto.fillText = function (text) { window.__texts.push(String(text)); return orig.apply(this, arguments); };
+  }
+})();
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle-drops.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* 关卡连战第二场：carryHp=0.65 → 入场 0.65+0.25=0.90。
+ * 断言血条显示的是「当前/上限」而不是「当前/当前」（满血假象）。
+ * 结果在 window.__report.check。 */
+(function () {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.addEventListener('load', async () => {
+    document.title = 'LOADING';
+    localStorage.removeItem('ssdz_debug');
+    await wait(250);
+    State.newGame('血量检查');
+    const S = State.state();
+    S.level = 20; S.power = 40; S.agility = 40; S.speed = 40; S.maxHp = 1200;
+    S.energy = S.maxEnergy; S.props[23] = 20;
+    S.weapons = ['1:6']; S.skills = [];
+    State.save();
+    Main.showHome();
+    await wait(400);
+
+    const check = {};
+    check.maxHp = State.totalStats({ useProps: false }).hp;
+
+    // 造一个「已打过第一场、剩 65% 血、且没有进行中的战斗」的本轮进度
+    // 注意 State.stageRun() 返回克隆，必须写进真实 state。
+    const started = State.beginStageBattle(1);
+    check.started = !!(started && started.ok);
+    State.state().stageRuns[1].carryHp = 0.65;
+    State.interruptStageBattle(1, started.token);   // 清掉 attempt，等同于刷新页面后继续
+    State.save();
+    check.carryBefore = State.stageRun(1).carryHp;
+
+    // 走真实 UI：关卡 → 1星螳螂 → 继续战斗
+    UI.runAction('challenge');
+    await wait(300);
+    document.querySelector('[data-action="stages"]').click();
+    await wait(300);
+    document.querySelector('[data-action="type0"]').click();
+    await wait(300);
+    document.querySelector('[data-action="star1"]').click();
+    await wait(300);
+    const go = document.querySelector('.classic-modal-overlay [data-action="0"]');
+    check.confirmLabel = go ? go.textContent.trim() : null;
+    go.click();
+
+    // 等血量数字画出来
+    for (let i = 0; i < 60; i++) {
+      await wait(100);
+      if (window.__texts.some((t) => /^\d+\/\d+$/.test(t))) break;
+    }
+    await wait(400);
+    const pairs = window.__texts.filter((t) => /^\d+\/\d+$/.test(t));
+    check.hpTexts = [...new Set(pairs)];
+    check.hasSkip = !!document.querySelector('[aria-label="跳过战斗"]');
+    check.screen = UI.currentScreen();
+    // 玩家那一条的上限就是真实满血值
+    check.playerHpText = pairs.find((t) => Number(t.split('/')[1]) === check.maxHp) || null;
+    if (check.playerHpText) {
+      const [cur, max] = check.playerHpText.split('/').map(Number);
+      check.cur = cur; check.shownMax = max;
+      check.maxMatches = max === check.maxHp;
+      check.notFull = cur < max;
+      check.expected = Math.round(check.maxHp * 0.9);   // 0.65 继承 + 0.25 回复
+      check.curMatchesExpected = cur === check.expected;
+    }
+    check.errs = window.__errs;
+    window.__report = { check, errs: window.__errs };
+    document.title = 'READY';
+  });
+})();
+</script>
+</body>
+</html>

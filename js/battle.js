@@ -90,25 +90,31 @@
 
     const player = Engine.makePlayer(), scenePlayers = [];
     const fighters = sources.map((info, side) => ({ info, side, npc: info.npcType || null, inst: null, dead: false, wears: wears[side] }));
-    const hps = sources.map((f) => f.hp), maxHp = hps.slice();
+    // maxHp 必须用真实上限：关卡连战时 me.hp 只是按比例继承的当前血量，
+    // 拿它当上限会让血条显示成满血，并让模拟按错误的上限计算。
+    const hpOf = (f) => Math.max(1, Math.round(Number(f.hp) || 1));
+    const hps = sources.map((f) => Math.min(hpOf(f), Number(f.maxHp) > 0 ? Math.round(Number(f.maxHp)) : hpOf(f)));
+    const maxHp = sources.map((f, side) => Number(f.maxHp) > 0 ? Math.max(hps[side], Math.round(Number(f.maxHp))) : hps[side]);
     const floaters = [], sleepers = new Set();
     let stopped = false, skipped = false, ending = false, raf = 0, round = 99, countdown = null;
-    let last = performance.now(), shake = 0;
+    let last = performance.now(), shake = 0, combatStarted = false;
     const skipRect = { x: 964, y: 605, w: 190, h: 70 };
     const previousClick = canvas.onclick;
     const ui = document.getElementById('ui');
+    const pickups = opts.collectDrops && !opts.result && window.BattleDrops ? BattleDrops.create({ root: ui, random: opts.dropRandom }) : null;
     const skipButton = document.createElement('button');
     skipButton.type = 'button'; skipButton.setAttribute('aria-label', '跳过战斗'); skipButton.textContent = '跳过';
     skipButton.style.cssText = 'position:absolute;left:82.39%;top:87.68%;width:16.24%;height:10.15%;padding:0;border:0;background:transparent;color:transparent;cursor:pointer;pointer-events:auto;z-index:20;';
     if (ui) ui.appendChild(skipButton);
     function clean() {
       cancelAnimationFrame(raf); skipButton.remove();
+      if (pickups) pickups.close();
       if (canvas.onclick === onClick) canvas.onclick = previousClick;
       canvas.style.cursor = '';
       for (const wake of [...sleepers]) wake();
       sleepers.clear();
     }
-    const controller = { cancel() { stopped = true; clean(); }, skip() { if (!ending) { skipped = true; for (const wake of [...sleepers]) wake(); } }, result };
+    const controller = { cancel() { stopped = true; clean(); }, skip() { if (!ending && !skipped && !stopped) { skipped = true; if (pickups) pickups.skip(); for (const wake of [...sleepers]) wake(); } }, result };
     activeController = controller;
     skipButton.onclick = () => controller.skip();
     function onClick(event) {
@@ -128,6 +134,9 @@
     }
     function mirrorFor(side) { return fighters[side].npc ? side === 0 : side === 1; }
     function killSide(side) {
+      // An interrupted reaction must release its await, even if a newer action
+      // replaces it before the timeline reaches its final frame.
+      if (fighters[side].finishAction) fighters[side].finishAction();
       for (const inst of player.list) if (inst.side === side) Engine.killInst(inst);
       fighters[side].inst = null;
     }
@@ -154,9 +163,14 @@
       killSide(side);
       return new Promise((resolve) => {
         let settled = false;
-        const done = () => { if (!settled) { settled = true; sleepers.delete(done); resolve(); } };
+        const done = () => { if (!settled) {
+          settled = true; sleepers.delete(done);
+          if (fighters[side].finishAction === done) fighters[side].finishAction = null;
+          resolve();
+        } };
+        fighters[side].finishAction = done;
         sleepers.add(done);
-        play(side, name, Object.assign({}, o, { onDone: done }));
+        if (!play(side, name, Object.assign({}, o, { onDone: done }))) done();
       });
     }
     function point(side) {
@@ -172,9 +186,19 @@
       const count = floaters.filter((f) => f.side === side && f.age < 250).length;
       floaters.push({ side, text: String(text), color: color || 'r', big: !!big, x: p.x, y: p.y - count * 43, age: 0 });
     }
-    function applyHp(r, counterPending) {
+    function applyHp(r, counterPending, before) {
       if (!r.hpAfter) return;
-      for (let side = 0; side < 2; side++) hps[side] = Math.max(0, Math.min(maxHp[side], r.hpAfter[side] + (counterPending && side === r.attacker ? (r.counterDmg || 0) : 0)));
+      for (let side = 0; side < 2; side++) {
+        let next = r.hpAfter[side];
+        if (counterPending && before && (r.counterDmg || r.counterFakeDie || r.counterRebound)) {
+          // hpAfter is clamped at zero. Adding an overkill counter damage back
+          // would manufacture HP, so derive this frame from the event's start.
+          next = before[side] + (side === r.attacker
+            ? (r.healSelf || 0) + (r.lifesteal || 0) - (r.selfBurn || 0) - (r.reboundHurt || 0)
+            : -(r.dmg || 0));
+        }
+        hps[side] = Math.max(0, Math.min(maxHp[side], next));
+      }
     }
     for (const layer of region.layers) {
       const p = Engine.makePlayer();
@@ -226,6 +250,7 @@
     function render(now) {
       if (stopped) return;
       const dt = Math.min(100, Math.max(0, now - last)); last = now;
+      if (pickups && combatStarted && !ending && !skipped && !document.hidden) pickups.tick(dt);
       Engine.updatePlayer(player, dt); scenePlayers.forEach((p) => Engine.updatePlayer(p, dt));
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
       ctx.save();
@@ -256,6 +281,10 @@
       else if (!f.npc && r.fakeDie) { name = 'skill_6'; fx = 'effect_skill_6'; }
       else if (!f.npc && r.jueDui) { name = 'skill_16'; fx = 'effect_skill_16'; }
       else if (!f.npc && r.guiJia) { name = 'skill_7'; fx = 'effect_skill_7'; }
+      else if (!f.npc && r.action === 'skill' && r.id === 18) {
+        const variant = r.disarmApplied ? 2 : 1;
+        name = 'skill_18_' + variant; fx = 'effect_skill_18_defend_' + variant;
+      }
       else if (!f.npc && r.action === 'skill' && SKILL_DEFEND[r.id]) [name, fx] = SKILL_DEFEND[r.id];
       if (!Engine.hasAnim(name)) name = f.npc ? npcAnim(f.npc, 'idle') : 'hitMe';
       effect(fx, side);
@@ -274,10 +303,12 @@
     }
     async function playRound(r) {
       const att = r.attacker, def = 1 - att, f = fighters[att];
+      const beforeHp = hps.slice();
       if (r.action === 'dot') { applyHp(r); floater(r.selfDot ? att : def, '-' + r.dmg, 'y'); await wait(400); return; }
       if (r.action === 'rest' || r.action === 'stunned') {
         applyHp(r); floater(att, r.action === 'rest' ? '休息' : '眩晕', 'y');
-        if (!f.npc) { effect('effect_skill_11', att); await action(att, 'commonThink'); idle(att); }
+        // 思考气泡里画的是方天画戟，只有蓄力方天画戟的休息回合才能播放；眩晕回合只飘字
+        if (r.preparingWeapon === 1 && !f.npc) { effect('effect_skill_11', att); await action(att, 'commonThink'); idle(att); }
         else await wait(500);
         return;
       }
@@ -285,6 +316,7 @@
       if (f.npc) {
         name = npcAnim(f.npc, r.action === 'skill' ? 'skill' : 'common');
         fx = f.npc + (r.action === 'skill' ? '_effect_skillAttack' : '_effect_commonAttack');
+        if (r.ultName) floater(att, r.ultName, 'r', true);
       } else if (r.action === 'weapon') {
         name = isThrowing(r.id) ? 'fightThrowWeaponAttack' : 'fightWeaponAttack';
         fx = isThrowing(r.id) ? 'effect_throw' : 'effect_weapon'; weaponLabel = weaponLabelFor(r.id, r.level || 1);
@@ -297,9 +329,12 @@
       let didHit = false, defending = Promise.resolve();
       function impact() {
         if (didHit || aborted()) return;
-        didHit = true; applyHp(r, true);
+        didHit = true; applyHp(r, true, beforeHp);
         if (r.dodge) { floater(def, '闪避', 'y', true); defending = reaction(def, r); }
-        else if (r.noDmg) { if (r.healSelf) floater(att, '+' + r.healSelf, 'g'); }
+        else if (r.noDmg) {
+          if (r.healSelf) floater(att, '+' + r.healSelf, 'g');
+          if (r.buffUp) floater(att, '属性提升', 'g');
+        }
         else {
           defending = reaction(def, r);
           if (r.dmg) floater(def, '-' + r.dmg, r.crit ? 'y' : 'r', !!r.crit);
@@ -321,12 +356,23 @@
       const moved = !f.npc ? (name === 'fightCommonAttack' || name === 'fightWeaponAttack') : name === f.npc + '_common_attack' && f.npc !== 'xh';
       let recoveredFromCounter = false;
       // 反击原版使用 beatBack；进攻者仍停在接近后的动作末帧，不提前瞬移回待机。
-      if (r.counterDmg && hps[def] > 0) {
+      if ((r.counterDmg || r.counterFakeDie || r.counterRebound) && hps[def] > 0) {
         floater(def, '反击', 'y');
         const counterName = fighters[def].npc ? fighters[def].npc + '_beatBack' : 'beatBack';
         let counterHit = false, counterReaction = Promise.resolve();
         const counterImpact = () => {
-          if (counterHit || aborted()) return; counterHit = true; applyHp(r); floater(att, '-' + r.counterDmg, 'r');
+          if (counterHit || aborted()) return; counterHit = true; applyHp(r);
+          if (r.counterDmg) floater(att, '-' + r.counterDmg, 'r');
+          if (r.counterFakeDie) {
+            floater(att, '装死', 'y');
+            counterReaction = reaction(att, { fakeDie: true });
+            return;
+          }
+          if (r.counterRebound) {
+            floater(att, '绝对防御', 'y'); floater(def, '-' + r.counterRebound, 'r');
+            counterReaction = reaction(att, { jueDui: true });
+            return;
+          }
           const hurt = moved ? (f.npc ? f.npc + '_hurtRunBack' : 'bjBack') : (f.npc ? npcAnim(f.npc, 'hit') : 'hitMe');
           if (Engine.hasAnim(hurt)) {
             effect(moved ? (f.npc ? f.npc + '_effect_hurtRunBack' : 'effect_hurtRunBack') : (f.npc ? f.npc + '_effect_hitMe' : 'effect_hitMe'), att);
@@ -348,12 +394,14 @@
       // 原版开场为 3、2、1、GO，runAround 是闪避动画，不能拿来循环入场。
       for (const n of ['1', '2', '3', '0']) { if (aborted()) break; countdown = n; await wait(n === '0' ? 500 : 420); }
       countdown = null;
+      combatStarted = true;
       for (let i = 0; i < result.rounds.length; i++) {
         if (aborted()) break;
         round = Math.max(0, 99 - i); await playRound(result.rounds[i]);
       }
       if (stopped) return;
       ending = true; skipButton.remove();
+      if (pickups) pickups.close();
       const finalRound = result.rounds[result.rounds.length - 1]; if (finalRound) applyHp(finalRound);
       // skip 唤醒当前动作后直接完成；自然结束保留倒地末帧和胜利演出。
       if (!skipped) {
@@ -369,7 +417,13 @@
       }
       if (stopped) return;
       stopped = true; clean(); if (activeController === controller) activeController = null;
-      if (opts.onEnd) opts.onEnd(result.winner, result);
+      // 结算方需要「战斗结束时的剩余血量」（关卡连战要按比例继承）。
+      // Sim.simulate 只在逐帧 r.hpAfter 上给血量，这里把最后一帧提到 result 上。
+      const hpRound = [...result.rounds].reverse().find((x) => x && Array.isArray(x.hpAfter) && x.hpAfter.length === 2);
+      result.hpAfter = hpRound ? [Math.max(0, hpRound.hpAfter[0]), Math.max(0, hpRound.hpAfter[1])] : null;
+      const loot = pickups ? pickups.summary() : { items: [], ups: [] };
+      if (loot.items.length) result.pickups = loot.items;
+      if (opts.onEnd) opts.onEnd(result.winner, result, loot);
     }
     perform().catch((error) => { controller.cancel(); console.error('[battle]', error); if (opts.onError) opts.onError(error); });
     return controller;

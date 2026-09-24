@@ -10,15 +10,16 @@
     throw new Error('QA fixture requires qa=1 and the isolated test save key.');
   }
   const noOutfit = query.get('outfit') === 'none';
+  const referenceOutfit = query.get('outfit') === 'reference';
   const originalLoad = State.load;
   const clone = (value) => JSON.parse(JSON.stringify(value));
-  window.QA_FIXTURE = Object.freeze({ testOnly: true, resetOnReload: true, saveKey: State.saveKey, outfit: noOutfit ? 'none' : '狂战套装' });
+  window.QA_FIXTURE = Object.freeze({ testOnly: true, resetOnReload: true, saveKey: State.saveKey, outfit: referenceOutfit ? '经典忍者混装' : noOutfit ? 'none' : '狂战套装', dropRandom: () => 0 });
 
   function seed() {
     State.newGame(noOutfit ? '怀旧测试' : '狂战测试');
     const s = State.state();
     Object.assign(s, {
-      level: noOutfit ? 34 : 50, exp: noOutfit ? 2535 : 7600,
+      level: noOutfit ? 34 : 50, exp: noOutfit ? 2535 : 5600,
       power: noOutfit ? 43 : 62, agility: noOutfit ? 41 : 59, speed: noOutfit ? 39 : 56,
       maxHp: noOutfit ? 330 : 480, energy: 180, maxEnergy: 180,
       goldPoint: 19980, goldCup: 42, integral: 1580,
@@ -43,10 +44,17 @@
     for (const [index, id] of [201, 202, 203, 204].entries()) {
       const gear = State.addGear(id, [{ id: index + 5, level: 1 }]);
       if (!gear) throw new Error('Missing QA gear definition: ' + id);
-      if (!noOutfit && !State.wear(gear.key)) throw new Error('Could not equip QA gear: ' + id);
+      if (!noOutfit && !referenceOutfit && !State.wear(gear.key)) throw new Error('Could not equip QA gear: ' + id);
     }
     // Three matching, unequipped blue items let the fusion screen be exercised.
     for (let i = 0; i < 3; i++) State.addGear(21, [{ id: 1, level: 1 }]);
+    // Reference comparison only: exact pictured learned/locked cards and outfit.
+    if (referenceOutfit) {
+      s.name='参考图测试';s.level=34;s.exp=2535;
+      s.weapons=['1:8','5:8','7:8','8:8','9:8','15:8'];
+      s.skills=['2:9','3:8','4:8','7:4','9:9','13:1','15:8','16:1','18:7'];
+      for (const id of [17,14,19,20]) { const gear=State.addGear(id,[]); State.wear(gear.key); }
+    }
 
     const stats = State.totalStats({ useProps: false });
     const me = {

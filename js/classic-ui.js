@@ -6,15 +6,21 @@
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const $ = (s, root) => (root || document).querySelector(s);
   const $$ = (s, root) => [...(root || document).querySelectorAll(s)];
-  const btn = (label, action, cls) => '<button type="button" class="uc-button ' + (cls || '') + '" data-action="' + esc(action) + '">' + esc(label) + '</button>';
+  const buttonArt = { '返回菜单':'return-menu', '更换装备':'change-equipment' };
+  const btn = (label, action, cls) => '<button type="button" class="uc-button ' + (cls || '') + '" data-action="' + esc(action) + '">' + (buttonArt[label] ? '<span class="reference-button-label">'+esc(label)+'</span><img alt="" class="classic-button-art" src="images/classic/new-reference/buttons/'+buttonArt[label]+'.png">' : esc(label)) + '</button>';
   const spriteCache = Object.create(null);
   let screen = 'home', timer = 0, activePortrait = null, lastRefresh = 0;
   let catalogPage = 0, bagPage = 0, gearPage = 0;
-  const selectedItems = {weapon:1,skill:1};
+  let selectedProp = 0;
+  const selectedItems = {weapon:0,skill:0};
   let opponents = [], selectedOpponent = null;
   let heroWears = [], wearSignature = '', wearRequest = '';
+  // 主页限时药丸角标：id → 效果简述（与 State.useProp/totalStats 的生效口径一致）
+  const BUFF_PROPS = [[3, '力量+20%'], [4, '敏捷+20%'], [5, '速度+20%'], [7, '挑战经验+40%'], [41, '力量+40%'], [42, '敏捷+40%'], [43, '速度+40%'], [44, '挑战经验+60%']];
+  let buffSignature = '';
   const classicPortrait = new Image(); classicPortrait.src = 'images/classic/squirrel-classic.png';
   const berserkerPortrait = new Image(); berserkerPortrait.src = 'images/classic/squirrel-berserker-classic.png';
+  const ninjaPortrait = new Image(); ninjaPortrait.src = 'images/classic/new-reference/squirrel-green-outfit.png';
 
   function bind(root, actions) {
     $$('[data-action]', root).forEach(b => b.onclick = () => {
@@ -57,7 +63,8 @@
   function renderNumbers(root) {
     if (!numImage.complete || !numImage.naturalWidth) return;
     const stretch = numStretch();
-    for (const block of $$('.num[data-text]', root || document)) {
+    const blocks = root?.matches?.('.num[data-text]') ? [root] : $$('.num[data-text]', root || document);
+    for (const block of blocks) {
       const canvas = $('canvas', block), height = block.clientHeight;
       if (!canvas || !height) continue;
       const text = block.dataset.text;
@@ -114,7 +121,18 @@
     if(kind==='weapon' && +id===1 && !locked)return 'images/classic/icons/weapon-1-classic.png';
     return 'images/classic/icons/' + kind + '-' + id + (locked ? '-locked' : '') + '.png';
   }
-  function icon(kind, id, locked) {
+  function icon(kind, id, locked, selected) {
+    if(kind==='prop' && ((!selected && [1,2,4,5,10,12,21,22,23,24,26,36].includes(+id)) || selected && [3,11,25].includes(+id))) {
+      return '<img alt="" class="reference-art" src="images/classic/new-reference/props/prop-'+id+(selected?'-selected':'')+'.png">';
+    }
+    const reference = {
+      weapon: { learned: [1,5,7,8,9,15], locked: [2,3,4,6,10,12,13,14] },
+      skill: { learned: [2,3,4,7,9,13,15,18], locked: [1,5,6,8,10,11,12,14,17] }
+    };
+    const state = locked ? 'locked' : 'learned';
+    if (reference[kind]?.[state].includes(+id) && !selected || kind==='skill' && +id===16 && !locked && selected) {
+      return '<img alt="" class="reference-art" src="images/classic/new-reference/cards/'+kind+'-'+id+'-'+state+'.png">';
+    }
     const grey={weapon:[2,3,4,7,9,10],skill:[3,7,8,9,14,15,18,23]};
     const fromReference=(locked && grey[kind]?.includes(+id)) || (!locked && kind==='skill' && [6,13].includes(+id));
     return '<img alt="" '+(fromReference?'class="reference-art" ':'')+'src="'+(fromReference?'images/classic/reference-cards/'+kind+'-'+id+'.png':atlasIcon(kind,id,locked))+'">';
@@ -146,7 +164,7 @@
         return '<div class="reward-card ' + cls + '"><span class="reward-icon">' + art + '</span>' +
           '<span class="reward-text">' + label + '+' + esc(value) + '</span></div>';
       });
-      const bonus = u.reward
+      const bonus = u.attributeBook ? '<div class="reward-card skill"><span class="reward-icon">'+icon('prop',37)+'</span><span class="reward-text">属性书 ×1</span></div>' : u.reward
         ? '<div class="reward-card skill"><span class="reward-icon">' + icon(u.rewardKind === 'weapon' ? 'weapon' : 'skill', u.rewardId) + '</span>' +
           '<span class="reward-text">' + esc(u.reward) + '</span></div>'
         : '';
@@ -161,16 +179,29 @@
     const list = (ups || []).filter(Boolean);
     return list.length ? '<div class="reward-stack">' + upgradeReward(list) + '</div>' : '';
   }
+  function pickupResult(loot) {
+    if (!loot || !loot.items.length) return;
+    const grouped = Object.create(null);
+    loot.items.forEach(item => { if(grouped[item.id])grouped[item.id].count+=item.count;else grouped[item.id]={...item}; });
+    const html='<div class="battle-loot-summary">战斗拾取：'+Object.values(grouped).map(item=>esc(item.name)+' ×'+item.count).join('　')+'</div>'+upsHtml(loot.ups);
+    const bodies=$$('.classic-modal-overlay .modal-body');
+    if (bodies.length) bodies[bodies.length-1].insertAdjacentHTML('beforeend',html);
+    else modal('战斗拾取',html,[{label:'确定'}],{small:true});
+  }
   function home() { Main.showHome(); }
   function tabs(group, active) {
     const sets = {
       status: [['status','状态'],['weapons','武器'],['skills','技能']],
       challenge: [['challenge','随机'],['friends','好友'],['arena','竞技'],['stages','关卡']],
       message: [['messages','消息'],['ranklog','天梯赛'],['revenge','复仇'],['board','留言板']],
-      bag: [['bag','道具'],['shop','商店'],['gears','装备']],
+      bag: [['bag','背包'],['shop','商店'],['exchange','兑换']],
       system: [['system','系统'],['help','帮助'],['village','村庄']]
     };
-    return '<nav class="classic-tabs ' + (sets[group].length > 3 ? 'four' : '') + '" aria-label="游戏分页">' + sets[group].map(([id,t]) => '<button class="uc-tab ' + (id === active ? 'active' : '') + '" data-action="' + id + '" aria-current="' + (id === active ? 'page' : 'false') + '">' + t + '</button>').join('') + (group === 'challenge' ? '<span class="tab-energy">体力 ' + State.state().energy + '/' + State.state().maxEnergy + '</span>' : '') + '</nav>';
+    const labels=sets[group].map(([id,t])=>{
+      const art=group==='status'?'<span class="reference-button-label">'+t+'</span><img alt="" class="classic-button-art" src="images/classic/new-reference/buttons/'+({status:'status',weapons:'weapon',skills:'skill'}[id])+'-'+(id===active?'active':'normal')+'.png">':t;
+      return '<button class="uc-tab '+(id===active?'active':'')+'" data-action="'+id+'" aria-current="'+(id===active?'page':'false')+'">'+art+'</button>';
+    }).join('');
+    return '<nav class="classic-tabs ' + (sets[group].length > 3 ? 'four' : group==='bag'?'bag-tabs':'') + '" aria-label="游戏分页">' + labels + (group === 'challenge' ? '<span class="tab-energy">体力 ' + State.state().energy + '/' + State.state().maxEnergy + '</span>' : group==='bag'?'<span class="bag-coins">'+spr('resource_1',18)+'<b>'+State.state().goldPoint+'</b></span>':'') + '</nav>';
   }
   function page(group, active, content, opts) {
     opts = opts || {}; screen = active; activePortrait = null;
@@ -180,6 +211,7 @@
     p.innerHTML = tabs(group, active) + (opts.above || '') + '<div class="classic-board ' + (opts.cls || '') + '">' + content + '</div><footer class="page-footer">' + (opts.left || '') + btn('返回菜单','home','gold') + (opts.right || '') + '</footer>' + (opts.counter ? '<span class="page-counter">' + opts.counter + '</span>' : '');
     $('#ui').appendChild(p);
     bind(p, Object.assign({}, actions, {home}));
+    if(window.Main?.resizeLayout)Main.resizeLayout();
     return p;
   }
   function modal(title, content, buttons, opts) {
@@ -202,8 +234,8 @@
   function renderHome() {
     screen = 'home'; activePortrait = null;
     const S = State.state();
-    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + esc(S.name) + '</span><span class="home-level">' + num(S.level) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy) + '</span></div></div><div class="home-subbar"><span class="home-exp-label">EXP</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level)) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint) + '</button></div></div><div class="home-side"><button class="picture-button" data-action="daily">' + '<img alt="活动" src="images/classic/home/activity.png">' + '</button><button class="picture-button" data-action="messages">' + '<img alt="" src="images/classic/home/chat.png">' + '<span>聊天</span></button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/classic/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
-    bind($('.classic-home'),actions);
+    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + esc(S.name) + '</span><span class="home-level">' + num(S.level) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy) + '</span></div></div><div class="home-subbar"><span class="home-exp-label">EXP</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level)) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button" data-action="daily">' + '<img alt="活动" src="images/classic/home/activity.png">' + '</button><button class="picture-button" data-action="messages">' + '<img alt="" src="images/classic/home/chat.png">' + '<span>聊天</span></button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/classic/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
+    bind($('.classic-home'),actions);buffSignature='';
     refreshHome();
     renderNumbers();
   }
@@ -224,6 +256,19 @@
     setNum($('.home-exp-val .num',h), S.exp + '/' + needExp);
     setNum($('.home-money .num',h), S.goldPoint);
     const gold = frameUrl('resource_1',18); if (gold) $('.home-money img',h).src = gold;
+    // 生效中的限时药丸：图标 + 剩余战斗场次
+    const buffBox = $('.home-buffs',h);
+    if (buffBox) {
+      const states = S.propsStates || {};
+      const sig = BUFF_PROPS.map(([id]) => states[id] > 0 ? id + ':' + states[id] : '').join();
+      if (sig !== buffSignature) {
+        buffSignature = sig;
+        buffBox.innerHTML = BUFF_PROPS.filter(([id]) => states[id] > 0).map(([id, desc]) => {
+          const prop = propMap.getValue(id);
+          return '<span class="home-buff" title="' + esc((prop ? prop.name : '') + '：' + desc + '，剩余 ' + states[id] + ' 场战斗') + '">' + icon('prop', id) + '<i>' + states[id] + '</i></span>';
+        }).join('');
+      }
+    }
   }
   function drawActor(ctx, box, options) {
     options = options || {};
@@ -234,7 +279,8 @@
     const animate = !!options.anim;
     // 经典截图提供原版无装备肖像；已穿装备的角色改用恢复出来的原版分层
     // 动画，这样套装和实际装备一致（狂暴套装仍用现成肖像）。
-    const classicImage = !animate && [0,1,2,3].every(i=>wears[i] && /_32(?:_|$)/.test(wears[i].src)) ? berserkerPortrait : !animate && !wears.some(Boolean) ? classicPortrait : null;
+    const referenceOutfit = ['Head_5_1','HandO_4_1','Body_5','Foot_5'].every((src,i)=>wears[i]?.src===src);
+    const classicImage = animate ? null : referenceOutfit ? ninjaPortrait : [0,1,2,3].every(i=>wears[i] && /_32(?:_|$)/.test(wears[i].src)) ? berserkerPortrait : !wears.some(Boolean) ? classicPortrait : null;
     if (classicImage && classicImage.complete && classicImage.naturalWidth) {
       const k = Math.min(box.w/classicImage.width,box.h/classicImage.height);
       const w = classicImage.width*k,h=classicImage.height*k;
@@ -294,8 +340,9 @@
   function portrait(c,options){activePortrait={canvas:c,options:options||{useHeroWears:true}};}
   function openStatus() {
     const S=State.state(),st=State.totalStats(),fights=S.dailyWins+S.dailyFails;
-    const p=page('status','status','<canvas class="status-character" width="497" height="341" aria-label="我的松鼠"></canvas><div class="status-right"><div class="status-exp"><span class="home-exp-label">EXP</span><div class="exp-meter"><i style="width:'+Math.min(100,100*S.exp/GData.nextExp(S.level))+'%"></i><span>'+S.exp+'/'+GData.nextExp(S.level)+'</span></div></div><dl class="status-lines"><dt>今日胜率：</dt><dd>'+(fights?Math.round(S.dailyWins/fights*100):0)+'%</dd><dt>战斗场次：</dt><dd>'+(S.allWins+S.allFails)+'</dd></dl><div class="status-buttons">'+btn('更换装备','gears','gold')+btn('装备融合','merge','gold')+'</div></div>'+statsHtml(st));
+    const p=page('status','status','<canvas class="status-character" width="497" height="341" aria-label="我的松鼠"></canvas><div class="status-right"><div class="status-exp"><span class="home-exp-label">Exp</span><div class="exp-meter"><i style="width:'+Math.min(100,100*S.exp/GData.nextExp(S.level))+'%"></i><span>'+S.exp+'/'+GData.nextExp(S.level)+'</span></div></div><dl class="status-lines"><dt>今日胜率：</dt><dd>'+(fights?Math.round(S.dailyWins/fights*100):0)+'%</dd><dt>战斗场次：</dt><dd>'+(S.allWins+S.allFails)+'</dd></dl><div class="status-buttons">'+btn('更换装备','gears','gold')+btn('装备融合','merge','gold')+'</div></div>'+statsHtml(st));
     portrait($('.status-character',p));
+    $('.page-footer',p).insertAdjacentHTML('beforeend','<button class="status-fusion-link" data-action="merge">装备融合</button>');
     bind(p,{...actions,merge:openMerge,home});
   }
   function allItems(kind) {
@@ -307,17 +354,13 @@
     const own=kind==='weapon'?State.myWeapons():State.mySkills();
     const items=allItems(kind),total=Math.ceil(items.length/10),key=kind==='weapon'?'weapons':'skills';
     catalogPage=Math.min(catalogPage,total-1);
-    const title=kind==='weapon'?'武器':'技能';
-    // 页面标识用原版贴图角标，横向居中在棋盘上方，不压住格子
-    const head='<div class="board-corner-label">'+sprLabel('resource_2',12,116,50,title)+'</div>';
-    const cells=items.slice(catalogPage*10,catalogPage*10+10).map(it=>{
+    const shown=items.slice(catalogPage*10,catalogPage*10+10);
+    const cells=shown.map(it=>{
       const has=own.find(x=>x.id===it.id);
       const selected=has && selectedItems[kind]===it.id;
-      return '<button class="catalog-cell '+(!has?'locked':selected?'selected':'')+'" data-item="'+it.id+'" aria-label="'+esc(it.name)+(has?' 等级'+has.level:' 尚未获得')+'"><span class="item-icon">'+icon(kind,it.id,!has)+'</span><span class="item-caption">'+(selected?esc(it.name):has?'LV'+has.level:'')+'</span></button>';
-    }).join('');
-    // 棋盘背景铺一层原版光效花纹，让武器/技能页更饱满
-    const deco='<div class="board-deco" aria-hidden="true"><img alt="" src="'+frameUrl('resource_2',0)+'"><img alt="" src="'+frameUrl('resource_2',0)+'"><i class="board-deco-spark"></i><i class="board-deco-spark small"></i></div>';
-    const p=page('status',key,deco+'<div class="catalog-grid">'+cells+'</div>'+(catalogPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(catalogPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(catalogPage+1)+'/'+total,above:head});
+      return '<button class="catalog-cell '+(!has?'locked':selected?'selected':'')+'" data-item="'+it.id+'" aria-label="'+esc(it.name)+(has?' 等级'+has.level:' 尚未获得')+'"><span class="item-icon">'+icon(kind,it.id,!has,selected)+'</span><span class="item-caption">'+(selected?esc(it.name):has?'LV'+has.level:'')+'</span></button>';
+    }).join('')+Array.from({length:10-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('');
+    const p=page('status',key,'<div class="catalog-grid">'+cells+'</div>'+(catalogPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(catalogPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(catalogPage+1)+'/'+total,cls:'collection-board'});
     $$('[data-item]',p).forEach(b=>b.onclick=()=>{selectedItems[kind]=+b.dataset.item;openCatalog(kind,catalogPage);openItem(kind,+b.dataset.item);});
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openCatalog(kind,catalogPage-1));
     $('[data-action="next"]',p)?.addEventListener('click',()=>openCatalog(kind,catalogPage+1));
@@ -326,7 +369,8 @@
     const isW=kind==='weapon',S=State.state(),base=(isW?weaponsMap:skillsMap).getValue(id);
     const it=(isW?State.myWeapons():State.mySkills()).find(x=>x.id===id);
     const up=it?State.upgradeInfo(kind,id):null;
-    const description=base.remark||'';
+    const skillDescriptions={6:'危机时刻装死避开攻击，成功后立即获得行动机会。装死不能升级。',7:'每场抵挡一次伤害，1级抵消20%，每级增加5%。装备附加能力可增加抵挡次数。',11:'增加原有闪避率5%，每级增加2%；按原有闪避率的比例计算。',13:'生命不高于35%时，每次出手有35%概率召唤师傅，每场最多一次。恢复师傅等级×4生命，下次攻击必中。',14:'按裸力量、敏捷、速度各增加1%，最少1点，每级增加1%；每场一次，随后立即行动。'};
+    const description=(!isW&&skillDescriptions[id])||base.remark||'';
     const locked=!it;
     const unupgradeable=!isW && (base.type==='被动' && up?.max || id===13);
     const extra=isW?'伤害 '+(it?it.harmLo+'-'+it.harmHi:base.harm):'类别 '+esc(base.type);
@@ -341,22 +385,41 @@
     const S=State.state();
     // 三个对手在玩家等级附近浮动，并带随机装备；等级差与名字都随机
     const spread=[-1,0,1];
-    opponents=spread.map(i=>State.genAI(Math.max(1,S.level+i),'',{levelJitter:3}));
+    opponents=spread.map(i=>State.genAI(Math.max(1,S.level+i),'',{levelJitter:2,minLevel:Math.max(1,S.level-1)}));
     selectedOpponent=null;
   }
+  // 刷新对手费用：前5次免费，随后每3次费用+1金松果（1,1,1,2,2,2,…）；进行挑战或10分钟未刷新后重置
+  function challengeRefreshState() {
+    const S = State.state(), now = Date.now();
+    let rf = S.challengeRefresh;
+    if (!rf || !Number.isFinite(rf.count) || !Number.isFinite(rf.ts) || now - rf.ts > 10 * 60 * 1000) rf = S.challengeRefresh = { count: 0, ts: now };
+    return rf;
+  }
+  function challengeRefreshCost(rf) { return rf.count < 5 ? 0 : 1 + Math.floor((rf.count - 5) / 3); }
   function openChallenge(refresh) {
     if(refresh===true||!opponents.length)genOpponents();
-    const content='<div class="challenge-list">'+opponents.map((f,i)=>'<button class="challenger '+(selectedOpponent===i?'active':'')+'" data-foe="'+i+'"><span class="foe-level">'+f.level+'</span><span class="foe-name">'+esc(f.name)+'</span>'+spr('resource_16',3)+'</button>').join('')+'</div><div class="challenge-preview"><canvas width="390" height="292" aria-label="对手预览"></canvas>'+(selectedOpponent!=null?statsHtml(opponents[selectedOpponent],'mini-stats'):'')+'</div><div class="challenge-note"><span>点击刷新<br>下一轮玩家…</span>'+btn('刷新玩家','refresh','small muted')+'</div>'+(selectedOpponent!=null?'<div class="preview-fight">'+btn('挑战他','fight','small')+'</div>':'');
+    const rf=challengeRefreshState(),refreshCost=challengeRefreshCost(rf);
+    const refreshLabel=refreshCost?'刷新玩家（'+refreshCost+'松果）':(rf.count?'刷新玩家（免费'+(5-rf.count)+'）':'刷新玩家');
+    const content='<div class="challenge-list">'+opponents.map((f,i)=>'<button class="challenger '+(selectedOpponent===i?'active':'')+'" data-foe="'+i+'"><span class="foe-level">'+f.level+'</span><span class="foe-name">'+esc(f.name)+'</span>'+spr('resource_16',3)+'</button>').join('')+'</div><div class="challenge-preview"><canvas width="390" height="292" aria-label="对手预览"></canvas>'+(selectedOpponent!=null?statsHtml(opponents[selectedOpponent],'mini-stats'):'')+'</div><div class="challenge-note"><span>点击刷新<br>下一轮玩家…</span>'+btn(refreshLabel,'refresh','small muted')+'</div>'+(selectedOpponent!=null?'<div class="preview-fight">'+btn('挑战他','fight','small')+'</div>':'');
     const p=page('challenge','challenge',content,{counter:'1/1'});
     portrait($('.challenge-preview canvas',p),{silhouette:selectedOpponent==null,wears:[]});
     $$('[data-foe]',p).forEach(b=>b.onclick=()=>{selectedOpponent=+b.dataset.foe;openChallenge();});
-    $('[data-action="refresh"]',p).onclick=()=>openChallenge(true);
+    $('[data-action="refresh"]',p).onclick=()=>{
+      const S=State.state(),rf2=challengeRefreshState(),c=challengeRefreshCost(rf2);
+      if(S.goldPoint<c){toast('金松果不足，无法进行刷新');return;}
+      if(c)S.goldPoint-=c;
+      rf2.count++;rf2.ts=Date.now();State.save();
+      openChallenge(true);
+    };
     $('[data-action="fight"]',p)?.addEventListener('click',()=>{
       const foe=opponents[selectedOpponent],S=State.state();
       if(S.energy<10){notice('体力不足！每5分钟恢复1点，也可以使用体力药剂。',[{label:'使用药剂',run:()=>openBag()},{label:'返回',cls:'gold'}]);return;}
+      S.challengeRefresh={count:0,ts:Date.now()};State.save();   // 进行挑战后重置刷新费用
       Main.startBattle(foe,{cost:10,kind:'challenge',useProps:true,onEnd:(winner)=>{
         const win=winner===0;if(win){S.dailyWins++;S.allWins++;}else{S.dailyFails++;S.allFails++;}
-        const rw=State.fightReward(win);resultModal(win,rw);opponents=[];
+        const rw=State.fightReward(win,{foeLevel:foe.level});
+        opponents=[];openChallenge();   // 战果弹窗放在挑战页上，并刷新下一批对手
+        resultModal(win,rw);
       }});
     });
   }
@@ -398,7 +461,7 @@
     const S=State.state(),type=GData.stageTypeOf(stageId),run=State.stageRun(stageId),idx=run?run.npcIndex:1,npc=State.npcOf(stageId,idx),reward=State.stageReward(stageId);
     const exhausted=run&&run.needsRevive&&run.revives>=2;
     const cost=exhausted?'复活机会已用完':run?(run.needsRevive?'复活需1个挑战书':'不消耗挑战书'):'每轮1个挑战书';
-    const text='<div class="mission-guide"><img alt="向导" src="images/classic/characters/master-classic.png"><div>【消耗】：'+cost+'<br>【整轮奖励】：经验'+reward.exp+'<br>金松果'+reward.gold+'，有几率得碎片<br><span class="small-label">现有挑战书 '+(S.props[23]||0)+' 个</span></div></div><p class="mission-description">连续击败3名敌人，领取整轮奖励。<br>当前对手：'+esc(npc.name)+'（'+idx+'/3）<br>'+(run?'本轮已复活 '+run.revives+'/2 次。':type.recommend+'。')+'</p>';
+    const text='<div class="mission-guide"><img alt="向导" src="images/classic/characters/master-classic.png"><div>【消耗】：'+cost+'<br>【奖励】：每场经验 '+GData.stageNpcExp(stageId,1)+'/'+GData.stageNpcExp(stageId,2)+'/'+GData.stageNpcExp(stageId,3)+'<br>通关得金松果'+reward.gold+'，每场胜利有几率得碎片<br><span class="small-label">现有挑战书 '+(S.props[23]||0)+' 个</span></div></div><p class="mission-description">连续击败3名敌人，后两场战斗不回满血（继承剩余血量并回复25%）。<br>当前对手：'+esc(npc.name)+'（'+idx+'/3）<br>'+(run?'本轮已复活 '+run.revives+'/2 次。':type.recommend+'。')+'</p>';
     const buttons=exhausted?[{label:'结束本轮',run:()=>stageAbandon(stageId)}]:[{label:run?(run.needsRevive?'复活再战':'继续战斗'):'开始战斗',run:()=>stageFight(stageId)}];
     buttons.push({label:run?'稍后继续':'返回',cls:'muted'});
     modal('关卡挑战',text,buttons,{small:true});
@@ -413,12 +476,22 @@
     const started=State.beginStageBattle(stageId);
     if(!started.ok){notice(started.msg,started.needsBook?[{label:'购买挑战书',run:()=>openProp(23,true)},{label:'返回',cls:'gold',run:()=>stageConfirm(stageId)}]:undefined);return;}
     const npc=State.npcOf(stageId,started.npcIndex),type=GData.stageTypeOf(stageId);
+    // 连续挑战不回满血：后两场继承上一场剩余血量，并回复25%
+    const prevRun=State.stageRun(stageId),carryHp=prevRun&&Number.isFinite(prevRun.carryHp)?Math.min(1,prevRun.carryHp+0.25):undefined;
     const foe={name:npc.name,level:10+stageId*2,power:+npc.power,agility:+npc.agility,speed:+npc.speed,hp:+npc.hp,weapons:[],skills:(npc.skills||'').split('|').filter(Boolean).map(s=>{const a=s.split(':');return{id:+a[0],level:+a[1]};}),npcType:type.anim};
-    const interrupted=()=>{State.interruptStageBattle(stageId,started.token);home();notice('战斗播放中断，本轮进度已保留。重新进入关卡即可继续。');};
-    try { Promise.resolve(Main.startBattle(foe,{region:type.anim==='tl'?3:type.anim==='xh'?4:1,kind:'stage',useProps:false,
+    const backToStage=()=>openDifficulty(Math.floor((stageId-1)/6));
+    const interrupted=()=>{State.interruptStageBattle(stageId,started.token);backToStage();notice('战斗播放中断，本轮进度已保留。重新进入关卡即可继续。');};
+    try { Promise.resolve(Main.startBattle(foe,{region:type.anim==='tl'?3:type.anim==='xh'?4:1,kind:'stage',useProps:false,hpRatio:carryHp,
       onError:()=>State.interruptStageBattle(stageId,started.token),
-      onEnd:w=>{
-        const rw=State.finishStageBattle(stageId,started.token,w===0);
+      onEnd:(w,r)=>{
+        // 战斗结束后把关卡页放回背景，别让战果弹窗飘在主界面上
+        backToStage();
+        // 连战按剩余血量比例继承；缺字段时退化为 0，绝不能在这里抛错，
+        // 否则异常会冒到 Battle 的 onError，把玩家直接丢回主界面且丢掉战果。
+        const hp=r&&Array.isArray(r.hpAfter)?r.hpAfter[0]:null,cap=r&&Array.isArray(r.maxHp)?r.maxHp[0]:0;
+        const ratio=w===0&&Number.isFinite(hp)&&cap>0?Math.max(0,Math.min(1,hp/cap)):0;
+        const rw=State.finishStageBattle(stageId,started.token,w===0,ratio);
+        // rw.ok 为 false 只会是「token 已作废」——重复/迟到的回调，静默忽略即可。
         if(!rw.ok)return;
         stageResult(stageId,npc,started.npcIndex,rw);
       }
@@ -426,13 +499,13 @@
   }
   function stageResult(stageId,npc,idx,rw) {
     const back=()=>openDifficulty(Math.floor((stageId-1)/6));
-    const reward=rw.complete?'<div class="result-lines">整轮经验 +'+rw.exp+'　金松果 +'+rw.gold+'</div>':'';
+    const reward='<div class="result-lines">经验 +'+rw.exp+(rw.complete?'　通关金松果 +'+rw.gold:'')+'</div>';
     let message,buttons;
     if(rw.complete){
       message='恭喜通关！三名对手全部击败。';
       buttons=[{label:'继续闯关',run:back},{label:'返回菜单',cls:'gold',run:home}];
     }else if(rw.win){
-      message='已击败'+npc.name+'（'+idx+'/3）。继续挑战不再消耗挑战书，全部击败后发放整轮奖励。';
+      message='已击败'+npc.name+'（'+idx+'/3）。继续挑战不再消耗挑战书，但下一场不会回满血（继承剩余血量并回复25%）。';
       buttons=[{label:'继续挑战',run:()=>stageConfirm(stageId)},{label:'稍后继续',cls:'gold',run:back},{label:'结束本轮',cls:'muted',run:()=>stageAbandon(stageId)}];
     }else{
       const canRevive=rw.run.revives<2;
@@ -441,53 +514,97 @@
       buttons.push({label:'结束本轮',cls:'muted',run:()=>stageAbandon(stageId)});
     }
     const drop=rw.drop?'<p>获得'+esc(rw.drop.name)+' ×'+rw.drop.count+'</p>':'';
-    modal('关卡战果','<div class="result-box"><div class="result-title '+(rw.win?'win':'lose')+'">'+(rw.win?'胜 利！':'再接再厉')+'</div>'+reward+'<p>'+esc(message)+'</p>'+drop+stageUpsHtml(rw.ups)+'</div>',buttons);
+    const gemDrop=rw.gem?'<p>获得'+esc(rw.gem.name)+' ×1</p>':'';
+    modal('关卡战果','<div class="result-box"><div class="result-title '+(rw.win?'win':'lose')+'">'+(rw.win?'胜 利！':'再接再厉')+'</div>'+reward+'<p>'+esc(message)+'</p>'+drop+gemDrop+stageUpsHtml(rw.ups)+'</div>',buttons);
   }
   function openBag(shop,pg) {
-    shop=shop===true;bagPage=pg||0;
+    const exchange=shop==='exchange',mode=shop;shop=shop===true;bagPage=pg||0;
     const S=State.state(),items=[];
-    propMap.each((id,v)=>{if(shop?v.buy==='true':S.props[id]>0)items.push({...v,id:+id});});
+    propMap.each((id,v)=>{if(exchange?[24,25,26,45,46].includes(+id):shop?v.buy==='true':S.props[id]>0)items.push({...v,id:+id});});
     items.sort((a,b)=>a.id-b.id);
-    const total=Math.max(1,Math.ceil(items.length/8));bagPage=Math.min(bagPage,total-1);
-    const content='<div class="bag-layout"><aside class="bag-sidebar">'+sprBtn('resource_2',7,'bag',{w:168,h:60,cls:!shop?'active':'',title:'我的道具'})+sprBtn('resource_2',8,'shop',{w:168,h:60,cls:shop?'active':'',title:'道具商店'})+sprBtn('resource_2',40,'lottery',{w:168,h:60,cls:'spr-gold',title:'每日抽奖'})+'</aside><div class="catalog-grid bag-grid">'+items.slice(bagPage*8,bagPage*8+8).map(it=>'<button class="catalog-cell" data-prop="'+it.id+'"><span class="item-icon">'+icon('prop',it.id)+(shop?'':'<b class="item-count">×'+S.props[it.id]+'</b>')+'</span><span class="item-caption">'+esc(it.name)+'</span></button>').join('')+(items.length?'':'<div class="empty-state">背包空空的<br>去商店看看吧！</div>')+'</div></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':'');
-    const p=page('bag',shop?'shop':'bag',content,{counter:(bagPage+1)+'/'+total});
-    $$('[data-prop]',p).forEach(b=>b.onclick=()=>openProp(+b.dataset.prop,shop));
-    $('[data-action="prev"]',p)?.addEventListener('click',()=>openBag(shop,bagPage-1));
-    $('[data-action="next"]',p)?.addEventListener('click',()=>openBag(shop,bagPage+1));
+    const total=Math.max(1,Math.ceil(items.length/6));bagPage=Math.min(bagPage,total-1);
+    const shown=items.slice(bagPage*6,bagPage*6+6);
+    if(!shown.some(it=>it.id===selectedProp))selectedProp=shown[0]?.id||0;
+    const it=shown.find(it=>it.id===selectedProp),status=shop&&it?State.purchaseStatus(it.id):null;
+    const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个')+'</div>'+btn(shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看','prop-action','small gold'):'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
+    const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':'X'+(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
+    const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,{cls:'classic-bag-board',counter:(bagPage+1)+'/'+total,left:'<span class="footer-left" style="display:flex;gap:12px">'+(exchange?btn('金杯商店','rank-shop','small'):'')+((shop||exchange)?btn('每日抽奖','lottery','small gold'):'')+'</span>'});
+    $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
+    $('[data-action="prop-action"]',p)?.addEventListener('click',()=>openProp(selectedProp,shop));
+    if(status&&!status.remaining)$('[data-action="prop-action"]',p).disabled=true;
+    $('[data-action="rank-shop"]',p)?.addEventListener('click',()=>ClassicExtras.rankShop());
+    $('[data-action="prev"]',p)?.addEventListener('click',()=>openBag(mode,bagPage-1));
+    $('[data-action="next"]',p)?.addEventListener('click',()=>openBag(mode,bagPage+1));
   }
   function openProp(id,shop) {
     const base=propMap.getValue(id),S=State.state();
     if(!base)return;
-    const isFragment=[24,25,26].includes(id),isSeed=[45,46].includes(id),canUse=base.useType==='1';
-    const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-description">'+esc(base.remark||'')+'</div><div class="small-label">拥有 '+(S.props[id]||0)+' 个'+(shop?'　售价 '+base.price+' 金松果':'')+'</div></div></div><p class="small-label">金松果：'+S.goldPoint+'</p>';
-    const label=shop?'购买':isFragment?'合成装备':isSeed?'合成果实':canUse?'使用':'返回';
-    modal(shop?'道具商店':'道具详情',content,[{label,run:()=>{
-      if(!shop&&!canUse&&!isFragment&&!isSeed)return;
+    const isFragment=[24,25,26].includes(id),isSeed=[45,46].includes(id),isGem=State.gemLevel(id)>0,canUse=base.useType==='1';
+    const status=shop?State.purchaseStatus(id):null;
+    // 天使/恶魔果实种子：合成的果实是「获得/遗忘武器技能」，所以这里直接标出武技是否已满
+    const wsNow=S.weapons.length+S.skills.length,wsMax=State.wsLimit(),wsFull=wsNow>=wsMax;
+    const seedNote=isSeed?('<p class="small-label">武器/技能：<b class="'+(wsFull?'ws-full':'ws-ok')+'">'+wsNow+'/'+wsMax+(wsFull?'（已满，合成的果实将无法领取新武器/技能）':'（未满，可继续获得）')+'</b></p>'):'';
+    const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-description">'+esc(base.remark||'')+'</div><div class="small-label">拥有 '+(S.props[id]||0)+' 个'+(shop?'　售价 '+base.price+' 金松果<br>每日限购 '+status.limit+' 件，今日剩余 '+status.remaining+' 件':'')+'</div></div></div>'+seedNote+'<p class="small-label">金松果：'+S.goldPoint+'</p>'+(isGem?'<p class="small-label">3 个同级宝石 + 10 金松果合成高一级，成功率 '+(State.GEM_MERGE_RATES[State.gemLevel(id)-1]*100)+'%；失败有 50% 几率一颗材料降 1 级（1级则碎裂）。</p>':'');
+    const label=shop?(status.remaining?'购买':'今日售罄'):isFragment?'合成装备':isSeed?(wsFull&&id===45?'武器技能已满':'合成果实'):isGem?'合成宝石':id===37?'分配属性':canUse?'使用':'返回';
+    const m=modal(shop?'道具商店':'道具详情',content,[{label,run:()=>{
+      if(!shop&&!canUse&&!isFragment&&!isSeed&&!isGem)return;
+      if(!shop&&id===37){allocateAttributes();return;}
       if(!shop&&isSeed){if((S.props[id]||0)<10||S.goldPoint<50){toast('合成需要10个种子和50金松果');return;}S.props[id]-=10;S.goldPoint-=50;const fruit=id===45?47:48;S.props[fruit]=(S.props[fruit]||0)+1;State.save();toast('合成成功：'+propMap.getValue(fruit).name);openBag(false,bagPage);return;}
-      const r=shop?State.buyProp(id,1):isFragment?State.composeGear(id):State.useProp(id);
+      const r=shop?State.buyProp(id,1):isFragment?State.composeGear(id):isGem?State.mergeGems(id):State.useProp(id);
       toast(r.msg||(r.gear?'合成成功：'+r.gear.name:'操作完成'));
       if(r.ok){openBag(shop,bagPage);if(shop)openProp(id,true);}
     }},{label:'返回',cls:'muted'}],{small:true});
+    if(shop&&!status.remaining)$('[data-action="0"]',m.element).disabled=true;
+    // 天使果实（45）合成的果实用来「获得」新武器/技能，武技已满时禁用合成
+    if(!shop&&isSeed&&wsFull&&id===45)$('[data-action="0"]',m.element).disabled=true;
+  }
+  function allocateAttributes() {
+    const keys=[['power','力量'],['agility','敏捷'],['speed','速度']];
+    const m=modal('分配属性','<p>将属性书的8点潜力分配给力量、敏捷和速度。</p><div class="attribute-allocation">'+keys.map(([key,name])=>'<label>'+name+'<input type="number" min="0" max="8" step="1" value="0" data-stat="'+key+'" aria-label="分配'+name+'点数"></label>').join('')+'</div><p class="allocation-remaining" role="status">剩余 8 点</p>',[{label:'确定分配',close:false,run:()=>{
+      const allocation=Object.fromEntries(keys.map(([key])=>[key,Number($('[data-stat="'+key+'"]',m.element).value)]));
+      const r=State.useProp(37,allocation);toast(r.msg);if(r.ok){m.close();openBag(false,bagPage);}
+    }},{label:'取消',cls:'muted'}],{small:true});
+    const refresh=()=>{const values=$$('input',m.element).map(e=>Number(e.value));const remaining=8-values.reduce((sum,n)=>sum+n,0);$('.allocation-remaining',m.element).textContent='剩余 '+remaining+' 点';$('[data-action="0"]',m.element).disabled=remaining!==0||values.some(n=>!Number.isInteger(n)||n<0||n>8);};
+    $$('input',m.element).forEach(e=>e.oninput=refresh);refresh();
   }
   function gearImg(g) {
     return '<img alt="" src="images/classic/icons/gear-'+g.id+'.png">';
   }
   function openGears(pg) {
     gearPage=typeof pg==='number'?pg:0;
+    openStatus();
     const gears=State.myGears(),total=Math.max(1,Math.ceil(gears.length/6));gearPage=Math.min(gearPage,total-1);
     const slots=['头部','手部','身体','脚部'];
     const content='<p class="gear-note">相同的附加属性效果不叠加，最高的1条生效！</p><div class="gear-layout"><div class="gear-slots">'+slots.map((name,i)=>{const g=gears.find(x=>x.used&&x.type===i);return '<button class="catalog-cell" '+(g?'data-gear="'+esc(g.key)+'"':'disabled')+'><span class="item-icon">'+(g?gearImg(g):'<span class="gear-empty">'+name+'</span>')+'</span></button>';}).join('')+'</div><div class="gear-list">'+gears.slice(gearPage*6,gearPage*6+6).map(g=>'<button class="catalog-cell '+(g.used?'selected':'')+'" data-gear="'+esc(g.key)+'"><span class="item-icon">'+gearImg(g)+(g.used?'<span class="equipped-check">✓</span>':'')+'</span><span class="item-caption q'+g.quality+'">'+esc(g.name)+'</span></button>').join('')+(gears.length?'':'<div class="empty-state">还没有装备<br><span class="small-label">挑战关卡获得碎片<br>10个碎片可合成一件装备</span><br>'+btn('去闯关','stages','small gold')+'</div>')+'</div></div>'+(gearPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(gearPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':'');
-    const p=page('status','status',content,{cls:'gear-board',counter:'容量 '+gears.length+'/100'});
+    const m=modal('我的装备',content+'<span class="gear-capacity">容量 '+gears.length+'/100　'+(gearPage+1)+'/'+total+'</span>',[{label:'返回',cls:'gold'}]);
+    const p=m.element;p.classList.add('gear-overlay');$('.classic-modal',p).classList.add('gear-modal');
+    const list=$('.gear-list',p),n=gears.slice(gearPage*6,gearPage*6+6).length;
+    if(n)list.insertAdjacentHTML('beforeend',Array.from({length:6-n},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join(''));
     $$('.gear-slots button',p).forEach((b,i)=>{const g=gears.find(x=>x.used&&x.type===i);b.setAttribute('aria-label',slots[i]+(g?'：'+g.name:'：未装备'));});
     $$('[data-gear]',p).forEach(b=>b.onclick=()=>openGear(b.dataset.gear));
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openGears(gearPage-1));
     $('[data-action="next"]',p)?.addEventListener('click',()=>openGears(gearPage+1));
-    $('[data-action="home"]',p).textContent='返回';$('[data-action="home"]',p).onclick=openStatus;
   }
   function openGear(key) {
     const g=State.myGears().find(x=>x.key===key);if(!g)return;
-    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+'<br>附加属性：<br>'+State.extText(g.ext).map(esc).join('<br>')+'</div></div>';
-    modal('我的装备',content,[{label:g.used?'卸下':'装备',run:()=>{const ok=g.used?State.unwear(key):State.wear(key);if(ok===false)toast('等级不足，暂时无法装备');openGears(gearPage);}},{label:'出售',cls:'muted',run:()=>notice('确定以 '+g.price+' 金松果出售【'+g.name+'】吗？',[{label:'出售',run:()=>{State.sellGear(key);openGears(gearPage);}},{label:'返回',cls:'muted'}])},{label:'返回',cls:'muted'}]);
+    const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+(g.gem.id-100)*4+'%，附加 +'+(g.gem.ext)+'%）':'';
+    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+'<br>附加属性：<br>'+State.extText(g.ext).map(esc).join('<br>')+gemInfo+'</div></div>';
+    const buttons=[{label:g.used?'卸下':'装备',run:()=>{const ok=g.used?State.unwear(key):State.wear(key);if(ok===false)toast('等级不足，暂时无法装备');openGears(gearPage);}}];
+    if(g.orange){
+      if(g.gem)buttons.push({label:'拆卸宝石（5金）',run:()=>{const r=State.unsocketGem(key);toast(r.msg);openGear(key);}});
+      else buttons.push({label:'镶嵌宝石',cls:'gold',run:()=>socketGemDialog(key)});
+    }
+    buttons.push({label:'出售',cls:'muted',run:()=>notice('确定以 '+g.price+' 金松果出售【'+g.name+'】吗？',[{label:'出售',run:()=>{State.sellGear(key);openGears(gearPage);}},{label:'返回',cls:'muted'}])},{label:'返回',cls:'muted'});
+    modal('我的装备',content,buttons);
+  }
+  // 镶嵌宝石：列出背包里各级宝石供选择，镶嵌免费
+  function socketGemDialog(key) {
+    const S=State.state();
+    const gems=[101,102,103,104,105,106,107].filter(id=>(S.props[id]||0)>0);
+    if(!gems.length){notice('背包里没有宝石。45级后通关关卡或在竞技场获胜有几率获得。',[{label:'知道了'}]);return;}
+    modal('选择宝石','<div class="gem-pick">'+gems.map(id=>'<button type="button" class="help-item" data-gem="'+id+'"><span class="item-icon">'+icon('prop',id)+'</span><span>'+esc(propMap.getValue(id).name)+' ×'+S.props[id]+'</span></button>').join('')+'</div><p class="small-label">镶嵌免费；附加属性提升幅度随机，可先拆卸（5金松果）再镶嵌来重随。</p>',[{label:'返回',cls:'muted'}],{small:true});
+    const overlays=$$('.classic-modal-overlay'),m=overlays[overlays.length-1];
+    $$('[data-gem]',m).forEach(b=>b.onclick=()=>{const r=State.socketGem(key,+b.dataset.gem);toast(r.msg);if(r.ok){m.remove();openGear(key);}});
   }
   function openMerge() {
     if (window.ClassicFusion) window.ClassicFusion.open();
@@ -561,11 +678,61 @@
   function openVillage() {
     const p=page('system','village','<div class="settings-grid">'+btn('师徒','master')+btn('竞技场','arena','gold')+btn('天梯赛','rank')+btn('道具商店','shop','gold')+btn('每日抽奖','lottery')+btn('挑战关卡','stages','gold')+'</div><p class="system-caption">欢迎来到松鼠村庄！<br>拜师学艺、收集装备，和松鼠伙伴一起成长。</p>');
   }
+  // —— 可获得物品图鉴（系统-帮助）：来源概率从真实数据（掉落池/商店/抽奖）计算 ——
+  const GUIDE_ITEMS = [1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,21,22,23,24,25,26,28,29,30,31,32,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,101,102,103,104,105,106,107];
+  function guideSources(id) {
+    const lines = [];
+    const pool = (window.BattleDrops && BattleDrops.pool) || [];
+    const total = pool.reduce((n, p) => n + p.weight, 0);
+    const drop = pool.find((p) => p.id === id);
+    if (drop) {
+      const per = drop.weight / total;
+      lines.push('战斗拾取：每张拾取卡 ' + (per * 100).toFixed(1) + '%，每场战斗 3 张卡，期望 ' + (per * 3 * drop.count).toFixed(2) + (id === 15 ? ' 点/场' : ' 个/场'));
+    }
+    const prop = propMap.getValue(id);
+    if (prop && prop.buy === 'true') lines.push('道具商店：' + parseInt(prop.price) + ' 金松果/个，每日限购 ' + State.shopLimit(id) + ' 个');
+    const prizes = (window.ClassicExtras && ClassicExtras.lotteryPrizes) || [];
+    const mine = prizes.filter((p) => p.id === id && p.count);
+    if (mine.length) {
+      const expect = mine.reduce((n, p) => n + p.count * 0.1, 0);
+      lines.push('每日抽奖：' + mine.map((p) => p.label).join('、') + '，占 ' + mine.length + '/10 格，单次抽中概率 ' + mine.length * 10 + '%，期望 ' + expect.toFixed(1) + ' 个/次（每天免费 1 次，之后 20 金松果/次）');
+    }
+    if ([24, 25, 26].includes(id)) lines.push('关卡掉落：' + ({ 24: '螳螂关', 25: '仙鹤关', 26: '熊猫关' })[id] + '每场胜利 45%～60%（按星级）概率掉落 1～6 个，期望约 1.6～2.1 个/场；★3-4 有 28% 几率越 1 级、★5-6 越 2 级');
+    if (id === 23) lines.push('每日礼包：每天 1 个（另附 150 金松果）');
+    if (id === 28) lines.push('创建角色时获得 1 个');
+    if (id === 29) lines.push('打开「1级礼包」获得');
+    if (id === 30) lines.push('打开「5级礼包」获得');
+    if (id === 31) lines.push('打开「10级礼包」获得');
+    if (id === 32) lines.push('打开「15级礼包」获得');
+    if (id === 37) lines.push('升级奖励：53、59、65 级时各获得 1 本');
+    if ([41, 42, 43, 44].includes(id)) lines.push('金杯商店（周日开放）：20 金杯 + 20 金松果，积分需 800');
+    if ([16, 17, 18, 19].includes(id)) lines.push('金杯商店（周日开放）：500 金杯 + 100 金松果，积分需 1500，每周限兑 1 次');
+    if ([21, 22].includes(id)) lines.push('金杯商店（周日开放）：100 金杯 + 100 金松果兑换 100 个，积分需 1200，每周限兑 1 次');
+    if (id === 40) lines.push('天梯赛：胜利 +3 杯、落败 +1 杯，获胜有 25% 概率额外夺得 3 杯');
+    if (id === 47) lines.push('合成：天使果实种子 ×10 + 50 金松果（背包中合成）');
+    if (id === 48) lines.push('合成：恶魔果实种子 ×10 + 50 金松果（背包中合成）');
+    if (id === 8) lines.push('挑战胜利：3～7 个/场；通关关卡整轮：25 个；各级礼包中也有');
+    if (id >= 101 && id <= 107) {
+      const lv = id - 100;
+      if (lv <= 2) lines.push('45 级起：通关关卡 20% 几率、竞技场（经验/碎片）获胜 15% 几率获得（一级 75% / 二级 25%）');
+      if (lv < 7) lines.push('合成：3 个同级 + 10 金松果，成功率 ' + (State.GEM_MERGE_RATES[lv - 1] * 100) + '%（失败有 50% 几率一颗材料降 1 级，1级则碎裂）');
+      lines.push('镶嵌：免费镶入橙装（3 件相同紫装融合而来），主属性 +' + lv * 4 + '%，附加属性效果随机提升，每件限 1 颗；拆卸 5 金松果');
+    }
+    if (!lines.length) lines.push('当前版本暂无产出途径（图鉴预留物品）');
+    return lines;
+  }
+  function openGuideItem(id) {
+    const prop = propMap.getValue(id);
+    if (!prop) return;
+    modal(prop.name, '<div class="guide-detail"><span class="item-icon">' + icon('prop', id) + '</span><div class="guide-info"><p><b>效果</b>：' + esc(prop.remark || '—') + '</p><p><b>获取方式与概率</b>：</p><ul>' + guideSources(id).map((s) => '<li>' + esc(s) + '</li>').join('') + '</ul></div></div>', [{ label: '返回帮助', cls: 'gold', run: openHelp }], { small: true });
+  }
   function openHelp() {
-    modal('游戏帮助','<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能。在状态页查看和升级。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。每轮消耗1张挑战书，连续击败3名敌人；失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件相同装备可以融合。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档</b>：自动保存。可在系统中导出、导入，音乐开关也会保存。</p></div>',[{label:'知道了'}]);
+    const items = GUIDE_ITEMS.map((id) => '<button type="button" class="help-item" data-guide="' + id + '"><span class="item-icon">' + icon('prop', id) + '</span><span>' + esc(propMap.getValue(id).name) + '</span></button>').join('');
+    const m = modal('游戏帮助','<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能。在状态页查看和升级。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。每轮消耗1张挑战书，连续击败3名敌人；失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件相同装备可以融合。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档</b>：自动保存。可在系统中导出、导入，音乐开关也会保存。</p><p><b>宝石</b>：45级后通关关卡、竞技场获胜有几率获得1-2级宝石；3个同级宝石+10金松果有几率合成高一级（失败可能降级）。3件相同紫装可融合为橙装，宝石免费镶入橙装（每件限1颗），拆卸5金松果。</p><h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>',[{label:'知道了'}]);
+    $$('[data-guide]', m.element).forEach((b) => b.onclick = () => openGuideItem(+b.dataset.guide));
   }
   function fallback(key){if(window.ClassicExtras && window.ClassicExtras[key])window.ClassicExtras[key]();else legacy.runAction(key);}
-  const actions={home,status:openStatus,weapons:()=>openCatalog('weapon'),skills:()=>openCatalog('skill'),challenge:()=>openChallenge(),battle:()=>openChallenge(),stages:openStages,bag:()=>openBag(),shop:()=>openBag(true),gears:()=>openGears(),messages:()=>openMessages(),ranklog:()=>openMessages('ranklog'),revenge:()=>openMessages('revenge'),board:openBoard,friends:openFriends,daily:openDaily,system:openSystem,village:openVillage,help:openHelp,arena:()=>fallback('arena'),rank:()=>fallback('rank'),lottery:()=>fallback('lottery'),master:()=>fallback('master')};
+  const actions={home,exchange:()=>openBag('exchange'),status:openStatus,weapons:()=>openCatalog('weapon'),skills:()=>openCatalog('skill'),challenge:()=>openChallenge(),battle:()=>openChallenge(),stages:openStages,bag:()=>openBag(),shop:()=>openBag(true),gears:()=>openGears(),messages:()=>openMessages(),ranklog:()=>openMessages('ranklog'),revenge:()=>openMessages('revenge'),board:openBoard,friends:openFriends,daily:openDaily,system:openSystem,village:openVillage,help:openHelp,arena:()=>fallback('arena'),rank:()=>fallback('rank'),lottery:()=>fallback('lottery'),master:()=>fallback('master')};
   function runAction(key){if(actions[key])actions[key]();}
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape'){
@@ -582,7 +749,7 @@
     }
   });
   window.UI={...legacy,renderHome,drawHomeHud,drawActor,runAction,currentScreen:()=>screen,refreshHome,renderNumbers,
-    classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,home,toast,num,setNum,upgradeReward,upsHtml},
+    classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult},
     weaponIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('weapon',id)+'">',
     skillIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('skill',id)+'">',
     propIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('prop',id)+'">'};

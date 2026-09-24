@@ -9,7 +9,13 @@ ROOT = Path(__file__).resolve().parent.parent
 REF = ROOT / 'references/new'
 OUT = ROOT / 'images/classic/new-reference'
 OUT.mkdir(parents=True, exist_ok=True)
-manifest = {'note': 'Reference crops retain the pictured frame and learned/locked/selected state. They have no true-weapon stamp. Do not use a locked crop for a learned item.', 'assets': {}, 'cards': {'weapon': {}, 'skill': {}}}
+manifest_file = OUT / 'manifest.json'
+manifest = json.loads(manifest_file.read_text(encoding='utf8')) if manifest_file.exists() else {}
+manifest['note'] = 'Reference crops retain the pictured frame and learned/locked/selected state. They have no true-weapon stamp. Do not use a locked crop for a learned item.'
+manifest.setdefault('assets', {})
+manifest.setdefault('cards', {})
+for kind in ('weapon', 'skill'):
+    manifest['cards'].setdefault(kind, {})
 
 def crop(source, rect, name, **meta):
     image = Image.open(ROOT / source).convert('RGBA')

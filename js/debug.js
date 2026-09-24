@@ -125,8 +125,8 @@
       } },
   ];
 
-  /** 彻底重置账号：连 1 级时随机得到的武器与技能一起清掉，回到全新开局。
-   *  State.newGame 会重建 NEW_PLAYER（weapons = ['1:1']、skills = []），
+  /** 彻底重置账号：清除武器与技能，回到全新开局。
+   *  State.newGame 会重建 NEW_PLAYER（weapons = []、skills = []），
    *  所以升级过程中随机领悟的武器/技能也会一并消失。
    *  weaponId 可以指定开局武器；'random' 表示从原版武器表里随机挑一把。 */
   function resetAccount(name, weaponId) {
@@ -136,7 +136,7 @@
     save();
     try { localStorage.removeItem(State.saveKey); } catch (e) {}
     try { localStorage.removeItem(State.saveKey + '_backup'); } catch (e) {}
-    // 决定开局武器：默认沿用原版的方天画戟（NEW_PLAYER.weapons）
+    // 默认采用无武技的普通开局；调试时也可指定武器。
     let chosen = null;
     const list = State.weaponList ? State.weaponList() : [];
     if (weaponId === 'random' && list.length) {
@@ -152,12 +152,10 @@
     };
   }
 
-  /** 开局武器下拉：默认「原版（方天画戟）」+ 全部武器 + 随机。 */
+  /** 开局武器下拉：普通开局（2级领悟武技）+ 全部武器 + 随机。 */
   function weaponOptions(selected) {
     const list = State.weaponList ? State.weaponList() : [];
-    const def = GData.NEW_PLAYER.weapons[0].split(':')[0];
-    const defName = (list.find((w) => w.id === Number(def)) || {}).name || '方天画戟';
-    let html = '<option value="default"' + (selected === 'default' ? ' selected' : '') + '>原版：' + esc(defName) + '</option>';
+    let html = '<option value="default"' + (selected === 'default' ? ' selected' : '') + '>普通开局：2级领悟武技</option>';
     html += '<option value="random"' + (selected === 'random' ? ' selected' : '') + '>随机一把</option>';
     html += list.map((w) => '<option value="' + w.id + '"' + (String(selected) === String(w.id) ? ' selected' : '') + '>' +
       esc(w.name) + '（' + esc(w.harm) + '）</option>').join('');

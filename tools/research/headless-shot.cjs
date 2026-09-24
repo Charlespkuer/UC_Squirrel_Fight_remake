@@ -82,6 +82,7 @@ function wsConnect(url) {
   const out = path.resolve(args[1] || 'shot.png');
   const opt = (name, dflt) => { const i = args.indexOf('--' + name); return i >= 0 ? args[i + 1] : dflt; };
   const evalJs = opt('eval', null);
+  const preJs = opt('pre', null);   // 截图前执行（用于跳转到目标界面）
   const waitSel = opt('wait', null);
   const W = Number(opt('w', 1170)), H = Number(opt('h', 690));
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-chrome-'));
@@ -143,6 +144,11 @@ function wsConnect(url) {
   }
   await sleep(700);
 
+  if (preJs) {
+    try { console.log('pre -> ' + JSON.stringify(await evaluate(preJs))); }
+    catch (e) { console.error('pre 失败: ' + e.message); }
+    await sleep(600);
+  }
   const shot = await cmd('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
   if (shot.result && shot.result.data) {
     fs.mkdirSync(path.dirname(out), { recursive: true });

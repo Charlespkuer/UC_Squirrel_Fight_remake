@@ -33,6 +33,25 @@
 .debug-value{grid-column:3;font-size:12px;color:#8a6528;min-width:38px;text-align:right}
 .debug-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .debug-actions .uc-button{font-size:14px;min-height:34px;padding:4px 8px;letter-spacing:0;border-width:2px}
+/* 快速获取物品：一行「道具下拉 + 数量 + 获取」 */
+.debug-grant{margin:0 0 10px;padding:9px 10px;border:2px solid #cbb98a;border-radius:14px;background:#fdf6e0}
+.debug-grant-title{display:block;margin-bottom:6px;font-weight:700;color:#5c3d1b}
+.debug-grant-row{display:grid;grid-template-columns:1fr 62px auto;gap:6px;align-items:center}
+.debug-grant-row select,.debug-grant-row input[type="number"]{min-width:0;border:2px solid #cbb98a;border-radius:10px;
+  background:#fffdf3;color:#6b4b2a;font:13px "Microsoft YaHei",sans-serif;padding:5px 6px}
+.debug-grant-row input[type="number"]{text-align:center}
+.debug-grant-row .uc-button{font-size:13px;min-height:30px;padding:3px 10px;letter-spacing:0;border-width:2px}
+.debug-grant-note{margin:7px 0 0;font-size:11.5px;line-height:1.5;color:#987a4e}
+/* 武技：获得 / 遗忘 */
+.debug-ws .debug-grant-row{grid-template-columns:auto 1fr 54px auto}
+.debug-ws-tag{font-size:12px;font-weight:700;color:#7a5528;white-space:nowrap}
+.debug-ws-owned{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;max-height:132px;overflow-y:auto}
+.debug-ws-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 4px 2px 8px;border-radius:12px;
+  background:#fffdf3;border:2px solid #dccba1;font-size:12px;color:#6b4b2a;white-space:nowrap}
+.debug-ws-chip b{font-weight:700;color:#a2731f}
+.debug-ws-chip button{border:0;background:transparent;color:#b3562c;font:700 14px/1 "Microsoft YaHei",sans-serif;
+  cursor:pointer;padding:0 3px}
+.debug-ws-chip button:hover{color:#e0431c}
 .debug-danger{margin-top:10px;padding:9px 10px;border:2px solid #d8a08a;border-radius:14px;background:#fdf0e8}
 .debug-weapon{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12.5px;color:#8a5a44}
 .debug-weapon span{flex-shrink:0;font-weight:700}

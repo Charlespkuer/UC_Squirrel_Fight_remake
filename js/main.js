@@ -87,18 +87,35 @@
   function playBgm(which) {
     if (muted || volume <= 0) { if (bgm) bgm.pause(); if (fightBgm) fightBgm.pause(); return; }
     try {
+      let audio;
       if (which === 'main') {
         if (!bgm) { bgm = new Audio('audio/main_bg.mp3'); bgm.loop = true; bgm.volume = BASE_VOLUME * volume; }
         applyVolume();
         if (fightBgm) fightBgm.pause();
-        bgm.play().catch(() => {});
+        audio = bgm;
       } else {
         if (!fightBgm) { fightBgm = new Audio('audio/fight_bg.mp3'); fightBgm.loop = true; fightBgm.volume = BASE_VOLUME * volume; }
         applyVolume();
         if (bgm) bgm.pause();
-        fightBgm.play().catch(() => {});
+        audio = fightBgm;
       }
+      const started = audio.play();
+      // 浏览器可能因为「没有用户手势」拒绝自动播放：被拒时挂一次性监听，在第一次点击/按键时补播
+      if (started && typeof started.catch === 'function') started.catch(armAudioUnlock);
     } catch (e) {}
+  }
+  /** 自动播放被拦截时，等第一次用户交互再补播当前场景的 BGM（只挂一次）。 */
+  let audioUnlockArmed = false;
+  function armAudioUnlock() {
+    if (audioUnlockArmed) return;
+    audioUnlockArmed = true;
+    const events = ['pointerdown', 'keydown', 'touchstart'];
+    const retry = () => {
+      audioUnlockArmed = false;
+      for (const name of events) window.removeEventListener(name, retry, true);
+      playBgm(mode === 'battle' ? 'fight' : 'main');
+    };
+    for (const name of events) window.addEventListener(name, retry, true);
   }
 
   // ---------- 加载 ----------
@@ -138,6 +155,8 @@
       if (el) el.textContent = m;
     };
     fitCanvas();
+    // 一打开页面就起 BGM，不必等素材加载完或点「开始游戏」（被自动播放策略拦下时会在第一次交互补播）
+    playBgm('main');
     drawLoading(0.05, '松鼠大战 · 怀旧复刻版');
     setStatus('加载背景…');
     // 主界面背景：用原版 main.jpg（868×512，比例与原设计空间一致）。
@@ -299,6 +318,8 @@
   function showTitle() {
     mode = 'title';
     cancelAnimationFrame(rafId);
+    // 打开页面就播 BGM（被浏览器自动播放策略拦掉时会在第一次点击/按键时补播）
+    playBgm('main');
     const ui = $('#ui');
     ui.innerHTML = `
       <div class="title-screen">

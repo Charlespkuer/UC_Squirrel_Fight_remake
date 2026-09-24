@@ -56,11 +56,11 @@
    * 保留这两个常量是为了以后调平衡时只改一处。 */
   const STAGE_REWARD_MULT = 1;
   const STAGE_GOLD_MULT = 1;
-  /* 关卡碎片掉落：调高掉率并收窄数量区间，减小方差。
-   *   掉率 = base + 星级 × perStar（★1 59% ~ ★6 79%）
-   *   数量 = min..max 均匀（2~5，均值仍是 3.5，标准差从 1.71 降到 1.12）
-   *   越级仍然是 tierUp 概率掉高一档颜色，蓝碎片封顶。 */
-  const STAGE_FRAGMENT = Object.freeze({ base: 0.55, perStar: 0.04, min: 2, max: 5, tierUp: 0.72 });
+  /* 关卡碎片掉落：掉率换回最初的 0.42 + 星级×0.03（★1 45% ~ ★6 60%），
+   * 也就是每场期望 = 掉率 × 3.5 ≈ 1.58 ~ 2.1 片，与最早的版本一致；
+   * 但数量区间仍然收窄在 2~5（均值 3.5、标准差 1.12），方差不再回到 1~6 那种。
+   * 越级仍然是 tierUp 概率掉高一档颜色，蓝碎片封顶。 */
+  const STAGE_FRAGMENT = Object.freeze({ base: 0.42, perStar: 0.03, min: 2, max: 5, tierUp: 0.72 });
   function stageFragmentChance(star) { return Math.min(1, STAGE_FRAGMENT.base + star * STAGE_FRAGMENT.perStar); }
   function stageFragmentCount(random) {
     const span = Math.max(0, STAGE_FRAGMENT.max - STAGE_FRAGMENT.min);
@@ -129,6 +129,23 @@
     return Object.keys(merged).map((id) => ({ id: Number(id), count: merged[id] }));
   }
 
+  /* 1 / 5 / 10 / 15 / 20 级礼包（原表 giftMap 28~32）：
+   * 金松果按用户要求**回到旧版数量**（50/50/100/150/200），20 级礼包只给 30 蓝色碎片；
+   * 大小体力药剂都给但数量不多（小 ×3、大 ×2）；额外加卷轴与经验丸，让奖励种类丰富一些。
+   * 原表逐字节保留在 GameDict.js 里，state.js 打开礼包时优先读这份清单。 */
+  const GIFT_PACK_BOOST = Object.freeze({
+    28: [[29, 1], [8, 50], [1, 3], [2, 2], [21, 3], [22, 3]],
+    29: [[30, 1], [8, 50], [1, 3], [2, 2], [21, 3], [22, 3], [7, 1]],
+    30: [[31, 1], [8, 100], [23, 3], [1, 3], [2, 2], [22, 3], [7, 1]],
+    31: [[32, 1], [8, 150], [23, 3], [1, 3], [2, 2], [21, 3], [7, 1]],
+    32: [[8, 200], [23, 3], [26, 30], [1, 3], [2, 2], [21, 5], [22, 5], [7, 2], [44, 1]],
+  });
+  /** 加强后的礼包清单；不是这几个礼包时返回 null（调用方回退到原表）。 */
+  function giftPackPrize(id) {
+    const rows = GIFT_PACK_BOOST[Number(id)];
+    return rows ? rows.map(([pid, count]) => ({ id: pid, count })) : null;
+  }
+
   /* 天梯碎片（本项目新增，id 51）：原版数据里 51~100 是空号。
    * 依据 references/new/微信图片_20260924010916_259_2.jpg：天梯战里会飘出带「?」的金色碎片，
    * 攒够 10 个可以随机合成一个力量/敏捷/速度转化丸；恶魔果实种子也走同一条路。
@@ -177,5 +194,5 @@
   }
   applyPropRemarkFixes();
 
-  window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_REWARD_MULT, STAGE_GOLD_MULT, STAGE_FRAGMENT, stageFragmentChance, stageFragmentCount, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift };
+  window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_REWARD_MULT, STAGE_GOLD_MULT, STAGE_FRAGMENT, stageFragmentChance, stageFragmentCount, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize };
 })();

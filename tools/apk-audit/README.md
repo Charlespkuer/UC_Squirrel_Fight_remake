@@ -221,8 +221,9 @@ node tools/apk-audit/compare.cjs
 .\tools\apk-audit\scan-strings.ps1 -Path '<开始游戏.exe 的完整路径>' -MinLen 6 `
   -OutFile .\tools\apk-audit\launcher-strings.txt
 
-# 5) 从压缩包里抽一段可读代码来看
-node tools/apk-audit/extract-window.cjs "fightingTimes==30" 700 700
+# 5) 在压缩源码里检索并解码文案（免解压）
+node tools/apk-audit/search.cjs "fightingTimes==30" --before 200 --after 400 --context
+node tools/apk-audit/search.cjs --read js/ssdz-pkg2.js --from 54600 --len 3200 --decode
 ```
 
 ### 注意（本轮踩到的坑）

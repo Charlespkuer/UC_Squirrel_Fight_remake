@@ -37,4 +37,6 @@
   以及 `lib/armeabi/libh5runtime.so`；`assets/game.zip` 里根本没有 `index.html`。
   这正是本项目自己写 `index.html` 重新托管的原因。
 - 这些文件是**压缩过的原始代码**，只用于查证，不要直接引用或执行。
-- 想抽一段可读代码看：`node tools/apk-audit/extract-window.cjs "<关键串>" 700 700`。
+- 想抽一段可读代码看：`node tools/apk-audit/search.cjs "<关键串>" --context`，或
+  `node tools/apk-audit/search.cjs --read js/ssdz-pkg2.js --from 54600 --len 3200 --decode`
+  （`--decode` 会把 `\uXXXX` 还原成中文）。

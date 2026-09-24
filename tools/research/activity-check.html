@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../">
+<meta charset="UTF-8">
+<title>活动与每日任务检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle-drops.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* ?done=1 先把所有任务计数打满，用来检查「可领取」样式与图标动效；
+ * ?gift=0 让每日礼包保持未领取。结果在 window.__report.check。 */
+(function () {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const q = new URLSearchParams(location.search);
+  window.addEventListener('load', async () => {
+    document.title = 'LOADING';
+    localStorage.removeItem('ssdz_debug');
+    await wait(250);
+    State.newGame('活动检查');
+    const S = State.state();
+    S.level = 30; S.goldPoint = 500;
+    if (q.get('done') === '1') {
+      for (const k of ['win', 'fight', 'stage', 'arena', 'lottery', 'merge', 'upgrade', 'energy']) State.bumpDaily(k, 99);
+    }
+    State.save();
+    Main.showHome();
+    await wait(600);
+
+    const check = {};
+    const btn = document.querySelector('[data-action="daily"]');
+    check.attentionClass = !!(btn && btn.classList.contains('attention'));
+    check.attentionLabel = btn ? btn.getAttribute('aria-label') : null;
+    if (btn) {
+      const cs = getComputedStyle(btn, '::after');
+      check.shimmerBackground = (cs.backgroundImage || '').slice(0, 40);
+      check.shimmerHasAnim = (getComputedStyle(btn).animationName || '') !== 'none';
+    }
+    check.quests = State.questStatus().map((r) => ({ key: r.key, need: r.need, gold: r.gold, progress: r.progress, done: r.done, claimable: r.claimable }));
+    check.claimable = State.questClaimable();
+    check.giftClaimed = State.dailyStatus().claimed;
+
+    UI.runAction('daily');
+    await wait(350);
+    const overlay = document.querySelector('.classic-modal-overlay');
+    check.modalText = overlay ? overlay.textContent.replace(/\s+/g, ' ').trim().slice(0, 300) : null;
+    check.questRows = document.querySelectorAll('.quest-row').length;
+    check.claimButtons = document.querySelectorAll('.classic-modal-overlay [data-action^="quest"]').length;
+    check.hasGiftButton = !!document.querySelector('[data-action="claim-gift"]');
+
+    // 点第一个可领取的任务
+    const first = document.querySelector('.classic-modal-overlay [data-action^="quest"]');
+    if (first) {
+      const goldBefore = State.state().goldPoint;
+      first.click();
+      await wait(400);
+      check.claimedGold = State.state().goldPoint - goldBefore;
+      check.claimableAfter = State.questClaimable();
+      check.modalAfter = (document.querySelector('.classic-modal-overlay') || {}).textContent;
+    }
+    check.errs = window.__errs;
+    window.__report = { check, errs: window.__errs };
+    document.title = 'READY';
+  });
+})();
+</script>
+</body>
+</html>

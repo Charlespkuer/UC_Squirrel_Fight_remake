@@ -14,7 +14,32 @@
   let mainPlayer = Engine.makePlayer();
   let rafId = null;
   let bgm = null, fightBgm = null;
-  let mainBg = null;
+  let mainBg = null, mainBgSoft = false;
+  const HOME_BG_BLUR = 2.5;
+
+  /** 主界面背景：等比铺满 1170×690，可加轻微虚化与淡化作纱。
+   *  原版 main.jpg 细节很密，HUD 与角色压上去会互相抢，所以默认轻微虚化 + 提亮。 */
+  function drawHomeBg(ctx, blur) {
+    if (!mainBg) { ctx.fillStyle = '#3d6b35'; ctx.fillRect(0, 0, W, H); return; }
+    const scale = Math.max(W / mainBg.width, H / mainBg.height);
+    const dw = mainBg.width * scale, dh = mainBg.height * scale;
+    const ox = (W - dw) / 2, oy = (H - dh) / 2;
+    ctx.save();
+    if (blur) ctx.filter = 'blur(' + blur + 'px)';
+    ctx.drawImage(mainBg, ox, oy, dw, dh);
+    if (blur) ctx.filter = 'none';
+    if (blur) {
+      // 淡化作纱：一层暖白，再压一点底部暗角让页脚按钮更清楚
+      ctx.fillStyle = 'rgba(255,250,236,0.20)';
+      ctx.fillRect(0, 0, W, H);
+      const g = ctx.createLinearGradient(0, H * 0.55, 0, H);
+      g.addColorStop(0, 'rgba(40,60,35,0)');
+      g.addColorStop(1, 'rgba(30,48,28,0.20)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, H * 0.55, W, H * 0.45);
+    }
+    ctx.restore();
+  }
   let homeT = 0;
   let muted = localStorage.getItem('ssdz_music_muted') === '1';
   let activeBattle = null;
@@ -115,8 +140,11 @@
     fitCanvas();
     drawLoading(0.05, '松鼠大战 · 怀旧复刻版');
     setStatus('加载背景…');
-    // 主界面背景
-    mainBg = await Engine.loadImage('images/classic/village.svg');
+    // 主界面背景：用原版 main.jpg（868×512，比例与原设计空间一致）。
+    // 加载失败时退回自绘村庄，保证离线也能显示。
+    mainBg = await Engine.loadImage('images/main.jpg');
+    if (!mainBg) mainBg = await Engine.loadImage('images/classic/village.svg');
+    mainBgSoft = !!mainBg && /main\.jpg$/i.test(mainBg.src || '');
     drawLoading(0.25, '正在加载角色素材…');
     setStatus('加载角色素材…');
     await Engine.loadSheets(['SQ_01', 'SQ_02', 'weaponAttack', 'throwweaponAttack', 'main_e1', 'main_e2', 'main_e3',
@@ -286,8 +314,8 @@
       if (mode !== 'title') return;
       const dt = Math.min(50, now - last); last = now;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      if (mainBg) ctx.drawImage(mainBg, 0, 0, W, H);
-      else { ctx.fillStyle = '#3d6b35'; ctx.fillRect(0, 0, W, H); }
+      drawHomeBg(ctx, mainBgSoft ? HOME_BG_BLUR : 0);
+      
       // 标题画面也放一只待机松鼠，避免"主界面没有松鼠动作"
       titleT += dt;
       rafId = requestAnimationFrame(loop);
@@ -319,8 +347,8 @@
       Engine.updatePlayer(mainPlayer, dt);
       if (homeBgPlayer) Engine.updatePlayer(homeBgPlayer, dt);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      if (mainBg) ctx.drawImage(mainBg, 0, 0, W, H);
-      else { ctx.fillStyle = '#3d6b35'; ctx.fillRect(0, 0, W, H); }
+      drawHomeBg(ctx, mainBgSoft ? HOME_BG_BLUR : 0);
+      
       if (homeBgPlayer) Engine.drawPlayer(ctx, homeBgPlayer);
       homeRegions = UI.drawHomeHud(ctx, W, H);
       window.__homeRegions = homeRegions;

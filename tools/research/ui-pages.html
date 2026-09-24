@@ -71,12 +71,35 @@ window.addEventListener('unhandledrejection', function (e) { window.__errs.push(
       UI.runAction(page);
       await new Promise((r) => setTimeout(r, 700));
     }
+    // 设计空间坐标（1170×690）便于与原版字面坐标逐项比对
+    const geom = () => {
+      const ui = document.getElementById('ui');
+      const ur = ui.getBoundingClientRect();
+      const s = ur.width / 1170;
+      const at = (sel, i) => {
+        const e = document.querySelectorAll(sel)[i || 0];
+        if (!e) return null;
+        const r = e.getBoundingClientRect();
+        return [+((r.left - ur.left) / s).toFixed(1), +((r.top - ur.top) / s).toFixed(1), +(r.width / s).toFixed(1), +(r.height / s).toFixed(1)];
+      };
+      return {
+        scale: +s.toFixed(4),
+        page: at('.classic-page'), board: at('.classic-board'), tabs: at('.classic-tabs'),
+        tab1: at('.classic-tabs .uc-tab', 0), tab2: at('.classic-tabs .uc-tab', 1),
+        tab3: at('.classic-tabs .uc-tab', 2), tab4: at('.classic-tabs .uc-tab', 3),
+        footer: at('.page-footer'), back: at('.page-footer .uc-button'),
+        prev: at('.page-arrow.prev'), next: at('.page-arrow:not(.prev)'),
+        counter: at('.page-counter'), grid: at('.catalog-grid'), heading: at('.board-heading'),
+      };
+    };
     window.__pages = {
       page: page, screen: UI.currentScreen && UI.currentScreen(),
       hasPage: !!document.querySelector('#ui .classic-page'),
       sprButtons: [...document.querySelectorAll('.spr-button img')].map((i) => i.getAttribute('src').split('/').pop()),
+      geom: geom(),
       errs: window.__errs,
     };
+    window.__report = { pages: window.__pages };
     document.title = 'READY';
   });
 })();

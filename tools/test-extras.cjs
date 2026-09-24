@@ -549,6 +549,72 @@ test('师徒存档文本经过转义，四个页面模板保持标签闭合', ()
   assertBalanced(g.markup);
 });
 
+test('超级松鼠（原版VIP）：金松果购买、体力上限180、恢复倍率、装备格子与到期回收', () => {
+  const g = setup(), s = g.c.State.state();
+  const base = s.maxEnergy;
+  s.goldPoint = 0;
+  assert.equal(g.c.State.vipActive(), false);
+  assert.equal(g.c.State.vipLevel(), 0);
+  assert.equal(g.c.State.gearCapacity(), 100);
+  assert.equal(g.c.State.buyVip(7).ok, false, '金松果不足不能买');
+  s.goldPoint = 5000;
+  const bought = g.c.State.buyVip(7);
+  assert.equal(bought.ok, true);
+  assert.equal(s.goldPoint, 5000 - 300);
+  assert.equal(g.c.State.vipActive(), true);
+  assert.equal(g.c.State.vipDaysLeft(), 7);
+  assert.equal(s.maxEnergy, 180, '特权8：体力上限 180');
+  assert.equal(g.c.State.gearCapacity(), 106, '特权5：永久 +6 装备格子');
+  assert.equal(g.c.State.vipRegenMul(), 1.1, '1 级恢复 1.1 倍');
+  // 每日首次登陆 +1 超级松鼠经验，重复调用不再加
+  assert.equal(g.c.State.tickVipDaily().gained, true);
+  assert.equal(s.vip.exp, 1);
+  assert.equal(g.c.State.tickVipDaily().gained, false);
+  // 10 级特权表
+  g.c.State.grantVip(0, 10);
+  assert.equal(g.c.State.vipLevel(), 10);
+  assert.equal(g.c.State.vipRegenMul(), 1.5);
+  assert.equal(g.c.State.vipPassiveExpCap(), 400);
+  // 到期后上限与格子回到原值（用 1 而不是 Date.now()-1000，避免测试沙箱的假时钟偏差）
+  s.vip.until = 1;
+  g.c.State.syncVipEnergyCap();
+  assert.equal(g.c.State.vipActive(), false);
+  assert.equal(s.maxEnergy, base, '到期退回原上限');
+  assert.equal(g.c.State.gearCapacity(), 100);
+  // 续期累加而不是覆盖
+  s.goldPoint = 5000;
+  g.c.State.buyVip(7); const first = g.c.State.vipUntil();
+  g.c.State.buyVip(30);
+  assert.ok(g.c.State.vipUntil() > first + 29 * 86400000, '续期在剩余时间上累加');
+});
+
+test('排行榜：离线模拟、包含自己、三个排序都成立', () => {
+  const g = setup(), s = g.c.State.state();
+  s.level = 33; s.goldCup = 9; s.integral = 1234; s.name = '测试鼠';
+  g.c.ClassicExtras.toplist();
+  const html = g.page().html;
+  assert.match(html, /排行榜/);
+  assert.match(html, /我的名次/);
+  assert.match(html, /测试鼠/);
+  assert.match(html, /Lv 33/, '自己那一行按等级显示');
+  assert.match(html, /1234/, '自己的天梯积分出现');
+  assert.match(html, /data-action="cup"/, '三个排序分页都在');
+  assert.match(html, /离线模拟/, '明确标注为单机离线模拟');
+  assertBalanced(g.markup);
+});
+
+test('VIP 页面：显示原版 8 条特权与两档价格，不删除系统页原有分页', () => {
+  const g = setup();
+  g.c.State.state().goldPoint = 5000;
+  g.c.ClassicExtras.vip();
+  const vipHtml = g.page().html;
+  assert.match(vipHtml, /超级松鼠/);
+  assert.match(vipHtml, /300/); assert.match(vipHtml, /1000/);
+  assert.match(vipHtml, /体力上限增加到180点/);
+  assert.match(vipHtml, /被动经验上限/);
+  assertBalanced(g.markup);
+});
+
 (async()=>{
   let failed = 0;
   for (const [name, run] of tests) {

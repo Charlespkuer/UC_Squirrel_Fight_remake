@@ -481,6 +481,7 @@
   /* \u539f\u7248 loadRankList / LoadRank \u7531\u670d\u52a1\u7aef\u4e0b\u53d1\u771f\u5b9e\u73a9\u5bb6\u699c\uff1b\u5355\u673a\u7248\u7528\u786e\u5b9a\u6027\u968f\u673a
    * \uff08\u6bcf\u5468\u4e00\u4e2a\u79cd\u5b50\uff09\u751f\u6210\u4e00\u6279\u79bb\u7ebf\u677e\u9f20\uff0c\u518d\u628a\u73a9\u5bb6\u63d2\u8fdb\u53bb\uff0c\u56e0\u6b64\u540c\u4e00\u5468\u5185\u699c\u5355\u7a33\u5b9a\u3002 */
   let toplistTab = 'level';
+  const RANK_LEVEL = 30;   // 原版天梯赛 30 级开启
   const TOPLIST_TABS = [['level', '\u7b49\u7ea7'], ['cup', '\u91d1\u676f'], ['integral', '\u79ef\u5206']];
   const TOPLIST_TITLES = ['\u677e\u9f20\u5c0f\u9738', '\u68ee\u6797\u4e00\u9738', '\u98ce\u901f\u4f20\u5947', '\u575a\u679c\u5927\u738b',
     '\u677e\u9f20\u5c0f\u9738\u4e8c\u4e16', '\u68a6\u5e7b\u6a61\u5b50', '\u91d1\u677e\u679c\u5b88\u62a4\u8005', '\u6708\u5149\u98de\u9f20',
@@ -505,18 +506,29 @@
     const s = State.state(), seed = rankWeekSeed(), key = seed + ':' + s.level + ':' + s.goldCup + ':' + (s.integral || 0);
     if (toplistCache[key]) return toplistCache[key];
     const rnd = mulberry(seed);
+    const ladderTab = toplistTab !== 'level';
     const rows = [];
     for (let i = 0; i < 14; i++) {
-      const lv = Math.max(5, Math.min(70, Math.round(s.level + (rnd() * 26 - 12))));
+      // 天梯榜上只会有够级的松鼠，所以看金杯/积分时对手一律按 30 级起算
+      const base = Math.max(5, Math.min(70, Math.round(s.level + (rnd() * 26 - 12))));
+      const lv = ladderTab ? Math.max(RANK_LEVEL, base) : base;
       rows.push({
         name: TOPLIST_TITLES[i % TOPLIST_TITLES.length],
         level: lv,
         cup: 2 + Math.floor(rnd() * Math.max(6, lv)),
         integral: 900 + Math.floor(rnd() * Math.max(400, lv * 70)),
+        inLadder: true,
         npc: true,
       });
     }
-    rows.push({ name: s.name, level: s.level, cup: s.goldCup || 0, integral: s.integral || 0, npc: false });
+    // 天梯赛 30 级才开启：不够级就没有金杯与积分，也不进天梯榜
+    const qualified = s.level >= RANK_LEVEL;
+    rows.push({
+      name: s.name, level: s.level,
+      cup: qualified ? (s.goldCup || 0) : 0,
+      integral: qualified ? (s.integral || 0) : 0,
+      inLadder: qualified, npc: false,
+    });
     const sortKey = toplistTab === 'cup' ? 'cup' : toplistTab === 'integral' ? 'integral' : 'level';
     rows.sort((a, b) => (b[sortKey] - a[sortKey]) || a.name.localeCompare(b.name));
     toplistCache[key] = rows;
@@ -527,22 +539,37 @@
     const s = State.state();
     const key = toplistTab === 'cup' ? 'cup' : toplistTab === 'integral' ? 'integral' : 'level';
     const rows = toplistRows();
-    const mine = rows.findIndex((r) => !r.npc) + 1;
-    const header = '<div class="toplist-head"><span class="toplist-me">\u6211\u7684\u540d\u6b21\uff1a<b>' + mine + '</b> / ' + rows.length +
-      '</span><span class="toplist-week">\u6bcf\u5468\u4e00\u91cd\u7f6e\u00b7\u79bb\u7ebf\u6a21\u62df</span></div>';
+    const ladderTab = key === 'cup' || key === 'integral';
+    const qualified = s.level >= RANK_LEVEL;
+    const mineRow = rows.find((r) => !r.npc);
+    // 不够 30 级就不进天梯榜：名次按等级榜算，金杯/积分显示为「—」
+    const mine = ladderTab && !qualified ? null : rows.findIndex((r) => !r.npc) + 1;
+    const rankText = mine ? '<b>' + mine + '</b> / ' + rows.length
+      : '<span class="toplist-locked">\u672a\u53c2\u8d5b</span>';
+    const header = '<div class="toplist-head"><span class="toplist-me">\u6211\u7684\u540d\u6b21\uff1a' + rankText +
+      '</span><span class="toplist-week">' + (ladderTab ? '\u5929\u68af\u8d5b ' + RANK_LEVEL + ' \u7ea7\u5f00\u542f' : '\u6bcf\u5468\u4e00\u91cd\u7f6e') + '\u00b7\u79bb\u7ebf\u6a21\u62df</span></div>';
+    const locked = ladderTab && !qualified
+      ? '<div class="toplist-locked-note">\u5929\u68af\u8d5b\u9700\u8981 ' + RANK_LEVEL + ' \u7ea7\u624d\u80fd\u53c2\u52a0\uff0c\u4f60\u73b0\u5728 ' + s.level +
+        ' \u7ea7\uff0c\u8fbe\u5230\u540e\u624d\u4f1a\u62e5\u6709\u91d1\u676f\u4e0e\u5929\u68af\u79ef\u5206\u3002</div>'
+      : '';
     const tabs = '<div class="master-tabs toplist-tabs">' + TOPLIST_TABS.map(([id, label]) =>
       '<button class="uc-tab ' + (id === toplistTab ? 'active' : '') + '" data-action="' + id + '" aria-current="' + (id === toplistTab ? 'page' : 'false') + '">' + label + '</button>').join('') + '</div>';
     const list = '<div class="toplist-rows">' + rows.slice(0, 15).map((r, i) => {
       const rank = i + 1, medal = rank <= 3 ? '\u2460\u2461\u2462'[rank - 1] : String(rank);
-      return '<div class="toplist-row' + (r.npc ? '' : ' me') + '"><span class="toplist-rank">' + medal + '</span>' +
+      const shown = r.inLadder !== false;
+      // 自己不够级时金杯/积分留空，不再显示 0 金杯
+      const cupText = ladderTab && r.npc === false && !qualified ? '\u2014' : (shown ? r.cup + ' \u91d1\u676f' : '\u2014');
+      const scoreText = ladderTab && r.npc === false && !qualified ? '\u2014' : (shown ? String(r.integral) : '\u2014');
+      return '<div class="toplist-row' + (r.npc ? '' : ' me') + (shown ? '' : ' unranked') + '"><span class="toplist-rank">' + medal + '</span>' +
         '<span class="toplist-name">' + esc(r.name) + (r.npc ? '' : '\uff08\u6211\uff09') + '</span>' +
         '<span class="toplist-lv">Lv ' + r.level + '</span>' +
-        '<span class="toplist-cup">' + r.cup + ' \u91d1\u676f</span>' +
-        '<span class="toplist-score">' + r.integral + '</span></div>';
+        '<span class="toplist-cup">' + cupText + '</span>' +
+        '<span class="toplist-score">' + scoreText + '</span></div>';
     }).join('') + '</div>';
     const foot = '<div class="extra-note">\u6392\u884c\u699c\u4e3a\u5355\u673a\u79bb\u7ebf\u6a21\u62df\uff1a\u5bf9\u624b\u540d\u5355\u6bcf\u5468\u56fa\u5b9a\uff0c\u4e0d\u8fde\u63a5\u771f\u5b9e\u73a9\u5bb6\u3002\u5f53\u524d\u6392\u5e8f\uff1a' +
-      (key === 'cup' ? '\u91d1\u676f' : key === 'integral' ? '\u5929\u68af\u79ef\u5206' : '\u7b49\u7ea7') + '\u3002</div>';
-    const p = C().page('message', 'toplist', header + tabs + list + foot, { cls: 'extra-board toplist-board' });
+      (key === 'cup' ? '\u91d1\u676f' : key === 'integral' ? '\u5929\u68af\u79ef\u5206' : '\u7b49\u7ea7') +
+      (ladderTab && !qualified ? '\uff08\u4f60\u672a\u53c2\u8d5b\uff09' : '') + '\u3002</div>';
+    const p = C().page('message', 'toplist', header + locked + tabs + list + foot, { cls: 'extra-board toplist-board' });
     on(p, 'level', () => { toplistTab = 'level'; toplistCache = Object.create(null); toplist(); });
     on(p, 'cup', () => { toplistTab = 'cup'; toplistCache = Object.create(null); toplist(); });
     on(p, 'integral', () => { toplistTab = 'integral'; toplistCache = Object.create(null); toplist(); });

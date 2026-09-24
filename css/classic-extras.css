@@ -79,6 +79,10 @@
 .toplist-rank{font-size:27px;text-align:center;color:#b8801d}
 .toplist-name{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .toplist-lv,.toplist-cup,.toplist-score{text-align:right;font-variant-numeric:tabular-nums}
+.toplist-row.unranked{opacity:.72}
+.toplist-me .toplist-locked{color:#b08a4e;font-size:22px}
+.toplist-locked-note{margin:0 0 7px;padding:6px 16px;border-radius:18px;background:#fff2cc;
+  box-shadow:inset 0 0 0 3px #ffd98a;font-size:20px;line-height:1.35;color:#8a4b12}
 
 /* ---------- 超级松鼠（原版 VIP） ---------- */
 .vip-board{padding:10px 34px 6px;font-size:19px;color:#7b5a2e;overflow-y:auto}

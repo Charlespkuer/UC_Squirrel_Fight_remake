@@ -179,13 +179,14 @@
     function npcUlt(att, def) {
       const r = { attacker: att.side, action: 'skill', npcSkill: true, ult: true };
       if (att.npcType === 'tl') {
-        // 疾风镰刀舞：生命低于35%时孤注一掷的四连击
+        // 疾风镰刀舞：生命低于20%时孤注一掷的四连击（门槛与伤害都下调过：
+        // 原版 35% / 每击 0.55 倍，实战里几乎每场都放且总伤达 2.2 倍力量）
         r.ultName = '疾风镰刀舞'; r.multiHit = 4;
         if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
         let total = 0;
         for (let i = 0; i < 4; i++) {
           const rr = { dmg: 0 };
-          applyDamage(att, def, Math.round(effPower(att) * 0.55), rr, { action: 'skill' });
+          applyDamage(att, def, Math.round(effPower(att) * 0.36), rr, { action: 'skill' });
           total += rr.dmg;
           if (rr.reboundHurt) { r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt; r.jueDui = true; }
           if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
@@ -195,7 +196,7 @@
       if (att.npcType === 'xh') {
         // 仙鹤展翅：开场第一次行动的重击，契合“前期凶猛”
         r.ultName = '仙鹤展翅';
-        const raw = Math.round((effPower(att) + effSpeed(att)) * 1.6);
+        const raw = Math.round((effPower(att) + effSpeed(att)) * 1.35);
         if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
         applyDamage(att, def, raw, r, { action: 'skill' });
         pushRound(r); return;
@@ -214,7 +215,7 @@
       const firstAction = !att.acted; att.acted = true;
       att.npcActs = (att.npcActs || 0) + 1;   // 仙鹤前期凶猛：前3次行动伤害+30%
       if (!att.usedUlt && (att.npcType === 'xh' ? firstAction
-        : att.npcType === 'tl' ? att.hp < att.maxHp * 0.35
+        : att.npcType === 'tl' ? att.hp < att.maxHp * 0.2
         : att.npcType === 'xm' ? att.hp < att.maxHp * 0.4 : false)) {
         att.usedUlt = true; npcUlt(att, def); return;
       }
@@ -253,7 +254,7 @@
       if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
       let raw = Math.round(effPower(att) * (0.8 + Math.random() * 0.4));
       if (att.npcType === 'xh' && att.npcActs <= 3) raw = Math.round(raw * 1.3); // 仙鹤前期凶猛
-      if (att.npcType === 'tl' && att.hp < att.maxHp * 0.3) raw = Math.round(raw * 1.5); // 螳螂低血爆发
+      if (att.npcType === 'tl' && att.hp < att.maxHp * 0.25) raw = Math.round(raw * 1.3); // 螳螂低血爆发
       applyDamage(att, def, raw, r, {});
       maybeCounter(att, def, r, true);
       pushRound(r);

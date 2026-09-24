@@ -103,7 +103,7 @@
     const skipRect = { x: 964, y: 605, w: 190, h: 70 };
     const previousClick = canvas.onclick;
     const ui = document.getElementById('ui');
-    const pickups = opts.collectDrops && !opts.result && window.BattleDrops ? BattleDrops.create({ root: ui, random: opts.dropRandom }) : null;
+    const pickups = opts.collectDrops && !opts.result && window.BattleDrops ? BattleDrops.create({ root: ui, random: opts.dropRandom, kind: opts.kind }) : null;
     const skipButton = document.createElement('button');
     skipButton.type = 'button'; skipButton.setAttribute('aria-label', '跳过战斗'); skipButton.textContent = '跳过';
     // 无障碍点击层跟着 skipRect 走，避免两处坐标各改一半而错位。

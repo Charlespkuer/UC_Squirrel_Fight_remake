@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../">
+<meta charset="UTF-8">
+<title>道具弹窗与首页数字检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle-drops.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* 1) 首页数字是否已用系统字体（.num.plain，没有 canvas）
+ * 2) 道具弹窗的按钮数量：任何道具都不该出现两个「返回」
+ * 3) 药剂弹窗应该有滑动条而不是一排批量按钮
+ * 结果在 window.__report.check。 */
+(function () {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.addEventListener('load', async () => {
+    document.title = 'LOADING';
+    localStorage.removeItem('ssdz_debug');
+    await wait(250);
+    State.newGame('弹窗检查');
+    const S = State.state();
+    S.level = 20; S.props[1] = 20; S.props[2] = 30; S.props[50] = 3; S.props[24] = 20; S.props[37] = 2;
+    S.energy = S.maxEnergy;
+    State.save();
+    Main.showHome();
+    await wait(600);
+
+    const check = {};
+    // 首页数字
+    const ids = ['.home-level .num', '.home-energy-val .num', '.home-exp-val .num', '.home-money .num'];
+    check.homeNums = ids.map((sel) => {
+      const e = document.querySelector(sel);
+      return e ? { sel, plain: e.classList.contains('plain'), hasCanvas: !!e.querySelector('canvas'), text: (e.querySelector('u') || {}).textContent } : { sel, missing: true };
+    });
+
+    const openProp = async (id) => {
+      document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+      UI.runAction('bag');
+      await wait(220);
+      const cell = document.querySelector('[data-prop="' + id + '"]');
+      if (!cell) return { error: 'no-cell' };
+      cell.click();
+      await wait(220);
+      const act = document.querySelector('[data-action="prop-action"]');
+      if (!act) return { error: 'no-action' };
+      act.click();
+      await wait(260);
+      const ms = document.querySelectorAll('.classic-modal-overlay');
+      const m = ms[ms.length - 1];
+      const btns = m ? [...m.querySelectorAll('.modal-buttons button')].map((b) => b.textContent.trim()) : [];
+      return {
+        buttons: btns,
+        returnCount: btns.filter((t) => t === '返回').length,
+        hasSlider: !!document.querySelector('[data-slider="use-count"] input'),
+        sliderMax: (document.querySelector('[data-slider="use-count"] input') || {}).max || null,
+        primaryLabel: btns[0] || null,
+      };
+    };
+
+    check.potion = await openProp(1);      // 药剂：滑动条
+    check.pill = await openProp(3);        // 大力丸：只有 使用/返回
+    check.ticket = await openProp(50);     // 抽奖卷（useType 0）：以前会出现两个返回
+    check.fragment = await openProp(24);   // 碎片：合成装备/返回
+    check.book = await openProp(37);       // 属性书：分配属性/返回
+
+    // 滑动条改数量
+    check.potionSlider = await openProp(1);
+    const range = document.querySelector('[data-slider="use-count"] input');
+    if (range) {
+      range.value = range.max;
+      range.dispatchEvent(new Event('input', { bubbles: true }));
+      await wait(120);
+      const useBtn = document.querySelector('.classic-modal-overlay .modal-buttons button');
+      check.afterSlide = { value: document.querySelector('[data-slider="use-count"] .slider-value').textContent, label: useBtn.textContent.trim(), preview: (document.querySelector('.use-preview') || {}).textContent };
+    }
+    // 真的点一次「使用 ×20」：体力从 90 顶到 290（超过自然上限 90）
+    const useNow = document.querySelector('.classic-modal-overlay .modal-buttons button');
+    if (useNow) {
+      useNow.click();
+      await wait(400);
+      check.used = { energy: S.energy, over: S.energy > S.maxEnergy, left: S.props[1] || 0 };
+      const m2 = document.querySelectorAll('.classic-modal-overlay');
+      const top = m2[m2.length - 1];
+      check.reopened = top ? [...top.querySelectorAll('.modal-buttons button')].map((b) => b.textContent.trim()) : null;
+      document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+    }
+    check.errs = window.__errs;
+    window.__report = { check, errs: window.__errs };
+    document.title = 'READY';
+  });
+})();
+</script>
+</body>
+</html>

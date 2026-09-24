@@ -117,8 +117,11 @@
   }
   bindNumImage();
 
-  function num(value) {
+  function num(value, plain) {
     const text = numeral(value);
+    // plain=true 时用系统字体直接排字：位图数字的原图只有 23px 高，
+    // 首页 HUD 要放到 30~32px，等于把 23px 的图放大 1.4 倍，怎么调都发虚。
+    if (plain) return '<span class="num plain" data-text="' + esc(text) + '" style="--n:' + text.length + '" role="img" aria-label="' + esc(text) + '"><u>' + esc(text) + '</u></span>';
     // <u> 是位图加载前的占位文字（加载失败时也不会空白），位图画好后由 CSS 隐藏。
     return '<span class="num" data-text="' + esc(text) + '" style="--n:' + text.length + '" role="img" aria-label="' + esc(text) + '"><canvas></canvas><u>' + esc(text) + '</u></span>';
   }
@@ -129,6 +132,11 @@
     if (host.dataset.text === text) return;
     host.dataset.text = text;
     host.style.setProperty('--n', text.length);
+    if (host.classList.contains('plain')) {
+      const u = $('u', host);
+      if (u) u.textContent = text;
+      return;
+    }
     renderNumbers(host);
   }
   // Original atlases alternate a colour row and a grey row. Item IDs retain gaps.
@@ -221,6 +229,13 @@
     }).join('');
     return '<nav class="classic-tabs ' + (sets[group].length > 3 ? 'four' : group==='bag'?'bag-tabs':'') + '" aria-label="游戏分页">' + labels + (group === 'challenge' ? '<span class="tab-energy">体力 ' + State.state().energy + '/' + State.state().maxEnergy + '</span>' : group==='bag'?'<span class="bag-coins">'+spr('resource_1',18)+'<b>'+State.state().goldPoint+'</b></span>':'') + '</nav>';
   }
+  /** 页内改过金松果之后刷新顶部标签条右上角的数量（抽奖/道具/任务/每日礼包等原地结算的场景）。 */
+  function refreshHeader() {
+    const S = State.state(); if (!S) return;
+    $$('.bag-coins b').forEach((el) => { el.textContent = S.goldPoint; });
+    $$('[data-live-gold]').forEach((el) => { el.textContent = S.goldPoint; });
+    const home = $('.home-money .num u'); if (home) setNum($('.home-money .num'), S.goldPoint);
+  }
   function page(group, active, content, opts) {
     opts = opts || {}; screen = active; activePortrait = null;
     const old = $('#ui .classic-page'); if (old) old.remove();
@@ -252,7 +267,7 @@
   function renderHome() {
     screen = 'home'; activePortrait = null;
     const S = State.state();
-    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy) + '</span></div></div><div class="home-subbar"><span class="home-exp-label">EXP</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level)) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/classic/home/activity.png">' + '</button><button class="picture-button" data-action="messages">' + '<img alt="" src="images/classic/home/chat.png">' + '<span>聊天</span></button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/classic/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
+    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label">EXP</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/classic/home/activity.png">' + '</button><button class="picture-button" data-action="messages">' + '<img alt="" src="images/classic/home/chat.png">' + '<span>聊天</span></button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/classic/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
     bind($('.classic-home'),actions);buffSignature='';
     refreshHome();
     renderNumbers();
@@ -365,7 +380,7 @@
     const S=State.state(),st=State.totalStats(),fights=S.dailyWins+S.dailyFails;
     const p=page('status','status','<canvas class="status-character" width="497" height="341" aria-label="我的松鼠"></canvas><div class="status-right"><div class="status-exp"><span class="home-exp-label">Exp</span><div class="exp-meter"><i style="width:'+Math.min(100,100*S.exp/GData.nextExp(S.level))+'%"></i><span>'+S.exp+'/'+GData.nextExp(S.level)+'</span></div></div><dl class="status-lines"><dt>今日胜率：</dt><dd>'+(fights?Math.round(S.dailyWins/fights*100):0)+'%</dd><dt>战斗场次：</dt><dd>'+(S.allWins+S.allFails)+'</dd></dl><div class="status-buttons">'+btn('更换装备','gears','gold')+btn('装备融合','merge','gold')+'</div></div>'+statsHtml(st));
     portrait($('.status-character',p));
-    $('.page-footer',p).insertAdjacentHTML('beforeend','<button class="status-fusion-link" data-action="merge">装备融合</button>');
+    $('.page-footer',p).insertAdjacentHTML('beforeend','<button class="status-fusion-link" data-action="merge" aria-label="装备融合：三件相同装备合成更高品质"><span class="status-fusion-icon" aria-hidden="true">⚒</span><span class="status-fusion-text">装备融合</span></button>');
     bind(p,{...actions,merge:openMerge,home});
   }
   function allItems(kind) {
@@ -399,10 +414,11 @@
     const extra=isW?'伤害 '+(it?it.harmLo+'-'+it.harmHi:base.harm):'类别 '+esc(base.type);
     const right=locked?'<div class="locked-message">尚未获得<br><span class="small-label">升级、开启礼包有机会获得</span></div>':up?.max||unupgradeable?'<div class="locked-message">该'+(isW?'武器':'技能')+'<br>不能升级</div>':'<h3>需要　<span class="muted-text">已有</span></h3><div><span>金松果 '+up.coin+'</span><b>'+S.goldPoint+'</b></div><div><span>卷轴 '+up.book+'</span><b>'+(S.props[up.bookId]||0)+'</b></div><span class="upgrade-rate">成功率 '+up.rate+'%</span><span class="small-label">需要角色 '+up.levelLimit+' 级</span>';
     const content='<div class="item-detail"><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-summary"><span class="item-icon">'+icon(kind,id,locked)+'</span><div class="detail-rows"><span class="detail-row">'+(isW?'阶段':'等级')+' '+(it?it.level:1)+'</span><span class="detail-row">'+extra+'</span><span class="detail-row">类型 '+esc(base.type)+'</span></div></div><div class="detail-description">'+esc(description)+(isW&&it?'<br>升至下一阶段额外提升'+esc(base.harmAdd)+'点基础伤害！':'')+'</div></div><div class="detail-upgrade">'+right+'</div></div>';
-    modal(isW?'武器详情':'技能详情',content,[{label:'返回'},{label:locked?'尚未获得':up?.max||unupgradeable?'不能升级':'立即升级',cls:locked||up?.max||unupgradeable?'muted':'gold',run:()=>{
+    // 按钮顺序统一成「动作在前、返回在最后」，与其它弹窗一致
+    modal(isW?'武器详情':'技能详情',content,[{label:locked?'尚未获得':up?.max||unupgradeable?'不能升级':'立即升级',cls:locked||up?.max||unupgradeable?'muted':'gold',run:()=>{
       if(locked||up?.max||unupgradeable)return;
       const r=State.doUpgrade(kind,id);toast(r.msg);openCatalog(kind,catalogPage);openItem(kind,id);
-    }}]);
+    }},{label:'返回',cls:'muted'}]);
   }
   function genOpponents() {
     const S=State.state();
@@ -411,6 +427,8 @@
     opponents=spread.map(i=>State.genAI(Math.max(1,S.level+i),'',{levelJitter:2,minLevel:Math.max(1,S.level-1)}));
     selectedOpponent=null;
   }
+  // 随机对手也是好友来源：好友页与推荐列表共用这一份候选
+  let friendCandidates = [];
   // 刷新对手费用：前5次免费，随后每3次费用+1金松果（1,1,1,2,2,2,…）；进行挑战或10分钟未刷新后重置
   function challengeRefreshState() {
     const S = State.state(), now = Date.now();
@@ -423,7 +441,7 @@
     if(refresh===true||!opponents.length)genOpponents();
     const rf=challengeRefreshState(),refreshCost=challengeRefreshCost(rf);
     const refreshLabel=refreshCost?'刷新玩家（'+refreshCost+'松果）':(rf.count?'刷新玩家（免费'+(5-rf.count)+'）':'刷新玩家');
-    const content='<div class="challenge-list">'+opponents.map((f,i)=>'<button class="challenger '+(selectedOpponent===i?'active':'')+'" data-foe="'+i+'"><span class="foe-level">'+f.level+'</span><span class="foe-name">'+esc(f.name)+'</span>'+spr('resource_16',3)+'</button>').join('')+'</div><div class="challenge-preview"><canvas width="390" height="292" aria-label="对手预览"></canvas>'+(selectedOpponent!=null?statsHtml(opponents[selectedOpponent],'mini-stats'):'')+'</div><div class="challenge-note"><span>点击刷新<br>下一轮玩家…</span>'+btn(refreshLabel,'refresh','small muted')+'</div>'+(selectedOpponent!=null?'<div class="preview-fight">'+btn('挑战他','fight','small')+'</div>':'');
+    const content='<div class="challenge-list">'+opponents.map((f,i)=>'<button class="challenger '+(selectedOpponent===i?'active':'')+'" data-foe="'+i+'"><span class="foe-level">'+f.level+'</span><span class="foe-name">'+esc(f.name)+'</span>'+spr('resource_16',3)+'</button>').join('')+'</div><div class="challenge-preview"><canvas width="390" height="292" aria-label="对手预览"></canvas>'+(selectedOpponent!=null?statsHtml(opponents[selectedOpponent],'mini-stats'):'')+'</div><div class="challenge-note"><span>点击刷新<br>下一轮玩家…</span>'+btn(refreshLabel,'refresh','small muted')+'</div>'+(selectedOpponent!=null?'<div class="preview-fight">'+btn('加好友','add-foe','small muted')+btn('挑战他','fight','small')+'</div>':'');
     const p=page('challenge','challenge',content,{counter:'1/1'});
     portrait($('.challenge-preview canvas',p),{silhouette:selectedOpponent==null,wears:[]});
     $$('[data-foe]',p).forEach(b=>b.onclick=()=>{selectedOpponent=+b.dataset.foe;openChallenge();});
@@ -434,6 +452,12 @@
       rf2.count++;rf2.ts=Date.now();State.save();
       openChallenge(true);
     };
+    $('[data-action="add-foe"]',p)?.addEventListener('click',()=>{
+      const foe=opponents[selectedOpponent];
+      if(!foe)return;
+      const r=State.addFriend(foe);
+      toast(r.msg);
+    });
     $('[data-action="fight"]',p)?.addEventListener('click',()=>{
       const foe=opponents[selectedOpponent],S=State.state();
       if(S.energy<10){notice('体力不足！每5分钟恢复1点，也可以使用体力药剂。',[{label:'使用药剂',run:()=>openBag()},{label:'返回',cls:'gold'}]);return;}
@@ -557,7 +581,7 @@
     if(!shown.some(it=>it.id===selectedProp))selectedProp=shown[0]?.id||0;
     const it=shown.find(it=>it.id===selectedProp),status=shop&&it?State.purchaseStatus(it.id):null;
     const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个')+'</div>'+btn(shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看','prop-action','small gold'):'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
-    const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':'X'+(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
+    const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
     const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,{cls:'classic-bag-board',counter:(bagPage+1)+'/'+total,left:'<span class="footer-left" style="display:flex;gap:12px">'+(exchange?btn('金杯商店','rank-shop','small'):'')+((shop||exchange)?btn('每日抽奖','lottery','small gold'):'')+'</span>'});
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
     $('[data-action="prop-action"]',p)?.addEventListener('click',()=>openProp(selectedProp,shop));
@@ -576,37 +600,136 @@
     const wsNow=S.weapons.length+S.skills.length,wsMax=State.wsLimit(),wsFull=wsNow>=wsMax;
     const seedNote=isSeed?('<p class="small-label">武器/技能：<b class="'+(wsFull?'ws-full':'ws-ok')+'">'+wsNow+'/'+wsMax+(wsFull?'（已满，果实仍可合成，等有空位时再使用）':'（未满，可继续获得）')+'</b></p>'):'';
     const shardNote=isConvertShard?('<p class="small-label">当前 <b>'+(S.props[id]||0)+'</b>/'+GData.CONVERT_SHARD_COST+' 个　天梯赛里点飘出来的碎片获得</p>'):'';
-    // 药剂：可以把体力顶到自然上限之上（最高 999），只提示不再自然回复
+    // 药剂：可以把体力顶到自然上限之上（最高 999），只提示不再自然回复。
+    // 碎片、果实种子、天梯碎片与宝石：每次合成消耗固定材料与金松果。
+    // 所有道具都只有「使用/合成」一次一个动作：点完不关弹窗、不换界面，可以继续点。
     const isPotion=!shop&&(id===1||id===2);
     const held=S.props[id]||0,cap=State.energyHardCap();
-    const potionNote=isPotion?('<p class="small-label">体力：<b class="'+(S.energy>S.maxEnergy?'ws-full':'ws-ok')+'">'+S.energy+'/'+S.maxEnergy+'</b>'+
-      '　硬上限 '+cap+'<br>超过自然上限的部分不会自然回复，但仍然可以用来挑战。</p>'):'';
-    const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-description">'+esc(base.remark||'')+'</div><div class="small-label">拥有 '+(S.props[id]||0)+' 个'+(shop?'　售价 '+base.price+' 金松果<br>每日限购 '+status.limit+' 件，今日剩余 '+status.remaining+' 件':'')+'</div></div></div>'+seedNote+shardNote+potionNote+'<p class="small-label">金松果：'+S.goldPoint+'</p>'+(isGem?'<p class="small-label">3 个同级宝石 + 10 金松果合成高一级，成功率 '+(State.GEM_MERGE_RATES[State.gemLevel(id)-1]*100)+'%；失败有 50% 几率一颗材料降 1 级（1级则碎裂）。</p>':'');
-    const label=shop?(status.remaining?'购买':'今日售罄'):isFragment?'合成装备':isConvertShard?'合成转化丸':isSeed?'合成果实':isGem?'合成宝石':id===37?'分配属性':canUse?'使用':'返回';
+    const perPotion=id===1?10:30;
+    const batchCost=isGem?3:10;                    // 每次合成消耗的材料个数
+    const batchGold=isGem?10:50;                   // 每次合成消耗的金松果
+    const fruitId=id===45?47:48;
+    const batchName=isFragment?'装备':isSeed?propMap.getValue(fruitId).name:isConvertShard?'转化丸（随机）':'更高一级宝石';
+    // 每种道具当前能不能再来一次（材料/金币/体力上限），用来说明按钮为什么变灰
+    const blockReason=()=>{
+      if(shop)return status.remaining?'':'今日已经卖完了，明天再来。';
+      const now=(State.state().props[id]||0);
+      if(isPotion)return State.state().energy>=cap?'体力已达硬上限 '+cap+' 点，无法继续使用。':(now<1?'背包里没有体力药剂了。':'');
+      if(isFragment||isSeed||isConvertShard){
+        if(now<batchCost)return '材料不足：还需要 '+(batchCost-now)+' 个'+base.name+'。';
+        if(S.goldPoint<batchGold)return '金松果不足：每次合成需要 '+batchGold+' 个。';
+        return '';
+      }
+      if(isGem){
+        if(State.gemLevel(id)>=7)return '七级宝石已是最高等级。';
+        if(now<3)return '需要 3 个同级宝石。';
+        if(S.goldPoint<10)return '金松果不足 10 个。';
+        return '';
+      }
+      if(canUse)return now<1?'背包里没有这个道具了。':'';
+      return '';
+    };
+    const liveOwn=()=>String(State.state().props[id]||0);
+    const potionNote=isPotion?('<p class="small-label">体力：<b data-live="potion" class="'+((S.energy>S.maxEnergy)?'ws-full':'ws-ok')+'">'+S.energy+'/'+S.maxEnergy+'</b>'+
+      '　硬上限 '+cap+(S.energy>S.maxEnergy?'（超出部分不自然回复，仍可用于挑战）':'')+'</p>'):'';
+    const batchNote=(isFragment||isSeed||isConvertShard||isGem)?('<p class="small-label">每次合成：'+base.name+' ×'+batchCost+' + 金松果 ×'+batchGold+'　→　'+batchName+'</p>'):'';
+    const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-description">'+esc(base.remark||'')+'</div>'+
+      '<div class="small-label">拥有 <b data-live="own">'+(S.props[id]||0)+'</b> 个'+(shop?'　售价 '+base.price+' 金松果<br>每日限购 '+status.limit+' 件，今日剩余 <b data-live="stock">'+status.remaining+'</b> 件':'')+'</div></div></div>'+
+      seedNote+shardNote+potionNote+batchNote+
+      (isGem?'<p class="small-label">3 个同级宝石 + 10 金松果合成高一级，成功率 '+(State.GEM_MERGE_RATES[State.gemLevel(id)-1]*100)+'%；失败有 50% 几率一颗材料降 1 级（1级则碎裂）。</p>':'')+
+      '<p class="small-label use-preview" data-live="hint" role="status"></p>';
+    // 主按钮只在真的有动作时才给；否则会出现「返回」和尾部的「返回」两个按钮
+    const label=shop?(status.remaining?'购买':'今日售罄'):isFragment?'合成装备':isConvertShard?'合成转化丸':isSeed?'合成果实':isGem?'合成宝石':id===37?'分配属性':canUse?'使用':'';
+    // 天使/恶魔果实种子：10 个种子 + 50 金松果 → 1 个果实
+    const composeFruit=(seedId)=>{
+      if((S.props[seedId]||0)<10)return{ok:false,msg:'需要 10 个种子'};
+      if(S.goldPoint<50)return{ok:false,msg:'合成需要 50 金松果'};
+      S.props[seedId]-=10;S.goldPoint-=50;
+      const fruit=seedId===45?47:48;
+      S.props[fruit]=Math.min(State.PROP_HARD_CAP,(S.props[fruit]||0)+1);
+      State.save();
+      return{ok:true,msg:'合成成功：'+propMap.getValue(fruit).name};
+    };
+    // 只有「大小体力药剂」和「碎片合成」需要连着点，弹窗保持打开；
+    // 其它道具（礼包、果实、属性书、种子/天梯碎片/宝石合成…）用完直接退回上一级（背包页）。
+    const stayOpen=!shop&&(isPotion||isFragment);
     const useOne=()=>{
       if(!shop&&!canUse&&!isFragment&&!isConvertShard&&!isSeed&&!isGem)return;
       if(!shop&&id===37){allocateAttributes();return;}
-      if(!shop&&isConvertShard){const r=State.composeConvertPill();toast(r.msg);if(r.ok)openBag(false,bagPage);return;}
-      if(!shop&&isSeed){if((S.props[id]||0)<10||S.goldPoint<50){toast('合成需要10个种子和50金松果');return;}S.props[id]-=10;S.goldPoint-=50;const fruit=id===45?47:48;S.props[fruit]=(S.props[fruit]||0)+1;State.save();toast('合成成功：'+propMap.getValue(fruit).name);openBag(false,bagPage);return;}
-      const r=shop?State.buyProp(id,1):isFragment?State.composeGear(id):isGem?State.mergeGems(id):State.useProp(id);
+      // 注意顺序：宝石要先判断 isGem，否则「使用」类道具（礼包、果实、转生果…）会被当成宝石合成
+      const r=shop?State.buyProp(id,1)
+        :isPotion?State.useProp(id)
+        :isFragment?State.composeGear(id)
+        :isSeed?composeFruit(id)
+        :isConvertShard?State.composeConvertPill()
+        :isGem?State.mergeGems(id)
+        :State.useProp(id);
       toast(r.msg||(r.gear?'合成成功：'+r.gear.name:'操作完成'));
-      if(r.ok){openBag(shop,bagPage);if(shop)openProp(id,true);}
+      if(!r.ok)return;
+      // 药剂与碎片：原地刷新弹窗里的数字，可以继续点
+      if(stayOpen){syncLive();return;}
+      // 其它道具：关掉详情、退回上一级页面（背包/商店）
+      m.close();
+      openBag(shop,bagPage);
     };
-    // 药剂支持批量使用：一次用 1/10/全部，超出自然上限的部分不会被清掉
-    const useBatch=(n)=>{
-      const r=State.usePropMany(id,n);
-      toast(r.msg||'操作完成');
-      if(r.ok){m.close();openBag(false,bagPage);openProp(id,false);}
-    };
-    const buttons=[{label,run:useOne}];
-    if(isPotion){
-      if(held>=10)buttons.push({label:'使用 ×10',run:()=>useBatch(10)});
-      buttons.push({label:'全部使用（'+held+'）',run:()=>useBatch('all')});
-    }
-    buttons.push({label:'返回',cls:'muted'});
+    const buttons=[];
+    // 需要连点的（药剂/碎片）设 close:false，点完不关弹窗
+    if(label)buttons.push({label,close:!stayOpen,run:useOne});
+    // 能卖的道具（天使果实 100 金松果/个）多给一个卖出入口，卖完原地刷新
+    if(State.propSellPrice&&State.propSellPrice(id))buttons.push({label:'卖出',cls:'gold',close:false,run:()=>sellAsk(id,()=>syncLive())});
+    buttons.push({label:'返回',cls:'muted',run:()=>openBag(shop,bagPage)});
     const m=modal(shop?'道具商店':'道具详情',content,buttons,{small:true});
-    if(shop&&!status.remaining)$('[data-action="0"]',m.element).disabled=true;
+    /** 只更新弹窗里的实时数字与按钮状态（不重建弹窗，避免界面跳动）。 */
+    function syncLive(){
+      const now=State.state();
+      const set=(key,value)=>{const el=$('[data-live="'+key+'"]',m.element);if(el)el.textContent=value;};
+      set('own',liveOwn()); set('gold',now.goldPoint);
+      if(shop){const st=State.purchaseStatus(id);set('stock',st.remaining);status.remaining=st.remaining;}
+      const potion=$('[data-live="potion"]',m.element);
+      if(potion){
+        potion.textContent=now.energy+'/'+now.maxEnergy;
+        potion.className=now.energy>now.maxEnergy?'ws-full':'ws-ok';
+        const note=$('[data-live="potion"]',m.element).parentElement;
+        const extra=now.energy>now.maxEnergy?'（超出部分不自然回复，仍可用于挑战）':'';
+        if(note)note.innerHTML='体力：<b data-live="potion" class="'+(now.energy>now.maxEnergy?'ws-full':'ws-ok')+'">'+now.energy+'/'+now.maxEnergy+'</b>　硬上限 '+cap+extra;
+      }
+      const reason=blockReason();
+      const hint=$('[data-live="hint"]',m.element);
+      if(hint){hint.textContent=reason;hint.classList.toggle('full',!!reason);}
+      const main=$('[data-action="0"]',m.element);
+      if(main){main.disabled=!!reason;if(label)main.textContent=label;}
+      if(shop&&!status.remaining)main.disabled=true;
+      refreshHeader();
+    }
+    syncLive();
     // 注意：天使果实（45）在武技已满时**不再**禁用合成，果实可以先囤着。
+  }
+  /** 卖出背包道具（目前只有天使果实，100 金松果一个）：滑动条选数量后确认。 */
+  function sellAsk(id,after) {
+    const S=State.state(),price=State.propSellPrice(id),held=S.props[id]||0,def=propMap.getValue(id);
+    if(!price||held<1){toast('背包里没有可卖的道具');return;}
+    let n=held;
+    const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div><h3 class="detail-name">'+esc(def?def.name:'道具')+'</h3>'+
+      '<div class="detail-description">每个 '+price+' 金松果，背包里有 '+held+' 个。</div><div class="small-label">金松果：'+S.goldPoint+'</div></div></div>'+
+      '<div class="setting-slider use-slider" data-slider="sell-count"><span class="slider-label">卖出数量</span>'+
+      '<input type="range" min="1" max="'+held+'" step="1" value="'+held+'" aria-label="卖出数量">'+
+      '<b class="slider-value">'+held+'</b><span class="use-preview" role="status"></span></div>';
+    const m=modal('卖出道具',content,[{label:'确认卖出',run:()=>{
+      const r=State.sellProp(id,n);
+      toast(r.msg||'操作完成');
+      if(r.ok){m.close();if(after)after();}
+    }},{label:'返回',cls:'muted'}],{small:true});
+    const range=$('[data-slider="sell-count"] input',m.element);
+    const value=$('[data-slider="sell-count"] .slider-value',m.element);
+    const preview=$('.use-preview',m.element);
+    const sellBtn=$('[data-action="0"]',m.element);
+    const refresh=()=>{
+      if(value)value.textContent=n;
+      if(sellBtn)sellBtn.textContent='确认卖出 ×'+n;
+      if(preview)preview.textContent='可得 '+(n*price)+' 金松果，卖出后剩 '+(held-n)+' 个';
+    };
+    if(range)range.addEventListener('input',()=>{n=Math.max(1,Math.min(held,Number(range.value)||1));refresh();});
+    refresh();
   }
   function allocateAttributes() {
     const keys=[['power','力量'],['agility','敏捷'],['speed','速度']];
@@ -675,9 +798,53 @@
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openMessages(tab,pg-1));
     $('[data-action="next"]',p)?.addEventListener('click',()=>openMessages(tab,pg+1));
   }
-  function openFriends() {
+  function openFriends(refresh) {
     const S=State.state();
-    page('challenge','friends','<div class="empty-state">山高水长，师徒相伴<br><span class="small-label">'+(S.master?'师父：'+esc(S.master.name)+'　'+S.master.level+'级':'去村庄拜一位师父，开启你的江湖之旅。')+'<br>这是离线怀旧版，好友与对手由本地模拟。</span><div class="btn-row">'+btn('师徒','master','gold')+btn('随机挑战','challenge')+'</div></div>');
+    if(refresh===true||!friendCandidates.length)friendCandidates=State.rollFriendCandidates(3);
+    const list=State.friendList();
+    const rowOf=(f,i,recommend)=>'<div class="friend-row'+(recommend?' recommend':'')+'">'+
+      '<span class="friend-level">Lv '+f.level+'</span><b class="friend-name">'+esc(f.name)+'</b>'+
+      '<span class="friend-stats"><i>力 '+f.power+'</i><i>敏 '+f.agility+'</i><i>速 '+f.speed+'</i><i>血 '+f.hp+'</i></span>'+
+      (recommend?'<span class="friend-since">推荐</span>':'<span class="friend-since" title="加为好友的日期">'+esc(f.since)+'</span>')+
+      '<span class="friend-actions">'+(recommend
+        ?(State.friendOf(f.name)
+          ?'<button class="uc-button small muted" disabled>已是好友</button>'
+          :'<button class="uc-button small gold" data-friend-action="add" data-friend-i="'+i+'">加好友</button>')
+        :'<button class="uc-button small" data-friend-action="spar" data-friend-i="'+i+'">切磋</button>'+
+         '<button class="uc-button small muted" data-friend-action="drop" data-friend-i="'+i+'">删除</button>')+'</span></div>';
+    const mine=list.map((f,i)=>rowOf(f,i,false)).join('')||'<div class="empty-state">还没有好友<br><span class="small-label">从下面的推荐里加一位，或者在「随机」页选中对手后点「加好友」。</span></div>';
+    const recs=friendCandidates.map((c,i)=>rowOf(c,i,true)).join('');
+    const content='<div class="friend-scroll">'+
+      '<div class="friend-panel"><div class="friend-head"><h3>我的好友</h3>'+
+      '<span class="small-label">'+list.length+' / '+State.friendLimit()+'　切磋不消耗体力、不结算奖励</span></div>'+
+      '<div class="friend-list">'+mine+'</div></div>'+
+      '<div class="friend-panel"><div class="friend-head"><h3>推荐好友</h3>'+
+      '<span class="small-label">等级和你接近的随机松鼠，加为好友后可以随时切磋</span>'+
+      '<button class="uc-button tiny muted" data-friend-action="refresh">换一批</button></div>'+
+      '<div class="friend-list">'+recs+'</div></div>'+
+      (S.master?'<p class="friend-note">师父：'+esc(S.master.name)+'　'+S.master.level+' 级</p>':'<p class="friend-note">还没有师父，可以去「师徒」拜一位。</p>')+'</div>';
+    const p=page('challenge','friends',content,{cls:'friends-board',left:'<span class="footer-left">'+btn('师徒','master','small gold')+btn('随机挑战','challenge','small')+'</span>'});
+    $$('[data-friend-action]',p).forEach(b=>b.onclick=()=>{
+      const act=b.dataset.friendAction,i=Number(b.dataset.friendI);
+      if(act==='refresh'){friendCandidates=State.rollFriendCandidates(3);toast('已换一批推荐好友');openFriends();return;}
+      if(act==='add'){const r=State.addFriend(friendCandidates[i]);toast(r.msg);if(r.ok)openFriends();return;}
+      if(act==='drop'){const r=State.removeFriend(list[i].name);toast(r.msg);openFriends();return;}
+      if(act==='spar')spar(list[i]);
+    });
+  }
+  /** 好友切磋：不消耗体力、不结算经验与金松果，纯粹打一场。 */
+  function spar(friend){
+    const foe=State.friendFoe(friend);
+    if(!foe)return;
+    Main.startBattle(foe,{cost:0,kind:'friend',useProps:false,collectDrops:false,region:0,
+      onError:()=>{openFriends();toast('切磋中断，稍后再来。');},
+      onEnd:(winner)=>{
+        openFriends();
+        modal('切磋结果','<div class="result-box"><div class="result-title '+(winner===0?'win':'lose')+'">'+(winner===0?'切磋胜利！':'再接再厉')+'</div>'+
+          '<div class="result-lines">和【'+esc(friend.name)+'】的切磋结束。</div>'+
+          '<p class="small-label">切磋不消耗体力、不结算经验与金松果；想赚奖励请去「随机」或「关卡」。</p></div>',
+          [{label:'确定',run:home},{label:'再来一场',cls:'gold',run:()=>spar(friend)}]);
+      }});
   }
   function openBoard() {
     page('message','board','<div class="empty-state">松鼠乐园留言板<br><span class="small-label">欢迎回来，老朋友。<br>本地怀旧版暂不连接公共聊天与留言服务。<br>你的战斗录像可在「消息」中查看。</span></div>');
@@ -707,7 +874,7 @@
     }).join('');
     const list = '<div class="daily-quests"><h3>每日任务<span class="quest-date">' + esc(State.localDate()) + ' · 每天 0 点刷新</span></h3>' + rows + '</div>';
     const m = modal('活动', gift + list, [{ label: '返回', cls: 'gold' }]);
-    const rerender = () => { m.close(); openDaily(); refreshHome(); };
+    const rerender = () => { m.close(); openDaily(); refreshHome(); refreshHeader(); };
     $('[data-action="claim-gift"]', m.element)?.addEventListener('click', () => { toast(State.claimDaily().msg); rerender(); });
     quests.forEach((q) => {
       const b = $('[data-action="quest' + q.index + '"]', m.element);
@@ -783,9 +950,9 @@
     if (id === 31) lines.push('打开「10级礼包」获得');
     if (id === 32) lines.push('打开「15级礼包」获得');
     if (id === 37) lines.push('升级奖励：53、59、65 级时各获得 1 本');
-    if ([41, 42, 43, 44].includes(id)) lines.push('金杯商店（周日开放）：20 金杯 + 20 金松果，积分需 800');
-    if ([16, 17, 18, 19].includes(id)) lines.push('金杯商店（周日开放）：500 金杯 + 100 金松果，积分需 1500，每周限兑 1 次');
-    if ([21, 22].includes(id)) lines.push('金杯商店（周日开放）：100 金杯 + 100 金松果兑换 100 个，积分需 1200，每周限兑 1 次');
+    if ([41, 42, 43, 44].includes(id)) lines.push('金杯商店（每天开放）：20 金杯 + 20 金松果，积分需 800，不限兑换次数');
+    if ([16, 17, 18, 19].includes(id)) lines.push('金杯商店（每天开放）：500 金杯 + 100 金松果，积分需 1500，每日限兑 1 次');
+    if ([21, 22].includes(id)) lines.push('金杯商店（每天开放）：100 金杯 + 100 金松果兑换 100 个，积分需 1200，每日限兑 1 次');
     if (id === 40) lines.push('天梯赛：胜利 +3 杯、落败 +1 杯，获胜有 25% 概率额外夺得 3 杯');
     if (id === 47) lines.push('合成：天使果实种子 ×10 + 50 金松果（背包中合成）');
     if (id === 48) lines.push('合成：恶魔果实种子 ×10 + 50 金松果（背包中合成）');
@@ -826,7 +993,7 @@
       else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
     }
   });
-  window.UI={...legacy,renderHome,drawHomeHud,drawActor,runAction,currentScreen:()=>screen,refreshHome,renderNumbers,
+  window.UI={...legacy,renderHome,drawHomeHud,drawActor,runAction,currentScreen:()=>screen,refreshHome,renderNumbers,refreshHeader,
     classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult},
     weaponIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('weapon',id)+'">',
     skillIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('skill',id)+'">',

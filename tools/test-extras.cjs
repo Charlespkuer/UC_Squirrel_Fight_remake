@@ -146,8 +146,8 @@ test('竞技两战只付一次报名费用，冠军150经验且不额外赠送�
   assertBalanced(g.markup);
 });
 
-test('经验竞技冠亚季四名分别150/75/25/0，半决赛落败必须再打季军赛', () => {
-  for (const [semiWin, secondWin, reward, place] of [[0, 0, 150, '冠军'], [0, 1, 75, '亚军'], [1, 0, 25, '季军'], [1, 1, 0, '第四名']]) {
+test('经验竞技冠亚季四名分别150/75/45/0，半决赛落败必须再打季军赛', () => {
+  for (const [semiWin, secondWin, reward, place] of [[0, 0, 150, '冠军'], [0, 1, 75, '亚军'], [1, 0, 45, '季军'], [1, 1, 0, '第四名']]) {
     const g = setup(), s = g.c.State.state(); enterArena(g, 0);
     g.settle(0, semiWin); g.settle(0, semiWin);
     assert.equal(s.exp, 0); assert.equal(g.modals.at(-1).title, semiWin === 0 ? '晋级决赛' : '争夺季军');
@@ -183,16 +183,17 @@ test('经验竞技场吃经验丸加成：经验丸+40%、超级经验丸+60%，
     g.settle(0, 0); g.modalClick(); g.settle(1, 0); g.settle(1, 0);
     assert.equal(s.exp, 150);
   }
-  // 碎片场不给经验，也不消耗药丸
+  // 碎片场只给碎片，不发经验、也不消耗经验丸
   {
     const g = setup(), s = g.c.State.state();
     s.propsStates[7] = 20; s.energy = 0; s.props[39] = 1; enterArena(g, 1);
     g.settle(0, 0); g.modalClick(); g.settle(1, 0); g.settle(1, 0);
-    assert.equal(s.exp, 0); assert.equal(s.propsStates[7], 20, '碎片场不消耗经验丸');
+    assert.equal(s.exp, 0, '碎片场不发经验');
+    assert.equal(s.propsStates[7], 20, '碎片场不消耗经验丸');
   }
 });
 
-test('碎片竞技四名分别8/6/4/3蓝片，不混发经验或金松果，票据仅扣一次', () => {
+test('碎片竞技四名依次 8/6/4/3 蓝片、不发经验与金松果，票据仅扣一次', () => {
   for (const [semiWin, secondWin, shards] of [[0, 0, 8], [0, 1, 6], [1, 0, 4], [1, 1, 3]]) {
     const g = setup(), s = g.c.State.state(); s.energy = 0; s.props[39] = 1;
     enterArena(g, 1); assert.equal(s.props[39], 0); assert.equal(s.energy, 0);
@@ -222,7 +223,7 @@ test('竞技保存中断进度，刷新后继续季军赛不再收费且旧回�
   g.battles[1].opts.onError(); g.c.ClassicExtras.arena(); g.click('arena-resume');
   assert.equal(g.battles.length, 3); assert.equal(s.energy, 60);
   g.settle(1, 0); assert.equal(s.exp, 0);
-  g.settle(2, 0); assert.equal(s.exp, 25); assert.equal(s.classicArenaRun, null);
+  g.settle(2, 0); assert.equal(s.exp, 45); assert.equal(s.classicArenaRun, null);
   assertBalanced(g.markup);
 });
 
@@ -271,40 +272,51 @@ test('天梯胜利夺杯为明确离线概率，失败不会夺杯', () => {
   g.c.ClassicExtras.rank(); g.click('rank-fight'); g.settle(1, 1); assert.equal(s.goldCup, 7);
 });
 
-test('天梯周一至周六比赛、商店仅周日，跨日旧按钮仍重新校验', () => {
+test('天梯周一至周六比赛，金杯商店每天都能打开，跨日旧按钮仍重新校验', () => {
   const g = setup(), s = g.c.State.state(); s.level = 30;
-  g.c.ClassicExtras.rank(); g.click('rank-shop'); assert.match(g.modals.at(-1).html, /每周日/);
-  const stale = g.node('rank-fight').onclick;
+  // 基准时间是周三（非周日）：商店照样能打开
+  g.c.ClassicExtras.rank(); g.click('rank-shop'); assert.match(g.page().html, /data-goods/);
+  g.c.ClassicExtras.rank(); const stale = g.node('rank-fight').onclick;
   g.advance(4 * 86400000); stale(); assert.equal(g.battles.length, 0);
-  g.c.ClassicExtras.rank(); assert.equal(g.node('rank-fight').disabled, true);
-  g.click('rank-shop'); assert.match(g.page().html, /data-goods/);
+  g.c.ClassicExtras.rank(); assert.equal(g.node('rank-fight').disabled, true);   // 周日休赛
+  g.click('rank-shop'); assert.match(g.page().html, /data-goods/);                // 周日也能打开
+  g.c.ClassicExtras.rank();
   g.advance(86400000); g.c.ClassicExtras.rank(); assert.equal(g.node('rank-fight').disabled, false);
   g.click('rank-fight'); assert.equal(g.battles.length, 1);
 });
 
-test('周日兑换校验积分与两种货币，不扣积分，每周限一件并在下周重置', () => {
+test('金杯商店兑换校验积分与两种货币，不扣积分，每日限一件且次日重置', () => {
   const g = setup(), s = g.c.State.state(); s.level = 30; s.integral = 1900; s.goldCup = 1000; s.goldPoint = 500;
-  g.advance(4 * 86400000); g.c.ClassicExtras.rank(); g.click('rank-shop'); g.click('rank-shop-next');
+  g.c.ClassicExtras.rank(); g.click('rank-shop'); g.click('rank-shop-next');
   const choose = () => g.page().querySelector('[data-goods="11"]').onclick();
   choose(); g.modalClick(); assert.equal(s.goldCup, 1000); assert.equal(s.goldPoint, 500); assert.equal(s.gears.length, 0);
   s.integral = 2000; choose(); const confirm = g.modals.at(-1).buttons[0].run; confirm(); confirm();
   assert.equal(s.goldCup, 0); assert.equal(s.goldPoint, 300); assert.equal(s.gears[0].id, 201); assert.equal(s.rankPurchases[11], 1); assert.equal(s.integral, 2000);
   s.goldCup = 2000; choose(); g.modalClick(); assert.equal(s.gears.length, 1); assert.equal(s.goldPoint, 300);
+  assert.match(g.modals.at(-1).html, /今日的兑换次数已用完/);
   g.c.State.save(); g.c.State.load(); const loaded = g.c.State.state();
   g.c.ClassicExtras.rankShop(); g.click('rank-shop-next'); choose(); g.modalClick(); assert.equal(loaded.gears.length, 1);
-  g.advance(7 * 86400000); g.c.ClassicExtras.rankShop(); g.click('rank-shop-next'); choose(); g.modalClick();
+  g.advance(86400000); g.c.ClassicExtras.rankShop(); g.click('rank-shop-next'); choose(); g.modalClick();
   assert.equal(loaded.gears.length, 2); assert.equal(loaded.goldPoint, 100); assert.equal(loaded.goldCup, 1000); assert.equal(loaded.rankPurchases[11], 1);
   assertBalanced(g.markup);
 });
 
-test('周日跨午夜确认禁止兑换，未标日期的旧购买计数保留到本周结束', () => {
+test('金杯商店跨午夜：限兑按天重置，未标日期的旧购买计数在迁移时清空', () => {
   const g = setup(), s = g.c.State.state(); s.level = 30; s.integral = 2000; s.goldCup = 4000; s.goldPoint = 1000;
-  s.rankPurchases = { 11: 1 }; g.advance(4 * 86400000);
+  s.rankPurchases = { 11: 1 };   // 旧档只有计数、没有日期
   g.c.ClassicExtras.rankShop(); g.click('rank-shop-next');
-  g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick(); assert.equal(s.gears.length, 0);
-  g.page().querySelector('[data-goods="12"]').onclick(); g.advance(86400000); g.modalClick();
-  assert.equal(s.goldCup, 4000); assert.equal(s.goldPoint, 1000); assert.equal(s.gears.length, 0);
-  assert.match(g.modals.at(-1).html, /商店已休息/);
+  assert.deepEqual(JSON.parse(JSON.stringify(s.rankPurchases)), {});   // 迁移到按天重置时清空
+  assert.equal(s.rankPurchaseDay, g.c.State.localDate());
+  g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick();
+  assert.equal(s.gears.length, 1);
+  g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick();
+  assert.equal(s.gears.length, 1);
+  assert.match(g.modals.at(-1).html, /今日的兑换次数已用完/);
+  g.advance(86400000);                             // 第二天
+  g.c.ClassicExtras.rankShop(); g.click('rank-shop-next');
+  g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick();
+  assert.equal(s.gears.length, 2);
+  assert.equal(s.rankPurchases[11], 1);
 });
 
 
@@ -327,6 +339,24 @@ test('抽奖离开动画后奖品已保存，重入可继续且旧计时器不�
   g.flushTimers(); assert.equal(s.props[22], 20); assert.equal(s.goldPoint, 80);
   assert.equal(g.node('lottery-spin').disabled, false);
   g.c.State.load(); assert.equal(g.c.State.state().props[22], 20);
+});
+
+test('抽奖里改成两个随机普通药丸，不再直接发天使果实种子', () => {
+  const g = setup(), s = g.c.State.state();
+  const table = g.c.ClassicExtras.lotteryPrizes;
+  assert.equal(table.length, 10);
+  assert.ok(table.every((p) => p.id !== 45), '奖池里不再有天使果实种子');
+  const pills = table.filter((p) => p.pills);
+  assert.equal(pills.length, 1, '只有一个「随机普通药丸」奖位');
+  assert.equal(pills[0].pills, 2, '一次给两个药丸');
+  // 0.85 → 选中第 9 项；药丸抽取也用同一个随机数（落到列表最后一个 → 经验丸）
+  g.math.random = () => 0.85;
+  const before = {}; [3, 4, 5, 7].forEach((id) => (before[id] = s.props[id] || 0));
+  g.c.ClassicExtras.lottery(); g.click('lottery-spin'); g.flushTimers();
+  const gained = [3, 4, 5, 7].reduce((sum, id) => sum + ((s.props[id] || 0) - before[id]), 0);
+  assert.equal(gained, 2, '实际到手两个普通药丸');
+  assert.equal(s.goldPoint, 100, '这一档不发金松果');
+  assert.ok(g.modals.at(-1).html.includes('经验丸'), '结算弹窗显示真实抽到的药丸：' + g.modals.at(-1).html.slice(0, 120));
 });
 
 test('抽奖旧日期迁移不白送次数，新的一天仅恢复一次免费机会', () => {
@@ -439,6 +469,30 @@ test('刷新师父/徒弟会换人且范围合理，候选人都带可查看的�
   g.c.ClassicExtras.master('apprentice');
   g.click('recruit-refresh');
   assert.equal([...g.page().html.matchAll(/data-recruit="\d+"/g)].length, 3, '给 3 位徒弟候选');  assertBalanced(g.markup);
+});
+
+test('师徒候选等级合理化：不超过满级 70，徒弟不会超过师父', () => {
+  const g = setup(), s = g.c.State.state();
+  s.level = 70;
+  g.c.ClassicExtras.master('master');
+  let masterLevels = [...g.page().html.matchAll(/data-master="\d+"[\s\S]*?candidate-level">等级 (\d+)/g)].map((m) => Number(m[1]));
+  assert.equal(masterLevels.length, 3);
+  assert.ok(masterLevels.every((lv) => lv <= 70), '70 级时师父候选不超过满级：' + masterLevels.join(','));
+  // 换一批再看，多次随机都不能超过满级
+  for (let i = 0; i < 6; i++) {
+    g.click('master-refresh');
+    masterLevels = [...g.page().html.matchAll(/data-master="\d+"[\s\S]*?candidate-level">等级 (\d+)/g)].map((m) => Number(m[1]));
+    assert.ok(masterLevels.every((lv) => lv >= 1 && lv <= 70), '师父等级 1~70：' + masterLevels.join(','));
+  }
+  g.c.ClassicExtras.master('apprentice');
+  for (let i = 0; i < 6; i++) {
+    g.click('recruit-refresh');
+    const recruitLevels = [...g.page().html.matchAll(/data-recruit="\d+"[\s\S]*?candidate-level">等级 (\d+)/g)].map((m) => Number(m[1]));
+    assert.equal(recruitLevels.length, 3);
+    assert.ok(recruitLevels.every((lv) => lv >= 1 && lv <= 70), '徒弟等级 1~70：' + recruitLevels.join(','));
+    assert.ok(recruitLevels.every((lv) => lv <= s.level + 1), '徒弟不会比师父强太多：' + recruitLevels.join(','));
+  }
+  assertBalanced(g.markup);
 });
 
 test('收徒金松果不足不启动，零体力可以收徒，落败消耗一次药剂状态', () => {

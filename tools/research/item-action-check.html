@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../">
+<meta charset="UTF-8">
+<title>道具使用/合成交互 · 抽奖药丸 · 排行榜下滑检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle-drops.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* 1) 道具详情：没有滑动条；使用/合成一次一个动作，弹窗不关、界面不换，可以继续点
+ * 2) 每日抽奖第 9 项 = 两个随机普通药丸
+ * 3) 排行榜列表可下滑（头部与排序标签固定）
+ * 结果在 window.__report.check。 */
+(function () {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.addEventListener('load', async () => {
+    document.title = 'LOADING';
+    localStorage.removeItem('ssdz_debug');
+    await wait(250);
+    State.newGame('交互检查');
+    const S = State.state();
+    S.level = 40; S.goldPoint = 6000; S.energy = 90;
+    S.props[24] = 100; S.props[45] = 60; S.props[51] = 55; S.props[1] = 20;
+    State.save();
+    Main.showHome();
+    await wait(400);
+    const check = {};
+    const lastModal = () => { const m = document.querySelectorAll('.classic-modal-overlay'); return m[m.length - 1] || null; };
+    const openDetail = async (id) => {
+      document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+      UI.runAction('bag');
+      for (let i = 0; i < 8; i++) {
+        const cell = document.querySelector('[data-prop="' + id + '"]');
+        if (cell) { cell.click(); break; }
+        const nx = document.querySelector('[data-action="next"]');
+        if (!nx) return null;
+        nx.click();
+      }
+      const act = document.querySelector('[data-action="prop-action"]');
+      if (act) act.click();
+      await wait(120);
+      return lastModal();
+    };
+    const clickMain = (m) => m.querySelector('.modal-buttons button').click();
+
+    // ---------- 碎片：连点三次「合成装备」 ----------
+    const before = { frag: S.props[24], gold: S.goldPoint, gears: S.gears.length };
+    const m1 = await openDetail(24);
+    check.modal = {
+      hasSlider: !!m1.querySelector('[data-slider="use-count"]'),
+      buttons: [...m1.querySelectorAll('.modal-buttons button')].map((b) => b.textContent.trim()),
+      own: m1.querySelector('[data-live="own"]').textContent,
+      hint: m1.querySelector('[data-live="hint"]').textContent,
+    };
+    const steps = [];
+    for (let i = 0; i < 3; i++) {
+      clickMain(m1);
+      await wait(160);
+      const open = lastModal();
+      steps.push({
+        frag: S.props[24], goldDelta: before.gold - S.goldPoint, gears: S.gears.length - before.gears,
+        modalOpen: !!open, sameModal: open === m1,
+        own: open && open.querySelector('[data-live="own"]') ? open.querySelector('[data-live="own"]').textContent : null,
+        gold: open && open.querySelector('[data-live="gold"]') ? open.querySelector('[data-live="gold"]').textContent : null,
+        toast: Array.from(document.querySelectorAll('.toast')).map((t) => t.textContent).pop() || '',
+      });
+    }
+    check.fragmentSteps = steps;
+    check.fragmentAfter = { frag: S.props[24], gold: S.goldPoint, gears: S.gears.length - before.gears };
+    // 返回后才刷新背包页
+    m1.querySelectorAll('.modal-buttons button')[1].click();
+    await wait(200);
+    const bagCell = document.querySelector('[data-prop="24"]');
+    check.afterReturn = {
+      bagVisible: !!document.querySelector('.classic-page[data-screen="bag"]'),
+      modalGone: !document.querySelector('.classic-modal-overlay'),
+      caption: bagCell ? bagCell.querySelector('.item-caption').textContent.trim() : null,
+    };
+
+    // ---------- 药剂：连点使用 ----------
+    const e0 = S.energy;
+    const m2 = await openDetail(1);
+    check.potion = { hasSlider: !!m2.querySelector('[data-slider="use-count"]'), buttons: [...m2.querySelectorAll('.modal-buttons button')].map((b) => b.textContent.trim()) };
+    for (let i = 0; i < 3; i++) { clickMain(m2); await wait(140); }
+    check.potionAfter = {
+      energy: S.energy - e0, left: S.props[1],
+      modalOpen: !!lastModal(), sameModal: lastModal() === m2,
+      note: lastModal().querySelector('[data-live="potion"]').textContent,
+    };
+    // 顶到硬上限后按钮应该禁用并有提示
+    closeAll();
+    async function closeAll() { document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove()); }
+    S.energy = State.energyHardCap(); S.props[1] = 5; State.save();
+    const m3 = await openDetail(1);
+    check.potionFull = {
+      disabled: m3.querySelector('.modal-buttons button').disabled,
+      hint: m3.querySelector('[data-live="hint"]').textContent,
+    };
+    document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+
+    // ---------- 礼包不再被当成宝石合成 ----------
+    S.props[29] = 1; S.goldPoint = 1000; State.save();
+    const m4 = await openDetail(29);
+    check.gift = { buttons: [...m4.querySelectorAll('.modal-buttons button')].map((b) => b.textContent.trim()) };
+    const goldBeforeGift = S.goldPoint;
+    clickMain(m4);
+    await wait(220);
+    check.gift.after = {
+      nextPack: S.props[30] || 0,
+      goldDelta: S.goldPoint - goldBeforeGift,
+      toast: Array.from(document.querySelectorAll('.toast')).map((t) => t.textContent).pop() || '',
+      // 礼包不属于「药剂/碎片」，用完应该退回上一级（背包页）
+      detailClosed: !document.querySelector('.classic-modal-overlay'),
+      backToBag: !!document.querySelector('.classic-page[data-screen="bag"]'),
+      caption29: (document.querySelector('[data-prop="29"]') || { textContent: '' }).textContent.trim(),
+    };
+    document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+
+    // ---------- 碎片（保留连点）与种子（用完退回上一层）的对比 ----------
+    S.props[45] = 60; State.save();
+    const seedGold = S.goldPoint;
+    const m5 = await openDetail(45);
+    const seedStayOpen = m5.querySelector('.modal-buttons button').dataset.close !== 'true';
+    clickMain(m5);
+    await wait(220);
+    check.seed = {
+      buttonStaysOpen: seedStayOpen,
+      detailClosed: !document.querySelector('.classic-modal-overlay'),
+      backToBag: !!document.querySelector('.classic-page[data-screen="bag"]'),
+      fruit: S.props[47] || 0,
+      goldDelta: S.goldPoint - seedGold,
+    };
+    document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+
+    // ---------- 抽奖后右上角金松果要同步 ----------
+    const badgeBefore = (document.querySelector('.bag-coins b') || {}).textContent;
+    const g0 = S.goldPoint;
+    const realRandom2 = Math.random;
+    ClassicExtras.lottery();
+    await wait(150);
+    Math.random = () => 0.55;      // 选中第 6 项：金松果 +30
+    document.querySelector('[data-action="lottery-spin"]').click();
+    await wait(2600);
+    Math.random = realRandom2;
+    check.badge = {
+      before: badgeBefore,
+      goldDelta: S.goldPoint - g0,
+      badgeAfter: (document.querySelector('.bag-coins b') || {}).textContent,
+    };
+    document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+
+    // ---------- 抽奖：第 9 项是两个随机普通药丸 ----------
+    const NORMAL = [3, 4, 5, 7];
+    check.prizeTable = ClassicExtras.lotteryPrizes.map((p) => p.label + (p.pills ? '(pills=' + p.pills + ')' : ''));
+    check.hasSeedPrize = ClassicExtras.lotteryPrizes.some((p) => p.id === 45);
+    const beforePills = {}; NORMAL.forEach((id) => (beforePills[id] = S.props[id] || 0));
+    const goldBefore = S.goldPoint;
+    const realRandom = Math.random;
+    ClassicExtras.lottery();
+    await wait(150);
+    // 0.85 → 选中第 9 项；接下来的随机数固定取 0.1 → 大力丸
+    Math.random = () => 0.85;
+    document.querySelector('[data-action="lottery-spin"]').click();
+    await wait(2600);
+    Math.random = realRandom;
+    check.lottery = {
+      pillsGained: NORMAL.map((id) => id + ':' + ((S.props[id] || 0) - beforePills[id])).join(' '),
+      total: NORMAL.reduce((sum, id) => sum + ((S.props[id] || 0) - beforePills[id]), 0),
+      goldDelta: S.goldPoint - goldBefore,
+      modalText: (lastModal() ? lastModal().textContent : '').replace(/\s+/g, ' ').slice(0, 80),
+    };
+    document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+
+    // ---------- 排行榜下滑 ----------
+    ClassicExtras.toplist();
+    await wait(200);
+    const rows = document.querySelector('.toplist-rows');
+    const head = document.querySelector('.toplist-head');
+    const tabs = document.querySelector('.toplist-tabs');
+    const headTop = head.getBoundingClientRect().top, tabsTop = tabs.getBoundingClientRect().top;
+    rows.scrollTop = rows.scrollHeight;
+    await wait(120);
+    check.toplist = {
+      scrollable: rows.scrollHeight > rows.clientHeight + 2,
+      scrolled: rows.scrollTop,
+      headFixed: Math.abs(head.getBoundingClientRect().top - headTop) < 1,
+      tabsFixed: Math.abs(tabs.getBoundingClientRect().top - tabsTop) < 1,
+      rows: rows.querySelectorAll('.toplist-row').length,
+    };
+
+    check.errs = window.__errs;
+    window.__report = { check, errs: window.__errs };
+    document.title = 'READY';
+  });
+})();
+</script>
+</body>
+</html>

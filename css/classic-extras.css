@@ -66,12 +66,19 @@
 .extra-master-main .extra-note{font-size:17px;margin-top:6px}
 
 /* ---------- 排行榜（原版 STATE.TOPLIST） ---------- */
+/* 头部与排序标签固定，只有名次列表滚动，页面支持下滑看完整榜单 */
+.toplist-board{display:flex;flex-direction:column;padding:16px 34px 10px}
+.toplist-head,.toplist-tabs,.toplist-locked-note,.toplist-board>.extra-note{flex:0 0 auto}
 .toplist-board{padding:16px 34px 10px}
 .toplist-head{display:flex;justify-content:space-between;align-items:center;font-size:23px;color:#8b672f;margin-bottom:6px}
 .toplist-head b{color:#c0392b;font-size:29px}
 .toplist-tabs{display:flex;gap:14px;margin:4px 0 8px}
 .toplist-tabs .uc-tab{flex:1;min-height:52px;font-size:30px;padding:2px 0}
-.toplist-rows{display:flex;flex-direction:column;gap:3px}
+.toplist-rows{display:flex;flex-direction:column;gap:3px;flex:1 1 auto;min-height:0;overflow-y:auto;
+  overscroll-behavior:contain;padding-right:8px;scrollbar-width:thin;scrollbar-color:#c9af76 #f0e3bf}
+.toplist-rows::-webkit-scrollbar{width:10px}
+.toplist-rows::-webkit-scrollbar-thumb{background:#c9af76;border-radius:6px}
+.toplist-rows::-webkit-scrollbar-track{background:#f0e3bf;border-radius:6px}
 .toplist-row{display:grid;grid-template-columns:64px 1fr 110px 150px 130px;align-items:center;font-size:24px;line-height:1.25;
   padding:3px 14px;border-radius:20px;background:#f3e6c4;color:#7b5a2e}
 .toplist-row:nth-child(odd){background:#efe0ba}

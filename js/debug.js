@@ -63,36 +63,49 @@
     return state;
   }
 
-  // 一键升级目标等级：原始经验表到 50 级，之后按 +250/级 顺延，这里统一到 60 级
-  const MAX_LEVEL = 60;
+  // 一键升级目标等级：与游戏满级一致（State.MAX_PLAYER_LEVEL = 70）
+  const MAX_LEVEL = 70;
   // ---------- 一次性工具 ----------
   const ACTIONS = [
-    { label: '一键满级', note: '直接升到 ' + MAX_LEVEL + ' 级并补满由升级带来的属性成长',
+    { label: '一键满级', note: '从当前等级一路走「真实升级流程」到 ' + MAX_LEVEL + ' 级：属性成长、升级礼包（道具）与随机领悟的武器/技能都会照常发放',
       run() {
         const S = State.state();
         const from = S.level;
-        if (from >= MAX_LEVEL) return '已经是 ' + MAX_LEVEL + ' 级';
-        let gain = { power: 0, agility: 0, speed: 0, hp: 0 };
-        for (let lv = from; lv < MAX_LEVEL; lv++) {
-          // 与 State.gainExp 的升级成长一致：三围各 +1~3、生命 +6~10
-          gain.power += 2; gain.agility += 2; gain.speed += 2; gain.hp += 8;
+        if (from >= MAX_LEVEL) return '已经是 ' + MAX_LEVEL + ' 级或更高（调试上限 ' + MAX_LEVEL + '）';
+        const gain = { power: 0, agility: 0, speed: 0, hp: 0 };
+        const learned = [];
+        let levels = 0, gifts = 0, books = 0;
+        // 每次只喂「当前等级升下一级」所需的经验，走完整的 gainExp 流程
+        for (let guard = 0; S.level < MAX_LEVEL && guard < 200; guard++) {
+          const ups = State.gainExp(GData.nextExp(S.level));
+          if (!ups.length) break;
+          for (const u of ups) {
+            levels++;
+            gain.power += u.power; gain.agility += u.agility; gain.speed += u.speed; gain.hp += u.hp;
+            gifts += (u.gifts || []).length;
+            if (u.attributeBook) books++;
+            if (u.reward) learned.push(u.reward + (u.rewardKind === 'skill' ? '（技能）' : '（武器）'));
+          }
         }
-        S.level = MAX_LEVEL; S.exp = 0;
-        S.power += gain.power; S.agility += gain.agility; S.speed += gain.speed; S.maxHp += gain.hp;
-        State.save();
         if (window.UI && UI.refreshHome) UI.refreshHome();
-        return '等级 ' + from + ' → ' + MAX_LEVEL + '（力量+' + gain.power + ' 敏捷+' + gain.agility +
-          ' 速度+' + gain.speed + ' 生命+' + gain.hp + '）';
+        renderOwned();
+        return '等级 ' + from + ' → ' + S.level + '（' + levels + ' 级）：力量+' + gain.power + ' 敏捷+' + gain.agility +
+          ' 速度+' + gain.speed + ' 生命+' + gain.hp + '，升级礼包 ' + gifts + ' 件' + (books ? '、属性书 ' + books + ' 本' : '') +
+          (learned.length ? '，领悟 ' + learned.join('、') : '，没有领悟新武技');
       } },
-    { label: '一键升级（升1级）', note: '按正常升级结算一次经验，属性成长与随机领悟照常',
+    { label: '一键升级（升1级）', note: '按正常升级结算一次经验，属性成长、升级礼包与随机领悟照常；到 ' + MAX_LEVEL + ' 级就停下',
       run() {
         const S = State.state();
+        if (S.level >= MAX_LEVEL) return '已经是 ' + MAX_LEVEL + ' 级或更高（调试上限 ' + MAX_LEVEL + '）';
         const ups = State.gainExp(GData.nextExp(S.level));
         if (!ups.length) return '经验不足，未能升级';
         const sum = (k) => ups.reduce((a, u) => a + u[k], 0);
         const last = ups[ups.length - 1];
+        const gifts = ups.reduce((a, u) => a + (u.gifts || []).length, 0);
+        renderOwned();
         return '升到 ' + last.level + ' 级（力量+' + sum('power') + ' 敏捷+' + sum('agility') +
-          ' 速度+' + sum('speed') + ' 生命+' + sum('hp') + '）' + (last.reward ? '，领悟 ' + last.reward : '');
+          ' 速度+' + sum('speed') + ' 生命+' + sum('hp') + '）' + (gifts ? '，礼包 ' + gifts + ' 件' : '') +
+          (last.reward ? '，领悟 ' + last.reward : '');
       } },
     { label: '体力全满', run() { const S = State.state(); S.energy = S.maxEnergy; S.lastEnergyTs = Date.now(); State.save(); UI.refreshHome(); return '体力已回满'; } },
     { label: '金松果 +10000', run() { State.state().goldPoint += 10000; State.save(); UI.refreshHome(); return '金松果 +10000'; } },
@@ -162,6 +175,63 @@
     return html;
   }
 
+  /** 快速获取物品用的道具下拉：字典里的全部道具，含碎片、种子与天梯碎片。 */
+  function itemOptions() {
+    const rows = [];
+    propMap.each((id, v) => { if (+id > 0) rows.push({ id: +id, name: v.name }); });
+    rows.sort((a, b) => a.id - b.id);
+    return rows.map((r) => '<option value="' + r.id + '">' + r.id + ' ' + esc(r.name) + '</option>').join('');
+  }
+
+  /** 武器/技能下拉：字典全表，按编号排序。 */
+  function wsOptions(kind) {
+    const rows = (kind === 'skill' ? State.skillList() : State.weaponList()) || [];
+    return rows.map((r) => '<option value="' + r.id + '">' + r.id + ' ' + esc(r.name) + '</option>').join('');
+  }
+
+  /** 直接获得/改等级指定武器、技能（等级 1~15）。 */
+  function grantWS(kind, id, level) {
+    const S = State.state ? State.state() : null;
+    if (!S) return '还没有存档，先开始游戏';
+    const fn = kind === 'skill' ? State.setSkill : State.setWeapon;
+    const r = fn ? fn(Number(id), Number(level)) : { ok: false, msg: '当前版本没有这个接口' };
+    if (window.UI && UI.refreshHome) UI.refreshHome();
+    renderOwned();
+    return r.ok
+      ? (r.replaced ? '【' + r.name + '】等级改为 ' + r.level : '获得【' + r.name + '】Lv' + r.level) + '　武技 ' + r.total + '/' + r.limit
+      : r.msg;
+  }
+
+  /** 遗忘指定武器、技能。 */
+  function forgetWS(kind, id) {
+    const S = State.state ? State.state() : null;
+    if (!S) return '还没有存档，先开始游戏';
+    const fn = kind === 'skill' ? State.forgetSkill : State.forgetWeapon;
+    const r = fn ? fn(Number(id)) : { ok: false, msg: '当前版本没有这个接口' };
+    if (window.UI && UI.refreshHome) UI.refreshHome();
+    renderOwned();
+    return r.ok ? '已遗忘【' + r.name + '】　武技 ' + r.total + '/' + r.limit : r.msg;
+  }
+
+  /** 直接往背包里加道具（调试用，不扣任何货币），并刷新首页/背包。
+   *  仍然遵守 9999 的单件上限，超出部分不会加进去。 */
+  function grantItem(id, count) {
+    const S = State.state ? State.state() : null;
+    if (!S) return '还没有存档，先开始游戏';
+    const n = Math.max(1, Math.min(999, Math.round(Number(count) || 1)));
+    const def = propMap.getValue(Number(id));
+    if (!def) return '道具表里没有编号 ' + id;
+    const cap = State.PROP_HARD_CAP || 9999;
+    const before = S.props[id] || 0;
+    S.props[id] = Math.min(cap, before + n);
+    State.save();
+    if (window.UI && UI.refreshHome) UI.refreshHome();
+    if (window.UI && UI.refreshHeader) UI.refreshHeader();
+    if (window.UI && UI.currentScreen && UI.currentScreen() === 'bag') UI.runAction('bag');
+    const added = S.props[id] - before;
+    return '获得 ' + def.name + ' ×' + added + '（现有 ' + S.props[id] + ' 个' + (S.props[id] >= cap ? '，已达上限 ' + cap : '') + '）';
+  }
+
   // ---------- 面板 ----------
   let panel = null, gear = null, drag = null;
 
@@ -176,7 +246,25 @@
       '<header class="debug-head"><b>调试面板</b><span class="debug-hint">Ctrl+Shift+D</span><button type="button" class="debug-x" aria-label="关闭调试面板">×</button></header>' +
       '<div class="debug-body"><ul class="debug-list">' +
       TOGGLES.map((t) => '<li><label class="debug-row" data-key="' + t.key + '"><input type="checkbox" data-key="' + t.key + '"' + (state[t.key] ? ' checked' : '') + '><span class="debug-name">' + esc(t.label) + '</span><em class="debug-note">' + esc(t.note || '') + '</em></label></li>').join('') +
-      '</ul><div class="debug-actions">' +
+      '</ul><div class="debug-grant">' +
+      '<span class="debug-grant-title">快速获取物品</span>' +
+      '<label class="debug-grant-row"><select data-item-select aria-label="选择要获取的道具">' + itemOptions() + '</select>' +
+      '<input type="number" data-item-count min="1" max="999" step="1" value="10" inputmode="numeric" aria-label="获取数量">' +
+      '<button type="button" class="uc-button tiny" data-item-grant="1">获取</button></label>' +
+      '<p class="debug-grant-note">直接进背包、不扣金松果；碎片、果实种子、天梯碎片等全部道具都在下拉里。</p></div>' +
+      '<div class="debug-grant debug-ws">' +
+      '<span class="debug-grant-title">武技：快速获得 / 遗忘</span>' +
+      '<label class="debug-grant-row debug-ws-row"><span class="debug-ws-tag">武器</span>' +
+      '<select data-ws-select="weapon" aria-label="选择要获得的武器">' + wsOptions('weapon') + '</select>' +
+      '<input type="number" data-ws-level="weapon" min="1" max="15" step="1" value="1" inputmode="numeric" aria-label="武器等级">' +
+      '<button type="button" class="uc-button tiny" data-ws-learn="weapon">获得</button></label>' +
+      '<label class="debug-grant-row debug-ws-row"><span class="debug-ws-tag">技能</span>' +
+      '<select data-ws-select="skill" aria-label="选择要获得的技能">' + wsOptions('skill') + '</select>' +
+      '<input type="number" data-ws-level="skill" min="1" max="15" step="1" value="1" inputmode="numeric" aria-label="技能等级">' +
+      '<button type="button" class="uc-button tiny" data-ws-learn="skill">获得</button></label>' +
+      '<div class="debug-ws-owned" data-ws-owned></div>' +
+      '<p class="debug-grant-note">点已有武技后面的 × 直接遗忘；等级会夹在 1~15。</p></div>' +
+      '<div class="debug-actions">' +
       ACTIONS.map((a, i) => '<button type="button" class="uc-button tiny" data-act="' + i + '" title="' + esc(a.note || a.label) + '">' + esc(a.label) + '</button>').join('') +
       '</div><div class="debug-danger"><label class="debug-weapon"><span>开局武器</span><select data-weapon-select aria-label="彻底重置后的开局武器">' + weaponOptions('default') + '</select></label>' +
       '<button type="button" class="debug-reset-account" data-reset-account="1">彻底重置账号</button>' +
@@ -208,6 +296,31 @@
       if (!b) return;
       const a = ACTIONS[Number(b.dataset.act)];
       if (a) msg(a.run());
+    };
+    // 快速获取物品：选道具 + 数量后点「获取」，回车同样生效
+    const grantBtn = panel.querySelector('[data-item-grant]');
+    const grantSelect = panel.querySelector('[data-item-select]');
+    const grantCount = panel.querySelector('[data-item-count]');
+    const doGrant = () => msg(grantItem(Number(grantSelect.value), Number(grantCount.value)));
+    grantBtn.onclick = doGrant;
+    grantCount.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); doGrant(); } };
+    grantSelect.onchange = () => {
+      const def = propMap.getValue(Number(grantSelect.value));
+      if (def) msg('已选中 ' + def.name + '，当前拥有 ' + ((State.state() || { props: {} }).props[grantSelect.value] || 0) + ' 个');
+    };
+    // 武器/技能：选表 + 等级后获得（回车同样生效），已有武技后面的 × 直接遗忘
+    for (const btn of panel.querySelectorAll('[data-ws-learn]')) {
+      const kind = btn.dataset.wsLearn;
+      btn.onclick = () => msg(grantWS(kind, panel.querySelector('[data-ws-select="' + kind + '"]').value,
+        panel.querySelector('[data-ws-level="' + kind + '"]').value));
+      const levelInput = panel.querySelector('[data-ws-level="' + kind + '"]');
+      levelInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); btn.click(); } };
+    }
+    panel.querySelector('[data-ws-owned]').onclick = (e) => {
+      const b = e.target.closest('[data-ws-forget]');
+      if (!b) return;
+      const parts = String(b.dataset.wsForget).split(':');
+      msg(forgetWS(parts[0], parts[1]));
     };
     panel.querySelector('[data-reset-account]').onclick = () => {
       const S = State.state();
@@ -273,6 +386,21 @@
     const live = !!(window.State && State.state && State.state());
     panel.classList.toggle('debug-off', !live);
     for (const input of panel.querySelectorAll('input[type="checkbox"]')) input.checked = state[input.dataset.key] === true;
+    renderOwned();
+  }
+  /** 面板里的「已有武技」列表：每项后面一个 × 直接遗忘。 */
+  function renderOwned() {
+    if (!panel) return;
+    const box = panel.querySelector('[data-ws-owned]');
+    if (!box) return;
+    const live = !!(window.State && State.state && State.state());
+    if (!live) { box.innerHTML = '<span class="debug-grant-note">还没有存档。</span>'; return; }
+    const chip = (kind, inst) => '<span class="debug-ws-chip">' + (kind === 'skill' ? '技' : '武') + ' ' + esc(inst.name) +
+      ' <b>Lv' + inst.level + '</b><button type="button" data-ws-forget="' + kind + ':' + inst.id + '" title="遗忘' +
+      esc(inst.name) + '" aria-label="遗忘' + esc(inst.name) + '">×</button></span>';
+    const html = (State.myWeapons ? State.myWeapons() : []).map((w) => chip('weapon', w)).join('') +
+      (State.mySkills ? State.mySkills() : []).map((s) => chip('skill', s)).join('');
+    box.innerHTML = html || '<span class="debug-grant-note">当前没有任何武器或技能。</span>';
   }
   function isOpen() { return !!(panel && panel.classList.contains('open')); }
   function togglePanel(force) {
@@ -299,7 +427,7 @@
   else init();
 
   window.Debug = {
-    enabled, get, set, toggle, reset, numberStretch, resetAccount,
+    enabled, get, set, toggle, reset, numberStretch, resetAccount, grantItem, grantWS, forgetWS, MAX_LEVEL,
     open: () => togglePanel(true), close: () => togglePanel(false), togglePanel, state: () => Object.assign({}, state),
   };
 })();

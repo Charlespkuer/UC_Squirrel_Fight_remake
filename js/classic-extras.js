@@ -18,6 +18,9 @@
     if (element) element.textContent = label || '\u8fd4\u56de';
   }
   function alert(text) { C().modal('\u63d0\u793a', '<p>' + esc(text) + '</p>', [{ label: '\u77e5\u9053\u4e86' }], { small: true }); }
+  // \u56db\u540d\u5956\u52b1\uff08\u51a0/\u4e9a/\u5b63/\u7b2c\u56db\uff09\u3002\u788e\u7247\u573a\u53ea\u7ed9\u788e\u7247\uff0c\u4e0d\u53d1\u7ecf\u9a8c\u3002
+  const ARENA_EXP = [150, 75, 45, 0];
+  const ARENA_FRAGMENT_SHARDS = [8, 6, 4, 3];
   function addProp(id, count) { const s = State.state(); s.props[id] = (s.props[id] || 0) + count; }
   function outcome(win, reward, text, again, label) {
     C().modal('\u6218\u6597\u7ed3\u679c', '<div class="extra-result"><strong class="cartoon">' + (win ? '\u80dc\u5229\uff01' : '\u518d\u63a5\u518d\u5389') + '</strong><p>' + esc(text) + '</p><div>\u7ecf\u9a8c +' + reward.exp + '\u3000\u91d1\u677e\u679c +' + (reward.gold || 0) + '</div>' + C().upsHtml(reward.ups) + '</div>', [{ label: label || '\u8fd4\u56de', run: again }, { label: '\u67e5\u770b\u5f55\u50cf', cls: 'gold', run: () => UI.runAction('messages') }]);
@@ -44,7 +47,7 @@
     State.tickEnergy();
     const s = State.state(), run = activeArenaRun();
     const cards = [
-      { art: 28, name: '\u7ecf\u9a8c\u7ade\u6280\u573a', text: '11\u7ea7\u5f00\u542f\uff0c\u51a0\u519b150\uff0f\u4e9a\u519b75\uff0f\u5b63\u519b25\u7ecf\u9a8c', action: 'arena-exp' },
+      { art: 28, name: '\u7ecf\u9a8c\u7ade\u6280\u573a', text: '11\u7ea7\u5f00\u542f\uff0c\u51a0\u519b150\uff0f\u4e9a\u519b75\uff0f\u5b63\u519b45\u7ecf\u9a8c', action: 'arena-exp' },
       { art: 29, name: '\u788e\u7247\u7ade\u6280\u573a', text: '20\u7ea7\u5f00\u542f\uff0c\u56db\u540d\u4f9d\u6b21\u83b7\u5f978\uff0f6\uff0f4\uff0f3\u84dd\u8272\u788e\u7247', action: 'arena-fragment' },
       { art: 30, name: '\u5929\u68af\u8d5b', text: '30\u7ea7\u5f00\u542f\uff0c\u8d62\u79ef\u5206\u3001\u4e89\u91d1\u676f', action: 'arena-rank' },
     ];
@@ -106,13 +109,13 @@
       }
       run.settled = true; arenaRun = null;
       const position = phase === 'final' ? (winner === 0 ? 0 : 1) : (winner === 0 ? 2 : 3);
-      // \u7ecf\u9a8c\u573a\u5403\u7ecf\u9a8c\u4e38\u52a0\u6210\uff08\u7ecf\u9a8c\u4e38 +40% / \u8d85\u7ea7\u7ecf\u9a8c\u4e38 +60%\uff09\uff1b\u788e\u7247\u573a\u7ed9\u788e\u7247\u4e0d\u7ed9\u7ecf\u9a8c
-      const baseExp = run.kind ? 0 : [150, 75, 25, 0][position];
+      // \u7ecf\u9a8c\u573a\u5403\u7ecf\u9a8c\u4e38\u52a0\u6210\uff08\u7ecf\u9a8c\u4e38 +40% / \u8d85\u7ea7\u7ecf\u9a8c\u4e38 +60%\uff09\uff1b\u788e\u7247\u573a\u53ea\u7ed9\u788e\u7247\u3001\u4e0d\u7ed9\u7ecf\u9a8c\uff08\u4e5f\u5c31\u4e0d\u6d88\u8017\u7ecf\u9a8c\u4e38\uff09\u3002
+      const baseExp = run.kind ? 0 : ARENA_EXP[position];
       // \u52a0\u6210\u767e\u5206\u6bd4\u8981\u5728 tickPropStates \u6d88\u8017\u672c\u573a\u7528\u91cf\u4e4b\u524d\u8bfb\uff0c\u5426\u5219\u7ed3\u7b97\u6587\u6848\u4f1a\u663e\u793a\u6210 0%
       const boostPct = baseExp ? State.expBoostPct() : 0;
       const boosted = baseExp ? State.gainExpWithBoost(baseExp) : { exp: 0, ups: [] };
       const exp = boosted.exp;
-      const shards = run.kind ? [8, 6, 4, 3][position] : 0;
+      const shards = run.kind ? ARENA_FRAGMENT_SHARDS[position] : 0;
       if (shards) addProp(26, shards);
       const gem = winner === 0 ? State.rollGemDrop(15) : null;   // 45\u7ea7\u8d77\u7ade\u6280\u573a\u83b7\u80dc\u6709\u51e0\u7387\u5f97\u5b9d\u77f3
       const ups = boosted.ups;
@@ -120,23 +123,21 @@
       const boostNote = boostPct ? '\uff08\u542b\u7ecf\u9a8c\u4e38 +' + boostPct + '%\uff09' : '';
       saveArenaRun(null);
       arena();   // \u6218\u679c\u5f39\u7a97\u653e\u56de\u7ade\u6280\u573a\u4e0a\uff0c\u522b\u98d8\u5728\u4e3b\u754c\u9762\u4e0a
-      outcome(winner === 0, { exp, gold: 0, ups }, '\u83b7\u5f97' + ['\u51a0\u519b', '\u4e9a\u519b', '\u5b63\u519b', '\u7b2c\u56db\u540d'][position] + '\uff01' + (shards ? '\u84dd\u8272\u788e\u7247 \u00d7' + shards + ' \u5df2\u653e\u5165\u80cc\u5305\u3002' : '\u5956\u52b1' + exp + '\u7ecf\u9a8c' + boostNote + '\u3002') + (gem ? '\u83b7\u5f97 ' + gem.name + ' \u00d71\uff01' : ''), arena, '\u8fd4\u56de\u7ade\u6280\u573a');
+      outcome(winner === 0, { exp, gold: 0, ups }, '\u83b7\u5f97' + ['\u51a0\u519b', '\u4e9a\u519b', '\u5b63\u519b', '\u7b2c\u56db\u540d'][position] + '\uff01' + (shards ? '\u84dd\u8272\u788e\u7247 \u00d7' + shards + (exp ? '\u3001\u7ecf\u9a8c ' + exp + boostNote : '') + '\u3002' : '\u5956\u52b1' + exp + '\u7ecf\u9a8c' + boostNote + '\u3002') + (gem ? '\u83b7\u5f97 ' + gem.name + ' \u00d71\uff01' : ''), arena, '\u8fd4\u56de\u7ade\u6280\u573a');
     } }).catch(interrupted);
   }
 
   let rankAttempt = null;
   const rankSunday = () => new Date(Date.now()).getDay() === 0;
-  function rankWeek() {
-    const date = new Date(Date.now());
-    date.setDate(date.getDate() - (date.getDay() + 6) % 7);
-    return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
-  }
-  function refreshRankWeek() {
-    const s = State.state(), week = rankWeek();
-    if (s.rankPurchaseWeek === week && s.rankPurchases && typeof s.rankPurchases === 'object' && !Array.isArray(s.rankPurchases)) return;
-    // A legacy undated purchase remains used in this week, then resets next week.
-    if (s.rankPurchaseWeek && s.rankPurchaseWeek !== week || !s.rankPurchases || typeof s.rankPurchases !== 'object' || Array.isArray(s.rankPurchases)) s.rankPurchases = {};
-    s.rankPurchaseWeek = week; State.save();
+  /** \u91d1\u676f\u5546\u5e97\u6539\u6210\u6bcf\u5929\u5f00\u653e\uff0c\u5151\u6362\u6b21\u6570\u4e5f\u6309\u5929\u91cd\u7f6e\uff08\u539f\u6765\u662f\u5468\u65e5\u5f00\u653e + \u6bcf\u5468\u9650\u5151\uff09\u3002 */
+  function refreshRankShopDay() {
+    const s = State.state(), day = State.localDate();
+    if (s.rankPurchaseDay === day && s.rankPurchases && typeof s.rankPurchases === 'object' && !Array.isArray(s.rankPurchases)) return;
+    // \u65e7\u6863\u53ea\u6709\u6bcf\u5468\u6807\u8bb0\uff08rankPurchaseWeek\uff09\uff1a\u8fc1\u79fb\u5230\u6309\u5929\u91cd\u7f6e\uff0c\u7b2c\u4e00\u6b21\u6253\u5f00\u65f6\u6e05\u7a7a\u5373\u53ef\u3002
+    s.rankPurchases = {};
+    s.rankPurchaseDay = day;
+    if (s.rankPurchaseWeek !== undefined) delete s.rankPurchaseWeek;
+    State.save();
   }
   function rank() {
     const s = State.state(); State.tickEnergy();
@@ -145,17 +146,17 @@
       C().modal('\u5929\u68af\u8d5b', '<div class="extra-finalist">' + sprite(30) + '<div><h3>30\u7ea7\u5f00\u542f\u5929\u68af\u8d5b</h3><p>\u5f53\u524d\u7b49\u7ea7\uff1a' + s.level + '<br>\u5148\u53bb\u6311\u6218\u79ef\u7d2f\u7ecf\u9a8c\u5427\uff01</p></div></div>', [{ label: '\u53bb\u6311\u6218', run: () => UI.runAction('challenge') }, { label: '\u8fd4\u56de\u7ade\u6280\u573a', cls: 'muted', run: arena }]); return;
     }
     if (s.integral == null) { s.integral = 1500; State.save(); }
-    refreshRankWeek();
+    refreshRankShopDay();
     const entries = [0, 1, 2, 3, 4, 5].map((n) => ({ name: GData.AI_NAMES[n * 4], points: 1350 + n * 83 }));
     entries.push({ name: s.name, points: s.integral, mine: true }); entries.sort((a, b) => b.points - a.points);
-    const p = C().page('challenge', 'arena', '<div class="extra-rank-layout"><div class="extra-rank-self">' + sprite(30) + '<h2>\u5929\u68af\u8d5b</h2><div class="extra-score">\u79ef\u5206 <b>' + s.integral + '</b></div><div class="extra-score">\u91d1\u676f <b>' + s.goldCup + '</b></div><p>\u4eca\u65e5\u5df2\u53c2\u8d5b ' + s.joinRankCount + ' / 20 \u573a<br>' + (rankSunday() ? '\u5468\u65e5\u4f11\u8d5b\uff0c\u91d1\u676f\u5546\u5e97\u5f00\u653e' : s.joinRankCount >= 20 ? '\u4eca\u65e5\u53c2\u8d5b\u6b21\u6570\u5df2\u7528\u5b8c' : s.joinRankCount < 10 ? '\u672c\u6b21\u514d\u8d39\uff0c\u524d10\u573a\u514d\u8d39' : '\u672c\u6b21\u6d88\u80175\u91d1\u677e\u679c') + '</p>' + button('\u5f00\u59cb\u5339\u914d', 'rank-fight', 'small gold') + button('\u91d1\u676f\u5546\u5e97', 'rank-shop', 'small') + '</div><div class="extra-rank-list"><h3>\u672c\u5730\u6a21\u62df\u6392\u884c\u699c</h3>' + entries.map((entry, i) => '<div class="extra-rank-row ' + (entry.mine ? 'mine' : '') + '"><span>' + (i + 1) + '</span><b>' + esc(entry.name) + (entry.mine ? '\uff08\u4f60\uff09' : '') + '</b><strong>' + entry.points + '</strong></div>').join('') + note('\u5468\u4e00\u81f3\u5468\u516d\u6bd4\u8d5b\uff0c\u5468\u65e5\u5151\u6362\u3002\u6bcf\u65e5\u6700\u591a20\u573a\uff0c\u524d10\u573a\u514d\u8d39\uff0c\u5176\u540e\u6bcf\u573a5\u91d1\u677e\u679c\u3002\u80dc\u5229\u5f973\u676f\uff0c\u843d\u8d25\u5f971\u676f\u3002\u79ef\u5206\u4e0e\u593a\u676f\u4e3a\u79bb\u7ebf\u6a21\u62df\uff1b\u83b7\u80dc\u670925%\u673a\u4f1a\u989d\u5916\u593a\u5f973\u676f\u3002') + '</div></div>', { cls: 'extra-board rank-extra-board' });
+    const p = C().page('challenge', 'arena', '<div class="extra-rank-layout"><div class="extra-rank-self">' + sprite(30) + '<h2>\u5929\u68af\u8d5b</h2><div class="extra-score">\u79ef\u5206 <b>' + s.integral + '</b></div><div class="extra-score">\u91d1\u676f <b>' + s.goldCup + '</b></div><p>\u4eca\u65e5\u5df2\u53c2\u8d5b ' + s.joinRankCount + ' / 20 \u573a<br>' + (rankSunday() ? '\u5468\u65e5\u4f11\u8d5b\uff08\u91d1\u676f\u5546\u5e97\u7167\u5e38\u5f00\u653e\uff09' : s.joinRankCount >= 20 ? '\u4eca\u65e5\u53c2\u8d5b\u6b21\u6570\u5df2\u7528\u5b8c' : s.joinRankCount < 10 ? '\u672c\u6b21\u514d\u8d39\uff0c\u524d10\u573a\u514d\u8d39' : '\u672c\u6b21\u6d88\u80175\u91d1\u677e\u679c') + '</p>' + button('\u5f00\u59cb\u5339\u914d', 'rank-fight', 'small gold') + button('\u91d1\u676f\u5546\u5e97', 'rank-shop', 'small') + '</div><div class="extra-rank-list"><h3>\u672c\u5730\u6a21\u62df\u6392\u884c\u699c</h3>' + entries.map((entry, i) => '<div class="extra-rank-row ' + (entry.mine ? 'mine' : '') + '"><span>' + (i + 1) + '</span><b>' + esc(entry.name) + (entry.mine ? '\uff08\u4f60\uff09' : '') + '</b><strong>' + entry.points + '</strong></div>').join('') + note('\u5929\u68af\u8d5b\u5468\u4e00\u81f3\u5468\u516d\u8fdb\u884c\uff0c\u5468\u65e5\u4f11\u8d5b\uff1b\u91d1\u676f\u5546\u5e97\u6bcf\u5929\u5f00\u653e\u3002\u6bcf\u65e5\u6700\u591a20\u573a\uff0c\u524d10\u573a\u514d\u8d39\uff0c\u5176\u540e\u6bcf\u573a5\u91d1\u677e\u679c\u3002\u80dc\u5229\u5f973\u676f\uff0c\u843d\u8d25\u5f971\u676f\u3002\u79ef\u5206\u4e0e\u593a\u676f\u4e3a\u79bb\u7ebf\u6a21\u62df\uff1b\u83b7\u80dc\u670925%\u673a\u4f1a\u989d\u5916\u593a\u5f973\u676f\u3002') + '</div></div>', { cls: 'extra-board rank-extra-board' });
     back(p, arena, '\u8fd4\u56de\u7ade\u6280\u573a');
     on(p, 'rank-shop', () => rankShop(0));
     const match = on(p, 'rank-fight', () => {
       if (!p.isConnected || State.state() !== s || rankAttempt) return;
       State.tickEnergy();
       if (s.level < 30) { alert('\u5929\u68af\u8d5b\u9700\u8981\u8fbe\u523030\u7ea7\u3002'); return; }
-      if (rankSunday()) { alert('\u5468\u65e5\u5929\u68af\u4f11\u8d5b\uff0c\u8bf7\u5230\u91d1\u676f\u5546\u5e97\u5151\u6362\u5956\u52b1\u3002'); return; }
+      if (rankSunday()) { alert('\u5468\u65e5\u5929\u68af\u4f11\u8d5b\uff0c\u53ef\u4ee5\u53bb\u91d1\u676f\u5546\u5e97\u5151\u6362\u5956\u52b1\u3002'); return; }
       if (s.joinRankCount >= 20) { alert('\u4eca\u5929\u5df2\u7ecf\u53c2\u52a020\u573a\uff0c\u660e\u5929\u518d\u6765\u5427\uff01'); return; }
       const fee = s.joinRankCount < 10 ? 0 : 5;
       if (s.goldPoint < fee) { alert('\u7b2c11\u81f320\u573a\u6bcf\u573a\u9700\u89815\u91d1\u677e\u679c\uff0c\u5f53\u524d\u91d1\u677e\u679c\u4e0d\u8db3\u3002'); return; }
@@ -185,12 +186,11 @@
   function rankShop(pg) {
     const s = State.state();
     if (s.level < 30) { alert('\u5929\u68af\u5546\u5e97\u9700\u8981\u8fbe\u523030\u7ea7\u3002'); return; }
-    if (!rankSunday()) { alert('\u91d1\u676f\u5546\u5e97\u6bcf\u5468\u65e5\u5f00\u653e\uff0c\u5468\u4e00\u81f3\u5468\u516d\u53ef\u53c2\u52a0\u5929\u68af\u8d5b\u3002'); return; }
-    refreshRankWeek();
+    refreshRankShopDay();
     const goods = []; rankgoodsMap.each((id, item) => goods.push(item));
     const total = Math.ceil(goods.length / 6); pg = Math.max(0, Math.min(pg || 0, total - 1));
     const selected = goods.slice(pg * 6, pg * 6 + 6);
-    const p = C().page('bag', 'shop', '<div class="extra-shop-balance">\u91d1\u676f ' + s.goldCup + '\u3000\u91d1\u677e\u679c ' + s.goldPoint + '\u3000\u79ef\u5206 ' + s.integral + '</div><div class="extra-shop-grid">' + selected.map(item => '<button class="extra-shop-item" data-goods="' + item.id + '">' + (item.type === '2' ? image('images/classic/icons/gear-' + item.goodsId + '.png', item.name) : C().icon('prop', +item.goodsId)) + '<b>' + esc(item.name) + '</b><span>' + item.cup + '\u91d1\u676f + ' + item.gold + '\u91d1\u677e\u679c</span><small>\u79ef\u5206\u9700 ' + item.integral + (Number(item.timesLimit) > 0 ? ' \u00b7 \u6bcf\u5468\u9650\u5151' + item.timesLimit + '\u6b21' + (s.rankPurchases[item.id] ? '\uff08\u672c\u5468\u5df2\u5151\uff09' : '') : '') + '</small></button>').join('') + '</div><div class="extra-pagination">' + button('\u4e0a\u4e00\u9875', 'rank-shop-prev', 'tiny muted') + '<span>' + (pg + 1) + '/' + total + '</span>' + button('\u4e0b\u4e00\u9875', 'rank-shop-next', 'tiny muted') + '</div>', { cls: 'extra-board extra-cup-shop' });
+    const p = C().page('bag', 'shop', '<div class="extra-shop-balance">\u91d1\u676f ' + s.goldCup + '\u3000\u91d1\u677e\u679c ' + s.goldPoint + '\u3000\u79ef\u5206 ' + s.integral + '</div><div class="extra-shop-grid">' + selected.map(item => '<button class="extra-shop-item" data-goods="' + item.id + '">' + (item.type === '2' ? image('images/classic/icons/gear-' + item.goodsId + '.png', item.name) : C().icon('prop', +item.goodsId)) + '<b>' + esc(item.name) + '</b><span>' + item.cup + '\u91d1\u676f + ' + item.gold + '\u91d1\u677e\u679c</span><small>\u79ef\u5206\u9700 ' + item.integral + (Number(item.timesLimit) > 0 ? ' \u00b7 \u6bcf\u65e5\u9650\u5151' + item.timesLimit + '\u6b21' + (s.rankPurchases[item.id] ? '\uff08\u4eca\u65e5\u5df2\u5151\uff09' : '') : '') + '</small></button>').join('') + '</div><div class="extra-pagination">' + button('\u4e0a\u4e00\u9875', 'rank-shop-prev', 'tiny muted') + '<span>' + (pg + 1) + '/' + total + '</span>' + button('\u4e0b\u4e00\u9875', 'rank-shop-next', 'tiny muted') + '</div>', { cls: 'extra-board extra-cup-shop' });
     back(p, rank, '\u8fd4\u56de\u5929\u68af\u8d5b');
     on(p, 'rank-shop-prev', () => rankShop(Math.max(0, pg - 1)));
     on(p, 'rank-shop-next', () => rankShop(Math.min(total - 1, pg + 1)));
@@ -199,12 +199,11 @@
       let redeemed = false;
       C().modal('\u91d1\u676f\u5151\u6362', '<p>\u5151\u6362\u3010' + esc(item.name) + '\u3011</p><p>' + esc(item.remark) + '</p><p>\u9700\u8981\uff1a' + item.cup + '\u91d1\u676f\u3001' + item.gold + '\u91d1\u677e\u679c\uff0c\u79ef\u5206\u8fbe\u5230' + item.integral + '\u3002</p>', [{ label: '\u786e\u8ba4\u5151\u6362', run: () => {
         if (redeemed || State.state() !== s) return;
-        if (!rankSunday()) { alert('\u91d1\u676f\u5546\u5e97\u5df2\u4f11\u606f\uff0c\u8bf7\u4e0b\u5468\u65e5\u518d\u6765\u3002'); return; }
-        refreshRankWeek();
+        refreshRankShopDay();
         if (s.integral < +item.integral) { alert('\u5929\u68af\u79ef\u5206\u5c1a\u672a\u8fbe\u5230\u5151\u6362\u8981\u6c42\u3002'); return; }
         if (s.goldCup < +item.cup || s.goldPoint < +item.gold) { alert('\u91d1\u676f\u6216\u91d1\u677e\u679c\u4e0d\u8db3\u3002'); return; }
         const bought = s.rankPurchases;
-        if (+item.timesLimit > 0 && (bought[item.id] || 0) >= +item.timesLimit) { alert('\u8be5\u5956\u52b1\u672c\u5468\u7684\u5151\u6362\u6b21\u6570\u5df2\u7528\u5b8c\uff0c\u4e0b\u5468\u65e5\u53ef\u518d\u6b21\u5151\u6362\u3002'); return; }
+        if (+item.timesLimit > 0 && (bought[item.id] || 0) >= +item.timesLimit) { alert('\u8be5\u5956\u52b1\u4eca\u65e5\u7684\u5151\u6362\u6b21\u6570\u5df2\u7528\u5b8c\uff0c\u660e\u5929\u53ef\u518d\u6b21\u5151\u6362\u3002'); return; }
         redeemed = true;
         s.goldCup -= +item.cup; s.goldPoint -= +item.gold;
         if (item.type === '2') State.addGear(+item.goodsId, State.randomExt(2)); else addProp(+item.goodsId, +item.count);
@@ -214,12 +213,14 @@
   }
 
 
+  // \u666e\u901a\u836f\u4e38\uff08\u5927\u529b/\u654f\u6377/\u901f\u5ea6/\u7ecf\u9a8c\u4e38\uff09\uff1a\u62bd\u5956\u91cc\u7684\u300c\u968f\u673a\u666e\u901a\u836f\u4e38\u00d72\u300d\u4ece\u8fd9\u56db\u79cd\u91cc\u62bd
+  const NORMAL_PILLS = [3, 4, 5, 7];
   const prizes = [
     { id: 22, count: 10, label: '\u6b66\u5668\u5377\u8f74 \u00d710' }, { id: 21, count: 10, label: '\u6280\u80fd\u5377\u8f74 \u00d710' },
     { id: 26, count: 3, label: '\u84dd\u8272\u788e\u7247 \u00d73' }, { id: 15, exp: 50, label: '\u7ecf\u9a8c +50' },
     { id: 15, exp: 100, label: '\u7ecf\u9a8c +100' }, { id: 8, gold: 30, label: '\u91d1\u677e\u679c +30' },
     { id: 23, count: 2, label: '\u6311\u6218\u4e66 \u00d72' }, { id: 2, count: 2, label: '\u5927\u4f53\u529b\u836f\u5242 \u00d72' },
-    { id: 45, count: 2, label: '\u5929\u4f7f\u679c\u5b9e\u79cd\u5b50 \u00d72' }, { id: 36, count: 2, label: '\u82f1\u96c4\u5e16 \u00d72' },
+    { id: 7, pills: 2, label: '\u968f\u673a\u666e\u901a\u836f\u4e38 \u00d72' }, { id: 36, count: 2, label: '\u82f1\u96c4\u5e16 \u00d72' },
   ];
   let spinning = false, lotteryVersion = 0;
   function refreshLotteryDay() {
@@ -245,6 +246,19 @@
       if (s.lotteryFree > 0) s.lotteryFree--; else s.goldPoint -= 20;
       // \u4e00\u6b21\u70b9\u51fb\u7acb\u5373\u3001\u539f\u5b50\u5730\u7ed3\u7b97\u3002\u79bb\u5f00\u52a8\u753b\u9875\u6216\u5237\u65b0\u9875\u9762\u4e0d\u4f1a\u6f0f\u5956\u6216\u591a\u53d1\u5956\u52b1\u3002
       const selected = Math.floor(Math.random() * prizes.length), prize = prizes[selected];
+      // \u300c\u968f\u673a\u666e\u901a\u836f\u4e38\u00d72\u300d\uff1a\u5f53\u573a\u4ece\u56db\u79cd\u666e\u901a\u836f\u4e38\u91cc\u62bd\uff0c\u76f8\u540c\u7684\u5408\u5e76\u6210 \u00d72
+      let prizeLabel = prize.label, prizeIcon = prize.id;
+      if (prize.pills) {
+        const merged = Object.create(null);
+        for (let i = 0; i < prize.pills; i++) {
+          const pid = NORMAL_PILLS[Math.floor(Math.random() * NORMAL_PILLS.length)];
+          merged[pid] = (merged[pid] || 0) + 1;
+        }
+        const ids = Object.keys(merged).map(Number);
+        for (const pid of ids) addProp(pid, merged[pid]);
+        prizeLabel = ids.map((pid) => (propMap.getValue(pid) || { name: pid }).name + ' \u00d7' + merged[pid]).join('\u3001');
+        prizeIcon = ids[0];
+      }
       if (prize.gold) s.goldPoint += prize.gold;
       if (prize.count) addProp(prize.id, prize.count);
       const ups = prize.exp ? State.gainExp(prize.exp) : [];
@@ -259,7 +273,9 @@
         spinning = false; spin.disabled = false; spin.textContent = '\u518d\u62bd\u4e00\u6b21';
         find(p, '[data-lottery-status]').textContent = '\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21';
         find(p, '[data-lottery-gold]').textContent = s.goldPoint;
-        C().modal('\u83b7\u5f97\u5956\u52b1', '<div class="extra-lottery-win">' + C().icon('prop', prize.id) + '<strong>' + prize.label + '</strong></div>' + C().upsHtml(ups), [{ label: '\u786e\u5b9a' }], { small: true });
+        // \u9876\u90e8\u6807\u7b7e\u6761\u53f3\u4e0a\u89d2\u7684\u91d1\u677e\u679c\u4e5f\u8981\u7acb\u523b\u8ddf\u4e0a\uff08\u9875\u9762\u4e0d\u91cd\u5efa\uff09
+        if (UI.refreshHeader) UI.refreshHeader();
+        C().modal('\u83b7\u5f97\u5956\u52b1', '<div class="extra-lottery-win">' + C().icon('prop', prizeIcon) + '<strong>' + prizeLabel + '</strong></div>' + C().upsHtml(ups), [{ label: '\u786e\u5b9a' }], { small: true });
       }
       animate();
     });
@@ -272,24 +288,26 @@
   const MASTER_CANDIDATE_COUNT = 3;
   const RECRUIT_CANDIDATE_COUNT = 3;
 
-  /** \u5e08\u7236\u5019\u9009\u4eba\uff1a\u7b49\u7ea7\u5728\u73a9\u5bb6\u7b49\u7ea7\u4e0a\u65b9\u6709\u8f83\u5927\u968f\u673a\u8303\u56f4\uff0c\u5e76\u5e26\u5b8c\u6574\u5c5e\u6027/\u6b66\u5668/\u6280\u80fd\u3002 */
+  /** \u5e08\u7236\u5019\u9009\u4eba\uff1a\u7b49\u7ea7\u5728\u73a9\u5bb6\u7b49\u7ea7\u4e0a\u65b9\u6709\u8f83\u5927\u968f\u673a\u8303\u56f4\uff08\u4e0d\u8d85\u8fc7\u6ee1\u7ea7\uff09\uff0c\u5e76\u5e26\u5b8c\u6574\u5c5e\u6027/\u6b66\u5668/\u6280\u80fd\u3002 */
   function rollMasterCandidates() {
     const s = State.state();
-    const base = Math.max(3, s.level);
+    const cap = State.MAX_PLAYER_LEVEL || 70;
+    const base = Math.max(3, Math.min(s.level, cap));
     return Array.from({ length: MASTER_CANDIDATE_COUNT }, () => {
-      // \u5e08\u7236\u901a\u5e38\u6bd4\u5f92\u5f1f\u5f3a\uff1a+2 ~ +12 \u7ea7
-      const level = Math.max(2, base + 2 + Math.floor(Math.random() * 11));
+      // \u5e08\u7236\u901a\u5e38\u6bd4\u5f92\u5f1f\u5f3a\uff1a+2 ~ +12 \u7ea7\uff0c\u4f46\u4e0d\u4f1a\u8d85\u8fc7\u6ee1\u7ea7
+      const level = Math.min(cap, Math.max(2, base + 2 + Math.floor(Math.random() * 11)));
       return State.genAI(level, '', { levelJitter: 0, gearSelfLevel: true });
     });
   }
-  /** \u53ef\u6536\u670d\u5f92\u5f1f\u5019\u9009\u4eba\uff1a\u7b49\u7ea7\u63a5\u8fd1\u73a9\u5bb6\uff0c\u5e26\u5b8c\u6574\u5c5e\u6027\u4fbf\u4e8e\u67e5\u770b\u540e\u518d\u51b3\u5b9a\u3002 */
+  /** \u53ef\u6536\u670d\u5f92\u5f1f\u5019\u9009\u4eba\uff1a\u7b49\u7ea7\u63a5\u8fd1\u73a9\u5bb6\uff08\u4e0d\u8d85\u8fc7\u6ee1\u7ea7\uff09\uff0c\u5e26\u5b8c\u6574\u5c5e\u6027\u4fbf\u4e8e\u67e5\u770b\u540e\u518d\u51b3\u5b9a\u3002 */
   function rollRecruitCandidates() {
     const s = State.state();
+    const cap = State.MAX_PLAYER_LEVEL || 70;
     return Array.from({ length: RECRUIT_CANDIDATE_COUNT }, () => {
       const base = Math.max(1, s.level + (Math.random() < 0.5 ? -2 : 0));
       const foe = State.genAI(base, '', { levelJitter: 2, gearSelfLevel: true });
-      // \u5f92\u5f1f\u4e0d\u4f1a\u6bd4\u5e08\u7236\u5f3a\u592a\u591a
-      foe.level = Math.min(foe.level, Math.max(1, s.level + 1));
+      // \u5f92\u5f1f\u4e0d\u4f1a\u6bd4\u5e08\u7236\u5f3a\u592a\u591a\uff0c\u4e5f\u4e0d\u4f1a\u8d85\u8fc7\u6ee1\u7ea7
+      foe.level = Math.max(1, Math.min(cap, Math.min(foe.level, s.level + 1)));
       return foe;
     });
   }

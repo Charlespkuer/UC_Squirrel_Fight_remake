@@ -11,6 +11,20 @@
   /* 使用药剂可以把体力顶到上限之上，最高 999；超过上限的部分只是不再自然回复，
    * 不会被清掉。maxEnergy 仍然是自然回复/每日回复的目标上限。 */
   const ENERGY_HARD_CAP = 999;
+  /* 单个道具的数量上限：任何来源（掉落、礼包、任务、商店、调试）都不会超过它。
+   * 收口放在 save()/normalizeSave 里，这样新增道具的地方不用各自记一遍。 */
+  const PROP_HARD_CAP = 9999;
+  /* 满级 70 级（原版也是到 70 级封顶）。
+   * 体力上限由等级决定：1 级 90 点，2~3 级每级 +3、4~20 级每级 +2、21~70 级每级 +1，
+   * 合计 +6+34+50 = 90 → 69 级正好 179、满级 70 级 180
+   * （低等级段从原来的 +3/+2 降下来，成长更多地摊到 21 级以后）。 */
+  const MAX_PLAYER_LEVEL = 70;
+  function energyCapForLevel(level) {
+    const lv = Math.max(1, Math.min(MAX_PLAYER_LEVEL, Math.round(Number(level) || 1)));
+    let cap = GData.NEW_PLAYER.maxEnergy;
+    for (let i = 2; i <= lv; i++) cap += i <= 3 ? 3 : i <= 20 ? 2 : 1;
+    return cap;
+  }
   let S = null; // 玩家状态
   const clone = (value) => JSON.parse(JSON.stringify(value));
   const object = (value) => value && typeof value === 'object' && !Array.isArray(value);
@@ -31,11 +45,18 @@
   // 旧版存档缺字段时补全独立副本；不重置已有等级、资源和关卡。
   function normalizeSave(raw) {
     const next = Object.assign(clone(GData.NEW_PLAYER), raw);
-    for (const key of ['level', 'power', 'agility', 'speed', 'maxHp', 'maxEnergy']) {
+    next.level = Math.max(1, Math.min(MAX_PLAYER_LEVEL, integer(next.level, GData.NEW_PLAYER.level, 1)));
+    for (const key of ['power', 'agility', 'speed', 'maxHp']) {
       next[key] = integer(next[key], GData.NEW_PLAYER[key], 1);
     }
     for (const key of ['exp', 'energy', 'goldPoint', 'goldCup', 'dailyWins', 'allWins', 'dailyFails', 'allFails', 'reborn', 'joinRankCount', 'lotteryFree', 'woodRecord']) {
       next[key] = integer(next[key], GData.NEW_PLAYER[key]);
+    }
+    // 体力上限由等级直接决定（满级 180），再叠上超级松鼠的增量；旧档的旧曲线超额值在这里被收回。
+    {
+      const v = object(raw.vip) ? raw.vip : {};
+      const vipBonus = v.capApplied === true ? Math.max(0, integer(v.capAdded, 0)) : 0;
+      next.maxEnergy = energyCapForLevel(next.level) + vipBonus;
     }
     next.energy = Math.min(ENERGY_HARD_CAP, next.energy);
     next.integral = next.integral == null ? null : integer(next.integral, 0);
@@ -47,7 +68,7 @@
       const source = object(next[key]) ? next[key] : {};
       next[key] = {};
       for (const id of Object.keys(source)) {
-        const count = integer(source[id], 0);
+        const count = Math.min(PROP_HARD_CAP, integer(source[id], 0));
         if (propMap.getValue(id) && count > 0) next[key][id] = count;
       }
     }
@@ -131,6 +152,18 @@
       };
     }
     next.battles = (Array.isArray(next.battles) ? next.battles : []).filter(validBattle).slice(0, 50);
+    // 好友：只保留名字合法的条目，等级夹在 1~满级，最多 20 位
+    next.friends = (Array.isArray(raw.friends) ? raw.friends : []).filter((f) => object(f) && typeof f.name === 'string' && f.name.trim())
+      .slice(0, FRIEND_LIMIT).map((f) => ({
+        name: String(f.name).trim().slice(0, 20),
+        level: Math.max(1, Math.min(MAX_PLAYER_LEVEL, integer(f.level, 1, 1))),
+        power: integer(f.power, GData.NEW_PLAYER.power, 1),
+        agility: integer(f.agility, GData.NEW_PLAYER.agility, 1),
+        speed: integer(f.speed, GData.NEW_PLAYER.speed, 1),
+        hp: integer(f.hp, GData.NEW_PLAYER.maxHp, 1),
+        note: typeof f.note === 'string' ? f.note.slice(0, 12) : '',
+        since: validLocalDate(f.since) ? f.since : localDate(),
+      }));
     next.dailyClaimDate = typeof next.dailyClaimDate === 'string' ? next.dailyClaimDate : '';
     // 每日任务：旧档没有就留空，首次打开「活动」时按当天补上
     next.quests = object(raw.quests) && Array.isArray(raw.quests.list) && typeof raw.quests.date === 'string' ? raw.quests : null;
@@ -334,7 +367,17 @@
   }
 
   // ---------- 存档 ----------
-  function save() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); return true; } catch (e) { return false; } }
+  /** 把 S.props 里超过上限的数量收口（save 前统一调用）。 */
+  function clampProps() {
+    if (!S || !object(S.props)) return;
+    for (const id of Object.keys(S.props)) {
+      const count = Number(S.props[id]);
+      if (!Number.isFinite(count)) { delete S.props[id]; continue; }
+      if (count > PROP_HARD_CAP) S.props[id] = PROP_HARD_CAP;
+      else if (count < 0) delete S.props[id];
+    }
+  }
+  function save() { try { clampProps(); localStorage.setItem(SAVE_KEY, JSON.stringify(S)); return true; } catch (e) { return false; } }
   function load() {
     try {
       const raw = localStorage.getItem(SAVE_KEY);
@@ -353,6 +396,7 @@
     S = clone(GData.NEW_PLAYER);
     Object.assign(S, GData.initialStats());
     S.stageRuns = {};
+    S.friends = [];
     S.name = typeof name === 'string' && name.trim() ? name.trim().slice(0, 20) : '小松鼠';
     S.lastEnergyTs = Date.now();
     S.dailyStatsDate = localDate();
@@ -454,6 +498,40 @@
   function myWeapons() { return S.weapons.map(weaponInst).filter(Boolean); }
   function mySkills() { return S.skills.map(skillInst).filter(Boolean); }
 
+  /** 原版技能表里的全部技能（按编号排序），供调试面板快速获得/遗忘。 */
+  function skillList() {
+    const out = [];
+    skillsMap.each((id, v) => { if (v && +id > 0) out.push({ id: +id, name: v.name, type: v.type }); });
+    return out.sort((a, b) => a.id - b.id);
+  }
+  /** 调试/工具用：直接获得（或改等级）指定武器/技能；已有就替换等级（可以调低）。 */
+  function setWS(kind, id, level) {
+    const map = kind === 'skill' ? skillsMap : weaponsMap;
+    const def = map.getValue(Number(id));
+    if (!def) return { ok: false, msg: '没有这个' + (kind === 'skill' ? '技能' : '武器') };
+    const lv = Math.min(15, integer(level, 1, 1));
+    const arr = kind === 'skill' ? S.skills : S.weapons;
+    const at = arr.findIndex((x) => Number(String(x).split(':')[0]) === Number(id));
+    const entry = Number(id) + ':' + lv;
+    if (at >= 0) arr[at] = entry; else arr.push(entry);
+    save();
+    return { ok: true, kind, id: Number(id), level: lv, name: def.name, replaced: at >= 0, total: ownedWSCount(), limit: wsLimit() };
+  }
+  /** 调试/工具用：遗忘指定武器/技能。 */
+  function forgetWS(kind, id) {
+    const arr = kind === 'skill' ? S.skills : S.weapons;
+    const at = arr.findIndex((x) => Number(String(x).split(':')[0]) === Number(id));
+    if (at < 0) return { ok: false, msg: '还没有这个' + (kind === 'skill' ? '技能' : '武器') };
+    const def = (kind === 'skill' ? skillsMap : weaponsMap).getValue(Number(id));
+    arr.splice(at, 1);
+    save();
+    return { ok: true, kind, id: Number(id), name: def ? def.name : String(id), total: ownedWSCount(), limit: wsLimit() };
+  }
+  const setWeapon = (id, level) => setWS('weapon', id, level);
+  const setSkill = (id, level) => setWS('skill', id, level);
+  const forgetWeapon = (id) => forgetWS('weapon', id);
+  const forgetSkill = (id) => forgetWS('skill', id);
+
   // 武技位置随固定领悟等级开放；拜师赠送技能13不占随机领悟位置。
   function wsLimit() { return GData.wsLimit(S.level); }
   function ownedWSCount() { return S.weapons.length + S.skills.filter(s => Number(String(s).split(':')[0]) !== MASTER_SKILL_ID).length; }
@@ -550,6 +628,27 @@
     S.gears.splice(i, 1);
     S.goldPoint += g.price; save();
     return g.price;
+  }
+  /* 背包里可以直接卖的道具（装备走 sellGear）：天使果实 100 金松果一个。
+   * 表放在这里，以后要加别的可卖道具只改这一处。 */
+  const SELLABLE_PROPS = { 47: 100 };
+  const propSellPrice = (id) => SELLABLE_PROPS[Number(id)] || 0;
+  const sellableProps = () => Object.keys(SELLABLE_PROPS).map(Number);
+  /** 卖出背包道具（最多持有数量），返回获得的金松果。 */
+  function sellProp(id, count) {
+    id = Number(id);
+    const price = propSellPrice(id);
+    if (!price) return { ok: false, msg: '这个道具不能卖' };
+    const held = S.props[id] || 0;
+    if (held < 1) return { ok: false, msg: '背包里没有这个道具' };
+    const n = Math.max(1, Math.min(held, Math.round(Number(count) || 1)));
+    S.props[id] = held - n;
+    if (S.props[id] <= 0) delete S.props[id];
+    const gold = price * n;
+    S.goldPoint += gold;
+    save();
+    const item = propMap.getValue(id);
+    return { ok: true, sold: n, gold, price, msg: '卖出 ' + (item ? item.name : '道具') + ' ×' + n + '，获得 ' + gold + ' 金松果' };
   }
   // ---------- 宝石（45级开启） ----------
   function gemLevel(id) { id = Number(id); return id >= 101 && id <= 107 ? id - 100 : 0; }
@@ -853,9 +952,14 @@
         const gift = giftMap.getValue(id);
         if (!gift) return { ok: false, msg: '礼包数据缺失' };
         if (S.level < parseInt(gift.level)) return { ok: false, msg: `需要${gift.level}级才能打开` };
-        const got = [];
-        for (const item of gift.prize.split('|')) {
+        // 1/5/10/15/20 级礼包用 GData 里的加强清单，其它礼包仍按原表
+        const boosted = GData.giftPackPrize ? GData.giftPackPrize(id) : null;
+        const prizes = boosted || gift.prize.split('|').map((item) => {
           const [pid, num] = item.split(':').map(Number);
+          return { id: pid, count: num };
+        });
+        const got = [];
+        for (const { id: pid, count: num } of prizes) {
           if (pid === 8) { S.goldPoint += num; got.push(`金松果x${num}`); }
           else { S.props[pid] = (S.props[pid] || 0) + num; const pp = propMap.getValue(pid); got.push((pp ? pp.name : pid) + 'x' + num); }
         }
@@ -897,7 +1001,8 @@
     amount = Number(amount);
     if (!Number.isFinite(amount) || amount <= 0) return ups;
     S.exp += Math.round(amount);
-    while (S.exp >= GData.nextExp(S.level)) {
+    // 满级 70 级封顶：到了 70 级就不再升级（经验继续累积，等以后开放等级）
+    while (S.level < MAX_PLAYER_LEVEL && S.exp >= GData.nextExp(S.level)) {
       S.exp -= GData.nextExp(S.level);
       S.level++;
       const bookLevel = GData.ATTRIBUTE_BOOK_LEVELS.includes(S.level);
@@ -909,8 +1014,8 @@
       }
       const { power: pw, agility: ag, speed: sp, hp } = growth;
       S.power += pw; S.agility += ag; S.speed += sp; S.maxHp += hp;
-      // 体力上限随等级成长：10级前每级+3，11-20级每级+2，之后每级+1
-      S.maxEnergy += S.level <= 10 ? 3 : S.level <= 20 ? 2 : 1;
+      // 体力上限按等级重算（2~3 级每级 +3、4~20 每级 +2、21~70 每级 +1，69 级 179、满级 180）
+      S.maxEnergy = Math.max(S.maxEnergy, energyCapForLevel(S.level));
       // 升级奖励：概率获得新武器/技能（reward 为 {name,id,kind} 或 null）
       const gained = GData.WS_LEVELS.includes(S.level) ? gainRandomWS() : null;
       if (S.level === 5 && !S.reborn) S.goldPoint += 50;
@@ -1068,18 +1173,69 @@
     return { until: v.until, level: v.level };
   }
 
+  // ---------- 好友（离线版：随机 NPC 也能加） ----------
+  /* 好友只是本地保存的一份对手快照（名字 + 等级 + 三维），可以切磋，不连接真实玩家。 */
+  const FRIEND_LIMIT = 20;
+  const friendLimit = () => FRIEND_LIMIT;
+  function friendList() { if (!Array.isArray(S.friends)) S.friends = []; return S.friends; }
+  function friendOf(name) { return S.friends.find((f) => f.name === name) || null; }
+  /** 把一位对手（随机 NPC、师父、天梯对手都行）加为好友。 */
+  function addFriend(foe) {
+    const name = foe && foe.name ? String(foe.name).trim().slice(0, 20) : '';
+    if (!name) return { ok: false, msg: '好友信息无效' };
+    if (friendOf(name)) return { ok: false, msg: '【' + name + '】已经是好友了' };
+    if (S.friends.length >= FRIEND_LIMIT) return { ok: false, msg: '好友已满（' + FRIEND_LIMIT + ' 位），先删掉几位吧' };
+    S.friends.push({
+      name,
+      level: Math.max(1, Math.min(MAX_PLAYER_LEVEL, integer(foe.level, 1, 1))),
+      power: integer(foe.power, 1, 1), agility: integer(foe.agility, 1, 1), speed: integer(foe.speed, 1, 1),
+      hp: integer(foe.hp != null ? foe.hp : foe.maxHp, 1, 1),
+      note: typeof foe.note === 'string' ? foe.note.slice(0, 12) : '',
+      since: localDate(),
+    });
+    save();
+    return { ok: true, msg: '已把【' + name + '】加为好友', friend: friendOf(name), count: S.friends.length };
+  }
+  function removeFriend(name) {
+    const at = S.friends.findIndex((f) => f.name === name);
+    if (at < 0) return { ok: false, msg: '没有这位好友' };
+    const [gone] = S.friends.splice(at, 1);
+    save();
+    return { ok: true, msg: '已把【' + gone.name + '】移出好友', count: S.friends.length };
+  }
+  /** 把好友快照还原成可以战斗的对手对象（切磋用）。 */
+  function friendFoe(friend) {
+    if (!friend) return null;
+    return {
+      name: friend.name, level: friend.level, power: friend.power, agility: friend.agility, speed: friend.speed,
+      hp: friend.hp, maxHp: friend.hp, baseStats: { power: friend.power, agility: friend.agility, speed: friend.speed, hp: friend.hp },
+      weapons: [], skills: [], isAI: true, effects: {}, friend: true,
+    };
+  }
+  /** 推荐好友：玩家等级附近的随机 NPC（不超过满级）。 */
+  function rollFriendCandidates(count) {
+    const n = Math.max(1, Math.min(8, Math.round(Number(count) || 3)));
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const level = Math.max(1, Math.min(MAX_PLAYER_LEVEL, S.level + Math.floor(Math.random() * 7) - 2));
+      out.push(genAI(level, '', { levelJitter: 1, gearSelfLevel: true }));
+    }
+    return out;
+  }
+
   // 战斗奖励（挑战/竞技胜利）；胜利经验在基准值上下浮动，期望值随对手等级提升
   /* 主动挑战的经验：只看「自己的等级」和「与对手的等级差」。
-   * 以前用对手等级的绝对值（10 + 对方等级×1.2），自己等级越高打同级对手给得越多，
-   * 结果高等级时随机挑战反而压过经验竞技场。现在改成：
-   *   基准 = BASE + 自己等级 × PER_LEVEL（跟得上经验表的膨胀）
+   *   基准 = BASE + min(自己等级, 20) × PER_LEVEL   ← 20 级封顶，增长比以前慢
    *   倍率 = 1 + 等级差 × STEP（对手比自己高才多给，低了就少给）
-   * 不设硬上限。参数挑成：20 级时一场 50 点，正好是竞技场冠军的单位体力效率
-   * （150/30 = 5），20 级之后挑战的单位体力效率就反超竞技场；
-   * 而单场经验在 1~60 级的实际对手等级差范围内始终低于竞技场冠军。
+   * 封顶后同级一场 33 点、最大等级差（+3）约 47 点，也就是 4.7 点体力，
+   * 略低于经验竞技场的 150/30 = 5.0（竞技场仍是最快的经验来源）。
    * nextExp 每级涨得比这里快，所以每升一级需要的场次仍然越来越多。 */
-  const CHALLENGE_EXP_BASE = 27;
-  const CHALLENGE_EXP_PER_LEVEL = 1.2;
+  const CHALLENGE_EXP_BASE = 20;
+  const CHALLENGE_EXP_PER_LEVEL = 0.65;
+  /* 等级成长到 20 级封顶：之后单场经验不再随等级上涨。这样上限就是
+   * 20 级时的 33 点，最大等级差（+3）下约 47 点/场，也就是 4.7 点体力，
+   * 略低于经验竞技场的 150/30 = 5.0。 */
+  const CHALLENGE_EXP_CAP_LEVEL = 20;
   const EXP_DIFF_STEP = 0.14;           // 每高 1 级 +14%
   const EXP_DIFF_FLOOR = 0.3;           // 对手低很多时的最低倍率
   const EXP_DIFF_CAP = 2.2;
@@ -1090,7 +1246,7 @@
   function challengeExp(foeLevel, myLevel) {
     const mine = Math.max(1, Math.round(Number(myLevel) || (S && S.level) || 1));
     const diff = Math.max(-15, Math.min(15, Math.round(Number(foeLevel) || mine) - mine));
-    const base = CHALLENGE_EXP_BASE + mine * CHALLENGE_EXP_PER_LEVEL;
+    const base = CHALLENGE_EXP_BASE + Math.min(mine, CHALLENGE_EXP_CAP_LEVEL) * CHALLENGE_EXP_PER_LEVEL;
     const mult = Math.max(EXP_DIFF_FLOOR, Math.min(EXP_DIFF_CAP, 1 + diff * EXP_DIFF_STEP));
     return Math.round(base * mult);
   }
@@ -1420,17 +1576,20 @@
   ];
   const QUEST_COUNT = 4;
   const QUEST_KEYS = QUEST_TYPES.map((q) => q.key);
-  /* 奖励：金松果固定 10~30，经验固定 50~80，再从下面这些里抽 1~2 种额外的。
-   * 全部按 id 走 propMap，UI 会连图标和名字一起显示，不会只剩一个数字。 */
+  /* 奖励池：金松果、经验与各种道具**一起加权乱抽**（金松果/经验不再是固定奖励），
+   * 每条任务只抽 1~2 项。weight 是权重：越"高级"的东西权重越低
+   * （超级经验丸只有 0.06，大约 1/14 的概率）。药丸数量固定 1 个。 */
+  const QUEST_GOLD = { kind: 'gold', weight: 1.4, range: [10, 30] };
+  const QUEST_EXP = { kind: 'exp', weight: 1.4, range: [50, 80] };
   const QUEST_EXTRA_POOL = [
-    { id: 21, range: [3, 5] },   // 技能卷轴
-    { id: 22, range: [3, 5] },   // 武器卷轴
-    { id: 1, range: [1, 3] },    // 小体力药剂
-    { id: 2, range: [1, 2] },    // 大体力药剂
-    { id: 7, range: [1, 2] },    // 经验丸
-    { id: 44, range: [1, 2] },   // 超级经验丸
-    { id: 23, range: [1, 2] },   // 挑战书
-    { id: 45, range: [1, 2] },   // 天使果实种子
+    { id: 21, range: [3, 5], weight: 1.2 },   // 技能卷轴
+    { id: 22, range: [3, 5], weight: 1.2 },   // 武器卷轴
+    { id: 23, range: [1, 2], weight: 1.0 },   // 挑战书
+    { id: 1, range: [1, 2], weight: 1.0 },    // 小体力药剂
+    { id: 7, range: [1, 1], weight: 0.7, pill: true },    // 经验丸
+    { id: 45, range: [1, 1], weight: 0.4 },   // 天使果实种子
+    { id: 2, range: [1, 1], weight: 0.3 },    // 大体力药剂（高级）
+    { id: 44, range: [1, 1], weight: 0.06, pill: true },  // 超级经验丸（高级药丸，概率大幅下调）
   ];
 
   function questSeed(date) {
@@ -1456,16 +1615,23 @@
     return pool.slice(0, QUEST_COUNT).map((key) => {
       const type = QUEST_TYPES.find((q) => q.key === key);
       const tier = Math.floor(rnd() * type.steps.length);
-      // 每单额外 1~2 种，运气好三种
-      const extraCount = rnd() < 0.22 ? 3 : rnd() < 0.55 ? 2 : 1;
-      const bag = QUEST_EXTRA_POOL.slice();
-      const extras = [];
-      for (let i = 0; i < extraCount && bag.length; i++) {
-        const pick = Math.floor(rnd() * bag.length);
+      // 纯随机 1~2 项：金松果、经验、道具在同一个加权池里抽，抽到才给
+      const bag = [QUEST_GOLD, QUEST_EXP].concat(QUEST_EXTRA_POOL.map((item) => ({
+        kind: 'prop', id: item.id, weight: item.weight, range: item.range, pill: item.pill,
+      })));
+      const rewardCount = rnd() < 0.45 ? 1 : 2;
+      const rewards = [];
+      for (let i = 0; i < rewardCount && bag.length; i++) {
+        const total = bag.reduce((sum, item) => sum + item.weight, 0);
+        let roll = rnd() * total, pick = 0;
+        for (let j = 0; j < bag.length; j++) { roll -= bag[j].weight; if (roll <= 0) { pick = j; break; } }
         const item = bag.splice(pick, 1)[0];
-        extras.push({ id: item.id, count: questRoll(rnd, item.range) });
+        rewards.push({
+          kind: item.kind, id: item.id,
+          count: item.pill ? 1 : questRoll(rnd, item.range),
+        });
       }
-      return { key, need: type.steps[tier], gold: questRoll(rnd, [10, 30]), exp: questRoll(rnd, [50, 80]), extras, claimed: false };
+      return { key, need: type.steps[tier], rewards, claimed: false };
     });
   }
   function questState() {
@@ -1496,20 +1662,37 @@
     if (kind === 'stage' && win) bumpDaily('stage', 1);
     if (kind === 'arena') bumpDaily('arena', 1);
   }
+  /** 兼容旧档：老任务只有 gold/exp/extras，新任务直接存 rewards。 */
+  function questRewards(q) {
+    const nameOf = (id) => { const item = propMap.getValue(id); return item ? item.name : '道具'; };
+    const out = [];
+    if (Array.isArray(q.rewards) && q.rewards.length) {
+      for (const r of q.rewards) {
+        if (!r) continue;
+        if (r.kind === 'gold') out.push({ kind: 'gold', id: 8, name: '金松果', count: Math.max(1, Number(r.count) || 1) });
+        else if (r.kind === 'exp') out.push({ kind: 'exp', id: 15, name: '经验', count: Math.max(1, Number(r.count) || 1) });
+        else if (r.id) out.push({ kind: 'prop', id: Number(r.id), name: nameOf(r.id), count: Math.max(1, Number(r.count) || 1) });
+      }
+      return out;
+    }
+    if (q.gold) out.push({ kind: 'gold', id: 8, name: '金松果', count: q.gold });
+    if (q.exp) out.push({ kind: 'exp', id: 15, name: '经验', count: q.exp });
+    for (const extra of Array.isArray(q.extras) ? q.extras : []) {
+      if (extra && extra.id) out.push({ kind: 'prop', id: Number(extra.id), name: nameOf(extra.id), count: Math.max(1, Number(extra.count) || 1) });
+    }
+    return out;
+  }
   function questStatus() {
     const quests = questState(), counters = S.dailyCounters;
     return quests.list.map((q, index) => {
       const type = QUEST_TYPES.find((t) => t.key === q.key) || { name: q.key };
       const progress = Math.min(q.need, Number(counters[q.key]) || 0);
-      const nameOf = (id) => { const item = propMap.getValue(id); return item ? item.name : '道具'; };
-      const rewards = [{ kind: 'gold', id: 8, name: '金松果', count: q.gold }];
-      if (q.exp) rewards.push({ kind: 'exp', id: 15, name: '经验', count: q.exp });
-      for (const extra of Array.isArray(q.extras) ? q.extras : []) {
-        if (extra && extra.id) rewards.push({ kind: 'prop', id: extra.id, name: nameOf(extra.id), count: Math.max(1, Number(extra.count) || 1) });
-      }
+      const rewards = questRewards(q);
+      const pick = (kind) => { const r = rewards.find((x) => x.kind === kind); return r ? r.count : 0; };
       return {
-        index, key: q.key, need: q.need, gold: q.gold, exp: q.exp || 0,
-        extras: (Array.isArray(q.extras) ? q.extras : []).map((e) => ({ ...e })),
+        index, key: q.key, need: q.need,
+        gold: pick('gold'), exp: pick('exp'),
+        extras: rewards.filter((r) => r.kind === 'prop').map((r) => ({ id: r.id, count: r.count })),
         rewards,
         name: String(type.name).replace('{n}', q.need),
         progress, done: progress >= q.need, claimed: q.claimed === true,
@@ -1527,17 +1710,13 @@
     if (!row.done) return { ok: false, msg: '任务还没完成' };
     questState().list[row.index].claimed = true;
     const parts = [];
-    S.goldPoint += row.gold;
-    parts.push('金松果 +' + row.gold);
-    if (row.exp) { gainExp(row.exp); parts.push('经验 +' + row.exp); }
-    const ups = row.exp ? [] : [];
-    for (const extra of row.extras) {
-      S.props[extra.id] = (S.props[extra.id] || 0) + extra.count;
-      const item = propMap.getValue(extra.id);
-      parts.push((item ? item.name : '道具') + ' +' + extra.count);
+    for (const r of row.rewards) {
+      if (r.kind === 'gold') { S.goldPoint += r.count; parts.push('金松果 +' + r.count); }
+      else if (r.kind === 'exp') { gainExp(r.count); parts.push('经验 +' + r.count); }
+      else { S.props[r.id] = (S.props[r.id] || 0) + r.count; parts.push(r.name + ' +' + r.count); }
     }
     save();
-    return { ok: true, msg: '领取成功：' + parts.join('、'), gold: row.gold, exp: row.exp, extras: row.extras, ups };
+    return { ok: true, msg: '领取成功：' + parts.join('、'), gold: row.gold, exp: row.exp, extras: row.extras, rewards: row.rewards, ups: [] };
   }
   function claimDaily() {
     const daily = dailyStatus();
@@ -1595,8 +1774,12 @@
     genAI, stageProgress, setStageProgress, npcOf, highestStageId, stageRun, stageAccess, stageReward,
     beginStageBattle, finishStageBattle, interruptStageBattle, abandonStageRun,
     localDate, dailyStatus, claimDaily, recordBattle, battleHistory,
-    questStatus, questClaimable, claimQuest, bumpDaily, QUEST_TYPES,
-    composeConvertPill, challengeExp, challengeFightsPerLevel, usePropMany, energyHardCap, ENERGY_HARD_CAP,
-    CHALLENGE_EXP_BASE, CHALLENGE_EXP_PER_LEVEL, CHALLENGE_DIFF_RANGE, ARENA_CHAMPION_EXP, ARENA_ENERGY_COST, ARENA_EXP_PER_ENERGY,
+    questStatus, questClaimable, claimQuest, bumpDaily, QUEST_TYPES, QUEST_EXTRA_POOL, QUEST_GOLD, QUEST_EXP,
+    sellProp, propSellPrice, sellableProps, SELLABLE_PROPS,
+    friendLimit, friendList, friendOf, addFriend, removeFriend, friendFoe, rollFriendCandidates, FRIEND_LIMIT,
+    weaponList, skillList, setWeapon, setSkill, forgetWeapon, forgetSkill, setWS, forgetWS,
+    composeConvertPill, challengeExp, challengeFightsPerLevel, usePropMany, energyHardCap, ENERGY_HARD_CAP, PROP_HARD_CAP,
+    MAX_PLAYER_LEVEL, energyCapForLevel,
+    CHALLENGE_EXP_BASE, CHALLENGE_EXP_PER_LEVEL, CHALLENGE_EXP_CAP_LEVEL, CHALLENGE_DIFF_RANGE, ARENA_CHAMPION_EXP, ARENA_ENERGY_COST, ARENA_EXP_PER_ENERGY,
   };
 })();

@@ -120,7 +120,9 @@ test('QA战斗结算不读写正式存档', async () => {
   g.end();
   assert.equal(g.storage.get('ssdz_save_v1'), normalSave);
   const qa = JSON.parse(g.storage.get('ssdz_test_save_v1'));
-  assert.equal(qa.name, 'QA旧账号'); assert.equal(qa.battles.length, 1); assert.ok(qa.exp > 0);
+  assert.equal(qa.name, 'QA旧账号'); assert.equal(qa.battles.length, 1);
+  // 1 级一场挑战经验约 20 点，正好够升到 2 级（升级后 exp 会归零），两种结果都算发了奖
+  assert.ok(qa.exp > 0 || qa.level > 1, 'QA 存档确实拿到经验：exp=' + qa.exp + ' level=' + qa.level);
 });
 
 test('重置账号后旧onEnd不发经验、掉落汇总或战报', async () => {

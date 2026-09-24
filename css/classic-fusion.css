@@ -1,104 +1,151 @@
 /* 装备融合：工作台（材料 → 预览 → 操作）+ 规则条 + 装备选择三段式。
-   沿用奶油色板与圆角槽，但把原来挤在一行、会被裁掉的说明改成可换行的规则条。 */
-.classic-board.fusion-board{padding:13px 30px 9px;display:flex;flex-direction:column;gap:7px}
+   视觉上把原来扁平的方框换成「工作台」：暖色台面 + 内嵌白描边，材料槽带品质描边与
+   悬停抬升，预览格金色高光，装备卡改成圆角小卡（品质缎带 + 状态带），
+   顶栏用带编号的步骤条，底部状态条改成可读性更好的胶囊。 */
+.classic-board.fusion-board{padding:12px 26px 8px;display:flex;flex-direction:column;gap:7px;
+  background:radial-gradient(120% 90% at 50% -10%,#fffdf3,#f9edca 60%,#f3e2ba)}
 
 /* ---------- 顶栏 ---------- */
-.fusion-heading{display:flex;align-items:center;gap:16px;flex:0 0 auto;height:40px}
-.fusion-heading h2{font-family:"Microsoft YaHei",sans-serif;font-size:31px;font-weight:normal;color:#8c612e;margin:0;white-space:nowrap}
-.fusion-steps{display:flex;align-items:center;gap:6px;margin:0;padding:0;list-style:none;font-size:19px;color:#b09a72;white-space:nowrap}
-.fusion-steps li{padding:2px 13px;border-radius:16px;background:#f0e3c2}
-.fusion-steps li.on{background:#ffe6a1;color:#8a4b12;box-shadow:inset 0 0 0 2px #e0b64a}
-.fusion-steps li+li{margin-left:12px;position:relative}
-.fusion-steps li+li::before{content:'›';position:absolute;left:-11px;color:#cbb891}
-.fusion-wallet{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:23px;color:#8c612e}
-.fusion-wallet img{width:35px;height:35px;object-fit:contain}
+.fusion-heading{display:flex;align-items:center;gap:16px;flex:0 0 auto;height:42px}
+.fusion-heading h2{display:flex;align-items:center;height:38px;padding:0 22px;margin:0;border-radius:19px;
+  font-family:"Microsoft YaHei",sans-serif;font-size:28px;font-weight:normal;color:#fff8e4;
+  background:linear-gradient(#8a6134,#6f4522);box-shadow:inset 0 0 0 3px #fffdf3,0 2px 0 #d9c496;white-space:nowrap}
+.fusion-steps{display:flex;align-items:center;gap:9px;margin:0;padding:0;list-style:none;font-size:19px;color:#a08a63;white-space:nowrap}
+.fusion-steps li{display:flex;align-items:center;gap:6px;padding:3px 14px 3px 4px;border-radius:19px;background:#f2e6c8;
+  box-shadow:inset 0 0 0 2px #e6d6ac}
+.fusion-steps li b{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;
+  background:#dccaa2;color:#fffaf0;font:normal 14px/1 "Microsoft YaHei",sans-serif}
+.fusion-steps li.on{background:linear-gradient(#ffeeb0,#ffdc79);color:#7a4a11;box-shadow:inset 0 0 0 2px #e2b64a}
+.fusion-steps li.on b{background:linear-gradient(#ffd867,#e79f16);color:#fffdf3}
+.fusion-steps li+li{position:relative}
+.fusion-steps li+li::before{content:'›';position:absolute;left:-8px;color:#cbb891;font-size:20px}
+.fusion-wallet{margin-left:auto;display:flex;align-items:center;gap:8px;padding:3px 16px 3px 8px;border-radius:21px;
+  background:#fffdf3;box-shadow:inset 0 0 0 3px #f0e2c0,0 2px 0 #e3d0a3;font-size:23px;color:#8c612e}
+.fusion-wallet img{width:34px;height:34px;object-fit:contain}
 .fusion-wallet b{color:#bb861d;font-weight:normal}
 
 /* ---------- 工作台 ---------- */
-.fusion-workbench{display:flex;align-items:center;justify-content:center;gap:26px;flex:0 0 auto;
-  padding:9px 26px;border-radius:30px;background:linear-gradient(#fdf8e6,#f3e4bd);
-  box-shadow:inset 0 0 0 4px #fffdf3,0 2px 0 #e3d0a3}
-.fusion-materials{display:flex;align-items:center;gap:8px}
-.fusion-material{width:124px;flex-shrink:0;border:0;padding:0;background:none;cursor:pointer;color:#795a38;
-  display:flex;align-items:center;flex-direction:column;gap:3px;border-radius:22px}
+.fusion-workbench{position:relative;display:flex;align-items:center;justify-content:center;gap:20px;flex:0 0 auto;
+  padding:8px 20px;border-radius:32px;background:linear-gradient(#fdf6e0,#f2e1b8);
+  box-shadow:inset 0 0 0 5px #fffdf3,inset 0 -14px 22px #e0c89440,0 3px 0 #ddc99b}
+.fusion-materials{display:flex;align-items:center;gap:6px}
+.fusion-material{width:118px;flex-shrink:0;border:0;padding:0;background:none;cursor:pointer;color:#795a38;
+  display:flex;align-items:center;flex-direction:column;gap:4px;border-radius:24px}
 .fusion-material:disabled{cursor:default;opacity:1}
-.fusion-material.filled:hover .fusion-frame{transform:translateY(-2px)}
-.fusion-material-name{font-size:20px;line-height:25px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.fusion-material.filled:hover .fusion-frame{transform:translateY(-3px)}
 
 .fusion-frame{position:relative;display:flex;align-items:center;justify-content:center;width:96px;height:96px;flex-shrink:0;
-  border:3px solid #948064;border-radius:22px;box-shadow:inset 0 0 0 4px #fffaf0,0 2px #dbc89e;
-  background:linear-gradient(135deg,#fbf2ce,#e8c786);overflow:hidden;transition:transform .16s,box-shadow .16s}
-.fusion-frame>img{width:91%;height:91%;object-fit:contain}
-.fusion-material.empty .fusion-frame{background:linear-gradient(#e6d6b0,#f2e6ca);box-shadow:inset 0 0 0 4px #fff8de,inset 0 4px 7px #aa89634d}
-.fusion-slot-number{font:44px Georgia,serif;color:#c0a67f;text-shadow:0 2px #fff5da}
-.fusion-plus{font:bold 34px Georgia,serif;color:#b09161;transform:translateY(-12px)}
-.fusion-remove{position:absolute;right:1px;top:-1px;width:24px;height:24px;border-radius:50%;background:#845a36;color:#fff6db;font:23px/22px Arial,sans-serif;box-shadow:0 1px 2px #00000040}
+  border:3px solid #a58a5f;border-radius:26px;box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #d5c096;
+  background:linear-gradient(150deg,#fdf6d8,#e9ca8b);overflow:hidden;transition:transform .16s,box-shadow .16s}
+.fusion-frame>img{width:90%;height:90%;object-fit:contain;filter:drop-shadow(0 2px 2px #6b4a2440)}
+.fusion-material.empty .fusion-frame{border-style:dashed;border-color:#c9ae7d;
+  background:linear-gradient(#f0e3c2,#f8f0da);box-shadow:inset 0 0 0 4px #fffdf3,inset 0 5px 9px #b99a6a33}
+.fusion-add{font:bold 52px/1 Georgia,serif;color:#d8bd8d;text-shadow:0 2px 0 #fffdf3}
+.fusion-material.empty:hover .fusion-frame{border-color:#e0a12f;background:linear-gradient(#fff8dd,#f6e6bb)}
+.fusion-material.empty:hover .fusion-add{color:#e0a12f}
+.fusion-slot-number{position:absolute;left:5px;top:4px;min-width:20px;height:20px;border-radius:10px;display:flex;
+  align-items:center;justify-content:center;background:#fff8e2c9;color:#a98a56;font-size:14px;
+  box-shadow:inset 0 0 0 2px #ffffffb0}
+.fusion-material.filled .fusion-slot-number{background:#6f4522c9;color:#fff6dc;box-shadow:none}
+.fusion-material-name{font-size:19px;line-height:24px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.fusion-plus{font:bold 32px Georgia,serif;color:#c1a373;transform:translateY(-10px)}
+.fusion-remove{position:absolute;right:2px;top:2px;width:26px;height:26px;border-radius:50%;background:#8b5a2f;
+  color:#fff6db;font:24px/24px Arial,sans-serif;box-shadow:inset 0 0 0 2px #fff4d8,0 1px 3px #00000047}
 
-.fusion-arrow{font-size:48px;color:#eaaa31;text-shadow:1px 2px #8e6b32,-1px -1px #ffeaaa;transform:translateY(-10px)}
+.fusion-arrow{font-size:44px;color:#eda92c;text-shadow:2px 2px 0 #8e6b32;transform:translateY(-8px)}
 
-.fusion-preview{display:flex;flex-direction:column;align-items:center;gap:3px;flex-shrink:0;width:124px;font-size:22px;line-height:26px;color:#b08341}
-.fusion-preview .fusion-frame{background:radial-gradient(ellipse at 40% 30%,#fffbe0,#efd17a);border-style:dashed}
-.fusion-preview.missing .fusion-frame{border-color:#b6a382}
-.fusion-question{font:bold 70px/1 Georgia,serif;color:#fffbcc;-webkit-text-stroke:2px #b9904e;text-shadow:1px 3px #b9904e}
-/* 预览格上的淡旋转高光，提示"会有新东西" */
+/* 预览：金色虚线格 + 旋转高光 + 「必得 1 件」 */
+.fusion-preview{display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0;width:132px;font-size:22px;line-height:26px;color:#a9762f}
+.fusion-preview .fusion-frame{width:76px;height:76px;border-style:dashed;border-color:#e0a12f;
+  background:radial-gradient(ellipse at 40% 28%,#fffce6,#f4d888 70%,#e8bd55)}
+.fusion-preview.missing{color:#b08341}
+.fusion-preview.missing .fusion-frame{border-color:#c9ae7d;background:linear-gradient(#f0e3c2,#f8f0da)}
+.fusion-question{position:relative;z-index:1;font:bold 50px/1 Georgia,serif;color:#fffbcc;-webkit-text-stroke:3px #c08f34;paint-order:stroke fill;text-shadow:0 3px 0 #b9853040}
 .fusion-glow{position:absolute;inset:-30%;pointer-events:none;
-  background:conic-gradient(from 0deg,rgba(255,255,255,0) 0deg,rgba(255,255,255,.75) 40deg,rgba(255,255,255,0) 90deg,
-    rgba(255,255,255,0) 210deg,rgba(255,246,190,.6) 250deg,rgba(255,255,255,0) 300deg);
+  background:conic-gradient(from 0deg,rgba(255,255,255,0) 0deg,rgba(255,255,255,.7) 40deg,rgba(255,255,255,0) 90deg,
+    rgba(255,255,255,0) 210deg,rgba(255,246,190,.55) 250deg,rgba(255,255,255,0) 300deg);
   mix-blend-mode:screen;animation:fusion-shine 6s linear infinite}
 @keyframes fusion-shine{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.fusion-glow{animation:none;opacity:.5}}
+.fusion-preview-label{font-size:21px}
+.fusion-preview-hint{font-size:17px;color:#b39a6d}
 
-.fusion-operation{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:224px}
-.fusion-operation>.uc-button{font-size:31px;min-height:56px;padding:6px 26px}
-.fusion-cost{font-size:22px;color:#8b672f}
+.fusion-operation{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:212px;
+  padding:6px 14px;border-radius:24px;background:#fffdf399;box-shadow:inset 0 0 0 3px #f4e8ca}
+.fusion-operation>.uc-button{font-size:29px;min-height:52px;padding:5px 26px;min-width:178px}
+.fusion-cost{font-size:21px;color:#8b672f}
 .fusion-cost b{color:#b5821e;font-weight:normal}
-.fusion-guarantee{font-size:18px;color:#a18a61}
+.fusion-guarantee{font-size:17px;color:#a18a61}
+/* 材料齐了给主按钮加一层呼吸光（reduced-motion 下自动关闭） */
+.fusion-ready{animation:fusion-ready 1.8s ease-in-out infinite}
+@keyframes fusion-ready{50%{filter:brightness(1.09) drop-shadow(0 0 8px #ffd54a99)}}
+@media (prefers-reduced-motion:reduce){.fusion-ready{animation:none}}
 
 /* ---------- 规则条 ---------- */
-.fusion-rules{flex:0 0 auto;margin:0;padding:6px 18px;border-radius:20px;background:#f6ecd2;
-  font-size:19px;line-height:25px;color:#8f7247;white-space:normal}
-.fusion-rules b{display:inline-block;margin-right:9px;padding:1px 12px;border-radius:13px;background:#ffe6a1;color:#8a4b12;font-weight:normal}
+.fusion-rules{flex:0 0 auto;display:flex;gap:9px;margin:0;padding:5px 16px;border-radius:22px;
+  background:#f7edd6;box-shadow:inset 0 0 0 3px #fffdf3;font-size:18px;line-height:24px;color:#8f7247;white-space:normal}
+.fusion-rules b{align-self:flex-start;flex-shrink:0;padding:1px 12px;border-radius:13px;
+  background:linear-gradient(#ffeeb0,#ffdc79);color:#7a4a11;font-weight:normal}
 
 /* ---------- 装备选择 ---------- */
 .fusion-inventory-panel{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;
-  border-radius:26px;background:#fbf4e2;box-shadow:inset 0 0 0 3px #fffdf3;padding:6px 16px 4px}
-.fusion-inventory-heading{display:flex;align-items:center;gap:14px;flex:0 0 auto;height:38px}
+  border-radius:28px;background:#fdf8ea;box-shadow:inset 0 0 0 4px #fffdf3,inset 0 6px 12px #e0c89433;padding:7px 16px 6px}
+.fusion-inventory-heading{display:flex;align-items:center;gap:14px;flex:0 0 auto;height:36px}
 .fusion-inventory-heading h3{display:flex;align-items:center;gap:12px;font-size:24px;font-weight:normal;margin:0 auto 0 0;color:#8c612e}
 .fusion-pips{display:inline-flex;gap:5px}
-.fusion-pips i{width:13px;height:13px;border-radius:50%;background:#dfcda6;box-shadow:inset 0 1px 2px #b09a6f80}
-.fusion-pips i.on{background:linear-gradient(#b9e86a,#6fb632);box-shadow:0 0 0 2px #ffffff9c}
+.fusion-pips i{width:14px;height:14px;border-radius:50%;background:#e2d2ae;box-shadow:inset 0 1px 2px #b09a6f80}
+.fusion-pips i.on{background:linear-gradient(#b9e86a,#6fb632);box-shadow:0 0 0 2px #ffffffb0,0 0 7px #8dc94a99}
 .fusion-count{font-size:19px;color:#a18151}
-.fusion-inventory-heading>.uc-button{font-size:20px;min-height:31px;padding:2px 13px}
+.fusion-inventory-heading>.uc-button{font-size:20px;min-height:32px;padding:2px 14px}
 .fusion-pagination{display:flex;align-items:center;gap:10px;font-size:21px;justify-content:flex-end;min-width:150px}
-.fusion-pagination .uc-button{min-height:30px;height:30px;width:33px;padding:0;font:29px/1 Georgia,serif;letter-spacing:0}
-.fusion-pagination>span{min-width:56px;text-align:center}
+.fusion-pagination .uc-button{min-height:31px;height:31px;width:34px;padding:0;font:29px/1 Georgia,serif;letter-spacing:0}
+.fusion-pagination>span{min-width:56px;text-align:center;color:#8c612e}
 
-.fusion-inventory{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(6,1fr);gap:8px;align-content:start;padding:2px 0}
-.fusion-gear{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0;padding:0;border:0;background:transparent;cursor:pointer}
-.fusion-gear .fusion-frame{width:92px;height:92px}
-.fusion-gear:hover:not(:disabled) .fusion-frame{transform:translateY(-2px);box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #d9c496}
-.fusion-gear-name{max-width:100%;font-size:20px;line-height:23px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;color:#7b5a2e}
-.fusion-card-state{position:absolute;bottom:0;left:0;right:0;background:#fff3d2db;font-size:16px;line-height:22px;color:#8d6b38;text-align:center}
-.fusion-gear.selected .fusion-frame{outline:3px solid #77a647;background:linear-gradient(#e6f2c4,#a9d16b);box-shadow:inset 0 0 0 4px #fbffee,0 0 0 4px #ffffff8c}
-.fusion-gear.selected .fusion-card-state{background:#639334eb;color:#fffee4}
-.fusion-gear:disabled{cursor:default;opacity:.6}
-.fusion-gear:disabled img{filter:grayscale(.6)}
-.fusion-gear:disabled .fusion-card-state{background:#ded7c5eb;color:#70624c}
+.fusion-inventory{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(6,1fr);gap:10px;align-content:start;
+  padding:1px 2px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.fusion-gear{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0;padding:5px 4px 4px;
+  border:0;border-radius:20px;background:linear-gradient(#fffdf5,#f7eed6);cursor:pointer;
+  box-shadow:inset 0 0 0 3px #fffdf3,0 2px 0 #e2d2ac;transition:transform .14s,box-shadow .14s}
+.fusion-gear .fusion-frame{width:74px;height:74px;border-radius:20px}
+.fusion-gear:hover:not(:disabled){transform:translateY(-3px);box-shadow:inset 0 0 0 3px #fffdf3,0 5px 0 #dfcda2}
+.fusion-gear-name{max-width:100%;font-size:19px;line-height:20px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;color:#7b5a2e}
+.fusion-quality-tag{position:absolute;left:0;top:0;padding:1px 9px 1px 7px;border-radius:0 0 13px 0;font-size:15px;
+  color:#fffdf3;background:#8b704d;text-shadow:0 1px 1px #00000033}
+.fusion-quality-tag.q1{background:#7b9652}
+.fusion-quality-tag.q2{background:#4f88a3}
+.fusion-quality-tag.q3{background:#8d63a3}
+.fusion-quality-tag.q4{background:#e8842c}
+.fusion-card-state{position:absolute;bottom:0;left:0;right:0;padding:1px 0;background:#f2e7c9e6;font-size:16px;
+  line-height:21px;color:#8d6b38;text-align:center}
+.fusion-gear.selected{box-shadow:inset 0 0 0 3px #fffdf3,0 0 0 3px #8ec155,0 3px 0 #6fa034}
+.fusion-gear.selected .fusion-frame{border-color:#6fa034;background:linear-gradient(#eaf6cd,#b6db7c)}
+.fusion-gear.selected .fusion-card-state{background:#639334e8;color:#fffee4}
+.fusion-gear:disabled{cursor:default;box-shadow:inset 0 0 0 3px #fffdf3,0 2px 0 #e6dcc6;opacity:.72}
+.fusion-gear:disabled img{filter:grayscale(.7) opacity(.85)}
+.fusion-gear:disabled .fusion-card-state{background:#e2dbcbeb;color:#7b6d55}
 .fusion-empty{grid-column:1/-1;align-self:center;text-align:center;font-size:25px;line-height:1.6;color:#9b835b}
 .fusion-empty span{font-size:21px}
-.fusion-status{flex:0 0 auto;margin:0;text-align:center;font-size:19px;line-height:24px;color:#a08356}
-.fusion-status.ready{color:#6f9137}
+
+/* ---------- 状态条 ---------- */
+.fusion-status{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:9px;margin:0 auto;
+  padding:4px 22px;border-radius:20px;background:#f6ecd2;font-size:19px;line-height:24px;color:#9c7c4b;
+  box-shadow:inset 0 0 0 3px #fffdf3}
+.fusion-status i{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;
+  background:#d8b877;color:#fffdf3;font:normal 15px/1 "Microsoft YaHei",sans-serif}
+.fusion-status.ready{background:#eaf6d2;color:#5c8a2c}
+.fusion-status.ready i{background:#7db23f}
 
 /* ---------- 品质描边 ---------- */
-.fusion-material.q1 .fusion-frame,.fusion-success-item.q1 .fusion-frame{border-color:#7b9652}
-.fusion-material.q2 .fusion-frame,.fusion-success-item.q2 .fusion-frame{border-color:#5b91a8}
-.fusion-material.q3 .fusion-frame,.fusion-success-item.q3 .fusion-frame{border-color:#9771a8}
-.fusion-material.q4 .fusion-frame,.fusion-success-item.q4 .fusion-frame,.fusion-preview.q4 .fusion-frame{border-color:#e8842c}
+.fusion-material.q1 .fusion-frame,.fusion-success-item.q1 .fusion-frame{border-color:#7b9652;box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #b9c79a}
+.fusion-material.q2 .fusion-frame,.fusion-success-item.q2 .fusion-frame{border-color:#5b91a8;box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #9fbcc7}
+.fusion-material.q3 .fusion-frame,.fusion-success-item.q3 .fusion-frame{border-color:#9771a8;box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #bfa4c9}
+.fusion-material.q4 .fusion-frame,.fusion-success-item.q4 .fusion-frame,.fusion-preview.q4 .fusion-frame{border-color:#e8842c;box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #e8bd8a}
 
 /* ---------- 融合成功弹窗 ---------- */
 .fusion-success{display:flex;align-items:center;gap:46px;padding:24px 42px 9px}
 .fusion-success-item{display:flex;align-items:center;flex-direction:column;gap:16px;min-width:235px}
-.fusion-success-item .fusion-frame{width:169px;height:169px;border-radius:28px}
+.fusion-success-item .fusion-frame{width:169px;height:169px;border-radius:30px;
+  background:radial-gradient(ellipse at 40% 26%,#fffdf0,#f0d79a 75%,#e0bd72)}
 .fusion-success-item strong{font-size:32px;font-weight:normal}
 .fusion-success-details{flex:1;line-height:1.5}
 .fusion-quality-change{font-size:35px}

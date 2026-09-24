@@ -97,14 +97,14 @@ test('普通商品每天每种5个，稀有1个，批量和重载均不能越额
   assert.equal(g.saved().shopPurchases[2],5); assert.equal(g.saved().shopPurchases[13],1);
 });
 
-test('午夜自动滚动限额，失败购买/礼包/持有数量不影响额度，周限档不碰', () => {
-  const g=setup(),s=g.s(); s.goldPoint=0; s.rankPurchases={11:1}; s.rankPurchaseWeek='2026-W39';
+test('午夜自动滚动限额，失败购买/礼包/持有数量不影响额度，金杯商店的按天限兑不被牵连', () => {
+  const g=setup(),s=g.s(); s.goldPoint=0; s.rankPurchases={11:1}; s.rankPurchaseDay='2026-09-23';
   assert.equal(g.State.buyProp(2).ok,false); assert.equal(g.State.purchaseStatus(2).bought,0);
   s.goldPoint=1000; s.props[2]=999; g.State.buyProp(2,5);
   const date=g.State.purchaseStatus(2).date; g.advance(120000);
   assert.notEqual(g.State.purchaseStatus(2).date,date); assert.equal(g.State.purchaseStatus(2).remaining,5);
   assert.equal(g.State.buyProp(2,5).ok,true); assert.equal(s.props[2],1009);
-  same(s.rankPurchases,{11:1}); assert.equal(s.rankPurchaseWeek,'2026-W39');
+  same(s.rankPurchases,{11:1}); assert.equal(s.rankPurchaseDay,'2026-09-23');
   assert.equal(g.State.purchaseStatus(16).buyable,false); assert.equal(g.State.buyProp(16).ok,false);
 });
 
@@ -187,6 +187,15 @@ test('关卡每次击败NPC都可能掉0–6片，白绿蓝按螳螂仙鹤熊猫
   // rng=0：掉率判定必过、数量取下限、普通档分支（<tierUp）成立
   g.math.random=()=>0;
   const FRAG=g.GData.STAGE_FRAGMENT, MIN=FRAG.min, MAX=FRAG.max;
+  // 期望回到最初水平（掉率 45%~60% × 数量均值 3.5 ≈ 1.58~2.1 片/场），但数量区间仍比最初的 1~6 窄
+  {
+    const mean=(MIN+MAX)/2, sd=Math.sqrt((Math.pow(MAX-MIN+1,2)-1)/12);
+    for(const star of [1,3,6]){
+      const exp=g.GData.stageFragmentChance(star)*mean;
+      assert.ok(exp>1.5&&exp<2.2,'★'+star+' 单场期望应回到 1.58~2.1，实际 '+exp.toFixed(2));
+    }
+    assert.ok(sd<1.5,'数量标准差不应回到 1~6 的水平，实际 '+sd.toFixed(2));
+  }
   for(const id of [1,6,7,12,13,18]) {
     if(id>1)g.State.setStageProgress(id-1,{passed:true,npcIndex:3});
     const base=24+Math.floor((id-1)/6);

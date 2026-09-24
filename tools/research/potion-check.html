@@ -73,13 +73,19 @@ window.addEventListener('unhandledrejection', function (e) { window.__errs.push(
     check.note = m1 ? (/体力：\d+\/\d+/.test(m1.textContent) ? m1.textContent.match(/体力：\d+\/\d+/)[0] : null) : null;
     check.disabled = m1 ? [...m1.querySelectorAll('.modal-buttons button')].map((b) => !!b.disabled) : null;
 
-    // 点「全部使用（20）」
-    const all = m1 ? [...m1.querySelectorAll('.modal-buttons button')].find((b) => b.textContent.includes('全部使用')) : null;
-    check.allLabel = all ? all.textContent.trim() : null;
-    if (all) { all.click(); await wait(500); }
+    // 药剂详情没有滑动条：点一次「使用」喝一瓶，弹窗保持打开，可以连续点
+    const range = m1 ? m1.querySelector('[data-slider="use-count"] input') : null;
+    check.sliderMax = range ? range.max : null;
+    const useBtn = m1 ? m1.querySelector('.modal-buttons button') : null;
+    check.useLabel = useBtn ? useBtn.textContent.trim() : null;
+    const energy0 = S.energy, held0 = S.props[1];
+    if (useBtn) { useBtn.click(); await wait(300); useBtn.click(); await wait(300); }
     check.energyAfterAll = S.energy;
+    check.usedCount = S.energy - energy0;
     check.energyOverCap = S.energy > S.maxEnergy;
     check.props1Left = S.props[1];
+    check.usedLeft = held0 - S.props[1];
+    check.modalStillOpen = !!overlay();
 
     // 主界面体力条应带 over 标记
     closeAll();

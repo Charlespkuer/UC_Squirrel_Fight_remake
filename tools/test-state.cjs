@@ -50,6 +50,129 @@ test('浏览器 QA 和自检存档隔离，正式存档不会被测试覆盖', (
   }
 });
 
+test('单个道具数量上限 9999：存档收口、读档也会夹住', () => {
+  const g = game(), S = g.State, s = S.state();
+  assert.equal(S.PROP_HARD_CAP, 9999);
+  // 内存里加爆也会在 save() 时收口
+  s.props[1] = 99999; s.props[2] = 9999; s.props[23] = 10000;
+  S.save();
+  assert.equal(s.props[1], 9999);
+  assert.equal(s.props[2], 9999);
+  assert.equal(s.props[23], 9999);
+  assert.equal(JSON.parse(g.storage.get(S.saveKey)).props[1], 9999);
+  // 负数与非数字会被清掉，不会写进存档
+  s.props[24] = -5; s.props[25] = 'abc';
+  S.save();
+  assert.equal(s.props[24], undefined);
+  assert.equal(s.props[25], undefined);
+  // 旧档里超上限的数量在 normalizeSave 时也会被夹住
+  g.storage.set(S.saveKey, JSON.stringify({ level: 5, props: { 1: 50000, 26: 12 } }));
+  S.load();
+  const loaded = S.state();
+  assert.equal(loaded.props[1], 9999);
+  assert.equal(loaded.props[26], 12);
+  // 未到上限的正常数量原样保留
+  assert.equal(loaded.props[1] + loaded.props[26], 10011);
+});
+
+test('卖出天使果实：100 金松果一个，数量与金松果一起结算', () => {
+  const g = game(), S = g.State, s = S.state();
+  assert.equal(S.propSellPrice(47), 100);
+  assert.equal(S.propSellPrice(46), 0, '只有天使果实（47）可卖');
+  assert.equal(S.sellProp(47, 3).ok, false, '背包里没有就不给卖');
+  s.props[47] = 5; s.goldPoint = 10;
+  const r = S.sellProp(47, 2);
+  assert.equal(r.ok, true); assert.equal(r.sold, 2); assert.equal(r.gold, 200);
+  assert.equal(s.props[47], 3); assert.equal(s.goldPoint, 210);
+  // 超过持有数量会被夹住，卖光后键被删掉
+  const all = S.sellProp(47, 99);
+  assert.equal(all.sold, 3); assert.equal(s.props[47], undefined); assert.equal(s.goldPoint, 510);
+  assert.equal(S.sellProp(47, 1).ok, false);
+  assert.equal(JSON.parse(g.storage.get(S.saveKey)).props[47], undefined);
+});
+
+test('调试用武技接口：获得/改等级/遗忘，等级夹在 1~15 且不重复', () => {
+  const g = game(), S = g.State, s = S.state();
+  assert.ok(S.weaponList().length > 0 && S.skillList().length > 0, '武器与技能表都读得到');
+  const w = S.weaponList()[0], k = S.skillList()[0];
+  const got = S.setWeapon(w.id, 7);
+  assert.equal(got.ok, true); assert.equal(got.level, 7);
+  assert.equal(s.weapons.includes(w.id + ':7'), true);
+  S.setWeapon(w.id, 12);
+  assert.equal(s.weapons.filter((x) => Number(String(x).split(':')[0]) === w.id).length, 1, '不会重复添加');
+  assert.equal(s.weapons.includes(w.id + ':12'), true);
+  assert.equal(S.setWeapon(w.id, 99).level, 15, '等级上限 15');
+  assert.equal(S.setSkill(k.id, 0).level, 1, '等级下限 1');
+  assert.equal(S.forgetWeapon(w.id).ok, true);
+  assert.equal(s.weapons.some((x) => Number(String(x).split(':')[0]) === w.id), false);
+  assert.equal(S.forgetWeapon(w.id).ok, false, '遗忘两次第二次失败');
+  assert.equal(S.forgetSkill(k.id).ok, true);
+  assert.equal(S.setSkill(9999, 1).ok, false);
+});
+
+test('满级 70 级：经验不再升级，69 级 179、满级 180 体力上限', () => {
+  const g = game(), S = g.State, s = S.state();
+  assert.equal(S.MAX_PLAYER_LEVEL, 70);
+  assert.equal(S.energyCapForLevel(1), 90);
+  assert.equal(S.energyCapForLevel(2), 93);
+  assert.equal(S.energyCapForLevel(10), 110);
+  assert.equal(S.energyCapForLevel(20), 130);
+  assert.equal(S.energyCapForLevel(30), 140);
+  assert.equal(S.energyCapForLevel(69), 179);
+  assert.equal(S.energyCapForLevel(70), 180);
+  // 低等级段确实比以前低（旧曲线 10 级 117 / 20 级 137）
+  assert.ok(S.energyCapForLevel(10) < 117 && S.energyCapForLevel(20) < 137, '低等级体力上限下调');
+  // 一路喂经验到满级后不再升级
+  s.exp = 0; S.gainExp(1e9);
+  assert.equal(s.level, 70, '满级封顶');
+  assert.equal(s.maxEnergy, 180, '满级体力上限 180');
+  S.save(); S.load();
+  assert.equal(S.state().level, 70); assert.equal(S.state().maxEnergy, 180);
+  // 旧档（旧成长曲线算出的更高上限）读档时被收回；超过 70 级的等级也压回 70
+  g.storage.set(S.saveKey, JSON.stringify({ level: 70, maxEnergy: 999, props: {} }));
+  S.load();
+  assert.equal(S.state().maxEnergy, 180);
+  g.storage.set(S.saveKey, JSON.stringify({ level: 99, maxEnergy: 300, props: {} }));
+  S.load();
+  assert.equal(S.state().level, 70);
+  assert.equal(S.state().maxEnergy, 180);
+});
+
+test('好友系统：随机 NPC 也能加为好友，重名/满员有提示，删除与存档往返正常', () => {
+  const g = game(), S = g.State;
+  assert.equal(S.friendLimit(), 20);
+  assert.equal(S.friendList().length, 0);
+  const cands = S.rollFriendCandidates(3);
+  assert.equal(cands.length, 3);
+  assert.ok(cands.every((c) => c.level >= 1 && c.level <= S.MAX_PLAYER_LEVEL), '推荐等级不超过满级');
+  const first = S.addFriend(cands[0]);
+  assert.equal(first.ok, true); assert.equal(S.friendList().length, 1);
+  assert.equal(S.friendList()[0].name, cands[0].name);
+  assert.equal(S.addFriend(cands[0]).ok, false, '同名不能重复加');
+  assert.equal(S.addFriend({ name: '   ' }).ok, false, '空名字不给加');
+  assert.equal(S.addFriend({ name: '超长名字'.repeat(8), level: 3 }).ok, true, '超长名字会被截断');
+  assert.ok(S.friendList()[1].name.length <= 20);
+  for (let i = 0; i < 25; i++) S.addFriend({ name: '路人' + i, level: 3 + i, power: 5, agility: 5, speed: 5, hp: 40 });
+  assert.equal(S.friendList().length, 20, '好友上限 20');
+  assert.match(S.addFriend({ name: '再来一个' }).msg, /好友已满/);
+  // 切磋用的对手对象
+  const foe = S.friendFoe(S.friendList()[0]);
+  assert.equal(foe.name, S.friendList()[0].name);
+  assert.equal(foe.level, S.friendList()[0].level);
+  assert.equal(foe.hp, S.friendList()[0].hp);
+  // 存档往返：好友与等级都保留，超过满级的旧好友被压回
+  S.save();
+  g.storage.set(S.saveKey, JSON.stringify(Object.assign(JSON.parse(g.storage.get(S.saveKey)), {
+    friends: [{ name: '老友', level: 99, power: 9, agility: 9, speed: 9, hp: 90 }],
+  })));
+  S.load();
+  assert.equal(S.friendList().length, 1);
+  assert.equal(S.friendList()[0].level, S.MAX_PLAYER_LEVEL, '好友等级不超过满级');
+  assert.equal(S.removeFriend('老友').ok, true);
+  assert.equal(S.friendList().length, 0);
+  assert.equal(S.removeFriend('老友').ok, false);
+});
+
 test('旧存档保留等级、物品、关卡并独立补全新字段', () => {
   const g = game();
   g.storage.set('ssdz_save_v1', JSON.stringify({ name: '老玩家', level: 25, goldPoint: 703, energy: 67, weapons: ['15:12'], stages: { 7: { npcIndex: 2, passed: false } }, props: { 23: 4 } }));
@@ -202,10 +325,32 @@ test('装备穿戴等级、槽位互斥、融合材料和附加属性生效', ()
   assert.equal(s.goldPoint, 50);
 });
 
-test('礼包可打开且不重复发放；药剂可以顶过自然上限，到硬上限才不浪费', () => {
+test('1/5/10/15/20 级礼包：金松果回到旧版数量，种类更丰富且不重复发放', () => {
   const g = game(), s = g.State.state();
+  // 原表（GameDict）保持逐字节不动，实际清单在 GData.GIFT_PACK_BOOST 里
+  assert.equal(g.giftMap.getValue(28).prize, '29:1|8:50|2:3|1:5');
+  const oldGold = { 28: 50, 29: 50, 30: 100, 31: 150, 32: 200 };
+  for (const id of [28, 29, 30, 31, 32]) {
+    const boost = g.GData.giftPackPrize(id);
+    const rows = g.giftMap.getValue(id).prize.split('|').map((item) => item.split(':').map(Number));
+    assert.ok(boost && boost.length, id + ' 级礼包有清单');
+    // 金松果用旧版数量
+    assert.equal((boost.find((b) => b.id === 8) || {}).count, oldGold[id], id + ' 级礼包金松果回到旧版');
+    // 大小体力药剂都给，但都不多
+    const small = (boost.find((b) => b.id === 1) || {}).count || 0;
+    const big = (boost.find((b) => b.id === 2) || {}).count || 0;
+    assert.ok(small >= 1 && small <= 5, id + ' 小体力药剂数量适中：' + small);
+    assert.ok(big >= 1 && big <= 3, id + ' 大体力药剂数量适中：' + big);
+    // 链式礼包（下一级的礼包）仍然保留
+    const chain = rows.find(([pid]) => pid >= 29 && pid <= 32);
+    if (chain) assert.ok(boost.some((b) => b.id === chain[0] && b.count === chain[1]), id + ' 的下一级礼包仍要保留');
+    // 种类要丰富：至少还有一个药丸或卷轴
+    assert.ok(boost.some((b) => [21, 22, 7, 44].includes(b.id)), id + ' 级礼包应有卷轴/药丸之类的额外奖励');
+  }
+  // 20 级礼包 30 片蓝色碎片
+  assert.equal(g.GData.giftPackPrize(32).find((b) => b.id === 26).count, 30);
   assert.equal(g.State.useProp(28).ok, true);
-  assert.equal(s.goldPoint, 150); assert.equal(s.props[29], 1);
+  assert.equal(s.goldPoint, 100 + oldGold[28]); assert.equal(s.props[29], 1);
   assert.equal(g.State.useProp(28).ok, false);
   assert.equal(g.State.useProp(29).ok, false);
   // 满体力时药剂仍然可用，会顶到自然上限之上
@@ -386,15 +531,39 @@ test('每日任务：当天固定抽取、进度来真实计数、只能领一�
   for (let i = 0; i < 5; i++) S.questStatus();
   assert.equal(S.questStatus().map((q) => q.key).join(','), keys, '同一天反复读取不会重抽');
   assert.ok(list.every((q) => q.need > 0), '每条都有目标');
-  // 奖励构成：金松果 10~30、经验 50~80，外加 1~3 种道具
+  // 奖励：纯随机 1~2 项，金松果/经验/道具都在同一个池子里抽，抽到才有
+  const seenKinds = new Set();
   for (const q of list) {
-    assert.ok(q.gold >= 10 && q.gold <= 30, '金松果 10~30，实际 ' + q.gold);
-    assert.ok(q.exp >= 50 && q.exp <= 80, '经验 50~80，实际 ' + q.exp);
-    assert.ok(q.extras.length >= 1 && q.extras.length <= 3, '额外道具 1~3 种，实际 ' + q.extras.length);
-    const kinds = q.rewards.map((r) => r.kind);
-    assert.equal(kinds[0], 'gold'); assert.equal(kinds[1], 'exp');
+    assert.ok(q.rewards.length >= 1 && q.rewards.length <= 2, '每条 1~2 项奖励，实际 ' + q.rewards.length);
     assert.ok(q.rewards.every((r) => r.name && r.count > 0), '每种奖励都有名字和数量（不会只剩数字）');
-    assert.equal(new Set(q.extras.map((e) => e.id)).size, q.extras.length, '同一单不重复给同一种道具');
+    for (const r of q.rewards) {
+      seenKinds.add(r.kind);
+      if (r.kind === 'gold') assert.ok(r.count >= 10 && r.count <= 30, '金松果 10~30，实际 ' + r.count);
+      if (r.kind === 'exp') assert.ok(r.count >= 50 && r.count <= 80, '经验 50~80，实际 ' + r.count);
+      // 药丸一次只能给 1 个
+      if (r.kind === 'prop' && [3, 4, 5, 7, 44].includes(r.id)) assert.equal(r.count, 1, '药丸数量必须是 1，实际 ' + r.count);
+    }
+    // 金松果与经验不是固定奖励：没有就是没有
+    assert.equal(q.gold, (q.rewards.find((r) => r.kind === 'gold') || { count: 0 }).count);
+    assert.equal(q.exp, (q.rewards.find((r) => r.kind === 'exp') || { count: 0 }).count);
+  }
+  // 池子里金松果与经验都只是候选，不再保证出现
+  assert.ok(S.QUEST_GOLD && S.QUEST_GOLD.kind === 'gold' && S.QUEST_EXP && S.QUEST_EXP.kind === 'exp');
+  // 高级药丸（超级经验丸 44）概率大幅下调：权重最低，实际概率只有百分之几
+  {
+    const pool = S.QUEST_EXTRA_POOL;
+    const total = pool.reduce((sum, item) => sum + item.weight, 0);
+    const superPill = pool.find((item) => item.id === 44);
+    const best = Math.max(...pool.map((item) => item.weight));
+    assert.ok(superPill && superPill.weight === Math.min(...pool.map((item) => item.weight)), '超级经验丸权重应最低');
+    const chance = superPill.weight / total;
+    assert.ok(chance < 0.05, '超级经验丸概率应低于 5%，实际 ' + (chance * 100).toFixed(1) + '%');
+    assert.ok(chance < best / total / 5, '应明显低于最高权重的奖励');
+    // 药丸数量固定 1（池子里就不能是区间）
+    for (const item of pool) if ([3, 4, 5, 7, 44].includes(item.id)) {
+      assert.equal(item.range[0], 1, '药丸数量应为 1：id ' + item.id);
+      assert.equal(item.range[1], 1, '药丸数量应为 1：id ' + item.id);
+    }
   }
   assert.equal(S.questClaimable(), 0, '没做任务时没有可领取');
 
@@ -408,15 +577,15 @@ test('每日任务：当天固定抽取、进度来真实计数、只能领一�
   assert.equal(after.claimable, true);
   assert.equal(S.questClaimable(), 1);
 
-  // 领奖：加金松果与经验，道具也进背包，且不能重复领
+  // 领奖：每条任务按它自己的奖励结算，且不能重复领
   const gold0 = s.goldPoint;
-  const props0 = JSON.stringify(s.props);
+  const props0 = JSON.parse(JSON.stringify(s.props));
   const reward = S.claimQuest(0);
   assert.equal(reward.ok, true);
   assert.equal(s.goldPoint, gold0 + target.gold);
-  assert.ok(s.exp > 0 || s.level > 1, '经验奖励会结算（可能升级）');
-  for (const extra of target.extras) {
-    assert.ok(s.props[extra.id] > (JSON.parse(props0)[extra.id] || 0), '道具 ' + extra.id + ' 已入袋');
+  assert.ok(target.exp === 0 || s.exp > 0 || s.level > 1, '有经验奖励就会结算（可能升级）');
+  for (const r of target.rewards) {
+    if (r.kind === 'prop') assert.ok(s.props[r.id] > (props0[r.id] || 0), '道具 ' + r.id + ' 已入袋');
   }
   assert.equal(S.claimQuest(0).ok, false, '不能重复领取');
   assert.equal(S.questClaimable(), 0);
@@ -439,7 +608,7 @@ test('每日任务：当天固定抽取、进度来真实计数、只能领一�
   assert.ok(next.every((q) => q.progress === 0), '新的一天计数归零');
 });
 
-test('挑战经验只看等级差：20 级起单位体力效率反超竞技场，且每级越来越难', () => {
+test('挑战经验只看等级差：等级成长 20 级封顶、单位体力效率略低于竞技场，且每级越来越难', () => {
   const g = game();
   const S = g.State;
   // 同级/越级/低级
@@ -454,24 +623,27 @@ test('挑战经验只看等级差：20 级起单位体力效率反超竞技场�
   const ratioA = S.challengeExp(23, 20) / S.challengeExp(20, 20);
   const ratioB = S.challengeExp(43, 40) / S.challengeExp(40, 40);
   assert.ok(Math.abs(ratioA - ratioB) < 0.02, '等级差倍率应与自身等级无关：' + ratioA.toFixed(3) + ' vs ' + ratioB.toFixed(3));
-  // 没有硬上限：经验随等级持续增长
-  assert.ok(S.challengeExp(60, 60) > S.challengeExp(20, 20) * 1.5, '不应被压平');
-  // 单位体力效率：20 级之前不如竞技场，20 级起反超，而且之后一直保持
-  const arenaPerEnergy = S.ARENA_EXP_PER_ENERGY;   // 150/30 = 5
-  const perEnergy = (lv) => S.challengeExp(lv, lv) / 10;   // 随机挑战 10 体力一场
-  assert.ok(perEnergy(19) <= arenaPerEnergy, '19 级还不该反超：' + perEnergy(19).toFixed(2));
-  for (let lv = 20; lv <= 60; lv++) {
-    assert.ok(perEnergy(lv) > arenaPerEnergy, lv + ' 级单位体力效率应反超竞技场：' + perEnergy(lv).toFixed(2));
-  }
-  // 单场经验仍低于竞技场冠军（只看随机挑战实际会遇到的等级差 -1~+3）
+  // 20 级封顶：之后单场经验不再随等级增长，但 20 级之前仍在慢慢涨
+  assert.equal(S.challengeExp(60, 60), S.challengeExp(20, 20), '20 级之后应封顶');
+  assert.equal(S.challengeExp(40, 40), S.challengeExp(20, 20), '20 级之后应封顶');
+  assert.ok(S.challengeExp(19, 19) < S.challengeExp(20, 20), '20 级之前仍应增长');
+  assert.ok(S.challengeExp(2, 2) < S.challengeExp(19, 19), '等级越高经验越多（封顶前）');
+  // 单位体力效率：任何等级都不超过竞技场（150/30 = 5.0），挑战不再是刷经验的最优解
+  const arenaPerEnergy = S.ARENA_EXP_PER_ENERGY;
+  const perEnergy = (foeLevel, myLevel) => S.challengeExp(foeLevel, myLevel) / 10;   // 随机挑战 10 体力一场
   const [dMin, dMax] = S.CHALLENGE_DIFF_RANGE;
   for (let lv = 1; lv <= 60; lv++) {
     for (let d = dMin; d <= dMax; d++) {
       const exp = S.challengeExp(lv + d, lv);
-      assert.ok(exp < S.ARENA_CHAMPION_EXP, lv + '级差' + d + ' 的挑战经验 ' + exp + ' 应低于竞技场 ' + S.ARENA_CHAMPION_EXP);
-      assert.ok(exp > 0);
+      assert.ok(exp > 0, lv + '级差' + d + ' 经验应为正');
+      assert.ok(exp / 10 <= arenaPerEnergy, lv + '级差' + d + ' 的挑战效率 ' + (exp / 10).toFixed(2) + ' 不应超过竞技场');
     }
   }
+  // 封顶 + 最大等级差时略低于竞技场（同一体力口径），但不是低一大截
+  const capMax = perEnergy(20 + dMax, 20), capSame = perEnergy(20, 20);
+  assert.ok(capMax < arenaPerEnergy, '封顶最大等级差应略低于竞技场：' + capMax.toFixed(2));
+  assert.ok(capMax > arenaPerEnergy * 0.88, '不应低太多：' + capMax.toFixed(2));
+  assert.ok(capSame < arenaPerEnergy);
   // 每级越来越难：通关一级所需的同级场次单调递增
   let prev = 0;
   for (let lv = 1; lv <= 60; lv++) {
@@ -479,8 +651,8 @@ test('挑战经验只看等级差：20 级起单位体力效率反超竞技场�
     assert.ok(fights > prev, lv + ' 级应比上一级更慢：' + fights.toFixed(1) + ' vs ' + prev.toFixed(1));
     prev = fights;
   }
-  // 挑战效率确实提高了：20 级同级明显高于旧公式的 10+20*1.2=34
-  assert.ok(S.challengeExp(20, 20) >= 34 * 1.3, '挑战经验效率应提升，实际 ' + S.challengeExp(20, 20));
+  // 与旧公式（27 + 等级×1.2）相比确实下调了
+  assert.ok(S.challengeExp(20, 20) < 27 + 20 * 1.2, '20 级同级应低于旧公式，实际 ' + S.challengeExp(20, 20));
 });
 
 test('升级礼包：每级给消耗品，逢 5 级与属性书等级再给大礼包，并真的进背包', () => {

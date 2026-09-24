@@ -52,31 +52,34 @@
         return (index ? '<span class="fusion-plus" aria-hidden="true">+</span>' : '') +
           '<button type="button" class="fusion-material ' + (gear ? 'filled q' + gear.quality : 'empty') +
           '" data-fusion-slot="' + index + '" aria-label="' + esc(gear ? '移除材料 ' + (index + 1) + '：' + gear.name : '材料 ' + (index + 1) + '，请在下方选择装备') + '"' + (gear ? '' : ' disabled') + '>' +
-          '<span class="fusion-frame">' + (gear ? art(gear) + '<span class="fusion-remove" aria-hidden="true">×</span>' : '<span class="fusion-slot-number">' + (index + 1) + '</span>') + '</span>' +
+          '<span class="fusion-frame">' + (gear ? art(gear) + '<span class="fusion-remove" aria-hidden="true">×</span>' : '<span class="fusion-add" aria-hidden="true">+</span>') +
+          '<span class="fusion-slot-number" aria-hidden="true">' + (index + 1) + '</span></span>' +
           '<span class="fusion-material-name">' + (gear ? esc(gear.name) : '放入装备') + '</span></button>';
       }).join('');
       const cards = inventory.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE).map((gear) => {
         const chosen = selected.includes(gear.key);
         const unavailable = gear.used ? '已穿戴' : gear.quality >= 4 ? '最高品质' : first && gear.id !== first.id ? '需要相同装备' : selected.length === 3 && !chosen ? '材料已放满' : '';
-        const caption = chosen ? '材料 ' + (selected.indexOf(gear.key) + 1) : unavailable || qualities[gear.quality];
+        const caption = chosen ? '材料 ' + (selected.indexOf(gear.key) + 1) : unavailable || '可放入';
         const effects = State.extText(gear.ext).join('，');
         const detail = gear.name + '，' + qualities[gear.quality] + '，' + gear.attrName + ' +' + gear.abilityVal + (effects ? '，' + effects : '');
         return '<button type="button" class="fusion-gear q' + gear.quality + (chosen ? ' selected' : '') +
           '" data-fusion-gear="' + esc(gear.key) + '" aria-pressed="' + chosen + '" aria-label="' + esc(detail + '，' + (chosen ? '已放入，点击移除' : unavailable || '点击放入')) + '" title="' + esc(detail) + '"' + (unavailable && !chosen ? ' disabled' : '') + '>' +
-          '<span class="fusion-frame">' + art(gear) + '<span class="fusion-card-state">' + esc(caption) + '</span></span>' +
+          '<span class="fusion-frame">' + art(gear) +
+          '<span class="fusion-quality-tag q' + gear.quality + '">' + qualities[gear.quality] + '</span>' +
+          '<span class="fusion-card-state">' + esc(caption) + '</span></span>' +
           '<span class="fusion-gear-name">' + esc(gear.name) + '</span></button>';
       }).join('');
       const pips = [0, 1, 2].map((i) => '<i class="' + (i < selected.length ? 'on' : '') + '"></i>').join('');
       board.innerHTML = '<header class="fusion-heading"><h2>装备融合</h2>' +
-        '<ol class="fusion-steps"><li class="on">选择材料</li><li>融合</li><li>获得装备</li></ol>' +
+        '<ol class="fusion-steps"><li class="on"><b>1</b>选择材料</li><li' + (selected.length === 3 ? ' class="on"' : '') + '><b>2</b>融合</li><li><b>3</b>获得装备</li></ol>' +
         '<span class="fusion-wallet">' + classic.spr('resource_1', 18) + '<span>金松果 <b>' + State.state().goldPoint + '</b></span></span></header>' +
         '<div class="fusion-workbench"><div class="fusion-materials" aria-label="融合材料">' + materials + '</div>' +
-        '<span class="fusion-arrow" aria-hidden="true">➜</span><div class="fusion-preview ' + (first ? 'q' + (first.quality + 1) : 'missing') + '"><span class="fusion-frame"><span class="fusion-question">?</span><span class="fusion-glow" aria-hidden="true"></span></span><span class="fusion-preview-label">' + (first ? qualities[first.quality + 1] + '装备' : '更高品质') + '</span></div>' +
-        '<div class="fusion-operation"><span class="fusion-cost">消耗 <b>' + COST + '</b> 金松果</span><button type="button" class="uc-button gold" data-fusion-action="fuse"' + (reason || busy ? ' disabled' : '') + '>开始融合</button><span class="fusion-guarantee">品质提升一级 · 材料会被消耗</span></div></div>' +
+        '<span class="fusion-arrow" aria-hidden="true">➜</span><div class="fusion-preview ' + (first ? 'q' + (first.quality + 1) : 'missing') + '"><span class="fusion-frame"><span class="fusion-question">?</span><span class="fusion-glow" aria-hidden="true"></span></span><span class="fusion-preview-label">' + (first ? qualities[first.quality + 1] + '装备' : '更高品质') + '</span><span class="fusion-preview-hint">必得 1 件</span></div>' +
+        '<div class="fusion-operation"><span class="fusion-cost">消耗 <b>' + COST + '</b> 金松果</span><button type="button" class="uc-button gold' + (!reason && !busy ? ' fusion-ready' : '') + '" data-fusion-action="fuse"' + (reason || busy ? ' disabled' : '') + '>开始融合</button><span class="fusion-guarantee">品质提升一级 · 材料会被消耗</span></div></div>' +
         '<p class="fusion-rules"><b>规则</b>3 件相同装备 + ' + COST + ' 金松果，随机获得 1 件高一级品质的同名装备；3 件相同卓越（紫）装备融合为传说（橙）装备，可镶嵌宝石。</p>' +
         '<div class="fusion-inventory-panel"><div class="fusion-inventory-heading"><h3>选择装备<span class="fusion-pips" aria-label="已放入 ' + selected.length + ' / 3">' + pips + '</span><span class="fusion-count">已放入 ' + selected.length + '/3</span></h3><button type="button" class="uc-button tiny muted" data-fusion-action="clear"' + (selected.length ? '' : ' disabled') + '>清空材料</button><div class="fusion-pagination"><button type="button" class="uc-button tiny" data-fusion-action="previous" aria-label="上一页装备"' + (pageIndex === 0 ? ' disabled' : '') + '>‹</button><span>' + (pageIndex + 1) + ' / ' + pages + '</span><button type="button" class="uc-button tiny" data-fusion-action="next" aria-label="下一页装备"' + (pageIndex + 1 >= pages ? ' disabled' : '') + '>›</button></div></div>' +
         '<div class="fusion-inventory">' + (cards || '<div class="fusion-empty">还没有可以选择的装备。<br><span>收集装备碎片，可在道具中合成装备。</span></div>') + '</div></div>' +
-        '<p class="fusion-status' + (!reason ? ' ready' : '') + '" role="status" aria-live="polite">' + esc(reason || '材料已齐全，可以融合！') + '</p>';
+        '<p class="fusion-status' + (!reason ? ' ready' : '') + '" role="status" aria-live="polite"><i aria-hidden="true">' + (reason ? '!' : '✓') + '</i>' + esc(reason || '材料已齐全，可以融合！') + '</p>';
 
       board.querySelectorAll('[data-fusion-slot]').forEach((button) => {
         button.onclick = () => { selected.splice(Number(button.dataset.fusionSlot), 1); render({ action: 'clear' }); };

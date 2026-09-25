@@ -28,39 +28,44 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="manual-$(date +%Y%m%d-%H%M)"; fi
           mkdir -p dist
 
-          # 一级目录只留「启动器 + 文件夹」：游戏本体在 game/ 里，启动器在顶层
-          LAUNCHERS="启动游戏.cmd 启动游戏.command 停止游戏.command 一键同步.cmd 一键同步.command 重启同步服务.cmd README.md"
-          GAME="index.html css js images audio serve.js serve.py start-game.ps1"
+          # 一级目录只放「启动器 + 游戏本体 + 两个子文件夹」：
+          #   启动游戏.*          双击开玩
+          #   index.html css js images audio   游戏本体（静态服务的根，必须在最外层）
+          #   scripts/            停止游戏、一键同步、重启同步服务、serve.js/serve.py/start-game.ps1、sync/
+          #   tools/（不进便携包）开发与验证
+          LAUNCHERS="启动游戏.cmd 启动游戏.command README.md"
+          GAME="index.html css js images audio"
+          SCRIPTS="serve.js serve.py start-game.ps1 停止游戏.command 一键同步.command 一键同步.cmd 重启同步服务.cmd"
 
           build() {          # $1 = 包名后缀（mac / win）
             name="squirrel-web-$1"
             out="dist/$name"
             rm -rf "$out"
             mkdir -p "$out"
-            mkdir -p "$out/game"
+            mkdir -p "$out/scripts/sync"
             cp -R $LAUNCHERS "$out/"
-            (cd game && cp -R $GAME "$out/game/")
-            # 双机同步本体（零依赖）：入口脚本在一级目录，逻辑在 game/tools/sync/ 里
-            mkdir -p "$out/game/tools/sync"
-            cp -R game/tools/sync/sync.js game/tools/sync/sync-win.ps1 "$out/game/tools/sync/"
-            chmod +x "$out/启动游戏.command" "$out/停止游戏.command" "$out/一键同步.command" "$out/game/serve.py" 2>/dev/null || true
+            cp -R $GAME "$out/"
+            (cd scripts && cp -R $SCRIPTS "$out/scripts/")
+            # 双机同步本体（零依赖）：入口脚本在 scripts/ 里，逻辑在 scripts/sync/ 里
+            cp -R scripts/sync/sync.js scripts/sync/sync-win.ps1 "$out/scripts/sync/"
+            chmod +x "$out/启动游戏.command" "$out/scripts/停止游戏.command" "$out/scripts/一键同步.command" "$out/scripts/serve.py" 2>/dev/null || true
             # Windows：.cmd 只是 ASCII 外壳，真正的逻辑在同目录的 .ps1 里
             # （cmd.exe 读 .cmd 里的 UTF-8 中文会把中文注释当命令，导致服务器起不来），
             # 而且 .cmd 必须是 CRLF，否则 if(...) 块与 goto 在部分环境下会出错。
             if [ "$1" = "win" ]; then
-              for f in 启动游戏.cmd 一键同步.cmd 重启同步服务.cmd; do
+              for f in "启动游戏.cmd" "scripts/一键同步.cmd" "scripts/重启同步服务.cmd"; do
                 sed -i 's/\r$//' "$out/$f"
                 sed -i 's/$/\r/' "$out/$f"
               done
-              sed -i 's/\r$//' "$out/game/start-game.ps1"
+              sed -i 's/\r$//' "$out/scripts/start-game.ps1"
             fi
             rm -f "$out/start-game.ps1.bak"
             cat > "$out/启动说明.txt" <<'TXT'
           松鼠大战怀旧复刻版 · 便携版
           ================================
-          1) 解压整个文件夹（游戏本体在 game\ 子文件夹里，图片和音频都在里面，别单独拖出来）
+          1) 解压整个文件夹（index.html、css、js、images、audio 都在最外层，别只拖一个文件出来）
           2) 启动：
-             · Windows：双击 启动游戏.cmd（它要去调用 game\start-game.ps1，别删 game\ 里的东西）
+             · Windows：双击 启动游戏.cmd（它会调用 scripts\start-game.ps1，scripts\ 要一起留着）
              · macOS  ：双击 启动游戏.command
                首次请右键 → 打开；若提示没有权限，先在「终端」里执行 chmod +x 启动游戏.command
              启动器会起一个本地服务器，并用浏览器的「应用窗口」模式打开：没有标签栏、没有地址栏，
@@ -73,15 +78,15 @@ jobs:
              （serve.js / serve.py 就在这个文件夹里）；
              两个都没有时会直接打开 index.html —— 那种情况下浏览器不允许本地文件写盘，只能存浏览器里。
 
-          存档：game\save\progress.json，就在解压出来的文件夹里，拷走这个文件等于备份了进度。
+          存档：save\progress.json，就在解压出来的文件夹里，拷走这个文件等于备份了进度。
             没有服务器接口时自动退回浏览器 localStorage；游戏里「系统 → 存档位置」能看到当前是哪种模式。
             系统页里还能「从磁盘载入」一个导出的 .json 存档（macOS 原生窗口里也能弹出选择框）。
 
           两台电脑（Mac ↔ Windows，走 ZeroTier）互相送存档 / 同步改过的文件：
-            两边各双击一次 一键同步.command（macOS）或 一键同步.cmd（Windows），
+            两边各双击一次 scripts\ 里的 一键同步.command（macOS）或 一键同步.cmd（Windows），
             按菜单提示走一遍：显示口令 → 让两边 token 一样 → 启动后台同步服务 → 扫描对端，
             以后每次只要选 2~5 项就能一键互传。游戏里「系统 → 跨设备同步」也能按。
-            细节看 README 的「双机同步」一节；配置在 game\tools\sync\sync.config.json（每台机器一份）。
+            细节看 README 的「双机同步」一节；配置在 scripts\sync\sync.config.json（每台机器一份）。
 
           想要完全没有浏览器的独立程序窗口：仓库的 .github/workflows/tauri.yml 会构建
             Windows（.exe 安装包）与 macOS（.dmg）原生安装包，源码在 src-tauri/。

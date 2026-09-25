@@ -16,7 +16,7 @@ import sys
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-ROOT = os.path.dirname(os.path.abspath(__file__))   # serve.py 就在游戏根目录里
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # serve.py 在 scripts/ 里，游戏根是上一层
 SAVE_DIR = os.path.join(ROOT, "save")
 SAVE_FILE = os.path.join(SAVE_DIR, "progress.json")
 SAVE_MAX = 4 * 1024 * 1024

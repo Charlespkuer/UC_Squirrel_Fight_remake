@@ -16,8 +16,9 @@ setlocal
 cd /d "%~dp0"
 set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 if not exist "%PS%" set "PS=powershell"
-rem  game logic lives in game\ ; fall back to a flat layout
-set "SYNCPS=%~dp0game\tools\sync\sync-win.ps1"
+rem  this file lives in scripts\ ; sync logic is in scripts\sync\
+set "SYNCPS=%~dp0sync\sync-win.ps1"
+if not exist "%SYNCPS%" set "SYNCPS=%~dp0game\tools\sync\sync-win.ps1"
 if not exist "%SYNCPS%" set "SYNCPS=%~dp0tools\sync\sync-win.ps1"
 "%PS%" -NoProfile -ExecutionPolicy Bypass -File "%SYNCPS%" %*
 set "CODE=%errorlevel%"

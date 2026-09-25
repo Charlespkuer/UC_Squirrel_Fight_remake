@@ -16,7 +16,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.resolve(__dirname);   // serve.js 就在游戏根目录里
+const ROOT = path.resolve(__dirname, '..');   // serve.js 在 scripts/ 里，游戏根是上一层
 const ARGS = process.argv.slice(2);
 const PORT = Number(ARGS.find((a) => /^[0-9]+$/.test(a)) || 8080);   // 端口可以写在任意位置：node tools/serve.js --no-save 8080
 

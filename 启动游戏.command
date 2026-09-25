@@ -20,13 +20,13 @@
 #   --foreground  服务器留在前台（调试用；窗口不会自动关闭）
 cd "$(dirname "$0")" || exit 1
 HERE="$(pwd)"
-# 游戏本体在 <脚本目录>/game/ 里；平铺的便携包、或者脚本被挪进子目录也都认
+# 启动器和 index.html 在同一层；万一脚本被挪进子目录，也往上找一层
 ROOT=""
-for c in "$HERE/game" "$HERE" "$HERE/.."; do
+for c in "$HERE" "$HERE/.."; do
   if [ -f "$c/index.html" ]; then ROOT="$(cd "$c" && pwd)"; break; fi
 done
 if [ -z "$ROOT" ]; then
-  echo "找不到 index.html：它应该在「$(basename "$HERE")/game/」里。"
+  echo "找不到 index.html：启动器要和 index.html 放在同一个文件夹里。"
   echo "请把整个文件夹一起解压后再运行启动器。"
   exit 2
 fi
@@ -192,15 +192,18 @@ if port_busy "$PORT"; then
 fi
 
 # ---- 选一个服务器：Node 优先，其次 Python ----
+# 服务器脚本住在 scripts/ 子文件夹里（也认旧版直接放在根目录的情况）
+SERVE_JS="$ROOT/scripts/serve.js"; [ -f "$SERVE_JS" ] || SERVE_JS="$ROOT/serve.js"
+SERVE_PY="$ROOT/scripts/serve.py"; [ -f "$SERVE_PY" ] || SERVE_PY="$ROOT/serve.py"
 SERVER_EXE=""
 SERVER_LABEL=""
 SERVER_PRE=()
-if command -v node >/dev/null 2>&1 && [ -f "$ROOT/serve.js" ]; then
-  SERVER_EXE="$(command -v node)"; SERVER_LABEL="Node.js"; SERVER_PRE=("$ROOT/serve.js")
+if command -v node >/dev/null 2>&1 && [ -f "$SERVE_JS" ]; then
+  SERVER_EXE="$(command -v node)"; SERVER_LABEL="Node.js"; SERVER_PRE=("$SERVE_JS")
 else
   PY="$(command -v python3 || command -v python)"
-  if [ -n "$PY" ] && [ -f "$ROOT/serve.py" ]; then
-    SERVER_EXE="$PY"; SERVER_LABEL="Python"; SERVER_PRE=("$ROOT/serve.py")
+  if [ -n "$PY" ] && [ -f "$SERVE_PY" ]; then
+    SERVER_EXE="$PY"; SERVER_LABEL="Python"; SERVER_PRE=("$SERVE_PY")
   fi
 fi
 

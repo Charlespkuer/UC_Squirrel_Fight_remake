@@ -1,6 +1,5 @@
 # 参考素材（原 APK、参考图、网页存档）不进仓库
 references/
-game/references/
 
 save/
 
@@ -10,13 +9,13 @@ package-lock.json
 _site/
 dist/
 
-# Tauri 桌面版：web/ 由 game/tools/build-tauri-web.cjs 生成，
+# Tauri 桌面版：web/ 由 tools/build-tauri-web.cjs 生成，
 # icons/ 由 `npx tauri icon app-icon.png` 生成，target/ 是 Rust 编译产物
-game/src-tauri/web/
-game/src-tauri/icons/
-game/src-tauri/target/
-game/src-tauri/dist/
-game/src-tauri/node_modules/
+src-tauri/web/
+src-tauri/icons/
+src-tauri/target/
+src-tauri/dist/
+src-tauri/node_modules/
 
 # macOS / Windows 的目录噪音
 .DS_Store
@@ -24,12 +23,12 @@ Thumbs.db
 desktop.ini
 
 # 检查工具留下的临时截图
-game/tools/research/tmp-*.png
+tools/research/tmp-*.png
 # 开发截图是「跑出来」的产物（headless-shot / test-battle 生成），要留证据时手动 git add -f
-game/tools/verification/*.png
-game/tools/research/*.png
-game/tools/research/*.jpg
-game/tools/research/battle-check/
+tools/verification/*.png
+tools/research/*.png
+tools/research/*.jpg
+tools/research/battle-check/
 
 # 双机同步：名字 / 对端地址 / 口令每台机器都不一样，不进仓库（首次运行会自动生成）
-game/tools/sync/sync.config.json
+scripts/sync/sync.config.json

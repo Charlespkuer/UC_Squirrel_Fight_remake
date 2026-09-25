@@ -16,16 +16,16 @@
  *   pull    = 把对端的东西取到本机
  *
  * 命令：
- *   node tools/sync/sync.js init                     生成配置 + 显示本机 ZeroTier 地址
- *   node tools/sync/sync.js serve [--port N]         前台跑接收服务
- *   node tools/sync/sync.js start | stop | restart   后台接收服务（PID 在 save/.sync.pid）
- *   node tools/sync/sync.js status [peer]            本机和对端的状态
- *   node tools/sync/sync.js discover                 扫描 ZeroTier 网段找对端
- *   node tools/sync/sync.js push [peer] [选项]       本机 → 对端
- *   node tools/sync/sync.js pull [peer] [选项]       对端 → 本机
- *   node tools/sync/sync.js watch [peer] [选项]      盯着本地改动，自动推给对端
- *   node tools/sync/sync.js token [值]               查看 / 设置同步口令
- *   node tools/sync/sync.js autostart install|remove|status   开机自启
+ *   node scripts/sync/sync.js init                     生成配置 + 显示本机 ZeroTier 地址
+ *   node scripts/sync/sync.js serve [--port N]         前台跑接收服务
+ *   node scripts/sync/sync.js start | stop | restart   后台接收服务（PID 在 save/.sync.pid）
+ *   node scripts/sync/sync.js status [peer]            本机和对端的状态
+ *   node scripts/sync/sync.js discover                 扫描 ZeroTier 网段找对端
+ *   node scripts/sync/sync.js push [peer] [选项]       本机 → 对端
+ *   node scripts/sync/sync.js pull [peer] [选项]       对端 → 本机
+ *   node scripts/sync/sync.js watch [peer] [选项]      盯着本地改动，自动推给对端
+ *   node scripts/sync/sync.js token [值]               查看 / 设置同步口令
+ *   node scripts/sync/sync.js autostart install|remove|status   开机自启
  *
  * 选项：--save 只同步存档 / --files 只同步文件 / --all 两者（默认两者）
  *       --force 存档比对方旧也覆盖 / --dry 只列计划 / --verify 文件用 sha1 精确比对
@@ -51,7 +51,17 @@ const ROOT = path.resolve(TOOL_DIR, '..', '..');          // 游戏目录（有 
 const SAVE_DIR = path.join(ROOT, 'save');
 const SAVE_FILE = path.join(SAVE_DIR, 'progress.json');
 const BACKUP_DIR = path.join(SAVE_DIR, 'backup');
-const CONFIG_FILE = path.join(TOOL_DIR, 'sync.config.json');
+const CONFIG_CANDIDATES = [
+  path.join(TOOL_DIR, 'sync.config.json'),                    // 正常位置：scripts/sync/sync.config.json
+  path.join(ROOT, 'tools', 'sync', 'sync.config.json'),       // 旧位置：布局迁移期仍然认，口令不会丢
+];
+/** 配置文件用哪个：先看正常位置，没有就认旧的（还没有就用正常位置新建）。 */
+function configPath() {
+  for (const p of CONFIG_CANDIDATES) {
+    try { if (fs.statSync(p).isFile()) return p; } catch (e) {}
+  }
+  return CONFIG_CANDIDATES[0];
+}
 const PID_FILE = path.join(SAVE_DIR, '.sync.pid');
 const OUT_LOG = path.join(SAVE_DIR, 'sync.out.log');
 const ERR_LOG = path.join(SAVE_DIR, 'sync.err.log');
@@ -72,16 +82,16 @@ const FW_RULE_NAME = 'SSDZ Sync';        // Windows 入站放行规则的名字�
 const DEFAULT_IGNORE = [
   // node_modules 用「任意一层」的写法：src-tauri/node_modules 里是各平台自己的二进制
   // （cli.win32-x64-msvc.node 之类），互相同步只会有害
-  // 一级目录的启动器与仓库文档：它们不属于「游戏本体」。
-  // 两边布局不同时（Windows 还是平铺的旧布局，把启动器/README 也放在游戏目录里），
-  // 对端会把它们当成「本机没有的文件」想拉过来，一拉就在 game/ 里多出一份，所以直接忽略。
-  '启动游戏.cmd', '启动游戏.command', '停止游戏.command',
-  '一键同步.cmd', '一键同步.command', '重启同步服务.cmd',
-  'README.md', '.github/', '.gitignore',
+  // 布局迁移期兼容：这几个辅助脚本现在住在 scripts/ 里（两台机器都是）。
+  // 但 Windows 那台如果还是旧布局，根目录下仍留着同名副本、以及旧的 tools/sync/，
+  // 不挡住的话 pull 会把它们复制到本机根目录，多出一堆重复文件。
+  // 前缀 / 表示「只匹配游戏目录的根那一层」，所以不会误伤 scripts/ 里的正式副本。
+  '/停止游戏.command', '/一键同步.cmd', '/一键同步.command', '/重启同步服务.cmd',
+  '/serve.js', '/serve.py', '/start-game.ps1', '/tools/sync/',
   'save/', 'node_modules', 'package-lock.json', 'references/',
   'src-tauri/target/', 'src-tauri/dist/', 'src-tauri/web/', 'src-tauri/icons/',
   'dist/', 'build/', '_site/',
-  '.git/', '.cache/', 'tools/sync/sync.config.json', 'tools/sync/.cache.json',
+  '.git/', '.cache/', 'scripts/sync/sync.config.json', 'tools/sync/.cache.json',
   '.DS_Store', 'Thumbs.db', 'desktop.ini', '._*',
   '*.log', '*.tmp', '*.swp', '*~',
 ];
@@ -122,18 +132,18 @@ function defaultConfig() {
 /** 口令指纹：只暴露 6 位，用来判断两台机器的 token 是不是一样，又不至于把口令本身写进日志。 */
 function tokenId(t) { return crypto.createHash('sha1').update(String(t == null ? '' : t)).digest('hex').slice(0, 6); }
 /**
- * 读配置。**每次都会 stat 一下文件**：改了 tools/sync/sync.config.json（最常见的是改 token）
+ * 读配置。**每次都会 stat 一下文件**：改了 scripts/sync/sync.config.json（最常见的是改 token）
  * 之后不用重启同步服务，下一次请求就用新口令 —— 以前这里是无条件缓存，
  * 于是出现「两边 token 明明改成一样了，还是报口令不对」，其实是服务进程还拿着启动时的旧口令。
  */
 function loadConfig() {
   let st = null;
-  try { st = fs.statSync(CONFIG_FILE); } catch (e) { st = null; }
+  try { st = fs.statSync(configPath()); } catch (e) { st = null; }
   const mtime = st ? st.mtimeMs : 0;
   if (config && mtime === configMtime) return config;
   if (!st && config) return config;                    // 文件暂时读不到，先用手里的
   let raw = null;
-  try { raw = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch (e) { raw = null; }
+  try { raw = JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch (e) { raw = null; }
   if (!raw || typeof raw !== 'object') {
     if (config) return config;                         // 文件写坏了也别把内存里的好配置冲掉
     raw = defaultConfig();
@@ -148,13 +158,14 @@ function loadConfig() {
   return cfg;
 }
 function saveConfig() {
-  fs.mkdirSync(TOOL_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2) + '\n', 'utf8');
-  try { configMtime = fs.statSync(CONFIG_FILE).mtimeMs; } catch (e) { configMtime = -1; }
+  const file = configPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(config, null, 2) + '\n', 'utf8');
+  try { configMtime = fs.statSync(file).mtimeMs; } catch (e) { configMtime = -1; }
 }
 /** 没有配置文件就生成一份（含随机口令）。 */
 function ensureConfig() {
-  const existed = fs.existsSync(CONFIG_FILE);
+  const existed = fs.existsSync(configPath());
   loadConfig();
   if (!existed) saveConfig();
   return config;
@@ -163,12 +174,18 @@ function ensureConfig() {
 // ---------------------------------------------------------------- 忽略规则
 
 function ruleMatcher(rule) {
+  // 以 / 开头 = 只匹配游戏目录「根那一层」（用来精确忽略根目录下的某个文件/文件夹）
+  if (rule.startsWith('/')) {
+    const p = rule.replace(/^\/+/, '').replace(/\/+$/, '');
+    if (rule.endsWith('/')) return (rel) => rel === p || rel.startsWith(p + '/');
+    return (rel) => rel === p;
+  }
   if (rule.endsWith('/')) { const p = rule.slice(0, -1); return (rel) => rel === p || rel.startsWith(p + '/'); }
   if (rule.includes('*')) {
     const rx = new RegExp('^' + rule.split('*').map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
     return (rel, base) => rx.test(rel) || rx.test(base);
   }
-  // 带 / 的写死路径（例：tools/sync/sync.config.json）按相对路径匹配，也当目录前缀
+  // 带 / 的写死路径（例：scripts/sync/sync.config.json）按相对路径匹配，也当目录前缀
   if (rule.includes('/')) return (rel) => rel === rule || rel.startsWith(rule + '/');
   return (rel, base, segs) => base === rule || segs.includes(rule);
 }
@@ -415,8 +432,8 @@ async function resolvePeer(arg) {
     const found = await discoverPeers();
     const hit = found.find((p) => p.name === key);
     if (hit) return { name: hit.name, host: hit.host, port: cfg.port };
-    throw new Error('不认识这台机器「' + key + '」。先跑一次  node tools/sync/sync.js discover，' +
-      '或者在 ' + CONFIG_FILE + ' 的 peers 里写上它的 ZeroTier 地址（例："' + key + '": "10.32.170.20"）。');
+    throw new Error('不认识这台机器「' + key + '」。先跑一次  node scripts/sync/sync.js discover，' +
+      '或者在 ' + configPath() + ' 的 peers 里写上它的 ZeroTier 地址（例："' + key + '": "10.32.170.20"）。');
   }
   const names = Object.keys(peers);
   if (names.length === 1) return { name: names[0], host: peers[names[0]], port: cfg.port };
@@ -424,7 +441,7 @@ async function resolvePeer(arg) {
   if (found.length === 1) return { name: found[0].name, host: found[0].host, port: cfg.port };
   if (found.length > 1) throw new Error('发现多台机器（' + found.map((f) => f.name + '@' + f.host).join('、') + '），请指定一台：… push <名字>');
   if (names.length > 1) throw new Error('配置里有 ' + names.length + ' 台机器，请指定一台：… push <名字>');
-  throw new Error('还没找到对端。跑  node tools/sync/sync.js discover 扫一下 ZeroTier 网段，或直接  … push <对端IP>');
+  throw new Error('还没找到对端。跑  node scripts/sync/sync.js discover 扫一下 ZeroTier 网段，或直接  … push <对端IP>');
 }
 
 // ---------------------------------------------------------------- 自检与防火墙
@@ -457,7 +474,7 @@ function firewallChecks() {
     out.push({
       label: 'Windows 防火墙入站规则「' + FW_RULE_NAME + '」：' + (has ? '已存在' : '没有'),
       ok: has,
-      hint: has ? '' : '跑一次  node tools/sync/sync.js firewall （会弹 UAC），或者双击「一键同步」菜单里的「a) 自检 / 放行防火墙」。' +
+      hint: has ? '' : '跑一次  node scripts/sync/sync.js firewall （会弹 UAC），或者双击「一键同步」菜单里的「a) 自检 / 放行防火墙」。' +
         '没有这条规则时，另一台机器连不上你这台的 ' + loadConfig().port + ' 端口（现象是「连不上」，而且本机看起来一切正常）。',
     });
   }
@@ -531,13 +548,13 @@ async function doctor(opts) {
     // 服务进程可能是改口令之前启动的（老版本会把口令读进内存就不再变），这里直接对一下指纹
     if (svc.tokenId && svc.tokenId !== tokenId(cfg.token)) {
       say('   [x] 但本机服务用的还是**旧口令**（服务指纹 ' + svc.tokenId + '，配置文件指纹 ' + tokenId(cfg.token) + '）');
-      say('       → 跑一次 node tools/sync/sync.js restart 让服务读到新口令');
+      say('       → 跑一次 node scripts/sync/sync.js restart 让服务读到新口令');
     } else if (svc.tokenId) {
       say('       服务口令指纹：' + svc.tokenId + '（和配置文件一致）');
     }
   } else {
     say('   [x] 没在运行 —— 对端连不上本机');
-    say('       → 双击「一键同步」选「启动后台同步服务」，或跑 node tools/sync/sync.js start'
+    say('       → 双击「一键同步」选「启动后台同步服务」，或跑 node scripts/sync/sync.js start'
       + (process.platform === 'win32' ? '（Windows 上会注册计划任务「' + WIN_TASK_NAME + '」，关掉窗口也不会停）' : ''));
   }
 
@@ -567,8 +584,8 @@ async function doctor(opts) {
       if (st && st.status === 403) {
         const rid = (st.json && st.json.tokenId) || info.tokenId || '（对端版本较老，没返回指纹）';
         say('   [x] 口令不一致：本机指纹 ' + mine + '，对端指纹 ' + rid);
-        say('       → 把两边 tools/sync/sync.config.json 的 token 改成完全一样（菜单第 8 项看本机的）；');
-        say('       → 改完在对端跑一次 node tools/sync/sync.js restart（老版本服务不重启不生效）。');
+        say('       → 把两边 scripts/sync/sync.config.json 的 token 改成完全一样（菜单第 8 项看本机的）；');
+        say('       → 改完在对端跑一次 node scripts/sync/sync.js restart（老版本服务不重启不生效）。');
       } else if (st && st.status === 200) {
         say(green('   [√] 口令一致（指纹 ' + mine + '），可以直接 push / pull。'));
       }
@@ -576,7 +593,7 @@ async function doctor(opts) {
       say('   [x] 连上了但端口没响应 —— 最常见的原因是【对端 Windows 防火墙没放行 ' + peer.port + '】');
       say('       或【对端根本没启动同步服务】。这两件事都要在对端那台机器上做：');
       say('       · 对端双击「一键同步」→「启动后台同步服务」；');
-      say('       · 对端跑一次 node tools/sync/sync.js firewall（Windows 会弹 UAC 放行入站）。');
+      say('       · 对端跑一次 node scripts/sync/sync.js firewall（Windows 会弹 UAC 放行入站）。');
     } else if (!tcp.ok) {
       say('   [x] 连不上 ' + peer.host + ':' + peer.port + '（' + tcp.reason + '）');
       say('       · 先 ping 一下：' + (process.platform === 'win32' ? 'ping ' : 'ping -c 2 ') + peer.host);
@@ -918,8 +935,8 @@ function createServer() {
           ok: false,
           tokenId: tokenId(cfg.token),
           msg: '同步口令不对：本机（' + (cfg.name || localHostname()) + '）的口令指纹是 ' + tokenId(cfg.token) +
-            '，和对面不一致。把两边 tools/sync/sync.config.json 的 token 改成一样；' +
-            '改完不用重启（新版会自动读新配置），老版本要跑一次 node tools/sync/sync.js restart。',
+            '，和对面不一致。把两边 scripts/sync/sync.config.json 的 token 改成一样；' +
+            '改完不用重启（新版会自动读新配置），老版本要跑一次 node scripts/sync/sync.js restart。',
         });
       }
       try {
@@ -1237,7 +1254,7 @@ function autostartInstall() {
     // 启动文件夹里的 VBS 会被终端 Job 牵连；计划任务由 Task Scheduler 拉起，最稳
     winTaskCreate();
     log('已装好开机自启：计划任务「' + WIN_TASK_NAME + '」（登录即启动，关窗口/注销都不受影响）。');
-    log('想立刻启动：node tools/sync/sync.js start');
+    log('想立刻启动：node scripts/sync/sync.js start');
   } else {
     const desk = '[Desktop Entry]\nType=Application\nName=SSDZ Sync\nExec="' + process.execPath + '" "' + __filename + '" serve\nX-GNOME-Autostart-enabled=true\n';
     fs.writeFileSync(file, desk, 'utf8');
@@ -1301,11 +1318,11 @@ async function connectPeer(arg) {
   if (!info) {
     const tcp = await tcpProbe(peer.host, peer.port, 3000);
     throw syncError('PEER_DOWN', '连不上「' + peer.name + '」(' + peer.host + ':' + peer.port + ')：TCP ' + tcp.reason + '\n' +
-      '    · 对端要先把同步服务开着（双击「一键同步」选「启动后台同步服务」，或跑 node tools/sync/sync.js start）；\n' +
-      '    · 对端是 Windows 的话还要放行入站端口：node tools/sync/sync.js prepare（会弹 UAC）；\n' +
-      '    · 两边的 ZeroTier 要在线，地址用 node tools/sync/sync.js discover 复查；\n' +
+      '    · 对端要先把同步服务开着（双击「一键同步」选「启动后台同步服务」，或跑 node scripts/sync/sync.js start）；\n' +
+      '    · 对端是 Windows 的话还要放行入站端口：node scripts/sync/sync.js prepare（会弹 UAC）；\n' +
+      '    · 两边的 ZeroTier 要在线，地址用 node scripts/sync/sync.js discover 复查；\n' +
       '    · 两边的同步口令（token）要一样。\n' +
-      '    想知道卡在哪一步：node tools/sync/sync.js doctor ' + peer.name);
+      '    想知道卡在哪一步：node scripts/sync/sync.js doctor ' + peer.name);
   }
   // 服务在线了：先验口令，别等传到一半才报 403
   const mine = tokenId(loadConfig().token);
@@ -1316,14 +1333,14 @@ async function connectPeer(arg) {
     throw syncError('TOKEN', '口令不一致，连上了但被对端拒绝：\n' +
       '    本机「' + loadConfig().name + '」口令指纹 ' + mine + '；对端「' + (info.name || peer.name) + '」口令指纹 ' +
       (remoteId || '（对端版本较老，没返回指纹）') + '\n' +
-      '    → 把两边 tools/sync/sync.config.json 的 token 改成完全一样（菜单第 8 项能看本机的）。\n' +
-      '    → 改完**在对端跑一次** node tools/sync/sync.js restart（老版本的服务启动时就把口令读进内存了，' +
+      '    → 把两边 scripts/sync/sync.config.json 的 token 改成完全一样（菜单第 8 项能看本机的）。\n' +
+      '    → 改完**在对端跑一次** node scripts/sync/sync.js restart（老版本的服务启动时就把口令读进内存了，' +
       '改文件不重启不会生效，这正是「两边 token 明明一样却同步不过去」最常见的原因）。\n' +
       '    → 对端如果换成新版 sync.js，就不用重启了：每次请求都会重新读配置。');
   }
   if (theirs && theirs !== mine) {
     throw syncError('TOKEN', '口令不一致：本机指纹 ' + mine + '，对端指纹 ' + theirs + '。\n' +
-      '    改 tools/sync/sync.config.json 里的 token，两边改成一样即可（新版不用重启，老版本要 restart）。');
+      '    改 scripts/sync/sync.config.json 里的 token，两边改成一样即可（新版不用重启，老版本要 restart）。');
   }
   return { peer, info };
 }
@@ -1363,7 +1380,7 @@ async function doWatch(opts) {
   await new Promise(() => {});
 }
 
-const HELP = `松鼠大战 · 双机同步（node tools/sync/sync.js <命令> [选项]）
+const HELP = `松鼠大战 · 双机同步（node scripts/sync/sync.js <命令> [选项]）
 
   init                        生成配置，显示本机名字 / ZeroTier 地址 / 同步口令
   serve [--port N]            前台跑接收服务（另一台机器要连的那一头）
@@ -1384,10 +1401,10 @@ const HELP = `松鼠大战 · 双机同步（node tools/sync/sync.js <命令> [�
       --peer <名字或IP> / --interval <秒>
 
 例子：
-  node tools/sync/sync.js start                     # 本机开接收服务
-  node tools/sync/sync.js discover                  # 找到对端
-  node tools/sync/sync.js push win --save           # 把存档送到 win
-  node tools/sync/sync.js pull win --files          # 从 win 拉取改动过的文件
+  node scripts/sync/sync.js start                     # 本机开接收服务
+  node scripts/sync/sync.js discover                  # 找到对端
+  node scripts/sync/sync.js push win --save           # 把存档送到 win
+  node scripts/sync/sync.js pull win --files          # 从 win 拉取改动过的文件
 `;
 
 async function main() {
@@ -1396,14 +1413,14 @@ async function main() {
   const opts = parseArgs(argv);
 
   if (cmd === 'help' || cmd === '--help' || cmd === '-h') { printBanner(); log(''); log(HELP); return; }
-  if (cmd === 'init') { ensureConfig(); printBanner(); log(''); log('把两边的同步口令改成一样（token），或者直接改 ' + CONFIG_FILE + '。'); return; }
+  if (cmd === 'init') { ensureConfig(); printBanner(); log(''); log('把两边的同步口令改成一样（token），或者直接改 ' + configPath() + '。'); return; }
   if (cmd === 'token') {
     ensureConfig();
     const v = argv[1];
     if (!v) { log(loadConfig().token); return; }
     config.token = String(v).trim(); saveConfig();
     log('同步口令已改成：' + config.token + '（指纹 ' + tokenId(config.token) + '）');
-    log('记得把另一台机器的 tools/sync/sync.config.json 里的 token 也改成一样。');
+    log('记得把另一台机器的 scripts/sync/sync.config.json 里的 token 也改成一样。');
     // 本机服务如果是老版本（启动时把口令读进内存），不重启就不会认新口令 —— 顺手重启掉
     if (await pingLocal(loadConfig().port)) {
       daemonStop();
@@ -1411,7 +1428,7 @@ async function main() {
       await daemonStart(true);
       log('本机同步服务已用新口令重启。');
     }
-    log('对端那台如果还是老版本 sync.js，也要在对端跑一次 node tools/sync/sync.js restart。');
+    log('对端那台如果还是老版本 sync.js，也要在对端跑一次 node scripts/sync/sync.js restart。');
     return;
   }
   if (cmd === 'serve') {
@@ -1475,7 +1492,7 @@ async function main() {
     log('本机 ZeroTier：' + (zeroTierIps().join('、') || '未检测到'));
     log('正在扫描 ...（每台机器试 0.5 秒）');
     const found = await discoverPeers();
-    if (!found.length) { warn('没找到开着同步服务的对端。确认对面跑过 node tools/sync/sync.js start。'); return; }
+    if (!found.length) { warn('没找到开着同步服务的对端。确认对面跑过 node scripts/sync/sync.js start。'); return; }
     log(green('找到 ' + found.length + ' 台：'));
     const cfg = loadConfig();
     for (const f of found) {
@@ -1483,7 +1500,7 @@ async function main() {
       if (!Object.values(cfg.peers).includes(f.host)) cfg.peers[f.name || f.host] = f.host;
     }
     saveConfig();
-    log('已写进 ' + CONFIG_FILE + ' 的 peers。');
+    log('已写进 ' + configPath() + ' 的 peers。');
     return;
   }
   if (cmd === 'push') { await doSync('push', opts); return; }

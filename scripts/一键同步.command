@@ -2,18 +2,17 @@
 # 松鼠大战怀旧复刻版 —— macOS：双机同步（Mac ↔ Windows，走 ZeroTier）
 #
 # 双击本文件就有一个菜单：送存档、取存档、推文件、拉文件、扫对端、开关后台服务。
-# 真正的逻辑在 tools/sync/sync.js（零依赖，Node 就行；Windows 那份在 一键同步.cmd）。
+# 真正的逻辑在 scripts/sync/sync.js（零依赖，Node 就行；Windows 那份是 scripts/一键同步.cmd）。
 #
 # 命令行也行：
 #   bash 一键同步.command status
 #   bash 一键同步.command save-push  /  save-pull
 #   bash 一键同步.command files-push /  files-pull
 #   bash 一键同步.command discover / start / stop / watch / token / autostart
-cd "$(dirname "$0")" || exit 1
-HERE="$(pwd)"
-# 游戏本体在 <脚本目录>/game/ 里；平铺的便携包也认
+HERE="$(cd "$(dirname "$0")" && pwd)" || exit 1
+# 本文件在 scripts/ 里，游戏根（有 index.html 的那层）是上一层
 ROOT=""
-for c in "$HERE/game" "$HERE" "$HERE/.."; do
+for c in "$HERE/.." "$HERE" "$HERE/../.."; do
   if [ -f "$c/index.html" ]; then ROOT="$(cd "$c" && pwd)"; break; fi
 done
 if [ -z "$ROOT" ]; then
@@ -22,7 +21,8 @@ if [ -z "$ROOT" ]; then
   exit 1
 fi
 cd "$ROOT" || exit 1
-SYNC="tools/sync/sync.js"
+SYNC="$ROOT/scripts/sync/sync.js"
+[ -f "$SYNC" ] || SYNC="$ROOT/tools/sync/sync.js"
 
 if ! command -v node >/dev/null 2>&1; then
   echo "同步需要 Node.js（https://nodejs.org，装 LTS 版就行）。"

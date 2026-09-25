@@ -7,7 +7,7 @@ name: Build desktop app (Tauri)
 # 推 v* 标签时会顺带把安装包挂到 GitHub Release 上。
 #
 # 本地想自己打：装 Rust（rustup）+ Node，然后
-#   cd game/src-tauri && npm install && npm run build   # 产物在 game/src-tauri/target/release/bundle/
+#   cd src-tauri && npm install && npm run build   # 产物在 src-tauri/target/release/bundle/
 # 本机没有 Rust 也没关系：这个工作流在 GitHub 的 macOS/Windows 机器上跑。
 
 on:
@@ -42,21 +42,21 @@ jobs:
       - name: 缓存 Rust 依赖
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: game/src-tauri
+          workspaces: src-tauri
 
       # 只有**安装包**需要把前端嵌进去（轻壳版直接读游戏目录）。
       # 这里临时生成 src-tauri/web，并用 tauri.bundle.conf.json 把 frontendDist 指过去。
       - name: 暂存前端文件并校验快照
         run: |
-          node game/tools/build-tauri-web.cjs
-          node game/tools/build-tauri-web.cjs --check
+          node tools/build-tauri-web.cjs
+          node tools/build-tauri-web.cjs --check
 
       - name: 安装 Tauri CLI
-        working-directory: game/src-tauri
+        working-directory: src-tauri
         run: npm install
 
       - name: 从 app-icon.png 生成各平台图标
-        working-directory: game/src-tauri
+        working-directory: src-tauri
         run: npx tauri icon app-icon.png
 
       - name: 构建安装包
@@ -64,7 +64,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          projectPath: game/src-tauri
+          projectPath: src-tauri
           args: --config tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: '松鼠大战 怀旧复刻版 ${{ github.ref_name }}'

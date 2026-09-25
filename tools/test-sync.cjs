@@ -1,4 +1,4 @@
-/* 双机同步（tools/sync/sync.js）回归测试：在两个临时「游戏目录」之间真的传文件与存档。
+/* 双机同步（scripts/sync/sync.js）回归测试：在两个临时「游戏目录」之间真的传文件与存档。
  * 跑法：node tools/test-sync.cjs
  * 不需要 ZeroTier：两台「机器」都在 127.0.0.1 上，用不同的根目录模拟。 */
 const assert = require('node:assert/strict');
@@ -9,7 +9,7 @@ const http = require('node:http');
 const { spawn, execFileSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const SYNC_SRC = path.join(ROOT, 'tools', 'sync', 'sync.js');
+const SYNC_SRC = path.join(ROOT, 'scripts', 'sync', 'sync.js');
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ssdz-sync-test-'));
 const A = path.join(TMP, 'A');
 const B = path.join(TMP, 'B');
@@ -37,11 +37,11 @@ function makeRoot(dir, name, port) {
   write(path.join(dir, 'node_modules/pkg/index.js'), 'module.exports=1\n');
   write(path.join(dir, '.git/config'), '[core]\n');
   write(path.join(dir, '.DS_Store'), 'junk');
-  write(path.join(dir, 'tools/sync/sync.js'), fs.readFileSync(SYNC_SRC, 'utf8'));
-  write(path.join(dir, 'tools/sync/sync.config.json'), JSON.stringify({ name, port, token: TOKEN, peers: {}, ignore: [] }, null, 2));
+  write(path.join(dir, 'scripts/sync/sync.js'), fs.readFileSync(SYNC_SRC, 'utf8'));
+  write(path.join(dir, 'scripts/sync/sync.config.json'), JSON.stringify({ name, port, token: TOKEN, peers: {}, ignore: [] }, null, 2));
 }
 function run(dir, args, expectFail) {
-  const exe = path.join(dir, 'tools', 'sync', 'sync.js');
+  const exe = path.join(dir, 'scripts', 'sync', 'sync.js');
   try {
     return execFileSync(process.execPath, [exe].concat(args), { encoding: 'utf8', cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (e) {
@@ -81,7 +81,7 @@ async function ping(port) {
   console.log('双机同步回归（临时目录 ' + TMP + '，端口 ' + PORT + '）');
   try {
     // ---- 起 B 的接收服务 ----
-    server = spawn(process.execPath, [path.join(B, 'tools', 'sync', 'sync.js'), 'serve'], { cwd: B, stdio: 'ignore' });
+    server = spawn(process.execPath, [path.join(B, 'scripts', 'sync', 'sync.js'), 'serve'], { cwd: B, stdio: 'ignore' });
     let up = false;
     for (let i = 0; i < 40 && !up; i++) { await sleep(200); up = await ping(PORT); }
     ok('接收服务能起来', up);
@@ -96,10 +96,10 @@ async function ping(port) {
     const names = man.entries.map((e) => e.p).sort();
     ok('清单里没有 save/ node_modules/ .git/ .DS_Store', !names.some((p) => /^(save|node_modules|\.git)\//.test(p) || /(^|\/)\.DS_Store$/.test(p)));
     ok('清单里没有 *.log 与 sync.config.json', !names.some((p) => /\.log$/.test(p) || /sync\.config\.json$/.test(p)));
-    ok('清单里有正常的源文件', names.includes('index.html') && names.includes('js/a.js') && names.includes('tools/sync/sync.js'));
+    ok('清单里有正常的源文件', names.includes('index.html') && names.includes('js/a.js') && names.includes('scripts/sync/sync.js'));
 
     // ---- 路径穿越与忽略路径一律拒绝 ----
-    const bad = ['../A/js/a.js', '..%2f..%2fetc%2fpasswd', '/etc/passwd', 'save/progress.json', 'tools/sync/sync.config.json'];
+    const bad = ['../A/js/a.js', '..%2f..%2fetc%2fpasswd', '/etc/passwd', 'save/progress.json', 'scripts/sync/sync.config.json'];
     let allBad = true;
     for (const p of bad) {
       const r = await get('127.0.0.1', PORT, '/api/file?path=' + encodeURIComponent(p), { 'x-ssdz-token': TOKEN });

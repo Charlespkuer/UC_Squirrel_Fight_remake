@@ -28,7 +28,7 @@ jobs:
       # 只有在这里（Linux 也跑一遍）才能拦住「本机能跑、发布后 404」的问题
       - name: 资源路径体检
         shell: bash
-        run: node game/tools/check-asset-paths.cjs
+        run: node tools/check-asset-paths.cjs
 
       - name: 单元与集成测试
         shell: bash
@@ -37,7 +37,7 @@ jobs:
                    test-main-battle test-extras test-fusion test-stages test-stage-balance \
                    test-sync; do
             echo "──── $t ────"
-            node "game/tools/$t.cjs"
+            node "tools/$t.cjs"
           done
 
       # 动画回归需要可选依赖 @napi-rs/canvas（三个平台都有预编译包）；装不上就自动 SKIP
@@ -46,4 +46,4 @@ jobs:
         continue-on-error: true
         run: |
           npm install --no-save --package-lock=false @napi-rs/canvas
-          node game/tools/test-battle.js
+          node tools/test-battle.js

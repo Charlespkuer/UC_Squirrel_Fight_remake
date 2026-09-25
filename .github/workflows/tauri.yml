@@ -1,0 +1,82 @@
+name: Build desktop app (Tauri)
+
+# 打出真正的桌面应用（不是浏览器窗口）：
+#   macOS  → .app / .dmg
+#   Windows→ .exe 安装程序（NSIS）/ .msi
+# 手动触发（Actions → 这个工作流 → Run workflow）只产出构建工件；
+# 推 v* 标签时会顺带把安装包挂到 GitHub Release 上。
+#
+# 本地想自己打：装 Rust（rustup）+ Node，然后
+#   cd src-tauri && npm install && npm run build     # 产物在 src-tauri/target/release/bundle/
+# 本机没有 Rust 也没关系：这个工作流在 GitHub 的 macOS/Windows 机器上跑。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            bundles: app,dmg
+          - platform: windows-latest
+            bundles: nsis
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Rust 依赖
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # 只有**安装包**需要把前端嵌进去（轻壳版直接读游戏目录）。
+      # 这里临时生成 src-tauri/web，并用 tauri.bundle.conf.json 把 frontendDist 指过去。
+      - name: 暂存前端文件并校验快照
+        run: |
+          node references/tools/build-tauri-web.cjs
+          node references/tools/build-tauri-web.cjs --check
+
+      - name: 安装 Tauri CLI
+        working-directory: src-tauri
+        run: npm install
+
+      - name: 从 app-icon.png 生成各平台图标
+        working-directory: src-tauri
+        run: npx tauri icon app-icon.png
+
+      - name: 构建安装包
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: src-tauri
+          args: --config tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: '松鼠大战 怀旧复刻版 ${{ github.ref_name }}'
+          releaseBody: |
+            解压/安装后直接双击图标即可，游戏在一个独立窗口里运行（不是浏览器）。
+
+            · 存档位置：**游戏目录里的 `save/progress.json`**（用启动器/便携版打开时就是它）。
+              真正安装到 `Program Files` 这类只读位置时，才退回系统应用数据目录：
+              - Windows：`%APPDATA%\com.ssdz.classic\save\progress.json`
+              - macOS：`~/Library/Application Support/com.ssdz.classic/save/progress.json`
+              两处同时有存档时，会按里的 `savedAt` 把**新的那份**搬到当前使用的位置，不会让进度变旧。
+            · 也可以继续用游戏里「系统 → 导出/导入存档」的 JSON。
+            · macOS 未做代码签名，首次打开需要「右键 → 打开」。
+          releaseDraft: false
+          prerelease: false

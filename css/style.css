@@ -1,6 +1,6 @@
 /* 松鼠大战 · 怀旧版 UI 样式 —— 原版橙色系 */
 * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
-html, body { width: 100%; height: 100%; background: #1a120b; overflow: hidden; font-family: "Microsoft YaHei", sans-serif; }
+html, body { width: 100%; height: 100%; background: #1a120b; overflow: hidden; font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif; }
 #app { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
 #stage { display: block; background: #2d1f10; }
 #ui { position: absolute; pointer-events: none; }

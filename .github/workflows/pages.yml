@@ -1,0 +1,51 @@
+name: Deploy to GitHub Pages
+
+# 这是最省事的「Mac + Windows 都能玩」的发布方式：
+# 不需要打包、不需要安装任何东西，浏览器打开同一个网址即可。
+# 仓库 Settings → Pages → Source 选 "GitHub Actions" 后，推 main 就会自动部署。
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 只发布游戏运行需要的东西：index.html + css/js/images/audio。
+      # references/（含原 APK）与 references/tools/（开发工具、截图证据）不进站点，省流量也避免版权问题。
+      - name: 组装站点目录
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp -R css js images audio _site/
+          # 游戏本体没有任何构建步骤，原样发布即可
+          du -sh _site
+          find _site -maxdepth 1 -mindepth 1 | sort
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

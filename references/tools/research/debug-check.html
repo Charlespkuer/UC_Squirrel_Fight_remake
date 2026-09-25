@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../../">
+<meta charset="UTF-8">
+<title>调试开关检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* 开发检查：验证每个调试开关是否真的改变游戏行为。
+ * ?seed=1 先写入一份已保存的开关再自动刷新，用来验证重启后能恢复。
+ * ?panel=0 不打开面板，方便只看数据。结果在 window.__report.check。 */
+(function () {
+  const q = new URLSearchParams(location.search);
+  const num = (k, d) => (q.has(k) ? Number(q.get(k)) : d);
+  if (q.get('seed') === '1' && !q.get('seeded')) {
+    localStorage.setItem('ssdz_debug', JSON.stringify({
+      infiniteEnergy: true, godMode: false, noUpgradeFail: false,
+      freeUpgrade: false, freeShop: false, noStageCost: false,
+    }));
+    q.set('seeded', '1');
+    location.replace(location.pathname + '?' + q.toString());
+    return;
+  }
+
+  window.addEventListener('load', async () => {
+    document.title = 'LOADING';
+    const seeded = q.get('seeded') === '1';
+    if (!seeded) localStorage.removeItem('ssdz_debug');
+    await new Promise((r) => setTimeout(r, 250));
+    State.newGame('调试测试');
+    const S = State.state();
+    S.level = 34; S.energy = 5; S.maxEnergy = 180; S.goldPoint = 10;
+    S.props[23] = 0;
+    S.weapons = ['1:1', '6:1']; S.skills = ['1:1'];
+    GData.nextExp = () => 1000;
+    Main.showHome();
+    if (q.has('fps')) Main.setHomeFps(num('fps', 22));
+    await new Promise((r) => setTimeout(r, 900));
+
+    const check = {};
+    // —— 刷新恢复：?seed=1 时 localStorage 里已预置「无限体力」 ——
+    if (seeded) {
+      check.restoredInfinite = Debug.enabled('infiniteEnergy');
+      const keep = State.state().energy;
+      State.state().energy = 3;
+      check.restoredConsumeAllows = State.consumeEnergy(10);
+      check.restoredEnergyKept = State.state().energy >= keep;
+      State.state().energy = keep;
+      Debug.set('infiniteEnergy', false);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    // —— 无限体力 ——
+    check.consumeBefore = State.consumeEnergy(10);
+    check.energyBefore = State.state().energy;
+    Debug.set('infiniteEnergy', true);
+    check.consumeAfterOn = State.consumeEnergy(10);
+    check.energyAfterOn = State.state().energy;
+    check.energyRestored = State.state().energy === State.state().maxEnergy;
+    // —— 道具免费 ——
+    check.buyBefore = State.buyProp(1, 1);
+    const goldAfterPaid = State.state().goldPoint;
+    Debug.set('freeShop', true);
+    const propsBefore = State.state().props[1] || 0;
+    check.buyAfterOn = State.buyProp(1, 1);
+    check.goldUnchanged = State.state().goldPoint === goldAfterPaid;
+    check.propGained = (State.state().props[1] || 0) === propsBefore + 1;
+
+    // —— 关卡不耗挑战书 ——
+    check.stageBefore = State.beginStageBattle(1);
+    Debug.set('noStageCost', true);
+    check.stageAfterOn = State.beginStageBattle(2);
+    check.bookStillZero = !(State.state().props[23] > 0);
+
+    // —— 升级无需消耗 + 必定成功 ——
+    const lv0 = State.state().weapons[0];
+    check.upgradeBefore = State.doUpgrade('weapon', 1);
+    Debug.set('freeUpgrade', true);
+    Debug.set('noUpgradeFail', true);
+    const goldBeforeUp = State.state().goldPoint;
+    let fails = 0;
+    for (let i = 0; i < 8; i++) { const r = State.doUpgrade('weapon', 1); if (!r.ok) fails++; }
+    check.upgradeFailsWithOn = fails;
+    check.goldUnchangedOn = State.state().goldPoint === goldBeforeUp;
+    check.weaponLeveled = State.state().weapons[0] !== lv0;
+
+    // —— 无敌模式：反复模拟，只要有任意一场里玩家没被击倒即视为生效 ——
+    Debug.set('godMode', true);
+    const me = { name: '调试测试', level: 1, power: 1, agility: 1, speed: 1, hp: 1, weapons: [], skills: [] };
+    let godRounds = 0, godSaved = false, godNeverDied = false, mortalDied = false;
+    for (let i = 0; i < 5; i++) {
+      const s = Sim.simulate(me, State.genAI(60));
+      godRounds += s.rounds.length;
+      if (s.rounds.some((r) => r.godSave)) godSaved = true;
+      if (s.rounds.every((r) => r.hpAfter[0] >= 1)) godNeverDied = true;
+    }
+    check.godSaves = godSaved;
+    check.godNeverDies = godNeverDied;
+    check.godRounds = godRounds;
+    Debug.set('godMode', false);
+    for (let i = 0; i < 5; i++) {
+      const s2 = Sim.simulate(me, State.genAI(60));
+      if (s2.rounds.some((r) => r.hpAfter[0] === 0)) mortalDied = true;
+    }
+    check.mortalLoses = mortalDied;
+
+    // —— 新增：一键升级 / 一键满级 ——
+    const lvBefore = State.state().level;
+    const upBtn = [...document.querySelectorAll('.debug-actions [data-act]')].find((b) => b.textContent === '一键升级（升1级）');
+    const maxBtn = [...document.querySelectorAll('.debug-actions [data-act]')].find((b) => b.textContent === '一键满级');
+    check.oneLevelButton = !!upBtn;
+    check.maxLevelButton = !!maxBtn;
+    if (upBtn) {
+      upBtn.click();
+      check.levelAfterOneClick = State.state().level;
+      check.levelRaisedByOne = State.state().level === lvBefore + 1;
+      check.msgAfterOneClick = document.querySelector('.debug-msg').textContent;
+    }
+    if (maxBtn) {
+      maxBtn.click();
+      check.levelAfterMax = State.state().level;
+      check.reached60 = State.state().level >= 60;
+    }
+
+    // —— 新增：彻底重置账号（清掉随机获得的武器与技能）——
+    // 先造出一份「升过级、有额外武器技能」的存档
+    State.state().weapons = ['1:5', '6:8', '15:11'];
+    State.state().skills = ['1:3', '5:2'];
+    State.state().level = 42;
+    State.state().props[13] = 3;
+    State.state().stages[1] = { npcIndex: 3, passed: true };
+    State.save();
+    check.beforeFullReset = {
+      lv: State.state().level, w: State.state().weapons.slice(), s: State.state().skills.slice(),
+      stages: Object.keys(State.state().stages).length, props: State.state().props[13],
+    };
+    check.resetAccountApi = typeof Debug.resetAccount === 'function';
+    const rr = Debug.resetAccount('重置测试');
+    check.resetAccountResult = { name: rr.name, w: rr.weapons, s: rr.skills };
+    check.resetWeaponsInitial = JSON.stringify(State.state().weapons) === JSON.stringify(GData.NEW_PLAYER.weapons);
+    check.resetSkillsEmpty = JSON.stringify(State.state().skills) === JSON.stringify(GData.NEW_PLAYER.skills);
+    check.resetLevelOne = State.state().level === 1;
+    check.resetStagesEmpty = Object.keys(State.state().stages || {}).length === 0;
+    check.resetSavedReload = (() => {
+      State.load();
+      return JSON.stringify(State.state().weapons) === JSON.stringify(['1:1']) && State.state().skills.length === 0;
+    })();
+
+    // —— 开局武器可选：指定某把武器 / 随机一把 ——
+    check.weaponOptionsCount = document.querySelectorAll('.debug-panel [data-weapon-select] option').length;
+    const pick = Debug.resetAccount('武器测试', 2);
+    check.pickedWeapon = pick;
+    check.pickedWeaponApplied = JSON.stringify(State.state().weapons) === JSON.stringify(['2:1'])
+      && State.state().level === 1 && State.state().skills.length === 0;
+    // 随机的开局武器必须来自原版武器表，并且确实是 1 级
+    const list = State.weaponList();
+    const ids = list.map((w) => w.id);
+    let randomOk = true;
+    const seen = [];
+    for (let i = 0; i < 12; i++) {
+      const r2 = Debug.resetAccount('随机测试', 'random');
+      const id = Number(String(State.state().weapons[0]).split(':')[0]);
+      const lv = Number(String(State.state().weapons[0]).split(':')[1]);
+      seen.push(id);
+      if (ids.indexOf(id) < 0 || lv !== 1 || State.state().level !== 1) { randomOk = false; break; }
+    }
+    check.weaponListSize = list.length;
+    check.randomWeaponFromTable = randomOk;
+    check.randomWeaponSamples = seen.slice(0, 6);
+    check.randomWeaponVaries = new Set(seen).size > 1;
+
+    // —— 面板交互：热键开关、开关持久化 ——
+    Debug.close();
+    const key = (k) => window.dispatchEvent(new KeyboardEvent('keydown', { key: k, ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    key('D');
+    check.hotkeyOpens = document.querySelector('.debug-panel').classList.contains('open');
+    key('D');
+    check.hotkeyCloses = !document.querySelector('.debug-panel').classList.contains('open');
+    check.noSliders = document.querySelectorAll('.debug-panel input[type="range"]').length === 0;
+    const box13 = document.querySelector('.debug-panel input[data-key="infiniteEnergy"]');
+    box13.checked = true; box13.dispatchEvent(new Event('change', { bubbles: true }));
+    check.savedRaw = localStorage.getItem('ssdz_debug');
+    State.state().energy = 3;
+    check.persistBlocksConsume = State.consumeEnergy(10) === true && State.state().energy > 3;
+
+    Debug.reset();
+    if (q.get('panel') !== '0') Debug.open();
+    await new Promise((r) => setTimeout(r, 400));
+    window.__report = { check, debugState: Debug.state(), errs: window.__errs };
+    document.title = 'READY';
+  });
+})();
+</script>
+</body>
+</html>

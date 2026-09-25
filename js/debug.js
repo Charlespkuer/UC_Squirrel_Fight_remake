@@ -67,14 +67,13 @@
   const MAX_LEVEL = 70;
   // ---------- 一次性工具 ----------
   const ACTIONS = [
-    { label: '一键满级', note: '从当前等级一路走「真实升级流程」到 ' + MAX_LEVEL + ' 级：属性成长、升级礼包（道具）与随机领悟的武器/技能都会照常发放；每级留的 1 点自选属性会攒下来，结束后弹窗一次分配（占比过低的由系统代选）',
+    { label: '一键满级', note: '从当前等级一路走「真实升级流程」到 ' + MAX_LEVEL + ' 级：属性成长、升级礼包（道具）与武器/技能「三选一」都会照常发放；攒下的三选一和自选属性点会在结束后弹窗处理（弹窗里有「全部随机」「平均分配」）',
       run() {
         const S = State.state();
         const from = S.level;
         if (from >= MAX_LEVEL) return '已经是 ' + MAX_LEVEL + ' 级或更高（调试上限 ' + MAX_LEVEL + '）';
         const gain = { power: 0, agility: 0, speed: 0, hp: 0 };
-        const learned = [];
-        let levels = 0, gifts = 0, books = 0;
+        let levels = 0, gifts = 0, books = 0, picks = 0;
         // 每次只喂「当前等级升下一级」所需的经验，走完整的 gainExp 流程
         for (let guard = 0; S.level < MAX_LEVEL && guard < 200; guard++) {
           const ups = State.gainExp(GData.nextExp(S.level));
@@ -84,19 +83,19 @@
             gain.power += u.power; gain.agility += u.agility; gain.speed += u.speed; gain.hp += u.hp;
             gifts += (u.gifts || []).length;
             if (u.attributeBook) books++;
-            if (u.reward) learned.push(u.reward + (u.rewardKind === 'skill' ? '（技能）' : '（武器）'));
+            if (u.wsChoice) picks++;
           }
         }
         if (window.UI && UI.refreshHome) UI.refreshHome();
         renderOwned();
-        // 一路上攒下的自选属性点：直接弹出分配弹窗（一键满级会有几十点，弹窗里有「平均分配」）
-        if (window.UI && UI.classic && UI.classic.promptFreePoints) UI.classic.promptFreePoints();
+        // 一路上攒下的三选一与自选属性点：直接弹出处理（一键满级会攒几十组/几十点）
+        if (window.UI && UI.classic && UI.classic.promptLevelUpChoices) UI.classic.promptLevelUpChoices();
         return '等级 ' + from + ' → ' + S.level + '（' + levels + ' 级）：力量+' + gain.power + ' 敏捷+' + gain.agility +
           ' 速度+' + gain.speed + ' 生命+' + gain.hp + '，升级礼包 ' + gifts + ' 件' + (books ? '、属性书 ' + books + ' 本' : '') +
-          (learned.length ? '，领悟 ' + learned.join('、') : '，没有领悟新武技') +
+          (picks ? '，武器/技能三选一 ' + picks + ' 组' : '，没有新的武技可选') +
           (S.freePoints ? '，本次分配弹窗里还有 ' + S.freePoints + ' 点没点完' : '');
       } },
-    { label: '一键升级（升1级）', note: '按正常升级结算一次经验，属性成长、升级礼包与随机领悟照常；到 ' + MAX_LEVEL + ' 级就停下',
+    { label: '一键升级（升1级）', note: '按正常升级结算一次经验，属性成长、升级礼包与武器/技能三选一照常；到 ' + MAX_LEVEL + ' 级就停下',
       run() {
         const S = State.state();
         if (S.level >= MAX_LEVEL) return '已经是 ' + MAX_LEVEL + ' 级或更高（调试上限 ' + MAX_LEVEL + '）';
@@ -105,11 +104,12 @@
         const sum = (k) => ups.reduce((a, u) => a + u[k], 0);
         const last = ups[ups.length - 1];
         const gifts = ups.reduce((a, u) => a + (u.gifts || []).length, 0);
+        const picks = ups.reduce((a, u) => a + (u.wsChoice ? 1 : 0), 0);
         renderOwned();
-        if (window.UI && UI.classic && UI.classic.promptFreePoints) UI.classic.promptFreePoints();
+        if (window.UI && UI.classic && UI.classic.promptLevelUpChoices) UI.classic.promptLevelUpChoices();
         return '升到 ' + last.level + ' 级（力量+' + sum('power') + ' 敏捷+' + sum('agility') +
           ' 速度+' + sum('speed') + ' 生命+' + sum('hp') + '）' + (gifts ? '，礼包 ' + gifts + ' 件' : '') +
-          (last.reward ? '，领悟 ' + last.reward : '') +
+          (picks ? '，武器/技能三选一 ' + picks + ' 组' : '') +
           (last.autoPoint ? '，' + last.autoPointName + '占比过低已自动补 1 点' : '') +
           (S.freePoints ? '，本次分配弹窗里还有 ' + S.freePoints + ' 点没点完' : '');
       } },

@@ -8,13 +8,13 @@
 /* ---------- 顶栏 ---------- */
 .fusion-heading{display:flex;align-items:center;gap:16px;flex:0 0 auto;height:42px}
 .fusion-heading h2{display:flex;align-items:center;height:38px;padding:0 22px;margin:0;border-radius:19px;
-  font-family:"Microsoft YaHei",sans-serif;font-size:28px;font-weight:normal;color:#fff8e4;
+  font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;font-size:28px;font-weight:normal;color:#fff8e4;
   background:linear-gradient(#8a6134,#6f4522);box-shadow:inset 0 0 0 3px #fffdf3,0 2px 0 #d9c496;white-space:nowrap}
 .fusion-steps{display:flex;align-items:center;gap:9px;margin:0;padding:0;list-style:none;font-size:19px;color:#a08a63;white-space:nowrap}
 .fusion-steps li{display:flex;align-items:center;gap:6px;padding:3px 14px 3px 4px;border-radius:19px;background:#f2e6c8;
   box-shadow:inset 0 0 0 2px #e6d6ac}
 .fusion-steps li b{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;
-  background:#dccaa2;color:#fffaf0;font:normal 14px/1 "Microsoft YaHei",sans-serif}
+  background:#dccaa2;color:#fffaf0;font:normal 14px/1 "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif}
 .fusion-steps li.on{background:linear-gradient(#ffeeb0,#ffdc79);color:#7a4a11;box-shadow:inset 0 0 0 2px #e2b64a}
 .fusion-steps li.on b{background:linear-gradient(#ffd867,#e79f16);color:#fffdf3}
 .fusion-steps li+li{position:relative}
@@ -131,7 +131,7 @@
   padding:4px 22px;border-radius:20px;background:#f6ecd2;font-size:19px;line-height:24px;color:#9c7c4b;
   box-shadow:inset 0 0 0 3px #fffdf3}
 .fusion-status i{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;
-  background:#d8b877;color:#fffdf3;font:normal 15px/1 "Microsoft YaHei",sans-serif}
+  background:#d8b877;color:#fffdf3;font:normal 15px/1 "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif}
 .fusion-status.ready{background:#eaf6d2;color:#5c8a2c}
 .fusion-status.ready i{background:#7db23f}
 

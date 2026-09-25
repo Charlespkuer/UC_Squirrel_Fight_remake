@@ -218,9 +218,9 @@
   const prizes = [
     { id: 22, count: 10, label: '\u6b66\u5668\u5377\u8f74 \u00d710' }, { id: 21, count: 10, label: '\u6280\u80fd\u5377\u8f74 \u00d710' },
     { id: 26, count: 3, label: '\u84dd\u8272\u788e\u7247 \u00d73' }, { id: 15, exp: 50, label: '\u7ecf\u9a8c +50' },
-    { id: 15, exp: 100, label: '\u7ecf\u9a8c +100' }, { id: 8, gold: 30, label: '\u91d1\u677e\u679c +30' },
+    { id: 15, exp: 100, label: '\u7ecf\u9a8c +100' }, { id: 8, gold: 40, label: '\u91d1\u677e\u679c +40' },
     { id: 23, count: 2, label: '\u6311\u6218\u4e66 \u00d72' }, { id: 2, count: 2, label: '\u5927\u4f53\u529b\u836f\u5242 \u00d72' },
-    { id: 7, pills: 2, label: '\u968f\u673a\u666e\u901a\u836f\u4e38 \u00d72' }, { id: 36, count: 2, label: '\u82f1\u96c4\u5e16 \u00d72' },
+    { id: 7, pills: 2, label: '\u968f\u673a\u666e\u901a\u836f\u4e38 \u00d72' }, { id: 36, count: 3, label: '\u82f1\u96c4\u5e16 \u00d73' },
   ];
   let spinning = false, lotteryVersion = 0;
   function refreshLotteryDay() {

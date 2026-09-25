@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../../">
+<meta charset="UTF-8">
+<title>弹窗视觉检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle-drops.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+window.addEventListener('load', function () {
+  localStorage.removeItem('ssdz_debug');
+  State.newGame('视觉检查');
+  const S = State.state();
+  S.level = 20; S.energy = S.maxEnergy;
+  S.goldPoint = 1234;
+  S.props[1] = 20; S.props[2] = 12; S.props[3] = 5; S.props[50] = 3;
+  S.props[24] = 20; S.props[37] = 2; S.props[45] = 12; S.props[51] = 7;
+  State.save();
+  Main.showHome();
+  window.__report = { ready: true, errs: window.__errs };
+  const flag = document.createElement('span');
+  flag.id = 'viz-ready';
+  flag.style.display = 'none';
+  document.body.appendChild(flag);
+
+  /* 打开背包 -> 选中某道具 -> 打开详情弹窗（全部同步渲染） */
+  window.__show = function (id, shop) {
+    document.querySelectorAll('.classic-modal-overlay').forEach(function (e) { e.remove(); });
+    UI.runAction('bag');
+    for (var i = 0; i < 6; i++) {
+      var cell = document.querySelector('[data-prop="' + id + '"]');
+      if (cell) { cell.click(); break; }
+      var nx = document.querySelector('[data-action="next"]');
+      if (!nx) return 'no-cell';
+      nx.click();
+    }
+    var act = document.querySelector('[data-action="prop-action"]');
+    if (!act) return 'no-action';
+    act.click();
+    return id;
+  };
+  /* 只打开背包页（检查翻页箭头/计数器） */
+  window.__bag = function () { UI.runAction('bag'); return 'bag'; };
+  /* 打开指定道具的卖出弹窗（天使果实等可卖道具） */
+  window.__sell = function (id) {
+    document.querySelectorAll('.classic-modal-overlay').forEach(function (e) { e.remove(); });
+    UI.runAction('bag');
+    let cell = null;
+    for (let i = 0; i < 8; i++) {
+      cell = document.querySelector('[data-prop="' + id + '"]');
+      if (cell) break;
+      const nx = document.querySelector('[data-action="next"]');
+      if (!nx) return 'no-next';
+      nx.click();
+    }
+    if (!cell) return 'no-cell';
+    cell.click();
+    const act = document.querySelector('[data-action="prop-action"]');
+    if (!act) return 'no-action';
+    act.click();
+    const ms = document.querySelectorAll('.classic-modal-overlay');
+    const m = ms[ms.length - 1];
+    const sale = [...m.querySelectorAll('.modal-buttons button')].find((b) => b.textContent.trim() === '卖出');
+    if (!sale) return 'no-sell';
+    sale.click();
+    return 'sell-open';
+  };
+  /* 打开装备融合页（先塞几件可融合的装备） */
+  window.__fusion = function (count) {
+    const s = State.state();
+    s.level = Math.max(s.level, 45);
+    s.goldPoint = Math.max(s.goldPoint, 5000);
+    State.save();
+    const have = State.myGears();
+    const want = count || 8;
+    for (let i = have.length; i < want; i++) State.addGear(101 + (i % 4), State.randomExt(1));
+    State.save();
+    window.ClassicFusion.open();
+    return State.myGears().length;
+  };
+  /* 把卖出/使用滑动条拉到指定值 */
+  window.__slide = function (which, value) {
+    const r = document.querySelector('[data-slider="' + (which || 'use-count') + '"] input');
+    if (!r) return 'no-slider';
+    r.value = value == null ? r.max : String(value);
+    r.dispatchEvent(new Event('input', { bubbles: true }));
+    return document.querySelector('[data-slider="' + (which || 'use-count') + '"] .slider-value').textContent;
+  };
+  /* 把药剂弹窗的滑动条拉满 */
+  window.__full = function () {
+    const r = document.querySelector('[data-slider="use-count"] input');
+    if (!r) return 'no-slider';
+    r.value = r.max; r.dispatchEvent(new Event('input', { bubbles: true }));
+    return document.querySelector('[data-slider="use-count"] .slider-value').textContent;
+  };
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../../">
+<meta charset="UTF-8">
+<title>天使种子与关卡碎片检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* 开发检查：
+ * 1) 天使种子（45）详情要标注「武器/技能 x/y」并说明是否已满；已满时**仍可**合成（果实先囤着）。
+ *    恶魔种子（46）用于遗忘，不受上限影响，按钮始终可用。
+ * 2) 关卡战果弹窗要显示碎片掉落。
+ * 全部走真实 UI 点击路径，结果在 window.__report.check。 */
+(function () {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.addEventListener('load', async () => {
+    document.title = 'LOADING';
+    localStorage.removeItem('ssdz_debug');
+    await wait(250);
+    State.newGame('种子检查');
+    const S = State.state();
+    S.level = 20; S.goldPoint = 500; S.energy = S.maxEnergy;
+
+    Main.showHome();
+    await wait(500);
+
+    const check = {};
+    check.limit = State.wsLimit();
+
+    // ---- 未满：只给 2 个种子，背包第 1 页只有它们
+    S.props = { 45: 20, 46: 20 };
+    S.weapons = ['1:1']; S.skills = [];
+    State.save();
+
+    const readModal = () => {
+      const overlays = document.querySelectorAll('.classic-modal-overlay');
+      const m = overlays[overlays.length - 1];
+      if (!m) return { error: 'no-modal' };
+      const title = m.querySelector('.modal-title');
+      const b = m.querySelector('[data-action="0"]');
+      return {
+        title: title ? title.textContent.trim() : null,
+        text: m.textContent.replace(/\s+/g, ' ').trim(),
+        button: b ? b.textContent.trim() : null,
+        disabled: b ? !!b.disabled : null,
+      };
+    };
+
+    const openAnd = async (id) => {
+      document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+      UI.runAction('bag');
+      await wait(200);
+      const cell = document.querySelector('[data-prop="' + id + '"]');
+      if (!cell) return { error: 'cell-missing:' + id };
+      cell.click();
+      await wait(200);
+      const action = document.querySelector('[data-action="prop-action"]');
+      if (!action) return { error: 'action-missing:' + id };
+      action.click();
+      await wait(250);
+      return readModal();
+    };
+
+    check.notFull = await openAnd(45);
+    check.notFull.hasRatio = /武器\/技能：\d+\/\d+/.test(check.notFull.text || '');
+    check.notFull.saysNotFull = /未满/.test(check.notFull.text || '');
+    check.notFull.buttonEnabled = check.notFull.disabled === false;
+
+    // ---- 已满：武器 + 技能补到上限
+    const S2 = State.state();
+    S2.weapons = []; S2.skills = [];
+    let id = 2;
+    for (let i = 0; i < State.wsLimit(); i++) {
+      if (i % 2 === 0) S2.weapons.push(id + ':1'); else S2.skills.push(id + ':1');
+      if (i % 2 === 1) id++;
+    }
+    State.save();
+    check.owned = S2.weapons.length + S2.skills.length;
+    check.full = await openAnd(45);
+    check.full.hasRatio = /武器\/技能：\d+\/\d+/.test(check.full.text || '');
+    check.full.saysFull = /已满/.test(check.full.text || '');
+    check.full.buttonLabel = check.full.button;
+    check.full.buttonDisabled = check.full.disabled === true;   // 已满也应该是 false
+    check.full.buttonEnabled = check.full.disabled === false;
+    check.full.saysStillOk = /仍可合成/.test(check.full.text || '');
+
+    // ---- 恶魔种子（46）不受武技上限影响，仍可合成
+    check.demonSeed = await openAnd(46);
+    check.demonSeed.buttonEnabled = check.demonSeed.disabled === false;
+
+    // ---- 关卡碎片掉落：真实结算一次关卡战斗，并渲染真实战果弹窗
+    document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+    State.state().props[23] = 20;
+    State.state().level = 30;
+    State.state().power = 120; State.state().agility = 120; State.state().speed = 120;
+    State.state().maxHp = 4000; State.state().hp = 4000;
+    // 碎片是概率掉落，多试几次直到真的掉出来，再核对战果弹窗的那一行
+    check.stageStarted = false;
+    check.stageAttempts = 0;
+    for (let i = 0; i < 30 && !check.stageDrop; i++) {
+      check.stageAttempts++;
+      const started = State.beginStageBattle(1);
+      if (!started || !started.ok) { check.stageStartError = started && started.msg; break; }
+      check.stageStarted = true;
+      const npc = State.npcOf(1, started.npcIndex);
+      const rw = State.finishStageBattle(1, started.token, true, 1);
+      check.stageRewardOk = !!rw.ok;
+      if (!rw.drop) continue;
+      check.stageDrop = rw.drop;
+      UI.classic.stageResult(1, npc, started.npcIndex, rw);
+      await wait(300);
+      const modal = readModal();
+      check.stageResultText = modal.text || null;
+      check.stageResultShowsExp = /经验 \+\d+/.test(modal.text || '');
+      check.stageResultShowsDrop = (modal.text || '').includes('获得' + rw.drop.name + ' ×' + rw.drop.count);
+      check.stageResultDropLine = ((modal.text || '').match(/获得\S+ ×\d+/) || [null])[0];
+      break;
+    }
+    document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+
+    check.errs = window.__errs;
+    window.__report = { check, errs: window.__errs };
+    document.title = 'READY';
+  });
+})();
+</script>
+</body>
+</html>

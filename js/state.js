@@ -108,6 +108,31 @@
       return entry;
     });
     next.stages = object(next.stages) ? next.stages : {};
+    // 升级「三选一」还没选的组：只保留合法的 {kind,id}，并且不能是已经拥有的
+    {
+      const owned = new Set([
+        ...(next.weapons || []).map((w) => 'w' + parseInt(w)),
+        ...(next.skills || []).map((s) => 's' + parseInt(s)),
+      ]);
+      const picks = [];
+      for (const group of Array.isArray(next.wsPicks) ? next.wsPicks : []) {
+        if (!Array.isArray(group)) continue;
+        const seen = new Set();
+        const list = [];
+        for (const c of group) {
+          if (!object(c) || (c.kind !== 'weapon' && c.kind !== 'skill')) continue;
+          const id = Number(c.id);
+          const def = (c.kind === 'weapon' ? weaponsMap : skillsMap).getValue(id);
+          const code = (c.kind === 'weapon' ? 'w' : 's') + id;
+          if (!def || seen.has(code) || owned.has(code)) continue;
+          seen.add(code);
+          list.push({ kind: c.kind, id, name: def.name, remark: def.remark || '', type: def.type || '' });
+        }
+        if (list.length) picks.push(list);
+        if (picks.length >= 40) break;   // 防止坏档堆出几百组
+      }
+      next.wsPicks = picks;
+    }
     const savedRuns = object(next.stageRuns) ? next.stageRuns : {};
     next.stageRuns = {};
     for (const id of Object.keys(savedRuns)) {
@@ -398,7 +423,17 @@
       else if (count < 0) delete S.props[id];
     }
   }
-  function save() { try { clampProps(); localStorage.setItem(SAVE_KEY, JSON.stringify(S)); return true; } catch (e) { return false; } }
+  function save() {
+    try {
+      clampProps();
+      S.savedAt = Date.now();
+      // 有本地服务器：主存档就是 save/progress.json，浏览器里不再留副本
+      if (storageMode() === 'file') { scheduleFileWrite(); return true; }
+      localStorage.setItem(SAVE_KEY, JSON.stringify(S));
+      return true;
+    } catch (e) { return false; }
+  }
+  /** 读浏览器里的存档（现在只在「没有本地服务器」或自检档时使用）。 */
   function load() {
     try {
       const raw = localStorage.getItem(SAVE_KEY);
@@ -412,8 +447,197 @@
     } catch (e) {}
     return false;
   }
+
+  /* ============================================================
+   * 存档：**主存档 = 游戏目录下的 save/progress.json**
+   *
+   * 由本地服务器的 /__save 读写（`node references/tools/serve.js`）。
+   *   · 有本地服务器：进度只写这个文件，浏览器 localStorage **不再当存档用**
+   *     （首次会把老档迁进文件，然后删掉旧的 ssdz_save_v1 键）。
+   *   · 没有本地服务器（GitHub Pages、file://）：退回 localStorage，否则无处可存；
+   *     系统页会显示当前用的是哪一种，避免「以为存在文件里」的误会。
+   *   · 自检档（?test=1 / ?qa=1）永远只写 localStorage，绝不碰正式存档文件。
+   *
+   * 冲突保护：写之前比较文件里的 savedAt，文件更新（另一台机器刚玩过）时不覆盖，
+   * 只标记冲突，由玩家在系统页点「载入文件里的存档」。
+   * ============================================================ */
+  const SAVE_URL = '__save';
+  const LEGACY_KEY = SAVE_KEY;                       // 旧的 localStorage 存档键
+  const fileState = { available: false, checked: false, fileAt: 0, error: '', reason: '', lastWrite: 0, lastLoad: 0, conflict: false, dirty: false, freshLocal: false, path: 'save/progress.json' };
+  let fileTimer = 0;
+  /* 存档读写通道：默认走本地服务器的 /__save；宿主（Tauri 等）可以替换成自己的实现。
+   * transport = { label, path?, probe(), read(), write(json) }，全部返回 Promise。 */
+  let saveTransport = null;
+
+  const fmtTime = (ts) => {
+    if (!ts) return '—';
+    const d = new Date(ts);
+    const p = (n) => String(n).padStart(2, '0');
+    return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  };
+  /** 当前进度存在哪里：'file'（save/progress.json）或 'local'（浏览器兜底）。 */
+  function storageMode() { return !testMode && fileState.available ? 'file' : 'local'; }
+  function forgetLegacy() {
+    try { localStorage.removeItem(LEGACY_KEY); localStorage.removeItem(LEGACY_KEY + '_sync'); } catch (e) {}
+  }
+  /** 宿主替换存档通道（Tauri 里用 Rust 端命令读写文件）。 */
+  function setSaveTransport(t) {
+    saveTransport = t && typeof t.probe === 'function' ? t : null;
+    if (saveTransport && saveTransport.path) fileState.path = saveTransport.path;
+    fileState.checked = false;
+    fileState.available = false;
+  }
+  const isFileProtocol = () => typeof location !== 'undefined' && location.protocol === 'file:';
+  /** 探一次存档通道在不在，并把「为什么不可用」记下来给界面显示。 */
+  async function fileProbe() {
+    if (testMode) { fileState.checked = true; fileState.available = false; fileState.reason = '自检档不写正式存档'; return false; }
+    if (saveTransport) {
+      try {
+        const meta = await saveTransport.probe();
+        fileState.available = !!meta.ok;
+        fileState.fileAt = Number(meta.savedAt) || 0;
+        fileState.reason = fileState.available ? '' : (meta.msg || '存档通道不可用');
+        fileState.error = '';
+      } catch (e) {
+        fileState.available = false;
+        fileState.reason = '存档通道出错：' + String((e && e.message) || e);
+        fileState.error = fileState.reason;
+      }
+      fileState.checked = true;
+      return fileState.available;
+    }
+    if (typeof fetch !== 'function') { fileState.checked = true; fileState.available = false; fileState.reason = '这个环境没有 fetch，无法读写存档文件'; return false; }
+    if (isFileProtocol()) {
+      fileState.checked = true; fileState.available = false;
+      fileState.reason = '页面是 file:// 打开的，浏览器不允许写文件。请用启动器（start-mac.command / start-win.cmd / node references/tools/serve.js）打开游戏。';
+      return false;
+    }
+    try {
+      const res = await fetch(SAVE_URL + '?meta=1', { cache: 'no-store' });
+      if (!res.ok) {
+        fileState.reason = res.status === 404
+          ? '服务器没有 /__save 接口（HTTP 404）：可能是 python3 -m http.server、旧版 serve.js，或页面来自别的静态托管。'
+          : '服务器返回 HTTP ' + res.status;
+        throw new Error(fileState.reason);
+      }
+      const info = await res.json();
+      fileState.available = !!info.ok;
+      fileState.fileAt = Number(info.savedAt) || 0;
+      fileState.reason = fileState.available ? '' : (info.msg || '服务器关闭了存档写入（--no-save？）');
+      fileState.error = '';
+      if (info.path) fileState.path = info.path;
+    } catch (e) {
+      fileState.available = false;
+      if (!fileState.reason) fileState.reason = '连不上本地服务器：' + String((e && e.message) || e);
+      fileState.error = fileState.reason;
+    }
+    fileState.checked = true;
+    return fileState.available;
+  }
+  /**
+   * 读主存档：文件优先，没有文件就把 localStorage 里的老档迁进去。
+   * 返回 true 表示内存里已经有可玩的进度。
+   */
+  async function fileLoad() {
+    if (!fileState.available) await fileProbe();
+    if (!fileState.available) return false;
+    try {
+      const info = saveTransport ? await saveTransport.read() : await (await fetch(SAVE_URL, { cache: 'no-store' })).json();
+      fileState.fileAt = Number(info.savedAt) || 0;
+      if (info.exists && info.data) {
+        const parsed = typeof info.data === 'string' ? JSON.parse(info.data) : info.data;
+        if (!object(parsed)) throw new Error('存档内容不是对象');
+        S = normalizeSave(parsed);
+        syncDailyStats();
+        S.savedAt = Number(parsed.savedAt) || fileState.fileAt || Date.now();
+        forgetLegacy();                       // 文件是主存档，旧的浏览器存档就此退休
+        fileState.lastLoad = Date.now();
+        fileState.conflict = false;
+        return true;
+      }
+      // 文件还不存在：把浏览器里的老档迁进来（只做一次）
+      if (load()) {
+        const ok = await fileWrite(true);
+        if (ok.ok) forgetLegacy();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      fileState.error = String((e && e.message) || e);
+      return false;
+    }
+  }
+  /** 把当前进度写进 save/progress.json（force=true 时不检查「文件是否更新」）。 */
+  async function fileWrite(force) {
+    if (testMode) return { ok: false, msg: '自检档不写正式存档' };
+    if (!fileState.available) await fileProbe();
+    if (!fileState.available) return { ok: false, msg: '存档写入不可用：' + (fileState.reason || '未知原因') };
+    try {
+      const meta = saveTransport ? await saveTransport.probe() : await (await fetch(SAVE_URL + '?meta=1', { cache: 'no-store' })).json();
+      const fileAt = Number(meta.savedAt) || 0;
+      const localAt = (S && S.savedAt) || 0;
+      // 存档文件里已有别的进度（新浏览器 / 换了机器第一次打开）：不覆盖，先让玩家决定
+      if (meta.exists && fileState.freshLocal && fileAt > 0) {
+        fileState.conflict = true; fileState.fileAt = fileAt;
+        return { ok: false, conflict: true, msg: '存档文件里已有进度（' + fmtTime(fileAt) + '），没有覆盖' };
+      }
+      if (!force && fileAt > localAt + 1000) {
+        fileState.conflict = true; fileState.fileAt = fileAt;
+        return { ok: false, conflict: true, msg: '存档文件更新（' + fmtTime(fileAt) + '），已跳过写入' };
+      }
+      const body = JSON.stringify(S);
+      const out = saveTransport ? await saveTransport.write(body)
+        : await (await fetch(SAVE_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body })).json();
+      if (!out.ok) throw new Error(out.msg || '写入失败');
+      fileState.fileAt = Number(out.savedAt) || Date.now();
+      fileState.lastWrite = Date.now();
+      fileState.conflict = false;
+      fileState.dirty = false;
+      fileState.freshLocal = false;
+      forgetLegacy();
+      return { ok: true, msg: '已写入 ' + fileState.path, fileAt: fileState.fileAt };
+    } catch (e) {
+      fileState.error = String((e && e.message) || e);
+      return { ok: false, msg: '写入存档失败：' + fileState.error };
+    }
+  }
+  /** 界面上「立即写入」按钮用：立刻写，不受防抖影响。 */
+  function fileWriteNow() { return fileWrite(true); }
+  /** 存档文件的信息（系统页显示用）。 */
+  function fileInfo() {
+    return {
+      mode: storageMode(), available: fileState.available, checked: fileState.checked,
+      conflict: fileState.conflict, fileAt: fileState.fileAt, localAt: (S && S.savedAt) || 0,
+      lastWrite: fileState.lastWrite, lastLoad: fileState.lastLoad, error: fileState.error,
+      dirty: fileState.dirty, path: fileState.path, reason: fileState.reason,
+    };
+  }
+  /** 保存后延迟写文件（连点几下只写一次）；页面要关掉时立刻补写。 */
+  function scheduleFileWrite() {
+    if (!S || storageMode() !== 'file' || typeof setTimeout !== 'function') return;
+    fileState.dirty = true;
+    if (fileTimer) clearTimeout(fileTimer);
+    fileTimer = setTimeout(() => { fileTimer = 0; void fileWrite(); }, 400);
+  }
+  function flushFileWrite() {
+    if (fileTimer) { clearTimeout(fileTimer); fileTimer = 0; }
+    if (!S || storageMode() !== 'file') return;
+    try {
+      const body = JSON.stringify(S);
+      if (typeof fetch === 'function') void fetch(SAVE_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: true });
+    } catch (e) {}
+  }
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('pagehide', flushFileWrite);
+    window.addEventListener('beforeunload', flushFileWrite);
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushFileWrite(); });
+    }
+  }
+
   /** 普通新建账号无武技；调试重置的 opts.weaponId / weaponLevel 可指定开局武器。 */
   function newGame(name, opts) {
+    fileState.freshLocal = true;   // 新角色：存档文件里如果已有进度，先别覆盖
     S = clone(GData.NEW_PLAYER);
     Object.assign(S, GData.initialStats());
     S.stageRuns = {};
@@ -1019,22 +1243,84 @@
   }
   // 天使果实/升级：随机获得新武器或技能
   function gainRandomWS() {
+    const pick = wsPool();
+    if (!pick.length) return null;
+    return grantWS(pick[Math.floor(Math.random() * pick.length)]);
+  }
+  /** 还能学、且没拥有的武器/技能池（'w3'/'s7' 这种编码）。 */
+  function wsPool() {
+    if (!S) return [];
     const ownedW = S.weapons.map((w) => parseInt(w.split(':')[0]));
     const ownedS = S.skills.map((s) => parseInt(s.split(':')[0]));
-    if (ownedWSCount() >= wsLimit()) return null;
+    if (ownedWSCount() >= wsLimit()) return [];
     const pool = [];
     weaponsMap.each((k, v) => { if (!ownedW.includes(parseInt(v.id)) && GData.canLearn('weapon', v.id, S.level)) pool.push('w' + v.id); });
     skillsMap.each((k, v) => { if (!ownedS.includes(parseInt(v.id)) && GData.canLearn('skill', v.id, S.level)) pool.push('s' + v.id); });
-    if (!pool.length) return null;
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    if (pick[0] === 'w') {
-      const id = Number(pick.slice(1));
-      S.weapons.push(id + ':1');
-      return { name: weaponsMap.getValue(id).name, id, kind: 'weapon' };
+    return pool;
+  }
+  function wsInfo(code) {
+    const kind = String(code)[0] === 'w' ? 'weapon' : 'skill';
+    const id = Number(String(code).slice(1));
+    const def = (kind === 'weapon' ? weaponsMap : skillsMap).getValue(id);
+    return def ? { kind, id, name: def.name, remark: def.remark || '', type: def.type || '' } : null;
+  }
+  function grantWS(code) {
+    const info = wsInfo(code);
+    if (!info) return null;
+    S[info.kind === 'weapon' ? 'weapons' : 'skills'].push(info.id + ':1');
+    return info;
+  }
+  /**
+   * 升级奖励的「三选一」候选：从还能学的池子里抽最多 n 个不重复的。
+   * 池子空了（已满 / 没有可学的）就返回空数组，调用方据此不发奖励。
+   */
+  function wsChoices(n) {
+    const pool = wsPool();
+    const want = Math.min(Math.max(1, integer(n, 3, 1)), pool.length);
+    const picked = [];
+    while (picked.length < want && pool.length) {
+      picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
     }
-    const id = Number(pick.slice(1));
-    S.skills.push(id + ':1');
-    return { name: skillsMap.getValue(id).name, id, kind: 'skill' };
+    return picked.map(wsInfo).filter(Boolean);
+  }
+  /** 还没选的「三选一」：升级发下来就必须选掉（和自由属性点一样，只是会排队）。 */
+  function pendingWS() { return S && Array.isArray(S.wsPicks) ? S.wsPicks.length : 0; }
+  /** 当前这一组的三个候选。 */
+  function currentWSChoices() { return pendingWS() ? (S.wsPicks[0] || []) : []; }
+  /** 从当前这组里选一个（kind+id），学会它并把这组出队。 */
+  function chooseWS(kind, id) {
+    if (!S || !pendingWS()) return { ok: false, msg: '没有待选的武器/技能' };
+    const list = S.wsPicks[0] || [];
+    const hit = list.find((c) => c && c.kind === kind && Number(c.id) === Number(id));
+    if (!hit) return { ok: false, msg: '这一组里没有这个选项' };
+    const info = grantWS((kind === 'weapon' ? 'w' : 's') + Number(id));
+    if (!info) return { ok: false, msg: '这个武器/技能暂时学不了' };
+    S.wsPicks.shift();
+    save();
+    return { ok: true, kind: info.kind, id: info.id, name: info.name, remaining: pendingWS() };
+  }
+  /** 手气不错：把还没选的组全部随机选掉（调试一键满级那种情况用）。 */
+  function chooseWSRandom() {
+    const got = [];
+    if (!S || !pendingWS()) return { ok: true, got, remaining: 0 };
+    let guard = 0;
+    while (pendingWS() && guard++ < 200) {
+      const list = S.wsPicks[0] || [];
+      const pool = list.filter((c) => c && c.kind && !ownsWS(c.kind, c.id));
+      if (!pool.length) { S.wsPicks.shift(); continue; }
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      const r = chooseWS(pick.kind, pick.id);
+      if (!r.ok) { S.wsPicks.shift(); continue; }
+      got.push(r.name);
+    }
+    save();
+    return { ok: true, got, remaining: pendingWS() };
+  }
+  function ownsWS(kind, id) {
+    if (!S) return false;
+    const key = Number(id) + ':';
+    const list = kind === 'weapon' ? S.weapons : S.skills;
+    return list.some((x) => String(x).indexOf(key) === 0);
   }
 
   // ---------- 自由属性点（升级自选，四项平衡，占比过低由系统代选） ----------
@@ -1137,8 +1423,11 @@
       }
       // 体力上限按等级重算（2~3 级每级 +3、4~20 每级 +2、21~70 每级 +1，69 级 179、满级 180）
       S.maxEnergy = Math.max(S.maxEnergy, energyCapForLevel(S.level));
-      // 升级奖励：概率获得新武器/技能（reward 为 {name,id,kind} 或 null）
-      const gained = GData.WS_LEVELS.includes(S.level) ? gainRandomWS() : null;
+      // 升级奖励：到指定等级时给一组「三选一」候选，玩家在弹窗里选一个
+      // （wsChoices 为空表示池子已满/没有可学的，就不发奖励）
+      const gained = null;
+      const choices = GData.WS_LEVELS.includes(S.level) ? wsChoices(3) : [];
+      if (choices.length) S.wsPicks.push(choices);
       if (S.level === 5 && !S.reborn) S.goldPoint += 50;
       // 升级礼包：卷轴 / 药剂 / 丹药，逢 5 级与属性书等级再加一份大礼包
       const gifts = (GData.levelGift ? GData.levelGift(S.level) : []).map((g) => {
@@ -1151,6 +1440,7 @@
         reward: gained ? gained.name : null,
         rewardId: gained ? gained.id : null,
         rewardKind: gained ? gained.kind : null,
+        wsChoice: choices.length,
         attributeBook: bookLevel,
         freePoint,
         autoPoint,
@@ -1912,6 +2202,7 @@
   window.State = {
     saveKey: SAVE_KEY,
     save, load, newGame, state, tickEnergy, energyCountdown,
+    fileProbe, fileLoad, fileWrite, fileWriteNow, fileInfo, storageMode, flushFileWrite, setSaveTransport, syncFormatTime: fmtTime, markLocalFresh: () => { fileState.freshLocal = true; },
     vipActive, vipLevel, vipUntil, vipDaysLeft, vipRegenMul, vipPassiveExpCap, vipExpNeed,
     vipRow, buyVip, grantVip, tickVipDaily, gearCapacity, syncVipEnergyCap,
     VIP_LEVELS, VIP_LEVEL_EXP, VIP_MAX_LEVEL, VIP_PLANS, VIP_ENERGY_CAP, VIP_GEAR_BONUS, GEAR_CAPACITY,
@@ -1920,7 +2211,8 @@
     weaponList,
     gearInst, myGears, wear, unwear, sellGear, composeGear, mergeGears, addGear, extText, randomExt,
     gemLevel, GEM_MERGE_RATES, rollGemDrop, mergeGems, socketGem, unsocketGem,
-    totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, gainRandomWS,
+    totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, gainRandomWS, wsChoices, wsInfo,
+    pendingWS, currentWSChoices, chooseWS, chooseWSRandom,
     gainExp, consumeEnergy, tickPropStates, fightReward, expBoostPct, gainExpWithBoost,
     // 师徒
     apprenticeCap, learnSkill, setMaster, clearMaster, addPrentice, removePrentice,

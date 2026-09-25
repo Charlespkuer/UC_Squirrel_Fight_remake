@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS 专用：这个文件会被合并进 .app 的 Info.plist。
+  轻壳（src-tauri/src/main.rs）在窗口里加载的是 http://127.0.0.1:<随机端口>/index.html，
+  而 WKWebView 的 App Transport Security 默认只允许 https；显式开一个「本地网络」例外，
+  免得 macOS 上窗口一片空白。Windows 版本完全不看这个文件。
+-->
+<plist version="1.0">
+<dict>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.games</string>
+</dict>
+</plist>

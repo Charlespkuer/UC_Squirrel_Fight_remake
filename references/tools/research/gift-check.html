@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../../">
+<meta charset="UTF-8">
+<title>升级礼包检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle-drops.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* ?to=5 让角色在 5 级（大礼包）升级，?to=N 换其它等级。
+ * 走真实结算路径：fightReward -> gainExp -> resultModal。结果在 window.__report.check。 */
+(function () {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const q = new URLSearchParams(location.search);
+  window.addEventListener('load', async () => {
+    document.title = 'LOADING';
+    localStorage.removeItem('ssdz_debug');
+    await wait(250);
+    State.newGame('礼包检查');
+    const S = State.state();
+    const target = Math.max(2, Math.min(60, Number(q.get('to') || 5)));
+    const checks = [];
+    // 逐级升到 target，收集每一级的礼包条目
+    for (const u of State.gainExp(GData.nextExp(1) * 0)) { /* noop */ }
+    S.level = target - 1; S.exp = 0;
+    State.save();
+    const ups = State.gainExp(GData.nextExp(target - 1));
+    checks.push(...ups);
+    Main.showHome();
+    await wait(300);
+    // 用刚收集到的升级结果渲染真实奖励面板（resultModal 会调用 upgradeReward）
+    UI.classic.resultModal(true, { exp: 0, gold: 0, ups: checks });
+    await wait(400);
+    const panel = document.querySelector('.result-box .reward-panel');
+    const cards = panel ? [...panel.querySelectorAll('.reward-card')] : [];
+    const box = panel ? panel.getBoundingClientRect() : null;
+    const check = {
+      target,
+      upsFromLevelUp: checks.map((u) => ({ level: u.level, gifts: (u.gifts || []).map((g) => g.name + 'x' + g.count) })),
+      panelFound: !!panel,
+      cards: cards.map((c) => ({ cls: [...c.classList].filter((x) => x !== 'reward-card').join(','), text: (c.querySelector('.reward-text') || {}).textContent })),
+      panelBox: box ? { w: Math.round(box.width), h: Math.round(box.height) } : null,
+      cardsInsidePanel: box ? cards.every((c) => { const cb = c.getBoundingClientRect(); return cb.left >= box.left - 1 && cb.right <= box.right + 1; }) : null,
+      modalOverflow: (() => {
+        const body = document.querySelector('.classic-modal .modal-body');
+        return body ? body.scrollHeight > body.clientHeight + 2 : null;
+      })(),
+      errs: window.__errs,
+    };
+    window.__report = { check, errs: window.__errs };
+    document.title = 'READY';
+  });
+})();
+</script>
+</body>
+</html>

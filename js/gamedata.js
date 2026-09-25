@@ -157,6 +157,7 @@
     gears: [], wears: {},      // gears: [{id,used,key,ext:[{id,level}]}]
     props: { 1: 3, 2: 2 },     // 小体力药剂x3 大体力药剂x2
     freePoints: 0,             // 升级发下来、还没分配的自由属性点
+    wsPicks: [],               // 升级发下来、还没选的武器/技能「三选一」组
     propsStates: {},           // 药剂生效场次 {propId: count}
     stages: {},                // stageId -> {npcIndex, passed}
     dailyWins: 0, allWins: 0, dailyFails: 0, allFails: 0,

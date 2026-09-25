@@ -2,23 +2,46 @@
 
 以 UC 乐园《松鼠大战》的经典截图为主要视觉参考，结合已取得的 Android 客户端素材、动画和数据，重建离线养成、挑战与战斗流程。经典界面与高清动画来自不同版本，目前仍有未恢复的素材和服务器规则，不宣称完整或逐像素复原。
 
-本轮改动与证据索引见 [2026-09-23 还原记录](tools/restoration-2026-09-23.md)。
+本轮改动与证据索引见 [2026-09-23 还原记录](references/tools/restoration-2026-09-23.md)。
 
 ## 启动
 
-静态网页，游玩不需要安装前端依赖或构建。建议使用 Node.js 启动本地服务器：
+纯静态网页，**没有构建步骤、没有前端依赖，Windows / macOS / Linux 都一样**。建议用 Node.js（≥18）起本地服务器：
 
-```powershell
-node tools/serve.js 8080
+```bash
+node references/tools/serve.js 8080      # 加 --no-save 可关掉存档文件写入
 ```
 
-用 Chrome 或 Edge 打开 [http://127.0.0.1:8080/](http://127.0.0.1:8080/)。服务器仅监听本机；推荐固定使用同一浏览器、地址和端口。直接双击 `index.html` 可能受到本地文件限制。
+然后浏览器打开 [http://127.0.0.1:8080/](http://127.0.0.1:8080/)。服务器仅监听本机；推荐固定使用同一浏览器、地址和端口。macOS 上也可以直接用系统自带的 python3 起服务（`python3 -m http.server 8080 --bind 127.0.0.1`）。
+
+> 目录约定：**仓库根只放运行必需的东西**（`index.html`、`css/`、`js/`、`images/`、`audio/`），
+> 开发工具、测试、取证与截图参考资料都在 **`references/tools/`**（原 `tools/`），
+> 原始 APK 与参考图在 `references/`（不进版本库）。
+
+**不要用 `file://` 长期游玩**：本地文件会被浏览器当作跨源，`getImageData`/`toDataURL` 直接抛 `SecurityError`（自检里的像素检查就因此失败），而且**浏览器不允许网页写本地文件，点「写入存档文件」只会提示没有本地服务器接口**。跨平台细节与发布方式见 [跨平台运行与 GitHub 发布指南](references/tools/publish-guide.md)。仓库根没有 `package.json`（没有构建步骤也就没有 npm 脚本），本地回归直接跑 `node references/tools/test-*.cjs`，见下面「验证」一节。
+
+### 打开方式
+
+| 方式 | 怎么开 | 存档 | 外观 |
+| --- | --- | --- | --- |
+| **双击启动**（推荐） | 仓库根的 **`启动游戏.cmd`**（Windows；macOS 用 `references/tools/launchers/start-mac.command`） | 游戏目录 `save/progress.json`（两条路同一个文件） | **有原生轻壳（`src-tauri/dist/ssdz-classic.exe`，约 3 MB）就是真正的原生窗口**；没有就退回浏览器**应用窗口**（无标签栏、无地址栏） |
+| 桌面程序（轻壳） | `src-tauri/dist/ssdz-classic.exe`（`node references/tools/build-tauri-app.cjs` 生成，`--clean` 可回收 `target/`） | 游戏目录 `save/progress.json` | 真正的原生窗口，不经过浏览器、不需要 Node/Python |
+| 手动起服务 | `node references/tools/serve.js 8080`（没装 Node 就用 `python3 references/tools/serve.py 8080`） | 游戏目录 `save/progress.json` | 普通浏览器标签 |
+
+桌面版是个 **2.86 MB 的轻壳**：它不把前端塞进二进制，而是启动时找到游戏目录，用一个内置的迷你 HTTP 服务器（Rust 标准库实现，随机端口）把 `index.html` 供起来，窗口打开 `http://127.0.0.1:<端口>/index.html`；存档也走和网页版完全一样的 `/__save`。所以**改了 `css/` `js/` `images/` 后重启窗口就是新的**，两边永远是同一套代码、同一个存档文件，本地也不会多出一份 55 MB 的前端副本。想发给别人装才用 `--installer` 打内嵌前端的安装包（约 47 MB）。细节与实测数据见 [Tauri 桌面版说明](references/tools/tauri-guide.md)。
+
+`启动游戏.cmd` 只做一件事：**优先开原生窗口**（`src-tauri/target/release/ssdz-classic.exe`），没有这个文件或它连开三次都没稳住，就自动走「起服务器 + 浏览器应用窗口」这条路。**双击后命令行窗口会自己关掉**：原生窗口 1~2 秒就确认启动完成，服务器路线则把服务器放到后台隐藏运行（日志写在 `save\server.out.log` / `save\server.err.log`），要停掉后台服务器就运行一次 `启动游戏.cmd --stop`。已经开着一个桌面版时再双击，它只会提示「已经在运行」，不会开第二个（两个实例写同一份存档会互相覆盖）。参数：`[端口]`、`--no-save`（只读）、`--browser`（跳过原生窗口，直接用浏览器应用窗口）、`--stop`（停掉后台服务器）。
+
+启动器会自己找 Node（最完整），没有就退到 Python 3（`serve.py` 带同一套 `/__save` 存档接口），两者都没有才直接开 `index.html`（这时只能用浏览器存档）。端口默认 8080，**被别的程序占用时启动器会直接告诉你换一个**（例如 `启动游戏.cmd 8081`），而不是硬起一个失败、让你在浏览器里看到「没有本地服务器接口」；如果 8080 上已经有一个带存档接口的服务器在跑，启动器就直接复用它。Windows 侧是 `start-win.cmd` + `start-win.ps1` 两个文件（`.cmd` 只做 ASCII 外壳，中文提示与判断在 PowerShell 里——cmd.exe 读 `.cmd` 里的 UTF-8 中文会把中文注释当命令执行，导致服务器起不来），**两个文件要放在一起**。应用窗口使用独立配置目录（Windows `%LocalAppData%\SSDZClassic\browser-profile`，macOS `~/Library/Application Support/SSDZClassic/browser-profile`），不会和你平时用的浏览器书签、登录状态混在一起。
+
+Tauri 桌面版的前端就是仓库根这份静态页（打包时由 `node references/tools/build-tauri-web.cjs` 复制成 `src-tauri/web/` 快照，`tauri.conf.json` 的 `beforeBuildCommand` 会在**每次** build 前自动重做，所以网页版和桌面版永远是同一套代码；快照是构建产物，不进版本库，`node references/tools/build-tauri-web.cjs --check` 可以检查它有没有过期）；存档由 Rust 侧命令直接读写文件，不经过 HTTP 服务器。细节见 [Tauri 桌面版说明](references/tools/tauri-guide.md)。
 
 经典菜单按新增参考图的 920:560 比例独立适配；首页和战斗保持 APK 的 1170:690 比例。切换页面或调整窗口时自动等比缩放。
 
 ## 当前内容与本轮变化
 
 - 首页、状态、武器/技能分页、道具、装备、融合、关卡、竞技、天梯、师徒、抽奖、**排行榜**、**超级松鼠**、系统及战斗录像。
+- **系统页可以向下滚动**：原来底板只有 489px 高、内容 672px，而底板是 `overflow:hidden`，「音乐音量 / 存档位置 / 底部说明」会被直接裁掉；现在系统页（`[data-screen="system"]`）可滚动，滚到底能看到全部内容。**调试面板的 6 个开关改成一行两个**（6 行 → 3 行，面板不再占半屏）。**首页三张图标（活动/聊天/村庄）重新裁过**：原先多边形抠图没带背景判定，图标里残留了草地/树叶和深色树影，白色文字也被啃掉一角；现在清干净了。**App 图标换成透明背景的松鼠**（1024×1024，居中留白），桌面版/安装包的图标都跟着更新。
 - 武器/技能按新增经典截图调整为5列×2行，优先使用无“真”章且灰色/彩色/选中状态匹配的参考卡片，减少重复边框和混入的高清装饰。
 - 道具页恢复“背包 / 商店 / 兑换”导航、左侧3列×2行物品与右侧说明；兑换页提供碎片、种子合成及金杯商店入口。天使果实种子（45）详情会标注当前**武器/技能 x/y** 是否已达上限，已满时按钮变为“武器技能已满”并禁用合成；恶魔果实种子（46）用于遗忘，不受该上限限制。所有道具**单件上限 9999**。
 - 装备改为覆盖状态页的弹窗，左侧按部位摆放，右侧显示库存；三件材料融合保留独立页面。**融合页按「工作台」重做**：带编号的步骤条、虚线 `+` 材料槽（角标是槽位号，放入后显示品质描边与 × 移除角标）、金色虚线预览格（旋转高光 + 「必得 1 件」）、独立的消耗/开始融合面板（材料齐了主按钮会呼吸发光）、可换行的规则条、装备卡改成圆角小卡（左上品质缎带 + 底部状态带，选中变绿并显示「材料 N」），底部状态条是带 ✓/! 图标的胶囊；名次列表区可滚动，不会再被裁掉。**状态页右下角的「装备融合」入口也换成了金色胶囊按钮**（棕色 ⚒ 图标底座 + 缓慢流光，悬停抬升），不再是那行带下划线的浅色小字。
@@ -30,12 +53,12 @@ node tools/serve.js 8080
 
 ### 排行榜、超级松鼠与每日任务
 
-原版是联网游戏，排行榜、VIP 与活动都由服务端下发；本版按单机思路补齐，详见 [APK 对齐改动表](tools/apk-alignment.md)。
+原版是联网游戏，排行榜、VIP 与活动都由服务端下发；本版按单机思路补齐，详见 [APK 对齐改动表](references/tools/apk-alignment.md)。
 
 - **排行榜**：消息页新增一页，按等级／金杯／天梯积分排序，每周固定种子生成 14 名离线松鼠并把玩家插进去，同周内榜单稳定，页面明确标注为离线模拟。**榜单支持下滑**：头部「我的名次」与三个排序标签固定，只有名次列表滚动（`css/classic-extras.css` 的 `.toplist-board` 改 flex 列 + `.toplist-rows{overflow-y:auto}`），15 行都能看全。**天梯赛 30 级才开启**：不够级时自己的金杯与积分不显示（破折号 + 未参赛），看金杯／积分榜时对手一律按 30 级起算。
-- **天梯碎片与转化丸**：天梯赛里飘出来的「请点击」改用专属掉落表，点到的就是**天梯碎片**，也有机会掉恶魔果实种子。10 个天梯碎片 + 50 金松果可以在兑换页随机合成一个**力量／敏捷／速度转化丸**（用 1 点某属性换 1 点另一属性，该属性占比低于 25% 时不能使用）。依据 `references/new/微信图片_20260924010916_259_2.jpg`；碎片图标由白色碎片改色加「?」生成（`tools/make-fragment-icon.cjs`），属派生素材。
+- **天梯碎片与转化丸**：天梯赛里飘出来的「请点击」改用专属掉落表，点到的就是**天梯碎片**，也有机会掉恶魔果实种子。10 个天梯碎片 + 50 金松果可以在兑换页随机合成一个**力量／敏捷／速度转化丸**（用 1 点某属性换 1 点另一属性，该属性占比低于 25% 时不能使用）。依据 `references/new/微信图片_20260924010916_259_2.jpg`；碎片图标由白色碎片改色加「?」生成（`references/tools/make-fragment-icon.cjs`），属派生素材。
 - **超级松鼠（原版 VIP）**：系统页新增一页。特权文案与 10 级成长表直接取自原客户端内嵌文本（体力恢复最快 1.5 倍、体力上限 180、被动经验上限最高 400/天、永久 +6 装备格子、昵称尊贵标识等 8 条）。原版按天售卖（`buyVIP.do`），本版改为**金松果**购买（7 天 300／30 天 1000，本项目的平衡定价），到期后等级与经验保留，可续期累加。
-- **抽奖**：每天免费 1 次，之后每次 20 金松果。奖池 10 档：武器／技能卷轴 ×10、蓝色碎片 ×3、经验 +50／+100、金松果 +30、挑战书 ×2、大体力药剂 ×2、**两个随机普通药丸**（从大力丸／敏捷丸／速度丸／经验丸里抽，抽到同一种就合并成 ×2，结算弹窗显示真实抽到的那几种；原来这一档是天使果实种子 ×2）、英雄帖 ×2。
+- **抽奖**：每天免费 1 次，之后每次 20 金松果。奖池 10 档：武器／技能卷轴 ×10、蓝色碎片 ×3、经验 +50／+100、**金松果 +40**、挑战书 ×2、大体力药剂 ×2、**两个随机普通药丸**（从大力丸／敏捷丸／速度丸／经验丸里抽，抽到同一种就合并成 ×2，结算弹窗显示真实抽到的那几种；原来这一档是天使果实种子 ×2）、**英雄帖 ×3**。
 - **每日任务**：首页「活动」里除了每日礼包，还有每天 4 条随机任务。**任务池 16 类**（`State.QUEST_TYPES`）：胜场／战斗场次／随机挑战／关卡通关／竞技场／天梯赛／好友切磋／幸运抽奖／合成或融合装备／合成宝石／武技升级／使用道具／商店购买／卖出道具／拾取战斗掉落／消耗体力，**每天用日期做种子从 16 类里抽 4 条**（同一天刷新页面不会换题）。**进度取自当天真实行为计数**（`S.dailyCounters`，键跟着任务池自动生成；合成装备、装备融合、宝石合成、使用/购买/卖出道具、拾取掉落、天梯/切磋/随机挑战都会各自计数），0 点随每日统计一起重置。奖励是**纯随机 1~2 项**：金松果（10~30）、经验（50~80）和各种道具放在同一个加权池里抽（`State.QUEST_GOLD` / `QUEST_EXP` / `QUEST_EXTRA_POOL`），**抽到才有**——可能只给一样，也可能给「经验 + 经验丸」这种组合；道具含技能／武器卷轴 3~5、挑战书 1~2、小体力药剂 1~2、天使果实种子、大体力药剂、经验丸。**药丸一次只给 1 个**，高级药丸（超级经验丸）权重只有 0.06，**概率约 1%**。当礼包或任一任务可领时，首页「活动」图标会缓慢放大缩小并带一层呼吸光晕（`prefers-reduced-motion` 下自动关闭）。
 - **天使果实种子**：即使武器/技能已达上限也能合成（详情里只提示「已满，果实仍可合成，等有空位时再使用」），果实可以先囤着。
 
@@ -58,7 +81,7 @@ node tools/serve.js 8080
 
 ### 战斗与点击奖励
 
-修正了师父驾到、普通龟甲、装死、小宇宙、木剑、流星锤、野球拳、狼牙棒及部分真武器效果。治疗、增益、持续掉血、反击与对应动画按事件播放；规则依据及资料冲突见 [战斗规则研究](tools/research-battle-rules.md)。
+修正了师父驾到、普通龟甲、装死、小宇宙、木剑、流星锤、野球拳、狼牙棒及部分真武器效果。治疗、增益、持续掉血、反击与对应动画按事件播放；规则依据及资料冲突见 [战斗规则研究](references/tools/research-battle-rules.md)。
 
 「跳过」会立即结算本场并唤醒所有等待中的动作，**仍然照常发放战果**；录像播放没有跳过入口。战斗结束（无论自然结束还是跳过）都会把最后一帧的剩余血量写进结算对象，供关卡连战按比例继承。战果弹窗会覆盖在**发起战斗的那个页面**上（随机挑战、关卡、竞技、天梯、师徒），不再飘在首页上。
 
@@ -66,7 +89,7 @@ node tools/serve.js 8080
 
 真实战斗中最多出现三次“请点击”奖励。按已取得客户端的15 FPS时序，首次约2–10.67秒，后两次相隔约10秒，每次停留约2秒。点击立即保存奖励；跳过会补领本场全部尚未领取的预定项，包括已错过的项；取消不补领，录像不发奖。结算显示拾取汇总。
 
-出现时间、领取与跳过行为有客户端证据；**奖励池、数量与权重是本地平衡值**。碎片图标来自原素材，但当前 APK 的浮动奖励列表没有碎片，它们是依据用户记忆补入的离线种类。详见 [掉落研究](tools/research-floating-drops.md)。
+出现时间、领取与跳过行为有客户端证据；**奖励池、数量与权重是本地平衡值**。碎片图标来自原素材，但当前 APK 的浮动奖励列表没有碎片，它们是依据用户记忆补入的离线种类。详见 [掉落研究](references/tools/research-floating-drops.md)。
 
 ### 关卡、竞技与天梯
 
@@ -74,7 +97,9 @@ node tools/serve.js 8080
 
 关卡10级开放，三个高手各六关、依次解锁；每轮连续三战，入场一本挑战书，最多复活两次、每次另用一本。中断可继续已付费进度。整轮经验和25金松果在通关时发放；**每次击败对手都可能掉碎片**（不必等到整轮结束），掉率 **45%~60%**（随星级提高，回到最初的 `0.42+星级×0.03`）、数量 **2~5**，单场期望仍是 **1.58~2.1 片**（与最初一致），但数量区间比最初的 1~6 窄，标准差从 1.71 降到 1.12；主类别按螳螂白/仙鹤绿/熊猫蓝，星数越高越可能越级（★3–4越1级、★5–6越2级，蓝碎片封顶），集中在 `GData.STAGE_FRAGMENT`。关卡经验与金松果保持原表数值。
 
-**关卡难度按「推荐等级」标定**（`GData.STAGE_USE_LEVEL_MODEL`）：螳螂 ★1-6 ↔ **10~15 级**、仙鹤 ↔ **15~20 级**、熊猫 ↔ **20~25 级**（`STAGE_LEVEL_BAND` + `stageTargetLevel()`）。每一档的 NPC 三维与血量直接由「该等级随机玩家的均值」推出——学徒／拳师／大侠 三维 = 玩家 ×0.70／0.78／0.72（再乘类型系数：螳螂 1.15／仙鹤 0.92／熊猫 1.02，用来抵消三种战斗风格的实际强度差），血量 = 玩家 ×0.90／1.05／1.20。字典里的原始三维只用来保留同一关三人的相对形状（螳螂偏敏捷、熊猫偏力量），攻略血量表 `STAGE_NPC_HP` 仍是历史参考（`STAGE_NPC_HP[5][2] === 901` 被测试钉住）；把 `STAGE_USE_LEVEL_MODEL` 设成 `false` 就回到旧的「字典数值 × `STAGE_DIFFICULTY`（血量×0.85、力量×0.88、敏捷/速度×0.96）」。玩家均值曲线在 `GData.STAGE_PLAYER_CURVE`，由 `tools/player-curve.cjs` 实测（每级 2000 个同等级 AI 采样做最小二乘），当前为 **三围 ≈1.53×等级−2.23、生命 ≈13.58×等级−10.44**（改升级规则就要重跑一次再回填）。实测（每档 300 场三星连战）：推荐等级通关率 **54%~86%**（均值 71%）、低 4 级 **0%~25%**、高 2 级 **73%~100%**，单场胜率第 1/2/3 场分别 99%~100%／77%~95%／54%~86%；门槛（`tools/stage-balance.cjs` 的 `TARGET`）是推荐等级 50%~85%、低 4 ≤30%、高 2 ≥65%，唯一越线的是螳螂★1 的 86%（第一关偏易，可接受）。另外螳螂的「疾风镰刀舞」触发血线从 35% 收紧到 **20%**、每击伤害从 0.55 倍降到 0.36 倍，低血爆发从 1.5 倍降到 1.3 倍，仙鹤开场重击从 1.6 倍降到 1.35 倍。
+**关卡难度按「推荐等级」标定**（`GData.STAGE_USE_LEVEL_MODEL`）：螳螂 ★1-6 ↔ **10~15 级**、仙鹤 ↔ **15~20 级**、熊猫 ↔ **20~25 级**（`STAGE_LEVEL_BAND` + `stageTargetLevel()`）。每一档的 NPC 三维与血量直接由「该等级随机玩家的均值」推出——学徒／拳师／大侠 三维 = 玩家 ×0.70／0.78／0.72（再乘类型系数：螳螂 1.15／仙鹤 0.92／熊猫 1.02，用来抵消三种战斗风格的实际强度差），血量 = 玩家 ×0.90／1.05／1.20。字典里的原始三维只用来保留同一关三人的相对形状（螳螂偏敏捷、熊猫偏力量），攻略血量表 `STAGE_NPC_HP` 仍是历史参考（`STAGE_NPC_HP[5][2] === 901` 被测试钉住）；把 `STAGE_USE_LEVEL_MODEL` 设成 `false` 就回到旧的「字典数值 × `STAGE_DIFFICULTY`（血量×0.85、力量×0.88、敏捷/速度×0.96）」。玩家均值曲线在 `GData.STAGE_PLAYER_CURVE`，由 `references/tools/player-curve.cjs` 实测（每级 2000 个同等级 AI 采样做最小二乘），当前为 **三围 ≈1.53×等级−2.23、生命 ≈13.58×等级−10.44**（改升级规则就要重跑一次再回填）。实测（每档 300 场三星连战）：推荐等级通关率 **54%~86%**（均值 71%）、低 4 级 **0%~25%**、高 2 级 **73%~100%**，单场胜率第 1/2/3 场分别 99%~100%／77%~95%／54%~86%；门槛（`references/tools/stage-balance.cjs` 的 `TARGET`）是推荐等级 50%~85%、低 4 ≤30%、高 2 ≥65%，唯一越线的是螳螂★1 的 86%（第一关偏易，可接受）。另外螳螂的「疾风镰刀舞」触发血线从 35% 收紧到 **20%**、每击伤害从 0.55 倍降到 0.36 倍，低血爆发从 1.5 倍降到 1.3 倍，仙鹤开场重击从 1.6 倍降到 1.35 倍。
+
+**升级奖励之一：武器／技能「三选一」**：到 `GData.WS_LEVELS`（2/3/4/6/…/68 共 24 个等级）时会抽**最多 3 个还没学过、又能学的**候选，并立刻弹一个**没有关闭叉的「选择武器或技能」弹窗**：三张卡片带图标、名字、「武器 · 近战」「技能 · 主动」这类标注和效果说明，点一张就学会（提示「学会了【X】」）。攒了多组时按钮会变成「**手气不错（全部随机）**」一次选完（调试「一键满级」会攒 7 组左右）。53/59/65 级的属性书等级不发三选一；天使果实（47）仍然是随机直接给一个。选完（或者没有待选项时）才轮到下面的「自由属性点」弹窗，两个弹窗都处理干净才回到游戏。奖励面板与关卡战果会显示一张「武器／技能 三选一」卡。
 
 **升级成长与「自由属性点」**：每级仍是 4 个点位（3 点属性 + 生命 5），但**其中 1 点不再随机，留给玩家在升级弹窗里当场选掉**（另外 2 点照旧随机，各 1/4 概率 +5 生命）。四个可选项是**力量／敏捷／速度各 +1、生命 +5**，点数**不进背包、不在任何页面常驻显示**（升级那一下就必须用完）。弹窗没有关闭叉，Esc 与背景点击都关不掉，剩余点数清零后「确定」才可用，另有「平均分配」一键铺平（调试「一键满级」攒几十点时用）。规则：**四项占比 = 该项 ÷（力+敏+速 + 生命÷10）**（生命按 10 点折算 1 点属性——自然成长到 15 级时三项约 14.6、生命约 145，四项刚好各占约 25%），**任意一项低于 20%（平均份额的八成）时必须先补它，由系统直接替玩家选**：升级结算时就地补上并在奖励面板标「系统代选」；弹窗里点别的项也会被 `State.allocatePoint` 改成补最低的那一项，并提示「生命占比过低，系统自动分配到生命」。实测一直堆同一项时会收敛：2~20 级里系统代选 248 次、玩家自己做主 512 次（首次能自己做主的等级平均 3.1 级），40 级里一直点力量也只有 10 次被拉回平衡，四项最终稳定在 20%~35%。离线对手 `genAI` 用同一套成长预算与代选规则，所以关卡难度标定仍以「平均玩家」为准；实测把自由点全堆力量并不会变强（200 场：螳螂★2 通关率 57% → 44%），因为敏捷（闪避）与速度（出手）被饿着了。
 
@@ -82,9 +107,9 @@ node tools/serve.js 8080
 
 体力药剂**可以顶到自然上限之上**，最高 **999** 点；超出部分不会自然回复，但照样能用来挑战，存档往返也不会被清掉。**单个道具的数量上限是 9999**（`State.PROP_HARD_CAP`）：任何来源都不会超过，存档写入与读档都会收口。
 
-**背包道具按「购买价的一半」回收**（`State.propSellPrice` = `Math.floor(字典价格 ÷ 2)`，至少 1 金松果）：字典里标了价的道具共 **23 种**可卖——大小体力药剂（3/5 → 1/2）、力量/敏捷/速度丸与经验丸（20 → 10）、挑战书（20 → 10）、英雄帖与勇气徽章（10 → 5）、转生果（300 → **150**）、天使果实（200 → **100**，与旧规则同价）、转化丸（240 → 120）、属性书与红包（1000 → 500）、1~7 级宝石（20 → 10）。字典里价格是 0 或占位 1 的道具**不开放回收**（技能/武器卷轴、三种碎片、五个礼包、天梯碎片、抽奖卷、超级药丸、天使/恶魔果实种子、恶魔果实、推荐大礼包、永久属性道具、金杯）——它们本来就不能购买，没有「半价」可言。背包右侧的道具说明会直接标「可回收 N 金松果/个」，卖出弹窗用滑动条选 1~持有数（默认全卖），确认后原地刷新背包与右上角金松果；`PROP_SELL_OVERRIDES` 留作个别道具单独定价的例外表（比如以后想给宝石按等级定价，改这一处即可）。
+**背包道具按「购买价的一半」回收**（`State.propSellPrice` = `Math.floor(字典价格 ÷ 2)`，至少 1 金松果）：字典里标了价的道具共 **23 种**可卖——大小体力药剂（3/5 → 1/2）、力量/敏捷/速度丸与经验丸（20 → 10）、挑战书（20 → 10）、英雄帖与勇气徽章（10 → 5）、转生果（300 → **150**）、天使果实（200 → **100**，与旧规则同价）、转化丸（240 → 120）、属性书与红包（1000 → 500）、1~7 级宝石（20 → 10）。字典里价格是 0 或占位 1 的道具**不开放回收**（技能/武器卷轴、三种碎片、五个礼包、天梯碎片、抽奖卷、超级药丸、天使/恶魔果实种子、恶魔果实、推荐大礼包、永久属性道具、金杯）——它们本来就不能购买，没有「半价」可言。**卖出入口只在背包页右侧的道具栏（一级界面）**，和「使用／合成」并排；点开「使用」之后的二级弹窗里没有卖出，商店页（含商品详情）也不显示卖出。背包上的「卖出」用滑动条选 1~持有数（默认全卖），确认后原地刷新背包与右上角金松果；`PROP_SELL_OVERRIDES` 留作个别道具单独定价的例外表（比如以后想给宝石按等级定价，改这一处即可）。
 
-**道具动作分两类**：**大小体力药剂（1/2）与碎片合成（24/25/26）**点完**留在详情弹窗里**（原地刷新「拥有 N 个」「体力 x/y」，可以连着点，材料/金松果不够或体力到 999 硬上限时按钮变灰并说明原因）；**其它道具**（礼包、果实、属性书、种子／天梯碎片／宝石合成、经验丸等）用完**直接关掉详情、退回上一级页面（背包／商店）**。两种情况下「返回」都会刷新背包页。**道具详情里不再展示金松果数量**（顶部标签条右上角一直都有）。**能回收的道具（见上一段的 23 种）在详情里多一个「卖出」**，弹出的小窗口用滑动条选数量，可卖的道具在背包右侧还会直接标出回收价。背包里的数量只在图标下方显示数字（**去掉了 `X` 前缀**）。
+**道具动作分两类**：**大小体力药剂（1/2）与碎片合成（24/25/26）**点完**留在详情弹窗里**（原地刷新「拥有 N 个」「体力 x/y」，可以连着点，材料/金松果不够或体力到 999 硬上限时按钮变灰并说明原因）；**商店里非「每日限购 1 件」的商品**（限购 5 的常规货）买完也**不退界面**，原地刷新「今日剩余/拥有」可以接着买，限购 1 件的（转生果、天使果实）买完才退回列表；**其它道具**（礼包、果实、属性书、种子／天梯碎片／宝石合成、经验丸等）用完**直接关掉详情、退回上一级页面（背包／商店）**。两种情况下「返回」都会刷新背包页。**道具详情里不再展示金松果数量**（顶部标签条右上角一直都有），可回收的道具在背包右侧直接标出回收价。背包里的数量只在图标下方显示数字（**去掉了 `X` 前缀**）。
 
 **弹窗不再把底下的界面「挖空」**：顶栏、页脚以及主页的 HUD／活动·聊天图标／村庄门／底部主菜单都始终保留（之前用 `#ui:has(> .classic-modal-overlay) … {visibility:hidden}` 藏掉过，已全部去掉）。小弹窗（道具详情/商店/提示）改成在顶栏与页脚之间的空档里居中（`max-height:466px`，内容超高只让弹窗内容自己滚），所以不会出现「顶栏被切一半、页脚露出半个返回菜单」或者上下整条消失的画面；主页上的活动弹窗就是普通弹窗盖在主页上，HUD 与主菜单照旧可见。
 
@@ -115,9 +140,17 @@ node tools/serve.js 8080
 
 ## 存档与调试
 
-正式存档使用浏览器 `localStorage` 的 `ssdz_save_v1`。本轮兼容旧档并补齐新字段，保留已有等级、属性、资源、武技、装备和关卡进度，不按新规则回溯扣减。系统页支持JSON导出和导入，导入前保留当前键的 `_backup` 副本。
+**主存档是游戏目录下的 `save/progress.json`**：用 `node references/tools/serve.js`（或 `python3 references/tools/serve.py`）启动时，进度只写这个文件（浏览器 localStorage 不再当存档用）。第一次读到文件为空时，会把以前存在浏览器里的老档（`ssdz_save_v1`）自动迁进文件并**删掉旧键**，所以从旧版本升上来不会丢进度。系统页的「存档位置」一块会显示当前用的是哪一种、最后写入/载入时间，并提供「立即写入存档文件」「载入存档文件」两个手动按钮（写入前会比较两边的时间，文件里的进度更新时只提示、不静默覆盖）。
 
-不同浏览器、地址、端口拥有独立存档。音乐开关和音量分别保存为 `ssdz_music_muted`、`ssdz_music_volume`。**BGM 在页面打开时就尝试播放**：`boot()` 一开始与标题画面各播一次，不必等素材加载完或点「开始游戏」。浏览器若按自动播放策略拒绝（Chrome/Edge 在没有任何用户手势前不允许带声音播放），页面左下角会出现「♪ 点击画面任意处开启音乐」的提示，并在**第一次点击／按键**时按当前场景补播（战斗里补的是战斗曲），成功即收起提示、不再重试——也就是说在标题画面随便点一下就能听到音乐，不必先进入某个界面。若浏览器允许自动播放（或加了 `--autoplay-policy=no-user-gesture-required`），开屏直接就有音乐，也不会出现提示。`tools/research/bgm-check.html` 用包装过的 `Audio` 记录创建与 `play()` 次数，`tools/research/bgm-autoplay-check.cjs` 则在放行的 Chrome 里跑同一页做对照。
+**为什么会出现「没有本地服务器接口」**：只有页面能连上带 `/__save` 的服务器时才写得进文件，所以面板会**把具体原因写出来**——`file://` 打开、普通 `python3 -m http.server`（它没有 `/__save`，返回 404）、启动器加了 `--no-save`，或服务器根本没起来；点「立即写入存档文件」的提示条里也是同一句话。看到这句就改用启动器或 `serve.py`/`serve.js` 打开，而不是怀疑存档坏了。
+
+**桌面版（轻壳）也写同一个文件**：外壳先找游戏目录（启动器用环境变量 `SSDZ_GAME_DIR` 告诉它；其次当前工作目录；再其次从 exe 往上找，都要求目录里真有 `index.html`），找到且 `save/` 可写就写 **`E:\松鼠大战怀旧版\save\progress.json`**（系统页「存档位置」显示的也是它）。只有在**找不到游戏目录**时（真正安装到 `Program Files` 这类只读位置）才退回系统应用数据目录：Windows `%APPDATA%\com.ssdz.classic\save\progress.json`、macOS `~/Library/Application Support/com.ssdz.classic/save/progress.json`。两处同时存在存档时，会**比较里面的 `savedAt`，把新的那份搬到当前使用的位置**（所以从旧版桌面版切过来不会让进度变旧）。
+
+没手动跑过启动器、也没写过文件时，桌面版还可以从这些位置找旧档：程序旁边 / 上一层 / 当前目录的 `save/progress.json`。
+
+没有本地服务器时（GitHub Pages、直接 `file://`）没有文件可写，这时才退回浏览器 localStorage，系统页会明确标出「浏览器里（兜底）」；自检档（`?test=1`、`?qa=1`）永远只写 localStorage，绝不碰正式存档文件。`save/` 已在 `.gitignore` 里，不会进版本库。返回 JSON 存档的导出/导入仍然保留（系统页），换机器或备份时用它。
+
+不同浏览器、地址、端口拥有独立存档。音乐开关和音量分别保存为 `ssdz_music_muted`、`ssdz_music_volume`。**BGM 在页面打开时就尝试播放**：`boot()` 一开始与标题画面各播一次，不必等素材加载完或点「开始游戏」。浏览器若按自动播放策略拒绝（Chrome/Edge 在没有任何用户手势前不允许带声音播放），页面左下角会出现「♪ 点击画面任意处开启音乐」的提示，并在**第一次点击／按键**时按当前场景补播（战斗里补的是战斗曲），成功即收起提示、不再重试——也就是说在标题画面随便点一下就能听到音乐，不必先进入某个界面。若浏览器允许自动播放（或加了 `--autoplay-policy=no-user-gesture-required`），开屏直接就有音乐，也不会出现提示。`references/tools/research/bgm-check.html` 用包装过的 `Audio` 记录创建与 `play()` 次数，`references/tools/research/bgm-autoplay-check.cjs` 则在放行的 Chrome 里跑同一页做对照。
 
 按 **Ctrl+Shift+D** 打开开发调试面板，可调整体力、无敌、升级、购买与挑战书等选项。开关保存为 `ssdz_debug`；一键加资源、升级和重置账号会修改当前存档。普通重置回到无武技开局，调试时可指定武器；“彻底重置账号”需两次确认。
 
@@ -133,35 +166,91 @@ node tools/serve.js 8080
 ## 验证
 
 ```powershell
-node tools/test-state.cjs
-node tools/test-balance.cjs
-node tools/test-points.cjs
-node tools/test-combat-rules.cjs
-node tools/test-battle-drops.cjs
-node tools/test-main-battle.cjs
-node tools/test-battle.js
-node tools/test-extras.cjs
-node tools/test-fusion.cjs
-node tools/test-stages.cjs
-node tools/test-stage-balance.cjs
+node references/tools/test-state.cjs
+node references/tools/test-balance.cjs
+node references/tools/test-points.cjs
+node references/tools/test-combat-rules.cjs
+node references/tools/test-battle-drops.cjs
+node references/tools/test-main-battle.cjs
+node references/tools/test-battle.js
+node references/tools/test-extras.cjs
+node references/tools/test-fusion.cjs
+node references/tools/test-stages.cjs
+node references/tools/test-stage-balance.cjs
+node references/tools/check-asset-paths.cjs   # 发布体检：静态引用的大小写与断链（跳过 js/orig、src-tauri 等归档目录）
 ```
 
-关卡难度是**测量**出来的，不是拍出来的：`node tools/stage-balance.cjs [每档场次] [关卡范围] [调参]` 用「推荐等级的随机玩家」跑三星连战，打印推荐等级／低 2 级／低 4 级／高 2 级的通关率并标出不达标档；`node tools/stage-balance-detail.cjs <关卡> <等级>` 给出单人（三维、血量、单场胜率、平均回合、剩余血量）；`node tools/player-curve.cjs [每级采样数]` 实测玩家三围／生命曲线并给出 `STAGE_PLAYER_CURVE` 的拟合建议（成长规则一改就要重跑，再回填 `js/gamedata.js`）。`test-stage-balance.cjs` 是常驻回归：抽 6 档关卡各跑 60 轮连战，断言推荐等级通关率落在 35%~95%、低 4 级明显更难、高 2 级明显更易、每个位置单场胜率不为 0。
+关卡难度是**测量**出来的，不是拍出来的：`node references/tools/stage-balance.cjs [每档场次] [关卡范围] [调参]` 用「推荐等级的随机玩家」跑三星连战，打印推荐等级／低 2 级／低 4 级／高 2 级的通关率并标出不达标档；`node references/tools/stage-balance-detail.cjs <关卡> <等级>` 给出单人（三维、血量、单场胜率、平均回合、剩余血量）；`node references/tools/player-curve.cjs [每级采样数]` 实测玩家三围／生命曲线并给出 `STAGE_PLAYER_CURVE` 的拟合建议（成长规则一改就要重跑，再回填 `js/gamedata.js`）。`test-stage-balance.cjs` 是常驻回归：抽 6 档关卡各跑 60 轮连战，断言推荐等级通关率落在 35%~95%、低 4 级明显更难、高 2 级明显更易、每个位置单场胜率不为 0。
 
-除战斗动画回归外，上述脚本仅需Node.js。`test-battle.js` 需要 `@napi-rs/canvas`，优先查找本地依赖，再尝试Codex桌面附带路径；其他环境可先运行 `npm install --no-save --package-lock=false @napi-rs/canvas`。动画截图写入 `tools/research/battle-check/`。
+除战斗动画回归外，上述脚本仅需Node.js。`test-battle.js` 需要 `@napi-rs/canvas`，优先查找本地依赖，再尝试Codex桌面附带路径；其他环境可先运行 `npm install --no-save --package-lock=false @napi-rs/canvas`。动画截图写入 `references/tools/research/battle-check/`。
 
 - [浏览器自检](http://127.0.0.1:8080/?test=1)：自动检查启动、素材、战斗和功能面板，报告在页面与 `window.__testlog`。
 - [战斗观察](http://127.0.0.1:8080/?test=2)：循环播放多个场景与对手。
-- [开发QA](http://127.0.0.1:8080/tools/qa.html)：高等级测试角色、装备、道具与示例录像；[基础外观](http://127.0.0.1:8080/tools/qa.html?outfit=none) 使用未穿装备的角色；[经典参考服装](http://127.0.0.1:8080/tools/qa.html?outfit=reference) 便于对照新增截图的锁定状态和服装。默认QA角色不变；新经典透明肖像只在一阶忍者护额、拳斗手套、忍者服、忍者鞋全部匹配时使用。
-- `tools/research/` 保留首页、奖励、师徒、逐页界面、[天使种子与碎片](http://127.0.0.1:8080/tools/research/seed-check.html)、[经验竞技场加成](http://127.0.0.1:8080/tools/research/arena-exp-check.html)、[跳过战斗](http://127.0.0.1:8080/tools/research/skip-check.html)（`?mode=random|stage`、`?skip=0` 自然结束）、[道具弹窗与首页数字](http://127.0.0.1:8080/tools/research/popup-check.html)（含 `[data-slider="use-count"]` 滑动条与「只有一个返回键」断言）、[调试面板取物与金杯商店](http://127.0.0.1:8080/tools/research/debug-shop-check.html)（商店每天开放、限兑按天重置）、[批量合成与排行榜下滑](http://127.0.0.1:8080/tools/research/item-action-check.html)（道具弹窗无滑动条、可连点使用/合成、礼包走使用、抽奖金松果同步、抽奖药丸、排行榜下滑）、[调试武技/卖果实/任务随机](http://127.0.0.1:8080/tools/research/debug-ws-sell-check.html)、[满级/礼包/师徒等级/好友](http://127.0.0.1:8080/tools/research/level-friend-check.html)、[BGM 播放](http://127.0.0.1:8080/tools/research/bgm-check.html)（包装 `Audio` 数 `play()` 次数）、[自由属性点](http://127.0.0.1:8080/tools/research/points-check.html)（`__levelUp/__force/__state/__alloc/__even/__confirm/__status/__reward/__bulk`：四项必选弹窗、系统代选、平均分配、奖励卡片、状态页不再有点数面板）与调试检查页。这些检查页加载与 `index.html` 相同的全部样式表（含 `classic-refine.css`），以免截图与线上布局不一致。它们用于开发核对，部分早期断言可能与本轮的新规则不同；当前回归以上述脚本与QA入口为准。
+- [开发QA](http://127.0.0.1:8080/references/tools/qa.html)：高等级测试角色、装备、道具与示例录像；[基础外观](http://127.0.0.1:8080/references/tools/qa.html?outfit=none) 使用未穿装备的角色；[经典参考服装](http://127.0.0.1:8080/references/tools/qa.html?outfit=reference) 便于对照新增截图的锁定状态和服装。默认QA角色不变；新经典透明肖像只在一阶忍者护额、拳斗手套、忍者服、忍者鞋全部匹配时使用。
+- `references/tools/research/` 保留首页、奖励、师徒、逐页界面、[天使种子与碎片](http://127.0.0.1:8080/references/tools/research/seed-check.html)、[经验竞技场加成](http://127.0.0.1:8080/references/tools/research/arena-exp-check.html)、[跳过战斗](http://127.0.0.1:8080/references/tools/research/skip-check.html)（`?mode=random|stage`、`?skip=0` 自然结束）、[道具弹窗与首页数字](http://127.0.0.1:8080/references/tools/research/popup-check.html)（含 `[data-slider="use-count"]` 滑动条与「只有一个返回键」断言）、[调试面板取物与金杯商店](http://127.0.0.1:8080/references/tools/research/debug-shop-check.html)（商店每天开放、限兑按天重置）、[批量合成与排行榜下滑](http://127.0.0.1:8080/references/tools/research/item-action-check.html)（道具弹窗无滑动条、可连点使用/合成、礼包走使用、抽奖金松果同步、抽奖药丸、排行榜下滑）、[调试武技/卖果实/任务随机](http://127.0.0.1:8080/references/tools/research/debug-ws-sell-check.html)、[满级/礼包/师徒等级/好友](http://127.0.0.1:8080/references/tools/research/level-friend-check.html)、[BGM 播放](http://127.0.0.1:8080/references/tools/research/bgm-check.html)（包装 `Audio` 数 `play()` 次数）、[自由属性点](http://127.0.0.1:8080/references/tools/research/points-check.html)（`__levelUp/__force/__state/__alloc/__even/__confirm/__status/__reward/__bulk`：四项必选弹窗、系统代选、平均分配、奖励卡片、状态页不再有点数面板）与调试检查页。这些检查页加载与 `index.html` 相同的全部样式表（含 `classic-refine.css`），以免截图与线上布局不一致。它们用于开发核对，部分早期断言可能与本轮的新规则不同；当前回归以上述脚本与QA入口为准。
 
-本轮确认：状态35/35、数值17/17、加点8/8、战斗规则25/25、拾取12/12、Main集成11/11、扩展玩法36/36、融合9/9、关卡15/15，关卡平衡回归通过，战斗动画回归通过。最终浏览器自检21/21通过，控制台无错误；真实点击验证了限购、属性书、拾取、跳过汇总、录像不重复结算、跳过战斗后的正常结算与页面归属，以及天使种子（已满仍可合成）、经验竞技场的经验丸加成文案、关卡碎片掉落弹窗、排行榜天梯门槛与下滑、超级松鼠、每日任务与领奖、融合材料选择与状态页入口、天梯碎片合成转化丸、升级礼包面板、**道具详情（药剂/碎片可连点、其它道具用完退回背包、没有滑动条、不显示金松果、礼包不再误判成宝石）**、**弹窗打开时底下的界面完整保留**、**主页活动弹窗也不再丢掉 HUD／活动·聊天图标／村庄门／底部主菜单**、**金松果在抽奖/道具/任务结算后立刻同步到右上角**、**BGM 打开页面即尝试播放、被自动播放策略拦下时提示并可在标题画面点一下补播**、**调试取物：金松果/金杯/经验按货币字段结算而不是进背包**、**调试「重置每日与体力计时」会真正清零天梯次数、每日任务进度与领取、金杯商店限兑、免费抽奖与每日礼包**、首页系统字体数字与体力条外框、调试面板（快速获得/遗忘武器技能、一键升级不越满级、一键满级发礼包与领悟武技）、金杯商店每天开放与限兑按天重置、道具 9999 上限、背包数量无 `X` 前缀、天使果实 100 金松果卖出、**大部分道具按半价回收**、每日任务纯随机 1~2 项奖励、碎片竞技场不发经验、经验场季军 45、**满级 70 级与 69 级 179／70 级 180 的体力曲线**、**1/5/10/15/20 级礼包回调**、**师徒候选等级不超过 70**、**好友系统（推荐随机 NPC、加/删好友、切磋零消耗且无悬浮泡、挑战页加好友、列表可下滑且名字不裁切、存档往返）**、**抽奖第 9 项改为两个随机普通药丸**、**每日任务 16 类挑 4 条且「合成或融合装备」等新计数都真的生效**、**关卡难度改成按推荐等级（螳螂10-15／仙鹤15-20／熊猫20-25）标定并逐档实测通关率**、**升级自由属性点（无关闭叉的升级必选弹窗、力量/敏捷/速度/生命四项、低于 20% 由系统代选、平均分配、点数不在任何页面常驻显示、刷新后仍会弹回没点完的点）**。测试通过只说明对应检查项成立，不等于全部玩法组合或视觉细节已与原版一致；证据与限制见 [还原记录](tools/restoration-2026-09-23.md) 与 [APK 对齐改动表](tools/apk-alignment.md)。
+本轮确认：状态35/35、数值17/17、加点8/8、战斗规则25/25、拾取12/12、Main集成11/11、扩展玩法36/36、融合9/9、关卡15/15，关卡平衡回归通过，战斗动画回归通过。最终浏览器自检21/21通过，控制台无错误；真实点击验证了限购、属性书、拾取、跳过汇总、录像不重复结算、跳过战斗后的正常结算与页面归属，以及天使种子（已满仍可合成）、经验竞技场的经验丸加成文案、关卡碎片掉落弹窗、排行榜天梯门槛与下滑、超级松鼠、每日任务与领奖、融合材料选择与状态页入口、天梯碎片合成转化丸、升级礼包面板、**道具详情（药剂/碎片可连点、其它道具用完退回背包、没有滑动条、不显示金松果、礼包不再误判成宝石）**、**弹窗打开时底下的界面完整保留**、**主页活动弹窗也不再丢掉 HUD／活动·聊天图标／村庄门／底部主菜单**、**金松果在抽奖/道具/任务结算后立刻同步到右上角**、**BGM 打开页面即尝试播放、被自动播放策略拦下时提示并可在标题画面点一下补播**、**调试取物：金松果/金杯/经验按货币字段结算而不是进背包**、**调试「重置每日与体力计时」会真正清零天梯次数、每日任务进度与领取、金杯商店限兑、免费抽奖与每日礼包**、**升级武器/技能三选一（弹窗三张卡、手气不错全部随机、选完才轮到加点）**、**卖出只出现在背包一级界面（使用旁边）、商店与二级弹窗都没有卖出、商店非限购品买完不退界面**、**存档文件（save/progress.json 自动写入、启动时提示载入、不静默覆盖）**、**每日抽奖金松果 40／英雄帖 3**、首页系统字体数字与体力条外框、调试面板（快速获得/遗忘武器技能、一键升级不越满级、一键满级发礼包与三选一）、金杯商店每天开放与限兑按天重置、道具 9999 上限、背包数量无 `X` 前缀、天使果实 100 金松果卖出、**大部分道具按半价回收（背包一级界面卖出）**、每日任务纯随机 1~2 项奖励、碎片竞技场不发经验、经验场季军 45、**满级 70 级与 69 级 179／70 级 180 的体力曲线**、**1/5/10/15/20 级礼包回调**、**师徒候选等级不超过 70**、**好友系统（推荐随机 NPC、加/删好友、切磋零消耗且无悬浮泡、挑战页加好友、列表可下滑且名字不裁切、存档往返）**、**抽奖第 9 项改为两个随机普通药丸**、**每日任务 16 类挑 4 条且「合成或融合装备」等新计数都真的生效**、**关卡难度改成按推荐等级（螳螂10-15／仙鹤15-20／熊猫20-25）标定并逐档实测通关率**、**升级自由属性点（无关闭叉的升级必选弹窗、力量/敏捷/速度/生命四项、低于 20% 由系统代选、平均分配、点数不在任何页面常驻显示、刷新后仍会弹回没点完的点）**。测试通过只说明对应检查项成立，不等于全部玩法组合或视觉细节已与原版一致；证据与限制见 [还原记录](references/tools/restoration-2026-09-23.md) 与 [APK 对齐改动表](references/tools/apk-alignment.md)。
+
+## 在 GitHub 上发布
+
+### 一、只是想玩（什么都不用编译）
+
+1. 下载/克隆本仓库；
+2. Windows 双击仓库根的 **`启动游戏.cmd`**，macOS 双击 `references/tools/launchers/start-mac.command`；
+3. 启动器会优先开**原生窗口**（`src-tauri/dist/ssdz-classic.exe`，约 3 MB；仓库里不带二进制，得自己编译一次，见下），
+   没有原生版就退回「起本地服务器 + 浏览器应用窗口」。
+
+**运行期只认两个可选项**（都没有也能玩，只是存档只能留在浏览器里）：
+
+| 需要 | 干什么用 | 怎么装 |
+| --- | --- | --- |
+| **Node.js ≥ 18**（推荐） | `references/tools/serve.js` 起本地服务器，存档写进 `save/progress.json` | https://nodejs.org 装 LTS 即可 |
+| **Python 3**（兜底） | 没有 Node 时用 `references/tools/serve.py`，功能相同（自带 `/__save`） | 系统自带或 python.org，只用标准库 |
+
+原生窗口（Tauri 轻壳）**不需要** Node/Python：它自带迷你文件服务器；只有「浏览器应用窗口」那条路才需要上面两个之一。
+
+### 二、想改代码 / 自己构建
+
+仓库**没有根 `package.json`、没有构建步骤**——网页版就是纯静态文件。下面这些只在你要做特定事情时才需要：
+
+| 用途 | 需要装什么 | 命令 |
+| --- | --- | --- |
+| 跑回归测试 | Node.js ≥ 18 | `node references/tools/test-state.cjs` 等，见「验证」一节 |
+| 编译桌面轻壳（约 3 MB 的原生窗口） | **Rust ≥ 1.77**（rustup）；Windows 还要 **VS 生成工具**（MSVC C++ + Windows SDK）与 **WebView2 运行时**（Win11 自带）；macOS 要 **Xcode Command Line Tools** | `node references/tools/build-tauri-app.cjs` |
+| 打独立安装包（内嵌前端，约 47 MB） | 上面那些 + 在 `src-tauri` 里 `npm install`（只装 `@tauri-apps/cli` 一个包） | `node references/tools/build-tauri-app.cjs --installer` |
+| 重新生成图标 | 上面的 Rust 环境 | `python references/tools/refine-classic-icons.py` → `cd src-tauri && npx tauri icon app-icon.png` |
+| 素材提取脚本（`references/tools/*.py`） | Python 3 + `pip install pillow numpy` | 按脚本头部说明运行 |
+| 战斗动画回归（`test-battle.js`） | `@napi-rs/canvas` | `npm install --no-save --package-lock=false @napi-rs/canvas` |
+| 发布前自检 | Node.js | `node references/tools/check-asset-paths.cjs`（资源大小写/断链）、`node references/tools/build-tauri-web.cjs --check`（安装包用的前端快照是否最新） |
+
+### 三、三条自动发布流程
+
+| 工作流 | 触发 | 产物 | 说明 |
+| --- | --- | --- | --- |
+| `.github/workflows/pages.yml` | 推 `main` 或手动 | GitHub Pages 静态站 | 纯静态托管，打开网址即玩；存档在浏览器 localStorage（或自建服务器用 `/__save`） |
+| `.github/workflows/release.yml` | 推 `v*` 标签或手动 | 两个便携 zip（mac / win） | 内容：游戏文件 + `serve.js`/`serve.py` + 启动器 + `启动说明.txt`，解压即玩 |
+| `.github/workflows/tauri.yml` | 推 `v*` 标签或手动 | Windows NSIS 安装包、macOS `.dmg`/`.app` | 矩阵在 `macos-latest` + `windows-latest`；用 `tauri.bundle.conf.json` 把前端嵌进安装包（轻壳版不嵌） |
+
+发布步骤（发布便携包与安装包）：
+
+```bash
+node references/tools/check-asset-paths.cjs     # 资源体检
+node references/tools/build-tauri-web.cjs --check   # 安装包前端快照是否最新（打安装包时才需要）
+git tag v0.1.4 && git push origin v0.1.4        # 触发 release.yml + tauri.yml
+```
+
+* 需要的 secret：只有仓库自带的 `GITHUB_TOKEN`（工作流里已声明 `permissions: contents: write`），不需要额外配置。
+* macOS 产物**未签名/未公证**，首次打开要「右键 → 打开」；Windows 未签名会有 SmartScreen 提示。
+* **首次发布前建议先清一次历史**：`node references/tools/clean-git-history.cjs`（先演练，再 `--apply`）。
+  `.gitignore` 早就排除了 `references/*`（原 APK 单个 34 MB）、废弃的 `fonts/` 与旧的 `tools/`，
+  但它们早期已经被提交过，仍占着 .git 的体积；这个脚本只重写历史、不动工作区。
+  重写后如果之前推过，需要 `git push --force --all && git push --force --tags`，协作者要重新 clone。
 
 ## 来源、限制与代码
 
 图片依据包括 `references/`、`references/new/` 和经典状态截图 [classic-status-360.jpg](references/classic-status-360.jpg)。原始安卓包 `references/h5ssdz_9game_4230.apk` 也在库内（35,572,039 字节）：它是明文 ZIP，内层 `assets/game.zip` 的 456 个资源已与本项目逐字节核对（443 个完全一致、0 个不同），并回收了 13 个此前未入库的原始引擎脚本到 `js/orig/`。未找到经典版完整动画或SWF。
 
-原版是**薄客户端**：战斗结算、掉落、升级奖励、排行榜、VIP 状态全部由 `http://ssdz.u.uc.cn/FightGame` 下发，客户端只负责播放服务端给的 `combatLog`。因此战斗公式无法从 APK「找回」，只能离线设计并明确标注。架构解剖、37 个界面的原始坐标与 76 个服务端接口清单见 [apk-audit/ARCHITECTURE.md](tools/apk-audit/ARCHITECTURE.md)，据此做的改动见 [APK 对齐改动表](tools/apk-alignment.md)。
+原版是**薄客户端**：战斗结算、掉落、升级奖励、排行榜、VIP 状态全部由 `http://ssdz.u.uc.cn/FightGame` 下发，客户端只负责播放服务端给的 `combatLog`。因此战斗公式无法从 APK「找回」，只能离线设计并明确标注。架构解剖、37 个界面的原始坐标与 76 个服务端接口清单见 [apk-audit/ARCHITECTURE.md](references/tools/apk-audit/ARCHITECTURE.md)，据此做的改动见 [APK 对齐改动表](references/tools/apk-alignment.md)。
 
 经典静态角色、卡片、按钮使用截图裁剪或清理，动画仍以APK的高清资源为主。[village.svg](images/classic/village.svg) 是依据截图重新绘制的村庄。原资源清单见 [manifest](images/classic/manifest.json)、[旧参考细节](images/classic/reference-details.json) 和 [新增参考清单](images/classic/new-reference/manifest.json)。每张参考卡只用于匹配的灰色、彩色或选中状态，不代表找回了所有等级变体。
 
@@ -171,8 +260,8 @@ node tools/test-stage-balance.cjs
 - `js/classic-ui.js`、`js/classic-extras.js`、`js/classic-fusion.js`：经典页面、扩展玩法（竞技/天梯/师徒/排行榜/超级松鼠）与融合。
 - `css/classic-refine.css`：本轮参考图布局修订；其余经典样式与模块同名。
 - `js/main.js`：启动、首页、战斗及声音调度；`js/debug.js`：开发调试。
-- [原始客户端研究](tools/research-original.md)、[数值核对](tools/balance-audit.md)、[战斗规则](tools/research-battle-rules.md)、[点击奖励与新图](tools/research-floating-drops.md)、[APK 对齐改动表](tools/apk-alignment.md)：证据与版本取舍。
-- `tools/apk-audit/`：APK 取证与架构工具（零依赖直读 APK、界面坐标导出、公共外框统计、资源逐字节核对）。用 `node tools/apk-audit/view-layout.cjs --list` 起步。
-- `tools/extract-ui-assets.py`、`tools/extract-classic-reference-details.py`、`tools/extract-new-reference-assets.py`、`tools/extract-new-reference-props.py`、`tools/extract-new-reference-buttons.py`：素材提取脚本，需Python/Pillow，部分需Node.js。
+- [原始客户端研究](references/tools/research-original.md)、[数值核对](references/tools/balance-audit.md)、[战斗规则](references/tools/research-battle-rules.md)、[点击奖励与新图](references/tools/research-floating-drops.md)、[APK 对齐改动表](references/tools/apk-alignment.md)：证据与版本取舍。
+- `references/tools/apk-audit/`：APK 取证与架构工具（零依赖直读 APK、界面坐标导出、公共外框统计、资源逐字节核对）。用 `node references/tools/apk-audit/view-layout.cjs --list` 起步。
+- `references/tools/extract-ui-assets.py`、`references/tools/extract-classic-reference-details.py`、`references/tools/extract-new-reference-assets.py`、`references/tools/extract-new-reference-props.py`、`references/tools/extract-new-reference-buttons.py`：素材提取脚本，需Python/Pillow，部分需Node.js。
 
 标题曾用本地下载的「站酷快乐体」（`@font-face UCClassic`）充当原游戏字体，但小字号下发虚发糊，本轮**已彻底弃用并删除 `fonts/` 目录**，全部标题回落到 `"Microsoft YaHei", sans-serif`。项目内不再包含任何第三方字体文件，因此也不涉及字体许可。原游戏素材与数据权利归原权利人。竞技、天梯、好友、师徒、排行榜与超级松鼠均为离线模拟，不提供原服务器、真实玩家对战或公共社交服务。

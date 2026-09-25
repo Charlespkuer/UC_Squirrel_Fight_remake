@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../../">
+<meta charset="UTF-8">
+<title>经验竞技场经验丸加成检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* 开发检查：经验竞技场要吃经验丸加成。
+ * 桩掉 Main.startBattle 让玩家两战全胜（冠军 150 基础经验），
+ * 走真实竞技场 UI 报名与结算，核对「战斗结果」里的经验与加成说明。
+ * 结果在 window.__report.check。 */
+(function () {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.addEventListener('load', async () => {
+    document.title = 'LOADING';
+    localStorage.removeItem('ssdz_debug');
+    await wait(250);
+    State.newGame('竞技场检查');
+    Main.showHome();
+    await wait(400);
+
+    // 桩：立即判定玩家获胜（0 = 玩家）
+    Main.startBattle = function (foe, opts) {
+      setTimeout(() => { if (opts && opts.onEnd) opts.onEnd(0, { rounds: [], hpAfter: [1, 0], maxHp: [1, 1] }); }, 10);
+      return Promise.resolve();
+    };
+
+    const check = {};
+    const clickTop = (sel) => {
+      const nodes = document.querySelectorAll(sel);
+      const n = nodes[nodes.length - 1];
+      if (!n) return false;
+      n.click();
+      return true;
+    };
+    const topModalText = () => {
+      const ms = document.querySelectorAll('.classic-modal-overlay');
+      const m = ms[ms.length - 1];
+      return m ? m.textContent.replace(/\s+/g, ' ').trim() : null;
+    };
+
+    // 跑一场冠军（两连胜）竞技场，返回结算弹窗文本
+    const runChampion = async () => {
+      document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+      ClassicExtras.arena();
+      await wait(200);
+      clickTop('[data-action="arena-exp"]');       // 参加经验竞技场
+      await wait(250);
+      check.reportModal = topModalText();
+      clickTop('.classic-modal-overlay:last-of-type [data-action="0"]');  // 报名参赛
+      await wait(400);
+      check.semiModal = topModalText();
+      clickTop('.classic-modal-overlay:last-of-type [data-action="0"]');  // 开始决赛
+      await wait(400);
+      const text = topModalText();
+      check.settled = text;
+      return text;
+    };
+
+    const S = State.state();
+    S.level = 20; S.maxEnergy = 9999; S.energy = 9999;
+
+    // ?shot=1：只跑一场「一颗经验丸的冠军」，停在战斗结果弹窗上供截图
+    if (/[?&]shot=1/.test(location.search)) {
+      S.exp = 0; S.goldPoint = 100; S.props = {}; S.propsStates = {};
+      S.props[7] = 5; S.propsStates[7] = 1;
+      State.save();
+      await runChampion();
+      window.__report = { check: { shot: true, boostPct: State.expBoostPct(), text: check.settled }, errs: window.__errs };
+      document.title = 'READY';
+      return;
+    }
+
+    S.exp = 0; S.goldPoint = 100; S.props = {}; S.propsStates = {};
+
+    // ---- 无经验丸：冠军 150
+    check.plainPct = State.expBoostPct();
+    const plain = await runChampion();
+    check.plainText = plain;
+    check.plainExp = (plain && (plain.match(/经验 \+(\d+)/) || [])[1]) || null;
+    check.plainHasBoostNote = /经验丸/.test(plain || '');
+
+    // ---- 一颗经验丸（+40%）：冠军 210
+    const S2 = State.state();
+    S2.exp = 0; S2.energy = 9999; S2.props[7] = 5; S2.propsStates[7] = 1;
+    State.save();
+    check.onePct = State.expBoostPct();
+    const one = await runChampion();
+    check.oneText = one;
+    check.oneExp = (one && (one.match(/经验 \+(\d+)/) || [])[1]) || null;
+    check.oneHasBoostNote = /含经验丸 \+40%/.test(one || '');
+    check.onePillConsumed = State.state().propsStates[7] || 0;
+
+    // ---- 两颗（+100%）：冠军 300
+    const S3 = State.state();
+    S3.exp = 0; S3.energy = 9999; S3.props[7] = 5; S3.props[44] = 5; S3.propsStates[7] = 1; S3.propsStates[44] = 1;
+    State.save();
+    check.bothPct = State.expBoostPct();
+    const both = await runChampion();
+    check.bothExp = (both && (both.match(/经验 \+(\d+)/) || [])[1]) || null;
+    check.bothHasBoostNote = /含经验丸 \+100%/.test(both || '');
+
+    // ---- 碎片竞技场：不吃经验丸，只给蓝色碎片
+    const S4 = State.state();
+    S4.exp = 0; S4.energy = 9999; S4.props[26] = 0; S4.propsStates[7] = 1;
+    State.save();
+    document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove());
+    ClassicExtras.arena();
+    await wait(200);
+    clickTop('[data-action="arena-fragment"]');
+    await wait(250);
+    clickTop('.classic-modal-overlay:last-of-type [data-action="0"]');
+    await wait(400);
+    clickTop('.classic-modal-overlay:last-of-type [data-action="0"]');
+    await wait(400);
+    const frag = topModalText();
+    check.fragText = frag;
+    check.fragExp = (frag && (frag.match(/经验 \+(\d+)/) || [])[1]) || null;
+    check.fragShards = State.state().props[26] || 0;
+    check.fragPillKept = State.state().propsStates[7] || 0;
+
+    check.errs = window.__errs;
+    window.__report = { check, errs: window.__errs };
+    document.title = 'READY';
+  });
+})();
+</script>
+</body>
+</html>

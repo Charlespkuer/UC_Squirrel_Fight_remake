@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "松鼠大战怀旧版",
+  "version": "0.1.3",
+  "identifier": "com.ssdz.classic",
+  "build": {
+    "frontendDist": "empty"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Game",
+    "shortDescription": "松鼠大战 怀旧复刻版",
+    "longDescription": "离线单机复刻版：养成、挑战、关卡、竞技、天梯与战斗动画。窗口自带本地文件服务器，直接使用游戏目录里的前端与 save/progress.json。"
+  }
+}

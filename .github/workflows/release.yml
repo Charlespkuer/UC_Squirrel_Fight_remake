@@ -1,0 +1,95 @@
+name: Release portable builds
+
+# 打一个 v* 标签（例如 git tag v0.1.3 && git push origin v0.1.3）就会：
+#   1. 把纯静态游戏打包成两个 zip（Mac 用 / Windows 用，内容一致，只是启动脚本不同）
+#   2. 建一个 GitHub Release 并把 zip 挂上去，别人下载解压即玩
+# 也可以手动触发（Actions → Release portable builds → Run workflow）。
+#
+# 注意：启动脚本不在本文件里现写，而是直接拷贝 references/tools/launchers/ 下维护的那一份，
+# 免得 workflow 与仓库里的脚本各写一套、越走越偏。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 组装两个平台的便携包
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="manual-$(date +%Y%m%d-%H%M)"; fi
+          mkdir -p dist
+
+          # 运行需要的目录（布局与本仓库一致；游戏里全是相对路径，没有绝对路径）
+          COMMON="index.html css js images audio README.md"
+
+          build() {          # $1 = 包名后缀, $2 = 启动器文件名
+            name="squirrel-web-$1"
+            out="dist/$name"
+            rm -rf "$out"
+            mkdir -p "$out/references/tools"
+            cp -R $COMMON "$out/"
+            # 存档接口必须跟着包走：缺了它，游戏里点「写入存档文件」只会提示没有本地服务器接口
+            cp references/tools/serve.js references/tools/serve.py "$out/references/tools/"
+            # 启动器就用仓库里维护的那一份（Node 优先、Python 兜底、应用窗口模式）
+            cp "references/tools/launchers/$2" "$out/$2"
+            chmod +x "$out/$2" 2>/dev/null || true
+            # Windows 的 .cmd 只是 ASCII 外壳，真正的逻辑在同目录的 start-win.ps1 里
+            # （cmd.exe 读 .cmd 里的 UTF-8 中文会把中文注释当命令，导致服务器起不来），
+            # 所以这两个文件必须一起进包。
+            if [ "$1" = "win" ]; then
+              cp references/tools/launchers/start-win.ps1 "$out/start-win.ps1"
+              # Windows 的 .cmd 必须是 CRLF，否则 if(...) 块与 goto 在部分环境下会出错
+              sed -i 's/\r$//' "$out/$2"
+              sed -i 's/$/\r/' "$out/$2"
+            fi
+            cat > "$out/启动说明.txt" <<'TXT'
+          松鼠大战怀旧复刻版 · 便携版
+          ================================
+          1) 解压整个文件夹（不要只把 index.html 拖出来：图片和音频都在 images/ 与 audio/ 里）
+          2) 启动：
+             · macOS  ：双击 start-mac.command
+               首次请右键 → 打开；若提示没有权限，先在「终端」里执行 chmod +x start-mac.command
+             · Windows：双击 start-win.cmd（同目录的 start-win.ps1 要一起留着，不能删）
+             启动器会起一个本地服务器，并用浏览器的「应用窗口」模式打开：没有标签栏、没有地址栏，
+             看着就是一个独立窗口。想用普通标签页就加参数 --browser（例如 start-win.cmd --browser）。
+             双击后命令行窗口会自己关掉：服务器在后台隐藏运行（日志在 save\server.out.log 与
+             save\server.err.log），要停掉它就跑一次 start-win.cmd --stop。
+             端口默认 8080；如果被别的程序占用，启动器会直接告诉你换一个，例如 start-win.cmd 8081。
+          3) Node.js（https://nodejs.org，装 LTS 版即可）与 Python 3 有任意一个就行；
+             两个都没有时会直接打开 index.html —— 那种情况下浏览器不允许本地文件写盘，只能存浏览器里。
+
+          存档：save/progress.json，就在解压出来的文件夹里，拷走这个文件等于备份了进度。
+            没有服务器接口时自动退回浏览器 localStorage；游戏里「系统 → 存档位置」能看到当前是哪种模式。
+
+          想要完全没有浏览器的独立程序窗口：仓库的 .github/workflows/tauri.yml 会构建
+            Windows（.exe 安装包）与 macOS（.dmg）原生安装包，源码在 src-tauri/。
+          TXT
+            sed -i 's/^          //' "$out/启动说明.txt"
+            (cd dist && zip -qr "$name-$TAG.zip" "$name")
+            ls -la "dist/$name-$TAG.zip"
+          }
+
+          build mac start-mac.command
+          build win start-win.cmd
+
+      - name: 创建 Release 并上传
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="manual-$(date +%Y%m%d-%H%M)"; fi
+          NOTES="解压即玩：macOS 双击 start-mac.command，Windows 双击 start-win.cmd，详细说明见包内「启动说明.txt」。"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.zip --clobber
+          else
+            gh release create "$TAG" dist/*.zip --title "$TAG" --generate-notes --notes "$NOTES"
+          fi

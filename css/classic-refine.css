@@ -24,8 +24,8 @@
 .catalog-cell.locked .item-icon img{opacity:1}
 .collection-board .item-icon:has(.reference-art){border:0;box-shadow:none;background:none;border-radius:35px;overflow:hidden}
 .item-icon>.reference-art{width:100%;height:100%;object-fit:fill}
-.collection-board .item-caption{font-family:Georgia,"SimSun",serif;font-size:38px;line-height:46px;color:#860d08}
-.collection-board .selected .item-caption{color:#648a28;font-family:"SimSun",serif;font-size:34px;font-weight:normal}
+.collection-board .item-caption{font-family:Georgia,"SimSun","Songti SC","STSong",serif;font-size:38px;line-height:46px;color:#860d08}
+.collection-board .selected .item-caption{color:#648a28;font-family:"SimSun","Songti SC","STSong",serif;font-size:34px;font-weight:normal}
 .catalog-cell.selected .item-icon{outline:4px solid #278000;outline-offset:0;box-shadow:inset 0 0 0 6px #ecffa7;background:repeating-conic-gradient(from 15deg,#d9f788 0deg 22deg,#a2ce3e 22deg 42deg)}
 .empty-slot{cursor:default}.collection-board .empty-slot .item-icon,.classic-bag-board .empty-slot .item-icon{background:#e6d5a9;border:0;box-shadow:none;border-radius:30px;opacity:.7}
 /* 翻页箭头保持居中偏侧的原有位置（原版字面坐标 (7,371)/(1094,371) 会把箭头压到
@@ -41,17 +41,19 @@
 .bag-grid .catalog-cell{justify-content:flex-start;gap:5px}
 .bag-grid .item-icon{width:174px;height:167px;border:4px solid #774b32;border-radius:34px;box-shadow:inset 0 0 0 5px #fffdf4;background:repeating-conic-gradient(from 15deg at 50% 52%,#f7e9b6 0deg 18deg,#d9c087 18deg 38deg)}
 .bag-grid .selected .item-icon{background:repeating-conic-gradient(from 15deg,#d8f982 0deg 22deg,#a8d23e 22deg 42deg);border-color:#287d00}
-.bag-grid .item-caption{font:36px/44px Georgia,"SimSun",serif;color:#8e1006}
+.bag-grid .item-caption{font:36px/44px Georgia,"SimSun","Songti SC","STSong",serif;color:#8e1006}
 .bag-grid .selected .item-caption{color:#8e1006;font-weight:normal}
 .bag-grid .item-icon:has(.reference-art){border:0;box-shadow:none;background:none;overflow:hidden}
 .bag-grid .selected .item-icon:has(.reference-art){outline:0}
-.bag-grid .shop-stock{font:21px/25px "Microsoft YaHei",sans-serif;color:#866131}
+.bag-grid .shop-stock{font:21px/25px "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;color:#866131}
 .classic-page[data-screen="shop"] .bag-grid .item-icon{height:147px;width:157px}
 .classic-page[data-screen="shop"] .bag-grid .item-caption{font-size:28px;line-height:33px}
 .bag-detail{position:relative;border-radius:58px;background:linear-gradient(#eed4a5,#e2bf82);padding:11px 21px 16px;color:#6a3b15;display:flex;flex-direction:column;min-width:0;overflow:hidden}
-.bag-detail h3{margin:0 -2px 0;padding:7px 5px 12px;border-radius:40px;background:#cfa469;font:38px/43px "SimSun",serif;color:#fff9e9;text-align:center;flex-shrink:0}
-.bag-description{font-family:"SimSun","Microsoft YaHei",serif;font-size:39px;line-height:1.1;flex:1;margin:3px 0 7px;overflow:auto;white-space:pre-line}
+.bag-detail h3{margin:0 -2px 0;padding:7px 5px 12px;border-radius:40px;background:#cfa469;font:38px/43px "SimSun","Songti SC","STSong",serif;color:#fff9e9;text-align:center;flex-shrink:0}
+.bag-description{font-family:"SimSun","Songti SC","Microsoft YaHei",serif;font-size:39px;line-height:1.1;flex:1;margin:3px 0 7px;overflow:auto;white-space:pre-line}
 .bag-item-meta{font-size:22px;line-height:1.4;margin-bottom:7px;color:#80541d}
+.bag-actions{display:flex;gap:14px;justify-content:center;align-items:center;flex-shrink:0}
+.bag-actions .uc-button{align-self:auto}
 .bag-detail .uc-button{align-self:center;font-size:29px;min-height:46px;height:48px;padding:2px 25px;flex-shrink:0}
 .classic-bag-board .page-arrow.bag-next{left:648px;right:auto}
 .attribute-allocation{display:flex;justify-content:center;gap:32px;margin:24px 0}.attribute-allocation label{display:flex;flex-direction:column;gap:10px;color:#795329}.attribute-allocation input{width:130px;padding:10px;border:3px solid #c19b59;border-radius:14px;background:#fff8db;color:#73441a;text-align:center;font:32px Georgia,serif;user-select:text}.allocation-remaining{text-align:center;color:#836120}
@@ -61,7 +63,7 @@
   padding:0 24px 0 12px;border:4px solid #7b5220;border-radius:34px;cursor:pointer;
   background:linear-gradient(#fff6c6,#ffd75c 46%,#f0a81b);
   box-shadow:inset 0 0 0 4px #fffdf3,0 3px 0 #b9832a,0 7px 14px #6b4a2433;
-  font:700 27px/1 "Microsoft YaHei",sans-serif;color:#6b3f12;letter-spacing:2px;text-shadow:0 1px 0 #fff7d0;
+  font:700 27px/1 "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;color:#6b3f12;letter-spacing:2px;text-shadow:0 1px 0 #fff7d0;
   overflow:hidden;transition:transform .14s,filter .14s}
 .status-fusion-link::after{content:"";position:absolute;top:-60%;left:-40%;width:36%;height:220%;pointer-events:none;
   background:linear-gradient(90deg,rgba(255,255,255,0),rgba(255,255,255,.75),rgba(255,255,255,0));
@@ -77,8 +79,8 @@
 .classic-page[data-screen="status"] .status-character{left:-27px;top:15px}
 .status-right{left:510px;right:29px;top:4px}
 .status-exp{position:relative;height:87px;gap:36px;z-index:0}.status-exp:before{content:"";position:absolute;inset:-8px -27px -1px -105px;background:linear-gradient(90deg,transparent,#bada73 27%,#aad069);z-index:-1}
-.status-exp .home-exp-label{font-family:"Microsoft YaHei",sans-serif;font-size:49px;font-style:normal;font-weight:bold;-webkit-text-stroke:7px #17445b;paint-order:stroke fill;text-shadow:none}
-.status-exp .exp-meter{max-width:none;height:69px;border:0;box-shadow:none;background:#154865;border-radius:42px}.status-exp .exp-meter>i{background:#57a9c3}.status-exp .exp-meter>span{font:44px/68px "Microsoft YaHei",sans-serif;color:#fff}
+.status-exp .home-exp-label{font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;font-size:49px;font-style:normal;font-weight:bold;-webkit-text-stroke:7px #17445b;paint-order:stroke fill;text-shadow:none}
+.status-exp .exp-meter{max-width:none;height:69px;border:0;box-shadow:none;background:#154865;border-radius:42px}.status-exp .exp-meter>i{background:#57a9c3}.status-exp .exp-meter>span{font:44px/68px "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;color:#fff}
 .status-lines{padding:11px 66px 3px 61px;grid-template-columns:208px 1fr;gap:11px 6px;font-size:41px}.status-lines dt{-webkit-text-stroke:5px #603c1d;paint-order:stroke fill}.status-lines dd{font-size:58px;line-height:55px;letter-spacing:3px}
 .status-buttons{margin:7px 0 0 47px}.status-buttons .uc-button{height:102px;font-size:44px}
 .classic-page[data-screen="status"]>.classic-board>.stat-strip{left:14px;right:14px;bottom:12px;height:108px;background:#e2bb80;border-radius:60px;align-items:center;padding:17px 16px;gap:18px}
@@ -94,7 +96,7 @@
 .status-buttons .uc-button:has(>.classic-button-art){height:116px;width:280px}
 .gear-overlay{background:#45384da6}.gear-modal{width:1000px;height:598px;max-height:630px;padding:40px 25px 100px;border-radius:62px}.gear-modal .modal-body{height:100%;padding:0;overflow:hidden}.gear-modal .modal-title{font-size:48px}.gear-modal .modal-buttons{position:absolute;bottom:17px;left:0;right:0}.gear-modal .modal-close{display:none}
 .gear-modal .gear-note{position:static;text-align:center;font-size:27px;margin-bottom:12px;color:#6d321d}.gear-modal .gear-layout{height:365px;grid-template-columns:38% 62%;gap:5px}.gear-modal .gear-slots{position:relative;display:block}.gear-modal .gear-slots .catalog-cell{position:absolute;width:140px;height:134px}.gear-modal .gear-slots .catalog-cell:nth-child(1){top:0;left:119px}.gear-modal .gear-slots .catalog-cell:nth-child(2){top:122px;left:202px}.gear-modal .gear-slots .catalog-cell:nth-child(3){top:122px;left:35px}.gear-modal .gear-slots .catalog-cell:nth-child(4){top:244px;left:119px}.gear-modal .gear-slots .item-icon{width:133px;height:119px;background:#ede0bd;border-radius:29px;border:3px solid #a88256;box-shadow:inset 0 0 0 3px #fff7dc}
-.gear-modal .gear-list{gap:3px 17px;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)}.gear-modal .gear-list .item-icon{width:147px;height:138px;border-radius:30px}.gear-modal .gear-list .item-caption{font:27px/32px "SimSun",serif}.gear-modal .gear-capacity{position:absolute;bottom:80px;right:37px;font-size:25px;color:#7b542d}.gear-modal .page-arrow{top:43%;right:2px}.gear-modal .page-arrow.prev{left:350px}
+.gear-modal .gear-list{gap:3px 17px;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)}.gear-modal .gear-list .item-icon{width:147px;height:138px;border-radius:30px}.gear-modal .gear-list .item-caption{font:27px/32px "SimSun","Songti SC","STSong",serif}.gear-modal .gear-capacity{position:absolute;bottom:80px;right:37px;font-size:25px;color:#7b542d}.gear-modal .page-arrow{top:43%;right:2px}.gear-modal .page-arrow.prev{left:350px}
 
 /* 自由属性点：升级时必选的分配弹窗（无关闭叉）；点数不在其它地方常驻显示 */
 .classic-modal-overlay.point-dialog>.classic-modal.small-modal{max-height:600px;width:800px}
@@ -115,3 +117,37 @@
 .reward-card.point .reward-text{display:flex;flex-direction:column;align-items:center;font-size:18px;color:#5b3f96;line-height:1.2}
 .reward-card.point .reward-badge{color:#4a3579;background:radial-gradient(circle at 38% 32%,#efe8ff,#c3b0ee)}
 .point-tag{font-size:13px;color:#8a4a3a;background:#ffe6df;border-radius:8px;padding:0 5px;font-weight:normal}
+.reward-card.skill .reward-badge.ws-badge{color:#2f5f26;background:radial-gradient(circle at 38% 32%,#eaf7dd,#b6dd97)}
+
+/* 升级「三选一」：武器/技能候选（无关闭叉，必须选一个） */
+.classic-modal-overlay.ws-choice-dialog>.classic-modal.small-modal{max-height:620px;width:980px}
+.classic-modal-overlay.ws-choice-dialog>.classic-modal.small-modal>.modal-body{max-height:490px;overflow-y:auto}
+.ws-choice-box{display:flex;flex-direction:column;gap:10px}
+.ws-choice-row{display:flex;gap:16px;justify-content:center;align-items:stretch;flex-wrap:wrap}
+.ws-choice{display:flex;flex-direction:column;align-items:center;gap:6px;width:284px;padding:14px 12px 12px;cursor:pointer;
+  border:4px solid #b98a4c;border-radius:24px;background:linear-gradient(#fffdf1,#f5e6c2);color:#6a3b15;text-align:center;
+  box-shadow:inset 0 0 0 4px #fffdf3,0 3px 0 #c8a870;transition:transform .12s,box-shadow .12s}
+.ws-choice:hover{transform:translateY(-3px);box-shadow:inset 0 0 0 4px #fffdf3,0 6px 0 #c8a870,0 0 16px #d9a94f88}
+.ws-choice .item-icon{width:104px;height:104px;display:flex;align-items:center;justify-content:center}
+.ws-choice .item-icon img{width:96%;height:96%;object-fit:contain}
+.ws-choice-name{font-size:27px;line-height:1.2;color:#7a4a18}
+.ws-choice-kind{font-size:18px;color:#9b7b51}
+.ws-choice-desc{font-size:17px;line-height:1.35;color:#836120;max-height:76px;overflow:hidden}
+@media (prefers-reduced-motion: reduce){.ws-choice{transition:none}.ws-choice:hover{transform:none}}
+
+/* 系统页内容比底板高：实测底板 489px、内容 672px，而 .classic-board 是 overflow:hidden，
+   下半截（音乐音量 / 存档位置 / 说明）会被直接裁掉。这里让系统页可以向下滚动。
+   scrollbar-gutter:stable 与之前修 Windows/macOS 滚动条差异的做法保持一致。 */
+.classic-page[data-screen="system"]>.classic-board{overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#c9af76 #f0e3bf}
+.classic-page[data-screen="system"]>.classic-board::-webkit-scrollbar{width:12px}
+.classic-page[data-screen="system"]>.classic-board::-webkit-scrollbar-track{background:#f0e3bf;border-radius:8px}
+.classic-page[data-screen="system"]>.classic-board::-webkit-scrollbar-thumb{background:#c9af76;border-radius:8px;border:2px solid #f0e3bf}
+
+/* 系统页的「云盘存档」一块（Windows / macOS 共用同一个存档文件） */
+.sync-panel{margin:14px auto 0;max-width:1000px;padding:12px 18px;border-radius:26px;background:#f6e7c4;border:3px solid #cbae78;color:#6a3b15}
+.sync-head{font-size:23px;line-height:1.5}
+.sync-head .small-label{font-size:18px;color:#8a6a3c;margin-left:8px}
+.sync-head code{background:#fff6dd;border-radius:8px;padding:0 6px;font-size:18px}
+.sync-on{color:#3f7a24}.sync-off{color:#9a7a4a}.sync-warn{color:#c0392b}
+.sync-actions{display:flex;gap:14px;margin-top:10px}

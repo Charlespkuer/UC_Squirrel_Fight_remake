@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../../">
+<meta charset="UTF-8">
+<title>背包卖出入口检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle-drops.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+window.addEventListener('load', function () {
+  localStorage.removeItem('ssdz_debug');
+  State.newGame('卖出检查');
+  var S = State.state();
+  S.level = 20; S.energy = S.maxEnergy; S.goldPoint = 500;
+  // 1 药剂（可卖/限购5）2 大药剂（可卖/限购5）3 大力丸（可卖）13 转生果（可卖/限购1）
+  // 23 挑战书（可卖）24 白碎片（不可卖）37 属性书（可卖）47 天使果实（可卖/限购1）51 天梯碎片（不可卖）
+  S.props = { 1: 5, 2: 3, 3: 5, 13: 2, 23: 4, 24: 10, 37: 1, 47: 3, 51: 6 };
+  State.save();
+  Main.showHome();
+  window.__report = { ready: true, errs: window.__errs };
+
+  var wait = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+  var buttonsIn = function (sel) { return [].map.call(document.querySelectorAll(sel), function (b) { return b.textContent.trim(); }); };
+
+  /* 打开背包/商店页，返回右侧道具栏的按钮与说明（商店里会自动翻页找到指定道具） */
+  window.__bag = function (shop, id) {
+    document.querySelectorAll('.classic-modal-overlay').forEach(function (e) { e.remove(); });
+    UI.runAction(shop ? 'shop' : 'bag');
+    if (id) {
+      var cell = document.querySelector('[data-prop="' + id + '"]');
+      for (var i = 0; i < 8 && !cell; i++) {
+        var nx = document.querySelector('[data-action="next"]');
+        if (!nx) break;
+        nx.click();
+        cell = document.querySelector('[data-prop="' + id + '"]');
+      }
+      if (cell) cell.click();
+    }
+    var detail = document.querySelector('.bag-detail');
+    return {
+      page: document.querySelector('#ui .classic-page') ? document.querySelector('#ui .classic-page').dataset.screen : null,
+      actions: buttonsIn('.bag-detail .bag-actions button'),
+      meta: detail && detail.querySelector('.bag-item-meta') ? detail.querySelector('.bag-item-meta').textContent : null,
+      name: detail && detail.querySelector('h3') ? detail.querySelector('h3').textContent : null,
+    };
+  };
+  /* 点开二级弹窗，返回它的按钮（应该没有卖出） */
+  window.__detail = function () {
+    var b = document.querySelector('[data-action="prop-action"]');
+    if (!b) return 'no-main-button';
+    b.click();
+    return { title: (document.querySelector('.classic-modal .modal-title') || {}).textContent, buttons: buttonsIn('.classic-modal .modal-buttons button') };
+  };
+  /* 在二级弹窗里点主按钮（购买/使用），返回弹窗是否还在、库存与持有数 */
+  window.__press = function (id) {
+    var m = document.querySelector('.classic-modal-overlay');
+    var b = [].filter.call(document.querySelectorAll('.classic-modal .modal-buttons button'), function (x) { return !x.disabled; })[0];
+    if (!b) return 'no-enabled-button';
+    b.click();
+    var still = !!document.querySelector('.classic-modal-overlay');
+    return {
+      closed: !still,
+      stock: still && document.querySelector('[data-live="stock"]') ? document.querySelector('[data-live="stock"]').textContent : null,
+      own: State.state().props[id] || 0,
+      gold: State.state().goldPoint,
+      toast: (document.querySelector('.toast') || {}).textContent || '',
+    };
+  };
+  /* 从背包一级界面点「卖出」，返回卖出弹窗内容与结果 */
+  window.__sellFromBag = function (n) {
+    var b = document.querySelector('[data-action="prop-sell"]');
+    if (!b) return 'no-sell-button';
+    b.click();
+    var dlg = [].slice.call(document.querySelectorAll('.classic-modal-overlay')).pop();
+    var range = dlg ? dlg.querySelector('[data-slider="sell-count"] input') : null;
+    var out = { title: dlg ? dlg.querySelector('.modal-title').textContent.trim() : null, max: range ? range.max : null };
+    if (range) { range.value = String(n); range.dispatchEvent(new Event('input', { bubbles: true })); }
+    out.preview = dlg && dlg.querySelector('.use-preview') ? dlg.querySelector('.use-preview').textContent : null;
+    var confirm = dlg ? [].filter.call(dlg.querySelectorAll('.modal-buttons button'), function (x) { return x.textContent.indexOf('确认卖出') === 0; })[0] : null;
+    if (confirm) confirm.click();
+    out.afterGold = State.state().goldPoint;
+    out.afterOwn = State.state().props[3] || 0;
+    out.toast = (document.querySelector('.toast') || {}).textContent || '';
+    return out;
+  };
+  /* 三级界面里是否还能找到「卖出」两个字 */
+  window.__sellAnywhere = function () {
+    return [].filter.call(document.querySelectorAll('.uc-button, .modal-buttons button'), function (b) { return b.textContent.trim() === '卖出'; }).length;
+  };
+
+  var flag = document.createElement('span');
+  flag.id = 'viz-ready';
+  flag.style.display = 'none';
+  document.body.appendChild(flag);
+});
+</script>
+</body>
+</html>

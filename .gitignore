@@ -1,2 +1,28 @@
-references/
+# 参考素材（原 APK、参考图、网页存档）不进仓库
+references/*
+# 但开发工具与测试留在仓库里：它们虽然在 references/ 下，仍然需要版本管理
+!references/tools/
+
 save/
+
+# 依赖与构建产物（本仓库无构建步骤，这些只在本地/CI 出现）
+node_modules/
+package-lock.json
+_site/
+dist/
+
+# Tauri 桌面版：web/ 由 references/tools/build-tauri-web.cjs 生成，
+# icons/ 由 `npx tauri icon app-icon.png` 生成，target/ 是 Rust 编译产物
+src-tauri/web/
+src-tauri/icons/
+src-tauri/target/
+src-tauri/dist/
+src-tauri/node_modules/
+
+# macOS / Windows 的目录噪音
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 检查工具留下的临时截图
+references/tools/research/tmp-*.png

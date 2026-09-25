@@ -202,12 +202,17 @@
         ? '<div class="reward-card point"><span class="reward-icon">' + pointArt(u.autoPoint) + '</span>' +
           '<span class="reward-text" title="' + STAT_CHAR[u.autoPoint] + '占比低于门槛，系统直接代选">' + STAT_CHAR[u.autoPoint] + '+' + State.STAT_GAIN[u.autoPoint] + '<span class="point-tag">系统代选</span></span></div>'
         : '';
+      // 武器/技能三选一：卡片只做提示，真正的选择在弹窗里
+      const wsPick = u.wsChoice
+        ? '<div class="reward-card skill"><span class="reward-icon"><b class="reward-badge ws-badge">选</b></span>' +
+          '<span class="reward-text">武器/技能 三选一</span></div>'
+        : '';
       const giftCards = (u.gifts || []).map((g) =>
         '<div class="reward-card gift"><span class="reward-icon">' + icon('prop', g.id) + '</span>' +
         '<span class="reward-text">' + esc(g.name) + ' ×' + esc(g.count) + '</span></div>').join('');
       return '<div class="reward-panel">' +
         '<div class="reward-title"><img alt="升级奖励" src="' + frameUrl('resource_10', 3) + '"></div>' +
-        '<div class="reward-row">' + cards.join('') + point + bonus + giftCards + '</div>' +
+        '<div class="reward-row">' + cards.join('') + point + wsPick + bonus + giftCards + '</div>' +
         '<div class="reward-level">升到 ' + esc(u.level) + ' 级</div></div>';
     }).join('');
   }
@@ -256,7 +261,7 @@
     $('#ui').appendChild(p);
     bind(p, Object.assign({}, actions, {home}));
     if(window.Main?.resizeLayout)Main.resizeLayout();
-    promptFreePoints();
+    promptLevelUpChoices();
     return p;
   }
   function modal(title, content, buttons, opts) {
@@ -273,8 +278,8 @@
     buttons.forEach((b,i) => { map[i] = () => { if (b.close !== false) close(); if (b.run) b.run(); }; });
     bind(wrap,map);
     $('.modal-buttons button',wrap)?.focus({preventScroll:true});
-    // 有未分配的自由属性点时，任何新弹窗之上都要先把它选完
-    if (!opts.locked) promptFreePoints();
+    // 有升级奖励（武器/技能三选一、自由属性点）没处理时，任何新弹窗之上都要先处理完
+    if (!opts.locked) promptLevelUpChoices();
     return {close,element:wrap};
   }
   function notice(msg, buttons) { return modal('提示', '<p>' + esc(msg) + '</p>', buttons || [{label:'确定'}], {small:true}); }
@@ -287,7 +292,7 @@
     bind($('.classic-home'),actions);buffSignature='';
     refreshHome();
     renderNumbers();
-    promptFreePoints();
+    promptLevelUpChoices();
   }
   function refreshHome() {
     const S = State.state(); if (!S) return;
@@ -501,6 +506,7 @@
           '<span class="reward-text">' + esc(g.name) + ' ×' + esc(g.count) + '</span></div>';
       }).join('');
       const rows = (u.reward ? '<div class="reward-card skill"><span class="reward-text">' + esc(u.reward) + '</span></div>' : '')
+        + (u.wsChoice ? '<div class="reward-card skill"><span class="reward-icon"><b class="reward-badge ws-badge">选</b></span><span class="reward-text">武器/技能 三选一</span></div>' : '')
         + (u.autoPoint ? '<div class="reward-card point"><span class="reward-icon">' + pointArt(u.autoPoint) + '</span><span class="reward-text">' + STAT_CHAR[u.autoPoint] + '+' + State.STAT_GAIN[u.autoPoint] + '<span class="point-tag">系统代选</span></span></div>' : '')
         + gifts;
       return '<div class="reward-panel"><div class="reward-level">升到 ' + esc(u.level) + ' 级</div>' +
@@ -600,11 +606,17 @@
     if(!shown.some(it=>it.id===selectedProp))selectedProp=shown[0]?.id||0;
     const it=shown.find(it=>it.id===selectedProp),status=shop&&it?State.purchaseStatus(it.id):null;
     const sellPrice=it&&!shop?State.propSellPrice(it.id):0;
-    const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个'+(sellPrice?'　可回收 '+sellPrice+' 金松果/个':''))+'</div>'+btn(shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看','prop-action','small gold'):'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
+    // 卖出只在背包的「一级界面」（右侧道具栏，紧挨着 使用/合成）出现：
+    // 商店页不给卖，点开「使用」后的二级弹窗里也没有卖出。
+    const mainLabel=shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看';
+    const bagActions=it?'<div class="bag-actions">'+btn(mainLabel,'prop-action','small gold')+
+      (sellPrice&&(S.props[it.id]||0)>0?btn('卖出','prop-sell','small'):'')+'</div>':'';
+    const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个'+(sellPrice?'　可回收 '+sellPrice+' 金松果/个':''))+'</div>'+bagActions:'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
     const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
     const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,{cls:'classic-bag-board',counter:(bagPage+1)+'/'+total,left:'<span class="footer-left" style="display:flex;gap:12px">'+(exchange?btn('金杯商店','rank-shop','small'):'')+((shop||exchange)?btn('每日抽奖','lottery','small gold'):'')+'</span>'});
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
     $('[data-action="prop-action"]',p)?.addEventListener('click',()=>openProp(selectedProp,shop));
+    $('[data-action="prop-sell"]',p)?.addEventListener('click',()=>sellAsk(selectedProp,()=>openBag(mode,bagPage)));
     if(status&&!status.remaining)$('[data-action="prop-action"]',p).disabled=true;
     $('[data-action="rank-shop"]',p)?.addEventListener('click',()=>ClassicExtras.rankShop());
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openBag(mode,bagPage-1));
@@ -671,8 +683,9 @@
       return{ok:true,msg:'合成成功：'+propMap.getValue(fruit).name};
     };
     // 只有「大小体力药剂」和「碎片合成」需要连着点，弹窗保持打开；
-    // 其它道具（礼包、果实、属性书、种子/天梯碎片/宝石合成…）用完直接退回上一级（背包页）。
+    // 商店里「非每日限购 1 件」的商品也保持打开（买完原地刷新，可以接着买）。
     const stayOpen=!shop&&(isPotion||isFragment);
+    const keepOpen=stayOpen||(shop&&status&&status.limit!==1);
     const useOne=()=>{
       if(!shop&&!canUse&&!isFragment&&!isConvertShard&&!isSeed&&!isGem)return;
       if(!shop&&id===37){allocateAttributes();return;}
@@ -686,17 +699,15 @@
         :State.useProp(id);
       toast(r.msg||(r.gear?'合成成功：'+r.gear.name:'操作完成'));
       if(!r.ok)return;
-      // 药剂与碎片：原地刷新弹窗里的数字，可以继续点
-      if(stayOpen){syncLive();return;}
+      if(keepOpen){syncLive();return;}
       // 其它道具：关掉详情、退回上一级页面（背包/商店）
       m.close();
       openBag(shop,bagPage);
     };
     const buttons=[];
-    // 需要连点的（药剂/碎片）设 close:false，点完不关弹窗
-    if(label)buttons.push({label,close:!stayOpen,run:useOne});
-    // 能给个半价回收的道具都多一个卖出入口，卖完原地刷新
-    if(State.propSellPrice&&State.propSellPrice(id))buttons.push({label:'卖出',cls:'gold',close:false,run:()=>sellAsk(id,()=>syncLive())});
+    // 需要连点的（药剂/碎片/商店非限购品）设 close:false，点完不关弹窗。
+    // 注意：卖出只在背包一级界面提供，这个二级弹窗里没有卖出按钮（商店更没有）。
+    if(label)buttons.push({label,close:!keepOpen,run:useOne});
     buttons.push({label:'返回',cls:'muted',run:()=>openBag(shop,bagPage)});
     const m=modal(shop?'道具商店':'道具详情',content,buttons,{small:true});
     /** 只更新弹窗里的实时数字与按钮状态（不重建弹窗，避免界面跳动）。 */
@@ -763,6 +774,51 @@
     const refresh=()=>{const values=$$('input',m.element).map(e=>Number(e.value));const remaining=8-values.reduce((sum,n)=>sum+n,0);$('.allocation-remaining',m.element).textContent='剩余 '+remaining+' 点';$('[data-action="0"]',m.element).disabled=remaining!==0||values.some(n=>!Number.isInteger(n)||n<0||n>8);};
     $$('input',m.element).forEach(e=>e.oninput=refresh);refresh();
   }
+  /* ---------- 升级「三选一」：武器 / 技能 ----------
+   * 到 WS_LEVELS 的等级时发一组候选（最多 3 个），必须在弹窗里选一个才继续。
+   * 和自由属性点一样是 locked 弹窗；一组选完自动接到下一组，最后再轮到加点弹窗。 */
+  function wsChoiceDialog() {
+    if (typeof State.pendingWS !== 'function' || State.pendingWS() <= 0) return null;
+    if ($$('.classic-modal-overlay').some(o => o.querySelector('.ws-choice-box'))) return null;
+    const list = State.currentWSChoices();
+    if (!list.length) { State.chooseWSRandom(); return null; }
+    const card = (c, i) => '<button type="button" class="ws-choice" data-ws-pick="' + i + '">' +
+      '<span class="item-icon">' + icon(c.kind, c.id) + '</span>' +
+      '<b class="ws-choice-name">' + esc(c.name) + '</b>' +
+      '<span class="ws-choice-kind">' + (c.kind === 'weapon' ? '武器' : '技能') + (c.type ? ' · ' + esc(c.type) : '') + '</span>' +
+      '<span class="ws-choice-desc">' + esc(c.remark || '—') + '</span></button>';
+    const body = '<div class="ws-choice-box"><p class="free-point-tip">升级奖励：从下面' + list.length + ' 个里选一个学会（' +
+      (State.pendingWS() > 1 ? '还有 ' + (State.pendingWS() - 1) + ' 组在后面等着' : '只有这一组') + '）。</p>' +
+      '<div class="ws-choice-row' + (list.length < 3 ? ' few' : '') + '">' + list.map(card).join('') + '</div></div>';
+    const m = modal('选择武器或技能', body, [
+      { label: State.pendingWS() > 1 ? '手气不错（全部随机）' : '随便来一个', cls: 'muted', close: false, run: () => { State.chooseWSRandom(); refresh(); } },
+    ], { small: true, locked: true });
+    m.element.classList.add('ws-choice-dialog');
+    const refresh = () => {
+      if (State.pendingWS() > 0 && State.currentWSChoices().length) {
+        const next = State.currentWSChoices();
+        m.element.querySelector('.modal-body').innerHTML = '<div class="ws-choice-box"><p class="free-point-tip">升级奖励：从下面' + next.length + ' 个里选一个学会（' +
+          (State.pendingWS() > 1 ? '还有 ' + (State.pendingWS() - 1) + ' 组在后面等着' : '最后一组') + '）。</p>' +
+          '<div class="ws-choice-row' + (next.length < 3 ? ' few' : '') + '">' + next.map(card).join('') + '</div></div>';
+        bindPicks();
+        return;
+      }
+      m.close();
+      promptLevelUpChoices();     // 这一组选完了，接着弹加点弹窗（如果还有）
+    };
+    function bindPicks() {
+      $$('[data-ws-pick]', m.element).forEach(b => b.addEventListener('click', () => {
+        const c = State.currentWSChoices()[Number(b.dataset.wsPick)];
+        if (!c) return;
+        const r = State.chooseWS(c.kind, c.id);
+        if (r.ok) toast('学会了【' + r.name + '】');
+        else toast(r.msg || '选择失败');
+        refresh();
+      }));
+    }
+    bindPicks();
+    return m;
+  }
   /* ---------- 自由属性点（升级当场自选，四项平衡，占比过低系统代选） ----------
    * 规则在 State：allocatePoint 会在某一项占比低于门槛时直接代选（redirected=true），
    * 所以界面即使被绕过也守得住。这里只负责把「升级时就得选掉」变成一个没有关闭叉的弹窗，
@@ -813,6 +869,12 @@
     if(typeof State.pendingPoints!=='function'||State.pendingPoints()<=0)return null;
     if($('.point-dialog'))return null;
     return freePointDialog();
+  }
+  /** 升级奖励的统一入口：先选「三选一」的武器/技能，选完再分配自由属性点。 */
+  function promptLevelUpChoices() {
+    if($('.ws-choice-dialog'))return null;
+    if(typeof State.pendingWS==='function'&&State.pendingWS()>0)return wsChoiceDialog();
+    return promptFreePoints();
   }
   function gearImg(g) {
     return '<img alt="" src="images/classic/icons/gear-'+g.id+'.png">';
@@ -955,14 +1017,42 @@
       if (b) b.addEventListener('click', () => { toast(State.claimQuest(q.index).msg); rerender(); });
     });
   }
+  /** 系统页里的「存档位置」一块：显示进度到底存在哪儿，并提供手动写入/载入。 */
+  function saveFilePanel() {
+    const info = State.fileInfo ? State.fileInfo() : { mode: 'local', available: false, checked: false };
+    if (!info.checked) { void State.fileProbe().then(() => { if (screen === 'system') openSystem(); }); }
+    let state;
+    if (info.mode !== 'file') {
+      state = '<b class="sync-off">浏览器里（兜底）</b><span class="small-label">' +
+        esc(info.reason || '没有本地服务器，进度暂存在这个浏览器的 localStorage。') +
+        '<br>用启动器或 <code>node references/tools/serve.js</code> 打开游戏，进度就会写进 <code>save/progress.json</code>。</span>';
+    } else if (info.conflict) {
+      state = '<b class="sync-warn">文件里的进度更新（' + State.syncFormatTime(info.fileAt) + '）</b><span class="small-label">点「载入存档文件」把它取过来（不会静默覆盖）</span>';
+    } else {
+      state = '<b class="sync-on">' + esc(info.path || 'save/progress.json') + '</b><span class="small-label">最后写入 ' + State.syncFormatTime(info.lastWrite) +
+        '　最后载入 ' + State.syncFormatTime(info.lastLoad) + (info.dirty ? '　（有改动正在写入…）' : '') + '</span>';
+    }
+    const useFile = info.mode === 'file';
+    return '<div class="sync-panel"><div class="sync-head">存档位置：' + state + '</div>' +
+      '<div class="sync-actions">' + btn('立即写入存档文件', 'save-write', 'small' + (useFile ? '' : ' muted')) +
+      btn('载入存档文件', 'save-load', 'small' + (useFile ? '' : ' muted')) + '</div></div>';
+  }
   function openSystem() {
     const mute=Main.isMuted&&Main.isMuted();
     const vol=Math.round(100*((Main.volume&&Main.volume())||0));
     const slider='<div class="setting-slider" data-slider="volume"><span class="slider-label">音乐音量</span>'+
       '<input type="range" min="0" max="100" step="1" value="'+vol+'" aria-label="音乐音量">'+
       '<b class="slider-value">'+vol+'%</b></div>';
-    const p=page('system','system','<div class="settings-grid">'+btn(mute?'音乐：关':'音乐：开','sound')+btn('游戏帮助','help')+btn('导出存档','export','gold')+btn('导入存档','import','gold')+btn('每日礼包','daily')+btn('更改昵称','rename')+'</div>'+slider+'<p class="system-caption">松鼠大战 · 怀旧单机版<br>进度自动保存在当前浏览器，可导出存档留作备份。</p>');
+    const p=page('system','system','<div class="settings-grid">'+btn(mute?'音乐：关':'音乐：开','sound')+btn('游戏帮助','help')+btn('导出存档','export','gold')+btn('导入存档','import','gold')+btn('每日礼包','daily')+btn('更改昵称','rename')+'</div>'+slider+saveFilePanel()+'<p class="system-caption">松鼠大战 · 怀旧单机版<br>进度默认写进游戏目录的 save/progress.json（用本地服务器启动时），也可以导出／导入 JSON 存档。</p>');
     $('[data-action="sound"]',p).onclick=()=>{Main.setMuted(!mute);openSystem();};
+    $('[data-action="save-write"]',p).onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};
+    $('[data-action="save-load"]',p).onclick=()=>{
+      const info=State.fileInfo?State.fileInfo():{};
+      notice('用文件里的存档覆盖本机进度？本机当前等级 '+State.state().level+' 级，文件里的存档时间 '+(State.syncFormatTime?State.syncFormatTime(info.fileAt):'—')+'。',[
+        {label:'载入',run:async()=>{const r=await State.fileLoad();toast(r?'已载入存档文件':'载入失败');if(r){refreshHome();openSystem();}}},
+        {label:'取消',cls:'muted'},
+      ]);
+    };
     // 音量滑块：拖动即时生效；拖到 0 等同静音，拉回来自动取消静音
     const range=$('[data-slider="volume"] input',p),value=$('[data-slider="volume"] .slider-value',p);
     range.oninput=()=>{
@@ -1073,7 +1163,7 @@
     }
   });
   window.UI={...legacy,renderHome,drawHomeHud,drawActor,runAction,currentScreen:()=>screen,refreshHome,renderNumbers,refreshHeader,
-    classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints},
+    classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog},
     weaponIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('weapon',id)+'">',
     skillIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('skill',id)+'">',
     propIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('prop',id)+'">'};

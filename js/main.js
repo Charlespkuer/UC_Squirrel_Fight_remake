@@ -47,7 +47,14 @@
   function fitCanvas() {
     // Classic menu screenshots use 920:560; APK combat keeps its native 1170:690.
     const layoutHeight = $('#ui .classic-page') ? W * 560 / 920 : H;
-    const scale = Math.min(window.innerWidth / W, window.innerHeight / layoutHeight);
+    // 用 documentElement.clientWidth/Height：它们**不含**滚动条占的位置，
+    // 而 window.innerWidth/Height 含。Windows 的滚动条占位会让 innerWidth 在
+    // 「弹窗出现/消失」时变化，导致整屏缩放跳一下；macOS 的覆盖式滚动条不占位，
+    // 所以在 mac 上看不出来 —— 这里统一按不含滚动条的尺寸算，两个平台就一致了。
+    const de = document.documentElement || {};
+    const vw = de.clientWidth || window.innerWidth || W;
+    const vh = de.clientHeight || window.innerHeight || layoutHeight;
+    const scale = Math.min(vw / W, vh / layoutHeight);
     canvas.style.width = W * scale + 'px';
     canvas.style.height = H * scale + 'px';
     const ui = $('#ui');
@@ -216,7 +223,11 @@
     setStatus('松鼠大战 · 怀旧单机版');
     UI.installFavicon();
     await new Promise((r) => setTimeout(r, 150));
-    if (State.load()) showHome();
+    // 存档：主存档是游戏目录下的 save/progress.json（本地服务器提供），
+    // 没有服务器时才退回浏览器 localStorage（老档会在第一次读文件时自动迁进去）
+    let loaded = false;
+    try { loaded = await State.fileLoad(); } catch (e) { loaded = false; }
+    if (loaded || State.load()) showHome();
     else showTitle();
     // 首页数字按当前调试设置（数字宽度）重画一次，保证刷新后立即生效
     if (window.UI && UI.renderNumbers) UI.renderNumbers();

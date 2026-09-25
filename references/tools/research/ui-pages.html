@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../../">
+<meta charset="UTF-8">
+<title>界面逐页检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* 开发检查：用真实首页循环渲染，再打开 ?page= 指定的页面，便于逐页截图核对。
+ * page: bag|shop|weapons|skills|gears|status|challenge|stages|messages|system|village
+ * 附加参数：level, gold, energy, maxEnergy, exp（用于构造测试角色） */
+(function () {
+  const q = new URLSearchParams(location.search);
+  const num = (k, d) => (q.has(k) ? Number(q.get(k)) : d);
+  window.addEventListener('load', async () => {
+    document.title = 'LOADING';
+    localStorage.removeItem('ssdz_debug');
+    await new Promise((r) => setTimeout(r, 250));
+    State.newGame('界面检查');
+    const S = State.state();
+    S.level = num('level', 30);
+    S.goldPoint = num('gold', 19980);
+    S.energy = num('energy', 100);
+    S.maxEnergy = num('maxEnergy', 180);
+    S.exp = num('exp', 373);
+    S.props[13] = 2; S.props[23] = 5; S.props[24] = 12; S.props[22] = 8; S.props[21] = 8;
+    // 给一些装备与武器技能，让页面有内容
+    try {
+      for (const id of [1, 2, 3]) { const g = State.addGear(id, [{ id: 1, level: 2 }]); if (g) State.wear(g.key); }
+      for (const id of [5, 6]) { const g = State.addGear(id, []); }
+    } catch (e) {}
+    GData.nextExp = () => 1000;
+    Main.showHome();
+    await new Promise((r) => setTimeout(r, 500));
+    const page = q.get('page');
+    if (page) {
+      UI.runAction(page);
+      await new Promise((r) => setTimeout(r, 700));
+    }
+    // 设计空间坐标（1170×690）便于与原版字面坐标逐项比对
+    const geom = () => {
+      const ui = document.getElementById('ui');
+      const ur = ui.getBoundingClientRect();
+      const s = ur.width / 1170;
+      const at = (sel, i) => {
+        const e = document.querySelectorAll(sel)[i || 0];
+        if (!e) return null;
+        const r = e.getBoundingClientRect();
+        return [+((r.left - ur.left) / s).toFixed(1), +((r.top - ur.top) / s).toFixed(1), +(r.width / s).toFixed(1), +(r.height / s).toFixed(1)];
+      };
+      return {
+        scale: +s.toFixed(4),
+        page: at('.classic-page'), board: at('.classic-board'), tabs: at('.classic-tabs'),
+        tab1: at('.classic-tabs .uc-tab', 0), tab2: at('.classic-tabs .uc-tab', 1),
+        tab3: at('.classic-tabs .uc-tab', 2), tab4: at('.classic-tabs .uc-tab', 3),
+        footer: at('.page-footer'), back: at('.page-footer .uc-button'),
+        prev: at('.page-arrow.prev'), next: at('.page-arrow:not(.prev)'),
+        counter: at('.page-counter'), grid: at('.catalog-grid'), heading: at('.board-heading'),
+      };
+    };
+    window.__pages = {
+      page: page, screen: UI.currentScreen && UI.currentScreen(),
+      hasPage: !!document.querySelector('#ui .classic-page'),
+      sprButtons: [...document.querySelectorAll('.spr-button img')].map((i) => i.getAttribute('src').split('/').pop()),
+      geom: geom(),
+      errs: window.__errs,
+    };
+    window.__report = { pages: window.__pages };
+    document.title = 'READY';
+  });
+})();
+</script>
+</body>
+</html>

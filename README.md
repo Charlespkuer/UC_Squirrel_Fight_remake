@@ -23,7 +23,7 @@ node scripts/serve.js 8080      # 加 --no-save 可关掉存档文件写入
 > save/                             ← 主存档（第一次运行自动创建）
 > scripts/                          ← 启动、停止、同步用到的脚本都在这里
 >     停止游戏.command  一键同步.command  一键同步.cmd
-  重启同步服务.cmd  restart-sync.cmd（同一个东西的英文名版）
+>     重启同步服务.cmd  restart-sync.cmd（同一个东西的英文名版）
 >     serve.js  serve.py  start-game.ps1   sync/（双机同步本体）
 > tools/                            ← 开发与验证（测试、关卡实测、APK 取证、文档）
 > src-tauri/                        ← 桌面轻壳源码（要自己编译桌面版才用得上）

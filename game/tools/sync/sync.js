@@ -72,6 +72,12 @@ const FW_RULE_NAME = 'SSDZ Sync';        // Windows 入站放行规则的名字�
 const DEFAULT_IGNORE = [
   // node_modules 用「任意一层」的写法：src-tauri/node_modules 里是各平台自己的二进制
   // （cli.win32-x64-msvc.node 之类），互相同步只会有害
+  // 一级目录的启动器与仓库文档：它们不属于「游戏本体」。
+  // 两边布局不同时（Windows 还是平铺的旧布局，把启动器/README 也放在游戏目录里），
+  // 对端会把它们当成「本机没有的文件」想拉过来，一拉就在 game/ 里多出一份，所以直接忽略。
+  '启动游戏.cmd', '启动游戏.command', '停止游戏.command',
+  '一键同步.cmd', '一键同步.command', '重启同步服务.cmd',
+  'README.md', '.github/', '.gitignore',
   'save/', 'node_modules', 'package-lock.json', 'references/',
   'src-tauri/target/', 'src-tauri/dist/', 'src-tauri/web/', 'src-tauri/icons/',
   'dist/', 'build/', '_site/',
@@ -246,6 +252,24 @@ function readSaveInfo() {
       data,
     };
   } catch (e) { return { exists: false, size: 0, savedAt: 0, name: '', level: null, data: null }; }
+}
+/** 存档「真正的时间」：优先用存档内容里的 savedAt，文件修改时间只作兜底。
+ *  两边判断谁更新时用这个，才不会因为「接收方写盘时间」而误判。 */
+function saveTimeOf(info) {
+  if (!info) return 0;
+  const t = info.data && Number(info.data.savedAt);
+  if (Number.isFinite(t) && t > 0) return t;
+  return Number(info.savedAt) || 0;
+}
+/** 对端存档的真实时间：新版 /api/save/meta 会直接给 saveTime；老版本就取整份存档来读。 */
+async function remoteSaveTime(peer, meta) {
+  if (meta && Number(meta.saveTime)) return Number(meta.saveTime);
+  try {
+    const full = await getJson(peer.host, peer.port, '/api/save', 8000);
+    const t = full && full.data && Number(full.data.savedAt);
+    if (Number.isFinite(t) && t > 0) return t;
+  } catch (e) {}
+  return meta ? (Number(meta.savedAt) || 0) : 0;
 }
 function describeSave(info, label) {
   if (!info || !info.exists) return label + '：还没有存档';
@@ -650,8 +674,10 @@ async function savePush(peer, opts) {
                remote: remote ? { name: remote.name, level: remote.level, savedAt: remote.savedAt, exists: remote.exists } : null };
   jobLine(describeSave(local, '本机  '));
   if (remote) jobLine(describeSave(remote, '对端  '));
-  if (remote && remote.exists && remote.savedAt > local.savedAt + 1000 && !opts.force) {
-    const msg = '对端的存档比本机新（' + fmtTime(remote.savedAt) + '），没有推送，免得把对面的进度盖旧。';
+  const localAt = saveTimeOf(local);
+  const remoteAt = remote ? await remoteSaveTime(peer, remote) : 0;
+  if (remote && remote.exists && remoteAt > localAt + 1000 && !opts.force) {
+    const msg = '对端的存档比本机新（' + fmtTime(remoteAt) + '），没有推送，免得把对面的进度盖旧。';
     warn('');
     warn('[!] ' + msg);
     warn('    确实要用本机这份覆盖它，就加 --force（对面会自动备份旧档）。');
@@ -660,9 +686,19 @@ async function savePush(peer, opts) {
   if (opts.dry) { log('[dry] 会把本机存档 POST 到 ' + peer.host + ':' + peer.port); return { ok: true }; }
   jobPhase('把存档写到对端');
   const body = fs.readFileSync(SAVE_FILE);
-  const r = await request(peer.host, peer.port, 'POST', '/api/save' + (opts.force ? '?force=1' : ''), {
+  const post = (force) => request(peer.host, peer.port, 'POST', '/api/save' + (force ? '?force=1' : ''), {
     headers: { 'content-type': 'application/json' }, body,
   });
+  let r = await post(opts.force);
+  // 老版本对端是按「文件修改时间」判更新的，可能刚收到过一份存档就把自己判成更新。
+  // 我们已经按存档内容里的 savedAt 确认本机不旧，这种情况自动补一次强制覆盖。
+  const refusedNewer = r.json && !r.json.ok &&
+    (r.json.code === 'PEER_NEWER' || /没有覆盖/.test(String(r.json.msg || '')));   // 老版本对端不返回 code
+  if (refusedNewer && !opts.force && localAt >= remoteAt) {
+    jobLine('对端按文件时间误判成更新，按存档内容时间本机并不旧 → 自动强制覆盖一次');
+    warn('[!] 对端按「文件时间」判成了更新，但按存档内容里的时间本机并不旧，自动强制覆盖一次。');
+    r = await post(true);
+  }
   if (r.status !== 200 || !r.json || !r.json.ok) throw syncError((r.json && r.json.code) || 'PEER_REJECT', (r.json && r.json.msg) || ('对端拒绝：HTTP ' + r.status));
   const note = r.json.backup ? '（对面旧档已备份成 ' + r.json.backup + '）' : '';
   log(green('[√] 已把存档送到「' + peer.name + '」') + note);
@@ -682,8 +718,9 @@ async function savePull(peer, opts) {
   jobLine(describeSave(local, '本机  '));
   jobLine(describeSave(remote, '对端  '));
   if (!remote.exists) return { ok: false, code: 'PEER_NO_SAVE', msg: '对端还没有存档，没什么可取的。' };
-  if (local.exists && local.savedAt > remote.savedAt + 1000 && !opts.force) {
-    const msg = '本机的存档比对端新（' + fmtTime(local.savedAt) + '），没有拉取，免得把本机进度盖旧。';
+  const remoteAtPull = Number(remote.data && remote.data.savedAt) || Number(remote.savedAt) || 0;
+  if (local.exists && saveTimeOf(local) > remoteAtPull + 1000 && !opts.force) {
+    const msg = '本机的存档比对端新（' + fmtTime(saveTimeOf(local)) + '），没有拉取，免得把本机进度盖旧。';
     warn('');
     warn('[!] ' + msg);
     warn('    确实要用对面那份覆盖本机，就加 --force（本机会自动备份旧档）。');
@@ -890,7 +927,7 @@ function createServer() {
           const s = readSaveInfo();
           return sendJson(res, 200, { ok: true, app: APP_TAG, version: APP_VERSION, name: cfg.name || localHostname(), root: ROOT, saveAt: s.savedAt, saveSize: s.size, exists: s.exists, tokenId: tokenId(cfg.token) });
         }
-        if (p === '/api/save/meta') { const s = readSaveInfo(); return sendJson(res, 200, { ok: true, exists: s.exists, savedAt: s.savedAt, size: s.size, name: s.name, level: s.level }); }
+        if (p === '/api/save/meta') { const s = readSaveInfo(); return sendJson(res, 200, { ok: true, exists: s.exists, savedAt: s.savedAt, saveTime: saveTimeOf(s), size: s.size, name: s.name, level: s.level }); }
         if (p === '/api/save' && req.method === 'GET') {
           const s = readSaveInfo();
           return sendJson(res, 200, { ok: true, exists: s.exists, savedAt: s.savedAt, name: s.name, level: s.level, data: s.data });

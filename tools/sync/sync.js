@@ -57,6 +57,7 @@ const OUT_LOG = path.join(SAVE_DIR, 'sync.out.log');
 const ERR_LOG = path.join(SAVE_DIR, 'sync.err.log');
 
 const APP_TAG = 'ssdz-sync';
+const PROCESS_STARTED_AT = Date.now();   // 服务进程启动时刻：用来判断它跑的是不是磁盘上这份新代码
 const APP_VERSION = 1;
 const SAVE_MAX = 4 * 1024 * 1024;                          // 与 serve.js 一致
 const DEFAULT_PORT = 8788;
@@ -69,7 +70,11 @@ const FW_RULE_NAME = 'SSDZ Sync';        // Windows 入站放行规则的名字�
  *   · 其它      = 任意一层目录/文件名等于它
  *   · 以 ! 开头 = 例外（即使前面被忽略也同步），例如 !tools/sync/keep.me */
 const DEFAULT_IGNORE = [
-  'save/', 'node_modules/', 'src-tauri/target/', 'src-tauri/dist/', 'dist/', 'build/',
+  // node_modules 用「任意一层」的写法：src-tauri/node_modules 里是各平台自己的二进制
+  // （cli.win32-x64-msvc.node 之类），互相同步只会有害
+  'save/', 'node_modules', 'package-lock.json', 'references/',
+  'src-tauri/target/', 'src-tauri/dist/', 'src-tauri/web/', 'src-tauri/icons/',
+  'dist/', 'build/', '_site/',
   '.git/', '.cache/', 'tools/sync/sync.config.json', 'tools/sync/.cache.json',
   '.DS_Store', 'Thumbs.db', 'desktop.ini', '._*',
   '*.log', '*.tmp', '*.swp', '*~',
@@ -638,20 +643,39 @@ async function savePull(peer, opts) {
 
 // ---------------------------------------------------------------- 文件同步
 
-async function collectFilePlan(peer, opts) {
-  const local = manifestMap(walk(ROOT, opts.verify));
-  const q = opts.verify ? '?hash=1' : '';
-  const rem = await getJson(peer.host, peer.port, '/api/manifest' + q, 60000);
+/** 拿到两边的清单，按「大小+修改时间」（verify 时按 sha1）算出差集。 */
+async function diffWithPeer(peer, verify) {
+  const local = manifestMap(walk(ROOT, verify));
+  const rem = await getJson(peer.host, peer.port, '/api/manifest' + (verify ? '?hash=1' : ''), 120000);
   const remote = manifestMap(rem.entries || []);
+  // 清单由对端算出来，对端可能是老版本、忽略清单不一样（例如会把 Windows 专属的
+  // src-tauri/node_modules 也列进来）。这里按**本机**的规则再滤一遍，
+  // 保证「我只碰我认为该同步的文件」，不会把对面的平台二进制拉到本机。
+  for (const p of [...remote.keys()]) if (ignored(p)) remote.delete(p);
   const toSend = [], toFetch = [], onlyLocal = [], onlyRemote = [];
   for (const [p, e] of local) {
     const r = remote.get(p);
     if (!r) { onlyLocal.push({ p, e }); continue; }
-    if (!fileDiffers(e, r, opts.verify)) continue;
+    if (!fileDiffers(e, r, verify)) continue;
     if (isNewer(e, r) === 'a') toSend.push({ p, e }); else toFetch.push({ p, r });
   }
   for (const [p, r] of remote) if (!local.has(p)) onlyRemote.push({ p, r });
   return { local, remote, toSend, toFetch, onlyLocal, onlyRemote };
+}
+async function collectFilePlan(peer, opts) {
+  let plan = await diffWithPeer(peer, !!opts.verify);
+  // 两边的文件来自不同来源（zip 解压、U 盘拷、换过机器）时修改时间会整体错开，
+  // 按时间比就会显示「一千多个文件都变了」，真去推等于把几十 MB 原样重传一遍。
+  // 遇到这种数量级就自动改用 sha1 按内容再比一次 —— 实测 1492 个「变了」里只有 17 个是真的。
+  const suspect = plan.toSend.length + plan.toFetch.length;
+  if (!opts.verify && suspect > 200) {
+    log('按修改时间看有 ' + suspect + ' 个文件不同，多半是两边时间戳整体错开；自动改用内容比对（sha1）…');
+    const t0 = Date.now();
+    plan = await diffWithPeer(peer, true);
+    log('内容比对完成（' + ((Date.now() - t0) / 1000).toFixed(1) + 's）：实际不同的只有 ' +
+      (plan.toSend.length + plan.toFetch.length) + ' 个。');
+  }
+  return plan;
 }
 
 async function filesSync(peer, opts, direction) {
@@ -776,7 +800,7 @@ function createServer() {
     if (p === '/api/ping') {
       const s = readSaveInfo();
       // tokenId 只是口令的 6 位指纹，用来让对面判断「我们俩的口令一样吗」，不需要认证也不会泄露口令
-      return sendJson(res, 200, { ok: true, app: APP_TAG, version: APP_VERSION, name: cfg.name || localHostname(), saveAt: s.savedAt, tokenId: tokenId(cfg.token) });
+      return sendJson(res, 200, { ok: true, app: APP_TAG, version: APP_VERSION, name: cfg.name || localHostname(), saveAt: s.savedAt, tokenId: tokenId(cfg.token), startedAt: PROCESS_STARTED_AT });
     }
     if (p.startsWith('/api/')) {
       if (!tokenOk(req)) {
@@ -921,8 +945,14 @@ async function daemonStart(quiet) {
   if (existing) {
     // 已经在跑的服务如果用的还是旧口令（老版本启动时把口令读进内存了），这里自动重启一次，
     // 免得出现「两边 token 明明一样却同步不过去」——用户只要再跑一次 start 就自愈。
+    let codeStale = false;
+    try { codeStale = !!(existing.startedAt && fs.statSync(__filename).mtimeMs > existing.startedAt + 1000); } catch (e) {}
     if (existing.tokenId && existing.tokenId !== tokenId(cfg.token)) {
       if (!quiet) log('同步服务用的还是旧口令（服务指纹 ' + existing.tokenId + '，配置指纹 ' + tokenId(cfg.token) + '），自动重启一次…');
+      daemonStop();
+      await sleep(500);
+    } else if (codeStale) {
+      if (!quiet) log('检测到 sync.js 更新过（服务是旧代码），自动重启一次…');
       daemonStop();
       await sleep(500);
     } else {

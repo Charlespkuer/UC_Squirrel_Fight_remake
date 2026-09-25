@@ -209,6 +209,8 @@ node tools/sync/sync.js doctor win     # win 是 peers 里的名字，也可以�
 
 菜单里也有：Mac 是一键同步菜单的 `c) 自检`，Windows 是 `c) 自检`；Windows 上更省事的是 **`0) 一键准备`**（= `node tools/sync/sync.js prepare`），一次做完「启动后台服务 + 用 UAC 放行 Windows 入站端口 + 自检」。
 
+**Windows 上的后台服务是计划任务，不是普通后台进程。** 从终端（尤其 Windows Terminal）里 `start` 出来的进程属于那个终端所在的 Job Object，**窗口一关就被一起回收**——现象就是「刚才还能连，关了窗口就再也连不上」。所以 Windows 上 `start` / `prepare` / 开机自启都注册一个名为 **`SSDZ Sync`** 的计划任务（`schtasks /SC ONLOGON`），由 Task Scheduler 拉起，关窗口、注销再登录都不受影响；`stop` 会同时结束这个任务。想确认：`schtasks /Query /TN "SSDZ Sync"`。
+
 **谁需要放行防火墙？只有「接收方」需要。** 记住这一条能省一半事：
 
 | 你要做的事 | 谁在监听 | 需要放行防火墙吗 |

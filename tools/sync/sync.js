@@ -508,7 +508,8 @@ async function doctor(opts) {
     }
   } else {
     say('   [x] 没在运行 —— 对端连不上本机');
-    say('       → 双击「一键同步」选「启动后台同步服务」，或跑 node tools/sync/sync.js start');
+    say('       → 双击「一键同步」选「启动后台同步服务」，或跑 node tools/sync/sync.js start'
+      + (process.platform === 'win32' ? '（Windows 上会注册计划任务「' + WIN_TASK_NAME + '」，关掉窗口也不会停）' : ''));
   }
 
   say('');
@@ -886,6 +887,30 @@ function startServer(port) {
   });
 }
 
+// ---------------------------------------------------------------- Windows 计划任务
+/*
+ * 为什么 Windows 上不能只靠 spawn(detached)：
+ *   从终端（尤其 Windows Terminal）里启动的进程属于那个终端所在的 Job Object，窗口一关
+ *   整个 Job 被回收，连 detached 的子进程一起被杀 ——「窗口开着好好的，一关就再也连不上」
+ *   就是这么来的。计划任务由 Task Scheduler 服务拉起，和任何终端/窗口都没关系。
+ * 所以 Windows 上启动后台服务与开机自启一律优先走计划任务，失败才退回 spawn。
+ */
+const WIN_TASK_NAME = 'SSDZ Sync';
+
+function winTaskExists() {
+  try {
+    const r = execFileSync('schtasks', ['/Query', '/TN', WIN_TASK_NAME], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15000 });
+    return r.includes(WIN_TASK_NAME);
+  } catch (e) { return false; }
+}
+function winTaskCreate() {
+  const tr = '"' + process.execPath + '" "' + __filename + '" serve';
+  execFileSync('schtasks', ['/Create', '/TN', WIN_TASK_NAME, '/TR', tr, '/SC', 'ONLOGON', '/F'], { stdio: 'ignore', timeout: 20000 });
+}
+function winTaskRun() { execFileSync('schtasks', ['/Run', '/TN', WIN_TASK_NAME], { stdio: 'ignore', timeout: 20000 }); }
+function winTaskEnd() { try { execFileSync('schtasks', ['/End', '/TN', WIN_TASK_NAME], { stdio: 'ignore', timeout: 15000 }); } catch (e) {} }
+function winTaskDelete() { try { execFileSync('schtasks', ['/Delete', '/TN', WIN_TASK_NAME, '/F'], { stdio: 'ignore', timeout: 15000 }); } catch (e) {} }
+
 // ---------------------------------------------------------------- 后台服务管理
 
 function pingLocal(port) { return pingPeer('127.0.0.1', port, 800); }
@@ -906,6 +931,25 @@ async function daemonStart(quiet) {
     }
   }
   fs.mkdirSync(SAVE_DIR, { recursive: true });
+  if (process.platform === 'win32') {
+    // 计划任务：关掉终端、注销再登录都还在（spawn detached 会被终端所在的 Job 一起回收）
+    try {
+      if (winTaskExists()) winTaskDelete();
+      winTaskCreate();
+      winTaskRun();
+      for (let i = 0; i < 60; i++) {
+        await sleep(250);
+        const info = await pingLocal(cfg.port);
+        if (info) {
+          if (!quiet) log('同步服务已通过计划任务启动（任务名「' + WIN_TASK_NAME + '」，端口 ' + cfg.port + '，关掉窗口也不会停）。');
+          return info;
+        }
+      }
+      warn('[!] 计划任务没能把服务拉起来，改用普通后台进程。');
+    } catch (e) {
+      warn('[!] 建计划任务失败（' + String((e && e.message) || e) + '），改用普通后台进程。');
+    }
+  }
   const out = fs.openSync(OUT_LOG, 'a'), err = fs.openSync(ERR_LOG, 'a');
   const child = spawn(process.execPath, [__filename, 'serve', '--port', String(cfg.port)], {
     detached: true, stdio: ['ignore', out, err], cwd: ROOT,
@@ -919,6 +963,7 @@ async function daemonStart(quiet) {
   throw new Error('同步服务没起来：端口 ' + cfg.port + ' 可能被别的程序占了，看日志 ' + ERR_LOG);
 }
 function daemonStop() {
+  if (process.platform === 'win32') winTaskEnd();   // 计划任务里跑的实例也要一起收掉
   let pid = 0;
   try { pid = parseInt(fs.readFileSync(PID_FILE, 'utf8').trim(), 10); } catch (e) {}
   if (pid && pid > 0) {
@@ -969,11 +1014,10 @@ function autostartInstall() {
     try { execFileSync('launchctl', ['load', '-w', file], { stdio: 'ignore' }); } catch (e) {}
     log('已装好开机自启（LaunchAgent）：' + file);
   } else if (process.platform === 'win32') {
-    const vbs = 'Set s = CreateObject("WScript.Shell")\r\n' +
-      's.CurrentDirectory = "' + ROOT.replace(/"/g, '""') + '"\r\n' +
-      's.Run """' + process.execPath + '"" ""' + __filename + '"" serve", 0, False\r\n';
-    fs.writeFileSync(file, vbs, 'utf8');
-    log('已装好开机自启（启动文件夹）：' + file);
+    // 启动文件夹里的 VBS 会被终端 Job 牵连；计划任务由 Task Scheduler 拉起，最稳
+    winTaskCreate();
+    log('已装好开机自启：计划任务「' + WIN_TASK_NAME + '」（登录即启动，关窗口/注销都不受影响）。');
+    log('想立刻启动：node tools/sync/sync.js start');
   } else {
     const desk = '[Desktop Entry]\nType=Application\nName=SSDZ Sync\nExec="' + process.execPath + '" "' + __filename + '" serve\nX-GNOME-Autostart-enabled=true\n';
     fs.writeFileSync(file, desk, 'utf8');
@@ -982,6 +1026,7 @@ function autostartInstall() {
 }
 function autostartRemove() {
   const file = autostartPath();
+  if (process.platform === 'win32') { winTaskDelete(); log('已删掉计划任务「' + WIN_TASK_NAME + '」。'); return; }
   if (process.platform === 'darwin') { try { execFileSync('launchctl', ['unload', file], { stdio: 'ignore' }); } catch (e) {} }
   try { fs.unlinkSync(file); log('已取消开机自启。'); } catch (e) { log('本来就没有装开机自启。'); }
 }
@@ -1232,6 +1277,7 @@ async function main() {
     const action = argv[1] || 'status';
     if (action === 'install') autostartInstall();
     else if (action === 'remove') autostartRemove();
+    else if (process.platform === 'win32') log('开机自启：' + (winTaskExists() ? ('计划任务「' + WIN_TASK_NAME + '」已安装') : '未安装（跑 autostart install）'));
     else log('开机自启：' + (fs.existsSync(autostartPath()) ? autostartPath() : '未安装'));
     return;
   }

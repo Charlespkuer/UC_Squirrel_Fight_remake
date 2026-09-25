@@ -1255,17 +1255,15 @@ async function main() {
     log('对端：' + info.name + ' @ ' + peer.host + '（服务运行中）');
     const rm = await getJson(peer.host, peer.port, '/api/save/meta', 5000).catch(() => null);
     log('  ' + describeSave(rm, '存档'));
-    const local = manifestMap(walk(ROOT));
-    const rem = await getJson(peer.host, peer.port, '/api/manifest', 60000).catch(() => null);
-    if (rem) {
-      const remote = manifestMap(rem.entries || []);
-      let newerLocal = 0, newerRemote = 0;
-      for (const [p, e] of local) {
-        const r = remote.get(p);
-        if (!r) continue;
-        if (e.m > r.m + 1000) newerLocal++; else if (r.m > e.m + 1000) newerRemote++;
-      }
-      log('  文件：本机 ' + local.size + ' 个 / 对端 ' + remote.size + ' 个，其中 ' + newerLocal + ' 个本机较新、' + newerRemote + ' 个对端较新');
+    // 和 push/pull 用同一套算法（含「差异太多就自动按内容核对」），免得两边报的数字对不上
+    try {
+      const plan = await collectFilePlan(peer, {});
+      const pushN = plan.toSend.length + plan.onlyLocal.length;
+      const pullN = plan.toFetch.length + plan.onlyRemote.length;
+      log('  文件：本机 ' + plan.local.size + ' 个 / 对端 ' + plan.remote.size + ' 个；待推送 ' + pushN +
+        ' 个、待拉取 ' + pullN + ' 个' + (pushN + pullN ? '' : '（两边一致）'));
+    } catch (e) {
+      log('  文件：对端清单取不到（' + String((e && e.message) || e) + '）');
     }
     return;
   }

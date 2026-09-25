@@ -97,6 +97,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ---------------------------------------------------------------- 配置
 
 let config = null;
+let configMtime = -1;      // 配置文件上次读进来时的 mtime：改了文件不用重启服务也能生效
 
 function defaultConfig() {
   return {
@@ -107,22 +108,38 @@ function defaultConfig() {
     ignore: [],         // 额外忽略项（在 DEFAULT_IGNORE 之后生效）
   };
 }
+/** 口令指纹：只暴露 6 位，用来判断两台机器的 token 是不是一样，又不至于把口令本身写进日志。 */
+function tokenId(t) { return crypto.createHash('sha1').update(String(t == null ? '' : t)).digest('hex').slice(0, 6); }
+/**
+ * 读配置。**每次都会 stat 一下文件**：改了 tools/sync/sync.config.json（最常见的是改 token）
+ * 之后不用重启同步服务，下一次请求就用新口令 —— 以前这里是无条件缓存，
+ * 于是出现「两边 token 明明改成一样了，还是报口令不对」，其实是服务进程还拿着启动时的旧口令。
+ */
 function loadConfig() {
-  if (config) return config;
+  let st = null;
+  try { st = fs.statSync(CONFIG_FILE); } catch (e) { st = null; }
+  const mtime = st ? st.mtimeMs : 0;
+  if (config && mtime === configMtime) return config;
+  if (!st && config) return config;                    // 文件暂时读不到，先用手里的
   let raw = null;
   try { raw = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch (e) { raw = null; }
-  if (!raw || typeof raw !== 'object') raw = defaultConfig();
+  if (!raw || typeof raw !== 'object') {
+    if (config) return config;                         // 文件写坏了也别把内存里的好配置冲掉
+    raw = defaultConfig();
+  }
   const cfg = Object.assign(defaultConfig(), raw);
   cfg.port = Number(cfg.port) || DEFAULT_PORT;
   cfg.token = String(cfg.token || '');
   cfg.peers = (cfg.peers && typeof cfg.peers === 'object') ? cfg.peers : {};
   cfg.ignore = Array.isArray(cfg.ignore) ? cfg.ignore : [];
   config = cfg;
+  configMtime = mtime;
   return cfg;
 }
 function saveConfig() {
   fs.mkdirSync(TOOL_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2) + '\n', 'utf8');
+  try { configMtime = fs.statSync(CONFIG_FILE).mtimeMs; } catch (e) { configMtime = -1; }
 }
 /** 没有配置文件就生成一份（含随机口令）。 */
 function ensureConfig() {
@@ -480,8 +497,16 @@ async function doctor(opts) {
   say('');
   say('3) 本机同步服务');
   const svc = await pingLocal(cfg.port);
-  if (svc) say(green('   [√] 正在运行（' + svc.name + '），监听 0.0.0.0:' + cfg.port));
-  else {
+  if (svc) {
+    say(green('   [√] 正在运行（' + svc.name + '），监听 0.0.0.0:' + cfg.port));
+    // 服务进程可能是改口令之前启动的（老版本会把口令读进内存就不再变），这里直接对一下指纹
+    if (svc.tokenId && svc.tokenId !== tokenId(cfg.token)) {
+      say('   [x] 但本机服务用的还是**旧口令**（服务指纹 ' + svc.tokenId + '，配置文件指纹 ' + tokenId(cfg.token) + '）');
+      say('       → 跑一次 node tools/sync/sync.js restart 让服务读到新口令');
+    } else if (svc.tokenId) {
+      say('       服务口令指纹：' + svc.tokenId + '（和配置文件一致）');
+    }
+  } else {
     say('   [x] 没在运行 —— 对端连不上本机');
     say('       → 双击「一键同步」选「启动后台同步服务」，或跑 node tools/sync/sync.js start');
   }
@@ -508,8 +533,15 @@ async function doctor(opts) {
     if (info) {
       say(green('   [√] 同步服务在线：' + info.name + '（存档时间 ' + fmtTime(info.saveAt) + '）'));
       const st = await request(peer.host, peer.port, 'GET', '/api/status', { timeout: 5000 }).catch(() => null);
-      if (st && st.status === 403) say('   [x] 口令不一致：把两边 tools/sync/sync.config.json 的 token 改成一样（菜单第 8 项能看）。');
-      else if (st && st.status === 200) say(green('   [√] 口令一致，可以直接 push / pull。'));
+      const mine = tokenId(cfg.token);
+      if (st && st.status === 403) {
+        const rid = (st.json && st.json.tokenId) || info.tokenId || '（对端版本较老，没返回指纹）';
+        say('   [x] 口令不一致：本机指纹 ' + mine + '，对端指纹 ' + rid);
+        say('       → 把两边 tools/sync/sync.config.json 的 token 改成完全一样（菜单第 8 项看本机的）；');
+        say('       → 改完在对端跑一次 node tools/sync/sync.js restart（老版本服务不重启不生效）。');
+      } else if (st && st.status === 200) {
+        say(green('   [√] 口令一致（指纹 ' + mine + '），可以直接 push / pull。'));
+      }
     } else if (!tcp.ok && /超时/.test(tcp.reason || '')) {
       say('   [x] 连上了但端口没响应 —— 最常见的原因是【对端 Windows 防火墙没放行 ' + peer.port + '】');
       say('       或【对端根本没启动同步服务】。这两件事都要在对端那台机器上做：');
@@ -533,6 +565,10 @@ async function doctor(opts) {
   if (peer) {
     const info = await pingPeer(peer.host, peer.port, 2500);
     if (!info) blockers.push('对端服务连不上（对端没启动服务，或对端防火墙没放行 ' + peer.port + '）');
+    else {
+      const st = await request(peer.host, peer.port, 'GET', '/api/status', { timeout: 5000 }).catch(() => null);
+      if (st && st.status === 403) blockers.push('两边口令（token）不一致 —— 改完要在对端 restart 才生效');
+    }
   }
   if (!blockers.length) say(green('   没发现问题：可以 push / pull 了。'));
   else for (const b of blockers) say('   · ' + b);
@@ -738,14 +774,23 @@ function createServer() {
     // ---- 对端接口（需要口令） ----
     if (p === '/api/ping') {
       const s = readSaveInfo();
-      return sendJson(res, 200, { ok: true, app: APP_TAG, version: APP_VERSION, name: cfg.name || localHostname(), saveAt: s.savedAt });
+      // tokenId 只是口令的 6 位指纹，用来让对面判断「我们俩的口令一样吗」，不需要认证也不会泄露口令
+      return sendJson(res, 200, { ok: true, app: APP_TAG, version: APP_VERSION, name: cfg.name || localHostname(), saveAt: s.savedAt, tokenId: tokenId(cfg.token) });
     }
     if (p.startsWith('/api/')) {
-      if (!tokenOk(req)) return sendJson(res, 403, { ok: false, msg: '同步口令不对：把两边 tools/sync/sync.config.json 里的 token 改成一样' });
+      if (!tokenOk(req)) {
+        return sendJson(res, 403, {
+          ok: false,
+          tokenId: tokenId(cfg.token),
+          msg: '同步口令不对：本机（' + (cfg.name || localHostname()) + '）的口令指纹是 ' + tokenId(cfg.token) +
+            '，和对面不一致。把两边 tools/sync/sync.config.json 的 token 改成一样；' +
+            '改完不用重启（新版会自动读新配置），老版本要跑一次 node tools/sync/sync.js restart。',
+        });
+      }
       try {
         if (p === '/api/status') {
           const s = readSaveInfo();
-          return sendJson(res, 200, { ok: true, app: APP_TAG, version: APP_VERSION, name: cfg.name || localHostname(), root: ROOT, saveAt: s.savedAt, saveSize: s.size, exists: s.exists });
+          return sendJson(res, 200, { ok: true, app: APP_TAG, version: APP_VERSION, name: cfg.name || localHostname(), root: ROOT, saveAt: s.savedAt, saveSize: s.size, exists: s.exists, tokenId: tokenId(cfg.token) });
         }
         if (p === '/api/save/meta') { const s = readSaveInfo(); return sendJson(res, 200, { ok: true, exists: s.exists, savedAt: s.savedAt, size: s.size, name: s.name, level: s.level }); }
         if (p === '/api/save' && req.method === 'GET') {
@@ -981,10 +1026,28 @@ async function connectPeer(arg) {
     const tcp = await tcpProbe(peer.host, peer.port, 3000);
     throw new Error('连不上「' + peer.name + '」(' + peer.host + ':' + peer.port + ')：TCP ' + tcp.reason + '\n' +
       '    · 对端要先把同步服务开着（双击「一键同步」选「启动后台同步服务」，或跑 node tools/sync/sync.js start）；\n' +
-      '    · 对端是 Windows 的话还要放行入站端口：node tools/sync/sync.js firewall（会弹 UAC）；\n' +
+      '    · 对端是 Windows 的话还要放行入站端口：node tools/sync/sync.js prepare（会弹 UAC）；\n' +
       '    · 两边的 ZeroTier 要在线，地址用 node tools/sync/sync.js discover 复查；\n' +
       '    · 两边的同步口令（token）要一样。\n' +
       '    想知道卡在哪一步：node tools/sync/sync.js doctor ' + peer.name);
+  }
+  // 服务在线了：先验口令，别等传到一半才报 403
+  const mine = tokenId(loadConfig().token);
+  const theirs = info.tokenId || null;
+  const st = await request(peer.host, peer.port, 'GET', '/api/status', { timeout: 5000 }).catch(() => null);
+  if (st && st.status === 403) {
+    const remoteId = (st.json && st.json.tokenId) || theirs;
+    throw new Error('口令不一致，连上了但被对端拒绝：\n' +
+      '    本机「' + loadConfig().name + '」口令指纹 ' + mine + '；对端「' + (info.name || peer.name) + '」口令指纹 ' +
+      (remoteId || '（对端版本较老，没返回指纹）') + '\n' +
+      '    → 把两边 tools/sync/sync.config.json 的 token 改成完全一样（菜单第 8 项能看本机的）。\n' +
+      '    → 改完**在对端跑一次** node tools/sync/sync.js restart（老版本的服务启动时就把口令读进内存了，' +
+      '改文件不重启不会生效，这正是「两边 token 明明一样却同步不过去」最常见的原因）。\n' +
+      '    → 对端如果换成新版 sync.js，就不用重启了：每次请求都会重新读配置。');
+  }
+  if (theirs && theirs !== mine) {
+    throw new Error('口令不一致：本机指纹 ' + mine + '，对端指纹 ' + theirs + '。\n' +
+      '    改 tools/sync/sync.config.json 里的 token，两边改成一样即可（新版不用重启，老版本要 restart）。');
   }
   return { peer, info };
 }
@@ -1063,8 +1126,16 @@ async function main() {
     const v = argv[1];
     if (!v) { log(loadConfig().token); return; }
     config.token = String(v).trim(); saveConfig();
-    log('同步口令已改成：' + config.token);
+    log('同步口令已改成：' + config.token + '（指纹 ' + tokenId(config.token) + '）');
     log('记得把另一台机器的 tools/sync/sync.config.json 里的 token 也改成一样。');
+    // 本机服务如果是老版本（启动时把口令读进内存），不重启就不会认新口令 —— 顺手重启掉
+    if (await pingLocal(loadConfig().port)) {
+      daemonStop();
+      await sleep(400);
+      await daemonStart(true);
+      log('本机同步服务已用新口令重启。');
+    }
+    log('对端那台如果还是老版本 sync.js，也要在对端跑一次 node tools/sync/sync.js restart。');
     return;
   }
   if (cmd === 'serve') {

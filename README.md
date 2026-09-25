@@ -223,6 +223,7 @@ node tools/sync/sync.js doctor win     # win 是 peers 里的名字，也可以�
 | `TCP 连接：不通（超时）`，但对端能 ping 通、445/3389 能连 | 对端**没启动同步服务**，或者**防火墙把 8788 丢了**——Windows 防火墙默认静默丢包，所以没放行的端口一律表现为「超时」，而不是「端口没人监听」 | 到对端跑一次 `prepare` |
 | `TCP 连接：不通（端口没人监听）` | 对端服务确实没起来 | 对端 `node tools/sync/sync.js start` |
 | `TCP 通`、`/api/ping` 通，但 `push/pull` 报 403 | 两边 **token 不一样** | 两边菜单第 8 项对一下口令，或 `node tools/sync/sync.js token <同一串>` |
+| 两边 token 文件里明明写成一样了，还是报口令不对 | **对端服务是改口令之前启动的**（老版本启动时就把口令读进内存，改文件不重启不生效） | 在对端跑一次 `node tools/sync/sync.js restart`；对端换成新版 `sync.js` 后就不用重启了（每次请求都重新读配置）。`doctor` 会直接打印两边的**口令指纹**（口令的 6 位哈希），一眼就能看出到底一样不一样 |
 | 第 2 项显示 `ZeroTier 地址：（一个都没检测到）` | ZeroTier 没连上或没装 | 先修 ZeroTier 本身 |
 | 第 3 项显示 `本机同步服务：没在运行` | 对端连不上你这一台 | `node tools/sync/sync.js start`，或装开机自启 |
 

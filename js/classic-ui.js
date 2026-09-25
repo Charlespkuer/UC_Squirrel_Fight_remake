@@ -1035,7 +1035,175 @@
     const useFile = info.mode === 'file';
     return '<div class="sync-panel"><div class="sync-head">存档位置：' + state + '</div>' +
       '<div class="sync-actions">' + btn('立即写入存档文件', 'save-write', 'small' + (useFile ? '' : ' muted')) +
-      btn('载入存档文件', 'save-load', 'small' + (useFile ? '' : ' muted')) + '</div></div>';
+      btn('载入存档文件', 'save-load', 'small' + (useFile ? '' : ' muted')) +
+      btn('从磁盘载入', 'save-import', 'small') + '</div></div>';
+  }
+  /** 选一个本地 .json 文件；返回 Promise<File|null>（null = 用户取消）。
+   *  macOS 的 WKWebView / Safari（原生轻壳、安装包模式）只认**已经挂在文档里**的
+   *  input[type=file]：游离节点上的 .click() 会静默无反应，看起来就是
+   *  「载入存档文件点不动、选不了文件」。所以这里把 input 放进 body 再点，
+   *  并且复用同一个节点（避免反复插入）。 */
+  function pickJsonFile() {
+    return new Promise((resolve) => {
+      let input = $('#ssdz-file-picker');
+      if (!input) {
+        input = document.createElement('input');
+        input.type = 'file';
+        input.id = 'ssdz-file-picker';
+        input.accept = '.json,application/json';
+        input.setAttribute('aria-hidden', 'true');
+        input.tabIndex = -1;
+        input.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;';
+        document.body.appendChild(input);
+      }
+      let done = false;
+      const finish = (file) => {
+        if (done) return; done = true;
+        input.removeEventListener('change', onChange);
+        input.removeEventListener('cancel', onCancel);
+        input.value = '';
+        resolve(file || null);
+      };
+      const onChange = () => finish(input.files && input.files[0]);
+      const onCancel = () => finish(null);
+      input.addEventListener('change', onChange);
+      input.addEventListener('cancel', onCancel);
+      input.value = '';
+      try { input.click(); } catch (e) { finish(null); }
+    });
+  }
+  /** 读文本：优先 File.text()，老 WebKit 没有就退回 FileReader。 */
+  function readFileText(file) {
+    if (file && typeof file.text === 'function') return file.text();
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result == null ? '' : fr.result));
+      fr.onerror = () => reject(new Error('读取文件失败'));
+      fr.readAsText(file);
+    });
+  }
+  /** 系统页「载入存档文件」：可选服务器存档文件，也可从磁盘挑一个 json。 */
+  function loadSaveDialog() {
+    const info = State.fileInfo ? State.fileInfo() : {};
+    const useFile = info.mode === 'file';
+    const buttons = [];
+    if (useFile) {
+      buttons.push({ label: '用存档文件覆盖', run: async () => {
+        const r = await State.fileLoad();
+        toast(r ? '已载入存档文件' : '载入失败');
+        if (r) { refreshHome(); openSystem(); }
+      } });
+    }
+    buttons.push({ label: '选择本地文件…', cls: useFile ? 'muted' : '', run: () => importSave() });
+    buttons.push({ label: '取消', cls: 'muted' });
+    const msg = useFile
+      ? '用文件里的存档覆盖本机进度？本机当前等级 ' + State.state().level + ' 级，文件里的存档时间 ' +
+        (State.syncFormatTime ? State.syncFormatTime(info.fileAt) : '—') + '。'
+      : '当前没有连上本地服务器（' + (info.reason || '存档文件不可用') + '），只能从磁盘上挑一个导出的 .json 存档导入。';
+    notice(msg, buttons);
+  }
+
+  /* ============================================================
+   * 跨设备同步（Mac ↔ Windows，走 ZeroTier）
+   *
+   * 页面上只能读 save/progress.json，读不到整个游戏目录；真正干活的
+   * 是本机的同步服务 tools/sync/sync.js（默认监听 127.0.0.1:8788）。
+   * 所以这里只是它的一个遥控器：/local/status 看状态，/local/save/{push,pull}
+   * 与 /local/files/{push,pull} 让它去和对端说话。服务没开就只提示，不报错。
+   * 端口在 tools/sync/sync.config.json 里可改；改了这里也要跟着改。
+   * ============================================================ */
+  const SYNC_API = 'http://127.0.0.1:8788';
+  const syncState = { checked: false, ok: false, info: null, reason: '', busy: false };
+
+  async function syncFetch(pathname, opts) {
+    opts = opts || {};
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), opts.timeout || 15000) : 0;
+    try {
+      const res = await fetch(SYNC_API + pathname, { method: opts.method || 'GET', signal: ctl ? ctl.signal : undefined });
+      let body = null;
+      try { body = await res.json(); } catch (e) {}
+      if (!res.ok) throw new Error((body && body.msg) || ('同步服务返回 HTTP ' + res.status));
+      if (!body) throw new Error('同步服务返回了看不懂的内容');
+      return body;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  async function syncProbe() {
+    try {
+      const info = await syncFetch('/local/status', { timeout: 2500 });
+      syncState.ok = true; syncState.info = info; syncState.reason = '';
+    } catch (e) {
+      syncState.ok = false; syncState.info = null;
+      syncState.reason = (e && e.name === 'AbortError') ? '同步服务没有响应' : String((e && e.message) || e);
+    }
+    syncState.checked = true;
+  }
+  /** 系统页里「跨设备同步」那一块。 */
+  function syncPanel() {
+    if (!syncState.checked) { void syncProbe().then(() => { if (screen === 'system') openSystem(); }); }
+    const info = syncState.info || {};
+    const peers = Object.keys(info.peers || {});
+    let state;
+    if (!syncState.checked) {
+      state = '<b class="sync-on">检查中…</b>';
+    } else if (!syncState.ok) {
+      state = '<b class="sync-off">同步服务没启动</b><span class="small-label">' +
+        esc(syncState.reason || '本机 127.0.0.1:8788 上没有同步服务。') +
+        '<br>双击游戏目录里的 <code>一键同步.command</code>（Mac）或 <code>一键同步.cmd</code>（Windows）' +
+        '选一次「启动后台同步服务」，就能在这里一键互传存档。</span>';
+    } else if (!peers.length) {
+      state = '<b class="sync-warn">还没找到另一台电脑</b><span class="small-label">本机叫「' + esc(info.name || '?') +
+        '」，ZeroTier 地址 ' + esc((info.selfIps || []).join('、') || '未检测到') +
+        '。点「扫描对端」，或者在对面的机器上跑一次同步菜单里的「扫描」。</span>';
+    } else {
+      state = '<b class="sync-on">已连上：' + peers.map((k) => esc(k) + '（' + esc(info.peers[k]) + '）').join('、') +
+        '</b><span class="small-label">本机「' + esc(info.name || '?') + '」· 存档时间 ' +
+        State.syncFormatTime(info.save && info.save.savedAt) + '　<span class="sync-warn">同步会覆盖对面的存档，先把对面退出游戏</span></span>';
+    }
+    let actions = '';
+    if (syncState.ok && peers.length) {
+      const peer = peers[0];
+      actions = btn('把存档送过去', 'sync-save-push', 'small gold') + btn('取回对面存档', 'sync-save-pull', 'small gold') +
+        btn('推改动的文件', 'sync-files-push', 'small') + btn('拉改动的文件', 'sync-files-pull', 'small');
+      void peer;
+    } else if (syncState.ok) {
+      actions = btn('扫描对端', 'sync-discover', 'small') + btn('重新检测', 'sync-recheck', 'small muted');
+    } else {
+      actions = btn('重新检测', 'sync-recheck', 'small');
+    }
+    return '<div class="sync-panel"><div class="sync-head">跨设备同步：' + state + '</div>' +
+      '<div class="sync-actions">' + actions + '</div></div>';
+  }
+  /** 面板上的按钮实际动作。kind 形如 'save' / 'files'，dir 是 'push' / 'pull'。 */
+  async function syncRun(kind, dir) {
+    if (syncState.busy) { toast('上一次同步还在跑，稍等一下'); return; }
+    const info = syncState.info || {};
+    const peers = Object.keys(info.peers || {});
+    if (!peers.length) { toast('还没找到对端，先点「扫描对端」'); return; }
+    const peer = peers[0];
+    syncState.busy = true;
+    toast(kind === 'save' ? '正在' + (dir === 'push' ? '发送' : '取回') + '存档…' : '正在同步文件…（第一次会比较久）');
+    try {
+      const body = await syncFetch('/local/' + kind + '/' + dir + '?peer=' + encodeURIComponent(peer), { method: 'POST', timeout: kind === 'files' ? 300000 : 30000 });
+      if (kind === 'save' && dir === 'pull' && body.ok) {
+        const loaded = await State.fileLoad();
+        if (loaded) { refreshHome(); }
+        toast(loaded ? '已取回「' + peer + '」的存档（' + State.state().name + ' ' + State.state().level + ' 级）' : '存档已取回，但读取失败');
+      } else if (body.skipped) {
+        toast('没有同步：' + (body.msg || '对面那份更新，未被覆盖'));
+      } else if (body.ok) {
+        toast(kind === 'save' ? '存档已' + (dir === 'push' ? '送到' : '取回') + '「' + peer + '」'
+          : '文件同步完成（' + (body.sent || 0) + ' 个' + (body.failed ? '，失败 ' + body.failed + ' 个' : '') + '）');
+      } else {
+        toast(body.msg || '同步失败');
+      }
+    } catch (e) {
+      toast(String((e && e.message) || e));
+    }
+    syncState.busy = false;
+    if (screen === 'system') openSystem();
   }
   function openSystem() {
     const mute=Main.isMuted&&Main.isMuted();
@@ -1043,16 +1211,23 @@
     const slider='<div class="setting-slider" data-slider="volume"><span class="slider-label">音乐音量</span>'+
       '<input type="range" min="0" max="100" step="1" value="'+vol+'" aria-label="音乐音量">'+
       '<b class="slider-value">'+vol+'%</b></div>';
-    const p=page('system','system','<div class="settings-grid">'+btn(mute?'音乐：关':'音乐：开','sound')+btn('游戏帮助','help')+btn('导出存档','export','gold')+btn('导入存档','import','gold')+btn('每日礼包','daily')+btn('更改昵称','rename')+'</div>'+slider+saveFilePanel()+'<p class="system-caption">松鼠大战 · 怀旧单机版<br>进度默认写进游戏目录的 save/progress.json（用本地服务器启动时），也可以导出／导入 JSON 存档。</p>');
+    const p=page('system','system','<div class="settings-grid">'+btn(mute?'音乐：关':'音乐：开','sound')+btn('游戏帮助','help')+btn('导出存档','export','gold')+btn('导入存档','import','gold')+btn('每日礼包','daily')+btn('更改昵称','rename')+'</div>'+slider+saveFilePanel()+syncPanel()+'<p class="system-caption">松鼠大战 · 怀旧单机版<br>进度默认写进游戏目录的 save/progress.json（用本地服务器启动时），也可以导出／导入 JSON 存档。<br>两台电脑（Mac ↔ Windows，走 ZeroTier）之间可以用「跨设备同步」一键互传存档与改动过的文件。</p>');
     $('[data-action="sound"]',p).onclick=()=>{Main.setMuted(!mute);openSystem();};
     $('[data-action="save-write"]',p).onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};
-    $('[data-action="save-load"]',p).onclick=()=>{
-      const info=State.fileInfo?State.fileInfo():{};
-      notice('用文件里的存档覆盖本机进度？本机当前等级 '+State.state().level+' 级，文件里的存档时间 '+(State.syncFormatTime?State.syncFormatTime(info.fileAt):'—')+'。',[
-        {label:'载入',run:async()=>{const r=await State.fileLoad();toast(r?'已载入存档文件':'载入失败');if(r){refreshHome();openSystem();}}},
-        {label:'取消',cls:'muted'},
-      ]);
-    };
+    $('[data-action="save-load"]',p).onclick=loadSaveDialog;
+    $('[data-action="save-import"]',p).onclick=()=>importSave();
+    const syncBtn=(action,fn)=>{const b=$('[data-action="'+action+'"]',p);if(b)b.onclick=fn;};
+    syncBtn('sync-save-push',()=>syncRun('save','push'));
+    syncBtn('sync-save-pull',()=>syncRun('save','pull'));
+    syncBtn('sync-files-push',()=>syncRun('files','push'));
+    syncBtn('sync-files-pull',()=>syncRun('files','pull'));
+    syncBtn('sync-discover',async()=>{
+      toast('正在扫描 ZeroTier 网段…');
+      try{await syncFetch('/local/discover',{timeout:30000});}catch(e){toast(String((e&&e.message)||e));}
+      syncState.checked=false;
+      if(screen==='system')openSystem();
+    });
+    syncBtn('sync-recheck',()=>{syncState.checked=false;syncState.ok=false;syncState.info=null;openSystem();});
     // 音量滑块：拖动即时生效；拖到 0 等同静音，拉回来自动取消静音
     const range=$('[data-slider="volume"] input',p),value=$('[data-slider="volume"] .slider-value',p);
     range.oninput=()=>{
@@ -1074,15 +1249,17 @@
     };
   }
   function importSave() {
-    const f=document.createElement('input');f.type='file';f.accept='.json,application/json';
-    f.onchange=async()=>{try{
-      const file=f.files[0];if(!file)return;if(file.size>8*1024*1024)throw new Error('存档文件过大');
-      const raw=await file.text(),data=JSON.parse(raw);
-      if(!data||typeof data.name!=='string'||!Number.isFinite(data.level)||!Array.isArray(data.weapons)||!Array.isArray(data.skills)||!data.props)throw new Error('这不是有效的松鼠大战存档');
-      notice('导入【'+data.name+'】'+data.level+'级的存档？当前进度会先自动备份。',[{label:'导入',run:()=>{
-        const old=localStorage.getItem(State.saveKey);try{if(old)localStorage.setItem(State.saveKey+'_backup',old);localStorage.setItem(State.saveKey,raw);if(!State.load())throw new Error('读取存档失败');State.save();home();toast('存档导入成功');}catch(e){if(old)localStorage.setItem(State.saveKey,old);State.load();toast('导入失败，已保留原存档');}
-      }},{label:'取消',cls:'muted'}]);
-    }catch(e){toast(e.message||'无法读取存档');}};f.click();
+    void pickJsonFile().then(async (file) => {
+      if (!file) return;                       // 用户取消
+      try {
+        if (file.size > 8*1024*1024) throw new Error('存档文件过大');
+        const raw = await readFileText(file), data = JSON.parse(raw);
+        if(!data||typeof data.name!=='string'||!Number.isFinite(data.level)||!Array.isArray(data.weapons)||!Array.isArray(data.skills)||!data.props)throw new Error('这不是有效的松鼠大战存档');
+        notice('导入【'+data.name+'】'+data.level+'级的存档？当前进度会先自动备份。',[{label:'导入',run:()=>{
+          const old=localStorage.getItem(State.saveKey);try{if(old)localStorage.setItem(State.saveKey+'_backup',old);localStorage.setItem(State.saveKey,raw);if(!State.load())throw new Error('读取存档失败');State.save();home();toast('存档导入成功');}catch(e){if(old)localStorage.setItem(State.saveKey,old);State.load();toast('导入失败，已保留原存档');}
+        }},{label:'取消',cls:'muted'}]);
+      } catch(e) { toast(e.message||'无法读取存档'); }
+    });
   }
   function openVillage() {
     const p=page('system','village','<div class="settings-grid">'+btn('师徒','master')+btn('竞技场','arena','gold')+btn('天梯赛','rank')+btn('道具商店','shop','gold')+btn('每日抽奖','lottery')+btn('挑战关卡','stages','gold')+'</div><p class="system-caption">欢迎来到松鼠村庄！<br>拜师学艺、收集装备，和松鼠伙伴一起成长。</p>');

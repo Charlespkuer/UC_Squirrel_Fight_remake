@@ -6,8 +6,18 @@
 #           ②没有原生版 → 起本地服务器（Node 优先，其次 Python，存档写进 save/progress.json），
 #            再用 Chrome/Edge 的「应用窗口」模式打开：没有标签栏与地址栏，也是一个独立窗口。
 #
-# 用法：  bash 启动游戏.command [端口] [--no-save] [--browser]
-#   --browser 不走原生窗口、用浏览器打开；--app 是默认行为
+# 双击运行时的行为：**服务器放到后台**（nohup，日志写 save/server.out.log 与
+# save/server.err.log，PID 写 save/.server.pid），本脚本立刻退出，Terminal 窗口自己关掉，
+# 不再像以前那样把一个 bash 永远挂在前台。
+#   想停掉后台服务器：再双击一次本文件、或者在「终端」里执行  bash 启动游戏.command --stop
+#   想在窗口里看实时日志：加 --foreground（服务器回到前台，窗口不会关）
+#   想保留窗口不自动关闭：设环境变量 SSDZ_KEEP_WINDOW=1
+#
+# 用法：  bash 启动游戏.command [端口] [--no-save] [--browser] [--stop] [--foreground]
+#   --browser     不走原生窗口、用浏览器打开；--app 是默认行为
+#   --no-save     服务器只读，不写 save/progress.json
+#   --stop        停掉上一次留在后台的本地服务器，然后退出
+#   --foreground  服务器留在前台（调试用；窗口不会自动关闭）
 cd "$(dirname "$0")" || exit 1
 HERE="$(pwd)"
 # 脚本就在游戏目录里；万一被挪进子目录，就往上找一层
@@ -17,14 +27,66 @@ if [ ! -f "$ROOT/index.html" ]; then
   exit 2
 fi
 cd "$ROOT" || exit 1
+
 PORT=8080
-for a in "$@"; do case "$a" in [0-9]*) PORT="$a";; esac; done
-URL="http://127.0.0.1:$PORT/"
 APP_MODE=1
-for a in "$@"; do [ "$a" = "--browser" ] && APP_MODE=0; done
+FOREGROUND=0
+DO_STOP=0
+SERVER_ARGS=()
+for a in "$@"; do
+  case "$a" in
+    [0-9]*) PORT="$a" ;;
+    --browser|--app) APP_MODE=0 ;;
+    --no-save) SERVER_ARGS+=(--no-save) ;;
+    --stop) DO_STOP=1 ;;
+    --foreground) FOREGROUND=1 ;;
+  esac
+done
+URL="http://127.0.0.1:$PORT/"
+SAVE_DIR="$ROOT/save"
+PID_FILE="$SAVE_DIR/.server.pid"
+OUT_LOG="$SAVE_DIR/server.out.log"
+ERR_LOG="$SAVE_DIR/server.err.log"
 
 echo "松鼠大战怀旧复刻版"
 echo "目录：$(pwd)"
+
+# ---- 退出时把这个 Terminal 窗口关掉（只关我们自己这一个）----
+# 双击 .command 时 Terminal 的窗口标题就是脚本名；手工在终端里跑时标题不是它，
+# 所以这里不会误关你正在用的窗口。osascript 不可用/没授权就什么都不做（静默失败）。
+close_self_window() {
+  [ "${SSDZ_KEEP_WINDOW:-}" = "1" ] && return 0
+  [ "$(uname)" = "Darwin" ] || return 0
+  [ "${TERM_PROGRAM:-}" = "Apple_Terminal" ] || return 0
+  [ -t 0 ] || return 0
+  command -v osascript >/dev/null 2>&1 || return 0
+  local title
+  title="${SSDZ_WINDOW_TITLE:-$(basename "$0")}"
+  title="${title%.command}"; title="${title%.sh}"
+  [ -n "$title" ] || return 0
+  nohup osascript -e 'delay 0.5' \
+    -e "tell application \"Terminal\" to close (every window whose name contains \"$title\")" \
+    >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  return 0
+}
+
+# ---- --stop：停掉上一次留在后台的本地服务器 ----
+if [ "$DO_STOP" = "1" ]; then
+  stopped=0
+  if [ -f "$PID_FILE" ]; then
+    srv_pid="$(tr -dc '0-9' < "$PID_FILE" 2>/dev/null)"
+    if [ -n "$srv_pid" ] && kill -0 "$srv_pid" 2>/dev/null; then
+      kill "$srv_pid" 2>/dev/null && stopped=1
+      sleep 0.3
+      kill -9 "$srv_pid" 2>/dev/null || true
+    fi
+    rm -f "$PID_FILE"
+  fi
+  if [ "$stopped" = "1" ]; then echo "已经停掉后台的本地服务器。"; else echo "没有找到正在运行的后台服务器。"; fi
+  close_self_window
+  exit 0
+fi
 
 # ---- 优先：已经编译好的原生窗口（Tauri 轻壳）----
 # 轻壳自己不存前端：启动时找游戏目录里的 index.html，自带迷你服务器供起来，
@@ -33,13 +95,15 @@ if [ "$APP_MODE" = "1" ]; then
   for app in "$ROOT"/src-tauri/target/release/bundle/macos/*.app "$ROOT"/src-tauri/target/release/bundle/macos/*/*.app; do
     if [ -d "$app" ]; then
       echo "打开方式：原生窗口（Tauri 桌面版）"
-      open "$app" && exit 0
+      open "$app" && { close_self_window; exit 0; }
     fi
   done
   for bin in "$ROOT/src-tauri/dist/ssdz-classic" "$ROOT/src-tauri/target/release/ssdz-classic"; do
     if [ -x "$bin" ]; then
       echo "打开方式：原生窗口（Tauri 轻壳）"
-      "$bin" >/dev/null 2>&1 &
+      nohup "$bin" >/dev/null 2>&1 &
+      disown 2>/dev/null || true
+      close_self_window
       exit 0
     fi
   done
@@ -70,7 +134,8 @@ fi
 open_app() {
   if [ "$APP_MODE" = "1" ] && [ -n "$BROWSER" ]; then
     # 应用窗口用独立配置目录（不污染游戏目录，也不和你平常的浏览器混在一起）
-    "$BROWSER" --app="$URL" --window-size=1216,760 --user-data-dir="$PROFILE_DIR" >/dev/null 2>&1 &
+    nohup "$BROWSER" --app="$URL" --window-size=1216,760 --user-data-dir="$PROFILE_DIR" >/dev/null 2>&1 &
+    disown 2>/dev/null || true
   elif command -v open >/dev/null 2>&1; then
     open "$URL"
   elif command -v xdg-open >/dev/null 2>&1; then
@@ -101,7 +166,14 @@ save_api_ok() {
 if port_busy "$PORT"; then
   if save_api_ok; then
     echo "端口 $PORT 上已经有一个带存档接口的服务器在跑，直接用它（不再新起一个）。"
+    # 记下它的 PID：这样即使是旧版启动器留在前台的服务器，也能用 --stop / 停止游戏.command 收掉。
+    # 能通过 save_api_ok 说明对面确实带 /__save 接口，不会是随便一个占端口的程序。
+    if [ ! -f "$PID_FILE" ] && command -v lsof >/dev/null 2>&1; then
+      old_pid="$(lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1)"
+      [ -n "$old_pid" ] && printf '%s\n' "$old_pid" > "$PID_FILE"
+    fi
     open_app
+    close_self_window
     exit 0
   fi
   echo
@@ -115,24 +187,73 @@ if port_busy "$PORT"; then
   exit 1
 fi
 
-# ---- 优先 Node.js ----
-if command -v node >/dev/null 2>&1; then
-  echo "服务器：Node.js（存档 → save/progress.json）"
-  ( sleep 1; open_app ) &
-  exec node serve.js "$@"
+# ---- 选一个服务器：Node 优先，其次 Python ----
+SERVER_EXE=""
+SERVER_LABEL=""
+SERVER_PRE=()
+if command -v node >/dev/null 2>&1 && [ -f "$ROOT/serve.js" ]; then
+  SERVER_EXE="$(command -v node)"; SERVER_LABEL="Node.js"; SERVER_PRE=("$ROOT/serve.js")
+else
+  PY="$(command -v python3 || command -v python)"
+  if [ -n "$PY" ] && [ -f "$ROOT/serve.py" ]; then
+    SERVER_EXE="$PY"; SERVER_LABEL="Python"; SERVER_PRE=("$ROOT/serve.py")
+  fi
 fi
 
-# ---- 没有 Node 就用 Python（同样带存档接口）----
-PY="$(command -v python3 || command -v python)"
-if [ -n "$PY" ]; then
-  echo "服务器：Python（存档 → save/progress.json）"
-  ( sleep 1; open_app ) &
-  exec "$PY" serve.py "$@"
+if [ -z "$SERVER_EXE" ]; then
+  echo "既没有 Node.js 也没有 Python：进度只能存在浏览器里（localStorage）。"
+  echo "装一个 Node.js（https://nodejs.org）后重新运行本脚本，就能写进 save/progress.json。"
+  if [ "$APP_MODE" = "1" ] && [ -n "$BROWSER" ]; then
+    nohup "$BROWSER" --app="file://$(pwd)/index.html" --window-size=1216,760 --allow-file-access-from-files >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+  elif command -v open >/dev/null 2>&1; then open index.html
+  else echo "请手动打开 index.html"; fi
+  close_self_window
+  exit 3
 fi
 
-echo "既没有 Node.js 也没有 Python：进度只能存在浏览器里（localStorage）。"
-echo "装一个 Node.js（https://nodejs.org）后重新运行本脚本，就能写进 save/progress.json。"
-if [ "$APP_MODE" = "1" ] && [ -n "$BROWSER" ]; then
-  "$BROWSER" --app="file://$(pwd)/index.html" --window-size=1216,760 --allow-file-access-from-files >/dev/null 2>&1 &
-elif command -v open >/dev/null 2>&1; then open index.html
-else echo "请手动打开 index.html"; fi
+echo "服务器：${SERVER_LABEL}（存档 → save/progress.json）"
+
+# ---- 前台模式（--foreground）：保留老行为，方便看日志 ----
+if [ "$FOREGROUND" = "1" ]; then
+  echo "（前台运行，Ctrl+C 结束；本窗口不会自动关闭）"
+  ( sleep 1; open_app ) &
+  exec "$SERVER_EXE" "${SERVER_PRE[@]}" "$PORT" "${SERVER_ARGS[@]}"
+fi
+
+# ---- 后台模式（默认）：起服务器 → 等它真的监听 → 开窗口 → 本脚本退出，窗口自动关闭 ----
+mkdir -p "$SAVE_DIR"
+: > "$OUT_LOG"
+: > "$ERR_LOG"
+nohup "$SERVER_EXE" "${SERVER_PRE[@]}" "$PORT" "${SERVER_ARGS[@]}" </dev/null >>"$OUT_LOG" 2>>"$ERR_LOG" &
+SRV_PID=$!
+disown 2>/dev/null || true
+
+UP=0
+i=0
+while [ "$i" -lt 60 ]; do
+  sleep 0.25
+  kill -0 "$SRV_PID" 2>/dev/null || break
+  if port_busy "$PORT"; then UP=1; break; fi
+  i=$((i + 1))
+done
+
+if [ "$UP" != "1" ]; then
+  echo
+  echo "[x] 服务器没能在这个端口上起来（端口 ${PORT}）。"
+  echo "    服务器输出在 save/server.out.log 与 save/server.err.log。"
+  echo "    常见原因是端口又被别的程序抢走了，换一个端口再试："
+  echo "      bash 启动游戏.command 8081"
+  kill "$SRV_PID" 2>/dev/null || true
+  echo
+  # 失败时留住窗口，让玩家能看清原因
+  if [ -t 0 ]; then printf '按回车键关闭…'; read -r _; fi
+  exit 1
+fi
+
+echo "$SRV_PID" > "$PID_FILE"
+echo "服务器已在后台运行（PID ${SRV_PID}），日志：save/server.out.log"
+echo "要停掉它：双击 停止游戏.command，或者  bash 启动游戏.command --stop"
+open_app
+close_self_window
+exit 0

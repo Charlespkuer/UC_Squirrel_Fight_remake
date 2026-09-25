@@ -34,7 +34,8 @@ jobs:
         shell: bash
         run: |
           for t in test-state test-balance test-points test-combat-rules test-battle-drops \
-                   test-main-battle test-extras test-fusion test-stages test-stage-balance; do
+                   test-main-battle test-extras test-fusion test-stages test-stage-balance \
+                   test-sync; do
             echo "──── $t ────"
             node "tools/$t.cjs"
           done

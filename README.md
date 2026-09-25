@@ -33,6 +33,8 @@ node serve.js 8080      # 加 --no-save 可关掉存档文件写入
 
 `启动游戏.cmd`（+ 同目录 `start-game.ps1`）只做一件事：**优先开原生窗口**（`src-tauri/dist/ssdz-classic.exe`），没有这个文件或它连开三次都没稳住，就自动走「起服务器 + 浏览器应用窗口」这条路。**双击后命令行窗口会自己关掉**：原生窗口 1~2 秒就确认启动完成，服务器路线则把服务器放到后台隐藏运行（日志写在 `save\server.out.log` / `save\server.err.log`），要停掉后台服务器就运行一次 `启动游戏.cmd --stop`。已经开着一个桌面版时再双击，它只会提示「已经在运行」，不会开第二个（两个实例写同一份存档会互相覆盖）。参数：`[端口]`、`--no-save`（只读）、`--browser`（跳过原生窗口，直接用浏览器应用窗口）、`--stop`（停掉后台服务器）。
 
+macOS 的 `启动游戏.command` 现在和 Windows 一样：**服务器用 `nohup` 放到后台**（日志 `save/server.out.log`、`save/server.err.log`，PID 写 `save/.server.pid`），脚本确认端口真的在监听、打开应用窗口后**立刻退出，Terminal 窗口自己关掉**，不会再留一个 bash 挂在前台。要停掉后台服务器：双击 **`停止游戏.command`**，或者 `bash 启动游戏.command --stop`；想在窗口里看实时日志就用 `--foreground`（这时窗口不会自动关）；不想让窗口自动关闭就设 `SSDZ_KEEP_WINDOW=1`。关窗口用的是 `osascript` 按窗口标题匹配（双击时标题就是脚本名），所以在已有终端里手工 `bash 启动游戏.command` 不会误关你那个窗口，`osascript` 没权限时也只是静静退回「靠 Terminal 自己的设置关闭」，不影响游戏。参数与 Windows 侧一致，另加 `--foreground`。
+
 启动器会自己找 Node（最完整），没有就退到 Python 3（`serve.py` 带同一套 `/__save` 存档接口），两者都没有才直接开 `index.html`（这时只能用浏览器存档）。端口默认 8080，**被别的程序占用时启动器会直接告诉你换一个**（例如 `启动游戏.cmd 8081`），而不是硬起一个失败、让你在浏览器里看到「没有本地服务器接口」；如果 8080 上已经有一个带存档接口的服务器在跑，启动器就直接复用它。Windows 侧是 `启动游戏.cmd` + `start-game.ps1` 两个文件（`.cmd` 只做 ASCII 外壳，中文提示与判断在 PowerShell 里——cmd.exe 读 `.cmd` 里的 UTF-8 中文会把中文注释当命令执行，导致服务器起不来），**两个文件要放在一起**。应用窗口使用独立配置目录（Windows `%LocalAppData%\SSDZClassic\browser-profile`，macOS `~/Library/Application Support/SSDZClassic/browser-profile`），不会和你平时用的浏览器书签、登录状态混在一起。
 
 Tauri 桌面版的前端就是仓库根这份静态页（打包时由 `node tools/build-tauri-web.cjs` 复制成 `src-tauri/web/` 快照，`tauri.conf.json` 的 `beforeBuildCommand` 会在**每次** build 前自动重做，所以网页版和桌面版永远是同一套代码；快照是构建产物，不进版本库，`node tools/build-tauri-web.cjs --check` 可以检查它有没有过期）；存档由 Rust 侧命令直接读写文件，不经过 HTTP 服务器。细节见 [Tauri 桌面版说明](tools/tauri-guide.md)。
@@ -141,7 +143,9 @@ Tauri 桌面版的前端就是仓库根这份静态页（打包时由 `node tool
 
 ## 存档与调试
 
-**主存档是游戏目录下的 `save/progress.json`**：用 `node serve.js`（或 `python3 serve.py`）启动时，进度只写这个文件（浏览器 localStorage 不再当存档用）。第一次读到文件为空时，会把以前存在浏览器里的老档（`ssdz_save_v1`）自动迁进文件并**删掉旧键**，所以从旧版本升上来不会丢进度。系统页的「存档位置」一块会显示当前用的是哪一种、最后写入/载入时间，并提供「立即写入存档文件」「载入存档文件」两个手动按钮（写入前会比较两边的时间，文件里的进度更新时只提示、不静默覆盖）。
+**主存档是游戏目录下的 `save/progress.json`**：用 `node serve.js`（或 `python3 serve.py`）启动时，进度只写这个文件（浏览器 localStorage 不再当存档用）。第一次读到文件为空时，会把以前存在浏览器里的老档（`ssdz_save_v1`）自动迁进文件并**删掉旧键**，所以从旧版本升上来不会丢进度。系统页的「存档位置」一块会显示当前用的是哪一种、最后写入/载入时间，并提供「立即写入存档文件」「载入存档文件」「从磁盘载入」三个手动按钮（写入前会比较两边的时间，文件里的进度更新时只提示、不静默覆盖）。
+
+**「载入存档文件」/「导入存档」在 macOS 上选不了文件的问题**：以前的「导入存档」是在一个**没有挂进文档的** `<input type="file">` 上直接 `.click()`。Chrome 这类浏览器放行，但 macOS 的 WKWebView/Safari（也就是原生轻壳和安装包模式的窗口）对游离节点上的 `.click()` **静默无反应**，看上去就是按钮点了没反应、选不了文件。现在改成固定复用**挂在 `<body>` 里的隐藏 input**，并用 `File.text()`→`FileReader` 兜底取内容；同时把「载入存档文件」的弹窗做成两个选择：**用存档文件覆盖**（服务器上的 `save/progress.json`）或**选择本地文件…**（磁盘上导出的 `.json`），另外系统页也直接多了一个「从磁盘载入」按钮——那条路在 WKWebView 里也能弹出选择框。
 
 **为什么会出现「没有本地服务器接口」**：只有页面能连上带 `/__save` 的服务器时才写得进文件，所以面板会**把具体原因写出来**——`file://` 打开、普通 `python3 -m http.server`（它没有 `/__save`，返回 404）、启动器加了 `--no-save`，或服务器根本没起来；点「立即写入存档文件」的提示条里也是同一句话。看到这句就改用启动器或 `serve.py`/`serve.js` 打开，而不是怀疑存档坏了。
 
@@ -164,6 +168,37 @@ Tauri 桌面版的前端就是仓库根这份静态页（打包时由 `node tool
 
 `?test=1`、`?test=2`、`?qa=1` 使用独立的 `ssdz_test_save_v1`，不覆盖正式存档；这些入口之间共用测试档。QA页面每次刷新重置测试角色。
 
+## 双机同步（Mac ↔ Windows，走 ZeroTier）
+
+两台电脑常年挂在同一个 ZeroTier 网络里，所以「送存档」「同步改动过的文件」不需要网盘、不需要 git，两边各跑一次菜单就行。实现是 **`tools/sync/sync.js`（零依赖，只要有 Node）**，Mac 的入口是 **`一键同步.command`**，Windows 是 **`一键同步.cmd` + `tools/sync/sync-win.ps1`**（`.cmd` 依旧只做 ASCII 外壳）。
+
+**第一次的准备工作（每台机器各做一次）**：
+
+1. 两边都双击各自的「一键同步」入口，选 `8) 显示同步口令 / 本机 ZeroTier 地址`，把**本机 ZeroTier 地址**记下来（例：Mac `10.32.170.33`、Windows `10.32.170.20`）；配置文件在 `tools/sync/sync.config.json`（**不进版本库**，每台机器一份）。
+2. 让两边的 **token 一样**：在其中一台选 `8`，把口令抄到另一台的 `tools/sync/sync.config.json` 里（或者两边都跑 `node tools/sync/sync.js token <同一串>`）。
+3. 菜单选 `9) 启动后台同步服务`（想省事就选 `a) 安装开机自启`）。**接收端开着，另一台才连得上**。
+4. 菜单选 `7) 扫描 ZeroTier 网段，找对端`：它会扫本机 ZeroTier 网段的 `/24`（每台试 0.5 秒，一般 1~2 秒），找到开着同步服务的机器并写进 `peers`。以后就不用再扫了。
+
+**日常一键操作**（菜单里的 2~5 项，或者直接命令行）：
+
+| 想干的事 | 菜单 | 命令行 |
+| --- | --- | --- |
+| 本机存档送到对端 | `2` | `node tools/sync/sync.js push <对端> --save` |
+| 从对端取回存档 | `3` | `node tools/sync/sync.js pull <对端> --save` |
+| 本机改动的文件推过去 | `4` | `node tools/sync/sync.js push <对端> --files` |
+| 对端改动的文件取回来 | `5` | `node tools/sync/sync.js pull <对端> --files` |
+| 先看一眼会传什么 | `6` | 加 `--dry` |
+| 盯着改动自动推 | — | `node tools/sync/sync.js watch <对端>` |
+
+游戏里也能按：**系统 → 跨设备同步**（只在本地同步服务开着时显示按钮）：把存档送过去 / 取回对面存档 / 推改动的文件 / 拉改动的文件。它其实是那个本地服务（`127.0.0.1:8788`）的遥控器，所以先在同一台机器上把同步服务开着。
+
+几条规矩（都是为了不丢档）：
+
+* **存档**：`push`/`pull` 之前都比 `save/progress.json` 的时间，**对方更新时不覆盖**，只提示；确实要用本机这份盖掉对面就加 `--force`。覆盖前旧档会自动备份到 `save/backup/progress-<时间>.json`（只留最近 10 份）。拉取成功后游戏里刷新一下页面就能看到新进度。
+* **文件**：按 **大小 + 修改时间**（`--verify` 再比 sha1）比对，**只传更新的那一侧**，其余原样不动，**从不删除**任何一方的文件；传过去后会把修改时间对齐，所以下次不会再传一遍。`save/`、`.git/`、`node_modules/`、`src-tauri/target/`、`*.log`、`tools/sync/sync.config.json` 等永远不参与（清单在 `sync.js` 的 `DEFAULT_IGNORE`，也可以在配置里的 `ignore` 追加，`!` 开头是例外）。
+* **只在游戏目录里读写**：对端接口的路径必须是一段段普通目录，`../`、盘符、忽略清单里的东西一律拒绝；`/api/*` 要 `x-ssdz-token` 口令一致；`/local/*`（游戏页面用的那个）只允许 `127.0.0.1` 调用，带 `Origin` 时必须是 `127.0.0.1`/`localhost`。
+* **macOS 防火墙**：第一次跑同步服务时如果系统问「是否允许 node 接受传入连接」，要选**允许**，否则对端连不上。
+
 ## 验证
 
 ```powershell
@@ -178,6 +213,7 @@ node tools/test-extras.cjs
 node tools/test-fusion.cjs
 node tools/test-stages.cjs
 node tools/test-stage-balance.cjs
+node tools/test-sync.cjs           # 双机同步：临时目录里起两个「机器」，真传文件与存档（34 项）
 node tools/check-asset-paths.cjs   # 发布体检：静态引用的大小写与断链（跳过 js/orig、src-tauri 等归档目录）
 ```
 
@@ -222,8 +258,11 @@ node tools/check-asset-paths.cjs   # 发布体检：静态引用的大小写与�
 | `css/battle-drops.css` | 战斗漂浮奖励样式。 |
 | `images/` | 素材：根目录是原版图集散图（战斗背景 `fightBg*`、数字 `*Num`、背景 `main.jpg` 等）；`classic/` 是从参考截图重制的经典界面素材（`icons/` 道具/武器/技能图标、`sprites/` 立绘、`reference-cards/` 卡片、`home/` 首页三个图标、`skins/` 按钮皮肤…）；`effect/`、`equip/` 来自 APK 的动画帧。 |
 | `audio/` | `main_bg.mp3`、`fight_bg.mp3` 两首 BGM。 |
-| `save/` | 存档目录（`progress.json` 主存档；不进版本库）。 |
-| `启动游戏.cmd` | Windows 双击入口：找游戏目录 → 起原生轻壳（`src-tauri/dist/`），没有就用「服务器 + 浏览器应用窗口」。 |
+| `save/` | 存档目录（`progress.json` 主存档；`backup/` 是同步/覆盖前的自动备份；不进版本库）。 |
+| `启动游戏.cmd` | Windows 双击入口：找游戏目录 → 起原生轻壳（`src-tauri/dist/`），没有就用「服务器 + 浏览器应用窗口」；服务器后台运行，`--stop` 停。 |
+| `启动游戏.command` | macOS / Linux 双击入口：和 Windows 侧同样把服务器 `nohup` 到后台（PID `save/.server.pid`，日志 `save/server.out.log`），打开窗口后**本窗口自动关闭**；`--stop` 停、`--foreground` 留在前台看日志。 |
+| `停止游戏.command` | macOS 双击一下停掉后台的本地服务器（等价于 `启动游戏.command --stop`）。 |
+| `一键同步.command` / `一键同步.cmd` | 双机（Mac ↔ Windows）同步菜单：送/取存档、推/拉改动过的文件、扫对端、开关后台同步服务、开机自启。逻辑都在 `tools/sync/`。 |
 | `src-tauri/` | 桌面轻壳源码（Rust，约 17 KB）：内置迷你 HTTP 服务器 + `/__save` + 开原生窗口；`dist/ssdz-classic.exe` 是构建产物。 |
 
 ### 数据流（一句话版）
@@ -236,8 +275,9 @@ node tools/check-asset-paths.cjs   # 发布体检：静态引用的大小写与�
 | 类别 | 文件 | 作用 |
 | --- | --- | --- |
 | **起服务** | `serve.js`、`serve.py` | 本地静态服务器 + `/__save` 存档接口（Node 与纯标准库 Python 两版，行为一致）。 |
-| **启动器** | （已在仓库根）`启动游戏.cmd`、`start-game.ps1`、`启动游戏.command` | 双击入口的实现：找游戏目录、探测/复用端口、优先轻壳、退回浏览器应用窗口、`--stop` 停后台服务器。 |
-| **回归测试** | `test-state.cjs`、`test-balance.cjs`、`test-battle-drops.cjs`、`test-combat-rules.cjs`、`test-stages.cjs`、`test-stage-balance.cjs`、`test-points.cjs`、`test-fusion.cjs`、`test-extras.cjs`、`test-main-battle.cjs` | 纯 Node 跑的逻辑回归（存档/数值/掉落/战斗规则/关卡/加点/融合/扩展玩法/主流程集成）。 |
+| **启动器** | （已在仓库根）`启动游戏.cmd`、`start-game.ps1`、`启动游戏.command`、`停止游戏.command` | 双击入口的实现：找游戏目录、探测/复用端口、优先轻壳、退回浏览器应用窗口；macOS 侧把服务器放后台并自动关掉 Terminal 窗口，`--stop` 停后台服务器。 |
+| **双机同步** | `sync/sync.js`、`sync/sync-win.ps1`（+ 根目录 `一键同步.command`、`一键同步.cmd`） | Mac ↔ Windows 一键互传 `save/progress.json` 与改动过的文件：接收服务 + 客户端二合一，ZeroTier 网段自动发现对端，存档取新不取旧、覆盖前自动备份，文件按大小+修改时间只传新的一侧且从不删除；游戏里「系统 → 跨设备同步」是它的遥控器。配置 `sync/sync.config.json`（每台机器一份，不进版本库）。 |
+| **回归测试** | `test-state.cjs`、`test-balance.cjs`、`test-battle-drops.cjs`、`test-combat-rules.cjs`、`test-stages.cjs`、`test-stage-balance.cjs`、`test-points.cjs`、`test-fusion.cjs`、`test-extras.cjs`、`test-main-battle.cjs`、`test-sync.cjs` | 纯 Node 跑的逻辑回归（存档/数值/掉落/战斗规则/关卡/加点/融合/扩展玩法/主流程集成/双机同步：临时目录里起两个「机器」真传文件与存档）。 |
 | | `test-battle.js` | 战斗动画回归，需要 `@napi-rs/canvas`，会把截图写到 `research/battle-check/`。 |
 | **数值实测** | `stage-balance.cjs`、`stage-balance-detail.cjs`、`player-curve.cjs` | 关卡通关率实测与调参、单档明细、玩家成长曲线拟合（改成长规则后要重跑）。 |
 | **素材与图标** | `extract-ui-assets.py`、`extract-classic-reference-details.py`、`extract-new-reference-*.py`、`refine-classic-icons.py`、`make-fragment-icon.cjs` | 从 APK / 参考截图里抠图与重制（需要 Pillow）；`refine-classic-icons.py` 还负责生成透明背景的 `src-tauri/app-icon.png`。 |
@@ -257,6 +297,10 @@ serve.js  serve.py    本地服务器 + /__save 存档接口（Node 与 Python �
 启动游戏.cmd           Windows 双击入口（ASCII 外壳）
 start-game.ps1         Windows 启动器本体（和 .cmd 必须放一起）
 启动游戏.command       macOS / Linux 双击入口
+停止游戏.command       macOS：停掉后台服务器（可选）
+一键同步.cmd           双机同步入口（Windows，可选）
+一键同步.command       双机同步入口（macOS，可选）
+tools/sync/sync.js     双机同步本体（零依赖，上面两个入口要用它）
 save/                 第一次运行自动创建（主存档 progress.json）
 src-tauri/dist/ssdz-classic.exe   可选：原生轻壳（约 3 MB，自带服务器，不需要 Node/Python）
 ```

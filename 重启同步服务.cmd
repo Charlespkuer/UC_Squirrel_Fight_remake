@@ -19,7 +19,10 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-node "%~dp0tools\sync\sync.js" restart
+rem  game logic lives in game\ ; fall back to a flat layout
+set "SYNCJS=%~dp0game\tools\sync\sync.js"
+if not exist "%SYNCJS%" set "SYNCJS=%~dp0tools\sync\sync.js"
+node "%SYNCJS%" restart
 echo.
 echo Done. Press any key to close.
 pause >nul

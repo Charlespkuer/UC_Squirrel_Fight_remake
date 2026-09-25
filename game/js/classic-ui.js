@@ -1113,7 +1113,7 @@
    * 端口在 tools/sync/sync.config.json 里可改；改了这里也要跟着改。
    * ============================================================ */
   const SYNC_API = 'http://127.0.0.1:8788';
-  const syncState = { checked: false, ok: false, info: null, reason: '', busy: false };
+  const syncState = { checked: false, ok: false, info: null, reason: '', busy: false, job: null, result: null, timer: 0 };
 
   async function syncFetch(pathname, opts) {
     opts = opts || {};
@@ -1123,12 +1123,10 @@
       const res = await fetch(SYNC_API + pathname, { method: opts.method || 'GET', signal: ctl ? ctl.signal : undefined });
       let body = null;
       try { body = await res.json(); } catch (e) {}
-      if (!res.ok) throw new Error((body && body.msg) || ('同步服务返回 HTTP ' + res.status));
+      if (!res.ok) { const err = new Error((body && body.msg) || ('同步服务返回 HTTP ' + res.status)); err.body = body; throw err; }
       if (!body) throw new Error('同步服务返回了看不懂的内容');
       return body;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    } finally { if (timer) clearTimeout(timer); }
   }
   async function syncProbe() {
     try {
@@ -1139,6 +1137,62 @@
       syncState.reason = (e && e.name === 'AbortError') ? '同步服务没有响应' : String((e && e.message) || e);
     }
     syncState.checked = true;
+  }
+  function fmtWhen(ms) { return (ms && State.syncFormatTime) ? State.syncFormatTime(ms) : '—'; }
+  function saveLine(s, who) {
+    if (!s || !s.exists) return who + '：还没有存档';
+    return who + '：' + esc(s.name || '小松鼠') + ' ' + (s.level == null ? '?' : s.level) + ' 级 · ' + fmtWhen(s.savedAt);
+  }
+  /** 失败原因 → 人话 + 下一步。面板上最值钱的就是这一段。 */
+  function syncAdvice(code, msg) {
+    switch (code) {
+      case 'PEER_DOWN': return '对端的同步服务没在跑，或者对端防火墙没放行 8788。到那台机器上双击「一键同步」→「9) 后台同步服务 → 1) 启动」，Windows 上还会弹一次 UAC 放行（或跑一次 prepare）。Mac 上想确认本机是否正常：菜单里选 c) 自检。';
+      case 'TOKEN': return '两边口令（token）不一样。把两边 game/tools/sync/sync.config.json 里的 token 改成完全一样；老版本的服务改完要重启一次（Windows 上双击 重启同步服务.cmd）。';
+      case 'PEER_NEWER': return '对面那份存档更新，所以没有覆盖它——这是防手滑的保护。确实要用本机这份盖掉对面，点下面的「强制覆盖对面」。';
+      case 'LOCAL_NEWER': return '本机这份存档更新，所以没有覆盖自己。确实要用对面那份盖掉本机，点下面的「强制用对面覆盖本机」。';
+      case 'NO_LOCAL_SAVE': return '本机还没写出存档。先在游戏里玩一下（任意操作都会自动保存），再回来同步。';
+      case 'PEER_NO_SAVE': return '对端还没有存档，先把对端的游戏打开玩一下，或者从本机「把存档送过去」。';
+      case 'PARTIAL': return '有一部分文件没传成功，多半是对端服务中途断了。再点一次即可，已传过去的不会重传。';
+      case 'FILES_FAILED': return '一个文件都没传成功，通常是对端服务断了或磁盘写不进去。确认对端服务在跑，再点一次。';
+      case 'ERROR': return msg || '同步失败。可以在 Mac 的「一键同步」菜单里选 c) 自检，看看到底卡在哪一步。';
+      default: return msg || '';
+    }
+  }
+  function resultHead(r) {
+    if (!r) return '';
+    const secs = ((r.took || 0) / 1000).toFixed(1);
+    if (r.ok) return '<b class="sync-on">✓ 同步成功</b> ' + esc(r.msg || '') + ' · 耗时 ' + secs + ' 秒';
+    if (r.skipped) return '<b class="sync-warn">已跳过</b> ' + esc(r.msg || '') + ' · 耗时 ' + secs + ' 秒';
+    return '<b class="sync-warn">同步失败</b> ' + esc(r.msg || '') + ' · 耗时 ' + secs + ' 秒';
+  }
+  /** 正在同步 / 上一次结果：直接改这块 DOM，不整页重绘（否则进度条会闪）。 */
+  function syncProgressHtml() {
+    const j = syncState.job, r = syncState.result;
+    if (syncState.busy) {
+      const j2 = j || {};
+      const pct = j2.total ? Math.round(100 * (j2.done || 0) / j2.total) : 0;
+      const bar = j2.total ? '<div class="sp-bar"><i style="width:' + pct + '%"></i></div>' : '';
+      const count = j2.total ? '　' + (j2.done || 0) + '/' + j2.total : '';
+      const kb = j2.bytes ? '　' + (j2.bytes / 1024).toFixed(0) + ' KB' : '';
+      const log = (j2.lines && j2.lines.length) ? '<pre class="sp-log">' + esc(j2.lines.join('\n')) + '</pre>' : '';
+      return '<div class="sp-head"><b class="sync-on">同步中…</b> ' + esc(j2.phase || '准备中') + count + kb + '</div>' + bar + log;
+    }
+    if (!r) return '';
+    let html = '<div class="sp-head">' + resultHead(r) + '</div>';
+    html += '<div class="sp-hint">' + esc(syncAdvice(r.code, r.msg)) + '</div>';
+    if (r.code === 'PEER_NEWER' || r.code === 'LOCAL_NEWER') {
+      const label = r.code === 'PEER_NEWER' ? '强制覆盖对面' : '强制用对面覆盖本机';
+      html += '<div class="sp-actions">' + btn(label, 'sync-force', 'small gold') + '</div>';
+    }
+    const log = (j && j.lines && j.lines.length) ? '<pre class="sp-log">' + esc(j.lines.join('\n')) + '</pre>' : '';
+    return html + log;
+  }
+  function paintSyncProgress() {
+    const host = typeof document !== 'undefined' ? document.getElementById('sync-progress') : null;
+    if (!host) return;
+    const html = syncProgressHtml();
+    host.innerHTML = html;
+    host.style.display = html ? '' : 'none';
   }
   /** 系统页里「跨设备同步」那一块。 */
   function syncPanel() {
@@ -1151,59 +1205,76 @@
     } else if (!syncState.ok) {
       state = '<b class="sync-off">同步服务没启动</b><span class="small-label">' +
         esc(syncState.reason || '本机 127.0.0.1:8788 上没有同步服务。') +
-        '<br>双击游戏目录里的 <code>一键同步.command</code>（Mac）或 <code>一键同步.cmd</code>（Windows）' +
-        '选一次「启动后台同步服务」，就能在这里一键互传存档。</span>';
+        '<br>双击游戏目录里的 <code>一键同步.command</code>（Mac）或 <code>一键同步.cmd</code>（Windows），' +
+        '选一次「启动后台同步服务」，这里就能一键互传存档。</span>';
     } else if (!peers.length) {
       state = '<b class="sync-warn">还没找到另一台电脑</b><span class="small-label">本机叫「' + esc(info.name || '?') +
         '」，ZeroTier 地址 ' + esc((info.selfIps || []).join('、') || '未检测到') +
         '。点「扫描对端」，或者在对面的机器上跑一次同步菜单里的「扫描」。</span>';
     } else {
       state = '<b class="sync-on">已连上：' + peers.map((k) => esc(k) + '（' + esc(info.peers[k]) + '）').join('、') +
-        '</b><span class="small-label">本机「' + esc(info.name || '?') + '」· 存档时间 ' +
-        State.syncFormatTime(info.save && info.save.savedAt) + '　<span class="sync-warn">同步会覆盖对面的存档，先把对面退出游戏</span></span>';
+        '</b><span class="small-label">本机「' + esc(info.name || '?') + '」　' + saveLine(info.save, '本机存档') + '</span>';
     }
     let actions = '';
     if (syncState.ok && peers.length) {
-      const peer = peers[0];
-      actions = btn('把存档送过去', 'sync-save-push', 'small gold') + btn('取回对面存档', 'sync-save-pull', 'small gold') +
-        btn('推改动的文件', 'sync-files-push', 'small') + btn('拉改动的文件', 'sync-files-pull', 'small');
-      void peer;
+      const dis = syncState.busy ? ' muted' : '';
+      actions = btn('把存档送过去', 'sync-save-push', 'small gold' + dis) + btn('取回对面存档', 'sync-save-pull', 'small gold' + dis) +
+        btn('推改动的文件', 'sync-files-push', 'small' + dis) + btn('拉改动的文件', 'sync-files-pull', 'small' + dis);
     } else if (syncState.ok) {
       actions = btn('扫描对端', 'sync-discover', 'small') + btn('重新检测', 'sync-recheck', 'small muted');
     } else {
       actions = btn('重新检测', 'sync-recheck', 'small');
     }
+    const prog = syncProgressHtml();
     return '<div class="sync-panel"><div class="sync-head">跨设备同步：' + state + '</div>' +
-      '<div class="sync-actions">' + actions + '</div></div>';
+      '<div class="sync-actions">' + actions + '</div>' +
+      '<div class="sync-progress" id="sync-progress"' + (prog ? '' : ' style="display:none"') + '>' + prog + '</div></div>';
   }
   /** 面板上的按钮实际动作。kind 形如 'save' / 'files'，dir 是 'push' / 'pull'。 */
-  async function syncRun(kind, dir) {
+  async function syncRun(kind, dir, force) {
     if (syncState.busy) { toast('上一次同步还在跑，稍等一下'); return; }
     const info = syncState.info || {};
     const peers = Object.keys(info.peers || {});
     if (!peers.length) { toast('还没找到对端，先点「扫描对端」'); return; }
     const peer = peers[0];
-    syncState.busy = true;
-    toast(kind === 'save' ? '正在' + (dir === 'push' ? '发送' : '取回') + '存档…' : '正在同步文件…（第一次会比较久）');
+    syncState.busy = true; syncState.result = null;
+    syncState.job = { phase: '准备中', done: 0, total: 0, bytes: 0, lines: [] };
+    if (screen === 'system') { openSystem(); }
+    // 一边等结果，一边每 600ms 问一次进度，实时刷进度条与日志
+    const tick = async () => {
+      try {
+        const p = await syncFetch('/local/progress', { timeout: 3000 });
+        syncState.job = p;
+        paintSyncProgress();
+        if (!p.active && syncState.busy && !syncState.result) { /* 还在等 POST 返回，忽略 */ }
+      } catch (e) {}
+    };
+    syncState.timer = setInterval(tick, 600);
+    const t0 = Date.now();
     try {
-      const body = await syncFetch('/local/' + kind + '/' + dir + '?peer=' + encodeURIComponent(peer), { method: 'POST', timeout: kind === 'files' ? 300000 : 30000 });
-      if (kind === 'save' && dir === 'pull' && body.ok) {
+      const body = await syncFetch('/local/' + kind + '/' + dir + '?peer=' + encodeURIComponent(peer) + (force ? '&force=1' : ''),
+        { method: 'POST', timeout: kind === 'files' ? 600000 : 60000 });
+      if (body.job) syncState.job = body.job;
+      const ok = body.ok !== false && !body.skipped;
+      syncState.result = { ok, skipped: !!body.skipped, code: body.code || (ok ? 'OK' : 'ERROR'), msg: body.msg || '', took: Date.now() - t0, kind, dir, force: !!force };
+      if (kind === 'save' && dir === 'pull' && ok) {
         const loaded = await State.fileLoad();
-        if (loaded) { refreshHome(); }
-        toast(loaded ? '已取回「' + peer + '」的存档（' + State.state().name + ' ' + State.state().level + ' 级）' : '存档已取回，但读取失败');
-      } else if (body.skipped) {
-        toast('没有同步：' + (body.msg || '对面那份更新，未被覆盖'));
-      } else if (body.ok) {
-        toast(kind === 'save' ? '存档已' + (dir === 'push' ? '送到' : '取回') + '「' + peer + '」'
-          : '文件同步完成（' + (body.sent || 0) + ' 个' + (body.failed ? '，失败 ' + body.failed + ' 个' : '') + '）');
-      } else {
-        toast(body.msg || '同步失败');
+        if (loaded) refreshHome();
+        syncState.result.msg = syncState.result.msg || ('已取回「' + peer + '」的存档');
       }
     } catch (e) {
-      toast(String((e && e.message) || e));
+      const body = e && e.body;
+      syncState.result = {
+        ok: false, skipped: false, code: (body && body.code) || 'ERROR',
+        msg: (body && body.msg) || String((e && e.message) || e), took: Date.now() - t0, kind, dir, force: !!force,
+      };
+      if (body && body.job) syncState.job = body.job;
+    } finally {
+      if (syncState.timer) { clearInterval(syncState.timer); syncState.timer = 0; }
+      syncState.busy = false;
     }
-    syncState.busy = false;
-    if (screen === 'system') openSystem();
+    if (screen === 'system') { openSystem(); } else { paintSyncProgress(); }
+    toast(syncState.result.ok ? '同步成功' : (syncState.result.skipped ? '已跳过（对面更新）' : '同步失败，看面板提示'));
   }
   function openSystem() {
     const mute=Main.isMuted&&Main.isMuted();
@@ -1221,6 +1292,13 @@
     syncBtn('sync-save-pull',()=>syncRun('save','pull'));
     syncBtn('sync-files-push',()=>syncRun('files','push'));
     syncBtn('sync-files-pull',()=>syncRun('files','pull'));
+    // 进度区里的按钮是每次重绘 innerHTML 生成的，用事件委托挂，避免重绘后失效
+    const syncPanelEl=$('.sync-panel',p);
+    if(syncPanelEl)syncPanelEl.addEventListener('click',(ev)=>{
+      const t=ev.target&&ev.target.closest?ev.target.closest('[data-action="sync-force"]'):null;
+      if(!t||!syncState.result)return;
+      syncRun(syncState.result.kind,syncState.result.dir,true);
+    });
     syncBtn('sync-discover',async()=>{
       toast('正在扫描 ZeroTier 网段…');
       try{await syncFetch('/local/discover',{timeout:30000});}catch(e){toast(String((e&&e.message)||e));}

@@ -32,11 +32,11 @@ $url = "http://127.0.0.1:$port/"
 $here = $PSScriptRoot
 if (-not $here) { $here = (Get-Location).Path }
 $root = $null
-foreach ($c in @($here, (Join-Path $here '..'))) {
+foreach ($c in @($here, (Join-Path $here 'game'), (Join-Path $here '..'))) {
   if (Test-Path -LiteralPath (Join-Path $c 'index.html')) { $root = (Resolve-Path -LiteralPath $c).Path; break }
 }
 if (-not $root) {
-  Write-Host '找不到 index.html：请把整个游戏文件夹一起解压后再双击启动器。'
+  Write-Host '找不到 index.html：它应该在 game\ 子文件夹里；请把整个文件夹一起解压后再双击启动器。'
   exit 2
 }
 Set-Location -LiteralPath $root

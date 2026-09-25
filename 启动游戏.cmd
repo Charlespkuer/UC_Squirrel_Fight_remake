@@ -6,7 +6,7 @@ rem  mis-parses UTF-8 Chinese inside .cmd files (it reads Chinese comment bytes 
 rem  bogus commands, so the server never started), therefore this file is ASCII-only.
 rem
 rem  What it does:
-rem    1) if src-tauri\target\release\ssdz-classic.exe exists -> open the native
+rem    1) if game\src-tauri\...\ssdz-classic.exe exists -> open the native
 rem       window (real desktop app, no browser involved);
 rem    2) otherwise -> start the local server (node, else python) on port 8080 and
 rem       open a Chrome/Edge "app window" (no tab bar, no address bar), then wait.
@@ -19,7 +19,10 @@ setlocal
 cd /d "%~dp0"
 set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 if not exist "%PS%" set "PS=powershell"
-"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-game.ps1" %*
+rem  game lives in the game\ subfolder; a flat portable layout works too
+set "PS1=%~dp0game\start-game.ps1"
+if not exist "%PS1%" set "PS1=%~dp0start-game.ps1"
+"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%PS1%" %*
 set "CODE=%errorlevel%"
 if not "%CODE%"=="0" (
   echo.

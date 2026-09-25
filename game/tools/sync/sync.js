@@ -593,52 +593,114 @@ function tcpProbe(host, port, ms) {
   });
 }
 
+// ---------------------------------------------------------------- 任务进度
+/*
+ * 游戏里的「跨设备同步」面板要能看见进度，所以每次 /local/* 同步都记一份进度：
+ * 现在在干什么、传到第几个、最近几行日志、最后成功还是失败（带机器可读的 code）。
+ * 页面用 GET /local/progress 轮询它。
+ */
+const job = {
+  active: false, kind: '', dir: '', peer: '', phase: '空闲',
+  done: 0, total: 0, bytes: 0, startedAt: 0, finishedAt: 0,
+  ok: null, code: '', msg: '', lines: [], save: null,
+};
+function jobReset(kind, dir, peer) {
+  job.active = true; job.kind = kind || ''; job.dir = dir || ''; job.peer = peer || '';
+  job.phase = '准备中'; job.done = 0; job.total = 0; job.bytes = 0;
+  job.startedAt = Date.now(); job.finishedAt = 0; job.ok = null; job.code = ''; job.msg = '';
+  job.lines = []; job.save = null;
+}
+function jobPhase(phase) { job.phase = phase; jobLine('· ' + phase); }
+function jobLine(text) {
+  job.lines.push(String(text));
+  if (job.lines.length > 40) job.lines.shift();
+}
+function jobProgress(done, total, bytes) {
+  if (typeof done === 'number') job.done = done;
+  if (typeof total === 'number') job.total = total;
+  if (typeof bytes === 'number') job.bytes += bytes;
+}
+function jobFinish(ok, code, msg) {
+  job.active = false; job.ok = !!ok; job.code = code || ''; job.msg = msg || '';
+  job.finishedAt = Date.now();
+  job.phase = ok ? '完成' : '失败'; jobLine('· ' + (msg || (ok ? '完成' : '失败')));
+}
+function jobSnapshot() {
+  return {
+    active: job.active, kind: job.kind, dir: job.dir, peer: job.peer, phase: job.phase,
+    done: job.done, total: job.total, bytes: job.bytes,
+    startedAt: job.startedAt, finishedAt: job.finishedAt,
+    ok: job.ok, code: job.code, msg: job.msg,
+    lines: job.lines.slice(-14), save: job.save,
+  };
+}
+/** 带 code 的错误：面板据此给出对症的下一步提示。 */
+function syncError(code, msg) { const e = new Error(msg); e.code = code; return e; }
+
 // ---------------------------------------------------------------- 存档同步
 
 async function savePush(peer, opts) {
   const local = readSaveInfo();
-  if (!local.exists) { warn('本机还没有存档（' + SAVE_FILE + '），先玩一局再同步。'); return { ok: false }; }
+  if (!local.exists) throw syncError('NO_LOCAL_SAVE', '本机还没有存档（' + SAVE_FILE + '），先在游戏里玩一局、等它保存好再同步。');
+  jobPhase('读取两边存档时间');
   const remote = await getJson(peer.host, peer.port, '/api/save/meta', 5000).catch(() => null);
   log(describeSave(local, '本机  '));
   if (remote) log(describeSave(remote, '对端  '));
+  job.save = { local: { name: local.name, level: local.level, savedAt: local.savedAt },
+               remote: remote ? { name: remote.name, level: remote.level, savedAt: remote.savedAt, exists: remote.exists } : null };
+  jobLine(describeSave(local, '本机  '));
+  if (remote) jobLine(describeSave(remote, '对端  '));
   if (remote && remote.exists && remote.savedAt > local.savedAt + 1000 && !opts.force) {
+    const msg = '对端的存档比本机新（' + fmtTime(remote.savedAt) + '），没有推送，免得把对面的进度盖旧。';
     warn('');
-    warn('[!] 对端存档更新（' + fmtTime(remote.savedAt) + '），没有推送，免得把对面的进度盖旧。');
+    warn('[!] ' + msg);
     warn('    确实要用本机这份覆盖它，就加 --force（对面会自动备份旧档）。');
-    return { ok: false, skipped: true };
+    return { ok: false, skipped: true, code: 'PEER_NEWER', msg };
   }
   if (opts.dry) { log('[dry] 会把本机存档 POST 到 ' + peer.host + ':' + peer.port); return { ok: true }; }
+  jobPhase('把存档写到对端');
   const body = fs.readFileSync(SAVE_FILE);
   const r = await request(peer.host, peer.port, 'POST', '/api/save' + (opts.force ? '?force=1' : ''), {
     headers: { 'content-type': 'application/json' }, body,
   });
-  if (r.status !== 200 || !r.json || !r.json.ok) throw new Error((r.json && r.json.msg) || ('对端拒绝：HTTP ' + r.status));
-  log(green('[√] 已把存档送到「' + peer.name + '」') + (r.json.backup ? '（对面旧档已备份成 ' + r.json.backup + '）' : ''));
-  return { ok: true };
+  if (r.status !== 200 || !r.json || !r.json.ok) throw syncError((r.json && r.json.code) || 'PEER_REJECT', (r.json && r.json.msg) || ('对端拒绝：HTTP ' + r.status));
+  const note = r.json.backup ? '（对面旧档已备份成 ' + r.json.backup + '）' : '';
+  log(green('[√] 已把存档送到「' + peer.name + '」') + note);
+  return { ok: true, code: 'OK', msg: '已把存档送到「' + peer.name + '」' + note };
 }
 
 async function savePull(peer, opts) {
+  jobPhase('读取两边存档时间');
   const local = readSaveInfo();
   const r = await request(peer.host, peer.port, 'GET', '/api/save', { timeout: 8000 });
-  if (r.status !== 200 || !r.json || !r.json.ok) throw new Error((r.json && r.json.msg) || ('对端拒绝：HTTP ' + r.status));
+  if (r.status !== 200 || !r.json || !r.json.ok) throw syncError('PEER_REJECT', (r.json && r.json.msg) || ('对端拒绝：HTTP ' + r.status));
   const remote = r.json;
   log(describeSave(local, '本机  '));
   log(describeSave(remote, '对端  '));
-  if (!remote.exists) { warn('对端还没有存档，没什么可取的。'); return { ok: false }; }
+  job.save = { local: { name: local.name, level: local.level, savedAt: local.savedAt },
+               remote: { name: remote.name, level: remote.level, savedAt: remote.savedAt, exists: remote.exists } };
+  jobLine(describeSave(local, '本机  '));
+  jobLine(describeSave(remote, '对端  '));
+  if (!remote.exists) return { ok: false, code: 'PEER_NO_SAVE', msg: '对端还没有存档，没什么可取的。' };
   if (local.exists && local.savedAt > remote.savedAt + 1000 && !opts.force) {
+    const msg = '本机的存档比对端新（' + fmtTime(local.savedAt) + '），没有拉取，免得把本机进度盖旧。';
     warn('');
-    warn('[!] 本机存档更新（' + fmtTime(local.savedAt) + '），没有拉取，免得把本机进度盖旧。');
+    warn('[!] ' + msg);
     warn('    确实要用对面那份覆盖本机，就加 --force（本机会自动备份旧档）。');
-    return { ok: false, skipped: true };
+    return { ok: false, skipped: true, code: 'LOCAL_NEWER', msg };
   }
   if (opts.dry) { log('[dry] 会把对端存档写入 ' + SAVE_FILE); return { ok: true }; }
+  jobPhase('写入本机存档');
   fs.mkdirSync(SAVE_DIR, { recursive: true });
   const backup = backupSave();
   fs.writeFileSync(SAVE_FILE, JSON.stringify(remote.data), 'utf8');
+  // 同上：时间对齐成对面存档的 savedAt，这样两边的时间戳含义一致、不会再互相挡
+  const at = Number(remote.data && remote.data.savedAt) || Number(remote.savedAt) || Date.now();
+  try { fs.utimesSync(SAVE_FILE, at / 1000, at / 1000); } catch (e) {}
   log(green('[√] 已从「' + peer.name + '」取回存档'));
   if (backup) log('    本机旧档已备份到 ' + path.relative(ROOT, backup));
   log('    游戏里刷新页面（或重新进系统页）即可看到新进度。');
-  return { ok: true };
+  return { ok: true, code: 'OK', msg: '已从「' + peer.name + '」取回存档' + (backup ? '，本机旧档已备份' : '') };
 }
 
 // ---------------------------------------------------------------- 文件同步
@@ -679,6 +741,7 @@ async function collectFilePlan(peer, opts) {
 }
 
 async function filesSync(peer, opts, direction) {
+  jobPhase('对比两边文件清单');
   const plan = await collectFilePlan(peer, opts);
   log('本机 ' + plan.local.size + ' 个文件，对端 ' + plan.remote.size + ' 个文件');
   // push：本机较新的 + 本机新加的；pull：对端较新的 + 对端新加的。两边都没有的「新文件」不会互相删。
@@ -686,11 +749,12 @@ async function filesSync(peer, opts, direction) {
     ? plan.toSend.concat(plan.onlyLocal)
     : plan.toFetch.concat(plan.onlyRemote);
   const fresh = direction === 'push' ? plan.onlyLocal.length : plan.onlyRemote.length;
+  jobProgress(0, changes.length, 0);
   if (!changes.length) log(green('[√] 没有需要' + (direction === 'push' ? '推送' : '拉取') + '的改动'));
   else if (fresh) log('其中 ' + fresh + ' 个是' + (direction === 'push' ? '本机新加的' : '对端新加的') + '文件');
   if (opts.dry) {
     for (const c of changes) log('[dry] ' + (direction === 'push' ? '→ ' : '← ') + c.p);
-    return { ok: true, sent: 0 };
+    return { ok: true, sent: 0, code: 'OK', msg: '演练：会传 ' + changes.length + ' 个文件（没有真的写）' };
   }
   let done = 0, bytes = 0, failed = 0, idx = 0;
   const CONC = 4;
@@ -715,9 +779,12 @@ async function filesSync(peer, opts, direction) {
           bytes += r.buffer.length;
         }
         done++;
+        jobProgress(done, changes.length, 0);
         log((direction === 'push' ? '  → ' : '  ← ') + c.p);
+        jobLine((direction === 'push' ? '→ ' : '← ') + c.p);
       } catch (e) {
         failed++;
+        jobLine('✗ ' + c.p + '：' + (e.message || e));
         warn('  [!] ' + c.p + ' 失败：' + (e.message || e));
       }
     }
@@ -726,7 +793,13 @@ async function filesSync(peer, opts, direction) {
   log(green('[√] ' + (direction === 'push' ? '推送' : '拉取') + ' ' + done + '/' + changes.length + ' 个文件（' + (bytes / 1024).toFixed(0) + ' KB）') + (failed ? '，失败 ' + failed + ' 个' : ''));
   if (direction === 'push' && plan.onlyRemote.length) log('    对端还多出 ' + plan.onlyRemote.length + ' 个本机没有的文件（不会自动删）');
   if (direction === 'pull' && plan.onlyLocal.length) log('    本机还有 ' + plan.onlyLocal.length + ' 个对端没有的文件（不会自动删）');
-  return { ok: true, sent: done, failed };
+  const verb = direction === 'push' ? '推送' : '拉取';
+  if (!changes.length) return { ok: true, sent: 0, failed: 0, code: 'OK', msg: '两边文件一致，没有需要' + verb + '的' };
+  if (failed && !done) throw syncError('FILES_FAILED', verb + '失败：' + failed + ' 个文件都没成功，多半是对端服务断了或磁盘写不进去。');
+  return {
+    ok: true, sent: done, failed, code: failed ? 'PARTIAL' : 'OK',
+    msg: verb + ' ' + done + '/' + changes.length + ' 个文件（' + (bytes / 1024).toFixed(0) + ' KB）' + (failed ? '，失败 ' + failed + ' 个' : ''),
+  };
 }
 
 /** watch 用：只推指定的这几个文件。 */
@@ -831,12 +904,17 @@ function createServer() {
           const cur = readSaveInfo();
           const incomingAt = Number(parsed.savedAt) || 0;
           if (cur.exists && cur.savedAt > incomingAt + 1000 && !force) {
-            return sendJson(res, 200, { ok: false, msg: '本机存档更新（' + fmtTime(cur.savedAt) + '），没有覆盖；加 --force 可以强制' });
+            return sendJson(res, 200, { ok: false, code: 'PEER_NEWER', msg: '本机存档更新（' + fmtTime(cur.savedAt) + '），没有覆盖；要强制覆盖请再点一次「强制覆盖对面」' });
           }
           fs.mkdirSync(SAVE_DIR, { recursive: true });
           const backup = backupSave();
           fs.writeFileSync(SAVE_FILE, JSON.stringify(parsed), 'utf8');
-          return sendJson(res, 200, { ok: true, savedAt: Math.floor(fs.statSync(SAVE_FILE).mtimeMs), backup: backup ? path.basename(backup) : null });
+          // 关键：把文件修改时间对齐成存档里的 savedAt。
+          // 否则「接收时间」会变成最新时间，推送方下一次再推就会被
+          // 「对端存档更新」挡下来 —— 表现就是「同步过一次之后再也同步不过去」。
+          const at = incomingAt || Date.now();
+          try { fs.utimesSync(SAVE_FILE, at / 1000, at / 1000); } catch (e) {}
+          return sendJson(res, 200, { ok: true, savedAt: at, backup: backup ? path.basename(backup) : null });
         }
         if (p === '/api/manifest') {
           return sendJson(res, 200, { ok: true, root: ROOT, entries: walk(ROOT, url.searchParams.get('hash') === '1') });
@@ -882,15 +960,31 @@ function createServer() {
         if (p === '/local/discover') {
           return sendJson(res, 200, { ok: true, found: await discoverPeers() }, cors);
         }
+        if (p === '/local/progress') {
+          return sendJson(res, 200, Object.assign({ ok: true }, jobSnapshot()), cors);
+        }
         const m = p.match(/^\/local\/(save|files)\/(push|pull)$/);
         if (m && req.method === 'POST') {
           const kind = m[1], dir = m[2];
-          const peer = await resolvePeer(url.searchParams.get('peer') || '');
           const opts = { force: url.searchParams.get('force') === '1' };
-          const r = kind === 'save'
-            ? (dir === 'push' ? await savePush(peer, opts) : await savePull(peer, opts))
-            : await filesSync(peer, opts, dir);
-          return sendJson(res, 200, Object.assign({ ok: true, peer: peer.name }, r), cors);
+          let peer = null;
+          try {
+            peer = await resolvePeer(url.searchParams.get('peer') || '');
+            jobReset(kind, dir, peer.name);
+            jobPhase('连接「' + peer.name + '」');
+            const info = await pingPeer(peer.host, peer.port, 3000);
+            if (!info) throw syncError('PEER_DOWN', '连不上「' + peer.name + '」(' + peer.host + ':' + peer.port + ')：对端的同步服务没在跑，或者对端防火墙没放行这个端口。');
+            const r = kind === 'save'
+              ? (dir === 'push' ? await savePush(peer, opts) : await savePull(peer, opts))
+              : await filesSync(peer, opts, dir);
+            jobFinish(!!r.ok, r.code || (r.skipped ? 'SKIPPED' : 'OK'), r.msg || '');
+            return sendJson(res, 200, Object.assign({ ok: true, peer: peer.name, job: jobSnapshot() }, r), cors);
+          } catch (e) {
+            const code = (e && e.code) || 'ERROR';
+            const msg = String((e && e.message) || e);
+            jobFinish(false, code, msg);
+            return sendJson(res, 500, { ok: false, code, msg, peer: peer && peer.name, job: jobSnapshot() }, cors);
+          }
         }
         return sendJson(res, 404, { ok: false, msg: '没有这个接口：' + p }, cors);
       } catch (e) {
@@ -927,9 +1021,68 @@ function winTaskExists() {
     return r.includes(WIN_TASK_NAME);
   } catch (e) { return false; }
 }
+/**
+ * Windows 计划任务的 XML 定义。为什么不用 `schtasks /SC ONLOGON` 那条简单命令：
+ *   它的默认值会坑人 —— 默认「只在交流电下启动、切到电池就停」（笔记本上会莫名被停），
+ *   默认还有 3 天运行上限。这里的设置是冲着「让它一直活着」去的：
+ *     · 每 5 分钟重复触发 → 相当于自带看门狗（serve 发现已经在跑就立刻安静退出）
+ *     · 切电池不停、不在电池上也能启动、无运行时长上限
+ *     · 崩了 1 分钟后自动重启，最多 999 次
+ *     · 同一个任务不并行跑第二个实例
+ *   触发器同时挂「登录时」，重启后也不用管。
+ */
+function winTaskXml() {
+  const p = (n) => String(n).padStart(2, '0');
+  const d = new Date(Date.now() - 2 * 60000);
+  const stamp = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':00';
+  const user = process.env.USERDOMAIN && process.env.USERNAME ? process.env.USERDOMAIN + '\\' + process.env.USERNAME : '';
+  const esc = escapeXml;
+  return '<?xml version="1.0" encoding="UTF-16"?>\n' +
+    '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n' +
+    '  <RegistrationInfo><Description>SSDZ Sync - 松鼠大战双机同步服务</Description></RegistrationInfo>\n' +
+    '  <Triggers>\n' +
+    '    <LogonTrigger><Enabled>true</Enabled>' + (user ? '<UserId>' + esc(user) + '</UserId>' : '') + '</LogonTrigger>\n' +
+    '    <TimeTrigger><StartBoundary>' + stamp + '</StartBoundary><Enabled>true</Enabled>\n' +
+    '      <Repetition><Interval>PT5M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition>\n' +
+    '    </TimeTrigger>\n' +
+    '  </Triggers>\n' +
+    '  <Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>\n' +
+    '  <Settings>\n' +
+    '    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n' +
+    '    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n' +
+    '    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n' +
+    '    <AllowHardTerminate>true</AllowHardTerminate>\n' +
+    '    <StartWhenAvailable>true</StartWhenAvailable>\n' +
+    '    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>\n' +
+    '    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>\n' +
+    '    <AllowStartOnDemand>true</AllowStartOnDemand>\n' +
+    '    <Enabled>true</Enabled>\n' +
+    '    <Hidden>false</Hidden>\n' +
+    '    <RunOnlyIfIdle>false</RunOnlyIfIdle>\n' +
+    '    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\n' +
+    '    <RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>\n' +
+    '  </Settings>\n' +
+    '  <Actions Context="Author">\n' +
+    '    <Exec>\n' +
+    '      <Command>' + esc(process.execPath) + '</Command>\n' +
+    '      <Arguments>"' + esc(__filename) + '" serve</Arguments>\n' +
+    '      <WorkingDirectory>' + esc(ROOT) + '</WorkingDirectory>\n' +
+    '    </Exec>\n' +
+    '  </Actions>\n' +
+    '</Task>\n';
+}
 function winTaskCreate() {
-  const tr = '"' + process.execPath + '" "' + __filename + '" serve';
-  execFileSync('schtasks', ['/Create', '/TN', WIN_TASK_NAME, '/TR', tr, '/SC', 'ONLOGON', '/F'], { stdio: 'ignore', timeout: 20000 });
+  // 优先用 XML（自带看门狗 + 电池/时长设置）；XML 建不出来再退回简单命令
+  try {
+    const xmlPath = path.join(SAVE_DIR, 'ssdz-sync-task.xml');
+    fs.mkdirSync(SAVE_DIR, { recursive: true });
+    fs.writeFileSync(xmlPath, '\ufeff' + winTaskXml(), 'utf16le');
+    execFileSync('schtasks', ['/Create', '/TN', WIN_TASK_NAME, '/XML', xmlPath, '/F'], { stdio: 'ignore', timeout: 30000 });
+    return;
+  } catch (e) {
+    const tr = '"' + process.execPath + '" "' + __filename + '" serve';
+    execFileSync('schtasks', ['/Create', '/TN', WIN_TASK_NAME, '/TR', tr, '/SC', 'ONLOGON', '/F'], { stdio: 'ignore', timeout: 20000 });
+  }
 }
 function winTaskRun() { execFileSync('schtasks', ['/Run', '/TN', WIN_TASK_NAME], { stdio: 'ignore', timeout: 20000 }); }
 function winTaskEnd() { try { execFileSync('schtasks', ['/End', '/TN', WIN_TASK_NAME], { stdio: 'ignore', timeout: 15000 }); } catch (e) {} }
@@ -1110,7 +1263,7 @@ async function connectPeer(arg) {
   }
   if (!info) {
     const tcp = await tcpProbe(peer.host, peer.port, 3000);
-    throw new Error('连不上「' + peer.name + '」(' + peer.host + ':' + peer.port + ')：TCP ' + tcp.reason + '\n' +
+    throw syncError('PEER_DOWN', '连不上「' + peer.name + '」(' + peer.host + ':' + peer.port + ')：TCP ' + tcp.reason + '\n' +
       '    · 对端要先把同步服务开着（双击「一键同步」选「启动后台同步服务」，或跑 node tools/sync/sync.js start）；\n' +
       '    · 对端是 Windows 的话还要放行入站端口：node tools/sync/sync.js prepare（会弹 UAC）；\n' +
       '    · 两边的 ZeroTier 要在线，地址用 node tools/sync/sync.js discover 复查；\n' +
@@ -1123,7 +1276,7 @@ async function connectPeer(arg) {
   const st = await request(peer.host, peer.port, 'GET', '/api/status', { timeout: 5000 }).catch(() => null);
   if (st && st.status === 403) {
     const remoteId = (st.json && st.json.tokenId) || theirs;
-    throw new Error('口令不一致，连上了但被对端拒绝：\n' +
+    throw syncError('TOKEN', '口令不一致，连上了但被对端拒绝：\n' +
       '    本机「' + loadConfig().name + '」口令指纹 ' + mine + '；对端「' + (info.name || peer.name) + '」口令指纹 ' +
       (remoteId || '（对端版本较老，没返回指纹）') + '\n' +
       '    → 把两边 tools/sync/sync.config.json 的 token 改成完全一样（菜单第 8 项能看本机的）。\n' +
@@ -1132,7 +1285,7 @@ async function connectPeer(arg) {
       '    → 对端如果换成新版 sync.js，就不用重启了：每次请求都会重新读配置。');
   }
   if (theirs && theirs !== mine) {
-    throw new Error('口令不一致：本机指纹 ' + mine + '，对端指纹 ' + theirs + '。\n' +
+    throw syncError('TOKEN', '口令不一致：本机指纹 ' + mine + '，对端指纹 ' + theirs + '。\n' +
       '    改 tools/sync/sync.config.json 里的 token，两边改成一样即可（新版不用重启，老版本要 restart）。');
   }
   return { peer, info };
@@ -1226,7 +1379,20 @@ async function main() {
   }
   if (cmd === 'serve') {
     ensureConfig();
-    const { port } = await startServer(opts.port || loadConfig().port);
+    const wantPort = opts.port || loadConfig().port;
+    // 看门狗友好：计划任务每 5 分钟会再拉一次 serve，已经在跑就安静退出，什么都不动
+    const alive = await pingLocal(wantPort);
+    if (alive) { log('同步服务已经在运行（' + alive.name + '，端口 ' + wantPort + '），本次启动忽略。'); return; }
+    // 单条请求出错（客户端中断、EPIPE 之类）不该把整个服务带走：
+    // Windows 上服务一死就要等下一次计划任务才回来，宁可记一笔日志继续跑。
+    const note = (kind, e) => {
+      const line = '[' + new Date().toISOString() + '] ' + kind + '：' + ((e && (e.stack || e.message)) || e) + '\n';
+      try { fs.appendFileSync(ERR_LOG, line); } catch (_) {}
+    };
+    process.on('uncaughtException', (e) => note('uncaughtException', e));
+    process.on('unhandledRejection', (e) => note('unhandledRejection', e));
+    const { srv, port } = await startServer(wantPort);
+    srv.on('clientError', (e, sock) => { note('clientError', e); try { sock.destroy(); } catch (_) {} });
     fs.mkdirSync(SAVE_DIR, { recursive: true });
     fs.writeFileSync(PID_FILE, String(process.pid), 'utf8');
     printBanner();

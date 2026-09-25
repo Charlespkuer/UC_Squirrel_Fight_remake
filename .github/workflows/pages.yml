@@ -30,8 +30,9 @@ jobs:
       - name: 组装站点目录
         run: |
           mkdir -p _site
-          cp index.html _site/
-          cp -R css js images audio _site/
+          # 游戏本体在仓库的 game/ 子文件夹里（一级目录只放启动器，方便用户）
+          cp game/index.html _site/
+          cp -R game/css game/js game/images game/audio _site/
           # 游戏本体没有任何构建步骤，原样发布即可
           du -sh _site
           find _site -maxdepth 1 -mindepth 1 | sort

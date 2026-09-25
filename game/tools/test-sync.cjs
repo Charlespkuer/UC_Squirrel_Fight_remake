@@ -150,16 +150,26 @@ async function ping(port) {
     ok('本机真的有了对端新文件', fs.existsSync(path.join(A, 'js/fromB.js')));
 
     // ---- 存档：对方更新时不覆盖，--force 才覆盖，且覆盖前备份 ----
-    write(path.join(A, 'save/progress.json'), JSON.stringify({ name: 'Alice', level: 10, savedAt: 1000, weapons: [], skills: [], props: {} }));
-    write(path.join(B, 'save/progress.json'), JSON.stringify({ name: 'Bob', level: 42, savedAt: 9000000000000, weapons: [], skills: [], props: {} }));
-    fs.utimesSync(path.join(A, 'save/progress.json'), new Date(2020, 0, 1), new Date(2020, 0, 1));
-    fs.utimesSync(path.join(B, 'save/progress.json'), new Date(2030, 0, 1), new Date(2030, 0, 1));
+    // 真实存档里 savedAt 与文件修改时间是一致的（游戏写盘时两者几乎同时），这里也照做
+    const T_ALICE = 1700000000000, T_BOB = 1800000000000;
+    const putSave = (dir, obj) => {
+      const f = path.join(dir, 'save/progress.json');
+      write(f, JSON.stringify(obj));
+      fs.utimesSync(f, obj.savedAt / 1000, obj.savedAt / 1000);
+    };
+    putSave(A, { name: 'Alice', level: 10, savedAt: T_ALICE, weapons: [], skills: [], props: {} });
+    putSave(B, { name: 'Bob', level: 42, savedAt: T_BOB, weapons: [], skills: [], props: {} });
     out = run(A, ['push', '127.0.0.1', '--save']);
     ok('对端更新 → push 被挡下', /没有推送/.test(out));
     ok('对端存档没被动过', JSON.parse(fs.readFileSync(path.join(B, 'save/progress.json'), 'utf8')).name === 'Bob');
     out = run(A, ['push', '127.0.0.1', '--save', '--force']);
     ok('--force 才真的覆盖', JSON.parse(fs.readFileSync(path.join(B, 'save/progress.json'), 'utf8')).name === 'Alice');
     ok('覆盖前自动备份', fs.readdirSync(path.join(B, 'save/backup')).some((f) => /^progress-.*\.json$/.test(f)));
+    // 关键回归：接收端写盘后要把文件时间对齐成存档里的 savedAt，
+    // 否则「接收时间」成了最新时间，推送方下一次再推就会被自己刚写过去的时间戳挡下来
+    ok('对端文件时间被对齐成存档时间', Math.abs(fs.statSync(path.join(B, 'save/progress.json')).mtimeMs - T_ALICE) < 1000);
+    out = run(A, ['push', '127.0.0.1', '--save']);
+    ok('推过一次之后还能再推（不会被自己写的旧档挡住）', !/没有推送/.test(out) && /已把存档送到/.test(out));
     out = run(A, ['pull', '127.0.0.1', '--save']);
     ok('pull 能把存档取回来', JSON.parse(fs.readFileSync(path.join(A, 'save/progress.json'), 'utf8')).level === 10);
     ok('本机旧档也备份了', fs.readdirSync(path.join(A, 'save/backup')).length >= 1);

@@ -10,8 +10,17 @@
 #   bash 一键同步.command files-push /  files-pull
 #   bash 一键同步.command discover / start / stop / watch / token / autostart
 cd "$(dirname "$0")" || exit 1
-ROOT="$(pwd)"
-[ -f "$ROOT/index.html" ] || ROOT="$(cd "$ROOT/.." && pwd)"
+HERE="$(pwd)"
+# 游戏本体在 <脚本目录>/game/ 里；平铺的便携包也认
+ROOT=""
+for c in "$HERE/game" "$HERE" "$HERE/.."; do
+  if [ -f "$c/index.html" ]; then ROOT="$(cd "$c" && pwd)"; break; fi
+done
+if [ -z "$ROOT" ]; then
+  echo "找不到游戏目录（应该有 index.html）：请把整个文件夹一起解压后再运行。"
+  printf '按回车键关闭…'; read -r _
+  exit 1
+fi
 cd "$ROOT" || exit 1
 SYNC="tools/sync/sync.js"
 

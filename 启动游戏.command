@@ -20,10 +20,14 @@
 #   --foreground  服务器留在前台（调试用；窗口不会自动关闭）
 cd "$(dirname "$0")" || exit 1
 HERE="$(pwd)"
-# 脚本就在游戏目录里；万一被挪进子目录，就往上找一层
-if [ -f "index.html" ]; then ROOT="$HERE"; else ROOT="$(cd "$HERE/.." && pwd)"; fi
-if [ ! -f "$ROOT/index.html" ]; then
-  echo "找不到 index.html：请把整个游戏文件夹一起解压后再运行启动器。"
+# 游戏本体在 <脚本目录>/game/ 里；平铺的便携包、或者脚本被挪进子目录也都认
+ROOT=""
+for c in "$HERE/game" "$HERE" "$HERE/.."; do
+  if [ -f "$c/index.html" ]; then ROOT="$(cd "$c" && pwd)"; break; fi
+done
+if [ -z "$ROOT" ]; then
+  echo "找不到 index.html：它应该在「$(basename "$HERE")/game/」里。"
+  echo "请把整个文件夹一起解压后再运行启动器。"
   exit 2
 fi
 cd "$ROOT" || exit 1

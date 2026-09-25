@@ -150,4 +150,12 @@
 .sync-head .small-label{font-size:18px;color:#8a6a3c;margin-left:8px}
 .sync-head code{background:#fff6dd;border-radius:8px;padding:0 6px;font-size:18px}
 .sync-on{color:#3f7a24}.sync-off{color:#9a7a4a}.sync-warn{color:#c0392b}
-.sync-actions{display:flex;gap:14px;margin-top:10px}
+.sync-actions{display:flex;gap:14px;margin-top:10px;flex-wrap:wrap}
+/* 跨设备同步的实时进度：阶段 + 进度条 + 最近几行日志 */
+.sync-progress{margin-top:10px;font-size:18px}
+.sync-progress .sp-head{font-size:20px;line-height:1.5}
+.sync-progress .sp-bar{height:12px;border-radius:8px;background:#e6d3ab;overflow:hidden;margin:8px 0 4px}
+.sync-progress .sp-bar i{display:block;height:100%;background:#8bbf4a;transition:width .25s}
+.sync-progress .sp-log{margin:8px 0 0;max-height:170px;overflow:auto;background:#fff6dd;border:2px solid #e2cfa4;border-radius:14px;padding:8px 12px;font-size:16px;line-height:1.5;white-space:pre-wrap;word-break:break-all;color:#6a4a24}
+.sync-progress .sp-hint{margin-top:8px;font-size:17px;line-height:1.6;color:#8a6a3c}
+.sync-progress .sp-actions{margin-top:10px;display:flex;gap:12px}

@@ -223,7 +223,7 @@ node tools/sync/sync.js doctor win     # win 是 peers 里的名字，也可以�
 | `TCP 连接：不通（超时）`，但对端能 ping 通、445/3389 能连 | 对端**没启动同步服务**，或者**防火墙把 8788 丢了**——Windows 防火墙默认静默丢包，所以没放行的端口一律表现为「超时」，而不是「端口没人监听」 | 到对端跑一次 `prepare` |
 | `TCP 连接：不通（端口没人监听）` | 对端服务确实没起来 | 对端 `node tools/sync/sync.js start` |
 | `TCP 通`、`/api/ping` 通，但 `push/pull` 报 403 | 两边 **token 不一样** | 两边菜单第 8 项对一下口令，或 `node tools/sync/sync.js token <同一串>` |
-| 两边 token 文件里明明写成一样了，还是报口令不对 | **对端服务是改口令之前启动的**（老版本启动时就把口令读进内存，改文件不重启不生效） | 在对端跑一次 `node tools/sync/sync.js restart`；对端换成新版 `sync.js` 后就不用重启了（每次请求都重新读配置）。`doctor` 会直接打印两边的**口令指纹**（口令的 6 位哈希），一眼就能看出到底一样不一样 |
+| 两边 token 文件里明明写成一样了，还是报口令不对 | **对端服务是改口令之前启动的**：老版本 `sync.js` 在启动时就把口令读进内存，之后改文件不重启不生效 | 新版 `sync.js` 每次请求都重新读配置，改完立即生效；而且 `start`/菜单启动时会发现「服务指纹 ≠ 配置指纹」并**自动重启**。对方还是老版本时，在对端跑一次 `node tools/sync/sync.js restart`（Windows 上也可以双击 `重启同步服务.cmd`）。`doctor` 会直接打印两边的**口令指纹**（口令的 6 位哈希），一眼看出到底一样不一样 |
 | 第 2 项显示 `ZeroTier 地址：（一个都没检测到）` | ZeroTier 没连上或没装 | 先修 ZeroTier 本身 |
 | 第 3 项显示 `本机同步服务：没在运行` | 对端连不上你这一台 | `node tools/sync/sync.js start`，或装开机自启 |
 
@@ -297,6 +297,7 @@ node tools/check-asset-paths.cjs   # 发布体检：静态引用的大小写与�
 | `audio/` | `main_bg.mp3`、`fight_bg.mp3` 两首 BGM。 |
 | `save/` | 存档目录（`progress.json` 主存档；`backup/` 是同步/覆盖前的自动备份；不进版本库）。 |
 | `启动游戏.cmd` | Windows 双击入口：找游戏目录 → 起原生轻壳（`src-tauri/dist/`），没有就用「服务器 + 浏览器应用窗口」；服务器后台运行，`--stop` 停。 |
+| `重启同步服务.cmd` | Windows：双击重启后台同步服务（改完 token 忘了重启时用它；等价于 `node tools\sync\sync.js restart`）。 |
 | `启动游戏.command` | macOS / Linux 双击入口：和 Windows 侧同样把服务器 `nohup` 到后台（PID `save/.server.pid`，日志 `save/server.out.log`），打开窗口后**本窗口自动关闭**；`--stop` 停、`--foreground` 留在前台看日志。 |
 | `停止游戏.command` | macOS 双击一下停掉后台的本地服务器（等价于 `启动游戏.command --stop`）。 |
 | `一键同步.command` / `一键同步.cmd` | 双机（Mac ↔ Windows）同步菜单：送/取存档、推/拉改动过的文件、扫对端、开关后台同步服务、开机自启。逻辑都在 `tools/sync/`。 |

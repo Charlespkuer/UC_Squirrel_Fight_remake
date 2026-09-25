@@ -29,7 +29,7 @@ jobs:
           mkdir -p dist
 
           # 运行需要的文件（**就是仓库根那一套最小运行集合**；游戏里全是相对路径，没有绝对路径）
-          COMMON="index.html css js images audio README.md serve.js serve.py 启动游戏.cmd 启动游戏.command 停止游戏.command 一键同步.cmd 一键同步.command start-game.ps1"
+          COMMON="index.html css js images audio README.md serve.js serve.py 启动游戏.cmd 启动游戏.command 停止游戏.command 一键同步.cmd 一键同步.command 重启同步服务.cmd start-game.ps1"
 
           build() {          # $1 = 包名后缀（mac / win）
             name="squirrel-web-$1"
@@ -45,7 +45,7 @@ jobs:
             # （cmd.exe 读 .cmd 里的 UTF-8 中文会把中文注释当命令，导致服务器起不来），
             # 而且 .cmd 必须是 CRLF，否则 if(...) 块与 goto 在部分环境下会出错。
             if [ "$1" = "win" ]; then
-              for f in 启动游戏.cmd 一键同步.cmd; do
+              for f in 启动游戏.cmd 一键同步.cmd 重启同步服务.cmd; do
                 sed -i 's/\r$//' "$out/$f"
                 sed -i 's/$/\r/' "$out/$f"
               done

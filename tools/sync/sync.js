@@ -893,7 +893,18 @@ function pingLocal(port) { return pingPeer('127.0.0.1', port, 800); }
 async function daemonStart(quiet) {
   const cfg = ensureConfig();
   const existing = await pingLocal(cfg.port);
-  if (existing) { if (!quiet) log('同步服务已经在运行（' + existing.name + '，端口 ' + cfg.port + '）。'); return existing; }
+  if (existing) {
+    // 已经在跑的服务如果用的还是旧口令（老版本启动时把口令读进内存了），这里自动重启一次，
+    // 免得出现「两边 token 明明一样却同步不过去」——用户只要再跑一次 start 就自愈。
+    if (existing.tokenId && existing.tokenId !== tokenId(cfg.token)) {
+      if (!quiet) log('同步服务用的还是旧口令（服务指纹 ' + existing.tokenId + '，配置指纹 ' + tokenId(cfg.token) + '），自动重启一次…');
+      daemonStop();
+      await sleep(500);
+    } else {
+      if (!quiet) log('同步服务已经在运行（' + existing.name + '，端口 ' + cfg.port + '）。');
+      return existing;
+    }
+  }
   fs.mkdirSync(SAVE_DIR, { recursive: true });
   const out = fs.openSync(OUT_LOG, 'a'), err = fs.openSync(ERR_LOG, 'a');
   const child = spawn(process.execPath, [__filename, 'serve', '--port', String(cfg.port)], {

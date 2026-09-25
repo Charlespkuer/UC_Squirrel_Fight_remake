@@ -451,7 +451,7 @@
   /* ============================================================
    * 存档：**主存档 = 游戏目录下的 save/progress.json**
    *
-   * 由本地服务器的 /__save 读写（`node references/tools/serve.js`）。
+   * 由本地服务器的 /__save 读写（`node serve.js`）。
    *   · 有本地服务器：进度只写这个文件，浏览器 localStorage **不再当存档用**
    *     （首次会把老档迁进文件，然后删掉旧的 ssdz_save_v1 键）。
    *   · 没有本地服务器（GitHub Pages、file://）：退回 localStorage，否则无处可存；
@@ -509,7 +509,7 @@
     if (typeof fetch !== 'function') { fileState.checked = true; fileState.available = false; fileState.reason = '这个环境没有 fetch，无法读写存档文件'; return false; }
     if (isFileProtocol()) {
       fileState.checked = true; fileState.available = false;
-      fileState.reason = '页面是 file:// 打开的，浏览器不允许写文件。请用启动器（start-mac.command / start-win.cmd / node references/tools/serve.js）打开游戏。';
+      fileState.reason = '页面是 file:// 打开的，浏览器不允许写文件。请用启动器（启动游戏.cmd / 启动游戏.command / node serve.js）打开游戏。';
       return false;
     }
     try {

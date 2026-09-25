@@ -1025,7 +1025,7 @@
     if (info.mode !== 'file') {
       state = '<b class="sync-off">浏览器里（兜底）</b><span class="small-label">' +
         esc(info.reason || '没有本地服务器，进度暂存在这个浏览器的 localStorage。') +
-        '<br>用启动器或 <code>node references/tools/serve.js</code> 打开游戏，进度就会写进 <code>save/progress.json</code>。</span>';
+        '<br>用启动器或 <code>node serve.js</code> 打开游戏，进度就会写进 <code>save/progress.json</code>。</span>';
     } else if (info.conflict) {
       state = '<b class="sync-warn">文件里的进度更新（' + State.syncFormatTime(info.fileAt) + '）</b><span class="small-label">点「载入存档文件」把它取过来（不会静默覆盖）</span>';
     } else {

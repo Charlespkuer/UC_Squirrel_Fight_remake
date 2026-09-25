@@ -1,7 +1,5 @@
 # 参考素材（原 APK、参考图、网页存档）不进仓库
 references/*
-# 但开发工具与测试留在仓库里：它们虽然在 references/ 下，仍然需要版本管理
-!references/tools/
 
 save/
 
@@ -11,7 +9,7 @@ package-lock.json
 _site/
 dist/
 
-# Tauri 桌面版：web/ 由 references/tools/build-tauri-web.cjs 生成，
+# Tauri 桌面版：web/ 由 tools/build-tauri-web.cjs 生成，
 # icons/ 由 `npx tauri icon app-icon.png` 生成，target/ 是 Rust 编译产物
 src-tauri/web/
 src-tauri/icons/
@@ -25,4 +23,9 @@ Thumbs.db
 desktop.ini
 
 # 检查工具留下的临时截图
-references/tools/research/tmp-*.png
+tools/research/tmp-*.png
+# 开发截图是「跑出来」的产物（headless-shot / test-battle 生成），要留证据时手动 git add -f
+tools/verification/*.png
+tools/research/*.png
+tools/research/*.jpg
+tools/research/battle-check/

@@ -25,7 +25,8 @@ jobs:
       - uses: actions/checkout@v4
 
       # 只发布游戏运行需要的东西：index.html + css/js/images/audio。
-      # references/（含原 APK）与 references/tools/（开发工具、截图证据）不进站点，省流量也避免版权问题。
+      # references/（含原 APK）与 tools/（开发工具、截图证据）不进站点，省流量也避免版权问题。
+      # serve.js / serve.py / 启动器是给「下载到本地玩」用的，静态站点上不需要（Pages 上存档退到 localStorage）。
       - name: 组装站点目录
         run: |
           mkdir -p _site

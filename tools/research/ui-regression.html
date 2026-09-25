@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../">
+<meta charset="UTF-8">
+<title>界面回归检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* 开发检查：逐项验证首页 HUD 与二级界面的界面细节，结果在 window.__report.check。
+ * ?screen=weapons|bag 可以停留在对应页面截图。 */
+(function () {
+  const q = new URLSearchParams(location.search);
+  const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { x: +r.left.toFixed(2), y: +r.top.toFixed(2), w: +r.width.toFixed(2), h: +r.height.toFixed(2), cx: +(r.left + r.width / 2).toFixed(2), cy: +(r.top + r.height / 2).toFixed(2) }; };
+  const hasBg = (el) => { if (!el) return false; const cs = getComputedStyle(el); return !!(cs.backgroundImage && cs.backgroundImage !== 'none') || (cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent'); };
+
+  window.addEventListener('load', async () => {
+    document.title = 'LOADING';
+    localStorage.removeItem('ssdz_debug');
+    await new Promise((r) => setTimeout(r, 250));
+    State.newGame('回归测试');
+    const S = State.state();
+    S.level = 20; S.energy = 60; S.maxEnergy = 180; S.goldPoint = 19980; S.exp = 373;
+    S.weapons = ['1:5', '6:8', '15:11']; S.skills = ['1:3', '5:2'];
+    S.props[13] = 2;
+    GData.nextExp = () => 1000;
+    Main.showHome();
+    await new Promise((r) => setTimeout(r, 900));
+
+    const check = {};
+    // —— 首页：金松果的「图标 + 数字」应共用同一个胶囊背景 ——
+    const money = document.querySelector('.home-money');
+    const moneyImg = document.querySelector('.home-money img');
+    const moneyNum = document.querySelector('.home-money .num');
+    check.goldWrapperHasBg = hasBg(money);
+    check.goldWrapperRadius = getComputedStyle(money).borderRadius;
+    check.goldIconInside = !!(moneyImg && money && money.contains(moneyImg));
+    const mr = box(money), ir = box(moneyImg), nr = box(moneyNum);
+    check.goldIconInsideBox = !!(ir && mr && ir.x >= mr.x - 1 && ir.x + ir.w <= mr.x + mr.w + 1);
+    check.goldNumInsideBox = !!(nr && mr && nr.x >= mr.x - 1 && nr.x + nr.w <= mr.x + mr.w + 1);
+    // —— 首页：等级数字与其它数字同高、且居中于格子 ——
+    const lv = box(document.querySelector('.home-level')), lvNum = box(document.querySelector('.home-level .num'));
+    check.levelNumHeight = lvNum && lvNum.h;
+    check.levelCenteredX = lv && lvNum ? +(lv.cx - lvNum.cx).toFixed(2) : null;
+    check.levelCenteredY = lv && lvNum ? +(lv.cy - lvNum.cy).toFixed(2) : null;
+    // —— 首页：经验百分比 + 具体值 ——
+    check.expPercent = document.querySelector('.home-exp-val .num').dataset.text;
+    check.expCount = document.querySelector('.home-exp-count .num').dataset.text;
+
+    // —— 转生果：走真实 UI（背包 -> 详情 -> 使用）——
+    UI.runAction('bag');
+    await new Promise((r) => setTimeout(r, 200));
+    const cell = document.querySelector('[data-prop="13"]');
+    check.rebornCellFound = !!cell;
+    if (cell) {
+      cell.click();
+      await new Promise((r) => setTimeout(r, 120));
+      const useBtn = [...document.querySelectorAll('.modal-buttons .uc-button')].find((b) => b.textContent === '使用');
+      check.rebornUseButton = !!useBtn;
+      if (useBtn) {
+        useBtn.click();
+        await new Promise((r) => setTimeout(r, 250));
+        const st = State.state();
+        check.rebornAfter = { w: st.weapons.slice(), s: st.skills.slice(), lv: st.level, reborn: st.reborn, left: st.props[13] || 0 };
+        check.rebornResetWeapons = JSON.stringify(st.weapons) === JSON.stringify(GData.NEW_PLAYER.weapons);
+        check.rebornResetSkills = JSON.stringify(st.skills) === JSON.stringify(GData.NEW_PLAYER.skills);
+        check.rebornLevelOne = st.level === 1;
+        check.rebornCounted = st.reborn === 1;
+        check.rebornConsumed = (st.props[13] || 0) === 1;
+      }
+    }
+
+    // —— 翻页箭头：按钮盒与字形行盒是否同心 ——
+    const arrows = [];
+    for (const target of ['weapons', 'skills', 'bag', 'gears']) {
+      UI.runAction(target);
+      await new Promise((r) => setTimeout(r, 200));
+      for (const sel of ['.page-arrow.prev .uc-button', '.page-arrow:not(.prev) .uc-button']) {
+        const el = document.querySelector(sel);
+        if (!el) continue;
+        const b = box(el);
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const t = range.getBoundingClientRect();
+        arrows.push({
+          screen: target + sel, text: el.textContent, btn: b,
+          dx: +((t.left + t.width / 2) - b.cx).toFixed(2), dy: +((t.top + t.height / 2) - b.cy).toFixed(2),
+          translate: getComputedStyle(el).translate,
+        });
+      }
+    }
+    check.arrows = arrows;
+
+    if (q.get('screen')) { UI.runAction(q.get('screen')); await new Promise((r) => setTimeout(r, 300)); }
+    window.__report = { check, errs: window.__errs };
+    document.title = 'READY';
+  });
+})();
+</script>
+</body>
+</html>

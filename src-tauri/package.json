@@ -4,11 +4,11 @@
   "version": "0.1.3",
   "description": "松鼠大战 怀旧复刻版 —— 轻量桌面窗口（自带迷你文件服务器，直接用游戏目录里的前端与存档；exe 约 3 MB）",
   "scripts": {
-    "app": "node ../references/tools/build-tauri-app.cjs",
-    "app:clean": "node ../references/tools/build-tauri-app.cjs --clean",
-    "installer": "node ../references/tools/build-tauri-app.cjs --installer",
-    "stage": "node ../references/tools/build-tauri-web.cjs",
-    "stage:check": "node ../references/tools/build-tauri-web.cjs --check",
+    "app": "node ../tools/build-tauri-app.cjs",
+    "app:clean": "node ../tools/build-tauri-app.cjs --clean",
+    "installer": "node ../tools/build-tauri-app.cjs --installer",
+    "stage": "node ../tools/build-tauri-web.cjs",
+    "stage:check": "node ../tools/build-tauri-web.cjs --check",
     "dev": "tauri dev",
     "icon": "tauri icon app-icon.png"
   },

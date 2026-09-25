@@ -48,8 +48,8 @@ jobs:
       # 这里临时生成 src-tauri/web，并用 tauri.bundle.conf.json 把 frontendDist 指过去。
       - name: 暂存前端文件并校验快照
         run: |
-          node references/tools/build-tauri-web.cjs
-          node references/tools/build-tauri-web.cjs --check
+          node tools/build-tauri-web.cjs
+          node tools/build-tauri-web.cjs --check
 
       - name: 安装 Tauri CLI
         working-directory: src-tauri

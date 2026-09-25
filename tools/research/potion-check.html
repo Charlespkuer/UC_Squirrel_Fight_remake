@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="../../">
+<meta charset="UTF-8">
+<title>药剂批量使用检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle-drops.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* 检查药剂批量使用按钮与超上限体力显示。结果在 window.__report.check。 */
+(function () {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.addEventListener('load', async () => {
+    document.title = 'LOADING';
+    localStorage.removeItem('ssdz_debug');
+    await wait(250);
+    State.newGame('药剂检查');
+    const S = State.state();
+    S.level = 20; S.props[1] = 20; S.props[2] = 30;
+    S.energy = S.maxEnergy;
+    State.save();
+    Main.showHome();
+    await wait(500);
+
+    const check = { maxEnergy: S.maxEnergy, cap: State.energyHardCap() };
+    const overlay = () => {
+      const ms = document.querySelectorAll('.classic-modal-overlay');
+      return ms[ms.length - 1] || null;
+    };
+    // 打开背包里的体力药剂详情
+    UI.runAction('bag');
+    await wait(300);
+    document.querySelector('[data-prop="1"]').click();
+    await wait(250);
+    document.querySelector('[data-action="prop-action"]').click();
+    await wait(300);
+    const m1 = overlay();
+    check.buttons = m1 ? [...m1.querySelectorAll('.modal-buttons button')].map((b) => b.textContent.trim()) : null;
+    check.note = m1 ? (/体力：\d+\/\d+/.test(m1.textContent) ? m1.textContent.match(/体力：\d+\/\d+/)[0] : null) : null;
+    check.disabled = m1 ? [...m1.querySelectorAll('.modal-buttons button')].map((b) => !!b.disabled) : null;
+
+    // 药剂详情没有滑动条：点一次「使用」喝一瓶，弹窗保持打开，可以连续点
+    const range = m1 ? m1.querySelector('[data-slider="use-count"] input') : null;
+    check.sliderMax = range ? range.max : null;
+    const useBtn = m1 ? m1.querySelector('.modal-buttons button') : null;
+    check.useLabel = useBtn ? useBtn.textContent.trim() : null;
+    const energy0 = S.energy, held0 = S.props[1];
+    if (useBtn) { useBtn.click(); await wait(300); useBtn.click(); await wait(300); }
+    check.energyAfterAll = S.energy;
+    check.usedCount = S.energy - energy0;
+    check.energyOverCap = S.energy > S.maxEnergy;
+    check.props1Left = S.props[1];
+    check.usedLeft = held0 - S.props[1];
+    check.modalStillOpen = !!overlay();
+
+    // 主界面体力条应带 over 标记
+    closeAll();
+    Main.showHome();
+    await wait(400);
+    const meter = document.querySelector('.home-energy');
+    check.meterHasOver = meter ? meter.classList.contains('over') : null;
+    check.meterTitle = meter ? meter.getAttribute('title') : null;
+
+    // 再补到大体力药剂，一口气顶到 999
+    const S2 = State.state();
+    S2.props[2] = 40; State.save();
+    const r = State.usePropMany(2, 'all');
+    check.bulk = { used: r.used, msg: r.msg, energy: S2.energy };
+    check.cappedAt999 = S2.energy === State.energyHardCap();
+    const again = State.usePropMany(2, 1);
+    check.atCapRefused = again.ok === false;
+    check.errs = window.__errs;
+    window.__report = { check, errs: window.__errs };
+    document.title = 'READY';
+
+    function closeAll() { document.querySelectorAll('.classic-modal-overlay').forEach((e) => e.remove()); }
+  });
+})();
+</script>
+</body>
+</html>

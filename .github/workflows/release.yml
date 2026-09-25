@@ -5,7 +5,7 @@ name: Release portable builds
 #   2. 建一个 GitHub Release 并把 zip 挂上去，别人下载解压即玩
 # 也可以手动触发（Actions → Release portable builds → Run workflow）。
 #
-# 注意：启动脚本不在本文件里现写，而是直接拷贝 references/tools/launchers/ 下维护的那一份，
+# 注意：启动脚本不在本文件里现写，而是直接拷贝  下维护的那一份，
 # 免得 workflow 与仓库里的脚本各写一套、越走越偏。
 
 on:
@@ -28,43 +28,39 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="manual-$(date +%Y%m%d-%H%M)"; fi
           mkdir -p dist
 
-          # 运行需要的目录（布局与本仓库一致；游戏里全是相对路径，没有绝对路径）
-          COMMON="index.html css js images audio README.md"
+          # 运行需要的文件（**就是仓库根那一套最小运行集合**；游戏里全是相对路径，没有绝对路径）
+          COMMON="index.html css js images audio README.md serve.js serve.py 启动游戏.cmd 启动游戏.command start-game.ps1"
 
-          build() {          # $1 = 包名后缀, $2 = 启动器文件名
+          build() {          # $1 = 包名后缀（mac / win）
             name="squirrel-web-$1"
             out="dist/$name"
             rm -rf "$out"
-            mkdir -p "$out/references/tools"
+            mkdir -p "$out"
             cp -R $COMMON "$out/"
-            # 存档接口必须跟着包走：缺了它，游戏里点「写入存档文件」只会提示没有本地服务器接口
-            cp references/tools/serve.js references/tools/serve.py "$out/references/tools/"
-            # 启动器就用仓库里维护的那一份（Node 优先、Python 兜底、应用窗口模式）
-            cp "references/tools/launchers/$2" "$out/$2"
-            chmod +x "$out/$2" 2>/dev/null || true
-            # Windows 的 .cmd 只是 ASCII 外壳，真正的逻辑在同目录的 start-win.ps1 里
+            chmod +x "$out/启动游戏.command" "$out/serve.py" 2>/dev/null || true
+            # Windows：启动游戏.cmd 只是 ASCII 外壳，真正的逻辑在同目录的 start-game.ps1 里
             # （cmd.exe 读 .cmd 里的 UTF-8 中文会把中文注释当命令，导致服务器起不来），
-            # 所以这两个文件必须一起进包。
+            # 而且 .cmd 必须是 CRLF，否则 if(...) 块与 goto 在部分环境下会出错。
             if [ "$1" = "win" ]; then
-              cp references/tools/launchers/start-win.ps1 "$out/start-win.ps1"
-              # Windows 的 .cmd 必须是 CRLF，否则 if(...) 块与 goto 在部分环境下会出错
-              sed -i 's/\r$//' "$out/$2"
-              sed -i 's/$/\r/' "$out/$2"
+              sed -i 's/\r$//' "$out/启动游戏.cmd"
+              sed -i 's/$/\r/' "$out/启动游戏.cmd"
             fi
+            rm -f "$out/start-game.ps1.bak"
             cat > "$out/启动说明.txt" <<'TXT'
           松鼠大战怀旧复刻版 · 便携版
           ================================
           1) 解压整个文件夹（不要只把 index.html 拖出来：图片和音频都在 images/ 与 audio/ 里）
           2) 启动：
-             · macOS  ：双击 start-mac.command
-               首次请右键 → 打开；若提示没有权限，先在「终端」里执行 chmod +x start-mac.command
-             · Windows：双击 start-win.cmd（同目录的 start-win.ps1 要一起留着，不能删）
+             · Windows：双击 启动游戏.cmd（同目录的 start-game.ps1 要一起留着，不能删）
+             · macOS  ：双击 启动游戏.command
+               首次请右键 → 打开；若提示没有权限，先在「终端」里执行 chmod +x 启动游戏.command
              启动器会起一个本地服务器，并用浏览器的「应用窗口」模式打开：没有标签栏、没有地址栏，
-             看着就是一个独立窗口。想用普通标签页就加参数 --browser（例如 start-win.cmd --browser）。
+             看着就是一个独立窗口。想用普通标签页就加参数 --browser（例如 启动游戏.cmd --browser）。
              双击后命令行窗口会自己关掉：服务器在后台隐藏运行（日志在 save\server.out.log 与
-             save\server.err.log），要停掉它就跑一次 start-win.cmd --stop。
-             端口默认 8080；如果被别的程序占用，启动器会直接告诉你换一个，例如 start-win.cmd 8081。
-          3) Node.js（https://nodejs.org，装 LTS 版即可）与 Python 3 有任意一个就行；
+             save\server.err.log），要停掉它就跑一次 启动游戏.cmd --stop。
+             端口默认 8080；如果被别的程序占用，启动器会直接告诉你换一个，例如 启动游戏.cmd 8081。
+          3) Node.js（https://nodejs.org，装 LTS 版即可）与 Python 3 有任意一个就行
+             （serve.js / serve.py 就在这个文件夹里）；
              两个都没有时会直接打开 index.html —— 那种情况下浏览器不允许本地文件写盘，只能存浏览器里。
 
           存档：save/progress.json，就在解压出来的文件夹里，拷走这个文件等于备份了进度。
@@ -78,8 +74,8 @@ jobs:
             ls -la "dist/$name-$TAG.zip"
           }
 
-          build mac start-mac.command
-          build win start-win.cmd
+          build mac
+          build win
 
       - name: 创建 Release 并上传
         env:
@@ -87,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="manual-$(date +%Y%m%d-%H%M)"; fi
-          NOTES="解压即玩：macOS 双击 start-mac.command，Windows 双击 start-win.cmd，详细说明见包内「启动说明.txt」。"
+          NOTES="解压即玩：macOS 双击 启动游戏.command，Windows 双击 启动游戏.cmd，详细说明见包内「启动说明.txt」。"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/*.zip --clobber
           else

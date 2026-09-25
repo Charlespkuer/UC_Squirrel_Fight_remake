@@ -1,7 +1,7 @@
 @echo off
 rem  SSDZ Classic - double-click launcher (project root).
 rem
-rem  All logic lives in references\tools\launchers\start-win.ps1: cmd.exe
+rem  All logic lives in start-game.ps1 next to this file: cmd.exe
 rem  mis-parses UTF-8 Chinese inside .cmd files (it reads Chinese comment bytes as
 rem  bogus commands, so the server never started), therefore this file is ASCII-only.
 rem
@@ -19,7 +19,7 @@ setlocal
 cd /d "%~dp0"
 set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 if not exist "%PS%" set "PS=powershell"
-"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0references\tools\launchers\start-win.ps1" %*
+"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-game.ps1" %*
 set "CODE=%errorlevel%"
 if not "%CODE%"=="0" (
   echo.

@@ -22,7 +22,8 @@ node scripts/serve.js 8080      # 加 --no-save 可关掉存档文件写入
 > index.html  css/  js/  images/  audio/   ← 游戏本体（静态服务的根，必须在最外层）
 > save/                             ← 主存档（第一次运行自动创建）
 > scripts/                          ← 启动、停止、同步用到的脚本都在这里
->     停止游戏.command  一键同步.command  一键同步.cmd  重启同步服务.cmd
+>     停止游戏.command  一键同步.command  一键同步.cmd
+  重启同步服务.cmd  restart-sync.cmd（同一个东西的英文名版）
 >     serve.js  serve.py  start-game.ps1   sync/（双机同步本体）
 > tools/                            ← 开发与验证（测试、关卡实测、APK 取证、文档）
 > src-tauri/                        ← 桌面轻壳源码（要自己编译桌面版才用得上）
@@ -252,7 +253,8 @@ node scripts/sync/sync.js doctor win     # win 是 peers 里的名字，也可�
 | `TCP 连接：不通（超时）`，但对端能 ping 通、445/3389 能连 | 对端**没启动同步服务**，或者**防火墙把 8788 丢了**——Windows 防火墙默认静默丢包，所以没放行的端口一律表现为「超时」，而不是「端口没人监听」 | 到对端跑一次 `prepare` |
 | `TCP 连接：不通（端口没人监听）` | 对端服务确实没起来 | 对端 `node scripts/sync/sync.js start` |
 | `TCP 通`、`/api/ping` 通，但 `push/pull` 报 403 | 两边 **token 不一样** | 两边菜单第 8 项对一下口令，或 `node scripts/sync/sync.js token <同一串>` |
-| 两边 token 文件里明明写成一样了，还是报口令不对 | **对端服务是改口令之前启动的**：老版本 `sync.js` 在启动时就把口令读进内存，之后改文件不重启不生效 | 新版 `sync.js` 每次请求都重新读配置，改完立即生效；而且 `start`/菜单启动时会发现「服务指纹 ≠ 配置指纹」并**自动重启**。对方还是老版本时，在对端跑一次 `node scripts/sync/sync.js restart`（Windows 上也可以双击 `重启同步服务.cmd`）。`doctor` 会直接打印两边的**口令指纹**（口令的 6 位哈希），一眼看出到底一样不一样 |
+| 文件同步提示「对端忽略 N 个（对端版本较旧）」 | 对端那台还在跑旧版 `sync.js`（忽略清单不一样），它按自己的规矩拒收了几个文件 | 在对端双击 `scripts/restart-sync.cmd`（或跑 `node scripts/sync/sync.js restart`），让对端换成新代码，再同步一次即可。存档同步不受影响 |
+| 两边 token 文件里明明写成一样了，还是报口令不对 | **对端服务是改口令之前启动的**：老版本 `sync.js` 在启动时就把口令读进内存，之后改文件不重启不生效 | 新版 `sync.js` 每次请求都重新读配置，改完立即生效；而且 `start`/菜单启动时会发现「服务指纹 ≠ 配置指纹」并**自动重启**。对方还是老版本时，在对端跑一次 `node scripts/sync/sync.js restart`（Windows 上也可以双击 `scripts/重启同步服务.cmd` 或 `scripts/restart-sync.cmd`）。`doctor` 会直接打印两边的**口令指纹**（口令的 6 位哈希），一眼看出到底一样不一样 |
 | 第 2 项显示 `ZeroTier 地址：（一个都没检测到）` | ZeroTier 没连上或没装 | 先修 ZeroTier 本身 |
 | 第 3 项显示 `本机同步服务：没在运行` | 对端连不上你这一台 | `node scripts/sync/sync.js start`，或装开机自启 |
 

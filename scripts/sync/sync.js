@@ -810,7 +810,7 @@ async function filesSync(peer, opts, direction) {
     for (const c of changes) log('[dry] ' + (direction === 'push' ? '→ ' : '← ') + c.p);
     return { ok: true, sent: 0, code: 'OK', msg: '演练：会传 ' + changes.length + ' 个文件（没有真的写）' };
   }
-  let done = 0, bytes = 0, failed = 0, idx = 0;
+  let done = 0, bytes = 0, failed = 0, refusedByPeer = 0, idx = 0;
   const CONC = 4;
   async function worker() {
     while (idx < changes.length) {
@@ -837,9 +837,17 @@ async function filesSync(peer, opts, direction) {
         log((direction === 'push' ? '  → ' : '  ← ') + c.p);
         jobLine((direction === 'push' ? '→ ' : '← ') + c.p);
       } catch (e) {
-        failed++;
-        jobLine('✗ ' + c.p + '：' + (e.message || e));
-        warn('  [!] ' + c.p + ' 失败：' + (e.message || e));
+        const em = String((e && e.message) || e);
+        if (/路径不合法或已被忽略/.test(em)) {
+          // 对端按它自己的忽略清单拒收：通常是对端版本较旧（忽略清单不一样）。
+          // 这不是故障，算「跳过」，并告诉用户怎么让它生效。
+          refusedByPeer++;
+          jobLine('⊘ ' + c.p + '（对端忽略清单拒收）');
+        } else {
+          failed++;
+          jobLine('✗ ' + c.p + '：' + em);
+          warn('  [!] ' + c.p + ' 失败：' + em);
+        }
       }
     }
   }
@@ -847,12 +855,18 @@ async function filesSync(peer, opts, direction) {
   log(green('[√] ' + (direction === 'push' ? '推送' : '拉取') + ' ' + done + '/' + changes.length + ' 个文件（' + (bytes / 1024).toFixed(0) + ' KB）') + (failed ? '，失败 ' + failed + ' 个' : ''));
   if (direction === 'push' && plan.onlyRemote.length) log('    对端还多出 ' + plan.onlyRemote.length + ' 个本机没有的文件（不会自动删）');
   if (direction === 'pull' && plan.onlyLocal.length) log('    本机还有 ' + plan.onlyLocal.length + ' 个对端没有的文件（不会自动删）');
+  if (refusedByPeer) {
+    log('    对端按自己的忽略清单拒收了 ' + refusedByPeer + ' 个文件');
+    log('    （最常见的原因：对端那台还是旧版本/旧目录布局。在对端跑一次');
+    log('      node scripts/sync/sync.js restart，或者双击 scripts/restart-sync.cmd，之后再同步一次就会过去。）');
+  }
   const verb = direction === 'push' ? '推送' : '拉取';
   if (!changes.length) return { ok: true, sent: 0, failed: 0, code: 'OK', msg: '两边文件一致，没有需要' + verb + '的' };
   if (failed && !done) throw syncError('FILES_FAILED', verb + '失败：' + failed + ' 个文件都没成功，多半是对端服务断了或磁盘写不进去。');
+  const extra = (failed ? '，失败 ' + failed + ' 个' : '') + (refusedByPeer ? '，对端忽略 ' + refusedByPeer + ' 个（对端版本较旧）' : '');
   return {
-    ok: true, sent: done, failed, code: failed ? 'PARTIAL' : 'OK',
-    msg: verb + ' ' + done + '/' + changes.length + ' 个文件（' + (bytes / 1024).toFixed(0) + ' KB）' + (failed ? '，失败 ' + failed + ' 个' : ''),
+    ok: true, sent: done, failed, code: failed ? 'PARTIAL' : (refusedByPeer ? 'PARTIAL_PEER_OLD' : 'OK'),
+    msg: verb + ' ' + done + '/' + changes.length + ' 个文件（' + (bytes / 1024).toFixed(0) + ' KB）' + extra,
   };
 }
 

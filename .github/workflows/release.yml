@@ -35,7 +35,7 @@ jobs:
           #   tools/（不进便携包）开发与验证
           LAUNCHERS="启动游戏.cmd 启动游戏.command README.md"
           GAME="index.html css js images audio"
-          SCRIPTS="serve.js serve.py start-game.ps1 停止游戏.command 一键同步.command 一键同步.cmd 重启同步服务.cmd"
+          SCRIPTS="serve.js serve.py start-game.ps1 停止游戏.command 一键同步.command 一键同步.cmd 重启同步服务.cmd restart-sync.cmd"
 
           build() {          # $1 = 包名后缀（mac / win）
             name="squirrel-web-$1"
@@ -53,7 +53,7 @@ jobs:
             # （cmd.exe 读 .cmd 里的 UTF-8 中文会把中文注释当命令，导致服务器起不来），
             # 而且 .cmd 必须是 CRLF，否则 if(...) 块与 goto 在部分环境下会出错。
             if [ "$1" = "win" ]; then
-              for f in "启动游戏.cmd" "scripts/一键同步.cmd" "scripts/重启同步服务.cmd"; do
+              for f in "启动游戏.cmd" "scripts/一键同步.cmd" "scripts/重启同步服务.cmd" "scripts/restart-sync.cmd"; do
                 sed -i 's/\r$//' "$out/$f"
                 sed -i 's/$/\r/' "$out/$f"
               done

@@ -1154,6 +1154,7 @@
       case 'PEER_NO_SAVE': return '对端还没有存档，先把对端的游戏打开玩一下，或者从本机「把存档送过去」。';
       case 'PARTIAL': return '有一部分文件没传成功，多半是对端服务中途断了。再点一次即可，已传过去的不会重传。';
       case 'FILES_FAILED': return '一个文件都没传成功，通常是对端服务断了或磁盘写不进去。确认对端服务在跑，再点一次。';
+      case 'PARTIAL_PEER_OLD': return '有文件被对端拒收了——对端那台的忽略清单还是旧的（多半它还在跑旧版本/旧目录布局）。在对面双击 scripts/restart-sync.cmd（或跑 node scripts/sync/sync.js restart），回来再点一次就会过去。';
       case 'ERROR': return msg || '同步失败。可以在 Mac 的「一键同步」菜单里选 c) 自检，看看到底卡在哪一步。';
       default: return msg || '';
     }

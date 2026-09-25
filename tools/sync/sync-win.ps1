@@ -55,6 +55,9 @@ if ($Rest.Count -gt 0) {
     'save-pull'  { exit (Invoke-Sync (@('pull') + $tail + @('--save'))) }
     'files-push' { exit (Invoke-Sync (@('push') + $tail + @('--files'))) }
     'files-pull' { exit (Invoke-Sync (@('pull') + $tail + @('--files'))) }
+    'doctor'     { exit (Invoke-Sync (@('doctor') + $tail)) }
+    'prepare'    { exit (Invoke-Sync (@('prepare') + $tail)) }
+    'firewall'   { exit (Invoke-Sync (@('firewall') + $tail)) }
     default      { exit (Invoke-Sync @($Rest)) }
   }
 }
@@ -77,9 +80,11 @@ while ($true) {
   Write-Host '  8) 显示同步口令 / 本机 ZeroTier 地址'
   Write-Host '  9) 后台同步服务：启动 / 停止'
   Write-Host '  a) 开机自启：安装 / 取消'
+  Write-Host '  c) 自检（连不上先点这个：ZeroTier / 服务 / 防火墙 / 对端）'
+  Write-Host '  0) 一键准备（启动服务 + 放行 Windows 防火墙 + 自检）'
   Write-Host '  q) 退出'
   Write-Host ''
-  $choice = Read-Host '选一个（1-9/a/q）'
+  $choice = Read-Host '选一个（0-9/a/c/q）'
   switch ($choice) {
     '1' { Write-Host ''; Invoke-Sync @('status') | Out-Null; Pause-Menu }
     '2' { Write-Host ''; Invoke-Sync @('push', '--save') | Out-Null; Pause-Menu }
@@ -117,6 +122,8 @@ while ($true) {
       }
       Pause-Menu
     }
+    'c' { Write-Host ''; Invoke-Sync @('doctor') | Out-Null; Pause-Menu }
+    '0' { Write-Host ''; Invoke-Sync @('prepare') | Out-Null; Pause-Menu }
     'q' { exit 0 }
     'Q' { exit 0 }
     default { Write-Host "看不懂「$choice」"; Start-Sleep -Seconds 1 }

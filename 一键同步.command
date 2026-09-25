@@ -34,6 +34,7 @@ if [ "$#" -gt 0 ]; then
     save-pull)  shift; exec node "$SYNC" pull "$@" --save ;;
     files-push) shift; exec node "$SYNC" push "$@" --files ;;
     files-pull) shift; exec node "$SYNC" pull "$@" --files ;;
+    doctor|prepare|firewall) exec node "$SYNC" "$@" ;;
     *) exec node "$SYNC" "$@" ;;
   esac
 fi
@@ -59,9 +60,10 @@ while true; do
   echo "  8) 显示同步口令 / 本机 ZeroTier 地址"
   echo "  9) 后台同步服务：启动 / 停止"
   echo "  a) 开机自启：安装 / 取消"
+  echo "  c) 自检（连不上先点这个：ZeroTier / 服务 / 防火墙 / 对端）"
   echo "  q) 退出"
   echo
-  printf '选一个（1-9/a/q）：'
+  printf '选一个（1-9/a/c/q）：'
   read -r choice
   case "$choice" in
     1) run "状态" node "$SYNC" status ;;
@@ -94,6 +96,7 @@ while true; do
         *) node "$SYNC" autostart status ;;
       esac
       pause ;;
+    c|C) run "自检" node "$SYNC" doctor ;;
     q|Q) exit 0 ;;
     *) echo "看不懂「$choice」"; sleep 1 ;;
   esac

@@ -1033,6 +1033,7 @@ const HELP = `松鼠大战 · 双机同步（node tools/sync/sync.js <命令> [�
   discover                    扫 ZeroTier 网段，自动找对端
   doctor [peer]               自检：ZeroTier / 本机服务 / 防火墙 / 对端，卡在哪一步一目了然
   firewall                    Windows：加一条入站放行规则（弹 UAC）；macOS：只报告状态
+  prepare                     一键准备：启动服务 + 放行防火墙 + 自检（连不上先跑这个）
   push [peer] [选项]          本机 → 对端
   pull [peer] [选项]          对端 → 本机
   watch [peer] [--interval N] 盯着本地文件改动，自动推给对端
@@ -1132,6 +1133,19 @@ async function main() {
   if (cmd === 'watch') { await doWatch(opts); return; }
   if (cmd === 'doctor') { await doctor(opts); return; }
   if (cmd === 'firewall') { ensureConfig(); firewallAdd(); return; }
+  if (cmd === 'prepare') {
+    // 一键准备：起服务 + 放行入站（Windows）+ 自检。连不上时先跑这个。
+    ensureConfig();
+    log(cyan('== 1/3 启动后台同步服务 =='));
+    await daemonStart(false);
+    log('');
+    log(cyan('== 2/3 放行入站端口 =='));
+    firewallAdd();
+    log('');
+    log(cyan('== 3/3 自检 =='));
+    await doctor(opts);
+    return;
+  }
   if (cmd === 'autostart') {
     const action = argv[1] || 'status';
     if (action === 'install') autostartInstall();

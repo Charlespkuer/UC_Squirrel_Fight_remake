@@ -94,6 +94,10 @@ const DEFAULT_IGNORE = [
   '.git/', '.cache/', 'scripts/sync/sync.config.json', 'tools/sync/.cache.json',
   '.DS_Store', 'Thumbs.db', 'desktop.ini', '._*',
   '*.log', '*.tmp', '*.swp', '*~',
+  // 开发截图（.gitignore 里也不进仓库）：headless-shot / test-battle 跑出来的证据图
+  // 是「本机产物」，两台机器之间来回搬只会白占空间，所以同步时跳过。
+  'tools/verification/*.png', 'tools/research/*.png', 'tools/research/*.jpg',
+  'tools/research/tmp-*.png', 'tools/research/battle-check/',
 ];
 
 // ---------------------------------------------------------------- 小工具
@@ -295,18 +299,38 @@ function describeSave(info, label) {
 
 // ---------------------------------------------------------------- 本机地址
 
+/* Windows 的 ZeroTier 网卡名是「ZeroTier One [b9a18a606f69408b]」，macOS 是 feth0 / zt0，
+ * 只有 Linux 才一定叫 ztXXXX。旧版只认 zt/feth 前缀，于是在 Windows 上永远扫不到对端网段
+ * （现象：mac 能连上 win，win 却「找不到对端」）。这里把 ZeroTier 字样的网卡也算上。 */
+const ZT_IFACE_RE = /^(zt|feth)|zerotier/i;
+const ZT_CLI_PATHS = ['/usr/local/bin/zerotier-cli', '/opt/homebrew/bin/zerotier-cli', '/usr/sbin/zerotier-cli',
+  'C:\\Program Files (x86)\\ZeroTier\\One\\zerotier-cli.bat', 'C:\\Program Files\\ZeroTier\\One\\zerotier-cli.bat', 'zerotier-cli'];
+/** 本机所有非回环 IPv4（带网卡名）。 */
+function ipv4List() {
+  const out = [];
+  const ifs = os.networkInterfaces();
+  for (const name of Object.keys(ifs)) {
+    for (const a of ifs[name] || []) if (a.family === 'IPv4' && !a.internal) out.push({ name, ip: a.address });
+  }
+  return out;
+}
+/** 能不能拿去扫：排除回环和 169.254 链路本地（ZeroTier / WLAN 没入网时网卡会拿到这种地址）。 */
+function scannableIp(ip) { return !!ip && !/^127\./.test(ip) && !/^169\.254\./.test(ip); }
 /** 从 zerotier-cli 拿本机 ZeroTier 地址；没有就退回名字像 ZeroTier 的网卡。 */
+let ztIpsCache = { at: 0, ips: [] };
 function zeroTierIps() {
+  // 一条命令里会问好几次（扫网段、自检、打印横幅），5 秒内复用，避免反复弹 zerotier-cli
+  if (ztIpsCache.ips.length && Date.now() - ztIpsCache.at < 5000) return ztIpsCache.ips.slice();
   const ips = new Set();
-  const cli = findExecutable(['/usr/local/bin/zerotier-cli', '/opt/homebrew/bin/zerotier-cli', '/usr/sbin/zerotier-cli',
-    'C:\\Program Files (x86)\\ZeroTier\\One\\zerotier-cli.bat', 'C:\\Program Files\\ZeroTier\\One\\zerotier-cli.bat', 'zerotier-cli']);
+  const cli = findExecutable(ZT_CLI_PATHS);
   if (cli) {
     try {
-      // Windows 上的 zerotier-cli 是 .bat，execFile 不能直接跑批处理，得经过 cmd /c
+      // Windows 上的 zerotier-cli 是 .bat，execFile 不能直接跑批处理，得经过 cmd /c。
+      // 非管理员跑 listnetworks 会往 stderr 吐「authtoken.secret not found」，属于正常现象，直接丢掉。
       const isBatch = /\.(bat|cmd)$/i.test(cli);
       const out = isBatch
-        ? execFileSync(process.env.ComSpec || 'cmd.exe', ['/c', cli, 'listnetworks'], { encoding: 'utf8', timeout: 6000 })
-        : execFileSync(cli, ['listnetworks'], { encoding: 'utf8', timeout: 4000 });
+        ? execFileSync(process.env.ComSpec || 'cmd.exe', ['/c', cli, 'listnetworks'], { encoding: 'utf8', timeout: 6000, stdio: ['ignore', 'pipe', 'ignore'] })
+        : execFileSync(cli, ['listnetworks'], { encoding: 'utf8', timeout: 4000, stdio: ['ignore', 'pipe', 'ignore'] });
       for (const line of out.split(/\r?\n/)) {
         for (const c of line.trim().split(/\s+/)) {
           if (/^\d+\.\d+\.\d+\.\d+\/\d+$/.test(c)) ips.add(c.split('/')[0]);
@@ -315,13 +339,26 @@ function zeroTierIps() {
     } catch (e) {}
   }
   if (!ips.size) {
-    const ifs = os.networkInterfaces();
-    for (const name of Object.keys(ifs)) {
-      if (!/^(zt|feth)/i.test(name)) continue;
-      for (const a of ifs[name] || []) if (a.family === 'IPv4' && !a.internal) ips.add(a.address);
+    for (const iface of ipv4List()) {
+      if (ZT_IFACE_RE.test(iface.name) && scannableIp(iface.ip)) ips.add(iface.ip);
     }
   }
-  return [...ips];
+  ztIpsCache = { at: Date.now(), ips: [...ips] };
+  return ztIpsCache.ips.slice();
+}
+/** 除 ZeroTier 以外的本机地址：ZeroTier 认不出来时拿它兜底扫局域网。 */
+function otherLocalIps() {
+  const zt = new Set(zeroTierIps());
+  return ipv4List().map((x) => x.ip).filter((ip) => scannableIp(ip) && !zt.has(ip));
+}
+/** 取 /24 网段前缀。 */
+function subnetOf(ip) { const p = String(ip).split('.'); return p[0] + '.' + p[1] + '.' + p[2]; }
+/** 扫描计划：先 ZeroTier 网段，再（兜底）本机其它网段。discover 命令用它打印进度。 */
+function subnetPlan() {
+  const self = zeroTierIps();
+  const ztNets = [...new Set(self.map(subnetOf))];
+  const extraNets = [...new Set(otherLocalIps().map(subnetOf))].filter((n) => !ztNets.includes(n));
+  return { self, ztNets, extraNets };
 }
 function findExecutable(list) {
   const exts = process.platform === 'win32' ? ['', '.exe', '.bat', '.cmd'] : [''];
@@ -390,36 +427,52 @@ async function pingPeer(host, port, timeout) {
 
 // ---------------------------------------------------------------- 对端解析
 
-/** 扫本机各个 ZeroTier 网段的 /24，找开着同步服务的对端。 */
-function discoverPeers() {
-  const cfg = loadConfig();
-  const self = zeroTierIps();
-  const targets = new Set();
-  for (const ip of self) {
-    const parts = ip.split('.');
+/** 扫若干个 /24，找开着同步服务的对端（skip 里的地址不扫）。 */
+function scanSubnets(nets, port, skip, budgetMs) {
+  const seen = new Set(skip || []);
+  const targets = [];
+  for (const net of nets) {
     for (let i = 1; i <= 254; i++) {
-      const cand = parts[0] + '.' + parts[1] + '.' + parts[2] + '.' + i;
-      if (cand !== ip) targets.add(cand);
+      const cand = net + '.' + i;
+      if (seen.has(cand)) continue;
+      seen.add(cand); targets.push(cand);
     }
   }
-  const list = [...targets];
   const found = [];
   return new Promise((resolve) => {
-    if (!list.length) return resolve(found);
+    if (!targets.length) return resolve(found);
     let idx = 0, active = 0, done = false;
-    const fallback = setTimeout(() => finish(), 12000);   // 兜底：扫太久就直接返回现有的
-    function finish() { if (done) return; done = true; clearTimeout(fallback); resolve(found); }
+    const finish = () => { if (done) return; done = true; clearTimeout(fallback); resolve(found); };
+    const fallback = setTimeout(finish, budgetMs || 12000);   // 兜底：扫太久就直接返回现有的
     const next = () => {
       if (done) return;
-      if (idx >= list.length) { if (active === 0) finish(); return; }
-      const host = list[idx++];
+      if (idx >= targets.length) { if (active === 0) finish(); return; }
+      const host = targets[idx++];
       active++;
-      pingPeer(host, cfg.port, 500).then((info) => {
+      pingPeer(host, port, 800).then((info) => {
         if (info) found.push({ name: info.name || host, host, saveAt: info.saveAt || 0 });
       }).catch(() => {}).then(() => { active--; next(); });
     };
     for (let i = 0; i < 128; i++) next();
   });
+}
+/**
+ * 找对端：先试配置里写过的地址 → 再扫本机 ZeroTier 网段 → 一台都没有才兜底扫本机其它网段。
+ * 第三步是给「ZeroTier 网卡名字不标准 / 用的是局域网或 Tailscale」准备的。
+ */
+async function discoverPeers() {
+  const cfg = loadConfig();
+  const plan = subnetPlan();
+  const skip = new Set(ipv4List().map((x) => x.ip));
+  const known = Object.values(cfg.peers || {}).map(String).filter((h) => /^\d+\.\d+\.\d+\.\d+$/.test(h));
+  for (const host of known) {
+    skip.add(host);
+    const info = await pingPeer(host, cfg.port, 1500);
+    if (info) return [{ name: info.name || host, host, saveAt: info.saveAt || 0 }];
+  }
+  const hit = await scanSubnets(plan.ztNets, cfg.port, skip, 8000);
+  if (hit.length || !plan.extraNets.length) return hit;
+  return scanSubnets(plan.extraNets, cfg.port, skip, 12000);
 }
 
 async function resolvePeer(arg) {
@@ -525,20 +578,22 @@ async function doctor(opts) {
 
   say('');
   say('2) ZeroTier');
-  const cli = findExecutable(['/usr/local/bin/zerotier-cli', '/opt/homebrew/bin/zerotier-cli', '/usr/sbin/zerotier-cli',
-    'C:\\Program Files (x86)\\ZeroTier\\One\\zerotier-cli.bat', 'C:\\Program Files\\ZeroTier\\One\\zerotier-cli.bat', 'zerotier-cli']);
+  const cli = findExecutable(ZT_CLI_PATHS);
   const ips = zeroTierIps();
   if (!cli) say('   [!] 找不到 zerotier-cli（ZeroTier 没装或不在 PATH 里）');
   else {
     try {
       const isBatch = /\.(bat|cmd)$/i.test(cli);
       const info = isBatch
-        ? execFileSync(process.env.ComSpec || 'cmd.exe', ['/c', cli, 'info'], { encoding: 'utf8', timeout: 6000 })
-        : execFileSync(cli, ['info'], { encoding: 'utf8', timeout: 4000 });
+        ? execFileSync(process.env.ComSpec || 'cmd.exe', ['/c', cli, 'info'], { encoding: 'utf8', timeout: 6000, stdio: ['ignore', 'pipe', 'ignore'] })
+        : execFileSync(cli, ['info'], { encoding: 'utf8', timeout: 4000, stdio: ['ignore', 'pipe', 'ignore'] });
       say('   ' + info.trim());
     } catch (e) { say('   [!] zerotier-cli info 失败：' + (e.message || e)); }
   }
   say('   本机 ZeroTier 地址：' + (ips.join('、') || '（一个都没检测到 —— ZeroTier 没连上）'));
+  const plan = subnetPlan();
+  say('   自动扫描网段：' + (plan.ztNets.map((n) => n + '.0/24').join('、') || '（无）') +
+    (plan.extraNets.length ? '；兜底 ' + plan.extraNets.map((n) => n + '.0/24').join('、') : ''));
 
   say('');
   say('3) 本机同步服务');
@@ -699,6 +754,16 @@ async function savePush(peer, opts) {
     warn('[!] ' + msg);
     warn('    确实要用本机这份覆盖它，就加 --force（对面会自动备份旧档）。');
     return { ok: false, skipped: true, code: 'PEER_NEWER', msg };
+  }
+  // 两边时间一样（差 1 秒内）且大小一样 = 其实就是同一份，别再白推一次：
+  // 每次覆盖对端都会在对端 save/backup/ 留一份备份，重复推送只会堆垃圾。
+  const sameSave = remote && remote.exists && Math.abs(localAt - remoteAt) <= 1000 &&
+    (!Number(remote.size) || Number(remote.size) === local.size);
+  if (sameSave && !opts.force) {
+    const msg = '两边存档已经一致（' + fmtTime(remoteAt) + '），没有需要推送的改动。';
+    log((opts.dry ? '[dry] ' : '[√] ') + msg);
+    jobLine(msg);
+    return { ok: true, skipped: true, code: 'SAME_SAVE', msg };
   }
   if (opts.dry) { log('[dry] 会把本机存档 POST 到 ' + peer.host + ':' + peer.port); return { ok: true }; }
   jobPhase('把存档写到对端');
@@ -1518,10 +1583,17 @@ async function main() {
   }
   if (cmd === 'discover') {
     ensureConfig();
-    log('本机 ZeroTier：' + (zeroTierIps().join('、') || '未检测到'));
-    log('正在扫描 ...（每台机器试 0.5 秒）');
+    const plan = subnetPlan();
+    log('本机 ZeroTier：' + (plan.self.join('、') || '未检测到'));
+    log('本机 ZeroTier 网段：' + (plan.ztNets.map((n) => n + '.0/24').join('、') || '（无）') +
+      (plan.extraNets.length ? '；兜底网段：' + plan.extraNets.map((n) => n + '.0/24').join('、') : ''));
+    log('正在扫描 ...（每台机器试 0.8 秒，最多几秒）');
     const found = await discoverPeers();
-    if (!found.length) { warn('没找到开着同步服务的对端。确认对面跑过 node scripts/sync/sync.js start。'); return; }
+    if (!found.length) {
+      warn('没找到开着同步服务的对端。确认对面跑过 node scripts/sync/sync.js start。');
+      warn('知道对面地址的话可以直接用：node scripts/sync/sync.js push <对端IP>');
+      return;
+    }
     log(green('找到 ' + found.length + ' 台：'));
     const cfg = loadConfig();
     for (const f of found) {

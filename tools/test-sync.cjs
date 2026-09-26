@@ -36,6 +36,10 @@ function makeRoot(dir, name, port) {
   write(path.join(dir, 'save/progress.json'), JSON.stringify({ name, level: 1, savedAt: 1000, weapons: [], skills: [], props: {} }));
   write(path.join(dir, 'save/server.out.log'), 'log\n');
   write(path.join(dir, 'node_modules/pkg/index.js'), 'module.exports=1\n');
+  // 开发截图是「跑出来」的产物，不进同步清单；同目录下的脚本属于源码，要照常同步
+  write(path.join(dir, 'tools/verification/shot.png'), 'png\n');
+  write(path.join(dir, 'tools/research/shot.png'), 'png\n');
+  write(path.join(dir, 'tools/research/keep.cjs'), 'module.exports=1\n');
   write(path.join(dir, '.git/config'), '[core]\n');
   write(path.join(dir, '.DS_Store'), 'junk');
   write(path.join(dir, 'scripts/sync/sync.js'), fs.readFileSync(SYNC_SRC, 'utf8'));
@@ -98,6 +102,8 @@ async function ping(port) {
     ok('清单里没有 save/ node_modules/ .git/ .DS_Store', !names.some((p) => /^(save|node_modules|\.git)\//.test(p) || /(^|\/)\.DS_Store$/.test(p)));
     ok('清单里没有 *.log 与 sync.config.json', !names.some((p) => /\.log$/.test(p) || /sync\.config\.json$/.test(p)));
     ok('清单里有正常的源文件', names.includes('scripts/index.html') && names.includes('js/a.js') && names.includes('scripts/sync/sync.js'));
+    ok('开发截图不进清单，tools/research 下的脚本照常同步',
+      !names.some((p) => /^tools\/(verification|research)\/.*\.(png|jpg)$/.test(p)) && names.includes('tools/research/keep.cjs'));
 
     // ---- 路径穿越与忽略路径一律拒绝 ----
     const bad = ['../A/js/a.js', '..%2f..%2fetc%2fpasswd', '/etc/passwd', 'save/progress.json', 'scripts/sync/sync.config.json'];
@@ -170,7 +176,8 @@ async function ping(port) {
     // 否则「接收时间」成了最新时间，推送方下一次再推就会被自己刚写过去的时间戳挡下来
     ok('对端文件时间被对齐成存档时间', Math.abs(fs.statSync(path.join(B, 'save/progress.json')).mtimeMs - T_ALICE) < 1000);
     out = run(A, ['push', '127.0.0.1', '--save']);
-    ok('推过一次之后还能再推（不会被自己写的旧档挡住）', !/没有推送/.test(out) && /已把存档送到/.test(out));
+    // 时间与大小都一样时不再重复推同一份（对端每次被覆盖都会留一份备份，白推只会堆垃圾）
+    ok('推过一次之后不会重复推同一份存档', /已经一致/.test(out) && !/已把存档送到/.test(out));
     out = run(A, ['pull', '127.0.0.1', '--save']);
     ok('pull 能把存档取回来', JSON.parse(fs.readFileSync(path.join(A, 'save/progress.json'), 'utf8')).level === 10);
     ok('本机旧档也备份了', fs.readdirSync(path.join(A, 'save/backup')).length >= 1);

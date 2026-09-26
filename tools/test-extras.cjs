@@ -337,9 +337,56 @@ test('抽奖首抽免费、防双击，付费经验奖扣20并真正升级', () 
   const g = setup(), s = g.c.State.state(); g.math.random = () => 0;
   g.c.ClassicExtras.lottery(); const first = g.node('lottery-spin').onclick; first(); first();
   assert.equal(s.props[22], 10); assert.equal(s.lotteryFree, 0); assert.equal(s.goldPoint, 100);
+  // 每日任务「抽取 {n} 次每日幸运抽奖」要有计数：抽一次算一次，双击只算一次
+  assert.equal(s.dailyCounters.lottery, 1, '第一次抽奖记 1 次');
   g.flushTimers(); g.math.random = () => 0.35; g.click('lottery-spin');
   assert.equal(s.goldPoint, 80); assert.equal(s.level, 2); assert.equal(s.exp, 30);
-  g.flushTimers(); assert.equal(g.saved().goldPoint, 80); assertBalanced(g.markup);
+  assert.equal(s.dailyCounters.lottery, 2, '第二次抽奖累加到 2 次');
+  g.flushTimers(); assert.equal(g.saved().goldPoint, 80); assert.equal(g.saved().dailyCounters.lottery, 2, '每日任务计数已存盘');
+  assertBalanced(g.markup);
+});
+
+test('每条每日任务都有计数来源（防止再出现「抽奖任务不识别」）', () => {
+  const source = ['js/state.js', 'js/classic-extras.js', 'js/battle-drops.js']
+    .map((file) => fs.readFileSync(path.join(rootDir, file), 'utf8')).join('\n');
+  const wired = new Set([...source.matchAll(/bumpDaily\('([a-z]+)'/g)].map((m) => m[1]));
+  // 这几个走 bumpBattleDaily(win, kind) 按战斗类型记，没有字面量调用
+  ['fight', 'win', 'stage', 'arena', 'rank', 'spar', 'challenge'].forEach((key) => wired.add(key));
+  const keys = ['win', 'fight', 'challenge', 'stage', 'arena', 'rank', 'spar', 'lottery',
+    'merge', 'gem', 'upgrade', 'use', 'buy', 'sell', 'pickup', 'energy'];
+  const missing = keys.filter((key) => !wired.has(key));
+  assert.deepEqual(missing, [], '这些每日任务没有计数来源：' + missing.join('、'));
+
+  // 运行时再确认一遍：计数真的会变成任务进度（抽奖任务现在能被识别）
+  const g = setup(), s = g.c.State.state();
+  s.quests = { date: g.c.State.localDate(), list: [{ key: 'lottery', need: 2, rewards: [], claimed: false }] };
+  g.c.State.bumpDaily('lottery', 1);
+  const row = g.c.State.questStatus()[0];
+  assert.equal(row.name, '抽取 2 次每日幸运抽奖');
+  assert.equal(row.progress, 1, '抽一次进度是 1');
+  assert.equal(row.done, false);
+  g.c.State.bumpDaily('lottery', 1);
+  assert.equal(g.c.State.questStatus()[0].done, true, '抽满 2 次后任务可领取');
+});
+
+test('对手等级封顶：随机挑战/擂台再抖也不会冒出 70 级以上的 NPC', () => {
+  const g = setup();
+  const seen = new Set();
+  for (let i = 0; i < 60; i++) {
+    for (const asked of [70, 74, 90]) {
+      const foe = g.c.State.genAI(asked, '', { levelJitter: 3 });
+      seen.add(foe.level);
+      assert.ok(foe.level <= 70, 'genAI(' + asked + ') 生成了 ' + foe.level + ' 级');
+      assert.ok(foe.level >= 1, 'genAI(' + asked + ') 等级不能低于 1');
+    }
+  }
+  assert.ok(seen.has(70), '满级附近的对手应该真的能生成 70 级（不是全被压到很低）：' + [...seen].sort((a, b) => a - b).join(','));
+  // 满级玩家在挑战/擂台里按 ±3 浮动，夹过之后不越界
+  const s = g.c.State.state(); s.level = 70;
+  for (let i = 0; i < 40; i++) {
+    const foe = g.c.State.genAI(Math.max(1, s.level + Math.floor(g.math.random() * 6) - 3));
+    assert.ok(foe.level <= 70, '满级玩家的对手是 ' + foe.level + ' 级');
+  }
 });
 
 test('抽奖离开动画后奖品已保存，重入可继续且旧计时器不会重发奖励', () => {
@@ -676,6 +723,20 @@ test('排行榜：离线模拟、包含自己、三个排序都成立', () => {
   const low = setup(), ls = low.c.State.state();
   ls.level = 20; ls.goldCup = 9; ls.integral = 1234; ls.name = '小松鼠';
   low.c.ClassicExtras.toplist();
+  const lowLvHtml = low.page().html;        // 默认的等级榜
+  // 不满 30 级的 NPC 不能带金杯与积分（只有够级的松鼠才有）
+  const lvRows = [...lowLvHtml.matchAll(/<span class="toplist-lv">Lv (\d+)<\/span><span class="toplist-cup">([^<]*)<\/span><span class="toplist-score">([^<]*)<\/span>/g)]
+    .map((m) => ({ level: Number(m[1]), cup: m[2], score: m[3] }));
+  assert.ok(lvRows.length >= 10, '等级榜应该有足够多行可检查，实际 ' + lvRows.length);
+  const under30 = lvRows.filter((row) => row.level < 30);
+  assert.ok(under30.length > 0, '20 级视角下确实会出现不满 30 级的对手');
+  assert.ok(under30.every((row) => row.cup === '—' && row.score === '—'),
+    '不满 30 级的对手不能有金杯与积分：' + JSON.stringify(under30.slice(0, 3)));
+  const over30 = lvRows.filter((row) => row.level >= 30);
+  assert.ok(over30.length > 0, '20 级视角下也有够级的对手');
+  assert.ok(over30.every((row) => /金杯/.test(row.cup) && /^\d+$/.test(row.score)),
+    '够级的对手才有金杯与积分：' + JSON.stringify(over30.slice(0, 3)));
+  assert.ok(lvRows.every((row) => row.level <= 70), '排行榜对手也不能超过满级 70');
   low.click('cup');                       // 切到金杯榜
   const lowHtml = low.page().html;
   assert.match(lowHtml, /未参赛/, '不够级显示未参赛');

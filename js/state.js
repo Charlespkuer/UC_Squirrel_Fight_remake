@@ -1723,7 +1723,9 @@
     level = integer(level, 1, 1);
     const jitter = Number.isFinite(opts.levelJitter) ? Math.max(0, Math.floor(opts.levelJitter)) : 2;
     const rolled = jitter ? integer(level + Math.floor(Math.random() * (2 * jitter + 1)) - jitter, 1, 1) : level;
-    const finalLevel = Math.max(integer(opts.minLevel, 1, 1), rolled);
+    // 满级 70：挑战/天梯/竞技场都在玩家等级上下浮动，玩家接近满级时浮上去就会冒出 71 级以上的对手，
+    // 所以在出口处统一夹一次（所有对手生成都走这里）。
+    const finalLevel = Math.min(MAX_PLAYER_LEVEL, Math.max(integer(opts.minLevel, 1, 1), rolled));
     const name = (opts.name ? String(opts.name) : randomAIName()) + (nameSuffix || '');
     // 离线对手遵循相同的基础成长预算，避免用旧高成长公式压过新建玩家。
     const base = GData.initialStats();

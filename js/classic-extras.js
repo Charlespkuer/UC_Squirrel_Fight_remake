@@ -147,9 +147,13 @@
     }
     if (s.integral == null) { s.integral = 1500; State.save(); }
     refreshRankShopDay();
-    const entries = [0, 1, 2, 3, 4, 5].map((n) => ({ name: GData.AI_NAMES[n * 4], points: 1350 + n * 83 }));
-    entries.push({ name: s.name, points: s.integral, mine: true }); entries.sort((a, b) => b.points - a.points);
-    const p = C().page('challenge', 'arena', '<div class="extra-rank-layout"><div class="extra-rank-self">' + sprite(30) + '<h2>\u5929\u68af\u8d5b</h2><div class="extra-score">\u79ef\u5206 <b>' + s.integral + '</b></div><div class="extra-score">\u91d1\u676f <b>' + s.goldCup + '</b></div><p>\u4eca\u65e5\u5df2\u53c2\u8d5b ' + s.joinRankCount + ' / 20 \u573a<br>' + (rankSunday() ? '\u5468\u65e5\u4f11\u8d5b\uff08\u91d1\u676f\u5546\u5e97\u7167\u5e38\u5f00\u653e\uff09' : s.joinRankCount >= 20 ? '\u4eca\u65e5\u53c2\u8d5b\u6b21\u6570\u5df2\u7528\u5b8c' : s.joinRankCount < 10 ? '\u672c\u6b21\u514d\u8d39\uff0c\u524d10\u573a\u514d\u8d39' : '\u672c\u6b21\u6d88\u80175\u91d1\u677e\u679c') + '</p>' + button('\u5f00\u59cb\u5339\u914d', 'rank-fight', 'small gold') + button('\u91d1\u676f\u5546\u5e97', 'rank-shop', 'small') + '</div><div class="extra-rank-list"><h3>\u672c\u5730\u6a21\u62df\u6392\u884c\u699c</h3>' + entries.map((entry, i) => '<div class="extra-rank-row ' + (entry.mine ? 'mine' : '') + '"><span>' + (i + 1) + '</span><b>' + esc(entry.name) + (entry.mine ? '\uff08\u4f60\uff09' : '') + '</b><strong>' + entry.points + '</strong></div>').join('') + note('\u5929\u68af\u8d5b\u5468\u4e00\u81f3\u5468\u516d\u8fdb\u884c\uff0c\u5468\u65e5\u4f11\u8d5b\uff1b\u91d1\u676f\u5546\u5e97\u6bcf\u5929\u5f00\u653e\u3002\u6bcf\u65e5\u6700\u591a20\u573a\uff0c\u524d10\u573a\u514d\u8d39\uff0c\u5176\u540e\u6bcf\u573a5\u91d1\u677e\u679c\u3002\u80dc\u5229\u5f973\u676f\uff0c\u843d\u8d25\u5f971\u676f\u3002\u79ef\u5206\u4e0e\u593a\u676f\u4e3a\u79bb\u7ebf\u6a21\u62df\uff1b\u83b7\u80dc\u670925%\u673a\u4f1a\u989d\u5916\u593a\u5f973\u676f\u3002') + '</div></div>', { cls: 'extra-board rank-extra-board' });
+    // 天梯赛 30 级才开，榜上对手也都是够级的（顺带显示等级，免得看起来像「不满 30 级也有积分」）
+    const cap = State.MAX_PLAYER_LEVEL || 70;
+    const entries = [0, 1, 2, 3, 4, 5].map((n) => ({
+      name: GData.AI_NAMES[n * 4], points: 1350 + n * 83, level: Math.min(cap, 34 + n * 6),
+    }));
+    entries.push({ name: s.name, points: s.integral, level: s.level, mine: true }); entries.sort((a, b) => b.points - a.points);
+    const p = C().page('challenge', 'arena', '<div class="extra-rank-layout"><div class="extra-rank-self">' + sprite(30) + '<h2>\u5929\u68af\u8d5b</h2><div class="extra-score">\u79ef\u5206 <b>' + s.integral + '</b></div><div class="extra-score">\u91d1\u676f <b>' + s.goldCup + '</b></div><p>\u4eca\u65e5\u5df2\u53c2\u8d5b ' + s.joinRankCount + ' / 20 \u573a<br>' + (rankSunday() ? '\u5468\u65e5\u4f11\u8d5b\uff08\u91d1\u676f\u5546\u5e97\u7167\u5e38\u5f00\u653e\uff09' : s.joinRankCount >= 20 ? '\u4eca\u65e5\u53c2\u8d5b\u6b21\u6570\u5df2\u7528\u5b8c' : s.joinRankCount < 10 ? '\u672c\u6b21\u514d\u8d39\uff0c\u524d10\u573a\u514d\u8d39' : '\u672c\u6b21\u6d88\u80175\u91d1\u677e\u679c') + '</p>' + button('\u5f00\u59cb\u5339\u914d', 'rank-fight', 'small gold') + button('\u91d1\u676f\u5546\u5e97', 'rank-shop', 'small') + '</div><div class="extra-rank-list"><h3>\u672c\u5730\u6a21\u62df\u6392\u884c\u699c</h3>' + entries.map((entry, i) => '<div class="extra-rank-row ' + (entry.mine ? 'mine' : '') + '"><span>' + (i + 1) + '</span><b>' + esc(entry.name) + (entry.mine ? '\uff08\u4f60\uff09' : '') + ' Lv' + (entry.level || 1) + '</b><strong>' + entry.points + '</strong></div>').join('') + note('\u5929\u68af\u8d5b\u5468\u4e00\u81f3\u5468\u516d\u8fdb\u884c\uff0c\u5468\u65e5\u4f11\u8d5b\uff1b\u91d1\u676f\u5546\u5e97\u6bcf\u5929\u5f00\u653e\u3002\u6bcf\u65e5\u6700\u591a20\u573a\uff0c\u524d10\u573a\u514d\u8d39\uff0c\u5176\u540e\u6bcf\u573a5\u91d1\u677e\u679c\u3002\u80dc\u5229\u5f973\u676f\uff0c\u843d\u8d25\u5f971\u676f\u3002\u79ef\u5206\u4e0e\u593a\u676f\u4e3a\u79bb\u7ebf\u6a21\u62df\uff1b\u83b7\u80dc\u670925%\u673a\u4f1a\u989d\u5916\u593a\u5f973\u676f\u3002') + '</div></div>', { cls: 'extra-board rank-extra-board' });
     back(p, arena, '\u8fd4\u56de\u7ade\u6280\u573a');
     on(p, 'rank-shop', () => rankShop(0));
     const match = on(p, 'rank-fight', () => {
@@ -262,6 +266,8 @@
       if (prize.gold) s.goldPoint += prize.gold;
       if (prize.count) addProp(prize.id, prize.count);
       const ups = prize.exp ? State.gainExp(prize.exp) : [];
+      // 每日任务「抽取 {n} 次每日幸运抽奖」：一次点击算一次（奖励当场结算，离开动画页也照样计数）
+      if (State.bumpDaily) State.bumpDaily('lottery', 1);
       State.save();
       let step = 0;
       const steps = 20 + selected;
@@ -525,17 +531,20 @@
     if (toplistCache[key]) return toplistCache[key];
     const rnd = mulberry(seed);
     const ladderTab = toplistTab !== 'level';
+    const cap = State.MAX_PLAYER_LEVEL || 70;
     const rows = [];
     for (let i = 0; i < 14; i++) {
       // 天梯榜上只会有够级的松鼠，所以看金杯/积分时对手一律按 30 级起算
-      const base = Math.max(5, Math.min(70, Math.round(s.level + (rnd() * 26 - 12))));
+      const base = Math.max(5, Math.min(cap, Math.round(s.level + (rnd() * 26 - 12))));
       const lv = ladderTab ? Math.max(RANK_LEVEL, base) : base;
+      // 不满 30 级不算参赛：没有金杯也没有积分，等级榜里这两列按「—」显示
+      const inLadder = lv >= RANK_LEVEL;
       rows.push({
         name: TOPLIST_TITLES[i % TOPLIST_TITLES.length],
         level: lv,
-        cup: 2 + Math.floor(rnd() * Math.max(6, lv)),
-        integral: 900 + Math.floor(rnd() * Math.max(400, lv * 70)),
-        inLadder: true,
+        cup: inLadder ? 2 + Math.floor(rnd() * Math.max(6, lv)) : 0,
+        integral: inLadder ? 900 + Math.floor(rnd() * Math.max(400, lv * 70)) : 0,
+        inLadder: inLadder,
         npc: true,
       });
     }

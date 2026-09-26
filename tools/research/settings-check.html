@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="/">
+<meta charset="UTF-8">
+<title>设置与界面检查</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/battle-drops.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* 本轮改动的浏览器侧检查：系统页设置项、帮助页、村庄配色、好友页脚、活动提示动效、
+ * 音量/分辨率/全面屏是否真的存进存档、装备融合不再有闪光特效、每日任务按等级抽题。
+ * 跑法：node tools/research/headless-shot.cjs "http://127.0.0.1:PORT/tools/research/settings-check.html?qa=1" out.png --eval "JSON.stringify(window.__runChecks())" */
+window.addEventListener('load', function () {
+  localStorage.removeItem('ssdz_debug');
+  State.newGame('设置检查');
+  var S = State.state();
+  S.level = 45; S.energy = S.maxEnergy; S.goldPoint = 1500;
+  State.save();
+  Main.showHome();
+
+  function check(list, name, pass, detail) {
+    list.push({ name: name, pass: !!pass, detail: detail == null ? '' : String(detail) });
+  }
+  function txt(node) { return node ? String(node.textContent || '').replace(/\s+/g, ' ').trim() : ''; }
+
+  window.__runChecks = function () {
+    var out = [];
+    var s = State.state();
+    s.level = 45; s.energy = s.maxEnergy; s.goldPoint = Math.max(s.goldPoint, 1500);
+    var $ = function (sel, root) { return (root || document).querySelector(sel); };
+    var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
+
+    /* ---------- 1. 系统页 ---------- */
+    UI.runAction('system');
+    var sys = $('#ui .classic-page[data-screen="system"]');
+    check(out, '系统页能打开', !!sys);
+    var grid = $('.settings-grid', sys);
+    check(out, '系统页不再放「游戏帮助」按钮', !$('[data-action="help"]', grid));
+    check(out, '系统页不再放「每日礼包」按钮', !$('[data-action="daily"]', grid));
+    check(out, '系统页有分辨率选项（6 档）', $$('[data-resolution]', sys).length === 6, $$('[data-resolution]', sys).map(function (b) { return b.textContent.trim(); }).join('/'));
+    check(out, '系统页有全面屏开关', !!$('[data-fullscreen]', sys));
+    var caption = txt($('.system-caption', sys));
+    check(out, '底部不再提「跨设备同步 / ZeroTier」', caption.indexOf('跨设备同步') < 0 && caption.indexOf('ZeroTier') < 0, caption);
+    check(out, '分辨率选中态跟存档一致', txt($('[data-resolution].active', sys)) === (State.RESOLUTIONS.filter(function (r) { return r.key === State.settings().resolution; })[0] || {}).label);
+
+    /* ---------- 2. 帮助页（不再是弹窗） ---------- */
+    UI.runAction('help');
+    var help = $('#ui .classic-page[data-screen="help"]');
+    check(out, '帮助是正常页面', !!help);
+    check(out, '帮助页没有弹窗遮罩', $$('.classic-modal-overlay').length === 0, $$('.classic-modal-overlay').length);
+    check(out, '帮助页有物品图鉴', $$('[data-guide]', help).length > 40, $$('[data-guide]', help).length);
+    check(out, '帮助页提到装备融合与画面设置', txt(help).indexOf('装备融合') >= 0 && txt(help).indexOf('分辨率') >= 0);
+    check(out, '帮助页所在面板可滚动', getComputedStyle(help.querySelector('.classic-board')).overflowY === 'auto',
+      getComputedStyle(help.querySelector('.classic-board')).overflowY);
+
+    /* ---------- 3. 村庄按钮统一黄色 ---------- */
+    UI.runAction('village');
+    var village = $('#ui .classic-page[data-screen="village"]');
+    var vBtns = $$('.settings-grid .uc-button', village);
+    check(out, '村庄有 6 个选项', vBtns.length === 6, vBtns.length);
+    check(out, '村庄选项全是金色', vBtns.every(function (b) { return b.classList.contains('gold'); }),
+      vBtns.map(function (b) { return b.textContent.trim() + ':' + (b.classList.contains('gold') ? 'gold' : '其它'); }).join(' '));
+
+    /* ---------- 4. 好友页脚 ---------- */
+    UI.runAction('friends');
+    var friends = $('#ui .classic-page[data-screen="friends"]');
+    var left = $('.footer-left', friends);
+    check(out, '好友页脚没有「随机挑战」', txt(left).indexOf('随机挑战') < 0, txt(left));
+    var masterBtn = $('[data-action="master"]', left);
+    check(out, '好友页脚有「师徒」且不是小号', !!masterBtn && !masterBtn.classList.contains('small'), masterBtn ? masterBtn.className : '（没有）');
+
+    /* ---------- 5. 活动按钮提示动效 ---------- */
+    Main.showHome();
+    UI.refreshHome();
+    var act = $('.home-side [data-action="daily"]');
+    check(out, '有奖励时活动图标在动', !!act && act.classList.contains('attention'));
+    State.claimDaily();
+    State.questState().list.forEach(function (q) { q.claimed = true; });
+    UI.refreshHome();
+    check(out, '领完奖后活动图标停下', !!act && !act.classList.contains('attention'),
+      act ? act.className + ' / ' + act.getAttribute('aria-label') : '（没有按钮）');
+    /* 领奖发生在「活动」弹窗里，重绘后同一个节点也要停下 */
+    State.setSettings({ volume: 1 });
+
+    /* ---------- 6. 音量写进存档 ---------- */
+    Main.setVolume(0.35);
+    check(out, '音量写进存档', Math.abs(State.settings().volume - 0.35) < 1e-6, State.settings().volume);
+    check(out, '音量镜像到 localStorage', localStorage.getItem('ssdz_music_volume') === '0.35', localStorage.getItem('ssdz_music_volume'));
+    UI.runAction('system');
+    check(out, '系统页滑块跟着存档走', $('[data-slider="volume"] input').value === '35', $('[data-slider="volume"] input').value);
+    check(out, '音量写盘时没有变成静音', Main.isMuted() === false, Main.isMuted());
+
+    /* ---------- 7. 分辨率 ---------- */
+    var autoScale = getComputedStyle($('#ui')).transform;
+    Main.setResolution('690');
+    var fixedScale = getComputedStyle($('#ui')).transform;
+    check(out, '分辨率改小了画面（变换矩阵不同）', autoScale !== fixedScale, autoScale + ' -> ' + fixedScale);
+    check(out, '分辨率写进存档', State.settings().resolution === '690', State.settings().resolution);
+    var board = $('#ui .classic-page[data-screen="system"] .classic-board');
+    check(out, '分辨率设置后页面仍然完整', !!board && board.getBoundingClientRect().width > 100,
+      board ? Math.round(board.getBoundingClientRect().width) + 'x' + Math.round(board.getBoundingClientRect().height) : '—');
+    Main.setResolution('auto');
+
+    /* ---------- 8. 全面屏 ---------- */
+    var before = $('#stage').style.width;
+    Main.setFullscreen(true);
+    var full = $('#stage').style.width;
+    check(out, '全面屏写进存档', State.settings().fullscreen === true);
+    check(out, '全面屏把画面铺满窗口宽度', full === (document.documentElement.clientWidth + 'px'), before + ' -> ' + full);
+    Main.setFullscreen(false);
+    check(out, '关掉全面屏恢复等比缩放', State.settings().fullscreen === false && $('#stage').style.width !== full, $('#stage').style.width);
+
+    /* ---------- 9. 装备融合不再闪光 ---------- */
+    ClassicFusion.open();
+    var fusion = $('#ui .classic-page[data-screen="status"]');
+    check(out, '融合页能打开', !!fusion);
+    check(out, '融合页没有闪光层', !$('.fusion-glow', fusion) && !$('.fusion-ready', fusion));
+    var sheets = $$('link[rel=stylesheet]').map(function (l) { return l.href; });
+    check(out, '融合样式表里已经删掉 fusion-glow / fusion-shine 规则',
+      !Array.prototype.some.call(document.styleSheets, function (sheet) {
+        try {
+          return Array.prototype.some.call(sheet.cssRules, function (rule) {
+            return /fusion-(glow|shine|ready)/.test(rule.cssText || '');
+          });
+        } catch (e) { return false; }
+      }), sheets.length + ' 张样式表');
+
+    /* ---------- 10. 每日任务按等级抽题 ---------- */
+    var pool1 = State.questPoolFor(1).map(function (t) { return t.key; });
+    var pool45 = State.questPoolFor(45).map(function (t) { return t.key; });
+    check(out, '1 级池子里没有关卡/竞技场/天梯/宝石任务',
+      ['stage', 'arena', 'rank', 'gem', 'merge', 'upgrade'].every(function (k) { return pool1.indexOf(k) < 0; }), pool1.join(','));
+    check(out, '45 级池子是全部 16 种', pool45.length === 16, pool45.length);
+    s.level = 1; s.quests = null;
+    var lowQuests = State.questStatus().map(function (q) { return q.key; });
+    check(out, '1 级当天抽到的 4 条都能完成', lowQuests.length === 4 &&
+      lowQuests.every(function (k) { return State.questAvailableAt(k, 1); }), lowQuests.join(','));
+    s.level = 20;
+    s.quests = { date: State.localDate(), list: [{ key: 'rank', need: 2, rewards: [], claimed: false }, { key: 'win', need: 2, rewards: [], claimed: true }] };
+    var fixed = State.questStatus();
+    check(out, '旧档里的越级任务会被换掉', !fixed.some(function (q) { return q.key === 'rank'; }), fixed.map(function (q) { return q.key; }).join(','));
+    check(out, '换题后已领取的条数照旧占位', fixed.filter(function (q) { return q.claimed; }).length === 1);
+
+    var pass = out.filter(function (r) { return r.pass; }).length;
+    return { pass: pass, fail: out.length - pass, total: out.length, errs: window.__errs, results: out };
+  };
+  window.__report = { ready: true, errs: window.__errs };
+});
+</script>
+</body>
+</html>

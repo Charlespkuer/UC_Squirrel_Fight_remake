@@ -37,6 +37,17 @@
    * 80% 以下时必须先补它，由系统直接代选（转化丸的「占比过低」是另一种口径）。 */
   const HP_PER_STAT = 10;
   const STAT_SHARE_MIN = 0.20;
+  /* 画面分辨率档位：'auto' 跟随窗口，其余按「设计基准高度」等比缩放并居中
+   * （设计尺寸是 1170×690）。窗口装不下时自动按窗口缩小，不会溢出屏幕。 */
+  const RESOLUTIONS = [
+    { key: 'auto', label: '自动（跟随窗口）', height: 0 },
+    { key: '690', label: '1170 × 690', height: 690 },
+    { key: '720', label: '1280 × 720', height: 720 },
+    { key: '810', label: '1440 × 810', height: 810 },
+    { key: '900', label: '1600 × 900', height: 900 },
+    { key: '1080', label: '1920 × 1080', height: 1080 },
+  ];
+  const RESOLUTION_KEYS = RESOLUTIONS.map((r) => r.key);
   function energyCapForLevel(level) {
     const lv = Math.max(1, Math.min(MAX_PLAYER_LEVEL, Math.round(Number(level) || 1)));
     let cap = GData.NEW_PLAYER.maxEnergy;
@@ -220,7 +231,40 @@
     if (object(raw.shopPurchases)) for (const id of Object.keys(raw.shopPurchases)) {
       if (propMap.getValue(id)) next.shopPurchases[id] = integer(raw.shopPurchases[id], 0);
     }
+    // 本机偏好（音乐音量/静音、分辨率、全面屏）也写进存档：换浏览器或换机器同步后设置还在。
+    next.settings = normalizeSettings(raw.settings);
     return next;
+  }
+
+  /** 存档里的本机偏好；缺字段/坏值一律回落到默认值。 */
+  function normalizeSettings(raw) {
+    const st = object(raw) ? raw : {};
+    const volume = Number(st.volume);
+    return {
+      volume: Number.isFinite(volume) && st.volume !== null && st.volume !== '' ? Math.max(0, Math.min(1, volume)) : 1,
+      muted: st.muted === true,
+      resolution: RESOLUTION_KEYS.includes(String(st.resolution)) ? String(st.resolution) : 'auto',
+      fullscreen: st.fullscreen === true,
+    };
+  }
+  /** 当前偏好（没有存档时给默认值，读到的对象就是存档里的那一份）。 */
+  function settings() {
+    if (!S) return normalizeSettings(null);
+    if (!object(S.settings)) S.settings = normalizeSettings(null);
+    return S.settings;
+  }
+  /** 改一项或几项偏好并立即存盘。 */
+  function setSettings(patch) {
+    const st = settings();
+    if (object(patch)) for (const key of Object.keys(patch)) st[key] = patch[key];
+    S.settings = normalizeSettings(st);
+    save();
+    return S.settings;
+  }
+  /** 分辨率档位对应的高度（0 = 跟随窗口）。 */
+  function resolutionHeight(key) {
+    const row = RESOLUTIONS.find((r) => r.key === String(key));
+    return row ? row.height : 0;
   }
 
   // ---------- 调试开关（js/debug.js 未加载时全部为关闭） ----------
@@ -646,6 +690,7 @@
     S.lastEnergyTs = Date.now();
     S.dailyStatsDate = localDate();
     S.props = { 1: 3, 2: 2, 28: 1 }; // 送1级礼包
+    S.settings = normalizeSettings(null);   // 新角色：音量/分辨率/全面屏的默认值也写进存档
     const weaponId = opts && Number(opts.weaponId);
     if (Number.isSafeInteger(weaponId) && weaponsMap.getValue(weaponId)) {
       const level = Math.min(15, Math.max(1, integer(opts.weaponLevel, 1, 1)));
@@ -1994,19 +2039,21 @@
   // ---------- 每日任务 ----------
   /* 原版没有每日任务（「活动」由服务端下发），这是按需求的单机补充：
    * 每天用日期做种子从池子里抽 4 条，进度来自当天真实行为计数，刷新/重开当天不变。
-   * 计数统一走 bumpDaily()，日期跟着 dailyStatsDate 一起重置。 */
+   * 计数统一走 bumpDaily()，日期跟着 dailyStatsDate 一起重置。
+   * minLevel：这条任务要几级才做得了（关卡 10 级开启、经验竞技场 11 级、碎片竞技场 20 级、
+   * 天梯 30 级、宝石 45 级才有产出）——抽题时只从「当前等级能完成」的任务里选。 */
   const QUEST_TYPES = [
     { key: 'win',       name: '赢下 {n} 场对战',          steps: [2, 3, 5] },
     { key: 'fight',     name: '进行 {n} 场战斗',          steps: [4, 6, 8] },
     { key: 'challenge', name: '发起 {n} 次随机挑战',      steps: [2, 3, 5] },
-    { key: 'stage',     name: '通关 {n} 次关卡挑战',      steps: [2, 3, 5] },
-    { key: 'arena',     name: '参加 {n} 次竞技场比赛',    steps: [1, 2, 3] },
-    { key: 'rank',      name: '参加 {n} 场天梯赛',        steps: [2, 3, 5] },
+    { key: 'stage',     name: '通关 {n} 次关卡挑战',      steps: [2, 3, 5], minLevel: 10 },
+    { key: 'arena',     name: '参加 {n} 次竞技场比赛',    steps: [1, 2, 3], minLevel: 11 },
+    { key: 'rank',      name: '参加 {n} 场天梯赛',        steps: [2, 3, 5], minLevel: 30 },
     { key: 'spar',      name: '和好友切磋 {n} 次',        steps: [1, 2, 3] },
     { key: 'lottery',   name: '抽取 {n} 次每日幸运抽奖',  steps: [1, 2, 3] },
-    { key: 'merge',     name: '合成或融合 {n} 次装备',    steps: [1, 2, 3] },
-    { key: 'gem',       name: '合成 {n} 次宝石',          steps: [1, 2, 3] },
-    { key: 'upgrade',   name: '升级武器或技能 {n} 次',    steps: [2, 4, 6] },
+    { key: 'merge',     name: '合成或融合 {n} 次装备',    steps: [1, 2, 3], minLevel: 10 },
+    { key: 'gem',       name: '合成 {n} 次宝石',          steps: [1, 2, 3], minLevel: 45 },
+    { key: 'upgrade',   name: '升级武器或技能 {n} 次',    steps: [2, 4, 6], minLevel: 2 },
     { key: 'use',       name: '使用 {n} 个道具',          steps: [2, 4, 6] },
     { key: 'buy',       name: '在商店购买 {n} 件道具',    steps: [1, 2, 3] },
     { key: 'sell',      name: '卖出 {n} 个道具',          steps: [1, 2, 3] },
@@ -2015,6 +2062,16 @@
   ];
   const QUEST_COUNT = 4;
   const QUEST_KEYS = QUEST_TYPES.map((q) => q.key);
+  /** 这条任务在 level 级能不能做（没写 minLevel 的就是 1 级就能做）。 */
+  function questAvailableAt(key, level) {
+    const type = QUEST_TYPES.find((q) => q.key === key);
+    if (!type) return false;
+    return (type.minLevel || 1) <= Math.max(1, Number(level) || 1);
+  }
+  /** 当前等级可完成的每日任务池（按 QUEST_TYPES 的固定顺序，保证同一天同一等级抽题稳定）。 */
+  function questPoolFor(level) {
+    return QUEST_TYPES.filter((q) => (q.minLevel || 1) <= Math.max(1, Number(level) || 1));
+  }
   /** 当天的空计数器：键跟着 QUEST_TYPES 走，加新任务不用再改这里。 */
   function emptyCounters(date) {
     const counters = { date };
@@ -2051,13 +2108,14 @@
   function rollQuests() {
     const date = localDate();
     const rnd = questRng(questSeed(date));
-    const pool = QUEST_KEYS.slice();
+    // 只抽当前等级做得完的任务（等级也在种子之外单独参与：同一天升级会换掉做不了的题）
+    const pool = questPoolFor(S ? S.level : 1).map((q) => q.key);
     // Fisher–Yates：同一天的抽取顺序固定，刷新页面不会换题
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(rnd() * (i + 1));
       const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
     }
-    return pool.slice(0, QUEST_COUNT).map((key) => {
+    return pool.slice(0, Math.min(QUEST_COUNT, pool.length)).map((key) => {
       const type = QUEST_TYPES.find((q) => q.key === key);
       const tier = Math.floor(rnd() * type.steps.length);
       // 纯随机 1~2 项：金松果、经验、道具在同一个加权池里抽，抽到才给
@@ -2081,9 +2139,17 @@
   }
   function questState() {
     const date = localDate();
-    if (!S.quests || typeof S.quests !== 'object' || S.quests.date !== date || !Array.isArray(S.quests.list) || !S.quests.list.length) {
+    const level = S ? S.level : 1;
+    const hasList = S.quests && typeof S.quests === 'object' && Array.isArray(S.quests.list) && S.quests.list.length > 0;
+    const sameDay = !!(S.quests && S.quests.date === date);
+    // 除了「换天」，「当前等级做不了的任务」也要重抽（升级后旧题失效、旧档里存的越级题也会被换掉）
+    const staleLevel = hasList && S.quests.list.some((q) => !q || !questAvailableAt(q.key, level));
+    if (!hasList || !sameDay || staleLevel) {
+      // 重抽时把「已经领过的条数」照旧占位，避免升级换题后当天多领一份奖励
+      const claimedCount = sameDay && hasList ? S.quests.list.filter((q) => q && q.claimed === true).length : 0;
       S.quests = { date, list: rollQuests() };
-      S.dailyCounters = emptyCounters(date);
+      S.quests.list.forEach((q, i) => { q.claimed = i < claimedCount; });
+      if (!sameDay) S.dailyCounters = emptyCounters(date);
       save();
     }
     if (!S.dailyCounters || S.dailyCounters.date !== date) {
@@ -2225,6 +2291,8 @@
     beginStageBattle, finishStageBattle, interruptStageBattle, abandonStageRun,
     localDate, dailyStatus, claimDaily, recordBattle, battleHistory,
     questStatus, questClaimable, claimQuest, bumpDaily, QUEST_TYPES, QUEST_EXTRA_POOL, QUEST_GOLD, QUEST_EXP,
+    questState, questAvailableAt, questPoolFor, QUEST_COUNT,
+    settings, setSettings, normalizeSettings, RESOLUTIONS, resolutionHeight,
     sellProp, propSellPrice, sellableProps, PROP_SELL_OVERRIDES, MIN_SELL_PRICE,
     friendLimit, friendList, friendOf, addFriend, removeFriend, friendFoe, rollFriendCandidates, FRIEND_LIMIT,
     weaponList, skillList, setWeapon, setSkill, forgetWeapon, forgetSkill, setWS, forgetWS,

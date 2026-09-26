@@ -52,21 +52,92 @@
     // 「弹窗出现/消失」时变化，导致整屏缩放跳一下；macOS 的覆盖式滚动条不占位，
     // 所以在 mac 上看不出来 —— 这里统一按不含滚动条的尺寸算，两个平台就一致了。
     const de = document.documentElement || {};
-    const vw = de.clientWidth || window.innerWidth || W;
-    const vh = de.clientHeight || window.innerHeight || layoutHeight;
-    const scale = Math.min(vw / W, vh / layoutHeight);
-    canvas.style.width = W * scale + 'px';
-    canvas.style.height = H * scale + 'px';
+    const vw = Math.max(1, de.clientWidth || window.innerWidth || W);
+    const vh = Math.max(1, de.clientHeight || window.innerHeight || layoutHeight);
+    const st = settingsSnapshot();
+    let sx, sy;
+    if (st.fullscreen) {
+      // 全面屏：两轴各自铺满窗口，不留黑边（窗口比例和 1170:690 差得多时会有轻微拉伸）
+      sx = vw / W; sy = vh / layoutHeight;
+    } else {
+      // 分辨率：按选定档位等比放大，但不超过窗口能容纳的尺寸（不会溢出）；自动档就是铺满能容纳的最大等比尺寸
+      const fit = Math.min(vw / W, vh / layoutHeight);
+      const target = (window.State && State.resolutionHeight) ? State.resolutionHeight(st.resolution) : 0;
+      sx = sy = target ? Math.min(fit, target / layoutHeight) : fit;
+    }
+    canvas.style.width = W * sx + 'px';
+    canvas.style.height = H * sy + 'px';
     const ui = $('#ui');
     ui.style.width = W + 'px';
     ui.style.height = H + 'px';
-    ui.style.transform = 'scale(' + scale + ')';
-    ui.style.setProperty('--uiscale', scale);
-    ui.style.fontSize = (16 * scale) + 'px';
+    ui.style.transform = 'scale(' + sx + ',' + sy + ')';
+    ui.style.setProperty('--uiscale', Math.min(sx, sy));
+    ui.style.fontSize = (16 * Math.min(sx, sy)) + 'px';
     // 位图数字按设计尺寸逐字绘制，缩放变化后需要按新比例重画一次。
     if (window.UI && UI.renderNumbers) UI.renderNumbers();
   }
   window.addEventListener('resize', fitCanvas);
+
+  /** 存档里的本机偏好（音量/静音/分辨率/全面屏）；存档还没载入时用 localStorage 兜底。 */
+  function settingsSnapshot() {
+    try {
+      if (window.State && State.settings && State.state && State.state()) return State.settings();
+    } catch (e) {}
+    return {
+      volume: clampVolume(localStorage.getItem('ssdz_music_volume')),
+      muted: localStorage.getItem('ssdz_music_muted') === '1',
+      resolution: 'auto',
+      fullscreen: false,
+    };
+  }
+  /** 把偏好写回存档：换浏览器/换机器（含双机同步）后设置还在。 */
+  function persistSettings(patch) {
+    if (patch && patch.volume != null) localStorage.setItem('ssdz_music_volume', String(patch.volume));
+    if (patch && patch.muted != null) localStorage.setItem('ssdz_music_muted', patch.muted ? '1' : '0');
+    try {
+      if (window.State && State.setSettings && State.state && State.state()) { State.setSettings(patch); return true; }
+    } catch (e) {}
+    return false;
+  }
+  /** 存档载入后把偏好接过来：存档优先，并回写 localStorage 供下次启动（标题画面）用。 */
+  function applyStoredSettings() {
+    try {
+      if (!window.State || !State.settings || !State.state || !State.state()) return;
+      const st = State.settings();
+      volume = clampVolume(st.volume);
+      muted = st.muted === true || volume <= 0;
+      localStorage.setItem('ssdz_music_volume', String(volume));
+      localStorage.setItem('ssdz_music_muted', muted ? '1' : '0');
+      applyVolume();
+      fitCanvas();
+    } catch (e) {}
+  }
+  /** 全面屏开关：请求真全屏（浏览器与桌面外壳都支持），失败就只做画面铺满。 */
+  function setFullscreen(on) {
+    persistSettings({ fullscreen: !!on });
+    try {
+      const el = document.documentElement;
+      if (on) {
+        if (!document.fullscreenElement && el.requestFullscreen) {
+          const r = el.requestFullscreen();
+          if (r && typeof r.catch === 'function') r.catch(() => {});
+        }
+      } else if (document.fullscreenElement && document.exitFullscreen) {
+        const r = document.exitFullscreen();
+        if (r && typeof r.catch === 'function') r.catch(() => {});
+      }
+    } catch (e) {}
+    fitCanvas();
+    return !!on;
+  }
+  /** 分辨率档位：'auto' 或 RESOLUTIONS 里的 key。 */
+  function setResolution(key) {
+    persistSettings({ resolution: String(key) });
+    fitCanvas();
+    return String(key);
+  }
+  // 进出系统全屏（含按 Esc）后重新算一次缩放；精简 DOM 环境（自检脚本）里没有这个 API
+  if (document.addEventListener) document.addEventListener('fullscreenchange', () => fitCanvas());
 
   // ---------- 音频：BGM 音量可连续调节 ----------
   const BASE_VOLUME = 0.35;
@@ -79,10 +150,10 @@
   function volumeValue() { return volume; }
   function setVolume(value) {
     volume = clampVolume(value);
-    localStorage.setItem('ssdz_music_volume', String(volume));
     // 静音标记只在滑块归零或恢复时同步，避免两套状态互相覆盖
-    if (volume <= 0) { muted = true; localStorage.setItem('ssdz_music_muted', '1'); }
-    else if (muted) { muted = false; localStorage.setItem('ssdz_music_muted', '0'); }
+    if (volume <= 0) muted = true;
+    else if (muted) muted = false;
+    persistSettings({ volume: volume, muted: muted });
     applyVolume();
     return volume;
   }
@@ -385,6 +456,7 @@
   let homeRegions = [];
   function showHome() {
     mode = 'home';
+    applyStoredSettings();
     UI.renderHome();
     fitCanvas();
     playBgm('main');
@@ -505,9 +577,10 @@
     if (!settled) activeBattle = controller;
   }
   function setMuted(value) {
-    muted = !!value; localStorage.setItem('ssdz_music_muted', muted ? '1' : '0');
+    muted = !!value;
     // 取消静音时若滑块停在 0，恢复到默认音量
     if (!muted && volume <= 0) volume = clampVolume(localStorage.getItem('ssdz_music_volume')) || 1;
+    persistSettings({ volume: volume, muted: muted });
     playBgm(mode === 'battle' ? 'fight' : 'main');
   }
   /** 调试/验证用：调整首页循环跑动的播放速度。 */
@@ -518,6 +591,7 @@
   }
 
   window.Main = { showHome, showTitle, startBattle, replayBattle, resizeLayout:fitCanvas, setMuted, isMuted: () => muted,
-    volume: volumeValue, setVolume, homePlayer: () => mainPlayer, setHomeFps, W, H };
+    volume: volumeValue, setVolume, homePlayer: () => mainPlayer, setHomeFps, W, H,
+    settings: settingsSnapshot, setResolution, setFullscreen, isFullscreen: () => !!document.fullscreenElement };
   window.addEventListener('DOMContentLoaded', boot);
 })();

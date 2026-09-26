@@ -58,18 +58,13 @@
 .classic-bag-board .page-arrow.bag-next{left:648px;right:auto}
 .attribute-allocation{display:flex;justify-content:center;gap:32px;margin:24px 0}.attribute-allocation label{display:flex;flex-direction:column;gap:10px;color:#795329}.attribute-allocation input{width:130px;padding:10px;border:3px solid #c19b59;border-radius:14px;background:#fff8db;color:#73441a;text-align:center;font:32px Georgia,serif;user-select:text}.allocation-remaining{text-align:center;color:#836120}
 .status-buttons{justify-content:flex-start}.status-buttons .uc-button{flex:none;width:279px;height:100px;font-size:38px}.status-buttons [data-action="merge"]{display:none}
-/* 状态页右下角的「装备融合」入口：做成和页面其它按钮同款的金色胶囊（带图标底座 + 缓慢流光） */
+/* 状态页右下角的「装备融合」入口：做成和页面其它按钮同款的金色胶囊（带图标底座） */
 .status-fusion-link{position:absolute;right:24px;bottom:14px;display:flex;align-items:center;gap:11px;height:62px;
   padding:0 24px 0 12px;border:4px solid #7b5220;border-radius:34px;cursor:pointer;
   background:linear-gradient(#fff6c6,#ffd75c 46%,#f0a81b);
   box-shadow:inset 0 0 0 4px #fffdf3,0 3px 0 #b9832a,0 7px 14px #6b4a2433;
   font:700 27px/1 "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;color:#6b3f12;letter-spacing:2px;text-shadow:0 1px 0 #fff7d0;
-  overflow:hidden;transition:transform .14s,filter .14s}
-.status-fusion-link::after{content:"";position:absolute;top:-60%;left:-40%;width:36%;height:220%;pointer-events:none;
-  background:linear-gradient(90deg,rgba(255,255,255,0),rgba(255,255,255,.75),rgba(255,255,255,0));
-  transform:rotate(18deg);animation:fusion-link-sheen 3.6s ease-in-out infinite}
-@keyframes fusion-link-sheen{0%{left:-45%}55%{left:120%}100%{left:120%}}
-@media (prefers-reduced-motion:reduce){.status-fusion-link::after{animation:none;display:none}}
+  transition:transform .14s,filter .14s}
 .status-fusion-link:hover{transform:translateY(-2px);filter:brightness(1.05)}
 .status-fusion-link:active{transform:translateY(1px)}
 .status-fusion-icon{position:relative;display:flex;align-items:center;justify-content:center;width:40px;height:40px;
@@ -159,3 +154,28 @@
 .sync-progress .sp-log{margin:8px 0 0;max-height:170px;overflow:auto;background:#fff6dd;border:2px solid #e2cfa4;border-radius:14px;padding:8px 12px;font-size:16px;line-height:1.5;white-space:pre-wrap;word-break:break-all;color:#6a4a24}
 .sync-progress .sp-hint{margin-top:8px;font-size:17px;line-height:1.6;color:#8a6a3c}
 .sync-progress .sp-actions{margin-top:10px;display:flex;gap:12px}
+
+/* ---------- 系统页：分辨率 / 全面屏（画面设置） ---------- */
+.settings-grid.system-grid{grid-template-columns:repeat(2,1fr)}
+.setting-group{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:14px 30px 0;padding:12px 22px;
+  border-radius:26px;background:#ead0a1;border:3px solid #d9bd88}
+.setting-group .slider-label{font-size:26px;color:#7a5528;font-weight:bold;white-space:nowrap}
+.setting-group .setting-hint{flex:1 0 100%;font-size:19px;line-height:1.5;color:#8a6a3c}
+.setting-choices{display:flex;gap:10px;flex-wrap:wrap;flex:1}
+.setting-choice{font-size:22px!important;min-height:40px!important;padding:3px 16px!important;
+  background:linear-gradient(#fffef1,#ede9d4 45%,#c7c5b9)!important;
+  box-shadow:inset 0 3px #fffdf3,inset 0 -2px #9c9b8a!important;color:#fcfcf6}
+.setting-choice:hover{filter:brightness(1.04)}
+.setting-choice.active{background:linear-gradient(#fff6a1,#ffdb58 38%,#ffb62c 67%,#ec9009)!important;
+  box-shadow:inset 0 3px 0 #fffac2,inset 0 -3px 0 #dd8210,0 2px 2px #62542890!important}
+
+/* ---------- 帮助页（系统分组，原先是弹窗） ---------- */
+.classic-page[data-screen="help"]>.classic-board{overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#c9af76 #f0e3bf}
+.classic-page[data-screen="help"]>.classic-board::-webkit-scrollbar{width:12px}
+.classic-page[data-screen="help"]>.classic-board::-webkit-scrollbar-thumb{background:#c9af76;border-radius:8px;border:2px solid #f0e3bf}
+.help-board .help-box{padding:6px 22px 18px;columns:2;column-gap:34px}
+.help-board .help-box p{font-size:22px;line-height:1.62;margin:0 0 9px;break-inside:avoid}
+.help-board .help-items-title{column-span:all}
+.help-board .help-items{column-span:all;grid-template-columns:repeat(8,1fr)}
+.help-board .small-label{column-span:all;display:block;margin-top:10px;font-size:19px;color:#8a6a3c}

@@ -44,9 +44,15 @@ ROOT = _find_root(Path(__file__).resolve().parent)
 parser = argparse.ArgumentParser()
 parser.add_argument('--dilate', type=int, default=0)
 parser.add_argument('--grey', action='store_true')
+parser.add_argument('--green', action='store_true',
+                    help='描边法之后再做一遍「全局绿色清理」：把被描边围住、泛洪到不了的草地/树叶渣也清掉')
+parser.add_argument('--sky', action='store_true',
+                    help='把「蓝天 / 青灰建筑」也算背景（外扩多边形时边缘会带进这些颜色）')
 parser.add_argument('--thr', type=int, default=165)
 parser.add_argument('--no-junk', dest='junk', action='store_false', help='关掉「深灰树影」这一条背景判定（默认开）')
-parser.add_argument('--method', choices=['polygon', 'outline', 'hybrid'], default='polygon')
+parser.add_argument('--method', choices=['auto', 'polygon', 'outline', 'hybrid'], default='polygon')
+parser.add_argument('--defringe', type=int, default=0,
+                    help='抠图后削掉边缘那圈背景混色像素（1 通常就够；默认 0 = 不削）')
 parser.add_argument('--out', default=None)
 ARGS = parser.parse_args()
 
@@ -66,17 +72,32 @@ def is_green(r, g, b):
     # 只清「深色」的草地/树叶；浅色像素可能是白字与草的抗锯齿混合，动了会把字啃掉
     foliage = g > 60 and g >= r * 1.15 and g >= b * 1.03 and max(r, g, b) < 190
     grey = ARGS.grey and abs(r - g) < 26 and abs(g - b) < 26 and abs(r - b) < 30 and min(r, g, b) > 120
+    # 村庄那张截图里，门外还有蓝天与青灰色建筑：多边形一外扩就会带进来，
+    # 它们既不是绿也不是灰，所以单独一条蓝/青判定（美术本体的红门、白字、黄箭头都不沾）。
+    sky = ARGS.sky and b > 110 and b >= r + 6 and b >= g - 6
     if ARGS.junk:
         hi, lo = max(r, g, b), min(r, g, b)
         # 截图里图标周围还有一层「深灰树影」，既不绿也不亮，单独一条规则清掉。
         # 注意不能顺手把「浅灰/白」也当背景：活动/村庄的白色字就是被这条规则啃掉的。
         grey = grey or (hi < 150 and (hi - lo) < 32)
-    return pale or foliage or grey
+    return pale or foliage or grey or sky
 
 
 def is_beige(r, g, b):
     # 与 extract-ui-assets.py 的 reference_cutout 保持一致：只清边界连通的米黄/白
     return r > 160 and g > 125 and b > 90 and (r - g) < 100
+
+
+def is_white(r, g, b):
+    """近白像素。只有「聊天」图标用得上：它的气泡下面压着界面上的「聊天」两个白字，
+    多边形一放宽就会把字头带进来；气泡内部的白色高光被黄色包住，泛洪够不着，不会被误伤。"""
+    return r > 238 and g > 238 and b > 232
+
+
+def background_predicate(name):
+    if name.endswith('chat.png'):
+        return lambda r, g, b: is_green(r, g, b) or is_white(r, g, b)
+    return is_green
 
 
 def flood_clear(im, predicate):
@@ -98,10 +119,41 @@ def flood_clear(im, predicate):
     return im
 
 
+def defringe(im, passes):
+    """把抠图边缘那圈「和背景混出来的浅色像素」清掉（1px 白边 / 绿边）。
+    只动「紧邻透明、而且又亮又灰（低饱和）」的像素：美术自己的深色描边 hi 很低会被留下，
+    门/字/箭头/盒子/气泡都是暖色（高饱和）也留下，所以只会削掉背景混色那一圈。"""
+    for _ in range(max(0, passes)):
+        px = im.load()
+        w, h = im.size
+        kill = []
+        for y in range(h):
+            for x in range(w):
+                r, g, b, a = px[x, y]
+                if not a:
+                    continue
+                border = ((x == 0 or not px[x - 1, y][3]) or (x == w - 1 or not px[x + 1, y][3]) or
+                          (y == 0 or not px[x, y - 1][3]) or (y == h - 1 or not px[x, y + 1][3]))
+                if not border:
+                    continue
+                hi, lo = max(r, g, b), min(r, g, b)
+                if hi > 168 and (hi - lo) < 70:
+                    kill.append((x, y))
+        for x, y in kill:
+            r, g, b, _ = px[x, y]
+            px[x, y] = (r, g, b, 0)
+    return im
+
+
 def write(im, name):
     # alpha=0 的地方把 RGB 也清掉：某些看图工具忽略 PNG alpha，否则会显示被丢弃的背景
     im = im.convert('RGBA')
-    im.putdata([(0, 0, 0, 0) if px[3] == 0 else px for px in im.getdata()])
+    px = im.load()
+    for y in range(im.height):
+        for x in range(im.width):
+            r, g, b, a = px[x, y]
+            if a == 0:
+                px[x, y] = (0, 0, 0, 0)
     path = OUT / name
     path.parent.mkdir(parents=True, exist_ok=True)
     im.save(path, optimize=True)
@@ -137,6 +189,15 @@ def outline_icon(bounds, name):
         a[x, y] = 0
         queue.extend([(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)])
     im.putalpha(alpha)
+    if ARGS.green:
+        # 泛洪只能清「和裁切框边界连通」的背景；被箭头/文字描边围住的草地够不着，
+        # 所以再按颜色全局清一遍绿色（美术本体没有绿色，村庄的门/字/箭头都不受影响）。
+        px = im.load()
+        for y in range(im.height):
+            for x in range(im.width):
+                r, g, b, a = px[x, y]
+                if a and is_green(r, g, b):
+                    px[x, y] = (r, g, b, 0)
     im = im.crop(im.getbbox())
     write(im, name)
     return im
@@ -189,6 +250,113 @@ def hybrid_icon(bounds, polygon, name):
     return im
 
 
+def auto_icon(bounds, polygon, name, tol=None):
+    """「自动」抠图：不靠手绘多边形切边，而是拿裁切框四边的颜色当背景模型 + 原来的绿色判定，
+    逐像素判背景；再把「和裁切框边界连通的残留」和「面积很小的碎渣」去掉，最后削一圈混色边。
+    多边形在这里只当「允许区」（外扩后），保证不会带进旁边别的界面元素。"""
+    tol = int(tol or 46)
+    src = Image.open(ROOT / 'references' / HOME_SRC).convert('RGBA')
+    im = src.crop(bounds).convert('RGBA')
+    w, h = im.size
+    px = im.load()
+    # 背景色模型：四边各 3 像素
+    ring = []
+    for x in range(w):
+        for y in list(range(0, 3)) + list(range(h - 3, h)):
+            ring.append(px[x, y][:3])
+    for y in range(h):
+        for x in list(range(0, 3)) + list(range(w - 3, w)):
+            ring.append(px[x, y][:3])
+    # 允许区：多边形外扩（默认 2px，让贴在多边形上的美术边角长回来）
+    allow = Image.new('L', im.size, 0)
+    local = [(x - bounds[0], y - bounds[1]) for x, y in polygon]
+    ImageDraw.Draw(allow).polygon(local, fill=255)
+    grow = max(0, DILATE) if DILATE else 2
+    if grow:
+        allow = allow.filter(ImageFilter.MaxFilter(grow * 2 + 1))
+    ap = allow.load()
+
+    def far_from_ring(c):
+        for b in ring:
+            if (c[0] - b[0]) ** 2 + (c[1] - b[1]) ** 2 + (c[2] - b[2]) ** 2 < tol * tol:
+                return False
+        return True
+
+    alpha = Image.new('L', im.size, 0)
+    al = alpha.load()
+    for y in range(h):
+        for x in range(w):
+            r, g, b, _ = px[x, y]
+            if not ap[x, y]:
+                continue
+            if is_green(r, g, b):
+                continue
+            if not far_from_ring((r, g, b)):
+                continue
+            al[x, y] = 255
+    im.putalpha(alpha)
+    # 去掉和裁切框边界连通的残留（多边形外扩后可能带进来的暗色背景），
+    # 以及面积很小的孤立碎渣（抗锯齿噪点）。
+    before = sum(1 for p in im.getdata() if p[3] > 0)
+    im = drop_connected_to_border(im)
+    after = sum(1 for p in im.getdata() if p[3] > 0)
+    if after < before * 0.12:      # 兜底：万一美术贴到裁切框边上被整块清掉，就退回不删
+        im = src.crop(bounds).convert('RGBA')
+        im.putalpha(alpha)
+        im = drop_small_blobs(im, 6)
+    else:
+        im = drop_small_blobs(im, 14)
+    im = defringe(im, max(1, ARGS.defringe))
+    im = im.crop(im.getbbox())
+    write(im, name)
+    return im
+
+
+def drop_connected_to_border(im):
+    px = im.load()
+    w, h = im.size
+    queue = deque()
+    seen = set()
+    for x in range(w):
+        queue.append((x, 0)); queue.append((x, h - 1))
+    for y in range(h):
+        queue.append((0, y)); queue.append((w - 1, y))
+    while queue:
+        x, y = queue.popleft()
+        if not (0 <= x < w and 0 <= y < h) or (x, y) in seen:
+            continue
+        seen.add((x, y))
+        if px[x, y][3] == 0:
+            continue
+        px[x, y] = px[x, y][:3] + (0,)
+        queue.extend([(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)])
+    return im
+
+
+def drop_small_blobs(im, min_area):
+    px = im.load()
+    w, h = im.size
+    seen = [[False] * w for _ in range(h)]
+    for y0 in range(h):
+        for x0 in range(w):
+            if seen[y0][x0] or px[x0, y0][3] == 0:
+                continue
+            stack = [(x0, y0)]
+            seen[y0][x0] = True
+            blob = []
+            while stack:
+                x, y = stack.pop()
+                blob.append((x, y))
+                for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                    if 0 <= nx < w and 0 <= ny < h and not seen[ny][nx] and px[nx, ny][3] > 0:
+                        seen[ny][nx] = True
+                        stack.append((nx, ny))
+            if len(blob) < min_area:
+                for x, y in blob:
+                    px[x, y] = px[x, y][:3] + (0,)
+    return im
+
+
 def polygon_icon(bounds, polygon, name):
     src = Image.open(ROOT / 'references' / HOME_SRC).convert('RGBA')
     im = src.crop(bounds)
@@ -200,7 +368,8 @@ def polygon_icon(bounds, polygon, name):
     elif DILATE < 0:
         mask = mask.filter(ImageFilter.MinFilter(-DILATE * 2 + 1))
     im.putalpha(mask)
-    flood_clear(im, is_green)
+    flood_clear(im, background_predicate(name))
+    im = defringe(im, ARGS.defringe)
     im = im.crop(im.getbbox())
     write(im, name)
     return im
@@ -263,7 +432,11 @@ def border_opaque(im):
     return n
 
 
-if ARGS.method == 'hybrid':
+if ARGS.method == 'auto':
+    activity = auto_icon((25, 405, 180, 578), [(55,421),(70,417),(83,420),(99,438),(124,421),(147,423),(155,439),(151,446),(168,454),(168,519),(153,532),(165,553),(152,565),(47,565),(36,553),(42,532),(31,519),(28,460),(52,448)], 'home/activity.png')
+    chat = auto_icon((17, 575, 177, 707), [(95,583),(130,587),(157,600),(171,624),(173,649),(163,675),(136,692),(83,700),(47,695),(20,704),(27,684),(23,666),(20,643),(26,616),(48,594),(74,584)], 'home/chat.png')
+    village = auto_icon((1338, 540, 1549, 729), [(1367,669),(1370,611),(1381,580),(1404,557),(1431,548),(1458,554),(1479,573),(1492,601),(1498,661),(1495,679),(1520,671),(1540,689),(1539,699),(1517,719),(1492,722),(1480,709),(1467,706),(1459,714),(1348,715),(1345,677)], 'home/village.png')
+elif ARGS.method == 'hybrid':
     activity = hybrid_icon((25, 405, 180, 578), [(55,421),(70,417),(83,420),(99,438),(124,421),(147,423),(155,439),(151,446),(168,454),(168,519),(153,532),(165,553),(152,565),(47,565),(36,553),(42,532),(31,519),(28,460),(52,448)], 'home/activity.png')
     chat = hybrid_icon((17, 575, 177, 707), [(95,583),(130,587),(157,600),(171,624),(173,649),(163,675),(136,692),(83,700),(47,695),(20,704),(27,684),(23,666),(20,643),(26,616),(48,594),(74,584)], 'home/chat.png')
     village = hybrid_icon((1338, 540, 1549, 729), [(1367,669),(1370,611),(1381,580),(1404,557),(1431,548),(1458,554),(1479,573),(1492,601),(1498,661),(1495,679),(1520,671),(1540,689),(1539,699),(1517,719),(1492,722),(1480,709),(1467,706),(1459,714),(1348,715),(1345,677)], 'home/village.png')

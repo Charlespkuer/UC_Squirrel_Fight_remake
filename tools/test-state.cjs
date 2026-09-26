@@ -716,6 +716,76 @@ test('每日任务：当天固定抽取、进度来真实计数、只能领一�
   assert.ok(next.every((q) => q.progress === 0), '新的一天计数归零');
 });
 
+test('每日任务按角色等级抽题：做不了的任务不会出现，升级换题也不多领奖励', () => {
+  const g = game(), S = g.State, s = S.state();
+  // 任务池随等级单调变大：1 级 10 种 → 2 级加武技升级 → 10 级加关卡与装备合成 → 11 级加竞技场 → 30 级加天梯 → 45 级加宝石
+  const count = (lv) => S.questPoolFor(lv).length;
+  assert.equal(count(1), 10, '1 级池子：' + S.questPoolFor(1).map((t) => t.key).join(','));
+  assert.equal(count(2), 11);
+  assert.equal(count(10), 13);
+  assert.equal(count(11), 14);
+  assert.equal(count(30), 15);
+  assert.equal(count(45), 16, '45 级才是全部 16 种');
+  for (const lv of [1, 5, 10, 20, 30, 45, 70]) {
+    for (const type of S.questPoolFor(lv)) assert.ok((type.minLevel || 1) <= lv, type.key + ' 不该出现在 ' + lv + ' 级');
+    for (const type of S.QUEST_TYPES) {
+      assert.equal(S.questAvailableAt(type.key, lv), (type.minLevel || 1) <= lv, type.key + ' @ ' + lv);
+    }
+  }
+  // 各个门槛和实际功能对得上（改了门槛要一起改这里）
+  const gate = (key) => (S.QUEST_TYPES.find((t) => t.key === key) || {}).minLevel || 1;
+  assert.equal(gate('stage'), 10, '关卡 10 级开启');
+  assert.equal(gate('merge'), 10, '装备合成要关卡碎片');
+  assert.equal(gate('arena'), 11, '经验竞技场 11 级开启');
+  assert.equal(gate('rank'), 30, '天梯赛 30 级开启');
+  assert.equal(gate('gem'), 45, '宝石 45 级才有产出');
+  assert.equal(gate('upgrade'), 2, '2 级才有第一件武器/技能');
+  // 1 级当天抽到的 4 条都必须能做
+  s.level = 1; s.quests = null;
+  const low = S.questStatus();
+  assert.equal(low.length, 4);
+  assert.ok(low.every((q) => S.questAvailableAt(q.key, 1)), '1 级抽到：' + low.map((q) => q.key).join(','));
+  // 同一天同一等级反复读不换题
+  assert.equal(S.questStatus().map((q) => q.key).join(','), low.map((q) => q.key).join(','));
+  // 旧档里存的越级任务（例如 20 级存了天梯任务）要被换掉，且已领取的条数照旧占位
+  s.level = 20;
+  s.quests = { date: S.localDate(), list: [
+    { key: 'rank', need: 2, rewards: [], claimed: false },
+    { key: 'win', need: 2, rewards: [], claimed: true },
+  ] };
+  const fixed = S.questStatus();
+  assert.equal(fixed.length, 4);
+  assert.ok(!fixed.some((q) => q.key === 'rank'), '越级的旧题会被换掉：' + fixed.map((q) => q.key).join(','));
+  assert.equal(fixed.filter((q) => q.claimed).length, 1, '已领取的 1 条继续占位，不会当天多领');
+  // 升级到 30 级后：原本合法的题不会被换（只是池子变大）
+  const keep = S.questStatus().map((q) => q.key).join(',');
+  s.level = 30;
+  assert.equal(S.questStatus().map((q) => q.key).join(','), keep, '升级不会换掉仍然能做的题');
+});
+
+test('音量/静音/分辨率/全面屏设置写进存档并读得回来', () => {
+  const g = game(), S = g.State, s = S.state();
+  same(s.settings, { volume: 1, muted: false, resolution: 'auto', fullscreen: false });
+  assert.equal(S.RESOLUTIONS.length, 6, '六档分辨率');
+  assert.equal(S.resolutionHeight('auto'), 0);
+  assert.equal(S.resolutionHeight('1080'), 1080);
+  assert.equal(S.resolutionHeight('4k'), 0, '认不出的档位当自动');
+  S.setSettings({ volume: 0.35, muted: true, resolution: '900', fullscreen: true });
+  same(S.settings(), { volume: 0.35, muted: true, resolution: '900', fullscreen: true });
+  // 存档往返（浏览器存档模式下 save/load 走 localStorage）
+  S.save(); S.load();
+  same(S.state().settings, { volume: 0.35, muted: true, resolution: '900', fullscreen: true });
+  // 坏值一律回落，不让坏档把画面或音量弄坏
+  same(S.normalizeSettings({ volume: 'x', muted: 'yes', resolution: 42, fullscreen: 1 }),
+    { volume: 1, muted: false, resolution: 'auto', fullscreen: false });
+  same(S.normalizeSettings({ volume: 5 }), { volume: 1, muted: false, resolution: 'auto', fullscreen: false });
+  same(S.normalizeSettings(null), { volume: 1, muted: false, resolution: 'auto', fullscreen: false });
+  // 旧档（没有 settings 字段）读进来要有默认值
+  const legacy = JSON.parse(JSON.stringify(s));
+  delete legacy.settings;
+  same(S.normalizeSettings(legacy.settings), { volume: 1, muted: false, resolution: 'auto', fullscreen: false });
+});
+
 test('挑战经验只看等级差：等级成长 20 级封顶、单位体力效率略低于竞技场，且每级越来越难', () => {
   const g = game();
   const S = g.State;

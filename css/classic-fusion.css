@@ -61,12 +61,6 @@
 .fusion-preview.missing{color:#b08341}
 .fusion-preview.missing .fusion-frame{border-color:#c9ae7d;background:linear-gradient(#f0e3c2,#f8f0da)}
 .fusion-question{position:relative;z-index:1;font:bold 50px/1 Georgia,serif;color:#fffbcc;-webkit-text-stroke:3px #c08f34;paint-order:stroke fill;text-shadow:0 3px 0 #b9853040}
-.fusion-glow{position:absolute;inset:-30%;pointer-events:none;
-  background:conic-gradient(from 0deg,rgba(255,255,255,0) 0deg,rgba(255,255,255,.7) 40deg,rgba(255,255,255,0) 90deg,
-    rgba(255,255,255,0) 210deg,rgba(255,246,190,.55) 250deg,rgba(255,255,255,0) 300deg);
-  mix-blend-mode:screen;animation:fusion-shine 6s linear infinite}
-@keyframes fusion-shine{from{transform:rotate(0)}to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.fusion-glow{animation:none;opacity:.5}}
 .fusion-preview-label{font-size:21px}
 .fusion-preview-hint{font-size:17px;color:#b39a6d}
 
@@ -76,10 +70,6 @@
 .fusion-cost{font-size:21px;color:#8b672f}
 .fusion-cost b{color:#b5821e;font-weight:normal}
 .fusion-guarantee{font-size:17px;color:#a18a61}
-/* 材料齐了给主按钮加一层呼吸光（reduced-motion 下自动关闭） */
-.fusion-ready{animation:fusion-ready 1.8s ease-in-out infinite}
-@keyframes fusion-ready{50%{filter:brightness(1.09) drop-shadow(0 0 8px #ffd54a99)}}
-@media (prefers-reduced-motion:reduce){.fusion-ready{animation:none}}
 
 /* ---------- 规则条 ---------- */
 .fusion-rules{flex:0 0 auto;display:flex;gap:9px;margin:0;padding:5px 16px;border-radius:22px;

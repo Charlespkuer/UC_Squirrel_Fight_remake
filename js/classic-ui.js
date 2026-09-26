@@ -316,6 +316,16 @@
     setNum($('.home-exp-val .num',h), S.exp + '/' + needExp);
     setNum($('.home-money .num',h), S.goldPoint);
     const gold = frameUrl('resource_1',18); if (gold) $('.home-money img',h).src = gold;
+    // 「活动」图标的提示动效要跟着可领取状态走：领完奖回到主界面就停下，
+    // 而不是一直缩放（以前只有重建主界面时才会重新判断）。
+    const act = $('.home-side [data-action="daily"]', h);
+    if (act) {
+      const att = dailyAttention();
+      if (act.classList.contains('attention') !== att) {
+        act.classList.toggle('attention', att);
+        act.setAttribute('aria-label', att ? '活动，有可领取的奖励' : '活动');
+      }
+    }
     // 生效中的限时药丸：图标 + 剩余战斗场次
     const buffBox = $('.home-buffs',h);
     if (buffBox) {
@@ -959,7 +969,7 @@
       '<button class="uc-button tiny muted" data-friend-action="refresh">换一批</button></div>'+
       '<div class="friend-list">'+recs+'</div></div>'+
       (S.master?'<p class="friend-note">师父：'+esc(S.master.name)+'　'+S.master.level+' 级</p>':'<p class="friend-note">还没有师父，可以去「师徒」拜一位。</p>')+'</div>';
-    const p=page('challenge','friends',content,{cls:'friends-board',left:'<span class="footer-left">'+btn('师徒','master','small gold')+btn('随机挑战','challenge','small')+'</span>'});
+    const p=page('challenge','friends',content,{cls:'friends-board',left:'<span class="footer-left">'+btn('师徒','master','gold')+'</span>'});
     $$('[data-friend-action]',p).forEach(b=>b.onclick=()=>{
       const act=b.dataset.friendAction,i=Number(b.dataset.friendI);
       if(act==='refresh'){friendCandidates=State.rollFriendCandidates(3);toast('已换一批推荐好友');openFriends();return;}
@@ -1280,10 +1290,20 @@
   function openSystem() {
     const mute=Main.isMuted&&Main.isMuted();
     const vol=Math.round(100*((Main.volume&&Main.volume())||0));
+    const st=(Main.settings&&Main.settings())||{resolution:'auto',fullscreen:false};
     const slider='<div class="setting-slider" data-slider="volume"><span class="slider-label">音乐音量</span>'+
       '<input type="range" min="0" max="100" step="1" value="'+vol+'" aria-label="音乐音量">'+
       '<b class="slider-value">'+vol+'%</b></div>';
-    const p=page('system','system','<div class="settings-grid">'+btn(mute?'音乐：关':'音乐：开','sound')+btn('游戏帮助','help')+btn('导出存档','export','gold')+btn('导入存档','import','gold')+btn('每日礼包','daily')+btn('更改昵称','rename')+'</div>'+slider+saveFilePanel()+syncPanel()+'<p class="system-caption">松鼠大战 · 怀旧单机版<br>进度默认写进游戏目录的 save/progress.json（用本地服务器启动时），也可以导出／导入 JSON 存档。<br>两台电脑（Mac ↔ Windows，走 ZeroTier）之间可以用「跨设备同步」一键互传存档与改动过的文件。</p>');
+    // 分辨率：按 1170×690 的设计尺寸等比缩放并居中（窗口装不下时自动缩小）
+    const resolutions=(State.RESOLUTIONS||[]).map((r)=>'<button type="button" class="uc-button tiny setting-choice'+
+      (st.resolution===r.key?' active':'')+'" data-resolution="'+r.key+'">'+esc(r.label)+'</button>').join('');
+    const display='<div class="setting-group"><span class="slider-label">分辨率</span><div class="setting-choices">'+resolutions+'</div>'+
+      '<span class="setting-hint">画面按这一档等比缩放并居中；窗口装不下时自动按窗口缩小，不会溢出。</span></div>'+
+      '<div class="setting-group"><span class="slider-label">显示模式</span><div class="setting-choices">'+
+      '<button type="button" class="uc-button tiny setting-choice'+(st.fullscreen?' active':'')+'" data-fullscreen="1">'+
+      (st.fullscreen?'全面屏：已开启':'全面屏：关')+'</button></div>'+
+      '<span class="setting-hint">开启后画面铺满整个窗口（不留黑边，窗口比例差得多时会有轻微拉伸），同时尝试进入系统全屏；按 Esc 可退出系统全屏。</span></div>';
+    const p=page('system','system','<div class="settings-grid system-grid">'+btn(mute?'音乐：关':'音乐：开','sound')+btn('导出存档','export','gold')+btn('导入存档','import','gold')+btn('更改昵称','rename')+'</div>'+slider+display+saveFilePanel()+syncPanel()+'<p class="system-caption">松鼠大战 · 怀旧单机版<br>进度默认写进游戏目录的 save/progress.json（用本地服务器启动时），也可以导出／导入 JSON 存档；音量与画面设置会一起存进存档。</p>');
     $('[data-action="sound"]',p).onclick=()=>{Main.setMuted(!mute);openSystem();};
     $('[data-action="save-write"]',p).onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};
     $('[data-action="save-load"]',p).onclick=loadSaveDialog;
@@ -1317,8 +1337,12 @@
       const v=Math.round(100*((Main.volume&&Main.volume())||0));
       const on=!(Main.isMuted&&Main.isMuted());
       $('[data-action="sound"]',p).textContent=on?'音乐：开':'音乐：关';
-      toast('音乐音量 '+v+'%'+(!on?'（已静音）':''));
+      toast('音乐音量 '+v+'%'+(!on?'（已静音）':'')+'（已存进存档）');
     };
+    // 分辨率与全面屏：改完立刻生效并写进存档，页面重绘一次让选中态跟上
+    $$('[data-resolution]',p).forEach((b)=>b.onclick=()=>{Main.setResolution(b.dataset.resolution);openSystem();});
+    const fsBtn=$('[data-fullscreen]',p);
+    if(fsBtn)fsBtn.onclick=()=>{Main.setFullscreen(!Main.settings().fullscreen);openSystem();};
     $('[data-action="export"]',p).onclick=()=>{
       const blob=new Blob([JSON.stringify(State.state(),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='松鼠大战存档-'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('存档已导出');
     };
@@ -1341,7 +1365,8 @@
     });
   }
   function openVillage() {
-    const p=page('system','village','<div class="settings-grid">'+btn('师徒','master')+btn('竞技场','arena','gold')+btn('天梯赛','rank')+btn('道具商店','shop','gold')+btn('每日抽奖','lottery')+btn('挑战关卡','stages','gold')+'</div><p class="system-caption">欢迎来到松鼠村庄！<br>拜师学艺、收集装备，和松鼠伙伴一起成长。</p>');
+    // 村庄里的选项统一用金黄色（原先是黄绿混着填的，看着花）
+    const p=page('system','village','<div class="settings-grid">'+btn('师徒','master','gold')+btn('竞技场','arena','gold')+btn('天梯赛','rank','gold')+btn('道具商店','shop','gold')+btn('每日抽奖','lottery','gold')+btn('挑战关卡','stages','gold')+'</div><p class="system-caption">欢迎来到松鼠村庄！<br>拜师学艺、收集装备，和松鼠伙伴一起成长。</p>');
   }
   // —— 可获得物品图鉴（系统-帮助）：来源概率从真实数据（掉落池/商店/抽奖）计算 ——
   const GUIDE_ITEMS = [1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,21,22,23,24,25,26,28,29,30,31,32,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,101,102,103,104,105,106,107];
@@ -1393,8 +1418,10 @@
   }
   function openHelp() {
     const items = GUIDE_ITEMS.map((id) => '<button type="button" class="help-item" data-guide="' + id + '"><span class="item-icon">' + icon('prop', id) + '</span><span>' + esc(propMap.getValue(id).name) + '</span></button>').join('');
-    const m = modal('游戏帮助','<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能。在状态页查看和升级。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。每轮消耗1张挑战书，连续击败3名敌人；失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件相同装备可以融合。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档</b>：自动保存。可在系统中导出、导入，音乐开关也会保存。</p><p><b>宝石</b>：45级后通关关卡、竞技场获胜有几率获得1-2级宝石；3个同级宝石+10金松果有几率合成高一级（失败可能降级）。3件相同紫装可融合为橙装，宝石免费镶入橙装（每件限1颗），拆卸5金松果。</p><h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>',[{label:'知道了'}]);
-    $$('[data-guide]', m.element).forEach((b) => b.onclick = () => openGuideItem(+b.dataset.guide));
+    // 帮助是「系统」分组下的正常页面（以前是弹窗，会挡住底下的界面）
+    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能。在状态页查看和升级。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。每轮消耗1张挑战书，连续击败3名敌人；失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件相同装备可以融合。</p><p><b>竞技场</b>：11级开启经验竞技场、20级开启碎片竞技场，报名一次打完两场。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45级后通关关卡、竞技场获胜有几率获得1-2级宝石；3个同级宝石+10金松果有几率合成高一级（失败可能降级）。3 件相同卓越（紫）装备可在「装备融合」里融为传说（橙）装备，宝石免费镶入橙装（每件限1颗），拆卸5金松果。</p><h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
+    $$('[data-guide]', p).forEach((b) => b.onclick = () => openGuideItem(+b.dataset.guide));
+    return p;
   }
   function fallback(key){if(window.ClassicExtras && window.ClassicExtras[key])window.ClassicExtras[key]();else legacy.runAction(key);}
   const actions={home,exchange:()=>openBag('exchange'),status:openStatus,weapons:()=>openCatalog('weapon'),skills:()=>openCatalog('skill'),challenge:()=>openChallenge(),battle:()=>openChallenge(),stages:openStages,bag:()=>openBag(),shop:()=>openBag(true),gears:()=>openGears(),messages:()=>openMessages(),ranklog:()=>openMessages('ranklog'),revenge:()=>openMessages('revenge'),board:openBoard,friends:openFriends,daily:openDaily,system:openSystem,village:openVillage,help:openHelp,arena:()=>fallback('arena'),rank:()=>fallback('rank'),lottery:()=>fallback('lottery'),master:()=>fallback('master'),toplist:()=>fallback('toplist'),vip:()=>fallback('vip')};

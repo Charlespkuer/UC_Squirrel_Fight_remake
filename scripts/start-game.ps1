@@ -33,10 +33,11 @@ $here = $PSScriptRoot
 if (-not $here) { $here = (Get-Location).Path }
 $root = $null
 foreach ($c in @((Join-Path $here '..'), $here, (Join-Path $here 'game'))) {
-  if (Test-Path -LiteralPath (Join-Path $c 'index.html')) { $root = (Resolve-Path -LiteralPath $c).Path; break }
+  if ((Test-Path -LiteralPath (Join-Path $c 'scripts\index.html')) -or
+      (Test-Path -LiteralPath (Join-Path $c 'index.html'))) { $root = (Resolve-Path -LiteralPath $c).Path; break }
 }
 if (-not $root) {
-  Write-Host '找不到 index.html：请把整个文件夹一起解压后再双击启动器（启动器与 index.html 在同一个目录里）。'
+  Write-Host '找不到游戏文件（应该有 scripts\index.html）：请把整个文件夹一起解压后再双击启动器。'
   exit 2
 }
 Set-Location -LiteralPath $root

@@ -1082,6 +1082,7 @@ function startServer(port) {
  * 所以 Windows 上启动后台服务与开机自启一律优先走计划任务，失败才退回 spawn。
  */
 const WIN_TASK_NAME = 'SSDZ Sync';
+const WIN_HIDDEN_VBS = path.join(TOOL_DIR, 'run-hidden.vbs');   // 用隐藏窗口启动服务（桌面不留黑框）
 
 function winTaskExists() {
   try {
@@ -1105,6 +1106,11 @@ function winTaskXml() {
   const stamp = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':00';
   const user = process.env.USERDOMAIN && process.env.USERNAME ? process.env.USERDOMAIN + '\\' + process.env.USERNAME : '';
   const esc = escapeXml;
+  // 用 wscript + run-hidden.vbs 启动：计划任务在交互会话里跑，直接跑 node 会在桌面上
+  // 留一个常驻的黑窗口；包一层 VBS 就能完全隐藏（wscript 自己立刻退出）。
+  const useHidden = fs.existsSync(WIN_HIDDEN_VBS);
+  const cmd = useHidden ? (process.env.SystemRoot || 'C:\\Windows') + '\\System32\\wscript.exe' : process.execPath;
+  const arg = useHidden ? '//B //Nologo "' + WIN_HIDDEN_VBS + '"' : '"' + __filename + '" serve';
   return '<?xml version="1.0" encoding="UTF-16"?>\n' +
     '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n' +
     '  <RegistrationInfo><Description>SSDZ Sync - 松鼠大战双机同步服务</Description></RegistrationInfo>\n' +
@@ -1132,8 +1138,8 @@ function winTaskXml() {
     '  </Settings>\n' +
     '  <Actions Context="Author">\n' +
     '    <Exec>\n' +
-    '      <Command>' + esc(process.execPath) + '</Command>\n' +
-    '      <Arguments>"' + esc(__filename) + '" serve</Arguments>\n' +
+    '      <Command>' + esc(cmd) + '</Command>\n' +
+    '      <Arguments>' + esc(arg) + '</Arguments>\n' +
     '      <WorkingDirectory>' + esc(ROOT) + '</WorkingDirectory>\n' +
     '    </Exec>\n' +
     '  </Actions>\n' +
@@ -1148,7 +1154,9 @@ function winTaskCreate() {
     execFileSync('schtasks', ['/Create', '/TN', WIN_TASK_NAME, '/XML', xmlPath, '/F'], { stdio: 'ignore', timeout: 30000 });
     return;
   } catch (e) {
-    const tr = '"' + process.execPath + '" "' + __filename + '" serve';
+    const tr = fs.existsSync(WIN_HIDDEN_VBS)
+      ? (process.env.SystemRoot || 'C:\\Windows') + '\\System32\\wscript.exe //B //Nologo "' + WIN_HIDDEN_VBS + '"'
+      : '"' + process.execPath + '" "' + __filename + '" serve';
     execFileSync('schtasks', ['/Create', '/TN', WIN_TASK_NAME, '/TR', tr, '/SC', 'ONLOGON', '/F'], { stdio: 'ignore', timeout: 20000 });
   }
 }
@@ -1202,9 +1210,13 @@ async function daemonStart(quiet) {
     }
   }
   const out = fs.openSync(OUT_LOG, 'a'), err = fs.openSync(ERR_LOG, 'a');
-  const child = spawn(process.execPath, [__filename, 'serve', '--port', String(cfg.port)], {
-    detached: true, stdio: ['ignore', out, err], cwd: ROOT,
-  });
+  const hidden = process.platform === 'win32' && fs.existsSync(WIN_HIDDEN_VBS);
+  const child = hidden
+    ? spawn((process.env.SystemRoot || 'C:\\Windows') + '\\System32\\wscript.exe',
+        ['//B', '//Nologo', WIN_HIDDEN_VBS], { detached: true, stdio: 'ignore', cwd: ROOT, windowsHide: true })
+    : spawn(process.execPath, [__filename, 'serve', '--port', String(cfg.port)], {
+        detached: true, stdio: ['ignore', out, err], cwd: ROOT,
+      });
   child.unref();
   for (let i = 0; i < 40; i++) {
     await sleep(250);

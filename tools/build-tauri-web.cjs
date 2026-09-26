@@ -14,7 +14,9 @@ const crypto = require('node:crypto');
 
 const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'src-tauri', 'web');
-const ITEMS = ['index.html', 'css', 'js', 'images', 'audio'];
+const ITEMS = ['css', 'js', 'images', 'audio'];
+// 首页在 scripts/index.html 里；快照里仍然放到 web/ 根，让 html 里的相对引用原样可用
+const ENTRY_SRC = path.join(ROOT, 'scripts', 'index.html');
 const STAMP = path.join(OUT, 'BUILD.txt');
 const CHECK = process.argv.includes('--check');
 
@@ -32,7 +34,7 @@ function fingerprint() {
   const hash = crypto.createHash('sha256');
   let files = 0;
   let bytes = 0;
-  for (const item of ITEMS) {
+  for (const item of ITEMS.concat(['scripts/index.html'])) {
     const src = path.join(ROOT, item);
     if (!fs.existsSync(src)) continue;
     if (fs.statSync(src).isDirectory()) {

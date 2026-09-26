@@ -23,6 +23,9 @@ const PORT = Number(ARGS.find((a) => /^[0-9]+$/.test(a)) || 8080);   // 端口�
 /* ---------- /__save：存档文件读写（本地备份 / 自建同步服务的接口层） ---------- */
 const NO_SAVE = process.argv.includes('--no-save');
 const SAVE_DIR = path.join(ROOT, 'save');
+/* 首页 index.html 住在 scripts/ 里。浏览器地址仍然是 http://host:port/ （或 /index.html），
+ * 页面里的 css/js/images/audio 都是相对 URL 根解析的，所以 html 里一个引用都不用改。 */
+const ENTRY_REL = ['scripts/index.html', 'index.html'].find((f) => fs.existsSync(path.join(ROOT, f))) || 'index.html';
 const SAVE_FILE = path.join(SAVE_DIR, 'progress.json');
 const SAVE_MAX = 4 * 1024 * 1024;      // 存档上限 4 MB
 
@@ -94,7 +97,7 @@ http.createServer((req, res) => {
     rel = decodeURIComponent(url.pathname);
   } catch (_) { res.writeHead(400); res.end('400'); return; }
   if (rel === '/__save') { handleSaveApi(req, res, url).catch(() => json(res, 500, { ok: false, msg: '服务器内部错误' })); return; }
-  if (rel === '/' || rel === '') rel = '/index.html';
+  if (rel === '/' || rel === '' || rel === '/index.html') rel = '/' + ENTRY_REL;
   const file = path.join(ROOT, rel);
   if (file !== ROOT && !file.startsWith(ROOT + path.sep)) { res.writeHead(403); res.end('403'); return; }
   fs.readFile(file, (err, data) => {

@@ -20,14 +20,13 @@
 #   --foreground  服务器留在前台（调试用；窗口不会自动关闭）
 cd "$(dirname "$0")" || exit 1
 HERE="$(pwd)"
-# 启动器和 index.html 在同一层；万一脚本被挪进子目录，也往上找一层
+# 游戏根 = 有「scripts/index.html」的那一层（旧布局的 index.html 也认）
 ROOT=""
 for c in "$HERE" "$HERE/.."; do
-  if [ -f "$c/index.html" ]; then ROOT="$(cd "$c" && pwd)"; break; fi
+  if [ -f "$c/scripts/index.html" ] || [ -f "$c/index.html" ]; then ROOT="$(cd "$c" && pwd)"; break; fi
 done
 if [ -z "$ROOT" ]; then
-  echo "找不到 index.html：启动器要和 index.html 放在同一个文件夹里。"
-  echo "请把整个文件夹一起解压后再运行启动器。"
+  echo "找不到游戏文件（应该有 scripts/index.html）：请把整个文件夹一起解压后再运行启动器。"
   exit 2
 fi
 cd "$ROOT" || exit 1

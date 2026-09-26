@@ -13,7 +13,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)" || exit 1
 # 本文件在 scripts/ 里，游戏根（有 index.html 的那层）是上一层
 ROOT=""
 for c in "$HERE/.." "$HERE" "$HERE/../.."; do
-  if [ -f "$c/index.html" ]; then ROOT="$(cd "$c" && pwd)"; break; fi
+  if [ -f "$c/scripts/index.html" ] || [ -f "$c/index.html" ]; then ROOT="$(cd "$c" && pwd)"; break; fi
 done
 if [ -z "$ROOT" ]; then
   echo "找不到游戏目录（应该有 index.html）：请把整个文件夹一起解压后再运行。"

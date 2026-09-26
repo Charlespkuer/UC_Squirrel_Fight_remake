@@ -18,6 +18,10 @@ from urllib.parse import urlparse, parse_qs
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # serve.py 在 scripts/ 里，游戏根是上一层
 SAVE_DIR = os.path.join(ROOT, "save")
+# 首页 index.html 住在 scripts/ 里；地址仍然是 / 或 /index.html，
+# 页面里的相对引用（css/、js/…）是相对 URL 根解析的，所以 html 不用改。
+ENTRY_REL = next((r for r in ("scripts/index.html", "index.html")
+                  if os.path.isfile(os.path.join(ROOT, r))), "index.html")
 SAVE_FILE = os.path.join(SAVE_DIR, "progress.json")
 SAVE_MAX = 4 * 1024 * 1024
 ARGS = sys.argv[1:]
@@ -89,6 +93,13 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/__save":
             return self._save_api(parse_qs(parsed.query))
         self.send_error(404, "not found")
+
+    def send_head(self):
+        parsed = urlparse(self.path)
+        if parsed.path in ("/", "", "/index.html"):
+            # 把首页指到 scripts/index.html（含 ?test=1 这类查询串，交给父类处理）
+            self.path = "/" + ENTRY_REL + (("?" + parsed.query) if parsed.query else "")
+        return super().send_head()
 
 
 if __name__ == "__main__":

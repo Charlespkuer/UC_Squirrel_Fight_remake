@@ -28,14 +28,15 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="manual-$(date +%Y%m%d-%H%M)"; fi
           mkdir -p dist
 
-          # 一级目录只放「启动器 + 游戏本体 + 两个子文件夹」：
+          # 一级目录只放「启动器 + 素材 + 子文件夹」：
           #   启动游戏.*          双击开玩
-          #   index.html css js images audio   游戏本体（静态服务的根，必须在最外层）
-          #   scripts/            停止游戏、一键同步、重启同步服务、serve.js/serve.py/start-game.ps1、sync/
+          #   css js images audio 素材（相对 URL 根解析，放哪一层都不影响）
+          #   scripts/            首页 index.html、停止游戏、一键同步、重启同步服务、
+          #                       serve.js/serve.py/start-game.ps1、sync/
           #   tools/（不进便携包）开发与验证
           LAUNCHERS="启动游戏.cmd 启动游戏.command README.md"
-          GAME="index.html css js images audio"
-          SCRIPTS="serve.js serve.py start-game.ps1 停止游戏.command 一键同步.command 一键同步.cmd 重启同步服务.cmd restart-sync.cmd"
+          GAME="css js images audio"
+          SCRIPTS="index.html serve.js serve.py start-game.ps1 停止游戏.command 一键同步.command 一键同步.cmd 重启同步服务.cmd restart-sync.cmd cleanup-old-layout.cmd cleanup-old-layout.ps1"
 
           build() {          # $1 = 包名后缀（mac / win）
             name="squirrel-web-$1"
@@ -47,7 +48,7 @@ jobs:
             cp -R $GAME "$out/"
             (cd scripts && cp -R $SCRIPTS "$out/scripts/")
             # 双机同步本体（零依赖）：入口脚本在 scripts/ 里，逻辑在 scripts/sync/ 里
-            cp -R scripts/sync/sync.js scripts/sync/sync-win.ps1 "$out/scripts/sync/"
+            cp -R scripts/sync/sync.js scripts/sync/sync-win.ps1 scripts/sync/run-hidden.vbs "$out/scripts/sync/"
             chmod +x "$out/启动游戏.command" "$out/scripts/停止游戏.command" "$out/scripts/一键同步.command" "$out/scripts/serve.py" 2>/dev/null || true
             # Windows：.cmd 只是 ASCII 外壳，真正的逻辑在同目录的 .ps1 里
             # （cmd.exe 读 .cmd 里的 UTF-8 中文会把中文注释当命令，导致服务器起不来），
@@ -63,7 +64,7 @@ jobs:
             cat > "$out/启动说明.txt" <<'TXT'
           松鼠大战怀旧复刻版 · 便携版
           ================================
-          1) 解压整个文件夹（index.html、css、js、images、audio 都在最外层，别只拖一个文件出来）
+          1) 解压整个文件夹（首页在 scripts\index.html，素材在 css\ js\ images\ audio\，别只拖一个文件出来）
           2) 启动：
              · Windows：双击 启动游戏.cmd（它会调用 scripts\start-game.ps1，scripts\ 要一起留着）
              · macOS  ：双击 启动游戏.command

@@ -34,17 +34,22 @@ const SAVE_MAX: usize = 4 * 1024 * 1024;
 // ---------------------------------------------------------------- 游戏目录
 
 /// 游戏目录：必须真的含 index.html，认错了就会去别的文件夹伺候文件
+/// 游戏目录的标志文件：首页 index.html 住在 scripts/ 里（旧布局直接在根目录，也认）。
+fn has_game(dir: &Path) -> bool {
+    dir.join("scripts").join("index.html").is_file() || dir.join("index.html").is_file()
+}
+
 fn find_game_root() -> Option<PathBuf> {
-    // 1) 启动器（启动游戏.cmd / start-win.ps1）显式指定
+    // 1) 启动器（启动游戏.cmd / start-game.ps1）显式指定
     if let Some(v) = std::env::var_os("SSDZ_GAME_DIR") {
         let p = PathBuf::from(v);
-        if p.join("index.html").is_file() {
+        if has_game(&p) {
             return Some(p);
         }
     }
     // 2) 当前工作目录
     if let Ok(cwd) = std::env::current_dir() {
-        if cwd.join("index.html").is_file() {
+        if has_game(&cwd) {
             return Some(cwd);
         }
     }
@@ -56,7 +61,7 @@ fn find_game_root() -> Option<PathBuf> {
                 Some(d) => d,
                 None => break,
             };
-            if dir.join("index.html").is_file() {
+            if has_game(&dir) {
                 return Some(dir);
             }
             cur = dir.parent().map(|p| p.to_path_buf());
@@ -455,7 +460,7 @@ fn main() {
                     WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
                 }
                 None => {
-                    eprintln!("松鼠大战：没找到游戏目录（缺 index.html），改用内置提示页");
+                    eprintln!("松鼠大战：没找到游戏目录（缺 scripts/index.html），改用内置提示页");
                     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 }
             };

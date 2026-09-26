@@ -19,9 +19,10 @@ node scripts/serve.js 8080      # 加 --no-save 可关掉存档文件写入
 >
 > ```
 > 启动游戏.cmd / 启动游戏.command   ← 双击开玩（Windows / macOS）
-> index.html  css/  js/  images/  audio/   ← 游戏本体（静态服务的根，必须在最外层）
+> css/  js/  images/  audio/        ← 素材
 > save/                             ← 主存档（第一次运行自动创建）
-> scripts/                          ← 启动、停止、同步用到的脚本都在这里
+> scripts/                          ← 所有「跑起来要用的东西」都在这
+>     index.html                    ← 首页
 >     停止游戏.command  一键同步.command  一键同步.cmd
 >     重启同步服务.cmd  restart-sync.cmd（同一个东西的英文名版）
 >     serve.js  serve.py  start-game.ps1   sync/（双机同步本体）
@@ -30,7 +31,9 @@ node scripts/serve.js 8080      # 加 --no-save 可关掉存档文件写入
 > README.md
 > ```
 >
-> 改代码、跑测试、找存档、看文档：游戏本体在一级，脚本在 `scripts/`，工具在 `tools/`。
+> **首页 `index.html` 也在 `scripts/` 里**：服务器把地址 `/`（以及 `/index.html`）映射到它，
+> 页面里的 `css/…`、`js/…` 这些相对引用是按 **URL 根**解析的，所以一个引用都不用改、素材也不用搬。
+> 代价只有一个：**别靠双击 `scripts/index.html`（file://）来玩** —— 那种打开方式本来就不被支持。
 > 原始 APK 与参考截图在 `references/`（**不进版本库**，见 `.gitignore`）。
 > 每个文件干什么，见下面「[目录与文件](#目录与文件)」。
 
@@ -239,6 +242,10 @@ node scripts/sync/sync.js doctor win     # win 是 peers 里的名字，也可�
 * 切电池不停、电池上也能启动、**无运行时长上限**、崩溃后 1 分钟自动重启（最多 999 次）、同一任务不并行跑第二个实例。
 * `serve` 还会把 `uncaughtException` / `unhandledRejection` / `clientError` 记进 `save/sync.err.log` 而**不退出**（客户端中途断开这种小事不该把服务带走）。
 
+**Windows 上同步服务是隐藏窗口跑的。** 计划任务由 Task Scheduler 在交互会话里拉起，直接跑 `node` 会在桌面上留一个常驻黑框；所以任务实际调用的是 `scripts/sync/run-hidden.vbs`（`WScript.Shell.Run` 的窗口样式 0），服务完全不可见，`wscript` 自己立刻退出。菜单里的 `一键同步.cmd` 仍然是有窗口的——它要让你选菜单项，藏起来就没法用了。
+
+**从旧布局迁过来**（两台机器目录不一样时）：同步工具只增不删，所以对端根目录上的旧副本不会自动消失。在 Windows 上双击一次 `scripts/cleanup-old-layout.cmd`（会先列出要删的东西、要你确认，并先把 `tools\sync\sync.config.json` 搬到 `scripts\sync\` 保住口令，最后用新代码重启一次服务），目录就和 Mac 一致了。
+
 **谁需要放行防火墙？只有「接收方」需要。** 记住这一条能省一半事：
 
 | 你要做的事 | 谁在监听 | 需要放行防火墙吗 |
@@ -300,11 +307,11 @@ node tools/check-asset-paths.cjs   # 发布体检：静态引用的大小写与�
 
 ### 运行时的文件（游戏本体，全部是相对路径）
 
-下面这些路径都在仓库根——**游戏目录就是仓库根**。整体布局见上面「[启动](#启动)」。
+下面这些路径都在仓库根——**游戏目录就是仓库根**（`scripts/`、`tools/` 是它下面的子文件夹；首页在 `scripts/index.html`）。整体布局见上面「[启动](#启动)」。
 
 | 文件 | 作用 |
 | --- | --- |
-| `index.html` | 唯一入口：引入 7 个样式表 → 按固定顺序引入 18 个脚本 → 建 1170×690 画布 `#stage` 与 UI 容器 `#ui`（内部再按窗口尺寸等比缩放）。 |
+| `scripts/index.html` | 唯一入口：引入 7 个样式表 → 按固定顺序引入 18 个脚本 → 建 1170×690 画布 `#stage` 与 UI 容器 `#ui`（内部再按窗口尺寸等比缩放）。服务器把 `/` 与 `/index.html` 都映射到它，页面里的相对引用照旧。 |
 | `js/orig/` | **原版客户端归档**（不参与重写，只当资料与数据源）：`Map.min.js`（原版的 Map 实现，**会覆盖 `window.Map`**，所以本项目代码不用 `new Map()`）、`GameDict.js`（与 APK 逐字节一致的数据表）、`animationStr.js`/`assets.js`/`asset2.js`（图集与动画字符串）、`ssdz-pkg2.js`、`player.js`、`index.js` 等。 |
 | `js/engine.js` | 素材与动画：加载图集（`Engine.SHEETS`）、按原版 `Anima` 帧播放、`drawNumber` 位图数字。 |
 | `js/gamedata.js` | 复刻版自己的常量与覆盖表（`GData`）：成长、关卡难度、掉落、礼包、抽奖、每日任务池、`WS_LEVELS`（三选一等级）等。 |
@@ -362,19 +369,21 @@ node tools/check-asset-paths.cjs   # 发布体检：静态引用的大小写与�
 把下面这些**拷到任何地方就能玩**（`tools/` 整个都不用带）：
 
 ```
-一级目录（双击 + 游戏本体）
+一级目录（双击 + 素材）
   启动游戏.cmd 启动游戏.command  README.md
-  index.html  css/  js/  images/  audio/
+  css/  js/  images/  audio/
   save/                     第一次运行自动创建（主存档 progress.json）
-scripts/（辅助脚本，双击用）
-  停止游戏.command  一键同步.command  一键同步.cmd  重启同步服务.cmd
+scripts/（跑起来要用的东西都在这）
+  index.html                首页（服务器把 / 和 /index.html 都映射到它）
+  停止游戏.command  一键同步.command  一键同步.cmd  重启同步服务.cmd  restart-sync.cmd
   serve.js  serve.py        本地服务器 + /__save 存档接口（Node 与 Python 两版，二选一）
   start-game.ps1            Windows 启动器本体（启动游戏.cmd 会去 scripts\ 里找它）
   sync/sync.js              双机同步本体（零依赖，一键同步的两个入口要用它）
   sync/sync-win.ps1         Windows 同步菜单
+  sync/run-hidden.vbs       Windows：用隐藏窗口跑同步服务（桌面不留黑框）
 src-tauri/dist/ssdz-classic.exe   可选：原生轻壳（约 3 MB，自带服务器，不需要 Node/Python）
 
-* **一级目录只有「启动器 + 游戏本体 + scripts/ + tools/」**，解压出来一眼就知道双击哪个；
+* **一级目录只有「两个启动器 + 素材 + 三个子文件夹」**，解压出来一眼就知道双击哪个；
 * **有轻壳** → 双击 `启动游戏.cmd` 直接开原生窗口，**连 Node/Python 都不需要**；
 * **没有轻壳** → `scripts/` 里放好 `serve.js`（或 `serve.py`）+ Node（或 Python 3），双击就退回「应用窗口」模式；
 * 实测：把上面这套单独拷到空目录，`启动游戏.cmd`、`启动游戏.cmd --browser`、`bash 启动游戏.command`、`node scripts/serve.js` 四条路都能起、存档都落在该目录的 `save/progress.json`。

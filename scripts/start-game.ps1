@@ -145,8 +145,10 @@ $py = Get-Command python3 -ErrorAction SilentlyContinue
 if (-not $py) { $py = Get-Command python -ErrorAction SilentlyContinue }
 if (-not $py) { $py = Get-Command py -ErrorAction SilentlyContinue }
 
-$serveJs = Join-Path $root 'serve.js'
-$servePy = Join-Path $root 'serve.py'
+$serveJs = Join-Path $here 'serve.js'
+if (-not (Test-Path -LiteralPath $serveJs)) { $serveJs = Join-Path $root 'serve.js' }
+$servePy = Join-Path $here 'serve.py'
+if (-not (Test-Path -LiteralPath $servePy)) { $servePy = Join-Path $root 'serve.py' }
 
 $exe = $null; $pre = @(); $label = ''
 if ($node -and (Test-Path -LiteralPath $serveJs)) {

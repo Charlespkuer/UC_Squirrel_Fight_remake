@@ -107,6 +107,16 @@ if (CHECK) {
 
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
+// 首页在新布局里住在 scripts/index.html，但内嵌进安装包时仍要放到 web 根：
+// 页面里的 css/… 是按 URL 根解析的（网页版那边靠服务器的 / → scripts/index.html 映射）。
+const ENTRY_CANDIDATES = ['index.html', 'scripts/index.html'];
+const entry = ENTRY_CANDIDATES.map((f) => path.join(ROOT, f)).find((f) => fs.existsSync(f));
+if (entry) {
+  fs.copyFileSync(entry, path.join(OUT, 'index.html'));
+  console.log('首页：' + path.relative(ROOT, entry).replace(/\\/g, '/') + ' → web/index.html');
+} else {
+  console.warn('警告：找不到 index.html（根目录或 scripts/），安装包里会没有首页');
+}
 for (const item of ITEMS) {
   const src = path.join(ROOT, item);
   if (!fs.existsSync(src)) { console.warn('跳过（不存在）: ' + item); continue; }

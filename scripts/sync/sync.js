@@ -1110,7 +1110,10 @@ function winTaskXml() {
   // 留一个常驻的黑窗口；包一层 VBS 就能完全隐藏（wscript 自己立刻退出）。
   const useHidden = fs.existsSync(WIN_HIDDEN_VBS);
   const cmd = useHidden ? (process.env.SystemRoot || 'C:\\Windows') + '\\System32\\wscript.exe' : process.execPath;
-  const arg = useHidden ? '//B //Nologo "' + WIN_HIDDEN_VBS + '"' : '"' + __filename + '" serve';
+  // 把绝对的 node 与 sync.js 路径交给 VBS，连 PATH 都不用依赖
+  const arg = useHidden
+    ? '//B //Nologo "' + WIN_HIDDEN_VBS + '" "' + process.execPath + '" "' + __filename + '"'
+    : '"' + __filename + '" serve';
   return '<?xml version="1.0" encoding="UTF-16"?>\n' +
     '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n' +
     '  <RegistrationInfo><Description>SSDZ Sync - 松鼠大战双机同步服务</Description></RegistrationInfo>\n' +

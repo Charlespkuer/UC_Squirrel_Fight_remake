@@ -11,8 +11,21 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
+/** 项目根：从脚本所在目录往上找含 index.html 的那一层（tools/ 放哪都能用）。 */
+function findRoot(start) {
+  const fsx = require('node:fs'), px = require('node:path');
+  let d = start;
+  for (let i = 0; i < 8; i++) {
+    if (fsx.existsSync(px.join(d, 'index.html'))) return d;
+    const up = px.dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return px.resolve(start, '..');
+}
 
-const APK = path.resolve(__dirname, '..', '..', '..', 'references', 'h5ssdz_9game_4230.apk');
+
+const APK = path.join(findRoot(__dirname), 'references', 'h5ssdz_9game_4230.apk');
 
 /** Parse a ZIP buffer into { name -> {method, size, offset} } using the central directory. */
 function entries(buf) {

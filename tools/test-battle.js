@@ -5,7 +5,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
-process.chdir(path.resolve(__dirname, '..'));
+/** 项目根：从脚本所在目录往上找含 index.html 的那一层（tools/ 放哪都能用）。 */
+function findRoot(start) {
+  const fsx = require('node:fs'), px = require('node:path');
+  let d = start;
+  for (let i = 0; i < 8; i++) {
+    if (fsx.existsSync(px.join(d, 'index.html'))) return d;
+    const up = px.dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return px.resolve(start, '..');
+}
+
+process.chdir(findRoot(__dirname));
 let graphics;
 try { graphics = require('@napi-rs/canvas'); }
 catch {

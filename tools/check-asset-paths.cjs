@@ -13,13 +13,27 @@
  * ============================================================ */
 const fs = require('node:fs');
 const path = require('node:path');
+/** 项目根：从脚本所在目录往上找含 index.html 的那一层（tools/ 放哪都能用）。 */
+function findRoot(start) {
+  const fsx = require('node:fs'), px = require('node:path');
+  let d = start;
+  for (let i = 0; i < 8; i++) {
+    if (fsx.existsSync(px.join(d, 'index.html'))) return d;
+    const up = px.dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return px.resolve(start, '..');
+}
 
-const ROOT = path.resolve(__dirname, '..');
+
+const ROOT = findRoot(__dirname);
 const SCAN_EXT = ['.html', '.css', '.js', '.json'];
 // 跳过不参与发布的目录：原版归档源码、APK 取证工具与它们的产物、原客户端脚本副本、
 // 以及 Tauri 的暂存目录（src-tauri/web 是 build-tauri-web.cjs 复制出来的构建产物，
 // 其中 js/orig 本来就带一批「引用了但原版没打包」的路径，不该算发布断链）
-const SKIP_DIRS = new Set(['node_modules', '.git', 'js/orig', 'src-tauri', 'tools/apk-audit', 'tools/research/original']);
+// 按「路径结尾」判断，不写死 tools/ 在第几层（放哪都能用）
+const SKIP_DIRS = new Set(['node_modules', '.git', 'js/orig', 'src-tauri', 'apk-audit', 'research/original']);
 const ROOTS = 'images|css|js|audio|music|fonts|assets';
 // 引号/括号里的资源路径：以四个已知资源目录开头，允许中文与常见符号
 const REF_RE = new RegExp('["\'(`]((?:' + ROOTS + ')/[A-Za-z0-9_@%\\-./\\u4e00-\\u9fa5]*)', 'g');
@@ -53,7 +67,7 @@ function walk(dir, out) {
     const full = path.join(dir, entry.name);
     const rel = path.relative(ROOT, full).replace(/\\/g, '/');
     if (entry.isDirectory()) {
-      if (SKIP_DIRS.has(rel) || SKIP_DIRS.has(entry.name)) continue;
+      if (SKIP_DIRS.has(entry.name) || Array.from(SKIP_DIRS).some((s) => rel === s || rel.endsWith('/' + s))) continue;
       walk(full, out);
     } else if (SCAN_EXT.includes(path.extname(entry.name).toLowerCase())) out.push(rel);
   }

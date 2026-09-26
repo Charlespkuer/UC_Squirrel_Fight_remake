@@ -6,8 +6,19 @@ agents' reference assets/metadata are read at the end and merged unchanged.
 from pathlib import Path
 import json
 from PIL import Image, ImageDraw, ImageFont
+def _find_root(start):
+    """项目根：从脚本所在目录往上找含 index.html 的那一层（tools/ 放哪都能用）。"""
+    d = start
+    for _ in range(8):
+        if (d / 'index.html').is_file():
+            return d
+        if d.parent == d:
+            break
+        d = d.parent
+    return start.parent
 
-ROOT = Path(__file__).resolve().parent
+
+ROOT = _find_root(Path(__file__).resolve().parent)
 OUT = ROOT / 'images/classic/new-reference'
 PROPS = OUT / 'props'
 PROPS.mkdir(parents=True, exist_ok=True)

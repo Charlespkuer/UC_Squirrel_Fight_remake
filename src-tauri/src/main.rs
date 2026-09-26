@@ -35,40 +35,100 @@ const SAVE_MAX: usize = 4 * 1024 * 1024;
 
 /// 游戏目录：必须真的含 index.html，认错了就会去别的文件夹伺候文件
 /// 游戏目录的标志文件：首页 index.html 住在 scripts/ 里（旧布局直接在根目录，也认）。
-fn has_game(dir: &Path) -> bool {
-    dir.join("scripts").join("index.html").is_file() || dir.join("index.html").is_file()
+fn has_assets(dir: &Path) -> bool {
+    dir.join("css").is_dir() || dir.join("js").is_dir() || dir.join("images").is_dir()
 }
 
-fn find_game_root() -> Option<PathBuf> {
+/// 在某个候选目录里找游戏，返回「伺候哪个目录」+「首页在其中的相对路径」。
+/// 三种布局都认：
+///   1) index.html 和资源同级（旧平铺布局）
+///   2) 首页在 scripts\index.html、资源在项目根（2026-09 起的布局）
+///   3) index.html 和资源都在 scripts\（自包含）
+fn game_at(dir: &Path) -> Option<(PathBuf, String)> {
+    if dir.join("index.html").is_file() && has_assets(dir) {
+        return Some((dir.to_path_buf(), "index.html".to_string()));
+    }
+    let sub = dir.join("scripts");
+    if sub.join("index.html").is_file() && has_assets(dir) {
+        return Some((dir.to_path_buf(), "scripts/index.html".to_string()));
+    }
+    if sub.join("index.html").is_file() && has_assets(&sub) {
+        return Some((sub, "index.html".to_string()));
+    }
+    None
+}
+
+fn find_game(dir: &Path) -> Option<(PathBuf, String)> {
+    diag(&format!("候选：{}", dir.display()));
+    let found = game_at(dir);
+    match &found {
+        Some((serve, entry)) => diag(&format!("  ✓ 采用 {}（首页 {entry}）", serve.display())),
+        None => diag("  ✗ 这里没有 index.html（或 scripts\\index.html）+ 资源目录"),
+    }
+    found
+}
+
+fn find_game_root() -> Option<(PathBuf, String)> {
+    let _ = fs::remove_file(
+        std::env::var_os("TEMP").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(".")).join("ssdz-shell.log"),
+    );
     // 1) 启动器（启动游戏.cmd / start-game.ps1）显式指定
     if let Some(v) = std::env::var_os("SSDZ_GAME_DIR") {
-        let p = PathBuf::from(v);
-        if has_game(&p) {
-            return Some(p);
+        diag(&format!("SSDZ_GAME_DIR = {}", PathBuf::from(&v).display()));
+        if let Some(found) = find_game(&PathBuf::from(v)) {
+            return Some(found);
         }
     }
-    // 2) 当前工作目录
+    // 2) 当前工作目录，以及它往上的几层
     if let Ok(cwd) = std::env::current_dir() {
-        if has_game(&cwd) {
-            return Some(cwd);
-        }
-    }
-    // 3) 从可执行文件往上找（开发运行时 exe 在 src-tauri/target/release）
-    if let Ok(exe) = std::env::current_exe() {
-        let mut cur = exe.parent().map(|p| p.to_path_buf());
-        for _ in 0..6 {
+        let mut cur = Some(cwd);
+        for i in 0..4 {
             let dir = match cur {
                 Some(d) => d,
                 None => break,
             };
-            if has_game(&dir) {
-                return Some(dir);
+            diag(&format!("cwd 上溯 {i}: {}", dir.display()));
+            if let Some(found) = find_game(&dir) {
+                return Some(found);
+            }
+            cur = dir.parent().map(|p| p.to_path_buf());
+        }
+    }
+    // 3) 从可执行文件往上找（开发运行时 exe 在 src-tauri/dist 或 src-tauri/target/release）
+    if let Ok(exe) = std::env::current_exe() {
+        let mut cur = exe.parent().map(|p| p.to_path_buf());
+        for i in 0..6 {
+            let dir = match cur {
+                Some(d) => d,
+                None => break,
+            };
+            diag(&format!("exe 上溯 {i}: {}", dir.display()));
+            if let Some(found) = find_game(&dir) {
+                return Some(found);
             }
             cur = dir.parent().map(|p| p.to_path_buf());
         }
     }
     None
 }
+
+/// 诊断用：设了 SSDZ_SHELL_LOG=1 就把「找游戏目录」的过程写到 %TEMP%\ssdz-shell.log。
+/// 双击 exe 报「没找到游戏目录」时可以靠它一眼看出它到底找过哪些目录。
+fn diag(msg: &str) {
+    if std::env::var_os("SSDZ_SHELL_LOG").is_none() {
+        return;
+    }
+    let dir = std::env::var_os("TEMP")
+        .or_else(|| std::env::var_os("TMP"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let file = dir.join("ssdz-shell.log");
+    let mut text = fs::read_to_string(&file).unwrap_or_default();
+    text.push_str(msg);
+    text.push('\n');
+    let _ = fs::write(&file, text);
+}
+
 
 fn dir_writable(dir: &Path) -> bool {
     if fs::create_dir_all(dir).is_err() {
@@ -105,6 +165,8 @@ fn resolve_save(handle: &tauri::AppHandle, root: Option<&Path>) -> PathBuf {
 
 struct Ctx {
     root: PathBuf,
+    /// 首页在 root 里的相对路径（新布局是 scripts/index.html）
+    entry: String,
     save: PathBuf,
 }
 
@@ -292,8 +354,10 @@ fn handle_request(method: &str, target: &str, body: &[u8], ctx: &Ctx, out: &mut 
         respond(out, 405, "text/plain; charset=utf-8", "只支持 GET / HEAD".as_bytes())?;
         return Ok(false);
     }
-    let rel = if path == "/" {
-        "index.html".to_string()
+    // 和 scripts/serve.js 一样：地址栏是 / 或 /index.html 时映射到真正的首页
+    // （首页在 scripts/index.html，而页面里的 css/… 是按 URL 根解析的，所以地址必须是 /）
+    let rel = if path == "/" || path == "/index.html" {
+        ctx.entry.clone()
     } else {
         path.trim_start_matches('/').to_string()
     };
@@ -447,20 +511,21 @@ fn main() {
         .invoke_handler(tauri::generate_handler![save_path, save_meta, save_read, save_write])
         .setup(|app| {
             let handle = app.handle().clone();
-            let root = find_game_root();
-            let save = resolve_save(&handle, root.as_deref());
+            let found = find_game_root();
+            // 存档放「伺候的那个目录」下的 save/；找不到游戏目录时用系统应用数据目录
+            let save = resolve_save(&handle, found.as_ref().map(|(serve, _)| serve.as_path()));
             app.manage(SaveState { file: save.clone() });
 
-            let builder = match &root {
-                Some(root) => {
-                    let ctx = Arc::new(Ctx { root: root.clone(), save });
+            let builder = match &found {
+                Some((serve, entry)) => {
+                    let ctx = Arc::new(Ctx { root: serve.clone(), entry: entry.clone(), save });
                     let port = start_server(ctx)?;
-                    let url = format!("http://127.0.0.1:{port}/index.html");
-                    eprintln!("松鼠大战：游戏目录 {} / 本地服务 {url}", root.display());
+                    let url = format!("http://127.0.0.1:{port}/");   // 服务器把 / 映射到首页（scripts/index.html）
+                    eprintln!("松鼠大战：游戏目录 {} / 本地服务 {url}", serve.display());
                     WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
                 }
                 None => {
-                    eprintln!("松鼠大战：没找到游戏目录（缺 scripts/index.html），改用内置提示页");
+                    eprintln!("松鼠大战：没找到游戏目录（需要 index.html 与 css/js/images 同级）");
                     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 }
             };

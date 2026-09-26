@@ -27,8 +27,19 @@ import argparse
 from collections import deque
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
+def _find_root(start):
+    """项目根：从脚本所在目录往上找含 index.html 的那一层（tools/ 放哪都能用）。"""
+    d = start
+    for _ in range(8):
+        if (d / 'index.html').is_file():
+            return d
+        if d.parent == d:
+            break
+        d = d.parent
+    return start.parent
 
-ROOT = Path(__file__).resolve().parents[1]
+
+ROOT = _find_root(Path(__file__).resolve().parent)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dilate', type=int, default=0)

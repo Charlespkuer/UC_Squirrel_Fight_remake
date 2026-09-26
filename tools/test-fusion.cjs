@@ -9,7 +9,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
-const rootDir = path.resolve(__dirname, '..');
+/** 项目根：从脚本所在目录往上找含 index.html 的那一层（tools/ 放哪都能用）。 */
+function findRoot(start) {
+  const fsx = require('node:fs'), px = require('node:path');
+  let d = start;
+  for (let i = 0; i < 8; i++) {
+    if (fsx.existsSync(px.join(d, 'index.html'))) return d;
+    const up = px.dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return px.resolve(start, '..');
+}
+
+const rootDir = findRoot(__dirname);
 const files = ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/state.js', 'js/classic-fusion.js'];
 
 function setup(ids = [21, 21, 21, 22, 201, 202]) {

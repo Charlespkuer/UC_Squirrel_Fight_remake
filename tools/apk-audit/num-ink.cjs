@@ -2,10 +2,23 @@
  * digit advance can be tightened without clipping neighbouring characters. */
 const fs = require('node:fs');
 const path = require('node:path');
+/** 项目根：从脚本所在目录往上找含 index.html 的那一层（tools/ 放哪都能用）。 */
+function findRoot(start) {
+  const fsx = require('node:fs'), px = require('node:path');
+  let d = start;
+  for (let i = 0; i < 8; i++) {
+    if (fsx.existsSync(px.join(d, 'index.html'))) return d;
+    const up = px.dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return px.resolve(start, '..');
+}
+
 let graphics;
 try { graphics = require('@napi-rs/canvas'); }
 catch { graphics = require(path.join(process.env.USERPROFILE || 'C:/Users/Charles', '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@napi-rs/canvas')); }
-const file = path.resolve(__dirname, '..', '..', '..', 'images', 'num_28.png');
+const file = path.join(findRoot(__dirname), 'images', 'num_28.png');
 const img = graphics.createCanvas ? null : null;
 const src = graphics.loadImage ? null : null;
 const { createCanvas, loadImage } = graphics;

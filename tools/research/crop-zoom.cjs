@@ -5,7 +5,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const g = require(path.join(process.env.USERPROFILE || 'C:/Users/Charles',
   '.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/@napi-rs/canvas'));
-process.chdir(path.resolve(__dirname, '..', '..'));
+/** 项目根：从脚本所在目录往上找含 index.html 的那一层（tools/ 放哪都能用）。 */
+function findRoot(start) {
+  const fsx = require('node:fs'), px = require('node:path');
+  let d = start;
+  for (let i = 0; i < 8; i++) {
+    if (fsx.existsSync(px.join(d, 'index.html'))) return d;
+    const up = px.dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return px.resolve(start, '..');
+}
+
+process.chdir(findRoot(__dirname));
 (async () => {
   const [inFile, outFile, x, y, w, h, scale] = process.argv.slice(2);
   const k = Number(scale || 3);

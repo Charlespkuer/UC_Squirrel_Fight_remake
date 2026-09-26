@@ -11,8 +11,21 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+/** 项目根：从脚本所在目录往上找含 index.html 的那一层（tools/ 放哪都能用）。 */
+function findRoot(start) {
+  const fsx = require('node:fs'), px = require('node:path');
+  let d = start;
+  for (let i = 0; i < 8; i++) {
+    if (fsx.existsSync(px.join(d, 'index.html'))) return d;
+    const up = px.dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return px.resolve(start, '..');
+}
 
-const ROOT = path.resolve(__dirname, '..');
+
+const ROOT = findRoot(__dirname);
 const OUT = path.join(ROOT, 'src-tauri', 'web');
 const ITEMS = ['css', 'js', 'images', 'audio'];
 // 首页在 scripts/index.html 里；快照里仍然放到 web/ 根，让 html 里的相对引用原样可用

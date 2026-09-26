@@ -29,7 +29,8 @@ function write(file, text) {
 }
 /** 搭一个最小「游戏目录」：有 index.html、几个源文件、save/、以及各种应该被忽略的杂物。 */
 function makeRoot(dir, name, port) {
-  write(path.join(dir, 'index.html'), '<!DOCTYPE html>\n');
+  // 首页和真实布局一样放在 scripts/ 里（根目录的 index.html 属于旧布局，已被忽略）
+  write(path.join(dir, 'scripts/index.html'), '<!DOCTYPE html>\n');
   write(path.join(dir, 'js/a.js'), 'console.log(1)\n');
   write(path.join(dir, 'css/b.css'), 'body{}\n');
   write(path.join(dir, 'save/progress.json'), JSON.stringify({ name, level: 1, savedAt: 1000, weapons: [], skills: [], props: {} }));
@@ -96,7 +97,7 @@ async function ping(port) {
     const names = man.entries.map((e) => e.p).sort();
     ok('清单里没有 save/ node_modules/ .git/ .DS_Store', !names.some((p) => /^(save|node_modules|\.git)\//.test(p) || /(^|\/)\.DS_Store$/.test(p)));
     ok('清单里没有 *.log 与 sync.config.json', !names.some((p) => /\.log$/.test(p) || /sync\.config\.json$/.test(p)));
-    ok('清单里有正常的源文件', names.includes('index.html') && names.includes('js/a.js') && names.includes('scripts/sync/sync.js'));
+    ok('清单里有正常的源文件', names.includes('scripts/index.html') && names.includes('js/a.js') && names.includes('scripts/sync/sync.js'));
 
     // ---- 路径穿越与忽略路径一律拒绝 ----
     const bad = ['../A/js/a.js', '..%2f..%2fetc%2fpasswd', '/etc/passwd', 'save/progress.json', 'scripts/sync/sync.config.json'];

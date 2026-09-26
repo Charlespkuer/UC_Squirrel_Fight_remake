@@ -87,7 +87,7 @@ const DEFAULT_IGNORE = [
   // 不挡住的话 pull 会把它们复制到本机根目录，多出一堆重复文件。
   // 前缀 / 表示「只匹配游戏目录的根那一层」，所以不会误伤 scripts/ 里的正式副本。
   '/停止游戏.command', '/一键同步.cmd', '/一键同步.command', '/重启同步服务.cmd',
-  '/serve.js', '/serve.py', '/start-game.ps1', '/tools/sync/',
+  '/index.html', '/serve.js', '/serve.py', '/start-game.ps1', '/tools/sync/',
   'save/', 'node_modules', 'package-lock.json', 'references/',
   'src-tauri/target/', 'src-tauri/dist/', 'src-tauri/web/', 'src-tauri/icons/',
   'dist/', 'build/', '_site/',

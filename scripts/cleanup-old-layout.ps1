@@ -31,9 +31,18 @@ if (-not (Test-Path -LiteralPath (Join-Path $root 'scripts\index.html'))) {
   exit 1
 }
 
-$files = @('serve.js', 'serve.py', 'start-game.ps1',
-           '停止游戏.command', '一键同步.cmd', '一键同步.command', '重启同步服务.cmd')
-$dirs  = @('tools\sync')
+# 旧位置 → 新位置：只有「新位置确实有」才删旧的，避免删早了把游戏弄坏
+$files = @(
+  @{ old = 'index.html';          new = 'scripts\index.html' },
+  @{ old = 'serve.js';            new = 'scripts\serve.js' },
+  @{ old = 'serve.py';            new = 'scripts\serve.py' },
+  @{ old = 'start-game.ps1';      new = 'scripts\start-game.ps1' },
+  @{ old = '停止游戏.command';    new = 'scripts\停止游戏.command' },
+  @{ old = '一键同步.cmd';        new = 'scripts\一键同步.cmd' },
+  @{ old = '一键同步.command';    new = 'scripts\一键同步.command' },
+  @{ old = '重启同步服务.cmd';    new = 'scripts\重启同步服务.cmd' }
+)
+$dirs = @(@{ old = 'tools\sync'; new = 'scripts\sync\sync.js' })
 
 Write-Host ''
 Write-Host '松鼠大战 —— 清理旧布局残留'
@@ -42,13 +51,21 @@ Write-Host ''
 Write-Host '将要删除（旧副本，正式文件已经在 scripts\ 里了）：'
 $found = @()
 foreach ($f in $files) {
-  $p = Join-Path $root $f
-  if (Test-Path -LiteralPath $p) { $found += $p; Write-Host "  [文件] $f" }
+  $p = Join-Path $root $f.old
+  if ((Test-Path -LiteralPath $p) -and (Test-Path -LiteralPath (Join-Path $root $f.new))) {
+    $found += $p; Write-Host "  [文件] $($f.old)"
+  } elseif (Test-Path -LiteralPath $p) {
+    Write-Host "  [跳过] $($f.old) —— 因为新位置 $($f.new) 还没到，删了会影响运行"
+  }
 }
 $foundDirs = @()
 foreach ($d in $dirs) {
-  $p = Join-Path $root $d
-  if (Test-Path -LiteralPath $p) { $foundDirs += $p; Write-Host "  [目录] $d\" }
+  $p = Join-Path $root $d.old
+  if ((Test-Path -LiteralPath $p) -and (Test-Path -LiteralPath (Join-Path $root $d.new))) {
+    $foundDirs += $p; Write-Host "  [目录] $($d.old)\"
+  } elseif (Test-Path -LiteralPath $p) {
+    Write-Host "  [跳过] $($d.old)\ —— 因为新位置 $($d.new) 还没到"
+  }
 }
 if ($found.Count -eq 0 -and $foundDirs.Count -eq 0) {
   Write-Host '  （没有找到需要清理的东西，目录已经和 Mac 一致了）'
@@ -56,7 +73,7 @@ if ($found.Count -eq 0 -and $foundDirs.Count -eq 0) {
   exit 0
 }
 Write-Host ''
-Write-Host '不会动：启动游戏.cmd、README.md、.github\、.gitignore、index.html、'
+Write-Host '不会动：启动游戏.cmd、启动游戏.command、README.md、.github\、.gitignore、'
 Write-Host '        css\ js\ images\ audio\、save\、scripts\、tools\ 的其它内容'
 Write-Host ''
 $ans = Read-Host '确认删除这些旧副本吗？输入 y 回车继续，其它键取消'

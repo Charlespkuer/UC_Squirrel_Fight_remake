@@ -856,8 +856,8 @@ async function savePull(peer, opts) {
   // 同上：时间对齐成对面存档的 savedAt，这样两边的时间戳含义一致、不会再互相挡
   const at = Number(remote.data && remote.data.savedAt) || Number(remote.savedAt) || Date.now();
   try { fs.utimesSync(SAVE_FILE, at / 1000, at / 1000); } catch (e) {}
-  log(green('[√] 已从「' + peer.name + '」取回存档'));
-  if (backup) log('    本机旧档已备份到 ' + path.relative(ROOT, backup));
+  log(green('[√] 已从「' + peer.name + '」取回存档：' + describeProgress(rp)));
+  if (backup) log('    本机旧档（' + describeProgress(lp) + '）已备份到 ' + path.relative(ROOT, backup));
   log('    游戏里刷新页面（或重新进系统页）即可看到新进度。');
   return {
     ok: true, code: 'OK',

@@ -156,8 +156,9 @@ async function ping(port) {
     ok('pull 取回对端新加的文件', /拉取 1\/1 个文件/.test(run(A, ['pull', '127.0.0.1', '--files'])));
     ok('本机真的有了对端新文件', fs.existsSync(path.join(A, 'js/fromB.js')));
 
-    // ---- 存档：对方更新时不覆盖，--force 才覆盖，且覆盖前备份 ----
-    // 真实存档里 savedAt 与文件修改时间是一致的（游戏写盘时两者几乎同时），这里也照做
+    // ---- 存档：方向由用户点出来（push/pull），不再用「时间更新」拦；覆盖前一定备份 ----
+    // 这游戏自动保存极频繁，谁刚打开过谁的时间就最新，用 savedAt 判断谁新毫无意义，
+    // 所以改成一律照做 + 被覆盖的那侧进度更靠前时提醒一句。
     const T_ALICE = 1700000000000, T_BOB = 1800000000000;
     const putSave = (dir, obj) => {
       const f = path.join(dir, 'save/progress.json');
@@ -167,20 +168,29 @@ async function ping(port) {
     putSave(A, { name: 'Alice', level: 10, savedAt: T_ALICE, weapons: [], skills: [], props: {} });
     putSave(B, { name: 'Bob', level: 42, savedAt: T_BOB, weapons: [], skills: [], props: {} });
     out = run(A, ['push', '127.0.0.1', '--save']);
-    ok('对端更新 → push 被挡下', /没有推送/.test(out));
-    ok('对端存档没被动过', JSON.parse(fs.readFileSync(path.join(B, 'save/progress.json'), 'utf8')).name === 'Bob');
-    out = run(A, ['push', '127.0.0.1', '--save', '--force']);
-    ok('--force 才真的覆盖', JSON.parse(fs.readFileSync(path.join(B, 'save/progress.json'), 'utf8')).name === 'Alice');
+    ok('对面进度更靠前时照样推（不再被时间判断挡下）', /已把存档送到/.test(out));
+    ok('并且提醒了对面的进度更靠前', /更靠前/.test(out));
+    ok('对端真的被覆盖成 Alice', JSON.parse(fs.readFileSync(path.join(B, 'save/progress.json'), 'utf8')).name === 'Alice');
     ok('覆盖前自动备份', fs.readdirSync(path.join(B, 'save/backup')).some((f) => /^progress-.*\.json$/.test(f)));
-    // 关键回归：接收端写盘后要把文件时间对齐成存档里的 savedAt，
-    // 否则「接收时间」成了最新时间，推送方下一次再推就会被自己刚写过去的时间戳挡下来
     ok('对端文件时间被对齐成存档时间', Math.abs(fs.statSync(path.join(B, 'save/progress.json')).mtimeMs - T_ALICE) < 1000);
     out = run(A, ['push', '127.0.0.1', '--save']);
-    // 时间与大小都一样时不再重复推同一份（对端每次被覆盖都会留一份备份，白推只会堆垃圾）
+    // 内容一样时不再重复推同一份（对端每次被覆盖都会留一份备份，白推只会堆垃圾）
     ok('推过一次之后不会重复推同一份存档', /已经一致/.test(out) && !/已把存档送到/.test(out));
+    // 但本机内容真的变了，就必须能再推
+    putSave(A, { name: 'Alice2', level: 11, savedAt: T_ALICE + 5000, weapons: [], skills: [], props: {} });
+    out = run(A, ['push', '127.0.0.1', '--save']);
+    ok('本机存档内容变了之后还能再推', /已把存档送到/.test(out));
     out = run(A, ['pull', '127.0.0.1', '--save']);
-    ok('pull 能把存档取回来', JSON.parse(fs.readFileSync(path.join(A, 'save/progress.json'), 'utf8')).level === 10);
+    ok('pull 能把存档取回来', JSON.parse(fs.readFileSync(path.join(A, 'save/progress.json'), 'utf8')).name === 'Alice2');
     ok('本机旧档也备份了', fs.readdirSync(path.join(A, 'save/backup')).length >= 1);
+    // 用户实际遇到的那个场景：本机时间更新（刚开过游戏=自动保存），但进度其实更靠前，
+    // 这时候「取回对面存档」必须照样执行，并且提醒一句。
+    putSave(A, { name: 'AliceHigh', level: 50, savedAt: T_BOB + 600000, weapons: [], skills: [], props: {} });
+    putSave(B, { name: 'BobLow', level: 10, savedAt: T_BOB, weapons: [], skills: [], props: {} });
+    out = run(A, ['pull', '127.0.0.1', '--save']);
+    ok('本机时间更新但进度更靠前时，pull 照样执行', /已从/.test(out));
+    ok('并且提醒本机进度更靠前', /本机的进度更靠前/.test(out));
+    ok('本机确实被对面的覆盖了', JSON.parse(fs.readFileSync(path.join(A, 'save/progress.json'), 'utf8')).name === 'BobLow');
 
     // ---- 对端服务停掉后，给的是人话而不是崩溃 ----
     server.kill('SIGTERM');

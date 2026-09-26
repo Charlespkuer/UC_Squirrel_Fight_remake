@@ -1191,10 +1191,6 @@
     if (!r) return '';
     let html = '<div class="sp-head">' + resultHead(r) + '</div>';
     html += '<div class="sp-hint">' + esc(syncAdvice(r.code, r.msg)) + '</div>';
-    if (r.code === 'PEER_NEWER' || r.code === 'LOCAL_NEWER') {
-      const label = r.code === 'PEER_NEWER' ? '强制覆盖对面' : '强制用对面覆盖本机';
-      html += '<div class="sp-actions">' + btn(label, 'sync-force', 'small gold') + '</div>';
-    }
     const log = (j && j.lines && j.lines.length) ? '<pre class="sp-log">' + esc(j.lines.join('\n')) + '</pre>' : '';
     return html + log;
   }
@@ -1237,17 +1233,44 @@
       actions = btn('重新检测', 'sync-recheck', 'small');
     }
     const prog = syncProgressHtml();
-    return '<div class="sync-panel"><div class="sync-head">跨设备同步：' + state + '</div>' +
+    return '<div class="sync-panel sync-panel-peers"><div class="sync-head">跨设备同步：' + state + '</div>' +
       '<div class="sync-actions">' + actions + '</div>' +
       '<div class="sync-progress" id="sync-progress"' + (prog ? '' : ' style="display:none"') + '>' + prog + '</div></div>';
   }
   /** 面板上的按钮实际动作。kind 形如 'save' / 'files'，dir 是 'push' / 'pull'。 */
+  function progText(p) {
+    if (!p) return '（没有存档）';
+    return esc(p.name || '小松鼠') + ' ' + (p.level || 0) + ' 级（经验 ' + (p.exp || 0) + '，金松果 ' + (p.gold || 0) + '）';
+  }
   async function syncRun(kind, dir, force) {
     if (syncState.busy) { toast('上一次同步还在跑，稍等一下'); return; }
     const info = syncState.info || {};
     const peers = Object.keys(info.peers || {});
     if (!peers.length) { toast('还没找到对端，先点「扫描对端」'); return; }
     const peer = peers[0];
+
+    // 存档同步：方向是你点出来的，所以不再因为「谁的时间更新」而拒绝执行。
+    // 只有在**要被覆盖的那一份进度更靠前**时，先确认一次（覆盖前一定自动备份）。
+    if (kind === 'save' && !force) {
+      let pv = null;
+      try { pv = await syncFetch('/local/save/preview?peer=' + encodeURIComponent(peer), { timeout: 20000 }); } catch (e) {}
+      if (pv) {
+        const losingAhead = dir === 'push' ? pv.ahead === 'b' : pv.ahead === 'a';
+        if (losingAhead) {
+          const losing = dir === 'push' ? pv.remote : pv.local;
+          const mine = dir === 'push' ? pv.local : pv.remote;
+          const who = dir === 'push' ? '对面' : '本机';
+          syncState.pending = { kind: kind, dir: dir };
+          notice(who + '那份的进度更靠前：' + progText(losing) + '，而' +
+            (dir === 'push' ? '本机' : '对面') + '这份是 ' + progText(mine) + '。\n\n' +
+            '确定要用' + (dir === 'push' ? '本机' : '对面') + '这份覆盖' + who + '吗？（覆盖前的旧档会自动备份）',
+            [{ label: '确定覆盖', run: () => { if (syncState.pending) { const r = syncState.pending; syncState.pending = null; syncRun(r.kind, r.dir, true); } } },
+             { label: '取消', cls: 'muted', run: () => { syncState.pending = null; } }]);
+          return;
+        }
+      }
+    }
+
     syncState.busy = true; syncState.result = null;
     syncState.job = { phase: '准备中', done: 0, total: 0, bytes: 0, lines: [] };
     if (screen === 'system') { openSystem(); }
@@ -1314,11 +1337,16 @@
     syncBtn('sync-files-push',()=>syncRun('files','push'));
     syncBtn('sync-files-pull',()=>syncRun('files','pull'));
     // 进度区里的按钮是每次重绘 innerHTML 生成的，用事件委托挂，避免重绘后失效
-    const syncPanelEl=$('.sync-panel',p);
+    // 系统页上有两个 .sync-panel（「存档位置」和「跨设备同步」）。以前这里写的是
+    // $('.sync-panel', p) —— 选中的是**第一个**（存档位置），于是进度区里动态生成的
+    // 按钮根本没有监听器，点「强制覆盖」毫无反应。现在用专属类名 sync-panel-peers。
+    const syncPanelEl=$('.sync-panel-peers',p);
     if(syncPanelEl)syncPanelEl.addEventListener('click',(ev)=>{
       const t=ev.target&&ev.target.closest?ev.target.closest('[data-action="sync-force"]'):null;
-      if(!t||!syncState.result)return;
-      syncRun(syncState.result.kind,syncState.result.dir,true);
+      if(!t)return;
+      const r=syncState.pending||syncState.result; if(!r)return;
+      syncState.pending=null;
+      syncRun(r.kind,r.dir,true);
     });
     syncBtn('sync-discover',async()=>{
       toast('正在扫描 ZeroTier 网段…');

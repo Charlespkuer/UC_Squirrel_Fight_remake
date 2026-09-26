@@ -292,6 +292,43 @@ async function remoteSaveTime(peer, meta) {
   } catch (e) {}
   return meta ? (Number(meta.savedAt) || 0) : 0;
 }
+/** 存档的「进度」：判断哪一份更靠前。**不看时间** ——
+ *  这游戏自动保存非常频繁（打开游戏、每次操作都存），谁刚打开过谁的时间就最新，
+ *  用 savedAt 判断「谁更新」完全没有意义。改成比 等级 → 经验 → 金松果。 */
+function saveProgress(info) {
+  const d = (info && info.data) || null;
+  const pick = (k) => {
+    const v = d && d[k] != null ? d[k] : (info ? info[k] : 0);
+    return Number(v) || 0;
+  };
+  return {
+    name: (d && typeof d.name === 'string' && d.name) || (info && info.name) || '',
+    level: pick('level'),
+    exp: pick('exp'),
+    gold: pick('goldPoint'),
+  };
+}
+/** 'a' = 前者更靠前，'b' = 后者更靠前，'same' = 一样 */
+function compareProgress(a, b) {
+  if (!b) return 'a';
+  if (!a) return 'b';
+  if (a.level !== b.level) return a.level > b.level ? 'a' : 'b';
+  if (a.exp !== b.exp) return a.exp > b.exp ? 'a' : 'b';
+  if (a.gold !== b.gold) return a.gold > b.gold ? 'a' : 'b';
+  return 'same';
+}
+function describeProgress(p) {
+  if (!p) return '（没有存档）';
+  return (p.name || '小松鼠') + ' ' + p.level + ' 级（经验 ' + p.exp + '，金松果 ' + p.gold + '）';
+}
+/** 本地存档 + 对端存档的进度对比，给 /local/save/preview 和 savePush/savePull 共用。 */
+async function saveComparison(peer) {
+  const local = readSaveInfo();
+  const remote = await getJson(peer.host, peer.port, '/api/save', 10000).catch(() => null);
+  const lp = local.exists ? saveProgress(local) : null;
+  const rp = remote && remote.exists ? saveProgress(remote) : null;
+  return { local, remote, lp, rp, ahead: (lp && rp) ? compareProgress(lp, rp) : 'same' };
+}
 function describeSave(info, label) {
   if (!info || !info.exists) return label + '：还没有存档';
   return label + '：' + (info.name || '小松鼠') + ' ' + (info.level == null ? '?' : info.level) + ' 级 · 存档时间 ' + fmtTime(info.savedAt);
@@ -738,57 +775,59 @@ function syncError(code, msg) { const e = new Error(msg); e.code = code; return 
 async function savePush(peer, opts) {
   const local = readSaveInfo();
   if (!local.exists) throw syncError('NO_LOCAL_SAVE', '本机还没有存档（' + SAVE_FILE + '），先在游戏里玩一局、等它保存好再同步。');
-  jobPhase('读取两边存档时间');
-  const remote = await getJson(peer.host, peer.port, '/api/save/meta', 5000).catch(() => null);
-  log(describeSave(local, '本机  '));
-  if (remote) log(describeSave(remote, '对端  '));
-  job.save = { local: { name: local.name, level: local.level, savedAt: local.savedAt },
-               remote: remote ? { name: remote.name, level: remote.level, savedAt: remote.savedAt, exists: remote.exists } : null };
-  jobLine(describeSave(local, '本机  '));
-  if (remote) jobLine(describeSave(remote, '对端  '));
-  const localAt = saveTimeOf(local);
-  const remoteAt = remote ? await remoteSaveTime(peer, remote) : 0;
-  if (remote && remote.exists && remoteAt > localAt + 1000 && !opts.force) {
-    const msg = '对端的存档比本机新（' + fmtTime(remoteAt) + '），没有推送，免得把对面的进度盖旧。';
+  jobPhase('读取两边存档');
+  const cmp = await saveComparison(peer);
+  const { lp, rp } = cmp;
+  const remote = cmp.remote;      // 对端的完整存档（含 data），下面「内容是否一致」要用
+  job.save = { local: lp, remote: rp };
+  log('本机  ：' + describeProgress(lp));
+  log('对端  ：' + describeProgress(rp));
+  jobLine('本机  ：' + describeProgress(lp));
+  jobLine('对端  ：' + describeProgress(rp));
+  // 方向是用户点出来的（「把存档送过去」），所以**不再因为「谁的时间更新」而拦下来**。
+  // 只在对面进度更靠前时提醒一句 —— 覆盖前的自动备份仍然照做。
+  const targetAhead = rp && compareProgress(rp, lp) === 'a';
+  if (targetAhead) {
     warn('');
-    warn('[!] ' + msg);
-    warn('    确实要用本机这份覆盖它，就加 --force（对面会自动备份旧档）。');
-    return { ok: false, skipped: true, code: 'PEER_NEWER', msg };
+    warn('[!] 对面的进度更靠前（' + describeProgress(rp) + '），你仍然用本机的 ' + describeProgress(lp) + ' 覆盖了它。');
+    warn('    对面旧档会自动备份到它对端的 save/backup/，想反悔可以拉回来。');
   }
-  // 两边时间一样（差 1 秒内）且大小一样 = 其实就是同一份，别再白推一次：
-  // 每次覆盖对端都会在对端 save/backup/ 留一份备份，重复推送只会堆垃圾。
-  const sameSave = remote && remote.exists && Math.abs(localAt - remoteAt) <= 1000 &&
-    (!Number(remote.size) || Number(remote.size) === local.size);
-  if (sameSave && !opts.force) {
-    const msg = '两边存档已经一致（' + fmtTime(remoteAt) + '），没有需要推送的改动。';
-    log((opts.dry ? '[dry] ' : '[√] ') + msg);
-    jobLine(msg);
-    return { ok: true, skipped: true, code: 'SAME_SAVE', msg };
+  // 两边内容完全一样就别白推一次：每次覆盖都会在对端 save/backup/ 留一份备份，
+  // 反复推同一份只会堆垃圾。这里按**内容**比（以前按时间+大小，时间已经不用来判断新旧了）。
+  if (!opts.force && remote && remote.exists && remote.data) {
+    try {
+      if (fs.readFileSync(SAVE_FILE, 'utf8') === JSON.stringify(remote.data)) {
+        const msg = '两边存档内容已经一致，没有需要推送的改动。';
+        log((opts.dry ? '[dry] ' : '[√] ') + msg);
+        jobLine(msg);
+        return { ok: true, skipped: true, code: 'SAME_SAVE', msg };
+      }
+    } catch (e) {}
   }
-  if (opts.dry) { log('[dry] 会把本机存档 POST 到 ' + peer.host + ':' + peer.port); return { ok: true }; }
+  if (opts.dry) { log('[dry] 会把本机存档 POST 到 ' + peer.host + ':' + peer.port); return { ok: true, code: 'OK', msg: '演练：会用本机存档覆盖对面' }; }
   jobPhase('把存档写到对端');
   const body = fs.readFileSync(SAVE_FILE);
   const post = (force) => request(peer.host, peer.port, 'POST', '/api/save' + (force ? '?force=1' : ''), {
     headers: { 'content-type': 'application/json' }, body,
   });
   let r = await post(opts.force);
-  // 老版本对端是按「文件修改时间」判更新的，可能刚收到过一份存档就把自己判成更新。
-  // 我们已经按存档内容里的 savedAt 确认本机不旧，这种情况自动补一次强制覆盖。
-  const refusedNewer = r.json && !r.json.ok &&
-    (r.json.code === 'PEER_NEWER' || /没有覆盖/.test(String(r.json.msg || '')));   // 老版本对端不返回 code
-  if (refusedNewer && !opts.force && localAt >= remoteAt) {
-    jobLine('对端按文件时间误判成更新，按存档内容时间本机并不旧 → 自动强制覆盖一次');
-    warn('[!] 对端按「文件时间」判成了更新，但按存档内容里的时间本机并不旧，自动强制覆盖一次。');
+  // 对端如果还是老版本，会用「文件修改时间」拦一手；方向是用户点的，自动带 force 重发一次
+  if (r.json && !r.json.ok && (r.json.code === 'PEER_NEWER' || /没有覆盖/.test(String(r.json.msg || '')))) {
+    jobLine('对端是老版本、还在按文件时间拦 → 自动带 force 重发一次');
     r = await post(true);
   }
   if (r.status !== 200 || !r.json || !r.json.ok) throw syncError((r.json && r.json.code) || 'PEER_REJECT', (r.json && r.json.msg) || ('对端拒绝：HTTP ' + r.status));
-  const note = r.json.backup ? '（对面旧档已备份成 ' + r.json.backup + '）' : '';
-  log(green('[√] 已把存档送到「' + peer.name + '」') + note);
-  return { ok: true, code: 'OK', msg: '已把存档送到「' + peer.name + '」' + note };
+  const note = r.json.backup ? '（对面原来的 ' + describeProgress(rp) + ' 已备份成 ' + r.json.backup + '）' : '';
+  log(green('[√] 已把存档送到「' + peer.name + '」：' + describeProgress(lp)) + note);
+  return {
+    ok: true, code: 'OK',
+    warn: targetAhead ? '对面的进度本来更靠前，这次是用本机这份把它覆盖了' : '',
+    msg: '已把存档送到「' + peer.name + '」：' + describeProgress(lp) + note,
+  };
 }
 
 async function savePull(peer, opts) {
-  jobPhase('读取两边存档时间');
+  jobPhase('读取两边存档');
   const local = readSaveInfo();
   const r = await request(peer.host, peer.port, 'GET', '/api/save', { timeout: 8000 });
   if (r.status !== 200 || !r.json || !r.json.ok) throw syncError('PEER_REJECT', (r.json && r.json.msg) || ('对端拒绝：HTTP ' + r.status));
@@ -800,13 +839,14 @@ async function savePull(peer, opts) {
   jobLine(describeSave(local, '本机  '));
   jobLine(describeSave(remote, '对端  '));
   if (!remote.exists) return { ok: false, code: 'PEER_NO_SAVE', msg: '对端还没有存档，没什么可取的。' };
-  const remoteAtPull = Number(remote.data && remote.data.savedAt) || Number(remote.savedAt) || 0;
-  if (local.exists && saveTimeOf(local) > remoteAtPull + 1000 && !opts.force) {
-    const msg = '本机的存档比对端新（' + fmtTime(saveTimeOf(local)) + '），没有拉取，免得把本机进度盖旧。';
+  // 同上：方向是用户点出来的（「取回对面存档」），不再用时间拦；只在被覆盖的那份更靠前时提醒
+  const lp = local.exists ? saveProgress(local) : null;
+  const rp = saveProgress(remote);
+  const targetAhead = lp && compareProgress(lp, rp) === 'a';
+  if (targetAhead) {
     warn('');
-    warn('[!] ' + msg);
-    warn('    确实要用对面那份覆盖本机，就加 --force（本机会自动备份旧档）。');
-    return { ok: false, skipped: true, code: 'LOCAL_NEWER', msg };
+    warn('[!] 本机的进度更靠前（' + describeProgress(lp) + '），你仍然用对面的 ' + describeProgress(rp) + ' 覆盖了它。');
+    warn('    本机旧档会自动备份到 save/backup/，想反悔可以拷回来。');
   }
   if (opts.dry) { log('[dry] 会把对端存档写入 ' + SAVE_FILE); return { ok: true }; }
   jobPhase('写入本机存档');
@@ -819,7 +859,11 @@ async function savePull(peer, opts) {
   log(green('[√] 已从「' + peer.name + '」取回存档'));
   if (backup) log('    本机旧档已备份到 ' + path.relative(ROOT, backup));
   log('    游戏里刷新页面（或重新进系统页）即可看到新进度。');
-  return { ok: true, code: 'OK', msg: '已从「' + peer.name + '」取回存档' + (backup ? '，本机旧档已备份' : '') };
+  return {
+    ok: true, code: 'OK',
+    warn: targetAhead ? '本机进度本来更靠前，这次是用对面那份把它覆盖了' : '',
+    msg: '已从「' + peer.name + '」取回存档：' + describeProgress(rp) + (backup ? '（本机原来的存档已备份成 ' + path.basename(backup) + '）' : ''),
+  };
 }
 
 // ---------------------------------------------------------------- 文件同步
@@ -1033,12 +1077,9 @@ function createServer() {
           let parsed;
           try { parsed = JSON.parse(body.toString('utf8')); } catch (e) { return sendJson(res, 400, { ok: false, msg: '存档不是合法 JSON' }); }
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return sendJson(res, 400, { ok: false, msg: '存档必须是对象' });
-          const force = url.searchParams.get('force') === '1';
-          const cur = readSaveInfo();
+          // 不再按「谁的时间更新」拒收：发送方是明确点了「把存档送过去」的，
+          // 时间判断在自动保存频繁的游戏里没有意义。旧档永远先备份。
           const incomingAt = Number(parsed.savedAt) || 0;
-          if (cur.exists && cur.savedAt > incomingAt + 1000 && !force) {
-            return sendJson(res, 200, { ok: false, code: 'PEER_NEWER', msg: '本机存档更新（' + fmtTime(cur.savedAt) + '），没有覆盖；要强制覆盖请再点一次「强制覆盖对面」' });
-          }
           fs.mkdirSync(SAVE_DIR, { recursive: true });
           const backup = backupSave();
           fs.writeFileSync(SAVE_FILE, JSON.stringify(parsed), 'utf8');
@@ -1095,6 +1136,17 @@ function createServer() {
         }
         if (p === '/local/progress') {
           return sendJson(res, 200, Object.assign({ ok: true }, jobSnapshot()), cors);
+        }
+        // 同步存档之前先看一眼两边「进度」：被覆盖的那一侧更靠前时，页面会先确认一次
+        if (p === '/local/save/preview') {
+          const peer = await resolvePeer(url.searchParams.get('peer') || '');
+          const cmp = await saveComparison(peer);
+          return sendJson(res, 200, {
+            ok: true, peer: peer.name,
+            local: cmp.lp || { name: '', level: 0, exp: 0, gold: 0 }, localExists: cmp.local.exists,
+            remote: cmp.rp || { name: '', level: 0, exp: 0, gold: 0 }, remoteExists: !!(cmp.remote && cmp.remote.exists),
+            ahead: cmp.ahead,
+          }, cors);
         }
         const m = p.match(/^\/local\/(save|files)\/(push|pull)$/);
         if (m && req.method === 'POST') {

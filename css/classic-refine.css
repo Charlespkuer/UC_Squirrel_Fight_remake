@@ -58,25 +58,38 @@
 .classic-bag-board .page-arrow.bag-next{left:648px;right:auto}
 .attribute-allocation{display:flex;justify-content:center;gap:32px;margin:24px 0}.attribute-allocation label{display:flex;flex-direction:column;gap:10px;color:#795329}.attribute-allocation input{width:130px;padding:10px;border:3px solid #c19b59;border-radius:14px;background:#fff8db;color:#73441a;text-align:center;font:32px Georgia,serif;user-select:text}.allocation-remaining{text-align:center;color:#836120}
 .status-buttons{justify-content:flex-start}.status-buttons .uc-button{flex:none;width:279px;height:100px;font-size:38px}.status-buttons [data-action="merge"]{display:none}
-/* 状态页右下角的「装备融合」入口：做成和页面其它按钮同款的金色胶囊（带图标底座） */
-.status-fusion-link{position:absolute;right:24px;bottom:14px;display:flex;align-items:center;gap:11px;height:62px;
-  padding:0 24px 0 12px;border:4px solid #7b5220;border-radius:34px;cursor:pointer;
+/* 状态页下角的「装备出售 / 装备融合」入口（第 1、2 项）：同一套金色胶囊样式，
+   整体从屏幕边缘抬起来（bottom 14 → 34），锤子图像再放大一档并往上顶一点。 */
+.status-sell-link,.status-fusion-link{position:absolute;bottom:34px;display:flex;align-items:center;gap:10px;height:58px;
+  padding:0 22px 0 10px;border:4px solid #7b5220;border-radius:32px;cursor:pointer;
   background:linear-gradient(#fff6c6,#ffd75c 46%,#f0a81b);
   box-shadow:inset 0 0 0 4px #fffdf3,0 3px 0 #b9832a,0 7px 14px #6b4a2433;
-  font:700 27px/1 "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;color:#6b3f12;letter-spacing:2px;text-shadow:0 1px 0 #fff7d0;
+  font:700 26px/1 "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;color:#6b3f12;letter-spacing:2px;text-shadow:0 1px 0 #fff7d0;
   transition:transform .14s,filter .14s}
-.status-fusion-link:hover{transform:translateY(-2px);filter:brightness(1.05)}
-.status-fusion-link:active{transform:translateY(1px)}
-/* 第 11 项：锤子标志放大并居中（⚒ 字形在多数中文字体里偏上，用 line-height
-   与 transform 双重压回方块正中）；底座也跟着放大一档。 */
-.status-fusion-icon{position:relative;display:flex;align-items:center;justify-content:center;width:46px;height:46px;
-  flex-shrink:0;border-radius:15px;background:linear-gradient(#8c5a2a,#6b3d16);color:#ffe27a;font-size:32px;
-  line-height:1;padding-top:0;
+.status-fusion-link{right:24px}
+.status-sell-link{left:24px}
+.status-sell-link:hover,.status-fusion-link:hover{transform:translateY(-2px);filter:brightness(1.05)}
+.status-sell-link:active,.status-fusion-link:active{transform:translateY(1px)}
+/* 锤子标志继续放大，并整体往上顶一点（第 11 项 + 第 2 项） */
+.status-fusion-icon,.status-sell-icon{position:relative;display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;border-radius:16px;background:linear-gradient(#8c5a2a,#6b3d16);color:#ffe27a;
+  line-height:1;top:-3px;
   box-shadow:inset 0 0 0 3px #fff4cd,0 1px 2px #7a4a1480}
-.status-fusion-icon::before{content:'';position:absolute;inset:0;border-radius:15px;
+.status-fusion-icon{width:54px;height:54px;font-size:38px}
+.status-sell-icon{width:44px;height:44px;font-size:26px}
+.status-fusion-icon::before,.status-sell-icon::before{content:'';position:absolute;inset:0;border-radius:16px;
   background:radial-gradient(circle at 50% 42%,#ffffff38,transparent 62%);pointer-events:none}
-.status-fusion-icon .status-fusion-glyph{font-style:normal;line-height:1;display:block;transform:translateY(-1px)}
-.status-fusion-text{position:relative;z-index:1}
+.status-fusion-icon .status-fusion-glyph,.status-sell-icon .status-sell-glyph{font-style:normal;line-height:1;display:block;transform:translateY(-1px)}
+.status-fusion-text,.status-sell-text{position:relative;z-index:1}
+
+/* 商店页下角入口：默认 .uc-button 是 36px 字、91px 高，这里压到和上面胶囊同一档
+   （第 2 项：向「装备融合」看齐） */
+.uc-button.entry-pill{height:58px;min-height:0;padding:0 26px;border:4px solid #7b5220;border-radius:32px;
+  font:700 26px/1 "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;color:#6b3f12;
+  letter-spacing:2px;-webkit-text-stroke:0;text-shadow:0 1px 0 #fff7d0;
+  background:linear-gradient(#fff6c6,#ffd75c 46%,#f0a81b);
+  box-shadow:inset 0 0 0 4px #fffdf3,0 3px 0 #b9832a,0 7px 14px #6b4a2433}
+.uc-button.entry-pill:hover{filter:brightness(1.05)}
 .classic-page[data-screen="status"] .status-character{left:-27px;top:15px}
 .status-right{left:510px;right:29px;top:4px}
 .status-exp{position:relative;height:87px;gap:36px;z-index:0}.status-exp:before{content:"";position:absolute;inset:-8px -27px -1px -105px;background:linear-gradient(90deg,transparent,#bada73 27%,#aad069);z-index:-1}
@@ -192,3 +205,24 @@
 /* 翻页箭头：‹ › 在 Arial 下的墨迹中心比圆框圆心低 5px（截图逐像素量出来的）。
    用 padding-bottom 顶回圆心——不能用 transform，那会把整个圆框一起搬走。
    1px padding-bottom ≈ 0.48px 视觉上移，所以取 10px。 */
+
+/* 状态页的力/敏/速/命数字（第 3 项）：Georgia 数字的字面重心偏低，
+   单独把数字上移 6px，圆形字徽不动。 */
+.classic-page[data-screen="status"]>.classic-board>.stat-strip .stat-value{display:block;position:relative;top:-6px}
+
+/* ---------- 装备出售页（第 1 项） ---------- */
+.gear-sell-board{overflow:hidden}
+.gear-sell-head{display:flex;flex-wrap:wrap;align-items:center;gap:12px 26px;margin:2px 4px 12px;font-size:23px;color:#7a5528}
+.gear-sell-head b{color:#c87f0a}
+.gear-sell-legend{margin-left:auto;font-size:20px;color:#957343}
+.gear-sell-grid{display:grid;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(3,1fr);gap:10px 16px;padding:0 4px}
+.gear-sell-card{display:flex;align-items:center;gap:14px;text-align:left;cursor:pointer;border:3px solid #d9bd88;border-radius:24px;
+  background:linear-gradient(#fffdf3,#f7ebc9);padding:6px 14px 6px 8px;font-family:inherit;box-shadow:0 3px 0 #d9bd88}
+.gear-sell-card:hover{filter:brightness(1.04)}
+.gear-sell-card:active{transform:translateY(2px)}
+.gear-sell-card .item-icon{width:66px;height:66px;border-radius:16px;box-shadow:inset 0 0 0 3px #fff,0 1px 0 #c7b489}
+.gear-sell-info{display:flex;flex-direction:column;gap:2px;min-width:0}
+.gear-sell-info b{font-size:25px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gear-sell-price{font-size:23px;color:#c87f0a;font-weight:bold}
+.gear-sell-meta{font-size:19px;color:#957343}
+.gear-sell-board .empty-state{margin-top:40px}

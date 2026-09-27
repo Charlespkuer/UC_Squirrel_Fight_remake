@@ -113,7 +113,7 @@ async function main() {
      ?shot=sell|shop|exchange|status|daily|chat|arrows 各自停在一个画面上，
      既抓尺寸数据也方便截图。 */
   const batch = q.get('shot');
-  if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows'].includes(batch)) {
+  if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows', 'gearsell', 'gearsellconfirm', 'master'].includes(batch)) {
     S.props[47] = 20; S.props[22] = 12; S.props[24] = 8; S.props[1] = 9;
     State.save();
     const rect = (sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
@@ -152,6 +152,52 @@ async function main() {
       P.done = true; P.errors = window.__errs.slice(); return;
     }
 
+    if (batch === 'master') {
+      // 造出「三个满级徒弟 + 我昨天赚了一笔」的局面，看日供 UI
+      const st = State.state();
+      st.level = 40; st.goldPoint = 5000;
+      st.prentices = [];
+      [{ n: '满级甲', l: 70 }, { n: '满级乙', l: 70 }, { n: '满级丙', l: 12 }].forEach(({ n, l }) => State.addPrentice({ name: n, level: l }));
+      const y = new Date(Date.now() - 86400000);
+      const pad = (v) => String(v).padStart(2, '0');
+      const ymd = y.getFullYear() + '-' + pad(y.getMonth() + 1) + '-' + pad(y.getDate());
+      st.prentices.forEach((p) => { p.since = ymd; });
+      st.earnHistory = [{ date: ymd, exp: 8000, gold: 1200 }];
+      State.save();
+      ClassicExtras.master('apprentice'); await flush(360);
+      P.masterText = text(document.querySelector('#ui .extra-apprentice-title'));
+      P.masterClaim = (() => { const b = document.querySelector('[data-action="master-claim"]'); return b ? b.textContent.trim() : null; })();
+      P.masterTip = text(document.querySelector('#ui .extra-master-tip'));
+      P.masterRow = text(document.querySelector('[data-prentice="0"]'));
+      P.apprenticeDaily = State.state().prentices.map((p) => {
+        const d = State.apprenticeDailyStatus(p);
+        return { name: p.name, level: p.level, exp: d.exp, gold: d.gold, ratio: Math.round(d.ratio * 1000) / 10 };
+      });
+      snap('徒弟面板', '#ui .extra-apprentice-title');
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+
+    if (batch === 'gearsell' || batch === 'gearsellconfirm') {
+      // 造几件不同品质的装备，看专用出售页
+      State.state().gears = [];
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].forEach((id) => State.addGear(id, []));
+      UI.runAction('gear-sell'); await flush(360);
+      P.sellPageCards = $$('[data-sell]').length;
+      P.sellPageHead = text(document.querySelector('.gear-sell-head'));
+      P.sellPageFirst = text(document.querySelector('[data-sell]'));
+      snap('出售页卡片', '[data-sell]');
+      // 点第一件 → 确认弹窗（只有 gearsellconfirm 才点，gearsell 留整页截图看排版）
+      if (batch === 'gearsellconfirm') {
+        const card = document.querySelector('[data-sell]');
+        if (card) card.click();
+        await flush(340);
+        P.sellConfirmButtons = $$('.classic-modal .modal-buttons button').map((b) => b.textContent.trim());
+        P.sellConfirmText = text(document.querySelector('.classic-modal .modal-body'));
+        snap('出售确认', '.classic-modal');
+      }
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+
     if (batch === 'status') {
       UI.runAction('status'); await flush(340);
       const link = rect('.status-fusion-link'), icon = rect('.status-fusion-icon'), glyph = rect('.status-fusion-glyph');
@@ -161,6 +207,21 @@ async function main() {
         linkCenter: link ? (link.top + link.bottom) / 2 : null };
       P.fusion.glyphCenteredInIcon = (icon && glyph)
         ? Math.abs(((glyph.top + glyph.bottom) / 2) - ((icon.top + icon.bottom) / 2)) <= 2 : null;
+      const sellLink = rect('.status-sell-link'), sellIcon = rect('.status-sell-icon');
+      P.sellEntry = { link: sellLink, icon: sellIcon,
+        glyphFont: (document.querySelector('.status-sell-glyph') && getComputedStyle(document.querySelector('.status-sell-glyph')).fontSize) };
+      P.pillMetrics = ['status-sell-link', 'status-fusion-link'].map((cls) => {
+        const b = document.querySelector('.' + cls); if (!b) return null;
+        const r = b.getBoundingClientRect(), cs = getComputedStyle(b);
+        return { cls, h: Math.round(r.height), font: cs.fontSize, bottom: Math.round(window.innerHeight - r.bottom) };
+      });
+      // 状态页四项数字：拿 pill 与数字各自的盒子中心对比
+      P.statPills = ['.stat-pill', '.stat-value'].map((sel) => {
+        const e = document.querySelector('#ui ' + sel); if (!e) return null;
+        const r = e.getBoundingClientRect();
+        return { sel, top: Math.round(r.top), bottom: Math.round(r.bottom), center: Math.round((r.top + r.bottom) / 2) };
+      });
+      snap('装备出售入口', '.status-sell-link');
       snap('融合入口', '.status-fusion-link');
       P.done = true; P.errors = window.__errs.slice(); return;
     }

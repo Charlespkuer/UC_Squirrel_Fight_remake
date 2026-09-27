@@ -483,21 +483,37 @@ test('收徒上限随师父等级1/2/3，仅扣10金松果且重复调用不多�
   assertBalanced(g.markup);
 });
 
-test('徒弟日贡按昨日活动产出，新增当天不能领，次日只领一次且踢人每天一次', () => {
+test('徒弟日供 = 等级之和的系数 × 我昨日收益；新增当天不能领，次日只领一次且踢人每天一次', () => {
   const g = setup(), s = g.c.State.state();
-  s.level = 20; s.exp = 0;
-  g.c.State.addPrentice({name:'甲',level:10});g.c.State.addPrentice({name:'乙',level:20});
-  assert.equal(g.c.State.apprenticeDailyTotal(),0);assert.equal(g.c.State.claimApprenticeExp().ok,false);
-  g.advance(86400000);
+  s.level = 20; s.exp = 0; s.goldPoint = 0;
+  g.c.State.addPrentice({ name: '甲', level: 10 });
+  g.c.State.addPrentice({ name: '乙', level: 20 });
+  assert.equal(g.c.State.apprenticeDailyTotal().exp, 0, '当天还没有昨日收益');
+  assert.equal(g.c.State.claimApprenticeExp().ok, false, '新增当天不能领');
+
+  // 当天赚 1000 经验 + 200 金松果（走真实入口记账）
+  g.c.State.gainExp(1000);
+  g.c.State.addGold(200);
+  g.advance(86400000);                       // 次日结算
+
+  const ratio = g.c.State.apprenticeTributeRatio(10 + 20);
+  const total = g.c.State.apprenticeDailyTotal();
+  assert.ok(Math.abs(total.exp - 1000 * ratio) <= 2, '经验合计≈1.5倍系数×收益：' + total.exp);
+  assert.ok(Math.abs(total.gold - 200 * ratio) <= 2, '金松果合计≈系数×收益：' + total.gold);
   const perA = g.c.State.apprenticeDailyExp(s.prentices[0]);
   const perB = g.c.State.apprenticeDailyExp(s.prentices[1]);
-  assert.ok(perA>0&&perB>0);
-  assert.equal(g.c.State.apprenticeDailyTotal(), perA + perB);
-  const expBefore = s.exp;
+  assert.ok(perB > perA, '等级高的徒弟分的份额更多：' + perA + ' < ' + perB);
+  assert.equal(perA + perB, total.exp, '各徒弟份额之和 = 合计');
+
+  const expBefore = s.exp, goldBefore = s.goldPoint;
   const r = g.c.State.claimApprenticeExp();
-  assert.ok(r.ok && r.count === 2 && r.total === perA + perB, JSON.stringify(r));
-  assert.equal(s.exp, expBefore + perA + perB, '日贡经验加到师父身上');
+  assert.ok(r.ok && r.count === 2, JSON.stringify(r));
+  assert.equal(s.exp, expBefore + total.exp, '日供经验加到师父身上');
+  assert.equal(s.goldPoint, goldBefore + total.gold, '日供金松果也加到师父身上');
   assert.ok(!g.c.State.claimApprenticeExp().ok, '同一天不能再领');
+  // 日供本身不再计入当日收益，避免滚雪球
+  assert.equal(g.c.State.earnOn(g.c.State.localDate()).exp, 0, '领到的日供不算我今天的收益');
+
   // 踢人每天 1 次
   assert.ok(g.c.State.canKickToday());
   assert.ok(g.c.State.kickPrentice('甲').ok);
@@ -563,45 +579,91 @@ test('收徒金松果不足不启动，零体力可以收徒，落败消耗一�
   assert.equal(s.energy, 0);assert.equal(s.goldPoint,0); assert.equal(s.prentices.length, 0); assert.equal(s.exp, 0); assert.equal(s.propsStates[3], 19);
 });
 
-test('日贡严格按普通及关卡10%和体力竞技5%，排除拾取抽奖与英雄帖竞技',()=>{
-  const g=setup();
-  const activities=[{kind:'challenge',exp:100},{kind:'challenged',exp:50},{kind:'stage',exp:30},{kind:'arena',entry:'energy',exp:200},
-    {kind:'arena',entry:'ticket',exp:900},{kind:'pickup',exp:900},{kind:'lottery',exp:900}];
-  assert.equal(g.c.State.apprenticeTribute(activities),28);
-  assert.equal(g.c.State.apprenticeTribute([{kind:'challenge',exp:19},{kind:'arena',entry:'energy',exp:1}]),1);
-  const s=g.c.State.state();s.level=20;g.c.State.addPrentice({name:'账目徒弟',level:15});const p=s.prentices[0];
-  p.since='2026-09-22';p.joinedAt=new g.c.Date(2026,8,22).getTime();p.tributeLedger=[{date:'2026-09-22',simulated:true,activities}];
-  g.c.State.save();g.c.ClassicExtras.master('apprentice');
-  assert.equal(g.c.State.apprenticeDailyTotal(),28);assert.match(g.page().html,/离线活动账目/);assert.match(g.page().html,/不计日贡/);
-  g.click('master-claim');assert.equal(s.exp,28);assert.equal(p.tributeClaimedDate,'2026-09-22');
-  assert.equal(g.c.State.claimApprenticeExp().ok,false);assert.equal(g.c.State.apprenticeDailyTotal(),0);
-  g.c.State.load();assert.equal(g.c.State.claimApprenticeExp().ok,false);assert.equal(g.c.State.state().exp,28);assertBalanced(g.markup);
+test('日供系数：保底 10%、三个满级徒弟正好 50%、中间线性递增', () => {
+  const g = setup();
+  const R = g.c.State.apprenticeTributeRatio;
+  assert.equal(R(0), 0.10, '没徒弟也是保底 10%');
+  assert.ok(Math.abs(R(1) - 0.10) < 0.01, '一个 1 级徒弟 ≈ 10% 保底：' + R(1));
+  assert.ok(Math.abs(R(210) - 0.50) < 1e-9, '三个满级（Σ=210）正好 50%：' + R(210));
+  assert.equal(R(999), 0.50, '封顶 50%');
+  // 线性：等距的等级之和给出等距的系数
+  assert.ok(Math.abs((R(40) - R(20)) - (R(200) - R(180))) < 1e-9, '线性递增');
+
+  // 三个满级徒弟：合计正好是我昨日收益的 50%（份额用累计取整，不被 floor 蚕食）
+  const s = g.c.State.state();
+  s.level = 20; s.exp = 0; s.goldPoint = 0;
+  g.c.State.addPrentice({ name: '满级甲', level: 70 });
+  g.c.State.addPrentice({ name: '满级乙', level: 70 });
+  g.c.State.addPrentice({ name: '满级丙', level: 70 });
+  g.c.State.gainExp(1000);
+  g.c.State.addGold(400);
+  g.advance(86400000);
+  const total = g.c.State.apprenticeDailyTotal();
+  assert.equal(total.exp, 500, '三个满级徒弟合计 50% 经验');
+  assert.equal(total.gold, 200, '金松果同样是 50%');
+  g.c.ClassicExtras.master('apprentice');
+  assert.match(g.page().html, /等级之和/);
+  const before = s.exp;
+  g.click('master-claim');
+  assert.equal(s.exp, before + 500, '点击领取真的发出 500 经验');
+  assert.equal(g.c.State.claimApprenticeExp().ok, false, '当天只能领一次');
+  assertBalanced(g.markup);
 });
 
-test('本地昨日日贡账目持久稳定，只有入门后的活动，读页面不重抽且不减徒弟经验',()=>{
-  const g=setup(),s=g.c.State.state();s.level=20;g.c.State.addPrentice({name:'下午入门',level:20});
-  const p=s.prentices[0];p.exp=123;
-  assert.equal(g.c.State.apprenticeDailyStatus(p).newApprentice,true);assert.equal(g.c.State.claimApprenticeExp().ok,false);
-  g.advance(86400000);const daily=g.c.State.apprenticeDailyStatus(p);
-  assert.ok(daily.activities.length>0&&daily.activities.length<=8);assert.equal(daily.date,'2026-09-23');assert.ok(daily.exp>0);
-  assert.ok(daily.activities.every(a=>a.at>=p.joinedAt));assert.ok(daily.activities.every(a=>new g.c.Date(a.at).getHours()>=15));
-  const snapshot=JSON.parse(JSON.stringify(daily));g.math.random=()=>.99999;
-  assert.deepEqual(JSON.parse(JSON.stringify(g.c.State.apprenticeDailyStatus(p))),snapshot);
-  g.c.State.save();g.c.State.load();const loaded=g.c.State.state().prentices[0];
-  assert.deepEqual(JSON.parse(JSON.stringify(g.c.State.apprenticeDailyStatus(loaded))),snapshot);
-  assert.equal(g.c.State.claimApprenticeExp().total,daily.exp);assert.equal(loaded.exp,123);
-  const claimedExp=g.c.State.state().exp;assert.equal(g.c.State.claimApprenticeExp().ok,false);assert.equal(g.c.State.state().exp,claimedExp);
-  g.advance(86400000);const next=g.c.State.apprenticeDailyStatus(loaded);assert.equal(next.date,'2026-09-24');assert.equal(next.claimed,false);
-  assert.equal(loaded.tributeLedger.length,2);
+test('日供只认我自己的昨日收益：读档稳定、不重抽，也不减少徒弟经验', () => {
+  const g = setup(), s = g.c.State.state(); s.level = 20; s.exp = 0; s.goldPoint = 0;
+  g.c.State.addPrentice({ name: '下午入门', level: 20 });
+  const p = s.prentices[0]; p.exp = 123;
+  assert.equal(g.c.State.apprenticeDailyStatus(p).newApprentice, true, '入门当天没有「昨天」');
+  assert.equal(g.c.State.claimApprenticeExp().ok, false);
+  assert.equal(g.c.State.apprenticeDailyTotal().exp, 0);
+
+  const earnDay = g.c.State.localDate();
+  g.c.State.gainExp(500); g.c.State.addGold(100);
+  g.advance(86400000);                       // 次日结算
+
+  const daily = g.c.State.apprenticeDailyStatus(p);
+  assert.equal(daily.date, earnDay, '结算的是前一天');
+  assert.equal(daily.mine.exp, 500, '读的是我昨天的收益');
+  assert.equal(daily.mine.gold, 100);
+  assert.equal(daily.ratio, g.c.State.apprenticeTributeRatio(20));
+  assert.ok(daily.exp > 0 && daily.gold > 0);
+  // 反复读不重抽
+  const snapshot = JSON.parse(JSON.stringify(daily));
+  assert.deepEqual(JSON.parse(JSON.stringify(g.c.State.apprenticeDailyStatus(p))), snapshot);
+  g.c.State.save(); g.c.State.load();
+  const loaded = g.c.State.state().prentices[0];
+  assert.deepEqual(JSON.parse(JSON.stringify(g.c.State.apprenticeDailyStatus(loaded))), snapshot, '读档后日供不变');
+  assert.equal(g.c.State.claimApprenticeExp().total, daily.exp);
+  assert.equal(loaded.exp, 123, '领日供不减徒弟自己的经验');
+  assert.equal(g.c.State.claimApprenticeExp().ok, false, '当天只能领一次');
+  // 新的一天：今天没赚东西，所以昨天的日供是 0
+  g.advance(86400000);
+  const next = g.c.State.apprenticeDailyStatus(loaded);
+  assert.equal(next.claimed, false);
+  assert.equal(next.exp, 0, '昨天没赚到就没有日供');
+  assert.equal(g.c.State.claimApprenticeExp().ok, false);
 });
 
-test('深夜新收徒不会补算入门前活动，缺日期旧档从迁移日开始且保留当日已领取标记',()=>{
-  const g=setup();g.advance((8*60+59)*60000);g.c.State.addPrentice({name:'深夜',level:20});
-  g.advance(120000);assert.equal(g.c.State.apprenticeDailyTotal(),0);assert.equal(g.c.State.claimApprenticeExp().ok,false);
-  assert.equal(g.c.State.apprenticeDailyStatus(g.c.State.state().prentices[0]).activities.length,0);
-  g.memory.set(g.c.State.saveKey,JSON.stringify({level:20,prentices:[{name:'旧徒弟',level:20,lastExpDate:g.c.State.localDate()}]}));
-  g.c.State.load();const p=g.c.State.state().prentices[0];assert.equal(p.since,g.c.State.localDate());assert.equal(g.c.State.claimApprenticeExp().ok,false);
-  g.advance(86400000);assert.ok(g.c.State.apprenticeDailyStatus(p).exp>0);assert.equal(g.c.State.claimApprenticeExp().ok,true);
+test('新收徒当天领不了、次日才能领；缺日期旧档从迁移日开始并保留当日已领取标记', () => {
+  const g = setup();
+  g.advance((8 * 60 + 59) * 60000);           // 23:59 收徒
+  g.c.State.addPrentice({ name: '深夜', level: 20 });
+  g.advance(120000);                          // 跨过零点
+  assert.equal(g.c.State.apprenticeDailyTotal().exp, 0, '刚收徒当天没有可领的日供');
+  assert.equal(g.c.State.claimApprenticeExp().ok, false, '收徒当天领不了');
+  // 日供按「天」结算：跨过零点后的这一天就是它第一个完整贡献日，攒下我的收益后次日可领
+  g.c.State.gainExp(600); g.c.State.addGold(150);
+  g.advance(86400000);
+  assert.ok(g.c.State.apprenticeDailyStatus(g.c.State.state().prentices[0]).exp > 0, '门下的收益日才有日供');
+  assert.equal(g.c.State.claimApprenticeExp().ok, true, '次日领取前一天的日供');
+  // 缺 since 的旧档：迁移到当天，当天领不了，且保留当日已领取标记
+  g.memory.set(g.c.State.saveKey, JSON.stringify({ level: 20, prentices: [{ name: '旧徒弟', level: 20, lastExpDate: g.c.State.localDate() }] }));
+  g.c.State.load();
+  const p = g.c.State.state().prentices[0];
+  assert.equal(p.since, g.c.State.localDate(), '缺日期旧档从迁移日开始');
+  assert.equal(p.lastExpDate, g.c.State.localDate(), '保留当日已领取标记');
+  assert.equal(g.c.State.claimApprenticeExp().ok, false, '迁移当天领不了');
 });
 
 test('收徒页面重入不再次收费，播放错误退款一次且迟到胜负回调不能收徒',()=>{

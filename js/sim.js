@@ -20,7 +20,8 @@
   // The client receives server-generated battles; no original trigger threshold
   // survives in its dictionary. Keep these reconstruction choices explicit.
   const RULES = Object.freeze({
-    masterHpRatio: 0.35, masterChance: 35,
+    // 师父驾到：生命不高于 50% 时开始尝试救场（原 35%），每场至多一次
+    masterHpRatio: 0.50, masterChance: 35,
     /* 出手时的「二次使用」概率（%）。做法是两层池子：本场没用过的武器/技能优先，
      * 只有这个概率才回头用旧的那把/那个，所以「用过的」实际出场率被明显压低。
      * 来点松果（技能 17）解除「每场一次」限制后，二次使用概率单独取最低档，

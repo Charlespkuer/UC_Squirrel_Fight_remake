@@ -161,7 +161,8 @@
     return '<img alt="" '+(fromReference?'class="reference-art" ':'')+'src="'+(fromReference?'images/classic/reference-cards/'+kind+'-'+id+'.png':atlasIcon(kind,id,locked))+'">';
   }
   function statsHtml(stats, cls) {
-    return '<div class="' + (cls || 'stat-strip') + '">' + [['力','power'],['敏','agility'],['速','speed'],['命','hp']].map(([s,k]) => '<div class="stat-pill"><b>' + s + '</b>' + esc(stats[k]) + '</div>').join('') + '</div>';
+    // 数字单独包一层 .stat-value：状态页的四项数字要能单独往上微调，不带着圆形字徽一起动
+    return '<div class="' + (cls || 'stat-strip') + '">' + [['力','power'],['敏','agility'],['速','speed'],['命','hp']].map(([s,k]) => '<div class="stat-pill"><b>' + s + '</b><span class="stat-value">' + esc(stats[k]) + '</span></div>').join('') + '</div>';
   }
   // 升级奖励面板用的属性图标：直接复用已按颜色分好的道具图标（3 力 / 4 敏 / 5 速 / 7 经验）。
   // 原版没有单独的「生命」图标，用同风格的圆形字徽补上。
@@ -412,7 +413,9 @@
     const S=State.state(),st=State.totalStats(),fights=S.dailyWins+S.dailyFails;
     const p=page('status','status','<canvas class="status-character" width="497" height="341" aria-label="我的松鼠"></canvas><div class="status-right"><div class="status-exp"><span class="home-exp-label">Exp</span><div class="exp-meter"><i style="width:'+Math.min(100,100*S.exp/GData.nextExp(S.level))+'%"></i><span>'+S.exp+'/'+GData.nextExp(S.level)+'</span></div></div><dl class="status-lines"><dt>今日胜率：</dt><dd>'+(fights?Math.round(S.dailyWins/fights*100):0)+'%</dd><dt>战斗场次：</dt><dd>'+(S.allWins+S.allFails)+'</dd></dl><div class="status-buttons">'+btn('更换装备','gears','gold')+btn('装备融合','merge','gold')+'</div></div>'+statsHtml(st));
     portrait($('.status-character',p));
-    $('.page-footer',p).insertAdjacentHTML('beforeend','<button class="status-fusion-link" data-action="merge" aria-label="装备融合：三件相同装备合成更高品质"><span class="status-fusion-icon" aria-hidden="true"><i class="status-fusion-glyph">⚒</i></span><span class="status-fusion-text">装备融合</span></button>');
+    $('.page-footer',p).insertAdjacentHTML('beforeend',
+      '<button class="status-sell-link" data-action="gear-sell" aria-label="装备出售：按品质回收背包里的装备"><span class="status-sell-icon" aria-hidden="true"><i class="status-sell-glyph">$</i></span><span class="status-sell-text">装备出售</span></button>' +
+      '<button class="status-fusion-link" data-action="merge" aria-label="装备融合：三件相同装备合成更高品质"><span class="status-fusion-icon" aria-hidden="true"><i class="status-fusion-glyph">⚒</i></span><span class="status-fusion-text">装备融合</span></button>');
     bind(p,{...actions,merge:openMerge,home});
   }
   function allItems(kind) {
@@ -439,7 +442,7 @@
     const isW=kind==='weapon',S=State.state(),base=(isW?weaponsMap:skillsMap).getValue(id);
     const it=(isW?State.myWeapons():State.mySkills()).find(x=>x.id===id);
     const up=it?State.upgradeInfo(kind,id):null;
-    const skillDescriptions={6:'危机时刻装死避开攻击，成功后立即获得行动机会。装死不能升级。',7:'每场抵挡一次伤害，1级抵消20%，每级增加5%。装备附加能力可增加抵挡次数。',11:'增加原有闪避率5%，每级增加2%；按原有闪避率的比例计算。',13:'生命不高于35%时，每次出手有35%概率召唤师傅，每场最多一次。恢复师傅等级×4生命，下次攻击必中。',14:'按裸力量、敏捷、速度各增加1%，最少1点，每级增加1%；每场一次，随后立即行动。'};
+    const skillDescriptions={6:'危机时刻装死避开攻击，成功后立即获得行动机会。装死不能升级。',7:'每场抵挡一次伤害，1级抵消20%，每级增加5%。装备附加能力可增加抵挡次数。',11:'增加原有闪避率5%，每级增加2%；按原有闪避率的比例计算。',13:'生命不高于50%时，每次出手有35%概率召唤师傅，每场最多一次。恢复师傅等级×4生命，下次攻击必中。',14:'按裸力量、敏捷、速度各增加1%，最少1点，每级增加1%；每场一次，随后立即行动。'};
     const description=(!isW&&skillDescriptions[id])||base.remark||'';
     const locked=!it;
     const unupgradeable=!isW && (base.type==='被动' && up?.max || id===13);
@@ -643,7 +646,8 @@
     const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
     // 兑换页不再挂「金杯商店 / 每日抽奖」（两个入口都在商店页）；商店页左下「每日抽奖」、右下「金杯商店」，
     // 都用默认尺寸的按钮（比原来的 small 明显大一档）。
-    const bagFooter=shop?{left:btn('每日抽奖','lottery','gold'),right:btn('金杯商店','rank-shop','gold')}:{};
+    // 第 2 项：这两个入口缩小到和「装备融合」入口同一档（.uc-button.entry-pill）
+    const bagFooter=shop?{left:btn('每日抽奖','lottery','gold entry-pill'),right:btn('金杯商店','rank-shop','gold entry-pill')}:{};
     const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,Object.assign({cls:'classic-bag-board',counter:(bagPage+1)+'/'+total},bagFooter));
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
     $('[data-action="prop-action"]',p)?.addEventListener('click',()=>openProp(selectedProp,shop));
@@ -955,6 +959,55 @@
     $$('[data-gear]',p).forEach(b=>b.onclick=()=>openGear(b.dataset.gear));
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openGears(gearPage-1));
     $('[data-action="next"]',p)?.addEventListener('click',()=>openGears(gearPage+1));
+  }
+  /* 状态页左下角的「装备出售」（第 1 项）：把卖装备从「更换装备」里拆出来，
+   * 一屏列出背包里的装备和各自的回收价区间，点一下就能卖，不用先进装备详情。 */
+  let gearSellPage = 0;
+  const GEAR_SELL_PER = 6;   // 3 行 × 2 列，正好铺满板面，不用滚动
+  const QUALITY_LABEL = ['普通', '优秀', '杰出', '卓越', '传说'];
+  function openGearSell(pg) {
+    gearSellPage = Math.max(0, typeof pg === 'number' ? pg : 0);
+    const gears = State.myGears(), S = State.state();
+    const total = Math.max(1, Math.ceil(gears.length / GEAR_SELL_PER));
+    gearSellPage = Math.min(gearSellPage, total - 1);
+    const shown = gears.slice(gearSellPage * GEAR_SELL_PER, gearSellPage * GEAR_SELL_PER + GEAR_SELL_PER);
+    const card = (g) => {
+      const r = State.gearSellRange(g.quality);
+      return '<button class="gear-sell-card q' + g.quality + '" data-sell="' + esc(g.key) + '" aria-label="出售' + esc(g.name) + '">' +
+        '<span class="item-icon">' + gearImg(g) + (g.used ? '<span class="equipped-check">✓</span>' : '') + '</span>' +
+        '<span class="gear-sell-info"><b class="q' + g.quality + '">' + esc(g.name) + '</b>' +
+        '<span class="gear-sell-price">' + r[0] + '~' + r[1] + ' 金松果</span>' +
+        '<span class="gear-sell-meta">' + QUALITY_LABEL[g.quality] + (g.used ? ' · 已装备' : '') + '</span></span></button>';
+    };
+    const head = '<div class="gear-sell-head">' +
+      '<span>背包里共 <b>' + gears.length + '</b> 件装备（容量 ' + gears.length + '/' + State.gearCapacity() + '）</span>' +
+      '<span>当前金松果 <b class="gold-text">' + S.goldPoint + '</b></span>' +
+      '<span class="gear-sell-legend">回收价：白 55-60 · 绿 60-65 · 蓝 65-70 · 紫 70-75 · 橙 75-80</span></div>';
+    const body = gears.length
+      ? '<div class="gear-sell-grid">' + shown.map(card).join('') + '</div>'
+      : '<div class="empty-state">还没有装备<br><span class="small-label">挑战关卡获得碎片，10 个碎片可以合成一件装备</span></div>';
+    const content = head + body +
+      (gearSellPage ? '<div class="page-arrow prev">' + btn('‹', 'prev', 'arrow') + '</div>' : '') +
+      (gearSellPage < total - 1 ? '<div class="page-arrow">' + btn('›', 'next', 'arrow') + '</div>' : '');
+    const p = page('status', 'gear-sell', content, { cls: 'gear-sell-board', counter: (gearSellPage + 1) + '/' + total });
+    $('[data-action="home"]', p).textContent = '返回';
+    $('[data-action="home"]', p).onclick = openStatus;
+    $$('[data-sell]', p).forEach((b) => { b.onclick = () => askSellGear(b.dataset.sell); });
+    $('[data-action="prev"]', p)?.addEventListener('click', () => openGearSell(gearSellPage - 1));
+    $('[data-action="next"]', p)?.addEventListener('click', () => openGearSell(gearSellPage + 1));
+  }
+  /** 点一件装备 → 确认 → 按品质区间随机成交（和「更换装备」里的出售是同一套逻辑）。 */
+  function askSellGear(key) {
+    const g = State.myGears().find((x) => x.key === key);
+    if (!g) { openGearSell(gearSellPage); return; }
+    const r = State.gearSellRange(g.quality);
+    modal('出售装备', '<p>确定以 <b>' + r[0] + '~' + r[1] + '</b> 金松果出售【' + esc(g.name) + '】吗？</p>' +
+      (g.used ? '<p class="small-label">这件装备正穿戴在身上。</p>' : ''),
+      [{ label: '出售', cls: 'gold', run: () => {
+          const got = State.sellGear(key);
+          toast('卖出【' + g.name + '】，获得 ' + got + ' 金松果');
+          openGearSell(gearSellPage);
+        } }, { label: '返回', cls: 'muted' }], { small: true });
   }
   function openGear(key) {
     const g=State.myGears().find(x=>x.key===key);if(!g)return;
@@ -1485,7 +1538,7 @@
     return p;
   }
   function fallback(key){if(window.ClassicExtras && window.ClassicExtras[key])window.ClassicExtras[key]();else legacy.runAction(key);}
-  const actions={home,exchange:()=>openBag('exchange'),status:openStatus,weapons:()=>openCatalog('weapon'),skills:()=>openCatalog('skill'),challenge:()=>openChallenge(),battle:()=>openChallenge(),stages:openStages,bag:()=>openBag(),shop:()=>openBag(true),gears:()=>openGears(),messages:()=>openMessages(),ranklog:()=>openMessages('ranklog'),revenge:()=>openMessages('revenge'),board:openBoard,chat:openChat,friends:openFriends,daily:openDaily,system:openSystem,village:openVillage,help:openHelp,arena:()=>fallback('arena'),rank:()=>fallback('rank'),lottery:()=>fallback('lottery'),master:()=>fallback('master'),toplist:()=>fallback('toplist'),vip:()=>fallback('vip')};
+  const actions={home,exchange:()=>openBag('exchange'),status:openStatus,weapons:()=>openCatalog('weapon'),skills:()=>openCatalog('skill'),challenge:()=>openChallenge(),battle:()=>openChallenge(),stages:openStages,bag:()=>openBag(),shop:()=>openBag(true),gears:()=>openGears(),messages:()=>openMessages(),ranklog:()=>openMessages('ranklog'),revenge:()=>openMessages('revenge'),board:openBoard,chat:openChat,'gear-sell':()=>openGearSell(0),friends:openFriends,daily:openDaily,system:openSystem,village:openVillage,help:openHelp,arena:()=>fallback('arena'),rank:()=>fallback('rank'),lottery:()=>fallback('lottery'),master:()=>fallback('master'),toplist:()=>fallback('toplist'),vip:()=>fallback('vip')};
   function runAction(key){if(actions[key])actions[key]();}
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape'){

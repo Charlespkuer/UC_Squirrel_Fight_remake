@@ -102,6 +102,11 @@
       }
       return out;
     })();
+    // 每日收益流水（徒弟日供）：只保留最近 7 天、日期合法、非负整数
+    next.earnHistory = (Array.isArray(raw.earnHistory) ? raw.earnHistory : [])
+      .filter((d) => object(d) && validLocalDate(d.date))
+      .slice(-EARN_DAYS)
+      .map((d) => ({ date: d.date, exp: Math.max(0, integer(d.exp, 0)), gold: Math.max(0, integer(d.gold, 0)) }));
     // 自由属性点撤回栈（第 2 项）：只保留合法的四项键
     next.pointUndo = (Array.isArray(raw.pointUndo) ? raw.pointUndo : [])
       .filter((key) => STAT_KEYS.includes(key)).slice(-500);
@@ -204,7 +209,6 @@
         joinedAt: Number(p.joinedAt) > 0 ? Number(p.joinedAt) : localDateTime(validLocalDate(p.since) ? p.since : localDate(), 0, 0),
         lastExpDate: typeof p.lastExpDate === 'string' ? p.lastExpDate : '',
         tributeClaimedDate: validLocalDate(p.tributeClaimedDate) ? p.tributeClaimedDate : '',
-        tributeLedger: normalizeTributeLedger(p.tributeLedger),
       }));
     // Reload cancels an unfinished local recruitment and returns its entry fee.
     if (object(next.recruitChallenge) && next.recruitChallenge.fee === 10 && typeof next.recruitChallenge.token === 'string') next.goldPoint += 10;
@@ -370,7 +374,7 @@
       weapons: Array.isArray(foe.weapons) ? foe.weapons.slice() : [],
       skills: Array.isArray(foe.skills) ? foe.skills.slice() : [],
       since: localDate(),
-      joinedAt: Date.now(), tributeClaimedDate: '', tributeLedger: [],
+      joinedAt: Date.now(), tributeClaimedDate: '',
     };
     if (!row.skills.some(skill => Number(String(skill).split(':')[0]) === MASTER_SKILL_ID)) row.skills.push(MASTER_SKILL_ID + ':1');
     S.prentices.push(row);
@@ -390,71 +394,90 @@
     const date = new Date(Date.now()); date.setDate(date.getDate()-1);
     return date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
   }
-  const TRIBUTE_KINDS = ['challenge', 'challenged', 'stage', 'arena', 'pickup', 'lottery'];
-  function normalizeTributeLedger(ledger) {
-    return (Array.isArray(ledger) ? ledger : []).filter(day => object(day) && validLocalDate(day.date) && Array.isArray(day.activities)).slice(-7).map(day => ({
-      date: day.date, simulated: day.simulated === true,
-      activities: day.activities.filter(a => object(a) && TRIBUTE_KINDS.includes(a.kind)).slice(0,64).map(a => ({
-        kind: a.kind, exp: integer(a.exp,0), entry: a.entry === 'energy' ? 'energy' : a.entry === 'ticket' ? 'ticket' : '',
-        at: integer(a.at,0),
-      })),
-    }));
+  /* ---------- 徒弟日供（v2：按徒弟等级之和线性给系数） ----------
+   * 系数随「所有徒弟等级之和」线性增长：保底 10%，Σ=210（三个满级 70 级徒弟）封顶 50%，
+   * 中间线性插值 —— ratio = 10% + Σ × (50%−10%) / 210。
+   * 系数乘的是**我自己昨天**赚到的总经验与金松果（earnOn(昨天)），次日领取。
+   * 多个徒弟按各自等级占「等级之和」的份额分这份贡品，合计正好是 ratio × 昨日收益。 */
+  const TRIBUTE_RATIO_MIN = 0.10;
+  const TRIBUTE_RATIO_MAX = 0.50;
+  const TRIBUTE_LEVEL_SUM_FULL = 210;        // 3 个满级徒弟：3 × 70
+  function apprenticeLevelSum(list) {
+    return (Array.isArray(list) ? list : []).reduce((sum, p) => sum + Math.max(1, integer(p && p.level, 1)), 0);
   }
-  /** Original ratios: challenge/passive challenge/stage 10%, energy-entry XP arena 5%.
-   * Pickup, lottery and ticket-entry arena XP are deliberately excluded. */
-  function apprenticeTribute(activities) {
-    let tenths = 0, twentieths = 0;
-    for (const a of Array.isArray(activities) ? activities : []) {
-      const exp = integer(a.exp,0);
-      if (['challenge','challenged','stage'].includes(a.kind)) tenths += exp;
-      else if (a.kind === 'arena' && a.entry === 'energy') twentieths += exp;
-    }
-    return Math.floor((tenths * 2 + twentieths) / 20);
+  function apprenticeTributeRatio(sum) {
+    const span = (TRIBUTE_RATIO_MAX - TRIBUTE_RATIO_MIN) / TRIBUTE_LEVEL_SUM_FULL;
+    const raw = TRIBUTE_RATIO_MIN + Math.max(0, integer(sum, 0)) * span;
+    return Math.min(TRIBUTE_RATIO_MAX, Math.max(TRIBUTE_RATIO_MIN, raw));
   }
-  function simulateApprenticeDay(p, date) {
-    let seed = 2166136261;
-    for (const ch of p.name+'|'+p.since+'|'+date) seed = Math.imul(seed ^ ch.charCodeAt(0),16777619) >>> 0;
-    const random = () => { seed = (Math.imul(seed,1664525)+1013904223) >>> 0; return seed / 4294967296; };
-    const joinedAt = Number(p.joinedAt) || localDateTime(p.since,0,0), activities = [];
-    const add = (kind,exp,hour,minute,entry) => { const at = localDateTime(date,hour,minute); if (at >= joinedAt) activities.push({kind,exp,at,entry:entry||''}); };
-    // A finite offline timetable, not a claim about original server activity volumes.
-    add('challenge',10+Math.floor(random()*10),9,10);
-    add('challenge',10+Math.floor(random()*10),12,30);
-    add('challenged',4+Math.floor(random()*4),15,10);
-    add('challenge',10+Math.floor(random()*10),18,40);
-    if (p.level >= 11) add('arena',random()<0.5?75:150,19,20,random()<0.75?'energy':'ticket');
-    if (p.level >= 10) add('stage',stageReward(Math.min(18,Math.max(1,Math.floor((p.level-7)/3)))).exp,20,10);
-    add('pickup',5,21,0);
-    if (random()<0.5) add('lottery',50,22,0);
-    return {date,simulated:true,activities};
+  /** 总日供 + 按等级份额的分配表。用累计取整，保证各徒弟份额之和正好等于总量（不被 floor 蚕食）。 */
+  function apprenticeTributeTable(list) {
+    const rows = Array.isArray(list) ? list : [];
+    const date = yesterdayDate();
+    const mine = earnOn(date);
+    const ratio = apprenticeTributeRatio(apprenticeLevelSum(rows));
+    const totalExp = Math.floor(mine.exp * ratio), totalGold = Math.floor(mine.gold * ratio);
+    const sum = apprenticeLevelSum(rows) || 1;
+    const shares = [];
+    let acc = 0, prevExp = 0, prevGold = 0;
+    rows.forEach((p, i) => {
+      acc += Math.max(1, integer(p && p.level, 1)) / sum;
+      const last = i === rows.length - 1;
+      const cumExp = last ? totalExp : Math.round(totalExp * acc);
+      const cumGold = last ? totalGold : Math.round(totalGold * acc);
+      shares.push({ exp: Math.max(0, cumExp - prevExp), gold: Math.max(0, cumGold - prevGold) });
+      prevExp = cumExp; prevGold = cumGold;
+    });
+    return { date, mine, ratio, totalExp, totalGold, shares };
   }
   function apprenticeDailyStatus(apprentice) {
-    const p = object(apprentice) ? apprentice : null, today = localDate(), date = yesterdayDate();
-    if (!p) return {date,exp:0,claimable:false,claimed:false,activities:[],simulated:true};
-    if (!validLocalDate(p.since)) { p.since=today; p.joinedAt=Date.now(); save(); }
-    const claimed = p.lastExpDate===today || p.tributeClaimedDate===date;
-    if (p.since>date) return {date,exp:0,claimable:false,claimed,activities:[],simulated:true,newApprentice:true};
-    p.tributeLedger = normalizeTributeLedger(p.tributeLedger);
-    let day = p.tributeLedger.find(day=>day.date===date);
-    if (!day) {
-      day=simulateApprenticeDay(p,date);p.tributeLedger.push(day);p.tributeLedger=p.tributeLedger.slice(-7);save();
-    }
-    const exp=apprenticeTribute(day.activities);
-    return {date,exp,claimable:!claimed&&exp>0,claimed,activities:clone(day.activities),simulated:day.simulated};
+    const p = object(apprentice) ? apprentice : null, today = localDate();
+    const table = apprenticeTributeTable(S.prentices || []);
+    const blank = { date: table.date, exp: 0, gold: 0, ratio: table.ratio, weight: 0, mine: table.mine,
+      claimable: false, claimed: false, newApprentice: false };
+    if (!p) return blank;
+    if (!validLocalDate(p.since)) { p.since = today; p.joinedAt = Date.now(); save(); }
+    const claimed = p.lastExpDate === today || p.tributeClaimedDate === table.date;
+    // 今天才进门的徒弟没有「昨天」，等次日结算
+    if (p.since > table.date) return Object.assign({}, blank, { claimed, newApprentice: true });
+    const sum = apprenticeLevelSum(S.prentices || []) || 1;
+    const weight = Math.max(1, integer(p.level, 1)) / sum;
+    const idx = (S.prentices || []).indexOf(p);
+    const share = idx >= 0 ? table.shares[idx] : { exp: 0, gold: 0 };
+    return { date: table.date, exp: share.exp, gold: share.gold, ratio: table.ratio, weight, mine: table.mine,
+      claimable: !claimed && (share.exp > 0 || share.gold > 0), claimed, newApprentice: false };
   }
   function apprenticeDailyExp(apprentice) { return apprenticeDailyStatus(apprentice).exp; }
+  function apprenticeDailyGold(apprentice) { return apprenticeDailyStatus(apprentice).gold; }
+  /** 所有徒弟今天还能领的日供合计（经验 + 金松果）。 */
   function apprenticeDailyTotal() {
-    return (S.prentices||[]).reduce((sum,p)=>{const daily=apprenticeDailyStatus(p);return sum+(daily.claimable?daily.exp:0);},0);
+    const out = { exp: 0, gold: 0 };
+    for (const p of S.prentices || []) {
+      const daily = apprenticeDailyStatus(p);
+      if (!daily.claimable) continue;
+      out.exp += daily.exp; out.gold += daily.gold;
+    }
+    return out;
   }
   function claimApprenticeExp() {
-    const today=localDate();let total=0,count=0;
-    for (const p of S.prentices||[]) {
-      const daily=apprenticeDailyStatus(p);if(!daily.claimable)continue;
-      p.lastExpDate=today;p.tributeClaimedDate=daily.date;total+=daily.exp;count++;
+    const today = localDate();
+    let totalExp = 0, totalGold = 0, count = 0;
+    for (const p of S.prentices || []) {
+      const daily = apprenticeDailyStatus(p);
+      if (!daily.claimable) continue;
+      p.lastExpDate = today; p.tributeClaimedDate = daily.date;
+      totalExp += daily.exp; totalGold += daily.gold; count++;
     }
-    if (!count) return {ok:false,msg:'暂无可领取的昨日日贡，新收徒需等待次日结算。'};
-    const ups=gainExp(total);save();
-    return {ok:true,total,count,ups,msg:count+'个徒弟昨日战斗贡献了'+total+'经验'};
+    if (!count) return { ok: false, msg: '暂无可领取的昨日日供，新收徒需等待次日结算。' };
+    // 日供发下来的资源不再计入「我的当日收益」，否则会滚雪球
+    const ups = totalExp > 0 ? gainExp(totalExp, { noTrack: true }) : [];
+    if (totalGold > 0) addGold(totalGold, { count: false });
+    save();
+    const parts = [];
+    if (totalExp > 0) parts.push('经验 +' + totalExp);
+    if (totalGold > 0) parts.push('金松果 +' + totalGold);
+    return { ok: true, total: totalExp, gold: totalGold, count, ups,
+      msg: count + ' 个徒弟昨日日供：' + (parts.join('　') || '无') };
   }
   let recruitSequence=0;
   function beginRecruitChallenge(candidate) {
@@ -985,7 +1008,7 @@
     if (i < 0) return 0;
     const gold = gearSellPrice(gearQuality(S.gears[i]));
     S.gears.splice(i, 1);
-    S.goldPoint += gold; save();
+    addGold(gold); save();
     return gold;
   }
   /* 背包里可以直接卖的道具（装备走 sellGear）：默认按**字典价格的一半**回收
@@ -1024,7 +1047,7 @@
     S.props[id] = held - n;
     if (S.props[id] <= 0) delete S.props[id];
     const gold = price * n;
-    S.goldPoint += gold;
+    addGold(gold);
     bumpDaily('sell', n);   // 每日任务：卖出 N 个道具
     save();
     const item = propMap.getValue(id);
@@ -1322,7 +1345,7 @@
         msg = `力量+${param.power} 敏捷+${param.agility} 速度+${param.speed}`;
         break;
       }
-      case 38: { const g = 20 + Math.floor(Math.random() * 80); S.goldPoint += g; msg = `打开红包，获得${g}金松果！`; break; }
+      case 38: { const g = 20 + Math.floor(Math.random() * 80); addGold(g); msg = `打开红包，获得${g}金松果！`; break; }
       case 47:   // 天使果实：随机三选一（学会一个）
       case 48: { // 恶魔果实：随机三选一（遗忘一个）
         // 这里只回传候选，由界面弹窗选完再走 applyFruitChoice，所以提前返回、不消耗果实
@@ -1344,7 +1367,7 @@
         });
         const got = [];
         for (const { id: pid, count: num } of prizes) {
-          if (pid === 8) { S.goldPoint += num; got.push(`金松果x${num}`); }
+          if (pid === 8) { addGold(num); got.push(`金松果x${num}`); }
           else { S.props[pid] = (S.props[pid] || 0) + num; const pp = propMap.getValue(pid); got.push((pp ? pp.name : pid) + 'x' + num); }
         }
         msg = '获得：' + got.join('、');
@@ -1585,13 +1608,48 @@
     return { ok: true, added, remaining: pendingPoints() };
   }
 
+  // ---------- 每日收益流水（徒弟日供的数据源） ----------
+  /* 记下「今天」自己赚到多少经验与金松果，徒弟日供按**昨天**这条流水结算。
+   * 经验只有 gainExp 一个入口、金松果统一走 addGold()，所以两个钩子就能覆盖全部真实收益；
+   * 退款、读档恢复与调试发放用 addGold(n,{count:false}) 明确排除，不算进收益。 */
+  const EARN_DAYS = 7;
+  function trackEarn(kind, n) {
+    n = Math.round(Number(n) || 0);
+    if (!S || n <= 0) return;
+    if (!Array.isArray(S.earnHistory)) S.earnHistory = [];
+    const date = localDate();
+    let row = S.earnHistory.find((d) => object(d) && d.date === date);
+    if (!row) {
+      row = { date, exp: 0, gold: 0 };
+      S.earnHistory.push(row);
+      S.earnHistory = S.earnHistory.slice(-EARN_DAYS);
+    }
+    row[kind] = Math.max(0, integer(row[kind], 0) + n);
+  }
+  /** 某一天自己赚到的经验与金松果（徒弟日供读昨天那一天）。 */
+  function earnOn(date) {
+    const row = (Array.isArray(S.earnHistory) ? S.earnHistory : []).find((d) => object(d) && d.date === date);
+    return { exp: row ? Math.max(0, integer(row.exp, 0)) : 0, gold: row ? Math.max(0, integer(row.gold, 0)) : 0 };
+  }
+  /** 给玩家加金松果并计入当日收益流水；opts.count === false 表示这不是「赚到的」。 */
+  function addGold(n, opts) {
+    n = Math.round(Number(n) || 0);
+    if (!S || !n) return 0;
+    S.goldPoint += n;
+    if (n > 0 && !(opts && opts.count === false)) trackEarn('gold', n);
+    return n;
+  }
+
   // ---------- 经验 / 升级 ----------
   // 返回升级信息数组（可能连升）
-  function gainExp(amount) {
+  function gainExp(amount, opts) {
     const ups = [];
     amount = Number(amount);
     if (!Number.isFinite(amount) || amount <= 0) return ups;
-    S.exp += Math.round(amount);
+    const gained = Math.round(amount);
+    S.exp += gained;
+    // 日供本身发下来的经验不再计入当日收益，否则「领得多→明天更多」会滚雪球
+    if (!(opts && opts.noTrack)) trackEarn('exp', gained);
     // 满级 70 级封顶：到了 70 级就不再升级（经验继续累积，等以后开放等级）
     while (S.level < MAX_PLAYER_LEVEL && S.exp >= GData.nextExp(S.level)) {
       S.exp -= GData.nextExp(S.level);
@@ -1620,7 +1678,7 @@
       const gained = null;
       const choices = GData.WS_LEVELS.includes(S.level) ? wsChoices(3) : [];
       if (choices.length) S.wsPicks.push(choices);
-      if (S.level === 5 && !S.reborn) S.goldPoint += 50;
+      if (S.level === 5 && !S.reborn) addGold(50);
       // 升级礼包：卷轴 / 药剂 / 丹药，逢 5 级与属性书等级再加一份大礼包
       const gifts = (GData.levelGift ? GData.levelGift(S.level) : []).map((g) => {
         const item = propMap.getValue(g.id);
@@ -1872,7 +1930,7 @@
     const useProps = opts.useProps !== false;
     const expMul = 1 + (useProps ? expBoostPct() : 0) / 100;
     const gold = win ? 3 + Math.floor(Math.random() * 5) : (Math.random() < 0.3 ? 1 : 0);
-    S.goldPoint += gold;
+    addGold(gold);
     const ups = gainExp(expBase * expMul);
     if (useProps) tickPropStates();
     save();
@@ -2145,7 +2203,7 @@
       drop = { id, count, name: propMap.getValue(id).name };
     }
     const gold = complete ? stageReward(stageId).gold : 0;
-    S.goldPoint += gold;
+    addGold(gold);
     // 45级起通关有几率获得1-2级宝石
     const gem = complete ? rollGemDrop(20) : null;
     const ups = gainExp(fightExp);
@@ -2395,7 +2453,7 @@
     questState().list[row.index].claimed = true;
     const parts = [];
     for (const r of row.rewards) {
-      if (r.kind === 'gold') { S.goldPoint += r.count; parts.push('金松果 +' + r.count); }
+      if (r.kind === 'gold') { addGold(r.count); parts.push('金松果 +' + r.count); }
       else if (r.kind === 'exp') { gainExp(r.count); parts.push('经验 +' + r.count); }
       else { S.props[r.id] = (S.props[r.id] || 0) + r.count; parts.push(r.name + ' +' + r.count); }
     }
@@ -2405,7 +2463,7 @@
   function claimDaily() {
     const daily = dailyStatus();
     if (daily.claimed) return { ok: false, msg: '今天的奖励已经领取，明天再来吧！', date: daily.date };
-    S.goldPoint += daily.gold;
+    addGold(daily.gold);
     S.props[23] = (S.props[23] || 0) + daily.challengeBooks;
     S.dailyClaimDate = daily.date;
     save();
@@ -2447,6 +2505,9 @@
     weaponInst, skillInst, myWeapons, mySkills, wsLimit, ownedWSCount,
     upgradeInfo, doUpgrade, upgradeFails, UPGRADE_COIN, UPGRADE_FAIL_BONUS,
     fruitOptions, applyFruitChoice,
+    trackEarn, earnOn, addGold,
+    apprenticeLevelSum, apprenticeTributeRatio, apprenticeTributeTable, apprenticeDailyGold,
+    TRIBUTE_RATIO_MIN, TRIBUTE_RATIO_MAX, TRIBUTE_LEVEL_SUM_FULL,
     undoPoint, undoDepth, hasUpgradableWS,
     weaponList,
     gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, extText, randomExt,
@@ -2456,7 +2517,8 @@
     gainExp, consumeEnergy, tickPropStates, fightReward, expBoostPct, gainExpWithBoost,
     // 师徒
     apprenticeCap, learnSkill, setMaster, clearMaster, addPrentice, removePrentice,
-    apprenticeDailyExp, apprenticeDailyTotal, apprenticeDailyStatus, apprenticeTribute, claimApprenticeExp, canKickToday, kickPrentice,
+    apprenticeDailyExp, apprenticeDailyGold, apprenticeDailyTotal, apprenticeDailyStatus,
+    apprenticeLevelSum, apprenticeTributeRatio, claimApprenticeExp, canKickToday, kickPrentice,
     beginRecruitChallenge, finishRecruitChallenge, cancelRecruitChallenge,
     MASTER_SKILL_ID, MASTER_SKILL_NAME,
     genAI, stageProgress, setStageProgress, npcOf, highestStageId, stageRun, stageAccess, stageReward,

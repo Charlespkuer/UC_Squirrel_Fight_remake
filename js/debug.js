@@ -116,7 +116,7 @@
           (S.freePoints ? '，本次分配弹窗里还有 ' + S.freePoints + ' 点没点完' : '');
       } },
     { label: '体力全满', run() { const S = State.state(); S.energy = S.maxEnergy; S.lastEnergyTs = Date.now(); State.save(); UI.refreshHome(); return '体力已回满'; } },
-    { label: '金松果 +10000', run() { State.state().goldPoint += 10000; State.save(); UI.refreshHome(); return '金松果 +10000'; } },
+    { label: '金松果 +10000', run() { State.addGold(10000, { count: false }); State.save(); UI.refreshHome(); return '金松果 +10000'; } },
     { label: '全道具 +10', run() {
         const S = State.state();
         let n = 0;
@@ -254,7 +254,7 @@
     const currency = CURRENCY_PROPS[key];
     if (currency) {
       let msg;
-      if (currency === 'gold') { S.goldPoint += n; msg = '金松果 +' + n + '（现有 ' + S.goldPoint + '）'; }
+      if (currency === 'gold') { State.addGold(n, { count: false }); msg = '金松果 +' + n + '（现有 ' + S.goldPoint + '）'; }
       else if (currency === 'goldCup') { S.goldCup += n; msg = '金杯 +' + n + '（现有 ' + S.goldCup + '）'; }
       else {
         const ups = State.gainExp(n);

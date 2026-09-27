@@ -390,7 +390,7 @@
   }
   function towerFail(run) {
     const consolation = Math.floor(run.pot * D().TOWER_FAIL_CONSOLATION);
-    if (consolation > 0) S().goldPoint += consolation;
+    if (consolation > 0) State.addGold(consolation);
     const layer = run.layer, pot = run.pot;
     tower().run = null;
     save();
@@ -426,7 +426,7 @@
     out.layer = run.layer;
     if (mode === 'tower') {
       const gold = run.pot;
-      S().goldPoint += gold;
+      State.addGold(gold);
       tower().maxLayer = run.layer;
       // 碎片判定压缩到最后一击：掉率/数量期望 = 挑战模式单场（★6 参数，蓝色封顶）
       if (Math.random() < GData.stageFragmentChance(6)) {

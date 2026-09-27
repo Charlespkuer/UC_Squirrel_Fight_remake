@@ -39,13 +39,14 @@ const rounds = (g, a = {}, b = {}, options) => g.Sim.simulate(fighter(a), fighte
 const tests = [];
 const test = (name, run) => tests.push([name, run]);
 
-test('师父在低血线才尝试救场，每场仅一次，使用真实师父等级', () => {
+test('师父在生命不高于 50% 时才尝试救场，每场仅一次，使用真实师父等级', () => {
   const g = game();
   g.Debug = { enabled: (key) => key === 'godMode' };
+  assert.equal(g.Sim.rules.masterHpRatio, 0.50, '阈值已上调到 50%');
   const events = rounds(g, { hp: 100, power: 1, skills: ['13:1'], masterLevel: 7 }, { power: 35, speed: 11 }, { masterChance: 100 });
   const index = events.findIndex((r) => r.id === 13);
   assert.ok(index > 0);
-  assert.ok(events[index - 1].hpAfter[0] <= 35);
+  assert.ok(events[index - 1].hpAfter[0] <= 50, '只在 50% 线以下救场：' + events[index - 1].hpAfter[0]);
   assert.equal(events[index].healSelf, 28);
   assert.equal(events.filter((r) => r.id === 13).length, 1);
   assert.ok(events.length > index + 10, '长战斗中反复进入低血，仍不会再次呼叫');

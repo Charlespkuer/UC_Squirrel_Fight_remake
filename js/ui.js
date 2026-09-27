@@ -537,7 +537,7 @@
               }
               const exp = 15 + star * 10 + idx * 5;
               const gold = 5 + star * 3;
-              S.goldPoint += gold;
+              State.addGold(gold);
               let fragTxt = '';
               if (Math.random() < 0.25 + star * 0.05) {
                 const fragId = star <= 2 ? 24 : star <= 4 ? 25 : 26;
@@ -603,7 +603,7 @@
                   if (w2 === 0) {
                     if (mode === 0) {
                       const ups = State.gainExp(150);
-                      S.goldPoint += 10;
+                      State.addGold(10);
                       showResult(true, finalist, { exp: 150, gold: 10, ups: ups }, '<div>🏆 竞技场冠军！</div>');
                     } else {
                       S.props[26] = (S.props[26] || 0) + 8;
@@ -880,7 +880,7 @@
       { name: '蓝色碎片x3', run: () => { S.props[26] = (S.props[26] || 0) + 3; } },
       { name: '经验+50', run: () => { State.gainExp(50); } },
       { name: '经验+100', run: () => { State.gainExp(100); } },
-      { name: '金松果+30', run: () => { S.goldPoint += 30; } },
+      { name: '金松果+30', run: () => { State.addGold(30); } },
       { name: '挑战书x2', run: () => { S.props[23] = (S.props[23] || 0) + 2; } },
       { name: '大体力药剂x4', run: () => { S.props[2] = (S.props[2] || 0) + 4; } },
       { name: '天使果实种子x2', run: () => { S.props[45] = (S.props[45] || 0) + 2; } },

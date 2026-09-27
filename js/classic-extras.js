@@ -172,7 +172,8 @@
         attempt.settled = true; rankAttempt = null;
         State.tickEnergy();
         if (State.localDate() === attempt.date) s.joinRankCount = Math.max(0, s.joinRankCount - 1);
-        s.goldPoint += attempt.fee; State.save();
+        State.addGold(attempt.fee, { count: false });   // 退还报名费，不算收益
+        State.save();
         C().toast('\u6bd4\u8d5b\u4e2d\u65ad\uff0c\u672c\u6b21\u53c2\u8d5b\u6b21\u6570\u548c\u8d39\u7528\u5df2\u9000\u8fd8\u3002');
       };
       Main.startBattle(foe, { cost: 0, kind: 'rank', useProps: false, region: 2, onError: interrupted, onEnd: winner => {
@@ -266,7 +267,7 @@
         prizeLabel = ids.map((pid) => (propMap.getValue(pid) || { name: pid }).name + ' \u00d7' + merged[pid]).join('\u3001');
         prizeIcon = ids[0];
       }
-      if (prize.gold) s.goldPoint += prize.gold;
+      if (prize.gold) State.addGold(prize.gold);
       if (prize.count) addProp(prize.id, prize.count);
       const ups = prize.exp ? State.gainExp(prize.exp) : [];
       // 每日任务「抽取 {n} 次每日幸运抽奖」：一次点击算一次（奖励当场结算，离开动画页也照样计数）
@@ -344,14 +345,16 @@
   }
   function apprenticeProfile(row) {
     const daily = State.apprenticeDailyStatus(row);
-    const names = {challenge:'\u4e3b\u52a8\u6311\u6218',challenged:'\u88ab\u6311\u6218',stage:'\u5173\u5361',arena:'\u7ecf\u9a8c\u7ade\u6280',pickup:'\u6218\u6597\u62fe\u53d6',lottery:'\u62bd\u5956'};
-    const ledger = daily.activities.map(a => {
-      const rate = ['challenge','challenged','stage'].includes(a.kind) ? '10%' : a.kind==='arena'&&a.entry==='energy' ? '5%' : '\u4e0d\u8ba1\u65e5\u8d21';
-      return '<span>'+names[a.kind]+(a.kind==='arena'?(a.entry==='energy'?'\uff08\u4f53\u529b\uff09':'\uff08\u82f1\u96c4\u5e16\uff09'):'')+' '+a.exp+'\u7ecf\u9a8c \u00b7 '+rate+'</span>';
-    }).join('<br>');
+    const sum = State.apprenticeLevelSum(State.state().prentices);
+    const pct = (v) => (Math.round(v * 1000) / 10) + '%';
     return '<div class="profile-panel">' +
-      '<p class="profile-meta">\u5165\u95e8\uff1a'+esc(row.since)+' \u00b7 \u6628\u65e5\u65e5\u8d21\uff1a'+(daily.claimed?'<b class="done">\u5df2\u9886\u53d6</b>':'<b>'+daily.exp+'\u7ecf\u9a8c</b>')+'</p>'+
-      '<details class="profile-meta"><summary>'+esc(daily.date)+' \u79bb\u7ebf\u6d3b\u52a8\u8d26\u76ee</summary>'+(ledger||'\u6628\u5929\u5c1a\u65e0\u5165\u95e8\u540e\u7684\u6218\u6597\u6d3b\u52a8\u3002')+'<br>\u6309\u4e24\u7c7b\u6bd4\u4f8b\u5408\u8ba1\u540e\u53d6\u6574\uff1b\u5f92\u5f1f\u7ecf\u9a8c\u4e0d\u51cf\u5c11\u3002</details>'+
+      '<p class="profile-meta">入门：' + esc(row.since) + '</p>' +
+      '<p class="profile-meta">徒弟等级之和 <b>' + sum + '</b> → 日供系数 <b>' + pct(daily.ratio) + '</b>' +
+        '（保底 10%，三个满级徒弟封顶 50%）</p>' +
+      '<p class="profile-meta">我 ' + esc(daily.date) + ' 赚到：经验 ' + daily.mine.exp + ' · 金松果 ' + daily.mine.gold + '</p>' +
+      '<p class="profile-meta">这个徒弟的份额 ' + pct(daily.weight) + ' → 昨日日贡：' +
+        (daily.claimed ? '<b class="done">已领取</b>' : '<b>经验 ' + daily.exp + ' · 金松果 ' + daily.gold + '</b>') +
+        (daily.newApprentice ? '（今日新收，次日才开始结算）' : '') + '</p>' +
       profileStats(row) + profileGear(row) + '</div>';
   }
 
@@ -389,15 +392,15 @@
 
     // ---- \u6211\u7684\u5f92\u5f1f / \u6536\u5f92 ----
     const dailyTotal = State.apprenticeDailyTotal();
-    const unclaimed = dailyTotal > 0;
+    const unclaimed = dailyTotal.exp > 0 || dailyTotal.gold > 0;
     const apprenticeBlock =
       '<div class="extra-apprentice-title"><h3>\u6211\u7684\u5f92\u5f1f\uff08' + s.prentices.length + '/' + cap + '\uff09</h3>' +
-      (unclaimed ? button('\u9886\u53d6\u6628\u65e5\u65e5\u8d21 +' + dailyTotal, 'master-claim', 'tiny gold') : '<span class="daily-done">\u6682\u65e0\u53ef\u9886\u6628\u65e5\u65e5\u8d21</span>') + '</div>' +
-      '<p class="extra-master-tip">\u6628\u65e5\u666e\u901a\u4e0e\u5173\u5361\u7ecf\u9a8c\u768410%\uff0c\u4f53\u529b\u62a5\u540d\u7ecf\u9a8c\u7ade\u6280\u76845%\uff0c\u6b21\u65e5\u53ef\u9886\uff1b\u62fe\u53d6\u3001\u62bd\u5956\u3001\u82f1\u96c4\u5e16\u7ade\u6280\u4e0d\u8ba1\u3002\u6d3b\u52a8\u7531\u672c\u5730\u6709\u9650\u6a21\u62df\uff0c\u8be6\u60c5\u53ef\u5c55\u5f00\u67e5\u770b\u3002</p>' +
+      (unclaimed ? button('\u9886\u53d6\u6628\u65e5\u65e5\u8d21 +' + dailyTotal.exp + '\u7ecf\u9a8c +' + dailyTotal.gold + '\u91d1\u677e\u679c', 'master-claim', 'tiny gold') : '<span class="daily-done">\u6682\u65e0\u53ef\u9886\u6628\u65e5\u65e5\u8d21</span>') + '</div>' +
+      '<p class="extra-master-tip">\u65e5\u4f9b = \u5f92\u5f1f\u7b49\u7ea7\u4e4b\u548c\u51b3\u5b9a\u7684\u7cfb\u6570 \u00d7 \u6211\u81ea\u5df1\u6628\u65e5\u8d5a\u5230\u7684\u603b\u7ecf\u9a8c\u4e0e\u91d1\u677e\u679c\uff0c\u6b21\u65e5\u9886\u53d6\uff1a\u4fdd\u5e95 10%\uff0c\u5f92\u5f1f\u7b49\u7ea7\u4e4b\u548c 210\uff08\u4e09\u4e2a\u6ee1\u7ea7\uff09\u5c01\u9876 50%\uff0c\u4e2d\u95f4\u7ebf\u6027\u9012\u589e\u3002</p>' +
       '<div class="apprentice-row">' + (s.prentices.length
         ? s.prentices.map((a, i) => '<div class="candidate-card small' + (apprenticeSel === i ? ' active' : '') + '" data-prentice="' + i + '">' +
             '<b class="candidate-name">' + esc(a.name) + '</b><span class="candidate-level">\u7b49\u7ea7 ' + a.level + '</span>' +
-            '<span class="candidate-hp">\u6628\u65e5\u65e5\u8d21 ' + State.apprenticeDailyExp(a) + '</span></div>').join('')
+            '<span class="candidate-hp">\u6628\u65e5 \u7ecf\u9a8c+' + State.apprenticeDailyExp(a) + ' \u91d1\u677e\u679c+' + State.apprenticeDailyGold(a) + '</span></div>').join('')
         : '<p class="empty-hint">\u8fd8\u6ca1\u6709\u5f92\u5f1f\uff0c\u5148\u5728\u4e0b\u65b9\u5bf9\u53ef\u6536\u670d\u7684\u5f92\u5f1f\u53d1\u8d77\u6536\u5f92\u6311\u6218\u3002</p>') + '</div>' +
       (s.prentices[apprenticeSel] ? '<div class="candidate-detail">' + apprenticeProfile(s.prentices[apprenticeSel]) + '</div>' : '') +
       (s.prentices[apprenticeSel] ? '<div class="master-actions">' + button('\u8ba9\u4ed6\u79bb\u5f00\u5e08\u95e8', 'prentice-leave', 'tiny muted') + '</div>' : '') +
@@ -462,8 +465,11 @@
     on(p, 'master-claim', () => {
       const r = State.claimApprenticeExp();
       if (!r.ok) { C().toast(r.msg); master(); return; }
-      C().modal('\u5f92\u5f1f\u65e5\u8d21', '<div class="extra-result"><strong class="cartoon">+' + r.total + ' \u7ecf\u9a8c</strong><p>' + esc(r.msg) + '</p>' +
-        '<p class="extra-master-tip">\u5f92\u5f1f\u81ea\u5df1\u7684\u7ecf\u9a8c\u4e0d\u4f1a\u51cf\u5c11\uff0c\u8fd9\u4efd\u7ecf\u9a8c\u662f\u989d\u5916\u4ea7\u51fa\u7684\u3002</p></div>' + C().upsHtml(r.ups),
+      const gain = [];
+      if (r.total > 0) gain.push('+' + r.total + ' \u7ecf\u9a8c');
+      if (r.gold > 0) gain.push('+' + r.gold + ' \u91d1\u677e\u679c');
+      C().modal('\u5f92\u5f1f\u65e5\u8d21', '<div class="extra-result"><strong class="cartoon">' + (gain.join('\u3000') || '\u65e0') + '</strong><p>' + esc(r.msg) + '</p>' +
+        '<p class="extra-master-tip">\u6309\u5f92\u5f1f\u7b49\u7ea7\u4e4b\u548c\u7ed9\u7cfb\u6570\uff0c\u4e58\u4f60\u6628\u65e5\u7684\u603b\u6536\u76ca\uff0c\u662f\u989d\u5916\u4ea7\u51fa\u7684\uff0c\u4e0d\u4f1a\u6263\u4f60\u81ea\u5df1\u7684\u6536\u5165\u3002</p></div>' + C().upsHtml(r.ups),
         [{ label: '\u786e\u5b9a', run: () => master('apprentice') }], { small: true });
     });
     on(p, 'prentice-leave', () => {

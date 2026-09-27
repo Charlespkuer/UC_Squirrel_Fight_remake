@@ -2,6 +2,14 @@
  * sim.js — 战斗模拟器
  * 输出回合事件流（供 battle.js 播放）。武器/技能效果按原版
  * GameDict 描述与百科资料实现。
+ *
+ * 挑战塔扩展（tower.js 注入，普通战斗不带这些字段，行为与旧版一致）：
+ *   fighter.mech: NPC 专属机制 id 数组（berserk/rhythmCrit/regen/thorns/
+ *                 poison/freeze/wolf/lifesteal/shell/devour）
+ *   fighter.mods: 玩家侧塔 buff 数值包 {dmgMul, critBonus, critDmgBonus,
+ *                 dodgeBonus, takenMul, regenPct, lifestealPct, shellPct,
+ *                 mustHitFirst, firstSkillFree, openStrikePct,
+ *                 deathSaves:[{healPct}]}
  * ============================================================ */
 (function () {
   'use strict';
@@ -22,7 +30,8 @@
    * fighter 输入: {name, level, power, agility, speed, hp,
    *   weapons:[{id,level,harmLo,harmHi,type}], skills:[{id,level,type}],
    *   baseStats?:{power,agility,speed}, masterLevel?:number,
-   *   npcType: null|'tl'|'xh'|'xm'|'wood'}
+   *   npcType: null|'tl'|'xh'|'xm'|'wood',
+   *   mech?: string[], mods?: object}   ← 挑战塔扩展
    */
   function makeCombatant(f, side) {
     const stat = (value, fallback) => Number.isFinite(Number(value)) ? Math.max(1, Number(value)) : fallback;
@@ -49,6 +58,8 @@
     // 关卡连战会带一个「入场血量比例」进来：hp 是当前血量，maxHp 才是上限。
     // 缺少 maxHp（AI/NPC/旧录像）时，把 hp 当作满血，保持既有行为。
     const fullHp = stat(f.maxHp != null ? f.maxHp : f.hp, 1);
+    const mech = Array.isArray(f.mech) ? f.mech.slice() : (f.mech ? [f.mech] : []);
+    const mods = f.mods && typeof f.mods === 'object' ? f.mods : null;
     return {
       side, name: f.name, level: stat(f.level, 1), npcType: f.npcType || null,
       power: stat(f.power, 1), agility: stat(f.agility, 1), speed: stat(f.speed, 1),
@@ -61,11 +72,19 @@
       baseStats: Object.fromEntries(['power', 'agility', 'speed'].map((key) => [key, stat(f.baseStats?.[key], stat(f[key], 1))])),
       // 战斗内状态
       ap: 0, restNext: false, pendingWeapon: null, stun: 0, silence: 0, disarm: 0, shellCharges: 0,
-      mustHitNext: false, usedFakeDie: false, usedMaster: false, usedShell: false, usedCosmos: false, usedSnack: false,
-      usedUlt: false, acted: false,
+      mustHitNext: !!(mods && mods.mustHitFirst), usedFakeDie: false, usedMaster: false, usedShell: false, usedCosmos: false, usedSnack: false,
+      usedUlt: false, acted: false, usedFreeSkill: false,
       swordDodge: 0, meteorDodge: 0, debuffs: { power: 0, agility: 0, speed: 0 },
-      dot: null, // {dmg, rounds}
+      dot: null, // {dmg, rounds} 或 {pct, rounds}（按当前生命比例扣血）
       buffFlat: { power: 0, agility: 0, speed: 0 },
+      // —— 挑战塔扩展状态 ——
+      mech, mods,
+      // 松鼠对手的固定出招循环（tower-data.js 定义）：['common'|'weapon'|'skill', …]
+      pattern: Array.isArray(f.pattern) && f.pattern.length ? f.pattern.slice() : null,
+      patternStep: 0,
+      mechState: { basePower: stat(f.power, 1), berserk: false },
+      shell: Math.round(fullHp * ((mech.includes('shell') ? 0.30 : 0) + (mods && mods.shellPct || 0))),
+      pendingNote: null,
     };
   }
 
@@ -78,6 +97,8 @@
   function weaponEffect(w, base, perLevel, perTrueLevel) {
     return base + perLevel * (Math.min(w.level, 10) - 1) + (perTrueLevel || 0) * Math.max(0, w.level - 10);
   }
+  /** 塔 buff 的暴击伤害加成（比例）。 */
+  function critDmgBonus(att) { return (att.mods && Number(att.mods.critDmgBonus) || 0) / 100; }
 
   function dodgeChance(att, def) {
     const wMust = att.mustHitNext;
@@ -86,12 +107,14 @@
     const shift = skill(def, 11) ? (5 + 2 * (skill(def, 11) - 1)) * (1 + effect(def, 35) / 100) : 0;
     // PPT问答：木剑、移形、流星锤均相对提升天生闪避率。
     d *= 1 + (shift + def.swordDodge + def.meteorDodge) / 100;
+    if (def.mods && def.mods.dodgeBonus) d += Number(def.mods.dodgeBonus);   // 塔 buff「凌波微步」（加算）
     return clamp(d, 0, 55);
   }
 
   function critChance(att) {
     let c = 5;
     if (skill(att, 9)) c += 2 * skill(att, 9);                  // 暴击
+    if (att.mods && att.mods.critBonus) c += Number(att.mods.critBonus);   // 塔 buff「鹰眼」
     return c;
   }
 
@@ -116,6 +139,7 @@
       const pct = clamp((5 + (skill(def, 10) - 1)) * (1 + effect(def, 34) / 100), 0, 80);
       out.dmg = Math.round(out.dmg * (100 - pct) / 100);
     }
+    if (def.mods && def.mods.takenMul) out.dmg = Math.round(out.dmg * (1 + Number(def.mods.takenMul)));   // 塔 buff「铁布衫」
     out.dmg = Math.max(1, out.dmg);
     return out;
   }
@@ -136,6 +160,11 @@
       // Preserve the user's Debug mode in the event snapshots as well as winner.
       if (A.hp <= 0 && godSave(A)) A.hp = 1;
       if (B.hp <= 0 && godSave(B)) B.hp = 1;
+      // 机制提示挂到行动方的回合事件上（血性狂暴/寒冰禁锢/吞噬成长等）
+      if (r && r.attacker != null) {
+        const c = r.attacker === 0 ? A : B;
+        if (c.pendingNote) { r.noteText = (r.noteText ? r.noteText + '·' : '') + c.pendingNote; c.pendingNote = null; }
+      }
       r.hpAfter = [Math.max(0, A.hp), Math.max(0, B.hp)];
       rounds.push(r);
     }
@@ -143,14 +172,21 @@
     function applyDamage(att, def, rawDmg, r, opts) {
       opts = opts || {};
       const action = opts.action || r.action;
+      if (att.mods && att.mods.dmgMul) rawDmg = Math.round(rawDmg * Number(att.mods.dmgMul));   // 塔 buff 伤害乘区（猎侠者/机制破解/精英杀手等，tower.js 按对手预算好）
       if (action === 'skill') {
         rawDmg = Math.round(rawDmg * (1 + effect(att, 8) / 100));
-        if (chance(critChance(att))) { rawDmg = Math.round(rawDmg * (2 + effect(att, 4) / 100)); r.crit = true; }
+        if (chance(critChance(att))) { rawDmg = Math.round(rawDmg * (2 + effect(att, 4) / 100 + critDmgBonus(att))); r.crit = true; }
       }
       const red = dmgReduce(def, rawDmg, { action, weaponType: opts.weaponType });
       let dmg = red.dmg;
       if (red.jueDui) { r.jueDui = true; r.rebound = red.rebound; }
       if (red.guiJia) r.guiJia = red.guiJia;
+      // 开局护盾（石像鬼机制 / 塔 buff「坚韧壁垒」）：先于血量消耗
+      if (def.shell > 0 && dmg > 0) {
+        const absorbed = Math.min(def.shell, dmg);
+        def.shell -= absorbed; dmg -= absorbed;
+        r.shellAbsorb = absorbed;
+      }
       // 装死
       if (def.hp - dmg <= 0 && def.skills[6] && def.silence <= 0 && !def.usedFakeDie && !opts.ignoreFakeDie) {
         def.usedFakeDie = true;
@@ -159,6 +195,12 @@
         r.fakeDie = true;
         def.stun = 0;
         immediate = { actor: def, reason: 'fakeDie' };
+      } else if (def.hp - dmg <= 0 && def.mods && Array.isArray(def.mods.deathSaves) && def.mods.deathSaves.length) {
+        // 塔 buff：金蝉脱壳（保留 1 血）/ 不死鸟（复活回 30%）
+        const sv = def.mods.deathSaves.shift();
+        def.hp = sv.healPct ? Math.max(1, Math.round(def.maxHp * sv.healPct)) : 1;
+        r.deathSave = true;
+        r.noteText = sv.healPct ? '不死鸟' : '金蝉脱壳'; r.noteSide = def.side;
       } else if (def.hp - dmg <= 0 && godSave(def)) {
         dmg = Math.max(0, def.hp - 1);
         def.hp = 1;
@@ -171,6 +213,24 @@
       if (red.rebound) {
         att.hp -= red.rebound;
         r.reboundHurt = red.rebound;
+      }
+      // —— 受击/命中方机制（挑战塔 NPC 池） ——
+      if (dmg > 0) {
+        if (def.mech.includes('thorns') && att.hp > 0) {          // 荆棘铁壁：反弹 15%
+          const reflect = Math.max(1, Math.round(dmg * 0.15));
+          att.hp -= reflect;
+          r.thornsDmg = (r.thornsDmg || 0) + reflect;
+        }
+        if (def.mech.includes('poison') && !att.dot && chance(30)) {  // 毒藤缠绕：30% 中毒
+          att.dot = { pct: 0.03, rounds: 3 };
+          r.poisonApplied = true;
+          r.noteText = (r.noteText ? r.noteText + '·' : '') + '毒藤缠绕'; r.noteSide = def.side;
+        }
+        const lsPct = (att.mech.includes('lifesteal') ? 0.30 : 0) + (att.mods && Number(att.mods.lifestealPct) || 0);
+        if (lsPct > 0 && att.hp > 0) {                              // 血之渴望 / 血饮狂刀
+          const heal = Math.min(att.maxHp - att.hp, Math.round(dmg * lsPct));
+          if (heal > 0) { att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
+        }
       }
       return dmg;
     }
@@ -210,10 +270,43 @@
       pushRound(r);
     }
 
+    /** 回合开始时的 NPC 机制触发（狂暴/冻结）；返回附加提示。 */
+    function npcMechTurnStart(att, def) {
+      if (att.mech.includes('berserk') && !att.mechState.berserk && att.hp > 0 && att.hp < att.maxHp * 0.5) {
+        att.mechState.berserk = true;
+        att.buffFlat.power += att.power;                 // 血性狂暴：攻击力翻倍
+        att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '血性狂暴';
+      }
+      if (att.mech.includes('freeze') && (att.npcActs || 0) % 3 === 0) {
+        def.stun = Math.max(def.stun, 1);                // 寒冰禁锢：每第 3 次行动冻结玩家
+        att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '寒冰禁锢';
+      }
+    }
+
+    /** NPC 行动结束后的机制（唤狼协战 / 无尽吞噬），在主循环里调用。 */
+    function npcMechAfter(att, def) {
+      if (att.hp <= 0 || def.hp <= 0) return;
+      if (att.mech.includes('wolf') && (att.npcActs || 0) % 2 === 0) {
+        // 唤狼协战：0.5×力量的必中突袭（不占行动，不可反击）
+        const wr = { attacker: att.side, action: 'skill', npcSkill: true, wolf: true, ultName: '唤狼协战' };
+        applyDamage(att, def, Math.round(effPower(att) * 0.5), wr, {});
+        pushRound(wr);
+      }
+      if (att.mech.includes('devour')) {
+        // 无尽吞噬：每回合结束攻击 +2%（按入场力量计，可无限叠加）
+        att.buffFlat.power += Math.max(1, Math.round(att.mechState.basePower * 0.02));
+        att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '无尽吞噬';
+      }
+    }
+
     function npcAction(att, def) {
       // 大招（每场一次）：仙鹤开场即放，螳螂/熊猫压低生命后触发
       const firstAction = !att.acted; att.acted = true;
       att.npcActs = (att.npcActs || 0) + 1;   // 仙鹤前期凶猛：前3次行动伤害+30%
+      npcMechTurnStart(att, def);
+      // 瞬杀节奏：每第 4 次行动必定暴击，暴击伤害 +50%
+      const rhythm = att.mech.includes('rhythmCrit') && att.npcActs % 4 === 0;
+      if (rhythm) att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '瞬杀节奏';
       if (!att.usedUlt && (att.npcType === 'xh' ? firstAction
         : att.npcType === 'tl' ? att.hp < att.maxHp * 0.2
         : att.npcType === 'xm' ? att.hp < att.maxHp * 0.4 : false)) {
@@ -231,6 +324,7 @@
         else if (att.npcType === 'xh') { raw = Math.round((effPower(att) + effSpeed(att)) * (0.9 + lv * 0.1)); }
         else { raw = Math.round(effPower(att) * (1.3 + lv * 0.1)); } // 熊猫重击
         if (att.npcType === 'xh' && att.npcActs <= 3) raw = Math.round(raw * 1.3); // 仙鹤前期凶猛
+        if (rhythm) { raw = Math.round(raw * 2.5); r.crit = true; }
         // 命中
         if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
         let total = 0;
@@ -240,8 +334,12 @@
           applyDamage(att, def, raw, rr, { action: 'skill' });
           total += rr.dmg;
           if (rr.reboundHurt) { r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt; r.jueDui = true; }
+          if (rr.thornsDmg) r.thornsDmg = (r.thornsDmg || 0) + rr.thornsDmg;
+          if (rr.shellAbsorb) r.shellAbsorb = (r.shellAbsorb || 0) + rr.shellAbsorb;
+          if (rr.lifesteal) r.lifesteal = (r.lifesteal || 0) + rr.lifesteal;
           if (rr.guiJia) r.guiJia = rr.guiJia;
           if (rr.fakeDie) r.fakeDie = true;
+          if (rr.deathSave) { r.deathSave = true; r.noteText = rr.noteText; r.noteSide = rr.noteSide; }
           if (rr.crit) r.crit = true;
           if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
         }
@@ -255,6 +353,7 @@
       let raw = Math.round(effPower(att) * (0.8 + Math.random() * 0.4));
       if (att.npcType === 'xh' && att.npcActs <= 3) raw = Math.round(raw * 1.3); // 仙鹤前期凶猛
       if (att.npcType === 'tl' && att.hp < att.maxHp * 0.25) raw = Math.round(raw * 1.3); // 螳螂低血爆发
+      if (rhythm) { raw = Math.round(raw * 2.5); r.crit = true; }
       applyDamage(att, def, raw, r, {});
       maybeCounter(att, def, r, true);
       pushRound(r);
@@ -274,6 +373,7 @@
       r.counterDmg = counter.dmg;
       if (counter.fakeDie) r.counterFakeDie = true;
       if (counter.reboundHurt) r.counterRebound = counter.reboundHurt;
+      if (counter.thornsDmg) r.counterThorns = counter.thornsDmg;
     }
 
     function playerLikeAction(att, def) {
@@ -292,12 +392,22 @@
       const canWeapon = att.weapons.length > 0 && att.disarm <= 0;
       const actives = ACTIVE_SKILLS.filter((id) => att.skills[id] && !(id === 14 && att.usedCosmos) && !(id === 17 && (att.usedSnack || att.hp >= att.maxHp)));
       const canSkill = actives.length > 0 && att.silence <= 0;
-      let roll = Math.random() * 100;
       let kind;
-      if (canWeapon && canSkill) kind = roll < 45 ? 'weapon' : roll < 80 ? 'skill' : 'common';
-      else if (canWeapon) kind = roll < 70 ? 'weapon' : 'common';
-      else if (canSkill) kind = roll < 60 ? 'skill' : 'common';
-      else kind = 'common';
+      if (att.pattern) {
+        // 挑战塔的松鼠对手：按固定循环出招（玩家可以背板）。
+        // 这一步用不了就顺延到下一个能用的，不会因为缴械/沉默而卡住。
+        const want = att.pattern[att.patternStep % att.pattern.length];
+        att.patternStep++;
+        if (want === 'weapon' && !canWeapon) kind = canSkill ? 'skill' : 'common';
+        else if (want === 'skill' && !canSkill) kind = canWeapon ? 'weapon' : 'common';
+        else kind = (want === 'weapon' || want === 'skill') ? want : 'common';
+      } else {
+        const roll = Math.random() * 100;
+        if (canWeapon && canSkill) kind = roll < 45 ? 'weapon' : roll < 80 ? 'skill' : 'common';
+        else if (canWeapon) kind = roll < 70 ? 'weapon' : 'common';
+        else if (canSkill) kind = roll < 60 ? 'skill' : 'common';
+        else kind = 'common';
+      }
       if (att.pendingWeapon && canWeapon) kind = 'weapon';
 
       if (kind === 'weapon') {
@@ -306,7 +416,7 @@
         // 这样连续重复同一把武器的观感变少，但不会退化成机械式的交替。
         let w;
         if (prepared) w = prepared;
-        else if (att.weapons.length > 1) {
+        else if (att.weapons.length > 1 && !att.pattern) {
           const fresh = att.weapons.filter((x) => x.id !== att.lastWeaponId);
           const repeatLast = fresh.length && Math.random() < 0.25;
           const from = repeatLast ? att.weapons : (fresh.length ? fresh : att.weapons);
@@ -335,7 +445,7 @@
         // 暴击
         let cc = critChance(att);
         if (w.id === 11) cc += weaponEffect(w, 20, 2, 3);         // 激光剑
-        if (chance(cc)) { raw = Math.round(raw * (2 + effect(att, w.type === '投掷' ? 3 : 2) / 100)); r.crit = true; }
+        if (chance(cc)) { raw = Math.round(raw * (2 + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att))); r.crit = true; }
         // 连击/三扔
         let hits = 1;
         if (w.id === 4 && chance(weaponEffect(w, 10, 2, 5))) hits = 2;          // 西瓜刀
@@ -347,8 +457,12 @@
           applyDamage(att, def, raw, rr, { ignoreFakeDie: w.id === 7, action: 'weapon', weaponType: w.type });
           total += rr.dmg;
           if (rr.reboundHurt) { r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt; r.jueDui = true; }
+          if (rr.thornsDmg) r.thornsDmg = (r.thornsDmg || 0) + rr.thornsDmg;
+          if (rr.shellAbsorb) r.shellAbsorb = (r.shellAbsorb || 0) + rr.shellAbsorb;
+          if (rr.lifesteal) r.lifesteal = (r.lifesteal || 0) + rr.lifesteal;
           if (rr.guiJia) r.guiJia = rr.guiJia;
           if (rr.fakeDie) r.fakeDie = true;
+          if (rr.deathSave) { r.deathSave = true; r.noteText = rr.noteText; r.noteSide = rr.noteSide; }
           if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
         }
         r.dmg = total;
@@ -362,7 +476,7 @@
           if (w.id === 13 && chance(weaponEffect(w, 10, 3, 3))) { def.stun = Math.max(def.stun, 1); r.stunApplied = true; }
           if (w.id === 16 && chance(weaponEffect(w, 10, 4, 4))) { def.silence = Math.max(def.silence, 4); r.silenceApplied = true; }
         }
-        if (w.id === 14 && att.hp > 0) { const heal = Math.min(att.maxHp - att.hp, Math.round(total * weaponEffect(w, 10, 4, 2) / 100)); att.hp += heal; r.lifesteal = heal; }
+        if (w.id === 14 && att.hp > 0) { const heal = Math.min(att.maxHp - att.hp, Math.round(total * weaponEffect(w, 10, 4, 2) / 100)); att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
         if (w.id === 17 && att.hp > 0) { const self = Math.round(att.hp * 0.1); att.hp -= self; r.selfBurn = self; }
         // 反击（大榔头2、死神镰刀15 不可反击）
         maybeCounter(att, def, r, w.type === '近战' && ![2, 15].includes(w.id));
@@ -371,9 +485,13 @@
       }
 
       if (kind === 'skill') {
-        const sid = parseInt(actives[Math.floor(Math.random() * actives.length)]);
+        const sid = att.pattern
+          ? parseInt(actives.slice().sort((a, b) => a - b)[0])          // 固定循环：技能也固定
+          : parseInt(actives[Math.floor(Math.random() * actives.length)]);
         const lv = att.skills[sid];
         r.action = 'skill'; r.id = sid; r.level = lv;
+        // 塔 buff「疾风先手」：本局首次技能不消耗回合
+        const freeSkill = att.mods && att.mods.firstSkillFree && !att.usedFreeSkill;
         switch (sid) {
           case 8: { // 色诱之术
             const raw = Math.round((R(15, 25) + 7 * (lv - 1)) * (1 + effect(att, 33) / 100));
@@ -425,6 +543,7 @@
             break;
           }
         }
+        if (freeSkill) { att.usedFreeSkill = true; r.actAgain = true; }
         maybeCounter(att, def, r, !r.noDmg && !r.dodge);
         pushRound(r);
         if (r.actAgain && att.hp > 0 && def.hp > 0) {
@@ -439,7 +558,7 @@
       att.mustHitNext = false;
       if (dodge) { r.dodge = true; pushRound(r); return; }
       let raw = Math.round(effPower(att) * (0.8 + Math.random() * 0.4) * (1 + effect(att, 5) / 100));
-      if (chance(critChance(att))) { raw = Math.round(raw * (2 + effect(att, 1) / 100)); r.crit = true; }
+      if (chance(critChance(att))) { raw = Math.round(raw * (2 + effect(att, 1) / 100 + critDmgBonus(att))); r.crit = true; }
       applyDamage(att, def, raw, r, {});
       maybeCounter(att, def, r, true);
       pushRound(r);
@@ -448,6 +567,13 @@
     function tickRestrictions(actor) {
       if (actor.silence > 0) actor.silence--;
       if (actor.disarm > 0) actor.disarm--;
+    }
+
+    // 塔 buff「先手制敌」：开局对敌人造成其最大生命比例的伤害（不致死）
+    if (A.mods && A.mods.openStrikePct && B.hp > 1) {
+      const dmg = Math.max(1, Math.round(B.maxHp * Number(A.mods.openStrikePct)));
+      B.hp = Math.max(1, B.hp - dmg);
+      pushRound({ attacker: 0, action: 'dot', dmg, noteText: '先手制敌' });
     }
 
     // ---- 主循环：速度行动条 ----
@@ -467,12 +593,21 @@
       }
       actions++;
       const def = actor === A ? B : A;
+      // 回合开始回复（药师「百草回春」/ 塔 buff「活血丹」「回春术」）
+      const regenPct = (actor.mech.includes('regen') ? 0.03 : 0) + (actor.mods && Number(actor.mods.regenPct) || 0);
+      if (regenPct > 0 && actor.hp > 0 && actor.hp < actor.maxHp) {
+        const heal = Math.min(actor.maxHp - actor.hp, Math.max(1, Math.round(actor.maxHp * regenPct)));
+        actor.hp += heal;
+        pushRound({ attacker: actor.side, action: 'regen', heal, noteText: actor.mech.includes('regen') ? '百草回春' : '回复' });
+        if (B.hp <= 0 || A.hp <= 0) break;
+      }
       // 持续伤害
       // 原攻略按中招者的四次出手计数，包括小宇宙后的追加行动。
       if (actor.dot) {
-        actor.hp -= actor.dot.dmg;
+        const dotDmg = actor.dot.pct ? Math.max(1, Math.round(actor.hp * actor.dot.pct)) : actor.dot.dmg;
+        actor.hp -= dotDmg;
         if (actor.hp <= 0 && godSave(actor)) actor.hp = 1;
-        pushRound({ attacker: actor.side, action: 'dot', dmg: actor.dot.dmg, selfDot: true });
+        pushRound({ attacker: actor.side, action: 'dot', dmg: dotDmg, selfDot: true });
         actor.dot.rounds--;
         if (actor.dot.rounds <= 0) actor.dot = null;
         if (actor.hp <= 0) break;
@@ -480,7 +615,7 @@
       if (actor.restNext) { actor.restNext = false; pushRound({ attacker: actor.side, action: 'rest' }); if (!followup) tickRestrictions(actor); continue; }
       if (actor.stun > 0) { actor.stun--; pushRound({ attacker: actor.side, action: 'stunned' }); if (!followup) tickRestrictions(actor); continue; }
 
-      if (actor.npcType) npcAction(actor, def);
+      if (actor.npcType) { npcAction(actor, def); npcMechAfter(actor, def); }
       else playerLikeAction(actor, def);
       if (!followup) tickRestrictions(actor);
       // 无敌模式兜底：吸血、自伤、反伤等旁路都不会把玩家打死

@@ -240,14 +240,17 @@
     spinning = false;
     refreshLotteryDay();
     const s = State.state();
-    const p = C().page('bag', 'bag', '<h2 class="extra-lottery-heading cartoon">\u6bcf\u65e5\u5e78\u8fd0\u62bd\u5956</h2><div class="extra-lottery-prizes">' + prizes.map((prize, i) => '<div class="extra-prize" data-prize="' + i + '">' + C().icon('prop', prize.id) + '<span>' + prize.label + '</span></div>').join('') + '</div><div class="extra-lottery-footer"><div><b data-lottery-status>\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21</b><span>\u6bcf\u5929\u514d\u8d391\u6b21\uff0c\u4e4b\u540e\u6bcf\u6b2120\u91d1\u677e\u679c<br>\u5f53\u524d\u91d1\u677e\u679c\uff1a<strong data-lottery-gold>' + s.goldPoint + '</strong></span></div>' + button(spinning ? '\u62bd\u5956\u4e2d\u2026' : s.lotteryFree > 0 ? '\u514d\u8d39\u62bd\u5956' : '\u518d\u62bd\u4e00\u6b21', 'lottery-spin', 'gold') + '</div>', { cls: 'extra-board lottery-extra-board' });
+    const p = C().page('bag', 'bag', '<h2 class="extra-lottery-heading cartoon">\u6bcf\u65e5\u5e78\u8fd0\u62bd\u5956</h2><div class="extra-lottery-prizes">' + prizes.map((prize, i) => '<div class="extra-prize" data-prize="' + i + '">' + C().icon('prop', prize.id) + '<span>' + prize.label + '</span></div>').join('') + '</div><div class="extra-lottery-footer"><div><b data-lottery-status>\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21</b><span>\u6bcf\u5929\u514d\u8d391\u6b21\uff0c\u4e4b\u540e\u4f18\u5148\u7528\u62bd\u5956\u5377\uff08\u73b0\u6709 ' + (s.props[50] || 0) + ' \u5f20\uff09\uff0c\u518d\u626320\u91d1\u677e\u679c<br>\u5f53\u524d\u91d1\u677e\u679c\uff1a<strong data-lottery-gold>' + s.goldPoint + '</strong></span></div>' + button(spinning ? '\u62bd\u5956\u4e2d\u2026' : s.lotteryFree > 0 ? '\u514d\u8d39\u62bd\u5956' : '\u518d\u62bd\u4e00\u6b21', 'lottery-spin', 'gold') + '</div>', { cls: 'extra-board lottery-extra-board' });
     back(p, () => UI.runAction('bag'), '\u8fd4\u56de\u9053\u5177');
     const spin = on(p, 'lottery-spin', () => {
       if (version !== lotteryVersion || !p.isConnected || spinning) return;
       refreshLotteryDay();
-      if (s.lotteryFree < 1 && s.goldPoint < 20) { alert('\u91d1\u677e\u679c\u4e0d\u8db320\uff0c\u660e\u5929\u8fd8\u6709\u4e00\u6b21\u514d\u8d39\u673a\u4f1a\u3002'); return; }
+      if (s.lotteryFree < 1 && !(s.props[50] > 0) && s.goldPoint < 20) { alert('\u91d1\u677e\u679c\u4e0d\u8db320\u4e14\u6ca1\u6709\u62bd\u5956\u5377\uff0c\u660e\u5929\u8fd8\u6709\u4e00\u6b21\u514d\u8d39\u673a\u4f1a\u3002'); return; }
       spinning = true; spin.disabled = true; spin.textContent = '\u62bd\u5956\u4e2d\u2026';
-      if (s.lotteryFree > 0) s.lotteryFree--; else s.goldPoint -= 20;
+      // 扣费顺序：每日免费次数 → 抽奖卷（无尽挑战塔产出）→ 20 金松果
+      if (s.lotteryFree > 0) s.lotteryFree--;
+      else if (s.props[50] > 0) { s.props[50]--; if (s.props[50] <= 0) delete s.props[50]; }
+      else s.goldPoint -= 20;
       // \u4e00\u6b21\u70b9\u51fb\u7acb\u5373\u3001\u539f\u5b50\u5730\u7ed3\u7b97\u3002\u79bb\u5f00\u52a8\u753b\u9875\u6216\u5237\u65b0\u9875\u9762\u4e0d\u4f1a\u6f0f\u5956\u6216\u591a\u53d1\u5956\u52b1\u3002
       const selected = Math.floor(Math.random() * prizes.length), prize = prizes[selected];
       // \u300c\u968f\u673a\u666e\u901a\u836f\u4e38\u00d72\u300d\uff1a\u5f53\u573a\u4ece\u56db\u79cd\u666e\u901a\u836f\u4e38\u91cc\u62bd\uff0c\u76f8\u540c\u7684\u5408\u5e76\u6210 \u00d72

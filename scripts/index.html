@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="css/debug.css">
 <link rel="stylesheet" href="css/battle-drops.css">
 <link rel="stylesheet" href="css/classic-refine.css">
+<link rel="stylesheet" href="css/tower.css">
 <script>
 // 运行时错误收集（供自检模式 ?test=1 报告问题，不影响正常游戏）
 window.__errs = [];
@@ -37,16 +38,19 @@ window.addEventListener('unhandledrejection', function (e) {
 <!-- 复刻版代码 -->
 <script src="js/engine.js"></script>
 <script src="js/gamedata.js"></script>
+<script src="js/tower-data.js"></script>
 <script src="js/state.js"></script>
 <!-- 桌面外壳（Tauri）里把存档通道换成 Rust 端文件读写；网页版这一句什么都不做 -->
 <script src="js/tauri-bridge.js"></script>
 <script src="js/sim.js"></script>
+<script src="js/tower.js"></script>
 <script src="js/battle.js"></script>
 <script src="js/battle-drops.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/classic-ui.js"></script>
 <script src="js/classic-extras.js"></script>
 <script src="js/classic-fusion.js"></script>
+<script src="js/tower-ui.js"></script>
 <script src="js/debug.js"></script>
 <script src="js/main.js"></script>
 </body>

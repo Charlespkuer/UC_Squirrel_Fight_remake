@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="/">
+<!-- 挑战塔 UI 探针（开发用，不属于游戏本体）。
+     用法：node scripts/serve.js --no-save 8199
+           然后打开 http://127.0.0.1:8199/tools/tower-ui-probe.html
+           可选 ?shot=stages|tower|choice|battle[&layer=N] 停在各画面便于截图
+           页面结束后把诊断 JSON 塞进隐藏的 <pre id="probe-json">，可用 headless Chrome
+           --dump-dom 抓取。始终使用 QA 隔离存档，不读写正式存档。 -->
+<script>
+(function () {
+  const url = new URL(location.href);
+  url.searchParams.set('qa', '1');
+  url.searchParams.delete('test');
+  history.replaceState(null, '', url.href);
+})();
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>挑战塔 UI 探针（开发用）</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<link rel="stylesheet" href="css/tower.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/tower-data.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/tower.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/battle-drops.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/tower-ui.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+/* ---------- 探针 ---------- */
+window.__PROBE = { steps: [], notes: {} };
+const P = window.__PROBE;
+const q = new URLSearchParams(location.search);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function snap(label, sel) {
+  const el = document.querySelector(sel);
+  if (!el) { P.steps.push({ label, sel, missing: true }); return null; }
+  const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+  const o = { label, sel, w: Math.round(r.width), h: Math.round(r.height),
+    fontSize: cs.fontSize, lineHeight: cs.lineHeight,
+    color: cs.color,
+    background: cs.backgroundImage !== 'none' ? cs.backgroundImage.slice(0, 70) : cs.backgroundColor,
+    border: cs.borderTopWidth + ' ' + cs.borderTopStyle + ' ' + cs.borderTopColor,
+    radius: cs.borderRadius, padding: cs.padding, fontFamily: cs.fontFamily.split(',')[0],
+    maxHeight: cs.maxHeight, overflowY: cs.overflowY,
+    text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 100) };
+  P.steps.push(o);
+  return o;
+}
+function list(sel) {
+  return [...document.querySelectorAll(sel)].map((el) => {
+    const cs = getComputedStyle(el);
+    return { cls: el.className, fontSize: cs.fontSize, text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 70) };
+  });
+}
+const btnTexts = () => [...document.querySelectorAll('#ui .uc-button')].map((b) => b.textContent.trim());
+
+async function main() {
+  // 1) 等正式启动流程走完（标题页），走「开始游戏」进入主界面，避免与 boot() 抢 #ui
+  for (let i = 0; i < 200 && !document.querySelector('#start-btn'); i++) await sleep(100);
+  P.notes.booted = !!document.querySelector('#start-btn');
+  if (!document.querySelector('#start-btn')) { P.fatal = '标题页未出现'; return; }
+  // QA 隔离存档：name 走默认，State.newGame 由 start-btn 触发（绝不碰正式存档）
+  document.querySelector('#start-btn').click();
+  for (let i = 0; i < 60 && document.querySelector('.title-screen'); i++) await sleep(100);
+  await sleep(400);
+  const S = State.state();
+  if (!S) { P.fatal = '存档未就绪'; return; }
+  P.notes.saveKey = State.saveKey;
+
+  // 2) 解锁挑战塔（QA 存档里改内存）
+  S.level = 35;
+  for (let id = 1; id <= 18; id++) S.stages[id] = { npcIndex: 3, passed: true };
+  const wantLayer = Math.max(0, Number(q.get('layer')) || 0);
+  if (wantLayer) S.tower = { maxLayer: wantLayer, best: 0, weekBest: 0 };
+  S.props[23] = 40;
+  P.notes.unlocked = Tower.unlocked();
+  P.notes.level = S.level;
+
+  // ---- 关卡页的挑战塔入口 ----
+  UI.runAction('stages');
+  await sleep(350);
+  P.notes.screen = UI.currentScreen();
+  P.entries = list('.tower-entry');
+  snap('入口卡片(挑战塔)', '.tower-entry');
+  snap('入口卡片(无尽)', '.tower-entry.endless');
+  snap('入口标题内文', '.tower-entry b');
+  snap('入口元信息', '.tower-entry-meta');
+  snap('基准:关卡说明', '.npc-description');
+  snap('基准:关卡标题', '.classic-board h2, .stages-scroll-board h2');
+  if (q.get('shot') === 'stages') {
+    const board = document.querySelector('#ui .classic-board');
+    if (board) board.scrollTop = board.scrollHeight;
+    await sleep(400);
+    snap('挑战塔入口(滚动后)', '.tower-entry');
+    P.done = true; P.errors = window.__errs.slice(); return;
+  }
+
+  // ---- 塔入口页 ----
+  TowerUI.openTower();
+  await sleep(350);
+  snap('塔页容器', '.tower-page');
+  snap('塔标题', '.tower-title');
+  snap('塔数值行', '.tower-stats');
+  snap('塔规则段', '.tower-rule');
+  snap('预告标题', '.tower-plan-title');
+  snap('塔身', '.tower-visual');
+  snap('塔身标题', '.tower-visual-caption');
+  snap('塔身里程碑提示', '.tower-caption-hint');
+  snap('楼层(当前)', '.tower-floor.now');
+  snap('楼层(普通)', '.tower-floor.todo');
+  snap('预告条目', '.tower-plan li');
+  snap('预告机制行', '.tower-plan-mech');
+  P.floors = list('.tower-floor').length;
+  P.fifthFloors = list('.tower-floor.fifth-floor').length;
+  P.markers = list('.tower-marker').length;
+  P.plan = (Tower.towerInfo().preview || []).map((p) => ({ name: p.name, kind: p.kind, squirrel: !!p.squirrel, elite: !!p.elite, mechDesc: p.mechDesc }));
+  P.towerPageButtons = btnTexts();
+  // 塔的返回按钮不应再叫「返回菜单」，否则会命中贴图美术
+  P.backButtonIsSprite = !!document.querySelector('.tower-board [data-action="home"] img, .tower-board .btn-art');
+  if (q.get('shot') === 'tower') { P.done = true; P.errors = window.__errs.slice(); return; }
+
+  // ---- 四选一弹窗 ----
+  Tower.startTowerRun();
+  const nb = Tower.nextBattle('tower');
+  P.notes.battle1 = nb.ok ? nb.info.name : nb.msg;
+  Tower.reportBattle('tower', nb.token, true, 0.55);
+  P.notes.pendingChoices = (Tower.towerInfo().run || {}).choices ? Tower.towerInfo().run.choices.length : 0;
+  TowerUI.openTower();
+  await sleep(300);
+  P.towerRunButtons = btnTexts();
+  const fightBtn = document.querySelector('#ui [data-action="fight"]');
+  P.notes.foundFightBtn = !!fightBtn;
+  if (fightBtn) fightBtn.click();
+  await sleep(500);
+  P.choiceShown = !!document.querySelector('.choice-card');
+  snap('四选一遮罩', '.classic-modal-overlay.choice-dialog');
+  snap('四选一弹窗', '.classic-modal-overlay.choice-dialog > .classic-modal');
+  snap('四选一弹窗内容区', '.classic-modal-overlay.choice-dialog > .classic-modal > .modal-body');
+  snap('四选一:回血卡', '.choice-card.heal-card');
+  P.choiceCards = list('.choice-card');
+  P.choiceButtons = btnTexts();
+  if (q.get('shot') === 'choice') { P.done = true; P.errors = window.__errs.slice(); return; }
+  // 关掉弹窗，继续测下一场
+  const cancel = [...document.querySelectorAll('.classic-modal .uc-button, .classic-modal-overlay .uc-button')].pop();
+  if (cancel) cancel.click();
+  await sleep(200);
+
+  // ---- 第 4 场：是不是松鼠（贴图表 / 武技 / 固定循环）----
+  if (Tower.towerInfo().run && Tower.towerInfo().run.choices) {
+    // 选第一个选项（回血），把选择清掉
+    Tower.pickChoice('tower', 0);
+  }
+  const foes = [];
+  for (let i = 0; i < 4; i++) {
+    const nx = Tower.nextBattle('tower');
+    if (!nx.ok) { foes.push({ error: nx.msg }); break; }
+    foes.push({ no: i + 1, name: nx.info.name, kind: nx.entry.kind, npcType: nx.foe.npcType,
+      weapons: (nx.foe.weapons || []).map((w) => w.id + ':' + w.level),
+      skills: (nx.foe.skills || []).map((w) => w.id + ':' + w.level),
+      pattern: nx.foe.pattern || null, mechs: (nx.foe.mech || []).slice(),
+      hp: nx.foe.hp, power: nx.foe.power, region: nx.region, squirrelFlag: !!nx.info.squirrel });
+    if (i < 3) {
+      // 赢下暖身战（战报按胜利结算），并在有选择时选回血
+      Tower.reportBattle('tower', nx.token, true, 0.9);
+      const run = Tower.towerInfo().run;
+      if (run && run.choices) Tower.pickChoice('tower', 0);
+    } else {
+      Tower.interruptBattle('tower', nx.token);
+    }
+  }
+  P.foes = foes;
+  P.notes.battleSpeedOpts = /speedToggle/.test(String(Battle.run));
+
+  // ---- 真打一场第 4 场，看松鼠贴图 / 武器 / 倍速按钮 ----
+  if (q.get('shot') === 'battle') {
+    // 确定性：清掉前面留下的 run，把层数钉在 ?layer= 指定的层（默认 1 层 = 斥候松鼠）
+    const tr = Tower.towerInfo().run;
+    if (tr) { const cur = Tower.nextBattle('tower'); if (cur.ok) Tower.interruptBattle('tower', cur.token); Tower.abandon('tower'); }
+    const bl = Math.max(0, Number(q.get('layer')) || 0);
+    Tower._debugSetLayer(bl);
+    const start = Tower.startTowerRun();
+    if (!start.ok) { P.fatal = '开局失败：' + start.msg; return; }
+    P.notes.battleLayer = bl + 1;
+    let nx2 = null;
+    for (let i = 0; i < 4; i++) {
+      nx2 = Tower.nextBattle('tower');
+      if (!nx2.ok) break;
+      if (nx2.entry.kind === 'squirrel') break;
+      Tower.reportBattle('tower', nx2.token, true, 1);
+      const r2 = Tower.towerInfo().run;
+      if (r2 && r2.choices) Tower.pickChoice('tower', 0);
+    }
+    if (!nx2 || !nx2.ok) { P.fatal = '取不到第 4 场'; return; }
+    P.notes.battleFoe = { name: nx2.info.name, npcType: nx2.foe.npcType, weapons: nx2.foe.weapons, skills: nx2.foe.skills, pattern: nx2.foe.pattern };
+    Promise.resolve(Main.startBattle(nx2.foe, {
+      region: nx2.region, kind: 'tower', useProps: false, hpRatio: 1, adjustMe: nx2.adjustMe,
+      allowSkip: false, speedToggle: true, collectDrops: false, onEnd: () => {},
+    })).catch(() => {});
+    for (let i = 0; i < 60; i++) {
+      await sleep(250);
+      if (window.UI && UI.currentScreen && document.querySelector('canvas')) break;
+    }
+    await sleep(4200);   // 让战斗打到中段，好人物的武器/技能动作
+    P.notes.battleShot = true;
+    P.done = true; P.errors = window.__errs.slice(); return;
+  }
+
+  // ---- 天使果实：师父驾到（技能 13）不计入上限 ----
+  const before = S.skills.slice();
+  S.skills = ['13:1'];
+  P.masterOnly = { wsLimit: State.wsLimit(), owned: State.ownedWSCount() };
+  S.skills = ['13:1', '5:1', '7:1'];
+  P.masterPlus2 = { wsLimit: State.wsLimit(), owned: State.ownedWSCount() };
+  S.skills = before;
+
+  P.done = true;
+  P.errors = window.__errs.slice();
+}
+function dump() {
+  const pre = document.createElement('pre');
+  pre.id = 'probe-json';
+  pre.style.cssText = 'position:fixed;left:-99999px;top:0;';
+  pre.textContent = JSON.stringify(P);
+  document.body.appendChild(pre);
+}
+main().then(dump).catch((e) => { P.fatal = String(e && e.stack || e); dump(); });
+</script>
+</body>
+</html>

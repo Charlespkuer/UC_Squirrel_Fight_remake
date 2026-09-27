@@ -164,6 +164,8 @@
     master: null, prentices: [],
     lastEnergyTs: 0, reborn: 0, joinRankCount: 0, lotteryDate: '', lotteryFree: 1,
     woodRecord: 0, dailyClaimDate: '', battles: [], shopPurchaseDate: '', shopPurchases: {},
+    tower: { maxLayer: 0, run: null },                                    // 无尽挑战塔（主塔）
+    endless: { best: 0, weekBest: 0, weekKey: '', bestLayer: 0, shieldDate: '', run: null },
   };
 
   // 竞技场 AI 名称前缀
@@ -235,6 +237,9 @@
         '增加主动挑战获得经验值40%,持续20次战斗,关卡中无效。'],
     [44, '增加主动挑战获得经验值60%,持续20次战斗,关卡,竞技,天梯赛无效。',
          '增加主动挑战获得经验值60%,持续20次战斗,关卡,天梯赛无效。'],
+    // 抽奖卷（id 50）：原版字典只有占位说明，无尽挑战塔正式启用后补正式文案。
+    [50, '我是抽奖卷',
+         '无尽挑战塔·无尽模式的战利品。每日幸运抽奖的免费次数用尽后，优先消耗1张抽奖卷再抽1次。'],
   ];
   function applyPropRemarkFixes() {
     const map = window.propMap;

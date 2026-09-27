@@ -233,6 +233,29 @@
     }
     // 本机偏好（音乐音量/静音、分辨率、全面屏）也写进存档：换浏览器或换机器同步后设置还在。
     next.settings = normalizeSettings(raw.settings);
+    // 无尽挑战塔：浅校验（深校验在 tower.js 懒做）。进行中的战斗令牌一律作废——
+    // 刷新/重进后重打该场，不重复扣挑战书、不掉层。
+    {
+      const runShape = (r) => {
+        if (!object(r)) return null;
+        const layer = Math.floor(Number(r.layer));
+        if (!Number.isFinite(layer) || layer < 1 || !Array.isArray(r.plan) || !r.plan.length) return null;
+        const copy = Object.assign({}, r);
+        delete copy.attempt;
+        copy.choices = null;
+        return copy;
+      };
+      const tw = object(raw.tower) ? raw.tower : {};
+      next.tower = { maxLayer: Math.max(0, integer(tw.maxLayer, 0)), run: runShape(tw.run) };
+      const en = object(raw.endless) ? raw.endless : {};
+      next.endless = {
+        best: Math.max(0, integer(en.best, 0)), weekBest: Math.max(0, integer(en.weekBest, 0)),
+        weekKey: typeof en.weekKey === 'string' ? en.weekKey : '',
+        bestLayer: Math.max(0, integer(en.bestLayer, 0)),
+        shieldDate: typeof en.shieldDate === 'string' ? en.shieldDate : '',
+        run: runShape(en.run),
+      };
+    }
     return next;
   }
 
@@ -2274,7 +2297,7 @@
     vipActive, vipLevel, vipUntil, vipDaysLeft, vipRegenMul, vipPassiveExpCap, vipExpNeed,
     vipRow, buyVip, grantVip, tickVipDaily, gearCapacity, syncVipEnergyCap,
     VIP_LEVELS, VIP_LEVEL_EXP, VIP_MAX_LEVEL, VIP_PLANS, VIP_ENERGY_CAP, VIP_GEAR_BONUS, GEAR_CAPACITY,
-    weaponInst, skillInst, myWeapons, mySkills, wsLimit,
+    weaponInst, skillInst, myWeapons, mySkills, wsLimit, ownedWSCount,
     upgradeInfo, doUpgrade,
     weaponList,
     gearInst, myGears, wear, unwear, sellGear, composeGear, mergeGears, addGear, extText, randomExt,

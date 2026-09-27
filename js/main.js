@@ -525,6 +525,8 @@
       wears: Engine.wearsFor(State.myGears().filter(g => g.used)),
       effects: State.equipmentEffects(), masterLevel: S.master ? S.master.level : 0,
     };
+    // 挑战塔等玩法在构建完玩家面板后注入本场的 buff 修正（属性乘区/护盾/吸血等）。
+    if (typeof opts.adjustMe === 'function') opts.adjustMe(me);
     mode = 'battle';
     cancelAnimationFrame(rafId);
     $('#ui').innerHTML = '';
@@ -534,6 +536,8 @@
     let settled = false;
     const controller = await Battle.run({
       canvas, me, foe, region: opts.region, kind: opts.kind, collectDrops: opts.collectDrops !== false,
+      // 挑战塔不给跳过（要真打），改成右下角 1×/2× 倍速切换
+      allowSkip: opts.allowSkip, speedToggle: opts.speedToggle,
       dropRandom: window.QA_FIXTURE && QA_FIXTURE.dropRandom,
       onEnd: (winner, result, loot) => {
         if (settled) return;

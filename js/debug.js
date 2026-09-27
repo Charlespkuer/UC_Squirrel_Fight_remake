@@ -45,6 +45,8 @@
     { key: 'freeUpgrade', label: '升级无需消耗', note: '升级不扣金松果、不扣武器/技能卷轴，也不受等级限制' },
     { key: 'freeShop', label: '道具免费', note: '商店购买不扣金松果' },
     { key: 'noStageCost', label: '关卡不耗挑战书', note: '入场与复活都不消耗挑战书' },
+    { key: 'noTowerCost', label: '爬塔不耗挑战书', note: '无尽挑战塔（主塔）进层不消耗挑战书' },
+    { key: 'endlessCoin', label: '无尽试炼币拉满', note: '无尽模式开局自带 9999 试炼币（仅新开的局生效）' },
   ];
   function set(key, value, session) {
     if (!(key in defaults)) return false;

@@ -526,9 +526,27 @@
   }
   function npcImage(type){return '<img alt="'+esc(type.name)+'" src="images/classic/characters/'+NPC_FILE[type.anim]+'-classic-card.png">';}
   function openStages() {
-    const content='<div class="npc-select">'+GData.STAGE_TYPES.map((t,i)=> (i?'<span class="npc-arrow">➜</span>':'')+'<div class="npc-card">'+npcImage(t)+btn('挑战他','type'+i,stageTypeAvailable(i)?'gold small':'muted small')+'</div>').join('')+'</div><div class="npc-description">10级可挑战盖世五侠。依次通过六种难度，才能挑战下一位高手。每轮连续击败3名敌人，收集装备碎片！</div>';
-    const p=page('challenge','stages',content);
+    const content='<div class="npc-select">'+GData.STAGE_TYPES.map((t,i)=> (i?'<span class="npc-arrow">➜</span>':'')+'<div class="npc-card">'+npcImage(t)+btn('挑战他','type'+i,stageTypeAvailable(i)?'gold small':'muted small')+'</div>').join('')+'</div><div class="npc-description">10级可挑战盖世五侠。依次通过六种难度，才能挑战下一位高手。每轮连续击败3名敌人，收集装备碎片！</div>'+towerEntryHtml();
+    const p=page('challenge','stages',content,{cls:'stages-scroll-board'});
     [0,1,2].forEach(i=>$('[data-action="type'+i+'"]',p).onclick=()=>openDifficulty(i));
+    $('[data-action="tower-entry"]',p)?.addEventListener('click',()=>openTowerEntry('tower'));
+    $('[data-action="endless-entry"]',p)?.addEventListener('click',()=>openTowerEntry('endless'));
+  }
+  /* 无尽挑战塔入口（关卡页下滑可见）：30 级 + 18 关通关解锁。 */
+  function towerEntryHtml() {
+    const lock=window.Tower?Tower.unlocked():{ok:false,msg:'数据加载中…'};
+    if(!lock.ok)return '<div class="tower-entries"><div class="tower-entry locked"><b>无尽挑战塔</b><span>'+esc(lock.msg)+'</span></div></div>';
+    const t=Tower.towerInfo(),e=Tower.endlessInfo();
+    return '<div class="tower-entries">'+
+      '<button class="tower-entry" data-action="tower-entry"><b>挑战塔</b><span>已通关 '+t.maxLayer+' 层 · 下一层 '+t.nextLayer+'</span><span class="tower-entry-meta">挑战书×1 → 金松果 '+t.gold+'</span></button>'+
+      '<button class="tower-entry endless" data-action="endless-entry"><b>无尽模式</b><span>最高分 '+e.best+' · 最深 '+e.bestLayer+' 层</span><span class="tower-entry-meta">免门票 · 赢抽奖卷（现有 '+e.tickets+' 张）</span></button>'+
+      '</div>';
+  }
+  function openTowerEntry(mode) {
+    if(!window.Tower||!window.TowerUI)return;
+    const lock=Tower.unlocked();
+    if(!lock.ok){notice(lock.msg);return;}
+    if(mode==='tower')TowerUI.openTower();else TowerUI.openEndless();
   }
   function stageTypeAvailable(t) {
     return [1,2,3,4,5,6].some(st=>State.stageAccess(t*6+st).ok);
@@ -639,7 +657,9 @@
     const status=shop?State.purchaseStatus(id):null;
     // 天使/恶魔果实种子：只提示武技是否已满，不阻止合成 ——
     // 已满时合成的天使果实仍然可以留着，等有空位再用。
-    const wsNow=S.weapons.length+S.skills.length,wsMax=State.wsLimit(),wsFull=wsNow>=wsMax;
+    // 注意：用 State.ownedWSCount()（它把「师父驾到」排除在外）——那是拜师剧情赠送的技能，
+    // 不占武器/技能上限位；旧写法直接加 S.skills.length 会在学了师父驾到后提前显示「已满」。
+    const wsNow=State.ownedWSCount?State.ownedWSCount():S.weapons.length+S.skills.length,wsMax=State.wsLimit(),wsFull=wsNow>=wsMax;
     const seedNote=isSeed?('<p class="small-label">武器/技能：<b class="'+(wsFull?'ws-full':'ws-ok')+'">'+wsNow+'/'+wsMax+(wsFull?'（已满，果实仍可合成，等有空位时再使用）':'（未满，可继续获得）')+'</b></p>'):'';
     const shardNote=isConvertShard?('<p class="small-label">当前 <b>'+(S.props[id]||0)+'</b>/'+GData.CONVERT_SHARD_COST+' 个　天梯赛里点飘出来的碎片获得</p>'):'';
     // 药剂：可以把体力顶到自然上限之上（最高 999），只提示不再自然回复。
@@ -939,7 +959,7 @@
       const d=new Date(r.createdAt),time=(d.getMonth()+1)+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
       return '<article class="message-card"><span class="message-stamp '+(r.winner?'loss':'')+'">'+(r.winner?'败':'胜')+'</span>你挑战了【'+esc(r.foe.name)+'】，'+(r.winner?'遗憾落败。':'获得胜利！')+'<time>'+time+'</time><button class="uc-button tiny muted" data-replay="'+esc(r.id)+'">查看录像</button></article>';
     }).join('');
-    const p=page('message',tab,'<div class="message-list">'+(html||'<div class="empty-state">暂时没有'+(tab==='revenge'?'落败记录':'战斗消息')+'<br><span class="small-label">开始一场挑战，精彩战斗会保存在这里。</span></div>')+'</div>'+(pg?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(pg<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(pg+1)+'/'+total,left:'<span class="footer-left">'+btn('村庄','village','small gold')+'</span>',right:'<span class="footer-right">'+btn('好友','friends','small gold')+'</span>',counterPlace:'board'});
+    const p=page('message',tab,'<div class="message-list">'+(html||'<div class="empty-state">暂时没有'+(tab==='revenge'?'落败记录':'战斗消息')+'<br><span class="small-label">开始一场挑战，精彩战斗会保存在这里。</span></div>')+'</div>'+(pg?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(pg<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(pg+1)+'/'+total,counterPlace:'board'});
     $$('[data-replay]',p).forEach(b=>b.onclick=()=>{const r=list.find(x=>x.id===b.dataset.replay);Main.replayBattle(r,()=>openMessages(tab,pg));});
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openMessages(tab,pg-1));
     $('[data-action="next"]',p)?.addEventListener('click',()=>openMessages(tab,pg+1));
@@ -1191,6 +1211,10 @@
     if (!r) return '';
     let html = '<div class="sp-head">' + resultHead(r) + '</div>';
     html += '<div class="sp-hint">' + esc(syncAdvice(r.code, r.msg)) + '</div>';
+    if (r.code === 'PEER_NEWER' || r.code === 'LOCAL_NEWER') {
+      const label = r.code === 'PEER_NEWER' ? '强制覆盖对面' : '强制用对面覆盖本机';
+      html += '<div class="sp-actions">' + btn(label, 'sync-force', 'small gold') + '</div>';
+    }
     const log = (j && j.lines && j.lines.length) ? '<pre class="sp-log">' + esc(j.lines.join('\n')) + '</pre>' : '';
     return html + log;
   }
@@ -1233,44 +1257,17 @@
       actions = btn('重新检测', 'sync-recheck', 'small');
     }
     const prog = syncProgressHtml();
-    return '<div class="sync-panel sync-panel-peers"><div class="sync-head">跨设备同步：' + state + '</div>' +
+    return '<div class="sync-panel"><div class="sync-head">跨设备同步：' + state + '</div>' +
       '<div class="sync-actions">' + actions + '</div>' +
       '<div class="sync-progress" id="sync-progress"' + (prog ? '' : ' style="display:none"') + '>' + prog + '</div></div>';
   }
   /** 面板上的按钮实际动作。kind 形如 'save' / 'files'，dir 是 'push' / 'pull'。 */
-  function progText(p) {
-    if (!p) return '（没有存档）';
-    return esc(p.name || '小松鼠') + ' ' + (p.level || 0) + ' 级（经验 ' + (p.exp || 0) + '，金松果 ' + (p.gold || 0) + '）';
-  }
   async function syncRun(kind, dir, force) {
     if (syncState.busy) { toast('上一次同步还在跑，稍等一下'); return; }
     const info = syncState.info || {};
     const peers = Object.keys(info.peers || {});
     if (!peers.length) { toast('还没找到对端，先点「扫描对端」'); return; }
     const peer = peers[0];
-
-    // 存档同步：方向是你点出来的，所以不再因为「谁的时间更新」而拒绝执行。
-    // 只有在**要被覆盖的那一份进度更靠前**时，先确认一次（覆盖前一定自动备份）。
-    if (kind === 'save' && !force) {
-      let pv = null;
-      try { pv = await syncFetch('/local/save/preview?peer=' + encodeURIComponent(peer), { timeout: 20000 }); } catch (e) {}
-      if (pv) {
-        const losingAhead = dir === 'push' ? pv.ahead === 'b' : pv.ahead === 'a';
-        if (losingAhead) {
-          const losing = dir === 'push' ? pv.remote : pv.local;
-          const mine = dir === 'push' ? pv.local : pv.remote;
-          const who = dir === 'push' ? '对面' : '本机';
-          syncState.pending = { kind: kind, dir: dir };
-          notice(who + '那份的进度更靠前：' + progText(losing) + '，而' +
-            (dir === 'push' ? '本机' : '对面') + '这份是 ' + progText(mine) + '。\n\n' +
-            '确定要用' + (dir === 'push' ? '本机' : '对面') + '这份覆盖' + who + '吗？（覆盖前的旧档会自动备份）',
-            [{ label: '确定覆盖', run: () => { if (syncState.pending) { const r = syncState.pending; syncState.pending = null; syncRun(r.kind, r.dir, true); } } },
-             { label: '取消', cls: 'muted', run: () => { syncState.pending = null; } }]);
-          return;
-        }
-      }
-    }
-
     syncState.busy = true; syncState.result = null;
     syncState.job = { phase: '准备中', done: 0, total: 0, bytes: 0, lines: [] };
     if (screen === 'system') { openSystem(); }
@@ -1337,16 +1334,11 @@
     syncBtn('sync-files-push',()=>syncRun('files','push'));
     syncBtn('sync-files-pull',()=>syncRun('files','pull'));
     // 进度区里的按钮是每次重绘 innerHTML 生成的，用事件委托挂，避免重绘后失效
-    // 系统页上有两个 .sync-panel（「存档位置」和「跨设备同步」）。以前这里写的是
-    // $('.sync-panel', p) —— 选中的是**第一个**（存档位置），于是进度区里动态生成的
-    // 按钮根本没有监听器，点「强制覆盖」毫无反应。现在用专属类名 sync-panel-peers。
-    const syncPanelEl=$('.sync-panel-peers',p);
+    const syncPanelEl=$('.sync-panel',p);
     if(syncPanelEl)syncPanelEl.addEventListener('click',(ev)=>{
       const t=ev.target&&ev.target.closest?ev.target.closest('[data-action="sync-force"]'):null;
-      if(!t)return;
-      const r=syncState.pending||syncState.result; if(!r)return;
-      syncState.pending=null;
-      syncRun(r.kind,r.dir,true);
+      if(!t||!syncState.result)return;
+      syncRun(syncState.result.kind,syncState.result.dir,true);
     });
     syncBtn('sync-discover',async()=>{
       toast('正在扫描 ZeroTier 网段…');

@@ -7,6 +7,12 @@
   const SQ = ['SQ_01', 'SQ_02', 'weaponAttack', 'throwweaponAttack'];
   const NPC_SHEETS = { tl: ['tl'], xh: ['xh1', 'xh2'], xm: ['xm1', 'xm2'], wood: ['woodman1', 'woodman2'] };
   const NPC_EFFECTS = { tl: ['tl_effect'], xh: ['xh_effect1', 'xh_effect2'], xm: ['xm_effect'], wood: ['woodman_effect'] };
+  /* 挑战塔 NPC：战斗行为用独立 npcType（tw_*，sim.js 里走普通 NPC 行动、不触发三侠大招），
+   * 贴图与动画复用三侠的表。优先从 TowerData 取体型指派，测试环境缺TowerData时用内联兜底。 */
+  const TOWER_NPC_ANIM = window.TowerData
+    ? Object.fromEntries(TowerData.NPCS.map((n) => ['tw_' + n.id, n.anim]))
+    : { tw_berserker: 'xm', tw_assassin: 'tl', tw_medic: 'xh', tw_ironwall: 'xm', tw_bramble: 'xh', tw_frostmage: 'xh', tw_tamer: 'tl', tw_vampire: 'tl', tw_golem: 'xm', tw_devourer: 'xm' };
+  const npcBase = (type) => TOWER_NPC_ANIM[type] || type;
   // FightStats.js 原版先把 1024 宽场景放大 1.4355 倍，再居中裁切，不能压成 1170 × 690。
   const BG_SCALE = 1.4355;
   const REGIONS = {
@@ -89,7 +95,7 @@
     for (const layer of region.layers) if (layer.id && !Engine.has(layer.id)) await Engine.loadSheetFromUrl(layer.id, 'images/' + layer.id + '.png');
 
     const player = Engine.makePlayer(), scenePlayers = [];
-    const fighters = sources.map((info, side) => ({ info, side, npc: info.npcType || null, inst: null, dead: false, wears: wears[side] }));
+    const fighters = sources.map((info, side) => ({ info, side, npc: info.npcType ? npcBase(info.npcType) : null, inst: null, dead: false, wears: wears[side] }));
     // maxHp 必须用真实上限：关卡连战时 me.hp 只是按比例继承的当前血量，
     // 拿它当上限会让血条显示成满血，并让模拟按错误的上限计算。
     const hpOf = (f) => Math.max(1, Math.round(Number(f.hp) || 1));
@@ -98,19 +104,26 @@
     const floaters = [], sleepers = new Set();
     let stopped = false, skipped = false, ending = false, raf = 0, round = 99, countdown = null;
     let last = performance.now(), shake = 0, combatStarted = false;
-    // 跳过按钮的绘制与点击区共用这个矩形。原版字面坐标 (983,609) 的 164x60 框会把
+    // 右下角那颗按钮的绘制与点击区共用这个矩形。原版字面坐标 (983,609) 的 164x60 框会把
     // 「跳过」两个字挤出圆角格，故保留原来的 190x70 比例。
     const skipRect = { x: 964, y: 605, w: 190, h: 70 };
+    // 挑战塔等玩法不给跳过（要真打），改成 1×/2× 倍速切换；两者都不开时右下角不留按钮。
+    const speedToggle = !!opts.speedToggle;
+    const allowSkip = opts.allowSkip !== false;
+    let speed = 1;
+    const cornerLabel = () => (speedToggle ? speed + '×' : '跳过');
     const previousClick = canvas.onclick;
     const ui = document.getElementById('ui');
     const pickups = opts.collectDrops && !opts.result && window.BattleDrops ? BattleDrops.create({ root: ui, random: opts.dropRandom, kind: opts.kind }) : null;
     const skipButton = document.createElement('button');
-    skipButton.type = 'button'; skipButton.setAttribute('aria-label', '跳过战斗'); skipButton.textContent = '跳过';
+    skipButton.type = 'button';
+    skipButton.setAttribute('aria-label', speedToggle ? '切换战斗速度' : '跳过战斗');
+    skipButton.textContent = cornerLabel();
     // 无障碍点击层跟着 skipRect 走，避免两处坐标各改一半而错位。
     const rectStyle = ['left:' + (skipRect.x / W * 100).toFixed(3) + '%', 'top:' + (skipRect.y / H * 100).toFixed(3) + '%',
       'width:' + (skipRect.w / W * 100).toFixed(3) + '%', 'height:' + (skipRect.h / H * 100).toFixed(3) + '%'].join(';');
     skipButton.style.cssText = 'position:absolute;' + rectStyle + ';padding:0;border:0;background:transparent;color:transparent;cursor:pointer;pointer-events:auto;z-index:20;';
-    if (ui) ui.appendChild(skipButton);
+    if (ui && (allowSkip || speedToggle)) ui.appendChild(skipButton);
     function clean() {
       cancelAnimationFrame(raf); skipButton.remove();
       if (pickups) pickups.close();
@@ -121,20 +134,28 @@
     }
     const controller = { cancel() { stopped = true; clean(); }, skip() { if (!ending && !skipped && !stopped) { skipped = true; if (pickups) pickups.skip(); for (const wake of [...sleepers]) wake(); } }, result };
     activeController = controller;
-    skipButton.onclick = () => controller.skip();
+    /** 右下角按钮被按下的动作：倍速模式切速度，否则跳过。 */
+    function cornerAction() {
+      if (!speedToggle) { controller.skip(); return; }
+      if (ending || stopped) return;
+      speed = speed === 1 ? 2 : 1;
+      skipButton.textContent = cornerLabel();
+      skipButton.setAttribute('aria-label', '切换战斗速度（当前 ' + speed + '×）');
+    }
+    skipButton.onclick = cornerAction;
     function onClick(event) {
       const rect = canvas.getBoundingClientRect();
       const x = (event.clientX - rect.left) * W / rect.width, y = (event.clientY - rect.top) * H / rect.height;
-      if (x >= skipRect.x && x <= skipRect.x + skipRect.w && y >= skipRect.y && y <= skipRect.y + skipRect.h) controller.skip();
+      if (x >= skipRect.x && x <= skipRect.x + skipRect.w && y >= skipRect.y && y <= skipRect.y + skipRect.h) cornerAction();
     }
-    canvas.onclick = onClick;
+    canvas.onclick = (allowSkip || speedToggle) ? onClick : null;
     const aborted = () => stopped || skipped;
     function wait(ms) {
       if (aborted()) return Promise.resolve();
       return new Promise((resolve) => {
         let timer;
         const wake = () => { clearTimeout(timer); sleepers.delete(wake); resolve(); };
-        sleepers.add(wake); timer = setTimeout(wake, ms);
+        sleepers.add(wake); timer = setTimeout(wake, speed > 1 ? ms / speed : ms);
       });
     }
     function mirrorFor(side) { return fighters[side].npc ? side === 0 : side === 1; }
@@ -243,18 +264,21 @@
       }
       Engine.text(ctx, String(Math.max(0, round)).padStart(2, '0'), W / 2, 101,
         { size: 63, align: 'center', color: '#fff', strokeColor: '#301314', lineWidth: 6 });
-      if (!ending) {
+      if (!ending && (allowSkip || speedToggle)) {
         const b = skipRect;
-        rounded(b.x, b.y + 5, b.w, b.h, 34, '#23350a');
-        const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h); g.addColorStop(0, '#cefa79'); g.addColorStop(.4, '#98df41'); g.addColorStop(1, '#6cac18');
+        const fast = speedToggle && speed > 1;
+        rounded(b.x, b.y + 5, b.w, b.h, 34, fast ? '#0d2a45' : '#23350a');
+        const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
+        if (fast) { g.addColorStop(0, '#8fd8ff'); g.addColorStop(.4, '#4aa8ee'); g.addColorStop(1, '#1c6fbe'); }
+        else { g.addColorStop(0, '#cefa79'); g.addColorStop(.4, '#98df41'); g.addColorStop(1, '#6cac18'); }
         rounded(b.x, b.y, b.w, b.h, 34, g);
-        ctx.lineWidth = 4; ctx.strokeStyle = '#374f11'; ctx.stroke();
-        Engine.text(ctx, '跳过', b.x + b.w / 2, b.y + 52, { size: 46, align: 'center', color: '#fff', strokeColor: '#432715', lineWidth: 7 });
+        ctx.lineWidth = 4; ctx.strokeStyle = fast ? '#123c63' : '#374f11'; ctx.stroke();
+        Engine.text(ctx, cornerLabel(), b.x + b.w / 2, b.y + 52, { size: 46, align: 'center', color: '#fff', strokeColor: fast ? '#123c63' : '#432715', lineWidth: 7 });
       }
     }
     function render(now) {
       if (stopped) return;
-      const dt = Math.min(100, Math.max(0, now - last)); last = now;
+      const dt = Math.min(100, Math.max(0, now - last)) * speed; last = now;
       if (pickups && combatStarted && !ending && !skipped && !document.hidden) pickups.tick(dt);
       Engine.updatePlayer(player, dt); scenePlayers.forEach((p) => Engine.updatePlayer(p, dt));
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
@@ -309,7 +333,11 @@
     async function playRound(r) {
       const att = r.attacker, def = 1 - att, f = fighters[att];
       const beforeHp = hps.slice();
-      if (r.action === 'dot') { applyHp(r); floater(r.selfDot ? att : def, '-' + r.dmg, 'y'); await wait(400); return; }
+      if (r.action === 'dot') { applyHp(r); floater(r.selfDot ? att : def, '-' + r.dmg, 'y'); if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y'); await wait(400); return; }
+      if (r.action === 'regen') {   // 塔机制/buff：回合开始回复（百草回春/活血丹/回春术）
+        applyHp(r); floater(att, '+' + r.heal, 'g'); if (r.noteText) floater(att, r.noteText, 'y');
+        await wait(420); return;
+      }
       if (r.action === 'rest' || r.action === 'stunned') {
         applyHp(r); floater(att, r.action === 'rest' ? '休息' : '眩晕', 'y');
         // 思考气泡里画的是方天画戟，只有蓄力方天画戟的休息回合才能播放；眩晕回合只飘字
@@ -351,6 +379,10 @@
           if (r.lifesteal) floater(att, '+' + r.lifesteal, 'g');
           if (r.reboundHurt) floater(att, '-' + r.reboundHurt, 'r');
           if (r.selfBurn) floater(att, '-' + r.selfBurn, 'r');
+          // 挑战塔：护盾吸收 / 荆棘反弹 / 机制提示（狂暴·禁锢·吞噬·瞬杀·毒藤·金蝉脱壳·不死鸟）
+          if (r.shellAbsorb) floater(def, '护盾-' + r.shellAbsorb, 'y');
+          if (r.thornsDmg) floater(att, '-' + r.thornsDmg, 'r');
+          if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y');
         }
       }
       effect(fx, att, { weaponLabel });

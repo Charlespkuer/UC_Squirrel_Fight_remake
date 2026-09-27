@@ -725,7 +725,7 @@ test('师徒存档文本经过转义，四个页面模板保持标签闭合', ()
   assertBalanced(g.markup);
 });
 
-test('超级松鼠（原版VIP）：金松果购买、体力上限180、恢复倍率、装备格子与到期回收', () => {
+test('超级松鼠（原版VIP）：金松果购买、体力上限+60、恢复倍率、装备格子与到期回收', () => {
   const g = setup(), s = g.c.State.state();
   const base = s.maxEnergy;
   s.goldPoint = 0;
@@ -739,7 +739,7 @@ test('超级松鼠（原版VIP）：金松果购买、体力上限180、恢复�
   assert.equal(s.goldPoint, 5000 - 300);
   assert.equal(g.c.State.vipActive(), true);
   assert.equal(g.c.State.vipDaysLeft(), 7);
-  assert.equal(s.maxEnergy, 180, '特权8：体力上限 180');
+  assert.equal(s.maxEnergy, g.c.State.energyCapForLevel(s.level) + 60, '特权8：当前等级上限 +60');
   assert.equal(g.c.State.gearCapacity(), 106, '特权5：永久 +6 装备格子');
   assert.equal(g.c.State.vipRegenMul(), 1.1, '1 级恢复 1.1 倍');
   // 每日首次登陆 +1 超级松鼠经验，重复调用不再加
@@ -816,7 +816,7 @@ test('VIP 页面：显示原版 8 条特权与两档价格，不删除系统页�
   const vipHtml = g.page().html;
   assert.match(vipHtml, /超级松鼠/);
   assert.match(vipHtml, /300/); assert.match(vipHtml, /1000/);
-  assert.match(vipHtml, /体力上限增加到180点/);
+  assert.match(vipHtml, /体力上限 \+60/);
   assert.match(vipHtml, /被动经验上限/);
   assertBalanced(g.markup);
 });

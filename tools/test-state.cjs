@@ -534,6 +534,77 @@ test('商店每日限购：四种普通药丸每天 3 颗', () => {
   for (const id of [41, 42, 43, 44]) assert.equal(S.purchaseStatus(id).buyable, false, id + ' 不进商店');
 });
 
+test('超级松鼠特权 8：体力上限在当前等级上限之上 +60，到期原样退回', () => {
+  const g = game(), S = g.State, s = S.state();
+  const day = 86400000;
+  for (const lv of [1, 10, 30, 50, 70]) {
+    const cap = S.energyCapForLevel(lv);
+    s.level = lv;
+    s.vip = { level: 1, exp: 0, until: 0, capAdded: 0, capApplied: false, lastDaily: '' };
+    s.maxEnergy = cap;                       // 普通状态：正好是等级上限
+    // 开通
+    s.vip.until = Date.now() + day;
+    S.syncVipEnergyCap();
+    assert.equal(s.maxEnergy, cap + 60, lv + ' 级开通后应为等级上限+60');
+    // 到期
+    s.vip.until = 0;
+    S.syncVipEnergyCap();
+    assert.equal(s.maxEnergy, cap, lv + ' 级到期应退回等级上限');
+  }
+  // 开通期间升级：上限跟着新等级走，仍然是 +60
+  s.level = 30; s.vip = { level: 1, exp: 0, until: Date.now() + day, capAdded: 0, capApplied: false, lastDaily: '' };
+  s.maxEnergy = S.energyCapForLevel(30);
+  S.syncVipEnergyCap();
+  assert.equal(s.maxEnergy, S.energyCapForLevel(30) + 60);
+  s.level = 50;
+  s.maxEnergy = Math.max(s.maxEnergy, S.energyCapForLevel(50));
+  S.syncVipEnergyCap();
+  assert.equal(s.maxEnergy, S.energyCapForLevel(50) + 60, '升级后仍应为新等级上限+60');
+  // 读档保留
+  S.save(); S.load();
+  assert.equal(S.state().maxEnergy, S.energyCapForLevel(50) + 60, '读档后 VIP 加成还在');
+  // 读档时若已到期则按等级上限收口
+  S.state().vip.until = 0; S.save(); S.load();
+  assert.equal(S.state().maxEnergy, S.energyCapForLevel(50), '到期读档按等级上限');
+});
+
+test('真·武器/真·技能：成功率沿用原表、费用按当日次数递增、24:00 清零、不吃失败保底', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.level = 70; s.goldPoint = 1000000; s.props[21] = 9999; s.props[22] = 9999;
+  // 真1~真5 的成功率就是原表 upgradeMap 第 10~14 行
+  for (const [lv, rate] of [[10, 100], [11, 8], [12, 5], [13, 4], [14, 3]]) {
+    s.skills = ['12:' + lv];
+    const info = S.upgradeInfo('skill', 12);
+    assert.equal(info.rate, rate, '技能等级 ' + lv + '（真' + (lv - 10) + '）成功率应为 ' + rate + '%');
+    assert.equal(info.isTrue, true);
+  }
+  s.weapons = ['4:10'];
+  assert.equal(S.upgradeInfo('weapon', 4).rate, 100, '武器 10→11 也是真1：100%');
+  // 真5 之后到顶
+  s.skills = ['12:15'];
+  assert.equal(S.upgradeInfo('skill', 12).max, true, '真5 是上限');
+  // 费用：当日第 N 次 = 2N U点 × 5 金松果 = 10/20/30…
+  s.skills = ['12:10']; s.trueUpgrades = { date: S.localDate(), count: 0 };
+  g.math.random = () => 1;                       // 必定失败，纯粹看费用与计数
+  const costs = [];
+  for (let i = 0; i < 5; i++) { costs.push(S.upgradeInfo('skill', 12).coin); S.doUpgrade('skill', 12); }
+  assert.deepEqual(costs, [10, 20, 30, 40, 50], '费用按当日次数递增');
+  const after = S.upgradeInfo('skill', 12);
+  assert.equal(after.fails, 0, '真升级绝不累积失败保底');
+  assert.equal(after.rate, 100, '真升级的成功率始终是原表值');
+  // 24:00 清零
+  g.advance(86400000);
+  assert.equal(S.trueAttemptsToday(), 0, '换天次数清零');
+  assert.equal(S.upgradeInfo('skill', 12).coin, 10, '次日费用回到第一次');
+  // 普通升级（9→10）仍然是 40 松果、仍然吃失败保底
+  s.skills = ['12:9'];
+  const normal = S.upgradeInfo('skill', 12);
+  assert.equal(normal.coin, 40);
+  assert.equal(normal.isTrue, false);
+  S.doUpgrade('skill', 12);
+  assert.equal(S.upgradeInfo('skill', 12).rate, 15, '普通升级失败仍然 +5%');
+});
+
 test('购买拒绝负数、小数和无穷数量，合法购买正常扣款', () => {
   const g = game(), s = g.State.state();
   for (const count of [-5, 0, 1.5, Infinity]) assert.equal(g.State.buyProp(1, count).ok, false);

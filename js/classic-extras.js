@@ -622,7 +622,7 @@
     '\u9996\u6b21\u5f00\u901a\uff0c\u6c38\u4e45\u8d60\u90016\u4e2a\u88c5\u5907\u683c\u5b50',
     '\u5e08\u5085\u5982\u679c\u662fVIP\uff0c\u5f92\u5f1f\u6bcf\u5929\u767b\u9646\u5c06\u989d\u5916\u83b7\u5f975-15\u4e2a\u91d1\u677e\u679c',
     '\u4e3b\u52a8\u6311\u6218VIP\u73a9\u5bb6\u6240\u5f97\u7ecf\u9a8c\u4e0a\u6da830%',
-    '\u4f53\u529b\u4e0a\u9650\u589e\u52a0\u5230180\u70b9',
+    '\u4f53\u529b\u4e0a\u9650 +60\uff08\u5f53\u524d\u7b49\u7ea7\u4e0a\u9650\u4e4b\u4e0a\uff09',
   ];
   function vip() {
     State.tickEnergy();
@@ -632,7 +632,7 @@
     const need = active ? State.vipExpNeed() : 0;
     const status = active
       ? '<div class="vip-status on"><span class="vip-crown">\u2605</span><div><h2>\u8d85\u7ea7\u677e\u9f20 Lv ' + level + '</h2>' +
-        '<p>\u5269\u4f59 ' + days + ' \u5929\u3000\u4f53\u529b\u6062\u590d ' + mul.toFixed(1) + ' \u500d\u3000\u4f53\u529b\u4e0a\u9650 ' + State.VIP_ENERGY_CAP + '\u3000\u88c5\u5907\u683c\u5b50 +' + State.VIP_GEAR_BONUS + '</p>' +
+        '<p>\u5269\u4f59 ' + days + ' \u5929\u3000\u4f53\u529b\u6062\u590d ' + mul.toFixed(1) + ' \u500d\u3000\u4f53\u529b\u4e0a\u9650 +' + State.VIP_ENERGY_BONUS + '\u3000\u88c5\u5907\u683c\u5b50 +' + State.VIP_GEAR_BONUS + '</p>' +
         '<p class="vip-exp">\u5347\u7ea7\u7ecf\u9a8c ' + s.vip.exp + ' / ' + need + '\uff08\u6bcf\u65e5\u9996\u6b21\u767b\u9646 +1\uff09</p></div></div>'
       : '<div class="vip-status off"><span class="vip-crown muted">\u2606</span><div><h2>\u5c1a\u672a\u5f00\u901a\u8d85\u7ea7\u677e\u9f20</h2>' +
         '<p>\u5f00\u901a\u540e\u7acb\u5373\u751f\u6548\uff0c\u5230\u671f\u540e\u7b49\u7ea7\u4e0e\u7ecf\u9a8c\u4fdd\u7559\uff0c\u518d\u6b21\u8d2d\u4e70\u5373\u53ef\u7ee7\u7eed\u4eab\u53d7\u3002</p></div></div>';

@@ -101,6 +101,53 @@
   const STAGE_ROLE_HP = Object.freeze([0.90, 1.05, 1.20]);
   const STAGE_TYPE_SCALE = Object.freeze({ tl: 1.15, xh: 0.92, xm: 1.02 });
   const STAGE_PLAYER_CURVE = Object.freeze({ statPer: 1.53, statBase: -2.23, hpPer: 13.58, hpBase: -10.44 });
+  /* ---------- 真·武器 / 真·技能（终局线） ----------
+   * 等级口径沿用原表：1~10 是普通，11~15 依次是真1~真5（upgradeMap 第 10~14 行
+   * 的成功率 100/8/5/4/3% 正好对上「真1~真5」）。所以真等级 = 等级 − 10。
+   *
+   * 真技能的效果**只有真5的端点**有史料（references/new/攻略.md），真1~真4 用
+   * 线性插值取整：真N ≈ 真5 × N / 5。下表每个条目标注了来源：
+   *   [史料] = 攻略写了真5端点；[平衡] = 攻略没有，本项目按同类量级定的取值。
+   * 改数值只动这一张表。 */
+  const TRUE_SKILL_MAX = 5;
+  const TRUE_SKILL_5 = Object.freeze({
+    7:  { key: 'guiJia',     value: 1.00, src: '史料' },   // 龟甲术：100% 几率可多次使用（多层防御）
+    8:  { key: 'stripGear',  value: 0.56, src: '史料' },   // 色诱之术：56% 几率脱光对手装备，持续 4 回合
+    9:  { key: 'crit4',      value: 0.50, src: '平衡' },   // 暴击：暴击时有 N% 几率打出 4 倍伤害
+    10: { key: 'antiCrit',   value: 0.50, src: '平衡' },   // 皮糙肉厚：额外压制对手 N% 暴击率
+    12: { key: 'doubleHit',  value: 1.00, src: '史料' },   // 野球拳：100% 几率再打一次
+    14: { key: 'cosmos',     value: 0.30, src: '史料' },   // 小宇宙爆发：基础属性 +30%
+    15: { key: 'extraFlat',  value: 18,   src: '用户提供' }, // 通灵召唤：额外 +18 点固定伤害，真级再叠加
+    18: { key: 'disarm',     value: 1.00, src: '史料' },   // 吸铁大法：100% 几率缴械
+    23: { key: 'luckyBase',  value: 137,  src: '史料' },   // 幸运一击：基础伤害 137×N
+  });
+  /* 真·武器的额外效果：数值取自原词典 weaponsMap[id].remark1
+   * （西瓜刀 +5% 连击、流星锤 +3% 扔 3 次、激光剑 +3% 暴击、狼牙棒 +6 持续伤害、
+   *   板砖 +3% 打晕、忍者镖 +2% 吸血、沉默之斧 +4% 沉默）。
+   * 只在武器等级 > 10（真形态）时生效——原词典把这几条写在 remark1，就是真武器说明。 */
+  const TRUE_WEAPON_BONUS = Object.freeze({
+    4: { combo: 5 }, 10: { triple: 3 }, 11: { crit: 3 },
+    12: { dot: 6 }, 13: { stun: 3 }, 14: { lifesteal: 2 }, 16: { silence: 4 },
+  });
+  /** 真武器的某类加成（武器不是真形态时返回 0）。 */
+  function trueWeaponBonus(weapon, key) {
+    if (!weapon || Number(weapon.level) <= 10) return 0;
+    const row = TRUE_WEAPON_BONUS[Number(weapon.id)];
+    return row && row[key] ? row[key] : 0;
+  }
+
+  /** 真等级：11 级 = 真1 … 15 级 = 真5；10 级及以下为 0。 */
+  function trueLevel(level) {
+    return Math.max(0, Math.min(TRUE_SKILL_MAX, Math.round(Number(level) || 0) - 10));
+  }
+  /** 真N 的效果值：真5端点 × N/5（线性插值）。ratio 类返回 0~真5，flat 类按同比例。 */
+  function trueSkillValue(id, level) {
+    const row = TRUE_SKILL_5[Number(id)];
+    if (!row) return 0;
+    return row.value * trueLevel(level) / TRUE_SKILL_MAX;
+  }
+  function trueSkillRow(id) { return TRUE_SKILL_5[Number(id)] || null; }
+
   function stageTargetLevel(stageId) {
     const type = Math.max(0, Math.min(2, Math.floor((Number(stageId) - 1) / 6)));
     return STAGE_LEVEL_BAND[type][0] + stageStar(stageId) - 1;
@@ -269,5 +316,6 @@
 
   window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
     STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
+    trueLevel, trueSkillValue, trueSkillRow, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
     stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize };
 })();

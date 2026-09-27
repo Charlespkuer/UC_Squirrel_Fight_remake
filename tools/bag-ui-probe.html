@@ -113,11 +113,11 @@ async function main() {
      ?shot=sell|shop|exchange|status|daily|chat|arrows 各自停在一个画面上，
      既抓尺寸数据也方便截图。 */
   const batch = q.get('shot');
-  if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows', 'gearsell', 'gearsellconfirm', 'master'].includes(batch)) {
+  if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows', 'gearsell', 'gearsellconfirm', 'master', 'trueform'].includes(batch)) {
     S.props[47] = 20; S.props[22] = 12; S.props[24] = 8; S.props[1] = 9;
     State.save();
     const rect = (sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
-    const footerButtons = () => $$('#ui .page-footer .uc-button').map((b) => ({ text: b.textContent.trim(), cls: b.className, rect: rect('.page-footer [data-action="' + b.dataset.action + '"]') }));
+    const footerButtons = () => $$('#ui .page-footer .uc-button').map((b) => { const r = b.getBoundingClientRect(); return { text: b.textContent.trim(), cls: b.className, x: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height), bottomGap: Math.round(window.innerHeight - r.bottom) }; });
 
     if (batch === 'sell') {
       // 背包 → 选中恶魔果实 → 点「卖出」→ 批量卖出弹窗（第 7 项滑条）
@@ -149,6 +149,27 @@ async function main() {
       UI.runAction(batch); await flush(340);
       P.footerButtons = footerButtons();
       snap('页脚', '#ui .page-footer');
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+
+    if (batch === 'trueform') {
+      // 造出真·武器与真·技能，看图标 / 标签 / 真化提示
+      const st = State.state();
+      st.level = 70; st.goldPoint = 500000; st.props[21] = 999; st.props[22] = 999;
+      st.weapons = ['4:12', '15:11'];      // 西瓜刀 真2、死神镰刀 真1
+      st.skills = ['12:15', '7:13'];       // 野球拳 真5、龟甲术 真3
+      st.trueUpgrades = { date: State.localDate(), count: 2 };
+      State.save();
+      UI.runAction('weapons'); await flush(340);
+      P.trueIcons = $$('#ui .catalog-cell.true-form img').map((i) => i.getAttribute('src'));
+      P.trueLabels = $$('#ui .catalog-cell.true-form .item-caption').map((e) => e.textContent.trim());
+      const cell = document.querySelector('#ui .catalog-cell[data-item="4"]');
+      if (cell) cell.click();
+      await flush(360);
+      P.trueDetail = text(document.querySelector('#ui .classic-modal'));
+      P.trueUpgradeTip = text(document.querySelector('.upgrade-true-tip'));
+      P.trueUpgradeInfo = (() => { const i = State.upgradeInfo('weapon', 4); return { level: i.item.level, rate: i.rate, coin: i.coin, isTrue: i.isTrue, attempt: i.trueAttempt, fails: i.fails }; })();
+      snap('真武器详情', '#ui .classic-modal');
       P.done = true; P.errors = window.__errs.slice(); return;
     }
 

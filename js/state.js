@@ -84,8 +84,10 @@
     // 体力上限由等级直接决定（满级 180），再叠上超级松鼠的增量；旧档的旧曲线超额值在这里被收回。
     {
       const v = object(raw.vip) ? raw.vip : {};
-      const vipBonus = v.capApplied === true ? Math.max(0, integer(v.capAdded, 0)) : 0;
-      next.maxEnergy = energyCapForLevel(next.level) + vipBonus;
+      // 体力上限的 +60 只在「读档时 VIP 仍在有效期」才给；capApplied 另有含义
+      // （特权 5 的装备格子是首次开通永久生效，所以不能拿它来判断体力）
+      const vipOn = Number(v.until) > Date.now();
+      next.maxEnergy = energyCapForLevel(next.level) + (vipOn ? VIP_ENERGY_BONUS : 0);
     }
     next.energy = Math.min(ENERGY_HARD_CAP, next.energy);
     next.integral = next.integral == null ? null : integer(next.integral, 0);
@@ -102,6 +104,10 @@
       }
       return out;
     })();
+    // 真升级的当日次数（费用递增，24:00 清零）：换天就归零
+    next.trueUpgrades = (object(raw.trueUpgrades) && raw.trueUpgrades.date === localDate())
+      ? { date: raw.trueUpgrades.date, count: Math.max(0, integer(raw.trueUpgrades.count, 0)) }
+      : { date: localDate(), count: 0 };
     // 每日收益流水（徒弟日供）：只保留最近 7 天、日期合法、非负整数
     next.earnHistory = (Array.isArray(raw.earnHistory) ? raw.earnHistory : [])
       .filter((d) => object(d) && validLocalDate(d.date))
@@ -893,6 +899,26 @@
    * 原表 upgradeMap 来自 GameDict，保持逐字节不动，只在这里覆盖取值。 */
   const UPGRADE_COIN = 40;
   const UPGRADE_FAIL_BONUS = 5;   // 每次失败 +5%
+  /* ---------- 真·武器 / 真·技能（终局线，等级 11~15 = 真1~真5） ----------
+   * 成功率沿用原表 upgradeMap 的第 10~14 行：100% / 8% / 5% / 4% / 3%。
+   * 费用不新引入货币：参考里 U点 的汇率是 10U=50金松果（1U=5金松果），
+   * 所以「当天第 N 次真升级 = 2N U点」直接按汇率折成 10N 金松果（10/20/30…），
+   * 当日 24:00 清零。真升级**不吃失败保底**——终局线就该慢一些。 */
+  const TRUE_UPGRADE_GOLD_PER_U = 5;
+  const TRUE_SKILL_MAX_LEVEL = 15;
+  const isTrueLevel = (level) => (Number(level) || 0) >= 10;
+  const trueUpgradeDate = () => localDate();
+  function trueAttemptsToday() {
+    if (!object(S.trueUpgrades) || S.trueUpgrades.date !== trueUpgradeDate()) return 0;
+    return Math.max(0, integer(S.trueUpgrades.count, 0));
+  }
+  /** 今天下一次真升级的金松果价：第 N 次 = 2N U点 × 5 金松果。 */
+  function trueUpgradeCost() { return 2 * (trueAttemptsToday() + 1) * TRUE_UPGRADE_GOLD_PER_U; }
+  function bumpTrueUpgrade() {
+    const date = trueUpgradeDate();
+    if (!object(S.trueUpgrades) || S.trueUpgrades.date !== date) S.trueUpgrades = { date, count: 0 };
+    S.trueUpgrades.count = Math.max(0, integer(S.trueUpgrades.count, 0)) + 1;
+  }
   const upgradeFailKey = (kind, id) => (kind === 'weapon' ? 'w' : 's') + Number(id);
   function upgradeFails(kind, id) {
     const m = object(S) && object(S.upgradeFails) ? S.upgradeFails : {};
@@ -907,13 +933,17 @@
     const it = list.find((x) => x.id === id);
     if (!it) return null;
     if (kind === 'skill' && [6, 13].includes(id)) return { max: true, fixed: true, item: it, msg: '该技能不能升级' };
-    if (kind === 'skill' && it.level >= 10) return { max: true, item: it, msg: '技能已达到10级上限' };
+    if (kind === 'skill' && it.level >= TRUE_SKILL_MAX_LEVEL) return { max: true, item: it, msg: '技能已达到真5上限' };
     const row = upgradeMap.getValue(it.level); // 当前等级对应升级行
     if (!row) return { max: true };
-    const baseRate = parseInt(row.rate), fails = upgradeFails(kind, id);
+    const baseRate = parseInt(row.rate);
+    const isTrue = isTrueLevel(it.level);
+    // 真升级不吃失败保底：概率就是原表的固定值
+    const fails = isTrue ? 0 : upgradeFails(kind, id);
     return {
-      max: false, item: it, baseRate, fails, rate: upgradeRate(baseRate, fails),
-      coin: UPGRADE_COIN,
+      max: false, item: it, baseRate, fails, isTrue, rate: upgradeRate(baseRate, fails),
+      coin: isTrue ? trueUpgradeCost() : UPGRADE_COIN,
+      trueAttempt: trueAttemptsToday() + 1,
       book: parseInt(row.book), levelLimit: parseInt(row.levelLimit),
       bookId: kind === 'weapon' ? 22 : 21,
     };
@@ -932,6 +962,8 @@
     const ok = debugOn('noUpgradeFail') ? true : Math.random() * 100 < info.rate;
     if (!object(S.upgradeFails)) S.upgradeFails = {};
     const failKey = upgradeFailKey(kind, id);
+    // 真升级每次尝试都记一次「今日第几次」（费用递增），但绝不累积失败保底
+    if (info.isTrue) bumpTrueUpgrade();
     if (ok) {
       bumpDaily('upgrade', 1);
       const arr = kind === 'weapon' ? S.weapons : S.skills;
@@ -940,14 +972,15 @@
         if (wid === id) { arr[i] = wid + ':' + (lv + 1); break; }
       }
       delete S.upgradeFails[failKey];      // 成功清零，下次回到基础概率
-    } else {
-      S.upgradeFails[failKey] = Math.min(999, info.fails + 1);   // 失败累积，下次 +5%
+    } else if (!info.isTrue) {
+      S.upgradeFails[failKey] = Math.min(999, info.fails + 1);   // 普通升级：失败累积，下次 +5%
     }
     save();
     const nextRate = ok ? null : upgradeRate(info.baseRate, info.fails + 1);
     return {
-      ok, rate: info.rate, fails: ok ? 0 : info.fails + 1, nextRate,
-      msg: ok ? '升级成功！' : '升级失败……再接再厉！' + (nextRate ? '（下次成功率 ' + nextRate + '%）' : ''),
+      ok, rate: info.rate, fails: ok ? 0 : info.fails + 1, nextRate, isTrue: !!info.isTrue,
+      msg: ok ? (info.isTrue ? '真化成功！' : '升级成功！')
+        : '升级失败……再接再厉！' + (!info.isTrue && nextRate ? '（下次成功率 ' + nextRate + '%）' : ''),
     };
   }
 
@@ -1752,7 +1785,7 @@
    *   1、角色等级10级以上的VIP可以跳过战斗；2、被动经验上限最高400/天；
    *   3、体力恢复速度最快1.5倍；4、昵称以尊贵标识展示；
    *   5、首次开通永久赠送6个装备格子；6、师父是VIP时徒弟每日额外获得金松果；
-   *   7、主动挑战VIP玩家所得经验上涨30%；8、体力上限增加到180点。
+   *   7、主动挑战VIP玩家所得经验上涨30%；8、体力上限提升（本项目改为「当前等级应有的上限 +60」）。
    * 原版按天售卖（buyVIP.do）；离线版改成金松果购买，价格是按本项目经济定的平衡值。
    * 「跳过战斗」在本项目对所有10级以上玩家开放（原版也是 VIP 或 等级>9），因此不作为VIP独占。 */
   const VIP_LEVELS = [   // [等级, 被动经验上限/天, 体力恢复倍率]
@@ -1761,7 +1794,7 @@
   ];
   const VIP_LEVEL_EXP = [3, 5, 15, 30, 60, 60, 60, 60, 100];   // 升到下一级所需
   const VIP_MAX_LEVEL = 10;
-  const VIP_ENERGY_CAP = 180;    // 特权 8
+  const VIP_ENERGY_BONUS = 60;   // 特权 8：在当前等级应有的体力上限之上再 +60
   const VIP_GEAR_BONUS = 6;      // 特权 5
   const VIP_PLANS = [Object.freeze({ days: 7, gold: 300 }), Object.freeze({ days: 30, gold: 1000 })];
   const GEAR_CAPACITY = 100;
@@ -1780,19 +1813,26 @@
   function vipDaysLeft() { return Math.max(0, Math.ceil((vipUntil() - Date.now()) / 86400000)); }
   /** 装备容量：原版特权 5 首次开通永久 +6 格。 */
   function gearCapacity() { return GEAR_CAPACITY + (vipState().capApplied ? VIP_GEAR_BONUS : 0); }
-  /** 特权 8：VIP 期间体力上限抬到 180。用增量记录，到期可原样退回。 */
+  /** VIP 生效时的体力上限 =「当前等级应有的上限」+ 60（特权 8）。 */
+  function vipEnergyCap() { return energyCapForLevel(S.level) + VIP_ENERGY_BONUS; }
+  /**
+   * 特权 8：VIP 期间体力上限在等级上限之上 +60，到期原样退回。
+   * 只搬动「上限本身」的 ±60 变化量，所以期间升级、或者被其它来源抬上去的
+   * 上限都不会被误算；退回后也不会低于当前等级应有的基础上限。
+   */
   function syncVipEnergyCap() {
-    const v = vipState(), on = vipActive();
-    if (on && !v.capApplied) {
-      v.capAdded = Math.max(0, VIP_ENERGY_CAP - S.maxEnergy);
-      S.maxEnergy += v.capAdded; v.capApplied = true;
-    } else if (!on && v.capApplied) {
-      S.maxEnergy = Math.max(1, S.maxEnergy - (Number(v.capAdded) || 0));
-      v.capAdded = 0; v.capApplied = false;
-    } else if (on && v.capApplied) {
-      // 期间升级涨了上限也要保住 180 的下限
-      const need = Math.max(0, VIP_ENERGY_CAP - S.maxEnergy);
-      if (need > 0) { S.maxEnergy += need; v.capAdded += need; }
+    const v = vipState(), on = vipActive(), base = energyCapForLevel(S.level);
+    if (on !== v.capApplied) {
+      const before = base + (v.capApplied ? VIP_ENERGY_BONUS : 0);
+      const after = base + (on ? VIP_ENERGY_BONUS : 0);
+      v.capApplied = on;
+      v.capAdded = on ? VIP_ENERGY_BONUS : 0;
+      S.maxEnergy = Math.max(base, S.maxEnergy + (after - before));
+    } else if (on) {
+      // 期间升级：保险起见把上限抬到「新等级 + 60」
+      const target = vipEnergyCap();
+      if (S.maxEnergy < target) S.maxEnergy = target;
+      v.capAdded = VIP_ENERGY_BONUS;
     }
     // 只按硬上限收口：药剂顶上去的超出部分要保住，不能因为上限变化被清掉
     if (S.energy > ENERGY_HARD_CAP) S.energy = ENERGY_HARD_CAP;
@@ -2501,9 +2541,10 @@
     fileProbe, fileLoad, fileWrite, fileWriteNow, fileInfo, storageMode, flushFileWrite, setSaveTransport, syncFormatTime: fmtTime, markLocalFresh: () => { fileState.freshLocal = true; },
     vipActive, vipLevel, vipUntil, vipDaysLeft, vipRegenMul, vipPassiveExpCap, vipExpNeed,
     vipRow, buyVip, grantVip, tickVipDaily, gearCapacity, syncVipEnergyCap,
-    VIP_LEVELS, VIP_LEVEL_EXP, VIP_MAX_LEVEL, VIP_PLANS, VIP_ENERGY_CAP, VIP_GEAR_BONUS, GEAR_CAPACITY,
+    VIP_LEVELS, VIP_LEVEL_EXP, VIP_MAX_LEVEL, VIP_PLANS, VIP_ENERGY_BONUS, vipEnergyCap, energyCapForLevel, VIP_GEAR_BONUS, GEAR_CAPACITY,
     weaponInst, skillInst, myWeapons, mySkills, wsLimit, ownedWSCount,
     upgradeInfo, doUpgrade, upgradeFails, UPGRADE_COIN, UPGRADE_FAIL_BONUS,
+    trueAttemptsToday, trueUpgradeCost, isTrueLevel, TRUE_SKILL_MAX_LEVEL, TRUE_UPGRADE_GOLD_PER_U,
     fruitOptions, applyFruitChoice,
     trackEarn, earnOn, addGold,
     apprenticeLevelSum, apprenticeTributeRatio, apprenticeTributeTable, apprenticeDailyGold,

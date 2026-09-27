@@ -24,7 +24,8 @@ const root = findRoot(__dirname);
 function game(fallback = 0.5, sequence = []) {
   const c = { console }; c.window = c;
   vm.createContext(c);
-  for (const file of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/sim.js']) {
+  // 真·武器/真·技能的表在 gamedata.js 里（sim.js 通过 window.GData 读它）
+  for (const file of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/sim.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), c, { filename: file });
   }
   const math = vm.runInContext('Math', c);
@@ -316,6 +317,42 @@ test('出手时优先用本场没用过的武器与技能（并非绝对）', ()
   const W2 = game().Sim.actionWeights.skill;
   assert.ok(W2({ usedSkills: {}, lastSkillId: null }, 12) > W2({ usedSkills: { 12: true }, lastSkillId: null }, 12), '没用过的技能权重更高');
   assert.ok(W2({ usedSkills: { 12: true }, lastSkillId: null }, 12) > W2({ usedSkills: { 12: true }, lastSkillId: 12 }, 12), '刚用过的技能该再降一档');
+});
+
+test('真·技能：真5端点与线性插值生效（龟甲必多次、幸运一击基础137、通灵额外+18）', () => {
+  const G = game();
+  assert.equal(G.GData.trueLevel(15), 5);
+  assert.equal(G.GData.trueLevel(10), 0);
+  assert.ok(Math.abs(G.GData.trueSkillValue(8, 15) - 0.56) < 1e-9, '真5色诱 56%');
+  assert.ok(Math.abs(G.GData.trueSkillValue(8, 13) - 0.336) < 1e-9, '真3色诱 = 56%×3/5');
+  /* 真5 龟甲：首次仍是 35%（原规则），但一旦触发过，之后每次受击都必定再挡
+   * （20% + 真5 的 100%）。所以断言「第一次挡住之后不再漏」。 */
+  let battles = 0, leaked = 0, firstBlocks = 0;
+  for (let i = 0; i < 40; i++) {
+    const ev = rounds(randomGame(), { power: 30, weapons: ['6:1'], hp: 100000 }, { skills: ['7:15'], hp: 100000 });
+    const incoming = ev.filter((r) => r.attacker === 0 && !r.dodge && r.action !== 'rest');
+    const first = incoming.findIndex((r) => r.guiJia);
+    if (first < 0) continue;
+    battles++; firstBlocks++;
+    if (incoming.slice(first + 1).some((r) => !r.guiJia)) leaked++;
+  }
+  assert.ok(battles > 20, '样本足够：' + battles);
+  assert.equal(leaked, 0, '真5龟甲触发过之后不该再漏（漏了 ' + leaked + '/' + battles + ' 场）');
+  // 真5 幸运一击：基础伤害 137×倍率（必中，不吃闪避）
+  const lucky = rounds(game(0.5), { power: 10, skills: ['23:15'], hp: 100000, agility: 1000 }, { power: 1, hp: 100000, agility: 1 });
+  const hitsLucky = lucky.filter((r) => r.id === 23);
+  assert.ok(hitsLucky.length > 0, '要能打出幸运一击');
+  assert.ok(hitsLucky.every((r) => r.dmg === 137 * r.multiple), '真5 基础 137：' + JSON.stringify(hitsLucky.slice(0, 3)));
+  /* 通灵召唤的伤害里有一项是「对手当前生命的 35%」，两次独立模拟的当前生命不同，
+   * 直接比伤害没有意义。它的真值走的是同一套插值，这里直接校验数值管线：
+   * 真5 额外 +18（用户提供），真4 = 18×4/5 = 14.4，真0 = 0。 */
+  assert.equal(G.GData.trueSkillValue(15, 15), 18, '真5 通灵额外 +18');
+  assert.ok(Math.abs(G.GData.trueSkillValue(15, 14) - 14.4) < 1e-9, '真4 = 14.4');
+  assert.equal(G.GData.trueSkillValue(15, 10), 0, '普通 10 级没有真加成');
+  // 真武器加成只在真形态生效（西瓜刀真级 +5% 连击）
+  assert.equal(G.GData.trueWeaponBonus({ id: 4, level: 10 }, 'combo'), 0, '普通形态没有真加成');
+  assert.equal(G.GData.trueWeaponBonus({ id: 4, level: 11 }, 'combo'), 5, '真形态 +5% 连击');
+  assert.equal(G.GData.trueWeaponBonus({ id: 12, level: 15 }, 'dot'), 6, '真狼牙棒 +6 持续伤害');
 });
 
 test('仙鹤大招「仙鹤展翅」是其首次行动且每场仅一次', () => {

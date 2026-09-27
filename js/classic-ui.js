@@ -140,11 +140,20 @@
     renderNumbers(host);
   }
   // Original atlases alternate a colour row and a grey row. Item IDs retain gaps.
-  function atlasIcon(kind, id, locked) {
+  function atlasIcon(kind, id, locked, trueForm) {
+    // 真·武器用的是素材库里的另一套图：images/classic/icons/weapon-true-<id>.png
+    if (kind === 'weapon' && trueForm) return 'images/classic/icons/weapon-true-' + id + (locked ? '-locked' : '') + '.png';
     if(kind==='weapon' && +id===1 && !locked)return 'images/classic/icons/weapon-1-classic.png';
     return 'images/classic/icons/' + kind + '-' + id + (locked ? '-locked' : '') + '.png';
   }
-  function icon(kind, id, locked, selected) {
+  /** 等级 11~15 = 真1~真5；显示成「真N」，10 级及以下显示 LVn。 */
+  const levelLabel = (level, withPrefix) => {
+    const t = (window.GData && GData.trueLevel) ? GData.trueLevel(level) : 0;
+    if (t > 0) return '真' + t;
+    return withPrefix === false ? String(level) : 'LV' + level;
+  };
+  const isTrueGear = (item) => !!item && (window.GData && GData.trueLevel ? GData.trueLevel(item.level) > 0 : Number(item.level) > 10);
+  function icon(kind, id, locked, selected, trueForm) {
     if(kind==='prop' && ((!selected && [1,2,4,5,10,12,21,22,23,24,26,36].includes(+id)) || selected && [3,11,25].includes(+id))) {
       return '<img alt="" class="reference-art" src="images/classic/new-reference/props/prop-'+id+(selected?'-selected':'')+'.png">';
     }
@@ -158,6 +167,8 @@
     }
     const grey={weapon:[2,3,4,7,9,10],skill:[3,7,8,9,14,15,18,23]};
     const fromReference=(locked && grey[kind]?.includes(+id)) || (!locked && kind==='skill' && [6,13].includes(+id));
+    // 真形态优先走真武器贴图（参考卡没有真版）
+    if (kind === 'weapon' && trueForm) return '<img alt="" src="' + atlasIcon('weapon', id, locked, true) + '">';
     return '<img alt="" '+(fromReference?'class="reference-art" ':'')+'src="'+(fromReference?'images/classic/reference-cards/'+kind+'-'+id+'.png':atlasIcon(kind,id,locked))+'">';
   }
   function statsHtml(stats, cls) {
@@ -431,7 +442,8 @@
     const cells=shown.map(it=>{
       const has=own.find(x=>x.id===it.id);
       const selected=has && selectedItems[kind]===it.id;
-      return '<button class="catalog-cell '+(!has?'locked':selected?'selected':'')+'" data-item="'+it.id+'" aria-label="'+esc(it.name)+(has?' 等级'+has.level:' 尚未获得')+'"><span class="item-icon">'+icon(kind,it.id,!has,selected)+'</span><span class="item-caption">'+(selected?esc(it.name):has?'LV'+has.level:'')+'</span></button>';
+      const trueForm = has && kind === 'weapon' && isTrueGear(has);
+      return '<button class="catalog-cell '+(!has?'locked':selected?'selected':'')+(trueForm?' true-form':'')+'" data-item="'+it.id+'" aria-label="'+esc(it.name)+(has?' '+levelLabel(has.level):' 尚未获得')+'"><span class="item-icon">'+icon(kind,it.id,!has,selected,trueForm)+'</span><span class="item-caption">'+(selected?esc(it.name):has?levelLabel(has.level):'')+'</span></button>';
     }).join('')+Array.from({length:10-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('');
     const p=page('status',key,'<div class="catalog-grid">'+cells+'</div>'+(catalogPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(catalogPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(catalogPage+1)+'/'+total,cls:'collection-board'});
     $$('[data-item]',p).forEach(b=>b.onclick=()=>{selectedItems[kind]=+b.dataset.item;openCatalog(kind,catalogPage);openItem(kind,+b.dataset.item);});
@@ -447,8 +459,8 @@
     const locked=!it;
     const unupgradeable=!isW && (base.type==='被动' && up?.max || id===13);
     const extra=isW?'伤害 '+(it?it.harmLo+'-'+it.harmHi:base.harm):'类别 '+esc(base.type);
-    const right=locked?'<div class="locked-message">尚未获得<br><span class="small-label">升级、开启礼包有机会获得</span></div>':up?.max||unupgradeable?'<div class="locked-message">该'+(isW?'武器':'技能')+'<br>不能升级</div>':'<h3>需要　<span class="muted-text">已有</span></h3><div><span>金松果 '+up.coin+'</span><b>'+S.goldPoint+'</b></div><div><span>卷轴 '+up.book+'</span><b>'+(S.props[up.bookId]||0)+'</b></div><span class="upgrade-rate">成功率 '+up.rate+'%'+(up.fails?'<i class="upgrade-pity">（失败 '+up.fails+' 次，已加 '+up.fails*State.UPGRADE_FAIL_BONUS+'%）</i>':'')+'</span><span class="small-label">需要角色 '+up.levelLimit+' 级</span>';
-    const content='<div class="item-detail"><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-summary"><span class="item-icon">'+icon(kind,id,locked)+'</span><div class="detail-rows"><span class="detail-row">'+(isW?'阶段':'等级')+' '+(it?it.level:1)+'</span><span class="detail-row">'+extra+'</span><span class="detail-row">类型 '+esc(base.type)+'</span></div></div><div class="detail-description">'+esc(description)+(isW&&it?'<br>升至下一阶段额外提升'+esc(base.harmAdd)+'点基础伤害！':'')+'</div></div><div class="detail-upgrade">'+right+'</div></div>';
+    const right=locked?'<div class="locked-message">尚未获得<br><span class="small-label">升级、开启礼包有机会获得</span></div>':up?.max||unupgradeable?'<div class="locked-message">该'+(isW?'武器':'技能')+'<br>不能升级</div>':'<h3>需要　<span class="muted-text">已有</span></h3><div><span>金松果 '+up.coin+'</span><b>'+S.goldPoint+'</b></div><div><span>卷轴 '+up.book+'</span><b>'+(S.props[up.bookId]||0)+'</b></div><span class="upgrade-rate">成功率 '+up.rate+'%'+(up.fails?'<i class="upgrade-pity">（失败 '+up.fails+' 次，已加 '+up.fails*State.UPGRADE_FAIL_BONUS+'%）</i>':'')+'</span>'+(up.isTrue?'<span class="upgrade-true-tip">真化第 '+up.trueAttempt+' 次（当日 24:00 次数与费用清零，真化不吃失败保底）</span>':'')+'<span class="small-label">需要角色 '+up.levelLimit+' 级</span>';
+    const content='<div class="item-detail"><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-summary"><span class="item-icon">'+icon(kind,id,locked,false,isW&&isTrueGear(it))+'</span><div class="detail-rows"><span class="detail-row">'+(isW?'阶段':'等级')+' '+(it?levelLabel(it.level,false):1)+(it&&isTrueGear(it)?'（真形态）':'')+'</span><span class="detail-row">'+extra+'</span><span class="detail-row">类型 '+esc(base.type)+'</span></div></div><div class="detail-description">'+esc(description)+(isW&&it?'<br>升至下一阶段额外提升'+esc(base.harmAdd)+'点基础伤害！':'')+'</div></div><div class="detail-upgrade">'+right+'</div></div>';
     // 按钮顺序统一成「动作在前、返回在最后」，与其它弹窗一致
     modal(isW?'武器详情':'技能详情',content,[{label:locked?'尚未获得':up?.max||unupgradeable?'不能升级':'立即升级',cls:locked||up?.max||unupgradeable?'muted':'gold',run:()=>{
       if(locked||up?.max||unupgradeable)return;
@@ -648,7 +660,7 @@
     // 都用默认尺寸的按钮（比原来的 small 明显大一档）。
     // 第 2 项：这两个入口缩小到和「装备融合」入口同一档（.uc-button.entry-pill）
     const bagFooter=shop?{left:btn('每日抽奖','lottery','gold entry-pill'),right:btn('金杯商店','rank-shop','gold entry-pill')}:{};
-    const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,Object.assign({cls:'classic-bag-board',counter:(bagPage+1)+'/'+total},bagFooter));
+    const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,Object.assign({cls:'classic-bag-board'+(shop?' shop-board':''),counter:(bagPage+1)+'/'+total},bagFooter));
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
     $('[data-action="prop-action"]',p)?.addEventListener('click',()=>openProp(selectedProp,shop));
     $('[data-action="prop-sell"]',p)?.addEventListener('click',()=>sellAsk(selectedProp,()=>openBag(mode,bagPage)));

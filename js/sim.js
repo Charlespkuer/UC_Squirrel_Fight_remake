@@ -83,7 +83,7 @@
       baseStats: Object.fromEntries(['power', 'agility', 'speed'].map((key) => [key, stat(f.baseStats?.[key], stat(f[key], 1))])),
       // 战斗内状态
       ap: 0, restNext: false, pendingWeapon: null, stun: 0, silence: 0, disarm: 0, shellCharges: 0,
-      mustHitNext: !!(mods && mods.mustHitFirst), usedFakeDie: false, usedMaster: false, usedShell: false, usedCosmos: false, usedSnack: false,
+      mustHitNext: !!(mods && mods.mustHitFirst), stripTurns: 0, usedFakeDie: false, usedMaster: false, usedShell: false, usedCosmos: false, usedSnack: false,
       usedUlt: false, acted: false, usedFreeSkill: false,
       swordDodge: 0, meteorDodge: 0, debuffs: { power: 0, agility: 0, speed: 0 },
       dot: null, // {dmg, rounds} 或 {pct, rounds}（按当前生命比例扣血）
@@ -99,10 +99,17 @@
     };
   }
 
-  function effPower(c) { return Math.max(1, Math.round(c.power * (1 - c.debuffs.power / 100) + c.buffFlat.power)); }
-  function effAgility(c) { return Math.max(1, Math.round(c.agility * (1 - c.debuffs.agility / 100) + c.buffFlat.agility)); }
-  function effSpeed(c) { return Math.max(1, Math.round(c.speed * (1 - c.debuffs.speed / 100) + c.buffFlat.speed)); }
-  function effect(c, id) { return Math.max(0, Number(c.effects[id]) || 0); }
+  /** 真·色诱之术：被脱光装备期间，装备提供的属性与附加能力全部失效（回到裸属性）。 */
+  function stripped(c) { return Number(c.stripTurns) > 0; }
+  function statOf(c, key) { return stripped(c) ? c.baseStats[key] : c[key]; }
+  function effPower(c) { return Math.max(1, Math.round(statOf(c, 'power') * (1 - c.debuffs.power / 100) + c.buffFlat.power)); }
+  function effAgility(c) { return Math.max(1, Math.round(statOf(c, 'agility') * (1 - c.debuffs.agility / 100) + c.buffFlat.agility)); }
+  function effSpeed(c) { return Math.max(1, Math.round(statOf(c, 'speed') * (1 - c.debuffs.speed / 100) + c.buffFlat.speed)); }
+  function effect(c, id) { return stripped(c) ? 0 : Math.max(0, Number(c.effects[id]) || 0); }
+  /** 真级工具：等级 11~15 = 真1~真5。 */
+  const trueLvOf = (level) => (window.GData && GData.trueLevel ? GData.trueLevel(level) : Math.max(0, Math.min(5, (Number(level) || 0) - 10)));
+  const trueVal = (id, level) => (window.GData && GData.trueSkillValue ? GData.trueSkillValue(id, level) : 0);
+  const trueW = (w, key) => (window.GData && GData.trueWeaponBonus ? GData.trueWeaponBonus(w, key) : 0);
   // 沉默之斧保留四项基础属性技，抑制其余主动、被动及防御技能。
   function skill(c, id) { return c.silence > 0 && id > 4 ? 0 : c.skills[id] || 0; }
   function weaponEffect(w, base, perLevel, perTrueLevel) {
@@ -188,7 +195,7 @@
     if (def.skills[7] && def.silence <= 0) {
       const canTrigger = def.shellCharges > 0
         || (!def.usedShell && chance(RULES.shellFirst))
-        || (def.usedShell && chance(RULES.shellAgain + effect(def, 32)));
+        || (def.usedShell && chance(RULES.shellAgain + effect(def, 32) + trueVal(7, def.skills[7]) * 100));
       if (canTrigger) {
         if (def.shellCharges > 0) def.shellCharges--;
         else def.usedShell = true;
@@ -237,7 +244,17 @@
       if (att.mods && att.mods.dmgMul) rawDmg = Math.round(rawDmg * Number(att.mods.dmgMul));   // 塔 buff 伤害乘区（猎侠者/机制破解/精英杀手等，tower.js 按对手预算好）
       if (action === 'skill') {
         rawDmg = Math.round(rawDmg * (1 + effect(att, 8) / 100));
-        if (chance(critChance(att))) { rawDmg = Math.round(rawDmg * (2 + effect(att, 4) / 100 + critDmgBonus(att))); r.crit = true; }
+        /* 真·皮糙肉厚：额外压制对手的暴击率（真5 压 50%）。
+         * 真·暴击：暴击发生时有机会把倍率从 2 倍抬到 4 倍（真5 50%）。 */
+        const antiCrit = trueVal(10, def.skills[10]);
+        const cc = critChance(att) * (1 - antiCrit);
+        if (chance(cc)) {
+          const quad = trueVal(9, att.skills[9]) * 100;
+          const mul = (quad > 0 && chance(quad)) ? 4 : 2;
+          if (mul === 4) r.crit4 = true;
+          rawDmg = Math.round(rawDmg * (mul + effect(att, 4) / 100 + critDmgBonus(att)));
+          r.crit = true;
+        }
       }
       const red = dmgReduce(def, rawDmg, { action, weaponType: opts.weaponType });
       let dmg = red.dmg;
@@ -503,12 +520,12 @@
         if (!mustHit && chance(dodgePct)) { r.dodge = true; pushRound(r); return; }
         // 暴击
         let cc = critChance(att);
-        if (w.id === 11) cc += weaponEffect(w, 20, 2, 3);         // 激光剑
+        if (w.id === 11) cc += weaponEffect(w, 20, 2, 3) + trueW(w, 'crit');   // 激光剑（真级 +3% 暴击）
         if (chance(cc)) { raw = Math.round(raw * (2 + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att))); r.crit = true; }
         // 连击/三扔
         let hits = 1;
-        if (w.id === 4 && chance(weaponEffect(w, 10, 2, 5))) hits = 2;          // 西瓜刀
-        if (w.id === 10 && chance(weaponEffect(w, 2, 2, 3))) hits = 3;          // 流星锤
+        if (w.id === 4 && chance(weaponEffect(w, 10, 2, 5) + trueW(w, 'combo'))) hits = 2;   // 西瓜刀（真级 +5% 连击）
+        if (w.id === 10 && chance(weaponEffect(w, 2, 2, 3) + trueW(w, 'triple'))) hits = 3;   // 流星锤（真级 +3% 三扔）
         r.hits = hits;
         let total = 0;
         for (let i = 0; i < hits; i++) {
@@ -531,11 +548,11 @@
           if (w.id === 5) { def.debuffs.agility = Math.max(def.debuffs.agility, weaponEffect(w, 10, 2)); r.debuffText = '敏捷降低！'; }
           if (w.id === 6) { def.debuffs.speed = Math.max(def.debuffs.speed, weaponEffect(w, 10, 2)); r.debuffText = '速度降低！'; }
           if (w.id === 8) { def.debuffs.power = Math.max(def.debuffs.power, weaponEffect(w, 10, 1)); r.debuffText = '力量降低！'; }
-          if (w.id === 12 && chance(35)) { def.dot = { dmg: weaponEffect(w, 4, 3, 6), rounds: 4 }; r.dotApplied = true; }
-          if (w.id === 13 && chance(weaponEffect(w, 10, 3, 3))) { def.stun = Math.max(def.stun, 1); r.stunApplied = true; }
-          if (w.id === 16 && chance(weaponEffect(w, 10, 4, 4))) { def.silence = Math.max(def.silence, 4); r.silenceApplied = true; }
+          if (w.id === 12 && chance(35)) { def.dot = { dmg: weaponEffect(w, 4, 3, 6) + trueW(w, 'dot'), rounds: 4 }; r.dotApplied = true; }
+          if (w.id === 13 && chance(weaponEffect(w, 10, 3, 3) + trueW(w, 'stun'))) { def.stun = Math.max(def.stun, 1); r.stunApplied = true; }
+          if (w.id === 16 && chance(weaponEffect(w, 10, 4, 4) + trueW(w, 'silence'))) { def.silence = Math.max(def.silence, 4); r.silenceApplied = true; }
         }
-        if (w.id === 14 && att.hp > 0) { const heal = Math.min(att.maxHp - att.hp, Math.round(total * weaponEffect(w, 10, 4, 2) / 100)); att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
+        if (w.id === 14 && att.hp > 0) { const heal = Math.min(att.maxHp - att.hp, Math.round(total * (weaponEffect(w, 10, 4, 2) + trueW(w, 'lifesteal')) / 100)); att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
         if (w.id === 17 && att.hp > 0) { const self = Math.round(att.hp * 0.1); att.hp -= self; r.selfBurn = self; }
         // 反击（大榔头2、死神镰刀15 不可反击）
         maybeCounter(att, def, r, w.type === '近战' && ![2, 15].includes(w.id));
@@ -554,30 +571,36 @@
         // 塔 buff「疾风先手」：本局首次技能不消耗回合
         const freeSkill = att.mods && att.mods.firstSkillFree && !att.usedFreeSkill;
         switch (sid) {
-          case 8: { // 色诱之术
+          case 8: { // 色诱之术（真级：有机会脱光对手装备，持续 4 回合）
             const raw = Math.round((R(15, 25) + 7 * (lv - 1)) * (1 + effect(att, 33) / 100));
             if (chance(dodgeChance(att, def))) { att.mustHitNext = false; r.dodge = true; break; }
             applyDamage(att, def, raw, r, {});
-            if (def.hp > 0 && !r.fakeDie) { def.stun = Math.max(def.stun, 1); r.stunApplied = true; }
+            if (def.hp > 0 && !r.fakeDie) {
+              def.stun = Math.max(def.stun, 1); r.stunApplied = true;
+              const stripPct = trueVal(8, lv) * 100;
+              if (stripPct > 0 && chance(stripPct)) { def.stripTurns = 4; r.stripApplied = Math.round(stripPct); }
+            }
             break;
           }
-          case 12: { // 野球拳
+          case 12: { // 野球拳（真级：有几率再打一次）
             const raw = Math.round((effPower(att) + effSpeed(att)) * (1.2 + 0.15 * (lv - 1)));
             if (chance(dodgeChance(att, def) * 0.7)) { att.mustHitNext = false; r.dodge = true; break; }
             applyDamage(att, def, raw, r, {});
+            const doublePct = trueVal(12, lv) * 100;
+            if (doublePct > 0 && def.hp > 0 && att.hp > 0 && chance(doublePct)) { r.actAgain = true; r.doubleHit = true; }
             break;
           }
           case 14: { // 小宇宙爆发
             att.usedCosmos = true;
             for (const [key, id] of [['power', 36], ['agility', 37], ['speed', 38]]) {
-              att.buffFlat[key] = Math.max(1, att.baseStats[key] * lv / 100) + effect(att, id);
+              att.buffFlat[key] = Math.max(1, att.baseStats[key] * Math.max(lv / 100, trueVal(14, lv))) + effect(att, id);
             }
             r.buffUp = true; r.noDmg = true; r.actAgain = true;
             r.statBonus = { ...att.buffFlat };
             break;
           }
           case 15: { // 通灵召唤
-            const raw = Math.round(def.hp * (35 + 2 * (lv - 1)) / 100) + 7 + effect(att, 39);
+            const raw = Math.round(def.hp * (35 + 2 * (lv - 1)) / 100) + 7 + effect(att, 39) + trueVal(15, lv);
             if (chance(dodgeChance(att, def))) { att.mustHitNext = false; r.dodge = true; break; }
             applyDamage(att, def, raw, r, { ignoreFakeDie: false });
             break;
@@ -593,12 +616,12 @@
             const raw = Math.round((R(5, 20) + 4 * (lv - 1)) * (1 + effect(att, 41) / 100));
             if (chance(dodgeChance(att, def))) { att.mustHitNext = false; r.dodge = true; break; }
             applyDamage(att, def, raw, r, { ignoreFakeDie: true });
-            if (chance(10 + 4 * (lv - 1))) { def.disarm = Math.max(def.disarm, 4); r.disarmApplied = true; }
+            if (chance(Math.max(10 + 4 * (lv - 1), trueVal(18, lv) * 100))) { def.disarm = Math.max(def.disarm, 4); r.disarmApplied = true; }
             break;
           }
           case 23: { // 幸运一击
             const mult = R(1, 6);
-            const raw = (15 + 8 * (lv - 1)) * mult;
+            const raw = Math.max(15 + 8 * (lv - 1), trueVal(23, lv)) * mult;
             r.multiple = mult;
             applyDamage(att, def, raw, r, {});
             break;
@@ -628,6 +651,7 @@
     function tickRestrictions(actor) {
       if (actor.silence > 0) actor.silence--;
       if (actor.disarm > 0) actor.disarm--;
+      if (actor.stripTurns > 0) actor.stripTurns--;   // 真·色诱之术：脱光装备的剩余回合
     }
 
     // 塔 buff「先手制敌」：开局对敌人造成其最大生命比例的伤害（不致死）

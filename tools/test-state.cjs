@@ -99,8 +99,10 @@ test('卖出道具：默认回收字典价格的一半，无价/占位价的道�
   assert.equal(S.propSellPrice(47), 100, '天使果实 200 → 100（旧规则就是这个价）');
   assert.equal(S.propSellPrice(37), 500, '属性书 1000 → 500');
   assert.equal(S.propSellPrice(101), 10, '宝石 20 → 10');
-  // 字典里 price 为 0 或占位 1 的（卷轴/碎片/礼包/天梯碎片/种子/超级药丸/恶魔果实）不开放回收
-  for (const id of [6, 9, 16, 21, 22, 24, 25, 26, 28, 32, 40, 41, 44, 45, 46, 48, 49, 50, 51]) {
+  // 第 2 项：恶魔果实字典里没有售价，单独定价 100 金松果回收
+  assert.equal(S.propSellPrice(48), 100, '恶魔果实单独定价 100');
+  // 字典里 price 为 0 或占位 1 的（卷轴/碎片/礼包/天梯碎片/种子/超级药丸）不开放回收
+  for (const id of [6, 9, 16, 21, 22, 24, 25, 26, 28, 32, 40, 41, 44, 45, 46, 49, 50, 51]) {
     assert.equal(S.propSellPrice(id), 0, id + ' 不该可卖');
   }
   assert.equal(S.sellProp(46, 1).ok, false, '不能卖的道具会被拒');
@@ -392,14 +394,84 @@ test('升级遵循原表等级与资源限制，零卷轴不会产生 NaN', () =
   assert.equal(g.State.doUpgrade('weapon', 1).ok, false);
   s.level = 5;
   assert.equal(g.State.doUpgrade('weapon', '1').ok, true);
-  assert.equal(s.weapons[0], '1:2'); assert.equal(s.goldPoint, 50);
+  assert.equal(s.weapons[0], '1:2'); assert.equal(s.goldPoint, 60);   // 第 5 项：一次 40 松果
   assert.equal(s.props[22], undefined);
   s.level = 7;
   assert.equal(g.State.doUpgrade('weapon', 1).ok, false);
-  assert.equal(s.goldPoint, 50);
+  assert.equal(s.goldPoint, 60);
   s.props[22] = 7;
   assert.equal(g.State.doUpgrade('weapon', 1).ok, true);
   assert.equal(s.props[22], 0); assert.equal(s.weapons[0], '1:3');
+});
+
+test('升级一次 40 松果；失败后成功率每次 +5%，封顶 100%，成功清零', () => {
+  // 把随机源钉成 1 → 概率判定必定失败，可以确定性地看失败累积
+  const g = game(), S = g.State, s = S.state();
+  g.math.random = () => 1;
+  s.weapons = ['15:9']; s.level = 40; s.goldPoint = 100000; s.props[22] = 9999;
+  const rates = [];
+  for (let i = 0; i < 5; i++) { rates.push(S.upgradeInfo('weapon', 15).rate); S.doUpgrade('weapon', 15); }
+  assert.deepEqual(rates, [10, 15, 20, 25, 30], '每次失败 +5%');
+  assert.equal(S.upgradeInfo('weapon', 15).coin, 40, '一次 40 松果');
+  for (let i = 0; i < 30; i++) S.doUpgrade('weapon', 15);
+  assert.equal(S.upgradeInfo('weapon', 15).rate, 100, '封顶 100%');
+  // 随机源钉成 0 → 必定成功，成功后失败计数清零
+  const g2 = game(), S2 = g2.State, s2 = S2.state();
+  g2.math.random = () => 0;
+  s2.weapons = ['15:9']; s2.level = 40; s2.goldPoint = 100000; s2.props[22] = 9999;
+  assert.equal(S2.upgradeFails('weapon', 15), 0);
+  assert.equal(S2.doUpgrade('weapon', 15).fails, 0);
+  assert.equal(S2.upgradeFails('weapon', 15), 0, '成功即清零');
+});
+
+test('卖出装备按品质给价：白55-60 / 绿60-65 / 蓝65-70 / 紫70-75 / 橙75-80', () => {
+  const g = game(), S = g.State;
+  const expect = [[55, 60], [60, 65], [65, 70], [70, 75], [75, 80]];
+  expect.forEach(([lo, hi], q) => {
+    assert.deepEqual(Array.from(S.gearSellRange(q)), [lo, hi], '品质 ' + q + ' 区间');
+    for (let i = 0; i < 60; i++) {
+      const v = S.gearSellPrice(q);
+      assert.ok(v >= lo && v <= hi, '品质 ' + q + ' 出价 ' + v + ' 应落在 ' + lo + '~' + hi);
+    }
+  });
+  assert.deepEqual(Array.from(S.gearSellRange(9)), [75, 80], '越界品质夹到最高档');
+  assert.deepEqual(Array.from(S.gearSellRange(-3)), [55, 60], '负品质夹到最低档');
+});
+
+test('天使/恶魔果实改成随机三选一，选完才消耗', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.level = 60; s.goldPoint = 100000;
+  s.weapons = ['15:1']; s.skills = ['12:1'];
+  s.props[47] = 2; s.props[48] = 2;
+
+  // 天使果实：回传最多 3 个可学候选，此时还不能消耗果实
+  const gain = S.useProp(47);
+  assert.equal(gain.ok, false);
+  assert.equal(gain.needsFruitChoice, true, '要弹窗让玩家选');
+  assert.equal(gain.mode, 'gain');
+  assert.ok(gain.options.length >= 1 && gain.options.length <= 3, '候选 1~3 个');
+  assert.equal(s.props[47], 2, '未选之前不消耗果实');
+  const pick = gain.options[0];
+  const applied = S.applyFruitChoice(47, pick.kind, pick.id);
+  assert.equal(applied.ok, true, applied.msg);
+  assert.equal(s.props[47], 1, '选完才扣一个');
+  assert.ok((pick.kind === 'weapon' ? s.weapons : s.skills).some((x) => parseInt(x) === pick.id), '真的学会了');
+
+  // 恶魔果实：候选都来自已拥有的，选中后忘掉那一个
+  const before = s.weapons.length + s.skills.length;
+  const lose = S.useProp(48);
+  assert.equal(lose.needsFruitChoice, true);
+  assert.equal(lose.mode, 'lose');
+  assert.ok(lose.options.length >= 1 && lose.options.length <= 3);
+  for (const o of lose.options) {
+    const inW = s.weapons.some((x) => parseInt(x) === o.id);
+    const inS = s.skills.some((x) => parseInt(x) === o.id);
+    assert.ok((o.kind === 'weapon' ? inW : inS), '候选必须是自己拥有的：' + o.name);
+  }
+  const drop = lose.options[0];
+  assert.equal(S.applyFruitChoice(48, drop.kind, drop.id).ok, true);
+  assert.equal(s.weapons.length + s.skills.length, before - 1, '真的忘掉了一个');
+  assert.equal(s.props[48], 1);
 });
 
 test('购买拒绝负数、小数和无穷数量，合法购买正常扣款', () => {

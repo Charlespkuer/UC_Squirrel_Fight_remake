@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="/">
+<!-- 背包 / 装备 / 升级面板 UI 探针（开发用，不属于游戏本体）。
+     用法：node scripts/serve.js --no-save 8199
+           打开 http://127.0.0.1:8199/tools/bag-ui-probe.html
+     可选 ?shot=bag|fruit|gear|upgrade 停在该画面便于截图。
+     诊断 JSON 塞进隐藏的 <pre id="probe-json">，可用 headless Chrome --dump-dom 抓取。
+     始终使用 QA 隔离存档，不读写正式存档。 -->
+<script>
+(function () {
+  const url = new URL(location.href);
+  url.searchParams.set('qa', '1');
+  url.searchParams.delete('test');
+  history.replaceState(null, '', url.href);
+})();
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>背包/装备 UI 探针（开发用）</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<link rel="stylesheet" href="css/tower.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="js/orig/Map.min.js"></script>
+<script src="js/orig/GameDict.js"></script>
+<script src="js/orig/animationStr.js"></script>
+<script src="js/orig/assets.js"></script>
+<script src="js/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/tower-data.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/tower.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/battle-drops.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/tower-ui.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+window.__PROBE = { steps: [], notes: {} };
+const P = window.__PROBE;
+const q = new URLSearchParams(location.search);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const $$ = (sel) => [...document.querySelectorAll(sel)];
+const text = (el) => (el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : null);
+
+function snap(label, sel) {
+  const el = document.querySelector(sel);
+  if (!el) { P.steps.push({ label, sel, missing: true }); return null; }
+  const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+  P.steps.push({ label, sel, w: Math.round(r.width), h: Math.round(r.height),
+    fontSize: cs.fontSize, background: cs.backgroundImage !== 'none' ? cs.backgroundImage.slice(0, 50) : cs.backgroundColor,
+    border: cs.borderTopWidth + ' ' + cs.borderTopStyle + ' ' + cs.borderTopColor, radius: cs.borderRadius,
+    text: text(el).slice(0, 120) });
+  return el;
+}
+const flush = (ms) => new Promise((r) => setTimeout(r, ms || 260));
+
+async function main() {
+  for (let i = 0; i < 200 && !document.querySelector('#start-btn'); i++) await sleep(100);
+  if (!document.querySelector('#start-btn')) { P.fatal = '标题页未出现'; return; }
+  document.querySelector('#start-btn').click();
+  for (let i = 0; i < 60 && document.querySelector('.title-screen'); i++) await sleep(100);
+  await flush(400);
+  const S = State.state();
+  if (!S) { P.fatal = '存档未就绪'; return; }
+  P.notes.saveKey = State.saveKey;
+
+  // 造出探针需要的局面：足够的钱/道具、几件不同品质的装备、一把低成功率可升级的武器
+  Object.assign(S, { level: 60, goldPoint: 999999 });
+  S.weapons = ['15:9', '6:5'];      // 15 号 9→10 级基础成功率只有 10%，正好看失败保护
+  S.skills = ['12:1', '18:1', '23:1'];
+  S.props = { 47: 3, 48: 3, 22: 999, 21: 999 };   // 只放这几种，背包第一页就能选到果实
+  S.upgradeFails = { w15: 3 };      // 直接造出「已失败 3 次」，稳定看到 +15% 的提示
+  State.save();
+
+  // 翻页找到某个格子再点（背包/图鉴都是 6 个一页）
+  async function selectCell(sel, tries) {
+    for (let i = 0; i < (tries || 12); i++) {
+      const hit = document.querySelector(sel);
+      if (hit) { hit.click(); await flush(260); return true; }
+      const next = document.querySelector('#ui [data-action="next"]');
+      if (!next) return false;
+      next.click(); await flush(260);
+    }
+    return false;
+  }
+
+  // ---------- 1) 背包：恶魔果实可卖出 + 价格 ----------
+  UI.runAction('bag');
+  await flush();
+  P.bagCells = $$('[data-prop]').map((b) => ({ id: b.dataset.prop, text: text(b).slice(0, 20) }));
+  P.demonCellExists = await selectCell('[data-prop="48"]');
+  P.demonSellText = text(document.querySelector('.bag-detail')).match(/可回收[^个]*个/);
+  P.demonDetailText = text(document.querySelector('.bag-detail')).slice(0, 160);
+  P.demonActions = $$('.bag-detail .uc-button').map((b) => b.textContent.trim());
+  snap('恶魔果实详情', '.bag-detail');
+  if (q.get('shot') === 'bag') { P.done = true; P.errors = window.__errs.slice(); return; }
+
+  // ---------- 2) 恶魔果实「使用」→ 随机三选一弹窗 ----------
+  document.querySelector('[data-action="prop-action"]').click();
+  await flush(320);
+  P.demonPropButtons = $$('.classic-modal .modal-buttons button').map((b) => b.textContent.trim());
+  const useBtn = $$('.classic-modal .modal-buttons button')[0];
+  if (useBtn) useBtn.click();
+  await flush(360);
+  P.fruitDialogShown = !!document.querySelector('.ws-choice-dialog');
+  P.fruitDialogTitle = text(document.querySelector('.ws-choice-dialog .modal-title'));
+  P.fruitCards = $$('.ws-choice-dialog .ws-choice').map((c) => text(c).slice(0, 60));
+  snap('恶魔果实三选一', '.ws-choice-dialog .ws-choice-box');
+  snap('三选一卡片', '.ws-choice-dialog .ws-choice');
+  if (q.get('shot') === 'fruit') { P.done = true; P.errors = window.__errs.slice(); return; }
+
+  // 真的选一个，确认扣果实 + 忘掉技能
+  const beforeSkillCount = S.skills.length;
+  if (document.querySelector('.ws-choice-dialog .ws-choice')) document.querySelector('.ws-choice-dialog .ws-choice').click();
+  await flush(360);
+  P.afterPick = { props48: S.props[48] || 0, skills: S.skills.length, before: beforeSkillCount,
+    dialogClosed: !document.querySelector('.ws-choice-dialog') };
+
+  // ---------- 3) 装备：回收价按品质给区间 ----------
+  UI.runAction('gears');
+  await flush();
+  const ranges = {};
+  [0, 1, 2, 3].forEach((qq) => { ranges[qq] = Array.from(State.gearSellRange(qq)); });
+  P.gearSellRanges = ranges;
+  P.gearCount = $$('[data-gear]').length;
+  // 直接给一件确定品质的装备，走真实弹窗看提示文案
+  State.addGear(1, []);                     // 斗斗头巾：白装
+  UI.runAction('gears');
+  await flush();
+  const cells = $$('[data-gear]');
+  if (cells.length) cells[0].click();
+  await flush(320);
+  const sellBtn = $$('.classic-modal .modal-buttons button').find((b) => /出售/.test(b.textContent));
+  P.gearDialogButtons = $$('.classic-modal .modal-buttons button').map((b) => b.textContent.trim());
+  if (sellBtn) sellBtn.click();
+  await flush(320);
+  const modals = $$('.classic-modal');
+  P.gearSellConfirm = text(modals[modals.length - 1] && modals[modals.length - 1].querySelector('.modal-body'));
+  if (modals.length) {
+    const body = modals[modals.length - 1].querySelector('.modal-body');
+    const cs = getComputedStyle(body), rr = body.getBoundingClientRect();
+    P.steps.push({ label: '装备出售确认', sel: 'last .modal-body', w: Math.round(rr.width), h: Math.round(rr.height),
+      fontSize: cs.fontSize, background: cs.backgroundColor, border: cs.borderTopWidth + ' none', radius: cs.borderRadius, text: text(body).slice(0, 120) });
+  }
+  $$('.classic-modal .modal-buttons button').forEach((b) => { if (/返回|取消/.test(b.textContent)) b.click(); });
+  await flush(200);
+  if (q.get('shot') === 'gear') { P.done = true; P.errors = window.__errs.slice(); return; }
+
+  // ---------- 4) 升级面板：40 松果 + 失败保护提示 ----------
+  // 前面「恶魔果实三选一」会随机忘掉一个武器/技能，有可能正好把要看的那把忘掉；
+  // 这里重新置回去，保证升级面板这一段无论前面抽到什么都稳定可测。
+  State.state().weapons = ['15:9', '6:5'];
+  State.state().upgradeFails = { w15: 3 };
+  // 先制造几次**真实**的失败（把随机源钉成 1 → 概率判定必不成立），
+  // 看到「失败 N 次，已加 N%」的提示；不钉的话这两次很可能直接成功、把计数清零。
+  Math.random = () => 1;
+  State.doUpgrade('weapon', 15);
+  State.doUpgrade('weapon', 15);
+  Math.random = Math.__origRandom || Math.random;
+  UI.runAction('weapons');
+  await flush();
+  P.weaponCellFound = await selectCell('[data-item="15"]', 12);
+  await flush(260);
+  P.weaponDiag = { raw: (State.state().weapons || []).slice(), parsed: State.myWeapons().map((w) => w.id + ':' + w.level) };
+  const up = State.upgradeInfo('weapon', 15);
+  P.upgrade = up ? { coin: up.coin, baseRate: up.baseRate, rate: up.rate, fails: up.fails } : { missing: true };
+  P.upgradePanelText = text(document.querySelector('.detail-upgrade')).slice(0, 200);
+  P.pityShown = !!document.querySelector('.upgrade-pity');
+  snap('升级面板', '.detail-upgrade');
+  snap('失败保护提示', '.upgrade-pity');
+  if (q.get('shot') === 'upgrade') { P.done = true; P.errors = window.__errs.slice(); return; }
+
+  P.done = true;
+  P.errors = window.__errs.slice();
+}
+function dump() {
+  const pre = document.createElement('pre');
+  pre.id = 'probe-json';
+  pre.style.cssText = 'position:fixed;left:-99999px;top:0;';
+  pre.textContent = JSON.stringify(P);
+  document.body.appendChild(pre);
+}
+main().then(dump).catch((e) => { P.fatal = String(e && e.stack || e); dump(); });
+</script>
+</body>
+</html>

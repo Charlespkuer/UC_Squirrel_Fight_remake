@@ -444,7 +444,7 @@
     const locked=!it;
     const unupgradeable=!isW && (base.type==='被动' && up?.max || id===13);
     const extra=isW?'伤害 '+(it?it.harmLo+'-'+it.harmHi:base.harm):'类别 '+esc(base.type);
-    const right=locked?'<div class="locked-message">尚未获得<br><span class="small-label">升级、开启礼包有机会获得</span></div>':up?.max||unupgradeable?'<div class="locked-message">该'+(isW?'武器':'技能')+'<br>不能升级</div>':'<h3>需要　<span class="muted-text">已有</span></h3><div><span>金松果 '+up.coin+'</span><b>'+S.goldPoint+'</b></div><div><span>卷轴 '+up.book+'</span><b>'+(S.props[up.bookId]||0)+'</b></div><span class="upgrade-rate">成功率 '+up.rate+'%</span><span class="small-label">需要角色 '+up.levelLimit+' 级</span>';
+    const right=locked?'<div class="locked-message">尚未获得<br><span class="small-label">升级、开启礼包有机会获得</span></div>':up?.max||unupgradeable?'<div class="locked-message">该'+(isW?'武器':'技能')+'<br>不能升级</div>':'<h3>需要　<span class="muted-text">已有</span></h3><div><span>金松果 '+up.coin+'</span><b>'+S.goldPoint+'</b></div><div><span>卷轴 '+up.book+'</span><b>'+(S.props[up.bookId]||0)+'</b></div><span class="upgrade-rate">成功率 '+up.rate+'%'+(up.fails?'<i class="upgrade-pity">（失败 '+up.fails+' 次，已加 '+up.fails*State.UPGRADE_FAIL_BONUS+'%）</i>':'')+'</span><span class="small-label">需要角色 '+up.levelLimit+' 级</span>';
     const content='<div class="item-detail"><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-summary"><span class="item-icon">'+icon(kind,id,locked)+'</span><div class="detail-rows"><span class="detail-row">'+(isW?'阶段':'等级')+' '+(it?it.level:1)+'</span><span class="detail-row">'+extra+'</span><span class="detail-row">类型 '+esc(base.type)+'</span></div></div><div class="detail-description">'+esc(description)+(isW&&it?'<br>升至下一阶段额外提升'+esc(base.harmAdd)+'点基础伤害！':'')+'</div></div><div class="detail-upgrade">'+right+'</div></div>';
     // 按钮顺序统一成「动作在前、返回在最后」，与其它弹窗一致
     modal(isW?'武器详情':'技能详情',content,[{label:locked?'尚未获得':up?.max||unupgradeable?'不能升级':'立即升级',cls:locked||up?.max||unupgradeable?'muted':'gold',run:()=>{
@@ -727,6 +727,8 @@
         :isConvertShard?State.composeConvertPill()
         :isGem?State.mergeGems(id)
         :State.useProp(id);
+      // 天使/恶魔果实改成随机三选一：先关掉详情，弹三张候选卡让玩家挑
+      if(!r.ok&&r.needsFruitChoice){m.close();fruitChoiceDialog(r);return;}
       toast(r.msg||(r.gear?'合成成功：'+r.gear.name:'操作完成'));
       if(!r.ok)return;
       if(keepOpen){syncLive();return;}
@@ -794,6 +796,31 @@
     };
     if(range)range.addEventListener('input',()=>{n=Math.max(1,Math.min(held,Number(range.value)||1));refresh();});
     refresh();
+  }
+  /* 天使果实 / 恶魔果实：随机三选一（天使=学会一个，恶魔=遗忘一个）。
+   * 候选由 State.fruitOptions 抽好，这里只负责展示与回传选择。 */
+  function fruitChoiceDialog(r) {
+    const isGain = r.mode === 'gain';
+    const card = (c, i) => '<button type="button" class="ws-choice" data-fruit-pick="' + i + '">' +
+      '<span class="item-icon">' + icon(c.kind, c.id) + '</span>' +
+      '<b class="ws-choice-name">' + esc(c.name) + '</b>' +
+      '<span class="ws-choice-kind">' + (c.kind === 'weapon' ? '武器' : '技能') + (c.type ? ' · ' + esc(c.type) : '') + '</span>' +
+      '<span class="ws-choice-desc">' + esc(c.remark || '—') + '</span></button>';
+    const body = '<div class="ws-choice-box"><p class="free-point-tip">' +
+      (isGain ? '天使果实：从下面 ' + r.options.length + ' 个里选一个学会。'
+              : '恶魔果实：从下面 ' + r.options.length + ' 个里选一个遗忘（不可撤销）。') +
+      '</p><div class="ws-choice-row' + (r.options.length < 3 ? ' few' : '') + '">' +
+      r.options.map(card).join('') + '</div></div>';
+    const m = modal(isGain ? '天使果实 · 三选一' : '恶魔果实 · 三选一', body,
+      [{ label: isGain ? '先不用' : '放弃使用', cls: 'muted' }], { small: true, locked: true });
+    m.element.classList.add('ws-choice-dialog');
+    $$('[data-fruit-pick]', m.element).forEach(b => b.addEventListener('click', () => {
+      const c = r.options[Number(b.dataset.fruitPick)];
+      if (!c) return;
+      const res = State.applyFruitChoice(r.fruit, c.kind, c.id);
+      toast(res.msg);
+      if (res.ok) { m.close(); openBag(false, bagPage); }
+    }));
   }
   function allocateAttributes() {
     const keys=[['power','力量'],['agility','敏捷'],['speed','速度']];
@@ -933,7 +960,7 @@
       if(g.gem)buttons.push({label:'拆卸宝石（5金）',run:()=>{const r=State.unsocketGem(key);toast(r.msg);openGear(key);}});
       else buttons.push({label:'镶嵌宝石',cls:'gold',run:()=>socketGemDialog(key)});
     }
-    buttons.push({label:'出售',cls:'muted',run:()=>notice('确定以 '+g.price+' 金松果出售【'+g.name+'】吗？',[{label:'出售',run:()=>{State.sellGear(key);openGears(gearPage);}},{label:'返回',cls:'muted'}])},{label:'返回',cls:'muted'});
+    buttons.push({label:'出售',cls:'muted',run:()=>notice('确定以 '+(State.gearSellRange(State.gearQuality(g))[0])+'~'+(State.gearSellRange(State.gearQuality(g))[1])+' 金松果出售【'+g.name+'】吗？',[{label:'出售',run:()=>{const got=State.sellGear(key);toast('卖出【'+g.name+'】，获得 '+got+' 金松果');openGears(gearPage);}},{label:'返回',cls:'muted'}])},{label:'返回',cls:'muted'});
     modal('我的装备',content,buttons);
   }
   // 镶嵌宝石：列出背包里各级宝石供选择，镶嵌免费

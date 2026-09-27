@@ -19,7 +19,17 @@
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   // The client receives server-generated battles; no original trigger threshold
   // survives in its dictionary. Keep these reconstruction choices explicit.
-  const RULES = Object.freeze({ masterHpRatio: 0.35, masterChance: 35 });
+  const RULES = Object.freeze({
+    masterHpRatio: 0.35, masterChance: 35,
+    /* 出手时的「二次使用」概率（%）。做法是两层池子：本场没用过的武器/技能优先，
+     * 只有这个概率才回头用旧的那把/那个，所以「用过的」实际出场率被明显压低。
+     * 来点松果（技能 17）解除「每场一次」限制后，二次使用概率单独取最低档，
+     * 必须严格低于其它武器与技能（tools/test-combat-rules.cjs 有断言锁住这一点）。 */
+    repeatWeapon: 25, repeatSkill: 20, repeatSnack: 8,
+    /* 受击防御技能的触发率（%）。绝对防御由 30 下调到 22；龟甲术保留首次 35%，
+     * 并新增自带的二次触发率——原来只能靠装备附加能力「龟甲术N%几率抵挡2次」。 */
+    jueDuiChance: 22, shellFirst: 35, shellAgain: 20,
+  });
   const ACTIVE_SKILLS = [8, 12, 14, 15, 17, 18, 23];
   /** 调试开关「无敌模式」：玩家侧不会被击倒，最少保留 1 点血。 */
   function godSave(def) {
@@ -64,7 +74,7 @@
       side, name: f.name, level: stat(f.level, 1), npcType: f.npcType || null,
       power: stat(f.power, 1), agility: stat(f.agility, 1), speed: stat(f.speed, 1),
       maxHp: fullHp, hp: Math.max(1, Math.min(stat(f.hp, 1), fullHp)),
-      weapons, skills, lastWeaponId: null,
+      weapons, skills, usedWeapons: {}, usedSkills: {}, lastWeaponId: null, lastSkillId: null,
       effects: f.effects || {}, masterLevel: Math.max(0, Number(f.masterLevel) || 0),
       // 攻略.md 的裸属性解释与 PPT 的含装备解释冲突。本版采用前者，
       // callers provide growth stats excluding equipment, skills and pills.
@@ -100,6 +110,48 @@
   /** 塔 buff 的暴击伤害加成（比例）。 */
   function critDmgBonus(att) { return (att.mods && Number(att.mods.critDmgBonus) || 0) / 100; }
 
+  function pickOne(list) { return list[Math.floor(Math.random() * list.length)]; }
+  /** 「本场没用过」的基准权重；用过的按各自的二次使用概率降权，所以一用再用会被明显压掉。 */
+  const UNUSED_WEIGHT = 100;
+  /** 刚刚用过的那一个再额外打折，避免连着两回合是同一把/同一个。 */
+  const LAST_PENALTY = 0.3;
+
+  function pickWeighted(list, weightOf) {
+    let total = 0;
+    for (const x of list) total += weightOf(x);
+    if (!(total > 0)) return pickOne(list);
+    let roll = Math.random() * total;
+    for (const x of list) { roll -= weightOf(x); if (roll <= 0) return x; }
+    return list[list.length - 1];
+  }
+
+  /**
+   * 出手权重（武器/技能共用口径，并导出给测试直接校验）：
+   *   - 本场没用过 → UNUSED_WEIGHT（远高于用过的，所以优先，但不是绝对优先）；
+   *   - 已经用过   → 它的「二次使用概率」；来点松果（17）取最低档 repeatSnack；
+   *   - 上一回合刚用过的那一个再乘 LAST_PENALTY，避免连着重复同一把/同一个。
+   * 「所有技能的二次使用概率被调低」和「来点松果最低」两条都落在这里。
+   */
+  function skillWeight(att, id) {
+    let w = att.usedSkills[id] ? (id === 17 ? RULES.repeatSnack : RULES.repeatSkill) : UNUSED_WEIGHT;
+    if (att.lastSkillId === id) w *= LAST_PENALTY;
+    return w;
+  }
+  function weaponWeight(att, id) {
+    let w = att.usedWeapons[id] ? RULES.repeatWeapon : UNUSED_WEIGHT;
+    if (att.lastWeaponId === id) w *= LAST_PENALTY;
+    return w;
+  }
+
+  /** 技能选择：按 skillWeight 加权 → 没用过的优先、二次使用被压掉、来点松果最低。 */
+  function pickSkill(att, actives) {
+    return pickWeighted(actives, (id) => skillWeight(att, id));
+  }
+  /** 武器选择：同一套口径。 */
+  function pickWeapon(att) {
+    return pickWeighted(att.weapons, (w) => weaponWeight(att, w.id));
+  }
+
   function dodgeChance(att, def) {
     const wMust = att.mustHitNext;
     if (wMust) return 0;
@@ -123,17 +175,26 @@
     let out = { dmg, guiJia: 0, jueDui: 0, rebound: 0 };
     const gearReduction = opts.action === 'weapon' ? effect(def, opts.weaponType === '投掷' ? 10 : 9) : opts.action === 'skill' ? effect(def, 11) : 0;
     out.dmg = Math.round(out.dmg * (1 - clamp(gearReduction, 0, 80) / 100));
-    if (def.skills[16] && def.silence <= 0 && chance(30)) {      // 绝对防御
+    if (def.skills[16] && def.silence <= 0 && chance(RULES.jueDuiChance)) {   // 绝对防御
       const pct = 40 + 4 * (def.skills[16] - 1);
       out.jueDui = out.dmg; out.rebound = Math.round(out.dmg * pct / 100); out.dmg = 0;
       return out;
     }
-    if (def.skills[7] && def.silence <= 0 && (def.shellCharges > 0 || !def.usedShell && chance(35))) { // 龟甲术
-      if (def.shellCharges > 0) def.shellCharges--;
-      else { def.usedShell = true; if (effect(def, 32) && chance(effect(def, 32))) def.shellCharges = 1; }
-      const pct = clamp(20 + 5 * (def.skills[7] - 1), 0, 80);
-      out.guiJia = Math.round(out.dmg * pct / 100);
-      out.dmg -= out.guiJia;
+    /* 龟甲术：首次受击 35%；触发过一次之后不再是一次性的，每次受击仍有
+     * shellAgain% + 装备附加能力「龟甲术N%几率抵挡2次」的概率再挡一次。
+     * 它只在绝对防御**没触发**时才会判定（绝对防御在前且直接 return），
+     * 所以多带一个龟甲术只会让受伤期望更低，不可能挤占绝对防御。 */
+    if (def.skills[7] && def.silence <= 0) {
+      const canTrigger = def.shellCharges > 0
+        || (!def.usedShell && chance(RULES.shellFirst))
+        || (def.usedShell && chance(RULES.shellAgain + effect(def, 32)));
+      if (canTrigger) {
+        if (def.shellCharges > 0) def.shellCharges--;
+        else def.usedShell = true;
+        const pct = clamp(20 + 5 * (def.skills[7] - 1), 0, 80);
+        out.guiJia = Math.round(out.dmg * pct / 100);
+        out.dmg -= out.guiJia;
+      }
     }
     if (skill(def, 10)) {                                      // 皮糙肉厚
       const pct = clamp((5 + (skill(def, 10) - 1)) * (1 + effect(def, 34) / 100), 0, 80);
@@ -390,7 +451,8 @@
       }
       // 行动选择：武器 45% / 技能 35% / 普攻 20%
       const canWeapon = att.weapons.length > 0 && att.disarm <= 0;
-      const actives = ACTIVE_SKILLS.filter((id) => att.skills[id] && !(id === 14 && att.usedCosmos) && !(id === 17 && (att.usedSnack || att.hp >= att.maxHp)));
+      // 来点松果解除「每场一次」：还能用，但下面的选法会把它压到最低的二次使用概率
+      const actives = ACTIVE_SKILLS.filter((id) => att.skills[id] && !(id === 14 && att.usedCosmos) && !(id === 17 && att.hp >= att.maxHp));
       const canSkill = actives.length > 0 && att.silence <= 0;
       let kind;
       if (att.pattern) {
@@ -412,16 +474,12 @@
 
       if (kind === 'weapon') {
         const prepared = att.pendingWeapon;
-        // 选武器时给「上一回合刚用过的那把」降权（而不是直接禁掉），
-        // 这样连续重复同一把武器的观感变少，但不会退化成机械式的交替。
+        // 选武器：本场没用过的优先（并非一定），只有 repeatWeapon% 才回头用旧的那把。
         let w;
         if (prepared) w = prepared;
-        else if (att.weapons.length > 1 && !att.pattern) {
-          const fresh = att.weapons.filter((x) => x.id !== att.lastWeaponId);
-          const repeatLast = fresh.length && Math.random() < 0.25;
-          const from = repeatLast ? att.weapons : (fresh.length ? fresh : att.weapons);
-          w = from[Math.floor(Math.random() * from.length)];
-        } else w = att.weapons[0];
+        else if (att.weapons.length > 1 && !att.pattern) w = pickWeapon(att);
+        else w = att.weapons[0];
+        att.usedWeapons[w.id] = true;
         att.lastWeaponId = w.id;
         att.pendingWeapon = null;
         if (w.id === 1 && !prepared) {
@@ -487,7 +545,9 @@
       if (kind === 'skill') {
         const sid = att.pattern
           ? parseInt(actives.slice().sort((a, b) => a - b)[0])          // 固定循环：技能也固定
-          : parseInt(actives[Math.floor(Math.random() * actives.length)]);
+          : pickSkill(att, actives);
+        att.usedSkills[sid] = true;
+        att.lastSkillId = sid;
         const lv = att.skills[sid];
         r.action = 'skill'; r.id = sid; r.level = lv;
         // 塔 buff「疾风先手」：本局首次技能不消耗回合
@@ -632,5 +692,9 @@
     return { rounds, winner, maxHp: [A.maxHp, B.maxHp], names: [A.name, B.name] };
   }
 
-  window.Sim = { simulate, rules: RULES };
+  window.Sim = {
+    simulate, rules: RULES,
+    // 供 tools/test-combat-rules.cjs 直接校验出手权重（不用统计近似）
+    actionWeights: { skill: skillWeight, weapon: weaponWeight },
+  };
 })();

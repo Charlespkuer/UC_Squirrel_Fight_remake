@@ -27,11 +27,21 @@ function setup(storage, keepSave) {
   for (const file of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), c, { filename: file });
   }
+  // 整层胜率贴着验收线（层 10-15 ≥15%、层 20-25 ≥8%）跑，用真随机会偶发抖动；
+  // 固定种子的 LCG 让每次结果一致，验收才有意义。
+  let seed = 20260927;
+  vm.runInContext('Math', c).random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
   if (!keepSave) c.State.newGame('塔测试');
   return c;
 }
 
 /* ---------- A. 逻辑测试 ---------- */
+/* 测试脚本自己也要掷骰子（场间选哪个 buff、无尽结算点去留），
+ * 这部分跑在 Node 宿主里，不受 setup() 里那个 vm 的 Math.random 影响，
+ * 所以单独给一支固定种子的流，保证整次验收可复现。 */
+let hostSeed = 20260927;
+const hostRandom = () => { hostSeed = (Math.imul(hostSeed, 1664525) + 1013904223) >>> 0; return hostSeed / 4294967296; };
+
 let passed = 0, failed = 0;
 function t(name, cond) { if (cond) { passed++; } else { failed++; console.log('  ✗ ' + name); } }
 
@@ -62,7 +72,7 @@ function autoPick(ctx, mode) {
   if (run && run.choices) {
     // 模拟真人策略：血量低于 75% 优先选固定回血，否则随机拿 buff
     const healIdx = run.choices.findIndex((x) => x.type === 'heal');
-    const idx = run.carry < 0.75 && healIdx >= 0 ? healIdx : 1 + Math.floor(Math.random() * (run.choices.length - 1));
+    const idx = run.carry < 0.75 && healIdx >= 0 ? healIdx : 1 + Math.floor(hostRandom() * (run.choices.length - 1));
     ctx.Tower.pickChoice(mode, idx);
   }
 }
@@ -276,7 +286,7 @@ function autoPick(ctx, mode) {
       if (!run) break;
       if (run.phase === 'shop') { Tower.closeShop(); }
       if (run.phase === 'checkpoint') {
-        if (Math.random() < 0.5) { Tower.settleEndless(); break; }
+        if (hostRandom() < 0.5) { Tower.settleEndless(); break; }
         Tower.continueEndless();
         continue;
       }

@@ -32,6 +32,9 @@ function game(fallback = 0.5, sequence = []) {
   return c;
 }
 const fighter = (extra = {}) => ({ name: '测试松鼠', level: 20, power: 10, agility: 10, speed: 10, hp: 10000, weapons: [], skills: [], ...extra });
+/** 统计类用例要真随机：game() 会把 Math.random 钉成常数（用来验证事件顺序），
+ *  概率类断言在常数下会退化成「永远成立」或「永远不成立」。 */
+function randomGame() { const c = game(); vm.runInContext('Math', c).random = Math.random; return c; }
 const rounds = (g, a = {}, b = {}, options) => g.Sim.simulate(fighter(a), fighter(b), options).rounds;
 const tests = [];
 const test = (name, run) => tests.push([name, run]);
@@ -162,11 +165,51 @@ test('色诱和通灵可以闪避，幸运一击始终必中', () => {
   assert.ok(lucky[0].dmg > 0);
 });
 
-test('普通龟甲只抵挡一次，附加属性可以增加一次', () => {
-  const ordinary = rounds(game(0.3), {}, { skills: ['7:10'] });
-  assert.equal(ordinary.filter((r) => r.guiJia).length, 1);
-  const extra = rounds(game(0.3), {}, { skills: ['7:10'], effects: { 32: 100 } });
-  assert.equal(extra.filter((r) => r.guiJia).length, 2);
+test('龟甲术首次触发后仍可二次触发（不再是一次性）', () => {
+  const turtle = (g, effects) => rounds(g, { power: 40, weapons: ['6:1'] }, { skills: ['7:10'], hp: 100000, effects });
+  // 附加能力「龟甲术N%几率抵挡2次」=100 时，首次触发之后每次受击都必定再挡
+  const full = turtle(randomGame(), { 32: 100 });
+  const blocks = full.filter((r) => r.guiJia).length;
+  assert.ok(blocks > 1, '首次之后应当继续二次触发，实测 ' + blocks + ' 次');
+  const lastHit = [...full].reverse().find((r) => r.attacker === 0 && !r.dodge && r.action !== 'rest');
+  assert.ok(lastHit && lastHit.guiJia !== undefined, '必定二次触发时最后一次受击也该被挡');
+  // 不带任何附加能力：首次 35%，之后每次仍有 shellAgain% 的二次触发概率
+  let several = 0;
+  for (let i = 0; i < 200; i++) if (rounds(randomGame(), { power: 40, weapons: ['6:1'] }, { skills: ['7:10'], hp: 100000 }).filter((r) => r.guiJia).length >= 2) several++;
+  assert.ok(several > 0, '没有装备附加能力时也应当能二次触发，实测 ' + several + '/200 场出现');
+});
+
+test('绝对防御触发率用 RULES.jueDuiChance，且已从 30% 下调', () => {
+  const c = game();
+  assert.equal(c.Sim.rules.jueDuiChance, 22);
+  assert.ok(c.Sim.rules.jueDuiChance < 30, '必须低于原来的 30%');
+  let hits = 0, blocks = 0;
+  for (let i = 0; i < 400; i++) {
+    const ev = rounds(randomGame(), { power: 30, weapons: ['6:1'], hp: 100000 }, { skills: ['16:1'], hp: 100000 });
+    for (const r of ev) {
+      if (r.attacker !== 0 || r.dodge || r.action === 'rest') continue;
+      hits++; if (r.jueDui) blocks++;
+    }
+  }
+  const rate = blocks / hits;
+  assert.ok(Math.abs(rate - 0.22) < 0.05, '实测触发率 ' + (rate * 100).toFixed(1) + '% 应接近 22%');
+});
+
+test('同时有龟甲术与绝对防御时，每次受击的受伤期望更低（不会被挤占）', () => {
+  const measure = (skills) => {
+    let taken = 0, hits = 0;
+    for (let i = 0; i < 400; i++) {
+      const ev = rounds(randomGame(), { power: 30, weapons: ['6:1'], hp: 100000 }, { skills, hp: 100000 });
+      for (const r of ev) {
+        if (r.attacker !== 0 || r.dodge || r.action === 'rest') continue;
+        hits++; taken += Number(r.dmg) || 0;
+      }
+    }
+    return taken / hits;
+  };
+  const onlyJueDui = measure(['16:1']);
+  const both = measure(['16:1', '7:10']);
+  assert.ok(both < onlyJueDui, '龟甲+绝对防御 ' + both.toFixed(1) + ' 应小于仅绝对防御 ' + onlyJueDui.toFixed(1));
 });
 
 test('来点松果不在满血时浪费，恢复后不占下一次行动', () => {
@@ -225,20 +268,53 @@ test('沉默之斧同时抑制武器好手等被动技能', () => {
   assert.equal(muted.dmg, withoutSkill.dmg);
 });
 
-test('来点松果每场战斗只能使用一次', () => {
-  const events = rounds(game(0.3), { skills: ['17:5'], power: 1 }, { power: 50, hp: 100000 });
-  const snacks = events.filter((r) => r.id === 17);
-  assert.equal(snacks.length, 1);
-  assert.ok(snacks[0].healSelf > 0);
-  assert.ok(events.length > 30, '战斗足够长，排除了“没机会再用”的假象');
+test('来点松果可以二次触发，但概率是所有武器/技能里最低的', () => {
+  const rules = game().Sim.rules;
+  assert.ok(rules.repeatSnack < rules.repeatSkill, '来点松果二次概率要低于其它技能');
+  assert.ok(rules.repeatSnack < rules.repeatWeapon, '来点松果二次概率要低于武器');
+  assert.ok(rules.repeatSkill < 50, '所有技能的二次使用概率都该被调低');
+  // 不再是「每场一次」：长战斗里应当出现多次
+  let repeated = 0;
+  for (let i = 0; i < 400; i++) {
+    const ev = rounds(randomGame(), { skills: ['17:5'], power: 1 }, { power: 50, hp: 100000 });
+    if (ev.filter((r) => r.id === 17).length >= 2) repeated++;
+  }
+  assert.ok(repeated > 0, '来点松果应当可以重复触发，实测 ' + repeated + '/400 场');
+  /* 「二次使用概率最低」直接用导出权重校验：来点松果自身是 actAgain 技能（不占回合），
+   * 用「场均使用次数」比较会被这个特性干扰，量不出概率差。 */
+  const w = game().Sim.actionWeights.skill;
+  const spent = { usedSkills: { 17: true, 12: true, 23: true }, lastSkillId: null };
+  const snack = w(spent, 17);
+  for (const id of [12, 23]) assert.ok(snack < w(spent, id), '来点松果二次权重 ' + snack + ' 应低于技能 ' + id + ' 的 ' + w(spent, id));
+  assert.ok(snack < game().Sim.actionWeights.weapon({ usedWeapons: { 6: true }, lastWeaponId: null }, 6), '也应低于武器');
 });
 
-test('来点松果每场战斗只能使用一次', () => {
-  const events = rounds(game(0.3), { skills: ['17:5'], power: 1 }, { power: 50, hp: 100000 });
-  const snacks = events.filter((r) => r.id === 17);
-  assert.equal(snacks.length, 1);
-  assert.ok(snacks[0].healSelf > 0);
-  assert.ok(events.length > 30, '战斗足够长，排除了“没机会再用”的假象');
+test('出手时优先用本场没用过的武器与技能（并非绝对）', () => {
+  let repeats = 0, weapons = 0;
+  for (let i = 0; i < 200; i++) {
+    const ev = rounds(randomGame(), { power: 30, skills: ['12:1', '18:1', '23:1'], weapons: ['6:1', '8:1', '13:1'], hp: 100000 }, { power: 5, hp: 100000 });
+    let last = null;
+    for (const r of ev) {
+      if (r.attacker !== 0) continue;
+      if (r.action === 'weapon') { weapons++; if (r.id === last) repeats++; last = r.id; }
+      else if (r.action === 'skill') { if (r.id === last) repeats++; last = r.id; }
+    }
+  }
+  assert.ok(weapons > 200, '样本量足够：实测武器出手 ' + weapons + ' 次');
+  // 均匀随机下「连续两次同一把/同一个」约 1/3；优先没用过的之后应当远低于此
+  const rate = repeats / weapons;
+  assert.ok(rate < 0.15, '连续重复率 ' + (rate * 100).toFixed(1) + '% 应远低于均匀随机的 ~33%');
+  // 权重口径（确定性，不依赖采样）：没用过的 > 用过的；刚用过的再降一档
+  const W = game().Sim.actionWeights;
+  const fresh = { usedWeapons: {}, lastWeaponId: null };
+  const spentW = { usedWeapons: { 6: true }, lastWeaponId: null };
+  const justW = { usedWeapons: { 6: true }, lastWeaponId: 6 };
+  assert.ok(W.weapon(fresh, 6) > W.weapon(spentW, 6), '没用过的武器权重必须高于用过的（优先但非绝对）');
+  assert.ok(W.weapon(spentW, 6) > W.weapon(justW, 6), '刚用过的武器该再降一档');
+  assert.ok(W.weapon(fresh, 6) > 0 && W.weapon(justW, 6) > 0, '只是降权，不是禁用');
+  const W2 = game().Sim.actionWeights.skill;
+  assert.ok(W2({ usedSkills: {}, lastSkillId: null }, 12) > W2({ usedSkills: { 12: true }, lastSkillId: null }, 12), '没用过的技能权重更高');
+  assert.ok(W2({ usedSkills: { 12: true }, lastSkillId: null }, 12) > W2({ usedSkills: { 12: true }, lastSkillId: 12 }, 12), '刚用过的技能该再降一档');
 });
 
 test('仙鹤大招「仙鹤展翅」是其首次行动且每场仅一次', () => {

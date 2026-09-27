@@ -91,6 +91,17 @@
     next.integral = next.integral == null ? null : integer(next.integral, 0);
     next.name = typeof next.name === 'string' && next.name.trim() ? next.name : '小松鼠';
     next.lastEnergyTs = Number(next.lastEnergyTs) > 0 ? Math.min(Date.now(), integer(next.lastEnergyTs, Date.now(), 1)) : Date.now();
+    // 升级失败累积（第 5 项）：只保留 'w15'/'s7' 这种键，值收敛到正整数
+    next.upgradeFails = (() => {
+      const src = object(raw.upgradeFails) ? raw.upgradeFails : {};
+      const out = {};
+      for (const key of Object.keys(src)) {
+        if (!/^[ws]\d+$/.test(key)) continue;
+        const v = integer(src[key], 0);
+        if (v > 0) out[key] = Math.min(999, v);
+      }
+      return out;
+    })();
     next.weapons = normalizeItems(next.weapons, weaponsMap);
     next.skills = normalizeItems(next.skills, skillsMap);
     for (const key of ['props', 'propsStates']) {
@@ -850,6 +861,19 @@
   function ownedWSCount() { return S.weapons.length + S.skills.filter(s => Number(String(s).split(':')[0]) !== MASTER_SKILL_ID).length; }
 
   // ---------- 升级武器/技能（upgradeMap: 成功率/费用/卷轴/玩家等级限制） ----------
+  /* 需求：升级一次统一 40 金松果（原表是 50，10→11 那行 100）。
+   * 失败保护：每次失败后成功率 +5 个百分点，累积到成功为止，成功即清零；
+   * 失败次数按「武器/技能 + id」存在存档的 upgradeFails 里。
+   * 原表 upgradeMap 来自 GameDict，保持逐字节不动，只在这里覆盖取值。 */
+  const UPGRADE_COIN = 40;
+  const UPGRADE_FAIL_BONUS = 5;   // 每次失败 +5%
+  const upgradeFailKey = (kind, id) => (kind === 'weapon' ? 'w' : 's') + Number(id);
+  function upgradeFails(kind, id) {
+    const m = object(S) && object(S.upgradeFails) ? S.upgradeFails : {};
+    return Math.max(0, integer(m[upgradeFailKey(kind, id)], 0));
+  }
+  /** 基础成功率 + 失败累积，封顶 100%。 */
+  const upgradeRate = (baseRate, fails) => Math.min(100, Math.max(0, integer(baseRate, 0)) + Math.max(0, integer(fails, 0)) * UPGRADE_FAIL_BONUS);
   function upgradeInfo(kind, id) {
     if (kind !== 'weapon' && kind !== 'skill') return null;
     id = Number(id);
@@ -860,8 +884,10 @@
     if (kind === 'skill' && it.level >= 10) return { max: true, item: it, msg: '技能已达到10级上限' };
     const row = upgradeMap.getValue(it.level); // 当前等级对应升级行
     if (!row) return { max: true };
+    const baseRate = parseInt(row.rate), fails = upgradeFails(kind, id);
     return {
-      max: false, item: it, rate: parseInt(row.rate), coin: parseInt(row.coin),
+      max: false, item: it, baseRate, fails, rate: upgradeRate(baseRate, fails),
+      coin: UPGRADE_COIN,
       book: parseInt(row.book), levelLimit: parseInt(row.levelLimit),
       bookId: kind === 'weapon' ? 22 : 21,
     };
@@ -878,6 +904,8 @@
       if (info.book > 0) S.props[info.bookId] -= info.book;
     }
     const ok = debugOn('noUpgradeFail') ? true : Math.random() * 100 < info.rate;
+    if (!object(S.upgradeFails)) S.upgradeFails = {};
+    const failKey = upgradeFailKey(kind, id);
     if (ok) {
       bumpDaily('upgrade', 1);
       const arr = kind === 'weapon' ? S.weapons : S.skills;
@@ -885,9 +913,16 @@
         const [wid, lv] = arr[i].split(':').map(Number);
         if (wid === id) { arr[i] = wid + ':' + (lv + 1); break; }
       }
+      delete S.upgradeFails[failKey];      // 成功清零，下次回到基础概率
+    } else {
+      S.upgradeFails[failKey] = Math.min(999, info.fails + 1);   // 失败累积，下次 +5%
     }
     save();
-    return { ok, msg: ok ? '升级成功！' : '升级失败……再接再厉！', rate: info.rate };
+    const nextRate = ok ? null : upgradeRate(info.baseRate, info.fails + 1);
+    return {
+      ok, rate: info.rate, fails: ok ? 0 : info.fails + 1, nextRate,
+      msg: ok ? '升级成功！' : '升级失败……再接再厉！' + (nextRate ? '（下次成功率 ' + nextRate + '%）' : ''),
+    };
   }
 
   // ---------- 装备 ----------
@@ -934,20 +969,29 @@
     const g = S.gears.find((x) => x.key === gearKey);
     if (g) { g.used = false; save(); }
   }
+  /* 卖出装备的金松果：按品质每档 +5，在区间内随机。
+   * 白 55-60 / 绿 60-65 / 蓝 65-70 / 紫 70-75 / 橙 75-80（橙是实例级传说品质）。
+   * 原来直接把字典里的 set.price 当回收价（白/绿/蓝都是 55、紫 210），品质之间没有区分度。 */
+  const GEAR_SELL_RANGE = Object.freeze([[55, 60], [60, 65], [65, 70], [70, 75], [75, 80]]);
+  const gearSellRange = (quality) => GEAR_SELL_RANGE[Math.max(0, Math.min(GEAR_SELL_RANGE.length - 1, integer(quality, 0)))] || GEAR_SELL_RANGE[0];
+  const gearSellPrice = (quality) => { const [lo, hi] = gearSellRange(quality); return lo + Math.floor(Math.random() * (hi - lo + 1)); };
+  /** 品质需要按实例算：橙装是写在实例上的 quality=4。 */
+  function gearQuality(gear) { return gear && gear.orange === true ? 4 : (gearInst(gear.id) || {}).quality || 0; }
   function sellGear(gearKey) {
     const i = S.gears.findIndex((x) => x.key === gearKey);
     if (i < 0) return 0;
-    const g = gearInst(S.gears[i].id);
+    const gold = gearSellPrice(gearQuality(S.gears[i]));
     S.gears.splice(i, 1);
-    S.goldPoint += g.price; save();
-    return g.price;
+    S.goldPoint += gold; save();
+    return gold;
   }
   /* 背包里可以直接卖的道具（装备走 sellGear）：默认按**字典价格的一半**回收
    * （向下取整），所以商店里买得到的、以及字典里标了价的材料都能卖。
    * 字典里 price 为 0 或占位 1 的道具（兑换用的卷轴、碎片、礼包、天梯碎片、
    * 超级药丸、果实种子这类「不可购买」的物品）不开放回收；
    * PROP_SELL_OVERRIDES 留作个别道具单独定价的例外表。 */
-  const PROP_SELL_OVERRIDES = Object.freeze({});
+  /* 恶魔果实（48）在字典里没有售价（不可购买），按需求单独定价 100 金松果回收。 */
+  const PROP_SELL_OVERRIDES = Object.freeze({ 48: 100 });
   const MIN_SELL_PRICE = 2;   // 半价至少 1 金松果才有意义
   function propSellPrice(id) {
     id = Number(id);
@@ -1267,20 +1311,14 @@
         break;
       }
       case 38: { const g = 20 + Math.floor(Math.random() * 80); S.goldPoint += g; msg = `打开红包，获得${g}金松果！`; break; }
-      case 47: { // 天使果实
-        const r = gainRandomWS();
-        if (!r) return { ok: false, msg: '获得失败：可能已达上限或运气不佳' };
-        msg = '获得了 ' + r.name + '！';
-        break;
-      }
-      case 48: { // 恶魔果实
-        const all = [...S.weapons.map((w) => 'w' + w), ...S.skills.map((s) => 's' + s)];
-        if (all.length <= 1) return { ok: false, msg: '没有可以遗忘的武器或技能' };
-        const pick = all[Math.floor(Math.random() * all.length)];
-        if (pick[0] === 'w') S.weapons.splice(S.weapons.indexOf(pick.slice(1)), 1);
-        else S.skills.splice(S.skills.indexOf(pick.slice(1)), 1);
-        msg = '遗忘成功';
-        break;
+      case 47:   // 天使果实：随机三选一（学会一个）
+      case 48: { // 恶魔果实：随机三选一（遗忘一个）
+        // 这里只回传候选，由界面弹窗选完再走 applyFruitChoice，所以提前返回、不消耗果实
+        const fruit = fruitOptions(id);
+        if (!fruit) {
+          return { ok: false, msg: id === 47 ? '获得失败：可能已达上限或运气不佳' : '没有可以遗忘的武器或技能' };
+        }
+        return { ok: false, needsFruitChoice: true, fruit: id, mode: fruit.mode, options: fruit.options, msg: '请从三个里选一个' };
       }
       case 28: case 29: case 30: case 31: case 32: case 49: { // 礼包
         const gift = giftMap.getValue(id);
@@ -1350,6 +1388,60 @@
       picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
     }
     return picked.map(wsInfo).filter(Boolean);
+  }
+  /* ---------- 天使果实 / 恶魔果实（第 3 项：随机三选一） ----------
+   * 天使果实：从「还能学」的池子里随机抽最多 3 个候选，玩家挑一个学会；
+   * 恶魔果实：从已拥有的武器/技能里随机抽最多 3 个候选，玩家挑一个遗忘。
+   * 都不再是「直接随机生效」。候选在 useProp 里只负责回传，真正改动在 applyFruitChoice。 */
+  function ownedWSChoices(n) {
+    const all = [
+      ...S.weapons.map((w) => wsInfo('w' + w.split(':')[0])),
+      ...S.skills.map((s) => wsInfo('s' + s.split(':')[0])),
+    ].filter(Boolean);
+    const pool = all.slice(), picked = [];
+    while (picked.length < Math.max(1, integer(n, 3, 1)) && pool.length) {
+      picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    }
+    return picked;
+  }
+  /** 果实的三选一候选；条件不满足（武技已满 / 只剩一个）时返回 null。 */
+  function fruitOptions(id) {
+    id = Number(id);
+    if (id === 47) { const options = wsChoices(3); return options.length ? { mode: 'gain', options } : null; }
+    if (id === 48) {
+      if (S.weapons.length + S.skills.length <= 1) return null;
+      return { mode: 'lose', options: ownedWSChoices(3) };
+    }
+    return null;
+  }
+  /** 应用果实三选一的结果，成功后消耗掉那个果实。 */
+  function applyFruitChoice(id, kind, targetId) {
+    id = Number(id); targetId = Number(targetId);
+    kind = kind === 'weapon' ? 'weapon' : 'skill';
+    if (!(S.props[id] > 0)) return { ok: false, msg: '没有这个果实' };
+    const label = kind === 'weapon' ? '武器' : '技能';
+    if (id === 47) {
+      const info = grantWS((kind === 'weapon' ? 'w' : 's') + targetId);
+      if (!info) return { ok: false, msg: '这个' + label + '暂时学不了' };
+      S.props[id]--; if (S.props[id] <= 0) delete S.props[id];
+      bumpDaily('use', 1);
+      save();
+      return { ok: true, msg: '获得了 ' + info.name + '！' };
+    }
+    if (id === 48) {
+      const arr = kind === 'weapon' ? S.weapons : S.skills;
+      const idx = arr.findIndex((x) => parseInt(x.split(':')[0]) === targetId);
+      if (idx < 0) return { ok: false, msg: '没有这个' + label };
+      // 忘掉之后至少要留一件，否则玩家会变成赤手空拳
+      if (S.weapons.length + S.skills.length <= 1) return { ok: false, msg: '至少要留下一个武器或技能' };
+      const info = wsInfo((kind === 'weapon' ? 'w' : 's') + targetId);
+      arr.splice(idx, 1);
+      S.props[id]--; if (S.props[id] <= 0) delete S.props[id];
+      bumpDaily('use', 1);
+      save();
+      return { ok: true, msg: '遗忘了 ' + ((info && info.name) || label) };
+    }
+    return { ok: false, msg: '这个道具不能这样用' };
   }
   /** 还没选的「三选一」：升级发下来就必须选掉（和自由属性点一样，只是会排队）。 */
   function pendingWS() { return S && Array.isArray(S.wsPicks) ? S.wsPicks.length : 0; }
@@ -2298,9 +2390,10 @@
     vipRow, buyVip, grantVip, tickVipDaily, gearCapacity, syncVipEnergyCap,
     VIP_LEVELS, VIP_LEVEL_EXP, VIP_MAX_LEVEL, VIP_PLANS, VIP_ENERGY_CAP, VIP_GEAR_BONUS, GEAR_CAPACITY,
     weaponInst, skillInst, myWeapons, mySkills, wsLimit, ownedWSCount,
-    upgradeInfo, doUpgrade,
+    upgradeInfo, doUpgrade, upgradeFails, UPGRADE_COIN, UPGRADE_FAIL_BONUS,
+    fruitOptions, applyFruitChoice,
     weaponList,
-    gearInst, myGears, wear, unwear, sellGear, composeGear, mergeGears, addGear, extText, randomExt,
+    gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, extText, randomExt,
     gemLevel, GEM_MERGE_RATES, rollGemDrop, mergeGems, socketGem, unsocketGem,
     totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, gainRandomWS, wsChoices, wsInfo,
     pendingWS, currentWSChoices, chooseWS, chooseWSRandom,

@@ -70,6 +70,25 @@ test('54位关卡NPC全部匹配所属高手和星级，修正原表4星仙鹤�
   assert.equal(g.c.State.npcOf(4, 1).id, '109'); assert.equal(g.c.State.npcOf(10, 1).id, '127');
 });
 
+test('常驻挑战关卡三种敌人 6 难度血量整体上调 15%~20%', () => {
+  const { c } = setup();
+  const { GData } = c;
+  assert.ok(GData.STAGE_HP_MUL >= 1.15 && GData.STAGE_HP_MUL <= 1.20,
+    '血量系数应落在 +15%~+20%：' + GData.STAGE_HP_MUL);
+  const seen = [];
+  for (let id = 1; id <= 18; id++) {
+    const base = GData.stagePlayerHp(GData.stageTargetLevel(id));
+    for (let role = 0; role < 3; role++) {
+      const raw = base * GData.STAGE_ROLE_HP[role];
+      const lift = GData.stageNpcHp(id, role + 1) / raw;
+      assert.ok(lift >= 1.15 && lift <= 1.21,
+        id + ' 关第 ' + (role + 1) + ' 个敌人只上调了 ' + ((lift - 1) * 100).toFixed(1) + '%');
+      seen.push(lift);
+    }
+  }
+  assert.equal(seen.length, 54, '18 关 × 3 个敌人 = 54 个 NPC 全部覆盖');
+});
+
 test('10级门槛、18关逐星解锁、跨高手边界全部生效', () => {
   const g = setup(); g.s().level = 9;
   assert.equal(g.c.State.stageAccess(1).ok, false); assert.equal(g.c.State.beginStageBattle(1).ok, false);

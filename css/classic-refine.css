@@ -179,3 +179,6 @@
 .help-board .help-items-title{column-span:all}
 .help-board .help-items{column-span:all;grid-template-columns:repeat(8,1fr)}
 .help-board .small-label{column-span:all;display:block;margin-top:10px;font-size:19px;color:#8a6a3c}
+
+/* 升级失败保护（第 5 项）：失败后成功率每次 +5%，在成功率旁边标出来 */
+.detail-upgrade .upgrade-pity { font-size: 22px; font-style: normal; color: #8a6a3a; }

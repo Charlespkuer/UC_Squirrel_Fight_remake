@@ -70,6 +70,12 @@
    * 越级仍然是 tierUp 概率掉高一档颜色，蓝碎片封顶。 */
   const STAGE_FRAGMENT = Object.freeze({ base: 0.42, perStar: 0.03, min: 2, max: 5, tierUp: 0.72 });
   function stageFragmentChance(star) { return Math.min(1, STAGE_FRAGMENT.base + star * STAGE_FRAGMENT.perStar); }
+  /* 常驻挑战关卡再收一道（需求：碎片期望「略微调低」）。
+   * 单独一个系数而不是改 STAGE_FRAGMENT，是为了不动挑战塔的产出——
+   * 塔文档写明它的碎片期望「等同于挑战模式单场」，那条一致性由 stageFragmentChance 保持。
+   * 0.88 → ★1 每场 1.39 片、★6 1.85 片（原 1.58 / 2.10）。 */
+  const STAGE_FRAGMENT_MUL = 0.88;
+  function stageChallengeFragmentChance(star) { return Math.min(1, stageFragmentChance(star) * STAGE_FRAGMENT_MUL); }
   function stageFragmentCount(random) {
     const span = Math.max(0, STAGE_FRAGMENT.max - STAGE_FRAGMENT.min);
     return STAGE_FRAGMENT.min + Math.floor((random ? random() : Math.random()) * (span + 1));
@@ -263,5 +269,5 @@
 
   window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
     STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
-    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, STAGE_FRAGMENT, stageFragmentChance, stageFragmentCount, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize };
+    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize };
 })();

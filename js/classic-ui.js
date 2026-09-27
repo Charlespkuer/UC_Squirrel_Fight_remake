@@ -235,7 +235,7 @@
     const sets = {
       status: [['status','状态'],['weapons','武器'],['skills','技能']],
       challenge: [['challenge','随机'],['friends','好友'],['arena','竞技'],['stages','关卡']],
-      message: [['messages','消息'],['ranklog','天梯赛'],['revenge','复仇'],['board','留言板'],['toplist','排行榜']],
+      message: [['messages','消息'],['chat','聊天'],['ranklog','天梯赛'],['revenge','复仇'],['board','留言板'],['toplist','排行榜']],
       bag: [['bag','背包'],['shop','商店'],['exchange','兑换']],
       system: [['system','系统'],['help','帮助'],['village','村庄'],['vip','超级松鼠']]
     };
@@ -288,7 +288,7 @@
   function renderHome() {
     screen = 'home'; activePortrait = null;
     const S = State.state();
-    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label">EXP</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/classic/home/activity.png">' + '</button><button class="picture-button" data-action="messages">' + '<img alt="" src="images/classic/home/chat.png">' + '<span>聊天</span></button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/classic/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
+    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label">EXP</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/classic/home/activity.png">' + '</button><button class="picture-button" data-action="chat">' + '<img alt="" src="images/classic/home/chat.png">' + '<span>聊天</span></button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/classic/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
     bind($('.classic-home'),actions);buffSignature='';
     refreshHome();
     renderNumbers();
@@ -412,7 +412,7 @@
     const S=State.state(),st=State.totalStats(),fights=S.dailyWins+S.dailyFails;
     const p=page('status','status','<canvas class="status-character" width="497" height="341" aria-label="我的松鼠"></canvas><div class="status-right"><div class="status-exp"><span class="home-exp-label">Exp</span><div class="exp-meter"><i style="width:'+Math.min(100,100*S.exp/GData.nextExp(S.level))+'%"></i><span>'+S.exp+'/'+GData.nextExp(S.level)+'</span></div></div><dl class="status-lines"><dt>今日胜率：</dt><dd>'+(fights?Math.round(S.dailyWins/fights*100):0)+'%</dd><dt>战斗场次：</dt><dd>'+(S.allWins+S.allFails)+'</dd></dl><div class="status-buttons">'+btn('更换装备','gears','gold')+btn('装备融合','merge','gold')+'</div></div>'+statsHtml(st));
     portrait($('.status-character',p));
-    $('.page-footer',p).insertAdjacentHTML('beforeend','<button class="status-fusion-link" data-action="merge" aria-label="装备融合：三件相同装备合成更高品质"><span class="status-fusion-icon" aria-hidden="true">⚒</span><span class="status-fusion-text">装备融合</span></button>');
+    $('.page-footer',p).insertAdjacentHTML('beforeend','<button class="status-fusion-link" data-action="merge" aria-label="装备融合：三件相同装备合成更高品质"><span class="status-fusion-icon" aria-hidden="true"><i class="status-fusion-glyph">⚒</i></span><span class="status-fusion-text">装备融合</span></button>');
     bind(p,{...actions,merge:openMerge,home});
   }
   function allItems(kind) {
@@ -641,7 +641,10 @@
       (sellPrice&&(S.props[it.id]||0)>0?btn('卖出','prop-sell','small'):'')+'</div>':'';
     const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个'+(sellPrice?'　可回收 '+sellPrice+' 金松果/个':''))+'</div>'+bagActions:'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
     const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
-    const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,{cls:'classic-bag-board',counter:(bagPage+1)+'/'+total,left:'<span class="footer-left" style="display:flex;gap:12px">'+(exchange?btn('金杯商店','rank-shop','small'):'')+((shop||exchange)?btn('每日抽奖','lottery','small gold'):'')+'</span>'});
+    // 兑换页不再挂「金杯商店 / 每日抽奖」（两个入口都在商店页）；商店页左下「每日抽奖」、右下「金杯商店」，
+    // 都用默认尺寸的按钮（比原来的 small 明显大一档）。
+    const bagFooter=shop?{left:btn('每日抽奖','lottery','gold'),right:btn('金杯商店','rank-shop','gold')}:{};
+    const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,Object.assign({cls:'classic-bag-board',counter:(bagPage+1)+'/'+total},bagFooter));
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
     $('[data-action="prop-action"]',p)?.addEventListener('click',()=>openProp(selectedProp,shop));
     $('[data-action="prop-sell"]',p)?.addEventListener('click',()=>sellAsk(selectedProp,()=>openBag(mode,bagPage)));
@@ -895,6 +898,7 @@
       '<p class="allocation-remaining" data-live="point-left" role="status">剩余 0 点</p></div>';
     const m=modal('分配自由属性点',body,[
       {label:'平均分配',cls:'muted',close:false,run:()=>{State.allocateEvenly();refresh();}},
+      {label:'撤回上一次',cls:'muted',close:false,run:()=>{const r=State.undoPoint();if(r.ok)toast(r.msg);refresh();}},
       {label:'确定',cls:'gold',close:false,run:()=>{if(State.pendingPoints()<=0)m.close();}},
     ],{small:true,locked:true});
     m.element.classList.add('point-dialog');
@@ -910,8 +914,9 @@
       $('[data-live="point-note"]',m.element).textContent=force
         ?STAT_LABEL[force]+'占比 '+Math.round(shares[force]*100)+'%，低于 '+minPct+'%，接下来必须加到'+STAT_LABEL[force]+'（系统代选）'
         :'四项占比都达标，可以自由选择。';
-      $('[data-action="0"]',m.element).disabled=left<=0;
-      $('[data-action="1"]',m.element).disabled=left>0;
+      $('[data-action="0"]',m.element).disabled=left<=0;                 // 平均分配
+      $('[data-action="1"]',m.element).disabled=State.undoDepth()<=0;      // 撤回上一次
+      $('[data-action="2"]',m.element).disabled=left>0;                    // 确定
     };
     $$('[data-point]',m.element).forEach(b=>b.addEventListener('click',()=>{
       const r=State.allocatePoint(b.dataset.point);
@@ -1042,6 +1047,11 @@
   function openBoard() {
     page('message','board','<div class="empty-state">松鼠乐园留言板<br><span class="small-label">欢迎回来，老朋友。<br>本地怀旧版暂不连接公共聊天与留言服务。<br>你的战斗录像可在「消息」中查看。</span></div>');
   }
+  /* 好友聊天：单机版没有服务端，照留言板的做法先留一块待开发区域，
+   * 不再跳到「消息」（那是战斗日志，不是聊天）。 */
+  function openChat() {
+    page('message','chat','<div class="empty-state">好友聊天<br><span class="small-label">这里会显示你和好友的聊天消息。<br>本地怀旧版暂不连接聊天服务，敬请期待。<br>好友间的切磋与战绩可在「好友」里查看。</span></div>');
+  }
   function openDaily() {
     const d = State.dailyStatus();
     const quests = State.questStatus();
@@ -1066,7 +1076,11 @@
         '</div>';
     }).join('');
     const list = '<div class="daily-quests"><h3>每日任务<span class="quest-date">' + esc(State.localDate()) + ' · 每天 0 点刷新</span></h3>' + rows + '</div>';
-    const m = modal('活动', gift + list, [{ label: '返回', cls: 'gold' }]);
+    // 活动页直接给一个「每日抽奖」入口（关掉活动弹窗再进抽奖页）
+    const m = modal('活动', gift + list, [
+      { label: '每日抽奖', cls: 'gold', run: () => { if (window.ClassicExtras && ClassicExtras.lottery) ClassicExtras.lottery(); } },
+      { label: '返回', cls: 'muted' },
+    ]);
     const rerender = () => { m.close(); openDaily(); refreshHome(); refreshHeader(); };
     $('[data-action="claim-gift"]', m.element)?.addEventListener('click', () => { toast(State.claimDaily().msg); rerender(); });
     quests.forEach((q) => {
@@ -1471,7 +1485,7 @@
     return p;
   }
   function fallback(key){if(window.ClassicExtras && window.ClassicExtras[key])window.ClassicExtras[key]();else legacy.runAction(key);}
-  const actions={home,exchange:()=>openBag('exchange'),status:openStatus,weapons:()=>openCatalog('weapon'),skills:()=>openCatalog('skill'),challenge:()=>openChallenge(),battle:()=>openChallenge(),stages:openStages,bag:()=>openBag(),shop:()=>openBag(true),gears:()=>openGears(),messages:()=>openMessages(),ranklog:()=>openMessages('ranklog'),revenge:()=>openMessages('revenge'),board:openBoard,friends:openFriends,daily:openDaily,system:openSystem,village:openVillage,help:openHelp,arena:()=>fallback('arena'),rank:()=>fallback('rank'),lottery:()=>fallback('lottery'),master:()=>fallback('master'),toplist:()=>fallback('toplist'),vip:()=>fallback('vip')};
+  const actions={home,exchange:()=>openBag('exchange'),status:openStatus,weapons:()=>openCatalog('weapon'),skills:()=>openCatalog('skill'),challenge:()=>openChallenge(),battle:()=>openChallenge(),stages:openStages,bag:()=>openBag(),shop:()=>openBag(true),gears:()=>openGears(),messages:()=>openMessages(),ranklog:()=>openMessages('ranklog'),revenge:()=>openMessages('revenge'),board:openBoard,chat:openChat,friends:openFriends,daily:openDaily,system:openSystem,village:openVillage,help:openHelp,arena:()=>fallback('arena'),rank:()=>fallback('rank'),lottery:()=>fallback('lottery'),master:()=>fallback('master'),toplist:()=>fallback('toplist'),vip:()=>fallback('vip')};
   function runAction(key){if(actions[key])actions[key]();}
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape'){

@@ -89,6 +89,22 @@ test('常驻挑战关卡三种敌人 6 难度血量整体上调 15%~20%', () => 
   assert.equal(seen.length, 54, '18 关 × 3 个敌人 = 54 个 NPC 全部覆盖');
 });
 
+test('常驻挑战关卡的碎片期望比基准略低，挑战塔仍按基准', () => {
+  const { c } = setup();
+  const { GData } = c;
+  const mean = (GData.STAGE_FRAGMENT.min + GData.STAGE_FRAGMENT.max) / 2;
+  assert.ok(GData.STAGE_FRAGMENT_MUL > 0.8 && GData.STAGE_FRAGMENT_MUL < 1,
+    '只是「略微调低」，系数应在 0.8~1 之间：' + GData.STAGE_FRAGMENT_MUL);
+  for (const star of [1, 3, 6]) {
+    const base = GData.stageFragmentChance(star) * mean;
+    const now = GData.stageChallengeFragmentChance(star) * mean;
+    assert.ok(now < base, '★' + star + ' 期望应当下降：' + now.toFixed(2) + ' < ' + base.toFixed(2));
+    assert.ok(now >= base * 0.8, '★' + star + ' 只是略降，不该砍掉两成以上：' + now.toFixed(2));
+  }
+  // 挑战塔沿用基准掉率（塔文档写明「等同于挑战模式单场」）
+  assert.equal(GData.stageFragmentChance(6), GData.STAGE_FRAGMENT.base + 6 * GData.STAGE_FRAGMENT.perStar);
+});
+
 test('10级门槛、18关逐星解锁、跨高手边界全部生效', () => {
   const g = setup(); g.s().level = 9;
   assert.equal(g.c.State.stageAccess(1).ok, false); assert.equal(g.c.State.beginStageBattle(1).ok, false);

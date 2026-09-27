@@ -102,6 +102,9 @@
       }
       return out;
     })();
+    // 自由属性点撤回栈（第 2 项）：只保留合法的四项键
+    next.pointUndo = (Array.isArray(raw.pointUndo) ? raw.pointUndo : [])
+      .filter((key) => STAT_KEYS.includes(key)).slice(-500);
     next.weapons = normalizeItems(next.weapons, weaponsMap);
     next.skills = normalizeItems(next.skills, skillsMap);
     for (const key of ['props', 'propsStates']) {
@@ -991,7 +994,11 @@
    * 超级药丸、果实种子这类「不可购买」的物品）不开放回收；
    * PROP_SELL_OVERRIDES 留作个别道具单独定价的例外表。 */
   /* 恶魔果实（48）在字典里没有售价（不可购买），按需求单独定价 100 金松果回收。 */
-  const PROP_SELL_OVERRIDES = Object.freeze({ 48: 100 });
+  const PROP_SELL_OVERRIDES = Object.freeze({
+    48: 100,   // 恶魔果实：字典无价，单独定价 100
+    21: 2,     // 技能卷轴：2 金松果一张
+    22: 2,     // 武器卷轴：2 金松果一张
+  });
   const MIN_SELL_PRICE = 2;   // 半价至少 1 金松果才有意义
   function propSellPrice(id) {
     id = Number(id);
@@ -1219,10 +1226,15 @@
   }
 
   // ---------- 道具 ----------
+  /* 每日限购：卷轴/永久属性/果实这类每天 1 件；四种普通药丸（大力丸/敏捷丸/速度丸/经验丸）
+   * 每天 3 颗；其余消耗品 5 件。超级药丸走名字里的「永久」分支，仍是 1 件。 */
+  const SHOP_DAILY_PILLS = [3, 4, 5, 7];
+  const SHOP_PILL_LIMIT = 3;
   function shopLimit(id) {
-    const prop = propMap.getValue(Number(id));
+    const key = Number(id), prop = propMap.getValue(key);
     if (!prop) return 0;
-    return [13, 16, 17, 18, 19, 37, 38, 47, 48].includes(Number(id)) || /宝箱|魔法袋|礼包|永久/.test(prop.name) ? 1 : 5;
+    if (SHOP_DAILY_PILLS.includes(key)) return SHOP_PILL_LIMIT;
+    return [13, 16, 17, 18, 19, 37, 38, 47, 48].includes(key) || /宝箱|魔法袋|礼包|永久/.test(prop.name) ? 1 : 5;
   }
   function syncShopPurchases() {
     const date = localDate();
@@ -1529,6 +1541,9 @@
     const target = forced || attr;
     grantPoint(target);
     S.freePoints = pendingPoints() - 1;
+    // 记下这一次到底加到了哪一项，供「撤回」原样退回去（含系统代选的那一下）
+    if (!Array.isArray(S.pointUndo)) S.pointUndo = [];
+    S.pointUndo.push(target);
     save();
     return {
       ok: true, attr: target, requested: attr, gain: STAT_GAIN[target],
@@ -1541,6 +1556,23 @@
           : STAT_NAMES[target] + ' +' + STAT_GAIN[target],
     };
   }
+  /**
+   * 撤回上一次自由属性点分配：把那次加上的属性原样减掉、点数退回待分配。
+   * 只回退「通过弹窗分配」的点（S.pointUndo 记着顺序），所以不会把成长得来的属性退掉。
+   */
+  function undoPoint() {
+    if (!Array.isArray(S.pointUndo) || !S.pointUndo.length) return { ok: false, msg: '没有可以撤回的分配' };
+    const attr = S.pointUndo.pop();
+    if (!STAT_KEYS.includes(attr)) return { ok: false, msg: '撤回记录已失效' };
+    S[STAT_FIELDS[attr]] = Math.max(1, S[STAT_FIELDS[attr]] - STAT_GAIN[attr]);
+    if (attr === 'hp') S.hp = Math.min(S.hp, S.maxHp);
+    S.freePoints = pendingPoints() + 1;
+    save();
+    return { ok: true, attr, gain: STAT_GAIN[attr], remaining: S.freePoints,
+      msg: '已撤回：' + STAT_NAMES[attr] + ' −' + STAT_GAIN[attr] };
+  }
+  /** 还有几次可以撤回（界面用它决定按钮是否可用）。 */
+  function undoDepth() { return Array.isArray(S.pointUndo) ? S.pointUndo.length : 0; }
   /** 一键把待分配点铺平到四项（每次选占比最低的一项，天然满足占比门槛）。 */
   function allocateEvenly() {
     const added = { power: 0, agility: 0, speed: 0, hp: 0 };
@@ -2103,7 +2135,7 @@
     const star = GData.stageStar(stageId);
     const frag = GData.STAGE_FRAGMENT;
     let drop = null;
-    if (Math.random() < GData.stageFragmentChance(star)) {
+    if (Math.random() < GData.stageChallengeFragmentChance(star)) {
       const base = 24 + Math.floor((stageId - 1) / 6);          // 24 白 / 25 绿 / 26 蓝
       const up = star >= 5 ? 2 : star >= 3 ? 1 : 0;
       const step = Math.min(base + up, 26);                     // 蓝碎片封顶
@@ -2168,7 +2200,7 @@
     { key: 'lottery',   name: '抽取 {n} 次每日幸运抽奖',  steps: [1, 2, 3] },
     { key: 'merge',     name: '合成或融合 {n} 次装备',    steps: [1, 2, 3], minLevel: 10 },
     { key: 'gem',       name: '合成 {n} 次宝石',          steps: [1, 2, 3], minLevel: 45 },
-    { key: 'upgrade',   name: '升级武器或技能 {n} 次',    steps: [2, 4, 6], minLevel: 2 },
+    { key: 'upgrade',   name: '升级武器或技能 {n} 次',    steps: [1], minLevel: 2 },   // 固定 1 次；全都升不动时整条不出现，见 questPoolFor
     { key: 'use',       name: '使用 {n} 个道具',          steps: [2, 4, 6] },
     { key: 'buy',       name: '在商店购买 {n} 件道具',    steps: [1, 2, 3] },
     { key: 'sell',      name: '卖出 {n} 个道具',          steps: [1, 2, 3] },
@@ -2183,9 +2215,30 @@
     if (!type) return false;
     return (type.minLevel || 1) <= Math.max(1, Number(level) || 1);
   }
-  /** 当前等级可完成的每日任务池（按 QUEST_TYPES 的固定顺序，保证同一天同一等级抽题稳定）。 */
+  /**
+   * 现在还有没有「升得动」的武器/技能：既没到自身等级上限，玩家等级也满足该级的等级门槛。
+   * 两者任一不满足就升不了，所以只要一件升得动，「升级武器或技能」这条任务才有意义。
+   */
+  function hasUpgradableWS(level) {
+    if (!S) return false;
+    const lv = Math.max(1, Number(level) || S.level);
+    for (const kind of ['weapon', 'skill']) {
+      const list = kind === 'weapon' ? myWeapons() : mySkills();
+      for (const it of list) {
+        const info = upgradeInfo(kind, it.id);
+        if (info && !info.max && lv >= info.levelLimit) return true;
+      }
+    }
+    return false;
+  }
+  /**
+   * 当前等级可完成的每日任务池（按 QUEST_TYPES 的固定顺序，保证同一天同一等级抽题稳定）。
+   * 「升级武器或技能」额外要求手上真有升得动的武技：全都顶到等级上限时整条不触发。
+   */
   function questPoolFor(level) {
-    return QUEST_TYPES.filter((q) => (q.minLevel || 1) <= Math.max(1, Number(level) || 1));
+    const lv = Math.max(1, Number(level) || 1);
+    const pool = QUEST_TYPES.filter((q) => (q.minLevel || 1) <= lv);
+    return hasUpgradableWS(lv) ? pool : pool.filter((q) => q.key !== 'upgrade');
   }
   /** 当天的空计数器：键跟着 QUEST_TYPES 走，加新任务不用再改这里。 */
   function emptyCounters(date) {
@@ -2257,8 +2310,10 @@
     const level = S ? S.level : 1;
     const hasList = S.quests && typeof S.quests === 'object' && Array.isArray(S.quests.list) && S.quests.list.length > 0;
     const sameDay = !!(S.quests && S.quests.date === date);
-    // 除了「换天」，「当前等级做不了的任务」也要重抽（升级后旧题失效、旧档里存的越级题也会被换掉）
-    const staleLevel = hasList && S.quests.list.some((q) => !q || !questAvailableAt(q.key, level));
+    // 除了「换天」，「当前等级做不了的任务」也要重抽（升级后旧题失效、旧档里存的越级题也会被换掉）；
+    // 「升级武器或技能」还要看手上是否真有升得动的武技——把最后一件升满之后这条当天就该消失。
+    const staleLevel = hasList && S.quests.list.some((q) => !q || !questAvailableAt(q.key, level)
+      || (q.key === 'upgrade' && !hasUpgradableWS()));
     if (!hasList || !sameDay || staleLevel) {
       // 重抽时把「已经领过的条数」照旧占位，避免升级换题后当天多领一份奖励
       const claimedCount = sameDay && hasList ? S.quests.list.filter((q) => q && q.claimed === true).length : 0;
@@ -2392,6 +2447,7 @@
     weaponInst, skillInst, myWeapons, mySkills, wsLimit, ownedWSCount,
     upgradeInfo, doUpgrade, upgradeFails, UPGRADE_COIN, UPGRADE_FAIL_BONUS,
     fruitOptions, applyFruitChoice,
+    undoPoint, undoDepth, hasUpgradableWS,
     weaponList,
     gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, extText, randomExt,
     gemLevel, GEM_MERGE_RATES, rollGemDrop, mergeGems, socketGem, unsocketGem,

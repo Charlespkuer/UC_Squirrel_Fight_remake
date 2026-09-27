@@ -882,7 +882,7 @@
       { name: '经验+100', run: () => { State.gainExp(100); } },
       { name: '金松果+30', run: () => { S.goldPoint += 30; } },
       { name: '挑战书x2', run: () => { S.props[23] = (S.props[23] || 0) + 2; } },
-      { name: '大体力药剂x2', run: () => { S.props[2] = (S.props[2] || 0) + 2; } },
+      { name: '大体力药剂x4', run: () => { S.props[2] = (S.props[2] || 0) + 4; } },
       { name: '天使果实种子x2', run: () => { S.props[45] = (S.props[45] || 0) + 2; } },
       { name: '英雄帖x2', run: () => { S.props[36] = (S.props[36] || 0) + 2; } },
     ];

@@ -101,8 +101,11 @@ test('卖出道具：默认回收字典价格的一半，无价/占位价的道�
   assert.equal(S.propSellPrice(101), 10, '宝石 20 → 10');
   // 第 2 项：恶魔果实字典里没有售价，单独定价 100 金松果回收
   assert.equal(S.propSellPrice(48), 100, '恶魔果实单独定价 100');
-  // 字典里 price 为 0 或占位 1 的（卷轴/碎片/礼包/天梯碎片/种子/超级药丸）不开放回收
-  for (const id of [6, 9, 16, 21, 22, 24, 25, 26, 28, 32, 40, 41, 44, 45, 46, 49, 50, 51]) {
+  // 第 3 项：武器/技能卷轴单独定价 2 金松果一张
+  assert.equal(S.propSellPrice(22), 2, '武器卷轴 2 金松果一张');
+  assert.equal(S.propSellPrice(21), 2, '技能卷轴 2 金松果一张');
+  // 字典里 price 为 0 或占位 1 的（碎片/礼包/天梯碎片/种子/超级药丸）不开放回收
+  for (const id of [6, 9, 16, 24, 25, 26, 28, 32, 40, 41, 44, 45, 46, 49, 50, 51]) {
     assert.equal(S.propSellPrice(id), 0, id + ' 不该可卖');
   }
   assert.equal(S.sellProp(46, 1).ok, false, '不能卖的道具会被拒');
@@ -474,6 +477,63 @@ test('天使/恶魔果实改成随机三选一，选完才消耗', () => {
   assert.equal(s.props[48], 1);
 });
 
+test('自由属性点分配可以撤回，撤回只退弹窗里分配的那些', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.power = 10; s.agility = 10; s.speed = 10; s.maxHp = 100; s.hp = 100; s.freePoints = 3;
+  assert.equal(S.undoDepth(), 0, '一开始没有可撤回的');
+  assert.equal(S.undoPoint().ok, false, '没分配过就撤不了');
+
+  const p1 = S.allocatePoint('power');
+  assert.equal(p1.ok, true);
+  assert.equal(s.power, 11);
+  assert.equal(s.freePoints, 2);
+  assert.equal(S.undoDepth(), 1);
+
+  const p2 = S.allocatePoint('hp');
+  assert.equal(s.maxHp, 105, '生命 +5');
+  assert.equal(s.freePoints, 1);
+
+  // 撤回一次：生命 −5、点数退回
+  const u1 = S.undoPoint();
+  assert.equal(u1.ok, true);
+  assert.equal(u1.attr, 'hp');
+  assert.equal(s.maxHp, 100);
+  assert.equal(s.freePoints, 2);
+  assert.ok(s.hp <= s.maxHp, '撤回生命后当前血量不能超过上限');
+
+  // 撤回第二次：力量 −1、回到最初
+  const u2 = S.undoPoint();
+  assert.equal(u2.attr, 'power');
+  assert.equal(s.power, 10);
+  assert.equal(s.freePoints, 3);
+  assert.equal(S.undoDepth(), 0, '退完了');
+  assert.equal(S.undoPoint().ok, false);
+
+  // 撤回栈按顺序记录，跨读档保留；成长得来的属性不会被退掉
+  s.freePoints = 2;
+  S.allocatePoint('agility');
+  S.allocatePoint('speed');
+  S.save();
+  S.load();
+  const reloaded = S.state();
+  assert.equal(S.undoDepth(), 2, '读档后仍能撤回');
+  S.undoPoint();
+  assert.equal(reloaded.speed, 10);
+});
+
+test('商店每日限购：四种普通药丸每天 3 颗', () => {
+  const g = game(), S = g.State;
+  for (const id of [3, 4, 5, 7]) {
+    assert.equal(S.shopLimit(id), 3, (S.propName ? S.propName(id) : id) + ' 每日 3 颗');
+    assert.equal(S.purchaseStatus(id).limit, 3);
+  }
+  assert.equal(S.shopLimit(2), 5, '体力药剂仍是 5 件');
+  assert.equal(S.shopLimit(23), 5, '挑战书仍是 5 件');
+  assert.equal(S.shopLimit(13), 1, '转生果每日 1 件');
+  // 超级药丸在字典里 buy=false，不进商店，限购多少都无所谓
+  for (const id of [41, 42, 43, 44]) assert.equal(S.purchaseStatus(id).buyable, false, id + ' 不进商店');
+});
+
 test('购买拒绝负数、小数和无穷数量，合法购买正常扣款', () => {
   const g = game(), s = g.State.state();
   for (const count of [-5, 0, 1.5, Infinity]) assert.equal(g.State.buyProp(1, count).ok, false);
@@ -790,14 +850,30 @@ test('每日任务：当天固定抽取、进度来真实计数、只能领一�
 
 test('每日任务按角色等级抽题：做不了的任务不会出现，升级换题也不多领奖励', () => {
   const g = game(), S = g.State, s = S.state();
-  // 任务池随等级单调变大：1 级 10 种 → 2 级加武技升级 → 10 级加关卡与装备合成 → 11 级加竞技场 → 30 级加天梯 → 45 级加宝石
+  /* 任务池随等级变大：1 级 10 种 → 10 级加关卡与装备合成 → 11 级加竞技场 → 30 级加天梯 → 45 级加宝石。
+   * 第 1 项：「升级武器或技能」固定 1 次，而且只在手上真有升得动的武技时出现。
+   * 手上给一把 1 级武器（升 1→2 需要玩家 5 级，见 upgradeMap 的 levelLimit），
+   * 所以 2~4 级这条任务不出现，5 级起才回到池子里。 */
   const count = (lv) => S.questPoolFor(lv).length;
+  const upgradeType = S.QUEST_TYPES.find((t) => t.key === 'upgrade');
+  assert.deepEqual(Array.from(upgradeType.steps), [1], '升级任务固定 1 次');
+  s.weapons = ['1:1'];
   assert.equal(count(1), 10, '1 级池子：' + S.questPoolFor(1).map((t) => t.key).join(','));
-  assert.equal(count(2), 11);
+  assert.equal(S.hasUpgradableWS(2), false, '2 级时 1 级武器还升不动（需要玩家 5 级）');
+  assert.equal(count(2), 10, '升不动就不该出现升级任务');
+  assert.equal(count(4), 10);
+  assert.equal(S.hasUpgradableWS(5), true, '5 级起 1→2 的等级门槛满足');
+  assert.equal(count(5), 11);
   assert.equal(count(10), 13);
   assert.equal(count(11), 14);
   assert.equal(count(30), 15);
   assert.equal(count(45), 16, '45 级才是全部 16 种');
+  // 全部顶到等级上限之后：池子里没有升级任务，当天已抽到的升级任务也会被换掉
+  s.weapons = ['1:15'];
+  s.level = 70;
+  assert.equal(S.hasUpgradableWS(70), false, '已满级的武器升不动');
+  assert.equal(S.questPoolFor(70).some((t) => t.key === 'upgrade'), false, '升不动时池子里没有升级任务');
+  s.weapons = ['1:1'];
   for (const lv of [1, 5, 10, 20, 30, 45, 70]) {
     for (const type of S.questPoolFor(lv)) assert.ok((type.minLevel || 1) <= lv, type.key + ' 不该出现在 ' + lv + ' 级');
     for (const type of S.QUEST_TYPES) {
@@ -811,7 +887,7 @@ test('每日任务按角色等级抽题：做不了的任务不会出现，升�
   assert.equal(gate('arena'), 11, '经验竞技场 11 级开启');
   assert.equal(gate('rank'), 30, '天梯赛 30 级开启');
   assert.equal(gate('gem'), 45, '宝石 45 级才有产出');
-  assert.equal(gate('upgrade'), 2, '2 级才有第一件武器/技能');
+  assert.equal(gate('upgrade'), 2, '2 级才有第一件武器/技能（能否做还要看手上有没有升得动的）');
   // 1 级当天抽到的 4 条都必须能做
   s.level = 1; s.quests = null;
   const low = S.questStatus();

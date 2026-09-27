@@ -109,6 +109,109 @@ async function main() {
     return false;
   }
 
+  /* ================= 本轮改动（13 项）的界面检查 =================
+     ?shot=sell|shop|exchange|status|daily|chat|arrows 各自停在一个画面上，
+     既抓尺寸数据也方便截图。 */
+  const batch = q.get('shot');
+  if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows'].includes(batch)) {
+    S.props[47] = 20; S.props[22] = 12; S.props[24] = 8; S.props[1] = 9;
+    State.save();
+    const rect = (sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
+    const footerButtons = () => $$('#ui .page-footer .uc-button').map((b) => ({ text: b.textContent.trim(), cls: b.className, rect: rect('.page-footer [data-action="' + b.dataset.action + '"]') }));
+
+    if (batch === 'sell') {
+      // 背包 → 选中恶魔果实 → 点「卖出」→ 批量卖出弹窗（第 7 项滑条）
+      UI.runAction('bag'); await flush();
+      await selectCell('[data-prop="47"]', 12);
+      const sell = document.querySelector('[data-action="prop-sell"]');
+      P.sellButtonFound = !!sell;
+      if (sell) sell.click();
+      await flush(360);
+      const box = document.querySelector('.setting-slider.use-slider');
+      P.sliderBox = rect('.setting-slider.use-slider');
+      P.slider = {
+        labelFont: box && getComputedStyle(box.querySelector('.slider-label')).fontSize,
+        labelRect: rect('.setting-slider.use-slider .slider-label'),
+        valueFont: box && getComputedStyle(box.querySelector('.slider-value')).fontSize,
+        rangeRect: rect('.setting-slider.use-slider input[type="range"]'),
+        rangeHeight: box && getComputedStyle(box.querySelector('input[type="range"]')).height,
+        rowCenters: box ? ['.slider-label', 'input[type="range"]', '.slider-value'].map((sel) => {
+          const e = box.querySelector(sel); const r = e.getBoundingClientRect();
+          return Math.round((r.top + r.bottom) / 2);
+        }) : null,
+      };
+      P.sliderAligned = P.slider.rowCenters ? (Math.max(...P.slider.rowCenters) - Math.min(...P.slider.rowCenters) <= 3) : null;
+      snap('批量卖出滑条', '.setting-slider.use-slider');
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+
+    if (batch === 'shop' || batch === 'exchange') {
+      UI.runAction(batch); await flush(340);
+      P.footerButtons = footerButtons();
+      snap('页脚', '#ui .page-footer');
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+
+    if (batch === 'status') {
+      UI.runAction('status'); await flush(340);
+      const link = rect('.status-fusion-link'), icon = rect('.status-fusion-icon'), glyph = rect('.status-fusion-glyph');
+      P.fusion = { link, icon, glyph,
+        glyphFont: getComputedStyle(document.querySelector('.status-fusion-glyph')).fontSize,
+        iconCenter: icon ? (icon.top + icon.bottom) / 2 : null,
+        linkCenter: link ? (link.top + link.bottom) / 2 : null };
+      P.fusion.glyphCenteredInIcon = (icon && glyph)
+        ? Math.abs(((glyph.top + glyph.bottom) / 2) - ((icon.top + icon.bottom) / 2)) <= 2 : null;
+      snap('融合入口', '.status-fusion-link');
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+
+    if (batch === 'daily') {
+      UI.runAction('home'); await flush(300);
+      const act = document.querySelector('.home-side [data-action="daily"]');
+      P.dailyButtonFound = !!act;
+      if (act) act.click();
+      await flush(360);
+      P.dailyModalButtons = $$('.classic-modal .modal-buttons button').map((b) => b.textContent.trim());
+      snap('活动弹窗', '.classic-modal');
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+
+    if (batch === 'chat') {
+      UI.runAction('home'); await flush(300);
+      const chat = document.querySelector('.home-side [data-action="chat"]');
+      P.chatButtonAction = chat ? chat.dataset.action : null;
+      P.oldMessagesButton = !!document.querySelector('.home-side [data-action="messages"]');
+      if (chat) chat.click();
+      await flush(360);
+      P.chatScreen = UI.currentScreen();
+      P.chatActiveTab = (document.querySelector('#ui .uc-tab.active') || {}).textContent || null;
+      P.chatBody = text(document.querySelector('#ui .empty-state'));
+      snap('聊天页', '#ui .empty-state');
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+
+    if (batch === 'arrows') {
+      // 多塞点道具逼出翻页箭头（第 9 项）
+      S.props = { 1: 9, 2: 9, 3: 9, 4: 9, 5: 9, 7: 9, 21: 9, 22: 9, 23: 9, 24: 9, 25: 9, 26: 9, 36: 9, 39: 9, 13: 9, 47: 9, 48: 9, 37: 9 };
+      State.save();
+      UI.runAction('bag'); await flush(340);
+      // 翻到第 2 页，这样 ‹ › 两个箭头同时在，方便逐个量焦心
+      const nxt = document.querySelector('#ui .page-arrow [data-action="next"]');
+      if (nxt) { nxt.click(); await flush(340); }
+      P.arrowCount = $$('#ui .page-arrow .uc-button.arrow').length;
+      P.arrowButtons = $$('#ui .page-arrow .uc-button.arrow').map((b) => {
+        const r = b.getBoundingClientRect();
+        return { text: b.textContent.trim(), x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+      });
+      const a = rect('#ui .page-arrow .uc-button.arrow');
+      P.arrowButton = a;
+      // 圆框圆心与箭头字形基线的关系：按钮本身是 flex 居中，这里记录供截图人工确认
+      P.arrowFont = getComputedStyle(document.querySelector('#ui .page-arrow .uc-button.arrow')).fontSize;
+      snap('翻页箭头', '#ui .page-arrow .uc-button.arrow');
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+  }
+
   // ---------- 1) 背包：恶魔果实可卖出 + 价格 ----------
   UI.runAction('bag');
   await flush();

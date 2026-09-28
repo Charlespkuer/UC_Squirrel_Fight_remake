@@ -20,11 +20,13 @@
   }
   function towerGold(n) {
     n = Math.max(1, n);
-    if (n <= 5) return 15;
-    if (n <= 10) return 20;
-    if (n <= 15) return 28;
-    if (n <= 20) return 38;
-    return Math.min(68, 38 + 3 * (n - 20));
+    /* 低层门槛上调：原来 1~10 层只发 15/20，比常驻挑战通关（3 场 = 25 金松果）还低，
+     * 打完一整套连战反而亏。现在最低 25，与常驻挑战通关看齐，再往上按层数递增。 */
+    if (n <= 5) return 25;
+    if (n <= 10) return 30;
+    if (n <= 15) return 38;
+    if (n <= 20) return 48;
+    return Math.min(88, 48 + 3 * (n - 20));
   }
   /** 层内逐场累积：前 battles-1 场各 floor(G/battles)，尾场补余数。 */
   function towerGoldShares(n, battles) {
@@ -76,18 +78,19 @@
    * 所以再压到 0.47 做补偿——仍然远低于敏捷/速度，保持「血厚打人不疼」的定位。 */
   const FOE_POWER_MUL = 0.47;
   const FOE_HP_MUL = 1.06;      // 血量基准：0.85 × 1.25，血量更厚
-  /* 松鼠对手额外修正：机制 NPC 只会用属性打人，松鼠是真的会拿武器、放技能，
-   * 输出天然高一档，血量也不该跟着「血厚」基准一起膨胀（血厚 → 回合变长 → 玩家承伤反而更多）。
-   * 两个系数乘在这里而不是改各模板的 bias，方便统一调（tools/tower-balance.cjs 实测）。
-   * 这组值让单场「胜时剩余血量」约 77%，和第 4 场原机制 NPC 的 80% 基本对齐，
-   * 这样每层 4 场连战的血量继承压力和改版前一致。 */
-  const FOE_SQUIRREL_POWER_MUL = 0.50;
-  const FOE_SQUIRREL_HP_MUL = 0.70;
-  /* 题面（第 4 场最终位）单独一组系数：它比普通松鼠多一条机制，
-   * 血量上限要留出「爆发窗口」（熔核恨不得 4 回合内打完），所以单独一档调，
-   * 不动上面的松鼠系数（x10 层第 5 场精英也走 NPC 系数）。 */
+  /* 血量分成两档（原来还有一档松鼠系数，Boss 池统一之后并进 Boss 档了）：
+   *   · 三侠（前 3 场）——FOE_HERO_HP_MUL
+   *   · Boss（第 4 场随机池 / x10 第 5 场狂战）——FOE_TRIAL_HP_MUL
+   * 系数写在系数区而不是各模板的 bias，方便统一调（tools/tower-balance.cjs 实测）。 */
+  /* 三侠（每层前 3 场）血量单独下调：实测玩家卡层几乎都卡在三侠的「血墙」上，
+   * 而每层最后一场（boss）反而像送的 —— 血量 0.62 系数比三侠矮一大截，手感完全反了。 */
+  const FOE_HERO_HP_MUL = 0.78;
+  /* Boss（第 4 场随机池 / x10 第 5 场狂战）单独一组系数：
+   * 血量从 0.62 提到 0.82（试过 0.95，墙区太硬，多日期复测后收到 0.82），
+   * 让「最后一战」真的比三侠更需要对策；力量仍压得低（0.50）。
+   * 难度结构改成「三侠是热身、boss 是墙」，卡层才可以靠「换一张对策 buff」解决。 */
   const FOE_TRIAL_POWER_MUL = 0.50;
-  const FOE_TRIAL_HP_MUL = 0.62;
+  const FOE_TRIAL_HP_MUL = 0.82;
 
   // ---------- NPC 池（10 个，8 类机制） ----------
   // bias: 力/敏/速/血 四元乘数；anim 复用现有动画表（tl 螳螂 / xh 仙鹤 / xm 熊猫）。
@@ -129,133 +132,174 @@
       name: '压制', desc: '随机锁住一个武器或技能（本层无法使用）' },
   });
 
-  // ---------- 松鼠对手（模板库；第 4 场已改由「题面」占据，这张表当前没有出场口） ----------
+  // ---------- 松鼠形态的固定装备（视觉记忆） ----------
+  /* 每个松鼠形态的 boss 都穿一套**固定且互不相同**的装备：玩家不用读文字，
+   * 看到「犀牛头 + 犀牛服」就知道是苔龟、看到「诅咒套」就知道是蚀骨或枯泉。
+   * 装备 id 取自 GameDict 的 gearMap（套装 4 件：头 / 手 / 身 / 脚），
+   * engine.js 的 wearsFor() 会按「套装的 sprite index + 装备等级」换算成贴图，
+   * 所以这里只要给对 id，战斗中就会真的画出来（tower.js 把 wears 传给 foe）。
+   * 注意避开三侠同款的螳螂 / 仙鹤 / 熊猫头饰（index 9/10/11），免得和三侠混淆。 */
+  const GEAR = Object.freeze({
+    hero: [93, 94, 95, 96],        // 勇者套装（sprite index 17）
+    rhino: [85, 86, 87, 88],       // 犀牛套装（15）
+    curse: [97, 98, 99, 100],      // 诅咒套装（18）
+    ninja3: [57, 58, 59, 60],      // 忍者套装·史诗（21）
+    fist3: [53, 54, 55, 56],       // 拳斗套装·史诗（20）
+    shogun: [89, 90, 91, 92],      // 幕府套装（16）
+    curse3: [121, 122, 123, 124],  // 诅咒套装·史诗（31）
+    ninja1: [17, 18, 19, 20],      // 忍者套装·普通（5）
+    knight: [77, 78, 79, 80],      // 骑士套装（13）
+    grappler3: [49, 50, 51, 52],   // 格斗套装·史诗（19）
+    berserk: [201, 202, 203, 204], // 狂战套装（32，x10 专属）
+  });
+  /** 装备 id 列表 → engine.wearsFor 认识的 wears（等级 1 = 该套装的初始外观）。 */
+  function wearsOf(key) { return (GEAR[key] || []).map((id) => ({ id })); }
+
+  // ---------- 松鼠对手（随机 boss 池成员之一） ----------
   /* 和小松鼠同族：战斗里用玩家那套松鼠贴图（镜像朝左，tower.js 不给 npcType 即自动生效），
    * 武器与技能都取自松鼠本来的池子（GameDict 的 weaponsMap / skillsMap）。
    *
    * 出招是**固定循环**，不是随机 roll —— 玩家可以背板、可以针对配装：
    *   pattern 的每一项 = 一次行动的意图：'common' 普攻 / 'weapon' 用武器 / 'skill' 放技能；
    *   某一项这回合用不了（被缴械 / 沉默 / 没主动技能）就顺延到下一个能用的。
-   *   每个模板只带 1 个主动技能，所以「放技能」这一步也是确定的。
+   * 每个模板只带 1 个主动技能，所以「放技能」这一步也是确定的。
    *
-   * 三套模板按层数固定轮换（(n−1) mod 3，见 squirrelFor）。
-   * 题面（TRIALS）接管第 4 场之后这套模板暂时打不到，保留的理由有两个：
-   *   1) 题面本来就是照它的结构写的（bias + 固定循环 + 武技池 + 同族贴图）；
-   *   2) 以后要给普通层加「松鼠杂兵」，直接拿这张表就能用（tower.js 仍保留 entry.kind === 'squirrel' 分支）。
+   * 这三只是「平庸款」：没有专属机制，靠数值与出招循环提供基础的随机 boss 体验，
+   * 和 7 个带机制的 boss（TRIALS）、10 个机制 NPC 一起洗进 BOSS_POOL。
    * 想加/改模板只动这张表就行。 */
   const SQUIRRELS = Object.freeze([
-    { id: 'scout', name: '斥候松鼠', type: '敏捷型', region: 3,
+    { id: 'scout', name: '斥候松鼠', type: '敏捷型', region: 3, gear: 'ninja1',
       bias: { power: 0.95, agility: 1.10, speed: 1.15, hp: 1.00 },
       weapons: [{ id: 8, level: 6 }], skills: [{ id: 2, level: 7 }, { id: 23, level: 7 }],
       pattern: ['common', 'weapon', 'common', 'skill'],
-      patternDesc: '固定循环：普攻 → 菜刀 → 普攻 → 幸运一击' },
-    { id: 'guard', name: '铁壁松鼠', type: '防御型', region: 2,
+      patternDesc: '固定循环：普攻 → 菜刀 → 普攻 → 幸运一击',
+      mechDesc: '出手最快、闪避最高，但血量与力量都偏低' },
+    { id: 'guard', name: '铁壁松鼠', type: '防御型', region: 2, gear: 'knight',
       bias: { power: 0.92, agility: 0.90, speed: 0.90, hp: 1.28 },
       weapons: [{ id: 2, level: 6 }], skills: [{ id: 4, level: 7 }, { id: 10, level: 7 }],
       pattern: ['weapon', 'common', 'weapon', 'common'],
-      patternDesc: '固定循环：大榔头 → 普攻（血最厚、出手最慢）' },
-    { id: 'frenzy', name: '狂暴松鼠', type: '爆发型', region: 1,
+      patternDesc: '固定循环：大榔头 → 普攻（血最厚、出手最慢）',
+      mechDesc: '血最厚、出手最慢，靠大榔头一下一下磨' },
+    { id: 'frenzy', name: '狂暴松鼠', type: '爆发型', region: 1, gear: 'grappler3',
       bias: { power: 1.10, agility: 0.95, speed: 1.00, hp: 1.10 },
       weapons: [{ id: 12, level: 6 }], skills: [{ id: 5, level: 7 }, { id: 14, level: 7 }],
       pattern: ['common', 'weapon', 'skill', 'weapon'],
-      patternDesc: '固定循环：普攻 → 狼牙棒 → 小宇宙爆发 → 狼牙棒' },
+      patternDesc: '固定循环：普攻 → 狼牙棒 → 小宇宙爆发 → 狼牙棒',
+      mechDesc: '攻击最高，会用「小宇宙爆发」自我强化，血量偏低' },
   ]);
   const SQUIRREL_BY_ID = Object.fromEntries(SQUIRRELS.map((n) => [n.id, n]));
   /** 第 4 场固定轮换：(n−1) mod 3 → 松鼠模板。 */
   function squirrelFor(layer) { return SQUIRRELS[(Math.max(1, layer) - 1) % SQUIRRELS.length]; }
 
-  // ---------- 题面（每层最终位对手，7 个固定轮换） ----------
+  // ---------- 带机制的松鼠 boss（随机 boss 池的核心 7 个） ----------
   /* 设计约束（见 docs/挑战塔重构建议.md §3.2）：
-   *   1. 可预告：mechDesc 要写清「第几次行动」「百分比」，进层前就能读到；
-   *   2. 改变节奏而不是加血：每个题面都有自己的「爆发窗口 / 该苟的窗口」；
-   *   3. 有明确对策：counter 一行写清怎么打，玩家读题 → 配装 → 验证。
-   * 数值上仍复用松鼠的系数与武技池（同族贴图、固定出招循环 → 可背板），
-   * 只是 bias 随题面调整：血厚的题面（苔龟/镜鳞/蚀骨）攻击更低，反之亦然。
+   *   1. 可预告：mechDesc 要写清「第几次行动」「百分比」，进层前 / 选 buff 时就能读到；
+   *   2. 改变节奏而不是加血：每个 boss 都有自己的「爆发窗口 / 该苟的窗口」；
+   *   3. 机制文本按**普通 boss 简介**的口径写，不写「对策建议」（那是给策划看的，见文档）。
+   * 数值上复用松鼠的系数与武技池（同族贴图、固定出招循环 → 可背板），
+   * bias 随机制调整：血厚的（苔龟/镜鳞/蚀骨）攻击更低，反之亦然。
    * 机制实现全部在 sim.js（trial* 前缀），这里只写数据。 */
-  /* 镜鳞的两个数值单独提出来：题面文本、sim 判定、以及调平衡都要用同一个数。
+  /* 镜鳞的两个数值单独提出来：简介文本、sim 判定、以及调平衡都要用同一个数。
    * 阈值是实测定标出来的：玩家单次伤害大多落在敌人 10%~25% 生命区间（爆发招 30%+），
    * 阈值定 8% 时几乎每一下都反弹，玩家等于自杀（实测第 5 层整层通关率 29%）；
-   * 逐步调到 15%/60% → 20%/50% → 20%/45%，最后一步是为了 20~25 层墙区
-   * （镜鳞/霜缚落在 26/25 层）能过 8% 验收线。现在只有暴击·爆发越线，普攻安全 ——
-   * 题面才真的变成「压低单次伤害走多段」，同时保留「一次性越线强杀」的高风险打法。 */
+   * 逐步调到 15%/60% → 20%/50% → 20%/45% → 20%/40%：最后两步是为了
+   * 「第 5 场队首 55%」与墙区 8% 两条验收线（镜鳞在随机池里是最硬的那个）。
+   * 现在只有暴击·爆发越线，普攻安全。 */
   const MIRROR_THRESHOLD = 0.20;
-  const MIRROR_REFLECT = 0.45;   // 反弹该次伤害的 45%
+  const MIRROR_REFLECT = 0.40;   // 反弹该次伤害的 40%
   const TRIALS = Object.freeze([
-    { id: 'core', name: '熔核·炽壳', title: '熔核', type: '爆发窗口型', region: 1,
+    { id: 'core', name: '熔核·炽壳', type: '爆发窗口型', region: 1, gear: 'hero',
       bias: { power: 1.00, agility: 0.90, speed: 0.90, hp: 0.82 },
       weapons: [{ id: 2, level: 6 }], skills: [{ id: 10, level: 7 }, { id: 4, level: 7 }],
       pattern: ['common', 'weapon', 'common', 'weapon'],
-      patternDesc: '固定循环：普攻 → 大榔头（出手慢，前 4 回合是唯一窗口）',
+      patternDesc: '固定循环：普攻 → 大榔头（出手慢，前 4 回合是唯一的输出窗口）',
       mech: ['trialCore'],
-      mechDesc: '题面·熔核：它的第 5 次行动起，受伤 −80%、力敏速 +50%，此后基本打不动',
-      counter: '对策：前 4 回合内打完 —— 爆发 / 先手制敌 / 攻击类 buff' },
-    { id: 'moss', name: '苔龟·磐甲', title: '苔龟', type: '回复型', region: 2,
+      mechDesc: '第 5 次行动起进入熔核成型：受到伤害 −80%，力/敏/速 +50%' },
+    { id: 'moss', name: '苔龟·磐甲', type: '回复型', region: 2, gear: 'rhino',
       bias: { power: 0.88, agility: 0.85, speed: 0.85, hp: 1.10 },
       weapons: [{ id: 2, level: 6 }], skills: [{ id: 7, level: 7 }, { id: 10, level: 7 }],
       pattern: ['weapon', 'common', 'common', 'weapon'],
       patternDesc: '固定循环：大榔头 → 普攻（血最厚、出手最慢）',
       mech: ['trialMoss', 'thorns'],
-      mechDesc: '题面·苔龟：每回合回复 6% 最大生命；受到的任何伤害反弹 15%',
-      counter: '对策：单回合高爆发一波压死；忌多段小伤害（每一下都吃反弹）' },
-    { id: 'dry', name: '枯泉·涸井', title: '枯泉', type: '压制型', region: 3,
+      mechDesc: '每回合回复 6% 最大生命；受到的任何伤害反弹 15% 给攻击者' },
+    { id: 'dry', name: '枯泉·涸井', type: '压制型', region: 3, gear: 'curse',
       bias: { power: 0.95, agility: 1.00, speed: 0.95, hp: 1.06 },
       weapons: [{ id: 8, level: 6 }], skills: [{ id: 8, level: 7 }, { id: 15, level: 7 }],
       pattern: ['weapon', 'skill', 'common', 'common'],
       patternDesc: '固定循环：菜刀 → 色诱之术 → 普攻',
       mech: ['trialDry'],
-      mechDesc: '题面·枯泉：你的治疗量 −100%；它每 3 次行动吸取你当前生命的 10%',
-      counter: '对策：放弃回血流（师父/吸血/回春都无效），堆减伤与护盾硬吃' },
-    { id: 'frost', name: '霜缚·凝霜', title: '霜缚', type: '控制型', region: 4,
+      mechDesc: '封死对手的一切治疗；每 3 次行动吸取对手当前生命的 10%' },
+    { id: 'frost', name: '霜缚·凝霜', type: '控制型', region: 4, gear: 'ninja3',
       bias: { power: 0.92, agility: 1.10, speed: 1.12, hp: 0.85 },
       weapons: [{ id: 8, level: 6 }], skills: [{ id: 23, level: 7 }, { id: 12, level: 7 }],
       pattern: ['weapon', 'common', 'skill', 'weapon'],
       patternDesc: '固定循环：菜刀 → 普攻 → 幸运一击',
       mech: ['trialFrost'],
-      mechDesc: '题面·霜缚：它的第 1/4/7… 次行动前把你冻结一回合（出手越快越吃亏）',
-      counter: '对策：抢在冻结前打完，或用不占回合的技能/先手类 buff 换节奏' },
-    { id: 'mirror', name: '镜鳞·折光', title: '镜鳞', type: '反击型', region: 2,
+      mechDesc: '第 1/4/7… 次行动前把对手冻结一回合（出手越快被冻得越多）' },
+    { id: 'mirror', name: '镜鳞·折光', type: '反击型', region: 2, gear: 'fist3',
       bias: { power: 0.90, agility: 1.00, speed: 1.00, hp: 1.02 },
       weapons: [{ id: 2, level: 6 }], skills: [{ id: 7, level: 7 }, { id: 16, level: 7 }],
       pattern: ['common', 'weapon', 'weapon', 'common'],
       patternDesc: '固定循环：普攻 → 大榔头',
       mech: ['trialMirror'],
       mechParams: { trialMirror: { threshold: MIRROR_THRESHOLD, reflect: MIRROR_REFLECT } },
-      mechDesc: '题面·镜鳞：单次伤害达到它 ' + Math.round(MIRROR_THRESHOLD * 100) + '% 最大生命时，反弹该次伤害的 ' +
-        Math.round(MIRROR_REFLECT * 100) + '%',
-      counter: '对策：压低单次伤害走多段小招；或反其道——一次性越线强杀' },
-    { id: 'bloodfang', name: '血牙·狂噬', title: '血牙', type: '成长型', region: 1,
+      mechDesc: '单次伤害达到它 ' + Math.round(MIRROR_THRESHOLD * 100) + '% 最大生命时，反弹该次伤害的 ' +
+        Math.round(MIRROR_REFLECT * 100) + '%' },
+    { id: 'bloodfang', name: '血牙·狂噬', type: '成长型', region: 1, gear: 'shogun',
       bias: { power: 1.08, agility: 1.00, speed: 1.05, hp: 0.94 },
       weapons: [{ id: 12, level: 6 }], skills: [{ id: 14, level: 7 }, { id: 5, level: 7 }],
       pattern: ['weapon', 'skill', 'weapon', 'common'],
       patternDesc: '固定循环：狼牙棒 → 小宇宙爆发 → 狼牙棒',
       mech: ['trialBloodfang'],
-      mechDesc: '题面·血牙：它每损失 20% 生命，攻击 +35%（越拖越猛）',
-      counter: '对策：一波带走，不给它挨打变强的机会' },
-    { id: 'erode', name: '蚀骨·腐毒', title: '蚀骨', type: '消耗型', region: 3,
+      mechDesc: '每损失 20% 生命，攻击力 +35%（越拖越猛）' },
+    { id: 'erode', name: '蚀骨·腐毒', type: '消耗型', region: 3, gear: 'curse3',
       bias: { power: 0.86, agility: 0.95, speed: 0.95, hp: 1.28 },
       weapons: [{ id: 8, level: 6 }], skills: [{ id: 10, level: 7 }, { id: 8, level: 7 }],
       pattern: ['common', 'weapon', 'common', 'skill'],
       patternDesc: '固定循环：普攻 → 菜刀 → 普攻 → 色诱之术',
       mech: ['trialErode'],
-      mechDesc: '题面·蚀骨：你每出手一次叠 1 层「攻击 −3%」，最多 10 层（本场有效）',
-      counter: '对策：速杀；或用不占出手的伤害（先手制敌 / 反弹）绕开层数' },
+      mechDesc: '对手每次出手叠 1 层「攻击 −3%」，最多 10 层（本场有效）' },
   ]);
   const TRIAL_BY_ID = Object.fromEntries(TRIALS.map((n) => [n.id, n]));
-  /** 题面固定按层轮换（可预习）：第 1 层熔核 → 第 7 层蚀骨 → 第 8 层熔核… */
+  /** 兼容别名：老的「按层固定轮换第 4 场题面」调用点（部分工具还在用）。 */
   function trialFor(layer) { return TRIALS[(Math.max(1, layer) - 1) % TRIALS.length]; }
 
-  /** 第 4 场固定轮换：(n−1) mod 10 → NPC。 */
-  /** 精英场（x10 层第 5 场）固定轮换：主体 + 第二机制（取循环下一位的机制）。
-   * v2.2 起第 4 场改成松鼠，机制 NPC 只剩这一个出场口，所以轮换必须覆盖全部 10 个，
-   * 否则后排几个 NPC 永远打不到。前 6 位是 v2.0 的既有顺序（10~60 层精英不变），后 4 位是补进来的。 */
-  const ELITE_ROTATION = Object.freeze(['ironwall', 'devourer', 'berserker', 'golem', 'assassin', 'vampire', 'medic', 'tamer', 'bramble', 'frostmage']);
-  function eliteFor(layer) {
-    const idx = (Math.floor(layer / 10) - 1 + ELITE_ROTATION.length * 100) % ELITE_ROTATION.length;
-    const main = NPC_BY_ID[ELITE_ROTATION[idx]];
-    const second = NPC_BY_ID[ELITE_ROTATION[(idx + 1) % ELITE_ROTATION.length]];
-    return { main, mechs: [main.mech, second.mech] };
-  }
+  // ---------- x10 层最后一场：固定狂战松鼠 ----------
+  /* 每 10 层的最后一个 boss 固定刷这一个：松鼠形态 + 全身狂战套 + 血性狂暴 + 精英 ×1.2。
+   * 「狂战套」是玩家在天梯商店追求的那一套（GameDict set 51 / gear 201~204），
+   * 让它穿在身上出现在塔顶，玩家一眼就知道「这是 10 层的大家伙」。 */
+  const WARLORD = Object.freeze({
+    id: 'warlord', name: '狂战松鼠·无双', type: '首领', region: 1, gear: 'berserk',
+    bias: { power: 1.15, agility: 1.02, speed: 1.06, hp: 1.08 },
+    weapons: [{ id: 12, level: 8 }], skills: [{ id: 14, level: 8 }, { id: 5, level: 8 }, { id: 10, level: 8 }],
+    pattern: ['weapon', 'skill', 'weapon', 'common'],
+    patternDesc: '固定循环：狼牙棒 → 小宇宙爆发 → 狼牙棒 → 普攻',
+    mech: ['berserk'],
+    mechDesc: '精英：生命首次低于 50% 时攻击力翻倍；一身狂战套，力量/敏捷/生命/速度全面强化' },
+  );
 
+  // ---------- 随机 boss 池（每层第 4 场） ----------
+  /* 7 个带机制的松鼠 boss + 3 只平庸松鼠 + 10 个机制 NPC = 20 个候选，
+   * 每层按 (日期 + 层数) 哈希抽一个。这样做的好处：
+   *   · 同一层当天固定 → 进层前能预习、失败重试还是同一个 boss（配合「换 buff 再战」）；
+   *   · 换一天 / 换一层就是新的组合 → 有重玩价值，也不会永远只见到那 7 个。
+   * x10 层第 5 场不走这个池子，固定 WARLORD。 */
+  const BOSS_POOL = Object.freeze([
+    ...TRIALS.map((t) => ({ kind: 'trial', id: t.id })),
+    ...SQUIRRELS.map((s) => ({ kind: 'squirrel', id: s.id })),
+    ...NPCS.map((n) => ({ kind: 'npc', id: n.id })),
+  ]);
+  /** FNV-1a：把「日期#层数」这种小字符串摊成一个稳定的下标。 */
+  function poolHash(text) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return h >>> 0;
+  }
+  /** 第 layer 层的 boss（salt 一般传当天日期）：同 salt 同层永远同一个，保证预告 = 实战。 */
+  function bossFor(layer, salt) {
+    const pick = BOSS_POOL[poolHash(String(salt == null ? '' : salt) + '#' + Math.max(1, layer)) % BOSS_POOL.length];
+    return { kind: pick.kind, id: pick.id };
+  }
   // ---------- Buff 池 ----------
   // rarity: 0 普通 / 1 稀有 / 2 史诗；scope: battle 单场 / layer 本层 / run 跨层（仅无尽）。
   // mods 由 tower.js 解释（数值均为加池百分比或比例）：
@@ -264,52 +308,61 @@
   //   shellPct enemyPowerDown dmgMulType dmgMulMech dmgMulElite eliteHealAfter
   //   killPowerPct/killPowerCap killMaxHpPct/killMaxHpCap killHealPct layerHealPct
   //   layer5HealPct x10Boost perLayerPowerAfter20 globalMul
+  /* 第 4 项数值加强（2026-09-28）：实测 buff 的「数值感」太弱 ——
+   * 减伤 10%、生命上限 +10% 这种量级，放在一场要打 10~20 回合的连战里几乎感觉不到，
+   * 玩家宁可每次都选回血。这一轮把「本层/跨层」的数值整体抬到能感知的量级
+   * （减伤 10%→25%、生命上限 10%→20% 是需求里点名的两条），
+   * 单场类（N/M）基本不动，避免一次选择直接决定整层。 */
   const BUFFS = Object.freeze([
     // —— 单场类（主塔+无尽通用） ——
     { id: 'N01', name: '蓄力一击', rarity: 0, scope: 'battle', desc: '下一场攻击 +25%', mods: { powerMul: 0.25 } },
     { id: 'N02', name: '百步穿杨', rarity: 0, scope: 'battle', desc: '下一场首次攻击必中', mods: { mustHitFirst: 1 } },
-    { id: 'M01', name: '威慑', rarity: 0, scope: 'battle', desc: '下一场敌人攻击力 −15%', mods: { enemyPowerDown: 0.15 } },
+    { id: 'M01', name: '威慑', rarity: 0, scope: 'battle', desc: '下一场敌人攻击力 −20%', mods: { enemyPowerDown: 0.20 } },
     { id: 'M02', name: '疾风先手', rarity: 0, scope: 'battle', desc: '下一场你的首次技能不消耗回合', mods: { firstSkillFree: 1 } },
     { id: 'N03', name: '活血丹', rarity: 1, scope: 'battle', desc: '下一场每回合开始回复 5% 生命', mods: { regenPct: 0.05 } },
     { id: 'N04', name: '金蝉脱壳', rarity: 1, scope: 'battle', desc: '下一场免疫一次致命伤害（保留 1 点生命）', mods: { deathSave: 1 } },
     { id: 'N05', name: '先手制敌', rarity: 2, scope: 'battle', desc: '下一场开局对敌人造成其 20% 最大生命的伤害', mods: { openStrikePct: 0.20 } },
     { id: 'N06', name: '血饮狂刀', rarity: 2, scope: 'battle', desc: '下一场攻击附带 30% 吸血', mods: { lifestealPct: 0.30 } },
     // —— 本层类（主塔=整局；无尽=当前层） ——
-    { id: 'G01', name: '力量祝福', rarity: 0, scope: 'layer', desc: '本层攻击 +8%', mods: { powerMul: 0.08 } },
-    { id: 'G02', name: '生命祝福', rarity: 0, scope: 'layer', desc: '本层生命上限 +10%，并回复等量生命', mods: { maxHpMul: 0.10 } },
-    { id: 'G03', name: '鹰眼', rarity: 0, scope: 'layer', desc: '本层暴击率 +5%', mods: { critBonus: 5 } },
-    { id: 'G04', name: '回春术', rarity: 1, scope: 'layer', desc: '本层每回合回复 1.5% 最大生命', mods: { regenPct: 0.015 } },
-    { id: 'G05', name: '铁布衫', rarity: 1, scope: 'layer', desc: '本层受到伤害 −10%', mods: { takenMul: -0.10 } },
-    { id: 'G06', name: '凌波微步', rarity: 1, scope: 'layer', desc: '本层闪避 +8%', mods: { dodgeBonus: 8 } },
-    { id: 'G07', name: '破釜沉舟', rarity: 2, scope: 'layer', desc: '本层攻击 +15%，生命上限 −10%', mods: { powerMul: 0.15, maxHpMul: -0.10 } },
+    { id: 'G01', name: '力量祝福', rarity: 0, scope: 'layer', desc: '本层攻击 +12%', mods: { powerMul: 0.12 } },
+    { id: 'G02', name: '生命祝福', rarity: 0, scope: 'layer', desc: '本层生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
+    { id: 'G03', name: '鹰眼', rarity: 0, scope: 'layer', desc: '本层暴击率 +8%', mods: { critBonus: 8 } },
+    { id: 'G04', name: '回春术', rarity: 1, scope: 'layer', desc: '本层每回合回复 2.5% 最大生命', mods: { regenPct: 0.025 } },
+    { id: 'G05', name: '铁布衫', rarity: 1, scope: 'layer', desc: '本层受到伤害 −25%', mods: { takenMul: -0.25 } },
+    { id: 'G06', name: '凌波微步', rarity: 1, scope: 'layer', desc: '本层闪避 +12%', mods: { dodgeBonus: 12 } },
+    { id: 'G07', name: '破釜沉舟', rarity: 2, scope: 'layer', desc: '本层攻击 +20%，生命上限 −10%', mods: { powerMul: 0.20, maxHpMul: -0.10 } },
     // —— 跨层类（仅无尽，本局永久） ——
-    { id: 'C01', name: '磐石之躯', rarity: 0, scope: 'run', desc: '生命上限 +12%，并回复等量生命', mods: { maxHpMul: 0.12 } },
-    { id: 'C02', name: '磨砺', rarity: 0, scope: 'run', desc: '攻击 +6%', mods: { powerMul: 0.06 } },
-    { id: 'C03', name: '猎侠者', rarity: 0, scope: 'run', desc: '对螳螂/仙鹤/熊猫伤害 +15%', mods: { dmgMulType: 0.15 } },
-    { id: 'C04', name: '生命源泉', rarity: 1, scope: 'run', desc: '每通过一层回复 10% 最大生命', mods: { layerHealPct: 0.10 } },
-    { id: 'C05', name: '坚韧壁垒', rarity: 1, scope: 'run', desc: '每场战斗开局获得 10% 最大生命的护盾', mods: { shellPct: 0.10 } },
-    { id: 'C06', name: '猎杀时刻', rarity: 1, scope: 'run', stackable: true, desc: '每击杀 1 个敌人攻击 +1%（上限 +20%）；重复选取提升速率与上限', mods: { killPowerPct: 0.01, killPowerCap: 0.20 } },
-    { id: 'C07', name: '吞噬成长', rarity: 1, scope: 'run', stackable: true, desc: '每击杀 1 个敌人生命上限 +2% 并回复等量生命（上限 +30%）', mods: { killMaxHpPct: 0.02, killMaxHpCap: 0.30 } },
+    { id: 'C01', name: '磐石之躯', rarity: 0, scope: 'run', desc: '生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
+    { id: 'C02', name: '磨砺', rarity: 0, scope: 'run', desc: '攻击 +10%', mods: { powerMul: 0.10 } },
+    { id: 'C03', name: '猎侠者', rarity: 0, scope: 'run', desc: '对螳螂/仙鹤/熊猫伤害 +25%', mods: { dmgMulType: 0.25 } },
+    { id: 'C04', name: '生命源泉', rarity: 1, scope: 'run', desc: '每通过一层回复 15% 最大生命', mods: { layerHealPct: 0.15 } },
+    { id: 'C05', name: '坚韧壁垒', rarity: 1, scope: 'run', desc: '每场战斗开局获得 15% 最大生命的护盾', mods: { shellPct: 0.15 } },
+    { id: 'C06', name: '猎杀时刻', rarity: 1, scope: 'run', stackable: true, desc: '每击杀 1 个敌人攻击 +2%（上限 +40%）；重复选取提升速率与上限', mods: { killPowerPct: 0.02, killPowerCap: 0.40 } },
+    { id: 'C07', name: '吞噬成长', rarity: 1, scope: 'run', stackable: true, desc: '每击杀 1 个敌人生命上限 +3% 并回复等量生命（上限 +45%）', mods: { killMaxHpPct: 0.03, killMaxHpCap: 0.45 } },
     { id: 'C08', name: '五层回响', rarity: 1, scope: 'run', desc: '每到 5 的倍数层，该层第 1 场开局回复 50% 最大生命', mods: { layer5HealPct: 0.50 } },
     { id: 'C09', name: '逢十强化', rarity: 1, scope: 'run', desc: '在 10 的倍数层攻击 +20%、生命上限 +20%（仅该层）', mods: { x10Boost: 0.20 } },
-    { id: 'C10', name: '机制破解', rarity: 1, scope: 'run', desc: '对带专属机制的 NPC 伤害 +20%', mods: { dmgMulMech: 0.20 } },
-    { id: 'C11', name: '以战养战', rarity: 2, scope: 'run', stackable: true, desc: '每击杀 1 个敌人回复 3% 最大生命', mods: { killHealPct: 0.03 } },
-    { id: 'C12', name: '登顶者', rarity: 2, scope: 'run', stackable: true, desc: '从 20 层起，每通过一层攻击永久 +3%', mods: { perLayerPowerAfter20: 0.03 } },
-    { id: 'C13', name: '精英杀手', rarity: 2, scope: 'run', desc: '对精英 NPC 伤害 +30%；击败精英后回复 15% 最大生命', mods: { dmgMulElite: 0.30, eliteHealAfter: 0.15 } },
-    { id: 'C14', name: '不死鸟', rarity: 2, scope: 'run', desc: '每场战斗可复活一次（回复 30% 生命）', mods: { revivePct: 0.30 } },
+    { id: 'C10', name: '机制破解', rarity: 1, scope: 'run', desc: '对带专属机制的敌人伤害 +25%', mods: { dmgMulMech: 0.25 } },
+    { id: 'C11', name: '以战养战', rarity: 2, scope: 'run', stackable: true, desc: '每击杀 1 个敌人回复 5% 最大生命', mods: { killHealPct: 0.05 } },
+    { id: 'C12', name: '登顶者', rarity: 2, scope: 'run', stackable: true, desc: '从 20 层起，每通过一层攻击永久 +4%', mods: { perLayerPowerAfter20: 0.04 } },
+    { id: 'C13', name: '精英杀手', rarity: 2, scope: 'run', desc: '对精英伤害 +40%；击败精英后回复 20% 最大生命', mods: { dmgMulElite: 0.40, eliteHealAfter: 0.20 } },
+    { id: 'C14', name: '不死鸟', rarity: 2, scope: 'run', desc: '每场战斗可复活一次（回复 50% 生命）', mods: { revivePct: 0.50 } },
     { id: 'C15', name: '增幅水晶', rarity: 2, scope: 'run', desc: '本局内所有 buff 效果 +40%', mods: { globalMul: 1.40 } },
   ]);
   const BUFF_BY_ID = Object.fromEntries(BUFFS.map((b) => [b.id, b]));
   const RARITY_NAME = ['普通', '稀有', '史诗'];
   const RARITY_WEIGHTS = [62, 28, 10];           // 每个随机槽独立 Roll
-    /* 每层只剩一次选择（第 3 项）：把原来的「3 次 ×30%」换成「1 次 ×80%」——
-   * 决策更少但更重，回血预算基本持平（实测分档验收仍全部达标，敌人系数不用动）。 */
-  const FIXED_HEAL_PCT = 0.8;
+  /* 第 4 项：场间只剩一次选择，所以那一次的大回血要够用。
+   * 第 4 项需求：从 80% 下调到 50%（配合「每场自动回血」，整层续航仍够，
+   * 但「回血 or 拿 buff」这次决策不再默认选回血）。 */
+  const FIXED_HEAL_PCT = 0.5;
   /* 每场战斗后自动回复的固定比例（不需要决策）。
    * 第 3 项把场间选择从 3 次压到 1 次后，回血从「三次微决策」变成「稳定节奏」，
    * 这样既少操作，也不会因为一次选错就断崖式掉血。 */
-  const AUTO_HEAL_PCT = 0.14;                    // 固定选项：回复 30% 最大生命
+  const AUTO_HEAL_PCT = 0.14;                    // 每场打完自动回复的比例
   const STACK_MAX = 3;
+  /* 每层通关结算时补发的「悬浮奖品」场数：塔内战斗关掉了飘物掉落（防免门票刷资源），
+   * 所以按**一整个常驻挑战关 = 3 场**的掉落量补回来（每场 3 个飘物 → 共 9 个）。 */
+  const SETTLE_DROP_BATTLES = 3;
 
   /** 主塔池 = 单场 + 本层（15 个）；无尽池 = 全部 30 个。 */
   const towerPool = BUFFS.filter((b) => b.scope !== 'run');
@@ -319,12 +372,14 @@
     towerLevel, towerMult, towerGold, towerGoldShares, TOWER_FAIL_CONSOLATION,
     endlessLevel, endlessSegment, endlessMult, endlessMechStacks, endlessTickets,
     ENDLESS_MECH_ORDER, ENDLESS_CONSOLATION_LAYER, SCORE, COINS, SHOP, shopPrice,
-    FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_SQUIRREL_POWER_MUL, FOE_SQUIRREL_HP_MUL,
+    FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL,
     FOE_TRIAL_POWER_MUL, FOE_TRIAL_HP_MUL,
-    NPCS, NPC_BY_ID, ELITE_ROTATION, eliteFor, HERO_DEBUFF,
+    NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,
+    GEAR, wearsOf, WARLORD, BOSS_POOL, bossFor,
     BUFFS, BUFF_BY_ID, RARITY_NAME, RARITY_WEIGHTS, FIXED_HEAL_PCT, AUTO_HEAL_PCT, STACK_MAX,
+    SETTLE_DROP_BATTLES,
     towerPool, endlessPool,
   };
 })();

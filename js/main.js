@@ -538,8 +538,10 @@
       canvas, me, foe, region: opts.region, kind: opts.kind, collectDrops: opts.collectDrops !== false,
       // 挑战塔不给跳过（要真打），改成右下角 1×/2× 倍速切换
       allowSkip: opts.allowSkip, speedToggle: opts.speedToggle,
-      // 挑战塔题面：把规则贴进战斗画面（opts.trial = {title, text}）
+      // 挑战塔 boss 机制：贴一条进战斗画面（opts.trial = {text}）
       trial: opts.trial,
+      // 挑战塔：三侠大招留下的本层削弱（画在玩家血条下方）
+      debuffs: opts.debuffs,
       dropRandom: window.QA_FIXTURE && QA_FIXTURE.dropRandom,
       onEnd: (winner, result, loot) => {
         if (settled) return;

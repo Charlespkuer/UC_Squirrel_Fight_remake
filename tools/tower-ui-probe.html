@@ -144,7 +144,15 @@ async function main() {
   snap('楼层(当前)', '.tower-floor.now');
   snap('楼层(普通)', '.tower-floor.todo');
   snap('预告条目', '.tower-plan li');
-  snap('预告机制行', '.tower-plan-mech');
+  snap('预告类型标签', '.tower-plan-type');
+  snap('悬停提示文案', '.tower-plan-hint');
+  // 第 1 项：预告 + 开始按钮必须一屏放得下（不下翻）；机制文本走悬停气泡
+  P.planFits = (() => { const el = document.querySelector('#ui .tower-main');
+    return el ? { scrollH: el.scrollHeight, clientH: el.clientHeight, needScroll: el.scrollHeight > el.clientHeight + 1 } : null; })();
+  P.planTips = [...document.querySelectorAll('#ui .tower-plan li')].map((li) => li.dataset.tip || '');
+  P.planStartBtn = (() => { const b = document.querySelector('#ui [data-action="fight"]');
+    if (!b) return null; const r = b.getBoundingClientRect(); const m = document.querySelector('#ui .tower-main').getBoundingClientRect();
+    return { bottom: Math.round(r.bottom), colBottom: Math.round(m.bottom), inside: r.bottom <= m.bottom + 1 }; })();
   P.floors = list('.tower-floor').length;
   P.fifthFloors = list('.tower-floor.fifth-floor').length;
   P.markers = list('.tower-marker').length;

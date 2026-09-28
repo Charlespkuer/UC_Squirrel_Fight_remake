@@ -262,17 +262,27 @@
         Engine.text(ctx, Math.round(hps[side]) + '/' + maxHp[side], x + width / 2, y + 42,
           { size: 36, align: 'center', color: '#fff8d4', bold: false, stroke: false });
       }
-      /* 挑战塔：三侠大招留下的「贯穿本层」削弱，挂在玩家血条正下方（第 3 项） */
+      /* 挑战塔：三侠大招留下的「贯穿本层」削弱，挂在玩家血条正下方（第 3 项）。
+       * 第 5 项：胶囊里带上「谁给的」——用来源大侠的颜色描边 + 名字前缀，
+       * 一眼能看出是螳螂/仙鹤/熊猫中的哪一个。 */
       const debuffs = Array.isArray(opts.debuffs) ? opts.debuffs : [];
       if (debuffs.length) {
         let dx = 8;
         for (const d of debuffs) {
-          const label = String(d.text || d.name || '削弱');
-          const width2 = Math.max(104, label.length * 21 + 28);
-          rounded(dx, 116, width2, 36, 18, 'rgba(126,28,22,.88)');
-          ctx.lineWidth = 2; ctx.strokeStyle = '#ffd2c8'; ctx.beginPath();
+          const body = String(d.text || d.name || '削弱');
+          const who = d.short || d.hero || '';
+          const whoW = who ? 18 + who.length * 20 : 0;
+          const width2 = Math.max(104, whoW + body.length * 21 + 22);
+          const color = d.color || '#7e1c16';
+          rounded(dx, 116, width2, 36, 18, 'rgba(30,16,10,.80)');
+          if (whoW) {
+            ctx.save(); ctx.beginPath(); ctx.roundRect(dx, 116, width2, 36, 18); ctx.clip();
+            ctx.fillStyle = color; ctx.fillRect(dx, 116, whoW, 36); ctx.restore();
+            Engine.text(ctx, who, dx + whoW / 2, 142, { size: 19, align: 'center', color: '#fff8d4', stroke: false });
+          }
+          ctx.lineWidth = 2; ctx.strokeStyle = color; ctx.beginPath();
           ctx.roundRect(dx, 116, width2, 36, 18); ctx.stroke();
-          Engine.text(ctx, label, dx + width2 / 2, 142, { size: 22, align: 'center', color: '#ffe6df', stroke: false });
+          Engine.text(ctx, body, dx + whoW + 11, 142, { size: 22, align: 'left', color: '#ffe6df', stroke: false });
           dx += width2 + 8;
         }
       }

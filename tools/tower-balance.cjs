@@ -26,14 +26,22 @@ const LAYERS = (() => {
   return list.length ? list.slice(0, 40) : [1, 5, 10, 15, 20, 25, 30];
 })();
 
+/* 随机 boss 池按「日期 + 层数」抽 boss，所以验收必须能换日期复测：
+ * --date=2026-9-26 → 固定成那一天（默认）。 */
+const DATE = (() => {
+  const arg = process.argv.find((a) => a.startsWith('--date='));
+  const m = arg && arg.slice('--date='.length).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  return m ? [Number(m[1]), Number(m[2]) - 1, Number(m[3])] : [2026, 8, 26];
+})();
+
 function setup(storage, keepSave) {
   const store = storage || new Map();
-  class ClockDate extends Date { static now() { return new Date(2026, 8, 26, 12).getTime(); } }
+  class ClockDate extends Date { static now() { return new Date(DATE[0], DATE[1], DATE[2], 12).getTime(); } }
   const c = { Date: ClockDate, location: { search: '?qa=1' }, console,
     localStorage: { getItem: (k) => store.get(k) || null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) } };
   c.window = c;
   vm.createContext(c);
-  for (const file of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js']) {
+  for (const file of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/battle-drops.js', 'js/tower.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), c, { filename: file });
   }
   // 整层胜率贴着验收线（层 10-15 ≥15%、层 20-25 ≥8%）跑，用真随机会偶发抖动；
@@ -99,23 +107,33 @@ function autoPick(ctx, mode) {
   S.level = 35;
 
   let info = Tower.towerInfo();
-  t('主塔初始：下一层 1、4 场、松果 15', info.nextLayer === 1 && info.battles === 4 && info.gold === 15);
-  // P0-3：第 4 场从「松鼠对手」升级成「题面」（同族贴图 + 固定出招循环 + 一条可读的机制）
-  t('第 1 层第 4 场 = 题面·熔核', info.preview[3].name === '熔核·炽壳' && info.preview[3].squirrel === true && info.preview[3].trial === true);
-  t('题面预告里写了机制与对策', /题面·熔核/.test(info.preview[3].mechDesc || '') && /对策/.test(info.preview[3].counter || ''));
-  t('第 1 层第 4 场预告里也写了固定出招循环', /固定循环/.test(info.preview[3].mechDesc || '') || !!Tower.preview(1)[3].title);
-  t('第 10 层有精英（铁甲·岩盾+吞噬）', Tower.preview(10).length === 5 && Tower.preview(10)[4].elite && Tower.preview(10)[4].mechs.join('+') === 'thorns+devour');
-  // v2.2：第 4 场变成松鼠后，精英场成了机制 NPC 唯一的出场口，轮换必须覆盖全部 10 个
+  t('主塔初始：下一层 1、4 场、松果 25（与常驻挑战通关看齐）', info.nextLayer === 1 && info.battles === 4 && info.gold === 25);
+  // 第 8 项：第 4 场改成随机 boss 池（20 选 1），同一天同一层的预告与实战必须是同一个
+  t('第 4 场来自随机 boss 池', ['trial', 'squirrel', 'npc'].includes(info.preview[3].kind));
+  t('预告 = 实战（同一天同一层确定性）', Tower.preview(1)[3].name === info.preview[3].name &&
+    Tower.preview(1)[3].kind === info.preview[3].kind);
+  t('boss 有可悬停的机制简介（不出现「题面/对策」字样）',
+    typeof info.preview[3].mechDesc === 'string' && !/题面|对策/.test(info.preview[3].mechDesc));
+  t('第 10 层 5 场、最后一场是狂战松鼠', Tower.preview(10).length === 5 &&
+    Tower.preview(10)[4].elite === true && Tower.preview(10)[4].name === '狂战松鼠·无双' && Tower.preview(10)[4].gear === true);
   {
+    // 池子必须覆盖：7 个带机制的松鼠 + 3 只平庸松鼠 + 10 个机制 NPC（都不浪费）
+    const kinds = {};
+    for (const b of TowerData.BOSS_POOL) kinds[b.kind] = (kinds[b.kind] || 0) + 1;
+    t('随机 boss 池 = 7 机制松鼠 + 3 平庸松鼠 + 10 机制 NPC',
+      TowerData.BOSS_POOL.length === 20 && kinds.trial === 7 && kinds.squirrel === 3 && kinds.npc === 10);
     const seen = new Set();
-    for (let n = 10; n <= 100; n += 10) seen.add(TowerData.eliteFor(n).main.id);
-    t('精英轮换覆盖全部 10 个机制 NPC（否则后排 NPC 永远打不到）',
-      seen.size === TowerData.NPCS.length && TowerData.NPCS.every((n) => seen.has(n.id)));
-    const seenSq = new Set();
-    for (let n = 1; n <= 30; n++) seenSq.add(TowerData.trialFor(n).id);
-    t('题面七个一循环、七套都能遇到且都带机制', seenSq.size === TowerData.TRIALS.length &&
-      TowerData.TRIALS.every((x) => x.mech.length > 0));
-    t('题面对手都要有可预告的机制文本与对策', TowerData.TRIALS.every((x) => /题面·/.test(x.mechDesc) && /对策/.test(x.counter)));
+    for (let day = 1; day <= 40; day++) {
+      for (let n = 1; n <= 20; n++) seen.add(TowerData.bossFor(n, 'day-' + day).kind + ':' + TowerData.bossFor(n, 'day-' + day).id);
+    }
+    t('换日期能把池子抽满（20 个 boss 都出得来）', seen.size === TowerData.BOSS_POOL.length);
+    t('松鼠形态的 boss 都有固定且互不相同的装备',
+      TowerData.BOSS_POOL.filter((b) => b.kind !== 'npc').every((b) => {
+        const e = b.kind === 'trial' ? TowerData.TRIAL_BY_ID[b.id] : TowerData.SQUIRREL_BY_ID[b.id];
+        return !!e.gear && TowerData.wearsOf(e.gear).length === 4;
+      }) && new Set(TowerData.BOSS_POOL.filter((b) => b.kind !== 'npc').map((b) =>
+        (b.kind === 'trial' ? TowerData.TRIAL_BY_ID[b.id] : TowerData.SQUIRREL_BY_ID[b.id]).gear)).size === 10);
+    t('狂战套 = 201~204（全身四件）', TowerData.wearsOf(TowerData.WARLORD.gear).map((w) => w.id).join(',') === '201,202,203,204');
   }
 
   // —— 主塔一层完整流程 ——
@@ -129,7 +147,7 @@ function autoPick(ctx, mode) {
   let rw = Tower.reportBattle('tower', nx.token, true, 0.40);
   // 第 3 项：改成「固定节奏回血」——每场打完自动 +10%，不再从选择里回血
   t('胜场 1：固定节奏回血 14%（0.40→0.54）', Math.abs(Tower.towerInfo().run.carry - 0.54) < 1e-9);
-  t('胜场 1：累积 3 松果（15/4 取整）', rw.potGold === 3);
+  t('胜场 1：累积 6 松果（25/4 取整）', rw.potGold === 6);
   // 第 3 项：场间选择只在第 3 场之后给一次（进第 4 场前），不再每场都给
   t('胜场 1：不再给场间选择', !rw.choices);
 
@@ -142,20 +160,27 @@ function autoPick(ctx, mode) {
   t('胜场 3：触发 4 选 1（回血 + 3 buff）', Array.isArray(rw.choices) && rw.choices.length === 4 && rw.choices[0].type === 'heal');
   t('选择挂起时不能开战', !Tower.nextBattle('tower').ok);
   let pick = Tower.pickChoice('tower', 0);
-  t('固定项回血 80%（封顶 1.00）', pick.ok && Math.abs(Tower.towerInfo().run.carry - 1) < 1e-9);
+  t('固定项回血 50%（60%→封顶 1.00）', pick.ok && Math.abs(Tower.towerInfo().run.carry - 1) < 1e-9);
 
   nx = Tower.nextBattle('tower');
-  t('第 4 场是题面（用松鼠贴图 + 松鼠武技 + 自己的机制）', nx.entry.kind === 'trial' && !nx.foe.npcType
-    && nx.foe.weapons.length > 0 && nx.foe.skills.length > 0 && nx.foe.mech.length > 0);
-  t('题面带固定出招循环', Array.isArray(nx.foe.pattern) && nx.foe.pattern.length > 0);
+  const bossKinds = ['trial', 'squirrel', 'npc'];
+  t('第 4 场是随机 boss 池成员', bossKinds.includes(nx.entry.kind));
+  t('松鼠形态的 boss 带固定装备（视觉记忆）', nx.entry.kind === 'npc' ? nx.foe.wears == null
+    : (Array.isArray(nx.foe.wears) && nx.foe.wears.length === 4 && nx.foe.wears.every(Boolean)));
+  t('松鼠形态的 boss 用同族贴图 + 固定出招循环', nx.entry.kind === 'npc'
+    ? (!!nx.foe.npcType && nx.foe.weapons.length > 0)
+    : (!nx.foe.npcType && Array.isArray(nx.foe.pattern) && nx.foe.pattern.length > 0));
   // 三侠大招留下的本层削弱会被 adjustMe 吃掉（这里只验证入口暴露出来了）
   t('削弱列表随 nextBattle 暴露给战斗', Array.isArray(nx.debuffs));
   rw = Tower.reportBattle('tower', nx.token, true, 0.55);
-  t('通关：整层 15 松果到账', rw.layerComplete === true && S.goldPoint === gold0 + 15);
+  t('通关：整层 25 松果到账（另有悬浮奖品里的金松果）',
+    rw.layerComplete === true && rw.gold === 25 && S.goldPoint >= gold0 + 25);
+  t('通关：额外补发 3 场挑战的悬浮奖品（9 次飘物）',
+    rw.prizes && rw.prizes.picks === 9 && rw.prizes.items.length > 0);
   t('通关：maxLayer=1，run 清空', State.state().tower.maxLayer === 1 && !Tower.towerInfo().run);
   t('主塔 buff 层结束清空（本层选过的 buff 已清）', Tower.ownedBuffs('tower').length === 0);
 
-  // —— 失败安慰奖（第 21 层：G=41，shares [10,10,10,11]） ——
+  // —— 失败安慰奖（第 21 层：G=51，shares [12,12,12,15]） ——
   Tower._debugSetLayer(20);
   Tower.startTowerRun();
   nx = Tower.nextBattle('tower'); Tower.reportBattle('tower', nx.token, true, 0.9);
@@ -170,9 +195,11 @@ function autoPick(ctx, mode) {
   t('失败：不掉层（仍 20）', State.state().tower.maxLayer === 20);
   t('失败：不扣金松果（安慰奖改成收手才发）', S.goldPoint === goldBefore);
   t('失败：本层仍在，可以直接再开（不用再花书）', !!Tower.towerInfo().run && !Tower.towerInfo().run.attempt);
-  t('收手：安慰奖 = ⌊20×0.3⌋ = 6', (() => {
+  t('收手：安慰奖 = 已累积松果的 30%（第 21 层前 2 场 = 24 → 7）', (() => {
+    const pot = Tower.towerInfo().run.pot;
+    const want = Math.floor(pot * 0.3);
     const out = Tower.giveUp('tower');
-    return out.ok && out.consolation === 6 && S.goldPoint === goldBefore + 6;
+    return pot === 24 && want === 7 && out.ok && out.consolation === want && S.goldPoint === goldBefore + want;
   })());
   t('收手：run 清空可重开', !Tower.towerInfo().run && Tower.startTowerRun().ok);
 
@@ -208,8 +235,16 @@ function autoPick(ctx, mode) {
   const buyable = shop.slots.findIndex((s) => !s.sold && s.price <= erun5.coins);
   const buy = Tower.buyShopSlot(buyable);
   t('商店：买 buff 扣币并入构筑', buy.ok && Tower.ownedBuffs('endless').some((b) => b.id === buy.buff.id));
-  const sell = Tower.sellBuff(buy.buff.scope === 'battle' ? 'C01' : buy.buff.id);
-  t('商店：卖出回收 40%', !buy.buff.scope || sell.ok === (buy.buff.scope !== 'battle'));
+  /* 回收测试要盯「确实拥有且可回收」的那张，而不是写死 C01 ——
+   * 叠层类跨层 buff 会随随机选项流被提前拿到，写死 id 会随机红。 */
+  t('商店：单场类 buff 不可回收', buy.buff.scope !== 'battle' || Tower.sellBuff(buy.buff.id).ok === false);
+  const sellable = Tower.ownedBuffs('endless').find((b) => b.scope !== 'battle');
+  t('商店：卖出回收 40%', !sellable || (() => {
+    const before = Tower.endlessInfo().run.coins;
+    const out = Tower.sellBuff(sellable.id);
+    const want = Math.max(1, Math.round(TowerData.shopPrice(TowerData.BUFF_BY_ID[sellable.id]) * TowerData.SHOP.sellBack));
+    return out.ok && out.gain === want && Tower.endlessInfo().run.coins === before + want;
+  })());
   const heal = Tower.buyShopHeal();
   t('商店：治疗泉水限购 1 份', heal.ok && !Tower.buyShopHeal().ok);
   t('商店：首次刷新免费', Tower.rerollShop().ok && Tower.shopState().rerollFree === false);

@@ -104,43 +104,37 @@
   }
 
   // ---------- 层结构 ----------
+  /** 第 4 场的随机 boss：同一天同一层永远同一个（所以「进层预告 = 实战」，失败重试也还是它）。 */
+  function bossEntry(layer) { return D().bossFor(layer, State.localDate()); }
   function buildPlan(layer) {
     /* 三侠固定顺序（螳螂 → 仙鹤 → 熊猫）：配合「三侠大招会留本层削弱」的设计，
      * 让整层的削弱序列完全可预期（先降上限、再降属性、最后锁武技），
      * 玩家才能读题、才能针对配 buff。原来是随机序，读题就不成立了。 */
     const plan = HEROES.map((anim) => ({ kind: 'hero', anim }));
-    // 第 4 场 = 题面（固定按层轮换的 7 个最终位对手：熔核/苔龟/枯泉/霜缚/镜鳞/血牙/蚀骨）；
-    // 原来那 10 个机制 NPC 退到 x10 层的精英场（第 5 场），设计不浪费。
-    plan.push({ kind: 'trial', id: D().trialFor(layer).id });
-    if (layer % 10 === 0) {
-      const e = D().eliteFor(layer);
-      plan.push({ kind: 'elite', id: e.main.id, mechs: e.mechs });
-    }
+    // 第 4 场 = 随机 boss（20 选 1：7 个带机制的松鼠 + 3 只平庸松鼠 + 10 个机制 NPC）
+    plan.push(bossEntry(layer));
+    // x10 层第 5 场 = 固定狂战松鼠（松鼠形态 + 全身狂战套 + 精英）
+    if (layer % 10 === 0) plan.push({ kind: 'warlord', id: D().WARLORD.id });
     return plan;
   }
   function entryInfo(entry) {
-    if (entry.kind === 'hero') return { name: HERO_NAME[entry.anim], anim: entry.anim, mechDesc: '', elite: false };
-    if (entry.kind === 'trial') {
-      const tr = D().TRIAL_BY_ID[entry.id];
-      return { name: tr.name, squirrel: true, trial: true, elite: false,
-        mechDesc: tr.mechDesc, counter: tr.counter, mechs: tr.mech.slice(), title: tr.title };
+    if (entry.kind === 'hero') return { name: HERO_NAME[entry.anim], anim: entry.anim, type: '三侠位', mechDesc: '', elite: false };
+    if (entry.kind === 'warlord') {
+      const w = D().WARLORD;
+      return { name: w.name, squirrel: true, gear: true, elite: true, type: w.type,
+        mechDesc: w.mechDesc, patternDesc: w.patternDesc, mechs: w.mech.slice() };
     }
-    const npc = D().NPC_BY_ID[entry.id];
-    if (entry.kind === 'elite') {
-      return { name: npc.name, anim: npc.anim, elite: true, mechDesc: npc.mechDesc, mechs: entry.mechs };
+    if (entry.kind === 'npc') {
+      const npc = D().NPC_BY_ID[entry.id];
+      return { name: npc.name, anim: npc.anim, elite: false, type: npc.type, mechDesc: npc.mechDesc, mechs: [npc.mech] };
     }
-    return { name: npc.name, anim: npc.anim, elite: false, mechDesc: npc.mechDesc, mechs: [npc.mech] };
+    const sq = entry.kind === 'trial' ? D().TRIAL_BY_ID[entry.id] : D().SQUIRREL_BY_ID[entry.id];
+    return { name: sq.name, squirrel: true, gear: true, elite: false, type: sq.type,
+      mechDesc: sq.mechDesc || '', patternDesc: sq.patternDesc || '', mechs: (sq.mech || []).slice() };
   }
-  /** 入口页预告：当前层的全部对手。 */
+  /** 入口页预告：当前层的全部对手（与 buildPlan 同源，所以预告 = 实战）。 */
   function preview(layer) {
-    return buildPlanPreview(layer).map((entry) => Object.assign({ kind: entry.kind }, entryInfo(entry)));
-  }
-  /** 预告与实战共用同一份「确定性部分」（三侠顺序预告里也随机一次即可）。 */
-  function buildPlanPreview(layer) {
-    const plan = HEROES.map((anim) => ({ kind: 'hero', anim }));
-    plan.push({ kind: 'trial', id: D().trialFor(layer).id });
-    if (layer % 10 === 0) { const e = D().eliteFor(layer); plan.push({ kind: 'elite', id: e.main.id, mechs: e.mechs }); }
-    return plan;
+    return buildPlan(layer).map((entry) => Object.assign({ kind: entry.kind }, entryInfo(entry)));
   }
 
   // ---------- buff 聚合 ----------
@@ -208,55 +202,60 @@
     const statBase = GData.stagePlayerStat(LT), hpBase = GData.stagePlayerHp(LT);
     // 无尽段机制叠加：所有怪物按固定顺序追加机制
     const extra = mode === 'endless' ? TD.ENDLESS_MECH_ORDER.slice(0, TD.endlessMechStacks(layer)) : [];
-    let name, bias, npcType, skills = [], weapons = [], pattern = null, mech, elite = entry.kind === 'elite';
-    let mechParams = null;
+    const elite = entry.kind === 'warlord';                 // x10 第 5 场：精英（×1.2）
+    let name, bias, npcType, skills = [], weapons = [], pattern = null, mech;
+    let mechParams = null, wears = null;
     if (entry.kind === 'hero') {
       const scale = (GData.STAGE_TYPE_SCALE && GData.STAGE_TYPE_SCALE[entry.anim]) || 1;
       bias = { power: scale, agility: scale, speed: scale, hp: 1 };
       name = HERO_NAME[entry.anim]; npcType = entry.anim;
       skills = [{ id: HERO_SKILL[entry.anim], level: Math.max(1, Math.min(15, Math.round(LT / 5))) }];
       mech = extra.slice();
-    } else if (entry.kind === 'squirrel' || entry.kind === 'trial') {
-      // 松鼠 / 题面对手：同族贴图（**不给 npcType** → 战斗里就用玩家那套松鼠图集并镜像朝左，
-      // 走 sim 的 playerLikeAction 分支，所以武器/技能都真的生效，题面机制在 sim 的
-      // 「玩家式 AI」分支里补挂）。两者共用一套武技等级上调规则，只有 bias/机制不同。
-      const sq = entry.kind === 'trial' ? TD.TRIAL_BY_ID[entry.id] : TD.SQUIRREL_BY_ID[entry.id];
+    } else if (entry.kind === 'squirrel' || entry.kind === 'trial' || entry.kind === 'warlord') {
+      // 松鼠形态的 boss：同族贴图（**不给 npcType** → 战斗里就用玩家那套松鼠图集并镜像朝左，
+      // 走 sim 的 playerLikeAction 分支，所以武器/技能都真的生效，机制在 sim 的
+      // 「玩家式 AI」分支里补挂）。每个 boss 都有固定装备（wears）→ 玩家看图就能认人。
+      const sq = entry.kind === 'warlord' ? TD.WARLORD
+        : entry.kind === 'trial' ? TD.TRIAL_BY_ID[entry.id] : TD.SQUIRREL_BY_ID[entry.id];
       bias = sq.bias; name = sq.name; npcType = null;
       // 武技等级随目标等级小幅上调，免得高层还在用 8 级菜刀
       const up = Math.max(0, Math.floor((LT - 28) / 12));
       weapons = sq.weapons.map((w) => ({ id: w.id, level: Math.max(1, Math.min(15, w.level + up)) }));
       skills = sq.skills.map((k) => ({ id: k.id, level: Math.max(1, Math.min(15, k.level + up)) }));
       pattern = sq.pattern.slice();
+      wears = TD.wearsOf(sq.gear);
       mech = extra.slice();
-      // 题面机制：和机制 NPC 一样可以叠加无尽的段位机制，但自己的题面永远在
-      if (entry.kind === 'trial') {
-        for (const m of sq.mech) if (!mech.includes(m)) mech.push(m);
-        mechParams = sq.mechParams || null;
-      }
+      // 自己的机制永远在（无尽的段位机制只做叠加）
+      for (const m of sq.mech || []) if (!mech.includes(m)) mech.push(m);
+      mechParams = sq.mechParams || null;
     } else {
       const npc = TD.NPC_BY_ID[entry.id];
       bias = npc.bias; name = npc.name; npcType = 'tw_' + npc.id;
-      mech = elite ? entry.mechs.slice() : [npc.mech];
+      mech = [npc.mech];
       for (const m of extra) if (!mech.includes(m)) mech.push(m);
     }
     const eliteMul = elite ? 1.2 : 1;
     // 敌方数值：高血低攻（系数在 tower-data.js 里，带注释，方便 tower-tune 复调）
     // 力量单独用更低的系数，敏捷/速度维持原基准；血量抬高。
     const stat = (b, mul) => Math.max(1, Math.round(statBase * (mul || TD.FOE_STAT_MUL) * M * b * eliteMul));
-    const trial = entry.kind === 'trial';
+    // 第 3 项数值调整：三侠（前 3 场）血量下调、第 4 场的 boss 血量上调，
+    // 让「卡层卡在最后一战」而不是卡在三侠的血墙上。
+    const hero = entry.kind === 'hero';
     const foe = {
       name, level: LT, npcType,
-      power: stat(bias.power, TD.FOE_POWER_MUL * (entry.kind === 'squirrel' ? TD.FOE_SQUIRREL_POWER_MUL : trial ? TD.FOE_TRIAL_POWER_MUL : 1)),
+      power: stat(bias.power, TD.FOE_POWER_MUL * (hero ? 1 : TD.FOE_TRIAL_POWER_MUL)),
       agility: stat(bias.agility), speed: stat(bias.speed),
-      hp: Math.max(1, Math.round(hpBase * TD.FOE_HP_MUL * (entry.kind === 'squirrel' ? TD.FOE_SQUIRREL_HP_MUL : trial ? TD.FOE_TRIAL_HP_MUL : 1) * M * bias.hp * eliteMul)),
-      weapons, skills, mech, pattern, mechParams,
+      hp: Math.max(1, Math.round(hpBase * TD.FOE_HP_MUL * (hero ? TD.FOE_HERO_HP_MUL : TD.FOE_TRIAL_HP_MUL) * M * bias.hp * eliteMul)),
+      weapons, skills, mech, pattern, mechParams, wears,
     };
-    // poolNpc = 带专属机制的对手（「机制破解」类 buff 只对它生效）；题面也算机制位（它就是这个层的机制考验）
-    return { foe, elite, poolNpc: entry.kind === 'npc' || entry.kind === 'elite' || trial };
+    // poolNpc = 带专属机制的对手（「机制破解」类 buff 只对它生效）；平庸松鼠没有机制，不算
+    const poolNpc = entry.kind === 'npc' || entry.kind === 'warlord' || (entry.kind === 'trial');
+    return { foe, elite, poolNpc };
   }
   function regionOf(entry) {
-    if (entry.kind === 'squirrel' || entry.kind === 'trial') {
-      const sq = entry.kind === 'trial' ? D().TRIAL_BY_ID[entry.id] : D().SQUIRREL_BY_ID[entry.id];
+    if (entry.kind === 'squirrel' || entry.kind === 'trial' || entry.kind === 'warlord') {
+      const sq = entry.kind === 'warlord' ? D().WARLORD
+        : entry.kind === 'trial' ? D().TRIAL_BY_ID[entry.id] : D().SQUIRREL_BY_ID[entry.id];
       return sq && sq.region != null ? sq.region : 0;
     }
     const anim = entry.kind === 'hero' ? entry.anim : D().NPC_BY_ID[entry.id].anim;
@@ -371,10 +370,18 @@
    * 三侠的招牌技给玩家留削弱：扫一遍这场战斗的事件，只有大招真的放出来了才生效。
    * 打得够快 / 打断它，就能整层规避 —— 这是本层的第一层对策。
    */
+  /* 削弱要「一眼看出是谁给的」：把来源大侠的名字与颜色一起写进 debuff，
+   * 战斗 HUD 的胶囊和选 buff 页的削弱卡片都用这套数据渲染。 */
+  const HERO_SOURCE = Object.freeze({
+    tl: { hero: '螳螂大侠', short: '螳螂', color: '#2f7a52' },
+    xh: { hero: '仙鹤大侠', short: '仙鹤', color: '#2f5f9e' },
+    xm: { hero: '熊猫大侠', short: '熊猫', color: '#8a5a20' },
+  });
   function applyHeroDebuff(run, entry, result) {
     if (!entry || entry.kind !== 'hero') return null;
     const def = D().HERO_DEBUFF[entry.anim];
     if (!def) return null;
+    const src = HERO_SOURCE[entry.anim] || { hero: '大侠', short: '大侠', color: '#7a4a18' };
     const fired = !!(result && Array.isArray(result.rounds)
       && result.rounds.some((r) => r && r.ultName === def.ult));
     if (!fired) return null;
@@ -384,7 +391,9 @@
     if (def.kind === 'stat') {
       const stat = ['power', 'agility', 'speed'][Math.floor(Math.random() * 3)];
       const label = { power: '力量', agility: '敏捷', speed: '速度' }[stat];
-      d = { from: entry.anim, kind: 'stat', stat, pct: def.pct, name: def.name, text: label + ' −' + Math.round(def.pct * 100) + '%' };
+      d = { from: entry.anim, hero: src.hero, short: src.short, color: src.color,
+        kind: 'stat', stat, pct: def.pct, name: def.name,
+        text: label + ' −' + Math.round(def.pct * 100) + '%' };
     } else if (def.kind === 'lock') {
       // 随机锁一个武器或技能：按玩家当前拥有的武技合计里抽（师父驾到 13 不占位，排除）
       const st = S(), pool = [];
@@ -400,10 +409,12 @@
       }
       if (!pool.length) return null;
       const pick = pool[Math.floor(Math.random() * pool.length)];
-      d = { from: entry.anim, kind: 'lock', what: pick.what, id: pick.id, name: def.name,
+      d = { from: entry.anim, hero: src.hero, short: src.short, color: src.color,
+        kind: 'lock', what: pick.what, id: pick.id, name: def.name,
         text: '锁住' + (pick.what === 'weapon' ? '武器' : '技能') + '「' + pick.name + '」' };
     } else {
-      d = { from: entry.anim, kind: 'maxHp', pct: def.pct, name: def.name,
+      d = { from: entry.anim, hero: src.hero, short: src.short, color: src.color,
+        kind: 'maxHp', pct: def.pct, name: def.name,
         text: '生命上限 −' + Math.round(def.pct * 100) + '%' };
     }
     run.debuffs.push(d);
@@ -416,7 +427,7 @@
     if (!run || run.attempt !== token) return { ok: false };
     delete run.attempt;
     const entry = run.plan[run.idx];
-    const isElite = entry.kind === 'elite';
+    const isElite = entry.kind === 'warlord';   // x10 第 5 场的狂战松鼠
     if (!win) return mode === 'tower' ? towerFail(run) : endlessFail(run);
     run.carry = Math.max(0.01, clamp01(carryRatio));
     run.battleBuffs = [];                                // 单场类 buff 打完即消耗
@@ -538,6 +549,9 @@
         S().props[id] = (S().props[id] || 0) + count;
         out.drop = { id, count, name: propMap.getValue(id).name };
       }
+      /* 第 2 项：塔内战斗关掉了飘物（防免门票刷资源），所以每层最后结算时
+       * 按「一整个常驻挑战关 = 3 场」补发它的掉落（每场 3 个飘物 → 9 个）。 */
+      out.prizes = settlePrizes();
       out.gold = gold;
       tower().run = null;
       save();
@@ -564,8 +578,16 @@
     save();
     return out;
   }
-  function advanceLayer(run) {
-    run.layer++;
+  /** 每层结算补发的「悬浮奖品」：3 场 × 3 个飘物（同一个掉落池）。 */
+  function settlePrizes() {
+    const Drops = window.BattleDrops;
+    if (!Drops || typeof Drops.plan !== 'function') return { items: [], ups: [] };
+    const battles = Math.max(0, Number(D().SETTLE_DROP_BATTLES) || 3);
+    const list = [];
+    for (let i = 0; i < battles; i++) list.push(...Drops.plan());
+    return Drops.grant(list);
+  }
+  function advanceLayer(run) {    run.layer++;
     run.plan = buildPlan(run.layer);
     run.idx = 0;
     run.choices = null;
@@ -776,7 +798,9 @@
       retry: t.retry || null,
       run: t.run ? { layer: t.run.layer, battleNo: t.run.idx + 1, battleCount: t.run.plan.length, carry: t.run.carry, pot: t.run.pot, failedAt: t.run.failedAt == null ? null : t.run.failedAt,
         choices: t.run.choices ? t.run.choices.slice() : null,
-        debuffs: (t.run.debuffs || []).slice() } : null,
+        debuffs: (t.run.debuffs || []).slice(),
+        // 下一场是谁 + 它的机制（选 buff 页要展示「你接下来要打的那个 boss 是什么」）
+        next: t.run.plan[t.run.idx] ? Object.assign({ kind: t.run.plan[t.run.idx].kind }, entryInfo(t.run.plan[t.run.idx])) : null } : null,
       preview: preview(layer) };
   }
   function endlessInfo() {
@@ -787,6 +811,7 @@
         battleNo: e.run.idx + 1, battleCount: e.run.plan.length, phase: e.run.phase,
       debuffs: (e.run.debuffs || []).slice(),
         choices: e.run.choices ? e.run.choices.slice() : null,
+        next: e.run.plan[e.run.idx] ? Object.assign({ kind: e.run.plan[e.run.idx].kind }, entryInfo(e.run.plan[e.run.idx])) : null,
         bestLayer: e.run.bestLayer, segment: D().endlessSegment(e.run.layer),
         ticketsIfSettle: D().endlessTickets(e.run.layer) } : null };
   }

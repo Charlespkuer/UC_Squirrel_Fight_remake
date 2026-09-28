@@ -14,12 +14,45 @@
 
   const RARITY = ['普通', '稀有', '史诗'];
   const SCOPE = { battle: '单场', layer: '本层', run: '跨层' };
-  const MECH_NAME = { berserk: '血性狂暴', rhythmCrit: '瞬杀节奏', regen: '百草回春', thorns: '荆棘铁壁', poison: '毒藤缠绕', freeze: '寒冰禁锢', wolf: '唤狼协战', lifesteal: '血之渴望', shell: '磐岩之壳', devour: '无尽吞噬' };
 
   // ---------- 通用小件 ----------
   function carryBar(carry) {
     const pct = Math.round((carry == null ? 1 : carry) * 100);
     return '<div class="tower-carry"><span>血量继承</span><div class="tower-carry-bar"><i style="width:' + pct + '%"></i></div><b>' + pct + '%</b></div>';
+  }
+  /** 悬停气泡：机制说明放在这里（第 1 项需求），预告列表就只需要一行名字。
+   *  用 body 上的 fixed 层，避免被 .tower-main 的 overflow 裁掉。 */
+  let tipEl = null;
+  function showTip(text, anchor) {
+    if (!tipEl) { tipEl = document.createElement('div'); tipEl.className = 'tower-tip-float'; document.body.appendChild(tipEl); }
+    tipEl.textContent = text;
+    tipEl.style.display = 'block';
+    const r = anchor.getBoundingClientRect(), t = tipEl.getBoundingClientRect();
+    let top = r.bottom + 8;
+    if (top + t.height > window.innerHeight - 8) top = Math.max(8, r.top - t.height - 8);
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - t.width - 8));
+    tipEl.style.left = Math.round(left) + 'px';
+    tipEl.style.top = Math.round(top) + 'px';
+  }
+  function hideTip() { if (tipEl) tipEl.style.display = 'none'; }
+  /** 把带 data-tip 的行绑上悬停/聚焦气泡（点击后也收起，避免残影）。 */
+  function bindTips(root) {
+    root.querySelectorAll('[data-tip]').forEach((el) => {
+      const text = el.getAttribute('data-tip');
+      el.onmouseenter = () => showTip(text, el);
+      el.onmouseleave = hideTip;
+      el.onfocus = () => showTip(text, el);
+      el.onblur = hideTip;
+      el.onclick = hideTip;
+    });
+  }
+  /** 一行对手的机制说明（悬停用）：机制 + 出招循环，不带「对策」。
+   *  第 9 项：这就是普通 boss 简介，不出现「题面」这类策划词。 */
+  function mechTip(info) {
+    const parts = [];
+    if (info.mechDesc) parts.push(info.mechDesc);
+    if (info.patternDesc) parts.push(info.patternDesc);
+    return parts.join('\n') || '没有特殊机制';
   }
   function buffTag(b, stacks) {
     return '<span class="buff-tag r' + b.rarity + '" title="' + esc(b.desc) + '">' + esc(b.name) +
@@ -30,6 +63,17 @@
     if (!list.length) return '';
     return '<div class="tower-buffs"><h4>本局构筑</h4><div class="buff-tags">' +
       list.map((b) => buffTag(b, b.stacks)).join('') + '</div></div>';
+  }
+  /** 本层削弱（第 5 项）：一张卡 = 来源大侠 + 名字 + 具体数值，
+   *  颜色跟着来源走，战斗 HUD 的胶囊、选 buff 页的提示用的是同一份数据。 */
+  function debuffPanel(debuffs) {
+    if (!debuffs || !debuffs.length) return '';
+    return '<div class="tower-debuffs"><h4>本层已被削弱（贯穿本层）</h4><div class="debuff-cards">' +
+      debuffs.map((d) => '<div class="debuff-card" style="--hero-color:' + esc(d.color || '#7a4a18') + '">' +
+        '<span class="debuff-from">' + esc(d.short || d.hero || '大侠') + '</span>' +
+        '<b class="debuff-name">' + esc(d.name || '削弱') + '</b>' +
+        '<span class="debuff-text">' + esc(d.text || '') + '</span></div>').join('') +
+      '</div></div>';
   }
   /** 左侧塔身：当前层附近的一段楼层，自上而下。 */
   function towerVisual(layer, maxLayer, mode) {
@@ -49,13 +93,15 @@
       '<div class="tower-visual-caption">' + caption + '</div></div>';
   }
   function planHtml(preview) {
+    // 第 1 项：每行只留「序号 + 名字 + 类型」，机制文本挂到悬停气泡上，
+    // 这样 4~5 行预告 + 「开始挑战」按钮一屏就能看完，不用下翻。
     return '<ol class="tower-plan">' + preview.map((b, i) =>
-      '<li class="' + (b.elite ? 'elite' : '') + (b.trial ? ' trial' : '') + '"><span class="tower-plan-no">' + (i + 1) + '</span>' +
-      '<b>' + esc(b.name) + '</b>' + (b.elite ? '<em class="elite-tag">精英</em>' : '') +
-      (b.trial ? '<em class="trial-tag">题面</em>' : '') +
-      (b.mechDesc ? '<span class="tower-plan-mech">' + esc(b.mechDesc) + '</span>' : '') +
-      (b.counter ? '<span class="tower-plan-counter">' + esc(b.counter) + '</span>' : '') +
-      (b.elite && b.mechs && b.mechs[1] ? '<span class="tower-plan-mech">叠加：' + esc(MECH_NAME[b.mechs[1]] || b.mechs[1]) + '</span>' : '') +
+      '<li class="' + (b.elite ? 'elite' : '') + (b.squirrel ? ' squirrel' : '') + '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
+      '<span class="tower-plan-no">' + (i + 1) + '</span>' +
+      '<b>' + esc(b.name) + '</b>' +
+      (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
+      (b.elite ? '<em class="elite-tag">精英</em>' : '') +
+      '<span class="tower-plan-hint">悬停看机制</span>' +
       '</li>').join('') + '</ol>';
   }
 
@@ -67,17 +113,19 @@
       const run = info.run;
       main = '<h2 class="tower-title">第 ' + run.layer + ' 层 · 第 ' + run.battleNo + '/' + run.battleCount + ' 场</h2>' +
         '<div class="tower-stats">已累积松果 <b class="gold-text">' + run.pot + '</b>（失败只保底 30%）</div>' +
-        carryBar(run.carry) + ownedBuffsHtml('tower') +
+        carryBar(run.carry) + debuffPanel(run.debuffs) + ownedBuffsHtml('tower') +
         '<div class="tower-actions">' + C().btn('继续战斗', 'fight', 'gold') + C().btn('放弃本层', 'abandon', 'muted small') + '</div>';
     } else {
-      main = '<h2 class="tower-title">无尽挑战塔 · 第 ' + info.nextLayer + ' 层</h2>' +
-        '<div class="tower-stats">目标等级 ' + info.level + ' · 强度 ×' + info.mult.toFixed(2) + ' · ' + info.battles + ' 场连战 · 通关金松果 <b class="gold-text">' + info.gold + '</b></div>' +
-        '<p class="tower-rule">每层 1 张挑战书；连战只继承剩余血量，不自动回复。场间可选择回血或增益。</p>' +
+      // 第 1 项：标题与数据并排、规则压成一行，保证一屏能放下 5 行预告 + 开始按钮
+      main = '<div class="tower-head"><h2 class="tower-title">无尽挑战塔 · 第 ' + info.nextLayer + ' 层</h2>' +
+        '<div class="tower-stats">目标等级 ' + info.level + ' · 强度 ×' + info.mult.toFixed(2) + ' · ' + info.battles + ' 场连战 · 通关金松果 <b class="gold-text">' + info.gold + '</b></div></div>' +
+        '<p class="tower-rule" title="第 4 场是随机 boss：悬停对手可以看到它的机制与出招循环">每层 1 张挑战书 · 连战只继承血量 · 第 4 场随机 boss（悬停看机制）· 通关另补 3 场挑战的掉落</p>' +
         '<h4 class="tower-plan-title">本层对手预告</h4>' + planHtml(info.preview) +
         '<div class="tower-actions">' + C().btn('开始挑战（挑战书×1）', 'fight', 'gold') + '<span class="tower-book-count">现有挑战书 ' + info.books + ' 张</span></div>';
     }
     const content = '<div class="tower-page">' + towerVisual(info.nextLayer, info.maxLayer, 'tower') + '<div class="tower-main">' + main + '</div></div>';
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
+    bindTips(p);
     back(p, () => UI.runAction('stages'));
     on(p, 'fight', () => {
       if (info.run) {
@@ -110,7 +158,7 @@
       main = '<h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
         '<div class="tower-stats">分数 <b class="gold-text">' + run.score + '</b> · 试炼币 <b class="gold-text">' + run.coins + '</b> · 现在离场可得抽奖卷 <b>' + run.ticketsIfSettle + '</b> 张（需到 5 的倍数层结算）</div>' +
         '<div class="tower-stats small">第 ' + run.battleNo + '/' + run.battleCount + ' 场 · 本局最深 ' + run.bestLayer + ' 层</div>' +
-        carryBar(run.carry) + ownedBuffsHtml('endless') +
+        carryBar(run.carry) + debuffPanel(run.debuffs) + ownedBuffsHtml('endless') +
         '<div class="tower-actions">' + C().btn(nextLabel, 'fight', 'gold') +
         (Tower.shopState() ? C().btn('试炼商店', 'shop', 'small') : '') +
         C().btn('放弃本局', 'abandon', 'muted small') + '</div>';
@@ -122,6 +170,7 @@
     }
     const content = '<div class="tower-page">' + towerVisual(info.run ? info.run.layer : 1, 0, 'endless') + '<div class="tower-main">' + main + '</div></div>';
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
+    bindTips(p);
     back(p, () => UI.runAction('stages'));
     on(p, 'fight', () => {
       if (info.run) {
@@ -158,8 +207,8 @@
       Promise.resolve(Main.startBattle(nx.foe, {
         region: nx.region, kind: mode, useProps: false, hpRatio: nx.hpRatio, adjustMe: nx.adjustMe,
         debuffs: nx.debuffs || [],
-        // 题面战斗：把规则贴在战斗画面里（进层前预告里已经读过一遍，这里是备忘）
-        trial: nx.info && nx.info.trial ? { title: nx.info.title || '题面', text: nx.info.mechDesc || '' } : null,
+        // boss 机制：贴一条在战斗画面里（进层预告 / 选 buff 页都读过，这里是备忘）
+        trial: nx.info && nx.info.mechDesc ? { text: nx.info.mechDesc } : null,
         // 塔里的战斗不许跳过（否则整层白给），右下角改成 1×/2× 倍速切换
         allowSkip: false, speedToggle: true,
         // 塔的产出全部由状态机结算（松果/压缩碎片/抽奖卷），关掉战斗飘物，
@@ -216,13 +265,26 @@
     const info = mode === 'tower' ? Tower.towerInfo() : Tower.endlessInfo();
     const run = info.run || {};
     const debuffs = (run.debuffs || []);
+    const next = run.next;
+    // 第 6 项：选 buff 之前先把「下一场是谁、有什么机制」摊开，
+    // 这一次选择才是真的对策选择（而不是看数值瞎选）。
+    const nextHtml = next
+      ? '<div class="hex-next"><span class="hex-next-label">下一场</span>' +
+        '<b class="hex-next-name">' + esc(next.name) + '</b>' +
+        (next.type ? '<span class="hex-next-type">' + esc(next.type) + '</span>' : '') +
+        '<span class="hex-next-mech">' + esc(next.mechDesc || '没有特殊机制') + '</span>' +
+        (next.patternDesc ? '<span class="hex-next-pattern">' + esc(next.patternDesc) + '</span>' : '') +
+        '</div>'
+      : '';
     const head = '<div class="hex-pick-head"><h2 class="hex-title">整装待发</h2>' +
       '<p class="hex-sub">' + (mode === 'tower'
         ? '第 ' + (run.battleNo || 4) + ' 场之前最后一次整备 —— 选一张带进去。'
         : '场间休整 —— 选一张带进去。') + '</p>' +
+      nextHtml +
       (debuffs.length
-        ? '<div class="hex-debuffs"><span class="hex-debuff-label">本层已被削弱</span>' +
-          debuffs.map((d) => '<span class="hex-debuff">' + esc(d.text || d.name) + '</span>').join('') + '</div>'
+        ? '<div class="hex-debuffs"><span class="hex-debuff-label">本层已被削弱（贯穿本层）</span>' +
+          debuffs.map((d) => '<span class="hex-debuff" style="--hero-color:' + esc(d.color || '#7a4a18') + '">' +
+            '<i>' + esc(d.short || d.hero || '大侠') + '</i>' + esc(d.text || d.name) + '</span>').join('') + '</div>'
         : '') +
       '</div>';
     const body = head + '<div class="hex-cards">' + choices.map(choiceCard).join('') + '</div>';
@@ -242,11 +304,21 @@
 
   // ---------- 主塔结算 ----------
   function towerClear(rw) {
+    const prizes = (rw.prizes && rw.prizes.items) || [];
+    const prizeLine = prizes.length
+      ? '<div class="result-lines">悬浮奖品（3 场挑战的量）：' +
+        prizes.map((p) => esc(p.name) + ' ×' + p.count).join('　') + '</div>'
+      : '';
     C().modal('层数通关', '<div class="result-box"><div class="result-title win">第 ' + rw.layer + ' 层通关！</div>' +
       '<div class="result-lines">金松果 +' + rw.gold + '</div>' +
       (rw.drop ? '<p>获得 ' + esc(rw.drop.name) + ' ×' + rw.drop.count + '</p>' : '') +
+      prizeLine +
       '<p class="small-label">层数 +1，下一层对手更强、松果更多。</p></div>',
       [{ label: '继续爬塔', cls: 'gold', run: openTower }, { label: '返回', run: () => C().home() }], { small: true });
+    // 经验/升级提示走和战斗拾取同一套 UI（追加到上面这个弹窗里）
+    if (rw.prizes && rw.prizes.ups && rw.prizes.ups.length && UI.classic && UI.classic.pickupResult) {
+      UI.classic.pickupResult({ items: [], ups: rw.prizes.ups });
+    }
   }
   /* 主塔失败（第 1 项）：不再逼你重头打 —— 就地再战一次（免费），而且可以换一张 buff；
    * 想收手就「结束本层」拿 30% 安慰奖。 */

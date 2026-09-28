@@ -107,5 +107,23 @@
     function summary() { return { items: collected.map(item => ({ ...item })), ups: upgrades.slice() }; }
     return { tick, collect, close, skip, summary };
   }
-  window.BattleDrops = { create, plan, rules: RULES, pool: POOL, ladderPool: LADDER_POOL, poolFor };
+  /** 一次性发一批掉落（塔的每层结算用）：同一个池、同一套入账规则，但不算「拾取」。
+   *  返回 { items, ups }，形状与 create().summary() 一致，可以直接交给 UI.pickupResult。 */
+  function grant(list) {
+    const owner = State.state(), items = [], ups = [];
+    let picks = 0;
+    for (const reward of list || []) {
+      if (!reward || !reward.count) continue;
+      picks++;
+      if (reward.id === 15) ups.push(...State.gainExp(reward.count));
+      else if (reward.id === 8) State.addGold(reward.count);
+      else owner.props[reward.id] = (owner.props[reward.id] || 0) + reward.count;
+      const hit = items.find((x) => x.id === reward.id);
+      if (hit) hit.count += reward.count;
+      else items.push({ id: reward.id, name: reward.name, count: reward.count });
+    }
+    State.save();
+    return { items, ups, picks };
+  }
+  window.BattleDrops = { create, plan, grant, rules: RULES, pool: POOL, ladderPool: LADDER_POOL, poolFor };
 })();

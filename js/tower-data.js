@@ -110,6 +110,20 @@
   ]);
   const NPC_BY_ID = Object.fromEntries(NPCS.map((n) => [n.id, n]));
 
+  // ---------- 三侠的「贯穿本层」削弱 ----------
+  /* 前三场打的是三侠。他们的招牌技一旦真的放出来，就会给玩家留下一层
+   * **打到本层结束**都一直在的削弱；进第 4 场前选 buff 时必须把这些削弱算进去。
+   * 反过来说：打得够快、不让大招放出来，就可以完全规避 —— 这是本层的第一层对策。
+   * 对应大招名见 sim.js 的 npcUlt（疾风镰刀舞 / 仙鹤展翅 / 熊掌震地）。 */
+  const HERO_DEBUFF = Object.freeze({
+    tl: { anim: 'tl', ult: '疾风镰刀舞', kind: 'maxHp', pct: 0.08,
+      name: '重伤', desc: '生命上限 −10%' },
+    xh: { anim: 'xh', ult: '仙鹤展翅', kind: 'stat', pct: 0.08,
+      name: '战吼', desc: '随机一项属性 −10%（力/敏/速）' },
+    xm: { anim: 'xm', ult: '熊掌震地', kind: 'lock',
+      name: '压制', desc: '随机锁住一个武器或技能（本层无法使用）' },
+  });
+
   // ---------- 松鼠对手（每层最后一场 / 第 4 场） ----------
   /* 和小松鼠同族：战斗里用玩家那套松鼠贴图（镜像朝左，tower.js 不给 npcType 即自动生效），
    * 武器与技能都取自松鼠本来的池子（GameDict 的 weaponsMap / skillsMap）。
@@ -201,7 +215,13 @@
   const BUFF_BY_ID = Object.fromEntries(BUFFS.map((b) => [b.id, b]));
   const RARITY_NAME = ['普通', '稀有', '史诗'];
   const RARITY_WEIGHTS = [62, 28, 10];           // 每个随机槽独立 Roll
-  const FIXED_HEAL_PCT = 0.30;                    // 固定选项：回复 30% 最大生命
+    /* 每层只剩一次选择（第 3 项）：把原来的「3 次 ×30%」换成「1 次 ×80%」——
+   * 决策更少但更重，回血预算基本持平（实测分档验收仍全部达标，敌人系数不用动）。 */
+  const FIXED_HEAL_PCT = 0.8;
+  /* 每场战斗后自动回复的固定比例（不需要决策）。
+   * 第 3 项把场间选择从 3 次压到 1 次后，回血从「三次微决策」变成「稳定节奏」，
+   * 这样既少操作，也不会因为一次选错就断崖式掉血。 */
+  const AUTO_HEAL_PCT = 0.14;                    // 固定选项：回复 30% 最大生命
   const STACK_MAX = 3;
 
   /** 主塔池 = 单场 + 本层（15 个）；无尽池 = 全部 30 个。 */
@@ -213,9 +233,9 @@
     endlessLevel, endlessSegment, endlessMult, endlessMechStacks, endlessTickets,
     ENDLESS_MECH_ORDER, ENDLESS_CONSOLATION_LAYER, SCORE, COINS, SHOP, shopPrice,
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_SQUIRREL_POWER_MUL, FOE_SQUIRREL_HP_MUL,
-    NPCS, NPC_BY_ID, ELITE_ROTATION, eliteFor,
+    NPCS, NPC_BY_ID, ELITE_ROTATION, eliteFor, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
-    BUFFS, BUFF_BY_ID, RARITY_NAME, RARITY_WEIGHTS, FIXED_HEAL_PCT, STACK_MAX,
+    BUFFS, BUFF_BY_ID, RARITY_NAME, RARITY_WEIGHTS, FIXED_HEAL_PCT, AUTO_HEAL_PCT, STACK_MAX,
     towerPool, endlessPool,
   };
 })();

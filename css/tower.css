@@ -152,34 +152,52 @@
 .buff-tag.r1 { border-color: #7fa6d8; color: #2f5a9e; background: #f4f9ff; }
 .buff-tag.r2 { border-color: #e0b25a; color: #a05f0a; background: #fff8e6; }
 
-/* ---------- 场间四选一 ----------
- * 弹窗加宽（.choice-dialog 由 tower-ui.js 挂上），卡片照 .ws-choice / .candidate-card 的做法：
- * 奶油底 + 粗描边 + 大圆角 + 悬停抬起 + 内高光，尽量和升级三选一如出一辙。
- * 注意 offerChoice 走的是 modal(..., {locked:true})，没有 small-modal 类——默认 .classic-modal
- * 本来就是 1020px，这里补的是高度上限与滚动区，选择器别写成 .small-modal（那样不会命中）。 */
-.classic-modal-overlay.choice-dialog > .classic-modal { width: 1020px; max-height: 648px; }
-.classic-modal-overlay.choice-dialog > .classic-modal > .modal-body { max-height: 500px; overflow-y: auto; }
-.choice-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 6px 2px; }
-.choice-card {
-  display: flex; flex-direction: column; gap: 7px; align-items: flex-start; text-align: left;
-  padding: 17px 20px; border-radius: 28px; cursor: pointer; font-family: inherit; color: #765432;
-  background: linear-gradient(#fffdf3, #f7ebc9); border: 4px solid #d9bd88;
-  box-shadow: inset 0 0 0 3px #fffdf2, 0 4px 0 #cbb17e;
-  transition: transform .1s ease, box-shadow .1s ease;
-}
-.choice-card:hover {
-  transform: translateY(-3px);
-  box-shadow: inset 0 0 0 3px #fffdf2, 0 7px 0 #c8a870, 0 0 18px #d9a94f88;
-}
-.choice-card:active { transform: translateY(1px); }
-.choice-card b { font-size: 30px; line-height: 1.15; color: #7a4a18; }
-.choice-card i { font-style: normal; font-size: 19px; color: #9b7b51; }
-.choice-card span { font-size: 21px; line-height: 1.45; color: #836120; }
-.choice-card.r0 { border-color: #cdb88c; }
-.choice-card.r1 { border-color: #7fa6d8; background: linear-gradient(#f6faff, #dfeafa); }
-.choice-card.r2 { border-color: #e0b25a; background: linear-gradient(#fffaea, #f8e3b4); }
-.choice-card.heal-card { border-color: #8abf6a; background: linear-gradient(#f6fce9, #dff0c8); }
-.choice-card.heal-card b { color: #3f7a24; }
+/* ---------- 场间选 buff：海克斯式卡片（第 4 项） ----------
+ * 卡片自己就是框，外面的 modal 做成完全透明（不套二级框），只留暗底。 */
+.classic-modal-overlay.choice-dialog.hex{background:rgba(12,22,30,.72)}
+.classic-modal-overlay.choice-dialog.hex > .classic-modal{
+  width:auto; min-height:0; max-height:none; padding:0; border:0; border-radius:0;
+  background:transparent; box-shadow:none}
+.classic-modal-overlay.choice-dialog.hex > .classic-modal > .modal-title,
+.classic-modal-overlay.choice-dialog.hex > .classic-modal > .modal-close,
+.classic-modal-overlay.choice-dialog.hex > .classic-modal > .modal-buttons{display:none}
+.classic-modal-overlay.choice-dialog.hex > .classic-modal > .modal-body{max-height:none; overflow:visible}
+
+.hex-pick-head{text-align:center;margin-bottom:22px}
+.hex-title{margin:0;font-size:44px;color:#ffe9a8;letter-spacing:6px;text-shadow:0 3px 0 #6b4a18,0 0 22px #ffca4a80}
+.hex-sub{margin:8px 0 0;font-size:23px;color:#d9e6f2}
+.hex-debuffs{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:10px;margin-top:14px}
+.hex-debuff-label{font-size:21px;color:#ffb4a4}
+.hex-debuff{padding:5px 15px;border-radius:16px;border:2px solid #ff9c86;background:rgba(126,28,22,.8);
+  color:#ffe6df;font-size:21px}
+
+.hex-cards{display:flex;justify-content:center;align-items:stretch;gap:22px}
+.hex-card{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;
+  width:268px;padding:34px 20px 24px;border-radius:26px;cursor:pointer;font-family:inherit;
+  border:4px solid #6f5a33;background:linear-gradient(180deg,#2d3a4c,#1b2430);
+  box-shadow:0 10px 26px rgba(0,0,0,.5),inset 0 0 0 3px rgba(255,255,255,.10);
+  transition:transform .14s,filter .14s,box-shadow .14s;color:#e8eef5}
+.hex-card:hover{transform:translateY(-7px);filter:brightness(1.08);box-shadow:0 16px 34px rgba(0,0,0,.55),inset 0 0 0 3px rgba(255,255,255,.18)}
+.hex-card:active{transform:translateY(-2px)}
+.hex-card .hex-ribbon{position:absolute;top:-14px;left:50%;transform:translateX(-50%);
+  padding:3px 18px;border-radius:14px;font-size:20px;font-weight:bold;letter-spacing:2px;
+  border:3px solid #2b2113;color:#241a0a;background:#cbb88c}
+.hex-card .hex-emblem{font-size:46px;line-height:1;color:#cbb88c;text-shadow:0 2px 0 #000a}
+.hex-card .hex-name{font-size:31px;line-height:1.15;text-align:center}
+.hex-card .hex-scope{font-size:20px;color:#a9bccc;letter-spacing:1px}
+.hex-card .hex-desc{font-size:23px;line-height:1.4;text-align:center;color:#dbe6f0}
+/* 稀有度配色：普通=灰蓝，稀有=蓝，史诗=金 */
+.hex-card.r0{border-color:#8fa3b5;background:linear-gradient(180deg,#33414f,#1c242e)}
+.hex-card.r0 .hex-ribbon,.hex-card.r0 .hex-emblem{background:#b8c6d4;color:#22303c}
+.hex-card.r1{border-color:#5fb6ff;background:linear-gradient(180deg,#26456b,#16283f);
+  box-shadow:0 10px 26px rgba(0,0,0,.5),inset 0 0 0 3px rgba(120,200,255,.22),0 0 22px #3f9bff44}
+.hex-card.r1 .hex-ribbon,.hex-card.r1 .hex-emblem{background:#9fd8ff;color:#0d2b46;text-shadow:none}
+.hex-card.r2{border-color:#ffcc4d;background:linear-gradient(180deg,#5b4318,#33240c);
+  box-shadow:0 10px 26px rgba(0,0,0,.5),inset 0 0 0 3px rgba(255,220,120,.28),0 0 26px #ffbe2a66}
+.hex-card.r2 .hex-ribbon,.hex-card.r2 .hex-emblem{background:#ffe08a;color:#4a3208;text-shadow:none}
+.hex-card.heal{border-color:#7fd06a;background:linear-gradient(180deg,#2b4a2a,#172c17);
+  box-shadow:0 10px 26px rgba(0,0,0,.5),inset 0 0 0 3px rgba(150,240,130,.22)}
+.hex-card.heal .hex-ribbon,.hex-card.heal .hex-emblem{background:#bdf3a8;color:#1e3d16;text-shadow:none}
 
 /* ---------- 无尽：试炼商店 ---------- */
 .tower-shop { padding: 2px; }

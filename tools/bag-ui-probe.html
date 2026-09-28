@@ -113,7 +113,7 @@ async function main() {
      ?shot=sell|shop|exchange|status|daily|chat|arrows 各自停在一个画面上，
      既抓尺寸数据也方便截图。 */
   const batch = q.get('shot');
-  if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows', 'gearsell', 'gearsellconfirm', 'master', 'trueform', 'vip'].includes(batch)) {
+  if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows', 'gearsell', 'gearsellconfirm', 'master', 'trueform', 'vip', 'hex'].includes(batch)) {
     S.props[47] = 20; S.props[22] = 12; S.props[24] = 8; S.props[1] = 9;
     State.save();
     const rect = (sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
@@ -149,6 +149,32 @@ async function main() {
       UI.runAction(batch); await flush(340);
       P.footerButtons = footerButtons();
       snap('页脚', '#ui .page-footer');
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+
+    if (batch === 'hex') {
+      // 打到第 3 场之后，看海克斯式选 buff 界面（第 4 项）+ 三侠削弱提示（第 3 项）
+      const st = State.state();
+      st.level = 35;
+      for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+      st.props[23] = 20; st.goldPoint = 5000;
+      State.save();
+      Tower.startTowerRun();
+      const ults = ['疾风镰刀舞', '仙鹤展翅', '熊掌震地'];
+      for (let i = 0; i < 3; i++) {
+        const nx = Tower.nextBattle('tower');
+        Tower.reportBattle('tower', nx.token, true, 0.8, { rounds: [{ ultName: ults[i] }] });
+      }
+      TowerUI.openTower(); await flush(320);
+      const fightBtn = document.querySelector('#ui [data-action="fight"]');
+      if (fightBtn) fightBtn.click();
+      await flush(420);
+      P.hexShown = !!document.querySelector('.hex-card');
+      P.hexTitle = text(document.querySelector('.hex-title'));
+      P.hexCards = $$('.hex-card').map((c) => text(c));
+      P.hexDebuffs = $$('.hex-debuff').map((e) => e.textContent.trim());
+      P.hexModalBoxed = (() => { const m = document.querySelector('.choice-dialog.hex > .classic-modal'); return m ? getComputedStyle(m).backgroundColor : null; })();
+      snap('海克斯卡片', '.hex-cards');
       P.done = true; P.errors = window.__errs.slice(); return;
     }
 

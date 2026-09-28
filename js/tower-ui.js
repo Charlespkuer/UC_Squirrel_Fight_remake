@@ -155,6 +155,7 @@
     try {
       Promise.resolve(Main.startBattle(nx.foe, {
         region: nx.region, kind: mode, useProps: false, hpRatio: nx.hpRatio, adjustMe: nx.adjustMe,
+        debuffs: nx.debuffs || [],
         // 塔里的战斗不许跳过（否则整层白给），右下角改成 1×/2× 倍速切换
         allowSkip: false, speedToggle: true,
         // 塔的产出全部由状态机结算（松果/压缩碎片/抽奖卷），关掉战斗飘物，
@@ -186,23 +187,50 @@
   }
 
   // ---------- 场间 4 选 1 ----------
+  /* 场间选 buff（第 4 项）：改成「海克斯」式 —— 卡片自己就是框，
+   * 外面不再套一层 modal 的奶油底板（.choice-dialog.hex 把 modal 本身做成透明的）。
+   * 卡片按稀有度上色：普通/稀有/史诗 + 回血。 */
+  const RARITY_CLASS = ['r0', 'r1', 'r2'];
+  function choiceCard(c, i) {
+    if (c.type === 'heal') {
+      return '<button type="button" class="hex-card heal" data-choice="' + i + '">' +
+        '<span class="hex-ribbon">补给</span>' +
+        '<span class="hex-emblem">✚</span>' +
+        '<b class="hex-name">紧急包扎</b>' +
+        '<span class="hex-scope">立即生效</span>' +
+        '<span class="hex-desc">回复 ' + Math.round(TowerData.FIXED_HEAL_PCT * 100) + '% 最大生命</span></button>';
+    }
+    const b = TowerData.BUFF_BY_ID[c.id];
+    return '<button type="button" class="hex-card ' + RARITY_CLASS[b.rarity] + '" data-choice="' + i + '">' +
+      '<span class="hex-ribbon">' + RARITY[b.rarity] + '</span>' +
+      '<span class="hex-emblem">' + (b.rarity === 2 ? '★' : b.rarity === 1 ? '◆' : '●') + '</span>' +
+      '<b class="hex-name">' + esc(b.name) + '</b>' +
+      '<span class="hex-scope">' + SCOPE[b.scope] + '</span>' +
+      '<span class="hex-desc">' + esc(b.desc) + '</span></button>';
+  }
   function offerChoice(mode, choices) {
-    const cards = choices.map((c, i) => {
-      if (c.type === 'heal') {
-        return '<button class="choice-card heal-card" data-choice="' + i + '"><b>紧急包扎</b><i>固定</i><span>回复 30% 最大生命</span></button>';
-      }
-      const b = TowerData.BUFF_BY_ID[c.id];
-      return '<button class="choice-card r' + b.rarity + '" data-choice="' + i + '"><b>' + esc(b.name) + '</b>' +
-        '<i>' + RARITY[b.rarity] + ' · ' + SCOPE[b.scope] + '</i><span>' + esc(b.desc) + '</span></button>';
-    }).join('');
-    const m = C().modal('场间休整 · 四选一', '<div class="choice-cards">' + cards + '</div>', [], { locked: true });
-    m.element.classList.add('choice-dialog');   // 让弹窗加宽到 1020px（四张大卡片两列）
+    const info = mode === 'tower' ? Tower.towerInfo() : Tower.endlessInfo();
+    const run = info.run || {};
+    const debuffs = (run.debuffs || []);
+    const head = '<div class="hex-pick-head"><h2 class="hex-title">整装待发</h2>' +
+      '<p class="hex-sub">' + (mode === 'tower'
+        ? '第 ' + (run.battleNo || 4) + ' 场之前最后一次整备 —— 选一张带进去。'
+        : '场间休整 —— 选一张带进去。') + '</p>' +
+      (debuffs.length
+        ? '<div class="hex-debuffs"><span class="hex-debuff-label">本层已被削弱</span>' +
+          debuffs.map((d) => '<span class="hex-debuff">' + esc(d.text || d.name) + '</span>').join('') + '</div>'
+        : '') +
+      '</div>';
+    const body = head + '<div class="hex-cards">' + choices.map(choiceCard).join('') + '</div>';
+    const m = C().modal('', body, [], { locked: true });
+    m.element.classList.add('choice-dialog', 'hex');
     m.element.querySelectorAll('[data-choice]').forEach((el) => {
       el.onclick = () => {
         const picked = Tower.pickChoice(mode, Number(el.dataset.choice));
         m.close();
         if (!picked.ok) { reopen(mode); return; }
-        const text = picked.heal ? '回复了 30% 最大生命，状态满满！' : '获得增益「' + picked.buff.name + '」：' + picked.buff.desc;
+        const text = picked.heal ? '回复了 ' + Math.round(TowerData.FIXED_HEAL_PCT * 100) + '% 最大生命，状态满满！'
+          : '获得增益「' + picked.buff.name + '」：' + picked.buff.desc;
         C().modal('休整完毕', '<p>' + esc(text) + '</p>', [{ label: '继续战斗', cls: 'gold', run: () => fight(mode) }], { small: true });
       };
     });
@@ -216,11 +244,20 @@
       '<p class="small-label">层数 +1，下一层对手更强、松果更多。</p></div>',
       [{ label: '继续爬塔', cls: 'gold', run: openTower }, { label: '返回', run: () => C().home() }], { small: true });
   }
+  /* 主塔失败（第 1 项）：不再逼你重头打 —— 就地再战一次（免费），而且可以换一张 buff；
+   * 想收手就「结束本层」拿 30% 安慰奖。 */
   function towerDefeat(rw) {
-    C().modal('挑战失败', '<div class="result-box"><div class="result-title lose">再接再厉</div>' +
-      '<p>第 ' + rw.layer + ' 层挑战失败，本局累积的 ' + rw.potGold + ' 松果已失去。</p>' +
-      '<div class="result-lines">安慰奖：金松果 +' + rw.consolation + '</div></div>',
-      [{ label: '再挑战一次', cls: 'gold', run: openTower }, { label: '返回', run: () => C().home() }], { small: true });
+    C().modal('倒下在第 ' + (rw.battleNo || '?') + ' 场', '<div class="result-box"><div class="result-title lose">再接再厉</div>' +
+      '<p>第 ' + rw.layer + ' 层第 ' + (rw.battleNo || '?') + '/' + (rw.battleCount || 4) + ' 场失败。</p>' +
+      '<p class="gold-text">进度已保留：再战一次不用再花挑战书，也可以换一张增益。</p>' +
+      '<div class="result-lines">收手的话，已累积的 ' + rw.potGold + ' 松果可换 30% 安慰奖</div></div>',
+      [{ label: '再战一次', cls: 'gold', run: () => { if (rw.choices && rw.choices.length) offerChoice('tower', rw.choices); else fight('tower'); } },
+       { label: '结束本层（领安慰奖）', cls: 'muted', run: () => {
+          const out = Tower.giveUp('tower');
+          C().modal('本层结束', '<p>安慰奖：金松果 +' + (out.consolation || 0) + '</p>',
+            [{ label: '返回', cls: 'gold', run: () => C().home() }], { small: true });
+        } },
+       { label: '返回', run: () => C().home() }], { small: true });
   }
   function endlessDefeat(rw) {
     C().modal('挑战失败', '<div class="result-box"><div class="result-title lose">倒在了第 ' + rw.layer + ' 层</div>' +

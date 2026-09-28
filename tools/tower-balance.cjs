@@ -64,7 +64,8 @@ function autoBattle(ctx, mode, level) {
   const win = res.winner === 0;
   const last = [...res.rounds].reverse().find((r) => Array.isArray(r.hpAfter));
   const ratio = win && last ? Math.max(0, Math.min(1, last.hpAfter[0] / me.maxHp)) : 0;
-  return { win, ratio, rw: Tower.reportBattle(mode, nx.token, win, ratio), foe: nx.foe, info: nx.info };
+  // 把战斗结果一起交回去：三侠大招的「本层削弱」要靠它判定（第 3 项）
+  return { win, ratio, rw: Tower.reportBattle(mode, nx.token, win, ratio, res), foe: nx.foe, info: nx.info };
 }
 function autoPick(ctx, mode) {
   const info = mode === 'tower' ? ctx.Tower.towerInfo() : ctx.Tower.endlessInfo();
@@ -114,43 +115,54 @@ function autoPick(ctx, mode) {
   let nx = Tower.nextBattle('tower');
   t('第 1 场是三侠之一', nx.ok && nx.entry.kind === 'hero');
   let rw = Tower.reportBattle('tower', nx.token, true, 0.40);
-  t('胜场 1：无自动回血（carry=0.40）', Math.abs(Tower.towerInfo().run.carry - 0.40) < 1e-9);
+  // 第 3 项：改成「固定节奏回血」——每场打完自动 +10%，不再从选择里回血
+  t('胜场 1：固定节奏回血 14%（0.40→0.54）', Math.abs(Tower.towerInfo().run.carry - 0.54) < 1e-9);
   t('胜场 1：累积 3 松果（15/4 取整）', rw.potGold === 3);
-  t('胜场 1：触发 4 选 1（回血 + 3 buff）', Array.isArray(rw.choices) && rw.choices.length === 4 && rw.choices[0].type === 'heal');
-  t('选择挂起时不能开战', !Tower.nextBattle('tower').ok);
-  let pick = Tower.pickChoice('tower', 0);
-  t('固定项回血 30%（0.40→0.70）', pick.ok && Math.abs(Tower.towerInfo().run.carry - 0.70) < 1e-9);
+  // 第 3 项：场间选择只在第 3 场之后给一次（进第 4 场前），不再每场都给
+  t('胜场 1：不再给场间选择', !rw.choices);
 
   nx = Tower.nextBattle('tower');
   rw = Tower.reportBattle('tower', nx.token, true, 0.50);
-  const buffIdx = rw.choices.findIndex((c) => c.type === 'buff');
-  pick = Tower.pickChoice('tower', buffIdx);
-  t('选 buff 入账', pick.ok && Tower.ownedBuffs('tower').length === 1);
-  const buffId = Tower.ownedBuffs('tower')[0].id;
+  t('胜场 2：仍不给选择', !rw.choices);
 
   nx = Tower.nextBattle('tower');
   rw = Tower.reportBattle('tower', nx.token, true, 0.60);
-  Tower.pickChoice('tower', 0); // 回血
+  t('胜场 3：触发 4 选 1（回血 + 3 buff）', Array.isArray(rw.choices) && rw.choices.length === 4 && rw.choices[0].type === 'heal');
+  t('选择挂起时不能开战', !Tower.nextBattle('tower').ok);
+  let pick = Tower.pickChoice('tower', 0);
+  t('固定项回血 80%（封顶 1.00）', pick.ok && Math.abs(Tower.towerInfo().run.carry - 1) < 1e-9);
+
   nx = Tower.nextBattle('tower');
   t('第 4 场是松鼠（用松鼠贴图 + 松鼠武技）', nx.entry.kind === 'squirrel' && !nx.foe.npcType
     && nx.foe.weapons.length > 0 && nx.foe.skills.length > 0);
   t('松鼠带固定出招循环', Array.isArray(nx.foe.pattern) && nx.foe.pattern.length > 0);
+  // 三侠大招留下的本层削弱会被 adjustMe 吃掉（这里只验证入口暴露出来了）
+  t('削弱列表随 nextBattle 暴露给战斗', Array.isArray(nx.debuffs));
   rw = Tower.reportBattle('tower', nx.token, true, 0.55);
   t('通关：整层 15 松果到账', rw.layerComplete === true && S.goldPoint === gold0 + 15);
   t('通关：maxLayer=1，run 清空', State.state().tower.maxLayer === 1 && !Tower.towerInfo().run);
-  t('主塔 buff 层结束清空', !Tower.ownedBuffs('tower').some((b) => b.id === buffId));
+  t('主塔 buff 层结束清空（本层选过的 buff 已清）', Tower.ownedBuffs('tower').length === 0);
 
   // —— 失败安慰奖（第 21 层：G=41，shares [10,10,10,11]） ——
   Tower._debugSetLayer(20);
   Tower.startTowerRun();
-  nx = Tower.nextBattle('tower'); Tower.reportBattle('tower', nx.token, true, 0.9); Tower.pickChoice('tower', 0);
-  nx = Tower.nextBattle('tower'); Tower.reportBattle('tower', nx.token, true, 0.9); Tower.pickChoice('tower', 0);
+  nx = Tower.nextBattle('tower'); Tower.reportBattle('tower', nx.token, true, 0.9);
+  nx = Tower.nextBattle('tower'); Tower.reportBattle('tower', nx.token, true, 0.9);
+  Tower.pickChoice('tower', 0);
   const goldBefore = S.goldPoint;
   nx = Tower.nextBattle('tower');
   rw = Tower.reportBattle('tower', nx.token, false, 0);
-  t('失败：安慰奖 = ⌊20×0.3⌋ = 6', !rw.win && rw.consolation === 6 && S.goldPoint === goldBefore + 6);
+  // 第 1 项：失败不再清空本层、也不当场发安慰奖 —— 保留进度可免费再战，收手才领安慰奖
+  t('失败：保留层内进度（run 还在、idx 停在倒下那场）',
+    !rw.win && rw.retry === true && !!Tower.towerInfo().run && Tower.towerInfo().run.failedAt != null);
   t('失败：不掉层（仍 20）', State.state().tower.maxLayer === 20);
-  t('失败：run 清空可重试', Tower.startTowerRun().ok);
+  t('失败：不扣金松果（安慰奖改成收手才发）', S.goldPoint === goldBefore);
+  t('失败：本层仍在，可以直接再开（不用再花书）', !!Tower.towerInfo().run && !Tower.towerInfo().run.attempt);
+  t('收手：安慰奖 = ⌊20×0.3⌋ = 6', (() => {
+    const out = Tower.giveUp('tower');
+    return out.ok && out.consolation === 6 && S.goldPoint === goldBefore + 6;
+  })());
+  t('收手：run 清空可重开', !Tower.towerInfo().run && Tower.startTowerRun().ok);
 
   // —— 播放中断：令牌作废不重复扣书 ——
   const books = S.props[23];

@@ -88,6 +88,7 @@
       run.bonusPower = Math.max(0, Number(run.bonusPower) || 0);
       if (run.shop && typeof run.shop === 'object' && !Array.isArray(run.shop.slots)) run.shop = null;
       if (run.phase !== 'shop' && run.phase !== 'checkpoint') run.phase = null;
+    if (!Array.isArray(run.debuffs)) run.debuffs = [];
     }
     return run;
   }
@@ -104,12 +105,10 @@
 
   // ---------- 层结构 ----------
   function buildPlan(layer) {
-    const heroes = HEROES.slice();
-    for (let i = heroes.length - 1; i > 0; i--) {           // 三侠随机序
-      const j = Math.floor(Math.random() * (i + 1));
-      [heroes[i], heroes[j]] = [heroes[j], heroes[i]];
-    }
-    const plan = heroes.map((anim) => ({ kind: 'hero', anim }));
+    /* 三侠固定顺序（螳螂 → 仙鹤 → 熊猫）：配合「三侠大招会留本层削弱」的设计，
+     * 让整层的削弱序列完全可预期（先降上限、再降属性、最后锁武技），
+     * 玩家才能读题、才能针对配 buff。原来是随机序，读题就不成立了。 */
+    const plan = HEROES.map((anim) => ({ kind: 'hero', anim }));
     // 第 4 场 = 松鼠对手（同族、用松鼠自己的武技、固定出招循环）；
     // 原来那 10 个机制 NPC 退到 x10 层的精英场（第 5 场），设计不浪费。
     plan.push({ kind: 'squirrel', id: D().squirrelFor(layer).id });
@@ -268,7 +267,7 @@
       if (s.props[BOOK_PROP] <= 0) delete s.props[BOOK_PROP];
     }
     const layer = t.maxLayer + 1;
-    t.run = { layer, plan: buildPlan(layer), idx: 0, carry: 1, buffs: [], battleBuffs: [], pot: 0, choices: null };
+    t.run = { layer, plan: buildPlan(layer), idx: 0, carry: 1, buffs: [], battleBuffs: [], debuffs: [], pot: 0, choices: null };
     save();
     return { ok: true, layer };
   }
@@ -279,7 +278,7 @@
     if (e.run) return { ok: false, msg: '本局无尽挑战尚未结束。' };
     const run = { layer: 1, plan: buildPlan(1), idx: 0, carry: 1,
       buffs: [], layerBuffs: [], battleBuffs: [], coins: 0, score: 0, bestLayer: 0,
-      killPower: 0, killMaxHp: 0, bonusPower: 0, shop: null, phase: null, choices: null };
+      killPower: 0, killMaxHp: 0, bonusPower: 0, shop: null, phase: null, choices: null, debuffs: [] };
     if (debug('endlessCoin')) run.coins = 9999;
     e.run = run;
     layerStartHeal(run);
@@ -309,8 +308,21 @@
     if (agg.enemyPowerDown > 0) built.foe.power = Math.max(1, Math.round(built.foe.power * (1 - agg.enemyPowerDown)));
     const maxHpMul = agg.maxHpMul, powerMul = agg.powerMul;
     const adjustMe = (me) => {
-      const maxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul)));
-      me.power = Math.max(1, Math.round(me.power * (1 + powerMul)));
+      // 本层削弱（三侠大招留下的）：生命上限 / 属性 / 锁武技
+      const debuffs = Array.isArray(run.debuffs) ? run.debuffs : [];
+      const dMaxHp = debuffs.filter((d) => d.kind === 'maxHp').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
+      const dPower = debuffs.filter((d) => d.kind === 'stat' && d.stat === 'power').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
+      const dAgi = debuffs.filter((d) => d.kind === 'stat' && d.stat === 'agility').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
+      const dSpd = debuffs.filter((d) => d.kind === 'stat' && d.stat === 'speed').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
+      const maxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul) * dMaxHp));
+      me.power = Math.max(1, Math.round(me.power * (1 + powerMul) * dPower));
+      me.agility = Math.max(1, Math.round(me.agility * dAgi));
+      me.speed = Math.max(1, Math.round(me.speed * dSpd));
+      for (const d of debuffs) {
+        if (d.kind !== 'lock') continue;
+        if (d.what === 'weapon') me.weapons = (me.weapons || []).filter((w) => Number(w.id) !== Number(d.id));
+        else me.skills = (me.skills || []).filter((s2) => Number(String(s2).split(':')[0]) !== Number(d.id));
+      }
       // maxHpMul 的「回复等量生命」= 按比例继承到新上限（正增益不亏比例、负增益同步缩血）
       me.maxHp = maxHp;
       me.hp = Math.max(1, Math.min(maxHp, Math.round(maxHp * run.carry)));
@@ -333,6 +345,7 @@
     save();
     return { ok: true, token: run.attempt, entry, info: entryInfo(entry), foe: built.foe,
       elite: built.elite, region: regionOf(entry), hpRatio: run.carry, adjustMe,
+      debuffs: (run.debuffs || []).slice(),
       battleNo: run.idx + 1, battleCount: run.plan.length, layer: run.layer };
   }
   /** 播放中断：令牌作废，进度保留（不重复扣书、不掉层）。 */
@@ -345,7 +358,50 @@
   }
 
   // ---------- 战斗结算 ----------
-  function reportBattle(mode, token, win, carryRatio) {
+  /**
+   * 三侠的招牌技给玩家留削弱：扫一遍这场战斗的事件，只有大招真的放出来了才生效。
+   * 打得够快 / 打断它，就能整层规避 —— 这是本层的第一层对策。
+   */
+  function applyHeroDebuff(run, entry, result) {
+    if (!entry || entry.kind !== 'hero') return null;
+    const def = D().HERO_DEBUFF[entry.anim];
+    if (!def) return null;
+    const fired = !!(result && Array.isArray(result.rounds)
+      && result.rounds.some((r) => r && r.ultName === def.ult));
+    if (!fired) return null;
+    if (!Array.isArray(run.debuffs)) run.debuffs = [];
+    if (run.debuffs.some((d) => d.from === entry.anim)) return null;   // 同一场只落一次
+    let d;
+    if (def.kind === 'stat') {
+      const stat = ['power', 'agility', 'speed'][Math.floor(Math.random() * 3)];
+      const label = { power: '力量', agility: '敏捷', speed: '速度' }[stat];
+      d = { from: entry.anim, kind: 'stat', stat, pct: def.pct, name: def.name, text: label + ' −' + Math.round(def.pct * 100) + '%' };
+    } else if (def.kind === 'lock') {
+      // 随机锁一个武器或技能：按玩家当前拥有的武技合计里抽（师父驾到 13 不占位，排除）
+      const st = S(), pool = [];
+      const nameOf = (map, id) => { const d = map && map.getValue(id); return d ? d.name : ('#' + id); };
+      for (const raw of st.weapons || []) {
+        const id = Number(String(raw).split(':')[0]);
+        pool.push({ what: 'weapon', id, name: nameOf(weaponsMap, id) });
+      }
+      for (const raw of st.skills || []) {
+        const id = Number(String(raw).split(':')[0]);
+        if (id === 13) continue;
+        pool.push({ what: 'skill', id, name: nameOf(skillsMap, id) });
+      }
+      if (!pool.length) return null;
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      d = { from: entry.anim, kind: 'lock', what: pick.what, id: pick.id, name: def.name,
+        text: '锁住' + (pick.what === 'weapon' ? '武器' : '技能') + '「' + pick.name + '」' };
+    } else {
+      d = { from: entry.anim, kind: 'maxHp', pct: def.pct, name: def.name,
+        text: '生命上限 −' + Math.round(def.pct * 100) + '%' };
+    }
+    run.debuffs.push(d);
+    return d;
+  }
+
+  function reportBattle(mode, token, win, carryRatio, result) {
     const box = mode === 'tower' ? tower() : endless();
     const run = box.run;
     if (!run || run.attempt !== token) return { ok: false };
@@ -356,7 +412,12 @@
     run.carry = Math.max(0.01, clamp01(carryRatio));
     run.battleBuffs = [];                                // 单场类 buff 打完即消耗
     const out = { ok: true, win: true, elite: isElite, entryKind: entry.kind };
+    // 三侠的大招会给玩家留一层削弱（第 3 项）
+    const debuff = applyHeroDebuff(run, entry, result);
+    if (debuff) { out.debuff = debuff; save(); }
     if (mode === 'tower') {
+      // 固定节奏回血：每打完一场自动回一点，续航不再依赖场间选择
+      run.carry = Math.min(1, run.carry + D().AUTO_HEAL_PCT);
       const shares = D().towerGoldShares(run.layer, run.plan.length);
       run.pot += shares[run.idx];
       out.potGold = run.pot;
@@ -383,19 +444,50 @@
     if (run.idx >= run.plan.length) return layerClear(mode, run, out);
     // 场间选择：第 1/2/3 场后必给；x10 层第 4 场后再给一次
     const won = run.idx, len = run.plan.length;
-    if (won < len && (won <= 3 || (won === 4 && len === 5))) run.choices = rollChoices(mode, run);
+    /* 第 3 项：场间选择从「每场都给」压成「只在第 4 场（题面）前给一次」，
+     * x10 层（5 场）在第 5 场精英前再给一次。这样每层只有 1~2 个决策点，
+     * 而且是在读过三侠的削弱之后才选，选项才有分量。 */
+    if (won === 3 || (won === 4 && len === 5)) run.choices = rollChoices(mode, run);
     out.choices = run.choices;
     save();
     return out;
   }
+  /**
+   * 主塔失败（第 1 项 P0-2「卡层可解」）：
+   * 不再清空本层 —— 保留层内进度（idx 停在倒下的那一场），玩家可以：
+   *   · 「再战一次」：免费（本层的挑战书已经付过），并且**可以换一张 buff**；
+   *   · 「结束本层」：走 giveUp()，拿已累积的 30% 安慰奖。
+   * 策划意图：练度刚好差一点时，靠「看懂了题 → 换对策 → 过关」而不是「再烧一张门票」。
+   */
   function towerFail(run) {
+    const layer = run.layer, pot = run.pot;
+    run.failedAt = run.idx;
+    // 挂在「第 4 场（题面）前」的那次选择：重试前可以重新选一张
+    if (run.idx === 3 || (run.idx === 4 && run.plan.length === 5)) {
+      run.buffs = [];
+      run.battleBuffs = [];
+      run.choices = rollChoices('tower', run);
+    }
+    tower().retry = { layer, date: State.localDate() };
+    save();
+    return { ok: true, win: false, layer, potGold: pot, retry: true,
+      battleNo: run.idx + 1, battleCount: run.plan.length, choices: run.choices };
+  }
+  /** 结束本层：把已累积的 30% 当安慰奖发掉并清空本层。 */
+  function giveUp(mode) {
+    if (mode !== 'tower') return abandon(mode);
+    const run = tower().run;
+    if (!run || run.attempt) return { ok: false };
     const consolation = Math.floor(run.pot * D().TOWER_FAIL_CONSOLATION);
     if (consolation > 0) State.addGold(consolation);
-    const layer = run.layer, pot = run.pot;
+    const out = { ok: true, layer: run.layer, potGold: run.pot, consolation };
     tower().run = null;
+    tower().retry = null;
     save();
-    return { ok: true, win: false, layer, potGold: pot, consolation };
+    return out;
   }
+  /** 本层通关 / 放弃后清掉「免费重试」标记。 */
+  function clearRetry() { if (tower().retry) { tower().retry = null; save(); } }
   function endlessFail(run) {
     const e = endless();
     const out = { ok: true, win: false, layer: run.layer, score: run.score, bestLayer: run.bestLayer,
@@ -428,6 +520,7 @@
       const gold = run.pot;
       State.addGold(gold);
       tower().maxLayer = run.layer;
+      tower().retry = null;
       // 碎片判定压缩到最后一击：掉率/数量期望 = 挑战模式单场（★6 参数，蓝色封顶）
       if (Math.random() < GData.stageFragmentChance(6)) {
         const frag = GData.STAGE_FRAGMENT;
@@ -651,6 +744,7 @@
       if (!run || run.attempt) return { ok: false };
       const layer = run.layer;
       tower().run = null;
+      tower().retry = null;
       save();
       return { ok: true, layer };
     }
@@ -670,8 +764,10 @@
     return { maxLayer: t.maxLayer, nextLayer: layer, books: s.props[BOOK_PROP] || 0,
       gold: D().towerGold(layer), battles: layer % 10 === 0 ? 5 : 4,
       level: D().towerLevel(layer), mult: D().towerMult(layer),
-      run: t.run ? { layer: t.run.layer, battleNo: t.run.idx + 1, battleCount: t.run.plan.length, carry: t.run.carry, pot: t.run.pot,
-        choices: t.run.choices ? t.run.choices.slice() : null } : null,
+      retry: t.retry || null,
+      run: t.run ? { layer: t.run.layer, battleNo: t.run.idx + 1, battleCount: t.run.plan.length, carry: t.run.carry, pot: t.run.pot, failedAt: t.run.failedAt == null ? null : t.run.failedAt,
+        choices: t.run.choices ? t.run.choices.slice() : null,
+        debuffs: (t.run.debuffs || []).slice() } : null,
       preview: preview(layer) };
   }
   function endlessInfo() {
@@ -680,6 +776,7 @@
       tickets: S().props[TICKET_PROP] || 0,
       run: e.run ? { layer: e.run.layer, score: e.run.score, coins: e.run.coins, carry: e.run.carry,
         battleNo: e.run.idx + 1, battleCount: e.run.plan.length, phase: e.run.phase,
+      debuffs: (e.run.debuffs || []).slice(),
         choices: e.run.choices ? e.run.choices.slice() : null,
         bestLayer: e.run.bestLayer, segment: D().endlessSegment(e.run.layer),
         ticketsIfSettle: D().endlessTickets(e.run.layer) } : null };
@@ -700,7 +797,7 @@
     unlocked, towerInfo, endlessInfo, preview, ownedBuffs,
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,
     pickChoice,
-    shopState, buyShopSlot, buyShopHeal, rerollShop, sellBuff, closeShop,
+    shopState, buyShopSlot, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp,
     checkpointInfo, settleEndless, continueEndless,
     // 调试
     _debugSetLayer(n) { tower().maxLayer = Math.max(0, Math.floor(Number(n) || 0)); save(); },

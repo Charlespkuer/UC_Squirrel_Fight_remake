@@ -153,15 +153,15 @@
 
   /** 技能选择：按 skillWeight 加权 → 没用过的优先、二次使用被压掉、来点松果最低。 */
   /* ---------- 出手类型概率（百分比；武器 / 技能 / 普攻 划分） ----------
-   * 默认：武器 45 / 技能 35 / 普攻 20。
-   * 武器与技能**都至少用过一遍**之后：武器 65 / 技能 15 / 普攻 20 ——
+   * 默认：武器 48 / 技能 40 / 普攻 12（普攻意愿比原来更低一档）。
+   * 武器与技能**都至少用过一遍**之后：武器 70 / 技能 18 / 普攻 12 ——
    *   技能比武器强力，用过一轮之后不该再被反复放，所以把权重挪给武器。
-   * 只有武器 / 只有技能时沿用原来的 70/30、60/40；
+   * 只有武器 / 只有技能时是 78/22、70/30；
    * 三侠 NPC（npcAction）没有武器池，用它自己那一行 70/30，行为与本项改动前一致。 */
-  const KIND_BOTH = [45, 80];
-  const KIND_BOTH_ALL_USED = [65, 80];
-  const KIND_WEAPON_ONLY = [70, 100];
-  const KIND_SKILL_ONLY = [60, 100];
+  const KIND_BOTH = [48, 88];
+  const KIND_BOTH_ALL_USED = [70, 88];
+  const KIND_WEAPON_ONLY = [78, 100];
+  const KIND_SKILL_ONLY = [70, 100];
   const KIND_NPC_SKILL_ONLY = [30, 100];
   /** 一次 Math.random() 决定出手类型（和原来 chance() 的消耗一致，不影响既有随机序列）。 */
   function pickKind(canWeapon, canSkill, allUsed, npcSkillOnly) {

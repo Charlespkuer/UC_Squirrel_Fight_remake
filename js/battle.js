@@ -262,6 +262,20 @@
         Engine.text(ctx, Math.round(hps[side]) + '/' + maxHp[side], x + width / 2, y + 42,
           { size: 36, align: 'center', color: '#fff8d4', bold: false, stroke: false });
       }
+      /* 挑战塔：三侠大招留下的「贯穿本层」削弱，挂在玩家血条正下方（第 3 项） */
+      const debuffs = Array.isArray(opts.debuffs) ? opts.debuffs : [];
+      if (debuffs.length) {
+        let dx = 8;
+        for (const d of debuffs) {
+          const label = String(d.text || d.name || '削弱');
+          const width2 = Math.max(104, label.length * 21 + 28);
+          rounded(dx, 116, width2, 36, 18, 'rgba(126,28,22,.88)');
+          ctx.lineWidth = 2; ctx.strokeStyle = '#ffd2c8'; ctx.beginPath();
+          ctx.roundRect(dx, 116, width2, 36, 18); ctx.stroke();
+          Engine.text(ctx, label, dx + width2 / 2, 142, { size: 22, align: 'center', color: '#ffe6df', stroke: false });
+          dx += width2 + 8;
+        }
+      }
       Engine.text(ctx, String(Math.max(0, round)).padStart(2, '0'), W / 2, 101,
         { size: 63, align: 'center', color: '#fff', strokeColor: '#301314', lineWidth: 6 });
       if (!ending && (allowSkip || speedToggle)) {

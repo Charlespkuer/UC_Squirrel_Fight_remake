@@ -81,7 +81,10 @@
 .status-sell-icon{width:46px;height:46px;font-size:30px}
 .status-fusion-icon::before,.status-sell-icon::before{content:'';position:absolute;inset:0;border-radius:16px;
   background:radial-gradient(circle at 50% 42%,#ffffff38,transparent 62%);pointer-events:none}
-.status-fusion-icon .status-fusion-glyph,.status-sell-icon .status-sell-glyph{font-style:normal;line-height:1;display:block;transform:translateY(-1px)}
+.status-fusion-icon .status-fusion-glyph,.status-sell-icon .status-sell-glyph{font-style:normal;line-height:1;display:block}
+/* 两个字形在各自方框里的垂直位置分开调：⚒ 交叠锤子偏下 4px，$ 偏下 1px */
+.status-fusion-icon .status-fusion-glyph{transform:translateY(-4px)}
+.status-sell-icon .status-sell-glyph{transform:translateY(-1px)}
 .status-fusion-text,.status-sell-text{position:relative;z-index:1}
 
 /* 商店页下角入口：默认 .uc-button 是 36px 字、91px 高，这里压到和上面胶囊同一档

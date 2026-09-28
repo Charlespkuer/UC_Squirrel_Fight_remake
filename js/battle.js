@@ -278,6 +278,15 @@
       }
       Engine.text(ctx, String(Math.max(0, round)).padStart(2, '0'), W / 2, 101,
         { size: 63, align: 'center', color: '#fff', strokeColor: '#301314', lineWidth: 6 });
+      /* 挑战塔题面：这条规则决定「什么时候该爆发」，进层前预告里读过，战斗里再贴一次备忘 */
+      if (opts.trial && opts.trial.text) {
+        const label = String(opts.trial.text);
+        const bw = Math.min(W - 40, label.length * 21 + 44);
+        rounded(W / 2 - bw / 2, 160, bw, 40, 20, 'rgba(74,32,104,.80)');
+        ctx.lineWidth = 2; ctx.strokeStyle = '#d9b6f5'; ctx.beginPath();
+        ctx.roundRect(W / 2 - bw / 2, 160, bw, 40, 20); ctx.stroke();
+        Engine.text(ctx, label, W / 2, 188, { size: 22, align: 'center', color: '#f4e6ff', stroke: false });
+      }
       if (!ending && (allowSkip || speedToggle)) {
         const b = skipRect;
         const fast = speedToggle && speed > 1;

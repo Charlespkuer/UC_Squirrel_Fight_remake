@@ -2,6 +2,7 @@
  * 无尽挑战塔：状态机逻辑测试 + 平衡实测
  *
  *   node tools/tower-balance.cjs [每层采样数]
+ *   node tools/tower-balance.cjs 200 --layers=1,2,3,4,5,6,7   # 只测这几层（调题面用）
  *
  * A. 逻辑测试：门票/连战继承(无自动回血)/4选1/安慰奖/碎片/无尽商店/结算点/保底
  * B. 平衡实测：目标等级随机玩家对各层的整层通关率（含场间选择、血量继承、
@@ -16,6 +17,14 @@ const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const RUNS = Math.max(20, Number(process.argv[2]) || 200);
+/* 默认测验收线上的那几层；--layers=1,2,… 可以只测指定层
+ * （调 7 个题面时按层看通关率，比只看验收线快得多）。 */
+const LAYERS = (() => {
+  const arg = process.argv.find((a) => a.startsWith('--layers='));
+  if (!arg) return [1, 5, 10, 15, 20, 25, 30];
+  const list = arg.slice('--layers='.length).split(',').map((x) => Math.max(1, Math.round(Number(x) || 0))).filter(Boolean);
+  return list.length ? list.slice(0, 40) : [1, 5, 10, 15, 20, 25, 30];
+})();
 
 function setup(storage, keepSave) {
   const store = storage || new Map();
@@ -91,9 +100,10 @@ function autoPick(ctx, mode) {
 
   let info = Tower.towerInfo();
   t('主塔初始：下一层 1、4 场、松果 15', info.nextLayer === 1 && info.battles === 4 && info.gold === 15);
-  // v2.2：第 4 场从「机制 NPC 轮换」改成「松鼠对手」（同族贴图 + 松鼠武技 + 固定出招循环）
-  t('第 1 层第 4 场 = 松鼠（斥候松鼠）', info.preview[3].name === '斥候松鼠' && info.preview[3].squirrel === true);
-  t('松鼠预告里写了固定出招循环', /固定循环/.test(info.preview[3].mechDesc || ''));
+  // P0-3：第 4 场从「松鼠对手」升级成「题面」（同族贴图 + 固定出招循环 + 一条可读的机制）
+  t('第 1 层第 4 场 = 题面·熔核', info.preview[3].name === '熔核·炽壳' && info.preview[3].squirrel === true && info.preview[3].trial === true);
+  t('题面预告里写了机制与对策', /题面·熔核/.test(info.preview[3].mechDesc || '') && /对策/.test(info.preview[3].counter || ''));
+  t('第 1 层第 4 场预告里也写了固定出招循环', /固定循环/.test(info.preview[3].mechDesc || '') || !!Tower.preview(1)[3].title);
   t('第 10 层有精英（铁甲·岩盾+吞噬）', Tower.preview(10).length === 5 && Tower.preview(10)[4].elite && Tower.preview(10)[4].mechs.join('+') === 'thorns+devour');
   // v2.2：第 4 场变成松鼠后，精英场成了机制 NPC 唯一的出场口，轮换必须覆盖全部 10 个
   {
@@ -102,8 +112,10 @@ function autoPick(ctx, mode) {
     t('精英轮换覆盖全部 10 个机制 NPC（否则后排 NPC 永远打不到）',
       seen.size === TowerData.NPCS.length && TowerData.NPCS.every((n) => seen.has(n.id)));
     const seenSq = new Set();
-    for (let n = 1; n <= 30; n++) seenSq.add(TowerData.squirrelFor(n).id);
-    t('松鼠模板三层一循环、三套都能遇到', seenSq.size === TowerData.SQUIRRELS.length);
+    for (let n = 1; n <= 30; n++) seenSq.add(TowerData.trialFor(n).id);
+    t('题面七个一循环、七套都能遇到且都带机制', seenSq.size === TowerData.TRIALS.length &&
+      TowerData.TRIALS.every((x) => x.mech.length > 0));
+    t('题面对手都要有可预告的机制文本与对策', TowerData.TRIALS.every((x) => /题面·/.test(x.mechDesc) && /对策/.test(x.counter)));
   }
 
   // —— 主塔一层完整流程 ——
@@ -133,9 +145,9 @@ function autoPick(ctx, mode) {
   t('固定项回血 80%（封顶 1.00）', pick.ok && Math.abs(Tower.towerInfo().run.carry - 1) < 1e-9);
 
   nx = Tower.nextBattle('tower');
-  t('第 4 场是松鼠（用松鼠贴图 + 松鼠武技）', nx.entry.kind === 'squirrel' && !nx.foe.npcType
-    && nx.foe.weapons.length > 0 && nx.foe.skills.length > 0);
-  t('松鼠带固定出招循环', Array.isArray(nx.foe.pattern) && nx.foe.pattern.length > 0);
+  t('第 4 场是题面（用松鼠贴图 + 松鼠武技 + 自己的机制）', nx.entry.kind === 'trial' && !nx.foe.npcType
+    && nx.foe.weapons.length > 0 && nx.foe.skills.length > 0 && nx.foe.mech.length > 0);
+  t('题面带固定出招循环', Array.isArray(nx.foe.pattern) && nx.foe.pattern.length > 0);
   // 三侠大招留下的本层削弱会被 adjustMe 吃掉（这里只验证入口暴露出来了）
   t('削弱列表随 nextBattle 暴露给战斗', Array.isArray(nx.debuffs));
   rw = Tower.reportBattle('tower', nx.token, true, 0.55);
@@ -255,7 +267,7 @@ function autoPick(ctx, mode) {
   console.log('层数   目标等级  整层胜率  低5级   高5级   精英场');
 
   const fails = [];
-  for (const layer of [1, 5, 10, 15, 20, 25, 30]) {
+  for (const layer of LAYERS) {
     const LT = TowerData.towerLevel(layer);
     const measure = (level) => {
       let cleared = 0, eliteWins = 0, eliteGames = 0;

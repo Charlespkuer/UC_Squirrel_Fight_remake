@@ -421,6 +421,120 @@ test('熊猫生命低于40%放「熊掌震地」并震晕对手一回合，每�
   assert.ok(events.some((r) => r.attacker === 0 && r.action === 'stunned'));
 });
 
+/* ---------- 挑战塔题面（第 4 场最终位对手）----------
+ * 题面是「玩家式 AI」（没有 npcType、走 playerLikeAction），机制要自己挂上，
+ * 所以这组用例同时守住两件事：机制数值对，以及玩家式 AI 也能吃到机制。 */
+const trialFoe = (mech, extra = {}) => fighter({ name: '题面', mech, pattern: ['common'], agility: 1, speed: 1, ...extra });
+/** 玩家每次出手打掉的血量（按顺序）。 */
+const hitSeq = (events) => Array.from(events).filter((r) => r.attacker === 0 && r.dmg > 0).map((r) => r.dmg);
+
+test('题面·熔核：第 5 次行动成型（受伤 −80%、力敏速 +50%），逼前 4 回合速杀', () => {
+  // 高血对手 + 弱玩家：成型前每次普攻都能打出伤害，成型后骤降
+  const make = () => {
+    const g = game(0.99);
+    return rounds(g, fighter({ power: 40, hp: 100000 }), trialFoe(['trialCore'], { power: 1, hp: 4000 }));
+  };
+  const events = make();
+  const mark = events.findIndex((r) => /熔核成型/.test(r.noteText || ''));
+  assert.ok(mark > 0, '第 5 次行动应打出「熔核成型」');
+  const dmg = hitSeq(events);
+  const before = dmg.slice(0, 4);
+  const after = dmg.slice(dmg.length - 3);
+  assert.ok(before.length >= 3 && after.length >= 3, '成型前后都应有足够的采样');
+  const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+  assert.ok(avg(after) < avg(before) * 0.35, '成型后受伤应低于成型前的 35%（实测 ' +
+    avg(before).toFixed(1) + ' → ' + avg(after).toFixed(1) + '）');
+  // 成型时会给自己加力敏速：玩家挨的伤害随之变高
+  assert.ok(events.some((r) => r.attacker === 1 && r.dmg > 0), '对手要能造成伤害');
+});
+
+test('题面·苔龟：每回合回复 6% 最大生命，并且反弹 15% 伤害', () => {
+  const g = game(0.99);
+  // 玩家很弱（每回合只打掉一点点），对手靠回复应当把血量拉起来
+  const events = rounds(g, fighter({ power: 3, hp: 100000 }), trialFoe(['trialMoss', 'thorns'], { power: 1, hp: 1000 }));
+  const foeHp = Array.from(events).filter((r) => Array.isArray(r.hpAfter)).map((r) => r.hpAfter[1]);
+  assert.ok(foeHp.length > 12, '需要足够长的战斗');
+  assert.ok(Math.max(...foeHp) > Math.min(...foeHp), '苔龟的回复应当把血量拉回来');
+  assert.ok(Array.from(events).some((r) => (r.thornsDmg || 0) > 0), '荆棘反弹应生效');
+  assert.ok(Array.from(events).some((r) => /苔甲再生/.test(r.noteText || '')), '回复要挂提示');
+});
+
+test('题面·枯泉：封死玩家治疗，并且每 3 次行动吸取玩家 10% 当前生命', () => {
+  // 师父驾到本来回 7×4 = 28 点，被枯泉封掉后 healSelf 必须是 0
+  const g = game(0.99);
+  const events = rounds(g, fighter({ hp: 100, power: 1, skills: ['13:1'], masterLevel: 7, agility: 1, speed: 1 }),
+    trialFoe(['trialDry'], { power: 1, hp: 100000 }), { masterChance: 100 });
+  const master = Array.from(events).find((r) => r.id === 13);
+  assert.ok(master, '师父应当出场');
+  assert.equal(master.healSelf, 0, '枯泉在场时治疗量必须为 0');
+  const drains = Array.from(events).filter((r) => /枯泉·吸血/.test(r.noteText || ''));
+  assert.ok(drains.length >= 2, '每 3 次行动吸一次，长战斗里应出现多次');
+  // 没被枯泉盯上的对照组：同样的师父能正常回血
+  const plain = Array.from(rounds(game(0.99), fighter({ hp: 100, power: 1, skills: ['13:1'], masterLevel: 7, agility: 1, speed: 1 }),
+    fighter({ power: 1, hp: 100000, agility: 1, speed: 1 }), { masterChance: 100 })).find((r) => r.id === 13);
+  assert.equal(plain.healSelf, 28, '没有枯泉时师父回血照旧');
+});
+
+test('题面·霜缚：第 1/4/7… 次行动前冻结玩家', () => {
+  const g = game(0.99);
+  const events = rounds(g, fighter({ power: 1, hp: 100000, agility: 1, speed: 1 }),
+    trialFoe(['trialFrost'], { power: 1, hp: 100000 }));
+  const freezes = Array.from(events).filter((r) => r.attacker === 0 && r.action === 'stunned').length;
+  assert.ok(freezes >= 3, '长战斗里至少冻结 3 次，实际 ' + freezes);
+  assert.ok(Array.from(events).filter((r) => /霜缚/.test(r.noteText || '')).length >= 3);
+  // 对照组：不带霜缚的同一场战斗不会被冻
+  const plain = rounds(game(0.99), fighter({ power: 1, hp: 100000, agility: 1, speed: 1 }),
+    trialFoe([], { power: 1, hp: 100000 }));
+  assert.equal(Array.from(plain).some((r) => r.attacker === 0 && r.action === 'stunned'), false);
+});
+
+test('题面·镜鳞：单次伤害越过阈值才反弹，阈值以下安全', () => {
+  const params = { trialMirror: { threshold: 0.05, reflect: 0.5 } };
+  // 弱玩家（单次 < 5% 生命）：一次都不该被反弹
+  const weak = rounds(game(0.99), fighter({ power: 2, hp: 100000, agility: 1, speed: 1 }),
+    trialFoe(['trialMirror'], { power: 1, hp: 100000, mechParams: params }));
+  assert.equal(Array.from(weak).some((r) => (r.thornsDmg || 0) > 0), false, '阈值以下不该反弹');
+  // 强玩家（单次 > 5% 生命）：每次越线都要吃反弹
+  const strong = rounds(game(0.99), fighter({ power: 60, hp: 100000, agility: 1, speed: 1 }),
+    trialFoe(['trialMirror'], { power: 1, hp: 400, mechParams: params }));
+  const reflected = Array.from(strong).filter((r) => (r.thornsDmg || 0) > 0);
+  assert.ok(reflected.length > 0, '越线伤害应被反弹');
+  assert.ok(reflected.some((r) => /镜鳞·反噬/.test(r.noteText || '')));
+  // 反弹量 = 该次伤害 × 50%
+  assert.equal(reflected[0].thornsDmg, Math.max(1, Math.round(reflected[0].dmg * 0.5)));
+});
+
+test('题面·血牙：每损失 20% 生命，攻击 +35%', () => {
+  const g = game(0.99);
+  // 玩家血厚、打得不快，让血牙有机会分段掉血
+  const events = rounds(g, fighter({ power: 12, hp: 100000, agility: 1, speed: 1 }),
+    trialFoe(['trialBloodfang'], { power: 30, hp: 900 }));
+  const notes = Array.from(events).filter((r) => /血牙·狂怒/.test(r.noteText || ''));
+  assert.ok(notes.length >= 2, '掉 40% 生命后至少叠 2 次，实际 ' + notes.length);
+  const hurt = Array.from(events).filter((r) => r.attacker === 1 && r.dmg > 0).map((r) => r.dmg);
+  assert.ok(hurt.length >= 6, '需要足够的挨打采样');
+  const early = hurt.slice(0, 2).reduce((a, b) => a + b, 0) / 2;
+  const late = hurt.slice(-2).reduce((a, b) => a + b, 0) / 2;
+  assert.ok(late > early * 1.3, '残血后攻击应明显更高（' + early.toFixed(1) + ' → ' + late.toFixed(1) + '）');
+});
+
+test('题面·蚀骨：玩家每次出手叠 1 层攻击 −3%，最多 10 层', () => {
+  const g = game(0.99);
+  const events = rounds(g, fighter({ power: 100, hp: 100000, agility: 1, speed: 1 }),
+    trialFoe(['trialErode'], { power: 1, hp: 100000 }));
+  const dmg = hitSeq(events);
+  assert.ok(dmg.length >= 12, '需要足够多的出手采样');
+  assert.ok(dmg[dmg.length - 1] < dmg[0] * 0.78, '第 10 层时攻击应掉到七成左右（' +
+    dmg[0] + ' → ' + dmg[dmg.length - 1] + '）');
+  // 10 层封顶：第 11 次出手以后不再继续掉
+  const tail = dmg.slice(11);
+  assert.ok(Math.max(...tail) - Math.min(...tail) <= Math.max(2, tail[0] * 0.08), '层数应当封顶在 10 层');
+  // 对照组：没有蚀骨时伤害不衰减
+  const plain = hitSeq(rounds(game(0.99), fighter({ power: 100, hp: 100000, agility: 1, speed: 1 }),
+    trialFoe([], { power: 1, hp: 100000 })));
+  assert.ok(plain[plain.length - 1] >= plain[0] * 0.9, '没有蚀骨时伤害不应衰减');
+});
+
 test('关卡连战入场：当前血量按比例继承，但生命上限保持不变', () => {
   const g = game();
   // 满血入场：上限与血量都由 hp 推出，行为不变。

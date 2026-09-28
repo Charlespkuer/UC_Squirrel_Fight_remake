@@ -121,13 +121,13 @@
 
 /* ---------- 本层对手预告 ---------- */
 .tower-plan-title { margin: 14px 0 8px; font-size: 26px; color: #7a4a18; }
-.tower-plan { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.tower-plan { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; }
 .tower-plan li {
-  display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px;
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;
   background: rgba(255, 250, 240, .95); border: 3px solid #d9bd88; border-radius: 20px;
-  padding: 10px 16px; font-size: 21px; color: #765432;
+  padding: 7px 16px; font-size: 21px; color: #765432;
 }
-.tower-plan li b { font-size: 24px; color: #7a4a18; }
+.tower-plan li b { font-size: 23px; color: #7a4a18; }
 .tower-plan li.elite { border-color: #e08573; background: rgba(255, 236, 230, .95); }
 .tower-plan-no {
   flex: 0 0 30px; height: 30px; border-radius: 50%; align-self: center;
@@ -137,6 +137,14 @@
 }
 .elite-tag { font-style: normal; font-size: 17px; color: #fff; background: #c05151; border-radius: 10px; padding: 2px 10px; }
 .tower-plan-mech { font-size: 19px; color: #836120; }
+/* 题面（每层最终位）：要一眼看出「这层最后有个需要读的机制」。
+   一行题面 + 一行对策正好两行，行高压紧一点，否则 4 行预告会被卡片下沿裁掉。 */
+.tower-plan li.trial { border-color: #b07ad0; background: linear-gradient(rgba(250, 242, 255, .97), rgba(240, 228, 252, .97)); }
+.tower-plan li.trial b { color: #6a2f8f; }
+.trial-tag { font-style: normal; font-size: 17px; color: #fff; background: #8b52b8; border-radius: 10px; padding: 2px 10px; }
+.tower-plan li.trial .tower-plan-mech { color: #5f3b80; font-weight: bold; font-size: 19px; }
+.tower-plan-counter { font-size: 19px; color: #2f7a52; }
+.tower-plan li.trial .tower-plan-mech, .tower-plan li.trial .tower-plan-counter { line-height: 1.1; }
 
 /* ---------- 本局构筑标签 ---------- */
 .tower-buffs { margin: 14px 0; }

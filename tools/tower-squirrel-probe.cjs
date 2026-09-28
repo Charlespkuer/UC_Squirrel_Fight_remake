@@ -1,11 +1,13 @@
-/* 挑战塔诊断探针：走真实 Tower.nextBattle / buildFoe 路径，实测第 4 场（松鼠）单场强度。
+/* 挑战塔诊断探针：走真实 Tower.nextBattle / buildFoe 路径，实测第 4 场（题面）单场强度。
  *
  *   node tools/tower-squirrel-probe.cjs [每层采样数]         # 1~8 层第 4 场强度表
  *   node tools/tower-squirrel-probe.cjs 300 --foe=12/5       # 指定玩家 build 复核
  *
  * 验收口径（tools/tower-balance.cjs 是集成关口，这里只看单场手感）：
- *   第 4 场「胜时剩余血量」应与改版前的机制 NPC 同档（≈75~80%），
- *   否则每层 4 场连战的血量继承压力会明显变重。
+ *   第 4 场是整层的最后一战，所以「胜时剩余血量」不再继承给下一场，
+ *   这里主要看两件事：胜率（别变成必败题）与回合数/剩余血（题面的节奏特征是否符合设计）。
+ *   实测参考（28 级随机配装、200 场）：熔核 7.6 回合速杀、苔龟/霜缚/镜鳞吃回合、
+ *   蚀骨 21 回合（消耗型）、镜鳞剩余血最低（反伤是玩家自己打自己）。
  * 注意玩家等级固定、层数递增，所以表里胜率逐层下滑是预期的，不是回归。 */
 const fs = require('node:fs');
 const path = require('node:path');

@@ -50,9 +50,11 @@
   }
   function planHtml(preview) {
     return '<ol class="tower-plan">' + preview.map((b, i) =>
-      '<li class="' + (b.elite ? 'elite' : '') + '"><span class="tower-plan-no">' + (i + 1) + '</span>' +
+      '<li class="' + (b.elite ? 'elite' : '') + (b.trial ? ' trial' : '') + '"><span class="tower-plan-no">' + (i + 1) + '</span>' +
       '<b>' + esc(b.name) + '</b>' + (b.elite ? '<em class="elite-tag">精英</em>' : '') +
+      (b.trial ? '<em class="trial-tag">题面</em>' : '') +
       (b.mechDesc ? '<span class="tower-plan-mech">' + esc(b.mechDesc) + '</span>' : '') +
+      (b.counter ? '<span class="tower-plan-counter">' + esc(b.counter) + '</span>' : '') +
       (b.elite && b.mechs && b.mechs[1] ? '<span class="tower-plan-mech">叠加：' + esc(MECH_NAME[b.mechs[1]] || b.mechs[1]) + '</span>' : '') +
       '</li>').join('') + '</ol>';
   }
@@ -156,6 +158,8 @@
       Promise.resolve(Main.startBattle(nx.foe, {
         region: nx.region, kind: mode, useProps: false, hpRatio: nx.hpRatio, adjustMe: nx.adjustMe,
         debuffs: nx.debuffs || [],
+        // 题面战斗：把规则贴在战斗画面里（进层前预告里已经读过一遍，这里是备忘）
+        trial: nx.info && nx.info.trial ? { title: nx.info.title || '题面', text: nx.info.mechDesc || '' } : null,
         // 塔里的战斗不许跳过（否则整层白给），右下角改成 1×/2× 倍速切换
         allowSkip: false, speedToggle: true,
         // 塔的产出全部由状态机结算（松果/压缩碎片/抽奖卷），关掉战斗飘物，

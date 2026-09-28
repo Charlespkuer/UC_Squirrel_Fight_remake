@@ -6,6 +6,14 @@
  * 挑战塔扩展（tower.js 注入，普通战斗不带这些字段，行为与旧版一致）：
  *   fighter.mech: NPC 专属机制 id 数组（berserk/rhythmCrit/regen/thorns/
  *                 poison/freeze/wolf/lifesteal/shell/devour）
+ *                 题面（最终位对手，玩家式 AI 也生效）：
+ *                 trialCore（第 5 次行动起受伤 −80%、力敏速 +50%）
+ *                 trialMoss（每回合回 6% 最大生命，配 thorns 反弹 15%）
+ *                 trialDry（封死玩家治疗，每 3 次行动吸取玩家 10% 当前生命）
+ *                 trialFrost（第 1/4/7… 次行动冻结玩家）
+ *                 trialMirror（单次伤害 ≥20% 最大生命时反弹 45%）
+ *                 trialBloodfang（每掉 20% 生命，攻击 +35%）
+ *                 trialErode（玩家每次出手叠 1 层攻击 −3%，最多 10 层）
  *   fighter.mods: 玩家侧塔 buff 数值包 {dmgMul, critBonus, critDmgBonus,
  *                 dodgeBonus, takenMul, regenPct, lifestealPct, shellPct,
  *                 mustHitFirst, firstSkillFree, openStrikePct,
@@ -84,16 +92,20 @@
       // 战斗内状态
       ap: 0, restNext: false, pendingWeapon: null, stun: 0, silence: 0, disarm: 0, shellCharges: 0,
       mustHitNext: !!(mods && mods.mustHitFirst), stripTurns: 0, usedFakeDie: false, usedMaster: false, usedShell: false, usedCosmos: false, usedSnack: false,
+      // 题面·枯泉：治疗量倍率（0 = 完全封疗）
+      healMul: 1,
       usedUlt: false, acted: false, usedFreeSkill: false,
       swordDodge: 0, meteorDodge: 0, debuffs: { power: 0, agility: 0, speed: 0 },
       dot: null, // {dmg, rounds} 或 {pct, rounds}（按当前生命比例扣血）
       buffFlat: { power: 0, agility: 0, speed: 0 },
       // —— 挑战塔扩展状态 ——
       mech, mods,
+      // 机制的可调数值（tower-data.js 里定，题面文本与判定共用一份，避免文案/数值走偏）
+      mechParams: f.mechParams && typeof f.mechParams === 'object' ? f.mechParams : null,
       // 松鼠对手的固定出招循环（tower-data.js 定义）：['common'|'weapon'|'skill', …]
       pattern: Array.isArray(f.pattern) && f.pattern.length ? f.pattern.slice() : null,
       patternStep: 0,
-      mechState: { basePower: stat(f.power, 1), berserk: false },
+      mechState: { basePower: stat(f.power, 1), berserk: false, core: false, bfStep: 0, erode: 0 },
       shell: Math.round(fullHp * ((mech.includes('shell') ? 0.30 : 0) + (mods && mods.shellPct || 0))),
       pendingNote: null,
     };
@@ -102,6 +114,8 @@
   /** 真·色诱之术：被脱光装备期间，装备提供的属性与附加能力全部失效（回到裸属性）。 */
   function stripped(c) { return Number(c.stripTurns) > 0; }
   function statOf(c, key) { return stripped(c) ? c.baseStats[key] : c[key]; }
+  /** 题面·枯泉：治疗量被压制时按倍率结算（0 层完全封疗）。 */
+  function healOf(c, amount) { return Math.max(0, Math.round(Number(amount) * (c.healMul == null ? 1 : c.healMul))); }
   function effPower(c) { return Math.max(1, Math.round(statOf(c, 'power') * (1 - c.debuffs.power / 100) + c.buffFlat.power)); }
   function effAgility(c) { return Math.max(1, Math.round(statOf(c, 'agility') * (1 - c.debuffs.agility / 100) + c.buffFlat.agility)); }
   function effSpeed(c) { return Math.max(1, Math.round(statOf(c, 'speed') * (1 - c.debuffs.speed / 100) + c.buffFlat.speed)); }
@@ -237,6 +251,7 @@
       out.dmg = Math.round(out.dmg * (100 - pct) / 100);
     }
     if (def.mods && def.mods.takenMul) out.dmg = Math.round(out.dmg * (1 + Number(def.mods.takenMul)));   // 塔 buff「铁布衫」
+    if (def.mech.includes('trialCore') && def.mechState.core) out.dmg = Math.round(out.dmg * 0.2);        // 题面·熔核：成型后受伤 −80%
     out.dmg = Math.max(1, out.dmg);
     return out;
   }
@@ -328,6 +343,17 @@
           att.hp -= reflect;
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
         }
+        // 题面·镜鳞：单次伤害超过阈值（默认 20% 最大生命）时，反弹该次伤害的 45%
+        // （逼玩家压低单次伤害 / 走多段；阈值与反弹比例由 tower-data.js 注入，方便调平衡）
+        const mp = (def.mechParams && def.mechParams.trialMirror) || null;
+        const threshold = (mp && Number(mp.threshold)) || 0.15;
+        const reflectPct = (mp && Number(mp.reflect)) || 0.6;
+        if (def.mech.includes('trialMirror') && att.hp > 0 && dmg >= def.maxHp * threshold) {
+          const reflect = Math.max(1, Math.round(dmg * reflectPct));
+          att.hp -= reflect;
+          r.thornsDmg = (r.thornsDmg || 0) + reflect;
+          r.noteText = (r.noteText ? r.noteText + '·' : '') + '镜鳞·反噬'; r.noteSide = def.side;
+        }
         if (def.mech.includes('poison') && !att.dot && chance(30)) {  // 毒藤缠绕：30% 中毒
           att.dot = { pct: 0.03, rounds: 3 };
           r.poisonApplied = true;
@@ -335,7 +361,7 @@
         }
         const lsPct = (att.mech.includes('lifesteal') ? 0.30 : 0) + (att.mods && Number(att.mods.lifestealPct) || 0);
         if (lsPct > 0 && att.hp > 0) {                              // 血之渴望 / 血饮狂刀
-          const heal = Math.min(att.maxHp - att.hp, Math.round(dmg * lsPct));
+          const heal = Math.min(att.maxHp - att.hp, healOf(att, dmg * lsPct));
           if (heal > 0) { att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
         }
       }
@@ -387,6 +413,45 @@
       if (att.mech.includes('freeze') && (att.npcActs || 0) % 3 === 0) {
         def.stun = Math.max(def.stun, 1);                // 寒冰禁锢：每第 3 次行动冻结玩家
         att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '寒冰禁锢';
+      }
+      /* ---------------- 挑战塔题面（最终位对手） ----------------
+       * 题面文本写的是「第 N 回合」；这里统一把 att.npcActs 当作它的出手次数。 */
+      const acts = att.npcActs || 0;
+      // 熔核：第 5 次行动起硬度暴涨（受伤 −80%、力敏速 +50%）—— 强制前 4 回合速杀
+      if (att.mech.includes('trialCore') && !att.mechState.core && acts >= 5) {
+        att.mechState.core = true;
+        for (const key of ['power', 'agility', 'speed']) att.buffFlat[key] += Math.max(1, Math.round(att[key] * 0.5));
+        att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '熔核成型';
+      }
+      // 血牙：每掉 20% 生命，攻击 +35%（越打越猛）—— 逼一波带走
+      if (att.mech.includes('trialBloodfang') && att.maxHp > 0) {
+        const step = Math.floor((1 - att.hp / att.maxHp) / 0.2);
+        if (step > att.mechState.bfStep) {
+          const add = step - att.mechState.bfStep;
+          att.mechState.bfStep = step;
+          att.buffFlat.power += Math.max(1, Math.round(att.mechState.basePower * 0.35)) * add;
+          att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '血牙·狂怒';
+        }
+      }
+      // 霜缚：第 1/4/7... 次行动前冻结玩家一次
+      if (att.mech.includes('trialFrost') && (acts - 1) % 3 === 0) {
+        def.stun = Math.max(def.stun, 1);
+        att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '霜缚';
+      }
+      // 枯泉：封死玩家治疗，并且每 3 次行动吸取玩家 10% 当前生命
+      if (att.mech.includes('trialDry')) {
+        def.healMul = 0;
+        if (acts % 3 === 0 && def.hp > 0) {
+          const drain = Math.max(1, Math.round(def.hp * 0.1));
+          def.hp = Math.max(0, def.hp - drain);
+          att.hp = Math.min(att.maxHp, att.hp + drain);
+          att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '枯泉·吸血';
+        }
+      }
+      // 苔龟：每回合回复 6% 最大生命（受击反弹 15% 走 thorns）
+      if (att.mech.includes('trialMoss') && att.hp > 0 && att.hp < att.maxHp) {
+        att.hp = Math.min(att.maxHp, att.hp + Math.max(1, Math.round(att.maxHp * 0.06)));
+        att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '苔甲再生';
       }
     }
 
@@ -490,7 +555,7 @@
       if (att.skills[13] && !att.usedMaster && att.masterLevel > 0 && att.silence <= 0 &&
           att.hp <= att.maxHp * rules.masterHpRatio && chance(rules.masterChance)) {
         att.usedMaster = true;
-        const heal = Math.min(att.maxHp - att.hp, att.masterLevel * 4);
+        const heal = Math.min(att.maxHp - att.hp, healOf(att, att.masterLevel * 4));
         att.hp += heal;
         att.mustHitNext = true;
         pushRound({ attacker: att.side, action: 'skill', id: 13, level: att.skills[13], healSelf: heal, noDmg: true });
@@ -577,7 +642,7 @@
           if (w.id === 13 && chance(weaponEffect(w, 10, 3, 3) + trueW(w, 'stun'))) { def.stun = Math.max(def.stun, 1); r.stunApplied = true; }
           if (w.id === 16 && chance(weaponEffect(w, 10, 4, 4) + trueW(w, 'silence'))) { def.silence = Math.max(def.silence, 4); r.silenceApplied = true; }
         }
-        if (w.id === 14 && att.hp > 0) { const heal = Math.min(att.maxHp - att.hp, Math.round(total * (weaponEffect(w, 10, 4, 2) + trueW(w, 'lifesteal')) / 100)); att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
+        if (w.id === 14 && att.hp > 0) { const heal = Math.min(att.maxHp - att.hp, healOf(att, total * (weaponEffect(w, 10, 4, 2) + trueW(w, 'lifesteal')) / 100)); att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
         if (w.id === 17 && att.hp > 0) { const self = Math.round(att.hp * 0.1); att.hp -= self; r.selfBurn = self; }
         // 反击（大榔头2、死神镰刀15 不可反击）
         maybeCounter(att, def, r, w.type === '近战' && ![2, 15].includes(w.id));
@@ -632,7 +697,7 @@
           }
           case 17: { // 来点松果：每场战斗限用一次
             att.usedSnack = true;
-            const heal = Math.min(att.maxHp - att.hp, (20 + 2 * (lv - 1)) * Math.max(1, effect(att, 40)));
+            const heal = Math.min(att.maxHp - att.hp, healOf(att, (20 + 2 * (lv - 1)) * Math.max(1, effect(att, 40))));
             att.hp += heal;
             r.healSelf = heal; r.noDmg = true; r.actAgain = true;
             break;
@@ -706,7 +771,7 @@
       // 回合开始回复（药师「百草回春」/ 塔 buff「活血丹」「回春术」）
       const regenPct = (actor.mech.includes('regen') ? 0.03 : 0) + (actor.mods && Number(actor.mods.regenPct) || 0);
       if (regenPct > 0 && actor.hp > 0 && actor.hp < actor.maxHp) {
-        const heal = Math.min(actor.maxHp - actor.hp, Math.max(1, Math.round(actor.maxHp * regenPct)));
+        const heal = Math.min(actor.maxHp - actor.hp, healOf(actor, Math.max(1, Math.round(actor.maxHp * regenPct))));
         actor.hp += heal;
         pushRound({ attacker: actor.side, action: 'regen', heal, noteText: actor.mech.includes('regen') ? '百草回春' : '回复' });
         if (B.hp <= 0 || A.hp <= 0) break;
@@ -726,7 +791,21 @@
       if (actor.stun > 0) { actor.stun--; pushRound({ attacker: actor.side, action: 'stunned' }); if (!followup) tickRestrictions(actor); continue; }
 
       if (actor.npcType) { npcAction(actor, def); npcMechAfter(actor, def); }
-      else playerLikeAction(actor, def);
+      else {
+        // 挑战塔的题面对手也是「玩家式」AI（无 npcType），机制要在这里补挂：
+        // 出手前先数它这一次行动，再走玩家式出招。玩家的 mech 为空数组，不受影响。
+        if (actor.mech.length) { actor.npcActs = (actor.npcActs || 0) + 1; npcMechTurnStart(actor, def); }
+        playerLikeAction(actor, def);
+        if (actor.mech.length) npcMechAfter(actor, def);
+        // 题面·蚀骨：玩家每次出手后叠 1 层「攻击 −3%」（层数记在对手身上，debuff 落在出手方身上）
+        if (def.mech.includes('trialErode') && actor.hp > 0) {
+          const stacks = Math.min(10, def.mechState.erode + 1);
+          if (stacks > def.mechState.erode) {
+            def.mechState.erode = stacks;
+            actor.buffFlat.power -= Math.max(1, Math.round(actor.mechState.basePower * 0.03));
+          }
+        }
+      }
       if (!followup) tickRestrictions(actor);
       // 无敌模式兜底：吸血、自伤、反伤等旁路都不会把玩家打死
       if (A.hp <= 0 && godSave(A)) A.hp = 1;

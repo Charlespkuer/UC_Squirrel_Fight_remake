@@ -83,6 +83,11 @@
    * 这样每层 4 场连战的血量继承压力和改版前一致。 */
   const FOE_SQUIRREL_POWER_MUL = 0.50;
   const FOE_SQUIRREL_HP_MUL = 0.70;
+  /* 题面（第 4 场最终位）单独一组系数：它比普通松鼠多一条机制，
+   * 血量上限要留出「爆发窗口」（熔核恨不得 4 回合内打完），所以单独一档调，
+   * 不动上面的松鼠系数（x10 层第 5 场精英也走 NPC 系数）。 */
+  const FOE_TRIAL_POWER_MUL = 0.50;
+  const FOE_TRIAL_HP_MUL = 0.62;
 
   // ---------- NPC 池（10 个，8 类机制） ----------
   // bias: 力/敏/速/血 四元乘数；anim 复用现有动画表（tl 螳螂 / xh 仙鹤 / xm 熊猫）。
@@ -117,14 +122,14 @@
    * 对应大招名见 sim.js 的 npcUlt（疾风镰刀舞 / 仙鹤展翅 / 熊掌震地）。 */
   const HERO_DEBUFF = Object.freeze({
     tl: { anim: 'tl', ult: '疾风镰刀舞', kind: 'maxHp', pct: 0.08,
-      name: '重伤', desc: '生命上限 −10%' },
+      name: '重伤', desc: '生命上限 −8%' },
     xh: { anim: 'xh', ult: '仙鹤展翅', kind: 'stat', pct: 0.08,
-      name: '战吼', desc: '随机一项属性 −10%（力/敏/速）' },
+      name: '战吼', desc: '随机一项属性 −8%（力/敏/速）' },
     xm: { anim: 'xm', ult: '熊掌震地', kind: 'lock',
       name: '压制', desc: '随机锁住一个武器或技能（本层无法使用）' },
   });
 
-  // ---------- 松鼠对手（每层最后一场 / 第 4 场） ----------
+  // ---------- 松鼠对手（模板库；第 4 场已改由「题面」占据，这张表当前没有出场口） ----------
   /* 和小松鼠同族：战斗里用玩家那套松鼠贴图（镜像朝左，tower.js 不给 npcType 即自动生效），
    * 武器与技能都取自松鼠本来的池子（GameDict 的 weaponsMap / skillsMap）。
    *
@@ -133,8 +138,10 @@
    *   某一项这回合用不了（被缴械 / 沉默 / 没主动技能）就顺延到下一个能用的。
    *   每个模板只带 1 个主动技能，所以「放技能」这一步也是确定的。
    *
-   * 三套模板按层数固定轮换（(n−1) mod 3，见 squirrelFor），数值仍按 1.4 的难度模型缩放；
-   * 武器/技能等级会随目标等级小幅上调，避免高层还在用 8 级菜刀。
+   * 三套模板按层数固定轮换（(n−1) mod 3，见 squirrelFor）。
+   * 题面（TRIALS）接管第 4 场之后这套模板暂时打不到，保留的理由有两个：
+   *   1) 题面本来就是照它的结构写的（bias + 固定循环 + 武技池 + 同族贴图）；
+   *   2) 以后要给普通层加「松鼠杂兵」，直接拿这张表就能用（tower.js 仍保留 entry.kind === 'squirrel' 分支）。
    * 想加/改模板只动这张表就行。 */
   const SQUIRRELS = Object.freeze([
     { id: 'scout', name: '斥候松鼠', type: '敏捷型', region: 3,
@@ -156,6 +163,86 @@
   const SQUIRREL_BY_ID = Object.fromEntries(SQUIRRELS.map((n) => [n.id, n]));
   /** 第 4 场固定轮换：(n−1) mod 3 → 松鼠模板。 */
   function squirrelFor(layer) { return SQUIRRELS[(Math.max(1, layer) - 1) % SQUIRRELS.length]; }
+
+  // ---------- 题面（每层最终位对手，7 个固定轮换） ----------
+  /* 设计约束（见 docs/挑战塔重构建议.md §3.2）：
+   *   1. 可预告：mechDesc 要写清「第几次行动」「百分比」，进层前就能读到；
+   *   2. 改变节奏而不是加血：每个题面都有自己的「爆发窗口 / 该苟的窗口」；
+   *   3. 有明确对策：counter 一行写清怎么打，玩家读题 → 配装 → 验证。
+   * 数值上仍复用松鼠的系数与武技池（同族贴图、固定出招循环 → 可背板），
+   * 只是 bias 随题面调整：血厚的题面（苔龟/镜鳞/蚀骨）攻击更低，反之亦然。
+   * 机制实现全部在 sim.js（trial* 前缀），这里只写数据。 */
+  /* 镜鳞的两个数值单独提出来：题面文本、sim 判定、以及调平衡都要用同一个数。
+   * 阈值是实测定标出来的：玩家单次伤害大多落在敌人 10%~25% 生命区间（爆发招 30%+），
+   * 阈值定 8% 时几乎每一下都反弹，玩家等于自杀（实测第 5 层整层通关率 29%）；
+   * 逐步调到 15%/60% → 20%/50% → 20%/45%，最后一步是为了 20~25 层墙区
+   * （镜鳞/霜缚落在 26/25 层）能过 8% 验收线。现在只有暴击·爆发越线，普攻安全 ——
+   * 题面才真的变成「压低单次伤害走多段」，同时保留「一次性越线强杀」的高风险打法。 */
+  const MIRROR_THRESHOLD = 0.20;
+  const MIRROR_REFLECT = 0.45;   // 反弹该次伤害的 45%
+  const TRIALS = Object.freeze([
+    { id: 'core', name: '熔核·炽壳', title: '熔核', type: '爆发窗口型', region: 1,
+      bias: { power: 1.00, agility: 0.90, speed: 0.90, hp: 0.82 },
+      weapons: [{ id: 2, level: 6 }], skills: [{ id: 10, level: 7 }, { id: 4, level: 7 }],
+      pattern: ['common', 'weapon', 'common', 'weapon'],
+      patternDesc: '固定循环：普攻 → 大榔头（出手慢，前 4 回合是唯一窗口）',
+      mech: ['trialCore'],
+      mechDesc: '题面·熔核：它的第 5 次行动起，受伤 −80%、力敏速 +50%，此后基本打不动',
+      counter: '对策：前 4 回合内打完 —— 爆发 / 先手制敌 / 攻击类 buff' },
+    { id: 'moss', name: '苔龟·磐甲', title: '苔龟', type: '回复型', region: 2,
+      bias: { power: 0.88, agility: 0.85, speed: 0.85, hp: 1.10 },
+      weapons: [{ id: 2, level: 6 }], skills: [{ id: 7, level: 7 }, { id: 10, level: 7 }],
+      pattern: ['weapon', 'common', 'common', 'weapon'],
+      patternDesc: '固定循环：大榔头 → 普攻（血最厚、出手最慢）',
+      mech: ['trialMoss', 'thorns'],
+      mechDesc: '题面·苔龟：每回合回复 6% 最大生命；受到的任何伤害反弹 15%',
+      counter: '对策：单回合高爆发一波压死；忌多段小伤害（每一下都吃反弹）' },
+    { id: 'dry', name: '枯泉·涸井', title: '枯泉', type: '压制型', region: 3,
+      bias: { power: 0.95, agility: 1.00, speed: 0.95, hp: 1.06 },
+      weapons: [{ id: 8, level: 6 }], skills: [{ id: 8, level: 7 }, { id: 15, level: 7 }],
+      pattern: ['weapon', 'skill', 'common', 'common'],
+      patternDesc: '固定循环：菜刀 → 色诱之术 → 普攻',
+      mech: ['trialDry'],
+      mechDesc: '题面·枯泉：你的治疗量 −100%；它每 3 次行动吸取你当前生命的 10%',
+      counter: '对策：放弃回血流（师父/吸血/回春都无效），堆减伤与护盾硬吃' },
+    { id: 'frost', name: '霜缚·凝霜', title: '霜缚', type: '控制型', region: 4,
+      bias: { power: 0.92, agility: 1.10, speed: 1.12, hp: 0.85 },
+      weapons: [{ id: 8, level: 6 }], skills: [{ id: 23, level: 7 }, { id: 12, level: 7 }],
+      pattern: ['weapon', 'common', 'skill', 'weapon'],
+      patternDesc: '固定循环：菜刀 → 普攻 → 幸运一击',
+      mech: ['trialFrost'],
+      mechDesc: '题面·霜缚：它的第 1/4/7… 次行动前把你冻结一回合（出手越快越吃亏）',
+      counter: '对策：抢在冻结前打完，或用不占回合的技能/先手类 buff 换节奏' },
+    { id: 'mirror', name: '镜鳞·折光', title: '镜鳞', type: '反击型', region: 2,
+      bias: { power: 0.90, agility: 1.00, speed: 1.00, hp: 1.02 },
+      weapons: [{ id: 2, level: 6 }], skills: [{ id: 7, level: 7 }, { id: 16, level: 7 }],
+      pattern: ['common', 'weapon', 'weapon', 'common'],
+      patternDesc: '固定循环：普攻 → 大榔头',
+      mech: ['trialMirror'],
+      mechParams: { trialMirror: { threshold: MIRROR_THRESHOLD, reflect: MIRROR_REFLECT } },
+      mechDesc: '题面·镜鳞：单次伤害达到它 ' + Math.round(MIRROR_THRESHOLD * 100) + '% 最大生命时，反弹该次伤害的 ' +
+        Math.round(MIRROR_REFLECT * 100) + '%',
+      counter: '对策：压低单次伤害走多段小招；或反其道——一次性越线强杀' },
+    { id: 'bloodfang', name: '血牙·狂噬', title: '血牙', type: '成长型', region: 1,
+      bias: { power: 1.08, agility: 1.00, speed: 1.05, hp: 0.94 },
+      weapons: [{ id: 12, level: 6 }], skills: [{ id: 14, level: 7 }, { id: 5, level: 7 }],
+      pattern: ['weapon', 'skill', 'weapon', 'common'],
+      patternDesc: '固定循环：狼牙棒 → 小宇宙爆发 → 狼牙棒',
+      mech: ['trialBloodfang'],
+      mechDesc: '题面·血牙：它每损失 20% 生命，攻击 +35%（越拖越猛）',
+      counter: '对策：一波带走，不给它挨打变强的机会' },
+    { id: 'erode', name: '蚀骨·腐毒', title: '蚀骨', type: '消耗型', region: 3,
+      bias: { power: 0.86, agility: 0.95, speed: 0.95, hp: 1.28 },
+      weapons: [{ id: 8, level: 6 }], skills: [{ id: 10, level: 7 }, { id: 8, level: 7 }],
+      pattern: ['common', 'weapon', 'common', 'skill'],
+      patternDesc: '固定循环：普攻 → 菜刀 → 普攻 → 色诱之术',
+      mech: ['trialErode'],
+      mechDesc: '题面·蚀骨：你每出手一次叠 1 层「攻击 −3%」，最多 10 层（本场有效）',
+      counter: '对策：速杀；或用不占出手的伤害（先手制敌 / 反弹）绕开层数' },
+  ]);
+  const TRIAL_BY_ID = Object.fromEntries(TRIALS.map((n) => [n.id, n]));
+  /** 题面固定按层轮换（可预习）：第 1 层熔核 → 第 7 层蚀骨 → 第 8 层熔核… */
+  function trialFor(layer) { return TRIALS[(Math.max(1, layer) - 1) % TRIALS.length]; }
 
   /** 第 4 场固定轮换：(n−1) mod 10 → NPC。 */
   /** 精英场（x10 层第 5 场）固定轮换：主体 + 第二机制（取循环下一位的机制）。
@@ -233,8 +320,10 @@
     endlessLevel, endlessSegment, endlessMult, endlessMechStacks, endlessTickets,
     ENDLESS_MECH_ORDER, ENDLESS_CONSOLATION_LAYER, SCORE, COINS, SHOP, shopPrice,
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_SQUIRREL_POWER_MUL, FOE_SQUIRREL_HP_MUL,
+    FOE_TRIAL_POWER_MUL, FOE_TRIAL_HP_MUL,
     NPCS, NPC_BY_ID, ELITE_ROTATION, eliteFor, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
+    TRIALS, TRIAL_BY_ID, trialFor,
     BUFFS, BUFF_BY_ID, RARITY_NAME, RARITY_WEIGHTS, FIXED_HEAL_PCT, AUTO_HEAL_PCT, STACK_MAX,
     towerPool, endlessPool,
   };

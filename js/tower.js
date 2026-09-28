@@ -109,9 +109,9 @@
      * 让整层的削弱序列完全可预期（先降上限、再降属性、最后锁武技），
      * 玩家才能读题、才能针对配 buff。原来是随机序，读题就不成立了。 */
     const plan = HEROES.map((anim) => ({ kind: 'hero', anim }));
-    // 第 4 场 = 松鼠对手（同族、用松鼠自己的武技、固定出招循环）；
+    // 第 4 场 = 题面（固定按层轮换的 7 个最终位对手：熔核/苔龟/枯泉/霜缚/镜鳞/血牙/蚀骨）；
     // 原来那 10 个机制 NPC 退到 x10 层的精英场（第 5 场），设计不浪费。
-    plan.push({ kind: 'squirrel', id: D().squirrelFor(layer).id });
+    plan.push({ kind: 'trial', id: D().trialFor(layer).id });
     if (layer % 10 === 0) {
       const e = D().eliteFor(layer);
       plan.push({ kind: 'elite', id: e.main.id, mechs: e.mechs });
@@ -120,9 +120,10 @@
   }
   function entryInfo(entry) {
     if (entry.kind === 'hero') return { name: HERO_NAME[entry.anim], anim: entry.anim, mechDesc: '', elite: false };
-    if (entry.kind === 'squirrel') {
-      const sq = D().SQUIRREL_BY_ID[entry.id];
-      return { name: sq.name, squirrel: true, elite: false, mechDesc: sq.patternDesc, mechs: [] };
+    if (entry.kind === 'trial') {
+      const tr = D().TRIAL_BY_ID[entry.id];
+      return { name: tr.name, squirrel: true, trial: true, elite: false,
+        mechDesc: tr.mechDesc, counter: tr.counter, mechs: tr.mech.slice(), title: tr.title };
     }
     const npc = D().NPC_BY_ID[entry.id];
     if (entry.kind === 'elite') {
@@ -137,7 +138,7 @@
   /** 预告与实战共用同一份「确定性部分」（三侠顺序预告里也随机一次即可）。 */
   function buildPlanPreview(layer) {
     const plan = HEROES.map((anim) => ({ kind: 'hero', anim }));
-    plan.push({ kind: 'squirrel', id: D().squirrelFor(layer).id });
+    plan.push({ kind: 'trial', id: D().trialFor(layer).id });
     if (layer % 10 === 0) { const e = D().eliteFor(layer); plan.push({ kind: 'elite', id: e.main.id, mechs: e.mechs }); }
     return plan;
   }
@@ -208,16 +209,18 @@
     // 无尽段机制叠加：所有怪物按固定顺序追加机制
     const extra = mode === 'endless' ? TD.ENDLESS_MECH_ORDER.slice(0, TD.endlessMechStacks(layer)) : [];
     let name, bias, npcType, skills = [], weapons = [], pattern = null, mech, elite = entry.kind === 'elite';
+    let mechParams = null;
     if (entry.kind === 'hero') {
       const scale = (GData.STAGE_TYPE_SCALE && GData.STAGE_TYPE_SCALE[entry.anim]) || 1;
       bias = { power: scale, agility: scale, speed: scale, hp: 1 };
       name = HERO_NAME[entry.anim]; npcType = entry.anim;
       skills = [{ id: HERO_SKILL[entry.anim], level: Math.max(1, Math.min(15, Math.round(LT / 5))) }];
       mech = extra.slice();
-    } else if (entry.kind === 'squirrel') {
-      // 松鼠对手：同族贴图（**不给 npcType** → 战斗里就用玩家那套松鼠图集并镜像朝左，
-      // 走 sim 的 playerLikeAction 分支，所以武器/技能都真的生效）。
-      const sq = TD.SQUIRREL_BY_ID[entry.id];
+    } else if (entry.kind === 'squirrel' || entry.kind === 'trial') {
+      // 松鼠 / 题面对手：同族贴图（**不给 npcType** → 战斗里就用玩家那套松鼠图集并镜像朝左，
+      // 走 sim 的 playerLikeAction 分支，所以武器/技能都真的生效，题面机制在 sim 的
+      // 「玩家式 AI」分支里补挂）。两者共用一套武技等级上调规则，只有 bias/机制不同。
+      const sq = entry.kind === 'trial' ? TD.TRIAL_BY_ID[entry.id] : TD.SQUIRREL_BY_ID[entry.id];
       bias = sq.bias; name = sq.name; npcType = null;
       // 武技等级随目标等级小幅上调，免得高层还在用 8 级菜刀
       const up = Math.max(0, Math.floor((LT - 28) / 12));
@@ -225,6 +228,11 @@
       skills = sq.skills.map((k) => ({ id: k.id, level: Math.max(1, Math.min(15, k.level + up)) }));
       pattern = sq.pattern.slice();
       mech = extra.slice();
+      // 题面机制：和机制 NPC 一样可以叠加无尽的段位机制，但自己的题面永远在
+      if (entry.kind === 'trial') {
+        for (const m of sq.mech) if (!mech.includes(m)) mech.push(m);
+        mechParams = sq.mechParams || null;
+      }
     } else {
       const npc = TD.NPC_BY_ID[entry.id];
       bias = npc.bias; name = npc.name; npcType = 'tw_' + npc.id;
@@ -235,19 +243,20 @@
     // 敌方数值：高血低攻（系数在 tower-data.js 里，带注释，方便 tower-tune 复调）
     // 力量单独用更低的系数，敏捷/速度维持原基准；血量抬高。
     const stat = (b, mul) => Math.max(1, Math.round(statBase * (mul || TD.FOE_STAT_MUL) * M * b * eliteMul));
+    const trial = entry.kind === 'trial';
     const foe = {
       name, level: LT, npcType,
-      power: stat(bias.power, TD.FOE_POWER_MUL * (entry.kind === 'squirrel' ? TD.FOE_SQUIRREL_POWER_MUL : 1)),
+      power: stat(bias.power, TD.FOE_POWER_MUL * (entry.kind === 'squirrel' ? TD.FOE_SQUIRREL_POWER_MUL : trial ? TD.FOE_TRIAL_POWER_MUL : 1)),
       agility: stat(bias.agility), speed: stat(bias.speed),
-      hp: Math.max(1, Math.round(hpBase * TD.FOE_HP_MUL * (entry.kind === 'squirrel' ? TD.FOE_SQUIRREL_HP_MUL : 1) * M * bias.hp * eliteMul)),
-      weapons, skills, mech, pattern,
+      hp: Math.max(1, Math.round(hpBase * TD.FOE_HP_MUL * (entry.kind === 'squirrel' ? TD.FOE_SQUIRREL_HP_MUL : trial ? TD.FOE_TRIAL_HP_MUL : 1) * M * bias.hp * eliteMul)),
+      weapons, skills, mech, pattern, mechParams,
     };
-    // poolNpc = 带专属机制的 NPC（「机制破解」类 buff 只对它生效）；松鼠不算
-    return { foe, elite, poolNpc: entry.kind === 'npc' || entry.kind === 'elite' };
+    // poolNpc = 带专属机制的对手（「机制破解」类 buff 只对它生效）；题面也算机制位（它就是这个层的机制考验）
+    return { foe, elite, poolNpc: entry.kind === 'npc' || entry.kind === 'elite' || trial };
   }
   function regionOf(entry) {
-    if (entry.kind === 'squirrel') {
-      const sq = D().SQUIRREL_BY_ID[entry.id];
+    if (entry.kind === 'squirrel' || entry.kind === 'trial') {
+      const sq = entry.kind === 'trial' ? D().TRIAL_BY_ID[entry.id] : D().SQUIRREL_BY_ID[entry.id];
       return sq && sq.region != null ? sq.region : 0;
     }
     const anim = entry.kind === 'hero' ? entry.anim : D().NPC_BY_ID[entry.id].anim;

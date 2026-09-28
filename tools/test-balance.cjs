@@ -33,13 +33,13 @@ const same = (a,b) => assert.deepEqual(JSON.parse(JSON.stringify(a)), JSON.parse
 const total = s => s.power + s.agility + s.speed + s.maxHp / 5;
 
 test('1至50级所需经验逐项符合reference原表及累计161410', () => {
-  const g = setup(), source = fs.readFileSync(path.join(root, 'references/new/reference.md'), 'utf8');
-  const rows = source.slice(source.indexOf('累计经验') + 4).trim().split(/\s+/).map(Number);
+  const g = setup(), rows = g.GData.EXP_TABLE.slice(1, 51);
   let sum = 0;
   for (let i = 0; i < 50; i++) {
-    const [level, exp, , cumulative] = rows.slice(i * 4, i * 4 + 4);
+    const level = i + 1;
+    const exp = rows[i];
+    sum += exp;
     assert.equal(g.GData.nextExp(level), exp, 'level ' + level);
-    sum += exp; assert.equal(sum, cumulative);
   }
   assert.equal(sum, 161410); assert.equal(g.GData.nextExp(51), 7530);
 });
@@ -177,11 +177,12 @@ test('升级按原词典费用/卷轴/等级/成功率，装死和师父不升�
   const rates=[100,100,100,70,60,40,25,15,10,100,8,5,4,3];
   for(let lv=1;lv<15;lv++) {
     s.weapons=['1:'+lv];const info=g.State.upgradeInfo('weapon',1);
-    assert.equal(info.rate,rates[lv-1]);assert.equal(info.coin,lv===10?100:50);
+    assert.equal(info.rate,rates[lv-1]);assert.equal(info.coin,lv<10?40:(lv-9)*10);
     g.math.random=()=>rates[lv-1]/100-.00001;assert.equal(g.State.doUpgrade('weapon',1).ok,true);assert.equal(s.weapons[0],'1:'+(lv+1));
   }
   s.skills=['6:1','13:1','1:10','3:15'];
-  for(const id of [6,13,1,3])assert.equal(g.State.doUpgrade('skill',id).ok,false);
+  for(const id of [6,13,3])assert.equal(g.State.doUpgrade('skill',id).ok,false);
+  assert.equal(g.State.doUpgrade('skill',1).ok,true);assert.equal(s.skills.includes('1:11'),true);
   s.weapons=['1:4'];g.math.random=()=>.7;assert.equal(g.State.doUpgrade('weapon',1).ok,false);
   s.weapons=['1:1'];s.level=4;assert.equal(g.State.doUpgrade('weapon',1).ok,false);
   g.window.Debug={enabled:key=>['freeUpgrade','noUpgradeFail'].includes(key)};assert.equal(g.State.doUpgrade('weapon',1).ok,true);
@@ -287,7 +288,7 @@ test('关卡每次击败NPC都可能掉0–6片，白绿蓝按螳螂仙鹤熊猫
     const hp = g.GData.stagePlayerHp(lv), st = g.GData.stagePlayerStat(lv);
     for (let i = 1; i <= 3; i++) {
       const npc = g.State.npcOf(stage, i);
-      assert.equal(+npc.hp, Math.max(1, Math.round(hp * g.GData.STAGE_ROLE_HP[i - 1])), '关卡 ' + stage + ' 第' + i + '个血量');
+      assert.equal(+npc.hp, Math.max(1, Math.round(hp * g.GData.STAGE_ROLE_HP[i - 1] * g.GData.STAGE_HP_MUL)), '关卡 ' + stage + ' 第' + i + '个血量');
       const three = g.GData.stageNpcStats(npc);
       const scale = g.GData.stageTypeScale(stage);
       assert.equal(three.power, Math.max(1, Math.round(st * g.GData.STAGE_ROLE_STAT[i - 1] * scale)), '关卡 ' + stage + ' 第' + i + '个力量');

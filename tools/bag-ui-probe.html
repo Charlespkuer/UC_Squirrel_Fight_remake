@@ -242,6 +242,23 @@ async function main() {
         const r = e.getBoundingClientRect();
         return { sel, top: Math.round(r.top), bottom: Math.round(r.bottom), center: Math.round((r.top + r.bottom) / 2) };
       });
+      /* 用 canvas 量两个图标「墨迹」的真实包围盒，才能客观比较
+         「图案 / 底座方框」的比例（颜色阈值分不开金色图案和金色胶囊底）。 */
+      const inkOf = (sel) => {
+        const el = document.querySelector(sel); if (!el) return null;
+        const cs = getComputedStyle(el);
+        const cv = document.createElement('canvas').getContext('2d');
+        cv.font = cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+        const m = cv.measureText(el.textContent.trim());
+        return { char: el.textContent.trim(), font: cs.fontSize,
+          inkW: +(m.actualBoundingBoxLeft + m.actualBoundingBoxRight).toFixed(1),
+          inkH: +(m.actualBoundingBoxAscent + m.actualBoundingBoxDescent).toFixed(1) };
+      };
+      const boxOf = (sel) => { const r = rect(sel); return r ? { w: r.w, h: r.h } : null; };
+      P.iconFit = {
+        sell: { box: boxOf('.status-sell-icon'), ink: inkOf('.status-sell-glyph') },
+        fusion: { box: boxOf('.status-fusion-icon'), ink: inkOf('.status-fusion-glyph') },
+      };
       snap('装备出售入口', '.status-sell-link');
       snap('融合入口', '.status-fusion-link');
       P.done = true; P.errors = window.__errs.slice(); return;

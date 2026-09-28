@@ -1786,7 +1786,8 @@
    *   3、体力恢复速度最快1.5倍；4、昵称以尊贵标识展示；
    *   5、首次开通永久赠送6个装备格子；6、师父是VIP时徒弟每日额外获得金松果；
    *   7、主动挑战VIP玩家所得经验上涨30%；8、体力上限提升（本项目改为「当前等级应有的上限 +60」）。
-   * 原版按天售卖（buyVIP.do）；离线版改成金松果购买，价格是按本项目经济定的平衡值。
+   * 原版按天售卖（buyVIP.do）；离线版改成金松果购买（7 天 150 / 30 天 500）。
+   * 到期只是停掉特权，存档里的 vip.level / vip.exp 一直保留，续费后从原等级继续。
    * 「跳过战斗」在本项目对所有10级以上玩家开放（原版也是 VIP 或 等级>9），因此不作为VIP独占。 */
   const VIP_LEVELS = [   // [等级, 被动经验上限/天, 体力恢复倍率]
     [1, 150, 1.1], [2, 150, 1.2], [3, 200, 1.2], [4, 200, 1.3], [5, 250, 1.3],
@@ -1796,7 +1797,7 @@
   const VIP_MAX_LEVEL = 10;
   const VIP_ENERGY_BONUS = 60;   // 特权 8：在当前等级应有的体力上限之上再 +60
   const VIP_GEAR_BONUS = 6;      // 特权 5
-  const VIP_PLANS = [Object.freeze({ days: 7, gold: 300 }), Object.freeze({ days: 30, gold: 1000 })];
+  const VIP_PLANS = [Object.freeze({ days: 7, gold: 150 }), Object.freeze({ days: 30, gold: 500 })];
   const GEAR_CAPACITY = 100;
 
   function vipState() {
@@ -2295,7 +2296,7 @@
     { key: 'arena',     name: '参加 {n} 次竞技场比赛',    steps: [1, 2, 3], minLevel: 11 },
     { key: 'rank',      name: '参加 {n} 场天梯赛',        steps: [2, 3, 5], minLevel: 30 },
     { key: 'spar',      name: '和好友切磋 {n} 次',        steps: [1, 2, 3] },
-    { key: 'lottery',   name: '抽取 {n} 次每日幸运抽奖',  steps: [1, 2, 3] },
+    { key: 'lottery',   name: '抽取 {n} 次每日幸运抽奖',  steps: [1, 2] },   // 每日免费只有 1 次，最多要求 2 次
     { key: 'merge',     name: '合成或融合 {n} 次装备',    steps: [1, 2, 3], minLevel: 10 },
     { key: 'gem',       name: '合成 {n} 次宝石',          steps: [1, 2, 3], minLevel: 45 },
     { key: 'upgrade',   name: '升级武器或技能 {n} 次',    steps: [1], minLevel: 2 },   // 固定 1 次；全都升不动时整条不出现，见 questPoolFor

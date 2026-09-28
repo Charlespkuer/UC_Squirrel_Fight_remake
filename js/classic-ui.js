@@ -247,7 +247,8 @@
     const sets = {
       status: [['status','状态'],['weapons','武器'],['skills','技能']],
       challenge: [['challenge','随机'],['friends','好友'],['arena','竞技'],['stages','关卡']],
-      message: [['messages','消息'],['chat','聊天'],['ranklog','天梯赛'],['revenge','复仇'],['board','留言板'],['toplist','排行榜']],
+      // 留言板与聊天合并成一个「聊天」页（第 2 项），不再单列
+      message: [['messages','消息'],['chat','聊天'],['ranklog','天梯赛'],['revenge','复仇'],['toplist','排行榜']],
       bag: [['bag','背包'],['shop','商店'],['exchange','兑换']],
       system: [['system','系统'],['help','帮助'],['village','村庄'],['vip','超级松鼠']]
     };
@@ -1109,13 +1110,12 @@
           [{label:'确定',run:home},{label:'再来一场',cls:'gold',run:()=>spar(friend)}]);
       }});
   }
-  function openBoard() {
-    page('message','board','<div class="empty-state">松鼠乐园留言板<br><span class="small-label">欢迎回来，老朋友。<br>本地怀旧版暂不连接公共聊天与留言服务。<br>你的战斗录像可在「消息」中查看。</span></div>');
-  }
-  /* 好友聊天：单机版没有服务端，照留言板的做法先留一块待开发区域，
-   * 不再跳到「消息」（那是战斗日志，不是聊天）。 */
+  /** 旧的留言板入口保留成别名，统一走合并后的聊天页。 */
+  function openBoard() { openChat(); }
+  /* 好友聊天（第 2 项：留言板并到这里，只保留一个界面）：
+   * 单机版没有服务端，照留言板的做法留一块待开发区域，不跳到「消息」（那是战斗日志）。 */
   function openChat() {
-    page('message','chat','<div class="empty-state">好友聊天<br><span class="small-label">这里会显示你和好友的聊天消息。<br>本地怀旧版暂不连接聊天服务，敬请期待。<br>好友间的切磋与战绩可在「好友」里查看。</span></div>');
+    page('message','chat','<div class="empty-state">好友聊天 · 留言板<br><span class="small-label">这里会显示你和好友的聊天消息，留言板也已并入这一页。<br>本地怀旧版暂不连接公共聊天与留言服务，敬请期待。<br>好友间的切磋与战绩可在「好友」里查看，战斗录像在「消息」中。</span></div>');
   }
   function openDaily() {
     const d = State.dailyStatus();

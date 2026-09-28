@@ -523,6 +523,30 @@ test('徒弟日供 = 等级之和的系数 × 我昨日收益；新增当天不�
   assertBalanced(g.markup);
 });
 
+test('超级松鼠：两档价格 150/500，且到期不重置等级、续费从原等级继续', () => {
+  const g = setup(), s = g.c.State.state();
+  assert.equal(JSON.stringify(g.c.State.VIP_PLANS.map((p) => [p.days, p.gold])), JSON.stringify([[7, 150], [30, 500]]));
+  s.goldPoint = 10000;
+  assert.equal(g.c.State.buyVip(7).ok, true);
+  assert.equal(s.goldPoint, 10000 - 150, '7 天 150');
+  assert.equal(g.c.State.buyVip(30).ok, true);
+  assert.equal(s.goldPoint, 10000 - 150 - 500, '30 天 500');
+  // 养到 4 级
+  s.vip.level = 4; s.vip.exp = 0;
+  assert.equal(g.c.State.vipLevel(), 4);
+  // 到期：特权停掉，但等级与经验留在存档里
+  g.advance(40 * 86400000);
+  assert.equal(g.c.State.vipActive(), false, '已到期');
+  assert.equal(g.c.State.vipLevel(), 0, '到期后特权等级按 0 算');
+  assert.equal(s.vip.level, 4, '存档里的等级不能被清掉');
+  g.c.State.save(); g.c.State.load();
+  assert.equal(g.c.State.state().vip.level, 4, '读档也不会重置');
+  // 续费从原等级继续
+  g.c.State.state().goldPoint = 10000;
+  g.c.State.buyVip(7);
+  assert.equal(g.c.State.vipLevel(), 4, '续费后从 Lv4 继续');
+});
+
 test('刷新师父/徒弟会换人且范围合理，候选人都带可查看的属性', () => {
   const g = setup(), s = g.c.State.state();
   s.level = 25;
@@ -736,7 +760,7 @@ test('超级松鼠（原版VIP）：金松果购买、体力上限+60、恢复�
   s.goldPoint = 5000;
   const bought = g.c.State.buyVip(7);
   assert.equal(bought.ok, true);
-  assert.equal(s.goldPoint, 5000 - 300);
+  assert.equal(s.goldPoint, 5000 - 150, '7 天 150 金松果');
   assert.equal(g.c.State.vipActive(), true);
   assert.equal(g.c.State.vipDaysLeft(), 7);
   assert.equal(s.maxEnergy, g.c.State.energyCapForLevel(s.level) + 60, '特权8：当前等级上限 +60');
@@ -815,8 +839,10 @@ test('VIP 页面：显示原版 8 条特权与两档价格，不删除系统页�
   g.c.ClassicExtras.vip();
   const vipHtml = g.page().html;
   assert.match(vipHtml, /超级松鼠/);
-  assert.match(vipHtml, /300/); assert.match(vipHtml, /1000/);
+  assert.match(vipHtml, /\u4e0d\u4f1a\u91cd\u7f6e/, '未开通时也要写明等级不会重置');
   assert.match(vipHtml, /体力上限 \+60/);
+  assert.match(vipHtml, /7 \u5929[\s\S]*?150/, '7 天 150 金松果');
+  assert.match(vipHtml, /30 \u5929[\s\S]*?500/, '30 天 500 金松果');
   assert.match(vipHtml, /被动经验上限/);
   assertBalanced(g.markup);
 });

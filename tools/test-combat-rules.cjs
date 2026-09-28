@@ -355,6 +355,38 @@ test('真·技能：真5端点与线性插值生效（龟甲必多次、幸运�
   assert.equal(G.GData.trueWeaponBonus({ id: 12, level: 15 }, 'dot'), 6, '真狼牙棒 +6 持续伤害');
 });
 
+test('武技都使用过一遍之后，出手更偏向武器（压低技能重复率）', () => {
+  const WEAPONS = ['6:1', '8:1', '13:1'], SKILLS = ['12:1', '18:1', '23:1'];
+  const wIds = WEAPONS.map((x) => x.split(':')[0]), sIds = SKILLS.map((x) => x.split(':')[0]);
+  let beforeW = 0, beforeS = 0, afterW = 0, afterS = 0, runs = 0;
+  for (let i = 0; i < 120; i++) {
+    const ev = rounds(randomGame(),
+      { power: 30, weapons: WEAPONS, skills: SKILLS, hp: 100000 },
+      { power: 5, hp: 100000 });
+    // 找到「六件武技都至少用过一次」的那一回合
+    const usedW = new Set(), usedS = new Set();
+    let cut = -1;
+    ev.forEach((r, idx) => {
+      if (r.attacker !== 0) return;
+      if (r.action === 'weapon') usedW.add(String(r.id));
+      if (r.action === 'skill') usedS.add(String(r.id));
+      if (cut < 0 && wIds.every((x) => usedW.has(x)) && sIds.every((x) => usedS.has(x))) cut = idx;
+    });
+    if (cut < 0) continue;
+    runs++;
+    ev.forEach((r, idx) => {
+      if (r.attacker !== 0) return;
+      if (r.action === 'weapon') { if (idx < cut) beforeW++; else afterW++; }
+      else if (r.action === 'skill') { if (idx < cut) beforeS++; else afterS++; }
+    });
+  }
+  assert.ok(runs > 40, '样本足够：' + runs);
+  const shareBefore = beforeW / (beforeW + beforeS), shareAfter = afterW / (afterW + afterS);
+  assert.ok(shareAfter > shareBefore + 0.1,
+    '用过一遍之后应当更偏向武器：之前 ' + (shareBefore * 100).toFixed(0) + '% → 之后 ' + (shareAfter * 100).toFixed(0) + '%');
+  assert.ok(shareAfter > 0.7, '之后武器占比应明显过半：' + (shareAfter * 100).toFixed(0) + '%');
+});
+
 test('仙鹤大招「仙鹤展翅」是其首次行动且每场仅一次', () => {
   const events = rounds(game(0.9), { hp: 100000, power: 1, speed: 100 }, { npcType: 'xh', power: 30, hp: 8000, speed: 10 });
   const ults = events.filter((r) => r.ultName === '仙鹤展翅');

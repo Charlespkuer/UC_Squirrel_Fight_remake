@@ -635,7 +635,7 @@
         '<p>\u5269\u4f59 ' + days + ' \u5929\u3000\u4f53\u529b\u6062\u590d ' + mul.toFixed(1) + ' \u500d\u3000\u4f53\u529b\u4e0a\u9650 +' + State.VIP_ENERGY_BONUS + '\u3000\u88c5\u5907\u683c\u5b50 +' + State.VIP_GEAR_BONUS + '</p>' +
         '<p class="vip-exp">\u5347\u7ea7\u7ecf\u9a8c ' + s.vip.exp + ' / ' + need + '\uff08\u6bcf\u65e5\u9996\u6b21\u767b\u9646 +1\uff09</p></div></div>'
       : '<div class="vip-status off"><span class="vip-crown muted">\u2606</span><div><h2>\u5c1a\u672a\u5f00\u901a\u8d85\u7ea7\u677e\u9f20</h2>' +
-        '<p>\u5f00\u901a\u540e\u7acb\u5373\u751f\u6548\uff0c\u5230\u671f\u540e\u7b49\u7ea7\u4e0e\u7ecf\u9a8c\u4fdd\u7559\uff0c\u518d\u6b21\u8d2d\u4e70\u5373\u53ef\u7ee7\u7eed\u4eab\u53d7\u3002</p></div></div>';
+        '<p>' + (Number(s.vip && s.vip.level) > 1 ? '\u4e0a\u6b21\u7b49\u7ea7 Lv ' + Number(s.vip.level) + '\uff0c\u7eed\u8d39\u540e\u4ece\u8fd9\u4e00\u7ea7\u7ee7\u7eed\u3002' : '') + '\u5f00\u901a\u540e\u7acb\u5373\u751f\u6548\uff0c\u5230\u671f\u540e\u7b49\u7ea7\u4e0e\u7ecf\u9a8c\u4fdd\u7559\uff08\u4e0d\u4f1a\u91cd\u7f6e\uff09\uff0c\u518d\u6b21\u8d2d\u4e70\u5373\u53ef\u7ee7\u7eed\u4eab\u53d7\u3002</p></div></div>';
     const priv = '<div class="vip-priv"><h3>\u7279\u6743</h3><ol>' + VIP_PRIVILEGES.map((t) => '<li>' + t + '</li>').join('') + '</ol></div>';
     const table = '<div class="vip-table"><h3>\u6210\u957f\u4f53\u7cfb</h3><table><thead><tr><th>\u7b49\u7ea7</th><th>\u88ab\u52a8\u7ecf\u9a8c\u4e0a\u9650</th><th>\u4f53\u529b\u6062\u590d</th></tr></thead><tbody>' +
       State.VIP_LEVELS.map(([lv, cap, m], i) => '<tr class="' + (active && i + 1 === level ? 'me' : '') + '"><td>' + lv + '</td><td>' + cap + '</td><td>' + Number(m).toFixed(1) + ' \u500d</td></tr>').join('') +

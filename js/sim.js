@@ -152,6 +152,34 @@
   }
 
   /** 技能选择：按 skillWeight 加权 → 没用过的优先、二次使用被压掉、来点松果最低。 */
+  /* ---------- 出手类型概率（百分比；武器 / 技能 / 普攻 划分） ----------
+   * 默认：武器 45 / 技能 35 / 普攻 20。
+   * 武器与技能**都至少用过一遍**之后：武器 65 / 技能 15 / 普攻 20 ——
+   *   技能比武器强力，用过一轮之后不该再被反复放，所以把权重挪给武器。
+   * 只有武器 / 只有技能时沿用原来的 70/30、60/40；
+   * 三侠 NPC（npcAction）没有武器池，用它自己那一行 70/30，行为与本项改动前一致。 */
+  const KIND_BOTH = [45, 80];
+  const KIND_BOTH_ALL_USED = [65, 80];
+  const KIND_WEAPON_ONLY = [70, 100];
+  const KIND_SKILL_ONLY = [60, 100];
+  const KIND_NPC_SKILL_ONLY = [30, 100];
+  /** 一次 Math.random() 决定出手类型（和原来 chance() 的消耗一致，不影响既有随机序列）。 */
+  function pickKind(canWeapon, canSkill, allUsed, npcSkillOnly) {
+    const roll = Math.random() * 100;
+    if (canWeapon && canSkill) {
+      const t = allUsed ? KIND_BOTH_ALL_USED : KIND_BOTH;
+      return roll < t[0] ? 'weapon' : roll < t[1] ? 'skill' : 'common';
+    }
+    if (canWeapon) return roll < KIND_WEAPON_ONLY[0] ? 'weapon' : 'common';
+    if (canSkill) return roll < (npcSkillOnly ? KIND_NPC_SKILL_ONLY[0] : KIND_SKILL_ONLY[0]) ? 'skill' : 'common';
+    return 'common';
+  }
+  /** 本场的武器与「当前可用的主动技能」是否都已经至少用过一次。 */
+  function allToolsUsed(att, actives) {
+    if (!att.weapons.length || !actives.length) return false;
+    return att.weapons.every((w) => att.usedWeapons[w.id]) && actives.every((id) => att.usedSkills[id]);
+  }
+
   function pickSkill(att, actives) {
     return pickWeighted(actives, (id) => skillWeight(att, id));
   }
@@ -392,7 +420,8 @@
         att.usedUlt = true; npcUlt(att, def); return;
       }
       // NPC：70% 普攻，30% 技能
-      const useSkill = Object.keys(att.skills).length > 0 && chance(30);
+      // 与玩家共用 pickKind；三侠没有武器池，走它自己的 70/30 分支
+      const useSkill = Object.keys(att.skills).length > 0 && pickKind(false, true, false, true) === 'skill';
       const r = { attacker: att.side, action: 'common', npcSkill: false };
       if (useSkill) {
         r.action = 'skill'; r.npcSkill = true;
@@ -482,11 +511,7 @@
         else if (want === 'skill' && !canSkill) kind = canWeapon ? 'weapon' : 'common';
         else kind = (want === 'weapon' || want === 'skill') ? want : 'common';
       } else {
-        const roll = Math.random() * 100;
-        if (canWeapon && canSkill) kind = roll < 45 ? 'weapon' : roll < 80 ? 'skill' : 'common';
-        else if (canWeapon) kind = roll < 70 ? 'weapon' : 'common';
-        else if (canSkill) kind = roll < 60 ? 'skill' : 'common';
-        else kind = 'common';
+        kind = pickKind(canWeapon, canSkill, allToolsUsed(att, actives), false);
       }
       if (att.pendingWeapon && canWeapon) kind = 'weapon';
 

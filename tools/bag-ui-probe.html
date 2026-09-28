@@ -113,7 +113,7 @@ async function main() {
      ?shot=sell|shop|exchange|status|daily|chat|arrows 各自停在一个画面上，
      既抓尺寸数据也方便截图。 */
   const batch = q.get('shot');
-  if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows', 'gearsell', 'gearsellconfirm', 'master', 'trueform'].includes(batch)) {
+  if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows', 'gearsell', 'gearsellconfirm', 'master', 'trueform', 'vip'].includes(batch)) {
     S.props[47] = 20; S.props[22] = 12; S.props[24] = 8; S.props[1] = 9;
     State.save();
     const rect = (sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
@@ -149,6 +149,18 @@ async function main() {
       UI.runAction(batch); await flush(340);
       P.footerButtons = footerButtons();
       snap('页脚', '#ui .page-footer');
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+
+    if (batch === 'vip') {
+      const st = State.state();
+      st.goldPoint = 10000;
+      st.vip = { level: 4, exp: 3, until: 0, capAdded: 0, capApplied: false, lastDaily: '' };
+      State.save();
+      ClassicExtras.vip(); await flush(340);
+      P.vipPrices = $$('#ui .vip-plan').map((b) => b.textContent.trim());
+      P.vipText = text(document.querySelector('#ui .vip-status'));
+      snap('超级松鼠页', '#ui .vip-status');
       P.done = true; P.errors = window.__errs.slice(); return;
     }
 
@@ -286,6 +298,13 @@ async function main() {
       P.chatActiveTab = (document.querySelector('#ui .uc-tab.active') || {}).textContent || null;
       P.chatBody = text(document.querySelector('#ui .empty-state'));
       snap('聊天页', '#ui .empty-state');
+      // 第 2 项：留言板与聊天合并 —— 页签里应当没有「留言板」
+      P.msgTabs = $$('#ui .uc-tab').map((b) => b.textContent.trim());
+      P.hasBoardTab = $$('#ui .uc-tab').some((b) => b.dataset.action === 'board');
+      P.chatTabCount = $$('#ui .uc-tab[data-action="chat"]').length;
+      // 旧入口 board 仍然可用（别名指向合并后的聊天页）
+      UI.runAction('board'); await flush(300);
+      P.boardAliasScreen = UI.currentScreen();
       P.done = true; P.errors = window.__errs.slice(); return;
     }
 

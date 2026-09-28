@@ -605,6 +605,13 @@ test('真·武器/真·技能：成功率沿用原表、费用按当日次数递
   assert.equal(S.upgradeInfo('skill', 12).rate, 15, '普通升级失败仍然 +5%');
 });
 
+test('每日任务「抽取每日幸运抽奖」最多要求 2 次', () => {
+  const g = game(), S = g.State;
+  const q = S.QUEST_TYPES.find((t) => t.key === 'lottery');
+  assert.ok(q, '任务表里有抽奖任务');
+  assert.deepEqual(Array.from(q.steps), [1, 2], '不再出现 3 次：' + JSON.stringify(q.steps));
+});
+
 test('购买拒绝负数、小数和无穷数量，合法购买正常扣款', () => {
   const g = game(), s = g.State.state();
   for (const count of [-5, 0, 1.5, Infinity]) assert.equal(g.State.buyProp(1, count).ok, false);

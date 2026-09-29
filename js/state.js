@@ -1980,6 +1980,30 @@
     save();
     return { exp: Math.round(expBase * expMul), gold, ups };
   }
+  /* ---------- 复仇（消息页「复仇」标签） ----------
+   * 输掉的挑战记在 S.battles 里，玩家可以拿录像里记下的对手数据再打一次。
+   * 胜利只给「少量」经验与金松果：按同级对手赢一场能拿到的经验的
+   * REVENGE_EXP_RATIO 折算 —— 算把上次失败少拿的那部分补回一点，
+   * 但远低于正常赢一场，所以不会变成刷经验的入口。每条记录只能复仇成功一次。 */
+  const REVENGE_EXP_RATIO = 0.35;
+  function revengeReward(foeLevel) {
+    const level = Math.max(1, Math.floor(Number(foeLevel) || (S && S.level) || 1));
+    const full = challengeExp(level, (S && S.level) || 1);
+    const exp = Math.max(4, Math.round(full * REVENGE_EXP_RATIO));
+    const gold = 1 + Math.floor(Math.random() * 3);
+    addGold(gold);
+    const ups = gainExp(exp);
+    save();
+    return { exp, gold, ups };
+  }
+  /** 标记某条败绩已复仇成功（false = 记录不存在或已经复仇过）。 */
+  function markRevenged(id) {
+    const battle = (S.battles || []).find((b) => b && b.id === id);
+    if (!battle || battle.revenged) return false;
+    battle.revenged = Date.now();
+    save();
+    return true;
+  }
 
   // ---------- AI 玩家生成 ----------
   /** AI 名字池：固定昵称池 + 前缀后缀组合，组合空间远大于固定名单。 */
@@ -2573,7 +2597,7 @@
     gemLevel, GEM_MERGE_RATES, rollGemDrop, mergeGems, socketGem, unsocketGem,
     totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, gainRandomWS, wsChoices, wsInfo,
     pendingWS, currentWSChoices, chooseWS, chooseWSRandom,
-    gainExp, consumeEnergy, tickPropStates, fightReward, expBoostPct, gainExpWithBoost,
+    gainExp, consumeEnergy, tickPropStates, fightReward, revengeReward, markRevenged, REVENGE_EXP_RATIO, expBoostPct, gainExpWithBoost,
     // 师徒
     apprenticeCap, learnSkill, setMaster, clearMaster, addPrentice, removePrentice,
     apprenticeDailyExp, apprenticeDailyGold, apprenticeDailyTotal, apprenticeDailyStatus,

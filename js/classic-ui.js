@@ -527,8 +527,8 @@
       }});
     });
   }
-  function resultModal(win,rw,extra) {
-    modal('战斗结果','<div class="result-box"><div class="result-title '+(win?'win':'lose')+'">'+(win?'胜 利！':'再接再厉')+'</div><div class="result-lines">经验 +'+rw.exp+'　金松果 +'+(rw.gold||0)+'</div>'+ (extra?'<p>'+esc(extra)+'</p>':'')+upsHtml(rw.ups)+'</div>',[{label:'确定',run:home},{label:'查看录像',cls:'gold',run:()=>openMessages()}]);
+  function resultModal(win,rw,extra,onOk) {
+    modal('战斗结果','<div class="result-box"><div class="result-title '+(win?'win':'lose')+'">'+(win?'胜 利！':'再接再厉')+'</div><div class="result-lines">经验 +'+rw.exp+'　金松果 +'+(rw.gold||0)+'</div>'+ (extra?'<p>'+esc(extra)+'</p>':'')+upsHtml(rw.ups)+'</div>',[{label:'确定',run:onOk||home},{label:'查看录像',cls:'gold',run:()=>openMessages()}]);
   }
   const NPC_FILE={tl:'mantis',xh:'crane',xm:'panda'};
   /** 关卡结算里的升级奖励：与首页共用的 upgradeReward 同款样式，
@@ -638,7 +638,9 @@
       buttons=[{label:'继续闯关',run:back},{label:'返回菜单',cls:'gold',run:home}];
     }else if(rw.win){
       message='已击败'+npc.name+'（'+idx+'/3）。继续挑战不再消耗挑战书，但下一场不会回满血（继承剩余血量并回复25%）。';
-      buttons=[{label:'继续挑战',run:()=>stageConfirm(stageId)},{label:'稍后继续',cls:'gold',run:back},{label:'结束本轮',cls:'muted',run:()=>stageAbandon(stageId)}];
+      // 第 1 项：点一次就直接开下一场 —— 原来要先「继续挑战」再在确认弹窗里点「继续战斗」，
+      // 连战本来就不消耗挑战书，没有必要再确认一次（确认弹窗仍保留在难度页进入时）。
+      buttons=[{label:'继续挑战',run:()=>stageFight(stageId)},{label:'稍后继续',cls:'gold',run:back},{label:'结束本轮',cls:'muted',run:()=>stageAbandon(stageId)}];
     }else{
       const canRevive=rw.run.revives<2;
       message=canRevive?'挑战失败，可花1个挑战书复活自己，继续本轮挑战。剩余复活次数：'+(2-rw.run.revives)+'。':'本轮2次复活机会已用完。结束本轮后可以重新挑战。';
@@ -672,14 +674,19 @@
     const bagFooter=shop?{left:btn('每日抽奖','lottery','gold entry-pill'),right:btn('金杯商店','rank-shop','gold entry-pill')}:{};
     const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,Object.assign({cls:'classic-bag-board'+(shop?' shop-board':''),counter:(bagPage+1)+'/'+total},bagFooter));
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
-    $('[data-action="prop-action"]',p)?.addEventListener('click',()=>openProp(selectedProp,shop));
+    // 第 2 项：把「来的那一页」原样传下去（true=商店 / 'exchange'=兑换 / false=背包），
+    // 否则兑换页点进详情再返回会掉回背包页。
+    $('[data-action="prop-action"]',p)?.addEventListener('click',()=>openProp(selectedProp,mode));
     $('[data-action="prop-sell"]',p)?.addEventListener('click',()=>sellAsk(selectedProp,()=>openBag(mode,bagPage)));
     if(status&&!status.remaining)$('[data-action="prop-action"]',p).disabled=true;
     $('[data-action="rank-shop"]',p)?.addEventListener('click',()=>ClassicExtras.rankShop());
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openBag(mode,bagPage-1));
     $('[data-action="next"]',p)?.addEventListener('click',()=>openBag(mode,bagPage+1));
   }
-  function openProp(id,shop) {
+  /** mode：true=商店（购买）/'exchange'=兑换页/其它=背包（使用·合成）。 */
+  function openProp(id,mode) {
+    const shop=mode===true,exchange=mode==='exchange';
+    const backMode=shop?true:exchange?'exchange':false;   // 返回时回到来的那一页
     const base=propMap.getValue(id),S=State.state();
     if(!base)return;
     const isFragment=[24,25,26].includes(id),isConvertShard=id===GData.CONVERT_SHARD_ID,isSeed=[45,46].includes(id),isGem=State.gemLevel(id)>0,canUse=base.useType==='1';
@@ -761,15 +768,15 @@
       toast(r.msg||(r.gear?'合成成功：'+r.gear.name:'操作完成'));
       if(!r.ok)return;
       if(keepOpen){syncLive();return;}
-      // 其它道具：关掉详情、退回上一级页面（背包/商店）
+      // 其它道具：关掉详情、退回上一级页面（背包/商店/兑换）
       m.close();
-      openBag(shop,bagPage);
+      openBag(backMode,bagPage);
     };
     const buttons=[];
     // 需要连点的（药剂/碎片/商店非限购品）设 close:false，点完不关弹窗。
     // 注意：卖出只在背包一级界面提供，这个二级弹窗里没有卖出按钮（商店更没有）。
     if(label)buttons.push({label,close:!keepOpen,run:useOne});
-    buttons.push({label:'返回',cls:'muted',run:()=>openBag(shop,bagPage)});
+    buttons.push({label:'返回',cls:'muted',run:()=>openBag(backMode,bagPage)});
     const m=modal(shop?'道具商店':'道具详情',content,buttons,{small:true});
     /** 只更新弹窗里的实时数字与按钮状态（不重建弹窗，避免界面跳动）。 */
     function syncLive(){
@@ -1061,16 +1068,40 @@
     tab=typeof tab==='string'?tab:'messages';pg=pg||0;
     let list=State.battleHistory?State.battleHistory():[];
     if(tab==='ranklog')list=list.filter(r=>r.kind==='rank');
-    if(tab==='revenge')list=list.filter(r=>r.winner!==0);
+    if(tab==='revenge')list=list.filter(r=>r.winner!==0&&r.kind!=='revenge');
     const total=Math.max(1,Math.ceil(list.length/2));pg=Math.min(pg,total-1);
     const html=list.slice(pg*2,pg*2+2).map(r=>{
       const d=new Date(r.createdAt),time=(d.getMonth()+1)+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
-      return '<article class="message-card"><span class="message-stamp '+(r.winner?'loss':'')+'">'+(r.winner?'败':'胜')+'</span>你挑战了【'+esc(r.foe.name)+'】，'+(r.winner?'遗憾落败。':'获得胜利！')+'<time>'+time+'</time><button class="uc-button tiny muted" data-replay="'+esc(r.id)+'">查看录像</button></article>';
+      // 第 4 项：复仇页的每条败绩都带一个「再次挑战」——用录像里记下的对手数据重打一次，
+      // 赢了给少量经验与金松果（补一点上次失败少拿的），每条记录只能成功复仇一次。
+      const rev=r.winner!==0&&tab==='revenge';
+      const revengeBtn=!rev?'':(r.revenged
+        ?'<button class="uc-button tiny muted" data-revenged="1" disabled>已复仇</button>'
+        :'<button class="uc-button tiny gold" data-revenge="'+esc(r.id)+'">再次挑战</button>');
+      return '<article class="message-card"><span class="message-stamp '+(r.winner?'loss':'')+'">'+(r.winner?'败':'胜')+'</span>你挑战了【'+esc(r.foe.name)+'】，'+(r.winner?'遗憾落败。':'获得胜利！')+'<time>'+time+'</time>'+
+        '<span class="message-actions">'+revengeBtn+'<button class="uc-button tiny muted" data-replay="'+esc(r.id)+'">查看录像</button></span></article>';
     }).join('');
-    const p=page('message',tab,'<div class="message-list">'+(html||'<div class="empty-state">暂时没有'+(tab==='revenge'?'落败记录':'战斗消息')+'<br><span class="small-label">开始一场挑战，精彩战斗会保存在这里。</span></div>')+'</div>'+(pg?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(pg<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(pg+1)+'/'+total,counterPlace:'board'});
+    const p=page('message',tab,'<div class="message-list">'+(html||'<div class="empty-state">暂时没有'+(tab==='revenge'?'落败记录':'战斗消息')+'<br><span class="small-label">'+(tab==='revenge'?'输掉的挑战会留在这里，之后可以点「再次挑战」找回场子。':'开始一场挑战，精彩战斗会保存在这里。')+'</span></div>')+'</div>'+(pg?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(pg<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(pg+1)+'/'+total,counterPlace:'board'});
     $$('[data-replay]',p).forEach(b=>b.onclick=()=>{const r=list.find(x=>x.id===b.dataset.replay);Main.replayBattle(r,()=>openMessages(tab,pg));});
+    $$('[data-revenge]',p).forEach(b=>b.onclick=()=>{const r=list.find(x=>x.id===b.dataset.revenge);if(r)revengeFight(r,()=>openMessages(tab,pg));});
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openMessages(tab,pg-1));
     $('[data-action="next"]',p)?.addEventListener('click',()=>openMessages(tab,pg+1));
+  }
+  /** 复仇：拿录像里记下的对手快照再打一场（不消耗体力、不掉飘物，避免变成刷资源入口）。
+   *  胜利 → State.revengeReward 发少量经验与金松果，并把这条记录标成「已复仇」。 */
+  function revengeFight(record, back) {
+    const foe=Object.assign({},record.foe);
+    Main.startBattle(foe,{region:record.region||0,kind:'revenge',useProps:false,collectDrops:false,onEnd:(winner)=>{
+      back();
+      const win=winner===0;
+      if(!win){modal('复仇失败','<div class="result-box"><div class="result-title lose">又输了</div><p>再来一次吧 —— 复仇不消耗体力，失败也没有额外损失。</p></div>',[{label:'返回',run:back}]);return;}
+      if(!State.markRevenged(record.id)){
+        modal('复仇成功','<div class="result-box"><div class="result-title win">胜 利！</div><p>这条败绩之前已经复仇过了，本次不再重复发补偿。</p></div>',[{label:'返回',run:back}]);
+        return;
+      }
+      const rw=State.revengeReward(foe.level);
+      resultModal(true,rw,'复仇成功：'+esc(foe.name)+' 已被击败，补回少量经验与金松果。',back);
+    }});
   }
   function openFriends(refresh) {
     const S=State.state();
@@ -1431,16 +1462,26 @@
     const slider='<div class="setting-slider" data-slider="volume"><span class="slider-label">音乐音量</span>'+
       '<input type="range" min="0" max="100" step="1" value="'+vol+'" aria-label="音乐音量">'+
       '<b class="slider-value">'+vol+'%</b></div>';
-    // 分辨率：按 1170×690 的设计尺寸等比缩放并居中（窗口装不下时自动缩小）
-    const resolutions=(State.RESOLUTIONS||[]).map((r)=>'<button type="button" class="uc-button tiny setting-choice'+
-      (st.resolution===r.key?' active':'')+'" data-resolution="'+r.key+'">'+esc(r.label)+'</button>').join('');
-    const display='<div class="setting-group"><span class="slider-label">分辨率</span><div class="setting-choices">'+resolutions+'</div>'+
-      '<span class="setting-hint">画面按这一档等比缩放并居中；窗口装不下时自动按窗口缩小，不会溢出。</span></div>'+
-      '<div class="setting-group"><span class="slider-label">显示模式</span><div class="setting-choices">'+
-      '<button type="button" class="uc-button tiny setting-choice'+(st.fullscreen?' active':'')+'" data-fullscreen="1">'+
-      (st.fullscreen?'全面屏：已开启':'全面屏：关')+'</button></div>'+
-      '<span class="setting-hint">开启后画面铺满整个窗口（不留黑边，窗口比例差得多时会有轻微拉伸），同时尝试进入系统全屏；按 Esc 可退出系统全屏。</span></div>';
-    const p=page('system','system','<div class="settings-grid system-grid">'+btn(mute?'音乐：关':'音乐：开','sound')+btn('导出存档','export','gold')+btn('导入存档','import','gold')+btn('更改昵称','rename')+'</div>'+slider+display+saveFilePanel()+syncPanel()+'<p class="system-caption">松鼠大战 · 怀旧单机版<br>进度默认写进游戏目录的 save/progress.json（用本地服务器启动时），也可以导出／导入 JSON 存档；音量与画面设置会一起存进存档。</p>');
+    /* 第 3 项：分辨率与全面屏收进上面那一排，和音乐/导出存档/导入存档/更改昵称
+     * 拼成「两排 6 个按钮」。分辨率不再是 6 个并排的小按钮，而是一个循环按钮
+     * （按钮上直接写着当前档位，点一下换下一档），长说明改挂 title 悬停提示。 */
+    const resolutions=State.RESOLUTIONS||[];
+    const resShort=(r)=>!r?'自动':r.key==='auto'?'自动':r.label.replace(' × ','×');
+    const resIndex=Math.max(0,resolutions.findIndex((r)=>r.key===st.resolution));
+    const resNow=resolutions[resIndex]||resolutions[0];
+    const sysBtn=(label,action,cls,title)=>'<button type="button" class="uc-button '+(cls||'')+'" data-action="'+action+'"'+
+      (title?' title="'+esc(title)+'"':'')+'>'+esc(label)+'</button>';
+    const grid='<div class="settings-grid system-grid">'+
+      sysBtn(mute?'音乐：关':'音乐：开','sound','','音乐开关')+
+      sysBtn('导出存档','export','gold','把当前存档导出成一个 JSON 文件')+
+      sysBtn('导入存档','import','gold','从 JSON 文件恢复存档')+
+      sysBtn('更改昵称','rename','','给松鼠换个名字')+
+      sysBtn('分辨率：'+resShort(resNow),'resolution','','点一下换下一档：'+
+        resolutions.map((r)=>r.label).join(' → ')+'。画面按这一档等比缩放并居中；窗口装不下时自动按窗口缩小，不会溢出。')+
+      sysBtn(st.fullscreen?'全面屏：开':'全面屏：关','fullscreen','','开启后画面铺满整个窗口（不留黑边，窗口比例差得多时会有轻微拉伸），同时尝试进入系统全屏；按 Esc 可退出系统全屏。')+
+      '</div>';
+    // 底部那段「松鼠大战 · 怀旧单机版 / 进度默认写进…」的提示按需求去掉（存档位置在下面的存档面板里有）
+    const p=page('system','system',grid+slider+saveFilePanel()+syncPanel());
     $('[data-action="sound"]',p).onclick=()=>{Main.setMuted(!mute);openSystem();};
     $('[data-action="save-write"]',p).onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};
     $('[data-action="save-load"]',p).onclick=loadSaveDialog;
@@ -1478,9 +1519,11 @@
       $('[data-action="sound"]',p).textContent=on?'音乐：开':'音乐：关';
       toast('音乐音量 '+v+'%'+(!on?'（已静音）':'')+'（已存进存档）');
     };
-    // 分辨率与全面屏：改完立刻生效并写进存档，页面重绘一次让选中态跟上
-    $$('[data-resolution]',p).forEach((b)=>b.onclick=()=>{Main.setResolution(b.dataset.resolution);openSystem();});
-    const fsBtn=$('[data-fullscreen]',p);
+    // 分辨率：点一下换下一档（循环），改完立刻生效并写进存档，页面重绘让按钮文字跟上
+    const resBtn=$('[data-action="resolution"]',p);
+    if(resBtn)resBtn.onclick=()=>{const next=resolutions[(resIndex+1)%resolutions.length];Main.setResolution(next.key);openSystem();};
+    const fsBtn=$('[data-action="fullscreen"]',p);
+    if(fsBtn)fsBtn.setAttribute('data-fullscreen','1');
     if(fsBtn)fsBtn.onclick=()=>{Main.setFullscreen(!Main.settings().fullscreen);openSystem();};
     $('[data-action="export"]',p).onclick=()=>{
       const blob=new Blob([JSON.stringify(State.state(),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='松鼠大战存档-'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('存档已导出');

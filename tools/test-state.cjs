@@ -1086,6 +1086,29 @@ test('升级礼包：每级给消耗品，逢 5 级与属性书等级再给大�
   assert.ok(delta >= totalAdded, '礼包道具应全部进背包：新增 ' + delta + ' / 礼包 ' + totalAdded);
 });
 
+test('复仇：败绩可标记一次，复仇补偿是赢场经验的一部分且带金松果', () => {
+  const g = game();
+  const me = fighter({ name: '我' }), foe = fighter({ name: '宿敌', level: 30, hp: 100000, power: 80 });
+  const result = g.Sim.simulate(me, foe);
+  const saved = g.State.recordBattle({ me, foe, result, region: 3, kind: 'challenge' });
+  assert.ok(saved && saved.id);
+  assert.equal(!!g.State.battleHistory()[0].revenged, false, '新记录还没复仇过');
+  assert.equal(g.State.markRevenged('不存在的 id'), false);
+  assert.equal(g.State.markRevenged(saved.id), true);
+  assert.equal(g.State.markRevenged(saved.id), false, '同一条记录只能算一次');
+  assert.ok(g.State.battleHistory()[0].revenged > 0, '标记会写进战报并落盘');
+
+  // 补偿量：低于赢一场（约 1.0× challengeExp），且有少量金松果
+  const exp0 = g.State.state().exp, gold0 = g.State.state().goldPoint;
+  const rw = g.State.revengeReward(30);
+  const win = g.State.fightReward(true, { foeLevel: 30 });
+  assert.ok(rw.exp > 0 && rw.gold >= 1 && rw.gold <= 3);
+  assert.ok(rw.exp < win.exp, '复仇补偿 ' + rw.exp + ' 应少于赢一场 ' + win.exp);
+  assert.ok(g.State.state().goldPoint >= gold0 + rw.gold);
+  assert.equal(typeof g.State.REVENGE_EXP_RATIO, 'number');
+  assert.ok(exp0 >= 0);
+});
+
 test('调试开关「12 小时一天」：过了中午算第二天，每日刷新 12 点也来一次', () => {
   const g = game();
   // 没有开关时：日期键只在午夜翻页

@@ -71,11 +71,20 @@ window.addEventListener('load', function () {
     var grid = $('.settings-grid', sys);
     check(out, '系统页不再放「游戏帮助」按钮', !$('[data-action="help"]', grid));
     check(out, '系统页不再放「每日礼包」按钮', !$('[data-action="daily"]', grid));
-    check(out, '系统页有分辨率选项（6 档）', $$('[data-resolution]', sys).length === 6, $$('[data-resolution]', sys).map(function (b) { return b.textContent.trim(); }).join('/'));
-    check(out, '系统页有全面屏开关', !!$('[data-fullscreen]', sys));
+    /* 第 3 项改版：分辨率与全面屏不再是并排小按钮，而是收进网格里的两个按钮
+       （分辨率按钮点一下换下一档，按钮文字直接写当前档位）。 */
+    var resBtn = $('[data-action="resolution"]', sys);
+    var fsToggle = $('[data-action="fullscreen"]', sys);
+    check(out, '系统页有分辨率按钮（单按钮循环 6 档）', !!resBtn && $$('[data-action="resolution"]', sys).length === 1,
+      resBtn ? resBtn.textContent.trim() : '—');
+    check(out, '系统页有全面屏开关', !!fsToggle && !!$('[data-fullscreen]', sys));
+    check(out, '设置区两排 6 个按钮', $('.settings-grid.system-grid', sys) && $$('.settings-grid.system-grid > .uc-button', sys).length === 6,
+      $('.settings-grid.system-grid', sys) ? $$('.settings-grid.system-grid > .uc-button', sys).length : 0);
     var caption = txt($('.system-caption', sys));
     check(out, '底部不再提「跨设备同步 / ZeroTier」', caption.indexOf('跨设备同步') < 0 && caption.indexOf('ZeroTier') < 0, caption);
-    check(out, '分辨率选中态跟存档一致', txt($('[data-resolution].active', sys)) === (State.RESOLUTIONS.filter(function (r) { return r.key === State.settings().resolution; })[0] || {}).label);
+    var resNow = (State.RESOLUTIONS.filter(function (r) { return r.key === State.settings().resolution; })[0] || {});
+    var resShort = resNow.key === 'auto' || !resNow.key ? '自动' : String(resNow.label).replace(' × ', '×');
+    check(out, '分辨率按钮显示当前档位', txt(resBtn) === '分辨率：' + resShort, txt(resBtn) + ' / 期望 分辨率：' + resShort);
 
     /* ---------- 2. 帮助页（不再是弹窗） ---------- */
     UI.runAction('help');

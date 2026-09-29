@@ -113,7 +113,7 @@ async function main() {
      ?shot=sell|shop|exchange|status|daily|chat|arrows 各自停在一个画面上，
      既抓尺寸数据也方便截图。 */
   const batch = q.get('shot');
-  if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows', 'gearsell', 'gearsellconfirm', 'master', 'trueform', 'vip', 'hex', 'trial', 'trialplan', 'warlord', 'debugday', 'system'].includes(batch)) {
+  if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows', 'gearsell', 'gearsellconfirm', 'master', 'trueform', 'vip', 'hex', 'trial', 'trialplan', 'warlord', 'debugday', 'system', 'exchange-back', 'revenge'].includes(batch)) {
     S.props[47] = 20; S.props[22] = 12; S.props[24] = 8; S.props[1] = 9;
     State.save();
     const rect = (sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
@@ -298,9 +298,80 @@ async function main() {
       P.done = true; P.errors = window.__errs.slice(); return;
     }
 
+    if (batch === 'exchange-back') {
+      // 第 2 项：兑换页点进详情再返回，必须还停在兑换页（不能掉回背包）
+      UI.runAction('exchange'); await flush(400);
+      P.exchangeScreen = !!document.querySelector('#ui .classic-page[data-screen="exchange"]');
+      const cell = document.querySelector('#ui [data-prop="45"]') || document.querySelector('#ui [data-prop]');
+      P.exchangeCell = cell ? cell.dataset.prop : null;
+      if (cell) { cell.click(); await flush(300); }
+      const use = document.querySelector('#ui .bag-detail [data-action="prop-action"]');
+      P.exchangeUseLabel = use ? use.textContent.trim() : null;
+      if (use) { use.click(); await flush(360); }
+      P.detailOpened = !!document.querySelector('.classic-modal-overlay .detail-summary');
+      const backBtn = $$('.classic-modal-overlay .modal-buttons button').find((b) => b.textContent.trim() === '返回');
+      P.detailBackFound = !!backBtn;
+      if (backBtn) { backBtn.click(); await flush(420); }
+      P.afterReturnScreen = UI.currentScreen ? UI.currentScreen() : null;
+      P.afterReturnIsExchange = !!document.querySelector('#ui .classic-page[data-screen="exchange"]');
+      P.afterReturnIsBag = !!document.querySelector('#ui .classic-page[data-screen="bag"]');
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+
+    if (batch === 'revenge') {
+      // 第 4 项：复仇页要有「再次挑战」，用战报里的对手数据重打（无体力消耗、无飘物）
+      const st = State.state();
+      const me = State.genAI(40, '', { levelJitter: 0, gearSelfLevel: true });
+      me.maxHp = me.hp;
+      // 必须真的是一场败绩，否则不会出现在复仇页（对手给成碾压配置）
+      const foe = { name: '宿敌松鼠', level: 40, power: 5000, agility: 400, speed: 400, hp: 100000, weapons: [], skills: [], npcType: 'tl' };
+      const res = Sim.simulate(me, foe);
+      P.revengeMadeLoss = res.winner === 1;
+      State.recordBattle({ me, foe, result: res, region: 3, kind: 'challenge' });
+      State.save();
+      UI.runAction('revenge'); await flush(400);
+      P.revengeCards = $$('#ui .message-card').length;
+      const btn = document.querySelector('#ui [data-revenge]');
+      P.revengeBtn = btn ? btn.textContent.trim() : null;
+      P.revengeBtnGold = btn ? btn.className.includes('gold') : null;
+      snap('复仇卡片', '#ui .message-card');
+      if (q.get('stop') === '1') { P.done = true; P.errors = window.__errs.slice(); return; }
+      if (q.get('stop') === '2') {
+        // 已复仇的记录：按钮变灰不可点，避免重复领补偿
+        const hid = State.battleHistory()[0] && State.battleHistory()[0].id;
+        P.revengeMarked = State.markRevenged(hid);
+        UI.runAction('revenge'); await flush(360);
+        const done = document.querySelector('#ui [data-revenged]');
+        P.revengedLabel = done ? done.textContent.trim() : null;
+        P.revengedDisabled = done ? done.disabled : null;
+        P.done = true; P.errors = window.__errs.slice(); return;
+      }
+      if (btn) { btn.click(); await flush(2400); }
+      // 战斗真的开起来了：战斗页会把 #ui 清空并插入 battle canvas
+      P.revengeBattleCanvas = !!document.querySelector('#stage canvas, canvas');
+      P.revengeFoeName = (() => {
+        const txt = document.body.textContent || '';
+        return txt.indexOf('宿敌松鼠') >= 0;
+      })();
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+
     if (batch === 'system') {
       // 音量滑条与卖出滑条共用同一套「已选金色 / 未选浅色」两段配色，这里一起核对
       UI.runAction('system'); await flush(400);
+      // 第 3 项：两排 6 个按钮；底部那段提示文字要没了
+      P.sysGridButtons = $$('.settings-grid.system-grid > .uc-button').map((b) => b.textContent.trim());
+      P.sysGridCols = (() => { const g = document.querySelector('.settings-grid.system-grid');
+        return g ? getComputedStyle(g).gridTemplateColumns.split(' ').length : null; })();
+      P.sysCaptionGone = !document.querySelector('#ui .classic-page[data-screen="system"] .system-caption');
+      const resBtn = document.querySelector('#ui [data-action="resolution"]');
+      P.sysResLabel = resBtn ? resBtn.textContent.trim() : null;
+      P.sysResTitle = resBtn ? (resBtn.getAttribute('title') || '').slice(0, 40) : null;
+      const before = State.settings().resolution;
+      if (resBtn) { resBtn.click(); await flush(400); }
+      P.sysResBefore = before;
+      P.sysResAfter = State.settings().resolution;
+      P.sysResCycled = before !== State.settings().resolution;
       const box = document.querySelector('.setting-slider[data-slider="volume"]');
       P.volumeBox = rect('.setting-slider[data-slider="volume"]');
       P.volumeFill = box ? box.querySelector('input[type="range"]').style.getPropertyValue('--fill') : null;

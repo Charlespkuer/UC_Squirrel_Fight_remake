@@ -232,7 +232,9 @@ test('UI三战与稍后继续完整连通，只付1书且重复战后回调被�
   g.modalClick('开始战斗'); assert.equal(g.battles.length, 1); assert.equal(g.battles[0].opts.cost, undefined); assert.equal(g.battles[0].opts.useProps, false);
   g.settle(0); const count = g.modals.length; g.settle(0); assert.equal(g.modals.length, count);
   g.modalClick('稍后继续'); g.click('star1'); assert.match(g.modals.at(-1).html, /不消耗挑战书/);
-  g.modalClick('继续战斗'); g.settle(1); g.modalClick('继续挑战'); g.modalClick('继续战斗'); g.settle(2);
+  // 第 1 项：战果弹窗的「继续挑战」现在一步直达下一场（不再先弹确认弹窗）
+  g.modalClick('继续战斗'); g.settle(1); g.modalClick('继续挑战'); g.settle(2);
+  assert.equal(g.modals.at(-1).buttons.some((b) => b.label === '继续战斗'), false, '连战不再需要二次确认');
   assert.equal(g.battles[1].opts.hpRatio, 0.25); assert.equal(g.battles[2].opts.hpRatio, 0.25);
   assert.match(g.modals.at(-1).html, new RegExp('经验 \\+' + (18 * g.c.GData.STAGE_REWARD_MULT) + '　通关金松果 \\+' + (25 * g.c.GData.STAGE_GOLD_MULT)));
   assert.equal(g.s().goldPoint, 100 + 25 * g.c.GData.STAGE_GOLD_MULT); assert.equal(g.s().props[23], 0);
@@ -267,7 +269,7 @@ test('战果按最后一帧剩余血量继承，缺少 hpAfter 也不抛错（�
   ] });
   assert.equal(g.c.State.stageRun(1).carryHp, 0.75);
   // 旧/异常形状：result 上只有逐帧 hpAfter（修复前这里会抛 TypeError 并被丢回主界面）。
-  g.modalClick('继续挑战'); g.modalClick('继续战斗');
+  g.modalClick('继续挑战');
   assert.doesNotThrow(() => g.battles.at(-1).opts.onEnd(0, { winner: 0, maxHp: [400, 100], rounds: [
     { attacker: 0, action: 'common', dmg: 100, hpAfter: [120, 0] },
   ] }));

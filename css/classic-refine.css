@@ -185,19 +185,11 @@
 .sync-progress .sp-hint{margin-top:8px;font-size:17px;line-height:1.6;color:#8a6a3c}
 .sync-progress .sp-actions{margin-top:10px;display:flex;gap:12px}
 
-/* ---------- 系统页：分辨率 / 全面屏（画面设置） ---------- */
-.settings-grid.system-grid{grid-template-columns:repeat(2,1fr)}
-.setting-group{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin:14px 30px 0;padding:12px 22px;
-  border-radius:26px;background:#ead0a1;border:3px solid #d9bd88}
-.setting-group .slider-label{font-size:26px;color:#7a5528;font-weight:bold;white-space:nowrap}
-.setting-group .setting-hint{flex:1 0 100%;font-size:19px;line-height:1.5;color:#8a6a3c}
-.setting-choices{display:flex;gap:10px;flex-wrap:wrap;flex:1}
-.setting-choice{font-size:22px!important;min-height:40px!important;padding:3px 16px!important;
-  background:linear-gradient(#fffef1,#ede9d4 45%,#c7c5b9)!important;
-  box-shadow:inset 0 3px #fffdf3,inset 0 -2px #9c9b8a!important;color:#fcfcf6}
-.setting-choice:hover{filter:brightness(1.04)}
-.setting-choice.active{background:linear-gradient(#fff6a1,#ffdb58 38%,#ffb62c 67%,#ec9009)!important;
-  box-shadow:inset 0 3px 0 #fffac2,inset 0 -3px 0 #dd8210,0 2px 2px #62542890!important}
+/* ---------- 系统页：分辨率 / 全面屏（画面设置） ----------
+   第 3 项：分辨率与全面屏收进了按钮网格，和音乐/导出/导入/昵称拼成两排 6 个，
+   所以这里只要保证网格是 3 列；原来的 setting-group / setting-choice 一并去掉。 */
+.settings-grid.system-grid{grid-template-columns:repeat(3,1fr)}
+.settings-grid.system-grid .uc-button{font-size:28px}
 
 /* ---------- 帮助页（系统分组，原先是弹窗） ---------- */
 .classic-page[data-screen="help"]>.classic-board{overflow-y:auto;overscroll-behavior:contain;

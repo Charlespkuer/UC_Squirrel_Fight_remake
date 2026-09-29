@@ -10,7 +10,7 @@
  *   ids 24/25/26 are NOT in it and are an explicit offline addition (see
  *   tools/research-floating-drops.md). Reward odds came from the unavailable
  *   server; this small pool is an explicit offline balance, separate from battle
- *   damage and stage loot. */
+ *   damage and stage loot. */ 
 (function () {
   'use strict';
   const RULES = Object.freeze({ fps: 15, frames: [30, 180, 340], jitter: 130, lifetime: 31 / 15 * 1000 });

@@ -11,7 +11,10 @@
   'use strict';
 
   const STORE_KEY = 'ssdz_debug';
-  const defaults = { infiniteEnergy: false, godMode: false, noUpgradeFail: false, freeUpgrade: false, freeShop: false, noStageCost: false };
+  /* 开关的默认值。新增开关要同时加进这里与下面的 TOGGLES；
+   * set() 以 TOGGLES 为准，所以这里漏了也不会出现「开关点不动」的老问题
+   * （noTowerCost / endlessCoin 以前就漏在这里，导致那两个开关一直是死的）。 */
+  const defaults = { infiniteEnergy: false, godMode: false, shortDay: false, noUpgradeFail: false, freeUpgrade: false, freeShop: false, noStageCost: false, noTowerCost: false, endlessCoin: false };
   const state = Object.assign({}, defaults);
   try {
     const raw = localStorage.getItem(STORE_KEY);
@@ -37,6 +40,18 @@
       on() { const S = State.state(); if (!S) return; S.energy = S.maxEnergy; S.lastEnergyTs = Date.now(); State.save(); if (window.UI && UI.refreshHome) UI.refreshHome(); },
     },
     {
+      key: 'shortDay', label: '12 小时一天',
+      note: '一天视为 12 小时：中午 12 点也算新的一天。每日礼包、免费抽奖、金杯商店每日限兑、每日任务、天梯今日场次、弟子日供、师父踢人、真化次数、VIP 每日、挑战塔当天刷新的 boss 等，全部会在 12 点再刷一次',
+      on() {
+        if (!window.State || !State.state()) return;
+        // 打开时如果已经是下午，日期键会直接跳到「第二天」——手动跑一次每日检查，
+        // 让所有每日刷新立刻生效，不用等下一次进首页。
+        if (State.refreshDaily) State.refreshDaily();
+        State.save();
+        if (window.UI && UI.refreshHome) UI.refreshHome();
+      },
+    },
+    {
       key: 'godMode', label: '无敌模式',
       note: '战斗里玩家最低保留 1 点血，不会被击倒',
       on() {},
@@ -49,12 +64,12 @@
     { key: 'endlessCoin', label: '无尽试炼币拉满', note: '无尽模式开局自带 9999 试炼币（仅新开的局生效）' },
   ];
   function set(key, value, session) {
-    if (!(key in defaults)) return false;
+    const def = TOGGLES.find((t) => t.key === key);
+    if (!def) return false;
     const changed = state[key] !== (value === true);
     state[key] = value === true;
     save();
-    const def = TOGGLES.find((t) => t.key === key);
-    if (changed && state[key] && session === true && def && def.on) def.on();
+    if (changed && state[key] && session === true && def.on) def.on();
     return state[key];
   }
   function toggle(key, session) { return set(key, !state[key], session); }
@@ -115,7 +130,6 @@
           (last.autoPoint ? '，' + last.autoPointName + '占比过低已自动补 1 点' : '') +
           (S.freePoints ? '，本次分配弹窗里还有 ' + S.freePoints + ' 点没点完' : '');
       } },
-    { label: '体力全满', run() { const S = State.state(); S.energy = S.maxEnergy; S.lastEnergyTs = Date.now(); State.save(); UI.refreshHome(); return '体力已回满'; } },
     { label: '金松果 +10000', run() { State.addGold(10000, { count: false }); State.save(); UI.refreshHome(); return '金松果 +10000'; } },
     { label: '全道具 +10', run() {
         const S = State.state();

@@ -113,7 +113,7 @@ async function main() {
      ?shot=sell|shop|exchange|status|daily|chat|arrows 各自停在一个画面上，
      既抓尺寸数据也方便截图。 */
   const batch = q.get('shot');
-  if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows', 'gearsell', 'gearsellconfirm', 'master', 'trueform', 'vip', 'hex', 'trial', 'trialplan', 'warlord'].includes(batch)) {
+  if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows', 'gearsell', 'gearsellconfirm', 'master', 'trueform', 'vip', 'hex', 'trial', 'trialplan', 'warlord', 'debugday'].includes(batch)) {
     S.props[47] = 20; S.props[22] = 12; S.props[24] = 8; S.props[1] = 9;
     State.save();
     const rect = (sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom) }; };
@@ -281,6 +281,29 @@ async function main() {
         trial: nx.info.mechDesc ? { text: nx.info.mechDesc } : null,
       });
       await flush(2600);
+      P.done = true; P.errors = window.__errs.slice(); return;
+    }
+
+    if (batch === 'debugday') {
+      // 调试面板：原来的「体力全满」按钮换成「12 小时一天」开关（中午 12 点也算新的一天）
+      Debug.open(); await flush(300);
+      P.debugToggles = $$('.debug-panel .debug-row .debug-name').map((e) => e.textContent.trim());
+      P.debugActions = $$('.debug-panel .debug-actions .uc-button').map((e) => e.textContent.trim());
+      P.shortDayBefore = Debug.enabled('shortDay');
+      const row = $$('.debug-panel input[type="checkbox"]').find((i) => i.dataset.key === 'shortDay');
+      P.shortDayRowExists = !!row;
+      P.shortDayNote = row ? text(row.closest('.debug-row').querySelector('.debug-note')) : null;
+      if (row) { row.checked = true; row.onchange(); }
+      await flush(260);
+      P.shortDayAfter = Debug.enabled('shortDay');
+      const d = new Date();
+      const want = new Date(d.getTime()); if (d.getHours() >= 12) want.setDate(want.getDate() + 1);
+      const key = want.getFullYear() + '-' + String(want.getMonth() + 1).padStart(2, '0') + '-' + String(want.getDate()).padStart(2, '0');
+      P.localDateNow = State.localDate();
+      P.localDateWant = key;
+      P.localDateMatches = State.localDate() === key;
+      P.hourNow = d.getHours();
+      snap('调试面板', '.debug-panel');
       P.done = true; P.errors = window.__errs.slice(); return;
     }
 

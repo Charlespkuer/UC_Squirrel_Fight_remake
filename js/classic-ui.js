@@ -1140,7 +1140,8 @@
             : '<span class="quest-state muted">进行中</span>') +
         '</div>';
     }).join('');
-    const list = '<div class="daily-quests"><h3>每日任务<span class="quest-date">' + esc(State.localDate()) + ' · 每天 0 点刷新</span></h3>' + rows + '</div>';
+    const list = '<div class="daily-quests"><h3>每日任务<span class="quest-date">' + esc(State.localDate()) + ' · ' +
+      (window.Debug && Debug.enabled('shortDay') ? '调试：12 小时一天，0 点与 12 点刷新' : '每天 0 点刷新') + '</span></h3>' + rows + '</div>';
     // 活动页直接给一个「每日抽奖」入口（关掉活动弹窗再进抽奖页）
     const m = modal('活动', gift + list, [
       { label: '每日抽奖', cls: 'gold', run: () => { if (window.ClassicExtras && ClassicExtras.lottery) ClassicExtras.lottery(); } },

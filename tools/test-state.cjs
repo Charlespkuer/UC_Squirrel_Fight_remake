@@ -39,7 +39,8 @@ function game(search) {
   const math = vm.runInContext('Math', context);
   math.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
   context.State.newGame('测试松鼠');
-  return { ...context, storage, math, advance: (ms) => { now += ms; } };
+  // ctx 是 vm 里的真·全局对象（写 window.Debug 这类开关要用它，展开出来的只是拷贝）
+  return { ...context, ctx: context, storage, math, advance: (ms) => { now += ms; } };
 }
 const same = (a, b) => assert.deepEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)));
 const tests = [];
@@ -1083,6 +1084,43 @@ test('升级礼包：每级给消耗品，逢 5 级与属性书等级再给大�
   const totalAdded = all.reduce((n, u) => n + u.gifts.reduce((m, x) => m + x.count, 0), 0);
   const delta = Object.keys(after).reduce((n, k) => n + Math.max(0, (after[k] || 0) - (before[k] || 0)), 0);
   assert.ok(delta >= totalAdded, '礼包道具应全部进背包：新增 ' + delta + ' / 礼包 ' + totalAdded);
+});
+
+test('调试开关「12 小时一天」：过了中午算第二天，每日刷新 12 点也来一次', () => {
+  const g = game();
+  // 没有开关时：日期键只在午夜翻页
+  g.advance(5 * 60 * 1000);                             // 23:55 → 次日 00:00
+  assert.equal(g.State.localDate(), '2026-09-24');
+  g.advance(13 * 60 * 60 * 1000);                       // → 13:00
+  assert.equal(g.State.localDate(), '2026-09-24', '没开开关时下午仍是当天');
+
+  // 打开开关（真实入口是调试面板，这里直接挂 vm 里的 window.Debug）
+  g.ctx.Debug = { enabled: (key) => key === 'shortDay' };
+  g.advance(-1 * 60 * 60 * 1000);                       // 回到 12:00 整
+  assert.equal(g.State.localDate(), '2026-09-25', '12:00 起算第二天');
+  g.advance(-60 * 1000);                                // 11:59
+  assert.equal(g.State.localDate(), '2026-09-24', '11:59 仍是当天');
+
+  // 端到端：每日礼包在「短日」里 12 点能再领一次
+  const g2 = game();
+  g2.ctx.Debug = { enabled: (key) => key === 'shortDay' };
+  g2.advance(5 * 60 * 1000);                            // 次日 00:00
+  assert.equal(g2.State.claimDaily().ok, true);
+  assert.equal(g2.State.claimDaily().ok, false, '同一天不能领两次');
+  g2.advance(12 * 60 * 60 * 1000);                      // → 12:00
+  g2.State.refreshDaily();                              // 调试开关 on() 里手动跑的那一步
+  const gold0 = g2.State.state().goldPoint;
+  assert.equal(g2.State.claimDaily().ok, true, '12 点应当能再领一次每日礼包');
+  assert.equal(g2.State.state().goldPoint, gold0 + 150);
+
+  // 弟子日供的「昨天」跟着短日走（否则会结算成两天前）
+  const g3 = game();
+  assert.equal(g3.State.localDate(), '2026-09-23');
+  g3.ctx.Debug = { enabled: (key) => key === 'shortDay' };
+  g3.advance(60 * 60 * 1000);                           // 次日 00:55
+  assert.equal(g3.State.localDate(), '2026-09-24');
+  g3.advance(12 * 60 * 60 * 1000);                      // → 12:55
+  assert.equal(g3.State.localDate(), '2026-09-25');
 });
 
 let failed = 0;

@@ -396,9 +396,12 @@
   }
   function validLocalDate(date) { return typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date); }
   function localDateTime(date, hour, minute) { const [y,m,d] = date.split('-').map(Number); return new Date(y,m-1,d,hour,minute).getTime(); }
+  /** 「昨天」跟着 localDate 走（12 小时一天的调试模式下也要跟着位移），
+   *  徒弟日供结算的是「我昨天赚到的」，所以这里必须和日期键同一套口径。 */
   function yesterdayDate() {
-    const date = new Date(Date.now()); date.setDate(date.getDate()-1);
-    return date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
+    const [y, m, d] = localDate().split('-').map(Number);
+    const date = new Date(y, m - 1, d); date.setDate(date.getDate() - 1);
+    return dateKey(date);
   }
   /* ---------- 徒弟日供（v2：按徒弟等级之和线性给系数） ----------
    * 系数随「所有徒弟等级之和」线性增长：保底 10%，Σ=210（三个满级 70 级徒弟）封顶 50%，
@@ -2259,9 +2262,23 @@
   }
 
   // 本地日历日期，避免 UTC 日期造成午夜前后重复领取或晚八小时刷新。
+  function dateKey(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  /** 调试开关「12 小时一天」：打开后一天只有 12 小时，过了中午就算第二天。 */
+  function shortDay() { return !!(window.Debug && window.Debug.enabled && window.Debug.enabled('shortDay')); }
+  /* 打开「12 小时一天」时，12:00 起换成「第二天」的日期键，于是每日礼包、免费抽奖、
+   * 金杯商店每日限兑、每日任务、天梯今日场次、弟子日供、师父踢人、真化次数、
+   * VIP 每日、挑战塔当天刷新的 boss 等**所有每日刷新在 0 点与 12 点各来一次**。
+   * 格式仍是 YYYY-MM-DD（存档校验 validLocalDate、earnOn 按日期查表都依赖它）。 */
   function localDate() {
     const now = new Date(Date.now());
-    return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+    if (shortDay() && now.getHours() >= 12) {
+      const next = new Date(now.getTime());
+      next.setDate(next.getDate() + 1);
+      return dateKey(next);
+    }
+    return dateKey(now);
   }
   function syncDailyStats() {
     const date = localDate();
@@ -2565,7 +2582,7 @@
     MASTER_SKILL_ID, MASTER_SKILL_NAME,
     genAI, stageProgress, setStageProgress, npcOf, highestStageId, stageRun, stageAccess, stageReward,
     beginStageBattle, finishStageBattle, interruptStageBattle, abandonStageRun,
-    localDate, dailyStatus, claimDaily, recordBattle, battleHistory,
+    localDate, dailyStatus, refreshDaily: syncDailyStats, claimDaily, recordBattle, battleHistory,
     questStatus, questClaimable, claimQuest, bumpDaily, QUEST_TYPES, QUEST_EXTRA_POOL, QUEST_GOLD, QUEST_EXP,
     questState, questAvailableAt, questPoolFor, QUEST_COUNT,
     settings, setSettings, normalizeSettings, RESOLUTIONS, resolutionHeight,

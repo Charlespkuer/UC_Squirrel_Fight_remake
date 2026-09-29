@@ -304,7 +304,9 @@
     panel.innerHTML =
       '<header class="debug-head"><b>调试面板</b><span class="debug-hint">Ctrl+Shift+D</span><button type="button" class="debug-x" aria-label="关闭调试面板">×</button></header>' +
       '<div class="debug-body"><ul class="debug-list">' +
-      TOGGLES.map((t) => '<li><label class="debug-row" data-key="' + t.key + '"><input type="checkbox" data-key="' + t.key + '"' + (state[t.key] ? ' checked' : '') + '><span class="debug-name">' + esc(t.label) + '</span><em class="debug-note">' + esc(t.note || '') + '</em></label></li>').join('') +
+      /* 第 2 项：开关行不再显示二级描述文字（一行一个开关，工整且占位少）；
+       * 说明文字改为 title 悬停提示，需要时鼠标停一下就能看到，不占面板空间。 */
+      TOGGLES.map((t) => '<li><label class="debug-row" data-key="' + t.key + '" title="' + esc(t.note || t.label) + '"><input type="checkbox" data-key="' + t.key + '"' + (state[t.key] ? ' checked' : '') + '><span class="debug-name">' + esc(t.label) + '</span></label></li>').join('') +
       '</ul><div class="debug-grant">' +
       '<span class="debug-grant-title">快速获取物品</span>' +
       '<label class="debug-grant-row"><select data-item-select aria-label="选择要获取的道具">' + itemOptions() + '</select>' +

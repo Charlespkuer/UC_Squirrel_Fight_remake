@@ -113,30 +113,45 @@ button,input,select{font:inherit}button{touch-action:manipulation}button:focus-v
 /* 音量滑块：连续调节，拖到 0 等同静音 */
 .setting-slider{display:flex;align-items:center;gap:16px;margin:6px 30px 0;padding:12px 22px;border-radius:26px;background:#ead0a1;border:3px solid #d9bd88}
 .setting-slider .slider-label{font-size:26px;color:#7a5528;font-weight:bold;white-space:nowrap}
-.setting-slider input[type="range"]{flex:1;height:16px;border-radius:10px;background:linear-gradient(90deg,#8a5a22,#e0a12f);accent-color:#e0900f;cursor:pointer}
+.setting-slider input[type="range"]{flex:1;height:16px;border-radius:10px;
+  background-color:#f3e3bd;
+  background-image:linear-gradient(90deg,#8a5a22,#e0a12f),linear-gradient(90deg,#f3e3bd,#f8eed2);
+  background-size:var(--fill,100%) 100%,100% 100%;background-repeat:no-repeat;background-position:left center,left center;
+  accent-color:#e0900f;cursor:pointer}
 .setting-slider .slider-value{min-width:76px;text-align:right;font-size:25px;color:#8a6528;font-weight:bold}.settings-grid .uc-button{font-size:32px;min-height:87px}.system-caption{margin-top:23px;text-align:center;line-height:1.6;font-size:24px;color:#957343}
 /* 道具详情里的「使用数量 / 合成次数」滑动条（第 7 项重做）：
    轨道做成又粗又短的卡通金条（固定 340px，不再拉满整行），滑块是大金圆钮，
    「卖出数量」四个字放大，整行垂直居中对齐。 */
 /* 必须保留 flex-wrap：不然「可得 X 金松果…」那行会被硬挤在同一行，
    标签也被压成 0 宽（文字贴着滑条边缘）。标签与数值都设 0 0 auto，避免被压扁。 */
-.setting-slider.use-slider{margin:10px 0 6px;padding:14px 18px;gap:16px;align-items:center;flex-wrap:wrap}
-.setting-slider.use-slider .slider-label{font-size:30px;flex:0 0 auto;white-space:nowrap}
-.setting-slider.use-slider .slider-value{flex:0 0 auto;min-width:78px;text-align:center;font-size:34px;color:#c87f0a;text-shadow:0 1px 0 #fff6ad}
+.setting-slider.use-slider{margin:10px 0 6px;padding:9px 16px;gap:14px;align-items:center;flex-wrap:wrap}
+.setting-slider.use-slider .slider-label{font-size:27px;line-height:1;flex:0 0 auto;white-space:nowrap}
+.setting-slider.use-slider .slider-value{flex:0 0 auto;min-width:70px;text-align:center;font-size:30px;line-height:1;
+  color:#c87f0a;text-shadow:0 1px 0 #fff6ad}
+/* 轨道细了（26px 含描边），滑块直径正好等于轨道内容高度，所以不会再凸出轨道、
+   底边也和标签/数值齐平；--fill 由 js 写入，左侧已选是金色、右侧未选是浅色。 */
+/* 滑条本身不画东西：金色/浅色两段轨道画在 runnable-track 上，
+   描边用 inset box-shadow（不占布局），滑块直径比轨道大 6px 但正好放进 input 高度里。 */
 .setting-slider.use-slider input[type="range"]{
-  flex:0 0 340px;width:340px;height:44px;border-radius:24px;padding:0;margin:0;
-  border:4px solid #8a5a22;background:linear-gradient(180deg,#ffd76a,#e8a01c 55%,#c07d10);
-  box-shadow:inset 0 3px 0 #fff3c4,inset 0 -4px 0 #9c6408,0 3px 0 #6b4a24;
+  flex:0 0 320px;width:320px;height:30px;padding:0;margin:0;border:0;background:transparent;
   cursor:pointer;appearance:none;-webkit-appearance:none}
-.setting-slider.use-slider input[type="range"]::-webkit-slider-runnable-track{height:36px;border-radius:18px;background:transparent}
+.setting-slider.use-slider input[type="range"]::-webkit-slider-runnable-track{
+  height:24px;border:0;border-radius:12px;background-color:#f7e9c7;
+  background-image:linear-gradient(180deg,#ffd76a,#e8a01c 58%,#c07d10),linear-gradient(180deg,#fdf3d8,#efdcb2);
+  background-size:var(--fill,100%) 100%,100% 100%;background-repeat:no-repeat;
+  box-shadow:inset 0 0 0 3px #8a5a22,inset 0 2px 0 #fff3c4,0 2px 0 #6b4a24}
 .setting-slider.use-slider input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
-  width:58px;height:58px;margin-top:-11px;border-radius:50%;border:5px solid #8a5a22;cursor:pointer;
+  width:30px;height:30px;margin-top:-3px;border-radius:50%;border:3px solid #8a5a22;cursor:pointer;
   background:radial-gradient(circle at 36% 30%,#fffbe0,#ffd24a 52%,#e08c10);
-  box-shadow:0 3px 4px #6b4a2499,inset 0 3px 0 #fffef0}
-.setting-slider.use-slider input[type="range"]::-moz-range-track{height:36px;border-radius:18px;background:transparent}
-.setting-slider.use-slider input[type="range"]::-moz-range-thumb{width:50px;height:50px;border-radius:50%;
-  border:5px solid #8a5a22;background:#ffd24a;cursor:pointer}
-.setting-slider.use-slider .use-preview{flex:1 0 100%;font-size:24px;line-height:1.3;color:#957343;text-align:center}
+  box-shadow:0 2px 3px #6b4a2499,inset 0 2px 0 #fffef0}
+.setting-slider.use-slider input[type="range"]::-moz-range-track{
+  height:24px;border:0;border-radius:12px;background-color:#f7e9c7;
+  background-image:linear-gradient(180deg,#ffd76a,#e8a01c 58%,#c07d10),linear-gradient(180deg,#fdf3d8,#efdcb2);
+  background-size:var(--fill,100%) 100%,100% 100%;background-repeat:no-repeat;
+  box-shadow:inset 0 0 0 3px #8a5a22}
+.setting-slider.use-slider input[type="range"]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;
+  border:3px solid #8a5a22;background:radial-gradient(circle at 36% 30%,#fffbe0,#ffd24a 52%,#e08c10);cursor:pointer}
+.setting-slider.use-slider .use-preview{flex:1 0 100%;font-size:22px;line-height:1.3;color:#957343;text-align:center}
 .use-preview{margin:0 0 2px !important;text-align:center}
 .use-preview.full{color:#c0392b}
 .title-screen{background:transparent;justify-content:flex-end;padding-bottom:70px;gap:19px}.title-logo{position:absolute;top:88px;left:0;right:0;text-align:center;color:#fff277;font-size:88px;letter-spacing:7px;-webkit-text-stroke:5px #724122;paint-order:stroke fill;text-shadow:0 6px #874b20,0 10px #fffac477}.title-sub{position:absolute;top:196px;font-size:27px;letter-spacing:8px;color:#fff8cf;text-shadow:2px 2px #5c6732}.title-form{display:flex;gap:20px;align-items:center;background:#fff4d6e8;padding:16px 21px;border-radius:45px;border:4px solid #90703e}.title-screen #name-input{width:310px;background:#fffdf0;color:#785536;border:3px solid #ab8b4d;border-radius:25px;font-size:29px;padding:9px}.title-screen #start-btn{font-size:34px}.title-tip{bottom:19px;color:#fffbd6;font-size:20px;text-shadow:1px 1px #425223}.title-screen .classic-portrait{position:absolute;width:310px;height:290px;top:239px;left:430px;object-fit:contain;animation:idle-breathe 2s ease-in-out infinite}@keyframes idle-breathe{50%{transform:translateY(-5px) rotate(-1deg)}}

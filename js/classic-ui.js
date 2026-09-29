@@ -15,6 +15,15 @@
   };
   const $ = (s, root) => (root || document).querySelector(s);
   const $$ = (s, root) => [...(root || document).querySelectorAll(s)];
+  /** 滑动条的「已选 / 未选」两段配色：把百分比写进 --fill，CSS 用它切分
+   *  左（金色已选）右（浅色未选）。卖出数量与音量共用。 */
+  const fillRange = (el) => {
+    if (!el) return;
+    const min = Number(el.min) || 0, max = Number(el.max);
+    const v = Number(el.value) || 0;
+    const pct = Number.isFinite(max) && max > min ? ((v - min) / (max - min)) * 100 : 100;
+    el.style.setProperty('--fill', Math.max(0, Math.min(100, pct)).toFixed(2) + '%');
+  };
   const buttonArt = { '返回菜单':'return-menu', '更换装备':'change-equipment' };
   const btn = (label, action, cls) => '<button type="button" class="uc-button ' + (cls || '') + '" data-action="' + esc(action) + '">' + (buttonArt[label] ? '<span class="reference-button-label">'+esc(label)+'</span><img alt="" class="classic-button-art" src="images/classic/new-reference/buttons/'+buttonArt[label]+'.png">' : esc(label)) + '</button>';
   const spriteCache = Object.create(null);
@@ -813,6 +822,7 @@
       if(value)value.textContent=n;
       if(sellBtn)sellBtn.textContent='确认卖出 ×'+n;
       if(preview)preview.textContent='可得 '+(n*price)+' 金松果，卖出后剩 '+(held-n)+' 个';
+      fillRange(range);                       // 左金色已选、右浅色未选
     };
     if(range)range.addEventListener('input',()=>{n=Math.max(1,Math.min(held,Number(range.value)||1));refresh();});
     refresh();
@@ -1456,9 +1466,11 @@
     syncBtn('sync-recheck',()=>{syncState.checked=false;syncState.ok=false;syncState.info=null;openSystem();});
     // 音量滑块：拖动即时生效；拖到 0 等同静音，拉回来自动取消静音
     const range=$('[data-slider="volume"] input',p),value=$('[data-slider="volume"] .slider-value',p);
+    fillRange(range);
     range.oninput=()=>{
       const v=Main.setVolume(Number(range.value)/100);
       value.textContent=Math.round(100*v)+'%';
+      fillRange(range);
     };
     range.onchange=()=>{
       const v=Math.round(100*((Main.volume&&Main.volume())||0));

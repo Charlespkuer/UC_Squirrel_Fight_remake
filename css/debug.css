@@ -18,14 +18,14 @@
 .debug-hint{margin-left:auto;font-size:11px;color:#7c5a2c;background:#fff6c9;border-radius:9px;padding:2px 7px}
 .debug-x{border:0;background:transparent;color:#7b5228;font-size:22px;line-height:1;cursor:pointer;padding:0 4px}
 .debug-body{padding:10px 12px 12px;overflow-y:auto}
-/* 开关一行两个：6 个开关从 6 行压到 3 行，面板不用再长到半屏高（用户要求「不占空间」）。 */
-.debug-list{list-style:none;margin:0 0 10px;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:5px 6px}
-.debug-row{display:grid;grid-template-columns:auto 1fr;gap:1px 6px;align-items:center;min-width:0;
-  background:#fdf6df;border:2px solid #e2d3ab;border-radius:14px;padding:5px 8px;cursor:pointer}
+/* 开关一行两个：开关多了也不会长到半屏高（用户要求「不占空间」）。
+   二级描述文字已去掉，每个开关只占一行、一行一个名字；说明改挂 title 悬停提示。 */
+.debug-list{list-style:none;margin:0 0 10px;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:4px 6px}
+.debug-row{display:grid;grid-template-columns:auto 1fr;gap:0 6px;align-items:center;min-width:0;
+  background:#fdf6df;border:2px solid #e2d3ab;border-radius:12px;padding:4px 9px;cursor:pointer}
 .debug-row:hover{background:#fffbe9}
-.debug-row input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:#4e9831;cursor:pointer}
-.debug-name{font-weight:700;color:#5c3d1b;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.debug-note{grid-column:2;font-style:normal;font-size:11px;line-height:1.3;color:#987a4e}
+.debug-row input[type="checkbox"]{width:16px;height:16px;margin:0;accent-color:#4e9831;cursor:pointer}
+.debug-name{font-weight:700;color:#5c3d1b;font-size:13.5px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .debug-row:has(input:checked){background:#eaf7d2;border-color:#9dc466}
 .debug-actions .uc-button{white-space:normal;line-height:1.2;height:auto;min-height:34px}
 .debug-range{grid-template-columns:auto 1fr auto}

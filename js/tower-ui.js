@@ -363,15 +363,13 @@
       main = '<div class="endless-run">' +
         '<div class="endless-left">' +
         '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
-        currencyHtml('endless') +
-        '<span class="endless-score-box"><i>分数</i><b>' + run.score + '</b></span></div>' +
+        '<span class="endless-topright">' + currencyHtml('endless') + '<span class="endless-score-box"><i>分数</i><b>' + run.score + '</b></span></span></div>' +
         carryBar(run.carry, '血量', 'endless-hp') +
         '<div class="tower-rule mech-bar"><b>当前遭遇的机制</b>' + (info.mechs && info.mechs.length
           ? info.mechs.map((m) => '<span class="mech-chip">' + esc(MECH_NAME[m] || m) + '<i>' + esc(MECH_DESC[m] || '') + '</i></span>').join('')
           : '<span class="mech-none">本段没有额外机制（第 1 段）</span>') + '</div>' +
         buffPanelsHtml('endless') + choicesHtml + '</div>' +
         '<div class="endless-foes">' + pillSlotsHtml(run.pillSlots) +
-        '<h4 class="tower-plan-title">本层对手</h4>' +
         '<ol class="tower-plan vertical">' + foeRows + '</ol></div></div>' +
         '<div class="endless-actions tower-actions">' +
         C().btn('放弃本局', 'abandon', 'muted tiny') +

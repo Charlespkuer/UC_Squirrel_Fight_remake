@@ -499,3 +499,31 @@
 
 /* 休整点的选卡在本页里整体缩一档，避免把按钮顶下去 */
 .choice-onpage { zoom: .82; }
+
+/* 第五轮：把内容区整体放大（左侧塔身收窄、页间距收紧），右上留更多空间 */
+.tower-page { gap: 14px; padding: 2px 0; }
+.tower-visual { flex: 0 0 128px; }
+.tower-main { padding-right: 2px; }
+.endless-run { grid-template-columns: minmax(0, 1fr) 236px; gap: 8px; }
+/* 力/敏/速继续往右上；对手行放大（去掉「本层对手」标题后空间更足） */
+.endless-foes { margin-right: 0; align-items: flex-end; }
+.endless-foes .pill-slots { margin: -6px -2px 2px; gap: 3px 6px; }
+.endless-foes .pill-slot { width: 42px; height: 42px; }
+.tower-plan.vertical .foe-portrait { width: 64px; height: 64px; }
+.tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 64px; }
+.tower-plan.vertical li { padding: 2px 8px; }
+/* 试炼币/抽奖卷往右放：标题靠左、货币与分数靠右 */
+.endless-title-row { justify-content: space-between; }
+.endless-title-row .endless-score-box { margin-left: 0; }
+
+.endless-topright { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
+.endless-topright .tower-currency { position: static; }
+
+/* 第五轮收口：立绘 56px（仍清楚）+ 药丸槽 40px，保证一屏 */
+.tower-plan.vertical .foe-portrait { width: 56px; height: 56px; }
+.tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 56px; }
+.tower-plan.vertical li { padding: 0 8px; }
+.tower-plan.vertical { gap: 3px; }
+.endless-foes .pill-slot { width: 40px; height: 40px; }
+.endless-foes .pill-slot img { width: 19px; height: 19px; }
+.endless-foes .pill-slots { gap: 2px 5px; }

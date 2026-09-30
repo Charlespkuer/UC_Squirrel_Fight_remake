@@ -680,9 +680,13 @@
       C().btn(shop.rerollFree ? '免费刷新' : shop.rerollPrice + ' 币刷新', 'reroll', 'small') + '</div></div>' +
       '<h4>出售增益（回收 40%，限次与永久都可卖）</h4><div class="shop-sell">' + sellRows + '</div>' +
       '</div>';
+    /* 第 1 项：从 5 的倍数层进来的商店，左下给一个「结算」按钮（直接离场拿卷），
+     * 右下「继续挑战」直接进下一段 —— 不再弹结算点那个二次确认窗。 */
     const p = C().page('challenge', 'stages', content, {
       cls: 'tower-board',
-      right: '<span class="footer-right">' + C().btn(revisit ? '返回' : '继续挑战', 'leave', 'gold') + '</span>',
+      left: (!revisit && !shop.rest)
+        ? '<span class="footer-left">' + C().btn('结算离场', 'settle', 'small gold') + '</span>' : '',
+      right: '<span class="footer-right">' + C().btn(revisit || shop.rest ? '返回' : '继续挑战', 'leave', 'gold') + '</span>',
     });
     back(p, () => openEndless());   // 第 2 项：返回键统一回无尽塔主界面
     shop.slots.forEach((s, i) => on(p, 'buy' + i, () => {
@@ -695,9 +699,17 @@
     on(p, 'reroll', () => { const r = Tower.rerollShop(); if (!r.ok) notice(r.msg || '刷新失败。'); openShop(revisit); });
     owned.forEach((b) => on(p, 'sell' + b.id, () => { Tower.sellBuff(b.id); openShop(revisit); }));
     on(p, 'leave', () => {
-      if (revisit) { openEndless(); return; }
-      Tower.closeShop();
-      openCheckpoint();
+      if (revisit || shop.rest) { openEndless(); return; }
+      Tower.continueFromShop();       // 直接进下一段，不弹结算点窗口
+      openEndless();
+    });
+    on(p, 'settle', () => {
+      const out = Tower.settleFromShop();
+      if (!out || !out.ok) { notice('现在还不能结算。'); return; }
+      C().modal('本局结算', '<div class="result-box"><div class="result-title win">见好就收</div>' +
+        '<p>抽奖卷 +<b class="gold-text">' + (out.tickets || 0) + '</b>（第 ' + out.layer + ' 层）</p>' +
+        '<div class="result-lines">分数 ' + out.score + ' 已入账 · 历史最高 ' + out.best + '</div></div>',
+        [{ label: '返回无尽塔', cls: 'gold', run: () => openEndless() }], { small: true });
     });
   }
 

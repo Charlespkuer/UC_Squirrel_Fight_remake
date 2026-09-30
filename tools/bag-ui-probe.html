@@ -170,7 +170,17 @@ async function main() {
       if (again) { again.click(); await flush(160); }
     }
     TowerUI.openEndless(); await flush(260);
-    P.shopPhase = State.state().endless.run.phase;
+    // 点进商店，检查「结算离场 / 继续挑战」两个按钮与点击后的行为
+    const shopBtn = $$('#ui .endless-actions [data-action="shop"]')[0] || $$('#ui .tower-actions [data-action="shop"]')[0];
+    if (shopBtn) { shopBtn.click(); await flush(320); }
+    P.shopOpened = !!document.querySelector('#ui .tower-shop');
+    P.shopFooter = $$('#ui .page-footer .uc-button').map((b) => b.textContent.trim());
+    const leave = $$('#ui .page-footer [data-action="leave"]')[0];
+    if (leave) { leave.click(); await flush(320); }
+    P.afterLeaveModals = $$('.classic-modal').length;
+    P.afterLeavePhase = State.state().endless.run ? State.state().endless.run.phase : null;
+    P.afterLeaveLayer = State.state().endless.run ? State.state().endless.run.layer : null;
+    P.shopPhase = 'checked';
     P.beatenRows = $$('#ui .tower-plan.vertical li.beaten').length;
     P.foeRows = $$('#ui .tower-plan.vertical li').length;
     P.finished = State.state().endless.run.finished;

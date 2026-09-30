@@ -932,6 +932,23 @@
     save();
     return out;
   }
+  /** 商店里的「继续挑战」：直接进下一段，不再经过结算点弹窗。 */
+  function continueFromShop() {
+    const run = endless().run;
+    if (!run || run.phase !== 'shop') return { ok: false };
+    run.shop = null;
+    run.phase = null;
+    advanceLayer(run, 'endless');
+    save();
+    return { ok: true, layer: run.layer };
+  }
+  /** 商店里的「结算」：等于结算点离场（抽奖卷入包、分数入账）。 */
+  function settleFromShop() {
+    const run = endless().run;
+    if (!run || run.phase !== 'shop') return { ok: false };
+    run.phase = 'checkpoint';
+    return settleEndless();
+  }
   /** 继续挑战：卷不领取，进入下一段（失败则全部作废）。 */
   function continueEndless() {
     const run = endless().run;
@@ -1015,7 +1032,7 @@
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,
     pickChoice, toggleLimited, addBuff, applyInstant, openRestShop, usePillSlot,
     shopState, buyShopSlot, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp,
-    checkpointInfo, settleEndless, continueEndless,
+    checkpointInfo, settleEndless, continueEndless, continueFromShop, settleFromShop,
     // 调试
     _debugSetLayer(n) { tower().maxLayer = Math.max(0, Math.floor(Number(n) || 0)); save(); },
   };

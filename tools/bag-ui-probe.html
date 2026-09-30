@@ -221,8 +221,14 @@ async function main() {
       P.footerBtn = (() => { const b = document.querySelector('#ui .tower-footer [data-action="fight"]');
         if (!b) return null; const r = b.getBoundingClientRect();
         const card = document.querySelector('#ui .tower-page').getBoundingClientRect();
+        const count = document.querySelector('#ui .tower-footer .tower-book-count');
+        const cr = count ? count.getBoundingClientRect() : null;
         return { inFooter: true, bottomRight: r.right > card.left + card.width * 0.5 && r.top > card.top + card.height * 0.5,
-          inside: r.right <= card.right + 1 && r.bottom <= card.bottom + 1 }; })();
+          inside: r.right <= card.right + 1 && r.bottom <= card.bottom + 1,
+          gapToCardRight: Math.round(card.right - r.right),
+          // 数量提示必须在按钮左边（第 1 项）
+          countLeftOfBtn: !!cr && cr.right <= r.left + 1,
+          gapCountToBtn: cr ? Math.round(r.left - cr.right) : null }; })();
       // 悬停气泡：手动触发 mouseenter，量它有没有跑到屏幕外
       const row = document.querySelector('#ui .tower-plan li');
       if (row) {

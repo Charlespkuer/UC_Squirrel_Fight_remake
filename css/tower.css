@@ -54,10 +54,11 @@
 /* 第 1 项：入口页的「开始挑战」固定到卡片右下角（绝对定位，不挤预告区） */
 .tower-page { position: relative; }
 .tower-page.has-footer .tower-main { padding-bottom: 60px; }
+/* 第 1 项：数量提示在按钮左边，按钮贴到卡片最右（right 只留一点点边距） */
 .tower-footer {
-  position: absolute; right: 18px; bottom: 10px; margin: 0; gap: 12px;
-  padding: 6px 0 6px 26px;
-  background: linear-gradient(90deg, rgba(255, 253, 240, 0), rgba(255, 253, 240, .94) 26%);
+  position: absolute; right: 8px; bottom: 10px; margin: 0; gap: 14px;
+  padding: 6px 2px 6px 30px;
+  background: linear-gradient(90deg, rgba(255, 253, 240, 0), rgba(255, 253, 240, .94) 30%);
 }
 .tower-rule-hint { font-size: 17px; color: #8a3a30; background: rgba(255, 240, 236, .9); border-color: #e0a99c; }
 .tower-book-count { font-size: 19px; color: #8a6a3a; }

@@ -200,9 +200,10 @@
         '<p class="tower-rule" title="第 4 场是随机 boss；三侠顺序每层随机。悬停任意对手可以看它的机制与出招循环">每层 1 张挑战书 · 连战只继承血量 · 对手顺序每层随机（悬停看机制）· 通关另补 3 场挑战的掉落</p>' +
         heroDebuffHint() +
         '<h4 class="tower-plan-title">本层对手预告</h4>' + planHtml(info.preview);
-      // 第 1 项：「开始挑战」挪到卡片右下角（脱离文字流，预告区就有完整的一屏）
-      footer = '<div class="tower-actions tower-footer">' + C().btn('开始挑战（挑战书×1）', 'fight', 'gold') +
-        '<span class="tower-book-count">现有挑战书 ' + info.books + ' 张</span></div>';
+      // 「开始挑战」在卡片右下角；挑战书数量放在它**左边**（第 1 项），按钮因此贴到最右
+      footer = '<div class="tower-actions tower-footer">' +
+        '<span class="tower-book-count">现有挑战书 ' + info.books + ' 张</span>' +
+        C().btn('开始挑战（挑战书×1）', 'fight', 'gold') + '</div>';
     }
     const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + '">' + towerVisual(info.nextLayer, info.maxLayer, 'tower') +
       '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';
@@ -249,8 +250,9 @@
       main = '<h2 class="tower-title">无尽模式</h2>' +
         '<div class="tower-stats">历史最高 <b class="gold-text">' + info.best + '</b> 分 · 本周最高 ' + info.weekBest + ' 分 · 最深 ' + info.bestLayer + ' 层</div>' +
         '<p class="tower-rule">免门票，从 1 层冲分。每 5 层进商店并可结算离场拿抽奖卷：20 层前翻倍（1/2/4/8），之后每段 +3；中途失败卷作废。怪物每段 ×1.5 并叠加机制，撑得越久越刺激。</p>';
-      footer = '<div class="tower-actions tower-footer">' + C().btn('开始冲塔（免费）', 'fight', 'gold') +
-        '<span class="tower-book-count">现有抽奖卷 ' + info.tickets + ' 张</span></div>';
+      footer = '<div class="tower-actions tower-footer">' +
+        '<span class="tower-book-count">现有抽奖卷 ' + info.tickets + ' 张</span>' +
+        C().btn('开始冲塔（免费）', 'fight', 'gold') + '</div>';
     }
     const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + '">' + towerVisual(info.run ? info.run.layer : 1, 0, 'endless') +
       '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';

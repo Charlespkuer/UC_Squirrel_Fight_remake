@@ -156,7 +156,13 @@ async function main() {
     const card = document.querySelector('#ui .tower-page').getBoundingClientRect();
     return { bottom: Math.round(r.bottom), right: Math.round(r.right), cardBottom: Math.round(card.bottom), cardRight: Math.round(card.right),
       inFooter: !!b.closest('.tower-footer'), inside: r.bottom <= card.bottom + 1 && r.right <= card.right + 1,
-      bottomRight: r.right > card.left + card.width * 0.5 && r.top > card.top + card.height * 0.5 }; })();
+      bottomRight: r.right > card.left + card.width * 0.5 && r.top > card.top + card.height * 0.5,
+      gapToCardRight: Math.round(card.right - r.right) }; })();
+  P.footerCountLeftOfBtn = (() => {
+    const c = document.querySelector('#ui .tower-footer .tower-book-count'), b = document.querySelector('#ui .tower-footer [data-action="fight"]');
+    if (!c || !b) return null;
+    return c.getBoundingClientRect().right <= b.getBoundingClientRect().left + 1;
+  })();
   // 第 1 项：对手要有一排小人像（松鼠形态的是 canvas，三侠/NPC 是立绘卡）
   P.foePortraits = document.querySelectorAll('#ui .tower-plan li .foe-portrait').length;
   P.foeImgs = [...document.querySelectorAll('#ui .tower-plan li .foe-portrait img')].map((i) => i.getAttribute('src').split('/').pop());

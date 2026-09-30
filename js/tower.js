@@ -752,6 +752,9 @@
       if (at < 0) return { ok: false, needsReplace: true, buff, msg: '要替换的增益不存在' };
       list.splice(at, 1);
     }
+    /* 第 1 项修复：全场五折是 permanent 类，addBuff 原来只对 instant 走 applyInstant，
+     * 所以标记一直没被点亮 —— 这里在加入时就把折扣标记打开。 */
+    if (buff.mods && buff.mods.shopDiscount) run.shopDiscount = true;
     // 第 1 项：拿到永久生命上限增益时，把它折算成 run.hpBonus（之后卖掉也保留）
     if (buff.kind === 'permanent' && buff.mods && buff.mods.maxHpMul) {
       run.hpBonus = (run.hpBonus || 0) + buff.mods.maxHpMul;
@@ -789,11 +792,11 @@
   }
   // ---------- 无尽：试炼币商店 ----------
   function makeShop(run) {
-    /* 第 1 项：「全场五折」在开店那一刻生效一次（价格在 shopState 里按 run.shopDiscount 打折），
-     * 然后用掉标记 —— 所以「立即进货」开的临时店也会吃到折扣。 */
-    const shop = { layer: run.layer, slots: rollShopSlots(run), healSold: false, rerollFree: true,
-      discount: !!run.shopDiscount };
-    return shop;
+    /* 第 1 项：「全场五折」在开店那一刻生效一次，然后**立刻消耗**标记（存到 shop.discount 上）。
+     * 价格统一走 shopPriceOf()，所以「立即进货」开的临时店也会吃到折扣，且不会跨店重复生效。 */
+    const discount = !!run.shopDiscount;
+    run.shopDiscount = false;
+    return { layer: run.layer, slots: rollShopSlots(run), healSold: false, rerollFree: true, discount };
   }
   function rollShopSlots(run) {
     const pool = D().shopPool || D().endlessPool, slots = [], taken = new Set();
@@ -863,7 +866,8 @@
   function shopPriceOf(buff) {
     const run = endless().run;
     const base = D().shopPrice(buff);
-    return run && run.shopDiscount ? Math.max(1, Math.round(base * 0.5)) : base;
+    const discounted = !!(run && run.shop && run.shop.discount);   // 只看当前这家店有没有折扣标记
+    return discounted ? Math.max(1, Math.round(base * 0.5)) : base;
   }
   /** 卖出价：名贵手表这类有固定 sellValue 的按固定值，其它按商店价 40%，再叠「战利品账本」的累计加成。 */
   function sellPriceOf(run, buff) {

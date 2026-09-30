@@ -1225,6 +1225,19 @@
     save();
     return { ok: true, gear: g };
   }
+  /** 第 3 项：体力不足时自动喝体力药剂（优先刚好够用的小药剂，其次大药剂）。 */
+  function autoEnergyPotion(need) {
+    const s = state();
+    const deficit = Math.max(0, (Number(need) || 0) - s.energy);
+    if (!deficit) return { ok: true, used: 0 };
+    const order = deficit <= 10 ? [1, 2] : [2, 1];
+    for (const id of order) {
+      if (!(s.props[id] > 0)) continue;
+      const res = useProp(id);
+      if (res && res.ok) return { ok: true, used: id, msg: res.msg };
+    }
+    return { ok: false, msg: '体力不足，也没有体力药剂。' };
+  }
   function randomExt(n, maxLevel) {
     maxLevel = Math.max(1, Math.min(3, Number(maxLevel) || 3));
     const ext = [];
@@ -2622,7 +2635,7 @@
     gainExp, consumeEnergy, tickPropStates, fightReward, revengeReward, markRevenged, REVENGE_EXP_RATIO, expBoostPct, gainExpWithBoost,
     // 师徒
     apprenticeCap, learnSkill, setMaster, clearMaster, addPrentice, removePrentice,
-    gearPart, gearPartQuality, gearIdsOf,
+    gearPart, gearPartQuality, gearIdsOf, autoEnergyPotion,
     apprenticeDailyExp, apprenticeDailyGold, apprenticeDailyTotal, apprenticeDailyStatus,
     apprenticeLevelSum, apprenticeTributeRatio, claimApprenticeExp, canKickToday, kickPrentice,
     beginRecruitChallenge, finishRecruitChallenge, cancelRecruitChallenge,

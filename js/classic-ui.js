@@ -517,7 +517,14 @@
     });
     $('[data-action="fight"]',p)?.addEventListener('click',()=>{
       const foe=opponents[selectedOpponent],S=State.state();
-      if(S.energy<10){notice('体力不足！每5分钟恢复1点，也可以使用体力药剂。',[{label:'使用药剂',run:()=>openBag()},{label:'返回',cls:'gold'}]);return;}
+      if(S.energy<10){
+        // 第 3 项：体力不足时自动喝一瓶体力药剂再进战斗
+        const potion = State.autoEnergyPotion ? State.autoEnergyPotion(10) : { ok: false };
+        if(!(potion.ok && S.energy>=10)){
+          notice('体力不足！每5分钟恢复1点，也可以使用体力药剂。',[{label:'使用药剂',run:()=>openBag()},{label:'返回',cls:'gold'}]);return;
+        }
+        C().toast('自动使用体力药剂，体力 ' + S.energy + '/' + S.maxEnergy);
+      }
       S.challengeRefresh={count:0,ts:Date.now()};State.save();   // 进行挑战后重置刷新费用
       Main.startBattle(foe,{cost:10,kind:'challenge',useProps:true,onEnd:(winner)=>{
         const win=winner===0;if(win){S.dailyWins++;S.allWins++;}else{S.dailyFails++;S.allFails++;}

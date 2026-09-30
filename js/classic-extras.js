@@ -73,13 +73,22 @@
     C().modal('\u7ade\u6280\u573a\u62a5\u540d', '<p>' + (kind ? '\u788e\u7247\u7ade\u6280\u573a' : '\u7ecf\u9a8c\u7ade\u6280\u573a') + '\uff1a\u534a\u51b3\u8d5b\u80dc\u8005\u8fdb\u5165\u51b3\u8d5b\uff0c\u8d25\u8005\u8fdb\u884c\u5b63\u519b\u8d5b\u3002</p><p>\u62a5\u540d\u4e00\u6b21\u6d88\u801730\u4f53\u529b\uff0c\u7b2c\u4e8c\u6218\u4e0d\u518d\u6263\u9664\u3002\u4f53\u529b\u4e0d\u8db3\u65f6\u4f7f\u75281\u5f20\u82f1\u96c4\u5e16\u6216\u52c7\u6c14\u5fbd\u7ae0\u3002</p>' + note('\u79bb\u7ebf\u5bf9\u624b\u7531\u672c\u5730\u751f\u6210\u3002\u7ade\u6280\u573a\u4e0d\u4f7f\u7528\u6311\u6218\u836f\u5242\u6548\u679c\u3002'), [{ label: '\u62a5\u540d\u53c2\u8d5b', run: () => {
       if (State.state() !== owner || activeArenaRun() || !arenaAccess(kind)) return;
       const s = owner; State.tickEnergy();
-      if (s.energy >= 30) { if (!State.consumeEnergy(30)) return; }
-      else {
-        const preferred = kind ? 39 : 36, alternate = kind ? 36 : 39;
-        const ticket = s.props[preferred] > 0 ? preferred : s.props[alternate] > 0 ? alternate : 0;
-        if (!ticket) { alert('\u4f53\u529b\u4e0d\u8db330\u70b9\uff0c\u4e5f\u6ca1\u6709\u82f1\u96c4\u5e16\u6216\u52c7\u6c14\u5fbd\u7ae0\u3002'); return; }
-        s.props[ticket]--; State.save();
+      /* 第 3 项：体力不够先自动喝体力药剂；第 2 项：碎片竞技场只认勇气徽章（39），
+       * 英雄帖（36）只用于经验竞技场，不再能拿去参加碎片场。 */
+      if (s.energy < 30) {
+        const potion = State.autoEnergyPotion ? State.autoEnergyPotion(30) : { ok: false };
+        if (!(potion.ok && s.energy >= 30)) {
+          const ticket = kind ? 39 : 36;
+          if (!(s.props[ticket] > 0)) {
+            alert(kind
+              ? '\u4f53\u529b\u4e0d\u8db330\u70b9\uff0c\u4e5f\u6ca1\u6709\u52c7\u6c14\u5fbd\u7ae0\uff08\u788e\u7247\u7ade\u6280\u573a\u4e0d\u80fd\u7528\u82f1\u96c4\u5e16\uff09\u3002'
+              : '\u4f53\u529b\u4e0d\u8db330\u70b9\uff0c\u4e5f\u6ca1\u6709\u82f1\u96c4\u5e16\u3002');
+            return;
+          }
+          s.props[ticket]--; State.save();
+        }
       }
+      if (s.energy >= 30) { if (!State.consumeEnergy(30)) return; }
       const foes = [State.genAI(s.level), State.genAI(s.level), State.genAI(s.level)];
       const other = Sim.simulate(foes[1], foes[2]);
       arenaRun = { owner: s, kind, phase: 'semi', foe: foes[0], finalist: foes[other.winner === 0 ? 1 : 2], consolation: foes[other.winner === 0 ? 2 : 1], busy: false, settled: false };

@@ -199,7 +199,7 @@ test('经验竞技场吃经验丸加成：经验丸+40%、超级经验丸+60%，
   // 碎片场只给碎片，不发经验、也不消耗经验丸
   {
     const g = setup(), s = g.c.State.state();
-    s.propsStates[7] = 20; s.energy = 0; s.props[39] = 1; enterArena(g, 1);
+    s.propsStates[7] = 20; s.energy = 0; s.props[39] = 1; s.props[1] = 0; s.props[2] = 0; enterArena(g, 1);
     g.settle(0, 0); g.modalClick(); g.settle(1, 0); g.settle(1, 0);
     assert.equal(s.exp, 0, '碎片场不发经验');
     assert.equal(s.propsStates[7], 20, '碎片场不消耗经验丸');
@@ -208,12 +208,16 @@ test('经验竞技场吃经验丸加成：经验丸+40%、超级经验丸+60%，
 
 test('碎片竞技四名依次 8/6/4/3 蓝片、不发经验与金松果，票据仅扣一次', () => {
   for (const [semiWin, secondWin, shards] of [[0, 0, 8], [0, 1, 6], [1, 0, 4], [1, 1, 3]]) {
-    const g = setup(), s = g.c.State.state(); s.energy = 0; s.props[39] = 1;
+    // 第 3 项：体力不足会先自动喝药剂，所以这里清空药剂，专门验证「碎片场用勇气徽章」
+    const g = setup(), s = g.c.State.state(); s.energy = 0; s.props[39] = 1; s.props[1] = 0; s.props[2] = 0;
     enterArena(g, 1); assert.equal(s.props[39], 0); assert.equal(s.energy, 0);
     g.settle(0, semiWin); g.modalClick(); g.settle(1, secondWin); g.settle(1, secondWin);
     assert.equal(s.props[26], shards); assert.equal(s.goldPoint, 100); assert.equal(s.exp, 0);
   }
-  const poor = setup(); poor.c.State.state().energy = 29; enterArena(poor, 0);
+  // 真正「弹尽粮绝」：体力差 1 点、没有药剂也没有帖子 → 不允许进场
+  const poor = setup(); const ps = poor.c.State.state();
+  ps.energy = 29; ps.props[1] = 0; ps.props[2] = 0; ps.props[36] = 0; ps.props[39] = 0;
+  enterArena(poor, 0);
   assert.equal(poor.battles.length, 0); assert.equal(poor.c.State.state().energy, 29);
 });
 

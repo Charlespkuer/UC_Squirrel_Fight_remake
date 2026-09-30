@@ -372,7 +372,7 @@
         '<div class="tower-rule mech-bar"><b>当前遭遇的机制</b>' + (info.mechs && info.mechs.length
           ? info.mechs.map((m) => '<span class="mech-chip">' + esc(MECH_NAME[m] || m) + '<i>' + esc(MECH_DESC[m] || '') + '</i></span>').join('')
           : '<span class="mech-none">本段没有额外机制（第 1 段）</span>') + '</div>' +
-        buffPanelsHtml('endless') + choicesHtml + '</div>' +
+        choicesHtml + buffPanelsHtml('endless') + '</div>' +
         '<div class="endless-foes">' +
         '<ol class="tower-plan vertical">' + foeRows + '</ol></div></div>' +
         '<div class="endless-actions tower-actions">' +
@@ -599,6 +599,20 @@
     buttons.push({ label: '返回', cls: 'muted', run: () => openEndless() });
     C().modal('嵌入' + def.name + '药丸', '<div class="pill-picker">' + rows + '</div>' +
       '<p class="small-label">药丸在无尽塔内持续 ' + TowerData.PILL_BATTLES + ' 场战斗（胜败都算），会扣背包里的道具。</p>',
+      buttons, { small: true });
+  }
+  /** 永久增益满 5 格时：直接把「替换哪一个」摆出来选（比让玩家先点上面的标签直观）。 */
+  function offerReplace(index, buff) {
+    const list = Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent');
+    const buttons = list.map((b) => ({
+      label: '换成 ' + b.name + (b.stacks > 1 ? '（×' + b.stacks + '）' : ''),
+      cls: 'small',
+      run: () => { Tower.pickChoice('endless', index, b.id); openEndless(); },
+    }));
+    if (!buttons.length) { notice('永久增益已满，但没有可替换的目标。'); return; }
+    buttons.push({ label: '取消', cls: 'muted', run: () => openEndless() });
+    C().modal('永久增益已满 5 格', '<p>要拿下【' + esc(buff.name) + '】，请选择替换掉哪一个：</p>' +
+      '<div class="replace-list">' + list.map((b) => '<div class="replace-row"><b>' + esc(b.name) + '</b><span>' + esc(b.desc || '') + '</span></div>').join('') + '</div>',
       buttons, { small: true });
   }
   /** 每 10 层的里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）。 */

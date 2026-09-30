@@ -664,3 +664,13 @@
 .endless-left .buff-empty { font-size: 20px; }
 .endless-left .limit-tag em { font-size: 17px; }
 .endless-left .limit-tag i { font-size: 17px; }
+
+/* 四选一卡片：字体整体缩小一档（本页里空间紧） */
+.choice-onpage .hex-name { font-size: 22px; }
+.choice-onpage .hex-desc { font-size: 15px; }
+.choice-onpage .hex-scope { font-size: 14px; }
+.choice-onpage .hex-ribbon { font-size: 15px; }
+.choice-onpage h4 { font-size: 19px; }
+.replace-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.replace-row b { font-size: 19px; color: #7a4a18; }
+.replace-row span { display: block; font-size: 16px; color: #8a6a3a; }

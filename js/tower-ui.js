@@ -25,9 +25,10 @@
   let replaceTarget = null;   // 第 1 项：永久增益满 5 格时，选中的「要被替换掉」的那个
 
   // ---------- 通用小件 ----------
-  function carryBar(carry) {
+  function carryBar(carry, label, cls) {
     const pct = Math.round((carry == null ? 1 : carry) * 100);
-    return '<div class="tower-carry"><span>血量继承</span><div class="tower-carry-bar"><i style="width:' + pct + '%"></i></div><b>' + pct + '%</b></div>';
+    return '<div class="tower-carry' + (cls ? ' ' + cls : '') + '"><span>' + (label || '血量继承') + '</span>' +
+      '<div class="tower-carry-bar"><i style="width:' + pct + '%"></i></div><b>' + pct + '%</b></div>';
   }
   /** 悬停气泡：机制说明放在这里（第 1 项需求），预告列表就只需要一行名字。
    *  用 body 上的 fixed 层，避免被 .tower-main 的 overflow 裁掉。 */
@@ -349,21 +350,21 @@
           run.choices.map((c, i) => choiceCard(c, i)).join('') + '</div></div>' : '';
       main = '<div class="endless-run">' +
         '<div class="endless-left">' +
-        pillSlotsHtml(run.pillSlots) +
         '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
         currencyHtml('endless') + '</div>' +
         '<p class="endless-score">分数 ' + run.score + '</p>' +
+        carryBar(run.carry, '血量', 'endless-hp') +
         '<div class="tower-rule mech-bar"><b>当前遭遇的机制</b>' + (info.mechs && info.mechs.length
           ? info.mechs.map((m) => '<span class="mech-chip">' + esc(MECH_NAME[m] || m) + '<i>' + esc(MECH_DESC[m] || '') + '</i></span>').join('')
           : '<span class="mech-none">本段没有额外机制（第 1 段）</span>') + '</div>' +
-        buffPanelsHtml('endless') + choicesHtml +
-        carryBar(run.carry) + '</div>' +
-        '<div class="endless-foes"><h4 class="tower-plan-title">本层对手</h4>' +
-        '<ol class="tower-plan vertical">' + foeRows + '</ol>' +
-        '<div class="tower-actions">' + C().btn(nextLabel, 'fight', 'gold') +
+        buffPanelsHtml('endless') + choicesHtml + '</div>' +
+        '<div class="endless-foes">' + pillSlotsHtml(run.pillSlots) +
+        '<h4 class="tower-plan-title">本层对手</h4>' +
+        '<ol class="tower-plan vertical">' + foeRows + '</ol></div></div>' +
+        '<div class="endless-actions tower-actions">' + C().btn(nextLabel, 'fight', 'gold') +
         (Tower.shopState() ? C().btn('试炼商店', 'shop', 'small')
           : run.choices && !run.restShopUsed ? C().btn('休整商店（本层 1 次）', 'rest-shop', 'small') : '') +
-        C().btn('放弃本局', 'abandon', 'muted small') + '</div></div></div>';
+        C().btn('放弃本局', 'abandon', 'muted small') + '</div>';
     } else {
       main = '<h2 class="tower-title">无尽模式</h2>' +
         '<div class="tower-stats">历史最高 <b class="gold-text">' + info.best + '</b> 分 · 本周最高 ' + info.weekBest + ' 分 · 最深 ' + info.bestLayer + ' 层</div>' +

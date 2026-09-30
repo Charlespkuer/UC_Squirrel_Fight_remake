@@ -107,7 +107,7 @@
     // 右下角那颗按钮的绘制与点击区共用这个矩形。原版字面坐标 (983,609) 的 164x60 框会把
     // 「跳过」两个字挤出圆角格，故保留原来的 190x70 比例。
     const skipRect = { x: 964, y: 605, w: 190, h: 70 };
-    // 挑战塔等玩法不给跳过（要真打），改成 1×/2× 倍速切换；两者都不开时右下角不留按钮。
+    // 挑战塔等玩法不给跳过（要真打），改成 1×/2×/3× 倍速循环切换；两者都不开时右下角不留按钮。
     const speedToggle = !!opts.speedToggle;
     const allowSkip = opts.allowSkip !== false;
     let speed = 1;
@@ -138,7 +138,7 @@
     function cornerAction() {
       if (!speedToggle) { controller.skip(); return; }
       if (ending || stopped) return;
-      speed = speed === 1 ? 2 : 1;
+      speed = speed === 1 ? 2 : speed === 2 ? 3 : 1;   // 第 1 项：三档倍速循环
       skipButton.textContent = cornerLabel();
       skipButton.setAttribute('aria-label', '切换战斗速度（当前 ' + speed + '×）');
     }

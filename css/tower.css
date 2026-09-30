@@ -401,3 +401,25 @@
 .endless-foes { display: flex; flex-direction: column; }
 .endless-foes .tower-actions { flex-direction: column; align-items: stretch; gap: 6px; margin-top: 8px; }
 .endless-foes .tower-actions .uc-button { min-height: 40px; font-size: 21px; padding: 3px 10px; }
+
+/* 第 2 项再调整：药丸槽横排放在「本层对手」上面；血量挪到左上、去掉「继承」两字；
+   货币紧跟标题（不再被右列遮住）；继续战斗/放弃本局单独一行，不与其它 ui 对齐。 */
+.endless-foes .pill-slots { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 6px; margin-bottom: 4px; }
+.endless-foes .pill-slot { width: 40px; height: 40px; }
+.endless-title-row { justify-content: flex-start; gap: 14px; }
+.endless-title-row .tower-currency { position: static; }
+.endless-hp { margin: 0 0 4px; }
+.endless-hp span { font-size: 16px; }
+.endless-hp b { font-size: 17px; }
+.endless-hp .tower-carry-bar { width: 150px; height: 14px; }
+.endless-actions { margin: 6px 0 0; justify-content: flex-start; }
+.endless-actions .uc-button { min-height: 46px; font-size: 24px; padding: 4px 18px; }
+.endless-left .endless-score { margin: 0 0 2px; }
+
+/* 再压一档，保证一屏 */
+.tower-plan.vertical li { padding: 1px 6px; }
+.tower-plan.vertical .foe-portrait { width: 40px; height: 40px; }
+.tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 40px; }
+.endless-actions { margin-top: 4px; }
+.endless-actions .uc-button { min-height: 42px; font-size: 22px; padding: 3px 16px; }
+.endless-left .mech-bar { margin: 2px 0; }

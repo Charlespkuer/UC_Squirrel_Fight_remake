@@ -652,3 +652,15 @@
 .endless-title-row { margin-top: 10px; }
 .endless-topright { top: 10px; }
 .endless-foes { margin-top: 58px; }
+
+/* 第十六轮：按钮放大、血量左移、增益面板字与行距加大 */
+.endless-actions .uc-button[data-action="fight"] { min-height: 64px; font-size: 33px; padding: 6px 30px; }
+.endless-actions .uc-button[data-action="abandon"] { min-height: 46px; font-size: 23px; }
+.endless-left .tower-carry.endless-hp { margin: 22px 0 8px 26px; }
+.endless-left .tower-buffs { margin: 12px 0; }
+.endless-left .tower-buffs h4 { font-size: 22px; margin: 8px 0 6px; }
+.endless-left .buff-tags { gap: 12px; }
+.endless-left .buff-tag, .endless-left .limit-tag { font-size: 21px; padding: 2px 12px; }
+.endless-left .buff-empty { font-size: 20px; }
+.endless-left .limit-tag em { font-size: 17px; }
+.endless-left .limit-tag i { font-size: 17px; }

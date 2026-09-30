@@ -627,3 +627,8 @@
 .endless-hp { margin-top: 12px; }
 .tower-page { align-items: center; }
 .tower-visual { margin-top: 0; }
+
+/* 第十二轮：标题上移到「边界与血量」中间（血量位置不变），对手列上提贴着分数下面 */
+.endless-title-row { margin-top: 0; }
+.endless-hp { margin-top: 24px; }
+.endless-foes { margin-top: 42px; }

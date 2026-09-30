@@ -60,29 +60,44 @@
    * —— 这套 wears 就是战斗里真正穿的那套（tower-data 的 GEAR / wearsOf）。 */
   const CHAR_FILE = { tl: 'mantis', xh: 'crane', xm: 'panda' };
   const SQ_SHEETS = ['SQ_01', 'SQ_02', 'weaponAttack', 'throwweaponAttack'];
+  /* 机制 NPC 复用三侠的动画表，但立绘卡和三侠是同一张（预告里会出现「两个螳螂」），
+   * 所以只有三侠用立绘卡，机制 NPC 也走引擎渲染（它们自己的待机帧）。 */
+  const NPC_SHEETS = { tl: ['tl'], xh: ['xh1', 'xh2'], xm: ['xm1', 'xm2'] };
+  const NPC_IDLE = { tl: 'tl_rest', xh: 'xh_rest', xm: 'xm_rest' };
   const AVATAR_SIZE = 104;
   function foePortraitHtml(index, info) {
-    if (info.anim) {
+    if (info.kind === 'hero') {
       const file = CHAR_FILE[info.anim] || 'mantis';
       return '<span class="foe-portrait"><img alt="" src="images/classic/characters/' + file + '-classic-card.png"></span>';
     }
     return '<span class="foe-portrait"><canvas width="' + AVATAR_SIZE + '" height="' + AVATAR_SIZE +
       '" data-foe-art="' + index + '" aria-hidden="true"></canvas></span>';
   }
+  /** 引擎渲染失败（动画/素材缺失）时退回立绘卡，保证列表里总有一张图。 */
+  function fallbackPortrait(canvas, info) {
+    const file = CHAR_FILE[info.anim] || 'mantis';
+    const img = document.createElement('img');
+    img.alt = ''; img.src = 'images/classic/characters/' + file + '-classic-card.png';
+    canvas.replaceWith(img);
+  }
   /** 把松鼠 boss 的「待机帧 + 装备」画进小 canvas（素材缺失时静默留空）。 */
   async function drawFoeArt(canvas, info) {
     const ctx = canvas.getContext('2d');
     if (!ctx || !window.Engine) return;
+    // 松鼠形态的 boss 连装备一起画；机制 NPC 用它们自己的待机帧（立绘卡和三侠重了）。
+    const npc = info.kind === 'npc';
     // 注意要过一遍 Engine.wearsFor：tower-data 给的是装备 id（{id:201}），
     // 引擎画图层时用的是 {src,label}（和战斗里 foe.wears 一样），少了这一步装备不会画出来。
-    const wears = Engine.wearsFor(TowerData.wearsOf(info.gear));
-    const srcs = SQ_SHEETS.concat(wears.map((w) => w && w.src).filter(Boolean));
+    const wears = npc ? null : Engine.wearsFor(TowerData.wearsOf(info.gear));
+    const sheets = npc ? (NPC_SHEETS[info.anim] || null) : SQ_SHEETS;
+    const animName = npc ? (NPC_IDLE[info.anim] || 'tl_rest') : 'standby';
+    const srcs = (sheets || []).concat((wears || []).map((w) => w && w.src).filter(Boolean));
     try {
       await Engine.loadSheets(srcs);
       const p = Engine.makePlayer();
-      const inst = Engine.playAnim(p, 'standby', { fps: 20, loop: true, sheets: SQ_SHEETS, wears: wears, holdLast: true });
-      if (!inst || !inst.frames.length) return;
-      const box = Engine.frameBounds(inst.frames[0], { sheets: SQ_SHEETS, wears: wears }) || { x: 0, y: 0, w: 1, h: 1 };
+      const inst = Engine.playAnim(p, animName, { fps: 20, loop: true, sheets: sheets, wears: wears, holdLast: true });
+      if (!inst || !inst.frames.length) { fallbackPortrait(canvas, info); return; }
+      const box = Engine.frameBounds(inst.frames[0], { sheets: sheets, wears: wears }) || { x: 0, y: 0, w: 1, h: 1 };
       const size = canvas.width, pad = 4;
       // 待机帧连武器/尾巴一起算包围盒，等比塞进方框后居中；再放大一档，
       // 让松鼠头像的视觉大小和三侠立绘卡接近（不裁切，靠 padding 控制）。

@@ -49,6 +49,14 @@ function setup(storage, keepSave) {
   let seed = 20260927;
   vm.runInContext('Math', c).random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
   if (!keepSave) c.State.newGame('塔测试');
+  /* 第 1 项之后随机只跟层数有关（boss 池 + 三侠顺序），所以验收默认跑「这一条池子」；
+   * --salt=xxx 可以整体换成另一条池子抽样（调平衡时用来看别层的对手组合）。 */
+  const salt = (process.argv.find((a) => a.startsWith('--salt=')) || '').slice(7);
+  if (salt) {
+    const TD = c.TowerData, bossFor = TD.bossFor, heroOrder = TD.heroOrder;
+    TD.bossFor = (layer) => bossFor(layer, salt);
+    TD.heroOrder = (layer) => heroOrder(layer, salt);
+  }
   return c;
 }
 
@@ -121,12 +129,17 @@ function autoPick(ctx, mode) {
       for (let n = 1; n <= 12; n++) orders.add(TowerData.heroOrder(n, 'day-' + day).join(''));
     }
     t('三侠出场顺序会洗牌（6 种全排列都能出现）', orders.size === 6);
-    const same = TowerData.heroOrder(7, '2026-09-28').join('') === TowerData.heroOrder(7, '2026-09-28').join('');
-    t('同一层同一天顺序固定（预告 = 实战）', same);
-    // 同一层换日期应当大概率换顺序（30 天里至少变过一次就说明它真的在洗牌）
-    const seen7 = new Set();
-    for (let day = 1; day <= 30; day++) seen7.add(TowerData.heroOrder(7, 'day-' + day).join(''));
-    t('同一层换一天会换顺序', seen7.size > 1 && !seen7.has(''));
+    t('同一层顺序固定（预告 = 实战、重试不变）',
+      TowerData.heroOrder(7).join('') === TowerData.heroOrder(7).join('') && TowerData.heroOrder(7).length === 3);
+    // 第 1 项：boss 与三侠顺序都只由层数决定 —— 同一层任何时候都一样
+    const bossOf = (n) => TowerData.bossFor(n).kind + ':' + TowerData.bossFor(n).id;
+    t('boss 只按层数随机（同层恒定、不随日期/调用次数变化）',
+      bossOf(9) === bossOf(9) && bossOf(9) === bossOf(9) && bossOf(1) === bossOf(1));
+    t('换层换 boss（30 层里出现多个不同对手）',
+      new Set(Array.from({ length: 30 }, (_, i) => bossOf(i + 1))).size > 5);
+    const heroOrders = new Set();
+    for (let n = 1; n <= 30; n++) heroOrders.add(TowerData.heroOrder(n).join(''));
+    t('三侠顺序按层数洗牌（30 层里出现多种排列）', heroOrders.size >= 3);
   }
   {
     // 池子必须覆盖：7 个带机制的松鼠 + 3 只平庸松鼠 + 10 个机制 NPC（都不浪费）

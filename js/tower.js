@@ -104,13 +104,13 @@
   }
 
   // ---------- 层结构 ----------
-  /** 第 4 场的随机 boss：同一天同一层永远同一个（所以「进层预告 = 实战」，失败重试也还是它）。 */
-  function bossEntry(layer) { return D().bossFor(layer, State.localDate()); }
+  /** 第 4 场的随机 boss：只由层数决定（第 1 项：不按天随机）—— 同层固定，换层才换。 */
+  function bossEntry(layer) { return D().bossFor(layer); }
   function buildPlan(layer) {
-    /* 第 3 项：三侠顺序随机（按「当天日期 + 层数」确定性洗牌 → 预告 = 实战、重试不变）。
+    /* 三侠顺序按层数随机（`heroOrder`，与日期无关）：同层固定 → 预告 = 实战、重试不变。
      * 削弱跟着「哪一位大侠」走（HERO_DEBUFF[anim]），所以顺序一变，本层要吃的削弱顺序也变，
      * 但三种削弱的组合固定，玩家看预告里的头像就知道等一下会被套上什么。 */
-    const plan = D().heroOrder(layer, State.localDate()).map((anim) => ({ kind: 'hero', anim }));
+    const plan = D().heroOrder(layer).map((anim) => ({ kind: 'hero', anim }));
     // 第 4 场 = 随机 boss（20 选 1：7 个带机制的松鼠 + 3 只平庸松鼠 + 10 个机制 NPC）
     plan.push(bossEntry(layer));
     // x10 层第 5 场 = 固定狂战松鼠（松鼠形态 + 全身狂战套 + 精英）
@@ -234,26 +234,23 @@
       mech = [npc.mech];
       for (const m of extra) if (!mech.includes(m)) mech.push(m);
     }
-    const eliteMul = elite ? 1.2 : 1;
+    const eliteMul = elite ? 1.2 : 1;   // 精英加成（x10 狂战）：作用在力量/敏捷/速度上
     // 敌方数值：高血低攻（系数在 tower-data.js 里，带注释，方便 tower-tune 复调）
     // 力量单独用更低的系数，敏捷/速度维持原基准；血量抬高。
     const stat = (b, mul) => Math.max(1, Math.round(statBase * (mul || TD.FOE_STAT_MUL) * M * b * eliteMul));
-    // 第 3 项数值调整：三侠（前 3 场）血量下调、第 4 场的 boss 血量上调，
-    // 让「卡层卡在最后一战」而不是卡在三侠的血墙上。
     const hero = entry.kind === 'hero';
-    // x10 第 5 场的狂战松鼠用自己那一档系数（见 tower-data 的 FOE_WARLORD_*）
-    const warlord = entry.kind === 'warlord';
-    const depth = TD.bossDepthMul(layer);   // 第 4 场的 boss 随层数缓升（1~5 层稍软、20 层起封顶）
-    const powMul = hero ? TD.FOE_HERO_POWER_MUL : warlord ? TD.FOE_WARLORD_POWER_MUL : TD.FOE_TRIAL_POWER_MUL * depth;
-    const hpMul = hero ? TD.FOE_HERO_HP_MUL : warlord ? TD.FOE_WARLORD_HP_MUL : TD.FOE_TRIAL_HP_MUL * depth;
+    const warlord = entry.kind === 'warlord';           // x10 第 5 场
+    const powMul = hero ? TD.FOE_HERO_POWER_MUL : warlord ? TD.FOE_WARLORD_POWER_MUL : TD.FOE_TRIAL_POWER_MUL;
+    /* 第 2 项：血量先按三侠那一档算出来，boss / 狂战再乘一个 1.04~1.22 的小倍率 ——
+     * 这样「最后一战的血条」永远只比前三场厚一点点，不会暴涨也不会反而更薄。
+     * 精英 ×1.2 只加在输出上（血量已经通过 ratio 表达），免得 x10 又变成血量墙。 */
+    const heroHp = hpBase * TD.FOE_HP_MUL * TD.FOE_HERO_HP_MUL * M * bias.hp;
+    const hpRatio = hero ? 1 : warlord ? TD.WARLORD_HP_RATIO : TD.bossHpRatio(bias.hp, layer);
     const foe = {
       name, level: LT, npcType,
       power: stat(bias.power, TD.FOE_POWER_MUL * powMul),
       agility: stat(bias.agility), speed: stat(bias.speed),
-      // 第 2 项：boss 的血量 bias 兜一个下限（0.95）——血薄的 boss（影刹 0.90 等）
-      // 原来比三侠还好打，随机池里就成了「最软的最后一战」。
-      hp: Math.max(1, Math.round(hpBase * TD.FOE_HP_MUL * hpMul * M *
-        (hero ? bias.hp : Math.max(0.95, bias.hp)) * eliteMul)),
+      hp: Math.max(1, Math.round(heroHp * hpRatio)),
       weapons, skills, mech, pattern, mechParams, wears,
     };
     // poolNpc = 带专属机制的对手（「机制破解」类 buff 只对它生效）；平庸松鼠没有机制，不算

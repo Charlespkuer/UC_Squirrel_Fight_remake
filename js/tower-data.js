@@ -78,32 +78,33 @@
    * 所以再压到 0.47 做补偿——仍然远低于敏捷/速度，保持「血厚打人不疼」的定位。 */
   const FOE_POWER_MUL = 0.47;
   const FOE_HP_MUL = 1.06;      // 血量基准：0.85 × 1.25，血量更厚
-  /* 血量分成两档（原来还有一档松鼠系数，Boss 池统一之后并进 Boss 档了）：
-   *   · 三侠（前 3 场）——FOE_HERO_HP_MUL
-   *   · Boss（第 4 场随机池 / x10 第 5 场狂战）——FOE_TRIAL_HP_MUL
-   * 系数写在系数区而不是各模板的 bias，方便统一调（tools/tower-balance.cjs 实测）。 */
-  /* 三侠（每层前 3 场）血量单独下调：实测玩家卡层几乎都卡在三侠的「血墙」上，
-   * 而每层最后一场（boss）反而像送的 —— 血量 0.62 系数比三侠矮一大截，手感完全反了。 */
-  const FOE_HERO_HP_MUL = 0.66;
-  /* 三侠的「输出」也单独压一档：三侠的攻击基准是 STAGE_TYPE_SCALE（螳螂 1.15／仙鹤 0.92／
-   * 熊猫 1.02）× FOE_POWER_MUL，比 boss 高一大截 —— 结果就是前三场把人打残、最后一场反而像送的。
-   * 第 2 项把 boss 抬成硬仗之后，这里必须回调，否则整层通关率会崩（实测 10 层 5%）。 */
-  const FOE_HERO_POWER_MUL = 0.80;
-  /* Boss（第 4 场随机池 / x10 第 5 场狂战）单独一组系数：
-   * 血量从 0.62 提到 0.82（试过 0.95，墙区太硬，多日期复测后收到 0.82），
-   * 让「最后一战」真的比三侠更需要对策；力量仍压得低（0.50）。
-   * 难度结构改成「三侠是热身、boss 是墙」，卡层才可以靠「换一张对策 buff」解决。 */
-  const FOE_TRIAL_POWER_MUL = 0.96;
-  const FOE_TRIAL_HP_MUL = 1.15;
-  /* x10 第 5 场的狂战松鼠单独一档：它本来就是第 5 场（血量继承最低）、还吃精英 ×1.2，
-   * 直接套 boss 档会变成「每 10 层必卡」（实测 10 层整层通关率 8%、狂战胜率 0~8%）。
-   * 这里把它的血调回和普通 boss 同量级、力量留高一档，做成「打得疼但打得过」的收尾。 */
+  /* ---------- 血量：先算三侠，boss 只在三侠基础上乘一个小倍率 ----------
+   * 第 2 项要求「最后一战的血量仅仅略高于前三场，不要大幅提升或衰减」，所以
+   * boss 的血量不再是独立一套系数，而是**直接由三侠那套血量推出来**：
+   *   heroHp  = hpBase × FOE_HP_MUL × FOE_HERO_HP_MUL × M × bias.hp      （三侠，bias.hp = 1）
+   *   bossHp  = heroHp × bossHpRatio(bias.hp, layer)                     （1.04 ~ 1.22 倍）
+   * 倍率里保留一点点 boss 之间的差别（苔龟/蚀骨/铁壁偏厚，熔核/霜缚偏薄）与层数缓升，
+   * 但被夹在 1.04~1.22 之间 —— 血条看上去只比前三场厚一点点，既不会暴涨也不会反而更薄。 */
+  const FOE_HERO_HP_MUL = 0.85;
+  const BOSS_HP_MIN = 1.04;
+  const BOSS_HP_MAX = 1.22;
+  const WARLORD_HP_RATIO = 1.20;   // x10 第 5 场：同样是「略高于前三场」，取倍率带上沿
+  function bossHpRatio(biasHp, layer) {
+    const hp = Math.max(0.82, Math.min(1.28, Number(biasHp) || 1));
+    const tank = (hp - 1) * 0.35;                                  // 模板偏厚/偏薄 → ±0.1
+    const depth = Math.min(0.06, 0.03 + 0.004 * Math.max(1, Number(layer) || 1));  // 层数缓升，20 层封顶
+    return Math.max(BOSS_HP_MIN, Math.min(BOSS_HP_MAX, 1.06 + tank + depth));
+  }
+  /* 三侠的「输出」压一档：三侠的攻击基准是 STAGE_TYPE_SCALE（螳螂 1.15／仙鹤 0.92／熊猫 1.02）
+   * × FOE_POWER_MUL，本来就比 boss 高；现在血量和 boss 差不多，输出必须压下来，
+   * 否则前三场又变成「把人打残的血墙」。boss 的输出高一大档（FOE_TRIAL_POWER_MUL），
+   * 所以「最后一战最难」靠的是伤害与机制，不是血量堆。 */
+  const FOE_HERO_POWER_MUL = 0.60;
+  /* boss 的输出：血量只比三侠厚一点点（见 bossHpRatio），所以「最后一战最难」全靠伤害与机制 ——
+   * 0.47 × 1.45 ≈ 0.68，约是三侠（0.47 × 0.60 × 0.92~1.15 ≈ 0.26~0.32）的 2~2.6 倍。 */
+  const FOE_TRIAL_POWER_MUL = 1.45;
+  /* x10 第 5 场的狂战松鼠：血量走 WARLORD_HP_RATIO，力量再压一点点（它还吃精英 ×1.2 的伤害）。 */
   const FOE_WARLORD_POWER_MUL = 0.85;
-  const FOE_WARLORD_HP_MUL = 0.72;
-  /* Boss 档再叠一条「随层数缓升」的曲线（只作用于第 4 场的随机 boss）：
-   * 低位层（1~5）boss 稍微软一点，保证「日常推进区」还能推（验收线 55%）；
-   * 10 层后回到 1.0，20 层起封顶 1.08 —— 深层 boss 更硬，符合「最后一战是墙」。 */
-  function bossDepthMul(layer) { return Math.min(1.08, 0.86 + 0.008 * Math.max(1, Number(layer) || 1)); }
 
   // ---------- NPC 池（10 个，8 类机制） ----------
   // bias: 力/敏/速/血 四元乘数；anim 复用现有动画表（tl 螳螂 / xh 仙鹤 / xm 熊猫）。
@@ -308,13 +309,15 @@
     for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
     return h >>> 0;
   }
-  /** 第 layer 层的 boss（salt 一般传当天日期）：同 salt 同层永远同一个，保证预告 = 实战。 */
+  /* 第 1 项：随机只跟**层数**有关，不再跟日期有关 ——
+   * 同一层永远是同一个 boss / 同一套三侠顺序（今天打过、明天还是它），
+   * 换层才换组合。预告 = 实战、重试不变。salt 只留给工具做「换一条池子」的抽样。 */
   function bossFor(layer, salt) {
     const pick = BOSS_POOL[poolHash(String(salt == null ? '' : salt) + '#' + Math.max(1, layer)) % BOSS_POOL.length];
     return { kind: pick.kind, id: pick.id };
   }
-  /* 第 3 项：三侠的出场顺序也随机，但同样按 (日期 + 层数) 确定性洗牌 ——
-   * 进层预告里看到的顺序就是实战顺序，失败重试还是这一套（不然「读题」无从谈起）。
+  /* 三侠的出场顺序也按层数随机（同样与日期无关）：同层的顺序固定，
+   * 预告里看到的顺序就是实战顺序，失败重试还是这一套。
    * 自己带一支小 PRNG，不动全局 Math.random。 */
   function heroOrder(layer, salt) {
     const out = ['tl', 'xh', 'xm'];
@@ -399,7 +402,7 @@
     endlessLevel, endlessSegment, endlessMult, endlessMechStacks, endlessTickets,
     ENDLESS_MECH_ORDER, ENDLESS_CONSOLATION_LAYER, SCORE, COINS, SHOP, shopPrice,
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
-    FOE_TRIAL_POWER_MUL, FOE_TRIAL_HP_MUL, FOE_WARLORD_POWER_MUL, FOE_WARLORD_HP_MUL, bossDepthMul,
+    FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, bossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,

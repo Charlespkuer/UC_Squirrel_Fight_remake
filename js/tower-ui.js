@@ -54,6 +54,64 @@
     if (info.patternDesc) parts.push(info.patternDesc);
     return parts.join('\n') || '没有特殊机制';
   }
+  /* ---------- 对手头像（第 1 项） ----------
+   * 三侠 / 机制 NPC 用现成的经典立绘卡（characters/*.json 里的整身图）；
+   * 松鼠形态的 boss 要连装备一起画，所以用引擎把「待机帧 + 装备图层」渲到小 canvas 上
+   * —— 这套 wears 就是战斗里真正穿的那套（tower-data 的 GEAR / wearsOf）。 */
+  const CHAR_FILE = { tl: 'mantis', xh: 'crane', xm: 'panda' };
+  const SQ_SHEETS = ['SQ_01', 'SQ_02', 'weaponAttack', 'throwweaponAttack'];
+  const AVATAR_SIZE = 104;
+  function foePortraitHtml(index, info) {
+    if (info.anim) {
+      const file = CHAR_FILE[info.anim] || 'mantis';
+      return '<span class="foe-portrait"><img alt="" src="images/classic/characters/' + file + '-classic-card.png"></span>';
+    }
+    return '<span class="foe-portrait"><canvas width="' + AVATAR_SIZE + '" height="' + AVATAR_SIZE +
+      '" data-foe-art="' + index + '" aria-hidden="true"></canvas></span>';
+  }
+  /** 把松鼠 boss 的「待机帧 + 装备」画进小 canvas（素材缺失时静默留空）。 */
+  async function drawFoeArt(canvas, info) {
+    const ctx = canvas.getContext('2d');
+    if (!ctx || !window.Engine) return;
+    // 注意要过一遍 Engine.wearsFor：tower-data 给的是装备 id（{id:201}），
+    // 引擎画图层时用的是 {src,label}（和战斗里 foe.wears 一样），少了这一步装备不会画出来。
+    const wears = Engine.wearsFor(TowerData.wearsOf(info.gear));
+    const srcs = SQ_SHEETS.concat(wears.map((w) => w && w.src).filter(Boolean));
+    try {
+      await Engine.loadSheets(srcs);
+      const p = Engine.makePlayer();
+      const inst = Engine.playAnim(p, 'standby', { fps: 20, loop: true, sheets: SQ_SHEETS, wears: wears, holdLast: true });
+      if (!inst || !inst.frames.length) return;
+      const box = Engine.frameBounds(inst.frames[0], { sheets: SQ_SHEETS, wears: wears }) || { x: 0, y: 0, w: 1, h: 1 };
+      const size = canvas.width, pad = 4;
+      // 待机帧连武器/尾巴一起算包围盒，等比塞进方框后居中；再放大一档，
+      // 让松鼠头像的视觉大小和三侠立绘卡接近（不裁切，靠 padding 控制）。
+      const s = Math.min((size - pad * 2) / Math.max(1, box.w), (size - pad * 2) / Math.max(1, box.h)) * 1.04;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, size, size);
+      ctx.setTransform(s, 0, 0, s, size / 2 - (box.x + box.w / 2) * s, size / 2 - (box.y + box.h / 2) * s);
+      Engine.drawPlayer(ctx, p);
+      canvas.dataset.drawn = '1';
+    } catch (e) { /* 素材没到位时留空，不影响列表 */ }
+  }
+  /** 预告里所有需要 canvas 的对手头像一起画（异步，画完就算）。 */
+  function fillFoeArt(root, preview) {
+    const list = [];
+    root.querySelectorAll('[data-foe-art]').forEach((c) => {
+      const info = preview[Number(c.dataset.foeArt)];
+      if (info && c.getContext) list.push(drawFoeArt(c, info));
+    });
+    return Promise.all(list);
+  }
+  /** 三侠的招牌技会留削弱（速杀可规避）——入口页先给一句提示，悬停看三条具体效果。 */
+  function heroDebuffHint() {
+    if (!TowerData.HERO_DEBUFF) return '';
+    const tips = ['tl', 'xh', 'xm'].map((k) => TowerData.HERO_DEBUFF[k]).filter(Boolean)
+      .map((d) => '· ' + d.name + '：' + d.desc).join('\n');
+    return '<p class="tower-rule tower-rule-hint" title="' + esc(tips) +
+      '">三侠的招牌技会给本层留下削弱（' + esc(tips.split('\n').map((t) => t.split('：')[0].slice(2)).join(' / ')) +
+      '），速杀可以规避 · 悬停看具体数值</p>';
+  }
   function buffTag(b, stacks) {
     return '<span class="buff-tag r' + b.rarity + '" title="' + esc(b.desc) + '">' + esc(b.name) +
       '<i>' + SCOPE[b.scope] + '</i>' + (stacks > 1 ? '<em>×' + stacks + '</em>' : '') + '</span>';
@@ -68,11 +126,16 @@
    *  颜色跟着来源走，战斗 HUD 的胶囊、选 buff 页的提示用的是同一份数据。 */
   function debuffPanel(debuffs) {
     if (!debuffs || !debuffs.length) return '';
+    // 每张卡带上「是哪位大侠给的」小头像 + 来源色，一眼就能对上本层的对手顺序
     return '<div class="tower-debuffs"><h4>本层已被削弱（贯穿本层）</h4><div class="debuff-cards">' +
-      debuffs.map((d) => '<div class="debuff-card" style="--hero-color:' + esc(d.color || '#7a4a18') + '">' +
-        '<span class="debuff-from">' + esc(d.short || d.hero || '大侠') + '</span>' +
-        '<b class="debuff-name">' + esc(d.name || '削弱') + '</b>' +
-        '<span class="debuff-text">' + esc(d.text || '') + '</span></div>').join('') +
+      debuffs.map((d) => {
+        const file = CHAR_FILE[d.from] || null;
+        const face = file ? '<img class="debuff-face" alt="" src="images/classic/characters/' + file + '-classic-card.png">' : '';
+        return '<div class="debuff-card" style="--hero-color:' + esc(d.color || '#7a4a18') + '">' + face +
+          '<span class="debuff-from">' + esc(d.short || d.hero || '大侠') + '</span>' +
+          '<b class="debuff-name">' + esc(d.name || '削弱') + '</b>' +
+          '<span class="debuff-text">' + esc(d.text || '') + '</span></div>';
+      }).join('') +
       '</div></div>';
   }
   /** 左侧塔身：当前层附近的一段楼层，自上而下。 */
@@ -92,23 +155,23 @@
     return '<div class="tower-visual" aria-label="塔层进度"><div class="tower-floors">' + floors + '</div>' +
       '<div class="tower-visual-caption">' + caption + '</div></div>';
   }
+  /* 第 1 项：对手从左到右排成一行「小人像 + 名字 + 类型」，
+   * 机制还是挂在悬停气泡上（列表本身不占高度），松鼠形态会把装备一起画出来。 */
   function planHtml(preview) {
-    // 第 1 项：每行只留「序号 + 名字 + 类型」，机制文本挂到悬停气泡上，
-    // 这样 4~5 行预告 + 「开始挑战」按钮一屏就能看完，不用下翻。
     return '<ol class="tower-plan">' + preview.map((b, i) =>
       '<li class="' + (b.elite ? 'elite' : '') + (b.squirrel ? ' squirrel' : '') + '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
       '<span class="tower-plan-no">' + (i + 1) + '</span>' +
+      foePortraitHtml(i, b) +
       '<b>' + esc(b.name) + '</b>' +
       (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
       (b.elite ? '<em class="elite-tag">精英</em>' : '') +
-      '<span class="tower-plan-hint">悬停看机制</span>' +
       '</li>').join('') + '</ol>';
   }
 
   // ---------- 主塔 ----------
   function openTower() {
     const info = Tower.towerInfo();
-    let main;
+    let main, footer = null;
     if (info.run) {
       const run = info.run;
       main = '<h2 class="tower-title">第 ' + run.layer + ' 层 · 第 ' + run.battleNo + '/' + run.battleCount + ' 场</h2>' +
@@ -119,13 +182,18 @@
       // 第 1 项：标题与数据并排、规则压成一行，保证一屏能放下 5 行预告 + 开始按钮
       main = '<div class="tower-head"><h2 class="tower-title">无尽挑战塔 · 第 ' + info.nextLayer + ' 层</h2>' +
         '<div class="tower-stats">目标等级 ' + info.level + ' · 强度 ×' + info.mult.toFixed(2) + ' · ' + info.battles + ' 场连战 · 通关金松果 <b class="gold-text">' + info.gold + '</b></div></div>' +
-        '<p class="tower-rule" title="第 4 场是随机 boss：悬停对手可以看到它的机制与出招循环">每层 1 张挑战书 · 连战只继承血量 · 第 4 场随机 boss（悬停看机制）· 通关另补 3 场挑战的掉落</p>' +
-        '<h4 class="tower-plan-title">本层对手预告</h4>' + planHtml(info.preview) +
-        '<div class="tower-actions">' + C().btn('开始挑战（挑战书×1）', 'fight', 'gold') + '<span class="tower-book-count">现有挑战书 ' + info.books + ' 张</span></div>';
+        '<p class="tower-rule" title="第 4 场是随机 boss；三侠顺序每层随机。悬停任意对手可以看它的机制与出招循环">每层 1 张挑战书 · 连战只继承血量 · 对手顺序每层随机（悬停看机制）· 通关另补 3 场挑战的掉落</p>' +
+        heroDebuffHint() +
+        '<h4 class="tower-plan-title">本层对手预告</h4>' + planHtml(info.preview);
+      // 第 1 项：「开始挑战」挪到卡片右下角（脱离文字流，预告区就有完整的一屏）
+      footer = '<div class="tower-actions tower-footer">' + C().btn('开始挑战（挑战书×1）', 'fight', 'gold') +
+        '<span class="tower-book-count">现有挑战书 ' + info.books + ' 张</span></div>';
     }
-    const content = '<div class="tower-page">' + towerVisual(info.nextLayer, info.maxLayer, 'tower') + '<div class="tower-main">' + main + '</div></div>';
+    const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + '">' + towerVisual(info.nextLayer, info.maxLayer, 'tower') +
+      '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
     bindTips(p);
+    if (!info.run) fillFoeArt(p, info.preview);
     back(p, () => UI.runAction('stages'));
     on(p, 'fight', () => {
       if (info.run) {
@@ -151,7 +219,7 @@
   // ---------- 无尽 ----------
   function openEndless() {
     const info = Tower.endlessInfo();
-    let main;
+    let main, footer = null;
     if (info.run) {
       const run = info.run;
       const nextLabel = run.choices ? '场间休整（四选一）' : run.phase === 'shop' ? '进入试炼商店' : run.phase === 'checkpoint' ? '前往结算点' : '继续战斗';
@@ -165,10 +233,12 @@
     } else {
       main = '<h2 class="tower-title">无尽模式</h2>' +
         '<div class="tower-stats">历史最高 <b class="gold-text">' + info.best + '</b> 分 · 本周最高 ' + info.weekBest + ' 分 · 最深 ' + info.bestLayer + ' 层</div>' +
-        '<p class="tower-rule">免门票，从 1 层冲分。每 5 层进商店并可结算离场拿抽奖卷：20 层前翻倍（1/2/4/8），之后每段 +3；中途失败卷作废。怪物每段 ×1.5 并叠加机制，撑得越久越刺激。</p>' +
-        '<div class="tower-actions">' + C().btn('开始冲塔（免费）', 'fight', 'gold') + '<span class="tower-book-count">现有抽奖卷 ' + info.tickets + ' 张</span></div>';
+        '<p class="tower-rule">免门票，从 1 层冲分。每 5 层进商店并可结算离场拿抽奖卷：20 层前翻倍（1/2/4/8），之后每段 +3；中途失败卷作废。怪物每段 ×1.5 并叠加机制，撑得越久越刺激。</p>';
+      footer = '<div class="tower-actions tower-footer">' + C().btn('开始冲塔（免费）', 'fight', 'gold') +
+        '<span class="tower-book-count">现有抽奖卷 ' + info.tickets + ' 张</span></div>';
     }
-    const content = '<div class="tower-page">' + towerVisual(info.run ? info.run.layer : 1, 0, 'endless') + '<div class="tower-main">' + main + '</div></div>';
+    const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + '">' + towerVisual(info.run ? info.run.layer : 1, 0, 'endless') +
+      '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
     bindTips(p);
     back(p, () => UI.runAction('stages'));

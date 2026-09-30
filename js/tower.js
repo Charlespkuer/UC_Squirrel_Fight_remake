@@ -107,10 +107,10 @@
   /** 第 4 场的随机 boss：同一天同一层永远同一个（所以「进层预告 = 实战」，失败重试也还是它）。 */
   function bossEntry(layer) { return D().bossFor(layer, State.localDate()); }
   function buildPlan(layer) {
-    /* 三侠固定顺序（螳螂 → 仙鹤 → 熊猫）：配合「三侠大招会留本层削弱」的设计，
-     * 让整层的削弱序列完全可预期（先降上限、再降属性、最后锁武技），
-     * 玩家才能读题、才能针对配 buff。原来是随机序，读题就不成立了。 */
-    const plan = HEROES.map((anim) => ({ kind: 'hero', anim }));
+    /* 第 3 项：三侠顺序随机（按「当天日期 + 层数」确定性洗牌 → 预告 = 实战、重试不变）。
+     * 削弱跟着「哪一位大侠」走（HERO_DEBUFF[anim]），所以顺序一变，本层要吃的削弱顺序也变，
+     * 但三种削弱的组合固定，玩家看预告里的头像就知道等一下会被套上什么。 */
+    const plan = D().heroOrder(layer, State.localDate()).map((anim) => ({ kind: 'hero', anim }));
     // 第 4 场 = 随机 boss（20 选 1：7 个带机制的松鼠 + 3 只平庸松鼠 + 10 个机制 NPC）
     plan.push(bossEntry(layer));
     // x10 层第 5 场 = 固定狂战松鼠（松鼠形态 + 全身狂战套 + 精英）
@@ -121,7 +121,7 @@
     if (entry.kind === 'hero') return { name: HERO_NAME[entry.anim], anim: entry.anim, type: '三侠位', mechDesc: '', elite: false };
     if (entry.kind === 'warlord') {
       const w = D().WARLORD;
-      return { name: w.name, squirrel: true, gear: true, elite: true, type: w.type,
+      return { name: w.name, squirrel: true, gear: w.gear, elite: true, type: w.type,
         mechDesc: w.mechDesc, patternDesc: w.patternDesc, mechs: w.mech.slice() };
     }
     if (entry.kind === 'npc') {
@@ -129,7 +129,7 @@
       return { name: npc.name, anim: npc.anim, elite: false, type: npc.type, mechDesc: npc.mechDesc, mechs: [npc.mech] };
     }
     const sq = entry.kind === 'trial' ? D().TRIAL_BY_ID[entry.id] : D().SQUIRREL_BY_ID[entry.id];
-    return { name: sq.name, squirrel: true, gear: true, elite: false, type: sq.type,
+    return { name: sq.name, squirrel: true, gear: sq.gear, elite: false, type: sq.type,
       mechDesc: sq.mechDesc || '', patternDesc: sq.patternDesc || '', mechs: (sq.mech || []).slice() };
   }
   /** 入口页预告：当前层的全部对手（与 buildPlan 同源，所以预告 = 实战）。 */
@@ -241,11 +241,19 @@
     // 第 3 项数值调整：三侠（前 3 场）血量下调、第 4 场的 boss 血量上调，
     // 让「卡层卡在最后一战」而不是卡在三侠的血墙上。
     const hero = entry.kind === 'hero';
+    // x10 第 5 场的狂战松鼠用自己那一档系数（见 tower-data 的 FOE_WARLORD_*）
+    const warlord = entry.kind === 'warlord';
+    const depth = TD.bossDepthMul(layer);   // 第 4 场的 boss 随层数缓升（1~5 层稍软、20 层起封顶）
+    const powMul = hero ? TD.FOE_HERO_POWER_MUL : warlord ? TD.FOE_WARLORD_POWER_MUL : TD.FOE_TRIAL_POWER_MUL * depth;
+    const hpMul = hero ? TD.FOE_HERO_HP_MUL : warlord ? TD.FOE_WARLORD_HP_MUL : TD.FOE_TRIAL_HP_MUL * depth;
     const foe = {
       name, level: LT, npcType,
-      power: stat(bias.power, TD.FOE_POWER_MUL * (hero ? 1 : TD.FOE_TRIAL_POWER_MUL)),
+      power: stat(bias.power, TD.FOE_POWER_MUL * powMul),
       agility: stat(bias.agility), speed: stat(bias.speed),
-      hp: Math.max(1, Math.round(hpBase * TD.FOE_HP_MUL * (hero ? TD.FOE_HERO_HP_MUL : TD.FOE_TRIAL_HP_MUL) * M * bias.hp * eliteMul)),
+      // 第 2 项：boss 的血量 bias 兜一个下限（0.95）——血薄的 boss（影刹 0.90 等）
+      // 原来比三侠还好打，随机池里就成了「最软的最后一战」。
+      hp: Math.max(1, Math.round(hpBase * TD.FOE_HP_MUL * hpMul * M *
+        (hero ? bias.hp : Math.max(0.95, bias.hp)) * eliteMul)),
       weapons, skills, mech, pattern, mechParams, wears,
     };
     // poolNpc = 带专属机制的对手（「机制破解」类 buff 只对它生效）；平庸松鼠没有机制，不算

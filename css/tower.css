@@ -51,6 +51,15 @@
   border-radius: 16px; padding: 5px 14px;
 }
 .tower-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 8px 0 2px; }
+/* 第 1 项：入口页的「开始挑战」固定到卡片右下角（绝对定位，不挤预告区） */
+.tower-page { position: relative; }
+.tower-page.has-footer .tower-main { padding-bottom: 60px; }
+.tower-footer {
+  position: absolute; right: 18px; bottom: 10px; margin: 0; gap: 12px;
+  padding: 6px 0 6px 26px;
+  background: linear-gradient(90deg, rgba(255, 253, 240, 0), rgba(255, 253, 240, .94) 26%);
+}
+.tower-rule-hint { font-size: 17px; color: #8a3a30; background: rgba(255, 240, 236, .9); border-color: #e0a99c; }
 .tower-book-count { font-size: 19px; color: #8a6a3a; }
 .gold-text { color: #c87f0a; }
 
@@ -126,28 +135,33 @@
    第 1 项：一行一个对手（名字 + 类型），机制文本进悬停气泡，
    这样 4~5 行预告 + 「开始挑战」一屏放得下，不用下翻。 */
 .tower-plan-title { margin: 6px 0 4px; font-size: 21px; color: #7a4a18; }
-.tower-plan { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+/* 第 1 项：对手从左到右一字排开，每格 = 小人像 + 名字 + 类型（机制走悬停气泡） */
+.tower-plan { margin: 0; padding: 0; list-style: none; display: flex; align-items: stretch; gap: 8px; }
 .tower-plan li {
-  display: flex; align-items: center; gap: 10px; position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px;
+  position: relative; flex: 1 1 0; min-width: 0; text-align: center;
   background: rgba(255, 250, 240, .95); border: 3px solid #d9bd88; border-radius: 18px;
-  padding: 2px 14px; font-size: 20px; color: #765432;
-  min-height: 40px; box-sizing: border-box; cursor: default;
+  padding: 6px 6px 8px; font-size: 19px; color: #765432;
+  box-sizing: border-box; cursor: default;
 }
-.tower-plan li b { font-size: 22px; color: #7a4a18; }
+.tower-plan li b { font-size: 21px; line-height: 1.15; color: #7a4a18; }
+.foe-portrait { display: flex; align-items: center; justify-content: center; width: 100%; height: 100px; }
+.foe-portrait img, .foe-portrait canvas { max-width: 100%; max-height: 100px; object-fit: contain; }
+.tower-plan li .tower-plan-no { position: absolute; left: 6px; top: 6px; flex: none; }
 .tower-plan li.elite { border-color: #e08573; background: rgba(255, 236, 230, .95); }
 .tower-plan li:focus { outline: none; box-shadow: 0 0 0 3px rgba(139, 82, 184, .35); }
 .tower-plan-no {
-  flex: 0 0 30px; height: 30px; border-radius: 50%; align-self: center;
-  background: linear-gradient(#c58a3c, #96601f); color: #fff8e4; font-size: 18px; font-weight: bold;
+  flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%;
+  background: linear-gradient(#c58a3c, #96601f); color: #fff8e4; font-size: 16px; font-weight: bold;
   display: inline-flex; align-items: center; justify-content: center;
   box-shadow: inset 0 2px 0 rgba(255, 255, 255, .35);
 }
 .tower-plan-type {
-  font-size: 18px; color: #8a6a3a; background: rgba(196, 158, 92, .18);
-  border: 2px solid rgba(196, 158, 92, .45); border-radius: 10px; padding: 1px 10px;
+  font-size: 17px; color: #8a6a3a; background: rgba(196, 158, 92, .18);
+  border: 2px solid rgba(196, 158, 92, .45); border-radius: 10px; padding: 0 8px;
 }
-.tower-plan-hint { margin-left: auto; font-size: 17px; color: #a98a5c; }
-.tower-plan li:hover .tower-plan-hint { color: #7a4a18; }
+/* 卡片整体可悬停：加一圈高亮提示「这里有机制可看」 */
+.tower-plan li:hover { border-color: #c9a468; background: #fffdf4; }
 .elite-tag { font-style: normal; font-size: 17px; color: #fff; background: #c05151; border-radius: 10px; padding: 2px 10px; }
 /* 悬停气泡：挂在 body 上的 fixed 层（js/tower-ui.js 定位），不会被滚动容器裁掉 */
 .tower-tip-float {
@@ -170,6 +184,7 @@
   font-size: 17px; color: #fff; background: var(--hero-color, #a8453a);
   border-radius: 9px; padding: 2px 8px; font-style: normal;
 }
+.debuff-face { width: 40px; height: 40px; object-fit: contain; flex: none; margin: -4px 0; }
 .debuff-name { font-size: 20px; color: #7e2a20; }
 .debuff-text { color: #8a3a30; }
 

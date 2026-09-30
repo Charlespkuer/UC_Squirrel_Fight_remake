@@ -213,6 +213,16 @@ async function main() {
         return { top: Math.round(r.top), bottom: Math.round(r.bottom), visible: r.bottom <= window.innerHeight }; })();
       P.needsScroll = (() => { const el = document.querySelector('#ui .tower-main');
         return el ? el.scrollHeight > el.clientHeight : null; })();
+      // 第 1 项：一排小人像（松鼠形态是 canvas，画完会带 data-drawn）+ 右下角按钮
+      P.foePortraits = $$('#ui .tower-plan li .foe-portrait').length;
+      P.foeImgs = $$('#ui .tower-plan li .foe-portrait img').map((i) => i.getAttribute('src').split('/').pop());
+      P.foeCanvasDrawn = $$('#ui .tower-plan li .foe-portrait canvas[data-drawn="1"]').length;
+      P.foeGearKeys = (Tower.towerInfo().preview || []).map((b) => b.gear || null);
+      P.footerBtn = (() => { const b = document.querySelector('#ui .tower-footer [data-action="fight"]');
+        if (!b) return null; const r = b.getBoundingClientRect();
+        const card = document.querySelector('#ui .tower-page').getBoundingClientRect();
+        return { inFooter: true, bottomRight: r.right > card.left + card.width * 0.5 && r.top > card.top + card.height * 0.5,
+          inside: r.right <= card.right + 1 && r.bottom <= card.bottom + 1 }; })();
       // 悬停气泡：手动触发 mouseenter，量它有没有跑到屏幕外
       const row = document.querySelector('#ui .tower-plan li');
       if (row) {
@@ -243,6 +253,15 @@ async function main() {
         Tower.reportBattle('tower', hero.token, true, 0.85, { rounds: [{ ultName: ults[i] }] });
       }
       P.trialDebuffs = Tower.towerInfo().run.debuffs.map((d) => d.short + '|' + d.text);
+      if (q.get('stop') === '3') {
+        // 看「进行中」的塔页：削弱卡片（带头像）是不是直观
+        TowerUI.openTower(); await flush(420);
+        P.debuffCards = $$('#ui .debuff-card').map((c) => text(c));
+        P.debuffFaces = $$('#ui .debuff-card .debuff-face').map((i) => i.getAttribute('src').split('/').pop());
+        P.debuffColors = $$('#ui .debuff-card').map((c) => c.style.getPropertyValue('--hero-color'));
+        snap('本层削弱卡片', '#ui .debuff-cards');
+        P.done = true; P.errors = window.__errs.slice(); return;
+      }
       Tower.pickChoice('tower', 0);
       const nx = Tower.nextBattle('tower');
       P.trialFoeName = nx.info.name;

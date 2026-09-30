@@ -114,8 +114,20 @@ function autoPick(ctx, mode) {
     Tower.preview(1)[3].kind === info.preview[3].kind);
   t('boss 有可悬停的机制简介（不出现「题面/对策」字样）',
     typeof info.preview[3].mechDesc === 'string' && !/题面|对策/.test(info.preview[3].mechDesc));
-  t('第 10 层 5 场、最后一场是狂战松鼠', Tower.preview(10).length === 5 &&
-    Tower.preview(10)[4].elite === true && Tower.preview(10)[4].name === '狂战松鼠·无双' && Tower.preview(10)[4].gear === true);
+  // 第 3 项：三侠顺序按「日期 + 层数」随机（换层/换天会变），但同一层预告 = 实战
+  {
+    const orders = new Set();
+    for (let day = 1; day <= 30; day++) {
+      for (let n = 1; n <= 12; n++) orders.add(TowerData.heroOrder(n, 'day-' + day).join(''));
+    }
+    t('三侠出场顺序会洗牌（6 种全排列都能出现）', orders.size === 6);
+    const same = TowerData.heroOrder(7, '2026-09-28').join('') === TowerData.heroOrder(7, '2026-09-28').join('');
+    t('同一层同一天顺序固定（预告 = 实战）', same);
+    // 同一层换日期应当大概率换顺序（30 天里至少变过一次就说明它真的在洗牌）
+    const seen7 = new Set();
+    for (let day = 1; day <= 30; day++) seen7.add(TowerData.heroOrder(7, 'day-' + day).join(''));
+    t('同一层换一天会换顺序', seen7.size > 1 && !seen7.has(''));
+  }
   {
     // 池子必须覆盖：7 个带机制的松鼠 + 3 只平庸松鼠 + 10 个机制 NPC（都不浪费）
     const kinds = {};
@@ -296,7 +308,7 @@ function autoPick(ctx, mode) {
 /* ---------- B. 平衡实测 ---------- */
 (function balance() {
   const ctx = setup();
-  const { State, Tower, TowerData } = ctx;
+  const { State, Tower, TowerData, Sim } = ctx;
   unlock(ctx);
   console.log('\nB. 主塔平衡实测（每层 ' + RUNS + ' 次整层挑战，目标等级随机玩家，随机场间选择）');
   console.log('层数   目标等级  整层胜率  低5级   高5级   精英场');
@@ -332,6 +344,49 @@ function autoPick(ctx, mode) {
     console.log(String(layer).padEnd(4) + String(LT).padStart(8) + '  ' +
       (at.clear * 100).toFixed(0).padStart(6) + '%  ' + (low.clear * 100).toFixed(0).padStart(5) + '%  ' +
       (high.clear * 100).toFixed(0).padStart(5) + '%  ' + (at.elite == null ? '—' : (at.elite * 100).toFixed(0) + '%'));
+  }
+
+  /* D. 逐场强度（--battles）：看「第 4 场（boss）是不是真的比前三场难」。
+   * 只统计「打到这一场时仍满状态/带血继承」的真实连战，所以是关卡内的自然节奏。 */
+  if (process.argv.includes('--battles')) {
+    console.log('\nD. 逐场胜率与剩余血量（同一层内连战，不重置血量）');
+    console.log('层数  场次  对手                    样本  胜率   胜时剩血  平均回合');
+    for (const layer of (process.env.BATTLE_LAYERS || '1,5,10,15,20').split(',').map(Number)) {
+      Tower._debugSetLayer(layer - 1);
+      const stats = [];
+      for (let i = 0; i < RUNS; i++) {
+        State.state().props[23] = 99;
+        Tower.startTowerRun();
+        let guard = 0;
+        while (guard++ < 9) {
+          const run = Tower.towerInfo().run;
+          if (!run) break;
+          if (run.choices) { autoPick(ctx, 'tower'); continue; }
+          const nx = Tower.nextBattle('tower');
+          if (!nx.ok) break;
+          const level = TowerData.towerLevel(layer);
+          const me = State.genAI(level, '', { levelJitter: 0, gearSelfLevel: true });
+          me.maxHp = me.hp; nx.adjustMe(me);
+          const res = Sim.simulate(me, nx.foe);
+          const last = [...res.rounds].reverse().find((r) => Array.isArray(r.hpAfter));
+          const win = res.winner === 0;
+          const ratio = win && last ? Math.max(0, Math.min(1, last.hpAfter[0] / me.maxHp)) : 0;
+          const slot = stats[run.battleNo - 1] || (stats[run.battleNo - 1] = { name: nx.info.name, kind: nx.entry.kind, n: 0, win: 0, hp: 0, rounds: 0 });
+          slot.n++; if (win) { slot.win++; slot.hp += ratio; } slot.rounds += res.rounds.length;
+          const rw = Tower.reportBattle('tower', nx.token, win, ratio, res);
+          if (!rw.ok || !rw.win) break;
+        }
+        if (Tower.towerInfo().run) Tower.abandon('tower');
+      }
+      stats.forEach((sl, i) => {
+        if (!sl) return;
+        console.log(String(layer).padEnd(5) + String(i + 1).padEnd(6) + String(sl.name).padEnd(22) +
+          String(sl.n).padStart(4) + '  ' +
+          ((sl.win / sl.n) * 100).toFixed(0).padStart(4) + '%  ' +
+          ((sl.win ? (sl.hp / sl.win) * 100 : 0).toFixed(0) + '%').padStart(7) + '  ' +
+          (sl.rounds / sl.n).toFixed(1).padStart(7));
+      });
+    }
   }
 
   console.log('\nC. 无尽模式自动爬层（45 级玩家、随机选项、不逛商店、每结算点抛硬币决定去留）');

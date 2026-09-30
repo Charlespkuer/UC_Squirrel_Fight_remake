@@ -84,13 +84,26 @@
    * 系数写在系数区而不是各模板的 bias，方便统一调（tools/tower-balance.cjs 实测）。 */
   /* 三侠（每层前 3 场）血量单独下调：实测玩家卡层几乎都卡在三侠的「血墙」上，
    * 而每层最后一场（boss）反而像送的 —— 血量 0.62 系数比三侠矮一大截，手感完全反了。 */
-  const FOE_HERO_HP_MUL = 0.78;
+  const FOE_HERO_HP_MUL = 0.66;
+  /* 三侠的「输出」也单独压一档：三侠的攻击基准是 STAGE_TYPE_SCALE（螳螂 1.15／仙鹤 0.92／
+   * 熊猫 1.02）× FOE_POWER_MUL，比 boss 高一大截 —— 结果就是前三场把人打残、最后一场反而像送的。
+   * 第 2 项把 boss 抬成硬仗之后，这里必须回调，否则整层通关率会崩（实测 10 层 5%）。 */
+  const FOE_HERO_POWER_MUL = 0.80;
   /* Boss（第 4 场随机池 / x10 第 5 场狂战）单独一组系数：
    * 血量从 0.62 提到 0.82（试过 0.95，墙区太硬，多日期复测后收到 0.82），
    * 让「最后一战」真的比三侠更需要对策；力量仍压得低（0.50）。
    * 难度结构改成「三侠是热身、boss 是墙」，卡层才可以靠「换一张对策 buff」解决。 */
-  const FOE_TRIAL_POWER_MUL = 0.50;
-  const FOE_TRIAL_HP_MUL = 0.82;
+  const FOE_TRIAL_POWER_MUL = 0.96;
+  const FOE_TRIAL_HP_MUL = 1.15;
+  /* x10 第 5 场的狂战松鼠单独一档：它本来就是第 5 场（血量继承最低）、还吃精英 ×1.2，
+   * 直接套 boss 档会变成「每 10 层必卡」（实测 10 层整层通关率 8%、狂战胜率 0~8%）。
+   * 这里把它的血调回和普通 boss 同量级、力量留高一档，做成「打得疼但打得过」的收尾。 */
+  const FOE_WARLORD_POWER_MUL = 0.85;
+  const FOE_WARLORD_HP_MUL = 0.72;
+  /* Boss 档再叠一条「随层数缓升」的曲线（只作用于第 4 场的随机 boss）：
+   * 低位层（1~5）boss 稍微软一点，保证「日常推进区」还能推（验收线 55%）；
+   * 10 层后回到 1.0，20 层起封顶 1.08 —— 深层 boss 更硬，符合「最后一战是墙」。 */
+  function bossDepthMul(layer) { return Math.min(1.08, 0.86 + 0.008 * Math.max(1, Number(layer) || 1)); }
 
   // ---------- NPC 池（10 个，8 类机制） ----------
   // bias: 力/敏/速/血 四元乘数；anim 复用现有动画表（tl 螳螂 / xh 仙鹤 / xm 熊猫）。
@@ -300,6 +313,19 @@
     const pick = BOSS_POOL[poolHash(String(salt == null ? '' : salt) + '#' + Math.max(1, layer)) % BOSS_POOL.length];
     return { kind: pick.kind, id: pick.id };
   }
+  /* 第 3 项：三侠的出场顺序也随机，但同样按 (日期 + 层数) 确定性洗牌 ——
+   * 进层预告里看到的顺序就是实战顺序，失败重试还是这一套（不然「读题」无从谈起）。
+   * 自己带一支小 PRNG，不动全局 Math.random。 */
+  function heroOrder(layer, salt) {
+    const out = ['tl', 'xh', 'xm'];
+    let s = poolHash(String(salt == null ? '' : salt) + '@heroes#' + Math.max(1, layer)) || 1;
+    const next = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(next() * (i + 1));
+      const tmp = out[i]; out[i] = out[j]; out[j] = tmp;
+    }
+    return out;
+  }
   // ---------- Buff 池 ----------
   // rarity: 0 普通 / 1 稀有 / 2 史诗；scope: battle 单场 / layer 本层 / run 跨层（仅无尽）。
   // mods 由 tower.js 解释（数值均为加池百分比或比例）：
@@ -372,12 +398,12 @@
     towerLevel, towerMult, towerGold, towerGoldShares, TOWER_FAIL_CONSOLATION,
     endlessLevel, endlessSegment, endlessMult, endlessMechStacks, endlessTickets,
     ENDLESS_MECH_ORDER, ENDLESS_CONSOLATION_LAYER, SCORE, COINS, SHOP, shopPrice,
-    FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL,
-    FOE_TRIAL_POWER_MUL, FOE_TRIAL_HP_MUL,
+    FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
+    FOE_TRIAL_POWER_MUL, FOE_TRIAL_HP_MUL, FOE_WARLORD_POWER_MUL, FOE_WARLORD_HP_MUL, bossDepthMul,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,
-    GEAR, wearsOf, WARLORD, BOSS_POOL, bossFor,
+    GEAR, wearsOf, WARLORD, BOSS_POOL, bossFor, heroOrder,
     BUFFS, BUFF_BY_ID, RARITY_NAME, RARITY_WEIGHTS, FIXED_HEAL_PCT, AUTO_HEAL_PCT, STACK_MAX,
     SETTLE_DROP_BATTLES,
     towerPool, endlessPool,

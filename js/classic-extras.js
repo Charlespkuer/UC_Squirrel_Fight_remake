@@ -362,7 +362,7 @@
     return '<div class="profile-panel">' +
       '<p class="profile-meta">入门：' + esc(row.since) + '</p>' +
       '<p class="profile-meta">徒弟等级之和 <b>' + sum + '</b> → 日供系数 <b>' + pct(daily.ratio) + '</b>' +
-        '（保底 10%，三个满级徒弟封顶 50%）</p>' +
+        '（保底 10%，三个满级徒弟封顶 30%）</p>' +
       '<p class="profile-meta">我 ' + esc(daily.date) + ' 赚到：经验 ' + daily.mine.exp + ' · 金松果 ' + daily.mine.gold + '</p>' +
       '<p class="profile-meta">这个徒弟的份额 ' + pct(daily.weight) + ' → 昨日日贡：' +
         (daily.claimed ? '<b class="done">已领取</b>' : '<b>经验 ' + daily.exp + ' · 金松果 ' + daily.gold + '</b>') +

@@ -133,6 +133,41 @@ async function main() {
     P.needsScroll = (() => { const el = document.querySelector('#ui .tower-main'); return el ? el.scrollHeight > el.clientHeight : null; })();
     P.done = true; P.errors = window.__errs.slice(); return;
   }
+  /* 第 3 项：无尽第 10 层的里程碑奖励弹窗（用假的即时战斗把 9 层推到 10 层） */
+  if (batch === 'milestone') {
+    for (let id = 1; id <= 18; id++) S.stages[id] = { npcIndex: 3, passed: true };
+    S.level = 70; State.save();
+    Tower.startEndlessRun();
+    const run = State.state().endless.run;
+    run.layer = 9;
+    Main.startBattle = (foe, opts) => {
+      const hp = 1, cap = 1;
+      if (opts && opts.onEnd) opts.onEnd(0, { hpAfter: [1, 0], maxHp: [1, 1], rounds: [] });
+      return Promise.resolve();
+    };
+    const seenModals = [];
+    for (let i = 0; i < 40; i++) {
+      const r = State.state().endless.run;
+      if (!r) break;
+      $$('.classic-modal').forEach((m) => { const t = m.textContent.replace(/\s+/g, ' ').trim().slice(0, 70); if (t && !seenModals.includes(t)) seenModals.push(t); });
+      if (r.choices) { Tower.pickChoice('endless', 0); TowerUI.openEndless(); await flush(120); continue; }
+      if (r.phase === 'shop') { Tower.closeShop(); continue; }
+      if (r.phase === 'checkpoint') { Tower.continueEndless(); continue; }
+      const btn = $$('#ui [data-action="fight"]')[0];
+      if (!btn) { TowerUI.openEndless(); await flush(150); continue; }
+      btn.click(); await flush(180);
+      // 里程碑弹窗要在这里抓：它在战斗结束后立刻出现，下面那一句「继续」会把它点掉
+      const msModal = $$('.classic-modal').find((m) => /里程碑奖励/.test(m.textContent));
+      if (msModal) { P.milestoneModalNow = msModal.textContent.replace(/\s+/g, ' ').trim().slice(0, 120); break; }
+      const again = $$('.classic-modal .uc-button').find((b) => /继续|下一场|继续战斗/.test(b.textContent));
+      if (again) { again.click(); await flush(180); }
+    }
+    $$('.classic-modal').forEach((m) => { const t = m.textContent.replace(/\s+/g, ' ').trim().slice(0, 70); if (t && !seenModals.includes(t)) seenModals.push(t); });
+    P.milestoneModal = seenModals;
+    P.hitModal = P.milestoneModalNow || null;
+    P.milestoneLayer = State.state().endless.run ? State.state().endless.run.layer : null;
+    P.done = true; P.errors = window.__errs.slice(); return;
+  }
   if (batch === 'rank') {
     S.level = 60; S.joinRankCount = 0; S.goldPoint = 9999; State.save();
     let started = 0;

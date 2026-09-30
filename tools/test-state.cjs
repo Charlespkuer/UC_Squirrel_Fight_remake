@@ -232,10 +232,13 @@ test('每日任务计数：合成/融合装备、宝石、使用/购买/卖出�
   s.props[24] = 20; s.goldPoint = 1000;
   assert.equal(S.composeGear(24).ok, true);
   assert.equal(c('merge'), 1, '碎片合成装备要计入 merge');
-  // 3 件同名装备融合 → merge
-  const trio = [S.addGear(21), S.addGear(21), S.addGear(21)];
+  // 3 件同部位同品质装备融合 → merge（第 2 项：允许不同名，产物是该部位随机装备）
+  const trio = [S.addGear(21), S.addGear(25), S.addGear(29)];
   s.goldPoint = 1000;
-  assert.equal(S.mergeGears(trio.map((x) => x.key)).ok, true);
+  const merged = S.mergeGears(trio.map((x) => x.key));
+  assert.equal(merged.ok, true);
+  assert.equal(merged.gear.quality, 3, '融合产物品质 +1');
+  assert.equal(S.gearPart(merged.gear.id), 0, '产物仍是同一部位（头巾）');
   assert.equal(c('merge'), 2, '装备融合也要计入 merge');
   // 宝石合成 → gem
   s.props[101] = 3; s.goldPoint = 1000;

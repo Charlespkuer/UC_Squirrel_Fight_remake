@@ -411,6 +411,29 @@
    * 所以按**一整个常驻挑战关 = 3 场**的掉落量补回来（每场 3 个飘物 → 共 9 个）。 */
   const SETTLE_DROP_BATTLES = 3;
 
+  /* 第 3 项：无尽每爬 10 层，结算时随机发一次里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）。
+   * 药丸取「大力丸/敏捷丸/速度丸/经验丸」的普通版与超级版（超级版权重低一半）。 */
+  const MILESTONE_EVERY = 10;
+  const MILESTONE_BOOK_COUNT = 10;
+  const MILESTONE_REWARDS = [
+    { kind: 'skill', propId: 21, count: MILESTONE_BOOK_COUNT, name: '技能卷轴' },
+    { kind: 'weapon', propId: 22, count: MILESTONE_BOOK_COUNT, name: '武器卷轴' },
+    { kind: 'pill' },
+  ];
+  const MILESTONE_PILLS = [
+    { id: 3, weight: 3 }, { id: 4, weight: 3 }, { id: 5, weight: 3 }, { id: 7, weight: 3 },
+    { id: 41, weight: 1 }, { id: 42, weight: 1 }, { id: 43, weight: 1 }, { id: 44, weight: 1 },
+  ];
+  /** 抽一次里程碑奖励（不改状态，纯计算，方便测试）。 */
+  function rollMilestone() {
+    const pick = MILESTONE_REWARDS[Math.floor(Math.random() * MILESTONE_REWARDS.length)];
+    if (pick.kind !== 'pill') return { kind: pick.kind, propId: pick.propId, count: pick.count, name: pick.name };
+    const total = MILESTONE_PILLS.reduce((a, p) => a + p.weight, 0);
+    let roll = Math.random() * total;
+    for (const p of MILESTONE_PILLS) { roll -= p.weight; if (roll < 0) return { kind: 'pill', propId: p.id, count: 1 }; }
+    const last = MILESTONE_PILLS[MILESTONE_PILLS.length - 1];
+    return { kind: 'pill', propId: last.id, count: 1 };
+  }
   /** 主塔池 = 单场 + 本层（15 个）；无尽池 = 全部 30 个。 */
   const towerPool = BUFFS.filter((b) => b.scope !== 'run');
   const endlessPool = BUFFS.slice();
@@ -421,7 +444,7 @@
     ENDLESS_MECH_ORDER, ENDLESS_CONSOLATION_LAYER, SCORE, COINS, SHOP, shopPrice,
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
     FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, bossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,
-    ENDLESS_LAYER_HEAL_PCT,
+    ENDLESS_LAYER_HEAL_PCT, MILESTONE_EVERY, MILESTONE_BOOK_COUNT, rollMilestone,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,

@@ -270,7 +270,7 @@
       main = '<h2 class="tower-title">无尽模式</h2>' +
         '<div class="tower-stats">历史最高 <b class="gold-text">' + info.best + '</b> 分 · 本周最高 ' + info.weekBest + ' 分 · 最深 ' + info.bestLayer + ' 层</div>' +
         currencyHtml('endless') +
-        '<p class="tower-rule">免门票，从 1 层冲分。跨层自动回复 20% 生命。每 5 层进商店并可结算离场拿抽奖卷：20 层前翻倍（1/2/4/8），之后每段 +3；中途失败也不再归零，按当前层应得结算。怪物每段 ×1.5 并叠加机制，撑得越久越刺激。</p>';
+        '<p class="tower-rule">免门票，从 1 层冲分。跨层自动回复 20% 生命。每 5 层进商店并可结算离场拿抽奖卷：20 层前翻倍（1/2/4/8），之后每段 +3；中途失败也不再归零，按当前层应得结算；每爬 10 层额外随机一份里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）。怪物每段 ×1.5 并叠加机制，撑得越久越刺激。</p>';
       footer = '<div class="tower-actions tower-footer">' +
         '<span class="tower-book-count">现有抽奖卷 ' + info.tickets + ' 张</span>' +
         C().btn('开始冲塔（免费）', 'fight', 'gold') + '</div>';
@@ -334,17 +334,27 @@
       })).catch(interrupted);
     } catch (error) { interrupted(); }
   }
+  /** 一场胜利后的「下一场」弹窗（里程碑奖励弹完也回到这里）。 */
+  function winModal(mode, rw) {
+    C().modal('战斗胜利', '<div class="result-box"><div class="result-title win">胜 利！</div>' +
+      '<p>' + (mode === 'tower' ? '已累积松果 ' + rw.potGold : '分数 ' + rw.score + ' · 试炼币 ' + rw.coins) + '</p></div>',
+      [{ label: '下一场', cls: 'gold', run: () => fight(mode) }], { small: true });
+  }
   function afterBattle(mode, rw) {
     if (!rw.win) { mode === 'tower' ? towerDefeat(rw) : endlessDefeat(rw); return; }
     if (rw.choices) { offerChoice(mode, rw.choices); return; }
+    // 第 3 项：每 10 层的里程碑奖励先把弹窗给出来，再走原本的流程
+    const cont = () => {
+      if (rw.layerComplete && mode !== 'tower') { if (rw.phase === 'shop') openShop(); else openEndless(); return; }
+      if (rw.layerComplete && mode === 'tower') { towerClear(rw); return; }
+      winModal(mode, rw);
+    };
+    if (rw.milestone) { milestoneModal(rw, cont); return; }
     if (rw.layerComplete) {
       if (mode === 'tower') { towerClear(rw); return; }
       if (rw.phase === 'shop') { openShop(); return; }
     }
-    // 普通一场胜利：直接给「下一场」
-    C().modal('战斗胜利', '<div class="result-box"><div class="result-title win">胜 利！</div>' +
-      '<p>' + (mode === 'tower' ? '已累积松果 ' + rw.potGold : '分数 ' + rw.score + ' · 试炼币 ' + rw.coins) + '</p></div>',
-      [{ label: '下一场', cls: 'gold', run: () => fight(mode) }], { small: true });
+    winModal(mode, rw);
   }
 
   // ---------- 场间 4 选 1 ----------
@@ -442,6 +452,16 @@
             [{ label: '返回', cls: 'gold', run: () => C().home() }], { small: true });
         } },
        { label: '返回', run: () => C().home() }], { small: true });
+  }
+  /** 每 10 层的里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）。 */
+  function milestoneModal(rw, next) {
+    const m = rw.milestone;
+    const icon = C().icon ? C().icon('prop', m.propId) : '';
+    C().modal('第 ' + rw.layer + ' 层 · 里程碑奖励', '<div class="result-box"><div class="result-title win">再进一步</div>' +
+      '<p>你爬到了第 ' + rw.layer + ' 层，结算奖励随机抽取：</p>' +
+      '<p class="milestone-reward">' + icon + '<b>' + esc(m.name) + '</b> ×' + m.count + '</p>' +
+      '<div class="result-lines">已放入背包（每 10 层一次）</div></div>',
+      [{ label: '继续', cls: 'gold', run: next }], { small: true });
   }
   function endlessDefeat(rw) {
     // 第 3 项：失败不再归零 —— 直接按当前层应得的抽奖卷结算

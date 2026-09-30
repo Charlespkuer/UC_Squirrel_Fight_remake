@@ -27,12 +27,12 @@
 - 51级以上经验没有可靠完整表，沿用原项目离线外推，每级比50级多250；代码与本文明确标识为补足，不宣称原版。
 - 关卡碎片精确概率及少量跨颜色掉落率无服务器数据。保留现有随星级变化的离线触发率，只校正确定的结算时点（每次击败对手）、主类别及1–6数量，并按攻略的“3星小概率出高一级颜色、6星几率提高”设置 ★3–4 越1级、★5–6 越2级。暂不臆造白绿蓝之间其他方向的小概率转换。
 - 天使果实原说明可能抽中已拥有武技而失败，当前离线实现从可获得且未拥有池中抽取；无可靠抽签概率，未改为未经证实的失败率。
-- 初始资源、每日礼包、普通战斗经验/金松果、红包金额等没有这次资料中的充分一致证据，保留当前离线实现。徒弟日供已按需求改成与离线活动模拟脱钩的算法：系数只由「所有徒弟等级之和」线性决定（保底 10%，Σ=210 即三个满级徒弟封顶 50%），乘的是**师父自己昨天**赚到的总经验与金松果，次日按各徒弟等级份额分配领取。原先那套明确标注的有限离线模拟（9:10/12:30/18:40 主动挑战等）连同活动账目一并删除，不再作为日供依据。现有收徒胜利20经验保留，未把它当作已经查实的原版奖励。
+- 初始资源、每日礼包、普通战斗经验/金松果、红包金额等没有这次资料中的充分一致证据，保留当前离线实现。徒弟日供已按需求改成与离线活动模拟脱钩的算法：系数只由「所有徒弟等级之和」线性决定（保底 10%，Σ=210 即三个满级徒弟封顶 30%），乘的是**师父自己昨天**赚到的总经验与金松果，次日按各徒弟等级份额分配领取。原先那套明确标注的有限离线模拟（9:10/12:30/18:40 主动挑战等）连同活动账目一并删除，不再作为日供依据。现有收徒胜利20经验保留，未把它当作已经查实的原版奖励。
 
 ## 接口与验证
 
 `State.shopLimit(id)` 返回5、1或无效物品0。`State.purchaseStatus(id)` 返回 `{date, limit, bought, remaining, buyable}`，读状态时自动日切。`State.buyProp` 在状态层原子校验余额、数量和限额。`State.useProp(37,{power,agility,speed})` 分配属性书；升级返回项 `attributeBook:true` 供UI显示。
 
-`State.apprenticeTributeRatio(等级之和)` 给出日供系数（10%~50% 线性、已封顶），`apprenticeTributeTable(徒弟列表)` 给出总日供与各徒弟份额（累计取整，份额之和恒等于总量）。`State.apprenticeDailyStatus(徒弟对象)` 返回该徒弟昨日的经验/金松果日供、当前系数、我昨日的收益、是否可领与是否已领；`apprenticeDailyExp` / `apprenticeDailyGold` 各自取一项。收益来源靠两个钩子记流水：经验走 `gainExp`，金松果统一走 `addGold(n)`（退款/读档恢复/调试用 `{count:false}` 排除）。`beginRecruitChallenge` / `finishRecruitChallenge` / `cancelRecruitChallenge` 管理费用与战斗token。
+`State.apprenticeTributeRatio(等级之和)` 给出日供系数（10%~30% 线性、已封顶），`apprenticeTributeTable(徒弟列表)` 给出总日供与各徒弟份额（累计取整，份额之和恒等于总量）。`State.apprenticeDailyStatus(徒弟对象)` 返回该徒弟昨日的经验/金松果日供、当前系数、我昨日的收益、是否可领与是否已领；`apprenticeDailyExp` / `apprenticeDailyGold` 各自取一项。收益来源靠两个钩子记流水：经验走 `gainExp`，金松果统一走 `addGold(n)`（退款/读档恢复/调试用 `{count:false}` 排除）。`beginRecruitChallenge` / `finishRecruitChallenge` / `cancelRecruitChallenge` 管理费用与战斗token。
 
 回归脚本：`tools/test-balance.cjs` 14项、`tools/test-state.cjs` 23项、`tools/test-stages.cjs` 13项。`tools/test-extras.cjs` 30项涵盖竞技/天梯/师徒，新增日贡精确比例、排除来源、午夜/深夜入门、旧档迁移、账目持久、防重复领取与收徒错误退款/换档保护。战斗掉落独立 `tools/test-battle-drops.cjs` 9项验证三次调度、约两秒过期、点击/跳过幂等、取消不补、换档不发、升级与掉落汇总。

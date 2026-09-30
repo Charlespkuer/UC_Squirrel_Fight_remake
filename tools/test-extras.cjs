@@ -603,17 +603,17 @@ test('收徒金松果不足不启动，零体力可以收徒，落败消耗一�
   assert.equal(s.energy, 0);assert.equal(s.goldPoint,0); assert.equal(s.prentices.length, 0); assert.equal(s.exp, 0); assert.equal(s.propsStates[3], 19);
 });
 
-test('日供系数：保底 10%、三个满级徒弟正好 50%、中间线性递增', () => {
+test('日供系数：保底 10%、三个满级徒弟正好 30%、中间线性递增', () => {
   const g = setup();
   const R = g.c.State.apprenticeTributeRatio;
   assert.equal(R(0), 0.10, '没徒弟也是保底 10%');
   assert.ok(Math.abs(R(1) - 0.10) < 0.01, '一个 1 级徒弟 ≈ 10% 保底：' + R(1));
-  assert.ok(Math.abs(R(210) - 0.50) < 1e-9, '三个满级（Σ=210）正好 50%：' + R(210));
-  assert.equal(R(999), 0.50, '封顶 50%');
+  assert.ok(Math.abs(R(210) - 0.30) < 1e-9, '三个满级（Σ=210）正好 30%：' + R(210));
+  assert.equal(R(999), 0.30, '封顶 30%');
   // 线性：等距的等级之和给出等距的系数
   assert.ok(Math.abs((R(40) - R(20)) - (R(200) - R(180))) < 1e-9, '线性递增');
 
-  // 三个满级徒弟：合计正好是我昨日收益的 50%（份额用累计取整，不被 floor 蚕食）
+  // 三个满级徒弟：合计正好是我昨日收益的 30%（份额用累计取整，不被 floor 蚕食）
   const s = g.c.State.state();
   s.level = 20; s.exp = 0; s.goldPoint = 0;
   g.c.State.addPrentice({ name: '满级甲', level: 70 });
@@ -623,13 +623,13 @@ test('日供系数：保底 10%、三个满级徒弟正好 50%、中间线性递
   g.c.State.addGold(400);
   g.advance(86400000);
   const total = g.c.State.apprenticeDailyTotal();
-  assert.equal(total.exp, 500, '三个满级徒弟合计 50% 经验');
-  assert.equal(total.gold, 200, '金松果同样是 50%');
+  assert.equal(total.exp, 300, '三个满级徒弟合计 30% 经验');
+  assert.equal(total.gold, 120, '金松果同样是 30%');
   g.c.ClassicExtras.master('apprentice');
   assert.match(g.page().html, /等级之和/);
   const before = s.exp;
   g.click('master-claim');
-  assert.equal(s.exp, before + 500, '点击领取真的发出 500 经验');
+  assert.equal(s.exp, before + 300, '点击领取真的发出 300 经验');
   assert.equal(g.c.State.claimApprenticeExp().ok, false, '当天只能领一次');
   assertBalanced(g.markup);
 });

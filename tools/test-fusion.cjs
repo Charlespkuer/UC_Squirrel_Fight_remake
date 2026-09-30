@@ -101,7 +101,7 @@ test('三件蓝装融合成紫装，只扣50金松果，正式存档保持不变
   assert.equal(game.get('action', 'fuse').disabled, true);
   keys.forEach((key) => game.click('gear', key));
   assert.equal(game.get('action', 'fuse').disabled, false);
-  assert.ok(game.board.innerHTML.includes('卓越装备'));
+  assert.ok(game.board.innerHTML.includes('卓越头巾'), '预览写成「卓越 + 部位」：' + game.board.innerHTML.match(/fusion-preview-label">[^<]*/));
   game.click('action', 'fuse');
   assert.equal(game.context.State.state().goldPoint, 50);
   const inventory = game.context.State.myGears();
@@ -112,6 +112,27 @@ test('三件蓝装融合成紫装，只扣50金松果，正式存档保持不变
   assert.ok(game.modals[0].html.includes('卓越'));
   assert.equal(game.storage.get('ssdz_save_v1'), 'untouched');
   assert.equal(JSON.parse(game.storage.get('ssdz_test_save_v1')).goldPoint, 50);
+});
+
+/* 第 2 项：不再要求同名，同部位 + 同品质即可融合，产物是该部位的随机装备 */
+test('三件不同名的同部位同品质装备可以融合，产物仍是该部位', () => {
+  // 21 格斗头巾 / 25 拳斗头巾 / 29 忍者护额：都是「头巾 + 品质2（杰出）」
+  const game = setup([21, 25, 29]);
+  assert.equal(game.get('action', 'fuse').disabled, true);
+  game.gears.forEach((gear) => game.click('gear', gear.key));
+  assert.equal(game.get('action', 'fuse').disabled, false, '不同名但同部位同品质应当可以融合');
+  game.click('action', 'fuse');
+  const made = game.context.State.myGears().find((gear) => !game.gears.some((old) => old.key === gear.key));
+  assert.equal(made.quality, 3, '品质提升一级');
+  assert.equal(game.context.State.gearPart(made.id), 0, '产物仍是头巾');
+  assert.ok(game.modals[0].html.includes('（头巾）'), '成功弹窗写明部位：' + game.modals[0].html.slice(-160));
+});
+
+test('同部位但品质不同 / 不同部位都不能混入', () => {
+  const game = setup([21, 201, 22]);   // 21 头巾品质2、201 头巾品质3、22 手套品质2
+  game.click('gear', game.gears[0].key);
+  assert.equal(game.get('gear', game.gears[1].key).disabled, true, '品质不同不能混入');
+  assert.equal(game.get('gear', game.gears[2].key).disabled, true, '部位不同不能混入');
 });
 
 test('重复选择会移除材料，支持槽位移除和清空，错ID及最高品质不能混入', () => {

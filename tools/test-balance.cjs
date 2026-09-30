@@ -331,12 +331,14 @@ test('宝石合成：3个同级+10金，成功升级，失败扣费且可能降�
   assert.equal(g.State.mergeGems(107).ok, false, '7级已是最高');
 });
 
-test('橙装：3件相同紫装融合为同名传说，宝石免费镶嵌、拆卸5金并退回', () => {
+test('橙装：3件同部位紫装融合为该部位随机传说，宝石免费镶嵌、拆卸5金并退回', () => {
   const g = setup(), s = g.s(); s.level = 50; s.goldPoint = 200;
   const keys = [1, 2, 3].map(() => g.State.addGear(202, [{ id: 5, level: 2 }]).key);
   const fused = g.State.mergeGears(keys);
   assert.equal(fused.ok, true); assert.equal(fused.gear.orange, true); assert.equal(fused.gear.quality, 4);
-  assert.equal(fused.gear.id, 202); assert.equal(fused.gear.ext[0].level, 2, '继承材料词条');
+  assert.equal(g.State.gearPart(fused.gear.id), 1, '产物是同部位（手套，材料是 202 狂战拳甲）');
+  assert.equal(g.State.gearQuality(fused.gear.id), 3, '底子仍是卓越品质，橙色是实例级');
+  assert.equal(fused.gear.ext[0].level, 2, '继承材料词条');
   assert.equal(g.State.mergeGems(101).ok, false);
   // 镶嵌
   s.props[103] = 1;
@@ -345,9 +347,11 @@ test('橙装：3件相同紫装融合为同名传说，宝石免费镶嵌、拆�
   const before = g.State.totalStats({ useProps: false }).power;
   const sock = g.State.socketGem(fused.gear.key, 103);
   assert.equal(sock.ok, true); assert.equal(s.props[103], 0); assert.equal(s.goldPoint, 150, '镶嵌免费');
+  // 产物是随机手套，主属性值要看实例（手套位一律加力量）
+  const madeInst = g.State.myGears().find((x) => x.key === fused.gear.key);
   g.State.wear(fused.gear.key);
   const after = g.State.totalStats({ useProps: false }).power;
-  assert.equal(after, before + Math.round(25 * 1.12), '三级宝石主属性+12%');
+  assert.equal(after, before + Math.round(madeInst.abilityVal * 1.12), '三级宝石主属性+12%');
   assert.equal(g.State.socketGem(fused.gear.key, 103).ok, false, '每件限1颗');
   s.goldPoint = 3; assert.equal(g.State.unsocketGem(fused.gear.key).ok, false, '拆卸需5金');
   s.goldPoint = 50;

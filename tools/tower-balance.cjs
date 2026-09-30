@@ -106,6 +106,7 @@ function autoPick(ctx, mode) {
 (function logic() {
   const ctx = setup();
   const { State, Tower, TowerData, Sim } = ctx;
+  const propMap = ctx.propMap;
   const S = unlock(ctx);
   console.log('A. 状态机逻辑测试');
 
@@ -370,6 +371,36 @@ function autoPick(ctx, mode) {
     const sim2 = Sim.simulate(playerThorns, fastFoe);
     t('荆棘之甲：受击反弹给敌人', sim2.rounds.filter((r) => r.dmg && r.attacker === 1).every((r) => r.thornsDmg > 0) &&
       sim2.rounds.some((r) => r.thornsDmg > 0));
+  }
+
+  // 第 3 项：无尽每爬 10 层发一次里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）
+  {
+    const clearLayerTo = (want) => {
+      Tower.abandon('endless');
+      Tower.startEndlessRun();
+      const r = State.state().endless.run;
+      r.layer = want; r.carry = 0.8;
+      let ms = null;
+      for (let g3 = 0; g3 < 12 && !ms; g3++) {
+        if (r.choices) { Tower.pickChoice('endless', 0); continue; }
+        const nb = Tower.nextBattle('endless');
+        if (!nb.ok) break;
+        const rw3 = Tower.reportBattle('endless', nb.token, true, 0.8, { rounds: [] });
+        if (!rw3.ok) break;
+        if (rw3.milestone) ms = rw3.milestone;
+      }
+      return { run: r, ms };
+    };
+    const hit = clearLayerTo(10);
+    const before = 0;   // 只校验增量：milestone 一定是本次新增
+    const allowed = [21, 22, 3, 4, 5, 7, 41, 42, 43, 44];
+    t('无尽：第 10 层结算发里程碑奖励', !!hit.ms && allowed.includes(hit.ms.propId) && hit.ms.count >= 1);
+    t('无尽：卷轴 ×10、药丸 ×1', !!hit.ms &&
+      ((hit.ms.propId === 21 || hit.ms.propId === 22) ? hit.ms.count === 10 : hit.ms.count === 1));
+    t('无尽：非整十层不发里程碑', !clearLayerTo(11).ms);
+    const msName = hit.ms ? propMap.getValue(hit.ms.propId).name : '';
+    t('无尽：里程碑奖励有名字', !!hit.ms && msName === hit.ms.name);
+    Tower.abandon('endless');
   }
 
   // —— 存档迁移：坏值钳制 + 旧档无字段 ——

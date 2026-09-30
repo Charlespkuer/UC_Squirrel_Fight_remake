@@ -409,7 +409,8 @@
    * 系数乘的是**我自己昨天**赚到的总经验与金松果（earnOn(昨天)），次日领取。
    * 多个徒弟按各自等级占「等级之和」的份额分这份贡品，合计正好是 ratio × 昨日收益。 */
   const TRIBUTE_RATIO_MIN = 0.10;
-  const TRIBUTE_RATIO_MAX = 0.50;
+  /* 第 1 项：日供系数线性区间收到 10% ~ 30%（原来封顶 50%，徒弟收益偏高）。 */
+  const TRIBUTE_RATIO_MAX = 0.30;
   const TRIBUTE_LEVEL_SUM_FULL = 210;        // 3 个满级徒弟：3 × 70
   function apprenticeLevelSum(list) {
     return (Array.isArray(list) ? list : []).reduce((sum, p) => sum + Math.max(1, integer(p && p.level, 1)), 0);
@@ -1167,38 +1168,56 @@
     return { ok: true, gear: g };
   }
   // 融合: 3件同名同品质 → 高一级品质（简化：3件蓝→随机紫）
+  /* 第 2 项：融合不再要求同名，只要求**同部位 + 同品质**；产物是该部位、品质 +1 的随机装备。
+   * 部位取 gearMap 的 type（0 头巾 / 1 手套 / 2 衣服 / 3 鞋），品质取 gearSetMap 的 quality。 */
+  function gearPart(id) {
+    const def = gearMap.getValue(id);
+    return def ? Number(def.type) : -1;
+  }
+  function gearQuality(id) {
+    const def = gearMap.getValue(id);
+    const set = def ? gearSetMap.getValue(parseInt(def.setId)) : null;
+    return set ? parseInt(set.quality) : -1;
+  }
+  /** 某部位 + 某品质的全部装备 id（融合产物从这里随机取一件）。 */
+  function gearIdsOf(part, quality) {
+    const out = [];
+    gearMap.each((k, v) => { if (Number(v.type) === Number(part) && gearQuality(parseInt(v.id)) === Number(quality)) out.push(parseInt(v.id)); });
+    return out;
+  }
   function mergeGears(keys) {
     if (!Array.isArray(keys) || keys.length !== 3 || new Set(keys).size !== 3) return { ok: false, msg: '请选择三件不同的装备' };
     const gs = keys.map((k) => S.gears.find((x) => x.key === k)).filter(Boolean);
     if (gs.length !== 3) return { ok: false, msg: '装备不存在' };
     if (gs.some((g) => g.used)) return { ok: false, msg: '不能融合已穿戴的装备' };
     if (S.goldPoint < 50) return { ok: false, msg: '融合费用不足（50金松果）' };
-    const setIds = gs.map((g) => parseInt(gearMap.getValue(g.id).setId));
-    if (new Set(gs.map((g) => g.id)).size !== 1) return { ok: false, msg: '需要三件同名同品质的装备' };
-    const set = gearSetMap.getValue(setIds[0]);
-    const q = parseInt(set.quality);
     if (gs.some((g) => g.orange)) return { ok: false, msg: '传说装备已是最高品质' };
+    const part = gearPart(gs[0].id), q = gearQuality(gs[0].id);
+    if (part < 0) return { ok: false, msg: '装备数据异常' };
+    if (gs.some((g) => gearPart(g.id) !== part)) return { ok: false, msg: '需要三件同部位的装备' };
+    if (gs.some((g) => gearQuality(g.id) !== q)) return { ok: false, msg: '需要三件同品质的装备' };
+    const partName = ['头巾', '手套', '衣服', '鞋子'][part] || '装备';
     if (q >= 3) {
-      // 3件相同紫装 → 同名橙装（传说），继承三件材料中各词条的最高星级
+      // 3 件同部位紫装 → 该部位随机一件橙装（传说），继承三件材料中各词条的最高星级
+      const pool = gearIdsOf(part, 3);
+      if (!pool.length) return { ok: false, msg: '这个部位还没有可合成的传说' + partName + '。' };
       S.goldPoint -= 50;
       S.gears = S.gears.filter((g) => !keys.includes(g.key));
       const best = {};
       for (const g of gs) for (const e of normalizeExt(g.ext)) best[e.id] = Math.max(best[e.id] || 0, e.level);
       const ext = Object.keys(best).slice(0, 3).map((id) => ({ id: Number(id), level: best[id] }));
-      const made = addGear(gs[0].id, ext);
+      const made = addGear(pool[Math.floor(Math.random() * pool.length)], ext);
       const inst = made && S.gears.find((x) => x.key === made.key);
       if (inst) { inst.orange = true; save(); }
       bumpDaily('merge', 1);   // 每日任务：合成或融合 N 次装备
       return { ok: true, gear: Object.assign(made || {}, { orange: true, quality: 4 }) };
     }
-    const candidates = [];
-    gearSetMap.each((k, v) => { if (parseInt(v.quality) === q + 1) candidates.push(parseInt(v.id)); });
-    const newSet = candidates[Math.floor(Math.random() * candidates.length)];
-    const gearsOfSet = [];
-    gearMap.each((k, v) => { if (parseInt(v.setId) === newSet) gearsOfSet.push(parseInt(v.id)); });
+    const candidates = gearIdsOf(part, q + 1);
+    if (!candidates.length) return { ok: false, msg: '这个部位还没有更高品质的' + partName + '。' };
     S.goldPoint -= 50;
     S.gears = S.gears.filter((g) => !keys.includes(g.key));
-    const g = addGear(gearsOfSet[Math.floor(Math.random() * gearsOfSet.length)], q + 1 >= 2 ? randomExt(q >= 2 ? 2 : 1, q >= 2 ? 3 : 2) : []);
+    const g = addGear(candidates[Math.floor(Math.random() * candidates.length)],
+      q + 1 >= 2 ? randomExt(q >= 2 ? 2 : 1, q >= 2 ? 3 : 2) : []);
     bumpDaily('merge', 1);   // 每日任务：合成或融合 N 次装备
     save();
     return { ok: true, gear: g };
@@ -2600,6 +2619,7 @@
     gainExp, consumeEnergy, tickPropStates, fightReward, revengeReward, markRevenged, REVENGE_EXP_RATIO, expBoostPct, gainExpWithBoost,
     // 师徒
     apprenticeCap, learnSkill, setMaster, clearMaster, addPrentice, removePrentice,
+    gearPart, gearQuality, gearIdsOf,
     apprenticeDailyExp, apprenticeDailyGold, apprenticeDailyTotal, apprenticeDailyStatus,
     apprenticeLevelSum, apprenticeTributeRatio, claimApprenticeExp, canKickToday, kickPrentice,
     beginRecruitChallenge, finishRecruitChallenge, cancelRecruitChallenge,

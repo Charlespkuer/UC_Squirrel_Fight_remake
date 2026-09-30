@@ -484,7 +484,7 @@
         const c13 = stacksOf(run, 'C13');
         if (c13) run.carry = Math.min(1, run.carry + D().BUFF_BY_ID.C13.mods.eliteHealAfter * g);
       }
-      out.score = run.score; out.coins = run.coins;
+    out.score = run.score; out.coins = run.coins;
     }
     run.idx++;
     if (run.idx >= run.plan.length) return layerClear(mode, run, out);
@@ -597,6 +597,14 @@
     if (c04) run.carry = Math.min(1, run.carry + D().BUFF_BY_ID.C04.mods.layerHealPct * g);
     const c12 = stacksOf(run, 'C12');                    // 登顶者：20 层起每过一层攻击成长
     if (c12 && run.layer >= 20) run.bonusPower += D().BUFF_BY_ID.C12.mods.perLayerPowerAfter20 * c12 * g;
+    /* 第 3 项：每爬 10 层，结算时随机发一次里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）。 */
+    if (run.layer % D().MILESTONE_EVERY === 0) {
+      const reward = D().rollMilestone();
+      S().props[reward.propId] = (S().props[reward.propId] || 0) + reward.count;
+      const def = propMap.getValue(reward.propId);
+      reward.name = def ? def.name : (reward.name || '奖励');
+      out.milestone = reward;
+    }
     out.score = run.score; out.coins = run.coins;
     if (run.layer % 5 === 0) {                           // 每 5 层：商店 → 结算点
       run.shop = makeShop(run);

@@ -216,8 +216,18 @@ async function main() {
     P.restChoiceCards = $$('#ui .choice-onpage [data-choice]').length;
     P.restLabels = $$('#ui .choice-onpage .hex-name').map((el) => el.textContent.trim());
     // 拿一张永久增益，再把永久格子填满、看替换提示
-    const first = $$('#ui .choice-onpage [data-choice]')[0];
-    if (first) { first.click(); await flush(250); }
+    // 点一张「增益」卡（下标 1，0 是回血），验证真的能选上
+    const first = $$('#ui .choice-onpage [data-choice]')[1] || $$('#ui .choice-onpage [data-choice]')[0];
+    P.pickLabel = first ? (first.querySelector('.hex-name') || {}).textContent : null;
+    if (first) { first.click(); await flush(300); }
+    P.choicesLeft = (State.state().endless.run.choices || []).length;
+    // 直接调用状态机接口，隔离「函数本身」与「事件绑定」
+    {
+      const r = State.state().endless.run;
+      P.choiceIds = (r.choices || []).map((c) => c.type + ':' + (c.id || ''));
+      P.directPick = 'skipped';
+    }
+    P.afterPickList = Tower.ownedBuffs('endless').map((b) => b.kind + ':' + b.name).join(',');
     P.afterPick = Tower.ownedBuffs('endless').map((b) => b.kind + ':' + b.name).join(',');
     const run2 = State.state().endless.run;
     P.permanentCount = (run2.permanent || []).length;

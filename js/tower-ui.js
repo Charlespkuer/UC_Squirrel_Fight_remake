@@ -413,6 +413,27 @@
       if (!started.ok) { notice(started.msg); return; }
       fight('endless');
     });
+    /* 休整点：在页面上直接选增益 / 开关限次 / 选「要被替换掉的」永久增益。
+     * （这一段曾经在重排版面时被整块覆盖掉，导致点卡片没反应 —— 现在补回来。） */
+    p.querySelectorAll('[data-choice]').forEach((el) => {
+      el.onclick = () => {
+        const index = Number(el.dataset.choice);
+        const res = Tower.pickChoice('endless', index, replaceTarget);
+        if (res && res.needsReplace) { offerReplace(index, res.buff); return; }
+        if (!res || !res.ok) { notice((res && res.msg) || '这张选不了。'); openEndless(); return; }
+        replaceTarget = null;
+        openEndless();      // 选完直接回主界面（不弹任何窗口）
+      };
+    });
+    p.querySelectorAll('[data-toggle]').forEach((el) => {
+      el.onclick = () => { Tower.toggleLimited(el.dataset.toggle); openEndless(); };
+    });
+    p.querySelectorAll('[data-replace]').forEach((el) => {
+      el.onclick = () => {
+        replaceTarget = replaceTarget === el.dataset.replace ? null : el.dataset.replace;
+        openEndless();
+      };
+    });
     on(p, 'shop', () => openShop(true));
     p.querySelectorAll('[data-pill]').forEach((el) => {
       el.onclick = () => choosePill(el.dataset.pill);

@@ -135,7 +135,7 @@ async function main() {
     {
       const r = (sel) => { const el = document.querySelector(sel); if (!el) return null;
         const b = el.getBoundingClientRect(); return { top: Math.round(b.top), left: Math.round(b.left), h: Math.round(b.height) }; };
-      P.geo = { title: r('#ui .endless-title-row'), hp: r('#ui .endless-hp'), foes: r('#ui .endless-foes'), rules: [0,1,2,3] };
+      P.geo = { title: r('#ui .endless-title-row'), hp: r('#ui .endless-hp'), foes: r('#ui .endless-foes'), top: r('#ui .endless-topright') };
       const st = (sel, prop) => { const el = document.querySelector(sel); return el ? getComputedStyle(el)[prop] : null; };
       P.css = { titleMargin: st('#ui .endless-title-row', 'marginTop'), hpMargin: st('#ui .endless-hp', 'marginTop'), foesMargin: st('#ui .endless-foes', 'marginTop') };
     }

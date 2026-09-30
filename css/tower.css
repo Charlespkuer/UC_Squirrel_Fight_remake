@@ -636,3 +636,14 @@
 /* 第十三轮：血量与标题之间真正拉开（之前被 `.endless-left .tower-carry{margin:2px 0}` 顶掉了），
    标题因此单独留在顶部、血量在其下方留出呼吸空间 */
 .endless-left .tower-carry.endless-hp { margin: 22px 0 8px 44px; }
+
+/* 第十四轮：整块内容再上移（塔页专用板子上边距与内边距收紧），对手列再上提 */
+.classic-board.tower-board { top: 92px; padding-top: 2px; }
+.endless-foes { margin-top: 32px; }
+
+/* 主列拉满高度、内容从顶部开始（塔身仍然由 .tower-page 的 center 保持纵向居中） */
+.tower-main { align-self: stretch; }
+
+/* 顶栏再上提、对手列让出顶栏高度，二者不重叠 */
+.endless-topright { top: 0; }
+.endless-foes { margin-top: 46px; }

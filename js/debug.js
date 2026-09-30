@@ -41,7 +41,7 @@
     },
     {
       key: 'shortDay', label: '12 小时一天',
-      note: '一天视为 12 小时：中午 12 点也算新的一天。每日礼包、免费抽奖、金杯商店每日限兑、每日任务、天梯今日场次、弟子日供、师父踢人、真化次数、VIP 每日、挑战塔当天刷新的 boss 等，全部会在 12 点再刷一次',
+      note: '一天视为 12 小时：中午 12 点也算新的一天。每日礼包、免费抽奖、每日任务、天梯今日场次、弟子日供、师父踢人、真化次数、VIP 每日、挑战塔当天刷新的 boss 等，全部会在 12 点再刷一次（金杯商店的限兑是按周的，不受影响）',
       on() {
         if (!window.State || !State.state()) return;
         // 打开时如果已经是下午，日期键会直接跳到「第二天」——手动跑一次每日检查，
@@ -161,7 +161,7 @@
         S.dailyStatsDate = today;
         S.dailyWins = 0; S.dailyFails = 0;
         S.joinRankCount = 0;                       // 天梯赛今日已参赛场次
-        S.rankPurchaseDay = ''; S.rankPurchases = {};   // 金杯商店每日限兑
+        S.rankPurchaseWeek = ''; S.rankPurchases = {};  // 金杯商店每周限兑（第 3 项：按周重置）
         S.lotteryDate = today; S.lotteryFree = 1;  // 每日免费抽奖
         S.quests = null; S.dailyCounters = null;   // 每日任务：进度与领取状态清空，下次打开活动页重抽
         S.masterKickDate = '';                     // 师父今天又能让一名徒弟离开

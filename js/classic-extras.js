@@ -131,14 +131,38 @@
 
   let rankAttempt = null;
   const rankSunday = () => new Date(Date.now()).getDay() === 0;
-  /** \u91d1\u676f\u5546\u5e97\u6539\u6210\u6bcf\u5929\u5f00\u653e\uff0c\u5151\u6362\u6b21\u6570\u4e5f\u6309\u5929\u91cd\u7f6e\uff08\u539f\u6765\u662f\u5468\u65e5\u5f00\u653e + \u6bcf\u5468\u9650\u5151\uff09\u3002 */
+  /* 第 2 项：天梯匹配不再「永远贴着玩家等级 ±3」，而是**只跟金杯数挂钩**：
+   * 0 杯从 30 级档起步（天梯本来就是 30 级解锁），每 15 杯 +1 级，600 杯封顶到 70 级。
+   * 匹配到的实际等级在这个期望上做 ±4 的随机，但均值就是这条曲线，且永远不超过 70。
+   * 于是「杯数」就是天梯的进度条：低杯期对手软、攒杯后一路对上满级对手；
+   * 花金杯买商店奖励会降杯，也顺手降一点难度（原版攻略里金杯就是可花掉的货币）。 */
+  const RANK_LEVEL_BASE = 30, RANK_LEVEL_PER_CUP = 15, RANK_LEVEL_SPREAD = 4;
+  function rankFoeLevel(cups, cap) {
+    const top = Math.max(1, Math.min(State.MAX_PLAYER_LEVEL || 70, Number(cap) || 70));
+    const expect = RANK_LEVEL_BASE + Math.max(0, Number(cups) || 0) / RANK_LEVEL_PER_CUP;
+    const jitter = (Math.random() * 2 - 1) * RANK_LEVEL_SPREAD;
+    return Math.max(1, Math.min(top, Math.round(expect + jitter)));
+  }
+  /** 只算期望值（给界面提示/测试用，不带随机）。 */
+  function rankFoeExpectLevel(cups, cap) {
+    const top = Math.max(1, Math.min(State.MAX_PLAYER_LEVEL || 70, Number(cap) || 70));
+    return Math.max(1, Math.min(top, Math.round(RANK_LEVEL_BASE + Math.max(0, Number(cups) || 0) / RANK_LEVEL_PER_CUP)));
+  }
+  /* 第 3 项：兑换次数重新按**周**重置 —— 《攻略》原文「狂战套装，永久属性，每种每周只能购买一件」。
+   * 一周只能买 1 件，所以四项永久属性 + 狂战套装（以及 timesLimit=1 的卷轴）合计每周各 1 次；
+   * timesLimit = -1 的超级药丸不设上限。商店本身仍按天开放（这条是之前刻意保留的差异）。 */
+  function rankWeekKey() {
+    const d = new Date(Date.now());
+    d.setDate(d.getDate() - (d.getDay() + 6) % 7);      // 周一为一周起点
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
   function refreshRankShopDay() {
-    const s = State.state(), day = State.localDate();
-    if (s.rankPurchaseDay === day && s.rankPurchases && typeof s.rankPurchases === 'object' && !Array.isArray(s.rankPurchases)) return;
-    // \u65e7\u6863\u53ea\u6709\u6bcf\u5468\u6807\u8bb0\uff08rankPurchaseWeek\uff09\uff1a\u8fc1\u79fb\u5230\u6309\u5929\u91cd\u7f6e\uff0c\u7b2c\u4e00\u6b21\u6253\u5f00\u65f6\u6e05\u7a7a\u5373\u53ef\u3002
+    const s = State.state(), week = rankWeekKey();
+    if (s.rankPurchaseWeek === week && s.rankPurchases && typeof s.rankPurchases === 'object' && !Array.isArray(s.rankPurchases)) return;
+    // 旧档只有按天标记（rankPurchaseDay）：换成按周后第一次打开清空即可
     s.rankPurchases = {};
-    s.rankPurchaseDay = day;
-    if (s.rankPurchaseWeek !== undefined) delete s.rankPurchaseWeek;
+    s.rankPurchaseWeek = week;
+    if (s.rankPurchaseDay !== undefined) delete s.rankPurchaseDay;
     State.save();
   }
   function rank() {
@@ -155,7 +179,7 @@
       name: GData.AI_NAMES[n * 4], points: 1350 + n * 83, level: Math.min(cap, 34 + n * 6),
     }));
     entries.push({ name: s.name, points: s.integral, level: s.level, mine: true }); entries.sort((a, b) => b.points - a.points);
-    const p = C().page('challenge', 'arena', '<div class="extra-rank-layout"><div class="extra-rank-self">' + sprite(30) + '<h2>\u5929\u68af\u8d5b</h2><div class="extra-score">\u79ef\u5206 <b>' + s.integral + '</b></div><div class="extra-score">\u91d1\u676f <b>' + s.goldCup + '</b></div><p>\u4eca\u65e5\u5df2\u53c2\u8d5b ' + s.joinRankCount + ' / 20 \u573a<br>' + (rankSunday() ? '\u5468\u65e5\u4f11\u8d5b\uff08\u91d1\u676f\u5546\u5e97\u7167\u5e38\u5f00\u653e\uff09' : s.joinRankCount >= 20 ? '\u4eca\u65e5\u53c2\u8d5b\u6b21\u6570\u5df2\u7528\u5b8c' : s.joinRankCount < 10 ? '\u672c\u6b21\u514d\u8d39\uff0c\u524d10\u573a\u514d\u8d39' : '\u672c\u6b21\u6d88\u80175\u91d1\u677e\u679c') + '</p>' + button('\u5f00\u59cb\u5339\u914d', 'rank-fight', 'small gold') + button('\u91d1\u676f\u5546\u5e97', 'rank-shop', 'small') + '</div><div class="extra-rank-list"><h3>\u672c\u5730\u6a21\u62df\u6392\u884c\u699c</h3>' + entries.map((entry, i) => '<div class="extra-rank-row ' + (entry.mine ? 'mine' : '') + '"><span>' + (i + 1) + '</span><b>' + esc(entry.name) + (entry.mine ? '\uff08\u4f60\uff09' : '') + ' Lv' + (entry.level || 1) + '</b><strong>' + entry.points + '</strong></div>').join('') + note('\u5929\u68af\u8d5b\u5468\u4e00\u81f3\u5468\u516d\u8fdb\u884c\uff0c\u5468\u65e5\u4f11\u8d5b\uff1b\u91d1\u676f\u5546\u5e97\u6bcf\u5929\u5f00\u653e\u3002\u6bcf\u65e5\u6700\u591a20\u573a\uff0c\u524d10\u573a\u514d\u8d39\uff0c\u5176\u540e\u6bcf\u573a5\u91d1\u677e\u679c\u3002\u80dc\u5229\u5f973\u676f\uff0c\u843d\u8d25\u5f971\u676f\u3002\u79ef\u5206\u4e0e\u593a\u676f\u4e3a\u79bb\u7ebf\u6a21\u62df\uff1b\u83b7\u80dc\u670925%\u673a\u4f1a\u989d\u5916\u593a\u5f973\u676f\u3002') + '</div></div>', { cls: 'extra-board rank-extra-board' });
+    const p = C().page('challenge', 'arena', '<div class="extra-rank-layout"><div class="extra-rank-self">' + sprite(30) + '<h2>\u5929\u68af\u8d5b</h2><div class="extra-score">\u79ef\u5206 <b>' + s.integral + '</b></div><div class="extra-score">\u91d1\u676f <b>' + s.goldCup + '</b></div><div class="extra-score">\u5339\u914d\u6863\u4f4d <b>Lv' + rankFoeExpectLevel(s.goldCup) + '</b></div><p>\u4eca\u65e5\u5df2\u53c2\u8d5b ' + s.joinRankCount + ' / 20 \u573a<br>' + (rankSunday() ? '\u5468\u65e5\u4f11\u8d5b\uff08\u91d1\u676f\u5546\u5e97\u7167\u5e38\u5f00\u653e\uff09' : s.joinRankCount >= 20 ? '\u4eca\u65e5\u53c2\u8d5b\u6b21\u6570\u5df2\u7528\u5b8c' : s.joinRankCount < 10 ? '\u672c\u6b21\u514d\u8d39\uff0c\u524d10\u573a\u514d\u8d39' : '\u672c\u6b21\u6d88\u80175\u91d1\u677e\u679c') + '</p>' + button('\u5f00\u59cb\u5339\u914d', 'rank-fight', 'small gold') + button('\u91d1\u676f\u5546\u5e97', 'rank-shop', 'small') + '</div><div class="extra-rank-list"><h3>\u672c\u5730\u6a21\u62df\u6392\u884c\u699c</h3>' + entries.map((entry, i) => '<div class="extra-rank-row ' + (entry.mine ? 'mine' : '') + '"><span>' + (i + 1) + '</span><b>' + esc(entry.name) + (entry.mine ? '\uff08\u4f60\uff09' : '') + ' Lv' + (entry.level || 1) + '</b><strong>' + entry.points + '</strong></div>').join('') + note('\u5929\u68af\u8d5b\u5468\u4e00\u81f3\u5468\u516d\u8fdb\u884c\uff0c\u5468\u65e5\u4f11\u8d5b\uff1b\u91d1\u676f\u5546\u5e97\u6bcf\u5929\u5f00\u653e\u3002\u6bcf\u65e5\u6700\u591a20\u573a\uff0c\u524d10\u573a\u514d\u8d39\uff0c\u5176\u540e\u6bcf\u573a5\u91d1\u677e\u679c\u3002\u80dc\u5229\u5f973\u676f\uff0c\u843d\u8d25\u5f971\u676f\u3002\u79ef\u5206\u4e0e\u593a\u676f\u4e3a\u79bb\u7ebf\u6a21\u62df\uff1b\u83b7\u80dc\u670925%\u673a\u4f1a\u989d\u5916\u593a\u5f973\u676f\u3002\u5339\u914d\u5bf9\u624b\u7684\u7b49\u7ea7\u53ea\u8ddf\u91d1\u676f\u6570\u6302\u94a9\uff080 \u676f\u4ece 30 \u7ea7\u6863\u8d77\u6b65\u3001\u6bcf 15 \u676f +1 \u7ea7\u3001\u4e0a\u9650 70 \u7ea7\uff09\uff0c\u4e70\u5546\u5e97\u5956\u52b1\u82b1\u6389\u91d1\u676f\u4f1a\u8ba9\u5bf9\u624b\u53d8\u8f6f\u3002') + '</div></div>', { cls: 'extra-board rank-extra-board' });
     back(p, arena, '\u8fd4\u56de\u7ade\u6280\u573a');
     on(p, 'rank-shop', () => rankShop(0));
     const match = on(p, 'rank-fight', () => {
@@ -178,7 +202,7 @@
       if (s.goldPoint < fee) { alert('\u7b2c11\u81f320\u573a\u6bcf\u573a\u9700\u89815\u91d1\u677e\u679c\uff0c\u5f53\u524d\u91d1\u677e\u679c\u4e0d\u8db3\u3002'); return; }
       const attempt = { owner: s, date: State.localDate(), fee, settled: false };
       rankAttempt = attempt; s.joinRankCount++; s.goldPoint -= fee; State.save();
-      const foe = State.genAI(Math.max(1, s.level + Math.floor(Math.random() * 6) - 3));
+      const foe = State.genAI(rankFoeLevel(s.goldCup));   // 第 2 项：等级期望跟金杯数挂钩
       const interrupted = () => {
         if (attempt.settled || rankAttempt !== attempt || State.state() !== s) return;
         attempt.settled = true; rankAttempt = null;
@@ -207,7 +231,7 @@
     const goods = []; rankgoodsMap.each((id, item) => goods.push(item));
     const total = Math.ceil(goods.length / 6); pg = Math.max(0, Math.min(pg || 0, total - 1));
     const selected = goods.slice(pg * 6, pg * 6 + 6);
-    const p = C().page('bag', 'shop', '<div class="extra-shop-balance">\u91d1\u676f ' + s.goldCup + '\u3000\u91d1\u677e\u679c ' + s.goldPoint + '\u3000\u79ef\u5206 ' + s.integral + '</div><div class="extra-shop-grid">' + selected.map(item => '<button class="extra-shop-item" data-goods="' + item.id + '">' + (item.type === '2' ? image('images/classic/icons/gear-' + item.goodsId + '.png', item.name) : C().icon('prop', +item.goodsId)) + '<b>' + esc(item.name) + '</b><span>' + item.cup + '\u91d1\u676f + ' + item.gold + '\u91d1\u677e\u679c</span><small>\u79ef\u5206\u9700 ' + item.integral + (Number(item.timesLimit) > 0 ? ' \u00b7 \u6bcf\u65e5\u9650\u5151' + item.timesLimit + '\u6b21' + (s.rankPurchases[item.id] ? '\uff08\u4eca\u65e5\u5df2\u5151\uff09' : '') : '') + '</small></button>').join('') + '</div><div class="extra-pagination">' + button('\u4e0a\u4e00\u9875', 'rank-shop-prev', 'tiny muted') + '<span>' + (pg + 1) + '/' + total + '</span>' + button('\u4e0b\u4e00\u9875', 'rank-shop-next', 'tiny muted') + '</div>', { cls: 'extra-board extra-cup-shop' });
+    const p = C().page('bag', 'shop', '<div class="extra-shop-balance">\u91d1\u676f ' + s.goldCup + '\u3000\u91d1\u677e\u679c ' + s.goldPoint + '\u3000\u79ef\u5206 ' + s.integral + '</div><div class="extra-shop-grid">' + selected.map(item => '<button class="extra-shop-item" data-goods="' + item.id + '">' + (item.type === '2' ? image('images/classic/icons/gear-' + item.goodsId + '.png', item.name) : C().icon('prop', +item.goodsId)) + '<b>' + esc(item.name) + '</b><span>' + item.cup + '\u91d1\u676f + ' + item.gold + '\u91d1\u677e\u679c</span><small>\u79ef\u5206\u9700 ' + item.integral + (Number(item.timesLimit) > 0 ? ' \u00b7 \u6bcf\u5468\u9650\u5151' + item.timesLimit + '\u6b21' + (s.rankPurchases[item.id] ? '\uff08\u672c\u5468\u5df2\u5151\uff09' : '') : '') + '</small></button>').join('') + '</div><div class="extra-pagination">' + button('\u4e0a\u4e00\u9875', 'rank-shop-prev', 'tiny muted') + '<span>' + (pg + 1) + '/' + total + '</span>' + button('\u4e0b\u4e00\u9875', 'rank-shop-next', 'tiny muted') + '</div>', { cls: 'extra-board extra-cup-shop' });
     back(p, rank, '\u8fd4\u56de\u5929\u68af\u8d5b');
     on(p, 'rank-shop-prev', () => rankShop(Math.max(0, pg - 1)));
     on(p, 'rank-shop-next', () => rankShop(Math.min(total - 1, pg + 1)));
@@ -220,7 +244,7 @@
         if (s.integral < +item.integral) { alert('\u5929\u68af\u79ef\u5206\u5c1a\u672a\u8fbe\u5230\u5151\u6362\u8981\u6c42\u3002'); return; }
         if (s.goldCup < +item.cup || s.goldPoint < +item.gold) { alert('\u91d1\u676f\u6216\u91d1\u677e\u679c\u4e0d\u8db3\u3002'); return; }
         const bought = s.rankPurchases;
-        if (+item.timesLimit > 0 && (bought[item.id] || 0) >= +item.timesLimit) { alert('\u8be5\u5956\u52b1\u4eca\u65e5\u7684\u5151\u6362\u6b21\u6570\u5df2\u7528\u5b8c\uff0c\u660e\u5929\u53ef\u518d\u6b21\u5151\u6362\u3002'); return; }
+        if (+item.timesLimit > 0 && (bought[item.id] || 0) >= +item.timesLimit) { alert('\u8be5\u5956\u52b1\u672c\u5468\u7684\u5151\u6362\u6b21\u6570\u5df2\u7528\u5b8c\uff0c\u4e0b\u5468\u4e00\u91cd\u7f6e\u540e\u53ef\u518d\u5151\u6362\u3002'); return; }
         redeemed = true;
         s.goldCup -= +item.cup; s.goldPoint -= +item.gold;
         if (item.type === '2') State.addGear(+item.goodsId, State.randomExt(2)); else addProp(+item.goodsId, +item.count);
@@ -665,5 +689,6 @@
     }
   }
 
-  window.ClassicExtras = { arena, rank, rankShop: () => rankShop(0), lottery, master, toplist, vip, lotteryPrizes: prizes };
+  window.ClassicExtras = { arena, rank, rankShop: () => rankShop(0), lottery, master, toplist, vip, lotteryPrizes: prizes,
+    rankFoeLevel, rankFoeExpectLevel };
 })();

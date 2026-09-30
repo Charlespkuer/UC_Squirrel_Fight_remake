@@ -176,6 +176,19 @@ async function main() {
     const rankBtn = $$('#ui [data-action="arena-rank"], #ui [data-action="rank"]')[0] ||
       $$('#ui .uc-button').find((b) => /天梯赛/.test(b.textContent));
     if (rankBtn) { rankBtn.click(); await flush(300); }
+    const rankHtml = (document.querySelector('#ui .extra-rank-self') || {}).textContent || '';
+    P.rankTier = (rankHtml.match(/匹配档位\s*Lv(\d+)/) || [])[1] || null;
+    P.rankRule = /只跟金杯数挂钩/.test(document.body.textContent);
+    const shopBtn = $$('#ui [data-action="rank-shop"]')[0];
+    if (shopBtn) { shopBtn.click(); await flush(300); }
+    // 只看商店容器里的文字：整页 textContent 会把本探针脚本里的正则字面量也算进去
+    const shopBox = document.querySelector('#ui .extra-cup-shop') || document.querySelector('#ui .classic-page');
+    const shopText = shopBox ? shopBox.textContent : '';
+    P.shopWeekly = /每周限兑/.test(shopText);
+    P.shopDaily = /每日限兑|今日已兑/.test(shopText);
+    P.shopSample = shopText.replace(/\s+/g, ' ').trim().slice(0, 60);
+    const backBtn = $$('.classic-modal .uc-button, #ui .uc-button').find((b) => /返回天梯赛/.test(b.textContent));
+    if (backBtn) { backBtn.click(); await flush(250); }
     const match = $$('#ui [data-action="rank-fight"]')[0];
     P.rankPage = !!match;
     if (match) { match.click(); await flush(400); }

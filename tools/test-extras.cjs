@@ -285,6 +285,31 @@ test('天梯胜利夺杯为明确离线概率，失败不会夺杯', () => {
   g.c.ClassicExtras.rank(); g.click('rank-fight'); g.settle(1, 1); assert.equal(s.goldCup, 7);
 });
 
+test('第 2 项：天梯匹配等级只跟金杯数挂钩，70 级封顶', () => {
+  const g = setup(), s = g.c.State.state(); s.level = 30; s.joinRankCount = 0;
+  const E = g.c.ClassicExtras.rankFoeExpectLevel;
+  assert.equal(E(0), 30, '0 杯从 30 级档起步');
+  assert.equal(E(150), 40, '每 15 杯 +1 级');
+  assert.equal(E(600), 70, '600 杯到顶');
+  assert.equal(E(99999), 70, '封顶 70 级');
+  // 匹配到的实际等级围绕期望值抖动，且绝不超过 70
+  g.math.random = () => 0.5;
+  assert.equal(g.c.ClassicExtras.rankFoeLevel(150), 40, '随机取中值时正好等于期望');
+  const levels = [];
+  for (let i = 0; i < 40; i++) {
+    g.math.random = () => (i % 20) / 20;
+    const lv = g.c.ClassicExtras.rankFoeLevel(99999);
+    levels.push(lv);
+    assert.ok(lv <= 70 && lv >= 1, '等级在 1~70 内：' + lv);
+  }
+  assert.ok(Math.max(...levels) > 66 && Math.min(...levels) >= 66, '高杯时整体贴近满级：' + levels.slice(0, 5).join(','));
+  // 实战：匹配到的对手 level 就是这条曲线给的等级（不再贴玩家等级）
+  s.level = 30; s.goldCup = 1500; s.goldPoint = 100; s.integral = 2000;
+  g.math.random = () => 0.5;
+  g.c.ClassicExtras.rank(); g.click('rank-fight');
+  assert.equal(g.battles.at(-1).foe.level, 70, '高杯 + 30 级玩家也会匹配到满级对手');
+});
+
 test('天梯周一至周六比赛，金杯商店每天都能打开，跨日旧按钮仍重新校验', () => {
   const g = setup(), s = g.c.State.state(); s.level = 30;
   // 基准时间是周三（非周日）：商店照样能打开
@@ -298,7 +323,7 @@ test('天梯周一至周六比赛，金杯商店每天都能打开，跨日旧�
   g.click('rank-fight'); assert.equal(g.battles.length, 1);
 });
 
-test('金杯商店兑换校验积分与两种货币，不扣积分，每日限一件且次日重置', () => {
+test('金杯商店兑换校验积分与两种货币，不扣积分，每周限一件且下周一重置', () => {
   const g = setup(), s = g.c.State.state(); s.level = 30; s.integral = 1900; s.goldCup = 1000; s.goldPoint = 500;
   g.c.ClassicExtras.rank(); g.click('rank-shop'); g.click('rank-shop-next');
   const choose = () => g.page().querySelector('[data-goods="11"]').onclick();
@@ -306,26 +331,35 @@ test('金杯商店兑换校验积分与两种货币，不扣积分，每日限�
   s.integral = 2000; choose(); const confirm = g.modals.at(-1).buttons[0].run; confirm(); confirm();
   assert.equal(s.goldCup, 0); assert.equal(s.goldPoint, 300); assert.equal(s.gears[0].id, 201); assert.equal(s.rankPurchases[11], 1); assert.equal(s.integral, 2000);
   s.goldCup = 2000; choose(); g.modalClick(); assert.equal(s.gears.length, 1); assert.equal(s.goldPoint, 300);
-  assert.match(g.modals.at(-1).html, /今日的兑换次数已用完/);
+  assert.match(g.modals.at(-1).html, /本周的兑换次数已用完/);
   g.c.State.save(); g.c.State.load(); const loaded = g.c.State.state();
   g.c.ClassicExtras.rankShop(); g.click('rank-shop-next'); choose(); g.modalClick(); assert.equal(loaded.gears.length, 1);
+  // 第 3 项：限兑按**周**重置 —— 隔一天还不能买，隔一周才可以
   g.advance(86400000); g.c.ClassicExtras.rankShop(); g.click('rank-shop-next'); choose(); g.modalClick();
+  assert.equal(loaded.gears.length, 1, '第二天仍然买不了（每周限一件）');
+  assert.match(g.modals.at(-1).html, /本周的兑换次数已用完/);
+  g.advance(6 * 86400000); g.c.ClassicExtras.rankShop(); g.click('rank-shop-next'); choose(); g.modalClick();
   assert.equal(loaded.gears.length, 2); assert.equal(loaded.goldPoint, 100); assert.equal(loaded.goldCup, 1000); assert.equal(loaded.rankPurchases[11], 1);
   assertBalanced(g.markup);
 });
 
-test('金杯商店跨午夜：限兑按天重置，未标日期的旧购买计数在迁移时清空', () => {
+test('金杯商店跨周：限兑按周重置，未标周次的旧购买计数在迁移时清空', () => {
   const g = setup(), s = g.c.State.state(); s.level = 30; s.integral = 2000; s.goldCup = 4000; s.goldPoint = 1000;
   s.rankPurchases = { 11: 1 };   // 旧档只有计数、没有日期
   g.c.ClassicExtras.rankShop(); g.click('rank-shop-next');
-  assert.deepEqual(JSON.parse(JSON.stringify(s.rankPurchases)), {});   // 迁移到按天重置时清空
-  assert.equal(s.rankPurchaseDay, g.c.State.localDate());
+  assert.deepEqual(JSON.parse(JSON.stringify(s.rankPurchases)), {});   // 迁移到按周重置时清空
+  assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(s.rankPurchaseWeek), '记下本周周一：' + s.rankPurchaseWeek);
+  assert.equal(s.rankPurchaseDay, undefined, '旧的按天标记要删掉');
   g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick();
   assert.equal(s.gears.length, 1);
   g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick();
   assert.equal(s.gears.length, 1);
-  assert.match(g.modals.at(-1).html, /今日的兑换次数已用完/);
-  g.advance(86400000);                             // 第二天
+  assert.match(g.modals.at(-1).html, /本周的兑换次数已用完/);
+  g.advance(3 * 86400000);                         // 同一周内（周三 → 周六）
+  g.c.ClassicExtras.rankShop(); g.click('rank-shop-next');
+  g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick();
+  assert.equal(s.gears.length, 1, '同一周内不能再买');
+  g.advance(3 * 86400000);                         // 跨到下一周
   g.c.ClassicExtras.rankShop(); g.click('rank-shop-next');
   g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick();
   assert.equal(s.gears.length, 2);

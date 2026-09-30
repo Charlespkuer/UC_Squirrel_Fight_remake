@@ -142,14 +142,14 @@ test('普通商品每天每种5个，稀有1个，批量和重载均不能越额
   assert.equal(g.saved().shopPurchases[2],5); assert.equal(g.saved().shopPurchases[13],1);
 });
 
-test('午夜自动滚动限额，失败购买/礼包/持有数量不影响额度，金杯商店的按天限兑不被牵连', () => {
-  const g=setup(),s=g.s(); s.goldPoint=0; s.rankPurchases={11:1}; s.rankPurchaseDay='2026-09-23';
+test('午夜自动滚动限额，失败购买/礼包/持有数量不影响额度，金杯商店的按周限兑不被牵连', () => {
+  const g=setup(),s=g.s(); s.goldPoint=0; s.rankPurchases={11:1}; s.rankPurchaseWeek='2026-09-21';
   assert.equal(g.State.buyProp(2).ok,false); assert.equal(g.State.purchaseStatus(2).bought,0);
   s.goldPoint=1000; s.props[2]=999; g.State.buyProp(2,5);
   const date=g.State.purchaseStatus(2).date; g.advance(120000);
   assert.notEqual(g.State.purchaseStatus(2).date,date); assert.equal(g.State.purchaseStatus(2).remaining,5);
   assert.equal(g.State.buyProp(2,5).ok,true); assert.equal(s.props[2],1009);
-  same(s.rankPurchases,{11:1}); assert.equal(s.rankPurchaseDay,'2026-09-23');
+  same(s.rankPurchases,{11:1}); assert.equal(s.rankPurchaseWeek,'2026-09-21');
   assert.equal(g.State.purchaseStatus(16).buyable,false); assert.equal(g.State.buyProp(16).ok,false);
 });
 
@@ -337,7 +337,7 @@ test('橙装：3件同部位紫装融合为该部位随机传说，宝石免费�
   const fused = g.State.mergeGears(keys);
   assert.equal(fused.ok, true); assert.equal(fused.gear.orange, true); assert.equal(fused.gear.quality, 4);
   assert.equal(g.State.gearPart(fused.gear.id), 1, '产物是同部位（手套，材料是 202 狂战拳甲）');
-  assert.equal(g.State.gearQuality(fused.gear.id), 3, '底子仍是卓越品质，橙色是实例级');
+  assert.equal(g.State.gearPartQuality(fused.gear.id), 3, '底子仍是卓越品质，橙色是实例级');
   assert.equal(fused.gear.ext[0].level, 2, '继承材料词条');
   assert.equal(g.State.mergeGems(101).ok, false);
   // 镶嵌

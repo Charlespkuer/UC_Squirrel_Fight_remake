@@ -232,6 +232,21 @@ test('每日任务计数：合成/融合装备、宝石、使用/购买/卖出�
   s.props[24] = 20; s.goldPoint = 1000;
   assert.equal(S.composeGear(24).ok, true);
   assert.equal(c('merge'), 1, '碎片合成装备要计入 merge');
+  // 装备回收价按品质分档：白 55-60 / 绿 60-65 / 蓝 65-70 / 紫 70-75 / 橙 75-80
+  // （回归：gearQuality 曾被同名的「按 id 取品质」函数顶掉，紫装一路掉到 55-60）
+  for (let q = 0; q <= 4; q++) {
+    const [lo, hi] = S.gearSellRange(q);
+    assert.equal(lo, 55 + q * 5, '第 ' + q + ' 档下限');
+    assert.equal(hi, 60 + q * 5, '第 ' + q + ' 档上限');
+  }
+  {
+    const purple = S.addGear(202);            // 狂战拳甲：卓越（紫）
+    const before = s.goldPoint;
+    const paid = S.sellGear(purple.key);
+    assert.ok(paid >= 70 && paid <= 75, '紫装回收价应落在 70-75，实际 ' + paid);
+    assert.equal(s.goldPoint, before + paid, '卖价真的入账');
+  }
+
   // 3 件同部位同品质装备融合 → merge（第 2 项：允许不同名，产物是该部位随机装备）
   const trio = [S.addGear(21), S.addGear(25), S.addGear(29)];
   s.goldPoint = 1000;

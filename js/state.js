@@ -1174,7 +1174,10 @@
     const def = gearMap.getValue(id);
     return def ? Number(def.type) : -1;
   }
-  function gearQuality(id) {
+  /** 注意：这是「按装备 id 取图鉴品质」，和下面按**实例**取品质的 gearQuality 不是一回事
+   *  —— 两个同名函数并存过一次，函数声明提升让 sellGear 拿到了这个 id 版，
+   *  于是所有紫装的回收价都掉到白装档（55~60）。改名成 gearPartQuality 后不再冲突。 */
+  function gearPartQuality(id) {
     const def = gearMap.getValue(id);
     const set = def ? gearSetMap.getValue(parseInt(def.setId)) : null;
     return set ? parseInt(set.quality) : -1;
@@ -1182,7 +1185,7 @@
   /** 某部位 + 某品质的全部装备 id（融合产物从这里随机取一件）。 */
   function gearIdsOf(part, quality) {
     const out = [];
-    gearMap.each((k, v) => { if (Number(v.type) === Number(part) && gearQuality(parseInt(v.id)) === Number(quality)) out.push(parseInt(v.id)); });
+    gearMap.each((k, v) => { if (Number(v.type) === Number(part) && gearPartQuality(parseInt(v.id)) === Number(quality)) out.push(parseInt(v.id)); });
     return out;
   }
   function mergeGears(keys) {
@@ -1192,10 +1195,10 @@
     if (gs.some((g) => g.used)) return { ok: false, msg: '不能融合已穿戴的装备' };
     if (S.goldPoint < 50) return { ok: false, msg: '融合费用不足（50金松果）' };
     if (gs.some((g) => g.orange)) return { ok: false, msg: '传说装备已是最高品质' };
-    const part = gearPart(gs[0].id), q = gearQuality(gs[0].id);
+    const part = gearPart(gs[0].id), q = gearPartQuality(gs[0].id);
     if (part < 0) return { ok: false, msg: '装备数据异常' };
     if (gs.some((g) => gearPart(g.id) !== part)) return { ok: false, msg: '需要三件同部位的装备' };
-    if (gs.some((g) => gearQuality(g.id) !== q)) return { ok: false, msg: '需要三件同品质的装备' };
+    if (gs.some((g) => gearPartQuality(g.id) !== q)) return { ok: false, msg: '需要三件同品质的装备' };
     const partName = ['头巾', '手套', '衣服', '鞋子'][part] || '装备';
     if (q >= 3) {
       // 3 件同部位紫装 → 该部位随机一件橙装（传说），继承三件材料中各词条的最高星级
@@ -2311,7 +2314,7 @@
   /** 调试开关「12 小时一天」：打开后一天只有 12 小时，过了中午就算第二天。 */
   function shortDay() { return !!(window.Debug && window.Debug.enabled && window.Debug.enabled('shortDay')); }
   /* 打开「12 小时一天」时，12:00 起换成「第二天」的日期键，于是每日礼包、免费抽奖、
-   * 金杯商店每日限兑、每日任务、天梯今日场次、弟子日供、师父踢人、真化次数、
+   * 每日任务、天梯今日场次、弟子日供、师父踢人、真化次数、
    * VIP 每日、挑战塔当天刷新的 boss 等**所有每日刷新在 0 点与 12 点各来一次**。
    * 格式仍是 YYYY-MM-DD（存档校验 validLocalDate、earnOn 按日期查表都依赖它）。 */
   function localDate() {
@@ -2619,7 +2622,7 @@
     gainExp, consumeEnergy, tickPropStates, fightReward, revengeReward, markRevenged, REVENGE_EXP_RATIO, expBoostPct, gainExpWithBoost,
     // 师徒
     apprenticeCap, learnSkill, setMaster, clearMaster, addPrentice, removePrentice,
-    gearPart, gearQuality, gearIdsOf,
+    gearPart, gearPartQuality, gearIdsOf,
     apprenticeDailyExp, apprenticeDailyGold, apprenticeDailyTotal, apprenticeDailyStatus,
     apprenticeLevelSum, apprenticeTributeRatio, claimApprenticeExp, canKickToday, kickPrentice,
     beginRecruitChallenge, finishRecruitChallenge, cancelRecruitChallenge,

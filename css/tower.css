@@ -679,3 +679,10 @@
 .tower-shop { max-height: 100%; overflow-y: auto; padding-right: 6px; }
 .tower-shop::-webkit-scrollbar { width: 10px; }
 .tower-shop::-webkit-scrollbar-thumb { background: #c9a468; border-radius: 6px; }
+
+/* 已战胜的对手：整体压暗、立绘去饱和，加一个绿色的「已战胜」标记 */
+.tower-plan.vertical li.beaten { background: rgba(238, 240, 224, .72); border-color: #b9c9a0; }
+.tower-plan.vertical li.beaten .foe-portrait { filter: grayscale(.85) brightness(.96); }
+.tower-plan.vertical li.beaten > b { color: #7d8a63; }
+.beaten-tag { grid-column: 2; grid-row: 3; justify-self: center; font-style: normal; font-size: 16px;
+  color: #4f7a2a; background: #e6f3d6; border: 2px solid #a9c98a; border-radius: 10px; padding: 0 8px; }

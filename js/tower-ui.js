@@ -351,11 +351,15 @@
        * 「当前遭遇的机制」下面直接跟已获得的增益（永久 / 限次），保证一屏看完不用下翻；
        * 本层对手缩成右侧竖排 1/2/3/4。 */
       const foes = Tower.preview(run.layer);   // 与 buildPlan 同源（run.plan 快照在页面重绘时可能还没刷新）
+      /* 第 2 项：打过的对手在右列留下「已战胜」的标记（本层内 idx 之前的都算） */
+      const beatenCount = Math.max(0, (run.battleNo || 1) - 1);
       const foeRows = foes.map((b, i) =>
-        '<li class="' + (b.elite ? 'elite' : '') + (b.squirrel ? ' squirrel' : '') + '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
+        '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel ' : '') + (i < beatenCount ? 'beaten' : '') +
+        '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
         foePortraitHtml(i, b) +
         '<b>' + esc(b.name) + '</b>' + (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
-        (b.elite ? '<em class="elite-tag">精英</em>' : '') + '</li>').join('');
+        (b.elite ? '<em class="elite-tag">精英</em>' : '') +
+        (i < beatenCount ? '<em class="beaten-tag">✓ 已战胜</em>' : '') + '</li>').join('');
       const choicesHtml = run.choices
         ? '<div class="tower-buffs choice-onpage"><h4>休整点 · 选一张带走</h4><div class="hex-row">' +
           run.choices.map((c, i) => choiceCard(c, i)).join('') + '</div></div>' : '';

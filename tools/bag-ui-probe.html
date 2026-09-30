@@ -176,6 +176,8 @@ async function main() {
       P.planDebug = { keys: Object.keys(di.run || {}), planLen: di.run && di.run.plan ? di.run.plan.length : null,
         rawPlanLen: (State.state().endless.run.plan || []).length };
     }
+    P.beatenRows = $$('#ui .tower-plan.vertical li.beaten').length;
+    P.beatenTags = $$('#ui .beaten-tag').length;
     P.restChoiceCards = $$('#ui .choice-onpage [data-choice]').length;
     P.restLabels = $$('#ui .choice-onpage .hex-name').map((el) => el.textContent.trim());
     // 拿一张永久增益，再把永久格子填满、看替换提示

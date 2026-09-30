@@ -576,3 +576,27 @@
   border: 2px solid #e2c68f; border-radius: 12px; }
 .tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 78px; height: 78px; width: auto; max-width: 104px; }
 .tower-plan.vertical li { padding: 4px 10px; }
+
+/* 第八轮微调 */
+/* 1) 力敏速：缩小、水平并排，放在试炼币左边 */
+.endless-topright .pill-slots { display: flex; flex-direction: row; align-items: center; gap: 5px; margin: 0 4px 0 0; }
+.endless-topright .pill-slot { width: 34px; height: 34px; border-width: 2px; }
+.endless-topright .pill-slot img { width: 17px; height: 17px; }
+.endless-topright .pill-slot i { font-size: 11px; }
+.endless-topright .pill-slot b { font-size: 12px; }
+.endless-topright .pill-slots .pill-slot:first-child { grid-column: auto; }
+.endless-left .pill-slots, .endless-actions .pill-slots { display: none; }
+/* 2) 塔身图像往下一点（原来看起来偏上没居中） */
+.tower-visual { margin-top: 10px; }
+/* 3) 血量：左端空两格（不与「无尽模式」对齐），纵向间距略放大 */
+.endless-hp { margin: 6px 0 8px 44px; }
+.endless-hp .tower-carry-bar { width: 190px; height: 18px; }
+/* 4) 对手：立绘略缩，类型标签挪到名字下面（格子内竖排，不横向溢出） */
+.tower-plan.vertical li { display: grid; grid-template-columns: auto auto 1fr; grid-template-rows: auto auto;
+  gap: 0 8px; align-items: center; padding: 3px 10px; }
+.tower-plan.vertical li > .tower-plan-no { grid-column: 1; grid-row: 1 / span 2; }
+.tower-plan.vertical li > .foe-portrait { grid-column: 2; grid-row: 1 / span 2; width: 90px; height: 70px; }
+.tower-plan.vertical li > .foe-portrait img, .tower-plan.vertical li > .foe-portrait canvas { max-height: 66px; height: 66px; max-width: 86px; }
+.tower-plan.vertical li > b { grid-column: 3; grid-row: 1; justify-self: start; }
+.tower-plan.vertical li > .tower-plan-type { grid-column: 3; grid-row: 2; justify-self: start; }
+.tower-plan.vertical li > .elite-tag { grid-column: 3; grid-row: 3; justify-self: start; }

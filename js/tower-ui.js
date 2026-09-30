@@ -363,7 +363,7 @@
        * 血量紧贴标题下方（分数已经挪进顶栏，所以这里整体上提），字号与血条都放大一档；
        * 「继续战斗」在右下角，「放弃本局」更小、压在它左边偏下。 */
       main = '<div class="endless-run">' +
-        '<div class="endless-topright">' + currencyHtml('endless') +
+        '<div class="endless-topright">' + pillSlotsHtml(run.pillSlots) + currencyHtml('endless') +
         '<span class="endless-score-box"><i>分数</i><b>' + run.score + '</b></span></div>' +
         '<div class="endless-left">' +
         '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
@@ -372,7 +372,7 @@
         '<div class="tower-rule mech-bar"><b>当前遭遇的机制</b>' + (info.mechs && info.mechs.length
           ? info.mechs.map((m) => '<span class="mech-chip">' + esc(MECH_NAME[m] || m) + '<i>' + esc(MECH_DESC[m] || '') + '</i></span>').join('')
           : '<span class="mech-none">本段没有额外机制（第 1 段）</span>') + '</div>' +
-        buffPanelsHtml('endless') + choicesHtml + pillSlotsHtml(run.pillSlots) + '</div>' +
+        buffPanelsHtml('endless') + choicesHtml + '</div>' +
         '<div class="endless-foes">' +
         '<ol class="tower-plan vertical">' + foeRows + '</ol></div></div>' +
         '<div class="endless-actions tower-actions">' +

@@ -353,7 +353,7 @@
       const foes = Tower.preview(run.layer);   // 与 buildPlan 同源（run.plan 快照在页面重绘时可能还没刷新）
       const foeRows = foes.map((b, i) =>
         '<li class="' + (b.elite ? 'elite' : '') + (b.squirrel ? ' squirrel' : '') + '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
-        '<span class="tower-plan-no">' + (i + 1) + '</span>' + foePortraitHtml(i, b) +
+        foePortraitHtml(i, b) +
         '<b>' + esc(b.name) + '</b>' + (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
         (b.elite ? '<em class="elite-tag">精英</em>' : '') + '</li>').join('');
       const choicesHtml = run.choices

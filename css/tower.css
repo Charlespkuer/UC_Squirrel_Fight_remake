@@ -600,3 +600,14 @@
 .tower-plan.vertical li > b { grid-column: 3; grid-row: 1; justify-self: start; }
 .tower-plan.vertical li > .tower-plan-type { grid-column: 3; grid-row: 2; justify-self: start; }
 .tower-plan.vertical li > .elite-tag { grid-column: 3; grid-row: 3; justify-self: start; }
+
+/* 第九轮：立绘框回方形、名字缩小、介绍框右移留白、去掉序号列 */
+.tower-plan.vertical li { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto auto;
+  gap: 0 10px; align-items: center; padding: 3px 10px; }
+.tower-plan.vertical li > .tower-plan-no { display: none; }
+.tower-plan.vertical li > .foe-portrait { grid-column: 1; grid-row: 1 / span 3; width: 74px; height: 74px; }
+.tower-plan.vertical li > .foe-portrait img, .tower-plan.vertical li > .foe-portrait canvas { max-height: 66px; height: 66px; max-width: 66px; }
+.tower-plan.vertical li > b { grid-column: 2; grid-row: 1; font-size: 19px; }
+.tower-plan.vertical li > .tower-plan-type { grid-column: 2; grid-row: 2; }
+.tower-plan.vertical li > .elite-tag { grid-column: 2; grid-row: 3; }
+.endless-foes { margin-left: 16px; }

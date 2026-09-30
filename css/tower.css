@@ -527,3 +527,14 @@
 .endless-foes .pill-slot { width: 40px; height: 40px; }
 .endless-foes .pill-slot img { width: 19px; height: 19px; }
 .endless-foes .pill-slots { gap: 2px 5px; }
+
+/* 第六轮：纵向显示区域放大（塔页专用，不动其它页）+ 药丸槽移到左下角 */
+.classic-board.tower-board { top: 100px; padding: 6px 32px 4px; }
+.endless-actions { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 10px 6px 0 0; }
+.endless-action-btns { display: flex; align-items: flex-end; gap: 12px; }
+.endless-actions .pill-slots { display: grid; grid-template-columns: repeat(2, auto); justify-items: center; align-items: center;
+  gap: 4px 8px; margin: 0 0 0 4px; }
+.endless-actions .pill-slots .pill-slot:first-child { grid-column: 1 / span 2; }
+.endless-actions .pill-slot { width: 46px; height: 46px; }
+.endless-actions .pill-slot img { width: 22px; height: 22px; }
+.endless-foes .pill-slots { display: none; }

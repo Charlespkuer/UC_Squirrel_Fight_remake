@@ -267,8 +267,10 @@
     // 下一个里程碑（5 的倍数层 / 10 的倍数层）提示，让玩家知道还有几层到商店或精英
     const next5 = Math.ceil((layer + 0.0001) / 5) * 5;
     const toElite = next5 % 10 === 0;
-    const caption = (mode === 'tower' ? '已通关 ' + maxLayer + ' 层' : '本局第 ' + layer + ' 层') +
-      '<br><span class="tower-caption-hint">再 ' + (next5 - layer) + ' 层是' + (toElite ? '第 ' + next5 + ' 层精英' : '第 ' + next5 + ' 层') + '</span>';
+    // 第 1 项：无尽塔只留「本局第 N 层」，不再写「再 X 层是第 Y 层」
+    const caption = mode === 'tower'
+      ? '已通关 ' + maxLayer + ' 层' + '<br><span class="tower-caption-hint">再 ' + (next5 - layer) + ' 层是' + (toElite ? '第 ' + next5 + ' 层精英' : '第 ' + next5 + ' 层') + '</span>'
+      : '本局第 ' + layer + ' 层';
     return '<div class="tower-visual" aria-label="塔层进度"><div class="tower-floors">' + floors + '</div>' +
       '<div class="tower-visual-caption">' + caption + '</div></div>';
   }
@@ -369,11 +371,13 @@
           ? info.mechs.map((m) => '<span class="mech-chip">' + esc(MECH_NAME[m] || m) + '<i>' + esc(MECH_DESC[m] || '') + '</i></span>').join('')
           : '<span class="mech-none">本段没有额外机制（第 1 段）</span>') + '</div>' +
         buffPanelsHtml('endless') + choicesHtml + '</div>' +
-        '<div class="endless-foes">' + pillSlotsHtml(run.pillSlots) +
+        '<div class="endless-foes">' +
         '<ol class="tower-plan vertical">' + foeRows + '</ol></div></div>' +
         '<div class="endless-actions tower-actions">' +
+        pillSlotsHtml(run.pillSlots) +
+        '<span class="endless-action-btns">' +
         C().btn('放弃本局', 'abandon', 'muted tiny') +
-        C().btn(nextLabel, 'fight', 'gold') + '</div>';
+        C().btn(nextLabel, 'fight', 'gold') + '</span></div>';
     } else {
       main = '<h2 class="tower-title">无尽模式</h2>' +
         '<div class="tower-stats">历史最高 <b class="gold-text">' + info.best + '</b> 分 · 本周最高 ' + info.weekBest + ' 分 · 最深 ' + info.bestLayer + ' 层</div>' +

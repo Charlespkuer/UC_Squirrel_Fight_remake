@@ -621,3 +621,9 @@
 .tower-plan.vertical li > b { justify-self: center; text-align: center; }
 .tower-plan.vertical li > .tower-plan-type { justify-self: center; }
 .tower-plan.vertical li > .elite-tag { justify-self: center; }
+
+/* 第十一轮：标题下移并与血量拉开间距；塔身整体纵向居中 */
+.endless-title-row { margin-top: 12px; }
+.endless-hp { margin-top: 12px; }
+.tower-page { align-items: center; }
+.tower-visual { margin-top: 0; }

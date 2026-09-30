@@ -538,3 +538,41 @@
 .endless-actions .pill-slot { width: 46px; height: 46px; }
 .endless-actions .pill-slot img { width: 22px; height: 22px; }
 .endless-foes .pill-slots { display: none; }
+
+/* 第七轮：塔身去掉底部那层「底座」阴影、整体上提；对手列往中间并放大；
+   货币贴右上边缘并下移；按钮固定在右下角不随滚动。 */
+.tower-visual { box-shadow: inset 0 0 26px rgba(0, 0, 0, .55), inset 0 3px 0 rgba(255, 255, 255, .10); margin-top: -2px; }
+.tower-page { align-items: flex-start; }
+.endless-run { grid-template-columns: minmax(0, 1fr) 268px; }
+.endless-foes { margin-right: 34px; }
+.tower-plan.vertical li { padding: 3px 10px; gap: 8px; }
+.tower-plan.vertical .foe-portrait { width: 72px; height: 72px; }
+.tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 72px; }
+.tower-plan.vertical li b { font-size: 22px; }
+.tower-plan.vertical .tower-plan-no { width: 28px; height: 28px; font-size: 17px; }
+/* 货币+分数：贴页面右上边缘、下移一点 */
+.endless-topright { position: absolute; top: 14px; right: 12px; display: inline-flex; align-items: center; gap: 12px; }
+.endless-title-row .endless-topright { position: static; }
+/* 底部按钮固定右下角，不随滚动 */
+.endless-actions { position: absolute; right: 16px; bottom: 10px; margin: 0; display: flex; align-items: flex-end; justify-content: space-between; width: auto; gap: 18px; }
+.tower-page.has-footer .tower-main { padding-bottom: 66px; }
+.endless-actions .uc-button[data-action="fight"] { min-height: 58px; font-size: 30px; padding: 5px 26px; }
+.endless-actions .uc-button[data-action="abandon"] { min-height: 40px; font-size: 21px; }
+.endless-actions .pill-slots { position: absolute; left: 0; bottom: 0; }
+
+/* 收口：货币贴右上且不压对手（对手列整体下移）；左列底部药丸槽；对手立绘给足尺寸 */
+.endless-foes { margin-top: 62px; margin-right: 30px; }
+.tower-plan.vertical .foe-portrait { width: 88px; height: 66px; overflow: visible; }
+.tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { width: 100%; height: 100%; max-height: 66px; object-fit: contain; }
+.endless-left .pill-slots { display: grid; grid-template-columns: repeat(2, auto); justify-items: center; align-items: center;
+  gap: 4px 8px; margin: 6px 0 0 2px; }
+.endless-left .pill-slots .pill-slot:first-child { grid-column: 1 / span 2; }
+.endless-left .pill-slot { width: 46px; height: 46px; }
+.endless-left .pill-slot img { width: 22px; height: 22px; }
+.endless-actions .pill-slots { display: none; }
+
+/* 对手立绘：再放大一档，并加浅色底衬让立绘卡在奶油底上更清楚 */
+.tower-plan.vertical .foe-portrait { width: 108px; height: 82px; background: rgba(255, 248, 230, .9);
+  border: 2px solid #e2c68f; border-radius: 12px; }
+.tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 78px; height: 78px; width: auto; max-width: 104px; }
+.tower-plan.vertical li { padding: 4px 10px; }

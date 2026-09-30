@@ -152,6 +152,31 @@ async function main() {
     P.needsScroll = (() => { const el = document.querySelector('#ui .tower-main'); return el ? el.scrollHeight > el.clientHeight : null; })();
     P.done = true; P.errors = window.__errs.slice(); return;
   }
+  if (batch === 'shop') {
+    for (let id = 1; id <= 18; id++) S.stages[id] = { npcIndex: 3, passed: true };
+    S.level = 70; State.save();
+    Tower.startEndlessRun();
+    Main.startBattle = (foe, opts) => { if (opts && opts.onEnd) opts.onEnd(0, { hpAfter: [1, 0], maxHp: [1, 1], rounds: [] }); return Promise.resolve(); };
+    for (let i = 0; i < 40; i++) {
+      const r = State.state().endless.run;
+      if (!r) break;
+      if (r.phase === 'shop') break;
+      if (r.choices) { Tower.pickChoice('endless', 0); TowerUI.openEndless(); await flush(120); continue; }
+      if (r.phase === 'checkpoint') { Tower.continueEndless(); continue; }
+      const btn = $$('#ui [data-action="fight"]')[0];
+      if (!btn) { TowerUI.openEndless(); await flush(150); continue; }
+      btn.click(); await flush(160);
+      const again = $$('.classic-modal .uc-button').find((b) => /继续|下一场|先选一张/.test(b.textContent));
+      if (again) { again.click(); await flush(160); }
+    }
+    TowerUI.openEndless(); await flush(260);
+    P.shopPhase = State.state().endless.run.phase;
+    P.beatenRows = $$('#ui .tower-plan.vertical li.beaten').length;
+    P.foeRows = $$('#ui .tower-plan.vertical li').length;
+    P.finished = State.state().endless.run.finished;
+    P.mainFit = (() => { const el = document.querySelector('#ui .tower-main'); return el ? el.scrollHeight <= el.clientHeight : null; })();
+    P.done = true; P.errors = window.__errs.slice(); return;
+  }
   /* 第 1 项：休整点改在无尽主界面（战斗 3 场后在页面上选增益 / 开关限次） */
   if (batch === 'rest') {
     for (let id = 1; id <= 18; id++) S.stages[id] = { npcIndex: 3, passed: true };

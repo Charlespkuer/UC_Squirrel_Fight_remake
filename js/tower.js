@@ -605,6 +605,8 @@
   function layerClear(mode, run, out) {
     out.layerComplete = true;
     out.layer = run.layer;
+    // 本层已全清：留一份快照，主界面在商店/结算点阶段仍能看到「最后一个敌人 已战胜」
+    if (mode === 'endless') run.finished = { layer: run.layer, count: run.plan.length, at: Date.now() };
     if (mode === 'tower') {
       const gold = run.pot;
       State.addGold(gold);
@@ -990,6 +992,7 @@
         // 第 1 项：本段怪物带的机制（按段轮转，最多 3 个）
         mechs: D().endlessMechs(e.run.layer).slice(),
         restShopUsed: !!e.run.restShopUsed,
+        finished: e.run.finished || null,
         pillSlots: Object.assign({}, e.run.pillSlots || {}),
         ticketsIfSettle: D().endlessTickets(e.run.layer) } : null };
   }

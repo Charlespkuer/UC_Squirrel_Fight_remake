@@ -686,3 +686,13 @@
 .tower-plan.vertical li.beaten > b { color: #7d8a63; }
 .beaten-tag { grid-column: 2; grid-row: 3; justify-self: center; font-style: normal; font-size: 16px;
   color: #4f7a2a; background: #e6f3d6; border: 2px solid #a9c98a; border-radius: 10px; padding: 0 8px; }
+
+/* 第 3 项：右侧标签再缩一号，5 个对手也放得下 */
+.tower-plan.vertical .tower-plan-type { font-size: 14px; padding: 0 6px; }
+.beaten-tag { font-size: 13px; padding: 0 6px; border-width: 1px; }
+.tower-plan.vertical .elite-tag { font-size: 13px; }
+.tower-plan.vertical li { row-gap: 3px; padding: 2px 8px; }
+.tower-plan.vertical .foe-portrait { width: 66px; height: 66px; }
+.tower-plan.vertical li > .foe-portrait img, .tower-plan.vertical li > .foe-portrait canvas { max-height: 60px; height: 60px; max-width: 60px; }
+/* 商店离开键（继续挑战）放大 */
+.page-footer > .uc-button[data-action="leave"] { min-height: 78px; font-size: 40px; min-width: 320px; }

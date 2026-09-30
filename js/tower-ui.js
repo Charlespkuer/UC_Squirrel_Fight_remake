@@ -351,8 +351,11 @@
        * 「当前遭遇的机制」下面直接跟已获得的增益（永久 / 限次），保证一屏看完不用下翻；
        * 本层对手缩成右侧竖排 1/2/3/4。 */
       const foes = Tower.preview(run.layer);   // 与 buildPlan 同源（run.plan 快照在页面重绘时可能还没刷新）
-      /* 第 2 项：打过的对手在右列留下「已战胜」的标记（本层内 idx 之前的都算） */
-      const beatenCount = Math.max(0, (run.battleNo || 1) - 1);
+      /* 第 2 项：打过的对手在右列留下「已战胜」的标记。
+       * 本层内 = idx 之前的；若本层已通关（商店/结算点阶段），整层都算已战胜，
+       * 这样「最后一个敌人」也能看到已战胜的状态。 */
+      const clearing = (run.phase === 'shop' || run.phase === 'checkpoint') && run.finished && run.finished.layer === run.layer;
+      const beatenCount = clearing ? foes.length : Math.max(0, (run.battleNo || 1) - 1);
       const foeRows = foes.map((b, i) =>
         '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel ' : '') + (i < beatenCount ? 'beaten' : '') +
         '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
@@ -679,7 +682,7 @@
       '</div>';
     const p = C().page('challenge', 'stages', content, {
       cls: 'tower-board',
-      right: '<span class="footer-right">' + C().btn(revisit ? '返回' : '离开商店，进入结算', 'leave', 'gold small') + '</span>',
+      right: '<span class="footer-right">' + C().btn(revisit ? '返回' : '继续挑战', 'leave', 'gold') + '</span>',
     });
     back(p, () => openEndless());   // 第 2 项：返回键统一回无尽塔主界面
     shop.slots.forEach((s, i) => on(p, 'buy' + i, () => {

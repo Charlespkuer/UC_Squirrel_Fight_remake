@@ -647,3 +647,8 @@
 /* 顶栏再上提、对手列让出顶栏高度，二者不重叠 */
 .endless-topright { top: 0; }
 .endless-foes { margin-top: 46px; }
+
+/* 第十五轮：这一排整体往下一点（标题、顶栏、对手列各下移约 10px） */
+.endless-title-row { margin-top: 10px; }
+.endless-topright { top: 10px; }
+.endless-foes { margin-top: 58px; }

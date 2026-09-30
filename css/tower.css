@@ -632,3 +632,7 @@
 .endless-title-row { margin-top: 0; }
 .endless-hp { margin-top: 24px; }
 .endless-foes { margin-top: 42px; }
+
+/* 第十三轮：血量与标题之间真正拉开（之前被 `.endless-left .tower-carry{margin:2px 0}` 顶掉了），
+   标题因此单独留在顶部、血量在其下方留出呼吸空间 */
+.endless-left .tower-carry.endless-hp { margin: 22px 0 8px 44px; }

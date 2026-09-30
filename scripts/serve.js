@@ -104,7 +104,8 @@ http.createServer((req, res) => {
     if (err) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); res.end('404 ' + rel); return; }
     res.writeHead(200, {
       'content-type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
-      'cache-control': 'no-cache',
+      // no-store：开发期改完 CSS/JS 一刷新就是新的（no-cache 在部分浏览器里仍会拿旧文件）
+      'cache-control': 'no-store, must-revalidate',
     });
     res.end(data);
   });

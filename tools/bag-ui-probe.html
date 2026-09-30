@@ -132,6 +132,13 @@ async function main() {
     P.runHasGold = /金松果/.test((document.querySelector('#ui .tower-currency') || {}).textContent || '');
     P.buffPanels = $$('#ui .endless-buffs h4').map((h) => h.textContent.replace(/\s+/g, ' ').trim());
     P.pillSlots = $$('#ui .pill-slot').length;
+    {
+      const r = (sel) => { const el = document.querySelector(sel); if (!el) return null;
+        const b = el.getBoundingClientRect(); return { top: Math.round(b.top), left: Math.round(b.left), h: Math.round(b.height) }; };
+      P.geo = { title: r('#ui .endless-title-row'), hp: r('#ui .endless-hp'), foes: r('#ui .endless-foes'), rules: [0,1,2,3] };
+      const st = (sel, prop) => { const el = document.querySelector(sel); return el ? getComputedStyle(el)[prop] : null; };
+      P.css = { titleMargin: st('#ui .endless-title-row', 'marginTop'), hpMargin: st('#ui .endless-hp', 'marginTop'), foesMargin: st('#ui .endless-foes', 'marginTop') };
+    }
     P.buffTips = $$('#ui .endless-buffs [data-tip]').length;
     P.scoreBox = (document.querySelector('#ui .endless-score-box') || {}).textContent;
     P.foeRows = $$('#ui .tower-plan.vertical li').length;

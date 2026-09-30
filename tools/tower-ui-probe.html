@@ -158,6 +158,15 @@ async function main() {
       inFooter: !!b.closest('.tower-footer'), inside: r.bottom <= card.bottom + 1 && r.right <= card.right + 1,
       bottomRight: r.right > card.left + card.width * 0.5 && r.top > card.top + card.height * 0.5,
       gapToCardRight: Math.round(card.right - r.right) }; })();
+  // 第 1 项：按钮不能压到对手卡片（第 10 层 5 个对手时最容易压），且 footer 没有半透明底
+  P.footerOverlap = (() => {
+    const plan = document.querySelector('#ui .tower-plan'), btn = document.querySelector('#ui .tower-footer [data-action="fight"]');
+    if (!plan || !btn) return null;
+    const p = plan.getBoundingClientRect(), b = btn.getBoundingClientRect();
+    return { planBottom: Math.round(p.bottom), btnTop: Math.round(b.top), gap: Math.round(b.top - p.bottom) };
+  })();
+  P.footerBg = (() => { const f = document.querySelector('#ui .tower-footer');
+    return f ? getComputedStyle(f).backgroundImage : null; })();
   P.footerCountLeftOfBtn = (() => {
     const c = document.querySelector('#ui .tower-footer .tower-book-count'), b = document.querySelector('#ui .tower-footer [data-action="fight"]');
     if (!c || !b) return null;

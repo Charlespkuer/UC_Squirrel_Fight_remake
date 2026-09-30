@@ -53,13 +53,15 @@
 .tower-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 8px 0 2px; }
 /* 第 1 项：入口页的「开始挑战」固定到卡片右下角（绝对定位，不挤预告区） */
 .tower-page { position: relative; }
-.tower-page.has-footer .tower-main { padding-bottom: 60px; }
-/* 第 1 项：数量提示在按钮左边，按钮贴到卡片最右（right 只留一点点边距） */
+.tower-page.has-footer .tower-main { padding-bottom: 70px; }
+/* 第 1 项：数量提示在按钮左边，按钮贴到卡片最右；
+   不再画那层半透明底（用户要去掉），按钮也缩小一档、再往下压一点，
+   保证第 10 层 5 个对手时按钮不会压到卡片。 */
 .tower-footer {
-  position: absolute; right: 8px; bottom: 10px; margin: 0; gap: 14px;
-  padding: 6px 2px 6px 30px;
-  background: linear-gradient(90deg, rgba(255, 253, 240, 0), rgba(255, 253, 240, .94) 30%);
+  position: absolute; right: 8px; bottom: 4px; margin: 0; gap: 14px;
+  padding: 0; background: none;
 }
+.tower-footer .uc-button { font-size: 30px; min-height: 52px; padding: 5px 26px; }
 .tower-rule-hint { font-size: 17px; color: #8a3a30; background: rgba(255, 240, 236, .9); border-color: #e0a99c; }
 .tower-book-count { font-size: 19px; color: #8a6a3a; }
 .gold-text { color: #c87f0a; }
@@ -146,8 +148,9 @@
   box-sizing: border-box; cursor: default;
 }
 .tower-plan li b { font-size: 21px; line-height: 1.15; color: #7a4a18; }
-.foe-portrait { display: flex; align-items: center; justify-content: center; width: 100%; height: 100px; }
-.foe-portrait img, .foe-portrait canvas { max-width: 100%; max-height: 100px; object-fit: contain; }
+/* 第 1 项：头像框压矮一点，5 个对手时按钮才压不到卡片（高度省下来给 footer） */
+.foe-portrait { display: flex; align-items: center; justify-content: center; width: 100%; height: 84px; }
+.foe-portrait img, .foe-portrait canvas { max-width: 100%; max-height: 84px; object-fit: contain; }
 .tower-plan li .tower-plan-no { position: absolute; left: 6px; top: 6px; flex: none; }
 .tower-plan li.elite { border-color: #e08573; background: rgba(255, 236, 230, .95); }
 .tower-plan li:focus { outline: none; box-shadow: 0 0 0 3px rgba(139, 82, 184, .35); }

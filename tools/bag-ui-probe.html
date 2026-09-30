@@ -203,6 +203,19 @@ async function main() {
       Tower._debugSetLayer(9);           // 下一层 = 10（5 场：三侠 + 随机 boss + 狂战松鼠）
       TowerUI.openTower(); await flush(500);
       P.planBox = rect('#ui .tower-plan');
+      // 第 1 项：第 10 层（5 个对手）下按钮不能压到对手卡片
+      P.planRowHeights = $$('#ui .tower-plan li').map((li) => Math.round(li.getBoundingClientRect().height));
+      P.portraitBox = rect('#ui .tower-plan li .foe-portrait');
+      P.overlapGap = (() => {
+        const plan = document.querySelector('#ui .tower-plan').getBoundingClientRect();
+        const btn = document.querySelector('#ui .tower-footer [data-action="fight"]');
+        if (!btn) return null;
+        const br = btn.getBoundingClientRect();
+        // 卡片最低点与按钮最高点之间的垂直间距（负数 = 重合）
+        return { planBottom: Math.round(plan.bottom), btnTop: Math.round(br.top), gap: Math.round(br.top - plan.bottom) };
+      })();
+      P.footerBg = (() => { const f = document.querySelector('#ui .tower-footer');
+        return f ? getComputedStyle(f).backgroundImage : null; })();
       P.mainBox = rect('#ui .tower-main');
       P.planRows = $$('#ui .tower-plan li').map((li) => { const r = li.getBoundingClientRect();
         return { text: text(li).slice(0, 22), h: Math.round(r.height), top: Math.round(r.top), tip: li.dataset.tip }; });

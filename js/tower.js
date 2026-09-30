@@ -323,7 +323,7 @@
     if (e.run) return { ok: false, msg: '本局无尽挑战尚未结束。' };
     const run = { layer: 1, plan: buildPlan(1), idx: 0, carry: 1,
       mode: 'endless', permanent: [], limited: [], coins: 0, score: 0, bestLayer: 0,
-      coinBoost: null, shopDiscount: false,
+      pillSlots: { power: null, agility: null, speed: null },
       killPower: 0, killMaxHp: 0, bonusPower: 0, shop: null, phase: null, choices: null, debuffs: [] };
     if (debug('endlessCoin')) run.coins = 9999;
     e.run = run;
@@ -365,6 +365,12 @@
       me.power = Math.max(1, Math.round(me.power * (1 + powerMul) * dPower));
       me.agility = Math.max(1, Math.round(me.agility * dAgi));
       me.speed = Math.max(1, Math.round(me.speed * dSpd * (1 + agg.speedMul)));
+      // 第 1 项：属性药丸（塔内 20 场）—— 与 State.totalStats 的药剂口径一致
+      for (const k of ['power', 'agility', 'speed']) {
+        const slot = (run.pillSlots || {})[k];
+        const eff = slot && D().pillEffect(slot.id);
+        if (eff) me[k] += Math.max(Math.floor(me[k] * eff.pct), eff.min);
+      }
       for (const d of debuffs) {
         if (d.kind !== 'lock') continue;
         if (d.what === 'weapon') me.weapons = (me.weapons || []).filter((w) => Number(w.id) !== Number(d.id));
@@ -518,6 +524,11 @@
     /* 第 1 项：限次 buff 打完一场扣 1 次，扣完自动消失（无尽；主塔的「本层类」按整层算）。
      * 顺序：先按本场生效的数值结算，再扣次数。 */
     consumeLimited(run);   // 主塔的单场类（1 次）打完即消耗，本层类 99 次不会耗尽；无尽按各自的次数扣
+    // 第 1 项：属性药丸按战斗数递减（胜败都算一场）
+    for (const k of ['power', 'agility', 'speed']) {
+      const slot = (run.pillSlots || {})[k];
+      if (slot && slot.battles > 0) { slot.battles--; if (slot.battles <= 0) run.pillSlots[k] = null; }
+    }
     if (won === 3 || (won === 4 && len === 5)) run.choices = rollChoices(mode, run);
     out.choices = run.choices;
     out.permanent = (run.permanent || []).length;
@@ -863,6 +874,20 @@
     save();
     return { ok: true };
   }
+  /** 第 1 项：往槽位里嵌一颗属性药丸（消耗背包道具，塔内持续 20 场战斗）。 */
+  function usePillSlot(key, propId) {
+    const run = endless().run;
+    if (!run) return { ok: false, msg: '没有进行中的无尽局。' };
+    const slotDef = (D().PILL_SLOTS || []).find((x) => x.key === key);
+    const eff = D().pillEffect(propId);
+    if (!slotDef || !eff || eff.stat !== key) return { ok: false, msg: '这颗药丸和槽位不匹配。' };
+    if (!(S().props[propId] > 0)) return { ok: false, msg: '背包里没有这种药丸。' };
+    S().props[propId]--;
+    run.pillSlots = run.pillSlots || { power: null, agility: null, speed: null };
+    run.pillSlots[key] = { id: Number(propId), battles: D().PILL_BATTLES || 20 };
+    save();
+    return { ok: true, id: Number(propId), battles: D().PILL_BATTLES || 20 };
+  }
   function closeShop() {
     { const r = endless().run; if (r && r.shop && r.shop.discount) { r.shopDiscount = false; r.shop.discount = false; } }
     const run = endless().run;
@@ -954,6 +979,7 @@
         // 第 1 项：本段怪物带的机制（按段轮转，最多 3 个）
         mechs: D().endlessMechs(e.run.layer).slice(),
         restShopUsed: !!e.run.restShopUsed,
+        pillSlots: Object.assign({}, e.run.pillSlots || {}),
         ticketsIfSettle: D().endlessTickets(e.run.layer) } : null };
   }
   /** 当前 run 已拥有 buff 列表（构筑展示 / 商店出售页用）。 */
@@ -973,7 +999,7 @@
   window.Tower = {
     unlocked, towerInfo, endlessInfo, preview, ownedBuffs,
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,
-    pickChoice, toggleLimited, addBuff, applyInstant, openRestShop,
+    pickChoice, toggleLimited, addBuff, applyInstant, openRestShop, usePillSlot,
     shopState, buyShopSlot, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp,
     checkpointInfo, settleEndless, continueEndless,
     // 调试

@@ -361,24 +361,24 @@
     /* 第 4 项：单场类 buff 整体加强（原来是 25/20/5/20/30 一档，太温柔，
      * 玩家拿到也不觉得这一场变强），并补了暴击/减伤/速度三种手感明显的。 */
     { id: 'N01', name: '蓄力一击', rarity: 0, kind: 'limited', uses: 1, desc: '下一场攻击 +40%', mods: { powerMul: 0.40 } },
-    { id: 'N02', name: '百步穿杨', rarity: 0, kind: 'limited', uses: 1, desc: '下一场首次攻击必中', mods: { mustHitFirst: 1 } },
+    { id: 'N02', name: '百步穿杨', rarity: 0, kind: 'limited', uses: 5, desc: '下一场首次攻击必中', mods: { mustHitFirst: 1 } },
     { id: 'M01', name: '威慑', rarity: 0, kind: 'limited', uses: 1, desc: '下一场敌人攻击力 −30%', mods: { enemyPowerDown: 0.30 } },
-    { id: 'M02', name: '疾风先手', rarity: 0, kind: 'limited', uses: 1, desc: '下一场你的首次技能不消耗回合', mods: { firstSkillFree: 1 } },
-    { id: 'N03', name: '活血丹', rarity: 1, kind: 'limited', uses: 1, desc: '下一场每回合开始回复 8% 生命', mods: { regenPct: 0.08 } },
+    { id: 'M02', name: '疾风先手', rarity: 0, kind: 'limited', uses: 3, desc: '下一场你的首次技能不消耗回合', mods: { firstSkillFree: 1 } },
+    { id: 'N03', name: '活血丹', rarity: 1, kind: 'limited', uses: 3, desc: '下一场每回合开始回复 8% 生命', mods: { regenPct: 0.08 } },
     { id: 'N04', name: '金蝉脱壳', rarity: 1, kind: 'limited', uses: 1, desc: '下一场免疫一次致命伤害（保留 1 点生命）', mods: { deathSave: 1 } },
-    { id: 'N07', name: '破军', rarity: 1, kind: 'limited', uses: 1, desc: '下一场暴击率 +25%', mods: { critBonus: 25 } },
-    { id: 'M03', name: '坚守', rarity: 1, kind: 'limited', uses: 1, desc: '下一场受到伤害 −30%', mods: { takenMul: -0.30 } },
-    { id: 'M04', name: '疾风步', rarity: 1, kind: 'limited', uses: 1, desc: '下一场速度 +30%', mods: { speedMul: 0.30 } },
+    { id: 'N07', name: '破军', rarity: 1, kind: 'limited', uses: 3, desc: '下一场暴击率 +25%', mods: { critBonus: 25 } },
+    { id: 'M03', name: '坚守', rarity: 1, kind: 'limited', uses: 2, desc: '下一场受到伤害 −30%', mods: { takenMul: -0.30 } },
+    { id: 'M04', name: '疾风步', rarity: 1, kind: 'limited', uses: 5, desc: '下一场速度 +30%', mods: { speedMul: 0.30 } },
     { id: 'N05', name: '先手制敌', rarity: 2, kind: 'limited', uses: 1, desc: '下一场开局对敌人造成其 30% 最大生命的伤害', mods: { openStrikePct: 0.30 } },
-    { id: 'N06', name: '血饮狂刀', rarity: 2, kind: 'limited', uses: 1, desc: '下一场攻击附带 45% 吸血', mods: { lifestealPct: 0.45 } },
+    { id: 'N06', name: '血饮狂刀', rarity: 2, kind: 'limited', uses: 2, desc: '下一场攻击附带 45% 吸血', mods: { lifestealPct: 0.45 } },
     // —— 本层类（主塔=整局；无尽=当前层） ——
-    { id: 'G01', name: '力量祝福', rarity: 0, kind: 'limited', uses: 2, desc: '本层攻击 +12%', mods: { powerMul: 0.12 } },
-    { id: 'G02', name: '生命祝福', rarity: 0, kind: 'limited', uses: 2, desc: '本层生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
-    { id: 'G03', name: '鹰眼', rarity: 0, kind: 'limited', uses: 2, desc: '本层暴击率 +8%', mods: { critBonus: 8 } },
-    { id: 'G04', name: '回春术', rarity: 1, kind: 'limited', uses: 2, desc: '本层每回合回复 2.5% 最大生命', mods: { regenPct: 0.025 } },
-    { id: 'G05', name: '铁布衫', rarity: 1, kind: 'limited', uses: 2, desc: '本层受到伤害 −25%', mods: { takenMul: -0.25 } },
-    { id: 'G06', name: '凌波微步', rarity: 1, kind: 'limited', uses: 2, desc: '本层闪避 +12%', mods: { dodgeBonus: 12 } },
-    { id: 'G07', name: '破釜沉舟', rarity: 2, kind: 'limited', uses: 2, desc: '本层攻击 +20%，生命上限 −10%', mods: { powerMul: 0.20, maxHpMul: -0.10 } },
+    { id: 'G01', name: '力量祝福', rarity: 0, kind: 'limited', uses: 10, desc: '本层攻击 +12%', mods: { powerMul: 0.12 } },
+    { id: 'G02', name: '生命祝福', rarity: 0, kind: 'limited', uses: 5, desc: '本层生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
+    { id: 'G03', name: '鹰眼', rarity: 0, kind: 'limited', uses: 10, desc: '本层暴击率 +8%', mods: { critBonus: 8 } },
+    { id: 'G04', name: '回春术', rarity: 1, kind: 'limited', uses: 10, desc: '本层每回合回复 2.5% 最大生命', mods: { regenPct: 0.025 } },
+    { id: 'G05', name: '铁布衫', rarity: 1, kind: 'limited', uses: 5, desc: '本层受到伤害 −25%', mods: { takenMul: -0.25 } },
+    { id: 'G06', name: '凌波微步', rarity: 1, kind: 'limited', uses: 10, desc: '本层闪避 +12%', mods: { dodgeBonus: 12 } },
+    { id: 'G07', name: '破釜沉舟', rarity: 2, kind: 'limited', uses: 3, desc: '本层攻击 +20%，生命上限 −10%', mods: { powerMul: 0.20, maxHpMul: -0.10 } },
     // —— 跨层类（仅无尽，本局永久） ——
     { id: 'C01', name: '磐石之躯', rarity: 0, kind: 'permanent', desc: '生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
     { id: 'C02', name: '磨砺', rarity: 0, kind: 'permanent', desc: '攻击 +10%', mods: { powerMul: 0.10 } },
@@ -462,6 +462,24 @@
   const endlessPool = BUFFS.slice();
   /** 永久增益的持有上限（第 1 项：无尽主界面最多 5 个，同名叠层仍算 1 格）。 */
   const PERMANENT_SLOTS = 5;
+  /* 第 1 项：无尽塔的「三种属性药丸」槽位 —— 消耗背包里的药丸，塔内持续 20 场战斗。
+   * 效果口径跟 State.totalStats 里的一致：普通丸 +20%（最少 5 点）、超级丸 +40%（最少 10 点）。 */
+  const PILL_BATTLES = 20;
+  const PILL_SLOTS = [
+    { key: 'power', name: '力量', ids: [3, 41] },
+    { key: 'agility', name: '敏捷', ids: [4, 42] },
+    { key: 'speed', name: '速度', ids: [5, 43] },
+  ];
+  function pillEffect(id) {
+    const n = Number(id);
+    if (n === 3) return { stat: 'power', pct: 0.20, min: 5 };
+    if (n === 4) return { stat: 'agility', pct: 0.20, min: 5 };
+    if (n === 5) return { stat: 'speed', pct: 0.20, min: 5 };
+    if (n === 41) return { stat: 'power', pct: 0.40, min: 10 };
+    if (n === 42) return { stat: 'agility', pct: 0.40, min: 10 };
+    if (n === 43) return { stat: 'speed', pct: 0.40, min: 10 };
+    return null;
+  }
 
   window.TowerData = {
     towerLevel, towerMult, towerGold, towerGoldShares, TOWER_FAIL_CONSOLATION,
@@ -470,6 +488,7 @@
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
     FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, bossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,
     ENDLESS_LAYER_HEAL_PCT, MILESTONE_EVERY, MILESTONE_BOOK_COUNT, rollMilestone, PERMANENT_SLOTS,
+    PILL_BATTLES, PILL_SLOTS, pillEffect,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,

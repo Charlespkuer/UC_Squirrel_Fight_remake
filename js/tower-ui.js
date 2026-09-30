@@ -15,6 +15,13 @@
   const RARITY = ['普通', '稀有', '史诗'];
   const SCOPE = { limited: '限次', permanent: '永久', instant: '即时' };
   const MECH_NAME = { thorns: '荆棘反伤', regen: '自愈回复', lifesteal: '吸血', shell: '护盾', devour: '吞噬成长' };
+  const MECH_DESC = {
+    thorns: '你每次命中它都会受到该次伤害 15% 的反伤',
+    regen: '它每回合开始回复 3% 最大生命',
+    lifesteal: '它的攻击回复伤害的 30%',
+    shell: '它开局带 30% 最大生命的护盾',
+    devour: '它每回合结束攻击永久 +2%（本场内无限叠）',
+  };
   let replaceTarget = null;   // 第 1 项：永久增益满 5 格时，选中的「要被替换掉」的那个
 
   // ---------- 通用小件 ----------
@@ -219,6 +226,25 @@
       '<span class="currency-item" data-live-gold="' + (it.name === '金松果' ? '1' : '') + '">' +
       '<img alt="" src="' + it.icon + '"><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';
   }
+  /** 第 1 项：无尽塔右上角的三个属性药丸槽位（点一下从背包里嵌一颗，塔内持续 20 场）。 */
+  function pillSlotsHtml(pillSlots) {
+    const S = State.state();
+    const slots = pillSlots || {};
+    return '<div class="pill-slots">' + (TowerData.PILL_SLOTS || []).map((def) => {
+      const cur = slots[def.key];
+      const eff = cur && TowerData.pillEffect(cur.id);
+      const icon = 'images/classic/icons/prop-' + (cur ? cur.id : def.ids[0]) + '.png';
+      const tip = cur
+        ? (propName(cur.id) + '：' + def.name + ' ' + (eff && eff.pct === 0.4 ? '+40%' : '+20%') + '，还剩 ' + cur.battles + ' 场')
+        : '点一下嵌入' + def.name + '药丸（背包里有：' + def.ids.map((id) => (S.props[id] || 0) + '×' + propName(id)).join('、') + '）';
+      return '<button type="button" class="pill-slot' + (cur ? ' filled' : '') + '" data-pill="' + def.key + '" title="' + esc(tip) + '">' +
+        (cur ? '<img alt="" src="' + icon + '"><b>' + cur.battles + '</b>' : '<span class="pill-plus">+</span><i>' + def.name + '</i>') +
+        '</button>';
+    }).join('') + '</div>';
+  }
+  function propName(id) {
+    try { const p = propMap.getValue(id); return p ? p.name : ('道具' + id); } catch (e) { return '道具' + id; }
+  }
   /** 左侧塔身：当前层附近的一段楼层，自上而下。 */
   function towerVisual(layer, maxLayer, mode) {
     const top = Math.max(layer + 4, 6), bottom = Math.max(1, layer - 3);
@@ -309,13 +335,15 @@
     if (info.run) {
       const run = info.run;
       const nextLabel = run.choices ? '先选一张增益' : run.phase === 'shop' ? '进入试炼商店' : run.phase === 'checkpoint' ? '前往结算点' : '继续战斗';
-      main = '<h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
+      main = '<div class="tower-head"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
+        pillSlotsHtml(run.pillSlots) + '</div>' +
         currencyHtml('endless') +
         '<div class="tower-stats">分数 <b class="gold-text">' + run.score + '</b> · 现在离场可得抽奖卷 <b>' + run.ticketsIfSettle + '</b> 张（需到 5 的倍数层结算）</div>' +
         '<div class="tower-stats small">本局最深 ' + run.bestLayer + ' 层 · 第 ' + run.segment + ' 段</div>' +
-        '<p class="tower-rule">本段机制：' + (info.mechs && info.mechs.length
-          ? info.mechs.map((m) => MECH_NAME[m] || m).join(' · ') + '（每段轮转，最多 ' + (TowerData.ENDLESS_MECH_MAX || 3) + ' 个）'
-          : '无（第 1 段不叠机制）') + '</p>' +
+        '<div class="tower-rule mech-bar"><b>当前遭遇的机制</b>' + (info.mechs && info.mechs.length
+          ? info.mechs.map((m) => '<span class="mech-chip">' + esc(MECH_NAME[m] || m) + '<i>' + esc(MECH_DESC[m] || '') + '</i></span>').join('')
+          : '<span class="mech-none">本段没有额外机制（第 1 段）</span>') +
+          '<span class="mech-note">每段轮转，最多 ' + (TowerData.ENDLESS_MECH_MAX || 3) + ' 个</span></div>' +
         '<h4 class="tower-plan-title">本层对手（第 ' + run.battleNo + '/' + run.battleCount + ' 场）</h4>' +
         planHtml(Tower.preview(run.layer), ' compact') +   // 第 3 项：本层对手预告（与 buildPlan 同源）
         carryBar(run.carry) + debuffPanel(run.debuffs) + buffPanelsHtml('endless') +
@@ -381,6 +409,9 @@
       fight('endless');
     });
     on(p, 'shop', () => openShop(true));
+    p.querySelectorAll('[data-pill]').forEach((el) => {
+      el.onclick = () => choosePill(el.dataset.pill);
+    });
     on(p, 'rest-shop', () => {
       const res = Tower.openRestShop();
       if (!res.ok) { notice(res.msg || '现在不能开商店。'); return; }
@@ -545,6 +576,33 @@
             [{ label: '返回', cls: 'gold', run: () => C().home() }], { small: true });
         } },
        { label: '返回', run: () => C().home() }], { small: true });
+  }
+  /** 第 1 项：点药丸槽位 → 列出背包里该属性的药丸（普通/超级），选一颗嵌进去。 */
+  function choosePill(key) {
+    const run = Tower.endlessInfo().run;
+    if (!run) return;
+    const def = (TowerData.PILL_SLOTS || []).find((x) => x.key === key);
+    if (!def) return;
+    const S = State.state();
+    const rows = def.ids.map((id) => {
+      const have = S.props[id] || 0;
+      const eff = TowerData.pillEffect(id);
+      return '<div class="pill-choice' + (have ? '' : ' empty') + '"><img alt="" src="images/classic/icons/prop-' + id + '.png">' +
+        '<div><b>' + esc(propName(id)) + '</b><span>' + def.name + ' +' + (eff.pct === 0.4 ? '40%' : '20%') +
+        '（最少 ' + eff.min + ' 点）· 塔内 ' + TowerData.PILL_BATTLES + ' 场</span><i>背包 ' + have + ' 颗</i></div></div>';
+    }).join('');
+    const buttons = def.ids.filter((id) => (S.props[id] || 0) > 0).map((id) => ({
+      label: '嵌入 ' + propName(id), cls: 'small gold',
+      run: () => {
+        const res = Tower.usePillSlot(key, id);
+        if (!res.ok) { notice(res.msg); return; }
+        openEndless();
+      },
+    }));
+    buttons.push({ label: '返回', cls: 'muted', run: () => openEndless() });
+    C().modal('嵌入' + def.name + '药丸', '<div class="pill-picker">' + rows + '</div>' +
+      '<p class="small-label">药丸在无尽塔内持续 ' + TowerData.PILL_BATTLES + ' 场战斗（胜败都算），会扣背包里的道具。</p>',
+      buttons, { small: true });
   }
   /** 每 10 层的里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）。 */
   function milestoneModal(rw, next) {

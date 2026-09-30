@@ -611,3 +611,13 @@
 .tower-plan.vertical li > .tower-plan-type { grid-column: 2; grid-row: 2; }
 .tower-plan.vertical li > .elite-tag { grid-column: 2; grid-row: 3; }
 .endless-foes { margin-left: 16px; }
+
+/* 第十轮：药丸槽无文字（图标居中）、塔身楼层间距拉大、对手名字/类型上下左右居中且间距加大 */
+.endless-topright .pill-slot { display: flex; align-items: center; justify-content: center; padding: 0; }
+.endless-topright .pill-slot i { display: none; }
+.endless-topright .pill-slot .pill-plus { font-size: 20px; }
+.tower-floors { gap: 12px; }
+.tower-plan.vertical li { align-content: center; row-gap: 6px; justify-items: center; }
+.tower-plan.vertical li > b { justify-self: center; text-align: center; }
+.tower-plan.vertical li > .tower-plan-type { justify-self: center; }
+.tower-plan.vertical li > .elite-tag { justify-self: center; }

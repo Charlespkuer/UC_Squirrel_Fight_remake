@@ -248,7 +248,7 @@
         ? (propName(cur.id) + '：' + def.name + ' ' + (eff && eff.pct === 0.4 ? '+40%' : '+20%') + '，还剩 ' + cur.battles + ' 场')
         : '点一下嵌入' + def.name + '药丸（背包里有：' + def.ids.map((id) => (S.props[id] || 0) + '×' + propName(id)).join('、') + '）';
       return '<button type="button" class="pill-slot' + (cur ? ' filled' : '') + '" data-pill="' + def.key + '" title="' + esc(tip) + '">' +
-        (cur ? '<img alt="" src="' + icon + '"><b>' + cur.battles + '</b>' : '<span class="pill-plus">+</span><i>' + def.name + '</i>') +
+        (cur ? '<img alt="" src="' + icon + '"><b>' + cur.battles + '</b>' : '<span class="pill-plus">+</span>') +
         '</button>';
     }).join('') + '</div>';
   }

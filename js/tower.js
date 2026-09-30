@@ -189,12 +189,14 @@
     const g = globalMul(run);
     const agg = { powerMul: 0, maxHpMul: 0, critBonus: 0, critDmgBonus: 0, dodgeBonus: 0, takenMul: 0,
       regenPct: 0, lifestealPct: 0, shellPct: 0, openStrikePct: 0, enemyPowerDown: 0,
-      mustHitFirst: 0, firstSkillFree: 0, deathSaves: [], dmgMul: 1,
+      mustHitFirst: 0, firstSkillFree: 0, deathSaves: [], dmgMul: 1, revivePct: 0,
       speedMul: 0, winHealPct: 0, thornsPct: 0, lowHpPowerMul: 0, lowHpAt: 0 };
     eachBuff(run, (buff, stacks) => {
       const m = buff.mods, k = stacks * g;
       if (m.powerMul) agg.powerMul += m.powerMul * k;
-      if (m.maxHpMul) agg.maxHpMul += m.maxHpMul * k;
+      /* 第 1 项：永久类的生命上限加成记在 run.hpBonus 上（卖掉/替换也不会掉血上限）；
+       * 限次类的仍然按场次生效，buff 消失时加成也一起消失。 */
+      if (m.maxHpMul) { if (buff.kind === 'limited') agg.maxHpMul += m.maxHpMul * k; }
       if (m.critBonus) agg.critBonus += m.critBonus * k;
       if (m.critDmgBonus) agg.critDmgBonus += m.critDmgBonus * k;
       if (m.dodgeBonus) agg.dodgeBonus += m.dodgeBonus * k;
@@ -205,13 +207,14 @@
       if (m.enemyPowerDown) agg.enemyPowerDown += m.enemyPowerDown * k;
       if (m.openStrikePct) agg.openStrikePct = Math.max(agg.openStrikePct, m.openStrikePct * k);
       if (m.speedMul) agg.speedMul += m.speedMul * k;
+      if (m.agilityMul) agg.agilityMul += m.agilityMul * k;
       if (m.winHealPct) agg.winHealPct += m.winHealPct * k;                       // 战后续航（可叠加）
       if (m.thornsPct) agg.thornsPct += m.thornsPct * k;                         // 荆棘之甲
       if (m.lowHpPowerMul) { agg.lowHpPowerMul += m.lowHpPowerMul * k; agg.lowHpAt = Math.max(agg.lowHpAt, Number(m.lowHpAt) || 0.35); }
       if (m.mustHitFirst) agg.mustHitFirst = 1;
       if (m.firstSkillFree) agg.firstSkillFree = 1;
       if (m.deathSave) agg.deathSaves.push({});                                  // 金蝉脱壳：保留 1 血
-      if (m.revivePct) agg.deathSaves = [{ healPct: Math.min(0.9, m.revivePct * g) }]; // 不死鸟：每场一次复活
+      if (m.revivePct) agg.revivePct = Math.max(agg.revivePct || 0, Math.min(0.9, m.revivePct * g));   // 不死鸟：每层一次
       if (foeCtx.hero && m.dmgMulType) agg.dmgMul *= 1 + m.dmgMulType * k;       // 猎侠者
       if (foeCtx.poolNpc && m.dmgMulMech) agg.dmgMul *= 1 + m.dmgMulMech * k;    // 机制破解
       if (foeCtx.elite && m.dmgMulElite) agg.dmgMul *= 1 + m.dmgMulElite * k;    // 精英杀手
@@ -221,7 +224,11 @@
     if (run.killMaxHp) agg.maxHpMul += run.killMaxHp;
     if (run.bonusPower) agg.powerMul += run.bonusPower;
     // 逢十强化：仅 x10 层生效
-    if (stacksOf(run, 'C09') && run.layer % 10 === 0) { agg.powerMul += 0.20 * g; agg.maxHpMul += 0.20 * g; }
+    // 第 2 项：C09 改成「逢五强化」——5 的倍数层生效，数值取 mods.x10Boost
+    if (stacksOf(run, 'C09') && run.layer % 5 === 0) {
+      const boost = (D().BUFF_BY_ID.C09.mods.x10Boost || 0.30) * g;
+      agg.powerMul += boost; agg.maxHpMul += boost;
+    }
     return agg;
   }
 
@@ -361,9 +368,10 @@
       const dPower = debuffs.filter((d) => d.kind === 'stat' && d.stat === 'power').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
       const dAgi = debuffs.filter((d) => d.kind === 'stat' && d.stat === 'agility').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
       const dSpd = debuffs.filter((d) => d.kind === 'stat' && d.stat === 'speed').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
-      const maxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul) * dMaxHp));
+      const stickyHp = Math.max(0, Number(run.hpBonus) || 0);   // 第 1 项：永久生命上限加成（卖/换后保留）
+      const maxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul + stickyHp) * dMaxHp));
       me.power = Math.max(1, Math.round(me.power * (1 + powerMul) * dPower));
-      me.agility = Math.max(1, Math.round(me.agility * dAgi));
+      me.agility = Math.max(1, Math.round(me.agility * dAgi * (1 + agg.agilityMul)));
       me.speed = Math.max(1, Math.round(me.speed * dSpd * (1 + agg.speedMul)));
       // 第 1 项：属性药丸（塔内 20 场）—— 与 State.totalStats 的药剂口径一致
       for (const k of ['power', 'agility', 'speed']) {
@@ -393,7 +401,9 @@
       if (agg.dmgMul !== 1) mods.dmgMul = agg.dmgMul;
       if (agg.thornsPct) mods.thornsPct = Math.min(0.6, agg.thornsPct);          // 荆棘之甲（sim 里结算）
       if (agg.lowHpPowerMul) { mods.lowHpPowerMul = agg.lowHpPowerMul; mods.lowHpAt = agg.lowHpAt || 0.35; }
-      if (agg.deathSaves.length) mods.deathSaves = agg.deathSaves;
+      // 第 2 项：不死鸟按「每层一次」发放（本层已经触发过就不再给）
+      if (agg.revivePct && (run.reviveLayer || 0) !== run.layer) mods.deathSaves = (mods.deathSaves || []).concat([{ healPct: agg.revivePct }]);
+      if (agg.deathSaves.length) mods.deathSaves = (mods.deathSaves || []).concat(agg.deathSaves);
       me.mods = mods;
     };
     run.attempt = mode + '_' + Date.now() + '_' + (++attemptSeq);
@@ -479,6 +489,8 @@
     run.carry = Math.max(0.01, clamp01(carryRatio));
     const out = { ok: true, win: true, elite: isElite, entryKind: entry.kind };
     // 三侠的大招会给玩家留一层削弱（第 3 项）
+    // 第 2 项：本场触发了复活甲 → 本层的不死鸟用掉
+    if (stacksOf(run, 'C14') && result && Array.isArray(result.rounds) && result.rounds.some((r) => r.deathSave)) run.reviveLayer = run.layer;
     const debuff = applyHeroDebuff(run, entry, result);
     if (debuff) { out.debuff = debuff; save(); }
     if (mode === 'tower') {
@@ -503,7 +515,7 @@
       run.coins += Math.round(D().COINS.battle * coinMul);
       // 击杀叠层类（基础 → 叠层 → C15）
       const c06 = stacksOf(run, 'C06');
-      if (c06) run.killPower = Math.min(0.20 * c06 * g, run.killPower + 0.01 * c06 * g);
+      if (c06) run.killPower = Math.min(D().BUFF_BY_ID.C06.mods.killPowerCap * g, run.killPower + D().BUFF_BY_ID.C06.mods.killPowerPct * g);   // 第 2 项：按文字 +2%/击杀、上限 +40%
       const c07 = stacksOf(run, 'C07');
       if (c07) run.killMaxHp = Math.min(0.30 * c07 * g, run.killMaxHp + 0.02 * c07 * g);
       const c11 = stacksOf(run, 'C11');
@@ -637,7 +649,7 @@
     const c04 = stacksOf(run, 'C04');                    // 生命源泉：每过一层回血
     if (c04) run.carry = Math.min(1, run.carry + D().BUFF_BY_ID.C04.mods.layerHealPct * g);
     const c12 = stacksOf(run, 'C12');                    // 登顶者：20 层起每过一层攻击成长
-    if (c12 && run.layer >= 20) run.bonusPower += D().BUFF_BY_ID.C12.mods.perLayerPowerAfter20 * c12 * g;
+    if (c12 && run.layer >= 10) run.bonusPower += D().BUFF_BY_ID.C12.mods.perLayerPowerAfter20 * c12 * g;   // 第 2 项：从 10 层起
     /* 第 3 项：每爬 10 层，结算时随机发一次里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）。 */
     if (run.layer % D().MILESTONE_EVERY === 0) {
       const reward = D().rollMilestone();
@@ -699,7 +711,7 @@
     return buff.stackable === true && owned.stacks < D().STACK_MAX;   // 同名唯一，可叠层例外
   }
   function rollRarity() {
-    const w = D().RARITY_WEIGHTS, total = w[0] + w[1] + w[2];
+    const w = D().RARITY_WEIGHTS, total = w.reduce((a, b) => a + b, 0);   // 第 3 项：支持 4 档稀有度
     let r = Math.random() * total;
     for (let i = 0; i < w.length; i++) { if (r < w[i]) return i; r -= w[i]; }
     return 0;
@@ -739,6 +751,10 @@
       const at = list.findIndex((b) => b.id === replaceId);
       if (at < 0) return { ok: false, needsReplace: true, buff, msg: '要替换的增益不存在' };
       list.splice(at, 1);
+    }
+    // 第 1 项：拿到永久生命上限增益时，把它折算成 run.hpBonus（之后卖掉也保留）
+    if (buff.kind === 'permanent' && buff.mods && buff.mods.maxHpMul) {
+      run.hpBonus = (run.hpBonus || 0) + buff.mods.maxHpMul;
     }
     const towerLimitedUses = run.mode === 'tower' && (buff.uses || 1) > 1 ? 99 : (buff.uses || 1);
     list.push(buff.kind === 'limited'

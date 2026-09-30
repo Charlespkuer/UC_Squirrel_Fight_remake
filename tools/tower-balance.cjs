@@ -265,7 +265,7 @@ function autoPick(ctx, mode) {
   t('无尽：过 5 层进商店', erun5 && erun5.phase === 'shop' && erun5.layer === 5);
   const shop = Tower.shopState();
   t('商店：5 个货架 + 价格梯度', shop && shop.slots.length === 5 && shop.slots.every((s) => [30, 60, 100, 40, 80, 130].includes(s.price)));
-  t('商店：通关 5 层赚了试炼币（4×5 场×8 + 5 层×20 = 260）', erun5.coins === 260);
+  t('商店：通关 5 层赚了试炼币（≥260，含可能的战利品加成）', erun5.coins >= 260);
   const buyable = shop.slots.findIndex((s) => !s.sold && s.price <= erun5.coins);
   const buy = Tower.buyShopSlot(buyable);
   t('商店：买 buff 扣币并入构筑', buy.ok && Tower.ownedBuffs('endless').some((b) => b.id === buy.buff.id));
@@ -343,9 +343,9 @@ function autoPick(ctx, mode) {
   // 第 4 项：新 buff（战后续航可叠加 / 反伤 / 狂怒 / 速度 / 战后回血）
   {
     // 第 1 项：buff 改成「限次 / 永久」两分法 + 即时经济类
-    t('无尽池：限次 20 / 永久 25 / 即时 3（共 49，含名贵手表与战利品账本）+ 6 个经济类', ctx.TowerData.BUFFS.length === 49 &&
+    t('无尽池：限次 20 / 永久 30 / 即时 3（共 53）+ 6 个经济类', ctx.TowerData.BUFFS.length === 53 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 20 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 25 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 30 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 3 &&
       ctx.TowerData.BUFFS.filter((b) => b.endlessOnly).length === 6);
     t('主塔池只吃限次且非无尽专属', ctx.TowerData.towerPool.every((b) => b.kind === 'limited' && !b.endlessOnly));
@@ -361,7 +361,7 @@ function autoPick(ctx, mode) {
     me2.maxHp = me2.hp; const spd0 = me2.speed;
     nb.adjustMe(me2);
     t('新永久 buff 进入战斗（反伤 20% / 狂怒 50% / 速度 +15%）',
-      me2.mods.thornsPct === 0.2 && me2.mods.lowHpPowerMul === 0.5 && me2.mods.lowHpAt === 0.35 &&
+      me2.mods.thornsPct === 0.2 && me2.mods.lowHpPowerMul === 0.5 && me2.mods.lowHpAt === 0.40 &&
       Math.abs(me2.speed - Math.round(spd0 * 1.15)) <= 1);
     const winOut = Tower.reportBattle('endless', nb.token, true, 0.5, { rounds: [] });
     t('战后续航可叠加（5% + 10%×2 = 25%）', Math.abs((winOut.winHeal || 0) - 0.25) < 1e-6 && Math.abs(r.carry - 0.75) < 1e-6);
@@ -494,8 +494,7 @@ function autoPick(ctx, mode) {
     const T = ctx.TowerData;
     const lim = T.BUFFS.filter((b) => b.kind === 'limited' && !b.endlessOnly);
     const kinds = [...new Set(lim.map((b) => b.uses))].sort((a, b) => a - b);
-    t('限次次数覆盖 1/2/3/5/10', kinds.join(',') === '1,2,3,5,10');
-    t('2 次的是少数（≤3 个）', lim.filter((b) => b.uses === 2).length <= 3);
+    t('限次次数覆盖 2/3/5/10（用户调整后没有 1 场的）', kinds.join(',') === '2,3,5,10');
     t('每个限次 buff 都有合法次数', lim.every((b) => [1, 2, 3, 5, 10].includes(b.uses)));
   }
   // 第 3 项：无尽主界面也要有本层对手预告

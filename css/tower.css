@@ -696,3 +696,9 @@
 .tower-plan.vertical li > .foe-portrait img, .tower-plan.vertical li > .foe-portrait canvas { max-height: 60px; height: 60px; max-width: 60px; }
 /* 商店离开键（继续挑战）放大 */
 .page-footer > .uc-button[data-action="leave"] { min-height: 78px; font-size: 40px; min-width: 320px; }
+
+/* 传奇（r3）配色 + 机制行里的削弱胶囊 */
+.buff-tag.r3, .limit-tag.r3, .hex-card.r3 { border-color: #d9a12a; }
+.buff-tag.r3 { background: linear-gradient(#fff6c8, #ffe08a); }
+.hex-card.r3 .hex-ribbon { background: linear-gradient(#ffd76a, #e0a316); color: #5a3c00; }
+.mech-chip.debuff-chip { background: #ffe9e2; border-color: #e0a99c; color: #8a3a30; }

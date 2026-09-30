@@ -360,17 +360,17 @@
     // —— 单场类（主塔+无尽通用） ——
     /* 第 4 项：单场类 buff 整体加强（原来是 25/20/5/20/30 一档，太温柔，
      * 玩家拿到也不觉得这一场变强），并补了暴击/减伤/速度三种手感明显的。 */
-    { id: 'N01', name: '蓄力一击', rarity: 0, kind: 'limited', uses: 1, desc: '下一场攻击 +40%', mods: { powerMul: 0.40 } },
-    { id: 'N02', name: '百步穿杨', rarity: 0, kind: 'limited', uses: 5, desc: '下一场首次攻击必中', mods: { mustHitFirst: 1 } },
-    { id: 'M01', name: '威慑', rarity: 0, kind: 'limited', uses: 1, desc: '下一场敌人攻击力 −30%', mods: { enemyPowerDown: 0.30 } },
-    { id: 'M02', name: '疾风先手', rarity: 0, kind: 'limited', uses: 3, desc: '下一场你的首次技能不消耗回合', mods: { firstSkillFree: 1 } },
-    { id: 'N03', name: '活血丹', rarity: 1, kind: 'limited', uses: 3, desc: '下一场每回合开始回复 8% 生命', mods: { regenPct: 0.08 } },
-    { id: 'N04', name: '金蝉脱壳', rarity: 1, kind: 'limited', uses: 1, desc: '下一场免疫一次致命伤害（保留 1 点生命）', mods: { deathSave: 1 } },
-    { id: 'N07', name: '破军', rarity: 1, kind: 'limited', uses: 3, desc: '下一场暴击率 +25%', mods: { critBonus: 25 } },
-    { id: 'M03', name: '坚守', rarity: 1, kind: 'limited', uses: 2, desc: '下一场受到伤害 −30%', mods: { takenMul: -0.30 } },
-    { id: 'M04', name: '疾风步', rarity: 1, kind: 'limited', uses: 5, desc: '下一场速度 +30%', mods: { speedMul: 0.30 } },
-    { id: 'N05', name: '先手制敌', rarity: 2, kind: 'limited', uses: 1, desc: '下一场开局对敌人造成其 30% 最大生命的伤害', mods: { openStrikePct: 0.30 } },
-    { id: 'N06', name: '血饮狂刀', rarity: 2, kind: 'limited', uses: 2, desc: '下一场攻击附带 45% 吸血', mods: { lifestealPct: 0.45 } },
+    { id: 'N01', name: '蓄力一击', rarity: 0, kind: 'limited', uses: 2, desc: '接下来 2 场攻击 +40%', mods: { powerMul: 0.40 } },
+    { id: 'N02', name: '百步穿杨', rarity: 0, kind: 'limited', uses: 5, desc: '接下来 5 场首次攻击必中', mods: { mustHitFirst: 1 } },
+    { id: 'M01', name: '威慑', rarity: 0, kind: 'limited', uses: 2, desc: '接下来 2 场敌人攻击力 −30%', mods: { enemyPowerDown: 0.30 } },
+    { id: 'M02', name: '疾风先手', rarity: 0, kind: 'limited', uses: 3, desc: '接下来 3 场你的首次技能不消耗回合', mods: { firstSkillFree: 1 } },
+    { id: 'N03', name: '活血丹', rarity: 1, kind: 'limited', uses: 3, desc: '接下来 3 场每回合开始回复 8% 生命', mods: { regenPct: 0.08 } },
+    { id: 'N04', name: '金蝉脱壳', rarity: 1, kind: 'limited', uses: 3, desc: '接下来 3 场免疫一次致命伤害（保留 1 点生命）', mods: { deathSave: 1 } },
+    { id: 'N07', name: '破军', rarity: 1, kind: 'limited', uses: 3, desc: '接下来 3 场暴击率 +25%', mods: { critBonus: 25 } },
+    { id: 'M03', name: '坚守', rarity: 1, kind: 'limited', uses: 2, desc: '接下来 2 场受到伤害 −30%', mods: { takenMul: -0.30 } },
+    { id: 'M04', name: '疾风步', rarity: 1, kind: 'limited', uses: 10, desc: '接下来 10 场速度 +30%', mods: { speedMul: 0.30 } },
+    { id: 'N05', name: '先手制敌', rarity: 2, kind: 'limited', uses: 2, desc: '接下来 2 场开局对敌人造成其 30% 最大生命的伤害', mods: { openStrikePct: 0.30 } },
+    { id: 'N06', name: '血饮狂刀', rarity: 2, kind: 'limited', uses: 2, desc: '接下来 2 场攻击附带 45% 吸血', mods: { lifestealPct: 0.45 } },
     // —— 本层类（主塔=整局；无尽=当前层） ——
     { id: 'G01', name: '力量祝福', rarity: 0, kind: 'limited', uses: 10, desc: '本层攻击 +12%', mods: { powerMul: 0.12 } },
     { id: 'G02', name: '生命祝福', rarity: 0, kind: 'limited', uses: 5, desc: '本层生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
@@ -385,10 +385,10 @@
     { id: 'C03', name: '猎侠者', rarity: 0, kind: 'permanent', desc: '对螳螂/仙鹤/熊猫伤害 +25%', mods: { dmgMulType: 0.25 } },
     { id: 'C04', name: '生命源泉', rarity: 1, kind: 'permanent', desc: '每通过一层回复 15% 最大生命', mods: { layerHealPct: 0.15 } },
     { id: 'C05', name: '坚韧壁垒', rarity: 1, kind: 'permanent', desc: '每场战斗开局获得 15% 最大生命的护盾', mods: { shellPct: 0.15 } },
-    { id: 'C06', name: '猎杀时刻', rarity: 1, kind: 'permanent', stackable: true, desc: '每击杀 1 个敌人攻击 +2%（上限 +40%）；重复选取提升速率与上限', mods: { killPowerPct: 0.02, killPowerCap: 0.40 } },
+    { id: 'C06', name: '猎杀时刻', rarity: 1, kind: 'permanent', stackable: true, desc: '每击杀 1 个敌人攻击 +2%（上限 +40%）', mods: { killPowerPct: 0.02, killPowerCap: 0.40 } },
     { id: 'C07', name: '吞噬成长', rarity: 1, kind: 'permanent', stackable: true, desc: '每击杀 1 个敌人生命上限 +3% 并回复等量生命（上限 +45%）', mods: { killMaxHpPct: 0.03, killMaxHpCap: 0.45 } },
     { id: 'C08', name: '五层回响', rarity: 1, kind: 'permanent', desc: '每到 5 的倍数层，该层第 1 场开局回复 50% 最大生命', mods: { layer5HealPct: 0.50 } },
-    { id: 'C09', name: '逢十强化', rarity: 1, kind: 'permanent', desc: '在 10 的倍数层攻击 +20%、生命上限 +20%（仅该层）', mods: { x10Boost: 0.20 } },
+    { id: 'C09', name: '逢五强化', rarity: 1, kind: 'permanent', desc: '在 5 的倍数层攻击 +30%、生命上限 +30%（仅该层）', mods: { x10Boost: 0.30 } },
     { id: 'C10', name: '机制破解', rarity: 1, kind: 'permanent', desc: '对带专属机制的敌人伤害 +25%', mods: { dmgMulMech: 0.25 } },
     /* 第 4 项新增的跨层类型：续航 / 反伤 / 低血狂怒 / 暴击 / 闪避 / 速度 ——
      * 让「本局永久」这一档不再只有纯数值放大，选到就能改变打法。 */
@@ -396,32 +396,38 @@
     { id: 'C17', name: '战后续航·精', rarity: 2, kind: 'permanent', stackable: true, desc: '每场战斗胜利后回复 10% 最大生命（可叠加）', mods: { winHealPct: 0.10 } },
     { id: 'C18', name: '吸血精通', rarity: 1, kind: 'permanent', desc: '所有攻击附带 12% 吸血', mods: { lifestealPct: 0.12 } },
     { id: 'C19', name: '荆棘之甲', rarity: 1, kind: 'permanent', desc: '受到伤害时反弹 20% 给敌人', mods: { thornsPct: 0.20 } },
-    { id: 'C20', name: '狂怒', rarity: 2, kind: 'permanent', desc: '生命低于 35% 时攻击 +50%', mods: { lowHpPowerMul: 0.50, lowHpAt: 0.35 } },
+    { id: 'C20', name: '狂怒', rarity: 2, kind: 'permanent', desc: '生命低于 40% 时攻击 +50%', mods: { lowHpPowerMul: 0.50, lowHpAt: 0.40 } },
     { id: 'C21', name: '暴击精通', rarity: 0, kind: 'permanent', desc: '暴击率 +10%', mods: { critBonus: 10 } },
     { id: 'C22', name: '闪避精通', rarity: 0, kind: 'permanent', desc: '闪避 +8%', mods: { dodgeBonus: 8 } },
     { id: 'C23', name: '轻身术', rarity: 0, kind: 'permanent', desc: '速度 +15%', mods: { speedMul: 0.15 } },
     { id: 'C11', name: '以战养战', rarity: 2, kind: 'permanent', stackable: true, desc: '每击杀 1 个敌人回复 5% 最大生命', mods: { killHealPct: 0.05 } },
-    { id: 'C12', name: '登顶者', rarity: 2, kind: 'permanent', stackable: true, desc: '从 20 层起，每通过一层攻击永久 +4%', mods: { perLayerPowerAfter20: 0.04 } },
+    { id: 'C12', name: '登顶者', rarity: 2, kind: 'permanent', stackable: true, desc: '从 10 层起，每通过一层攻击永久 +5%', mods: { perLayerPowerAfter20: 0.05 } },
     { id: 'C13', name: '精英杀手', rarity: 2, kind: 'permanent', desc: '对精英伤害 +40%；击败精英后回复 20% 最大生命', mods: { dmgMulElite: 0.40, eliteHealAfter: 0.20 } },
-    { id: 'C14', name: '不死鸟', rarity: 2, kind: 'permanent', desc: '每场战斗可复活一次（回复 50% 生命）', mods: { revivePct: 0.50 } },
+    { id: 'C14', name: '不死鸟', rarity: 3, kind: 'permanent', desc: '每层拥有一次复活甲（回复 50% 生命）', mods: { revivePct: 0.50 } },
     /* —— 第 1 项新增：与经济系统挂钩的 buff（仅无尽；instant 的拿到就结算，不占永久 5 格） —— */
     { id: 'E01', name: '立即进货', rarity: 1, kind: 'instant', endlessOnly: true, desc: '立刻开一次试炼商店（不影响 5 层一次的结算点）', mods: { openShop: 1 } },
-    { id: 'E02', name: '试炼补贴', rarity: 0, kind: 'instant', endlessOnly: true, desc: '立刻获得 40 试炼币', mods: { instantCoins: 40 } },
+    { id: 'E02', name: '试炼补贴', rarity: 0, kind: 'instant', endlessOnly: true, desc: '立刻获得 60 试炼币', mods: { instantCoins: 60 } },
     { id: 'E03', name: '财源滚滚', rarity: 1, kind: 'instant', endlessOnly: true, desc: '立刻获得 120 试炼币', mods: { instantCoins: 120 } },
     { id: 'E04', name: '全场五折', rarity: 1, kind: 'permanent', endlessOnly: true, desc: '下一个试炼商店里全部商品 5 折（进店时消耗）', mods: { shopDiscount: 0.5 } },
-    { id: 'E05', name: '战利品', rarity: 1, kind: 'limited', uses: 3, endlessOnly: true, desc: '接下来 3 场战斗的试炼币获取 +50%', mods: { coinBoostPct: 0.50 } },
-    { id: 'E06', name: '战利品·精', rarity: 2, kind: 'limited', uses: 3, endlessOnly: true, desc: '接下来 3 场战斗的试炼币获取 +120%', mods: { coinBoostPct: 1.20 } },
+    { id: 'E05', name: '战利品', rarity: 1, kind: 'limited', uses: 10, endlessOnly: true, desc: '接下来 10 场战斗的试炼币获取 +50%', mods: { coinBoostPct: 0.50 } },
+    { id: 'E06', name: '战利品·精', rarity: 2, kind: 'limited', uses: 10, endlessOnly: true, desc: '接下来 10 场战斗的试炼币获取 +120%', mods: { coinBoostPct: 1.20 } },
     /* 第 1 项：名贵手表（稀有 / 永久）—— 商店里不出售，但卖掉能换 200 试炼币；
      * C25 账本：每战斗获胜一次，自己（以及手表）的卖出价就涨一档。 */
+    /* 第 5 项补充：普通稀有度的永久小增益（直接加力/敏/速/生命，好上手） */
+    { id: 'C26', name: '蛮力', rarity: 0, kind: 'permanent', desc: '攻击 +6%', mods: { powerMul: 0.06 } },
+    { id: 'C27', name: '灵巧', rarity: 0, kind: 'permanent', desc: '敏捷 +8%', mods: { agilityMul: 0.08 } },
+    { id: 'C28', name: '疾行', rarity: 0, kind: 'permanent', desc: '速度 +8%', mods: { speedMul: 0.08 } },
+    { id: 'C29', name: '体质', rarity: 0, kind: 'permanent', desc: '生命上限 +10%（卖掉/替换后仍然保留）', mods: { maxHpMul: 0.10 } },
     { id: 'C24', name: '名贵手表', rarity: 1, kind: 'permanent', shopBanned: true,
       desc: '商店里买不到；在试炼商店卖出可得 200 试炼币', mods: { sellValue: 200 } },
-    { id: 'C25', name: '战利品账本', rarity: 2, kind: 'permanent',
+    { id: 'C25', name: '战利品账本', rarity: 1, kind: 'permanent',
       desc: '每场战斗胜利后，卖出增益的收益 +25 试炼币（本局累计）', mods: { sellGrowthPerWin: 25 } },
-    { id: 'C15', name: '增幅水晶', rarity: 2, scope: 'run', desc: '本局内所有 buff 效果 +40%', mods: { globalMul: 1.40 } },
+    { id: 'C15', name: '增幅水晶', rarity: 2, kind: 'permanent', desc: '本局内所有 buff 效果 +40%', mods: { globalMul: 1.40 } },
   ]);
   const BUFF_BY_ID = Object.fromEntries(BUFFS.map((b) => [b.id, b]));
-  const RARITY_NAME = ['普通', '稀有', '史诗'];
-  const RARITY_WEIGHTS = [62, 28, 10];           // 每个随机槽独立 Roll
+  /* 第 3 项：稀有度加一档「传奇」。越高稀有度权重越低，但不悬殊（普通 56 / 稀有 26 / 史诗 14 / 传奇 4）。 */
+  const RARITY_NAME = ['普通', '稀有', '史诗', '传奇'];
+  const RARITY_WEIGHTS = [56, 26, 14, 4];        // 每个随机槽独立 Roll
   /* 第 4 项：场间只剩一次选择，所以那一次的大回血要够用。
    * 第 4 项需求：从 80% 下调到 50%（配合「每场自动回血」，整层续航仍够，
    * 但「回血 or 拿 buff」这次决策不再默认选回血）。 */
@@ -462,12 +468,23 @@
     return { kind: 'pill', propId: last.id, count: 1 };
   }
   /** 主塔池 = 单场 + 本层（15 个）；无尽池 = 全部 30 个。 */
+  /* 第 4 项：池子用 tag 显式标注（谁进哪个池一眼能看出来）：
+   *   'choice' 休整点/场间四选一能抽到
+   *   'shop'   试炼商店货架能上架
+   *   'tower'  挑战塔的场间四选一能抽到（限次 & 非无尽专属）
+   * 名贵手表这类「只在别处出现」的靠 shopBanned 排除出 shop，但仍留在 choice。 */
+  const POOLS = Object.freeze({
+    choice: (b) => true,
+    shop: (b) => !b.shopBanned && b.kind !== 'instant',
+    tower: (b) => b.kind === 'limited' && !b.endlessOnly,
+  });
+  const inPool = (tag, buff) => !!(POOLS[tag] && POOLS[tag](buff));
   /* 主塔池 = 限次类（不含无尽专属的经济 buff）；无尽池 = 全部。
    * 永久类只进无尽（主塔一层一结算，没有「本局永久」的位置）。 */
-  const towerPool = BUFFS.filter((b) => b.kind === 'limited' && !b.endlessOnly);
+  const towerPool = BUFFS.filter((b) => inPool('tower', b));
   const endlessPool = BUFFS.slice();
   /** 商店货架池：去掉「商店里不卖」的（名贵手表）。 */
-  const shopPool = BUFFS.filter((b) => !b.shopBanned);
+  const shopPool = BUFFS.filter((b) => inPool('shop', b));
   /** 永久增益的持有上限（第 1 项：无尽主界面最多 5 个，同名叠层仍算 1 格）。 */
   const PERMANENT_SLOTS = 5;
   /* 第 1 项：无尽塔的「三种属性药丸」槽位 —— 消耗背包里的药丸，塔内持续 20 场战斗。
@@ -496,7 +513,7 @@
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
     FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, bossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,
     ENDLESS_LAYER_HEAL_PCT, MILESTONE_EVERY, MILESTONE_BOOK_COUNT, rollMilestone, PERMANENT_SLOTS,
-    PILL_BATTLES, PILL_SLOTS, pillEffect, shopPool,
+    PILL_BATTLES, PILL_SLOTS, pillEffect, shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,

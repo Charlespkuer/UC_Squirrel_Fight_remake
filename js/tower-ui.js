@@ -12,7 +12,7 @@
   function back(root, handler, label) { const el = on(root, 'home', handler); if (el) el.textContent = label || '返回'; }
   function notice(text, buttons) { C().modal('提示', '<p>' + esc(text) + '</p>', buttons || [{ label: '知道了' }], { small: true }); }
 
-  const RARITY = ['普通', '稀有', '史诗'];
+  const RARITY = TowerData.RARITY_NAME || ['普通', '稀有', '史诗', '传奇'];
   const SCOPE = { limited: '限次', permanent: '永久', instant: '即时' };
   const MECH_NAME = { thorns: '荆棘反伤', regen: '自愈回复', lifesteal: '吸血', shell: '护盾', devour: '吞噬成长' };
   const MECH_DESC = {
@@ -378,7 +378,12 @@
         carryBar(run.carry, '血量', 'endless-hp') +
         '<div class="tower-rule mech-bar"><b>当前遭遇的机制</b>' + (info.mechs && info.mechs.length
           ? info.mechs.map((m) => '<span class="mech-chip">' + esc(MECH_NAME[m] || m) + '<i>' + esc(MECH_DESC[m] || '') + '</i></span>').join('')
-          : '<span class="mech-none">本段没有额外机制（第 1 段）</span>') + '</div>' +
+          : '<span class="mech-none">本段没有额外机制（第 1 段）</span>') +
+          /* 第 6 项：三侠大招留下的「贯穿本层」削弱也挂在这一行上（原来只在下面单独一块） */
+          (run.debuffs && run.debuffs.length
+            ? run.debuffs.map((d) => '<span class="mech-chip debuff-chip" style="--hero-color:' + esc(d.color || '#a8453a') + '">' +
+                esc(d.short || d.hero || '大侠') + esc(d.name || '削弱') + '<i>' + esc(d.text || '') + '</i></span>').join('')
+            : '') + '</div>' +
         choicesHtml + buffPanelsHtml('endless') + '</div>' +
         '<div class="endless-foes">' +
         '<ol class="tower-plan vertical">' + foeRows + '</ol></div></div>' +
@@ -510,7 +515,7 @@
   /* 场间选 buff（第 4 项）：改成「海克斯」式 —— 卡片自己就是框，
    * 外面不再套一层 modal 的奶油底板（.choice-dialog.hex 把 modal 本身做成透明的）。
    * 卡片按稀有度上色：普通/稀有/史诗 + 回血。 */
-  const RARITY_CLASS = ['r0', 'r1', 'r2'];
+  const RARITY_CLASS = ['r0', 'r1', 'r2', 'r3'];
   function choiceCard(c, i) {
     if (c.type === 'heal') {
       return '<button type="button" class="hex-card heal" data-choice="' + i + '">' +

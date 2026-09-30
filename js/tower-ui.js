@@ -13,7 +13,8 @@
   function notice(text, buttons) { C().modal('提示', '<p>' + esc(text) + '</p>', buttons || [{ label: '知道了' }], { small: true }); }
 
   const RARITY = ['普通', '稀有', '史诗'];
-  const SCOPE = { battle: '单场', layer: '本层', run: '跨层' };
+  const SCOPE = { limited: '限次', permanent: '永久', instant: '即时' };
+  let replaceTarget = null;   // 第 1 项：永久增益满 5 格时，选中的「要被替换掉」的那个
 
   // ---------- 通用小件 ----------
   function carryBar(carry) {
@@ -127,13 +128,36 @@
   }
   function buffTag(b, stacks) {
     return '<span class="buff-tag r' + b.rarity + '" title="' + esc(b.desc) + '">' + esc(b.name) +
-      '<i>' + SCOPE[b.scope] + '</i>' + (stacks > 1 ? '<em>×' + stacks + '</em>' : '') + '</span>';
+      '<i>' + SCOPE[b.kind] + '</i>' + (stacks > 1 ? '<em>×' + stacks + '</em>' : '') + '</span>';
   }
   function ownedBuffsHtml(mode) {
     const list = Tower.ownedBuffs(mode);
     if (!list.length) return '';
     return '<div class="tower-buffs"><h4>本局构筑</h4><div class="buff-tags">' +
       list.map((b) => buffTag(b, b.stacks)).join('') + '</div></div>';
+  }
+  /** 第 1 项：无尽主界面的增益面板 —— 永久（最多 5 格）+ 限次（可开关、扣次用完即消失）。 */
+  function buffPanelsHtml(mode) {
+    const run = mode === 'tower' ? Tower.towerInfo().run : Tower.endlessInfo().run;
+    if (!run || mode !== 'endless') return '';
+    const list = Tower.ownedBuffs('endless');
+    const perm = list.filter((b) => b.kind === 'permanent');
+    const lim = list.filter((b) => b.kind === 'limited');
+    const cap = TowerData.PERMANENT_SLOTS || 5;
+    const permHtml = perm.length
+      ? perm.map((b) => '<span class="buff-tag r' + b.rarity + (b.id === replaceTarget ? ' replacing' : '') + '" data-replace="' + b.id + '" title="点一下选它作为要被替换掉的永久增益">' +
+          esc(b.name) + '<i>永久</i>' + (b.stacks > 1 ? '<em>×' + b.stacks + '</em>' : '') + '</span>').join('')
+      : '<span class="buff-empty">还没有永久增益（每层的休整点可以拿）</span>';
+    const limHtml = lim.length
+      ? lim.map((b) => '<button type="button" class="limit-tag r' + b.rarity + (b.on ? '' : ' off') + '" data-toggle="' + b.id + '">' +
+          '<b>' + esc(b.name) + '</b><i>' + (b.on ? '生效中' : '已关闭') + '</i><em>剩 ' + b.uses + ' 场</em></button>').join('')
+      : '<span class="buff-empty">还没有限次增益</span>';
+    return '<div class="tower-buffs endless-buffs">' +
+      '<h4>永久增益 <span class="buff-slot-count">' + perm.length + '/' + cap + '</span>' +
+      (replaceTarget ? '<span class="replace-hint">选一个要替换掉的（再点增益卡确认）</span>' : '') + '</h4>' +
+      '<div class="buff-tags">' + permHtml + '</div>' +
+      '<h4>限次增益 <span class="buff-slot-count">点一下开关</span></h4>' +
+      '<div class="buff-tags">' + limHtml + '</div></div>';
   }
   /** 本层削弱（第 5 项）：一张卡 = 来源大侠 + 名字 + 具体数值，
    *  颜色跟着来源走，战斗 HUD 的胶囊、选 buff 页的提示用的是同一份数据。 */
@@ -155,15 +179,17 @@
   const CURRENCY_PROP = { book: 23, ticket: 50 };
   function currencyHtml(mode) {
     const S = State.state();
-    const items = [];
+    // 第 3 项：无尽塔右上只留文字（试炼币 / 抽奖卷），不带图标、也不显示金松果
     if (mode === 'endless') {
       const run = Tower.endlessInfo().run;
-      if (run) items.push({ icon: 'images/classic/icons/prop-21.png', name: '试炼币', value: run.coins });
-      items.push({ icon: 'images/classic/icons/prop-50.png', name: '抽奖卷', value: S.props[CURRENCY_PROP.ticket] || 0 });
-    } else {
-      items.push({ icon: 'images/classic/icons/prop-23.png', name: '挑战书', value: S.props[CURRENCY_PROP.book] || 0 });
+      const items = [];
+      if (run) items.push({ name: '试炼币', value: run.coins });
+      items.push({ name: '抽奖卷', value: S.props[CURRENCY_PROP.ticket] || 0 });
+      return '<div class="tower-currency text-only">' + items.map((it) =>
+        '<span class="currency-item"><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';
     }
-    items.push({ icon: 'images/classic/icons/prop-1.png', name: '金松果', value: S.goldPoint });
+    const items = [{ icon: 'images/classic/icons/prop-23.png', name: '挑战书', value: S.props[CURRENCY_PROP.book] || 0 },
+      { icon: 'images/classic/icons/prop-1.png', name: '金松果', value: S.goldPoint }];
     return '<div class="tower-currency">' + items.map((it) =>
       '<span class="currency-item" data-live-gold="' + (it.name === '金松果' ? '1' : '') + '">' +
       '<img alt="" src="' + it.icon + '"><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';
@@ -257,12 +283,15 @@
     let main, footer = null;
     if (info.run) {
       const run = info.run;
-      const nextLabel = run.choices ? '场间休整（四选一）' : run.phase === 'shop' ? '进入试炼商店' : run.phase === 'checkpoint' ? '前往结算点' : '继续战斗';
+      const nextLabel = run.choices ? '先选一张增益' : run.phase === 'shop' ? '进入试炼商店' : run.phase === 'checkpoint' ? '前往结算点' : '继续战斗';
       main = '<h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
         currencyHtml('endless') +
         '<div class="tower-stats">分数 <b class="gold-text">' + run.score + '</b> · 试炼币 <b class="gold-text">' + run.coins + '</b> · 现在离场可得抽奖卷 <b>' + run.ticketsIfSettle + '</b> 张（需到 5 的倍数层结算）</div>' +
         '<div class="tower-stats small">第 ' + run.battleNo + '/' + run.battleCount + ' 场 · 本局最深 ' + run.bestLayer + ' 层</div>' +
-        carryBar(run.carry) + debuffPanel(run.debuffs) + ownedBuffsHtml('endless') +
+        carryBar(run.carry) + debuffPanel(run.debuffs) + buffPanelsHtml('endless') +
+        (run.choices ? '<div class="tower-buffs choice-onpage"><h4>休整点 · 选一张带走（' +
+          (TowerData.PERMANENT_SLOTS || 5) + ' 格永久已用 ' + Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent').length + '）</h4>' +
+          '<div class="hex-row">' + run.choices.map((c, i) => choiceCard(c, i)).join('') + '</div></div>' : '') +
         '<div class="tower-actions">' + C().btn(nextLabel, 'fight', 'gold') +
         (Tower.shopState() ? C().btn('试炼商店', 'shop', 'small') : '') +
         C().btn('放弃本局', 'abandon', 'muted small') + '</div>';
@@ -280,9 +309,37 @@
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
     bindTips(p);
     back(p, () => UI.runAction('stages'));
+    /* 第 1 项：休整点的选择改在**主界面**上做（不再弹窗）——
+     * 点卡片拿增益、点永久标签选「要被替换掉的」、点限次标签开关。 */
+    p.querySelectorAll('[data-choice]').forEach((el) => {
+      el.onclick = () => {
+        const index = Number(el.dataset.choice);
+        const res = Tower.pickChoice('endless', index, replaceTarget);
+        if (res && res.needsReplace) {
+          notice('永久增益已满 5 个：先在上面「永久增益」里点一个要被替换掉的，再点这张卡。');
+          openEndless();
+          return;
+        }
+        replaceTarget = null;
+        if (res && res.ok && res.instant) {
+          if (res.coins) notice('试炼币 +' + res.coins);
+          if (res.shop) { openShop(true); return; }
+        }
+        openEndless();
+      };
+    });
+    p.querySelectorAll('[data-toggle]').forEach((el) => {
+      el.onclick = () => { Tower.toggleLimited(el.dataset.toggle); openEndless(); };
+    });
+    p.querySelectorAll('[data-replace]').forEach((el) => {
+      el.onclick = () => {
+        replaceTarget = replaceTarget === el.dataset.replace ? null : el.dataset.replace;
+        openEndless();
+      };
+    });
     on(p, 'fight', () => {
       if (info.run) {
-        if (info.run.choices) { offerChoice('endless', info.run.choices); return; }
+        if (info.run.choices) { notice('先在下面选一张增益（休整点）。'); return; }
         if (info.run.phase === 'shop') { openShop(); return; }
         if (info.run.phase === 'checkpoint') { openCheckpoint(); return; }
         fight('endless');
@@ -376,7 +433,7 @@
       '<span class="hex-ribbon">' + RARITY[b.rarity] + '</span>' +
       '<span class="hex-emblem">' + (b.rarity === 2 ? '★' : b.rarity === 1 ? '◆' : '●') + '</span>' +
       '<b class="hex-name">' + esc(b.name) + '</b>' +
-      '<span class="hex-scope">' + SCOPE[b.scope] + '</span>' +
+      '<span class="hex-scope">' + SCOPE[b.kind] + (b.kind === 'limited' ? ' · ' + (b.uses || 1) + ' 场' : '') + '</span>' +
       '<span class="hex-desc">' + esc(b.desc) + '</span></button>';
   }
   function offerChoice(mode, choices) {
@@ -479,9 +536,9 @@
     const rarityCls = (r) => 'r' + r;
     const slots = shop.slots.map((s, i) =>
       '<div class="shop-slot ' + rarityCls(s.rarity) + (s.sold ? ' sold' : '') + '"><b>' + esc(s.name) + '</b>' +
-      '<i>' + RARITY[s.rarity] + ' · ' + SCOPE[s.scope] + '</i><span>' + esc(s.desc) + '</span>' +
+      '<i>' + RARITY[s.rarity] + ' · ' + (SCOPE[s.kind] || '增益') + '</i><span>' + esc(s.desc) + '</span>' +
       (s.sold ? '<em>已购入</em>' : C().btn(s.price + ' 币', 'buy' + i, 'small gold')) + '</div>').join('');
-    const owned = Tower.ownedBuffs('endless').filter((b) => b.scope !== 'battle');
+    const owned = Tower.ownedBuffs('endless').filter((b) => b.kind !== 'instant');
     const sellRows = owned.length ? owned.map((b) =>
       '<div class="shop-sell-row">' + buffTag(b, b.stacks) + C().btn('卖出 +' + b.sellPrice, 'sell' + b.id, 'tiny muted') + '</div>').join('') :
       '<div class="small-label">还没有可出售的本层/跨层增益</div>';

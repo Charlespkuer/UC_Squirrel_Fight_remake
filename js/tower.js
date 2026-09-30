@@ -73,9 +73,23 @@
     run.layer = layer;
     run.idx = Math.max(0, Math.min(run.plan.length - 1, Math.floor(Number(run.idx) || 0)));
     run.carry = Math.max(0.01, clamp01(run.carry == null ? 1 : run.carry));
-    run.battleBuffs = cleanBuffs(run.battleBuffs);
-    run.buffs = cleanBuffs(run.buffs);
-    run.layerBuffs = cleanBuffs(run.layerBuffs);
+    /* 第 1 项新模型：permanent（永久，上限 5 格）/ limited（限次，带剩余次数与开关）。
+     * 旧档只有 battleBuffs / layerBuffs / buffs：按旧 scope 迁移到新结构，坏值照旧丢弃。 */
+    if (!Array.isArray(run.permanent) || !Array.isArray(run.limited)) {
+      const oldBattle = cleanBuffs(run.battleBuffs), oldLayer = cleanBuffs(run.layerBuffs), oldRun = cleanBuffs(run.buffs);
+      run.permanent = oldRun.filter((b) => D().BUFF_BY_ID[b.id] && D().BUFF_BY_ID[b.id].kind === 'permanent')
+        .concat(oldLayer.filter((b) => D().BUFF_BY_ID[b.id] && D().BUFF_BY_ID[b.id].kind === 'permanent'));
+      run.limited = oldBattle.concat(oldLayer).filter((b) => D().BUFF_BY_ID[b.id] && D().BUFF_BY_ID[b.id].kind === 'limited')
+        .map((b) => ({ id: b.id, stacks: b.stacks, uses: Number(b.uses) || D().BUFF_BY_ID[b.id].uses || 1, on: b.on !== false }));
+    }
+    run.permanent = cleanBuffs(run.permanent).slice(0, D().PERMANENT_SLOTS || 5);
+    run.limited = (Array.isArray(run.limited) ? run.limited : []).filter((b) => b && D().BUFF_BY_ID[b.id] && D().BUFF_BY_ID[b.id].kind === 'limited')
+      .map((b) => ({ id: b.id, stacks: Math.max(1, Math.min(D().STACK_MAX, Math.floor(Number(b.stacks) || 1))),
+        uses: Math.max(0, Math.floor(Number(b.uses) || 0)), on: b.on !== false }))
+      .filter((b) => b.uses > 0);
+    // 主塔：本层类按整层算（不给它扣光的可能），单场类仍是 1 次
+    if (run.mode === 'tower') run.limited = run.limited.map((b) => Object.assign(b, { uses: (D().BUFF_BY_ID[b.id].uses || 1) > 1 ? 99 : 1, on: true }));
+    if (!Array.isArray(run.buffs)) run.buffs = [];
     // 注意：attempt/choices 的作废只在读档时做（state.js normalizeSave），
     // 这里是每次访问都会跑的深校验，不能动进行中的战斗令牌。
     if (mode === 'tower') run.pot = Math.max(0, Math.floor(Number(run.pot) || 0));
@@ -139,7 +153,7 @@
 
   // ---------- buff 聚合 ----------
   function ownedEntry(run, id) {
-    for (const list of [run.battleBuffs, run.layerBuffs, run.buffs]) {
+    for (const list of [run.permanent || [], run.limited || []]) {
       const found = (list || []).find((b) => b.id === id);
       if (found) return found;
     }
@@ -150,10 +164,15 @@
     const st = stacksOf(run, 'C15');
     return st ? Math.pow(D().BUFF_BY_ID.C15.mods.globalMul, st) : 1;
   }
+  /** 生效中的 buff：永久全部生效；限次只在「开关打开且还有次数」时生效。 */
   function eachBuff(run, fn) {
-    for (const list of [run.battleBuffs, run.layerBuffs, run.buffs]) {
-      for (const b of list || []) fn(D().BUFF_BY_ID[b.id], b.stacks);
-    }
+    for (const b of run.permanent || []) fn(D().BUFF_BY_ID[b.id], b.stacks);
+    for (const b of run.limited || []) { if (b.on === false || !(b.uses > 0)) continue; fn(D().BUFF_BY_ID[b.id], b.stacks); }
+  }
+  /** 限次 buff 打完一场扣 1 次，扣完自动消失（第 1 项）。 */
+  function consumeLimited(run) {
+    for (const b of run.limited || []) { if (b.on !== false && b.uses > 0) b.uses--; }
+    run.limited = (run.limited || []).filter((b) => b.uses > 0);
   }
   /**
    * 聚合当前生效的 buff 为本场战斗的修正。
@@ -292,7 +311,8 @@
       if (s.props[BOOK_PROP] <= 0) delete s.props[BOOK_PROP];
     }
     const layer = t.maxLayer + 1;
-    t.run = { layer, plan: buildPlan(layer), idx: 0, carry: 1, buffs: [], battleBuffs: [], debuffs: [], pot: 0, choices: null };
+    t.run = { mode: 'tower', layer, plan: buildPlan(layer), idx: 0, carry: 1,
+      permanent: [], limited: [], buffs: [], debuffs: [], pot: 0, choices: null };
     save();
     return { ok: true, layer };
   }
@@ -302,7 +322,8 @@
     const e = endless();
     if (e.run) return { ok: false, msg: '本局无尽挑战尚未结束。' };
     const run = { layer: 1, plan: buildPlan(1), idx: 0, carry: 1,
-      buffs: [], layerBuffs: [], battleBuffs: [], coins: 0, score: 0, bestLayer: 0,
+      mode: 'endless', permanent: [], limited: [], coins: 0, score: 0, bestLayer: 0,
+      coinBoost: null, shopDiscount: false,
       killPower: 0, killMaxHp: 0, bonusPower: 0, shop: null, phase: null, choices: null, debuffs: [] };
     if (debug('endlessCoin')) run.coins = 9999;
     e.run = run;
@@ -450,7 +471,6 @@
     const isElite = entry.kind === 'warlord';   // x10 第 5 场的狂战松鼠
     if (!win) return mode === 'tower' ? towerFail(run) : endlessFail(run);
     run.carry = Math.max(0.01, clamp01(carryRatio));
-    run.battleBuffs = [];                                // 单场类 buff 打完即消耗
     const out = { ok: true, win: true, elite: isElite, entryKind: entry.kind };
     // 三侠的大招会给玩家留一层削弱（第 3 项）
     const debuff = applyHeroDebuff(run, entry, result);
@@ -470,7 +490,9 @@
         out.winHeal = winHeal;
       }
       run.score += D().SCORE.battle;
-      run.coins += D().COINS.battle;
+      /* 第 1 项：试炼币加成（战利品类限次 buff，remaining 次数在下面统一扣） */
+      const coinMul = 1 + (runModTotal(run, 'coinBoostPct') || 0);
+      run.coins += Math.round(D().COINS.battle * coinMul);
       // 击杀叠层类（基础 → 叠层 → C15）
       const c06 = stacksOf(run, 'C06');
       if (c06) run.killPower = Math.min(0.20 * c06 * g, run.killPower + 0.01 * c06 * g);
@@ -493,8 +515,13 @@
     /* 第 3 项：场间选择从「每场都给」压成「只在第 4 场（题面）前给一次」，
      * x10 层（5 场）在第 5 场精英前再给一次。这样每层只有 1~2 个决策点，
      * 而且是在读过三侠的削弱之后才选，选项才有分量。 */
+    /* 第 1 项：限次 buff 打完一场扣 1 次，扣完自动消失（无尽；主塔的「本层类」按整层算）。
+     * 顺序：先按本场生效的数值结算，再扣次数。 */
+    consumeLimited(run);   // 主塔的单场类（1 次）打完即消耗，本层类 99 次不会耗尽；无尽按各自的次数扣
     if (won === 3 || (won === 4 && len === 5)) run.choices = rollChoices(mode, run);
     out.choices = run.choices;
+    out.permanent = (run.permanent || []).length;
+    out.limited = (run.limited || []).map((b) => ({ id: b.id, uses: b.uses, on: b.on }));
     save();
     return out;
   }
@@ -510,8 +537,7 @@
     run.failedAt = run.idx;
     // 挂在「第 4 场（题面）前」的那次选择：重试前可以重新选一张
     if (run.idx === 3 || (run.idx === 4 && run.plan.length === 5)) {
-      run.buffs = [];
-      run.battleBuffs = [];
+      run.limited = [];
       run.choices = rollChoices('tower', run);
     }
     tower().retry = { layer, date: State.localDate() };
@@ -592,7 +618,7 @@
     run.score += D().SCORE.layer;
     run.coins += D().COINS.layer;
     run.bestLayer = Math.max(run.bestLayer, run.layer);
-    run.layerBuffs = [];                                 // 本层类 buff 过层清空
+    run.limited = [];                                   // 本层类 buff 过层清空（第 1 项：限次列表）
     const c04 = stacksOf(run, 'C04');                    // 生命源泉：每过一层回血
     if (c04) run.carry = Math.min(1, run.carry + D().BUFF_BY_ID.C04.mods.layerHealPct * g);
     const c12 = stacksOf(run, 'C12');                    // 登顶者：20 层起每过一层攻击成长
@@ -662,35 +688,80 @@
     for (let i = 0; i < w.length; i++) { if (r < w[i]) return i; r -= w[i]; }
     return 0;
   }
-  function pickChoice(mode, index) {
+  function pickChoice(mode, index, replaceId) {
     const run = mode === 'tower' ? tower().run : endless().run;
     if (!run || !run.choices) return { ok: false };
     const choice = run.choices[index];
     if (!choice) return { ok: false };
-    run.choices = null;
     if (choice.type === 'heal') {
+      run.choices = null;
       run.carry = Math.min(1, run.carry + D().FIXED_HEAL_PCT);
       save();
       return { ok: true, heal: D().FIXED_HEAL_PCT };
     }
-    addBuff(run, choice.id);
+    const res = addBuff(run, choice.id, replaceId);
+    if (!res.ok) return res;                     // 永久格子满了：保留 choices，让界面去选替换
+    run.choices = null;
     save();
-    return { ok: true, buff: D().BUFF_BY_ID[choice.id] };
+    return res;
   }
-  function addBuff(run, id) {
+  /** 加一个 buff。永久类要过 5 格上限（满则返回 needsReplace，由界面选一个替换）。 */
+  function addBuff(run, id, replaceId) {
     const buff = D().BUFF_BY_ID[id];
-    if (!buff) return;
-    const owned = ownedEntry(run, id);
-    if (owned) { owned.stacks = Math.min(D().STACK_MAX, owned.stacks + 1); return; }
-    const entry = { id, stacks: 1 };
-    if (buff.scope === 'battle') run.battleBuffs.push(entry);
-    else if (buff.scope === 'layer') (run.layerBuffs || run.buffs).push(entry);   // 主塔：本层=整局，存 buffs
-    else run.buffs.push(entry);
+    if (!buff) return { ok: false, msg: '没有这个增益' };
+    if (buff.kind === 'instant') return applyInstant(run, buff);
+    const listKey = buff.kind === 'permanent' ? 'permanent' : 'limited';
+    const list = run[listKey] || (run[listKey] = []);
+    const owned = list.find((b) => b.id === id);
+    if (owned) {
+      owned.stacks = Math.min(D().STACK_MAX, owned.stacks + 1);
+      if (buff.kind === 'limited') { owned.uses += buff.uses || 1; owned.on = true; }
+      return { ok: true, buff, stacks: owned.stacks };
+    }
+    if (buff.kind === 'permanent' && list.length >= (D().PERMANENT_SLOTS || 5)) {
+      if (!replaceId) return { ok: false, needsReplace: true, buff, msg: '永久增益已满 5 个，先选一个替换掉' };
+      const at = list.findIndex((b) => b.id === replaceId);
+      if (at < 0) return { ok: false, needsReplace: true, buff, msg: '要替换的增益不存在' };
+      list.splice(at, 1);
+    }
+    const towerLimitedUses = run.mode === 'tower' && (buff.uses || 1) > 1 ? 99 : (buff.uses || 1);
+    list.push(buff.kind === 'limited'
+      ? { id, stacks: 1, uses: towerLimitedUses, on: true }
+      : { id, stacks: 1 });
+    return { ok: true, buff };
   }
-
+  /** 瞬时经济 buff（立即进货 / 立即得试炼币 / 全场五折）。 */
+  function applyInstant(run, buff) {
+    const m = buff.mods || {};
+    const out = { ok: true, buff, instant: true };
+    if (m.instantCoins) { run.coins = Math.max(0, (run.coins || 0) + m.instantCoins); out.coins = m.instantCoins; }
+    if (m.shopDiscount) { run.shopDiscount = true; out.discount = m.shopDiscount; }
+    if (m.openShop) {
+      // 立刻开一次商店：不动 5 层一次的结算点节奏（phase 用完即恢复）
+      run.shop = makeShop(run);
+      run.phase = 'shop';
+      out.shop = true;
+    }
+    save();
+    return out;
+  }
+  /** 限次 buff 的开关（第 1 项）。关掉就不生效、也不消耗次数。 */
+  function toggleLimited(id, on) {
+    const run = endless().run;
+    if (!run) return { ok: false };
+    const b = (run.limited || []).find((x) => x.id === id);
+    if (!b) return { ok: false };
+    b.on = on === undefined ? b.on === false : !!on;
+    save();
+    return { ok: true, id, on: b.on };
+  }
   // ---------- 无尽：试炼币商店 ----------
   function makeShop(run) {
-    return { layer: run.layer, slots: rollShopSlots(run), healSold: false, rerollFree: true };
+    /* 第 1 项：「全场五折」在开店那一刻生效一次（价格在 shopState 里按 run.shopDiscount 打折），
+     * 然后用掉标记 —— 所以「立即进货」开的临时店也会吃到折扣。 */
+    const shop = { layer: run.layer, slots: rollShopSlots(run), healSold: false, rerollFree: true,
+      discount: !!run.shopDiscount };
+    return shop;
   }
   function rollShopSlots(run) {
     const pool = D().endlessPool, slots = [], taken = new Set();
@@ -710,7 +781,7 @@
     return { coins: run.coins, layer: run.shop.layer, healSold: run.shop.healSold, rerollFree: run.shop.rerollFree,
       rerollPrice: D().SHOP.rerollPrice, healPrice: D().SHOP.healPrice, healPct: D().SHOP.healPct,
       slots: run.shop.slots.map((s) => { const b = D().BUFF_BY_ID[s.id];
-        return { id: s.id, sold: s.sold, name: b.name, desc: b.desc, rarity: b.rarity, scope: b.scope, price: D().shopPrice(b) }; }) };
+        return { id: s.id, sold: s.sold, name: b.name, desc: b.desc, rarity: b.rarity, kind: b.kind, price: shopPriceOf(b) }; }) };
   }
   function buyShopSlot(index) {
     const run = endless().run;
@@ -718,13 +789,18 @@
     const slot = run.shop.slots[index];
     if (!slot || slot.sold) return { ok: false };
     const buff = D().BUFF_BY_ID[slot.id];
-    const price = D().shopPrice(buff);
+    // 永久增益满 5 格时先让玩家去替换（商店里不弹替换面板，避免一次点出两层交互）
+    if (buff.kind === 'permanent' && (run.permanent || []).length >= (D().PERMANENT_SLOTS || 5) &&
+        !(run.permanent || []).some((b) => b.id === buff.id)) {
+      return { ok: false, needsReplace: true, msg: '永久增益已满 5 个，先在主界面替换一个再来买。' };
+    }
+    const price = shopPriceOf(buff);
     if (run.coins < price) return { ok: false, msg: '试炼币不足。' };
     run.coins -= price;
     slot.sold = true;
-    addBuff(run, slot.id);
+    const res = addBuff(run, slot.id);
     save();
-    return { ok: true, buff, price };
+    return { ok: true, buff, price, instant: !!(res && res.instant) };
   }
   function buyShopHeal() {
     const run = endless().run;
@@ -749,12 +825,18 @@
     return { ok: true };
   }
   /** 卖出一个已拥有的本层/跨层 buff（回收价 = 买入价 40%）；击杀/层数成长累积值保留。 */
+  /** 第 1 项：全场五折 —— 进店时把价格乘上折扣并消耗掉这个标记。 */
+  function shopPriceOf(buff) {
+    const run = endless().run;
+    const base = D().shopPrice(buff);
+    return run && run.shopDiscount ? Math.max(1, Math.round(base * 0.5)) : base;
+  }
   function sellBuff(id) {
     const run = endless().run;
     if (!run || !run.shop) return { ok: false };
     const buff = D().BUFF_BY_ID[id];
-    if (!buff || buff.scope === 'battle') return { ok: false };
-    for (const list of [run.layerBuffs, run.buffs]) {
+    if (!buff || buff.kind === 'limited') return { ok: false };
+    for (const list of [run.permanent || [], run.limited || []]) {
       const i = (list || []).findIndex((b) => b.id === id);
       if (i >= 0) {
         list.splice(i, 1);
@@ -768,6 +850,7 @@
   }
   /** 商店逛完：进入结算点（每 5 层的固定流程 商店 → 结算）。 */
   function closeShop() {
+    { const r = endless().run; if (r && r.shop && r.shop.discount) { r.shopDiscount = false; r.shop.discount = false; } }
     const run = endless().run;
     if (!run || run.phase !== 'shop') return { ok: false };
     run.phase = 'checkpoint';
@@ -858,18 +941,20 @@
   function ownedBuffs(mode) {
     const run = mode === 'tower' ? tower().run : endless().run;
     if (!run) return [];
-    const scopeName = { battle: '单场', layer: '本层', run: '跨层' };
+    const scopeName = { limited: '限次', permanent: '永久', instant: '即时' };
     const list = [];
     eachBuff(run, (buff, stacks) => list.push({ id: buff.id, name: buff.name, desc: buff.desc, rarity: buff.rarity,
-      scope: buff.scope, scopeName: scopeName[buff.scope], stacks,
-      sellable: buff.scope !== 'battle' && !!run.shop, sellPrice: Math.max(1, Math.round(D().shopPrice(buff) * D().SHOP.sellBack)) }));
+      kind: buff.kind, scopeName: scopeName[buff.kind], stacks,
+      uses: buff.kind === 'limited' ? (ownedEntry(run, buff.id) || {}).uses : undefined,
+      on: buff.kind === 'limited' ? (ownedEntry(run, buff.id) || {}).on !== false : true,
+      sellable: !!run.shop, sellPrice: Math.max(1, Math.round(D().shopPrice(buff) * D().SHOP.sellBack)) }));
     return list;
   }
 
   window.Tower = {
     unlocked, towerInfo, endlessInfo, preview, ownedBuffs,
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,
-    pickChoice,
+    pickChoice, toggleLimited, addBuff, applyInstant,
     shopState, buyShopSlot, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp,
     checkpointInfo, settleEndless, continueEndless,
     // 调试

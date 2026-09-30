@@ -285,16 +285,16 @@ test('天梯胜利夺杯为明确离线概率，失败不会夺杯', () => {
   g.c.ClassicExtras.rank(); g.click('rank-fight'); g.settle(1, 1); assert.equal(s.goldCup, 7);
 });
 
-test('第 2 项：天梯匹配等级只跟金杯数挂钩，70 级封顶', () => {
+test('第 2 项：天梯匹配等级只跟积分挂钩，70 级封顶', () => {
   const g = setup(), s = g.c.State.state(); s.level = 30; s.joinRankCount = 0;
   const E = g.c.ClassicExtras.rankFoeExpectLevel;
-  assert.equal(E(0), 30, '0 杯从 30 级档起步');
-  assert.equal(E(150), 40, '每 15 杯 +1 级');
-  assert.equal(E(600), 70, '600 杯到顶');
+  assert.equal(E(1500), 30, '1500 分（初始分）从 30 级档起步');
+  assert.equal(E(1750), 40, '每 +25 分 +1 级');
+  assert.equal(E(2500), 70, '2500 分到顶');
   assert.equal(E(99999), 70, '封顶 70 级');
   // 匹配到的实际等级围绕期望值抖动，且绝不超过 70
   g.math.random = () => 0.5;
-  assert.equal(g.c.ClassicExtras.rankFoeLevel(150), 40, '随机取中值时正好等于期望');
+  assert.equal(g.c.ClassicExtras.rankFoeLevel(1750), 40, '随机取中值时正好等于期望');
   const levels = [];
   for (let i = 0; i < 40; i++) {
     g.math.random = () => (i % 20) / 20;
@@ -304,10 +304,16 @@ test('第 2 项：天梯匹配等级只跟金杯数挂钩，70 级封顶', () =>
   }
   assert.ok(Math.max(...levels) > 66 && Math.min(...levels) >= 66, '高杯时整体贴近满级：' + levels.slice(0, 5).join(','));
   // 实战：匹配到的对手 level 就是这条曲线给的等级（不再贴玩家等级）
-  s.level = 30; s.goldCup = 1500; s.goldPoint = 100; s.integral = 2000;
+  s.level = 30; s.goldCup = 0; s.goldPoint = 100; s.integral = 2600;
   g.math.random = () => 0.5;
   g.c.ClassicExtras.rank(); g.click('rank-fight');
-  assert.equal(g.battles.at(-1).foe.level, 70, '高杯 + 30 级玩家也会匹配到满级对手');
+  assert.equal(g.battles.at(-1).foe.level, 70, '高积分 + 30 级玩家也会匹配到满级对手');
+  // 金杯多寡不再影响匹配（花金杯不会让对手变软）
+  g.settle(0, 0);                                    // 收掉上一场，否则 rankAttempt 未清、按钮禁用
+  s.integral = 1500; s.goldCup = 5000;
+  g.c.State.save();
+  g.c.ClassicExtras.rank(); g.click('rank-fight');
+  assert.equal(g.battles.at(-1).foe.level, 30, '积分 1500 就还是 30 级档，跟金杯无关');
 });
 
 test('天梯周一至周六比赛，金杯商店每天都能打开，跨日旧按钮仍重新校验', () => {

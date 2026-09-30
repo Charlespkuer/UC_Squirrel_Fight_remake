@@ -136,17 +136,21 @@
    * 匹配到的实际等级在这个期望上做 ±4 的随机，但均值就是这条曲线，且永远不超过 70。
    * 于是「杯数」就是天梯的进度条：低杯期对手软、攒杯后一路对上满级对手；
    * 花金杯买商店奖励会降杯，也顺手降一点难度（原版攻略里金杯就是可花掉的货币）。 */
-  const RANK_LEVEL_BASE = 30, RANK_LEVEL_PER_CUP = 15, RANK_LEVEL_SPREAD = 4;
-  function rankFoeLevel(cups, cap) {
+  const RANK_LEVEL_BASE = 30, RANK_INTEGRAL_BASE = 1500, RANK_INTEGRAL_PER_LEVEL = 25, RANK_LEVEL_SPREAD = 4;
+  /** 第 2 项：匹配档位跟**积分**挂钩（积分是排行榜评分、不会被花掉）。
+   *  1500 分（天梯初始分）对应 30 级档，每多 25 分 +1 级，2500 分封顶到 70 级；
+   *  实际等级在期望上 ±4 抖动，但均值就是这条曲线，且永远不超过 70。 */
+  function rankFoeLevel(integral, cap) {
     const top = Math.max(1, Math.min(State.MAX_PLAYER_LEVEL || 70, Number(cap) || 70));
-    const expect = RANK_LEVEL_BASE + Math.max(0, Number(cups) || 0) / RANK_LEVEL_PER_CUP;
+    const expect = RANK_LEVEL_BASE + Math.max(0, (Number(integral) || 0) - RANK_INTEGRAL_BASE) / RANK_INTEGRAL_PER_LEVEL;
     const jitter = (Math.random() * 2 - 1) * RANK_LEVEL_SPREAD;
     return Math.max(1, Math.min(top, Math.round(expect + jitter)));
   }
   /** 只算期望值（给界面提示/测试用，不带随机）。 */
-  function rankFoeExpectLevel(cups, cap) {
+  function rankFoeExpectLevel(integral, cap) {
     const top = Math.max(1, Math.min(State.MAX_PLAYER_LEVEL || 70, Number(cap) || 70));
-    return Math.max(1, Math.min(top, Math.round(RANK_LEVEL_BASE + Math.max(0, Number(cups) || 0) / RANK_LEVEL_PER_CUP)));
+    return Math.max(1, Math.min(top, Math.round(
+      RANK_LEVEL_BASE + Math.max(0, (Number(integral) || 0) - RANK_INTEGRAL_BASE) / RANK_INTEGRAL_PER_LEVEL)));
   }
   /* 第 3 项：兑换次数重新按**周**重置 —— 《攻略》原文「狂战套装，永久属性，每种每周只能购买一件」。
    * 一周只能买 1 件，所以四项永久属性 + 狂战套装（以及 timesLimit=1 的卷轴）合计每周各 1 次；
@@ -179,7 +183,7 @@
       name: GData.AI_NAMES[n * 4], points: 1350 + n * 83, level: Math.min(cap, 34 + n * 6),
     }));
     entries.push({ name: s.name, points: s.integral, level: s.level, mine: true }); entries.sort((a, b) => b.points - a.points);
-    const p = C().page('challenge', 'arena', '<div class="extra-rank-layout"><div class="extra-rank-self">' + sprite(30) + '<h2>\u5929\u68af\u8d5b</h2><div class="extra-score">\u79ef\u5206 <b>' + s.integral + '</b></div><div class="extra-score">\u91d1\u676f <b>' + s.goldCup + '</b></div><div class="extra-score">\u5339\u914d\u6863\u4f4d <b>Lv' + rankFoeExpectLevel(s.goldCup) + '</b></div><p>\u4eca\u65e5\u5df2\u53c2\u8d5b ' + s.joinRankCount + ' / 20 \u573a<br>' + (rankSunday() ? '\u5468\u65e5\u4f11\u8d5b\uff08\u91d1\u676f\u5546\u5e97\u7167\u5e38\u5f00\u653e\uff09' : s.joinRankCount >= 20 ? '\u4eca\u65e5\u53c2\u8d5b\u6b21\u6570\u5df2\u7528\u5b8c' : s.joinRankCount < 10 ? '\u672c\u6b21\u514d\u8d39\uff0c\u524d10\u573a\u514d\u8d39' : '\u672c\u6b21\u6d88\u80175\u91d1\u677e\u679c') + '</p>' + button('\u5f00\u59cb\u5339\u914d', 'rank-fight', 'small gold') + button('\u91d1\u676f\u5546\u5e97', 'rank-shop', 'small') + '</div><div class="extra-rank-list"><h3>\u672c\u5730\u6a21\u62df\u6392\u884c\u699c</h3>' + entries.map((entry, i) => '<div class="extra-rank-row ' + (entry.mine ? 'mine' : '') + '"><span>' + (i + 1) + '</span><b>' + esc(entry.name) + (entry.mine ? '\uff08\u4f60\uff09' : '') + ' Lv' + (entry.level || 1) + '</b><strong>' + entry.points + '</strong></div>').join('') + note('\u5929\u68af\u8d5b\u5468\u4e00\u81f3\u5468\u516d\u8fdb\u884c\uff0c\u5468\u65e5\u4f11\u8d5b\uff1b\u91d1\u676f\u5546\u5e97\u6bcf\u5929\u5f00\u653e\u3002\u6bcf\u65e5\u6700\u591a20\u573a\uff0c\u524d10\u573a\u514d\u8d39\uff0c\u5176\u540e\u6bcf\u573a5\u91d1\u677e\u679c\u3002\u80dc\u5229\u5f973\u676f\uff0c\u843d\u8d25\u5f971\u676f\u3002\u79ef\u5206\u4e0e\u593a\u676f\u4e3a\u79bb\u7ebf\u6a21\u62df\uff1b\u83b7\u80dc\u670925%\u673a\u4f1a\u989d\u5916\u593a\u5f973\u676f\u3002\u5339\u914d\u5bf9\u624b\u7684\u7b49\u7ea7\u53ea\u8ddf\u91d1\u676f\u6570\u6302\u94a9\uff080 \u676f\u4ece 30 \u7ea7\u6863\u8d77\u6b65\u3001\u6bcf 15 \u676f +1 \u7ea7\u3001\u4e0a\u9650 70 \u7ea7\uff09\uff0c\u4e70\u5546\u5e97\u5956\u52b1\u82b1\u6389\u91d1\u676f\u4f1a\u8ba9\u5bf9\u624b\u53d8\u8f6f\u3002') + '</div></div>', { cls: 'extra-board rank-extra-board' });
+    const p = C().page('challenge', 'arena', '<div class="extra-rank-layout"><div class="extra-rank-self">' + sprite(30) + '<h2>\u5929\u68af\u8d5b</h2><div class="extra-score">\u79ef\u5206 <b>' + s.integral + '</b></div><div class="extra-score">\u91d1\u676f <b>' + s.goldCup + '</b></div><div class="extra-score">\u5339\u914d\u6863\u4f4d <b>Lv' + rankFoeExpectLevel(s.integral) + '</b></div><p>\u4eca\u65e5\u5df2\u53c2\u8d5b ' + s.joinRankCount + ' / 20 \u573a<br>' + (rankSunday() ? '\u5468\u65e5\u4f11\u8d5b\uff08\u91d1\u676f\u5546\u5e97\u7167\u5e38\u5f00\u653e\uff09' : s.joinRankCount >= 20 ? '\u4eca\u65e5\u53c2\u8d5b\u6b21\u6570\u5df2\u7528\u5b8c' : s.joinRankCount < 10 ? '\u672c\u6b21\u514d\u8d39\uff0c\u524d10\u573a\u514d\u8d39' : '\u672c\u6b21\u6d88\u80175\u91d1\u677e\u679c') + '</p>' + button('\u5f00\u59cb\u5339\u914d', 'rank-fight', 'small gold') + button('\u91d1\u676f\u5546\u5e97', 'rank-shop', 'small') + '</div><div class="extra-rank-list"><h3>\u672c\u5730\u6a21\u62df\u6392\u884c\u699c</h3>' + entries.map((entry, i) => '<div class="extra-rank-row ' + (entry.mine ? 'mine' : '') + '"><span>' + (i + 1) + '</span><b>' + esc(entry.name) + (entry.mine ? '\uff08\u4f60\uff09' : '') + ' Lv' + (entry.level || 1) + '</b><strong>' + entry.points + '</strong></div>').join('') + note('\u5929\u68af\u8d5b\u5468\u4e00\u81f3\u5468\u516d\u8fdb\u884c\uff0c\u5468\u65e5\u4f11\u8d5b\uff1b\u91d1\u676f\u5546\u5e97\u6bcf\u5929\u5f00\u653e\u3002\u6bcf\u65e5\u6700\u591a20\u573a\uff0c\u524d10\u573a\u514d\u8d39\uff0c\u5176\u540e\u6bcf\u573a5\u91d1\u677e\u679c\u3002\u80dc\u5229\u5f973\u676f\uff0c\u843d\u8d25\u5f971\u676f\u3002\u79ef\u5206\u4e0e\u593a\u676f\u4e3a\u79bb\u7ebf\u6a21\u62df\uff1b\u83b7\u80dc\u670925%\u673a\u4f1a\u989d\u5916\u593a\u5f973\u676f\u3002\u5339\u914d\u5bf9\u624b\u7684\u7b49\u7ea7\u53ea\u8ddf\u79ef\u5206\u6302\u94a9\uff081500 \u5206\u5bf9\u5e94 30 \u7ea7\u6863\u3001\u6bcf +25 \u5206 +1 \u7ea7\u3001\u4e0a\u9650 70 \u7ea7\uff09\uff0c\u79ef\u5206\u4e0d\u4f1a\u88ab\u82b1\u6389\uff0c\u6240\u4ee5\u6863\u4f4d\u53ea\u4f1a\u8ddf\u7740\u6218\u7ee9\u8d70\u3002') + '</div></div>', { cls: 'extra-board rank-extra-board' });
     back(p, arena, '\u8fd4\u56de\u7ade\u6280\u573a');
     on(p, 'rank-shop', () => rankShop(0));
     const match = on(p, 'rank-fight', () => {
@@ -202,7 +206,7 @@
       if (s.goldPoint < fee) { alert('\u7b2c11\u81f320\u573a\u6bcf\u573a\u9700\u89815\u91d1\u677e\u679c\uff0c\u5f53\u524d\u91d1\u677e\u679c\u4e0d\u8db3\u3002'); return; }
       const attempt = { owner: s, date: State.localDate(), fee, settled: false };
       rankAttempt = attempt; s.joinRankCount++; s.goldPoint -= fee; State.save();
-      const foe = State.genAI(rankFoeLevel(s.goldCup));   // 第 2 项：等级期望跟金杯数挂钩
+      const foe = State.genAI(rankFoeLevel(s.integral));   // 第 2 项：等级期望跟积分挂钩
       const interrupted = () => {
         if (attempt.settled || rankAttempt !== attempt || State.state() !== s) return;
         attempt.settled = true; rankAttempt = null;

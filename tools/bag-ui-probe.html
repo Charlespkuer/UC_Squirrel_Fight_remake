@@ -122,15 +122,56 @@ async function main() {
     State.save();
     TowerUI.openEndless(); await flush(300);
     P.entryCurrency = $$('#ui .tower-currency .currency-item').map((el) => el.textContent.trim());
+    P.entryCurrencyIcons = $$('#ui .tower-currency img').length;
     Tower.startEndlessRun();
     State.state().endless.run.coins = 77;
     TowerUI.openEndless(); await flush(420);
     P.towerPage = !!document.querySelector('#ui .tower-page');
+    P.runCurrency = $$('#ui .tower-currency .currency-item').map((el) => el.textContent.trim());
+    P.runCurrencyIcons = $$('#ui .tower-currency img').length;
+    P.runHasGold = /金松果/.test((document.querySelector('#ui .tower-currency') || {}).textContent || '');
+    P.buffPanels = $$('#ui .endless-buffs h4').map((h) => h.textContent.replace(/\s+/g, ' ').trim());
     P.currency = $$('#ui .tower-currency .currency-item').map((el) => el.textContent.trim());
     P.currencyBox = (() => { const el = document.querySelector('#ui .tower-currency'); if (!el) return null;
       const r = el.getBoundingClientRect(); return { top: Math.round(r.top), right: Math.round(r.right) }; })();
     P.ruleText = (document.querySelector('#ui .tower-rule') || {}).textContent;
     P.needsScroll = (() => { const el = document.querySelector('#ui .tower-main'); return el ? el.scrollHeight > el.clientHeight : null; })();
+    P.done = true; P.errors = window.__errs.slice(); return;
+  }
+  /* 第 1 项：休整点改在无尽主界面（战斗 3 场后在页面上选增益 / 开关限次） */
+  if (batch === 'rest') {
+    for (let id = 1; id <= 18; id++) S.stages[id] = { npcIndex: 3, passed: true };
+    S.level = 70; State.save();
+    Tower.startEndlessRun();
+    Main.startBattle = (foe, opts) => { if (opts && opts.onEnd) opts.onEnd(0, { hpAfter: [1, 0], maxHp: [1, 1], rounds: [] }); return Promise.resolve(); };
+    for (let i = 0; i < 12; i++) {
+      const r = State.state().endless.run;
+      if (!r) break;
+      if (r.choices) break;
+      if (r.phase === 'shop') { Tower.closeShop(); continue; }
+      if (r.phase === 'checkpoint') { Tower.continueEndless(); continue; }
+      const btn = $$('#ui [data-action="fight"]')[0];
+      if (!btn) { TowerUI.openEndless(); await flush(150); continue; }
+      btn.click(); await flush(200);
+      const again = $$('.classic-modal .uc-button').find((b) => /继续|下一场|继续战斗/.test(b.textContent));
+      if (again) { again.click(); await flush(200); }
+    }
+    TowerUI.openEndless(); await flush(300);
+    P.restChoiceCards = $$('#ui .choice-onpage [data-choice]').length;
+    P.restLabels = $$('#ui .choice-onpage .hex-name').map((el) => el.textContent.trim());
+    // 拿一张永久增益，再把永久格子填满、看替换提示
+    const first = $$('#ui .choice-onpage [data-choice]')[0];
+    if (first) { first.click(); await flush(250); }
+    P.afterPick = Tower.ownedBuffs('endless').map((b) => b.kind + ':' + b.name).join(',');
+    const run2 = State.state().endless.run;
+    P.permanentCount = (run2.permanent || []).length;
+    // 手动塞一个限次 buff，验证开关按钮
+    run2.limited.push({ id: 'N01', stacks: 1, uses: 2, on: true });
+    TowerUI.openEndless(); await flush(250);
+    P.limitTags = $$('#ui [data-toggle]').map((el) => el.textContent.replace(/\s+/g, ' ').trim());
+    const tgl = $$('#ui [data-toggle]')[0];
+    if (tgl) { tgl.click(); await flush(250); }
+    P.afterToggle = (State.state().endless.run.limited[0] || {}).on;
     P.done = true; P.errors = window.__errs.slice(); return;
   }
   /* 第 3 项：无尽第 10 层的里程碑奖励弹窗（用假的即时战斗把 9 层推到 10 层） */

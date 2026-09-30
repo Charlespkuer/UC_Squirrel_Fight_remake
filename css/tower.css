@@ -57,6 +57,8 @@
 .tower-currency { display: flex; align-items: center; justify-content: flex-end; gap: 18px; margin: 0 0 2px; }
 .tower-currency .currency-item { display: flex; align-items: center; gap: 5px; font-size: 19px; color: #7a4a18; }
 .tower-currency img { width: 30px; height: 30px; object-fit: contain; }
+/* 第 3 项：无尽塔的货币条只留文字 */
+.tower-currency.text-only .currency-item { background: rgba(196, 158, 92, .16); border-radius: 12px; padding: 1px 12px; }
 .tower-currency b { font-size: 22px; color: #a8641c; }
 .tower-page.has-footer .tower-main { padding-bottom: 46px; }
 /* 第 1 项：数量提示在按钮左边，按钮贴到卡片最右；
@@ -302,3 +304,18 @@
 
 /* 塔身说明里的第二行小提示 */
 .tower-caption-hint { display: block; margin-top: 3px; font-size: 17px; color: #9fb3d0; }
+
+/* 第 1 项：无尽主界面的增益面板（永久 5 格 + 限次开关）与「页面上的休整点选择」 */
+.endless-buffs h4 { display: flex; align-items: center; gap: 10px; }
+.buff-slot-count { font-size: 17px; color: #8a6a3a; background: rgba(196, 158, 92, .18); border-radius: 10px; padding: 0 8px; }
+.buff-empty { font-size: 18px; color: #a98a5c; }
+.replace-hint { font-size: 16px; color: #a8453a; font-weight: normal; }
+.buff-tag.replacing { outline: 3px solid #d9503f; outline-offset: 1px; }
+.limit-tag { display: inline-flex; align-items: center; gap: 6px; font: inherit; cursor: pointer;
+  border: 2px solid #c4a05c; border-radius: 14px; padding: 1px 10px; background: #fff6dd; color: #7a4a18; }
+.limit-tag i { font-style: normal; font-size: 15px; color: #6f8a3a; }
+.limit-tag em { font-style: normal; font-size: 15px; color: #8a6a3a; }
+.limit-tag.off { filter: grayscale(.7); opacity: .65; }
+.limit-tag.off i { color: #9a6a5a; }
+.choice-onpage { background: rgba(255, 250, 235, .92); border: 3px solid #e2c68f; border-radius: 18px; padding: 6px 10px 10px; }
+.choice-onpage .hex-row { display: flex; gap: 10px; }

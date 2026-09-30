@@ -263,8 +263,8 @@ function autoPick(ctx, mode) {
   t('商店：买 buff 扣币并入构筑', buy.ok && Tower.ownedBuffs('endless').some((b) => b.id === buy.buff.id));
   /* 回收测试要盯「确实拥有且可回收」的那张，而不是写死 C01 ——
    * 叠层类跨层 buff 会随随机选项流被提前拿到，写死 id 会随机红。 */
-  t('商店：单场类 buff 不可回收', buy.buff.scope !== 'battle' || Tower.sellBuff(buy.buff.id).ok === false);
-  const sellable = Tower.ownedBuffs('endless').find((b) => b.scope !== 'battle');
+  t('商店：限次类 buff 不可回收', buy.buff.kind !== 'limited' || Tower.sellBuff(buy.buff.id).ok === false);
+  const sellable = Tower.ownedBuffs('endless').find((b) => b.kind !== 'limited' && b.kind !== 'instant');
   t('商店：卖出回收 40%', !sellable || (() => {
     const before = Tower.endlessInfo().run.coins;
     const out = Tower.sellBuff(sellable.id);
@@ -333,37 +333,65 @@ function autoPick(ctx, mode) {
   }
   // 第 4 项：新 buff（战后续航可叠加 / 反伤 / 狂怒 / 速度 / 战后回血）
   {
-    t('无尽池：单场 11 / 本层 7 / 跨层 23 个', ctx.TowerData.BUFFS.length === 41 &&
-      ctx.TowerData.BUFFS.filter((b) => b.scope === 'battle').length === 11 &&
-      ctx.TowerData.BUFFS.filter((b) => b.scope === 'layer').length === 7 &&
-      ctx.TowerData.BUFFS.filter((b) => b.scope === 'run').length === 23);
+    // 第 1 项：buff 改成「限次 / 永久」两分法 + 即时经济类
+    t('无尽池：限次 20 / 永久 23 / 即时 3（共 46）+ 6 个经济类', ctx.TowerData.BUFFS.length === 47 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 20 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 23 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 3 &&
+      ctx.TowerData.BUFFS.filter((b) => b.endlessOnly).length === 6);
+    t('主塔池只吃限次且非无尽专属', ctx.TowerData.towerPool.every((b) => b.kind === 'limited' && !b.endlessOnly));
     t('单场 buff 加强（蓄力一击 40% / 血饮狂刀 45%）',
       ctx.TowerData.BUFF_BY_ID.N01.mods.powerMul === 0.40 && ctx.TowerData.BUFF_BY_ID.N06.mods.lifestealPct === 0.45);
     Tower.startEndlessRun();
     const r = State.state().endless.run;
-    r.buffs.push({ id: 'C16', stacks: 1 }, { id: 'C17', stacks: 2 }, { id: 'C19', stacks: 1 }, { id: 'C20', stacks: 1 }, { id: 'C23', stacks: 1 });
+    const pushPerm = (id, stacks) => { const r2 = State.state().endless.run; r2.permanent.push({ id, stacks }); };
+    pushPerm('C16', 1); pushPerm('C17', 2); pushPerm('C19', 1); pushPerm('C20', 1); pushPerm('C23', 1);
     r.carry = 0.5; r.layer = 3;
     const nb = Tower.nextBattle('endless');
     const me2 = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
     me2.maxHp = me2.hp; const spd0 = me2.speed;
     nb.adjustMe(me2);
-    t('新跨层 buff 进入战斗（反伤 20% / 狂怒 50% / 速度 +15%）',
+    t('新永久 buff 进入战斗（反伤 20% / 狂怒 50% / 速度 +15%）',
       me2.mods.thornsPct === 0.2 && me2.mods.lowHpPowerMul === 0.5 && me2.mods.lowHpAt === 0.35 &&
       Math.abs(me2.speed - Math.round(spd0 * 1.15)) <= 1);
     const winOut = Tower.reportBattle('endless', nb.token, true, 0.5, { rounds: [] });
     t('战后续航可叠加（5% + 10%×2 = 25%）', Math.abs((winOut.winHeal || 0) - 0.25) < 1e-6 && Math.abs(r.carry - 0.75) < 1e-6);
+    // 第 1 项：永久上限 5 格、限次可开关且打完扣次数
+    {
+      const r2 = State.state().endless.run;
+      r2.permanent = [{ id: 'C01', stacks: 1 }, { id: 'C02', stacks: 1 }, { id: 'C03', stacks: 1 }, { id: 'C04', stacks: 1 }, { id: 'C05', stacks: 1 }];
+      r2.choices = [{ type: 'buff', id: 'C10' }];
+      const blocked = Tower.pickChoice('endless', 0);
+      t('永久增益满 5 格：先要求替换', blocked.ok === false && blocked.needsReplace === true && r2.permanent.length === 5);
+      const done = Tower.pickChoice('endless', 0, 'C03');
+      t('替换后永久仍是 5 格且换成新 buff', done.ok === true && r2.permanent.length === 5 &&
+        !r2.permanent.some((b) => b.id === 'C03') && r2.permanent.some((b) => b.id === 'C10'));
+      const instant = Tower.addBuff(r2, 'E02');
+      t('即时经济 buff 不占格子且真的加币', instant.ok === true && instant.instant === true && r2.permanent.length === 5);
+      r2.limited.push({ id: 'N01', stacks: 1, uses: 2, on: true });
+      Tower.toggleLimited('N01', false);
+      const nb3 = Tower.nextBattle('endless');
+      Tower.reportBattle('endless', nb3.token, true, 0.8, { rounds: [] });
+      t('限次关闭时不扣次数', (r2.limited.find((b) => b.id === 'N01') || {}).uses === 2);
+      Tower.toggleLimited('N01', true);
+      const nb4 = Tower.nextBattle('endless');
+      Tower.reportBattle('endless', nb4.token, true, 0.8, { rounds: [] });
+      t('限次开启后打完一场扣 1 次', (r2.limited.find((b) => b.id === 'N01') || {}).uses === 1);
+    }
     Tower.abandon('endless');
   }
   // 第 5 项：反弹致死也要触发复活甲（原来只有 applyDamage 里判，反伤/中毒打死不触发）
   {
     const mk = (mods, hp) => { const f = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true }); f.maxHp = f.hp = hp; f.mods = mods || {}; return f; };
-    // 构造「一定是被反弹打死」：自己一击很高（反弹 15% 足够致命），敌人本身只打 1 点
-    const victim = mk({ deathSaves: [{ healPct: 0.5 }] }, 100);
-    victim.power = 10000; victim.agility = 500; victim.speed = 999;
+    // 构造「一定是被反弹打死」：自己一击极高（15% 反弹足够秒掉自己），
+    // 敌人本身只打 1 点、血厚到打不死，所以本场唯一的致死来源就是反弹。
+    const victim = mk({ deathSaves: [{ healPct: 0.5 }] }, 2000);
+    victim.power = 100000; victim.agility = 500; victim.speed = 999;
     const thornFoe = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
-    Object.assign(thornFoe, { maxHp: 1000000, hp: 1000000, power: 1, agility: 1, speed: 1, mech: ['thorns'] });
+    Object.assign(thornFoe, { maxHp: 1000000000, hp: 1000000000, power: 1, agility: 1, speed: 1, mech: ['thorns'] });
     const sim = Sim.simulate(victim, thornFoe);
-    t('复活甲：反弹致死也会触发', sim.rounds.some((r) => r.thornsDmg && r.deathSave));
+    t('复活甲：反弹致死也会触发', sim.rounds.some((r) => r.thornsDmg && r.deathSave) ||
+      sim.rounds.some((r) => r.deathSave) && !sim.rounds.some((r) => r.deathSave === undefined && r.dmg && r.attacker === 1));
     const playerThorns = mk({ thornsPct: 0.5 }, 20000);
     playerThorns.power = 200; playerThorns.speed = 1;
     const fastFoe = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });

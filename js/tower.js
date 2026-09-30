@@ -232,7 +232,7 @@
     const M = mode === 'tower' ? TD.towerMult(layer) : TD.endlessMult(layer);
     const statBase = GData.stagePlayerStat(LT), hpBase = GData.stagePlayerHp(LT);
     // 无尽段机制叠加：所有怪物按固定顺序追加机制
-    const extra = mode === 'endless' ? TD.ENDLESS_MECH_ORDER.slice(0, TD.endlessMechStacks(layer)) : [];
+    const extra = mode === 'endless' ? TD.endlessMechs(layer) : [];   // 第 1 项：按段轮转、同屏最多 3 个
     const elite = entry.kind === 'warlord';                 // x10 第 5 场：精英（×1.2）
     let name, bias, npcType, skills = [], weapons = [], pattern = null, mech;
     let mechParams = null, wears = null;
@@ -656,6 +656,7 @@
     run.plan = buildPlan(run.layer);
     run.idx = 0;
     run.choices = null;
+    run.restShopUsed = false;
     layerStartHeal(run, mode);
   }
 
@@ -849,11 +850,24 @@
     return { ok: false };
   }
   /** 商店逛完：进入结算点（每 5 层的固定流程 商店 → 结算）。 */
+  /* 第 4 项：休整点也能进店 —— 层内第 3 场后（5 场层第 4 场后）允许再开一次商店，
+   * 货架当场刷新，每层限一次；关店直接回到「继续战斗」，不走 5 层一次的结算点。 */
+  function openRestShop() {
+    const run = endless().run;
+    if (!run || !run.choices) return { ok: false, msg: '只有休整点（每层第 3 场后）能开休整商店。' };
+    if (run.restShopUsed) return { ok: false, msg: '本层的休整商店已经用过了。' };
+    run.restShopUsed = true;
+    run.shop = makeShop(run);
+    run.shop.rest = true;
+    run.phase = 'shop';
+    save();
+    return { ok: true };
+  }
   function closeShop() {
     { const r = endless().run; if (r && r.shop && r.shop.discount) { r.shopDiscount = false; r.shop.discount = false; } }
     const run = endless().run;
     if (!run || run.phase !== 'shop') return { ok: false };
-    run.phase = 'checkpoint';
+    run.phase = run.shop && run.shop.rest ? null : 'checkpoint';   // 休整商店：回战斗；结算商店：去结算点
     save();
     return { ok: true };
   }
@@ -935,6 +949,11 @@
         choices: e.run.choices ? e.run.choices.slice() : null,
         next: e.run.plan[e.run.idx] ? Object.assign({ kind: e.run.plan[e.run.idx].kind }, entryInfo(e.run.plan[e.run.idx])) : null,
         bestLayer: e.run.bestLayer, segment: D().endlessSegment(e.run.layer),
+        // 第 3 项：无尽主界面也要能提前看到本层对手（和挑战塔同一份预告数据）
+        plan: (e.run.plan || []).map((entry) => Object.assign({ kind: entry.kind }, entryInfo(entry))),
+        // 第 1 项：本段怪物带的机制（按段轮转，最多 3 个）
+        mechs: D().endlessMechs(e.run.layer).slice(),
+        restShopUsed: !!e.run.restShopUsed,
         ticketsIfSettle: D().endlessTickets(e.run.layer) } : null };
   }
   /** 当前 run 已拥有 buff 列表（构筑展示 / 商店出售页用）。 */
@@ -954,7 +973,7 @@
   window.Tower = {
     unlocked, towerInfo, endlessInfo, preview, ownedBuffs,
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,
-    pickChoice, toggleLimited, addBuff, applyInstant,
+    pickChoice, toggleLimited, addBuff, applyInstant, openRestShop,
     shopState, buyShopSlot, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp,
     checkpointInfo, settleEndless, continueEndless,
     // 调试

@@ -319,3 +319,10 @@
 .limit-tag.off i { color: #9a6a5a; }
 .choice-onpage { background: rgba(255, 250, 235, .92); border: 3px solid #e2c68f; border-radius: 18px; padding: 6px 10px 10px; }
 .choice-onpage .hex-row { display: flex; gap: 10px; }
+
+/* 无尽主界面的紧凑对手条：主界面还要放增益面板与休整卡片，头像压低一档 */
+.tower-plan.compact .foe-portrait { height: 48px; }
+.tower-plan.compact .foe-portrait img, .tower-plan.compact .foe-portrait canvas { max-height: 48px; }
+.tower-plan.compact li { padding: 4px 4px 6px; font-size: 17px; }
+.tower-plan.compact li b { font-size: 18px; }
+.tower-plan.compact .tower-plan-type { font-size: 15px; }

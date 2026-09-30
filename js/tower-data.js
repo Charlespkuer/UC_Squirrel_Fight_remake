@@ -39,13 +39,27 @@
   function endlessLevel(n) { return Math.min(70, Math.round(24 + 1.2 * (n - 1))); }
   const endlessSegment = (n) => Math.max(1, Math.ceil(n / 5));
   function endlessMult(n) { return Math.min(10, Math.pow(1.5, endlessSegment(n) - 1)); }
-  function endlessMechStacks(n) { return Math.min(5, endlessSegment(n) - 1); }
+  function endlessMechStacks(n) { return Math.min(ENDLESS_MECH_MAX, endlessSegment(n) - 1); }
+  /** 本层怪物带的机制（按段轮转取前 N 个）。 */
+  function endlessMechs(n) {
+    const seg = endlessSegment(n), count = endlessMechStacks(n);
+    if (!count) return [];
+    const off = (seg - 2 + ENDLESS_MECH_ORDER.length * 2) % ENDLESS_MECH_ORDER.length;
+    const out = [];
+    for (let i = 0; i < count; i++) out.push(ENDLESS_MECH_ORDER[(off + i) % ENDLESS_MECH_ORDER.length]);
+    return out;
+  }
   function endlessTickets(n) {
     const s = endlessSegment(n);
     return s <= 4 ? Math.pow(2, s - 1) : 8 + 3 * (s - 4);
   }
-  /** 段间怪物机制叠加顺序（固定，方便玩家预判）。 */
+  /* 段间怪物机制叠加顺序（固定顺序，方便玩家预判）。
+   * 第 1 项修正：原来 `slice(0, 段数-1)` 只增不减，于是从第 2 段（6 层）起
+   * **每一场都带反伤**、再往下每段再加一个、永远不摘 —— 玩家读起来就是「打完一个反伤 boss
+   * 之后所有战斗都在反伤」。现在改成「同屏最多 3 个 + 按段轮转」：
+   * 段数越多带的机制越多（最多 3），但顺序整体轮转，所以反伤会来、也会走。 */
   const ENDLESS_MECH_ORDER = ['thorns', 'regen', 'lifesteal', 'shell', 'devour'];
+  const ENDLESS_MECH_MAX = 3;
   const ENDLESS_CONSOLATION_LAYER = 15;  // 到达 15 层后失败送 1 次免费抽奖（每日限 1 次）
 
   // ---------- 计分 ----------
@@ -451,7 +465,7 @@
 
   window.TowerData = {
     towerLevel, towerMult, towerGold, towerGoldShares, TOWER_FAIL_CONSOLATION,
-    endlessLevel, endlessSegment, endlessMult, endlessMechStacks, endlessTickets,
+    endlessLevel, endlessSegment, endlessMult, endlessMechStacks, endlessMechs, ENDLESS_MECH_MAX, endlessTickets,
     ENDLESS_MECH_ORDER, ENDLESS_CONSOLATION_LAYER, SCORE, COINS, SHOP, shopPrice,
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
     FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, bossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,

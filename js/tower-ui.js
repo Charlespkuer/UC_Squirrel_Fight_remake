@@ -14,6 +14,7 @@
 
   const RARITY = ['普通', '稀有', '史诗'];
   const SCOPE = { limited: '限次', permanent: '永久', instant: '即时' };
+  const MECH_NAME = { thorns: '荆棘反伤', regen: '自愈回复', lifesteal: '吸血', shell: '护盾', devour: '吞噬成长' };
   let replaceTarget = null;   // 第 1 项：永久增益满 5 格时，选中的「要被替换掉」的那个
 
   // ---------- 通用小件 ----------
@@ -136,6 +137,29 @@
     return '<div class="tower-buffs"><h4>本局构筑</h4><div class="buff-tags">' +
       list.map((b) => buffTag(b, b.stacks)).join('') + '</div></div>';
   }
+  /** 第 2 项：永久增益的悬停提示 —— 效果说明 + 当前叠层 + 换算后的合计（叠层是乘着生效的）。 */
+  function permTip(b) {
+    const buff = TowerData.BUFF_BY_ID[b.id];
+    if (!buff) return b.name;
+    const parts = [buff.name + '（' + RARITY[b.rarity] + ' · 永久）', buff.desc];
+    parts.push('当前叠层：×' + b.stacks + (b.stacks > 1 ? '（按层数累加）' : ''));
+    const m = buff.mods || {};
+    if (m.powerMul) parts.push('攻击合计 +' + Math.round(m.powerMul * b.stacks * 100) + '%');
+    if (m.maxHpMul) parts.push('生命上限合计 ' + (m.maxHpMul * b.stacks >= 0 ? '+' : '') + Math.round(m.maxHpMul * b.stacks * 100) + '%');
+    if (m.critBonus) parts.push('暴击合计 +' + (m.critBonus * b.stacks) + '%');
+    if (m.dodgeBonus) parts.push('闪避合计 +' + (m.dodgeBonus * b.stacks) + '%');
+    if (m.lifestealPct) parts.push('吸血合计 ' + Math.round(m.lifestealPct * b.stacks * 100) + '%');
+    if (m.thornsPct) parts.push('反伤合计 ' + Math.round(m.thornsPct * b.stacks * 100) + '%');
+    if (m.speedMul) parts.push('速度合计 +' + Math.round(m.speedMul * b.stacks * 100) + '%');
+    if (m.winHealPct) parts.push('每场胜利回血合计 ' + Math.round(m.winHealPct * b.stacks * 100) + '%');
+    if (m.killPowerPct) parts.push('每击杀攻击 +' + Math.round(m.killPowerPct * b.stacks * 100) + '%');
+    if (m.killMaxHpPct) parts.push('每击杀生命上限 +' + Math.round(m.killMaxHpPct * b.stacks * 100) + '%');
+    if (m.revivePct) parts.push('复活回血 ' + Math.round(m.revivePct * 100) + '%');
+    if (m.globalMul) parts.push('全局增幅 ×' + m.globalMul + (b.stacks > 1 ? '，可叠 ' + b.stacks + ' 层' : ''));
+    if (buff.mods && buff.mods.shopDiscount) parts.push('下个商店 5 折');
+    parts.push(replaceTarget === b.id ? '（当前已选为替换目标，点一下取消）' : '点一下选它作为要被替换掉的永久增益');
+    return parts.join('\n');
+  }
   /** 第 1 项：无尽主界面的增益面板 —— 永久（最多 5 格）+ 限次（可开关、扣次用完即消失）。 */
   function buffPanelsHtml(mode) {
     const run = mode === 'tower' ? Tower.towerInfo().run : Tower.endlessInfo().run;
@@ -145,7 +169,8 @@
     const lim = list.filter((b) => b.kind === 'limited');
     const cap = TowerData.PERMANENT_SLOTS || 5;
     const permHtml = perm.length
-      ? perm.map((b) => '<span class="buff-tag r' + b.rarity + (b.id === replaceTarget ? ' replacing' : '') + '" data-replace="' + b.id + '" title="点一下选它作为要被替换掉的永久增益">' +
+      ? perm.map((b) => '<span class="buff-tag r' + b.rarity + (b.id === replaceTarget ? ' replacing' : '') + '" data-replace="' + b.id +
+          '" title="' + esc(permTip(b)) + '">' +
           esc(b.name) + '<i>永久</i>' + (b.stacks > 1 ? '<em>×' + b.stacks + '</em>' : '') + '</span>').join('')
       : '<span class="buff-empty">还没有永久增益（每层的休整点可以拿）</span>';
     const limHtml = lim.length
@@ -213,8 +238,8 @@
   }
   /* 第 1 项：对手从左到右排成一行「小人像 + 名字 + 类型」，
    * 机制还是挂在悬停气泡上（列表本身不占高度），松鼠形态会把装备一起画出来。 */
-  function planHtml(preview) {
-    return '<ol class="tower-plan">' + preview.map((b, i) =>
+  function planHtml(preview, extraCls) {
+    return '<ol class="tower-plan' + (extraCls || '') + '">' + preview.map((b, i) =>
       '<li class="' + (b.elite ? 'elite' : '') + (b.squirrel ? ' squirrel' : '') + '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
       '<span class="tower-plan-no">' + (i + 1) + '</span>' +
       foePortraitHtml(i, b) +
@@ -286,14 +311,20 @@
       const nextLabel = run.choices ? '先选一张增益' : run.phase === 'shop' ? '进入试炼商店' : run.phase === 'checkpoint' ? '前往结算点' : '继续战斗';
       main = '<h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
         currencyHtml('endless') +
-        '<div class="tower-stats">分数 <b class="gold-text">' + run.score + '</b> · 试炼币 <b class="gold-text">' + run.coins + '</b> · 现在离场可得抽奖卷 <b>' + run.ticketsIfSettle + '</b> 张（需到 5 的倍数层结算）</div>' +
-        '<div class="tower-stats small">第 ' + run.battleNo + '/' + run.battleCount + ' 场 · 本局最深 ' + run.bestLayer + ' 层</div>' +
+        '<div class="tower-stats">分数 <b class="gold-text">' + run.score + '</b> · 现在离场可得抽奖卷 <b>' + run.ticketsIfSettle + '</b> 张（需到 5 的倍数层结算）</div>' +
+        '<div class="tower-stats small">本局最深 ' + run.bestLayer + ' 层 · 第 ' + run.segment + ' 段</div>' +
+        '<p class="tower-rule">本段机制：' + (info.mechs && info.mechs.length
+          ? info.mechs.map((m) => MECH_NAME[m] || m).join(' · ') + '（每段轮转，最多 ' + (TowerData.ENDLESS_MECH_MAX || 3) + ' 个）'
+          : '无（第 1 段不叠机制）') + '</p>' +
+        '<h4 class="tower-plan-title">本层对手（第 ' + run.battleNo + '/' + run.battleCount + ' 场）</h4>' +
+        planHtml(Tower.preview(run.layer), ' compact') +   // 第 3 项：本层对手预告（与 buildPlan 同源）
         carryBar(run.carry) + debuffPanel(run.debuffs) + buffPanelsHtml('endless') +
         (run.choices ? '<div class="tower-buffs choice-onpage"><h4>休整点 · 选一张带走（' +
           (TowerData.PERMANENT_SLOTS || 5) + ' 格永久已用 ' + Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent').length + '）</h4>' +
           '<div class="hex-row">' + run.choices.map((c, i) => choiceCard(c, i)).join('') + '</div></div>' : '') +
         '<div class="tower-actions">' + C().btn(nextLabel, 'fight', 'gold') +
-        (Tower.shopState() ? C().btn('试炼商店', 'shop', 'small') : '') +
+        (Tower.shopState() ? C().btn('试炼商店', 'shop', 'small')
+          : run.choices && !run.restShopUsed ? C().btn('休整商店（本层 1 次）', 'rest-shop', 'small') : '') +
         C().btn('放弃本局', 'abandon', 'muted small') + '</div>';
     } else {
       main = '<h2 class="tower-title">无尽模式</h2>' +
@@ -350,6 +381,11 @@
       fight('endless');
     });
     on(p, 'shop', () => openShop(true));
+    on(p, 'rest-shop', () => {
+      const res = Tower.openRestShop();
+      if (!res.ok) { notice(res.msg || '现在不能开商店。'); return; }
+      openShop();
+    });
     on(p, 'abandon', () => {
       C().modal('放弃本局', '<p>放弃后按当前层应得的抽奖卷结算（分数照常入账），确定吗？</p>', [
         { label: '放弃', cls: 'muted', run: () => { Tower.abandon('endless'); openEndless(); } },

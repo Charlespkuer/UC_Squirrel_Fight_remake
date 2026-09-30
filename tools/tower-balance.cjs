@@ -68,6 +68,14 @@ let hostSeed = 20260927;
 const hostRandom = () => { hostSeed = (Math.imul(hostSeed, 1664525) + 1013904223) >>> 0; return hostSeed / 4294967296; };
 
 let passed = 0, failed = 0;
+/** 开一局干净的无尽：先把未完成的战斗令牌作废（否则 abandon 会被拒）。 */
+function freshEndless(State, Tower) {
+  const e = State.state().endless;
+  if (e.run && e.run.attempt) Tower.interruptBattle('endless', e.run.attempt);
+  if (e.run) Tower.abandon('endless');
+  Tower.startEndlessRun();
+  return State.state().endless.run;
+}
 function t(name, cond) { if (cond) { passed++; } else { failed++; console.log('  ✗ ' + name); } }
 
 function unlock(ctx) {
@@ -401,16 +409,61 @@ function autoPick(ctx, mode) {
       sim2.rounds.some((r) => r.thornsDmg > 0));
   }
 
+  // 第 1 项修正：本段机制按段轮转（不再「一旦出现就永远挂着」）
+  {
+    const T = ctx.TowerData, mechs = (n) => T.endlessMechs(n).join('+');
+    t('段机制按段轮转：第 2 段反伤、第 3 段不再反伤',
+      T.endlessMechs(6).includes('thorns') && !T.endlessMechs(11).includes('thorns'));
+    t('段机制同屏最多 3 个', [1, 6, 11, 16, 21, 26, 31, 41].every((n) => T.endlessMechs(n).length <= 3));
+    t('段机制会回来（第 5/6 段又出现反伤）',
+      T.endlessMechs(21).includes('thorns') && T.endlessMechs(26).includes('thorns'));
+    // 建造出来的敌人只用本段的机制
+    const r = freshEndless(State, Tower); r.layer = 11;
+    const nx = Tower.nextBattle('endless');
+    t('第 11 层的敌人不带反伤', !(nx.foe.mech || []).includes('thorns') &&
+      (nx.foe.mech || []).includes('regen'));
+  }
+  // 第 4 项：休整点商店（每层一次）
+  {
+    const r = freshEndless(State, Tower);
+    t('没有休整点不让开休整商店', Tower.openRestShop().ok === false);
+    r.choices = [{ type: 'heal' }, { type: 'buff', id: 'N01' }];
+    const opened = Tower.openRestShop();
+    t('休整点可以开一次休整商店', opened.ok === true && r.phase === 'shop' && r.shop.rest === true);
+    t('同一层不能开第二次', Tower.openRestShop().ok === false);
+    Tower.closeShop();
+    t('休整商店关掉直接回战斗（不去结算点）', r.phase === null);
+    r.restShopUsed = true;
+    let guard = 0, advanced = false;
+    while (guard++ < 12 && !advanced) {
+      if (r.choices) { Tower.pickChoice('endless', 0); continue; }
+      const nbLast = Tower.nextBattle('endless');
+      if (!nbLast.ok) break;
+      const res2 = Tower.reportBattle('endless', nbLast.token, true, 0.8, { rounds: [] });
+      if (!res2.ok) break;
+      if (r.layer !== 1) advanced = true;
+    }
+    t('换层后休整商店次数重置', advanced && r.restShopUsed === false && r.layer === 2);
+    Tower.abandon('endless');
+  }
+  // 第 3 项：无尽主界面也要有本层对手预告
+  {
+    freshEndless(State, Tower);
+    const info = Tower.endlessInfo();
+    t('无尽主界面能看到本层对手与段机制', Array.isArray(info.run.plan) && info.run.plan.length === 4 &&
+      info.run.plan.every((e) => e.name) && Array.isArray(info.run.mechs));
+    Tower.abandon('endless');
+  }
   // 第 3 项：无尽每爬 10 层发一次里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）
   {
     const clearLayerTo = (want) => {
-      Tower.abandon('endless');
-      Tower.startEndlessRun();
-      const r = State.state().endless.run;
+      const r = freshEndless(State, Tower);
       r.layer = want; r.carry = 0.8;
       let ms = null;
-      for (let g3 = 0; g3 < 12 && !ms; g3++) {
+      for (let g3 = 0; g3 < 20 && !ms; g3++) {
         if (r.choices) { Tower.pickChoice('endless', 0); continue; }
+        if (r.phase === 'shop') { Tower.closeShop(); continue; }
+        if (r.phase === 'checkpoint') { Tower.continueEndless(); continue; }
         const nb = Tower.nextBattle('endless');
         if (!nb.ok) break;
         const rw3 = Tower.reportBattle('endless', nb.token, true, 0.8, { rounds: [] });

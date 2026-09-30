@@ -157,6 +157,11 @@ async function main() {
       if (again) { again.click(); await flush(200); }
     }
     TowerUI.openEndless(); await flush(300);
+    {
+      const di = Tower.endlessInfo();
+      P.planDebug = { keys: Object.keys(di.run || {}), planLen: di.run && di.run.plan ? di.run.plan.length : null,
+        rawPlanLen: (State.state().endless.run.plan || []).length };
+    }
     P.restChoiceCards = $$('#ui .choice-onpage [data-choice]').length;
     P.restLabels = $$('#ui .choice-onpage .hex-name').map((el) => el.textContent.trim());
     // 拿一张永久增益，再把永久格子填满、看替换提示

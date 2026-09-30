@@ -343,9 +343,9 @@ function autoPick(ctx, mode) {
   // 第 4 项：新 buff（战后续航可叠加 / 反伤 / 狂怒 / 速度 / 战后回血）
   {
     // 第 1 项：buff 改成「限次 / 永久」两分法 + 即时经济类
-    t('无尽池：限次 20 / 永久 23 / 即时 3（共 46）+ 6 个经济类', ctx.TowerData.BUFFS.length === 47 &&
+    t('无尽池：限次 20 / 永久 25 / 即时 3（共 49，含名贵手表与战利品账本）+ 6 个经济类', ctx.TowerData.BUFFS.length === 49 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 20 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 23 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 25 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 3 &&
       ctx.TowerData.BUFFS.filter((b) => b.endlessOnly).length === 6);
     t('主塔池只吃限次且非无尽专属', ctx.TowerData.towerPool.every((b) => b.kind === 'limited' && !b.endlessOnly));
@@ -469,6 +469,24 @@ function autoPick(ctx, mode) {
     const nb2 = Tower.nextBattle('endless');
     Tower.reportBattle('endless', nb2.token, true, 0.8, { rounds: [] });
     t('用完自动清空槽位', r.pillSlots.power === null);
+    Tower.abandon('endless');
+  }
+  // 第 1 项（本轮）：名贵手表（商店不卖、卖出 200）+ 战利品账本（按胜场累计卖出收益）
+  {
+    const T = ctx.TowerData;
+    t('名贵手表：稀有 / 永久 / 商店不卖', T.BUFF_BY_ID.C24.rarity === 1 && T.BUFF_BY_ID.C24.kind === 'permanent' &&
+      T.BUFF_BY_ID.C24.shopBanned === true && T.BUFF_BY_ID.C24.mods.sellValue === 200);
+    t('商店货架池不含名贵手表', !(T.shopPool || []).some((b) => b.id === 'C24'));
+    const r = freshEndless(State, Tower);
+    r.shop = Tower.shopState ? (Tower.shopState() || null) : null;
+    // 直接造一个商店，验证卖出价与账本累计
+    Tower.openRestShop && (r.choices = [{ type: 'heal' }], Tower.openRestShop());
+    r.permanent.push({ id: 'C24', stacks: 1 }, { id: 'C25', stacks: 1 });
+    const nb = Tower.nextBattle('endless');
+    Tower.reportBattle('endless', nb.token, true, 0.8, { rounds: [] });
+    t('胜利后账本累计 +25', (r.sellBonus || 0) === 25);
+    const sold = Tower.sellBuff('C24');
+    t('名贵手表卖出得 200 + 累计 25 = 225', sold.ok === true && sold.gain === 225 && r.coins >= 225);
     Tower.abandon('endless');
   }
   // 第 2 项：限次 buff 的次数铺成 1/2/3/5/10

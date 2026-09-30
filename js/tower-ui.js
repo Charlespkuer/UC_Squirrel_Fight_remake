@@ -677,7 +677,7 @@
       cls: 'tower-board',
       right: '<span class="footer-right">' + C().btn(revisit ? '返回' : '离开商店，进入结算', 'leave', 'gold small') + '</span>',
     });
-    back(p, () => revisit ? openEndless() : C().home());
+    back(p, () => openEndless());   // 第 2 项：返回键统一回无尽塔主界面
     shop.slots.forEach((s, i) => on(p, 'buy' + i, () => {
       const r = Tower.buyShopSlot(i);
       if (r && r.needsReplace) { offerShopReplace(i, r.buff); return; }

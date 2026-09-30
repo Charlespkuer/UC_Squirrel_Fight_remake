@@ -498,6 +498,8 @@
       run.score += D().SCORE.battle;
       /* 第 1 项：试炼币加成（战利品类限次 buff，remaining 次数在下面统一扣） */
       const coinMul = 1 + (runModTotal(run, 'coinBoostPct') || 0);
+      // 第 1 项：战利品账本 —— 每胜一场，卖出收益累计 +N
+      run.sellBonus = (run.sellBonus || 0) + (runModTotal(run, 'sellGrowthPerWin') || 0);
       run.coins += Math.round(D().COINS.battle * coinMul);
       // 击杀叠层类（基础 → 叠层 → C15）
       const c06 = stacksOf(run, 'C06');
@@ -776,7 +778,7 @@
     return shop;
   }
   function rollShopSlots(run) {
-    const pool = D().endlessPool, slots = [], taken = new Set();
+    const pool = D().shopPool || D().endlessPool, slots = [], taken = new Set();
     for (let i = 0; i < D().SHOP.slots; i++) {
       let list = pool.filter((b) => b.rarity === rollRarity() && !taken.has(b.id) && ownable(run, b));
       if (!list.length) list = pool.filter((b) => !taken.has(b.id) && ownable(run, b));
@@ -845,6 +847,13 @@
     const base = D().shopPrice(buff);
     return run && run.shopDiscount ? Math.max(1, Math.round(base * 0.5)) : base;
   }
+  /** 卖出价：名贵手表这类有固定 sellValue 的按固定值，其它按商店价 40%，再叠「战利品账本」的累计加成。 */
+  function sellPriceOf(run, buff) {
+    const base = buff.mods && buff.mods.sellValue
+      ? Number(buff.mods.sellValue)
+      : Math.max(1, Math.round(D().shopPrice(buff) * D().SHOP.sellBack));
+    return base + Math.max(0, Math.floor(Number(run.sellBonus) || 0));
+  }
   function sellBuff(id) {
     const run = endless().run;
     if (!run || !run.shop) return { ok: false };
@@ -853,8 +862,8 @@
     for (const list of [run.permanent || [], run.limited || []]) {
       const i = (list || []).findIndex((b) => b.id === id);
       if (i >= 0) {
+        const gain = sellPriceOf(run, buff);
         list.splice(i, 1);
-        const gain = Math.max(1, Math.round(D().shopPrice(buff) * D().SHOP.sellBack));
         run.coins += gain;
         save();
         return { ok: true, gain };
@@ -994,7 +1003,7 @@
       kind: buff.kind, scopeName: scopeName[buff.kind], stacks,
       uses: buff.kind === 'limited' ? (ownedEntry(run, buff.id) || {}).uses : undefined,
       on: buff.kind === 'limited' ? (ownedEntry(run, buff.id) || {}).on !== false : true,
-      sellable: !!run.shop && buff.kind !== 'instant', sellPrice: Math.max(1, Math.round(D().shopPrice(buff) * D().SHOP.sellBack)) }));
+      sellable: !!run.shop && buff.kind !== 'instant', sellPrice: sellPriceOf(run, buff) }));
     return list;
   }
 

@@ -411,6 +411,12 @@
     { id: 'E04', name: '全场五折', rarity: 1, kind: 'permanent', endlessOnly: true, desc: '下一个试炼商店里全部商品 5 折（进店时消耗）', mods: { shopDiscount: 0.5 } },
     { id: 'E05', name: '战利品', rarity: 1, kind: 'limited', uses: 3, endlessOnly: true, desc: '接下来 3 场战斗的试炼币获取 +50%', mods: { coinBoostPct: 0.50 } },
     { id: 'E06', name: '战利品·精', rarity: 2, kind: 'limited', uses: 3, endlessOnly: true, desc: '接下来 3 场战斗的试炼币获取 +120%', mods: { coinBoostPct: 1.20 } },
+    /* 第 1 项：名贵手表（稀有 / 永久）—— 商店里不出售，但卖掉能换 200 试炼币；
+     * C25 账本：每战斗获胜一次，自己（以及手表）的卖出价就涨一档。 */
+    { id: 'C24', name: '名贵手表', rarity: 1, kind: 'permanent', shopBanned: true,
+      desc: '商店里买不到；在试炼商店卖出可得 200 试炼币', mods: { sellValue: 200 } },
+    { id: 'C25', name: '战利品账本', rarity: 2, kind: 'permanent',
+      desc: '每场战斗胜利后，卖出增益的收益 +25 试炼币（本局累计）', mods: { sellGrowthPerWin: 25 } },
     { id: 'C15', name: '增幅水晶', rarity: 2, scope: 'run', desc: '本局内所有 buff 效果 +40%', mods: { globalMul: 1.40 } },
   ]);
   const BUFF_BY_ID = Object.fromEntries(BUFFS.map((b) => [b.id, b]));
@@ -460,6 +466,8 @@
    * 永久类只进无尽（主塔一层一结算，没有「本局永久」的位置）。 */
   const towerPool = BUFFS.filter((b) => b.kind === 'limited' && !b.endlessOnly);
   const endlessPool = BUFFS.slice();
+  /** 商店货架池：去掉「商店里不卖」的（名贵手表）。 */
+  const shopPool = BUFFS.filter((b) => !b.shopBanned);
   /** 永久增益的持有上限（第 1 项：无尽主界面最多 5 个，同名叠层仍算 1 格）。 */
   const PERMANENT_SLOTS = 5;
   /* 第 1 项：无尽塔的「三种属性药丸」槽位 —— 消耗背包里的药丸，塔内持续 20 场战斗。
@@ -488,7 +496,7 @@
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
     FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, bossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,
     ENDLESS_LAYER_HEAL_PCT, MILESTONE_EVERY, MILESTONE_BOOK_COUNT, rollMilestone, PERMANENT_SLOTS,
-    PILL_BATTLES, PILL_SLOTS, pillEffect,
+    PILL_BATTLES, PILL_SLOTS, pillEffect, shopPool,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,

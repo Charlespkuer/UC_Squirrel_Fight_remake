@@ -42,13 +42,23 @@
       selected = selected.filter((key) => gears.some((gear) => gear.key === key && !gear.used && gear.quality < 4));
       const first = gears.find((gear) => gear.key === selected[0]);
       // The original dictionary installs its own window.Map implementation.
+      /* 排序按**当前融合规则**来：材料只要同部位 + 同品质，所以「同部位同品质的件数」
+       * 才是能不能凑齐三件的关键 —— 不再优先把同名装备排在一起。
+       * 顺序：能当材料的优先 → 同组件数多的优先（越容易凑三件）→ 品质高的优先 →
+       * 部位（头/手/衣/鞋）→ id/钥匙，保证同一组一定挨在一起。 */
       const groups = Object.create(null);
       gears.forEach((gear) => {
-        if (!gear.used && gear.quality < 4) groups[gear.id] = (groups[gear.id] || 0) + 1;
+        if (gear.used || gear.quality >= 4) return;
+        const key = State.gearPart(gear.id) + ':' + gear.quality;
+        groups[key] = (groups[key] || 0) + 1;
       });
+      const groupKey = (gear) => State.gearPart(gear.id) + ':' + gear.quality;
       const inventory = gears.slice().sort((a, b) =>
         Number(a.used || a.quality >= 4) - Number(b.used || b.quality >= 4) ||
-        (groups[b.id] || 0) - (groups[a.id] || 0) || a.id - b.id || String(a.key).localeCompare(String(b.key)));
+        (groups[groupKey(b)] || 0) - (groups[groupKey(a)] || 0) ||
+        b.quality - a.quality ||
+        State.gearPart(a.id) - State.gearPart(b.id) ||
+        a.id - b.id || String(a.key).localeCompare(String(b.key)));
       const pages = Math.max(1, Math.ceil(inventory.length / PAGE_SIZE));
       pageIndex = Math.max(0, Math.min(pageIndex, pages - 1));
       const reason = validation(gears);
@@ -66,7 +76,9 @@
         const unavailable = gear.used ? '已穿戴' : gear.quality >= 4 ? '最高品质'
           : first && (partOf(gear) !== partOf(first) || gear.quality !== first.quality) ? '需同部位同品质'
           : selected.length === 3 && !chosen ? '材料已放满' : '';
-        const caption = chosen ? '材料 ' + (selected.indexOf(gear.key) + 1) : unavailable || '可放入';
+        const sameGroup = groups[groupKey(gear)] || 0;
+        const caption = chosen ? '材料 ' + (selected.indexOf(gear.key) + 1)
+          : unavailable || (sameGroup >= 3 ? '同组 ' + sameGroup + ' 件' : '可放入');
         const effects = State.extText(gear.ext).join('，');
         const detail = gear.name + '，' + qualities[gear.quality] + '，' + gear.attrName + ' +' + gear.abilityVal + (effects ? '，' + effects : '');
         return '<button type="button" class="fusion-gear q' + gear.quality + (chosen ? ' selected' : '') +

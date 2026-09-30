@@ -135,6 +135,18 @@ test('同部位但品质不同 / 不同部位都不能混入', () => {
   assert.equal(game.get('gear', game.gears[2].key).disabled, true, '部位不同不能混入');
 });
 
+/* 排序要按「同部位 + 同品质」成组（不再优先同名）：能凑齐三件的组排最前，同名但不搭的靠后 */
+test('装备按同部位同品质成组排序，凑得齐三件的排最前', () => {
+  // 21 格斗头巾 / 25 拳斗头巾 / 29 忍者护额（头巾·品质2）能凑三件；
+  // 22 格斗手套（手套·品质2）只有 1 件；13 拳斗头巾（头巾·品质1）只有 1 件
+  const game = setup([22, 13, 21, 25, 29]);
+  const names = [...game.board.innerHTML.matchAll(/data-fusion-gear="[^"]+"[^>]*>[\s\S]*?fusion-gear-name">([^<]+)</g)].map((m) => m[1]);
+  assert.equal(names.length, 5, '五件都渲染出来：' + names.join(','));
+  assert.ok(names.slice(0, 3).includes('格斗头巾') && names.slice(0, 3).includes('拳斗头巾') && names.slice(0, 3).includes('忍者护额'),
+    '头巾·品质2 的三件应排在前面：' + names.join(','));
+  assert.ok(game.board.innerHTML.includes('同组 3 件'), '同组 3 件的卡片要标出来');
+});
+
 test('重复选择会移除材料，支持槽位移除和清空，错ID及最高品质不能混入', () => {
   const game = setup([21, 21, 21, 22, 201]), first = game.gears[0], second = game.gears[1];
   game.click('gear', first.key);

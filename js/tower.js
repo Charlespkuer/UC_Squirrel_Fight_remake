@@ -795,22 +795,24 @@
       slots: run.shop.slots.map((s) => { const b = D().BUFF_BY_ID[s.id];
         return { id: s.id, sold: s.sold, name: b.name, desc: b.desc, rarity: b.rarity, kind: b.kind, price: shopPriceOf(b) }; }) };
   }
-  function buyShopSlot(index) {
+  function buyShopSlot(index, replaceId) {
     const run = endless().run;
     if (!run || !run.shop) return { ok: false };
     const slot = run.shop.slots[index];
     if (!slot || slot.sold) return { ok: false };
     const buff = D().BUFF_BY_ID[slot.id];
     // 永久增益满 5 格时先让玩家去替换（商店里不弹替换面板，避免一次点出两层交互）
-    if (buff.kind === 'permanent' && (run.permanent || []).length >= (D().PERMANENT_SLOTS || 5) &&
-        !(run.permanent || []).some((b) => b.id === buff.id)) {
-      return { ok: false, needsReplace: true, msg: '永久增益已满 5 个，先在主界面替换一个再来买。' };
+    const permanentFull = buff.kind === 'permanent' && (run.permanent || []).length >= (D().PERMANENT_SLOTS || 5) &&
+      !(run.permanent || []).some((b) => b.id === buff.id);
+    if (permanentFull && !replaceId) {
+      // 第 1 项：不再把玩家打发回主界面 —— 直接把替换目标的选择交给界面
+      return { ok: false, needsReplace: true, buff, msg: '永久增益已满 5 个，请选择要替换掉的增益。' };
     }
     const price = shopPriceOf(buff);
     if (run.coins < price) return { ok: false, msg: '试炼币不足。' };
     run.coins -= price;
     slot.sold = true;
-    const res = addBuff(run, slot.id);
+    const res = addBuff(run, slot.id, replaceId);
     save();
     return { ok: true, buff, price, instant: !!(res && res.instant) };
   }
@@ -847,7 +849,7 @@
     const run = endless().run;
     if (!run || !run.shop) return { ok: false };
     const buff = D().BUFF_BY_ID[id];
-    if (!buff || buff.kind === 'limited') return { ok: false };
+    if (!buff || buff.kind === 'instant') return { ok: false };   // 第 3 项：限次也能卖（只有即时类不留存、无从卖出）
     for (const list of [run.permanent || [], run.limited || []]) {
       const i = (list || []).findIndex((b) => b.id === id);
       if (i >= 0) {
@@ -992,7 +994,7 @@
       kind: buff.kind, scopeName: scopeName[buff.kind], stacks,
       uses: buff.kind === 'limited' ? (ownedEntry(run, buff.id) || {}).uses : undefined,
       on: buff.kind === 'limited' ? (ownedEntry(run, buff.id) || {}).on !== false : true,
-      sellable: !!run.shop, sellPrice: Math.max(1, Math.round(D().shopPrice(buff) * D().SHOP.sellBack)) }));
+      sellable: !!run.shop && buff.kind !== 'instant', sellPrice: Math.max(1, Math.round(D().shopPrice(buff) * D().SHOP.sellBack)) }));
     return list;
   }
 

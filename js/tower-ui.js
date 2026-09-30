@@ -601,6 +601,22 @@
       '<p class="small-label">药丸在无尽塔内持续 ' + TowerData.PILL_BATTLES + ' 场战斗（胜败都算），会扣背包里的道具。</p>',
       buttons, { small: true });
   }
+  /** 第 1 项：商店里买永久增益但格子满了 —— 直接选一个替换掉并完成购买。 */
+  function offerShopReplace(index, buff) {
+    const list = Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent');
+    const buttons = list.map((b) => ({
+      label: '替换 ' + b.name + (b.stacks > 1 ? '（×' + b.stacks + '）' : ''),
+      cls: 'small',
+      run: () => {
+        const r = Tower.buyShopSlot(index, b.id);
+        if (!r.ok) notice(r.msg || '买不了。');
+        openShop(true);
+      },
+    }));
+    if (!buttons.length) { notice('永久增益已满，但没有可替换的目标。'); return; }
+    buttons.push({ label: '取消', cls: 'muted', run: () => openShop(true) });
+    C().modal('永久增益已满 5 格', '<p>要买下【' + esc(buff.name) + '】，请选择替换掉哪一个：</p>', buttons, { small: true });
+  }
   /** 永久增益满 5 格时：直接把「替换哪一个」摆出来选（比让玩家先点上面的标签直观）。 */
   function offerReplace(index, buff) {
     const list = Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent');
@@ -646,7 +662,7 @@
     const owned = Tower.ownedBuffs('endless').filter((b) => b.kind !== 'instant');
     const sellRows = owned.length ? owned.map((b) =>
       '<div class="shop-sell-row">' + buffTag(b, b.stacks) + C().btn('卖出 +' + b.sellPrice, 'sell' + b.id, 'tiny muted') + '</div>').join('') :
-      '<div class="small-label">还没有可出售的本层/跨层增益</div>';
+      '<div class="small-label">还没有可出售的增益</div>';
     const content = '<div class="tower-shop">' +
       '<h2 class="tower-title">试炼商店 <span class="shop-coins">试炼币 ' + shop.coins + '</span></h2>' +
       '<div class="shop-shelf">' + slots + '</div>' +
@@ -655,7 +671,7 @@
       (shop.healSold ? '<em>已购买</em>' : C().btn(shop.healPrice + ' 币', 'heal', 'small gold')) + '</div>' +
       '<div class="shop-slot reroll"><b>刷新货架</b><i>重新 Roll 5 个增益</i><span>当前拥有与已售出的不会再出现</span>' +
       C().btn(shop.rerollFree ? '免费刷新' : shop.rerollPrice + ' 币刷新', 'reroll', 'small') + '</div></div>' +
-      '<h4>出售增益（回收 40%）</h4><div class="shop-sell">' + sellRows + '</div>' +
+      '<h4>出售增益（回收 40%，限次与永久都可卖）</h4><div class="shop-sell">' + sellRows + '</div>' +
       '</div>';
     const p = C().page('challenge', 'stages', content, {
       cls: 'tower-board',
@@ -664,6 +680,7 @@
     back(p, () => revisit ? openEndless() : C().home());
     shop.slots.forEach((s, i) => on(p, 'buy' + i, () => {
       const r = Tower.buyShopSlot(i);
+      if (r && r.needsReplace) { offerShopReplace(i, r.buff); return; }
       if (!r.ok) { notice(r.msg || '买不了。'); return; }
       openShop(revisit);
     }));

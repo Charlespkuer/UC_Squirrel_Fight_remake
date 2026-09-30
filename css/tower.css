@@ -674,3 +674,8 @@
 .replace-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
 .replace-row b { font-size: 19px; color: #7a4a18; }
 .replace-row span { display: block; font-size: 16px; color: #8a6a3a; }
+
+/* 第 2 项：试炼商店支持下滑（内容多时可滚动） */
+.tower-shop { max-height: 100%; overflow-y: auto; padding-right: 6px; }
+.tower-shop::-webkit-scrollbar { width: 10px; }
+.tower-shop::-webkit-scrollbar-thumb { background: #c9a468; border-radius: 6px; }

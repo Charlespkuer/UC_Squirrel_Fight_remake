@@ -271,8 +271,9 @@ function autoPick(ctx, mode) {
   t('商店：买 buff 扣币并入构筑', buy.ok && Tower.ownedBuffs('endless').some((b) => b.id === buy.buff.id));
   /* 回收测试要盯「确实拥有且可回收」的那张，而不是写死 C01 ——
    * 叠层类跨层 buff 会随随机选项流被提前拿到，写死 id 会随机红。 */
-  t('商店：限次类 buff 不可回收', buy.buff.kind !== 'limited' || Tower.sellBuff(buy.buff.id).ok === false);
-  const sellable = Tower.ownedBuffs('endless').find((b) => b.kind !== 'limited' && b.kind !== 'instant');
+  // 第 3 项：限次与永久都能卖（只有即时类不留存）
+  t('商店：限次/永久都能卖，即时类不存在可卖', Tower.sellBuff(buy.buff.id).ok === (buy.buff.kind !== 'instant'));
+  const sellable = Tower.ownedBuffs('endless').find((b) => b.kind !== 'instant');
   t('商店：卖出回收 40%', !sellable || (() => {
     const before = Tower.endlessInfo().run.coins;
     const out = Tower.sellBuff(sellable.id);

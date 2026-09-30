@@ -353,9 +353,10 @@
 .mech-note { font-size: 15px; color: #a98a5c; }
 
 /* 第 2 项：无尽主界面 —— 左列信息 + 右侧竖排对手，尽量一屏看完 */
-.endless-run { display: flex; gap: 10px; align-items: flex-start; }
-.endless-left { flex: 1 1 auto; min-width: 0; }
-.endless-foes { flex: 0 0 196px; }
+/* 用 grid 固定两列，避免任何一边内容过宽时把另一边挤过去/压在一起 */
+.endless-run { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 10px; align-items: start; }
+.endless-left { min-width: 0; }
+.endless-foes { min-width: 0; }
 .endless-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .endless-title-row .tower-currency { position: static; }
 .endless-score { margin: 0 0 4px; font-size: 18px; color: #8a6a3a; }
@@ -423,3 +424,51 @@
 .endless-actions { margin-top: 4px; }
 .endless-actions .uc-button { min-height: 42px; font-size: 22px; padding: 3px 16px; }
 .endless-left .mech-bar { margin: 2px 0; }
+
+/* 第 3 轮 UI 微调：顶栏一行排完（标题→货币→分数框→右边缘三角药丸槽）；
+   血量上提贴标题并放大；继续战斗右下、放弃本局更小且偏左下。 */
+.endless-title-row { display: flex; align-items: center; gap: 12px; justify-content: flex-start; }
+.endless-title-row .tower-currency { position: static; margin-left: 2px; }
+.endless-score-box { display: inline-flex; align-items: baseline; gap: 6px; font-family: Georgia, 'Times New Roman', serif;
+  border: 2px solid #c9a468; border-radius: 12px; background: #fff8e6; padding: 0 10px; color: #7a4a18; }
+.endless-score-box i { font-style: normal; font-size: 15px; color: #a98a5c; font-family: inherit; }
+.endless-score-box b { font-size: 24px; color: #a8641c; }
+/* 三个药丸槽：等腰三角（上 1 下 2），整体贴右上角 */
+.endless-title-row .pill-slots { margin-left: auto; display: grid; grid-template-columns: repeat(2, auto);
+  justify-items: center; align-items: center; gap: 5px 8px; }
+.endless-title-row .pill-slots .pill-slot:first-child { grid-column: 1 / span 2; }
+.endless-title-row .pill-slot { width: 50px; height: 50px; }
+.endless-title-row .pill-slot img { width: 24px; height: 24px; }
+.endless-title-row .pill-slot b { font-size: 14px; }
+.endless-title-row .pill-slot i { font-size: 13px; }
+/* 血量：贴标题、放大 */
+.endless-hp { margin: -2px 0 4px; }
+.endless-hp span { font-size: 19px; color: #7a4a18; }
+.endless-hp b { font-size: 22px; }
+.endless-hp .tower-carry-bar { width: 210px; height: 20px; }
+/* 动作：继续战斗固定右下角；放弃本局更小、在它左边偏下 */
+.endless-actions { position: relative; display: flex; align-items: flex-end; justify-content: flex-end; gap: 12px; margin: 6px 6px 0 0; }
+.endless-actions .uc-button[data-action="fight"] { min-height: 52px; font-size: 27px; padding: 4px 22px; }
+.endless-actions .uc-button[data-action="abandon"] { position: relative; top: 8px; margin-right: 4px; }
+
+/* 药丸槽：绝对定位贴右上角（不参与左列宽度计算，避免把标题行挤爆） */
+.endless-pills { position: absolute; top: 6px; right: 10px; }
+.endless-pills .pill-slots { display: grid; grid-template-columns: repeat(2, auto); justify-items: center; align-items: center; gap: 5px 9px; }
+.endless-pills .pill-slots .pill-slot:first-child { grid-column: 1 / span 2; }
+.endless-pills .pill-slot { width: 52px; height: 52px; }
+.endless-pills .pill-slot img { width: 25px; height: 25px; }
+.endless-pills .pill-slot b { font-size: 14px; }
+.endless-pills .pill-slot i { font-size: 13px; }
+.endless-foes { margin-right: 66px; }
+.endless-title-row { overflow: hidden; }
+.endless-title-row { white-space: nowrap; }
+
+/* 药丸槽放回右列顶部（三角、贴右边缘），不与对手行重叠 */
+.endless-foes { display: flex; flex-direction: column; align-items: flex-end; margin-right: 20px; }
+.endless-foes .tower-plan, .endless-foes .tower-plan-title { align-self: stretch; }
+.endless-foes .pill-slots { display: grid; grid-template-columns: repeat(2, auto); justify-items: center; align-items: center;
+  gap: 4px 8px; margin-bottom: 6px; }
+.endless-foes .pill-slots .pill-slot:first-child { grid-column: 1 / span 2; }
+.endless-foes .pill-slot { width: 50px; height: 50px; }
+.endless-foes .pill-slot img { width: 24px; height: 24px; }
+.endless-pills { display: none; }

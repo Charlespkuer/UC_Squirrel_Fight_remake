@@ -348,11 +348,14 @@
       const choicesHtml = run.choices
         ? '<div class="tower-buffs choice-onpage"><h4>休整点 · 选一张带走</h4><div class="hex-row">' +
           run.choices.map((c, i) => choiceCard(c, i)).join('') + '</div></div>' : '';
+      /* 顶栏：标题 → 试炼币/抽奖卷 → 分数框 → 右边缘的三个药丸槽（等腰三角摆放）。
+       * 血量紧贴标题下方（分数已经挪进顶栏，所以这里整体上提），字号与血条都放大一档；
+       * 「继续战斗」在右下角，「放弃本局」更小、压在它左边偏下。 */
       main = '<div class="endless-run">' +
         '<div class="endless-left">' +
         '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
-        currencyHtml('endless') + '</div>' +
-        '<p class="endless-score">分数 ' + run.score + '</p>' +
+        currencyHtml('endless') +
+        '<span class="endless-score-box"><i>分数</i><b>' + run.score + '</b></span></div>' +
         carryBar(run.carry, '血量', 'endless-hp') +
         '<div class="tower-rule mech-bar"><b>当前遭遇的机制</b>' + (info.mechs && info.mechs.length
           ? info.mechs.map((m) => '<span class="mech-chip">' + esc(MECH_NAME[m] || m) + '<i>' + esc(MECH_DESC[m] || '') + '</i></span>').join('')
@@ -361,10 +364,9 @@
         '<div class="endless-foes">' + pillSlotsHtml(run.pillSlots) +
         '<h4 class="tower-plan-title">本层对手</h4>' +
         '<ol class="tower-plan vertical">' + foeRows + '</ol></div></div>' +
-        '<div class="endless-actions tower-actions">' + C().btn(nextLabel, 'fight', 'gold') +
-        (Tower.shopState() ? C().btn('试炼商店', 'shop', 'small')
-          : run.choices && !run.restShopUsed ? C().btn('休整商店（本层 1 次）', 'rest-shop', 'small') : '') +
-        C().btn('放弃本局', 'abandon', 'muted small') + '</div>';
+        '<div class="endless-actions tower-actions">' +
+        C().btn('放弃本局', 'abandon', 'muted tiny') +
+        C().btn(nextLabel, 'fight', 'gold') + '</div>';
     } else {
       main = '<h2 class="tower-title">无尽模式</h2>' +
         '<div class="tower-stats">历史最高 <b class="gold-text">' + info.best + '</b> 分 · 本周最高 ' + info.weekBest + ' 分 · 最深 ' + info.bestLayer + ' 层</div>' +

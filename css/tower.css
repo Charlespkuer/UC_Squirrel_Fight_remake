@@ -351,3 +351,53 @@
 .mech-chip i { font-style: normal; font-size: 15px; color: #a4645a; }
 .mech-none { font-size: 17px; color: #6f8a3a; }
 .mech-note { font-size: 15px; color: #a98a5c; }
+
+/* 第 2 项：无尽主界面 —— 左列信息 + 右侧竖排对手，尽量一屏看完 */
+.endless-run { display: flex; gap: 10px; align-items: flex-start; }
+.endless-left { flex: 1 1 auto; min-width: 0; }
+.endless-foes { flex: 0 0 196px; }
+.endless-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.endless-title-row .tower-currency { position: static; }
+.endless-score { margin: 0 0 4px; font-size: 18px; color: #8a6a3a; }
+.endless-left .tower-head .pill-slots, .endless-left .pill-slots { justify-content: flex-start; margin-bottom: 2px; }
+.endless-left .tower-buffs { margin: 2px 0; }
+.endless-left .tower-buffs h4 { font-size: 17px; margin: 2px 0; }
+.endless-left .buff-tags { gap: 5px; }
+.endless-left .buff-tag, .endless-left .limit-tag { font-size: 17px; padding: 0 8px; }
+.endless-left .tower-carry { margin: 4px 0; }
+.endless-left .tower-actions { margin: 4px 0 0; gap: 10px; }
+.endless-left .choice-onpage .hex-row { gap: 8px; }
+.endless-left .choice-onpage .hex-card { transform: scale(.92); transform-origin: left center; }
+.tower-plan.vertical { flex-direction: column; gap: 5px; }
+.tower-plan.vertical li { flex-direction: row; align-items: center; gap: 6px; padding: 3px 8px; font-size: 18px; }
+.tower-plan.vertical li b { font-size: 19px; }
+.tower-plan.vertical .foe-portrait { width: 46px; height: 46px; }
+.tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 46px; }
+.tower-plan.vertical .tower-plan-no { position: static; flex: none; }
+.tower-plan.vertical .tower-plan-type { font-size: 15px; padding: 0 6px; }
+
+/* 一屏放下：再压一档（药丸槽、对手行、行距） */
+.endless-left .pill-slot { width: 44px; height: 44px; border-width: 2px; }
+.endless-left .pill-slot img { width: 20px; height: 20px; }
+.endless-left .pill-slot b { font-size: 13px; }
+.endless-left .pill-slot i { font-size: 12px; }
+.endless-left .endless-score { margin: 0; font-size: 17px; }
+.tower-plan.vertical li { padding: 2px 6px; }
+.tower-plan.vertical li b { white-space: nowrap; }
+.tower-plan.vertical .tower-plan-type { white-space: nowrap; }
+.endless-left .tower-carry { margin: 2px 0; }
+.endless-left .buff-tag, .endless-left .limit-tag { font-size: 16px; padding: 0 6px; }
+.endless-left .tower-buffs h4 { margin: 1px 0; }
+.endless-foes .tower-plan-title { margin: 4px 0 2px; }
+
+/* 标题与货币都不换行，省下一行高度给底部按钮 */
+.endless-title-row .tower-title { font-size: 30px; white-space: nowrap; }
+.endless-title-row .tower-currency { gap: 8px; }
+.endless-title-row .tower-currency .currency-item { font-size: 16px; gap: 3px; }
+.endless-title-row .tower-currency b { font-size: 19px; }
+.endless-title-row .tower-currency .currency-item { white-space: nowrap; }
+
+/* 按钮挪到右列（对手表下面）：左列不再被按钮挤高，一屏就能看完 */
+.endless-foes { display: flex; flex-direction: column; }
+.endless-foes .tower-actions { flex-direction: column; align-items: stretch; gap: 6px; margin-top: 8px; }
+.endless-foes .tower-actions .uc-button { min-height: 40px; font-size: 21px; padding: 3px 10px; }

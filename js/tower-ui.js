@@ -335,25 +335,35 @@
     if (info.run) {
       const run = info.run;
       const nextLabel = run.choices ? '先选一张增益' : run.phase === 'shop' ? '进入试炼商店' : run.phase === 'checkpoint' ? '前往结算点' : '继续战斗';
-      main = '<div class="tower-head"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
-        pillSlotsHtml(run.pillSlots) + '</div>' +
-        currencyHtml('endless') +
-        '<div class="tower-stats">分数 <b class="gold-text">' + run.score + '</b> · 现在离场可得抽奖卷 <b>' + run.ticketsIfSettle + '</b> 张（需到 5 的倍数层结算）</div>' +
-        '<div class="tower-stats small">本局最深 ' + run.bestLayer + ' 层 · 第 ' + run.segment + ' 段</div>' +
+      /* 第 2 项版面：左上角是三个属性药丸槽；下面紧贴标题一行小字只有分数；
+       * 「当前遭遇的机制」下面直接跟已获得的增益（永久 / 限次），保证一屏看完不用下翻；
+       * 本层对手缩成右侧竖排 1/2/3/4。 */
+      const foes = Tower.preview(run.layer);   // 与 buildPlan 同源（run.plan 快照在页面重绘时可能还没刷新）
+      const foeRows = foes.map((b, i) =>
+        '<li class="' + (b.elite ? 'elite' : '') + (b.squirrel ? ' squirrel' : '') + '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
+        '<span class="tower-plan-no">' + (i + 1) + '</span>' + foePortraitHtml(i, b) +
+        '<b>' + esc(b.name) + '</b>' + (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
+        (b.elite ? '<em class="elite-tag">精英</em>' : '') + '</li>').join('');
+      const choicesHtml = run.choices
+        ? '<div class="tower-buffs choice-onpage"><h4>休整点 · 选一张带走</h4><div class="hex-row">' +
+          run.choices.map((c, i) => choiceCard(c, i)).join('') + '</div></div>' : '';
+      main = '<div class="endless-run">' +
+        '<div class="endless-left">' +
+        pillSlotsHtml(run.pillSlots) +
+        '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
+        currencyHtml('endless') + '</div>' +
+        '<p class="endless-score">分数 ' + run.score + '</p>' +
         '<div class="tower-rule mech-bar"><b>当前遭遇的机制</b>' + (info.mechs && info.mechs.length
           ? info.mechs.map((m) => '<span class="mech-chip">' + esc(MECH_NAME[m] || m) + '<i>' + esc(MECH_DESC[m] || '') + '</i></span>').join('')
-          : '<span class="mech-none">本段没有额外机制（第 1 段）</span>') +
-          '<span class="mech-note">每段轮转，最多 ' + (TowerData.ENDLESS_MECH_MAX || 3) + ' 个</span></div>' +
-        '<h4 class="tower-plan-title">本层对手（第 ' + run.battleNo + '/' + run.battleCount + ' 场）</h4>' +
-        planHtml(Tower.preview(run.layer), ' compact') +   // 第 3 项：本层对手预告（与 buildPlan 同源）
-        carryBar(run.carry) + debuffPanel(run.debuffs) + buffPanelsHtml('endless') +
-        (run.choices ? '<div class="tower-buffs choice-onpage"><h4>休整点 · 选一张带走（' +
-          (TowerData.PERMANENT_SLOTS || 5) + ' 格永久已用 ' + Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent').length + '）</h4>' +
-          '<div class="hex-row">' + run.choices.map((c, i) => choiceCard(c, i)).join('') + '</div></div>' : '') +
+          : '<span class="mech-none">本段没有额外机制（第 1 段）</span>') + '</div>' +
+        buffPanelsHtml('endless') + choicesHtml +
+        carryBar(run.carry) + '</div>' +
+        '<div class="endless-foes"><h4 class="tower-plan-title">本层对手</h4>' +
+        '<ol class="tower-plan vertical">' + foeRows + '</ol>' +
         '<div class="tower-actions">' + C().btn(nextLabel, 'fight', 'gold') +
         (Tower.shopState() ? C().btn('试炼商店', 'shop', 'small')
           : run.choices && !run.restShopUsed ? C().btn('休整商店（本层 1 次）', 'rest-shop', 'small') : '') +
-        C().btn('放弃本局', 'abandon', 'muted small') + '</div>';
+        C().btn('放弃本局', 'abandon', 'muted small') + '</div></div></div>';
     } else {
       main = '<h2 class="tower-title">无尽模式</h2>' +
         '<div class="tower-stats">历史最高 <b class="gold-text">' + info.best + '</b> 分 · 本周最高 ' + info.weekBest + ' 分 · 最深 ' + info.bestLayer + ' 层</div>' +
@@ -367,35 +377,8 @@
       '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
     bindTips(p);
+    if (info.run) fillFoeArt(p, Tower.preview(info.run.layer));   // 第 3 项：松鼠类对手是 canvas，要等素材画上去
     back(p, () => UI.runAction('stages'));
-    /* 第 1 项：休整点的选择改在**主界面**上做（不再弹窗）——
-     * 点卡片拿增益、点永久标签选「要被替换掉的」、点限次标签开关。 */
-    p.querySelectorAll('[data-choice]').forEach((el) => {
-      el.onclick = () => {
-        const index = Number(el.dataset.choice);
-        const res = Tower.pickChoice('endless', index, replaceTarget);
-        if (res && res.needsReplace) {
-          notice('永久增益已满 5 个：先在上面「永久增益」里点一个要被替换掉的，再点这张卡。');
-          openEndless();
-          return;
-        }
-        replaceTarget = null;
-        if (res && res.ok && res.instant) {
-          if (res.coins) notice('试炼币 +' + res.coins);
-          if (res.shop) { openShop(true); return; }
-        }
-        openEndless();
-      };
-    });
-    p.querySelectorAll('[data-toggle]').forEach((el) => {
-      el.onclick = () => { Tower.toggleLimited(el.dataset.toggle); openEndless(); };
-    });
-    p.querySelectorAll('[data-replace]').forEach((el) => {
-      el.onclick = () => {
-        replaceTarget = replaceTarget === el.dataset.replace ? null : el.dataset.replace;
-        openEndless();
-      };
-    });
     on(p, 'fight', () => {
       if (info.run) {
         if (info.run.choices) { notice('先在下面选一张增益（休整点）。'); return; }
@@ -466,18 +449,17 @@
   }
   function afterBattle(mode, rw) {
     if (!rw.win) { mode === 'tower' ? towerDefeat(rw) : endlessDefeat(rw); return; }
-    if (rw.choices) { offerChoice(mode, rw.choices); return; }
-    // 第 3 项：每 10 层的里程碑奖励先把弹窗给出来，再走原本的流程
-    const cont = () => {
-      if (rw.layerComplete && mode !== 'tower') { if (rw.phase === 'shop') openShop(); else openEndless(); return; }
-      if (rw.layerComplete && mode === 'tower') { towerClear(rw); return; }
-      winModal(mode, rw);
-    };
-    if (rw.milestone) { milestoneModal(rw, cont); return; }
-    if (rw.layerComplete) {
-      if (mode === 'tower') { towerClear(rw); return; }
-      if (rw.phase === 'shop') { openShop(); return; }
+    /* 第 1 项：无尽塔不搞弹窗 —— 一场打完（含休整点）直接回主界面，
+     * 选增益、开关限次、看对手都在主界面上做；选完也不弹「继续战斗」，
+     * 由玩家自己点主界面的按钮进下一场。主塔的弹窗流程保持不变。 */
+    if (mode === 'endless') {
+      const cont = () => { if (rw.layerComplete && rw.phase === 'shop') openShop(); else openEndless(); };
+      if (rw.milestone) { milestoneModal(rw, cont); return; }
+      cont();
+      return;
     }
+    if (rw.choices) { offerChoice(mode, rw.choices); return; }
+    if (rw.layerComplete) { towerClear(rw); return; }
     winModal(mode, rw);
   }
 

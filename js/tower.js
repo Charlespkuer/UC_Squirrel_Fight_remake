@@ -159,11 +159,19 @@
    * 聚合当前生效的 buff 为本场战斗的修正。
    * foeCtx = {hero, poolNpc, elite}，用于「特定 NPC 触发」类乘区。
    */
+  /** 某个 mod 在本局的合计值（战斗外结算用，例如战后续航）——带叠层与增幅水晶乘区。 */
+  function runModTotal(run, key) {
+    const g = globalMul(run);
+    let sum = 0;
+    eachBuff(run, (buff, stacks) => { const m = buff.mods; if (m && m[key]) sum += m[key] * stacks * g; });
+    return sum;
+  }
   function aggregate(run, foeCtx) {
     const g = globalMul(run);
     const agg = { powerMul: 0, maxHpMul: 0, critBonus: 0, critDmgBonus: 0, dodgeBonus: 0, takenMul: 0,
       regenPct: 0, lifestealPct: 0, shellPct: 0, openStrikePct: 0, enemyPowerDown: 0,
-      mustHitFirst: 0, firstSkillFree: 0, deathSaves: [], dmgMul: 1 };
+      mustHitFirst: 0, firstSkillFree: 0, deathSaves: [], dmgMul: 1,
+      speedMul: 0, winHealPct: 0, thornsPct: 0, lowHpPowerMul: 0, lowHpAt: 0 };
     eachBuff(run, (buff, stacks) => {
       const m = buff.mods, k = stacks * g;
       if (m.powerMul) agg.powerMul += m.powerMul * k;
@@ -177,6 +185,10 @@
       if (m.shellPct) agg.shellPct += m.shellPct * k;
       if (m.enemyPowerDown) agg.enemyPowerDown += m.enemyPowerDown * k;
       if (m.openStrikePct) agg.openStrikePct = Math.max(agg.openStrikePct, m.openStrikePct * k);
+      if (m.speedMul) agg.speedMul += m.speedMul * k;
+      if (m.winHealPct) agg.winHealPct += m.winHealPct * k;                       // 战后续航（可叠加）
+      if (m.thornsPct) agg.thornsPct += m.thornsPct * k;                         // 荆棘之甲
+      if (m.lowHpPowerMul) { agg.lowHpPowerMul += m.lowHpPowerMul * k; agg.lowHpAt = Math.max(agg.lowHpAt, Number(m.lowHpAt) || 0.35); }
       if (m.mustHitFirst) agg.mustHitFirst = 1;
       if (m.firstSkillFree) agg.firstSkillFree = 1;
       if (m.deathSave) agg.deathSaves.push({});                                  // 金蝉脱壳：保留 1 血
@@ -294,12 +306,13 @@
       killPower: 0, killMaxHp: 0, bonusPower: 0, shop: null, phase: null, choices: null, debuffs: [] };
     if (debug('endlessCoin')) run.coins = 9999;
     e.run = run;
-    layerStartHeal(run);
     save();
     return { ok: true, layer: 1 };
   }
   /** 五层回响：进入 5 的倍数层时回复 50%（无尽）。 */
-  function layerStartHeal(run) {
+  function layerStartHeal(run, mode) {
+    // 第 2 项：无尽塔跨层固定回 20% 血
+    if (mode === 'endless') run.carry = Math.min(1, run.carry + D().ENDLESS_LAYER_HEAL_PCT);
     if (run.layer % 5 === 0 && stacksOf(run, 'C08')) {
       run.carry = Math.min(1, run.carry + D().BUFF_BY_ID.C08.mods.layer5HealPct * globalMul(run));
     }
@@ -330,7 +343,7 @@
       const maxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul) * dMaxHp));
       me.power = Math.max(1, Math.round(me.power * (1 + powerMul) * dPower));
       me.agility = Math.max(1, Math.round(me.agility * dAgi));
-      me.speed = Math.max(1, Math.round(me.speed * dSpd));
+      me.speed = Math.max(1, Math.round(me.speed * dSpd * (1 + agg.speedMul)));
       for (const d of debuffs) {
         if (d.kind !== 'lock') continue;
         if (d.what === 'weapon') me.weapons = (me.weapons || []).filter((w) => Number(w.id) !== Number(d.id));
@@ -351,6 +364,8 @@
       if (agg.mustHitFirst) mods.mustHitFirst = 1;
       if (agg.firstSkillFree) mods.firstSkillFree = 1;
       if (agg.dmgMul !== 1) mods.dmgMul = agg.dmgMul;
+      if (agg.thornsPct) mods.thornsPct = Math.min(0.6, agg.thornsPct);          // 荆棘之甲（sim 里结算）
+      if (agg.lowHpPowerMul) { mods.lowHpPowerMul = agg.lowHpPowerMul; mods.lowHpAt = agg.lowHpAt || 0.35; }
       if (agg.deathSaves.length) mods.deathSaves = agg.deathSaves;
       me.mods = mods;
     };
@@ -448,6 +463,12 @@
       out.potGold = run.pot;
     } else {
       const g = globalMul(run);
+      // 战后续航（C16/C17，可叠加）：每场胜利后回复 X% 最大生命
+      const winHeal = runModTotal(run, 'winHealPct');
+      if (winHeal > 0) {
+        run.carry = Math.min(1, run.carry + winHeal);
+        out.winHeal = winHeal;
+      }
       run.score += D().SCORE.battle;
       run.coins += D().COINS.battle;
       // 击杀叠层类（基础 → 叠层 → C15）
@@ -515,8 +536,12 @@
   function clearRetry() { if (tower().retry) { tower().retry = null; save(); } }
   function endlessFail(run) {
     const e = endless();
+    /* 第 3 项：失败不再把奖励归零 —— 直接按**当前层应得的抽奖卷**结算（和结算点离场同一个口径），
+     * 分数也照常入账。这样「撑到更深」永远有意义，不会一次失败全打水漂。 */
+    const tickets = D().endlessTickets(run.layer);
+    if (tickets > 0) S().props[TICKET_PROP] = (S().props[TICKET_PROP] || 0) + tickets;
     const out = { ok: true, win: false, layer: run.layer, score: run.score, bestLayer: run.bestLayer,
-      tickets: 0, shield: false };
+      tickets, shield: false, settled: true };
     settleScore(run, out);
     // 保底：本局到达 ≥15 层后失败，送 1 次免费抽奖（每日限 1 次）
     const today = State.localDate();
@@ -578,7 +603,7 @@
       run.phase = 'shop';
       out.phase = 'shop';
     } else {
-      advanceLayer(run);
+      advanceLayer(run, 'endless');
     }
     save();
     return out;
@@ -592,11 +617,12 @@
     for (let i = 0; i < battles; i++) list.push(...Drops.plan());
     return Drops.grant(list);
   }
-  function advanceLayer(run) {    run.layer++;
+  function advanceLayer(run, mode) {
+    run.layer++;
     run.plan = buildPlan(run.layer);
     run.idx = 0;
     run.choices = null;
-    layerStartHeal(run);
+    layerStartHeal(run, mode);
   }
 
   // ---------- 场间 4 选 1 ----------
@@ -768,7 +794,7 @@
     const run = endless().run;
     if (!run || run.phase !== 'checkpoint') return { ok: false };
     run.phase = null;
-    advanceLayer(run);
+    advanceLayer(run, 'endless');
     save();
     return { ok: true, layer: run.layer };
   }

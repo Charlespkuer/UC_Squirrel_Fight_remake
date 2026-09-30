@@ -22,8 +22,10 @@
   const ARENA_EXP = [150, 75, 45, 0];
   const ARENA_FRAGMENT_SHARDS = [8, 6, 4, 3];
   function addProp(id, count) { const s = State.state(); s.props[id] = (s.props[id] || 0) + count; }
-  function outcome(win, reward, text, again, label) {
-    C().modal('\u6218\u6597\u7ed3\u679c', '<div class="extra-result"><strong class="cartoon">' + (win ? '\u80dc\u5229\uff01' : '\u518d\u63a5\u518d\u5389') + '</strong><p>' + esc(text) + '</p><div>\u7ecf\u9a8c +' + reward.exp + '\u3000\u91d1\u677e\u679c +' + (reward.gold || 0) + '</div>' + C().upsHtml(reward.ups) + '</div>', [{ label: label || '\u8fd4\u56de', run: again }, { label: '\u67e5\u770b\u5f55\u50cf', cls: 'gold', run: () => UI.runAction('messages') }]);
+  /** extra：额外按钮（第 7 项天梯赛的「继续挑战」就是走这里），排在最前面当主按钮。 */
+  function outcome(win, reward, text, again, label, extra) {
+    const buttons = (extra || []).concat([{ label: label || '\u8fd4\u56de', run: again }, { label: '\u67e5\u770b\u5f55\u50cf', cls: 'gold', run: () => UI.runAction('messages') }]);
+    C().modal('\u6218\u6597\u7ed3\u679c', '<div class="extra-result"><strong class="cartoon">' + (win ? '\u80dc\u5229\uff01' : '\u518d\u63a5\u518d\u5389') + '</strong><p>' + esc(text) + '</p><div>\u7ecf\u9a8c +' + reward.exp + '\u3000\u91d1\u677e\u679c +' + (reward.gold || 0) + '</div>' + C().upsHtml(reward.ups) + '</div>', buttons);
   }
 
   let arenaRun = null;
@@ -158,6 +160,16 @@
     on(p, 'rank-shop', () => rankShop(0));
     const match = on(p, 'rank-fight', () => {
       if (!p.isConnected || State.state() !== s || rankAttempt) return;
+      rankMatch();
+    });
+    match.disabled = rankSunday() || s.joinRankCount >= 20 || !!rankAttempt;
+  }
+  /* 第 7 项：天梯赛开战逻辑抽成独立函数，战果弹窗里的「继续挑战」按钮直接复用它
+   * （原来只能先点「返回天梯赛」、再点一次「开始匹配」）。 */
+  function rankMatch() {
+    {
+      const s = State.state();
+      if (rankAttempt) return;
       State.tickEnergy();
       if (s.level < 30) { alert('\u5929\u68af\u8d5b\u9700\u8981\u8fbe\u523030\u7ea7\u3002'); return; }
       if (rankSunday()) { alert('\u5468\u65e5\u5929\u68af\u4f11\u8d5b\uff0c\u53ef\u4ee5\u53bb\u91d1\u676f\u5546\u5e97\u5151\u6362\u5956\u52b1\u3002'); return; }
@@ -183,10 +195,10 @@
         const robbed = win && Math.random() < 0.25 ? 3 : 0, cups = (win ? 3 : 1) + robbed;
         s.integral = Math.max(0, s.integral + delta); s.goldCup += cups; State.save();
         rank();   // \u6218\u679c\u5f39\u7a97\u653e\u56de\u5929\u68af\u8d5b\u9875\u4e0a
-        outcome(win, { exp: 0, gold: 0, ups: [] }, '\u79ef\u5206 ' + (delta > 0 ? '+' : '') + delta + '\uff0c\u91d1\u676f +' + cups + (robbed ? '\uff08\u542b\u593a\u5f973\u676f\uff09' : '') + '\u3002\u5f53\u524d\u79ef\u5206 ' + s.integral + '\u3002', rank, '\u8fd4\u56de\u5929\u68af\u8d5b');
+        outcome(win, { exp: 0, gold: 0, ups: [] }, '\u79ef\u5206 ' + (delta > 0 ? '+' : '') + delta + '\uff0c\u91d1\u676f +' + cups + (robbed ? '\uff08\u542b\u593a\u5f973\u676f\uff09' : '') + '\u3002\u5f53\u524d\u79ef\u5206 ' + s.integral + '\u3002', rank, '\u8fd4\u56de\u5929\u68af\u8d5b',
+          [{ label: '\u7ee7\u7eed\u6311\u6218', cls: 'gold', run: () => rankMatch() }]);
       } }).catch(interrupted);
-    });
-    match.disabled = rankSunday() || s.joinRankCount >= 20 || !!rankAttempt;
+    }
   }
   function rankShop(pg) {
     const s = State.state();

@@ -344,14 +344,19 @@
    * 单场类（N/M）基本不动，避免一次选择直接决定整层。 */
   const BUFFS = Object.freeze([
     // —— 单场类（主塔+无尽通用） ——
-    { id: 'N01', name: '蓄力一击', rarity: 0, scope: 'battle', desc: '下一场攻击 +25%', mods: { powerMul: 0.25 } },
+    /* 第 4 项：单场类 buff 整体加强（原来是 25/20/5/20/30 一档，太温柔，
+     * 玩家拿到也不觉得这一场变强），并补了暴击/减伤/速度三种手感明显的。 */
+    { id: 'N01', name: '蓄力一击', rarity: 0, scope: 'battle', desc: '下一场攻击 +40%', mods: { powerMul: 0.40 } },
     { id: 'N02', name: '百步穿杨', rarity: 0, scope: 'battle', desc: '下一场首次攻击必中', mods: { mustHitFirst: 1 } },
-    { id: 'M01', name: '威慑', rarity: 0, scope: 'battle', desc: '下一场敌人攻击力 −20%', mods: { enemyPowerDown: 0.20 } },
+    { id: 'M01', name: '威慑', rarity: 0, scope: 'battle', desc: '下一场敌人攻击力 −30%', mods: { enemyPowerDown: 0.30 } },
     { id: 'M02', name: '疾风先手', rarity: 0, scope: 'battle', desc: '下一场你的首次技能不消耗回合', mods: { firstSkillFree: 1 } },
-    { id: 'N03', name: '活血丹', rarity: 1, scope: 'battle', desc: '下一场每回合开始回复 5% 生命', mods: { regenPct: 0.05 } },
+    { id: 'N03', name: '活血丹', rarity: 1, scope: 'battle', desc: '下一场每回合开始回复 8% 生命', mods: { regenPct: 0.08 } },
     { id: 'N04', name: '金蝉脱壳', rarity: 1, scope: 'battle', desc: '下一场免疫一次致命伤害（保留 1 点生命）', mods: { deathSave: 1 } },
-    { id: 'N05', name: '先手制敌', rarity: 2, scope: 'battle', desc: '下一场开局对敌人造成其 20% 最大生命的伤害', mods: { openStrikePct: 0.20 } },
-    { id: 'N06', name: '血饮狂刀', rarity: 2, scope: 'battle', desc: '下一场攻击附带 30% 吸血', mods: { lifestealPct: 0.30 } },
+    { id: 'N07', name: '破军', rarity: 1, scope: 'battle', desc: '下一场暴击率 +25%', mods: { critBonus: 25 } },
+    { id: 'M03', name: '坚守', rarity: 1, scope: 'battle', desc: '下一场受到伤害 −30%', mods: { takenMul: -0.30 } },
+    { id: 'M04', name: '疾风步', rarity: 1, scope: 'battle', desc: '下一场速度 +30%', mods: { speedMul: 0.30 } },
+    { id: 'N05', name: '先手制敌', rarity: 2, scope: 'battle', desc: '下一场开局对敌人造成其 30% 最大生命的伤害', mods: { openStrikePct: 0.30 } },
+    { id: 'N06', name: '血饮狂刀', rarity: 2, scope: 'battle', desc: '下一场攻击附带 45% 吸血', mods: { lifestealPct: 0.45 } },
     // —— 本层类（主塔=整局；无尽=当前层） ——
     { id: 'G01', name: '力量祝福', rarity: 0, scope: 'layer', desc: '本层攻击 +12%', mods: { powerMul: 0.12 } },
     { id: 'G02', name: '生命祝福', rarity: 0, scope: 'layer', desc: '本层生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
@@ -371,6 +376,16 @@
     { id: 'C08', name: '五层回响', rarity: 1, scope: 'run', desc: '每到 5 的倍数层，该层第 1 场开局回复 50% 最大生命', mods: { layer5HealPct: 0.50 } },
     { id: 'C09', name: '逢十强化', rarity: 1, scope: 'run', desc: '在 10 的倍数层攻击 +20%、生命上限 +20%（仅该层）', mods: { x10Boost: 0.20 } },
     { id: 'C10', name: '机制破解', rarity: 1, scope: 'run', desc: '对带专属机制的敌人伤害 +25%', mods: { dmgMulMech: 0.25 } },
+    /* 第 4 项新增的跨层类型：续航 / 反伤 / 低血狂怒 / 暴击 / 闪避 / 速度 ——
+     * 让「本局永久」这一档不再只有纯数值放大，选到就能改变打法。 */
+    { id: 'C16', name: '战后续航', rarity: 1, scope: 'run', stackable: true, desc: '每场战斗胜利后回复 5% 最大生命（可叠加）', mods: { winHealPct: 0.05 } },
+    { id: 'C17', name: '战后续航·精', rarity: 2, scope: 'run', stackable: true, desc: '每场战斗胜利后回复 10% 最大生命（可叠加）', mods: { winHealPct: 0.10 } },
+    { id: 'C18', name: '吸血精通', rarity: 1, scope: 'run', desc: '所有攻击附带 12% 吸血', mods: { lifestealPct: 0.12 } },
+    { id: 'C19', name: '荆棘之甲', rarity: 1, scope: 'run', desc: '受到伤害时反弹 20% 给敌人', mods: { thornsPct: 0.20 } },
+    { id: 'C20', name: '狂怒', rarity: 2, scope: 'run', desc: '生命低于 35% 时攻击 +50%', mods: { lowHpPowerMul: 0.50, lowHpAt: 0.35 } },
+    { id: 'C21', name: '暴击精通', rarity: 0, scope: 'run', desc: '暴击率 +10%', mods: { critBonus: 10 } },
+    { id: 'C22', name: '闪避精通', rarity: 0, scope: 'run', desc: '闪避 +8%', mods: { dodgeBonus: 8 } },
+    { id: 'C23', name: '轻身术', rarity: 0, scope: 'run', desc: '速度 +15%', mods: { speedMul: 0.15 } },
     { id: 'C11', name: '以战养战', rarity: 2, scope: 'run', stackable: true, desc: '每击杀 1 个敌人回复 5% 最大生命', mods: { killHealPct: 0.05 } },
     { id: 'C12', name: '登顶者', rarity: 2, scope: 'run', stackable: true, desc: '从 20 层起，每通过一层攻击永久 +4%', mods: { perLayerPowerAfter20: 0.04 } },
     { id: 'C13', name: '精英杀手', rarity: 2, scope: 'run', desc: '对精英伤害 +40%；击败精英后回复 20% 最大生命', mods: { dmgMulElite: 0.40, eliteHealAfter: 0.20 } },
@@ -388,6 +403,9 @@
    * 第 3 项把场间选择从 3 次压到 1 次后，回血从「三次微决策」变成「稳定节奏」，
    * 这样既少操作，也不会因为一次选错就断崖式掉血。 */
   const AUTO_HEAL_PCT = 0.14;                    // 每场打完自动回复的比例
+  /* 第 2 项：无尽塔跨层时固定回复 20% 生命（原来只有「五层回响」那 50%），
+   * 冲分时的续航不再只能靠场间选择。 */
+  const ENDLESS_LAYER_HEAL_PCT = 0.20;
   const STACK_MAX = 3;
   /* 每层通关结算时补发的「悬浮奖品」场数：塔内战斗关掉了飘物掉落（防免门票刷资源），
    * 所以按**一整个常驻挑战关 = 3 场**的掉落量补回来（每场 3 个飘物 → 共 9 个）。 */
@@ -403,6 +421,7 @@
     ENDLESS_MECH_ORDER, ENDLESS_CONSOLATION_LAYER, SCORE, COINS, SHOP, shopPrice,
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
     FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, bossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,
+    ENDLESS_LAYER_HEAL_PCT,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,

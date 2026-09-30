@@ -105,7 +105,7 @@ function autoPick(ctx, mode) {
 
 (function logic() {
   const ctx = setup();
-  const { State, Tower, TowerData } = ctx;
+  const { State, Tower, TowerData, Sim } = ctx;
   const S = unlock(ctx);
   console.log('A. 状态机逻辑测试');
 
@@ -291,7 +291,8 @@ function autoPick(ctx, mode) {
   const free0 = S.lotteryFree;
   nx = Tower.nextBattle('endless');
   rw = Tower.reportBattle('endless', nx.token, false, 0);
-  t('失败：卷作废（tickets=0）', !rw.win && rw.tickets === 0);
+  /* 第 3 项改动后：失败不再归零，按当前层应得结算 */
+  t('失败：按当前层应得结算抽奖卷（不再归零）', !rw.win && rw.tickets === TowerData.endlessTickets(erun.layer) && rw.tickets > 0);
   t('保底：≥15 层失败送 1 次免费抽奖', rw.shield === true && S.lotteryFree === free0 + 1);
   // 每日限 1 次
   Tower.startEndlessRun();
@@ -299,6 +300,77 @@ function autoPick(ctx, mode) {
   nx = Tower.nextBattle('endless');
   rw = Tower.reportBattle('endless', nx.token, false, 0);
   t('保底：同日不重复送', rw.shield === false && S.lotteryFree === free0 + 1);
+
+  /* —— 本轮（无尽 buff 与结算）的新断言 —— */
+  // 第 2 项：跨层固定回复 20% 生命（上面这局是满血爬的，所以另开一局把 carry 压到 0.4 复现）
+  {
+    Tower.abandon('endless');
+    Tower.startEndlessRun();
+    // 注意 endlessInfo() 给的是快照，要改数值/推进战斗必须拿 State 里的活对象
+    const r = State.state().endless.run;
+    r.carry = 0.4; r.layer = 4;
+    let g2 = 0;
+    while (g2++ < 20 && State.state().endless.run === r && r.layer === 4) {
+      if (r.choices) { Tower.pickChoice('endless', 0); continue; }
+      const nb = Tower.nextBattle('endless');
+      if (!nb.ok) break;
+      const rw2 = Tower.reportBattle('endless', nb.token, true, 0.4, { rounds: [] });
+      if (!rw2.ok) break;
+    }
+    t('无尽：跨层回复 20% 生命（0.4 → 0.6）', Math.abs(r.carry - 0.6) < 1e-6 && r.layer === 5);
+  }
+  // 第 3 项：无尽失败按当前层应得结算抽奖卷（不再归零）
+  {
+    const r = State.state().endless.run;
+    const ticketsBefore = S.props[50] || 0;
+    r.layer = 12; r.carry = 0.5;
+    const nb = Tower.nextBattle('endless');
+    const failOut = Tower.reportBattle('endless', nb.token, false, 0, { rounds: [] });
+    t('无尽：失败按当前层结算抽奖卷', failOut.tickets === ctx.TowerData.endlessTickets(12) && failOut.tickets > 0 &&
+      (S.props[50] || 0) === ticketsBefore + failOut.tickets);
+    t('无尽：失败后本局结束', !Tower.endlessInfo().run);
+  }
+  // 第 4 项：新 buff（战后续航可叠加 / 反伤 / 狂怒 / 速度 / 战后回血）
+  {
+    t('无尽池：单场 11 / 本层 7 / 跨层 23 个', ctx.TowerData.BUFFS.length === 41 &&
+      ctx.TowerData.BUFFS.filter((b) => b.scope === 'battle').length === 11 &&
+      ctx.TowerData.BUFFS.filter((b) => b.scope === 'layer').length === 7 &&
+      ctx.TowerData.BUFFS.filter((b) => b.scope === 'run').length === 23);
+    t('单场 buff 加强（蓄力一击 40% / 血饮狂刀 45%）',
+      ctx.TowerData.BUFF_BY_ID.N01.mods.powerMul === 0.40 && ctx.TowerData.BUFF_BY_ID.N06.mods.lifestealPct === 0.45);
+    Tower.startEndlessRun();
+    const r = State.state().endless.run;
+    r.buffs.push({ id: 'C16', stacks: 1 }, { id: 'C17', stacks: 2 }, { id: 'C19', stacks: 1 }, { id: 'C20', stacks: 1 }, { id: 'C23', stacks: 1 });
+    r.carry = 0.5; r.layer = 3;
+    const nb = Tower.nextBattle('endless');
+    const me2 = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+    me2.maxHp = me2.hp; const spd0 = me2.speed;
+    nb.adjustMe(me2);
+    t('新跨层 buff 进入战斗（反伤 20% / 狂怒 50% / 速度 +15%）',
+      me2.mods.thornsPct === 0.2 && me2.mods.lowHpPowerMul === 0.5 && me2.mods.lowHpAt === 0.35 &&
+      Math.abs(me2.speed - Math.round(spd0 * 1.15)) <= 1);
+    const winOut = Tower.reportBattle('endless', nb.token, true, 0.5, { rounds: [] });
+    t('战后续航可叠加（5% + 10%×2 = 25%）', Math.abs((winOut.winHeal || 0) - 0.25) < 1e-6 && Math.abs(r.carry - 0.75) < 1e-6);
+    Tower.abandon('endless');
+  }
+  // 第 5 项：反弹致死也要触发复活甲（原来只有 applyDamage 里判，反伤/中毒打死不触发）
+  {
+    const mk = (mods, hp) => { const f = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true }); f.maxHp = f.hp = hp; f.mods = mods || {}; return f; };
+    // 构造「一定是被反弹打死」：自己一击很高（反弹 15% 足够致命），敌人本身只打 1 点
+    const victim = mk({ deathSaves: [{ healPct: 0.5 }] }, 100);
+    victim.power = 10000; victim.agility = 500; victim.speed = 999;
+    const thornFoe = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+    Object.assign(thornFoe, { maxHp: 1000000, hp: 1000000, power: 1, agility: 1, speed: 1, mech: ['thorns'] });
+    const sim = Sim.simulate(victim, thornFoe);
+    t('复活甲：反弹致死也会触发', sim.rounds.some((r) => r.thornsDmg && r.deathSave));
+    const playerThorns = mk({ thornsPct: 0.5 }, 20000);
+    playerThorns.power = 200; playerThorns.speed = 1;
+    const fastFoe = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+    Object.assign(fastFoe, { maxHp: 200000, hp: 200000, power: 300, agility: 50, speed: 300 });
+    const sim2 = Sim.simulate(playerThorns, fastFoe);
+    t('荆棘之甲：受击反弹给敌人', sim2.rounds.filter((r) => r.dmg && r.attacker === 1).every((r) => r.thornsDmg > 0) &&
+      sim2.rounds.some((r) => r.thornsDmg > 0));
+  }
 
   // —— 存档迁移：坏值钳制 + 旧档无字段 ——
   const store2 = new Map();

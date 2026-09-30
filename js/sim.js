@@ -111,12 +111,37 @@
     };
   }
 
+  /** 任何扣血途径致死时的兜底：不死鸟（复活）/ 金蝉脱壳（保留 1 血）/ 无敌模式。
+   *  原来只有 applyDamage 里判，中毒、荆棘反弹、双刃剑自伤、枯泉吸血把人打死时
+   *  复活甲不会触发 —— 玩家会以为「buff 没生效」。 */
+  function tryDeathSave(def, r) {
+    if (!def || def.hp > 0) return false;
+    if (def.mods && Array.isArray(def.mods.deathSaves) && def.mods.deathSaves.length) {
+      const sv = def.mods.deathSaves.shift();
+      def.hp = sv.healPct ? Math.max(1, Math.round(def.maxHp * sv.healPct)) : 1;
+      if (r) {
+        r.deathSave = true;
+        r.noteText = (r.noteText ? r.noteText + '·' : '') + (sv.healPct ? '不死鸟' : '金蝉脱壳');
+        r.noteSide = def.side;
+      }
+      return true;
+    }
+    if (godSave(def)) { def.hp = 1; if (r) r.godSave = true; return true; }
+    return false;
+  }
+
   /** 真·色诱之术：被脱光装备期间，装备提供的属性与附加能力全部失效（回到裸属性）。 */
   function stripped(c) { return Number(c.stripTurns) > 0; }
   function statOf(c, key) { return stripped(c) ? c.baseStats[key] : c[key]; }
   /** 题面·枯泉：治疗量被压制时按倍率结算（0 层完全封疗）。 */
   function healOf(c, amount) { return Math.max(0, Math.round(Number(amount) * (c.healMul == null ? 1 : c.healMul))); }
-  function effPower(c) { return Math.max(1, Math.round(statOf(c, 'power') * (1 - c.debuffs.power / 100) + c.buffFlat.power)); }
+  function effPower(c) {
+    let p = statOf(c, 'power') * (1 - c.debuffs.power / 100) + c.buffFlat.power;
+    // 塔 buff「狂怒」：自己血量低于阈值时攻击提升（只有进攻方结算，所以放在这里）
+    const rage = c.mods && Number(c.mods.lowHpPowerMul) || 0;
+    if (rage > 0 && c.maxHp > 0 && c.hp <= c.maxHp * (Number(c.mods.lowHpAt) || 0.35)) p *= 1 + rage;
+    return Math.max(1, Math.round(p));
+  }
   function effAgility(c) { return Math.max(1, Math.round(statOf(c, 'agility') * (1 - c.debuffs.agility / 100) + c.buffFlat.agility)); }
   function effSpeed(c) { return Math.max(1, Math.round(statOf(c, 'speed') * (1 - c.debuffs.speed / 100) + c.buffFlat.speed)); }
   function effect(c, id) { return stripped(c) ? 0 : Math.max(0, Number(c.effects[id]) || 0); }
@@ -318,7 +343,6 @@
         def.stun = 0;
         immediate = { actor: def, reason: 'fakeDie' };
       } else if (def.hp - dmg <= 0 && def.mods && Array.isArray(def.mods.deathSaves) && def.mods.deathSaves.length) {
-        // 塔 buff：金蝉脱壳（保留 1 血）/ 不死鸟（复活回 30%）
         const sv = def.mods.deathSaves.shift();
         def.hp = sv.healPct ? Math.max(1, Math.round(def.maxHp * sv.healPct)) : 1;
         r.deathSave = true;
@@ -335,6 +359,7 @@
       if (red.rebound) {
         att.hp -= red.rebound;
         r.reboundHurt = red.rebound;
+        tryDeathSave(att, r);
       }
       // —— 受击/命中方机制（挑战塔 NPC 池） ——
       if (dmg > 0) {
@@ -342,6 +367,16 @@
           const reflect = Math.max(1, Math.round(dmg * 0.15));
           att.hp -= reflect;
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
+          tryDeathSave(att, r);
+        }
+        // 塔 buff「荆棘之甲」：玩家侧反伤（跨层类）
+        const thornsPct = def.mods && Number(def.mods.thornsPct) || 0;
+        if (thornsPct > 0 && att.hp > 0) {
+          const reflect = Math.max(1, Math.round(dmg * thornsPct));
+          att.hp -= reflect;
+          r.thornsDmg = (r.thornsDmg || 0) + reflect;
+          r.noteText = (r.noteText ? r.noteText + '·' : '') + '荆棘之甲'; r.noteSide = def.side;
+          tryDeathSave(att, r);
         }
         // 题面·镜鳞：单次伤害超过阈值（默认 20% 最大生命）时，反弹该次伤害的 45%
         // （逼玩家压低单次伤害 / 走多段；阈值与反弹比例由 tower-data.js 注入，方便调平衡）
@@ -643,7 +678,7 @@
           if (w.id === 16 && chance(weaponEffect(w, 10, 4, 4) + trueW(w, 'silence'))) { def.silence = Math.max(def.silence, 4); r.silenceApplied = true; }
         }
         if (w.id === 14 && att.hp > 0) { const heal = Math.min(att.maxHp - att.hp, healOf(att, total * (weaponEffect(w, 10, 4, 2) + trueW(w, 'lifesteal')) / 100)); att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
-        if (w.id === 17 && att.hp > 0) { const self = Math.round(att.hp * 0.1); att.hp -= self; r.selfBurn = self; }
+        if (w.id === 17 && att.hp > 0) { const self = Math.round(att.hp * 0.1); att.hp -= self; r.selfBurn = self; tryDeathSave(att, r); }
         // 反击（大榔头2、死神镰刀15 不可反击）
         maybeCounter(att, def, r, w.type === '近战' && ![2, 15].includes(w.id));
         pushRound(r);
@@ -781,8 +816,9 @@
       if (actor.dot) {
         const dotDmg = actor.dot.pct ? Math.max(1, Math.round(actor.hp * actor.dot.pct)) : actor.dot.dmg;
         actor.hp -= dotDmg;
-        if (actor.hp <= 0 && godSave(actor)) actor.hp = 1;
-        pushRound({ attacker: actor.side, action: 'dot', dmg: dotDmg, selfDot: true });
+        const dotRound = { attacker: actor.side, action: 'dot', dmg: dotDmg, selfDot: true };
+        tryDeathSave(actor, dotRound);            // 中毒致死也要过复活甲
+        pushRound(dotRound);
         actor.dot.rounds--;
         if (actor.dot.rounds <= 0) actor.dot = null;
         if (actor.hp <= 0) break;

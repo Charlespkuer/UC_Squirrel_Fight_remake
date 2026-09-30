@@ -118,14 +118,12 @@
     });
     return Promise.all(list);
   }
-  /** 三侠的招牌技会留削弱（速杀可规避）——入口页先给一句提示，悬停看三条具体效果。 */
-  function heroDebuffHint() {
-    if (!TowerData.HERO_DEBUFF) return '';
+  /** 三侠大招留削弱的具体数值（挂在规则行的悬停气泡上）。 */
+  function heroDebuffTips() {
+    if (!TowerData.HERO_DEBUFF) return '第 4 场是随机 boss；三侠顺序每层随机。';
     const tips = ['tl', 'xh', 'xm'].map((k) => TowerData.HERO_DEBUFF[k]).filter(Boolean)
       .map((d) => '· ' + d.name + '：' + d.desc).join('\n');
-    return '<p class="tower-rule tower-rule-hint" title="' + esc(tips) +
-      '">三侠的招牌技会给本层留下削弱（' + esc(tips.split('\n').map((t) => t.split('：')[0].slice(2)).join(' / ')) +
-      '），速杀可以规避 · 悬停看具体数值</p>';
+    return '三侠的大招会给本层留下削弱（速杀可规避）：\n' + tips + '\n\n第 4 场是随机 boss；悬停任意对手可以看它的机制与出招循环。';
   }
   function buffTag(b, stacks) {
     return '<span class="buff-tag r' + b.rarity + '" title="' + esc(b.desc) + '">' + esc(b.name) +
@@ -152,6 +150,23 @@
           '<span class="debuff-text">' + esc(d.text || '') + '</span></div>';
       }).join('') +
       '</div></div>';
+  }
+  /* 第 6 项：塔页右上角的货币条。主塔看金松果与挑战书，无尽额外看本局试炼币与抽奖卷。 */
+  const CURRENCY_PROP = { book: 23, ticket: 50 };
+  function currencyHtml(mode) {
+    const S = State.state();
+    const items = [];
+    if (mode === 'endless') {
+      const run = Tower.endlessInfo().run;
+      if (run) items.push({ icon: 'images/classic/icons/prop-21.png', name: '试炼币', value: run.coins });
+      items.push({ icon: 'images/classic/icons/prop-50.png', name: '抽奖卷', value: S.props[CURRENCY_PROP.ticket] || 0 });
+    } else {
+      items.push({ icon: 'images/classic/icons/prop-23.png', name: '挑战书', value: S.props[CURRENCY_PROP.book] || 0 });
+    }
+    items.push({ icon: 'images/classic/icons/prop-1.png', name: '金松果', value: S.goldPoint });
+    return '<div class="tower-currency">' + items.map((it) =>
+      '<span class="currency-item" data-live-gold="' + (it.name === '金松果' ? '1' : '') + '">' +
+      '<img alt="" src="' + it.icon + '"><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';
   }
   /** 左侧塔身：当前层附近的一段楼层，自上而下。 */
   function towerVisual(layer, maxLayer, mode) {
@@ -189,16 +204,20 @@
     let main, footer = null;
     if (info.run) {
       const run = info.run;
-      main = '<h2 class="tower-title">第 ' + run.layer + ' 层 · 第 ' + run.battleNo + '/' + run.battleCount + ' 场</h2>' +
-        '<div class="tower-stats">已累积松果 <b class="gold-text">' + run.pot + '</b>（失败只保底 30%）</div>' +
+      main = '<div class="tower-head"><h2 class="tower-title">第 ' + run.layer + ' 层 · 第 ' + run.battleNo + '/' + run.battleCount + ' 场</h2>' +
+        '<div class="tower-stats">已累积松果 <b class="gold-text">' + run.pot + '</b>（失败只保底 30%）</div></div>' +
+        currencyHtml('tower') +
         carryBar(run.carry) + debuffPanel(run.debuffs) + ownedBuffsHtml('tower') +
         '<div class="tower-actions">' + C().btn('继续战斗', 'fight', 'gold') + C().btn('放弃本层', 'abandon', 'muted small') + '</div>';
     } else {
       // 第 1 项：标题与数据并排、规则压成一行，保证一屏能放下 5 行预告 + 开始按钮
       main = '<div class="tower-head"><h2 class="tower-title">无尽挑战塔 · 第 ' + info.nextLayer + ' 层</h2>' +
         '<div class="tower-stats">目标等级 ' + info.level + ' · 强度 ×' + info.mult.toFixed(2) + ' · ' + info.battles + ' 场连战 · 通关金松果 <b class="gold-text">' + info.gold + '</b></div></div>' +
-        '<p class="tower-rule" title="第 4 场是随机 boss；三侠顺序每层随机。悬停任意对手可以看它的机制与出招循环">每层 1 张挑战书 · 连战只继承血量 · 对手顺序每层随机（悬停看机制）· 通关另补 3 场挑战的掉落</p>' +
-        heroDebuffHint() +
+        currencyHtml('tower') +
+        /* 把「三侠削弱」提示并进规则行（右上角多了货币条，版面高度要省下来），
+         * 具体数值仍挂在悬停气泡里，信息不丢。 */
+        '<p class="tower-rule" title="' + esc(heroDebuffTips()) + '">每层 1 张挑战书 · 连战只继承血量 · 对手顺序每层随机 · ' +
+        '三侠的大招会留贯穿本层的削弱（速杀可规避）· 通关另补 3 场挑战的掉落 · 悬停看机制</p>' +
         '<h4 class="tower-plan-title">本层对手预告</h4>' + planHtml(info.preview);
       // 「开始挑战」在卡片右下角；挑战书数量放在它**左边**（第 1 项），按钮因此贴到最右
       footer = '<div class="tower-actions tower-footer">' +
@@ -240,6 +259,7 @@
       const run = info.run;
       const nextLabel = run.choices ? '场间休整（四选一）' : run.phase === 'shop' ? '进入试炼商店' : run.phase === 'checkpoint' ? '前往结算点' : '继续战斗';
       main = '<h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
+        currencyHtml('endless') +
         '<div class="tower-stats">分数 <b class="gold-text">' + run.score + '</b> · 试炼币 <b class="gold-text">' + run.coins + '</b> · 现在离场可得抽奖卷 <b>' + run.ticketsIfSettle + '</b> 张（需到 5 的倍数层结算）</div>' +
         '<div class="tower-stats small">第 ' + run.battleNo + '/' + run.battleCount + ' 场 · 本局最深 ' + run.bestLayer + ' 层</div>' +
         carryBar(run.carry) + debuffPanel(run.debuffs) + ownedBuffsHtml('endless') +
@@ -249,7 +269,8 @@
     } else {
       main = '<h2 class="tower-title">无尽模式</h2>' +
         '<div class="tower-stats">历史最高 <b class="gold-text">' + info.best + '</b> 分 · 本周最高 ' + info.weekBest + ' 分 · 最深 ' + info.bestLayer + ' 层</div>' +
-        '<p class="tower-rule">免门票，从 1 层冲分。每 5 层进商店并可结算离场拿抽奖卷：20 层前翻倍（1/2/4/8），之后每段 +3；中途失败卷作废。怪物每段 ×1.5 并叠加机制，撑得越久越刺激。</p>';
+        currencyHtml('endless') +
+        '<p class="tower-rule">免门票，从 1 层冲分。跨层自动回复 20% 生命。每 5 层进商店并可结算离场拿抽奖卷：20 层前翻倍（1/2/4/8），之后每段 +3；中途失败也不再归零，按当前层应得结算。怪物每段 ×1.5 并叠加机制，撑得越久越刺激。</p>';
       footer = '<div class="tower-actions tower-footer">' +
         '<span class="tower-book-count">现有抽奖卷 ' + info.tickets + ' 张</span>' +
         C().btn('开始冲塔（免费）', 'fight', 'gold') + '</div>';
@@ -273,7 +294,7 @@
     });
     on(p, 'shop', () => openShop(true));
     on(p, 'abandon', () => {
-      C().modal('放弃本局', '<p>放弃后未结算的抽奖卷全部作废（分数仍会入账），确定吗？</p>', [
+      C().modal('放弃本局', '<p>放弃后按当前层应得的抽奖卷结算（分数照常入账），确定吗？</p>', [
         { label: '放弃', cls: 'muted', run: () => { Tower.abandon('endless'); openEndless(); } },
         { label: '继续冲塔', cls: 'gold' },
       ], { small: true });
@@ -415,7 +436,7 @@
       '<p class="gold-text">进度已保留：再战一次不用再花挑战书，也可以换一张增益。</p>' +
       '<div class="result-lines">收手的话，已累积的 ' + rw.potGold + ' 松果可换 30% 安慰奖</div></div>',
       [{ label: '再战一次', cls: 'gold', run: () => { if (rw.choices && rw.choices.length) offerChoice('tower', rw.choices); else fight('tower'); } },
-       { label: '结束本层（领安慰奖）', cls: 'muted', run: () => {
+       { label: '结束本层', cls: 'muted', run: () => {
           const out = Tower.giveUp('tower');
           C().modal('本层结束', '<p>安慰奖：金松果 +' + (out.consolation || 0) + '</p>',
             [{ label: '返回', cls: 'gold', run: () => C().home() }], { small: true });
@@ -423,9 +444,10 @@
        { label: '返回', run: () => C().home() }], { small: true });
   }
   function endlessDefeat(rw) {
+    // 第 3 项：失败不再归零 —— 直接按当前层应得的抽奖卷结算
     C().modal('挑战失败', '<div class="result-box"><div class="result-title lose">倒在了第 ' + rw.layer + ' 层</div>' +
       '<div class="result-lines">本局分数 ' + rw.score + '（历史最高 ' + rw.best + '）</div>' +
-      '<p>未结算的抽奖卷已作废。</p>' +
+      '<p class="gold-text">按当前进度结算：抽奖卷 +' + (rw.tickets || 0) + '（第 ' + rw.layer + ' 层应得）</p>' +
       (rw.shield ? '<p class="gold-text">保底奖励：本局到达过 15 层，赠送 1 次免费抽奖（每日限 1 次）！</p>' : '') + '</div>',
       [{ label: '再来一局', cls: 'gold', run: openEndless }, { label: '返回', run: () => C().home() }], { small: true });
   }
@@ -479,7 +501,7 @@
     if (!info) { openEndless(); return; }
     C().modal('结算点 · 第 ' + info.layer + ' 层', '<div class="checkpoint-box">' +
       '<div class="checkpoint-option"><b>结算离场</b><span>立刻领取 <b class="gold-text">' + info.ticketsNow + '</b> 张抽奖卷，本局结束（分数入账）</span></div>' +
-      '<div class="checkpoint-option"><b>继续挑战</b><span>撑到第 ' + info.nextCheckpoint + ' 层可得 <b class="gold-text">' + info.ticketsNext + '</b> 张；中途失败则全部作废</span></div>' +
+      '<div class="checkpoint-option"><b>继续挑战</b><span>撑到第 ' + info.nextCheckpoint + ' 层可得 <b class="gold-text">' + info.ticketsNext + '</b> 张；中途失败也会按当时层数应得结算</span></div>' +
       '<p class="small-label">本局分数 ' + info.score + ' · 试炼币 ' + info.coins + '</p></div>',
       [
         { label: '结算离场', cls: 'gold', run: () => { const r = Tower.settleEndless(); if (r.ok) settleResult(r); else openEndless(); } },

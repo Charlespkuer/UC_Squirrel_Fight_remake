@@ -113,6 +113,46 @@ async function main() {
      ?shot=sell|shop|exchange|status|daily|chat|arrows 各自停在一个画面上，
      既抓尺寸数据也方便截图。 */
   const batch = q.get('shot');
+  /* 第 7 项：天梯赛战果弹窗要有「继续挑战」——把 Main.startBattle 换成假的即时结算，
+     点「开始匹配」→ 弹窗；点「继续挑战」→ 又打一场，验证按钮真的能再开一局。 */
+  /* 第 6 项：无尽入口页的右上货币条（试炼币/抽奖卷/金松果） */
+  if (batch === 'endless') {
+    S.props[50] = 3; S.props[21] = 99; S.goldPoint = 4321;
+    for (let id = 1; id <= 18; id++) S.stages[id] = { npcIndex: 3, passed: true };   // 挑战塔要求 18 关全通
+    State.save();
+    TowerUI.openEndless(); await flush(300);
+    P.entryCurrency = $$('#ui .tower-currency .currency-item').map((el) => el.textContent.trim());
+    Tower.startEndlessRun();
+    State.state().endless.run.coins = 77;
+    TowerUI.openEndless(); await flush(420);
+    P.towerPage = !!document.querySelector('#ui .tower-page');
+    P.currency = $$('#ui .tower-currency .currency-item').map((el) => el.textContent.trim());
+    P.currencyBox = (() => { const el = document.querySelector('#ui .tower-currency'); if (!el) return null;
+      const r = el.getBoundingClientRect(); return { top: Math.round(r.top), right: Math.round(r.right) }; })();
+    P.ruleText = (document.querySelector('#ui .tower-rule') || {}).textContent;
+    P.needsScroll = (() => { const el = document.querySelector('#ui .tower-main'); return el ? el.scrollHeight > el.clientHeight : null; })();
+    P.done = true; P.errors = window.__errs.slice(); return;
+  }
+  if (batch === 'rank') {
+    S.level = 60; S.joinRankCount = 0; S.goldPoint = 9999; State.save();
+    let started = 0;
+    Main.startBattle = (foe, opts) => { started++; if (opts && opts.onEnd) opts.onEnd(started === 1 ? 0 : 1); return Promise.resolve(); };
+    UI.runAction('arena'); await flush(300);
+    const rankBtn = $$('#ui [data-action="arena-rank"], #ui [data-action="rank"]')[0] ||
+      $$('#ui .uc-button').find((b) => /天梯赛/.test(b.textContent));
+    if (rankBtn) { rankBtn.click(); await flush(300); }
+    const match = $$('#ui [data-action="rank-fight"]')[0];
+    P.rankPage = !!match;
+    if (match) { match.click(); await flush(400); }
+    P.rankModalButtons = $$('.classic-modal .uc-button').map((b) => b.textContent.trim());
+    P.rankBattlesAfterFirst = started;
+    const again = $$('.classic-modal .uc-button').find((b) => b.textContent.trim() === '继续挑战');
+    if (again) { again.click(); await flush(500); }
+    P.rankBattlesAfterAgain = started;
+    P.rankModalButtons2 = $$('.classic-modal .uc-button').map((b) => b.textContent.trim());
+    P.integral = State.state().integral;
+    P.done = true; P.errors = window.__errs.slice(); return;
+  }
   if (['sell', 'shop', 'exchange', 'status', 'daily', 'chat', 'arrows', 'gearsell', 'gearsellconfirm', 'master', 'trueform', 'vip', 'hex', 'trial', 'trialplan', 'warlord', 'debugday', 'system', 'exchange-back', 'revenge'].includes(batch)) {
     S.props[47] = 20; S.props[22] = 12; S.props[24] = 8; S.props[1] = 9;
     State.save();

@@ -472,3 +472,30 @@
 .endless-foes .pill-slot { width: 50px; height: 50px; }
 .endless-foes .pill-slot img { width: 24px; height: 24px; }
 .endless-pills { display: none; }
+
+/* 第四轮微调：按钮更靠下；药丸槽略缩小并更贴右上；对手行放大到能看清立绘；
+   顶栏给分数字留位置；增益面板松一点、字大一点。 */
+.endless-actions { margin: 16px 6px 0 0; }
+.endless-foes .pill-slot { width: 44px; height: 44px; }
+.endless-foes .pill-slot img { width: 21px; height: 21px; }
+.endless-foes .pill-slot b { font-size: 12px; }
+.endless-foes .pill-slot i { font-size: 12px; }
+.endless-foes { margin-right: 6px; }
+.endless-foes .pill-slots { margin: -2px 0 6px; }
+.tower-plan.vertical .foe-portrait { width: 56px; height: 56px; }
+.tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 56px; }
+.tower-plan.vertical li { padding: 3px 8px; }
+.tower-plan.vertical li b { font-size: 20px; }
+.endless-title-row { overflow: visible; gap: 10px; }
+.endless-title-row .tower-title { font-size: 27px; overflow: hidden; text-overflow: ellipsis; }
+.endless-title-row .endless-score-box { flex: none; }
+.endless-run { grid-template-columns: minmax(0, 1fr) 200px; }
+.endless-left .tower-buffs { margin: 6px 0; }
+.endless-left .tower-buffs h4 { font-size: 19px; margin: 4px 0; }
+.endless-left .buff-tags { gap: 8px; }
+.endless-left .buff-tag, .endless-left .limit-tag { font-size: 19px; padding: 1px 10px; }
+.endless-left .buff-empty { font-size: 18px; }
+.endless-left .mech-bar b, .endless-left .mech-chip { font-size: 17px; }
+
+/* 休整点的选卡在本页里整体缩一档，避免把按钮顶下去 */
+.choice-onpage { zoom: .82; }

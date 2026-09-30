@@ -132,6 +132,8 @@ async function main() {
     P.runHasGold = /金松果/.test((document.querySelector('#ui .tower-currency') || {}).textContent || '');
     P.buffPanels = $$('#ui .endless-buffs h4').map((h) => h.textContent.replace(/\s+/g, ' ').trim());
     P.pillSlots = $$('#ui .pill-slot').length;
+    P.buffTips = $$('#ui .endless-buffs [data-tip]').length;
+    P.scoreBox = (document.querySelector('#ui .endless-score-box') || {}).textContent;
     P.foeRows = $$('#ui .tower-plan.vertical li').length;
     P.foeCanvasDrawn = $$('#ui .tower-plan.vertical canvas[data-drawn="1"]').length;
     P.scoreLine = (document.querySelector('#ui .endless-score') || {}).textContent;

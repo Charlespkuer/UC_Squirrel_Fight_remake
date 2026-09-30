@@ -168,6 +168,14 @@
     parts.push(replaceTarget === b.id ? '（当前已选为替换目标，点一下取消）' : '点一下选它作为要被替换掉的永久增益');
     return parts.join('\n');
   }
+  /** 限次增益的悬停说明：效果 + 剩余场次 + 当前开关状态。 */
+  function limitTip(b) {
+    const buff = TowerData.BUFF_BY_ID[b.id];
+    if (!buff) return b.name;
+    return [buff.name + '（' + RARITY[b.rarity] + ' · 限次 ' + (buff.uses || 1) + ' 场）', buff.desc,
+      '剩余 ' + b.uses + ' 场（每打完一场扣 1，扣完自动消失）',
+      b.on ? '当前生效中 · 点一下可以关掉（关掉不扣次数）' : '当前已关闭 · 点一下重新开启'].join('\n');
+  }
   /** 第 1 项：无尽主界面的增益面板 —— 永久（最多 5 格）+ 限次（可开关、扣次用完即消失）。 */
   function buffPanelsHtml(mode) {
     const run = mode === 'tower' ? Tower.towerInfo().run : Tower.endlessInfo().run;
@@ -178,11 +186,12 @@
     const cap = TowerData.PERMANENT_SLOTS || 5;
     const permHtml = perm.length
       ? perm.map((b) => '<span class="buff-tag r' + b.rarity + (b.id === replaceTarget ? ' replacing' : '') + '" data-replace="' + b.id +
-          '" title="' + esc(permTip(b)) + '">' +
+          '" data-tip="' + esc(permTip(b)) + '" title="' + esc(permTip(b)) + '">' +
           esc(b.name) + '<i>永久</i>' + (b.stacks > 1 ? '<em>×' + b.stacks + '</em>' : '') + '</span>').join('')
       : '<span class="buff-empty">还没有永久增益（每层的休整点可以拿）</span>';
     const limHtml = lim.length
-      ? lim.map((b) => '<button type="button" class="limit-tag r' + b.rarity + (b.on ? '' : ' off') + '" data-toggle="' + b.id + '">' +
+      ? lim.map((b) => '<button type="button" class="limit-tag r' + b.rarity + (b.on ? '' : ' off') + '" data-toggle="' + b.id +
+          '" data-tip="' + esc(limitTip(b)) + '" title="' + esc(limitTip(b)) + '">' +
           '<b>' + esc(b.name) + '</b><i>' + (b.on ? '生效中' : '已关闭') + '</i><em>剩 ' + b.uses + ' 场</em></button>').join('')
       : '<span class="buff-empty">还没有限次增益</span>';
     return '<div class="tower-buffs endless-buffs">' +

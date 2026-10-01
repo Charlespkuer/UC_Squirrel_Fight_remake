@@ -77,6 +77,11 @@
        * 英雄帖（36）只用于经验竞技场，不再能拿去参加碎片场。 */
       if (s.energy < 30) {
         const potion = State.autoEnergyPotion ? State.autoEnergyPotion(30) : { ok: false };
+        if (potion.ok && s.energy >= 30) {
+          // 第 1 项：自动喝药后给一条明确提示（用掉的是哪瓶 + 当前体力）
+          const usedName = potion.used ? propMap.getValue(potion.used).name : '\u4f53\u529b\u836f\u5242';
+          C().toast('\u4f53\u529b\u4e0d\u8db3\uff0c\u5df2\u81ea\u52a8\u4f7f\u7528 ' + usedName + '\uff08\u4f53\u529b ' + s.energy + '/' + s.maxEnergy + '\uff09\uff0c\u7ee7\u7eed\u53c2\u8d5b');
+        }
         if (!(potion.ok && s.energy >= 30)) {
           const ticket = kind ? 39 : 36;
           if (!(s.props[ticket] > 0)) {

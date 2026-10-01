@@ -48,9 +48,9 @@
   /** 体力药提示：优先用游戏内全局 toast（和别处一致），拿不到就退回弹窗，保证一定看得见。 */
   function showHint(msg) {
     try {
-      if (typeof toast === 'function') { toast(msg); }
+      if (typeof toast === 'function') { toast(msg); return; }
+      if (typeof window !== 'undefined' && window.C && C().toast) C().toast(msg);
     } catch (_) {}
-    notice(msg);   // 弹窗兜底：toast 有可能被战斗界面盖住，这里保证玩家一定看得到
   }
   function arena() {
     State.tickEnergy();
@@ -61,6 +61,16 @@
       { art: 30, name: '\u5929\u68af\u8d5b', text: '30\u7ea7\u5f00\u542f\uff0c\u8d62\u79ef\u5206\u3001\u4e89\u91d1\u676f', action: 'arena-rank' },
     ];
     const resume = run ? '<div class="extra-resume">\u4f60\u5df2\u62a5\u540d\uff0c\u65e0\u9700\u518d\u6b21\u6d88\u8017\u4f53\u529b\u3002' + button(run.phase === 'final' ? '\u7ee7\u7eed\u51b3\u8d5b' : run.phase === 'third' ? '\u7ee7\u7eed\u5b63\u519b\u8d5b' : '\u7ee7\u7eed\u6bd4\u8d5b', 'arena-resume', 'tiny gold') + '</div>' : '';
+    /* 第 1 项：报名页直接写清楚「体力不足会自动喝哪瓶药」，不再额外弹窗。 */
+    let potionHint = '';
+    if (s.energy < 30) {
+      const deficit = 30 - s.energy;
+      const small = s.props[1] || 0, big = s.props[2] || 0;
+      const useId = (deficit <= 10 && small) ? 1 : (big ? 2 : (small ? 1 : 0));
+      potionHint = useId
+        ? '<div class="extra-arena-hint">' + esc('体力不足 30：报名时会自动使用「') + propMap.getValue(useId).name + esc('」补足体力（不需要手动操作）。') + '</div>'
+        : '<div class="extra-arena-hint warn">' + esc('体力不足 30，也没有体力药剂：经验场需英雄帖、碎片场需勇气徽章。') + '</div>';
+    }
     const p = C().page('challenge', 'arena', '<div class="extra-arena-cards">' + cards.map(card => '<article>' + sprite(card.art) + '<h2>' + card.name + '</h2><p>' + card.text + '</p>' + button(card.action === 'arena-rank' ? '\u8fdb\u5165\u5929\u68af' : '\u53c2\u52a0\u6bd4\u8d5b', card.action, 'small gold') + '</article>').join('') + '</div><div class="extra-arena-cost">4\u4eba\u4e24\u8f6e\u6bd4\u8d5b\uff1a\u534a\u51b3\u8d5b\u80dc\u8005\u4e89\u51a0\u519b\uff0c\u8d25\u8005\u4e89\u5b63\u519b\u3002<br>\u62a5\u540d\u6d88\u801730\u4f53\u529b\uff0c\u4f53\u529b\u4e0d\u8db3\u53ef\u4f7f\u7528\u82f1\u96c4\u5e16\u6216\u52c7\u6c14\u5fbd\u7ae0\u3002<br>\u4f53\u529b ' + s.energy + '/' + s.maxEnergy + '\u3000\u82f1\u96c4\u5e16 ' + (s.props[36] || 0) + '\u3000\u52c7\u6c14\u5fbd\u7ae0 ' + (s.props[39] || 0) + '</div>' + resume, { cls: 'extra-board arena-extra-board' });
     on(p, 'arena-exp', () => confirmArena(0));
     on(p, 'arena-fragment', () => confirmArena(1));

@@ -517,22 +517,35 @@
     });
     $('[data-action="fight"]',p)?.addEventListener('click',()=>{
       const foe=opponents[selectedOpponent],S=State.state();
-      if(S.energy<10){
-        // 第 3 项：体力不足时自动喝一瓶体力药剂再进战斗
-        const potion = State.autoEnergyPotion ? State.autoEnergyPotion(10) : { ok: false };
-        if(!(potion.ok && S.energy>=10)){
-          notice('体力不足！每5分钟恢复1点，也可以使用体力药剂。',[{label:'使用药剂',run:()=>openBag()},{label:'返回',cls:'gold'}]);return;
-        }
-        const potionName = potion.used ? (propMap.getValue(potion.used) || {}).name : '体力药剂';
-        notice('体力不足，已自动使用 ' + potionName + '（体力 ' + S.energy + '/' + S.maxEnergy + '），继续挑战。', [{ label: '继续', cls: 'gold' }]);
-      }
-      S.challengeRefresh={count:0,ts:Date.now()};State.save();   // 进行挑战后重置刷新费用
-      Main.startBattle(foe,{cost:10,kind:'challenge',useProps:true,onEnd:(winner)=>{
+      const beginChallenge = () => {
+        S.challengeRefresh={count:0,ts:Date.now()};State.save();   // 进行挑战后重置刷新费用
+        Main.startBattle(foe,{cost:10,kind:'challenge',useProps:true,onEnd:(winner)=>{
         const win=winner===0;if(win){S.dailyWins++;S.allWins++;}else{S.dailyFails++;S.allFails++;}
         const rw=State.fightReward(win,{foeLevel:foe.level});
         opponents=[];openChallenge();   // 战果弹窗放在挑战页上，并刷新下一批对手
         resultModal(win,rw);
       }});
+      };
+      if(S.energy<10){
+        /* 第 1 项：体力不足时弹「自动喝药」确认；确认后用持有药水补足体力并开战。 */
+        const deficit = 10 - S.energy;
+        const small = S.props[1] || 0, big = S.props[2] || 0;
+        const useId = (deficit <= 10 && small) ? 1 : (big ? 2 : (small ? 1 : 0));
+        if(!useId){
+          notice('体力不足！每5分钟恢复1点，也可以使用体力药剂。',[{label:'使用药剂',run:()=>openBag()},{label:'返回',cls:'gold'}]);return;
+        }
+        const potionName = (propMap.getValue(useId) || {}).name || '体力药剂';
+        notice('体力不足（当前 ' + S.energy + '/' + S.maxEnergy + '）：自动使用「' + potionName + '」补足体力并挑战？',
+          [{label:'使用并挑战',cls:'gold',run:()=>{
+            const potion = State.autoEnergyPotion ? State.autoEnergyPotion(10) : { ok:false };
+            if(!(potion.ok && S.energy>=10)){
+              notice('药剂没能补足体力，请稍后再试。',[{label:'返回',cls:'gold'}]);return;
+            }
+            beginChallenge();
+          }},{label:'取消',cls:'muted'}]);
+        return;
+      }
+      beginChallenge();
     });
   }
   function resultModal(win,rw,extra,onOk) {

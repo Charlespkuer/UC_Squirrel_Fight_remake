@@ -304,7 +304,7 @@
     return '<div class="tower-buffs boss-catalog"><h4>BOSS 一览 <span class="buff-slot-count">' + pool.length + ' 个 · 第 4 场随机池</span></h4>' +
       '<ol class="tower-plan boss-grid">' + pool.map((b, i) =>
         '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel' : '') + '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
-        bossPortraitHtml(i, b) + '<b>' + esc(b.name) + '</b>' +
+        '<b>' + esc(b.name) + '</b>' +
         (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
         (b.layers && b.layers.length ? '<span class="boss-layers">第 ' + b.layers.join(' / ') + ' 层</span>' : '') +
         '</li>').join('') + '</ol></div>';
@@ -371,7 +371,7 @@
       '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
     bindTips(p);
-    if (!info.run) { fillFoeArt(p, info.preview); paintBossCatalog(p); }
+    if (!info.run) fillFoeArt(p, info.preview);   // 第 2 项：boss 卡不再画头像（素材加载不稳定，也就不占位）
     back(p, () => UI.runAction('stages'));
     on(p, 'fight', () => {
       if (info.run) {

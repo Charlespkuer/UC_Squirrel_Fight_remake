@@ -727,3 +727,15 @@
 
 /* 进塔页底部给「开始冲塔」按钮留出空间（增益集锦最后一行不再被压住） */
 .tower-page.has-footer .tower-main { padding-bottom: 92px; }
+
+/* BOSS 一览：不占头像位，改成紧凑文字卡（一排 3 个，名字一行） */
+.boss-catalog .boss-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.boss-grid li { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; gap: 0 8px;
+  padding: 4px 10px; align-items: center; }
+.boss-grid li b { grid-column: 1; grid-row: 1; font-size: 19px; white-space: nowrap; }
+.boss-grid .tower-plan-type { grid-column: 2; grid-row: 1; justify-self: end; }
+.boss-grid .boss-layers { grid-column: 1 / -1; grid-row: 2; font-size: 14px; color: #8a6a3a; }
+.boss-grid .foe-portrait { display: none; }
+/* 竞技场报名页的自动喝药说明 */
+.extra-arena-hint { margin-top: 6px; padding: 4px 10px; border-radius: 12px; background: #eef7e2; border: 2px solid #b7d096; color: #3f6a1f; font-size: 17px; }
+.extra-arena-hint.warn { background: #fdeee8; border-color: #e0a99c; color: #8a3a30; }

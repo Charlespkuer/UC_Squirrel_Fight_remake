@@ -1333,7 +1333,16 @@
       syncState.ok = true; syncState.info = info; syncState.reason = '';
     } catch (e) {
       syncState.ok = false; syncState.info = null;
-      syncState.reason = (e && e.name === 'AbortError') ? '同步服务没有响应' : String((e && e.message) || e);
+      const raw = (e && e.name === 'AbortError') ? '同步服务没有响应（超时）' : String((e && e.message) || e);
+      /* 常见两类要分开说：
+       *  · 403 → 同步服务拒了本页面的来路（桌面客户端/局域网 IP 打开时会这样）
+       *  · Failed to fetch → 本机同步服务没在跑（或端口不是 8788）
+       * 两者都在排查「游戏内推不过去、命令行却正常」时最关键。 */
+      syncState.reason = /HTTP 403/.test(raw)
+        ? raw + '（同步服务只接受来自 127.0.0.1 / localhost / Tauri 桌面壳的页面调用；用局域网 IP 打开游戏就会这样）'
+        : /Failed to fetch|NetworkError|Load failed/i.test(raw)
+          ? raw + '（本机同步服务没在跑：跑 node scripts/sync/sync.js serve，或用「一键同步」启动）'
+          : raw;
     }
     syncState.checked = true;
   }

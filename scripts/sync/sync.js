@@ -1036,7 +1036,14 @@ function isLoopback(req) {
 function allowedOrigin(req) {
   const o = req.headers.origin;
   if (!o) return null;
-  return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(o) ? o : undefined;
+  /* 允许本机页面：浏览器（127.0.0.1 / localhost / [::1]）以及 Tauri 桌面壳
+   * （macOS 是 tauri://localhost，Windows 是 http://tauri.localhost）。
+   * 桌面客户端里打开游戏时，origin 不是 127.0.0.1，之前会被这条拦掉 →
+   * 游戏内「一键同步」永远报「连不上对端」，而命令行却完全正常。 */
+  if (/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(o)) return o;
+  if (/^https?:\/\/tauri\.localhost(:\d+)?$/.test(o)) return o;
+  if (o === 'tauri://localhost') return o;
+  return undefined;
 }
 
 function createServer() {

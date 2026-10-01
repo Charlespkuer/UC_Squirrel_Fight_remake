@@ -771,6 +771,14 @@
     const buff = D().BUFF_BY_ID[id];
     if (!buff) return { ok: false, msg: '没有这个增益' };
     if (buff.kind === 'instant') return applyInstant(run, buff);
+    /* 扩容类（+1/+2 槽位）要先于「永久栏已满」判断处理：它不占槽、也不会触发替换。 */
+    /* 第 2 项：扩容类 buff（+1/+2 永久槽位）立即生效 —— 加名额、不占自己的槽、一局只能拿一次。 */
+    if (buff.mods && buff.mods.permSlot) {
+      if ((run.permSlotIds || []).includes(buff.id)) return { ok: false, msg: '这类扩容增益一局只能获得一次。' };
+      run.permSlots = Math.max(0, Number(run.permSlots) || 0) + Number(buff.mods.permSlot);
+      run.permSlotIds = (run.permSlotIds || []).concat([buff.id]);
+      return { ok: true, granted: buff.mods.permSlot };
+    }
     const listKey = buff.kind === 'permanent' ? 'permanent' : 'limited';
     const list = run[listKey] || (run[listKey] = []);
     const owned = list.find((b) => b.id === id);
@@ -788,13 +796,6 @@
     /* 第 1 项修复：全场五折是 permanent 类，addBuff 原来只对 instant 走 applyInstant，
      * 所以标记一直没被点亮 —— 这里在加入时就把折扣标记打开。 */
     if (buff.mods && buff.mods.shopDiscount) run.shopDiscount = true;
-    /* 第 2 项：扩容类 buff（+1/+2 永久槽位）立即生效 —— 加名额、不占自己的槽、一局只能拿一次。 */
-    if (buff.mods && buff.mods.permSlot) {
-      if ((run.permSlotIds || []).includes(buff.id)) return { ok: false, msg: '这类扩容增益一局只能获得一次。' };
-      run.permSlots = Math.max(0, Number(run.permSlots) || 0) + Number(buff.mods.permSlot);
-      run.permSlotIds = (run.permSlotIds || []).concat([buff.id]);
-      return { ok: true, granted: buff.mods.permSlot };
-    }
     // 第 1 项：拿到永久生命上限增益时，把它折算成 run.hpBonus（之后卖掉也保留）
     if (buff.kind === 'permanent' && buff.mods && buff.mods.maxHpMul) {
       run.hpBonus = (run.hpBonus || 0) + buff.mods.maxHpMul;

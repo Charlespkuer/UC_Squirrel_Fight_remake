@@ -545,10 +545,17 @@ function autoPick(ctx, mode) {
       !T.inPool('shop', T.BUFF_BY_ID.C31) && T.inPool('choice', T.BUFF_BY_ID.C31));
     const grant = Tower.debugGrantBuff('C30');
     t('获得扩容背包：槽位 5→6 且不入永久栏', grant.ok === true && r.permSlots === 1 && (r.permanent || []).length === 0);
-    Tower.debugGrantBuff('C30');
-    t('扩容背包一局只能拿一次（unique 过滤）', (r.permSlotIds || []).length === 1);
+    // 永久栏塞满 5 个后再拿扩容类：不应被要求替换，也不该占槽
+    for (const id of ['C01', 'C02', 'C03', 'C04', 'C05']) Tower.debugGrantBuff(id);
+    const fullOk = (r.permanent || []).length === 5;
+    const grant2 = Tower.debugGrantBuff('C31');
+    t('永久栏满 5 格时拿「仓库钥匙」：直接 +2 槽、不触发替换、不占槽',
+      fullOk && grant2.ok === true && r.permSlots === 3 && (r.permanent || []).length === 5);
+    t('扩容后永久上限 = 5 + permSlots', (5 + r.permSlots) === 8);
+    const dup = Tower.debugGrantBuff('C30');
+    t('扩容背包一局只能拿一次（unique 过滤）', dup.ok === false && (r.permSlotIds || []).filter((x) => x === 'C30').length === 1);
     const lost = Tower.debugLoseBuff('C30');
-    t('调试可立即失去任意 buff', lost.ok === true && (r.permSlotIds || []).length === 0);
+    t('调试可立即失去任意 buff', lost.ok === true && !(r.permSlotIds || []).includes('C30'));
     r.permanent.push({ id: 'C11', stacks: 1 }, { id: 'C12', stacks: 1 });
     const before = r.winHpFlat || 0;
     const nb = Tower.nextBattle('endless');

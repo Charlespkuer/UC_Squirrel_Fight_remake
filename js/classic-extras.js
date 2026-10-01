@@ -45,6 +45,14 @@
     }
     return arenaRun;
   }
+  /** 体力药提示：优先用游戏内全局 toast（和别处一致），拿不到就退回弹窗，保证一定看得见。 */
+  function showHint(msg) {
+    try {
+      if (typeof toast === 'function') { toast(msg); return; }
+      if (window.C && C().toast) { C().toast(msg); return; }
+    } catch (_) {}
+    notice(msg);
+  }
   function arena() {
     State.tickEnergy();
     const s = State.state(), run = activeArenaRun();
@@ -80,7 +88,7 @@
         if (potion.ok && s.energy >= 30) {
           // 第 1 项：自动喝药后给一条明确提示（用掉的是哪瓶 + 当前体力）
           const usedName = potion.used ? propMap.getValue(potion.used).name : '\u4f53\u529b\u836f\u5242';
-          C().toast('\u4f53\u529b\u4e0d\u8db3\uff0c\u5df2\u81ea\u52a8\u4f7f\u7528 ' + usedName + '\uff08\u4f53\u529b ' + s.energy + '/' + s.maxEnergy + '\uff09\uff0c\u7ee7\u7eed\u53c2\u8d5b');
+          showHint('\u4f53\u529b\u4e0d\u8db3\uff0c\u5df2\u81ea\u52a8\u4f7f\u7528 ' + usedName + '\uff08\u4f53\u529b ' + s.energy + '/' + s.maxEnergy + '\uff09\uff0c\u7ee7\u7eed\u53c2\u8d5b');
         }
         if (!(potion.ok && s.energy >= 30)) {
           const ticket = kind ? 39 : 36;

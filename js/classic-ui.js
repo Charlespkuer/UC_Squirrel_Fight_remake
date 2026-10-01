@@ -524,7 +524,7 @@
           notice('体力不足！每5分钟恢复1点，也可以使用体力药剂。',[{label:'使用药剂',run:()=>openBag()},{label:'返回',cls:'gold'}]);return;
         }
         const potionName = potion.used ? (propMap.getValue(potion.used) || {}).name : '体力药剂';
-        C().toast('体力不足，已自动使用 ' + potionName + '（体力 ' + S.energy + '/' + S.maxEnergy + '），继续挑战');
+        toast('体力不足，已自动使用 ' + potionName + '（体力 ' + S.energy + '/' + S.maxEnergy + '），继续挑战');
       }
       S.challengeRefresh={count:0,ts:Date.now()};State.save();   // 进行挑战后重置刷新费用
       Main.startBattle(foe,{cost:10,kind:'challenge',useProps:true,onEnd:(winner)=>{

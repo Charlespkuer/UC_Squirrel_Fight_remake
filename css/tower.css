@@ -715,3 +715,12 @@
 .boss-grid li b { font-size: 18px; }
 .boss-grid .boss-layers { font-size: 14px; color: #8a6a3a; }
 .buff-catalog, .boss-catalog { margin: 6px 0; }
+
+/* 体力药等提示浮在最上层（原来会被战斗/弹窗盖住） */
+.uc-toast, .toast { z-index: 95; }
+/* BOSS 一览：一排 3 个，名字不换行，立绘放大 */
+.boss-catalog .boss-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.boss-grid li { padding: 4px 8px; gap: 8px; }
+.boss-grid .foe-portrait { width: 68px; height: 68px; }
+.boss-grid .foe-portrait img, .boss-grid .foe-portrait canvas { max-height: 64px; height: 64px; max-width: 64px; }
+.boss-grid li b { font-size: 19px; white-space: nowrap; }

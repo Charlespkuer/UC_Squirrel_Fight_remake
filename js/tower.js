@@ -344,7 +344,9 @@
     if (!lock.ok) return lock;
     const e = endless();
     if (e.run) return { ok: false, msg: '本局无尽挑战尚未结束。' };
-    const run = { layer: 1, plan: buildPlan(1), idx: 0, carry: 1,
+    /* 第 1 项：本局随机盐 —— boss / 三侠顺序按 salt 抽，每局都不一样。 */
+    const salt = (Date.now() % 1000000) + ':' + Math.floor(Math.random() * 1e6);
+    const run = { layer: 1, plan: buildPlan(1, salt), idx: 0, carry: 1, salt,
       mode: 'endless', permanent: [], limited: [], coins: 0, score: 0, bestLayer: 0,
       pillSlots: { power: null, agility: null, speed: null },
       killPower: 0, killMaxHp: 0, bonusPower: 0, shop: null, phase: null, choices: null, debuffs: [] };
@@ -699,7 +701,7 @@
   }
   function advanceLayer(run, mode) {
     run.layer++;
-    run.plan = buildPlan(run.layer);
+    run.plan = buildPlan(run.layer, run.salt);
     run.idx = 0;
     run.choices = null;
     run.restShopUsed = false;

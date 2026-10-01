@@ -183,7 +183,7 @@
     const list = Tower.ownedBuffs('endless');
     const perm = list.filter((b) => b.kind === 'permanent');
     const lim = list.filter((b) => b.kind === 'limited');
-    const cap = (TowerData.PERMANENT_SLOTS || 5) + Math.max(0, Number((info.run && info.run.permSlots) || 0));
+    const cap = (TowerData.PERMANENT_SLOTS || 5) + Math.max(0, Number(run.permSlots || 0));   // 槽位上限含扩容类加成
     const permHtml = perm.length
       ? perm.map((b) => '<span class="buff-tag r' + b.rarity + (b.id === replaceTarget ? ' replacing' : '') + '" data-replace="' + b.id +
           '" data-tip="' + esc(permTip(b)) + '" title="' + esc(permTip(b)) + '">' +

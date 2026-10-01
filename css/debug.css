@@ -71,3 +71,8 @@
 .debug-link{border:0;background:transparent;color:#b3562c;font:inherit;text-decoration:underline;cursor:pointer;padding:0 2px}
 .debug-msg{display:block;min-height:18px;margin-top:6px;font-size:12.5px;color:#3f7a24}
 @media (max-width:560px){.debug-panel{width:calc(100vw - 20px);right:10px}}
+
+/* 无尽塔增益：与武技区块同款布局 */
+.debug-buff .debug-ws-tag { min-width: 40px; }
+.debug-buff .debug-grant-row select { flex: 1; }
+.debug-buff .debug-ws-owned { margin-top: 6px; }

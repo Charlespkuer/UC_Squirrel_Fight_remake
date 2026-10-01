@@ -253,6 +253,32 @@
     return r.ok ? '已遗忘【' + r.name + '】　武技 ' + r.total + '/' + r.limit : r.msg;
   }
 
+  /** 无尽塔增益：下拉全表（编号 + 名称 + 稀有度/类型）。 */
+  function buffOptions() {
+    const rows = (window.TowerData && TowerData.BUFFS) || [];
+    const rar = (window.TowerData && TowerData.RARITY_NAME) || ['普通', '稀有', '史诗', '传奇'];
+    const kind = { limited: '限次', permanent: '永久', instant: '即时' };
+    return rows.map((b) => '<option value="' + b.id + '">' + b.id + ' ' + esc(b.name) +
+      '（' + (rar[b.rarity] || '') + '·' + (kind[b.kind] || '') + '）</option>').join('');
+  }
+  /** 无尽塔专属：立即获得指定增益（走 Tower.debugGrantBuff）。 */
+  function grantBuff(id) {
+    if (!(window.Tower && Tower.debugGrantBuff)) return '当前版本没有这个接口';
+    const r = Tower.debugGrantBuff(id);
+    renderOwned();
+    if (window.TowerUI && TowerUI.openEndless && State.state().endless && State.state().endless.run) TowerUI.openEndless();
+    return r.ok ? '获得【' + r.buff.name + '】' + (r.granted ? '（永久槽位 +' + r.granted + '）' : '') : (r.msg || '没成功');
+  }
+  /** 无尽塔专属：立即失去指定增益（走 Tower.debugLoseBuff）。 */
+  function loseBuff(id) {
+    if (!(window.Tower && Tower.debugLoseBuff)) return '当前版本没有这个接口';
+    const def = (window.TowerData && TowerData.BUFF_BY_ID && TowerData.BUFF_BY_ID[id]) || null;
+    const r = Tower.debugLoseBuff(id);
+    renderOwned();
+    if (window.TowerUI && TowerUI.openEndless && State.state().endless && State.state().endless.run) TowerUI.openEndless();
+    return r.ok ? '失去【' + ((def && def.name) || id) + '】' : (r.msg || '没成功');
+  }
+
   /* 8 金松果 / 15 经验 / 40 金杯在原版里就是货币或经验值，不是背包道具：
    * 挂进背包只是个用不掉的死物（useType 0/3），所以取物时直接加到对应字段上。 */
   const CURRENCY_PROPS = { 8: 'gold', 40: 'goldCup', 15: 'exp' };
@@ -325,6 +351,14 @@
       '<button type="button" class="uc-button tiny" data-ws-learn="skill">获得</button></label>' +
       '<div class="debug-ws-owned" data-ws-owned></div>' +
       '<p class="debug-grant-note">点已有武技后面的 × 直接遗忘；等级会夹在 1~15。</p></div>' +
+      '<div class="debug-grant debug-buff">' +
+      '<span class="debug-grant-title">无尽塔：立即获得 / 失去增益</span>' +
+      '<label class="debug-grant-row debug-ws-row"><span class="debug-ws-tag">增益</span>' +
+      '<select data-buff-select aria-label="选择要获得或失去的增益">' + buffOptions() + '</select>' +
+      '<button type="button" class="uc-button tiny" data-buff-grant="1">获得</button>' +
+      '<button type="button" class="uc-button tiny muted" data-buff-lose="1">失去</button></label>' +
+      '<div class="debug-ws-owned" data-buff-owned></div>' +
+      '<p class="debug-grant-note">需要在无尽塔对局中（先开始一局）。点已获得增益后面的 × 可直接失去；扩容类增益一局只能拿一次。</p></div>' +
       '<div class="debug-actions">' +
       ACTIONS.map((a, i) => '<button type="button" class="uc-button tiny" data-act="' + i + '" title="' + esc(a.note || a.label) + '">' + esc(a.label) + '</button>').join('') +
       '</div><div class="debug-danger"><label class="debug-weapon"><span>开局武器</span><select data-weapon-select aria-label="彻底重置后的开局武器">' + weaponOptions('default') + '</select></label>' +
@@ -377,6 +411,13 @@
       const levelInput = panel.querySelector('[data-ws-level="' + kind + '"]');
       levelInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); btn.click(); } };
     }
+    // 无尽塔增益：下拉选一个，就能「获得」或「失去」
+    panel.querySelector('[data-buff-grant]').onclick = () => msg(grantBuff(panel.querySelector('[data-buff-select]').value));
+    panel.querySelector('[data-buff-lose]').onclick = () => msg(loseBuff(panel.querySelector('[data-buff-select]').value));
+    panel.querySelector('[data-buff-owned]').onclick = (e) => {
+      const b = e.target.closest('[data-buff-forget]');
+      if (b) msg(loseBuff(b.dataset.buffForget));
+    };
     panel.querySelector('[data-ws-owned]').onclick = (e) => {
       const b = e.target.closest('[data-ws-forget]');
       if (!b) return;
@@ -462,6 +503,27 @@
     const html = (State.myWeapons ? State.myWeapons() : []).map((w) => chip('weapon', w)).join('') +
       (State.mySkills ? State.mySkills() : []).map((s) => chip('skill', s)).join('');
     box.innerHTML = html || '<span class="debug-grant-note">当前没有任何武器或技能。</span>';
+    /* 无尽塔增益：列出本局已获得的永久/限次增益，点 × 直接失去 */
+    const bbox = panel.querySelector('[data-buff-owned]');
+    if (bbox) {
+      const run = (State.state().endless && State.state().endless.run) || null;
+      if (!run) { bbox.innerHTML = '<span class="debug-grant-note">当前没有无尽塔对局。</span>'; }
+      else {
+        const rar = (window.TowerData && TowerData.RARITY_NAME) || ['普通', '稀有', '史诗', '传奇'];
+        const rows = []
+          .concat((run.permanent || []).map((b) => ({ b, tag: '永久' })))
+          .concat((run.limited || []).map((b) => ({ b, tag: '限次' + (b.uses != null ? ' 剩' + b.uses : '') })))
+          .concat((run.permSlotIds || []).map((id) => ({ b: { id }, tag: '槽位' })));
+        const chip = ({ b, tag }) => {
+          const def = (window.TowerData && TowerData.BUFF_BY_ID && TowerData.BUFF_BY_ID[b.id]) || { name: b.id, rarity: 0 };
+          return '<span class="debug-ws-chip">' + (rar[def.rarity] || '') + ' ' + esc(def.name) +
+            ' <b>' + tag + '</b><button type="button" data-buff-forget="' + b.id + '" title="失去' + esc(def.name) +
+            '" aria-label="失去' + esc(def.name) + '">×</button></span>';
+        };
+        bbox.innerHTML = rows.length ? rows.map(chip).join('')
+          : '<span class="debug-grant-note">本局还没有任何增益（槽位 ' + ((window.TowerData && TowerData.PERMANENT_SLOTS) || 5) + (run.permSlots || 0) + ' 格）。</span>';
+      }
+    }
   }
   function isOpen() { return !!(panel && panel.classList.contains('open')); }
   function togglePanel(force) {

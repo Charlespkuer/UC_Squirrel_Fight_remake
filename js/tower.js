@@ -1102,16 +1102,25 @@
   }
   /** 当前 run 已拥有 buff 列表（构筑展示 / 商店出售页用）。 */
   function ownedBuffs(mode) {
+    /* 直接遍历本局的两张表（permanent / limited），不要用 eachBuff ——
+     * eachBuff 只聚合「生效中」的限次增益，导致关掉开关的限次 buff 直接消失。
+     * 关掉只是 on=false（界面变灰），仍然要列出来、还能再点回来。 */
     const run = mode === 'tower' ? tower().run : endless().run;
     if (!run) return [];
     const scopeName = { limited: '限次', permanent: '永久', instant: '即时' };
-    const list = [];
-    eachBuff(run, (buff, stacks) => list.push({ id: buff.id, name: buff.name, desc: buff.desc, rarity: buff.rarity,
-      kind: buff.kind, scopeName: scopeName[buff.kind], stacks,
-      uses: buff.kind === 'limited' ? (ownedEntry(run, buff.id) || {}).uses : undefined,
-      on: buff.kind === 'limited' ? (ownedEntry(run, buff.id) || {}).on !== false : true,
-      sellable: !!run.shop && buff.kind !== 'instant', sellPrice: sellPriceOf(run, buff) }));
-    return list;
+    const out = [];
+    const add = (entry) => {
+      const buff = entry && D().BUFF_BY_ID[entry.id];
+      if (!buff) return;
+      out.push({ id: buff.id, name: buff.name, desc: buff.desc, rarity: buff.rarity, kind: buff.kind,
+        scopeName: scopeName[buff.kind], stacks: entry.stacks || 1,
+        uses: buff.kind === 'limited' ? entry.uses : undefined,
+        on: buff.kind === 'limited' ? entry.on !== false : true,
+        sellable: !!run.shop && buff.kind !== 'instant', sellPrice: sellPriceOf(run, buff) });
+    };
+    (run.permanent || []).forEach(add);
+    (run.limited || []).forEach(add);
+    return out;
   }
 
   window.Tower = {

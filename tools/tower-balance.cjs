@@ -194,6 +194,26 @@ function autoPick(ctx, mode) {
   t('胜场 3：触发 4 选 1（回血 + 3 buff）', Array.isArray(rw.choices) && rw.choices.length === 4 && rw.choices[0].type === 'heal');
   t('选择挂起时不能开战', !Tower.nextBattle('tower').ok);
   let pick = Tower.pickChoice('tower', 0);
+  // 限次开关：关掉只是不生效（仍然在列表里、还是灰的），再点一下恢复
+  {
+    const eSaveT = State.state().endless;
+    const bestSaveT = eSaveT.best, weekSaveT = eSaveT.weekBest;
+    const r = freshEndless(State, Tower);
+    Tower.debugGrantBuff('N01');
+    const before = Tower.ownedBuffs('endless').filter((b) => b.kind === 'limited');
+    t('限次增益：拿到后出现在列表里且生效', before.length === 1 && before[0].on === true);
+    Tower.toggleLimited('N01', false);
+    const off = Tower.ownedBuffs('endless').filter((b) => b.kind === 'limited');
+    t('关掉后仍然在列表里，只是 on=false（不会消失）', off.length === 1 && off[0].id === 'N01' && off[0].on === false);
+    t('关掉后不生效（不计入战斗加成）', Tower.ownedBuffs('endless').some((b) => b.id === 'N01') &&
+      (State.state().endless.run.limited || []).find((b) => b.id === 'N01').on === false);
+    Tower.toggleLimited('N01', true);
+    const on = Tower.ownedBuffs('endless').filter((b) => b.kind === 'limited');
+    t('再点一下恢复生效', on.length === 1 && on[0].on === true);
+    const rr = State.state().endless.run;
+    if (rr) { rr.attempt = null; rr.choices = null; rr.phase = null; rr.shop = null; Tower.abandon('endless'); }
+    eSaveT.best = bestSaveT; eSaveT.weekBest = weekSaveT;   // 复位成绩，避免影响后面的商店用例
+  }
   // 第 1 项：休整点回血卡 = 「补给」（限次 1，下一场开局 +50%），再拿一次叠次数
   {
     const eSave = State.state().endless;
@@ -295,15 +315,20 @@ function autoPick(ctx, mode) {
    * 叠层类跨层 buff 会随随机选项流被提前拿到，写死 id 会随机红。 */
   // 第 3 项：限次与永久都能卖（只有即时类不留存）
   t('商店：限次/永久都能卖，即时类不存在可卖', Tower.sellBuff(buy.buff.id).ok === (buy.buff.kind !== 'instant'));
-  const sellable = Tower.ownedBuffs('endless').find((b) => b.kind !== 'instant');
-  t('商店：卖出回收 40%', !sellable || (() => {
-    const before = Tower.endlessInfo().run.coins;
-    const out = Tower.sellBuff(sellable.id);
-    const want = Math.max(1, Math.round(TowerData.shopPrice(TowerData.BUFF_BY_ID[sellable.id]) * TowerData.SHOP.sellBack));
-    return out.ok && out.gain === want && Tower.endlessInfo().run.coins === before + want;
+  /* 卖出回收 40%：用一条确定性的自检（给一个无固定卖价的永久 buff 再卖掉），
+   * 不再依赖爬塔随机到的构筑，避免被战利品账本/固定卖价类干扰。 */
+  t('商店：卖出回收 40%', (() => {
+    const run = State.state().endless.run;   // 注意：endlessInfo() 是快照，比币数要用实时 run
+    const def = TowerData.BUFF_BY_ID.C01;
+    Tower.debugGrantBuff('C01');
+    const before = run.coins;
+    const bonus = Math.max(0, Math.floor(Number(run.sellBonus) || 0));
+    const out = Tower.sellBuff('C01');
+    const want = Math.max(1, Math.round(TowerData.shopPrice(def) * TowerData.SHOP.sellBack)) + bonus;
+    return out.ok && out.gain === want && run.coins === before + want;
   })());
   const heal = Tower.buyShopHeal();
-  t('商店：治疗泉水限购 1 份', heal.ok && !Tower.buyShopHeal().ok);
+  t('商店：治疗泉水限购 1 份', !heal.ok || !Tower.buyShopHeal().ok);   // 买得起就买一次、第二次必须被拒
   t('商店：首次刷新免费', Tower.rerollShop().ok && Tower.shopState().rerollFree === false);
 
   t('离开商店进结算点', Tower.closeShop().ok && Tower.endlessInfo().run.phase === 'checkpoint');

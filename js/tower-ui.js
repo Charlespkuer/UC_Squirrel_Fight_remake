@@ -268,6 +268,35 @@
             '" title="' + esc(b.desc) + '">' + esc(b.name) + '<i>' + (kindName[b.kind] || '') + '</i></span>').join('') +
           '</div></div>' : '').join('') + '</div>';
   }
+  /** BOSS 卡的头像：用独立的 data-boss-art，渲染完由 paintBossCatalog 逐张作画（不会和同页其它画布串号）。 */
+  function bossPortraitHtml(index, info) {
+    return '<span class="foe-portrait"><canvas width="' + AVATAR_SIZE + '" height="' + AVATAR_SIZE +
+      '" data-boss-art="' + index + '" aria-hidden="true"></canvas></span>';
+  }
+  /** 进塔页渲染完成后：按池子下标逐张把 boss 立绘画进画布（canvas 是空的就退回立绘卡）。 */
+  function paintBossCatalog(root) {
+    const pool = Tower.bossPool ? Tower.bossPool() : [];
+    const nodes = Array.prototype.slice.call(root.querySelectorAll('[data-boss-art]'));
+    if (!nodes.length) return;
+    /* 进塔页往往在任何战斗之前打开：这时引擎/图集可能还没加载好，
+     * drawFoeArt 会静默返回留下空白画布（就是「boss 没有图像」的原因）。
+     * 这里做「空白就重试」：每 320ms 重画一次，最多 12 次，引擎就绪后自然补上。 */
+    const blank = (c) => {
+      try {
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        for (let i = 3; i < d.length; i += 4) if (d[i] > 8) return false;
+        return true;
+      } catch (_) { return false; }
+    };
+    let tries = 0;
+    const run = () => {
+      const pending = nodes.filter((c) => c.getContext && blank(c));
+      if (!pending.length || tries++ > 12) return;
+      pending.forEach((c) => { const info = pool[Number(c.dataset.bossArt)]; if (info) drawFoeArt(c, info); });
+      setTimeout(run, 320);
+    };
+    run();
+  }
   /** 第 1 项：进塔页的「BOSS 一览」——池子里每个 boss 的形象、类型与固定出现的层。 */
   function bossCatalogHtml() {
     const pool = Tower.bossPool ? Tower.bossPool() : [];
@@ -275,7 +304,7 @@
     return '<div class="tower-buffs boss-catalog"><h4>BOSS 一览 <span class="buff-slot-count">' + pool.length + ' 个 · 第 4 场随机池</span></h4>' +
       '<ol class="tower-plan boss-grid">' + pool.map((b, i) =>
         '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel' : '') + '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
-        foePortraitHtml(i, b) + '<b>' + esc(b.name) + '</b>' +
+        bossPortraitHtml(i, b) + '<b>' + esc(b.name) + '</b>' +
         (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
         (b.layers && b.layers.length ? '<span class="boss-layers">第 ' + b.layers.join(' / ') + ' 层</span>' : '') +
         '</li>').join('') + '</ol></div>';
@@ -342,7 +371,7 @@
       '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
     bindTips(p);
-    if (!info.run) { fillFoeArt(p, info.preview); if (Tower.bossPool) fillFoeArt(p, Tower.bossPool()); }
+    if (!info.run) { fillFoeArt(p, info.preview); paintBossCatalog(p); }
     back(p, () => UI.runAction('stages'));
     on(p, 'fight', () => {
       if (info.run) {

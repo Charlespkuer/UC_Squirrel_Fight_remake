@@ -724,3 +724,6 @@
 .boss-grid .foe-portrait { width: 68px; height: 68px; }
 .boss-grid .foe-portrait img, .boss-grid .foe-portrait canvas { max-height: 64px; height: 64px; max-width: 64px; }
 .boss-grid li b { font-size: 19px; white-space: nowrap; }
+
+/* 进塔页底部给「开始冲塔」按钮留出空间（增益集锦最后一行不再被压住） */
+.tower-page.has-footer .tower-main { padding-bottom: 92px; }

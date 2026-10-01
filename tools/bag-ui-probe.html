@@ -156,6 +156,24 @@ async function main() {
     P.needsScroll = (() => { const el = document.querySelector('#ui .tower-main'); return el ? el.scrollHeight > el.clientHeight : null; })();
     P.done = true; P.errors = window.__errs.slice(); return;
   }
+  if (batch === 'entry') {
+    // 进塔页（没有 run）：检查增益集锦 / BOSS 一览，以及 boss 画布是否真的画上了像素
+    S.level = 70; State.save();
+    TowerUI.openEndless(); await flush(2200);
+    const painted = $$('#ui .boss-grid canvas').filter((c) => {
+      try {
+        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+        for (let i = 3; i < d.length; i += 4) if (d[i] > 8) return true;
+        return false;
+      } catch (_) { return false; }
+    });
+    P.bossCards = $$('#ui .boss-grid li').length;
+    P.bossCanvases = $$('#ui .boss-grid canvas').length;
+    P.bossPainted = painted.length;
+    P.catalogBuffs = $$('#ui .buff-catalog .buff-tag').length;
+    P.engine = typeof window.Engine;
+    P.done = true; P.errors = window.__errs.slice(); return;
+  }
   if (batch === 'shop') {
     for (let id = 1; id <= 18; id++) S.stages[id] = { npcIndex: 3, passed: true };
     S.level = 70; State.save();

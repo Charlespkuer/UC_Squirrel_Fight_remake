@@ -48,10 +48,9 @@
   /** 体力药提示：优先用游戏内全局 toast（和别处一致），拿不到就退回弹窗，保证一定看得见。 */
   function showHint(msg) {
     try {
-      if (typeof toast === 'function') { toast(msg); return; }
-      if (window.C && C().toast) { C().toast(msg); return; }
+      if (typeof toast === 'function') { toast(msg); }
     } catch (_) {}
-    notice(msg);
+    notice(msg);   // 弹窗兜底：toast 有可能被战斗界面盖住，这里保证玩家一定看得到
   }
   function arena() {
     State.tickEnergy();

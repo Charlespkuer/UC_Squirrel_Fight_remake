@@ -739,3 +739,6 @@
 /* 竞技场报名页的自动喝药说明 */
 .extra-arena-hint { margin-top: 6px; padding: 4px 10px; border-radius: 12px; background: #eef7e2; border: 2px solid #b7d096; color: #3f6a1f; font-size: 17px; }
 .extra-arena-hint.warn { background: #fdeee8; border-color: #e0a99c; color: #8a3a30; }
+
+/* 三选一强化按钮：名字一行、等级一行，按钮自适应宽度 */
+.uc-button.pick-buff-btn { white-space: pre-line; line-height: 1.25; text-align: center; min-width: 200px; padding: 6px 16px; }

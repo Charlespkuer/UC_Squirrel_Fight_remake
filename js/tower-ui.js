@@ -699,9 +699,10 @@
       notice('你还没有任何' + label + '可选，这次强化先留着（之后拿到' + label + '再自动弹出）。', [{ label: '知道了', cls: 'gold', run: () => openEndless() }]);
       return;
     }
+    /* 按钮只写名字，等级换行显示（modal 按钮是 esc() 输出，用 \n + white-space:pre-line 换行） */
     const buttons = cands.map((c) => ({
-      label: (pending.kind === 'skill' ? '技能：' : '武器：') + c.name + ' Lv' + (c.level || 1),
-      cls: 'small' + (pending.kind === 'skill' ? '' : ' gold'),
+      label: c.name + '\nLv' + (c.level || 1),
+      cls: 'small pick-buff-btn' + (pending.kind === 'skill' ? '' : ' gold'),
       run: () => {
         const r = Tower.applyPickBuff(pending.kind, c.id);
         if (!r.ok) notice(r.msg || '强化失败。');

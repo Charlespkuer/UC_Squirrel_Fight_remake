@@ -369,8 +369,8 @@
     { id: 'N07', name: '破军', rarity: 1, kind: 'limited', uses: 3, desc: '接下来 3 场暴击率 +25%', mods: { critBonus: 25 } },
     { id: 'M03', name: '坚守', rarity: 1, kind: 'limited', uses: 2, desc: '接下来 2 场受到伤害 −30%', mods: { takenMul: -0.30 } },
     { id: 'M04', name: '疾风步', rarity: 1, kind: 'limited', uses: 10, desc: '接下来 10 场速度 +30%', mods: { speedMul: 0.30 } },
-    { id: 'N05', name: '先手制敌', rarity: 2, kind: 'limited', uses: 2, desc: '接下来 2 场开局对敌人造成其 30% 最大生命的伤害', mods: { openStrikePct: 0.30 } },
-    { id: 'N06', name: '血饮狂刀', rarity: 2, kind: 'limited', uses: 2, desc: '接下来 2 场攻击附带 45% 吸血', mods: { lifestealPct: 0.45 } },
+    { id: 'N05', name: '先手制敌', rarity: 2, kind: 'limited', uses: 3, desc: '接下来 2 场开局对敌人造成其 30% 最大生命的伤害', mods: { openStrikePct: 0.30 } },
+    { id: 'N06', name: '血饮狂刀', rarity: 2, kind: 'limited', uses: 5, desc: '接下来 2 场攻击附带 45% 吸血', mods: { lifestealPct: 0.45 } },
     // —— 本层类（主塔=整局；无尽=当前层） ——
     { id: 'G01', name: '力量祝福', rarity: 0, kind: 'limited', uses: 10, desc: '本层攻击 +12%', mods: { powerMul: 0.12 } },
     { id: 'G02', name: '生命祝福', rarity: 0, kind: 'limited', uses: 5, desc: '本层生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
@@ -378,7 +378,7 @@
     { id: 'G04', name: '回春术', rarity: 1, kind: 'limited', uses: 10, desc: '本层每回合回复 2.5% 最大生命', mods: { regenPct: 0.025 } },
     { id: 'G05', name: '铁布衫', rarity: 1, kind: 'limited', uses: 5, desc: '本层受到伤害 −25%', mods: { takenMul: -0.25 } },
     { id: 'G06', name: '凌波微步', rarity: 1, kind: 'limited', uses: 10, desc: '本层闪避 +12%', mods: { dodgeBonus: 12 } },
-    { id: 'G07', name: '破釜沉舟', rarity: 2, kind: 'limited', uses: 3, desc: '本层攻击 +20%，生命上限 −10%', mods: { powerMul: 0.20, maxHpMul: -0.10 } },
+    { id: 'G07', name: '破釜沉舟', rarity: 2, kind: 'limited', uses: 3, desc: '本层攻击 +50%，生命上限 −20%', mods: { powerMul: 0.50, maxHpMul: -0.20 } },
     // —— 跨层类（仅无尽，本局永久） ——
     { id: 'C01', name: '磐石之躯', rarity: 0, kind: 'permanent', desc: '生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
     { id: 'C02', name: '磨砺', rarity: 0, kind: 'permanent', desc: '攻击 +10%', mods: { powerMul: 0.10 } },
@@ -400,8 +400,8 @@
     { id: 'C21', name: '暴击精通', rarity: 0, kind: 'permanent', desc: '暴击率 +10%', mods: { critBonus: 10 } },
     { id: 'C22', name: '闪避精通', rarity: 0, kind: 'permanent', desc: '闪避 +8%', mods: { dodgeBonus: 8 } },
     { id: 'C23', name: '轻身术', rarity: 0, kind: 'permanent', desc: '速度 +15%', mods: { speedMul: 0.15 } },
-    { id: 'C11', name: '以战养战', rarity: 2, kind: 'permanent', stackable: true, desc: '每击杀 1 个敌人回复 5% 最大生命', mods: { killHealPct: 0.05 } },
-    { id: 'C12', name: '登顶者', rarity: 2, kind: 'permanent', stackable: true, desc: '从 10 层起，每通过一层攻击永久 +5%', mods: { perLayerPowerAfter20: 0.05 } },
+    { id: 'C11', name: '以战养战', rarity: 2, kind: 'permanent', stackable: true, desc: '每获得一场胜利，生命上限 +10（不封顶）', mods: { winMaxHpFlat: 10 } },
+    { id: 'C12', name: '登顶者', rarity: 2, kind: 'permanent', stackable: true, desc: '第 10 层起，每通过一场战斗攻击 +5%（不封顶）', mods: { winPowerAfter10: 0.05 } },
     { id: 'C13', name: '精英杀手', rarity: 2, kind: 'permanent', desc: '对精英伤害 +40%；击败精英后回复 20% 最大生命', mods: { dmgMulElite: 0.40, eliteHealAfter: 0.20 } },
     { id: 'C14', name: '不死鸟', rarity: 3, kind: 'permanent', desc: '每层拥有一次复活甲（回复 50% 生命）', mods: { revivePct: 0.50 } },
     /* —— 第 1 项新增：与经济系统挂钩的 buff（仅无尽；instant 的拿到就结算，不占永久 5 格） —— */
@@ -418,6 +418,11 @@
     { id: 'C27', name: '灵巧', rarity: 0, kind: 'permanent', desc: '敏捷 +8%', mods: { agilityMul: 0.08 } },
     { id: 'C28', name: '疾行', rarity: 0, kind: 'permanent', desc: '速度 +8%', mods: { speedMul: 0.08 } },
     { id: 'C29', name: '体质', rarity: 0, kind: 'permanent', desc: '生命上限 +10%（卖掉/替换后仍然保留）', mods: { maxHpMul: 0.10 } },
+    /* 第 2 项新增：永久槽位 buff（一局各只能拿一次；史诗战斗+商店都能出，传奇只在战斗里出） */
+    { id: 'C30', name: '扩容背包', rarity: 2, kind: 'permanent', unique: true, permSlot: 1,
+      desc: '本局永久增益槽位 +1（立即生效，一局只能获得一次）', mods: { permSlot: 1 } },
+    { id: 'C31', name: '仓库钥匙', rarity: 3, kind: 'permanent', unique: true, permSlot: 2, battleOnly: true,
+      desc: '本局永久增益槽位 +2（立即生效，一局只能获得一次；只在战斗奖励里出现）', mods: { permSlot: 2 } },
     { id: 'C24', name: '名贵手表', rarity: 1, kind: 'permanent', shopBanned: true,
       desc: '商店里买不到；在试炼商店卖出可得 200 试炼币', mods: { sellValue: 200 } },
     { id: 'C25', name: '战利品账本', rarity: 1, kind: 'permanent',
@@ -475,7 +480,7 @@
    * 名贵手表这类「只在别处出现」的靠 shopBanned 排除出 shop，但仍留在 choice。 */
   const POOLS = Object.freeze({
     choice: (b) => true,
-    shop: (b) => !b.shopBanned && b.kind !== 'instant',
+    shop: (b) => !b.shopBanned && !b.battleOnly && b.kind !== 'instant',
     tower: (b) => b.kind === 'limited' && !b.endlessOnly,
   });
   const inPool = (tag, buff) => !!(POOLS[tag] && POOLS[tag](buff));

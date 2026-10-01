@@ -183,7 +183,7 @@
     const list = Tower.ownedBuffs('endless');
     const perm = list.filter((b) => b.kind === 'permanent');
     const lim = list.filter((b) => b.kind === 'limited');
-    const cap = TowerData.PERMANENT_SLOTS || 5;
+    const cap = (TowerData.PERMANENT_SLOTS || 5) + Math.max(0, Number((info.run && info.run.permSlots) || 0));
     const permHtml = perm.length
       ? perm.map((b) => '<span class="buff-tag r' + b.rarity + (b.id === replaceTarget ? ' replacing' : '') + '" data-replace="' + b.id +
           '" data-tip="' + esc(permTip(b)) + '" title="' + esc(permTip(b)) + '">' +
@@ -404,7 +404,7 @@
       /* 第 2 项版面：左上角是三个属性药丸槽；下面紧贴标题一行小字只有分数；
        * 「当前遭遇的机制」下面直接跟已获得的增益（永久 / 限次），保证一屏看完不用下翻；
        * 本层对手缩成右侧竖排 1/2/3/4。 */
-      const foes = Tower.preview(run.layer);   // 与 buildPlan 同源（run.plan 快照在页面重绘时可能还没刷新）
+      const foes = Tower.preview(run.layer, run.salt);   // 与 buildPlan 同源（run.plan 快照在页面重绘时可能还没刷新）
       /* 第 2 项：打过的对手在右列留下「已战胜」的标记。
        * 本层内 = idx 之前的；若本层已通关（商店/结算点阶段），整层都算已战胜，
        * 这样「最后一个敌人」也能看到已战胜的状态。 */
@@ -458,7 +458,7 @@
       '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
     bindTips(p);
-    if (info.run) fillFoeArt(p, Tower.preview(info.run.layer));   // 第 3 项：松鼠类对手是 canvas，要等素材画上去
+    if (info.run) fillFoeArt(p, Tower.preview(info.run.layer, info.run.salt));   // 第 3 项：松鼠类对手是 canvas，要等素材画上去
     back(p, () => UI.runAction('stages'));
     on(p, 'fight', () => {
       if (info.run) {

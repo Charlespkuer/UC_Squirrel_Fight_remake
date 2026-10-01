@@ -343,9 +343,9 @@ function autoPick(ctx, mode) {
   // 第 4 项：新 buff（战后续航可叠加 / 反伤 / 狂怒 / 速度 / 战后回血）
   {
     // 第 1 项：buff 改成「限次 / 永久」两分法 + 即时经济类
-    t('无尽池：限次 20 / 永久 30 / 即时 3（共 53）+ 6 个经济类', ctx.TowerData.BUFFS.length === 53 &&
+    t('无尽池：限次 20 / 永久 32 / 即时 3（共 55，含扩容背包与仓库钥匙）+ 6 个经济类', ctx.TowerData.BUFFS.length === 55 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 20 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 30 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 32 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 3 &&
       ctx.TowerData.BUFFS.filter((b) => b.endlessOnly).length === 6);
     t('主塔池只吃限次且非无尽专属', ctx.TowerData.towerPool.every((b) => b.kind === 'limited' && !b.endlessOnly));
@@ -487,6 +487,29 @@ function autoPick(ctx, mode) {
     t('胜利后账本累计 +25', (r.sellBonus || 0) === 25);
     const sold = Tower.sellBuff('C24');
     t('名贵手表卖出得 200 + 累计 25 = 225', sold.ok === true && sold.gain === 225 && r.coins >= 225);
+    Tower.abandon('endless');
+  }
+  // 第 2 项（本轮）：槽位 buff、以战养战、登顶者、破釜沉舟
+  {
+    const T = ctx.TowerData, r = freshEndless(State, Tower);
+    t('扩容背包：史诗 / unique / +1 槽 / 商店可出', T.BUFF_BY_ID.C30.rarity === 2 && T.BUFF_BY_ID.C30.unique === true &&
+      T.BUFF_BY_ID.C30.mods.permSlot === 1 && T.inPool('shop', T.BUFF_BY_ID.C30));
+    t('仓库钥匙：传奇 / unique / +2 槽 / 仅战斗', T.BUFF_BY_ID.C31.rarity === 3 && T.BUFF_BY_ID.C31.mods.permSlot === 2 &&
+      !T.inPool('shop', T.BUFF_BY_ID.C31) && T.inPool('choice', T.BUFF_BY_ID.C31));
+    const grant = Tower.debugGrantBuff('C30');
+    t('获得扩容背包：槽位 5→6 且不入永久栏', grant.ok === true && r.permSlots === 1 && (r.permanent || []).length === 0);
+    Tower.debugGrantBuff('C30');
+    t('扩容背包一局只能拿一次（unique 过滤）', (r.permSlotIds || []).length === 1);
+    const lost = Tower.debugLoseBuff('C30');
+    t('调试可立即失去任意 buff', lost.ok === true && (r.permSlotIds || []).length === 0);
+    r.permanent.push({ id: 'C11', stacks: 1 }, { id: 'C12', stacks: 1 });
+    const before = r.winHpFlat || 0;
+    const nb = Tower.nextBattle('endless');
+    Tower.reportBattle('endless', nb.token, true, 0.8, { rounds: [] });
+    t('以战养战：胜利后生命上限 +10（不封顶）', (r.winHpFlat || 0) === before + 10);
+    t('登顶者：10 层以上每胜一场攻击 +5%', r.layer < 10 || (r.winPower || 0) >= 0.05);
+    t('破釜沉舟：攻击 +50% / 生命上限 −20%', T.BUFF_BY_ID.G07.mods.powerMul === 0.50 && T.BUFF_BY_ID.G07.mods.maxHpMul === -0.20);
+    t('先手制敌 3 场 / 血饮狂刀 5 场', T.BUFF_BY_ID.N05.uses === 3 && T.BUFF_BY_ID.N06.uses === 5);
     Tower.abandon('endless');
   }
   // 第 2 项：限次 buff 的次数铺成 1/2/3/5/10

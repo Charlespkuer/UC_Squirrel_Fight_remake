@@ -82,7 +82,7 @@
       run.limited = oldBattle.concat(oldLayer).filter((b) => D().BUFF_BY_ID[b.id] && D().BUFF_BY_ID[b.id].kind === 'limited')
         .map((b) => ({ id: b.id, stacks: b.stacks, uses: Number(b.uses) || D().BUFF_BY_ID[b.id].uses || 1, on: b.on !== false }));
     }
-    run.permanent = cleanBuffs(run.permanent).slice(0, D().PERMANENT_SLOTS || 5);
+    run.permanent = cleanBuffs(run.permanent).slice(0, permSlots(run));
     run.limited = (Array.isArray(run.limited) ? run.limited : []).filter((b) => b && D().BUFF_BY_ID[b.id] && D().BUFF_BY_ID[b.id].kind === 'limited')
       .map((b) => ({ id: b.id, stacks: Math.max(1, Math.min(D().STACK_MAX, Math.floor(Number(b.stacks) || 1))),
         uses: Math.max(0, Math.floor(Number(b.uses) || 0)), on: b.on !== false }))
@@ -119,12 +119,12 @@
 
   // ---------- 层结构 ----------
   /** 第 4 场的随机 boss：只由层数决定（第 1 项：不按天随机）—— 同层固定，换层才换。 */
-  function bossEntry(layer) { return D().bossFor(layer); }
-  function buildPlan(layer) {
+  function bossEntry(layer, salt) { return D().bossFor(layer, salt); }
+  function buildPlan(layer, salt) {   // 第 1 项：salt = 本局随机盐，让每局的 boss/三侠顺序都不同
     /* 三侠顺序按层数随机（`heroOrder`，与日期无关）：同层固定 → 预告 = 实战、重试不变。
      * 削弱跟着「哪一位大侠」走（HERO_DEBUFF[anim]），所以顺序一变，本层要吃的削弱顺序也变，
      * 但三种削弱的组合固定，玩家看预告里的头像就知道等一下会被套上什么。 */
-    const plan = D().heroOrder(layer).map((anim) => ({ kind: 'hero', anim }));
+    const plan = D().heroOrder(layer, salt).map((anim) => ({ kind: 'hero', anim }));
     // 第 4 场 = 随机 boss（20 选 1：7 个带机制的松鼠 + 3 只平庸松鼠 + 10 个机制 NPC）
     plan.push(bossEntry(layer));
     // x10 层第 5 场 = 固定狂战松鼠（松鼠形态 + 全身狂战套 + 精英）
@@ -161,8 +161,8 @@
     });
   }
   /** 入口页预告：当前层的全部对手（与 buildPlan 同源，所以预告 = 实战）。 */
-  function preview(layer) {
-    return buildPlan(layer).map((entry) => Object.assign({ kind: entry.kind }, entryInfo(entry)));
+  function preview(layer, salt) {
+    return buildPlan(layer, salt).map((entry) => Object.assign({ kind: entry.kind }, entryInfo(entry)));
   }
 
   // ---------- buff 聚合 ----------
@@ -208,6 +208,7 @@
     eachBuff(run, (buff, stacks) => {
       const m = buff.mods, k = stacks * g;
       if (m.powerMul) agg.powerMul += m.powerMul * k;
+      if (m.winPowerAfter10) agg.powerMul += Math.max(0, Number(run.winPower) || 0) * 0;   // 占位：winPower 在下面统一加
       /* 第 1 项：永久类的生命上限加成记在 run.hpBonus 上（卖掉/替换也不会掉血上限）；
        * 限次类的仍然按场次生效，buff 消失时加成也一起消失。 */
       if (m.maxHpMul) { if (buff.kind === 'limited') agg.maxHpMul += m.maxHpMul * k; }
@@ -222,6 +223,7 @@
       if (m.openStrikePct) agg.openStrikePct = Math.max(agg.openStrikePct, m.openStrikePct * k);
       if (m.speedMul) agg.speedMul += m.speedMul * k;
       if (m.agilityMul) agg.agilityMul += m.agilityMul * k;
+      if (m.winPowerAfter10) agg.winPower += 1;
       if (m.winHealPct) agg.winHealPct += m.winHealPct * k;                       // 战后续航（可叠加）
       if (m.thornsPct) agg.thornsPct += m.thornsPct * k;                         // 荆棘之甲
       if (m.lowHpPowerMul) { agg.lowHpPowerMul += m.lowHpPowerMul * k; agg.lowHpAt = Math.max(agg.lowHpAt, Number(m.lowHpAt) || 0.35); }
@@ -383,7 +385,7 @@
       const dAgi = debuffs.filter((d) => d.kind === 'stat' && d.stat === 'agility').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
       const dSpd = debuffs.filter((d) => d.kind === 'stat' && d.stat === 'speed').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
       const stickyHp = Math.max(0, Number(run.hpBonus) || 0);   // 第 1 项：永久生命上限加成（卖/换后保留）
-      const maxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul + stickyHp) * dMaxHp));
+      const maxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul + stickyHp) * dMaxHp) + Math.max(0, Number(run.winHpFlat) || 0));
       me.power = Math.max(1, Math.round(me.power * (1 + powerMul) * dPower));
       me.agility = Math.max(1, Math.round(me.agility * dAgi * (1 + agg.agilityMul)));
       me.speed = Math.max(1, Math.round(me.speed * dSpd * (1 + agg.speedMul)));
@@ -526,6 +528,9 @@
       const coinMul = 1 + (runModTotal(run, 'coinBoostPct') || 0);
       // 第 1 项：战利品账本 —— 每胜一场，卖出收益累计 +N
       run.sellBonus = (run.sellBonus || 0) + (runModTotal(run, 'sellGrowthPerWin') || 0);
+      /* 第 2 项：以战养战（每胜一场生命上限 +10，不封顶）、登顶者（第 10 层起每胜一场攻击 +5%） */
+      run.winHpFlat = (run.winHpFlat || 0) + (runModTotal(run, 'winMaxHpFlat') || 0);
+      if (run.layer >= 10) run.winPower = (run.winPower || 0) + (runModTotal(run, 'winPowerAfter10') || 0);
       run.coins += Math.round(D().COINS.battle * coinMul);
       // 击杀叠层类（基础 → 叠层 → C15）
       const c06 = stacksOf(run, 'C06');
@@ -702,16 +707,22 @@
   }
 
   // ---------- 场间 4 选 1 ----------
+  /** 第 2 项：unique（扩容类）buff 一局只能拿一次 —— 拿过就不再进任何池子。 */
+  function poolFilter(run, buff) {
+    if (!buff.unique) return true;
+    if ((run.permSlotIds || []).includes(buff.id)) return false;
+    return !(run.permanent || []).some((b) => b.id === buff.id);
+  }
   function rollChoices(mode, run) {
     const TD = D();
     const pool = mode === 'tower' ? TD.towerPool : TD.endlessPool;
     const picked = [];
     const taken = new Set();
-    const available = (rarity) => pool.filter((b) => b.rarity === rarity && !taken.has(b.id) && ownable(run, b));
+    const available = (rarity) => pool.filter((b) => b.rarity === rarity && !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));
     for (let slot = 0; slot < 3; slot++) {
       let rarity = rollRarity();
       let list = available(rarity);
-      if (!list.length) list = pool.filter((b) => !taken.has(b.id) && ownable(run, b));   // 该稀有度抽空时放宽
+      if (!list.length) list = pool.filter((b) => !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));   // 该稀有度抽空时放宽
       if (!list.length) break;
       const buff = list[Math.floor(Math.random() * list.length)];
       taken.add(buff.id);
@@ -760,7 +771,7 @@
       if (buff.kind === 'limited') { owned.uses += buff.uses || 1; owned.on = true; }
       return { ok: true, buff, stacks: owned.stacks };
     }
-    if (buff.kind === 'permanent' && list.length >= (D().PERMANENT_SLOTS || 5)) {
+    if (buff.kind === 'permanent' && list.length >= permSlots(run)) {
       if (!replaceId) return { ok: false, needsReplace: true, buff, msg: '永久增益已满 5 个，先选一个替换掉' };
       const at = list.findIndex((b) => b.id === replaceId);
       if (at < 0) return { ok: false, needsReplace: true, buff, msg: '要替换的增益不存在' };
@@ -769,6 +780,13 @@
     /* 第 1 项修复：全场五折是 permanent 类，addBuff 原来只对 instant 走 applyInstant，
      * 所以标记一直没被点亮 —— 这里在加入时就把折扣标记打开。 */
     if (buff.mods && buff.mods.shopDiscount) run.shopDiscount = true;
+    /* 第 2 项：扩容类 buff（+1/+2 永久槽位）立即生效 —— 加名额、不占自己的槽、一局只能拿一次。 */
+    if (buff.mods && buff.mods.permSlot) {
+      if ((run.permSlotIds || []).includes(buff.id)) return { ok: false, msg: '这类扩容增益一局只能获得一次。' };
+      run.permSlots = Math.max(0, Number(run.permSlots) || 0) + Number(buff.mods.permSlot);
+      run.permSlotIds = (run.permSlotIds || []).concat([buff.id]);
+      return { ok: true, granted: buff.mods.permSlot };
+    }
     // 第 1 项：拿到永久生命上限增益时，把它折算成 run.hpBonus（之后卖掉也保留）
     if (buff.kind === 'permanent' && buff.mods && buff.mods.maxHpMul) {
       run.hpBonus = (run.hpBonus || 0) + buff.mods.maxHpMul;
@@ -839,7 +857,7 @@
     if (!slot || slot.sold) return { ok: false };
     const buff = D().BUFF_BY_ID[slot.id];
     // 永久增益满 5 格时先让玩家去替换（商店里不弹替换面板，避免一次点出两层交互）
-    const permanentFull = buff.kind === 'permanent' && (run.permanent || []).length >= (D().PERMANENT_SLOTS || 5) &&
+    const permanentFull = buff.kind === 'permanent' && (run.permanent || []).length >= permSlots(run) &&
       !(run.permanent || []).some((b) => b.id === buff.id);
     if (permanentFull && !replaceId) {
       // 第 1 项：不再把玩家打发回主界面 —— 直接把替换目标的选择交给界面
@@ -883,6 +901,33 @@
     const discounted = !!(run && run.shop && run.shop.discount);   // 只看当前这家店有没有折扣标记
     return discounted ? Math.max(1, Math.round(base * 0.5)) : base;
   }
+  /** 第 3 项：调试用 —— 无尽塔专属的「立即获得 / 失去」任意一个增益（不消耗选择次数）。 */
+  function debugGrantBuff(id) {
+    const run = endless().run;
+    if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
+    const buff = D().BUFF_BY_ID[id];
+    if (!buff) return { ok: false, msg: '没有这个增益。' };
+    const res = addBuff(run, id);
+    save();
+    return { ok: !!(res && res.ok), buff, res };
+  }
+  function debugLoseBuff(id) {
+    const run = endless().run;
+    if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
+    for (const list of [run.permanent || [], run.limited || [], run.permSlotIds || []]) {
+      const i = (list || []).findIndex((b) => (typeof b === 'string' ? b === id : b.id === id));
+      if (i >= 0) {
+        const removed = list[i];
+        list.splice(i, 1);
+        if (list === run.permanent && removed && removed.id === id) { /* 永久类移除后不回落生命上限（第 1 项规则） */ }
+        save();
+        return { ok: true, id };
+      }
+    }
+    return { ok: false, msg: '本局没有这个增益。' };
+  }
+  /** 永久增益槽位数：基础 5 + 扩容类 buff 给的名额。 */
+  function permSlots(run) { return (D().PERMANENT_SLOTS || 5) + Math.max(0, Number(run && run.permSlots) || 0); }
   /** 卖出价：名贵手表这类有固定 sellValue 的按固定值，其它按商店价 40%，再叠「战利品账本」的累计加成。 */
   function sellPriceOf(run, buff) {
     const base = buff.mods && buff.mods.sellValue
@@ -1062,7 +1107,7 @@
   }
 
   window.Tower = {
-    unlocked, towerInfo, endlessInfo, preview, ownedBuffs, bossPool,
+    unlocked, towerInfo, endlessInfo, preview, ownedBuffs, bossPool, debugGrantBuff, debugLoseBuff,
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,
     pickChoice, toggleLimited, addBuff, applyInstant, openRestShop, usePillSlot,
     shopState, buyShopSlot, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp,

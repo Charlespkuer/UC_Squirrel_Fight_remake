@@ -208,6 +208,11 @@
     eachBuff(run, (buff, stacks) => {
       const m = buff.mods, k = stacks * g;
       if (m.powerMul) agg.powerMul += m.powerMul * k;
+      /* 本轮第 6 项：与永久槽位互动的两个攻击增益。
+       * C34 轻装上阵 = 每个**空**槽 +20%（槽越空越强）；C35 厚积薄发 = 每拥有 1 个永久增益 +10%。
+       * 都用「当前快照」计算：拿了/卖了/换了永久增益，下一场立刻反映。 */
+      if (m.powerPerEmptySlot) agg.powerMul += m.powerPerEmptySlot * Math.max(0, permSlots(run) - (run.permanent || []).length) * k;
+      if (m.powerPerPermBuff) agg.powerMul += m.powerPerPermBuff * (run.permanent || []).length * k;
       if (m.winPowerAfter10) agg.powerMul += Math.max(0, Number(run.winPower) || 0) * 0;   // 占位：winPower 在下面统一加
       /* 第 1 项：永久类的生命上限加成记在 run.hpBonus 上（卖掉/替换也不会掉血上限）；
        * 限次类的仍然按场次生效，buff 消失时加成也一起消失。 */
@@ -379,6 +384,10 @@
     const agg = aggregate(run, foeCtx);
     // M01 威慑：直接压敌人力量
     if (agg.enemyPowerDown > 0) built.foe.power = Math.max(1, Math.round(built.foe.power * (1 - agg.enemyPowerDown)));
+    /* 本轮第 3 项：挫锐 / 卸甲 —— 本局所有敌人生命上限按累计比例下调。
+     * 这是「即时」类增益，登记在 run.enemyMaxHpDown 上，之后每场都生效（不占增益位）。 */
+    const foeHpDown = Math.max(0, Math.min(0.6, Number(run.enemyMaxHpDown) || 0));
+    if (foeHpDown > 0) built.foe.hp = Math.max(1, Math.round(built.foe.hp * (1 - foeHpDown)));
     const maxHpMul = agg.maxHpMul, powerMul = agg.powerMul;
     /* 「补给」：下一场战斗开始时立即回复 50% 生命 —— 在取下一场的时候就把 carry 抬上去。 */
     if (agg.startHealPct > 0) run.carry = Math.min(1, run.carry + agg.startHealPct);
@@ -390,7 +399,9 @@
       const dAgi = debuffs.filter((d) => d.kind === 'stat' && d.stat === 'agility').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
       const dSpd = debuffs.filter((d) => d.kind === 'stat' && d.stat === 'speed').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
       const stickyHp = Math.max(0, Number(run.hpBonus) || 0);   // 第 1 项：永久生命上限加成（卖/换后保留）
-      const maxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul + stickyHp) * dMaxHp) + Math.max(0, Number(run.winHpFlat) || 0));
+      /* 第 9 项：挥金如土累计的生命上限（固定值，和「以战养战」的 winHpFlat 同口径）。 */
+      const spendHp = run.spendGain ? Math.max(0, Number(run.spendGain.hp) || 0) : 0;
+      const maxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul + stickyHp) * dMaxHp) + Math.max(0, Number(run.winHpFlat) || 0) + spendHp);
       /* 选取型强化：指定武器出战时伤害 +pct（等价于力量翻倍），指定技能的触发档位 ×(1+pct) 且至少 +25 */
       const wBoost = run.weaponBoost || {};
       let weaponMul = 1;
@@ -413,6 +424,10 @@
         const slot = (run.pillSlots || {})[k];
         const eff = slot && D().pillEffect(slot.id);
         if (eff) me[k] += Math.max(Math.floor(me[k] * eff.pct), eff.min);
+      }
+      /* 第 9 项：挥金如土累计的力/敏/速（固定值，和药丸一样直接加到面板属性上）。 */
+      if (run.spendGain) {
+        for (const k of ['power', 'agility', 'speed']) me[k] += Math.max(0, Number(run.spendGain[k]) || 0);
       }
       for (const d of debuffs) {
         if (d.kind !== 'lock') continue;
@@ -555,7 +570,12 @@
       const c06 = stacksOf(run, 'C06');
       if (c06) run.killPower = Math.min(D().BUFF_BY_ID.C06.mods.killPowerCap * g, run.killPower + D().BUFF_BY_ID.C06.mods.killPowerPct * g);   // 第 2 项：按文字 +2%/击杀、上限 +40%
       const c07 = stacksOf(run, 'C07');
-      if (c07) run.killMaxHp = Math.min(0.30 * c07 * g, run.killMaxHp + 0.02 * c07 * g);
+      if (c07) {
+        /* 本轮第 7 项：这里原来硬编码 0.02 / 0.30，和增益文字写的「每击杀 +3%、上限 +45%」对不上。
+         * 改成读 mods，以后文字改了数值就跟着改，不会再各说各话。 */
+        const c07m = D().BUFF_BY_ID.C07.mods;
+        run.killMaxHp = Math.min(c07m.killMaxHpCap * c07 * g, run.killMaxHp + c07m.killMaxHpPct * c07 * g);
+      }
       const c11 = stacksOf(run, 'C11');
       if (c11) run.carry = Math.min(1, run.carry + 0.03 * c11 * g);
       if (isElite) {
@@ -683,7 +703,12 @@
     run.score += D().SCORE.layer;
     run.coins += D().COINS.layer;
     run.bestLayer = Math.max(run.bestLayer, run.layer);
-    run.limited = [];                                   // 本层类 buff 过层清空（第 1 项：限次列表）
+    /* 本轮第 5 项：**不要**在这里清空限次列表。
+     * 无尽里限次 buff 全是按「场次」计时的（战利品 10 场、疾风步 10 场…），
+     * consumeLimited 每打完一场扣 1、扣完自动消失。原来这句 run.limited = []
+     * 会在每次换层把它们全部抹掉 —— 玩家只吃到本层剩下的 3~4 场，
+     * 「接下来 10 场」形同虚设（第 1 层结束就消失）。
+     * 主塔的「本层类」uses=99，而且整局在上面 tower 分支就已经结束了，不受影响。 */
     const c04 = stacksOf(run, 'C04');                    // 生命源泉：每过一层回血
     if (c04) run.carry = Math.min(1, run.carry + D().BUFF_BY_ID.C04.mods.layerHealPct * g);
     const c12 = stacksOf(run, 'C12');                    // 登顶者：20 层起每过一层攻击成长
@@ -739,6 +764,11 @@
     const picked = [];
     const taken = new Set();
     const available = (rarity) => pool.filter((b) => b.rarity === rarity && !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));
+    /* 本轮第 8 项：每次多选一**必定**有一张限次增益（「接下来 N 场」那类），
+     * 让每次选择都有「现在立刻变强」这个选项，而不是三张全是永久/即时。
+     * 排除 N08「补给」—— 它是单场开局回血的一次性卡，不算真正的限次增益。 */
+    const limitedLeft = () => pool.filter((b) => b.kind === 'limited' && b.id !== 'N08' &&
+      !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));
     for (let slot = 0; slot < 3; slot++) {
       let rarity = rollRarity();
       let list = available(rarity);
@@ -747,6 +777,17 @@
       const buff = list[Math.floor(Math.random() * list.length)];
       taken.add(buff.id);
       picked.push({ type: 'buff', id: buff.id });
+    }
+    // 三张里一张限次都没有 → 用一张限次顶掉最后一张（池子里确实没有才算）
+    const hasLimited = picked.some((c) => { const b = TD.BUFF_BY_ID[c.id]; return b && b.kind === 'limited' && b.id !== 'N08'; });
+    if (picked.length && !hasLimited) {
+      const list = limitedLeft();
+      if (list.length) {
+        const buff = list[Math.floor(Math.random() * list.length)];
+        taken.delete(picked[picked.length - 1].id);
+        picked[picked.length - 1] = { type: 'buff', id: buff.id };
+        taken.add(buff.id);
+      }
     }
     return [{ type: 'heal' }, ...picked];
   }
@@ -836,6 +877,11 @@
     const m = buff.mods || {};
     const out = { ok: true, buff, instant: true };
     if (m.instantCoins) { run.coins = Math.max(0, (run.coins || 0) + m.instantCoins); out.coins = m.instantCoins; }
+    /* 本轮第 3 项：即时削弱 —— 累加到本局全局，下一场 buildFoe 起对所有敌人生效。 */
+    if (m.enemyMaxHpDown) {
+      run.enemyMaxHpDown = Math.min(0.6, Math.max(0, Number(run.enemyMaxHpDown) || 0) + Number(m.enemyMaxHpDown));
+      out.enemyMaxHpDown = run.enemyMaxHpDown;
+    }
     if (m.shopDiscount) { run.shopDiscount = true; out.discount = m.shopDiscount; }
     if (m.openShop) {
       // 立刻开一次商店：不动 5 层一次的结算点节奏（phase 用完即恢复）
@@ -884,6 +930,26 @@
       slots: run.shop.slots.map((s) => { const b = D().BUFF_BY_ID[s.id];
         return { id: s.id, sold: s.sold, name: b.name, desc: b.desc, rarity: b.rarity, kind: b.kind, price: shopPriceOf(b) }; }) };
   }
+  /* 本轮第 9 项：挥金如土（C36）—— 每消费 step 试炼币，随机 +1 力/敏/速 并 +5 生命上限。
+   * 消费点有三处（买增益 / 买回血 / 刷新），统一从这里过。 */
+  function addShopSpend(run, amount) {
+    const spend = Math.max(0, Number(amount) || 0);
+    if (!(spend > 0)) return null;
+    if (!stacksOf(run, 'C36')) return null;                 // 没这个增益就不累计
+    const mm = D().BUFF_BY_ID.C36.mods, step = Math.max(1, Number(mm.shopSpendStep) || 20);
+    run.shopSpend = Math.max(0, Number(run.shopSpend) || 0) + spend;
+    const keys = ['power', 'agility', 'speed'];
+    const gained = [];
+    while (run.shopSpend >= step) {
+      run.shopSpend -= step;
+      const key = keys[Math.floor(Math.random() * keys.length)];
+      run.spendGain = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, run.spendGain || {});
+      run.spendGain[key] += Math.max(0, Number(mm.shopSpendStat) || 1);
+      run.spendGain.hp += Math.max(0, Number(mm.shopSpendHp) || 5);
+      gained.push(key);
+    }
+    return gained.length ? { gained, spendGain: Object.assign({}, run.spendGain) } : null;
+  }
   function buyShopSlot(index, replaceId) {
     const run = endless().run;
     if (!run || !run.shop) return { ok: false };
@@ -900,6 +966,7 @@
     const price = shopPriceOf(buff);
     if (run.coins < price) return { ok: false, msg: '试炼币不足。' };
     run.coins -= price;
+    addShopSpend(run, price);                               // 第 9 项：挥金如土
     slot.sold = true;
     const res = addBuff(run, slot.id, replaceId);
     save();
@@ -910,6 +977,7 @@
     if (!run || !run.shop || run.shop.healSold) return { ok: false };
     if (run.coins < D().SHOP.healPrice) return { ok: false, msg: '试炼币不足。' };
     run.coins -= D().SHOP.healPrice;
+    addShopSpend(run, D().SHOP.healPrice);                  // 第 9 项：买回血也算消费
     run.shop.healSold = true;
     run.carry = Math.min(1, run.carry + D().SHOP.healPct);
     save();
@@ -922,6 +990,7 @@
     else {
       if (run.coins < D().SHOP.rerollPrice) return { ok: false, msg: '试炼币不足。' };
       run.coins -= D().SHOP.rerollPrice;
+      addShopSpend(run, D().SHOP.rerollPrice);              // 第 9 项：刷新也算消费
     }
     run.shop.slots = rollShopSlots(run);
     save();
@@ -993,12 +1062,17 @@
   }
   /** 永久增益槽位数：基础 5 + 扩容类 buff 给的名额。 */
   function permSlots(run) { return (D().PERMANENT_SLOTS || 5) + Math.max(0, Number(run && run.permSlots) || 0); }
-  /** 卖出价：名贵手表这类有固定 sellValue 的按固定值，其它按商店价 40%，再叠「战利品账本」的累计加成。 */
+  /** 卖出价：名贵手表这类有固定 sellValue 的按固定值，其它按商店价 40%。 */
   function sellPriceOf(run, buff) {
     const base = buff.mods && buff.mods.sellValue
       ? Number(buff.mods.sellValue)
       : Math.max(1, Math.round(D().shopPrice(buff) * D().SHOP.sellBack));
-    return base + Math.max(0, Math.floor(Number(run.sellBonus) || 0));
+    /* 本轮第 7 项：战利品账本的累计加成**只加账本自己**。
+     * 原来它无差别加到每一个 buff 的卖价上 —— 等于「卖什么都变贵」，
+     * 既和文字（只讲自己卖得贵）不符，也让卖杂 buff 变成稳定刷币。
+     * 改成只认 C25：账本卖掉/失去后，这个加成自然就不再被任何东西读到（效果随之消失）。 */
+    if (buff.id === 'C25' && stacksOf(run, 'C25') > 0) return base + Math.max(0, Math.floor(Number(run.sellBonus) || 0));
+    return base;
   }
   function sellBuff(id) {
     const run = endless().run;
@@ -1155,10 +1229,35 @@
         restShopUsed: !!e.run.restShopUsed,
         pendingPick: e.run.pendingPick || null,
         permSlots: Math.max(0, Number(e.run.permSlots) || 0),
+        // 本轮第 3 / 9 项：即时削弱累计 + 挥金如土的消费进度（界面要显示）
+        enemyMaxHpDown: Math.max(0, Number(e.run.enemyMaxHpDown) || 0),
+        shopSpend: Math.max(0, Number(e.run.shopSpend) || 0),
+        spendGain: Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, e.run.spendGain || {}),
         permCap: permSlots(e.run),
         finished: e.run.finished || null,
         pillSlots: Object.assign({}, e.run.pillSlots || {}),
         ticketsIfSettle: D().endlessTickets(e.run.layer) } : null };
+  }
+  /** 本轮第 7 项：成长/累计类增益的**真实进度**（面板 + 悬停都用它）。
+   * 原来面板只显示 entry.stacks（这个增益拿过几次），所以「吞噬成长」这类
+   * 按击杀/胜利累计的增益看起来永远是「×1」，玩家会以为没生效 ——
+   * 实际上 run.killPower / run.killMaxHp / run.sellBonus 一直在涨。 */
+  function progressOf(run, id) {
+    const g = globalMul(run);
+    const pct = (v) => Math.round((Number(v) || 0) * 100);
+    if (id === 'C06') return '已累计 攻击 +' + pct(run.killPower) + '%（上限 +' + pct(D().BUFF_BY_ID.C06.mods.killPowerCap * g) + '%）';
+    if (id === 'C07') return '已累计 生命上限 +' + pct(run.killMaxHp) + '%（上限 +' +
+      pct(D().BUFF_BY_ID.C07.mods.killMaxHpCap * Math.max(1, stacksOf(run, 'C07')) * g) + '%）';
+    if (id === 'C11') return '已累计 生命上限 +' + Math.round(Number(run.winHpFlat) || 0);
+    if (id === 'C12') return '已累计 攻击 +' + pct(run.winPower) + '%';
+    if (id === 'C25') return '本局已累计 卖价 +' + Math.round(Number(run.sellBonus) || 0) + ' 试炼币（只加自己）';
+    if (id === 'C36') {
+      const sg = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, run.spendGain || {});
+      const step = Math.max(1, Number(D().BUFF_BY_ID.C36.mods.shopSpendStep) || 20);
+      return '已累计 力 +' + sg.power + ' / 敏 +' + sg.agility + ' / 速 +' + sg.speed + ' / 生命 +' + sg.hp +
+        '（距下次 ' + Math.floor(Number(run.shopSpend) || 0) + '/' + step + ' 试炼币）';
+    }
+    return null;
   }
   /** 当前 run 已拥有 buff 列表（构筑展示 / 商店出售页用）。 */
   function ownedBuffs(mode) {
@@ -1174,6 +1273,7 @@
       if (!buff || buff.hidden) return;   // 隐藏型（背包/选取类）不进增益面板
       out.push({ id: buff.id, name: buff.name, desc: buff.desc, rarity: buff.rarity, kind: buff.kind,
         scopeName: scopeName[buff.kind], stacks: entry.stacks || 1,
+        progress: progressOf(run, buff.id),                 // 第 7 项：成长类的真实累计值
         uses: buff.kind === 'limited' ? entry.uses : undefined,
         on: buff.kind === 'limited' ? entry.on !== false : true,
         sellable: !!run.shop && buff.kind !== 'instant' && !buff.hidden, sellPrice: sellPriceOf(run, buff) });
@@ -1191,5 +1291,23 @@
     checkpointInfo, settleEndless, continueEndless, continueFromShop, settleFromShop,
     // 调试
     _debugSetLayer(n) { tower().maxLayer = Math.max(0, Math.floor(Number(n) || 0)); save(); },
+    /* 调试/探针用：endlessInfo/towerInfo 返回的是**子集**，看不到 killPower、sellBonus、
+     * limited 的 uses 这些运行态字段。诊断叠层/限次问题时需要拿到原始 run。 */
+    _debugRun(mode) { return (mode === 'endless' ? endless() : tower()).run; },
+    /* 调试/探针用：把无尽对局直接挪到第 n 层（plan 一并重建，界面能正确显示
+     * 「当前遭遇的机制」，例如第 6 层的荆棘反伤）。截图页 tools/tower-ui-probe.html 用。 */
+    _debugSetEndlessLayer(n) {
+      const layer = Math.max(1, Math.floor(Number(n) || 1));
+      const e = endless();
+      if (!e.run) { const r = startEndlessRun(); if (!r.ok) return r; }
+      e.run.layer = layer;
+      e.run.plan = buildPlan(layer, e.run.salt);
+      e.run.idx = 0;
+      e.run.choices = null;
+      e.run.phase = null;
+      e.run.finished = null;
+      save();
+      return { ok: true, layer };
+    },
   };
 })();

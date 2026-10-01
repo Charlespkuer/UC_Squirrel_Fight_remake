@@ -390,11 +390,13 @@ function autoPick(ctx, mode) {
   // 第 4 项：新 buff（战后续航可叠加 / 反伤 / 狂怒 / 速度 / 战后回血）
   {
     // 第 1 项：buff 改成「限次 / 永久」两分法 + 即时经济类
-    t('无尽池：限次 21 / 永久 34 / 即时 3（共 58）+ 6 个经济类', ctx.TowerData.BUFFS.length === 58 &&
+    /* 本轮（第 3/6/9 项）新增 5 个：E07/E08（即时·削敌方生命上限）、
+     * C34/C35/C36（永久·空槽攻击 / 永久数攻击 / 商店消费成长）→ 58 → 63。 */
+    t('无尽池：限次 21 / 永久 37 / 即时 5（共 63）+ 8 个无尽专属', ctx.TowerData.BUFFS.length === 63 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 21 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 34 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 3 &&
-      ctx.TowerData.BUFFS.filter((b) => b.endlessOnly).length === 6);
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 37 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 5 &&
+      ctx.TowerData.BUFFS.filter((b) => b.endlessOnly).length === 8);
     t('主塔池只吃限次且非无尽专属', ctx.TowerData.towerPool.every((b) => b.kind === 'limited' && !b.endlessOnly));
     t('单场 buff 加强（蓄力一击 40% / 血饮狂刀 45%）',
       ctx.TowerData.BUFF_BY_ID.N01.mods.powerMul === 0.40 && ctx.TowerData.BUFF_BY_ID.N06.mods.lifestealPct === 0.45);
@@ -532,8 +534,13 @@ function autoPick(ctx, mode) {
     const nb = Tower.nextBattle('endless');
     Tower.reportBattle('endless', nb.token, true, 0.8, { rounds: [] });
     t('胜利后账本累计 +25', (r.sellBonus || 0) === 25);
+    /* 本轮第 7 项：账本的累计加成**只加账本自己**（原来把它加到所有 buff 的卖价上）。
+     * 所以名贵手表按自身固定价 200 卖出，账本自己才是「基础价 + 累计」。 */
     const sold = Tower.sellBuff('C24');
-    t('名贵手表卖出得 200 + 累计 25 = 225', sold.ok === true && sold.gain === 225 && r.coins >= 225);
+    t('名贵手表只按自身固定价 200 卖出（账本不再普涨卖价）', sold.ok === true && sold.gain === 200 && r.coins >= 200);
+    const ledger = Tower.ownedBuffs('endless').find((b) => b.id === 'C25');
+    const ledgerBase = Math.max(1, Math.round(ctx.TowerData.shopPrice(ctx.TowerData.BUFF_BY_ID.C25) * ctx.TowerData.SHOP.sellBack));
+    t('账本自身卖价 = 基础 ' + ledgerBase + ' + 累计 25', !!ledger && ledger.sellPrice === ledgerBase + 25);
     Tower.abandon('endless');
   }
   // 选取型隐藏 buff：神兵淬炼 / 秘技通神（立即生效、隐藏、不可出售、一局一次）

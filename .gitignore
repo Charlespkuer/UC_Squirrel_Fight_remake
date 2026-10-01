@@ -32,3 +32,5 @@ tools/research/battle-check/
 
 # 双机同步：名字 / 对端地址 / 口令每台机器都不一样，不进仓库（首次运行会自动生成）
 scripts/sync/sync.config.json
+
+

@@ -1,7 +1,7 @@
 @echo off
 rem  SSDZ Classic - two-machine sync menu (project root).
 rem
-rem  All logic lives in tools\sync\sync-win.ps1 next to this file: cmd.exe
+rem  All logic lives in scripts\sync\sync-win.ps1 (a sibling folder): cmd.exe
 rem  mis-parses UTF-8 Chinese inside .cmd files, therefore this file is ASCII-only.
 rem
 rem  What it does (Mac <-> Windows over ZeroTier):
@@ -27,5 +27,7 @@ if not "%CODE%"=="0" (
   echo Sync tool stopped ^(exit code %CODE%^).
   pause
 )
-endlocal
-exit /b %CODE%
+rem  endlocal clears variables set inside setlocal, so keep both on ONE line:
+rem  that way %CODE% is expanded before endlocal runs. (Two lines would make
+rem  the caller always see exit code 0.)
+endlocal & exit /b %CODE%

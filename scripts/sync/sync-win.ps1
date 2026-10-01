@@ -5,7 +5,8 @@
 # （PowerShell 处理 UTF-8 没问题，但本文件必须带 UTF-8 BOM，否则 Windows PowerShell 5.1
 #   会按 ANSI 读，中文全是乱码）。
 #
-# 真正的同步逻辑在 tools\sync\sync.js（零依赖，Node 就行），Mac 那份是 一键同步.command。
+# 真正的同步逻辑是 sync.js（零依赖，Node 就行）：本仓库在 scripts\sync\sync.js，
+# 发布包里在 tools\sync\sync.js。Mac 那份是 一键同步.command。
 #
 # 命令行用法：
 #   一键同步.cmd status | save-push | save-pull | files-push | files-pull | discover
@@ -13,20 +14,55 @@
 param([Parameter(ValueFromRemainingArguments = $true)]$Rest)
 
 $ErrorActionPreference = 'Continue'
+
+# node 的输出是 UTF-8；Windows PowerShell 5.1 默认按本地代码页（简体中文是 GBK）解码
+# 外部程序输出，中文会变乱码。这里显式按 UTF-8 解码（失败就算了，不影响功能）。
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 $here = $PSScriptRoot
 if (-not $here) { $here = (Get-Location).Path }
+# 先找同步逻辑 sync.js。两种布局都要认，所以从本脚本所在目录往上逐层找：
+#   本仓库布局：<仓库>\scripts\sync\sync.js     ← 与本脚本同级
+#   发布包布局：<游戏根>\tools\sync\sync.js
+# 之前的写法只认 <根>\tools\sync\sync.js，于是本仓库里会被判成"文件缺失"。
+$sync = $null
+foreach ($c in @($here, (Join-Path $here '..'), (Join-Path $here '..\..'), (Join-Path $here '..\..\..'))) {
+  if (-not (Test-Path -LiteralPath $c)) { continue }
+  foreach ($rel in @('sync.js', 'sync\sync.js', 'tools\sync\sync.js')) {
+    $cand = Join-Path $c $rel
+    if (Test-Path -LiteralPath $cand) { $sync = (Resolve-Path -LiteralPath $cand).Path; break }
+  }
+  if ($sync) { break }
+}
+
+# 游戏根 = sync.js 往上两层（与 sync.js 自己的算法 ROOT = dirname(sync.js)\..\.. 一致，
+# 免得启动器和同步逻辑对"根在哪"的判断不一致）。
 $root = $null
-foreach ($c in @($here, (Join-Path $here '..'), (Join-Path $here '..\..'))) {
-  if (Test-Path -LiteralPath (Join-Path $c 'index.html')) { $root = (Resolve-Path -LiteralPath $c).Path; break }
+if ($sync) {
+  # 注意：Windows PowerShell 5.1 的 Split-Path **没有** -LiteralPath 参数
+  # （那是 PowerShell 6+ 才有的），所以这里用 .NET 取目录名。
+  $syncDir = [System.IO.Path]::GetDirectoryName($sync)
+  $root = [System.IO.Path]::GetFullPath((Join-Path $syncDir '..\..'))
+}
+
+# 兜底：老办法找 index.html（兼容别的打包布局）。注意本仓库的入口 HTML 在 scripts\index.html，
+# 不在仓库根，所以两个位置都要认。
+if (-not $root) {
+  foreach ($c in @($here, (Join-Path $here '..'), (Join-Path $here '..\..'))) {
+    if ((Test-Path -LiteralPath (Join-Path $c 'index.html')) -or
+        (Test-Path -LiteralPath (Join-Path $c 'scripts\index.html'))) {
+      $root = (Resolve-Path -LiteralPath $c).Path; break
+    }
+  }
 }
 if (-not $root) {
-  Write-Host '找不到 index.html：请把整个游戏文件夹一起解压后再运行。'
+  Write-Host '找不到游戏目录（应该有 scripts\index.html 或 index.html）：请把整个文件夹一起解压后再运行。'
   Read-Host '按回车键关闭'
   exit 1
 }
 Set-Location -LiteralPath $root
 
-$sync = Join-Path $root 'tools\sync\sync.js'
+if (-not $sync) { $sync = Join-Path $root 'scripts\sync\sync.js' }
+if (-not (Test-Path -LiteralPath $sync)) { $sync = Join-Path $root 'tools\sync\sync.js' }
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) {
   Write-Host '同步需要 Node.js（https://nodejs.org，装 LTS 版就行）。'
@@ -41,8 +77,28 @@ if (-not (Test-Path -LiteralPath $sync)) {
 }
 
 function Invoke-Sync([string[]]$SyncArgs) {
-  & $node.Source $sync @SyncArgs
-  return $LASTEXITCODE
+  # 两个坑一起处理：
+  #  1) node 的 stdout 默认会变成本函数的「成功流」输出，而调用点全都写成
+  #     `Invoke-Sync ... | Out-Null`（本意是丢掉返回的退出码），结果把该显示的
+  #     内容也一起丢了 —— 菜单里每一项一片空白就是这个原因。
+  #  2) `2>&1` 之后 PowerShell 5.1 会把 node 的 stderr 包成 ErrorRecord，直接
+  #     打出来是一大段红字 NativeCommandError（双击运行时看着像崩溃）。
+  # 所以：先把两路输出都收成纯字符串，再统一用 Write-Host 打到控制台；
+  # 退出码在管道之后立刻取（ForEach-Object 不会改它），单独返回。
+  # 取值要绕一下：node 输出里的**空行**在 2>&1 之后会变成 Exception 为
+  # RemoteException 的 ErrorRecord，直接 [string] 会得到
+  # "System.Management.Automation.RemoteException"；取 TargetObject /
+  # Exception.Message 才是那一行的原文（空行就是空字符串）。
+  $lines = & $node.Source $sync @SyncArgs 2>&1 | ForEach-Object {
+    if ($_ -is [System.Management.Automation.ErrorRecord]) {
+      $t = [string]$_.TargetObject
+      if (-not $t) { $t = [string]$_.Exception.Message }
+      $t
+    } else { [string]$_ }
+  }
+  $code = $LASTEXITCODE
+  if ($lines) { $lines | ForEach-Object { Write-Host $_ } }
+  return $code
 }
 function Pause-Menu() { Read-Host '按回车回到菜单' | Out-Null }
 

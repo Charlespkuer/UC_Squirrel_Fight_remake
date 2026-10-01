@@ -186,6 +186,41 @@ async function main() {
   P.backButtonIsSprite = !!document.querySelector('.tower-board [data-action="home"] img, .tower-board .btn-art');
   if (q.get('shot') === 'tower') { P.done = true; P.errors = window.__errs.slice(); return; }
 
+  // ---- 无尽主界面 + 选牌弹窗（本轮第 4 项：本段机制要出现在这两处）----
+  if (q.get('shot') === 'endless') {
+    const el = Math.max(1, Number(q.get('elayer')) || Number(q.get('layer')) || 6);
+    Tower._debugSetEndlessLayer(el);
+    // 打赢 3 场走到「休整点·选一张带走」，这样选牌弹窗也会被渲染出来
+    for (let i = 0; i < 3; i++) {
+      const nx = Tower.nextBattle('endless');
+      if (!nx || !nx.ok) break;
+      Tower.reportBattle('endless', nx.token, true, 0.8);
+    }
+    TowerUI.openEndless();
+    await sleep(400);
+    const info = Tower.endlessInfo();
+    P.notes.endlessLayer = el;
+    P.notes.endlessMechs = (info.run && info.run.mechs) || [];
+    const bar = document.querySelector('.mech-bar');
+    P.endlessMechBar = bar ? bar.textContent : null;
+    snap('无尽主界面', '.endless-run');
+    snap('无尽-机制行', '.mech-bar');
+    P.endlessHasThorns = !!(bar && bar.textContent.indexOf('荆棘反伤') >= 0);
+    const run = Tower._debugRun('endless');
+    P.notes.endlessHasChoices = !!(run && run.choices);
+    if (run && run.choices) {
+      // 无尽的选择是内联区块（.choice-onpage），不是弹窗
+      const seg = document.querySelector('.choice-onpage .hex-seg-mechs, .hex-seg-mechs');
+      P.choiceDialogSegMechs = seg ? seg.textContent : null;
+      P.choiceDialogHasThorns = !!(seg && seg.textContent.indexOf('荆棘反伤') >= 0);
+      const inline = document.querySelector('.choice-onpage');
+      P.choiceInlineText = inline ? inline.textContent.slice(0, 120) : null;
+      snap('无尽-选牌(本段机制)', '.hex-seg-mechs');
+      snap('无尽-选牌区块', '.choice-onpage');
+    }
+    P.done = true; P.errors = window.__errs.slice(); return;
+  }
+
   // ---- 四选一弹窗 ----
   Tower.startTowerRun();
   const nb = Tower.nextBattle('tower');

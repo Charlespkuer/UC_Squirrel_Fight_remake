@@ -742,3 +742,15 @@
 
 /* 三选一强化按钮：名字一行、等级一行，按钮自适应宽度 */
 .uc-button.pick-buff-btn { white-space: pre-line; line-height: 1.25; text-align: center; min-width: 200px; padding: 6px 16px; }
+
+/* ---------- 本轮第 3 / 4 / 7 项新增的小件 ---------- */
+/* 选牌弹窗里的「本段机制」一行（和 .hex-next 同一套紫色系） */
+.hex-seg-mechs{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px;margin:10px auto 0;
+  max-width:1000px;padding:8px 16px;border-radius:16px;border:3px dashed #b07ad0;background:rgba(58,32,84,.62)}
+/* 「敌人生命上限 −N%」这种全局减益胶囊：比普通减益更醒目 */
+.mech-chip.enemy-down{background:#ffdede;border-color:#d98a8a;color:#8a2f2f;font-weight:700}
+/* 成长类增益的真实进度（面板上单独一行，避免看起来只有「×1」） */
+.buff-progress-list{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 2px}
+.buff-progress-item{display:inline-flex;align-items:baseline;gap:8px;background:#fff4d9;border:2px solid #e0be86;
+  border-radius:12px;padding:2px 10px;font-size:16px;color:#6b4a1c}
+.buff-progress-item b{color:#8a5a18}

@@ -435,11 +435,34 @@
     { id: 'C25', name: '战利品账本', rarity: 1, kind: 'permanent',
       desc: '每场战斗胜利后，卖出增益的收益 +25 试炼币（本局累计）', mods: { sellGrowthPerWin: 25 } },
     { id: 'C15', name: '增幅水晶', rarity: 2, kind: 'permanent', desc: '本局内所有 buff 效果 +40%', mods: { globalMul: 1.40 } },
+    /* —— 本轮第 3 项：即时削弱敌方生命上限（普通 / 稀有各一）——
+     * kind: instant 表示「拿到就结算、不占永久 5 格」；效果是本局内的全局减益，
+     * 立刻登记到 run.enemyMaxHpDown，之后每一场 buildFoe 出来的敌人都按比例扣血上限。 */
+    { id: 'E07', name: '挫锐', rarity: 0, kind: 'instant', endlessOnly: true,
+      desc: '立刻让本局所有敌人的生命上限 −10%（此后每场都生效，不占增益位）', mods: { enemyMaxHpDown: 0.10 } },
+    { id: 'E08', name: '卸甲', rarity: 1, kind: 'instant', endlessOnly: true,
+      desc: '立刻让本局所有敌人的生命上限 −15%（此后每场都生效，不占增益位）', mods: { enemyMaxHpDown: 0.15 } },
+    /* —— 本轮第 6 项：和永久增益槽位互动的攻击 buff ——
+     * C34 是「空槽越多越强」，C35 是「永久 buff 越多越强」，两者取向相反，
+     * 放在一起才逼出「要不要占满 5 格」的真实取舍。 */
+    { id: 'C34', name: '轻装上阵', rarity: 0, kind: 'permanent',
+      desc: '每个空的永久增益位让攻击 +20%', mods: { powerPerEmptySlot: 0.20 } },
+    { id: 'C35', name: '厚积薄发', rarity: 2, kind: 'permanent',
+      desc: '每拥有 1 个永久增益，攻击 +10%（含它自己）', mods: { powerPerPermBuff: 0.10 } },
+    /* —— 本轮第 9 项：传奇 · 商店消费成长 ——
+     * 每消费 20 试炼币 → 力/敏/速 随机一项 +1、生命上限 +5，可无限累计；
+     * 累计结果与「距下次还差几枚」都显示在增益面板上（progressOf）。 */
+    { id: 'C36', name: '挥金如土', rarity: 3, kind: 'permanent',
+      desc: '本局每在试炼商店消费 20 试炼币，随机 +1 力/敏/速 并 +5 生命上限（可无限累计）',
+      mods: { shopSpendStep: 20, shopSpendStat: 1, shopSpendHp: 5 } },
   ]);
   const BUFF_BY_ID = Object.fromEntries(BUFFS.map((b) => [b.id, b]));
   /* 第 3 项：稀有度加一档「传奇」。越高稀有度权重越低，但不悬殊（普通 56 / 稀有 26 / 史诗 14 / 传奇 4）。 */
   const RARITY_NAME = ['普通', '稀有', '史诗', '传奇'];
-  const RARITY_WEIGHTS = [56, 26, 14, 4];        // 每个随机槽独立 Roll
+  /* 本轮第 2 项：稀有/史诗/传奇出率整体下调（原 56/26/14/4）——
+   * 实测史诗/传奇出现得太频繁，「抽到好东西」不再有感觉。现在换算成
+   * 66% / 21% / 10% / 3%（三个随机槽独立 Roll，所以一屏出现史诗的概率仍不低）。 */
+  const RARITY_WEIGHTS = [66, 21, 10, 3];        // 每个随机槽独立 Roll
   /* 第 4 项：场间只剩一次选择，所以那一次的大回血要够用。
    * 第 4 项需求：从 80% 下调到 50%（配合「每场自动回血」，整层续航仍够，
    * 但「回血 or 拿 buff」这次决策不再默认选回血）。 */

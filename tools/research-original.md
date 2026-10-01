@@ -10,7 +10,7 @@
 - `System/` 文件夹为空，未发现 SWF 或额外旧版客户端。
 - 原脚本提取到 `tools/research/original/`。`js/ssdz-pkg2.js` 已仅做 Prettier 格式化，原始压缩代码仍可从 APK 重取。
 - `tools/research/original-ui-coordinates.json` 对 51 个模块中的 1,490 处静态贴图调用建立索引。它包含弹窗和条件分支，并不代表所有贴图会同时显示。
-- `tools/research/extract-ui-coordinates.cjs` 可重新生成坐标索引。
+- 坐标索引由 `tools/apk-audit/rects.cjs` 系列工序生成（早期的 `extract-ui-coordinates.cjs` 已随 1.0 之前的脚本清理掉）。
 - `tools/extract-ui-assets.py` 可重新生成已导出的独立 PNG；依赖 Pillow 和 Node.js，仅执行项目内原始数据表，不执行原游戏客户端。
 - `images/classic/manifest.json` 为导出文件逐项记录原始文件、裁剪矩形、原帧号和名称。
 
@@ -81,7 +81,7 @@ NPC 关卡区原版只有螳螂、仙鹤、熊猫三个高手入口，使用 res
 
 ## GitHub 只读检索
 
-查询记录在 `tools/research/github-search.json`。使用 GitHub 官方 API 检索「松鼠大战」「UC松鼠大战」「songshufight」「ssdz」「squirrel fight UC」，没有找到经证实属于 UC 经典版的复刻资源仓库。
+查询记录在 `tools/research/github-search.json`（当时的检索脚本 `github-search.js`、`github-dom-client-tree.js` 已清理，JSON 结果保留）。使用 GitHub 官方 API 检索「松鼠大战」「UC松鼠大战」「songshufight」「ssdz」「squirrel fight UC」，没有找到经证实属于 UC 经典版的复刻资源仓库。
 
 - `winterIce/chipndale` 的 README 为「运用 flash 版 Box2d 的松鼠大战 demo」，内容为 Chip 'n Dale 同名横版游戏，不是 UC 松鼠大战。
 - `littlebeijing/ssdz` 是一个标题为「松鼠大战 - 横版闯关」的单文件页面，是双人平台跳跃项目，与 UC 自动战斗游戏无关。

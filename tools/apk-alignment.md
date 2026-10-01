@@ -1,3 +1,5 @@
+> **说明**：本文件是**历史变更记录**，里面的路径按当时状态记录。仓库经历过几轮目录整理（tools/ ↔ references/tools/ 往返、serve.js/serve.py/start-*.ps1 提到根目录），因此早期条目里的 tools/serve.js、tools/launchers/start-win.ps1 等路径今天已不存在，请以仓库当前结构为准（见 README 的「目录与文件」一节）。
+
 # 依照 APK 对齐的改动表
 
 依据：`references/h5ssdz_9game_4230.apk`（SHA-256 `BBFD6061…8DA73`）。

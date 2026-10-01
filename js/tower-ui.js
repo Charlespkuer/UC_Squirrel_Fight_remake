@@ -58,10 +58,15 @@
   }
   /** 一行对手的机制说明（悬停用）：机制 + 出招循环，不带「对策」。
    *  第 9 项：这就是普通 boss 简介，不出现「题面」这类策划词。 */
-  function mechTip(info) {
+  function mechTip(info, mechs) {
     const parts = [];
     if (info.mechDesc) parts.push(info.mechDesc);
     if (info.patternDesc) parts.push(info.patternDesc);
+    /* 本轮第 4 项：本段**所有敌人共有**的机制（第 6 层起的荆棘反伤等）也要写进气泡。
+     * 原来只写 boss 自己的机制，玩家在第 6 层完全看不出「打谁都反伤」。 */
+    if (mechs && mechs.length) {
+      parts.push('本段所有敌人附带：' + mechs.map((m) => (MECH_NAME[m] || m) + '（' + (MECH_DESC[m] || '') + '）').join('；'));
+    }
     return parts.join('\n') || '没有特殊机制';
   }
   /* ---------- 对手头像（第 1 项） ----------
@@ -164,6 +169,12 @@
     if (m.killMaxHpPct) parts.push('每击杀生命上限 +' + Math.round(m.killMaxHpPct * b.stacks * 100) + '%');
     if (m.revivePct) parts.push('复活回血 ' + Math.round(m.revivePct * 100) + '%');
     if (m.globalMul) parts.push('全局增幅 ×' + m.globalMul + (b.stacks > 1 ? '，可叠 ' + b.stacks + ' 层' : ''));
+    /* 本轮第 6 / 9 项的新增益：把「当前到底加了多少」写清楚 */
+    if (m.powerPerEmptySlot) parts.push('每个空的永久增益位 攻击 +' + Math.round(m.powerPerEmptySlot * 100) + '%');
+    if (m.powerPerPermBuff) parts.push('每拥有 1 个永久增益 攻击 +' + Math.round(m.powerPerPermBuff * 100) + '%');
+    if (m.shopSpendStep) parts.push('每消费 ' + m.shopSpendStep + ' 试炼币 → 随机 +' + (m.shopSpendStat || 1) +
+      ' 力/敏/速 并 +' + (m.shopSpendHp || 5) + ' 生命上限');
+    if (b.progress) parts.push('当前进度：' + b.progress);   // 第 7 项：成长类的真实累计值
     if (buff.mods && buff.mods.shopDiscount) parts.push('下个商店 5 折');
     parts.push(replaceTarget === b.id ? '（当前已选为替换目标，点一下取消）' : '点一下选它作为要被替换掉的永久增益');
     return parts.join('\n');
@@ -189,6 +200,13 @@
           '" data-tip="' + esc(permTip(b)) + '" title="' + esc(permTip(b)) + '">' +
           esc(b.name) + '<i>永久</i>' + (b.stacks > 1 ? '<em>×' + b.stacks + '</em>' : '') + '</span>').join('')
       : '<span class="buff-empty">还没有永久增益（每层的休整点可以拿）</span>';
+    /* 本轮第 7 项：成长类增益的真实进度单独列一行 —— 只在悬停里写不够，
+     * 面板上「吞噬成长 ×1」看起来就像没生效。 */
+    const progList = perm.filter((b) => b.progress);
+    const progHtml = progList.length
+      ? '<div class="buff-progress-list">' + progList.map((b) =>
+          '<span class="buff-progress-item"><b>' + esc(b.name) + '</b>' + esc(b.progress) + '</span>').join('') + '</div>'
+      : '';
     const limHtml = lim.length
       ? lim.map((b) => '<button type="button" class="limit-tag r' + b.rarity + (b.on ? '' : ' off') + '" data-toggle="' + b.id +
           '" data-tip="' + esc(limitTip(b)) + '" title="' + esc(limitTip(b)) + '">' +
@@ -197,7 +215,7 @@
     return '<div class="tower-buffs endless-buffs">' +
       '<h4>永久增益 <span class="buff-slot-count">' + perm.length + '/' + cap + '</span>' +
       (replaceTarget ? '<span class="replace-hint">选一个要替换掉的（再点增益卡确认）</span>' : '') + '</h4>' +
-      '<div class="buff-tags">' + permHtml + '</div>' +
+      '<div class="buff-tags">' + permHtml + '</div>' + progHtml +
       '<h4>限次增益 <span class="buff-slot-count">点一下开关</span></h4>' +
       '<div class="buff-tags">' + limHtml + '</div></div>';
   }
@@ -412,13 +430,20 @@
       const beatenCount = clearing ? foes.length : Math.max(0, (run.battleNo || 1) - 1);
       const foeRows = foes.map((b, i) =>
         '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel ' : '') + (i < beatenCount ? 'beaten' : '') +
-        '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
+        '" tabindex="0" data-tip="' + esc(mechTip(b, run.mechs)) + '">' +
         foePortraitHtml(i, b) +
         '<b>' + esc(b.name) + '</b>' + (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
         (b.elite ? '<em class="elite-tag">精英</em>' : '') +
         (i < beatenCount ? '<em class="beaten-tag">✓ 已战胜</em>' : '') + '</li>').join('');
       const choicesHtml = run.choices
-        ? '<div class="tower-buffs choice-onpage"><h4>休整点 · 选一张带走</h4><div class="hex-row">' +
+        ? '<div class="tower-buffs choice-onpage"><h4>休整点 · 选一张带走</h4>' +
+          /* 本轮第 4 项：无尽模式的选择是**内联**在这一屏的（不是弹窗），
+           * 所以本段机制要贴在卡片正上方 —— 选牌时一眼能看到「打谁都反伤」。 */
+          (run.mechs && run.mechs.length
+            ? '<div class="hex-seg-mechs inline"><span class="hex-next-label">本段机制</span>' +
+              run.mechs.map((m) => '<span class="mech-chip">' + esc(MECH_NAME[m] || m) + '<i>' + esc(MECH_DESC[m] || '') + '</i></span>').join('') + '</div>'
+            : '') +
+          '<div class="hex-row">' +
           run.choices.map((c, i) => choiceCard(c, i)).join('') + '</div></div>' : '';
       /* 顶栏：标题 → 试炼币/抽奖卷 → 分数框 → 右边缘的三个药丸槽（等腰三角摆放）。
        * 血量紧贴标题下方（分数已经挪进顶栏，所以这里整体上提），字号与血条都放大一档；
@@ -430,10 +455,18 @@
         '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
         '</div>' +
         carryBar(run.carry, '血量', 'endless-hp') +
-        '<div class="tower-rule mech-bar"><b>当前遭遇的机制</b>' + (info.mechs && info.mechs.length
-          ? info.mechs.map((m) => '<span class="mech-chip">' + esc(MECH_NAME[m] || m) + '<i>' + esc(MECH_DESC[m] || '') + '</i></span>').join('')
+        /* 本轮第 4 项修复：原来这里读的是 info.mechs —— 但 mechs 挂在 **info.run** 里，
+         * 顶层没有这个字段，所以这一行永远显示「本段没有额外机制（第 1 段）」，
+         * 第 6 层起的荆棘反伤从来没露过面。改成读 run.mechs。 */
+        '<div class="tower-rule mech-bar"><b>当前遭遇的机制</b>' + (run.mechs && run.mechs.length
+          ? run.mechs.map((m) => '<span class="mech-chip">' + esc(MECH_NAME[m] || m) + '<i>' + esc(MECH_DESC[m] || '') + '</i></span>').join('')
           : '<span class="mech-none">本段没有额外机制（第 1 段）</span>') +
           /* 第 6 项：三侠大招留下的「贯穿本层」削弱也挂在这一行上（原来只在下面单独一块） */
+          /* 本轮第 3 项：挫锐/卸甲是本局全局减益，也挂在机制行上（不然玩家看不到自己拿过）。 */
+          (run.enemyMaxHpDown > 0
+            ? '<span class="mech-chip debuff-chip enemy-down">敌人生命上限 −' + Math.round(run.enemyMaxHpDown * 100) +
+              '%<i>挫锐 / 卸甲：本局所有敌人都按这个比例扣</i></span>'
+            : '') +
           (run.debuffs && run.debuffs.length
             ? run.debuffs.map((d) => '<span class="mech-chip debuff-chip" style="--hero-color:' + esc(d.color || '#a8453a') + '">' +
                 esc(d.short || d.hero || '大侠') + esc(d.name || '削弱') + '<i>' + esc(d.text || '') + '</i></span>').join('')
@@ -610,6 +643,13 @@
         ? '第 ' + (run.battleNo || 4) + ' 场之前最后一次整备 —— 选一张带进去。'
         : '场间休整 —— 选一张带进去。') + '</p>' +
       nextHtml +
+      /* 本轮第 4 项：选牌弹窗也要摊开本段共有机制 —— 第 6 层起「打谁都反伤」，
+       * 只写下一场自己的 mechDesc 会让人完全没准备。 */
+      (mode === 'endless' && run.mechs && run.mechs.length
+        ? '<div class="hex-seg-mechs"><span class="hex-next-label">本段机制</span>' +
+          run.mechs.map((m) => '<span class="mech-chip">' + esc(MECH_NAME[m] || m) + '<i>' + esc(MECH_DESC[m] || '') + '</i></span>').join('') +
+          '</div>'
+        : '') +
       (debuffs.length
         ? '<div class="hex-debuffs"><span class="hex-debuff-label">本层已被削弱（贯穿本层）</span>' +
           debuffs.map((d) => '<span class="hex-debuff" style="--hero-color:' + esc(d.color || '#7a4a18') + '">' +

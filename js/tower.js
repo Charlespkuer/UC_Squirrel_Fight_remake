@@ -948,11 +948,15 @@
   function debugLoseBuff(id) {
     const run = endless().run;
     if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
-    for (const list of [run.permanent || [], run.limited || [], run.permSlotIds || []]) {
+    for (const list of [run.permanent || [], run.limited || [], run.permSlotIds || [], run.pickBuffIds || []]) {
       const i = (list || []).findIndex((b) => (typeof b === 'string' ? b === id : b.id === id));
       if (i >= 0) {
         const removed = list[i];
         list.splice(i, 1);
+        // 选取型被移除时，连带清掉它强化过的武器/技能与待选取状态
+        if (id === 'C32') run.weaponBoost = null;
+        if (id === 'C33') run.skillBoost = null;
+        if (run.pendingPick && run.pendingPick.buffId === id) run.pendingPick = null;
         if (list === run.permanent && removed && removed.id === id) { /* 永久类移除后不回落生命上限（第 1 项规则） */ }
         save();
         return { ok: true, id };

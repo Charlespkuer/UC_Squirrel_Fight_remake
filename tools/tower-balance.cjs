@@ -556,6 +556,11 @@ function autoPick(ctx, mode) {
       t('没有武器时不落地（保留 pendingPick 等以后选）', r.pendingPick && r.pendingPick.kind === 'weapon');
     }
     t('同名再拿一次被拒（unique）', Tower.debugGrantBuff('C32').ok === false);
+    // 调试面板能列出来（pickBuffIds 是调试用的可见来源），也能被「失去」
+    t('选取型记录在 pickBuffIds（调试面板可见）', (r.pickBuffIds || []).includes('C32'));
+    const lostPick = Tower.debugLoseBuff('C32');
+    t('调试可失去选取型 buff，并清掉它带来的强化',
+      lostPick.ok === true && !(r.pickBuffIds || []).includes('C32') && !r.weaponBoost);
     const rr = State.state().endless.run; rr.attempt = null; rr.choices = null; rr.phase = null; rr.shop = null;
     Tower.abandon('endless');
   }

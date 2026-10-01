@@ -513,7 +513,20 @@
         const rows = []
           .concat((run.permanent || []).map((b) => ({ b, tag: '永久' })))
           .concat((run.limited || []).map((b) => ({ b, tag: '限次' + (b.uses != null ? ' 剩' + b.uses : '') })))
-          .concat((run.permSlotIds || []).map((id) => ({ b: { id }, tag: '槽位' })));
+          .concat((run.permSlotIds || []).map((id) => ({ b: { id }, tag: '槽位' })))
+          .concat((run.pickBuffIds || []).map((id) => {
+            // 选取型（神兵淬炼/秘技通神）：标出已经强化到哪一个武器/技能
+            const def = (window.TowerData && TowerData.BUFF_BY_ID && TowerData.BUFF_BY_ID[id]) || {};
+            const boost = (def.mods && def.mods.pickSkillPct) ? (run.skillBoost || {}) : (run.weaponBoost || {});
+            const keys = Object.keys(boost);
+            let who = '';
+            if (keys.length) {
+              const list = (def.mods && def.mods.pickSkillPct) ? (State.mySkills ? State.mySkills() : []) : (State.myWeapons ? State.myWeapons() : []);
+              const hit = list.find((x) => String(x.id) === String(keys[0]));
+              who = hit ? ' · 已强化 ' + hit.name : ' · 已强化 #' + keys[0];
+            } else if (run.pendingPick && run.pendingPick.buffId === id) who = ' · 待三选一';
+            return { b: { id }, tag: '选取' + who };
+          }));
         const chip = ({ b, tag }) => {
           const def = (window.TowerData && TowerData.BUFF_BY_ID && TowerData.BUFF_BY_ID[b.id]) || { name: b.id, rarity: 0 };
           return '<span class="debug-ws-chip">' + (rar[def.rarity] || '') + ' ' + esc(def.name) +

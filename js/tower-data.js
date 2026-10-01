@@ -425,6 +425,11 @@
       desc: '本局永久增益槽位 +1（立即生效，一局只能获得一次）', mods: { permSlot: 1 } },
     { id: 'C31', name: '仓库钥匙', rarity: 3, kind: 'permanent', unique: true, permSlot: 2, battleOnly: true,
       desc: '本局永久增益槽位 +2（立即生效，一局只能获得一次；只在战斗奖励里出现）', mods: { permSlot: 2 } },
+    /* 隐藏型选取 buff：拿到后立即三选一（已有武器/技能），强化指定对象；不显示在增益面板、不可出售 */
+    { id: 'C32', name: '神兵淬炼', rarity: 2, kind: 'permanent', unique: true, hidden: true,
+      desc: '立即从你已有的武器里随机三选一，该武器伤害 +100%（本局有效，隐藏增益，不可出售）', mods: { pickWeaponPct: 1.00 } },
+    { id: 'C33', name: '秘技通神', rarity: 2, kind: 'permanent', unique: true, hidden: true,
+      desc: '立即从你已有的技能里随机三选一，该技能触发概率大幅提升（本局有效，隐藏增益，不可出售）', mods: { pickSkillPct: 0.60 } },
     { id: 'C24', name: '名贵手表', rarity: 1, kind: 'permanent', shopBanned: true,
       desc: '商店里买不到；在试炼商店卖出可得 200 试炼币', mods: { sellValue: 200 } },
     { id: 'C25', name: '战利品账本', rarity: 1, kind: 'permanent',

@@ -481,6 +481,7 @@
         if (res && res.needsReplace) { offerReplace(index, res.buff); return; }
         if (!res || !res.ok) { notice((res && res.msg) || '这张选不了。'); openEndless(); return; }
         replaceTarget = null;
+        if (res.pendingPick) { openPickBuff(res.pendingPick); return; }
         openEndless();      // 选完直接回主界面（不弹任何窗口）
       };
     });
@@ -494,6 +495,8 @@
       };
     });
     on(p, 'shop', () => openShop(true));
+    /* 待选取的强化（神兵淬炼/秘技通神）没选完时，回到主界面自动补弹一次 */
+    if (info.run && info.run.pendingPick) setTimeout(() => openPickBuff(info.run.pendingPick), 60);
     p.querySelectorAll('[data-pill]').forEach((el) => {
       el.onclick = () => choosePill(el.dataset.pill);
     });
@@ -687,6 +690,27 @@
     C().modal('嵌入' + def.name + '药丸', '<div class="pill-picker">' + rows + '</div>' +
       '<p class="small-label">药丸在无尽塔内持续 ' + TowerData.PILL_BATTLES + ' 场战斗（胜败都算），会扣背包里的道具。</p>',
       buttons, { small: true });
+  }
+  /** 选取型 buff（神兵淬炼 / 秘技通神）：立即从已有武器或技能里三选一，选完立刻生效。 */
+  function openPickBuff(pending) {
+    const cands = Tower.pickCandidates(pending.kind);
+    const label = pending.kind === 'skill' ? '技能' : '武器';
+    if (!cands.length) {
+      notice('你还没有任何' + label + '可选，这次强化先留着（之后拿到' + label + '再自动弹出）。', [{ label: '知道了', cls: 'gold', run: () => openEndless() }]);
+      return;
+    }
+    const buttons = cands.map((c) => ({
+      label: (pending.kind === 'skill' ? '技能：' : '武器：') + c.name + ' Lv' + (c.level || 1),
+      cls: 'small' + (pending.kind === 'skill' ? '' : ' gold'),
+      run: () => {
+        const r = Tower.applyPickBuff(pending.kind, c.id);
+        if (!r.ok) notice(r.msg || '强化失败。');
+        openEndless();
+      },
+    }));
+    C().modal('三选一 · ' + label + '强化', '<p>' + esc(pending.kind === 'skill'
+      ? '从下面三个技能里选一个：它的触发概率大幅提升（本局有效）。'
+      : '从下面三把武器里选一个：它的伤害 +100%（本局有效）。') + '</p>', buttons, { small: true });
   }
   /** 第 1 项：商店里买永久增益但格子满了 —— 直接选一个替换掉并完成购买。 */
   function offerShopReplace(index, buff) {

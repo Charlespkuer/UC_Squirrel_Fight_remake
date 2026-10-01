@@ -390,9 +390,9 @@ function autoPick(ctx, mode) {
   // 第 4 项：新 buff（战后续航可叠加 / 反伤 / 狂怒 / 速度 / 战后回血）
   {
     // 第 1 项：buff 改成「限次 / 永久」两分法 + 即时经济类
-    t('无尽池：限次 21 / 永久 32 / 即时 3（共 56，含补给/扩容背包/仓库钥匙）+ 6 个经济类', ctx.TowerData.BUFFS.length === 56 &&
+    t('无尽池：限次 21 / 永久 34 / 即时 3（共 58）+ 6 个经济类', ctx.TowerData.BUFFS.length === 58 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 21 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 32 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 34 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 3 &&
       ctx.TowerData.BUFFS.filter((b) => b.endlessOnly).length === 6);
     t('主塔池只吃限次且非无尽专属', ctx.TowerData.towerPool.every((b) => b.kind === 'limited' && !b.endlessOnly));
@@ -534,6 +534,29 @@ function autoPick(ctx, mode) {
     t('胜利后账本累计 +25', (r.sellBonus || 0) === 25);
     const sold = Tower.sellBuff('C24');
     t('名贵手表卖出得 200 + 累计 25 = 225', sold.ok === true && sold.gain === 225 && r.coins >= 225);
+    Tower.abandon('endless');
+  }
+  // 选取型隐藏 buff：神兵淬炼 / 秘技通神（立即生效、隐藏、不可出售、一局一次）
+  {
+    const T = ctx.TowerData, r = freshEndless(State, Tower);
+    t('神兵淬炼/秘技通神：史诗·隐藏·unique·商店都能出', T.BUFF_BY_ID.C32.hidden === true && T.BUFF_BY_ID.C33.hidden === true &&
+      T.BUFF_BY_ID.C32.unique === true && T.inPool('shop', T.BUFF_BY_ID.C32) && T.inPool('choice', T.BUFF_BY_ID.C33));
+    const res = Tower.debugGrantBuff('C32');
+    t('拿到神兵淬炼：立即进入待选取（pendingPick=weapon）', res.ok === true && r.pendingPick && r.pendingPick.kind === 'weapon');
+    t('隐藏型不进增益面板', !Tower.ownedBuffs('endless').some((b) => b.id === 'C32'));
+    t('隐藏型不可出售', Tower.sellBuff('C32').ok === false);
+    Tower.state && 0;
+    const cands = Tower.pickCandidates('weapon');
+    t('三选一候选最多 3 个且都是已有武器', cands.length <= 3 && cands.every((c) => c.id != null));
+    if (cands.length) {
+      const ap = Tower.applyPickBuff('weapon', cands[0].id);
+      t('落地强化：weaponBoost 记下该武器 +100%',
+        ap.ok === true && r.weaponBoost && Number(r.weaponBoost[cands[0].id]) === 1);
+    } else {
+      t('没有武器时不落地（保留 pendingPick 等以后选）', r.pendingPick && r.pendingPick.kind === 'weapon');
+    }
+    t('同名再拿一次被拒（unique）', Tower.debugGrantBuff('C32').ok === false);
+    const rr = State.state().endless.run; rr.attempt = null; rr.choices = null; rr.phase = null; rr.shop = null;
     Tower.abandon('endless');
   }
   // 第 2 项（本轮）：槽位 buff、以战养战、登顶者、破釜沉舟

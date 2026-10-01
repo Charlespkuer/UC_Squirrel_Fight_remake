@@ -391,7 +391,21 @@
       const dSpd = debuffs.filter((d) => d.kind === 'stat' && d.stat === 'speed').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
       const stickyHp = Math.max(0, Number(run.hpBonus) || 0);   // 第 1 项：永久生命上限加成（卖/换后保留）
       const maxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul + stickyHp) * dMaxHp) + Math.max(0, Number(run.winHpFlat) || 0));
-      me.power = Math.max(1, Math.round(me.power * (1 + powerMul) * dPower));
+      /* 选取型强化：指定武器出战时伤害 +pct（等价于力量翻倍），指定技能的触发档位 ×(1+pct) 且至少 +25 */
+      const wBoost = run.weaponBoost || {};
+      let weaponMul = 1;
+      for (const key of Object.keys(wBoost)) {
+        const inst = (State.myWeapons ? State.myWeapons() : []).find((w) => Number(w.id) === Number(key));
+        if (inst) weaponMul = Math.max(weaponMul, 1 + Number(wBoost[key] || 0));
+      }
+      const sBoost = run.skillBoost || {};
+      if (me.effects) {
+        for (const key of Object.keys(sBoost)) {
+          const cur = Number(me.effects[key]) || 0;
+          me.effects[key] = Math.max(cur * (1 + Number(sBoost[key] || 0)), cur + 25);
+        }
+      }
+      me.power = Math.max(1, Math.round(me.power * (1 + powerMul) * dPower * weaponMul));
       me.agility = Math.max(1, Math.round(me.agility * dAgi * (1 + agg.agilityMul)));
       me.speed = Math.max(1, Math.round(me.speed * dSpd * (1 + agg.speedMul)));
       // 第 1 项：属性药丸（塔内 20 场）—— 与 State.totalStats 的药剂口径一致
@@ -715,6 +729,7 @@
   /** 第 2 项：unique（扩容类）buff 一局只能拿一次 —— 拿过就不再进任何池子。 */
   function poolFilter(run, buff) {
     if (!buff.unique) return true;
+    if ((run.pickBuffIds || []).includes(buff.id)) return false;
     if ((run.permSlotIds || []).includes(buff.id)) return false;
     return !(run.permanent || []).some((b) => b.id === buff.id);
   }
@@ -771,6 +786,16 @@
     const buff = D().BUFF_BY_ID[id];
     if (!buff) return { ok: false, msg: '没有这个增益' };
     if (buff.kind === 'instant') return applyInstant(run, buff);
+    /* 选取型（武器/技能强化）同样不占槽、不触发替换：立即登记，等界面做三选一。 */
+    if (buff.mods && (buff.mods.pickWeaponPct || buff.mods.pickSkillPct)) {
+      if ((run.pickBuffIds || []).includes(buff.id)) return { ok: false, msg: '这类选取增益一局只能获得一次。' };
+      run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]);
+      run.pendingPick = buff.mods.pickWeaponPct
+        ? { kind: 'weapon', buffId: buff.id, pct: buff.mods.pickWeaponPct }
+        : { kind: 'skill', buffId: buff.id, pct: buff.mods.pickSkillPct };
+      save();
+      return { ok: true, pendingPick: run.pendingPick };
+    }
     /* 扩容类（+1/+2 槽位）要先于「永久栏已满」判断处理：它不占槽、也不会触发替换。 */
     /* 第 2 项：扩容类 buff（+1/+2 永久槽位）立即生效 —— 加名额、不占自己的槽、一局只能拿一次。 */
     if (buff.mods && buff.mods.permSlot) {
@@ -935,6 +960,33 @@
     }
     return { ok: false, msg: '本局没有这个增益。' };
   }
+  /** 选取型 buff 的三选一候选：从玩家已有的武器/技能里随机挑最多 3 个。 */
+  function pickCandidates(kind) {
+    const run = endless().run;
+    if (!run) return [];
+    const list = kind === 'skill'
+      ? (State.mySkills ? State.mySkills() : [])
+      : (State.myWeapons ? State.myWeapons() : []);
+    const pool = list.slice();
+    for (let i = pool.length - 1; i > 0; i--) {           // 洗牌
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+    }
+    return pool.slice(0, 3);
+  }
+  /** 落地选取：武器记 weaponBoost[id]，技能记 skillBoost[id]（本局有效）。 */
+  function applyPickBuff(kind, id) {
+    const run = endless().run;
+    if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
+    const pend = run.pendingPick;
+    if (!pend || pend.kind !== kind) return { ok: false, msg: '现在没有待选取的强化。' };
+    const key = kind === 'skill' ? 'skillBoost' : 'weaponBoost';
+    run[key] = run[key] || {};
+    run[key][Number(id)] = Math.max(Number(run[key][Number(id)]) || 0, pend.pct);
+    run.pendingPick = null;
+    save();
+    return { ok: true, kind, id: Number(id), pct: pend.pct };
+  }
   /** 永久增益槽位数：基础 5 + 扩容类 buff 给的名额。 */
   function permSlots(run) { return (D().PERMANENT_SLOTS || 5) + Math.max(0, Number(run && run.permSlots) || 0); }
   /** 卖出价：名贵手表这类有固定 sellValue 的按固定值，其它按商店价 40%，再叠「战利品账本」的累计加成。 */
@@ -948,7 +1000,7 @@
     const run = endless().run;
     if (!run || !run.shop) return { ok: false };
     const buff = D().BUFF_BY_ID[id];
-    if (!buff || buff.kind === 'instant') return { ok: false };   // 第 3 项：限次也能卖（只有即时类不留存、无从卖出）
+    if (!buff || buff.kind === 'instant' || buff.hidden) return { ok: false };   // 隐藏型不可出售（只有即时类不留存、无从卖出）
     for (const list of [run.permanent || [], run.limited || []]) {
       const i = (list || []).findIndex((b) => b.id === id);
       if (i >= 0) {
@@ -1097,6 +1149,7 @@
         // 第 1 项：本段怪物带的机制（按段轮转，最多 3 个）
         mechs: D().endlessMechs(e.run.layer).slice(),
         restShopUsed: !!e.run.restShopUsed,
+        pendingPick: e.run.pendingPick || null,
         permSlots: Math.max(0, Number(e.run.permSlots) || 0),
         permCap: permSlots(e.run),
         finished: e.run.finished || null,
@@ -1114,12 +1167,12 @@
     const out = [];
     const add = (entry) => {
       const buff = entry && D().BUFF_BY_ID[entry.id];
-      if (!buff) return;
+      if (!buff || buff.hidden) return;   // 隐藏型（背包/选取类）不进增益面板
       out.push({ id: buff.id, name: buff.name, desc: buff.desc, rarity: buff.rarity, kind: buff.kind,
         scopeName: scopeName[buff.kind], stacks: entry.stacks || 1,
         uses: buff.kind === 'limited' ? entry.uses : undefined,
         on: buff.kind === 'limited' ? entry.on !== false : true,
-        sellable: !!run.shop && buff.kind !== 'instant', sellPrice: sellPriceOf(run, buff) });
+        sellable: !!run.shop && buff.kind !== 'instant' && !buff.hidden, sellPrice: sellPriceOf(run, buff) });
     };
     (run.permanent || []).forEach(add);
     (run.limited || []).forEach(add);
@@ -1127,7 +1180,7 @@
   }
 
   window.Tower = {
-    unlocked, towerInfo, endlessInfo, preview, ownedBuffs, bossPool, debugGrantBuff, debugLoseBuff,
+    unlocked, towerInfo, endlessInfo, preview, ownedBuffs, bossPool, debugGrantBuff, debugLoseBuff, pickCandidates, applyPickBuff,
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,
     pickChoice, toggleLimited, addBuff, applyInstant, openRestShop, usePillSlot,
     shopState, buyShopSlot, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp,

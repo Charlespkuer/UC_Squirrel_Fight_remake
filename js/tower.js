@@ -202,7 +202,7 @@
   function aggregate(run, foeCtx) {
     const g = globalMul(run);
     const agg = { powerMul: 0, maxHpMul: 0, critBonus: 0, critDmgBonus: 0, dodgeBonus: 0, takenMul: 0,
-      regenPct: 0, lifestealPct: 0, shellPct: 0, openStrikePct: 0, enemyPowerDown: 0,
+      regenPct: 0, lifestealPct: 0, shellPct: 0, openStrikePct: 0, enemyPowerDown: 0, startHealPct: 0,
       mustHitFirst: 0, firstSkillFree: 0, deathSaves: [], dmgMul: 1, revivePct: 0,
       speedMul: 0, winHealPct: 0, thornsPct: 0, lowHpPowerMul: 0, lowHpAt: 0 };
     eachBuff(run, (buff, stacks) => {
@@ -219,6 +219,7 @@
       if (m.regenPct) agg.regenPct += m.regenPct * k;
       if (m.lifestealPct) agg.lifestealPct += m.lifestealPct * k;
       if (m.shellPct) agg.shellPct += m.shellPct * k;
+      if (m.startHealPct) agg.startHealPct += m.startHealPct * k;
       if (m.enemyPowerDown) agg.enemyPowerDown += m.enemyPowerDown * k;
       if (m.openStrikePct) agg.openStrikePct = Math.max(agg.openStrikePct, m.openStrikePct * k);
       if (m.speedMul) agg.speedMul += m.speedMul * k;
@@ -379,6 +380,8 @@
     // M01 威慑：直接压敌人力量
     if (agg.enemyPowerDown > 0) built.foe.power = Math.max(1, Math.round(built.foe.power * (1 - agg.enemyPowerDown)));
     const maxHpMul = agg.maxHpMul, powerMul = agg.powerMul;
+    /* 「补给」：下一场战斗开始时立即回复 50% 生命 —— 在取下一场的时候就把 carry 抬上去。 */
+    if (agg.startHealPct > 0) run.carry = Math.min(1, run.carry + agg.startHealPct);
     const adjustMe = (me) => {
       // 本层削弱（三侠大招留下的）：生命上限 / 属性 / 锁武技
       const debuffs = Array.isArray(run.debuffs) ? run.debuffs : [];
@@ -748,11 +751,14 @@
     if (!run || !run.choices) return { ok: false };
     const choice = run.choices[index];
     if (!choice) return { ok: false };
+    /* 第 1 项：回血卡改成「补给」限次增益 —— 不立刻回血，而是下一场战斗开局回 50%，
+     * 同名再次拿到会叠加剩余场次（addBuff 对限次同名是累加 uses）。 */
     if (choice.type === 'heal') {
+      const res = addBuff(run, 'N08');
+      if (!res.ok) return res;
       run.choices = null;
-      run.carry = Math.min(1, run.carry + D().FIXED_HEAL_PCT);
       save();
-      return { ok: true, heal: D().FIXED_HEAL_PCT };
+      return { ok: true, buff: res.buff, healLater: true, uses: (res.stacks ? undefined : 1) };
     }
     const res = addBuff(run, choice.id, replaceId);
     if (!res.ok) return res;                     // 永久格子满了：保留 choices，让界面去选替换

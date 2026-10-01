@@ -194,7 +194,29 @@ function autoPick(ctx, mode) {
   t('胜场 3：触发 4 选 1（回血 + 3 buff）', Array.isArray(rw.choices) && rw.choices.length === 4 && rw.choices[0].type === 'heal');
   t('选择挂起时不能开战', !Tower.nextBattle('tower').ok);
   let pick = Tower.pickChoice('tower', 0);
-  t('固定项回血 50%（60%→封顶 1.00）', pick.ok && Math.abs(Tower.towerInfo().run.carry - 1) < 1e-9);
+  // 第 1 项：休整点回血卡 = 「补给」（限次 1，下一场开局 +50%），再拿一次叠次数
+  {
+    const eSave = State.state().endless;
+    const bestSave = eSave.best, weekSave = eSave.weekBest;
+    const r = freshEndless(State, Tower);
+    r.choices = [{ type: 'heal' }, { type: 'buff', id: 'N01' }];   // 手工摆一张回血卡 + 一张普通卡
+    const healIdx = 0;
+    const before = r.carry;
+    const got = Tower.pickChoice('endless', healIdx);
+    t('拿补给：不立刻回血，而是得到一个限次增益', got.ok === true && r.carry === before &&
+      (r.limited || []).some((b) => b.id === 'N08' && b.uses === 1));
+    const again = Tower.debugGrantBuff('N08');
+    const entry = (r.limited || []).find((b) => b.id === 'N08');
+    t('同名再拿一次：补给次数叠加', again.ok === true && entry.uses === 2);
+    r.carry = 0.6;
+    const nb = Tower.nextBattle('endless');
+    t('下一场开局立即回复 50%（60%→封顶 1.00）', nb.ok === true && r.carry === 1);
+    // 收尾：把这一局彻底结束，避免影响后面的用例
+    if (nb && nb.token) Tower.reportBattle('endless', nb.token, true, 0.8, { rounds: [] });
+    const rr = State.state().endless.run;
+    if (rr) { rr.attempt = null; rr.choices = null; rr.phase = null; rr.shop = null; Tower.abandon('endless'); }
+    eSave.best = bestSave; eSave.weekBest = weekSave;   // 复位成绩，避免影响后面的「初始态」断言
+  }
 
   nx = Tower.nextBattle('tower');
   const bossKinds = ['trial', 'squirrel', 'npc'];
@@ -343,8 +365,8 @@ function autoPick(ctx, mode) {
   // 第 4 项：新 buff（战后续航可叠加 / 反伤 / 狂怒 / 速度 / 战后回血）
   {
     // 第 1 项：buff 改成「限次 / 永久」两分法 + 即时经济类
-    t('无尽池：限次 20 / 永久 32 / 即时 3（共 55，含扩容背包与仓库钥匙）+ 6 个经济类', ctx.TowerData.BUFFS.length === 55 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 20 &&
+    t('无尽池：限次 21 / 永久 32 / 即时 3（共 56，含补给/扩容背包/仓库钥匙）+ 6 个经济类', ctx.TowerData.BUFFS.length === 56 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 21 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 32 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 3 &&
       ctx.TowerData.BUFFS.filter((b) => b.endlessOnly).length === 6);
@@ -517,7 +539,7 @@ function autoPick(ctx, mode) {
     const T = ctx.TowerData;
     const lim = T.BUFFS.filter((b) => b.kind === 'limited' && !b.endlessOnly);
     const kinds = [...new Set(lim.map((b) => b.uses))].sort((a, b) => a - b);
-    t('限次次数覆盖 2/3/5/10（用户调整后没有 1 场的）', kinds.join(',') === '2,3,5,10');
+    t('限次次数覆盖 1/2/3/5/10（补给的 1 场）', kinds.join(',') === '1,2,3,5,10');
     t('每个限次 buff 都有合法次数', lim.every((b) => [1, 2, 3, 5, 10].includes(b.uses)));
   }
   // 第 3 项：无尽主界面也要有本层对手预告

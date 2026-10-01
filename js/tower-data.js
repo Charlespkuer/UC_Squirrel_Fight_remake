@@ -370,6 +370,8 @@
     { id: 'M03', name: '坚守', rarity: 1, kind: 'limited', uses: 2, desc: '接下来 2 场受到伤害 −30%', mods: { takenMul: -0.30 } },
     { id: 'M04', name: '疾风步', rarity: 1, kind: 'limited', uses: 10, desc: '接下来 10 场速度 +30%', mods: { speedMul: 0.30 } },
     { id: 'N05', name: '先手制敌', rarity: 2, kind: 'limited', uses: 3, desc: '接下来 2 场开局对敌人造成其 30% 最大生命的伤害', mods: { openStrikePct: 0.30 } },
+    { id: 'N08', name: '补给', rarity: 0, kind: 'limited', uses: 1,
+      desc: '下一场战斗开始时立即回复 50% 生命（再拿一次会叠加次数）', mods: { startHealPct: 0.50 } },
     { id: 'N06', name: '血饮狂刀', rarity: 2, kind: 'limited', uses: 5, desc: '接下来 2 场攻击附带 45% 吸血', mods: { lifestealPct: 0.45 } },
     // —— 本层类（主塔=整局；无尽=当前层） ——
     { id: 'G01', name: '力量祝福', rarity: 0, kind: 'limited', uses: 10, desc: '本层攻击 +12%', mods: { powerMul: 0.12 } },

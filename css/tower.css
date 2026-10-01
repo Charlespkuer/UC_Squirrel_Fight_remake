@@ -702,3 +702,16 @@
 .buff-tag.r3 { background: linear-gradient(#fff6c8, #ffe08a); }
 .hex-card.r3 .hex-ribbon { background: linear-gradient(#ffd76a, #e0a316); color: #5a3c00; }
 .mech-chip.debuff-chip { background: #ffe9e2; border-color: #e0a99c; color: #8a3a30; }
+
+/* 第 1 项：进塔页的增益集锦 + BOSS 一览 */
+.catalog-row { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0; }
+.catalog-rarity { flex: none; width: 52px; text-align: center; font-size: 16px; border-radius: 10px; padding: 1px 0;
+  color: #fff8e4; background: #a98a5c; }
+.catalog-rarity.r1 { background: #3f7fb5; } .catalog-rarity.r2 { background: #8a5ac2; } .catalog-rarity.r3 { background: #d9a12a; }
+.boss-catalog .boss-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.boss-grid li { flex-direction: row; gap: 6px; padding: 3px 6px; }
+.boss-grid .foe-portrait { width: 56px; height: 56px; }
+.boss-grid .foe-portrait img, .boss-grid .foe-portrait canvas { max-height: 52px; height: 52px; max-width: 52px; }
+.boss-grid li b { font-size: 18px; }
+.boss-grid .boss-layers { font-size: 14px; color: #8a6a3a; }
+.buff-catalog, .boss-catalog { margin: 6px 0; }

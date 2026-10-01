@@ -255,6 +255,31 @@
   function propName(id) {
     try { const p = propMap.getValue(id); return p ? p.name : ('道具' + id); } catch (e) { return '道具' + id; }
   }
+  /** 第 1 项：进塔页的「增益集锦」——按稀有度分组，悬停看具体效果。 */
+  function buffCatalogHtml() {
+    const list = TowerData.BUFFS.filter((b) => !b.endlessOnly || b.kind !== 'instant');
+    const byRarity = [0, 1, 2, 3].map((r) => list.filter((b) => b.rarity === r));
+    const kindName = { limited: '限次', permanent: '永久', instant: '即时' };
+    return '<div class="tower-buffs buff-catalog"><h4>增益集锦 <span class="buff-slot-count">共 ' + list.length + ' 种 · 悬停看效果</span></h4>' +
+      byRarity.map((group, r) => group.length
+        ? '<div class="catalog-row"><b class="catalog-rarity r' + r + '">' + (RARITY[r] || '') + '</b>' +
+          '<div class="buff-tags">' + group.map((b) => '<span class="buff-tag r' + b.rarity + '" data-tip="' +
+            esc(b.name + '（' + (RARITY[b.rarity] || '') + ' · ' + (kindName[b.kind] || '') + (b.uses ? ' ' + b.uses + ' 场' : '') + '）\n' + b.desc) +
+            '" title="' + esc(b.desc) + '">' + esc(b.name) + '<i>' + (kindName[b.kind] || '') + '</i></span>').join('') +
+          '</div></div>' : '').join('') + '</div>';
+  }
+  /** 第 1 项：进塔页的「BOSS 一览」——池子里每个 boss 的形象、类型与固定出现的层。 */
+  function bossCatalogHtml() {
+    const pool = Tower.bossPool ? Tower.bossPool() : [];
+    if (!pool.length) return '';
+    return '<div class="tower-buffs boss-catalog"><h4>BOSS 一览 <span class="buff-slot-count">' + pool.length + ' 个 · 第 4 场随机池</span></h4>' +
+      '<ol class="tower-plan boss-grid">' + pool.map((b, i) =>
+        '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel' : '') + '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
+        foePortraitHtml(i, b) + '<b>' + esc(b.name) + '</b>' +
+        (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
+        (b.layers && b.layers.length ? '<span class="boss-layers">第 ' + b.layers.join(' / ') + ' 层</span>' : '') +
+        '</li>').join('') + '</ol></div>';
+  }
   /** 左侧塔身：当前层附近的一段楼层，自上而下。 */
   function towerVisual(layer, maxLayer, mode) {
     const top = Math.max(layer + 4, 6), bottom = Math.max(1, layer - 3);
@@ -317,7 +342,7 @@
       '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
     bindTips(p);
-    if (!info.run) fillFoeArt(p, info.preview);
+    if (!info.run) { fillFoeArt(p, info.preview); if (Tower.bossPool) fillFoeArt(p, Tower.bossPool()); }
     back(p, () => UI.runAction('stages'));
     on(p, 'fight', () => {
       if (info.run) {
@@ -395,7 +420,7 @@
       main = '<h2 class="tower-title">无尽模式</h2>' +
         '<div class="tower-stats">历史最高 <b class="gold-text">' + info.best + '</b> 分 · 本周最高 ' + info.weekBest + ' 分 · 最深 ' + info.bestLayer + ' 层</div>' +
         currencyHtml('endless') +
-        '<p class="tower-rule">免门票，从 1 层冲分。跨层自动回复 20% 生命。每 5 层进商店并可结算离场拿抽奖卷：20 层前翻倍（1/2/4/8），之后每段 +3；中途失败也不再归零，按当前层应得结算；每爬 10 层额外随机一份里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）。怪物每段 ×1.5 并叠加机制，撑得越久越刺激。</p>';
+        buffCatalogHtml() + bossCatalogHtml();
       footer = '<div class="tower-actions tower-footer">' +
         '<span class="tower-book-count">现有抽奖卷 ' + info.tickets + ' 张</span>' +
         C().btn('开始冲塔（免费）', 'fight', 'gold') + '</div>';

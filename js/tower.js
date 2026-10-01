@@ -146,6 +146,20 @@
     return { name: sq.name, squirrel: true, gear: sq.gear, elite: false, type: sq.type,
       mechDesc: sq.mechDesc || '', patternDesc: sq.patternDesc || '', mechs: (sq.mech || []).slice() };
   }
+  /** 第 1 项：boss 一览 —— 池子里每个 boss 的预告信息 + 它固定出现的层（池子只按层抽取，所以层是固定的）。 */
+  function bossPool() {
+    const TD = D();
+    const layersOf = Object.create(null);
+    for (let layer = 1; layer <= 30; layer++) {
+      const e = TD.bossFor(layer);
+      const key = e.kind + ':' + e.id;
+      (layersOf[key] = layersOf[key] || []).push(layer);
+    }
+    return (TD.BOSS_POOL || []).map((pick) => {
+      const entry = { kind: pick.kind, id: pick.id };
+      return Object.assign({ kind: pick.kind }, entryInfo(entry), { layers: layersOf[pick.kind + ':' + pick.id] || [] });
+    });
+  }
   /** 入口页预告：当前层的全部对手（与 buildPlan 同源，所以预告 = 实战）。 */
   function preview(layer) {
     return buildPlan(layer).map((entry) => Object.assign({ kind: entry.kind }, entryInfo(entry)));
@@ -1048,7 +1062,7 @@
   }
 
   window.Tower = {
-    unlocked, towerInfo, endlessInfo, preview, ownedBuffs,
+    unlocked, towerInfo, endlessInfo, preview, ownedBuffs, bossPool,
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,
     pickChoice, toggleLimited, addBuff, applyInstant, openRestShop, usePillSlot,
     shopState, buyShopSlot, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp,

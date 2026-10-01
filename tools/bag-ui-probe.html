@@ -122,6 +122,10 @@ async function main() {
     State.save();
     TowerUI.openEndless(); await flush(300);
     P.entryCurrency = $$('#ui .tower-currency .currency-item').map((el) => el.textContent.trim());
+    P.catalogBuffs = $$('#ui .buff-catalog .buff-tag').length;
+    P.catalogBosses = $$('#ui .boss-grid li').length;
+    P.bossDrawn = $$('#ui .boss-grid canvas[data-drawn="1"]').length;
+    P.entryHint = /免门票，从 1 层冲分/.test(document.body.textContent);
     P.entryCurrencyIcons = $$('#ui .tower-currency img').length;
     Tower.startEndlessRun();
     State.state().endless.run.coins = 77;

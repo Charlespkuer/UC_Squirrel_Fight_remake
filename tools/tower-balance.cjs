@@ -552,6 +552,8 @@ function autoPick(ctx, mode) {
     t('永久栏满 5 格时拿「仓库钥匙」：直接 +2 槽、不触发替换、不占槽',
       fullOk && grant2.ok === true && r.permSlots === 3 && (r.permanent || []).length === 5);
     t('扩容后永久上限 = 5 + permSlots', (5 + r.permSlots) === 8);
+    const snap = Tower.endlessInfo().run;
+    t('快照也带 permSlots/permCap（界面显示 N/6 靠它）', snap.permSlots === 3 && snap.permCap === 8);
     const dup = Tower.debugGrantBuff('C30');
     t('扩容背包一局只能拿一次（unique 过滤）', dup.ok === false && (r.permSlotIds || []).filter((x) => x === 'C30').length === 1);
     const lost = Tower.debugLoseBuff('C30');

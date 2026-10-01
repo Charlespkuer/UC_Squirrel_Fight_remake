@@ -1097,6 +1097,8 @@
         // 第 1 项：本段怪物带的机制（按段轮转，最多 3 个）
         mechs: D().endlessMechs(e.run.layer).slice(),
         restShopUsed: !!e.run.restShopUsed,
+        permSlots: Math.max(0, Number(e.run.permSlots) || 0),
+        permCap: permSlots(e.run),
         finished: e.run.finished || null,
         pillSlots: Object.assign({}, e.run.pillSlots || {}),
         ticketsIfSettle: D().endlessTickets(e.run.layer) } : null };

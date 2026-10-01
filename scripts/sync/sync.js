@@ -454,11 +454,18 @@ async function getBuffer(host, port, urlPath) {
   if (r.status !== 200) throw new Error((r.json && r.json.msg) || ('HTTP ' + r.status));
   return r;
 }
+/* 对端探测：ZeroTier 走中继时 RTT 可能上到 1 秒以上（实测 Mac↔Win 1106ms、偶发丢包），
+ * 原来只探一次、3 秒超时，链路抖一下就判成「连不上对端」。
+ * 现在：默认超时抬到 6 秒，并且最多重试 3 次（每次间隔 400ms）。 */
 async function pingPeer(host, port, timeout) {
-  try {
-    const r = await request(host, port, 'GET', '/api/ping', { timeout: timeout || 800 });
-    if (r.status === 200 && r.json && r.json.app === APP_TAG) return r.json;
-  } catch (e) {}
+  const per = Math.max(2000, timeout || 6000);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await request(host, port, 'GET', '/api/ping', { timeout: per });
+      if (r.status === 200 && r.json && r.json.app === APP_TAG) return r.json;
+    } catch (e) {}
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 400));
+  }
   return null;
 }
 
@@ -668,7 +675,7 @@ async function doctor(opts) {
     say('   目标：' + peer.name + ' @ ' + peer.host + ':' + peer.port);
     const tcp = await tcpProbe(peer.host, peer.port, 3000);
     say('   TCP 连接：' + (tcp.ok ? green('通（' + tcp.ms + 'ms）') : '不通（' + tcp.reason + '）'));
-    const info = await pingPeer(peer.host, peer.port, 3000);
+    const info = await pingPeer(peer.host, peer.port, 8000);
     if (info) {
       say(green('   [√] 同步服务在线：' + info.name + '（存档时间 ' + fmtTime(info.saveAt) + '）'));
       const st = await request(peer.host, peer.port, 'GET', '/api/status', { timeout: 5000 }).catch(() => null);
@@ -1164,7 +1171,7 @@ function createServer() {
             peer = await resolvePeer(url.searchParams.get('peer') || '');
             jobReset(kind, dir, peer.name);
             jobPhase('连接「' + peer.name + '」');
-            const info = await pingPeer(peer.host, peer.port, 3000);
+            const info = await pingPeer(peer.host, peer.port, 8000);
             if (!info) throw syncError('PEER_DOWN', '连不上「' + peer.name + '」(' + peer.host + ':' + peer.port + ')：对端的同步服务没在跑，或者对端防火墙没放行这个端口。');
             const r = kind === 'save'
               ? (dir === 'push' ? await savePush(peer, opts) : await savePull(peer, opts))

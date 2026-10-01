@@ -99,11 +99,21 @@
     return '<span class="foe-portrait"><canvas width="' + AVATAR_SIZE + '" height="' + AVATAR_SIZE +
       '" data-foe-art="' + index + '" aria-hidden="true"></canvas></span>';
   }
-  /** 引擎渲染失败（动画/素材缺失）时退回立绘卡，保证列表里总有一张图。 */
+  /** 引擎渲染失败（动画/素材缺失）时的兜底。
+   *  本轮第 6 项：原来一律用 mantis（螳螂）立绘卡，于是松鼠 boss / 机制 NPC 一旦画不出来，
+   *  右侧那一格就变成螳螂 —— 玩家看到的就是「描述与实际种类对不上」。
+   *  现在按种类兜底：三侠位用对应卡；机制 NPC 留空（它们本就不该用三侠卡，否则会出现两个螳螂）；
+   *  松鼠类用通用松鼠图。**宁可空着，也不显示成别的敌人。** */
   function fallbackPortrait(canvas, info) {
-    const file = CHAR_FILE[info.anim] || 'mantis';
+    const kind = info && info.kind;
+    const file = CHAR_FILE[info && info.anim];
+    let src = null;
+    if (kind === 'hero') src = file ? 'images/classic/characters/' + file + '-classic-card.png' : null;
+    else if (kind === 'npc') src = null;
+    else src = 'images/classic/squirrel-classic.png';
+    if (!src) { canvas.remove(); return; }
     const img = document.createElement('img');
-    img.alt = ''; img.src = 'images/classic/characters/' + file + '-classic-card.png';
+    img.alt = ''; img.src = src;
     canvas.replaceWith(img);
   }
   /** 把松鼠 boss 的「待机帧 + 装备」画进小 canvas（素材缺失时静默留空）。 */
@@ -187,6 +197,8 @@
       ' / 敏+' + (m.shopSpendStat || 1) + ' / 速+' + (m.shopSpendStat || 1) + ' / 生命上限+' + (m.shopSpendHp || 5) + ' 其中一项');
     if (m.firstHitZero) parts.push('每场战斗敌方对我方的第一次攻击伤害归零');
     if (m.pickPermanentFree) parts.push('可给一个已有的永久增益附魔免占位');
+    if (m.fragileStat) parts.push('本局永久保留：' + ({ power: '力量', agility: '敏捷', speed: '速度' }[m.fragileStat] || m.fragileStat) +
+      ' +' + Math.round((m.fragilePct || 0) * 100) + '%；每场 ' + (m.fragileBreakPct || 5) + '% 损毁');
     if (b.progress) parts.push('当前进度：' + b.progress);   // 第 7 项：成长类的真实累计值
     if (buff.mods && buff.mods.shopDiscount) parts.push('下个商店 5 折');
     parts.push(replaceTarget === b.id ? '（当前已选为替换目标，点一下取消）' : '点一下选它作为要被替换掉的永久增益');
@@ -196,7 +208,15 @@
   function limitTip(b) {
     const buff = TowerData.BUFF_BY_ID[b.id];
     if (!buff) return b.name;
-    return [buff.name + '（' + RARITY[b.rarity] + ' · 限次 ' + (buff.uses || 1) + ' 场）', buff.desc,
+    /* 本轮第 7 项：易碎烙印也是限次类（uses 1000），但结束方式是「每场 5% 损毁」，
+     * 写「剩余 1000 场」没意义。 */
+    const fragile = buff.mods && buff.mods.fragileBreakPct;
+    if (fragile) {
+      return [buff.name + '（' + RARITY[buff.rarity] + ' · 易碎）', buff.desc,
+        '每打完一场有 ' + fragile + '% 概率损毁；损毁后加成仍然保留',
+        b.on ? '当前生效中 · 点一下可以关掉' : '当前已关闭 · 点一下重新开启'].join('\n');
+    }
+    return [buff.name + '（' + RARITY[buff.rarity] + ' · 限次 ' + (buff.uses || 1) + ' 场）', buff.desc,
       '剩余 ' + b.uses + ' 场（每打完一场扣 1，扣完自动消失）',
       b.on ? '当前生效中 · 点一下可以关掉（关掉不扣次数）' : '当前已关闭 · 点一下重新开启'].join('\n');
   }
@@ -227,7 +247,9 @@
     const limHtml = lim.length
       ? lim.map((b) => '<button type="button" class="limit-tag r' + b.rarity + (b.on ? '' : ' off') + '" data-toggle="' + b.id +
           '" data-tip="' + esc(limitTip(b)) + '" title="' + esc(limitTip(b)) + '">' +
-          '<b>' + esc(b.name) + '</b><i>' + (b.on ? '生效中' : '已关闭') + '</i><em>剩 ' + b.uses + ' 场</em></button>').join('')
+          '<b>' + esc(b.name) + '</b><i>' + (b.on ? '生效中' : '已关闭') + '</i><em>' +
+        ((TowerData.BUFF_BY_ID[b.id] && TowerData.BUFF_BY_ID[b.id].mods && TowerData.BUFF_BY_ID[b.id].mods.fragileBreakPct)
+          ? '易碎 ' + TowerData.BUFF_BY_ID[b.id].mods.fragileBreakPct + '%' : '剩 ' + b.uses + ' 场') + '</em></button>').join('')
       : '<span class="buff-empty">还没有限次增益</span>';
     return '<div class="tower-buffs endless-buffs">' +
       '<h4>永久增益 <span class="buff-slot-count">' + (run.permUsed == null ? perm.length : run.permUsed) + '/' + cap + '</span>' +
@@ -778,8 +800,10 @@
   function offerShopReplace(index, buff) {
     const list = Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent');
     const buttons = list.map((b) => ({
-      label: '替换 ' + b.name + (b.stacks > 1 ? '（×' + b.stacks + '）' : ''),
-      cls: 'small',
+      /* 本轮第 1 项：不再写「替换」前缀（弹窗标题已说清），并且支持换行 ——
+       * 5 个永久增益 + 取消排成一行时，长名字会顶出屏幕。 */
+      label: b.name + (b.stacks > 1 ? '\n×' + b.stacks + ' 层' : ''),
+      cls: 'small pick-buff-btn replace-btn',
       run: () => {
         const r = Tower.buyShopSlot(index, b.id);
         if (!r.ok) notice(r.msg || '买不了。');
@@ -794,8 +818,8 @@
   function offerReplace(index, buff) {
     const list = Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent');
     const buttons = list.map((b) => ({
-      label: '换成 ' + b.name + (b.stacks > 1 ? '（×' + b.stacks + '）' : ''),
-      cls: 'small',
+      label: b.name + (b.stacks > 1 ? '\n×' + b.stacks + ' 层' : ''),   // 第 1 项：去前缀 + 换行
+      cls: 'small pick-buff-btn replace-btn',
       run: () => { Tower.pickChoice('endless', index, b.id); openEndless(); },
     }));
     if (!buttons.length) { notice('永久增益已满，但没有可替换的目标。'); return; }
@@ -828,9 +852,13 @@
     const shop = Tower.shopState();
     if (!shop) { notice('商店还没开张：每通过 5 层开放一次。'); return; }
     const rarityCls = (r) => 'r' + r;
+    /* 本轮第 2 项：已经拥有的**可叠加**增益高光提示 —— 一眼看出「再买一份能叠层」。 */
+    const stackableOwned = (s) => s.ownedStacks > 0 && s.stackable;
     const slots = shop.slots.map((s, i) =>
-      '<div class="shop-slot ' + rarityCls(s.rarity) + (s.sold ? ' sold' : '') + '"><b>' + esc(s.name) + '</b>' +
+      '<div class="shop-slot ' + rarityCls(s.rarity) + (s.sold ? ' sold' : '') +
+        (stackableOwned(s) ? ' owned-stack' : '') + '"><b>' + esc(s.name) + '</b>' +
       '<i>' + RARITY[s.rarity] + ' · ' + (SCOPE[s.kind] || '增益') + '</i><span>' + esc(s.desc) + '</span>' +
+      (stackableOwned(s) ? '<em class="stack-hint">已有 ×' + s.ownedStacks + ' · 可叠层</em>' : '') +
       (s.sold ? '<em>已购入</em>' : C().btn(s.price + ' 币', 'buy' + i, 'small gold')) + '</div>').join('');
     const owned = Tower.ownedBuffs('endless').filter((b) => b.kind !== 'instant');
     const sellRows = owned.length ? owned.map((b) =>

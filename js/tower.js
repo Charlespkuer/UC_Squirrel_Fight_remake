@@ -242,6 +242,13 @@
       if (foeCtx.poolNpc && m.dmgMulMech) agg.dmgMul *= 1 + m.dmgMulMech * k;    // 机制破解
       if (foeCtx.elite && m.dmgMulElite) agg.dmgMul *= 1 + m.dmgMulElite * k;    // 精英杀手
     });
+    /* 本轮第 7 项：易碎烙印的「本局永久保留」加成。
+     * 单独存在 run.stickyStat 上，所以烙印损毁/消失后它照样生效。 */
+    if (run.stickyStat) {
+      agg.powerMul += Math.max(0, Number(run.stickyStat.power) || 0);
+      agg.agilityMul += Math.max(0, Number(run.stickyStat.agility) || 0);
+      agg.speedMul += Math.max(0, Number(run.stickyStat.speed) || 0);
+    }
     // 叠层累积（击杀/层数成长，运行态数值）
     if (run.killPower) agg.powerMul += run.killPower;
     if (run.killMaxHp) agg.maxHpMul += run.killMaxHp;
@@ -603,6 +610,9 @@
     /* 第 1 项：限次 buff 打完一场扣 1 次，扣完自动消失（无尽；主塔的「本层类」按整层算）。
      * 顺序：先按本场生效的数值结算，再扣次数。 */
     consumeLimited(run);   // 主塔的单场类（1 次）打完即消耗，本层类 99 次不会耗尽；无尽按各自的次数扣
+    /* 本轮第 7 项：易碎烙印每场 5% 损毁（加成保留）。放在扣次数之后 —— 这一场它是生效过的。 */
+    const brokenFragile = rollFragileBuffs(run);
+    if (brokenFragile.length) out.fragileBroken = brokenFragile;
     // 第 1 项：属性药丸按战斗数递减（胜败都算一场）
     for (const k of ['power', 'agility', 'speed']) {
       const slot = (run.pillSlots || {})[k];
@@ -763,6 +773,8 @@
     if (!buff.unique) return true;
     if ((run.pickBuffIds || []).includes(buff.id)) return false;
     if ((run.permSlotIds || []).includes(buff.id)) return false;
+    /* 本轮第 4 项：已经挂着「待选取」的同名增益也别再给（免得同时攒两份待选取）。 */
+    if (run.pendingPick && run.pendingPick.buffId === buff.id) return false;
     return !(run.permanent || []).some((b) => b.id === buff.id);
   }
   function rollChoices(mode, run) {
@@ -829,6 +841,22 @@
     save();
     return res;
   }
+  /** 「获得这个增益时」立刻要结算的东西（新增与叠加两条路径都要走）。
+   *  · 易碎烙印：把属性加成记进 stickyStat（本局永久保留，损毁也不退回）
+   *  · 生命上限增益：按字面「回复等量生命」—— 新上限比旧上限多出来的部分补进当前血量
+   *    （原来只保持百分比，玩家看到血条没动就以为没生效）。比例推一下与上限无关：
+   *      carry' = (carry + m) / (1 + m)   （m 为 maxHpMul，负值则同步缩血） */
+  function applyBuffOnAcquire(run, buff) {
+    if (buff.mods && buff.mods.fragileStat) {
+      const key = buff.mods.fragileStat;
+      run.stickyStat = Object.assign({ power: 0, agility: 0, speed: 0 }, run.stickyStat || {});
+      run.stickyStat[key] += Math.max(0, Number(buff.mods.fragilePct) || 0);
+    }
+    if (buff.mods && buff.mods.maxHpMul) {
+      const m = Number(buff.mods.maxHpMul) || 0;
+      if (m !== 0) run.carry = clamp01((clamp01(run.carry) + m) / (1 + m));
+    }
+  }
   /** 加一个 buff。永久类要过 5 格上限（满则返回 needsReplace，由界面选一个替换）。 */
   function addBuff(run, id, replaceId) {
     const buff = D().BUFF_BY_ID[id];
@@ -837,7 +865,9 @@
     /* 选取型（武器/技能强化）同样不占槽、不触发替换：立即登记，等界面做三选一。 */
     if (buff.mods && (buff.mods.pickWeaponPct || buff.mods.pickSkillPct)) {
       if ((run.pickBuffIds || []).includes(buff.id)) return { ok: false, msg: '这类选取增益一局只能获得一次。' };
-      run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]);
+      /* 本轮第 4 项：**不再在这里**登记 pickBuffIds —— 原来一拿到就登记，于是「当时没有武器/
+       * 技能可选」时这次强化被白白消耗掉，而且以后永远刷不到了。
+       * 改成等 applyPickBuff 真正落地时再登记（见那里）。 */
       run.pendingPick = buff.mods.pickWeaponPct
         ? { kind: 'weapon', buffId: buff.id, pct: buff.mods.pickWeaponPct }
         : { kind: 'skill', buffId: buff.id, pct: buff.mods.pickSkillPct };
@@ -848,8 +878,7 @@
      * 与武器/技能选取同款：不占槽、不触发替换，立即登记 pendingPick 等界面选。 */
     if (buff.mods && buff.mods.pickPermanentFree) {
       if ((run.pickBuffIds || []).includes(buff.id)) return { ok: false, msg: '这类选取增益一局只能获得一次。' };
-      run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]);
-      run.pendingPick = { kind: 'permBuff', buffId: buff.id };
+      run.pendingPick = { kind: 'permBuff', buffId: buff.id };   // 第 4 项：同样等落地再登记
       save();
       return { ok: true, pendingPick: run.pendingPick };
     }
@@ -867,6 +896,9 @@
     if (owned) {
       owned.stacks = Math.min(D().STACK_MAX, owned.stacks + 1);
       if (buff.kind === 'limited') { owned.uses += buff.uses || 1; owned.on = true; }
+      /* 本轮修复：重复获得同名增益（叠加）时也要执行「获得时结算」——
+       * 原来这里直接 return，于是第二份易碎烙印不加属性、第二份生命上限增益不回血。 */
+      applyBuffOnAcquire(run, buff);
       return { ok: true, buff, stacks: owned.stacks };
     }
     if (buff.kind === 'permanent' && permUsed(run) >= permSlots(run)) {
@@ -881,6 +913,7 @@
     /* 第 1 项修复：全场五折是 permanent 类，addBuff 原来只对 instant 走 applyInstant，
      * 所以标记一直没被点亮 —— 这里在加入时就把折扣标记打开。 */
     if (buff.mods && buff.mods.shopDiscount) run.shopDiscount = true;
+    applyBuffOnAcquire(run, buff);
     // 第 1 项：拿到永久生命上限增益时，把它折算成 run.hpBonus（之后卖掉也保留）
     if (buff.kind === 'permanent' && buff.mods && buff.mods.maxHpMul) {
       run.hpBonus = (run.hpBonus || 0) + buff.mods.maxHpMul;
@@ -932,8 +965,11 @@
   function rollShopSlots(run) {
     const pool = D().shopPool || D().endlessPool, slots = [], taken = new Set();
     for (let i = 0; i < D().SHOP.slots; i++) {
-      let list = pool.filter((b) => b.rarity === rollRarity() && !taken.has(b.id) && ownable(run, b));
-      if (!list.length) list = pool.filter((b) => !taken.has(b.id) && ownable(run, b));
+      /* 本轮第 5 项：商店也要过 poolFilter —— 原来只过 ownable，于是
+       * 「一局只能获得一次」的扩容类（扩容背包/仓库钥匙）会被反复刷上货架，
+       * 买第二次时 addBuff 拒绝、币却照扣（静默吞币）。 */
+      let list = pool.filter((b) => b.rarity === rollRarity() && !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));
+      if (!list.length) list = pool.filter((b) => !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));
       if (!list.length) break;
       const buff = list[Math.floor(Math.random() * list.length)];
       taken.add(buff.id);
@@ -943,7 +979,7 @@
      * 「接下来 N 场」那类，排除一次性开局的补给 N08）。 */
     const isLimited = (bid) => { const b = D().BUFF_BY_ID[bid]; return !!b && b.kind === 'limited' && b.id !== 'N08'; };
     if (slots.length && !slots.some((sl) => isLimited(sl.id))) {
-      const cand = pool.filter((b) => b.kind === 'limited' && b.id !== 'N08' && !taken.has(b.id) && ownable(run, b));
+      const cand = pool.filter((b) => b.kind === 'limited' && b.id !== 'N08' && !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));
       if (cand.length) {
         const buff = cand[Math.floor(Math.random() * cand.length)];
         taken.delete(slots[slots.length - 1].id);
@@ -959,7 +995,10 @@
     return { coins: run.coins, layer: run.shop.layer, healSold: run.shop.healSold, rerollFree: run.shop.rerollFree,
       rerollPrice: D().SHOP.rerollPrice, healPrice: D().SHOP.healPrice, healPct: D().SHOP.healPct,
       slots: run.shop.slots.map((s) => { const b = D().BUFF_BY_ID[s.id];
-        return { id: s.id, sold: s.sold, name: b.name, desc: b.desc, rarity: b.rarity, kind: b.kind, price: shopPriceOf(b) }; }) };
+        /* 本轮第 2 项：已经拥有的**可叠加**增益，界面上要能高光提示「再买一份能叠层」。 */
+        const mine = (run.permanent || []).find((x) => x.id === s.id) || (run.limited || []).find((x) => x.id === s.id);
+        return { id: s.id, sold: s.sold, name: b.name, desc: b.desc, rarity: b.rarity, kind: b.kind, price: shopPriceOf(b),
+          ownedStacks: mine ? (mine.stacks || 1) : 0, stackable: b.stackable === true }; }) };
   }
   /* 本轮第 9 项：挥金如土（C36）—— 每消费 step 试炼币，随机 +1 力/敏/速 并 +5 生命上限。
    * 消费点有三处（买增益 / 买回血 / 刷新），统一从这里过。 */
@@ -1003,8 +1042,15 @@
     addShopSpend(run, price);                               // 第 9 项：挥金如土
     slot.sold = true;
     const res = addBuff(run, slot.id, replaceId);
+    if (!res || !res.ok) {
+      /* 第 5 项：addBuff 拒绝（例如这类增益一局只能拿一次）时把钱退回去，
+       * 并且把原因告诉玩家 —— 原来照扣币、什么都不给。 */
+      run.coins += price;
+      save();
+      return { ok: false, msg: (res && res.msg) || '这件增益现在买不了。' };
+    }
     save();
-    return { ok: true, buff, price, instant: !!(res && res.instant) };
+    return { ok: true, buff, price, instant: !!res.instant };
   }
   function buyShopHeal() {
     const run = endless().run;
@@ -1051,6 +1097,15 @@
   function debugLoseBuff(id) {
     const run = endless().run;
     if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
+    /* 本轮第 4 项：选取型在「落地前」只挂在 pendingPick 上（不在 pickBuffIds 里），
+     * 所以失去它应当表现为「取消这次待选取」并返回成功。 */
+    if (run.pendingPick && run.pendingPick.buffId === id) {
+      run.pendingPick = null;
+      if (id === 'C32') run.weaponBoost = null;
+      if (id === 'C33') run.skillBoost = null;
+      save();
+      return { ok: true, id, cancelledPick: true };
+    }
     for (const list of [run.permanent || [], run.limited || [], run.permSlotIds || [], run.pickBuffIds || []]) {
       const i = (list || []).findIndex((b) => (typeof b === 'string' ? b === id : b.id === id));
       if (i >= 0) {
@@ -1104,6 +1159,7 @@
     if (kind === 'permBuff') {
       if (!(run.permanent || []).some((b) => b.id === id)) return { ok: false, msg: '你还没有这个永久增益。' };
       run.slotFreeIds = (run.slotFreeIds || []).concat([id]);
+      run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId || 'C37']);   // 第 4 项：落地才算用掉
       run.pendingPick = null;
       save();
       return { ok: true, kind, id, slotFree: true };
@@ -1111,6 +1167,8 @@
     const key = kind === 'skill' ? 'skillBoost' : 'weaponBoost';
     run[key] = run[key] || {};
     run[key][Number(id)] = Math.max(Number(run[key][Number(id)]) || 0, pend.pct);
+    /* 本轮第 4 项：真正选定了才算「一局一次」用掉（原来在拿到的时候就登记了）。 */
+    if (pend.buffId) run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId]);
     run.pendingPick = null;
     save();
     return { ok: true, kind, id: Number(id), pct: pend.pct };
@@ -1140,6 +1198,20 @@
       (run.spendGain ? Math.max(0, Number(run.spendGain.hp) || 0) : 0);
     return Math.max(1, Math.round(base * (1 + agg.maxHpMul + stickyHp) * dMaxHp) + flat);
   }
+  /** 本轮第 7 项：易碎烙印的损毁判定（每场战斗一次，默认 5%）。
+   * 损毁**只移除增益本身**，run.stickyStat 里的加成不退回 —— 这就是需求里的
+   * 「损毁后获得本次挑战永久保留的提升」。 */
+  function rollFragileBuffs(run) {
+    const broken = [];
+    run.limited = (run.limited || []).filter((b) => {
+      const def = D().BUFF_BY_ID[b.id];
+      const pct = def && def.mods && def.mods.fragileBreakPct;
+      if (!pct || b.on === false) return true;
+      if (Math.random() * 100 < Number(pct)) { broken.push(def.name); return false; }
+      return true;
+    });
+    return broken;
+  }
   /** 本轮第 3 项：卖出/失去**成长类**增益时，把它累计出来的运行态一并清零 ——
    *  再买回来是从 0 重新长，而不是接着上次的进度（吞噬成长就是典型）。
    *  （叠层数本身在重新获得时本来就是 1；过去漏掉的是这些「跑出来的数值」。） */
@@ -1151,7 +1223,18 @@
     else if (id === 'C12') run.winPower = 0;
     else if (id === 'C25') run.sellBonus = 0;
     else if (id === 'C36') { run.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; run.shopSpend = 0; }
-    else return false;
+    else {
+      /* 第 7 项：烙印被**主动卖掉/换掉/失去**时，才把 sticky 加成收回去
+       * （5% 损毁那条路径不走这里，所以损毁不掉加成）。 */
+      const def = D().BUFF_BY_ID[id];
+      if (def && def.mods && def.mods.fragileStat) {
+        const key = def.mods.fragileStat;
+        run.stickyStat = Object.assign({ power: 0, agility: 0, speed: 0 }, run.stickyStat || {});
+        run.stickyStat[key] = Math.max(0, run.stickyStat[key] - (Number(def.mods.fragilePct) || 0));
+        return true;
+      }
+      return false;
+    }
     return true;
   }
   /** 卖出价：名贵手表这类有固定 sellValue 的按固定值，其它按商店价 40%。 */
@@ -1334,6 +1417,8 @@
         lastMaxHp: Math.max(0, Number(e.run.lastMaxHp) || 0),
         lastHp: Math.max(0, Number(e.run.lastHp) || 0),
         curMaxHp: currentMaxHp(e.run),
+        // 本轮第 7 项：易碎烙印留下的「本局永久保留」属性加成
+        stickyStat: Object.assign({ power: 0, agility: 0, speed: 0 }, e.run.stickyStat || {}),
         // 本轮第 3 / 9 项：即时削弱累计 + 挥金如土的消费进度（界面要显示）
         enemyMaxHpDown: Math.max(0, Number(e.run.enemyMaxHpDown) || 0),
         shopSpend: Math.max(0, Number(e.run.shopSpend) || 0),
@@ -1356,6 +1441,13 @@
     if (id === 'C11') return '已累计 生命上限 +' + Math.round(Number(run.winHpFlat) || 0);
     if (id === 'C12') return '已累计 攻击 +' + pct(run.winPower) + '%';
     if (id === 'C25') return '本局已累计 卖价 +' + Math.round(Number(run.sellBonus) || 0) + ' 试炼币（只加自己）';
+    const def = D().BUFF_BY_ID[id];
+    if (def && def.mods && def.mods.fragileStat) {
+      const key = def.mods.fragileStat;
+      const names = { power: '力量', agility: '敏捷', speed: '速度' };
+      const own = Math.round((Number((run.stickyStat || {})[key]) || 0) * 100);
+      return '本局已永久保留 ' + (names[key] || key) + ' +' + own + '%（烙印损毁也不会退回）';
+    }
     if (id === 'C36') {
       const sg = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, run.spendGain || {});
       const step = Math.max(1, Number(D().BUFF_BY_ID.C36.mods.shopSpendStep) || 20);

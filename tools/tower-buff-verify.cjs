@@ -20,6 +20,7 @@ for (const f of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 
   vm.runInContext(load(f), c, { filename: f });
 }
 const { State, Sim, Tower, TowerData } = c;
+vm.runInContext('Math.__realRandom = Math.random', c);
 State.newGame('verify');
 const S = State.state();
 S.level = 70;
@@ -441,6 +442,210 @@ hr('本轮 5：商店 5 格必有一张限次增益');
     Tower.abandon('endless');
   }
   check('每个商店都至少有一张限次增益', shops > 0 && withLimited === shops, withLimited + '/' + shops);
+}
+
+// ---------- 本轮 1：替换选项文案 ----------
+hr('本轮 1：永久增益替换选项（去前缀 + 换行）');
+{
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'js', 'tower-ui.js'), 'utf8');
+  check('不再有「替换 」前缀的按钮', src.indexOf("label: '替换 '") < 0);
+  check('不再有「换成 」前缀的按钮', src.indexOf("label: '换成 '") < 0);
+  check('替换按钮支持换行（名字与层数分两行）',
+    src.indexOf('pick-buff-btn replace-btn') >= 0 && src.indexOf("×' + b.stacks") >= 0);
+  check('替换按钮有限宽样式（不会顶出屏幕）', require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'css', 'tower.css'), 'utf8').indexOf('.uc-button.replace-btn') >= 0);
+}
+
+// ---------- 本轮 2：商店高光已拥有的可叠加增益 ----------
+hr('本轮 2：商店里已拥有的可叠加增益要能高光');
+{
+  freshRun();
+  Tower.debugGrantBuff('C06');            // 猎杀时刻：永久 + stackable
+  Tower.debugGrantBuff('C16');            // 战后续航：永久 + stackable
+  run_coins: {
+    const run = Tower._debugRun('endless');
+    run.coins = 9999;
+  }
+  /* 休整商店只在「层内第 3 场后」能开 —— 先把 3 场打完走到选择点。 */
+  const opened = (() => {
+    for (let i = 0; i < 5; i++) {
+      const run = Tower._debugRun('endless');
+      if (run && run.choices) return Tower.openRestShop();
+      win('endless', 1);
+    }
+    const run = Tower._debugRun('endless');
+    return run && run.choices ? Tower.openRestShop() : null;
+  })();
+  if (opened && opened.ok) {
+    const st = Tower.shopState();
+    const c06 = (st.slots || []).find((x) => x.id === 'C06');
+    const c16 = (st.slots || []).find((x) => x.id === 'C16');
+    const anyStack = (st.slots || []).filter((x) => x.ownedStacks > 0 && x.stackable);
+    check('商店数据带上 ownedStacks/stackable', (st.slots || []).every((x) => x.ownedStacks !== undefined && x.stackable !== undefined));
+    check('已拥有的可叠加增益能被识别出来（若本次货架刷到）',
+      !(c06 || c16) || anyStack.length >= 1,
+      '刷到 C06=' + !!c06 + ' C16=' + !!c16 + '，可高光 ' + anyStack.length + ' 个');
+  } else {
+    check('能开一次休整商店', false, JSON.stringify(opened));
+  }
+  Tower.abandon('endless');
+}
+
+// ---------- 本轮 3：磐石之躯的回复立即生效 ----------
+hr('本轮 3：磐石之躯（生命上限 +20%）的回复要立即生效');
+{
+  freshRun();
+  const nx = Tower.nextBattle('endless');
+  const me = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+  me.maxHp = me.hp;
+  nx.adjustMe(me);
+  Tower.reportBattle('endless', nx.token, true, 0.5);      // 血量掉到 50%
+  const before = Tower._debugRun('endless');
+  const max0 = Tower.endlessInfo().run.curMaxHp;
+  const hp0 = Math.round(max0 * before.carry);
+  Tower.debugGrantBuff('C01');                             // 磐石之躯：上限 +20%
+  const after = Tower.endlessInfo().run;
+  const max1 = after.curMaxHp;
+  const hp1 = Math.round(max1 * Tower._debugRun('endless').carry);
+  const grewMax = max1 - max0;
+  const grewHp = hp1 - hp0;
+  check('上限涨了约 20%', Math.abs(grewMax - Math.round(max0 * 0.2)) <= 2, max0 + ' -> ' + max1 + '（+' + grewMax + '）');
+  check('当前血量按「等量」补上（不是保持百分比）', Math.abs(grewHp - grewMax) <= 2,
+    '血量 ' + hp0 + ' -> ' + hp1 + '（+' + grewHp + '，上限 +' + grewMax + '）');
+  check('不是「比例不变」那种老行为', Math.abs(grewHp - Math.round(hp0 * 0.2)) > 2 || grewHp > Math.round(hp0 * 0.2),
+    '老行为会只补 ' + Math.round(hp0 * 0.2));
+  Tower.abandon('endless');
+}
+
+// ---------- 本轮 4：选取型不会白拿 ----------
+hr('本轮 4：神兵淬炼/秘技通神 在没有可选目标时不该被白白消耗');
+{
+  freshRun();
+  const run = Tower._debugRun('endless');
+  run.weaponBoost = null; run.skillBoost = null;
+  const g = Tower.debugGrantBuff('C32');
+  const r1 = Tower._debugRun('endless');
+  check('拿到后进入待选取', !!(g && g.ok && r1.pendingPick), JSON.stringify(r1.pendingPick));
+  check('还没落地，就不该登记「一局一次」', !(r1.pickBuffIds || []).includes('C32'), JSON.stringify(r1.pickBuffIds || []));
+  const cands = Tower.pickCandidates('weapon');
+  check('没有武器时候选为空（此时不该消耗）', cands.length === 0, '候选 ' + cands.length + ' 个');
+  const g2 = Tower.debugGrantBuff('C32');
+  check('还能再次拿到（不会因为白拿一次就永久刷不到）', !!(g2 && g2.ok), JSON.stringify(g2 && g2.res && g2.res.msg));
+  // 真给一把武器再落地：登记「一局一次」，之后再拿才被拒
+  // 注意 State.state().weapons 存的是 'id:level' 字符串（不是对象）
+  for (const wid of [1, 2, 3, 5, 8, 15]) {
+    State.state().weapons = [wid + ':5'];
+    if ((State.myWeapons ? State.myWeapons() : []).length) break;
+  }
+  const cands2 = Tower.pickCandidates('weapon');
+  check('有了武器就有候选', cands2.length >= 1, '候选 ' + cands2.length + ' 个（weapons=' + JSON.stringify(State.state().weapons) + '）');
+  const ap = cands2.length ? Tower.applyPickBuff('weapon', cands2[0].id) : { ok: false, msg: '没有候选' };
+  const r2 = Tower._debugRun('endless');
+  check('落地成功并登记一局一次', !!(ap && ap.ok) && (r2.pickBuffIds || []).includes('C32'), JSON.stringify(r2.pickBuffIds || []));
+  const g3 = Tower.debugGrantBuff('C32');
+  check('落地之后才永久挡住', !(g3 && g3.ok), JSON.stringify(g3 && g3.res && g3.res.msg));
+  Tower.abandon('endless');
+}
+
+// ---------- 本轮 5：扩容类不会重复刷上货架 ----------
+hr('本轮 5：扩容背包/仓库钥匙不会重复出现在商店');
+{
+  let shops = 0, offeredAfterOwned = 0, refundOk = false;
+  for (let i = 0; i < 120 && shops < 40; i++) {
+    freshRun();
+    /* 休整商店要在选择点才开得起来：先打几场走到 choices。 */
+    let r0 = Tower._debugRun('endless');
+    for (let k = 0; k < 5 && r0 && !r0.choices; k++) { win('endless', 1); r0 = Tower._debugRun('endless'); }
+    const run = Tower._debugRun('endless');
+    if (!run || !run.choices) { clearPhase(); continue; }
+    run.coins = 9999;
+    const res = Tower.openRestShop();
+    if (!(res && res.ok)) { Tower.pickChoice('endless', 0); clearPhase(); continue; }
+    shops++;
+    const st = Tower.shopState();
+    const idx = (st.slots || []).findIndex((x) => x.id === 'C30' || x.id === 'C31');
+    if (idx >= 0) {
+      const b = Tower.buyShopSlot(idx);
+      if (b.ok) {
+        // 买下后再刷货架：不该再出现同类
+        const before2 = Tower._debugRun('endless');
+        const c0 = before2.coins;
+        const st2 = Tower.shopState();
+        const boughtId = (st.slots[idx] || {}).id;
+        if ((st2.slots || []).some((x) => x.id === boughtId && !x.sold)) offeredAfterOwned++;   // 别把刚买下的那格算进来
+      } else {
+        refundOk = true;
+      }
+      // 直接再调一次同样购买：应被拒并退款
+      const again = Tower.buyShopSlot(idx);
+      if (again && !again.ok) refundOk = true;
+    }
+    Tower.pickChoice('endless', 0);
+    clearPhase();
+    Tower.abandon('endless');
+  }
+  check('买下扩容类之后不再重复出现在同一商店', offeredAfterOwned === 0, '重复出现 ' + offeredAfterOwned + ' 次（开了 ' + shops + ' 家店）');
+  /* 上一条在 40 家店里可能一次都没刷到扩容类（修好之后更刷不到），
+   * 所以这里**强行摆一个**已经拥有的扩容类上货架，专门验退款。 */
+  let refundOk2 = false, refundMsg = '';
+  {
+    freshRun();
+    Tower.debugGrantBuff('C30');
+    let r = Tower._debugRun('endless');
+    for (let k = 0; k < 5 && r && !r.choices; k++) { win('endless', 1); r = Tower._debugRun('endless'); }
+    r = Tower._debugRun('endless');
+    if (r && r.choices && Tower.openRestShop().ok) {
+      const rr = Tower._debugRun('endless');
+      rr.coins = 500;
+      rr.shop.slots[0] = { id: 'C30', sold: false };
+      const before = rr.coins;
+      const res = Tower.buyShopSlot(0);
+      refundOk2 = !res.ok && Tower._debugRun('endless').coins === before;
+      refundMsg = (res.msg || '') + '；币 ' + before + ' -> ' + Tower._debugRun('endless').coins;
+    }
+    Tower.abandon('endless');
+  }
+  check('重复购买会被拒并原额退款', refundOk2, refundMsg);
+}
+
+// ---------- 本轮 7：易碎烙印 ----------
+hr('本轮 7：易碎属性烙印（永久保留 + 每场 5% 损毁）');
+{
+  freshRun();
+  /* 注意：State.genAI 每次的属性带随机（装备品质），跨两次 genAI 比较绝对值会飘 ——
+   * 用**同一个基准对象**克隆两份来量。 */
+  const base = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+  const nx1 = Tower.nextBattle('endless');
+  const meA = Object.assign({}, base); meA.maxHp = base.hp; nx1.adjustMe(meA);
+  const pow0 = meA.power;
+  Tower.reportBattle('endless', nx1.token, true, 1);
+  Tower.debugGrantBuff('C39');                       // 力量烙印：+8%
+  const run1 = Tower._debugRun('endless');
+  check('拿到就写进 stickyStat', Math.abs((run1.stickyStat || {}).power - 0.08) < 1e-6, JSON.stringify(run1.stickyStat));
+  const nx2 = Tower.nextBattle('endless');
+  const me2 = Object.assign({}, base); me2.maxHp = base.hp; nx2.adjustMe(me2);
+  check('力量立刻涨约 8%', me2.power / pow0 > 1.06 && me2.power / pow0 < 1.10,
+    pow0 + ' -> ' + me2.power + '（×' + (me2.power / pow0).toFixed(3) + '）');
+  Tower.reportBattle('endless', nx2.token, true, 1);
+  const info = Tower.ownedBuffs('endless').find((b) => b.id === 'C39');
+  check('面板显示「已永久保留 力量 +8%」', !!(info && info.progress && info.progress.indexOf('永久保留') >= 0), info && info.progress);
+  // 强制损毁：Math.random 压到 1% 以下
+  /* 注意：要改的是 **vm 沙箱里**的 Math（外层 Node 的 Math 与它不是一个对象）。 */
+  vm.runInContext('Math.random = () => 0.01', c);
+  const nx3 = Tower.nextBattle('endless');
+  Tower.reportBattle('endless', nx3.token, true, 1);
+  vm.runInContext('Math.random = Math.__realRandom', c);
+  const run2 = Tower._debugRun('endless');
+  const still = (run2.limited || []).some((b) => b.id === 'C39');
+  check('5% 判定命中时烙印损毁', !still, '仍在=' + still);
+  check('损毁后加成仍然保留', Math.abs((run2.stickyStat || {}).power - 0.08) < 1e-6, JSON.stringify(run2.stickyStat));
+  // 再拿一次 → 再 +8%，然后主动卖掉 → 收回
+  Tower.debugGrantBuff('C39');
+  check('再拿一次会继续叠加', Math.abs((Tower._debugRun('endless').stickyStat || {}).power - 0.16) < 1e-6,
+    JSON.stringify(Tower._debugRun('endless').stickyStat));
+  Tower.debugLoseBuff('C39');
+  check('主动失去（卖出/换掉）才收回加成', Math.abs((Tower._debugRun('endless').stickyStat || {}).power - 0.08) < 1e-6,
+    JSON.stringify(Tower._debugRun('endless').stickyStat));
+  Tower.abandon('endless');
 }
 
 console.log('\n================ 合计 ' + pass + ' 通过 / ' + fail + ' 失败 ================');

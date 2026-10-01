@@ -320,11 +320,21 @@ function autoPick(ctx, mode) {
   t('商店：卖出回收 40%', (() => {
     const run = State.state().endless.run;   // 注意：endlessInfo() 是快照，比币数要用实时 run
     const def = TowerData.BUFF_BY_ID.C01;
+    /* 永久槽可能已经被前面的流程占满（满格时 debugGrantBuff 会要求替换）——
+     * 先腾一个位置，保证这条自检只测「回收价」这一件事。 */
+    const perms = Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent');
+    const cap = Number((Tower.endlessInfo().run || {}).permCap) || 5;
+    while (Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent').length >= cap) {
+      const drop = Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent').pop();
+      if (!drop || !Tower.debugLoseBuff(drop.id).ok) break;
+    }
+    void perms;
     Tower.debugGrantBuff('C01');
     const before = run.coins;
-    const bonus = Math.max(0, Math.floor(Number(run.sellBonus) || 0));
+    /* 注意：战利品账本的累计加成现在**只加账本自己**（上一轮第 7 项），
+     * 所以卖 C01 只按基础回收价，不能把 sellBonus 加进来。 */
     const out = Tower.sellBuff('C01');
-    const want = Math.max(1, Math.round(TowerData.shopPrice(def) * TowerData.SHOP.sellBack)) + bonus;
+    const want = Math.max(1, Math.round(TowerData.shopPrice(def) * TowerData.SHOP.sellBack));
     return out.ok && out.gain === want && run.coins === before + want;
   })());
   const heal = Tower.buyShopHeal();
@@ -392,8 +402,8 @@ function autoPick(ctx, mode) {
     // 第 1 项：buff 改成「限次 / 永久」两分法 + 即时经济类
     /* 本轮（第 3/6/9 项）新增 5 个：E07/E08（即时·削敌方生命上限）、
      * C34/C35/C36（永久·空槽攻击 / 永久数攻击 / 商店消费成长）→ 58 → 63。 */
-    t('无尽池：限次 21 / 永久 39 / 即时 5（共 65）+ 8 个无尽专属', ctx.TowerData.BUFFS.length === 65 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 21 &&
+    t('无尽池：限次 27 / 永久 39 / 即时 5（共 71）+ 8 个无尽专属', ctx.TowerData.BUFFS.length === 71 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 27 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 39 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 5 &&
       ctx.TowerData.BUFFS.filter((b) => b.endlessOnly).length === 8);
@@ -562,9 +572,11 @@ function autoPick(ctx, mode) {
     } else {
       t('没有武器时不落地（保留 pendingPick 等以后选）', r.pendingPick && r.pendingPick.kind === 'weapon');
     }
-    t('同名再拿一次被拒（unique）', Tower.debugGrantBuff('C32').ok === false);
+    t('还没落地时可以再拿（不会白拿一次就永远刷不到）', Tower.debugGrantBuff('C32').ok === true);
     // 调试面板能列出来（pickBuffIds 是调试用的可见来源），也能被「失去」
-    t('选取型记录在 pickBuffIds（调试面板可见）', (r.pickBuffIds || []).includes('C32'));
+    /* 本轮第 4 项：选取型不再「一拿到就登记」——那会让「当时没有武器可选」的情况白白消耗掉。
+   * 现在落地前由 pendingPick 记录，落地后才进 pickBuffIds。 */
+  t('选取型在落地前由 pendingPick 记录', !!(r.pendingPick && r.pendingPick.buffId === 'C32'));
     const lostPick = Tower.debugLoseBuff('C32');
     t('调试可失去选取型 buff，并清掉它带来的强化',
       lostPick.ok === true && !(r.pickBuffIds || []).includes('C32') && !r.weaponBoost);
@@ -606,7 +618,10 @@ function autoPick(ctx, mode) {
   // 第 2 项：限次 buff 的次数铺成 1/2/3/5/10
   {
     const T = ctx.TowerData;
-    const lim = T.BUFFS.filter((b) => b.kind === 'limited' && !b.endlessOnly);
+    /* 易碎烙印（本轮第 7 项）虽然也是 limited，但次数 1000 只是个「不会耗尽」的写法，
+     * 它真正的结束方式是每场 5% 损毁 —— 不参与「场次档位」这条自检。 */
+    const lim = T.BUFFS.filter((b) => b.kind === 'limited' && !b.endlessOnly &&
+      !(b.mods && b.mods.fragileBreakPct));
     const kinds = [...new Set(lim.map((b) => b.uses))].sort((a, b) => a - b);
     t('限次次数覆盖 1/2/3/5/10（补给的 1 场）', kinds.join(',') === '1,2,3,5,10');
     t('每个限次 buff 都有合法次数', lim.every((b) => [1, 2, 3, 5, 10].includes(b.uses)));

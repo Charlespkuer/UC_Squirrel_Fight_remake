@@ -464,6 +464,29 @@
     { id: 'C37', name: '虚空铭文', rarity: 3, kind: 'permanent', unique: true, hidden: true,
       desc: '立即从你已有的永久增益里选一个附魔：它不再占用永久增益位（可叠加的增益则全部层数一起免疫占位；本局有效，隐藏增益，不可出售）',
       mods: { pickPermanentFree: 1 } },
+    /* —— 本轮第 7 项：易碎的属性烙印（普通 / 稀有各三种）——
+     * kind: limited + uses: 1000 = 实际上不会按场次耗尽，靠「每场 5% 损毁」结束。
+     * 拿到时立刻把加成记进 run.stickyStat（本局永久保留的乘区），
+     * 所以烙印损毁之后这份提升依然留着 —— 需求里点名的「永久保留」。
+     * 损毁只发生在 5% 判定里；玩家主动「卖出/被换掉」才算真的失去（那时连加成一起清）。 */
+    { id: 'C39', name: '力量烙印', rarity: 0, kind: 'limited', uses: 1000,
+      desc: '力量 +8%（本局永久保留）。每打完一场有 5% 概率损毁；损毁后这份力量仍然保留',
+      mods: { fragileStat: 'power', fragilePct: 0.08, fragileBreakPct: 5 } },
+    { id: 'C40', name: '敏捷烙印', rarity: 0, kind: 'limited', uses: 1000,
+      desc: '敏捷 +8%（本局永久保留）。每打完一场有 5% 概率损毁；损毁后这份敏捷仍然保留',
+      mods: { fragileStat: 'agility', fragilePct: 0.08, fragileBreakPct: 5 } },
+    { id: 'C41', name: '速度烙印', rarity: 0, kind: 'limited', uses: 1000,
+      desc: '速度 +8%（本局永久保留）。每打完一场有 5% 概率损毁；损毁后这份速度仍然保留',
+      mods: { fragileStat: 'speed', fragilePct: 0.08, fragileBreakPct: 5 } },
+    { id: 'C42', name: '力量烙印·精', rarity: 1, kind: 'limited', uses: 1000,
+      desc: '力量 +14%（本局永久保留）。每打完一场有 5% 概率损毁；损毁后这份力量仍然保留',
+      mods: { fragileStat: 'power', fragilePct: 0.14, fragileBreakPct: 5 } },
+    { id: 'C43', name: '敏捷烙印·精', rarity: 1, kind: 'limited', uses: 1000,
+      desc: '敏捷 +14%（本局永久保留）。每打完一场有 5% 概率损毁；损毁后这份敏捷仍然保留',
+      mods: { fragileStat: 'agility', fragilePct: 0.14, fragileBreakPct: 5 } },
+    { id: 'C44', name: '速度烙印·精', rarity: 1, kind: 'limited', uses: 1000,
+      desc: '速度 +14%（本局永久保留）。每打完一场有 5% 概率损毁；损毁后这份速度仍然保留',
+      mods: { fragileStat: 'speed', fragilePct: 0.14, fragileBreakPct: 5 } },
     { id: 'C38', name: '先机预判', rarity: 2, kind: 'permanent',
       desc: '每场战斗敌方对我方造成的第一次伤害变为 0（反伤、中毒等非攻击伤害不会消耗它）',
       mods: { firstHitZero: 1 } },

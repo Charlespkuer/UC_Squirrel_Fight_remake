@@ -758,3 +758,9 @@
 /* 本轮第 1 项：被「虚空铭文」附魔的永久增益 —— 不占槽，用青色描边区分 */
 .buff-tag.slot-free{border-color:#3f9d9d;box-shadow:0 0 0 2px #bdf0ee inset}
 .buff-tag.slot-free i{color:#1c6f6f}
+
+/* 本轮第 1 项：永久增益替换弹窗的按钮 —— 名字换行、限宽，避免 5 个选项顶出屏幕 */
+.uc-button.replace-btn { min-width: 150px; max-width: 260px; font-size: 26px; height: auto; min-height: 66px; }
+/* 本轮第 2 项：商店里已经拥有的可叠加增益 —— 高光边框 + 提示 */
+.shop-slot.owned-stack { border-color: #3f9d9d; box-shadow: 0 0 0 3px #bdf0ee inset, 0 0 10px #3f9d9d66; }
+.shop-slot .stack-hint { color: #1c6f6f; font-weight: 700; }

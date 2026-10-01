@@ -754,3 +754,7 @@
 .buff-progress-item{display:inline-flex;align-items:baseline;gap:8px;background:#fff4d9;border:2px solid #e0be86;
   border-radius:12px;padding:2px 10px;font-size:16px;color:#6b4a1c}
 .buff-progress-item b{color:#8a5a18}
+
+/* 本轮第 1 项：被「虚空铭文」附魔的永久增益 —— 不占槽，用青色描边区分 */
+.buff-tag.slot-free{border-color:#3f9d9d;box-shadow:0 0 0 2px #bdf0ee inset}
+.buff-tag.slot-free i{color:#1c6f6f}

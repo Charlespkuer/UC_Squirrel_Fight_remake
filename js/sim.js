@@ -326,6 +326,17 @@
       }
       const red = dmgReduce(def, rawDmg, { action, weaponType: opts.weaponType });
       let dmg = red.dmg;
+      /* 本轮第 1 项：史诗增益「先机预判」—— 每场战斗敌方对我方的**第一次攻击**伤害归零。
+       * 放在这里而不是别处，是因为反伤（荆棘铁壁 / 荆棘之甲 / 镜鳞）和中毒都是直接
+       * `hp -= x` 结算的，根本不走 applyDamage 的攻击路径 —— 所以它们天然不会消耗这次免疫，
+       * 正好满足「该 buff 不会被反伤 debuff 破坏」。mods 是每场战斗新建的对象，
+       * 用它自己当「本场用过了吗」的标记即可。 */
+      if (dmg > 0 && def.mods && def.mods.firstHitZero && !def.mods.firstHitZeroUsed) {
+        def.mods.firstHitZeroUsed = true;
+        dmg = 0;
+        r.firstHitZero = true;
+        r.noteText = (r.noteText ? r.noteText + '·' : '') + '先机预判'; r.noteSide = def.side;
+      }
       if (red.jueDui) { r.jueDui = true; r.rebound = red.rebound; }
       if (red.guiJia) r.guiJia = red.guiJia;
       // 开局护盾（石像鬼机制 / 塔 buff「坚韧壁垒」）：先于血量消耗

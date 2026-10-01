@@ -25,10 +25,21 @@
   let replaceTarget = null;   // 第 1 项：永久增益满 5 格时，选中的「要被替换掉」的那个
 
   // ---------- 通用小件 ----------
-  function carryBar(carry, label, cls) {
+  function carryBar(carry, label, cls, tip) {
     const pct = Math.round((carry == null ? 1 : carry) * 100);
-    return '<div class="tower-carry' + (cls ? ' ' + cls : '') + '"><span>' + (label || '血量继承') + '</span>' +
+    /* 本轮第 4 项：血条挂上真实血量上限（悬停显示）。tip 由调用方按本局
+     * lastMaxHp / lastHp 拼好 —— 那两个值在 tower.js 的 adjustMe 里每场更新。 */
+    const tipAttr = tip ? ' data-tip="' + esc(tip) + '" title="' + esc(tip) + '" tabindex="0"' : '';
+    return '<div class="tower-carry' + (cls ? ' ' + cls : '') + '"' + tipAttr + '><span>' + (label || '血量继承') + '</span>' +
       '<div class="tower-carry-bar"><i style="width:' + pct + '%"></i></div><b>' + pct + '%</b></div>';
+  }
+  /** 本局当前的血量上限 / 当前血量（血条悬停用）。 */
+  function hpTip(run) {
+    /* curMaxHp 是 tower.js 现算的（拿到增益立刻反映）；lastMaxHp 只作兜底。 */
+    const maxHp = Number(run && run.curMaxHp) || Number(run && run.lastMaxHp) || 0;
+    if (!(maxHp > 0)) return '血量上限：打完第一场后显示';
+    const hp = Math.max(0, Math.round(Number(run.lastHp) || 0));
+    return '血量上限 ' + maxHp + ' · 当前 ' + hp + '（' + Math.round((run.carry == null ? 1 : run.carry) * 100) + '%，下一场按比例继承）';
   }
   /** 悬停气泡：机制说明放在这里（第 1 项需求），预告列表就只需要一行名字。
    *  用 body 上的 fixed 层，避免被 .tower-main 的 overflow 裁掉。 */
@@ -172,8 +183,10 @@
     /* 本轮第 6 / 9 项的新增益：把「当前到底加了多少」写清楚 */
     if (m.powerPerEmptySlot) parts.push('每个空的永久增益位 攻击 +' + Math.round(m.powerPerEmptySlot * 100) + '%');
     if (m.powerPerPermBuff) parts.push('每拥有 1 个永久增益 攻击 +' + Math.round(m.powerPerPermBuff * 100) + '%');
-    if (m.shopSpendStep) parts.push('每消费 ' + m.shopSpendStep + ' 试炼币 → 随机 +' + (m.shopSpendStat || 1) +
-      ' 力/敏/速 并 +' + (m.shopSpendHp || 5) + ' 生命上限');
+    if (m.shopSpendStep) parts.push('每消费 ' + m.shopSpendStep + ' 试炼币 → 随机获得 力+' + (m.shopSpendStat || 1) +
+      ' / 敏+' + (m.shopSpendStat || 1) + ' / 速+' + (m.shopSpendStat || 1) + ' / 生命上限+' + (m.shopSpendHp || 5) + ' 其中一项');
+    if (m.firstHitZero) parts.push('每场战斗敌方对我方的第一次攻击伤害归零');
+    if (m.pickPermanentFree) parts.push('可给一个已有的永久增益附魔免占位');
     if (b.progress) parts.push('当前进度：' + b.progress);   // 第 7 项：成长类的真实累计值
     if (buff.mods && buff.mods.shopDiscount) parts.push('下个商店 5 折');
     parts.push(replaceTarget === b.id ? '（当前已选为替换目标，点一下取消）' : '点一下选它作为要被替换掉的永久增益');
@@ -195,10 +208,14 @@
     const perm = list.filter((b) => b.kind === 'permanent');
     const lim = list.filter((b) => b.kind === 'limited');
     const cap = Number(run.permCap) || ((TowerData.PERMANENT_SLOTS || 5) + Math.max(0, Number(run.permSlots || 0)));   // 槽位上限含扩容类加成
+    /* 本轮第 1 项：被「虚空铭文」附魔的增益不占槽，面板上标出来（计数走 run.permUsed）。 */
+    const freeIds = run.slotFreeIds || [];
     const permHtml = perm.length
-      ? perm.map((b) => '<span class="buff-tag r' + b.rarity + (b.id === replaceTarget ? ' replacing' : '') + '" data-replace="' + b.id +
+      ? perm.map((b) => '<span class="buff-tag r' + b.rarity + (b.id === replaceTarget ? ' replacing' : '') +
+          (freeIds.indexOf(b.id) >= 0 ? ' slot-free' : '') + '" data-replace="' + b.id +
           '" data-tip="' + esc(permTip(b)) + '" title="' + esc(permTip(b)) + '">' +
-          esc(b.name) + '<i>永久</i>' + (b.stacks > 1 ? '<em>×' + b.stacks + '</em>' : '') + '</span>').join('')
+          esc(b.name) + '<i>' + (freeIds.indexOf(b.id) >= 0 ? '不占位' : '永久') + '</i>' +
+          (b.stacks > 1 ? '<em>×' + b.stacks + '</em>' : '') + '</span>').join('')
       : '<span class="buff-empty">还没有永久增益（每层的休整点可以拿）</span>';
     /* 本轮第 7 项：成长类增益的真实进度单独列一行 —— 只在悬停里写不够，
      * 面板上「吞噬成长 ×1」看起来就像没生效。 */
@@ -213,7 +230,7 @@
           '<b>' + esc(b.name) + '</b><i>' + (b.on ? '生效中' : '已关闭') + '</i><em>剩 ' + b.uses + ' 场</em></button>').join('')
       : '<span class="buff-empty">还没有限次增益</span>';
     return '<div class="tower-buffs endless-buffs">' +
-      '<h4>永久增益 <span class="buff-slot-count">' + perm.length + '/' + cap + '</span>' +
+      '<h4>永久增益 <span class="buff-slot-count">' + (run.permUsed == null ? perm.length : run.permUsed) + '/' + cap + '</span>' +
       (replaceTarget ? '<span class="replace-hint">选一个要替换掉的（再点增益卡确认）</span>' : '') + '</h4>' +
       '<div class="buff-tags">' + permHtml + '</div>' + progHtml +
       '<h4>限次增益 <span class="buff-slot-count">点一下开关</span></h4>' +
@@ -368,7 +385,7 @@
       main = '<div class="tower-head"><h2 class="tower-title">第 ' + run.layer + ' 层 · 第 ' + run.battleNo + '/' + run.battleCount + ' 场</h2>' +
         '<div class="tower-stats">已累积松果 <b class="gold-text">' + run.pot + '</b>（失败只保底 30%）</div></div>' +
         currencyHtml('tower') +
-        carryBar(run.carry) + debuffPanel(run.debuffs) + ownedBuffsHtml('tower') +
+        carryBar(run.carry, '血量继承', '', hpTip(run)) + debuffPanel(run.debuffs) + ownedBuffsHtml('tower') +
         '<div class="tower-actions">' + C().btn('继续战斗', 'fight', 'gold') + C().btn('放弃本层', 'abandon', 'muted small') + '</div>';
     } else {
       // 第 1 项：标题与数据并排、规则压成一行，保证一屏能放下 5 行预告 + 开始按钮
@@ -454,7 +471,7 @@
         '<div class="endless-left">' +
         '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
         '</div>' +
-        carryBar(run.carry, '血量', 'endless-hp') +
+        carryBar(run.carry, '血量', 'endless-hp', hpTip(run)) +
         /* 本轮第 4 项修复：原来这里读的是 info.mechs —— 但 mechs 挂在 **info.run** 里，
          * 顶层没有这个字段，所以这一行永远显示「本段没有额外机制（第 1 段）」，
          * 第 6 层起的荆棘反伤从来没露过面。改成读 run.mechs。 */
@@ -734,14 +751,16 @@
   /** 选取型 buff（神兵淬炼 / 秘技通神）：立即从已有武器或技能里三选一，选完立刻生效。 */
   function openPickBuff(pending) {
     const cands = Tower.pickCandidates(pending.kind);
-    const label = pending.kind === 'skill' ? '技能' : '武器';
+    /* 本轮第 1 项：虚空铭文选的是「已有的永久增益」，与武器/技能共用这个弹窗。 */
+    const isPerm = pending.kind === 'permBuff';
+    const label = isPerm ? '永久增益' : (pending.kind === 'skill' ? '技能' : '武器');
     if (!cands.length) {
       notice('你还没有任何' + label + '可选，这次强化先留着（之后拿到' + label + '再自动弹出）。', [{ label: '知道了', cls: 'gold', run: () => openEndless() }]);
       return;
     }
     /* 按钮只写名字，等级换行显示（modal 按钮是 esc() 输出，用 \n + white-space:pre-line 换行） */
     const buttons = cands.map((c) => ({
-      label: c.name + '\nLv' + (c.level || 1),
+      label: c.name + '\n' + (isPerm ? ('×' + (c.stacks || 1) + ' 层') : ('Lv' + (c.level || 1))),
       cls: 'small pick-buff-btn' + (pending.kind === 'skill' ? '' : ' gold'),
       run: () => {
         const r = Tower.applyPickBuff(pending.kind, c.id);
@@ -749,9 +768,11 @@
         openEndless();
       },
     }));
-    C().modal('三选一 · ' + label + '强化', '<p>' + esc(pending.kind === 'skill'
-      ? '从下面三个技能里选一个：它的触发概率大幅提升（本局有效）。'
-      : '从下面三把武器里选一个：它的伤害 +100%（本局有效）。') + '</p>', buttons, { small: true });
+    C().modal(isPerm ? '附魔 · 选一个永久增益' : ('三选一 · ' + label + '强化'), '<p>' + esc(isPerm
+      ? '从下面三张里选一个永久增益：它不再占用永久增益位（可叠加的则全部层数一起免疫占位，本局有效）。'
+      : (pending.kind === 'skill'
+        ? '从下面三个技能里选一个：它的触发概率大幅提升（本局有效）。'
+        : '从下面三把武器里选一个：它的伤害 +100%（本局有效）。')) + '</p>', buttons, { small: true });
   }
   /** 第 1 项：商店里买永久增益但格子满了 —— 直接选一个替换掉并完成购买。 */
   function offerShopReplace(index, buff) {

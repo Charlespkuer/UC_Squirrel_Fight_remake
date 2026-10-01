@@ -211,7 +211,7 @@
       /* 本轮第 6 项：与永久槽位互动的两个攻击增益。
        * C34 轻装上阵 = 每个**空**槽 +20%（槽越空越强）；C35 厚积薄发 = 每拥有 1 个永久增益 +10%。
        * 都用「当前快照」计算：拿了/卖了/换了永久增益，下一场立刻反映。 */
-      if (m.powerPerEmptySlot) agg.powerMul += m.powerPerEmptySlot * Math.max(0, permSlots(run) - (run.permanent || []).length) * k;
+      if (m.powerPerEmptySlot) agg.powerMul += m.powerPerEmptySlot * Math.max(0, permSlots(run) - permUsed(run)) * k;
       if (m.powerPerPermBuff) agg.powerMul += m.powerPerPermBuff * (run.permanent || []).length * k;
       if (m.winPowerAfter10) agg.powerMul += Math.max(0, Number(run.winPower) || 0) * 0;   // 占位：winPower 在下面统一加
       /* 第 1 项：永久类的生命上限加成记在 run.hpBonus 上（卖掉/替换也不会掉血上限）；
@@ -232,6 +232,7 @@
       if (m.winPowerAfter10) agg.winPower += 1;
       if (m.winHealPct) agg.winHealPct += m.winHealPct * k;                       // 战后续航（可叠加）
       if (m.thornsPct) agg.thornsPct += m.thornsPct * k;                         // 荆棘之甲
+      if (m.firstHitZero) agg.firstHitZero = 1;                                  // 第 1 项：先机预判
       if (m.lowHpPowerMul) { agg.lowHpPowerMul += m.lowHpPowerMul * k; agg.lowHpAt = Math.max(agg.lowHpAt, Number(m.lowHpAt) || 0.35); }
       if (m.mustHitFirst) agg.mustHitFirst = 1;
       if (m.firstSkillFree) agg.firstSkillFree = 1;
@@ -392,6 +393,8 @@
     /* 「补给」：下一场战斗开始时立即回复 50% 生命 —— 在取下一场的时候就把 carry 抬上去。 */
     if (agg.startHealPct > 0) run.carry = Math.min(1, run.carry + agg.startHealPct);
     const adjustMe = (me) => {
+      /* 第 4 项：先记下「未加塔 buff」的基础上限，currentMaxHp() 靠它现算。 */
+      run.baseMaxHp = Math.max(1, Number(me.maxHp) || 0);
       // 本层削弱（三侠大招留下的）：生命上限 / 属性 / 锁武技
       const debuffs = Array.isArray(run.debuffs) ? run.debuffs : [];
       const dMaxHp = debuffs.filter((d) => d.kind === 'maxHp').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
@@ -437,6 +440,9 @@
       // maxHpMul 的「回复等量生命」= 按比例继承到新上限（正增益不亏比例、负增益同步缩血）
       me.maxHp = maxHp;
       me.hp = Math.max(1, Math.min(maxHp, Math.round(maxHp * run.carry)));
+      /* 本轮第 4 项：记下基础上限（未加塔 buff 的那一份）与本场真实上限 / 当前血量。 */
+      run.lastMaxHp = maxHp;
+      run.lastHp = me.hp;
       const mods = {};
       if (agg.critBonus) mods.critBonus = agg.critBonus;
       if (agg.critDmgBonus) mods.critDmgBonus = agg.critDmgBonus;
@@ -450,6 +456,7 @@
       if (agg.firstSkillFree) mods.firstSkillFree = 1;
       if (agg.dmgMul !== 1) mods.dmgMul = agg.dmgMul;
       if (agg.thornsPct) mods.thornsPct = Math.min(0.6, agg.thornsPct);          // 荆棘之甲（sim 里结算）
+      if (agg.firstHitZero) mods.firstHitZero = 1;                              // 第 1 项：先机预判（sim 里结算）
       if (agg.lowHpPowerMul) { mods.lowHpPowerMul = agg.lowHpPowerMul; mods.lowHpAt = agg.lowHpAt || 0.35; }
       // 第 2 项：不死鸟按「每层一次」发放（本层已经触发过就不再给）
       if (agg.revivePct && (run.reviveLayer || 0) !== run.layer) mods.deathSaves = (mods.deathSaves || []).concat([{ healPct: agg.revivePct }]);
@@ -837,6 +844,15 @@
       save();
       return { ok: true, pendingPick: run.pendingPick };
     }
+    /* 本轮第 1 项：虚空铭文（传奇·隐藏选取型）—— 选已有的一个永久增益给它附魔免占位。
+     * 与武器/技能选取同款：不占槽、不触发替换，立即登记 pendingPick 等界面选。 */
+    if (buff.mods && buff.mods.pickPermanentFree) {
+      if ((run.pickBuffIds || []).includes(buff.id)) return { ok: false, msg: '这类选取增益一局只能获得一次。' };
+      run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]);
+      run.pendingPick = { kind: 'permBuff', buffId: buff.id };
+      save();
+      return { ok: true, pendingPick: run.pendingPick };
+    }
     /* 扩容类（+1/+2 槽位）要先于「永久栏已满」判断处理：它不占槽、也不会触发替换。 */
     /* 第 2 项：扩容类 buff（+1/+2 永久槽位）立即生效 —— 加名额、不占自己的槽、一局只能拿一次。 */
     if (buff.mods && buff.mods.permSlot) {
@@ -853,11 +869,14 @@
       if (buff.kind === 'limited') { owned.uses += buff.uses || 1; owned.on = true; }
       return { ok: true, buff, stacks: owned.stacks };
     }
-    if (buff.kind === 'permanent' && list.length >= permSlots(run)) {
+    if (buff.kind === 'permanent' && permUsed(run) >= permSlots(run)) {
       if (!replaceId) return { ok: false, needsReplace: true, buff, msg: '永久增益已满 5 个，先选一个替换掉' };
       const at = list.findIndex((b) => b.id === replaceId);
       if (at < 0) return { ok: false, needsReplace: true, buff, msg: '要替换的增益不存在' };
       list.splice(at, 1);
+      /* 第 3 项：被替换掉的成长类增益，把它的累计一起清掉。 */
+      resetGrowth(run, replaceId);
+      run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== replaceId);
     }
     /* 第 1 项修复：全场五折是 permanent 类，addBuff 原来只对 instant 走 applyInstant，
      * 所以标记一直没被点亮 —— 这里在加入时就把折扣标记打开。 */
@@ -920,6 +939,18 @@
       taken.add(buff.id);
       slots.push({ id: buff.id, sold: false });
     }
+    /* 本轮第 5 项：商店 5 格也保证至少有一张限次增益（与场间三选一同一个口径：
+     * 「接下来 N 场」那类，排除一次性开局的补给 N08）。 */
+    const isLimited = (bid) => { const b = D().BUFF_BY_ID[bid]; return !!b && b.kind === 'limited' && b.id !== 'N08'; };
+    if (slots.length && !slots.some((sl) => isLimited(sl.id))) {
+      const cand = pool.filter((b) => b.kind === 'limited' && b.id !== 'N08' && !taken.has(b.id) && ownable(run, b));
+      if (cand.length) {
+        const buff = cand[Math.floor(Math.random() * cand.length)];
+        taken.delete(slots[slots.length - 1].id);
+        slots[slots.length - 1] = { id: buff.id, sold: false };
+        taken.add(buff.id);
+      }
+    }
     return slots;
   }
   function shopState() {
@@ -938,14 +969,17 @@
     if (!stacksOf(run, 'C36')) return null;                 // 没这个增益就不累计
     const mm = D().BUFF_BY_ID.C36.mods, step = Math.max(1, Number(mm.shopSpendStep) || 20);
     run.shopSpend = Math.max(0, Number(run.shopSpend) || 0) + spend;
-    const keys = ['power', 'agility', 'speed'];
+    /* 本轮第 2 项：改成「力+1 / 敏+1 / 速+1 / 生命上限+5」**四项里随机一项**，
+     * 不再是「随机一项属性 + 每次都额外加 5 血」。 */
+    const opts = ['power', 'agility', 'speed', 'hp'];
     const gained = [];
     while (run.shopSpend >= step) {
       run.shopSpend -= step;
-      const key = keys[Math.floor(Math.random() * keys.length)];
+      const key = opts[Math.floor(Math.random() * opts.length)];
       run.spendGain = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, run.spendGain || {});
-      run.spendGain[key] += Math.max(0, Number(mm.shopSpendStat) || 1);
-      run.spendGain.hp += Math.max(0, Number(mm.shopSpendHp) || 5);
+      run.spendGain[key] += key === 'hp'
+        ? Math.max(0, Number(mm.shopSpendHp) || 5)
+        : Math.max(0, Number(mm.shopSpendStat) || 1);
       gained.push(key);
     }
     return gained.length ? { gained, spendGain: Object.assign({}, run.spendGain) } : null;
@@ -957,7 +991,7 @@
     if (!slot || slot.sold) return { ok: false };
     const buff = D().BUFF_BY_ID[slot.id];
     // 永久增益满 5 格时先让玩家去替换（商店里不弹替换面板，避免一次点出两层交互）
-    const permanentFull = buff.kind === 'permanent' && (run.permanent || []).length >= permSlots(run) &&
+    const permanentFull = buff.kind === 'permanent' && permUsed(run) >= permSlots(run) &&
       !(run.permanent || []).some((b) => b.id === buff.id);
     if (permanentFull && !replaceId) {
       // 第 1 项：不再把玩家打发回主界面 —— 直接把替换目标的选择交给界面
@@ -1022,6 +1056,8 @@
       if (i >= 0) {
         const removed = list[i];
         list.splice(i, 1);
+        resetGrowth(run, id);                                                      // 第 3 项：成长累计清零
+        run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== id);         // 第 1 项：附魔记录一并清掉
         // 选取型被移除时，连带清掉它强化过的武器/技能与待选取状态
         if (id === 'C32') run.weaponBoost = null;
         if (id === 'C33') run.skillBoost = null;
@@ -1037,6 +1073,17 @@
   function pickCandidates(kind) {
     const run = endless().run;
     if (!run) return [];
+    /* 本轮第 1 项：虚空铭文选的是「已有的永久增益」（隐藏型不参与，它们本就不占槽）。 */
+    if (kind === 'permBuff') {
+      const pool = (run.permanent || [])
+        .map((b) => ({ id: b.id, buff: D().BUFF_BY_ID[b.id], stacks: b.stacks || 1 }))
+        .filter((x) => x.buff && !x.buff.hidden);
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+      }
+      return pool.slice(0, 3).map((x) => ({ id: x.id, name: x.buff.name, rarity: x.buff.rarity, stacks: x.stacks }));
+    }
     const list = kind === 'skill'
       ? (State.mySkills ? State.mySkills() : [])
       : (State.myWeapons ? State.myWeapons() : []);
@@ -1053,6 +1100,14 @@
     if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
     const pend = run.pendingPick;
     if (!pend || pend.kind !== kind) return { ok: false, msg: '现在没有待选取的强化。' };
+    /* 本轮第 1 项：虚空铭文落地 —— 记进 slotFreeIds，permUsed() 之后就会把它排除。 */
+    if (kind === 'permBuff') {
+      if (!(run.permanent || []).some((b) => b.id === id)) return { ok: false, msg: '你还没有这个永久增益。' };
+      run.slotFreeIds = (run.slotFreeIds || []).concat([id]);
+      run.pendingPick = null;
+      save();
+      return { ok: true, kind, id, slotFree: true };
+    }
     const key = kind === 'skill' ? 'skillBoost' : 'weaponBoost';
     run[key] = run[key] || {};
     run[key][Number(id)] = Math.max(Number(run[key][Number(id)]) || 0, pend.pct);
@@ -1062,6 +1117,43 @@
   }
   /** 永久增益槽位数：基础 5 + 扩容类 buff 给的名额。 */
   function permSlots(run) { return (D().PERMANENT_SLOTS || 5) + Math.max(0, Number(run && run.permSlots) || 0); }
+  /** 本轮第 1 项：**实际占用**的永久槽位数 = 拥有数 − 被「虚空铭文」附魔免占位的数量。
+   *  槽位判断、面板计数、C34「空槽换攻击」全部走这里，避免三处各算一套。 */
+  function permUsed(run) {
+    const list = (run && run.permanent) || [];
+    const free = ((run && run.slotFreeIds) || []).filter((id) => list.some((b) => b.id === id));
+    return Math.max(0, list.length - free.length);
+  }
+  /** 本轮第 4 项：**当前**血量上限（血条悬停显示用）。
+   * 不直接用「上一场开战时的 maxHp」，是因为两次战斗之间玩家可能刚拿了增益 ——
+   * 那样悬停会显示过期数字。这里按 adjustMe 的同一个公式现算：
+   *   基础上限 ×(1 + 增益 maxHpMul + 永久 hpBonus) ×本层削弱 + 固定加成（以战养战 / 挥金如土）。
+   * 基础上限由 adjustMe 每场记到 run.baseMaxHp（是「未加塔 buff」的那一份）。 */
+  function currentMaxHp(run) {
+    const base = Number(run && run.baseMaxHp) || 0;
+    if (!(base > 0)) return 0;
+    const agg = aggregate(run, { hero: false, poolNpc: false, elite: false });
+    const dMaxHp = ((run.debuffs || []).filter((d) => d.kind === 'maxHp'))
+      .reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
+    const stickyHp = Math.max(0, Number(run.hpBonus) || 0);
+    const flat = Math.max(0, Number(run.winHpFlat) || 0) +
+      (run.spendGain ? Math.max(0, Number(run.spendGain.hp) || 0) : 0);
+    return Math.max(1, Math.round(base * (1 + agg.maxHpMul + stickyHp) * dMaxHp) + flat);
+  }
+  /** 本轮第 3 项：卖出/失去**成长类**增益时，把它累计出来的运行态一并清零 ——
+   *  再买回来是从 0 重新长，而不是接着上次的进度（吞噬成长就是典型）。
+   *  （叠层数本身在重新获得时本来就是 1；过去漏掉的是这些「跑出来的数值」。） */
+  function resetGrowth(run, id) {
+    if (!run) return false;
+    if (id === 'C06') run.killPower = 0;
+    else if (id === 'C07') run.killMaxHp = 0;
+    else if (id === 'C11') run.winHpFlat = 0;
+    else if (id === 'C12') run.winPower = 0;
+    else if (id === 'C25') run.sellBonus = 0;
+    else if (id === 'C36') { run.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; run.shopSpend = 0; }
+    else return false;
+    return true;
+  }
   /** 卖出价：名贵手表这类有固定 sellValue 的按固定值，其它按商店价 40%。 */
   function sellPriceOf(run, buff) {
     const base = buff.mods && buff.mods.sellValue
@@ -1084,6 +1176,8 @@
       if (i >= 0) {
         const gain = sellPriceOf(run, buff);
         list.splice(i, 1);
+        resetGrowth(run, id);                                                      // 第 3 项：成长累计清零
+        run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== id);         // 第 1 项：附魔记录一并清掉
         run.coins += gain;
         save();
         return { ok: true, gain };
@@ -1208,6 +1302,10 @@
       run: t.run ? { layer: t.run.layer, battleNo: t.run.idx + 1, battleCount: t.run.plan.length, carry: t.run.carry, pot: t.run.pot, failedAt: t.run.failedAt == null ? null : t.run.failedAt,
         choices: t.run.choices ? t.run.choices.slice() : null,
         debuffs: (t.run.debuffs || []).slice(),
+        // 第 4 项：挑战塔的血条悬停也显示真实上限
+        lastMaxHp: Math.max(0, Number(t.run.lastMaxHp) || 0),
+        lastHp: Math.max(0, Number(t.run.lastHp) || 0),
+        curMaxHp: currentMaxHp(t.run),
         // 下一场是谁 + 它的机制（选 buff 页要展示「你接下来要打的那个 boss 是什么」）
         next: t.run.plan[t.run.idx] ? Object.assign({ kind: t.run.plan[t.run.idx].kind }, entryInfo(t.run.plan[t.run.idx])) : null } : null,
       preview: preview(layer) };
@@ -1229,6 +1327,13 @@
         restShopUsed: !!e.run.restShopUsed,
         pendingPick: e.run.pendingPick || null,
         permSlots: Math.max(0, Number(e.run.permSlots) || 0),
+        // 本轮（上一轮第 1 项）虚空铭文：免占位的增益 id + 实际占用槽位数
+        slotFreeIds: (e.run.slotFreeIds || []).slice(),
+        permUsed: permUsed(e.run),
+        // 本轮第 4 项：血条悬停要显示真实上限与当前血量（curMaxHp 是现算的）
+        lastMaxHp: Math.max(0, Number(e.run.lastMaxHp) || 0),
+        lastHp: Math.max(0, Number(e.run.lastHp) || 0),
+        curMaxHp: currentMaxHp(e.run),
         // 本轮第 3 / 9 项：即时削弱累计 + 挥金如土的消费进度（界面要显示）
         enemyMaxHpDown: Math.max(0, Number(e.run.enemyMaxHpDown) || 0),
         shopSpend: Math.max(0, Number(e.run.shopSpend) || 0),

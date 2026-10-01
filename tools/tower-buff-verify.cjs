@@ -62,7 +62,7 @@ function clearPhase() {
 }
 
 // ---------- 任务 2：出率 ----------
-hr('任务 2：稀有度出率');
+hr('上轮 2：稀有度出率');
 {
   const w = TowerData.RARITY_WEIGHTS, sum = w.reduce((a, b) => a + b, 0);
   check('权重数组是 4 档且合计 100', w.length === 4 && sum === 100, '[' + w.join(', ') + '] 合计 ' + sum);
@@ -102,7 +102,7 @@ hr('任务 2：稀有度出率');
 }
 
 // ---------- 任务 8：选牌必有一张限次 ----------
-hr('任务 8：每次多选一必有一张限次增益（不含补给 N08）');
+hr('上轮 8：每次多选一必有一张限次增益（不含补给 N08）');
 {
   let sets = 0, withLimited = 0;
   for (let i = 0; i < SAMPLE && sets < 120; i++) {
@@ -127,8 +127,8 @@ hr('任务 8：每次多选一必有一张限次增益（不含补给 N08）');
   check('每一组都至少有一张限次', sets > 0 && withLimited === sets, withLimited + '/' + sets);
 }
 
-// ---------- 任务 5：限次 buff 跨层保留 ----------
-hr('任务 5：限次 buff 按场次消耗、跨层不被清空');
+// ---------- 本轮 5：限次 buff 跨层保留 ----------
+hr('上轮 5：限次 buff 按场次消耗、跨层不被清空');
 {
   freshRun();
   Tower.debugGrantBuff('E06');   // 接下来 10 场 +120% 试炼币
@@ -154,7 +154,7 @@ hr('任务 5：限次 buff 按场次消耗、跨层不被清空');
 }
 
 // ---------- 任务 7：成长数值 + 面板进度 + 账本 ----------
-hr('任务 7：成长类数值与账本');
+hr('上轮 7：成长类数值与账本');
 {
   freshRun();
   Tower.debugGrantBuff('C07');   // 吞噬成长：每击杀 +3%，上限 +45%
@@ -182,7 +182,7 @@ hr('任务 7：成长类数值与账本');
 }
 
 // ---------- 任务 3：即时削弱敌方生命上限 ----------
-hr('任务 3：即时削弱敌方生命上限');
+hr('上轮 3：即时削弱敌方生命上限');
 {
   // 同一 salt、同一层，比较拿 buff 前后第一场敌人的生命上限
   freshRun();
@@ -212,7 +212,7 @@ hr('任务 3：即时削弱敌方生命上限');
 }
 
 // ---------- 任务 6：空槽 / 永久数量换攻击 ----------
-hr('任务 6：轻装上阵（空槽 +20%）与厚积薄发（每个永久 +10%）');
+hr('上轮 6：轻装上阵与厚积薄发');
 {
   /* 注意测量方式：State.genAI 每次的属性带随机（装备品质），所以不能跨局比较绝对值。
    * 做法是在**同一局**里，用同一个基准对象克隆两份：先量没有增益的那一场，
@@ -248,7 +248,7 @@ hr('任务 6：轻装上阵（空槽 +20%）与厚积薄发（每个永久 +10%�
 }
 
 // ---------- 任务 9：挥金如土 ----------
-hr('任务 9：挥金如土（每消费 20 试炼币 → 随机 +1 力/敏/速 并 +5 生命）');
+hr('上轮 9：挥金如土');
 {
   freshRun();
   // 推进到第 5 层通关后的商店阶段（每 5 层一次结算点）
@@ -284,13 +284,163 @@ hr('任务 9：挥金如土（每消费 20 试炼币 → 随机 +1 力/敏/速 �
     const statSum = (g1.power - g0.power) + (g1.agility - g0.agility) + (g1.speed - g0.speed);
     check('消费累计换成属性点', statSum > 0, '消费 ' + spent + ' 币 → 力+' + (g1.power - g0.power) +
       ' 敏+' + (g1.agility - g0.agility) + ' 速+' + (g1.speed - g0.speed));
-    check('每 1 点属性同时 +5 生命上限', (g1.hp - g0.hp) === statSum * 5, '属性共 +' + statSum + '，生命 +' + (g1.hp - g0.hp));
-    check('累计点数量与消费额一致（每 20 币 1 点）', Math.abs(statSum - Math.floor((spent + Number(r1.shopSpend || 0)) / 20)) <= 1,
-      '消费 ' + spent + '，剩余进度 ' + r1.shopSpend + '，得点 ' + statSum);
+    /* 第 2 项（本轮）：改成「力+1 / 敏+1 / 速+1 / 生命上限+5」四项随机**一项** ——
+     * 所以「获得次数」= 属性点数 + 生命增量/5，且应等于 floor(总消费/20)。 */
+    const gains = statSum + Math.round((g1.hp - g0.hp) / 5);
+    const expectGains = Math.floor((spent + Number(r1.shopSpend || 0)) / 20);
+    check('每次消费 20 币只给四项中的一项', Math.abs(gains - expectGains) <= 1,
+      '消费 ' + spent + '，剩余进度 ' + r1.shopSpend + '，共获得 ' + gains + ' 次（力+' + (g1.power - g0.power) +
+      ' 敏+' + (g1.agility - g0.agility) + ' 速+' + (g1.speed - g0.speed) + ' 生命+' + (g1.hp - g0.hp) + '）');
+    check('生命项每次固定 +5', (g1.hp - g0.hp) % 5 === 0, '生命 +' + (g1.hp - g0.hp));
     const ob = Tower.ownedBuffs('endless').find((b) => b.id === 'C36');
     check('面板显示累计量与距下次进度', !!(ob && ob.progress), ob ? ob.progress : '没有 progress');
   }
   Tower.abandon('endless');
+}
+
+// ---------- 本轮 1a：虚空铭文 ----------
+hr('本轮 1a：虚空铭文（附魔一个永久增益免占位）');
+{
+  freshRun();
+  for (const id of ['C01', 'C02', 'C21', 'C22', 'C23']) Tower.debugGrantBuff(id);
+  const r0 = Tower._debugRun('endless');
+  check('先占满 5 个永久槽', (r0.permanent || []).length === 5, '永久=' + (r0.permanent || []).length);
+  const full = Tower.debugGrantBuff('C29');
+  check('满格时再加永久增益需要替换', !!(full && full.res && full.res.needsReplace), JSON.stringify(full && full.res && (full.res.msg || '')));
+  const g = Tower.debugGrantBuff('C37');
+  const r1 = Tower._debugRun('endless');
+  check('虚空铭文进入「选取永久增益」状态', !!(g && g.ok && r1.pendingPick && r1.pendingPick.kind === 'permBuff'), JSON.stringify(r1.pendingPick));
+  const cands = Tower.pickCandidates('permBuff');
+  check('候选来自已有的永久增益（排除隐藏型）', cands.length > 0 && cands.every((c) =>
+    TowerData.BUFF_BY_ID[c.id] && !TowerData.BUFF_BY_ID[c.id].hidden), cands.map((c) => c.id).join(','));
+  const picked = cands[0];
+  const before = (r1.permanent || []).length;
+  const ap = Tower.applyPickBuff('permBuff', picked.id);
+  const r2 = Tower._debugRun('endless');
+  check('附魔落地成功', !!(ap && ap.ok), JSON.stringify(ap && (ap.msg || '')));
+  check('permUsed 比拥有数少 1', r2.permUsed === undefined ? ((r2.permanent || []).length - (r2.slotFreeIds || []).length) === before - 1 : true,
+    '免占位=' + JSON.stringify(r2.slotFreeIds));
+  const info = Tower.endlessInfo();
+  check('界面数据 permUsed 也少 1', info.run.permUsed === before - 1, 'permUsed=' + info.run.permUsed + ' cap=' + info.run.permCap);
+  const again = Tower.debugGrantBuff('C29');
+  check('腾出位置后又能再拿一个永久增益', !!(again && again.ok), JSON.stringify(again && again.res && (again.res.msg || 'ok')));
+  Tower.debugLoseBuff(picked.id);
+  const r3 = Tower._debugRun('endless');
+  check('失去被附魔的增益后附魔记录一并清掉', !(r3.slotFreeIds || []).includes(picked.id), JSON.stringify(r3.slotFreeIds || []));
+  Tower.abandon('endless');
+}
+
+// ---------- 本轮 1b：先机预判 ----------
+hr('本轮 1b：先机预判（首次受击为 0，反伤不消耗）');
+{
+  /* 用**手工构造的确定性对局**来验，不依赖塔里的随机对手 ——
+   * 第一版跑塔内实战，结果那局我方压根没被普攻命中，断言随机飘。
+   * 这里让敌人速度远高于我方（必定先手），场景就固定了。 */
+  const mk = (o) => Object.assign({ name: 'X', level: 50, power: 100, agility: 50, speed: 50,
+    hp: 6000, maxHp: 6000, weapons: [], skills: [], effects: {},
+    baseStats: { power: 100, agility: 50, speed: 50 } }, o);
+  /* 参数刻意做成确定性：
+   *  · 敌方速度更高 → 必定先手（这样「首次受击」一定发生）
+   *  · 我方敏捷 300 vs 敌方 1 → 我方普攻必中（保证能打到带荆棘的对手）
+   *  · 双方血厚 → 战斗足够长，不会被 120 动作上限截断 */
+  const hero = mk({ name: '我方', speed: 100, agility: 300, power: 200, hp: 30000, maxHp: 30000,
+    mods: { firstHitZero: 1 } });
+  const foe = mk({ name: '敌方', speed: 200, agility: 1, power: 120, hp: 30000, maxHp: 30000 });
+  const res = Sim.simulate(hero, foe);
+  const zero = (res.rounds || []).filter((r) => r.firstHitZero);
+  check('敌方首次攻击被归零', zero.length === 1, '触发 ' + zero.length + ' 次');
+  check('归零的那一回合没造成伤害', zero.length === 1 && !zero[0].dmg, '该回合 dmg=' + (zero[0] && zero[0].dmg));
+  check('每场只触发一次', zero.length <= 1, '触发 ' + zero.length + ' 次');
+
+  // 对手带荆棘：反伤不能消耗这次免疫
+  const hero2 = mk({ name: '我方', speed: 100, agility: 300, power: 200, hp: 30000, maxHp: 30000,
+    mods: { firstHitZero: 1 } });
+  const foe2 = mk({ name: '荆棘敌方', speed: 200, agility: 1, power: 120, hp: 30000, maxHp: 30000, mech: ['thorns'] });
+  const res2 = Sim.simulate(hero2, foe2);
+  const rounds2 = res2.rounds || [];
+  const thornsRounds = rounds2.filter((r) => r.thornsDmg);
+  check('带荆棘的对手确实发生了反伤', thornsRounds.length >= 1, '反伤回合数=' + thornsRounds.length);
+  check('反伤回合不会消耗这次免疫', thornsRounds.filter((r) => r.firstHitZero).length === 0,
+    '反伤且归零=' + thornsRounds.filter((r) => r.firstHitZero).length);
+  check('反伤照旧生效（伤害不为 0）', thornsRounds.every((r) => r.thornsDmg > 0),
+    '反伤值=' + thornsRounds.map((r) => r.thornsDmg).slice(0, 3).join(','));
+  check('带荆棘时敌方首次攻击依然被归零', rounds2.filter((r) => r.firstHitZero).length === 1,
+    '触发 ' + rounds2.filter((r) => r.firstHitZero).length + ' 次');
+}
+
+// ---------- 本轮 3：成长累计在失去后重置 ----------
+hr('本轮 3：成长类增益失去后累计清零');
+{
+  freshRun();
+  Tower.debugGrantBuff('C07');
+  Tower.debugGrantBuff('C07');
+  const stack0 = ((Tower._debugRun('endless').permanent || []).find((b) => b.id === 'C07') || {}).stacks;
+  for (let i = 0; i < 6; i++) { win('endless', 1); clearPhase(); if (!Tower._debugRun('endless')) break; }
+  const r1 = Tower._debugRun('endless');
+  check('叠到 2 层并长了起来', stack0 === 2 && (r1.killMaxHp || 0) > 0, 'stacks=' + stack0 + ' killMaxHp=' + (r1.killMaxHp || 0).toFixed(3));
+  Tower.debugLoseBuff('C07');
+  const r2 = Tower._debugRun('endless');
+  check('失去后累计清零', (r2.killMaxHp || 0) === 0, 'killMaxHp=' + (r2.killMaxHp || 0));
+  Tower.debugGrantBuff('C07');
+  const r3 = Tower._debugRun('endless');
+  const back = (r3.permanent || []).find((b) => b.id === 'C07');
+  check('重新获得是 1 层、累计从 0 开始', !!back && back.stacks === 1 && (r3.killMaxHp || 0) === 0,
+    'stacks=' + (back && back.stacks) + ' killMaxHp=' + (r3.killMaxHp || 0));
+  Tower.abandon('endless');
+}
+
+// ---------- 本轮 4：血条悬停的真实上限 ----------
+hr('本轮 4：血条悬停显示真实血量上限');
+{
+  freshRun();
+  /* 血条上的数值来自 adjustMe（游戏里由 Main.startBattle 调用），探针要自己调一次。 */
+  const nx = Tower.nextBattle('endless');
+  const me = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+  me.maxHp = me.hp;
+  nx.adjustMe(me);
+  Tower.reportBattle('endless', nx.token, true, 0.8);
+  const info = Tower.endlessInfo();
+  check('能拿到现在的血量上限与当前血量', info.run.curMaxHp > 0 && info.run.lastHp > 0,
+    '上限 ' + info.run.curMaxHp + ' / 当前 ' + info.run.lastHp + '（本场 adjustMe 算出 ' + me.maxHp + '）');
+  check('实时上限与本场 adjustMe 一致', info.run.curMaxHp === me.maxHp,
+    info.run.curMaxHp + ' vs ' + me.maxHp);
+  // 拿到加生命上限的增益后，实时上限应立刻变大（不用等下一场）
+  Tower.debugGrantBuff('C01');                       // 磐石之躯：生命上限 +20%
+  const after = Tower.endlessInfo();
+  check('拿增益后实时上限立刻变大', after.run.curMaxHp > info.run.curMaxHp,
+    info.run.curMaxHp + ' -> ' + after.run.curMaxHp);
+  Tower.abandon('endless');
+}
+
+// ---------- 本轮 5：商店 5 格必有限次 ----------
+hr('本轮 5：商店 5 格必有一张限次增益');
+{
+  let shops = 0, withLimited = 0;
+  for (let i = 0; i < 60 && shops < 25; i++) {
+    freshRun();
+    let guard = 0;
+    while (guard++ < 20) {
+      win('endless', 1);
+      const run = Tower._debugRun('endless');
+      if (!run) break;
+      if (run.choices) {
+        const res = Tower.openRestShop();
+        if (res && res.ok) {
+          const st = Tower.shopState();
+          shops++;
+          const has = (st.slots || []).some((sl) => {
+            const b = TowerData.BUFF_BY_ID[sl.id];
+            return b && b.kind === 'limited' && b.id !== 'N08';
+          });
+          if (has) withLimited++;
+          break;
+        }
+        Tower.pickChoice('endless', 0);
+      }
+    }
+    Tower.abandon('endless');
+  }
+  check('每个商店都至少有一张限次增益', shops > 0 && withLimited === shops, withLimited + '/' + shops);
 }
 
 console.log('\n================ 合计 ' + pass + ' 通过 / ' + fail + ' 失败 ================');

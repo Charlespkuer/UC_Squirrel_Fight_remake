@@ -194,6 +194,11 @@ async function main() {
     for (let i = 0; i < 3; i++) {
       const nx = Tower.nextBattle('endless');
       if (!nx || !nx.ok) break;
+      /* 走一遍 adjustMe（游戏里由 Main.startBattle 调用）—— 这样血条悬停的
+       * 「血量上限/当前血量」才有真实数值可显示。 */
+      const me = State.genAI(35, '', { levelJitter: 0, gearSelfLevel: true });
+      me.maxHp = me.hp;
+      nx.adjustMe(me);
       Tower.reportBattle('endless', nx.token, true, 0.8);
     }
     TowerUI.openEndless();

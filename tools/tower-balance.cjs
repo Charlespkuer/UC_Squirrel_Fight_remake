@@ -392,9 +392,9 @@ function autoPick(ctx, mode) {
     // 第 1 项：buff 改成「限次 / 永久」两分法 + 即时经济类
     /* 本轮（第 3/6/9 项）新增 5 个：E07/E08（即时·削敌方生命上限）、
      * C34/C35/C36（永久·空槽攻击 / 永久数攻击 / 商店消费成长）→ 58 → 63。 */
-    t('无尽池：限次 21 / 永久 37 / 即时 5（共 63）+ 8 个无尽专属', ctx.TowerData.BUFFS.length === 63 &&
+    t('无尽池：限次 21 / 永久 39 / 即时 5（共 65）+ 8 个无尽专属', ctx.TowerData.BUFFS.length === 65 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 21 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 37 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 39 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 5 &&
       ctx.TowerData.BUFFS.filter((b) => b.endlessOnly).length === 8);
     t('主塔池只吃限次且非无尽专属', ctx.TowerData.towerPool.every((b) => b.kind === 'limited' && !b.endlessOnly));

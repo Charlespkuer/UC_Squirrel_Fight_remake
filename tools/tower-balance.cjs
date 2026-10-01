@@ -543,14 +543,14 @@ function autoPick(ctx, mode) {
     r.permanent.push({ id: 'C24', stacks: 1 }, { id: 'C25', stacks: 1 });
     const nb = Tower.nextBattle('endless');
     Tower.reportBattle('endless', nb.token, true, 0.8, { rounds: [] });
-    t('胜利后账本累计 +25', (r.sellBonus || 0) === 25);
+    t('胜利后账本累计 +10', (r.sellBonus || 0) === 10);   // 本轮第 2 项：25 -> 10
     /* 本轮第 7 项：账本的累计加成**只加账本自己**（原来把它加到所有 buff 的卖价上）。
      * 所以名贵手表按自身固定价 200 卖出，账本自己才是「基础价 + 累计」。 */
     const sold = Tower.sellBuff('C24');
     t('名贵手表只按自身固定价 200 卖出（账本不再普涨卖价）', sold.ok === true && sold.gain === 200 && r.coins >= 200);
     const ledger = Tower.ownedBuffs('endless').find((b) => b.id === 'C25');
     const ledgerBase = Math.max(1, Math.round(ctx.TowerData.shopPrice(ctx.TowerData.BUFF_BY_ID.C25) * ctx.TowerData.SHOP.sellBack));
-    t('账本自身卖价 = 基础 ' + ledgerBase + ' + 累计 25', !!ledger && ledger.sellPrice === ledgerBase + 25);
+    t('账本自身卖价 = 基础 ' + ledgerBase + ' + 累计 10', !!ledger && ledger.sellPrice === ledgerBase + 10);
     Tower.abandon('endless');
   }
   // 选取型隐藏 buff：神兵淬炼 / 秘技通神（立即生效、隐藏、不可出售、一局一次）
@@ -572,7 +572,9 @@ function autoPick(ctx, mode) {
     } else {
       t('没有武器时不落地（保留 pendingPick 等以后选）', r.pendingPick && r.pendingPick.kind === 'weapon');
     }
-    t('还没落地时可以再拿（不会白拿一次就永远刷不到）', Tower.debugGrantBuff('C32').ok === true);
+    /* 本轮第 4 项最终口径：拿到就登记「一局一次」（不再重复刷到），
+   * 但 pendingPick 会保留 —— 没武器时不算白拿，之后拿到武器照样弹三选一。 */
+  t('拿到后不会再被刷到（一局一次）', Tower.debugGrantBuff('C32').ok === false);
     // 调试面板能列出来（pickBuffIds 是调试用的可见来源），也能被「失去」
     /* 本轮第 4 项：选取型不再「一拿到就登记」——那会让「当时没有武器可选」的情况白白消耗掉。
    * 现在落地前由 pendingPick 记录，落地后才进 pickBuffIds。 */

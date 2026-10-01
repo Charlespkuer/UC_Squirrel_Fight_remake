@@ -344,7 +344,9 @@ hr('本轮 1b：先机预判（首次受击为 0，反伤不消耗）');
    *  · 敌方速度更高 → 必定先手（这样「首次受击」一定发生）
    *  · 我方敏捷 300 vs 敌方 1 → 我方普攻必中（保证能打到带荆棘的对手）
    *  · 双方血厚 → 战斗足够长，不会被 120 动作上限截断 */
-  const hero = mk({ name: '我方', speed: 100, agility: 300, power: 200, hp: 30000, maxHp: 30000,
+  /* 这一场我方敏捷压到 1：保证敌人的第一次攻击**一定命中**（否则被闪掉就不触发，
+   * 断言会随机红）。要验「反伤不消耗免疫」时另给高敏捷（见下面 hero2）。 */
+  const hero = mk({ name: '我方', speed: 100, agility: 1, power: 200, hp: 30000, maxHp: 30000,
     mods: { firstHitZero: 1 } });
   const foe = mk({ name: '敌方', speed: 200, agility: 1, power: 120, hp: 30000, maxHp: 30000 });
   const res = Sim.simulate(hero, foe);
@@ -525,11 +527,12 @@ hr('本轮 4：神兵淬炼/秘技通神 在没有可选目标时不该被白白
   const g = Tower.debugGrantBuff('C32');
   const r1 = Tower._debugRun('endless');
   check('拿到后进入待选取', !!(g && g.ok && r1.pendingPick), JSON.stringify(r1.pendingPick));
-  check('还没落地，就不该登记「一局一次」', !(r1.pickBuffIds || []).includes('C32'), JSON.stringify(r1.pickBuffIds || []));
+  check('拿到就登记「一局一次」（不再重复刷到）', (r1.pickBuffIds || []).includes('C32'), JSON.stringify(r1.pickBuffIds || []));
   const cands = Tower.pickCandidates('weapon');
-  check('没有武器时候选为空（此时不该消耗）', cands.length === 0, '候选 ' + cands.length + ' 个');
+  check('没有武器时候选为空（但待选取保留，之后能再选）', cands.length === 0 && !!r1.pendingPick, '候选 ' + cands.length + ' 个');
   const g2 = Tower.debugGrantBuff('C32');
-  check('还能再次拿到（不会因为白拿一次就永久刷不到）', !!(g2 && g2.ok), JSON.stringify(g2 && g2.res && g2.res.msg));
+  check('再次拿会被拒（不会重复刷到神兵淬炼）', !(g2 && g2.ok), JSON.stringify(g2 && g2.res && g2.res.msg));
+  check('但待选取仍保留（不会白拿一次就没了）', !!(Tower._debugRun('endless').pendingPick), JSON.stringify(Tower._debugRun('endless').pendingPick));
   // 真给一把武器再落地：登记「一局一次」，之后再拿才被拒
   // 注意 State.state().weapons 存的是 'id:level' 字符串（不是对象）
   for (const wid of [1, 2, 3, 5, 8, 15]) {
@@ -542,7 +545,13 @@ hr('本轮 4：神兵淬炼/秘技通神 在没有可选目标时不该被白白
   const r2 = Tower._debugRun('endless');
   check('落地成功并登记一局一次', !!(ap && ap.ok) && (r2.pickBuffIds || []).includes('C32'), JSON.stringify(r2.pickBuffIds || []));
   const g3 = Tower.debugGrantBuff('C32');
-  check('落地之后才永久挡住', !(g3 && g3.ok), JSON.stringify(g3 && g3.res && g3.res.msg));
+  check('落地后依然是拒绝再拿', !(g3 && g3.ok), JSON.stringify(g3 && g3.res && g3.res.msg));
+  /* 失去之后要真的能再刷到（不然「卖了/丢了就永远没了」）。 */
+  const lostPick = Tower.debugLoseBuff('C32');
+  const g4 = Tower.debugGrantBuff('C32');
+  check('失去选取型之后可以再拿到（不会永久锁死）', !!(lostPick && lostPick.ok && g4 && g4.ok),
+    'lost=' + JSON.stringify(lostPick) + ' 再拿=' + JSON.stringify(g4 && (g4.ok || g4.res && g4.res.msg)) +
+    ' pickBuffIds=' + JSON.stringify(Tower._debugRun('endless').pickBuffIds || []));
   Tower.abandon('endless');
 }
 

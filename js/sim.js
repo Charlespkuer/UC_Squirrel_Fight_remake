@@ -228,6 +228,10 @@
   }
 
   function dodgeChance(att, def) {
+    /* 本轮第 1 项：百步穿杨（mustHitAll）—— 接下来 3 场「所有攻击必中」，
+     * 所以这里直接返回 0 闪避率（普攻/武器/技能/反击全都覆盖）。
+     * 原来的 mustHitFirst 是「下一次攻击必中」，由 mustHitNext 单次标记实现。 */
+    if (att.mods && att.mods.mustHitAll) return 0;
     const wMust = att.mustHitNext;
     if (wMust) return 0;
     let d = 6 + 26 * effAgility(def) / (effAgility(def) + effAgility(att) * 1.2 + 40);

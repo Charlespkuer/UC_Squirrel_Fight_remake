@@ -232,6 +232,7 @@
       if (m.winPowerAfter10) agg.winPower += 1;
       if (m.winHealPct) agg.winHealPct += m.winHealPct * k;                       // 战后续航（可叠加）
       if (m.thornsPct) agg.thornsPct += m.thornsPct * k;                         // 荆棘之甲
+      if (m.mustHitAll) agg.mustHitAll = 1;                                      // 第 1 项：百步穿杨
       if (m.firstHitZero) agg.firstHitZero = 1;                                  // 第 1 项：先机预判
       if (m.lowHpPowerMul) { agg.lowHpPowerMul += m.lowHpPowerMul * k; agg.lowHpAt = Math.max(agg.lowHpAt, Number(m.lowHpAt) || 0.35); }
       if (m.mustHitFirst) agg.mustHitFirst = 1;
@@ -463,6 +464,7 @@
       if (agg.firstSkillFree) mods.firstSkillFree = 1;
       if (agg.dmgMul !== 1) mods.dmgMul = agg.dmgMul;
       if (agg.thornsPct) mods.thornsPct = Math.min(0.6, agg.thornsPct);          // 荆棘之甲（sim 里结算）
+      if (agg.mustHitAll) mods.mustHitAll = 1;                                  // 第 1 项：百步穿杨（整个一场必中）
       if (agg.firstHitZero) mods.firstHitZero = 1;                              // 第 1 项：先机预判（sim 里结算）
       if (agg.lowHpPowerMul) { mods.lowHpPowerMul = agg.lowHpPowerMul; mods.lowHpAt = agg.lowHpAt || 0.35; }
       // 第 2 项：不死鸟按「每层一次」发放（本层已经触发过就不再给）
@@ -865,9 +867,11 @@
     /* 选取型（武器/技能强化）同样不占槽、不触发替换：立即登记，等界面做三选一。 */
     if (buff.mods && (buff.mods.pickWeaponPct || buff.mods.pickSkillPct)) {
       if ((run.pickBuffIds || []).includes(buff.id)) return { ok: false, msg: '这类选取增益一局只能获得一次。' };
-      /* 本轮第 4 项：**不再在这里**登记 pickBuffIds —— 原来一拿到就登记，于是「当时没有武器/
-       * 技能可选」时这次强化被白白消耗掉，而且以后永远刷不到了。
-       * 改成等 applyPickBuff 真正落地时再登记（见那里）。 */
+      /* 第 4 项（两轮合并后的口径）：**拿到就登记** pickBuffIds —— 这样它不会在池子里被
+       * 反复刷到（上一轮反馈「还是重复刷到神兵淬炼」）。
+       * 同时保留 pendingPick：即使此刻没有武器/技能可选，这次强化也不会白拿 ——
+       * 界面会提示「先留着」，之后拿到武器/技能时自动弹三选一。 */
+      run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]);
       run.pendingPick = buff.mods.pickWeaponPct
         ? { kind: 'weapon', buffId: buff.id, pct: buff.mods.pickWeaponPct }
         : { kind: 'skill', buffId: buff.id, pct: buff.mods.pickSkillPct };
@@ -878,7 +882,8 @@
      * 与武器/技能选取同款：不占槽、不触发替换，立即登记 pendingPick 等界面选。 */
     if (buff.mods && buff.mods.pickPermanentFree) {
       if ((run.pickBuffIds || []).includes(buff.id)) return { ok: false, msg: '这类选取增益一局只能获得一次。' };
-      run.pendingPick = { kind: 'permBuff', buffId: buff.id };   // 第 4 项：同样等落地再登记
+      run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]);   // 第 4 项：拿到即登记，不重复刷到
+      run.pendingPick = { kind: 'permBuff', buffId: buff.id };
       save();
       return { ok: true, pendingPick: run.pendingPick };
     }
@@ -1101,6 +1106,9 @@
      * 所以失去它应当表现为「取消这次待选取」并返回成功。 */
     if (run.pendingPick && run.pendingPick.buffId === id) {
       run.pendingPick = null;
+      /* 第 4 项：拿到时已登记过「一局一次」，取消待选取就要把它一起撤掉，
+       * 否则这个增益既用不上、又永远刷不到了。 */
+      run.pickBuffIds = (run.pickBuffIds || []).filter((x) => x !== id);
       if (id === 'C32') run.weaponBoost = null;
       if (id === 'C33') run.skillBoost = null;
       save();
@@ -1112,7 +1120,12 @@
         const removed = list[i];
         list.splice(i, 1);
         resetGrowth(run, id);                                                      // 第 3 项：成长累计清零
-        run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== id);         // 第 1 项：附魔记录一并清掉
+        /* 第 1 / 4 项：任何情况下都把「附魔免占位」与「一局一次」的登记一起撤掉 ——
+         * 原来只在命中 pickBuffIds 那条分支里撤，若在别的名单里先命中就会残留登记，
+         * 于是「失去之后再也刷不到」。 */
+        run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== id);
+        run.pickBuffIds = (run.pickBuffIds || []).filter((x) => x !== id);
+        run.permSlotIds = (run.permSlotIds || []).filter((x) => x !== id);
         // 选取型被移除时，连带清掉它强化过的武器/技能与待选取状态
         if (id === 'C32') run.weaponBoost = null;
         if (id === 'C33') run.skillBoost = null;

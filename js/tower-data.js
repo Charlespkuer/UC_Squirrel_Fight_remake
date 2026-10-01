@@ -361,7 +361,8 @@
     /* 第 4 项：单场类 buff 整体加强（原来是 25/20/5/20/30 一档，太温柔，
      * 玩家拿到也不觉得这一场变强），并补了暴击/减伤/速度三种手感明显的。 */
     { id: 'N01', name: '蓄力一击', rarity: 0, kind: 'limited', uses: 2, desc: '接下来 2 场攻击 +40%', mods: { powerMul: 0.40 } },
-    { id: 'N02', name: '百步穿杨', rarity: 0, kind: 'limited', uses: 5, desc: '接下来 5 场首次攻击必中', mods: { mustHitFirst: 1 } },
+    /* 本轮第 1 项：从「首次攻击必中」改成「所有攻击必中」，场次 5 → 3。 */
+    { id: 'N02', name: '百步穿杨', rarity: 0, kind: 'limited', uses: 3, desc: '接下来 3 场所有攻击必中', mods: { mustHitAll: 1 } },
     { id: 'M01', name: '威慑', rarity: 0, kind: 'limited', uses: 2, desc: '接下来 2 场敌人攻击力 −30%', mods: { enemyPowerDown: 0.30 } },
     { id: 'M02', name: '疾风先手', rarity: 0, kind: 'limited', uses: 3, desc: '接下来 3 场你的首次技能不消耗回合', mods: { firstSkillFree: 1 } },
     { id: 'N03', name: '活血丹', rarity: 1, kind: 'limited', uses: 3, desc: '接下来 3 场每回合开始回复 8% 生命', mods: { regenPct: 0.08 } },
@@ -433,7 +434,7 @@
     { id: 'C24', name: '名贵手表', rarity: 1, kind: 'permanent', shopBanned: true,
       desc: '商店里买不到；在试炼商店卖出可得 200 试炼币', mods: { sellValue: 200 } },
     { id: 'C25', name: '战利品账本', rarity: 1, kind: 'permanent',
-      desc: '每场战斗胜利后，卖出增益的收益 +25 试炼币（本局累计）', mods: { sellGrowthPerWin: 25 } },
+      desc: '每场战斗胜利后，自己的卖价 +10 试炼币（本局累计，卖掉/失去后清零）', mods: { sellGrowthPerWin: 10 } },
     { id: 'C15', name: '增幅水晶', rarity: 2, kind: 'permanent', desc: '本局内所有 buff 效果 +40%', mods: { globalMul: 1.40 } },
     /* —— 本轮第 3 项：即时削弱敌方生命上限（普通 / 稀有各一）——
      * kind: instant 表示「拿到就结算、不占永久 5 格」；效果是本局内的全局减益，

@@ -196,12 +196,14 @@
     if (m.shopSpendStep) parts.push('每消费 ' + m.shopSpendStep + ' 试炼币 → 随机获得 力+' + (m.shopSpendStat || 1) +
       ' / 敏+' + (m.shopSpendStat || 1) + ' / 速+' + (m.shopSpendStat || 1) + ' / 生命上限+' + (m.shopSpendHp || 5) + ' 其中一项');
     if (m.firstHitZero) parts.push('每场战斗敌方对我方的第一次攻击伤害归零');
+    if (m.mustHitAll) parts.push('这一场所有攻击必中');
+    if (m.mustHitFirst) parts.push('首次攻击必中');
     if (m.pickPermanentFree) parts.push('可给一个已有的永久增益附魔免占位');
     if (m.fragileStat) parts.push('本局永久保留：' + ({ power: '力量', agility: '敏捷', speed: '速度' }[m.fragileStat] || m.fragileStat) +
       ' +' + Math.round((m.fragilePct || 0) * 100) + '%；每场 ' + (m.fragileBreakPct || 5) + '% 损毁');
     if (b.progress) parts.push('当前进度：' + b.progress);   // 第 7 项：成长类的真实累计值
     if (buff.mods && buff.mods.shopDiscount) parts.push('下个商店 5 折');
-    parts.push(replaceTarget === b.id ? '（当前已选为替换目标，点一下取消）' : '点一下选它作为要被替换掉的永久增益');
+    parts.push(replaceTarget === b.id ? '（当前已选为要拿掉的那个，点一下取消）' : '点一下选它作为要拿掉的那个永久增益');
     return parts.join('\n');
   }
   /** 限次增益的悬停说明：效果 + 剩余场次 + 当前开关状态。 */
@@ -253,7 +255,7 @@
       : '<span class="buff-empty">还没有限次增益</span>';
     return '<div class="tower-buffs endless-buffs">' +
       '<h4>永久增益 <span class="buff-slot-count">' + (run.permUsed == null ? perm.length : run.permUsed) + '/' + cap + '</span>' +
-      (replaceTarget ? '<span class="replace-hint">选一个要替换掉的（再点增益卡确认）</span>' : '') + '</h4>' +
+      (replaceTarget ? '<span class="replace-hint">选一个要拿掉的（再点增益卡确认）</span>' : '') + '</h4>' +
       '<div class="buff-tags">' + permHtml + '</div>' + progHtml +
       '<h4>限次增益 <span class="buff-slot-count">点一下开关</span></h4>' +
       '<div class="buff-tags">' + limHtml + '</div></div>';
@@ -273,6 +275,12 @@
           '<span class="debuff-text">' + esc(d.text || '') + '</span></div>';
       }).join('') +
       '</div></div>';
+  }
+  /** 本轮第 5 项：塔里结算完抽奖卷（放弃本局 / 结算离场 / 领奖）之后，
+   *  立刻把页面上所有抽奖卷数字刷新一遍，不等玩家重新进页面。 */
+  function syncTickets() {
+    if (window.ClassicExtras && ClassicExtras.refreshTickets) { try { ClassicExtras.refreshTickets(); } catch (e) { /* ignore */ } }
+    if (window.UI && UI.refreshHeader) { try { UI.refreshHeader(); } catch (e) { /* ignore */ } }
   }
   /* 第 6 项：塔页右上角的货币条。主塔看金松果与挑战书，无尽额外看本局试炼币与抽奖卷。 */
   const CURRENCY_PROP = { book: 23, ticket: 50 };
@@ -368,7 +376,9 @@
   }
   /** 左侧塔身：当前层附近的一段楼层，自上而下。 */
   function towerVisual(layer, maxLayer, mode) {
-    const top = Math.max(layer + 4, 6), bottom = Math.max(1, layer - 3);
+    /* 本轮第 6 项：只画 5 层（原来 8 层 × 38px + 间距 ≈ 350px，会顶出左侧栏）。
+   * 5 层 × 34px + 间距 ≈ 200px，配上「纵向居中」既看得清又不越界。 */
+  const top = Math.max(layer + 2, 4), bottom = Math.max(1, layer - 2);
     let floors = '';
     for (let i = top; i >= bottom; i--) {
       const cls = i < layer || (mode === 'tower' && i <= maxLayer) ? 'done' : i === layer ? 'now' : 'todo';
@@ -379,11 +389,9 @@
     const next5 = Math.ceil((layer + 0.0001) / 5) * 5;
     const toElite = next5 % 10 === 0;
     // 第 1 项：无尽塔只留「本局第 N 层」，不再写「再 X 层是第 Y 层」
-    const caption = mode === 'tower'
-      ? '已通关 ' + maxLayer + ' 层' + '<br><span class="tower-caption-hint">再 ' + (next5 - layer) + ' 层是' + (toElite ? '第 ' + next5 + ' 层精英' : '第 ' + next5 + ' 层') + '</span>'
-      : '本局第 ' + layer + ' 层';
-    return '<div class="tower-visual" aria-label="塔层进度"><div class="tower-floors">' + floors + '</div>' +
-      '<div class="tower-visual-caption">' + caption + '</div></div>';
+    /* 本轮第 6 项：塔下方那行「再 X 层是第 Y 层 / 本局第 N 层」去掉 ——
+   * 层数在顶栏标题里已经写了（无尽模式 · 第 N 层），这里只留塔身本身。 */
+  return '<div class="tower-visual" aria-label="塔层进度"><div class="tower-floors">' + floors + '</div></div>';
   }
   /* 第 1 项：对手从左到右排成一行「小人像 + 名字 + 类型」，
    * 机制还是挂在悬停气泡上（列表本身不占高度），松鼠形态会把装备一起画出来。 */
@@ -445,7 +453,7 @@
     });
     on(p, 'abandon', () => {
       C().modal('放弃挑战', '<p>放弃后本局已累积的松果将全部失去（也没有安慰奖），确定吗？</p>', [
-        { label: '放弃', cls: 'muted', run: () => { Tower.abandon('tower'); openTower(); } },
+        { label: '放弃', cls: 'muted', run: () => { Tower.abandon('tower'); syncTickets(); openTower(); } },
         { label: '继续挑战', cls: 'gold' },
       ], { small: true });
     });
@@ -579,7 +587,7 @@
     });
     on(p, 'abandon', () => {
       C().modal('放弃本局', '<p>放弃后按当前层应得的抽奖卷结算（分数照常入账），确定吗？</p>', [
-        { label: '放弃', cls: 'muted', run: () => { Tower.abandon('endless'); openEndless(); } },
+        { label: '放弃', cls: 'muted', run: () => { Tower.abandon('endless'); syncTickets(); openEndless(); } },
         { label: '继续冲塔', cls: 'gold' },
       ], { small: true });
     });
@@ -810,9 +818,9 @@
         openShop(true);
       },
     }));
-    if (!buttons.length) { notice('永久增益已满，但没有可替换的目标。'); return; }
+    if (!buttons.length) { notice('永久增益已满，但没有可以拿掉的。'); return; }
     buttons.push({ label: '取消', cls: 'muted', run: () => openShop(true) });
-    C().modal('永久增益已满 5 格', '<p>要买下【' + esc(buff.name) + '】，请选择替换掉哪一个：</p>', buttons, { small: true });
+    C().modal('永久增益已满 5 格', '<p>要买下【' + esc(buff.name) + '】，先拿掉下面哪一个？</p>', buttons, { small: true });
   }
   /** 永久增益满 5 格时：直接把「替换哪一个」摆出来选（比让玩家先点上面的标签直观）。 */
   function offerReplace(index, buff) {
@@ -822,9 +830,9 @@
       cls: 'small pick-buff-btn replace-btn',
       run: () => { Tower.pickChoice('endless', index, b.id); openEndless(); },
     }));
-    if (!buttons.length) { notice('永久增益已满，但没有可替换的目标。'); return; }
+    if (!buttons.length) { notice('永久增益已满，但没有可以拿掉的。'); return; }
     buttons.push({ label: '取消', cls: 'muted', run: () => openEndless() });
-    C().modal('永久增益已满 5 格', '<p>要拿下【' + esc(buff.name) + '】，请选择替换掉哪一个：</p>' +
+    C().modal('永久增益已满 5 格', '<p>要拿下【' + esc(buff.name) + '】，先拿掉下面哪一个？</p>' +
       '<div class="replace-list">' + list.map((b) => '<div class="replace-row"><b>' + esc(b.name) + '</b><span>' + esc(b.desc || '') + '</span></div>').join('') + '</div>',
       buttons, { small: true });
   }
@@ -924,7 +932,8 @@
     C().modal('结算完成', '<div class="result-box"><div class="result-title win">满载而归！</div>' +
       '<div class="result-lines">抽奖卷 +' + r.tickets + '　本局分数 ' + r.score + '</div>' +
       '<p class="small-label">抽奖卷可在「每日幸运抽奖」里抵扣抽奖次数（免费次数用完后优先消耗）。</p></div>',
-      [{ label: '再来一局', cls: 'gold', run: openEndless }, { label: '去抽奖', run: () => UI.runAction('lottery') }, { label: '返回', run: () => C().home() }], { small: true });
+      [{ label: '再来一局', cls: 'gold', run: openEndless }, { label: '去抽奖', run: () => { syncTickets();
+            if (window.ClassicExtras && ClassicExtras.lottery) ClassicExtras.lottery(); else UI.runAction('lottery'); } }, { label: '返回', run: () => C().home() }], { small: true });
   }
 
   window.TowerUI = { openTower, openEndless };

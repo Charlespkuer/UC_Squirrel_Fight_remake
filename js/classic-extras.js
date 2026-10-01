@@ -305,6 +305,16 @@
     if (s.lotteryDate !== legacyToday) s.lotteryFree = 1;
     s.lotteryDate = today; State.save();
   }
+  /** 本轮第 5 项：抽奖卷数量要能「即时更新」。
+   *  塔里结算完抽奖卷之后（放弃本局 / 结算弹窗 / 去抽奖），外部会调它把当前页面上
+   *  的抽奖卷数字就地刷新，不必等玩家重新进页面。 */
+  function refreshTickets() {
+    const s = State.state(); if (!s) return;
+    const n = s.props[50] || 0;
+    $$('[data-lottery-ticket]').forEach((el) => { el.textContent = n; });
+    $$('[data-live-ticket]').forEach((el) => { el.textContent = n; });
+    if (window.UI && UI.refreshHeader) { try { UI.refreshHeader(); } catch (e) { /* 顶栏刷新失败不影响抽奖卷 */ } }
+  }
   function lottery() {
     // Rewards are already settled before the animation. Reopening the page may
     // dismiss that animation; its pending timer must not lock the new controls.
@@ -312,7 +322,7 @@
     spinning = false;
     refreshLotteryDay();
     const s = State.state();
-    const p = C().page('bag', 'bag', '<h2 class="extra-lottery-heading cartoon">\u6bcf\u65e5\u5e78\u8fd0\u62bd\u5956</h2><div class="extra-lottery-prizes">' + prizes.map((prize, i) => '<div class="extra-prize" data-prize="' + i + '">' + C().icon('prop', prize.id) + '<span>' + prize.label + '</span></div>').join('') + '</div><div class="extra-lottery-footer"><div><b data-lottery-status>\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21</b><span>\u6bcf\u5929\u514d\u8d391\u6b21\uff0c\u4e4b\u540e\u4f18\u5148\u7528\u62bd\u5956\u5377\uff08\u73b0\u6709 ' + (s.props[50] || 0) + ' \u5f20\uff09\uff0c\u518d\u626320\u91d1\u677e\u679c<br>\u5f53\u524d\u91d1\u677e\u679c\uff1a<strong data-lottery-gold>' + s.goldPoint + '</strong></span></div>' + button(spinning ? '\u62bd\u5956\u4e2d\u2026' : s.lotteryFree > 0 ? '\u514d\u8d39\u62bd\u5956' : '\u518d\u62bd\u4e00\u6b21', 'lottery-spin', 'gold') + '</div>', { cls: 'extra-board lottery-extra-board' });
+    const p = C().page('bag', 'bag', '<h2 class="extra-lottery-heading cartoon">\u6bcf\u65e5\u5e78\u8fd0\u62bd\u5956</h2><div class="extra-lottery-prizes">' + prizes.map((prize, i) => '<div class="extra-prize" data-prize="' + i + '">' + C().icon('prop', prize.id) + '<span>' + prize.label + '</span></div>').join('') + '</div><div class="extra-lottery-footer"><div><b data-lottery-status>\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21</b><span>\u6bcf\u5929\u514d\u8d391\u6b21\uff0c\u4e4b\u540e\u4f18\u5148\u7528\u62bd\u5956\u5377\uff08\u73b0\u6709 <strong data-lottery-ticket>' + (s.props[50] || 0) + '</strong> \u5f20\uff09\uff0c\u518d\u626320\u91d1\u677e\u679c<br>\u5f53\u524d\u91d1\u677e\u679c\uff1a<strong data-lottery-gold>' + s.goldPoint + '</strong></span></div>' + button(spinning ? '\u62bd\u5956\u4e2d\u2026' : s.lotteryFree > 0 ? '\u514d\u8d39\u62bd\u5956' : '\u518d\u62bd\u4e00\u6b21', 'lottery-spin', 'gold') + '</div>', { cls: 'extra-board lottery-extra-board' });
     back(p, () => UI.runAction('bag'), '\u8fd4\u56de\u9053\u5177');
     const spin = on(p, 'lottery-spin', () => {
       if (version !== lotteryVersion || !p.isConnected || spinning) return;
@@ -724,6 +734,6 @@
     }
   }
 
-  window.ClassicExtras = { arena, rank, rankShop: () => rankShop(0), lottery, master, toplist, vip, lotteryPrizes: prizes,
+  window.ClassicExtras = { arena, rank, rankShop: () => rankShop(0), lottery, refreshTickets, master, toplist, vip, lotteryPrizes: prizes,
     rankFoeLevel, rankFoeExpectLevel };
 })();

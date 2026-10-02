@@ -102,12 +102,25 @@
       if (potion.ok && s.energy >= NEED) potionUsed = potion.used || 0;
     }
     if (s.energy >= NEED) {
+      const before = Number(s.energy) || 0;
       if (!State.consumeEnergy(NEED)) return { ok: false };   // 兜底：扣不掉就不放行
+      const after = Number(s.energy) || 0;
+      /* 精确校验：只核对**体力**这一项减了 NEED。
+       * 不能用「体力+道具总和」之类跨字段的粗判：自动喝药、体力恢复、
+       * 道具结算都会改动总和，会把正常的体力扣费误报成异常（踩过）。 */
+      if (after > before - NEED) {
+        /* 「无限体力」调试开关下体力不会被扣，那属于预期，不算异常。 */
+        const freeEnergy = !!(typeof window !== 'undefined' && window.Debug && window.Debug.enabled('infiniteEnergy'));
+        if (!freeEnergy) return { ok: false, msg: 'energy-not-deducted' };
+      }
       return { ok: true, by: 'energy', potionUsed: potionUsed };
     }
     const itemId = kind ? 39 : 36;                            // 碎片场=勇气徽章，经验场=英雄帖
     if (!(s.props[itemId] > 0)) return { ok: false };
+    const beforeItem = Number(s.props[itemId]) || 0;
     s.props[itemId]--;
+    const afterItem = Number(s.props[itemId]) || 0;
+    if (afterItem !== beforeItem - 1) return { ok: false, msg: 'item-not-deducted' };   // 精确校验
     State.save();
     return { ok: true, by: 'item', itemId: itemId };
   }
@@ -126,17 +139,10 @@
        *   `if (s.energy < 30) { ...道具... }` + `if (s.energy >= 30) { consumeEnergy }`，
        * 两段都可能被绕过（体力量不足时道具没扣、consumeEnergy 又失败就直接往下走），
        * 现在只要判定通过就一定扣掉，判定不通过就一定 return。 */
-      /* 不变量：报名前后必须**真的少点什么**（体力或准入道具）——
-       * 除非开了「无限体力」调试开关（那时体力不会被扣掉，属于预期）。
-       * 这条断言是为了防止以后再出现「不扣费就进场」。 */
-      const beforeTop = s.energy + (Number(s.props[36]) || 0) + (Number(s.props[39]) || 0);
+      /* 扣费由 payArenaEntry 统一负责，并在内部**按实际扣掉的那一项**精确校验；
+       * 这里不再用「体力+道具总和」做粗判 —— 那个总和会被同一流程里的
+       * 自动喝药 / 体力恢复 / 道具结算掩盖或抵消，从而误报「报名异常」。 */
       const pay = payArenaEntry(s, kind);
-      const afterTop = s.energy + (Number(s.props[36]) || 0) + (Number(s.props[39]) || 0);
-      const freeEnergyDebug = !!(typeof window !== 'undefined' && window.Debug && window.Debug.enabled('infiniteEnergy'));
-      if (pay.ok && !freeEnergyDebug && afterTop >= beforeTop) {
-        alert('竞技场报名扣费异常，已取消本次参赛，请反馈。');
-        return;
-      }
       if (!pay.ok) {
         alert(kind
           ? '\u4f53\u529b\u4e0d\u8db330\u70b9\uff0c\u4e5f\u6ca1\u6709\u52c7\u6c14\u5fbd\u7ae0\uff08\u788e\u7247\u7ade\u6280\u573a\u4e0d\u80fd\u7528\u82f1\u96c4\u5e16\uff09\u3002'

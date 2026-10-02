@@ -214,6 +214,35 @@ test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进
     assert.equal(ss.energy, 10, '体力不该动');
     assert.equal(g.battles.length, 1, '应当开始比赛');
   }
+  // 回归：**体力 0 + 勇气徽章 1** 报名碎片场 —— 以前会被粗判不变量误报「报名异常，请反馈」
+  {
+    const g = setup(), ss = g.c.State.state();
+    ss.level = 25; ss.energy = 0; ss.props[1] = 0; ss.props[2] = 0; ss.props[39] = 1; ss.props[36] = 0;
+    enterArena(g, 1);
+    assert.equal(ss.props[39], 0, '体力 0 时应当扣勇气徽章');
+    assert.equal(ss.energy, 0, '体力本来就没有，不该变负');
+    assert.equal(g.battles.length, 1, '应当正常开始比赛');
+    const last = g.modals.at(-1) || {};
+    assert.ok(!/异常|请反馈/.test(String(last.html) || ''), '不该出现「报名异常」提示：' + last.html);
+    assert.ok(!/报名异常/.test(String(last.title) || ''), '不该出现「报名异常」弹窗：' + last.title);
+  }
+  // 回归：**体力 0 + 勇气徽章 5** → 只扣 1 枚
+  {
+    const g = setup(), ss = g.c.State.state();
+    ss.level = 25; ss.energy = 0; ss.props[1] = 0; ss.props[2] = 0; ss.props[39] = 5;
+    enterArena(g, 1);
+    assert.equal(ss.props[39], 4, '只该扣 1 枚勇气徽章，实测剩 ' + ss.props[39]);
+    assert.equal(g.battles.length, 1, '应当正常开始比赛');
+  }
+  // 回归：体力 0 + 无徽章 → 拒绝，且提示「没有勇气徽章」
+  {
+    const g = setup(), ss = g.c.State.state();
+    ss.level = 25; ss.energy = 0; ss.props[1] = 0; ss.props[2] = 0; ss.props[39] = 0; ss.props[36] = 3;
+    enterArena(g, 1);
+    assert.equal(g.battles.length, 0, '没有徽章时不该进场');
+    assert.equal(ss.props[36], 3, '英雄帖不该被扣');
+    assert.match(String(g.modals.at(-1).html), /勇气徽章/, '应当提示缺少勇气徽章');
+  }
   // 源码层面：两段式扣费的旧写法不该再出现
   const src = fs.readFileSync(path.join(rootDir, 'js', 'classic-extras.js'), 'utf8');
   assert.ok(src.indexOf('function payArenaEntry') > 0, '应当有统一的 payArenaEntry');

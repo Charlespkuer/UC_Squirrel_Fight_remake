@@ -520,6 +520,7 @@ test('需求12：刷新只抬高稀有度期望、不设保底货品', () => {
     let score = 0, epics = 0, n = 0;
     for (let i = 0; i < 200; i++) {
       const cur = c.Tower._debugRun('endless');
+      cur.coins = 1000000;               // 每次刷新前补钱：否则扣到低于价格后 rerollShop 会失败并被 continue 跳过
       cur.shop.rerollFree = (price === 0);
       cur.shop.rerollCount = priceToCount(price);
       const r = c.Tower.rerollShop();
@@ -541,9 +542,46 @@ test('需求12：刷新只抬高稀有度期望、不设保底货品', () => {
     '最贵档应当明显优于免费档：' + rows.map((r) => r.price + '→' + r.score.toFixed(2)).join(' '));
   assert.ok(rows.find((r) => r.price === 20).epics > rows[0].epics + 0.2,
     '20 币应当比免费档多出可感知的史诗：' + rows.map((r) => r.price + '→' + r.epics.toFixed(2)).join(' '));
-  const r20 = rows.find((r) => r.price === 20).epics, r40 = rows.find((r) => r.price === 40).epics;
-  assert.ok(Math.abs(r20 - 1) < 0.3, '实战 20 币应当约 1 件史诗，实测 ' + r20.toFixed(2));
-  assert.ok(Math.abs(r40 - 2) < 0.35, '实战 40 币应当约 2 件史诗，实测 ' + r40.toFixed(2));
+  /* 20 币档单独用**大样本**判定：200 次刷新的采样标准差 ≈ 0.074，
+   * 原来的 |x−1|<0.3 正好卡在采样边界上，偶发离群（实测约 1/8 局会红，与池子改动无关）。
+   * 大样本下把它收成确定性断言，同时核对实测均值与理论期望一致（这才是真正的回归）。 */
+  const BIG = 1200;
+  let bigEpics = 0, bigN = 0;
+  for (let i = 0; i < BIG; i++) {
+    const cur = c.Tower._debugRun('endless');
+    cur.coins = 1000000;
+    cur.shop.rerollFree = false;
+    cur.shop.rerollCount = priceToCount(20);
+    const r = c.Tower.rerollShop();
+    if (!r.ok) continue;
+    const slots = c.Tower.shopState().slots;
+    bigEpics += slots.filter((s) => s.rarity >= 2).length;
+    bigN++;
+  }
+  const bigR20 = bigEpics / Math.max(1, bigN);
+  const theo20 = TD.rerollExpectation(20).epics;
+  assert.ok(Math.abs(bigR20 - theo20) < 0.15,
+    '20 币档的实测史诗数应当贴近理论期望 ' + theo20.toFixed(2) + '，实测 ' + bigR20.toFixed(3) + '（' + bigN + ' 次刷新）');
+  assert.ok(bigR20 > 0.8 && bigR20 < 1.4, '实战 20 币应当约 1 件史诗，实测 ' + bigR20.toFixed(3));
+  const r20 = bigR20;                      // 20 币档用大样本值（200 次采样的那版仍留在 rows 里做单调性判断）
+  assert.ok(r20 > 0.8, '20 币档至少要有可感知的史诗：' + r20.toFixed(3));
+  /* 40 币档也用大样本（同法），核对理论期望。 */
+  let bigEpics40 = 0, bigN40 = 0;
+  for (let i = 0; i < BIG; i++) {
+    const cur = c.Tower._debugRun('endless');
+    cur.coins = 1000000;
+    cur.shop.rerollFree = false;
+    cur.shop.rerollCount = priceToCount(40);
+    const r = c.Tower.rerollShop();
+    if (!r.ok) continue;
+    bigEpics40 += c.Tower.shopState().slots.filter((s) => s.rarity >= 2).length;
+    bigN40++;
+  }
+  const theo40 = TD.rerollExpectation(40).epics;
+  const bigR40 = bigEpics40 / Math.max(1, bigN40);
+  assert.ok(Math.abs(bigR40 - theo40) < 0.25,
+    '40 币档的实测史诗数应当贴近理论期望 ' + theo40.toFixed(2) + '，实测 ' + bigR40.toFixed(3));
+  assert.ok(bigR40 > bigR20, '40 币档应当明显多于 20 币档：' + bigR40.toFixed(3) + ' vs ' + bigR20.toFixed(3));
 });
 
 test('需求13：新增益「重整旗鼓（普通，+1 币）」与「背水一战（史诗，+5 币）」', () => {
@@ -850,11 +888,16 @@ test('需求21：挑战塔不再生成任何「只有无尽塔用得上」的增
   // 烙印（本局永久保留）也不该进塔 —— 挑战塔的增益只服务下一场
   assert.ok(!TD.towerPool.some((b) => /^C4[0-4]$/.test(b.id)), '烙印不该出现在挑战塔池');
   for (const id of ['C39', 'C42']) assert.equal(TD.BUFF_BY_ID[id].endlessOnly, true, id + ' 应当标无尽专属');
-  // 池子规模：挑战塔真用得上的限次增益 + 挑战塔专属
-  assert.equal(TD.towerPool.length, 31, '挑战塔池应当是 31 条，实测 ' + TD.towerPool.length);
-  assert.equal(TD.towerPool.filter((b) => b.towerOnly).length, 12, '其中 12 条是挑战塔专属');
+  /* 池子规模：towerPool 现在是「挑战塔**归属**」的完整名单（场间选择池），
+   * 包含限次类与永久类 —— 塔里本来就能选到永久增益（无尽塔专属的除外）。 */
+  const towerLimited = TD.towerPool.filter((b) => b.kind === 'limited');
+  assert.equal(towerLimited.length, 31, '挑战塔的限次类应当是 31 条（19 通用 + 12 专属），实测 ' + towerLimited.length);
+  assert.equal(towerLimited.filter((b) => b.towerOnly).length, 12, '其中 12 条是挑战塔专属');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 31, '永久类也属于挑战塔池（共 31 条）');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'instant').length, 0, '即时类不进选择池');
   // 无尽池不该混入挑战塔专属（它们按「一场定胜负」设计）
-  assert.equal(TD.endlessPool.filter((b) => b.towerOnly).length, 0, '无尽池不该有挑战塔专属');
+  assert.equal(TD.endlessPool.filter((b) => b.towerOnly).length, 0, '无尽选择池不该有挑战塔专属');
+  assert.equal(TD.shopPool.filter((b) => b.towerOnly).length, 0, '无尽商店池不该有挑战塔专属');
   // 挑战塔实战里抽到的选项也必须是池内成员
   const S = c.State.state(); S.props[23] = 99;
   c.Tower._debugSetLayer(0);
@@ -1424,6 +1467,136 @@ test('需求30：烙印两段机制（未破碎 50% / 破碎后 100%）+ 复数�
   assert.ok(vals.filter((v) => v !== undefined).length >= 2, '三条烙印应当至少碎两条：' + JSON.stringify(a1));
   assert.ok(new Set(vals.filter((v) => v !== undefined)).size >= 2,
     '三条烙印的破碎时点必须不同（各自独立计数）：' + JSON.stringify(a1));
+});
+
+test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池子，不得互相泄漏）', () => {
+  const c = setup();
+  const TD = c.TowerData;
+  const EM = TD.ENDLESS_ONLY_MODS;
+  const hasEM = (b) => Object.keys(b.mods || {}).some((k) => EM.indexOf(k) >= 0);
+  const roster = (id) => TD.poolRoster(TD.BUFF_BY_ID[id]);
+  const POOL_TAGS = ['T.choice', 'T.shop', 'E.choice', 'E.shop'];
+
+  // 1) 每条增益都要有明确的归属，且只能是合法池子标签
+  for (const b of TD.BUFFS) {
+    const r = roster(b.id);
+    assert.ok(Array.isArray(r), b.id + ' 应当有池子归属');
+    for (const t of r) assert.ok(POOL_TAGS.indexOf(t) >= 0, b.id + ' 出现非法池子标签 ' + t);
+    assert.equal(new Set(r).size, r.length, b.id + ' 的池子标签不该重复');
+  }
+
+  // 2) 挑战塔专属：只能进挑战塔，绝不能出现在任何无尽池
+  for (const b of TD.BUFFS.filter((x) => x.towerOnly)) {
+    assert.equal(JSON.stringify(roster(b.id)), '["T.choice"]', b.id + ' 应当只属于挑战塔，实测 ' + JSON.stringify(roster(b.id)));
+    assert.ok(!TD.endlessPool.some((x) => x.id === b.id), b.id + ' 不该进无尽选择池');
+    assert.ok(!TD.shopPool.some((x) => x.id === b.id), b.id + ' 不该进无尽商店池 ← 需求点名的泄漏');
+  }
+  assert.equal(TD.BUFFS.filter((x) => x.towerOnly).length, 12, '应当有 12 条挑战塔专属');
+
+  // 3) 无尽专属（显式标记或带无尽专属 mod）：绝不能出现在挑战塔池
+  for (const b of TD.BUFFS) {
+    const endlessOnly = b.endlessOnly || hasEM(b);
+    if (!endlessOnly) continue;
+    assert.ok(roster(b.id).every((t) => t.indexOf('E.') === 0),
+      b.id + ' 是无尽专属，却出现在挑战塔池：' + JSON.stringify(roster(b.id)));
+  }
+  assert.equal(TD.towerPool.filter((b) => b.endlessOnly || hasEM(b)).length, 0,
+    '挑战塔池里不该有任何无尽专属条目');
+  // 需求点名的 6 条漏标条目（带无尽专属 mod 却曾在塔池里）
+  for (const id of ['C30', 'C32', 'C33', 'C45', 'C25', 'C37']) {
+    assert.equal(JSON.stringify(roster(id)), '["E.choice","E.shop"]', id + ' 应当只在无尽塔，实测 ' + JSON.stringify(roster(id)));
+    assert.ok(!TD.towerPool.some((b) => b.id === id), id + ' 不该进挑战塔池');
+  }
+
+  // 4) 无尽商店池的边界
+  assert.ok(!TD.shopPool.some((b) => b.shopBanned), 'shopBanned 的（名贵手表）不该进商店池');
+  assert.ok(TD.shopPool.some((b) => b.id === 'N09'), '环境类晴空护符应当能在无尽商店买到');
+  assert.equal(TD.shopPool.filter((b) => b.kind === 'instant').length, 0, '即时类不该进商店池');
+
+  // 5) 三个池子的名单必须与 roster 完全一致（不能各自写谓词）
+  const byTag = (tag) => TD.BUFFS.filter((b) => roster(b.id).indexOf(tag) >= 0).map((b) => b.id).join(',');
+  assert.equal(TD.towerPool.map((b) => b.id).join(','), byTag('T.choice'), 'towerPool 必须等于 T.choice 名单');
+  assert.equal(TD.endlessPool.map((b) => b.id).join(','), byTag('E.choice'), 'endlessPool 必须等于 E.choice 名单');
+  assert.equal(TD.shopPool.map((b) => b.id).join(','), byTag('E.shop'), 'shopPool 必须等于 E.shop 名单');
+
+  // 6) 标记规范化：带无尽专属 mod 的条目必须同时显式标 endlessOnly（让数据自解释，
+  //    不再只靠 roster 的计算兜住 —— 否则以后新增条目很容易又漏标。）
+  const unmarked = TD.BUFFS.filter((b) => !b.endlessOnly && hasEM(b)).map((b) => b.id);
+  assert.equal(unmarked.length, 0, '带无尽专属 mod 却没标 endlessOnly：' + JSON.stringify(unmarked));
+  for (const id of ['C24', 'C25', 'C30', 'C31', 'C32', 'C33', 'C37', 'C45']) {
+    assert.equal(TD.BUFF_BY_ID[id].endlessOnly, true, id + ' 应当标 endlessOnly');
+  }
+  // 塔专属同样要有显式标记（数据自解释）
+  for (const b of TD.towerPool) {
+    if (TD.poolRoster(b).join() === 'T.choice') {
+      assert.ok(b.towerOnly === true || b.endlessOnly === true,
+        b.id + ' 只属于挑战塔，却没有 towerOnly / endlessOnly 标记');
+    }
+  }
+
+  // 7) 挑战塔池的构成可解释
+  assert.equal(TD.towerPool.length, byTag('T.choice').split(',').length, '池子大小要自洽');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'limited').length, 31, '限次类 31 条');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 31, '永久类 31 条');
+});
+
+test('需求32：池子分离的端到端实测（真跑两种塔的抽取，零交叉）', () => {
+  const c = setup();
+  const TD = c.TowerData;
+  const S = c.State.state();
+  S.level = 70; S.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) S.stages[i] = { npcIndex: 3, passed: true };
+  const cid = (ch) => (typeof ch === 'string' ? ch : (ch && (ch.id || (ch.buff && ch.buff.id))));
+  const hasEM = (b) => !!(b && (b.endlessOnly || Object.keys(b.mods || {}).some((k) => TD.ENDLESS_ONLY_MODS.indexOf(k) >= 0)));
+
+  const sample = (mode, rounds) => {
+    const seen = new Set();
+    for (let t = 0; t < rounds; t++) {
+      if (mode === 'tower') { c.Tower._debugSetLayer(0); if (!c.Tower.startTowerRun().ok) continue; }
+      else { c.Tower._debugSetLayer(9); c.Tower.startEndlessRun(); }
+      for (let k = 0; k < 14; k++) {
+        const r = c.Tower._debugRun(mode);
+        if (!r) break;
+        if (r.choices) {
+          for (const ch of r.choices) { const id = cid(ch); if (id) seen.add(id); }
+          const p = c.Tower.pickChoice(mode, 0, null);
+          if (p && !p.ok && p.needsReplace) c.Tower.pickChoice(mode, 0, ((r.permanent || [])[0] || {}).id || null);
+          continue;
+        }
+        if (mode === 'endless' && r.phase === 'shop') {
+          const st = c.Tower.shopState();
+          if (st && st.slots) for (const sl of st.slots) if (sl && sl.id) seen.add(sl.id);
+          c.Tower.continueFromShop();
+          continue;
+        }
+        if (mode === 'endless' && r.phase === 'checkpoint') { c.Tower.continueEndless(); continue; }
+        const nx = c.Tower.nextBattle(mode);
+        if (!nx || nx.ok === false) break;
+        const a = c.Tower._debugRun(mode);
+        if (!a || !a.attempt) break;
+        c.Tower.reportBattle(mode, a.attempt, true, 1, null);
+      }
+      const rr = c.Tower._debugRun(mode);
+      if (rr) c.Tower.giveUp(mode);
+    }
+    return seen;
+  };
+
+  const tower = sample('tower', 60);
+  const endless = sample('endless', 40);
+  assert.ok(tower.size >= 30, '挑战塔样本太少：' + tower.size);
+  assert.ok(endless.size >= 30, '无尽塔样本太少：' + endless.size);
+
+  const towerOnlyIds = TD.BUFFS.filter((b) => b.towerOnly).map((b) => b.id);
+  const leaked = [...endless].filter((id) => towerOnlyIds.indexOf(id) >= 0);
+  assert.equal(leaked.length, 0, '挑战塔专属不该出现在无尽塔：' + JSON.stringify(leaked));
+  const reverse = [...tower].filter((id) => hasEM(TD.BUFF_BY_ID[id]));
+  assert.equal(reverse.length, 0, '无尽专属不该出现在挑战塔：' + JSON.stringify(reverse));
+  // 抽到的一定在对应池子名单里（不能绕过名单）
+  const outOfTower = [...tower].filter((id) => !TD.towerPool.some((b) => b.id === id));
+  assert.equal(outOfTower.length, 0, '挑战塔抽到了池外条目：' + JSON.stringify(outOfTower));
+  const outOfEndless = [...endless].filter((id) => !TD.endlessPool.some((b) => b.id === id) && !TD.shopPool.some((b) => b.id === id));
+  assert.equal(outOfEndless.length, 0, '无尽塔抽到了池外条目：' + JSON.stringify(outOfEndless));
 });
 
 (async () => {

@@ -780,14 +780,14 @@
     { id: 'C28', name: '疾行', rarity: 0, kind: 'permanent', desc: '速度 +8%', mods: { speedMul: 0.08 } },
     { id: 'C29', name: '体质', rarity: 0, kind: 'permanent', desc: '生命上限 +10%（卖掉/替换后仍然保留）', mods: { maxHpMul: 0.10 } },
     /* 第 2 项新增：永久槽位 buff（一局各只能拿一次；史诗战斗+商店都能出，传奇只在战斗里出） */
-    { id: 'C30', name: '扩容背包', rarity: 2, kind: 'permanent', unique: true, permSlot: 1,
+    { id: 'C30', name: '扩容背包', rarity: 2, kind: 'permanent', endlessOnly: true, unique: true, permSlot: 1,
       desc: '本局永久增益槽位 +1（立即生效，一局只能获得一次）', mods: { permSlot: 1 } },
-    { id: 'C31', name: '仓库钥匙', rarity: 3, kind: 'permanent', unique: true, permSlot: 2, battleOnly: true,
+    { id: 'C31', name: '仓库钥匙', rarity: 3, kind: 'permanent', endlessOnly: true, unique: true, permSlot: 2, battleOnly: true,
       desc: '本局永久增益槽位 +2（立即生效，一局只能获得一次；只在战斗奖励里出现）', mods: { permSlot: 2 } },
     /* 隐藏型选取 buff：拿到后立即三选一（已有武器/技能），强化指定对象；不显示在增益面板、不可出售 */
-    { id: 'C32', name: '神兵淬炼', rarity: 2, kind: 'permanent', unique: true, hidden: true,
+    { id: 'C32', name: '神兵淬炼', rarity: 2, kind: 'permanent', endlessOnly: true, unique: true, hidden: true,
       desc: '立即从你已有的武器里随机三选一，该武器伤害 +100%（本局有效，隐藏增益，不可出售）', mods: { pickWeaponPct: 1.00 } },
-    { id: 'C33', name: '秘技通神', rarity: 2, kind: 'permanent', unique: true, hidden: true,
+    { id: 'C33', name: '秘技通神', rarity: 2, kind: 'permanent', endlessOnly: true, unique: true, hidden: true,
       desc: '立即从你已有的技能里随机三选一，该技能触发概率大幅提升（本局有效，隐藏增益，不可出售）', mods: { pickSkillPct: 0.60 } },
     /* 对抗环境词缀的三档 buff（普通/稀有/史诗） */
     /* 需求 1：这两条作用于**环境词缀**，而环境只有无尽塔才有 ——
@@ -796,13 +796,13 @@
       desc: '接下来 3 场：无视环境词缀，并把负面环境词缀反弹给对手', mods: { envIgnore: 1, envReflect: 1 } },
     { id: 'N10', name: '避风斗篷', rarity: 1, kind: 'limited', uses: 10, endlessOnly: true,
       desc: '接下来 10 场：无视环境词缀', mods: { envIgnore: 1 } },
-    { id: 'C45', name: '天象之眼', rarity: 2, kind: 'permanent',
+    { id: 'C45', name: '天象之眼', rarity: 2, kind: 'permanent', endlessOnly: true,
       desc: '永远无视负面环境词缀并反弹给对手；敌方吃不到正向环境词缀（贪婪裂隙的试炼币收益保留，敌方不再获得生命加成）',
       mods: { envIgnore: 1, envReflect: 1, envDenyGood: 1 } },
-    { id: 'C24', name: '名贵手表', rarity: 1, kind: 'permanent', shopBanned: true,
+    { id: 'C24', name: '名贵手表', rarity: 1, kind: 'permanent', endlessOnly: true, shopBanned: true,
       desc: '商店里买不到；在试炼商店卖出可得 200 试炼币', mods: { sellValue: 200 } },
     /* 需求 4：卖价定为 50（原来按商店回收价 40% 算，卖掉只有 40）。 */
-    { id: 'C25', name: '战利品账本', rarity: 1, kind: 'permanent',
+    { id: 'C25', name: '战利品账本', rarity: 1, kind: 'permanent', endlessOnly: true,
       desc: '卖出可得 50 试炼币；每场战斗胜利后再 +10（本局累计，卖掉/失去后清零）',
       mods: { sellValue: 50, sellGrowthPerWin: 10 } },
     { id: 'C15', name: '增幅水晶', rarity: 2, kind: 'permanent', desc: '本局内所有 buff 效果 +40%', mods: { globalMul: 1.40 } },
@@ -838,7 +838,7 @@
      * C38 先机预判（史诗）：每场战斗敌方对我方的第一次**攻击**伤害归零。
      *    反伤/中毒这类非攻击伤害不走 applyDamage 的攻击路径，所以天然不会消耗它
      *    （需求里点名的「不会被反伤 debuff 破坏」）。 */
-    { id: 'C37', name: '虚空铭文', rarity: 3, kind: 'permanent', unique: true, hidden: true,
+    { id: 'C37', name: '虚空铭文', rarity: 3, kind: 'permanent', endlessOnly: true, unique: true, hidden: true,
       desc: '立即从你已有的永久增益里选一个附魔：它不再占用永久增益位（可叠加的增益则全部层数一起免疫占位；本局有效，隐藏增益，不可出售）',
       mods: { pickPermanentFree: 1 } },
     /* —— 本轮第 7 项：易碎的属性烙印（普通 / 稀有各三种）——
@@ -923,39 +923,79 @@
    *   'shop'   试炼商店货架能上架
    *   'tower'  挑战塔的场间四选一能抽到（限次 & 非无尽专属）
    * 名贵手表这类「只在别处出现」的靠 shopBanned 排除出 shop，但仍留在 choice。 */
-  /* 需求 1：挑战塔**只收「挑战塔真正用得上」的增益**。
-   * 挑战塔的机制与无尽塔差别很大 —— 没有环境词缀、没有试炼币/商店、没有重新挑战币、
-   * 没有本局永久槽位、也没有「按层成长」。所以除了「限次类」这个结构条件，
-   * 还必须排除 endlessOnly（无尽专属）。漏标 endlessOnly 的条目会被下面的断言挡下来。 */
-  /* 需求：挑战塔的 buff 只服务**下一场战斗**，所以它的增益是自成一套的。
-   *   towerOnly = true → 只进挑战塔池（无尽池不要）。
-   *   towerBattle = true → 在挑战塔里就是「下一场战斗」这一个单位，不显示限次，
-   *                       打完一场即消耗（见 tower.js 的 normalizeRun）。 */
-  const POOLS = Object.freeze({
-    choice: (b) => true,
-    shop: (b) => !b.shopBanned && !b.battleOnly && b.kind !== 'instant',
-    tower: (b) => b.kind === 'limited' && !b.endlessOnly,
-  });
-  const inPool = (tag, buff) => !!(POOLS[tag] && POOLS[tag](buff));
-  /* 主塔池 = 限次类（不含无尽专属的经济 buff）；无尽池 = 全部。
-   * 永久类只进无尽（主塔一层一结算，没有「本局永久」的位置）。 */
-  const towerPool = BUFFS.filter((b) => inPool('tower', b));
-  /* 无尽池排除「仅挑战塔」的条目（它们是按「一场定胜负」设计的，放进无尽会失衡）。 */
-  const endlessPool = BUFFS.filter((b) => !b.towerOnly);
-  /* 需求 1 的护栏：这些 mods 键只在无尽塔生效（环境 / 试炼币 / 商店 / 重新挑战币 /
-   * 本局永久槽位 / 选取型 / 即时结算），一旦出现在 towerPool 里就说明某条忘了标 endlessOnly。
-   * 开发期直接抛错，比玩家在挑战塔里抽到一张废卡好得多。 */
+  /* ============================================================
+   * 增益池：**显式池子归属**（需求：严格规范 tag，挑战塔与无尽塔是两个池子）
+   *
+   * 以前每个池子都是对同一份 BUFFS 各写一个谓词，谓词之间**不互斥** ——
+   * 于是 `shopPool` 会收进 `towerOnly` 的条：12 条挑战塔专属增益全部漏进了无尽塔商店
+   * （实测 shopPool 79 条里有 12 条是塔专属）。这正是「挑战塔规定 buff 出现在无尽塔」的原因。
+   *
+   * 现在改成三件事：
+   *   1. `poolRoster(b)` 给每条增益算出它**允许出现**的池子集合；
+   *   2. 各池子按这份名单取，不再各自写谓词；
+   *   3. 加载时**断言互斥**（塔专属不得出现在无尽池、无尽专属不得出现在塔池…），
+   *      漏标就直接抛错，而不是等玩家在错误的池子里刷到它。
+   *
+   * 池子定义：
+   *   T.choice  挑战塔场间选择   T.shop  挑战塔商店（塔目前没有商店，但保留概念）
+   *   E.choice  无尽塔场间选择   E.shop  无尽塔试炼商店
+   * ============================================================ */
+  /* 无尽专属 mod：带这些效果的增益只在无尽塔成立（环境词缀 / 试炼币 / 商店 /
+   * 重新挑战币 / 结算相关）。判定时「显式 endlessOnly 标记」与「带这类 mod」
+   * 二者取或 —— 否则漏标的条目会像 C30/C32/C33/C45/C25/C37 那样混进挑战塔池。 */
   const ENDLESS_ONLY_MODS = [
     'envIgnore', 'envReflect', 'envDenyGood', 'instantCoins', 'coinBoostPct', 'shopDiscount',
     'openShop', 'instantRetry', 'enemyMaxHpDown', 'permSlot', 'pickWeaponPct', 'pickSkillPct',
     'pickPermanentFree', 'sellValue', 'sellGrowthPerWin',
   ];
-  for (const b of towerPool) {
-    const bad = Object.keys(b.mods || {}).filter((k) => ENDLESS_ONLY_MODS.includes(k));
-    if (bad.length) throw new Error('挑战塔池不该包含无尽专属增益 ' + b.id + '（' + bad.join(',') + '），请标 endlessOnly');
+  function hasEndlessOnlyMod(b) {
+    return Object.keys(b.mods || {}).some((k) => ENDLESS_ONLY_MODS.indexOf(k) >= 0);
   }
-  /** 商店货架池：去掉「商店里不卖」的（名贵手表）。 */
-  const shopPool = BUFFS.filter((b) => inPool('shop', b));
+  function poolRoster(b) {
+    /* 挑战塔专属：**只**进挑战塔 —— 按需求这一条是硬约束，优先判定。 */
+    if (b.towerOnly) return ['T.choice'];
+    /* 无尽专属：环境词缀 / 试炼币 / 商店 / 重新挑战币 / 结算相关。 */
+    if (b.endlessOnly || hasEndlessOnlyMod(b)) {
+      return b.kind === 'instant' ? [] : (b.shopBanned ? ['E.choice'] : ['E.choice', 'E.shop']);
+    }
+    if (b.kind === 'instant') return [];                       // 一次生效类不进任何货架/选择池
+    if (b.battleOnly || b.shopBanned) return ['E.choice'];     // 只在战斗里出现 / 商店不卖的
+    /* 通用增益：两条塔的场间选择 + 无尽塔商店（挑战塔没有商店）。 */
+    return ['T.choice', 'E.choice', 'E.shop'];
+  }
+  const ROSTERS = Object.freeze(BUFFS.map((b) => ({ b, pools: poolRoster(b) })));
+  const inPool = (tag, buff) => {
+    const row = ROSTERS.find((r) => r.b.id === buff.id);
+    return !!(row && row.pools.indexOf(tag) >= 0);
+  };
+  /* 兼容旧调用点（POOLS.tower / POOLS.endless / POOLS.shop）。 */
+  const POOLS = Object.freeze({
+    tower: (b) => inPool('T.choice', b),
+    endless: (b) => inPool('E.choice', b),
+    shop: (b) => inPool('E.shop', b),
+  });
+  /* ---- 加载期断言：跨塔互斥（这是需求要的「严格」） ---- */
+  const TOWER_POOLS = ['T.choice', 'T.shop'];
+  const ENDLESS_POOLS = ['E.choice', 'E.shop'];
+  for (const row of ROSTERS) {
+    const b = row.b;
+    if (row.pools.some((t) => TOWER_POOLS.indexOf(t) >= 0) && b.endlessOnly) {
+      throw new Error('无尽专属增益 ' + b.id + ' 不该进挑战塔池');
+    }
+    if (row.pools.some((t) => ENDLESS_POOLS.indexOf(t) >= 0) && b.towerOnly) {
+      throw new Error('挑战塔专属增益 ' + b.id + ' 不该进无尽塔池');
+    }
+  }
+  /* 需求 1 的护栏：挑战塔池里不得出现任何无尽专属 mod（上面已把这类条目排除，这里是第二道闸）。 */
+  for (const row of ROSTERS) {
+    if (!row.pools.some((t) => TOWER_POOLS.indexOf(t) >= 0)) continue;
+    const bad = Object.keys(row.b.mods || {}).filter((k) => ENDLESS_ONLY_MODS.indexOf(k) >= 0);
+    if (bad.length) throw new Error('挑战塔池不该包含无尽专属增益 ' + row.b.id + '（' + bad.join(',') + '）');
+  }
+  /* 主塔（挑战塔）池 = 挑战塔场间选择池；无尽池 = 无尽塔场间选择池；商店池 = 无尽塔商店。 */
+  const towerPool = ROSTERS.filter((r) => r.pools.indexOf('T.choice') >= 0).map((r) => r.b);
+  const endlessPool = ROSTERS.filter((r) => r.pools.indexOf('E.choice') >= 0).map((r) => r.b);
+  const shopPool = ROSTERS.filter((r) => r.pools.indexOf('E.shop') >= 0).map((r) => r.b);
   /** 永久增益的持有上限（第 1 项：无尽主界面最多 5 个，同名叠层仍算 1 格）。 */
   const PERMANENT_SLOTS = 5;
   /* 第 1 项：无尽塔的「三种属性药丸」槽位 —— 消耗背包里的药丸，塔内持续 20 场战斗。
@@ -994,7 +1034,7 @@
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,
-    GEAR, wearsOf, WARLORD, BOSS_POOL, bossFor, heroOrder, ENDLESS_ONLY_MODS,
+    GEAR, wearsOf, WARLORD, BOSS_POOL, bossFor, heroOrder, ENDLESS_ONLY_MODS, poolRoster, ROSTERS,
     TOWER_BATTLE_IDS,
     BUFFS, BUFF_BY_ID, RARITY_NAME, RARITY_WEIGHTS, FIXED_HEAL_PCT, AUTO_HEAL_PCT, STACK_MAX,
     SETTLE_DROP_BATTLES,

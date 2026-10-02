@@ -25,7 +25,7 @@ function game(fallback = 0.5, sequence = []) {
   const c = { console }; c.window = c;
   vm.createContext(c);
   // 真·武器/真·技能的表在 gamedata.js 里（sim.js 通过 window.GData 读它）
-  for (const file of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/sim.js']) {
+  for (const file of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/sim.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), c, { filename: file });
   }
   const math = vm.runInContext('Math', c);

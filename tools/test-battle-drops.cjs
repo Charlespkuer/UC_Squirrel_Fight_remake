@@ -24,7 +24,7 @@ function setup() {
   }
   const c={location:{search:'?qa=1'},document:{createElement:element},localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)}};
   c.window=c;vm.createContext(c);
-  for(const file of ['js/orig/Map.min.js','js/orig/GameDict.js','js/gamedata.js','js/state.js','js/battle-drops.js'])vm.runInContext(fs.readFileSync(path.join(project,file),'utf8'),c,{filename:file});
+  for(const file of ['references/orig/Map.min.js','references/orig/GameDict.js','js/gamedata.js','js/state.js','js/battle-drops.js'])vm.runInContext(fs.readFileSync(path.join(project,file),'utf8'),c,{filename:file});
   c.State.newGame('掉落测试');
   const root={appendChild(node){nodes.push(node);}};
   function create(values=[0,0,0,0],withRoot=true,kind){let i=0;return c.BattleDrops.create({root:withRoot?root:undefined,random:()=>values[i++]??0,kind});}

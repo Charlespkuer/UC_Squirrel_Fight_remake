@@ -41,7 +41,7 @@ function setup(storage, keepSave) {
     localStorage: { getItem: (k) => store.get(k) || null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) } };
   c.window = c;
   vm.createContext(c);
-  for (const file of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/battle-drops.js', 'js/tower.js']) {
+  for (const file of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/battle-drops.js', 'js/tower.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), c, { filename: file });
   }
   // 整层胜率贴着验收线（层 10-15 ≥15%、层 20-25 ≥8%）跑，用真随机会偶发抖动；

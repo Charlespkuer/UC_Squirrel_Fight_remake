@@ -376,9 +376,9 @@
   }
   /** 左侧塔身：当前层附近的一段楼层，自上而下。 */
   function towerVisual(layer, maxLayer, mode) {
-    /* 本轮第 6 项：只画 5 层（原来 8 层 × 38px + 间距 ≈ 350px，会顶出左侧栏）。
-   * 5 层 × 34px + 间距 ≈ 200px，配上「纵向居中」既看得清又不越界。 */
-  const top = Math.max(layer + 2, 4), bottom = Math.max(1, layer - 2);
+    /* 第 5 项：显示更多层（上下各 4 层，共 9 层），行高与间距同步缩小，
+   * 总高 ≈ 9×26 + 8×6 ≈ 282px，仍在一屏内（塔身纵向居中）。 */
+  const top = Math.max(layer + 4, 5), bottom = Math.max(1, layer - 4);
     let floors = '';
     for (let i = top; i >= bottom; i--) {
       const cls = i < layer || (mode === 'tower' && i <= maxLayer) ? 'done' : i === layer ? 'now' : 'todo';

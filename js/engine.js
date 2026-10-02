@@ -7,7 +7,7 @@
  *   · 图元标签 "75" 为占位/定位点，永远不绘制
  *   · 标签 > 1000 为武器替身槽（1001-1017 / 1101-1117 / 1201-1217）
  *
- * 数据来源：js/orig/animationStr.js（AnimationStr）、assets.js /
+ * 数据来源：references/orig/animationStr.js（AnimationStr）、assets.js /
  * asset2.js（imgMap 帧表 + 图片路径表）
  * ============================================================ */
 (function () {

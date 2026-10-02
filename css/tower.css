@@ -767,3 +767,10 @@
 /* 本轮第 2 项：商店里已经拥有的可叠加增益 —— 高光边框 + 提示 */
 .shop-slot.owned-stack { border-color: #3f9d9d; box-shadow: 0 0 0 3px #bdf0ee inset, 0 0 10px #3f9d9d66; }
 .shop-slot .stack-hint { color: #1c6f6f; font-weight: 700; }
+
+/* 第 5 项：塔身显示更多层数 —— 行更矮、间距更小、塔身略加宽 */
+.tower-floor { height: 26px; flex: 0 0 26px; border-radius: 7px; }
+.tower-floor-no { font-size: 15px; }
+.tower-floors { gap: 6px; }
+.tower-visual { flex: 0 0 150px; }
+.tower-visual-caption { margin-top: 8px; font-size: 17px; }

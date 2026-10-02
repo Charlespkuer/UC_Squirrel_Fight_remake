@@ -56,7 +56,7 @@ function setup() {
   };
   c.window = c;
   vm.createContext(c);
-  for (const file of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/state.js', 'js/sim.js']) {
+  for (const file of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/state.js', 'js/sim.js']) {
     vm.runInContext(fs.readFileSync(path.join(rootDir, file), 'utf8'), c, { filename: file });
   }
   const math = vm.runInContext('Math', c);

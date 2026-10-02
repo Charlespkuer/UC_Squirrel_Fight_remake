@@ -28,7 +28,7 @@ function setup() {
   const c = { console, location: { search: '?qa=1' }, localStorage: { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value) } };
   c.window = c;
   vm.createContext(c);
-  for (const file of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/state.js']) vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), c, { filename: file });
+  for (const file of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/state.js']) vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), c, { filename: file });
   vm.runInContext('Math.random = () => 0.9', c); // Keep rewards independent of offline fragment RNG.
   c.State.newGame('关卡测试');
   Object.assign(c.State.state(), { level: 10, exp: 0, energy: 0, props: { 23: 10 } });

@@ -36,7 +36,7 @@ function setup() {
   const c = { Date: ClockDate, location: { search: '?qa=1' }, console, localStorage: { getItem: (k) => storage.get(k) || null, setItem: (k, v) => storage.set(k, v) } };
   c.window = c;
   vm.createContext(c);
-  for (const file of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/state.js', 'js/sim.js']) {
+  for (const file of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/state.js', 'js/sim.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), c, { filename: file });
   }
   // 这个回归跑的是 6 档 × 3 个等级的连战胜率，用真随机会偶发抖动

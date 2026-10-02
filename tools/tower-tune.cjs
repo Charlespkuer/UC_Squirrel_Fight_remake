@@ -19,7 +19,7 @@ let tower = load('js/tower.js');
 tower = tower.replace('statBase * 0.78 * M', 'statBase * ' + statC + ' * M')
   .replace('hpBase * 1.05 * M', 'hpBase * ' + hpC + ' * M')
   .replace('elite ? 1.35 : 1', 'elite ? ' + eliteM + ' : 1');
-for (const f of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js']) vm.runInContext(load(f), c, { filename: f });
+for (const f of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js']) vm.runInContext(load(f), c, { filename: f });
 vm.runInContext(towerData, c, { filename: 'tower-data(patched)' });
 for (const f of ['js/state.js', 'js/sim.js']) vm.runInContext(load(f), c, { filename: f });
 vm.runInContext(tower, c, { filename: 'tower(patched)' });

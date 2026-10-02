@@ -33,7 +33,7 @@ function game(search) {
   if (search !== undefined) context.location = { search };
   context.window = context;
   vm.createContext(context);
-  for (const file of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/state.js', 'js/sim.js']) {
+  for (const file of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/state.js', 'js/sim.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file });
   }
   const math = vm.runInContext('Math', context);

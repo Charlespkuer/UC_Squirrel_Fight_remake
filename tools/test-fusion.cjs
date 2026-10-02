@@ -23,7 +23,7 @@ function findRoot(start) {
 }
 
 const rootDir = findRoot(__dirname);
-const files = ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/state.js', 'js/classic-fusion.js'];
+const files = ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/state.js', 'js/classic-fusion.js'];
 
 function setup(ids = [21, 21, 21, 22, 201, 202]) {
   const storage = new Map([['ssdz_save_v1', 'untouched']]), modals = [], toasts = [];

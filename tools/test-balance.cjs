@@ -22,7 +22,7 @@ function setup() {
   class Clock extends Date { constructor(...args) { super(...(args.length ? args : [now])); } static now() { return now; } }
   const c = { Date: Clock, location: { search: '?qa=1' }, localStorage: { getItem: k => storage.get(k) || null, setItem: (k,v) => storage.set(k,v) } };
   c.window = c; vm.createContext(c);
-  for (const file of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/state.js']) vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), c, { filename: file });
+  for (const file of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/state.js']) vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), c, { filename: file });
   const math = vm.runInContext('Math', c); math.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
   c.State.newGame('规则测试');
   return { ...c, storage, math, advance: ms => now += ms, s: () => c.State.state(), saved: () => JSON.parse(storage.get(c.State.saveKey)) };

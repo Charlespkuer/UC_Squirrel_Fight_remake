@@ -22,7 +22,7 @@ const c = { Date: ClockDate, location: { search: '?qa=1' }, console,
   localStorage: { getItem: (k) => store.get(k) || null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) } };
 c.window = c;
 vm.createContext(c);
-for (const f of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js']) {
+for (const f of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js']) {
   vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), c, { filename: f });
 }
 const { State, Sim, Tower } = c;

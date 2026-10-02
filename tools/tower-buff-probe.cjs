@@ -15,7 +15,7 @@ class CD extends Date { static now() { return new Date(2026, 8, 26, 12).getTime(
 const c = { Date: CD, location: { search: '?qa=1' }, console, localStorage: { getItem: (k) => store.get(k) || null, setItem: (k, v) => store.set(k, v) } };
 c.window = c; vm.createContext(c);
 const load = (f) => fs.readFileSync(path.join(root, f), 'utf8');
-for (const f of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js']) {
+for (const f of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js']) {
   vm.runInContext(load(f), c, { filename: f });
 }
 const { State, Sim, Tower, TowerData } = c;

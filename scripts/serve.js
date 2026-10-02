@@ -69,6 +69,18 @@ async function handleSaveApi(req, res, url) {
      * 触发场景：浏览器里那份 1 级空档在自动保存时把几十级的存档盖掉（已经发生过两次）。
      * 需要真的重置时，用 ?force=1（调试面板的「彻底重置账号」会带）。 */
     const force = url.searchParams.get('force') === '1';
+    /* 历史最高等级水位线：一旦写过 32 级，就再也不会被任何「1 级空档」覆盖
+     * （连浏览器兜底档那种顽固状态也挡得住），除非显式 force=1。 */
+    const MARK = path.join(SAVE_DIR, '.min-level');
+    const readMark = () => { try { return Number(fs.readFileSync(MARK, 'utf8')) || 0; } catch (e) { return 0; } };
+    const writeMark = (lv) => { try { fs.mkdirSync(SAVE_DIR, { recursive: true }); fs.writeFileSync(MARK, String(lv), 'utf8'); } catch (e) {} };
+    if (!force) {
+      const mark = readMark();
+      const newLv0 = Number(parsed.level) || 0;
+      if (mark >= 5 && newLv0 < mark) {
+        return json(res, 409, { ok: false, msg: '本机曾达到 ' + mark + ' 级，已拒绝用 ' + newLv0 + ' 级存档覆盖（要重置请用调试面板「彻底重置账号」或 ?force=1）' });
+      }
+    }
     if (!force && fs.existsSync(SAVE_FILE)) {
       try {
         const cur = JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8'));
@@ -84,6 +96,7 @@ async function handleSaveApi(req, res, url) {
     try {
       fs.mkdirSync(SAVE_DIR, { recursive: true });
       fs.writeFileSync(SAVE_FILE, JSON.stringify(parsed), 'utf8');
+      writeMark(Math.max(readMark(), Number(parsed.level) || 0));
       return json(res, 200, { ok: true, savedAt: saveStat().savedAt });
     } catch (e) { return json(res, 500, { ok: false, msg: '写入存档失败：' + e.message }); }
   }

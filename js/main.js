@@ -300,6 +300,24 @@
     try { loaded = await State.fileLoad(); } catch (e) { loaded = false; }
     if (loaded || State.load()) showHome();
     else showTitle();
+    /* 可见自检：如果最终不是「文件存档模式」，直接把原因摆出来（并给一键修复）。
+     * 兜底模式 = 只用浏览器 localStorage，save/progress.json 不参与 ——
+     * 这正是「用启动器打开一直显示 1 级、也导入不了存档」的症状来源。 */
+    setTimeout(async () => {
+      try {
+        const mode = State.storageMode ? State.storageMode() : 'file';
+        if (mode === 'file') return;
+        const info = State.fileInfo ? State.fileInfo() : {};
+        const reason = info.reason || '未知原因';
+        const go = window.confirm('⚠ 当前是「浏览器兜底存档」模式：不会读写 save/progress.json。\n\n' +
+          '原因：' + reason + '\n\n点「确定」立刻改回文件存档（以 save/progress.json 为准并重新载入）。');
+        if (!go) return;
+        const ok = await State.fileProbe();
+        if (ok) { await State.fileLoad(); location.reload(); return; }
+        window.alert('仍然连不上本地服务器的存档接口，请关掉本窗口、用「启动游戏.command」重新打开。\n原因：' +
+          ((State.fileInfo() || {}).reason || reason));
+      } catch (e) {}
+    }, 1200);
     // 首页数字按当前调试设置（数字宽度）重画一次，保证刷新后立即生效
     if (window.UI && UI.renderNumbers) UI.renderNumbers();
     if (/[?&]test=1(?:&|$)/.test(location.search)) runSelfTest();

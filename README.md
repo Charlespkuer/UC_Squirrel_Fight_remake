@@ -12,6 +12,11 @@
 | Windows | 双击 `启动游戏.cmd` |
 | 手动 | `node scripts/serve.js` → 浏览器打开 `http://127.0.0.1:8080/` |
 
+> **存档到底在哪**：有本地服务器时，正式存档就是 `save/progress.json`（浏览器 localStorage 只当兜底）。
+> 启动器的独立窗口用的是**单独的浏览器 profile**（`~/Library/Application Support/SSDZClassic/browser-profile`），
+> 那里可能残留一份旧的「兜底存档」，表现为「明明文件里是 32 级，窗口里却是 1 级」。
+> 遇到就执行一次：`bash 启动游戏.command --reset-profile`（清掉那份兜底档）再重新启动。
+
 纯静态、无构建步骤。唯一需要注意的是：「存档写入文件」与「双机同步」需要本地服务
 （`scripts/serve.js` 提供 `/__save`，`scripts/sync/sync.js` 提供跨设备同步）；直接静态托管也能玩，
 但存档只留在浏览器里。

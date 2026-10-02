@@ -33,6 +33,7 @@ cd "$ROOT" || exit 1
 
 PORT=8080
 APP_MODE=1
+RESET_PROFILE=0
 FOREGROUND=0
 DO_STOP=0
 SERVER_ARGS=()
@@ -40,6 +41,7 @@ for a in "$@"; do
   case "$a" in
     [0-9]*) PORT="$a" ;;
     --browser|--app) APP_MODE=0 ;;
+    --reset-profile) RESET_PROFILE=1 ;;
     --no-save) SERVER_ARGS+=(--no-save) ;;
     --stop) DO_STOP=1 ;;
     --foreground) FOREGROUND=1 ;;
@@ -132,6 +134,13 @@ if [ "$(uname)" = "Darwin" ]; then
   PROFILE_DIR="$HOME/Library/Application Support/SSDZClassic/browser-profile"
 else
   PROFILE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/SSDZClassic/browser-profile"
+fi
+
+# --reset-profile：清掉游戏独立窗口的浏览器存档目录（localStorage 里的兜底档）。
+# 用独立 profile 时，浏览器兜底存档和人平时用的浏览器不是同一份，出问题要来这里清。
+if [ "$RESET_PROFILE" = "1" ] && [ -n "$PROFILE_DIR" ] && [ -d "$PROFILE_DIR" ]; then
+  echo "清理独立窗口的浏览器存档：$PROFILE_DIR"
+  rm -rf "$PROFILE_DIR"
 fi
 
 open_app() {

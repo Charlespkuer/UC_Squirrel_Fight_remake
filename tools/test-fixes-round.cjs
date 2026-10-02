@@ -1047,6 +1047,200 @@ test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => 
   assert.ok(r6 > 0.68 && r6 < 0.92, '第 6 回合起应当约 ×0.80，实测 ×' + r6.toFixed(2));
 });
 
+test('需求25：挑战塔碎片只掉蓝色（不再有白/绿）', () => {
+  const c = setup();
+  const S = c.State.state();
+  S.level = 70; S.props[23] = 9999;
+  for (let i = 1; i <= 18; i++) S.stages[i] = { npcIndex: 3, passed: true };
+  const drops = { 24: 0, 25: 0, 26: 0 }, counts = { 24: 0, 25: 0, 26: 0 };
+  let layers = 0;
+  for (let round = 0; round < 60; round++) {
+    c.Tower._debugSetLayer(0);
+    if (!c.Tower.startTowerRun().ok) continue;
+    for (let g = 0; g < 12; g++) {
+      const r = c.Tower._debugRun('tower');
+      if (!r) break;
+      if (r.choices) {
+        const pick = c.Tower.pickChoice('tower', 0, null);
+        if (pick && !pick.ok && pick.needsReplace) c.Tower.pickChoice('tower', 0, ((r.permanent || [])[0] || {}).id || null);
+        continue;
+      }
+      const nx = c.Tower.nextBattle('tower');
+      if (!nx || nx.ok === false) break;
+      const out = c.Tower.reportBattle('tower', nx.token, true, 1, null);
+      if (out && out.layerComplete) {
+        layers++;
+        if (out.drop) { drops[out.drop.id]++; counts[out.drop.id] += out.drop.count; }
+        break;
+      }
+    }
+    const rr = c.Tower._debugRun('tower');
+    if (rr && rr.retry) c.Tower.giveUp('tower');
+  }
+  assert.ok(layers >= 20, '样本太少：' + layers);
+  assert.equal(drops[24] + counts[24], 0, '不该再掉白色碎片，实测 ' + drops[24] + ' 次 / ' + counts[24] + ' 个');
+  assert.equal(drops[25] + counts[25], 0, '不该再掉绿色碎片，实测 ' + drops[25] + ' 次 / ' + counts[25] + ' 个');
+  assert.ok(drops[26] > 0, '应当掉蓝色碎片');
+  // 掉率与数量沿用 ★6 那一档：约 60% × 2~5 个 → 每层约 2 个
+  const perLayer = counts[26] / layers;
+  assert.ok(perLayer > 1.0 && perLayer < 3.2, '蓝色碎片每层期望应当约 2 个，实测 ' + perLayer.toFixed(2));
+  // 源码层面确认没有 tierUp 的分支了
+  /* 只查塔的实现里没有 tierUp 分支（常规关卡 gamedata.js 仍然用它分白/绿/蓝，那是另一套）。 */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  assert.ok(!/tierUp/.test(src), '挑战塔内不该再用 tierUp 决定碎片成色');
+});
+
+test('需求26：积分扩展（拿增益计分 + 两个隐藏成就）', () => {
+  const c = setup();
+  const TD = c.TowerData, S = c.State;
+  const run = () => c.Tower._debugRun('endless');
+
+  // 1) 分值配置
+  assert.equal(TD.SCORE.battle, 25, '战斗胜利 25');
+  assert.equal(TD.SCORE.layer, 100, '通过一层 100');
+  assert.equal(TD.SCORE.elite, 50, '击败精英 50');
+  assert.equal(TD.buffScore(0), 5, '普通增益 5');
+  assert.equal(TD.buffScore(1), 10, '稀有增益 10');
+  assert.equal(TD.buffScore(2), 20, '史诗增益 20');
+  assert.equal(TD.buffScore(3), 40, '传奇增益 40');
+  // 复活档位：分档递增且封顶
+  const tiers = TD.SCORE.reviveTiers;
+  assert.equal(tiers[0].at, 3, '第一档是累计 3 次');
+  for (let i = 1; i < tiers.length; i++) {
+    assert.ok(tiers[i].at > tiers[i - 1].at, '档位阈值应当递增');
+    assert.ok(tiers[i].points > tiers[i - 1].points, '档位分值应当递增');
+  }
+  assert.equal(TD.reviveScoreAt(2), 0, '不到 3 次不给分');
+  assert.equal(TD.reviveScoreAt(3), tiers[0].points);
+  assert.equal(TD.reviveScoreAt(6), tiers[1].points);
+  assert.equal(TD.reviveScoreAt(12), tiers[3].points);
+  assert.equal(TD.reviveScoreAt(999), tiers[3].points, '超过最后一档不再增长（防刷分）');
+  // 加成档位
+  const ms = TD.SCORE.statMilestones;
+  assert.equal(ms[0].at, 1.0, '第一档是 +100%');
+  for (let i = 1; i < ms.length; i++) assert.ok(ms[i].at > ms[i - 1].at && ms[i].points > ms[i - 1].points, '加成档位应当递增');
+
+  // 2) 战斗胜利 / 通关一层 真的加分，并记录流水
+  let r = run();
+  r.score = 0; r.scoreLog = []; r.achievements = []; r.statPeaks = {}; r.deathSaves = 0; r.reviveTierPaid = 0; r.reviveCount = 0;
+  let nx = c.Tower.nextBattle('endless');
+  let a = run();
+  c.Tower.reportBattle('endless', a.attempt, true, 1, null);
+  a = run();
+  assert.equal(a.score, 25, '胜一场应当 +25，实测 ' + a.score);
+  assert.ok(a.scoreLog.some((x) => x.tag === '战斗胜利' && x.points === 25), '要有流水记录');
+
+  // 3) 拿增益计分：按稀有度（场间选择路径）
+  r = run();
+  r.score = 0; r.choices = [{ type: 'buff', id: 'C15' }];   // 史诗 → 20 分
+  const picked = c.Tower.pickChoice('endless', 0, null);
+  assert.ok(picked.ok, '应当能拿到');
+  assert.equal(picked.score, TD.buffScore(TD.BUFF_BY_ID.C15.rarity), '选择路径要按稀有度给分');
+  assert.equal(run().score, picked.score, '分数要真的入账');
+
+  // 4) 拿增益计分：商店购买路径
+  r = run();
+  r.score = 0; r.coins = 9999; r.phase = 'shop';
+  r.shop = { layer: r.layer, retrySold: false, rerollFree: true, rerollCount: 0, rerollPaid: 0,
+    slots: [{ id: 'C02', sold: false, price: 20 }] };
+  const bought = c.Tower.buyShopSlot(0);
+  assert.ok(bought.ok, '应当能买：' + (bought.msg || ''));
+  assert.equal(bought.score, TD.buffScore(TD.BUFF_BY_ID.C02.rarity), '商店路径也要给分');
+  assert.equal(run().score, bought.score, '分数要真的入账');
+
+  // 5) 隐藏成就「死而复生」：每 3 次触发一档、分档递增、封顶
+  r = run();
+  r.score = 0; r.achievements = []; r.scoreLog = []; r.deathSaves = 0; r.reviveTierPaid = 0; r.reviveCount = 0;
+  r.phase = null; r.choices = null;
+  /* 只关心「复活成就带来的增量」——开战时可能顺带触发加成成就，所以用 score 的差值断言。 */
+  const fire3 = () => {
+    const cur = run();
+    cur.phase = null; cur.choices = null;
+    const before = Number(cur.score) || 0;
+    const n = c.Tower.nextBattle('endless');
+    if (!n || n.ok === false) return null;
+    const mid = Number(run().score) || 0;      // nextBattle 可能已加了别的成就分
+    const live = run();
+    const out = c.Tower.reportBattle('endless', live.attempt, true, 1,
+      { rounds: [{ deathSave: true }, { deathSave: true }, { deathSave: true }] });
+    out.__delta = (Number(run().score) || 0) - mid;
+    return out;
+  };
+  const o1 = fire3();
+  assert.ok(o1 && o1.achievement, '累计 3 次应当触发成就');
+  assert.match(o1.achievement.name, /累计 3 次/);
+  assert.equal(o1.achievement.points, tiers[0].points, '第一档分值要对');
+  assert.equal(o1.reviveScore, tiers[0].points, '第 1 档的边际增量就是档位分');
+  /* 结算阶段同时会加「战斗胜利 25」，所以增量 = 复活档位分 + 25。 */
+  assert.equal(o1.__delta, tiers[0].points + TD.SCORE.battle, '本场应当加「复活档位分 + 战斗胜利」');
+  assert.ok(o1.achievements && o1.achievements.length, '要进「待飘提示」队列');
+  const o2 = fire3();
+  assert.ok(o2 && o2.achievement, '累计 6 次应当再触发一档');
+  assert.match(o2.achievement.name, /累计 6 次/);
+  assert.equal(o2.achievement.points, tiers[1].points, '第二档的「档位总分」要对');
+  assert.equal(o2.reviveScore, tiers[1].points - tiers[0].points, '本次边际增量应当是档位差');
+  assert.equal(o2.__delta, (tiers[1].points - tiers[0].points) + TD.SCORE.battle, '第 2 档只补发档位差（累计制）+ 战斗胜利');
+  // 封顶：直接把累计推到 999，再打一场不应再给分
+  /* 封顶：把「累计复活」推到 999（模拟极端情况），且把已发档位也推到最高，
+   * 再打一场不应再给复活分。用 reviveScore / 流水断言 —— 开战时可能顺带触发
+   * 加成成就，总分会被干扰。 */
+  run().deathSaves = 999;
+  run().reviveTierPaid = tiers[tiers.length - 1].points;
+  const logBefore = (run().scoreLog || []).length;
+  const o3 = fire3();
+  assert.ok(!o3.reviveScore, '超过最后一档不该再给复活分（防刷分）');
+  assert.ok(!o3.achievement, '封顶后不该再产生复活成就');
+  const newLogs = (run().scoreLog || []).slice(logBefore).map((x) => x.tag);
+  assert.ok(!newLogs.some((t) => /死而复生/.test(t)), '流水里不该再出现复活成就：' + JSON.stringify(newLogs));
+  // 防刷分根因：金蝉脱壳改成 unique（一局只能拿一次），累计复活因此封顶在 13 次（10+每层1）
+  assert.equal(TD.BUFF_BY_ID.N04.unique, true, '金蝉脱壳必须是 unique，否则可无限叠、刷爆复活成就');
+  assert.ok(tiers[tiers.length - 1].at <= 10 + 3, '最高档阈值不该超过实际可达到的复活次数（10 + 每层 1）');
+
+  // 6) 隐藏成就「超凡入圣」：跨档才触发，且**不能一次点亮整档**（回归：阈值判断写反过）
+  r = run();
+  r.score = 0; r.achievements = []; r.scoreLog = []; r.statPeaks = {};
+  r.phase = null; r.choices = null;
+  /* 全部走 addBuff 并每步重新取 run 引用（debugGrantBuff 拿的是内部引用，
+   * 与这里持有的 r 可能不是同一个对象，混用会导致增益没真正入账）。 */
+  for (const id of ['G07', 'N01', 'C02', 'C02', 'C02']) c.Tower.addBuff(run(), id);
+  const bonus = c.Tower.debugBuffReport('endless').effects.find(([k]) => k === '攻击');
+  assert.ok(bonus && parseFloat(bonus[1].replace('+', '')) > 100,
+    '前置条件：本场攻击加成应当 >100%，实测 ' + JSON.stringify(bonus));
+  c.Tower._debugSetStatPeak('powerMul', 0.99);                 // 峰值刚好在 100% 之下
+  c.Tower.nextBattle('endless');
+  const peaks = run().statPeaks;
+  assert.ok(peaks.powerMul >= 1.0, '本场实际加成应当超过 100%，实测 ' + peaks.powerMul);
+  const ach = run().achievements || [];
+  /* 从 0.99 一步跨到 1.20 → 跨过了 +100% 与 +150% 两档，so 点亮两条（这是正确行为：
+   * 「跨过哪一档就点亮哪一档」）。关键是不能把 200%/300% 也一起点亮。 */
+  const expectedTiers = ms.filter((m) => m.at > 0.99 && m.at <= peaks.powerMul);
+  assert.equal(ach.length, expectedTiers.length,
+    '应当点亮 ' + expectedTiers.length + ' 档，实测 ' + JSON.stringify(ach.map((x) => x.name)));
+  assert.ok(ach.some((x) => /\+100%/.test(x.name)), '必须含 +100% 档');
+  assert.ok(!ach.some((x) => /\+200%|\+300%/.test(x.name)), '不该点亮未跨过的更高档：' + JSON.stringify(ach.map((x) => x.name)));
+  assert.equal(run().score, expectedTiers.reduce((a, m) => a + m.points, 0), '加成成就的分值要对');
+  // 再调两次不该重复点亮同一档
+  c.Tower.nextBattle('endless');
+  c.Tower.nextBattle('endless');
+  assert.equal((run().achievements || []).length, ach.length, '同一档位不该重复点亮');
+  // 低加成不该误触发（回归：曾经一场刷出 16 个成就）
+  const c2 = setup();
+  const r2 = c2.Tower._debugRun('endless');
+  r2.score = 0; r2.achievements = []; r2.statPeaks = {};
+  for (let k = 0; k < 3; k++) c2.Tower.addBuff(r2, 'C02');    // 仅 +30%
+  c2.Tower.nextBattle('endless');
+  c2.Tower.nextBattle('endless');
+  assert.equal((r2.achievements || []).length, 0, '加成不足 100% 时不该触发任何档位');
+
+  // 7) 数据持久化 + 暴露给界面
+  r = run();
+  assert.ok(Array.isArray(r.achievements) && Array.isArray(r.scoreLog), '成就与流水要挂在 run 上（随存档保留）');
+  const info = c.Tower.endlessInfo();
+  assert.ok(Array.isArray(info.run.achievements), 'endlessInfo 要暴露成就');
+  assert.ok(Array.isArray(info.run.scoreLog), 'endlessInfo 要暴露加分流水');
+  assert.ok(typeof info.run.deathSaves === 'number', 'endlessInfo 要暴露复活计数');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

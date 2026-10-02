@@ -278,13 +278,15 @@ hr('上轮 9：挥金如土');
     Tower.debugGrantBuff('C36');
     const g0 = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, Tower._debugRun('endless').spendGain || {});
     let spent = 0;
+    /* 消费点用「刷新货架」：它每刷一次都扣币、且价格递增，稳定产生消费。
+     * （原来用的是 buyShopHeal —— 那个位置现在是一次限购的重新挑战币，
+     *  买过就失败、靠刷新补，刷新价涨上去后有时花不够，导致断言偶发红。） */
     for (let i = 0; i < 40; i++) {
       const before = Tower._debugRun('endless').coins;
-      const r = Tower.buyShopHeal();
-      if (!r.ok) Tower.rerollShop();
+      Tower.rerollShop();
       const after = Tower._debugRun('endless').coins;
       spent += Math.max(0, before - after);
-      if (Tower._debugRun('endless').coins < 10) { Tower._debugRun('endless').coins = 500; }
+      if (Tower._debugRun('endless').coins < 60) { Tower._debugRun('endless').coins = 500; }
     }
     const r1 = Tower._debugRun('endless');
     const g1 = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, r1.spendGain || {});

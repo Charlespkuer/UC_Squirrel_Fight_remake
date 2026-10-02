@@ -11,6 +11,21 @@
   function on(root, action, handler) { const el = find(root, '[data-action="' + action + '"]'); if (el) el.onclick = handler; return el; }
   function back(root, handler, label) { const el = on(root, 'home', handler); if (el) el.textContent = label || '返回'; }
   function notice(text, buttons) { modal('提示', '<p>' + esc(text) + '</p>', buttons || [{ label: '知道了' }], { small: true }); }
+  /** 隐藏成就的「飘一条提示」：非阻塞、几秒后自己消失，不打断操作。
+   *  用 document 判空，保证无 DOM 环境（测试）调用不会炸。 */
+  function achievementToast(item) {
+    if (!item || typeof document === 'undefined' || !document.body) return;
+    const el = document.createElement('div');
+    el.className = 'achieve-toast';
+    el.innerHTML = '<b>' + esc(item.name) + '</b><i>隐藏成就 · 分数 +' + esc(item.points || 0) + '</i>';
+    document.body.appendChild(el);
+    setTimeout(() => { el.classList.add('out'); }, 2600);
+    setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 3400);
+  }
+  /** 把状态机返回的成就列表逐条飘出来（战斗前后都可能产生）。 */
+  function flushAchievements(list) {
+    for (const it of (list || [])) achievementToast(it);
+  }
 
   const RARITY = TowerData.RARITY_NAME || ['普通', '稀有', '史诗', '传奇'];
   const SCOPE = { limited: '限次', permanent: '永久', instant: '即时' };
@@ -648,6 +663,7 @@
   function fight(mode) {
     const nx = Tower.nextBattle(mode);
     if (!nx.ok) { reopen(mode); if (nx.msg) notice(nx.msg); return; }
+    flushAchievements(nx.achievements);      // 「超凡入圣」这类在开战时算出的成就
     const interrupted = () => {
       Tower.interruptBattle(mode, nx.token);
       reopen(mode);
@@ -683,6 +699,7 @@
       [{ label: '下一场', cls: 'gold', run: () => fight(mode) }], { small: true });
   }
   function afterBattle(mode, rw) {
+    flushAchievements(rw.achievements);      // 「死而复生」这类在战斗结算时算出的成就
     if (!rw.win) {
       if (mode === 'tower') towerDefeat(rw);
       else if (rw.retryable) endlessRetryOffer(rw);     // 需求 1：有重新挑战币 → 先问要不要回滚
@@ -760,9 +777,12 @@
         const picked = Tower.pickChoice(mode, Number(el.dataset.choice));
         m.close();
         if (!picked.ok) { reopen(mode); return; }
-        const text = picked.heal ? '回复了 ' + Math.round(TowerData.FIXED_HEAL_PCT * 100) + '% 最大生命，状态满满！'
-          : '获得增益「' + picked.buff.name + '」：' + picked.buff.desc;
-        modal('休整完毕', '<p>' + esc(text) + '</p>', [{ label: '继续战斗', cls: 'gold', run: () => fight(mode) }], { small: true });
+        flushAchievements(picked.achievements);
+        const text = '获得增益「' + picked.buff.name + '」：' + picked.buff.desc;
+        /* 计分扩展：拿增益也得分，这里把这次拿到的分写出来。 */
+        const bonus = picked.score ? '<p class="gold-text">得分 +' + picked.score + '（获取增益）</p>' : '';
+        modal('休整完毕', '<p>' + esc(text) + '</p>' + bonus,
+          [{ label: '继续战斗', cls: 'gold', run: () => fight(mode) }], { small: true });
       };
     });
   }
@@ -917,12 +937,22 @@
           endlessDefeat(out);
         } }], { small: true });
   }
+  /** 本局隐藏成就汇总（结算/失败弹窗用）。没有成就就返回空串。 */
+  function achieveSummaryHtml() {
+    const info = Tower.endlessInfo();
+    const list = (info && info.run && info.run.achievements) || [];
+    if (!list.length) return '';
+    const total = list.reduce((a, x) => a + (Number(x.points) || 0), 0);
+    return '<div class="achieve-summary"><b>本局隐藏成就 ' + list.length + ' 个 · 合计 +' + total + ' 分</b>' +
+      list.map((x) => '<span>' + esc(x.name) + '<i>+' + (Number(x.points) || 0) + '</i></span>').join('') + '</div>';
+  }
   function endlessDefeat(rw) {
     // 第 3 项：失败不再归零 —— 直接按当前层应得的抽奖卷结算
     modal('挑战失败', '<div class="result-box"><div class="result-title lose">倒在了第 ' + rw.layer + ' 层</div>' +
       '<div class="result-lines">本局分数 ' + rw.score + '（历史最高 ' + rw.best + '）</div>' +
       '<p class="gold-text">按当前进度结算：抽奖卷 +' + (rw.tickets || 0) + '（第 ' + rw.layer + ' 层应得）</p>' +
-      (rw.shield ? '<p class="gold-text">保底奖励：本局到达过 15 层，赠送 1 次免费抽奖（每日限 1 次）！</p>' : '') + '</div>',
+      (rw.shield ? '<p class="gold-text">保底奖励：本局到达过 15 层，赠送 1 次免费抽奖（每日限 1 次）！</p>' : '') +
+      achieveSummaryHtml() + '</div>',
       [{ label: '再来一局', cls: 'gold', run: openEndless }, { label: '返回', run: () => C().home() }], { small: true });
   }
 
@@ -979,7 +1009,10 @@
       const r = Tower.buyShopSlot(i);
       if (r && r.needsReplace) { offerShopReplace(i, r.buff); return; }
       if (!r.ok) { notice(r.msg || '买不了。'); return; }
-      openShop(revisit);
+      const back = () => openShop(revisit);
+      /* 计分扩展：商店买到的增益也算分。 */
+      if (r.score) notice('已购入「' + r.buff.name + '」· 得分 +' + r.score + '（获取增益）', [{ label: '知道了', run: back }]);
+      else back();
     }));
     on(p, 'retry', () => {
       const r = Tower.buyRetryToken();

@@ -119,6 +119,14 @@
         delete run.stickyStat;
       }
       run.fragileSeeds = Object.assign({}, run.fragileSeeds || {});
+      /* 计分扩展：成就 / 加成峰值 / 复活计数 / 本局加分流水。 */
+      run.achievements = Array.isArray(run.achievements) ? run.achievements.slice(0, 40) : [];
+      run.scoreLog = Array.isArray(run.scoreLog) ? run.scoreLog.slice(-60) : [];
+      run.statPeaks = Object.assign({}, run.statPeaks || {});
+      run.pendingToasts = Array.isArray(run.pendingToasts) ? run.pendingToasts.slice(0, 12) : [];
+      run.deathSaves = Math.max(0, Math.floor(Number(run.deathSaves) || 0));
+      run.reviveCount = Math.max(0, Math.floor(Number(run.reviveCount) || 0));
+      run.reviveTierPaid = Math.max(0, Number(run.reviveTierPaid) || 0);
       run.bonusPower = Math.max(0, Number(run.bonusPower) || 0);
       if (run.shop && typeof run.shop === 'object' && !Array.isArray(run.shop.slots)) run.shop = null;
       if (run.phase !== 'shop' && run.phase !== 'checkpoint') run.phase = null;
@@ -505,7 +513,9 @@
       mode: 'endless', permanent: [], limited: [], coins: 0, score: 0, bestLayer: 0,
       pillSlots: { power: null, agility: null, speed: null },
       killPower: 0, killMaxHp: 0, bonusPower: 0, shop: null, phase: null, choices: null, debuffs: [],
-      retryToken: 0, retrySnap: null };
+      retryToken: 0, retrySnap: null,
+      achievements: [], scoreLog: [], statPeaks: {}, pendingToasts: [],
+      deathSaves: 0, reviveCount: 0, reviveTierPaid: 0 };
     if (debug('endlessCoin')) run.coins = 9999;
     e.run = run;
     save();
@@ -551,6 +561,8 @@
     const built = buildFoe(mode, run.layer, entry);
     const foeCtx = { hero: entry.kind === 'hero', poolNpc: built.poolNpc, elite: built.elite };
     const agg = aggregate(run, foeCtx);
+    /* 隐藏成就「超凡入圣」：本场聚合出来的 buff 加成（不含装备/等级）跨过阈值就记一次。 */
+    checkStatAchievements(run, agg);
     // M01 威慑：直接压敌人力量
     if (agg.enemyPowerDown > 0) built.foe.power = Math.max(1, Math.round(built.foe.power * (1 - agg.enemyPowerDown)));
     /* 本轮第 3 项：挫锐 / 卸甲 —— 本局所有敌人生命上限按累计比例下调。
@@ -653,10 +665,80 @@
     run.attempt = mode + '_' + Date.now() + '_' + (++attemptSeq);
     snapshotBattle(run);      // 需求 1：记下这一场开始前的状态，供失败后回滚
     save();
+    const toasts = takeAchievementToasts(run);   // 例如「超凡入圣」是在这之前算出来的
     return { ok: true, token: run.attempt, entry, info: entryInfo(entry), foe: built.foe,
       elite: built.elite, region: regionOf(entry), hpRatio: run.carry, adjustMe,
-      debuffs: (run.debuffs || []).slice(),
+      debuffs: (run.debuffs || []).slice(), achievements: toasts,
       battleNo: run.idx + 1, battleCount: run.plan.length, layer: run.layer };
+  }
+  /* ============================================================
+   * 计分：所有加分都走这里，顺带记录「本局成就」流水（供界面飘提示与结算展示）
+   * ============================================================ */
+  function addScore(run, points, tag) {
+    const pts = Math.max(0, Math.round(Number(points) || 0));
+    if (!run || !pts) return 0;
+    run.score = Math.max(0, Math.floor(Number(run.score) || 0)) + pts;
+    if (tag) {
+      run.scoreLog = Array.isArray(run.scoreLog) ? run.scoreLog : (run.scoreLog = []);
+      run.scoreLog.push({ tag: tag, points: pts, layer: Math.max(1, Number(run.layer) || 1) });
+      if (run.scoreLog.length > 60) run.scoreLog.splice(0, run.scoreLog.length - 60);
+    }
+    return pts;
+  }
+  /**
+   * 记录一条隐藏成就。**同一 key 只记一次**，所以「可重复」是靠调用方给递增的 key
+   * （死而复生用 revive:1 / revive:2…）实现的 —— 这样成就列表不会出现重复条目，
+   * 同时每次触发都能得分。
+   * 顺带推进「待界面显示」的队列（成就提示在 explore 的所有路径上统一取出）。
+   */
+  function markAchievement(run, key, name, points) {
+    if (!run) return null;
+    run.achievements = Array.isArray(run.achievements) ? run.achievements : (run.achievements = []);
+    if (run.achievements.some((a) => a.key === key)) return null;
+    const item = { key: key, name: name, points: Math.max(0, Math.round(Number(points) || 0)),
+      layer: Math.max(1, Number(run.layer) || 1) };
+    run.achievements.push(item);
+    if (run.achievements.length > 40) run.achievements.splice(0, run.achievements.length - 40);
+    run.pendingToasts = Array.isArray(run.pendingToasts) ? run.pendingToasts : (run.pendingToasts = []);
+    run.pendingToasts.push(item);
+    if (run.pendingToasts.length > 12) run.pendingToasts.splice(0, run.pendingToasts.length - 12);
+    return item;
+  }
+  /** 取出所有待显示的成就提示（并清空队列）。界面在每次操作后调它。 */
+  function takeAchievementToasts(run) {
+    if (!run) return [];
+    const list = Array.isArray(run.pendingToasts) ? run.pendingToasts.slice() : [];
+    run.pendingToasts = [];
+    return list;
+  }
+  /** 获取增益 → 计分（场间选择与商店购买都走这里）。 */
+  function scoreBuffAcquire(run, buff) {
+    if (!run || run.mode !== 'endless' || !buff) return 0;
+    return addScore(run, D().buffScore(buff.rarity), '获得增益·' + buff.name);
+  }
+  /** 需求：某项 buff 加成跨过阈值 → 隐藏成就。在 buildFoe 里用本场的 aggregate 检查。 */
+  function checkStatAchievements(run, agg) {
+    if (!run || run.mode !== 'endless' || !agg) return [];
+    const got = [];
+    const peaks = run.statPeaks = Object.assign({}, run.statPeaks || {});
+    const NAMES = { powerMul: '攻击', agilityMul: '敏捷', speedMul: '速度', maxHpMul: '生命上限' };
+    for (const [field, label] of Object.entries(NAMES)) {
+      const before = Math.max(0, Number(peaks[field]) || 0);
+      const pct = Math.max(0, Number(agg[field]) || 0);
+      /* 峰值只增不减：buff 掉了成就也已经拿到手（那才是「曾经达成」）。 */
+      if (pct > before) peaks[field] = pct;
+      const after = Number(peaks[field]) || 0;
+      for (const m of D().SCORE.statMilestones) {
+        /* 必须「本次这一下跨过」才触发：before < 阈值 ≤ after。
+         * 只写 `after >= 阈值` 会把整档一次性全点亮（曾经写反过：峰值一到 100%
+         * 就把 100/150/200/300 四条一起记，实测一场刷出 16 个成就 +3000 分）。 */
+        if (!(before < m.at && after >= m.at)) continue;
+        const key = 'stat:' + field + ':' + Math.round(m.at * 100);
+        const item = markAchievement(run, key, '超凡入圣 · ' + label + ' +' + Math.round(m.at * 100) + '%', m.points);
+        if (item) { addScore(run, m.points, '隐藏成就·' + item.name); got.push(item); }
+      }
+    }
+    return got;
   }
   /** 手上有没有重新挑战币（以及有没有可用的快照）。 */
   function canRetry(run) {
@@ -761,6 +843,28 @@
     // 三侠的大招会给玩家留一层削弱（第 3 项）
     // 第 2 项：本场触发了复活甲 → 本层的不死鸟用掉
     if (stacksOf(run, 'C14') && result && Array.isArray(result.rounds) && result.rounds.some((r) => r.deathSave)) run.reviveLayer = run.layer;
+    /* 隐藏成就「死而复生」：统计本场触发了几次免死/复活（不死鸟、金蝉脱壳都算），
+     * 累计到档位就加分 —— 分档递增、12 次封顶（防「故意挨打刷分」）。 */
+    if (mode === 'endless' && result && Array.isArray(result.rounds)) {
+      const saves = result.rounds.filter((r) => r.deathSave).length;
+      if (saves > 0) {
+        run.deathSaves = Math.max(0, Math.floor(Number(run.deathSaves) || 0)) + saves;
+        const tier = D().reviveScoreAt(run.deathSaves);
+        /* 用 `>` 比较：只补发「比已发过的更高档」的那部分，跳档也不会重复发放。 */
+        if (tier > (Number(run.reviveTierPaid) || 0)) {
+          const gained = tier - (Number(run.reviveTierPaid) || 0);
+          run.reviveTierPaid = tier;
+          run.reviveCount = (Number(run.reviveCount) || 0) + 1;
+          addScore(run, gained, '隐藏成就·死而复生（累计 ' + run.deathSaves + ' 次）');
+          /* 成就上标「这一档总共值多少」（不是本次边际增量），这样展示在结算页
+           * 可以直接相加得到成就总收益：30 + 45 + 60 + 90 = 225。 */
+          const item = markAchievement(run, 'revive:' + run.reviveCount,
+            '死而复生 · 累计 ' + run.deathSaves + ' 次', tier);
+          out.achievement = item || null;
+          out.reviveScore = gained;
+        }
+      }
+    }
     const debuff = applyHeroDebuff(run, entry, result);
     if (debuff) { out.debuff = debuff; save(); }
     if (mode === 'tower') {
@@ -777,7 +881,7 @@
         run.carry = Math.min(1, run.carry + winHeal);
         out.winHeal = winHeal;
       }
-      run.score += D().SCORE.battle;
+      addScore(run, D().SCORE.battle, '战斗胜利');
       /* 第 1 项：试炼币加成（战利品类限次 buff，remaining 次数在下面统一扣） */
       let coinMul = 1 + (runModTotal(run, 'coinBoostPct') || 0);
       /* 贪婪裂隙：我方试炼币按实例上摇出来的比例加成（被反弹/被剥夺时就不给）。
@@ -808,7 +912,7 @@
       const c11 = stacksOf(run, 'C11');
       if (c11) run.carry = Math.min(1, run.carry + 0.03 * c11 * g);
       if (isElite) {
-        run.score += D().SCORE.elite;
+        addScore(run, D().SCORE.elite, '击败精英');
         run.coins += D().COINS.elite;
         const c13 = stacksOf(run, 'C13');
         if (c13) run.carry = Math.min(1, run.carry + D().BUFF_BY_ID.C13.mods.eliteHealAfter * g);
@@ -835,6 +939,7 @@
       if (slot && slot.battles > 0) { slot.battles--; if (slot.battles <= 0) run.pillSlots[k] = null; }
     }
     if (won === 3 || (won === 4 && len === 5)) run.choices = rollChoices(mode, run);
+    out.achievements = takeAchievementToasts(run);
     out.choices = run.choices;
     out.permanent = (run.permanent || []).length;
     out.limited = (run.limited || []).map((b) => ({ id: b.id, uses: b.uses, on: b.on }));
@@ -1097,11 +1202,14 @@
       State.addGold(gold);
       tower().maxLayer = run.layer;
       tower().retry = null;
-      // 碎片判定压缩到最后一击：掉率/数量期望 = 挑战模式单场（★6 参数，蓝色封顶）
+      /* 碎片判定压缩到最后一击：掉率/数量期望 = 挑战模式单场（★6 参数）。
+       * 需求：挑战塔**只掉蓝色碎片**（id 26）—— 不再按概率分白/绿
+       *（原来 72% 白、28% 蓝，白色占大头）。掉率与数量沿用 ★6 那一档，
+       * 所以改的是「碎片成色」而不是掉率本身：每层期望从「白 ~1.5 + 蓝 ~0.6」
+       * 变成「蓝 ~2.1」。 */
       if (Math.random() < GData.stageFragmentChance(6)) {
-        const frag = GData.STAGE_FRAGMENT;
         const count = GData.stageFragmentCount();
-        const id = Math.random() >= frag.tierUp ? 26 : 24;
+        const id = 26;                                  // 蓝色碎片
         S().props[id] = (S().props[id] || 0) + count;
         out.drop = { id, count, name: propMap.getValue(id).name };
       }
@@ -1115,7 +1223,7 @@
     }
     // —— 无尽 ——
     const g = globalMul(run);
-    run.score += D().SCORE.layer;
+    addScore(run, D().SCORE.layer, '通过第 ' + run.layer + ' 层');
     run.coins += D().COINS.layer;
     run.bestLayer = Math.max(run.bestLayer, run.layer);
     /* 本轮第 5 项：**不要**在这里清空限次列表。
@@ -1239,9 +1347,13 @@
     if (!choice) return { ok: false };
     const res = addBuff(run, choice.id, replaceId);
     if (!res.ok) return res;                     // 永久格子满了：保留 choices，让界面去选替换
+    /* 需求：获取增益也算分（按稀有度）。 */
+    const gained = res.buff || D().BUFF_BY_ID[choice.id];
+    const pts = scoreBuffAcquire(run, gained);
     run.choices = null;
     save();
-    return res;
+    return Object.assign({}, res, pts ? { score: pts } : null,
+      { achievements: takeAchievementToasts(run) });
   }
   /** 需求 3：烙印加成的实际生效值 = 基础 × 0.5（未损毁）+ 已损毁的永久份。
    *  未损毁时半效；损毁时把「基础」整份转成永久（burned += base），于是变成 1.5×基础，
@@ -1287,6 +1399,14 @@
     /* 需求 3：每条烙印有自己的碎裂随机数种子（不再共用 Math.random）。 */
     if (buff.mods && buff.mods.fragileBreakPct) {
       run.fragileSeeds = Object.assign({}, run.fragileSeeds || {});
+      /* 计分扩展：成就 / 加成峰值 / 复活计数 / 本局加分流水。 */
+      run.achievements = Array.isArray(run.achievements) ? run.achievements.slice(0, 40) : [];
+      run.scoreLog = Array.isArray(run.scoreLog) ? run.scoreLog.slice(-60) : [];
+      run.statPeaks = Object.assign({}, run.statPeaks || {});
+      run.pendingToasts = Array.isArray(run.pendingToasts) ? run.pendingToasts.slice(0, 12) : [];
+      run.deathSaves = Math.max(0, Math.floor(Number(run.deathSaves) || 0));
+      run.reviveCount = Math.max(0, Math.floor(Number(run.reviveCount) || 0));
+      run.reviveTierPaid = Math.max(0, Number(run.reviveTierPaid) || 0);
     }
     /* 需求 2：全场五折按**份数**累计 —— 放在这里才能覆盖「新拿到」与「叠加再拿一次」
      * 两条路径（原来只写在 addBuff 的新增分支，第二次拿只是叠层，份数不会涨）。 */
@@ -1538,8 +1658,10 @@
       save();
       return { ok: false, msg: (res && res.msg) || '这件增益现在买不了。' };
     }
+    /* 需求：商店买到的增益也算分。 */
+    const pts = scoreBuffAcquire(run, buff);
     save();
-    return { ok: true, buff, price, instant: !!res.instant };
+    return { ok: true, buff, price, instant: !!res.instant, score: pts };
   }
   /* 兼容旧调用名：以前这里卖「治疗泉水」，现在同一位置是重新挑战币，
    * 语义仍然是「每次商店限购 1 份」，所以旧的 buyShopHeal 直接指向新实现
@@ -1940,6 +2062,10 @@
         bestLayer: e.run.bestLayer, segment: D().endlessSegment(e.run.layer),
         // 第 3 项：无尽主界面也要能提前看到本层对手（和挑战塔同一份预告数据）
         plan: (e.run.plan || []).map((entry) => Object.assign({ kind: entry.kind }, entryInfo(entry))),
+        /* 计分扩展：成就列表 + 本局加分流水（界面用它做提示与结算展示）。 */
+        achievements: (e.run.achievements || []).slice(),
+        scoreLog: (e.run.scoreLog || []).slice(-12),
+        deathSaves: Math.max(0, Number(e.run.deathSaves) || 0),
         /* 段位机制已并入环境词缀：这里恒为空（界面统一显示环境）。 */
         mechs: [],
         restShopUsed: !!e.run.restShopUsed,
@@ -2056,7 +2182,7 @@
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,
     pickChoice, toggleLimited, addBuff, applyInstant, openRestShop, usePillSlot,
     shopState, buyShopSlot, buyRetryToken, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp,
-    canRetry, retryBattle, declineRetry, isTowerBattleBuff,
+    canRetry, retryBattle, declineRetry, isTowerBattleBuff, takeAchievementToasts,
     checkpointInfo, settleEndless, continueEndless, continueFromShop, settleFromShop,
     /* 调试台：一次拿到「收集到的全部增益 + 获取/消失流水 + 当前实际提升」。
      * collected 含一次生效类与已损毁/用尽/失去的（从流水里回捞）。 */
@@ -2103,6 +2229,16 @@
     /* 调试/探针用：endlessInfo/towerInfo 返回的是**子集**，看不到 killPower、sellBonus、
      * limited 的 uses 这些运行态字段。诊断叠层/限次问题时需要拿到原始 run。 */
     _debugRun(mode) { return (mode === 'endless' ? endless() : tower()).run; },
+    /* 调试/测试用：直接指定某项加成的「历史峰值」，用来验证「超凡入圣」的跨档逻辑
+     * （真实数值下很难凑到 100% 以上；实测 0.10 次/局，这正是它稀有的原因）。 */
+    _debugSetStatPeak(field, value) {
+      const run = endless().run;
+      if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
+      run.statPeaks = Object.assign({}, run.statPeaks || {});
+      run.statPeaks[field] = Math.max(0, Number(value) || 0);
+      save();
+      return { ok: true, peaks: run.statPeaks };
+    },
     /* 调试/探针用：把无尽对局直接挪到第 n 层（plan 一并重建，界面能正确显示
      * 「当前遭遇的机制」，例如第 6 层的荆棘反伤）。截图页 tools/tower-ui-probe.html 用。 */
     _debugSetEndlessLayer(n) {

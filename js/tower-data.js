@@ -158,7 +158,48 @@
   const ENDLESS_CONSOLATION_LAYER = 15;  // 到达 15 层后失败送 1 次免费抽奖（每日限 1 次）
 
   // ---------- 计分 ----------
-  const SCORE = Object.freeze({ battle: 25, layer: 100, elite: 50 });
+  /* ============================================================
+   * 无尽塔计分
+   *
+   * 原来只有「战斗结果」计分（胜利 / 精英 / 通过一层）。现在补上三类：
+   *   · 获取增益：按稀有度给分（场间选择 + 商店购买都算）
+   *   · 隐藏成就 1「死而复生」：累计复活每 3 次触发一档，分档递增、12 次封顶
+   *     （封顶是为了防刷：金蝉脱壳能在商店反复买到几百次，不封顶就能靠
+   *       「故意挨打不死」刷分 —— 实测单局最多出现过 260 次复活）
+   *   · 隐藏成就 2「超凡入圣」：某一项 **buff 加成**（不含装备/等级）首次超过
+   *     100% / 150% / 200% / 300% 各触发一次，单局最多 4 次
+   * ============================================================ */
+  const SCORE = Object.freeze({
+    battle: 25, layer: 100, elite: 50,
+    /* 获取增益：按稀有度给分（普通/稀有/史诗/传奇）。 */
+    buffByRarity: [5, 10, 20, 40],
+    /* 隐藏成就「死而复生」：累计复活达到阈值时给分，分档递增、最后一档封顶。
+     * 阈值刻意取 3 的倍数，对应需求里的「死而复生 3 次」。 */
+    reviveTiers: [
+      { at: 3, points: 30 },
+      { at: 6, points: 45 },
+      { at: 9, points: 60 },
+      { at: 12, points: 90 },
+    ],
+    /* 隐藏成就「超凡入圣」：某项 buff 加成首次跨过这些阈值时各给一次分。 */
+    statMilestones: [
+      { at: 1.00, points: 100 },
+      { at: 1.50, points: 150 },
+      { at: 2.00, points: 220 },
+      { at: 3.00, points: 300 },
+    ],
+  });
+  /** 获取一个增益能拿多少分（按稀有度；未知稀有度按普通）。 */
+  function buffScore(rarity) {
+    const list = SCORE.buffByRarity;
+    return list[Math.max(0, Math.min(list.length - 1, Math.floor(Number(rarity) || 0)))];
+  }
+  /** 累计复活次数 → 这一档该给多少分（0 = 还没到下一档）。 */
+  function reviveScoreAt(count) {
+    const n = Math.max(0, Math.floor(Number(count) || 0));
+    const hit = SCORE.reviveTiers.filter((t) => n >= t.at);
+    return hit.length ? hit[hit.length - 1].points : 0;
+  }
 
   // ---------- 试炼币与商店（无尽局内经济，跨局不继承） ----------
   const COINS = Object.freeze({ battle: 8, layer: 20, elite: 15 });
@@ -636,7 +677,12 @@
     { id: 'M01', name: '威慑', rarity: 0, kind: 'limited', uses: 2, towerBattle: true, desc: '下一场战斗敌人攻击力 −30%', mods: { enemyPowerDown: 0.30 } },
     { id: 'M02', name: '疾风先手', rarity: 0, kind: 'limited', uses: 3, towerBattle: true, desc: '下一场战斗你的首次技能不消耗回合', mods: { firstSkillFree: 1 } },
     { id: 'N03', name: '活血丹', rarity: 1, kind: 'limited', uses: 3, towerBattle: true, desc: '下一场战斗每回合开始回复 8% 生命', mods: { regenPct: 0.08 } },
-    { id: 'N04', name: '金蝉脱壳', rarity: 1, kind: 'limited', uses: 10, towerBattle: true, desc: '下一场战斗免疫一次致命伤害（保留 1 点生命）', mods: { deathSave: 1 } },
+    /* 需求：改成 unique —— 一局只能获得一次。
+     * 原来它是可无限叠加的（同名叠加即 +10 次免死），配合「故意挨打不死」可以
+     * 把复活次数刷到几百（实测单局最多 260 次），既破坏战斗平衡、又能刷成就分。
+     * 现在一局最多一次（10 次免死），累计复活封顶 12 次的档位设计才有意义。 */
+    { id: 'N04', name: '金蝉脱壳', rarity: 1, kind: 'limited', uses: 10, towerBattle: true, unique: true,
+      desc: '下一场战斗免疫一次致命伤害（保留 1 点生命）', mods: { deathSave: 1 } },
     { id: 'N07', name: '破军', rarity: 1, kind: 'limited', uses: 3, towerBattle: true, desc: '下一场战斗暴击率 +25%', mods: { critBonus: 25 } },
     { id: 'M03', name: '坚守', rarity: 1, kind: 'limited', uses: 2, towerBattle: true, desc: '下一场战斗受到伤害 −30%', mods: { takenMul: -0.30 } },
     { id: 'M04', name: '疾风步', rarity: 1, kind: 'limited', uses: 10, towerBattle: true, desc: '下一场战斗速度 +30%', mods: { speedMul: 0.30 } },
@@ -941,6 +987,7 @@
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
     FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, bossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,
     ENDLESS_LAYER_HEAL_PCT, MILESTONE_EVERY, MILESTONE_BOOK_COUNT, rollMilestone, PERMANENT_SLOTS,
+    buffScore, reviveScoreAt,
     SHOP_PRICE_OFFSET, rollShopPrice,
     rerollPriceAt, rerollTilt, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,
     PILL_BATTLES, PILL_SLOTS, pillEffect, shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,

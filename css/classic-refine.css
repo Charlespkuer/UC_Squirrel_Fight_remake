@@ -264,3 +264,34 @@
 .save-list-tip{color:#9a8156;font-size:18px;margin:10px 8px 0;line-height:1.45}
 .save-list::-webkit-scrollbar{width:9px}
 .save-list::-webkit-scrollbar-thumb{background:#c9af76;border-radius:6px}
+/* ============================================================
+ * 隐藏成就：飘提示 + 结算汇总
+ *
+ * 「未达成不显示，达成时飘一条提示并记分」—— 提示是非阻塞的，
+ * 3 秒左右自己淡出，不打断战斗与选牌流程。
+ * ============================================================ */
+.achieve-toast{
+  position:fixed;left:50%;top:14vh;transform:translateX(-50%);
+  z-index:9000;pointer-events:none;
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:10px 20px;border-radius:14px;
+  background:linear-gradient(180deg,#4a3a17,#2e2410);
+  border:2px solid #e0b64a;box-shadow:0 8px 24px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,235,180,.35);
+  color:#ffe9b0;text-align:center;
+  animation:achieve-in .28s ease-out;
+}
+.achieve-toast b{font-size:17px;letter-spacing:1px;color:#ffd76a}
+.achieve-toast i{font-style:normal;font-size:12px;color:#d9c188}
+.achieve-toast.out{opacity:0;transition:opacity .8s ease}
+@keyframes achieve-in{
+  from{opacity:0;transform:translateX(-50%) translateY(-14px) scale(.92)}
+  to{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}
+}
+/* 结算/失败弹窗里的本局成就汇总 */
+.achieve-summary{margin-top:10px;padding:8px 10px;border:2px dashed #c2a45c;border-radius:12px;
+  background:#fdf6e0;text-align:left}
+.achieve-summary b{display:block;margin-bottom:6px;color:#7a5a17;font-size:13px}
+.achieve-summary span{display:inline-flex;align-items:baseline;gap:4px;margin:2px 6px 2px 0;
+  padding:2px 8px;border-radius:10px;background:#fff3cd;border:1px solid #e0c98a;
+  font-size:12px;color:#6d5426}
+.achieve-summary span i{font-style:normal;font-weight:700;color:#a2731f}

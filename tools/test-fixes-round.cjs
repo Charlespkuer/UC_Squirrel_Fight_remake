@@ -1241,6 +1241,72 @@ test('需求26：积分扩展（拿增益计分 + 两个隐藏成就）', () => 
   assert.ok(typeof info.run.deathSaves === 'number', 'endlessInfo 要暴露复活计数');
 });
 
+test('需求27：弹窗按钮按「主操作靠右、取消/返回靠左」排序', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
+  const a = src.indexOf('const btnRank = (b, i) => {');
+  assert.ok(a > 0, 'classic-ui.js 里应当有 btnRank');
+  const b = src.indexOf('/* 排序会打乱顺序', a);
+  assert.ok(b > a, '应当能定位 btnRank 的结尾');
+  const ctx = vm.createContext({});
+  /* 直接用源码里的排序规则，避免测试复制实现。 */
+  const rank = vm.runInContext(src.slice(a, b) + '\nbtnRank;', ctx, { filename: 'btnRank.js' });
+  const order = (buttons) => buttons
+    .map((x, i) => ({ x, i }))
+    .sort((p, q) => rank(p.x, p.i) - rank(q.x, q.i) || p.i - q.i)
+    .map((p) => p.x.label);
+
+  // 需求点名的三处
+  assert.equal(order([{ label: '开始战斗' }, { label: '返回', cls: 'muted' }]).join('|'),
+    '返回|开始战斗', '常驻挑战：开始战斗应当在返回右边');
+  assert.equal(order([{ label: '继续战斗' }, { label: '稍后继续' }]).join('|'),
+    '稍后继续|继续战斗', '胜利后的继续战斗（主操作）应当在「稍后继续」右边');
+  assert.equal(order([{ label: '继续闯关' }, { label: '返回菜单', cls: 'muted' }]).join('|'),
+    '返回菜单|继续闯关', '继续闯关应当在返回菜单右边');
+  // 三按钮：取消最左、主操作最右
+  /* 三按钮（游戏里的真实组合）：「结束本轮」是最破坏性的操作、标了 muted → 最左；
+   * 「稍后继续」居中；「继续挑战」是主操作 → 最右。 */
+  assert.equal(order([{ label: '继续挑战' }, { label: '稍后继续' }, { label: '结束本轮', cls: 'muted' }]).join('|'),
+    '结束本轮|稍后继续|继续挑战', '三按钮：破坏性操作最左、主操作最右');
+  /* 不看 cls 的纯语义排序也要成立（cls 只是加强信号）。 */
+  assert.equal(order([{ label: '继续挑战' }, { label: '稍后继续' }, { label: '结束本轮' }]).join('|'),
+    '稍后继续|结束本轮|继续挑战', '纯语义：稍后/结束居中偏左、继续类最右');
+  assert.equal(order([{ label: '复活再战' }, { label: '结束本轮' }]).join('|'),
+    '结束本轮|复活再战', '纯语义：复活再战最右');
+  assert.equal(order([{ label: '复活再战' }, { label: '稍后继续', cls: 'gold' }]).join('|'),
+    '稍后继续|复活再战', '复活再战是主操作，应当在最右');
+  // 顺序不影响 data-action 的索引映射（排序后仍按原索引生成）
+  assert.match(src, /orderedIdx\.map\(\(i\) => btn\(buttons\[i\]\.label, String\(i\)/,
+    '排序后必须仍按原索引生成 data-action，否则点击会错位');
+});
+
+test('需求28：徒弟日供 —— 经验 5%~15%、金松果 5%~25% 线性插值', () => {
+  const c = setup();
+  const S = c.State;
+  assert.equal(S.TRIBUTE_EXP_MIN, 0.05, '经验下限 5%');
+  assert.equal(S.TRIBUTE_EXP_MAX, 0.15, '经验上限 15%');
+  assert.equal(S.TRIBUTE_GOLD_MIN, 0.05, '金松果下限 5%');
+  assert.equal(S.TRIBUTE_GOLD_MAX, 0.25, '金松果上限 25%');
+  const RE = S.apprenticeTributeExpRatio, RG = S.apprenticeTributeGoldRatio;
+  // 两端
+  assert.ok(Math.abs(RE(0) - 0.05) < 1e-9, 'Σ=0 经验 5%');
+  assert.ok(Math.abs(RG(0) - 0.05) < 1e-9, 'Σ=0 金松果 5%');
+  assert.ok(Math.abs(RE(210) - 0.15) < 1e-9, 'Σ=210（三个满级）经验 15%');
+  assert.ok(Math.abs(RG(210) - 0.25) < 1e-9, 'Σ=210 金松果 25%');
+  // 封顶
+  assert.equal(RE(9999), 0.15, '经验封顶');
+  assert.equal(RG(9999), 0.25, '金松果封顶');
+  // 中点线性
+  assert.ok(Math.abs(RE(105) - 0.10) < 1e-9, 'Σ=105 经验 10%，实测 ' + RE(105));
+  assert.ok(Math.abs(RG(105) - 0.15) < 1e-9, 'Σ=105 金松果 15%，实测 ' + RG(105));
+  // 等距线性
+  assert.ok(Math.abs((RE(40) - RE(20)) - (RE(200) - RE(180))) < 1e-9, '经验线性');
+  assert.ok(Math.abs((RG(40) - RG(20)) - (RG(200) - RG(180))) < 1e-9, '金松果线性');
+  // 金松果区间更宽，任何 Σ 下都不低于经验
+  for (const sum of [0, 30, 70, 105, 140, 175, 210]) {
+    assert.ok(RG(sum) >= RE(sum) - 1e-9, 'Σ=' + sum + ' 金松果不该低于经验');
+  }
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

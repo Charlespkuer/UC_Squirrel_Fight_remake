@@ -293,7 +293,36 @@
     opts = opts || {};
     const wrap = document.createElement('div'); wrap.className = 'classic-modal-overlay';
     // locked=true 时没有关闭叉：用于「必须选完才能继续」的自由属性点分配。
-    wrap.innerHTML = '<section class="classic-modal ' + (opts.small ? 'small-modal' : '') + '" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h2 class="modal-title cartoon">' + esc(title) + '</h2>' + (opts.locked ? '' : '<button class="modal-close" aria-label="关闭">×</button>') + '<div class="modal-body">' + content + '</div><div class="modal-buttons">' + buttons.map((b,i) => btn(b.label, String(i), b.cls || '')).join('') + '</div></section>';
+    /* 需求：**主操作按钮放最右、取消/返回放最左**（例如「开始战斗 / 继续挑战 / 继续闯关」
+     * 都在右，「返回 / 稍后继续 / 结束本轮」都在左）。
+     * 原来按钮按传入顺序排、容器是 space-evenly，于是「开始战斗」会落在「返回」左边。
+     * 这里统一按「主操作 → 次要 → 取消」排序，一次覆盖所有弹窗。
+     * 判定：显式 primary / muted 标记最优先；否则按 cls 里的 gold（主）与 muted（取消），
+     * 再回退到标签语义（开始/继续/确定… 算主操作，返回/取消/稍后/结束… 算取消）。 */
+    /* 显式角色优先（可预测）：primary/muted 标记 > cls 里的 gold/muted > 标签语义。
+     * gold = 主操作（最右），muted = 取消/返回（最左），其余居中。
+     * 只按「角色」排序、同级保持原顺序，所以顺序完全由 cls 决定，好维护。 */
+    const btnRank = (b, i) => {
+      /* 取消/返回类最左 —— cls 里的 muted 是最可靠的信号。 */
+      if (b.muted === true) return -2;
+      const cls = String(b.cls || '').toLowerCase();
+      if (cls.indexOf('muted') >= 0) return -2;
+      const label = String(b.label || '');
+      /* 取消/返回类最左。 */
+      if (/返回|取消|关闭|放弃/.test(label)) return -2;
+      /* 延后/结束类居中偏左：注意它们里含有「继续」（如「稍后继续」），
+       * 必须先于主操作规则判断，否则会被误当主操作排到最右。 */
+      if (/稍后|暂不|待会|结束/.test(label)) return -1;
+      /* 主操作类最右（需求点名的「开始战斗 / 继续挑战 / 继续闯关」都在这里）。 */
+      if (/开始|继续|确定|确认|闯关|挑战|再战|知道了/.test(label)) return 2;
+      if (b.primary === true) return 2;
+      return 0;
+    };
+    /* 排序会打乱顺序，所以仍然按**原索引**生成 data-action，保证 bind(map) 的映射不变。 */
+    const orderedIdx = buttons.map((b, i) => ({ b, i }))
+      .sort((x, y) => btnRank(x.b, x.i) - btnRank(y.b, y.i) || x.i - y.i)
+      .map((x) => x.i);
+    wrap.innerHTML = '<section class="classic-modal ' + (opts.small ? 'small-modal' : '') + '" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h2 class="modal-title cartoon">' + esc(title) + '</h2>' + (opts.locked ? '' : '<button class="modal-close" aria-label="关闭">×</button>') + '<div class="modal-body">' + content + '</div><div class="modal-buttons">' + orderedIdx.map((i) => btn(buttons[i].label, String(i), buttons[i].cls || '')).join('') + '</div></section>';
     $('#ui').appendChild(wrap);
     const previousFocus = document.activeElement;
     const close = () => { wrap.remove(); if (previousFocus && previousFocus.isConnected) previousFocus.focus({preventScroll:true}); };
@@ -723,7 +752,9 @@
     let message,buttons;
     if(rw.complete){
       message='恭喜通关！三名对手全部击败。';
-      buttons=[{label:'继续闯关',run:back},{label:'返回菜单',cls:'gold',run:home}];
+      /* 需求：主操作（继续闯关）在右、导航（返回菜单）在左。
+       * 原来「返回菜单」被标成 gold（=主操作），排序后会跑到最右，与需求相反。 */
+      buttons=[{label:'继续闯关',run:back},{label:'返回菜单',cls:'muted',run:home}];
     }else if(rw.win){
       message='已击败'+npc.name+'（'+idx+'/3）。继续挑战不再消耗挑战书，但下一场不会回满血（继承剩余血量并回复25%）。';
       // 第 1 项：点一次就直接开下一场 —— 原来要先「继续挑战」再在确认弹窗里点「继续战斗」，

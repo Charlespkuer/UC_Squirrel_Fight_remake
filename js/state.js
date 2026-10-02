@@ -403,47 +403,65 @@
     const date = new Date(y, m - 1, d); date.setDate(date.getDate() - 1);
     return dateKey(date);
   }
-  /* ---------- 徒弟日供（v2：按徒弟等级之和线性给系数） ----------
-   * 系数随「所有徒弟等级之和」线性增长：保底 10%，Σ=210（三个满级 70 级徒弟）封顶 50%，
-   * 中间线性插值 —— ratio = 10% + Σ × (50%−10%) / 210。
+  /* ============================================================
+   * 徒弟日供：系数按「所有徒弟等级之和」**线性插值**，经验与金松果分开给
+   *
+   *   Σ = 0（没有徒弟）           → 经验 5%  金松果 5%
+   *   Σ = TRIBUTE_LEVEL_SUM_FULL  → 经验 15% 金松果 25%
+   *   中间线性：ratio = min + Σ × (max − min) / FULL
+   *
    * 系数乘的是**我自己昨天**赚到的总经验与金松果（earnOn(昨天)），次日领取。
-   * 多个徒弟按各自等级占「等级之和」的份额分这份贡品，合计正好是 ratio × 昨日收益。 */
-  const TRIBUTE_RATIO_MIN = 0.10;
-  /* 第 1 项：日供系数线性区间收到 10% ~ 30%（原来封顶 50%，徒弟收益偏高）。 */
-  const TRIBUTE_RATIO_MAX = 0.30;
+   * 多个徒弟按各自等级占「等级之和」的份额分这份贡品，合计正好是 ratio × 昨日收益。
+   * Σ = 210 对应 3 个满级（70 级）徒弟。
+   * ============================================================ */
+  const TRIBUTE_EXP_MIN = 0.05, TRIBUTE_EXP_MAX = 0.15;      // 经验：前一天的 5% ~ 15%
+  const TRIBUTE_GOLD_MIN = 0.05, TRIBUTE_GOLD_MAX = 0.25;    // 金松果：前一天的 5% ~ 25%
   const TRIBUTE_LEVEL_SUM_FULL = 210;        // 3 个满级徒弟：3 × 70
   function apprenticeLevelSum(list) {
     return (Array.isArray(list) ? list : []).reduce((sum, p) => sum + Math.max(1, integer(p && p.level, 1)), 0);
   }
-  function apprenticeTributeRatio(sum) {
-    const span = (TRIBUTE_RATIO_MAX - TRIBUTE_RATIO_MIN) / TRIBUTE_LEVEL_SUM_FULL;
-    const raw = TRIBUTE_RATIO_MIN + Math.max(0, integer(sum, 0)) * span;
-    return Math.min(TRIBUTE_RATIO_MAX, Math.max(TRIBUTE_RATIO_MIN, raw));
+  /** 线性插值：Σ 从 0 到 FULL 对应 min → max，超出封顶。 */
+  function tributeLerp(sum, min, max) {
+    const lo = Number(min) || 0, hi = Number(max) || 0;
+    const span = (hi - lo) / TRIBUTE_LEVEL_SUM_FULL;
+    const raw = lo + Math.max(0, integer(sum, 0)) * span;
+    return Math.min(hi, Math.max(lo, raw));
   }
+  /** 经验日供系数（5% ~ 15%）。 */
+  function apprenticeTributeExpRatio(sum) { return tributeLerp(sum, TRIBUTE_EXP_MIN, TRIBUTE_EXP_MAX); }
+  /** 金松果日供系数（5% ~ 25%）。 */
+  function apprenticeTributeGoldRatio(sum) { return tributeLerp(sum, TRIBUTE_GOLD_MIN, TRIBUTE_GOLD_MAX); }
+  /* 兼容旧调用：以前只有一个「总系数」，返回经验那一档（两者下限相同、口径最接近）。 */
+  function apprenticeTributeRatio(sum) { return apprenticeTributeExpRatio(sum); }
   /** 总日供 + 按等级份额的分配表。用累计取整，保证各徒弟份额之和正好等于总量（不被 floor 蚕食）。 */
   function apprenticeTributeTable(list) {
     const rows = Array.isArray(list) ? list : [];
     const date = yesterdayDate();
     const mine = earnOn(date);
-    const ratio = apprenticeTributeRatio(apprenticeLevelSum(rows));
-    const totalExp = Math.floor(mine.exp * ratio), totalGold = Math.floor(mine.gold * ratio);
-    const sum = apprenticeLevelSum(rows) || 1;
+    const sum = apprenticeLevelSum(rows);
+    /* 经验与金松果用各自的比例（金松果区间更宽：5%~25%）。 */
+    const expRatio = apprenticeTributeExpRatio(sum);
+    const goldRatio = apprenticeTributeGoldRatio(sum);
+    const ratio = expRatio;                                   // 兼容字段：旧界面读它显示「系数」
+    const totalExp = Math.floor(mine.exp * expRatio), totalGold = Math.floor(mine.gold * goldRatio);
+    const weightSum = sum || 1;                              // 全部徒弟等级之和（为 0 时兜底 1）
     const shares = [];
     let acc = 0, prevExp = 0, prevGold = 0;
     rows.forEach((p, i) => {
-      acc += Math.max(1, integer(p && p.level, 1)) / sum;
+      acc += Math.max(1, integer(p && p.level, 1)) / weightSum;
       const last = i === rows.length - 1;
       const cumExp = last ? totalExp : Math.round(totalExp * acc);
       const cumGold = last ? totalGold : Math.round(totalGold * acc);
       shares.push({ exp: Math.max(0, cumExp - prevExp), gold: Math.max(0, cumGold - prevGold) });
       prevExp = cumExp; prevGold = cumGold;
     });
-    return { date, mine, ratio, totalExp, totalGold, shares };
+    return { date, mine, ratio, expRatio, goldRatio, totalExp, totalGold, shares };
   }
   function apprenticeDailyStatus(apprentice) {
     const p = object(apprentice) ? apprentice : null, today = localDate();
     const table = apprenticeTributeTable(S.prentices || []);
-    const blank = { date: table.date, exp: 0, gold: 0, ratio: table.ratio, weight: 0, mine: table.mine,
+    const blank = { date: table.date, exp: 0, gold: 0, ratio: table.ratio,
+      expRatio: table.expRatio, goldRatio: table.goldRatio, weight: 0, mine: table.mine,
       claimable: false, claimed: false, newApprentice: false };
     if (!p) return blank;
     if (!validLocalDate(p.since)) { p.since = today; p.joinedAt = Date.now(); save(); }
@@ -454,7 +472,8 @@
     const weight = Math.max(1, integer(p.level, 1)) / sum;
     const idx = (S.prentices || []).indexOf(p);
     const share = idx >= 0 ? table.shares[idx] : { exp: 0, gold: 0 };
-    return { date: table.date, exp: share.exp, gold: share.gold, ratio: table.ratio, weight, mine: table.mine,
+    return { date: table.date, exp: share.exp, gold: share.gold, ratio: table.ratio,
+      expRatio: table.expRatio, goldRatio: table.goldRatio, weight, mine: table.mine,
       claimable: !claimed && (share.exp > 0 || share.gold > 0), claimed, newApprentice: false };
   }
   function apprenticeDailyExp(apprentice) { return apprenticeDailyStatus(apprentice).exp; }
@@ -2683,7 +2702,7 @@
     fruitOptions, applyFruitChoice,
     trackEarn, earnOn, addGold,
     apprenticeLevelSum, apprenticeTributeRatio, apprenticeTributeTable, apprenticeDailyGold,
-    TRIBUTE_RATIO_MIN, TRIBUTE_RATIO_MAX, TRIBUTE_LEVEL_SUM_FULL,
+    TRIBUTE_LEVEL_SUM_FULL,
     undoPoint, undoDepth, hasUpgradableWS,
     weaponList,
     gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, extText, randomExt,
@@ -2691,6 +2710,7 @@
     totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, gainRandomWS, wsChoices, wsInfo,
     pendingWS, currentWSChoices, chooseWS, chooseWSRandom,
     gainExp, consumeEnergy, tickPropStates, fightReward, revengeReward, markRevenged, REVENGE_EXP_RATIO, expBoostPct, gainExpWithBoost,
+    apprenticeTributeExpRatio, apprenticeTributeGoldRatio, TRIBUTE_EXP_MIN, TRIBUTE_EXP_MAX, TRIBUTE_GOLD_MIN, TRIBUTE_GOLD_MAX,
     // 师徒
     apprenticeCap, learnSkill, setMaster, clearMaster, addPrentice, removePrentice,
     gearPart, gearPartQuality, gearIdsOf, autoEnergyPotion,

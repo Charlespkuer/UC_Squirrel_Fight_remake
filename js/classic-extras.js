@@ -441,8 +441,11 @@
     const pct = (v) => (Math.round(v * 1000) / 10) + '%';
     return '<div class="profile-panel">' +
       '<p class="profile-meta">入门：' + esc(row.since) + '</p>' +
-      '<p class="profile-meta">徒弟等级之和 <b>' + sum + '</b> → 日供系数 <b>' + pct(daily.ratio) + '</b>' +
-        '（保底 10%，三个满级徒弟封顶 30%）</p>' +
+      /* 经验与金松果的日供系数是两条线性插值（各自区间不同），分别显示。 */
+      '<p class="profile-meta">徒弟等级之和 <b>' + sum + '</b> → 日供系数：经验 <b>' +
+        pct(daily.expRatio != null ? daily.expRatio : daily.ratio) + '</b> · 金松果 <b>' +
+        pct(daily.goldRatio != null ? daily.goldRatio : daily.ratio) + '</b>' +
+        '（线性插值：经验 5%~15%、金松果 5%~25%，三个满级徒弟封顶）</p>' +
       '<p class="profile-meta">我 ' + esc(daily.date) + ' 赚到：经验 ' + daily.mine.exp + ' · 金松果 ' + daily.mine.gold + '</p>' +
       '<p class="profile-meta">这个徒弟的份额 ' + pct(daily.weight) + ' → 昨日日贡：' +
         (daily.claimed ? '<b class="done">已领取</b>' : '<b>经验 ' + daily.exp + ' · 金松果 ' + daily.gold + '</b>') +

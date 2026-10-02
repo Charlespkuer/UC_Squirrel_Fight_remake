@@ -157,6 +157,27 @@ open_app() {
   fi
 }
 
+# ---- 第 1 步：补齐 PATH（这是「双击打开是 1 级」的病根）----
+# macOS 上 Finder 双击 .command 只给 /usr/bin:/bin:/usr/sbin:/sbin，
+# Homebrew（/opt/homebrew/bin）装的 node 不在里面 → 以前被误判成「没有 Node.js」，
+# 于是回退到 --app=file://… 打开：页面是 file: 协议，浏览器不许写文件，
+# 游戏只能退回 localStorage 兜底档（于是显示 1 级、也导入不了 save/ 里的存档）。
+for d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "$HOME/.volta/bin" "$HOME/.bun/bin"; do
+  if [ -d "$d" ]; then case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH" ;; esac; fi
+done
+for d in "$HOME"/.nvm/versions/node/*/bin "$HOME"/.n/bin; do
+  if [ -d "$d" ]; then case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH" ;; esac; fi
+done
+export PATH
+
+# 再兜一层：即使 PATH 还是不对，也直接按绝对路径找 node
+NODE_BIN="$(command -v node 2>/dev/null || true)"
+if [ -z "$NODE_BIN" ]; then
+  for c in /opt/homebrew/bin/node /usr/local/bin/node /opt/local/bin/node "$HOME"/.nvm/versions/node/*/bin/node; do
+    if [ -x "$c" ]; then NODE_BIN="$c"; break; fi
+  done
+fi
+
 # ---- 端口占用检测 ----
 port_busy() {
   if [ -n "${BASH_VERSION:-}" ]; then
@@ -206,8 +227,8 @@ SERVE_PY="$ROOT/scripts/serve.py"; [ -f "$SERVE_PY" ] || SERVE_PY="$ROOT/serve.p
 SERVER_EXE=""
 SERVER_LABEL=""
 SERVER_PRE=()
-if command -v node >/dev/null 2>&1 && [ -f "$SERVE_JS" ]; then
-  SERVER_EXE="$(command -v node)"; SERVER_LABEL="Node.js"; SERVER_PRE=("$SERVE_JS")
+if [ -n "$NODE_BIN" ] && [ -f "$SERVE_JS" ]; then
+  SERVER_EXE="$NODE_BIN"; SERVER_LABEL="Node.js"; SERVER_PRE=("$SERVE_JS")
 else
   PY="$(command -v python3 || command -v python)"
   if [ -n "$PY" ] && [ -f "$SERVE_PY" ]; then
@@ -217,6 +238,8 @@ fi
 
 if [ -z "$SERVER_EXE" ]; then
   echo "既没有 Node.js 也没有 Python：进度只能存在浏览器里（localStorage）。"
+  # 双击时终端窗口会立刻关闭，所以这里必须用系统对话框把话说清楚（以前是静默回退到 file://）
+  osascript -e 'display dialog "没有找到 Node.js / Python。\n\n现在只能用浏览器兜底存档：游戏里会显示 1 级（或你自己浏览器里的旧档），save/progress.json 不会被读写，也无法导入存档文件。\n\n建议先安装 Node.js（https://nodejs.org）后重新双击启动。" buttons {"知道了"} default button 1 with title "松鼠大战 · 启动提示"' >/dev/null 2>&1 || true
   echo "装一个 Node.js（https://nodejs.org）后重新运行本脚本，就能写进 save/progress.json。"
   if [ "$APP_MODE" = "1" ] && [ -n "$BROWSER" ]; then
     nohup "$BROWSER" --app="file://$(pwd)/index.html" --window-size=1216,760 --allow-file-access-from-files >/dev/null 2>&1 &

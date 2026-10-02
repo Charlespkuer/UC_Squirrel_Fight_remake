@@ -577,7 +577,7 @@
    * ============================================================ */
   const SAVE_URL = '__save';
   const LEGACY_KEY = SAVE_KEY;                       // 旧的 localStorage 存档键
-  const fileState = { available: false, checked: false, fileAt: 0, error: '', reason: '', lastWrite: 0, lastLoad: 0, conflict: false, dirty: false, freshLocal: false, path: 'save/progress.json' };
+  const fileState = { available: false, checked: false, code: 0, fileAt: 0, error: '', reason: '', lastWrite: 0, lastLoad: 0, lastRead: 0, lastReadErr: '', conflict: false, dirty: false, freshLocal: false, path: 'save/progress.json' };
   let fileTimer = 0;
   /* 存档读写通道：默认走本地服务器的 /__save；宿主（Tauri 等）可以替换成自己的实现。
    * transport = { label, path?, probe(), read(), write(json) }，全部返回 Promise。 */
@@ -594,6 +594,21 @@
   function forgetLegacy() {
     try { localStorage.removeItem(LEGACY_KEY); localStorage.removeItem(LEGACY_KEY + '_sync'); } catch (e) {}
   }
+  /** 浏览器兜底档是不是「更新且等级不低于文件里这份」——换机器/双机同步后本机没跟上时，
+   * 它就是玩家真正的最新进度，不能当成残留垃圾悄悄删掉（交给 fileWrite 的冲突保护处理）。 */
+  function localSaveWorthKeeping(fileAt) {
+    const local = localSaveMeta();
+    if (!local) return false;
+    const fileLevel = (S && S.level) || 1;
+    return local.savedAt > (Number(fileAt) || 0) + 1000 && local.level >= fileLevel;
+  }
+  /** 收口：只有在「那份浏览器兜底档已经冗余」时才删它。
+   *  读档、写档、后台补写所有路径都走这里，避免某一条路径把玩家更新的兜底档悄悄删掉。 */
+  function forgetLegacyIfRedundant(fileAt) {
+    if (localSaveWorthKeeping(fileAt)) return false;
+    forgetLegacy();
+    return true;
+  }
   /** 宿主替换存档通道（Tauri 里用 Rust 端命令读写文件）。 */
   function setSaveTransport(t) {
     saveTransport = t && typeof t.probe === 'function' ? t : null;
@@ -602,9 +617,26 @@
     fileState.available = false;
   }
   const isFileProtocol = () => typeof location !== 'undefined' && location.protocol === 'file:';
-  /** 探一次存档通道在不在，并把「为什么不可用」记下来给界面显示。 */
+  /** 浏览器 localStorage 里有没有兜底存档（boot 判断「能不能回落」时用，不改动内存状态）。 */
+  function hasLocalSave() {
+    try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
+  }
+  /** 浏览器兜底档的等级与时间戳（判断「文件里的是不是那份该用的档」时用）。 */
+  function localSaveMeta() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!object(parsed)) return null;
+      return { level: Math.max(1, integer(parsed.level, 1, 1)), savedAt: Number(parsed.savedAt) || 0 };
+    } catch (e) { return null; }
+  }
+  /** 探一次存档通道在不在，并把「为什么不可用」记下来给界面显示。
+   *  注意：只探「通道在不在」——读文件本身成功还是失败由 fileState.lastRead / lastReadErr 单独记，
+   *  否则界面会把「连不上服务器」和「服务器没有存档接口」混成一句含糊的话。 */
   async function fileProbe() {
-    if (testMode) { fileState.checked = true; fileState.available = false; fileState.reason = '自检档不写正式存档'; return false; }
+    if (testMode) { fileState.checked = true; fileState.available = false; fileState.code = 0; fileState.reason = '自检档不写正式存档'; return false; }
+    fileState.code = 0;
     if (saveTransport) {
       try {
         const meta = await saveTransport.probe();
@@ -629,6 +661,7 @@
     try {
       const res = await fetch(SAVE_URL + '?meta=1', { cache: 'no-store' });
       if (!res.ok) {
+        fileState.code = res.status;
         fileState.reason = res.status === 404
           ? '服务器没有 /__save 接口（HTTP 404）：可能是 python3 -m http.server、旧版 serve.js，或页面来自别的静态托管。'
           : '服务器返回 HTTP ' + res.status;
@@ -655,6 +688,8 @@
   async function fileLoad() {
     if (!fileState.available) await fileProbe();
     if (!fileState.available) return false;
+    fileState.lastRead = 0;
+    fileState.lastReadErr = '';
     try {
       const info = saveTransport ? await saveTransport.read() : await (await fetch(SAVE_URL, { cache: 'no-store' })).json();
       fileState.fileAt = Number(info.savedAt) || 0;
@@ -663,21 +698,29 @@
         if (!object(parsed)) throw new Error('存档内容不是对象');
         S = normalizeSave(parsed);
         syncDailyStats();
-        S.savedAt = Number(parsed.savedAt) || fileState.fileAt || Date.now();
-        forgetLegacy();                       // 文件是主存档，旧的浏览器存档就此退休
+        /* savedAt 用服务器报的**文件时间**：它和 fileWrite() 里比较的 fileAt 是同一个时钟。
+         * 以前这里用存档内部的 savedAt（游戏里的 Date.now()），一旦文件是由同步/手工恢复过来的
+         * （内部时间戳比文件 mtime 旧），fileAt 就永远大于 localAt，自动保存会被
+         * 「存档文件更新，已跳过写入」永久挡住 —— 表现在玩家身上就是「打了半天进度没保存」。 */
+        S.savedAt = fileState.fileAt || Number(parsed.savedAt) || Date.now();
+        // 文件是主存档，旧的浏览器兜底档就此退休；
+        // 但「更新且更强」的那份要留着（见 localSaveWorthKeeping）。
+        forgetLegacyIfRedundant(fileState.fileAt);
         fileState.lastLoad = Date.now();
+        fileState.lastRead = fileState.fileAt || Date.now();
         fileState.conflict = false;
         return true;
       }
       // 文件还不存在：把浏览器里的老档迁进来（只做一次）
       if (load()) {
         const ok = await fileWrite(true);
-        if (ok.ok) forgetLegacy();
+        if (ok.ok) forgetLegacy();     // 迁移：这份兜底档已经写进文件了
         return true;
       }
       return false;
     } catch (e) {
-      fileState.error = String((e && e.message) || e);
+      fileState.lastReadErr = String((e && e.message) || e);
+      fileState.error = fileState.lastReadErr;
       return false;
     }
   }
@@ -708,7 +751,8 @@
       fileState.conflict = false;
       fileState.dirty = false;
       fileState.freshLocal = false;
-      forgetLegacy();
+      // 刚写进去的就是当前进度；浏览器兜底档只在「更新且不低于当前等级」时才留着
+      forgetLegacyIfRedundant(fileState.fileAt);
       return { ok: true, msg: '已写入 ' + fileState.path, fileAt: fileState.fileAt };
     } catch (e) {
       fileState.error = String((e && e.message) || e);
@@ -722,10 +766,15 @@
     return {
       mode: storageMode(), available: fileState.available, checked: fileState.checked,
       conflict: fileState.conflict, fileAt: fileState.fileAt, localAt: (S && S.savedAt) || 0,
-      lastWrite: fileState.lastWrite, lastLoad: fileState.lastLoad, error: fileState.error,
+      code: fileState.code,
+      lastWrite: fileState.lastWrite, lastLoad: fileState.lastLoad,
+      lastRead: fileState.lastRead, lastReadErr: fileState.lastReadErr,
+      error: fileState.error,
       dirty: fileState.dirty, path: fileState.path, reason: fileState.reason,
     };
   }
+  /** 这次启动到底把磁盘上的正式存档读进来了没有（boot 用它决定要不要提示玩家）。 */
+  function fileLoadedThisBoot() { return fileState.lastRead > 0; }
   /** 保存后延迟写文件（连点几下只写一次）；页面要关掉时立刻补写。 */
   function scheduleFileWrite() {
     if (!S || storageMode() !== 'file' || typeof setTimeout !== 'function') return;
@@ -1975,22 +2024,30 @@
    * nextExp 每级涨得比这里快，所以每升一级需要的场次仍然越来越多。 */
   const CHALLENGE_EXP_BASE = 20;
   const CHALLENGE_EXP_PER_LEVEL = 0.65;
-  /* 等级成长到 20 级封顶：之后单场经验不再随等级上涨。这样上限就是
-   * 20 级时的 33 点，最大等级差（+3）下约 47 点/场，也就是 4.7 点体力，
-   * 略低于经验竞技场的 150/30 = 5.0。 */
+  /* 等级成长到 20 级封顶：之后单场经验不再随等级上涨。20 级同级 33 点/场，
+   * 压实等级差之后最大等级差（+3）约 45 点/场 = 4.5 点体力，
+   * 仍在经验竞技场 150/30 = 5.0 之下。 */
   const CHALLENGE_EXP_CAP_LEVEL = 20;
-  const EXP_DIFF_STEP = 0.14;           // 每高 1 级 +14%
+  const EXP_DIFF_STEP = 0.14;           // 每高 1 级 +14%（先算线性倍率，再压实）
+  /* 等级差压实指数：mult' = mult^EXP_DIFF_TIGHTEN（同级仍是 1.00×，锚点不变）。
+   * 需求「锁紧等级差与经验期望的关系」= 让经验在各等级差下更贴近同级基准。
+   * 下限是 exp 竞技场验收线给的：最大等级差（+3）的体力效率必须**严格大于**
+   * 竞技场的 88%（4.4/5.0）。0.85 时正好等于 4.40 会踩线，所以取 0.88（→4.48）。 */
+  const EXP_DIFF_TIGHTEN = 0.88;
   const EXP_DIFF_FLOOR = 0.3;           // 对手低很多时的最低倍率
   const EXP_DIFF_CAP = 2.2;
   const ARENA_CHAMPION_EXP = 150;
   const ARENA_ENERGY_COST = 30;
   const ARENA_EXP_PER_ENERGY = ARENA_CHAMPION_EXP / ARENA_ENERGY_COST;   // 5.0
-  /** 一次主动挑战胜利的经验期望（不含随机浮动与经验丸）。 */
+  /** 一次主动挑战胜利的经验期望（不含随机浮动与经验丸）。
+   *  等级差只影响倍率，且被 EXP_DIFF_TIGHTEN 压实；diff = 0 时倍率恒为 1.00，
+   *  所以**同级别挑战的经验期望不变**。 */
   function challengeExp(foeLevel, myLevel) {
     const mine = Math.max(1, Math.round(Number(myLevel) || (S && S.level) || 1));
     const diff = Math.max(-15, Math.min(15, Math.round(Number(foeLevel) || mine) - mine));
     const base = CHALLENGE_EXP_BASE + Math.min(mine, CHALLENGE_EXP_CAP_LEVEL) * CHALLENGE_EXP_PER_LEVEL;
-    const mult = Math.max(EXP_DIFF_FLOOR, Math.min(EXP_DIFF_CAP, 1 + diff * EXP_DIFF_STEP));
+    const linear = Math.max(EXP_DIFF_FLOOR, Math.min(EXP_DIFF_CAP, 1 + diff * EXP_DIFF_STEP));
+    const mult = Math.pow(linear, EXP_DIFF_TIGHTEN);
     return Math.round(base * mult);
   }
   /** 随机挑战实际会遇到的等级差范围（classic-ui 的 genOpponents：level-1 ~ level+3）。 */
@@ -2616,6 +2673,7 @@
     saveKey: SAVE_KEY,
     save, load, newGame, state, tickEnergy, energyCountdown,
     fileProbe, fileLoad, fileWrite, fileWriteNow, fileInfo, storageMode, flushFileWrite, setSaveTransport, syncFormatTime: fmtTime, markLocalFresh: () => { fileState.freshLocal = true; },
+    hasLocalSave, localSaveMeta, fileLoadedThisBoot,
     vipActive, vipLevel, vipUntil, vipDaysLeft, vipRegenMul, vipPassiveExpCap, vipExpNeed,
     vipRow, buyVip, grantVip, tickVipDaily, gearCapacity, syncVipEnergyCap,
     VIP_LEVELS, VIP_LEVEL_EXP, VIP_MAX_LEVEL, VIP_PLANS, VIP_ENERGY_BONUS, vipEnergyCap, energyCapForLevel, VIP_GEAR_BONUS, GEAR_CAPACITY,
@@ -2653,6 +2711,7 @@
     MAX_PLAYER_LEVEL, energyCapForLevel,
     statShares, forcedStat, lowestStat, pendingPoints, allocatePoint, allocateEvenly,
     STAT_SHARE_MIN, STAT_KEYS, STAT_NAMES, STAT_GAIN, HP_PER_STAT, FREE_POINT_RANDOM,
-    CHALLENGE_EXP_BASE, CHALLENGE_EXP_PER_LEVEL, CHALLENGE_EXP_CAP_LEVEL, CHALLENGE_DIFF_RANGE, ARENA_CHAMPION_EXP, ARENA_ENERGY_COST, ARENA_EXP_PER_ENERGY,
+    CHALLENGE_EXP_BASE, CHALLENGE_EXP_PER_LEVEL, CHALLENGE_EXP_CAP_LEVEL, EXP_DIFF_STEP, EXP_DIFF_TIGHTEN,
+    CHALLENGE_DIFF_RANGE, ARENA_CHAMPION_EXP, ARENA_ENERGY_COST, ARENA_EXP_PER_ENERGY,
   };
 })();

@@ -7,7 +7,7 @@
  *   fighter.mech: NPC 专属机制 id 数组（berserk/rhythmCrit/regen/thorns/
  *                 poison/freeze/wolf/lifesteal/shell/devour）
  *                 题面（最终位对手，玩家式 AI 也生效）：
- *                 trialCore（第 5 次行动起受伤 −80%、力敏速 +50%）
+ *                 trialCore（第 7 次行动起受伤 −70%、力敏速 +50%）
  *                 trialMoss（每回合回 6% 最大生命，配 thorns 反弹 15%）
  *                 trialDry（封死玩家治疗，每 3 次行动吸取玩家 10% 当前生命）
  *                 trialFrost（第 1/4/7… 次行动冻结玩家）
@@ -15,7 +15,8 @@
  *                 trialBloodfang（每掉 20% 生命，攻击 +35%）
  *                 trialErode（玩家每次出手叠 1 层攻击 −3%，最多 10 层）
  *   fighter.mods: 玩家侧塔 buff 数值包 {dmgMul, critBonus, critDmgBonus,
- *                 dodgeBonus, takenMul, regenPct, lifestealPct, shellPct,
+ *                 dodgeBonus, dodgeMul, takenMul, regenPct, lifestealPct, shellPct,
+ *                 openerPowerMul/openerRounds/fatiguePowerMul,
  *                 mustHitFirst, firstSkillFree, openStrikePct,
  *                 deathSaves:[{healPct}]}
  * ============================================================ */
@@ -32,13 +33,31 @@
     masterHpRatio: 0.50, masterChance: 35,
     /* 出手时的「二次使用」概率（%）。做法是两层池子：本场没用过的武器/技能优先，
      * 只有这个概率才回头用旧的那把/那个，所以「用过的」实际出场率被明显压低。
-     * 来点松果（技能 17）解除「每场一次」限制后，二次使用概率单独取最低档，
-     * 必须严格低于其它武器与技能（tools/test-combat-rules.cjs 有断言锁住这一点）。 */
-    repeatWeapon: 25, repeatSkill: 20, repeatSnack: 8,
-    /* 受击防御技能的触发率（%）。绝对防御由 30 下调到 22；龟甲术保留首次 35%，
-     * 并新增自带的二次触发率——原来只能靠装备附加能力「龟甲术N%几率抵挡2次」。 */
-    jueDuiChance: 22, shellFirst: 35, shellAgain: 20,
+     * 现在按技能分档（见 repeatBySkill）：越强的技能，二次及以后越难被再放一次。
+     * 来点松果（17）单独取最低档 repeatSnack，必须严格低于其它武器与技能
+     * （tools/test-combat-rules.cjs 有断言锁住这一点）。 */
+    repeatWeapon: 25, repeatSkill: 20, repeatSnack: 5,
+    /* 二次及以后使用概率（%）。基准 20 = repeatSkill。
+     *   · medium：本来最常见、影响最大的三个（色诱/野球拳/来点松果）中幅下调；
+     *   · small ：通灵召唤 / 幸运一击；以及「二次概率本来就低」的绝对防御，小幅下调。
+     * 这两个档位都必须低于 repeatSkill，且 repeatSnack 仍是最低。 */
+    repeatSkillMedium: 13, repeatSkillSmall: 17,
+    repeatBySkill: { 8: 13, 12: 13, 15: 17, 23: 17 },
+    /* 绝对防御是**受击自动触发**的技能（不进出手池），所以它不按 repeatBySkill 走，
+     * 而是「首次 22% / 二次及以后 13%」——和龟甲术首次 35 / 再次 20 一样的口径。
+     * 13/22 比上面那三档的降幅还大一点，因为它是「每次都白挡一下」的强被动。 */
+    jueDuiChance: 22, jueDuiAgain: 13,
+    shellFirst: 35, shellAgain: 20,
   });
+  /* ============================================================
+   * sim 真正实现了战斗效果的主动技能。
+   *
+   * 原版技能表里 2~11、13、16、19~22 大多是**被动**（力王附体/身手敏捷/龟甲术/
+   * 皮糙肉厚/绝对防御…）或空 id（原版字典里 19~22 没有名字）。
+   * 玩家只会领悟下面这 7 个主动技，但敌人模板历史上抄了一批没实现的 id ——
+   * 放出来就是「空过一回合」（元素术鼠的 5「武器好手」其实是被动、20 是空 id）。
+   * 所以出招时只从这张表里挑：数据写错的技能会被自动跳过，不会再空过。
+   * ============================================================ */
   const ACTIVE_SKILLS = [8, 12, 14, 15, 17, 18, 23];
   /** 调试开关「无敌模式」：玩家侧不会被击倒，最少保留 1 点血。 */
   function godSave(def) {
@@ -84,6 +103,22 @@
       power: stat(f.power, 1), agility: stat(f.agility, 1), speed: stat(f.speed, 1),
       maxHp: fullHp, hp: Math.max(1, Math.min(stat(f.hp, 1), fullHp)),
       weapons, skills, usedWeapons: {}, usedSkills: {}, lastWeaponId: null, lastSkillId: null,
+      /* 固定循环出招用：完整技能表（顺序稳定，不受「本场已用」过滤影响）+ 循环下标。
+       * 以前按 actives.sort()[0] 取最小 id，结果 5/17/20 里永远只放 17（来点松果）——
+       * 元素术鼠 200 场里吃了 7326 次松果，就是这个 bug。 */
+      /* 完整技能表的稳定顺序（skills 是「id → 等级」的对象，不是数组！）。
+       * 原版这里写的是 skills[id] 下标访问，永远取不到东西 —— 所以固定循环的技能
+       * 只能退化成「取 actives 里最小的 id」，元素术鼠因此整场都在放来点松果。 */
+      /* 只保留 sim 真正实现的技能（数据里抄错的 id 会被丢弃，不会空过一回合）。
+       * 若一个都不剩，就用 ACTIVE_SKILLS 兜底，避免出现「完全不会放技能」的敌人。 */
+      skillOrder: (function () {
+        const own = Array.isArray(f.castable) ? f.castable.map(Number) : Object.keys(skills).map(Number);
+        const usable = own.filter((id) => ACTIVE_SKILLS.includes(id) && skills[id]);
+        return (usable.length ? usable : ACTIVE_SKILLS.filter((id) => skills[id] || usable.length === 0)).sort((a, b) => a - b);
+      })(),
+      patternSkillIdx: 0,
+      /* 「同一回合内只能用一次」的锚点：turnId 变化 = 换了一个回合。 */
+      turnId: 0, lastTurnId: -1, turnSkills: {},
       effects: f.effects || {}, masterLevel: Math.max(0, Number(f.masterLevel) || 0),
       // 攻略.md 的裸属性解释与 PPT 的含装备解释冲突。本版采用前者，
       // callers provide growth stats excluding equipment, skills and pills.
@@ -91,7 +126,7 @@
       baseStats: Object.fromEntries(['power', 'agility', 'speed'].map((key) => [key, stat(f.baseStats?.[key], stat(f[key], 1))])),
       // 战斗内状态
       ap: 0, restNext: false, pendingWeapon: null, stun: 0, silence: 0, disarm: 0, shellCharges: 0,
-      mustHitNext: !!(mods && mods.mustHitFirst), stripTurns: 0, usedFakeDie: false, usedMaster: false, usedShell: false, usedCosmos: false, usedSnack: false,
+      mustHitNext: !!(mods && mods.mustHitFirst), stripTurns: 0, usedFakeDie: false, usedMaster: false, usedShell: false, usedCosmos: false, usedSnack: false, usedJueDui: false,
       // 题面·枯泉：治疗量倍率（0 = 完全封疗）
       healMul: 1,
       usedUlt: false, acted: false, usedFreeSkill: false,
@@ -140,6 +175,17 @@
     // 塔 buff「狂怒」：自己血量低于阈值时攻击提升（只有进攻方结算，所以放在这里）
     const rage = c.mods && Number(c.mods.lowHpPowerMul) || 0;
     if (rage > 0 && c.maxHp > 0 && c.hp <= c.maxHp * (Number(c.mods.lowHpAt) || 0.35)) p *= 1 + rage;
+    /* 塔 buff「开局狂热」：按**本次战斗的出手次数**分档 ——
+     * 前 openerRounds 次出手 ×(1+openerPowerMul)，之后 ×(1-fatiguePowerMul)。
+     * 玩家与敌人共用这段逻辑，但只有拿到该 buff 的一方 mods 里才有这两个字段。 */
+    if (c.mods) {
+      const boost = Number(c.mods.openerPowerMul) || 0;
+      const fatigue = Number(c.mods.fatiguePowerMul) || 0;
+      if (boost || fatigue) {
+        const rounds = Math.max(1, Number(c.mods.openerRounds) || 5);
+        p *= (Number(c.acts) || 1) <= rounds ? 1 + boost : 1 - fatigue;
+      }
+    }
     return Math.max(1, Math.round(p));
   }
   function effAgility(c) { return Math.max(1, Math.round(statOf(c, 'agility') * (1 - c.debuffs.agility / 100) + c.buffFlat.agility)); }
@@ -179,8 +225,14 @@
    *   - 上一回合刚用过的那一个再乘 LAST_PENALTY，避免连着重复同一把/同一个。
    * 「所有技能的二次使用概率被调低」和「来点松果最低」两条都落在这里。
    */
+  /** 某个技能「二次及以后」的使用概率（%）。未列出的用基准 repeatSkill。 */
+  function repeatRateOf(id) {
+    if (id === 17) return RULES.repeatSnack;                 // 来点松果：最低档，不许被别档追平
+    const tier = RULES.repeatBySkill[id];
+    return Number.isFinite(tier) ? tier : RULES.repeatSkill;
+  }
   function skillWeight(att, id) {
-    let w = att.usedSkills[id] ? (id === 17 ? RULES.repeatSnack : RULES.repeatSkill) : UNUSED_WEIGHT;
+    let w = att.usedSkills[id] ? repeatRateOf(id) : UNUSED_WEIGHT;
     if (att.lastSkillId === id) w *= LAST_PENALTY;
     return w;
   }
@@ -219,6 +271,20 @@
     return att.weapons.every((w) => att.usedWeapons[w.id]) && actives.every((id) => att.usedSkills[id]);
   }
 
+  /** 固定循环出招：按「技能表的轮转顺序」依次放技能，缺一个就顺延到下一个能用的。
+   *  原来这里取 actives 里最小的 id，于是 5/17/20 永远只放 17（来点松果）——
+   *  元素术鼠因此整场都在吃松果，循环描述（冰霜 → 普攻 → 烈焰 → 雷击）也从来没成立过。
+   *  现在 skillOrder 固定不变（不受本场已用过滤影响），循环因此稳定可预告。 */
+  function nextPatternSkill(att, actives) {
+    const order = (att.skillOrder && att.skillOrder.length) ? att.skillOrder : actives.slice().sort((a, b) => a - b);
+    const n = order.length;
+    for (let i = 0; i < n; i++) {
+      const id = order[(att.patternSkillIdx + i) % n];
+      const sid = Number(id);
+      if (actives.includes(sid)) { att.patternSkillIdx = (att.patternSkillIdx + i + 1) % n; return sid; }
+    }
+    return Number(actives[0]);
+  }
   function pickSkill(att, actives) {
     return pickWeighted(actives, (id) => skillWeight(att, id));
   }
@@ -231,7 +297,7 @@
     /* 本轮第 1 项：百步穿杨（mustHitAll）—— 接下来 3 场「所有攻击必中」，
      * 所以这里直接返回 0 闪避率（普攻/武器/技能/反击全都覆盖）。
      * 原来的 mustHitFirst 是「下一次攻击必中」，由 mustHitNext 单次标记实现。 */
-    if (att.mods && att.mods.mustHitAll) return 0;
+    if (att.mods && (att.mods.mustHitAll || att.mods.firstStrikeAll)) return 0;   // 「必中」类：塔 buff 百步穿杨 / 必中
     const wMust = att.mustHitNext;
     if (wMust) return 0;
     let d = 6 + 26 * effAgility(def) / (effAgility(def) + effAgility(att) * 1.2 + 40);
@@ -239,6 +305,7 @@
     // PPT问答：木剑、移形、流星锤均相对提升天生闪避率。
     d *= 1 + (shift + def.swordDodge + def.meteorDodge) / 100;
     if (def.mods && def.mods.dodgeBonus) d += Number(def.mods.dodgeBonus);   // 塔 buff「凌波微步」（加算）
+    if (def.mods && def.mods.dodgeMul) d *= 1 + Number(def.mods.dodgeMul);   // 塔 buff「烟幕」：闪避率 ×(1+n)
     return clamp(d, 0, 55);
   }
 
@@ -254,7 +321,11 @@
     let out = { dmg, guiJia: 0, jueDui: 0, rebound: 0 };
     const gearReduction = opts.action === 'weapon' ? effect(def, opts.weaponType === '投掷' ? 10 : 9) : opts.action === 'skill' ? effect(def, 11) : 0;
     out.dmg = Math.round(out.dmg * (1 - clamp(gearReduction, 0, 80) / 100));
-    if (def.skills[16] && def.silence <= 0 && chance(RULES.jueDuiChance)) {   // 绝对防御
+    /* 绝对防御是受击自动触发、不进出手池的技能，所以「二次及以后」用单独的档：
+     * 首次 jueDuiChance%，之后再挨打只有 jueDuiAgain% 再挡一次（口径同龟甲术）。 */
+    if (def.skills[16] && def.silence <= 0
+        && chance(def.usedJueDui ? RULES.jueDuiAgain : RULES.jueDuiChance)) {
+      def.usedJueDui = true;
       const pct = 40 + 4 * (def.skills[16] - 1);
       out.jueDui = out.dmg; out.rebound = Math.round(out.dmg * pct / 100); out.dmg = 0;
       return out;
@@ -280,7 +351,7 @@
       out.dmg = Math.round(out.dmg * (100 - pct) / 100);
     }
     if (def.mods && def.mods.takenMul) out.dmg = Math.round(out.dmg * (1 + Number(def.mods.takenMul)));   // 塔 buff「铁布衫」
-    if (def.mech.includes('trialCore') && def.mechState.core) out.dmg = Math.round(out.dmg * 0.2);        // 题面·熔核：成型后受伤 −80%
+    if (def.mech.includes('trialCore') && def.mechState.core) out.dmg = Math.round(out.dmg * 0.3);        // 题面·熔核：成型后受伤 −70%
     out.dmg = Math.max(1, out.dmg);
     return out;
   }
@@ -468,7 +539,9 @@
        * 题面文本写的是「第 N 回合」；这里统一把 att.npcActs 当作它的出手次数。 */
       const acts = att.npcActs || 0;
       // 熔核：第 5 次行动起硬度暴涨（受伤 −80%、力敏速 +50%）—— 强制前 4 回合速杀
-      if (att.mech.includes('trialCore') && !att.mechState.core && acts >= 5) {
+      /* 需求 5：成型时点从「第 5 次行动」推到「第 7 次行动」，减伤从 80% 降到 70%。
+       * 玩家的输出窗口因此多两回合，成型后也没那么硬。 */
+      if (att.mech.includes('trialCore') && !att.mechState.core && acts >= 7) {
         att.mechState.core = true;
         for (const key of ['power', 'agility', 'speed']) att.buffFlat[key] += Math.max(1, Math.round(att[key] * 0.5));
         att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '熔核成型';
@@ -514,9 +587,11 @@
         applyDamage(att, def, Math.round(effPower(att) * 0.5), wr, {});
         pushRound(wr);
       }
-      if (att.mech.includes('devour')) {
-        // 无尽吞噬：每回合结束攻击 +2%（按入场力量计，可无限叠加）
-        att.buffFlat.power += Math.max(1, Math.round(att.mechState.basePower * 0.02));
+      /* 吞噬成长：每回合结束按「入场力量」永久 +N%，可无限叠加。
+       * 既支持原来的机制标签（固定 2%），也支持带数值的 mods.devourPct（环境词缀用）。 */
+      const devourPct = (att.mech.includes('devour') ? 0.02 : 0) + (att.mods && Number(att.mods.devourPct) || 0);
+      if (devourPct > 0) {
+        att.buffFlat.power += Math.max(1, Math.round(att.mechState.basePower * devourPct));
         att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '无尽吞噬';
       }
     }
@@ -614,7 +689,17 @@
       // 行动选择：武器 45% / 技能 35% / 普攻 20%
       const canWeapon = att.weapons.length > 0 && att.disarm <= 0;
       // 来点松果解除「每场一次」：还能用，但下面的选法会把它压到最低的二次使用概率
-      const actives = ACTIVE_SKILLS.filter((id) => att.skills[id] && !(id === 14 && att.usedCosmos) && !(id === 17 && att.hp >= att.maxHp));
+      /* 「来点松果」(17) 是每场一次（att.usedSkills 已经在 skillWeight 里压到最低档，
+       * 这里再显式排除）；**同一回合内**任何技能都不能再次出手 —— 否则 17 自带 actAgain，
+       * 会在同一回合连着触发 （需求 3 点名的「不允许同一回合内多次触发」）。 */
+      /* 可用技能从「这个 fighter 实际拥有的技能」里筛（att.skillOrder），
+       * 而不是原版玩家那份硬编码的 ACTIVE_SKILLS 表 ——
+       * 松鼠/题面用的技能横跨 2~23（元素术鼠是 5/17/20），
+       * 用玩家表去筛会把 5 和 20 直接漏掉，于是它一辈子只能放 17（来点松果）。
+       * 排除规则：小宇宙爆发每场一次、来点松果每场一次且满血不放、本回合已用过的不能再用。 */
+      const actives = (att.skillOrder || ACTIVE_SKILLS).filter((id) => att.skills[id] &&
+        !(id === 14 && att.usedCosmos) && !(id === 17 && att.usedSnack) && !(id === 17 && att.hp >= att.maxHp) &&
+        !att.turnSkills[id]);
       const canSkill = actives.length > 0 && att.silence <= 0;
       let kind;
       if (att.pattern) {
@@ -702,9 +787,10 @@
 
       if (kind === 'skill') {
         const sid = att.pattern
-          ? parseInt(actives.slice().sort((a, b) => a - b)[0])          // 固定循环：技能也固定
+          ? nextPatternSkill(att, actives)                              // 固定循环：按技能表的轮转顺序出
           : pickSkill(att, actives);
         att.usedSkills[sid] = true;
+        att.turnSkills[sid] = true;
         att.lastSkillId = sid;
         const lv = att.skills[sid];
         r.action = 'skill'; r.id = sid; r.level = lv;
@@ -817,6 +903,11 @@
         actor.ap -= 100;
       }
       actions++;
+      /* 需求 3：回合边界。同一个 actor 因 actAgain 追加的行动属于**同一回合**，
+       * 所以这里的 turnId 只跟着主循环的「换人」推进，供「同回合只能用一次」判定。 */
+      actor.turnId = Number(actor.turnId || 0) + 1;
+      actor.acts = Number(actor.acts || 0) + 1;      // 出手次数（塔 buff「开局狂热」按它分档）
+      actor.turnSkills = {};
       const def = actor === A ? B : A;
       // 回合开始回复（药师「百草回春」/ 塔 buff「活血丹」「回春术」）
       const regenPct = (actor.mech.includes('regen') ? 0.03 : 0) + (actor.mods && Number(actor.mods.regenPct) || 0);
@@ -876,5 +967,7 @@
     simulate, rules: RULES,
     // 供 tools/test-combat-rules.cjs 直接校验出手权重（不用统计近似）
     actionWeights: { skill: skillWeight, weapon: weaponWeight },
+    // 各技能「二次及以后」的出手概率（%），供测试与调参直接读
+    repeatRateOf,
   };
 })();

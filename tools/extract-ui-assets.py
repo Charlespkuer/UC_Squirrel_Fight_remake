@@ -28,7 +28,7 @@ NODE_DATA = r'''
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const root=process.argv[1],ctx={};ctx.window=ctx;vm.createContext(ctx);
 for(const f of ['Map.min.js','assets.js','asset2.js','GameDict.js'])
- vm.runInContext(fs.readFileSync(path.join(root,'js/orig',f),'utf8'),ctx);
+ vm.runInContext(fs.readFileSync(path.join(root,'references/orig',f),'utf8'),ctx);
 const result={frames:{},weapons:ctx.weaponsMap.toArray(),skills:ctx.skillsMap.toArray(),props:ctx.propMap.toArray(),gears:ctx.gearMap.toArray(),gearSets:ctx.gearSetMap.toArray()};
 for(const key of ctx.imgMap.keys) result.frames[key]=ctx.imgMap.getValue(key);
 console.log(JSON.stringify(result));

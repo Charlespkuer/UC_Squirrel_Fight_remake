@@ -14,7 +14,7 @@
    不存在 —— 即模拟器安装失败回滚了，所以外壳无处可启。
 3. **不需要"解码/破解"这个 exe 也能拿到全部数据**，因为数据在 APK 里，而 APK 是明文 ZIP。
 4. 本项目此前已经从同一个 APK 提取过资源；本次逐字节核对：**456 个资源文件里 443 个完全一致、
-   0 个不同、13 个从未入库**。这 13 个是原版**引擎/运行时**源码，已补入 `js/orig/`。
+   0 个不同、13 个从未入库**。这 13 个是原版**引擎/运行时**源码，已补入 `references/orig/`。
 5. 原版客户端**无法直接在普通浏览器里运行**：它的入口 `index.js` 依赖 UC 专有原生桥
    （`require()`、`native.call`、`native.startActivity`）和 `lib/armeabi/libh5runtime.so`，
    `assets/game.zip` 里**根本没有 `index.html`**。这正是本项目自己写 `index.html` 重新托管的原因。
@@ -64,7 +64,7 @@ APK 共 191 项，去掉 UC SDK 与安卓外壳后真正的内容只有一个：
 
 ## 四、与原项目的逐字节核对
 
-方法：解出 `assets/game.zip` 全部 456 个文件，对每个文件在该项目内按「同相对路径 / `js/orig/` 迁移路径 /
+方法：解出 `assets/game.zip` 全部 456 个文件，对每个文件在该项目内按「同相对路径 / `references/orig/` 迁移路径 /
 同名文件」三种候选查找，比较大小与 SHA-256。脚本：`tools/apk-audit/compare.cjs`，
 明细：`tools/apk-audit/report.md`。
 
@@ -77,7 +77,7 @@ APK 共 191 项，去掉 UC SDK 与安卓外壳后真正的内容只有一个：
 0 个不同，说明项目里的图集、音频、`GameDict.js`、`animationStr.js`、`assets.js`、`asset2.js`、
 `Map.min.js` **全部与 APK 原样一致**，没有任何被改写或丢失的素材。
 
-### 新增入库的 13 个原始文件（→ `js/orig/`）
+### 新增入库的 13 个原始文件（→ `references/orig/`）
 
 | 文件 | 大小 | 作用 |
 | --- | --- | --- |

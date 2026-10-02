@@ -1,7 +1,7 @@
 /* Turn the original client's literal top-left coordinates into true rectangles.
  *
  * The client positions atlas frames by top-left only; the size comes from imgMap
- * in js/orig/assets.js ([label, sx, sy, sw, sh]). This resolves the pairs found by
+ * in references/orig/assets.js ([label, sx, sy, sw, sh]). This resolves the pairs found by
  * shared-chrome.cjs into x/y/w/h so an HTML layout can be compared honestly. */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -24,7 +24,7 @@ const root = findRoot(__dirname);
 const sandbox = { console };
 sandbox.window = sandbox;
 vm.createContext(sandbox);
-for (const f of ['js/orig/Map.min.js', 'js/orig/assets.js']) {
+for (const f of ['references/orig/Map.min.js', 'references/orig/assets.js']) {
   vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), sandbox, { filename: f });
 }
 

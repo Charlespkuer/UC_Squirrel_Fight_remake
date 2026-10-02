@@ -45,10 +45,39 @@ Set-Location -LiteralPath $root
 Write-Host '松鼠大战怀旧复刻版'
 Write-Host "目录：$root"
 
+# 入口页：新布局在 scripts\ 里、旧布局在根目录；file:// 兜底打开时要用完整路径
+$entry = Join-Path $root 'index.html'
+if (Test-Path -LiteralPath (Join-Path $root 'scripts\index.html')) { $entry = Join-Path $root 'scripts\index.html' }
+
 # 游戏目录告诉存档代码（Tauri 桌面版会用它决定 save 放哪；没有它就只能猜）
 $env:SSDZ_GAME_DIR = $root
 $saveDir = Join-Path $root 'save'
 $srvPidFile = Join-Path $saveDir '.server.pid'
+
+# ---------- 存档体检：正式存档读不出来时，从 backup\ 里挑等级最高的补回来 ----------
+function Get-SaveLevel([string]$file) {
+  if (-not (Test-Path -LiteralPath $file)) { return 0 }
+  try { return [int](Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json).level } catch { return 0 }
+}
+function Repair-Save {
+  $progress = Join-Path $saveDir 'progress.json'
+  if ((Get-SaveLevel $progress) -gt 0) { return }
+  $backupDir = Join-Path $saveDir 'backup'
+  if (-not (Test-Path -LiteralPath $backupDir)) { return }
+  $best = $null; $bestLevel = 0
+  foreach ($f in Get-ChildItem -LiteralPath $backupDir -Filter '*.json' -File -ErrorAction SilentlyContinue) {
+    $lv = Get-SaveLevel $f.FullName
+    if ($lv -gt $bestLevel) { $bestLevel = $lv; $best = $f }
+  }
+  if ($best) {
+    Copy-Item -LiteralPath $best.FullName -Destination $progress -Force
+    Set-Content -LiteralPath (Join-Path $saveDir '.min-level') -Value $bestLevel -Encoding ASCII
+    Write-Host "存档体检：progress.json 读不出来，已从备份恢复（$bestLevel 级 ← $($best.Name)）"
+  } else {
+    Write-Host '存档体检：progress.json 读不出来，backup\ 里也没有可用备份。'
+  }
+}
+if (-not ($args -contains '--stop')) { Repair-Save }
 
 # ---------- --stop：停掉上一次留在后台的本地服务器 ----------
 if ($args -contains '--stop') {
@@ -105,6 +134,14 @@ foreach ($p in @(
   if ($p -and (Test-Path -LiteralPath $p)) { $browser = $p; break }
 }
 $profileDir = Join-Path $env:LocalAppData 'SSDZClassic\browser-profile'
+
+# --reset-profile：清掉独立窗口的浏览器缓存（localStorage 兜底档）。
+# 正式存档是 save\progress.json，和这个目录无关；这里只改名不删除，误清了也能拿回来。
+if (($args -contains '--reset-profile') -and (Test-Path -LiteralPath $profileDir)) {
+  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  try { Rename-Item -LiteralPath $profileDir -NewName ("browser-profile.bak-" + $stamp) -ErrorAction Stop; Write-Host "浏览器缓存目录已改名保留：browser-profile.bak-$stamp" }
+  catch { Remove-Item -LiteralPath $profileDir -Recurse -Force -ErrorAction SilentlyContinue }
+}
 
 function Test-Port([int]$p) {
   $c = New-Object System.Net.Sockets.TcpClient
@@ -182,14 +219,29 @@ if ($exe) {
   }
   Set-Content -LiteralPath $srvPidFile -Value $srv.Id -Encoding ASCII
   Open-Game
+  # 开窗口之后再做一次存档接口自检：真的能读到 progress.json 才算启动成功，
+  # 免得出现「窗口开了、但游戏读不到存档」这种最难排查的静默状态。
+  try {
+    $body = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 "${url}__save").Content
+    if ($body -match '"ok"\s*:\s*true') {
+      Write-Host '存档接口自检：正常（游戏会读写 save\progress.json）'
+      # 旧代码的服务器没有备份接口：不算致命，但导入存档时不能自动备份旧档
+      try { $null = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 "${url}__save/backup" }
+      catch { Write-Host '[!] 现在这个服务器是旧版本（没有备份接口）。建议：先双击 停止游戏.cmd，再双击本文件重启一次。' }
+    } else {
+      Write-Host '[!] 存档接口自检没通过：游戏窗口可能退回浏览器兜底存档（save\server.err.log）'
+    }
+  } catch {
+    Write-Host '[!] 存档接口自检没通过：游戏窗口可能退回浏览器兜底存档（save\server.err.log）'
+  }
   exit 0
 }
 
 Write-Host '既没有 Node.js 也没有 Python：进度只能存在浏览器里（localStorage）。'
 Write-Host '装一个 Node.js（https://nodejs.org）后重新双击本文件，就能把进度写进 save\progress.json。'
 if ($appMode -and $browser) {
-  Start-Process -FilePath $browser -ArgumentList '--app=index.html', '--window-size=1216,760', '--allow-file-access-from-files'
+  Start-Process -FilePath $browser -ArgumentList "--app=$([System.Uri]::new($entry).AbsoluteUri)", '--window-size=1216,760', '--allow-file-access-from-files'
 } else {
-  Start-Process 'index.html'
+  Start-Process $entry
 }
 exit 3

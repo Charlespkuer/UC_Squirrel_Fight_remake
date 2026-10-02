@@ -26,7 +26,7 @@ const root = findRoot(__dirname);
 const sandbox = { console };
 sandbox.window = sandbox;
 vm.createContext(sandbox);
-for (const file of ['js/orig/Map.min.js', 'js/orig/GameDict.js', 'js/orig/assets.js', 'js/orig/asset2.js', 'js/orig/animationStr.js']) {
+for (const file of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'references/orig/assets.js', 'references/orig/asset2.js', 'references/orig/animationStr.js']) {
   vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, { filename: file });
 }
 

@@ -11,10 +11,10 @@
 | --- | --- |
 | **本项目自己写的**（绝大多数） | `test-*.cjs`（12 个回归脚本）、`stage-balance*.cjs`、`player-curve.cjs`、`check-asset-paths.cjs`、`serve.js`、`apk-audit/*`（APK 取证工具）、`research/*.html`（浏览器检查页）、`verification/*.png`（实测截图）、各篇 `.md` 文档 |
 | **从 APK 解出来的**（归档） | `research/original/js/*`：`index.js`、`ssdz-pkg2.js`、`JsonLoader.js`、`vmGameBase.js`、`player.js`、`FightStats.js` 等 13 个原版脚本，供比对查阅；运行时**不加载**它们 |
-| **项目运行真正用到的原版文件** | 仓库根的 `js/orig/`：`Map.min.js`、`GameDict.js`、`animationStr.js`、`assets.js`、`asset2.js`（`index.html` 直接 `<script>` 引入） |
+| **项目运行真正用到的原版文件** | 仓库根的 `references/orig/`：`Map.min.js`、`GameDict.js`、`animationStr.js`、`assets.js`、`asset2.js`（`index.html` 直接 `<script>` 引入） |
 
 也就是说：`tools/` 不是「解开的 APK」，而是**开发工具 + 从 APK 里提取的少量原始脚本**；
-`js/orig/` 才是从 APK 提取、并且真的参与运行的那 5 个文件。
+`references/orig/` 才是从 APK 提取、并且真的参与运行的那 5 个文件。
 
 ## 二、APK 结构
 

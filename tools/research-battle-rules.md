@@ -1,6 +1,6 @@
 # 战斗规则核对记录
 
-本次核对使用 `references/new/reference.md`、`references/new/攻略.md`、新增 PPT 的只读提取 `tools/research/new-guide-ppt-text.txt`、原版 `js/orig/GameDict.js`，以及 `tools/research/original/js/ssdz-pkg2.js` 的动作播放器。客户端播放服务端返回的战斗事件，没有恢复出服务端模拟算法；不能把动画时长当作触发概率。
+本次核对使用 `references/new/reference.md`、`references/new/攻略.md`、新增 PPT 的只读提取 `tools/research/new-guide-ppt-text.txt`、原版 `references/orig/GameDict.js`，以及 `tools/research/original/js/ssdz-pkg2.js` 的动作播放器。客户端播放服务端返回的战斗事件，没有恢复出服务端模拟算法；不能把动画时长当作触发概率。
 
 ## 已落实的明确规则
 

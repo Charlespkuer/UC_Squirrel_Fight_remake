@@ -294,34 +294,140 @@
     setStatus('松鼠大战 · 怀旧单机版');
     UI.installFavicon();
     await new Promise((r) => setTimeout(r, 150));
-    // 存档：主存档是游戏目录下的 save/progress.json（本地服务器提供），
-    // 没有服务器时才退回浏览器 localStorage（老档会在第一次读文件时自动迁进去）
+    // 存档：主存档永远是游戏目录下的 save/progress.json（本地服务器提供）。
+    // **磁盘存档优先**：只要服务器的存档接口能用，就一定读它；
+    // 只有读不到文件时才退回浏览器 localStorage，而且必须把原因明明白白摆出来
+    // （以前这里是静默回落：一个残留的 1 级浏览器档会让玩家以为存档丢了）。
     let loaded = false;
     try { loaded = await State.fileLoad(); } catch (e) { loaded = false; }
-    if (loaded || State.load()) showHome();
+    const fellBack = !loaded && !!State.hasLocalSave();
+    if (loaded || (fellBack && State.load())) showHome();
     else showTitle();
-    /* 可见自检：如果最终不是「文件存档模式」，直接把原因摆出来（并给一键修复）。
-     * 兜底模式 = 只用浏览器 localStorage，save/progress.json 不参与 ——
-     * 这正是「用启动器打开一直显示 1 级、也导入不了存档」的症状来源。 */
-    setTimeout(async () => {
-      try {
-        const mode = State.storageMode ? State.storageMode() : 'file';
-        if (mode === 'file') return;
-        const info = State.fileInfo ? State.fileInfo() : {};
-        const reason = info.reason || '未知原因';
-        const go = window.confirm('⚠ 当前是「浏览器兜底存档」模式：不会读写 save/progress.json。\n\n' +
-          '原因：' + reason + '\n\n点「确定」立刻改回文件存档（以 save/progress.json 为准并重新载入）。');
-        if (!go) return;
-        const ok = await State.fileProbe();
-        if (ok) { await State.fileLoad(); location.reload(); return; }
-        window.alert('仍然连不上本地服务器的存档接口，请关掉本窗口、用「启动游戏.command」重新打开。\n原因：' +
-          ((State.fileInfo() || {}).reason || reason));
-      } catch (e) {}
-    }, 1200);
+    if (loaded) {
+      // 正式存档读进来了：顺手把浏览器里残留的那份兜底档清掉，
+      // 免得它以后又被当成存档用（这也是一劳永逸治好旧 profile 的那一步）。
+      // 例外：那份兜底档既更新、等级又不低于文件（换机器/双机同步后本机没跟上）
+      // 就先留着，写文件时 fileWrite() 的冲突保护会提示玩家，别在这里悄悄删掉。
+      const local = State.localSaveMeta ? State.localSaveMeta() : null;
+      const fileAt = (State.fileInfo() || {}).fileAt || 0;
+      const keepLocal = !!local && local.savedAt > fileAt + 1000 && local.level >= ((State.state() || {}).level || 1);
+      if (!keepLocal) {
+        try { localStorage.removeItem(State.saveKey); localStorage.removeItem(State.saveKey + '_sync'); } catch (e) {}
+      } else if (UI && UI.toast) {
+        UI.toast('浏览器里还有一份更新的存档，已先保留；要换用它请到「系统 → 导入存档」');
+      }
+    } else {
+      // 没读到磁盘存档：立刻把原因摆出来，同时后台重试（服务器晚一步起来也能自己恢复）
+      showSaveWarning();
+      retryFileSave();
+    }
     // 首页数字按当前调试设置（数字宽度）重画一次，保证刷新后立即生效
     if (window.UI && UI.renderNumbers) UI.renderNumbers();
     if (/[?&]test=1(?:&|$)/.test(location.search)) runSelfTest();
     if (/[?&]test=2(?:&|$)/.test(location.search)) runBattleLoop();
+  }
+
+  /* ============================================================
+   * 存档告警与自动重连
+   *
+   * 病根（实测）：启动时如果服务器晚了一步、或者页面是被 file:// 打开、
+   * 或者端口上蹲着一个没有 /__save 的旧服务器，fileLoad() 就会失败；
+   * 以前这里会**静默**退回 localStorage 里那份残留的旧档（比如 1 级），
+   * 玩家看到的就是「双击启动器载入了一个新存档」，而 save/progress.json
+   * 里明明还是 32 级。
+   *
+   * 现在：① 磁盘存档永远是第一优先，读不到才回落，并且立刻在画面顶部
+   *       挂一条横幅把原因写清楚（app 窗口里 confirm() 可能被吞掉，
+   *       所以这里用页面内元素，不依赖弹窗）；
+   *       ② 后台自动重试探测 + 读档，连上就自动重载，回到磁盘存档。
+   * ============================================================ */
+  let pageHiddenAt = 0;
+  let saveBanner = null;
+
+  /** 顶部告警横幅：一直挂着，直到成功连上磁盘存档（或玩家自己关掉）。 */
+  function showSaveWarning() {
+    if (saveBanner) return saveBanner;
+    const info = (State.fileInfo && State.fileInfo()) || {};
+    const inFile = location.protocol === 'file:';
+    const noApi = Number(info.code) === 404 || /404/.test(String(info.reason || ''));
+    let how, color;
+    if (inFile) {
+      color = '#7a1010';
+      how = '页面是 file:// 打开的，浏览器不允许读写存档文件。请关掉本窗口，用「启动游戏.command」重新启动游戏。';
+    } else if (noApi) {
+      color = '#8a4b00';
+      how = '这个服务器没有 /__save 存档接口（多半是 python -m http.server 之类的静态服务器）。请先把它关掉，再用「启动游戏.command」启动游戏。';
+    } else {
+      color = '#7a1010';
+      how = '本地游戏服务没连上（多半是启动器还没把服务器拉起来，或者被别的程序占了端口）。请关掉本窗口，用「启动游戏.command」重新启动；也可以点上面的「重试连线」。';
+    }
+    const el = document.createElement('div');
+    el.id = 'save-warning';
+    el.setAttribute('role', 'alert');
+    el.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:2147483000;background:' + color +
+      ';color:#fff8ec;font:13px/1.55 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding:9px 14px;' +
+      'display:flex;gap:10px;align-items:flex-start;box-shadow:0 2px 10px rgba(0,0,0,.35)';
+    saveBanner = el;   // 先登记：后面任何一步出错也不会重复挂第二条
+    const text = document.createElement('div');
+    text.style.cssText = 'flex:1 1 auto';
+    text.innerHTML = '<b>⚠ 现在用的是浏览器兜底存档，' +
+      'save/progress.json（磁盘上的正式存档）没有被读写。</b><br>' +
+      '<span style="opacity:.92">原因：' + esc(info.reason || info.error || '未知') + '<br>' + esc(how) + '</span>';
+    const retryBtn = document.createElement('button');
+    retryBtn.type = 'button';
+    retryBtn.textContent = '重试连线';
+    retryBtn.style.cssText = 'flex:0 0 auto;padding:5px 12px;cursor:pointer';
+    retryBtn.onclick = async () => {
+      retryBtn.textContent = '正在重试…';
+      const ok = await State.fileProbe();
+      if (ok && await State.fileLoad()) { location.reload(); return; }
+      retryBtn.textContent = '重试连线';
+      if (UI && UI.toast) UI.toast('还是连不上本地服务器，确认「启动游戏.command」的窗口没报错后再试');
+    };
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.textContent = '先这样玩';
+    closeBtn.style.cssText = 'flex:0 0 auto;padding:5px 12px;cursor:pointer';
+    closeBtn.onclick = () => { el.remove(); saveBanner = null; };
+    el.appendChild(text); el.appendChild(retryBtn); el.appendChild(closeBtn);
+    document.body.appendChild(el);
+    return el;
+  }
+  function hideSaveWarning() { if (saveBanner) { saveBanner.remove(); saveBanner = null; } }
+  function esc(text) {
+    return String(text == null ? '' : text).replace(/[&<>"']/g, (ch) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  }
+
+  /** 页面重新可见：在后台放了很久（比如启动器把它丢在后台才把服务器拉起来），
+   *  重新露脸时补一次重试，不用玩家手动刷新。 */
+  if (document.addEventListener) {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') { pageHiddenAt = Date.now(); return; }
+      const hiddenFor = pageHiddenAt ? Date.now() - pageHiddenAt : 0;
+      pageHiddenAt = 0;
+      if (hiddenFor > 10000) retryFileSave();
+    });
+  }
+
+  /** 探针/读档失败时自动重试：服务器刚起来时可能还没开始监听
+   *  （实测：双击启动器时服务器要 1~3 秒才 bind 上端口，页面可能先开一步）。
+   *  整段重试约 12 秒；多次都失败就挂一条「现在用的是浏览器兜底存档」的横幅（不静默）。 */
+  async function retryFileSave() {
+    if (State.fileLoadedThisBoot()) { hideSaveWarning(); return true; }
+    const delays = [300, 600, 1000, 1500, 2000, 2500, 3000];
+    for (let i = 0; i < delays.length; i++) {
+      await new Promise((r) => setTimeout(r, delays[i]));
+      if (State.fileLoadedThisBoot()) { hideSaveWarning(); return true; }
+      try {
+        const available = await State.fileProbe();
+        if (!available) continue;
+        const ok = await State.fileLoad();
+        if (ok) { location.reload(); return true; }   // 连上了就以磁盘存档为准，重开一遍
+      } catch (e) { /* 下一轮再试 */ }
+    }
+    if (!State.fileLoadedThisBoot()) showSaveWarning();
+    return false;
   }
 
   // ---------- 战斗观察模式（?test=2） ----------
@@ -619,5 +725,6 @@
   window.Main = { showHome, showTitle, startBattle, replayBattle, resizeLayout:fitCanvas, setMuted, isMuted: () => muted,
     volume: volumeValue, setVolume, homePlayer: () => mainPlayer, setHomeFps, W, H,
     settings: settingsSnapshot, setResolution, setFullscreen, isFullscreen: () => !!document.fullscreenElement };
+
   window.addEventListener('DOMContentLoaded', boot);
 })();

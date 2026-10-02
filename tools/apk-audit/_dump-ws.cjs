@@ -35,7 +35,7 @@ const localDict = fs.readFileSync(localPath, 'utf8');
 const sha = (t) => crypto.createHash('sha256').update(t, 'utf8').digest('hex').slice(0, 16);
 console.log('=== 字典文件本体 ===');
 console.log('APK  js/GameDict.js   ' + apkDict.length + ' 字符  sha256:' + sha(apkDict));
-console.log('本地 js/orig/GameDict.js ' + localDict.length + ' 字符  sha256:' + sha(localDict));
+console.log('本地 references/orig/GameDict.js ' + localDict.length + ' 字符  sha256:' + sha(localDict));
 console.log(apkDict === localDict ? '→ 逐字节完全相同' : '→ 有差异！');
 
 const A = loadDict(apkDict, 'apk'), L = loadDict(localDict, 'local');

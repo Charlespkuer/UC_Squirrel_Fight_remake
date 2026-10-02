@@ -238,3 +238,29 @@
 .catalog-cell.true-form .item-icon{outline:4px solid #e8b13a;box-shadow:inset 0 0 0 5px #fff8dc,0 0 10px #e8b13a99}
 .catalog-cell.true-form .item-caption{color:#c8860a;font-weight:bold}
 .detail-upgrade .upgrade-true-tip{display:block;margin-top:8px;font-size:21px;color:#b8801a}
+
+/* ============================================================
+ * 存档列表弹窗（系统 → 从存档列表导入）
+ *
+ * 旧版把每份存档做成一个按钮横排 12 个，按钮上还印着「【32级 Charles】2026/10/2 15:20:09」，
+ * 在 small-modal（宽 755px）里必然溢出屏幕。现在改成一列紧凑可滚动的行：
+ * 等级徽章（定宽）+ 名字（超出省略）+ 时间/大小（次要信息）+ 载入按钮（定宽）。
+ * ============================================================ */
+.classic-modal-overlay.save-list-dialog>.classic-modal.small-modal{width:820px;max-height:600px;padding-bottom:18px}
+.classic-modal-overlay.save-list-dialog>.classic-modal.small-modal>.modal-body{max-height:432px;padding:0 6px}
+.classic-modal-overlay.save-list-dialog>.classic-modal.small-modal>.modal-buttons{margin-top:14px}
+.save-list{display:flex;flex-direction:column;gap:7px;padding:2px 4px 6px}
+.save-row{display:grid;grid-template-columns:74px minmax(0,1fr) 150px 92px;align-items:center;gap:10px;
+  background:#fffdf3;border:3px solid #d9c391;border-radius:20px;padding:7px 12px;min-height:52px}
+.save-row.current{border-color:#c2a25e;box-shadow:inset 0 0 0 2px #fff3c4}
+.save-level{display:inline-flex;align-items:baseline;justify-content:center;gap:2px;background:#8a6a3c;color:#fff8e4;
+  border-radius:14px;padding:3px 6px;font-size:23px;font-weight:700;line-height:1.1;font-family:"Microsoft YaHei","PingFang SC",sans-serif}
+.save-level i{font-size:14px;font-style:normal;opacity:.9}
+.save-name{color:#77502e;font-size:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.save-name em{font-style:normal;font-size:15px;color:#7f9a3c;background:#eef6d4;border:2px solid #cddc9d;
+  border-radius:10px;padding:0 6px;margin-left:8px;vertical-align:2px}
+.save-sub{color:#9a8156;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right}
+.save-row .uc-button{min-width:0;width:92px;font-size:19px;padding:4px 0;justify-self:end}
+.save-list-tip{color:#9a8156;font-size:18px;margin:10px 8px 0;line-height:1.45}
+.save-list::-webkit-scrollbar{width:9px}
+.save-list::-webkit-scrollbar-thumb{background:#c9af76;border-radius:6px}

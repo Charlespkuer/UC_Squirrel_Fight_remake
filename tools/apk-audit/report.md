@@ -16,7 +16,7 @@
 
 | APK 内路径 | 大小 | 项目中的位置 |
 | --- | --- | --- |
-| `js/animationstr.js` | 1858.0 KB | js/orig/animationstr.js |
+| `js/animationstr.js` | 1858.0 KB | references/orig/animationstr.js |
 | `images/fightbg_seaworld_front.png` | 1365.2 KB | images/fightbg_seaworld_front.png |
 | `images/daoju.png` | 1321.9 KB | images/daoju.png |
 | `images/sq_01.png` | 1244.8 KB | images/sq_01.png |
@@ -115,7 +115,7 @@
 | `images/equip/head/head_30_2.png` | 90.0 KB | images/equip/head/head_30_2.png |
 | `images/fightbg_wood_effect2.png` | 89.9 KB | images/fightbg_wood_effect2.png |
 | `images/equip/head/head_24_3.png` | 89.0 KB | images/equip/head/head_24_3.png |
-| `js/gamedict.js` | 88.6 KB | js/orig/gamedict.js |
+| `js/gamedict.js` | 88.6 KB | references/orig/gamedict.js |
 | `images/equip/head/head_22_1.png` | 88.1 KB | images/equip/head/head_22_1.png |
 | `images/equip/head/head_27_2.png` | 86.2 KB | images/equip/head/head_27_2.png |
 | `images/equip/head/head_26_3.png` | 86.0 KB | images/equip/head/head_26_3.png |
@@ -137,7 +137,7 @@
 | `images/equip/head/head_24_1.png` | 76.4 KB | images/equip/head/head_24_1.png |
 | `images/effect/effectcommonattack.png` | 75.9 KB | images/effect/effectcommonattack.png |
 | `images/equip/head/head_15_2.png` | 75.6 KB | images/equip/head/head_15_2.png |
-| `js/assets.js` | 75.3 KB | js/orig/assets.js |
+| `js/assets.js` | 75.3 KB | references/orig/assets.js |
 | `images/equip/arm/thumbs.db` | 74.5 KB | images/equip/arm/thumbs.db |
 | `images/equip/head/head_18_1.png` | 74.2 KB | images/equip/head/head_18_1.png |
 | `images/jinbeidaoju.png` | 72.6 KB | images/jinbeidaoju.png |
@@ -383,7 +383,7 @@
 | `images/equip/handi/handi_19_2.png` | 4.3 KB | images/equip/handi/handi_19_2.png |
 | `images/equip/handi/handi_24_3.png` | 4.3 KB | images/equip/handi/handi_24_3.png |
 | `images/equip/handi/handi_4_1.png` | 4.3 KB | images/equip/handi/handi_4_1.png |
-| `js/asset2.js` | 4.3 KB | js/orig/asset2.js |
+| `js/asset2.js` | 4.3 KB | references/orig/asset2.js |
 | `images/equip/handi/handi_1_1.png` | 4.3 KB | images/equip/handi/handi_1_1.png |
 | `images/equip/handi/handi_2_1.png` | 4.2 KB | images/equip/handi/handi_2_1.png |
 | `images/energynum.png` | 3.4 KB | images/energynum.png |
@@ -457,7 +457,7 @@
 | `images/expnum.png` | 1.4 KB | images/expnum.png |
 | `images/tudi.png` | 1.3 KB | images/tudi.png |
 | `images/shade.png` | 1.0 KB | images/shade.png |
-| `js/map.min.js` | 0.8 KB | js/orig/map.min.js |
+| `js/map.min.js` | 0.8 KB | references/orig/map.min.js |
 | `images/tanchutiao.png` | 0.6 KB | images/tanchutiao.png |
 
 ## 存在但内容不同

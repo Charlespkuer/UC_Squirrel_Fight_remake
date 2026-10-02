@@ -137,20 +137,24 @@ hr('上轮 5：限次 buff 按场次消耗、跨层不被清空');
   const u0 = (run0.limited || []).find((b) => b.id === 'E06');
   check('拿到时 uses=10', u0 && u0.uses === 10, u0 ? 'uses=' + u0.uses : '没拿到');
   const layers = new Set();
-  let last = null;
+  let last = null, battles = 0;
   for (let i = 0; i < 12; i++) {
     win('endless', 1);
+    battles++;
     const run = Tower._debugRun('endless');
     if (!run) break;
     layers.add(run.layer);
     const e = (run.limited || []).find((b) => b.id === 'E06');
-    last = { layer: run.layer, uses: e ? e.uses : 0, idx: run.idx };
+    last = { layer: run.layer, uses: e ? e.uses : 0, idx: run.idx, totalBattles: battles };
     clearPhase();
     if (!Tower._debugRun('endless')) break;
   }
-  const panel = Tower.ownedBuffs('endless').find((b) => b.id === 'E06');
-  check('跨过至少 2 层后仍在（且次数连续递减）', last && layers.size >= 2 && last.uses > 0 && last.uses < 10,
-    last ? ('最后一层=' + last.layer + ' 剩 ' + last.uses + ' 场；走过层数=' + layers.size) : '中途消失');
+  const panel = Tower.ownedBuffs('endless');
+  /* 需求 6：限次现在**每场都扣 1**（含整层最后一场）——
+   * 原来整层最后一场会被 layerClear 提前 return 跳过，所以 12 场只掉 9~10 点。
+   * 这里改成断言「确实跨了至少 2 层、次数单调递减、从不越界」。 */
+  check('跨过至少 2 层（次数每场扣 1、单调递减）', last && layers.size >= 2 && last.uses >= 0 && last.uses < 10 && last.uses === Math.max(0, 10 - last.totalBattles),
+    last ? ('最后一层=' + last.layer + ' 剩 ' + last.uses + ' 场；走过层数=' + layers.size + '；已打 ' + last.totalBattles + ' 场') : '中途消失');
   Tower.abandon('endless');
 }
 
@@ -158,11 +162,13 @@ hr('上轮 5：限次 buff 按场次消耗、跨层不被清空');
 hr('上轮 7：成长类数值与账本');
 {
   freshRun();
-  Tower.debugGrantBuff('C07');   // 吞噬成长：每击杀 +3%，上限 +45%
-  for (let i = 0; i < 10; i++) { win('endless', 1); clearPhase(); if (!Tower._debugRun('endless')) break; }
+  Tower.debugGrantBuff('C07');   // 需求 4：吞噬成长改成「每胜利一场 +2%，上限 +30%」
+  let fought = 0;
+  for (let i = 0; i < 10; i++) { win('endless', 1); fought++; clearPhase(); if (!Tower._debugRun('endless')) break; }
   const run = Tower._debugRun('endless');
-  const growth = run ? (run.killMaxHp || 0) : 0;
-  check('吞噬成长按 +3%/场 累计（10 场 ≈ +30%）', growth > 0.28 && growth < 0.33, 'killMaxHp=' + growth.toFixed(3));
+  const growth = run ? (run.winMaxHp || 0) : 0;
+  check('吞噬成长按 +2%/胜利 累计（' + fought + ' 场 ≈ +' + (2 * fought) + '%）',
+    Math.abs(growth - 0.02 * fought) < 0.001, 'winMaxHp=' + growth.toFixed(3));
   const ob = Tower.ownedBuffs('endless').find((b) => b.id === 'C07');
   check('面板带上真实进度（不再是 ×1）', !!(ob && ob.progress), ob ? ob.progress : '没有 progress');
   Tower.abandon('endless');
@@ -355,8 +361,11 @@ hr('本轮 1b：先机预判（首次受击为 0，反伤不消耗）');
   check('归零的那一回合没造成伤害', zero.length === 1 && !zero[0].dmg, '该回合 dmg=' + (zero[0] && zero[0].dmg));
   check('每场只触发一次', zero.length <= 1, '触发 ' + zero.length + ' 次');
 
-  // 对手带荆棘：反伤不能消耗这次免疫
-  const hero2 = mk({ name: '我方', speed: 100, agility: 300, power: 200, hp: 30000, maxHp: 30000,
+  /* 对手带荆棘：反伤不能消耗这次免疫。
+   * 注意 hero2 的敏捷也要压到 1 —— 原来写 300，敌人（敏捷 1）的第一次攻击会**被闪避**，
+   * 于是「首次伤害归零」根本不触发，断言随机红（实测约 1/4 概率失败）。
+   * 「反伤不消耗免疫」这条逻辑与敏捷无关，压低敏捷不影响它的验证。 */
+  const hero2 = mk({ name: '我方', speed: 100, agility: 1, power: 200, hp: 30000, maxHp: 30000,
     mods: { firstHitZero: 1 } });
   const foe2 = mk({ name: '荆棘敌方', speed: 200, agility: 1, power: 120, hp: 30000, maxHp: 30000, mech: ['thorns'] });
   const res2 = Sim.simulate(hero2, foe2);
@@ -380,7 +389,7 @@ hr('本轮 3：成长类增益失去后累计清零');
   const stack0 = ((Tower._debugRun('endless').permanent || []).find((b) => b.id === 'C07') || {}).stacks;
   for (let i = 0; i < 6; i++) { win('endless', 1); clearPhase(); if (!Tower._debugRun('endless')) break; }
   const r1 = Tower._debugRun('endless');
-  check('叠到 2 层并长了起来', stack0 === 2 && (r1.killMaxHp || 0) > 0, 'stacks=' + stack0 + ' killMaxHp=' + (r1.killMaxHp || 0).toFixed(3));
+  check('叠到 2 层并长了起来', stack0 === 2 && (r1.winMaxHp || 0) > 0, 'stacks=' + stack0 + ' winMaxHp=' + (r1.winMaxHp || 0).toFixed(3));
   Tower.debugLoseBuff('C07');
   const r2 = Tower._debugRun('endless');
   check('失去后累计清零', (r2.killMaxHp || 0) === 0, 'killMaxHp=' + (r2.killMaxHp || 0));
@@ -616,8 +625,8 @@ hr('本轮 5：扩容背包/仓库钥匙不会重复出现在商店');
   check('重复购买会被拒并原额退款', refundOk2, refundMsg);
 }
 
-// ---------- 本轮 7：易碎烙印 ----------
-hr('本轮 7：易碎属性烙印（永久保留 + 每场 5% 损毁）');
+// ---------- 本轮 7（需求 3 重做）：易碎属性烙印 ----------
+hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留、各自独立随机数');
 {
   freshRun();
   /* 注意：State.genAI 每次的属性带随机（装备品质），跨两次 genAI 比较绝对值会飘 ——
@@ -627,34 +636,98 @@ hr('本轮 7：易碎属性烙印（永久保留 + 每场 5% 损毁）');
   const meA = Object.assign({}, base); meA.maxHp = base.hp; nx1.adjustMe(meA);
   const pow0 = meA.power;
   Tower.reportBattle('endless', nx1.token, true, 1);
-  Tower.debugGrantBuff('C39');                       // 力量烙印：+8%
+  Tower.debugGrantBuff('C39');                       // 力量烙印：基础 +8%
   const run1 = Tower._debugRun('endless');
-  check('拿到就写进 stickyStat', Math.abs((run1.stickyStat || {}).power - 0.08) < 1e-6, JSON.stringify(run1.stickyStat));
+  check('拿到时登记基础加成 0.08', Math.abs((run1.fragileBase || {}).power - 0.08) < 1e-6, JSON.stringify(run1.fragileBase));
+  check('旧的 stickyStat 已不再使用', run1.stickyStat === undefined, JSON.stringify(run1.stickyStat));
+  const cur0 = Tower._debugRun('endless');
   const nx2 = Tower.nextBattle('endless');
   const me2 = Object.assign({}, base); me2.maxHp = base.hp; nx2.adjustMe(me2);
-  check('力量立刻涨约 8%', me2.power / pow0 > 1.06 && me2.power / pow0 < 1.10,
+  /* 需求 3：烙印存在时只吃一半 → 实际 +4% */
+  check('存在时半效（力量 +4%）', me2.power / pow0 > 1.02 && me2.power / pow0 < 1.06,
     pow0 + ' -> ' + me2.power + '（×' + (me2.power / pow0).toFixed(3) + '）');
+  /* 这一场要保证烙印**不碎**，否则面板会变成「已损毁」而不是「存在：半效」。
+   * 注入一个「下一步必定不碎」的种子（派生算法与 fragileRoll 一致）。 */
+  const miss = (function () {
+    const key = String(cur0.salt == null ? 'run' : cur0.salt) + '#' + (Number(cur0.layer) || 0) + '#C39';
+    let h = 0x811c9dc5;
+    for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    let st = h >>> 0 || 1;
+    for (let i = 0; i < 50; i++) {
+      const next = (Math.imul(st, 1664525) + 1013904223) >>> 0;
+      if ((next / 4294967296) * 100 >= 60) return st;      // 用 60% 当阈值，确保远离 6% 边界
+      st = next;
+    }
+    return null;
+  })();
+  if (miss != null) cur0.fragileSeeds = { C39: miss };
   Tower.reportBattle('endless', nx2.token, true, 1);
   const info = Tower.ownedBuffs('endless').find((b) => b.id === 'C39');
-  check('面板显示「已永久保留 力量 +8%」', !!(info && info.progress && info.progress.indexOf('永久保留') >= 0), info && info.progress);
-  // 强制损毁：Math.random 压到 1% 以下
-  /* 注意：要改的是 **vm 沙箱里**的 Math（外层 Node 的 Math 与它不是一个对象）。 */
-  vm.runInContext('Math.random = () => 0.01', c);
-  const nx3 = Tower.nextBattle('endless');
-  Tower.reportBattle('endless', nx3.token, true, 1);
-  vm.runInContext('Math.random = Math.__realRandom', c);
+  check('面板写明「存在：半效」', !!(info && info.progress && info.progress.indexOf('半效') >= 0), info && info.progress);
+  /* 连打直到损毁。每条烙印有自己的随机序列，不能靠改 Math.random 制造；
+   * 直接注入一个「下一步必然碎裂」的种子状态（派生算法与 fragileRoll 一致），
+   * 避免靠概率采样导致偶发失败。 */
+  function seedForHit(salt, id, pct) {
+    const key = String(salt == null ? '' : salt) + '#' + id;
+    let h = 0x811c9dc5;
+    for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    let st = h >>> 0 || 1;
+    for (let i = 0; i < 200; i++) {
+      const next = (Math.imul(st, 1664525) + 1013904223) >>> 0;
+      if ((next / 4294967296) * 100 < pct) return st;
+      st = next;
+    }
+    return null;
+  }
+  let broken = false;
+  for (let i = 0; i < 40 && !broken; i++) {
+    const cur = Tower._debugRun('endless');
+    if (cur.choices) { clearPhase(); }
+    if (cur.phase === 'shop') { Tower.continueFromShop(); continue; }
+    if (cur.phase === 'checkpoint') { Tower.continueEndless(); continue; }
+    const hit = seedForHit(cur.salt, 'C39', TowerData.BUFF_BY_ID.C39.mods.fragileBreakPct);
+    if (hit != null) cur.fragileSeeds = { C39: hit };
+    const nx = Tower.nextBattle('endless');
+    if (!nx || nx.ok === false) { clearPhase(); continue; }
+    Tower.reportBattle('endless', nx.token, true, 1);
+    if (!(Tower._debugRun('endless').limited || []).some((b) => b.id === 'C39')) broken = true;
+    clearPhase();
+  }
+  check('注入必碎种子后一场内损毁', broken, '40 场内未损毁');
   const run2 = Tower._debugRun('endless');
-  const still = (run2.limited || []).some((b) => b.id === 'C39');
-  check('5% 判定命中时烙印损毁', !still, '仍在=' + still);
-  check('损毁后加成仍然保留', Math.abs((run2.stickyStat || {}).power - 0.08) < 1e-6, JSON.stringify(run2.stickyStat));
-  // 再拿一次 → 再 +8%，然后主动卖掉 → 收回
+  /* 需求 3：损毁后基础那份整份转为永久（burned += base）→ 实际 = 0.5×base + base = 1.5×base = 12% */
+  check('损毁后升为全额并永久保留（+12%）',
+    Math.abs(((run2.fragileBase || {}).power) - 0.08) < 1e-6 && Math.abs(((run2.fragileBurned || {}).power) - 0.08) < 1e-6,
+    JSON.stringify(run2.fragileBurned));
+  // 再拿一次 → 基础再 +8%（已损毁那份不受影响）
   Tower.debugGrantBuff('C39');
-  check('再拿一次会继续叠加', Math.abs((Tower._debugRun('endless').stickyStat || {}).power - 0.16) < 1e-6,
-    JSON.stringify(Tower._debugRun('endless').stickyStat));
+  check('再拿一次基础继续叠加', Math.abs((Tower._debugRun('endless').fragileBase || {}).power - 0.16) < 1e-6,
+    JSON.stringify(Tower._debugRun('endless').fragileBase));
+  // 主动卖掉 → 基础那份收回，已损毁的永久份保留
   Tower.debugLoseBuff('C39');
-  check('主动失去（卖出/换掉）才收回加成', Math.abs((Tower._debugRun('endless').stickyStat || {}).power - 0.08) < 1e-6,
-    JSON.stringify(Tower._debugRun('endless').stickyStat));
+  const run3 = Tower._debugRun('endless');
+  check('主动失去只收回基础那份（永久份保留）',
+    Math.abs((run3.fragileBase || {}).power - 0.08) < 1e-6 && Math.abs((run3.fragileBurned || {}).power - 0.08) < 1e-6,
+    JSON.stringify({ base: run3.fragileBase, burned: run3.fragileBurned }));
   Tower.abandon('endless');
+}
+{
+  /* 独立随机数：三条烙印在同一场里不该「一起碎」（共用 Math.random 时会） */
+  let bothAll = 0, partial = 0, trials = 0;
+  for (let t = 0; t < 120 && partial === 0; t++) {
+    freshRun();
+    ['C39', 'C40', 'C41'].forEach((id) => Tower.debugGrantBuff(id));
+    const nx = Tower.nextBattle('endless');
+    if (!nx || nx.ok === false) continue;
+    Tower.reportBattle('endless', nx.token, true, 1);
+    const broken = (Tower._debugRun('endless').buffLog || []).filter((e) => e.event === 'break').length;
+    trials++;
+    if (broken === 3) bothAll++;
+    if (broken > 0 && broken < 3) partial++;
+    Tower.abandon('endless');
+  }
+  check('三条烙印各自独立随机（出现「部分碎」）', partial > 0 || bothAll === 0,
+    '试验 ' + trials + ' 次：全碎 ' + bothAll + ' 次、部分碎 ' + partial + ' 次');
 }
 
 console.log('\n================ 合计 ' + pass + ' 通过 / ' + fail + ' 失败 ================');

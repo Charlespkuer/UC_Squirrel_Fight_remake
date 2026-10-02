@@ -311,8 +311,15 @@
   function refreshTickets() {
     const s = State.state(); if (!s) return;
     const n = s.props[50] || 0;
-    $$('[data-lottery-ticket]').forEach((el) => { el.textContent = n; });
-    $$('[data-live-ticket]').forEach((el) => { el.textContent = n; });
+    /* 注意：`$$` 是 classic-ui.js 内部的局部函数、**不是全局**，所以这里自己查 DOM。
+     * 没有真实 DOM 时（单测的沙箱）静默跳过 —— 刷新展示失败不该中断存档流程。 */
+    const paint = (sel) => {
+      const root = (typeof document !== 'undefined' && document) ? document : null;
+      if (!root || !root.querySelectorAll) return;
+      root.querySelectorAll(sel).forEach((el) => { el.textContent = n; });
+    };
+    paint('[data-lottery-ticket]');
+    paint('[data-live-ticket]');
     if (window.UI && UI.refreshHeader) { try { UI.refreshHeader(); } catch (e) { /* 顶栏刷新失败不影响抽奖卷 */ } }
   }
   function lottery() {
@@ -364,6 +371,10 @@
         spinning = false; spin.disabled = false; spin.textContent = '\u518d\u62bd\u4e00\u6b21';
         find(p, '[data-lottery-status]').textContent = '\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21';
         find(p, '[data-lottery-gold]').textContent = s.goldPoint;
+        /* \u9700\u6c42 8\uff1a\u62bd\u5956\u5377\u6570\u91cf\u4e5f\u8981\u5373\u65f6\u66f4\u65b0\u3002
+         * \u539f\u6765\u8fd9\u91cc\u53ea\u5237\u65b0\u4e86\u300c\u4eca\u65e5\u514d\u8d39\u6b21\u6570\u300d\u4e0e\u300c\u91d1\u677e\u679c\u300d\uff0c
+         * \u9875\u9762\u4e0a\u7684\u300c\u73b0\u6709 N \u5f20\u300d\u62bd\u5956\u5377\u8fd8\u662f\u62bd\u4e4b\u524d\u7684\u6570\u5b57\u3002 */
+        refreshTickets();
         // \u9876\u90e8\u6807\u7b7e\u6761\u53f3\u4e0a\u89d2\u7684\u91d1\u677e\u679c\u4e5f\u8981\u7acb\u523b\u8ddf\u4e0a\uff08\u9875\u9762\u4e0d\u91cd\u5efa\uff09
         if (UI.refreshHeader) UI.refreshHeader();
         C().modal('\u83b7\u5f97\u5956\u52b1', '<div class="extra-lottery-win">' + C().icon('prop', prizeIcon) + '<strong>' + prizeLabel + '</strong></div>' + C().upsHtml(ups), [{ label: '\u786e\u5b9a' }], { small: true });
@@ -600,7 +611,8 @@
   const TOPLIST_TITLES = ['\u677e\u9f20\u5c0f\u9738', '\u68ee\u6797\u4e00\u9738', '\u98ce\u901f\u4f20\u5947', '\u575a\u679c\u5927\u738b',
     '\u677e\u9f20\u5c0f\u9738\u4e8c\u4e16', '\u68a6\u5e7b\u6a61\u5b50', '\u91d1\u677e\u679c\u5b88\u62a4\u8005', '\u6708\u5149\u98de\u9f20',
     '\u96fe\u6797\u730e\u624b', '\u96ea\u539f\u65c5\u4eba', '\u53e4\u6811\u5b88\u671b\u8005', '\u661f\u8fb0\u4e4b\u5f71'];
-  // \u6ce8\u610f\uff1a\u539f\u7248 Map.min.js \u4f1a\u8986\u76d6\u5168\u5c40 Map\uff08window.Map\uff09\uff0c\u6240\u4ee5\u8fd9\u91cc\u4e0d\u80fd\u7528 new Map()\u3002
+  // 说明：以前原版的 Map.min.js 会覆盖全局 Map（window.Map），所以这里只能用手写对象缓存；
+  // 现在数据走 js/gamedict.js（自带独立实现、不碰全局 Map），下面继续用手写对象也完全没问题。
   let toplistCache = Object.create(null);
   function rankWeekSeed() {
     const d = new Date(Date.now());

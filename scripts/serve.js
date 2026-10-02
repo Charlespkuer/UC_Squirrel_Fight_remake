@@ -18,7 +18,18 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');   // serve.js 在 scripts/ 里，游戏根是上一层
 const ARGS = process.argv.slice(2);
-const PORT = Number(ARGS.find((a) => /^[0-9]+$/.test(a)) || 8080);   // 端口可以写在任意位置：node tools/serve.js --no-save 8080
+// 端口可以写在任意位置：node tools/serve.js --no-save 8080
+// 显式传 0 = 让系统分配一个空闲端口（自动化测试用；启动日志里会打印真实端口）。
+const PORT_ARG = ARGS.find((a) => /^[0-9]+$/.test(a));
+const PORT = PORT_ARG === undefined ? 8080 : Number(PORT_ARG);
+
+/** 当前正式存档里的等级 / 历史最高等级水位线（导入前确认、界面显示用）。 */
+function readSaveLevel() {
+  try { const d = JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8')); return Number(d && d.level) || 0; } catch (e) { return 0; }
+}
+function readMinLevel() {
+  try { return Number(fs.readFileSync(path.join(SAVE_DIR, '.min-level'), 'utf8')) || 0; } catch (e) { return 0; }
+}
 
 /* ---------- /__save：存档文件读写（本地备份 / 自建同步服务的接口层） ---------- */
 const NO_SAVE = process.argv.includes('--no-save');
@@ -53,7 +64,7 @@ async function handleSaveApi(req, res, url) {
   if (NO_SAVE) return json(res, 503, { ok: false, msg: '服务器以 --no-save 启动，存档文件同步已关闭' });
   if (req.method === 'GET') {
     const st = saveStat();
-    if (url.searchParams.get('meta')) return json(res, 200, { ok: true, exists: st.exists, savedAt: st.savedAt, size: st.size });
+    if (url.searchParams.get('meta')) return json(res, 200, { ok: true, exists: st.exists, savedAt: st.savedAt, size: st.size, level: readSaveLevel(), minLevel: readMinLevel() });
     if (!st.exists) return json(res, 200, { ok: true, exists: false, savedAt: 0, data: null });
     try { return json(res, 200, { ok: true, exists: true, savedAt: st.savedAt, data: fs.readFileSync(SAVE_FILE, 'utf8') }); }
     catch (e) { return json(res, 500, { ok: false, msg: '读取存档失败：' + e.message }); }
@@ -103,6 +114,25 @@ async function handleSaveApi(req, res, url) {
   return json(res, 405, { ok: false, msg: '只支持 GET / POST' });
 }
 
+/* ---------- /__save/backup：把当前正式存档留一份快照到 save/backup/ ----------
+ * 「导入存档」「用另一个档覆盖」这类操作前先调它，玩家随时能退回上一份进度。
+ * 文件名沿用 README 里写的 progress-YYYYMMDD-HHMMSS.json；同一秒内重复调用只留一份。 */
+function handleBackupApi(req, res) {
+  if (NO_SAVE) return json(res, 503, { ok: false, msg: '服务器以 --no-save 启动，存档文件同步已关闭' });
+  const st = saveStat();
+  if (!st.exists) return json(res, 200, { ok: true, skipped: true, msg: '还没有正式存档，不用备份' });
+  const dir = path.join(SAVE_DIR, 'backup');
+  const p2 = (n) => String(n).padStart(2, '0');
+  const d = new Date();
+  const stamp = '' + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds());
+  const target = path.join(dir, 'progress-' + stamp + '.json');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(target)) fs.copyFileSync(SAVE_FILE, target);
+  } catch (e) { return json(res, 500, { ok: false, msg: '写备份失败：' + e.message }); }
+  return json(res, 200, { ok: true, backup: path.relative(ROOT, target).split(path.sep).join('/'), savedAt: st.savedAt, level: readSaveLevel() });
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -125,18 +155,19 @@ http.createServer((req, res) => {
     url = new URL(req.url, 'http://127.0.0.1');
     rel = decodeURIComponent(url.pathname);
   } catch (_) { res.writeHead(400); res.end('400'); return; }
+  if (rel === '/__save/backup') { try { handleBackupApi(req, res); } catch (e) { json(res, 500, { ok: false, msg: '备份失败：' + e.message }); } return; }
   if (rel === '/__save') { handleSaveApi(req, res, url).catch(() => json(res, 500, { ok: false, msg: '服务器内部错误' })); return; }
   /* 存档列表 / 读取：给「从存档列表导入」用（不依赖系统文件选择器，桌面壳里也能用）。 */
   if (rel === '/__saves' || rel.startsWith('/__saves/get')) {
     const SAVE_DIR = path.join(ROOT, 'save');
-    const listOne = (abs, rel2) => {
+    const listOne = (abs, rel2, kind) => {
       try {
         const st = fs.statSync(abs);
         if (!st.isFile() || !abs.endsWith('.json')) return null;
         let level = null, name = null;
         try { const d = JSON.parse(fs.readFileSync(abs, 'utf8')); level = d && d.level; name = d && d.name; } catch (e) { return null; }
         if (typeof name !== 'string' || !Number.isFinite(level)) return null;
-        return { rel: rel2, level, name, size: st.size, at: st.mtimeMs };
+        return { rel: rel2, level, name, size: st.size, at: st.mtimeMs, kind: kind || 'backup' };
       } catch (e) { return null; }
     };
     if (rel.startsWith('/__saves/get')) {
@@ -151,7 +182,11 @@ http.createServer((req, res) => {
       return;
     }
     const out = [];
-    for (const rel2 of fs.readdirSync(SAVE_DIR)) { if (rel2 === 'backup') continue; const it = listOne(path.join(SAVE_DIR, rel2), 'save/' + rel2); if (it) out.push(it); }
+    for (const rel2 of fs.readdirSync(SAVE_DIR)) {
+      if (rel2 === 'backup') continue;
+      const it = listOne(path.join(SAVE_DIR, rel2), 'save/' + rel2, rel2 === 'progress.json' ? 'current' : 'backup');
+      if (it) out.push(it);
+    }
     const bk = path.join(SAVE_DIR, 'backup');
     if (fs.existsSync(bk)) for (const f of fs.readdirSync(bk)) { const it = listOne(path.join(bk, f), 'save/backup/' + f); if (it) out.push(it); }
     out.sort((a, b) => b.at - a.at);
@@ -170,13 +205,14 @@ http.createServer((req, res) => {
     });
     res.end(data);
   });
-}).listen(PORT, '127.0.0.1', () => {
+}).listen(PORT, '127.0.0.1', function () {
   const st = saveStat();
+  const realPort = this.address().port;     // PORT=0 时这里是系统分配的真实端口
   console.log('松鼠大战 · 怀旧复刻版');
   console.log('目录: ' + ROOT);
-  console.log('地址: http://127.0.0.1:' + PORT + '/');
-  console.log('自检: http://127.0.0.1:' + PORT + '/index.html?test=1');
-  console.log('战斗观察: http://127.0.0.1:' + PORT + '/index.html?test=2');
+  console.log('地址: http://127.0.0.1:' + realPort + '/');
+  console.log('自检: http://127.0.0.1:' + realPort + '/index.html?test=1');
+  console.log('战斗观察: http://127.0.0.1:' + realPort + '/index.html?test=2');
   console.log(NO_SAVE
     ? '存档文件: 已关闭（--no-save）'
     : '存档文件: save/progress.json' + (st.exists ? '（已有存档 ' + new Date(st.savedAt).toLocaleString() + '）' : '（还没有，游戏保存后自动出现）'));

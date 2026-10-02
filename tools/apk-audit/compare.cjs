@@ -49,12 +49,12 @@ const apk = walk(src);
 const identical = [], different = [], missing = [];
 for (const f of apk) {
   const size = fs.statSync(f.abs).size;
-  // Candidate project locations: same relative path, js/orig move, or same basename.
+  // Candidate project locations: same relative path, references/orig move, or same basename.
   const cands = [];
   const direct = byRel.get(f.rel);
   if (direct) cands.push(direct);
   if (f.rel.startsWith('js/')) {
-    const moved = byRel.get('js/orig/' + f.rel.slice(3));
+    const moved = byRel.get('references/orig/' + f.rel.slice(3));
     if (moved) cands.push(moved);
   }
   for (const b of byBase.get(f.rel.split('/').pop()) || []) cands.push(b);

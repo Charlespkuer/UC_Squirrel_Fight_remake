@@ -76,3 +76,36 @@
 .debug-buff .debug-ws-tag { min-width: 40px; }
 .debug-buff .debug-grant-row select { flex: 1; }
 .debug-buff .debug-ws-owned { margin-top: 6px; }
+
+/* ============================================================
+ * 调试台 · 无尽塔增益总览
+ * 三块：当前实际提升（聚合后的效果清单）/ 已获得过的全部增益（含一次生效、用尽、
+ * 损毁、失去）/ 获取与消失流水。目的是把「看不见的增益」全部摊开在调试台上。
+ * ============================================================ */
+.debug-buff-report{margin:8px 0 0;padding:8px 9px;border:2px dashed #c3ad7c;border-radius:14px;background:#fffdf2}
+.debug-report-head{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  font-weight:700;color:#5c3d1b;font-size:13px;margin-bottom:6px}
+.debug-report-slots{font-weight:400;font-size:11.5px;color:#987a4e}
+.debug-report-sec{margin:7px 0 0}
+.debug-report-sec h5{margin:0 0 5px;font-size:11.5px;font-weight:700;color:#8a6a3a;letter-spacing:.5px}
+.debug-report-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:3px 0}
+.debug-report-tag{flex:0 0 auto;font-size:11px;color:#77502e;background:#efe2c0;border-radius:9px;padding:1px 7px;margin-right:3px}
+/* 效果清单：左边名字、右边数值 */
+.debug-effect-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 8px}
+.debug-effect{display:flex;align-items:baseline;justify-content:space-between;gap:6px;
+  background:#f3f8e2;border:1px solid #cddc9d;border-radius:9px;padding:2px 8px;font-size:11.5px;color:#5e6b3a}
+.debug-effect i{font-style:normal;color:#6d7a44}
+.debug-effect b{font-weight:700;color:#4f872b}
+/* 流水：一条一行，按事件类型配色 */
+.debug-buff-log{list-style:none;margin:0;padding:0;max-height:168px;overflow-y:auto;font-size:11.5px}
+.debug-buff-log li{display:flex;align-items:baseline;gap:6px;padding:2px 6px;border-radius:8px;color:#5f4a2c}
+.debug-buff-log li:nth-child(odd){background:#f7f1de}
+.debug-buff-log li i{font-style:normal;color:#a08a5f;flex:0 0 auto;min-width:52px}
+.debug-buff-log li b{font-weight:700;flex:0 0 auto;min-width:48px}
+.debug-buff-log li em{font-style:normal;color:#8d7752;margin-left:auto;text-align:right}
+.debug-buff-log li.get b{color:#4f872b}
+.debug-buff-log li.stack b{color:#3d7c9c}
+.debug-buff-log li.instant b{color:#a2731f}
+.debug-buff-log li.gone{opacity:.72}
+.debug-buff-log li.gone b{color:#9a6a4a}
+.debug-buff-log li.broken b{color:#b3562c}

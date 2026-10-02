@@ -29,12 +29,10 @@ window.addEventListener('unhandledrejection', function (e) {
   <div id="ui"></div>
   <div id="boot-note">初始化…</div>
 </div>
-<!-- 原版数据文件 -->
-<script src="js/orig/Map.min.js"></script>
-<script src="js/orig/GameDict.js"></script>
-<script src="js/orig/animationStr.js"></script>
-<script src="js/orig/assets.js"></script>
-<script src="js/orig/asset2.js"></script>
+<!-- 原版数据（武器/技能/道具字典 + 素材清单 + 动画帧表）：
+     由 tools/gen-vendor-data.cjs 从 references/orig/ 抽取生成，
+     运行时只加载这一份，游戏中不再引用 references/ 下的任何文件 -->
+<script src="js/gamedict.js"></script>
 <!-- 复刻版代码 -->
 <script src="js/engine.js"></script>
 <script src="js/gamedata.js"></script>

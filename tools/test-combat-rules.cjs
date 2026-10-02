@@ -181,20 +181,30 @@ test('龟甲术首次触发后仍可二次触发（不再是一次性）', () =>
   assert.ok(several > 0, '没有装备附加能力时也应当能二次触发，实测 ' + several + '/200 场出现');
 });
 
-test('绝对防御触发率用 RULES.jueDuiChance，且已从 30% 下调', () => {
+test('绝对防御：首次 22%，二次及以后 13%（都低于原来的 30%）', () => {
   const c = game();
-  assert.equal(c.Sim.rules.jueDuiChance, 22);
-  assert.ok(c.Sim.rules.jueDuiChance < 30, '必须低于原来的 30%');
-  let hits = 0, blocks = 0;
+  const rules = c.Sim.rules;
+  assert.equal(rules.jueDuiChance, 22);
+  assert.ok(rules.jueDuiChance < 30, '首次概率必须低于原来的 30%');
+  assert.ok(rules.jueDuiAgain < rules.jueDuiChance, '二次及以后必须比首次更低');
+  // 单次受击（只打一下）：触发率应贴着首次的 22%
+  let firstHits = 0, firstBlocks = 0, manyHits = 0, manyBlocks = 0;
   for (let i = 0; i < 400; i++) {
     const ev = rounds(randomGame(), { power: 30, weapons: ['6:1'], hp: 100000 }, { skills: ['16:1'], hp: 100000 });
+    let n = 0;
     for (const r of ev) {
       if (r.attacker !== 0 || r.dodge || r.action === 'rest') continue;
-      hits++; if (r.jueDui) blocks++;
+      n++;
+      manyHits++; if (r.jueDui) manyBlocks++;
+      if (n === 1) { firstHits++; if (r.jueDui) firstBlocks++; }
     }
   }
-  const rate = blocks / hits;
-  assert.ok(Math.abs(rate - 0.22) < 0.05, '实测触发率 ' + (rate * 100).toFixed(1) + '% 应接近 22%');
+  const firstRate = firstBlocks / firstHits;
+  assert.ok(Math.abs(firstRate - 0.22) < 0.05, '首次受击实测 ' + (firstRate * 100).toFixed(1) + '% 应接近 22%');
+  // 整场累计：首次 22% + 之后 13%，长期应明显低于 22% 但高于 13%
+  const longRate = manyBlocks / manyHits;
+  assert.ok(longRate < 0.20, '整场累计触发率 ' + (longRate * 100).toFixed(1) + '% 应明显低于首次的 22%（二次档 13% 在压）');
+  assert.ok(longRate > 0.10, '整场累计触发率 ' + (longRate * 100).toFixed(1) + '% 不该低于二次档太多');
 });
 
 test('同时有龟甲术与绝对防御时，每次受击的受伤期望更低（不会被挤占）', () => {
@@ -275,13 +285,40 @@ test('来点松果可以二次触发，但概率是所有武器/技能里最低�
   assert.ok(rules.repeatSnack < rules.repeatSkill, '来点松果二次概率要低于其它技能');
   assert.ok(rules.repeatSnack < rules.repeatWeapon, '来点松果二次概率要低于武器');
   assert.ok(rules.repeatSkill < 50, '所有技能的二次使用概率都该被调低');
-  // 不再是「每场一次」：长战斗里应当出现多次
-  let repeated = 0;
+  /* 分档下调（本次需求）：中幅 = 色诱之术/野球拳/来点松果，
+   * 小幅 = 通灵召唤/幸运一击；没点名的技能保持基准不变。 */
+  const Sim = game().Sim;
+  const rate = (id) => Sim.repeatRateOf(id);
+  for (const id of [8, 12, 17]) {
+    assert.ok(rate(id) < rules.repeatSkill, '技能 ' + id + ' 的二次概率应该比基准更低（中幅下调）');
+    assert.ok(rate(id) <= rules.repeatSkillMedium, '技能 ' + id + ' 应该落在中幅档（≤' + rules.repeatSkillMedium + '%）');
+  }
+  for (const id of [15, 23]) {
+    assert.ok(rate(id) < rules.repeatSkill, '技能 ' + id + ' 的二次概率应该被小幅下调');
+    assert.ok(rate(id) >= rules.repeatSkillMedium && rate(id) <= rules.repeatSkillSmall,
+      '技能 ' + id + ' 应该落在小幅档');
+  }
+  assert.equal(rate(14), rules.repeatSkill, '没点名的技能（小宇宙爆发）保持基准');
+  assert.equal(rate(18), rules.repeatSkill, '没点名的技能（吸铁大法）保持基准');
+  assert.ok(rate(17) < rate(8) && rate(17) < rate(15), '来点松果仍是最低档');
+  // 绝对防御是受击自动触发，不进出手池，但同样要「二次及以后更难触发」
+  assert.ok(rules.jueDuiAgain < rules.jueDuiChance, '绝对防御二次触发概率要低于首次');
+  assert.ok(rules.jueDuiAgain <= rules.repeatSkillMedium, '绝对防御的二次档要和中幅下调一个量级');
+  /* 需求 3：来点松果**不允许在同一回合内多次触发**（它自带追加行动，
+   * 早期实现会在同一回合里连着放两次）。同一场可以有多次，但两次之间
+   * 必须夹着对手的行动 —— 也就是不能背靠背。 */
+  let backToBack = 0, multiPerFight = 0, total = 0;
   for (let i = 0; i < 400; i++) {
     const ev = rounds(randomGame(), { skills: ['17:5'], power: 1 }, { power: 50, hp: 100000 });
-    if (ev.filter((r) => r.id === 17).length >= 2) repeated++;
+    const mine = ev.filter((r) => r.attacker === 0);
+    let last = -2;
+    for (let k = 0; k < mine.length; k++) {
+      if (mine[k].id === 17) { if (k === last + 1) backToBack++; last = k; total++; }
+    }
+    if (mine.filter((r) => r.id === 17).length >= 2) multiPerFight++;
   }
-  assert.ok(repeated > 0, '来点松果应当可以重复触发，实测 ' + repeated + '/400 场');
+  assert.equal(backToBack, 0, '来点松果不该在同一回合内背靠背触发，实测 ' + backToBack + ' 次');
+  assert.ok(total > 0, '400 场里来点松果应当至少放出来过（实测 ' + total + ' 次）');
   /* 「二次使用概率最低」直接用导出权重校验：来点松果自身是 actAgain 技能（不占回合），
    * 用「场均使用次数」比较会被这个特性干扰，量不出概率差。 */
   const w = game().Sim.actionWeights.skill;

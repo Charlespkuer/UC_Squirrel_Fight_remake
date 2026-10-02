@@ -24,8 +24,11 @@
     const pct = Number.isFinite(max) && max > min ? ((v - min) / (max - min)) * 100 : 100;
     el.style.setProperty('--fill', Math.max(0, Math.min(100, pct)).toFixed(2) + '%');
   };
+  /* 少数按钮在原版里是整张切图。art 开关只给**页面页脚**那一处用：
+   * 弹窗里的按钮必须和「继续闯关」「稍后继续」这些手搓按钮同一套样式 ——
+   * 同一个弹窗里一个贴图、一个手搓，美术会不一致。 */
   const buttonArt = { '返回菜单':'return-menu', '更换装备':'change-equipment' };
-  const btn = (label, action, cls) => '<button type="button" class="uc-button ' + (cls || '') + '" data-action="' + esc(action) + '">' + (buttonArt[label] ? '<span class="reference-button-label">'+esc(label)+'</span><img alt="" class="classic-button-art" src="images/classic/new-reference/buttons/'+buttonArt[label]+'.png">' : esc(label)) + '</button>';
+  const btn = (label, action, cls, art) => '<button type="button" class="uc-button ' + (cls || '') + '" data-action="' + esc(action) + '">' + ((art && buttonArt[label]) ? '<span class="reference-button-label">'+esc(label)+'</span><img alt="" class="classic-button-art" src="images/classic/new-reference/buttons/'+buttonArt[label]+'.png">' : esc(label)) + '</button>';
   const spriteCache = Object.create(null);
   let screen = 'home', timer = 0, activePortrait = null, lastRefresh = 0;
   let catalogPage = 0, bagPage = 0, gearPage = 0;
@@ -279,7 +282,7 @@
     const old = $('#ui .classic-page'); if (old) old.remove();
     $$('.classic-modal-overlay').forEach(e => e.remove());
     const p = document.createElement('section'); p.className = 'classic-page'; p.dataset.screen = active;
-    p.innerHTML = tabs(group, active) + (opts.above || '') + '<div class="classic-board ' + (opts.cls || '') + '">' + content + '</div><footer class="page-footer">' + (opts.left || '') + btn('返回菜单','home','gold') + (opts.right || '') + '</footer>' + (opts.counter ? '<span class="page-counter' + (opts.counterPlace === 'board' ? ' in-board' : '') + '">' + opts.counter + '</span>' : '');
+    p.innerHTML = tabs(group, active) + (opts.above || '') + '<div class="classic-board ' + (opts.cls || '') + '">' + content + '</div><footer class="page-footer">' + (opts.left || '') + btn('返回菜单','home','gold',true) + (opts.right || '') + '</footer>' + (opts.counter ? '<span class="page-counter' + (opts.counterPlace === 'board' ? ' in-board' : '') + '">' + opts.counter + '</span>' : '');
     $('#ui').appendChild(p);
     bind(p, Object.assign({}, actions, {home}));
     if(window.Main?.resizeLayout)Main.resizeLayout();
@@ -306,6 +309,61 @@
   }
   function notice(msg, buttons) { return modal('提示', '<p>' + esc(msg) + '</p>', buttons || [{label:'确定'}], {small:true}); }
   function toast(msg) { legacy.toast(msg); }
+
+  /* ============================================================
+   * 存档列表弹窗（saveListDialog）
+   *
+   * 以前的写法是把每份存档塞成一个按钮、横着排 12 个：一个按钮上既写等级、又写角色名、
+   * 还带全角日期（2026/10/2 15:20:09），在 755px 的弹窗里必然溢出屏幕。
+   * 现在改成一列紧凑的可滚动行：等级徽章 + 名字 + 简短时间 + 一个「载入」按钮。
+   * ============================================================ */
+  function ssdzSizeText(n) {
+    const v = Number(n) || 0;
+    return v >= 1048576 ? (v / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(v / 1024)) + ' KB';
+  }
+  function ssdzWhenText(ms, now) {
+    const d = new Date(Number(ms) || 0);
+    if (!Number.isFinite(d.getTime())) return '—';
+    const p = (n) => String(n).padStart(2, '0');
+    const hm = p(d.getHours()) + ':' + p(d.getMinutes());
+    const ref = new Date(now);
+    const sameDay = d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth() && d.getDate() === ref.getDate();
+    const md = p(d.getMonth() + 1) + '-' + p(d.getDate());
+    return sameDay ? ('今天 ' + hm) : (md + ' ' + hm);
+  }
+  /** 一行：等级徽章、名字、时间、大小、载入按钮 */
+  function saveListRow(it, index) {
+    const kind = it.kind || (String(it.rel).indexOf('backup') >= 0 ? 'backup' : 'backup');
+    const sub = ssdzWhenText(it.at, Date.now()) + ' · ' + ssdzSizeText(it.size);
+    return '<div class="save-row' + (kind === 'current' ? ' current' : '') + '">' +
+      '<span class="save-level">' + Math.max(0, Number(it.level) || 0) + '<i>级</i></span>' +
+      '<span class="save-name">' + esc(String(it.name || '（无名）')) +
+      (kind === 'current' ? '<em>当前</em>' : '') + '</span>' +
+      '<span class="save-sub">' + esc(sub) + '</span>' +
+      '<button type="button" class="uc-button small" data-save-row="' + index + '">载入</button>' +
+      '</div>';
+  }
+  /** 存档列表弹窗：返回 { close, element }，data-save-row 用 saveRowIndex 里的下标取回对应存档。 */
+  function saveListDialog(list, onPick) {
+    const rows = list.map((it, i) => saveListRow(it, i)).join('');
+    const total = list.length;
+    const body = '<div class="save-list" role="list">' + rows + '</div>' +
+      '<p class="save-list-tip">共 ' + total + ' 份（含 save/backup/ 快照）。' +
+      '载入会先把当前进度备份到 save/backup/，再整档换过去。</p>';
+    const m = modal('从存档列表导入', body, [{ label: '返回', cls: 'muted' }]);   // 大弹窗：列表要占满高度
+    m.element.classList.add('save-list-dialog');
+    const buttons = m.element.querySelectorAll('[data-save-row]');
+    for (const btn of buttons) {
+      btn.onclick = () => {
+        const i = Number(btn.getAttribute('data-save-row'));
+        const it = list[i];
+        if (!it) return;
+        m.close();
+        onPick(it);
+      };
+    }
+    return m;
+  }
 
   function renderHome() {
     screen = 'home'; activePortrait = null;
@@ -432,7 +490,7 @@
   function portrait(c,options){activePortrait={canvas:c,options:options||{useHeroWears:true}};}
   function openStatus() {
     const S=State.state(),st=State.totalStats(),fights=S.dailyWins+S.dailyFails;
-    const p=page('status','status','<canvas class="status-character" width="497" height="341" aria-label="我的松鼠"></canvas><div class="status-right"><div class="status-exp"><span class="home-exp-label">Exp</span><div class="exp-meter"><i style="width:'+Math.min(100,100*S.exp/GData.nextExp(S.level))+'%"></i><span>'+S.exp+'/'+GData.nextExp(S.level)+'</span></div></div><dl class="status-lines"><dt>今日胜率：</dt><dd>'+(fights?Math.round(S.dailyWins/fights*100):0)+'%</dd><dt>战斗场次：</dt><dd>'+(S.allWins+S.allFails)+'</dd></dl><div class="status-buttons">'+btn('更换装备','gears','gold')+btn('装备融合','merge','gold')+'</div></div>'+statsHtml(st));
+    const p=page('status','status','<canvas class="status-character" width="497" height="341" aria-label="我的松鼠"></canvas><div class="status-right"><div class="status-exp"><span class="home-exp-label">Exp</span><div class="exp-meter"><i style="width:'+Math.min(100,100*S.exp/GData.nextExp(S.level))+'%"></i><span>'+S.exp+'/'+GData.nextExp(S.level)+'</span></div></div><dl class="status-lines"><dt>今日胜率：</dt><dd>'+(fights?Math.round(S.dailyWins/fights*100):0)+'%</dd><dt>战斗场次：</dt><dd>'+(S.allWins+S.allFails)+'</dd></dl><div class="status-buttons">'+btn('更换装备','gears','gold',true)+btn('装备融合','merge','gold')+'</div></div>'+statsHtml(st));
     portrait($('.status-character',p));
     $('.page-footer',p).insertAdjacentHTML('beforeend',
       '<button class="status-sell-link" data-action="gear-sell" aria-label="装备出售：按品质回收背包里的装备"><span class="status-sell-icon" aria-hidden="true"><i class="status-sell-glyph">$</i></span><span class="status-sell-text">装备出售</span></button>' +
@@ -517,14 +575,23 @@
     });
     $('[data-action="fight"]',p)?.addEventListener('click',()=>{
       const foe=opponents[selectedOpponent],S=State.state();
-      const beginChallenge = () => {
+      const beginChallenge = async () => {
         S.challengeRefresh={count:0,ts:Date.now()};State.save();   // 进行挑战后重置刷新费用
-        Main.startBattle(foe,{cost:10,kind:'challenge',useProps:true,onEnd:(winner)=>{
-        const win=winner===0;if(win){S.dailyWins++;S.allWins++;}else{S.dailyFails++;S.allFails++;}
-        const rw=State.fightReward(win,{foeLevel:foe.level});
-        opponents=[];openChallenge();   // 战果弹窗放在挑战页上，并刷新下一批对手
-        resultModal(win,rw);
-      }});
+        try {
+          await Main.startBattle(foe,{cost:10,kind:'challenge',useProps:true,onEnd:(winner)=>{
+            const win=winner===0;if(win){S.dailyWins++;S.allWins++;}else{S.dailyFails++;S.allFails++;}
+            const rw=State.fightReward(win,{foeLevel:foe.level});
+            opponents=[];                 // 战果弹窗先压在挑战页上；下一批对手等「确定」时再抽
+            openChallenge();
+            // 「确定」要回到随机挑战页（并换一批新对手），而不是被弹回主界面
+            resultModal(win,rw,'',()=>openChallenge(true));
+          }});
+        } catch (e) {
+          /* startBattle 是 async：它内部抛错时不会走 onEnd，战果弹窗也就不会出现。
+           * 不兜住的话这里会变成未处理的 Promise 拒绝（页面看起来卡在战斗画面）。 */
+          if (typeof console !== 'undefined' && console.warn) console.warn('[challenge] 战斗启动失败：' + ((e && e.message) || e));
+          openChallenge();
+        }
       };
       if(S.energy<10){
         /* 第 1 项：体力不足时弹「自动喝药」确认；确认后用持有药水补足体力并开战。 */
@@ -1304,6 +1371,78 @@
   }
 
   /* ============================================================
+   * 导入存档（v2）
+   *
+   * 旧版只有一个 localStorage 分支：在「文件存档模式」下点「导入存档」，
+   * 它把 JSON 塞进 localStorage，然后**报成功**——但真正的存档是
+   * save/progress.json，界面等级一点没变，刷新回去还是旧档。
+   * 现在两种情况分开走，而且成功后界面与文件必然一致：
+   *   · 文件模式：先让服务器把当前档备份到 save/backup/，再 ?force=1 写回，
+   *     然后 fileLoad() 重载、刷新整个界面；
+   *   · 兜底模式：仍是 localStorage（这里没有文件可写）。
+   * ============================================================ */
+  /** 校验一份「存档」JSON 是不是能用（导入的所有入口共用，避免脏数据写进正式存档）。 */
+  function saveDataError(data) {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return '这不是一个存档对象';
+    if (typeof data.name !== 'string' || !data.name.trim()) return '存档里没有角色名';
+    if (!Number.isFinite(Number(data.level))) return '存档里没有等级';
+    if (!Array.isArray(data.weapons) || !Array.isArray(data.skills)) return '存档缺少武器/技能字段';
+    if (!data.props || typeof data.props !== 'object' || Array.isArray(data.props)) return '存档缺少道具字段';
+    return '';
+  }
+  /** 导入完成后统一刷新界面：整页重建主界面（等级/名字/背包全换掉），再按需回到系统页。 */
+  function afterSaveImport(name, level, backup) {
+    const wasSystem = screen === 'system';
+    home();                       // Main.showHome() → UI.renderHome()，按新档整页重画
+    refreshHeader();
+    if (wasSystem) openSystem();
+    toast('已导入【' + name + '】' + level + ' 级' + (backup ? '，旧档备份在 ' + backup : ''));
+  }
+  /** 把一份存档 JSON 写进正式存档：文件模式先备份再强制写回，兜底模式写 localStorage。 */
+  async function applyImportedSave(raw, data) {
+    let info = State.fileInfo ? State.fileInfo() : {};
+    /* 现在明明是「浏览器兜底模式」，但本地服务器的存档接口其实是好的 —— 说明这次只是
+     * 启动时没连上。这时候如果按兜底模式把档写进 localStorage，磁盘上那份正式存档
+     * 会在下次启动时重新占上风，等于玩家白导一次。所以先重新探一次：能连上就按文件模式走。 */
+    if (info.mode !== 'file' && State.fileProbe) {
+      try {
+        if (await State.fileProbe()) info = State.fileInfo ? State.fileInfo() : info;
+      } catch (e) { /* 探针失败就照旧走兜底模式 */ }
+    }
+    if (State.storageMode && State.storageMode() === 'file') info = Object.assign({}, info, { mode: 'file' });
+    if (info.mode === 'file') {
+      // 先留快照：显式导入会覆盖当前进度（服务器把旧档放进 save/backup/）
+      let backup = '';
+      try {
+        const b = await fetch('/__save/backup', { method: 'POST', cache: 'no-store' });
+        const bj = await b.json();
+        if (bj && bj.ok && bj.backup) backup = bj.backup;
+      } catch (e) { /* 备份失败也允许继续，下面会提示 */ }
+      // 显式导入 = 玩家确认过，所以带 force=1（否则会被水位线拦下）
+      const w = await fetch('/__save?force=1', { method: 'POST', headers: { 'content-type': 'application/json' }, body: raw });
+      const wj = await w.json().catch(() => ({}));
+      if (!w.ok || wj.ok === false) throw new Error(wj.msg || ('写回存档文件失败（HTTP ' + w.status + '）'));
+      const ok = await State.fileLoad();
+      if (!ok) throw new Error('存档文件写进去了，但重新读取失败 —— 刷新一下页面就能看到导入的档');
+      afterSaveImport(data.name, data.level, backup);
+      return true;
+    }
+    const old = localStorage.getItem(State.saveKey);
+    try {
+      if (old) localStorage.setItem(State.saveKey + '_backup', old);
+      localStorage.setItem(State.saveKey, raw);
+      if (!State.load()) throw new Error('读取存档失败');
+      State.save();
+      afterSaveImport(data.name, data.level, '');
+      return true;
+    } catch (e) {
+      if (old) localStorage.setItem(State.saveKey, old);
+      State.load();
+      throw e;
+    }
+  }
+
+  /* ============================================================
    * 跨设备同步（Mac ↔ Windows，走 ZeroTier）
    *
    * 页面上只能读 save/progress.json，读不到整个游戏目录；真正干活的
@@ -1522,33 +1661,17 @@
       try{const r=await fetch('/__saves',{cache:'no-store'});const j=await r.json();list=(j&&j.saves)||[];}
       catch(e){toast('读不到存档列表：本地服务器没开？');return;}
       if(!list.length){toast('save/ 与 save/backup/ 里没有可用存档');return;}
-      const when=(ms)=>{try{return new Date(ms).toLocaleString('zh-CN',{hour12:false});}catch(e){return '';}};
-      const buttons=list.slice(0,12).map((it)=>({label:'【'+it.level+'级 '+it.name+'】'+when(it.at),cls:'small',run:async()=>{
+      // 紧凑的可滚动列表（不再把等级/名字/时间全塞进按钮里，避免溢出屏幕）
+      saveListDialog(list, async (it)=>{
         try{
           const r=await fetch('/__saves/get?rel='+encodeURIComponent(it.rel),{cache:'no-store'});
           if(!r.ok)throw new Error('读不到文件');
           const raw=await r.text();const data=JSON.parse(raw);
-          if(!data||typeof data.name!=='string'||!Number.isFinite(data.level))throw new Error('不是有效存档');
-          const info = State.fileInfo ? State.fileInfo() : {};
-          if (info.mode === 'file') {
-            /* 文件存档模式（有本地服务器）：真正的存档是 save/progress.json，
-             * 必须写回服务器再重载 —— 往 localStorage 里塞是没用的（原来就是这么失败的）。 */
-            const w = await fetch('/__save?force=1', { method: 'POST', headers: { 'content-type': 'application/json' }, body: raw });
-            const wj = await w.json().catch(() => ({}));
-            if (!w.ok || wj.ok === false) throw new Error(wj.msg || '写回存档文件失败');
-            const ok = await State.fileLoad();
-            if (!ok) throw new Error('重载存档失败');
-            refreshHome(); home(); toast('已导入【' + data.name + '】' + data.level + ' 级');
-          } else {
-            const old = localStorage.getItem(State.saveKey);
-            try { if (old) localStorage.setItem(State.saveKey + '_backup', old); localStorage.setItem(State.saveKey, raw);
-              if (!State.load()) throw new Error('读取失败'); State.save(); home(); toast('已导入【' + data.name + '】' + data.level + ' 级');
-            } catch (e) { if (old) localStorage.setItem(State.saveKey, old); State.load(); toast('导入失败，已保留原存档'); }
-          }
+          const bad = saveDataError(data);
+          if (bad) throw new Error(bad + '，不是有效存档');
+          await applyImportedSave(raw, data);
         }catch(e){toast(e.message||'导入失败');}
-      }}));
-      buttons.push({label:'取消',cls:'muted'});
-      notice('从服务器存档导入（save/ 与 save/backup/ 里的文件）：',buttons,{small:true});
+      });
     };
     $('[data-action="save-import"]',p).onclick=()=>importSave();
     const syncBtn=(action,fn)=>{const b=$('[data-action="'+action+'"]',p);if(b)b.onclick=fn;};
@@ -1602,13 +1725,24 @@
     void pickJsonFile().then(async (file) => {
       if (!file) return;                       // 用户取消
       try {
-        if (file.size > 8*1024*1024) throw new Error('存档文件过大');
-        const raw = await readFileText(file), data = JSON.parse(raw);
-        if(!data||typeof data.name!=='string'||!Number.isFinite(data.level)||!Array.isArray(data.weapons)||!Array.isArray(data.skills)||!data.props)throw new Error('这不是有效的松鼠大战存档');
-        notice('导入【'+data.name+'】'+data.level+'级的存档？当前进度会先自动备份。',[{label:'导入',run:()=>{
-          const old=localStorage.getItem(State.saveKey);try{if(old)localStorage.setItem(State.saveKey+'_backup',old);localStorage.setItem(State.saveKey,raw);if(!State.load())throw new Error('读取存档失败');State.save();home();toast('存档导入成功');}catch(e){if(old)localStorage.setItem(State.saveKey,old);State.load();toast('导入失败，已保留原存档');}
-        }},{label:'取消',cls:'muted'}]);
-      } catch(e) { toast(e.message||'无法读取存档'); }
+        if (file.size > 8 * 1024 * 1024) throw new Error('存档文件过大（上限 8 MB）');
+        const raw = await readFileText(file);
+        let data;
+        try { data = JSON.parse(raw); } catch (e) { throw new Error('这个文件不是合法的 JSON'); }
+        const bad = saveDataError(data);
+        if (bad) throw new Error(bad + '，不是有效的松鼠大战存档');
+        const info = State.fileInfo ? State.fileInfo() : {};
+        const nowLevel = (State.state() || {}).level;
+        const where = info.mode === 'file'
+          ? '会覆盖磁盘上的正式存档 ' + (info.path || 'save/progress.json') + '（旧档先自动备份到 save/backup/）'
+          : '会覆盖这个浏览器里的兜底存档（旧档先留在 localStorage 备份键里）';
+        notice('导入【' + data.name + '】' + data.level + ' 级的存档？\n\n' + where +
+          (nowLevel ? '。当前进度：' + nowLevel + ' 级。' : '。'),
+          [{ label: '导入', run: async () => {
+            try { await applyImportedSave(raw, data); }
+            catch (e) { toast(e.message || '导入失败'); }
+          } }, { label: '取消', cls: 'muted' }]);
+      } catch (e) { toast(e.message || '无法读取存档'); }
     });
   }
   function openVillage() {

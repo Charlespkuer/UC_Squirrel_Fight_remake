@@ -13,11 +13,13 @@
 #   想在窗口里看实时日志：加 --foreground（服务器回到前台，窗口不会关）
 #   想保留窗口不自动关闭：设环境变量 SSDZ_KEEP_WINDOW=1
 #
-# 用法：  bash 启动游戏.command [端口] [--no-save] [--browser] [--stop] [--foreground]
+# 用法：  bash 启动游戏.command [端口] [--no-save] [--browser] [--stop] [--foreground] [--reset-profile]
 #   --browser     不走原生窗口、用浏览器打开；--app 是默认行为
 #   --no-save     服务器只读，不写 save/progress.json
 #   --stop        停掉上一次留在后台的本地服务器，然后退出
 #   --foreground  服务器留在前台（调试用；窗口不会自动关闭）
+#   --reset-profile  清掉游戏独立窗口的浏览器缓存目录（正式存档 save/progress.json 不受影响；
+#                    目录先改名为 browser-profile.bak-<时间>，确认没用再自己删）
 cd "$(dirname "$0")" || exit 1
 HERE="$(pwd)"
 # 游戏根 = 有「scripts/index.html」的那一层（旧布局的 index.html 也认）
@@ -30,6 +32,9 @@ if [ -z "$ROOT" ]; then
   exit 2
 fi
 cd "$ROOT" || exit 1
+# 入口页：新布局在 scripts/ 里、旧布局在根目录；file:// 兜底打开时要用它的完整路径
+ENTRY="$ROOT/index.html"
+[ -f "$ROOT/scripts/index.html" ] && ENTRY="$ROOT/scripts/index.html"
 
 PORT=8080
 APP_MODE=1
@@ -55,6 +60,44 @@ ERR_LOG="$SAVE_DIR/server.err.log"
 
 echo "松鼠大战怀旧复刻版"
 echo "目录：$(pwd)"
+
+# ---- 存档体检：正式存档不在/读不出来时，从 backup/ 里挑等级最高的那份补回来 ----
+# 「双击启动器却载入了一个新存档」的另一半原因：save/progress.json 被写坏或写空之后，
+# 游戏只能从零开始，而玩家其实在 save/backup/ 里还有好几份几十级的快照。
+save_file_level() {  # 打印存档文件里的等级；读不出来就什么都不打印
+  [ -f "$1" ] || return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$1" <<'PY' 2>/dev/null
+import json, sys
+try:
+    d = json.load(open(sys.argv[1], encoding='utf-8'))
+    print(int(d['level']))
+except Exception:
+    pass
+PY
+}
+recover_save_if_needed() {
+  local progress="$SAVE_DIR/progress.json" level best best_level
+  level="$(save_file_level "$progress" || true)"
+  if [ -n "$level" ]; then return 0; fi
+  [ -d "$SAVE_DIR/backup" ] || return 0
+  best=""; best_level=0
+  for f in "$SAVE_DIR/backup"/*.json; do
+    [ -f "$f" ] || continue
+    level="$(save_file_level "$f" || true)"
+    [ -n "$level" ] || continue
+    if [ "$level" -gt "$best_level" ]; then best_level="$level"; best="$f"; fi
+  done
+  if [ -n "$best" ]; then
+    cp "$best" "$progress"
+    printf '%s' "$best_level" > "$SAVE_DIR/.min-level"
+    echo "存档体检：progress.json 读不出来，已从备份恢复（$best_level 级 ← $(basename "$best")）"
+    osascript -e "display dialog \"磁盘上的正式存档读不出来，已从备份恢复 $best_level 级的存档。\n\n来源：$(basename "$best")\" buttons {\"知道了\"} default button 1 with title \"松鼠大战 · 存档体检\"" >/dev/null 2>&1 || true
+  else
+    echo "存档体检：progress.json 读不出来，backup/ 里也没有可用备份。"
+  fi
+}
+if [ "$DO_STOP" != "1" ]; then recover_save_if_needed; fi
 
 # ---- 退出时把这个 Terminal 窗口关掉（只关我们自己这一个）----
 # 双击 .command 时 Terminal 的窗口标题就是脚本名；手工在终端里跑时标题不是它，
@@ -136,11 +179,13 @@ else
   PROFILE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/SSDZClassic/browser-profile"
 fi
 
-# --reset-profile：清掉游戏独立窗口的浏览器存档目录（localStorage 里的兜底档）。
-# 用独立 profile 时，浏览器兜底存档和人平时用的浏览器不是同一份，出问题要来这里清。
+# --reset-profile：清掉游戏独立窗口的浏览器缓存目录（localStorage 里的兜底档）。
+# 用独立 profile 时，浏览器兜底存档和人平时用的浏览器不是同一份。
+# 注意：正式存档是 save/progress.json，和这个目录无关；这里只改名不删除，误清了也能拿回来。
 if [ "$RESET_PROFILE" = "1" ] && [ -n "$PROFILE_DIR" ] && [ -d "$PROFILE_DIR" ]; then
-  echo "清理独立窗口的浏览器存档：$PROFILE_DIR"
-  rm -rf "$PROFILE_DIR"
+  STAMP="$(date +%Y%m%d-%H%M%S)"
+  echo "浏览器缓存目录改名保留：$PROFILE_DIR → $PROFILE_DIR.bak-$STAMP"
+  mv "$PROFILE_DIR" "$PROFILE_DIR.bak-$STAMP" 2>/dev/null || rm -rf "$PROFILE_DIR"
 fi
 
 open_app() {
@@ -239,13 +284,14 @@ fi
 if [ -z "$SERVER_EXE" ]; then
   echo "既没有 Node.js 也没有 Python：进度只能存在浏览器里（localStorage）。"
   # 双击时终端窗口会立刻关闭，所以这里必须用系统对话框把话说清楚（以前是静默回退到 file://）
-  osascript -e 'display dialog "没有找到 Node.js / Python。\n\n现在只能用浏览器兜底存档：游戏里会显示 1 级（或你自己浏览器里的旧档），save/progress.json 不会被读写，也无法导入存档文件。\n\n建议先安装 Node.js（https://nodejs.org）后重新双击启动。" buttons {"知道了"} default button 1 with title "松鼠大战 · 启动提示"' >/dev/null 2>&1 || true
+  osascript -e 'display dialog "没有找到 Node.js / Python。\n\n现在只能用浏览器兜底存档：游戏会显示浏览器里的旧档（可能是 1 级），save/progress.json（磁盘上的正式存档）不会被读写，也无法导入存档文件。\n\n建议先装 Node.js（https://nodejs.org）后重新双击启动。" buttons {"知道了"} default button 1 with title "松鼠大战 · 启动提示"' >/dev/null 2>&1 || true
   echo "装一个 Node.js（https://nodejs.org）后重新运行本脚本，就能写进 save/progress.json。"
+  # 入口页在 scripts/ 里（新布局），这里用完整路径；以前写死了 $(pwd)/index.html，新布局下根本打不开
   if [ "$APP_MODE" = "1" ] && [ -n "$BROWSER" ]; then
-    nohup "$BROWSER" --app="file://$(pwd)/index.html" --window-size=1216,760 --allow-file-access-from-files >/dev/null 2>&1 &
+    nohup "$BROWSER" --app="file://$ENTRY" --window-size=1216,760 --allow-file-access-from-files >/dev/null 2>&1 &
     disown 2>/dev/null || true
-  elif command -v open >/dev/null 2>&1; then open index.html
-  else echo "请手动打开 index.html"; fi
+  elif command -v open >/dev/null 2>&1; then open "$ENTRY"
+  else echo "请手动打开：$ENTRY"; fi
   close_self_window
   exit 3
 fi
@@ -292,6 +338,26 @@ fi
 echo "$SRV_PID" > "$PID_FILE"
 echo "服务器已在后台运行（PID ${SRV_PID}），日志：save/server.out.log"
 echo "要停掉它：双击 停止游戏.command，或者  bash 启动游戏.command --stop"
+# 开窗口之后再做一次存档接口自检：接口真的能读到 progress.json 才算启动成功，
+# 免得出现「窗口开了、但游戏读不到存档」这种最难排查的静默状态。
+save_check_warn() {
+  local body
+  body="$(curl -fs -m 3 "${URL}__save" 2>/dev/null | head -c 200 || true)"
+  if printf '%s' "$body" | grep -q '"ok":true'; then
+    echo "存档接口自检：正常（游戏会读写 save/progress.json）"
+    # 顺手看看是不是「旧代码的服务器」还在跑：新版有这个备份接口，旧版没有。
+    # 旧服务器不算致命，但导入存档时不能自动备份旧档，所以提示一下重启。
+    if command -v curl >/dev/null 2>&1 && ! curl -fs -m 2 -o /dev/null "${URL}__save/backup" 2>/dev/null; then
+      echo "[!] 现在这个服务器是旧版本（没有备份接口）。建议：先 双击 停止游戏.command，再双击本文件重启一次。"
+    fi
+    return 0
+  fi
+  echo "[!] 存档接口自检没通过：游戏窗口可能退回浏览器兜底存档。"
+  echo "    服务器日志：save/server.err.log"
+  osascript -e "display dialog \"游戏窗口开了，但存档接口自检没通过 —— 窗口里可能会显示浏览器里的旧档（例如 1 级）。\n\n请把这个提示告诉维护者，并附上 save/server.err.log。\" buttons {\"知道了\"} default button 1 with title \"松鼠大战 · 存档自检\"" >/dev/null 2>&1 || true
+  return 1
+}
 open_app
+save_check_warn || true
 close_self_window
 exit 0

@@ -95,7 +95,7 @@ im.save(OUT/'squirrel-green-outfit.png')
 manifest['assets']['squirrel-green-outfit.png']={**manifest['assets']['squirrel-green-outfit-reference.png'],'processing':'Boundary-connected pale background removed; closed internal pale face pixels remain. Includes original shadow.'}
 
 # Exact draw resource frames used by Quark.FightProps in the original APK.
-node=r"const fs=require('fs'),vm=require('vm'),c={};c.window=c;vm.createContext(c);for(const f of ['Map.min.js','assets.js'])vm.runInContext(fs.readFileSync('js/orig/'+f,'utf8'),c);console.log(JSON.stringify(c.imgMap.getValue('draw')));"
+node=r"const fs=require('fs'),vm=require('vm'),c={};c.window=c;vm.createContext(c);for(const f of ['Map.min.js','assets.js'])vm.runInContext(fs.readFileSync('references/orig/'+f,'utf8'),c);console.log(JSON.stringify(c.imgMap.getValue('draw')));"
 frames=json.loads(subprocess.check_output(['node','-e',node],cwd=ROOT,encoding='utf8'))
 for f in frames:crop('images/draw.png',f[1:5],f'draw/draw-{f[0]}.png',sheet='draw',label=str(f[0]),note='Exact APK sprite, HD presentation differs from classic screenshot.')
 for pid in [24,25,26]:

@@ -358,6 +358,8 @@
       '<button type="button" class="uc-button tiny" data-buff-grant="1">获得</button>' +
       '<button type="button" class="uc-button tiny muted" data-buff-lose="1">失去</button></label>' +
       '<div class="debug-ws-owned" data-buff-owned></div>' +
+      /* 增益总览：当前生效 + 已获得过的全部（含一次生效、用尽、损毁、失去）+ 累计提升效果 */
+      '<div class="debug-buff-report" data-buff-report></div>' +
       '<p class="debug-grant-note">需要在无尽塔对局中（先开始一局）。点已获得增益后面的 × 可直接失去；扩容类增益一局只能拿一次。</p></div>' +
       '<div class="debug-actions">' +
       ACTIONS.map((a, i) => '<button type="button" class="uc-button tiny" data-act="' + i + '" title="' + esc(a.note || a.label) + '">' + esc(a.label) + '</button>').join('') +
@@ -503,6 +505,7 @@
     const html = (State.myWeapons ? State.myWeapons() : []).map((w) => chip('weapon', w)).join('') +
       (State.mySkills ? State.mySkills() : []).map((s) => chip('skill', s)).join('');
     box.innerHTML = html || '<span class="debug-grant-note">当前没有任何武器或技能。</span>';
+    renderBuffReport(panel);
     /* 无尽塔增益：列出本局已获得的永久/限次增益，点 × 直接失去 */
     const bbox = panel.querySelector('[data-buff-owned]');
     if (bbox) {
@@ -538,6 +541,61 @@
       }
     }
   }
+  /** 无尽塔增益总览：已获得过的全部增益（含一次生效/用尽/损毁/失去）+ 当前实际提升。 */
+  function renderBuffReport(root) {
+    const box = root.querySelector('[data-buff-report]');
+    if (!box) return;
+    if (!window.Tower || !Tower.debugBuffReport) { box.innerHTML = ''; return; }
+    let rep = null;
+    try { rep = Tower.debugBuffReport('endless'); } catch (e) { rep = null; }
+    if (!rep || !rep.ok) {
+      box.innerHTML = '<div class="debug-report-head">增益总览</div><span class="debug-grant-note">' +
+        esc((rep && rep.msg) || '暂时读不到（需要先开始一局无尽塔）。') + '</span>';
+      return;
+    }
+    const rar = (window.TowerData && TowerData.RARITY_NAME) || ['普通', '稀有', '史诗', '传奇'];
+    const KIND_LABEL = { permanent: '永久', limited: '限次', instant: '立即生效', hidden: '隐藏' };
+    const EVENT_LABEL = { get: '获得', stack: '叠加', instant: '立即生效', expire: '用尽消失', break: '损毁', lose: '失去' };
+    const EVENT_CLS = { get: 'get', stack: 'stack', instant: 'instant', expire: 'gone', break: 'broken', lose: 'gone' };
+
+    /* ① 当前实际提升（聚合后的效果清单） */
+    const effects = (rep.effects || []).length
+      ? '<div class="debug-effect-list">' + rep.effects.map(([k, v]) =>
+          '<span class="debug-effect"><i>' + esc(k) + '</i><b>' + esc(v) + '</b></span>').join('') + '</div>'
+      : '<span class="debug-grant-note">当前没有任何生效中的加成。</span>';
+
+    /* ② 已获得过的全部增益（去重，按类别分组） */
+    const groups = { permanent: [], limited: [], instant: [], hidden: [] };
+    for (const it of rep.collected || []) (groups[it.kind] || groups.hidden).push(it);
+    const chip = (it) => '<span class="debug-ws-chip" title="' + esc((it.detail ? it.detail + ' · ' : '') + (KIND_LABEL[it.kind] || '')) + '">' +
+      (rar[it.rarity] || '') + ' ' + esc(it.name) + ' <b>' + esc(it.tag) + '</b></span>';
+    const groupHtml = ['permanent', 'limited', 'instant', 'hidden'].map((k) => {
+      const list = groups[k];
+      if (!list.length) return '';
+      return '<div class="debug-report-row"><span class="debug-report-tag">' + (KIND_LABEL[k] || '其它') + ' ×' + list.length + '</span>' +
+        list.map(chip).join('') + '</div>';
+    }).join('');
+
+    /* ③ 获取/消失流水（时间顺序，最近的在下） */
+    const hist = (rep.history || []).slice().reverse().slice(0, 40);
+    const histHtml = hist.length
+      ? '<ol class="debug-buff-log">' + hist.map((e) => {
+          const def = (window.TowerData && TowerData.BUFF_BY_ID && TowerData.BUFF_BY_ID[e.id]) || { name: e.id };
+          return '<li class="' + (EVENT_CLS[e.event] || '') + '"><i>第 ' + e.layer + ' 层</i>' +
+            '<b>' + esc(EVENT_LABEL[e.event] || e.event) + '</b>' + esc(def.name) +
+            (e.detail ? '<em>' + esc(e.detail) + '</em>' : '') + '</li>';
+        }).join('') + '</ol>'
+      : '<span class="debug-grant-note">还没有增益流水（获得 / 用尽 / 损毁 / 失去都会记一笔）。</span>';
+
+    box.innerHTML =
+      '<div class="debug-report-head">增益总览 · 本局第 ' + (rep.layer || 1) + ' 层' +
+        '<span class="debug-report-slots">永久槽位 ' + (rep.slots ? rep.slots.used + '/' + rep.slots.cap : '—') + '</span></div>' +
+      '<div class="debug-report-sec"><h5>当前实际提升（所有生效中的增益合计）</h5>' + effects + '</div>' +
+      '<div class="debug-report-sec"><h5>已获得过的全部增益（含一次生效 / 用尽 / 损毁 / 失去）</h5>' +
+        (groupHtml || '<span class="debug-grant-note">还没有获得过任何增益。</span>') + '</div>' +
+      '<div class="debug-report-sec"><h5>获取 / 消失流水（最近 40 条）</h5>' + histHtml + '</div>';
+  }
+
   function isOpen() { return !!(panel && panel.classList.contains('open')); }
   function togglePanel(force) {
     if (!panel) build();

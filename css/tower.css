@@ -780,3 +780,57 @@
 .mech-chip.env-chip i { font-style: normal; opacity: .75; margin-left: 4px; font-size: 14px; }
 .mech-chip.env-chip.env-bad { background: #fdeee8; border-color: #dfa595; color: #8a3a30; }
 .mech-chip.env-chip.env-good { background: #eef7e2; border-color: #b7d096; color: #3f6a1f; }
+
+/* ============================================================
+ * 塔身楼层：显示更多层（挑战塔 / 无尽塔共用）
+ *
+ * 原来是固定「上下各 4 层、行高 34px、间距 9px」，实际一屏只露得出 6 层左右，
+ * 无尽塔看起来层数太少。现在改成：
+ *   · tower-ui.js 给上下各 8 / 6 层（15 层窗口）；
+ *   · 行高与间距都改成自适应（flex 收缩 + clamp），层多就自动压扁一点，永远铺满塔身；
+ *   · 上下边缘加淡出，表示塔还在往上/往下延伸，不会看着像被截断。
+ * ============================================================ */
+/* 塔身总高收到 470px（原 500px），层数收到 13 层、间距收到 3px，
+ * 于是每层反而更高：实算 (470 − 金冠26 − 内边距27 − 间距 12×3) / 13 ≈ 29px/层。
+ * 演进：15 层(约22px) → 14 层(约27px) → 13 层(约29px)。 */
+.tower-floors { gap: 3px; justify-content: flex-end; }
+.tower-floor {
+  flex: 1 1 29px; min-height: 20px; max-height: 38px; height: auto;
+  border-radius: 9px; border-width: 2px;
+}
+.tower-floor-no { font-size: clamp(14px, 1.6vh, 19px); letter-spacing: 0; padding: 0; }   /* 层高更高，层号也跟着放大一档 */
+.tower-floor.now .tower-floor-no { padding: 0 10px 0 12px; }
+.tower-floor::after { inset: 3px 4px; border-radius: 4px; }
+.tower-floor.fifth-floor::before,
+.tower-floor.elite-floor::before { right: 4px; width: 6px; height: 6px; margin-top: -3px; }
+.tower-marker { left: 4px; border-left-width: 9px; border-top-width: 5px; border-bottom-width: 5px; margin-top: -5px; }
+/* 塔身略加宽一点，两三位数的层号也不挤。
+ * 关键是**给确定高度**：以前只写 flex: 0 0 150px，高度完全靠父级 flex 拉伸，
+ * 而挑战塔与无尽塔的主列内容高度不同，量出来的塔身高度就不一样（无尽塔明显偏矮）。
+ * 这里统一钉成同一个高度，两个塔页的塔身就完全一致了。 */
+.tower-visual { flex: 0 0 150px; height: 470px; min-height: 0; }
+/* 上下边缘淡出（需要时给不支持 mask 的老浏览器留个降级：不加也照样能看） */
+@supports ((mask-image: linear-gradient(#000, transparent)) or (-webkit-mask-image: linear-gradient(#000, transparent))) {
+  .tower-floors {
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+    mask-image: linear-gradient(180deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  }
+}
+
+/* ============================================================
+ * 环境词缀（无尽塔唯一的常驻负面机制）
+ *
+ * 段位机制（荆棘反伤/自愈回复/吸血/护盾/吞噬成长）已并入环境，所以这里只有一套胶囊：
+ *   · .env-mech 是「原机制」那几条，加一圈描边和系统原来的机制胶囊区分开；
+ *   · 每条都带 data-tip，悬停/聚焦显示完整效果 + 本局实际数值 + 数值区间 + 剩余场数。
+ * ============================================================ */
+.env-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
+.env-bar > b { flex: 0 0 auto; }
+.env-chip { cursor: help; }
+.env-chip.env-mech { border-style: dashed; border-width: 2px; }
+.env-chip.env-mech::after {
+  content: '机制'; margin-left: 5px; font-size: 12px; opacity: .8;
+  border-left: 1px solid currentColor; padding-left: 5px;
+}
+.env-chip.env-bad.env-mech { border-color: #d08a6a; }
+.env-chip.env-good.env-mech { border-color: #7fae62; }

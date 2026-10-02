@@ -154,8 +154,15 @@ function autoPick(ctx, mode) {
     // 池子必须覆盖：7 个带机制的松鼠 + 3 只平庸松鼠 + 10 个机制 NPC（都不浪费）
     const kinds = {};
     for (const b of TowerData.BOSS_POOL) kinds[b.kind] = (kinds[b.kind] || 0) + 1;
-    t('随机 boss 池 = 7 机制松鼠 + 3 平庸松鼠 + 10 机制 NPC',
-      TowerData.BOSS_POOL.length === 20 && kinds.trial === 7 && kinds.squirrel === 3 && kinds.npc === 10);
+    /* C 项改造后：挑战塔池保留 NPC 机制怪；无尽塔只用「松鼠/试炼」池 */
+    const eKinds = TowerData.ENDLESS_BOSS_POOL.reduce((m, p) => (m[p.kind] = (m[p.kind] || 0) + 1, m), {});
+    t('挑战塔 boss 池仍有 NPC 机制怪（10 个）', TowerData.BOSS_POOL.length === 26 && kinds.npc === 10 && kinds.squirrel === 9);
+    t('无尽塔 boss 池只有松鼠/试炼（无 NPC）', TowerData.ENDLESS_BOSS_POOL.length === 16 && !eKinds.npc && eKinds.squirrel === 9 && eKinds.trial === 7);
+    t('无尽塔预告（第 4 场）永远不是 NPC',
+      [1, 3, 5, 9, 15, 25, 33].every((L) => Tower.preview(L, 'env', true).every((x) => x.kind !== 'npc')));
+    t('套装随层升级：1~3 层不出现蓝/紫、10 的倍数层固定狂战',
+      [1, 2, 3].every((L) => TowerData.GEAR_TIER[TowerData.gearKeyForLayer(L, 'shogun')] <= 1) &&
+      TowerData.gearKeyForLayer(10, 'ninja1') === 'berserk' && TowerData.gearKeyForLayer(23, 'shogun') !== 'berserk');
     const seen = new Set();
     for (let day = 1; day <= 40; day++) {
       for (let n = 1; n <= 20; n++) seen.add(TowerData.bossFor(n, 'day-' + day).kind + ':' + TowerData.bossFor(n, 'day-' + day).id);

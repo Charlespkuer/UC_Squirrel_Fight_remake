@@ -119,14 +119,14 @@
 
   // ---------- 层结构 ----------
   /** 第 4 场的随机 boss：只由层数决定（第 1 项：不按天随机）—— 同层固定，换层才换。 */
-  function bossEntry(layer, salt) { return D().bossFor(layer, salt); }
-  function buildPlan(layer, salt) {   // 第 1 项：salt = 本局随机盐，让每局的 boss/三侠顺序都不同
+  function bossEntry(layer, salt, squirrelsOnly) { return D().bossFor(layer, salt, squirrelsOnly); }
+  function buildPlan(layer, salt, squirrelsOnly) {   // 第 1 项：salt = 本局随机盐，让每局的 boss/三侠顺序都不同
     /* 三侠顺序按层数随机（`heroOrder`，与日期无关）：同层固定 → 预告 = 实战、重试不变。
      * 削弱跟着「哪一位大侠」走（HERO_DEBUFF[anim]），所以顺序一变，本层要吃的削弱顺序也变，
      * 但三种削弱的组合固定，玩家看预告里的头像就知道等一下会被套上什么。 */
     const plan = D().heroOrder(layer, salt).map((anim) => ({ kind: 'hero', anim }));
     // 第 4 场 = 随机 boss（20 选 1：7 个带机制的松鼠 + 3 只平庸松鼠 + 10 个机制 NPC）
-    plan.push(bossEntry(layer));
+    plan.push(bossEntry(layer, salt, squirrelsOnly));
     // x10 层第 5 场 = 固定狂战松鼠（松鼠形态 + 全身狂战套 + 精英）
     if (layer % 10 === 0) plan.push({ kind: 'warlord', id: D().WARLORD.id });
     return plan;
@@ -161,8 +161,8 @@
     });
   }
   /** 入口页预告：当前层的全部对手（与 buildPlan 同源，所以预告 = 实战）。 */
-  function preview(layer, salt) {
-    return buildPlan(layer, salt).map((entry) => Object.assign({ kind: entry.kind }, entryInfo(entry)));
+  function preview(layer, salt, squirrelsOnly) {
+    return buildPlan(layer, salt, squirrelsOnly).map((entry) => Object.assign({ kind: entry.kind }, entryInfo(entry)));
   }
 
   // ---------- buff 聚合 ----------
@@ -292,7 +292,7 @@
       weapons = sq.weapons.map((w) => ({ id: w.id, level: Math.max(1, Math.min(15, w.level + up)) }));
       skills = sq.skills.map((k) => ({ id: k.id, level: Math.max(1, Math.min(15, k.level + up)) }));
       pattern = sq.pattern.slice();
-      wears = TD.wearsOf(sq.gear);
+      wears = TD.wearsOf(TD.gearKeyForLayer ? TD.gearKeyForLayer(layer, sq.gear) : sq.gear);   // C：套装随层升级
       mech = extra.slice();
       // 自己的机制永远在（无尽的段位机制只做叠加）
       for (const m of sq.mech || []) if (!mech.includes(m)) mech.push(m);
@@ -361,7 +361,7 @@
     if (e.run) return { ok: false, msg: '本局无尽挑战尚未结束。' };
     /* 第 1 项：本局随机盐 —— boss / 三侠顺序按 salt 抽，每局都不一样。 */
     const salt = (Date.now() % 1000000) + ':' + Math.floor(Math.random() * 1e6);
-    const run = { layer: 1, plan: buildPlan(1, salt), idx: 0, carry: 1, salt,
+    const run = { layer: 1, plan: buildPlan(1, salt, true), idx: 0, carry: 1, salt,
       mode: 'endless', permanent: [], limited: [], coins: 0, score: 0, bestLayer: 0,
       pillSlots: { power: null, agility: null, speed: null },
       killPower: 0, killMaxHp: 0, bonusPower: 0, shop: null, phase: null, choices: null, debuffs: [] };
@@ -818,7 +818,7 @@
   }
   function advanceLayer(run, mode) {
     run.layer++;
-    run.plan = buildPlan(run.layer, run.salt);
+    run.plan = buildPlan(run.layer, run.salt, true);
     run.idx = 0;
     run.choices = null;
     run.restShopUsed = false;

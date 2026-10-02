@@ -196,6 +196,31 @@
   });
   /** 装备 id 列表 → engine.wearsFor 认识的 wears（等级 1 = 该套装的初始外观）。 */
   function wearsOf(key) { return (GEAR[key] || []).map((id) => ({ id })); }
+  /* ---------- 第 C 项：套装分层 & 随层升级 ----------
+   * tier 0 = 最低级（普通，<蓝装）；1 = 绿/蓝前；2 = 蓝；3 = 紫；4 = 狂战（仅 10 的倍数层）
+   * 无尽塔越往上爬，松鼠敌人穿的装备越好；1~3 层只会出现 <蓝装。 */
+  const GEAR_TIER = Object.freeze({ ninja1: 0, knight: 1, rhino: 1, curse: 1,
+    shogun: 2, hero: 2, ninja3: 3, fist3: 3, grappler3: 3, curse3: 3, berserk: 4 });
+  const GEAR_KEYS = Object.freeze(Object.keys(GEAR_TIER));
+  /** 某层允许出现的套装档位上限（越深越好）。 */
+  function gearTierCap(layer) {
+    if (layer <= 3) return 1;      // 1~3 层：最低级 / 次一级（都 < 蓝装）
+    if (layer <= 9) return 2;      // 4~9 层：开始出现蓝装
+    if (layer <= 19) return 3;     // 10~19 层：蓝紫混搭
+    return 3;                      // 20+ 层：以紫装为主（狂战仍然只给 10 的倍数层）
+  }
+  /** 按层决定实际穿戴的套装：10 的倍数层固定狂战，其它层永不出现狂战。 */
+  function gearKeyForLayer(layer, baseKey) {
+    if (layer % 10 === 0) return 'berserk';
+    const cap = gearTierCap(layer);
+    const baseTier = GEAR_TIER[baseKey];
+    if (baseKey && baseTier != null && baseTier !== 4 && baseTier <= cap) return baseKey;
+    const pool = GEAR_KEYS.filter((k) => GEAR_TIER[k] !== 4 && GEAR_TIER[k] <= cap);
+    if (!pool.length) return baseKey || 'ninja1';
+    const h = poolHash('gear#' + Math.max(1, layer));
+    return pool[h % pool.length];
+  }
+
 
   // ---------- 松鼠对手（随机 boss 池成员之一） ----------
   /* 和小松鼠同族：战斗里用玩家那套松鼠贴图（镜像朝左，tower.js 不给 npcType 即自动生效），
@@ -228,6 +253,44 @@
       pattern: ['common', 'weapon', 'skill', 'weapon'],
       patternDesc: '固定循环：普攻 → 狼牙棒 → 小宇宙爆发 → 狼牙棒',
       mechDesc: '攻击最高，会用「小宇宙爆发」自我强化，血量偏低' },
+    /* 第 C 项新增：与既有松鼠有明确差分的六只（各自武器/技能树 + 专属套装） */
+    { id: 'thrower', name: '投掷宗师·银镖', type: '投掷型', region: 4, gear: 'shogun',
+      bias: { power: 1.00, agility: 1.05, speed: 1.05, hp: 1.05 },
+      weapons: [{ id: 12, level: 10 }, { id: 14, level: 10 }],
+      skills: [{ id: 3, level: 9 }, { id: 11, level: 9 }, { id: 22, level: 8 }],
+      pattern: ['weapon', 'weapon', 'skill', 'common'],
+      patternDesc: '固定循环：飞镖 → 飞镖 → 天女散花 → 普攻',
+      mechDesc: '专精全部投掷类武器：远程压制，命中后持续流血' },
+    { id: 'heavy', name: '巨力战槌·磐岩', type: '重击型', region: 4, gear: 'rhino',
+      bias: { power: 1.30, agility: 0.82, speed: 0.78, hp: 1.22 },
+      weapons: [{ id: 5, level: 12 }], skills: [{ id: 6, level: 8 }, { id: 13, level: 9 }],
+      pattern: ['weapon', 'common', 'weapon', 'skill'],
+      patternDesc: '固定循环：大槌 → 普攻 → 大槌 → 震地',
+      mechDesc: '只用势大力沉的武器：出手慢但一击破盾，被击中会掉护甲' },
+    { id: 'monk', name: '无械苦修·空明', type: '苦修型', region: 4, gear: 'curse3',
+      bias: { power: 0.90, agility: 1.35, speed: 1.25, hp: 1.10 },
+      weapons: [], skills: [{ id: 2, level: 12 }, { id: 7, level: 12 }, { id: 16, level: 12 }, { id: 23, level: 12 }],
+      pattern: ['skill', 'skill', 'common', 'skill'],
+      patternDesc: '固定循环：技能 → 技能 → 普攻 → 技能',
+      mechDesc: '不带任何武器、全技能树：技能触发极频繁，闪避最高' },
+    { id: 'twinblade', name: '双匕游侠·夜刃', type: '连击型', region: 4, gear: 'ninja3',
+      bias: { power: 1.05, agility: 1.20, speed: 1.30, hp: 0.95 },
+      weapons: [{ id: 9, level: 11 }], skills: [{ id: 9, level: 11 }, { id: 10, level: 11 }],
+      pattern: ['weapon', 'weapon', 'weapon', 'skill'],
+      patternDesc: '固定循环：匕首 ×3 → 影袭',
+      mechDesc: '高速三连击，暴击叠层，血量偏低' },
+    { id: 'bulwark', name: '铁盾守卫·铜墙', type: '守御型', region: 4, gear: 'knight',
+      bias: { power: 0.92, agility: 0.85, speed: 0.85, hp: 1.40 },
+      weapons: [{ id: 2, level: 11 }], skills: [{ id: 4, level: 11 }, { id: 16, level: 10 }],
+      pattern: ['weapon', 'common', 'weapon', 'common'],
+      patternDesc: '固定循环：盾击 → 普攻 → 盾击 → 普攻',
+      mechDesc: '极高护盾与反伤，输出低但很难打死' },
+    { id: 'elemental', name: '元素术鼠·霜火', type: '法系型', region: 4, gear: 'fist3',
+      bias: { power: 1.10, agility: 1.00, speed: 1.00, hp: 1.00 },
+      weapons: [{ id: 20, level: 11 }], skills: [{ id: 5, level: 12 }, { id: 17, level: 12 }, { id: 20, level: 12 }],
+      pattern: ['skill', 'common', 'skill', 'skill'],
+      patternDesc: '固定循环：冰霜 → 普攻 → 烈焰 → 雷击',
+      mechDesc: '交替元素 DOT，抵抗吸血，越拖越痛' },
   ]);
   const SQUIRREL_BY_ID = Object.fromEntries(SQUIRRELS.map((n) => [n.id, n]));
   /** 第 4 场固定轮换：(n−1) mod 3 → 松鼠模板。 */
@@ -249,7 +312,7 @@
    * 现在只有暴击·爆发越线，普攻安全。 */
   const MIRROR_THRESHOLD = 0.20;
   const MIRROR_REFLECT = 0.40;   // 反弹该次伤害的 40%
-  const TRIALS = Object.freeze([
+    const TRIALS = Object.freeze([
     { id: 'core', name: '熔核·炽壳', type: '爆发窗口型', region: 1, gear: 'hero',
       bias: { power: 1.00, agility: 0.90, speed: 0.90, hp: 0.82 },
       weapons: [{ id: 2, level: 6 }], skills: [{ id: 10, level: 7 }, { id: 4, level: 7 }],
@@ -326,6 +389,11 @@
    *   · 同一层当天固定 → 进层前能预习、失败重试还是同一个 boss（配合「换 buff 再战」）；
    *   · 换一天 / 换一层就是新的组合 → 有重玩价值，也不会永远只见到那 7 个。
    * x10 层第 5 场不走这个池子，固定 WARLORD。 */
+  /* 无尽塔第 4/5 场只要松鼠形态：NPC 机制怪只留在挑战塔。 */
+  const ENDLESS_BOSS_POOL = Object.freeze([
+    ...TRIALS.map((t) => ({ kind: 'trial', id: t.id })),
+    ...SQUIRRELS.map((s) => ({ kind: 'squirrel', id: s.id })),
+  ]);
   const BOSS_POOL = Object.freeze([
     ...TRIALS.map((t) => ({ kind: 'trial', id: t.id })),
     ...SQUIRRELS.map((s) => ({ kind: 'squirrel', id: s.id })),
@@ -340,8 +408,9 @@
   /* 第 1 项：随机只跟**层数**有关，不再跟日期有关 ——
    * 同一层永远是同一个 boss / 同一套三侠顺序（今天打过、明天还是它），
    * 换层才换组合。预告 = 实战、重试不变。salt 只留给工具做「换一条池子」的抽样。 */
-  function bossFor(layer, salt) {
-    const pick = BOSS_POOL[poolHash(String(salt == null ? '' : salt) + '#' + Math.max(1, layer)) % BOSS_POOL.length];
+  function bossFor(layer, salt, squirrelsOnly) {
+    const pool = squirrelsOnly ? ENDLESS_BOSS_POOL : BOSS_POOL;
+    const pick = pool[poolHash(String(salt == null ? '' : salt) + '#' + Math.max(1, layer)) % pool.length];
     return { kind: pick.kind, id: pick.id };
   }
   /* 三侠的出场顺序也按层数随机（同样与日期无关）：同层的顺序固定，
@@ -602,6 +671,7 @@
   window.TowerData = {
     towerLevel, towerMult, towerGold, towerGoldShares, TOWER_FAIL_CONSOLATION,
     endlessLevel, endlessSegment, endlessMult, endlessMechStacks, endlessMechs, ENDLESS_MECH_MAX, endlessTickets,
+    GEAR_TIER, gearKeyForLayer, gearTierCap, ENDLESS_BOSS_POOL,
     ENDLESS_ENV, ENDLESS_ENV_BY_ID, envChance, ENV_START_LAYER, ENV_TWO_LAYER, ENV_MAX, ENV_DUR,
     ENDLESS_MECH_ORDER, ENDLESS_CONSOLATION_LAYER, SCORE, COINS, SHOP, shopPrice,
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,

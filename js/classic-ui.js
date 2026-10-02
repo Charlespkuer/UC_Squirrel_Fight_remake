@@ -1529,10 +1529,22 @@
           if(!r.ok)throw new Error('读不到文件');
           const raw=await r.text();const data=JSON.parse(raw);
           if(!data||typeof data.name!=='string'||!Number.isFinite(data.level))throw new Error('不是有效存档');
-          const old=localStorage.getItem(State.saveKey);
-          try{ if(old)localStorage.setItem(State.saveKey+'_backup',old); localStorage.setItem(State.saveKey,raw);
-            if(!State.load())throw new Error('读取失败'); State.save(); home(); toast('已导入【'+data.name+'】'+data.level+' 级');
-          }catch(e){ if(old)localStorage.setItem(State.saveKey,old); State.load(); toast('导入失败，已保留原存档'); }
+          const info = State.fileInfo ? State.fileInfo() : {};
+          if (info.mode === 'file') {
+            /* 文件存档模式（有本地服务器）：真正的存档是 save/progress.json，
+             * 必须写回服务器再重载 —— 往 localStorage 里塞是没用的（原来就是这么失败的）。 */
+            const w = await fetch('/__save?force=1', { method: 'POST', headers: { 'content-type': 'application/json' }, body: raw });
+            const wj = await w.json().catch(() => ({}));
+            if (!w.ok || wj.ok === false) throw new Error(wj.msg || '写回存档文件失败');
+            const ok = await State.fileLoad();
+            if (!ok) throw new Error('重载存档失败');
+            refreshHome(); home(); toast('已导入【' + data.name + '】' + data.level + ' 级');
+          } else {
+            const old = localStorage.getItem(State.saveKey);
+            try { if (old) localStorage.setItem(State.saveKey + '_backup', old); localStorage.setItem(State.saveKey, raw);
+              if (!State.load()) throw new Error('读取失败'); State.save(); home(); toast('已导入【' + data.name + '】' + data.level + ' 级');
+            } catch (e) { if (old) localStorage.setItem(State.saveKey, old); State.load(); toast('导入失败，已保留原存档'); }
+          }
         }catch(e){toast(e.message||'导入失败');}
       }}));
       buttons.push({label:'取消',cls:'muted'});

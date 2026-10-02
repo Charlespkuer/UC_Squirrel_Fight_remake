@@ -24,7 +24,12 @@
   function addProp(id, count) { const s = State.state(); s.props[id] = (s.props[id] || 0) + count; }
   /** extra：额外按钮（第 7 项天梯赛的「继续挑战」就是走这里），排在最前面当主按钮。 */
   function outcome(win, reward, text, again, label, extra) {
-    const buttons = (extra || []).concat([{ label: label || '\u8fd4\u56de', run: again }, { label: '\u67e5\u770b\u5f55\u50cf', cls: 'gold', run: () => UI.runAction('messages') }]);
+    /* 需求：竞技场的「返回竞技场」要放在**右边**（它是这一屏的主操作 —— 点完可以继续报名），
+     * 「查看录像」是次要入口放左边。用 primary/muted 显式指定，避免被关键词规则排到左边。 */
+    const buttons = (extra || []).concat([
+      { label: '\u67e5\u770b\u5f55\u50cf', muted: true, run: () => UI.runAction('messages') },
+      { label: label || '\u8fd4\u56de', primary: true, run: again },
+    ]);
     C().modal('\u6218\u6597\u7ed3\u679c', '<div class="extra-result"><strong class="cartoon">' + (win ? '\u80dc\u5229\uff01' : '\u518d\u63a5\u518d\u5389') + '</strong><p>' + esc(text) + '</p><div>\u7ecf\u9a8c +' + reward.exp + '\u3000\u91d1\u677e\u679c +' + (reward.gold || 0) + '</div>' + C().upsHtml(reward.ups) + '</div>', buttons);
   }
 
@@ -82,6 +87,30 @@
     if (State.state().level >= level) return true;
     alert((kind ? '\u788e\u7247\u7ade\u6280\u573a' : '\u7ecf\u9a8c\u7ade\u6280\u573a') + '\u9700\u8981\u8fbe\u5230' + level + '\u7ea7\u3002'); return false;
   }
+  /**
+   * 竞技场报名：**判定并扣费**（唯一入口，保证「进场必付费」）。
+   * 返回 { ok:true, by:'energy'|'item', itemId, potionUsed } 或 { ok:false }。
+   * · 体力 ≥ 30：扣 30 体力
+   * · 否则先自动喝体力药剂补到 30（能补够就还扣体力）
+   * · 补不够：经验场扣英雄帖(36)、碎片场扣勇气徽章(39)；碎片场不接受英雄帖
+   */
+  function payArenaEntry(s, kind) {
+    const NEED = 30;
+    let potionUsed = 0;
+    if (s.energy < NEED) {
+      const potion = State.autoEnergyPotion ? State.autoEnergyPotion(NEED) : { ok: false };
+      if (potion.ok && s.energy >= NEED) potionUsed = potion.used || 0;
+    }
+    if (s.energy >= NEED) {
+      if (!State.consumeEnergy(NEED)) return { ok: false };   // 兜底：扣不掉就不放行
+      return { ok: true, by: 'energy', potionUsed: potionUsed };
+    }
+    const itemId = kind ? 39 : 36;                            // 碎片场=勇气徽章，经验场=英雄帖
+    if (!(s.props[itemId] > 0)) return { ok: false };
+    s.props[itemId]--;
+    State.save();
+    return { ok: true, by: 'item', itemId: itemId };
+  }
   function confirmArena(kind) {
     const existing = activeArenaRun();
     if (existing) { fightArena(existing); return; }
@@ -89,28 +118,35 @@
     const owner = State.state();
     C().modal('\u7ade\u6280\u573a\u62a5\u540d', '<p>' + (kind ? '\u788e\u7247\u7ade\u6280\u573a' : '\u7ecf\u9a8c\u7ade\u6280\u573a') + '\uff1a\u534a\u51b3\u8d5b\u80dc\u8005\u8fdb\u5165\u51b3\u8d5b\uff0c\u8d25\u8005\u8fdb\u884c\u5b63\u519b\u8d5b\u3002</p><p>\u62a5\u540d\u4e00\u6b21\u6d88\u801730\u4f53\u529b\uff0c\u7b2c\u4e8c\u6218\u4e0d\u518d\u6263\u9664\u3002\u4f53\u529b\u4e0d\u8db3\u65f6\u4f7f\u75281\u5f20\u82f1\u96c4\u5e16\u6216\u52c7\u6c14\u5fbd\u7ae0\u3002</p>' + note('\u79bb\u7ebf\u5bf9\u624b\u7531\u672c\u5730\u751f\u6210\u3002\u7ade\u6280\u573a\u4e0d\u4f7f\u7528\u6311\u6218\u836f\u5242\u6548\u679c\u3002'), [{ label: '\u62a5\u540d\u53c2\u8d5b', run: () => {
       if (State.state() !== owner || activeArenaRun() || !arenaAccess(kind)) return;
-      const s = owner; State.tickEnergy();
-      /* 第 3 项：体力不够先自动喝体力药剂；第 2 项：碎片竞技场只认勇气徽章（39），
-       * 英雄帖（36）只用于经验竞技场，不再能拿去参加碎片场。 */
-      if (s.energy < 30) {
-        const potion = State.autoEnergyPotion ? State.autoEnergyPotion(30) : { ok: false };
-        if (potion.ok && s.energy >= 30) {
-          // 第 1 项：自动喝药后给一条明确提示（用掉的是哪瓶 + 当前体力）
-          const usedName = potion.used ? propMap.getValue(potion.used).name : '\u4f53\u529b\u836f\u5242';
-          showHint('\u4f53\u529b\u4e0d\u8db3\uff0c\u5df2\u81ea\u52a8\u4f7f\u7528 ' + usedName + '\uff08\u4f53\u529b ' + s.energy + '/' + s.maxEnergy + '\uff09\uff0c\u7ee7\u7eed\u53c2\u8d5b');
-        }
-        if (!(potion.ok && s.energy >= 30)) {
-          const ticket = kind ? 39 : 36;
-          if (!(s.props[ticket] > 0)) {
-            alert(kind
-              ? '\u4f53\u529b\u4e0d\u8db330\u70b9\uff0c\u4e5f\u6ca1\u6709\u52c7\u6c14\u5fbd\u7ae0\uff08\u788e\u7247\u7ade\u6280\u573a\u4e0d\u80fd\u7528\u82f1\u96c4\u5e16\uff09\u3002'
-              : '\u4f53\u529b\u4e0d\u8db330\u70b9\uff0c\u4e5f\u6ca1\u6709\u82f1\u96c4\u5e16\u3002');
-            return;
-          }
-          s.props[ticket]--; State.save();
-        }
+      const s = owner;
+      State.tickEnergy();
+      /* 报名费用：体力 30，或（体力不足时）1 张准入道具 ——
+       *   经验竞技场 → 英雄帖(36)；碎片竞技场 → 勇气徽章(39)，**不能用英雄帖**。
+       * 重构成「先判定 payArenaEntry、再一次性扣」：原写法是
+       *   `if (s.energy < 30) { ...道具... }` + `if (s.energy >= 30) { consumeEnergy }`，
+       * 两段都可能被绕过（体力量不足时道具没扣、consumeEnergy 又失败就直接往下走），
+       * 现在只要判定通过就一定扣掉，判定不通过就一定 return。 */
+      /* 不变量：报名前后必须**真的少点什么**（体力或准入道具）——
+       * 除非开了「无限体力」调试开关（那时体力不会被扣掉，属于预期）。
+       * 这条断言是为了防止以后再出现「不扣费就进场」。 */
+      const beforeTop = s.energy + (Number(s.props[36]) || 0) + (Number(s.props[39]) || 0);
+      const pay = payArenaEntry(s, kind);
+      const afterTop = s.energy + (Number(s.props[36]) || 0) + (Number(s.props[39]) || 0);
+      const freeEnergyDebug = !!(typeof window !== 'undefined' && window.Debug && window.Debug.enabled('infiniteEnergy'));
+      if (pay.ok && !freeEnergyDebug && afterTop >= beforeTop) {
+        alert('竞技场报名扣费异常，已取消本次参赛，请反馈。');
+        return;
       }
-      if (s.energy >= 30) { if (!State.consumeEnergy(30)) return; }
+      if (!pay.ok) {
+        alert(kind
+          ? '\u4f53\u529b\u4e0d\u8db330\u70b9\uff0c\u4e5f\u6ca1\u6709\u52c7\u6c14\u5fbd\u7ae0\uff08\u788e\u7247\u7ade\u6280\u573a\u4e0d\u80fd\u7528\u82f1\u96c4\u5e16\uff09\u3002'
+          : '\u4f53\u529b\u4e0d\u8db330\u70b9\uff0c\u4e5f\u6ca1\u6709\u82f1\u96c4\u5e16\u3002');
+        return;
+      }
+      if (pay.potionUsed) {
+        const usedName = propMap.getValue(pay.potionUsed).name;
+        showHint('\u4f53\u529b\u4e0d\u8db3\uff0c\u5df2\u81ea\u52a8\u4f7f\u7528 ' + usedName + '\uff08\u4f53\u529b ' + s.energy + '/' + s.maxEnergy + '\uff09\uff0c\u7ee7\u7eed\u53c2\u8d5b');
+      }
       const foes = [State.genAI(s.level), State.genAI(s.level), State.genAI(s.level)];
       const other = Sim.simulate(foes[1], foes[2]);
       arenaRun = { owner: s, kind, phase: 'semi', foe: foes[0], finalist: foes[other.winner === 0 ? 1 : 2], consolation: foes[other.winner === 0 ? 2 : 1], busy: false, settled: false };
@@ -749,6 +785,7 @@
     }
   }
 
-  window.ClassicExtras = { arena, rank, rankShop: () => rankShop(0), lottery, refreshTickets, master, toplist, vip, lotteryPrizes: prizes,
+  window.ClassicExtras = {
+    payArenaEntry, arena, rank, rankShop: () => rankShop(0), lottery, refreshTickets, master, toplist, vip, lotteryPrizes: prizes,
     rankFoeLevel, rankFoeExpectLevel };
 })();

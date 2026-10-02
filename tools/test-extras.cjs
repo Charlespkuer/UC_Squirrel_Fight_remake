@@ -145,6 +145,96 @@ test('竞技11/20级门槛在报名确认时再次校验，不扣低等级资源
   s.level = 1; g.modalClick(); assert.equal(g.battles.length, 0); assert.equal(s.energy, 90);
 });
 
+test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进场必付费', () => {
+  const c = setup();
+  const S = c.c.State;
+  const s = S.state();
+  s.level = 25;
+  const pay = (energy, ticket36, badge39, kind) => {
+    s.energy = energy; s.props[1] = 0; s.props[2] = 0; s.props[36] = ticket36; s.props[39] = badge39;
+    const before = { e: s.energy, t: s.props[36], b: s.props[39] };
+    const r = c.c.ClassicExtras.payArenaEntry(s, kind);
+    return { r, before, after: { e: s.energy, t: s.props[36], b: s.props[39] } };
+  };
+  // 体力充足 → 扣 30 体力，两个场都一样
+  let x = pay(90, 3, 3, 0);
+  assert.ok(x.r.ok && x.r.by === 'energy', '经验场应当扣体力');
+  assert.equal(x.after.e, 60, '经验场体力 90→60，实测 ' + x.after.e);
+  x = pay(90, 3, 3, 1);
+  assert.ok(x.r.ok && x.r.by === 'energy', '碎片场应当扣体力');
+  assert.equal(x.after.e, 60, '碎片场体力 90→60，实测 ' + x.after.e);
+  // 体力不足 → 经验场扣英雄帖(36)
+  x = pay(10, 1, 0, 0);
+  assert.ok(x.r.ok && x.r.by === 'item' && x.r.itemId === 36, '经验场体力不足时扣英雄帖');
+  assert.equal(x.after.t, 0, '英雄帖 1→0');
+  assert.equal(x.after.e, 10, '体力不该动');
+  // 体力不足 → 碎片场扣勇气徽章(39)
+  x = pay(10, 0, 1, 1);
+  assert.ok(x.r.ok && x.r.by === 'item' && x.r.itemId === 39, '碎片场体力不足时扣勇气徽章');
+  assert.equal(x.after.b, 0, '勇气徽章 1→0');
+  assert.equal(x.after.e, 10, '体力不该动');
+  // 碎片场**不能**用英雄帖
+  x = pay(10, 3, 0, 1);
+  assert.ok(!x.r.ok, '碎片场不该接受英雄帖');
+  assert.equal(x.after.t, 3, '被拒时英雄帖不该被扣');
+  // 经验场**不能**用勇气徽章
+  x = pay(10, 0, 3, 0);
+  assert.ok(!x.r.ok, '经验场不该接受勇气徽章');
+  assert.equal(x.after.b, 3, '被拒时勇气徽章不该被扣');
+  // 弹尽粮绝 → 拒绝且不扣任何东西
+  x = pay(0, 0, 0, 0);
+  assert.ok(!x.r.ok, '什么都没有时应当拒绝');
+  assert.equal(x.after.e, 0, '被拒时体力不该动');
+  x = pay(0, 0, 0, 1);
+  assert.ok(!x.r.ok, '碎片场什么都没有时应当拒绝');
+  // 不变量：只要 ok，就必须真的少点什么
+  for (const kind of [0, 1]) {
+    for (const [e, t, b] of [[90, 0, 0], [30, 0, 0], [10, 1, 0], [10, 0, 1], [29, 5, 5]]) {
+      const y = pay(e, t, b, kind);
+      if (!y.r.ok) continue;
+      const dropped = (y.before.e - y.after.e) + (y.before.t - y.after.t) + (y.before.b - y.after.b);
+      assert.ok(dropped > 0, 'ok 时必须有扣除（kind=' + kind + ' e=' + e + ' t=' + t + ' b=' + b + '）');
+    }
+  }
+  // 端到端：走真实报名入口（体力充足 → 扣 30 体力）
+  {
+    const g = setup(), ss = g.c.State.state();
+    ss.level = 25; ss.energy = 90; ss.props[39] = 3; ss.props[36] = 3;
+    enterArena(g, 1);
+    assert.equal(ss.energy, 60, '碎片场报名应当扣 30 体力，实测 ' + ss.energy);
+    assert.equal(ss.props[39], 3, '体力够时不该动勇气徽章');
+    assert.equal(g.battles.length, 1, '应当开始比赛');
+  }
+  // 端到端：体力不足 → 扣勇气徽章
+  {
+    const g = setup(), ss = g.c.State.state();
+    ss.level = 25; ss.energy = 10; ss.props[1] = 0; ss.props[2] = 0; ss.props[39] = 1;
+    enterArena(g, 1);
+    assert.equal(ss.props[39], 0, '碎片场体力不足应当扣勇气徽章');
+    assert.equal(ss.energy, 10, '体力不该动');
+    assert.equal(g.battles.length, 1, '应当开始比赛');
+  }
+  // 源码层面：两段式扣费的旧写法不该再出现
+  const src = fs.readFileSync(path.join(rootDir, 'js', 'classic-extras.js'), 'utf8');
+  assert.ok(src.indexOf('function payArenaEntry') > 0, '应当有统一的 payArenaEntry');
+  assert.ok(!/if \(s\.energy >= 30\) \{ if \(!State\.consumeEnergy\(30\)\) return; \}/.test(src),
+    '旧的「两段式」扣费写法应当已被 payArenaEntry 取代');
+});
+
+test('竞技战果弹窗：「返回竞技场」在主操作位（最右）', () => {
+  const g = setup(), s = g.c.State.state();
+  s.level = 25;
+  enterArena(g, 0);
+  g.settle(0, 0); g.modalClick(); g.settle(1, 0);
+  const modal = g.modals.at(-1);
+  const labels = modal.buttons.map((b) => b.label);
+  assert.equal(labels.join('/'), '查看录像/返回竞技场', '战果弹窗按钮：' + labels.join('/'));
+  const back = modal.buttons.find((b) => b.label === '返回竞技场');
+  const movie = modal.buttons.find((b) => b.label === '查看录像');
+  assert.ok(back && back.primary === true, '返回竞技场应当标 primary（靠右）');
+  assert.ok(movie && movie.muted === true, '查看录像应当标 muted（靠左）');
+});
+
 test('竞技两战只付一次报名费用，冠军150经验且不额外赠送金松果', () => {
   const g = setup(), s = g.c.State.state();
   enterArena(g, 0); assert.equal(s.energy, 60); assert.equal(g.battles.length, 1);

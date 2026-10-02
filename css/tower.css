@@ -774,3 +774,9 @@
 .tower-floors { gap: 6px; }
 .tower-visual { flex: 0 0 150px; }
 .tower-visual-caption { margin-top: 8px; font-size: 17px; }
+
+/* 环境词缀胶囊：负面偏红、正向偏绿，与段位机制胶囊区分 */
+.mech-chip.env-chip { border-radius: 10px; padding: 1px 8px; font-size: 16px; }
+.mech-chip.env-chip i { font-style: normal; opacity: .75; margin-left: 4px; font-size: 14px; }
+.mech-chip.env-chip.env-bad { background: #fdeee8; border-color: #dfa595; color: #8a3a30; }
+.mech-chip.env-chip.env-good { background: #eef7e2; border-color: #b7d096; color: #3f6a1f; }

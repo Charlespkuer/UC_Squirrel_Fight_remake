@@ -60,6 +60,20 @@
    * 段数越多带的机制越多（最多 3），但顺序整体轮转，所以反伤会来、也会走。 */
   const ENDLESS_MECH_ORDER = ['thorns', 'regen', 'lifesteal', 'shell', 'devour'];
   const ENDLESS_MECH_MAX = 3;
+  /* 环境词缀：不常驻、按战斗随机触发，同时最多 2 条、持续 3~6 场（第 5 层起可能触发，15 层起固定两条）。 */
+  const ENDLESS_ENV = Object.freeze([
+    { id: 'sun', name: '烈日灼烧', bad: true, desc: '敌方暴击率 +25%' },
+    { id: 'frost', name: '寒霜锁链', bad: true, desc: '我方速度 −15%' },
+    { id: 'greed', name: '贪婪裂隙', bad: true, desc: '我方试炼币 +50%，但敌方生命上限 +15%' },
+    { id: 'dusk', name: '血色黄昏', bad: false, desc: '双方吸血 +15%' },
+  ]);
+  const ENDLESS_ENV_BY_ID = Object.freeze(ENDLESS_ENV.reduce((m, e) => (m[e.id] = e, m), {}));
+  const ENV_START_LAYER = 5, ENV_TWO_LAYER = 15, ENV_MAX = 2, ENV_DUR = [3, 6];
+  /** 战斗后触发概率：5 层 ~20%，之后每层 +6%，40 层封顶 80%。 */
+  function envChance(layer) {
+    if (layer < ENV_START_LAYER) return 0;
+    return Math.min(0.80, 0.14 + (layer - ENV_START_LAYER + 1) * 0.06);
+  }
   const ENDLESS_CONSOLATION_LAYER = 15;  // 到达 15 层后失败送 1 次免费抽奖（每日限 1 次）
 
   // ---------- 计分 ----------
@@ -431,6 +445,14 @@
       desc: '立即从你已有的武器里随机三选一，该武器伤害 +100%（本局有效，隐藏增益，不可出售）', mods: { pickWeaponPct: 1.00 } },
     { id: 'C33', name: '秘技通神', rarity: 2, kind: 'permanent', unique: true, hidden: true,
       desc: '立即从你已有的技能里随机三选一，该技能触发概率大幅提升（本局有效，隐藏增益，不可出售）', mods: { pickSkillPct: 0.60 } },
+    /* 对抗环境词缀的三档 buff（普通/稀有/史诗） */
+    { id: 'N09', name: '晴空护符', rarity: 0, kind: 'limited', uses: 5,
+      desc: '接下来 5 场：无视环境词缀，并把负面环境词缀反弹给对手', mods: { envIgnore: 1, envReflect: 1 } },
+    { id: 'N10', name: '避风斗篷', rarity: 1, kind: 'limited', uses: 10,
+      desc: '接下来 10 场：无视环境词缀', mods: { envIgnore: 1 } },
+    { id: 'C45', name: '天象之眼', rarity: 2, kind: 'permanent',
+      desc: '永远无视负面环境词缀并反弹给对手；敌方吃不到正向环境词缀（贪婪裂隙的试炼币收益保留，敌方不再获得生命加成）',
+      mods: { envIgnore: 1, envReflect: 1, envDenyGood: 1 } },
     { id: 'C24', name: '名贵手表', rarity: 1, kind: 'permanent', shopBanned: true,
       desc: '商店里买不到；在试炼商店卖出可得 200 试炼币', mods: { sellValue: 200 } },
     { id: 'C25', name: '战利品账本', rarity: 1, kind: 'permanent',
@@ -580,6 +602,7 @@
   window.TowerData = {
     towerLevel, towerMult, towerGold, towerGoldShares, TOWER_FAIL_CONSOLATION,
     endlessLevel, endlessSegment, endlessMult, endlessMechStacks, endlessMechs, ENDLESS_MECH_MAX, endlessTickets,
+    ENDLESS_ENV, ENDLESS_ENV_BY_ID, envChance, ENV_START_LAYER, ENV_TWO_LAYER, ENV_MAX, ENV_DUR,
     ENDLESS_MECH_ORDER, ENDLESS_CONSOLATION_LAYER, SCORE, COINS, SHOP, shopPrice,
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
     FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, bossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,

@@ -194,6 +194,30 @@ function autoPick(ctx, mode) {
   t('胜场 3：触发 4 选 1（回血 + 3 buff）', Array.isArray(rw.choices) && rw.choices.length === 4 && rw.choices[0].type === 'heal');
   t('选择挂起时不能开战', !Tower.nextBattle('tower').ok);
   let pick = Tower.pickChoice('tower', 0);
+  // 环境词缀（A）：触发模型 + 三档对抗 buff + 效果落地
+  {
+    const eSaveEnv = State.state().endless;
+    const bestSaveEnv = eSaveEnv.best, weekSaveEnv = eSaveEnv.weekBest;
+    const T = ctx.TowerData, r = freshEndless(State, Tower);
+    t('环境词缀：4 条（烈日/寒霜/贪婪/血色）', T.ENDLESS_ENV.length === 4 && !!T.ENDLESS_ENV_BY_ID.greed);
+    t('5 层前不触发、概率随层数上升并封顶 80%', T.envChance(4) === 0 && T.envChance(10) > T.envChance(5) && T.envChance(99) === 0.80);
+    r.layer = 20;
+    for (let i = 0; i < 6; i++) { r.attempt = null; r.choices = null; r.phase = null; const nb = Tower.nextBattle('endless');
+      if (!nb.ok) break; Tower.reportBattle('endless', nb.token, true, 0.9, { rounds: [] }); }
+    const env = State.state().endless.run.env || [];
+    t('15 层起战斗后固定触发（同一时刻不超过 2 条）', env.length >= 1 && env.length <= 2);
+    t('每条都有剩余场次（3~6）', env.every((e) => e.left >= 1 && e.left <= 6));
+    t('三档对抗 buff：普通限5 / 稀有限10 / 史诗永久', T.BUFF_BY_ID.N09.uses === 5 && T.BUFF_BY_ID.N10.uses === 10 &&
+      T.BUFF_BY_ID.C45.kind === 'permanent' && T.BUFF_BY_ID.C45.mods.envDenyGood === 1);
+    // 无视 + 反弹：拿 N09 后，负面词缀应不再作用于我方
+    State.state().endless.run.env = [{ id: 'frost', left: 3 }, { id: 'greed', left: 3 }];
+    Tower.debugGrantBuff('N09');
+    const info = Tower.endlessInfo().run;
+    t('环境快照带 name/desc/left（界面用来画胶囊）', (info.env || []).every((e) => e.name && e.left >= 1));
+    const rr = State.state().endless.run; rr.attempt = null; rr.choices = null; rr.phase = null; rr.shop = null;
+    Tower.abandon('endless');
+    eSaveEnv.best = bestSaveEnv; eSaveEnv.weekBest = weekSaveEnv;   // 复位成绩，别影响后面的初始态断言
+  }
   // 限次开关：关掉只是不生效（仍然在列表里、还是灰的），再点一下恢复
   {
     const eSaveT = State.state().endless;
@@ -402,9 +426,9 @@ function autoPick(ctx, mode) {
     // 第 1 项：buff 改成「限次 / 永久」两分法 + 即时经济类
     /* 本轮（第 3/6/9 项）新增 5 个：E07/E08（即时·削敌方生命上限）、
      * C34/C35/C36（永久·空槽攻击 / 永久数攻击 / 商店消费成长）→ 58 → 63。 */
-    t('无尽池：限次 27 / 永久 39 / 即时 5（共 71）+ 8 个无尽专属', ctx.TowerData.BUFFS.length === 71 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 27 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 39 &&
+    t('无尽池：限次 29 / 永久 40 / 即时 5（共 74，含环境对抗三档）+ 8 个无尽专属', ctx.TowerData.BUFFS.length === 74 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 29 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 40 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 5 &&
       ctx.TowerData.BUFFS.filter((b) => b.endlessOnly).length === 8);
     t('主塔池只吃限次且非无尽专属', ctx.TowerData.towerPool.every((b) => b.kind === 'limited' && !b.endlessOnly));

@@ -518,6 +518,12 @@
             ? run.debuffs.map((d) => '<span class="mech-chip debuff-chip" style="--hero-color:' + esc(d.color || '#a8453a') + '">' +
                 esc(d.short || d.hero || '大侠') + esc(d.name || '削弱') + '<i>' + esc(d.text || '') + '</i></span>').join('')
             : '') + '</div>' +
+          /* 环境词缀（第 2/3 项）：显示名称 + 剩余场数，悬停看效果 */
+          ((run.env && run.env.length)
+            ? run.env.map((e) => '<span class="mech-chip env-chip' + (e.bad ? ' env-bad' : ' env-good') + '" title="' +
+                ((e.desc || '') + '（剩 ' + e.left + ' 场）').replace(/"/g, '&quot;') + '">' +
+                (e.name || e.id) + '<i>剩 ' + e.left + ' 场</i></span>').join('')
+            : '') +
         choicesHtml + buffPanelsHtml('endless') + '</div>' +
         '<div class="endless-foes">' +
         '<ol class="tower-plan vertical">' + foeRows + '</ol></div></div>' +

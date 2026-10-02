@@ -427,9 +427,20 @@
           me.effects[key] = Math.max(cur * (1 + Number(sBoost[key] || 0)), cur + 25);
         }
       }
+      /* 环境词缀效果：负面可被无视/反弹，正向可被剥夺 */
+      const envFx = envEffective(run);
+      const envFrost = envFx.mine.includes('frost'), envGreed = envFx.mine.includes('greed'), envDusk = envFx.mine.includes('dusk');
+      const frostMul = envFrost ? 0.85 : 1;
+      const greedEnemyHp = envGreed ? 1.15 : 1;
+      const duskLifesteal = envDusk ? 0.15 : 0;
+      if (envFx.enemy.includes('sun')) built.foe.crit = (Number(built.foe.crit) || 0) + 25;
+      if (envFx.enemy.includes('frost')) built.foe.speed = Math.max(1, Math.round(built.foe.speed * 0.85));
+      if (envFx.enemy.includes('dusk')) built.foe.lifestealPct = Math.max(Number(built.foe.lifestealPct) || 0, 0.15);
+      if (greedEnemyHp !== 1) built.foe.hp = Math.max(1, Math.round(built.foe.hp * greedEnemyHp));
+      if (duskLifesteal) me.lifestealPct = Math.max(Number(me.lifestealPct) || 0, duskLifesteal);
       me.power = Math.max(1, Math.round(me.power * (1 + powerMul) * dPower * weaponMul));
       me.agility = Math.max(1, Math.round(me.agility * dAgi * (1 + agg.agilityMul)));
-      me.speed = Math.max(1, Math.round(me.speed * dSpd * (1 + agg.speedMul)));
+      me.speed = Math.max(1, Math.round(me.speed * dSpd * (1 + agg.speedMul) * frostMul));
       // 第 1 项：属性药丸（塔内 20 场）—— 与 State.totalStats 的药剂口径一致
       for (const k of ['power', 'agility', 'speed']) {
         const slot = (run.pillSlots || {})[k];
@@ -575,11 +586,13 @@
       }
       run.score += D().SCORE.battle;
       /* 第 1 项：试炼币加成（战利品类限次 buff，remaining 次数在下面统一扣） */
-      const coinMul = 1 + (runModTotal(run, 'coinBoostPct') || 0);
+      let coinMul = 1 + (runModTotal(run, 'coinBoostPct') || 0);
+      if (envList(run).some((e) => e.id === 'greed')) coinMul += 0.50;   // 贪婪裂隙：我方试炼币 +50%
       // 第 1 项：战利品账本 —— 每胜一场，卖出收益累计 +N
       run.sellBonus = (run.sellBonus || 0) + (runModTotal(run, 'sellGrowthPerWin') || 0);
       /* 第 2 项：以战养战（每胜一场生命上限 +10，不封顶）、登顶者（第 10 层起每胜一场攻击 +5%） */
       run.winHpFlat = (run.winHpFlat || 0) + (runModTotal(run, 'winMaxHpFlat') || 0);
+      rollEnvAfterBattle(run);   // 每场战斗后推进环境词缀
       if (run.layer >= 10) run.winPower = (run.winPower || 0) + (runModTotal(run, 'winPowerAfter10') || 0);
       run.coins += Math.round(D().COINS.battle * coinMul);
       // 击杀叠层类（基础 → 叠层 → C15）
@@ -690,6 +703,42 @@
     out.best = e.best; out.weekBest = e.weekBest;
   }
 
+  // ---------- 环境词缀（无尽塔）----------
+  function envList(run) { return Array.isArray(run.env) ? run.env : (run.env = []); }
+  /** 战斗后推进：先扣时长，再按层数概率触发（15 层起固定两条，最多同时 2 条）。 */
+  function rollEnvAfterBattle(run) {
+    const TD = D(), list = envList(run);
+    for (let i = list.length - 1; i >= 0; i--) { list[i].left -= 1; if (list[i].left <= 0) list.splice(i, 1); }
+    if (run.layer < TD.ENV_START_LAYER) return;
+    const room = TD.ENV_MAX - list.length;
+    if (room <= 0) return;
+    const forced = run.layer >= TD.ENV_TWO_LAYER ? 2 : 0;
+    const want = Math.min(room, forced || (Math.random() < TD.envChance(run.layer) ? 1 : 0));
+    for (let k = 0; k < want; k++) {
+      const pool = TD.ENDLESS_ENV.filter((e) => !list.some((x) => x.id === e.id));
+      if (!pool.length) break;
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      const dur = TD.ENV_DUR[0] + Math.floor(Math.random() * (TD.ENV_DUR[1] - TD.ENV_DUR[0] + 1));
+      list.push({ id: pick.id, left: dur });
+    }
+  }
+  /** 来自三档 buff 的环境护盾：无视 / 反弹 / 剥夺正向。 */
+  function envShield(run) {
+    return { ignore: runModTotal(run, 'envIgnore') > 0, reflect: runModTotal(run, 'envReflect') > 0,
+      denyGood: runModTotal(run, 'envDenyGood') > 0 };
+  }
+  /** 本场实际生效的环境（区分「我方承受」与「反弹给对手」）。 */
+  function envEffective(run) {
+    const TD = D(), sh = envShield(run), mine = [], enemy = [];
+    for (const e of envList(run)) {
+      const def = TD.ENDLESS_ENV_BY_ID[e.id];
+      if (!def) continue;
+      if (def.bad) { if (sh.ignore && !sh.reflect) continue; if (sh.reflect) enemy.push(e.id); else mine.push(e.id); }
+      else if (!sh.denyGood) mine.push(e.id);
+    }
+    return { mine, enemy, sh };
+  }
+
   // ---------- 层通关 ----------
   function layerClear(mode, run, out) {
     out.layerComplete = true;
@@ -734,7 +783,14 @@
     if (c12 && run.layer >= 10) run.bonusPower += D().BUFF_BY_ID.C12.mods.perLayerPowerAfter20 * c12 * g;   // 第 2 项：从 10 层起
     /* 第 3 项：每爬 10 层，结算时随机发一次里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）。 */
     if (run.layer % D().MILESTONE_EVERY === 0) {
-      const reward = D().rollMilestone();
+      /* 第 1 项：10 的倍数层（该层最后一场）里程碑奖励提高稀有度期望 —— 重掷 3 次取最好的一档 */
+      const rollLucky = () => {
+        const cands = [D().rollMilestone(), D().rollMilestone(), D().rollMilestone()].filter(Boolean);
+        const rank = (r) => (r.kind === 'pill' ? 2 : r.kind === 'skill' ? 1 : 0);   // 药丸 > 技能卷轴 > 武器卷轴
+        return cands.sort((a, b) => rank(b) - rank(a))[0] || null;
+      };
+      const FALLBACK = { kind: 'skill', propId: 21, count: 10, name: '技能卷轴' };
+      const reward = (run.layer % 10 === 0 ? rollLucky() : D().rollMilestone()) || FALLBACK;
       S().props[reward.propId] = (S().props[reward.propId] || 0) + reward.count;
       const def = propMap.getValue(reward.propId);
       reward.name = def ? def.name : (reward.name || '奖励');
@@ -1422,6 +1478,7 @@
         mechs: D().endlessMechs(e.run.layer).slice(),
         restShopUsed: !!e.run.restShopUsed,
         pendingPick: e.run.pendingPick || null,
+        env: (e.run.env || []).map((x) => Object.assign({ left: x.left }, D().ENDLESS_ENV_BY_ID[x.id] || { id: x.id })),
         permSlots: Math.max(0, Number(e.run.permSlots) || 0),
         // 本轮（上一轮第 1 项）虚空铭文：免占位的增益 id + 实际占用槽位数
         slotFreeIds: (e.run.slotFreeIds || []).slice(),

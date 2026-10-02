@@ -156,13 +156,20 @@ test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进
     const r = c.c.ClassicExtras.payArenaEntry(s, kind);
     return { r, before, after: { e: s.energy, t: s.props[36], b: s.props[39] } };
   };
-  // 体力充足 → 扣 30 体力，两个场都一样
+  // 优先级：**体力 > 准入道具 > 喝药**。体力充足时扣体力，道具不动。
   let x = pay(90, 3, 3, 0);
-  assert.ok(x.r.ok && x.r.by === 'energy', '经验场应当扣体力');
+  assert.ok(x.r.ok && x.r.by === 'energy', '经验场体力充足应当扣体力');
   assert.equal(x.after.e, 60, '经验场体力 90→60，实测 ' + x.after.e);
+  assert.equal(x.after.t, 3, '体力够时不该动英雄帖');
   x = pay(90, 3, 3, 1);
-  assert.ok(x.r.ok && x.r.by === 'energy', '碎片场应当扣体力');
+  assert.ok(x.r.ok && x.r.by === 'energy', '碎片场体力充足应当扣体力');
   assert.equal(x.after.e, 60, '碎片场体力 90→60，实测 ' + x.after.e);
+  assert.equal(x.after.b, 3, '体力够时不该动勇气徽章');
+  // 体力刚好 30 也走体力
+  x = pay(30, 1, 1, 1);
+  assert.ok(x.r.ok && x.r.by === 'energy', '体力刚好 30 应当扣体力');
+  assert.equal(x.after.e, 0, '体力 30→0，实测 ' + x.after.e);
+  assert.equal(x.after.b, 1, '体力够时不该动徽章');
   // 体力不足 → 经验场扣英雄帖(36)
   x = pay(10, 1, 0, 0);
   assert.ok(x.r.ok && x.r.by === 'item' && x.r.itemId === 36, '经验场体力不足时扣英雄帖');
@@ -187,13 +194,20 @@ test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进
   assert.equal(x.after.e, 0, '被拒时体力不该动');
   x = pay(0, 0, 0, 1);
   assert.ok(!x.r.ok, '碎片场什么都没有时应当拒绝');
-  // 不变量：只要 ok，就必须真的少点什么
+  // 不变量：只要 ok，就必须真的少点什么；且**只扣一种**（体力或对应道具）
   for (const kind of [0, 1]) {
     for (const [e, t, b] of [[90, 0, 0], [30, 0, 0], [10, 1, 0], [10, 0, 1], [29, 5, 5]]) {
       const y = pay(e, t, b, kind);
       if (!y.r.ok) continue;
-      const dropped = (y.before.e - y.after.e) + (y.before.t - y.after.t) + (y.before.b - y.after.b);
-      assert.ok(dropped > 0, 'ok 时必须有扣除（kind=' + kind + ' e=' + e + ' t=' + t + ' b=' + b + '）');
+      const dE = y.before.e - y.after.e, dT = y.before.t - y.after.t, dB = y.before.b - y.after.b;
+      assert.ok(dE + dT + dB > 0, 'ok 时必须有扣除（kind=' + kind + ' e=' + e + ' t=' + t + ' b=' + b + '）');
+      const changed = [dE > 0, dT > 0, dB > 0].filter(Boolean).length;
+      assert.equal(changed, 1, '一次报名只该扣一种资源（kind=' + kind + ' dE=' + dE + ' dT=' + dT + ' dB=' + dB + '）');
+      if (y.r.by === 'energy') assert.ok(dE === 30, '体力路径应当正好扣 30，实测 ' + dE);
+      if (y.r.by === 'item') {
+        assert.ok(y.r.itemId === (kind ? 39 : 36), '道具路径应当扣对应入场券');
+        assert.equal(kind ? dB : dT, 1, '道具路径应当正好扣 1 枚');
+      }
     }
   }
   // 端到端：走真实报名入口（体力充足 → 扣 30 体力）
@@ -233,6 +247,51 @@ test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进
     enterArena(g, 1);
     assert.equal(ss.props[39], 4, '只该扣 1 枚勇气徽章，实测剩 ' + ss.props[39]);
     assert.equal(g.battles.length, 1, '应当正常开始比赛');
+  }
+  // 喝药兜底（第三方优先级）：体力不足、无准入道具时才喝药
+  {
+    const g = setup(), ss = g.c.State.state();
+    ss.level = 25; ss.energy = 0; ss.props[1] = 0; ss.props[2] = 1; ss.props[39] = 0; ss.props[36] = 0;
+    enterArena(g, 0);
+    assert.equal(g.battles.length, 1, '有大体力药剂时应当能进场');
+    assert.equal(Number(ss.props[2] || 0), 0, '大体力药剂应当被喝掉');
+    assert.equal(ss.energy, 0, '喝药补到 30 后再扣 30，体力回到 0');
+  }
+  // 药剂**补不够**时不该白白喝掉（体力 0 + 只有小药剂 +10）
+  {
+    const g = setup(), ss = g.c.State.state();
+    ss.level = 25; ss.energy = 0; ss.props[1] = 1; ss.props[2] = 0; ss.props[39] = 0; ss.props[36] = 0;
+    enterArena(g, 0);
+    assert.equal(g.battles.length, 0, '小药剂补不到 30 时不该进场');
+    assert.equal(Number(ss.props[1] || 0), 1, '补不够时不该白喝掉小体力药剂 ← 曾经会白扔');
+    assert.equal(ss.energy, 0, '体力不该变');
+  }
+  // 有大有小：应当优先喝能把体力补够的那瓶（缺 30 → 先看大药剂）
+  {
+    const g = setup(), ss = g.c.State.state();
+    ss.level = 25; ss.energy = 0; ss.props[1] = 1; ss.props[2] = 1; ss.props[39] = 0; ss.props[36] = 0;
+    enterArena(g, 1);
+    assert.equal(g.battles.length, 1, '应当能进场');
+    assert.equal(Number(ss.props[2] || 0), 0, '应当先喝大体力药剂');
+    assert.equal(Number(ss.props[1] || 0), 1, '小体力药剂不该被动');
+  }
+  // 有准入道具时**不喝药**（道具优先于喝药）
+  {
+    const g = setup(), ss = g.c.State.state();
+    ss.level = 25; ss.energy = 0; ss.props[1] = 1; ss.props[2] = 1; ss.props[39] = 1; ss.props[36] = 0;
+    enterArena(g, 1);
+    assert.equal(Number(ss.props[39] || 0), 0, '有徽章时应当用徽章');
+    assert.equal(Number(ss.props[2] || 0), 1, '有徽章时不该喝药');
+    assert.equal(Number(ss.props[1] || 0), 1, '有徽章时不该喝药');
+  }
+  // 体力充足时**不喝药也不花道具**（体力优先级最高）
+  {
+    const g = setup(), ss = g.c.State.state();
+    ss.level = 25; ss.energy = 90; ss.props[1] = 1; ss.props[2] = 1; ss.props[39] = 3; ss.props[36] = 3;
+    enterArena(g, 1);
+    assert.equal(ss.energy, 60, '体力 90→60');
+    assert.equal(Number(ss.props[39] || 0), 3, '体力够时不该动徽章');
+    assert.equal(Number(ss.props[2] || 0), 1, '体力够时不该喝药');
   }
   // 回归：体力 0 + 无徽章 → 拒绝，且提示「没有勇气徽章」
   {

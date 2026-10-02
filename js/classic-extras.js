@@ -89,40 +89,57 @@
   }
   /**
    * 竞技场报名：**判定并扣费**（唯一入口，保证「进场必付费」）。
-   * 返回 { ok:true, by:'energy'|'item', itemId, potionUsed } 或 { ok:false }。
-   * · 体力 ≥ 30：扣 30 体力
-   * · 否则先自动喝体力药剂补到 30（能补够就还扣体力）
-   * · 补不够：经验场扣英雄帖(36)、碎片场扣勇气徽章(39)；碎片场不接受英雄帖
+   *
+   * 需求：两个竞技场的优先级统一为 **体力 > 准入道具 > 喝体力药剂**。
+   *   · 体力 ≥ 30 → 扣 30 体力（有徽章/英雄帖也先扣体力）
+   *   · 体力不足 → 碎片场花勇气徽章(39)、经验场花英雄帖(36)
+   *   · 两者都没有 → 喝体力药剂补到 30，再扣 30 体力
+   *   · 徽章与英雄帖**互不通用**：碎片场不接受英雄帖，经验场也不接受勇气徽章
+   * 返回 { ok:true, by:'energy'|'item', itemId?, potionUsed } 或 { ok:false, reason }。
    */
   function payArenaEntry(s, kind) {
     const NEED = 30;
-    let potionUsed = 0;
-    if (s.energy < NEED) {
-      const potion = State.autoEnergyPotion ? State.autoEnergyPotion(NEED) : { ok: false };
-      if (potion.ok && s.energy >= NEED) potionUsed = potion.used || 0;
-    }
-    if (s.energy >= NEED) {
+    const admission = kind ? 39 : 36;                 // 碎片场=勇气徽章，经验场=英雄帖
+    const freeEnergyDebug = () => !!(typeof window !== 'undefined' && window.Debug && window.Debug.enabled('infiniteEnergy'));
+    /* 体力路径：先记后扣，再**精确核对体力这一项**减了 NEED（不能用跨字段总和，
+     * 会被自动喝药 / 体力恢复干扰）。「无限体力」调试开关下不扣属预期。 */
+    const payEnergy = () => {
       const before = Number(s.energy) || 0;
-      if (!State.consumeEnergy(NEED)) return { ok: false };   // 兜底：扣不掉就不放行
+      if (!State.consumeEnergy(NEED)) return false;
       const after = Number(s.energy) || 0;
-      /* 精确校验：只核对**体力**这一项减了 NEED。
-       * 不能用「体力+道具总和」之类跨字段的粗判：自动喝药、体力恢复、
-       * 道具结算都会改动总和，会把正常的体力扣费误报成异常（踩过）。 */
-      if (after > before - NEED) {
-        /* 「无限体力」调试开关下体力不会被扣，那属于预期，不算异常。 */
-        const freeEnergy = !!(typeof window !== 'undefined' && window.Debug && window.Debug.enabled('infiniteEnergy'));
-        if (!freeEnergy) return { ok: false, msg: 'energy-not-deducted' };
-      }
-      return { ok: true, by: 'energy', potionUsed: potionUsed };
+      return after <= before - NEED || freeEnergyDebug();
+    };
+    /* ① 体力优先：够就先扣体力（不再先花道具）。 */
+    if (s.energy >= NEED) {
+      if (!payEnergy()) return { ok: false, reason: 'energy-not-deducted' };
+      return { ok: true, by: 'energy' };
     }
-    const itemId = kind ? 39 : 36;                            // 碎片场=勇气徽章，经验场=英雄帖
-    if (!(s.props[itemId] > 0)) return { ok: false };
-    const beforeItem = Number(s.props[itemId]) || 0;
-    s.props[itemId]--;
-    const afterItem = Number(s.props[itemId]) || 0;
-    if (afterItem !== beforeItem - 1) return { ok: false, msg: 'item-not-deducted' };   // 精确校验
-    State.save();
-    return { ok: true, by: 'item', itemId: itemId };
+    /* ② 体力不足：花准入道具。 */
+    const beforeItem = Number(s.props[admission]) || 0;
+    if (beforeItem > 0) {
+      s.props[admission]--;
+      const afterItem = Number(s.props[admission]) || 0;
+      if (afterItem !== beforeItem - 1) return { ok: false, reason: 'item-not-deducted' };
+      State.save();
+      return { ok: true, by: 'item', itemId: admission };
+    }
+    /* ③ 最后才喝体力药剂：补到 30 之后仍需再扣掉 30 体力。
+     * **先只检查、不真喝**：万一现有药剂补不到 30（例如只有小体力药剂 +10），
+     * 就不能把药喝掉再宣布报名失败 —— 那是白扔一瓶药（踩过）。
+     * 检查顺序与 autoEnergyPotion 一致：缺得少先看小药，缺得多先看大药。 */
+    const deficit = NEED - Math.max(0, Number(s.energy) || 0);
+    const order = deficit <= 10 ? [1, 2] : [2, 1];
+    const per = { 1: 10, 2: 30 };
+    let useId = 0;
+    for (const id of order) {
+      if (!(Number(s.props[id]) > 0)) continue;
+      if (s.energy + per[id] >= NEED) { useId = id; break; }
+    }
+    if (!useId) return { ok: false, reason: 'no-energy-no-item' };
+    const potion = State.autoEnergyPotion ? State.autoEnergyPotion(NEED) : { ok: false };
+    if (!(potion.ok && s.energy >= NEED)) return { ok: false, reason: 'no-energy-no-item' };
+    if (!payEnergy()) return { ok: false, reason: 'energy-not-deducted' };
+    return { ok: true, by: 'energy', potionUsed: potion.used || useId };
   }
   function confirmArena(kind) {
     const existing = activeArenaRun();
@@ -144,9 +161,13 @@
        * 自动喝药 / 体力恢复 / 道具结算掩盖或抵消，从而误报「报名异常」。 */
       const pay = payArenaEntry(s, kind);
       if (!pay.ok) {
-        alert(kind
-          ? '\u4f53\u529b\u4e0d\u8db330\u70b9\uff0c\u4e5f\u6ca1\u6709\u52c7\u6c14\u5fbd\u7ae0\uff08\u788e\u7247\u7ade\u6280\u573a\u4e0d\u80fd\u7528\u82f1\u96c4\u5e16\uff09\u3002'
-          : '\u4f53\u529b\u4e0d\u8db330\u70b9\uff0c\u4e5f\u6ca1\u6709\u82f1\u96c4\u5e16\u3002');
+        if (pay.reason === 'no-energy-no-item') {
+          alert(kind
+            ? '\u4f53\u529b\u4e0d\u8db330\u70b9\uff0c\u4e5f\u6ca1\u6709\u52c7\u6c14\u5fbd\u7ae0\uff08\u788e\u7247\u7ade\u6280\u573a\u4e0d\u80fd\u7528\u82f1\u96c4\u5e16\uff09\u3002'
+            : '\u4f53\u529b\u4e0d\u8db330\u70b9\uff0c\u4e5f\u6ca1\u6709\u82f1\u96c4\u5e16\u3002');
+        } else {
+          alert('\u7ade\u6280\u573a\u62a5\u540d\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5\u3002');   // 扣费未生效：不放行
+        }
         return;
       }
       if (pay.potionUsed) {

@@ -1307,6 +1307,125 @@ test('需求28：徒弟日供 —— 经验 5%~15%、金松果 5%~25% 线性插�
   }
 });
 
+test('需求29：挑战塔的「返回」回主界面（含胜利弹窗与塔页面）', () => {
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  // 塔页面自身的返回：不应再回关卡页（原来 UI.runAction('stages')）
+  assert.ok(!/back\(p, \(\) => UI\.runAction\('stages'\)\)/.test(ui),
+    '塔页面的返回不该再走关卡页');
+  const backs = (ui.match(/back\(p, \(\) => C\(\)\.home\(\)\)/g) || []).length;
+  assert.ok(backs >= 2, '挑战塔与无尽塔两处页面返回都应当回主界面，实测 ' + backs + ' 处');
+
+  // 胜利弹窗的「返回」也要回主界面（抽出 towerClear 用桩跑一遍，直接看导航）
+  const a = ui.indexOf('function towerClear(rw)');
+  assert.ok(a > 0, '应当有 towerClear');
+  const b = ui.indexOf('/* 主塔失败', a);
+  assert.ok(b > a, '应当能定位 towerClear 的结尾');
+  const calls = [];
+  const ctx = vm.createContext({
+    modal: (t, html, buttons) => { calls.push({ t: t, buttons: buttons || [] }); return { close() {}, element: null }; },
+    C: () => ({ home: () => calls.push({ nav: 'home' }) }),
+    esc: (v) => String(v), UI: { classic: { pickupResult: () => {} } },
+    openTower: () => calls.push({ nav: 'tower' }),
+  });
+  vm.runInContext(ui.slice(a, b) + '\ntowerClear({ layer: 3, gold: 10, drop: null, prizes: null });', ctx, { filename: 'towerClear.js' });
+  const btns = calls[0].buttons;
+  assert.equal(btns.map((x) => x.label).join('/'), '继续爬塔/返回', '胜利弹窗按钮：' + btns.map((x) => x.label).join('/'));
+  const back = btns.find((x) => x.label === '返回');
+  assert.ok(back, '要有返回按钮');
+  calls.length = 0;
+  back.run();
+  assert.equal(calls[0] && calls[0].nav, 'home', '胜利弹窗的返回必须回主界面');
+  const climb = btns.find((x) => x.label === '继续爬塔');
+  calls.length = 0;
+  climb.run();
+  assert.equal(calls[0] && calls[0].nav, 'tower', '继续爬塔应当回塔页面');
+});
+
+test('需求30：烙印两段机制（未破碎 50% / 破碎后 100%）+ 复数烙印各自计数', () => {
+  const c = setup();
+  const TD = c.TowerData;
+  const run = c.Tower._debugRun('endless');
+  run.permanent = []; run.limited = [];
+  run.fragileBase = { power: 0, agility: 0, speed: 0 };
+  run.fragileBurned = { power: 0, agility: 0, speed: 0 };
+  run.fragileSeeds = {};
+  c.Tower.addBuff(run, 'C39');                   // 力量烙印：基础 8%
+  const pct = (scale) => Math.round((Number(TD.BUFF_BY_ID.C39.mods.fragilePct) * scale) * 100);
+  // 1) 未破碎：只有 50% 增益
+  let line = c.Tower.debugBuffReport('endless').effects.find(([k]) => /烙印.*攻击/.test(k));
+  assert.ok(line, '效果清单要列出烙印攻击');
+  assert.match(line[0], /存在·半效/, '未破碎要标「存在·半效」：' + line[0]);
+  assert.equal(line[1], '+' + pct(0.5) + '%', '未破碎应当只有 50% 增益（' + pct(0.5) + '%）：' + line[1]);
+  // 2) 用「下一步必碎」的种子强制破碎
+  const miss = (function () {
+    const key = String(run.salt == null ? 'run' : run.salt) + '#' + (Number(run.layer) || 0) + '#C39';
+    let h = 0x811c9dc5;
+    for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    let st = h >>> 0 || 1;
+    for (let i = 0; i < 200; i++) {
+      const next = (Math.imul(st, 1664525) + 1013904223) >>> 0;
+      if ((next / 4294967296) * 100 < Number(TD.BUFF_BY_ID.C39.mods.fragileBreakPct)) return st;
+      st = next;
+    }
+    return null;
+  })();
+  assert.ok(miss != null, '应当能算出必碎的种子');
+  run.fragileSeeds = { C39: miss };
+  const nx = c.Tower.nextBattle('endless');
+  const live = c.Tower._debugRun('endless');
+  c.Tower.reportBattle('endless', live.attempt, true, 1, { rounds: [] });
+  assert.ok(!(c.Tower._debugRun('endless').limited || []).some((x) => x.id === 'C39'), '应当已破碎');
+  line = c.Tower.debugBuffReport('endless').effects.find(([k]) => /烙印.*攻击/.test(k));
+  assert.match(line[0], /已损毁/, '破碎后要标「已损毁」：' + line[0]);
+  // 破碎后 = 50%（仍在的基础）+ 100%（破碎保留）= 150% 的基础 = 12%
+  assert.equal(line[1], '+' + pct(1.5) + '%', '破碎后应当是 150% 基础（' + pct(1.5) + '%）：' + line[1]);
+  // 3) 本局永久：再打 5 场，加成不掉
+  for (let i = 0; i < 5; i++) {
+    const cur = c.Tower._debugRun('endless');
+    cur.phase = null; cur.choices = null;
+    const n2 = c.Tower.nextBattle('endless');
+    if (!n2 || n2.ok === false) break;
+    const l2 = c.Tower._debugRun('endless');
+    c.Tower.reportBattle('endless', l2.attempt, true, 1, { rounds: [] });
+  }
+  line = c.Tower.debugBuffReport('endless').effects.find(([k]) => /烙印.*攻击/.test(k));
+  assert.equal(line[1], '+' + pct(1.5) + '%', '破碎后的加成应当本局永久保留：' + line[1]);
+
+  // 4) 复数烙印各自计数：固定 salt 下三条烙印的破碎时点必须不同
+  const breakAt = (salt) => {
+    const cc = setup();
+    const s = cc.State.state(); s.level = 70; s.props[23] = 30;
+    for (let i = 1; i <= 18; i++) s.stages[i] = { npcIndex: 3, passed: true };
+    cc.Tower._debugSetLayer(9); cc.Tower.startEndlessRun();
+    const r = cc.Tower._debugRun('endless');
+    r.salt = salt;
+    r.permanent = []; r.limited = [];
+    r.fragileBase = { power: 0, agility: 0, speed: 0 };
+    r.fragileBurned = { power: 0, agility: 0, speed: 0 };
+    r.fragileSeeds = {};
+    for (const id of ['C39', 'C40', 'C41']) cc.Tower.addBuff(r, id);
+    const at = {};
+    for (let i = 1; i <= 40; i++) {
+      const cur = cc.Tower._debugRun('endless');
+      cur.phase = null; cur.choices = null;
+      const n2 = cc.Tower.nextBattle('endless');
+      if (!n2 || n2.ok === false) break;
+      const l2 = cc.Tower._debugRun('endless');
+      cc.Tower.reportBattle('endless', l2.attempt, true, 1, { rounds: [] });
+      const left = (cc.Tower._debugRun('endless').limited || []).map((x) => x.id);
+      for (const id of ['C39', 'C40', 'C41']) if (at[id] === undefined && !left.includes(id)) at[id] = i;
+    }
+    return at;
+  };
+  const a1 = breakAt('FIXED-SALT');
+  const a2 = breakAt('FIXED-SALT');
+  assert.equal(JSON.stringify(a1), JSON.stringify(a2), '同一 salt 下应当可复现：' + JSON.stringify(a1));
+  const vals = ['C39', 'C40', 'C41'].map((id) => a1[id]);
+  assert.ok(vals.filter((v) => v !== undefined).length >= 2, '三条烙印应当至少碎两条：' + JSON.stringify(a1));
+  assert.ok(new Set(vals.filter((v) => v !== undefined)).size >= 2,
+    '三条烙印的破碎时点必须不同（各自独立计数）：' + JSON.stringify(a1));
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

@@ -498,7 +498,8 @@
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
     bindTips(p);
     if (!info.run) fillFoeArt(p, info.preview);   // 第 2 项：boss 卡不再画头像（素材加载不稳定，也就不占位）
-    back(p, () => UI.runAction('stages'));
+    /* 需求：挑战塔页面的「返回」回**主界面**（原来回关卡页，与「返回」的语义不符）。 */
+    back(p, () => C().home());
     on(p, 'fight', () => {
       if (info.run) {
         if (info.run.choices) { offerChoice('tower', info.run.choices); return; }
@@ -604,7 +605,8 @@
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
     bindTips(p);
     if (info.run) fillFoeArt(p, Tower.planInfo ? Tower.planInfo('endless') : Tower.preview(info.run.layer, info.run.salt, true));   // 第 3 项：松鼠类对手是 canvas，要等素材画上去
-    back(p, () => UI.runAction('stages'));
+    /* 需求：挑战塔页面的「返回」回**主界面**（原来回关卡页，与「返回」的语义不符）。 */
+    back(p, () => C().home());
     on(p, 'fight', () => {
       if (info.run) {
         if (info.run.choices) { notice('先在下面选一张增益（休整点）。'); return; }

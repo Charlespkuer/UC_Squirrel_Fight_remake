@@ -65,6 +65,22 @@ async function handleSaveApi(req, res, url) {
     let parsed;
     try { parsed = JSON.parse(body); } catch (e) { return json(res, 400, { ok: false, msg: '不是合法 JSON' }); }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return json(res, 400, { ok: false, msg: '存档必须是对象' });
+    /* 防呆：拒绝用「全新空档」覆盖磁盘上已有的正式存档。
+     * 触发场景：浏览器里那份 1 级空档在自动保存时把几十级的存档盖掉（已经发生过两次）。
+     * 需要真的重置时，用 ?force=1（调试面板的「彻底重置账号」会带）。 */
+    const force = url.searchParams.get('force') === '1';
+    if (!force && fs.existsSync(SAVE_FILE)) {
+      try {
+        const cur = JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8'));
+        const curLv = Number(cur && cur.level) || 0;
+        const newLv = Number(parsed.level) || 0;
+        const fresh = newLv <= 1 && (!Array.isArray(parsed.weapons) || parsed.weapons.length === 0) &&
+          (!Array.isArray(parsed.skills) || parsed.skills.length === 0) && (Number(parsed.goldPoint) || 0) <= 100;
+        if (curLv >= 5 && fresh) {
+          return json(res, 409, { ok: false, msg: '磁盘上已有 ' + curLv + ' 级存档，已拒绝用全新的 1 级空档覆盖（如确需重置：调试面板「彻底重置账号」，或加 ?force=1）' });
+        }
+      } catch (e) { /* 旧存档读不出来就不拦，照常写 */ }
+    }
     try {
       fs.mkdirSync(SAVE_DIR, { recursive: true });
       fs.writeFileSync(SAVE_FILE, JSON.stringify(parsed), 'utf8');
@@ -97,6 +113,38 @@ http.createServer((req, res) => {
     rel = decodeURIComponent(url.pathname);
   } catch (_) { res.writeHead(400); res.end('400'); return; }
   if (rel === '/__save') { handleSaveApi(req, res, url).catch(() => json(res, 500, { ok: false, msg: '服务器内部错误' })); return; }
+  /* 存档列表 / 读取：给「从存档列表导入」用（不依赖系统文件选择器，桌面壳里也能用）。 */
+  if (rel === '/__saves' || rel.startsWith('/__saves/get')) {
+    const SAVE_DIR = path.join(ROOT, 'save');
+    const listOne = (abs, rel2) => {
+      try {
+        const st = fs.statSync(abs);
+        if (!st.isFile() || !abs.endsWith('.json')) return null;
+        let level = null, name = null;
+        try { const d = JSON.parse(fs.readFileSync(abs, 'utf8')); level = d && d.level; name = d && d.name; } catch (e) { return null; }
+        if (typeof name !== 'string' || !Number.isFinite(level)) return null;
+        return { rel: rel2, level, name, size: st.size, at: st.mtimeMs };
+      } catch (e) { return null; }
+    };
+    if (rel.startsWith('/__saves/get')) {
+      const want = url.searchParams.get('rel') || '';
+      const abs = path.resolve(ROOT, want);
+      if (!abs.startsWith(SAVE_DIR + path.sep) || !abs.endsWith('.json')) { json(res, 403, { ok: false, msg: '只允许读取 save/ 下的存档' }); return; }
+      fs.readFile(abs, (err, data) => {
+        if (err) { json(res, 404, { ok: false, msg: '读不到这个存档' }); return; }
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+        res.end(data);
+      });
+      return;
+    }
+    const out = [];
+    for (const rel2 of fs.readdirSync(SAVE_DIR)) { if (rel2 === 'backup') continue; const it = listOne(path.join(SAVE_DIR, rel2), 'save/' + rel2); if (it) out.push(it); }
+    const bk = path.join(SAVE_DIR, 'backup');
+    if (fs.existsSync(bk)) for (const f of fs.readdirSync(bk)) { const it = listOne(path.join(bk, f), 'save/backup/' + f); if (it) out.push(it); }
+    out.sort((a, b) => b.at - a.at);
+    json(res, 200, { ok: true, saves: out });
+    return;
+  }
   if (rel === '/' || rel === '' || rel === '/index.html') rel = '/' + ENTRY_REL;
   const file = path.join(ROOT, rel);
   if (file !== ROOT && !file.startsWith(ROOT + path.sep)) { res.writeHead(403); res.end('403'); return; }

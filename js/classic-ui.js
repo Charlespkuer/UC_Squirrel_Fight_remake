@@ -1235,6 +1235,7 @@
     return '<div class="sync-panel"><div class="sync-head">存档位置：' + state + '</div>' +
       '<div class="sync-actions">' + btn('立即写入存档文件', 'save-write', 'small' + (useFile ? '' : ' muted')) +
       btn('载入存档文件', 'save-load', 'small' + (useFile ? '' : ' muted')) +
+      btn('从存档列表导入', 'save-import-list', 'small') +
       btn('从磁盘载入', 'save-import', 'small') + '</div></div>';
   }
   /** 选一个本地 .json 文件；返回 Promise<File|null>（null = 用户取消）。
@@ -1515,6 +1516,28 @@
     $('[data-action="sound"]',p).onclick=()=>{Main.setMuted(!mute);openSystem();};
     $('[data-action="save-write"]',p).onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};
     $('[data-action="save-load"]',p).onclick=loadSaveDialog;
+    /* 从服务器存档列表导入：绕过系统文件选择器（桌面壳里也能用），列表里带等级与时间。 */
+    $('[data-action="save-import-list"]',p).onclick=async()=>{
+      let list=[];
+      try{const r=await fetch('/__saves',{cache:'no-store'});const j=await r.json();list=(j&&j.saves)||[];}
+      catch(e){toast('读不到存档列表：本地服务器没开？');return;}
+      if(!list.length){toast('save/ 与 save/backup/ 里没有可用存档');return;}
+      const when=(ms)=>{try{return new Date(ms).toLocaleString('zh-CN',{hour12:false});}catch(e){return '';}};
+      const buttons=list.slice(0,12).map((it)=>({label:'【'+it.level+'级 '+it.name+'】'+when(it.at),cls:'small',run:async()=>{
+        try{
+          const r=await fetch('/__saves/get?rel='+encodeURIComponent(it.rel),{cache:'no-store'});
+          if(!r.ok)throw new Error('读不到文件');
+          const raw=await r.text();const data=JSON.parse(raw);
+          if(!data||typeof data.name!=='string'||!Number.isFinite(data.level))throw new Error('不是有效存档');
+          const old=localStorage.getItem(State.saveKey);
+          try{ if(old)localStorage.setItem(State.saveKey+'_backup',old); localStorage.setItem(State.saveKey,raw);
+            if(!State.load())throw new Error('读取失败'); State.save(); home(); toast('已导入【'+data.name+'】'+data.level+' 级');
+          }catch(e){ if(old)localStorage.setItem(State.saveKey,old); State.load(); toast('导入失败，已保留原存档'); }
+        }catch(e){toast(e.message||'导入失败');}
+      }}));
+      buttons.push({label:'取消',cls:'muted'});
+      notice('从服务器存档导入（save/ 与 save/backup/ 里的文件）：',buttons,{small:true});
+    };
     $('[data-action="save-import"]',p).onclick=()=>importSave();
     const syncBtn=(action,fn)=>{const b=$('[data-action="'+action+'"]',p);if(b)b.onclick=fn;};
     syncBtn('sync-save-push',()=>syncRun('save','push'));

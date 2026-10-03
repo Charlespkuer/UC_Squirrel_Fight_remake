@@ -54,20 +54,29 @@
    * 50 层起额外加速（rate2 3.5%/层），避免「每层固定 +6%」在后期也显得不够。
    * ============================================================ */
   const ENDLESS_DEEP_LAYER = 30;
-  const ENDLESS_DEEP_RATE = 0.06;     // 30 层之后每层 +6%
+  /* 需求：30 层后要**更陡**。所以不用恒定速率，而是分两段**逐段加速**：
+   *   30 → 50 层：每层 +7%
+   *   50 层之后：每层 +9%（加速到 1.29 倍）
+   * 为什么不做成「指数本身也指数增长」：玩家的成长源大多**有封顶**
+   *   （C07 生命上限 +30% 封顶、C48 减伤 −25% 封顶；无封顶的只有
+   *    「以战养战 +5 血/场」「挥金如土 +5 币一次」「登顶者 10 层后 +1/场」这些缓坡），
+   * 而指数指数在 100 层会到 ×2700 甚至 ×18 万 —— 那不是「陡」，是没有解法。
+   * 这条曲线在 100 层是 ×287，靠上面几条无封顶成长 + 装备 + 药丸可以咬住。 */
+  const ENDLESS_DEEP_RATE1 = 0.07;
+  const ENDLESS_DEEP_RATE2 = 0.09;
+  const ENDLESS_DEEP_SPLIT = 20;      // 30 + 20 = 第 50 层开始切换速率
   /**
    * 30 层之后的敌方深度倍率（≤30 层恒为 1，不影响既有平衡）。
-   *
-   * 用**单一速率**（每层 ×1.06）而不是「越深越快」的复合指数：
-   * 每层的相对增幅恒定，玩家体感是「一层比一层紧」，而不是某个层数突然出现悬崖。
-   *   · 35 层 ×1.34    40 层 ×1.79    50 层 ×3.21
-   *   · 60 层 ×5.74    70 层 ×10.29   80 层 ×18.42   100 层 ×59.05
-   * 对比旧曲线（31 层起 M 封顶 ×10、40 层起 LT 封顶 70 级 → 之后**完全不变**），
-   * 这条曲线才是「越深越难」。
+   *   · 30 层 ×1.00    40 层 ×1.97    50 层 ×3.87
+   *   · 60 层 ×9.20    70 层 ×21.68   80 层 ×51.30   100 层 ×287.7
+   * 对应「5 层环比」：50 层前 ×1.40，50 层后 ×1.54 且随深度缓慢变陡。
    */
   function endlessDepthMul(n) {
     const layer = Math.max(0, Number(n) || 0);
-    return Math.pow(1 + ENDLESS_DEEP_RATE, Math.max(0, layer - ENDLESS_DEEP_LAYER));
+    const d = Math.max(0, layer - ENDLESS_DEEP_LAYER);
+    const seg1 = Math.min(d, ENDLESS_DEEP_SPLIT);
+    const seg2 = Math.max(0, d - ENDLESS_DEEP_SPLIT);
+    return Math.pow(1 + ENDLESS_DEEP_RATE1, seg1) * Math.pow(1 + ENDLESS_DEEP_RATE2, seg2);
   }
   function endlessMechStacks(n) { return Math.min(ENDLESS_MECH_MAX, endlessSegment(n) - 1); }
   /** 本层怪物带的机制（按段轮转取前 N 个）。 */

@@ -4235,11 +4235,27 @@ test('需求62：减敌血的一次性 buff 一局一次 / 30 层后的敌人深
     assert.ok(TD.endlessDepthMul(L) > TD.endlessDepthMul(L - 1),
       '第 ' + L + ' 层应当比上一层更高：' + TD.endlessDepthMul(L - 1) + ' → ' + TD.endlessDepthMul(L));
   }
-  /* 单调且加速稳定：每层固定 ×1.06 */
-  for (const L of [31, 45, 70, 100]) {
+  /* 分段加速：30→50 层每层 ×1.07，50 层之后每层 ×1.09（更陡） */
+  for (const L of [31, 40, 50]) {
     const r = TD.endlessDepthMul(L) / TD.endlessDepthMul(L - 1);
-    assert.ok(Math.abs(r - 1.06) < 1e-9, '每层应当是固定 ×1.06（第 ' + L + ' 层实测 ×' + r.toFixed(4) + '）');
+    assert.ok(Math.abs(r - 1.07) < 1e-9, '第 ' + L + ' 层应当是 ×1.07（实测 ×' + r.toFixed(4) + '）');
   }
+  for (const L of [51, 60, 70, 100]) {
+    const r = TD.endlessDepthMul(L) / TD.endlessDepthMul(L - 1);
+    assert.ok(Math.abs(r - 1.09) < 1e-9, '第 ' + L + ' 层应当是 ×1.09（实测 ×' + r.toFixed(4) + '）');
+  }
+  /* 曲线必须**逐段更陡**：50 层之后的每层增幅要大于 50 层之前 */
+  assert.ok(TD.endlessDepthMul(51) / TD.endlessDepthMul(50) > TD.endlessDepthMul(50) / TD.endlessDepthMul(49),
+    '50 层之后应当比之前更陡（需求：30 层后要更陡的曲线）');
+  /* 「更陡」的两个可验证口径：
+   *   ① 50 层之后的 5 层环比（×1.54 = 1.09^5）**大于** 50 层之前的（×1.40 = 1.07^5）
+   *   ② 每 5 层的**绝对**倍数增量随深度变大（毕竟乘数本身在涨） */
+  const per5 = (L) => TD.endlessDepthMul(L) / TD.endlessDepthMul(L - 5);
+  assert.ok(per5(60) > per5(40) + 0.05,
+    '50 层之后的 5 层环比应当明显更大：×' + per5(40).toFixed(2) + ' → ×' + per5(60).toFixed(2));
+  const delta5 = (L) => TD.endlessDepthMul(L) - TD.endlessDepthMul(L - 5);
+  assert.ok(delta5(70) > delta5(50), '70 层的 5 层绝对增量应当大于 50 层：' + delta5(50).toFixed(1) + ' → ' + delta5(70).toFixed(1));
+  assert.ok(delta5(100) > delta5(70), '100 层的 5 层绝对增量应当大于 70 层：' + delta5(70).toFixed(1) + ' → ' + delta5(100).toFixed(1));
   /* 实测敌人数值：30 层以后必须真的在涨（旧版 40 层后完全不变） */
   const foeAt = (L) => {
     openRun();

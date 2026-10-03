@@ -302,6 +302,7 @@
       mustHitFirst: 0, firstSkillFree: 0, deathSaves: [], dmgMul: 1, revivePct: 0,
       speedMul: 0, winHealPct: 0, thornsPct: 0, lowHpPowerMul: 0, lowHpAt: 0,
       lowHpAgilityMul: 0, lowHpSpeedMul: 0,
+      emptyMaxHpMul: 0, lowHpTakenMul: 0, lowHpLifestealPct: 0, lowHpRegenPct: 0, lowHpRegenAt: 0,
       openerPowerMul: 0, openerRounds: 0, fatiguePowerMul: 0, dodgeMul: 0 };
     eachBuff(run, (buff, stacks) => {
       const m = buff.mods, k = stacks * g;
@@ -341,6 +342,15 @@
       if (m.mustHitAll) agg.mustHitAll = 1;                                      // 第 1 项：百步穿杨
       if (m.firstHitZero) agg.firstHitZero = 1;                                  // 第 1 项：先机预判
       /* 狂怒：低血时攻/敏/速同时提升；阈值取所有来源里的最高值（同一套 lowHpAt）。 */
+      /* 空血上限：只抬高上限、不回血（与 maxHpMul 那条「回复等量」的语义相反）。 */
+      if (m.emptyMaxHpMul) agg.emptyMaxHpMul += m.emptyMaxHpMul * k;
+      /* 低血 combo 的减伤 / 吸血 / 每回合回血（都读同一个 lowHpAt 阈值）。 */
+      if (m.lowHpTakenMul) agg.lowHpTakenMul += m.lowHpTakenMul * k;
+      if (m.lowHpLifestealPct) agg.lowHpLifestealPct += m.lowHpLifestealPct * k;
+      if (m.lowHpRegenPct) {
+        agg.lowHpRegenPct += m.lowHpRegenPct * k;
+        agg.lowHpRegenAt = Math.max(agg.lowHpRegenAt, Number(m.lowHpRegenAt) || Number(m.lowHpAt) || 0.5);
+      }
       if (m.lowHpPowerMul || m.lowHpAgilityMul || m.lowHpSpeedMul) {
         if (m.lowHpPowerMul) agg.lowHpPowerMul += m.lowHpPowerMul * k;
         if (m.lowHpAgilityMul) agg.lowHpAgilityMul += m.lowHpAgilityMul * k;
@@ -407,12 +417,16 @@
     if (a.winHealPct) lines.push(['战斗胜利后回血', pct(a.winHealPct)]);
     if (a.openStrikePct) lines.push(['开局打击', pct(a.openStrikePct) + ' 敌最大生命']);
     if (a.enemyPowerDown) lines.push(['敌人攻击', pct(-a.enemyPowerDown)]);
-    if (a.lowHpPowerMul || a.lowHpAgilityMul || a.lowHpSpeedMul) {
-      const gate = '低血（≤' + Math.round(a.lowHpAt * 100) + '%）';
-      if (a.lowHpPowerMul) lines.push([gate + '攻击', pct(a.lowHpPowerMul)]);
-      if (a.lowHpAgilityMul) lines.push([gate + '敏捷', pct(a.lowHpAgilityMul)]);
-      if (a.lowHpSpeedMul) lines.push([gate + '速度', pct(a.lowHpSpeedMul)]);
-    }
+    if (a.emptyMaxHpMul) lines.push(['空生命上限（不回血）', pct(a.emptyMaxHpMul)]);
+    /* 低血系（狂怒 + combo）：同一套阈值，清单里统一标出来源。 */
+    const lowGate = '低血（≤' + Math.round(Math.max(a.lowHpAt, a.lowHpRegenAt) * 100) + '%）';
+    if (a.lowHpPowerMul) lines.push([lowGate + '攻击', pct(a.lowHpPowerMul)]);
+    if (a.lowHpAgilityMul) lines.push([lowGate + '敏捷', pct(a.lowHpAgilityMul)]);
+    if (a.lowHpSpeedMul) lines.push([lowGate + '速度', pct(a.lowHpSpeedMul)]);
+    if (a.lowHpTakenMul) lines.push([lowGate + '减伤', pct(-a.lowHpTakenMul)]);
+    if (a.lowHpLifestealPct) lines.push([lowGate + '吸血', pct(a.lowHpLifestealPct)]);
+    if (a.lowHpRegenPct) lines.push(['低血（≤' + Math.round(a.lowHpRegenAt * 100) + '%）每回合回血',
+      pct(a.lowHpRegenPct) + '，最多回到 ' + Math.round(a.lowHpRegenAt * 100) + '%']);
     if (a.dmgMul && a.dmgMul !== 1) lines.push(['对本场敌人伤害', pct(a.dmgMul - 1)]);
     if (a.revivePct) lines.push(['复活（每层一次）', pct(a.revivePct) + ' 生命']);
     if (a.deathSaves && a.deathSaves.length) lines.push(['免死', a.deathSaves.length + ' 次（保留 1 血）']);
@@ -626,7 +640,16 @@
       const winMaxHp = Math.max(0, Number(run.winMaxHp) || 0);
       /* 第 9 项：挥金如土累计的生命上限（固定值，和「以战养战」的 winHpFlat 同口径）。 */
       const spendHp = run.spendGain ? Math.max(0, Number(run.spendGain.hp) || 0) : 0;
-      const maxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul + stickyHp + winMaxHp) * dMaxHp) + Math.max(0, Number(run.winHpFlat) || 0) + spendHp);
+      /* 「空血上限」（emptyMaxHpMul）：只抬高上限、**不把当前血量一起放大**。
+       * 关键：不能直接写 me.hp = maxHp × carry —— 那样抬上限会把当前血量一起抬上去，
+       * 「空」的那部分根本不存在（实测 60% 血量时 +100% 上限给出 6000/10000 而不是 3000/10000）。
+       * 正确做法是把空出来的那份从「折算当前血量的基数」里扣掉：
+       *   baseMaxHp（不含空血上限）用于算当前血量，maxHp（含）才是上限。
+       * 于是占比 = 原占比 / (1 + 空血上限)，正好把血线推进低血区间。 */
+      const emptyHp = Math.max(0, Number(agg.emptyMaxHpMul) || 0);
+      const flatHp = Math.max(0, Number(run.winHpFlat) || 0) + spendHp;
+      const baseMaxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul + stickyHp + winMaxHp) * dMaxHp) + flatHp);
+      const maxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul + stickyHp + winMaxHp + emptyHp) * dMaxHp) + flatHp);
       /* 选取型强化：指定武器出战时伤害 +pct（等价于力量翻倍），指定技能的触发档位 ×(1+pct) 且至少 +25 */
       const wBoost = run.weaponBoost || {};
       let weaponMul = 1;
@@ -668,7 +691,8 @@
       const envModsMine = Object.assign({}, me.mods || {});
       // maxHpMul 的「回复等量生命」= 按比例继承到新上限（正增益不亏比例、负增益同步缩血）
       me.maxHp = maxHp;
-      me.hp = Math.max(1, Math.min(maxHp, Math.round(maxHp * run.carry)));
+      /* 当前血量按**不含空血上限**的基数折算，所以那部分始终是空的。 */
+      me.hp = Math.max(1, Math.min(maxHp, Math.round(baseMaxHp * run.carry)));
       /* 本轮第 4 项：记下基础上限（未加塔 buff 的那一份）与本场真实上限 / 当前血量。 */
       run.lastMaxHp = maxHp;
       run.lastHp = me.hp;
@@ -692,11 +716,17 @@
       if (agg.thornsPct) mods.thornsPct = Math.min(0.6, agg.thornsPct);          // 荆棘之甲（sim 里结算）
       if (agg.mustHitAll) mods.mustHitAll = 1;                                  // 第 1 项：百步穿杨（整个一场必中）
       if (agg.firstHitZero) mods.firstHitZero = 1;                              // 第 1 项：先机预判（sim 里结算）
-      if (agg.lowHpPowerMul || agg.lowHpAgilityMul || agg.lowHpSpeedMul) {
+      if (agg.emptyMaxHpMul) mods.emptyMaxHpMul = agg.emptyMaxHpMul;
+      if (agg.lowHpPowerMul || agg.lowHpAgilityMul || agg.lowHpSpeedMul ||
+          agg.lowHpTakenMul || agg.lowHpLifestealPct || agg.lowHpRegenPct) {
         if (agg.lowHpPowerMul) mods.lowHpPowerMul = agg.lowHpPowerMul;
         if (agg.lowHpAgilityMul) mods.lowHpAgilityMul = agg.lowHpAgilityMul;
         if (agg.lowHpSpeedMul) mods.lowHpSpeedMul = agg.lowHpSpeedMul;
-        mods.lowHpAt = agg.lowHpAt || 0.35;
+        if (agg.lowHpTakenMul) mods.lowHpTakenMul = Math.max(-0.9, agg.lowHpTakenMul);
+        if (agg.lowHpLifestealPct) mods.lowHpLifestealPct = agg.lowHpLifestealPct;
+        if (agg.lowHpRegenPct) { mods.lowHpRegenPct = agg.lowHpRegenPct; mods.lowHpRegenAt = agg.lowHpRegenAt || 0.5; }
+        /* 统一阈值：所有低血效果共用一个 lowHpAt（没有显式值的来源按 0.35 兜底）。 */
+        mods.lowHpAt = agg.lowHpAt || agg.lowHpRegenAt || 0.5;
       }
       // 第 2 项：不死鸟按「每层一次」发放（本层已经触发过就不再给）
       if (agg.revivePct && (run.reviveLayer || 0) !== run.layer) mods.deathSaves = (mods.deathSaves || []).concat([{ healPct: agg.revivePct }]);
@@ -2247,6 +2277,15 @@
       return '生命 ≤' + Math.round((m20.lowHpAt || 0.5) * 100) + '% 时：攻击 +' +
         pct(m20.lowHpPowerMul) + '、敏捷 +' + pct(m20.lowHpAgilityMul) + '、速度 +' + pct(m20.lowHpSpeedMul);
     }
+    if (id === 'N13' || id === 'C46' || id === 'C47') {
+      const def = D().BUFF_BY_ID[id], mm = def.mods;
+      const bits = ['空生命上限 +' + pct(mm.emptyMaxHpMul)];
+      if (mm.lowHpRegenPct) bits.push('低血每回合回 ' + pct(mm.lowHpRegenPct) + '（最多到 ' + pct(mm.lowHpRegenAt) + '）');
+      if (mm.lowHpTakenMul) bits.push('低血减伤 ' + pct(-mm.lowHpTakenMul));
+      if (mm.lowHpLifestealPct) bits.push('低血吸血 ' + pct(mm.lowHpLifestealPct));
+      return '每场开始：' + bits.join('、');
+    }
+    if (id === 'N14') return '生命 ≤' + pct(D().BUFF_BY_ID.N14.mods.lowHpAt) + '% 时减伤 ' + pct(-D().BUFF_BY_ID.N14.mods.lowHpTakenMul);
     if (id === 'C25') return '本局已累计 卖价 +' + Math.round(Number(run.sellBonus) || 0) + ' 试炼币（只加自己）';
     const def = D().BUFF_BY_ID[id];
     if (def && def.mods && def.mods.fragileStat) {

@@ -891,9 +891,9 @@ test('需求21：挑战塔不再生成任何「只有无尽塔用得上」的增
   /* 池子规模：towerPool 现在是「挑战塔**归属**」的完整名单（场间选择池），
    * 包含限次类与永久类 —— 塔里本来就能选到永久增益（无尽塔专属的除外）。 */
   const towerLimited = TD.towerPool.filter((b) => b.kind === 'limited');
-  assert.equal(towerLimited.length, 31, '挑战塔的限次类应当是 31 条（19 通用 + 12 专属），实测 ' + towerLimited.length);
+  assert.equal(towerLimited.length, 33, '挑战塔的限次类应当是 33 条（21 通用 + 12 专属），实测 ' + towerLimited.length);
   assert.equal(towerLimited.filter((b) => b.towerOnly).length, 12, '其中 12 条是挑战塔专属');
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 31, '永久类也属于挑战塔池（共 31 条）');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 33, '永久类也属于挑战塔池（共 33 条）');
   assert.equal(TD.towerPool.filter((b) => b.kind === 'instant').length, 0, '即时类不进选择池');
   // 无尽池不该混入挑战塔专属（它们按「一场定胜负」设计）
   assert.equal(TD.endlessPool.filter((b) => b.towerOnly).length, 0, '无尽选择池不该有挑战塔专属');
@@ -1536,8 +1536,8 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
 
   // 7) 挑战塔池的构成可解释
   assert.equal(TD.towerPool.length, byTag('T.choice').split(',').length, '池子大小要自洽');
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'limited').length, 31, '限次类 31 条');
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 31, '永久类 31 条');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'limited').length, 33, '限次类 33 条');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 33, '永久类 33 条');
 });
 
 test('需求32：池子分离的端到端实测（真跑两种塔的抽取，零交叉）', () => {
@@ -2035,6 +2035,121 @@ test('需求40：狂怒（C20）阈值 50%，且低血时攻击+50%、敏捷+20%
   };
   const aHi = acts(5000, null, 40), aLo = acts(2000, m, 40);
   assert.ok(aLo > aHi, '低血时速度 +20% 应当带来更多出手：' + aHi.toFixed(2) + ' → ' + aLo.toFixed(2));
+});
+
+test('需求41：与狂怒成套的四条低血 combo（空血上限 / 低血减伤 / 低血吸血 / 低血回血）', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;
+
+  /* ---- 定义：稀有度、类型、限次次数都要符合需求 ---- */
+  const spec = [
+    ['N13', 0, 'limited', 10, '普通·限次'],
+    ['N14', 1, 'limited', 10, '稀有·限次'],
+    ['C46', 1, 'permanent', null, '稀有·永久'],
+    ['C47', 2, 'permanent', null, '史诗·永久'],
+  ];
+  for (const [id, rarity, kind, uses, label] of spec) {
+    const b = TD.BUFF_BY_ID[id];
+    assert.ok(b, id + ' 应当存在');
+    assert.equal(b.rarity, rarity, id + ' 应当是 ' + label);
+    assert.equal(b.kind, kind, id + ' 应当是 ' + kind);
+    if (uses != null) assert.equal(b.uses, uses, id + ' 限次次数应当是 ' + uses);
+    assert.match(Sim ? JSON.stringify(b.mods) : '', /emptyMaxHpMul|lowHp/, id + ' 应当挂低血/空血字段');
+  }
+  assert.equal(TD.BUFF_BY_ID.N13.mods.emptyMaxHpMul, 1.00, 'N13：+100% 空血上限');
+  assert.equal(TD.BUFF_BY_ID.N14.mods.lowHpTakenMul, -0.50, 'N14：低血 50% 减伤');
+  assert.equal(TD.BUFF_BY_ID.C46.mods.emptyMaxHpMul, 0.50, 'C46：+50% 空血上限');
+  assert.equal(TD.BUFF_BY_ID.C46.mods.lowHpRegenPct, 0.05, 'C46：低血每回合回 5%');
+  assert.equal(TD.BUFF_BY_ID.C46.mods.lowHpRegenAt, 0.50, 'C46：最多回到 50%');
+  assert.equal(TD.BUFF_BY_ID.C47.mods.emptyMaxHpMul, 1.00, 'C47：+100% 空血上限');
+  assert.equal(TD.BUFF_BY_ID.C47.mods.lowHpTakenMul, -0.20, 'C47：低血 20% 减伤');
+  assert.equal(TD.BUFF_BY_ID.C47.mods.lowHpLifestealPct, 0.20, 'C47：低血 20% 吸血');
+
+  /* ---- 空血上限：抬上限但**当前血量绝对值不变**（这是「空」的关键）---- */
+  const baseMe = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
+    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
+  const st = S.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  const oneBattle = (ids, carry) => {
+    T._debugSetLayer(9);
+    const r0 = T._debugRun('endless');
+    if (r0 && r0.attempt) { try { T.reportBattle('endless', r0.attempt, false, 0); } catch (e) {} }
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = []; r.hpBonus = 0; r.carry = carry;
+    for (const id of ids) {
+      const d = TD.BUFF_BY_ID[id];
+      if (d.kind === 'permanent') r.permanent.push({ id: id, stacks: 1 });
+      else r.limited.push({ id: id, stacks: 1, uses: d.uses || 10, on: true });
+    }
+    const nx = T.nextBattle('endless');
+    const me = baseMe(); nx.adjustMe(me);
+    return { me: me, run: T._debugRun('endless') };
+  };
+  const plain = oneBattle([], 0.6);
+  assert.equal(plain.me.hp, 3000, '基准：5000 × 0.6 = 3000');
+  const n13 = oneBattle(['N13'], 0.6);
+  assert.equal(n13.me.maxHp, 10000, 'N13 应当把上限抬到 10000');
+  assert.equal(n13.me.hp, 3000, 'N13 的当前血量绝对值必须不变（仍是 3000）← 关键');
+  assert.ok(Math.abs(n13.me.hp / n13.me.maxHp - 0.30) < 1e-6, '占比应当被压到 30%');
+  const c46 = oneBattle(['C46'], 0.6);
+  assert.equal(c46.me.maxHp, 7500, 'C46 应当把上限抬到 7500');
+  assert.equal(c46.me.hp, 3000, 'C46 的当前血量绝对值必须不变');
+  const c47 = oneBattle(['C47'], 0.6);
+  assert.equal(c47.me.maxHp, 10000, 'C47 应当把上限抬到 10000');
+  assert.equal(c47.me.hp, 3000, 'C47 的当前血量绝对值必须不变');
+  /* 空血上限要能把「高血线」推进狂怒区间（这就是 combo 的意义） */
+  const pushed = oneBattle(['N13'], 0.55);
+  assert.ok(pushed.me.hp / pushed.me.maxHp <= 0.5,
+    '55% 血线配 +100% 空血上限应当落进低血区间，实测 ' + (pushed.me.hp / pushed.me.maxHp * 100).toFixed(1) + '%');
+
+  /* ---- 低血减伤：低血生效、满血不生效 ---- */
+  const mk = (o) => Object.assign({ name: 'X', level: 50, power: 200, agility: 120, speed: 100,
+    hp: 5000, maxHp: 5000, weapons: [], skills: [], effects: {},
+    baseStats: { power: 200, agility: 120, speed: 100 } }, o);
+  const firstTaken = (hp, mods, n) => {
+    const vals = [];
+    for (let i = 0; i < n; i++) {
+      const foe = mk({ name: 'F', power: 200, agility: 120, speed: 200 });
+      const me = mk({ name: 'M', power: 1, agility: 1, speed: 1, hp: hp, mods: mods || {} });
+      const r = Sim.simulate(foe, me);
+      const h = (r.rounds || []).find((x) => x.attacker === 0 && x.dmg > 0 && x.action === 'common');
+      if (h) vals.push(h.dmg);
+    }
+    return vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length);
+  };
+  const none = firstTaken(5000, null, 300);
+  const fullWith = firstTaken(5000, TD.BUFF_BY_ID.N14.mods, 300);
+  const lowWith = firstTaken(2500, TD.BUFF_BY_ID.N14.mods, 300);
+  assert.ok(Math.abs(fullWith / none - 1) < 0.05, '满血时 N14 不该减伤：×' + (fullWith / none).toFixed(3));
+  assert.ok(Math.abs(lowWith / none - 0.5) < 0.06, '低血时 N14 应当减伤一半：×' + (lowWith / none).toFixed(3));
+
+  /* ---- 低血回血：每回合 5%，且**从不越过 50% 线** ---- */
+  const regenRun = (hp) => {
+    const me = mk({ name: 'M', power: 1, agility: 1, speed: 50, hp: hp, mods: TD.BUFF_BY_ID.C46.mods });
+    const foe = mk({ name: 'F', power: 20, agility: 1, speed: 60, hp: 5000000, maxHp: 5000000 });
+    const r = Sim.simulate(me, foe);
+    const heals = (r.rounds || []).filter((x) => x.lowHpRegen);
+    const maxSeen = Math.max.apply(null, (r.rounds || []).map((x) => x.hpAfter && x.hpAfter[0]).filter((v) => v != null));
+    return { heals: heals.length, maxSeen: maxSeen, first: heals.length ? heals[0].heal : 0 };
+  };
+  const r1 = regenRun(2000);
+  assert.ok(r1.heals > 0, '低血时应当有回血回合');
+  assert.equal(r1.first, 250, '单次回血应当是 5% × 5000 = 250，实测 ' + r1.first);
+  assert.ok(r1.maxSeen <= 2500, '回血不该越过 50% 线（2500），实测最高 ' + r1.maxSeen);
+  const r2 = regenRun(1000);
+  assert.ok(r2.maxSeen <= 2500, '从 20% 起回血也不该越过 50% 线，实测 ' + r2.maxSeen);
+
+  /* ---- 低血吸血：满血不触发、低血触发 ---- */
+  const steal = (hp) => {
+    const me = mk({ name: 'M', power: 200, agility: 120, speed: 100, hp: hp, mods: TD.BUFF_BY_ID.C47.mods });
+    const foe = mk({ name: 'F', power: 1, agility: 1, speed: 1, hp: 5000000, maxHp: 5000000 });
+    const r = Sim.simulate(me, foe);
+    return (r.rounds || []).filter((x) => x.attacker === 0 && x.lifesteal).length;
+  };
+  assert.equal(steal(5000), 0, '满血时低血吸血不该触发');
+  assert.ok(steal(2000) > 0, '低血时应当触发低血吸血');
 });
 
 (async () => {

@@ -18,7 +18,8 @@
  *                 dodgeBonus, dodgeMul, takenMul, regenPct, lifestealPct, shellPct,
  *                 openerPowerMul/openerRounds/fatiguePowerMul,
  *                 mustHitFirst, firstSkillFree, openStrikePct,
- *                 deathSaves:[{healPct}], lowHpPowerMul/lowHpAgilityMul/lowHpSpeedMul/lowHpAt}
+ *                 emptyMaxHpMul, lowHpTakenMul, lowHpLifestealPct, lowHpRegenPct/lowHpRegenAt,
+ *                 lowHpPowerMul/lowHpAgilityMul/lowHpSpeedMul/lowHpAt}
  * ============================================================ */
 (function () {
   'use strict';
@@ -366,6 +367,10 @@
       out.dmg = Math.round(out.dmg * (100 - pct) / 100);
     }
     if (def.mods && def.mods.takenMul) out.dmg = Math.round(out.dmg * (1 + Number(def.mods.takenMul)));   // 塔 buff「铁布衫」
+    /* 塔 buff「铁血护盾 / 濒死觉悟」：**低血时**才减伤（与狂怒共用 lowHpAt 阈值）。 */
+    if (def.mods && def.mods.lowHpTakenMul && lowHpActive(def)) {
+      out.dmg = Math.round(out.dmg * (1 + Number(def.mods.lowHpTakenMul)));
+    }
     if (def.mech.includes('trialCore') && def.mechState.core) out.dmg = Math.round(out.dmg * 0.3);        // 题面·熔核：成型后受伤 −70%
     out.dmg = Math.max(1, out.dmg);
     return out;
@@ -495,7 +500,9 @@
           r.poisonApplied = true;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '毒藤缠绕'; r.noteSide = def.side;
         }
-        const lsPct = (att.mech.includes('lifesteal') ? 0.30 : 0) + (att.mods && Number(att.mods.lifestealPct) || 0);
+        let lsPct = (att.mech.includes('lifesteal') ? 0.30 : 0) + (att.mods && Number(att.mods.lifestealPct) || 0);
+        /* 低血吸血（濒死觉悟）：同样读 lowHpAt，按**攻击方当前血量**判定。 */
+        if (att.mods && att.mods.lowHpLifestealPct && lowHpActive(att)) lsPct += Number(att.mods.lowHpLifestealPct) || 0;
         if (lsPct > 0 && att.hp > 0) {                              // 血之渴望 / 血饮狂刀
           const heal = Math.min(att.maxHp - att.hp, healOf(att, dmg * lsPct));
           if (heal > 0) { att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
@@ -934,6 +941,25 @@
       const def = actor === A ? B : A;
       // 回合开始回复（药师「百草回春」/ 塔 buff「活血丹」「回春术」）
       const regenPct = (actor.mech.includes('regen') ? 0.03 : 0) + (actor.mods && Number(actor.mods.regenPct) || 0);
+      /* 塔 buff「浴血重生」：低血时每回合回血，但**最多回到 lowHpRegenAt 这条线**
+       *（把血线顶回阈值就停，不会靠回血脱出低血区）。 */
+      const lrPct = (actor.mods && Number(actor.mods.lowHpRegenPct) || 0);
+      if (lrPct > 0 && actor.hp > 0) {
+        const gate = Number(actor.mods.lowHpRegenAt) || 0.5;
+        if (actor.hp <= actor.maxHp * gate) {
+          const ceil = Math.max(1, Math.round(actor.maxHp * gate));
+          const room = Math.max(0, Math.min(actor.maxHp, ceil) - actor.hp);
+          if (room > 0) {
+            const heal = Math.min(room, healOf(actor, Math.max(1, Math.round(actor.maxHp * lrPct))));
+            if (heal > 0) {
+              actor.hp = Math.min(actor.maxHp, actor.hp + heal);
+              pushRound({ attacker: actor.side, action: 'regen', heal: heal, lowHpRegen: true,
+                noteText: '浴血重生', noteSide: actor.side });
+              if (B.hp <= 0 || A.hp <= 0) break;
+            }
+          }
+        }
+      }
       if (regenPct > 0 && actor.hp > 0 && actor.hp < actor.maxHp) {
         const heal = Math.min(actor.maxHp - actor.hp, healOf(actor, Math.max(1, Math.round(actor.maxHp * regenPct))));
         actor.hp += heal;

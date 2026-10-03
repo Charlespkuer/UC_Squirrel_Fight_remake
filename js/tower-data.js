@@ -762,6 +762,21 @@
     { id: 'C20', name: '狂怒', rarity: 2, kind: 'permanent',
       desc: '生命低于 50% 时攻击 +50%、敏捷 +20%、速度 +20%',
       mods: { lowHpPowerMul: 0.50, lowHpAgilityMul: 0.20, lowHpSpeedMul: 0.20, lowHpAt: 0.50 } },
+    /* ============================================================
+     * 与「狂怒」成套的低血 combo（空血上限 = 只抬高上限、不回血，
+     * 于是当前血量占比被压低，直接把血线推进狂怒的触发区间）。
+     *   emptyMaxHpMul   只加上限、不补血（每场开战时按新上限重算，空的那部分仍是空的）
+     *   lowHpRegenPct   低血时每回合回血，但**不超过 lowHpRegenAt 这条线**
+     *   lowHpTakenMul   低血时减伤
+     *   lowHpLifestealPct 低血时吸血
+     * 四项低血效果共用同一个 lowHpAt 阈值（与狂怒一致，便于玩家理解）。
+     * ============================================================ */
+    { id: 'C46', name: '浴血重生', rarity: 1, kind: 'permanent',
+      desc: '每场战斗开始时获得 50% 的空生命上限（不回血）；生命低于 50% 时每回合回复 5% 生命，最多回到 50%',
+      mods: { emptyMaxHpMul: 0.50, lowHpRegenPct: 0.05, lowHpRegenAt: 0.50, lowHpAt: 0.50 } },
+    { id: 'C47', name: '濒死觉悟', rarity: 2, kind: 'permanent',
+      desc: '每场战斗开始时获得 100% 的空生命上限（不回血）；生命低于 50% 时获得 20% 减伤与 20% 吸血',
+      mods: { emptyMaxHpMul: 1.00, lowHpTakenMul: -0.20, lowHpLifestealPct: 0.20, lowHpAt: 0.50 } },
     { id: 'C21', name: '暴击精通', rarity: 0, kind: 'permanent', desc: '暴击率 +10%', mods: { critBonus: 10 } },
     { id: 'C22', name: '闪避精通', rarity: 0, kind: 'permanent', desc: '闪避 +8%', mods: { dodgeBonus: 8 } },
     { id: 'C23', name: '轻身术', rarity: 0, kind: 'permanent', desc: '速度 +15%', mods: { speedMul: 0.15 } },
@@ -800,6 +815,13 @@
       desc: '接下来 3 场：无视环境词缀，并把负面环境词缀反弹给对手', mods: { envIgnore: 1, envReflect: 1 } },
     { id: 'N10', name: '避风斗篷', rarity: 1, kind: 'limited', uses: 10, endlessOnly: true,
       desc: '接下来 10 场：无视环境词缀', mods: { envIgnore: 1 } },
+    /* 低血 combo 的两条限次类（与狂怒成套；限次 10 场） */
+    { id: 'N13', name: '血之契约', rarity: 0, kind: 'limited', uses: 10, towerBattle: true,
+      desc: '下一场战斗开始时限生命上限 +100%（这部分是空的，不回血）',
+      mods: { emptyMaxHpMul: 1.00 } },
+    { id: 'N14', name: '铁血护盾', rarity: 1, kind: 'limited', uses: 10, towerBattle: true,
+      desc: '下一场战斗中生命低于 50% 时获得 50% 减伤',
+      mods: { lowHpTakenMul: -0.50, lowHpAt: 0.50 } },
     { id: 'C45', name: '天象之眼', rarity: 2, kind: 'permanent', endlessOnly: true,
       desc: '永远无视负面环境词缀并反弹给对手；敌方吃不到正向环境词缀（贪婪裂隙的试炼币收益保留，敌方不再获得生命加成）',
       mods: { envIgnore: 1, envReflect: 1, envDenyGood: 1 } },

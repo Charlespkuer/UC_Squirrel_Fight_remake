@@ -1122,11 +1122,15 @@
     const shown = gears.slice(gearSellPage * GEAR_SELL_PER, gearSellPage * GEAR_SELL_PER + GEAR_SELL_PER);
     const card = (g) => {
       const r = State.gearSellRange(g.quality);
-      return '<button class="gear-sell-card q' + g.quality + '" data-sell="' + esc(g.key) + '" aria-label="出售' + esc(g.name) + '">' +
-        '<span class="item-icon">' + gearImg(g) + (g.used ? '<span class="equipped-check">✓</span>' : '') + '</span>' +
+      const starred = State.isGearStarred(g);
+      return '<button class="gear-sell-card q' + g.quality + (starred ? ' starred' : '') + '" data-sell="' + esc(g.key) +
+        '" aria-label="' + (starred ? '已加星标，' : '') + '出售' + esc(g.name) + '">' +
+        '<span class="item-icon">' + gearImg(g) + (g.used ? '<span class="equipped-check">✓</span>' : '') +
+        (starred ? '<span class="gear-star" title="已加星标：不会被误融合或误出售">★</span>' : '') + '</span>' +
         '<span class="gear-sell-info"><b class="q' + g.quality + '">' + esc(g.name) + '</b>' +
         '<span class="gear-sell-price">' + r[0] + '~' + r[1] + ' 金松果</span>' +
-        '<span class="gear-sell-meta">' + QUALITY_LABEL[g.quality] + (g.used ? ' · 已装备' : '') + '</span></span></button>';
+        '<span class="gear-sell-meta">' + QUALITY_LABEL[g.quality] + (g.used ? ' · 已装备' : '') +
+        (starred ? ' · <b class="star-text">已加星标</b>' : '') + '</span></span></button>';
     };
     const head = '<div class="gear-sell-head">' +
       '<span>背包里共 <b>' + gears.length + '</b> 件装备（容量 ' + gears.length + '/' + State.gearCapacity() + '）</span>' +
@@ -1149,6 +1153,16 @@
   function askSellGear(key) {
     const g = State.myGears().find((x) => x.key === key);
     if (!g) { openGearSell(gearSellPage); return; }
+    /* 星标装备受保护：不给「出售」按钮，只能先取消星标。 */
+    if (State.isGearStarred(g)) {
+      modal('已加星标', '<p>【' + esc(g.name) + '】已加星标，不会被误出售或误融合。</p>' +
+        '<p class="small-label">想卖掉它，先点下面的「取消星标」。</p>',
+        [{ label: '取消星标', cls: 'gold', run: () => {
+            const r2 = State.toggleGearStar(key);
+            toast(r2.msg); openGearSell(gearSellPage);
+          } }, { label: '返回', cls: 'muted' }], { small: true });
+      return;
+    }
     const r = State.gearSellRange(g.quality);
     modal('出售装备', '<p>确定以 <b>' + r[0] + '~' + r[1] + '</b> 金松果出售【' + esc(g.name) + '】吗？</p>' +
       (g.used ? '<p class="small-label">这件装备正穿戴在身上。</p>' : ''),
@@ -1167,8 +1181,15 @@
       if(g.gem)buttons.push({label:'拆卸宝石（5金）',run:()=>{const r=State.unsocketGem(key);toast(r.msg);openGear(key);}});
       else buttons.push({label:'镶嵌宝石',cls:'gold',run:()=>socketGemDialog(key)});
     }
-    buttons.push({label:'出售',cls:'muted',run:()=>notice('确定以 '+(State.gearSellRange(State.gearQuality(g))[0])+'~'+(State.gearSellRange(State.gearQuality(g))[1])+' 金松果出售【'+g.name+'】吗？',[{label:'出售',run:()=>{const got=State.sellGear(key);toast('卖出【'+g.name+'】，获得 '+got+' 金松果');openGears(gearPage);}},{label:'返回',cls:'muted'}])},{label:'返回',cls:'muted'});
-    modal('我的装备',content,buttons);
+    /* 星标：防止手滑把好装备卖掉/合掉（融合与出售都会跳过星标装备）。 */
+    const starred = State.isGearStarred(g);
+    buttons.push({label: starred ? '取消星标' : '加星标（防误合/误卖）', cls: starred ? 'gold' : 'muted',
+      run:()=>{const r=State.toggleGearStar(key);toast(r.msg);openGear(key);}});
+    if(!starred){
+      buttons.push({label:'出售',cls:'muted',run:()=>notice('确定以 '+(State.gearSellRange(State.gearQuality(g))[0])+'~'+(State.gearSellRange(State.gearQuality(g))[1])+' 金松果出售【'+g.name+'】吗？',[{label:'出售',run:()=>{const got=State.sellGear(key);toast('卖出【'+g.name+'】，获得 '+got+' 金松果');openGears(gearPage);}},{label:'返回',cls:'muted'}])});
+    }
+    buttons.push({label:'返回',cls:'muted'});
+    modal((starred ? '★ ' : '') + '我的装备', content + (starred ? '<p class="small-label star-text">已加星标：不会被误融合或误出售。</p>' : ''), buttons);
   }
   // 镶嵌宝石：列出背包里各级宝石供选择，镶嵌免费
   function socketGemDialog(key) {

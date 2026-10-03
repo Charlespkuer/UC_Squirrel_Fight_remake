@@ -311,3 +311,12 @@
   object-fit:contain;
   flex:none;
 }
+
+/* 装备星标（防误合 / 误卖） */
+.gear-star{
+  position:absolute;top:-6px;left:-6px;font-size:18px;line-height:1;color:#ffd323;
+  text-shadow:0 0 3px #000,0 0 6px #b8860b;pointer-events:none;
+}
+.gear-sell-card.starred{border-color:#ffd323;box-shadow:0 0 6px rgba(255,211,35,.55)}
+.gear-sell-card .item-icon{position:relative}
+.star-text{color:#ffd323}

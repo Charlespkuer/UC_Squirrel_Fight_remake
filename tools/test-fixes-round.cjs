@@ -3385,7 +3385,8 @@ test('需求54：挥金如土可重复 / 传奇商店降权 / 终焉烙印终乘
   const f0 = TD.legendWeightFactor({});
   const f1 = TD.legendWeightFactor({ permanent: [{ id: 'C36' }] });
   const f3 = TD.legendWeightFactor({ permanent: [{ id: 'C14' }, { id: 'C36' }, { id: 'C37' }] });
-  const allOwn = { permanent: [{ id: 'C14' }, { id: 'C36' }, { id: 'C37' }, { id: 'C49' }] };
+  const allOwn = { permanent: [{ id: 'C14' }, { id: 'C36' }, { id: 'C37' }, { id: 'C49' }],
+    instantIds: [{ id: 'C51', count: 1 }] };
   const fAll = TD.legendWeightFactor(allOwn);
   assert.equal(f0, 1, '没拿过传奇时系数应当是 1');
   assert.ok(f1 < f0, '拿到 1 条传奇后系数应当下降：' + f1 + ' vs ' + f0);
@@ -3407,6 +3408,7 @@ test('需求54：挥金如土可重复 / 传奇商店降权 / 终焉烙印终乘
     const r = T._debugRun('endless');
     r.permanent = []; r.limited = []; r.slotFreeIds = []; r.pickBuffIds = [];
     if (owned.length) T._debugRun('endless').permanent = owned.map((id) => ({ id: id, stacks: 1 }));
+    T._debugRun('endless').instantIds = [{ id: 'C51', count: 1 }];   // 即时类传奇也要算「已拥有」
     let leg = 0, epic = 0, tot = 0;
     for (let i = 0; i < 3000; i++) {
       for (const sl of (T.rollShopSlotsOf(T._debugRun('endless'), 0) || [])) {
@@ -3420,6 +3422,94 @@ test('需求54：挥金如土可重复 / 传奇商店降权 / 终焉烙印终乘
   assert.ok(m0.leg > 0, '未拥有时应当能刷到传奇：' + m0.leg);
   assert.equal(mAll.leg, 0, '全部可重复传奇到手后不该再刷到传奇：' + mAll.leg);
   assert.ok(mAll.epic > 0.05, '史诗仍应当正常出现（货架不会退化成纯普通）：' + mAll.epic);
+  T.abandon('endless');
+});
+
+test('需求55：装备星标防误合误卖 / 天命所归（传奇即时）/ 战斗奖励稀有度上调', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+
+  /* ① 装备星标：加了星的装备不能被卖掉 / 融合掉 */
+  S.newGame('star' + Math.random());
+  S.state().level = 70;
+  S.addGear(1); S.addGear(2); S.addGear(3);
+  const gears = S.myGears();
+  assert.ok(gears.length >= 3, '应当造出至少 3 件装备：' + gears.length);
+  const g0 = gears[gears.length - 1];
+  assert.equal(S.isGearStarred(g0), false, '默认没有星标');
+  const on = S.toggleGearStar(g0.key);
+  assert.ok(on.ok && on.starred === true, '加星标应当成功：' + JSON.stringify(on));
+  assert.equal(S.isGearStarred(S.myGears().find((x) => x.key === g0.key)), true, '加星后应当读得到');
+  /* 出售被拦（返回 0 且装备还在） */
+  const before = S.state().gears.length;
+  assert.equal(S.sellGear(g0.key), 0, '星标装备不该被卖掉');
+  assert.equal(S.state().gears.length, before, '星标装备应当还在');
+  /* 融合被拦 */
+  const others = S.myGears().filter((x) => x.key !== g0.key).slice(0, 2);
+  if (others.length === 2) {
+    const r = S.mergeGears([g0.key, others[0].key, others[1].key]);
+    assert.equal(r.ok, false, '含星标装备的融合应当被拒绝');
+    assert.match(r.msg, /星标/, '提示里应当说明是星标挡住了：' + r.msg);
+  }
+  /* 取消星标后可以正常卖 */
+  S.toggleGearStar(g0.key);
+  assert.equal(S.isGearStarred(S.myGears().find((x) => x.key === g0.key)), false, '取消后应当读不到星标');
+  assert.ok(S.sellGear(g0.key) > 0, '取消星标后应当能正常出售');
+  /* 星标要能存进存档 */
+  S.addGear(4);
+  const g1 = S.myGears()[S.myGears().length - 1];
+  S.toggleGearStar(g1.key);
+  S.save();
+  assert.equal(S.isGearStarred(S.myGears().find((x) => x.key === g1.key)), true, '存档往返后星标应当保留');
+  const raw = JSON.parse(c.localStorage.getItem(S.saveKey) || '{}');
+  assert.ok((raw.gears || []).some((x) => x.starred === true), '存档里应当有 starred 字段');
+
+  /* ② 天命所归（C51）：传奇·即时·可重复；史诗/传奇 ×2、普通 ×0.5 */
+  const c51 = TD.BUFF_BY_ID.C51;
+  assert.ok(c51, 'C51 应当存在');
+  assert.equal(c51.name, '天命所归', 'C51 名称');
+  assert.equal(c51.rarity, 3, 'C51 应当是传奇');
+  assert.equal(c51.kind, 'instant', 'C51 应当是即时类');
+  assert.equal(c51.repeatable, true, 'C51 应当可重复获得');
+  assert.equal(c51.mods.epicMul, 2, '史诗档 ×2');
+  assert.equal(c51.mods.legendMul, 2, '传奇档 ×2');
+  assert.equal(c51.mods.commonMul, 0.5, '普通档 ×0.5');
+  assert.ok(c51.mods.repeatWeight > 0 && c51.mods.repeatWeight < 1, '应当有重复获得惩罚：' + c51.mods.repeatWeight);
+  assert.ok(TD.endlessPool.some((b) => b.id === 'C51'), 'C51 应当在无尽塔池');
+  /* 权重真的变（普通降、史诗/传奇升） */
+  const w0 = TD.tiltWeights(1, {}), w1 = TD.tiltWeights(1, { rarityBoost: 1 });
+  assert.ok(w1[0] < w0[0], '普通档应当下降：' + w1[0] + ' vs ' + w0[0]);
+  assert.ok(w1[2] > w0[2] * 1.8, '史诗档应当接近翻倍：' + w1[2] + ' vs ' + w0[2]);
+  assert.ok(w1[3] > w0[3] * 1.8, '传奇档应当接近翻倍：' + w1[3] + ' vs ' + w0[3]);
+  /* 即时获得会累加到 run 上（本局永久），并记进 instantIds */
+  S.newGame('c51' + Math.random());
+  const st = S.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  try { T.abandon('endless'); } catch (e) {}
+  T.startEndlessRun();
+  const r = T._debugRun('endless');
+  r.permanent = []; r.limited = []; r.slotFreeIds = [];
+  assert.equal(T.rarityBoostOf(T._debugRun('endless')).common, 1, '没拿过时为 1');
+  T.addBuff(T._debugRun('endless'), 'C51');
+  const after1 = T._debugRun('endless');
+  assert.equal(after1.rarityBoost, 1, '第 1 次获得应当记 1 层');
+  assert.equal((after1.instantIds || []).find((x) => x.id === 'C51').count, 1, 'instantIds 应当记 1');
+  assert.ok(T.rarityBoostOf(after1).epic === 2, '史诗系数应当是 2');
+  T.addBuff(T._debugRun('endless'), 'C51');
+  const after2 = T._debugRun('endless');
+  assert.equal(after2.rarityBoost, 2, '可重复获得：第 2 次应当记 2 层');
+  assert.ok(Math.abs(T.rarityBoostOf(after2).common - 0.25) < 1e-9, '2 层时普通系数 0.25');
+  /* 重复获得惩罚：已拥有的层数会被记账（pickByShopWeight 据此降权）。 */
+  assert.equal(T.instantOwnedCountOf(T._debugRun('endless'), 'C51'), 2,
+    '已获得 2 次应当记 2：' + T.instantOwnedCountOf(T._debugRun('endless'), 'C51'));
+
+  /* ③ 战斗奖励的稀有度：不再用第一页商店权重，而是约 10 币刷新后的水平 */
+  const natural = TD.tiltWeights(1, {});
+  const choice = TD.tiltWeights(TD.rerollTilt(10), {});
+  assert.ok(choice[2] > natural[2] * 1.15,
+    '战斗奖励的史诗出率应当明显高于第一页商店：' + choice[2] + ' vs ' + natural[2]);
+  assert.ok(choice[0] < natural[0], '战斗奖励的普通出率应当低于第一页商店：' + choice[0] + ' vs ' + natural[0]);
+  assert.ok(choice[3] > natural[3], '传奇也应当更高：' + choice[3] + ' vs ' + natural[3]);
   T.abandon('endless');
 });
 

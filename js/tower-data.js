@@ -321,6 +321,7 @@
     for (const b of run.limited || []) if (b && b.id) ids.add(b.id);
     for (const id of run.permSlotIds || []) ids.add(id);
     for (const id of run.pickBuffIds || []) ids.add(id);
+    for (const row of run.instantIds || []) if (row && row.id) ids.add(row.id);
     let n = 0;
     for (const id of ids) { const def = BUFF_BY_ID[id]; if (def && def.rarity === 3) n++; }
     return n;
@@ -332,6 +333,8 @@
     for (const b of run.permanent || []) if (b && b.id) own.add(b.id);
     for (const b of run.limited || []) if (b && b.id) own.add(b.id);
     for (const id of run.permSlotIds || []) own.add(id);
+    /* 即时类（「天命所归」）不进 permanent/limited，单独记在 instantIds 上。 */
+    for (const row of run.instantIds || []) if (row && row.id) own.add(row.id);
     const need = BUFFS.filter((b) => b.rarity === 3 && b.repeatable);
     return need.length > 0 && need.every((b) => own.has(b.id));
   }
@@ -344,10 +347,23 @@
   }
   /** 倾斜后的稀有度权重（p=1 时就是自然掉率的 RARITY_WEIGHTS）。
    *  run 可选：传入时按「已拥有传奇数」压低传奇那一档（需求 2 / 4）。 */
+  /** 「天命所归」(C51) 累计提供的稀有度加成：普通 ×commonMul^n、史诗/传奇 ×epicMul^n。 */
+  function rarityBoostOf(run) {
+    const n = Math.max(0, Math.floor(Number(run && run.rarityBoost) || 0));
+    if (!n) return { common: 1, epic: 1, legend: 1 };
+    const m = BUFF_BY_ID.C51.mods;
+    return {
+      common: Math.pow(Number(m.commonMul) || 0.5, n),
+      epic: Math.pow(Number(m.epicMul) || 2, n),
+      legend: Math.pow(Number(m.legendMul) || 2, n),
+    };
+  }
   function tiltWeights(tilt, run) {
     const p = Math.max(0, Number(tilt) || 1);
-    const legendMul = (LEGEND_BASE_WEIGHT / RARITY_WEIGHTS[3]) * legendWeightFactor(run);
-    const w = RARITY_WEIGHTS.map((v, i) => (i === 3 ? v * legendMul : v) * Math.pow(p, i));
+    const boost = rarityBoostOf(run);
+    const legendMul = (LEGEND_BASE_WEIGHT / RARITY_WEIGHTS[3]) * legendWeightFactor(run) * boost.legend;
+    const slotMul = (i) => (i === 0 ? boost.common : i === 2 ? boost.epic : 1);
+    const w = RARITY_WEIGHTS.map((v, i) => (i === 3 ? v * legendMul : v * slotMul(i)) * Math.pow(p, i));
     const total = w.reduce((a, b) => a + b, 0) || 1;
     return w.map((v) => v / total);
   }
@@ -934,6 +950,18 @@
       desc: '每层拥有一次复活甲：复活时回复当前生命上限的 50%，且本场战斗力量、敏捷、速度均 +50%',
       mods: { revivePct: 0.50, reviveStatMul: 0.50 } },
     /* —— 第 1 项新增：与经济系统挂钩的 buff（仅无尽；instant 的拿到就结算，不占永久 5 格） —— */
+    /* ============================================================
+     * 传奇·即时「天命所归」：获得时立刻生效，**本局永久**改变后续的稀有度分布。
+     *   epicMul / legendMul = 2   → 史诗与传奇档权重 ×2
+     *   commonMul = 0.5           → 普通档权重 ×0.5
+     * 影响范围：战斗奖励的选项池（rollChoices）与试炼商店货架（rollShopSlots）。
+     * 可重复获得，但重复获得概率降低（repeatWeight 走加权抽取，越拿越低）。
+     * ============================================================ */
+    { id: 'C51', name: '天命所归', rarity: 3, kind: 'instant', endlessOnly: true, repeatable: true,
+      desc: '立即生效：本局战斗奖励与商店的史诗/传奇出率 ×2、普通出率 ×0.5（可重复获得，重复获得概率递减）',
+      /* repeatWeight：已拥有时，它被抽中的权重乘这个系数（叠加层数次幂）。
+       * 「天命所归」可以重复获得，但每多拿一层就更难再刷到。 */
+      mods: { rarityBoost: 1, epicMul: 2, legendMul: 2, commonMul: 0.5, repeatWeight: 0.35 } },
     { id: 'E01', name: '立即进货', rarity: 1, kind: 'instant', endlessOnly: true, desc: '立刻开一次试炼商店（不影响 5 层一次的结算点）', mods: { openShop: 1 } },
     { id: 'E02', name: '试炼补贴', rarity: 0, kind: 'instant', endlessOnly: true, desc: '立刻获得 60 试炼币', mods: { instantCoins: 60 } },
     { id: 'E03', name: '财源滚滚', rarity: 1, kind: 'instant', endlessOnly: true, desc: '立刻获得 120 试炼币', mods: { instantCoins: 120 } },
@@ -1146,12 +1174,16 @@
   function poolRoster(b) {
     /* 挑战塔专属：**只**进挑战塔 —— 按需求这一条是硬约束，优先判定。 */
     if (b.towerOnly) return ['T.choice'];
-    if (b.kind === 'instant') return [];                       // 一次生效类不进任何货架/选择池
-    /* 「只战斗出」/「商店不卖」必须在无尽专属那条**之前**判定 ——
+    /* 「只战斗出」/「商店不卖」要在无尽专属那条**之前**判定 ——
      * 否则带 permSlot 之类无尽专属 mod 的条目会先命中无尽分支，
      * 于是 battleOnly 被忽略、照样上商店货架（仓库钥匙 C31 就是这样漏进商店的）。 */
     if (b.battleOnly || b.shopBanned) return ['E.choice'];
-    /* 无尽专属：环境词缀 / 试炼币 / 商店 / 重新挑战币 / 结算相关。 */
+    /* 无尽专属：环境词缀 / 试炼币 / 商店 / 重新挑战币 / 结算相关。
+     * **即时类（E 系列回收 / C51 天命所归）也要能出现在无尽塔的战斗奖励里** ——
+     * 它们不进商店货架（不能买），但必须能被「抽到并立刻结算」。
+     * 曾经这里写成「instant → 一律 []」，把整条 E 系列（立即进货 / 试炼补贴 /
+     * 财源滚滚 / 重整旗鼓 / 背水一战 / 挫锐 / 卸甲）全部变成了拿不到的死数据。 */
+    if (b.kind === 'instant') return b.endlessOnly ? ['E.choice'] : ['T.choice', 'E.choice'];
     if (b.endlessOnly || hasEndlessOnlyMod(b)) return ['E.choice', 'E.shop'];
     /* 通用增益：两条塔的场间选择 + 无尽塔商店（挑战塔没有商店）。 */
     return ['T.choice', 'E.choice', 'E.shop'];
@@ -1236,7 +1268,7 @@
     SHOP_PRICE_OFFSET, rollShopPrice,
     rerollPriceAt, rerollTilt, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,
     PILL_BATTLES, PILL_SLOTS, pillEffect, shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,
-    legendWeightFactor, legendOwnedCount, allRepeatableLegendsOwned, LEGEND_BASE_WEIGHT,
+    legendWeightFactor, legendOwnedCount, allRepeatableLegendsOwned, LEGEND_BASE_WEIGHT, rarityBoostOf,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,

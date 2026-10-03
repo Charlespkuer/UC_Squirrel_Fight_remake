@@ -139,6 +139,8 @@
       if (used) usedSlots.add(info.type);
       const entry = { id: info.id, key, used, ext: normalizeExt(g.ext) };
       if (g.orange === true) entry.orange = true;
+      /* 星标：标记后不会被误融合 / 误出售（防止手滑把好装备合掉）。 */
+      if (g.starred === true) entry.starred = true;
       const gemLv = g.gem && gemLevel(g.gem.id);
       if (gemLv) entry.gem = { id: 100 + gemLv, ext: Math.max(1, Math.min(99, integer(g.gem.ext, 1, 1))) };
       return entry;
@@ -1108,9 +1110,28 @@
   const gearSellPrice = (quality) => { const [lo, hi] = gearSellRange(quality); return lo + Math.floor(Math.random() * (hi - lo + 1)); };
   /** 品质需要按实例算：橙装是写在实例上的 quality=4。 */
   function gearQuality(gear) { return gear && gear.orange === true ? 4 : (gearInst(gear.id) || {}).quality || 0; }
+  /** 切换星标：标上之后不会被误融合 / 误出售。 */
+  function toggleGearStar(gearKey) {
+    const g = S.gears.find((x) => x.key === gearKey);
+    if (!g) return { ok: false, msg: '装备不存在' };
+    g.starred = g.starred !== true;
+    save();
+    return { ok: true, starred: g.starred === true,
+      msg: g.starred ? '已加星标：不会被误融合或误出售' : '已取消星标' };
+  }
+  function isGearStarred(gear) {
+    if (!gear) return false;
+    if (gear.starred === true) return true;
+    const key = gear.key;
+    if (!key) return false;
+    const g = (S.gears || []).find((x) => x.key === key);
+    return !!(g && g.starred === true);
+  }
   function sellGear(gearKey) {
     const i = S.gears.findIndex((x) => x.key === gearKey);
     if (i < 0) return 0;
+    /* 星标装备不参与出售（返回 0，界面据此提示）。 */
+    if (S.gears[i].starred === true) return 0;
     const gold = gearSellPrice(gearQuality(S.gears[i]));
     S.gears.splice(i, 1);
     addGold(gold); save();
@@ -1272,6 +1293,10 @@
     const gs = keys.map((k) => S.gears.find((x) => x.key === k)).filter(Boolean);
     if (gs.length !== 3) return { ok: false, msg: '装备不存在' };
     if (gs.some((g) => g.used)) return { ok: false, msg: '不能融合已穿戴的装备' };
+    /* 星标装备受保护：不参与融合（防止误合成）。 */
+    if (gs.some((g) => g.starred === true)) {
+      return { ok: false, msg: '有装备已加星标（防误合），先取消星标再融合' };
+    }
     if (S.goldPoint < 50) return { ok: false, msg: '融合费用不足（50金松果）' };
     if (gs.some((g) => g.orange)) return { ok: false, msg: '传说装备已是最高品质' };
     const part = gearPart(gs[0].id), q = gearPartQuality(gs[0].id);
@@ -2722,6 +2747,7 @@
     undoPoint, undoDepth, hasUpgradableWS,
     weaponList,
     gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, extText, randomExt,
+    toggleGearStar, isGearStarred,
     gemLevel, GEM_MERGE_RATES, rollGemDrop, mergeGems, socketGem, unsocketGem,
     totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, gainRandomWS, wsChoices, wsInfo,
     pendingWS, currentWSChoices, chooseWS, chooseWSRandom,

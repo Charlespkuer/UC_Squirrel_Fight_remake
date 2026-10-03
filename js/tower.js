@@ -160,6 +160,10 @@
       run.winStatAgility = Math.max(0, Number(run.winStatAgility) || 0);
       run.winStatSpeed = Math.max(0, Number(run.winStatSpeed) || 0);
       run.winTakenMul = Math.max(0, Number(run.winTakenMul) || 0);
+      run.rarityBoost = Math.max(0, Math.floor(Number(run.rarityBoost) || 0));
+      run.instantIds = Array.isArray(run.instantIds)
+        ? run.instantIds.filter((x) => x && typeof x.id === 'string').map((x) => ({ id: x.id, count: Math.max(1, Math.floor(Number(x.count) || 1)) }))
+        : [];
       /* 血量绝对值口径：剩余血量与「最近一次已知上限」（回血/裁血的基准）。 */
       run.hpAbs = Math.max(0, Math.round(Number(run.hpAbs) || 0));
       run.repeatAt = Number(run.repeatAt) >= 0 ? Number(run.repeatAt) : -1;
@@ -1620,6 +1624,9 @@
     if (run.pendingPick && run.pendingPick.buffId === buff.id) return false;
     return !(run.permanent || []).some((b) => b.id === buff.id);
   }
+  /** 战斗奖励的稀有度倾斜：按「花了这么多币刷新后」的商店水平取。
+   *  10 币 = rerollTilt 调一次 1.20，实测史诗档从 10.1% 抬到约 17%。 */
+  const CHOICE_TILT_PAID = 10;
   /** 战斗获得的选项目数：基础 3，由「抉择扩充」(C50) 每层 +1，上限 6。
    *  可叠 3 层 → 三选一 / 四选一 / 五选一 / 六选一。 */
   function choiceSlotsOf(run) {
@@ -1639,16 +1646,17 @@
      * 排除 N08「补给」—— 它是单场开局回血的一次性卡，不算真正的限次增益。 */
     const limitedLeft = () => pool.filter((b) => b.kind === 'limited' && b.id !== 'N08' &&
       !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));
-    /* 场间三选一也用**同一份稀有度权重**（原来调 rollRarity() 没传权重 → 走的是
-     * 均匀分布，传奇占比远高于自然掉率）。需求 2 / 4 的传奇降权在这里同样生效。 */
-    const choiceWeights = TD.tiltWeights(1, run);
+    /* 战斗奖励的选项池：**不再用第一页商店（自然掉率）的权重**，而是按
+     * 「约 10 币刷新后的商店」水平取（需求：当前战斗 buff 质量偏低）。
+     * 同时仍然吃到传奇降权（需求 2 / 4）与「天命所归」的稀有度加成（需求 2 本轮）。 */
+    const choiceWeights = TD.tiltWeights(TD.rerollTilt(CHOICE_TILT_PAID), run);
     const slots = choiceSlotsOf(run);
     for (let slot = 0; slot < slots; slot++) {
       let rarity = rollRarity(choiceWeights);
       let list = available(rarity);
       if (!list.length) list = pool.filter((b) => !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));   // 该稀有度抽空时放宽
       if (!list.length) break;
-      const buff = pickByShopWeight(list);
+      const buff = pickByShopWeight(list, run);
       if (!buff) break;
       taken.add(buff.id);
       picked.push({ type: 'buff', id: buff.id });
@@ -1658,7 +1666,7 @@
     if (picked.length && !hasLimited) {
       const list = limitedLeft();
       if (list.length) {
-        const buff = list[Math.floor(Math.random() * list.length)];
+        const buff = pickByShopWeight(list, run);
         taken.delete(picked[picked.length - 1].id);
         picked[picked.length - 1] = { type: 'buff', id: buff.id };
         taken.add(buff.id);
@@ -1873,6 +1881,13 @@
   }
   /** 瞬时经济 buff（立即进货 / 立即得试炼币 / 全场五折）。 */
   function applyInstant(run, buff) {
+    /* 「天命所归」：即时类，但效果要留在 run 上（本局后续的稀有度分布）——
+     * 所以即时结算里显式累加层数，而不是只当一次性的数值结算。 */
+    if (buff.mods && buff.mods.rarityBoost) {
+      run.rarityBoost = Math.max(0, Math.floor(Number(run.rarityBoost) || 0)) + 1;
+      bumpInstant(run, buff.id);
+      return { ok: true, msg: '本局稀有度提升已生效（' + run.rarityBoost + ' 层）', rarityBoost: run.rarityBoost };
+    }
     const m = buff.mods || {};
     const out = { ok: true, buff, instant: true };
     if (m.instantCoins) { run.coins = Math.max(0, (run.coins || 0) + m.instantCoins); out.coins = m.instantCoins; }
@@ -1931,14 +1946,28 @@
    * p 由这次刷新实际付掉的钱决定（每 10 币 ×1.25）。整架货一起变好，不出现结构突变。 */
   /** 从一个候选里抽一件，按 buff.shopWeight 加权（默认 1）—— 用来压低个别 overpowered
    * 增益在商店出现的概率（例如不死鸟）。权重只影响「谁被抽中」，不影响稀有度倾斜。 */
-  function pickByShopWeight(list) {
+  function pickByShopWeight(list, run) {
     if (!list || !list.length) return null;
     if (list.length === 1) return list[0];
+    /* 权重 = shopWeight × 重复获得惩罚：
+     *   repeatable（可重复获得）的传奇增益，每已拥有 1 份，
+     *   被抽中的权重就再乘 repeatWeight（默认 0.35）—— 越拿越难刷到。 */
+    const weightOf = (b) => {
+      let w = Math.max(0, Number(b.shopWeight) || 1);
+      const rw = b.mods && Number(b.mods.repeatWeight);
+      if (run && rw > 0 && rw < 1) {
+        const owned = b.kind === 'instant'
+          ? instantOwnedCount(run, b.id)
+          : Math.max(0, stacksOf(run, b.id) - 1);
+        if (owned > 0) w *= Math.pow(rw, owned);
+      }
+      return w;
+    };
     let total = 0;
-    for (const b of list) total += Math.max(0, Number(b.shopWeight) || 1);
+    for (const b of list) total += weightOf(b);
     if (!(total > 0)) return list[Math.floor(Math.random() * list.length)];
     let roll = Math.random() * total;
-    for (const b of list) { roll -= Math.max(0, Number(b.shopWeight) || 1); if (roll < 0) return b; }
+    for (const b of list) { roll -= weightOf(b); if (roll < 0) return b; }
     return list[list.length - 1];
   }
   function rollShopSlots(run, paid) {
@@ -1962,7 +1991,7 @@
       }
       if (!list.length) list = pool.filter((b) => !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));
       if (!list.length) break;
-      const buff = pickByShopWeight(list);
+      const buff = pickByShopWeight(list, run);
       if (!buff) break;
       taken.add(buff.id);
       /* 需求 2：价格在开店时摇一次并固定到槽位上 —— 界面显示的就是实际扣费的价。 */
@@ -1974,7 +2003,7 @@
     if (slots.length && !slots.some((sl) => isLimited(sl.id))) {
       const cand = pool.filter((b) => b.kind === 'limited' && b.id !== 'N08' && !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));
       if (cand.length) {
-        const buff = pickByShopWeight(cand);
+        const buff = pickByShopWeight(cand, run);
         taken.delete(slots[slots.length - 1].id);
         slots[slots.length - 1] = { id: buff.id, sold: false, price: D().rollShopPrice(D().shopPrice(buff)) };
         taken.add(buff.id);
@@ -2282,6 +2311,21 @@
     const c07 = stacksOf(run, 'C07');
     const cap = c07 ? (D().BUFF_BY_ID.C07.mods.winMaxHpCap || 0.30) * c07 * globalMul(run) : 0;
     return Math.min(cap, Math.max(0, Number(run.winMaxHp) || 0));
+  }
+  /** 记一次「即时类已获得」（用于重复获得概率递减）。 */
+  function bumpInstant(run, id) {
+    if (!run || !id) return;
+    run.instantIds = Array.isArray(run.instantIds) ? run.instantIds : [];
+    const row = run.instantIds.find((x) => x && x.id === id);
+    if (row) row.count = Math.max(1, Math.floor(Number(row.count) || 1)) + 1;
+    else run.instantIds.push({ id: id, count: 1 });
+  }
+  /** 某个**即时类**增益本局已获得的次数（即时类不进 permanent/limited，另记在 instantIds 上）。 */
+  function instantOwnedCount(run, id) {
+    if (!run) return 0;
+    let n = 0;
+    for (const row of run.instantIds || []) if (row && row.id === id) n += Math.max(1, Math.floor(Number(row.count) || 1));
+    return n;
   }
   function permUsed(run) {
     const list = (run && run.permanent) || [];
@@ -2772,6 +2816,10 @@
     ownableOf: (run, buff) => ownable(run || endless().run, buff),
     /* 只读：当前战斗奖励的选项目数（基础 3 + 抉择扩充层数，上限 6）。 */
     choiceSlotsOf: (run) => choiceSlotsOf(run || endless().run),
+    /* 只读：本局「天命所归」累计提供的稀有度系数。 */
+    rarityBoostOf: (run) => D().rarityBoostOf(run || endless().run),
+    /* 只读：某个即时类增益本局已获得的次数（重复获得概率递减用）。 */
+    instantOwnedCountOf: (run, id) => instantOwnedCount(run || endless().run, id),
     /* 只读：本局全局倍率（增幅水晶 C15 的 globalMul^层数）。
      * 成长类增益的增量与上限都要乘它，暴露出来便于界面/测试用同一口径核算。 */
     globalMulOf: (run) => globalMul(run || endless().run),

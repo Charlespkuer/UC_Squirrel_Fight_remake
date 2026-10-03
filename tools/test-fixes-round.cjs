@@ -2428,6 +2428,89 @@ test('需求44：幻影回响（环境）—— 只在三侠战生效，胜利�
   T.abandon('endless');
 });
 
+test('需求45：全局实际血量计数器 —— 被上限压下来的部分要真正写入，进场血量不高于局外上限', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  S.newGame('counter' + Math.random());
+  const st = S.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  T.startEndlessRun();
+  const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
+    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
+  const info = () => { const e = T.endlessInfo().run; return { cap: e.curMaxHp, hp: e.curHp, counter: e.hpAbs }; };
+  const fight = (hpAtEnd) => {
+    const nx = T.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '应当能取到下一场');
+    const me = mk(); nx.adjustMe(me);
+    const a = T._debugRun('endless');
+    const out = T.reportBattle('endless', a.attempt, true, hpAtEnd, a.lastMaxHp);
+    assert.ok(out.ok, '结算应当成功');
+    return { battleCap: a.lastMaxHp, outside: info() };
+  };
+
+  /* ⓪ 全新一局 + 空血上限：第一场进场血量就不能超过局外上限 */
+  {
+    T.abandon('endless');
+    T.startEndlessRun();
+    T.addBuff(T._debugRun('endless'), 'C47');
+    const nx0 = T.nextBattle('endless');
+    const me0 = mk(); nx0.adjustMe(me0);
+    const cap0 = T.endlessInfo().run.curMaxHp;
+    assert.ok(me0.maxHp > cap0, '战斗内上限应当高于局外上限：场内 ' + me0.maxHp + ' 场外 ' + cap0);
+    assert.ok(me0.hp <= cap0, '第一场进场血量就不该超过局外上限：hp=' + me0.hp + ' 局外上限=' + cap0);
+  }
+
+  /* ① 无临时上限时正常继承 */
+  let r = fight(3000);
+  assert.equal(r.outside.counter, 3000, '正常继承：计数器应当 = 剩余血量');
+  assert.equal(r.outside.hp, 3000, '局外显示血量应当 = 3000');
+
+  /* ② 战斗内上限被空血上限抬高 → 剩余血量超出局外上限时，**真裁**进计数器 */
+  T.addBuff(T._debugRun('endless'), 'C47');           // +50% 空血上限
+  r = fight(9000);
+  assert.ok(r.battleCap > r.outside.cap, '战斗内上限应当高于局外上限：场内 ' + r.battleCap + ' 场外 ' + r.outside.cap);
+  assert.equal(r.outside.counter, r.outside.cap,
+    '计数器必须被局外上限真裁：实测 ' + r.outside.counter + '，局外上限 ' + r.outside.cap);
+  assert.equal(r.outside.hp, r.outside.cap, '局外显示血量也要等于局外上限');
+
+  /* ③ 再进战斗时血量不得高于局外上限 */
+  let nx = T.nextBattle('endless');
+  let me = mk(); nx.adjustMe(me);
+  assert.ok(me.hp <= r.outside.cap,
+    '进场血量不得高于局外上限：hp=' + me.hp + ' 局外上限=' + r.outside.cap);
+  assert.equal(me.hp, r.outside.cap, '进场血量应当正好是计数器里那份');
+
+  /* ④ 局外上限**变小**时，计数器向下同步（不保留多出来的血） */
+  T.reportBattle('endless', T._debugRun('endless').attempt, true, me.maxHp, me.maxHp);
+  const before = info();
+  T._debugRun('endless').hpBonus = 0;                 // 失去长期上限加成（等价于卖掉/失去）
+  const after = info();
+  assert.ok(after.cap <= before.cap, '上限不该变大');
+  assert.ok(after.counter <= after.cap,
+    '计数器必须向下同步到新上限：计数器 ' + after.counter + ' 上限 ' + after.cap);
+
+  /* ⑤ 只向下同步：上限变大不会凭空补血 */
+  T._debugRun('endless').hpAbs = 1500;
+  T._debugRun('endless').lastMaxHp = 5000;
+  T._debugRun('endless').baseMaxHp = 5000;
+  T.addBuff(T._debugRun('endless'), 'C29');           // +10% 长期上限
+  const grew = info();
+  assert.ok(grew.cap > 5000, '上限应当变大：' + grew.cap);
+  assert.equal(grew.counter, 1500, '上限变大不该给计数器补血，实测 ' + grew.counter);
+  assert.equal(grew.hp, 1500, '显示血量也不该被补');
+
+  /* ⑥ 战斗开始后的回复类 buff 另外累加（不受裁剪影响） */
+  const r6 = T._debugRun('endless');
+  r6.hpAbs = 1000;
+  /* 验证 healAbs：按最大生命百分比回血会**加**到计数器上 */
+  const beforeHeal = info().counter;
+  T.addBuff(T._debugRun('endless'), 'N08');           // 补给类：开战回血
+  T.nextBattle('endless');                            // 开战 → 结算开战回血
+  assert.ok(info().counter >= beforeHeal,
+    '开战回血应当把计数器加上去（不受上限裁剪影响）：' + beforeHeal + ' → ' + info().counter);
+  T.abandon('endless');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

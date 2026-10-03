@@ -158,6 +158,76 @@ function fightOnce(h, out) {
 const results = [];
 function record(name, fn) { results.push([name, fn]); }
 
+/* ============================================================
+ * 本轮需求：复仇范围 / 存档入口去重 / 主页 EXP 贴图
+ * ============================================================ */
+
+record('复仇只收「普通挑战」的败绩：挑战塔 / 无尽塔 / 挑战关不计入', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
+  /* 直接把源码里的名单与判定函数抽出来跑，避免在测试里复制一份实现。 */
+  const decl = (/const REVENGE_EXCLUDED_KINDS = \[[^\]]*\];/.exec(src) || [])[0];
+  assert.ok(decl, '应当有 REVENGE_EXCLUDED_KINDS 名单');
+  const fn = (/function canRevenge\(r\) \{[^}]*\}/.exec(src) || [])[0];
+  assert.ok(fn, '应当有 canRevenge 判定');
+  const ctx = vm.createContext({});
+  const canRevenge = vm.runInContext(decl + '\n' + fn + '\ncanRevenge;', ctx, { filename: 'canRevenge.js' });
+
+  /* 三类塔/关卡的败绩一律不可复仇 */
+  for (const kind of ['tower', 'endless', 'stage']) {
+    assert.equal(canRevenge({ kind: kind, winner: 1 }), false, kind + ' 的败绩不该计入复仇');
+  }
+  /* 普通挑战、竞技场、天梯、切磋、师徒的败绩可以复仇 */
+  for (const kind of ['challenge', 'arena', 'rank', 'friend', 'master']) {
+    assert.equal(canRevenge({ kind: kind, winner: 1 }), true, kind + ' 的败绩应当可复仇');
+  }
+  /* 胜绩与无效记录都不行 */
+  assert.equal(canRevenge({ kind: 'challenge', winner: 0 }), false, '胜绩不该进复仇');
+  assert.equal(canRevenge(null), false, '空记录不该进复仇');
+  assert.equal(canRevenge({ kind: 'revenge', winner: 1 }), false, '复仇本身再失败不该再进复仇');
+  /* 复仇标签必须复用同一个判定（口径不能有两份） */
+  assert.ok(/list\.filter\(canRevenge\)/.test(src), '复仇页应当直接用 canRevenge 过滤');
+  assert.ok(/const rev=tab==='revenge'&&canRevenge\(r\)/.test(src),
+    '「再次挑战」按钮也应当用同一个判定');
+  /* 录像标签不受影响：这三类仍要能在「消息」里看到 */
+  assert.ok(!/if\(tab==='messages'\)/.test(src), '「消息」标签不该按类型过滤');
+  assert.ok(/KIND_LABEL/.test(src), '消息卡片应当标明战斗类型');
+});
+
+record('系统页去掉「从磁盘载入」（与「导入存档」重复）', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
+  /* 只查**按钮调用**，不查注释（注释里会提到这个被删掉的旧按钮）。 */
+  assert.ok(!/btn\('[^']*', 'save-import'/.test(src), '「从磁盘载入」按钮应当已删除');
+  assert.ok(!/\[data-action="save-import"\]/.test(src), '它的点击处理也应当已删除');
+  const diskBtn = (src.match(/从磁盘载入/g) || []).length;
+  assert.ok(diskBtn <= 1, '「从磁盘载入」最多只应出现在注释里，实测 ' + diskBtn + ' 处');
+  /* 「导入存档」保留，并在系统页上 */
+  assert.ok(/sysBtn\('导入存档','import'/.test(src), '「导入存档」应当保留');
+  /* 「从存档列表导入」是另一个功能（服务器 save/ 目录），要保留 */
+  assert.ok(/btn\('从存档列表导入', 'save-import-list'/.test(src), '「从存档列表导入」应当保留');
+  assert.ok(/\[data-action="save-import-list"\]/.test(src), '存档列表导入的处理应当保留');
+});
+
+record('主页 EXP 用原版贴图 draw-15（不再是文字）', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
+  const css = fs.readFileSync(path.join(ROOT, 'css', 'classic-refine.css'), 'utf8');
+  /* 贴图确实存在且就是「Exp」那一帧 */
+  assert.ok(fs.existsSync(path.join(ROOT, 'images/classic/sprites/draw-15.png')), 'draw-15.png 应当存在');
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'images/classic/manifest.json'), 'utf8'));
+  const frame = manifest.sprites['sprites/draw-15.png'];
+  assert.ok(frame && frame.sheet === 'draw' && frame.label === '15', 'manifest 里 draw-15 应当指向 draw 图集的第 15 帧');
+  /* 主页的 EXP 标签改成了 spr('draw', 15)，且不再有裸文本 EXP */
+  assert.ok(/home-exp-label[^>]*>' \+ spr\('draw', 15/.test(src), '主页 EXP 应当用 spr(\'draw\', 15) 渲染');
+  assert.ok(src.indexOf('>EXP<') < 0, '不该再有裸文本 EXP');
+  assert.ok(/role="img" aria-label="经验"/.test(src), '贴图要有可访问名称');
+  /* 尺寸按原比例缩放（125:81） */
+  const rule = (/\.home-exp-label \.home-exp-art\{([^}]*)\}/.exec(css) || [])[1] || '';
+  const w = Number((/width:\s*(\d+)px/.exec(rule) || [])[1]);
+  const h = Number((/height:\s*(\d+)px/.exec(rule) || [])[1]);
+  assert.ok(w > 0 && h > 0, '贴图尺寸应当在 CSS 里定死：' + rule);
+  assert.ok(Math.abs(w / h - 125 / 81) < 0.05, '宽高比应当贴近原图 125:81，实测 ' + w + ':' + h);
+});
+
+
 record('随机挑战战胜 → 点「确定」回到随机挑战页（不是主界面），并换一批新对手', () => {
   const h = harness();
   fightOnce(h, 0);

@@ -672,6 +672,14 @@
       if (counter.fakeDie) r.counterFakeDie = true;
       if (counter.reboundHurt) r.counterRebound = counter.reboundHurt;
       if (counter.thornsDmg) r.counterThorns = counter.thornsDmg;
+      /* 反击同样走 applyDamage：如果这一击被「先机预判」归零了（反击也算敌方对我方的
+       * 一次攻击，见需求确认），必须把标记一起带上来 —— 否则免疫**被悄悄消耗**、
+       * 战斗详情里既看不到这次归零，后面的普攻也不再触发，玩家只会觉得「这 buff 没生效」。 */
+      if (counter.firstHitZero) {
+        r.firstHitZero = true;
+        r.noteText = (r.noteText ? r.noteText + '·' : '') + '先机预判';
+        r.noteSide = counter.noteSide;
+      }
     }
 
     function playerLikeAction(att, def) {

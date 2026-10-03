@@ -1921,6 +1921,39 @@ test('需求38：永久增益替换弹窗改为竖排可滚动列表（不再横
   assert.equal(after.permanent.length, 8, '替换后仍是 8 项');
 });
 
+test('需求39：反击也算「敌方的一次攻击」——先机预判被反击消耗时也要可见', () => {
+  const c = setup();
+  const Sim = c.Sim;
+  const mk = (o) => Object.assign({ name: 'X', level: 50, power: 100, agility: 50, speed: 50,
+    hp: 6000, maxHp: 6000, weapons: [], skills: [], effects: {},
+    baseStats: { power: 100, agility: 50, speed: 50 } }, o);
+  /* 场景：我方带「先机预判」且必中；敌方先手、威力压到 1（它的反击算出来是 0 伤害，
+   * 不会生成归零回合），于是我方的免疫只能被敌方**主动普攻**消耗。 */
+  let seen = 0;
+  for (let t = 0; t < 60; t++) {
+    const hero = mk({ name: '我方', speed: 100, agility: 1, power: 200, hp: 30000, maxHp: 30000,
+      mods: { firstHitZero: 1, mustHitAll: 1 } });
+    const foe = mk({ name: '敌方', speed: 200, agility: 1, power: 1, hp: 30000000, maxHp: 30000000 });
+    foe.baseStats.power = 1;
+    const res = Sim.simulate(hero, foe);
+    const zero = (res.rounds || []).filter((r) => r.firstHitZero);
+    assert.equal(zero.length, 1, '整场应当恰好免一次，实测 ' + zero.length);
+    /* 语义：被标记归零的那一回合，**敌方那次攻击**没有造成伤害。
+     * 不能直接断言 `!zero[0].dmg` —— 触发免疫的那一回合可能是我方行动（反击已完成免疫），
+     * 那一回合我方造成的伤害照旧存在。 */
+    assert.ok(zero[0].firstHitZero === true, '该回合应当带归零标记');
+    assert.ok(!zero.some((r) => r.firstHitZero && r.attacker === 1 && r.dmg > 0),
+      '被归零的敌方攻击不该同时有伤害');
+    seen++;
+  }
+  assert.equal(seen, 60, '样本应当跑满');
+  /* 反向确认：反击触发的归零必须**带上主回合**（否则免疫被悄悄消耗、玩家看不到）。 */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'sim.js'), 'utf8');
+  assert.ok(/if \(counter\.firstHitZero\) \{/.test(src),
+    '反击的归零标记应当被带进主回合（可见）');
+  assert.ok(/r\.firstHitZero = true;/.test(src), '主回合要记下这次归零');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

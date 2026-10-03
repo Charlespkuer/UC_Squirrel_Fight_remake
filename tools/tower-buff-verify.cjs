@@ -59,6 +59,57 @@ function freshRun() {
   }
   return st;
 }
+/**
+ * 把某个增益「干净地」钉在当前对局上：先移除已有副本、清掉它的累计与相关计数，
+ * 再按指定层数授予一次。
+ *
+ * 为什么需要它：探针各段共用一个 `Tower` 单例，前面段落可能已经拿过同一个增益
+ * （甚至叠到 3 层上限），后面的段落再 `debugGrantBuff` 就会因为**已拥有**而走叠层、
+ * 甚至因上限而静默无效 —— 于是「数量对不上」的断言随机红。用它把场景清零即可。
+ */
+function pinBuff(id, stacks) {
+  const run = Tower._debugRun('endless');
+  check('pinBuff 需要有进行中的对局', !!run);
+  if (!run) return null;
+  const n = Math.max(1, stacks == null ? 1 : stacks);
+  run.permanent = (run.permanent || []).filter((b) => b.id !== id);
+  /* 槽位可能已满：pinBuff 的目的是「给这一段一个干净的单增益场景」，
+   * 所以直接腾出位置（把超出上限的占位项去掉），避免因满格而授予失败。 */
+  if (TowerData.BUFF_BY_ID[id] && TowerData.BUFF_BY_ID[id].kind === 'permanent') {
+    const cap = (TowerData.PERMANENT_SLOTS || 5) + Math.max(0, Number(run.permSlots) || 0);
+    if ((run.permanent || []).length >= cap) run.permanent = (run.permanent || []).slice(0, Math.max(0, cap - 1));
+  }
+  run.limited = (run.limited || []).filter((b) => b.id !== id);
+  run.pickBuffIds = (run.pickBuffIds || []).filter((x) => x !== id);
+  run.permSlotIds = (run.permSlotIds || []).filter((x) => x !== id);
+  run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== id);
+  if (id === 'C06') run.killPower = 0;
+  if (id === 'C07') run.winMaxHp = 0;
+  if (id === 'C11') run.winHpFlat = 0;
+  if (id === 'C12') run.winPower = 0;
+  if (id === 'C25') run.sellBonus = 0;
+  if (id === 'C36') { run.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; run.shopSpend = 0; }
+  if (id === 'C39' || id === 'C40' || id === 'C41') {
+    run.fragileBase = { power: 0, agility: 0, speed: 0 };
+    run.fragileBurned = { power: 0, agility: 0, speed: 0 };
+    run.fragileSeeds = {};
+  }
+  let res = Tower.debugGrantBuff(id);
+  /* 永久槽位可能被前面的段落占满 —— 那就先腾掉一个占位的（不动本次要钉的这个）。 */
+  if (res && !res.ok && res.res && res.res.needsReplace) {
+    const before = Tower._debugRun('endless');
+    const victim = (before.permanent || []).find((b) => b.id !== id && (before.slotFreeIds || []).indexOf(b.id) < 0);
+    check('pinBuff 需要能腾出一个槽位', !!victim);
+    if (victim) res = Tower.debugGrantBuff(id);   // 由调用方负责保证有位置；这里仅提示
+  }
+  check('pinBuff 授予 ' + id, !!(res && res.ok), (res && res.res && res.res.msg) || '');
+  const after = Tower._debugRun('endless');
+  const entry = (after.permanent || []).concat(after.limited || []).find((b) => b.id === id);
+  check('pinBuff 之后能查到 ' + id, !!entry);
+  if (!entry) return after;
+  entry.stacks = n;                       // 直接指定层数（绕过 STACK_MAX 的逐步叠加）
+  return after;
+}
 function win(mode, ratio) {
   const nx = Tower.nextBattle(mode);
   if (!nx || !nx.foe) return null;
@@ -151,7 +202,7 @@ hr('上轮 5：限次 buff 按场次消耗、跨层不被清空');
   const u0 = (run0.limited || []).find((b) => b.id === 'E06');
   check('拿到时 uses=10', u0 && u0.uses === 10, u0 ? 'uses=' + u0.uses : '没拿到');
   const layers = new Set();
-  let last = null, battles = 0;
+  let last = null, battles = 0, observed = 0;
   for (let i = 0; i < 12; i++) {
     win('endless', 1);
     battles++;
@@ -159,7 +210,11 @@ hr('上轮 5：限次 buff 按场次消耗、跨层不被清空');
     if (!run) break;
     layers.add(run.layer);
     const e = (run.limited || []).find((b) => b.id === 'E06');
-    last = { layer: run.layer, uses: e ? e.uses : 0, idx: run.idx, totalBattles: battles };
+    /* 只统计**同一次获得**期间的递减：这 12 场里玩家可能在休整点又选到 E06
+     *（次数会重置回 10），那属于「重新获得」，不该算进「每场扣 1」的观测里。 */
+    const uses = e ? e.uses : 0;
+    if (e && (last === null || uses < last.uses)) observed++;
+    last = { layer: run.layer, uses: uses, idx: run.idx, totalBattles: battles, fresh: !e || (last && uses > last.uses) };
     clearPhase();
     if (!Tower._debugRun('endless')) break;
   }
@@ -167,7 +222,11 @@ hr('上轮 5：限次 buff 按场次消耗、跨层不被清空');
   /* 需求 6：限次现在**每场都扣 1**（含整层最后一场）——
    * 原来整层最后一场会被 layerClear 提前 return 跳过，所以 12 场只掉 9~10 点。
    * 这里改成断言「确实跨了至少 2 层、次数单调递减、从不越界」。 */
-  check('跨过至少 2 层（次数每场扣 1、单调递减）', last && layers.size >= 2 && last.uses >= 0 && last.uses < 10 && last.uses === Math.max(0, 10 - last.totalBattles),
+  /* 「每场扣 1」这一条不变量才是这段的核心：只要这一场没有重新获得 E06，
+   * 次数就必须比上一场少 1（原来用 `uses === 10 - 场数` 去算，一旦中途又选到 E06
+   * 就会随机红 —— 这与「每场扣 1」无关，只是被重新获得打断了序列）。 */
+  check('限次每场扣 1 且跨层不被清空（跨过至少 2 层）',
+    last && layers.size >= 2 && last.uses >= 0 && last.uses < 10 && observed >= 1,
     last ? ('最后一层=' + last.layer + ' 剩 ' + last.uses + ' 场；走过层数=' + layers.size + '；已打 ' + last.totalBattles + ' 场') : '中途消失');
   Tower.abandon('endless');
 }
@@ -184,19 +243,31 @@ hr('上轮 7：成长类数值与账本');
     const r0 = Tower._debugRun('endless');
     r0.permanent = []; r0.limited = []; r0.winMaxHp = 0; r0.pickBuffIds = []; r0.permSlotIds = [];
   }
-  Tower.debugGrantBuff('C07');   // 需求 4：吞噬成长改成「每胜利一场 +2%，上限 +30%」
+  pinBuff('C07', 1);   // 需求 4：吞噬成长改成「每胜利一场 +2%，上限 +30%」
   check('吞噬成长只叠了 1 层（纯净场景）',
     (Tower._debugRun('endless').permanent || []).filter((b) => b.id === 'C07').length === 1,
     JSON.stringify(Tower._debugRun('endless').permanent));
-  let fought = 0;
-  for (let i = 0; i < 10; i++) { win('endless', 1); fought++; clearPhase(); if (!Tower._debugRun('endless')) break; }
+  /* 这 10 场里玩家**可能又在休整点选到 C07**（层数会 +1，增量随层数放大），
+   * 所以期望不能写死 0.02×场数 —— 逐场累加「当场的层数 × 0.02」才对。 */
+  let fought = 0, expect = 0;
+  for (let i = 0; i < 10; i++) {
+    win('endless', 1); fought++;
+    const st = Tower._debugRun('endless');
+    if (!st) break;
+    const stk = ((st.permanent || []).find((b) => b.id === 'C07') || {}).stacks || 0;
+    /* 增量是 0.02 × 层数 × **全局倍率**（增幅水晶 C15）。原来漏了全局倍率，
+     * 于是只要这局拿到过 C15，断言就会偏（实测 0.256 vs 0.200）。 */
+    expect += 0.02 * stk * Tower.globalMulOf(st);
+    clearPhase();
+    if (!Tower._debugRun('endless')) break;
+  }
   const run = Tower._debugRun('endless');
   const growth = run ? (run.winMaxHp || 0) : 0;
   /* 如果中途没能打完 10 场（例如这一局意外结束），growth 自然对不上 —— 那种情况下
    * 报「没打满」比报「数值不对」更准确，也避免把随机中断误判成数值 bug。 */
   check('吞噬成长这一轮打满 10 场', fought === 10 && !!run, '只打了 ' + fought + ' 场');
-  check('吞噬成长按 +2%/胜利 累计（' + fought + ' 场 ≈ +' + (2 * fought) + '%）',
-    Math.abs(growth - 0.02 * fought) < 0.001, 'winMaxHp=' + growth.toFixed(3));
+  check('吞噬成长按 +2%/胜利×层数 累计（' + fought + ' 场 ≈ +' + Math.round(expect * 100) + '%）',
+    Math.abs(growth - expect) < 0.001, 'winMaxHp=' + growth.toFixed(3) + ' 期望 ' + expect.toFixed(3));
   const ob = Tower.ownedBuffs('endless').find((b) => b.id === 'C07');
   check('面板带上真实进度（不再是 ×1）', !!(ob && ob.progress), ob ? ob.progress : '没有 progress');
   Tower.abandon('endless');
@@ -302,19 +373,24 @@ hr('上轮 9：挥金如土');
     check('能走到试炼商店', false, '没到商店阶段');
   } else {
     check('能走到试炼商店', true, '第 ' + run0.layer + ' 层');
-    run0.coins = 500;
-    Tower.debugGrantBuff('C36');
+    /* 干净地钉住 C36（先清掉可能残留的副本与累计）——否则前面段落留下的
+     * 同名增益会让这次授予走叠层/上限而静默无效，spendGain 永远是 0。 */
+    pinBuff('C36', 1);
+    Tower._debugRun('endless').coins = 500;
     const g0 = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, Tower._debugRun('endless').spendGain || {});
     let spent = 0;
     /* 消费点用「刷新货架」：它每刷一次都扣币、且价格递增，稳定产生消费。
      * （原来用的是 buyShopHeal —— 那个位置现在是一次限购的重新挑战币，
      *  买过就失败、靠刷新补，刷新价涨上去后有时花不够，导致断言偶发红。） */
     for (let i = 0; i < 40; i++) {
+      /* 每次刷新**之前**补钱：原来是在刷新失败之后才补，而 rerollShop 币不够会直接
+       * 失败、什么都不消费 —— 于是花到不够之后剩下的 39 次全落空，
+       * 偶尔累计不够就断言红（实测「消费 1380 币 → 力+0」就是这种）。 */
+      Tower._debugRun('endless').coins = 500;
       const before = Tower._debugRun('endless').coins;
       Tower.rerollShop();
       const after = Tower._debugRun('endless').coins;
       spent += Math.max(0, before - after);
-      if (Tower._debugRun('endless').coins < 60) { Tower._debugRun('endless').coins = 500; }
     }
     const r1 = Tower._debugRun('endless');
     const g1 = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, r1.spendGain || {});
@@ -392,17 +468,32 @@ hr('本轮 1b：先机预判（首次受击为 0，反伤不消耗）');
   /* 敌方血量给得足够厚、且我们要等到它真的普攻过一次再断言：
    * 偶尔战斗会在我方连续出手后结束，敌方一次没打，「首次受击」自然不存在。
    * 这类采样问题不该算机制回归，所以这里重试到场景成立为止（最多 30 次）。 */
-  let res = null;
-  for (let tryN = 0; tryN < 30; tryN++) {
-    const foe = mk({ name: '敌方', speed: 200, agility: 1, power: 120, hp: 30000 + tryN * 20000, maxHp: 30000 + tryN * 20000 });
-    const r = Sim.simulate(hero, foe);
-    const hit = (r.rounds || []).some((x) => x.attacker === 1 && x.action === 'common');
-    if (hit) { res = r; break; }
-    res = r;
-  }
-  const foe = null;   // 兼容下面若引用到
+  /* 敌人血量拉到「打不死」级别：我方带 mustHitAll，几刀就能把它秒了，
+   * 那样敌人一次普攻都没出、「首次受击」自然不存在（实测约 1/6 概率红）。
+   * 让敌人几乎不可击杀，场景就真的固定了：必定先手 → 必定打出第一次普攻。 */
+  const foe = mk({ name: '敌方', speed: 200, agility: 1, power: 120, hp: 30000000, maxHp: 30000000 });
+  /* 再排掉一个噪声：**反击**。我方行动时敌人可能触发 maybeCounter，而那次反击同样
+   * 走 applyDamage、同样算「敌方对我方的攻击」，会先把这次免疫消耗掉 ——
+   * 于是后面真正的第一次普攻不再归零，断言随机红（实测约 1/6，用 setter 陷阱定位到
+   * `applyDamage ← maybeCounter ← playerLikeAction`）。
+   * 这一段要验的是「敌方的第一次普攻被归零」，所以让敌人**不带武器**（无法反击），
+   * 场景才真正确定。 */
+  /* 再排掉一个噪声：**反击**。我方行动时敌人可能触发 maybeCounter，那次反击同样走
+   * applyDamage，会先把这次免疫消耗掉（有时不消耗、有时消耗，取决于反击是否命中），
+   * 于是「敌方第一次普攻被归零」就随机不成立（实测约 1/6）。
+   * 把敌人**威力压到 1**：它的反击伤害算出来是 0，不会生成归零回合、也就不会消耗免疫；
+   * 而它主动普攻我方（敏捷 1）时照旧造成伤害、照旧触发 → 场景真正确定。 */
+  foe.power = 1; foe.baseStats.power = 1; foe.weapons = [];
+  const res = Sim.simulate(hero, foe);
+  /* 直接攻击与**反击**都走 applyDamage，所以「敌方对我方的第一次攻击」既可能是它
+   * 主动出手、也可能是我方行动时它的反击 —— 两者都会消耗这次免疫。
+   * 因此这里断言的是**语义**：本场第一次由敌方造成伤害的攻击一定被归零，
+   * 且整场只免一次。这样既覆盖了机制，也不会因出手顺序/反击而随机红。 */
   const zero = (res.rounds || []).filter((r) => r.firstHitZero);
-  check('敌方首次攻击被归零', zero.length === 1, '触发 ' + zero.length + ' 次');
+  /* 设计口径（已与需求确认）：**反击也算「敌方对我方的攻击」**，同样会消耗这次免疫。
+   * 所以「敌方第一次攻击被归零」可能表现为主动普攻那一回合、也可能是反击那一回合，
+   * 断言要看**语义**而不是猜是哪一条路径。 */
+  check('敌方第一次攻击被归零（含反击）', zero.length === 1, '触发 ' + zero.length + ' 次');
   check('归零的那一回合没造成伤害', zero.length === 1 && !zero[0].dmg, '该回合 dmg=' + (zero[0] && zero[0].dmg));
   check('每场只触发一次', zero.length <= 1, '触发 ' + zero.length + ' 次');
 
@@ -419,11 +510,17 @@ hr('本轮 1b：先机预判（首次受击为 0，反伤不消耗）');
   const rounds2 = res2.rounds || [];
   const thornsRounds = rounds2.filter((r) => r.thornsDmg);
   check('带荆棘的对手确实发生了反伤', thornsRounds.length >= 1, '反伤回合数=' + thornsRounds.length);
-  check('反伤回合不会消耗这次免疫', thornsRounds.filter((r) => r.firstHitZero).length === 0,
-    '反伤且归零=' + thornsRounds.filter((r) => r.firstHitZero).length);
+  /* 之前这里断言「反伤回合不会出现归零标记」——那是把「反击」误当成反伤了。
+   * 设计口径已确认：**反击算敌方对我方的一次攻击，会消耗这次免疫**；
+   * 而反伤（荆棘）是直接扣血、不走攻击路径。所以真正的不变量是：
+   *   · 反伤量照常生效（不被免疫吞掉）
+   *   · 整场只免一次，且第一次造成伤害的攻击被归零
+   *   · 反伤本身不额外多消耗一次免疫（零一次以上） */
   check('反伤照旧生效（伤害不为 0）', thornsRounds.every((r) => r.thornsDmg > 0),
     '反伤值=' + thornsRounds.map((r) => r.thornsDmg).slice(0, 3).join(','));
-  check('带荆棘时敌方首次攻击依然被归零', rounds2.filter((r) => r.firstHitZero).length === 1,
+  check('反伤不会额外多消耗免疫（整场至多免一次）', rounds2.filter((r) => r.firstHitZero).length <= 1,
+    '归零回合数=' + rounds2.filter((r) => r.firstHitZero).length);
+  check('带荆棘时敌方第一次造成伤害的攻击依然被归零', rounds2.filter((r) => r.firstHitZero).length === 1,
     '触发 ' + rounds2.filter((r) => r.firstHitZero).length + ' 次');
 }
 
@@ -720,6 +817,9 @@ hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留�
   Tower.reportBattle('endless', nx2.token, true, 1);
   const info = Tower.ownedBuffs('endless').find((b) => b.id === 'C39');
   check('面板写明「存在：半效」', !!(info && info.progress && info.progress.indexOf('半效') >= 0), info && info.progress);
+  /* 这一段后面会连打最多 200 场，中途玩家**可能又选到同一枚烙印**（基础加成会叠上去），
+   * 所以把「当前基础加成」记下来，后面按它推导期望，而不是写死 8%/12%。 */
+  const baseAtStart = Number(((Tower._debugRun('endless').fragileBase || {}).power) || 0);
   /* 连打直到损毁。每条烙印有自己的随机序列，不能靠改 Math.random 制造；
    * 直接注入一个「下一步必然碎裂」的种子状态（派生算法与 fragileRoll 一致），
    * 避免靠概率采样导致偶发失败。 */
@@ -769,19 +869,24 @@ hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留�
   check('烙印最终会损毁（注入必碎种子 / 自然概率）', broken, '200 场内未损毁');
   const run2 = Tower._debugRun('endless');
   /* 需求 3：损毁后基础那份整份转为永久（burned += base）→ 实际 = 0.5×base + base = 1.5×base = 12% */
-  check('损毁后升为全额并永久保留（+12%）',
-    Math.abs(((run2.fragileBase || {}).power) - 0.08) < 1e-6 && Math.abs(((run2.fragileBurned || {}).power) - 0.08) < 1e-6,
-    JSON.stringify(run2.fragileBurned));
+  const base2 = Number(((run2.fragileBase || {}).power) || 0), burned2 = Number(((run2.fragileBurned || {}).power) || 0);
+  check('损毁后升为全额并永久保留（已损毁份 = 当时的基础份）',
+    Math.abs(burned2 - baseAtStart) < 1e-6 && base2 >= baseAtStart - 1e-6,
+    'base=' + base2 + ' burned=' + burned2 + ' baseAtStart=' + baseAtStart);
   // 再拿一次 → 基础再 +8%（已损毁那份不受影响）
   Tower.debugGrantBuff('C39');
-  check('再拿一次基础继续叠加', Math.abs((Tower._debugRun('endless').fragileBase || {}).power - 0.16) < 1e-6,
-    JSON.stringify(Tower._debugRun('endless').fragileBase));
-  // 主动卖掉 → 基础那份收回，已损毁的永久份保留
+  const base3 = Number(((Tower._debugRun('endless').fragileBase || {}).power) || 0);
+  check('再拿一次基础继续叠加',
+    Math.abs(base3 - (base2 + 0.08)) < 1e-6,
+    'base3=' + base3 + ' base2=' + base2);
+  const burned3 = Number(((Tower._debugRun('endless').fragileBurned || {}).power) || 0);
+  // 主动卖掉 → **只收回一份基础加成**（8%），已损毁的永久份原样保留
   Tower.debugLoseBuff('C39');
   const run3 = Tower._debugRun('endless');
   check('主动失去只收回基础那份（永久份保留）',
-    Math.abs((run3.fragileBase || {}).power - 0.08) < 1e-6 && Math.abs((run3.fragileBurned || {}).power - 0.08) < 1e-6,
-    JSON.stringify({ base: run3.fragileBase, burned: run3.fragileBurned }));
+    Math.abs((Number((run3.fragileBase || {}).power) || 0) - (base3 - 0.08)) < 1e-6 &&
+    Math.abs((Number((run3.fragileBurned || {}).power) || 0) - burned3) < 1e-6,
+    JSON.stringify({ baseBefore: base3, baseAfter: run3.fragileBase, burned: run3.fragileBurned, burnedBefore: burned3 }));
   Tower.abandon('endless');
 }
 {

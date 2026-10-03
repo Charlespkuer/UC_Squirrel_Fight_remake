@@ -295,3 +295,19 @@
   padding:2px 8px;border-radius:10px;background:#fff3cd;border:1px solid #e0c98a;
   font-size:12px;color:#6d5426}
 .achieve-summary span i{font-style:normal;font-weight:700;color:#a2731f}
+
+/* ============================================================
+ * 主页 EXP 标签改用原版贴图（images/classic/sprites/draw-15.png，即「Exp」字样）
+ *
+ * 原来是用 CSS 描边拼出来的文字「EXP」。原版贴图在本仓库里就有，
+ * 换上之后字重/描边/配色与原版一致，也不会因系统字体差异跑版。
+ * 比例 125:81 ≈ 1.543；这里按 34px 高缩放 → 宽约 52px。
+ * ============================================================ */
+.home-exp-label{ display:inline-flex; align-items:center; min-width:52px; }
+.home-exp-label .home-exp-art{
+  display:block;
+  width:52px;               /* 由 CSS 统一控制尺寸，避免不同 DPR 下抖动 */
+  height:34px;
+  object-fit:contain;
+  flex:none;
+}

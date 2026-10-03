@@ -2281,6 +2281,9 @@
     pickChoice, toggleLimited, addBuff, applyInstant, openRestShop, usePillSlot,
     shopState, buyShopSlot, buyRetryToken, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp,
     canRetry, retryBattle, declineRetry, isTowerBattleBuff, takeAchievementToasts,
+    /* 只读：本局全局倍率（增幅水晶 C15 的 globalMul^层数）。
+     * 成长类增益的增量与上限都要乘它，暴露出来便于界面/测试用同一口径核算。 */
+    globalMulOf: (run) => globalMul(run || endless().run),
     checkpointInfo, settleEndless, continueEndless, continueFromShop, settleFromShop,
     /* 调试台：一次拿到「收集到的全部增益 + 获取/消失流水 + 当前实际提升」。
      * collected 含一次生效类与已损毁/用尽/失去的（从流水里回捞）。 */

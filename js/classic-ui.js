@@ -397,7 +397,7 @@
   function renderHome() {
     screen = 'home'; activePortrait = null;
     const S = State.state();
-    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label">EXP</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/classic/home/activity.png">' + '</button><button class="picture-button" data-action="chat">' + '<img alt="" src="images/classic/home/chat.png">' + '<span>聊天</span></button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/classic/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
+    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label" role="img" aria-label="经验" title="经验">' + spr('draw', 15, 'home-exp-art') + '</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/classic/home/activity.png">' + '</button><button class="picture-button" data-action="chat">' + '<img alt="" src="images/classic/home/chat.png">' + '<span>聊天</span></button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/classic/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
     bind($('.classic-home'),actions);buffSignature='';
     refreshHome();
     renderNumbers();
@@ -1183,24 +1183,38 @@
     if (window.ClassicFusion) window.ClassicFusion.open();
     else legacy.runAction('gears');
   }
+  /* 需求：这些战斗类型的失败**不计入复仇**（仍可在「消息」里看录像）。
+   * 复仇页与「再次挑战」按钮都读这一份名单，避免两处口径不一致。 */
+  const REVENGE_EXCLUDED_KINDS = ['tower', 'endless', 'stage'];
+  /** 这条记录能不能复仇（败绩 + 不在排除名单里，复仇再失败也不算新的败绩）。 */
+  function canRevenge(r) {
+    return !!r && r.winner !== 0 && r.kind !== 'revenge' && REVENGE_EXCLUDED_KINDS.indexOf(r.kind) < 0;
+  }
   function openMessages(tab,pg) {
     tab=typeof tab==='string'?tab:'messages';pg=pg||0;
     let list=State.battleHistory?State.battleHistory():[];
     if(tab==='ranklog')list=list.filter(r=>r.kind==='rank');
-    if(tab==='revenge')list=list.filter(r=>r.winner!==0&&r.kind!=='revenge');
+    /* 需求：**挑战塔 / 无尽塔 / 挑战关**的失败不计入复仇 —— 这三类是「连战/爬塔」流程，
+     * 失败已经由各自的机制处理（塔内就地再战、关卡可花挑战书复活），
+     * 再挂一条「再次挑战」既没有意义、也会把复仇页刷得又长又杂。
+     * 它们仍然会出现在「消息」标签里，录像照常可看。 */
+    if(tab==='revenge')list=list.filter(canRevenge);
     const total=Math.max(1,Math.ceil(list.length/2));pg=Math.min(pg,total-1);
     const html=list.slice(pg*2,pg*2+2).map(r=>{
       const d=new Date(r.createdAt),time=(d.getMonth()+1)+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
       // 第 4 项：复仇页的每条败绩都带一个「再次挑战」——用录像里记下的对手数据重打一次，
       // 赢了给少量经验与金松果（补一点上次失败少拿的），每条记录只能成功复仇一次。
-      const rev=r.winner!==0&&tab==='revenge';
+      const rev=tab==='revenge'&&canRevenge(r);
       const revengeBtn=!rev?'':(r.revenged
         ?'<button class="uc-button tiny muted" data-revenged="1" disabled>已复仇</button>'
         :'<button class="uc-button tiny gold" data-revenge="'+esc(r.id)+'">再次挑战</button>');
-      return '<article class="message-card"><span class="message-stamp '+(r.winner?'loss':'')+'">'+(r.winner?'败':'胜')+'</span>你挑战了【'+esc(r.foe.name)+'】，'+(r.winner?'遗憾落败。':'获得胜利！')+'<time>'+time+'</time>'+
+      /* 需求：标明这一场来自哪里 —— 塔与关卡的失败不计入复仇，列表里要能看出来。 */
+      const KIND_LABEL={challenge:'挑战',stage:'关卡',tower:'挑战塔',endless:'无尽塔',arena:'竞技场',rank:'天梯赛',friend:'切磋',master:'师徒',revenge:'复仇'};
+      const kindTag=(KIND_LABEL[r.kind]||'挑战')+' · ';
+      return '<article class="message-card"><span class="message-stamp '+(r.winner?'loss':'')+'">'+(r.winner?'败':'胜')+'</span>'+kindTag+'你挑战了【'+esc(r.foe.name)+'】，'+(r.winner?'遗憾落败。':'获得胜利！')+'<time>'+time+'</time>'+
         '<span class="message-actions">'+revengeBtn+'<button class="uc-button tiny muted" data-replay="'+esc(r.id)+'">查看录像</button></span></article>';
     }).join('');
-    const p=page('message',tab,'<div class="message-list">'+(html||'<div class="empty-state">暂时没有'+(tab==='revenge'?'落败记录':'战斗消息')+'<br><span class="small-label">'+(tab==='revenge'?'输掉的挑战会留在这里，之后可以点「再次挑战」找回场子。':'开始一场挑战，精彩战斗会保存在这里。')+'</span></div>')+'</div>'+(pg?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(pg<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(pg+1)+'/'+total,counterPlace:'board'});
+    const p=page('message',tab,'<div class="message-list">'+(html||'<div class="empty-state">暂时没有'+(tab==='revenge'?'落败记录':'战斗消息')+'<br><span class="small-label">'+(tab==='revenge'?'普通挑战的败绩会留在这里，之后可以点「再次挑战」找回场子（塔与关卡不计入）。':'开始一场挑战，精彩战斗会保存在这里。')+'</span></div>')+'</div>'+(pg?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(pg<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(pg+1)+'/'+total,counterPlace:'board'});
     $$('[data-replay]',p).forEach(b=>b.onclick=()=>{const r=list.find(x=>x.id===b.dataset.replay);Main.replayBattle(r,()=>openMessages(tab,pg));});
     $$('[data-revenge]',p).forEach(b=>b.onclick=()=>{const r=list.find(x=>x.id===b.dataset.revenge);if(r)revengeFight(r,()=>openMessages(tab,pg));});
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openMessages(tab,pg-1));
@@ -1333,8 +1347,10 @@
     return '<div class="sync-panel"><div class="sync-head">存档位置：' + state + '</div>' +
       '<div class="sync-actions">' + btn('立即写入存档文件', 'save-write', 'small' + (useFile ? '' : ' muted')) +
       btn('载入存档文件', 'save-load', 'small' + (useFile ? '' : ' muted')) +
-      btn('从存档列表导入', 'save-import-list', 'small') +
-      btn('从磁盘载入', 'save-import', 'small') + '</div></div>';
+      /* 需求：去掉「从磁盘载入」—— 它和系统页上的「导入存档」指向同一个 importSave()，
+       * 属于重复入口（两个按钮做同一件事，容易让人以为行为不同）。
+       * 「从存档列表导入」保留：它走的是服务器 save/ 目录，不是同一功能。 */
+      btn('从存档列表导入', 'save-import-list', 'small') + '</div></div>';
   }
   /** 选一个本地 .json 文件；返回 Promise<File|null>（null = 用户取消）。
    *  macOS 的 WKWebView / Safari（原生轻壳、安装包模式）只认**已经挂在文档里**的
@@ -1704,7 +1720,6 @@
         }catch(e){toast(e.message||'导入失败');}
       });
     };
-    $('[data-action="save-import"]',p).onclick=()=>importSave();
     const syncBtn=(action,fn)=>{const b=$('[data-action="'+action+'"]',p);if(b)b.onclick=fn;};
     syncBtn('sync-save-push',()=>syncRun('save','push'));
     syncBtn('sync-save-pull',()=>syncRun('save','pull'));

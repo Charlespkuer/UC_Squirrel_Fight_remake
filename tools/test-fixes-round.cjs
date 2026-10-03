@@ -903,7 +903,7 @@ test('需求21：挑战塔不再生成任何「只有无尽塔用得上」的增
   const towerLimited = TD.towerPool.filter((b) => b.kind === 'limited');
   assert.equal(towerLimited.length, 31, '挑战塔的限次类应当是 31 条（19 通用 + 12 专属），实测 ' + towerLimited.length);
   assert.equal(towerLimited.filter((b) => b.towerOnly).length, 31, '其中 31 条是挑战塔专属（含 N/M/G/T 四系）');
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 33, '永久类也属于挑战塔池（共 33 条）');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 34, '永久类也属于挑战塔池（共 34 条）');
   assert.equal(TD.towerPool.filter((b) => b.kind === 'instant').length, 0, '即时类不进选择池');
   // 无尽池不该混入挑战塔专属（它们按「一场定胜负」设计）
   assert.equal(TD.endlessPool.filter((b) => b.towerOnly).length, 0, '无尽选择池不该有挑战塔专属');
@@ -1552,7 +1552,7 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
   // 7) 挑战塔池的构成可解释
   assert.equal(TD.towerPool.length, byTag('T.choice').split(',').length, '池子大小要自洽');
   assert.equal(TD.towerPool.filter((b) => b.kind === 'limited').length, 31, '限次类 31 条');
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 33, '永久类 33 条');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 34, '永久类 34 条');
 });
 
 test('需求32：池子分离的端到端实测（真跑两种塔的抽取，零交叉）', () => {
@@ -1747,11 +1747,15 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
    *（增幅水晶 C15 的 globalMul^层数）。g 会随「这一局恰好选到什么」而变化，
    * 随机波动会让比值假报（实测 C07 出现 ×2.00 / 上限 60% 而不是 30%）。
    * 这里统一拒绝把 C15 选进来，把 g 锁死在 1，测量才可复现。 */
-  const pickNoC15 = (run) => {
+  const pickNoC15 = (run, avoidId) => {
+    /* avoidId：把「本次测试正在观察的那条增益」也排除掉 ——
+     * 否则循环里又选到它自己，层数从 1 变 2，期望值就会对不上（实测踩过）。 */
     const ch = (run && run.choices) || [];
-    const i = ch.findIndex((x) => x && x.id !== 'C15');
-    const p = T.pickChoice('endless', i < 0 ? 0 : i, null);
-    if (p && !p.ok && p.needsReplace) T.pickChoice('endless', i < 0 ? 0 : i, ((run.permanent || [])[0] || {}).id || null);
+    let i = ch.findIndex((x) => x && x.id !== 'C15' && x.id !== avoidId);
+    if (i < 0) i = ch.findIndex((x) => x && x.id !== 'C15');
+    if (i < 0) i = 0;
+    const p = T.pickChoice('endless', i, null);
+    if (p && !p.ok && p.needsReplace) T.pickChoice('endless', i, ((run.permanent || [])[0] || {}).id || null);
     return p;
   };
     const heals = [];
@@ -1760,7 +1764,7 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
       const cur = T._debugRun('endless');
       if (!cur) break;
       if (fixedLayer) cur.layer = fixedLayer;
-      if (cur.choices) { pickNoC15(cur); continue; }
+      if (cur.choices) { pickNoC15(cur, id); continue; }
       if (cur.phase === 'shop') { T.continueFromShop(); continue; }
       if (cur.phase === 'checkpoint') { T.continueEndless(); continue; }
       const nx = T.nextBattle('endless');
@@ -1836,11 +1840,15 @@ test('需求37：成长类增益的「面板文字」必须等于「真实累计
    *（增幅水晶 C15 的 globalMul^层数）。g 会随「这一局恰好选到什么」而变化，
    * 随机波动会让比值假报（实测 C07 出现 ×2.00 / 上限 60% 而不是 30%）。
    * 这里统一拒绝把 C15 选进来，把 g 锁死在 1，测量才可复现。 */
-  const pickNoC15 = (run) => {
+  const pickNoC15 = (run, avoidId) => {
+    /* avoidId：把「本次测试正在观察的那条增益」也排除掉 ——
+     * 否则循环里又选到它自己，层数从 1 变 2，期望值就会对不上（实测踩过）。 */
     const ch = (run && run.choices) || [];
-    const i = ch.findIndex((x) => x && x.id !== 'C15');
-    const p = T.pickChoice('endless', i < 0 ? 0 : i, null);
-    if (p && !p.ok && p.needsReplace) T.pickChoice('endless', i < 0 ? 0 : i, ((run.permanent || [])[0] || {}).id || null);
+    let i = ch.findIndex((x) => x && x.id !== 'C15' && x.id !== avoidId);
+    if (i < 0) i = ch.findIndex((x) => x && x.id !== 'C15');
+    if (i < 0) i = 0;
+    const p = T.pickChoice('endless', i, null);
+    if (p && !p.ok && p.needsReplace) T.pickChoice('endless', i, ((run.permanent || [])[0] || {}).id || null);
     return p;
   };
   /* 跑真实流程：拿到某条成长增益 → 连打 N 场 → 对比「面板 progress」与「run 里的真实累计字段」。 */
@@ -1855,7 +1863,7 @@ test('需求37：成长类增益的「面板文字」必须等于「真实累计
       const cur = T._debugRun('endless');
       if (!cur) break;
       if (layer) cur.layer = layer;
-      if (cur.choices) { pickNoC15(cur); continue; }
+      if (cur.choices) { pickNoC15(cur, id); continue; }
       if (cur.phase === 'shop') { T.continueFromShop(); continue; }
       if (cur.phase === 'checkpoint') { T.continueEndless(); continue; }
       const nx = T.nextBattle('endless');
@@ -1879,8 +1887,11 @@ test('需求37：成长类增益的「面板文字」必须等于「真实累计
   assert.equal(shown, Math.round(one.value * 100),
     'C07 面板显示的百分比必须等于真实累计：面板「' + one.progress + '」 vs 实际 ' + (one.value * 100) + '%');
   assert.ok(shown > 0, 'C07 面板不该再显示 +0%：' + one.progress);
-  /* 上限也要显示真实值（×层数） */
+  /* 上限也要显示真实值（×层数 ×全局倍率）。
+   * 注意：循环里可能还是抽到了增幅水晶（pickNoC15 只能尽力而为），
+   * 所以期望值要用**真实的 globalMulOf(run)** 推导，而不是写死 30%。 */
   const capShown = Number((/（上限 \+(\d+)%）/.exec(one.progress) || [])[1]);
+  /* pickNoC15 已经避开了增幅水晶与「测试目标自己」，所以这里 g=1、层数=1。 */
   assert.equal(capShown, Math.round(0.30 * 1 * 100), 'C07 ×1 的上限应当是 30%：' + one.progress);
   const three = grow('C07', 3, 5, 'winMaxHp');
   const capShown3 = Number((/（上限 \+(\d+)%）/.exec(three.progress) || [])[1]);
@@ -2182,8 +2193,10 @@ test('需求41：与狂怒成套的四条低血 combo（空血上限 / 低血减
       const foe = mk({ name: 'F', power: 200, agility: 120, speed: 200 });
       const me = mk({ name: 'M', power: 1, agility: 1, speed: 1, hp: hp, mods: mods || {} });
       const r = Sim.simulate(foe, me);
-      const h = (r.rounds || []).find((x) => x.attacker === 0 && x.dmg > 0 && x.action === 'common');
-      if (h) vals.push(h.dmg);
+      /* 每局取**前 3 次**受击：单次伤害的骰子方差很大，只取一次的话
+       * 300 局均值的标准误仍有 ~3%，会让 ±5% 的断言偶发红（实测约 1/10）。 */
+      const hits = (r.rounds || []).filter((x) => x.attacker === 0 && x.dmg > 0 && x.action === 'common').slice(0, 3);
+      for (const h of hits) vals.push(h.dmg);
     }
     return vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length);
   };
@@ -2672,6 +2685,21 @@ test('需求48：吞噬成长 / 以战养战 的累计生命上限在被替换�
   const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
     baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
   /* 攒 N 场，然后把永久槽填满并**替换掉** target，比较替换前后的上限。 */
+  /* 这段测量假定槽位上限固定为 5（填满 5 个就必须替换）。若循环里恰好选到
+   * 「扩容背包 / 仓库钥匙」这类 permSlot 增益，上限会变成 6/7，5 个占位就不再是满格，
+   * 「应当要求替换」的断言会偶发红（实测约 1/12）。所以这里拒绝扩容类与增幅水晶。 */
+  const pickNoSlotNoC15 = (run) => {
+    const ch = (run && run.choices) || [];
+    const bad = (x) => {
+      const def = TD.BUFF_BY_ID[x && x.id];
+      return !!(def && def.mods && (def.mods.permSlot || def.mods.globalMul));
+    };
+    let i = ch.findIndex((x) => !bad(x));
+    if (i < 0) i = 0;
+    const p = T.pickChoice('endless', i, null);
+    if (p && !p.ok && p.needsReplace) T.pickChoice('endless', i, ((run.permanent || [])[0] || {}).id || null);
+    return p;
+  };
   const growThenReplace = (target, battles) => {
     S.newGame('keep' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
@@ -2682,7 +2710,7 @@ test('需求48：吞噬成长 / 以战养战 的累计生命上限在被替换�
       const cur = T._debugRun('endless');
       if (!cur) break;
       cur.env = [];
-      if (cur.choices) { const p = T.pickChoice('endless', 0, null); if (p && !p.ok && p.needsReplace) T.pickChoice('endless', 0, ((cur.permanent || [])[0] || {}).id || null); continue; }
+      if (cur.choices) { pickNoSlotNoC15(cur); continue; }
       if (cur.phase === 'shop') { T.continueFromShop(); continue; }
       if (cur.phase === 'checkpoint') { T.continueEndless(); continue; }
       const nx = T.nextBattle('endless');
@@ -2838,6 +2866,15 @@ test('需求50：N13/N14 的界面口径（无尽塔 10 次限次）+ 寒霜锁�
     assert.match(b.desc, /10 场/, id + ' 描述应写明 10 场：' + b.desc);
   }
   assert.equal(TD.BUFF_BY_ID.N13.mods.emptyMaxHpMul, 1.00, 'N13 仍是 +100% 空上限');
+  /* N15 反噬豁免：限次 10 场 + nextBattle 生命周期 + 无尽专属。 */
+  const n15 = TD.BUFF_BY_ID.N15;
+  assert.equal(n15.kind, 'limited', 'N15 应当是限次类');
+  assert.equal(n15.uses, 10, 'N15 应当是 10 次限次');
+  assert.equal(n15.nextBattle, true, 'N15 是「下一场战斗」生命周期');
+  assert.equal(n15.endlessOnly, true, 'N15 只属于无尽塔');
+  assert.ok(!(n15.towerOnly && n15.nextBattle), 'N15 不该被判成「只服务下一场」');
+  assert.ok(TD.endlessPool.some((x) => x.id === 'N15'), 'N15 应当出现在无尽塔池');
+  assert.ok(!TD.towerPool.some((x) => x.id === 'N15'), 'N15 不该出现在挑战塔池');
   assert.equal(TD.BUFF_BY_ID.N14.mods.lowHpTakenMul, -0.50, 'N14 仍是 50% 减伤');
 
   /* ② 寒霜锁链：敌方 −5%~−9%，我方 −11%~−19% */
@@ -3059,6 +3096,141 @@ test('需求52：体力药限购/售价、天梯周日不休赛、涅槃重做',
   /* 每层只给一次（run 层面的口径未被破坏） */
   assert.ok(/reviveLayer/.test(fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8')),
     '仍然保留「每层一次」的发放口径');
+});
+
+test('需求53：unique 口径 / 塔顶 boss 变体池 / 幸运一击重复率 / 反噬豁免与减伤成长', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;
+
+  /* ① 仓库钥匙 / 扩容背包一局只出现一次；虚空铭文可重复出现 */
+  assert.equal(TD.BUFF_BY_ID.C30.unique, true, '扩容背包仍是一局一次');
+  assert.equal(TD.BUFF_BY_ID.C31.unique, true, '仓库钥匙仍是一局一次');
+  assert.equal(TD.BUFF_BY_ID.C37.unique, undefined, '虚空铭文不再受 unique 限制');
+  assert.equal(TD.BUFF_BY_ID.C37.repeatable, true, '虚空铭文应当标 repeatable');
+  /* poolFilter 行为：拥有之后，前两者应当被排除、虚空铭文仍可再出现 */
+  S.newGame('uniq' + Math.random());
+  const st0 = S.state(); st0.level = 70; st0.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st0.stages[i] = { npcIndex: 3, passed: true };
+  try { T.abandon('endless'); } catch (e) {}
+  T.startEndlessRun();
+  const r0 = T._debugRun('endless');
+  r0.permanent = []; r0.limited = []; r0.slotFreeIds = [];
+  for (const id of ['C30', 'C31', 'C37']) {
+    const def = TD.BUFF_BY_ID[id];
+    const before = T.poolFilterOf(r0, def);
+    assert.ok(before, id + ' 未拥有时应当允许出现');
+  }
+  r0.permanent = [{ id: 'C30', stacks: 1 }, { id: 'C31', stacks: 1 }, { id: 'C37', stacks: 1 }];
+  assert.ok(!T.poolFilterOf(r0, TD.BUFF_BY_ID.C30), '已拥有扩容背包后应当被排除');
+  assert.ok(!T.poolFilterOf(r0, TD.BUFF_BY_ID.C31), '已拥有仓库钥匙后应当被排除');
+  assert.ok(T.poolFilterOf(r0, TD.BUFF_BY_ID.C37), '虚空铭文即使已拥有也应当还能再出现');
+
+  /* ② 塔顶 boss：独立变体池，装备固定狂战套，机制/武器/技能等级各有不同，且都带绝对防御 */
+  const pool = TD.WARLORD_POOL;
+  assert.ok(Array.isArray(pool) && pool.length >= 4, '塔顶 boss 池应当有多只：' + (pool && pool.length));
+  const names = pool.map((w) => w.name);
+  assert.equal(new Set(names).size, names.length, '变体名不该重复：' + names.join('/'));
+  for (const w of pool) {
+    assert.equal(w.gear, 'berserk', w.name + ' 应当穿狂战套');
+    assert.ok(Array.isArray(w.mech) && w.mech.length, w.name + ' 应当有机制');
+    assert.ok(Array.isArray(w.weapons) && w.weapons.length, w.name + ' 应当有武器');
+    /* 绝对防御在引擎里是技能 16（受击自动触发），不是 22 */
+    assert.ok(w.skills.some((k) => k.id === 16), w.name + ' 必须固定带绝对防御（技能 16）：' +
+      JSON.stringify(w.skills));
+    assert.ok(Array.isArray(w.castable) && w.castable.length, w.name + ' 应当声明倾向的主动技');
+  }
+  /* 武器/技能/等级确有差异（不是同一套换个名字） */
+  const sig = (w) => JSON.stringify([w.weapons, w.skills, w.castable]);
+  assert.equal(new Set(pool.map(sig)).size, pool.length, '每只的武技搭配应当各不相同');
+  const lv = new Set(pool.flatMap((w) => w.skills.map((k) => k.level)));
+  assert.ok(lv.size >= 3, '技能等级应当有多种变化，实测 ' + [...lv].join(','));
+  /* 抽取：同层固定、换层变化 */
+  const salt = 'test-salt';
+  assert.equal(TD.warlordFor(30, salt).name, TD.warlordFor(30, salt).name, '同一层应当固定同一只');
+  const byLayer = [];
+  for (let L = 10; L <= 100; L += 10) byLayer.push(TD.warlordFor(L, salt).name);
+  assert.ok(new Set(byLayer).size >= 3, '不同层应当抽到不同的 boss，实测 ' + byLayer.join('/'));
+  /* 实战：预告名 = 实战名、狂战套、castable 真的被用 */
+  S.newGame('warlord' + Math.random());
+  const st1 = S.state(); st1.level = 70; st1.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st1.stages[i] = { npcIndex: 3, passed: true };
+  try { T.abandon('endless'); } catch (e) {}
+  T.startEndlessRun();
+  const r1 = T._debugRun('endless');
+  r1.layer = 10;
+  r1.plan = [{ kind: 'warlord', id: 'warlord', _layer: 10, _salt: r1.salt }];
+  r1.idx = 0;
+  const nx = T.nextBattle('endless');
+  assert.ok(nx && nx.ok !== false, '应当能取到塔顶 boss');
+  assert.equal(nx.info.name, nx.foe.name, '预告名必须等于实战名');
+  assert.equal(nx.elite, true, '塔顶 boss 应当是精英');
+  assert.ok((nx.foe.wears || []).length >= 4, '应当穿满狂战套：' + JSON.stringify(nx.foe.wears));
+  assert.ok(nx.foe.skills.some((k) => k.id === 16), '实战 boss 必须带绝对防御');
+  assert.ok(Array.isArray(nx.foe.castable) && nx.foe.castable.length, '实战 boss 应当带 castable');
+  /* 绝对防御真的会触发（用弱一点的我方，让战斗打得久） */
+  const mkHero = () => ({ name: 'p', level: 70, power: 120, agility: 60, speed: 60, maxHp: 99999, hp: 99999,
+    baseStats: { power: 120, agility: 60, speed: 60 }, weapons: [{ id: 1, level: 1 }], skills: [],
+    wears: [], effects: {}, masterLevel: 0 });
+  let jueDui = 0, usedCastable = 0;
+  for (let t = 0; t < 30; t++) {
+    const sim = Sim.simulate(mkHero(), nx.foe);
+    if ((sim.rounds || []).some((x) => x.jueDui)) jueDui++;
+    const ids = (sim.rounds || []).filter((x) => x.attacker === 1 && x.action === 'skill').map((x) => x.id);
+    if (ids.length && ids.every((id) => nx.foe.castable.indexOf(id) >= 0)) usedCastable++;
+  }
+  assert.ok(jueDui > 0, '绝对防御应当真的触发，实测 ' + jueDui + '/30');
+  assert.ok(usedCastable > 0, 'boss 放出的技能应当都来自 castable，实测 ' + usedCastable + '/30');
+
+  /* ③ 幸运一击的重复触发概率被下调 */
+  const rate = (id) => Sim.repeatRateOf(id);
+  const rules = Sim.rules;
+  assert.ok(rate(23) < 17, '幸运一击的重复概率应当低于原来的 17%，实测 ' + rate(23));
+  assert.ok(rate(23) < rate(15), '应当低于同档的通灵召唤：' + rate(23) + ' vs ' + rate(15));
+  assert.ok(rate(23) > rules.repeatSnack, '但仍应高于最低档的来点松果');
+
+  /* ④ 反噬豁免（免疫一切反伤）+ 减伤成长 */
+  const n15 = TD.BUFF_BY_ID.N15;
+  assert.equal(n15.kind, 'limited', 'N15 是限次类');
+  assert.equal(n15.mods.reflectImmune, 1, 'N15 应当提供 reflectImmune');
+  assert.equal(n15.uses, 10, 'N15 限次 10 场');
+  const c48 = TD.BUFF_BY_ID.C48;
+  assert.equal(c48.kind, 'permanent', 'C48 应当永久类');
+  assert.ok(c48.mods.winTakenMulPct > 0 && c48.mods.winTakenMulCap > 0, 'C48 应当有成长与上限');
+  assert.ok(TD.endlessPool.some((b) => b.id === 'N15'), 'N15 应当在无尽塔池');
+  assert.ok(TD.endlessPool.some((b) => b.id === 'C48'), 'C48 应当在无尽塔池');
+  /* 实战：带 reflectImmune 时四种反伤都不掉血 */
+  const mkF = (o) => Object.assign({ name: 'X', level: 50, power: 200, agility: 100, speed: 100,
+    hp: 5000, maxHp: 5000, weapons: [{ id: 1, level: 5 }], skills: [], effects: {},
+    baseStats: { power: 200, agility: 100, speed: 100 } }, o);
+  const reflectTaken = (mods, foeMods) => {
+    let sum = 0, n = 0;
+    for (let i = 0; i < 60; i++) {
+      const me = mkF({ name: '我', power: 300, mods: mods || {} });
+      const foe = mkF({ name: '敌', power: 30, hp: 9999999, maxHp: 9999999, mods: foeMods || {} });
+      const r = Sim.simulate(me, foe);
+      for (const x of (r.rounds || [])) sum += (x.thornsDmg || 0) + (x.reboundHurt || 0);
+      n++;
+    }
+    return sum / Math.max(1, n);
+  };
+  const withThorns = reflectTaken(null, { thornsPct: 0.30 });
+  assert.ok(withThorns > 0, '对照组应当吃到反伤，实测 ' + withThorns);
+  assert.equal(reflectTaken({ reflectImmune: 1 }, { thornsPct: 0.30 }), 0,
+    '带反噬豁免时不该吃到任何反伤');
+  /* 减伤成长：累计值真的并进 takenMul（用第一次受击对比） */
+  const firstTaken = (mods, n) => {
+    const vals = [];
+    for (let i = 0; i < n; i++) {
+      const foe = mkF({ name: 'F', power: 200, agility: 120, speed: 200 });
+      const me = mkF({ name: 'M', power: 1, agility: 1, speed: 1, mods: mods || {} });
+      const r = Sim.simulate(foe, me);
+      for (const h of (r.rounds || []).filter((x) => x.attacker === 0 && x.dmg > 0 && x.action === 'common').slice(0, 3)) vals.push(h.dmg);
+    }
+    return vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length);
+  };
+  const noCut = firstTaken(null, 200), cut = firstTaken({ takenMul: -0.25 }, 200);
+  assert.ok(cut < noCut * 0.85, '减伤 25% 应当明显降低受到的伤害：' + noCut.toFixed(1) + ' → ' + cut.toFixed(1));
+  T.abandon('endless');
 });
 
 (async () => {

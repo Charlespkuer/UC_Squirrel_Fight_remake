@@ -71,6 +71,10 @@ function playLayer(c, mode) {
       continue;
     }
     if (run.phase) break;                                  // 商店/结算点：本层战斗已结束
+    /* 隔离环境：环境里有「幻影回响」会按概率把同一场再打一遍，
+     * 那会让「界面 N 条 = 实战 N 场」的比对多出一项（实测偶发）。
+     * 这条测试只关心顺序，所以每次取场前清空环境。 */
+    run.env = [];
     const nx = c.Tower.nextBattle(mode);
     if (!nx || nx.ok === false) break;
     names.push(nx.foe.name);

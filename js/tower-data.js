@@ -625,15 +625,70 @@
   /* 每 10 层的最后一个 boss 固定刷这一个：松鼠形态 + 全身狂战套 + 血性狂暴 + 精英 ×1.2。
    * 「狂战套」是玩家在天梯商店追求的那一套（GameDict set 51 / gear 201~204），
    * 让它穿在身上出现在塔顶，玩家一眼就知道「这是 10 层的大家伙」。 */
-  const WARLORD = Object.freeze({
-    id: 'warlord', name: '狂战松鼠·无双', type: '首领', region: 1, gear: 'berserk',
-    bias: { power: 1.15, agility: 1.02, speed: 1.06, hp: 1.08 },
-    weapons: [{ id: 12, level: 8 }], skills: [{ id: 14, level: 8 }, { id: 5, level: 8 }, { id: 10, level: 8 }],
-    pattern: ['weapon', 'skill', 'weapon', 'common'],
-    patternDesc: '固定循环：狼牙棒 → 小宇宙爆发 → 狼牙棒 → 普攻',
-    mech: ['berserk'],
-    mechDesc: '精英：生命首次低于 50% 时攻击力翻倍；一身狂战套，力量/敏捷/生命/速度全面强化' },
-  );
+  /* ============================================================
+   * 10 整层的最终 boss：**独立随机池**（不再是固定那一只）
+   *
+   * 装备固定为狂战套（gear: 'berserk'，玩家一眼认得出），但每一只的
+   * 武器 / 技能 / 技能等级 / 机制倾向都不同 —— 于是「塔顶那一战」有变化：
+   *   · 技能等级有高有低（不是全 8 级），形成「某几招特别狠」的压迫感；
+   *   · 武技搭配决定倾向：双武器＝靠普攻硬砸，双主动＝技能密集，
+   *     被动多的（皮糙肉厚/装死）＝特别耐打；
+   *   · 每只都**固定带绝对防御**（技能 16）—— 受击自动触发、不进出手池的被动
+   *     （首次 22% / 再次 13% 概率完全免伤，并把伤害反弹回去）。
+   *
+   * 变体按 (salt + 层数) 哈希抽取：**同一层固定同一只**（进层前能预习、
+   * 失败重试还是它），换一层就是新的组合。
+   * ============================================================ */
+  /* 所有变体共享的「首领底子」：狂战套 + 略微高于三侠的三围。 */
+  const WARLORD_BASE = { type: '首领', region: 1, gear: 'berserk', mech: ['berserk'] };
+  const WARLORD_POOL = Object.freeze([
+    { ...WARLORD_BASE, id: 'warlord', name: '狂战松鼠·无双',
+      bias: { power: 1.15, agility: 1.02, speed: 1.06, hp: 1.08 },
+      weapons: [{ id: 12, level: 8 }],
+      skills: [{ id: 14, level: 10 }, { id: 5, level: 9 }, { id: 10, level: 8 }, { id: 16, level: 8 }],
+      castable: [14, 5], pattern: ['weapon', 'skill', 'weapon', 'common'],
+      patternDesc: '固定循环：狼牙棒 → 小宇宙爆发 → 狼牙棒 → 普攻',
+      mechDesc: '精英：生命首次低于 50% 时攻击力翻倍；一身狂战套，力/敏/速/生命全面强化；' +
+        '自带绝对防御（受击时按概率完全免伤）' },
+    { ...WARLORD_BASE, id: 'warlord', name: '狂战松鼠·铁壁',
+      bias: { power: 1.05, agility: 0.94, speed: 0.96, hp: 1.22 },
+      weapons: [{ id: 9, level: 12 }],
+      skills: [{ id: 16, level: 14 }, { id: 10, level: 14 }, { id: 6, level: 12 }, { id: 14, level: 8 }],
+      castable: [14], pattern: ['weapon', 'weapon', 'common', 'skill'],
+      patternDesc: '固定循环：斩马刀 → 斩马刀 → 普攻 → 小宇宙爆发',
+      mechDesc: '精英：血量与减伤拉满（皮糙肉厚 14 级 + 绝对防御 14 级），' +
+        '出手慢但极难打死；装死 12 级让它在濒死时多撑一段' },
+    { ...WARLORD_BASE, id: 'warlord', name: '狂战松鼠·血怒',
+      bias: { power: 1.20, agility: 1.04, speed: 1.04, hp: 1.06 },
+      weapons: [{ id: 12, level: 10 }, { id: 8, level: 10 }],
+      skills: [{ id: 23, level: 12 }, { id: 16, level: 10 }, { id: 5, level: 10 }, { id: 14, level: 8 }],
+      castable: [23, 14], pattern: ['weapon', 'skill', 'weapon', 'skill'],
+      patternDesc: '固定循环：狼牙棒 → 幸运一击 → 菜刀 → 小宇宙爆发',
+      mechDesc: '精英：幸运一击 12 级（1~6 倍伤害，方差极大）；攻击时吸血；' +
+        '自带绝对防御 —— 打它要扛得住爆发' },
+    { ...WARLORD_BASE, id: 'warlord', name: '狂战松鼠·霜狱',
+      bias: { power: 1.12, agility: 1.06, speed: 1.10, hp: 1.10 },
+      weapons: [{ id: 7, level: 11 }],
+      skills: [{ id: 15, level: 13 }, { id: 16, level: 12 }, { id: 10, level: 10 }, { id: 14, level: 8 }],
+      castable: [15, 14], pattern: ['skill', 'weapon', 'skill', 'common'],
+      patternDesc: '固定循环：通灵召唤 → 毒龙胆 → 通灵召唤 → 普攻',
+      mechDesc: '精英：通灵召唤 13 级（召唤物压制）+ 毒藤缠绕；自带绝对防御 12 级' },
+    { ...WARLORD_BASE, id: 'warlord', name: '狂战松鼠·无常',
+      bias: { power: 1.18, agility: 1.08, speed: 1.12, hp: 1.04 },
+      weapons: [{ id: 11, level: 12 }],
+      skills: [{ id: 14, level: 12 }, { id: 16, level: 12 }, { id: 6, level: 10 }, { id: 10, level: 10 }],
+      castable: [14], pattern: ['weapon', 'skill', 'common', 'weapon'],
+      patternDesc: '固定循环：武士刀 → 小宇宙爆发 → 普攻 → 武士刀',
+      mechDesc: '精英：小宇宙爆发 12 级（频繁追加行动），会冻结与吸血；' +
+        '自带绝对防御 12 级，节奏极快' },
+  ]);
+  /** 取某一层对应的塔顶 boss 变体：同层固定，换层变化。 */
+  function warlordFor(layer, salt) {
+    const key = String(salt == null ? '' : salt) + '&warlord#' + Math.max(1, Number(layer) || 1);
+    return WARLORD_POOL[poolHash(key) % WARLORD_POOL.length];
+  }
+  /* 兼容旧调用点：默认（不带层数）就是第一只。 */
+  const WARLORD = WARLORD_POOL[0];
 
   // ---------- 随机 boss 池（每层第 4 场） ----------
   /* 7 个带机制的松鼠 boss + 3 只平庸松鼠 + 10 个机制 NPC = 20 个候选，
@@ -801,6 +856,12 @@
     { id: 'C47', name: '濒死觉悟', rarity: 2, kind: 'permanent',
       desc: '每场战斗开始时获得 50% 的空生命上限（不回血）；生命低于 50% 时获得 15% 减伤与 15% 吸血',
       mods: { emptyMaxHpMul: 0.50, lowHpTakenMul: -0.15, lowHpLifestealPct: 0.15, lowHpAt: 0.50 } },
+    /* 减伤成长：每胜利一场，本局受到伤害再 −1%（上限 −25%）。
+     * 与 C07（生命成长）/ C11（生命固定成长）/ C12（力敏速成长）同一族的「成长型」，
+     * 但作用在减伤上 —— 无尽塔后期最缺的就是续航。 */
+    { id: 'C48', name: '铜墙铁壁', rarity: 2, kind: 'permanent',
+      desc: '本局每胜利一场，受到的伤害额外 −1%（上限 −25%）',
+      mods: { winTakenMulPct: 0.01, winTakenMulCap: 0.25 } },
     { id: 'C21', name: '暴击精通', rarity: 0, kind: 'permanent', desc: '暴击率 +10%', mods: { critBonus: 10 } },
     { id: 'C22', name: '闪避精通', rarity: 0, kind: 'permanent', desc: '闪避 +8%', mods: { dodgeBonus: 8 } },
     { id: 'C23', name: '轻身术', rarity: 0, kind: 'permanent', desc: '速度 +15%', mods: { speedMul: 0.15 } },
@@ -848,6 +909,11 @@
       desc: '接下来 3 场：无视环境词缀，并把负面环境词缀反弹给对手', mods: { envIgnore: 1, envReflect: 1 } },
     { id: 'N10', name: '避风斗篷', rarity: 1, kind: 'limited', uses: 10, endlessOnly: true,
       desc: '接下来 10 场：无视环境词缀', mods: { envIgnore: 1 } },
+    /* 反噬豁免：限次 10 场，免疫**一切反伤**（荆棘铁壁 / 荆棘之甲 / 镜鳞反噬 /
+     * 绝对防御反伤）。无尽塔后期到处都是反伤，这条是硬解。 */
+    { id: 'N15', name: '反噬豁免', rarity: 1, kind: 'limited', uses: 10, endlessOnly: true, nextBattle: true,
+      desc: '每场战斗免疫一切反伤（含荆棘、镜鳞与绝对防御的反伤）· 共 10 场',
+      mods: { reflectImmune: 1 } },
     /* 低血 combo 的两条限次类（与狂怒成套；限次 10 场） */
     /* 这两条虽然也是「下一场战斗」生命周期（nextBattle），但在无尽塔里是
      * **10 场限次**（每场各生效一次、打完扣 1），所以文案按「每场」写，
@@ -901,7 +967,9 @@
      * C38 先机预判（史诗）：每场战斗敌方对我方的第一次**攻击**伤害归零。
      *    反伤/中毒这类非攻击伤害不走 applyDamage 的攻击路径，所以天然不会消耗它
      *    （需求里点名的「不会被反伤 debuff 破坏」）。 */
-    { id: 'C37', name: '虚空铭文', rarity: 3, kind: 'permanent', endlessOnly: true, unique: true, hidden: true,
+    /* 需求：仓库钥匙 / 扩容背包一局只出现一次；**虚空铭文可以重复出现** ——
+     * 它每次只让一个永久增益免占位，重复刷到是有意义的。 */
+    { id: 'C37', name: '虚空铭文', rarity: 3, kind: 'permanent', endlessOnly: true, hidden: true, repeatable: true,
       desc: '立即从你已有的永久增益里选一个附魔：它不再占用永久增益位（可叠加的增益则全部层数一起免疫占位；本局有效，隐藏增益，不可出售）',
       mods: { pickPermanentFree: 1 } },
     /* —— 本轮第 7 项：易碎的属性烙印（普通 / 稀有各三种）——
@@ -1110,7 +1178,7 @@
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,
-    GEAR, wearsOf, WARLORD, BOSS_POOL, bossFor, heroOrder, ENDLESS_ONLY_MODS, poolRoster, ROSTERS,
+    GEAR, wearsOf, WARLORD, WARLORD_POOL, warlordFor, BOSS_POOL, bossFor, heroOrder, ENDLESS_ONLY_MODS, poolRoster, ROSTERS,
     TOWER_BATTLE_IDS,
     BUFFS, BUFF_BY_ID, RARITY_NAME, RARITY_WEIGHTS, FIXED_HEAL_PCT, AUTO_HEAL_PCT, STACK_MAX,
     SETTLE_DROP_BATTLES,

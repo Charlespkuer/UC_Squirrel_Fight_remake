@@ -296,11 +296,13 @@ test('来点松果可以二次触发，但概率是所有武器/技能里最低�
     assert.ok(rate(id) < rules.repeatSkill, '技能 ' + id + ' 的二次概率应该比基准更低（中幅下调）');
     assert.ok(rate(id) <= rules.repeatSkillMedium, '技能 ' + id + ' 应该落在中幅档（≤' + rules.repeatSkillMedium + '%）');
   }
-  for (const id of [15, 23]) {
-    assert.ok(rate(id) < rules.repeatSkill, '技能 ' + id + ' 的二次概率应该被小幅下调');
-    assert.ok(rate(id) >= rules.repeatSkillMedium && rate(id) <= rules.repeatSkillSmall,
-      '技能 ' + id + ' 应该落在小幅档');
-  }
+  /* 小幅档：通灵召唤（15）与幸运一击（23）。幸运一击本次**再单独下调**一档
+   * （10%，低于小幅档），因为它「必中 + 1~6 倍伤害」，重复触发时方差极大。 */
+  assert.ok(rate(15) < rules.repeatSkill, '技能 15 的二次概率应该被小幅下调');
+  assert.ok(rate(15) >= rules.repeatSkillMedium && rate(15) <= rules.repeatSkillSmall,
+    '技能 15 应该落在小幅档');
+  assert.ok(rate(23) < rate(15), '幸运一击应当低于同档的通灵召唤：' + rate(23) + ' vs ' + rate(15));
+  assert.ok(rate(23) > rules.repeatSnack, '但仍应高于最低档的来点松果');
   assert.equal(rate(14), rules.repeatSkill, '没点名的技能（小宇宙爆发）保持基准');
   assert.equal(rate(18), rules.repeatSkill, '没点名的技能（吸铁大法）保持基准');
   assert.ok(rate(17) < rate(8) && rate(17) < rate(15), '来点松果仍是最低档');

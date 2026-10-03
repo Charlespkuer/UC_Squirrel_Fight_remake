@@ -40,10 +40,12 @@
     repeatWeapon: 25, repeatSkill: 20, repeatSnack: 5,
     /* 二次及以后使用概率（%）。基准 20 = repeatSkill。
      *   · medium：本来最常见、影响最大的三个（色诱/野球拳/来点松果）中幅下调；
-     *   · small ：通灵召唤 / 幸运一击；以及「二次概率本来就低」的绝对防御，小幅下调。
+     *   · small ：通灵召唤（幸运一击本次再单独下调，见 repeatBySkill 的 23）。
      * 这两个档位都必须低于 repeatSkill，且 repeatSnack 仍是最低。 */
-    repeatSkillMedium: 13, repeatSkillSmall: 17,
-    repeatBySkill: { 8: 13, 12: 13, 15: 17, 23: 17 },
+    repeatSkillMedium: 13, repeatSkillSmall: 13,
+    /* 23 = 幸运一击：本次单独再下调（从 17% 降到 10%）——
+     * 它「必中 + 1~6 倍伤害」，重复触发时方差极大，是所有技能里最该压一档的。 */
+    repeatBySkill: { 8: 13, 12: 13, 15: 13, 23: 10 },
     /* 绝对防御是**受击自动触发**的技能（不进出手池），所以它不按 repeatBySkill 走，
      * 而是「首次 22% / 二次及以后 13%」——和龟甲术首次 35 / 再次 20 一样的口径。
      * 13/22 比上面那三档的降幅还大一点，因为它是「每次都白挡一下」的强被动。 */
@@ -153,6 +155,9 @@
   /** 任何扣血途径致死时的兜底：涅槃（复活 + 本场力/敏/速提升）/ 金蝉脱壳（保留 1 血）/ 无敌模式。
    *  原来只有 applyDamage 里判，中毒、荆棘反弹、双刃剑自伤、枯泉吸血把人打死时
    *  复活甲不会触发 —— 玩家会以为「buff 没生效」。 */
+  /** 塔 buff「反噬豁免」：免疫**一切**反伤（荆棘铁壁 / 荆棘之甲 / 镜鳞反噬 / 绝对防御反伤）。
+   *  判据放在被反伤的那一方（att）身上 —— 也就是「我方出手时不会被弹」。 */
+  function reflectImmune(c) { return !!(c && c.mods && Number(c.mods.reflectImmune) > 0); }
   function tryDeathSave(def, r) {
     if (!def || def.hp > 0) return false;
     if (def.mods && Array.isArray(def.mods.deathSaves) && def.mods.deathSaves.length) {
@@ -490,13 +495,21 @@
       att.mustHitNext = false;
       r.dmg = (r.dmg || 0) + dmg;
       if (red.rebound) {
-        att.hp -= red.rebound;
-        r.reboundHurt = red.rebound;
-        tryDeathSave(att, r);
+        /* 反噬豁免：免疫反伤（包括绝对防御的反伤），但**不免疫**被挡住这件事本身。 */
+        if (reflectImmune(att)) {
+          r.reflectBlocked = (r.reflectBlocked || 0) + red.rebound;
+          r.noteText = (r.noteText ? r.noteText + '·' : '') + '反噬豁免'; r.noteSide = att.side;
+        } else {
+          att.hp -= red.rebound;
+          r.reboundHurt = red.rebound;
+          tryDeathSave(att, r);
+        }
       }
       // —— 受击/命中方机制（挑战塔 NPC 池） ——
       if (dmg > 0) {
-        if (def.mech.includes('thorns') && att.hp > 0) {          // 荆棘铁壁：反弹 15%
+        /* 反噬豁免：本场免疫一切反伤 —— 直接把三种反伤一起跳过。 */
+        const noReflect = reflectImmune(att);
+        if (def.mech.includes('thorns') && att.hp > 0 && !noReflect) {   // 荆棘铁壁：反弹 15%
           const reflect = Math.max(1, Math.round(dmg * 0.15));
           att.hp -= reflect;
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
@@ -504,7 +517,7 @@
         }
         // 塔 buff「荆棘之甲」：玩家侧反伤（跨层类）
         const thornsPct = def.mods && Number(def.mods.thornsPct) || 0;
-        if (thornsPct > 0 && att.hp > 0) {
+        if (thornsPct > 0 && att.hp > 0 && !noReflect) {
           const reflect = Math.max(1, Math.round(dmg * thornsPct));
           att.hp -= reflect;
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
@@ -516,7 +529,7 @@
         const mp = (def.mechParams && def.mechParams.trialMirror) || null;
         const threshold = (mp && Number(mp.threshold)) || 0.15;
         const reflectPct = (mp && Number(mp.reflect)) || 0.6;
-        if (def.mech.includes('trialMirror') && att.hp > 0 && dmg >= def.maxHp * threshold) {
+        if (def.mech.includes('trialMirror') && att.hp > 0 && !noReflect && dmg >= def.maxHp * threshold) {
           const reflect = Math.max(1, Math.round(dmg * reflectPct));
           att.hp -= reflect;
           r.thornsDmg = (r.thornsDmg || 0) + reflect;

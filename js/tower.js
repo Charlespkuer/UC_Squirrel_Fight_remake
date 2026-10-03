@@ -156,6 +156,7 @@
       run.winStatPower = Math.max(0, Number(run.winStatPower) || 0);
       run.winStatAgility = Math.max(0, Number(run.winStatAgility) || 0);
       run.winStatSpeed = Math.max(0, Number(run.winStatSpeed) || 0);
+      run.winTakenMul = Math.max(0, Number(run.winTakenMul) || 0);
       /* 血量绝对值口径：剩余血量与「最近一次已知上限」（回血/裁血的基准）。 */
       run.hpAbs = Math.max(0, Math.round(Number(run.hpAbs) || 0));
       run.repeatAt = Number(run.repeatAt) >= 0 ? Number(run.repeatAt) : -1;
@@ -188,13 +189,14 @@
     // 第 4 场 = 随机 boss（20 选 1：7 个带机制的松鼠 + 3 只平庸松鼠 + 10 个机制 NPC）
     plan.push(bossEntry(layer, salt, squirrelsOnly));
     // x10 层第 5 场 = 固定狂战松鼠（松鼠形态 + 全身狂战套 + 精英）
-    if (layer % 10 === 0) plan.push({ kind: 'warlord', id: D().WARLORD.id });
+    if (layer % 10 === 0) plan.push({ kind: 'warlord', id: 'warlord', _layer: layer, _salt: salt });
     return plan;
   }
   function entryInfo(entry) {
     if (entry.kind === 'hero') return { name: HERO_NAME[entry.anim], anim: entry.anim, type: '三侠位', mechDesc: '', elite: false };
     if (entry.kind === 'warlord') {
-      const w = D().WARLORD;
+      /* 预告必须显示**这一层实际会遇到的**那只变体（同层固定 → 预告 = 实战）。 */
+      const w = D().warlordFor(entry._layer, entry._salt);
       return { name: w.name, squirrel: true, gear: w.gear, elite: true, type: w.type,
         mechDesc: w.mechDesc, patternDesc: w.patternDesc, mechs: w.mech.slice() };
     }
@@ -311,6 +313,7 @@
       speedMul: 0, winHealPct: 0, thornsPct: 0, lowHpPowerMul: 0, lowHpAt: 0,
       lowHpAgilityMul: 0, lowHpSpeedMul: 0,
       emptyMaxHpMul: 0, lowHpTakenMul: 0, lowHpLifestealPct: 0, lowHpRegenPct: 0, lowHpRegenAt: 0,
+      reflectImmune: 0, winTakenMulPct: 0, winTakenMulCap: 0,
       winStatAfter10: 0,
       openerPowerMul: 0, openerRounds: 0, fatiguePowerMul: 0, dodgeMul: 0 };
     eachBuff(run, (buff, stacks) => {
@@ -350,6 +353,13 @@
       if (m.mustHitAll) agg.mustHitAll = 1;                                      // 第 1 项：百步穿杨
       if (m.firstHitZero) agg.firstHitZero = 1;                                  // 第 1 项：先机预判
       /* 狂怒：低血时攻/敏/速同时提升；阈值取所有来源里的最高值（同一套 lowHpAt）。 */
+      /* 反噬豁免：免疫一切反伤（限次类，战斗内生效）。 */
+      if (m.reflectImmune) agg.reflectImmune = Math.max(agg.reflectImmune, Number(m.reflectImmune) || 0);
+      /* 减伤成长（铜墙铁壁）：累计值记在 run.winTakenMul 上，这里只登记上限口径。 */
+      if (m.winTakenMulPct) {
+        agg.winTakenMulPct += m.winTakenMulPct * k;
+        agg.winTakenMulCap = Math.max(agg.winTakenMulCap, (Number(m.winTakenMulCap) || 0) * stacks);
+      }
       /* 空血上限：只抬高上限、不回血（与 maxHpMul 那条「回复等量」的语义相反）。 */
       if (m.emptyMaxHpMul) agg.emptyMaxHpMul += m.emptyMaxHpMul * k;
       /* 低血 combo 的减伤 / 吸血 / 每回合回血（都读同一个 lowHpAt 阈值）。 */
@@ -432,6 +442,8 @@
     if (a.thornsPct) lines.push(['荆棘反伤', pct(a.thornsPct)]);
     if (a.shellPct) lines.push(['护盾', pct(a.shellPct)]);
     if (a.startHealPct) lines.push(['开战回血', pct(a.startHealPct) + ' 最大生命']);
+    if (a.reflectImmune) lines.push(['反噬豁免', '免疫一切反伤']);
+    { const wt = winTakenMulOf(run); if (wt > 0) lines.push(['减伤成长（每胜利 −1%）', pct(wt)]); }
     if (a.winHealPct) lines.push(['战斗胜利后回血', pct(a.winHealPct)]);
     if (a.openStrikePct) lines.push(['开局打击', pct(a.openStrikePct) + ' 敌最大生命']);
     if (a.enemyPowerDown) lines.push(['敌人攻击', pct(-a.enemyPowerDown)]);
@@ -480,7 +492,7 @@
   }
 
   // ---------- 敌人构建 ----------
-  function buildFoe(mode, layer, entry) {
+  function buildFoe(mode, layer, entry, salt) {
     const TD = D();
     const LT = mode === 'tower' ? TD.towerLevel(layer) : TD.endlessLevel(layer);
     const M = mode === 'tower' ? TD.towerMult(layer) : TD.endlessMult(layer);
@@ -491,7 +503,7 @@
     const extra = [];
     const elite = entry.kind === 'warlord';                 // x10 第 5 场：精英（×1.2）
     let name, bias, npcType, skills = [], weapons = [], pattern = null, mech;
-    let mechParams = null, wears = null;
+    let mechParams = null, wears = null, castable = undefined;
     if (entry.kind === 'hero') {
       const scale = (GData.STAGE_TYPE_SCALE && GData.STAGE_TYPE_SCALE[entry.anim]) || 1;
       bias = { power: scale, agility: scale, speed: scale, hp: 1 };
@@ -502,7 +514,9 @@
       // 松鼠形态的 boss：同族贴图（**不给 npcType** → 战斗里就用玩家那套松鼠图集并镜像朝左，
       // 走 sim 的 playerLikeAction 分支，所以武器/技能都真的生效，机制在 sim 的
       // 「玩家式 AI」分支里补挂）。每个 boss 都有固定装备（wears）→ 玩家看图就能认人。
-      const sq = entry.kind === 'warlord' ? TD.WARLORD
+      /* 塔顶 boss 从**独立变体池**里按 (salt, 层数) 取：同层固定、换层变化。
+       * 池里每只都是狂战套，但武器/技能/技能等级/机制倾向各不相同。 */
+      const sq = entry.kind === 'warlord' ? TD.warlordFor(layer, salt)
         : entry.kind === 'trial' ? TD.TRIAL_BY_ID[entry.id] : TD.SQUIRREL_BY_ID[entry.id];
       bias = sq.bias; name = sq.name; npcType = null;
       // 武技等级随目标等级小幅上调，免得高层还在用 8 级菜刀
@@ -525,6 +539,9 @@
       // 自己的机制永远在（无尽的段位机制只做叠加）
       for (const m of sq.mech || []) if (!mech.includes(m)) mech.push(m);
       mechParams = sq.mechParams || null;
+      /* castable：这个敌人固定循环里会用的**主动技**（塔顶 boss 变体用它表达倾向）。
+       * 没有就交给 sim 退回「所有已实现技能」。 */
+      castable = Array.isArray(sq.castable) ? sq.castable.slice() : undefined;
     } else {
       const npc = TD.NPC_BY_ID[entry.id];
       bias = npc.bias; name = npc.name; npcType = 'tw_' + npc.id;
@@ -549,6 +566,7 @@
       agility: stat(bias.agility), speed: stat(bias.speed),
       hp: Math.max(1, Math.round(heroHp * hpRatio)),
       weapons, skills, mech, pattern, mechParams, wears,
+      castable,
     };
     // poolNpc = 带专属机制的对手（「机制破解」类 buff 只对它生效）；平庸松鼠没有机制，不算
     const poolNpc = entry.kind === 'npc' || entry.kind === 'warlord' || (entry.kind === 'trial');
@@ -556,7 +574,7 @@
   }
   function regionOf(entry) {
     if (entry.kind === 'squirrel' || entry.kind === 'trial' || entry.kind === 'warlord') {
-      const sq = entry.kind === 'warlord' ? D().WARLORD
+      const sq = entry.kind === 'warlord' ? D().warlordFor(entry._layer, entry._salt)
         : entry.kind === 'trial' ? D().TRIAL_BY_ID[entry.id] : D().SQUIRREL_BY_ID[entry.id];
       return sq && sq.region != null ? sq.region : 0;
     }
@@ -641,7 +659,7 @@
     if (run.choices) return { ok: false, msg: '请先完成场间选择。' };
     if (run.phase) return { ok: false, msg: '请先完成商店与结算。' };
     const entry = run.plan[run.idx];
-    const built = buildFoe(mode, run.layer, entry);
+    const built = buildFoe(mode, run.layer, entry, run.salt);
     const foeCtx = { hero: entry.kind === 'hero', poolNpc: built.poolNpc, elite: built.elite };
     const agg = aggregate(run, foeCtx);
     /* 隐藏成就「超凡入圣」：本场聚合出来的 buff 加成（不含装备/等级）跨过阈值就记一次。 */
@@ -780,6 +798,10 @@
       if (agg.thornsPct) mods.thornsPct = Math.min(0.6, agg.thornsPct);          // 荆棘之甲（sim 里结算）
       if (agg.mustHitAll) mods.mustHitAll = 1;                                  // 第 1 项：百步穿杨（整个一场必中）
       if (agg.firstHitZero) mods.firstHitZero = 1;                              // 第 1 项：先机预判（sim 里结算）
+      /* 减伤成长：与本场其它减伤一起并进 takenMul（负值 = 减伤）。 */
+      const grownTaken = winTakenMulOf(run);
+      if (grownTaken > 0) mods.takenMul = (Number(mods.takenMul) || 0) - Math.min(agg.winTakenMulCap || grownTaken, grownTaken);
+      if (agg.reflectImmune) mods.reflectImmune = agg.reflectImmune;
       if (agg.emptyMaxHpMul) mods.emptyMaxHpMul = agg.emptyMaxHpMul;
       if (agg.lowHpPowerMul || agg.lowHpAgilityMul || agg.lowHpSpeedMul ||
           agg.lowHpTakenMul || agg.lowHpLifestealPct || agg.lowHpRegenPct) {
@@ -1067,6 +1089,15 @@
       run.sellBonus = (run.sellBonus || 0) + (runModTotal(run, 'sellGrowthPerWin') || 0);
       /* 第 2 项：以战养战（每胜一场生命上限 +10，不封顶）、登顶者（第 10 层起每胜一场攻击 +5%） */
       run.winHpFlat = (run.winHpFlat || 0) + (runModTotal(run, 'winMaxHpFlat') || 0);
+      /* 铜墙铁壁（减伤成长）：每胜利一场累计，封顶见 winTakenMulCap。 */
+      {
+        const c48 = stacksOf(run, 'C48');
+        if (c48) {
+          const per = Number(D().BUFF_BY_ID.C48.mods.winTakenMulPct) || 0.01;
+          const cap = (Number(D().BUFF_BY_ID.C48.mods.winTakenMulCap) || 0.25) * c48;
+          run.winTakenMul = Math.min(cap, Math.max(0, Number(run.winTakenMul) || 0) + per * c48);
+        }
+      }
       /* 登顶者（可叠层）：第 10 层起每胜一场，本局固定 +1 力/敏/速 × 层数。
        * 固定值不参与全局倍率（增幅水晶只管百分比乘区），这也和「以战养战 +5 上限」同口径。 */
       if (battleLayer >= 10) {
@@ -1548,6 +1579,10 @@
   // ---------- 场间 4 选 1 ----------
   /** 第 2 项：unique（扩容类）buff 一局只能拿一次 —— 拿过就不再进任何池子。 */
   function poolFilter(run, buff) {
+    /* repeatable：允许**重复出现**（例如虚空铭文 —— 每次只让一个永久增益免占位，
+     * 重复刷到是有意义的）。这类不受 unique 的「已拥有就不再进池」限制；
+     * 是否真的还能再拿一次由 addBuff 里的 pickBuffIds 把关。 */
+    if (buff.repeatable) return true;
     if (!buff.unique) return true;
     if ((run.pickBuffIds || []).includes(buff.id)) return false;
     if ((run.permSlotIds || []).includes(buff.id)) return false;
@@ -2171,6 +2206,14 @@
     if (m.pickWeaponPct || m.pickSkillPct || m.pickPermanentFree || m.permSlot) return false;
     return true;
   }
+  /** C48 铜墙铁壁的减伤累计（含上限封顶口径）。 */
+  function winTakenMulOf(run) {
+    if (!run) return 0;
+    const c48 = stacksOf(run, 'C48');
+    if (!c48) return 0;
+    const cap = (Number(D().BUFF_BY_ID.C48.mods.winTakenMulCap) || 0.25) * c48;
+    return Math.min(cap, Math.max(0, Number(run.winTakenMul) || 0));
+  }
   /** C07 吞噬成长的百分比累计（含上限封顶口径，与 adjustMe 保持一致）。 */
   function winMaxHpOf(run) {
     if (!run) return 0;
@@ -2296,6 +2339,8 @@
       run.winHpFlat = 0;
     }
     else if (id === 'C12') { run.winStatPower = 0; run.winStatAgility = 0; run.winStatSpeed = 0; }
+    /* C48 铜墙铁壁：它的「已累计减伤」同样是本局攒出来的收益，替换/卖出后**保留**
+     *（与 C07/C11 一致），所以这里不清零。 */
     else if (id === 'C25') run.sellBonus = 0;
     else if (id === 'C36') { run.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; run.shopSpend = 0; }
     else {
@@ -2590,6 +2635,11 @@
       return '每场开始：' + bits.join('、');
     }
     if (id === 'N14') return '生命 ≤' + pct(D().BUFF_BY_ID.N14.mods.lowHpAt) + '% 时减伤 ' + pct(-D().BUFF_BY_ID.N14.mods.lowHpTakenMul);
+    if (id === 'C48') {
+      const cap = (D().BUFF_BY_ID.C48.mods.winTakenMulCap || 0.25) * Math.max(1, stacksOf(run, 'C48'));
+      return '已累计 受到伤害 −' + pct(winTakenMulOf(run)) + '（上限 −' + pct(cap) + '）';
+    }
+    if (id === 'N15') return '接下来免疫一切反伤（荆棘 / 镜鳞 / 绝对防御）';
     if (id === 'C25') return '本局已累计 卖价 +' + Math.round(Number(run.sellBonus) || 0) + ' 试炼币（只加自己）';
     const def = D().BUFF_BY_ID[id];
     if (def && def.mods && def.mods.fragileStat) {
@@ -2649,6 +2699,8 @@
     /* 只读：摇一页商店货架（不改状态）。测试用它统计各增益的上架概率
      *（例如不死鸟 shopWeight 的效果），界面也可以拿来做「货架预览」。 */
     rollShopSlotsOf: (run, paid) => rollShopSlots(run || endless().run, paid),
+    /* 只读：某条增益现在还能不能进池（unique / repeatable 口径）。 */
+    poolFilterOf: (run, buff) => poolFilter(run || endless().run, buff),
     /* 只读：本局全局倍率（增幅水晶 C15 的 globalMul^层数）。
      * 成长类增益的增量与上限都要乘它，暴露出来便于界面/测试用同一口径核算。 */
     globalMulOf: (run) => globalMul(run || endless().run),

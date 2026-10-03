@@ -1604,6 +1604,11 @@
   // ---------- 场间 4 选 1 ----------
   /** 第 2 项：unique（扩容类）buff 一局只能拿一次 —— 拿过就不再进任何池子。 */
   function poolFilter(run, buff) {
+    /* maxStacks：这条增益的**层数上限**（默认取全局 STACK_MAX）。
+     * 已经叠满的就不该再出现在任何池子里 —— 商店、场间三选一、战斗奖励都走这里。
+     * 例：「抉择扩充」(C50) 叠满 3 层后不再刷新。 */
+    const cap = Math.max(1, Math.floor(Number(buff.maxStacks) || D().STACK_MAX));
+    if (buff.stackable && stacksOf(run, buff.id) >= cap) return false;
     /* repeatable：允许**重复出现**（例如虚空铭文 —— 每次只让一个永久增益免占位，
      * 重复刷到是有意义的）。这类不受 unique 的「已拥有就不再进池」限制；
      * 是否真的还能再拿一次由 addBuff 里的 pickBuffIds 把关。 */
@@ -1614,6 +1619,13 @@
     /* 本轮第 4 项：已经挂着「待选取」的同名增益也别再给（免得同时攒两份待选取）。 */
     if (run.pendingPick && run.pendingPick.buffId === buff.id) return false;
     return !(run.permanent || []).some((b) => b.id === buff.id);
+  }
+  /** 战斗获得的选项目数：基础 3，由「抉择扩充」(C50) 每层 +1，上限 6。
+   *  可叠 3 层 → 三选一 / 四选一 / 五选一 / 六选一。 */
+  function choiceSlotsOf(run) {
+    const base = 3, cap = 6;
+    const extra = Math.max(0, Math.floor(runModTotal(run, 'choiceCount') || 0));
+    return Math.max(base, Math.min(cap, base + extra));
   }
   function rollChoices(mode, run) {
     const TD = D();
@@ -1630,7 +1642,8 @@
     /* 场间三选一也用**同一份稀有度权重**（原来调 rollRarity() 没传权重 → 走的是
      * 均匀分布，传奇占比远高于自然掉率）。需求 2 / 4 的传奇降权在这里同样生效。 */
     const choiceWeights = TD.tiltWeights(1, run);
-    for (let slot = 0; slot < 3; slot++) {
+    const slots = choiceSlotsOf(run);
+    for (let slot = 0; slot < slots; slot++) {
       let rarity = rollRarity(choiceWeights);
       let list = available(rarity);
       if (!list.length) list = pool.filter((b) => !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));   // 该稀有度抽空时放宽
@@ -1659,7 +1672,11 @@
   function ownable(run, buff) {
     const owned = ownedEntry(run, buff.id);
     if (!owned) return true;
-    return buff.stackable === true && owned.stacks < D().STACK_MAX;   // 同名唯一，可叠层例外
+    /* 可叠层类的上限：优先用该增益自己的 maxStacks（例如 C50 只到 3 层），
+     * 没写就用全局 STACK_MAX。叠满即视为「不可再获得」。 */
+    if (buff.stackable !== true) return false;                        // 同名唯一
+    const cap = Math.max(1, Math.floor(Number(buff.maxStacks) || D().STACK_MAX));
+    return owned.stacks < cap;
   }
   /** 摇一个稀有度。默认用自然掉率权重；刷新时传入倾斜后的权重。 */
   function rollRarity(weights) {
@@ -2749,8 +2766,12 @@
     /* 只读：摇一页商店货架（不改状态）。测试用它统计各增益的上架概率
      *（例如不死鸟 shopWeight 的效果），界面也可以拿来做「货架预览」。 */
     rollShopSlotsOf: (run, paid) => rollShopSlots(run || endless().run, paid),
-    /* 只读：某条增益现在还能不能进池（unique / repeatable 口径）。 */
+    /* 只读：某条增益现在还能不能进池（unique / repeatable / maxStacks 口径）。 */
     poolFilterOf: (run, buff) => poolFilter(run || endless().run, buff),
+    /* 只读：本条增益当前还能不能获得（叠层上限口径）。 */
+    ownableOf: (run, buff) => ownable(run || endless().run, buff),
+    /* 只读：当前战斗奖励的选项目数（基础 3 + 抉择扩充层数，上限 6）。 */
+    choiceSlotsOf: (run) => choiceSlotsOf(run || endless().run),
     /* 只读：本局全局倍率（增幅水晶 C15 的 globalMul^层数）。
      * 成长类增益的增量与上限都要乘它，暴露出来便于界面/测试用同一口径核算。 */
     globalMulOf: (run) => globalMul(run || endless().run),

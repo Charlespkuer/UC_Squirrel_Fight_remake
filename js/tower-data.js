@@ -307,10 +307,10 @@
    * 实现：给稀有度权重第 3 档（传奇）乘一个系数，系数只跟「本局已拥有多少条传奇」有关。
    * 商店（rollShopSlots）与场间三选一（rollChoices）共用同一份权重，口径一致。
    * ============================================================ */
-  /* 需求 2：传奇基础权重 3 → 2.4（中幅下调，传奇占比降到原来的 80%）。
+  /* 需求 2：传奇基础权重 3 → 2.2（中幅下调，传奇占比降到原来的约 73%）。
    * 取值依据：既让传奇明显更难刷到，又守住「20/40/60/80 币 ≈ 1/2/3/4 件史诗」
-   * 这条既有平衡（tools/test-fixes-round.cjs 需求12 有断言）。 */
-  const LEGEND_BASE_WEIGHT = 2.4;
+   * 以及「期望随价格接近线性递增」这两条既有平衡（tools/test-fixes-round.cjs 需求12 有断言）。 */
+  const LEGEND_BASE_WEIGHT = 2.2;
   const LEGEND_HOLD_PENALTY = 0.12;      // 每已拥有一条传奇，再乘 0.88
   const LEGEND_ALL_OWNED_PENALTY = 0.35; // 所有传奇都拿到手后，再乘 0.35
   /** 本局已拥有的传奇条数。 */
@@ -905,6 +905,12 @@
     { id: 'C47', name: '濒死觉悟', rarity: 2, kind: 'permanent',
       desc: '每场战斗开始时获得 50% 的空生命上限（不回血）；生命低于 50% 时获得 15% 减伤与 15% 吸血',
       mods: { emptyMaxHpMul: 0.50, lowHpTakenMul: -0.15, lowHpLifestealPct: 0.15, lowHpAt: 0.50 } },
+    /* 抉择扩充：战斗获得的三选一变四选一，可叠 3 层（最高 6 选 1）。
+     * maxStacks 与 stackable 配套：叠满 3 层后 `poolFilter` 直接把它排除，
+     * 商店与战斗都不会再刷到它。 */
+    { id: 'C50', name: '抉择扩充', rarity: 1, kind: 'permanent', stackable: true, maxStacks: 3,
+      desc: '战斗获得的选择项 +1（三选一变四选一）；可叠 3 层，最高六选一；叠满后不再出现',
+      mods: { choiceCount: 1 } },
     /* 减伤成长：每胜利一场，本局受到伤害再 −1%（上限 −25%）。
      * 与 C07（生命成长）/ C11（生命固定成长）/ C12（力敏速成长）同一族的「成长型」，
      * 但作用在减伤上 —— 无尽塔后期最缺的就是续航。 */

@@ -432,7 +432,7 @@
           if (r.lifesteal) floater(att, '+' + r.lifesteal, 'g');
           if (r.reboundHurt) floater(att, '-' + r.reboundHurt, 'r');
           if (r.selfBurn) floater(att, '-' + r.selfBurn, 'r');
-          // 挑战塔：护盾吸收 / 荆棘反弹 / 机制提示（狂暴·禁锢·吞噬·瞬杀·毒藤·金蝉脱壳·不死鸟）
+          // 挑战塔：护盾吸收 / 荆棘反弹 / 机制提示（狂暴·禁锢·吞噬·瞬杀·毒藤·金蝉脱壳·涅槃）
           if (r.shellAbsorb) floater(def, '护盾-' + r.shellAbsorb, 'y');
           if (r.thornsDmg) floater(att, '-' + r.thornsDmg, 'r');
           if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y');

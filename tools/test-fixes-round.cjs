@@ -2966,6 +2966,101 @@ test('需求51：天象之眼应当剥夺敌方吃到的正向环境（但不剥
   T.abandon('endless');
 });
 
+test('需求52：体力药限购/售价、天梯周日不休赛、涅槃重做', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;
+
+  /* ① 商店每天仅售 3 小 + 3 大体力药；大体力药 6 金松果 */
+  assert.equal(S.shopLimit(1), 3, '小体力药剂每日限购 3');
+  assert.equal(S.shopLimit(2), 3, '大体力药剂每日限购 3');
+  const big = c.propMap.getValue(2);
+  assert.equal(Number(big.price), 6, '大体力药剂售价应当是 6 金松果，实测 ' + big.price);
+  assert.equal(Number(c.propMap.getValue(1).price), 3, '小体力药剂售价仍是 3');
+  /* 实际扣费 = 价格：买 1 个大体力药扣 6 */
+  S.newGame('shop' + Math.random());
+  const st0 = S.state(); st0.goldPoint = 100; st0.props = {}; st0.shopPurchases = {};
+  const buy1 = S.buyProp(2, 1);
+  assert.ok(buy1.ok, '应当能买 1 个大体力药');
+  assert.equal(S.state().goldPoint, 94, '买 1 个大体力药应当扣 6 金松果');
+  assert.equal(S.purchaseStatus(2).remaining, 2, '买 1 个后今日还剩 2 个');
+  /* 一次性超额购买要被挡住，且不扣费 */
+  const over1 = S.buyProp(2, 3);
+  assert.ok(!over1.ok && over1.limited, '一次买 3 个（只剩 2 个额度）应当被限购挡住');
+  assert.equal(S.state().goldPoint, 94, '被限购挡住时不该扣钱');
+  S.newGame('shop2' + Math.random());
+  const st1 = S.state(); st1.goldPoint = 100; st1.props = {}; st1.shopPurchases = {};
+  assert.equal(S.buyProp(2, 3).ok, true, '一次买 3 个应当成功');
+  const over = S.buyProp(2, 1);
+  assert.ok(!over.ok && over.limited, '买满 3 个后再买应当被限购挡住');
+  assert.equal(S.state().goldPoint, 100 - 18, '3 个大体力药应当扣 18 金松果（6×3）');
+
+  /* ② 天梯赛周日不休赛：源码里不该再有周日休赛的判断 */
+  const rawSrc = fs.readFileSync(path.join(ROOT, 'js', 'classic-extras.js'), 'utf8');
+  /* 只检查**代码**：注释里会解释「原来周日休赛」，不该被当成残留逻辑。 */
+  const src = rawSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  assert.ok(src.indexOf('rankSunday') < 0, '不该再有 rankSunday() 这个休赛判据');
+  assert.ok(!/getDay\(\) === 0/.test(src), '不该再用 getDay() === 0 判断休赛');
+  assert.ok(!/\u5468\u65e5\u4f11\u8d5b/.test(src), '界面文案里不该再写「周日休赛」');
+  assert.ok(!/match\.disabled = [^;]*[Ss]unday/.test(src), '匹配按钮的禁用条件不该含周日');
+  /* 开战校验里也不该有周日拦截 */
+  assert.ok(!/if \([^)]*[Ss]unday[^)]*\) \{ alert/.test(src), '开战校验不该拦周日');
+
+  /* ③ 涅槃（原不死鸟）：每层一次复活甲 + 复活回 50% 上限 + 本场力/敏/速 +50% */
+  const c14 = TD.BUFF_BY_ID.C14;
+  assert.equal(c14.name, '涅槃', 'C14 应当已改名为涅槃');
+  assert.equal(c14.rarity, 3, '仍是传奇');
+  assert.equal(c14.shopWeight, 0.12, '商店权重仍保持很低');
+  assert.equal(c14.mods.revivePct, 0.50, '复活回复当前生命上限的 50%');
+  assert.equal(c14.mods.reviveStatMul, 0.50, '复活后本场力/敏/速 +50%');
+  assert.match(c14.desc, /涅槃|复活/, '文案要说明复活');
+  assert.match(c14.desc, /50%/, '文案要写 50%');
+  assert.match(c14.desc, /力|敏|速/, '文案要写力/敏/速加成：' + c14.desc);
+
+  /* 引擎行为：复活回复 50% 上限，且复活后力/敏/速各 +50% */
+  const mk = (o) => Object.assign({ name: 'X', level: 50, power: 200, agility: 100, speed: 100,
+    hp: 5000, maxHp: 5000, weapons: [{ id: 1, level: 5 }], skills: [], effects: {},
+    baseStats: { power: 200, agility: 100, speed: 100 } }, o);
+  let sawRevive = 0, sawMul = 0, hpOk = 0;
+  for (let i = 0; i < 60; i++) {
+    const me = mk({ name: '我', mods: { deathSaves: [{ healPct: 0.5, statMul: 0.5 }] } });
+    const foe = mk({ name: '敌', power: 400, agility: 100, speed: 200, hp: 5000, maxHp: 5000 });
+    const r = Sim.simulate(me, foe);
+    const ds = (r.rounds || []).filter((x) => x.deathSave && x.attacker === 1);
+    if (!ds.length) continue;
+    sawRevive++;
+    if (ds.some((x) => x.reviveStatMul === 0.5)) sawMul++;
+    /* 复活那一回合之后，我方血量应当回到 50% 上限附近（至少 1 点、且不超过上限） */
+    const idx = (r.rounds || []).findIndex((x) => x.deathSave);
+    const after = (r.rounds || []).slice(idx).find((x) => Array.isArray(x.hpAfter));
+    if (after && after.hpAfter[0] > 0 && after.hpAfter[0] <= r.maxHp[0]) hpOk++;
+  }
+  assert.ok(sawRevive >= 20, '应当有足够多的复活样本，实测 ' + sawRevive);
+  assert.equal(sawMul, sawRevive, '每次复活都应当带上 +50% 的标记（界面上才看得到）');
+  assert.equal(hpOk, sawRevive, '复活后血量应当在合法范围内');
+
+  /* 复活后伤害确实提高：比较有/无 statMul 的复活后普攻均值 */
+  const dmgAfter = (statMul) => {
+    let sum = 0, cnt = 0;
+    for (let i = 0; i < 200; i++) {
+      const me = mk({ name: '我', mods: { deathSaves: [{ healPct: 0.5, statMul: statMul }] } });
+      const foe = mk({ name: '敌', power: 300, agility: 1, speed: 300, hp: 99999999, maxHp: 99999999 });
+      const r = Sim.simulate(me, foe);
+      const rounds = r.rounds || [];
+      const idx = rounds.findIndex((x) => x.deathSave);
+      if (idx < 0) continue;
+      for (const x of rounds.slice(idx)) if (x.attacker === 0 && x.dmg > 0 && x.action === 'common') { sum += x.dmg; cnt++; }
+    }
+    return sum / Math.max(1, cnt);
+  };
+  const boosted = dmgAfter(0.5), plain = dmgAfter(0);
+  assert.ok(boosted > plain * 1.2,
+    '复活后应当明显变强（力/敏/速 +50%）：' + plain.toFixed(1) + ' → ' + boosted.toFixed(1));
+
+  /* 每层只给一次（run 层面的口径未被破坏） */
+  assert.ok(/reviveLayer/.test(fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8')),
+    '仍然保留「每层一次」的发放口径');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

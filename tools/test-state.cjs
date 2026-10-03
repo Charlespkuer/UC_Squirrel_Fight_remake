@@ -93,7 +93,7 @@ test('卖出道具：默认回收字典价格的一半，无价/占位价的道�
   const g = game(), S = g.State, s = S.state();
   // 商店里买得到的：半价（向下取整）
   assert.equal(S.propSellPrice(1), 1, '小体力药剂 3 → 1');
-  assert.equal(S.propSellPrice(2), 2, '大体力药剂 5 → 2');
+  assert.equal(S.propSellPrice(2), 3, '大体力药剂 6 → 3（售价已上调到 6 金松果）');
   assert.equal(S.propSellPrice(3), 10, '大力丸 20 → 10');
   assert.equal(S.propSellPrice(23), 10, '挑战书 20 → 10');
   assert.equal(S.propSellPrice(13), 150, '转生果 300 → 150');
@@ -546,7 +546,9 @@ test('商店每日限购：四种普通药丸每天 3 颗', () => {
     assert.equal(S.shopLimit(id), 3, (S.propName ? S.propName(id) : id) + ' 每日 3 颗');
     assert.equal(S.purchaseStatus(id).limit, 3);
   }
-  assert.equal(S.shopLimit(2), 5, '体力药剂仍是 5 件');
+  /* 养成平衡：大小体力药剂每天各限购 3 个。 */
+  assert.equal(S.shopLimit(1), 3, '小体力药剂每日 3 个');
+  assert.equal(S.shopLimit(2), 3, '大体力药剂每日 3 个');
   assert.equal(S.shopLimit(23), 5, '挑战书仍是 5 件');
   assert.equal(S.shopLimit(13), 1, '转生果每日 1 件');
   // 超级药丸在字典里 buy=false，不进商店，限购多少都无所谓

@@ -810,11 +810,13 @@
       desc: '第 10 层起，每胜利一场，本局力量 +1、敏捷 +1、速度 +1（不封顶）',
       mods: { winStatAfter10: 1 } },
     { id: 'C13', name: '精英杀手', rarity: 2, kind: 'permanent', desc: '对精英伤害 +40%；击败精英后回复 20% 最大生命', mods: { dmgMulElite: 0.40, eliteHealAfter: 0.20 } },
-    /* shopWeight：单件在商店里的相对权重（默认 1）。
-     * 不死鸟每层一次复活甲，放进商店会让「买一次=整局每层都多一条命」，
-     * 强度远超同档传奇，所以按需求大幅降低它上架的概率。 */
-    { id: 'C14', name: '不死鸟', rarity: 3, kind: 'permanent', shopWeight: 0.12,
-      desc: '每层拥有一次复活甲（回复 50% 生命）', mods: { revivePct: 0.50 } },
+    /* shopWeight：单件在商店里的相对权重（默认 1）。涅槃每层一次复活甲，
+     * 放进商店会让「买一次=整局每层都多一条命」，强度远超同档传奇，
+     * 所以按需求大幅降低它上架的概率。
+     * 重做（原「不死鸟」）：复活后**本场战斗**力/敏/速均 +50%（reviveStatMul）。 */
+    { id: 'C14', name: '涅槃', rarity: 3, kind: 'permanent', shopWeight: 0.12,
+      desc: '每层拥有一次复活甲：复活时回复当前生命上限的 50%，且本场战斗力量、敏捷、速度均 +50%',
+      mods: { revivePct: 0.50, reviveStatMul: 0.50 } },
     /* —— 第 1 项新增：与经济系统挂钩的 buff（仅无尽；instant 的拿到就结算，不占永久 5 格） —— */
     { id: 'E01', name: '立即进货', rarity: 1, kind: 'instant', endlessOnly: true, desc: '立刻开一次试炼商店（不影响 5 层一次的结算点）', mods: { openShop: 1 } },
     { id: 'E02', name: '试炼补贴', rarity: 0, kind: 'instant', endlessOnly: true, desc: '立刻获得 60 试炼币', mods: { instantCoins: 60 } },

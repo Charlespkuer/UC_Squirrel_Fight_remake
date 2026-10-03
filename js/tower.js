@@ -307,7 +307,7 @@
     const g = globalMul(run);
     const agg = { powerMul: 0, maxHpMul: 0, critBonus: 0, critDmgBonus: 0, dodgeBonus: 0, takenMul: 0,
       regenPct: 0, lifestealPct: 0, shellPct: 0, openStrikePct: 0, enemyPowerDown: 0, startHealPct: 0,
-      mustHitFirst: 0, firstSkillFree: 0, deathSaves: [], dmgMul: 1, revivePct: 0,
+      mustHitFirst: 0, firstSkillFree: 0, deathSaves: [], dmgMul: 1, revivePct: 0, reviveStatMul: 0,
       speedMul: 0, winHealPct: 0, thornsPct: 0, lowHpPowerMul: 0, lowHpAt: 0,
       lowHpAgilityMul: 0, lowHpSpeedMul: 0,
       emptyMaxHpMul: 0, lowHpTakenMul: 0, lowHpLifestealPct: 0, lowHpRegenPct: 0, lowHpRegenAt: 0,
@@ -368,7 +368,12 @@
       if (m.mustHitFirst) agg.mustHitFirst = 1;
       if (m.firstSkillFree) agg.firstSkillFree = 1;
       if (m.deathSave) agg.deathSaves.push({});                                  // 金蝉脱壳：保留 1 血
-      if (m.revivePct) agg.revivePct = Math.max(agg.revivePct || 0, Math.min(0.9, m.revivePct * g));   // 不死鸟：每层一次
+      /* 涅槃（原不死鸟）：每层一次复活甲。revivePct = 复活回复的生命上限比例；
+       * reviveStatMul = 复活后本场战斗力/敏/速的加成（叠层时按层数放大）。 */
+      if (m.revivePct) {
+        agg.revivePct = Math.max(agg.revivePct || 0, Math.min(0.9, m.revivePct * g));
+        agg.reviveStatMul = Math.max(agg.reviveStatMul || 0, (Number(m.reviveStatMul) || 0) * stacks);
+      }
       if (foeCtx.hero && m.dmgMulType) agg.dmgMul *= 1 + m.dmgMulType * k;       // 猎侠者
       if (foeCtx.poolNpc && m.dmgMulMech) agg.dmgMul *= 1 + m.dmgMulMech * k;    // 机制破解
       if (foeCtx.elite && m.dmgMulElite) agg.dmgMul *= 1 + m.dmgMulElite * k;    // 精英杀手
@@ -443,7 +448,10 @@
     if (a.lowHpRegenPct) lines.push(['低血（≤' + Math.round(a.lowHpRegenAt * 100) + '%）每回合回血',
       pct(a.lowHpRegenPct) + '，最多回到 ' + Math.round(a.lowHpRegenAt * 100) + '%']);
     if (a.dmgMul && a.dmgMul !== 1) lines.push(['对本场敌人伤害', pct(a.dmgMul - 1)]);
-    if (a.revivePct) lines.push(['复活（每层一次）', pct(a.revivePct) + ' 生命']);
+    if (a.revivePct) {
+      lines.push(['复活（每层一次）', pct(a.revivePct) + ' 生命' +
+        (a.reviveStatMul ? '，复活后本场力/敏/速 +' + pct(a.reviveStatMul) : '')]);
+    }
     if (a.deathSaves && a.deathSaves.length) lines.push(['免死', a.deathSaves.length + ' 次（保留 1 血）']);
     if (a.mustHitFirst) lines.push(['必中', '首次攻击']);
     if (a.mustHitAll) lines.push(['必中', '全部攻击']);
@@ -785,7 +793,9 @@
         mods.lowHpAt = agg.lowHpAt || agg.lowHpRegenAt || 0.5;
       }
       // 第 2 项：不死鸟按「每层一次」发放（本层已经触发过就不再给）
-      if (agg.revivePct && (run.reviveLayer || 0) !== run.layer) mods.deathSaves = (mods.deathSaves || []).concat([{ healPct: agg.revivePct }]);
+      if (agg.revivePct && (run.reviveLayer || 0) !== run.layer) {
+        mods.deathSaves = (mods.deathSaves || []).concat([{ healPct: agg.revivePct, statMul: agg.reviveStatMul || 0 }]);
+      }
       if (agg.deathSaves.length) mods.deathSaves = (mods.deathSaves || []).concat(agg.deathSaves);
       /* 环境词缀（我方侧）也要并进这一份最终 mods 里 ——
        * applyEnvToMe 是在上面算的，那时候 me.mods 还不是这个新对象，

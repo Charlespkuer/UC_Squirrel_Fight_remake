@@ -130,37 +130,40 @@ test('属性书仅接受总计8点的自由分配，坏参数不吃书', () => {
   assert.equal(g.State.useProp(37,{power:0,agility:0,speed:8}).ok, true); assert.equal(s.props[37],undefined);
 });
 
-test('普通商品每天每种5个，稀有1个，批量和重载均不能越额', () => {
+test('普通商品每天每种5个（体力药3个），稀有1个，批量和重载均不能越额', () => {
   const g = setup(), s=g.s(); s.goldPoint=5000;
-  assert.equal(g.State.shopLimit(2),5); assert.equal(g.State.shopLimit(13),1); assert.equal(g.State.shopLimit(47),1);
-  assert.equal(g.State.buyProp(2,3).ok,true); assert.equal(g.State.purchaseStatus(2).remaining,2);
+  /* 养成平衡：大小体力药剂每天各 3 个（原 5 个），转生果/天使果实仍 1 个。 */
+  assert.equal(g.State.shopLimit(2),3); assert.equal(g.State.shopLimit(13),1); assert.equal(g.State.shopLimit(47),1);
+  assert.equal(g.State.buyProp(2,3).ok,true); assert.equal(g.State.purchaseStatus(2).remaining,0);
   const gold=s.goldPoint, owned=s.props[2];
   assert.equal(g.State.buyProp(2,3).limited,true); assert.equal(s.goldPoint,gold); assert.equal(s.props[2],owned);
-  assert.equal(g.State.buyProp(2,2).ok,true); assert.equal(g.State.buyProp(2,1).ok,false);
-  assert.equal(g.State.buyProp(1,5).ok,true); assert.equal(g.State.buyProp(13).ok,true); assert.equal(g.State.buyProp(13).limited,true);
+  assert.equal(g.State.buyProp(2,1).limited,true);
+  assert.equal(g.State.buyProp(1,3).ok,true); assert.equal(g.State.buyProp(1,1).limited,true);   // 小体力药同样 3 个
+  assert.equal(g.State.buyProp(23,5).ok,true); assert.equal(g.State.buyProp(13).ok,true); assert.equal(g.State.buyProp(13).limited,true);
   g.State.load(); assert.equal(g.State.purchaseStatus(2).remaining,0); assert.equal(g.State.buyProp(2).limited,true);
-  assert.equal(g.saved().shopPurchases[2],5); assert.equal(g.saved().shopPurchases[13],1);
+  assert.equal(g.saved().shopPurchases[2],3); assert.equal(g.saved().shopPurchases[13],1);
 });
 
 test('午夜自动滚动限额，失败购买/礼包/持有数量不影响额度，金杯商店的按周限兑不被牵连', () => {
   const g=setup(),s=g.s(); s.goldPoint=0; s.rankPurchases={11:1}; s.rankPurchaseWeek='2026-09-21';
   assert.equal(g.State.buyProp(2).ok,false); assert.equal(g.State.purchaseStatus(2).bought,0);
-  s.goldPoint=1000; s.props[2]=999; g.State.buyProp(2,5);
+  s.goldPoint=1000; s.props[2]=999; g.State.buyProp(2,3);
   const date=g.State.purchaseStatus(2).date; g.advance(120000);
-  assert.notEqual(g.State.purchaseStatus(2).date,date); assert.equal(g.State.purchaseStatus(2).remaining,5);
-  assert.equal(g.State.buyProp(2,5).ok,true); assert.equal(s.props[2],1009);
+  assert.notEqual(g.State.purchaseStatus(2).date,date); assert.equal(g.State.purchaseStatus(2).remaining,3);
+  assert.equal(g.State.buyProp(2,3).ok,true); assert.equal(s.props[2],1005);
   same(s.rankPurchases,{11:1}); assert.equal(s.rankPurchaseWeek,'2026-09-21');
   assert.equal(g.State.purchaseStatus(16).buyable,false); assert.equal(g.State.buyProp(16).ok,false);
 });
 
 test('限购迁移兼容无字段/破损字段，Debug免费购买保留且不越日限', () => {
   const g=setup();
-  g.storage.set(g.State.saveKey,JSON.stringify({goldPoint:80,shopPurchases:{1:4,2:-4,999:5},shopPurchaseDate:''}));
-  g.State.load(); assert.equal(g.State.purchaseStatus(1).remaining,1); assert.equal(g.State.purchaseStatus(2).remaining,5);
+  /* 体力药限购现在是 3：这里用「已买 2 个」的旧档，验证迁移后额度是 3、还能再买 1 个。 */
+  g.storage.set(g.State.saveKey,JSON.stringify({goldPoint:80,shopPurchases:{1:2,2:-4,999:5},shopPurchaseDate:''}));
+  g.State.load(); assert.equal(g.State.purchaseStatus(1).remaining,1); assert.equal(g.State.purchaseStatus(2).remaining,3);
   g.window.Debug={enabled:key=>key==='freeShop'}; assert.equal(g.State.buyProp(1,1).ok,true); assert.equal(g.s().goldPoint,80);
   assert.equal(g.State.buyProp(1).limited,true); assert.equal(g.State.buyProp(47,2).limited,true); assert.equal(g.State.buyProp(47).ok,true);
   g.State.load(); assert.equal(g.State.purchaseStatus(1).remaining,0);
-  g.storage.set(g.State.saveKey,JSON.stringify({shopPurchases:[],shopPurchaseDate:null}));g.State.load();assert.equal(g.State.purchaseStatus(1).remaining,5);
+  g.storage.set(g.State.saveKey,JSON.stringify({shopPurchases:[],shopPurchaseDate:null}));g.State.load();assert.equal(g.State.purchaseStatus(1).remaining,3);
 });
 
 test('转生50级前保留物品装备且不重复礼包，50级后拒绝且不吃果', () => {
@@ -192,7 +195,7 @@ test('被动初始值风驰2速/体壮5血，10级分别11速/77血，药剂价�
   const g=setup(),s=g.s();s.skills=['3:1','4:1'];let stats=g.State.totalStats({useProps:false});
   assert.equal(stats.speed-s.speed,2);assert.equal(stats.hp-s.maxHp,5);
   s.skills=['3:10','4:10'];stats=g.State.totalStats({useProps:false});assert.equal(stats.speed-s.speed,11);assert.equal(stats.hp-s.maxHp,77);
-  for(const [id,cost] of [[1,3],[2,5],[3,20],[4,20],[5,20],[7,20],[13,300],[23,20],[36,10],[39,10],[47,200]])assert.equal(+g.propMap.getValue(id).price,cost);
+  for(const [id,cost] of [[1,3],[2,6],[3,20],[4,20],[5,20],[7,20],[13,300],[23,20],[36,10],[39,10],[47,200]])assert.equal(+g.propMap.getValue(id).price,cost);
   s.energy=0;s.props[1]=1;s.props[2]=1;g.State.useProp(1);g.State.useProp(2);assert.equal(s.energy,40);
   s.power=10;s.props[3]=1;g.State.useProp(3);assert.equal(g.State.totalStats().power,15);assert.equal(g.State.totalStats({useProps:false}).power,10);assert.equal(s.propsStates[3],20);
   s.power=29;assert.equal(g.State.totalStats().power,34); // PPT FAQ: potion percentage uses floor.

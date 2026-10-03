@@ -498,17 +498,28 @@ test('第 2 项：天梯匹配等级只跟积分挂钩，70 级封顶', () => {
   assert.equal(g.battles.at(-1).foe.level, 30, '积分 1500 就还是 30 级档，跟金杯无关');
 });
 
-test('天梯周一至周六比赛，金杯商店每天都能打开，跨日旧按钮仍重新校验', () => {
+test('天梯每天都可比赛（周日不休赛），金杯商店每天都能打开，跨日旧按钮仍重新校验', () => {
   const g = setup(), s = g.c.State.state(); s.level = 30;
-  // 基准时间是周三（非周日）：商店照样能打开
+  // 基准时间是周三：商店照样能打开
   g.c.ClassicExtras.rank(); g.click('rank-shop'); assert.match(g.page().html, /data-goods/);
-  g.c.ClassicExtras.rank(); const stale = g.node('rank-fight').onclick;
-  g.advance(4 * 86400000); stale(); assert.equal(g.battles.length, 0);
-  g.c.ClassicExtras.rank(); assert.equal(g.node('rank-fight').disabled, true);   // 周日休赛
-  g.click('rank-shop'); assert.match(g.page().html, /data-goods/);                // 周日也能打开
+  /* 「跨日旧按钮要重新校验」用**每日场次上限**来验（原来靠周日休赛）：
+   * 先把今日场次打满，此时旧按钮的闭包仍指向「满场」那一份状态，
+   * 直接调用它不该开打；重新渲染出新按钮之后才轮到明天。 */
+  const st = g.c.State.state();
+  const keep = st.joinRankCount;
+  st.joinRankCount = 20;
   g.c.ClassicExtras.rank();
-  g.advance(86400000); g.c.ClassicExtras.rank(); assert.equal(g.node('rank-fight').disabled, false);
-  g.click('rank-fight'); assert.equal(g.battles.length, 1);
+  const stale = g.node('rank-fight').onclick;
+  assert.equal(g.node('rank-fight').disabled, true, '满 20 场时按钮应当禁用');
+  stale();
+  assert.equal(g.battles.length, 0, '满场时旧按钮不该开打');
+  /* 需求：周日不休赛 —— 推进 4 天（到周日）后按钮仍可点、点了就能开打。 */
+  st.joinRankCount = keep;
+  g.advance(4 * 86400000);
+  g.c.ClassicExtras.rank(); assert.equal(g.node('rank-fight').disabled, false);   // 周日不休赛
+  g.click('rank-shop'); assert.match(g.page().html, /data-goods/);
+  g.c.ClassicExtras.rank();
+  g.click('rank-fight'); assert.equal(g.battles.length, 1);                       // 周日真的能打
 });
 
 test('金杯商店兑换校验积分与两种货币，不扣积分，每周限一件且下周一重置', () => {

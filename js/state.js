@@ -1128,6 +1128,17 @@
     22: 2,     // 武器卷轴：2 金松果一张
   });
   const MIN_SELL_PRICE = 2;   // 半价至少 1 金松果才有意义
+  /* 养成平衡：大体力药剂（2）售价 5 → 6 金松果。
+   * 字典（js/gamedict.js）是只读数据源，这里做一次运行期覆盖 —— 价格只有这一处权威，
+   * 商店扣费与回收价都读 propMap.getValue(id).price，所以两边自动一致。 */
+  const BIG_ENERGY_ID = 2;
+  const BIG_ENERGY_PRICE = 6;
+  (function applyShopPriceTuning() {
+    const item = propMap && propMap.getValue ? propMap.getValue(BIG_ENERGY_ID) : null;
+    if (!item) return;
+    item.price = String(BIG_ENERGY_PRICE);
+    if (Array.isArray(item.source) && item.source.length > 3) item.source[3] = String(BIG_ENERGY_PRICE);
+  })();
   function propSellPrice(id) {
     id = Number(id);
     if (PROP_SELL_OVERRIDES[id] != null) return PROP_SELL_OVERRIDES[id];
@@ -1389,13 +1400,18 @@
 
   // ---------- 道具 ----------
   /* 每日限购：卷轴/永久属性/果实这类每天 1 件；四种普通药丸（大力丸/敏捷丸/速度丸/经验丸）
-   * 每天 3 颗；其余消耗品 5 件。超级药丸走名字里的「永久」分支，仍是 1 件。 */
+   * 每天 3 颗；**大小体力药剂每天各 3 个**（体力是硬资源，限紧一点）；
+   * 其余消耗品 5 件。超级药丸走名字里的「永久」分支，仍是 1 件。 */
   const SHOP_DAILY_PILLS = [3, 4, 5, 7];
   const SHOP_PILL_LIMIT = 3;
+  /* 体力药剂（1 = 小、2 = 大）：每天各限购 3 个。 */
+  const SHOP_DAILY_ENERGY = [1, 2];
+  const SHOP_ENERGY_LIMIT = 3;
   function shopLimit(id) {
     const key = Number(id), prop = propMap.getValue(key);
     if (!prop) return 0;
     if (SHOP_DAILY_PILLS.includes(key)) return SHOP_PILL_LIMIT;
+    if (SHOP_DAILY_ENERGY.includes(key)) return SHOP_ENERGY_LIMIT;
     return [13, 16, 17, 18, 19, 37, 38, 47, 48].includes(key) || /宝箱|魔法袋|礼包|永久/.test(prop.name) ? 1 : 5;
   }
   function syncShopPurchases() {

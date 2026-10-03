@@ -150,7 +150,7 @@
     };
   }
 
-  /** 任何扣血途径致死时的兜底：不死鸟（复活）/ 金蝉脱壳（保留 1 血）/ 无敌模式。
+  /** 任何扣血途径致死时的兜底：涅槃（复活 + 本场力/敏/速提升）/ 金蝉脱壳（保留 1 血）/ 无敌模式。
    *  原来只有 applyDamage 里判，中毒、荆棘反弹、双刃剑自伤、枯泉吸血把人打死时
    *  复活甲不会触发 —— 玩家会以为「buff 没生效」。 */
   function tryDeathSave(def, r) {
@@ -158,9 +158,18 @@
     if (def.mods && Array.isArray(def.mods.deathSaves) && def.mods.deathSaves.length) {
       const sv = def.mods.deathSaves.shift();
       def.hp = sv.healPct ? Math.max(1, Math.round(def.maxHp * sv.healPct)) : 1;
+      /* 涅槃（原不死鸟）：复活后**本场战斗**力/敏/速提升 —— 直接加到 buffFlat 上，
+       * 与「血性狂暴」等临时加成同一口径（每场战斗的 combatant 是新建的，所以只影响本场）。 */
+      const mul = Math.max(0, Number(sv.statMul) || 0);
+      if (mul > 0) {
+        for (const key of ['power', 'agility', 'speed']) {
+          def.buffFlat[key] = (def.buffFlat[key] || 0) + Math.max(1, Math.round((Number(def[key]) || 0) * mul));
+        }
+      }
       if (r) {
         r.deathSave = true;
-        r.noteText = (r.noteText ? r.noteText + '·' : '') + (sv.healPct ? '不死鸟' : '金蝉脱壳');
+        r.reviveStatMul = mul > 0 ? mul : undefined;
+        r.noteText = (r.noteText ? r.noteText + '·' : '') + (sv.healPct ? '涅槃' : '金蝉脱壳');
         r.noteSide = def.side;
       }
       return true;
@@ -461,8 +470,16 @@
       } else if (def.hp - dmg <= 0 && def.mods && Array.isArray(def.mods.deathSaves) && def.mods.deathSaves.length) {
         const sv = def.mods.deathSaves.shift();
         def.hp = sv.healPct ? Math.max(1, Math.round(def.maxHp * sv.healPct)) : 1;
+        /* 同 tryDeathSave：涅槃复活后本场力/敏/速提升。 */
+        const mul2 = Math.max(0, Number(sv.statMul) || 0);
+        if (mul2 > 0) {
+          for (const key of ['power', 'agility', 'speed']) {
+            def.buffFlat[key] = (def.buffFlat[key] || 0) + Math.max(1, Math.round((Number(def[key]) || 0) * mul2));
+          }
+        }
         r.deathSave = true;
-        r.noteText = sv.healPct ? '不死鸟' : '金蝉脱壳'; r.noteSide = def.side;
+        r.reviveStatMul = mul2 > 0 ? mul2 : undefined;
+        r.noteText = sv.healPct ? '涅槃' : '金蝉脱壳'; r.noteSide = def.side;
       } else if (def.hp - dmg <= 0 && godSave(def)) {
         dmg = Math.max(0, def.hp - 1);
         def.hp = 1;
@@ -669,7 +686,11 @@
           if (rr.lifesteal) r.lifesteal = (r.lifesteal || 0) + rr.lifesteal;
           if (rr.guiJia) r.guiJia = rr.guiJia;
           if (rr.fakeDie) r.fakeDie = true;
-          if (rr.deathSave) { r.deathSave = true; r.noteText = rr.noteText; r.noteSide = rr.noteSide; }
+          if (rr.deathSave) {
+            r.deathSave = true; r.noteText = rr.noteText; r.noteSide = rr.noteSide;
+            /* 涅槃的属性加成标记也要一起带上来，否则界面上看不到「复活后变强」这条提示。 */
+            if (rr.reviveStatMul) r.reviveStatMul = rr.reviveStatMul;
+          }
           if (rr.crit) r.crit = true;
           if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
         }
@@ -803,7 +824,11 @@
           if (rr.lifesteal) r.lifesteal = (r.lifesteal || 0) + rr.lifesteal;
           if (rr.guiJia) r.guiJia = rr.guiJia;
           if (rr.fakeDie) r.fakeDie = true;
-          if (rr.deathSave) { r.deathSave = true; r.noteText = rr.noteText; r.noteSide = rr.noteSide; }
+          if (rr.deathSave) {
+            r.deathSave = true; r.noteText = rr.noteText; r.noteSide = rr.noteSide;
+            /* 涅槃的属性加成标记也要一起带上来，否则界面上看不到「复活后变强」这条提示。 */
+            if (rr.reviveStatMul) r.reviveStatMul = rr.reviveStatMul;
+          }
           if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
         }
         r.dmg = total;

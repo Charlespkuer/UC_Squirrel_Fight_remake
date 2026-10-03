@@ -1709,6 +1709,74 @@ test('需求35：永久槽位的「占位口径」必须一致（修「7/8 拿�
     'addBuff 的满格判定应当按「加入后的占用」');
 });
 
+test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不叠层 / C12 恒为 0）', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const STACKABLE = TD.BUFFS.filter((b) => b.stackable).map((b) => b.id).sort();
+  assert.equal(STACKABLE.join(','), 'C06,C07,C11,C12,C16,C17', '可叠层增益清单变了：' + STACKABLE.join(','));
+
+  /* 跑一小段真实流程，取某个累计字段（固定层数，排除推进噪声）。 */
+  const measure = (id, stacks, wins, field, fixedLayer) => {
+    S.newGame('stack' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    T._debugSetLayer(9); T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = [{ id: id, stacks: stacks }];
+    const heals = [];
+    for (let i = 0; i < wins; i++) {
+      const cur = T._debugRun('endless');
+      if (!cur) break;
+      if (fixedLayer) cur.layer = fixedLayer;
+      if (cur.choices) {
+        const p = T.pickChoice('endless', 0, null);
+        if (p && !p.ok && p.needsReplace) T.pickChoice('endless', 0, ((cur.permanent || [])[0] || {}).id || null);
+        continue;
+      }
+      if (cur.phase === 'shop') { T.continueFromShop(); continue; }
+      if (cur.phase === 'checkpoint') { T.continueEndless(); continue; }
+      const nx = T.nextBattle('endless');
+      if (!nx || nx.ok === false) break;
+      const a = T._debugRun('endless');
+      if (!a || !a.attempt) break;
+      if (fixedLayer) a.layer = fixedLayer;
+      const out = T.reportBattle('endless', a.attempt, true, 1, null);
+      if (out && out.winHeal != null) heals.push(out.winHeal);
+      if (!T._debugRun('endless')) break;
+    }
+    if (field === 'winHeal') return heals.length ? heals[0] : NaN;
+    const rr = T._debugRun('endless');
+    return rr ? Number(rr[field] || 0) : NaN;
+  };
+
+  const CASES = [
+    ['C06', 'killPower', 7, 10],    // 猎杀时刻：每击杀 +2%（×层数）
+    ['C07', 'winMaxHp', 7, null],   // 吞噬成长：每胜 +2%（×层数）
+    ['C11', 'winHpFlat', 7, null],  // 以战养战：每胜 +5 上限（×层数）
+    ['C12', 'winPower', 7, 10],     // 登顶者：第 10 层起每胜 +5%（×层数）
+    ['C16', 'winHeal', 3, null],    // 战后续航：每胜回 5%（×层数）
+    ['C17', 'winHeal', 3, null],    // 战后续航·精：每胜回 10%（×层数）
+  ];
+  for (const [id, field, wins, layer] of CASES) {
+    const one = measure(id, 1, wins, field, layer);
+    const three = measure(id, 3, wins, field, layer);
+    assert.ok(Number.isFinite(one) && one > 0, id + ' 的单层效果应当可测到：' + one);
+    const ratio = three / one;
+    assert.ok(Math.abs(ratio - 3) < 0.2,
+      id + ' 的叠层应当严格 3 倍：×1=' + one + ' ×3=' + three + '（比值 ' + ratio.toFixed(2) + '）');
+  }
+
+  /* C12 曾经因为 `* 0` 的占位写法而**完全无效**（加成恒为 0）—— 断言它真的进了攻击加成 */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  assert.ok(!/winPowerAfter10\)\s*agg\.powerMul\s*\+=\s*[^;]*\*\s*0\s*;/.test(src),
+    'C12 不该再有 `* 0` 的占位写法');
+  assert.ok(/if \(m\.winPowerAfter10\) agg\.powerMul \+= Math\.max\(0, Number\(run\.winPower\)/.test(src),
+    'C12 应当把 run.winPower 真正累加进攻击加成');
+  /* C12 的累积不能重复乘层数（runModTotal 已经乘过 stacks×g） */
+  assert.ok(!/runModTotal\(run, 'winPowerAfter10'\) \|\| 0\) \* c12/.test(src),
+    'C12 累积不该再乘一次 stacks（会平方）');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

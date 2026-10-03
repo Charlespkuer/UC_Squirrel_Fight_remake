@@ -311,7 +311,10 @@
        * 都用「当前快照」计算：拿了/卖了/换了永久增益，下一场立刻反映。 */
       if (m.powerPerEmptySlot) agg.powerMul += m.powerPerEmptySlot * Math.max(0, permSlots(run) - permUsed(run)) * k;
       if (m.powerPerPermBuff) agg.powerMul += m.powerPerPermBuff * (run.permanent || []).length * k;
-      if (m.winPowerAfter10) agg.powerMul += Math.max(0, Number(run.winPower) || 0) * 0;   // 占位：winPower 在下面统一加
+      /* C12 登顶者：第 10 层起每胜一场攻击 +5%（可叠层）。
+       * 这里原来写的是 `* 0` —— 一个占位写法，等于把这条增益的加成**恒置为 0**，
+       * 玩家叠到再多层也毫无效果（实测：层 10 起连胜 10 场，winPower 一直是 0）。 */
+      if (m.winPowerAfter10) agg.powerMul += Math.max(0, Number(run.winPower) || 0);
       /* 第 1 项：永久类的生命上限加成记在 run.hpBonus 上（卖掉/替换也不会掉血上限）；
        * 限次类的仍然按场次生效，buff 消失时加成也一起消失。 */
       if (m.maxHpMul) { if (buff.kind === 'limited') agg.maxHpMul += m.maxHpMul * k; }
@@ -922,11 +925,23 @@
       /* 第 2 项：以战养战（每胜一场生命上限 +10，不封顶）、登顶者（第 10 层起每胜一场攻击 +5%） */
       run.winHpFlat = (run.winHpFlat || 0) + (runModTotal(run, 'winMaxHpFlat') || 0);
       rollEnvAfterBattle(run);   // 每场战斗后推进环境词缀
-      if (run.layer >= 10) run.winPower = (run.winPower || 0) + (runModTotal(run, 'winPowerAfter10') || 0);
+      /* 登顶者（可叠层）：第 10 层起每胜一场 +5% × 层数 × 全局倍率。
+       * 注意 **不要** 再乘一次 stacksOf —— runModTotal() 内部已经乘了 `stacks * g`，
+       * 再乘一次会让层数被平方（实测 3 层变成 9 倍）。 */
+      if (run.layer >= 10 && stacksOf(run, 'C12')) {
+        run.winPower = (run.winPower || 0) + (runModTotal(run, 'winPowerAfter10') || 0);
+      }
       run.coins += Math.round(D().COINS.battle * coinMul);
       // 击杀叠层类（基础 → 叠层 → C15）
+      /* 猎杀时刻（可叠层）：增量与上限都要 × 层数 ——
+       * 与 C07「吞噬成长」同一套写法（那条本来就乘了 c07）。原来这里只乘了全局倍率 g，
+       * 于是拿到 3 层和 1 层完全一样（实测 ×1 与 ×3 都是 0.200）。 */
       const c06 = stacksOf(run, 'C06');
-      if (c06) run.killPower = Math.min(D().BUFF_BY_ID.C06.mods.killPowerCap * g, run.killPower + D().BUFF_BY_ID.C06.mods.killPowerPct * g);   // 第 2 项：按文字 +2%/击杀、上限 +40%
+      if (c06) {
+        const c06m = D().BUFF_BY_ID.C06.mods;
+        run.killPower = Math.min((c06m.killPowerCap || 0.40) * c06 * g,
+          run.killPower + (c06m.killPowerPct || 0.02) * c06 * g);
+      }
       /* 需求 4：吞噬成长改成「每胜利一场生命上限 +2%，上限 +30%」——
        * 成长从「击杀」改成「胜利」，数值全部读 mods（文字改了数值就跟着改）。 */
       const c07 = stacksOf(run, 'C07');
@@ -2178,7 +2193,10 @@
   function progressOf(run, id) {
     const g = globalMul(run);
     const pct = (v) => Math.round((Number(v) || 0) * 100);
-    if (id === 'C06') return '已累计 攻击 +' + pct(run.killPower) + '%（上限 +' + pct(D().BUFF_BY_ID.C06.mods.killPowerCap * g) + '%）';
+    if (id === 'C06') {
+      const cap = D().BUFF_BY_ID.C06.mods.killPowerCap * Math.max(1, stacksOf(run, 'C06')) * g;
+      return '已累计 攻击 +' + pct(run.killPower) + '%（上限 +' + pct(cap) + '%）';
+    }
     if (id === 'C07') return '已累计 生命上限 +' + pct(run.killMaxHp) + '%（上限 +' +
       pct(D().BUFF_BY_ID.C07.mods.killMaxHpCap * Math.max(1, stacksOf(run, 'C07')) * g) + '%）';
     if (id === 'C11') return '已累计 生命上限 +' + Math.round(Number(run.winHpFlat) || 0);

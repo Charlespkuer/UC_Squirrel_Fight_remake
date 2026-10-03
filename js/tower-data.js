@@ -772,11 +772,11 @@
      * 四项低血效果共用同一个 lowHpAt 阈值（与狂怒一致，便于玩家理解）。
      * ============================================================ */
     { id: 'C46', name: '浴血重生', rarity: 1, kind: 'permanent',
-      desc: '每场战斗开始时获得 50% 的空生命上限（不回血）；生命低于 50% 时每回合回复 5% 生命，最多回到 50%',
-      mods: { emptyMaxHpMul: 0.50, lowHpRegenPct: 0.05, lowHpRegenAt: 0.50, lowHpAt: 0.50 } },
+      desc: '每场战斗开始时获得 30% 的空生命上限（不回血）；生命低于 50% 时每回合回复 2% 生命，最多回到 50%',
+      mods: { emptyMaxHpMul: 0.30, lowHpRegenPct: 0.02, lowHpRegenAt: 0.50, lowHpAt: 0.50 } },
     { id: 'C47', name: '濒死觉悟', rarity: 2, kind: 'permanent',
-      desc: '每场战斗开始时获得 100% 的空生命上限（不回血）；生命低于 50% 时获得 20% 减伤与 20% 吸血',
-      mods: { emptyMaxHpMul: 1.00, lowHpTakenMul: -0.20, lowHpLifestealPct: 0.20, lowHpAt: 0.50 } },
+      desc: '每场战斗开始时获得 50% 的空生命上限（不回血）；生命低于 50% 时获得 15% 减伤与 15% 吸血',
+      mods: { emptyMaxHpMul: 0.50, lowHpTakenMul: -0.15, lowHpLifestealPct: 0.15, lowHpAt: 0.50 } },
     { id: 'C21', name: '暴击精通', rarity: 0, kind: 'permanent', desc: '暴击率 +10%', mods: { critBonus: 10 } },
     { id: 'C22', name: '闪避精通', rarity: 0, kind: 'permanent', desc: '闪避 +8%', mods: { dodgeBonus: 8 } },
     { id: 'C23', name: '轻身术', rarity: 0, kind: 'permanent', desc: '速度 +15%', mods: { speedMul: 0.15 } },
@@ -856,12 +856,12 @@
     { id: 'C35', name: '厚积薄发', rarity: 2, kind: 'permanent',
       desc: '每拥有 1 个永久增益，攻击 +10%（含它自己）', mods: { powerPerPermBuff: 0.10 } },
     /* —— 传奇 · 商店消费成长 ——
-     * **每消费 10 试炼币** → 随机一项「力+1 / 敏+1 / 速+1 / 生命上限+5」，可无限累计。
+     * **每消费 5 试炼币** → 随机一项「力+1 / 敏+1 / 速+1 / 生命上限+5」，可无限累计。
      * 累计结果与「距下次还差几枚」都显示在增益面板上（progressOf）。
      * 注意：买到「挥金如土」本身的这笔花费也计入（见 buyShopSlot 的记账顺序）。 */
     { id: 'C36', name: '挥金如土', rarity: 3, kind: 'permanent',
-      desc: '本局每在试炼商店消费 10 试炼币，随机获得「力+1 / 敏+1 / 速+1 / 生命上限+5」中的一项（可无限累计，含购买本增益的花费）',
-      mods: { shopSpendStep: 10, shopSpendStat: 1, shopSpendHp: 5 } },
+      desc: '本局每在试炼商店消费 5 试炼币，随机获得「力+1 / 敏+1 / 速+1 / 生命上限+5」中的一项（可无限累计，含购买本增益的花费）',
+      mods: { shopSpendStep: 5, shopSpendStat: 1, shopSpendHp: 5 } },
     /* —— 本轮第 1 项：两个新增益 ——
      * C37 虚空铭文（传奇·隐藏选取型）：给已有的一个永久增益附魔，让它不占永久位。
      *    可叠加的增益是一个条目带 stacks，所以「所有层一起免疫占位」是自动成立的。

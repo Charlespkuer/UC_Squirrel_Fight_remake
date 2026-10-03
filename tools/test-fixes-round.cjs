@@ -1204,7 +1204,8 @@ test('需求26：积分扩展（拿增益计分 + 两个隐藏成就）', () => 
     if (!n || n.ok === false) return null;
     const mid = Number(run().score) || 0;      // nextBattle 可能已加了别的成就分
     const live = run();
-    const out = c.Tower.reportBattle('endless', live.attempt, true, 1,
+    const out = c.Tower.reportBattle('endless', live.attempt, true,
+      Number(live.lastHp || live.lastMaxHp || 1), Number(live.lastMaxHp || 0),
       { rounds: [{ deathSave: true }, { deathSave: true }, { deathSave: true }] });
     out.__delta = (Number(run().score) || 0) - mid;
     return out;
@@ -1416,7 +1417,8 @@ test('需求30：烙印两段机制（未破碎 50% / 破碎后 100%）+ 复数�
   run.fragileSeeds = { C39: miss };
   const nx = c.Tower.nextBattle('endless');
   const live = c.Tower._debugRun('endless');
-  c.Tower.reportBattle('endless', live.attempt, true, 1, { rounds: [] });
+  c.Tower.reportBattle('endless', live.attempt, true,
+    Number(live.lastHp || live.lastMaxHp || 1), Number(live.lastMaxHp || 0), { rounds: [] });
   assert.ok(!(c.Tower._debugRun('endless').limited || []).some((x) => x.id === 'C39'), '应当已破碎');
   line = c.Tower.debugBuffReport('endless').effects.find(([k]) => /烙印.*攻击/.test(k));
   assert.match(line[0], /已损毁/, '破碎后要标「已损毁」：' + line[0]);
@@ -1602,8 +1604,8 @@ test('需求32：池子分离的端到端实测（真跑两种塔的抽取，零
 test('需求33：挥金如土（C36）每 10 币一次随机项，且购买它自身的花费也计入', () => {
   const c = setup();
   const TD = c.TowerData;
-  assert.equal(TD.BUFF_BY_ID.C36.mods.shopSpendStep, 10, '步长应当是 10 试炼币');
-  assert.match(TD.BUFF_BY_ID.C36.desc, /10 试炼币/, '文案要写 10 试炼币：' + TD.BUFF_BY_ID.C36.desc);
+  assert.equal(TD.BUFF_BY_ID.C36.mods.shopSpendStep, 5, '步长应当是 5 试炼币');
+  assert.match(TD.BUFF_BY_ID.C36.desc, /5 试炼币/, '文案要写 5 试炼币：' + TD.BUFF_BY_ID.C36.desc);
   assert.match(TD.BUFF_BY_ID.C36.desc, /购买本增益的花费/, '文案要说明含自身花费');
 
   const run = c.Tower._debugRun('endless');
@@ -1622,8 +1624,8 @@ test('需求33：挥金如土（C36）每 10 币一次随机项，且购买它�
   assert.ok(bought.ok, '应当能买到挥金如土');
   let r = c.Tower._debugRun('endless');
   const procs = (g) => g.power + g.agility + g.speed + g.hp / 5;   // 血是 +5/次，折算成「次」
-  assert.equal(procs(r.spendGain), 16, '160 币应当触发 16 次，实测 ' + procs(r.spendGain));
-  assert.equal(r.shopSpend, 0, '160 是 10 的整数倍，余数应为 0，实测 ' + r.shopSpend);
+  assert.equal(procs(r.spendGain), 32, '160 币应当触发 32 次（每 5 币一次），实测 ' + procs(r.spendGain));
+  assert.equal(r.shopSpend, 0, '160 是 5 的整数倍，余数应为 0，实测 ' + r.shopSpend);
   // ② 每次只加「1 力 / 1 敏 / 1 速 / 5 血」中的一项
   assert.ok(r.spendGain.power <= 16 && r.spendGain.agility <= 16 && r.spendGain.speed <= 16 && r.spendGain.hp <= 80,
     '单项不该超过总次数：' + JSON.stringify(r.spendGain));
@@ -1632,13 +1634,13 @@ test('需求33：挥金如土（C36）每 10 币一次随机项，且购买它�
   mkShop('C01', 30);
   c.Tower.buyShopSlot(0);
   r = c.Tower._debugRun('endless');
-  assert.equal(procs(r.spendGain), 19, '再消费 30 币应当累计到 19 次，实测 ' + procs(r.spendGain));
+  assert.equal(procs(r.spendGain), 38, '再消费 30 币应当累计到 38 次，实测 ' + procs(r.spendGain));
   // ④ 没钱时不买、也不记账
   mkShop('C02', 200);
   c.Tower._debugRun('endless').coins = 50;
   const poor = c.Tower.buyShopSlot(0);
   assert.ok(!poor.ok, '钱不够应当买不成');
-  assert.equal(procs(c.Tower._debugRun('endless').spendGain), 19, '买不成时不该记账');
+  assert.equal(procs(c.Tower._debugRun('endless').spendGain), 38, '买不成时不该记账');
 });
 
 test('需求34：护盾环境削弱为 18%~28%', () => {
@@ -2060,12 +2062,12 @@ test('需求41：与狂怒成套的四条低血 combo（空血上限 / 低血减
   }
   assert.equal(TD.BUFF_BY_ID.N13.mods.emptyMaxHpMul, 1.00, 'N13：+100% 空血上限');
   assert.equal(TD.BUFF_BY_ID.N14.mods.lowHpTakenMul, -0.50, 'N14：低血 50% 减伤');
-  assert.equal(TD.BUFF_BY_ID.C46.mods.emptyMaxHpMul, 0.50, 'C46：+50% 空血上限');
-  assert.equal(TD.BUFF_BY_ID.C46.mods.lowHpRegenPct, 0.05, 'C46：低血每回合回 5%');
+  assert.equal(TD.BUFF_BY_ID.C46.mods.emptyMaxHpMul, 0.30, 'C46：+30% 空血上限');
+  assert.equal(TD.BUFF_BY_ID.C46.mods.lowHpRegenPct, 0.02, 'C46：低血每回合回 2%');
   assert.equal(TD.BUFF_BY_ID.C46.mods.lowHpRegenAt, 0.50, 'C46：最多回到 50%');
-  assert.equal(TD.BUFF_BY_ID.C47.mods.emptyMaxHpMul, 1.00, 'C47：+100% 空血上限');
-  assert.equal(TD.BUFF_BY_ID.C47.mods.lowHpTakenMul, -0.20, 'C47：低血 20% 减伤');
-  assert.equal(TD.BUFF_BY_ID.C47.mods.lowHpLifestealPct, 0.20, 'C47：低血 20% 吸血');
+  assert.equal(TD.BUFF_BY_ID.C47.mods.emptyMaxHpMul, 0.50, 'C47：+50% 空血上限');
+  assert.equal(TD.BUFF_BY_ID.C47.mods.lowHpTakenMul, -0.15, 'C47：低血 15% 减伤');
+  assert.equal(TD.BUFF_BY_ID.C47.mods.lowHpLifestealPct, 0.15, 'C47：低血 15% 吸血');
 
   /* ---- 空血上限：抬上限但**当前血量绝对值不变**（这是「空」的关键）---- */
   const baseMe = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
@@ -2079,7 +2081,9 @@ test('需求41：与狂怒成套的四条低血 combo（空血上限 / 低血减
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
     const r = T._debugRun('endless');
-    r.permanent = []; r.limited = []; r.slotFreeIds = []; r.hpBonus = 0; r.carry = carry;
+    r.permanent = []; r.limited = []; r.slotFreeIds = []; r.hpBonus = 0;
+    /* 血量继承已改为**绝对值**口径：按 5000 上限把 carry 折算成绝对血量。 */
+    r.refMaxHp = 5000; r.hpAbs = Math.max(1, Math.round(5000 * carry)); r.carry = carry;
     for (const id of ids) {
       const d = TD.BUFF_BY_ID[id];
       if (d.kind === 'permanent') r.permanent.push({ id: id, stacks: 1 });
@@ -2091,15 +2095,29 @@ test('需求41：与狂怒成套的四条低血 combo（空血上限 / 低血减
   };
   const plain = oneBattle([], 0.6);
   assert.equal(plain.me.hp, 3000, '基准：5000 × 0.6 = 3000');
+  /* 回归：全新一局 carry=1 且还没有任何历史血量时，第一场必须是满血
+   * （曾经因为以「未知上限」折算而给出 1 点血）。 */
+  {
+    T._debugSetLayer(9);
+    const r0 = T._debugRun('endless');
+    if (r0 && r0.attempt) { try { T.reportBattle('endless', r0.attempt, false, 0, 0); } catch (e) {} }
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.hpAbs = 0; r.refMaxHp = 0; r.carry = 1;
+    const nxb = T.nextBattle('endless');
+    const meb = baseMe(); nxb.adjustMe(meb);
+    assert.equal(meb.hp, meb.maxHp, '全新一局第一场应当满血（不是 1 点血），实测 ' + meb.hp + '/' + meb.maxHp);
+  }
   const n13 = oneBattle(['N13'], 0.6);
   assert.equal(n13.me.maxHp, 10000, 'N13 应当把上限抬到 10000');
   assert.equal(n13.me.hp, 3000, 'N13 的当前血量绝对值必须不变（仍是 3000）← 关键');
   assert.ok(Math.abs(n13.me.hp / n13.me.maxHp - 0.30) < 1e-6, '占比应当被压到 30%');
   const c46 = oneBattle(['C46'], 0.6);
-  assert.equal(c46.me.maxHp, 7500, 'C46 应当把上限抬到 7500');
+  assert.equal(c46.me.maxHp, 6500, 'C46 应当把上限抬到 6500（+30%）');
   assert.equal(c46.me.hp, 3000, 'C46 的当前血量绝对值必须不变');
   const c47 = oneBattle(['C47'], 0.6);
-  assert.equal(c47.me.maxHp, 10000, 'C47 应当把上限抬到 10000');
+  assert.equal(c47.me.maxHp, 7500, 'C47 应当把上限抬到 7500（+50%）');
   assert.equal(c47.me.hp, 3000, 'C47 的当前血量绝对值必须不变');
   /* 空血上限要能把「高血线」推进狂怒区间（这就是 combo 的意义） */
   const pushed = oneBattle(['N13'], 0.55);
@@ -2138,7 +2156,7 @@ test('需求41：与狂怒成套的四条低血 combo（空血上限 / 低血减
   };
   const r1 = regenRun(2000);
   assert.ok(r1.heals > 0, '低血时应当有回血回合');
-  assert.equal(r1.first, 250, '单次回血应当是 5% × 5000 = 250，实测 ' + r1.first);
+  assert.equal(r1.first, 100, '单次回血应当是 2% × 5000 = 100，实测 ' + r1.first);
   assert.ok(r1.maxSeen <= 2500, '回血不该越过 50% 线（2500），实测最高 ' + r1.maxSeen);
   const r2 = regenRun(1000);
   assert.ok(r2.maxSeen <= 2500, '从 20% 起回血也不该越过 50% 线，实测 ' + r2.maxSeen);

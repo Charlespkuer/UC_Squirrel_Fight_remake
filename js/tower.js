@@ -156,6 +156,9 @@
       run.winStatPower = Math.max(0, Number(run.winStatPower) || 0);
       run.winStatAgility = Math.max(0, Number(run.winStatAgility) || 0);
       run.winStatSpeed = Math.max(0, Number(run.winStatSpeed) || 0);
+      /* 血量绝对值口径：剩余血量与「最近一次已知上限」（回血/裁血的基准）。 */
+      run.hpAbs = Math.max(0, Math.round(Number(run.hpAbs) || 0));
+      run.refMaxHp = Math.max(0, Math.round(Number(run.refMaxHp) || 0));
       if (run.shop && typeof run.shop === 'object' && !Array.isArray(run.shop.slots)) run.shop = null;
       if (run.phase !== 'shop' && run.phase !== 'checkpoint') run.phase = null;
     if (!Array.isArray(run.debuffs)) run.debuffs = [];
@@ -584,10 +587,13 @@
   }
   /** 五层回响：进入 5 的倍数层时回复 50%（无尽）。 */
   function layerStartHeal(run, mode) {
+    /* 需求：血量继承改绝对值 —— 这里的「回 X% 最大生命」就是加一个固定绝对量，
+     * 参考上限用上一场记下的 run.lastMaxHp（此刻还没有下一场的 maxHp）。 */
+    const ref = Math.max(1, Number(run.lastMaxHp) || 0);
     // 第 2 项：无尽塔跨层固定回 20% 血
-    if (mode === 'endless') run.carry = Math.min(1, run.carry + D().ENDLESS_LAYER_HEAL_PCT);
+    if (mode === 'endless') healAbs(run, D().ENDLESS_LAYER_HEAL_PCT, ref);
     if (run.layer % 5 === 0 && stacksOf(run, 'C08')) {
-      run.carry = Math.min(1, run.carry + D().BUFF_BY_ID.C08.mods.layer5HealPct * globalMul(run));
+      healAbs(run, D().BUFF_BY_ID.C08.mods.layer5HealPct * globalMul(run), ref);
     }
   }
 
@@ -631,8 +637,9 @@
     const foeHpDown = Math.max(0, Math.min(0.6, Number(run.enemyMaxHpDown) || 0));
     if (foeHpDown > 0) built.foe.hp = Math.max(1, Math.round(built.foe.hp * (1 - foeHpDown)));
     const maxHpMul = agg.maxHpMul, powerMul = agg.powerMul;
-    /* 「补给」：下一场战斗开始时立即回复 50% 生命 —— 在取下一场的时候就把 carry 抬上去。 */
-    if (agg.startHealPct > 0) run.carry = Math.min(1, run.carry + agg.startHealPct);
+    /* 「补给」：下一场战斗开始时立即回复 50% 生命。绝对口径下等价于加固定绝对量，
+     * 参考上限用上一场记下的 run.lastMaxHp。 */
+    if (agg.startHealPct > 0) healAbs(run, agg.startHealPct, Number(run.lastMaxHp) || 0);
     const adjustMe = (me) => {
       /* 第 4 项：先记下「未加塔 buff」的基础上限，currentMaxHp() 靠它现算。 */
       run.baseMaxHp = Math.max(1, Number(me.maxHp) || 0);
@@ -702,11 +709,16 @@
       const envModsMine = Object.assign({}, me.mods || {});
       // maxHpMul 的「回复等量生命」= 按比例继承到新上限（正增益不亏比例、负增益同步缩血）
       me.maxHp = maxHp;
-      /* 当前血量按**不含空血上限**的基数折算，所以那部分始终是空的。 */
-      me.hp = Math.max(1, Math.min(maxHp, Math.round(baseMaxHp * run.carry)));
+      /* 需求：血量继承按**绝对值** —— 把上一场记下的剩余血量直接放进新上限，
+       * 超出上限的部分裁掉。（空血上限只抬 maxHp，不动 hpAbs，
+       * 所以那部分天然是空的；旧档的 carry 由 hpAbsOf 按当时上限折算一次。） */
+      me.hp = Math.max(1, Math.min(maxHp, hpAbsOf(run, maxHp)));
       /* 本轮第 4 项：记下基础上限（未加塔 buff 的那一份）与本场真实上限 / 当前血量。 */
       run.lastMaxHp = maxHp;
       run.lastHp = me.hp;
+      /* 记下本场真正的上限，供「非战斗期间」的绝对回血与裁血使用
+       *（尤其是第一场：那时还没有任何历史血量，必须以本场上限为基准）。 */
+      run.refMaxHp = maxHp;
       const mods = {};
       if (agg.critBonus) mods.critBonus = agg.critBonus;
       if (agg.critDmgBonus) mods.critDmgBonus = agg.critDmgBonus;
@@ -754,6 +766,9 @@
     const toasts = takeAchievementToasts(run);   // 例如「超凡入圣」是在这之前算出来的
     return { ok: true, token: run.attempt, entry, info: entryInfo(entry), foe: built.foe,
       elite: built.elite, region: regionOf(entry), hpRatio: run.carry, adjustMe,
+      /* 本场「实际上限」的取值函数：一次战斗内是定值，提供出来是为了把
+       * 「按最大生命百分比回血」换算成绝对血量（血量继承改成绝对值口径后需要）。 */
+      effMaxHp: () => Math.max(1, Number(run.lastMaxHp) || Math.max(1, Number(built.foe && built.foe.hp) || 1)),
       debuffs: (run.debuffs || []).slice(), achievements: toasts,
       battleNo: run.idx + 1, battleCount: run.plan.length, layer: run.layer };
   }
@@ -912,7 +927,7 @@
     return d;
   }
 
-  function reportBattle(mode, token, win, carryRatio, result) {
+  function reportBattle(mode, token, win, hpAbs, effMaxHp, result) {
     const box = mode === 'tower' ? tower() : endless();
     const run = box.run;
     if (!run || run.attempt !== token) return { ok: false };
@@ -924,7 +939,15 @@
       if (fail && fail.retryable) { fail.battleNo = run.idx + 1; fail.battleCount = run.plan.length; }
       return fail;
     }
-    run.carry = Math.max(0.01, clamp01(carryRatio));
+    /* 需求：血量继承改为**绝对值**口径 —— 记下战斗结束时的剩余血量绝对值，
+     * 下一场按「非战斗期间算出来的上限」把它放进去，超出部分裁掉。
+     * 旧实现存的是百分比 carry，上限一变就等比例放大/缩小，不符合预期。 */
+    const endHp = Math.max(1, Math.round(Number(hpAbs) || 0));
+    const endCap = Math.max(1, Math.round(Number(effMaxHp) || 0));
+    run.hpAbs = endHp;
+    run.carry = clamp01(endHp / endCap);        // 仅保留给旧档/旧界面显示用，不再是权威口径
+    /* 本场参考上限：本场结束时记下的真实 maxHp（「回 X% 最大生命」都按它换算）。 */
+    const refMax = Math.max(1, Number(run.refMaxHp) || Number(run.lastMaxHp) || endCap);
     const out = { ok: true, win: true, elite: isElite, entryKind: entry.kind };
     // 三侠的大招会给玩家留一层削弱（第 3 项）
     // 第 2 项：本场触发了复活甲 → 本层的不死鸟用掉
@@ -955,7 +978,7 @@
     if (debuff) { out.debuff = debuff; save(); }
     if (mode === 'tower') {
       // 固定节奏回血：每打完一场自动回一点，续航不再依赖场间选择
-      run.carry = Math.min(1, run.carry + D().AUTO_HEAL_PCT);
+      healAbs(run, D().AUTO_HEAL_PCT, refMax);
       const shares = D().towerGoldShares(run.layer, run.plan.length);
       run.pot += shares[run.idx];
       out.potGold = run.pot;
@@ -964,7 +987,7 @@
       // 战后续航（C16/C17，可叠加）：每场胜利后回复 X% 最大生命
       const winHeal = runModTotal(run, 'winHealPct');
       if (winHeal > 0) {
-        run.carry = Math.min(1, run.carry + winHeal);
+        healAbs(run, winHeal, refMax);
         out.winHeal = winHeal;
       }
       addScore(run, D().SCORE.battle, '战斗胜利');
@@ -1013,12 +1036,12 @@
         run.winMaxHp = Math.min((c07m.winMaxHpCap || 0.30) * c07 * g, (Number(run.winMaxHp) || 0) + (c07m.winMaxHpPct || 0.02) * c07 * g);
       }
       const c11 = stacksOf(run, 'C11');
-      if (c11) run.carry = Math.min(1, run.carry + 0.03 * c11 * g);
+      if (c11) healAbs(run, 0.03 * c11 * g, refMax);
       if (isElite) {
         addScore(run, D().SCORE.elite, '击败精英');
         run.coins += D().COINS.elite;
         const c13 = stacksOf(run, 'C13');
-        if (c13) run.carry = Math.min(1, run.carry + D().BUFF_BY_ID.C13.mods.eliteHealAfter * g);
+        if (c13) healAbs(run, D().BUFF_BY_ID.C13.mods.eliteHealAfter * g, refMax);
       }
     out.score = run.score; out.coins = run.coins;
     }
@@ -1336,7 +1359,7 @@
      * 「接下来 10 场」形同虚设（第 1 层结束就消失）。
      * 主塔的「本层类」uses=99，而且整局在上面 tower 分支就已经结束了，不受影响。 */
     const c04 = stacksOf(run, 'C04');                    // 生命源泉：每过一层回血
-    if (c04) run.carry = Math.min(1, run.carry + D().BUFF_BY_ID.C04.mods.layerHealPct * g);
+    if (c04) healAbs(run, D().BUFF_BY_ID.C04.mods.layerHealPct * g, Number(run.lastMaxHp) || 0);
     const c12 = stacksOf(run, 'C12');                    // 登顶者：20 层起每过一层攻击成长
     if (c12 && run.layer >= 10) run.bonusPower += D().BUFF_BY_ID.C12.mods.perLayerPowerAfter20 * c12 * g;   // 第 2 项：从 10 层起
     /* 第 3 项：每爬 10 层，结算时随机发一次里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）。 */
@@ -1516,10 +1539,9 @@
     if (buff.mods && buff.mods.shopDiscount) {
       run.shopDiscount = Math.max(0, Math.floor(Number(run.shopDiscount) || 0)) + 1;
     }
-    if (buff.mods && buff.mods.maxHpMul) {
-      const m = Number(buff.mods.maxHpMul) || 0;
-      if (m !== 0) run.carry = clamp01((clamp01(run.carry) + m) / (1 + m));
-    }
+    /* 注意：这里原来会把百分比 maxHpMul「按比例继承」到 run.carry。
+     * 血量继承改成**绝对值**口径后不再需要 —— hpAbs 保持不变、上限变高，
+     * 效果自然就是「加上限但不补血」（与空血上限同口径）。 */
   }
   /** 加一个 buff。永久类要过 5 格上限（满则返回 needsReplace，由界面选一个替换）。 */
   function addBuff(run, id, replaceId) {
@@ -1945,6 +1967,35 @@
   function permSlots(run) { return (D().PERMANENT_SLOTS || 5) + Math.max(0, Number(run && run.permSlots) || 0); }
   /** 本轮第 1 项：**实际占用**的永久槽位数 = 拥有数 − 被「虚空铭文」附魔免占位的数量。
    *  槽位判断、面板计数、C34「空槽换攻击」全部走这里，避免三处各算一套。 */
+  /* ============================================================
+   * 血量：**绝对值口径**（需求：血量继承按绝对值而不是百分比）
+   *
+   *   run.hpAbs —— 战斗结束时的剩余血量绝对值；下一场把它放进「非战斗期间算出的上限」，
+   *                超出上限的部分裁掉。旧档只有百分比 run.carry，这里按当时的上限折算一次。
+   *
+   * 「按最大生命百分比回血」在绝对值模型下等于「加一个固定的绝对量」，所以需要一个
+   * 参考上限：战斗中用本场实际 maxHp；换层等「还没有下一场」的时机用上一场记下的
+   * run.lastMaxHp（就是玩家看到的那条血上限）。
+   * ============================================================ */
+  function hpAbsOf(run, fallbackMaxHp) {
+    if (!run) return Math.max(1, Math.round(Number(fallbackMaxHp) || 1));
+    const v = Number(run.hpAbs);
+    if (Number.isFinite(v) && v > 0) return Math.max(1, Math.round(v));
+    /* 没有 hpAbs 的历史档（或全新一局）：按「最近一次已知上限 × carry」折算。
+     * 全新一局 carry=1、上限还没记过 —— 此时必须以**本次的上限**为基准，
+     * 否则会折算出 1 点血（实测第一场 hp=1）。 */
+    const ref = Math.max(1, Math.round(Number(run.refMaxHp) || Number(run.lastMaxHp) || Number(fallbackMaxHp) || 0));
+    return Math.max(1, Math.round(ref * clamp01(run.carry == null ? 1 : run.carry)));
+  }
+  /** 非战斗期间按「最大生命的百分比」回血：换算成绝对值后累加（自动受上限约束）。 */
+  function healAbs(run, pct, refMaxHp) {
+    const p = Math.max(0, Number(pct) || 0);
+    if (!p) return 0;
+    const ref = Math.max(1, Math.round(Number(refMaxHp) || Number(run && run.refMaxHp) || Number(run && run.lastMaxHp) || 0));
+    const gain = Math.max(1, Math.round(ref * p));
+    run.hpAbs = hpAbsOf(run) + gain;
+    return gain;
+  }
   function permUsed(run) {
     const list = (run && run.permanent) || [];
     const free = ((run && run.slotFreeIds) || []).filter((id) => list.some((b) => b.id === id));
@@ -1983,9 +2034,18 @@
     const dMaxHp = ((run.debuffs || []).filter((d) => d.kind === 'maxHp'))
       .reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
     const stickyHp = Math.max(0, Number(run.hpBonus) || 0);
+    const winMaxHp = Math.max(0, Number(run.winMaxHp) || 0);
+    /* 补上「空血上限」—— 它只抬上限，所以必须算进来，否则界面血条会虚高。 */
+    const emptyHp = Math.max(0, Number(agg.emptyMaxHpMul) || 0);
     const flat = Math.max(0, Number(run.winHpFlat) || 0) +
       (run.spendGain ? Math.max(0, Number(run.spendGain.hp) || 0) : 0);
-    return Math.max(1, Math.round(base * (1 + agg.maxHpMul + stickyHp) * dMaxHp) + flat);
+    return Math.max(1, Math.round(base * (1 + agg.maxHpMul + stickyHp + winMaxHp + emptyHp) * dMaxHp) + flat);
+  }
+  /** 当前血量（绝对口径）：hpAbs 裁到当前上限。 */
+  function currentHp(run) {
+    const cap = currentMaxHp(run);
+    const hp = hpAbsOf(run, cap);
+    return { hp: cap > 0 ? Math.min(hp, cap) : hp, maxHp: cap };
   }
   /** 需求 3：易碎烙印的损毁判定（每场战斗一次，默认 6%）。
    * 每条烙印有**自己的随机序列**（fragileRoll）；损毁后该烙印的基础加成整份转为
@@ -2193,7 +2253,8 @@
       gold: D().towerGold(layer), battles: layer % 10 === 0 ? 5 : 4,
       level: D().towerLevel(layer), mult: D().towerMult(layer),
       retry: t.retry || null,
-      run: t.run ? { layer: t.run.layer, battleNo: t.run.idx + 1, battleCount: t.run.plan.length, carry: t.run.carry, pot: t.run.pot, failedAt: t.run.failedAt == null ? null : t.run.failedAt,
+      run: t.run ? { layer: t.run.layer, battleNo: t.run.idx + 1, battleCount: t.run.plan.length, carry: t.run.carry,
+        curMaxHp: currentMaxHp(t.run), curHp: currentHp(t.run).hp, hpAbs: hpAbsOf(t.run), pot: t.run.pot, failedAt: t.run.failedAt == null ? null : t.run.failedAt,
         choices: t.run.choices ? t.run.choices.slice() : null,
         debuffs: (t.run.debuffs || []).slice(),
         // 第 4 项：挑战塔的血条悬停也显示真实上限
@@ -2243,6 +2304,8 @@
         lastMaxHp: Math.max(0, Number(e.run.lastMaxHp) || 0),
         lastHp: Math.max(0, Number(e.run.lastHp) || 0),
         curMaxHp: currentMaxHp(e.run),
+        curHp: currentHp(e.run).hp,
+        hpAbs: hpAbsOf(e.run),
         // 本轮第 7 项：易碎烙印留下的「本局永久保留」属性加成
         fragileBase: Object.assign({ power: 0, agility: 0, speed: 0 }, e.run.fragileBase || {}),
         fragileBurned: Object.assign({ power: 0, agility: 0, speed: 0 }, e.run.fragileBurned || {}),

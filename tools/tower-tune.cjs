@@ -31,7 +31,7 @@ function single(layer, slot, level) {
   for (let i = 0; i < RUNS; i++) {
     Tower._debugSetLayer(layer - 1); Tower.startTowerRun();
     for (let k = 0; k < slot; k++) {
-      const nx0 = Tower.nextBattle('tower'); Tower.reportBattle('tower', nx0.token, true, 1);
+      const nx0 = Tower.nextBattle('tower'); Tower.reportBattle('tower', nx0.token, true, (Tower._debugRun('tower').lastHp || Tower._debugRun('tower').lastMaxHp || 1), Tower._debugRun('tower').lastMaxHp);
       const ti = Tower.towerInfo(); if (ti.run && ti.run.choices) Tower.pickChoice('tower', 0);
     }
     const nx = Tower.nextBattle('tower');

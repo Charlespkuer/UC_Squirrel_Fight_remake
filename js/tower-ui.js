@@ -35,21 +35,26 @@
   let replaceTarget = null;   // 第 1 项：永久增益满 5 格时，选中的「要被替换掉」的那个
 
   // ---------- 通用小件 ----------
-  function carryBar(carry, label, cls, tip) {
-    const pct = Math.round((carry == null ? 1 : carry) * 100);
+  function carryBar(hp, maxHp, label, cls, tip) {
+    /* 需求：血量继承改为**绝对值** —— 血条按「当前绝对值 / 当前上限」显示，
+     * 文本直接写 X / Y，不再用百分比表达继承。 */
+    const cap = Math.max(0, Math.round(Number(maxHp) || 0));
+    const cur = Math.max(0, Math.round(Number(hp) || 0));
+    const pct = cap > 0 ? Math.max(0, Math.min(100, Math.round(cur / cap * 100))) : 0;
     /* 本轮第 4 项：血条挂上真实血量上限（悬停显示）。tip 由调用方按本局
      * lastMaxHp / lastHp 拼好 —— 那两个值在 tower.js 的 adjustMe 里每场更新。 */
     const tipAttr = tip ? ' data-tip="' + esc(tip) + '" title="' + esc(tip) + '" tabindex="0"' : '';
-    return '<div class="tower-carry' + (cls ? ' ' + cls : '') + '"' + tipAttr + '><span>' + (label || '血量继承') + '</span>' +
-      '<div class="tower-carry-bar"><i style="width:' + pct + '%"></i></div><b>' + pct + '%</b></div>';
+    return '<div class="tower-carry' + (cls ? ' ' + cls : '') + '"' + tipAttr + '><span>' + (label || '血量') + '</span>' +
+      '<div class="tower-carry-bar"><i style="width:' + pct + '%"></i></div><b>' +
+      (cap > 0 ? (cur + ' / ' + cap) : '—') + '</b></div>';
   }
   /** 本局当前的血量上限 / 当前血量（血条悬停用）。 */
   function hpTip(run) {
-    /* curMaxHp 是 tower.js 现算的（拿到增益立刻反映）；lastMaxHp 只作兜底。 */
+    /* curMaxHp / curHp 都在 tower.js 里现算（拿到增益、抬上限立刻反映）。 */
     const maxHp = Number(run && run.curMaxHp) || Number(run && run.lastMaxHp) || 0;
     if (!(maxHp > 0)) return '血量上限：打完第一场后显示';
-    const hp = Math.max(0, Math.round(Number(run.lastHp) || 0));
-    return '血量上限 ' + maxHp + ' · 当前 ' + hp + '（' + Math.round((run.carry == null ? 1 : run.carry) * 100) + '%，下一场按比例继承）';
+    const hp = Math.max(0, Math.round(Number(run && run.curHp != null ? run.curHp : run.lastHp) || 0));
+    return '当前血量 ' + hp + ' / 上限 ' + maxHp + '（下一场按**绝对值**继承，超出上限的部分裁掉）';
   }
   /** 悬停气泡：机制说明放在这里（第 1 项需求），预告列表就只需要一行名字。
    *  用 body 上的 fixed 层，避免被 .tower-main 的 overflow 裁掉。 */
@@ -489,7 +494,7 @@
       main = '<div class="tower-head"><h2 class="tower-title">第 ' + run.layer + ' 层 · 第 ' + run.battleNo + '/' + run.battleCount + ' 场</h2>' +
         '<div class="tower-stats">已累积松果 <b class="gold-text">' + run.pot + '</b>（失败只保底 30%）</div></div>' +
         currencyHtml('tower') +
-        carryBar(run.carry, '血量继承', '', hpTip(run)) + debuffPanel(run.debuffs) + ownedBuffsHtml('tower') +
+        carryBar(run.curHp, run.curMaxHp, '血量', '', hpTip(run)) + debuffPanel(run.debuffs) + ownedBuffsHtml('tower') +
         '<div class="tower-actions">' + C().btn('继续战斗', 'fight', 'gold') + C().btn('放弃本层', 'abandon', 'muted small') + '</div>';
     } else {
       // 第 1 项：标题与数据并排、规则压成一行，保证一屏能放下 5 行预告 + 开始按钮
@@ -580,7 +585,7 @@
         '<div class="endless-left">' +
         '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
         '</div>' +
-        carryBar(run.carry, '血量', 'endless-hp', hpTip(run)) +
+        carryBar(run.curHp, run.curMaxHp, '血量', 'endless-hp', hpTip(run)) +
         /* 环境词缀（唯一常驻负面机制）：
          * 段位机制已并入环境，这里只画一个面板；每条都带完整悬停说明与数值区间。
          * 三侠削弱（贯穿本层）与挫锐/卸甲（本局全局减益）是「本局累积的减益」，
@@ -697,9 +702,11 @@
         collectDrops: false,
         onError: () => Tower.interruptBattle(mode, nx.token),
         onEnd: (w, r) => {
-          const hp = r && Array.isArray(r.hpAfter) ? r.hpAfter[0] : null, cap = r && Array.isArray(r.maxHp) ? r.maxHp[0] : 0;
-          const ratio = w === 0 && Number.isFinite(hp) && cap > 0 ? Math.max(0, Math.min(1, hp / cap)) : 0;
-          const rw = Tower.reportBattle(mode, nx.token, w === 0, ratio);
+          /* 需求：血量继承按**绝对值** —— 传战斗结束时的剩余血量与本场实际上限。 */
+          const hp = r && Array.isArray(r.hpAfter) ? r.hpAfter[0] : null;
+          const cap = r && Array.isArray(r.maxHp) ? r.maxHp[0] : (nx.effMaxHp ? nx.effMaxHp() : 0);
+          const abs = w === 0 && Number.isFinite(hp) ? Math.max(1, Math.round(hp)) : 0;
+          const rw = Tower.reportBattle(mode, nx.token, w === 0, abs, cap);
           reopen(mode);
           if (!rw.ok) return;                 // 令牌已作废的迟到回调，静默忽略
           afterBattle(mode, rw);

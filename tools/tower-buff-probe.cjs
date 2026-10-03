@@ -71,7 +71,7 @@ hr('2) 限次 buff 的次数消耗（任务 5）');
     for (let i = 1; i <= Math.min(BATTLES, 4); i++) {
       const nx = Tower.nextBattle('endless');
       if (!nx || !nx.foe) { line('  第 ' + i + ' 场取不到（' + JSON.stringify(nx) + '）'); break; }
-      Tower.reportBattle('endless', nx.token, true, 1);
+      Tower.reportBattle('endless', nx.token, true, (Tower._debugRun('endless').lastHp || Tower._debugRun('endless').lastMaxHp || 1), Tower._debugRun('endless').lastMaxHp);
       show('打完 ' + i + ' 场');
       const info = Tower.endlessInfo();
       if (info.run && info.run.choices) Tower.pickChoice('endless', 0);
@@ -102,7 +102,7 @@ hr('3) 叠层成长（任务 7：猎杀时刻 C06 / 吞噬成长 C07）');
   for (let i = 1; i <= BATTLES; i++) {
     const nx = Tower.nextBattle('endless');
     if (!nx || !nx.foe) break;
-    Tower.reportBattle('endless', nx.token, true, 1);
+    Tower.reportBattle('endless', nx.token, true, (Tower._debugRun('endless').lastHp || Tower._debugRun('endless').lastMaxHp || 1), Tower._debugRun('endless').lastMaxHp);
     if (i % 4 === 0 || i === 1) show('打完 ' + i + ' 场');
     const info = Tower.endlessInfo();
     if (info.run && info.run.choices) Tower.pickChoice('endless', 0);
@@ -126,7 +126,7 @@ hr('4) 战利品账本 C25（任务 7：只该加自己 / 且随持有而生效�
   for (let i = 1; i <= 6; i++) {
     const nx = Tower.nextBattle('endless');
     if (!nx || !nx.foe) break;
-    Tower.reportBattle('endless', nx.token, true, 1);
+    Tower.reportBattle('endless', nx.token, true, (Tower._debugRun('endless').lastHp || Tower._debugRun('endless').lastMaxHp || 1), Tower._debugRun('endless').lastMaxHp);
     if (i % 2 === 0) price('打完 ' + i + ' 场');
     const info = Tower.endlessInfo();
     if (info.run && info.run.choices) Tower.pickChoice('endless', 0);

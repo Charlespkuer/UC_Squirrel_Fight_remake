@@ -328,7 +328,7 @@ hr('上轮 6：轻装上阵与厚积薄发');
     const base = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
     const nx1 = Tower.nextBattle('endless');
     const me1 = Object.assign({}, base); nx1.adjustMe(me1);
-    Tower.reportBattle('endless', nx1.token, true, 1);
+    Tower.reportBattle('endless', nx1.token, true, (Tower._debugRun('endless').lastHp || Tower._debugRun('endless').lastMaxHp || 1), Tower._debugRun('endless').lastMaxHp);
     const run = Tower._debugRun('endless');
     if (run && run.choices) Tower.pickChoice('endless', 0);
     grant();
@@ -366,7 +366,7 @@ hr('上轮 9：挥金如土');
     if (run.choices) { Tower.pickChoice('endless', 0); continue; }
     const nx = Tower.nextBattle('endless');
     if (!nx || !nx.foe) break;
-    Tower.reportBattle('endless', nx.token, true, 1);
+    Tower.reportBattle('endless', nx.token, true, (Tower._debugRun('endless').lastHp || Tower._debugRun('endless').lastMaxHp || 1), Tower._debugRun('endless').lastMaxHp);
   }
   const run0 = Tower._debugRun('endless');
   if (!run0 || !run0.shop) {
@@ -654,29 +654,49 @@ hr('本轮 2：商店里已拥有的可叠加增益要能高光');
   Tower.abandon('endless');
 }
 
-// ---------- 本轮 3：磐石之躯的回复立即生效 ----------
-hr('本轮 3：磐石之躯（生命上限 +20%）的回复要立即生效');
+// ---------- 血量继承：绝对值口径 ----------
+hr('血量继承按绝对值（不是百分比），且上限变化时按规则处理');
 {
   freshRun();
   const nx = Tower.nextBattle('endless');
   const me = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
   me.maxHp = me.hp;
   nx.adjustMe(me);
-  Tower.reportBattle('endless', nx.token, true, 0.5);      // 血量掉到 50%
-  const before = Tower._debugRun('endless');
-  const max0 = Tower.endlessInfo().run.curMaxHp;
-  const hp0 = Math.round(max0 * before.carry);
-  Tower.debugGrantBuff('C01');                             // 磐石之躯：上限 +20%
+  const max0 = me.maxHp, endHp = Math.round(max0 * 0.5);
+  /* 结算时传**剩余血量绝对值**：掉到 50%。 */
+  Tower.reportBattle('endless', nx.token, true, endHp, max0);
+  const r1 = Tower._debugRun('endless');
+  check('战后记下剩余血量绝对值', r1.hpAbs === endHp, 'hpAbs=' + r1.hpAbs + ' 期望 ' + endHp + '（上限 ' + max0 + '）');
+  check('当前血量与上限的显示口径一致', Tower.endlessInfo().run.curHp === endHp,
+    'curHp=' + Tower.endlessInfo().run.curHp);
+
+  /* 上限变大（磐石之躯 +20%）：绝对值**保持不变**，多出来的是空血。 */
+  Tower.debugGrantBuff('C01');
   const after = Tower.endlessInfo().run;
-  const max1 = after.curMaxHp;
-  const hp1 = Math.round(max1 * Tower._debugRun('endless').carry);
-  const grewMax = max1 - max0;
-  const grewHp = hp1 - hp0;
-  check('上限涨了约 20%', Math.abs(grewMax - Math.round(max0 * 0.2)) <= 2, max0 + ' -> ' + max1 + '（+' + grewMax + '）');
-  check('当前血量按「等量」补上（不是保持百分比）', Math.abs(grewHp - grewMax) <= 2,
-    '血量 ' + hp0 + ' -> ' + hp1 + '（+' + grewHp + '，上限 +' + grewMax + '）');
-  check('不是「比例不变」那种老行为', Math.abs(grewHp - Math.round(hp0 * 0.2)) > 2 || grewHp > Math.round(hp0 * 0.2),
-    '老行为会只补 ' + Math.round(hp0 * 0.2));
+  const max1 = after.curMaxHp, hp1 = after.curHp;
+  check('上限涨了约 20%', Math.abs((max1 - max0) - Math.round(max0 * 0.2)) <= 2, max0 + ' -> ' + max1);
+  check('绝对值继承：上限变大后当前血量不变（空的部分就是空的）',
+    hp1 === endHp, '血量 ' + endHp + ' -> ' + hp1 + '（上限 ' + max0 + ' -> ' + max1 + '）');
+  Tower.abandon('endless');
+}
+
+{
+  /* 上限变小：多余部分裁掉（不超出上限）。 */
+  freshRun();
+  const nx = Tower.nextBattle('endless');
+  const me = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+  me.maxHp = me.hp;
+  nx.adjustMe(me);
+  const max0 = me.maxHp;
+  Tower.reportBattle('endless', nx.token, true, max0, max0);      // 满血过场
+  const r = Tower._debugRun('endless');
+  r.debuffs = [{ kind: 'maxHp', pct: 0.5, label: '测试：上限腰斩' }];
+  const nx2 = Tower.nextBattle('endless');
+  const me2 = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+  me2.maxHp = me2.hp;
+  nx2.adjustMe(me2);
+  check('上限变小时多余血量被裁掉（不超出上限）', me2.hp === me2.maxHp && me2.hp < r.hpAbs,
+    '血量 ' + r.hpAbs + ' -> ' + me2.hp + '（新上限 ' + me2.maxHp + '）');
   Tower.abandon('endless');
 }
 
@@ -788,7 +808,7 @@ hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留�
   const nx1 = Tower.nextBattle('endless');
   const meA = Object.assign({}, base); meA.maxHp = base.hp; nx1.adjustMe(meA);
   const pow0 = meA.power;
-  Tower.reportBattle('endless', nx1.token, true, 1);
+  Tower.reportBattle('endless', nx1.token, true, (Tower._debugRun('endless').lastHp || Tower._debugRun('endless').lastMaxHp || 1), Tower._debugRun('endless').lastMaxHp);
   Tower.debugGrantBuff('C39');                       // 力量烙印：基础 +8%
   const run1 = Tower._debugRun('endless');
   check('拿到时登记基础加成 0.08', Math.abs((run1.fragileBase || {}).power - 0.08) < 1e-6, JSON.stringify(run1.fragileBase));
@@ -814,7 +834,7 @@ hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留�
     return null;
   })();
   if (miss != null) cur0.fragileSeeds = { C39: miss };
-  Tower.reportBattle('endless', nx2.token, true, 1);
+  Tower.reportBattle('endless', nx2.token, true, (Tower._debugRun('endless').lastHp || Tower._debugRun('endless').lastMaxHp || 1), Tower._debugRun('endless').lastMaxHp);
   const info = Tower.ownedBuffs('endless').find((b) => b.id === 'C39');
   check('面板写明「存在：半效」', !!(info && info.progress && info.progress.indexOf('半效') >= 0), info && info.progress);
   /* 这一段后面会连打最多 200 场，中途玩家**可能又选到同一枚烙印**（基础加成会叠上去），
@@ -862,7 +882,7 @@ hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留�
     if (hit != null) cur.fragileSeeds = { C39: hit };
     const nx = Tower.nextBattle('endless');
     if (!nx || nx.ok === false) { clearPhase(); continue; }
-    Tower.reportBattle('endless', nx.token, true, 1);
+    Tower.reportBattle('endless', nx.token, true, (Tower._debugRun('endless').lastHp || Tower._debugRun('endless').lastMaxHp || 1), Tower._debugRun('endless').lastMaxHp);
     if (!(Tower._debugRun('endless').limited || []).some((b) => b.id === 'C39')) broken = true;
     clearPhase();
   }
@@ -897,7 +917,7 @@ hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留�
     ['C39', 'C40', 'C41'].forEach((id) => Tower.debugGrantBuff(id));
     const nx = Tower.nextBattle('endless');
     if (!nx || nx.ok === false) continue;
-    Tower.reportBattle('endless', nx.token, true, 1);
+    Tower.reportBattle('endless', nx.token, true, (Tower._debugRun('endless').lastHp || Tower._debugRun('endless').lastMaxHp || 1), Tower._debugRun('endless').lastMaxHp);
     const broken = (Tower._debugRun('endless').buffLog || []).filter((e) => e.event === 'break').length;
     trials++;
     if (broken === 3) bothAll++;

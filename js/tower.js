@@ -131,6 +131,9 @@
       /* 需求 3：烙印两段加成 + 独立随机种子；旧档 stickyStat → fragileBurned。 */
       run.fragileBase = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBase || {});
       run.fragileBurned = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBurned || {});
+      /* 终乘烙印（C49）：独立于「加算烙印」的两段层数，最后做幂乘。 */
+      run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0));
+      run.fragileMulBurned = Math.max(0, Math.floor(Number(run.fragileMulBurned) || 0));
       for (const k of ['power', 'agility', 'speed']) {
         run.fragileBase[k] = Math.max(0, Number(run.fragileBase[k]) || 0);
         run.fragileBurned[k] = Math.max(0, Number(run.fragileBurned[k]) || 0);
@@ -307,7 +310,11 @@
   }
   function aggregate(run, foeCtx) {
     const g = globalMul(run);
-    const agg = { powerMul: 0, maxHpMul: 0, critBonus: 0, critDmgBonus: 0, dodgeBonus: 0, takenMul: 0,
+    /* 注意：这里每个字段都必须显式初始化 —— 下面用的是 `agg.x += …`，
+     * 漏初始化就会变成 `undefined + n = NaN`，一路污染到我方面板。
+     * 实测漏过 agilityMul：任何带敏捷加成的增益（灵巧 C27 / 凌波微步 G06…）
+     * 都会让我方敏捷直接变成 NaN。 */
+    const agg = { powerMul: 0, agilityMul: 0, maxHpMul: 0, critBonus: 0, critDmgBonus: 0, dodgeBonus: 0, takenMul: 0,
       regenPct: 0, lifestealPct: 0, shellPct: 0, openStrikePct: 0, enemyPowerDown: 0, startHealPct: 0,
       mustHitFirst: 0, firstSkillFree: 0, deathSaves: [], dmgMul: 1, revivePct: 0, reviveStatMul: 0,
       speedMul: 0, winHealPct: 0, thornsPct: 0, lowHpPowerMul: 0, lowHpAt: 0,
@@ -760,8 +767,26 @@
        * 同时把这次加到我方身上的 mods 记下来，稍后并进最终的 me.mods。 */
       applyEnvToMe(run, me);
       const envModsMine = Object.assign({}, me.mods || {});
+      /* ============================================================
+       * 终乘烙印（C49「终焉烙印」）：**所有加算 / 成长都算完之后**再乘一遍。
+       *   力/敏/速/生命上限 ×(1.25^存在层 × 1.5^损毁层)
+       * 之所以放在这里：它要的是「最终 1.25 倍 / 1.5 倍」，而不是参与前面的加法堆叠；
+       * 多层时各自独立相乘（1.5^n）。
+       * 注意 maxHp 与当前血量一起放大，保持「当前血量占上限的比例」不变。
+       * ============================================================ */
+      const finalMul = fragileFinalMul(run);
+      const scaledMaxHp = finalMul === 1 ? maxHp : Math.max(1, Math.round(maxHp * finalMul));
+      if (finalMul !== 1) {
+        me.power = Math.max(1, Math.round(me.power * finalMul));
+        me.agility = Math.max(1, Math.round(me.agility * finalMul));
+        me.speed = Math.max(1, Math.round(me.speed * finalMul));
+        me.hp = Math.max(1, Math.min(scaledMaxHp, Math.round(me.hp * finalMul)));
+      } else {
+        me.hp = Math.max(1, Math.min(scaledMaxHp, me.hp));
+      }
+
       // maxHpMul 的「回复等量生命」= 按比例继承到新上限（正增益不亏比例、负增益同步缩血）
-      me.maxHp = maxHp;
+      me.maxHp = scaledMaxHp;
       /* 需求：血量继承按**绝对值** —— 把上一场记下的剩余血量直接放进新上限，
        * 超出上限的部分裁掉。（空血上限只抬 maxHp，不动 hpAbs，
        * 所以那部分天然是空的；旧档的 carry 由 hpAbsOf 按当时上限折算一次。） */
@@ -773,8 +798,8 @@
       if (!(Number(run.hpAbs) > 0)) run.hpAbs = me.hp;      // 建立计数器 */
 
       /* 本轮第 4 项：记下基础上限（未加塔 buff 的那一份）与本场真实上限 / 当前血量。 */
-      run.lastMaxHp = maxHp;
-      run.lastHp = me.hp;
+      run.lastMaxHp = scaledMaxHp;
+      run.lastHp = Math.min(me.hp, scaledMaxHp);
       /* 记下本场真正的上限，供「非战斗期间」的绝对回血与裁血使用
        *（尤其是第一场：那时还没有任何历史血量，必须以本场上限为基准）。 */
       run.refMaxHp = maxHp;
@@ -1602,8 +1627,11 @@
      * 排除 N08「补给」—— 它是单场开局回血的一次性卡，不算真正的限次增益。 */
     const limitedLeft = () => pool.filter((b) => b.kind === 'limited' && b.id !== 'N08' &&
       !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));
+    /* 场间三选一也用**同一份稀有度权重**（原来调 rollRarity() 没传权重 → 走的是
+     * 均匀分布，传奇占比远高于自然掉率）。需求 2 / 4 的传奇降权在这里同样生效。 */
+    const choiceWeights = TD.tiltWeights(1, run);
     for (let slot = 0; slot < 3; slot++) {
-      let rarity = rollRarity();
+      let rarity = rollRarity(choiceWeights);
       let list = available(rarity);
       if (!list.length) list = pool.filter((b) => !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));   // 该稀有度抽空时放宽
       if (!list.length) break;
@@ -1664,6 +1692,19 @@
     const burned = Math.max(0, Number((run.fragileBurned || {})[key]) || 0);
     return { base: base, burned: burned, value: base * 0.5 + burned };
   }
+  /**
+   * 终乘烙印（C49「终焉烙印」）的最终倍率。
+   *   存在时 ×1.25、损毁后 ×1.5，**每次获得独立相乘**（多层 = 1.25^base × 1.5^burned），
+   *   而不是常见的加法叠加。调用点在 adjustMe 的最末尾（所有加算 / 成长都算完之后）。
+   */
+  function fragileFinalMul(run) {
+    const b = Math.max(0, Math.floor(Number(run && run.fragileMulBase) || 0));
+    const k = Math.max(0, Math.floor(Number(run && run.fragileMulBurned) || 0));
+    if (!b && !k) return 1;
+    const alive = Number(D().BUFF_BY_ID.C49.mods.fragileMulAlive) || 1.25;
+    const burned = Number(D().BUFF_BY_ID.C49.mods.fragileMulBurned) || 1.5;
+    return Math.pow(alive, b) * Math.pow(burned, k);
+  }
   /** 需求 3：每条烙印一个独立的确定性 PRNG（由本局 salt + 烙印 id 派生）。
    *  原来所有烙印共用 Math.random()，同一次判定会把好几条一起打碎。 */
   function fragileRoll(run, id, pct) {
@@ -1691,6 +1732,10 @@
   function applyBuffOnAcquire(run, buff) {
     /* 需求 3：易碎烙印的加成分两段 —— 烙印**还在**时只吃一半；
      * **损毁后**升为全额并本局永久保留。这里只登记「基础加成」，实际值在 fragileBonus() 现算。 */
+    /* 终乘烙印：每获得一份就 +1 层（重复获得独立相乘）。 */
+    if (buff.mods && buff.mods.fragileFinalMul) {
+      run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0)) + 1;
+    }
     if (buff.mods && buff.mods.fragileStat) {
       const key = buff.mods.fragileStat;
       run.fragileBase = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBase || {});
@@ -1882,7 +1927,7 @@
   function rollShopSlots(run, paid) {
     const pool = D().shopPool || D().endlessPool, slots = [], taken = new Set();
     /* 这次货架的稀有度权重：paid 越大，权重越往高稀有度倾斜（无保底）。 */
-    const weights = D().tiltWeights(D().rerollTilt(paid || 0));
+    const weights = D().tiltWeights(D().rerollTilt(paid || 0), run);
     for (let i = 0; i < D().SHOP.slots; i++) {
       /* 本轮第 5 项：商店也要过 poolFilter —— 原来只过 ownable，于是
        * 「一局只能获得一次」的扩容类（扩容背包/仓库钥匙）会被反复刷上货架，
@@ -2311,6 +2356,11 @@
           run.fragileBurned = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBurned || {});
           run.fragileBurned[key] = Math.max(0, Number(run.fragileBurned[key]) || 0) +
             Math.max(0, Number(def.mods.fragilePct) || 0);
+        }
+        /* 终乘烙印：损毁把一份「存在」层转成「损毁」层（1.25^n → 1.25^(n-1) × 1.5）。 */
+        if (def.mods.fragileFinalMul) {
+          run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0) - 1);
+          run.fragileMulBurned = Math.max(0, Math.floor(Number(run.fragileMulBurned) || 0)) + 1;
         }
         logBuff(run, b.id, 'break', { detail: '易碎损毁（升级为全额并永久保留）' });
         return false;

@@ -296,18 +296,67 @@
     const g = Math.max(1, Number(SHOP.rerollTiltGrowth) || 1.25);
     return Math.pow(g, money / 10);
   }
-  /** 倾斜后的稀有度权重（p=1 时就是自然掉率的 RARITY_WEIGHTS）。 */
-  function tiltWeights(tilt) {
+  /* ============================================================
+   * 传奇权重的两档下调（需求 2 / 4）
+   *
+   *   需求 2：传奇级商品在商店刷出的**基础**权重中幅下调。
+   *   需求 4：可重复获得的传奇重复获得时概率继续降；当**所有传奇都已获得**时，
+   *           整体获得传奇的概率进一步降低 —— 不是「只在传奇内部挪权重」，
+   *           而是把传奇这一档的整体份额压下去。
+   *
+   * 实现：给稀有度权重第 3 档（传奇）乘一个系数，系数只跟「本局已拥有多少条传奇」有关。
+   * 商店（rollShopSlots）与场间三选一（rollChoices）共用同一份权重，口径一致。
+   * ============================================================ */
+  /* 需求 2：传奇基础权重 3 → 2.4（中幅下调，传奇占比降到原来的 80%）。
+   * 取值依据：既让传奇明显更难刷到，又守住「20/40/60/80 币 ≈ 1/2/3/4 件史诗」
+   * 这条既有平衡（tools/test-fixes-round.cjs 需求12 有断言）。 */
+  const LEGEND_BASE_WEIGHT = 2.4;
+  const LEGEND_HOLD_PENALTY = 0.12;      // 每已拥有一条传奇，再乘 0.88
+  const LEGEND_ALL_OWNED_PENALTY = 0.35; // 所有传奇都拿到手后，再乘 0.35
+  /** 本局已拥有的传奇条数。 */
+  function legendOwnedCount(run) {
+    if (!run) return 0;
+    const ids = new Set();
+    for (const b of run.permanent || []) if (b && b.id) ids.add(b.id);
+    for (const b of run.limited || []) if (b && b.id) ids.add(b.id);
+    for (const id of run.permSlotIds || []) ids.add(id);
+    for (const id of run.pickBuffIds || []) ids.add(id);
+    let n = 0;
+    for (const id of ids) { const def = BUFF_BY_ID[id]; if (def && def.rarity === 3) n++; }
+    return n;
+  }
+  /** 本局可重复获得的传奇是否**全部**已拥有（需求 4 的第二档）。 */
+  function allRepeatableLegendsOwned(run) {
+    if (!run) return false;
+    const own = new Set();
+    for (const b of run.permanent || []) if (b && b.id) own.add(b.id);
+    for (const b of run.limited || []) if (b && b.id) own.add(b.id);
+    for (const id of run.permSlotIds || []) own.add(id);
+    const need = BUFFS.filter((b) => b.rarity === 3 && b.repeatable);
+    return need.length > 0 && need.every((b) => own.has(b.id));
+  }
+  /** 传奇那一档的权重系数（1 = 没拿过任何传奇）。 */
+  function legendWeightFactor(run) {
+    const owned = legendOwnedCount(run);
+    let f = Math.pow(1 - LEGEND_HOLD_PENALTY, owned);
+    if (allRepeatableLegendsOwned(run)) f *= LEGEND_ALL_OWNED_PENALTY;
+    return f;
+  }
+  /** 倾斜后的稀有度权重（p=1 时就是自然掉率的 RARITY_WEIGHTS）。
+   *  run 可选：传入时按「已拥有传奇数」压低传奇那一档（需求 2 / 4）。 */
+  function tiltWeights(tilt, run) {
     const p = Math.max(0, Number(tilt) || 1);
-    const w = RARITY_WEIGHTS.map((v, i) => v * Math.pow(p, i));
+    const legendMul = (LEGEND_BASE_WEIGHT / RARITY_WEIGHTS[3]) * legendWeightFactor(run);
+    const w = RARITY_WEIGHTS.map((v, i) => (i === 3 ? v * legendMul : v) * Math.pow(p, i));
     const total = w.reduce((a, b) => a + b, 0) || 1;
     return w.map((v) => v / total);
   }
   /** 这一次刷新「本来」与「倾斜后」的期望稀有度 / 史诗件数（界面与测试都用它）。 */
-  function rerollExpectation(paid) {
+  function rerollExpectation(paid, run) {
     const slots = Math.max(1, (SHOP && SHOP.slots) || 5);
     const mean = (w) => w.reduce((a, v, i) => a + v * i, 0);
-    const base = tiltWeights(1), tilted = tiltWeights(rerollTilt(paid));
+    /* run 可选：传入后按「已拥有传奇数」再压传奇那一档，与商店实际抽取同口径。 */
+    const base = tiltWeights(1, run), tilted = tiltWeights(rerollTilt(paid), run);
     const epics = (w) => w.reduce((a, v, i) => a + v * (i >= 2 ? 1 : 0), 0) * slots;
     return {
       paid: Math.max(0, Number(paid) || 0),
@@ -958,7 +1007,7 @@
      * **每消费 5 试炼币** → 随机一项「力+1 / 敏+1 / 速+1 / 生命上限+5」，可无限累计。
      * 累计结果与「距下次还差几枚」都显示在增益面板上（progressOf）。
      * 注意：买到「挥金如土」本身的这笔花费也计入（见 buyShopSlot 的记账顺序）。 */
-    { id: 'C36', name: '挥金如土', rarity: 3, kind: 'permanent',
+    { id: 'C36', name: '挥金如土', rarity: 3, kind: 'permanent', repeatable: true,
       desc: '本局每在试炼商店消费 5 试炼币，随机获得「力+1 / 敏+1 / 速+1 / 生命上限+5」中的一项（可无限累计，含购买本增益的花费）',
       mods: { shopSpendStep: 5, shopSpendStat: 1, shopSpendHp: 5 } },
     /* —— 本轮第 1 项：两个新增益 ——
@@ -996,6 +1045,12 @@
     { id: 'C44', name: '速度烙印·精', rarity: 1, kind: 'limited', uses: 1000, endlessOnly: true,
       desc: '速度 +14%（本局永久保留）。每打完一场有 6% 概率损毁；损毁后这份速度仍然保留',
       mods: { fragileStat: 'speed', fragilePct: 0.14, fragileBreakPct: 6 } },
+    /* 传奇烙印「终焉烙印」：**终乘**类 —— 先把局内所有加算/成长算完，最后再乘。
+     * 存在时 力/敏/速/生命上限 ×1.25；损毁后本局 ×1.5。
+     * 可重复获得，每次独立相乘（多层 = 1.5^n，而不是 1+0.5n）。 */
+    { id: 'C49', name: '终焉烙印', rarity: 3, kind: 'limited', uses: 1000, endlessOnly: true, repeatable: true,
+      desc: '终乘烙印：存在时力量/敏捷/速度/生命上限 ×1.25；损毁后本局 ×1.5（可重复获得，多次独立相乘）',
+      mods: { fragileFinalMul: true, fragileMulAlive: 1.25, fragileMulBurned: 1.5, fragileBreakPct: 6 } },
     { id: 'C38', name: '先机预判', rarity: 2, kind: 'permanent',
       desc: '每场战斗敌方对我方造成的第一次伤害变为 0（反伤、中毒等非攻击伤害不会消耗它）',
       mods: { firstHitZero: 1 } },
@@ -1175,6 +1230,7 @@
     SHOP_PRICE_OFFSET, rollShopPrice,
     rerollPriceAt, rerollTilt, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,
     PILL_BATTLES, PILL_SLOTS, pillEffect, shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,
+    legendWeightFactor, legendOwnedCount, allRepeatableLegendsOwned, LEGEND_BASE_WEIGHT,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,

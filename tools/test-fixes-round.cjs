@@ -486,10 +486,18 @@ test('需求12：刷新只抬高稀有度期望、不设保底货品', () => {
   assert.equal(TD.rerollQuality, undefined, '保底接口应当已移除');
   assert.equal(TD.REROLL_QUALITY, undefined, '保底阶梯表应当已移除');
 
-  // 2) 倾斜权重族：p=1 就是自然掉率，p 越大越偏向高稀有度
+  /* 2) 倾斜权重族：p=1 是「基础权重」，p 越大越偏向高稀有度。
+   * 注意：传奇那一档现在会额外被「传奇降权」压低（需求 2：中幅下调；
+   * 需求 4：已拥有传奇时继续降），所以 p=1 不再等于原始 RARITY_WEIGHTS 的传奇档，
+   * 但普通/稀有/史诗三档的比例必须与原始一致。 */
   const natural = TD.tiltWeights(1);
-  assert.equal(natural.map((v) => Math.round(v * 100)).join(','), TD.RARITY_WEIGHTS.map((v) => Math.round(v / 1 * 1)).join(','),
-    'p=1 应当等于自然掉率权重：' + JSON.stringify(natural));
+  const sum3 = TD.RARITY_WEIGHTS[0] + TD.RARITY_WEIGHTS[1] + TD.RARITY_WEIGHTS[2];
+  for (let i = 0; i < 3; i++) {
+    assert.ok(Math.abs(natural[i] - TD.RARITY_WEIGHTS[i] / (sum3 + TD.LEGEND_BASE_WEIGHT)) < 1e-9,
+      '第 ' + i + ' 档应当保持原始比例：' + JSON.stringify(natural));
+  }
+  assert.ok(natural[3] < TD.RARITY_WEIGHTS[3] / (sum3 + TD.RARITY_WEIGHTS[3]),
+    '传奇那一档应当被下调：' + JSON.stringify(natural));
   assert.ok(Math.abs(natural.reduce((a, b) => a + b, 0) - 1) < 1e-9, '权重应当归一化');
   let last = -1;
   for (const p of [1, 1.5, 2, 3, 5]) {
@@ -3230,6 +3238,155 @@ test('需求53：unique 口径 / 塔顶 boss 变体池 / 幸运一击重复率 /
   };
   const noCut = firstTaken(null, 200), cut = firstTaken({ takenMul: -0.25 }, 200);
   assert.ok(cut < noCut * 0.85, '减伤 25% 应当明显降低受到的伤害：' + noCut.toFixed(1) + ' → ' + cut.toFixed(1));
+  T.abandon('endless');
+});
+
+test('需求54：挥金如土可重复 / 传奇商店降权 / 终焉烙印终乘 / 全拥有后进一步降权', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+
+  /* ① 挥金如土（C36）可以重复获得 */
+  assert.equal(TD.BUFF_BY_ID.C36.repeatable, true, 'C36 应当标 repeatable');
+  assert.equal(TD.BUFF_BY_ID.C36.unique, undefined, 'C36 不该再受 unique 限制');
+  S.newGame('c36' + Math.random());
+  const st0 = S.state(); st0.level = 70; st0.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st0.stages[i] = { npcIndex: 3, passed: true };
+  try { T.abandon('endless'); } catch (e) {}
+  T.startEndlessRun();
+  const r0 = T._debugRun('endless');
+  r0.permanent = []; r0.limited = []; r0.slotFreeIds = [];
+  assert.ok(T.poolFilterOf(r0, TD.BUFF_BY_ID.C36), '未拥有时应当允许出现');
+  T.addBuff(T._debugRun('endless'), 'C36');
+  assert.ok(T.poolFilterOf(T._debugRun('endless'), TD.BUFF_BY_ID.C36),
+    '已拥有挥金如土后**仍然**应当允许再次出现');
+  /* 再拿一次会叠层（而不是被拒绝） */
+  const again = T.addBuff(T._debugRun('endless'), 'C36');
+  assert.ok(again.ok, '再次获得挥金如土应当成功：' + JSON.stringify(again));
+  const owned36 = (T._debugRun('endless').permanent || []).find((b) => b.id === 'C36');
+  assert.ok(owned36 && owned36.stacks >= 2, '应当叠到至少 2 层：' + JSON.stringify(owned36));
+
+  /* ② 传奇档基础权重中幅下调（且不再等于原始 RARITY_WEIGHTS[3]） */
+  assert.ok(TD.LEGEND_BASE_WEIGHT > 0 && TD.LEGEND_BASE_WEIGHT < TD.RARITY_WEIGHTS[3],
+    '传奇基础权重应当低于原始值：' + TD.LEGEND_BASE_WEIGHT + ' vs ' + TD.RARITY_WEIGHTS[3]);
+  const nat = TD.tiltWeights(1);
+  const origLeg = TD.RARITY_WEIGHTS[3] / TD.RARITY_WEIGHTS.reduce((a, b) => a + b, 0);
+  assert.ok(nat[3] < origLeg, '传奇档占比应当低于原始：' + nat[3] + ' vs ' + origLeg);
+  /* 期望史诗曲线仍守住既有平衡（20/40/60/80 币 ≈ 1/2/3/4） */
+  const e = (p) => TD.rerollExpectation(p).epics;
+  assert.ok(Math.abs(e(20) - 1) < 0.25, '20 币期望史诗仍应约 1：' + e(20));
+  assert.ok(Math.abs(e(40) - 2) < 0.25, '40 币期望史诗仍应约 2：' + e(40));
+  assert.ok(Math.abs(e(60) - 3) < 0.3, '60 币期望史诗仍应约 3：' + e(60));
+  assert.ok(Math.abs(e(80) - 4) < 0.5, '80 币期望史诗仍应约 4：' + e(80));
+
+  /* ③ 终焉烙印（C49）：传奇·限次·可重复；终乘 1.25 / 损毁 1.5；多层独立相乘 */
+  const c49 = TD.BUFF_BY_ID.C49;
+  assert.ok(c49, 'C49 应当存在');
+  assert.equal(c49.name, '终焉烙印', 'C49 名称');
+  assert.equal(c49.rarity, 3, 'C49 应当是传奇');
+  assert.equal(c49.kind, 'limited', 'C49 应当是限次类');
+  assert.equal(c49.repeatable, true, 'C49 应当可重复获得');
+  assert.equal(c49.mods.fragileFinalMul, true, 'C49 是终乘烙印');
+  assert.equal(c49.mods.fragileMulAlive, 1.25, '存在时 ×1.25');
+  assert.equal(c49.mods.fragileMulBurned, 1.5, '损毁后 ×1.5');
+  assert.ok(c49.mods.fragileBreakPct > 0, '应当有损毁概率');
+  assert.ok(TD.endlessPool.some((b) => b.id === 'C49'), 'C49 应当在无尽塔池');
+  /* 实战：无烙印 / n 层存在 / n 层损毁 的倍率 */
+  const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
+    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
+  const scene = (marks, burned) => {
+    S.newGame('c49' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e2) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = [];
+    for (let i = 0; i < marks; i++) T.addBuff(T._debugRun('endless'), 'C49');
+    if (burned) {
+      const rr = T._debugRun('endless');
+      rr.fragileMulBase = 0; rr.fragileMulBurned = marks;
+    }
+    const nx = T.nextBattle('endless');
+    const me = mk(); nx.adjustMe(me);
+    return me;
+  };
+  const base = scene(0, false);
+  assert.equal(base.power, 200, '无烙印时力量应当是基础值');
+  assert.equal(base.agility, 120, '无烙印时敏捷应当是基础值（顺带守住 agilityMul 不 NaN）');
+  for (const n of [1, 2, 3]) {
+    const s1 = scene(n, false);
+    assert.ok(Math.abs(s1.power / base.power - Math.pow(1.25, n)) < 0.02,
+      n + ' 层存在应当 ×1.25^' + n + '：实测 ×' + (s1.power / base.power).toFixed(3));
+    assert.ok(Math.abs(s1.agility / base.agility - Math.pow(1.25, n)) < 0.02,
+      n + ' 层存在的敏捷也应同倍：实测 ×' + (s1.agility / base.agility).toFixed(3));
+    assert.ok(Math.abs(s1.maxHp / base.maxHp - Math.pow(1.25, n)) < 0.02,
+      n + ' 层存在的生命上限也应同倍：实测 ×' + (s1.maxHp / base.maxHp).toFixed(3));
+  }
+  for (const n of [1, 2, 3]) {
+    const s1 = scene(n, true);
+    assert.ok(Math.abs(s1.power / base.power - Math.pow(1.5, n)) < 0.02,
+      n + ' 层损毁应当 ×1.5^' + n + '（独立相乘，不是 1+0.5n）：实测 ×' + (s1.power / base.power).toFixed(3));
+  }
+  /* 关键区分：3 层损毁 = 3.375，而不是 1+0.5×3 = 2.5 */
+  const s3 = scene(3, true);
+  const ratio = s3.power / base.power;
+  assert.ok(Math.abs(ratio - 2.5) > 0.3, '必须**不是**线性叠加（1+0.5n）：实测 ×' + ratio.toFixed(3));
+  /* 与局内加算的关系：先加算、最后再乘 */
+  {
+    S.newGame('c49add' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e2) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = [];
+    T.addBuff(T._debugRun('endless'), 'C29');    // +10% 生命上限（加算类）
+    T.addBuff(T._debugRun('endless'), 'C49');    // ×1.25（终乘）
+    const nx = T.nextBattle('endless');
+    const me = mk(); nx.adjustMe(me);
+    assert.equal(me.maxHp, Math.round(5000 * 1.1 * 1.25),
+      '应当是「先加算再终乘」：(5000×1.1)×1.25 = ' + Math.round(5000 * 1.1 * 1.25) + '，实测 ' + me.maxHp);
+  }
+
+  /* ④ 已拥有传奇越多、传奇整体出率越低；全部可重复传奇到手后再降一档 */
+  const f0 = TD.legendWeightFactor({});
+  const f1 = TD.legendWeightFactor({ permanent: [{ id: 'C36' }] });
+  const f3 = TD.legendWeightFactor({ permanent: [{ id: 'C14' }, { id: 'C36' }, { id: 'C37' }] });
+  const allOwn = { permanent: [{ id: 'C14' }, { id: 'C36' }, { id: 'C37' }, { id: 'C49' }] };
+  const fAll = TD.legendWeightFactor(allOwn);
+  assert.equal(f0, 1, '没拿过传奇时系数应当是 1');
+  assert.ok(f1 < f0, '拿到 1 条传奇后系数应当下降：' + f1 + ' vs ' + f0);
+  assert.ok(f3 < f1, '拿到 3 条后应当更低：' + f3 + ' vs ' + f1);
+  assert.ok(fAll < f3, '全部可重复传奇到手后应当再降：' + fAll + ' vs ' + f3);
+  assert.equal(TD.allRepeatableLegendsOwned(allOwn), true, '应当识别出「全部可重复传奇已拥有」');
+  assert.equal(TD.allRepeatableLegendsOwned({ permanent: [{ id: 'C36' }] }), false, '只拿一条不算全拥有');
+  /* 权重与抽取都要跟着降（不是只在传奇内部挪权重，而是传奇这一档整体变小） */
+  const w0 = TD.tiltWeights(1, {}), wAll = TD.tiltWeights(1, allOwn);
+  assert.ok(wAll[3] < w0[3], '传奇那一档的整体占比应当下降：' + wAll[3] + ' vs ' + w0[3]);
+  assert.ok(wAll[2] >= w0[2] - 0.02, '史诗档不该被传奇降权拖垮：' + wAll[2] + ' vs ' + w0[2]);
+  /* 商店实测：全拥有后传奇不再出现，但史诗仍在 */
+  const measure = (owned) => {
+    S.newGame('lg' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e2) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = []; r.pickBuffIds = [];
+    if (owned.length) T._debugRun('endless').permanent = owned.map((id) => ({ id: id, stacks: 1 }));
+    let leg = 0, epic = 0, tot = 0;
+    for (let i = 0; i < 3000; i++) {
+      for (const sl of (T.rollShopSlotsOf(T._debugRun('endless'), 0) || [])) {
+        const b = TD.BUFF_BY_ID[sl.id]; if (!b) continue;
+        tot++; if (b.rarity === 3) leg++; if (b.rarity === 2) epic++;
+      }
+    }
+    return { leg: leg / tot, epic: epic / tot };
+  };
+  const m0 = measure([]), mAll = measure(['C14', 'C36', 'C37', 'C49']);
+  assert.ok(m0.leg > 0, '未拥有时应当能刷到传奇：' + m0.leg);
+  assert.equal(mAll.leg, 0, '全部可重复传奇到手后不该再刷到传奇：' + mAll.leg);
+  assert.ok(mAll.epic > 0.05, '史诗仍应当正常出现（货架不会退化成纯普通）：' + mAll.epic);
   T.abandon('endless');
 });
 

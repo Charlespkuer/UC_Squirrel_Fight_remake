@@ -363,16 +363,37 @@
     return Number.isFinite(v) ? Math.max(0, v) : 0;
   }
   /** 绝对防御的单次触发概率（%）：首次 / 二次及以后，再乘被动加成。 */
+  /**
+   * 秘技通神把防御被动的触发率按 `1 + boost` 放大之后的**上限**（百分比）。
+   *
+   * 需求：绝对防御「第二次及以后」的触发概率不得高于 50%。
+   * 基准值本来就在 50% 以下（首次 22 / 再次 13），但 ×3 之后：
+   *   · 绝对防御：首次 66%、二次及以后 **39%** —— 已满足底线；
+   *   · 龟甲术  ：首次 **105%**（= 必定格挡）、二次及以后 **60%** —— 明显过强，
+   *     实测平均格挡率从 21.8% 飙到 63.3%。
+   * 所以对「**加成了的**那一种情况」统一封顶：
+   *   · 二次及以后 ≤ 45%（守住需求里那条 50% 底线，并留一点余量）；
+   *   · 首次 ≤ 90%（只防「必定格挡」这种没有随机性的极端，不额外削弱首次）。
+   * 没有加成（未选中秘技通神）时**不加任何封顶**，原始数值与随机性完全不变。
+   */
+  const BOOSTED_AGAIN_CAP = 45;
+  const BOOSTED_FIRST_CAP = 90;
   function jueDuiChanceOf(def, again) {
     const base = again ? RULES.jueDuiAgain : RULES.jueDuiChance;
-    return base * (1 + passiveSkillBoost(def, 16));
+    const boost = passiveSkillBoost(def, 16);
+    const out = base * (1 + boost);
+    if (!boost) return out;                                  // 没加成：原样
+    return Math.min(out, again ? BOOSTED_AGAIN_CAP : BOOSTED_FIRST_CAP);
   }
   /** 龟甲术的单次触发概率（%）：首次 / 二次及以后（二次还带装备与技能等级加成）。 */
   function shellChanceOf(def, again) {
     const base = again
       ? RULES.shellAgain + effect(def, 32) + trueVal(7, def.skills[7]) * 100
       : RULES.shellFirst;
-    return base * (1 + passiveSkillBoost(def, 7));
+    const boost = passiveSkillBoost(def, 7);
+    const out = base * (1 + boost);
+    if (!boost) return out;                                  // 没加成：原样
+    return Math.min(out, again ? BOOSTED_AGAIN_CAP : BOOSTED_FIRST_CAP);
   }
   function dmgReduce(def, dmg, opts) {
     opts = opts || {};
@@ -1091,5 +1112,9 @@
     actionWeights: { skill: skillWeight, weapon: weaponWeight },
     // 各技能「二次及以后」的出手概率（%），供测试与调参直接读
     repeatRateOf,
+    /* 防御被动的单次触发概率（%）与被动加成读取 —— 供测试/调参直接核对，
+     * 不用靠统计近似（绝对防御 16 / 龟甲术 7）。 */
+    jueDuiChanceOf, shellChanceOf, passiveSkillBoost,
+    defenseCaps: { again: BOOSTED_AGAIN_CAP, first: BOOSTED_FIRST_CAP },
   };
 })();

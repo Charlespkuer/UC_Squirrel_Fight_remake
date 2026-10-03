@@ -3735,6 +3735,26 @@ test('需求57：终焉烙印最多3次 / 秘技通神可抽绝对防御与龟�
   assert.ok(jdBoost > jdPlain * 1.5, '绝对防御触发率应当大幅提升：' + (jdPlain * 100).toFixed(1) + '% → ' + (jdBoost * 100).toFixed(1) + '%');
   const gjPlain = rateOf(null, [7], 'guiJia'), gjBoost = rateOf({ 7: 2 }, [7], 'guiJia');
   assert.ok(gjBoost > gjPlain * 1.5, '龟甲术触发率应当大幅提升：' + (gjPlain * 100).toFixed(1) + '% → ' + (gjBoost * 100).toFixed(1) + '%');
+  /* 平衡约束：秘技通神加成之后，「第二次及以后」的触发概率不得高于 50%。
+   * 基准值本来就在 50% 以下（绝对防御 13、龟甲术 20），但 ×3 之后龟甲术会到 60%，
+   * 实测平均格挡率从 20.7% 飙到 63.3%，所以对「加成后」统一封顶。 */
+  const mkF2 = (eff, skills) => ({ name: 'p', level: 60, power: 200, agility: 100, speed: 100,
+    hp: 1000, maxHp: 1000, weapons: [], skills: (skills || []).map((id) => ({ id: id, level: 5 })),
+    effects: eff || {}, baseStats: { power: 200, agility: 100, speed: 100 } });
+  assert.equal(Sim.jueDuiChanceOf(mkF2(null, [16]), false), 22, '未选中时绝对防御首次仍是 22');
+  assert.equal(Sim.jueDuiChanceOf(mkF2(null, [16]), true), 13, '未选中时绝对防御二次及以后仍是 13');
+  assert.equal(Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), true), 39,
+    '选中后绝对防御二次及以后应当是 39（≤50）');
+  assert.ok(Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), true) <= 50,
+    '绝对防御二次及以后不得高于 50%：' + Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), true));
+  assert.ok(Sim.shellChanceOf(mkF2({ 7: 2 }, [7]), true) <= 50,
+    '龟甲术二次及以后不得高于 50%：' + Sim.shellChanceOf(mkF2({ 7: 2 }, [7]), true));
+  assert.ok(Sim.shellChanceOf(mkF2({ 7: 2 }, [7]), false) <= 90,
+    '选中后首次不该到「必定格挡」：' + Sim.shellChanceOf(mkF2({ 7: 2 }, [7]), false));
+  /* 未选中时不受任何封顶影响（保留原来的极端上限） */
+  assert.equal(Sim.shellChanceOf(mkF2(null, [7]), false), 35, '未选中时龟甲术首次仍是 35');
+  assert.equal(Sim.jueDuiChanceOf(mkF2({ 16: 0.5 }, [16]), true), 19.5,
+    '小加成不受封顶影响（13 × 1.5）：' + Sim.jueDuiChanceOf(mkF2({ 16: 0.5 }, [16]), true));
 
   /* ③ 天象之眼（C45）必须拦住敌方自愈（以及其它「纯粹强化敌人自身」的环境） */
   assert.equal(TD.ENDLESS_ENV_BY_ID.regen.noReflect, true, '自愈回复应当标记 noReflect');

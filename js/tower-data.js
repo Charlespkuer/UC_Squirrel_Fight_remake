@@ -90,8 +90,11 @@
      * 两条数值各自在小区间内随机，但保持「敌方 > 我方」这个强度关系。 */
     { id: 'sun', name: '烈日灼烧', bad: true, mods: { enemyCritBonus: [22, 28, 'num'], selfCritBonus: [8, 12, 'num'] },
       desc: '敌方暴击率 %enemyCritBonus%，我方暴击率 %selfCritBonus%' },
-    { id: 'frost', name: '寒霜锁链', bad: true, mods: { selfSpeedMul: [-0.19, -0.11, 'pct'] },
-      desc: '我方速度 %selfSpeedMul%' },
+    /* 寒霜锁链：**敌方也降速**，但我方降得更多（敌方 -5%~-9%，我方 -11%~-19%）。
+     * 两条数值各自在小区间内随机，但保持「我方降幅明显大于敌方」这个强度关系。 */
+    { id: 'frost', name: '寒霜锁链', bad: true,
+      mods: { enemySpeedMul: [-0.09, -0.05, 'pct'], selfSpeedMul: [-0.19, -0.11, 'pct'] },
+      desc: '敌方速度 %enemySpeedMul%，我方速度 %selfSpeedMul%' },
     { id: 'greed', name: '贪婪裂隙', bad: true, mods: { coinBonus: [0.35, 0.6, 'pct'], enemyMaxHpMul: [0.10, 0.18, 'pct'] },
       desc: '我方试炼币 %coinBonus%，但敌方生命上限 %enemyMaxHpMul%' },
     { id: 'dusk', name: '血色黄昏', bad: false, mods: { bothLifestealPct: [0.10, 0.18, 'pct'] },
@@ -612,7 +615,7 @@
       pattern: ['common', 'weapon', 'common', 'skill'],
       patternDesc: '固定循环：普攻 → 菜刀 → 普攻 → 色诱之术',
       mech: ['trialErode'],
-      mechDesc: '对手每次出手叠 1 层「攻击 −3%」，最多 10 层（本场有效）' },
+      mechDesc: '对手每次出手叠 1 层「攻击 −3%」，最多 15 层（本场有效）' },
   ]);
   const TRIAL_BY_ID = Object.fromEntries(TRIALS.map((n) => [n.id, n]));
   /** 兼容别名：老的「按层固定轮换第 4 场题面」调用点（部分工具还在用）。 */
@@ -807,7 +810,11 @@
       desc: '第 10 层起，每胜利一场，本局力量 +1、敏捷 +1、速度 +1（不封顶）',
       mods: { winStatAfter10: 1 } },
     { id: 'C13', name: '精英杀手', rarity: 2, kind: 'permanent', desc: '对精英伤害 +40%；击败精英后回复 20% 最大生命', mods: { dmgMulElite: 0.40, eliteHealAfter: 0.20 } },
-    { id: 'C14', name: '不死鸟', rarity: 3, kind: 'permanent', desc: '每层拥有一次复活甲（回复 50% 生命）', mods: { revivePct: 0.50 } },
+    /* shopWeight：单件在商店里的相对权重（默认 1）。
+     * 不死鸟每层一次复活甲，放进商店会让「买一次=整局每层都多一条命」，
+     * 强度远超同档传奇，所以按需求大幅降低它上架的概率。 */
+    { id: 'C14', name: '不死鸟', rarity: 3, kind: 'permanent', shopWeight: 0.12,
+      desc: '每层拥有一次复活甲（回复 50% 生命）', mods: { revivePct: 0.50 } },
     /* —— 第 1 项新增：与经济系统挂钩的 buff（仅无尽；instant 的拿到就结算，不占永久 5 格） —— */
     { id: 'E01', name: '立即进货', rarity: 1, kind: 'instant', endlessOnly: true, desc: '立刻开一次试炼商店（不影响 5 层一次的结算点）', mods: { openShop: 1 } },
     { id: 'E02', name: '试炼补贴', rarity: 0, kind: 'instant', endlessOnly: true, desc: '立刻获得 60 试炼币', mods: { instantCoins: 60 } },
@@ -840,11 +847,14 @@
     { id: 'N10', name: '避风斗篷', rarity: 1, kind: 'limited', uses: 10, endlessOnly: true,
       desc: '接下来 10 场：无视环境词缀', mods: { envIgnore: 1 } },
     /* 低血 combo 的两条限次类（与狂怒成套；限次 10 场） */
+    /* 这两条虽然也是「下一场战斗」生命周期（nextBattle），但在无尽塔里是
+     * **10 场限次**（每场各生效一次、打完扣 1），所以文案按「每场」写，
+     * 界面也会照常显示「剩 N 场」。 */
     { id: 'N13', name: '血之契约', rarity: 0, kind: 'limited', uses: 10, endlessOnly: true, nextBattle: true,
-      desc: '下一场战斗开始时限生命上限 +100%（这部分是空的，不回血）',
+      desc: '每场战斗开始时生命上限 +100%（这部分是空的，不回血）· 共 10 场',
       mods: { emptyMaxHpMul: 1.00 } },
     { id: 'N14', name: '铁血护盾', rarity: 1, kind: 'limited', uses: 10, endlessOnly: true, nextBattle: true,
-      desc: '下一场战斗中生命低于 50% 时获得 50% 减伤',
+      desc: '每场战斗中生命低于 50% 时获得 50% 减伤 · 共 10 场',
       mods: { lowHpTakenMul: -0.50, lowHpAt: 0.50 } },
     { id: 'C45', name: '天象之眼', rarity: 2, kind: 'permanent', endlessOnly: true,
       desc: '永远无视负面环境词缀并反弹给对手；敌方吃不到正向环境词缀（贪婪裂隙的试炼币收益保留，敌方不再获得生命加成）',

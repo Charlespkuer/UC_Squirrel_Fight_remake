@@ -1335,6 +1335,7 @@
     enemyCritBonus: ['critBonus', 'foe'],
     enemyMaxHpMul: ['maxHpMul', 'foe'],
     selfSpeedMul: ['speedMul', 'me'],
+    enemySpeedMul: ['speedMul', 'foe'],
     bothLifestealPct: ['lifestealPct', 'both'],
     selfCritBonus: ['critBonus', 'me'],
   };
@@ -1365,6 +1366,15 @@
       const def = TD.ENDLESS_ENV_BY_ID[entry.id];
       if (!def || !def.mods) return;
       const values = envValues(run, entry);
+      /* 「双方向」的环境（`both`，例如血色黄昏的双方吸血）语义是**双方都吃**，
+       * 所以两边都要写。唯一的额外规则是：
+       *   · 「无视正向环境」（envIgnore）—— 谁都不吃（在 envEffective 里已经过滤掉）
+       *   · 「剥夺正向」（envDenyGood，天象之眼）—— **只是不让敌人吃到**，
+       *     我方作为环境承受方该吃的仍然吃。
+       * 原来这里是一刀切：带 envDenyGood 时 `both` 的数值连我方一起被跳过，
+       * 于是天象之眼把自己的血色黄昏吸血也剥夺了（需求点名的 bug：敌人反而照吃）。 */
+      const goodEnv = !def.bad;
+      if (isFoe && goodEnv && fx.sh.denyGood) return;
       for (const [mk, spec] of Object.entries(ENV_MOD_MAP)) {
         if (def.mods[mk] === undefined) continue;
         if (spec[1] !== 'both' && spec[1] !== key) continue;
@@ -1421,7 +1431,14 @@
       const def = TD.ENDLESS_ENV_BY_ID[e.id];
       if (!def) continue;
       if (def.bad) { if (sh.ignore && !sh.reflect) continue; if (sh.reflect) { if (allow(def)) enemy.push(e.id); } else if (allow(def)) mine.push(e.id); }
-      else if (!sh.denyGood && allow(def)) mine.push(e.id);
+      /* 正向环境：我方**始终**吃得到（`fx.mine` 就是「本场真正生效的那一份」）。
+       *   · 「无视环境」（envIgnore）**只针对负面环境** —— 它原来是
+       *     「无视负面环境词缀」，不该把正向环境一起无视掉。
+       *     天象之眼（C45）同时带 envIgnore 与 envDenyGood，早期写法让 `sh.ignore`
+       *     把正向的血色黄昏也跳过了，于是我方自己那份吸血也丢了。
+       *   · envDenyGood（剥夺正向）只阻止**敌人**吃到，由 applyEnvTo 里的
+       *     `if (isFoe && goodEnv && sh.denyGood) return;` 挡住敌人那一侧。 */
+      else if (allow(def)) mine.push(e.id);
     }
     return { mine, enemy, sh };
   }
@@ -1545,7 +1562,8 @@
       let list = available(rarity);
       if (!list.length) list = pool.filter((b) => !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));   // 该稀有度抽空时放宽
       if (!list.length) break;
-      const buff = list[Math.floor(Math.random() * list.length)];
+      const buff = pickByShopWeight(list);
+      if (!buff) break;
       taken.add(buff.id);
       picked.push({ type: 'buff', id: buff.id });
     }
@@ -1804,6 +1822,18 @@
   /* 需求：刷新**不设保底货品**，只把稀有度期望往上推。
    * 做法见 tower-data.js 的 tiltWeights()：把稀有度权重按 w_i × p^i 重新归一化，
    * p 由这次刷新实际付掉的钱决定（每 10 币 ×1.25）。整架货一起变好，不出现结构突变。 */
+  /** 从一个候选里抽一件，按 buff.shopWeight 加权（默认 1）—— 用来压低个别 overpowered
+   * 增益在商店出现的概率（例如不死鸟）。权重只影响「谁被抽中」，不影响稀有度倾斜。 */
+  function pickByShopWeight(list) {
+    if (!list || !list.length) return null;
+    if (list.length === 1) return list[0];
+    let total = 0;
+    for (const b of list) total += Math.max(0, Number(b.shopWeight) || 1);
+    if (!(total > 0)) return list[Math.floor(Math.random() * list.length)];
+    let roll = Math.random() * total;
+    for (const b of list) { roll -= Math.max(0, Number(b.shopWeight) || 1); if (roll < 0) return b; }
+    return list[list.length - 1];
+  }
   function rollShopSlots(run, paid) {
     const pool = D().shopPool || D().endlessPool, slots = [], taken = new Set();
     /* 这次货架的稀有度权重：paid 越大，权重越往高稀有度倾斜（无保底）。 */
@@ -1825,7 +1855,8 @@
       }
       if (!list.length) list = pool.filter((b) => !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));
       if (!list.length) break;
-      const buff = list[Math.floor(Math.random() * list.length)];
+      const buff = pickByShopWeight(list);
+      if (!buff) break;
       taken.add(buff.id);
       /* 需求 2：价格在开店时摇一次并固定到槽位上 —— 界面显示的就是实际扣费的价。 */
       slots.push({ id: buff.id, sold: false, price: D().rollShopPrice(D().shopPrice(buff)) });
@@ -1836,7 +1867,7 @@
     if (slots.length && !slots.some((sl) => isLimited(sl.id))) {
       const cand = pool.filter((b) => b.kind === 'limited' && b.id !== 'N08' && !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));
       if (cand.length) {
-        const buff = cand[Math.floor(Math.random() * cand.length)];
+        const buff = pickByShopWeight(cand);
         taken.delete(slots[slots.length - 1].id);
         slots[slots.length - 1] = { id: buff.id, sold: false, price: D().rollShopPrice(D().shopPrice(buff)) };
         taken.add(buff.id);
@@ -2605,6 +2636,9 @@
     pickChoice, toggleLimited, addBuff, applyInstant, openRestShop, usePillSlot,
     shopState, buyShopSlot, buyRetryToken, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp,
     canRetry, retryBattle, declineRetry, isTowerBattleBuff, takeAchievementToasts,
+    /* 只读：摇一页商店货架（不改状态）。测试用它统计各增益的上架概率
+     *（例如不死鸟 shopWeight 的效果），界面也可以拿来做「货架预览」。 */
+    rollShopSlotsOf: (run, paid) => rollShopSlots(run || endless().run, paid),
     /* 只读：本局全局倍率（增幅水晶 C15 的 globalMul^层数）。
      * 成长类增益的增量与上限都要乘它，暴露出来便于界面/测试用同一口径核算。 */
     globalMulOf: (run) => globalMul(run || endless().run),

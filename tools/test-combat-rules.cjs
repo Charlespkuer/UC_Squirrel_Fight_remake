@@ -558,17 +558,19 @@ test('题面·血牙：每损失 20% 生命，攻击 +35%', () => {
   assert.ok(late > early * 1.3, '残血后攻击应明显更高（' + early.toFixed(1) + ' → ' + late.toFixed(1) + '）');
 });
 
-test('题面·蚀骨：玩家每次出手叠 1 层攻击 −3%，最多 10 层', () => {
+test('题面·蚀骨：玩家每次出手叠 1 层攻击 −3%，最多 15 层', () => {
   const g = game(0.99);
   const events = rounds(g, fighter({ power: 100, hp: 100000, agility: 1, speed: 1 }),
     trialFoe(['trialErode'], { power: 1, hp: 100000 }));
   const dmg = hitSeq(events);
-  assert.ok(dmg.length >= 12, '需要足够多的出手采样');
-  assert.ok(dmg[dmg.length - 1] < dmg[0] * 0.78, '第 10 层时攻击应掉到七成左右（' +
+  assert.ok(dmg.length >= 17, '需要足够多的出手采样（要能打到 15 层封顶）');
+  /* 15 层 × 3% = 45%，所以最终伤害约为初始的 55%。 */
+  assert.ok(dmg[dmg.length - 1] < dmg[0] * 0.65, '第 15 层时攻击应掉到六成以下（' +
     dmg[0] + ' → ' + dmg[dmg.length - 1] + '）');
-  // 10 层封顶：第 11 次出手以后不再继续掉
-  const tail = dmg.slice(11);
-  assert.ok(Math.max(...tail) - Math.min(...tail) <= Math.max(2, tail[0] * 0.08), '层数应当封顶在 10 层');
+  // 15 层封顶：第 16 次出手以后不再继续掉
+  const tail = dmg.slice(16);
+  assert.ok(tail.length >= 1, '需要封顶之后的采样');
+  assert.ok(Math.max(...tail) - Math.min(...tail) <= Math.max(2, tail[0] * 0.08), '层数应当封顶在 15 层');
   // 对照组：没有蚀骨时伤害不衰减
   const plain = hitSeq(rounds(game(0.99), fighter({ power: 100, hp: 100000, agility: 1, speed: 1 }),
     trialFoe([], { power: 1, hp: 100000 })));

@@ -276,9 +276,13 @@
         '每打完一场有 ' + fragile + '% 概率损毁；损毁后加成仍然保留',
         b.on ? '当前生效中 · 点一下可以关掉' : '当前已关闭 · 点一下重新开启'].join('\n');
     }
-    /* 挑战塔的限次增益只服务**下一场战斗**，卡面与悬停都不显示「N 场」。 */
-    if (buff.nextBattle) {
-      return [buff.name + '（' + RARITY[buff.rarity] + ' · 下一场战斗）', buff.desc,
+    /* **只有挑战塔专属**的限次增益才「只服务下一场战斗」，卡面与悬停都不显示「N 场」。
+     * 注意判据是 towerOnly 而不是 nextBattle —— 后者只是「下一场战斗生命周期」，
+     * 无尽塔里的 N13 血之契约 / N14 铁血护盾同样带它，但它们是 **10 次限次**，
+     * 必须照常显示总次数与当前剩余次数（否则玩家只看到「下一场」，
+     * 完全看不出它其实还能用 10 场）。 */
+    if (buff.towerOnly && buff.nextBattle) {
+      return [buff.name + '（' + RARITY[buff.rarity] + ' · 挑战塔 · 下一场战斗）', buff.desc,
         '打完这一场就消失（挑战塔的增益只服务下一场）',
         b.on ? '当前生效中 · 点一下可以关掉' : '当前已关闭 · 点一下重新开启'].join('\n');
     }
@@ -316,8 +320,11 @@
           '<b>' + esc(b.name) + '</b><i>' + (b.on ? '生效中' : '已关闭') + '</i><em>' +
         (function () {
           const def = TowerData.BUFF_BY_ID[b.id] || {};
-          if (def.nextBattle) return '下一场';                       // 挑战塔：只服务下一场
+          /* 只有挑战塔专属才写「下一场」；无尽塔的 nextBattle 限次类要显示真实剩余次数
+           *（N13 血之契约 / N14 铁血护盾 都是 10 次限次，必须看得出剩几次）。 */
+          if (def.towerOnly && def.nextBattle) return '下一场';
           if (def.mods && def.mods.fragileBreakPct) return '易碎 ' + def.mods.fragileBreakPct + '%';
+          if (def.nextBattle) return '无尽塔 · 剩 ' + b.uses + ' 场';   // 无尽塔的单场限次类
           return '剩 ' + b.uses + ' 场';
         })() + '</em></button>').join('')
       : '<span class="buff-empty">还没有限次增益</span>';
@@ -397,8 +404,9 @@
       byRarity.map((group, r) => group.length
         ? '<div class="catalog-row"><b class="catalog-rarity r' + r + '">' + (RARITY[r] || '') + '</b>' +
           '<div class="buff-tags">' + group.map((b) => '<span class="buff-tag r' + b.rarity + '" data-tip="' +
-            esc(b.name + '（' + (RARITY[b.rarity] || '') + ' · ' + (b.nextBattle ? '下一场' : (kindName[b.kind] || '')) +
-              (b.kind === 'limited' ? (b.nextBattle ? ' 下一场战斗' : ' ' + (b.uses || 1) + ' 场') : '') + '）\n' + b.desc) +
+            esc(b.name + '（' + (RARITY[b.rarity] || '') + ' · ' +
+              ((b.towerOnly && b.nextBattle) ? '下一场' : (kindName[b.kind] || '')) +
+              (b.kind === 'limited' ? ((b.towerOnly && b.nextBattle) ? ' 下一场战斗' : ' ' + (b.uses || 1) + ' 场') : '') + '）\n' + b.desc) +
             '" title="' + esc(b.desc) + '">' + esc(b.name) + '<i>' + (kindName[b.kind] || '') + '</i></span>').join('') +
           '</div></div>' : '').join('') + '</div>';
   }
@@ -767,8 +775,10 @@
       '<span class="hex-ribbon">' + RARITY[b.rarity] + '</span>' +
       '<span class="hex-emblem">' + (b.rarity === 2 ? '★' : b.rarity === 1 ? '◆' : '●') + '</span>' +
       '<b class="hex-name">' + esc(b.name) + '</b>' +
-      '<span class="hex-scope">' + (b.nextBattle ? (b.towerOnly ? '挑战塔 · 下一场' : (b.endlessOnly ? '无尽塔 · 下一场' : '下一场')) : SCOPE[b.kind]) +
-        (b.kind === 'limited' ? (b.nextBattle ? ' · 下一场战斗' : ' · ' + (b.uses || 1) + ' 场') : '') + '</span>' +
+      '<span class="hex-scope">' + ((b.towerOnly && b.nextBattle) ? '挑战塔' : SCOPE[b.kind]) +
+        (b.kind === 'limited'
+          ? ((b.towerOnly && b.nextBattle) ? ' · 下一场战斗' : ' · ' + (b.uses || 1) + ' 场')
+          : '') + '</span>' +
       '<span class="hex-desc">' + esc(b.desc) + '</span></button>';
   }
   function offerChoice(mode, choices) {

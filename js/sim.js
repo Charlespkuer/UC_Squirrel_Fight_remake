@@ -13,7 +13,7 @@
  *                 trialFrost（第 1/4/7… 次行动冻结玩家）
  *                 trialMirror（单次伤害 ≥20% 最大生命时反弹 45%）
  *                 trialBloodfang（每掉 20% 生命，攻击 +35%）
- *                 trialErode（玩家每次出手叠 1 层攻击 −3%，最多 10 层）
+ *                 trialErode（玩家每次出手叠 1 层攻击 −3%，最多 RULES.erodeMax 层）
  *   fighter.mods: 玩家侧塔 buff 数值包 {dmgMul, critBonus, critDmgBonus,
  *                 dodgeBonus, dodgeMul, takenMul, regenPct, lifestealPct, shellPct,
  *                 openerPowerMul/openerRounds/fatiguePowerMul,
@@ -49,6 +49,9 @@
      * 13/22 比上面那三档的降幅还大一点，因为它是「每次都白挡一下」的强被动。 */
     jueDuiChance: 22, jueDuiAgain: 13,
     shellFirst: 35, shellAgain: 20,
+    /* 题面·蚀骨：玩家每次出手叠 1 层「攻击 −3%」，这个上限同时被代码与 NPC 文案使用 ——
+     * 抽成常量，免得一边改、另一边忘（此前 10 层写在两处）。 */
+    erodeMax: 15,
   });
   /* ============================================================
    * sim 真正实现了战斗效果的主动技能。
@@ -997,7 +1000,7 @@
         if (actor.mech.length) npcMechAfter(actor, def);
         // 题面·蚀骨：玩家每次出手后叠 1 层「攻击 −3%」（层数记在对手身上，debuff 落在出手方身上）
         if (def.mech.includes('trialErode') && actor.hp > 0) {
-          const stacks = Math.min(10, def.mechState.erode + 1);
+          const stacks = Math.min(RULES.erodeMax, def.mechState.erode + 1);
           if (stacks > def.mechState.erode) {
             def.mechState.erode = stacks;
             actor.buffFlat.power -= Math.max(1, Math.round(actor.mechState.basePower * 0.03));

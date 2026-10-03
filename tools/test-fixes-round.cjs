@@ -2816,6 +2816,156 @@ test('需求49：神兵淬炼 / 秘技通神 视为「立即生效类」，永�
   T.abandon('endless');
 });
 
+test('需求50：N13/N14 的界面口径（无尽塔 10 次限次）+ 寒霜锁链双向降速 + 不死鸟商店权重', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+
+  /* ① N13 血之契约 / N14 铁血护盾：无尽专属 + **下一场战斗生命周期** + 10 次限次。
+   *    「是否显示成『下一场』」必须看 towerOnly，而不是 nextBattle ——
+   *    否则无尽塔里这两条会显示成「下一场」，玩家看不出还剩 10 场。 */
+  for (const id of ['N13', 'N14']) {
+    const b = TD.BUFF_BY_ID[id];
+    assert.equal(b.kind, 'limited', id + ' 应当是限次类');
+    assert.equal(b.uses, 10, id + ' 应当是 10 次限次');
+    assert.equal(b.endlessOnly, true, id + ' 应当只属于无尽塔');
+    assert.equal(b.towerOnly, undefined, id + ' 不该标 towerOnly');
+    assert.equal(b.nextBattle, true, id + ' 仍是「下一场战斗」生命周期');
+    /* 界面判据：towerOnly && nextBattle 才显示「下一场」 */
+    assert.ok(!(b.towerOnly && b.nextBattle), id + ' 不该被判成「只服务下一场」');
+    assert.ok(!TD.towerPool.some((x) => x.id === id), id + ' 不该出现在挑战塔池');
+    assert.ok(TD.endlessPool.some((x) => x.id === id), id + ' 应当出现在无尽塔池');
+    assert.ok(!/^下一场战斗/.test(b.desc), id + ' 描述应按「每场」写：' + b.desc);
+    assert.match(b.desc, /10 场/, id + ' 描述应写明 10 场：' + b.desc);
+  }
+  assert.equal(TD.BUFF_BY_ID.N13.mods.emptyMaxHpMul, 1.00, 'N13 仍是 +100% 空上限');
+  assert.equal(TD.BUFF_BY_ID.N14.mods.lowHpTakenMul, -0.50, 'N14 仍是 50% 减伤');
+
+  /* ② 寒霜锁链：敌方 −5%~−9%，我方 −11%~−19% */
+  const frost = TD.ENDLESS_ENV_BY_ID.frost;
+  assert.ok(frost.mods.enemySpeedMul, '寒霜应当也降敌方速度');
+  assert.equal(frost.mods.enemySpeedMul[0], -0.09, '敌方下沿 -9%');
+  assert.equal(frost.mods.enemySpeedMul[1], -0.05, '敌方向上沿 -5%');
+  assert.equal(frost.mods.selfSpeedMul[0], -0.19, '我方下沿 -19%');
+  assert.equal(frost.mods.selfSpeedMul[1], -0.11, '我方向上沿 -11%');
+  /* 我方降幅必须严格大于敌方（强度关系） */
+  for (let i = 0; i < 30; i++) {
+    const v = TD.rollEnvMods(frost);
+    assert.ok(Math.abs(v.selfSpeedMul) > Math.abs(v.enemySpeedMul),
+      '我方降幅应当大于敌方：' + JSON.stringify(v));
+  }
+  const frostTxt = TD.envText(frost, { enemySpeedMul: -0.07, selfSpeedMul: -0.15 }).text;
+  assert.match(frostTxt, /敌方/, '文案要写敌方：' + frostTxt);
+  assert.match(frostTxt, /我方/, '文案要写我方：' + frostTxt);
+  /* 实战：两条速度修正都要落到面板上 */
+  const applyFrost = (ids) => {
+    S.newGame('frost' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = [];
+    for (const id of ids) T.addBuff(T._debugRun('endless'), id);
+    const rr = T._debugRun('endless');
+    rr.env = [{ id: 'frost', left: 5, values: { enemySpeedMul: -0.07, selfSpeedMul: -0.15 } }];
+    rr.choices = null; rr.phase = null;
+    const nx = T.nextBattle('endless');
+    const me = { name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
+      baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 };
+    nx.adjustMe(me);
+    return { me: me, foe: nx.foe };
+  };
+  const fr = applyFrost([]);
+  assert.equal(fr.me.mods.speedMul, -0.15, '我方速度修正应当生效：' + JSON.stringify(fr.me.mods));
+  assert.equal(fr.foe.mods.speedMul, -0.07, '敌方速度修正应当生效：' + JSON.stringify(fr.foe.mods));
+
+  /* ③ 不死鸟：商店权重显著低于其它传奇 */
+  const c14 = TD.BUFF_BY_ID.C14;
+  assert.ok(Number(c14.shopWeight) > 0 && Number(c14.shopWeight) < 0.5,
+    '不死鸟的商店权重应当明显小于 1：' + c14.shopWeight);
+  assert.equal(TD.BUFF_BY_ID.C36.shopWeight, undefined, '其它传奇不该被顺手改权重（默认 1）');
+  /* 统计：不死鸟的上架概率应当远低于同档其它传奇 */
+  S.newGame('shopprob' + Math.random());
+  const st2 = S.state(); st2.level = 70; st2.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st2.stages[i] = { npcIndex: 3, passed: true };
+  try { T.abandon('endless'); } catch (e) {}
+  T.startEndlessRun();
+  const RUNS = 4000;
+  let c14n = 0, other = 0, others = 0;
+  for (let i = 0; i < RUNS; i++) {
+    const list = T.rollShopSlotsOf(T._debugRun('endless'), 0) || [];
+    for (const sl of list) {
+      const b = TD.BUFF_BY_ID[sl.id];
+      if (!b || b.rarity !== 3) continue;
+      if (b.id === 'C14') c14n++; else { other++; others++; }
+    }
+  }
+  assert.ok(c14n < other, '不死鸟出现次数应当明显少于其它传奇：' + c14n + ' vs ' + other);
+  assert.ok(other > 0, '对照组应当有传奇出现（否则样本不足）');
+  T.abandon('endless');
+});
+
+test('需求51：天象之眼应当剥夺敌方吃到的正向环境（但不剥夺我方那一份）', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
+    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
+  /* 起一局、装指定永久增益、挂上指定环境，返回双方的面板。 */
+  const scene = (ids, envs) => {
+    S.newGame('envshield' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = [];
+    for (const id of ids) T.addBuff(T._debugRun('endless'), id);
+    const rr = T._debugRun('endless');
+    rr.env = envs; rr.choices = null; rr.phase = null;
+    const nx = T.nextBattle('endless');
+    const me = mk(); nx.adjustMe(me);
+    return { me: me, foe: nx.foe };
+  };
+  const DUSK = [{ id: 'dusk', left: 5, values: { bothLifestealPct: 0.15 } }];
+  const THORNS = [{ id: 'thorns', left: 5, values: { thornsPct: 0.15 } }];
+
+  /* 前置：C45 同时带 envIgnore 与 envDenyGood —— 「无视环境」只该针对**负面**环境，
+   * 否则会把我方自己的正向环境（血色黄昏的吸血）也一起无视掉。 */
+  const c45 = TD.BUFF_BY_ID.C45;
+  assert.equal(c45.mods.envDenyGood, 1, 'C45 应当带 envDenyGood');
+  assert.equal(c45.mods.envIgnore, 1, 'C45 也带 envIgnore（只针对负面环境）');
+
+  /* ① 血色黄昏是**正向**环境（双方吸血）：天象之眼应当剥夺敌方那份、我方保留 */
+  const plain = scene([], DUSK);
+  assert.equal(plain.me.mods.lifestealPct, 0.15, '无天象时我方该有吸血');
+  assert.equal(plain.foe.mods.lifestealPct, 0.15, '无天象时敌方也该有吸血（双方环境）');
+  const deny = scene(['C45'], DUSK);
+  assert.equal(deny.me.mods.lifestealPct, 0.15,
+    '天象之眼**不该剥夺我方**那一份吸血（这是需求点名的 bug）：' + JSON.stringify(deny.me.mods));
+  assert.ok(!deny.foe.mods.lifestealPct,
+    '天象之眼应当剥夺敌方吃到的正向环境（敌方不该有吸血）：' + JSON.stringify(deny.foe.mods));
+
+  /* ② 负面环境仍然照常反弹给敌人（别把这条修坏了） */
+  const bad = scene(['C45'], THORNS);
+  assert.equal(bad.foe.mods.thornsPct, 0.15, '负面环境应当反弹给敌人');
+  assert.ok(!bad.me.mods.thornsPct, '我方不该吃到被反弹的负面环境');
+
+  /* ③ 「无视环境」（避风斗篷 N10 / 晴空护符 N09）的定位是
+   *    **无视负面环境词缀** —— 所以它只屏蔽负面环境，正向环境照常生效。
+   *    （这里顺带把这条口径钉住：envIgnore 不该误伤正向环境。） */
+  const ignoreBad = scene(['N10'], THORNS);
+  assert.ok(!ignoreBad.foe.mods.thornsPct, '避风斗篷下负面环境不该生效');
+  assert.ok(!ignoreBad.me.mods.thornsPct, '避风斗篷下我方也不该吃到负面环境');
+  const ignoreGood = scene(['N10'], DUSK);
+  assert.equal(ignoreGood.me.mods.lifestealPct, 0.15,
+    '避风斗篷不该屏蔽正向环境（我方吸血仍在）：' + JSON.stringify(ignoreGood.me.mods));
+
+  /* ④ 没有天象之眼时，正向环境不能被自己弄丢（回归：envEffective 曾把它整条排除） */
+  const noShield = scene([], DUSK);
+  assert.equal(noShield.me.mods.lifestealPct, 0.15, '没有护盾类增益时我方吸血必须生效');
+  T.abandon('endless');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

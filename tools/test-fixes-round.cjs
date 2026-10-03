@@ -4299,6 +4299,69 @@ test('需求62：减敌血的一次性 buff 一局一次 / 30 层后的敌人深
   T.abandon('endless');
 });
 
+test('需求63：开局回血类 buff 要吃到局内加生命上限的加成', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const openRun = (setup) => {
+    S.newGame('r63' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    /* 直接把「补给 N08」挂在永久列表上当开局回血源（它本来就是 startHealPct 类）。 */
+    r.permanent = [{ id: 'N08', stacks: 1 }];
+    r.limited = []; r.slotFreeIds = []; r.env = []; r.noEnvRoll = true;
+    if (setup) setup(r);
+    r.hpAbs = 500; r.lastMaxHp = 5000; r.refMaxHp = 5000; r.carry = 0.1;
+    const nx = T.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '应当能取到战斗');
+    const me = { name: 'p', level: 70, power: 100, agility: 100, speed: 100, maxHp: 5000, hp: 500,
+      baseStats: { power: 100, agility: 100, speed: 100 }, weapons: [], skills: [], wears: [],
+      effects: {}, masterLevel: 0 };
+    nx.adjustMe(me);
+    return me;
+  };
+
+  /* 基线：没有局内上限加成 → 回 50% × 5000 = 2500 */
+  const base = openRun();
+  assert.equal(base.maxHp, 5000, '基线上限应当是 5000');
+  assert.equal(base.hp, 3000, '基线应当是 500 + 2500 = 3000，实测 ' + base.hp);
+
+  /* ① C07「吞噬成长」的百分比上限成长（run.winMaxHp）必须算进去 */
+  const grown = openRun((r) => { r.winMaxHp = 0.20; });
+  assert.equal(grown.maxHp, 6000, 'C07 +20% 时上限应当是 6000，实测 ' + grown.maxHp);
+  assert.equal(grown.hp, 500 + 3000, '回血应当按新上限 6000 × 50% = 3000，实测 ' + (grown.hp - 500));
+
+  /* ② 固定值上限成长（以战养战 C11 / 挥金如土 C36）也要算进去 */
+  const flat = openRun((r) => { r.winHpFlat = 50; });
+  assert.equal(flat.maxHp, 5050, '固定 +50 时上限应当是 5050，实测 ' + flat.maxHp);
+  assert.equal(flat.hp - 500, Math.round(5050 * 0.5), '回血应当按 5050 算');
+  const spend = openRun((r) => { r.spendGain = { power: 0, agility: 0, speed: 0, hp: 40 }; });
+  assert.equal(spend.maxHp, 5040, '挥金如土 +40 时上限应当是 5040，实测 ' + spend.maxHp);
+  assert.equal(spend.hp - 500, Math.round(5040 * 0.5), '回血应当按 5040 算');
+
+  /* ③ 上限加成不改变「回血不超过上限」的约束 */
+  const capped = openRun((r) => { r.winMaxHp = 0.20; });
+  capped.hp = 6000;                       // 先拉满
+  assert.ok(capped.hp <= 6000, '回血后不该超过上限');
+  const nearFull = openRun((r) => { r.winMaxHp = 0.20; });
+  assert.ok(nearFull.hp <= nearFull.maxHp, '回血后血量不该超过上限：' + nearFull.hp + ' / ' + nearFull.maxHp);
+
+  /* ④ 跟「减伤」这类与上限无关的加成无关（别把口径搞混） */
+  const unrelated = openRun((r) => { r.winTakenMul = 0.2; });
+  assert.equal(unrelated.maxHp, 5000, '减伤不该影响上限');
+  assert.equal(unrelated.hp, 3000, '减伤不该影响开局回血');
+
+  /* ⑤ 文案口径：效果清单里仍然写「开战回血 X% 最大生命」 */
+  const lines = T.buffEffectLines ? T.buffEffectLines('endless') : null;
+  if (lines) {
+    const line = (lines.effects || []).find((x) => x[0] === '开战回血');
+    if (line) assert.ok(/最大生命/.test(line[1]), '文案应当说明是按最大生命：' + JSON.stringify(line));
+  }
+  T.abandon('endless');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

@@ -720,9 +720,9 @@
     const foeHpDown = Math.max(0, Math.min(0.6, Number(run.enemyMaxHpDown) || 0));
     if (foeHpDown > 0) built.foe.hp = Math.max(1, Math.round(built.foe.hp * (1 - foeHpDown)));
     const maxHpMul = agg.maxHpMul, powerMul = agg.powerMul;
-    /* 「补给」：下一场战斗开始时立即回复 50% 生命。绝对口径下等价于加固定绝对量，
-     * 参考上限用上一场记下的 run.lastMaxHp。 */
-    if (agg.startHealPct > 0) healAbs(run, agg.startHealPct, Number(run.lastMaxHp) || 0);
+    /* 「开局回血」类（补给 N08 等）放在 adjustMe **内部**执行 ——
+     * 它要按「本场实际的最大生命」回血，而那个值只有在 adjustMe 里算完才有
+     *（run.baseMaxHp 也是在那里写的）。详见下面的 pendingStartHealPct。 */
     const adjustMe = (me) => {
       /* 第 4 项：先记下「未加塔 buff」的基础上限，currentMaxHp() 靠它现算。 */
       run.baseMaxHp = Math.max(1, Number(me.maxHp) || 0);
@@ -831,6 +831,26 @@
 
       // maxHpMul 的「回复等量生命」= 按比例继承到新上限（正增益不亏比例、负增益同步缩血）
       me.maxHp = scaledMaxHp;
+      /* ============================================================
+       * 「开局回血」类（补给 N08 等）：回复 X% **最大生命**。
+       *
+       * 需求：这里的「最大生命」要吃到**局内加生命上限**的加成。
+       * 原来用的是 run.lastMaxHp（**上一场**记下的上限），于是本局吃到的
+       * 「生命上限 +N%」（体质 C29 / 磐石之躯 / 五层回响…）与固定值成长
+       *（以战养战 C11 / 挥金如土 C36）都算不进去，回血量偏小。
+       *
+       * 现在放在这里、用 me.maxHp 作基准 —— 它已经含：
+       *   baseMaxHp（含局内 maxHpMul 与固定值成长）+ 空血上限 + 限次类 maxHpMul。
+       * 注意 me.hp 已在上面按「不含空血上限」初始化过，所以这里按比例再补一份：
+       *   回血后的血条 = 进场血 + X% × 上限（不超过上限）。
+       * ============================================================ */
+      if (agg.startHealPct > 0 && me.maxHp > 0) {
+        const gain = Math.max(1, Math.round(me.maxHp * agg.startHealPct));
+        me.hp = Math.min(me.maxHp, me.hp + gain);
+        run.hpAbs = me.hp;
+        agg.startHealGain = gain;
+        agg.startHealRef = me.maxHp;
+      }
       /* 需求：血量继承按**绝对值** —— 把上一场记下的剩余血量直接放进新上限，
        * 超出上限的部分裁掉。（空血上限只抬 maxHp，不动 hpAbs，
        * 所以那部分天然是空的；旧档的 carry 由 hpAbsOf 按当时上限折算一次。） */

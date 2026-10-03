@@ -81,7 +81,7 @@
       desc: '敌人每回合回复 %regenPct% 最大生命' },
     { id: 'lifesteal', name: '吸血', bad: true, mech: true, mods: { lifestealPct: [0.20, 0.32, 'pct'] },
       desc: '敌人造成伤害时回复其 %lifestealPct%' },
-    { id: 'shell', name: '护盾', bad: true, mech: true, mods: { shellPct: [0.20, 0.32, 'pct'] },
+    { id: 'shell', name: '护盾', bad: true, mech: true, mods: { shellPct: [0.18, 0.28, 'pct'] },
       desc: '敌人开局自带 %shellPct% 最大生命的护盾' },
     { id: 'devour', name: '吞噬成长', bad: true, mech: true, mods: { devourPct: [0.015, 0.028, 'pct'] },
       desc: '敌人每回合攻击永久 %devourPct%（按入场力量，可无限叠加）' },
@@ -826,12 +826,13 @@
       desc: '每个空的永久增益位让攻击 +20%', mods: { powerPerEmptySlot: 0.20 } },
     { id: 'C35', name: '厚积薄发', rarity: 2, kind: 'permanent',
       desc: '每拥有 1 个永久增益，攻击 +10%（含它自己）', mods: { powerPerPermBuff: 0.10 } },
-    /* —— 本轮第 9 项：传奇 · 商店消费成长 ——
-     * 每消费 20 试炼币 → 力/敏/速 随机一项 +1、生命上限 +5，可无限累计；
-     * 累计结果与「距下次还差几枚」都显示在增益面板上（progressOf）。 */
+    /* —— 传奇 · 商店消费成长 ——
+     * **每消费 10 试炼币** → 随机一项「力+1 / 敏+1 / 速+1 / 生命上限+5」，可无限累计。
+     * 累计结果与「距下次还差几枚」都显示在增益面板上（progressOf）。
+     * 注意：买到「挥金如土」本身的这笔花费也计入（见 buyShopSlot 的记账顺序）。 */
     { id: 'C36', name: '挥金如土', rarity: 3, kind: 'permanent',
-      desc: '本局每在试炼商店消费 20 试炼币，随机获得「力+1 / 敏+1 / 速+1 / 生命上限+5」中的一项（可无限累计）',
-      mods: { shopSpendStep: 20, shopSpendStat: 1, shopSpendHp: 5 } },
+      desc: '本局每在试炼商店消费 10 试炼币，随机获得「力+1 / 敏+1 / 速+1 / 生命上限+5」中的一项（可无限累计，含购买本增益的花费）',
+      mods: { shopSpendStep: 10, shopSpendStat: 1, shopSpendHp: 5 } },
     /* —— 本轮第 1 项：两个新增益 ——
      * C37 虚空铭文（传奇·隐藏选取型）：给已有的一个永久增益附魔，让它不占永久位。
      *    可叠加的增益是一个条目带 stacks，所以「所有层一起免疫占位」是自动成立的。

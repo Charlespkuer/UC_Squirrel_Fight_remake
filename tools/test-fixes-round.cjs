@@ -1599,6 +1599,58 @@ test('需求32：池子分离的端到端实测（真跑两种塔的抽取，零
   assert.equal(outOfEndless.length, 0, '无尽塔抽到了池外条目：' + JSON.stringify(outOfEndless));
 });
 
+test('需求33：挥金如土（C36）每 10 币一次随机项，且购买它自身的花费也计入', () => {
+  const c = setup();
+  const TD = c.TowerData;
+  assert.equal(TD.BUFF_BY_ID.C36.mods.shopSpendStep, 10, '步长应当是 10 试炼币');
+  assert.match(TD.BUFF_BY_ID.C36.desc, /10 试炼币/, '文案要写 10 试炼币：' + TD.BUFF_BY_ID.C36.desc);
+  assert.match(TD.BUFF_BY_ID.C36.desc, /购买本增益的花费/, '文案要说明含自身花费');
+
+  const run = c.Tower._debugRun('endless');
+  run.permanent = []; run.limited = []; run.coins = 999999;
+  run.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; run.shopSpend = 0;
+  const mkShop = (id, price) => {
+    const r = c.Tower._debugRun('endless');
+    r.coins = 999999; r.phase = 'shop';
+    r.shop = { layer: r.layer, retrySold: false, rerollFree: true, rerollCount: 0, rerollPaid: 0,
+      slots: [{ id: id, sold: false, price: price }] };
+    return r;
+  };
+  // ① 买 C36 自身的花费要吃到加成：160 币 → 16 次
+  mkShop('C36', 160);
+  const bought = c.Tower.buyShopSlot(0);
+  assert.ok(bought.ok, '应当能买到挥金如土');
+  let r = c.Tower._debugRun('endless');
+  const procs = (g) => g.power + g.agility + g.speed + g.hp / 5;   // 血是 +5/次，折算成「次」
+  assert.equal(procs(r.spendGain), 16, '160 币应当触发 16 次，实测 ' + procs(r.spendGain));
+  assert.equal(r.shopSpend, 0, '160 是 10 的整数倍，余数应为 0，实测 ' + r.shopSpend);
+  // ② 每次只加「1 力 / 1 敏 / 1 速 / 5 血」中的一项
+  assert.ok(r.spendGain.power <= 16 && r.spendGain.agility <= 16 && r.spendGain.speed <= 16 && r.spendGain.hp <= 80,
+    '单项不该超过总次数：' + JSON.stringify(r.spendGain));
+  assert.ok(r.spendGain.hp % 5 === 0, '生命项应当是 5 的倍数，实测 ' + r.spendGain.hp);
+  // ③ 后续消费继续累计：再买 30 币 → 累计 19 次
+  mkShop('C01', 30);
+  c.Tower.buyShopSlot(0);
+  r = c.Tower._debugRun('endless');
+  assert.equal(procs(r.spendGain), 19, '再消费 30 币应当累计到 19 次，实测 ' + procs(r.spendGain));
+  // ④ 没钱时不买、也不记账
+  mkShop('C02', 200);
+  c.Tower._debugRun('endless').coins = 50;
+  const poor = c.Tower.buyShopSlot(0);
+  assert.ok(!poor.ok, '钱不够应当买不成');
+  assert.equal(procs(c.Tower._debugRun('endless').spendGain), 19, '买不成时不该记账');
+});
+
+test('需求34：护盾环境削弱为 18%~28%', () => {
+  const c = setup();
+  const TD = c.TowerData;
+  const shell = TD.ENDLESS_ENV_BY_ID.shell;
+  assert.ok(shell, '应当有护盾环境');
+  assert.equal(JSON.stringify(shell.mods.shellPct.slice(0, 2)), JSON.stringify([0.18, 0.28]),
+    '护盾区间应当是 18%~28%，实测 ' + JSON.stringify(shell.mods.shellPct));
+  assert.match(TD.envRangeText(shell), /18% ~ 28%/, '区间文案要同步：' + TD.envRangeText(shell));
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

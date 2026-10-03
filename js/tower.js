@@ -84,6 +84,22 @@
     }
     /* 段位机制已并入环境词缀：run.mechs 只作历史兼容，永远为空。 */
     run.mechs = [];
+    /* 槽位相关字段的**防御性规范化**（当前存档已经会带上它们，这里是第二道闸）：
+     * permSlotIds 是权威记录、permSlots 由它派生、两者取最大值兼容旧档 ——
+     * 只要有一份字段缺失（旧档 / 同步来的残缺档），下面那行
+     * `slice(0, permSlots(run))` 就会把超出的永久增益**静默截掉**，
+     * 所以宁可多算一点名额，也不能把玩家已有的增益丢掉。 */
+    /* 只做「是字符串且非空」的轻校验：**不要**在这里按 BUFF_BY_ID 过滤 ——
+     * 过严的过滤会误删合法登记（实测把玩家的增益整批丢掉）。 */
+    const cleanIds = (v) => (Array.isArray(v) ? v.filter((id) => typeof id === 'string' && id) : []);
+    run.permSlotIds = cleanIds(run.permSlotIds);
+    const slotFromIds = run.permSlotIds.reduce((sum, id) => {
+      const def = D().BUFF_BY_ID[id];
+      return sum + Math.max(0, Number(def && def.mods && def.mods.permSlot) || 0);
+    }, 0);
+    run.permSlots = Math.max(slotFromIds, Math.max(0, Number(run.permSlots) || 0));
+    run.slotFreeIds = cleanIds(run.slotFreeIds);
+    run.pickBuffIds = cleanIds(run.pickBuffIds);
     run.permanent = cleanBuffs(run.permanent).slice(0, permSlots(run));
     run.limited = (Array.isArray(run.limited) ? run.limited : []).filter((b) => b && D().BUFF_BY_ID[b.id] && D().BUFF_BY_ID[b.id].kind === 'limited')
       .map((b) => ({ id: b.id, stacks: Math.max(1, Math.min(D().STACK_MAX, Math.floor(Number(b.stacks) || 1))),
@@ -1611,10 +1627,13 @@
   }
   /* 本轮第 9 项：挥金如土（C36）—— 每消费 step 试炼币，随机 +1 力/敏/速 并 +5 生命上限。
    * 消费点有三处（买增益 / 买回血 / 刷新），统一从这里过。 */
-  function addShopSpend(run, amount) {
+  function addShopSpend(run, amount, flags) {
     const spend = Math.max(0, Number(amount) || 0);
     if (!(spend > 0)) return null;
-    if (!stacksOf(run, 'C36')) return null;                 // 没这个增益就不累计
+    /* flags.assumeOwned：本次花费**本身**就把挥金如土买到手了（买 C36 那一笔），
+     * 所以即使此刻还没入账也要累计 —— 这是需求「购买该 buff 的价格会吃到其加成」。 */
+    const assumeOwned = !!(flags && flags.assumeOwned);
+    if (!assumeOwned && !stacksOf(run, 'C36')) return null;   // 没这个增益就不累计
     const mm = D().BUFF_BY_ID.C36.mods, step = Math.max(1, Number(mm.shopSpendStep) || 20);
     run.shopSpend = Math.max(0, Number(run.shopSpend) || 0) + spend;
     /* 本轮第 2 项：改成「力+1 / 敏+1 / 速+1 / 生命上限+5」**四项里随机一项**，
@@ -1648,8 +1667,12 @@
     const price = shopPriceOf(buff, slot);
     if (run.coins < price) return { ok: false, msg: '试炼币不足。' };
     run.coins -= price;
-    addShopSpend(run, price);                               // 第 9 项：挥金如土
     slot.sold = true;
+    /* 需求：**购买挥金如土本身的花费也要吃到它自己的加成**。
+     * 所以顺序必须是「先入账 → 再按最终是否拥有 C36 来记账」：
+     *   · 原来在 addBuff 之前记账，买 C36 时此刻还没拥有 → 直接 return，这笔钱白花
+     *   · 而且 addBuff(C36) 会把 run.shopSpend 清零（新持有的成长从 0 起算），
+     *     先记的账也会被清掉 —— 两个原因叠加，之前买它自身的钱必然不计。 */
     const res = addBuff(run, slot.id, replaceId);
     if (!res || !res.ok) {
       /* 第 5 项：addBuff 拒绝（例如这类增益一局只能拿一次）时把钱退回去，
@@ -1658,10 +1681,13 @@
       save();
       return { ok: false, msg: (res && res.msg) || '这件增益现在买不了。' };
     }
+    /* 挥金如土：按**最终是否拥有** C36 记账，于是买它本身的那笔也算进去。 */
+    const spend = addShopSpend(run, price, { assumeOwned: stacksOf(run, 'C36') > 0 });
     /* 需求：商店买到的增益也算分。 */
     const pts = scoreBuffAcquire(run, buff);
     save();
-    return { ok: true, buff, price, instant: !!res.instant, score: pts };
+    return { ok: true, buff, price, instant: !!res.instant, score: pts,
+      shopSpend: spend || undefined };
   }
   /* 兼容旧调用名：以前这里卖「治疗泉水」，现在同一位置是重新挑战币，
    * 语义仍然是「每次商店限购 1 份」，所以旧的 buyShopHeal 直接指向新实现
@@ -2163,9 +2189,10 @@
     const out = [];
     const add = (entry) => {
       const buff = entry && D().BUFF_BY_ID[entry.id];
+      /* 查不到定义的条目进不来：normalizeRun 的 cleanBuffs 已经先过滤过一遍
+       * （只有 BUFF_BY_ID 里存在的 id 才会留在 permanent / limited 里）。 */
       if (!buff || buff.hidden) return;   // 隐藏型（背包/选取类）不进增益面板
-      out.push({ id: buff.id, name: buff.name, desc: buff.desc, rarity: buff.rarity, kind: buff.kind,
-        scopeName: scopeName[buff.kind], stacks: entry.stacks || 1,
+      out.push({ id: buff.id, name: buff.name, desc: buff.desc, rarity: buff.rarity, kind: buff.kind,        scopeName: scopeName[buff.kind], stacks: entry.stacks || 1,
         progress: progressOf(run, buff.id),                 // 第 7 项：成长类的真实累计值
         uses: buff.kind === 'limited' ? entry.uses : undefined,
         towerBattle: !!buff.towerBattle,          // 挑战塔里 = 「下一场战斗」，卡面不显示限次

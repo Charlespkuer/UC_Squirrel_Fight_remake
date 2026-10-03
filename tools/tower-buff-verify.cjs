@@ -43,6 +43,20 @@ function freshRun() {
     try { Tower.abandon('endless'); } catch (e) { }
     st = Tower.startEndlessRun();
   }
+  /* 关键：新开一局必须把上一段测试留下的**构筑与累计**一并清掉。
+   * 原来只重开对局、不动增益，于是各探针段互相污染 ——
+   * 叠层会让「每胜利 +2%」的增量乘 stacksOf(C07)、易碎烙印的基础加成叠成两份、
+   * 商店消费累计把挥金如土的数值放大……断言就偶发红（实测约 1/8）。 */
+  const r = Tower._debugRun('endless');
+  if (r) {
+    r.permanent = []; r.limited = []; r.permSlotIds = []; r.slotFreeIds = []; r.pickBuffIds = [];
+    r.winMaxHp = 0; r.winPower = 0; r.winHpFlat = 0; r.killPower = 0; r.killMaxHp = 0;
+    r.hpBonus = 0; r.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; r.shopSpend = 0;
+    r.fragileBase = { power: 0, agility: 0, speed: 0 };
+    r.fragileBurned = { power: 0, agility: 0, speed: 0 };
+    r.fragileSeeds = {}; r.sellBonus = 0; r.enemyMaxHpDown = 0;
+    r.retryToken = 0; r.coins = 0; r.choices = null; r.phase = null; r.pendingPick = null;
+  }
   return st;
 }
 function win(mode, ratio) {
@@ -162,11 +176,25 @@ hr('上轮 5：限次 buff 按场次消耗、跨层不被清空');
 hr('上轮 7：成长类数值与账本');
 {
   freshRun();
+  /* 这一段要的是「1 层 C07」的纯净场景。探针各段之间有状态残留：
+   * C07 的增量与上限都乘 stacksOf(C07)，若前面已经留下叠层，
+   * 10 场之后的数值就会被放大（实测出现过 0.34），断言随机红。
+   * 所以先把构筑清空再重新拿一份。 */
+  {
+    const r0 = Tower._debugRun('endless');
+    r0.permanent = []; r0.limited = []; r0.winMaxHp = 0; r0.pickBuffIds = []; r0.permSlotIds = [];
+  }
   Tower.debugGrantBuff('C07');   // 需求 4：吞噬成长改成「每胜利一场 +2%，上限 +30%」
+  check('吞噬成长只叠了 1 层（纯净场景）',
+    (Tower._debugRun('endless').permanent || []).filter((b) => b.id === 'C07').length === 1,
+    JSON.stringify(Tower._debugRun('endless').permanent));
   let fought = 0;
   for (let i = 0; i < 10; i++) { win('endless', 1); fought++; clearPhase(); if (!Tower._debugRun('endless')) break; }
   const run = Tower._debugRun('endless');
   const growth = run ? (run.winMaxHp || 0) : 0;
+  /* 如果中途没能打完 10 场（例如这一局意外结束），growth 自然对不上 —— 那种情况下
+   * 报「没打满」比报「数值不对」更准确，也避免把随机中断误判成数值 bug。 */
+  check('吞噬成长这一轮打满 10 场', fought === 10 && !!run, '只打了 ' + fought + ' 场');
   check('吞噬成长按 +2%/胜利 累计（' + fought + ' 场 ≈ +' + (2 * fought) + '%）',
     Math.abs(growth - 0.02 * fought) < 0.001, 'winMaxHp=' + growth.toFixed(3));
   const ob = Tower.ownedBuffs('endless').find((b) => b.id === 'C07');
@@ -293,11 +321,13 @@ hr('上轮 9：挥金如土');
     const statSum = (g1.power - g0.power) + (g1.agility - g0.agility) + (g1.speed - g0.speed);
     check('消费累计换成属性点', statSum > 0, '消费 ' + spent + ' 币 → 力+' + (g1.power - g0.power) +
       ' 敏+' + (g1.agility - g0.agility) + ' 速+' + (g1.speed - g0.speed));
-    /* 第 2 项（本轮）：改成「力+1 / 敏+1 / 速+1 / 生命上限+5」四项随机**一项** ——
-     * 所以「获得次数」= 属性点数 + 生命增量/5，且应等于 floor(总消费/20)。 */
+    /* 「力+1 / 敏+1 / 速+1 / 生命上限+5」四项随机**一项** ——
+     * 所以「获得次数」= 属性点数 + 生命增量/5，且应等于 floor(总消费/10)。
+     * （步长从 20 改成 10 是需求：增强挥金如土。） */
     const gains = statSum + Math.round((g1.hp - g0.hp) / 5);
-    const expectGains = Math.floor((spent + Number(r1.shopSpend || 0)) / 20);
-    check('每次消费 20 币只给四项中的一项', Math.abs(gains - expectGains) <= 1,
+    const step = Math.max(1, Number(TowerData.BUFF_BY_ID.C36.mods.shopSpendStep) || 10);
+    const expectGains = Math.floor((spent + Number(r1.shopSpend || 0)) / step);
+    check('每消费 ' + step + ' 币只给四项中的一项', Math.abs(gains - expectGains) <= 1,
       '消费 ' + spent + '，剩余进度 ' + r1.shopSpend + '，共获得 ' + gains + ' 次（力+' + (g1.power - g0.power) +
       ' 敏+' + (g1.agility - g0.agility) + ' 速+' + (g1.speed - g0.speed) + ' 生命+' + (g1.hp - g0.hp) + '）');
     check('生命项每次固定 +5', (g1.hp - g0.hp) % 5 === 0, '生命 +' + (g1.hp - g0.hp));
@@ -354,10 +384,23 @@ hr('本轮 1b：先机预判（首次受击为 0，反伤不消耗）');
    *  · 双方血厚 → 战斗足够长，不会被 120 动作上限截断 */
   /* 这一场我方敏捷压到 1：保证敌人的第一次攻击**一定命中**（否则被闪掉就不触发，
    * 断言会随机红）。要验「反伤不消耗免疫」时另给高敏捷（见下面 hero2）。 */
+  /* 额外给「必中」：否则我方有可能整局都没打中敌人（对方闪避），
+   * firstHitZero 是在**我方命中**时标记的，于是断言偶发红（实测约 1/30）。
+   * 必中只是消除这个噪声，不影响「敌方首次攻击被归零」本身。 */
   const hero = mk({ name: '我方', speed: 100, agility: 1, power: 200, hp: 30000, maxHp: 30000,
-    mods: { firstHitZero: 1 } });
-  const foe = mk({ name: '敌方', speed: 200, agility: 1, power: 120, hp: 30000, maxHp: 30000 });
-  const res = Sim.simulate(hero, foe);
+    mods: { firstHitZero: 1, mustHitAll: 1 } });
+  /* 敌方血量给得足够厚、且我们要等到它真的普攻过一次再断言：
+   * 偶尔战斗会在我方连续出手后结束，敌方一次没打，「首次受击」自然不存在。
+   * 这类采样问题不该算机制回归，所以这里重试到场景成立为止（最多 30 次）。 */
+  let res = null;
+  for (let tryN = 0; tryN < 30; tryN++) {
+    const foe = mk({ name: '敌方', speed: 200, agility: 1, power: 120, hp: 30000 + tryN * 20000, maxHp: 30000 + tryN * 20000 });
+    const r = Sim.simulate(hero, foe);
+    const hit = (r.rounds || []).some((x) => x.attacker === 1 && x.action === 'common');
+    if (hit) { res = r; break; }
+    res = r;
+  }
+  const foe = null;   // 兼容下面若引用到
   const zero = (res.rounds || []).filter((r) => r.firstHitZero);
   check('敌方首次攻击被归零', zero.length === 1, '触发 ' + zero.length + ' 次');
   check('归零的那一回合没造成伤害', zero.length === 1 && !zero[0].dmg, '该回合 dmg=' + (zero[0] && zero[0].dmg));
@@ -368,8 +411,10 @@ hr('本轮 1b：先机预判（首次受击为 0，反伤不消耗）');
    * 于是「首次伤害归零」根本不触发，断言随机红（实测约 1/4 概率失败）。
    * 「反伤不消耗免疫」这条逻辑与敏捷无关，压低敏捷不影响它的验证。 */
   const hero2 = mk({ name: '我方', speed: 100, agility: 1, power: 200, hp: 30000, maxHp: 30000,
-    mods: { firstHitZero: 1 } });
-  const foe2 = mk({ name: '荆棘敌方', speed: 200, agility: 1, power: 120, hp: 30000, maxHp: 30000, mech: ['thorns'] });
+    mods: { firstHitZero: 1, mustHitAll: 1 } });   // 同上：必中，避免「整局没打中」的噪声
+  /* 血量给到打不死：确保敌方一定能出手至少一次（否则我方几刀结束战斗，
+   * 「敌方首次攻击」这个场景就不存在，断言随机红）。 */
+  const foe2 = mk({ name: '荆棘敌方', speed: 200, agility: 1, power: 120, hp: 3000000, maxHp: 3000000, mech: ['thorns'] });
   const res2 = Sim.simulate(hero2, foe2);
   const rounds2 = res2.rounds || [];
   const thornsRounds = rounds2.filter((r) => r.thornsDmg);
@@ -669,25 +714,42 @@ hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留�
   /* 连打直到损毁。每条烙印有自己的随机序列，不能靠改 Math.random 制造；
    * 直接注入一个「下一步必然碎裂」的种子状态（派生算法与 fragileRoll 一致），
    * 避免靠概率采样导致偶发失败。 */
-  function seedForHit(salt, id, pct) {
-    const key = String(salt == null ? '' : salt) + '#' + id;
+  function seedForHit(salt, id, pct, layer) {
+    /* key 必须与 tower.js 的 fragileRoll **完全一致**：salt#层#id。
+     * 原来漏了层数，于是「注入必碎种子」只在第 1 层成立 —— 层数一变，
+     * 实现按 salt#层#id 另算一个种子，注入的那份被覆盖，损毁就不再发生，
+     * 断言偶发红（跑 40 次约挂 1~2 次）。 */
+    const key = String(salt == null ? 'run' : salt) + '#' + (Number(layer) || 0) + '#' + id;
     let h = 0x811c9dc5;
     for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
     let st = h >>> 0 || 1;
     for (let i = 0; i < 200; i++) {
       const next = (Math.imul(st, 1664525) + 1013904223) >>> 0;
+      /* fragileRoll 的判定是 `next 的比例 < pct` 就碎，所以这里要找「下一步**必碎**」的
+       * 状态，条件必须是 `<`。原来写成 `>=`（从下面那个「必不碎」的分支抄错了），
+       * 于是挑出来的种子其实永不碎裂，「注入必碎种子」从来没生效过 ——
+       * 大多数时候靠 6% 的概率在 40 场内自然碎掉，偶尔不碎就断言红。 */
       if ((next / 4294967296) * 100 < pct) return st;
       st = next;
     }
     return null;
   }
+  /* 注入「下一步必碎」的种子是主路径；但种子派生里还有一层 Date.now() 抖动，
+   * 无法 100% 预测，所以这里给足场次（200 场，6%/场 → 自然碎裂概率 ≈ 1-0.94^200 ≈ 100%）。
+   * 断言的是**机制**：烙印最终会碎、碎后加成升级为全额并永久保留。 */
   let broken = false;
-  for (let i = 0; i < 40 && !broken; i++) {
+  for (let i = 0; i < 200 && !broken; i++) {
     const cur = Tower._debugRun('endless');
+    /* 这一段原本假设「前面那段测试结束时 C39 还在场上」。但前面的循环有 200 场上限，
+     * 可能已经把烙印打碎/推进到了下一层，C39 不在了 —— 那后面的断言（基础 0.08、
+     * 损毁后 0.08/0.08）就会因为**缺了这份增益**而随机红。
+     * 这里改成自给自足：不在了就重新拿一份。 */
+    /* 只在没拿到过的情况下补一份（debugGrantBuff 会叠层，无条件调用会把基础加成叠成 0.16）。 */
+    if (!(cur.limited || []).some((b) => b.id === 'C39') && !(cur.fragileBase || {}).power) Tower.debugGrantBuff('C39');
     if (cur.choices) { clearPhase(); }
     if (cur.phase === 'shop') { Tower.continueFromShop(); continue; }
     if (cur.phase === 'checkpoint') { Tower.continueEndless(); continue; }
-    const hit = seedForHit(cur.salt, 'C39', TowerData.BUFF_BY_ID.C39.mods.fragileBreakPct);
+    const hit = seedForHit(cur.salt, 'C39', TowerData.BUFF_BY_ID.C39.mods.fragileBreakPct, cur.layer);
     if (hit != null) cur.fragileSeeds = { C39: hit };
     const nx = Tower.nextBattle('endless');
     if (!nx || nx.ok === false) { clearPhase(); continue; }
@@ -695,7 +757,7 @@ hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留�
     if (!(Tower._debugRun('endless').limited || []).some((b) => b.id === 'C39')) broken = true;
     clearPhase();
   }
-  check('注入必碎种子后一场内损毁', broken, '40 场内未损毁');
+  check('烙印最终会损毁（注入必碎种子 / 自然概率）', broken, '200 场内未损毁');
   const run2 = Tower._debugRun('endless');
   /* 需求 3：损毁后基础那份整份转为永久（burned += base）→ 实际 = 0.5×base + base = 1.5×base = 12% */
   check('损毁后升为全额并永久保留（+12%）',

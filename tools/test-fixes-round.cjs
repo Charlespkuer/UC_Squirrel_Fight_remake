@@ -210,9 +210,9 @@ test('需求5：x10 层只有最后一个敌人穿狂战套', () => {
   assert.equal(run.plan.length, 5, '第 10 层应当是 5 场');
   assert.equal(run.plan[4].kind, 'warlord', '最后一场应当是狂战松鼠');
   const seen = [];
-  /* 环境里现在有一条「幻影回响」会在三侠战后按概率追加一场 ——
-   * 这条测试只数「本层计划内的 5 场」，所以先把环境清掉。 */
-  run.env = [];
+  /* 环境里的「幻影回响」会在战后按概率追加一场 —— 这条测试只数「本层计划内的 5 场」，
+   * 所以直接关掉环境抽取（比每轮清 env 更可靠：reportBattle 里还会再摇一次）。 */
+  run.noEnvRoll = true; run.env = [];
   for (let g = 0; g < 12; g++) {
     const r = c.Tower._debugRun('endless');
     r.env = [];
@@ -224,6 +224,10 @@ test('需求5：x10 层只有最后一个敌人穿狂战套', () => {
     seen.push({ name: nx.foe.name, elite: nx.elite, wears: (nx.foe.wears || []).map((w) => w.id) });
     const a = c.Tower._debugRun('endless');
     c.Tower.reportBattle('endless', a.attempt, true, 1, null);
+    /* reportBattle 里的 rollEnvAfterBattle 可能又摇出「幻影回响」，
+     * 对下一场来说环境仍然是「干净」的 —— 再清一次。 */
+    const after = c.Tower._debugRun('endless');
+    if (after) after.env = [];
   }
   assert.equal(seen.length, 5, '应当打完 5 场，实测 ' + seen.length);
   const berserk = [201, 202, 203, 204];
@@ -243,14 +247,15 @@ test('需求6：限次 buff 每场都扣（含整层最后一场）', () => {
   const len = run.plan.length;
   run.limited = [{ id: 'G01', stacks: 1, uses: 10, on: true }];
   run.choices = null; run.phase = null;
+  /* 直接写在 run 上（会被 normalizeRun 持久化）——比每轮调 _debugSetNoEnv 可靠，
+   * 因为循环里的 continue 分支会跳过那一行。 */
+  run.noEnvRoll = true; run.env = [];
   const uses = () => { const b = c.Tower._debugRun('endless').limited.find((x) => x.id === 'G01'); return b ? b.uses : 0; };
   let fought = 0;
   for (let g = 0; g < 10; g++) {
     const r = c.Tower._debugRun('endless');
     if (r.layer !== 3) break;
-    /* 隔离环境：环境里的「幻影回响」会按概率把同一场再打一遍，
-     * 那条路径不推进层内序号，会让「本层应当打 N 场」的计数偶发偏少。 */
-    r.env = [];
+    r.env = [];   // noEnvRoll 已在上面写成持久开关
     if (r.choices) { c.Tower.pickChoice('endless', 0, null); continue; }
     if (r.phase) break;
     const nx = c.Tower.nextBattle('endless');
@@ -3572,7 +3577,13 @@ test('需求56：秘技通神只抽主动技能 / 终焉烙印改加算并降出
     const r = T._debugRun('endless');
     r.permanent = []; r.limited = []; r.slotFreeIds = [];
     for (let i = 0; i < marks; i++) T.addBuff(T._debugRun('endless'), id);
-    if (burned) { const rr = T._debugRun('endless'); rr.fragileMulBase = 0; rr.fragileMulBurned = burned; }
+    if (burned) {
+      const rr = T._debugRun('endless');
+      rr.fragileMulBase = 0; rr.fragileMulBurned = burned;
+      /* 治疗烙印(C52) 的「已损毁」现在是**逐条明细**（供 30 层后随机作废），
+       * 所以这里要把明细一起写好，否则 fragileHealBonus 读不到。 */
+      rr.fragileHealBurned = new Array(burned).fill(0.20);
+    }
     const nx = T.nextBattle('endless');
     const me = mk(); nx.adjustMe(me);
     return me;
@@ -3926,6 +3937,133 @@ test('需求59：主动放弃无尽塔时，本局剩余试炼币 1:1 兑换为�
     assert.equal(resT.tickets, undefined, '挑战塔放弃不该走试炼币兑换');
     assert.equal(S.state().props[TICKET] || 0, beforeT, '挑战塔放弃不该发抽奖卷');
   }
+});
+
+test('需求60：20 起每 10 层必须放弃一个永久增益 / 30 层后每 2 层碎烙印失效一条', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const openRun = (layer, perms) => {
+    S.newGame('r60' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = (perms || [{ id: 'C29', stacks: 1 }]).map((x) => Object.assign({}, x));
+    r.limited = []; r.slotFreeIds = []; r.pendingToasts = []; r.phase = null;
+    if (layer != null) T._debugSetEndlessLayer(layer);
+    return T._debugRun('endless');
+  };
+  const enterSacrifice = () => {
+    const r = T._debugRun('endless');
+    r.phase = 'shop'; r.shop = {};
+    return T.continueFromShop();
+  };
+
+  /* ① 判定：20 起每 10 层 */
+  for (const [L, want] of [[10, false], [19, false], [20, true], [21, false], [29, false],
+    [30, true], [31, false], [40, true], [50, true]]) {
+    assert.equal(T.needPermSacrifice(L), want, '第 ' + L + ' 层应当' + (want ? '' : '不') + '要求放弃永久增益');
+  }
+
+  /* ② 出商店后进入 sacrifice 阶段（10 层不进） */
+  openRun(10); let res = enterSacrifice();
+  assert.equal(res.phase, undefined, '第 10 层不该进入放弃阶段：' + JSON.stringify(res));
+  assert.equal(T._debugRun('endless').layer, 11, '第 10 层应当直接进第 11 层');
+  openRun(20); res = enterSacrifice();
+  assert.equal(res.phase, 'sacrifice', '第 20 层应当进入放弃阶段：' + JSON.stringify(res));
+  assert.equal(T._debugRun('endless').phase, 'sacrifice', '阶段应当持久化（不被 normalizeRun 清掉）');
+  assert.equal(T._debugRun('endless').layer, 20, '放弃前不该推进层数');
+
+  /* ③ 候选 = 已有的永久增益（隐藏型不算） */
+  const cands = T.sacrificeCandidatesOf(T._debugRun('endless'));
+  assert.equal(cands.map((x) => x.id).sort().join(','), 'C29', '候选应当只有已有的永久增益：' + JSON.stringify(cands.map((x) => x.id)));
+
+  /* ④ 放弃：叠层的先掉一层，掉光才移除；放弃后推进到下一层 */
+  openRun(20, [{ id: 'C29', stacks: 1 }, { id: 'C27', stacks: 2 }]);
+  enterSacrifice();
+  let out = T.sacrificePerm('C27');
+  assert.ok(out.ok, '放弃应当成功：' + JSON.stringify(out));
+  let run = T._debugRun('endless');
+  assert.equal(run.permanent.find((b) => b.id === 'C27').stacks, 1, '2 层应当先掉成 1 层');
+  assert.equal(run.layer, 21, '放弃后应当推进到下一层');
+  assert.equal(run.phase, null, '放弃后阶段应当清空');
+  /* 再放弃一次 → 完全移除 */
+  run.layer = 30; run.phase = 'shop'; run.shop = {};
+  T.continueFromShop();
+  assert.ok(T.sacrificePerm('C27').ok, '第二次放弃应当成功');
+  run = T._debugRun('endless');
+  assert.ok(!run.permanent.some((b) => b.id === 'C27'), '1 层再被放弃应当彻底移除：' + JSON.stringify(run.permanent));
+  assert.ok(!(run.slotFreeIds || []).includes('C27'), '免占位标记也该一并清掉');
+
+  /* ⑤ 不能在不该放弃的时候放弃 */
+  openRun(20);
+  assert.equal(T.sacrificePerm('C29').ok, false, '不是 sacrifice 阶段时不该能放弃');
+  assert.ok(T._debugRun('endless').permanent.some((b) => b.id === 'C29'), '被拒时不该真的移除');
+
+  /* ⑥ 30 层后每 2 层：随机作废一条碎掉的烙印 */
+  const withBroken = (layer, marks) => {
+    const r = openRun(layer);
+    r.brokenMarks = marks.slice();
+    r.fragileBurned = { power: 0, agility: 0, speed: 0 };
+    r.fragileHealBurned = []; r.fragileMulBurned = 0;
+    for (const m of r.brokenMarks) {
+      if (m.kind === 'stat') r.fragileBurned[m.stat] = (r.fragileBurned[m.stat] || 0) + m.pct;
+      if (m.kind === 'heal') r.fragileHealBurned.push(m.burned);
+      if (m.kind === 'final') r.fragileMulBurned = (r.fragileMulBurned || 0) + 1;
+    }
+    return r;
+  };
+  const MARKS = [{ kind: 'stat', stat: 'power', pct: 0.08 }, { kind: 'stat', stat: 'agility', pct: 0.14 },
+    { kind: 'stat', stat: 'speed', pct: 0.08 }, { kind: 'heal', alive: 0.10, burned: 0.20 },
+    { kind: 'final', alive: 0.25, burned: 0.5 }];
+  /* 30 层及以前不动：「30 层过后」= 31 层起才算通过，所以 29/30/31 都不掉，
+   * 第一次流失发生在**进入第 32 层**时。 */
+  withBroken(28, MARKS);
+  T._debugAdvanceLayer();                       // → 29
+  T._debugAdvanceLayer();                       // → 30（这里只是「到达」30，不算过后）
+  T._debugAdvanceLayer();                       // → 31
+  assert.equal(T._debugRun('endless').brokenMarks.length, 5, '31 层以前不该流失碎烙印');
+  /* 进入 32 层掉一条，33 层不掉，34 层再掉一条 */
+  withBroken(30, MARKS);
+  T._debugAdvanceLayer();                       // → 31
+  assert.equal(T._debugRun('endless').brokenMarks.length, 5, '奇数层不该流失');
+  T._debugAdvanceLayer();                       // → 32
+  assert.equal(T._debugRun('endless').brokenMarks.length, 4, '第 32 层应当流失一条');
+  T._debugAdvanceLayer();                       // → 33
+  assert.equal(T._debugRun('endless').brokenMarks.length, 4, '第 33 层不该流失');
+  T._debugAdvanceLayer();                       // → 34
+  assert.equal(T._debugRun('endless').brokenMarks.length, 3, '第 34 层应当再流失一条');
+  /* 合计值必须跟着重算（力量烙印掉光后 power 应当归零） */
+  const fin = T._debugRun('endless');
+  const expectPower = fin.brokenMarks.filter((m) => m.kind === 'stat' && m.stat === 'power')
+    .reduce((a, m) => a + m.pct, 0);
+  assert.ok(Math.abs(fin.fragileBurned.power - expectPower) < 1e-9,
+    '力量合计应当等于剩余明细之和：' + fin.fragileBurned.power + ' vs ' + expectPower);
+  assert.ok((fin.pendingToasts || []).length > 0, '应当留下「碎烙印失效」的提示');
+  /* 提示一次性取走 */
+  const toasts = T.takeRunToasts();
+  assert.ok(toasts.length > 0, '应当能取到提示');
+  assert.equal(T.takeRunToasts().length, 0, '取走后应当清空');
+
+  /* ⑦ legacy（旧档迁移）的明细不可被抽走 */
+  const r7 = withBroken(31, [{ kind: 'stat', stat: 'power', pct: 0.10, legacy: true }]);
+  T._debugAdvanceLayer();
+  assert.equal(T._debugRun('endless').brokenMarks.length, 1, 'legacy 明细不该被抽走');
+  assert.ok(Math.abs(T._debugRun('endless').fragileBurned.power - 0.10) < 1e-9, 'legacy 合计应当保留');
+
+  /* ⑧ 没有碎烙印时推进不报错 */
+  const r8 = withBroken(31, []);
+  assert.ok(T._debugAdvanceLayer().ok, '没有碎烙印时推进应当正常');
+  assert.equal(T._debugRun('endless').brokenMarks.length, 0, '不该凭空产生明细');
+
+  /* ⑨ 终焉烙印（final）被作废时要同时减 fragileMulBurned */
+  /* 起点放在 31 层：推进后进入 32 层（偶数层）才会触发流失。 */
+  const r9 = withBroken(31, [{ kind: 'final', alive: 0.25, burned: 0.5 }]);
+  assert.equal(r9.fragileMulBurned, 1, '前置条件：应当有 1 层损毁终焉');
+  T._debugAdvanceLayer();
+  assert.equal(T._debugRun('endless').fragileMulBurned, 0, '作废后 fragileMulBurned 应当归零');
+  T.abandon('endless');
 });
 
 (async () => {

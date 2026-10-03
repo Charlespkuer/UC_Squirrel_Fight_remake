@@ -304,6 +304,46 @@ pct(mods.killMaxHpCap * stacks * g)             // ❌ 这个 mod 根本不存�
 结果：挑战塔池 64 条（限次 31 / 永久 33，其中 31 条专属），无尽池 54 条，商店池 52 条；
 **无尽池里 0 条 towerOnly，挑战塔池里 0 条 endlessOnly**。
 
+### 20 起每 10 层「放弃一个永久增益」/ 30 层后每 2 层「碎烙印失效一条」
+
+**① 20/30/40… 层出商店后，必须放弃一个永久增益**
+
+- `needPermSacrifice(layer)`：`layer >= 20 && layer % 10 === 0`
+- `continueFromShop()` 在这些层不再直接推进，而是把 `run.phase` 置为 `'sacrifice'`
+- 界面弹**不可取消**的选择框（没有「返回」按钮）：列出全部永久增益，
+  选一个 → `sacrificePerm(id)`；叠层的**先掉一层**，掉光才从本局移除
+- 放弃后清掉该增益的免占位标记，再 `advanceLayer` 推进到下一层
+- `normalizeRun` 放行了 `'sacrifice'` 阶段（原来只认 `shop`/`checkpoint`，
+  否则 `save()` 会把它清成 null —— 这个坑踩到了，已修）
+
+**② 30 层过后，每通过 2 层随机作废一条**已碎掉**的烙印**
+
+前提是「碎掉的烙印」要能**逐条**移除，而原来 `run.fragileBurned` 只是一个合计数字。
+所以新增了一份**明细**：
+
+```js
+run.brokenMarks = [
+  { kind:'stat',  stat:'power', pct:0.08 },          // 力量烙印（已损毁 +8%）
+  { kind:'heal',  alive:0.10, burned:0.20 },          // 涌泉烙印
+  { kind:'final', alive:0.25, burned:0.5 },           // 终焉烙印
+  { kind:'stat',  stat:'power', pct:0.10, legacy:true },  // 旧档迁移，不可被抽走
+]
+```
+
+- 烙印碎裂时同时登记一条明细；`rebuildFragileTotals()` 由明细重算合计
+- `loseRandomBrokenMark()` 随机抽一条（跳过 `legacy`），作废后重算合计；
+  `final` 类还会同步减 `fragileMulBurned`
+- 治疗烙印的「已损毁」也改成数组 `run.fragileHealBurned`
+- 触发点统一挂在 `advanceLayer()` 里（`layer > 30 && layer % 2 === 0`）——
+  所有「进入下一层」的路径都会经过，不会漏也不会重复
+- 界面飘字提示「碎掉的烙印失效：敏捷烙印（已损毁 +14%）」
+
+实测：31 层以前不掉；进入 32 层掉一条、33 层不掉、34 层再掉一条；
+合计值（`fragileBurned`）跟着重算；`legacy` 明细抽不走；没有碎烙印时不报错。
+
+**顺带**加了一个调试开关 `run.noEnvRoll`（关掉环境抽取），
+让「只数层内计划场次」的测试不再被「幻影回响」随机追加的那一场干扰。
+
 ### 主动放弃无尽塔：剩余试炼币 1:1 换抽奖卷
 
 原来主动放弃本局时，攒下来的试炼币是**直接蒸发**的。现在在 `abandon('endless')` 里结算：

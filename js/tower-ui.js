@@ -26,6 +26,21 @@
   function flushAchievements(list) {
     for (const it of (list || [])) achievementToast(it);
   }
+  /** 把状态机攒下的「本局待提示」取走并飘出来（例如「碎掉的烙印失效」）。 */
+  function flushRunToasts() {
+    let list = [];
+    try { list = Tower.takeRunToasts ? Tower.takeRunToasts() : []; } catch (e) { list = []; }
+    for (const t of list) runToast(t);
+  }
+  /** 轻量飘字（比成就条更朴素，用于「碎烙印失效」这类过程提示）。 */
+  function runToast(text) {
+    const el = document.createElement('div');
+    el.className = 'run-toast';
+    el.textContent = String(text || '');
+    document.body.appendChild(el);
+    setTimeout(() => { el.classList.add('out'); }, 2400);
+    setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 3200);
+  }
 
   const RARITY = TowerData.RARITY_NAME || ['普通', '稀有', '史诗', '传奇'];
   const SCOPE = { limited: '限次', permanent: '永久', instant: '即时' };
@@ -553,7 +568,10 @@
     let main, footer = null;
     if (info.run) {
       const run = info.run;
-      const nextLabel = run.choices ? '先选一张增益' : run.phase === 'shop' ? '进入试炼商店' : run.phase === 'checkpoint' ? '前往结算点' : '继续战斗';
+      const nextLabel = run.choices ? '先选一张增益'
+        : run.phase === 'shop' ? '进入试炼商店'
+        : run.phase === 'checkpoint' ? '前往结算点'
+        : run.phase === 'sacrifice' ? '放弃一个永久增益' : '继续战斗';
       /* 第 2 项版面：左上角是三个属性药丸槽；下面紧贴标题一行小字只有分数；
        * 「当前遭遇的机制」下面直接跟已获得的增益（永久 / 限次），保证一屏看完不用下翻；
        * 本层对手缩成右侧竖排 1/2/3/4。 */
@@ -565,7 +583,7 @@
       /* 第 2 项：打过的对手在右列留下「已战胜」的标记。
        * 本层内 = idx 之前的；若本层已通关（商店/结算点阶段），整层都算已战胜，
        * 这样「最后一个敌人」也能看到已战胜的状态。 */
-      const clearing = (run.phase === 'shop' || run.phase === 'checkpoint') && run.finished && run.finished.layer === run.layer;
+      const clearing = (run.phase === 'shop' || run.phase === 'checkpoint' || run.phase === 'sacrifice') && run.finished && run.finished.layer === run.layer;
       const beatenCount = clearing ? foes.length : Math.max(0, (run.battleNo || 1) - 1);
       const foeRows = foes.map((b, i) =>
         '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel ' : '') + (i < beatenCount ? 'beaten' : '') +
@@ -638,6 +656,7 @@
         if (info.run.choices) { notice('先在下面选一张增益（休整点）。'); return; }
         if (info.run.phase === 'shop') { openShop(); return; }
         if (info.run.phase === 'checkpoint') { openCheckpoint(); return; }
+        if (info.run.phase === 'sacrifice') { openPermSacrifice(); return; }
         fight('endless');
         return;
       }
@@ -670,6 +689,9 @@
     on(p, 'shop', () => openShop(true));
     /* 待选取的强化（神兵淬炼/秘技通神）没选完时，回到主界面自动补弹一次 */
     if (info.run && info.run.pendingPick) setTimeout(() => openPickBuff(info.run.pendingPick), 60);
+    flushRunToasts();   // 「碎掉的烙印失效」这类过程提示
+    /* 20 起每 10 层：出商店后必须放弃一个永久增益（不可取消）。 */
+    if (info.run && info.run.phase === 'sacrifice') setTimeout(() => openPermSacrifice(), 60);
     p.querySelectorAll('[data-pill]').forEach((el) => {
       el.onclick = () => choosePill(el.dataset.pill);
     });
@@ -1121,6 +1143,40 @@
         '<p>抽奖卷 +<b class="gold-text">' + (out.tickets || 0) + '</b>（第 ' + out.layer + ' 层）</p>' +
         '<div class="result-lines">分数 ' + out.score + ' 已入账 · 历史最高 ' + out.best + '</div></div>',
         [{ label: '返回无尽塔', cls: 'gold', run: () => openEndless() }], { small: true });
+    });
+  }
+
+  // ---------- 无尽：20 起每 10 层「放弃一个永久增益」 ----------
+  /**
+   * 需求：从 20 层开始，每 10 层出商店后**必须**放弃一个永久增益。
+   * 做成不可取消的弹窗（没有「返回/继续」按钮）——这是这一层的必经步骤。
+   */
+  function openPermSacrifice() {
+    const info = Tower.endlessInfo();
+    const run = info.run;
+    if (!run || run.phase !== 'sacrifice') return;
+    const cands = Tower.sacrificeCandidatesOf(run);
+    if (!cands.length) { Tower.sacrificePerm(null); openEndless(); return; }
+    const rows = cands.map((x) => {
+      const b = x.buff;
+      const stack = x.stacks > 1 ? ' <em class="sac-stack">×' + x.stacks + '</em>' : '';
+      return '<button class="sac-card" data-sac="' + esc(x.id) + '">' +
+        '<b class="q' + (b.rarity || 0) + '">' + esc(b.name) + '</b>' + stack +
+        '<span class="sac-desc">' + esc(b.desc || '') + '</span></button>';
+    }).join('');
+    const p = modal('放弃一个永久增益',
+      '<p class="sac-lead">第 ' + esc(run.layer) + ' 层已通过。作为代价，必须永久放弃<b>一个</b>永久增益' +
+      '（叠层的会先掉一层）。选中的增益会立刻从本局移除。</p>' +
+      '<div class="sac-grid">' + rows + '</div>',
+      [], { small: false, cls: 'sac-board' });
+    p.element.querySelectorAll('[data-sac]').forEach((el) => {
+      el.onclick = () => {
+        const res = Tower.sacrificePerm(el.dataset.sac);
+        if (!res.ok) { notice(res.msg || '放弃失败'); return; }
+        p.close();
+        if (res.lostMark) notice('碎掉的烙印失效：' + res.lostMark.label);
+        openEndless();
+      };
     });
   }
 

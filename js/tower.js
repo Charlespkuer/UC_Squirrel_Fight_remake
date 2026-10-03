@@ -131,12 +131,40 @@
       /* 需求 3：烙印两段加成 + 独立随机种子；旧档 stickyStat → fragileBurned。 */
       run.fragileBase = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBase || {});
       run.fragileBurned = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBurned || {});
+      /* 需求：破碎烙印要能被**逐条**移除（30 层后每 2 层随机抽一条碎掉的烙印作废），
+       * 所以除了「合计值」还留一份**明细**：
+       *   run.brokenMarks      —— [{ kind:'stat',   stat:'power', pct:0.08 }]
+       *                           [{ kind:'final',  alive:0.25, burned:0.5 }]
+       *                           [{ kind:'heal',   alive:0.10, burned:0.20 }]
+       *   run.fragileHealBurned —— 治疗烙印的「已损毁」合计（数组，按份数）
+       * 旧档只有合计值，迁移成一条不可移除的 `legacy` 明细，避免凭空多出可移除的层。 */
+      run.fragileHealBurned = Array.isArray(run.fragileHealBurned)
+        ? run.fragileHealBurned.map((v) => Math.max(0, Number(v) || 0)).filter((v) => v > 0) : [];
+      run.brokenMarks = Array.isArray(run.brokenMarks)
+        ? run.brokenMarks.filter((m) => m && typeof m.kind === 'string')
+          .map((m) => ({
+            kind: m.kind,
+            legacy: m.legacy === true,
+            stat: typeof m.stat === 'string' ? m.stat : undefined,
+            pct: Math.max(0, Number(m.pct) || 0),
+            alive: Math.max(0, Number(m.alive) || 0),
+            burned: Math.max(0, Number(m.burned) || 0),
+          })) : [];
       /* 终乘烙印（C49）：独立于「加算烙印」的两段层数，最后做幂乘。 */
       run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0));
       run.fragileMulBurned = Math.max(0, Math.floor(Number(run.fragileMulBurned) || 0));
+      if (run.fragileMulBurned > 0 &&
+          !run.brokenMarks.some((m) => m.kind === 'final')) {
+        run.brokenMarks.push({ kind: 'final', alive: 0.25, burned: 0.5, legacy: true });
+      }
       for (const k of ['power', 'agility', 'speed']) {
         run.fragileBase[k] = Math.max(0, Number(run.fragileBase[k]) || 0);
         run.fragileBurned[k] = Math.max(0, Number(run.fragileBurned[k]) || 0);
+        /* 旧档：有合计但没有对应明细 → 补一条不可移除的 legacy 明细。 */
+        if (run.fragileBurned[k] > 0 &&
+            !run.brokenMarks.some((m) => m.kind === 'stat' && m.stat === k)) {
+          run.brokenMarks.push({ kind: 'stat', stat: k, pct: run.fragileBurned[k], legacy: true });
+        }
       }
       if (run.stickyStat) {
         for (const k of ['power', 'agility', 'speed']) {
@@ -161,6 +189,10 @@
       run.winStatSpeed = Math.max(0, Number(run.winStatSpeed) || 0);
       run.winTakenMul = Math.max(0, Number(run.winTakenMul) || 0);
       run.rarityBoost = Math.max(0, Math.floor(Number(run.rarityBoost) || 0));
+      run.lostMarks = Array.isArray(run.lostMarks) ? run.lostMarks.slice(-20) : [];
+      run.noEnvRoll = run.noEnvRoll === true;
+      run.noEnvGain = run.noEnvGain === true;
+      run.lastSacrifice = run.lastSacrifice && typeof run.lastSacrifice === 'object' ? run.lastSacrifice : null;
       run.instantIds = Array.isArray(run.instantIds)
         ? run.instantIds.filter((x) => x && typeof x.id === 'string').map((x) => ({ id: x.id, count: Math.max(1, Math.floor(Number(x.count) || 1)) }))
         : [];
@@ -169,7 +201,8 @@
       run.repeatAt = Number(run.repeatAt) >= 0 ? Number(run.repeatAt) : -1;
       run.refMaxHp = Math.max(0, Math.round(Number(run.refMaxHp) || 0));
       if (run.shop && typeof run.shop === 'object' && !Array.isArray(run.shop.slots)) run.shop = null;
-      if (run.phase !== 'shop' && run.phase !== 'checkpoint') run.phase = null;
+      /* 合法的「等待玩家操作」阶段：出商店 / 结算点 / 20 起每 10 层的放弃永久增益。 */
+      if (run.phase !== 'shop' && run.phase !== 'checkpoint' && run.phase !== 'sacrifice') run.phase = null;
     if (!Array.isArray(run.debuffs)) run.debuffs = [];
     }
     return run;
@@ -1344,6 +1377,10 @@
    */
   function rollEnvAfterBattle(run) {
     const TD = D(), list = envList(run);
+    /* 调试/测试开关：关掉环境抽取（有些断言只关心「层内计划」，不希望被
+     * 「幻影回响」随机追加的那一场干扰）。同时清空当前环境。 */
+    if (run.noEnvRoll === true) { list.length = 0; return; }
+    if (run.noEnvGain === true) { if (list.length) return; }
     for (let i = list.length - 1; i >= 0; i--) { list[i].left -= 1; if (list[i].left <= 0) list.splice(i, 1); }
     if (run.layer < TD.ENV_START_LAYER) return;
     const cap = Math.max(1, Number(TD.ENV_MAX) || 2);
@@ -1632,6 +1669,11 @@
     run.choices = null;
     run.restShopUsed = false;
     layerStartHeal(run, mode);
+    /* 需求：30 层过后，每通过 2 层随机作废一条已碎掉的烙印。
+     * 统一挂在这里 —— 所有「进入下一层」的路径（普通层 / 出商店 / 放弃永久增益后）
+     * 都会经过，不会漏也不会重复。 */
+    const lost = applyBrokenMarkLoss(run);
+    if (lost) run.pendingToasts = (run.pendingToasts || []).concat(['碎掉的烙印失效：' + lost.label]).slice(-12);
   }
 
   // ---------- 场间 4 选 1 ----------
@@ -1784,10 +1826,51 @@
   /** 治疗烙印（C52「涌泉烙印」）的最终治疗加成：按层加算（存在 +10%/层、损毁 +20%/层）。 */
   function fragileHealBonus(run) {
     const b = Math.max(0, Math.floor(Number(run && run.fragileMulBase) || 0));
-    const k = Math.max(0, Math.floor(Number(run && run.fragileMulBurned) || 0));
-    if (!b && !k) return 0;
+    const list = Array.isArray(run && run.fragileHealBurned) ? run.fragileHealBurned : [];
+    if (!b && !list.length) return 0;
     const m = D().BUFF_BY_ID.C52.mods;
-    return (Number(m.fragileHealAddAlive) || 0.10) * b + (Number(m.fragileHealAddBurned) || 0.20) * k;
+    let sum = (Number(m.fragileHealAddAlive) || 0.10) * b;
+    for (const v of list) sum += Math.max(0, Number(v) || 0);
+    return sum;
+  }
+  /** 把明细重新汇总成「合计值」（移除明细后必须重算）。 */
+  function rebuildFragileTotals(run) {
+    if (!run) return;
+    run.fragileBurned = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBurned || {});
+    run.fragileBurned.power = 0; run.fragileBurned.agility = 0; run.fragileBurned.speed = 0;
+    run.fragileHealBurned = [];
+    for (const m of run.brokenMarks || []) {
+      if (m.kind === 'stat' && m.stat) {
+        if (run.fragileBurned[m.stat] === undefined) run.fragileBurned[m.stat] = 0;
+        run.fragileBurned[m.stat] += Math.max(0, Number(m.pct) || 0);
+      } else if (m.kind === 'heal') {
+        run.fragileHealBurned.push(Math.max(0, Number(m.burned) || 0));
+      }
+    }
+  }
+  /**
+   * 需求：「30 层过后，每通过 2 层随机抽一个已碎掉的烙印，使其效果消失」。
+   * 只从**非 legacy** 的明细里抽（旧档迁移出来的合计值没有对应的可移除单位）。
+   * 返回被作废的烙印名 / 说明，没有可抽的就返回 null。
+   */
+  function loseRandomBrokenMark(run) {
+    const pool = (run.brokenMarks || []).filter((m) => !m.legacy);
+    if (!pool.length) return null;
+    const idx = Math.floor(Math.random() * pool.length);
+    const m = pool[idx];
+    run.brokenMarks.splice((run.brokenMarks || []).indexOf(m), 1);
+    let label = '碎裂烙印';
+    if (m.kind === 'stat') {
+      const statName = { power: '力量', agility: '敏捷', speed: '速度' }[m.stat] || m.stat;
+      label = statName + '烙印（已损毁 +' + Math.round((Number(m.pct) || 0) * 100) + '%）';
+    } else if (m.kind === 'heal') {
+      label = '涌泉烙印（已损毁 +' + Math.round((Number(m.burned) || 0) * 100) + '% 治疗）';
+    } else if (m.kind === 'final') {
+      label = '终焉烙印（已损毁 +' + Math.round((Number(m.burned) || 0) * 100) + '%）';
+      run.fragileMulBurned = Math.max(0, Math.floor(Number(run.fragileMulBurned) || 0) - 1);
+    }
+    rebuildFragileTotals(run);
+    return { label: label, kind: m.kind, stat: m.stat };
   }
   /** 需求 3：每条烙印一个独立的确定性 PRNG（由本局 salt + 烙印 id 派生）。
    *  原来所有烙印共用 Math.random()，同一次判定会把好几条一起打碎。 */
@@ -2535,6 +2618,20 @@
           run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0) - 1);
           run.fragileMulBurned = Math.max(0, Math.floor(Number(run.fragileMulBurned) || 0)) + 1;
         }
+        /* 明细：碎掉的每一条都登记一份，供「30 层后每 2 层作废一条」抽取。 */
+        run.brokenMarks = Array.isArray(run.brokenMarks) ? run.brokenMarks : [];
+        if (def.mods.fragileStat) {
+          run.brokenMarks.push({ kind: 'stat', stat: def.mods.fragileStat,
+            pct: Math.max(0, Number(def.mods.fragilePct) || 0) });
+        } else if (def.mods.fragileHealAddAlive !== undefined) {
+          run.brokenMarks.push({ kind: 'heal',
+            alive: Math.max(0, Number(def.mods.fragileHealAddAlive) || 0),
+            burned: Math.max(0, Number(def.mods.fragileHealAddBurned) || 0) });
+        } else if (def.mods.fragileFinalMul) {
+          run.brokenMarks.push({ kind: 'final',
+            alive: Math.max(0, Number(def.mods.fragileAddAlive) || 0),
+            burned: Math.max(0, Number(def.mods.fragileAddBurned) || 0) });
+        }
         logBuff(run, b.id, 'break', { detail: '易碎损毁（升级为全额并永久保留）' });
         return false;
       }
@@ -2686,10 +2783,73 @@
     const run = endless().run;
     if (!run || run.phase !== 'shop') return { ok: false };
     run.shop = null;
+    /* 需求：从 20 层开始，每 10 层（20/30/40…）出商店后必须**放弃一个永久增益**。 */
+    if (needPermSacrifice(run.layer) && (run.permanent || []).length) {
+      run.phase = 'sacrifice';
+      save();
+      return { ok: true, phase: 'sacrifice', layer: run.layer };
+    }
     run.phase = null;
     advanceLayer(run, 'endless');
     save();
     return { ok: true, layer: run.layer };
+  }
+  /** 是否需要在「刚清完这一层」时放弃一个永久增益（20 起每 10 层）。 */
+  function needPermSacrifice(layer) {
+    const n = Math.max(0, Math.floor(Number(layer) || 0));
+    return n >= 20 && n % 10 === 0;
+  }
+  /** 本局可被放弃的永久增益（隐藏型本来就不占槽，不算）。 */
+  function sacrificeCandidates(run) {
+    return (run.permanent || [])
+      .map((b) => ({ id: b.id, stacks: Math.max(1, Math.floor(Number(b.stacks) || 1)),
+        buff: D().BUFF_BY_ID[b.id] }))
+      .filter((x) => x.buff && !x.buff.hidden);
+  }
+  /** 放弃一个永久增益（20 起每 10 层的必经步骤）。放弃后继续推进到下一层。 */
+  function sacrificePerm(id) {
+    const run = endless().run;
+    if (!run || run.phase !== 'sacrifice') return { ok: false, msg: '现在不是放弃永久增益的时机。' };
+    const cands = sacrificeCandidates(run);
+    if (!cands.length) {                      // 没有可放弃的（理论上不会走到）→ 直接放行
+      run.phase = null; advanceLayer(run, 'endless'); save();
+      return { ok: true, skipped: true };
+    }
+    const pick = cands.find((x) => x.id === id);
+    if (!pick) return { ok: false, msg: '只能放弃你已有的永久增益。' };
+    /* 从永久列表里摘掉（叠层的一次只掉一层，掉光才移出）。 */
+    const row = (run.permanent || []).find((b) => b.id === id);
+    if (row) {
+      row.stacks = Math.max(0, Math.floor(Number(row.stacks) || 1) - 1);
+      if (row.stacks <= 0) run.permanent = run.permanent.filter((b) => b !== row);
+    }
+    /* 虚空铭文的免占位要一并清掉（那条增益已经不在本局了）。 */
+    run.slotFreeIds = (run.slotFreeIds || []).filter((v) => v !== id);
+    /* 成长类已经冻结进 run 的收益**不回收**（与「卖出/替换后保留」的既有口径一致），
+     * 但治愈类/烙印类的即时登记要按份数退回：这里只处理「获得时写进 run 的一次性登记」。 */
+    const mods = pick.buff.mods || {};
+    if (mods.permSlot) run.permSlots = Math.max(0, (Number(run.permSlots) || 0) - mods.permSlot);
+    const log = { id: id, name: pick.buff.name, stacks: row ? 0 : 0 };
+    run.lastSacrifice = { id: id, name: pick.buff.name, layer: run.layer };
+    run.phase = null;
+    advanceLayer(run, 'endless');
+    /* 需求：30 层过后，每通过 2 层随机抽一个碎掉的烙印作废。 */
+    const lost = applyBrokenMarkLoss(run);
+    save();
+    return { ok: true, sacrificed: log, lostMark: lost, layer: run.layer };
+  }
+  /**
+   * 需求：「30 层过后，每通过 2 层时随机抽取一个已碎掉的烙印，使其效果消失」。
+   * 放在 advanceLayer 之后统一判定 —— 只有真的进入新层才算「通过」，
+   * 这样中途退出/重开也不会多扣或漏扣。
+   */
+  function applyBrokenMarkLoss(run) {
+    const layer = Math.max(0, Math.floor(Number(run && run.layer) || 0));
+    if (!(layer > 30 && layer % 2 === 0)) return null;
+    const lost = loseRandomBrokenMark(run);
+    if (!lost) return null;
+    run.lostMarks = (run.lostMarks || []).concat([{ layer: layer, label: lost.label }]).slice(-20);
+    return lost;
   }
   /** 商店里的「结算」：等于结算点离场（抽奖卷入包、分数入账）。 */
   function settleFromShop() {
@@ -2944,6 +3104,28 @@
     choiceSlotsOf: (run) => choiceSlotsOf(run || endless().run),
     /* 只读：选取型 buff 的候选（测试用；skill 会过滤掉被动/防御类）。 */
     pickCandidatesOf: (kind) => pickCandidates(kind),
+    /* 只读：20 起每 10 层是否要放弃永久增益 / 可放弃的候选 / 已流失的碎烙印。 */
+    /* 调试/测试：关闭环境抽取（noEnvRoll 连当前环境一起清）。 */
+    _debugSetNoEnv: (on) => {
+      const e = endless();
+      if (!e.run) return { ok: false };
+      e.run.noEnvRoll = on !== false;
+      if (e.run.noEnvRoll) e.run.env = [];
+      return { ok: true, noEnvRoll: e.run.noEnvRoll };
+    },
+    needPermSacrifice: (layer) => needPermSacrifice(layer),
+    sacrificeCandidatesOf: (run) => sacrificeCandidates(run || endless().run),
+    /* 20 起每 10 层的「放弃一个永久增益」。 */
+    sacrificePerm: (id) => sacrificePerm(id),
+    /* 一次性取走本局待提示（含「碎掉的烙印失效」）。 */
+    takeRunToasts: () => {
+      const run = endless().run;
+      if (!run || !Array.isArray(run.pendingToasts) || !run.pendingToasts.length) return [];
+      const out = run.pendingToasts.slice();
+      run.pendingToasts = [];
+      return out;
+    },
+    brokenMarksOf: (run) => (run || endless().run || {}).brokenMarks || [],
     /* 只读：本局「天命所归」累计提供的稀有度系数。 */
     rarityBoostOf: (run) => D().rarityBoostOf(run || endless().run),
     /* 只读：某个即时类增益本局已获得的次数（重复获得概率递减用）。 */
@@ -3009,6 +3191,14 @@
     },
     /* 调试/探针用：把无尽对局直接挪到第 n 层（plan 一并重建，界面能正确显示
      * 「当前遭遇的机制」，例如第 6 层的荆棘反伤）。截图页 tools/tower-ui-probe.html 用。 */
+    /* 只读推进一层（测试用）：走真实 advanceLayer，因此会触发「30 层后每 2 层碎烙印失效」。 */
+    _debugAdvanceLayer: () => {
+      const e = endless();
+      if (!e.run) return { ok: false };
+      advanceLayer(e.run, 'endless');
+      save();
+      return { ok: true, layer: e.run.layer, toasts: (e.run.pendingToasts || []).slice() };
+    },
     _debugSetEndlessLayer(n) {
       const layer = Math.max(1, Math.floor(Number(n) || 1));
       const e = endless();

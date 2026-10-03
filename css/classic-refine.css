@@ -320,3 +320,19 @@
 .gear-sell-card.starred{border-color:#ffd323;box-shadow:0 0 6px rgba(255,211,35,.55)}
 .gear-sell-card .item-icon{position:relative}
 .star-text{color:#ffd323}
+
+/* 20 起每 10 层：放弃一个永久增益 */
+.sac-board .sac-lead{font-size:22px;line-height:1.6;margin-bottom:10px}
+.sac-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.sac-card{display:flex;flex-direction:column;gap:4px;text-align:left;padding:10px 12px;cursor:pointer;
+  background:#f3dcb2;border:2px solid #b9945f;border-radius:14px}
+.sac-card:hover{border-color:#c0392b;background:#f7e3c0}
+.sac-card b{font-size:23px}
+.sac-card .sac-desc{font-size:17px;line-height:1.5;color:#6b563a}
+.sac-card .sac-stack{font-style:normal;color:#a966b9}
+
+/* 过程提示（碎烙印失效等） */
+.run-toast{position:fixed;left:50%;bottom:120px;transform:translateX(-50%);z-index:9000;
+  background:rgba(40,26,14,.92);color:#ffd9a0;border:2px solid #b9945f;border-radius:12px;
+  padding:10px 20px;font-size:22px;pointer-events:none;opacity:1;transition:opacity .6s}
+.run-toast.out{opacity:0}

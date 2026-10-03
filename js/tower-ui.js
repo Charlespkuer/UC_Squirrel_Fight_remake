@@ -1155,8 +1155,13 @@
     const info = Tower.endlessInfo();
     const run = info.run;
     if (!run || run.phase !== 'sacrifice') return;
-    const cands = Tower.sacrificeCandidatesOf(run);
-    if (!cands.length) { Tower.sacrificePerm(null); openEndless(); return; }
+    /* 注意：`info.run` 是 endlessInfo() 拼出来的**只读副本**，里面没有
+     * permanent / limited 字段（界面另有 ownedBuffs 这条读法）。
+     * 早期这里传了 info.run，于是候选恒为空 → 直接调 sacrificePerm(null)
+     * 并弹出「只能放弃你已有的永久增益」，玩家点不动 —— 就是这个 bug。
+     * 必须不传参（走真实的 endless().run）。 */
+    const cands = Tower.sacrificeCandidatesOf();
+    if (!cands.length) { openEndless(); return; }
     const rows = cands.map((x) => {
       const b = x.buff;
       const stack = x.stacks > 1 ? ' <em class="sac-stack">×' + x.stacks + '</em>' : '';

@@ -541,6 +541,9 @@ test('需求12：刷新只抬高稀有度期望、不设保底货品', () => {
   run.phase = 'shop';
   run.shop = { layer: run.layer, retrySold: false, rerollFree: true, rerollCount: 0, rerollPaid: 0, slots: [] };
   const priceToCount = (p) => (p === 0 ? 0 : ((p - 10) / 10 + 1));
+  /* 固定随机种子：相邻两档的期望质量分只差 ~0.05，200 次抽样的噪声同量级，
+   * 不种子化时「价格 10 > 价格 0」会偶发红（实测约 1/10）。用固定种子后完全可复现。 */
+  c.__seed(20260415);
   const rows = [];
   for (const price of [0, 10, 20, 30, 40, 60]) {
     let score = 0, epics = 0, n = 0;
@@ -4063,6 +4066,91 @@ test('需求60：20 起每 10 层必须放弃一个永久增益 / 30 层后每 2
   assert.equal(r9.fragileMulBurned, 1, '前置条件：应当有 1 层损毁终焉');
   T._debugAdvanceLayer();
   assert.equal(T._debugRun('endless').fragileMulBurned, 0, '作废后 fragileMulBurned 应当归零');
+  T.abandon('endless');
+});
+
+test('需求61：放弃永久增益的弹窗必须能真的选出候选（修「点不动」）', () => {
+  const c = setup();
+  const T = c.Tower, S = c.State;
+
+  /* ① 根因回归：endlessInfo() 返回的 run 是**只读副本**，里面没有 permanent / limited。
+   *    所以任何「用 info.run 当候选来源」的界面代码都会拿到空列表。 */
+  S.newGame('r61' + Math.random());
+  const st = S.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  try { T.abandon('endless'); } catch (e) {}
+  T.startEndlessRun();
+  const r = T._debugRun('endless');
+  r.permanent = [{ id: 'C29', stacks: 1 }, { id: 'C27', stacks: 2 }];
+  r.limited = []; r.slotFreeIds = []; r.pendingToasts = []; r.phase = null;
+  T._debugSetEndlessLayer(20);
+  const rr = T._debugRun('endless');
+  rr.phase = 'shop'; rr.shop = {};
+  assert.equal(T.continueFromShop().phase, 'sacrifice', '第 20 层应当进入放弃阶段');
+  const info = T.endlessInfo();
+  assert.equal(info.run.phase, 'sacrifice', '界面副本里能看到 sacrifice 阶段');
+  assert.equal(info.run.permanent, undefined,
+    '前置条件：endlessInfo().run 是只读副本，不含 permanent（这正是 bug 的根源）');
+  /* 传副本 → 空候选；不传 → 真实候选 */
+  assert.equal(T.sacrificeCandidatesOf(info.run).length, 0,
+    '传界面副本时候选必然为空（bug 的复现条件）');
+  const real = T.sacrificeCandidatesOf();
+  assert.equal(real.map((x) => x.id).sort().join(','), 'C27,C29',
+    '不传参（读真实 run）时应当拿到全部候选：' + JSON.stringify(real.map((x) => x.id)));
+
+  /* ② 真跑一遍界面函数：弹窗要列出全部候选，点击要能完成放弃 */
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const seg = ui.slice(ui.indexOf('  function openPermSacrifice()'), ui.indexOf('  function openCheckpoint()'));
+  assert.ok(seg.length > 200, '应当截到 openPermSacrifice 的实现');
+  /* 断言它**没有**把 info.run 传给 sacrificeCandidatesOf（修好的标志）。 */
+  assert.ok(/Tower\.sacrificeCandidatesOf\(\)/.test(seg),
+    'openPermSacrifice 必须调用 sacrificeCandidatesOf()（不传界面副本）：' + seg.slice(0, 300));
+
+  const modals = [];
+  const mkEl = () => {
+    const els = [];
+    return { querySelector: () => null,
+      querySelectorAll: (sel) => (sel === '[data-sac]' ? els : []),
+      _els: els, classList: { add() {} }, dataset: {}, appendChild(x) { els.push(x); } };
+  };
+  const notices = [];
+  const classic = {
+    modal: (t, html, buttons) => {
+      const ids = [...String(html).matchAll(/data-sac="([^"]+)"/g)].map((mm) => mm[1]);
+      const el = mkEl();
+      for (const id of ids) el._els.push({ dataset: { sac: id }, onclick: null });
+      const m = { title: t, html: String(html), buttons: buttons, closed: 0,
+        close() { this.closed++; }, element: el };
+      modals.push(m); return m;
+    },
+    bind: () => {},
+  };
+  const ctx = { Tower: T, State: S, esc: (x) => String(x == null ? '' : x),
+    notice: (t) => notices.push(t), modal: classic.modal, openEndless: () => {}, bindTips: () => {},
+    console: { warn() {}, log() {} }, C: () => ({ bind: () => {} }),
+    Math: Math, JSON: JSON, Object: Object, Number: Number, String: String, Array: Array,
+    setTimeout: () => {}, clearTimeout: () => {} };
+  ctx.window = ctx;
+  vm.createContext(ctx);
+  vm.runInContext(seg + '\nopenPermSacrifice();', ctx, { filename: 'sac.js' });
+  const m = modals[modals.length - 1];
+  assert.ok(m, '应当弹出「放弃一个永久增益」');
+  assert.equal(m.title, '放弃一个永久增益', '弹窗标题：' + m.title);
+  const ids = (m.element._els || []).map((e) => e.dataset.sac);
+  assert.equal(ids.sort().join(','), 'C27,C29', '弹窗应当列出全部候选：' + JSON.stringify(ids));
+  assert.ok((m.element._els || []).every((e) => typeof e.onclick === 'function'),
+    '每张卡片都必须绑上点击（原来点不动就是因为候选为空、卡片根本没生成）');
+  assert.equal(notices.length, 0, '不应当先弹「只能放弃你已有的永久增益」：' + JSON.stringify(notices));
+  /* 点第一张 → 真的放弃掉并推进到下一层 */
+  const picked = m.element._els[0].dataset.sac;
+  m.element._els[0].onclick();
+  assert.equal(m.closed, 1, '点击后弹窗应当关闭');
+  const after = T._debugRun('endless');
+  assert.equal(after.layer, 21, '放弃后应当推进到第 21 层');
+  assert.equal(after.phase, null, '放弃后阶段应当清空');
+  const left = after.permanent.map((b) => b.id + 'x' + b.stacks).sort().join(',');
+  const expect = picked === 'C29' ? 'C27x2' : 'C29x1';
+  assert.equal(left, expect, '被点的那一项应当被放弃（掉一层或移除）：' + left + '（点了 ' + picked + '）');
   T.abandon('endless');
 });
 

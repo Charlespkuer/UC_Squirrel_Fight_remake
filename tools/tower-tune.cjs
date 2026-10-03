@@ -31,10 +31,12 @@ function single(layer, slot, level) {
   for (let i = 0; i < RUNS; i++) {
     Tower._debugSetLayer(layer - 1); Tower.startTowerRun();
     for (let k = 0; k < slot; k++) {
-      const nx0 = Tower.nextBattle('tower'); Tower.reportBattle('tower', nx0.token, true, (Tower._debugRun('tower').lastHp || Tower._debugRun('tower').lastMaxHp || 1), Tower._debugRun('tower').lastMaxHp);
+      const nx0 = Tower.nextBattle('tower'); var _r = Tower.towerInfo().run, _st = (Tower._debugRun && Tower._debugRun('tower')) || {};
+      Tower.reportBattle('tower', nx0.token, true, (_st.lastHp || (_r && _r.curHp) || 1), (_st.lastMaxHp || (_r && _r.curMaxHp) || 0));
       const ti = Tower.towerInfo(); if (ti.run && ti.run.choices) Tower.pickChoice('tower', 0);
     }
     const nx = Tower.nextBattle('tower');
+    if (!nx || nx.ok === false) continue;          // 这一局提前结束了，跳过
     const me = State.genAI(level, '', { levelJitter: 0, gearSelfLevel: true }); me.maxHp = me.hp; nx.adjustMe(me);
     if (Sim.simulate(me, nx.foe).winner === 0) win++;
     Tower.reportBattle('tower', nx.token, false, 0);

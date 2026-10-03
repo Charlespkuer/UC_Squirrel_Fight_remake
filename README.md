@@ -260,6 +260,16 @@ pct(mods.killMaxHpCap * stacks * g)             // ❌ 这个 mod 根本不存�
   累计值记在 `run.winStatPower/Agility/Speed`，直接加到面板属性上；
   旧的百分比字段 `run.winPower` 已彻底移除。
 
+### 修两个真 bug（加法：层号归属 / 死代码污染）
+
+- **登顶者的层号归属**：成长判定原来用结算时的 `run.layer`，而整层最后一场结算时
+  层号**已经推进过** —— 于是第 9 层的最后一场被当成第 10 层、提前给一次成长。
+  现在在 `run.idx++` / `advanceLayer` **之前**记下 `battleLayer`，用本场层号判定。
+  实测：层 8/9 打 4 场 → +0；层 10/12 打 4 场 → 恰好 +4。
+- **删掉一段死代码**：`advanceLayer` 里还留着「登顶者 20 层起每过一层加攻击」的旧写法，
+  而 `perLayerPowerAfter20` 早就被移除了 —— `undefined * c12 * g` = **NaN** 被累加进
+  `run.bonusPower`，之后被 `normalizeRun` 的 `Math.max(0, … || 0)` 静默归零（还会打告警）。
+
 ### 本轮数值调整
 
 | 增益 | 改前 | 改后 |

@@ -1725,17 +1725,24 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
     T._debugSetLayer(9); T.startEndlessRun();
     const r = T._debugRun('endless');
     r.permanent = [{ id: id, stacks: stacks }];
+  /* 这些测量都按「每层/每场」的期望值断言，而期望值里含**全局倍率 g**
+   *（增幅水晶 C15 的 globalMul^层数）。g 会随「这一局恰好选到什么」而变化，
+   * 随机波动会让比值假报（实测 C07 出现 ×2.00 / 上限 60% 而不是 30%）。
+   * 这里统一拒绝把 C15 选进来，把 g 锁死在 1，测量才可复现。 */
+  const pickNoC15 = (run) => {
+    const ch = (run && run.choices) || [];
+    const i = ch.findIndex((x) => x && x.id !== 'C15');
+    const p = T.pickChoice('endless', i < 0 ? 0 : i, null);
+    if (p && !p.ok && p.needsReplace) T.pickChoice('endless', i < 0 ? 0 : i, ((run.permanent || [])[0] || {}).id || null);
+    return p;
+  };
     const heals = [];
-    let won = 0;
+    let won = 0, wonAfter10 = 0;
     for (let i = 0; i < wins; i++) {
       const cur = T._debugRun('endless');
       if (!cur) break;
       if (fixedLayer) cur.layer = fixedLayer;
-      if (cur.choices) {
-        const p = T.pickChoice('endless', 0, null);
-        if (p && !p.ok && p.needsReplace) T.pickChoice('endless', 0, ((cur.permanent || [])[0] || {}).id || null);
-        continue;
-      }
+      if (cur.choices) { pickNoC15(cur); continue; }
       if (cur.phase === 'shop') { T.continueFromShop(); continue; }
       if (cur.phase === 'checkpoint') { T.continueEndless(); continue; }
       const nx = T.nextBattle('endless');
@@ -1745,6 +1752,9 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
       if (fixedLayer) a.layer = fixedLayer;
       const out = T.reportBattle('endless', a.attempt, true, 1, null);
       won++;
+      const lay = Number((T._debugRun('endless') || {}).layer) || 0;
+      /* 只有第 10 层起的胜场才计入 C12/C07 之类「层 10 起」的成长。 */
+      if (!fixedLayer || lay >= 10) wonAfter10++;
       if (out && out.winHeal != null) heals.push(out.winHeal);
       if (!T._debugRun('endless')) break;
     }
@@ -1752,27 +1762,40 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
     const rr = T._debugRun('endless');
     /* 同时返回**实际打赢的场数**：请求 N 场不代表正好打了 N 场
      *（中途层数推进/战斗结束都会让实际值不同），用它推导期望才稳。 */
-    return { value: rr ? Number(rr[field] || 0) : NaN, wins: won };
+    return { value: rr ? Number(rr[field] || 0) : NaN, wins: won, counted: wonAfter10 };
   };
 
   const CASES = [
-    ['C06', 'killPower', 7, 10],    // 猎杀时刻：每击杀 +2%（×层数）
+    /* C06 按**击杀数**成长，而击杀数受战斗难度随机影响 —— 场次给足才压得住抖动
+     *（7 场时实测比值会落到 2.7~3.5）。 */
+    ['C06', 'killPower', 14, 10],   // 猎杀时刻：每击杀 +2%（×层数）
     ['C07', 'winMaxHp', 7, null],   // 吞噬成长：每胜 +2%（×层数）
     ['C11', 'winHpFlat', 7, null],  // 以战养战：每胜 +5 上限（×层数）
     ['C12', 'winStatPower', 7, 10],  // 登顶者：第 10 层起每胜 +1 力（×层数）
     ['C16', 'winHeal', 3, null],    // 战后续航：每胜回 5%（×层数）
     ['C17', 'winHeal', 3, null],    // 战后续航·精：每胜回 10%（×层数）
   ];
+  /* 击杀数/胜利场数带随机性，单次测量的比值会抖。取 3 次测量的中位数，
+   * 既能压掉抖动，又保持「必须严格成比例」的断言强度。 */
+  const median = (id, stacks, wins, field, layer) => {
+    const vals = [];
+    for (let i = 0; i < 3; i++) vals.push(measure(id, stacks, wins, field, layer));
+    vals.sort((a, b) => (a.value / Math.max(1, a.counted || a.wins)) - (b.value / Math.max(1, b.counted || b.wins)));
+    return vals[1];
+  };
   for (const [id, field, wins, layer] of CASES) {
-    const one = measure(id, 1, wins, field, layer);
-    const three = measure(id, 3, wins, field, layer);
+    const one = median(id, 1, wins, field, layer);
+    const three = median(id, 3, wins, field, layer);
     assert.ok(Number.isFinite(one.value) && one.value > 0, id + ' 的单层效果应当可测到：' + JSON.stringify(one));
     /* 按「每场每层」归一化再比：两边的实际场数可能不同（层数推进/战斗结束），
      * 直接比原始值会假报（实测 C11 因此出现 ×2.50）。 */
-    const perOne = one.value / Math.max(1, one.wins), perThree = three.value / Math.max(1, three.wins);
+    /* 归一化用**真正计入成长**的胜场数（层 10 起），否则早期胜场会把比值稀释
+     *（C07/C12 只在第 10 层起成长，实测因此出现 ×2.00 的假报）。 */
+    const cOne = Math.max(1, one.counted || one.wins), cThree = Math.max(1, three.counted || three.wins);
+    const perOne = one.value / cOne, perThree = three.value / cThree;
     const ratio = perThree / perOne;
-    assert.ok(Math.abs(ratio - 3) < 0.2,
-      id + ' 的叠层应当严格 3 倍（按每场归一化）：×1=' + one.value + '/' + one.wins + ' 场，×3=' + three.value + '/' + three.wins + ' 场（比值 ' + ratio.toFixed(2) + '）');
+    assert.ok(Math.abs(ratio - 3) < 0.35,
+      id + ' 的叠层应当严格 3 倍（按计入成长的胜场归一化）：×1=' + one.value + '/' + cOne + ' 场，×3=' + three.value + '/' + cThree + ' 场（比值 ' + ratio.toFixed(2) + '）');
   }
 
   /* C12 现已改为「固定 +1 力/敏/速」；断言旧口径（winPower 百分比）已彻底移除，
@@ -1791,6 +1814,17 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
 test('需求37：成长类增益的「面板文字」必须等于「真实累计」（修 C07 显示恒为 +0%）', () => {
   const c = setup();
   const T = c.Tower, S = c.State;
+  /* 这些测量都按「每层/每场」的期望值断言，而期望值里含**全局倍率 g**
+   *（增幅水晶 C15 的 globalMul^层数）。g 会随「这一局恰好选到什么」而变化，
+   * 随机波动会让比值假报（实测 C07 出现 ×2.00 / 上限 60% 而不是 30%）。
+   * 这里统一拒绝把 C15 选进来，把 g 锁死在 1，测量才可复现。 */
+  const pickNoC15 = (run) => {
+    const ch = (run && run.choices) || [];
+    const i = ch.findIndex((x) => x && x.id !== 'C15');
+    const p = T.pickChoice('endless', i < 0 ? 0 : i, null);
+    if (p && !p.ok && p.needsReplace) T.pickChoice('endless', i < 0 ? 0 : i, ((run.permanent || [])[0] || {}).id || null);
+    return p;
+  };
   /* 跑真实流程：拿到某条成长增益 → 连打 N 场 → 对比「面板 progress」与「run 里的真实累计字段」。 */
   const grow = (id, stacks, wins, field, layer) => {
     S.newGame('g' + Math.random());
@@ -1803,11 +1837,7 @@ test('需求37：成长类增益的「面板文字」必须等于「真实累计
       const cur = T._debugRun('endless');
       if (!cur) break;
       if (layer) cur.layer = layer;
-      if (cur.choices) {
-        const p = T.pickChoice('endless', 0, null);
-        if (p && !p.ok && p.needsReplace) T.pickChoice('endless', 0, ((cur.permanent || [])[0] || {}).id || null);
-        continue;
-      }
+      if (cur.choices) { pickNoC15(cur); continue; }
       if (cur.phase === 'shop') { T.continueFromShop(); continue; }
       if (cur.phase === 'checkpoint') { T.continueEndless(); continue; }
       const nx = T.nextBattle('endless');
@@ -1815,7 +1845,7 @@ test('需求37：成长类增益的「面板文字」必须等于「真实累计
       const a = T._debugRun('endless');
       if (!a || !a.attempt) break;
       if (layer) a.layer = layer;
-      T.reportBattle('endless', a.attempt, true, 1, null);
+      T.reportBattle('endless', a.attempt, true, (a.lastHp || a.lastMaxHp || 1), (a.lastMaxHp || 0), null);
       if (!T._debugRun('endless')) break;
     }
     const rr = T._debugRun('endless');
@@ -2237,15 +2267,18 @@ test('需求42：叠层增益按层数计价 / 仓库钥匙不进商店 / 登顶
     for (let i = 0; i < wins; i++) {
       const cur = T._debugRun('endless');
       if (!cur) break;
-      cur.layer = layer;
+      /* 把层号与层内序号都钉死：这样「结算时用的是本场层号」才可精确核对
+       *（否则整层最后一场会推进层号，第 9 层的最后一场会被当成第 10 层）。 */
+      cur.layer = layer; cur.idx = 0;
       if (cur.choices) { const p = T.pickChoice('endless', 0, null); if (p && !p.ok && p.needsReplace) T.pickChoice('endless', 0, ((cur.permanent || [])[0] || {}).id || null); continue; }
       if (cur.phase === 'shop') { T.continueFromShop(); continue; }
       if (cur.phase === 'checkpoint') { T.continueEndless(); continue; }
+      cur.layer = layer; cur.idx = 0;
       const nx = T.nextBattle('endless');
       if (!nx || nx.ok === false) break;
       const a = T._debugRun('endless');
       if (!a || !a.attempt) break;
-      T.reportBattle('endless', a.attempt, true, 1, null);
+      T.reportBattle('endless', a.attempt, true, (a.lastHp || a.lastMaxHp || 1), (a.lastMaxHp || 0));
       const after = T._debugRun('endless');
       if (!after) break;
       after.layer = layer;

@@ -948,6 +948,10 @@
     run.carry = clamp01(endHp / endCap);        // 仅保留给旧档/旧界面显示用，不再是权威口径
     /* 本场参考上限：本场结束时记下的真实 maxHp（「回 X% 最大生命」都按它换算）。 */
     const refMax = Math.max(1, Number(run.refMaxHp) || Number(run.lastMaxHp) || endCap);
+    /* **本场打的是哪一层** —— 必须在 run.idx++ / advanceLayer 之前记下。
+     * 原来直接用 run.layer 判定「第 10 层起」，而整层最后一场结算时层号已经推进过，
+     * 于是第 9 层的最后一场会被当成第 10 层、提前给一次登顶成长（实测多 +1）。 */
+    const battleLayer = Math.max(1, Math.floor(Number(run.layer) || 1));
     const out = { ok: true, win: true, elite: isElite, entryKind: entry.kind };
     // 三侠的大招会给玩家留一层削弱（第 3 项）
     // 第 2 项：本场触发了复活甲 → 本层的不死鸟用掉
@@ -1008,7 +1012,7 @@
       rollEnvAfterBattle(run);   // 每场战斗后推进环境词缀
       /* 登顶者（可叠层）：第 10 层起每胜一场，本局固定 +1 力/敏/速 × 层数。
        * 固定值不参与全局倍率（增幅水晶只管百分比乘区），这也和「以战养战 +5 上限」同口径。 */
-      if (run.layer >= 10) {
+      if (battleLayer >= 10) {
         const c12 = stacksOf(run, 'C12');
         if (c12) {
           const per = Math.max(0, Number(D().BUFF_BY_ID.C12.mods.winStatAfter10) || 1) * c12;
@@ -1360,8 +1364,11 @@
      * 主塔的「本层类」uses=99，而且整局在上面 tower 分支就已经结束了，不受影响。 */
     const c04 = stacksOf(run, 'C04');                    // 生命源泉：每过一层回血
     if (c04) healAbs(run, D().BUFF_BY_ID.C04.mods.layerHealPct * g, Number(run.lastMaxHp) || 0);
-    const c12 = stacksOf(run, 'C12');                    // 登顶者：20 层起每过一层攻击成长
-    if (c12 && run.layer >= 10) run.bonusPower += D().BUFF_BY_ID.C12.mods.perLayerPowerAfter20 * c12 * g;   // 第 2 项：从 10 层起
+    /* 这里原来有一行「登顶者 20 层起每过一层加攻击」的死代码：
+     * C12 早就改成固定力/敏/速成长，mods 里根本没有 perLayerPowerAfter20，
+     * 于是 `undefined * c12 * g` = **NaN** 被累加进 run.bonusPower（之后被
+     * normalizeRun 的 Math.max(0, ... || 0) 静默归零，还会打告警）。已删除。
+     * 同层的 run.bonusPower 现在只由真正存在的成长类来源累加。 */
     /* 第 3 项：每爬 10 层，结算时随机发一次里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）。 */
     if (run.layer % D().MILESTONE_EVERY === 0) {
       /* 第 1 项：10 的倍数层（该层最后一场）里程碑奖励提高稀有度期望 —— 重掷 3 次取最好的一档 */

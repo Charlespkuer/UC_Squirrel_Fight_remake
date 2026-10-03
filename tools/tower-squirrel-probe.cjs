@@ -41,10 +41,11 @@ function pick(layer, idx) {
   for (let i = 0; i < idx; i++) {
     const nx = Tower.nextBattle('tower');
     if (!nx.ok) throw new Error('第 ' + (i + 1) + ' 场取场失败：' + nx.msg);
+    if (!nx || nx.ok === false) return null;
     const me = State.genAI(nx.foe.level, '', { levelJitter: 0, gearSelfLevel: true });
     me.maxHp = me.hp; nx.adjustMe(me);
     // 暖身战一律按胜利结算：本探针只关心第 4 场，输掉暖身战会让整层提前结束
-    Tower.reportBattle('tower', nx.token, true, (Tower._debugRun('tower').lastHp || Tower._debugRun('tower').lastMaxHp || 1), Tower._debugRun('tower').lastMaxHp);
+    Tower.reportBattle('tower', nx.token, true, ((Tower._debugRun && Tower._debugRun('tower') || {}).lastHp || Tower.towerInfo().run.curHp || 1), ((Tower._debugRun && Tower._debugRun('tower') || {}).lastMaxHp || Tower.towerInfo().run.curMaxHp || 0));
     const run = Tower.towerInfo().run;
     if (run && run.choices) Tower.pickChoice('tower', Math.max(0, run.choices.findIndex((x) => x.type === 'heal')));
   }

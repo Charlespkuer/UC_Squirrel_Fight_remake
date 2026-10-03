@@ -2591,6 +2591,81 @@ test('需求46：护盾（我方与敌方）—— 模拟结果暴露开局护�
     '应当存在挂 shellPct 的塔 buff（坚韧壁垒）');
 });
 
+test('需求47：空血上限的基准是「当前上限」（含固定值成长），不是获得时的血量', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
+    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
+  /* 指定一组增益与固定值加成，返回这一场的上限与「空的部分」。 */
+  const cap = (ids, flat, spendHp) => {
+    S.newGame('empty' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    T.startEndlessRun();
+    for (const id of ids) T.addBuff(T._debugRun('endless'), id);
+    const r = T._debugRun('endless');
+    if (flat) r.winHpFlat = flat;
+    if (spendHp) r.spendGain = { power: 0, agility: 0, speed: 0, hp: spendHp };
+    const nx = T.nextBattle('endless');
+    const me = mk(); nx.adjustMe(me);
+    return { maxHp: me.maxHp, hp: me.hp, empty: me.maxHp - me.hp };
+  };
+
+  /* ① 空血只按「百分比乘区」算时是对的 */
+  const c46 = cap(['C46']);                       // +30% 空上限
+  assert.equal(c46.maxHp, 6500, 'C46 把上限抬到 6500');
+  assert.equal(c46.empty, 1500, '空的部分 = 5000 × 30%');
+
+  /* ② **固定值成长必须并入空血基准**（这是本轮修的 bug）——
+   * 以前写成 `me.maxHp × (1+百分比) × E`，固定值那部分没算进空血，
+   * 于是以战养战 / 挥金如土叠起来后，空的部分明显偏小。 */
+  const flat500 = cap(['C46'], 500);
+  assert.equal(flat500.maxHp, 7150, '固定 +500 后上限应当是 7150，实测 ' + flat500.maxHp);
+  assert.equal(flat500.empty, Math.round((5000 + 500) * 0.30),
+    '空的部分要按「当前上限 5500」算 = 1650，实测 ' + flat500.empty);
+  assert.ok(flat500.empty > c46.empty, '固定值成长变多时空的部分必须跟着变大');
+  const spend500 = cap(['C46'], 0, 500);
+  assert.equal(spend500.empty, flat500.empty, '挥金如土的固定生命同样要并入空血基准');
+
+  /* ③ 多条空血上限按乘法叠加，空的部分乘数正确 */
+  /* 多条空血上限在聚合层是**相加**的（agg.emptyMaxHpMul += …），
+   * 所以 C46(30%) + C47(50%) = 80%：上限 9000、空的部分 4000。 */
+  const both = cap(['C46', 'C47']);
+  assert.equal(both.maxHp, 9000, 'C46+C47 的上限应当是 9000，实测 ' + both.maxHp);
+  assert.equal(both.empty, 4000, '空的部分 = 5000 × (30%+50%) = 4000，实测 ' + both.empty);
+  const n13 = cap(['N13']);                        // +100%
+  assert.equal(n13.empty, 5000, 'N13 的空的部分 = 5000（一倍）');
+
+  /* ④ 逐场重算：以战养战每胜 +5，空的部分应当随之上浮，而不是钉在获得时的值 */
+  S.newGame('perbattle' + Math.random());
+  const st = S.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  T.startEndlessRun();
+  T.addBuff(T._debugRun('endless'), 'C46');
+  T.addBuff(T._debugRun('endless'), 'C11');        // 以战养战：每胜 +5 上限
+  const empties = [];
+  for (let i = 0; i < 4; i++) {
+    const cur = T._debugRun('endless');
+    if (!cur) break;
+    if (cur.choices) { const p = T.pickChoice('endless', 0, null); if (p && !p.ok && p.needsReplace) T.pickChoice('endless', 0, ((cur.permanent || [])[0] || {}).id || null); continue; }
+    if (cur.phase === 'shop') { T.continueFromShop(); continue; }
+    if (cur.phase === 'checkpoint') { T.continueEndless(); continue; }
+    const nx = T.nextBattle('endless');
+    if (!nx || nx.ok === false) break;
+    const me = mk(); nx.adjustMe(me);
+    empties.push({ maxHp: me.maxHp, empty: me.maxHp - me.hp });
+    const a = T._debugRun('endless');
+    T.reportBattle('endless', a.attempt, true, me.maxHp, me.maxHp);
+    if (!T._debugRun('endless')) break;
+  }
+  assert.ok(empties.length >= 3, '至少要跑出 3 场：' + JSON.stringify(empties));
+  for (let i = 1; i < empties.length; i++) {
+    assert.ok(empties[i].empty > empties[i - 1].empty,
+      '空的部分必须随成长逐场上浮（第 ' + i + ' 场）：' + JSON.stringify(empties));
+  }
+  T.abandon('endless');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

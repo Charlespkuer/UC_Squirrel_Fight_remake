@@ -425,7 +425,9 @@
     if (a.winHealPct) lines.push(['战斗胜利后回血', pct(a.winHealPct)]);
     if (a.openStrikePct) lines.push(['开局打击', pct(a.openStrikePct) + ' 敌最大生命']);
     if (a.enemyPowerDown) lines.push(['敌人攻击', pct(-a.enemyPowerDown)]);
-    if (a.emptyMaxHpMul) lines.push(['空生命上限（不回血）', pct(a.emptyMaxHpMul)]);
+    /* 空血上限是乘法叠加的，清单里显示**合并后的真实比例**：
+     * 空的部分 / 最终上限，这样玩家看到的数字与战斗里的实际占比一致。 */
+    if (a.emptyMaxHpMul) lines.push(['空生命上限（不回血）', pct(a.emptyMaxHpMul / (1 + a.emptyMaxHpMul))]);
     /* 低血系（狂怒 + combo）：同一套阈值，清单里统一标出来源。 */
     const lowGate = '低血（≤' + Math.round(Math.max(a.lowHpAt, a.lowHpRegenAt) * 100) + '%）';
     if (a.lowHpPowerMul) lines.push([lowGate + '攻击', pct(a.lowHpPowerMul)]);
@@ -655,16 +657,35 @@
       const winMaxHp = Math.max(0, Number(run.winMaxHp) || 0);
       /* 第 9 项：挥金如土累计的生命上限（固定值，和「以战养战」的 winHpFlat 同口径）。 */
       const spendHp = run.spendGain ? Math.max(0, Number(run.spendGain.hp) || 0) : 0;
-      /* 「空血上限」（emptyMaxHpMul）：只抬高上限、**不把当前血量一起放大**。
-       * 关键：不能直接写 me.hp = maxHp × carry —— 那样抬上限会把当前血量一起抬上去，
-       * 「空」的那部分根本不存在（实测 60% 血量时 +100% 上限给出 6000/10000 而不是 3000/10000）。
-       * 正确做法是把空出来的那份从「折算当前血量的基数」里扣掉：
-       *   baseMaxHp（不含空血上限）用于算当前血量，maxHp（含）才是上限。
-       * 于是占比 = 原占比 / (1 + 空血上限)，正好把血线推进低血区间。 */
-      const emptyHp = Math.max(0, Number(agg.emptyMaxHpMul) || 0);
+      /* ============================================================
+       * 「空血上限」（emptyMaxHpMul）
+       *
+       * 语义（需求已经点明）：**空的那部分 = 当前最大生命 × 该比例**，
+       * 而「当前最大生命」是**这一场算出来的上限**（会随层数、成长、其它增益变化），
+       * 不是一个固定的「获得时的基准」。
+       *
+       * 所以每条「空血上限 +E」定义成「把空出来的那份放大 (1+E) 倍」——
+       * 多条同时生效时按 (1+E1)(1+E2)… 连乘，空出来的那份直接跟随最终上限走：
+       *     P = me.maxHp × (1 + maxHpMul + stickyHp + winMaxHp) × dMaxHp + flatHp
+       *     空的部分 = P × ((1+E1)(1+E2)… − 1)
+       *     maxHp    = P + 空的部分
+       * 于是「空的部分 / maxHp」= 1 − 1/∏(1+Ek)，正好等于写出来的那个百分比，
+       * 而且每场都会按当时的上限重算（层数变高、成长变多，空的部分也跟着变）。
+       *
+       * 曾经写成加法（空 = P × E、maxHp = P × (1+E)）：那样空的部分只占最终上限的
+       * E/(1+E)，写 30% 实际只有 23%，再叠上别的上限增益会更小 —— 这就是「有出入」的来源。
+       *
+       * 另外：当前血量始终按**不含空血上限**的基数折算（baseMaxHp），
+       * 所以空出来的那部分永远是真的空的。
+       * ============================================================ */
+      const emptyPct = Math.max(0, Number(agg.emptyMaxHpMul) || 0);
       const flatHp = Math.max(0, Number(run.winHpFlat) || 0) + spendHp;
+      /* baseMaxHp = **不含空血上限的当前上限**（已经含了固定值成长：以战养战 / 挥金如土）。
+       * 空的部分就按这个「当前上限」算 —— 这样层数变高、成长叠起来之后，
+       * 空出来的那份会跟着一起变大（需求要的「每场都按当前最大血量重算」）。 */
       const baseMaxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul + stickyHp + winMaxHp) * dMaxHp) + flatHp);
-      const maxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul + stickyHp + winMaxHp + emptyHp) * dMaxHp) + flatHp);
+      const emptyPart = Math.max(0, Math.round(baseMaxHp * emptyPct));
+      const maxHp = baseMaxHp + emptyPart;
       /* 选取型强化：指定武器出战时伤害 +pct（等价于力量翻倍），指定技能的触发档位 ×(1+pct) 且至少 +25 */
       const wBoost = run.weaponBoost || {};
       let weaponMul = 1;

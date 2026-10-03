@@ -39,6 +39,36 @@
   function endlessLevel(n) { return Math.min(70, Math.round(24 + 1.2 * (n - 1))); }
   const endlessSegment = (n) => Math.max(1, Math.ceil(n / 5));
   function endlessMult(n) { return Math.min(10, Math.pow(1.5, endlessSegment(n) - 1)); }
+  /* ============================================================
+   * 30 层之后的「深度曲线」（需求：30 层后的成长太缓）
+   *
+   * 原来敌人只有两条成长轴，各自都会**提前封顶**：
+   *   · endlessLevel：第 40 层起封顶 70 级（属性基数的成长归零）
+   *   · endlessMult ：第 31 层起封顶 ×10（段位倍率归零）
+   * 两者一封顶，第 31 层往后敌人的血量/攻击就**完全不变**了 —— 所以体感是平的。
+   *
+   * 这条曲线**独立于那两条封顶**，只在 30 层之后叠加：
+   *   30 层：×1.00（30 层及以前一点不影响，老平衡原样保留）
+   *   40 层：×1.40      50 层：×2.18
+   *   60 层：×3.87      70 层：×5.69
+   * 50 层起额外加速（rate2 3.5%/层），避免「每层固定 +6%」在后期也显得不够。
+   * ============================================================ */
+  const ENDLESS_DEEP_LAYER = 30;
+  const ENDLESS_DEEP_RATE = 0.06;     // 30 层之后每层 +6%
+  /**
+   * 30 层之后的敌方深度倍率（≤30 层恒为 1，不影响既有平衡）。
+   *
+   * 用**单一速率**（每层 ×1.06）而不是「越深越快」的复合指数：
+   * 每层的相对增幅恒定，玩家体感是「一层比一层紧」，而不是某个层数突然出现悬崖。
+   *   · 35 层 ×1.34    40 层 ×1.79    50 层 ×3.21
+   *   · 60 层 ×5.74    70 层 ×10.29   80 层 ×18.42   100 层 ×59.05
+   * 对比旧曲线（31 层起 M 封顶 ×10、40 层起 LT 封顶 70 级 → 之后**完全不变**），
+   * 这条曲线才是「越深越难」。
+   */
+  function endlessDepthMul(n) {
+    const layer = Math.max(0, Number(n) || 0);
+    return Math.pow(1 + ENDLESS_DEEP_RATE, Math.max(0, layer - ENDLESS_DEEP_LAYER));
+  }
   function endlessMechStacks(n) { return Math.min(ENDLESS_MECH_MAX, endlessSegment(n) - 1); }
   /** 本层怪物带的机制（按段轮转取前 N 个）。 */
   function endlessMechs(n) {
@@ -1026,9 +1056,9 @@
       desc: '立即获得 1 枚重新挑战币（失败时可回滚到该场战斗开始前再打一次）', mods: { instantRetry: 1 } },
     { id: 'E10', name: '背水一战', rarity: 2, kind: 'instant', endlessOnly: true,
       desc: '立即获得 5 枚重新挑战币（失败时可回滚到该场战斗开始前再打一次）', mods: { instantRetry: 5 } },
-    { id: 'E07', name: '挫锐', rarity: 0, kind: 'instant', endlessOnly: true,
+    { id: 'E07', name: '挫锐', rarity: 0, kind: 'instant', endlessOnly: true, repeatable: true, maxStacks: 1,
       desc: '立刻让本局所有敌人的生命上限 −10%（此后每场都生效，不占增益位）', mods: { enemyMaxHpDown: 0.10 } },
-    { id: 'E08', name: '卸甲', rarity: 1, kind: 'instant', endlessOnly: true,
+    { id: 'E08', name: '卸甲', rarity: 1, kind: 'instant', endlessOnly: true, repeatable: true, maxStacks: 1,
       desc: '立刻让本局所有敌人的生命上限 −15%（此后每场都生效，不占增益位）', mods: { enemyMaxHpDown: 0.15 } },
     /* —— 本轮第 6 项：和永久增益槽位互动的攻击 buff ——
      * C34 是「空槽越多越强」，C35 是「永久 buff 越多越强」，两者取向相反，
@@ -1271,6 +1301,7 @@
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
     FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, bossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,
     ENDLESS_LAYER_HEAL_PCT, MILESTONE_EVERY, MILESTONE_BOOK_COUNT, rollMilestone, PERMANENT_SLOTS,
+    endlessDepthMul, ENDLESS_DEEP_LAYER,
     buffScore, reviveScoreAt,
     SHOP_PRICE_OFFSET, rollShopPrice,
     rerollPriceAt, rerollTilt, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,

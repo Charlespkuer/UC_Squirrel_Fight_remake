@@ -230,6 +230,12 @@ test('需求5：x10 层只有最后一个敌人穿狂战套', () => {
     if (after) after.env = [];
   }
   assert.equal(seen.length, 5, '应当打完 5 场，实测 ' + seen.length);
+  /* 修 bug 回归：三选一的触发点原来写成 `won === 3 || (won === 4 && len === 5)`，
+   * `won === 3` 没看 len —— 5 场层会在打完第 4 场后挂上 choices，
+   * 下一轮直接结算层完成，**第 5 场的塔顶 boss 被整个跳过**。
+   * 所以这里必须确认第 5 场真的是狂战松鼠（而不是提前结束）。 */
+  assert.equal(seen[4].name.indexOf('狂战松鼠'), 0, '第 5 场必须是塔顶 boss，实测 ' + seen[4].name);
+  assert.equal(seen[4].elite, true, '塔顶 boss 应当是精英');
   const berserk = [201, 202, 203, 204];
   for (let i = 0; i < 4; i++) {
     const hit = seen[i].wears.filter((id) => berserk.includes(id));
@@ -4151,6 +4157,109 @@ test('需求61：放弃永久增益的弹窗必须能真的选出候选（修「
   const left = after.permanent.map((b) => b.id + 'x' + b.stacks).sort().join(',');
   const expect = picked === 'C29' ? 'C27x2' : 'C29x1';
   assert.equal(left, expect, '被点的那一项应当被放弃（掉一层或移除）：' + left + '（点了 ' + picked + '）');
+  T.abandon('endless');
+});
+
+test('需求62：减敌血的一次性 buff 一局一次 / 30 层后的敌人深度成长曲线', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const openRun = () => {
+    S.newGame('r62' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = []; r.instantIds = [];
+    return r;
+  };
+
+  /* ① 挫锐(E07) / 卸甲(E08)：一局只能拾取并生效一次 */
+  for (const id of ['E07', 'E08']) {
+    const b = TD.BUFF_BY_ID[id];
+    assert.equal(b.kind, 'instant', id + ' 应当是即时类');
+    assert.equal(b.maxStacks, 1, id + ' 应当限定一局一次：' + b.maxStacks);
+    assert.equal(b.repeatable, true, id + ' 需要 repeatable 才能让 maxStacks 生效（否则被 unique 直接排除）');
+    assert.ok(TD.endlessPool.some((x) => x.id === id), id + ' 应当在无尽塔池里');
+  }
+  openRun();
+  for (const id of ['E07', 'E08']) {
+    const b = TD.BUFF_BY_ID[id];
+    /* 拿到之前：可进池、可获得 */
+    assert.equal(T.poolFilterOf(T._debugRun('endless'), b), true, id + ' 未获得时应当可进池');
+    assert.equal(T.ownableOf(T._debugRun('endless'), b), true, id + ' 未获得时应当可获得');
+    const before = Number(T._debugRun('endless').enemyMaxHpDown) || 0;
+    T.addBuff(T._debugRun('endless'), id);
+    const mid = T._debugRun('endless');
+    assert.ok((Number(mid.enemyMaxHpDown) || 0) > before, id + ' 应当真的减少敌方血量');
+    assert.equal(T.instantOwnedCountOf(mid, id), 1, id + ' 应当记 1 次获得');
+    /* 拿到之后：不再进池、不再可获得（这就是「刷新不出来」的判据） */
+    assert.equal(T.poolFilterOf(mid, b), false, id + ' 获得后不该再进任何池子');
+    assert.equal(T.ownableOf(mid, b), false, id + ' 获得后不该再可获得');
+  }
+  /* 真实奖励路径：连打 40 步，E07/E08 各最多被拿到一次 */
+  {
+    const r = openRun();
+    const mk = () => ({ name: 'p', level: 70, power: 99999, agility: 99999, speed: 99999, maxHp: 99999, hp: 99999,
+      baseStats: { power: 99999, agility: 99999, speed: 99999 }, weapons: [{ id: 1, level: 15 }],
+      skills: [], wears: [], effects: {}, masterLevel: 0 });
+    const got = { E07: 0, E08: 0 };
+    for (let step = 0; step < 120; step++) {
+      const cur = T._debugRun('endless');
+      if (!cur || cur.layer > 40) break;
+      cur.env = [];
+      if (cur.choices) {
+        const i = cur.choices.findIndex((x) => x.id === 'E07' || x.id === 'E08');
+        if (i >= 0) { got[cur.choices[i].id]++; T.pickChoice('endless', i, null); }
+        else T.pickChoice('endless', 0, null);
+        continue;
+      }
+      if (cur.phase === 'shop') { T.continueFromShop(); continue; }
+      if (cur.phase === 'checkpoint') { T.continueEndless(); continue; }
+      if (cur.phase === 'sacrifice') { T.sacrificePerm((cur.permanent[0] || {}).id); continue; }
+      const nx = T.nextBattle('endless');
+      if (!nx || nx.ok === false) break;
+      const me = mk(); nx.adjustMe(me);
+      const a = T._debugRun('endless');
+      T.reportBattle('endless', a.attempt, true, me.maxHp, me.maxHp);
+    }
+    assert.ok(got.E07 <= 1, '一局内挫锐最多拿一次，实测 ' + got.E07);
+    assert.ok(got.E08 <= 1, '一局内卸甲最多拿一次，实测 ' + got.E08);
+  }
+
+  /* ② 30 层后的敌人成长曲线：不能再是一条平线 */
+  assert.equal(TD.endlessDepthMul(1), 1, '第 1 层不该有深度加成');
+  assert.equal(TD.endlessDepthMul(30), 1, '第 30 层不该有深度加成（老平衡原样保留）');
+  assert.ok(TD.endlessDepthMul(31) > 1, '第 31 层起应当开始加成长');
+  for (const L of [35, 40, 50, 60, 70, 80, 100]) {
+    assert.ok(TD.endlessDepthMul(L) > TD.endlessDepthMul(L - 1),
+      '第 ' + L + ' 层应当比上一层更高：' + TD.endlessDepthMul(L - 1) + ' → ' + TD.endlessDepthMul(L));
+  }
+  /* 单调且加速稳定：每层固定 ×1.06 */
+  for (const L of [31, 45, 70, 100]) {
+    const r = TD.endlessDepthMul(L) / TD.endlessDepthMul(L - 1);
+    assert.ok(Math.abs(r - 1.06) < 1e-9, '每层应当是固定 ×1.06（第 ' + L + ' 层实测 ×' + r.toFixed(4) + '）');
+  }
+  /* 实测敌人数值：30 层以后必须真的在涨（旧版 40 层后完全不变） */
+  const foeAt = (L) => {
+    openRun();
+    T._debugSetEndlessLayer(L);
+    const cur = T._debugRun('endless');
+    cur.env = [];
+    const nx = T.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '第 ' + L + ' 层应当能取到战斗');
+    return nx.foe;
+  };
+  const hp = {};
+  for (const L of [30, 40, 50, 60, 70, 80, 100]) hp[L] = foeAt(L).hp;
+  assert.ok(hp[40] > hp[30], '第 40 层血量应当高于第 30 层：' + hp[30] + ' → ' + hp[40]);
+  assert.ok(hp[50] > hp[40], '第 50 层血量应当高于第 40 层：' + hp[40] + ' → ' + hp[50]);
+  assert.ok(hp[70] > hp[50], '第 70 层血量应当高于第 50 层：' + hp[50] + ' → ' + hp[70]);
+  assert.ok(hp[100] > hp[80], '第 100 层血量应当高于第 80 层：' + hp[80] + ' → ' + hp[100]);
+  assert.ok(hp[70] / hp[30] > 8, '30→70 层的血量应当拉开明显差距（实测 ×' + (hp[70] / hp[30]).toFixed(2) + '）');
+  /* 属性也跟着涨（不只是血量） */
+  const pow30 = foeAt(30).power, pow70 = foeAt(70).power;
+  assert.ok(pow70 > pow30 * 3, '30→70 层的力量也应当明显提高：' + pow30 + ' → ' + pow70);
   T.abandon('endless');
 });
 

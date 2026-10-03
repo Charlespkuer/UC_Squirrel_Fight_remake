@@ -540,6 +540,11 @@
     const TD = D();
     const LT = mode === 'tower' ? TD.towerLevel(layer) : TD.endlessLevel(layer);
     const M = mode === 'tower' ? TD.towerMult(layer) : TD.endlessMult(layer);
+    /* 30 层之后的深度曲线（见 tower-data.js 的 endlessDepthMul）：
+     * 血量与属性一起放大，让「过了 30 层」真的越来越吃练度与对策。
+     * ≤30 层时恒为 1，既有平衡不受影响。 */
+    const KM = mode === 'tower' ? 1
+      : (TD.endlessDepthMul ? TD.endlessDepthMul(layer) : 1);
     const statBase = GData.stagePlayerStat(LT), hpBase = GData.stagePlayerHp(LT);
     // 无尽段机制叠加：所有怪物按固定顺序追加机制
     /* 段位机制已经并入环境词缀：这里不再自动追加，敌人身上也不再挂机制标签。
@@ -595,14 +600,14 @@
     const eliteMul = elite ? 1.2 : 1;   // 精英加成（x10 狂战）：作用在力量/敏捷/速度上
     // 敌方数值：高血低攻（系数在 tower-data.js 里，带注释，方便 tower-tune 复调）
     // 力量单独用更低的系数，敏捷/速度维持原基准；血量抬高。
-    const stat = (b, mul) => Math.max(1, Math.round(statBase * (mul || TD.FOE_STAT_MUL) * M * b * eliteMul));
+    const stat = (b, mul) => Math.max(1, Math.round(statBase * (mul || TD.FOE_STAT_MUL) * M * KM * b * eliteMul));
     const hero = entry.kind === 'hero';
     const warlord = entry.kind === 'warlord';           // x10 第 5 场
     const powMul = hero ? TD.FOE_HERO_POWER_MUL : warlord ? TD.FOE_WARLORD_POWER_MUL : TD.FOE_TRIAL_POWER_MUL;
     /* 第 2 项：血量先按三侠那一档算出来，boss / 狂战再乘一个 1.04~1.22 的小倍率 ——
      * 这样「最后一战的血条」永远只比前三场厚一点点，不会暴涨也不会反而更薄。
      * 精英 ×1.2 只加在输出上（血量已经通过 ratio 表达），免得 x10 又变成血量墙。 */
-    const heroHp = hpBase * TD.FOE_HP_MUL * TD.FOE_HERO_HP_MUL * M * bias.hp;
+    const heroHp = hpBase * TD.FOE_HP_MUL * TD.FOE_HERO_HP_MUL * M * KM * bias.hp;
     const hpRatio = hero ? 1 : warlord ? TD.WARLORD_HP_RATIO : TD.bossHpRatio(bias.hp, layer);
     const foe = {
       name, level: LT, npcType,
@@ -1244,17 +1249,22 @@
       return out;
     }
     if (run.idx >= run.plan.length) return layerClear(mode, run, out);
-    // 场间选择：第 1/2/3 场后必给；x10 层第 4 场后再给一次
     const won = run.idx, len = run.plan.length;
-    /* 第 3 项：场间选择从「每场都给」压成「只在第 4 场（题面）前给一次」，
-     * x10 层（5 场）在第 5 场精英前再给一次。这样每层只有 1~2 个决策点，
-     * 而且是在读过三侠的削弱之后才选，选项才有分量。 */
+    /* 场间选择：普通层（4 场）在第 4 场前给一次；x10 层（5 场）在第 5 场
+     * **塔顶 boss 前**给一次。
+     *
+     * 修 bug：原来这里是 `won === 3 || (won === 4 && len === 5)` ——
+     * `won === 3` **没看 len**，于是 5 场层打完第 4 场时才挂上三选一，
+     * 而下一轮 `nextBattle` 会先结算层完成、直接进商店/进下一层，
+     * 第 5 场（塔顶 boss）**被整个跳过**（玩家再也打不到狂战松鼠）。
+     * 现在按 len 决定触发点：4 场层 → 3，5 场层 → 4。 */
+    const choiceAfter = len === 5 ? 4 : 3;
     // 第 1 项：属性药丸按战斗数递减（胜败都算一场）
     for (const k of ['power', 'agility', 'speed']) {
       const slot = (run.pillSlots || {})[k];
       if (slot && slot.battles > 0) { slot.battles--; if (slot.battles <= 0) run.pillSlots[k] = null; }
     }
-    if (won === 3 || (won === 4 && len === 5)) run.choices = rollChoices(mode, run);
+    if (won === choiceAfter) run.choices = rollChoices(mode, run);
     out.achievements = takeAchievementToasts(run);
     out.choices = run.choices;
     out.permanent = (run.permanent || []).length;
@@ -1687,7 +1697,11 @@
     /* maxUses：**限次类**的「本局最多获得 N 次」上限（例：终焉烙印最多 3 次）。
      * 用 maxStacks 当阈值，但判据是总数而不是可叠层标记 —— 烙印不进 permanent，
      * 所以不能只靠上面那条 stackable 判断。 */
-    if (!buff.stackable && buff.maxStacks && buffCountOf(run, buff.id) >= Math.max(1, Math.floor(buff.maxStacks))) return false;
+    if (!buff.stackable && buff.maxStacks) {
+      /* 即时类不进 permanent / limited，另记在 instantIds 上；两者一起数。 */
+      const got = buffCountOf(run, buff.id) + instantOwnedCount(run, buff.id);
+      if (got >= Math.max(1, Math.floor(buff.maxStacks))) return false;
+    }
     /* repeatable：允许**重复出现**（例如虚空铭文 —— 每次只让一个永久增益免占位，
      * 重复刷到是有意义的）。这类不受 unique 的「已拥有就不再进池」限制；
      * 是否真的还能再拿一次由 addBuff 里的 pickBuffIds 把关。 */
@@ -1764,13 +1778,23 @@
     return picked;
   }
   function ownable(run, buff) {
+    /* 即时类不进 permanent / limited，ownedEntry 永远查不到 —— 必须先单独判上限，
+     * 否则会在第一行被 `if (!owned) return true` 直接放行
+     *（E07 挫锐 / E08 卸甲「一局只能生效一次」就是这么漏的）。 */
+    if (buff.kind === 'instant' && buff.maxStacks) {
+      const got = instantOwnedCount(run, buff.id);
+      return got < Math.max(1, Math.floor(buff.maxStacks));
+    }
     const owned = ownedEntry(run, buff.id);
     if (!owned) return true;
     /* 可叠层类的上限：优先用该增益自己的 maxStacks（例如 C50 只到 3 层），
      * 没写就用全局 STACK_MAX。叠满即视为「不可再获得」。 */
     if (buff.stackable !== true) {
-      /* 烙印类等「限次但一局最多 N 次」的：叠满 maxStacks 就不可再获得。 */
-      if (buff.maxStacks) return buffCountOf(run, buff.id) < Math.max(1, Math.floor(buff.maxStacks));
+      /* 烙印类 / 即时类等「一局最多 N 次」的：到上限就不可再获得。 */
+      if (buff.maxStacks) {
+        const got = buffCountOf(run, buff.id) + instantOwnedCount(run, buff.id);
+        return got < Math.max(1, Math.floor(buff.maxStacks));
+      }
       return false;                                                   // 同名唯一
     }
     const cap = Math.max(1, Math.floor(Number(buff.maxStacks) || D().STACK_MAX));
@@ -1934,7 +1958,15 @@
   function addBuff(run, id, replaceId) {
     const buff = D().BUFF_BY_ID[id];
     if (!buff) return { ok: false, msg: '没有这个增益' };
-    if (buff.kind === 'instant') { const r = applyInstant(run, buff); logBuff(run, id, 'instant', { detail: instantDetail(buff) }); return r; }
+    if (buff.kind === 'instant') {
+      /* 即时类不进 permanent / limited，所以「已获得几次」要单独记账 ——
+       * 这是 E07 挫锐 / E08 卸甲「一局只能生效一次」以及「天命所归」
+       * 重复获得降权的判据来源（见 poolFilter 的 maxStacks 与 pickByShopWeight）。 */
+      bumpInstant(run, id);
+      const r = applyInstant(run, buff);
+      logBuff(run, id, 'instant', { detail: instantDetail(buff) });
+      return r;
+    }
     /* 选取型（武器/技能强化）同样不占槽、不触发替换：立即登记，等界面做三选一。 */
     if (buff.mods && (buff.mods.pickWeaponPct || buff.mods.pickSkillPct)) {
       if (!buff.repeatable && (run.pickBuffIds || []).includes(buff.id)) {
@@ -2035,7 +2067,6 @@
      * 所以即时结算里显式累加层数，而不是只当一次性的数值结算。 */
     if (buff.mods && buff.mods.rarityBoost) {
       run.rarityBoost = Math.max(0, Math.floor(Number(run.rarityBoost) || 0)) + 1;
-      bumpInstant(run, buff.id);
       return { ok: true, msg: '本局稀有度提升已生效（' + run.rarityBoost + ' 层）', rarityBoost: run.rarityBoost };
     }
     const m = buff.mods || {};

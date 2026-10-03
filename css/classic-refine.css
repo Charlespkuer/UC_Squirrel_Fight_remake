@@ -336,3 +336,7 @@
   background:rgba(40,26,14,.92);color:#ffd9a0;border:2px solid #b9945f;border-radius:12px;
   padding:10px 20px;font-size:22px;pointer-events:none;opacity:1;transition:opacity .6s}
 .run-toast.out{opacity:0}
+
+/* 永久增益面板：附魔（虚空铭文·不占位）段与未附魔段之间的分界 */
+.buff-sep{display:inline-block;width:2px;height:26px;margin:0 6px;vertical-align:middle;
+  background:linear-gradient(to bottom,transparent,#8a6a3c,transparent);border-radius:2px}

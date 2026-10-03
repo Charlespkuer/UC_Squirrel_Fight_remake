@@ -49,6 +49,20 @@
    * 渲染好的效果文案、数值区间（悬停可见）。 */
   let replaceTarget = null;   // 第 1 项：永久增益满 5 格时，选中的「要被替换掉」的那个
 
+  /**
+   * 需求：被「虚空铭文」附魔（不占位）的永久增益**排在前面**，与未附魔的分开，
+   * 而不是混在一起。面板与「替换」弹窗共用这一份排序，避免两处口径不一致。
+   * 同组内保持原顺序（稳定排序），只按「是否附魔」分两段。
+   */
+  function orderPermanent(list, freeIds) {
+    const free = freeIds || [];
+    const arr = (list || []).slice();
+    const isFree = (b) => free.indexOf(b.id) >= 0;
+    return arr.map((b, i) => ({ b: b, i: i, f: isFree(b) ? 0 : 1 }))
+      .sort((x, y) => (x.f - y.f) || (x.i - y.i))
+      .map((x) => x.b);
+  }
+
   // ---------- 通用小件 ----------
   function carryBar(hp, maxHp, label, cls, tip) {
     /* 需求：血量继承改为**绝对值** —— 血条按「当前绝对值 / 当前上限」显示，
@@ -310,17 +324,25 @@
     const run = mode === 'tower' ? Tower.towerInfo().run : Tower.endlessInfo().run;
     if (!run || mode !== 'endless') return '';
     const list = Tower.ownedBuffs('endless');
-    const perm = list.filter((b) => b.kind === 'permanent');
-    const lim = list.filter((b) => b.kind === 'limited');
-    const cap = Number(run.permCap) || ((TowerData.PERMANENT_SLOTS || 5) + Math.max(0, Number(run.permSlots || 0)));   // 槽位上限含扩容类加成
     /* 本轮第 1 项：被「虚空铭文」附魔的增益不占槽，面板上标出来（计数走 run.permUsed）。 */
     const freeIds = run.slotFreeIds || [];
+    /* 需求：附魔过的排前面，和没附魔的分开显示。 */
+    const perm = orderPermanent(list.filter((b) => b.kind === 'permanent'), freeIds);
+    const lim = list.filter((b) => b.kind === 'limited');
+    const cap = Number(run.permCap) || ((TowerData.PERMANENT_SLOTS || 5) + Math.max(0, Number(run.permSlots || 0)));   // 槽位上限含扩容类加成
     const permHtml = perm.length
-      ? perm.map((b) => '<span class="buff-tag r' + b.rarity + (b.id === replaceTarget ? ' replacing' : '') +
-          (freeIds.indexOf(b.id) >= 0 ? ' slot-free' : '') + '" data-replace="' + b.id +
-          '" data-tip="' + esc(permTip(b)) + '" title="' + esc(permTip(b)) + '">' +
-          esc(b.name) + '<i>' + (freeIds.indexOf(b.id) >= 0 ? '不占位' : '永久') + '</i>' +
-          (b.stacks > 1 ? '<em>×' + b.stacks + '</em>' : '') + '</span>').join('')
+      ? perm.map((b, i) => {
+          const free = freeIds.indexOf(b.id) >= 0;
+          const nextFree = i + 1 < perm.length && freeIds.indexOf(perm[i + 1].id) >= 0;
+          /* 需求：附魔过的排在前面并与未附魔的**分开** ——
+           * 除了排序，在「最后一条附魔增益」之后插一道分界线，视觉上分成两段。 */
+          const divider = (free && !nextFree) ? '<span class="buff-sep" aria-hidden="true"></span>' : '';
+          return '<span class="buff-tag r' + b.rarity + (b.id === replaceTarget ? ' replacing' : '') +
+            (free ? ' slot-free' : '') + '" data-replace="' + b.id +
+            '" data-tip="' + esc(permTip(b)) + '" title="' + esc(permTip(b)) + '">' +
+            esc(b.name) + '<i>' + (free ? '不占位' : '永久') + '</i>' +
+            (b.stacks > 1 ? '<em>×' + b.stacks + '</em>' : '') + '</span>' + divider;
+        }).join('')
       : '<span class="buff-empty">还没有永久增益（每层的休整点可以拿）</span>';
     /* 本轮第 7 项：成长类增益的真实进度单独列一行 —— 只在悬停里写不够，
      * 面板上「吞噬成长 ×1」看起来就像没生效。 */
@@ -960,9 +982,10 @@
   /** 永久增益替换弹窗：onPick(entry) 执行实际替换，onCancel() 返回。 */
   function offerPermanentReplace(opts) {
     const o = opts || {};
-    const list = Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent');
-    if (!list.length) { notice('没有可以拿掉的永久增益。'); if (o.onCancel) o.onCancel(); return null; }
     const freeIds = (Tower.endlessInfo().run || {}).slotFreeIds || [];
+    /* 与面板同一口径：附魔（不占位）的排在前面。 */
+    const list = orderPermanent(Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent'), freeIds);
+    if (!list.length) { notice('没有可以拿掉的永久增益。'); if (o.onCancel) o.onCancel(); return null; }
     const rows = list.map((b, i) => {
       const free = freeIds.indexOf(b.id) >= 0;
       return '<button type="button" class="replace-pick r' + b.rarity + '" data-action="rp' + i + '"' +
@@ -1160,8 +1183,10 @@
      * 早期这里传了 info.run，于是候选恒为空 → 直接调 sacrificePerm(null)
      * 并弹出「只能放弃你已有的永久增益」，玩家点不动 —— 就是这个 bug。
      * 必须不传参（走真实的 endless().run）。 */
-    const cands = Tower.sacrificeCandidatesOf();
-    if (!cands.length) { openEndless(); return; }
+    const candsAll = Tower.sacrificeCandidatesOf();
+    if (!candsAll.length) { openEndless(); return; }
+    /* 与面板 / 替换弹窗同一口径：附魔（不占位）的排在前面。 */
+    const cands = orderPermanent(candsAll, (run && run.slotFreeIds) || []);
     const rows = cands.map((x) => {
       const b = x.buff;
       const stack = x.stacks > 1 ? ' <em class="sac-stack">×' + x.stacks + '</em>' : '';

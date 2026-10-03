@@ -217,7 +217,16 @@ test('需求5：x10 层只有最后一个敌人穿狂战套', () => {
     const r = c.Tower._debugRun('endless');
     r.env = [];
     if (r.layer !== 10) break;
-    if (r.choices) { c.Tower.pickChoice('endless', 0, null); continue; }
+    if (r.choices) {
+      /* 永久格子满了时 pickChoice 会返回 needsReplace 且**不消耗** choices ——
+       * 必须补一个替换目标，否则循环会原地打转（表现为「本层只打了 N 场」）。 */
+      const p = c.Tower.pickChoice('endless', 0, null);
+      if (p && !p.ok && p.needsReplace) {
+        const owned = (r.permanent || [])[0];
+        c.Tower.pickChoice('endless', 0, owned ? owned.id : null);
+      }
+      continue;
+    }
     if (r.phase) break;
     const nx = c.Tower.nextBattle('endless');
     if (!nx || nx.ok === false) break;
@@ -262,14 +271,24 @@ test('需求6：限次 buff 每场都扣（含整层最后一场）', () => {
     const r = c.Tower._debugRun('endless');
     if (r.layer !== 3) break;
     r.env = [];   // noEnvRoll 已在上面写成持久开关
-    if (r.choices) { c.Tower.pickChoice('endless', 0, null); continue; }
+    if (r.choices) {
+      const p = c.Tower.pickChoice('endless', 0, null);
+      if (p && !p.ok && p.needsReplace) {
+        const owned = (r.permanent || [])[0];
+        c.Tower.pickChoice('endless', 0, owned ? owned.id : null);
+      }
+      continue;
+    }
     if (r.phase) break;
     const nx = c.Tower.nextBattle('endless');
     if (!nx || nx.ok === false) break;
     const a = c.Tower._debugRun('endless');
-    c.Tower.reportBattle('endless', a.attempt, true, 1, null);
+    const rb = c.Tower.reportBattle('endless', a.attempt, true, 1, null);
     fought++;
     assert.equal(uses(), 10 - fought, '打完第 ' + fought + ' 场后应当剩 ' + (10 - fought) + '，实测 ' + uses());
+    /* 幻影回响必须被 noEnvRoll 关掉：它会把 idx 回退一格重复同一场，
+     * 让「本层应当打 N 场」的计数偏少（这条断言就是来钉住它的）。 */
+    assert.ok(!(rb && rb.repeat), '第 ' + fought + ' 场后不该触发幻影回响：' + JSON.stringify(rb && rb.repeat));
   }
   assert.equal(fought, len, '本层应当打 ' + len + ' 场，实测 ' + fought);
   assert.equal(uses(), 10 - len, '整层打完后应当正好扣掉 ' + len + ' 点');
@@ -2024,13 +2043,15 @@ test('需求38：永久增益替换弹窗改为竖排可滚动列表（不再横
 
   /* 用真实的 tower-ui 片段跑 offerShopReplace（只替换 C()/modal 等依赖） */
   const body = ui.slice(ui.indexOf('const RARITY_SHORT'), ui.indexOf('/** 每 10 层的里程碑奖励'));
+  /* 面板/弹窗的「附魔优先」排序函数在文件更前面，片段要把它一起带上。 */
+  const ordSeg = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  // ---------- 通用小件 ----------'));
   const ctx = { Tower: T, State: S, esc: (x) => String(x == null ? '' : x), notice: () => {},
     modal: classic.modal, openShop: () => {}, openEndless: () => {},
     C: () => ({ bind: (root, actions) => { binds.push(actions); } }),
     console: { warn() {}, log() {} }, Math: Math, JSON: JSON, Object: Object, Number: Number, String: String, Array: Array };
   ctx.window = ctx;
   vm.createContext(ctx);
-  vm.runInContext(body + '\nofferShopReplace(0, { id: "C03", name: "猎侠者" });', ctx, { filename: 'dlg.js' });
+  vm.runInContext(ordSeg + body + '\nofferShopReplace(0, { id: "C03", name: "猎侠者" });', ctx, { filename: 'dlg.js' });
   const m = modals[modals.length - 1];
   assert.ok(m, '应当弹出替换弹窗');
   assert.equal(m.buttons.map((b) => b.label).join(','), '取消', '底部按钮只应有取消：' + m.buttons.map((b) => b.label).join(','));
@@ -4127,7 +4148,9 @@ test('需求61：放弃永久增益的弹窗必须能真的选出候选（修「
   /* ② 真跑一遍界面函数：弹窗要列出全部候选，点击要能完成放弃 */
   const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
   const seg = ui.slice(ui.indexOf('  function openPermSacrifice()'), ui.indexOf('  function openCheckpoint()'));
+  const ordSeg61 = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  // ---------- 通用小件 ----------'));
   assert.ok(seg.length > 200, '应当截到 openPermSacrifice 的实现');
+  assert.ok(ordSeg61.length > 100, '应当截到 orderPermanent 的实现');
   /* 断言它**没有**把 info.run 传给 sacrificeCandidatesOf（修好的标志）。 */
   assert.ok(/Tower\.sacrificeCandidatesOf\(\)/.test(seg),
     'openPermSacrifice 必须调用 sacrificeCandidatesOf()（不传界面副本）：' + seg.slice(0, 300));
@@ -4158,7 +4181,7 @@ test('需求61：放弃永久增益的弹窗必须能真的选出候选（修「
     setTimeout: () => {}, clearTimeout: () => {} };
   ctx.window = ctx;
   vm.createContext(ctx);
-  vm.runInContext(seg + '\nopenPermSacrifice();', ctx, { filename: 'sac.js' });
+  vm.runInContext(ordSeg61 + seg + '\nopenPermSacrifice();', ctx, { filename: 'sac.js' });
   const m = modals[modals.length - 1];
   assert.ok(m, '应当弹出「放弃一个永久增益」');
   assert.equal(m.title, '放弃一个永久增益', '弹窗标题：' + m.title);
@@ -4359,6 +4382,64 @@ test('需求63：开局回血类 buff 要吃到局内加生命上限的加成', 
     const line = (lines.effects || []).find((x) => x[0] === '开战回血');
     if (line) assert.ok(/最大生命/.test(line[1]), '文案应当说明是按最大生命：' + JSON.stringify(line));
   }
+  T.abandon('endless');
+});
+
+test('需求64：被虚空铭文附魔的永久增益排在前面，与未附魔的分开', () => {
+  const c = setup();
+  const T = c.Tower, S = c.State;
+  const openRun = () => {
+    S.newGame('r64' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    /* 6 个永久增益，第 2 / 5 个被附魔（不占位） */
+    r.permanent = [{ id: 'C29', stacks: 1 }, { id: 'C27', stacks: 1 }, { id: 'C22', stacks: 1 },
+      { id: 'C07', stacks: 2 }, { id: 'C12', stacks: 1 }, { id: 'C48', stacks: 1 }];
+    r.limited = []; r.slotFreeIds = ['C27', 'C12']; r.env = []; r.noEnvRoll = true;
+    return r;
+  };
+  openRun();
+  const raw = T.ownedBuffs('endless').filter((b) => b.kind === 'permanent').map((b) => b.id).join(',');
+  assert.equal(raw, 'C29,C27,C22,C07,C12,C48', '前置条件：原始顺序是这个（附魔的混在中间）：' + raw);
+
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const ordSeg = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  // ---------- 通用小件 ----------'));
+  assert.ok(ordSeg.length > 100, '应当截到 orderPermanent 的实现');
+
+  const ctx = { Tower: T, State: S, console,
+    esc: (x) => String(x == null ? '' : x), Math: Math, JSON: JSON, Object: Object,
+    Number: Number, String: String, Array: Array };
+  ctx.window = ctx;
+  vm.createContext(ctx);
+  vm.runInContext(ordSeg + `
+var list = Tower.ownedBuffs('endless').filter(function (b) { return b.kind === 'permanent'; });
+var out = orderPermanent(list, ['C27', 'C12']).map(function (b) { return b.id; });
+`, ctx, { filename: 'ord.js' });
+  assert.equal(ctx.out.join(','), 'C27,C12,C29,C22,C07,C48',
+    '附魔的应当排到最前，其余保持原相对顺序：' + ctx.out.join(','));
+  /* 同组内稳定：不附魔的相对顺序不变 */
+  assert.equal(ctx.out.slice(2).join(','), 'C29,C22,C07,C48', '未附魔的相对顺序不该被打乱');
+  /* 边界：没有附魔时顺序完全不变 */
+  vm.runInContext(`
+var out2 = orderPermanent(Tower.ownedBuffs('endless').filter(function (b) { return b.kind === 'permanent'; }), []).map(function (b) { return b.id; });
+var out3 = orderPermanent([], ['C29']).map(function (b) { return b.id; });
+`, ctx, { filename: 'ord2.js' });
+  assert.equal(ctx.out2.join(','), 'C29,C27,C22,C07,C12,C48', '没有附魔时不该改变顺序：' + ctx.out2.join(','));
+  assert.equal(ctx.out3.length, 0, '空列表不该报错');
+
+  /* 源码口径：面板、替换弹窗、放弃弹窗三处都要走这个排序 */
+  const uses = (ui.match(/orderPermanent\(/g) || []).length;
+  assert.ok(uses >= 4, '面板 + 替换弹窗 + 放弃弹窗 + 定义本身，至少 4 处用到 orderPermanent，实测 ' + uses);
+  assert.ok(ui.indexOf('const perm = orderPermanent(') > 0, '面板的永久列表必须走 orderPermanent');
+  assert.ok(ui.indexOf("const list = orderPermanent(Tower.ownedBuffs('endless')") > 0,
+    '替换弹窗的列表必须走 orderPermanent');
+  assert.ok(ui.indexOf('const cands = orderPermanent(candsAll') > 0,
+    '放弃永久增益弹窗的候选必须走 orderPermanent');
+  /* 面板还要有「附魔段 / 未附魔段」的分界线 */
+  assert.ok(ui.indexOf("buff-sep") > 0, '面板应当有附魔段与未附魔段的分界线');
   T.abandon('endless');
 });
 

@@ -2736,6 +2736,86 @@ test('需求48：吞噬成长 / 以战养战 的累计生命上限在被替换�
   T.abandon('endless');
 });
 
+test('需求49：神兵淬炼 / 秘技通神 视为「立即生效类」，永久栏满时仍可购买', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
+    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [{ id: 1, level: 5 }], skills: ['13:5'],
+    wears: [], effects: {}, masterLevel: 0 });
+  /* 槽位占用/上限通过 debugBuffReport 暴露（permUsed/permSlots 没有单独导出）。 */
+  const slotsOf = () => T.debugBuffReport('endless').slots;
+  /* 起一局并把永久栏塞满（5/5），商店已开；可选地预置 choices。 */
+  const fullRun = (choiceIds) => {
+    S.newGame('instant' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = ['C21', 'C22', 'C23', 'C26', 'C27'].map((id) => ({ id: id, stacks: 1 }));
+    r.coins = 99999;
+    r.phase = 'shop';
+    r.shop = { layer: r.layer, retrySold: false, rerollFree: true, rerollCount: 0, rerollPaid: 0, slots: [] };
+    if (choiceIds) r.choices = choiceIds.map((id) => ({ id: id, rarity: 2 }));
+    return r;
+  };
+  const buy = (id) => {
+    const rr = T._debugRun('endless');
+    rr.shop.slots = [{ id: id, sold: false, price: 1 }];
+    const out = T.buyShopSlot(0);
+    return { out: out, run: T._debugRun('endless') };
+  };
+
+  /* ① 定义核对：这两条是 permanent 但**不占槽**的选取类 */
+  for (const [id, key] of [['C32', 'pickWeaponPct'], ['C33', 'pickSkillPct']]) {
+    const b = TD.BUFF_BY_ID[id];
+    assert.ok(b, id + ' 应当存在');
+    assert.ok(b.mods && b.mods[key], id + '（' + b.name + '）应当挂 ' + key);
+    assert.equal(b.hidden, true, id + ' 应当是隐藏型（不在增益面板/商店池里单独出现）');
+    assert.equal(b.unique, true, id + ' 应当一局一次');
+  }
+
+  /* ② 满槽时买神兵淬炼：应当成功、不占新的槽、立刻登记「待选武器」 */
+  let r = fullRun();
+  assert.equal(slotsOf().used, slotsOf().cap, '前置条件：永久栏应当已满');
+  let res = buy('C32');
+  assert.ok(res.out.ok, '满槽时应当能买神兵淬炼：' + JSON.stringify(res.out));
+  assert.ok(!res.out.needsReplace, '不该要求替换');
+  assert.equal(slotsOf().used, slotsOf().cap, '永久栏占用不该增加');
+  assert.ok(res.run.pendingPick && res.run.pendingPick.kind === 'weapon',
+    '应当立刻登记「待选武器」：' + JSON.stringify(res.run.pendingPick));
+  assert.ok((res.run.pickBuffIds || []).indexOf('C32') >= 0, '应当登记「一局一次」以免重复刷到');
+
+  /* ③ 满槽时买秘技通神：同理，登记「待选技能」 */
+  r = fullRun();
+  res = buy('C33');
+  assert.ok(res.out.ok, '满槽时应当能买秘技通神：' + JSON.stringify(res.out));
+  assert.equal(slotsOf().used, slotsOf().cap, '永久栏占用不该增加');
+  assert.ok(res.run.pendingPick && res.run.pendingPick.kind === 'skill',
+    '应当立刻登记「待选技能」：' + JSON.stringify(res.run.pendingPick));
+
+  /* ④ 满槽时买**真的占槽**的增益：仍然要求替换（不能被这条需求放宽） */
+  r = fullRun();
+  res = buy('C29');                                   // 体质：永久 +10% 生命上限
+  assert.ok(!res.out.ok && res.out.needsReplace,
+    '占槽的永久增益满槽时应当要求替换：' + JSON.stringify(res.out));
+
+  /* ⑤ 场间选择（战斗奖励）路径同样放行 */
+  r = fullRun(['C32']);
+  const picked = T.pickChoice('endless', 0, null);
+  assert.ok(picked.ok, '满槽时场间选择也该能拿神兵淬炼：' + JSON.stringify(picked));
+  assert.ok(T._debugRun('endless').pendingPick, '应当登记待选目标');
+
+  /* ⑥ 扩容类（+槽位）也不该被满槽挡住 */
+  r = fullRun();
+  const beforeSlots = slotsOf().cap;
+  res = buy('C30');                                   // 扩容背包：永久槽位 +1
+  assert.ok(res.out.ok, '满槽时应当能买扩容背包：' + JSON.stringify(res.out));
+  assert.equal(slotsOf().cap, beforeSlots + 1, '槽位上限应当 +1');
+
+  T.abandon('endless');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

@@ -1709,7 +1709,9 @@
     }
     /* 满格判定按**加入后的占用**：占位类增益会 +1，所以只要 permUsed + 1 > 上限就得替换。
      * 免占位的（虚空铭文附魔过的）不占位，不受此限。 */
-    if (buff.kind === 'permanent' && permUsed(run) + 1 > permSlots(run)) {
+    /* 满格判定同样只针对**真的占槽**的增益：不占槽的选取类 / 扩容类在上面已经提前
+     * return 了，这里再统一用 occupiesPermSlot 收口（两道闸，防止将来新增不占槽类型时漏改）。 */
+    if (occupiesPermSlot(buff) && permUsed(run) + 1 > permSlots(run)) {
       if (!replaceId) return { ok: false, needsReplace: true, buff, msg: '永久增益已满，先选一个替换掉' };
       const at = list.findIndex((b) => b.id === replaceId);
       if (at < 0) return { ok: false, needsReplace: true, buff, msg: '要替换的增益不存在' };
@@ -1890,8 +1892,10 @@
     const slot = run.shop.slots[index];
     if (!slot || slot.sold) return { ok: false };
     const buff = D().BUFF_BY_ID[slot.id];
-    // 永久增益满 5 格时先让玩家去替换（商店里不弹替换面板，避免一次点出两层交互）
-    const permanentFull = buff.kind === 'permanent' && permUsed(run) >= permSlots(run) &&
+    /* 永久增益满格时先让玩家去替换（商店里不弹替换面板，避免一次点出两层交互）。
+     * 需求：**不占槽的「立即生效类」（神兵淬炼 / 秘技通神 等）满格时照样能买** ——
+     * 它们不会进永久栏，所以用 occupiesPermSlot 判定，而不是 kind === 'permanent'。 */
+    const permanentFull = occupiesPermSlot(buff) && permUsed(run) >= permSlots(run) &&
       !(run.permanent || []).some((b) => b.id === buff.id);
     if (permanentFull && !replaceId) {
       // 第 1 项：不再把玩家打发回主界面 —— 直接把替换目标的选择交给界面
@@ -2109,6 +2113,22 @@
     const gain = Math.max(1, Math.round(ref * p));
     run.hpAbs = hpAbsOf(run) + gain;
     return gain;
+  }
+  /** 这条增益**是否真的占用永久槽位**。
+   * 「立即生效类」都不占槽 —— 它们的收益是当场结算（或当场登记一个待选目标），
+   * 不会留在永久栏里，所以槽位满时照样应当能拿：
+   *   · kind === 'instant'（即时类）
+   *   · 选取型 pickWeaponPct / pickSkillPct（神兵淬炼 C32 / 秘技通神 C33）
+   *   · 虚空铭文 pickPermanentFree
+   *   · 扩容类 permSlot（扩容背包 C30 / 仓库钥匙 C31）
+   * addBuff 早就有对应的提前分支，但**满格判定**（界面提示 + 商店拦截）原来只看
+   * kind === 'permanent'，于是槽位满时买不了这几条 —— 这正是本条需求要修的。
+   * 注意：永久类的**百分比生命上限**（maxHpMul）是折算进 run.hpBonus 的，仍然占槽。 */
+  function occupiesPermSlot(buff) {
+    if (!buff || buff.kind !== 'permanent') return false;
+    const m = buff.mods || {};
+    if (m.pickWeaponPct || m.pickSkillPct || m.pickPermanentFree || m.permSlot) return false;
+    return true;
   }
   /** C07 吞噬成长的百分比累计（含上限封顶口径，与 adjustMe 保持一致）。 */
   function winMaxHpOf(run) {

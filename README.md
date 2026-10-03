@@ -304,6 +304,45 @@ pct(mods.killMaxHpCap * stacks * g)             // ❌ 这个 mod 根本不存�
 结果：挑战塔池 64 条（限次 31 / 永久 33，其中 31 条专属），无尽池 54 条，商店池 52 条；
 **无尽池里 0 条 towerOnly，挑战塔池里 0 条 endlessOnly**。
 
+### 不占槽的「立即生效类」：永久栏满时照样能拿
+
+**症状**：永久栏满 5 格时，买不了 **神兵淬炼（C32）/ 秘技通神（C33）**。
+
+**根因**：满格判定只看 `kind === 'permanent'`，没排除「不占槽」的类型 ——
+`addBuff` 内部早就有对应的提前分支（结果是对的），但**外层的拦截**先把它挡掉了：
+
+```js
+// buyShopSlot：只看 kind，于是选取类也被要求替换
+const permanentFull = buff.kind === 'permanent' && permUsed(run) >= permSlots(run) && …
+```
+
+**修正**：新增 `occupiesPermSlot(buff)` 作为唯一判定，并让所有满格检查都走它：
+
+```js
+function occupiesPermSlot(buff) {
+  if (!buff || buff.kind !== 'permanent') return false;
+  const m = buff.mods || {};
+  if (m.pickWeaponPct || m.pickSkillPct || m.pickPermanentFree || m.permSlot) return false;
+  return true;
+}
+```
+
+即**「立即生效类」都不占槽**：即时类、选取型（神兵淬炼 / 秘技通神 / 虚空铭文）、
+扩容类（扩容背包 / 仓库钥匙）。注意永久类的百分比生命上限（`maxHpMul`）是折算进
+`run.hpBonus` 的，仍然占槽。
+
+实测（永久栏 5/5 满格时）：
+
+| 增益 | 结果 |
+|---|---|
+| C32 神兵淬炼 | ✅ 买到，永久栏仍 5，立刻登记「待选武器」 |
+| C33 秘技通神 | ✅ 买到，永久栏仍 5，立刻登记「待选技能」 |
+| C30 扩容背包 | ✅ 买到，槽位上限 5 → 6 |
+| C31 仓库钥匙 | ✅ 买到，槽位上限 5 → 7 |
+| C29 体质（占槽） | ⛔ 仍要求替换（没被放宽）✅ |
+
+场间选择（战斗奖励）走同一个 `addBuff`，同样放行。
+
 ### 成长类生命上限：被替换后不再消失（吞噬成长 / 以战养战）
 
 **症状**：C07 吞噬成长、C11 以战养战攒了一堆生命上限，被新永久增益**替换掉**之后，

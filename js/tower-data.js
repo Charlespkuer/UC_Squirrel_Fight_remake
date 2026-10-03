@@ -96,8 +96,26 @@
       desc: '我方试炼币 %coinBonus%，但敌方生命上限 %enemyMaxHpMul%' },
     { id: 'dusk', name: '血色黄昏', bad: false, mods: { bothLifestealPct: [0.10, 0.18, 'pct'] },
       desc: '双方吸血 %bothLifestealPct%' },
+    /* —— 回响类：不改战斗数值，只改「打完这一场之后会发生什么」 ——
+     * 幻影回响：**只**在三侠战生效，胜利后有 %repeatChance% 概率立刻再打同一场。
+     * 数值随层数在 17%~23% 之间取值（见 repeatChanceInterval），
+     * 目的是让「战斗叠层」类增益（猎杀时刻 / 吞噬成长 / 以战养战 / 登顶者 / 战后续航）
+     * 多一份弹性空间 —— 重复的那一场同样计入叠层。 */
+    { id: 'echo', name: '幻影回响', bad: false, repeatOnly: true,
+      mods: { repeatChance: [0.17, 0.23, 'pct'] },
+      desc: '三侠战胜利后有 %repeatChance% 概率立刻再战同一场（重复的战斗同样计入叠层）' },
   ]);
   const ENDLESS_ENV_BY_ID = Object.freeze(ENDLESS_ENV.reduce((m, e) => (m[e.id] = e, m), {}));
+  /** 「幻影回响」在该层的概率区间：下沿固定 17%，上沿随层数从 17% 抬到 23%
+   *  （第 1 层 17%，之后每层 +0.5%，第 13 层起封顶 23%）。
+   *  这样「17~23%」这个区间本身就是**随层数展开**的，后期更容易触发。 */
+  function repeatChanceInterval(layer) {
+    const spec = (ENDLESS_ENV_BY_ID.echo.mods || {}).repeatChance;
+    const lo = Array.isArray(spec) ? Number(spec[0]) : Number(spec);
+    const hi = Array.isArray(spec) ? Number(spec[1]) : Number(spec);
+    const t = Math.max(0, Math.min(1, (Math.max(1, Number(layer) || 1) - 1) / 12));
+    return [lo, lo + (hi - lo) * t];
+  }
   /* 需求 7：环境**最多同时两层**（ENV_MAX 是硬上限）。
    * 原来源码里写的是 3，而且 rollEnvAfterBattle 里「15 层起固定补 2 条」是不管上限的
    * 强行补，所以实测能叠到 4 条。现在两层封顶：层数再高也只补到 2。 */
@@ -132,6 +150,9 @@
   /** 把模板里的 %key% 用实际值渲染出来 → { text, values, keys }。 */
   function envText(def, values) {
     const v = values || rollEnvMods(def);
+    /* 「幻影回响」的数值本身就是概率，直接按摇到的值渲染（不用「区间」写法），
+     * 免得和别的环境一样显示成「+17%~+23%」。 */
+
     const keys = [];
     const text = String(def.desc || '').replace(/%([\w]+)%/g, (_, key) => {
       if (!keys.includes(key)) keys.push(key);
@@ -1053,7 +1074,7 @@
     endlessLevel, endlessSegment, endlessMult, endlessMechStacks, endlessMechs, ENDLESS_MECH_MAX, endlessTickets,
     GEAR_TIER, gearKeyForLayer, gearTierCap, ENDLESS_BOSS_POOL,
     ENDLESS_ENV, ENDLESS_ENV_BY_ID, envChance, rollEnvMods, envText, envRange, envRangeText, envPctKeys,
-    ENV_START_LAYER, ENV_TWO_LAYER, ENV_MAX, ENV_DUR,
+    ENV_START_LAYER, ENV_TWO_LAYER, ENV_MAX, ENV_DUR, repeatChanceInterval,
     ENDLESS_MECH_ORDER, ENDLESS_CONSOLATION_LAYER, SCORE, COINS, SHOP, shopPrice,
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
     FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, bossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,

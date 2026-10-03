@@ -734,6 +734,17 @@
     if (mode === 'endless') {
       const cont = () => { if (rw.layerComplete && rw.phase === 'shop') openShop(); else openEndless(); };
       if (rw.milestone) { milestoneModal(rw, cont); return; }
+      /* 幻影回响：三侠战胜利后立刻再战同一场。要给玩家一个明确提示，
+       * 否则会以为是「同一场打了两遍」的 bug。 */
+      if (rw.repeat) {
+        const rp = rw.repeat;
+        modal(rp.name || '幻影回响',
+          '<div class="result-box"><div class="result-title">回 响</div>' +
+          '<p>三侠的幻影尚未散去 —— 立刻再战第 ' + Math.max(1, Number(rp.battleNo) || 1) + ' 场（同一对手）。</p>' +
+          '<p class="dim">触发概率 ' + Math.round((Number(rp.chance) || 0) * 100) + '% · 这一场同样计入叠层</p></div>',
+          [{ label: '再战一场', cls: 'gold', run: () => fight(mode) }], { small: true });
+        return;
+      }
       cont();
       return;
     }

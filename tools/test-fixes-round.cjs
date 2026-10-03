@@ -204,8 +204,12 @@ test('需求5：x10 层只有最后一个敌人穿狂战套', () => {
   assert.equal(run.plan.length, 5, '第 10 层应当是 5 场');
   assert.equal(run.plan[4].kind, 'warlord', '最后一场应当是狂战松鼠');
   const seen = [];
+  /* 环境里现在有一条「幻影回响」会在三侠战后按概率追加一场 ——
+   * 这条测试只数「本层计划内的 5 场」，所以先把环境清掉。 */
+  run.env = [];
   for (let g = 0; g < 12; g++) {
     const r = c.Tower._debugRun('endless');
+    r.env = [];
     if (r.layer !== 10) break;
     if (r.choices) { c.Tower.pickChoice('endless', 0, null); continue; }
     if (r.phase) break;
@@ -2301,6 +2305,127 @@ test('需求42：叠层增益按层数计价 / 仓库钥匙不进商店 / 登顶
   assert.match(prog, /力 \+15/, '面板进度要写力：' + prog);
   assert.match(prog, /敏 \+15/, '面板进度要写敏：' + prog);
   assert.match(prog, /速 \+15/, '面板进度要写速：' + prog);
+});
+
+test('需求43：战斗内专属的上限/战力加成不得在局外生效；空血上限只属于战斗', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  S.newGame('outside' + Math.random());
+  const st = S.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  T.startEndlessRun();
+  const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
+    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
+  /* 先打一场，让 run.lastMaxHp / baseMaxHp 落到真实值。 */
+  let nx = T.nextBattle('endless');
+  let me = mk(); nx.adjustMe(me);
+  T.reportBattle('endless', T._debugRun('endless').attempt, true, me.maxHp, me.maxHp);
+  const baseOut = T.endlessInfo().run.curMaxHp;
+
+  /* 拿到三条「空血上限」增益后，**局外**展示的上限必须不变 ——
+   * 它们只在战斗内抬高上限（曾经的 bug：局外也会跟着涨）。 */
+  for (const id of ['C46', 'C47', 'N13']) {
+    T.addBuff(T._debugRun('endless'), id);
+    const outside = T.endlessInfo().run.curMaxHp;
+    assert.equal(outside, baseOut,
+      id + '（' + TD.BUFF_BY_ID[id].name + '）的空血上限不该在局外生效：局外 ' + outside + '，基准 ' + baseOut);
+  }
+  /* 战斗内必须生效（这才是设计意图）。 */
+  nx = T.nextBattle('endless');
+  me = mk(); nx.adjustMe(me);
+  assert.ok(me.maxHp > baseOut, '战斗内空血上限应当生效：maxHp=' + me.maxHp + ' 基准 ' + baseOut);
+  assert.ok(me.hp <= baseOut, '空血上限不该把当前血量一起抬上去：hp=' + me.hp);
+
+  /* 战斗结束、还没有打下一场时，展示值要退回到「长期口径」，
+   * 不能把上一场的临时上限一直挂着。 */
+  T.reportBattle('endless', T._debugRun('endless').attempt, true, me.maxHp, me.maxHp);
+  const afterInfo = T.endlessInfo().run;
+  const longCap = T._debugRun('endless');
+  assert.ok(afterInfo.curMaxHp <= baseOut * 3,
+    '战后展示的上限应当是长期口径，实测 ' + afterInfo.curMaxHp);
+  /* 长期成长（C07 的 run.winMaxHp / 以战养战的 run.winHpFlat）仍然要算进局外展示。 */
+  const r = T._debugRun('endless');
+  const before = T.endlessInfo().run.curMaxHp;
+  r.winHpFlat = Math.max(0, Number(r.winHpFlat) || 0) + 500;   // 模拟以战养战再叠 500
+  assert.equal(T.endlessInfo().run.curMaxHp, before + 500,
+    '长期固定上限加成（winHpFlat）必须在局外立刻反映');
+  T.abandon('endless');
+});
+
+test('需求44：幻影回响（环境）—— 只在三侠战生效，胜利后立刻再战同一场且计入叠层', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  /* 定义与数值区间 */
+  const def = TD.ENDLESS_ENV_BY_ID.echo;
+  assert.ok(def, '应当有 echo 这条环境');
+  assert.equal(def.repeatOnly, true, 'echo 应当是「只改战后行为」的标记');
+  assert.equal(def.mods.repeatChance[0], 0.17, '概率区间下沿应当是 17%');
+  assert.equal(def.mods.repeatChance[1], 0.23, '概率区间上沿应当是 23%');
+  const lo1 = TD.repeatChanceInterval(1), hi13 = TD.repeatChanceInterval(13), hi99 = TD.repeatChanceInterval(99);
+  assert.equal(lo1[0], 0.17, '低层下沿 17%');
+  assert.ok(Math.abs(hi13[1] - 0.23) < 1e-9, '第 13 层上沿到 23%，实测 ' + hi13[1]);
+  assert.ok(Math.abs(hi99[1] - 0.23) < 1e-9, '再高也不会超过 23%');
+  /* 它不改战斗数值（不该出现在战斗 mods 上） */
+  const vals = TD.rollEnvMods(def);
+  assert.ok(vals.repeatChance >= 0.17 - 1e-9 && vals.repeatChance <= 0.23 + 1e-9,
+    '摇到的概率应当在区间内：' + vals.repeatChance);
+
+  S.newGame('echo' + Math.random());
+  const st = S.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
+    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
+
+  /* 强制 100% 触发：连打 3 次同一场三侠战，且 idx 不能前进 */
+  T.abandon('endless');
+  T.startEndlessRun();
+  let r = T._debugRun('endless');
+  r.layer = 12; r.idx = 0;
+  r.permanent = [{ id: 'C11', stacks: 1 }, { id: 'C12', stacks: 1 }];
+  r.env = [{ id: 'echo', left: 99, values: { repeatChance: 1 } }];
+  let repeats = 0, sameEntry = true, firstEntry = null;
+  for (let i = 0; i < 3; i++) {
+    const nx = T.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '应当能取到下一场');
+    const tag = nx.entry.kind + ':' + (nx.entry.anim || nx.entry.id);
+    if (firstEntry == null) firstEntry = tag;
+    if (tag !== firstEntry) sameEntry = false;
+    const me = mk(); nx.adjustMe(me);
+    const a = T._debugRun('endless');
+    const out = T.reportBattle('endless', a.attempt, true, me.maxHp, me.maxHp);
+    if (out.repeat) repeats++;
+    assert.ok(!out.layerComplete, '回响不该让本层提前通关');
+  }
+  assert.equal(repeats, 3, '100% 概率下三次都该触发回响，实测 ' + repeats);
+  assert.ok(sameEntry, '回响必须是**同一场**对手，实测 ' + firstEntry);
+  r = T._debugRun('endless');
+  assert.equal(r.layer, 12, '回响不该推进层号');
+  assert.equal(r.idx, 0, '回响应当把层内序号回退到同一场');
+  assert.equal(r.repeatCount, 3, '重复场次应当被计数');
+  /* 叠层增益要把重复的那一场也算进去 */
+  assert.equal(r.winHpFlat, 15, 'C11 每胜 +5：3 场（含重复）应当 = 15，实测 ' + r.winHpFlat);
+  assert.equal(r.winStatPower, 3, 'C12 第 10 层起每胜 +1：实测 ' + r.winStatPower);
+  assert.ok(Math.abs(Number(r.winMaxHp) || 0) > 0 || Number(r.winHpFlat) === 15,
+    '战斗成长类增益要把重复的那一场也算进去');
+
+  /* 非三侠战（boss）不该触发 */
+  let bossRepeat = false;
+  for (let t = 0; t < 30; t++) {
+    T.abandon('endless');
+    T.startEndlessRun();
+    const rr = T._debugRun('endless');
+    rr.layer = 12; rr.idx = 3;                       // 第 4 场 = boss
+    rr.env = [{ id: 'echo', left: 99, values: { repeatChance: 1 } }];
+    const nx = T.nextBattle('endless');
+    if (!nx || nx.ok === false) continue;
+    if (String(nx.entry.kind) === 'hero') continue;  // 万一计划不同，跳过
+    const me = mk(); nx.adjustMe(me);
+    const a = T._debugRun('endless');
+    const out = T.reportBattle('endless', a.attempt, true, me.maxHp, me.maxHp);
+    if (out.repeat) { bossRepeat = true; break; }
+  }
+  assert.equal(bossRepeat, false, '非三侠战不该触发回响');
+  T.abandon('endless');
 });
 
 (async () => {

@@ -1009,7 +1009,6 @@
       run.sellBonus = (run.sellBonus || 0) + (runModTotal(run, 'sellGrowthPerWin') || 0);
       /* 第 2 项：以战养战（每胜一场生命上限 +10，不封顶）、登顶者（第 10 层起每胜一场攻击 +5%） */
       run.winHpFlat = (run.winHpFlat || 0) + (runModTotal(run, 'winMaxHpFlat') || 0);
-      rollEnvAfterBattle(run);   // 每场战斗后推进环境词缀
       /* 登顶者（可叠层）：第 10 层起每胜一场，本局固定 +1 力/敏/速 × 层数。
        * 固定值不参与全局倍率（增幅水晶只管百分比乘区），这也和「以战养战 +5 上限」同口径。 */
       if (battleLayer >= 10) {
@@ -1049,6 +1048,13 @@
       }
     out.score = run.score; out.coins = run.coins;
     }
+    /* 幻影回响（三侠战）：胜利后按概率**立刻再战同一场**。
+     * 做法是把层内序号回退一格 —— 这样：
+     *   · 下一场取到的还是同一个 entry（三侠由 heroOrder(layer, salt) 固定，所以是同一场）
+     *   · 猎杀时刻 / 吞噬成长 / 以战养战 / 登顶者 / 战后续航 等**战斗叠层**增益
+     *     天然把这一场也算进去（不用逐个特殊处理）
+     *   · 层号不变，所以不会触发跨层回血，也不会提前进下一层 */
+    const echoP = (entry.kind === 'hero') ? echoRepeatChance(run) : 0;
     run.idx++;
     /* 需求 6：限次 buff 的扣数**必须每场都执行**。
      * 原来这行在 `if (run.idx >= run.plan.length) return layerClear(...)` 之后，
@@ -1057,6 +1063,21 @@
     consumeLimited(run);
     const brokenFragile = rollFragileBuffs(run);
     if (brokenFragile.length) out.fragileBroken = brokenFragile;
+    /* 环境词缀的「剩余场数」与「战后补抽」必须**每场都推进** ——
+     * 包括整层最后一场（原来这行在后面，整层最后一场会提前 return 跳过推进，
+     * 于是环境的剩余场数会少算一场）。放在回响判定**之前**，重复的那一场
+     * 也会照常消耗环境场数。 */
+    rollEnvAfterBattle(run);
+    /* 回响判定放在限次扣数 / 环境推进 / 烙印判定**之后**：重复的那一场
+     * 应当照常消耗一次限次（不然「限次 10 场」会因为回响白打）。
+     * 它只在**未通关本层**时才可能发生。 */
+    if (echoP > 0 && run.idx < run.plan.length && Math.random() < echoP) {
+      run.idx--;                                  // 回退一格 → 下一场还是这一场
+      out.repeat = { chance: echoP, name: (echoDef() || {}).name || '幻影回响', layer: run.layer, battleNo: run.idx + 1 };
+      run.repeatCount = Math.max(0, Number(run.repeatCount) || 0) + 1;
+      save();
+      return out;
+    }
     if (run.idx >= run.plan.length) return layerClear(mode, run, out);
     // 场间选择：第 1/2/3 场后必给；x10 层第 4 场后再给一次
     const won = run.idx, len = run.plan.length;
@@ -1165,6 +1186,23 @@
 
   // ---------- 环境词缀（无尽塔）----------
   function envList(run) { return Array.isArray(run.env) ? run.env : (run.env = []); }
+  /** 「幻影回响」：**只**在三侠战生效的「胜利后立刻再战同一场」概率。
+   *  多条同时生效时按 1-(1-p1)(1-p2) 合并；没有生效则返回 0。
+   *  用 envEffective() 是为了让「无视环境」类 buff 也能正确地屏蔽它。 */
+  function echoRepeatChance(run) {
+    const TD = D(), fx = envEffective(run);
+    let miss = 1;
+    for (const e of envList(run)) {
+      if (!fx.mine.includes(e.id)) continue;
+      const def = TD.ENDLESS_ENV_BY_ID[e.id];
+      if (!def || !def.repeatOnly) continue;
+      const p = Math.max(0, Math.min(1, Number(envValues(run, e).repeatChance) || 0));
+      if (p > 0) miss *= (1 - p);
+    }
+    return 1 - miss;
+  }
+  /** 回响定义（供界面显示名字）。 */
+  function echoDef() { return D().ENDLESS_ENV_BY_ID.echo; }
   /**
    * 战斗后推进：先扣时长，再按层数概率触发。
    * 需求 7：**同时最多 ENV_MAX（2）条，这是硬上限**。
@@ -2037,20 +2075,34 @@
   function currentMaxHp(run) {
     const base = Number(run && run.baseMaxHp) || 0;
     if (!(base > 0)) return 0;
-    const agg = aggregate(run, { hero: false, poolNpc: false, elite: false });
-    const dMaxHp = ((run.debuffs || []).filter((d) => d.kind === 'maxHp'))
-      .reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
+    /* **这里只算「长期有效」的上限，不能把战斗内的临时上限算进来。**
+     * 曾经的 bug：把「空血上限」（emptyMaxHpMul，浴血重生 / 濒死觉悟 / 血之契约）
+     * 也加到局外展示上 —— 于是玩家在局外（战前准备、休整点）就看到血上限被抬高，
+     * 而那部分其实只在战斗内存在。
+     *
+     * 口径：
+     *   · 长期加成 —— run.hpBonus（永久 maxHpMul 在获得时就折算进去了）、
+     *     run.winMaxHp（C07 每胜成长）、run.winHpFlat / spendGain.hp（固定值）
+     *   · 战斗内临时上限 —— emptyMaxHpMul、限次类 maxHpMul、本层 debuff，
+     *     一律不进局外展示；战斗结束后界面会退回到「最近一场的真实上限」来显示。 */
     const stickyHp = Math.max(0, Number(run.hpBonus) || 0);
     const winMaxHp = Math.max(0, Number(run.winMaxHp) || 0);
-    /* 补上「空血上限」—— 它只抬上限，所以必须算进来，否则界面血条会虚高。 */
-    const emptyHp = Math.max(0, Number(agg.emptyMaxHpMul) || 0);
     const flat = Math.max(0, Number(run.winHpFlat) || 0) +
       (run.spendGain ? Math.max(0, Number(run.spendGain.hp) || 0) : 0);
-    return Math.max(1, Math.round(base * (1 + agg.maxHpMul + stickyHp + winMaxHp + emptyHp) * dMaxHp) + flat);
+    return Math.max(1, Math.round(base * (1 + stickyHp + winMaxHp)) + flat);
   }
   /** 当前血量（绝对口径）：hpAbs 裁到当前上限。 */
   function currentHp(run) {
-    const cap = currentMaxHp(run);
+    /* 展示口径的优先级：
+     *  · 战斗**进行中**时 run.lastMaxHp 就是本场真实上限（含空血上限等临时加成），
+     *    此时 currentMaxHp() 只反映长期加成 —— 所以直接用 lastMaxHp 更准。
+     *  · 战斗之间（拿到新永久增益、还没打下一场）用 currentMaxHp()，
+     *    这样「刚买的增益」能立刻在血条上看到。
+     * 另外：临时上限只在战斗中有效，战斗一结束就应当消失（见 currentMaxHp 的说明）。 */
+    const longCap = currentMaxHp(run);
+    const battleCap = Math.max(0, Math.round(Number(run && run.lastMaxHp) || 0));
+    const live = !!(run && run.attempt);          // 战斗进行中
+    const cap = live && battleCap > 0 ? battleCap : (longCap > 0 ? longCap : battleCap);
     const hp = hpAbsOf(run, cap);
     return { hp: cap > 0 ? Math.min(hp, cap) : hp, maxHp: cap };
   }

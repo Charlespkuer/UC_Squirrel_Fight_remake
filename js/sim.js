@@ -384,6 +384,9 @@
       masterChance: Number.isFinite(options.masterChance) ? clamp(options.masterChance, 0, 100) : RULES.masterChance,
     };
     const A = makeCombatant(f0, 0), B = makeCombatant(f1, 1);
+    /* 开局护盾值（石像鬼机制 / 塔 buff「坚韧壁垒」）：给界面用 ——
+     * 战斗一开始就要能把护盾画出来，不能等第一次挨打。 */
+    const startShell = [Math.max(0, A.shell || 0), Math.max(0, B.shell || 0)];
     const rounds = [];
     const MAX_ACTIONS = 120;
     let actions = 0;
@@ -398,6 +401,10 @@
         if (c.pendingNote) { r.noteText = (r.noteText ? r.noteText + '·' : '') + c.pendingNote; c.pendingNote = null; }
       }
       r.hpAfter = [Math.max(0, A.hp), Math.max(0, B.hp)];
+      /* 需求：护盾要能在局内**直观看到**（存在 + 剩余量）。
+       * 把两边的剩余护盾一并记进事件快照 —— 界面的战斗详情/血条靠它显示，
+       * 录像回放也能看到「这回合被护盾吃掉了多少」。 */
+      r.shellAfter = [Math.max(0, A.shell || 0), Math.max(0, B.shell || 0)];
       rounds.push(r);
     }
 
@@ -1009,7 +1016,7 @@
     else if (A.hp <= 0) winner = 1;
     else winner = A.hp / A.maxHp >= B.hp / B.maxHp ? 0 : 1; // 超时按血量比例
 
-    return { rounds, winner, maxHp: [A.maxHp, B.maxHp], names: [A.name, B.name] };
+    return { rounds, winner, maxHp: [A.maxHp, B.maxHp], startShell: startShell, names: [A.name, B.name] };
   }
 
   window.Sim = {

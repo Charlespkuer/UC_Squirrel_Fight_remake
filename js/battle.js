@@ -100,6 +100,11 @@
     // 拿它当上限会让血条显示成满血，并让模拟按错误的上限计算。
     const hpOf = (f) => Math.max(1, Math.round(Number(f.hp) || 1));
     const hps = sources.map((f) => Math.min(hpOf(f), Number(f.maxHp) > 0 ? Math.round(Number(f.maxHp)) : hpOf(f)));
+    /* 护盾（石像鬼机制 / 塔 buff「坚韧壁垒」）：初值取模拟的开局护盾，
+     * 之后每帧跟随事件里的 shellAfter 更新。血条上画一段浅蓝，数值旁标「＋护盾 N」。 */
+    const shields = Array.isArray(result.startShell) && result.startShell.length === 2
+      ? result.startShell.map((v) => Math.max(0, Math.round(Number(v) || 0)))
+      : [0, 0];
     const maxHp = sources.map((f, side) => Number(f.maxHp) > 0 ? Math.max(hps[side], Math.round(Number(f.maxHp))) : hps[side]);
     const floaters = [], sleepers = new Set();
     let stopped = false, skipped = false, ending = false, raf = 0, round = 99, countdown = null;
@@ -213,6 +218,9 @@
       floaters.push({ side, text: String(text), color: color || 'r', big: !!big, x: p.x, y: p.y - count * 43, age: 0 });
     }
     function applyHp(r, counterPending, before) {
+      if (Array.isArray(r.shellAfter) && r.shellAfter.length === 2) {
+        for (let side = 0; side < 2; side++) shields[side] = Math.max(0, Math.round(Number(r.shellAfter[side]) || 0));
+      }
       if (!r.hpAfter) return;
       for (let side = 0; side < 2; side++) {
         let next = r.hpAfter[side];
@@ -256,11 +264,23 @@
           { size: 32, bold: false, align: 'center', color: '#9f3f17', stroke: false });
         rounded(x, y, width, height, 31, '#ff6100');
         const pct = Math.max(0, Math.min(1, hps[side] / maxHp[side]));
+        /* 护盾按「占上限的比例」画成血条后面的一段 —— 敌方血条是从右往左长的，
+         * 所以那一侧的护盾段要贴在血条的**左端**，保持「越靠内越先被打掉」的直觉。 */
+        const sp = Math.max(0, Math.min(1, (Number(shields[side]) || 0) / maxHp[side]));
         ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, width, height, 31); ctx.clip();
+        if (sp > 0) {
+          ctx.fillStyle = 'rgba(120,226,255,.95)';
+          ctx.fillRect(right ? x + width * (1 - pct - sp) : x + width * pct, y, width * sp, height);
+        }
         const gradient = ctx.createLinearGradient(0, y, 0, y + height); gradient.addColorStop(0, '#ffd323'); gradient.addColorStop(1, '#ffaa0e');
         ctx.fillStyle = gradient; ctx.fillRect(right ? x + width * (1 - pct) : x, y, width * pct, height); ctx.restore();
         Engine.text(ctx, Math.round(hps[side]) + '/' + maxHp[side], x + width / 2, y + 42,
           { size: 36, align: 'center', color: '#fff8d4', bold: false, stroke: false });
+        /* 护盾数值写在生命值右边（有护盾才画，避免平时干扰）。 */
+        if (shields[side] > 0) {
+          Engine.text(ctx, '＋护盾 ' + Math.round(shields[side]), x + width / 2 + 104, y + 40,
+            { size: 24, align: 'left', color: '#8fe8ff' });
+        }
       }
       /* 挑战塔：三侠大招留下的「贯穿本层」削弱，挂在玩家血条正下方（第 3 项）。
        * 第 5 项：胶囊里带上「谁给的」——用来源大侠的颜色描边 + 名字前缀，

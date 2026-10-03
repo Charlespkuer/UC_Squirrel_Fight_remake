@@ -158,6 +158,7 @@
       run.winStatSpeed = Math.max(0, Number(run.winStatSpeed) || 0);
       /* 血量绝对值口径：剩余血量与「最近一次已知上限」（回血/裁血的基准）。 */
       run.hpAbs = Math.max(0, Math.round(Number(run.hpAbs) || 0));
+      run.repeatAt = Number(run.repeatAt) >= 0 ? Number(run.repeatAt) : -1;
       run.refMaxHp = Math.max(0, Math.round(Number(run.refMaxHp) || 0));
       if (run.shop && typeof run.shop === 'object' && !Array.isArray(run.shop.slots)) run.shop = null;
       if (run.phase !== 'shop' && run.phase !== 'checkpoint') run.phase = null;
@@ -971,6 +972,8 @@
      * 原来直接用 run.layer 判定「第 10 层起」，而整层最后一场结算时层号已经推进过，
      * 于是第 9 层的最后一场会被当成第 10 层、提前给一次登顶成长（实测多 +1）。 */
     const battleLayer = Math.max(1, Math.floor(Number(run.layer) || 1));
+    /* 同理记下**本场的层内序号** —— run.idx++ 之后它已经指向下一场了。 */
+    const battleIdx = Math.max(0, Math.floor(Number(run.idx) || 0));
     const out = { ok: true, win: true, elite: isElite, entryKind: entry.kind };
     // 三侠的大招会给玩家留一层削弱（第 3 项）
     // 第 2 项：本场触发了复活甲 → 本层的不死鸟用掉
@@ -1090,8 +1093,15 @@
     /* 回响判定放在限次扣数 / 环境推进 / 烙印判定**之后**：重复的那一场
      * 应当照常消耗一次限次（不然「限次 10 场」会因为回响白打）。
      * 它只在**未通关本层**时才可能发生。 */
-    if (echoP > 0 && run.idx < run.plan.length && Math.random() < echoP) {
+    /* 「这一场」用层内序号标识：回响再战时 idx 会被回退成同一个值，
+     * 所以同一个 idx 就是同一场 —— 一场战斗至多触发一次。
+     * （用递增的「战斗实例号」是不行的：再战也要经过 nextBattle，实例号会跟着涨。） */
+    const echoBattleKey = battleLayer * 1000 + battleIdx;
+    if (echoP > 0 && run.idx < run.plan.length &&
+        Number(run.repeatAt) !== echoBattleKey &&        // 本场还没触发过
+        Math.random() < echoP) {
       run.idx--;                                  // 回退一格 → 下一场还是这一场
+      run.repeatAt = echoBattleKey;               // 记下「这一场已经触发过」
       out.repeat = { chance: echoP, name: (echoDef() || {}).name || '幻影回响', layer: run.layer, battleNo: run.idx + 1 };
       run.repeatCount = Math.max(0, Number(run.repeatCount) || 0) + 1;
       save();
@@ -1210,9 +1220,10 @@
    *  用 envEffective() 是为了让「无视环境」类 buff 也能正确地屏蔽它。 */
   function echoRepeatChance(run) {
     const TD = D(), fx = envEffective(run);
+    /* fx.mine 已经按 maxStacks 去重过，所以这里天然只取「生效的那一份」。 */
     let miss = 1;
     for (const e of envList(run)) {
-      if (!fx.mine.includes(e.id)) continue;
+      if (fx.mine.indexOf(e.id) < 0) continue;
       const def = TD.ENDLESS_ENV_BY_ID[e.id];
       if (!def || !def.repeatOnly) continue;
       const p = Math.max(0, Math.min(1, Number(envValues(run, e).repeatChance) || 0));
@@ -1369,11 +1380,22 @@
   /** 本场实际生效的环境（区分「我方承受」与「反弹给对手」）。 */
   function envEffective(run) {
     const TD = D(), sh = envShield(run), mine = [], enemy = [];
+    /* 同一条环境**最多叠 maxStacks 层**（默认 1）——
+     * 需求：「幻影回响」一场战斗至多触发一次。靠这条通用规则保证，
+     * 而不是在结算处写特例；将来其它环境要限层也只改数据。 */
+    const used = {};
+    const allow = (def) => {
+      const cap = Math.max(1, Math.floor(Number(def.maxStacks) || 1));
+      const n = used[def.id] || 0;
+      if (n >= cap) return false;
+      used[def.id] = n + 1;
+      return true;
+    };
     for (const e of envList(run)) {
       const def = TD.ENDLESS_ENV_BY_ID[e.id];
       if (!def) continue;
-      if (def.bad) { if (sh.ignore && !sh.reflect) continue; if (sh.reflect) enemy.push(e.id); else mine.push(e.id); }
-      else if (!sh.denyGood) mine.push(e.id);
+      if (def.bad) { if (sh.ignore && !sh.reflect) continue; if (sh.reflect) { if (allow(def)) enemy.push(e.id); } else if (allow(def)) mine.push(e.id); }
+      else if (!sh.denyGood && allow(def)) mine.push(e.id);
     }
     return { mine, enemy, sh };
   }
@@ -2486,7 +2508,7 @@
   /** 某个增益在挑战塔里是否属于「下一场战斗」语义（卡面不显示限次）。 */
   function isTowerBattleBuff(id) {
     const def = D().BUFF_BY_ID[id];
-    return !!(def && def.towerBattle);
+    return !!(def && def.nextBattle);
   }
   function ownedBuffs(mode) {
     /* 直接遍历本局的两张表（permanent / limited），不要用 eachBuff ——
@@ -2504,7 +2526,7 @@
       out.push({ id: buff.id, name: buff.name, desc: buff.desc, rarity: buff.rarity, kind: buff.kind,        scopeName: scopeName[buff.kind], stacks: entry.stacks || 1,
         progress: progressOf(run, buff.id),                 // 第 7 项：成长类的真实累计值
         uses: buff.kind === 'limited' ? entry.uses : undefined,
-        towerBattle: !!buff.towerBattle,          // 挑战塔里 = 「下一场战斗」，卡面不显示限次
+        nextBattle: !!buff.nextBattle,          // 挑战塔里 = 「下一场战斗」，卡面不显示限次
         on: buff.kind === 'limited' ? entry.on !== false : true,
         sellable: !!run.shop && buff.kind !== 'instant' && !buff.hidden, sellPrice: sellPriceOf(run, buff) });
     };

@@ -101,9 +101,9 @@
      * 数值随层数在 17%~23% 之间取值（见 repeatChanceInterval），
      * 目的是让「战斗叠层」类增益（猎杀时刻 / 吞噬成长 / 以战养战 / 登顶者 / 战后续航）
      * 多一份弹性空间 —— 重复的那一场同样计入叠层。 */
-    { id: 'echo', name: '幻影回响', bad: false, repeatOnly: true,
+    { id: 'echo', name: '幻影回响', bad: false, repeatOnly: true, maxStacks: 1,
       mods: { repeatChance: [0.17, 0.23, 'pct'] },
-      desc: '三侠战胜利后有 %repeatChance% 概率立刻再战同一场（重复的战斗同样计入叠层）' },
+      desc: '三侠战胜利后有 %repeatChance% 概率立刻再战同一场（每场战斗至多触发一次；重复的战斗同样计入叠层）' },
   ]);
   const ENDLESS_ENV_BY_ID = Object.freeze(ENDLESS_ENV.reduce((m, e) => (m[e.id] = e, m), {}));
   /** 「幻影回响」在该层的概率区间：下沿固定 17%，上沿随层数从 17% 抬到 23%
@@ -692,69 +692,69 @@
     // —— 单场类（主塔+无尽通用） ——
     /* 第 4 项：单场类 buff 整体加强（原来是 25/20/5/20/30 一档，太温柔，
      * 玩家拿到也不觉得这一场变强），并补了暴击/减伤/速度三种手感明显的。 */
-    { id: 'N01', name: '蓄力一击', rarity: 0, kind: 'limited', uses: 2, towerBattle: true, desc: '下一场战斗攻击 +40%', mods: { powerMul: 0.40 } },
+    { id: 'N01', name: '蓄力一击', rarity: 0, kind: 'limited', uses: 2, towerOnly: true, nextBattle: true, desc: '下一场战斗攻击 +40%', mods: { powerMul: 0.40 } },
     /* 本轮第 1 项：从「首次攻击必中」改成「所有攻击必中」，场次 5 → 3。 */
-    { id: 'N02', name: '百步穿杨', rarity: 0, kind: 'limited', uses: 3, towerBattle: true, desc: '下一场战斗所有攻击必中', mods: { mustHitAll: 1 } },
-    { id: 'M01', name: '威慑', rarity: 0, kind: 'limited', uses: 2, towerBattle: true, desc: '下一场战斗敌人攻击力 −30%', mods: { enemyPowerDown: 0.30 } },
-    { id: 'M02', name: '疾风先手', rarity: 0, kind: 'limited', uses: 3, towerBattle: true, desc: '下一场战斗你的首次技能不消耗回合', mods: { firstSkillFree: 1 } },
-    { id: 'N03', name: '活血丹', rarity: 1, kind: 'limited', uses: 3, towerBattle: true, desc: '下一场战斗每回合开始回复 8% 生命', mods: { regenPct: 0.08 } },
+    { id: 'N02', name: '百步穿杨', rarity: 0, kind: 'limited', uses: 3, towerOnly: true, nextBattle: true, desc: '下一场战斗所有攻击必中', mods: { mustHitAll: 1 } },
+    { id: 'M01', name: '威慑', rarity: 0, kind: 'limited', uses: 2, towerOnly: true, nextBattle: true, desc: '下一场战斗敌人攻击力 −30%', mods: { enemyPowerDown: 0.30 } },
+    { id: 'M02', name: '疾风先手', rarity: 0, kind: 'limited', uses: 3, towerOnly: true, nextBattle: true, desc: '下一场战斗你的首次技能不消耗回合', mods: { firstSkillFree: 1 } },
+    { id: 'N03', name: '活血丹', rarity: 1, kind: 'limited', uses: 3, towerOnly: true, nextBattle: true, desc: '下一场战斗每回合开始回复 8% 生命', mods: { regenPct: 0.08 } },
     /* 需求：改成 unique —— 一局只能获得一次。
      * 原来它是可无限叠加的（同名叠加即 +10 次免死），配合「故意挨打不死」可以
      * 把复活次数刷到几百（实测单局最多 260 次），既破坏战斗平衡、又能刷成就分。
      * 现在一局最多一次（10 次免死），累计复活封顶 12 次的档位设计才有意义。 */
-    { id: 'N04', name: '金蝉脱壳', rarity: 1, kind: 'limited', uses: 10, towerBattle: true, unique: true,
+    { id: 'N04', name: '金蝉脱壳', rarity: 1, kind: 'limited', uses: 10, towerOnly: true, nextBattle: true, unique: true,
       desc: '下一场战斗免疫一次致命伤害（保留 1 点生命）', mods: { deathSave: 1 } },
-    { id: 'N07', name: '破军', rarity: 1, kind: 'limited', uses: 3, towerBattle: true, desc: '下一场战斗暴击率 +25%', mods: { critBonus: 25 } },
-    { id: 'M03', name: '坚守', rarity: 1, kind: 'limited', uses: 2, towerBattle: true, desc: '下一场战斗受到伤害 −30%', mods: { takenMul: -0.30 } },
-    { id: 'M04', name: '疾风步', rarity: 1, kind: 'limited', uses: 10, towerBattle: true, desc: '下一场战斗速度 +30%', mods: { speedMul: 0.30 } },
-    { id: 'N05', name: '先手制敌', rarity: 2, kind: 'limited', uses: 3, towerBattle: true, desc: '下一场战斗开局对敌人造成其 30% 最大生命的伤害', mods: { openStrikePct: 0.30 } },
-    { id: 'N08', name: '补给', rarity: 0, kind: 'limited', uses: 1, towerBattle: true,
+    { id: 'N07', name: '破军', rarity: 1, kind: 'limited', uses: 3, towerOnly: true, nextBattle: true, desc: '下一场战斗暴击率 +25%', mods: { critBonus: 25 } },
+    { id: 'M03', name: '坚守', rarity: 1, kind: 'limited', uses: 2, towerOnly: true, nextBattle: true, desc: '下一场战斗受到伤害 −30%', mods: { takenMul: -0.30 } },
+    { id: 'M04', name: '疾风步', rarity: 1, kind: 'limited', uses: 10, towerOnly: true, nextBattle: true, desc: '下一场战斗速度 +30%', mods: { speedMul: 0.30 } },
+    { id: 'N05', name: '先手制敌', rarity: 2, kind: 'limited', uses: 3, towerOnly: true, nextBattle: true, desc: '下一场战斗开局对敌人造成其 30% 最大生命的伤害', mods: { openStrikePct: 0.30 } },
+    { id: 'N08', name: '补给', rarity: 0, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
       desc: '下一场战斗开始时立即回复 50% 生命', mods: { startHealPct: 0.50 } },
-    { id: 'N06', name: '血饮狂刀', rarity: 2, kind: 'limited', uses: 5, towerBattle: true, desc: '下一场战斗攻击附带 45% 吸血', mods: { lifestealPct: 0.45 } },
+    { id: 'N06', name: '血饮狂刀', rarity: 2, kind: 'limited', uses: 5, towerOnly: true, nextBattle: true, desc: '下一场战斗攻击附带 45% 吸血', mods: { lifestealPct: 0.45 } },
     // —— 本层类（主塔=整局；无尽=当前层） ——
-    { id: 'G01', name: '力量祝福', rarity: 0, kind: 'limited', uses: 10, towerBattle: true, desc: '下一场战斗攻击 +12%', mods: { powerMul: 0.12 } },
-    { id: 'G02', name: '生命祝福', rarity: 0, kind: 'limited', uses: 5, towerBattle: true, desc: '下一场战斗生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
-    { id: 'G03', name: '鹰眼', rarity: 0, kind: 'limited', uses: 10, towerBattle: true, desc: '下一场战斗暴击率 +8%', mods: { critBonus: 8 } },
-    { id: 'G04', name: '回春术', rarity: 1, kind: 'limited', uses: 10, towerBattle: true, desc: '下一场战斗每回合回复 2.5% 最大生命', mods: { regenPct: 0.025 } },
-    { id: 'G05', name: '铁布衫', rarity: 1, kind: 'limited', uses: 5, towerBattle: true, desc: '下一场战斗受到伤害 −25%', mods: { takenMul: -0.25 } },
-    { id: 'G06', name: '凌波微步', rarity: 1, kind: 'limited', uses: 10, towerBattle: true, desc: '下一场战斗闪避 +12%', mods: { dodgeBonus: 12 } },
-    { id: 'G07', name: '破釜沉舟', rarity: 2, kind: 'limited', uses: 3, towerBattle: true, desc: '下一场战斗攻击 +50%，生命上限 −20%', mods: { powerMul: 0.50, maxHpMul: -0.20 } },
+    { id: 'G01', name: '力量祝福', rarity: 0, kind: 'limited', uses: 10, towerOnly: true, nextBattle: true, desc: '下一场战斗攻击 +12%', mods: { powerMul: 0.12 } },
+    { id: 'G02', name: '生命祝福', rarity: 0, kind: 'limited', uses: 5, towerOnly: true, nextBattle: true, desc: '下一场战斗生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
+    { id: 'G03', name: '鹰眼', rarity: 0, kind: 'limited', uses: 10, towerOnly: true, nextBattle: true, desc: '下一场战斗暴击率 +8%', mods: { critBonus: 8 } },
+    { id: 'G04', name: '回春术', rarity: 1, kind: 'limited', uses: 10, towerOnly: true, nextBattle: true, desc: '下一场战斗每回合回复 2.5% 最大生命', mods: { regenPct: 0.025 } },
+    { id: 'G05', name: '铁布衫', rarity: 1, kind: 'limited', uses: 5, towerOnly: true, nextBattle: true, desc: '下一场战斗受到伤害 −25%', mods: { takenMul: -0.25 } },
+    { id: 'G06', name: '凌波微步', rarity: 1, kind: 'limited', uses: 10, towerOnly: true, nextBattle: true, desc: '下一场战斗闪避 +12%', mods: { dodgeBonus: 12 } },
+    { id: 'G07', name: '破釜沉舟', rarity: 2, kind: 'limited', uses: 3, towerOnly: true, nextBattle: true, desc: '下一场战斗攻击 +50%，生命上限 −20%', mods: { powerMul: 0.50, maxHpMul: -0.20 } },
     /* ============================================================
-     * 挑战塔专属「下一场战斗」增益（towerOnly + towerBattle）
+     * 挑战塔专属「下一场战斗」增益（towerOnly + nextBattle）
      *
      * 挑战塔是一层四场连战、打完结算，所以它的增益天然只服务**下一场**：
      * 不搞「接下来 N 场」那种叠加计时，卡面直接写「下一场战斗」。
      * 这些条目不会进无尽池（endlessPool 过滤 towerOnly）。
      * ============================================================ */
-    { id: 'T01', name: '开局狂热', rarity: 2, kind: 'limited', uses: 1, towerOnly: true, towerBattle: true,
+    { id: 'T01', name: '开局狂热', rarity: 2, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
       desc: '下一场战斗：前 5 回合攻击 +50%，之后攻击 −20%',
       mods: { openerPowerMul: 0.50, openerRounds: 5, fatiguePowerMul: 0.20 } },
-    { id: 'T02', name: '烟幕', rarity: 1, kind: 'limited', uses: 1, towerOnly: true, towerBattle: true,
+    { id: 'T02', name: '烟幕', rarity: 1, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
       desc: '下一场战斗：自身闪避率 +50%（乘算，上限仍是 55%）',
       mods: { dodgeMul: 0.50 } },
-    { id: 'T03', name: '疾风之靴', rarity: 1, kind: 'limited', uses: 1, towerOnly: true, towerBattle: true,
+    { id: 'T03', name: '疾风之靴', rarity: 1, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
       desc: '下一场战斗：速度 +30%', mods: { speedMul: 0.30 } },
-    { id: 'T04', name: '锁定打击', rarity: 1, kind: 'limited', uses: 1, towerOnly: true, towerBattle: true,
+    { id: 'T04', name: '锁定打击', rarity: 1, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
       desc: '下一场战斗：所有攻击必中', mods: { mustHitAll: 1 } },
-    { id: 'T05', name: '见血封喉', rarity: 2, kind: 'limited', uses: 1, towerOnly: true, towerBattle: true,
+    { id: 'T05', name: '见血封喉', rarity: 2, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
       desc: '下一场战斗：暴击率 +30%、暴击伤害 +50%',
       mods: { critBonus: 30, critDmgBonus: 0.50 } },
-    { id: 'T06', name: '金钟罩', rarity: 1, kind: 'limited', uses: 1, towerOnly: true, towerBattle: true,
+    { id: 'T06', name: '金钟罩', rarity: 1, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
       desc: '下一场战斗：受到伤害 −30%', mods: { takenMul: -0.30 } },
-    { id: 'T07', name: '以血换血', rarity: 2, kind: 'limited', uses: 1, towerOnly: true, towerBattle: true,
+    { id: 'T07', name: '以血换血', rarity: 2, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
       desc: '下一场战斗：反弹 35% 受到的伤害给敌人', mods: { thornsPct: 0.35 } },
-    { id: 'T08', name: '破竹之势', rarity: 2, kind: 'limited', uses: 1, towerOnly: true, towerBattle: true,
+    { id: 'T08', name: '破竹之势', rarity: 2, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
       desc: '下一场战斗：开局对敌人造成其 25% 最大生命的伤害',
       mods: { openStrikePct: 0.25 } },
-    { id: 'T09', name: '吸血獠牙', rarity: 2, kind: 'limited', uses: 1, towerOnly: true, towerBattle: true,
+    { id: 'T09', name: '吸血獠牙', rarity: 2, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
       desc: '下一场战斗：所有攻击附带 40% 吸血', mods: { lifestealPct: 0.40 } },
-    { id: 'T10', name: '背水一战', rarity: 3, kind: 'limited', uses: 1, towerOnly: true, towerBattle: true,
+    { id: 'T10', name: '背水一战', rarity: 3, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
       desc: '下一场战斗：攻击 +35%、速度 +20%、受到伤害 −20%（一场定胜负）',
       mods: { powerMul: 0.35, speedMul: 0.20, takenMul: -0.20 } },
-    { id: 'T11', name: '不动如山', rarity: 3, kind: 'limited', uses: 1, towerOnly: true, towerBattle: true,
+    { id: 'T11', name: '不动如山', rarity: 3, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
       desc: '下一场战斗：生命上限 +35% 并回复等量生命、每回合回复 5% 生命',
       mods: { maxHpMul: 0.35, regenPct: 0.05 } },
-    { id: 'T12', name: '先发制人', rarity: 0, kind: 'limited', uses: 1, towerOnly: true, towerBattle: true,
+    { id: 'T12', name: '先发制人', rarity: 0, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
       desc: '下一场战斗：首次技能不消耗回合、敌方对我方的第一次伤害为 0',
       mods: { firstSkillFree: 1, firstHitZero: 1 } },
     // —— 跨层类（仅无尽，本局永久） ——
@@ -840,10 +840,10 @@
     { id: 'N10', name: '避风斗篷', rarity: 1, kind: 'limited', uses: 10, endlessOnly: true,
       desc: '接下来 10 场：无视环境词缀', mods: { envIgnore: 1 } },
     /* 低血 combo 的两条限次类（与狂怒成套；限次 10 场） */
-    { id: 'N13', name: '血之契约', rarity: 0, kind: 'limited', uses: 10, towerBattle: true,
+    { id: 'N13', name: '血之契约', rarity: 0, kind: 'limited', uses: 10, endlessOnly: true, nextBattle: true,
       desc: '下一场战斗开始时限生命上限 +100%（这部分是空的，不回血）',
       mods: { emptyMaxHpMul: 1.00 } },
-    { id: 'N14', name: '铁血护盾', rarity: 1, kind: 'limited', uses: 10, towerBattle: true,
+    { id: 'N14', name: '铁血护盾', rarity: 1, kind: 'limited', uses: 10, endlessOnly: true, nextBattle: true,
       desc: '下一场战斗中生命低于 50% 时获得 50% 减伤',
       mods: { lowHpTakenMul: -0.50, lowHpAt: 0.50 } },
     { id: 'C45', name: '天象之眼', rarity: 2, kind: 'permanent', endlessOnly: true,
@@ -922,7 +922,7 @@
   ]);
   const BUFF_BY_ID = Object.fromEntries(BUFFS.map((b) => [b.id, b]));
   /* 「下一场战斗」语义的增益 id 集合（挑战塔里打完一场即消耗，卡面不显示限次）。 */
-  const TOWER_BATTLE_IDS = BUFFS.filter((b) => b.towerBattle).map((b) => b.id);
+  const TOWER_BATTLE_IDS = BUFFS.filter((b) => b.nextBattle).map((b) => b.id);
   /* 第 3 项：稀有度加一档「传奇」。越高稀有度权重越低，但不悬殊（普通 56 / 稀有 26 / 史诗 14 / 传奇 4）。 */
   const RARITY_NAME = ['普通', '稀有', '史诗', '传奇'];
   /* 本轮第 2 项：稀有/史诗/传奇出率整体下调（原 56/26/14/4）——
@@ -1036,6 +1036,18 @@
     }
     if (row.pools.some((t) => ENDLESS_POOLS.indexOf(t) >= 0) && b.towerOnly) {
       throw new Error('挑战塔专属增益 ' + b.id + ' 不该进无尽塔池');
+    }
+  }
+  /* ---- 加载期断言：「下一场战斗」生命周期的条目必须显式声明归属 ----
+   * `nextBattle` 只表示「效果只服务下一场战斗」，它**不表达**属于哪座塔。
+   * 以前正因为如此，G03 鹰眼（只有 nextBattle）被当成通用条目，漏进了无尽塔。
+   * 现在要求这类条目必须显式写 towerOnly 或 endlessOnly，漏标直接抛错。 */
+  for (const b of BUFFS) {
+    if (!b.nextBattle) continue;
+    const declared = !!(b.towerOnly || b.endlessOnly);
+    if (!declared) {
+      throw new Error('增益 ' + b.id + '（' + b.name + '）是「下一场战斗」类，' +
+        '必须显式声明 towerOnly 或 endlessOnly —— 否则会同时漏进两座塔的池子');
     }
   }
   /* 需求 1 的护栏：挑战塔池里不得出现任何无尽专属 mod（上面已把这类条目排除，这里是第二道闸）。 */

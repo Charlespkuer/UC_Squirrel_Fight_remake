@@ -277,7 +277,7 @@
         b.on ? '当前生效中 · 点一下可以关掉' : '当前已关闭 · 点一下重新开启'].join('\n');
     }
     /* 挑战塔的限次增益只服务**下一场战斗**，卡面与悬停都不显示「N 场」。 */
-    if (buff.towerBattle) {
+    if (buff.nextBattle) {
       return [buff.name + '（' + RARITY[buff.rarity] + ' · 下一场战斗）', buff.desc,
         '打完这一场就消失（挑战塔的增益只服务下一场）',
         b.on ? '当前生效中 · 点一下可以关掉' : '当前已关闭 · 点一下重新开启'].join('\n');
@@ -316,7 +316,7 @@
           '<b>' + esc(b.name) + '</b><i>' + (b.on ? '生效中' : '已关闭') + '</i><em>' +
         (function () {
           const def = TowerData.BUFF_BY_ID[b.id] || {};
-          if (def.towerBattle) return '下一场';                       // 挑战塔：只服务下一场
+          if (def.nextBattle) return '下一场';                       // 挑战塔：只服务下一场
           if (def.mods && def.mods.fragileBreakPct) return '易碎 ' + def.mods.fragileBreakPct + '%';
           return '剩 ' + b.uses + ' 场';
         })() + '</em></button>').join('')
@@ -397,8 +397,8 @@
       byRarity.map((group, r) => group.length
         ? '<div class="catalog-row"><b class="catalog-rarity r' + r + '">' + (RARITY[r] || '') + '</b>' +
           '<div class="buff-tags">' + group.map((b) => '<span class="buff-tag r' + b.rarity + '" data-tip="' +
-            esc(b.name + '（' + (RARITY[b.rarity] || '') + ' · ' + (b.towerBattle ? '仅挑战塔' : (kindName[b.kind] || '')) +
-              (b.kind === 'limited' ? (b.towerBattle ? ' 下一场战斗' : ' ' + (b.uses || 1) + ' 场') : '') + '）\n' + b.desc) +
+            esc(b.name + '（' + (RARITY[b.rarity] || '') + ' · ' + (b.nextBattle ? '下一场' : (kindName[b.kind] || '')) +
+              (b.kind === 'limited' ? (b.nextBattle ? ' 下一场战斗' : ' ' + (b.uses || 1) + ' 场') : '') + '）\n' + b.desc) +
             '" title="' + esc(b.desc) + '">' + esc(b.name) + '<i>' + (kindName[b.kind] || '') + '</i></span>').join('') +
           '</div></div>' : '').join('') + '</div>';
   }
@@ -767,8 +767,8 @@
       '<span class="hex-ribbon">' + RARITY[b.rarity] + '</span>' +
       '<span class="hex-emblem">' + (b.rarity === 2 ? '★' : b.rarity === 1 ? '◆' : '●') + '</span>' +
       '<b class="hex-name">' + esc(b.name) + '</b>' +
-      '<span class="hex-scope">' + (b.towerBattle ? '仅挑战塔' : SCOPE[b.kind]) +
-        (b.kind === 'limited' ? (b.towerBattle ? ' · 下一场战斗' : ' · ' + (b.uses || 1) + ' 场') : '') + '</span>' +
+      '<span class="hex-scope">' + (b.nextBattle ? (b.towerOnly ? '挑战塔 · 下一场' : (b.endlessOnly ? '无尽塔 · 下一场' : '下一场')) : SCOPE[b.kind]) +
+        (b.kind === 'limited' ? (b.nextBattle ? ' · 下一场战斗' : ' · ' + (b.uses || 1) + ' 场') : '') + '</span>' +
       '<span class="hex-desc">' + esc(b.desc) + '</span></button>';
   }
   function offerChoice(mode, choices) {

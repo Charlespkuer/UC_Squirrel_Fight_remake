@@ -107,8 +107,14 @@ test('需求1：环境 buff 全部真正生效（血色黄昏双方向吸血、�
   // 荆棘反伤：写进敌人 mods 且在实战里真的反弹
   r = withEnv(c, [{ id: 'thorns', left: 5, values: { thornsPct: 0.15 } }]);
   assert.equal(r.foe.mods.thornsPct, 0.15, '荆棘反伤应当写进敌人 mods');
-  const sim = c.Sim.simulate(PLAYER(), r.foe);
-  assert.ok(sim.rounds.some((x) => (x.thornsDmg || 0) > 0), '荆棘反伤应当真的反弹伤害');
+  /* 单场不一定打得到（可能输掉 / 被闪避 / 没轮到近战命中），实测单场出现反伤约 76%，
+   * 所以采样若干场，只要有反伤就说明机制真的生效。 */
+  let thornSeen = false;
+  for (let t = 0; t < 40 && !thornSeen; t++) {
+    const sim = c.Sim.simulate(PLAYER(), r.foe);
+    if ((sim.rounds || []).some((x) => (x.thornsDmg || 0) > 0)) thornSeen = true;
+  }
+  assert.ok(thornSeen, '荆棘反伤应当真的反弹伤害（40 场采样）');
 });
 
 test('需求2：烈日灼烧 = 敌方 +25% 暴击 / 我方 +10% 暴击', () => {
@@ -635,7 +641,7 @@ test('需求14：用「补给」替代「紧急包扎」，去掉后者；金蝉
   assert.ok(!/type: 'heal'/.test(core.replace(/\/\*[\s\S]*?\*\//g, '')), '选择池里不该再有 heal 卡');
   assert.equal(TD.BUFF_BY_ID.N04.uses, 10, '金蝉脱壳的 uses 仍是 10');
   /* 挑战塔里限次类一律是「下一场战斗」，所以卡面文案改成单场；无尽塔仍按 uses 显示。 */
-  assert.equal(TD.BUFF_BY_ID.N04.towerBattle, true, '金蝉脱壳应当标 towerBattle');
+  assert.equal(TD.BUFF_BY_ID.N04.nextBattle, true, '金蝉脱壳应当标 nextBattle');
   assert.match(TD.BUFF_BY_ID.N04.desc, /下一场战斗/, '文字要写成「下一场战斗」：' + TD.BUFF_BY_ID.N04.desc);
   // 场间选择里全是真增益（含补给 N08 的可能性存在）
   const run = c.Tower._debugRun('endless');
@@ -895,8 +901,8 @@ test('需求21：挑战塔不再生成任何「只有无尽塔用得上」的增
   /* 池子规模：towerPool 现在是「挑战塔**归属**」的完整名单（场间选择池），
    * 包含限次类与永久类 —— 塔里本来就能选到永久增益（无尽塔专属的除外）。 */
   const towerLimited = TD.towerPool.filter((b) => b.kind === 'limited');
-  assert.equal(towerLimited.length, 33, '挑战塔的限次类应当是 33 条（21 通用 + 12 专属），实测 ' + towerLimited.length);
-  assert.equal(towerLimited.filter((b) => b.towerOnly).length, 12, '其中 12 条是挑战塔专属');
+  assert.equal(towerLimited.length, 31, '挑战塔的限次类应当是 31 条（19 通用 + 12 专属），实测 ' + towerLimited.length);
+  assert.equal(towerLimited.filter((b) => b.towerOnly).length, 31, '其中 31 条是挑战塔专属（含 N/M/G/T 四系）');
   assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 33, '永久类也属于挑战塔池（共 33 条）');
   assert.equal(TD.towerPool.filter((b) => b.kind === 'instant').length, 0, '即时类不进选择池');
   // 无尽池不该混入挑战塔专属（它们按「一场定胜负」设计）
@@ -977,10 +983,10 @@ test('需求23：挑战塔限次类只表达「下一场战斗」，不显示限
   c.Tower._debugSetLayer(0);
   assert.ok(c.Tower.startTowerRun().ok, '应当能开挑战塔');
 
-  // 所有限次类都标了 towerBattle（含新加的挑战塔专属）
+  // 所有限次类都标了 nextBattle（含新加的挑战塔专属）
   for (const b of TD.towerPool) {
     if (b.kind !== 'limited') continue;
-    assert.equal(b.towerBattle, true, b.id + ' 应当标 towerBattle');
+    assert.equal(b.nextBattle, true, b.id + ' 应当标 nextBattle');
     assert.match(b.desc, /下一场战斗/, b.id + ' 的文案要写「下一场战斗」：' + b.desc);
     assert.ok(!/接下来\s*\d+\s*场|本层/.test(b.desc), b.id + ' 的文案不该再出现「N 场 / 本层」：' + b.desc);
   }
@@ -1003,9 +1009,9 @@ test('需求23：挑战塔限次类只表达「下一场战斗」，不显示限
     '无尽塔的 N01 仍应是 2 场');
   // UI：塔里的限次胶囊显示「下一场」而不是「剩 N 场」
   const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
-  assert.match(ui, /towerBattle/, 'UI 要按 towerBattle 区分展示');
+  assert.match(ui, /nextBattle/, 'UI 要按 nextBattle 区分展示');
   assert.match(ui, /'下一场'/, '面板胶囊要能显示「下一场」');
-  assert.match(ui, /仅挑战塔/, '选牌卡面要标「仅挑战塔」');
+  assert.match(ui, /下一场/, '选牌卡面要标「下一场」');
 });
 
 test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => {
@@ -1018,7 +1024,7 @@ test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => 
   assert.equal(TD.endlessPool.filter((b) => b.towerOnly).length, 0, '专属不该进无尽池');
   for (const b of tower) {
     assert.equal(b.kind, 'limited', b.id + ' 应当是限次类（塔里=下一场）');
-    assert.equal(b.towerBattle, true, b.id + ' 应当 towerBattle');
+    assert.equal(b.nextBattle, true, b.id + ' 应当 nextBattle');
     assert.match(b.desc, /下一场战斗/, b.id + ' 文案要写「下一场战斗」');
   }
   // 关键几条的数值
@@ -1500,7 +1506,7 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
     assert.ok(!TD.endlessPool.some((x) => x.id === b.id), b.id + ' 不该进无尽选择池');
     assert.ok(!TD.shopPool.some((x) => x.id === b.id), b.id + ' 不该进无尽商店池 ← 需求点名的泄漏');
   }
-  assert.equal(TD.BUFFS.filter((x) => x.towerOnly).length, 12, '应当有 12 条挑战塔专属');
+  assert.equal(TD.BUFFS.filter((x) => x.towerOnly).length, 31, '应当有 31 条挑战塔专属');
 
   // 3) 无尽专属（显式标记或带无尽专属 mod）：绝不能出现在挑战塔池
   for (const b of TD.BUFFS) {
@@ -1545,7 +1551,7 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
 
   // 7) 挑战塔池的构成可解释
   assert.equal(TD.towerPool.length, byTag('T.choice').split(',').length, '池子大小要自洽');
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'limited').length, 33, '限次类 33 条');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'limited').length, 31, '限次类 31 条');
   assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 33, '永久类 33 条');
 });
 
@@ -1633,9 +1639,14 @@ test('需求33：挥金如土（C36）每 10 币一次随机项，且购买它�
   const procs = (g) => g.power + g.agility + g.speed + g.hp / 5;   // 血是 +5/次，折算成「次」
   assert.equal(procs(r.spendGain), 32, '160 币应当触发 32 次（每 5 币一次），实测 ' + procs(r.spendGain));
   assert.equal(r.shopSpend, 0, '160 是 5 的整数倍，余数应为 0，实测 ' + r.shopSpend);
-  // ② 每次只加「1 力 / 1 敏 / 1 速 / 5 血」中的一项
-  assert.ok(r.spendGain.power <= 16 && r.spendGain.agility <= 16 && r.spendGain.speed <= 16 && r.spendGain.hp <= 80,
-    '单项不该超过总次数：' + JSON.stringify(r.spendGain));
+  /* ② 每次只加「1 力 / 1 敏 / 1 速 / 5 血」中的一项。
+   * 正确的不变量：四项折算后**总和**等于触发次数，且每项非负 ——
+   * 原来写「单项 ≤ 16」是错的：32 次随机分配里某一项完全可能超过半数（实测 hp 到 30）。 */
+  const g = r.spendGain;
+  assert.ok(g.power >= 0 && g.agility >= 0 && g.speed >= 0 && g.hp >= 0,
+    '各项不该为负：' + JSON.stringify(g));
+  assert.equal(g.hp % 5, 0, '生命那一项应当是 5 的整数倍：' + g.hp);
+  assert.equal(procs(g), 32, '四项折算后总和应当等于触发次数：' + JSON.stringify(g));
   assert.ok(r.spendGain.hp % 5 === 0, '生命项应当是 5 的倍数，实测 ' + r.spendGain.hp);
   // ③ 后续消费继续累计：再买 30 币 → 累计 19 次
   mkShop('C01', 30);
@@ -2386,25 +2397,41 @@ test('需求44：幻影回响（环境）—— 只在三侠战生效，胜利�
   r.layer = 12; r.idx = 0;
   r.permanent = [{ id: 'C11', stacks: 1 }, { id: 'C12', stacks: 1 }];
   r.env = [{ id: 'echo', left: 99, values: { repeatChance: 1 } }];
-  let repeats = 0, sameEntry = true, firstEntry = null;
+  /* 回响已限制为「一场战斗至多触发一次」：同一场再战一次之后就必须推进。
+   * 所以 3 次连打里会有 2 次触发（第 1、3 次），第 2 次是把这一场推过去。 */
+  let repeats = 0, sameEntry = true, advanced = false;
+  let lastRepeatTag = null, lastRepeatIdx = null;
   for (let i = 0; i < 3; i++) {
     const nx = T.nextBattle('endless');
     assert.ok(nx && nx.ok !== false, '应当能取到下一场');
     const tag = nx.entry.kind + ':' + (nx.entry.anim || nx.entry.id);
-    if (firstEntry == null) firstEntry = tag;
-    if (tag !== firstEntry) sameEntry = false;
+    const idxNow = T._debugRun('endless').idx;
     const me = mk(); nx.adjustMe(me);
     const a = T._debugRun('endless');
     const out = T.reportBattle('endless', a.attempt, true, me.maxHp, me.maxHp);
-    if (out.repeat) repeats++;
+    if (out.repeat) {
+      /* 真正的不变量：**同一场不能连续触发两次** ——
+       * 触发之后紧接着的那一场必须是同一对手且 idx 不变；
+       * 若下一次又是同一对手 + 同一 idx 且再次触发，就说明「一场多次」漏了。
+       * 另外回响不该推进层号。 */
+      if (out.repeat.battleNo !== idxNow + 1) sameEntry = false;
+      if (T._debugRun('endless').layer !== 12) sameEntry = false;
+      lastRepeatTag = tag; lastRepeatIdx = idxNow;
+      repeats++;
+    } else {
+      advanced = true;
+      /* 没触发就一定要推进（否则会卡在同一场） */
+      if (T._debugRun('endless').idx <= idxNow) sameEntry = false;
+    }
     assert.ok(!out.layerComplete, '回响不该让本层提前通关');
   }
-  assert.equal(repeats, 3, '100% 概率下三次都该触发回响，实测 ' + repeats);
-  assert.ok(sameEntry, '回响必须是**同一场**对手，实测 ' + firstEntry);
+  assert.equal(repeats, 2, '100% 概率 + 一场至多一次：3 次连打应当触发 2 次，实测 ' + repeats);
+  assert.ok(advanced, '同一场再战一次后必须推进到下一场');
+  assert.ok(sameEntry, '回响必须是**同一场**对手（同一 layer+idx），实测 ' + lastRepeatTag + ' @idx ' + lastRepeatIdx);
   r = T._debugRun('endless');
   assert.equal(r.layer, 12, '回响不该推进层号');
-  assert.equal(r.idx, 0, '回响应当把层内序号回退到同一场');
-  assert.equal(r.repeatCount, 3, '重复场次应当被计数');
+  assert.equal(r.idx, 1, '再战一次后层内序号应当推进到 1，实测 ' + r.idx);
+  assert.equal(r.repeatCount, 2, '重复场次应当被计数');
   /* 叠层增益要把重复的那一场也算进去 */
   assert.equal(r.winHpFlat, 15, 'C11 每胜 +5：3 场（含重复）应当 = 15，实测 ' + r.winHpFlat);
   assert.equal(r.winStatPower, 3, 'C12 第 10 层起每胜 +1：实测 ' + r.winStatPower);
@@ -2516,6 +2543,52 @@ test('需求45：全局实际血量计数器 —— 被上限压下来的部分�
   assert.ok(info().counter >= beforeHeal,
     '开战回血应当把计数器加上去（不受上限裁剪影响）：' + beforeHeal + ' → ' + info().counter);
   T.abandon('endless');
+});
+
+test('需求46：护盾（我方与敌方）—— 模拟结果暴露开局护盾，事件里带剩余护盾', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;
+  const mk = (o) => Object.assign({ name: 'X', level: 50, power: 140, agility: 100, speed: 100,
+    hp: 3000, maxHp: 3000, weapons: [{ id: 1, level: 5 }], skills: [], effects: {},
+    baseStats: { power: 140, agility: 100, speed: 100 } }, o);
+
+  /* ① 我方护盾（塔 buff 坚韧壁垒 → shellPct） */
+  let me = mk({ name: '我', mods: { shellPct: 0.30 } });
+  let foe = mk({ name: '敌', power: 60, hp: 3000, maxHp: 3000 });
+  let res = Sim.simulate(me, foe);
+  assert.ok(Array.isArray(res.startShell) && res.startShell.length === 2,
+    '模拟结果要暴露 startShell（界面一开始就要能画出护盾）');
+  assert.equal(res.startShell[0], Math.round(3000 * 0.30), '我方开局护盾 = 上限 × 30%，实测 ' + res.startShell[0]);
+  assert.equal(res.startShell[1], 0, '没有护盾来源时敌方为 0');
+  /* 每个事件都带两侧剩余护盾，界面才能逐帧更新 */
+  const withShell = (res.rounds || []).filter((r) => Array.isArray(r.shellAfter) && r.shellAfter.length === 2);
+  assert.equal(withShell.length, (res.rounds || []).length, '每个事件都要带 shellAfter');
+  assert.ok((res.rounds || []).some((r) => (r.shellAbsorb || 0) > 0), '护盾应当真的吸收过伤害');
+  assert.ok((res.rounds || []).some((r) => r.shellAfter[0] < res.startShell[0]), '被吸收后剩余护盾要减少');
+
+  /* ② 敌方护盾（环境词缀「护盾」→ foe.mods.shellPct） */
+  me = mk({ name: '我', power: 400 });
+  foe = mk({ name: '敌', power: 30, hp: 3000, maxHp: 3000, mods: { shellPct: 0.25 } });
+  res = Sim.simulate(me, foe);
+  assert.equal(res.startShell[1], Math.round(3000 * 0.25), '敌方开局护盾 = 上限 × 25%，实测 ' + res.startShell[1]);
+  assert.ok((res.rounds || []).some((r) => (r.shellAbsorb || 0) > 0), '敌方护盾也要能吸收伤害');
+  assert.ok((res.rounds || []).some((r) => r.shellAfter[1] < res.startShell[1]), '敌方剩余护盾要减少');
+
+  /* ③ 双方都有护盾（血色黄昏之类的双向场景） */
+  me = mk({ name: '我', mods: { shellPct: 0.20 } });
+  foe = mk({ name: '敌', power: 30, mods: { shellPct: 0.20 } });
+  res = Sim.simulate(me, foe);
+  assert.ok(res.startShell[0] > 0 && res.startShell[1] > 0, '双方都该有护盾：' + JSON.stringify(res.startShell));
+
+  /* ④ 没有护盾来源时全为 0（不要凭空出现护盾） */
+  res = Sim.simulate(mk({ name: '我' }), mk({ name: '敌', power: 30 }));
+  assert.equal(res.startShell[0], 0, '没有 shellPct 时我方护盾为 0');
+  assert.equal(res.startShell[1], 0, '没有 shellPct 时敌方护盾为 0');
+  assert.ok((res.rounds || []).every((r) => !r.shellAbsorb), '没有护盾就不该有吸收记录');
+
+  /* ⑤ 塔 buff「坚韧壁垒」走的是同一条路径（agg.shellPct → mods.shellPct） */
+  assert.ok(Object.keys(TD.BUFF_BY_ID).some((id) => (TD.BUFF_BY_ID[id].mods || {}).shellPct),
+    '应当存在挂 shellPct 的塔 buff（坚韧壁垒）');
 });
 
 (async () => {

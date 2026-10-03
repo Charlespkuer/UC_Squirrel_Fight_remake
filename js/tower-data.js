@@ -75,7 +75,7 @@
    * 例：[0.10, 0.16, 'pct'] → 显示 +13%；[18, 32, 'num'] → 显示 +24。 */
   const ENDLESS_ENV = Object.freeze([
     /* —— 原段位机制并入（这几个都是「敌人变强」类，bad=true）—— */
-    { id: 'thorns', name: '荆棘反伤', bad: true, mech: true, mods: { thornsPct: [0.10, 0.16, 'pct'] },
+    { id: 'thorns', name: '荆棘反伤', bad: true, noReflect: true, mech: true, mods: { thornsPct: [0.10, 0.16, 'pct'] },
       desc: '敌人受到伤害时反弹 %thornsPct%' },
     { id: 'regen', name: '自愈回复', bad: true, noReflect: true, mech: true, mods: { regenPct: [0.02, 0.04, 'pct'] },
       desc: '敌人每回合回复 %regenPct% 最大生命' },
@@ -95,7 +95,7 @@
     { id: 'frost', name: '寒霜锁链', bad: true, noReflect: true,
       mods: { enemySpeedMul: [-0.09, -0.05, 'pct'], selfSpeedMul: [-0.19, -0.11, 'pct'] },
       desc: '敌方速度 %enemySpeedMul%，我方速度 %selfSpeedMul%' },
-    { id: 'greed', name: '贪婪裂隙', bad: true, mods: { coinBonus: [0.35, 0.6, 'pct'], enemyMaxHpMul: [0.10, 0.18, 'pct'] },
+    { id: 'greed', name: '贪婪裂隙', bad: true, noReflect: true, mods: { coinBonus: [0.35, 0.6, 'pct'], enemyMaxHpMul: [0.10, 0.18, 'pct'] },
       desc: '我方试炼币 %coinBonus%，但敌方生命上限 %enemyMaxHpMul%' },
     { id: 'dusk', name: '血色黄昏', bad: false, mods: { bothLifestealPct: [0.10, 0.18, 'pct'] },
       desc: '双方吸血 %bothLifestealPct%' },

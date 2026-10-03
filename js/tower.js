@@ -1115,8 +1115,10 @@
        * 以前这里写死 +50%，与实例数值无关。 */
       {
         const fx = envEffective(run);
-        if (!fx.denyGood && (fx.mine.includes('greed') || fx.enemy.includes('greed'))) {
-          coinMul += Math.max(0, envModTotal(run, 'coinBonus'));
+        /* 贪婪裂隙的奖励只有在这条环境**真正生效**时才给 ——
+         * 天象之眼（C45）把它剥夺之后，敌人既不变厚、也不再产生试炼币奖励。 */
+        if (fx.mine.includes('greed')) {
+          coinMul += Math.max(0, envModTotal(run, 'coinBonus', { mineOnly: true }));
         }
       }
       // 第 1 项：战利品账本 —— 每胜一场，卖出收益累计 +N
@@ -1376,9 +1378,15 @@
     return out;
   }
   /** 本局所有生效环境里，某个键的合计（已含环境强化倍率）。 */
-  function envModTotal(run, key) {
+  /** 环境数值求和。
+   *  opts.mineOnly：只算「本场真正生效」的那一份（见 envEffective 的 fx.mine）——
+   *  这样天象之眼剥夺过的环境不会再从这里漏出来。 */
+  function envModTotal(run, key, opts) {
+    const mineOnly = !!(opts && opts.mineOnly);
+    const fx = mineOnly ? envEffective(run) : null;
     let sum = 0;
     for (const e of envList(run)) {
+      if (mineOnly && fx.mine.indexOf(e.id) < 0) continue;
       const def = D().ENDLESS_ENV_BY_ID[e.id];
       if (!def || !def.mods || def.mods[key] === undefined) continue;
       sum += Number(envValues(run, e)[key]) || 0;
@@ -1476,8 +1484,7 @@
      * 面板字段也补上（否则玩家侧只是 mods 里有个值、面板不显示、老代码读面板时看不到）。 */
     if (eff.mods.lifestealPct) fighter.lifestealPct = Math.max(Number(fighter.lifestealPct) || 0, eff.mods.lifestealPct);
     /* 贪婪裂隙：我方试炼币加成（记在 run 上，结算奖励时用） */
-    const coin = fx.denyGood ? 0 : (fx.mine.includes('greed') || fx.enemy.includes('greed'))
-      ? envModTotal(run, 'coinBonus') : 0;
+    const coin = fx.mine.includes('greed') ? envModTotal(run, 'coinBonus', { mineOnly: true }) : 0;
     run.envCoinMul = 1 + Math.max(0, coin);
     return fighter;
   }
@@ -1509,11 +1516,15 @@
        *   · 无视（envIgnore）且不反弹 → 整条无效；
        *   · 反弹（envReflect）→ 转嫁给敌人（敌人自食其果）；
        *   · 其余 → 由我方承受（数值本来就是「敌人变强」）。
-       * `noReflect`：那些**纯粹强化敌人自身**的词缀（自愈回复 / 吸血 / 护盾 /
-       * 吞噬成长 / 烈日 / 寒霜的敌方加速）没有「反弹」的意义 —— 反弹等于
-       * 把敌人的自我强化又还给他，所以这类一律只是**无效化**。
-       * 需求点名的 bug：天象之眼带了反弹，于是「自愈回复」被反弹给敌人，
-       * 敌方反而照样回血。 */
+       * `noReflect`：**目前所有负面环境都标了它** —— 天象之眼（C45）的语义是
+       * 「剥夺环境」，而不是「把环境反弹回去」：
+       *   · 「自愈回复 / 吸血 / 护盾 / 吞噬成长 / 烈日灼烧 / 寒霜锁链」是敌人自我强化，
+       *     反弹等于把强化又还给他；
+       *   · 「荆棘反伤」反弹之后敌人自己带上了荆棘 —— 玩家还是会挨反弹伤害，
+       *     等于没有剥夺（需求点名的第二个 bug）；
+       *   · 「贪婪裂隙」反弹之后敌人照样变厚。
+       * 所以现在一律**无效化**。`envReflect` 分支保留为将来「某条环境确实适合反弹」
+       * 时的数据开关（把该条的 noReflect 去掉即可）。 */
       if (def.bad) {
         if (sh.ignore) { if (def.noReflect || !sh.reflect) continue; }
         if (sh.reflect && !def.noReflect) { if (allow(def)) enemy.push(e.id); }
@@ -1843,7 +1854,9 @@
     if (buff.kind === 'instant') { const r = applyInstant(run, buff); logBuff(run, id, 'instant', { detail: instantDetail(buff) }); return r; }
     /* 选取型（武器/技能强化）同样不占槽、不触发替换：立即登记，等界面做三选一。 */
     if (buff.mods && (buff.mods.pickWeaponPct || buff.mods.pickSkillPct)) {
-      if ((run.pickBuffIds || []).includes(buff.id)) return { ok: false, msg: '这类选取增益一局只能获得一次。' };
+      if (!buff.repeatable && (run.pickBuffIds || []).includes(buff.id)) {
+        return { ok: false, msg: '这类选取增益一局只能获得一次。' };
+      }
       /* 第 4 项（两轮合并后的口径）：**拿到就登记** pickBuffIds —— 这样它不会在池子里被
        * 反复刷到（上一轮反馈「还是重复刷到神兵淬炼」）。
        * 同时保留 pendingPick：即使此刻没有武器/技能可选，这次强化也不会白拿 ——
@@ -1859,8 +1872,14 @@
     /* 本轮第 1 项：虚空铭文（传奇·隐藏选取型）—— 选已有的一个永久增益给它附魔免占位。
      * 与武器/技能选取同款：不占槽、不触发替换，立即登记 pendingPick 等界面选。 */
     if (buff.mods && buff.mods.pickPermanentFree) {
-      if ((run.pickBuffIds || []).includes(buff.id)) return { ok: false, msg: '这类选取增益一局只能获得一次。' };
-      run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]);   // 第 4 项：拿到即登记，不重复刷到
+      /* 需求：虚空铭文是**可重复获得**的（每条永久增益各附魔一次），
+       * 所以这里不能再拿 pickBuffIds 当「一局一次」的闸门 ——
+       * 那会把第二次的拾取直接拒绝（bug：重复获取时不能正常拾取）。
+       * 去重由数据层的 repeatable + poolFilter 负责（每层的重复出率还会递减）。 */
+      if (!buff.repeatable && (run.pickBuffIds || []).includes(buff.id)) {
+        return { ok: false, msg: '这类选取增益一局只能获得一次。' };
+      }
+      run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]).filter((v, i, a) => a.indexOf(v) === i);
       run.pendingPick = { kind: 'permBuff', buffId: buff.id };
       logBuff(run, id, 'get', { detail: '虚空铭文（待选永久增益）' });
       save();

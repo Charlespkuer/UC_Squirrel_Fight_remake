@@ -3024,10 +3024,11 @@ test('需求51：天象之眼应当剥夺敌方吃到的正向环境（但不剥
   assert.ok(!deny.foe.mods.lifestealPct,
     '天象之眼应当剥夺敌方吃到的正向环境（敌方不该有吸血）：' + JSON.stringify(deny.foe.mods));
 
-  /* ② 负面环境仍然照常反弹给敌人（别把这条修坏了） */
+  /* ② 负面环境现在一律**无效化**（不再反弹）——
+   *    反弹会让荆棘/自愈/贪婪在敌人身上重生，等于没有剥夺。 */
   const bad = scene(['C45'], THORNS);
-  assert.equal(bad.foe.mods.thornsPct, 0.15, '负面环境应当反弹给敌人');
-  assert.ok(!bad.me.mods.thornsPct, '我方不该吃到被反弹的负面环境');
+  assert.ok(!bad.foe.mods.thornsPct, '天象之眼应当把负面环境整个剥夺（不反弹）：' + JSON.stringify(bad.foe.mods));
+  assert.ok(!bad.me.mods.thornsPct, '我方也不该吃到这条负面环境');
 
   /* ③ 「无视环境」（避风斗篷 N10 / 晴空护符 N09）的定位是
    *    **无视负面环境词缀** —— 所以它只屏蔽负面环境，正向环境照常生效。
@@ -3720,8 +3721,11 @@ test('需求57：终焉烙印最多3次 / 秘技通神可抽绝对防御与龟�
   assert.equal(TD.ENDLESS_ENV_BY_ID.lifesteal.noReflect, true, '吸血应当标记 noReflect');
   assert.equal(TD.ENDLESS_ENV_BY_ID.shell.noReflect, true, '护盾应当标记 noReflect');
   assert.equal(TD.ENDLESS_ENV_BY_ID.devour.noReflect, true, '吞噬成长应当标记 noReflect');
-  assert.ok(!TD.ENDLESS_ENV_BY_ID.thorns.noReflect, '荆棘反伤应当仍可反弹');
-  assert.ok(!TD.ENDLESS_ENV_BY_ID.greed.noReflect, '贪婪裂隙应当仍可反弹');
+  assert.equal(TD.ENDLESS_ENV_BY_ID.thorns.noReflect, true, '荆棘反伤应当标记 noReflect');
+  /* 所有负面环境都必须被剥夺（不再反弹） */
+  for (const e of TD.ENDLESS_ENV.filter((x) => x.bad)) {
+    assert.equal(e.noReflect, true, '负面环境 ' + e.id + ' 应当标记 noReflect（一律无效化）');
+  }
   const envTrial = (envIds, c45) => {
     openRun();
     if (c45) T.addBuff(T._debugRun('endless'), 'C45');
@@ -3742,15 +3746,115 @@ test('需求57：终焉烙印最多3次 / 秘技通神可抽绝对防御与龟�
     assert.ok(Number(a.foe[key]) > 0, id + '：无天象之眼时敌方应当吃得到');
     assert.ok(!(Number(b.foe[key]) > 0), id + '：有天象之眼时敌方不该再吃得到');
   }
-  /* 荆棘仍然反弹（这是「敌人自食其果」，不该被一起拦掉） */
+  /* 荆棘也必须被剥夺：反弹的话敌人自己带荆棘，玩家照样挨反弹伤害 */
   const th = envTrial(['thorns'], true);
-  assert.ok(Number(th.foe.thornsPct) > 0, '荆棘反伤应当仍然反弹给敌人：' + JSON.stringify(th.foe));
+  assert.ok(!(Number(th.foe.thornsPct) > 0), '荆棘反伤应当被剥夺：' + JSON.stringify(th.foe));
   /* 血色黄昏（正向）：我方该吃的仍然吃得到，敌方被剥夺 */
   const duskOff = envTrial(['dusk'], false), duskOn = envTrial(['dusk'], true);
   assert.ok(Number(duskOff.me.lifestealPct) > 0 && Number(duskOff.foe.lifestealPct) > 0,
     '没有天象之眼时血色黄昏双方都吃：' + JSON.stringify(duskOff));
   assert.ok(Number(duskOn.me.lifestealPct) > 0, '有天象之眼时我方仍该吃血色黄昏：' + JSON.stringify(duskOn.me));
   assert.ok(!(Number(duskOn.foe.lifestealPct) > 0), '有天象之眼时敌方不该吃血色黄昏：' + JSON.stringify(duskOn.foe));
+  T.abandon('endless');
+});
+
+test('需求58：天象之眼剥夺全部负面环境 / 虚空铭文可重复拾取', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const openRun = () => {
+    S.newGame('r58' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = []; r.pickBuffIds = [];
+    return r;
+  };
+  const mkMe = () => ({ name: 'p', level: 70, power: 300, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
+    baseStats: { power: 300, agility: 120, speed: 120 }, weapons: [{ id: 1, level: 5 }], skills: [],
+    wears: [], effects: {}, masterLevel: 0 });
+  const present = (v) => v != null && Number(v) !== 0;
+  const envTrial = (envId, c45) => {
+    openRun();
+    if (c45) T.addBuff(T._debugRun('endless'), 'C45');
+    const rr = T._debugRun('endless');
+    rr.env = [{ id: envId, vals: null }];
+    const nx = T.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '应当能取到战斗');
+    const me = mkMe();
+    nx.adjustMe(me);
+    return { foe: nx.foe.mods || {}, me: me.mods || {} };
+  };
+
+  /* ① 全部 8 条负面环境都必须被天象之眼**整个剥夺**（不再反弹） */
+  const badList = TD.ENDLESS_ENV.filter((e) => e.bad);
+  assert.equal(badList.length, 8, '负面环境应当有 8 条，实测 ' + badList.length);
+  for (const e of badList) {
+    assert.equal(e.noReflect, true, '负面环境 ' + e.id + '（' + e.name + '）应当标记 noReflect');
+  }
+  const KEYS = { thorns: 'thornsPct', regen: 'regenPct', lifesteal: 'lifestealPct', shell: 'shellPct',
+    devour: 'devourPct', sun: 'critBonus', frost: 'speedMul', greed: 'maxHpMul' };
+  for (const e of badList) {
+    const k = KEYS[e.id];
+    const off = envTrial(e.id, false), on = envTrial(e.id, true);
+    assert.ok(present(off.foe[k]) || present(off.me[k]),
+      e.id + '：没有天象之眼时应当生效（' + k + '）');
+    assert.ok(!(present(on.foe[k]) || present(on.me[k])),
+      e.id + '：有天象之眼时应当被完全剥夺，实测 敌=' + on.foe[k] + ' 我=' + on.me[k]);
+  }
+  /* 贪婪裂隙：被剥夺后连「试炼币奖励」也一并取消（否则等于白拿钱） */
+  const coinMul = (c45) => {
+    openRun();
+    if (c45) T.addBuff(T._debugRun('endless'), 'C45');
+    const rr = T._debugRun('endless');
+    rr.env = [{ id: 'greed', vals: null }];
+    const nx = T.nextBattle('endless');
+    const me = mkMe();
+    nx.adjustMe(me);
+    return T._debugRun('endless').envCoinMul;
+  };
+  assert.ok(coinMul(false) > 1, '没有天象之眼时贪婪裂隙应当给试炼币加成：' + coinMul(false));
+  assert.equal(coinMul(true), 1, '有天象之眼时贪婪裂隙的试炼币加成也该取消：' + coinMul(true));
+
+  /* 正向环境（血色黄昏）：我方保留、敌方被剥夺 —— 别把这条修坏 */
+  const dOff = envTrial('dusk', false), dOn = envTrial('dusk', true);
+  assert.ok(present(dOff.me.lifestealPct) && present(dOff.foe.lifestealPct),
+    '无天象时血色黄昏双方都吃：' + JSON.stringify(dOff));
+  assert.ok(present(dOn.me.lifestealPct), '有天象时我方仍该吃血色黄昏：' + JSON.stringify(dOn.me));
+  assert.ok(!present(dOn.foe.lifestealPct), '有天象时敌方不该吃血色黄昏：' + JSON.stringify(dOn.foe));
+
+  /* ② 虚空铭文（C37）可重复拾取：第二、三次都要能正常落地 */
+  const c37 = TD.BUFF_BY_ID.C37;
+  assert.equal(c37.repeatable, true, 'C37 应当可重复获得');
+  openRun();
+  T.addBuff(T._debugRun('endless'), 'C29');   // 供附魔的永久增益
+  T.addBuff(T._debugRun('endless'), 'C27');
+  const picks = [];
+  for (let n = 0; n < 2; n++) {
+    const res = T.addBuff(T._debugRun('endless'), 'C37');
+    assert.ok(res.ok, '第 ' + (n + 1) + ' 次获取虚空铭文应当成功：' + JSON.stringify(res));
+    const rr = T._debugRun('endless');
+    assert.ok(rr.pendingPick && rr.pendingPick.kind === 'permBuff',
+      '第 ' + (n + 1) + ' 次应当挂上待选永久增益：' + JSON.stringify(rr.pendingPick));
+    const target = (rr.permanent || []).find((b) => !(rr.slotFreeIds || []).includes(b.id));
+    assert.ok(target, '应当还有可附魔的永久增益');
+    const pick = T.applyPickBuff('permBuff', target.id);
+    assert.ok(pick.ok, '第 ' + (n + 1) + ' 次落地应当成功：' + JSON.stringify(pick));
+    picks.push(target.id);
+  }
+  assert.equal(new Set(picks).size, 2, '两次应当附魔到不同的永久增益：' + picks.join(','));
+  const fin = T._debugRun('endless');
+  assert.equal((fin.slotFreeIds || []).length, 2, '两个永久增益都应当免占位：' + JSON.stringify(fin.slotFreeIds));
+  /* 重复拾取不能再被「一局一次」闸门拒绝 */
+  const third = T.addBuff(T._debugRun('endless'), 'C37');
+  assert.ok(third.ok, '第三次获取也应当成功（可重复获得）：' + JSON.stringify(third));
+
+  /* ③ 单次型的选取增益（C32/C33 是 unique，一局本就只会出现一次）不受影响 */
+  openRun();
+  assert.ok(T.addBuff(T._debugRun('endless'), 'C33').ok, '第一次秘技通神应当成功');
+  const again = T.addBuff(T._debugRun('endless'), 'C33');
+  assert.equal(again.ok, false, '非 repeatable 的选取增益仍应受「一局一次」限制：' + JSON.stringify(again));
   T.abandon('endless');
 });
 

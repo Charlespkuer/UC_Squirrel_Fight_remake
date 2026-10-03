@@ -2723,6 +2723,20 @@
     if (!run || run.attempt) return { ok: false };
     const out = { ok: true, score: run.score, layer: run.layer };
     settleScore(run, out);
+    /* 需求：本局**多余的试炼币按 1:1 换成抽奖卷** ——
+     * 主动放弃时不该让攒下来的币白白蒸发（原来直接丢掉）。 */
+    const leftCoins = Math.max(0, Math.floor(Number(run.coins) || 0));
+    if (leftCoins > 0) {
+      S().props[TICKET_PROP] = (S().props[TICKET_PROP] || 0) + leftCoins;
+      run.coins = 0;
+      out.coinsLeft = leftCoins;
+      out.tickets = leftCoins;
+      out.ticketsTotal = S().props[TICKET_PROP];
+      out.convertMsg = '放弃本局：' + leftCoins + ' 试炼币已 1:1 兑换为 ' + leftCoins + ' 张抽奖卷';
+    } else {
+      out.coinsLeft = 0;
+      out.tickets = 0;
+    }
     endless().run = null;
     save();
     return out;

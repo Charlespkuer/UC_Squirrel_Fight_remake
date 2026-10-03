@@ -679,8 +679,17 @@
       openShop();
     });
     on(p, 'abandon', () => {
-      modal('放弃本局', '<p>放弃后按当前层应得的抽奖卷结算（分数照常入账），确定吗？</p>', [
-        { label: '放弃', cls: 'muted', run: () => { Tower.abandon('endless'); syncTickets(); openEndless(); } },
+      const leftCoins = Math.max(0, Math.floor(Number((info.run || {}).coins) || 0));
+      /* 把「本局剩余试炼币 1:1 换抽奖卷」明确写进确认框 —— 否则玩家不知道币不会白丢。 */
+      modal('放弃本局',
+        '<p>放弃后按当前层应得的抽奖卷结算（分数照常入账）' +
+        (leftCoins > 0 ? '，并且本局剩余的 <b>' + leftCoins + '</b> 试炼币会 <b>1:1</b> 兑换为抽奖卷' : '') +
+        '，确定吗？</p>', [
+        { label: '放弃', cls: 'muted', run: () => {
+            const res = Tower.abandon('endless');
+            syncTickets(); openEndless();
+            if (res && res.coinsLeft > 0) toast(res.convertMsg);
+          } },
         { label: '继续冲塔', cls: 'gold' },
       ], { small: true });
     });

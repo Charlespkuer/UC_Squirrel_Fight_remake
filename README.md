@@ -304,6 +304,25 @@ pct(mods.killMaxHpCap * stacks * g)             // ❌ 这个 mod 根本不存�
 结果：挑战塔池 64 条（限次 31 / 永久 33，其中 31 条专属），无尽池 54 条，商店池 52 条；
 **无尽池里 0 条 towerOnly，挑战塔池里 0 条 endlessOnly**。
 
+### 主动放弃无尽塔：剩余试炼币 1:1 换抽奖卷
+
+原来主动放弃本局时，攒下来的试炼币是**直接蒸发**的。现在在 `abandon('endless')` 里结算：
+
+```js
+const leftCoins = Math.max(0, Math.floor(Number(run.coins) || 0));
+if (leftCoins > 0) {
+  S().props[TICKET_PROP] = (S().props[TICKET_PROP] || 0) + leftCoins;   // 50 = 抽奖卷
+  out.coinsLeft = leftCoins; out.tickets = leftCoins; out.convertMsg = '…';
+}
+```
+
+- 返回里带上 `coinsLeft` / `tickets` / `ticketsTotal` / `convertMsg`，界面据此提示
+- 放弃确认框会**先显示**「本局剩余的 N 试炼币会 1:1 兑换为抽奖卷」，放弃后 toast 结果
+- 分数照常入账（原有 `settleScore` 不动）；`run.coins` 清零后再销毁本局
+- 没有币时不发卷、也不显示兑换提示；挑战塔（`abandon('tower')`）有自己的结算，不受影响
+
+实测：137 币 → 137 张卷并写进存档；0 币不动；重复放弃被拒且不重复发卷。
+
 ### 天象之眼改为「一律剥夺」环境 / 虚空铭文可重复拾取
 
 **① 天象之眼（C45）不再反弹，一律无效化 —— 8 条负面环境全部核对过**

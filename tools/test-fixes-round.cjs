@@ -3858,6 +3858,76 @@ test('需求58：天象之眼剥夺全部负面环境 / 虚空铭文可重复拾
   T.abandon('endless');
 });
 
+test('需求59：主动放弃无尽塔时，本局剩余试炼币 1:1 兑换为抽奖卷', () => {
+  const c = setup();
+  const T = c.Tower, S = c.State;
+  const TICKET = 50;    // 抽奖卷的道具 id
+  const startRun = () => {
+    S.newGame('ab' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    return T._debugRun('endless');
+  };
+
+  /* ① 有币放弃：1:1 换成抽奖卷，币清零、本局结束 */
+  const run = startRun();
+  run.coins = 137;
+  run.score = 500;
+  const ticketsBefore = S.state().props[TICKET] || 0;
+  const res = T.abandon('endless');
+  assert.ok(res.ok, '放弃应当成功');
+  assert.equal(res.coinsLeft, 137, '应当报告剩余试炼币 137，实测 ' + res.coinsLeft);
+  assert.equal(res.tickets, 137, '应当报告换到 137 张抽奖卷，实测 ' + res.tickets);
+  assert.equal(S.state().props[TICKET] || 0, ticketsBefore + 137,
+    '抽奖卷应当增加 137 张：' + ticketsBefore + ' → ' + (S.state().props[TICKET] || 0));
+  assert.equal(T._debugRun('endless'), null, '放弃后本局应当已结束');
+  assert.ok(/兑换/.test(res.convertMsg || ''), '应当给出兑换提示：' + res.convertMsg);
+
+  /* ② 分数照常入账（别把原有结算弄坏） */
+  assert.ok(res.score === 500, '分数应当照常结算：' + res.score);
+  assert.ok(Number(res.best) >= 500, 'best 应当更新：' + res.best);
+
+  /* ③ 没有币：不该凭空加卷，也不该报兑换 */
+  const run2 = startRun();
+  run2.coins = 0;
+  const before2 = S.state().props[TICKET] || 0;
+  const res2 = T.abandon('endless');
+  assert.equal(res2.coinsLeft, 0, '没有币时 coinsLeft 应当是 0');
+  assert.equal(res2.tickets, 0, '没有币时不该给卷');
+  assert.equal(S.state().props[TICKET] || 0, before2, '抽奖卷不该变化');
+  assert.equal(res2.convertMsg, undefined, '没有币时不该有兑换提示');
+
+  /* ④ 连续放弃两次：第二次没有进行中的本局，应当被拒（不该重复发卷） */
+  const before4 = S.state().props[TICKET] || 0;
+  const res4 = T.abandon('endless');
+  assert.equal(res4.ok, false, '没有本局时放弃应当被拒：' + JSON.stringify(res4));
+  assert.equal(S.state().props[TICKET] || 0, before4, '被拒时不该发卷');
+
+  /* ⑤ 兑换要能落到存档 */
+  const run5 = startRun();
+  run5.coins = 42;
+  const before5 = S.state().props[TICKET] || 0;
+  T.abandon('endless');
+  const raw = JSON.parse(c.localStorage.getItem(S.saveKey) || '{}');
+  assert.ok(Number((raw.props || {})[TICKET] || 0) >= before5 + 42,
+    '抽奖卷应当写进存档：' + JSON.stringify((raw.props || {})[TICKET]));
+
+  /* ⑥ 挑战塔（tower）不受影响：它有自己的结算 */
+  S.newGame('abt' + Math.random());
+  const st = S.state(); st.level = 70; st.props[23] = 99999;
+  try { T.abandon('endless'); } catch (e) {}
+  const tRun = T.startTowerRun();
+  if (tRun && tRun.ok) {
+    const beforeT = S.state().props[TICKET] || 0;
+    const resT = T.abandon('tower');
+    assert.ok(resT.ok, '挑战塔放弃应当成功');
+    assert.equal(resT.tickets, undefined, '挑战塔放弃不该走试炼币兑换');
+    assert.equal(S.state().props[TICKET] || 0, beforeT, '挑战塔放弃不该发抽奖卷');
+  }
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

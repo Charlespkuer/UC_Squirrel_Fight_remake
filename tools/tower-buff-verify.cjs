@@ -509,9 +509,17 @@ hr('本轮 1：永久增益替换选项（去前缀 + 换行）');
   const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'js', 'tower-ui.js'), 'utf8');
   check('不再有「替换 」前缀的按钮', src.indexOf("label: '替换 '") < 0);
   check('不再有「换成 」前缀的按钮', src.indexOf("label: '换成 '") < 0);
-  check('替换按钮支持换行（名字与层数分两行）',
-    src.indexOf('pick-buff-btn replace-btn') >= 0 && src.indexOf("×' + b.stacks") >= 0);
-  check('替换按钮有限宽样式（不会顶出屏幕）', require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'css', 'tower.css'), 'utf8').indexOf('.uc-button.replace-btn') >= 0);
+  /* 替换弹窗已重做：不再把每个增益做成 .modal-buttons 里的横排按钮（8 个就顶出屏幕），
+   * 改成竖排、可滚动的整行列表。这里断言新做法，并反向确认旧做法已消失。 */
+  const css = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'css', 'tower.css'), 'utf8');
+  check('替换弹窗用竖排列表（不再横排按钮）',
+    src.indexOf('replace-pick-list') >= 0 && src.indexOf('function offerPermanentReplace') >= 0);
+  check('列表可滚动且限高（增益再多也不溢出屏幕）',
+    /\.replace-pick-list\s*\{[^}]*flex-direction:\s*column/.test(css) &&
+    /\.replace-pick-list\s*\{[^}]*overflow-y:\s*auto/.test(css) &&
+    /\.replace-pick-list\s*\{[^}]*max-height/.test(css));
+  check('旧的横排替换按钮样式已删除',
+    css.indexOf('.uc-button.replace-btn') < 0 && src.indexOf('pick-buff-btn replace-btn') < 0);
 }
 
 // ---------- 本轮 2：商店高光已拥有的可叠加增益 ----------

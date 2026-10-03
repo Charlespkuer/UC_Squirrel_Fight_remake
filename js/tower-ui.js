@@ -879,37 +879,67 @@
         ? '从下面三个技能里选一个：它的触发概率大幅提升（本局有效）。'
         : '从下面三把武器里选一个：它的伤害 +100%（本局有效）。')) + '</p>', buttons, { small: true });
   }
-  /** 第 1 项：商店里买永久增益但格子满了 —— 直接选一个替换掉并完成购买。 */
-  function offerShopReplace(index, buff) {
+  /* ============================================================
+   * 永久增益「满了要换掉一个」的弹窗（商店购买 / 休整点选择共用）
+   *
+   * 原来把每个已有增益做成**一个按钮**、全塞进 .modal-buttons（flex 横排）——
+   * 8 个增益 + 取消排成一行必然顶出屏幕，只能靠换行/限宽硬撑，既难看又难点。
+   * 现在改成一屏内可读的**竖排列表**：每行一个增益（名称 + 稀有度 + 层数 + 效果说明 +
+   * 是否被虚空铭文免占位），点整行即选中；底部只留「取消」。
+   * 列表 max-height + overflow-y 滚动，增益再多也不会溢出屏幕。
+   * ============================================================ */
+  const RARITY_SHORT = ['普通', '稀有', '史诗', '传奇'];
+  /** 永久增益替换弹窗：onPick(entry) 执行实际替换，onCancel() 返回。 */
+  function offerPermanentReplace(opts) {
+    const o = opts || {};
     const list = Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent');
-    const buttons = list.map((b) => ({
-      /* 本轮第 1 项：不再写「替换」前缀（弹窗标题已说清），并且支持换行 ——
-       * 5 个永久增益 + 取消排成一行时，长名字会顶出屏幕。 */
-      label: b.name + (b.stacks > 1 ? '\n×' + b.stacks + ' 层' : ''),
-      cls: 'small pick-buff-btn replace-btn',
-      run: () => {
+    if (!list.length) { notice('没有可以拿掉的永久增益。'); if (o.onCancel) o.onCancel(); return null; }
+    const freeIds = (Tower.endlessInfo().run || {}).slotFreeIds || [];
+    const rows = list.map((b, i) => {
+      const free = freeIds.indexOf(b.id) >= 0;
+      return '<button type="button" class="replace-pick r' + b.rarity + '" data-action="rp' + i + '"' +
+        ' title="' + esc(b.name + '：' + (b.desc || '')) + '">' +
+        '<span class="rp-name">' + esc(b.name) + '</span>' +
+        '<span class="rp-meta">' + (RARITY_SHORT[b.rarity] || '') +
+          (b.stacks > 1 ? ' · ×' + b.stacks + ' 层' : '') +
+          (free ? ' · <b class="rp-free">虚空铭文·不占位</b>' : '') + '</span>' +
+        '<span class="rp-desc">' + esc(b.desc || '') + '</span>' +
+        '</button>';
+    }).join('');
+    const m = modal(o.title || '永久增益已满',
+      '<p>' + o.prompt + '</p>' +
+      '<div class="replace-pick-list">' + rows + '</div>' +
+      '<p class="small-label">点一行把它拿掉' + (o.footNote ? '　·　' + o.footNote : '') + '</p>',
+      [{ label: '取消', cls: 'muted', run: () => { if (o.onCancel) o.onCancel(); } }], { small: true });
+    /* 行不在 .modal-buttons 里，所以这里自己挂点击（modal 已把 wrap 加进 DOM）。 */
+    if (m && m.element) {
+      const actions = {};
+      list.forEach((b, i) => { actions['rp' + i] = () => { m.close(); o.onPick(b); }; });
+      C().bind(m.element, actions);
+    }
+    return m;
+  }
+  /** 第 1 项：商店里买永久增益但格子满了 —— 选一个替换掉并完成购买。 */
+  function offerShopReplace(index, buff) {
+    offerPermanentReplace({
+      prompt: '要买下【' + esc(buff.name) + '】，先拿掉下面哪一个？',
+      footNote: '被换掉的那个会从构筑里移除（成长类增益的累计也一起清零）',
+      onPick: (b) => {
         const r = Tower.buyShopSlot(index, b.id);
         if (!r.ok) notice(r.msg || '买不了。');
         openShop(true);
       },
-    }));
-    if (!buttons.length) { notice('永久增益已满，但没有可以拿掉的。'); return; }
-    buttons.push({ label: '取消', cls: 'muted', run: () => openShop(true) });
-    modal('永久增益已满 5 格', '<p>要买下【' + esc(buff.name) + '】，先拿掉下面哪一个？</p>', buttons, { small: true });
+      onCancel: () => openShop(true),
+    });
   }
-  /** 永久增益满 5 格时：直接把「替换哪一个」摆出来选（比让玩家先点上面的标签直观）。 */
+  /** 永久增益满格时（休整点选择）—— 选一个拿掉再收下新的。 */
   function offerReplace(index, buff) {
-    const list = Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent');
-    const buttons = list.map((b) => ({
-      label: b.name + (b.stacks > 1 ? '\n×' + b.stacks + ' 层' : ''),   // 第 1 项：去前缀 + 换行
-      cls: 'small pick-buff-btn replace-btn',
-      run: () => { Tower.pickChoice('endless', index, b.id); openEndless(); },
-    }));
-    if (!buttons.length) { notice('永久增益已满，但没有可以拿掉的。'); return; }
-    buttons.push({ label: '取消', cls: 'muted', run: () => openEndless() });
-    modal('永久增益已满 5 格', '<p>要拿下【' + esc(buff.name) + '】，先拿掉下面哪一个？</p>' +
-      '<div class="replace-list">' + list.map((b) => '<div class="replace-row"><b>' + esc(b.name) + '</b><span>' + esc(b.desc || '') + '</span></div>').join('') + '</div>',
-      buttons, { small: true });
+    offerPermanentReplace({
+      prompt: '要拿下【' + esc(buff.name) + '】，先拿掉下面哪一个？',
+      footNote: '被换掉的那个会从构筑里移除（成长类增益的累计也一起清零）',
+      onPick: (b) => { Tower.pickChoice('endless', index, b.id); openEndless(); },
+      onCancel: () => openEndless(),
+    });
   }
   /** 每 10 层的里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）。 */
   function milestoneModal(rw, next) {

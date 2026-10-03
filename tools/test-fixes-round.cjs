@@ -1842,6 +1842,85 @@ test('需求37：成长类增益的「面板文字」必须等于「真实累计
   assert.ok(/run\.winMaxHp = 0/.test(src), 'resetGrowth 应当清 run.winMaxHp');
 });
 
+test('需求38：永久增益替换弹窗改为竖排可滚动列表（不再横排溢出）', () => {
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8');
+
+  /* 结构：两个入口共用一个组件，行是竖排列的整行按钮，底部只留「取消」 */
+  assert.ok(ui.indexOf('function offerPermanentReplace') > 0, '应当有统一的替换弹窗组件');
+  assert.ok(/offerShopReplace[\s\S]{0,400}offerPermanentReplace\(/.test(ui), '商店入口应当复用它');
+  assert.ok(/function offerReplace[\s\S]{0,400}offerPermanentReplace\(/.test(ui), '休整点入口应当复用它');
+  assert.ok(/class="replace-pick r/.test(ui), '每行应当是 .replace-pick 按钮（整行可点）');
+  assert.ok(/class="replace-pick-list"/.test(ui), '应当有 .replace-pick-list 列表容器');
+  assert.ok(/data-action="rp/.test(ui), '行要带 data-action 供 bind 挂点击');
+  assert.ok(/C\(\)\.bind\(m\.element, actions\)/.test(ui), '行点击要自己 bind（它们不在 .modal-buttons 里）');
+
+  /* 关键回归：不许再把每个增益塞成 .modal-buttons 里的横排按钮 */
+  const comp = ui.slice(ui.indexOf('function offerPermanentReplace'), ui.indexOf('/** 每 10 层的里程碑奖励'));
+  assert.ok(comp.indexOf("replace-btn") < 0,
+    '替换弹窗不该再用 replace-btn 横排按钮');
+  assert.ok((comp.match(/buttons\.push/g) || []).length === 0,
+    '替换弹窗不该再往 .modal-buttons 里塞每个增益');
+  assert.ok(/\{ label: '取消', cls: 'muted'/.test(comp), '底部应当只留「取消」');
+
+  /* 样式：竖排 + 可滚动，而不是横排 */
+  const listRule = (/\.replace-pick-list\s*\{([^}]*)\}/.exec(css) || [])[1] || '';
+  assert.ok(/flex-direction:\s*column/.test(listRule), '列表必须竖排：' + listRule);
+  assert.ok(/overflow-y:\s*auto/.test(listRule), '列表必须可滚动（增益再多也不溢出）：' + listRule);
+  assert.ok(/max-height:\s*\d+px/.test(listRule), '列表必须有 max-height：' + listRule);
+  const pickRule = (/\.replace-pick\s*\{([^}]*)\}/.exec(css) || [])[1] || '';
+  assert.ok(/width:\s*100%/.test(pickRule), '每行应当撑满宽度：' + pickRule);
+  assert.ok(/\.replace-pick:hover/.test(css), '行应当有悬停反馈');
+  /* 旧的横排样式与描述列表都应当清掉 */
+  assert.ok(!/\.replace-btn\s*\{/.test(css), '旧的 .replace-btn 样式应当删除');
+  assert.ok(!/\.replace-row\b/.test(css), '旧的 .replace-row 样式应当删除');
+
+  /* 真跑一遍：8 个永久增益 → 8 行、底部只有取消、点击能完成替换 */
+  const c = setup();
+  const T = c.Tower, S = c.State;
+  const modals = [], binds = [];
+  const mkEl = () => ({ querySelector: () => null, querySelectorAll: () => [], classList: { add() {} }, dataset: {} });
+  const classic = {
+    page: () => mkEl(),
+    modal: (t, html, buttons) => { const m = { title: t, html: html, buttons: buttons, closed: 0, close() { this.closed++; }, element: mkEl() }; modals.push(m); return m; },
+    btn: (l, a, cls) => '<button data-action="' + a + '">' + l + '</button>',
+    bind: (root, actions) => { binds.push(actions); },
+  };
+  const st = S.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  T._debugSetLayer(9); T.startEndlessRun();
+  const r = T._debugRun('endless');
+  r.permanent = ['C01', 'C02', 'C04', 'C05', 'C06', 'C10', 'C13', 'C14'].map((id) => ({ id: id, stacks: 1 }));
+  r.permSlots = 3; r.permSlotIds = ['C31', 'C30']; r.slotFreeIds = [];
+  r.phase = 'shop'; r.coins = 999;
+  r.shop = { layer: r.layer, retrySold: false, rerollFree: true, rerollCount: 0, rerollPaid: 0, slots: [{ id: 'C03', sold: false, price: 20 }] };
+  assert.ok(T.buyShopSlot(0).needsReplace, '占满 8 格时买新的应当要求替换');
+
+  /* 用真实的 tower-ui 片段跑 offerShopReplace（只替换 C()/modal 等依赖） */
+  const body = ui.slice(ui.indexOf('const RARITY_SHORT'), ui.indexOf('/** 每 10 层的里程碑奖励'));
+  const ctx = { Tower: T, State: S, esc: (x) => String(x == null ? '' : x), notice: () => {},
+    modal: classic.modal, openShop: () => {}, openEndless: () => {},
+    C: () => ({ bind: (root, actions) => { binds.push(actions); } }),
+    console: { warn() {}, log() {} }, Math: Math, JSON: JSON, Object: Object, Number: Number, String: String, Array: Array };
+  ctx.window = ctx;
+  vm.createContext(ctx);
+  vm.runInContext(body + '\nofferShopReplace(0, { id: "C03", name: "猎侠者" });', ctx, { filename: 'dlg.js' });
+  const m = modals[modals.length - 1];
+  assert.ok(m, '应当弹出替换弹窗');
+  assert.equal(m.buttons.map((b) => b.label).join(','), '取消', '底部按钮只应有取消：' + m.buttons.map((b) => b.label).join(','));
+  const rows = (m.html.match(/class="replace-pick r/g) || []).length;
+  assert.equal(rows, 8, '应当有 8 行（当前 8 个永久增益），实测 ' + rows);
+  assert.ok(m.html.indexOf('replace-pick-list') > 0, '应当用列表容器');
+  assert.ok(m.html.indexOf('class="uc-button') < 0, '弹窗体里不该再有横排按钮堆');
+  assert.ok(binds.length && Object.keys(binds[binds.length - 1]).length === 8, '8 行都要绑上点击');
+  /* 点第一行 → 完成替换 */
+  const keys = Object.keys(binds[binds.length - 1]);
+  binds[binds.length - 1][keys[0]]();
+  const after = T._debugRun('endless');
+  assert.ok(after.permanent.some((b) => b.id === 'C03'), '点了行之后新增益应当入账');
+  assert.equal(after.permanent.length, 8, '替换后仍是 8 项');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

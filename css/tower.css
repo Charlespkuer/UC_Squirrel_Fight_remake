@@ -674,9 +674,6 @@
 .choice-onpage .hex-scope { font-size: 14px; }
 .choice-onpage .hex-ribbon { font-size: 15px; }
 .choice-onpage h4 { font-size: 19px; }
-.replace-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
-.replace-row b { font-size: 19px; color: #7a4a18; }
-.replace-row span { display: block; font-size: 16px; color: #8a6a3a; }
 
 /* 第 2 项：试炼商店支持下滑（内容多时可滚动） */
 .tower-shop { max-height: 100%; overflow-y: auto; padding-right: 6px; }
@@ -763,7 +760,6 @@
 .buff-tag.slot-free i{color:#1c6f6f}
 
 /* 本轮第 1 项：永久增益替换弹窗的按钮 —— 名字换行、限宽，避免 5 个选项顶出屏幕 */
-.uc-button.replace-btn { min-width: 150px; max-width: 260px; font-size: 26px; height: auto; min-height: 66px; }
 /* 本轮第 2 项：商店里已经拥有的可叠加增益 —— 高光边框 + 提示 */
 .shop-slot.owned-stack { border-color: #3f9d9d; box-shadow: 0 0 0 3px #bdf0ee inset, 0 0 10px #3f9d9d66; }
 .shop-slot .stack-hint { color: #1c6f6f; font-weight: 700; }
@@ -834,3 +830,53 @@
 }
 .env-chip.env-bad.env-mech { border-color: #d08a6a; }
 .env-chip.env-good.env-mech { border-color: #7fae62; }
+
+/* ============================================================
+ * 永久增益「满了要换掉一个」的列表（js/tower-ui.js → offerPermanentReplace）
+ *
+ * 旧做法：每个已有增益是一个 .modal-buttons 里的横排按钮 → 8 个就顶出屏幕。
+ * 新做法：竖排、可滚动的整行按钮，点整行即选中；底部只留「取消」。
+ * ============================================================ */
+.replace-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 2px 6px;
+  max-height: 260px;          /* 一屏内可读；超出的滚动，绝不溢出弹窗 */
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+}
+.replace-pick {
+  display: grid;
+  grid-template-columns: auto 1fr;      /* 左=名称/稀有度，右=效果说明 */
+  grid-template-areas: "name meta" "desc desc";
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 2px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  padding: 8px 14px;
+  border-radius: 14px;
+  border: 2px solid #d8bd85;
+  background: linear-gradient(#fffdf3, #f7ecd0);
+  box-shadow: inset 0 1px 0 #fff;
+  transition: transform .08s ease, box-shadow .12s ease, border-color .12s ease;
+}
+.replace-pick:hover {
+  border-color: #a8453a;                 /* 悬停就用「要拿掉」的红色警示 */
+  box-shadow: 0 4px 12px rgba(120, 60, 30, .22), inset 0 1px 0 #fff;
+  transform: translateY(-1px);
+}
+.replace-pick:active { transform: translateY(0); }
+.replace-pick .rp-name { grid-area: name; font-size: 22px; font-weight: 700; color: #7a4a18; }
+.replace-pick .rp-meta { grid-area: meta; font-size: 15px; color: #9a7b53; justify-self: end; }
+.replace-pick .rp-free { color: #2f6f8f; font-weight: 700; }
+.replace-pick .rp-desc { grid-area: desc; font-size: 16px; color: #8a6a3a; line-height: 1.35; }
+/* 稀有度用左侧色条区分，不再靠按钮底色堆叠 */
+.replace-pick.r0 { border-left: 7px solid #b9a06a; }
+.replace-pick.r1 { border-left: 7px solid #6f9ec4; }
+.replace-pick.r2 { border-left: 7px solid #a77bd0; }
+.replace-pick.r3 { border-left: 7px solid #e0a72e; }

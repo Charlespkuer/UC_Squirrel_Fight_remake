@@ -140,11 +140,18 @@ test('损毁消失类：易碎烙印损毁后仍能查到，且「永久保留�
   assert.match(tags, /已损毁/, '应当能看到「损毁」这一条：' + tags);
   const broke = rep.history.find((e) => e.id === 'C39' && e.event === 'break');
   assert.ok(broke, '流水里应当有损毁记录：' + JSON.stringify(rep.history));
-  /* 需求 3：损毁后升为全额并本局永久保留 —— 基础 8% + 已损毁 8% = 实际 12%。 */
+  /* 需求 3：损毁后升为全额并本局永久保留 —— 实际 = 0.5×基础 + 已损毁那份。
+   * 注意：这 300 场里玩家**可能在休整点又选到同一枚烙印**（C39 在无尽选择池与商店池里），
+   * 那样 fragileBase 会涨到 0.16、显示 +24% —— 所以期望必须按**真实的 base/burned**推导，
+   * 不能硬编码 +12%（原来那样写会让这条断言随机红）。 */
   const powerLine = rep.effects.find(([k]) => /烙印.*攻击/.test(k));
   assert.ok(powerLine, '效果清单里应当仍列出烙印攻击：' + JSON.stringify(rep.effects));
   assert.match(powerLine[0], /已损毁/, '损毁后要标「已损毁·全额永久」：' + powerLine[0]);
-  assert.match(powerLine[1], /\+12%/, '损毁后的实际加成应当是 +12%：' + powerLine[1]);
+  const fb = after.fragileBase || {}, bn = after.fragileBurned || {};
+  const expectPct = Math.round((Number(fb.power || 0) * 0.5 + Number(bn.power || 0)) * 100);
+  assert.ok(expectPct > 0, '损毁后应当有永久保留的加成：' + expectPct);
+  assert.match(powerLine[1], new RegExp('\\+' + expectPct + '%'),
+    '损毁后的实际加成应当是 +' + expectPct + '%（基础 ' + fb.power + ' + 已损毁 ' + bn.power + '）：' + powerLine[1]);
 });
 
 test('限次类：用尽消失后仍查得到，剩余场数与用尽记录都对', () => {

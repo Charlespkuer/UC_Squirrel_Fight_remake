@@ -411,8 +411,13 @@
     if (a.speedMul) lines.push(['速度', pct(a.speedMul)]);
     /* 永久类的生命上限加成不进聚合乘区（拿到时就折算进 run.hpBonus，卖掉也不回落），
      * 所以这里要把两条并起来算，否则「磐石之躯 +20%」在报告里会整条消失。 */
-    const hpTotal = (a.maxHpMul || 0) + (run.hpBonus || 0);
-    if (hpTotal) lines.push(['生命上限', pct(hpTotal) + (run.hpBonus ? '（含永久累计 ' + pct(run.hpBonus) + '）' : '')]);
+    const hpTotal = (a.maxHpMul || 0) + (run.hpBonus || 0) + winMaxHpOf(run);
+    if (hpTotal) {
+      lines.push(['生命上限', pct(hpTotal) +
+        (run.hpBonus ? '（含已冻结 ' + pct(run.hpBonus) + '）' : '') +
+        (winMaxHpOf(run) ? '（含成长 ' + pct(winMaxHpOf(run)) + '）' : '')]);
+    }
+
     if (a.critBonus) lines.push(['暴击率', num(a.critBonus) + '%']);
     if (a.critDmgBonus) lines.push(['暴击伤害', pct(a.critDmgBonus)]);
     if (a.dodgeBonus) lines.push(['闪避', num(a.dodgeBonus) + '%']);
@@ -2105,6 +2110,13 @@
     run.hpAbs = hpAbsOf(run) + gain;
     return gain;
   }
+  /** C07 吞噬成长的百分比累计（含上限封顶口径，与 adjustMe 保持一致）。 */
+  function winMaxHpOf(run) {
+    if (!run) return 0;
+    const c07 = stacksOf(run, 'C07');
+    const cap = c07 ? (D().BUFF_BY_ID.C07.mods.winMaxHpCap || 0.30) * c07 * globalMul(run) : 0;
+    return Math.min(cap, Math.max(0, Number(run.winMaxHp) || 0));
+  }
   function permUsed(run) {
     const list = (run && run.permanent) || [];
     const free = ((run && run.slotFreeIds) || []).filter((id) => list.some((b) => b.id === id));
@@ -2150,7 +2162,7 @@
      *   · 战斗内临时上限 —— emptyMaxHpMul、限次类 maxHpMul、本层 debuff，
      *     一律不进局外展示；战斗结束后界面会退回到「最近一场的真实上限」来显示。 */
     const stickyHp = Math.max(0, Number(run.hpBonus) || 0);
-    const winMaxHp = Math.max(0, Number(run.winMaxHp) || 0);
+    const winMaxHp = winMaxHpOf(run);
     const flat = Math.max(0, Number(run.winHpFlat) || 0) +
       (run.spendGain ? Math.max(0, Number(run.spendGain.hp) || 0) : 0);
     return Math.max(1, Math.round(base * (1 + stickyHp + winMaxHp)) + flat);
@@ -2209,8 +2221,19 @@
   function resetGrowth(run, id) {
     if (!run) return false;
     if (id === 'C06') run.killPower = 0;
-    else if (id === 'C07') run.winMaxHp = 0;   // 原来清的是 killMaxHp（C07 用不到的字段），等于没清
-    else if (id === 'C11') run.winHpFlat = 0;
+    /* 需求：**成长类累积的生命上限在被替换/卖出后不消失**。
+     * C07（吞噬成长，百分比）与 C11（以战养战，固定值）都是「本局累计」的上限收益，
+     * 原来这里直接清零 —— 玩家换掉/卖掉它，之前攒的血上限就凭空没了。
+     * 现在改成**冻结进 run.hpBonus**（与永久 maxHpMul 同一口径：卖掉/替换后仍然保留），
+     * 所以效果继续生效，只是不再继续增长。
+     * 注意 hpBonus 是「百分比」口径，固定值那一份要先折算成比例再并入。 */
+    else if (id === 'C07') { run.hpBonus = Math.max(0, Number(run.hpBonus) || 0) + Math.max(0, Number(run.winMaxHp) || 0); run.winMaxHp = 0; }
+    else if (id === 'C11') {
+      const flat = Math.max(0, Number(run.winHpFlat) || 0);
+      const base = Math.max(1, Number(run.baseMaxHp) || 0);
+      run.hpBonus = Math.max(0, Number(run.hpBonus) || 0) + (base > 0 ? flat / base : 0);
+      run.winHpFlat = 0;
+    }
     else if (id === 'C12') { run.winStatPower = 0; run.winStatAgility = 0; run.winStatSpeed = 0; }
     else if (id === 'C25') run.sellBonus = 0;
     else if (id === 'C36') { run.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; run.shopSpend = 0; }

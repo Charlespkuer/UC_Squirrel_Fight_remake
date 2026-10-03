@@ -2666,6 +2666,76 @@ test('需求47：空血上限的基准是「当前上限」（含固定值成长
   T.abandon('endless');
 });
 
+test('需求48：吞噬成长 / 以战养战 的累计生命上限在被替换后不消失', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
+    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
+  /* 攒 N 场，然后把永久槽填满并**替换掉** target，比较替换前后的上限。 */
+  const growThenReplace = (target, battles) => {
+    S.newGame('keep' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    T.startEndlessRun();
+    T.addBuff(T._debugRun('endless'), target);
+    for (let i = 0; i < battles; i++) {
+      const cur = T._debugRun('endless');
+      if (!cur) break;
+      cur.env = [];
+      if (cur.choices) { const p = T.pickChoice('endless', 0, null); if (p && !p.ok && p.needsReplace) T.pickChoice('endless', 0, ((cur.permanent || [])[0] || {}).id || null); continue; }
+      if (cur.phase === 'shop') { T.continueFromShop(); continue; }
+      if (cur.phase === 'checkpoint') { T.continueEndless(); continue; }
+      const nx = T.nextBattle('endless');
+      if (!nx || nx.ok === false) break;
+      const me = mk(); nx.adjustMe(me);
+      const a = T._debugRun('endless');
+      T.reportBattle('endless', a.attempt, true, me.maxHp, me.maxHp);
+      if (!T._debugRun('endless')) break;
+    }
+    /* 只保留 target 的累计，把列表换成「target + 几个占位」并填满槽位 */
+    const r = T._debugRun('endless');
+    const cap = 5 + Math.max(0, Number(r.permSlots) || 0);
+    const others = ['C21', 'C22', 'C23', 'C26', 'C27', 'C28'].filter((x) => x !== target).map((x) => ({ id: x, stacks: 1 }));
+    r.permanent = [{ id: target, stacks: 1 }].concat(others).slice(0, cap);
+    const before = { cap: T.endlessInfo().run.curMaxHp, winMaxHp: Number(r.winMaxHp) || 0,
+      winHpFlat: Number(r.winHpFlat) || 0, hpBonus: Number(r.hpBonus) || 0 };
+    const needs = T.addBuff(T._debugRun('endless'), 'C28', null);
+    assert.ok(needs && needs.needsReplace, '槽位填满后应当要求替换');
+    const out = T.addBuff(T._debugRun('endless'), 'C28', target);
+    assert.ok(out && out.ok, '替换应当成功：' + ((out && out.msg) || ''));
+    const r2 = T._debugRun('endless');
+    const after = { cap: T.endlessInfo().run.curMaxHp, winMaxHp: Number(r2.winMaxHp) || 0,
+      winHpFlat: Number(r2.winHpFlat) || 0, hpBonus: Number(r2.hpBonus) || 0 };
+    assert.ok(!(r2.permanent || []).some((b) => b.id === target), target + ' 应当已被换掉');
+    return { before: before, after: after };
+  };
+
+  /* ① C07 吞噬成长（百分比累计）：换掉后累计冻结进 run.hpBonus，上限不回落 */
+  const c07 = growThenReplace('C07', 5);
+  assert.ok(c07.before.winMaxHp > 0, '替换前应当攒到了成长：' + JSON.stringify(c07.before));
+  assert.ok(c07.before.cap > 5000, '替换前上限应当高于基础：' + c07.before.cap);
+  assert.equal(c07.after.winMaxHp, 0, '替换后成长累计字段清零');
+  assert.ok(Math.abs(c07.after.hpBonus - (c07.before.hpBonus + c07.before.winMaxHp)) < 1e-9,
+    '替换后应当把那份累计**追加**进 hpBonus：' + JSON.stringify(c07));
+  assert.equal(c07.after.cap, c07.before.cap,
+    'C07 被替换后上限不该回落：' + c07.before.cap + ' → ' + c07.after.cap);
+
+  /* ② C11 以战养战（固定值累计）：换掉后按比例折算进 hpBonus，上限不回落 */
+  const c11 = growThenReplace('C11', 5);
+  assert.ok(c11.before.winHpFlat > 0, '替换前应当攒到固定值成长：' + JSON.stringify(c11.before));
+  assert.ok(c11.before.cap > 5000, '替换前上限应当高于基础：' + c11.before.cap);
+  assert.equal(c11.after.winHpFlat, 0, '替换后固定值累计字段清零');
+  assert.ok(c11.after.hpBonus > c11.before.hpBonus,
+    '替换后应当把固定值折算成比例**追加**进 hpBonus：' + JSON.stringify(c11));
+  assert.equal(c11.after.cap, c11.before.cap,
+    'C11 被替换后上限不该回落：' + c11.before.cap + ' → ' + c11.after.cap);
+
+  /* ③ 静置不动时上限也不该自己变化（确认冻结值稳定） */
+  const again = T.endlessInfo().run.curMaxHp;
+  assert.equal(again, c11.after.cap, '冻结后上限应当稳定不变');
+  T.abandon('endless');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

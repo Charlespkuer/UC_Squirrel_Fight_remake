@@ -757,7 +757,11 @@
     { id: 'C17', name: '战后续航·精', rarity: 2, kind: 'permanent', stackable: true, desc: '每场战斗胜利后回复 10% 最大生命（可叠加）', mods: { winHealPct: 0.10 } },
     { id: 'C18', name: '吸血精通', rarity: 1, kind: 'permanent', desc: '所有攻击附带 12% 吸血', mods: { lifestealPct: 0.12 } },
     { id: 'C19', name: '荆棘之甲', rarity: 1, kind: 'permanent', desc: '受到伤害时反弹 20% 给敌人', mods: { thornsPct: 0.20 } },
-    { id: 'C20', name: '狂怒', rarity: 2, kind: 'permanent', desc: '生命低于 40% 时攻击 +50%', mods: { lowHpPowerMul: 0.50, lowHpAt: 0.40 } },
+    /* 狂怒：低血时同时强化攻/敏/速（阈值 50%）。
+     * 三项都用同一套「当前血量 ≤ 上限 × lowHpAt」判定，见 sim.js 的 effPower/effAgility/effSpeed。 */
+    { id: 'C20', name: '狂怒', rarity: 2, kind: 'permanent',
+      desc: '生命低于 50% 时攻击 +50%、敏捷 +20%、速度 +20%',
+      mods: { lowHpPowerMul: 0.50, lowHpAgilityMul: 0.20, lowHpSpeedMul: 0.20, lowHpAt: 0.50 } },
     { id: 'C21', name: '暴击精通', rarity: 0, kind: 'permanent', desc: '暴击率 +10%', mods: { critBonus: 10 } },
     { id: 'C22', name: '闪避精通', rarity: 0, kind: 'permanent', desc: '闪避 +8%', mods: { dodgeBonus: 8 } },
     { id: 'C23', name: '轻身术', rarity: 0, kind: 'permanent', desc: '速度 +15%', mods: { speedMul: 0.15 } },

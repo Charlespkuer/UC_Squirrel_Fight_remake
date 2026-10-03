@@ -1724,6 +1724,7 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
     const r = T._debugRun('endless');
     r.permanent = [{ id: id, stacks: stacks }];
     const heals = [];
+    let won = 0;
     for (let i = 0; i < wins; i++) {
       const cur = T._debugRun('endless');
       if (!cur) break;
@@ -1741,12 +1742,15 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
       if (!a || !a.attempt) break;
       if (fixedLayer) a.layer = fixedLayer;
       const out = T.reportBattle('endless', a.attempt, true, 1, null);
+      won++;
       if (out && out.winHeal != null) heals.push(out.winHeal);
       if (!T._debugRun('endless')) break;
     }
-    if (field === 'winHeal') return heals.length ? heals[0] : NaN;
+    if (field === 'winHeal') return { value: heals.length ? heals[0] : NaN, wins: won };
     const rr = T._debugRun('endless');
-    return rr ? Number(rr[field] || 0) : NaN;
+    /* 同时返回**实际打赢的场数**：请求 N 场不代表正好打了 N 场
+     *（中途层数推进/战斗结束都会让实际值不同），用它推导期望才稳。 */
+    return { value: rr ? Number(rr[field] || 0) : NaN, wins: won };
   };
 
   const CASES = [
@@ -1760,10 +1764,13 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
   for (const [id, field, wins, layer] of CASES) {
     const one = measure(id, 1, wins, field, layer);
     const three = measure(id, 3, wins, field, layer);
-    assert.ok(Number.isFinite(one) && one > 0, id + ' 的单层效果应当可测到：' + one);
-    const ratio = three / one;
+    assert.ok(Number.isFinite(one.value) && one.value > 0, id + ' 的单层效果应当可测到：' + JSON.stringify(one));
+    /* 按「每场每层」归一化再比：两边的实际场数可能不同（层数推进/战斗结束），
+     * 直接比原始值会假报（实测 C11 因此出现 ×2.50）。 */
+    const perOne = one.value / Math.max(1, one.wins), perThree = three.value / Math.max(1, three.wins);
+    const ratio = perThree / perOne;
     assert.ok(Math.abs(ratio - 3) < 0.2,
-      id + ' 的叠层应当严格 3 倍：×1=' + one + ' ×3=' + three + '（比值 ' + ratio.toFixed(2) + '）');
+      id + ' 的叠层应当严格 3 倍（按每场归一化）：×1=' + one.value + '/' + one.wins + ' 场，×3=' + three.value + '/' + three.wins + ' 场（比值 ' + ratio.toFixed(2) + '）');
   }
 
   /* C12 曾经因为 `* 0` 的占位写法而**完全无效**（加成恒为 0）—— 断言它真的进了攻击加成 */
@@ -1952,6 +1959,82 @@ test('需求39：反击也算「敌方的一次攻击」——先机预判被反
   assert.ok(/if \(counter\.firstHitZero\) \{/.test(src),
     '反击的归零标记应当被带进主回合（可见）');
   assert.ok(/r\.firstHitZero = true;/.test(src), '主回合要记下这次归零');
+});
+
+test('需求40：狂怒（C20）阈值 50%，且低血时攻击+50%、敏捷+20%、速度+20%', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;
+
+  /* 定义与文案 */
+  const m = TD.BUFF_BY_ID.C20.mods;
+  assert.equal(m.lowHpAt, 0.50, '阈值应当是 50%');
+  assert.equal(m.lowHpPowerMul, 0.50, '攻击 +50%');
+  assert.equal(m.lowHpAgilityMul, 0.20, '敏捷 +20%');
+  assert.equal(m.lowHpSpeedMul, 0.20, '速度 +20%');
+  assert.match(TD.BUFF_BY_ID.C20.desc, /50%/, '文案要写 50%：' + TD.BUFF_BY_ID.C20.desc);
+  assert.match(TD.BUFF_BY_ID.C20.desc, /敏捷/, '文案要写敏捷：' + TD.BUFF_BY_ID.C20.desc);
+  assert.match(TD.BUFF_BY_ID.C20.desc, /速度/, '文案要写速度：' + TD.BUFF_BY_ID.C20.desc);
+
+  /* 塔内聚合：三项都要落到 me.mods 上（mods 是逐字段挑的，漏一个就静默失效） */
+  S.newGame('rage' + Math.random());
+  const st = S.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  T._debugSetLayer(9); T.startEndlessRun();
+  T._debugRun('endless').permanent = [{ id: 'C20', stacks: 1 }];
+  const nx = T.nextBattle('endless');
+  const me = { name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
+    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 };
+  nx.adjustMe(me);
+  assert.equal(me.mods.lowHpPowerMul, 0.50, 'me.mods 要有 lowHpPowerMul');
+  assert.equal(me.mods.lowHpAgilityMul, 0.20, 'me.mods 要有 lowHpAgilityMul');
+  assert.equal(me.mods.lowHpSpeedMul, 0.20, 'me.mods 要有 lowHpSpeedMul');
+  assert.equal(me.mods.lowHpAt, 0.50, 'me.mods 要有 lowHpAt=0.50');
+  /* 效果清单与面板进度要写全三项 */
+  const rep = T.debugBuffReport('endless');
+  const low = rep.effects.filter((e) => /低血/.test(e[0]));
+  assert.equal(low.length, 3, '效果清单应当有三条低血项：' + JSON.stringify(rep.effects));
+  assert.ok(low.some((e) => /攻击/.test(e[0]) && /\+50%/.test(e[1])), '要有低血攻击 +50%');
+  assert.ok(low.some((e) => /敏捷/.test(e[0]) && /\+20%/.test(e[1])), '要有低血敏捷 +20%');
+  assert.ok(low.some((e) => /速度/.test(e[0]) && /\+20%/.test(e[1])), '要有低血速度 +20%');
+  const prog = (T.ownedBuffs('endless').find((b) => b.id === 'C20') || {}).progress || '';
+  assert.match(prog, /≤50%/, '面板进度要写阈值 50%：' + prog);
+  assert.match(prog, /敏捷/, '面板进度要写敏捷：' + prog);
+
+  /* 战斗实测：低血伤害倍率 ≈ 1.5（平均 60 局，排除单局浮动） */
+  const mk = (o) => Object.assign({ name: 'X', level: 50, power: 200, agility: 120, speed: 100,
+    hp: 5000, maxHp: 5000, weapons: [], skills: [], effects: {},
+    baseStats: { power: 200, agility: 120, speed: 100 } }, o);
+  const avgDmg = (hp, mods, n) => {
+    let sum = 0, cnt = 0;
+    for (let i = 0; i < n; i++) {
+      const a = mk({ name: 'A', hp: hp, maxHp: 5000, mods: mods || {} });
+      const b = mk({ name: 'B', power: 1, agility: 1, speed: 1, hp: 5000000, maxHp: 5000000 });
+      const r = Sim.simulate(a, b);
+      for (const x of (r.rounds || [])) if (x.attacker === 0 && x.dmg > 0 && x.action === 'common') { sum += x.dmg; cnt++; }
+    }
+    return sum / Math.max(1, cnt);
+  };
+  const hi = avgDmg(5000, null, 60), lo = avgDmg(2000, m, 60);
+  assert.ok(lo / hi > 1.42 && lo / hi < 1.62, '低血伤害倍率应当约 ×1.50，实测 ×' + (lo / hi).toFixed(3));
+
+  /* 阈值边界：≤50% 触发、明显高于 50% 不触发（都与满血基准比，避免两边都带加成时抵消） */
+  const at50 = avgDmg(2500, m, 120), at52 = avgDmg(2600, m, 120), full = avgDmg(5000, m, 120);
+  assert.ok(at50 / full > 1.35, '刚好 50%（2500/5000）应当触发狂怒：×' + (at50 / full).toFixed(3));
+  assert.ok(at52 / full < 1.10, '52%（2600/5000）不该触发狂怒：×' + (at52 / full).toFixed(3));
+
+  /* 速度：低血时同场行动次数应当变多 */
+  const acts = (hp, mods, n) => {
+    let a = 0;
+    for (let i = 0; i < n; i++) {
+      const m1 = mk({ name: 'M', hp: hp, maxHp: 5000, mods: mods || {} });
+      const f1 = mk({ name: 'F', power: 1, agility: 1, speed: 100, hp: 5000000, maxHp: 5000000 });
+      const r = Sim.simulate(m1, f1);
+      a += (r.rounds || []).filter((x) => x.attacker === 0 && x.action === 'common').length;
+    }
+    return a / n;
+  };
+  const aHi = acts(5000, null, 40), aLo = acts(2000, m, 40);
+  assert.ok(aLo > aHi, '低血时速度 +20% 应当带来更多出手：' + aHi.toFixed(2) + ' → ' + aLo.toFixed(2));
 });
 
 (async () => {

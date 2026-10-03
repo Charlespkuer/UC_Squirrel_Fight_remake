@@ -229,6 +229,15 @@
     if (m.killPowerPct) parts.push('每击杀攻击 +' + Math.round(m.killPowerPct * b.stacks * 100) + '%');
     /* 原来这里还有一条 `m.killMaxHpPct` —— 那个 mod 在任何增益上都不存在（死代码），
      * 换成真正在用的「每胜利生命上限」字段（C07 吞噬成长）。 */
+    /* 狂怒：低血时攻/敏/速同时生效（阈值 + 三项一起写清楚）。 */
+    if (m.lowHpPowerMul || m.lowHpAgilityMul || m.lowHpSpeedMul) {
+      const low = '生命低于 ' + Math.round((m.lowHpAt || 0.5) * 100) + '% 时';
+      const bits = [];
+      if (m.lowHpPowerMul) bits.push('攻击 +' + Math.round(m.lowHpPowerMul * b.stacks * 100) + '%');
+      if (m.lowHpAgilityMul) bits.push('敏捷 +' + Math.round(m.lowHpAgilityMul * b.stacks * 100) + '%');
+      if (m.lowHpSpeedMul) bits.push('速度 +' + Math.round(m.lowHpSpeedMul * b.stacks * 100) + '%');
+      parts.push(low + bits.join('、'));
+    }
     if (m.winMaxHpPct) parts.push('每胜利生命上限 +' + Math.round(m.winMaxHpPct * b.stacks * 100) + '%');
     if (m.winMaxHpFlat) parts.push('每胜利生命上限 +' + Math.round(m.winMaxHpFlat * b.stacks));
     if (m.winPowerAfter10) parts.push('第 10 层起每胜利攻击 +' + Math.round(m.winPowerAfter10 * b.stacks * 100) + '%');

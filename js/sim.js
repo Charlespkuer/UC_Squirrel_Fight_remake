@@ -18,7 +18,7 @@
  *                 dodgeBonus, dodgeMul, takenMul, regenPct, lifestealPct, shellPct,
  *                 openerPowerMul/openerRounds/fatiguePowerMul,
  *                 mustHitFirst, firstSkillFree, openStrikePct,
- *                 deathSaves:[{healPct}]}
+ *                 deathSaves:[{healPct}], lowHpPowerMul/lowHpAgilityMul/lowHpSpeedMul/lowHpAt}
  * ============================================================ */
 (function () {
   'use strict';
@@ -174,7 +174,7 @@
     let p = statOf(c, 'power') * (1 - c.debuffs.power / 100) + c.buffFlat.power;
     // 塔 buff「狂怒」：自己血量低于阈值时攻击提升（只有进攻方结算，所以放在这里）
     const rage = c.mods && Number(c.mods.lowHpPowerMul) || 0;
-    if (rage > 0 && c.maxHp > 0 && c.hp <= c.maxHp * (Number(c.mods.lowHpAt) || 0.35)) p *= 1 + rage;
+    if (rage > 0 && lowHpActive(c)) p *= 1 + rage;
     /* 塔 buff「开局狂热」：按**本次战斗的出手次数**分档 ——
      * 前 openerRounds 次出手 ×(1+openerPowerMul)，之后 ×(1-fatiguePowerMul)。
      * 玩家与敌人共用这段逻辑，但只有拿到该 buff 的一方 mods 里才有这两个字段。 */
@@ -188,8 +188,23 @@
     }
     return Math.max(1, Math.round(p));
   }
-  function effAgility(c) { return Math.max(1, Math.round(statOf(c, 'agility') * (1 - c.debuffs.agility / 100) + c.buffFlat.agility)); }
-  function effSpeed(c) { return Math.max(1, Math.round(statOf(c, 'speed') * (1 - c.debuffs.speed / 100) + c.buffFlat.speed)); }
+  /** 低血门槛是否成立（塔 buff「狂怒」共用一套判定：攻/敏/速同时生效）。 */
+  function lowHpActive(c) {
+    const th = c.mods && Number(c.mods.lowHpAt);
+    return !!(th > 0 && c.maxHp > 0 && c.hp <= c.maxHp * th);
+  }
+  function effAgility(c) {
+    let a = statOf(c, 'agility') * (1 - c.debuffs.agility / 100) + c.buffFlat.agility;
+    const m = c.mods && Number(c.mods.lowHpAgilityMul) || 0;
+    if (m > 0 && lowHpActive(c)) a *= 1 + m;
+    return Math.max(1, Math.round(a));
+  }
+  function effSpeed(c) {
+    let v = statOf(c, 'speed') * (1 - c.debuffs.speed / 100) + c.buffFlat.speed;
+    const m = c.mods && Number(c.mods.lowHpSpeedMul) || 0;
+    if (m > 0 && lowHpActive(c)) v *= 1 + m;
+    return Math.max(1, Math.round(v));
+  }
   function effect(c, id) { return stripped(c) ? 0 : Math.max(0, Number(c.effects[id]) || 0); }
   /** 真级工具：等级 11~15 = 真1~真5。 */
   const trueLvOf = (level) => (window.GData && GData.trueLevel ? GData.trueLevel(level) : Math.max(0, Math.min(5, (Number(level) || 0) - 10)));

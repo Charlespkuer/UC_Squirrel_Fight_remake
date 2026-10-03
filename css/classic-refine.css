@@ -303,11 +303,11 @@
  * 换上之后字重/描边/配色与原版一致，也不会因系统字体差异跑版。
  * 比例 125:81 ≈ 1.543；这里按 34px 高缩放 → 宽约 52px。
  * ============================================================ */
-.home-exp-label{ display:inline-flex; align-items:center; min-width:52px; }
+.home-exp-label{ display:inline-flex; align-items:center; min-width:62px; }
 .home-exp-label .home-exp-art{
   display:block;
-  width:52px;               /* 由 CSS 统一控制尺寸，避免不同 DPR 下抖动 */
-  height:34px;
+  width:62px;               /* 由 CSS 统一控制尺寸，避免不同 DPR 下抖动（比例保持 125:81） */
+  height:40px;
   object-fit:contain;
   flex:none;
 }

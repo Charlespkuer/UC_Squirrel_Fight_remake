@@ -349,6 +349,31 @@
     return c;
   }
 
+  /**
+   * 「被动技能触发提升」—— 秘技通神（C33）选中绝对防御 / 龟甲术之后写进
+   * `effects['技能ID']` 的加成值（例如 effects['16'] = 2.0 表示 +200%）。
+   * 绝对防御与龟甲术都是**受击自动触发**、不进出手池的技能，
+   * 所以它们不吃 skillWeight 那套权重，必须在这里单独乘一次。
+   */
+  function passiveSkillBoost(f, id) {
+    if (!f) return 0;
+    const raw = f.effects && f.effects[id] != null ? f.effects[id]
+      : (f.mods && f.mods[id] != null ? f.mods[id] : 0);
+    const v = Number(raw);
+    return Number.isFinite(v) ? Math.max(0, v) : 0;
+  }
+  /** 绝对防御的单次触发概率（%）：首次 / 二次及以后，再乘被动加成。 */
+  function jueDuiChanceOf(def, again) {
+    const base = again ? RULES.jueDuiAgain : RULES.jueDuiChance;
+    return base * (1 + passiveSkillBoost(def, 16));
+  }
+  /** 龟甲术的单次触发概率（%）：首次 / 二次及以后（二次还带装备与技能等级加成）。 */
+  function shellChanceOf(def, again) {
+    const base = again
+      ? RULES.shellAgain + effect(def, 32) + trueVal(7, def.skills[7]) * 100
+      : RULES.shellFirst;
+    return base * (1 + passiveSkillBoost(def, 7));
+  }
   function dmgReduce(def, dmg, opts) {
     opts = opts || {};
     let out = { dmg, guiJia: 0, jueDui: 0, rebound: 0 };
@@ -357,7 +382,7 @@
     /* 绝对防御是受击自动触发、不进出手池的技能，所以「二次及以后」用单独的档：
      * 首次 jueDuiChance%，之后再挨打只有 jueDuiAgain% 再挡一次（口径同龟甲术）。 */
     if (def.skills[16] && def.silence <= 0
-        && chance(def.usedJueDui ? RULES.jueDuiAgain : RULES.jueDuiChance)) {
+        && chance(jueDuiChanceOf(def, !!def.usedJueDui))) {
       def.usedJueDui = true;
       const pct = 40 + 4 * (def.skills[16] - 1);
       out.jueDui = out.dmg; out.rebound = Math.round(out.dmg * pct / 100); out.dmg = 0;
@@ -369,8 +394,8 @@
      * 所以多带一个龟甲术只会让受伤期望更低，不可能挤占绝对防御。 */
     if (def.skills[7] && def.silence <= 0) {
       const canTrigger = def.shellCharges > 0
-        || (!def.usedShell && chance(RULES.shellFirst))
-        || (def.usedShell && chance(RULES.shellAgain + effect(def, 32) + trueVal(7, def.skills[7]) * 100));
+        || (!def.usedShell && chance(shellChanceOf(def, false)))
+        || (def.usedShell && chance(shellChanceOf(def, true)));
       if (canTrigger) {
         if (def.shellCharges > 0) def.shellCharges--;
         else def.usedShell = true;

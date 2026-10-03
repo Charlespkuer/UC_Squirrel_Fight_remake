@@ -77,22 +77,22 @@
     /* —— 原段位机制并入（这几个都是「敌人变强」类，bad=true）—— */
     { id: 'thorns', name: '荆棘反伤', bad: true, mech: true, mods: { thornsPct: [0.10, 0.16, 'pct'] },
       desc: '敌人受到伤害时反弹 %thornsPct%' },
-    { id: 'regen', name: '自愈回复', bad: true, mech: true, mods: { regenPct: [0.02, 0.04, 'pct'] },
+    { id: 'regen', name: '自愈回复', bad: true, noReflect: true, mech: true, mods: { regenPct: [0.02, 0.04, 'pct'] },
       desc: '敌人每回合回复 %regenPct% 最大生命' },
-    { id: 'lifesteal', name: '吸血', bad: true, mech: true, mods: { lifestealPct: [0.20, 0.32, 'pct'] },
+    { id: 'lifesteal', name: '吸血', bad: true, noReflect: true, mech: true, mods: { lifestealPct: [0.20, 0.32, 'pct'] },
       desc: '敌人造成伤害时回复其 %lifestealPct%' },
-    { id: 'shell', name: '护盾', bad: true, mech: true, mods: { shellPct: [0.18, 0.28, 'pct'] },
+    { id: 'shell', name: '护盾', bad: true, noReflect: true, mech: true, mods: { shellPct: [0.18, 0.28, 'pct'] },
       desc: '敌人开局自带 %shellPct% 最大生命的护盾' },
-    { id: 'devour', name: '吞噬成长', bad: true, mech: true, mods: { devourPct: [0.015, 0.028, 'pct'] },
+    { id: 'devour', name: '吞噬成长', bad: true, noReflect: true, mech: true, mods: { devourPct: [0.015, 0.028, 'pct'] },
       desc: '敌人每回合攻击永久 %devourPct%（按入场力量，可无限叠加）' },
     /* —— 原有环境词缀 —— */
     /* 需求 2：烈日灼烧 = 敌方暴击率 +25、我方暴击率 +10（双方都涨，敌人涨得更多）。
      * 两条数值各自在小区间内随机，但保持「敌方 > 我方」这个强度关系。 */
-    { id: 'sun', name: '烈日灼烧', bad: true, mods: { enemyCritBonus: [22, 28, 'num'], selfCritBonus: [8, 12, 'num'] },
+    { id: 'sun', name: '烈日灼烧', bad: true, noReflect: true, mods: { enemyCritBonus: [22, 28, 'num'], selfCritBonus: [8, 12, 'num'] },
       desc: '敌方暴击率 %enemyCritBonus%，我方暴击率 %selfCritBonus%' },
     /* 寒霜锁链：**敌方也降速**，但我方降得更多（敌方 -5%~-9%，我方 -11%~-19%）。
      * 两条数值各自在小区间内随机，但保持「我方降幅明显大于敌方」这个强度关系。 */
-    { id: 'frost', name: '寒霜锁链', bad: true,
+    { id: 'frost', name: '寒霜锁链', bad: true, noReflect: true,
       mods: { enemySpeedMul: [-0.09, -0.05, 'pct'], selfSpeedMul: [-0.19, -0.11, 'pct'] },
       desc: '敌方速度 %enemySpeedMul%，我方速度 %selfSpeedMul%' },
     { id: 'greed', name: '贪婪裂隙', bad: true, mods: { coinBonus: [0.35, 0.6, 'pct'], enemyMaxHpMul: [0.10, 0.18, 'pct'] },
@@ -1082,7 +1082,7 @@
     /* 传奇烙印「终焉烙印」：**终乘**类 —— 先把局内所有加算/成长算完，最后再乘。
      * 存在时 力/敏/速/生命上限 ×1.25；损毁后本局 ×1.5。
      * 可重复获得，每次独立相乘（多层 = 1.5^n，而不是 1+0.5n）。 */
-    { id: 'C49', name: '终焉烙印', rarity: 3, kind: 'limited', uses: 1000, endlessOnly: true, repeatable: true,
+    { id: 'C49', name: '终焉烙印', rarity: 3, kind: 'limited', uses: 1000, endlessOnly: true, repeatable: true, maxStacks: 3,
       desc: '终乘烙印：存在时力量/敏捷/速度/生命上限 +25%；损毁后本局 +50%（可重复获得，按层**加算**）',
       /* repeatWeight：可重复获得，但已拥有时被抽中的权重 ×0.18^层数（越拿越难刷到）。
        * 叠层按**加算**：n 层损毁 = 1 + 0.5n（不再是 1.5^n）。 */

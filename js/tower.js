@@ -1505,7 +1505,20 @@
     for (const e of envList(run)) {
       const def = TD.ENDLESS_ENV_BY_ID[e.id];
       if (!def) continue;
-      if (def.bad) { if (sh.ignore && !sh.reflect) continue; if (sh.reflect) { if (allow(def)) enemy.push(e.id); } else if (allow(def)) mine.push(e.id); }
+      /* 负面环境：
+       *   · 无视（envIgnore）且不反弹 → 整条无效；
+       *   · 反弹（envReflect）→ 转嫁给敌人（敌人自食其果）；
+       *   · 其余 → 由我方承受（数值本来就是「敌人变强」）。
+       * `noReflect`：那些**纯粹强化敌人自身**的词缀（自愈回复 / 吸血 / 护盾 /
+       * 吞噬成长 / 烈日 / 寒霜的敌方加速）没有「反弹」的意义 —— 反弹等于
+       * 把敌人的自我强化又还给他，所以这类一律只是**无效化**。
+       * 需求点名的 bug：天象之眼带了反弹，于是「自愈回复」被反弹给敌人，
+       * 敌方反而照样回血。 */
+      if (def.bad) {
+        if (sh.ignore) { if (def.noReflect || !sh.reflect) continue; }
+        if (sh.reflect && !def.noReflect) { if (allow(def)) enemy.push(e.id); }
+        else if (allow(def)) mine.push(e.id);
+      }
       /* 正向环境：我方**始终**吃得到（`fx.mine` 就是「本场真正生效的那一份」）。
        *   · 「无视环境」（envIgnore）**只针对负面环境** —— 它原来是
        *     「无视负面环境词缀」，不该把正向环境一起无视掉。
@@ -1617,7 +1630,11 @@
      * 已经叠满的就不该再出现在任何池子里 —— 商店、场间三选一、战斗奖励都走这里。
      * 例：「抉择扩充」(C50) 叠满 3 层后不再刷新。 */
     const cap = Math.max(1, Math.floor(Number(buff.maxStacks) || D().STACK_MAX));
-    if (buff.stackable && stacksOf(run, buff.id) >= cap) return false;
+    if (buff.stackable && buffCountOf(run, buff.id) >= cap) return false;
+    /* maxUses：**限次类**的「本局最多获得 N 次」上限（例：终焉烙印最多 3 次）。
+     * 用 maxStacks 当阈值，但判据是总数而不是可叠层标记 —— 烙印不进 permanent，
+     * 所以不能只靠上面那条 stackable 判断。 */
+    if (!buff.stackable && buff.maxStacks && buffCountOf(run, buff.id) >= Math.max(1, Math.floor(buff.maxStacks))) return false;
     /* repeatable：允许**重复出现**（例如虚空铭文 —— 每次只让一个永久增益免占位，
      * 重复刷到是有意义的）。这类不受 unique 的「已拥有就不再进池」限制；
      * 是否真的还能再拿一次由 addBuff 里的 pickBuffIds 把关。 */
@@ -1629,6 +1646,17 @@
     if (run.pendingPick && run.pendingPick.buffId === buff.id) return false;
     return !(run.permanent || []).some((b) => b.id === buff.id);
   }
+  /* 秘技通神（C33）可以抽中的防御类技能：绝对防御(16) 与 龟甲术(7)。
+   * 它们不进出手池，但被选中后会大幅提升**触发概率**（见 sim 的 passiveSkillBoost
+   * 与下面的 DEFENSE_PICK_BOOST）。即使玩家还没学，也会出现在候选里（选中即领悟）。 */
+  const PICKABLE_DEFENSE = [16, 7];
+  const isPickableDefense = (id) => PICKABLE_DEFENSE.indexOf(Number(id)) >= 0;
+  /* 秘技通神抽中绝对防御 / 龟甲术时的触发概率提升幅度。
+   * 这两条是「受击自动触发」的防御被动，技能等级对它们的作用很小
+   *（绝对防御等级只影响反伤比例、龟甲术等级只影响抵挡比例），
+   * 真正决定强度的是**触发概率** —— 所以选中时给一个大幅加成。
+   * 数值口径：effects['16'] / effects['7'] 是「相对加成」，2.0 = 触发率 ×3。 */
+  const DEFENSE_PICK_BOOST = 2.0;
   /** 战斗奖励的稀有度倾斜：按「花了这么多币刷新后」的商店水平取。
    *  10 币 = rerollTilt 调一次 1.20，实测史诗档从 10.1% 抬到约 17%。 */
   const CHOICE_TILT_PAID = 10;
@@ -1687,7 +1715,11 @@
     if (!owned) return true;
     /* 可叠层类的上限：优先用该增益自己的 maxStacks（例如 C50 只到 3 层），
      * 没写就用全局 STACK_MAX。叠满即视为「不可再获得」。 */
-    if (buff.stackable !== true) return false;                        // 同名唯一
+    if (buff.stackable !== true) {
+      /* 烙印类等「限次但一局最多 N 次」的：叠满 maxStacks 就不可再获得。 */
+      if (buff.maxStacks) return buffCountOf(run, buff.id) < Math.max(1, Math.floor(buff.maxStacks));
+      return false;                                                   // 同名唯一
+    }
     const cap = Math.max(1, Math.floor(Number(buff.maxStacks) || D().STACK_MAX));
     return owned.stacks < cap;
   }
@@ -2237,9 +2269,22 @@
       const t = it && it.type ? String(it.type) : '';
       return t === '主动';
     };
-    const list = kind === 'skill'
-      ? (State.mySkills ? State.mySkills() : []).filter((sk) => sk && isActiveSkill(sk.id))
-      : (State.myWeapons ? State.myWeapons() : []);
+    const pickableSkill = (id) => isActiveSkill(id) || isPickableDefense(id);
+    let list;
+    if (kind === 'skill') {
+      list = (State.mySkills ? State.mySkills() : []).filter((sk) => sk && pickableSkill(sk.id));
+      /* 候选里补齐「玩家还没学的可抽防御技」——它们按 id 造一层占位，
+       * 选中后由 applyPickBuff 真正写进技能表。 */
+      const have = new Set(list.map((sk) => Number(sk.id)));
+      const map = (typeof skillsMap !== 'undefined' && skillsMap) ? skillsMap : (window.skillsMap || null);
+      for (const id of PICKABLE_DEFENSE) {
+        if (have.has(id)) continue;
+        const it = map && map.getValue ? map.getValue(id) : null;
+        if (it) list = list.concat([{ id: id, level: 1, name: it.name, type: it.type }]);
+      }
+    } else {
+      list = (State.myWeapons ? State.myWeapons() : []);
+    }
     const pool = list.slice();
     for (let i = pool.length - 1; i > 0; i--) {           // 洗牌
       const j = Math.floor(Math.random() * (i + 1));
@@ -2266,12 +2311,24 @@
     }
     const key = kind === 'skill' ? 'skillBoost' : 'weaponBoost';
     run[key] = run[key] || {};
-    run[key][Number(id)] = Math.max(Number(run[key][Number(id)]) || 0, pend.pct);
+    let pct = pend.pct;
+    if (kind === 'skill' && PICKABLE_DEFENSE.indexOf(Number(id)) >= 0) {
+      /* 绝对防御 / 龟甲术是「受击自动触发」的防御被动，不给它们叠加技能等级，
+       * 而是把触发概率**大幅**提升（详见下方 applyDefenseBoost 的说明）。 */
+      if (!(S().skills || []).some((sk) => Number(sk.id) === Number(id))) {
+        State.setWS('skill', Number(id), 1);
+      }
+      const before = Number(run[key][Number(id)]) || 0;
+      run[key][Number(id)] = before + DEFENSE_PICK_BOOST;
+      pct = run[key][Number(id)];
+    } else {
+      run[key][Number(id)] = Math.max(Number(run[key][Number(id)]) || 0, pct);
+    }
     /* 本轮第 4 项：真正选定了才算「一局一次」用掉（原来在拿到的时候就登记了）。 */
     if (pend.buffId) run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId]).filter((v, i, a) => a.indexOf(v) === i);
     run.pendingPick = null;
     save();
-    return { ok: true, kind, id: Number(id), pct: pend.pct };
+    return { ok: true, kind, id: Number(id), pct: pct };
   }
   /** 永久增益槽位数：基础 5 + 扩容类 buff 给的名额。 */
   function permSlots(run) { return (D().PERMANENT_SLOTS || 5) + Math.max(0, Number(run && run.permSlots) || 0); }
@@ -2346,6 +2403,15 @@
     const row = run.instantIds.find((x) => x && x.id === id);
     if (row) row.count = Math.max(1, Math.floor(Number(row.count) || 1)) + 1;
     else run.instantIds.push({ id: id, count: 1 });
+  }
+  /** 本局某条增益的**总层数**（permanent 与 limited 都要数）——
+   *  烙印类（C49 / C52）记在 run.limited 上，只查 permanent 会永远数到 0。 */
+  function buffCountOf(run, id) {
+    if (!run) return 0;
+    let n = 0;
+    for (const row of run.permanent || []) if (row && row.id === id) n += Math.max(1, Math.floor(Number(row.stacks) || 1));
+    for (const row of run.limited || []) if (row && row.id === id) n += Math.max(1, Math.floor(Number(row.stacks) || 1));
+    return n;
   }
   /** 某个**即时类**增益本局已获得的次数（即时类不进 permanent/limited，另记在 instantIds 上）。 */
   function instantOwnedCount(run, id) {

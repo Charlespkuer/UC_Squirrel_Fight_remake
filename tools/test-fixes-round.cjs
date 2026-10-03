@@ -3415,6 +3415,9 @@ test('需求54：挥金如土可重复 / 传奇商店降权 / 终焉烙印终乘
     r.permanent = []; r.limited = []; r.slotFreeIds = []; r.pickBuffIds = [];
     if (owned.length) T._debugRun('endless').permanent = owned.map((id) => ({ id: id, stacks: 1 }));
     T._debugRun('endless').instantIds = [{ id: 'C51', count: 1 }];   // 即时类传奇也要算「已拥有」
+    /* 终焉烙印(C49) 是限次类、且「一局最多 3 次」—— 想让它真正退出池子，
+     * 必须在 run.limited 里叠到 maxStacks（只挂 1 份仍会继续出现）。 */
+    T._debugRun('endless').limited = [{ id: 'C49', stacks: 3, uses: 1000, on: true }];
     let leg = 0, epic = 0, tot = 0;
     for (let i = 0; i < 3000; i++) {
       for (const sl of (T.rollShopSlotsOf(T._debugRun('endless'), 0) || [])) {
@@ -3424,9 +3427,12 @@ test('需求54：挥金如土可重复 / 传奇商店降权 / 终焉烙印终乘
     }
     return { leg: leg / tot, epic: epic / tot };
   };
-  const m0 = measure([]), mAll = measure(['C14', 'C36', 'C37', 'C49']);
+  /* 注意：终焉烙印(C49) 现在是「一局最多 3 次」，只写 permanent 里 1 份并不算叠满，
+   * 所以全拥有后它还会少量出现（直到 maxStacks）。这里改成对比「出率大幅下降」。 */
+  /* 「全拥有」= 四条可重复传奇都到手且**叠满**（C49 需 3 层），此时传奇应彻底绝迹。 */
+  const m0 = measure([]), mAll = measure(['C14', 'C36', 'C37']);
   assert.ok(m0.leg > 0, '未拥有时应当能刷到传奇：' + m0.leg);
-  assert.equal(mAll.leg, 0, '全部可重复传奇到手后不该再刷到传奇：' + mAll.leg);
+  assert.equal(mAll.leg, 0, '全部可重复传奇叠满后不该再刷到传奇：' + mAll.leg);
   assert.ok(mAll.epic > 0.05, '史诗仍应当正常出现（货架不会退化成纯普通）：' + mAll.epic);
   T.abandon('endless');
 });
@@ -3538,8 +3544,12 @@ test('需求56：秘技通神只抽主动技能 / 终焉烙印改加算并降出
     const cand = T.pickCandidatesOf('skill');
     assert.ok(cand.length > 0, '应当能抽出候选');
     for (const x of cand) {
-      assert.equal(x.type, '主动', '秘技通神只该抽主动技能，实测抽到 ' + x.id + ':' + x.type + ' ' + x.name);
-      assert.ok(actives.indexOf(x.id) >= 0, '候选应当来自已学的主动技能：' + x.id);
+      /* 秘技通神可以抽：主动技能，外加绝对防御(16) 与龟甲术(7) 这两个「受击自动触发」的
+       * 防御被动（选中后大幅提升触发概率）。其余被动/防御类仍然不许出现。 */
+      const defOk = (x.id === 16 || x.id === 7) && x.type === '防御';
+      assert.ok(x.type === '主动' || defOk,
+        '秘技通神只该抽主动技能或 16/7，实测抽到 ' + x.id + ':' + x.type + ' ' + x.name);
+      if (!defOk) assert.ok(actives.indexOf(x.id) >= 0, '候选应当来自已学的主动技能：' + x.id);
     }
   }
 
@@ -3612,6 +3622,135 @@ test('需求56：秘技通神只抽主动技能 / 终焉烙印改加算并降出
   };
   const uPlain = unitsFor(null), uBoost = unitsFor(2);
   assert.ok(uBoost >= uPlain && uPlain > 0, 'healMul 应当生效且不减少治疗：' + uPlain + ' → ' + uBoost);
+  T.abandon('endless');
+});
+
+const State_hasSkill = (S, id) => (S.state().skills || []).some((x) => Number(String(x).split(':')[0]) === Number(id));
+
+test('需求57：终焉烙印最多3次 / 秘技通神可抽绝对防御与龟甲术 / 天象之眼拦敌方自愈', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;
+  const openRun = () => {
+    S.newGame('r57' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = [];
+    return r;
+  };
+
+  /* ① 终焉烙印（C49）：一局最多 3 次，之后不再出现 */
+  const c49 = TD.BUFF_BY_ID.C49;
+  assert.equal(c49.maxStacks, 3, 'C49 应当最多 3 次');
+  openRun();
+  for (let n = 1; n <= 3; n++) {
+    assert.ok(T.addBuff(T._debugRun('endless'), 'C49').ok, '第 ' + n + ' 次应当能获得');
+    const rr = T._debugRun('endless');
+    const row = (rr.limited || []).find((b) => b.id === 'C49');
+    assert.equal(row && row.stacks, n, '第 ' + n + ' 次后层数应当是 ' + n);
+    if (n < 3) {
+      assert.equal(T.poolFilterOf(rr, c49), true, n + ' 层时仍应可进池');
+      assert.equal(T.ownableOf(rr, c49), true, n + ' 层时仍可获得');
+    }
+  }
+  const r3 = T._debugRun('endless');
+  assert.equal(T.poolFilterOf(r3, c49), false, '叠满 3 次后不该再进池');
+  assert.equal(T.ownableOf(r3, c49), false, '叠满 3 次后不该再获得');
+  T.addBuff(T._debugRun('endless'), 'C49');
+  assert.equal((T._debugRun('endless').limited.find((b) => b.id === 'C49') || {}).stacks, 3,
+    '第 4 次不该再叠上去');
+
+  /* ② 秘技通神：候选含绝对防御(16) 与龟甲术(7)，且选中后触发率大幅提升 */
+  openRun();
+  for (const id of [1, 8, 14]) S.setWS('skill', id, 5);   // 1 是被动，用来验证过滤
+  const seen = new Set();
+  for (let t = 0; t < 60; t++) for (const x of T.pickCandidatesOf('skill')) seen.add(x.id);
+  assert.ok(seen.has(16), '候选应当含绝对防御 16，实测 ' + [...seen].join(','));
+  assert.ok(seen.has(7), '候选应当含龟甲术 7，实测 ' + [...seen].join(','));
+  assert.ok(!seen.has(1), '候选不该含普通被动技能（力王附体 1）');
+  /* 选中 16：学会 + 写进 skillBoost（大幅提升） */
+  openRun();
+  assert.equal(State_hasSkill(S, 16), false, '前置条件：落地前不该会绝对防御');
+  T.addBuff(T._debugRun('endless'), 'C33');
+  const res = T.applyPickBuff('skill', 16);
+  assert.ok(res.ok, '拾取应当成功：' + JSON.stringify(res));
+  assert.ok(res.pct >= 1, '防御技的加成应当「大幅」（≥100%）：' + res.pct);
+  assert.equal(State_hasSkill(S, 16), true, '选中绝对防御后应当学会它');
+  const boost16 = T._debugRun('endless').skillBoost['16'];
+  assert.ok(boost16 >= 1, 'skillBoost[16] 应当是大额加成：' + boost16);
+  /* 同理龟甲术 */
+  openRun();
+  T.addBuff(T._debugRun('endless'), 'C33');
+  const res7 = T.applyPickBuff('skill', 7);
+  assert.ok(res7.ok && State_hasSkill(S, 7), '选中龟甲术后应当学会它：' + JSON.stringify(res7));
+  assert.ok(T._debugRun('endless').skillBoost['7'] >= 1, 'skillBoost[7] 应当是大额加成');
+  /* 主动技能仍然只拿 0.6（不被防御技的加成影响） */
+  openRun();
+  S.setWS('skill', 8, 5);
+  T.addBuff(T._debugRun('endless'), 'C33');
+  const res8 = T.applyPickBuff('skill', 8);
+  assert.ok(res8.pct <= 1, '主动技能仍是原来的 pct：' + res8.pct);
+  /* 实战触发率对比：绝对防御 / 龟甲术 都要明显变高 */
+  const mkF = (eff, skills) => ({ name: 'p', level: 60, power: 200, agility: 100, speed: 100,
+    hp: 40000, maxHp: 40000, weapons: [{ id: 1, level: 5 }],
+    skills: (skills || []).map((id) => ({ id: id, level: 5 })), effects: eff || {},
+    baseStats: { power: 200, agility: 100, speed: 100 } });
+  const rateOf = (eff, skills, key) => {
+    let hits = 0, trig = 0;
+    for (let i = 0; i < 200; i++) {
+      const me = mkF(eff, skills);
+      const foe = { name: 'F', level: 60, power: 300, agility: 200, speed: 150, hp: 999999, maxHp: 999999,
+        weapons: [{ id: 1, level: 5 }], skills: [], effects: {}, baseStats: { power: 300, agility: 200, speed: 150 } };
+      const rr = Sim.simulate(foe, me);
+      for (const x of (rr.rounds || [])) {
+        if (x.attacker === 0 && x.action === 'common' && x.dmg !== undefined) { hits++; if (x[key]) trig++; }
+      }
+    }
+    return hits ? trig / hits : 0;
+  };
+  const jdPlain = rateOf(null, [16], 'jueDui'), jdBoost = rateOf({ 16: 2 }, [16], 'jueDui');
+  assert.ok(jdBoost > jdPlain * 1.5, '绝对防御触发率应当大幅提升：' + (jdPlain * 100).toFixed(1) + '% → ' + (jdBoost * 100).toFixed(1) + '%');
+  const gjPlain = rateOf(null, [7], 'guiJia'), gjBoost = rateOf({ 7: 2 }, [7], 'guiJia');
+  assert.ok(gjBoost > gjPlain * 1.5, '龟甲术触发率应当大幅提升：' + (gjPlain * 100).toFixed(1) + '% → ' + (gjBoost * 100).toFixed(1) + '%');
+
+  /* ③ 天象之眼（C45）必须拦住敌方自愈（以及其它「纯粹强化敌人自身」的环境） */
+  assert.equal(TD.ENDLESS_ENV_BY_ID.regen.noReflect, true, '自愈回复应当标记 noReflect');
+  assert.equal(TD.ENDLESS_ENV_BY_ID.lifesteal.noReflect, true, '吸血应当标记 noReflect');
+  assert.equal(TD.ENDLESS_ENV_BY_ID.shell.noReflect, true, '护盾应当标记 noReflect');
+  assert.equal(TD.ENDLESS_ENV_BY_ID.devour.noReflect, true, '吞噬成长应当标记 noReflect');
+  assert.ok(!TD.ENDLESS_ENV_BY_ID.thorns.noReflect, '荆棘反伤应当仍可反弹');
+  assert.ok(!TD.ENDLESS_ENV_BY_ID.greed.noReflect, '贪婪裂隙应当仍可反弹');
+  const envTrial = (envIds, c45) => {
+    openRun();
+    if (c45) T.addBuff(T._debugRun('endless'), 'C45');
+    const rr = T._debugRun('endless');
+    rr.env = envIds.map((id) => ({ id: id, vals: null }));
+    const nx = T.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '应当能取到战斗');
+    const me = mkF(null, []);
+    nx.adjustMe(me);
+    return { foe: nx.foe.mods || {}, me: me.mods || {} };
+  };
+  const off = envTrial(['regen'], false), on = envTrial(['regen'], true);
+  assert.ok(Number(off.foe.regenPct) > 0, '没有天象之眼时敌方应当吃得到自愈：' + JSON.stringify(off.foe));
+  assert.ok(!(Number(on.foe.regenPct) > 0), '有天象之眼时敌方不该再有自愈：' + JSON.stringify(on.foe));
+  for (const id of ['lifesteal', 'shell', 'devour']) {
+    const a = envTrial([id], false), b = envTrial([id], true);
+    const key = { lifesteal: 'lifestealPct', shell: 'shellPct', devour: 'devourPct' }[id];
+    assert.ok(Number(a.foe[key]) > 0, id + '：无天象之眼时敌方应当吃得到');
+    assert.ok(!(Number(b.foe[key]) > 0), id + '：有天象之眼时敌方不该再吃得到');
+  }
+  /* 荆棘仍然反弹（这是「敌人自食其果」，不该被一起拦掉） */
+  const th = envTrial(['thorns'], true);
+  assert.ok(Number(th.foe.thornsPct) > 0, '荆棘反伤应当仍然反弹给敌人：' + JSON.stringify(th.foe));
+  /* 血色黄昏（正向）：我方该吃的仍然吃得到，敌方被剥夺 */
+  const duskOff = envTrial(['dusk'], false), duskOn = envTrial(['dusk'], true);
+  assert.ok(Number(duskOff.me.lifestealPct) > 0 && Number(duskOff.foe.lifestealPct) > 0,
+    '没有天象之眼时血色黄昏双方都吃：' + JSON.stringify(duskOff));
+  assert.ok(Number(duskOn.me.lifestealPct) > 0, '有天象之眼时我方仍该吃血色黄昏：' + JSON.stringify(duskOn.me));
+  assert.ok(!(Number(duskOn.foe.lifestealPct) > 0), '有天象之眼时敌方不该吃血色黄昏：' + JSON.stringify(duskOn.foe));
   T.abandon('endless');
 });
 

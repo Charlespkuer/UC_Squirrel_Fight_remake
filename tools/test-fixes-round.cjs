@@ -1651,6 +1651,64 @@ test('需求34：护盾环境削弱为 18%~28%', () => {
   assert.match(TD.envRangeText(shell), /18% ~ 28%/, '区间文案要同步：' + TD.envRangeText(shell));
 });
 
+test('需求35：永久槽位的「占位口径」必须一致（修「7/8 拿到增益直接消失」）', () => {
+  const c = setup();
+  const T = c.Tower;
+  /* 复刻玩家实测状态：两个背包扩容（C30 +1 / C31 +2 → 上限 8）、
+   * 8 个永久增益、其中 C36 被虚空铭文附魔免占位 → 实际占用 7/8。 */
+  const scene = () => {
+    const r = T._debugRun('endless');
+    r.permanent = ['C35', 'C13', 'C36', 'C14', 'C28', 'C18', 'C10', 'C07'].map((id) => ({ id: id, stacks: 1 }));
+    r.permSlots = 3; r.permSlotIds = ['C31', 'C30']; r.slotFreeIds = ['C36'];
+    r.limited = []; r.pendingPick = null;
+    return r;
+  };
+  let r = scene();
+  let info = T.endlessInfo().run;
+  assert.equal(info.permCap, 8, '上限应当是 8（5 + 1 + 2）');
+  assert.equal(info.permUsed, 7, '实际占用应当是 7（C36 免占位）');
+  assert.equal(r.permanent.length, 8, '数组长度是 8（含 1 个免占位）');
+
+  /* 关键回归：占用 7/8 时拿一个永久增益，**必须真的进去**。
+   * 改前：addBuff 返回 ok=true（因为 permUsed 7 < 8 没满），列表变 9 项，
+   * 紧接着 normalizeRun 的 `slice(0, permSlots)` 按数组长度 9 > 8 把
+   * **最后一项（刚拿到的）** 切掉 —— 玩家看到的就是「拿到了直接消失」。 */
+  const out = T.addBuff(r, 'C03');
+  assert.ok(out.ok, '应当能拿到');
+  const after = T._debugRun('endless');
+  assert.ok(after.permanent.some((b) => b.id === 'C03'),
+    '新拿到的 C03 必须留在构筑里：' + JSON.stringify(after.permanent.map((b) => b.id)));
+  assert.equal(after.permanent.length, 9, '列表应当是 8 + 1 = 9 项（8 占位 + 1 免占位）');
+  assert.equal(T.endlessInfo().run.permUsed, 8, '占用应当变成 8');
+  assert.ok(after.permanent.some((b) => b.id === 'C36'), '免占位的 C36 不该被挤掉');
+
+  /* 占用满 8 之后再拿 → 要求替换，且**不许丢任何已有增益** */
+  const before = after.permanent.map((b) => b.id).join(',');
+  const full = T.addBuff(T._debugRun('endless'), 'C45');
+  assert.ok(full.needsReplace, '占用满时应当要求替换');
+  assert.equal(T._debugRun('endless').permanent.map((b) => b.id).join(','), before,
+    '要求替换时不该改动构筑');
+  /* 替换掉一个**占位**的 → 成功且新增益入账 */
+  const rep = T.addBuff(T._debugRun('endless'), 'C45', 'C13');
+  assert.ok(rep.ok, '替换应当成功：' + (rep.msg || ''));
+  const r3 = T._debugRun('endless');
+  assert.ok(r3.permanent.some((b) => b.id === 'C45'), 'C45 应当入账');
+  assert.ok(!r3.permanent.some((b) => b.id === 'C13'), 'C13 应当被替换掉');
+  assert.equal(T.endlessInfo().run.permUsed, 8, '替换后占用仍是 8');
+  /* 换掉**免占位**的那个腾不出位置 → 明确拒绝 */
+  const bad = T.addBuff(T._debugRun('endless'), 'C02', 'C36');
+  assert.ok(!bad.ok, '换掉免占位的增益腾不出槽位，应当拒绝');
+
+  /* normalizeRun 再也不允许丢弃永久增益 */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  assert.ok(!/cleanBuffs\(run\.permanent\)\.slice\(0, permSlots/.test(src),
+    'normalizeRun 不该再按数组长度裁剪永久增益');
+  assert.ok(src.indexOf('function repairPermanentSlots') > 0, '应当有只校验不丢弃的 repairPermanentSlots');
+  /* 满格判定必须按「加入后的占用」而不是「当前占用」 */
+  assert.ok(/permUsed\(run\) \+ 1 > permSlots\(run\)/.test(src),
+    'addBuff 的满格判定应当按「加入后的占用」');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

@@ -100,7 +100,16 @@
     run.permSlots = Math.max(slotFromIds, Math.max(0, Number(run.permSlots) || 0));
     run.slotFreeIds = cleanIds(run.slotFreeIds);
     run.pickBuffIds = cleanIds(run.pickBuffIds);
-    run.permanent = cleanBuffs(run.permanent).slice(0, permSlots(run));
+    /* **绝不在这里丢弃永久增益**。
+     * 原来这里写的是 `slice(0, permSlots(run))` —— 按数组长度一刀切，
+     * 而 addBuff 的满格判断用的是 permUsed（已扣掉虚空铭文免占位的那些）。
+     * 两个口径不一致时就会把**刚拿到的新增益**无差别切掉：
+     *   上限 8、占用 7/8（其中 1 个免占位 → 数组长度 8），
+     *   addBuff 认为没满、正常推入 → 长度 9 → 这里 slice(0,8) → 新增益消失。
+     * 上限的维护收口在 addBuff（按「加入后占用是否超上限」判定、超了就要求替换），
+     * 所以这里只做校验与告警：真超了说明别处口径又错了，但**不能拿玩家的增益买单**。 */
+    run.permanent = cleanBuffs(run.permanent);
+    run.permanent = repairPermanentSlots(run, run.permanent);
     run.limited = (Array.isArray(run.limited) ? run.limited : []).filter((b) => b && D().BUFF_BY_ID[b.id] && D().BUFF_BY_ID[b.id].kind === 'limited')
       .map((b) => ({ id: b.id, stacks: Math.max(1, Math.min(D().STACK_MAX, Math.floor(Number(b.stacks) || 1))),
         uses: Math.max(0, Math.floor(Number(b.uses) || 0)), on: b.on !== false }))
@@ -1486,10 +1495,17 @@
       logBuff(run, id, 'stack', { stacks: owned.stacks, detail: '叠到 ×' + owned.stacks });
       return { ok: true, buff, stacks: owned.stacks };
     }
-    if (buff.kind === 'permanent' && permUsed(run) >= permSlots(run)) {
-      if (!replaceId) return { ok: false, needsReplace: true, buff, msg: '永久增益已满 5 个，先选一个替换掉' };
+    /* 满格判定按**加入后的占用**：占位类增益会 +1，所以只要 permUsed + 1 > 上限就得替换。
+     * 免占位的（虚空铭文附魔过的）不占位，不受此限。 */
+    if (buff.kind === 'permanent' && permUsed(run) + 1 > permSlots(run)) {
+      if (!replaceId) return { ok: false, needsReplace: true, buff, msg: '永久增益已满，先选一个替换掉' };
       const at = list.findIndex((b) => b.id === replaceId);
       if (at < 0) return { ok: false, needsReplace: true, buff, msg: '要替换的增益不存在' };
+      /* 换掉一个**免占位**的不会腾出槽位（它本来就不占），所以换它没有意义 —— 明确拒绝，
+       * 免得玩家点了「替换」却发现还是买不了。 */
+      if ((run.slotFreeIds || []).indexOf(replaceId) >= 0) {
+        return { ok: false, needsReplace: true, buff, msg: '【' + replaceId + '】已被虚空铭文附魔、不占槽位，换它腾不出位置' };
+      }
       list.splice(at, 1);
       /* 第 3 项：被替换掉的成长类增益，把它的累计一起清掉。 */
       resetGrowth(run, replaceId);
@@ -1508,6 +1524,11 @@
     list.push(buff.kind === 'limited'
       ? { id, stacks: 1, uses: towerLimitedUses, on: true }
       : { id, stacks: 1 });
+    /* 自检：加入后占用不应超过上限（前面已按「加入后占用」判定过，正常不会触发）。 */
+    if (buff.kind === 'permanent' && permUsed(run) > permSlots(run)
+        && typeof console !== 'undefined' && console.warn) {
+      console.warn('[tower] 永久增益占用槽位超上限：' + permUsed(run) + '/' + permSlots(run) + '（id=' + id + '）');
+    }
     logBuff(run, id, 'get', { detail: buff.kind === 'permanent' ? '永久' : (run.mode === 'tower' ? '下一场战斗' : ('限次 ' + towerLimitedUses + ' 场')) });
     return { ok: true, buff };
   }
@@ -1825,8 +1846,10 @@
     /* 本轮第 1 项：虚空铭文落地 —— 记进 slotFreeIds，permUsed() 之后就会把它排除。 */
     if (kind === 'permBuff') {
       if (!(run.permanent || []).some((b) => b.id === id)) return { ok: false, msg: '你还没有这个永久增益。' };
-      run.slotFreeIds = (run.slotFreeIds || []).concat([id]);
-      run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId || 'C37']);   // 第 4 项：落地才算用掉
+      run.slotFreeIds = (run.slotFreeIds || []).concat([id]).filter((v, i, a) => a.indexOf(v) === i);
+      /* 第 4 项：落地才算用掉。这里也去重 —— 玩家存档里出现过 pickBuffIds 重复登记
+       * （同一 id 出现两次），虽然逻辑上无害，但会让「一局一次」的名单越来越脏。 */
+      run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId || 'C37']).filter((v, i, a) => a.indexOf(v) === i);
       run.pendingPick = null;
       save();
       return { ok: true, kind, id, slotFree: true };
@@ -1835,7 +1858,7 @@
     run[key] = run[key] || {};
     run[key][Number(id)] = Math.max(Number(run[key][Number(id)]) || 0, pend.pct);
     /* 本轮第 4 项：真正选定了才算「一局一次」用掉（原来在拿到的时候就登记了）。 */
-    if (pend.buffId) run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId]);
+    if (pend.buffId) run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId]).filter((v, i, a) => a.indexOf(v) === i);
     run.pendingPick = null;
     save();
     return { ok: true, kind, id: Number(id), pct: pend.pct };
@@ -1848,6 +1871,27 @@
     const list = (run && run.permanent) || [];
     const free = ((run && run.slotFreeIds) || []).filter((id) => list.some((b) => b.id === id));
     return Math.max(0, list.length - free.length);
+  }
+  /**
+   * 永久增益列表的**校验（不裁剪）** —— bug 修复。
+   *
+   * 原来 normalizeRun 用 `slice(0, permSlots)` 按**数组长度**裁剪，而 addBuff 的
+   * 满格判断按 `permUsed`（已扣掉虚空铭文免占位的那些）。口径不一致就会丢东西：
+   *   上限 8、占用 7/8、其中 1 个免占位（数组长度 8）→ addBuff 认为没满、正常推入
+   *   → 长度 9 → slice(0,8) 把**最后一项（刚拿到的那份）**切掉
+   *   → 玩家看到「拿到了又直接消失」（实测复刻到：C03 / C45 都这样没了）。
+   *
+   * 现在上限的维护**收口在 addBuff**（加入前按「加入后占用是否超上限」判定），
+   * 这里只做校验：真超了就告警，但**绝不丢弃玩家已有的增益**。
+   */
+  function repairPermanentSlots(run, list) {
+    const cap = permSlots(run);
+    const used = permUsed(run);
+    if (used > cap && typeof console !== 'undefined' && console.warn) {
+      console.warn('[tower] 永久增益占用槽位超过上限：' + used + '/' + cap +
+        '（列表 ' + list.length + ' 项，含免占位 ' + (list.length - used) + ' 项）—— 保留不丢弃，请检查 addBuff 的满格判定');
+    }
+    return list;
   }
   /** 本轮第 4 项：**当前**血量上限（血条悬停显示用）。
    * 不直接用「上一场开战时的 maxHp」，是因为两次战斗之间玩家可能刚拿了增益 ——

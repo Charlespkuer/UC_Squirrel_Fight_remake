@@ -1083,8 +1083,15 @@
      * 存在时 力/敏/速/生命上限 ×1.25；损毁后本局 ×1.5。
      * 可重复获得，每次独立相乘（多层 = 1.5^n，而不是 1+0.5n）。 */
     { id: 'C49', name: '终焉烙印', rarity: 3, kind: 'limited', uses: 1000, endlessOnly: true, repeatable: true,
-      desc: '终乘烙印：存在时力量/敏捷/速度/生命上限 ×1.25；损毁后本局 ×1.5（可重复获得，多次独立相乘）',
-      mods: { fragileFinalMul: true, fragileMulAlive: 1.25, fragileMulBurned: 1.5, fragileBreakPct: 6 } },
+      desc: '终乘烙印：存在时力量/敏捷/速度/生命上限 +25%；损毁后本局 +50%（可重复获得，按层**加算**）',
+      /* repeatWeight：可重复获得，但已拥有时被抽中的权重 ×0.18^层数（越拿越难刷到）。
+       * 叠层按**加算**：n 层损毁 = 1 + 0.5n（不再是 1.5^n）。 */
+      mods: { fragileFinalMul: true, fragileAddAlive: 0.25, fragileAddBurned: 0.5, fragileBreakPct: 6, repeatWeight: 0.18 } },
+    /* 稀有烙印「涌泉烙印」：跳绿字的回血量 +10%；损毁后本局 +20%（同样是加算层）。 */
+    { id: 'C52', name: '涌泉烙印', rarity: 1, kind: 'limited', uses: 1000, endlessOnly: true, repeatable: true,
+      desc: '治疗烙印：跳跃绿字的回血量 +10%；损毁后本局 +20%（可重复获得，按层加算）',
+      mods: { fragileFinalMul: true, fragileHealAddAlive: 0.10, fragileHealAddBurned: 0.20,
+        fragileBreakPct: 6, repeatWeight: 0.3 } },
     { id: 'C38', name: '先机预判', rarity: 2, kind: 'permanent',
       desc: '每场战斗敌方对我方造成的第一次伤害变为 0（反伤、中毒等非攻击伤害不会消耗它）',
       mods: { firstHitZero: 1 } },

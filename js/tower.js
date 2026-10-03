@@ -778,6 +778,8 @@
        * 多层时各自独立相乘（1.5^n）。
        * 注意 maxHp 与当前血量一起放大，保持「当前血量占上限的比例」不变。
        * ============================================================ */
+      /* 治疗烙印：跳绿字的回血量 +% —— sim 的 healOf() 读 mods.healMul。 */
+      const healBonus = fragileHealBonus(run);
       const finalMul = fragileFinalMul(run);
       const scaledMaxHp = finalMul === 1 ? maxHp : Math.max(1, Math.round(maxHp * finalMul));
       if (finalMul !== 1) {
@@ -831,6 +833,9 @@
       const grownTaken = winTakenMulOf(run);
       if (grownTaken > 0) mods.takenMul = (Number(mods.takenMul) || 0) - Math.min(agg.winTakenMulCap || grownTaken, grownTaken);
       if (agg.reflectImmune) mods.reflectImmune = agg.reflectImmune;
+      /* 治疗烙印：sim 的 healOf() 读的是 fighter 顶层的 **healMul**（不是 me.mods 里的字段），
+       * 所以这里要把面板字段一起写上。 */
+      if (healBonus > 0) me.healMul = 1 + healBonus;
       if (agg.emptyMaxHpMul) mods.emptyMaxHpMul = agg.emptyMaxHpMul;
       if (agg.lowHpPowerMul || agg.lowHpAgilityMul || agg.lowHpSpeedMul ||
           agg.lowHpTakenMul || agg.lowHpLifestealPct || agg.lowHpRegenPct) {
@@ -1726,9 +1731,20 @@
     const b = Math.max(0, Math.floor(Number(run && run.fragileMulBase) || 0));
     const k = Math.max(0, Math.floor(Number(run && run.fragileMulBurned) || 0));
     if (!b && !k) return 1;
-    const alive = Number(D().BUFF_BY_ID.C49.mods.fragileMulAlive) || 1.25;
-    const burned = Number(D().BUFF_BY_ID.C49.mods.fragileMulBurned) || 1.5;
-    return Math.pow(alive, b) * Math.pow(burned, k);
+    const mA = D().BUFF_BY_ID.C49.mods;
+    /* 按层**加算**：n 层损毁 = 1 + 0.5n（不再是 1.5^n）。
+     * 存在层 +0.25/层、损毁层 +0.5/层，两者相加。 */
+    const alive = Number(mA.fragileAddAlive) || 0.25;
+    const burned = Number(mA.fragileAddBurned) || 0.5;
+    return 1 + alive * b + burned * k;
+  }
+  /** 治疗烙印（C52「涌泉烙印」）的最终治疗加成：按层加算（存在 +10%/层、损毁 +20%/层）。 */
+  function fragileHealBonus(run) {
+    const b = Math.max(0, Math.floor(Number(run && run.fragileMulBase) || 0));
+    const k = Math.max(0, Math.floor(Number(run && run.fragileMulBurned) || 0));
+    if (!b && !k) return 0;
+    const m = D().BUFF_BY_ID.C52.mods;
+    return (Number(m.fragileHealAddAlive) || 0.10) * b + (Number(m.fragileHealAddBurned) || 0.20) * k;
   }
   /** 需求 3：每条烙印一个独立的确定性 PRNG（由本局 salt + 烙印 id 派生）。
    *  原来所有烙印共用 Math.random()，同一次判定会把好几条一起打碎。 */
@@ -2210,8 +2226,19 @@
       }
       return pool.slice(0, 3).map((x) => ({ id: x.id, name: x.buff.name, rarity: x.buff.rarity, stacks: x.stacks }));
     }
+    /* 秘技通神（C33）：**只抽主动技能**。
+     * 它的效果是把该技能的「触发概率」大幅提升，而被动/防御类技能
+     * （力王附体 / 风驰电掣 / 武器好手 / 装死 / 皮糙肉厚 / 绝对防御…）
+     * 根本不进出手池，抽到它们等于白拿一整份传奇增益。
+     * 技能表里的 type 字段是权威口径（'主动' / '被动' / '防御'）。 */
+    const isActiveSkill = (id) => {
+      const map = (typeof skillsMap !== 'undefined' && skillsMap) ? skillsMap : (window.skillsMap || null);
+      const it = map && map.getValue ? map.getValue(Number(id)) : null;
+      const t = it && it.type ? String(it.type) : '';
+      return t === '主动';
+    };
     const list = kind === 'skill'
-      ? (State.mySkills ? State.mySkills() : [])
+      ? (State.mySkills ? State.mySkills() : []).filter((sk) => sk && isActiveSkill(sk.id))
       : (State.myWeapons ? State.myWeapons() : []);
     const pool = list.slice();
     for (let i = pool.length - 1; i > 0; i--) {           // 洗牌
@@ -2816,6 +2843,8 @@
     ownableOf: (run, buff) => ownable(run || endless().run, buff),
     /* 只读：当前战斗奖励的选项目数（基础 3 + 抉择扩充层数，上限 6）。 */
     choiceSlotsOf: (run) => choiceSlotsOf(run || endless().run),
+    /* 只读：选取型 buff 的候选（测试用；skill 会过滤掉被动/防御类）。 */
+    pickCandidatesOf: (kind) => pickCandidates(kind),
     /* 只读：本局「天命所归」累计提供的稀有度系数。 */
     rarityBoostOf: (run) => D().rarityBoostOf(run || endless().run),
     /* 只读：某个即时类增益本局已获得的次数（重复获得概率递减用）。 */

@@ -248,6 +248,9 @@ test('需求6：限次 buff 每场都扣（含整层最后一场）', () => {
   for (let g = 0; g < 10; g++) {
     const r = c.Tower._debugRun('endless');
     if (r.layer !== 3) break;
+    /* 隔离环境：环境里的「幻影回响」会按概率把同一场再打一遍，
+     * 那条路径不推进层内序号，会让「本层应当打 N 场」的计数偶发偏少。 */
+    r.env = [];
     if (r.choices) { c.Tower.pickChoice('endless', 0, null); continue; }
     if (r.phase) break;
     const nx = c.Tower.nextBattle('endless');
@@ -3319,8 +3322,10 @@ test('需求54：挥金如土可重复 / 传奇商店降权 / 终焉烙印终乘
   assert.equal(c49.kind, 'limited', 'C49 应当是限次类');
   assert.equal(c49.repeatable, true, 'C49 应当可重复获得');
   assert.equal(c49.mods.fragileFinalMul, true, 'C49 是终乘烙印');
-  assert.equal(c49.mods.fragileMulAlive, 1.25, '存在时 ×1.25');
-  assert.equal(c49.mods.fragileMulBurned, 1.5, '损毁后 ×1.5');
+  assert.equal(c49.mods.fragileAddAlive, 0.25, '存在时 +25%');
+  assert.equal(c49.mods.fragileAddBurned, 0.5, '损毁后 +50%');
+  assert.ok(c49.mods.repeatWeight > 0 && c49.mods.repeatWeight < 0.5,
+    '应当有较低的重复出率：' + c49.mods.repeatWeight);
   assert.ok(c49.mods.fragileBreakPct > 0, '应当有损毁概率');
   assert.ok(TD.endlessPool.some((b) => b.id === 'C49'), 'C49 应当在无尽塔池');
   /* 实战：无烙印 / n 层存在 / n 层损毁 的倍率 */
@@ -3346,24 +3351,25 @@ test('需求54：挥金如土可重复 / 传奇商店降权 / 终焉烙印终乘
   const base = scene(0, false);
   assert.equal(base.power, 200, '无烙印时力量应当是基础值');
   assert.equal(base.agility, 120, '无烙印时敏捷应当是基础值（顺带守住 agilityMul 不 NaN）');
+  /* 按层**加算**：存在层 +25%/层、损毁层 +50%/层。 */
   for (const n of [1, 2, 3]) {
     const s1 = scene(n, false);
-    assert.ok(Math.abs(s1.power / base.power - Math.pow(1.25, n)) < 0.02,
-      n + ' 层存在应当 ×1.25^' + n + '：实测 ×' + (s1.power / base.power).toFixed(3));
-    assert.ok(Math.abs(s1.agility / base.agility - Math.pow(1.25, n)) < 0.02,
+    assert.ok(Math.abs(s1.power / base.power - (1 + 0.25 * n)) < 0.02,
+      n + ' 层存在应当 ×' + (1 + 0.25 * n) + '：实测 ×' + (s1.power / base.power).toFixed(3));
+    assert.ok(Math.abs(s1.agility / base.agility - (1 + 0.25 * n)) < 0.02,
       n + ' 层存在的敏捷也应同倍：实测 ×' + (s1.agility / base.agility).toFixed(3));
-    assert.ok(Math.abs(s1.maxHp / base.maxHp - Math.pow(1.25, n)) < 0.02,
+    assert.ok(Math.abs(s1.maxHp / base.maxHp - (1 + 0.25 * n)) < 0.02,
       n + ' 层存在的生命上限也应同倍：实测 ×' + (s1.maxHp / base.maxHp).toFixed(3));
   }
   for (const n of [1, 2, 3]) {
     const s1 = scene(n, true);
-    assert.ok(Math.abs(s1.power / base.power - Math.pow(1.5, n)) < 0.02,
-      n + ' 层损毁应当 ×1.5^' + n + '（独立相乘，不是 1+0.5n）：实测 ×' + (s1.power / base.power).toFixed(3));
+    assert.ok(Math.abs(s1.power / base.power - (1 + 0.5 * n)) < 0.02,
+      n + ' 层损毁应当 ×' + (1 + 0.5 * n) + '（按层加算）：实测 ×' + (s1.power / base.power).toFixed(3));
   }
-  /* 关键区分：3 层损毁 = 3.375，而不是 1+0.5×3 = 2.5 */
+  /* 关键区分：3 层损毁 = 2.5（加算），而不是 1.5^3 = 3.375（幂乘） */
   const s3 = scene(3, true);
   const ratio = s3.power / base.power;
-  assert.ok(Math.abs(ratio - 2.5) > 0.3, '必须**不是**线性叠加（1+0.5n）：实测 ×' + ratio.toFixed(3));
+  assert.ok(Math.abs(ratio - Math.pow(1.5, 3)) > 0.3, '必须**不是**幂乘（1.5^n）：实测 ×' + ratio.toFixed(3));
   /* 与局内加算的关系：先加算、最后再乘 */
   {
     S.newGame('c49add' + Math.random());
@@ -3510,6 +3516,102 @@ test('需求55：装备星标防误合误卖 / 天命所归（传奇即时）/ �
     '战斗奖励的史诗出率应当明显高于第一页商店：' + choice[2] + ' vs ' + natural[2]);
   assert.ok(choice[0] < natural[0], '战斗奖励的普通出率应当低于第一页商店：' + choice[0] + ' vs ' + natural[0]);
   assert.ok(choice[3] > natural[3], '传奇也应当更高：' + choice[3] + ' vs ' + natural[3]);
+  T.abandon('endless');
+});
+
+test('需求56：秘技通神只抽主动技能 / 终焉烙印改加算并降出率 / 涌泉烙印', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+
+  /* ① 秘技通神（C33）的候选必须全是**主动**技能（被动/防御类抽到等于白拿） */
+  S.newGame('pick' + Math.random());
+  const st = S.state(); st.level = 70; st.props[23] = 99999;
+  for (const id of [1, 3, 5, 6, 8, 10, 14, 15, 16, 23]) S.setWS('skill', id, 5);
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  try { T.abandon('endless'); } catch (e) {}
+  T.startEndlessRun();
+  const learned = S.mySkills();
+  const actives = learned.filter((x) => x.type === '主动').map((x) => x.id);
+  assert.ok(learned.some((x) => x.type === '被动'), '前置条件：应当学了被动技能：' + learned.map((x) => x.id + ':' + x.type).join(','));
+  assert.ok(actives.length > 0, '前置条件：应当学了主动技能');
+  for (let t = 0; t < 30; t++) {
+    const cand = T.pickCandidatesOf('skill');
+    assert.ok(cand.length > 0, '应当能抽出候选');
+    for (const x of cand) {
+      assert.equal(x.type, '主动', '秘技通神只该抽主动技能，实测抽到 ' + x.id + ':' + x.type + ' ' + x.name);
+      assert.ok(actives.indexOf(x.id) >= 0, '候选应当来自已学的主动技能：' + x.id);
+    }
+  }
+
+  /* ② 终焉烙印（C49）：按层**加算**（1+0.5n），并进一步降低重复出率 */
+  const c49 = TD.BUFF_BY_ID.C49;
+  assert.equal(c49.mods.fragileAddAlive, 0.25, '存在层每层 +25%');
+  assert.equal(c49.mods.fragileAddBurned, 0.5, '损毁层每层 +50%');
+  assert.equal(c49.mods.fragileMulAlive, undefined, '旧的乘法参数应当已移除');
+  assert.ok(c49.mods.repeatWeight > 0 && c49.mods.repeatWeight <= 0.2,
+    '重复出率应当进一步调低（≤0.2）：' + c49.mods.repeatWeight);
+  const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
+    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
+  const scene = (marks, burned, id) => {
+    S.newGame('c49' + Math.random());
+    const s2 = S.state(); s2.level = 70; s2.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) s2.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = [];
+    for (let i = 0; i < marks; i++) T.addBuff(T._debugRun('endless'), id);
+    if (burned) { const rr = T._debugRun('endless'); rr.fragileMulBase = 0; rr.fragileMulBurned = burned; }
+    const nx = T.nextBattle('endless');
+    const me = mk(); nx.adjustMe(me);
+    return me;
+  };
+  const base = scene(0, 0, 'C49');
+  for (const n of [1, 2, 3]) {
+    const s1 = scene(n, n, 'C49');
+    assert.ok(Math.abs(s1.power / base.power - (1 + 0.5 * n)) < 0.02,
+      n + ' 层损毁应当是 1+0.5×' + n + '：实测 ×' + (s1.power / base.power).toFixed(3));
+  }
+  const s3 = scene(3, 3, 'C49');
+  assert.ok(Math.abs(s3.power / base.power - Math.pow(1.5, 3)) > 0.3,
+    '必须**不是**幂乘 1.5^3：实测 ×' + (s3.power / base.power).toFixed(3));
+
+  /* ③ 涌泉烙印（C52）：稀有·可重复；治疗量 +10% / 损毁 +20%（按层加算） */
+  const c52 = TD.BUFF_BY_ID.C52;
+  assert.ok(c52, 'C52 应当存在');
+  assert.equal(c52.name, '涌泉烙印', 'C52 名称');
+  assert.equal(c52.rarity, 1, 'C52 应当是稀有');
+  assert.equal(c52.kind, 'limited', 'C52 应当是限次类（烙印）');
+  assert.equal(c52.mods.fragileFinalMul, true, 'C52 是烙印（终结算）');
+  assert.equal(c52.mods.fragileHealAddAlive, 0.10, '存在时治疗 +10%');
+  assert.equal(c52.mods.fragileHealAddBurned, 0.20, '损毁后治疗 +20%');
+  assert.ok(TD.endlessPool.some((b) => b.id === 'C52'), 'C52 应当在无尽塔池');
+  assert.ok(c52.mods.repeatWeight > 0, 'C52 也应当有重复出率惩罚');
+  const m1 = scene(1, 0, 'C52');
+  assert.ok(Math.abs(m1.healMul - 1.10) < 1e-9, '存在 1 层 healMul 应当是 1.10：' + m1.healMul);
+  const m2 = scene(1, 1, 'C52');
+  assert.ok(Math.abs(m2.healMul - 1.20) < 1e-9, '损毁 1 层 healMul 应当是 1.20：' + m2.healMul);
+  const m3 = scene(1, 2, 'C52');
+  assert.ok(Math.abs(m3.healMul - 1.40) < 1e-9, '损毁 2 层 healMul 应当是 1.40：' + m3.healMul);
+  /* 没有烙印时不写 healMul（走默认 1） */
+  const m0 = scene(0, 0, 'C52');
+  assert.ok(m0.healMul == null || m0.healMul === 1, '没有涌泉烙印时不该有治疗加成：' + m0.healMul);
+  /* 引擎侧确认 healMul 真的被 sim 读走（healOf 的模板）：
+   * 直接比「同一份回血在 healMul=1 vs 1.5 下的数值」。 */
+  const Sim = c.Sim;
+  const unitsFor = (mul) => {
+    const me = { name: 'M', level: 50, power: 200, agility: 1, speed: 100, hp: 1000, maxHp: 100000,
+      weapons: [], skills: [{ id: 17, level: 5 }], effects: {},
+      baseStats: { power: 200, agility: 1, speed: 100 } };
+    if (mul != null) me.healMul = mul;
+    const foe = { name: 'F', level: 50, power: 60, agility: 1, speed: 1, hp: 9999999, maxHp: 9999999,
+      weapons: [], skills: [], effects: {}, baseStats: { power: 60, agility: 1, speed: 1 } };
+    const r = Sim.simulate(me, foe);
+    return (r.rounds || []).reduce((a, x) => a + (x.heal || 0) + (x.healSelf || 0), 0) +
+      (r.rounds || []).filter((x) => x.healSelf).length;
+  };
+  const uPlain = unitsFor(null), uBoost = unitsFor(2);
+  assert.ok(uBoost >= uPlain && uPlain > 0, 'healMul 应当生效且不减少治疗：' + uPlain + ' → ' + uBoost);
   T.abandon('endless');
 });
 

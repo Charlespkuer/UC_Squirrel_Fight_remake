@@ -1757,7 +1757,7 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
     ['C06', 'killPower', 7, 10],    // 猎杀时刻：每击杀 +2%（×层数）
     ['C07', 'winMaxHp', 7, null],   // 吞噬成长：每胜 +2%（×层数）
     ['C11', 'winHpFlat', 7, null],  // 以战养战：每胜 +5 上限（×层数）
-    ['C12', 'winPower', 7, 10],     // 登顶者：第 10 层起每胜 +5%（×层数）
+    ['C12', 'winStatPower', 7, 10],  // 登顶者：第 10 层起每胜 +1 力（×层数）
     ['C16', 'winHeal', 3, null],    // 战后续航：每胜回 5%（×层数）
     ['C17', 'winHeal', 3, null],    // 战后续航·精：每胜回 10%（×层数）
   ];
@@ -1773,15 +1773,17 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
       id + ' 的叠层应当严格 3 倍（按每场归一化）：×1=' + one.value + '/' + one.wins + ' 场，×3=' + three.value + '/' + three.wins + ' 场（比值 ' + ratio.toFixed(2) + '）');
   }
 
-  /* C12 曾经因为 `* 0` 的占位写法而**完全无效**（加成恒为 0）—— 断言它真的进了攻击加成 */
+  /* C12 现已改为「固定 +1 力/敏/速」；断言旧口径（winPower 百分比）已彻底移除，
+   * 且新字段真的落到 run 上。 */
   const src = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
-  assert.ok(!/winPowerAfter10\)\s*agg\.powerMul\s*\+=\s*[^;]*\*\s*0\s*;/.test(src),
-    'C12 不该再有 `* 0` 的占位写法');
-  assert.ok(/if \(m\.winPowerAfter10\) agg\.powerMul \+= Math\.max\(0, Number\(run\.winPower\)/.test(src),
-    'C12 应当把 run.winPower 真正累加进攻击加成');
-  /* C12 的累积不能重复乘层数（runModTotal 已经乘过 stacks×g） */
-  assert.ok(!/runModTotal\(run, 'winPowerAfter10'\) \|\| 0\) \* c12/.test(src),
-    'C12 累积不该再乘一次 stacks（会平方）');
+  assert.ok(!/run\.winPower\b/.test(src.replace(/\/\*[\s\S]*?\*\//g, '')),
+    'C12 不该再引用旧的 winPower（百分比口径）');
+  assert.ok(/run\.winStatPower = Math\.max\(0, Number\(run\.winStatPower\)/.test(src),
+    'C12 应当累加 run.winStatPower');
+  assert.ok(/me\.agility \+= Math\.max\(0, Number\(run\.winStatAgility\)/.test(src),
+    'C12 的敏捷累计应当加到面板属性上');
+  assert.ok(/winStatAfter10: 1/.test(fs.readFileSync(path.join(ROOT, 'js', 'tower-data.js'), 'utf8')),
+    'C12 的 mods 应当是 winStatAfter10');
 });
 
 test('需求37：成长类增益的「面板文字」必须等于「真实累计」（修 C07 显示恒为 +0%）', () => {
@@ -2150,6 +2152,104 @@ test('需求41：与狂怒成套的四条低血 combo（空血上限 / 低血减
   };
   assert.equal(steal(5000), 0, '满血时低血吸血不该触发');
   assert.ok(steal(2000) > 0, '低血时应当触发低血吸血');
+});
+
+test('需求42：叠层增益按层数计价 / 仓库钥匙不进商店 / 登顶者改为固定 +1 力敏速', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+
+  /* ---- ① 可叠加增益卖出按层数计价 ---- */
+  S.newGame('sellstack' + Math.random());
+  const st = S.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  T._debugSetLayer(9); T.startEndlessRun();
+  let r = T._debugRun('endless');
+  r.permanent = [{ id: 'C07', stacks: 3 }, { id: 'C02', stacks: 1 }];
+  r.limited = []; r.slots = null; r.coins = 0;
+  r.phase = 'shop';
+  r.shop = { layer: r.layer, retrySold: false, rerollFree: true, rerollCount: 0, rerollPaid: 0, slots: [] };
+  const listed = T.ownedBuffs('endless');
+  const one = listed.find((b) => b.id === 'C02').sellPrice;
+  const three = listed.find((b) => b.id === 'C07').sellPrice;
+  const unit07 = Math.max(1, Math.round(TD.shopPrice(TD.BUFF_BY_ID.C07) * TD.SHOP.sellBack));
+  assert.equal(three, unit07 * 3, 'C07×3 的卖出价应当是单份 ×3（单份 ' + unit07 + '）');
+  assert.ok(three > one, '叠层增益的卖价应当高于单层');
+  const before = T._debugRun('endless').coins;
+  const sold = T.sellBuff('C07');
+  const after = T._debugRun('endless').coins;
+  assert.equal(sold.gain, unit07 * 3, '实际卖出应当给单份 ×3');
+  assert.equal(after - before, unit07 * 3, '币要真的入账');
+  assert.ok(!T._debugRun('endless').permanent.some((b) => b.id === 'C07'), '卖出后整条移除');
+  const log = (T._debugRun('endless').buffLog || []).slice(-1)[0];
+  assert.ok(log && /×3/.test(log.detail || ''), '流水里应当写明层数：' + JSON.stringify(log));
+
+  /* ---- ② 仓库钥匙（battleOnly）不进商店 ---- */
+  const c31 = TD.BUFF_BY_ID.C31;
+  assert.equal(c31.battleOnly, true, 'C31 应当标 battleOnly');
+  assert.equal(c31.shopBanned, undefined, 'C31 不是靠 shopBanned 挡的（要靠 battleOnly 生效）');
+  assert.ok(!TD.shopPool.some((b) => b.id === 'C31'), 'C31 不该出现在商店池');
+  assert.ok(TD.endlessPool.some((b) => b.id === 'C31'), 'C31 仍应出现在无尽选择池');
+  assert.equal(JSON.stringify(TD.poolRoster(c31)), '["E.choice"]', 'C31 的归属应当只有 E.choice');
+  /* 「只战斗出」与「商店不卖」都要在无尽专属之前判定 */
+  assert.equal(JSON.stringify(TD.poolRoster(TD.BUFF_BY_ID.C24)), '["E.choice"]', 'C24（shopBanned）也不该进商店');
+  assert.ok(TD.shopPool.some((b) => b.id === 'C30'), 'C30（扩容背包，不 battleOnly）应当能进商店');
+  /* 描述里不该再写「只在某某池子里出现」 */
+  const pats = ['只在战斗', '只出现在', '商店里不卖', '战斗奖励里出现', '不出现在商店', '只在商店', '货架上'];
+  for (const b of TD.BUFFS) {
+    for (const p of pats) {
+      assert.equal(String(b.desc || '').indexOf(p), -1, b.id + ' 的描述里不该写池子说明：' + b.desc);
+    }
+  }
+
+  /* ---- ③ 登顶者：第 10 层起每胜 +1 力/敏/速（固定值，不吃百分比乘区） ---- */
+  const c12 = TD.BUFF_BY_ID.C12;
+  assert.equal(c12.mods.winStatAfter10, 1, 'C12 应当是固定 +1');
+  assert.equal(c12.mods.winPowerAfter10, undefined, '旧的百分比口径应当移除');
+  assert.match(c12.desc, /力量 \+1/, '文案要写力量 +1：' + c12.desc);
+  assert.match(c12.desc, /敏捷 \+1/, '文案要写敏捷 +1：' + c12.desc);
+  assert.match(c12.desc, /速度 \+1/, '文案要写速度 +1：' + c12.desc);
+  const grow = (stacks, layer, wins) => {
+    S.newGame('c12' + Math.random());
+    const s2 = S.state(); s2.level = 70; s2.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) s2.stages[i] = { npcIndex: 3, passed: true };
+    T._debugSetLayer(9); T.startEndlessRun();
+    const rr = T._debugRun('endless');
+    rr.permanent = [{ id: 'C12', stacks: stacks }]; rr.layer = layer;
+    let w = 0;
+    for (let i = 0; i < wins; i++) {
+      const cur = T._debugRun('endless');
+      if (!cur) break;
+      cur.layer = layer;
+      if (cur.choices) { const p = T.pickChoice('endless', 0, null); if (p && !p.ok && p.needsReplace) T.pickChoice('endless', 0, ((cur.permanent || [])[0] || {}).id || null); continue; }
+      if (cur.phase === 'shop') { T.continueFromShop(); continue; }
+      if (cur.phase === 'checkpoint') { T.continueEndless(); continue; }
+      const nx = T.nextBattle('endless');
+      if (!nx || nx.ok === false) break;
+      const a = T._debugRun('endless');
+      if (!a || !a.attempt) break;
+      T.reportBattle('endless', a.attempt, true, 1, null);
+      const after = T._debugRun('endless');
+      if (!after) break;
+      after.layer = layer;
+      w++;
+    }
+    const fin = T._debugRun('endless');
+    return { wins: w, p: fin ? Number(fin.winStatPower || 0) : NaN,
+      a: fin ? Number(fin.winStatAgility || 0) : NaN, s: fin ? Number(fin.winStatSpeed || 0) : NaN };
+  };
+  const one1 = grow(1, 10, 5), three1 = grow(3, 10, 5), below = grow(1, 5, 5);
+  assert.equal(one1.p, one1.wins * 1, '×1 应当每胜 +1：' + JSON.stringify(one1));
+  assert.equal(one1.a, one1.wins * 1, '敏捷也要 +1');
+  assert.equal(one1.s, one1.wins * 1, '速度也要 +1');
+  assert.equal(three1.p, three1.wins * 3, '×3 层应当每胜 +3：' + JSON.stringify(three1));
+  assert.equal(below.p, 0, '层数 <10 时不该累计：' + JSON.stringify(below));
+  /* 面板进度要写清三项 */
+  const r3 = T._debugRun('endless');
+  r3.winStatPower = 15; r3.winStatAgility = 15; r3.winStatSpeed = 15;
+  const prog = (T.ownedBuffs('endless').find((b) => b.id === 'C12') || {}).progress || '';
+  assert.match(prog, /力 \+15/, '面板进度要写力：' + prog);
+  assert.match(prog, /敏 \+15/, '面板进度要写敏：' + prog);
+  assert.match(prog, /速 \+15/, '面板进度要写速：' + prog);
 });
 
 (async () => {

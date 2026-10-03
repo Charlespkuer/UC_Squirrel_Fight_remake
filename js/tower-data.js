@@ -781,7 +781,10 @@
     { id: 'C22', name: '闪避精通', rarity: 0, kind: 'permanent', desc: '闪避 +8%', mods: { dodgeBonus: 8 } },
     { id: 'C23', name: '轻身术', rarity: 0, kind: 'permanent', desc: '速度 +15%', mods: { speedMul: 0.15 } },
     { id: 'C11', name: '以战养战', rarity: 2, kind: 'permanent', stackable: true, desc: '每获得一场胜利，生命上限 +5（不封顶）', mods: { winMaxHpFlat: 5 } },
-    { id: 'C12', name: '登顶者', rarity: 2, kind: 'permanent', stackable: true, desc: '第 10 层起，每通过一场战斗攻击 +5%（不封顶）', mods: { winPowerAfter10: 0.05 } },
+    /* 登顶者：第 10 层起每胜利一场，本局固定 +1 力 / +1 敏 / +1 速（不封顶、可叠层）。 */
+    { id: 'C12', name: '登顶者', rarity: 2, kind: 'permanent', stackable: true,
+      desc: '第 10 层起，每胜利一场，本局力量 +1、敏捷 +1、速度 +1（不封顶）',
+      mods: { winStatAfter10: 1 } },
     { id: 'C13', name: '精英杀手', rarity: 2, kind: 'permanent', desc: '对精英伤害 +40%；击败精英后回复 20% 最大生命', mods: { dmgMulElite: 0.40, eliteHealAfter: 0.20 } },
     { id: 'C14', name: '不死鸟', rarity: 3, kind: 'permanent', desc: '每层拥有一次复活甲（回复 50% 生命）', mods: { revivePct: 0.50 } },
     /* —— 第 1 项新增：与经济系统挂钩的 buff（仅无尽；instant 的拿到就结算，不占永久 5 格） —— */
@@ -802,7 +805,7 @@
     { id: 'C30', name: '扩容背包', rarity: 2, kind: 'permanent', endlessOnly: true, unique: true, permSlot: 1,
       desc: '本局永久增益槽位 +1（立即生效，一局只能获得一次）', mods: { permSlot: 1 } },
     { id: 'C31', name: '仓库钥匙', rarity: 3, kind: 'permanent', endlessOnly: true, unique: true, permSlot: 2, battleOnly: true,
-      desc: '本局永久增益槽位 +2（立即生效，一局只能获得一次；只在战斗奖励里出现）', mods: { permSlot: 2 } },
+      desc: '本局永久增益槽位 +2（立即生效，一局只能获得一次）', mods: { permSlot: 2 } },
     /* 隐藏型选取 buff：拿到后立即三选一（已有武器/技能），强化指定对象；不显示在增益面板、不可出售 */
     { id: 'C32', name: '神兵淬炼', rarity: 2, kind: 'permanent', endlessOnly: true, unique: true, hidden: true,
       desc: '立即从你已有的武器里随机三选一，该武器伤害 +100%（本局有效，隐藏增益，不可出售）', mods: { pickWeaponPct: 1.00 } },
@@ -981,12 +984,13 @@
   function poolRoster(b) {
     /* 挑战塔专属：**只**进挑战塔 —— 按需求这一条是硬约束，优先判定。 */
     if (b.towerOnly) return ['T.choice'];
-    /* 无尽专属：环境词缀 / 试炼币 / 商店 / 重新挑战币 / 结算相关。 */
-    if (b.endlessOnly || hasEndlessOnlyMod(b)) {
-      return b.kind === 'instant' ? [] : (b.shopBanned ? ['E.choice'] : ['E.choice', 'E.shop']);
-    }
     if (b.kind === 'instant') return [];                       // 一次生效类不进任何货架/选择池
-    if (b.battleOnly || b.shopBanned) return ['E.choice'];     // 只在战斗里出现 / 商店不卖的
+    /* 「只战斗出」/「商店不卖」必须在无尽专属那条**之前**判定 ——
+     * 否则带 permSlot 之类无尽专属 mod 的条目会先命中无尽分支，
+     * 于是 battleOnly 被忽略、照样上商店货架（仓库钥匙 C31 就是这样漏进商店的）。 */
+    if (b.battleOnly || b.shopBanned) return ['E.choice'];
+    /* 无尽专属：环境词缀 / 试炼币 / 商店 / 重新挑战币 / 结算相关。 */
+    if (b.endlessOnly || hasEndlessOnlyMod(b)) return ['E.choice', 'E.shop'];
     /* 通用增益：两条塔的场间选择 + 无尽塔商店（挑战塔没有商店）。 */
     return ['T.choice', 'E.choice', 'E.shop'];
   }

@@ -240,7 +240,7 @@
     }
     if (m.winMaxHpPct) parts.push('每胜利生命上限 +' + Math.round(m.winMaxHpPct * b.stacks * 100) + '%');
     if (m.winMaxHpFlat) parts.push('每胜利生命上限 +' + Math.round(m.winMaxHpFlat * b.stacks));
-    if (m.winPowerAfter10) parts.push('第 10 层起每胜利攻击 +' + Math.round(m.winPowerAfter10 * b.stacks * 100) + '%');
+    if (m.winStatAfter10) parts.push('第 10 层起每胜利 力/敏/速 各 +' + (m.winStatAfter10 * b.stacks));
     if (m.revivePct) parts.push('复活回血 ' + Math.round(m.revivePct * 100) + '%');
     if (m.globalMul) parts.push('全局增幅 ×' + m.globalMul + (b.stacks > 1 ? '，可叠 ' + b.stacks + ' 层' : ''));
     /* 本轮第 6 / 9 项的新增益：把「当前到底加了多少」写清楚 */

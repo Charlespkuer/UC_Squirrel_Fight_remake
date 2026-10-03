@@ -152,6 +152,10 @@
       run.reviveCount = Math.max(0, Math.floor(Number(run.reviveCount) || 0));
       run.reviveTierPaid = Math.max(0, Number(run.reviveTierPaid) || 0);
       run.bonusPower = Math.max(0, Number(run.bonusPower) || 0);
+      /* 登顶者改为固定力/敏/速后的累计字段（旧档的 winPower 是百分比口径，直接弃用）。 */
+      run.winStatPower = Math.max(0, Number(run.winStatPower) || 0);
+      run.winStatAgility = Math.max(0, Number(run.winStatAgility) || 0);
+      run.winStatSpeed = Math.max(0, Number(run.winStatSpeed) || 0);
       if (run.shop && typeof run.shop === 'object' && !Array.isArray(run.shop.slots)) run.shop = null;
       if (run.phase !== 'shop' && run.phase !== 'checkpoint') run.phase = null;
     if (!Array.isArray(run.debuffs)) run.debuffs = [];
@@ -303,6 +307,7 @@
       speedMul: 0, winHealPct: 0, thornsPct: 0, lowHpPowerMul: 0, lowHpAt: 0,
       lowHpAgilityMul: 0, lowHpSpeedMul: 0,
       emptyMaxHpMul: 0, lowHpTakenMul: 0, lowHpLifestealPct: 0, lowHpRegenPct: 0, lowHpRegenAt: 0,
+      winStatAfter10: 0,
       openerPowerMul: 0, openerRounds: 0, fatiguePowerMul: 0, dodgeMul: 0 };
     eachBuff(run, (buff, stacks) => {
       const m = buff.mods, k = stacks * g;
@@ -312,10 +317,9 @@
        * 都用「当前快照」计算：拿了/卖了/换了永久增益，下一场立刻反映。 */
       if (m.powerPerEmptySlot) agg.powerMul += m.powerPerEmptySlot * Math.max(0, permSlots(run) - permUsed(run)) * k;
       if (m.powerPerPermBuff) agg.powerMul += m.powerPerPermBuff * (run.permanent || []).length * k;
-      /* C12 登顶者：第 10 层起每胜一场攻击 +5%（可叠层）。
-       * 这里原来写的是 `* 0` —— 一个占位写法，等于把这条增益的加成**恒置为 0**，
-       * 玩家叠到再多层也毫无效果（实测：层 10 起连胜 10 场，winPower 一直是 0）。 */
-      if (m.winPowerAfter10) agg.powerMul += Math.max(0, Number(run.winPower) || 0);
+      /* C12 登顶者：第 10 层起每胜一场固定 +1 力/敏/速（不再按百分比加攻击）。
+       * 累计值记在 run.winStatPower / winStatAgility / winStatSpeed 上，稍后直接加到面板属性。 */
+      if (m.winStatAfter10) agg.winStatAfter10 += 1;
       /* 第 1 项：永久类的生命上限加成记在 run.hpBonus 上（卖掉/替换也不会掉血上限）；
        * 限次类的仍然按场次生效，buff 消失时加成也一起消失。 */
       if (m.maxHpMul) { if (buff.kind === 'limited') agg.maxHpMul += m.maxHpMul * k; }
@@ -336,7 +340,7 @@
       if (m.fatiguePowerMul) agg.fatiguePowerMul += m.fatiguePowerMul * k;
       if (m.openerRounds) agg.openerRounds = Math.max(agg.openerRounds, Number(m.openerRounds) || 5);
       if (m.dodgeMul) agg.dodgeMul += m.dodgeMul * k;
-      if (m.winPowerAfter10) agg.winPower += 1;
+
       if (m.winHealPct) agg.winHealPct += m.winHealPct * k;                       // 战后续航（可叠加）
       if (m.thornsPct) agg.thornsPct += m.thornsPct * k;                         // 荆棘之甲
       if (m.mustHitAll) agg.mustHitAll = 1;                                      // 第 1 项：百步穿杨
@@ -434,7 +438,10 @@
     if (a.mustHitAll) lines.push(['必中', '全部攻击']);
     if (a.firstHitZero) lines.push(['首次受击', '伤害归零']);
     if (a.firstSkillFree) lines.push(['首技能', '不消耗回合']);
-    if (a.winPower) lines.push(['连胜成长', '已叠 ' + a.winPower + ' 层']);
+    if (run.winStatPower || run.winStatAgility || run.winStatSpeed) {
+      lines.push(['登顶成长（第 10 层起每胜）', '力 +' + Math.round(Number(run.winStatPower) || 0) +
+        '、敏 +' + Math.round(Number(run.winStatAgility) || 0) + '、速 +' + Math.round(Number(run.winStatSpeed) || 0)]);
+    }
     /* 运行态成长（不在 aggregate 的 mods 里，但确实是 buff 带来的提升） */
     if (run.killPower) lines.push(['击杀成长（攻击）', pct(run.killPower)]);
     if (run.bonusPower) lines.push(['加成累积（攻击）', pct(run.bonusPower)]);
@@ -679,6 +686,10 @@
       if (run.spendGain) {
         for (const k of ['power', 'agility', 'speed']) me[k] += Math.max(0, Number(run.spendGain[k]) || 0);
       }
+      /* 登顶者：第 10 层起每胜一场累计的固定力/敏/速（同口径，直接加到面板属性）。 */
+      me.power += Math.max(0, Number(run.winStatPower) || 0);
+      me.agility += Math.max(0, Number(run.winStatAgility) || 0);
+      me.speed += Math.max(0, Number(run.winStatSpeed) || 0);
       for (const d of debuffs) {
         if (d.kind !== 'lock') continue;
         if (d.what === 'weapon') me.weapons = (me.weapons || []).filter((w) => Number(w.id) !== Number(d.id));
@@ -972,11 +983,16 @@
       /* 第 2 项：以战养战（每胜一场生命上限 +10，不封顶）、登顶者（第 10 层起每胜一场攻击 +5%） */
       run.winHpFlat = (run.winHpFlat || 0) + (runModTotal(run, 'winMaxHpFlat') || 0);
       rollEnvAfterBattle(run);   // 每场战斗后推进环境词缀
-      /* 登顶者（可叠层）：第 10 层起每胜一场 +5% × 层数 × 全局倍率。
-       * 注意 **不要** 再乘一次 stacksOf —— runModTotal() 内部已经乘了 `stacks * g`，
-       * 再乘一次会让层数被平方（实测 3 层变成 9 倍）。 */
-      if (run.layer >= 10 && stacksOf(run, 'C12')) {
-        run.winPower = (run.winPower || 0) + (runModTotal(run, 'winPowerAfter10') || 0);
+      /* 登顶者（可叠层）：第 10 层起每胜一场，本局固定 +1 力/敏/速 × 层数。
+       * 固定值不参与全局倍率（增幅水晶只管百分比乘区），这也和「以战养战 +5 上限」同口径。 */
+      if (run.layer >= 10) {
+        const c12 = stacksOf(run, 'C12');
+        if (c12) {
+          const per = Math.max(0, Number(D().BUFF_BY_ID.C12.mods.winStatAfter10) || 1) * c12;
+          run.winStatPower = Math.max(0, Number(run.winStatPower) || 0) + per;
+          run.winStatAgility = Math.max(0, Number(run.winStatAgility) || 0) + per;
+          run.winStatSpeed = Math.max(0, Number(run.winStatSpeed) || 0) + per;
+        }
       }
       run.coins += Math.round(D().COINS.battle * coinMul);
       // 击杀叠层类（基础 → 叠层 → C15）
@@ -2004,7 +2020,7 @@
     if (id === 'C06') run.killPower = 0;
     else if (id === 'C07') run.winMaxHp = 0;   // 原来清的是 killMaxHp（C07 用不到的字段），等于没清
     else if (id === 'C11') run.winHpFlat = 0;
-    else if (id === 'C12') run.winPower = 0;
+    else if (id === 'C12') { run.winStatPower = 0; run.winStatAgility = 0; run.winStatSpeed = 0; }
     else if (id === 'C25') run.sellBonus = 0;
     else if (id === 'C36') { run.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; run.shopSpend = 0; }
     else {
@@ -2023,17 +2039,22 @@
     }
     return true;
   }
-  /** 卖出价：名贵手表这类有固定 sellValue 的按固定值，其它按商店价 40%。 */
+  /** 卖出价：名贵手表这类有固定 sellValue 的按固定值，其它按商店价 40%。
+   *  需求：**可叠加增益按层数计价** —— 卖出是把整条（含所有层数）一起卖掉，
+   *  所以这里要乘上当前层数；否则买 3 层只收回 1 份的钱（实测踩过）。 */
   function sellPriceOf(run, buff) {
     const base = buff.mods && buff.mods.sellValue
       ? Number(buff.mods.sellValue)
       : Math.max(1, Math.round(D().shopPrice(buff) * D().SHOP.sellBack));
+    const stacks = Math.max(1, Math.floor(stacksOf(run, buff.id) || 1));
     /* 本轮第 7 项：战利品账本的累计加成**只加账本自己**。
      * 原来它无差别加到每一个 buff 的卖价上 —— 等于「卖什么都变贵」，
      * 既和文字（只讲自己卖得贵）不符，也让卖杂 buff 变成稳定刷币。
      * 改成只认 C25：账本卖掉/失去后，这个加成自然就不再被任何东西读到（效果随之消失）。 */
-    if (buff.id === 'C25' && stacksOf(run, 'C25') > 0) return base + Math.max(0, Math.floor(Number(run.sellBonus) || 0));
-    return base;
+    const unit = (buff.id === 'C25' && stacksOf(run, 'C25') > 0)
+      ? base + Math.max(0, Math.floor(Number(run.sellBonus) || 0))
+      : base;
+    return unit * stacks;
   }
   function sellBuff(id) {
     const run = endless().run;
@@ -2043,12 +2064,13 @@
     for (const list of [run.permanent || [], run.limited || []]) {
       const i = (list || []).findIndex((b) => b.id === id);
       if (i >= 0) {
-        const gain = sellPriceOf(run, buff);
+        const stacks = Math.max(1, Math.floor(Number(list[i].stacks) || 1));
+        const gain = sellPriceOf(run, buff);          // 已含层数
         list.splice(i, 1);
         resetGrowth(run, id);                                                      // 第 3 项：成长累计清零
         run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== id);         // 第 1 项：附魔记录一并清掉
         run.coins += gain;
-        logBuff(run, id, 'lose', { detail: '商店卖出 +' + gain + ' 试炼币' });
+        logBuff(run, id, 'lose', { detail: '商店卖出 ' + (stacks > 1 ? ('×' + stacks + ' 层 ') : '') + '+' + gain + ' 试炼币' });
         save();
         return { ok: true, gain };
       }
@@ -2271,7 +2293,11 @@
         (stacks34 > 1 ? ' × ' + stacks34 + ' 层' : '') + ' = 攻击 +' + Math.round(total * 100) + '%' +
         '（永久位 ' + permUsed(run) + '/' + permSlots(run) + '）';
     }
-    if (id === 'C12') return '已累计 攻击 +' + pct(run.winPower) + '%';
+    if (id === 'C12') {
+      return '第 10 层起已累计 力 +' + Math.round(Number(run.winStatPower) || 0) +
+        ' / 敏 +' + Math.round(Number(run.winStatAgility) || 0) +
+        ' / 速 +' + Math.round(Number(run.winStatSpeed) || 0);
+    }
     if (id === 'C20') {
       const m20 = D().BUFF_BY_ID.C20.mods;
       return '生命 ≤' + Math.round((m20.lowHpAt || 0.5) * 100) + '% 时：攻击 +' +

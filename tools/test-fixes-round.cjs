@@ -1208,6 +1208,9 @@ test('需求26：积分扩展（拿增益计分 + 两个隐藏成就）', () => 
     if (!n || n.ok === false) return null;
     const mid = Number(run().score) || 0;      // nextBattle 可能已加了别的成就分
     const live = run();
+    /* 环境里现在有「幻影回响」会在三侠战后按概率追加一场 —— 那会让「累计 N 次」
+     * 这类成就提前触发、把待飘队列先消耗掉，导致本测试偶发红。这里隔离掉环境。 */
+    live.env = [];
     const out = c.Tower.reportBattle('endless', live.attempt, true,
       Number(live.lastHp || live.lastMaxHp || 1), Number(live.lastMaxHp || 0),
       { rounds: [{ deathSave: true }, { deathSave: true }, { deathSave: true }] });
@@ -2458,6 +2461,10 @@ test('需求45：全局实际血量计数器 —— 被上限压下来的部分�
     const cap0 = T.endlessInfo().run.curMaxHp;
     assert.ok(me0.maxHp > cap0, '战斗内上限应当高于局外上限：场内 ' + me0.maxHp + ' 场外 ' + cap0);
     assert.ok(me0.hp <= cap0, '第一场进场血量就不该超过局外上限：hp=' + me0.hp + ' 局外上限=' + cap0);
+    /* 收尾：这一场已经取过 token，必须结算掉才能再取下一场。 */
+    T.reportBattle('endless', T._debugRun('endless').attempt, true, me0.maxHp, me0.maxHp);
+    T.abandon('endless');
+    T.startEndlessRun();
   }
 
   /* ① 无临时上限时正常继承 */

@@ -50,7 +50,7 @@ function freshRun() {
   const r = Tower._debugRun('endless');
   if (r) {
     r.permanent = []; r.limited = []; r.permSlotIds = []; r.slotFreeIds = []; r.pickBuffIds = [];
-    r.winMaxHp = 0; r.winPower = 0; r.winHpFlat = 0; r.killPower = 0; r.killMaxHp = 0;
+    r.winMaxHp = 0; r.winPower = 0; r.winHpFlat = 0; r.killPower = 0;
     r.hpBonus = 0; r.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; r.shopSpend = 0;
     r.fragileBase = { power: 0, agility: 0, speed: 0 };
     r.fragileBurned = { power: 0, agility: 0, speed: 0 };
@@ -439,12 +439,13 @@ hr('本轮 3：成长类增益失去后累计清零');
   check('叠到 2 层并长了起来', stack0 === 2 && (r1.winMaxHp || 0) > 0, 'stacks=' + stack0 + ' winMaxHp=' + (r1.winMaxHp || 0).toFixed(3));
   Tower.debugLoseBuff('C07');
   const r2 = Tower._debugRun('endless');
-  check('失去后累计清零', (r2.killMaxHp || 0) === 0, 'killMaxHp=' + (r2.killMaxHp || 0));
+  /* C07 的累计在 run.winMaxHp（原来这里查的 killMaxHp 是死字段，断言恒真、等于没查）。 */
+  check('失去后累计清零', (r2.winMaxHp || 0) === 0, 'winMaxHp=' + (r2.winMaxHp || 0));
   Tower.debugGrantBuff('C07');
   const r3 = Tower._debugRun('endless');
   const back = (r3.permanent || []).find((b) => b.id === 'C07');
-  check('重新获得是 1 层、累计从 0 开始', !!back && back.stacks === 1 && (r3.killMaxHp || 0) === 0,
-    'stacks=' + (back && back.stacks) + ' killMaxHp=' + (r3.killMaxHp || 0));
+  check('重新获得是 1 层、累计从 0 开始', !!back && back.stacks === 1 && (r3.winMaxHp || 0) === 0,
+    'stacks=' + (back && back.stacks) + ' winMaxHp=' + (r3.winMaxHp || 0));
   Tower.abandon('endless');
 }
 

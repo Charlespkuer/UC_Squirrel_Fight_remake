@@ -189,7 +189,10 @@ test('绝对防御：首次 22%，二次及以后 13%（都低于原来的 30%�
   assert.ok(rules.jueDuiAgain < rules.jueDuiChance, '二次及以后必须比首次更低');
   // 单次受击（只打一下）：触发率应贴着首次的 22%
   let firstHits = 0, firstBlocks = 0, manyHits = 0, manyBlocks = 0;
-  for (let i = 0; i < 400; i++) {
+  /* 样本量：400 次里只有约 1/3 是「单次受击」，比例的标准差 ≈ 3.6%，
+   * 而容差是 ±5%（约 1.4σ）→ 约 16% 的概率误报。加到 1500 次，
+   * 单次受击样本约 500，标准差降到 ≈1.9%，容差变成约 2.7σ，才真正稳。 */
+  for (let i = 0; i < 1500; i++) {
     const ev = rounds(randomGame(), { power: 30, weapons: ['6:1'], hp: 100000 }, { skills: ['16:1'], hp: 100000 });
     let n = 0;
     for (const r of ev) {

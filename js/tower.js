@@ -10,7 +10,7 @@
  *   { layer, plan:[entry], idx, carry, battleBuffs:[{id,stacks}],
  *     choices:null|[...], attempt:null|token, pot(tower) }
  *   无尽追加：{ buffs(run 跨层), layerBuffs, coins, score, bestLayer,
- *     killPower, killMaxHp, bonusPower, shop|null, phase:null|'shop'|'checkpoint' }
+ *     killPower, winMaxHp, bonusPower, shop|null, phase:null|'shop'|'checkpoint' }
  * plan entry：{kind:'hero',anim:'tl'|'xh'|'xm'}
  *             {kind:'npc', id}  {kind:'elite', id, mechs:[a,b]}
  *
@@ -127,7 +127,6 @@
       run.score = Math.max(0, Math.floor(Number(run.score) || 0));
       run.bestLayer = Math.max(0, Math.floor(Number(run.bestLayer) || 0));
       run.killPower = Math.max(0, Number(run.killPower) || 0);
-      run.killMaxHp = Math.max(0, Number(run.killMaxHp) || 0);
       run.winMaxHp = Math.max(0, Number(run.winMaxHp) || 0);
       /* 需求 3：烙印两段加成 + 独立随机种子；旧档 stickyStat → fragileBurned。 */
       run.fragileBase = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBase || {});
@@ -356,7 +355,9 @@
     }
     // 叠层累积（击杀/层数成长，运行态数值）
     if (run.killPower) agg.powerMul += run.killPower;
-    if (run.killMaxHp) agg.maxHpMul += run.killMaxHp;
+    /* 注意：这里原来有一行 `if (run.killMaxHp) agg.maxHpMul += run.killMaxHp;` ——
+     * killMaxHp 是「击杀成长·生命上限」的历史字段，现已**没有任何地方写它**
+     * （C07 吞噬成长走 run.winMaxHp），留着只会让人以为它还生效，已删除。 */
     if (run.bonusPower) agg.powerMul += run.bonusPower;
     // 逢十强化：仅 x10 层生效
     // 第 2 项：C09 改成「逢五强化」——5 的倍数层生效，数值取 mods.x10Boost
@@ -410,7 +411,6 @@
     if (a.winPower) lines.push(['连胜成长', '已叠 ' + a.winPower + ' 层']);
     /* 运行态成长（不在 aggregate 的 mods 里，但确实是 buff 带来的提升） */
     if (run.killPower) lines.push(['击杀成长（攻击）', pct(run.killPower)]);
-    if (run.killMaxHp) lines.push(['击杀成长（生命上限）', pct(run.killMaxHp)]);
     if (run.bonusPower) lines.push(['加成累积（攻击）', pct(run.bonusPower)]);
     for (const [k, name] of [['power', '攻击'], ['agility', '敏捷'], ['speed', '速度']]) {
       const fb = fragileBonus(run, k);
@@ -540,7 +540,7 @@
     const run = { layer: 1, plan: buildPlan(1, salt, true), idx: 0, carry: 1, salt,
       mode: 'endless', permanent: [], limited: [], coins: 0, score: 0, bestLayer: 0,
       pillSlots: { power: null, agility: null, speed: null },
-      killPower: 0, killMaxHp: 0, bonusPower: 0, shop: null, phase: null, choices: null, debuffs: [],
+      killPower: 0, bonusPower: 0, shop: null, phase: null, choices: null, debuffs: [],
       retryToken: 0, retrySnap: null,
       achievements: [], scoreLog: [], statPeaks: {}, pendingToasts: [],
       deathSaves: 0, reviveCount: 0, reviveTierPaid: 0 };
@@ -610,7 +610,7 @@
       const dAgi = debuffs.filter((d) => d.kind === 'stat' && d.stat === 'agility').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
       const dSpd = debuffs.filter((d) => d.kind === 'stat' && d.stat === 'speed').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
       const stickyHp = Math.max(0, Number(run.hpBonus) || 0);   // 第 1 项：永久生命上限加成（卖/换后保留）
-      /* 需求 4：吞噬成长的「胜利成长」按比例加到生命上限上（与 killMaxHp 同一口径）。 */
+      /* 需求 4：吞噬成长的「胜利成长」按比例加到生命上限上（run.winMaxHp）。 */
       const winMaxHp = Math.max(0, Number(run.winMaxHp) || 0);
       /* 第 9 项：挥金如土累计的生命上限（固定值，和「以战养战」的 winHpFlat 同口径）。 */
       const spendHp = run.spendGain ? Math.max(0, Number(run.spendGain.hp) || 0) : 0;
@@ -1955,7 +1955,7 @@
   function resetGrowth(run, id) {
     if (!run) return false;
     if (id === 'C06') run.killPower = 0;
-    else if (id === 'C07') run.killMaxHp = 0;
+    else if (id === 'C07') run.winMaxHp = 0;   // 原来清的是 killMaxHp（C07 用不到的字段），等于没清
     else if (id === 'C11') run.winHpFlat = 0;
     else if (id === 'C12') run.winPower = 0;
     else if (id === 'C25') run.sellBonus = 0;
@@ -2189,7 +2189,7 @@
   /** 本轮第 7 项：成长/累计类增益的**真实进度**（面板 + 悬停都用它）。
    * 原来面板只显示 entry.stacks（这个增益拿过几次），所以「吞噬成长」这类
    * 按击杀/胜利累计的增益看起来永远是「×1」，玩家会以为没生效 ——
-   * 实际上 run.killPower / run.killMaxHp / run.sellBonus 一直在涨。 */
+   * 实际上 run.killPower / run.winMaxHp / run.sellBonus 一直在涨。 */
   function progressOf(run, id) {
     const g = globalMul(run);
     const pct = (v) => Math.round((Number(v) || 0) * 100);
@@ -2197,8 +2197,17 @@
       const cap = D().BUFF_BY_ID.C06.mods.killPowerCap * Math.max(1, stacksOf(run, 'C06')) * g;
       return '已累计 攻击 +' + pct(run.killPower) + '%（上限 +' + pct(cap) + '%）';
     }
-    if (id === 'C07') return '已累计 生命上限 +' + pct(run.killMaxHp) + '%（上限 +' +
-      pct(D().BUFF_BY_ID.C07.mods.killMaxHpCap * Math.max(1, stacksOf(run, 'C07')) * g) + '%）';
+    /* C07 吞噬成长：累计值在 run.winMaxHp、上限字段是 mods.winMaxHpCap。
+     * 原来这里读的是运行态里的「击杀成长」历史字段，以及一个**根本不存在的上限字段**
+     * （旧名是 kill 前缀、现已统一成 win 前缀）—— 两个都取不到值：
+     *   · C07 从不写那个 kill 前缀字段（它是给「击杀成长」用的历史字段），累计恒为 0
+     *   · 上限字段名不存在 → 上限也恒为 0
+     * 于是面板永远显示「生命上限 +0%（上限 +0%）」，看起来就像这条增益完全没生效
+     * （效果本身其实是好的，只是显示错了）。 */
+    if (id === 'C07') {
+      const cap = D().BUFF_BY_ID.C07.mods.winMaxHpCap * Math.max(1, stacksOf(run, 'C07')) * g;
+      return '已累计 生命上限 +' + pct(run.winMaxHp) + '%（上限 +' + pct(cap) + '%）';
+    }
     if (id === 'C11') return '已累计 生命上限 +' + Math.round(Number(run.winHpFlat) || 0);
     /* 需求 4：轻装上阵 / 厚积薄发的叠层在详情里没显示 —— 这两条的加成依赖「当前有几个
      * 空槽 / 几个永久增益」，是动态值，所以要把「现在实际加了多少」算出来写清楚。 */

@@ -1777,6 +1777,71 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
     'C12 累积不该再乘一次 stacks（会平方）');
 });
 
+test('需求37：成长类增益的「面板文字」必须等于「真实累计」（修 C07 显示恒为 +0%）', () => {
+  const c = setup();
+  const T = c.Tower, S = c.State;
+  /* 跑真实流程：拿到某条成长增益 → 连打 N 场 → 对比「面板 progress」与「run 里的真实累计字段」。 */
+  const grow = (id, stacks, wins, field, layer) => {
+    S.newGame('g' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    T._debugSetLayer(9); T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = [{ id: id, stacks: stacks }];
+    for (let i = 0; i < wins; i++) {
+      const cur = T._debugRun('endless');
+      if (!cur) break;
+      if (layer) cur.layer = layer;
+      if (cur.choices) {
+        const p = T.pickChoice('endless', 0, null);
+        if (p && !p.ok && p.needsReplace) T.pickChoice('endless', 0, ((cur.permanent || [])[0] || {}).id || null);
+        continue;
+      }
+      if (cur.phase === 'shop') { T.continueFromShop(); continue; }
+      if (cur.phase === 'checkpoint') { T.continueEndless(); continue; }
+      const nx = T.nextBattle('endless');
+      if (!nx || nx.ok === false) break;
+      const a = T._debugRun('endless');
+      if (!a || !a.attempt) break;
+      if (layer) a.layer = layer;
+      T.reportBattle('endless', a.attempt, true, 1, null);
+      if (!T._debugRun('endless')) break;
+    }
+    const rr = T._debugRun('endless');
+    const ob = T.ownedBuffs('endless').find((b) => b.id === id);
+    return { value: rr ? Number(rr[field] || 0) : NaN, progress: ob ? String(ob.progress || '') : '' };
+  };
+
+  /* C07 吞噬成长：面板要显示真实百分比，而不是恒定的 +0%。
+   * 这个 bug 之所以长期没被发现，就是因为此前只断言了「进度文本非空」。 */
+  const one = grow('C07', 1, 5, 'winMaxHp');
+  assert.ok(one.value > 0, 'C07 的真实累计应当大于 0：' + one.value);
+  const shown = Number((/生命上限 \+(\d+)%（上限/.exec(one.progress) || [])[1]);
+  assert.equal(shown, Math.round(one.value * 100),
+    'C07 面板显示的百分比必须等于真实累计：面板「' + one.progress + '」 vs 实际 ' + (one.value * 100) + '%');
+  assert.ok(shown > 0, 'C07 面板不该再显示 +0%：' + one.progress);
+  /* 上限也要显示真实值（×层数） */
+  const capShown = Number((/（上限 \+(\d+)%）/.exec(one.progress) || [])[1]);
+  assert.equal(capShown, Math.round(0.30 * 1 * 100), 'C07 ×1 的上限应当是 30%：' + one.progress);
+  const three = grow('C07', 3, 5, 'winMaxHp');
+  const capShown3 = Number((/（上限 \+(\d+)%）/.exec(three.progress) || [])[1]);
+  assert.equal(capShown3, Math.round(0.30 * 3 * 100), 'C07 ×3 的上限应当是 90%：' + three.progress);
+
+  /* C06 猎杀时刻：面板显示的攻击累计要与 run.killPower 一致 */
+  const c06 = grow('C06', 1, 5, 'killPower');
+  const shown6 = Number((/攻击 \+(\d+)%（上限/.exec(c06.progress) || [])[1]);
+  assert.equal(shown6, Math.round(c06.value * 100),
+    'C06 面板显示必须等于真实累计：面板「' + c06.progress + '」 vs 实际 ' + (c06.value * 100) + '%');
+
+  /* 死字段不许再被引用（它曾让 C07 的显示恒为 0） */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  assert.ok(!/run\.killMaxHp\b/.test(src.replace(/\/\*[\s\S]*?\*\//g, '')),
+    'tower.js 代码里不该再引用死字段 run.killMaxHp');
+  assert.ok(!/mods\.killMaxHpCap/.test(src), '不该引用不存在的 mods.killMaxHpCap');
+  assert.ok(/mods\.winMaxHpCap/.test(src), 'C07 的上限应当读 mods.winMaxHpCap');
+  assert.ok(/run\.winMaxHp = 0/.test(src), 'resetGrowth 应当清 run.winMaxHp');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

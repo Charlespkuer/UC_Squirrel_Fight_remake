@@ -227,7 +227,11 @@
     if (m.speedMul) parts.push('速度合计 +' + Math.round(m.speedMul * b.stacks * 100) + '%');
     if (m.winHealPct) parts.push('每场胜利回血合计 ' + Math.round(m.winHealPct * b.stacks * 100) + '%');
     if (m.killPowerPct) parts.push('每击杀攻击 +' + Math.round(m.killPowerPct * b.stacks * 100) + '%');
-    if (m.killMaxHpPct) parts.push('每击杀生命上限 +' + Math.round(m.killMaxHpPct * b.stacks * 100) + '%');
+    /* 原来这里还有一条 `m.killMaxHpPct` —— 那个 mod 在任何增益上都不存在（死代码），
+     * 换成真正在用的「每胜利生命上限」字段（C07 吞噬成长）。 */
+    if (m.winMaxHpPct) parts.push('每胜利生命上限 +' + Math.round(m.winMaxHpPct * b.stacks * 100) + '%');
+    if (m.winMaxHpFlat) parts.push('每胜利生命上限 +' + Math.round(m.winMaxHpFlat * b.stacks));
+    if (m.winPowerAfter10) parts.push('第 10 层起每胜利攻击 +' + Math.round(m.winPowerAfter10 * b.stacks * 100) + '%');
     if (m.revivePct) parts.push('复活回血 ' + Math.round(m.revivePct * 100) + '%');
     if (m.globalMul) parts.push('全局增幅 ×' + m.globalMul + (b.stacks > 1 ? '，可叠 ' + b.stacks + ' 层' : ''));
     /* 本轮第 6 / 9 项的新增益：把「当前到底加了多少」写清楚 */

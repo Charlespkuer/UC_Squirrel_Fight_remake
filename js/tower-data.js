@@ -275,7 +275,7 @@
     price: [30, 60, 100, 160],     // 普通/稀有/史诗/传奇
     crossLayerMul: 1.3,            // 跨层类 ×1.3 → 40/80/130
     sellBack: 0.4,                 // 回收 40%
-    retryPrice: 50,                // 重新挑战币：失败后回滚到本场开始前
+    retryPrice: 50,                // 铸币（内部字段 retryToken / retryPrice）：失败后回滚到本场开始前
     rerollPrice: 10,               // 第一次付费刷新的价格（之后每次 +rerollGrowth）
     rerollGrowth: 10,              // 涨价步长：10 → 20 → 30 → 40 → 50
     rerollMax: 50,
@@ -1005,9 +1005,9 @@
       mods: { sellValue: 50, sellGrowthPerWin: 10 } },
     { id: 'C15', tags: ['tower', 'endless', 'battle', 'shop'], name: '增幅水晶', rarity: 2, kind: 'permanent', desc: '本局内所有 buff 的效果 ×1.4', mods: { globalMul: 1.40 } },
     { id: 'E09', tags: ['endless', 'battle'], name: '重整旗鼓', rarity: 0, kind: 'instant',
-      desc: '立即获得 1 枚重新挑战币', mods: { instantRetry: 1 } },
+      desc: '立即获得 1 枚铸币', mods: { instantRetry: 1 } },
     { id: 'E10', tags: ['endless', 'battle'], name: '背水一战', rarity: 2, kind: 'instant',
-      desc: '立即获得 3 枚重新挑战币', mods: { instantRetry: 3 } },
+      desc: '立即获得 3 枚铸币', mods: { instantRetry: 3 } },
     { id: 'E07', tags: ['endless', 'battle', 'oncePerRun', 'repeatable'], name: '挫锐', rarity: 0, kind: 'instant', maxStacks: 1,
       desc: '立刻让本局所有敌人的生命上限 −10%', mods: { enemyMaxHpDown: 0.10 } },
     { id: 'E08', tags: ['endless', 'battle', 'oncePerRun', 'repeatable'], name: '卸甲', rarity: 1, kind: 'instant', maxStacks: 1,
@@ -1201,7 +1201,7 @@
   function buffsWithTag(t) { return BUFFS.filter((b) => hasTag(b, t)); }
   function poolsOf(b) { return Object.keys(POOL_TAGS).filter((pool) => POOL_TAGS[pool].every((t) => hasTag(b, t))); }
   /* 无尽专属 mod：带这些效果的增益只在无尽塔成立（环境词缀 / 试炼币 / 商店 /
-   * 重新挑战币 / 结算 / 商店消费相关）。挑战塔带这类标签/效果一律加载期报错。 */
+   * 铸币 / 结算 / 商店消费相关）。挑战塔带这类标签/效果一律加载期报错。 */
   const ENDLESS_ONLY_MODS = [
     'envIgnore', 'envReflect', 'envDenyGood', 'instantCoins', 'coinBoostPct', 'shopDiscount',
     /* 注意 enemyPowerDown 不在这里：挑战塔的 M01「威慑」也用它（下一场敌人攻击力 −30%），

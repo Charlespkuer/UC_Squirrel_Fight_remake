@@ -404,12 +404,24 @@
         name: '抽奖卷',
         value: run ? exitT : (S.props[CURRENCY_PROP.ticket] || 0),
         tip: run
-          ? ('现在退出实际到手 ' + exitT + ' 张：本层应得 ' + layerT + ' 张 + 重新挑战币 ' + tokens +
+          ? ('现在退出实际到手 ' + exitT + ' 张：本层应得 ' + layerT + ' 张 + 铸币 ' + tokens +
              ' 枚 1:1 折现 ' + tokens + ' 张。\n' +
              '· 剩余试炼币（当前 ' + coins + ' 枚）**不折现**，本局结束即作废\n' +
              '· 结算点「结算离场」/「放弃本局」/ 失败结算 三条路收益完全一致，都是这个数\n' +
              '· 仓库里已有的抽奖卷不在这个数字里（去「每日幸运抽奖」页看总数）')
           : '仓库持有的抽奖卷总数'
+      });
+      /* 铸币（原名「重新挑战币」）：无尽塔主界面右上角直接标出**本场拥有多少枚**，
+       * 鼠标悬停说明用途（失败时回滚本场 / 退出时 1:1 折成抽奖卷 / 商店售价）。 */
+      items.push({
+        name: '铸币',
+        value: run ? tokens : 0,
+        tip: run
+          ? ('本场拥有 ' + tokens + ' 枚铸币。\n' +
+             '· 战斗失败时可以花 1 枚回滚到该场开始前再打一次（血量 / 试炼币 / 分数 / 增益次数全部还原）\n' +
+             '· 退出本局时剩余的铸币按 1:1 折成抽奖卷（' + tokens + ' 枚 → ' + tokens + ' 张，已经算进左边「抽奖卷」那个数）\n' +
+             '· 试炼商店左下角可以用 50 试炼币买 1 枚')
+          : '铸币：失败时回滚本场再打一次；退出时 1:1 折成抽奖卷'
       });
       return '<div class="tower-currency text-only">' + items.map((it) =>
         '<span class="currency-item"' + (it.tip ? ' data-tip="' + esc(it.tip) + '" title="' + esc(it.tip) + '"' : '') + '><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';
@@ -424,7 +436,7 @@
    * 无尽主界面右上角的「离场结算」一行：
    *   · 离场可得 +N 抽奖卷 —— 与「结算点·结算离场 / 失败结算」同一口径
    *     （endlessTickets(当前层)，即 Tower.endlessInfo().run.ticketsIfSettle）
-   *   · 重新挑战币 ×M —— 失败后可回滚本场再打一次（不折现，不并进上面那个数字）
+   *   · 铸币 ×M —— 失败后可回滚本场再打一次（不折现，不并进上面那个数字）
    * 两个数字都从 endlessInfo().run 里取，纯函数（便于测试直接跑这一份实现）。
    * ============================================================ */
   function propName(id) {
@@ -731,7 +743,7 @@
       const leftTokens = Math.max(0, Math.floor(Number((info.run || {}).retryToken) || 0));
       modal('放弃本局',
         '<p>放弃后按当前层应得的抽奖卷结算（分数照常入账）' +
-        (leftTokens > 0 ? '，手上的 <b>' + leftTokens + '</b> 枚重新挑战币会 <b>1:1</b> 折成抽奖卷' : '') +
+        (leftTokens > 0 ? '，手上的 <b>' + leftTokens + '</b> 枚铸币会 <b>1:1</b> 折成抽奖卷' : '') +
         (leftCoins > 0 ? '；本局剩余的 <b>' + leftCoins + '</b> 试炼币<b>不折现</b>，会随本局作废' : '') +
         '，确定吗？</p>', [
         { label: '放弃', cls: 'muted', run: () => {
@@ -1024,8 +1036,8 @@
     modal('本场失利 · 可以重新挑战',
       '<div class="result-box"><div class="result-title lose">再试一次？</div>' +
       '<p>倒在第 ' + rw.layer + ' 层第 ' + (rw.battleNo || '?') + '/' + (rw.battleCount || 4) + ' 场。</p>' +
-      '<p class="gold-text">消耗 1 枚重新挑战币，回滚到本场开始前（血量 / 试炼币 / 分数 / 增益次数全部还原），再打一次。</p>' +
-      '<div class="result-lines">现有重新挑战币 <b>' + (rw.retryLeft || 0) + '</b> 枚 · 本局分数 ' + rw.score +
+      '<p class="gold-text">消耗 1 枚铸币，回滚到本场开始前（血量 / 试炼币 / 分数 / 增益次数全部还原），再打一次。</p>' +
+      '<div class="result-lines">现有铸币 <b>' + (rw.retryLeft || 0) + '</b> 枚 · 本局分数 ' + rw.score +
       ' · 选「放弃本局」也一样按当前层应得 + 试炼币折现结算</div></div>',
       [{ label: '用 1 枚重新挑战', cls: 'gold', run: () => {
           const r = Tower.retryBattle();
@@ -1055,7 +1067,7 @@
     const total = Math.max(0, Math.floor(Number(r && r.tickets) || 0));
     if (!coins && !tokens) return '';
     return '<p class="small-label">明细：本层应得 ' + layerT + ' 张' +
-      (tokens ? ' + 剩余 ' + tokens + ' 枚重新挑战币 1:1 折现 ' + tokens + ' 张' : '') +
+      (tokens ? ' + 剩余 ' + tokens + ' 枚铸币 1:1 折现 ' + tokens + ' 张' : '') +
       ' = <b>' + total + '</b> 张' +
       (coins ? '（剩余 ' + coins + ' 试炼币不折现，随本局作废）' : '') + '</p>';
   }
@@ -1094,7 +1106,7 @@
       '<h2 class="tower-title">试炼商店 <span class="shop-coins">试炼币 ' + shop.coins + '</span></h2>' +
       '<div class="shop-shelf">' + slots + '</div>' +
       '<div class="shop-extra">' +
-      '<div class="shop-slot retry' + (shop.retrySold ? ' sold' : '') + '"><b>重新挑战币</b>' +
+      '<div class="shop-slot retry' + (shop.retrySold ? ' sold' : '') + '"><b>铸币</b>' +
       '<i>每次商店限购 1 枚 · 已有 ' + shop.retryToken + ' 枚</i>' +
       '<span>失败时消耗 1 枚，回滚到该场战斗开始前再打一次</span>' +
       (shop.retrySold ? '<em>已购买</em>' : C().btn(shop.retryPrice + ' 币', 'retry', 'small gold')) + '</div>' +
@@ -1133,7 +1145,7 @@
     on(p, 'retry', () => {
       const r = Tower.buyRetryToken();
       if (!r.ok) notice(r.msg || '买不了。');
-      else notice('已购买重新挑战币（现有 ' + r.left + ' 枚）。失败时可以选择回滚本场再打一次。');
+      else notice('已购买铸币（现有 ' + r.left + ' 枚）。失败时可以选择回滚本场再打一次。');
       openShop(revisit);
     });
     on(p, 'reroll', () => {
@@ -1205,7 +1217,7 @@
     modal('结算点 · 第 ' + info.layer + ' 层', '<div class="checkpoint-box">' +
       '<div class="checkpoint-option"><b>结算离场</b><span>立刻领取 <b class="gold-text">' + info.ticketsNowTotal + '</b> 张抽奖卷' +
         '（本层应得 ' + info.ticketsNow +
-        (info.retryToken ? ' + 重新挑战币 ' + info.retryToken + ' 枚 1:1 折现' : '') + '），本局结束（分数入账）</span></div>' +
+        (info.retryToken ? ' + 铸币 ' + info.retryToken + ' 枚 1:1 折现' : '') + '），本局结束（分数入账）</span></div>' +
       '<div class="checkpoint-option"><b>继续挑战</b><span>撑到第 ' + info.nextCheckpoint + ' 层本层应得升到 <b class="gold-text">' + info.ticketsNext + '</b> 张（试炼币照常折现）；中途失败也按同一口径结算</span></div>' +
       '<p class="small-label">本局分数 ' + info.score + ' · 试炼币 ' + info.coins + '（不折现，随本局作废）</p></div>',
       [

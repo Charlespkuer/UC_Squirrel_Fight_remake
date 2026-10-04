@@ -356,10 +356,10 @@ test('需求8：每日抽奖后抽奖卷数量即时刷新（且不依赖全局 
   assert.doesNotThrow(() => shot(), '没有 DOM 时也该静默跳过，不能抛错');
 });
 
-test('需求9：商店左下角是重新挑战币（50 币），失败可花 1 枚回滚本场再打', () => {
+test('需求9：商店左下角是铸币（50 币），失败可花 1 枚回滚本场再打', () => {
   const c = setup();
   const TD = c.TowerData;
-  assert.equal(TD.SHOP.retryPrice, 50, '重新挑战币定价应当 50');
+  assert.equal(TD.SHOP.retryPrice, 50, '铸币定价应当 50');
   assert.equal(TD.SHOP.healPrice, undefined, '旧的治疗泉水应当已经移除');
 
   // 买币要扣 50、记 1 枚
@@ -441,6 +441,38 @@ test('需求9b：有币时选择「放弃本局」→ 才真正结算失败', ()
   assert.ok(out.tickets > 0, '应当按层数发抽奖卷：' + out.tickets);
   assert.equal(c.State.state().props[50] || 0, ticketsBefore + out.tickets, '抽奖卷要真的入账');
   assert.ok(!c.Tower._debugRun('endless'), '放弃后对局结束');
+});
+
+test('需求9.5：铸币（原名「重新挑战币」）改名彻底 + 无尽塔右上角标出本场数量', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower;
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const data = fs.readFileSync(path.join(ROOT, 'js', 'tower-data.js'), 'utf8');
+  const core = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+
+  // 1) 面向玩家的**字符串字面量**里不该再出现旧名字（注释里保留「原名…」的说明不算）
+  const literal = /(['"`])(?:(?!\1)[^\n])*?(重新挑战币|重挑币)(?:(?!\1)[^\n])*?\1/;
+  for (const [name, src] of [['tower-ui.js', ui], ['tower-data.js', data], ['tower.js', core]]) {
+    assert.ok(!literal.test(src), name + ' 里还有带旧名字的文案');
+  }
+
+  // 2) 新名字要出现在该出现的地方：HUD / 商店货架 / 商店购买提示 / 增益文案
+  assert.match(ui, /name: '铸币'/, '无尽塔右上角应当有「铸币」这一项');
+  assert.match(ui, /本场拥有 ' \+ tokens \+ ' 枚铸币/, 'HUD 悬停要写明本场拥有多少枚');
+  assert.ok(ui.indexOf('<b>铸币</b>') > 0, '商店左下角货架应当叫「铸币」');
+  assert.match(data, /desc: '立即获得 1 枚铸币'/, 'E09 文案要用铸币');
+  assert.match(data, /desc: '立即获得 3 枚铸币'/, 'E10 文案要用铸币');
+
+  // 3) HUD 里的数量 = 本场手上的铸币（失败回滚 / 退出折券都用它）
+  const run = T._debugRun('endless');
+  run.retryToken = 4;
+  assert.equal(T.endlessInfo().run.retryToken, 4, 'endlessInfo 要能读出铸币数量');
+  assert.equal(T.endlessInfo().run.ticketsOnExit, T.endlessInfo().run.ticketsIfSettle + 4,
+    '退出时铸币 1:1 折券仍要算进总额');
+  // 商店售价与购买路径也还在（只是名字换了）
+  assert.equal(TD.SHOP.retryPrice, 50, '铸币售价应当 50 试炼币');
+  assert.equal(TD.BUFF_BY_ID.E09.mods.instantRetry, 1, '「重整旗鼓」给 1 枚铸币');
+  assert.equal(TD.BUFF_BY_ID.E10.mods.instantRetry, 3, '「背水一战」给 3 枚铸币');
 });
 
 test('需求10：商店价格在 -3 ~ +3 随机，且期望不变', () => {
@@ -793,15 +825,13 @@ test('需求15：E04「steam大促」一次性 7 折；E01「立即进货」战�
   r5.shop = null; r5.phase = null; r5.shopDiscount = 0; r5.shopDiscountPct = 0;
   r5.limited = [{ id: 'E01', stacks: 1, uses: 1, on: true }];
   assert.ok(c.Tower.toggleLimited('E01', false).ok, '应当能把 E01 关掉');
-  fightOnce(c);
+  const offOut = fightOnce(c);
   const afterOff = c.Tower._debugRun('endless');
-  assert.equal(afterOff.phase, null, '关掉 E01 之后不该再进商店：' + afterOff.phase);
-  assert.ok(!afterOff.shop, '关掉 E01 之后不该开店');
+  assert.ok(!offOut.postBattleShop, '关掉 E01 之后不该由它开店：' + JSON.stringify(offOut.postBattleShop));
   assert.equal(afterOff.limited.filter((b) => b.id === 'E01' && b.uses > 0).length, 1,
     '关掉的限次不该被消耗（关掉不扣次数）');
-  /* 再打一场，仍然不该开店（原来每场都会开） */
-  fightOnce(c);
-  assert.ok(!c.Tower._debugRun('endless').shop, '关掉之后连着几场都不该开店');
+  /* 再打一场，仍然不该由 E01 开店（原来每场都会开） */
+  assert.ok(!fightOnce(c).postBattleShop, '关掉之后连着几场都不该由 E01 开店');
 
   /* ---- 关掉再打开 → 恢复生效，单用 5 折，且只开这一次 ---- */
   const r6 = c.Tower._debugRun('endless');
@@ -813,8 +843,7 @@ test('需求15：E04「steam大促」一次性 7 折；E01「立即进货」战�
   assert.ok(Math.abs(r7.shop.discountPct - 0.50) < 1e-6,
     '单用 E01 应当是 5 折，实测 ' + r7.shop.discountPct);
   r7.shop = null; r7.phase = null; r7.choices = null;
-  fightOnce(c);
-  assert.ok(!c.Tower._debugRun('endless').shop, 'E01 用完（限次 1）之后不该再开店');
+  assert.ok(!fightOnce(c).postBattleShop, 'E01 用完（限次 1）之后不该再由它开店');
 });
 
 test('需求16：烙印各自独立随机数；存在时半效、损毁后全额且本局永久', () => {
@@ -1012,7 +1041,7 @@ test('需求20：环境 buff 最多同时两层（硬上限）', () => {
 test('需求21：挑战塔不再生成任何「只有无尽塔用得上」的增益', () => {
   const c = setup();
   const TD = c.TowerData;
-  // 环境 / 试炼币 / 商店 / 重新挑战币 / 永久槽位 / 选取型 / 即时结算 —— 这些在挑战塔里都是废的
+  // 环境 / 试炼币 / 商店 / 铸币 / 永久槽位 / 选取型 / 即时结算 —— 这些在挑战塔里都是废的
   const ENDLESS_ONLY = TD.ENDLESS_ONLY_MODS;
   assert.ok(Array.isArray(ENDLESS_ONLY) && ENDLESS_ONLY.length >= 10, '应当有一份「无尽专属 mods」清单');
   for (const b of TD.towerPool) {
@@ -4120,12 +4149,12 @@ test('需求58：天象之眼剥夺全部负面环境 / 虚空铭文可重复拾
   T.abandon('endless');
 });
 
-test('需求59：放弃本局 = 按当前层结算 + 重挑币 1:1 折现；试炼币不折现（作废）', () => {
+test('需求59：放弃本局 = 按当前层结算 + 铸币 1:1 折现；试炼币不折现（作废）', () => {
   const c = setup();
   const T = c.Tower, S = c.State, TD = c.TowerData;
   const TICKET = 50;    // 抽奖卷的道具 id
   /* 第 1 层应得的抽奖卷（endlessTickets(1) = 1）。
-   * 本轮修正：**只有多的重新挑战币 1:1 折券，试炼币不折现**（之前误把试炼币也折了）。 */
+   * 本轮修正：**只有多的铸币 1:1 折券，试炼币不折现**（之前误把试炼币也折了）。 */
   const LAYER_TICKETS = TD.endlessTickets(1);
   const startRun = () => {
     S.newGame('ab' + Math.random());
@@ -4136,7 +4165,7 @@ test('需求59：放弃本局 = 按当前层结算 + 重挑币 1:1 折现；试�
     return T._debugRun('endless');
   };
 
-  /* ① 有币 + 有重挑币放弃：只折重挑币，试炼币作废、本局结束 */
+  /* ① 有币 + 有铸币放弃：只折铸币，试炼币作废、本局结束 */
   const run = startRun();
   run.coins = 137;
   run.retryToken = 2;
@@ -4145,21 +4174,21 @@ test('需求59：放弃本局 = 按当前层结算 + 重挑币 1:1 折现；试�
   const res = T.abandon('endless');
   assert.ok(res.ok, '放弃应当成功');
   assert.equal(res.layerTickets, LAYER_TICKETS, '应当按当前层结算 ' + LAYER_TICKETS + ' 张，实测 ' + res.layerTickets);
-  assert.equal(res.retryLeft, 2, '应当报告折现了 2 枚重新挑战币，实测 ' + res.retryLeft);
+  assert.equal(res.retryLeft, 2, '应当报告折现了 2 枚铸币，实测 ' + res.retryLeft);
   assert.equal(res.tickets, LAYER_TICKETS + 2, '本局一共发 ' + LAYER_TICKETS + ' + 2 张，实测 ' + res.tickets);
   assert.equal(S.state().props[TICKET] || 0, ticketsBefore + LAYER_TICKETS + 2,
     '抽奖卷应当只增加 ' + (LAYER_TICKETS + 2) + ' 张：' + ticketsBefore + ' → ' + (S.state().props[TICKET] || 0));
   assert.equal(res.coinsLeft, undefined, '不该再有「试炼币折现」这个字段');
   assert.equal(res.forfeitCoins, 137, '要报出作废了多少试炼币：' + res.forfeitCoins);
   assert.equal(T._debugRun('endless'), null, '放弃后本局应当已结束');
-  assert.ok(/兑换/.test(res.retryMsg || ''), '应当给出重挑币折现提示：' + res.retryMsg);
+  assert.ok(/兑换/.test(res.retryMsg || ''), '应当给出铸币折现提示：' + res.retryMsg);
   assert.equal(res.convertMsg, undefined, '不该再报「试炼币兑换」');
 
   /* ② 分数照常入账（别把原有结算弄坏） */
   assert.ok(res.score === 500, '分数应当照常结算：' + res.score);
   assert.ok(Number(res.best) >= 500, 'best 应当更新：' + res.best);
 
-  /* ③ 既没币也没重挑币：只发「当前层应得」那一份 */
+  /* ③ 既没币也没铸币：只发「当前层应得」那一份 */
   const run2 = startRun();
   run2.coins = 0;
   run2.retryToken = 0;
@@ -4167,7 +4196,7 @@ test('需求59：放弃本局 = 按当前层结算 + 重挑币 1:1 折现；试�
   const res2 = T.abandon('endless');
   assert.equal(res2.tickets, LAYER_TICKETS, '只发「当前层应得」那一份：' + res2.tickets);
   assert.equal(S.state().props[TICKET] || 0, before2 + LAYER_TICKETS, '抽奖卷只加当前层应得的那份');
-  assert.equal(res2.retryMsg, undefined, '没有重挑币时不该有折现提示');
+  assert.equal(res2.retryMsg, undefined, '没有铸币时不该有折现提示');
   assert.equal(res2.forfeitCoins, 0, '没有试炼币可作废');
 
   /* ③b 只有币：试炼币**一分都不折** */
@@ -4194,7 +4223,7 @@ test('需求59：放弃本局 = 按当前层结算 + 重挑币 1:1 折现；试�
   T.abandon('endless');
   const raw = JSON.parse(c.localStorage.getItem(S.saveKey) || '{}');
   assert.ok(Number((raw.props || {})[TICKET] || 0) >= before5 + LAYER_TICKETS + 3,
-    '抽奖卷（当前层应得 + 重挑币折现）应当写进存档：' + JSON.stringify((raw.props || {})[TICKET]));
+    '抽奖卷（当前层应得 + 铸币折现）应当写进存档：' + JSON.stringify((raw.props || {})[TICKET]));
 });
 
 test('需求60：20 起每 10 层必须放弃一个永久增益 / 30 层后每 2 层碎烙印失效一条', () => {
@@ -5250,7 +5279,7 @@ test('需求73：无尽主界面右上角显示「实际退出到手」的抽奖
     return r;
   };
 
-  /* ① 数据口径：本层应得 / 退出总额（= 本层应得 + 重挑币；试炼币不折现）/ 重挑币 */
+  /* ① 数据口径：本层应得 / 退出总额（= 本层应得 + 铸币；试炼币不折现）/ 铸币 */
   const run0 = openRun(6);
   run0.coins = 24;
   const info = T.endlessInfo().run;
@@ -5259,12 +5288,12 @@ test('需求73：无尽主界面右上角显示「实际退出到手」的抽奖
   assert.equal(info.ticketsIfSettle, TD.endlessTickets(6), '本层应得应当等于 endlessTickets(当前层)');
   assert.equal(info.ticketsIfSettle, 2, '第 6 层（第 2 段）应当是 2 张');
   assert.equal(info.ticketsOnExit, 2, '有 24 试炼币也不该进总额，实测 ' + info.ticketsOnExit);
-  assert.equal(info.retryToken, 0, '开局没有重新挑战币');
-  /* 拿到重新挑战币（E10 即时类）后总额要跟着涨 */
+  assert.equal(info.retryToken, 0, '开局没有铸币');
+  /* 拿到铸币（E10 即时类）后总额要跟着涨 */
   T.applyInstant(T._debugRun('endless'), TD.BUFF_BY_ID.E10);
   assert.equal(T.endlessInfo().run.retryToken, 3, 'E10 的 3 枚要能读出来（本轮增益表重做后的数值）');
   assert.equal(T.endlessInfo().run.ticketsOnExit, T.endlessInfo().run.ticketsIfSettle + 3,
-    '重挑币要 1:1 进总额：' + T.endlessInfo().run.ticketsOnExit);
+    '铸币要 1:1 进总额：' + T.endlessInfo().run.ticketsOnExit);
   /* 换一层：档位跟着走 */
   const tb = T._debugRun('endless');
   tb.layer = 26;
@@ -5285,7 +5314,7 @@ test('需求73：无尽主界面右上角显示「实际退出到手」的抽奖
   /* ③ 端到端：放弃本局实际到手的张数 == 右上角显示的那个数 */
   openRun(6);
   T._debugRun('endless').coins = 24;           // 试炼币：不折现
-  T._debugRun('endless').retryToken = 3;       // 重挑币：1:1 折现
+  T._debugRun('endless').retryToken = 3;       // 铸币：1:1 折现
   const expect = T.endlessInfo().run.ticketsOnExit;
   assert.equal(expect, TD.endlessTickets(6) + 3, '退出总额应当 = 2 + 3 = 5（24 试炼币不算），实测 ' + expect);
   const beforeTickets = Number(S.state().props[50] || 0);
@@ -5294,7 +5323,7 @@ test('需求73：无尽主界面右上角显示「实际退出到手」的抽奖
   assert.equal(Number(S.state().props[50] || 0) - beforeTickets, expect,
     '放弃本局实际到手应当等于界面显示：' + expect + ' vs ' + (Number(S.state().props[50] || 0) - beforeTickets));
 });
-test('需求74：所有退出本局的方式收益完全一致（本层应得 + 重挑币 1:1 折现；试炼币作废）', () => {
+test('需求74：所有退出本局的方式收益完全一致（本层应得 + 铸币 1:1 折现；试炼币作废）', () => {
   const c = setup();
   const T = c.Tower, S = c.State, TD = c.TowerData;
   const TICKET = 50;
@@ -5312,7 +5341,7 @@ test('需求74：所有退出本局的方式收益完全一致（本层应得 + 
     r.coins = COINS; r.retryToken = TOKENS; r.env = []; r.noEnvRoll = true;
     return r;
   };
-  assert.equal(TOTAL, 7, '基准：第 6 层 2 张 + 5 枚重挑币 = 7 张（24 试炼币不算），实测 ' + TOTAL);
+  assert.equal(TOTAL, 7, '基准：第 6 层 2 张 + 5 枚铸币 = 7 张（24 试炼币不算），实测 ' + TOTAL);
 
   /* ① 放弃本局 */
   newRun();
@@ -5320,7 +5349,7 @@ test('需求74：所有退出本局的方式收益完全一致（本层应得 + 
   const r1 = T.abandon('endless');
   assert.equal(r1.tickets, TOTAL, '放弃本局应当发 ' + TOTAL + ' 张，实测 ' + r1.tickets);
   assert.equal(r1.layerTickets, LAYER_T, '本层应得那份：' + r1.layerTickets);
-  assert.equal(r1.retryLeft, TOKENS, '折现的重挑币数：' + r1.retryLeft);
+  assert.equal(r1.retryLeft, TOKENS, '折现的铸币数：' + r1.retryLeft);
   assert.equal(r1.forfeitCoins, COINS, '作废的试炼币数要报出来：' + r1.forfeitCoins);
   assert.equal(r1.coinsLeft, undefined, '不该再有「试炼币折现」字段');
   assert.equal(Number(S.state().props[TICKET] || 0) - before1, TOTAL, '放弃本局实际入包张数');
@@ -5331,13 +5360,13 @@ test('需求74：所有退出本局的方式收益完全一致（本层应得 + 
   run2.phase = 'checkpoint';
   const info2 = T.checkpointInfo();
   assert.equal(info2.ticketsNow, LAYER_T, '结算点「本层应得」= ' + LAYER_T);
-  assert.equal(info2.retryToken, TOKENS, '结算点要带出重挑币数量');
-  assert.equal(info2.ticketsNowTotal, TOTAL, '结算点「立刻能领」= 本层 + 重挑币：' + info2.ticketsNowTotal);
+  assert.equal(info2.retryToken, TOKENS, '结算点要带出铸币数量');
+  assert.equal(info2.ticketsNowTotal, TOTAL, '结算点「立刻能领」= 本层 + 铸币：' + info2.ticketsNowTotal);
   const before2 = Number(S.state().props[TICKET] || 0);
   const r2 = T.settleEndless();
   assert.equal(r2.tickets, TOTAL, '结算离场应当发 ' + TOTAL + ' 张，实测 ' + r2.tickets);
   assert.equal(r2.layerTickets, LAYER_T, '结算离场也要报本层应得那份');
-  assert.equal(r2.retryLeft, TOKENS, '结算离场也要折现重挑币');
+  assert.equal(r2.retryLeft, TOKENS, '结算离场也要折现铸币');
   assert.equal(Number(S.state().props[TICKET] || 0) - before2, TOTAL, '结算离场实际入包张数');
   assert.equal(T._debugRun('endless'), null, '结算后本局结束');
 
@@ -5348,16 +5377,16 @@ test('需求74：所有退出本局的方式收益完全一致（本层应得 + 
   const me = c.State.genAI(35, '', { levelJitter: 0, gearSelfLevel: true });
   me.maxHp = me.hp; nb.adjustMe(me);
   const run3 = T._debugRun('endless');
-  run3.coins = COINS; run3.retryToken = 0;            // 无重挑币 → 直接失败结算
+  run3.coins = COINS; run3.retryToken = 0;            // 无铸币 → 直接失败结算
   const before3 = Number(S.state().props[TICKET] || 0);
   const r3 = T.reportBattle('endless', nb.token, false, 0.3);
-  assert.equal(r3.tickets, LAYER_T, '失败结算（无重挑币）应当发 ' + LAYER_T + ' 张，实测 ' + r3.tickets);
+  assert.equal(r3.tickets, LAYER_T, '失败结算（无铸币）应当发 ' + LAYER_T + ' 张，实测 ' + r3.tickets);
   assert.equal(r3.layerTickets, LAYER_T, '失败结算也要报本层应得那份');
   assert.equal(r3.forfeitCoins, COINS, '失败结算也要报作废的试炼币');
   assert.equal(Number(S.state().props[TICKET] || 0) - before3, LAYER_T, '失败结算实际入包张数');
   assert.equal(T._debugRun('endless'), null, '失败后本局结束');
 
-  /* ④ declineRetry（有重挑币时选择放弃重打 → 同一个 doFail）也要折现重挑币 */
+  /* ④ declineRetry（有铸币时选择放弃重打 → 同一个 doFail）也要折现铸币 */
   newRun();
   const nb4 = T.nextBattle('endless');
   const me4 = c.State.genAI(35, '', { levelJitter: 0, gearSelfLevel: true });
@@ -5365,11 +5394,11 @@ test('需求74：所有退出本局的方式收益完全一致（本层应得 + 
   const run4 = T._debugRun('endless');
   run4.coins = COINS; run4.retryToken = 3;
   const fail4 = T.reportBattle('endless', nb4.token, false, 0.3);
-  assert.equal(fail4.retryable, true, '有重挑币时失败应当先不结算：' + JSON.stringify(fail4));
-  assert.equal(T._debugRun('endless').coins, COINS, '重挑币待命期间不该动币');
+  assert.equal(fail4.retryable, true, '有铸币时失败应当先不结算：' + JSON.stringify(fail4));
+  assert.equal(T._debugRun('endless').coins, COINS, '铸币待命期间不该动币');
   const before4 = Number(S.state().props[TICKET] || 0);
   const r4 = T.declineRetry();
-  assert.equal(r4.retryLeft, 3, '明细里要报「折现了 3 枚重挑币」，实测 ' + r4.retryLeft);
+  assert.equal(r4.retryLeft, 3, '明细里要报「折现了 3 枚铸币」，实测 ' + r4.retryLeft);
   assert.equal(r4.tickets, LAYER_T + 3, '放弃重打应当发 ' + (LAYER_T + 3) + ' 张，实测 ' + r4.tickets);
   assert.equal(Number(S.state().props[TICKET] || 0) - before4, LAYER_T + 3, '放弃重打实际入包张数');
 });
@@ -5441,7 +5470,7 @@ test('需求75：无尽塔商店刷新价封顶 50（之后不再涨）', () => 
   assert.equal(mk(70)(9), 70, 'rerollMax=70 时封到 70：' + mk(70)(9));
 });
 
-test('需求76：抽奖卷曲线（10 层前每 5 层 1 张 / 之后 2 张）+ 重挑币结算折现', () => {
+test('需求76：抽奖卷曲线（10 层前每 5 层 1 张 / 之后 2 张）+ 铸币结算折现', () => {
   const c = setup();
   const T = c.Tower, TD = c.TowerData, S = c.State;
   const TICKET = 50;
@@ -5470,7 +5499,7 @@ test('需求76：抽奖卷曲线（10 层前每 5 层 1 张 / 之后 2 张）+ �
   /* 单调不减 */
   for (let n = 1; n <= 60; n++) assert.ok(at(n + 1) >= at(n), '曲线不能下降：' + n);
 
-  /* ② 结算：剩余重新挑战币 1:1 折现、**剩余试炼币不折现** */
+  /* ② 结算：剩余铸币 1:1 折现、**剩余试炼币不折现** */
   const newRun = (layer, coins, tokens) => {
     S.newGame('r76' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
@@ -5486,12 +5515,12 @@ test('需求76：抽奖卷曲线（10 层前每 5 层 1 张 / 之后 2 张）+ �
   const L26 = TD.endlessTickets(26);
   assert.equal(L26, 10, '基准层：第 26 层应得 10 张，实测 ' + L26);
 
-  /* ②-1 放弃本局：10 张 + 2 枚重挑币；30 试炼币作废 */
+  /* ②-1 放弃本局：10 张 + 2 枚铸币；30 试炼币作废 */
   newRun(26, 30, 2);
   const before1 = Number(S.state().props[TICKET] || 0);
   const r1 = T.abandon('endless');
   assert.equal(r1.layerTickets, L26, '本层应得 ' + L26 + ' 张，实测 ' + r1.layerTickets);
-  assert.equal(r1.retryLeft, 2, '折现 2 枚重挑币，实测 ' + r1.retryLeft);
+  assert.equal(r1.retryLeft, 2, '折现 2 枚铸币，实测 ' + r1.retryLeft);
   assert.equal(r1.forfeitCoins, 30, '作废的试炼币数要报出来，实测 ' + r1.forfeitCoins);
   assert.equal(r1.tickets, L26 + 2, '总额 = ' + L26 + ' + 2，实测 ' + r1.tickets);
   assert.equal(Number(S.state().props[TICKET] || 0) - before1, L26 + 2, '实际入包张数');
@@ -5501,13 +5530,13 @@ test('需求76：抽奖卷曲线（10 层前每 5 层 1 张 / 之后 2 张）+ �
   run2.phase = 'checkpoint';
   const info2 = T.checkpointInfo();
   assert.equal(info2.ticketsNow, L26, '结算点「本层应得」= ' + L26);
-  assert.equal(info2.retryToken, 2, '结算点要带出重挑币数量');
-  assert.equal(info2.ticketsNowTotal, L26 + 2, '结算点「立刻能领」= 本层 + 重挑币，实测 ' + info2.ticketsNowTotal);
+  assert.equal(info2.retryToken, 2, '结算点要带出铸币数量');
+  assert.equal(info2.ticketsNowTotal, L26 + 2, '结算点「立刻能领」= 本层 + 铸币，实测 ' + info2.ticketsNowTotal);
   const r2 = T.settleEndless();
   assert.equal(r2.tickets, L26 + 2, '结算离场总额，实测 ' + r2.tickets);
-  assert.equal(r2.retryLeft, 2, '结算离场也要折现重挑币');
+  assert.equal(r2.retryLeft, 2, '结算离场也要折现铸币');
 
-  /* ②-3 失败结算（有重挑币 → 先不结算，放弃重打时一起折） */
+  /* ②-3 失败结算（有铸币 → 先不结算，放弃重打时一起折） */
   newRun(26, 30, 0);
   const nb = T.nextBattle('endless');
   const me = c.State.genAI(35, '', { levelJitter: 0, gearSelfLevel: true });
@@ -5516,32 +5545,32 @@ test('需求76：抽奖卷曲线（10 层前每 5 层 1 张 / 之后 2 张）+ �
   run3.coins = 30; run3.retryToken = 4;
   const before3 = Number(S.state().props[TICKET] || 0);
   const r3 = T.reportBattle('endless', nb.token, false, 0.3);
-  assert.equal(r3.retryable, true, '有重挑币时先不结算');
+  assert.equal(r3.retryable, true, '有铸币时先不结算');
   const r3b = T.declineRetry();
   assert.equal(r3b.tickets, L26 + 4, '失败结算总额 = ' + L26 + ' + 4，实测 ' + r3b.tickets);
   assert.equal(Number(S.state().props[TICKET] || 0) - before3, L26 + 4, '失败结算实际入包张数');
 
-  /* ②-4 纯试炼币（没有重挑币）：一分都不折，只发本层应得 */
+  /* ②-4 纯试炼币（没有铸币）：一分都不折，只发本层应得 */
   newRun(26, 999, 0);
   const before4 = Number(S.state().props[TICKET] || 0);
   const r4 = T.abandon('endless');
   assert.equal(r4.tickets, L26, '999 试炼币也不该折出任何卷，实测 ' + r4.tickets);
   assert.equal(Number(S.state().props[TICKET] || 0) - before4, L26, '只发本层应得那份');
 
-  /* ③ 结算后重挑币必须清零（不能带到下一局） */
+  /* ③ 结算后铸币必须清零（不能带到下一局） */
   newRun(6, 10, 3);
   T.abandon('endless');
   assert.ok(!T._debugRun('endless'), '本局已结束');
   T.startEndlessRun();
-  assert.equal(Number(T._debugRun('endless').retryToken) || 0, 0, '新本局不该继承上局的重挑币');
+  assert.equal(Number(T._debugRun('endless').retryToken) || 0, 0, '新本局不该继承上局的铸币');
 
-  /* ④ 界面口径：右上角那个「退出实际到手」= 本层应得 + 重挑币（不含试炼币） */
+  /* ④ 界面口径：右上角那个「退出实际到手」= 本层应得 + 铸币（不含试炼币） */
   newRun(26, 30, 2);
   const info = T.endlessInfo().run;
   assert.equal(info.ticketsIfSettle, L26, '本层应得 ' + L26);
-  assert.equal(info.retryToken, 2, '手上 2 枚重挑币');
+  assert.equal(info.retryToken, 2, '手上 2 枚铸币');
   assert.equal(info.ticketsOnExit, L26 + 2, '退出总额，实测 ' + info.ticketsOnExit);
-  assert.equal(info.ticketsOnExit, info.ticketsIfSettle + 2, '总额 = 本层应得 + 重挑币（30 试炼币不算）');
+  assert.equal(info.ticketsOnExit, info.ticketsIfSettle + 2, '总额 = 本层应得 + 铸币（30 试炼币不算）');
 });
 test('需求77：无尽塔「力/敏/速药丸槽」已整块删除（含旧存档字段与局外药丸回归）', () => {
   const c = setup();

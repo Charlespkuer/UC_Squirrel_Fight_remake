@@ -380,7 +380,7 @@ hr('上轮 9：挥金如土');
     const g0 = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, Tower._debugRun('endless').spendGain || {});
     let spent = 0;
     /* 消费点用「刷新货架」：它每刷一次都扣币、且价格递增，稳定产生消费。
-     * （原来用的是 buyShopHeal —— 那个位置现在是一次限购的重新挑战币，
+     * （原来用的是 buyShopHeal —— 那个位置现在是一次限购的铸币，
      *  买过就失败、靠刷新补，刷新价涨上去后有时花不够，导致断言偶发红。） */
     for (let i = 0; i < 40; i++) {
       /* 每次刷新**之前**补钱：原来是在刷新失败之后才补，而 rerollShop 币不够会直接

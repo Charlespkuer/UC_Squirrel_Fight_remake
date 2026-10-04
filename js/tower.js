@@ -336,7 +336,7 @@
     if (m.enemyMaxHpDown) parts.push('本局敌人生命上限 −' + Math.round(m.enemyMaxHpDown * 100) + '%');
     if (m.shopDiscount) parts.push('下一家商店 ' + shopDiscountLabel(m.shopDiscount));
     if (m.postBattleShop) parts.push('下一场战斗后开一次商店');
-    if (m.instantRetry) parts.push('重新挑战币 +' + m.instantRetry);
+    if (m.instantRetry) parts.push('铸币 +' + m.instantRetry);
     return parts.join('、') || (buff && buff.desc) || '立即生效';
   }
 
@@ -1123,14 +1123,14 @@
       debuffs: (run.debuffs || []).slice(), achievements: toasts,
       battleNo: run.idx + 1, battleCount: run.plan.length, layer: run.layer };
   }
-  /** 手上有没有重新挑战币（以及有没有可用的快照）。 */
+  /** 手上有没有铸币（以及有没有可用的快照）。 */
   function canRetry(run) {
     return !!(run && run.mode === 'endless' && Number(run.retryToken) > 0 && run.retrySnap);
   }
   function retryBattle() {
     const e = endless(), run = e.run;
     if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
-    if (!(Number(run.retryToken) > 0)) return { ok: false, msg: '没有重新挑战币（可在试炼商店购买）。' };
+    if (!(Number(run.retryToken) > 0)) return { ok: false, msg: '没有铸币（可在试炼商店购买）。' };
     if (!run.retrySnap) return { ok: false, msg: '没有可回滚的战斗记录。' };
     const snap = cloneRun(run.retrySnap);
     snap.retryToken = Number(run.retryToken) - 1;     // 消耗 1 枚
@@ -1465,10 +1465,10 @@
     out.forfeitCoins = coins;
     out.tickets = gain;
     out.ticketsTotal = S().props[TICKET_PROP] || 0;
-    if (retryTokens > 0) out.retryMsg = retryTokens + ' 枚重新挑战币已 1:1 兑换为 ' + retryTokens + ' 张抽奖卷';
+    if (retryTokens > 0) out.retryMsg = retryTokens + ' 枚铸币已 1:1 兑换为 ' + retryTokens + ' 张抽奖卷';
     return out;
   }
-  /** 玩家在有重新挑战币的情况下选择「放弃本局」→ 现在才真正结算失败。 */
+  /** 玩家在有铸币的情况下选择「放弃本局」→ 现在才真正结算失败。 */
   function declineRetry() {
     const e = endless(), run = e.run;
     if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
@@ -2596,7 +2596,7 @@
     return { ok: true, buff, price, instant: !!res.instant, score: pts,
       shopSpend: spend || undefined };
   }
-  /* 兼容旧调用名：以前这里卖「治疗泉水」，现在同一位置是重新挑战币，
+  /* 兼容旧调用名：以前这里卖「治疗泉水」，现在同一位置是铸币，
    * 语义仍然是「每次商店限购 1 份」，所以旧的 buyShopHeal 直接指向新实现
    * （tools/ 里的历史探针脚本还在用它）。 */
   function buyShopHeal() { return buyRetryToken(); }
@@ -2758,7 +2758,7 @@
     const now = D().endlessTickets(run.layer);
     return { layer: run.layer, score: run.score, coins, retryToken: tokens,
       ticketsNow: now,
-      /* 「立刻能领多少」= 本层应得 + 重挑币折现（试炼币不折现、只作废；
+      /* 「立刻能领多少」= 本层应得 + 铸币折现（试炼币不折现、只作废；
        * 与界面上的「离场可得」、放弃本局、失败结算完全一致） */
       ticketsNowTotal: now + tokens,
       ticketsNext: D().endlessTickets((s + 1) * 5),       // 下一结算点（再撑 5 层）的升档面值
@@ -2951,8 +2951,9 @@
         finished: e.run.finished || null,
         /* 无尽主界面右上角显示用的三个数（口径与 settleRunTickets 完全一致）：
          *   · ticketsIfSettle —— 只算「本层应得」那一份（5 层一个档位）
-         *   · retryToken      —— 手上的重新挑战币（失败后回滚本场再打一次；结算时 1:1 折券）
-         *   · ticketsOnExit   —— 现在退出**实际到手**的总额 = 本层应得 + 重挑币折现
+         *   · retryToken      —— 手上的**铸币**（游戏内文案叫「铸币」，字段名沿用 retryToken
+         *                        以免旧档迁移；失败后回滚本场再打一次；结算时 1:1 折券）
+         *   · ticketsOnExit   —— 现在退出**实际到手**的总额 = 本层应得 + 铸币折现
          *                        （剩余试炼币不折现，随本局作废） */
         retryToken: Math.max(0, Math.floor(Number(e.run.retryToken) || 0)),
         ticketsIfSettle: D().endlessTickets(e.run.layer),

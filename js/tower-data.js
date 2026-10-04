@@ -350,7 +350,7 @@
     for (const id of run.permSlotIds || []) own.add(id);
     /* 即时类（「天命所归」）不进 permanent/limited，单独记在 instantIds 上。 */
     for (const row of run.instantIds || []) if (row && row.id) own.add(row.id);
-    const need = BUFFS.filter((b) => b.rarity === 3 && b.repeatable);
+    const need = BUFFS.filter((b) => b.rarity === 3 && hasTag(b, 'repeatable'));
     return need.length > 0 && need.every((b) => own.has(b.id));
   }
   /** 传奇那一档的权重系数（1 = 没拿过任何传奇）。 */
@@ -827,25 +827,25 @@
   //   shopDiscount(折扣比例) postBattleShop/postBattleShopDiscount(战后开店)
   const BUFFS = Object.freeze([
     // —— 单场类（主塔+无尽通用） ——
-    { id: 'N01', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '蓄力一击', rarity: 0, kind: 'limited', uses: 2, towerOnly: true, nextBattle: true, desc: '下一场战斗攻击 +40%', mods: { powerMul: 0.40 } },
-    { id: 'N02', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '百步穿杨', rarity: 0, kind: 'limited', uses: 3, towerOnly: true, nextBattle: true, desc: '下一场战斗所有攻击必中', mods: { mustHitAll: 1 } },
-    { id: 'M01', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '威慑', rarity: 0, kind: 'limited', uses: 2, towerOnly: true, nextBattle: true, desc: '下一场战斗敌人攻击力 −30%', mods: { enemyPowerDown: 0.30 } },
-    { id: 'M02', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '疾风先手', rarity: 0, kind: 'limited', uses: 3, towerOnly: true, nextBattle: true, desc: '下一场战斗前 3 次使用武器不消耗回合', mods: { weaponFreeUses: 3 } },
-    { id: 'N03', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '活血丹', rarity: 1, kind: 'limited', uses: 3, towerOnly: true, nextBattle: true, desc: '下一场战斗每回合开始回复 7% 生命', mods: { regenPct: 0.07 } },
-    { id: 'N04', tags: ['tower', 'battle', 'limited', 'unique', 'nextBattle'], name: '金蝉脱壳', rarity: 1, kind: 'limited', uses: 10, towerOnly: true, nextBattle: true, unique: true,
+    { id: 'N01', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '蓄力一击', rarity: 0, kind: 'limited', uses: 2, desc: '下一场战斗攻击 +40%', mods: { powerMul: 0.40 } },
+    { id: 'N02', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '百步穿杨', rarity: 0, kind: 'limited', uses: 3, desc: '下一场战斗所有攻击必中', mods: { mustHitAll: 1 } },
+    { id: 'M01', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '威慑', rarity: 0, kind: 'limited', uses: 2, desc: '下一场战斗敌人攻击力 −30%', mods: { enemyPowerDown: 0.30 } },
+    { id: 'M02', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '疾风先手', rarity: 0, kind: 'limited', uses: 3, desc: '下一场战斗前 3 次使用武器不消耗回合', mods: { weaponFreeUses: 3 } },
+    { id: 'N03', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '活血丹', rarity: 1, kind: 'limited', uses: 3, desc: '下一场战斗每回合开始回复 7% 生命', mods: { regenPct: 0.07 } },
+    { id: 'N04', tags: ['tower', 'battle', 'limited', 'unique', 'nextBattle'], name: '金蝉脱壳', rarity: 1, kind: 'limited', uses: 10,
       desc: '下一场战斗第一次死亡时复活，并回复 30% 生命上限', mods: { reviveFirstPct: 0.30 } },
-    { id: 'N07', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '破军', rarity: 1, kind: 'limited', uses: 3, towerOnly: true, nextBattle: true, desc: '下一场战斗暴击率 +20%，暴击伤害 +30%', mods: { critBonus: 20, critDmgBonus: 0.30 } },
-    { id: 'M03', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '坚守', rarity: 1, kind: 'limited', uses: 2, towerOnly: true, nextBattle: true, desc: '下一场战斗受到伤害 −30%', mods: { takenMul: -0.30 } },
-    { id: 'M04', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '疾风步', rarity: 1, kind: 'limited', uses: 10, towerOnly: true, nextBattle: true, desc: '下一场战斗速度 +30%', mods: { speedMul: 0.30 } },
-    { id: 'N05', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '先手制敌', rarity: 2, kind: 'limited', uses: 3, towerOnly: true, nextBattle: true, desc: '下一场战斗开局对敌人造成其 30% 最大生命的伤害', mods: { openStrikePct: 0.30 } },
-    { id: 'N08', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '补给', rarity: 0, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
+    { id: 'N07', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '破军', rarity: 1, kind: 'limited', uses: 3, desc: '下一场战斗暴击率 +20%，暴击伤害 +30%', mods: { critBonus: 20, critDmgBonus: 0.30 } },
+    { id: 'M03', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '坚守', rarity: 1, kind: 'limited', uses: 2, desc: '下一场战斗受到伤害 −30%', mods: { takenMul: -0.30 } },
+    { id: 'M04', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '疾风步', rarity: 1, kind: 'limited', uses: 10, desc: '下一场战斗速度 +30%', mods: { speedMul: 0.30 } },
+    { id: 'N05', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '先手制敌', rarity: 2, kind: 'limited', uses: 3, desc: '下一场战斗开局对敌人造成其 30% 最大生命的伤害', mods: { openStrikePct: 0.30 } },
+    { id: 'N08', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '补给', rarity: 0, kind: 'limited', uses: 1,
       desc: '下一场战斗开始时立即回复 50% 生命', mods: { startHealPct: 0.50 } },
-    { id: 'N06', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '血饮狂刀', rarity: 2, kind: 'limited', uses: 5, towerOnly: true, nextBattle: true, desc: '下一场战斗攻击附带 45% 吸血', mods: { lifestealPct: 0.45 } },
+    { id: 'N06', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '血饮狂刀', rarity: 2, kind: 'limited', uses: 5, desc: '下一场战斗攻击附带 45% 吸血', mods: { lifestealPct: 0.45 } },
     // —— 本层类（主塔=整局；无尽=当前层） ——
-    { id: 'G01', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '力量祝福', rarity: 0, kind: 'limited', uses: 10, towerOnly: true, nextBattle: true, desc: '下一场战斗力量、敏捷、速度各 +20%', mods: { powerMul: 0.20, agilityMul: 0.20, speedMul: 0.20 } },
-    { id: 'G02', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '生命祝福', rarity: 0, kind: 'limited', uses: 5, towerOnly: true, nextBattle: true, desc: '下一场战斗生命上限 +20%，并在开战第一回合回复 40% 生命上限', mods: { maxHpMul: 0.20, startHealPct: 0.40 } },
-    { id: 'G03', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '凌波微步', rarity: 1, kind: 'limited', uses: 10, towerOnly: true, nextBattle: true, desc: '下一场战斗我方闪避率 +15%', mods: { dodgeBonus: 15 } },
-    { id: 'G04', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '破釜沉舟', rarity: 2, kind: 'limited', uses: 3, towerOnly: true, nextBattle: true, desc: '下一场战斗攻击 +70%，生命上限 −20%', mods: { powerMul: 0.70, maxHpMul: -0.20 } },
+    { id: 'G01', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '力量祝福', rarity: 0, kind: 'limited', uses: 10, desc: '下一场战斗力量、敏捷、速度各 +20%', mods: { powerMul: 0.20, agilityMul: 0.20, speedMul: 0.20 } },
+    { id: 'G02', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '生命祝福', rarity: 0, kind: 'limited', uses: 5, desc: '下一场战斗生命上限 +20%，并在开战第一回合回复 40% 生命上限', mods: { maxHpMul: 0.20, startHealPct: 0.40 } },
+    { id: 'G03', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '凌波微步', rarity: 1, kind: 'limited', uses: 10, desc: '下一场战斗我方闪避率 +15%', mods: { dodgeBonus: 15 } },
+    { id: 'G04', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '破釜沉舟', rarity: 2, kind: 'limited', uses: 3, desc: '下一场战斗攻击 +70%，生命上限 −20%', mods: { powerMul: 0.70, maxHpMul: -0.20 } },
     /* ============================================================
      * 挑战塔专属「下一场战斗」增益（towerOnly + nextBattle）
      *
@@ -853,26 +853,26 @@
      * 不搞「接下来 N 场」那种叠加计时，卡面直接写「下一场战斗」。
      * 这些条目不会进无尽池（endlessPool 过滤 towerOnly）。
      * ============================================================ */
-    { id: 'T01', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '闪亮登场', rarity: 2, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
+    { id: 'T01', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '闪亮登场', rarity: 2, kind: 'limited', uses: 1,
       desc: '下一场战斗：前 3 次使用武器时攻击 +50% 且必中，同时免疫反伤；之后我方攻击 −20%',
       mods: { weaponBoostUses: 3, weaponBoostPowerMul: 0.50, weaponBoostMustHit: 1, weaponBoostReflectImmune: 1, weaponBoostFatigueMul: 0.20 } },
-    { id: 'T02', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '烟幕', rarity: 1, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
+    { id: 'T02', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '烟幕', rarity: 1, kind: 'limited', uses: 1,
       desc: '下一场战斗：我方闪避率 ×1.5',
       mods: { dodgeMul: 0.50 } },
-    { id: 'T03', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '锁定打击', rarity: 1, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
+    { id: 'T03', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '锁定打击', rarity: 1, kind: 'limited', uses: 1,
       desc: '下一场战斗：所有攻击必中', mods: { mustHitAll: 1 } },
-    { id: 'T04', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '见血封喉', rarity: 2, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
+    { id: 'T04', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '见血封喉', rarity: 2, kind: 'limited', uses: 1,
       desc: '下一场战斗：暴击率 +30%，暴击伤害 +50%',
       mods: { critBonus: 30, critDmgBonus: 0.50 } },
-    { id: 'T05', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '以血换血', rarity: 2, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
+    { id: 'T05', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '以血换血', rarity: 2, kind: 'limited', uses: 1,
       desc: '下一场战斗：反弹 50% 受到的伤害给敌人', mods: { thornsPct: 0.50 } },
-    { id: 'T06', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '背水一战', rarity: 3, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
+    { id: 'T06', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '背水一战', rarity: 3, kind: 'limited', uses: 1,
       desc: '下一场战斗：攻击 +35%，速度 +20%，受到伤害 −20%',
       mods: { powerMul: 0.35, speedMul: 0.20, takenMul: -0.20 } },
-    { id: 'T07', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '不动如山', rarity: 3, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
+    { id: 'T07', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '不动如山', rarity: 3, kind: 'limited', uses: 1,
       desc: '下一场战斗：生命上限 +35%，开战回满生命，之后每回合再回复 5% 生命',
       mods: { maxHpMul: 0.35, startHealPct: 1.00, regenPct: 0.05 } },
-    { id: 'T08', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '先发制人', rarity: 0, kind: 'limited', uses: 1, towerOnly: true, nextBattle: true,
+    { id: 'T08', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '先发制人', rarity: 0, kind: 'limited', uses: 1,
       desc: '下一场战斗：首次使用武器不消耗回合，敌方对我方的第一次伤害为 0',
       mods: { weaponFreeUses: 1, firstHitZero: 1 } },
     // —— 跨层类（仅无尽，本局永久） ——
@@ -880,20 +880,20 @@
      * 注意它与「获得时回血」类（healOnGainPct）不是一回事 —— 后者只回血、不抬上限。 */
     { id: 'C01', tags: ['tower', 'endless', 'battle', 'shop'], name: '磐石之躯', rarity: 1, kind: 'permanent', desc: '生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
     { id: 'C02', tags: ['tower', 'endless', 'battle', 'shop'], name: '磨砺', rarity: 0, kind: 'permanent', desc: '攻击 +10%', mods: { powerMul: 0.10 } },
-    { id: 'C03', tags: ['endless', 'battle', 'shop', 'stackable'], name: '猎侠者', rarity: 0, kind: 'permanent', endlessOnly: true, stackable: true, maxStacks: 3, desc: '对螳螂/仙鹤/熊猫伤害 +25%', mods: { dmgMulType: 0.25 } },
+    { id: 'C03', tags: ['endless', 'battle', 'shop', 'stackable'], name: '猎侠者', rarity: 0, kind: 'permanent', maxStacks: 3, desc: '对螳螂/仙鹤/熊猫伤害 +25%', mods: { dmgMulType: 0.25 } },
     { id: 'C04', tags: ['tower', 'endless', 'battle', 'shop'], name: '生命源泉', rarity: 1, kind: 'permanent', desc: '每进入新的一层，该层第一场战斗开战时回复 100% 生命', mods: { layerFirstHealPct: 1.00 } },
     { id: 'C05', tags: ['tower', 'endless', 'battle', 'shop'], name: '坚韧壁垒', rarity: 1, kind: 'permanent', desc: '每场战斗开局获得 15% 最大生命的护盾', mods: { shellPct: 0.15 } },
-    { id: 'C06', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '猎杀时刻', rarity: 1, kind: 'permanent', stackable: true, desc: '每击杀 1 个敌人攻击 +2%，最多 +30%', mods: { killPowerPct: 0.02, killPowerCap: 0.30 } },
-    { id: 'C07', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '吞噬成长', rarity: 1, kind: 'permanent', stackable: true,
+    { id: 'C06', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '猎杀时刻', rarity: 1, kind: 'permanent', desc: '每击杀 1 个敌人攻击 +2%，最多 +30%', mods: { killPowerPct: 0.02, killPowerCap: 0.30 } },
+    { id: 'C07', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '吞噬成长', rarity: 1, kind: 'permanent',
       desc: '每胜利一场生命上限 +2%，最多 +30%', mods: { winMaxHpPct: 0.02, winMaxHpCap: 0.30 } },
     { id: 'C09', tags: ['tower', 'endless', 'battle', 'shop'], name: '逢五强化', rarity: 1, kind: 'permanent', desc: '每到 5 的倍数层，攻击与生命上限各 +50%', mods: { x10Boost: 0.50 } },
-    { id: 'C10', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '机制破解', rarity: 1, kind: 'permanent', stackable: true, maxStacks: 3, desc: '对带专属机制的敌人伤害 +25%', mods: { dmgMulMech: 0.25 } },
-    { id: 'C16', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '战斗续航', rarity: 1, kind: 'permanent', stackable: true, maxStacks: 2,
+    { id: 'C10', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '机制破解', rarity: 1, kind: 'permanent', maxStacks: 3, desc: '对带专属机制的敌人伤害 +25%', mods: { dmgMulMech: 0.25 } },
+    { id: 'C16', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '战斗续航', rarity: 1, kind: 'permanent', maxStacks: 2,
       desc: '每场战斗开始时回复 5% 生命上限', mods: { startHealPct: 0.05 } },
-    { id: 'C17', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '战斗续航·精', rarity: 2, kind: 'permanent', stackable: true, maxStacks: 2,
+    { id: 'C17', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '战斗续航·精', rarity: 2, kind: 'permanent', maxStacks: 2,
       desc: '每场战斗开始时回复 10% 生命上限', mods: { startHealPct: 0.10 } },
     { id: 'C18', tags: ['tower', 'endless', 'battle', 'shop'], name: '吸血精通', rarity: 1, kind: 'permanent', desc: '所有攻击附带 15% 吸血', mods: { lifestealPct: 0.15 } },
-    { id: 'C19', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '荆棘之甲', rarity: 1, kind: 'permanent', stackable: true, maxStacks: 3, desc: '受到伤害时反弹 20% 给敌人', mods: { thornsPct: 0.20 } },
+    { id: 'C19', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '荆棘之甲', rarity: 1, kind: 'permanent', maxStacks: 3, desc: '受到伤害时反弹 20% 给敌人', mods: { thornsPct: 0.20 } },
     /* 狂怒：低血时同时强化攻/敏/速（阈值 50%）。
      * 三项都用同一套「当前血量 ≤ 上限 × lowHpAt」判定，见 sim.js 的 effPower/effAgility/effSpeed。
      * **攻击那一份是终乘**（lowHpFinalMul）：不走力量面板，而是在最终伤害上直接乘，
@@ -919,7 +919,7 @@
     /* 抉择扩充：战斗获得的三选一变四选一，可叠 3 层（最高 6 选 1）。
      * maxStacks 与 stackable 配套：叠满 3 层后 `poolFilter` 直接把它排除，
      * 商店与战斗都不会再刷到它。 */
-    { id: 'C50', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '抉择扩充', rarity: 1, kind: 'permanent', stackable: true, maxStacks: 3,
+    { id: 'C50', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '抉择扩充', rarity: 1, kind: 'permanent', maxStacks: 3,
       desc: '战斗获得的选择项 +1',
       mods: { choiceCount: 1 } },
     /* 减伤成长：每胜利一场，本局受到伤害再 −1%（上限 −25%）。
@@ -928,16 +928,16 @@
     { id: 'C48', tags: ['tower', 'endless', 'battle', 'shop'], name: '铜墙铁壁', rarity: 2, kind: 'permanent',
       desc: '本局每胜利一场，受到的伤害额外 −1%，最多 −25%',
       mods: { winTakenMulPct: 0.01, winTakenMulCap: 0.25 } },
-    { id: 'C21', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '暴击精通', rarity: 0, kind: 'permanent', stackable: true, maxStacks: 3, desc: '暴击率 +10%', mods: { critBonus: 10 } },
-    { id: 'C22', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '闪避精通', rarity: 0, kind: 'permanent', stackable: true, maxStacks: 3, desc: '闪避率 +10%', mods: { dodgeBonus: 10 } },
-    { id: 'C23', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '轻身术', rarity: 0, kind: 'permanent', stackable: true, maxStacks: 3, desc: '速度 +10%', mods: { speedMul: 0.10 } },
-    { id: 'C11', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '以战养战', rarity: 2, kind: 'permanent', stackable: true, desc: '每胜利一场，生命上限 +5', mods: { winMaxHpFlat: 5 } },
+    { id: 'C21', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '暴击精通', rarity: 0, kind: 'permanent', maxStacks: 3, desc: '暴击率 +10%', mods: { critBonus: 10 } },
+    { id: 'C22', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '闪避精通', rarity: 0, kind: 'permanent', maxStacks: 3, desc: '闪避率 +10%', mods: { dodgeBonus: 10 } },
+    { id: 'C23', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '轻身术', rarity: 0, kind: 'permanent', maxStacks: 3, desc: '速度 +10%', mods: { speedMul: 0.10 } },
+    { id: 'C11', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '以战养战', rarity: 2, kind: 'permanent', desc: '每胜利一场，生命上限 +5', mods: { winMaxHpFlat: 5 } },
     /* 登顶者：第 10 层起每胜利一场，本局固定 +1 力 / +1 敏 / +1 速（不封顶、可叠层）。 */
-    { id: 'C12', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '登顶者', rarity: 2, kind: 'permanent', stackable: true,
+    { id: 'C12', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '登顶者', rarity: 2, kind: 'permanent',
       desc: '第 10 层起，每胜利一场，本局力量 +1、敏捷 +1、速度 +1',
       mods: { winStatAfter10: 1 } },
     { id: 'C13', tags: ['tower', 'endless', 'battle', 'shop'], name: '精英杀手', rarity: 2, kind: 'permanent', desc: '对精英伤害 +40%；击败精英后回复 20% 最大生命', mods: { dmgMulElite: 0.40, eliteHealAfter: 0.20 } },
-    { id: 'C14', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '涅槃', rarity: 3, kind: 'permanent', shopWeight: 0.12, stackable: true, maxStacks: 2,
+    { id: 'C14', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '涅槃', rarity: 3, kind: 'permanent', shopWeight: 0.12, maxStacks: 2,
       desc: '每层战斗可复活一次；复活回复 50% 生命上限，本场力量、敏捷、速度 +50%',
       mods: { revivePct: 0.50, reviveStatMul: 0.50 } },
     /* ============================================================
@@ -947,73 +947,72 @@
      * 影响范围：战斗奖励的选项池（rollChoices）与试炼商店货架（rollShopSlots）。
      * **一局一次**（与 E07 挫锐 / E08 卸甲 同一口径）—— poolFilter / ownable
      * 用 instantOwnedCount 判上限，拿过一次之后就不再进任何池子。
-     * 之所以继续保留 `repeatable: true`：传奇掉率里的「可重复传奇是否已全部拥有」
+     * 它带 `repeatable` 标签（而不是「同名唯一」）：传奇掉率里的「可重复传奇是否已全部拥有」
      * 仍要把它算作一份（见 allRepeatableLegendsOwned），语义是「它能重复出现在池子里」。
      * ============================================================ */
-    { id: 'C51', tags: ['endless', 'battle', 'oncePerRun', 'repeatable'], name: '天命所归', rarity: 3, kind: 'instant', endlessOnly: true, repeatable: true, maxStacks: 1,
+    { id: 'C51', tags: ['endless', 'battle', 'oncePerRun', 'repeatable'], name: '天命所归', rarity: 3, kind: 'instant', maxStacks: 1,
       desc: '立即生效：本局战斗奖励与商店的史诗/传奇出率 ×2、普通出率 ×0.5',
       mods: { rarityBoost: 1, epicMul: 2, legendMul: 2, commonMul: 0.5 } },
-    { id: 'E01', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle'], name: '立即进货', rarity: 1, kind: 'limited', uses: 1, endlessOnly: true, nextBattle: true,
+    { id: 'E01', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle'], name: '立即进货', rarity: 1, kind: 'limited', uses: 1,
       desc: '下一场战斗结束后立即开启一次试炼商店，全部商品 5 折；若同时持有「steam大促」，两档折扣叠加为 3.5 折',
       mods: { postBattleShop: 1, postBattleShopDiscount: 0.50 } },
-    { id: 'E02', tags: ['endless', 'battle'], name: '试炼补贴', rarity: 0, kind: 'instant', endlessOnly: true, desc: '立刻获得 60 试炼币', mods: { instantCoins: 60 } },
-    { id: 'E03', tags: ['endless', 'battle'], name: '财源滚滚', rarity: 1, kind: 'instant', endlessOnly: true, desc: '立刻获得 120 试炼币', mods: { instantCoins: 120 } },
-    { id: 'E04', tags: ['endless', 'battle', 'oncePerRun'], name: 'steam大促', rarity: 1, kind: 'instant', endlessOnly: true, maxStacks: 1,
+    { id: 'E02', tags: ['endless', 'battle'], name: '试炼补贴', rarity: 0, kind: 'instant', desc: '立刻获得 60 试炼币', mods: { instantCoins: 60 } },
+    { id: 'E03', tags: ['endless', 'battle'], name: '财源滚滚', rarity: 1, kind: 'instant', desc: '立刻获得 120 试炼币', mods: { instantCoins: 120 } },
+    { id: 'E04', tags: ['endless', 'battle', 'oncePerRun'], name: 'steam大促', rarity: 1, kind: 'instant', maxStacks: 1,
       desc: '下一个试炼商店全部商品 7 折', mods: { shopDiscount: 0.30 } },
-    { id: 'E05', tags: ['endless', 'battle', 'shop', 'limited'], name: '战利品', rarity: 1, kind: 'limited', uses: 10, endlessOnly: true, desc: '接下来 10 场战斗的试炼币获取 ×1.6', mods: { coinBoostPct: 0.60 } },
-    { id: 'E06', tags: ['endless', 'battle', 'shop', 'limited'], name: '战利品·精', rarity: 2, kind: 'limited', uses: 10, endlessOnly: true, desc: '接下来 10 场战斗的试炼币获取 ×2.4', mods: { coinBoostPct: 1.40 } },
-    { id: 'C26', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '蛮力', rarity: 0, kind: 'permanent', stackable: true, unlimitedStacks: true, desc: '攻击 +6%', mods: { powerMul: 0.06 } },
-    { id: 'C27', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '灵巧', rarity: 0, kind: 'permanent', stackable: true, unlimitedStacks: true, desc: '敏捷 +8%', mods: { agilityMul: 0.08 } },
-    { id: 'C28', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '疾行', rarity: 0, kind: 'permanent', stackable: true, unlimitedStacks: true, desc: '速度 +8%', mods: { speedMul: 0.08 } },
-    { id: 'C29', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '体质', rarity: 0, kind: 'permanent', stackable: true, unlimitedStacks: true, desc: '生命上限 +10%', mods: { maxHpMul: 0.10 } },
-    { id: 'C30', tags: ['endless', 'battle', 'shop', 'unique'], name: '扩容背包', rarity: 2, kind: 'permanent', endlessOnly: true, unique: true, permSlot: 1,
+    { id: 'E05', tags: ['endless', 'battle', 'shop', 'limited'], name: '战利品', rarity: 1, kind: 'limited', uses: 10, desc: '接下来 10 场战斗的试炼币获取 ×1.6', mods: { coinBoostPct: 0.60 } },
+    { id: 'E06', tags: ['endless', 'battle', 'shop', 'limited'], name: '战利品·精', rarity: 2, kind: 'limited', uses: 10, desc: '接下来 10 场战斗的试炼币获取 ×2.4', mods: { coinBoostPct: 1.40 } },
+    { id: 'C26', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '蛮力', rarity: 0, kind: 'permanent', unlimitedStacks: true, desc: '攻击 +6%', mods: { powerMul: 0.06 } },
+    { id: 'C27', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '灵巧', rarity: 0, kind: 'permanent', unlimitedStacks: true, desc: '敏捷 +8%', mods: { agilityMul: 0.08 } },
+    { id: 'C28', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '疾行', rarity: 0, kind: 'permanent', unlimitedStacks: true, desc: '速度 +8%', mods: { speedMul: 0.08 } },
+    { id: 'C29', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '体质', rarity: 0, kind: 'permanent', unlimitedStacks: true, desc: '生命上限 +10%', mods: { maxHpMul: 0.10 } },
+    { id: 'C30', tags: ['endless', 'battle', 'shop', 'unique'], name: '扩容背包', rarity: 2, kind: 'permanent', permSlot: 1,
       desc: '本局永久增益槽位 +1', mods: { permSlot: 1 } },
-    { id: 'C31', tags: ['endless', 'battle', 'unique'], name: '仓库钥匙', rarity: 3, kind: 'permanent', endlessOnly: true, unique: true, permSlot: 2, battleOnly: true,
+    { id: 'C31', tags: ['endless', 'battle', 'unique'], name: '仓库钥匙', rarity: 3, kind: 'permanent', permSlot: 2,
       desc: '本局永久增益槽位 +2', mods: { permSlot: 2 } },
     /* 隐藏型选取 buff：拿到后立即三选一（已有武器/技能），强化指定对象；不显示在增益面板、不可出售 */
-    { id: 'C32', tags: ['endless', 'battle', 'shop', 'unique', 'hidden'], name: '神兵淬炼', rarity: 2, kind: 'permanent', endlessOnly: true, unique: true, hidden: true,
+    { id: 'C32', tags: ['endless', 'battle', 'shop', 'unique', 'hidden'], name: '神兵淬炼', rarity: 2, kind: 'permanent',
       desc: '立即从已有武器中随机三选一，该武器伤害 +100%', mods: { pickWeaponPct: 1.00 } },
-    { id: 'C33', tags: ['endless', 'battle', 'shop', 'unique', 'hidden'], name: '秘技通神', rarity: 2, kind: 'permanent', endlessOnly: true, unique: true, hidden: true,
+    { id: 'C33', tags: ['endless', 'battle', 'shop', 'unique', 'hidden'], name: '秘技通神', rarity: 2, kind: 'permanent',
       desc: '立即从已有主动技能中随机三选一，该技能触发概率 +60%', mods: { pickSkillPct: 0.60 } },
     /* 对抗环境词缀的三档 buff（普通/稀有/史诗） */
-    { id: 'N09', tags: ['endless', 'battle', 'shop', 'limited'], name: '晴空护符', rarity: 0, kind: 'limited', uses: 3, endlessOnly: true,
+    { id: 'N09', tags: ['endless', 'battle', 'shop', 'limited'], name: '晴空护符', rarity: 0, kind: 'limited', uses: 3,
       desc: '接下来 3 场：无视环境词缀，并把负面环境词缀反弹给对手', mods: { envIgnore: 1, envReflect: 1 } },
-    { id: 'N10', tags: ['endless', 'battle', 'shop', 'limited'], name: '避风斗篷', rarity: 1, kind: 'limited', uses: 10, endlessOnly: true,
+    { id: 'N10', tags: ['endless', 'battle', 'shop', 'limited'], name: '避风斗篷', rarity: 1, kind: 'limited', uses: 10,
       desc: '接下来 10 场：无视环境词缀', mods: { envIgnore: 1 } },
     /* 反噬豁免：限次 10 场，免疫**一切反伤**（荆棘铁壁 / 荆棘之甲 / 镜鳞反噬 /
      * 绝对防御反伤）。无尽塔后期到处都是反伤，这条是硬解。 */
-    { id: 'N15', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle'], name: '反噬豁免', rarity: 1, kind: 'limited', uses: 10, endlessOnly: true, nextBattle: true,
+    { id: 'N15', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle'], name: '反噬豁免', rarity: 1, kind: 'limited', uses: 10,
       desc: '每场战斗免疫一切反伤· 共 10 场',
       mods: { reflectImmune: 1 } },
     /* 低血 combo 的两条限次类（与狂怒成套；限次 10 场） */
     /* 这两条虽然也是「下一场战斗」生命周期（nextBattle），但在无尽塔里是
      * **10 场限次**（每场各生效一次、打完扣 1），所以文案按「每场」写，
      * 界面也会照常显示「剩 N 场」。 */
-    { id: 'N13', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle'], name: '血之契约', rarity: 0, kind: 'limited', uses: 10, endlessOnly: true, nextBattle: true,
+    { id: 'N13', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle'], name: '血之契约', rarity: 0, kind: 'limited', uses: 10,
       desc: '每场战斗开始时生命上限 +100%· 共 10 场',
       mods: { emptyMaxHpMul: 1.00 } },
-    { id: 'N14', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle'], name: '铁血护盾', rarity: 1, kind: 'limited', uses: 10, endlessOnly: true, nextBattle: true,
+    { id: 'N14', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle'], name: '铁血护盾', rarity: 1, kind: 'limited', uses: 10,
       desc: '每场战斗中生命低于 50% 时获得 50% 减伤 · 共 10 场',
       mods: { lowHpTakenMul: -0.50, lowHpAt: 0.50 } },
-    { id: 'C45', tags: ['endless', 'battle', 'shop'], name: '天象之眼', rarity: 2, kind: 'permanent', endlessOnly: true,
+    { id: 'C45', tags: ['endless', 'battle', 'shop'], name: '天象之眼', rarity: 2, kind: 'permanent',
       desc: '无视负面环境词缀；把负面环境词缀反弹给对手；敌方无法获得环境词缀加成',
       mods: { envIgnore: 1, envReflect: 1, envDenyGood: 1 } },
-    { id: 'C24', tags: ['endless', 'battle', 'stackable'], name: '名贵手表', rarity: 1, kind: 'permanent', endlessOnly: true, shopBanned: true, stackable: true, maxStacks: 2,
+    { id: 'C24', tags: ['endless', 'battle', 'stackable'], name: '名贵手表', rarity: 1, kind: 'permanent', maxStacks: 2,
       desc: '售出可获得 200 试炼币', mods: { sellValue: 200 } },
-    { id: 'C25', tags: ['endless', 'battle', 'shop'], name: '战利品账本', rarity: 1, kind: 'permanent', endlessOnly: true,
+    { id: 'C25', tags: ['endless', 'battle', 'shop'], name: '战利品账本', rarity: 1, kind: 'permanent',
       desc: '售出可获得 50 试炼币；每胜利一场售价 +10',
       mods: { sellValue: 50, sellGrowthPerWin: 10 } },
     { id: 'C15', tags: ['tower', 'endless', 'battle', 'shop'], name: '增幅水晶', rarity: 2, kind: 'permanent', desc: '本局内所有 buff 的效果 ×1.4', mods: { globalMul: 1.40 } },
-    { id: 'E09', tags: ['endless', 'battle'], name: '重整旗鼓', rarity: 0, kind: 'instant', endlessOnly: true,
+    { id: 'E09', tags: ['endless', 'battle'], name: '重整旗鼓', rarity: 0, kind: 'instant',
       desc: '立即获得 1 枚重新挑战币', mods: { instantRetry: 1 } },
-    { id: 'E10', tags: ['endless', 'battle'], name: '背水一战', rarity: 2, kind: 'instant', endlessOnly: true,
+    { id: 'E10', tags: ['endless', 'battle'], name: '背水一战', rarity: 2, kind: 'instant',
       desc: '立即获得 3 枚重新挑战币', mods: { instantRetry: 3 } },
-    { id: 'E07', tags: ['endless', 'battle', 'oncePerRun', 'repeatable'], name: '挫锐', rarity: 0, kind: 'instant', endlessOnly: true, repeatable: true, maxStacks: 1,
+    { id: 'E07', tags: ['endless', 'battle', 'oncePerRun', 'repeatable'], name: '挫锐', rarity: 0, kind: 'instant', maxStacks: 1,
       desc: '立刻让本局所有敌人的生命上限 −10%', mods: { enemyMaxHpDown: 0.10 } },
-    { id: 'E08', tags: ['endless', 'battle', 'oncePerRun', 'repeatable'], name: '卸甲', rarity: 1, kind: 'instant', endlessOnly: true, repeatable: true, maxStacks: 1,
+    { id: 'E08', tags: ['endless', 'battle', 'oncePerRun', 'repeatable'], name: '卸甲', rarity: 1, kind: 'instant', maxStacks: 1,
       desc: '立刻让本局所有敌人的生命上限 −15%', mods: { enemyMaxHpDown: 0.15 } },
-    { id: 'E11', tags: ['endless', 'battle', 'oncePerRun', 'repeatable'], name: '挫锋', rarity: 2, kind: 'instant', endlessOnly: true, battleOnly: true,
-      repeatable: true, maxStacks: 1,
+    { id: 'E11', tags: ['endless', 'battle', 'oncePerRun', 'repeatable'], name: '挫锋', rarity: 2, kind: 'instant', maxStacks: 1,
       desc: '立刻让本局所有敌人的攻击力 −15%',
       mods: { enemyPowerDown: 0.15 } },
     { id: 'C34', tags: ['tower', 'endless', 'battle', 'shop'], name: '轻装上阵', rarity: 0, kind: 'permanent',
@@ -1024,38 +1023,38 @@
      * **每消费 5 试炼币** → 随机一项「力+1 / 敏+1 / 速+1 / 生命上限+5」，可无限累计。
      * 累计结果与「距下次还差几枚」都显示在增益面板上（progressOf）。
      * 注意：买到「挥金如土」本身的这笔花费也计入（见 buyShopSlot 的记账顺序）。 */
-    { id: 'C36', tags: ['endless', 'battle', 'shop', 'repeatable'], name: '挥金如土', rarity: 3, kind: 'permanent', repeatable: true,
+    { id: 'C36', tags: ['endless', 'battle', 'shop', 'repeatable'], name: '挥金如土', rarity: 3, kind: 'permanent',
       desc: '每在试炼商店消费 5 试炼币，随机获得「力 +1 / 敏 +1 / 速 +1 / 生命上限 +5」中的一项',
       mods: { shopSpendStep: 5, shopSpendStat: 1, shopSpendHp: 5 } },
-    { id: 'C37', tags: ['endless', 'battle', 'shop', 'repeatable', 'hidden'], name: '虚空铭文', rarity: 3, kind: 'permanent', endlessOnly: true, hidden: true, repeatable: true,
+    { id: 'C37', tags: ['endless', 'battle', 'shop', 'repeatable', 'hidden'], name: '虚空铭文', rarity: 3, kind: 'permanent',
       desc: '从永久增益里选一个附赠铭文：它不再占用永久增益位',
       mods: { pickPermanentFree: 1 } },
-    { id: 'C39', tags: ['endless', 'battle', 'shop', 'limited'], name: '力量烙印', rarity: 0, kind: 'limited', uses: 1000, endlessOnly: true,
+    { id: 'C39', tags: ['endless', 'battle', 'shop', 'limited'], name: '力量烙印', rarity: 0, kind: 'limited', uses: 1000,
       desc: '力量 +8%，损毁后 +16%；每打完一场小概率损毁（6%）',
       mods: { fragileStat: 'power', fragilePct: 0.08, fragileBreakPct: 6 } },
-    { id: 'C40', tags: ['endless', 'battle', 'shop', 'limited'], name: '敏捷烙印', rarity: 0, kind: 'limited', uses: 1000, endlessOnly: true,
+    { id: 'C40', tags: ['endless', 'battle', 'shop', 'limited'], name: '敏捷烙印', rarity: 0, kind: 'limited', uses: 1000,
       desc: '敏捷 +8%，损毁后 +16%；每打完一场小概率损毁（6%）',
       mods: { fragileStat: 'agility', fragilePct: 0.08, fragileBreakPct: 6 } },
-    { id: 'C41', tags: ['endless', 'battle', 'shop', 'limited'], name: '速度烙印', rarity: 0, kind: 'limited', uses: 1000, endlessOnly: true,
+    { id: 'C41', tags: ['endless', 'battle', 'shop', 'limited'], name: '速度烙印', rarity: 0, kind: 'limited', uses: 1000,
       desc: '速度 +8%，损毁后 +16%；每打完一场小概率损毁（6%）',
       mods: { fragileStat: 'speed', fragilePct: 0.08, fragileBreakPct: 6 } },
-    { id: 'C42', tags: ['endless', 'battle', 'shop', 'limited'], name: '力量烙印·精', rarity: 1, kind: 'limited', uses: 1000, endlessOnly: true,
+    { id: 'C42', tags: ['endless', 'battle', 'shop', 'limited'], name: '力量烙印·精', rarity: 1, kind: 'limited', uses: 1000,
       desc: '力量 +14%，损毁后 +28%；每打完一场小概率损毁（6%）',
       mods: { fragileStat: 'power', fragilePct: 0.14, fragileBreakPct: 6 } },
-    { id: 'C43', tags: ['endless', 'battle', 'shop', 'limited'], name: '敏捷烙印·精', rarity: 1, kind: 'limited', uses: 1000, endlessOnly: true,
+    { id: 'C43', tags: ['endless', 'battle', 'shop', 'limited'], name: '敏捷烙印·精', rarity: 1, kind: 'limited', uses: 1000,
       desc: '敏捷 +14%，损毁后 +28%；每打完一场小概率损毁（6%）',
       mods: { fragileStat: 'agility', fragilePct: 0.14, fragileBreakPct: 6 } },
-    { id: 'C44', tags: ['endless', 'battle', 'shop', 'limited'], name: '速度烙印·精', rarity: 1, kind: 'limited', uses: 1000, endlessOnly: true,
+    { id: 'C44', tags: ['endless', 'battle', 'shop', 'limited'], name: '速度烙印·精', rarity: 1, kind: 'limited', uses: 1000,
       desc: '速度 +14%，损毁后 +28%；每打完一场小概率损毁（6%）',
       mods: { fragileStat: 'speed', fragilePct: 0.14, fragileBreakPct: 6 } },
     /* 传奇烙印「终焉烙印」：**终乘**类 —— 先把局内所有加算/成长算完，最后再乘。
      * 存在时 力/敏/速/生命上限 ×1.25；损毁后本局 ×1.5。
      * 可重复获得，每次独立相乘（多层 = 1.5^n，而不是 1+0.5n）。 */
-    { id: 'C49', tags: ['endless', 'battle', 'shop', 'limited', 'repeatable'], name: '终焉烙印', rarity: 3, kind: 'limited', uses: 1000, endlessOnly: true, repeatable: true, maxStacks: 3,
+    { id: 'C49', tags: ['endless', 'battle', 'shop', 'limited', 'repeatable'], name: '终焉烙印', rarity: 3, kind: 'limited', uses: 1000, maxStacks: 3,
       desc: '力/敏/速/生命上限 +25%（终乘），损毁后本局 +50%；每打完一场小概率损毁',
       mods: { fragileFinalMul: true, fragileAddAlive: 0.25, fragileAddBurned: 0.5, fragileBreakPct: 6, repeatWeight: 0.10 } },
     /* 稀有烙印「涌泉烙印」：跳绿字的回血量 +10%；损毁后本局 +20%（同样是加算层）。 */
-    { id: 'C52', tags: ['endless', 'battle', 'shop', 'limited', 'repeatable'], name: '涌泉烙印', rarity: 1, kind: 'limited', uses: 1000, endlessOnly: true, repeatable: true,
+    { id: 'C52', tags: ['endless', 'battle', 'shop', 'limited', 'repeatable'], name: '涌泉烙印', rarity: 1, kind: 'limited', uses: 1000,
       desc: '治疗量 +10%，损毁后本局 +20%',
       mods: { fragileFinalMul: true, fragileHealAddAlive: 0.10, fragileHealAddBurned: 0.20,
         fragileBreakPct: 6, repeatWeight: 0.3 } },
@@ -1063,7 +1062,7 @@
      * 每场战斗的试炼币获取 +15%；损毁后本局 +30%（同样是「存在/损毁」两段加算）。
      * 记账字段与前两条烙印同一套：run.fragileCoinBase（未破碎份数）+
      * run.fragileCoinBurned（已破碎份数的明细数组），见 tower.js 的 fragileCoinBonus。 */
-    { id: 'C53', tags: ['endless', 'battle', 'limited', 'oncePerRun'], name: '淘金烙印', rarity: 3, kind: 'limited', uses: 1000, endlessOnly: true, battleOnly: true, maxStacks: 1,
+    { id: 'C53', tags: ['endless', 'battle', 'limited', 'oncePerRun'], name: '淘金烙印', rarity: 3, kind: 'limited', uses: 1000, maxStacks: 1,
       desc: '战斗获得试炼币 +15%，损毁后本局 +30%；每打完一场小概率损毁（6%）',
       mods: { fragileCoinAddAlive: 0.15, fragileCoinAddBurned: 0.30, fragileBreakPct: 6 } },
     { id: 'C38', tags: ['tower', 'endless', 'battle', 'shop'], name: '先机预判', rarity: 2, kind: 'permanent',
@@ -1075,7 +1074,7 @@
    * ============================================================ */
   const BUFF_BY_ID = Object.fromEntries(BUFFS.map((b) => [b.id, b]));
   /* 「下一场战斗」语义的增益 id 集合（挑战塔里打完一场即消耗，卡面不显示限次）。 */
-  const TOWER_BATTLE_IDS = BUFFS.filter((b) => b.nextBattle).map((b) => b.id);
+  const TOWER_BATTLE_IDS = BUFFS.filter((b) => hasTag(b, 'nextBattle')).map((b) => b.id);
   const RARITY_NAME = ['普通', '稀有', '史诗', '传奇'];
   const RARITY_WEIGHTS = [66, 21, 10, 3];        // 每个随机槽独立 Roll
   /* 试炼商店折扣口径：E04 steam大促 −30%；E01 立即进货的战后商店 −50%；
@@ -1194,11 +1193,13 @@
     'E.choice': ['endless', 'battle'],     // 无尽塔场间选择（战斗奖励）
     'E.shop': ['shop'],                    // 无尽塔试炼商店
   });
-  const tagSet = (b) => (b && Array.isArray(b.tags) ? b.tags : []);
-  const hasTag = (b, t) => tagSet(b).indexOf(t) >= 0;
-  const tagsOf = (b) => tagSet(b).slice();
-  const buffsWithTag = (t) => BUFFS.filter((b) => hasTag(b, t));
-  const poolsOf = (b) => Object.keys(POOL_TAGS).filter((pool) => POOL_TAGS[pool].every((t) => hasTag(b, t)));
+  /* 这几个写成 function 声明（会提升）：文件前面的表（TOWER_BATTLE_IDS 等）
+   * 也要按标签筛，不能等到这里才可用。 */
+  function tagSet(b) { return b && Array.isArray(b.tags) ? b.tags : []; }
+  function hasTag(b, t) { return tagSet(b).indexOf(t) >= 0; }
+  function tagsOf(b) { return tagSet(b).slice(); }
+  function buffsWithTag(t) { return BUFFS.filter((b) => hasTag(b, t)); }
+  function poolsOf(b) { return Object.keys(POOL_TAGS).filter((pool) => POOL_TAGS[pool].every((t) => hasTag(b, t))); }
   /* 无尽专属 mod：带这些效果的增益只在无尽塔成立（环境词缀 / 试炼币 / 商店 /
    * 重新挑战币 / 结算 / 商店消费相关）。挑战塔带这类标签/效果一律加载期报错。 */
   const ENDLESS_ONLY_MODS = [
@@ -1209,7 +1210,7 @@
     'pickSkillPct', 'pickPermanentFree', 'sellValue', 'sellGrowthPerWin', 'postBattleShop',
     'postBattleShopDiscount', 'shopSpendStep', 'shopSpendStat', 'shopSpendHp',
   ];
-  const hasEndlessOnlyMod = (b) => Object.keys(b.mods || {}).some((k) => ENDLESS_ONLY_MODS.indexOf(k) >= 0);
+  function hasEndlessOnlyMod(b) { return Object.keys(b.mods || {}).some((k) => ENDLESS_ONLY_MODS.indexOf(k) >= 0); }
   function poolRoster(b) {
     return poolsOf(b);
   }
@@ -1253,31 +1254,20 @@
       throw new Error('挑战塔池不该包含无尽专属增益 ' + b.id + '（' + bad.join(',') + '）—— 请去掉 tower 标签');
     }
   }
-  /* ---- 标签 ↔ 旧字段：**只做一致性校验，不写回** ----
-   * 池子归属已经全部由标签推导，旧字段（towerOnly/endlessOnly/battleOnly/shopBanned/
-   * stackable/unique/repeatable/nextBattle/hidden）只在数据里**显式写过**的地方存在
-   * （其它地方是 undefined，等价于 false），历史调用点照旧读它们。
-   * 写法与标签冲突时报错，避免出现「标签说 A、字段说 B」。 */
-  const LEGACY_FLAGS = {
-    towerOnly: (b) => hasTag(b, 'tower') && !hasTag(b, 'endless'),
-    endlessOnly: (b) => hasTag(b, 'endless') && !hasTag(b, 'tower'),
-    battleOnly: (b) => hasTag(b, 'battle') && !hasTag(b, 'shop'),
-    shopBanned: (b) => !hasTag(b, 'shop'),
-    stackable: (b) => hasTag(b, 'stackable'),
-    unique: (b) => hasTag(b, 'unique'),
-    repeatable: (b) => hasTag(b, 'repeatable'),
-    nextBattle: (b) => hasTag(b, 'nextBattle'),
-    hidden: (b) => hasTag(b, 'hidden'),
-  };
+  /* ---- 冗余守门：**旧字段一律不许再写** ----
+   * 池子归属、可叠层、同名唯一、限次生命周期……全都由 `tags` 表达，
+   * 数据里再出现 towerOnly / endlessOnly / battleOnly / shopBanned / stackable /
+   * repeatable / unique / nextBattle / hidden 这些布尔字段就是冗余，直接抛错。
+   * （历史上这些字段是从一堆分支里反推池子的，漏标一次就会串池 —— 现在只留标签一条路。） */
+  const FORBIDDEN_FIELDS = ['towerOnly', 'endlessOnly', 'battleOnly', 'shopBanned',
+    'stackable', 'repeatable', 'unique', 'nextBattle', 'hidden'];
   for (const b of BUFFS) {
-    for (const k of Object.keys(LEGACY_FLAGS)) {
-      if (!(k in b)) continue;
-      const want = LEGACY_FLAGS[k](b);
-      if (!!b[k] !== want) {
-        throw new Error('增益 ' + b.id + ' 的字段 ' + k + '=' + b[k] + ' 与 tags 推导出的 ' + want + ' 不一致');
-      }
+    const bad = FORBIDDEN_FIELDS.filter((k) => k in b);
+    if (bad.length) {
+      throw new Error('增益 ' + b.id + ' 还写着冗余字段 ' + bad.join(',') + ' —— 请改用 tags 表达');
     }
   }
+
   /* 主塔（挑战塔）池 = 挑战塔场间选择池；无尽池 = 无尽塔场间选择池；商店池 = 无尽塔商店。 */
   const towerPool = ROSTERS.filter((r) => r.pools.indexOf('T.choice') >= 0).map((r) => r.b);
   const endlessPool = ROSTERS.filter((r) => r.pools.indexOf('E.choice') >= 0).map((r) => r.b);

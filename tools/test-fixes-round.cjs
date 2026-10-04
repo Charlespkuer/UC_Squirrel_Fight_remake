@@ -711,7 +711,7 @@ test('需求14：用「补给」替代「紧急包扎」，去掉后者；金蝉
   assert.ok(!/type: 'heal'/.test(core.replace(/\/\*[\s\S]*?\*\//g, '')), '选择池里不该再有 heal 卡');
   assert.equal(TD.BUFF_BY_ID.N04.uses, 10, '金蝉脱壳的 uses 仍是 10');
   /* 挑战塔里限次类一律是「下一场战斗」，所以卡面文案改成单场；无尽塔仍按 uses 显示。 */
-  assert.equal(TD.BUFF_BY_ID.N04.nextBattle, true, '金蝉脱壳应当标 nextBattle');
+  assert.equal(TD.hasTag(TD.BUFF_BY_ID.N04, 'nextBattle'), true, '金蝉脱壳应当带 nextBattle 标签');
   assert.match(TD.BUFF_BY_ID.N04.desc, /下一场战斗/, '文字要写成「下一场战斗」：' + TD.BUFF_BY_ID.N04.desc);
   // 场间选择里全是真增益（含补给 N08 的可能性存在）
   const run = c.Tower._debugRun('endless');
@@ -759,7 +759,7 @@ test('需求15：E04「steam大促」一次性 7 折；E01「立即进货」战�
   const e01 = TD.BUFF_BY_ID.E01;
   assert.equal(e01.kind, 'limited', 'E01 应当是限次类');
   assert.equal(e01.uses, 1, 'E01 限次 1');
-  assert.equal(e01.nextBattle, true, 'E01 是「下一场战斗」类');
+  assert.equal(TD.hasTag(e01, 'nextBattle'), true, 'E01 是「下一场战斗」类');
   assert.equal(e01.mods.postBattleShop, 1, 'E01 应当挂「战后开店」');
   assert.equal(e01.mods.postBattleShopDiscount, 0.50, 'E01 单用 5 折');
   assert.ok(!e01.mods.openShop, 'E01 不该再用「立刻开店」的旧口径');
@@ -978,31 +978,31 @@ test('需求21：挑战塔不再生成任何「只有无尽塔用得上」的增
   for (const b of TD.towerPool) {
     const bad = Object.keys(b.mods || {}).filter((k) => ENDLESS_ONLY.includes(k));
     assert.equal(bad.length, 0, '挑战塔池不该有 ' + b.id + '（' + bad.join(',') + '）');
-    assert.ok(!b.endlessOnly, '挑战塔池不该有无尽专属条目：' + b.id);
+    assert.ok(!(TD.hasTag(b, 'endless') && !TD.hasTag(b, 'tower')), '挑战塔池不该有无尽专属条目：' + b.id);
   }
   // 具体两条：晴空护符 / 避风斗篷（作用于环境词缀，挑战塔没有环境）
-  assert.equal(TD.BUFF_BY_ID.N09.endlessOnly, true, '晴空护符应当标无尽专属');
-  assert.equal(TD.BUFF_BY_ID.N10.endlessOnly, true, '避风斗篷应当标无尽专属');
+  assert.equal(TD.hasTag(TD.BUFF_BY_ID.N09, 'endless') && !TD.hasTag(TD.BUFF_BY_ID.N09, 'tower'), true, '晴空护符应当标无尽专属');
+  assert.equal(TD.hasTag(TD.BUFF_BY_ID.N10, 'endless') && !TD.hasTag(TD.BUFF_BY_ID.N10, 'tower'), true, '避风斗篷应当标无尽专属');
   assert.ok(!TD.towerPool.some((b) => b.id === 'N09' || b.id === 'N10'), '它们不该出现在挑战塔池');
   assert.ok(!TD.towerPool.some((b) => b.mods && (b.mods.envIgnore || b.mods.envReflect)), '挑战塔池不该有环境类');
   assert.ok(!TD.towerPool.some((b) => b.mods && b.mods.coinBoostPct), '挑战塔池不该有试炼币类');
   // 烙印（本局永久保留）也不该进塔 —— 挑战塔的增益只服务下一场
   assert.ok(!TD.towerPool.some((b) => /^C4[0-4]$/.test(b.id)), '烙印不该出现在挑战塔池');
-  for (const id of ['C39', 'C42']) assert.equal(TD.BUFF_BY_ID[id].endlessOnly, true, id + ' 应当标无尽专属');
+  for (const id of ['C39', 'C42']) assert.equal(TD.hasTag(TD.BUFF_BY_ID[id], 'endless') && !TD.hasTag(TD.BUFF_BY_ID[id], 'tower'), true, id + ' 应当标无尽专属');
   /* 池子规模：towerPool 现在是「挑战塔**归属**」的完整名单（场间选择池），
    * 包含限次类与永久类 —— 塔里本来就能选到永久增益（无尽塔专属的除外）。 */
   const towerLimited = TD.towerPool.filter((b) => b.kind === 'limited');
   /* 本轮改动：删掉 G03-G05（3 条）与 T03/T06/T08/T09（4 条）→ 挑战塔专属限次类 31 → 24；
    * 永久类因为删掉 C08、并把 C03（猎侠者）改成**无尽专属**（不再进挑战塔池），35 → 33。 */
   assert.equal(towerLimited.length, 24, '挑战塔的限次类应当是 24 条（本轮删了 7 条专属），实测 ' + towerLimited.length);
-  assert.equal(towerLimited.filter((b) => b.towerOnly).length, 24, '其中 24 条是挑战塔专属（含 N/M/G/T 四系）');
+  assert.equal(towerLimited.filter((b) => TD.hasTag(b, 'tower') && !TD.hasTag(b, 'endless')).length, 24, '其中 24 条是挑战塔专属（含 N/M/G/T 四系）');
   /* 本轮「严格池子管理」：C36 挥金如土挂在试炼商店消费上 → 改成无尽塔专属，
    * 永久类 33 → 32。 */
   assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 32, '永久类也属于挑战塔池（共 32 条）');
   assert.equal(TD.towerPool.filter((b) => b.kind === 'instant').length, 0, '即时类不进选择池');
   // 无尽池不该混入挑战塔专属（它们按「一场定胜负」设计）
-  assert.equal(TD.endlessPool.filter((b) => b.towerOnly).length, 0, '无尽选择池不该有挑战塔专属');
-  assert.equal(TD.shopPool.filter((b) => b.towerOnly).length, 0, '无尽商店池不该有挑战塔专属');
+  assert.equal(TD.endlessPool.filter((b) => TD.hasTag(b, 'tower') && !TD.hasTag(b, 'endless')).length, 0, '无尽选择池不该有挑战塔专属');
+  assert.equal(TD.shopPool.filter((b) => TD.hasTag(b, 'tower') && !TD.hasTag(b, 'endless')).length, 0, '无尽商店池不该有挑战塔专属');
   // 挑战塔实战里抽到的选项也必须是池内成员
   const S = c.State.state(); S.props[23] = 99;
   c.Tower._debugSetLayer(0);
@@ -1094,7 +1094,7 @@ test('需求23：挑战塔限次类只表达「下一场战斗」，不显示限
   // 所有限次类都标了 nextBattle（含新加的挑战塔专属）
   for (const b of TD.towerPool) {
     if (b.kind !== 'limited') continue;
-    assert.equal(b.nextBattle, true, b.id + ' 应当标 nextBattle');
+    assert.equal(TD.hasTag(b, 'nextBattle'), true, b.id + ' 应当带 nextBattle 标签');
     assert.match(b.desc, /下一场战斗/, b.id + ' 的文案要写「下一场战斗」：' + b.desc);
     assert.ok(!/接下来\s*\d+\s*场|本层/.test(b.desc), b.id + ' 的文案不该再出现「N 场 / 本层」：' + b.desc);
   }
@@ -1125,14 +1125,14 @@ test('需求23：挑战塔限次类只表达「下一场战斗」，不显示限
 test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => {
   const c = setup();
   const TD = c.TowerData;
-  const tower = TD.BUFFS.filter((b) => b.towerOnly);
+  const tower = TD.BUFFS.filter((b) => TD.hasTag(b, 'tower') && !TD.hasTag(b, 'endless'));
   assert.ok(tower.length >= 12, '至少 12 条挑战塔专属，实测 ' + tower.length);
   // 池子隔离
-  assert.equal(TD.towerPool.filter((b) => b.towerOnly).length, tower.length, '专属全在挑战塔池');
-  assert.equal(TD.endlessPool.filter((b) => b.towerOnly).length, 0, '专属不该进无尽池');
+  assert.equal(TD.towerPool.filter((b) => TD.hasTag(b, 'tower') && !TD.hasTag(b, 'endless')).length, tower.length, '专属全在挑战塔池');
+  assert.equal(TD.endlessPool.filter((b) => TD.hasTag(b, 'tower') && !TD.hasTag(b, 'endless')).length, 0, '专属不该进无尽池');
   for (const b of tower) {
     assert.equal(b.kind, 'limited', b.id + ' 应当是限次类（塔里=下一场）');
-    assert.equal(b.nextBattle, true, b.id + ' 应当 nextBattle');
+    assert.equal(TD.hasTag(b, 'nextBattle'), true, b.id + ' 应当带 nextBattle 标签');
     assert.match(b.desc, /下一场战斗/, b.id + ' 文案要写「下一场战斗」');
   }
   // 关键几条的数值（本轮 T 组重排过：删掉 T03/T06/T08/T09 之后其余前移）
@@ -1411,7 +1411,7 @@ test('需求26：积分扩展（拿增益计分 + 两个隐藏成就）', () => 
   const newLogs = (run().scoreLog || []).slice(logBefore).map((x) => x.tag);
   assert.ok(!newLogs.some((t) => /死而复生/.test(t)), '流水里不该再出现复活成就：' + JSON.stringify(newLogs));
   // 防刷分根因：金蝉脱壳改成 unique（一局只能拿一次），累计复活因此封顶在 13 次（10+每层1）
-  assert.equal(TD.BUFF_BY_ID.N04.unique, true, '金蝉脱壳必须是 unique，否则可无限叠、刷爆复活成就');
+  assert.equal(TD.hasTag(TD.BUFF_BY_ID.N04, 'unique'), true, '金蝉脱壳必须是 unique，否则可无限叠、刷爆复活成就');
   assert.ok(tiers[tiers.length - 1].at <= 10 + 3, '最高档阈值不该超过实际可达到的复活次数（10 + 每层 1）');
 
   // 6) 隐藏成就「超凡入圣」：跨档才触发，且**不能一次点亮整档**（回归：阈值判断写反过）
@@ -1662,21 +1662,21 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
   }
 
   // 2) 挑战塔专属：只能进挑战塔，绝不能出现在任何无尽池
-  for (const b of TD.BUFFS.filter((x) => x.towerOnly)) {
+  for (const b of TD.BUFFS.filter((x) => TD.hasTag(x, 'tower') && !TD.hasTag(x, 'endless'))) {
     assert.equal(JSON.stringify(roster(b.id)), '["T.choice"]', b.id + ' 应当只属于挑战塔，实测 ' + JSON.stringify(roster(b.id)));
     assert.ok(!TD.endlessPool.some((x) => x.id === b.id), b.id + ' 不该进无尽选择池');
     assert.ok(!TD.shopPool.some((x) => x.id === b.id), b.id + ' 不该进无尽商店池 ← 需求点名的泄漏');
   }
-  assert.equal(TD.BUFFS.filter((x) => x.towerOnly).length, 24, '应当有 24 条挑战塔专属（本轮删了 7 条）');
+  assert.equal(TD.BUFFS.filter((x) => TD.hasTag(x, 'tower') && !TD.hasTag(x, 'endless')).length, 24, '应当有 24 条挑战塔专属（本轮删了 7 条）');
 
   // 3) 无尽专属（显式标记或带无尽专属 mod）：绝不能出现在挑战塔池
   for (const b of TD.BUFFS) {
-    const endlessOnly = b.endlessOnly || hasEM(b);
+    const endlessOnly = (TD.hasTag(b, 'endless') && !TD.hasTag(b, 'tower')) || hasEM(b);
     if (!endlessOnly) continue;
     assert.ok(roster(b.id).every((t) => t.indexOf('E.') === 0),
       b.id + ' 是无尽专属，却出现在挑战塔池：' + JSON.stringify(roster(b.id)));
   }
-  assert.equal(TD.towerPool.filter((b) => b.endlessOnly || hasEM(b)).length, 0,
+  assert.equal(TD.towerPool.filter((b) => (TD.hasTag(b, 'endless') && !TD.hasTag(b, 'tower')) || hasEM(b)).length, 0,
     '挑战塔池里不该有任何无尽专属条目');
   // 需求点名的 6 条漏标条目（带无尽专属 mod 却曾在塔池里）
   for (const id of ['C30', 'C32', 'C33', 'C45', 'C25', 'C37']) {
@@ -1685,7 +1685,7 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
   }
 
   // 4) 无尽商店池的边界
-  assert.ok(!TD.shopPool.some((b) => b.shopBanned), 'shopBanned 的（名贵手表）不该进商店池');
+  assert.ok(!TD.shopPool.some((b) => !TD.hasTag(b, 'shop')), '不上商店的（名贵手表）不该进商店池');
   assert.ok(TD.shopPool.some((b) => b.id === 'N09'), '环境类晴空护符应当能在无尽商店买到');
   assert.equal(TD.shopPool.filter((b) => b.kind === 'instant').length, 0, '即时类不该进商店池');
 
@@ -1701,12 +1701,12 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
   const unmarked = TD.BUFFS.filter((b) => TD.hasTag(b, 'tower') && hasEM(b)).map((b) => b.id);
   assert.equal(unmarked.length, 0, '带无尽专属 mod 却仍标了挑战塔：' + JSON.stringify(unmarked));
   for (const id of ['C24', 'C25', 'C30', 'C31', 'C32', 'C33', 'C37', 'C45']) {
-    assert.equal(TD.BUFF_BY_ID[id].endlessOnly, true, id + ' 应当标 endlessOnly');
+    assert.equal(TD.hasTag(TD.BUFF_BY_ID[id], 'endless') && !TD.hasTag(TD.BUFF_BY_ID[id], 'tower'), true, id + ' 应当标无尽塔专属');
   }
   // 塔专属同样要有显式标记（数据自解释）
   for (const b of TD.towerPool) {
     if (TD.poolRoster(b).join() === 'T.choice') {
-      assert.ok(b.towerOnly === true || b.endlessOnly === true,
+      assert.ok((TD.hasTag(b, 'tower') && !TD.hasTag(b, 'endless')) || (TD.hasTag(b, 'endless') && !TD.hasTag(b, 'tower')),
         b.id + ' 只属于挑战塔，却没有 towerOnly / endlessOnly 标记');
     }
   }
@@ -1724,7 +1724,7 @@ test('需求32：池子分离的端到端实测（真跑两种塔的抽取，零
   S.level = 70; S.props[23] = 99999;
   for (let i = 1; i <= 18; i++) S.stages[i] = { npcIndex: 3, passed: true };
   const cid = (ch) => (typeof ch === 'string' ? ch : (ch && (ch.id || (ch.buff && ch.buff.id))));
-  const hasEM = (b) => !!(b && (b.endlessOnly || Object.keys(b.mods || {}).some((k) => TD.ENDLESS_ONLY_MODS.indexOf(k) >= 0)));
+  const hasEM = (b) => !!(b && ((TD.hasTag(b, 'endless') && !TD.hasTag(b, 'tower')) || Object.keys(b.mods || {}).some((k) => TD.ENDLESS_ONLY_MODS.indexOf(k) >= 0)));
 
   const sample = (mode, rounds) => {
     const seen = new Set();
@@ -1764,7 +1764,7 @@ test('需求32：池子分离的端到端实测（真跑两种塔的抽取，零
   assert.ok(tower.size >= 30, '挑战塔样本太少：' + tower.size);
   assert.ok(endless.size >= 30, '无尽塔样本太少：' + endless.size);
 
-  const towerOnlyIds = TD.BUFFS.filter((b) => b.towerOnly).map((b) => b.id);
+  const towerOnlyIds = TD.BUFFS.filter((b) => TD.hasTag(b, 'tower') && !TD.hasTag(b, 'endless')).map((b) => b.id);
   const leaked = [...endless].filter((id) => towerOnlyIds.indexOf(id) >= 0);
   assert.equal(leaked.length, 0, '挑战塔专属不该出现在无尽塔：' + JSON.stringify(leaked));
   const reverse = [...tower].filter((id) => hasEM(TD.BUFF_BY_ID[id]));
@@ -1896,7 +1896,7 @@ test('需求35：永久槽位的「占位口径」必须一致（修「7/8 拿�
 test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不叠层 / C12 恒为 0）', () => {
   const c = setup();
   const TD = c.TowerData, T = c.Tower, S = c.State;
-  const STACKABLE = TD.BUFFS.filter((b) => b.stackable).map((b) => b.id).sort();
+  const STACKABLE = TD.BUFFS.filter((b) => TD.hasTag(b, 'stackable')).map((b) => b.id).sort();
   /* 本轮新增的可叠层（对应「Cxx 可叠加 N 层」那组需求）：
    *   C03/C10/C19/C21/C22/C23 → 3 层；C24 → 2 层；C26-C29 → **无上限**（unlimitedStacks）。
    * C50「抉择扩充」也是 stackable，但叠层效果是「选项数 +1/层」而不是属性成比例；
@@ -2004,7 +2004,7 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
 test('需求36b：C50「抉择扩充」的叠层是「选项目数 +1/层」，上限 3 层（六选一）', () => {
   const c = setup();
   const TD = c.TowerData, T = c.Tower, S = c.State;
-  assert.equal(TD.BUFF_BY_ID.C50.stackable, true, 'C50 应当可叠层');
+  assert.equal(TD.hasTag(TD.BUFF_BY_ID.C50, 'stackable'), true, 'C50 应当可叠层');
   assert.equal(TD.BUFF_BY_ID.C50.maxStacks, 3, 'C50 上限 3 层');
   assert.equal(TD.BUFF_BY_ID.C50.mods.choiceCount, 1, '每层 +1 个选项');
   S.newGame('c50' + Math.random());
@@ -2465,8 +2465,8 @@ test('需求42：叠层增益按层数计价 / 仓库钥匙不进商店 / 登顶
 
   /* ---- ② 仓库钥匙（battleOnly）不进商店 ---- */
   const c31 = TD.BUFF_BY_ID.C31;
-  assert.equal(c31.battleOnly, true, 'C31 应当标 battleOnly');
-  assert.equal(c31.shopBanned, undefined, 'C31 不是靠 shopBanned 挡的（要靠 battleOnly 生效）');
+  assert.equal(TD.hasTag(c31, 'battle') && !TD.hasTag(c31, 'shop'), true, 'C31 应当只从战斗奖励掉落');
+  assert.ok(!TD.hasTag(c31, 'shop'), 'C31 不该上商店货架');
   assert.ok(!TD.shopPool.some((b) => b.id === 'C31'), 'C31 不该出现在商店池');
   assert.ok(TD.endlessPool.some((b) => b.id === 'C31'), 'C31 仍应出现在无尽选择池');
   assert.equal(JSON.stringify(TD.poolRoster(c31)), '["E.choice"]', 'C31 的归属应当只有 E.choice');
@@ -3000,8 +3000,8 @@ test('需求49：神兵淬炼 / 秘技通神 视为「立即生效类」，永�
     const b = TD.BUFF_BY_ID[id];
     assert.ok(b, id + ' 应当存在');
     assert.ok(b.mods && b.mods[key], id + '（' + b.name + '）应当挂 ' + key);
-    assert.equal(b.hidden, true, id + ' 应当是隐藏型（不在增益面板/商店池里单独出现）');
-    assert.equal(b.unique, true, id + ' 应当一局一次');
+    assert.equal(TD.hasTag(b, 'hidden'), true, id + ' 应当是隐藏型（不在增益面板里单独出现）');
+    assert.equal(TD.hasTag(b, 'unique'), true, id + ' 应当一局一次');
   }
 
   /* ② 满槽时买神兵淬炼：应当成功、不占新的槽、立刻登记「待选武器」 */
@@ -3056,11 +3056,11 @@ test('需求50：N13/N14 的界面口径（无尽塔 10 次限次）+ 寒霜锁�
     const b = TD.BUFF_BY_ID[id];
     assert.equal(b.kind, 'limited', id + ' 应当是限次类');
     assert.equal(b.uses, 10, id + ' 应当是 10 次限次');
-    assert.equal(b.endlessOnly, true, id + ' 应当只属于无尽塔');
-    assert.equal(b.towerOnly, undefined, id + ' 不该标 towerOnly');
-    assert.equal(b.nextBattle, true, id + ' 仍是「下一场战斗」生命周期');
+    assert.equal(TD.hasTag(b, 'endless') && !TD.hasTag(b, 'tower'), true, id + ' 应当只属于无尽塔');
+    assert.ok(!TD.hasTag(b, 'tower'), id + ' 不该带挑战塔标签');
+    assert.equal(TD.hasTag(b, 'nextBattle'), true, id + ' 仍是「下一场战斗」生命周期');
     /* 界面判据：towerOnly && nextBattle 才显示「下一场」 */
-    assert.ok(!(b.towerOnly && b.nextBattle), id + ' 不该被判成「只服务下一场」');
+    assert.ok(!(TD.hasTag(b, 'tower') && TD.hasTag(b, 'nextBattle')), id + ' 不该被判成「只服务下一场」');
     assert.ok(!TD.towerPool.some((x) => x.id === id), id + ' 不该出现在挑战塔池');
     assert.ok(TD.endlessPool.some((x) => x.id === id), id + ' 应当出现在无尽塔池');
     assert.ok(!/^下一场战斗/.test(b.desc), id + ' 描述应按「每场」写：' + b.desc);
@@ -3071,9 +3071,9 @@ test('需求50：N13/N14 的界面口径（无尽塔 10 次限次）+ 寒霜锁�
   const n15 = TD.BUFF_BY_ID.N15;
   assert.equal(n15.kind, 'limited', 'N15 应当是限次类');
   assert.equal(n15.uses, 10, 'N15 应当是 10 次限次');
-  assert.equal(n15.nextBattle, true, 'N15 是「下一场战斗」生命周期');
-  assert.equal(n15.endlessOnly, true, 'N15 只属于无尽塔');
-  assert.ok(!(n15.towerOnly && n15.nextBattle), 'N15 不该被判成「只服务下一场」');
+  assert.equal(TD.hasTag(n15, 'nextBattle'), true, 'N15 是「下一场战斗」生命周期');
+  assert.equal(TD.hasTag(n15, 'endless') && !TD.hasTag(n15, 'tower'), true, 'N15 只属于无尽塔');
+  assert.ok(!(TD.hasTag(n15, 'tower') && TD.hasTag(n15, 'nextBattle')), 'N15 不该被判成「只服务下一场」');
   assert.ok(TD.endlessPool.some((x) => x.id === 'N15'), 'N15 应当出现在无尽塔池');
   assert.ok(!TD.towerPool.some((x) => x.id === 'N15'), 'N15 不该出现在挑战塔池');
   assert.equal(TD.BUFF_BY_ID.N14.mods.lowHpTakenMul, -0.50, 'N14 仍是 50% 减伤');
@@ -3305,10 +3305,10 @@ test('需求53：unique 口径 / 塔顶 boss 变体池 / 幸运一击重复率 /
   const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;
 
   /* ① 仓库钥匙 / 扩容背包一局只出现一次；虚空铭文可重复出现 */
-  assert.equal(TD.BUFF_BY_ID.C30.unique, true, '扩容背包仍是一局一次');
-  assert.equal(TD.BUFF_BY_ID.C31.unique, true, '仓库钥匙仍是一局一次');
-  assert.equal(TD.BUFF_BY_ID.C37.unique, undefined, '虚空铭文不再受 unique 限制');
-  assert.equal(TD.BUFF_BY_ID.C37.repeatable, true, '虚空铭文应当标 repeatable');
+  assert.equal(TD.hasTag(TD.BUFF_BY_ID.C30, 'unique'), true, '扩容背包仍是一局一次');
+  assert.equal(TD.hasTag(TD.BUFF_BY_ID.C31, 'unique'), true, '仓库钥匙仍是一局一次');
+  assert.ok(!TD.hasTag(TD.BUFF_BY_ID.C37, 'unique'), '虚空铭文不再受 unique 限制');
+  assert.equal(TD.hasTag(TD.BUFF_BY_ID.C37, 'repeatable'), true, '虚空铭文应当标 repeatable');
   /* poolFilter 行为：拥有之后，前两者应当被排除、虚空铭文仍可再出现 */
   S.newGame('uniq' + Math.random());
   const st0 = S.state(); st0.level = 70; st0.props[23] = 99999;
@@ -3440,8 +3440,8 @@ test('需求54：挥金如土可重复 / 传奇商店降权 / 终焉烙印终乘
   const TD = c.TowerData, T = c.Tower, S = c.State;
 
   /* ① 挥金如土（C36）可以重复获得 */
-  assert.equal(TD.BUFF_BY_ID.C36.repeatable, true, 'C36 应当标 repeatable');
-  assert.equal(TD.BUFF_BY_ID.C36.unique, undefined, 'C36 不该再受 unique 限制');
+  assert.equal(TD.hasTag(TD.BUFF_BY_ID.C36, 'repeatable'), true, 'C36 应当标 repeatable');
+  assert.ok(!TD.hasTag(TD.BUFF_BY_ID.C36, 'unique'), 'C36 不该再受 unique 限制');
   S.newGame('c36' + Math.random());
   const st0 = S.state(); st0.level = 70; st0.props[23] = 99999;
   for (let i = 1; i <= 18; i++) st0.stages[i] = { npcIndex: 3, passed: true };
@@ -3480,7 +3480,7 @@ test('需求54：挥金如土可重复 / 传奇商店降权 / 终焉烙印终乘
   assert.equal(c49.name, '终焉烙印', 'C49 名称');
   assert.equal(c49.rarity, 3, 'C49 应当是传奇');
   assert.equal(c49.kind, 'limited', 'C49 应当是限次类');
-  assert.equal(c49.repeatable, true, 'C49 应当可重复获得');
+  assert.equal(TD.hasTag(c49, 'repeatable'), true, 'C49 应当可重复获得');
   assert.equal(c49.mods.fragileFinalMul, true, 'C49 是终乘烙印');
   assert.equal(c49.mods.fragileAddAlive, 0.25, '存在时 +25%');
   assert.equal(c49.mods.fragileAddBurned, 0.5, '损毁后 +50%');
@@ -3645,7 +3645,7 @@ test('需求55：装备星标防误合误卖 / 天命所归（传奇即时）/ �
   assert.equal(c51.rarity, 3, 'C51 应当是传奇');
   assert.equal(c51.kind, 'instant', 'C51 应当是即时类');
   assert.equal(c51.maxStacks, 1, 'C51 应当一局只能获得一次（instant + maxStacks 闸门）');
-  assert.equal(c51.repeatable, true, 'C51 仍保留 repeatable（传奇掉率的「可重复传奇是否全拥有」口径要用）');
+  assert.equal(TD.hasTag(c51, 'repeatable'), true, 'C51 仍带 repeatable 标签（传奇掉率的「可重复传奇是否全拥有」口径要用）');
   assert.equal(c51.mods.epicMul, 2, '史诗档 ×2');
   assert.equal(c51.mods.legendMul, 2, '传奇档 ×2');
   assert.equal(c51.mods.commonMul, 0.5, '普通档 ×0.5');
@@ -4048,7 +4048,7 @@ test('需求58：天象之眼剥夺全部负面环境 / 虚空铭文可重复拾
 
   /* ② 虚空铭文（C37）可重复拾取：第二、三次都要能正常落地 */
   const c37 = TD.BUFF_BY_ID.C37;
-  assert.equal(c37.repeatable, true, 'C37 应当可重复获得');
+  assert.equal(TD.hasTag(c37, 'repeatable'), true, 'C37 应当可重复获得');
   openRun();
   T.addBuff(T._debugRun('endless'), 'C29');   // 供附魔的永久增益
   T.addBuff(T._debugRun('endless'), 'C27');
@@ -4390,7 +4390,7 @@ test('需求62：减敌血的一次性 buff 一局一次 / 30 层后的敌人深
     const b = TD.BUFF_BY_ID[id];
     assert.equal(b.kind, 'instant', id + ' 应当是即时类');
     assert.equal(b.maxStacks, 1, id + ' 应当限定一局一次：' + b.maxStacks);
-    assert.equal(b.repeatable, true, id + ' 需要 repeatable 才能让 maxStacks 生效（否则被 unique 直接排除）');
+    assert.equal(TD.hasTag(b, 'repeatable'), true, id + ' 需要 repeatable 才能让 maxStacks 生效（否则被 unique 直接排除）');
     assert.ok(TD.endlessPool.some((x) => x.id === id), id + ' 应当在无尽塔池里');
   }
   openRun();
@@ -4984,7 +4984,7 @@ test('需求70：淘金烙印（C53）——传奇·只在战斗中掉落·一�
   assert.equal(c53.name, '淘金烙印', 'C53 名称');
   assert.equal(c53.rarity, 3, 'C53 应当是传奇');
   assert.equal(c53.kind, 'limited', 'C53 应当是限次类（烙印）');
-  assert.equal(c53.battleOnly, true, 'C53 应当只从战斗奖励掉落');
+  assert.equal(TD.hasTag(c53, 'battle') && !TD.hasTag(c53, 'shop'), true, 'C53 应当只从战斗奖励掉落');
   assert.equal(c53.maxStacks, 1, 'C53 一局只能获得一次');
   assert.equal(c53.mods.fragileCoinAddAlive, 0.15, '未破碎 +15% 试炼币');
   assert.equal(c53.mods.fragileCoinAddBurned, 0.30, '破碎后 +30% 试炼币');
@@ -5041,7 +5041,8 @@ test('需求71：限次栏显示「未破碎的烙印叠层」', () => {
   assert.ok(a >= 0, 'tower-ui.js 里应当有 limitBadgeText');
   const b = src.findIndex((l, i) => i > a && l.includes('\n') === false && /^\s*\}$/.test(l));
   const fn = src.slice(a, b + 1).join('\n');
-  const ctx = { TowerData: { BUFF_BY_ID: TD.BUFF_BY_ID } };
+  /* limitBadgeText 现在按标签判定（TowerData.hasTag），所以桩里也要带上它。 */
+  const ctx = { TowerData: { BUFF_BY_ID: TD.BUFF_BY_ID, hasTag: TD.hasTag } };
   vm.createContext(ctx);
   const badge = vm.runInContext(fn + '\nlimitBadgeText;', ctx, { filename: 'limitBadgeText' });
 
@@ -5113,12 +5114,12 @@ test('需求72：涅槃（C14）一局可拿两次 —— 第 2 层改为「本�
 
   /* ① 数据：可叠 2 层；第三份被拒（叠满） */
   const c14 = TD.BUFF_BY_ID.C14;
-  assert.equal(c14.stackable, true, 'C14 应当可以叠层');
+  assert.equal(TD.hasTag(c14, 'stackable'), true, 'C14 应当可以叠层');
   assert.equal(c14.maxStacks, 2, 'C14 一局最多 2 层');
   assert.equal(c14.mods.revivePct, 0.50, '复活仍然回 50% 上限');
   assert.equal(c14.mods.reviveStatMul, 0.50, '复活后力/敏/速 +50% 不变（第 2 层不再放大它）');
   /* 本轮增益表重做后文案改成「每层战斗可复活一次…」；「一局能拿两次」由数据字段锁定 */
-  assert.equal(c14.stackable, true, '涅槃仍然可叠层');
+  assert.equal(TD.hasTag(c14, 'stackable'), true, '涅槃仍然可叠层');
   assert.equal(c14.maxStacks, 2, '涅槃一局最多 2 层：' + c14.maxStacks);
   assert.match(c14.desc, /每层战斗可复活一次/, '文案要写明每层可复活：' + c14.desc);
   openRun(3);

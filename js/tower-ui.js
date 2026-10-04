@@ -316,7 +316,7 @@
      * 无尽塔里的 N13 血之契约 / N14 铁血护盾同样带它，但它们是 **10 次限次**，
      * 必须照常显示总次数与当前剩余次数（否则玩家只看到「下一场」，
      * 完全看不出它其实还能用 10 场）。 */
-    if (buff.towerOnly && buff.nextBattle) {
+    if (TowerData.hasTag(buff, 'tower') && TowerData.hasTag(buff, 'nextBattle')) {
       return [buff.name + '（' + RARITY[buff.rarity] + ' · 挑战塔 · 下一场战斗）', buff.desc,
         '打完这一场就消失（挑战塔的增益只服务下一场）',
         b.on ? '当前生效中 · 点一下可以关掉' : '当前已关闭 · 点一下重新开启'].join('\n');
@@ -328,9 +328,9 @@
   function limitBadgeText(b) {
     const def = TowerData.BUFF_BY_ID[b.id] || {};
     const stackTag = b.stacks > 1 ? '×' + b.stacks + ' 层 · ' : '';
-    if (def.towerOnly && def.nextBattle) return stackTag + '下一场';
+    if (TowerData.hasTag(def, 'tower') && TowerData.hasTag(def, 'nextBattle')) return stackTag + '下一场';
     if (def.mods && def.mods.fragileBreakPct) return stackTag + '易碎 ' + def.mods.fragileBreakPct + '%';
-    if (def.nextBattle) return stackTag + '无尽塔 · 剩 ' + b.uses + ' 场';   // 无尽塔的单场限次类
+    if (TowerData.hasTag(def, 'nextBattle')) return stackTag + '无尽塔 · 剩 ' + b.uses + ' 场';   // 无尽塔的单场限次类
     return stackTag + '剩 ' + b.uses + ' 场';
   }
   function buffPanelsHtml(mode) {
@@ -433,6 +433,12 @@
   /* ============================================================
    * 【U5】入口图鉴与塔身可视化 —— buffCatalogHtml / towerVisual / planHtml
    * ============================================================ */
+  /* 卡片/悬停用的判据：**挑战塔专属**的「下一场战斗」限次类。
+   * 判据全部走标签（tower ∧ nextBattle）；无尽塔的 N13/N14 同样带 nextBattle 标签，
+   * 但它们是 10 次限次，必须照常显示总次数。 */
+  function isTowerNext(b) {
+    return !!(b && TowerData.hasTag(b, 'tower') && TowerData.hasTag(b, 'nextBattle'));
+  }
   function buffCatalogHtml() {
     /* 增益集锦 = **无尽塔的全增益展示**：只列带无尽塔标签的条目，
      * 挑战塔专属（tower-only）一条都不出现；hidden 的（选取型强化）也不列。 */
@@ -444,8 +450,8 @@
         ? '<div class="catalog-row"><b class="catalog-rarity r' + r + '">' + (RARITY[r] || '') + '</b>' +
           '<div class="buff-tags">' + group.map((b) => '<span class="buff-tag r' + b.rarity + '" data-tip="' +
             esc(b.name + '（' + (RARITY[b.rarity] || '') + ' · ' +
-              ((b.towerOnly && b.nextBattle) ? '下一场' : (kindName[b.kind] || '')) +
-              (b.kind === 'limited' ? ((b.towerOnly && b.nextBattle) ? ' 下一场战斗' : ' ' + (b.uses || 1) + ' 场') : '') + '）\n' + b.desc) +
+              ((isTowerNext(b)) ? '下一场' : (kindName[b.kind] || '')) +
+              (b.kind === 'limited' ? (isTowerNext(b) ? ' 下一场战斗' : ' ' + (b.uses || 1) + ' 场') : '') + '）\n' + b.desc) +
             '" title="' + esc(b.desc) + '">' + esc(b.name) + '<i>' + (kindName[b.kind] || '') + '</i></span>').join('') +
           '</div></div>' : '').join('') + '</div>';
   }
@@ -826,9 +832,9 @@
       '<span class="hex-ribbon">' + RARITY[b.rarity] + '</span>' +
       '<span class="hex-emblem">' + (b.rarity === 2 ? '★' : b.rarity === 1 ? '◆' : '●') + '</span>' +
       '<b class="hex-name">' + esc(b.name) + '</b>' +
-      '<span class="hex-scope">' + ((b.towerOnly && b.nextBattle) ? '挑战塔' : SCOPE[b.kind]) +
+      '<span class="hex-scope">' + (isTowerNext(b) ? '挑战塔' : SCOPE[b.kind]) +
         (b.kind === 'limited'
-          ? ((b.towerOnly && b.nextBattle) ? ' · 下一场战斗' : ' · ' + (b.uses || 1) + ' 场')
+          ? (isTowerNext(b) ? ' · 下一场战斗' : ' · ' + (b.uses || 1) + ' 场')
           : '') + '</span>' +
       '<span class="hex-desc">' + esc(b.desc) + '</span></button>';
   }
@@ -1071,7 +1077,9 @@
     const shop = Tower.shopState();
     if (!shop) { notice('商店还没开张：每通过 5 层开放一次。'); return; }
     const rarityCls = (r) => 'r' + r;
-    const stackableOwned = (s) => s.ownedStacks > 0 && s.stackable;
+    /* 注意：这是**商店槽位上报行**的字段 canStack（由 tower.js 用标签算好），
+     * 不是增益数据里的字段 —— 旧数据字段 stackable 已经删掉、只留标签。 */
+    const stackableOwned = (s) => s.ownedStacks > 0 && s.canStack;
     const slots = shop.slots.map((s, i) =>
       '<div class="shop-slot ' + rarityCls(s.rarity) + (s.sold ? ' sold' : '') +
         (stackableOwned(s) ? ' owned-stack' : '') + '"><b>' + esc(s.name) + '</b>' +

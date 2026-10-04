@@ -55,7 +55,11 @@
 **③ 增益标签系统（严格池子管理）**：每条增益显式写 `tags: [...]`，
 池子只认标签 —— 挑战塔只出 `tower`、无尽塔只出 `endless`（增益集锦也不再出现挑战塔专属）、
 战斗掉落只出 `battle`、商店只卖 `shop`；可叠层 / 每局限次获得 / 同名唯一 / 隐藏
-也都有独立标签。加载期校验 + `tools/test-buff-tags.cjs`（含反向用例：喂坏数据必须抛错）。
+也都有独立标签。
+**旧的布尔字段（towerOnly / endlessOnly / battleOnly / shopBanned / stackable /
+repeatable / unique / nextBattle / hidden）已全部删除**，数据里再写就是加载期报错 ——
+代码与测试一律读标签。加载期校验 + `tools/test-buff-tags.cjs`（含反向用例：
+喂坏数据、或把旧字段写回去，都必须抛错）。
 顺带把 **C36「挥金如土」**（试炼商店消费）改成无尽塔专属。
 细节见 [docs/无尽挑战塔系统设计文档.md](docs/无尽挑战塔系统设计文档.md) 的 3.5 节。
 

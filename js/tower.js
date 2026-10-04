@@ -1812,17 +1812,17 @@
   function poolFilter(run, buff) {
     const cap = D().stackCap(buff);
     /* 层数口径用「累计获得过几份」（含碎掉的烙印），否则碎一条就能再刷一条。 */
-    if (buff.stackable && obtainedCountOf(run, buff.id) >= cap) return false;
+    if (D().hasTag(buff, 'stackable') && obtainedCountOf(run, buff.id) >= cap) return false;
     /* maxUses：**限次类**的「本局最多获得 N 次」上限（例：终焉烙印最多 3 次）。
      * 用 maxStacks 当阈值，但判据是总数而不是可叠层标记 —— 烙印不进 permanent，
      * 所以不能只靠上面那条 stackable 判断。 */
-    if (!buff.stackable && buff.maxStacks) {
+    if (!D().hasTag(buff, 'stackable') && buff.maxStacks) {
       /* 即时类不进 permanent / limited，另记在 instantIds 上；两者一起数。 */
       const got = obtainedCountOf(run, buff.id) + instantOwnedCount(run, buff.id);
       if (got >= Math.max(1, Math.floor(buff.maxStacks))) return false;
     }
-    if (buff.repeatable) return true;
-    if (!buff.unique) return true;
+    if (D().hasTag(buff, 'repeatable')) return true;
+    if (!D().hasTag(buff, 'unique')) return true;
     if ((run.pickBuffIds || []).includes(buff.id)) return false;
     if ((run.permSlotIds || []).includes(buff.id)) return false;
     if (run.pendingPick && run.pendingPick.buffId === buff.id) return false;
@@ -1883,7 +1883,7 @@
     if (!owned) return true;
     /* 可叠层类的上限：优先用该增益自己的 maxStacks（例如 C50 只到 3 层），
      * 没写就用全局 STACK_MAX。叠满即视为「不可再获得」。 */
-    if (buff.stackable !== true) {
+    if (!D().hasTag(buff, 'stackable')) {
       /* 既没有 stackable 也没有 maxStacks 的才是「同名唯一」；
        * 带 maxStacks 的烙印类（C49 等）可以叠到上限 —— 上限在前置判断里已把过关。 */
       if (!buff.maxStacks) return false;
@@ -2185,7 +2185,7 @@
     }
     /* 选取型（武器/技能强化）同样不占槽、不触发替换：立即登记，等界面做三选一。 */
     if (buff.mods && (buff.mods.pickWeaponPct || buff.mods.pickSkillPct)) {
-      if (!buff.repeatable && (run.pickBuffIds || []).includes(buff.id)) {
+      if (!D().hasTag(buff, 'repeatable') && (run.pickBuffIds || []).includes(buff.id)) {
         return { ok: false, msg: '这类选取增益一局只能获得一次。' };
       }
       run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]);
@@ -2197,7 +2197,7 @@
       return { ok: true, pendingPick: run.pendingPick };
     }
     if (buff.mods && buff.mods.pickPermanentFree) {
-      if (!buff.repeatable && (run.pickBuffIds || []).includes(buff.id)) {
+      if (!D().hasTag(buff, 'repeatable') && (run.pickBuffIds || []).includes(buff.id)) {
         return { ok: false, msg: '这类选取增益一局只能获得一次。' };
       }
       run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]).filter((v, i, a) => a.indexOf(v) === i);
@@ -2347,7 +2347,7 @@
     if (kind === 'permBuff') {
       const pool = (run.permanent || [])
         .map((b) => ({ id: b.id, buff: D().BUFF_BY_ID[b.id], stacks: b.stacks || 1 }))
-        .filter((x) => x.buff && !x.buff.hidden);
+        .filter((x) => x.buff && !D().hasTag(x.buff, 'hidden'));
       for (let i = pool.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
@@ -2524,7 +2524,7 @@
       slots: run.shop.slots.map((s) => { const b = D().BUFF_BY_ID[s.id];
         const mine = (run.permanent || []).find((x) => x.id === s.id) || (run.limited || []).find((x) => x.id === s.id);
         return { id: s.id, sold: s.sold, name: b.name, desc: b.desc, rarity: b.rarity, kind: b.kind, price: shopPriceOf(b, s),
-          ownedStacks: mine ? (mine.stacks || 1) : 0, stackable: b.stackable === true }; }) };
+          ownedStacks: mine ? (mine.stacks || 1) : 0, canStack: D().hasTag(b, 'stackable') }; }) };
   }
   function addShopSpend(run, amount, flags) {
     const spend = Math.max(0, Number(amount) || 0);
@@ -2683,7 +2683,7 @@
     const run = endless().run;
     if (!run || !run.shop) return { ok: false };
     const buff = D().BUFF_BY_ID[id];
-    if (!buff || buff.kind === 'instant' || buff.hidden) return { ok: false };   // 隐藏型不可出售（只有即时类不留存、无从卖出）
+    if (!buff || buff.kind === 'instant' || D().hasTag(buff, 'hidden')) return { ok: false };   // 隐藏型不可出售（只有即时类不留存、无从卖出）
     for (const list of [run.permanent || [], run.limited || []]) {
       const i = (list || []).findIndex((b) => b.id === id);
       if (i >= 0) {
@@ -2777,7 +2777,7 @@
     return (run.permanent || [])
       .map((b) => ({ id: b.id, stacks: Math.max(1, Math.floor(Number(b.stacks) || 1)),
         buff: D().BUFF_BY_ID[b.id] }))
-      .filter((x) => x.buff && !x.buff.hidden);
+      .filter((x) => x.buff && !D().hasTag(x.buff, 'hidden'));
   }
   /** 放弃一个永久增益（20 起每 10 层的必经步骤）。放弃后继续推进到下一层。 */
   function sacrificePerm(id) {
@@ -3016,7 +3016,7 @@
   /** 某个增益在挑战塔里是否属于「下一场战斗」语义（卡面不显示限次）。 */
   function isTowerBattleBuff(id) {
     const def = D().BUFF_BY_ID[id];
-    return !!(def && def.nextBattle);
+    return !!(def && D().hasTag(def, 'nextBattle'));
   }
   function ownedBuffs(mode) {
     /* 直接遍历本局的两张表（permanent / limited），不要用 eachBuff ——
@@ -3030,13 +3030,13 @@
       const buff = entry && D().BUFF_BY_ID[entry.id];
       /* 查不到定义的条目进不来：normalizeRun 的 cleanBuffs 已经先过滤过一遍
        * （只有 BUFF_BY_ID 里存在的 id 才会留在 permanent / limited 里）。 */
-      if (!buff || buff.hidden) return;   // 隐藏型（背包/选取类）不进增益面板
+      if (!buff || D().hasTag(buff, 'hidden')) return;   // 隐藏型（背包/选取类）不进增益面板
       out.push({ id: buff.id, name: buff.name, desc: buff.desc, rarity: buff.rarity, kind: buff.kind,        scopeName: scopeName[buff.kind], stacks: entry.stacks || 1,
         progress: progressOf(run, buff.id),
         uses: buff.kind === 'limited' ? entry.uses : undefined,
-        nextBattle: !!buff.nextBattle,          // 挑战塔里 = 「下一场战斗」，卡面不显示限次
+        nextBattle: D().hasTag(buff, 'nextBattle'),   // 挑战塔里 = 「下一场战斗」，卡面不显示限次
         on: buff.kind === 'limited' ? entry.on !== false : true,
-        sellable: !!run.shop && buff.kind !== 'instant' && !buff.hidden, sellPrice: sellPriceOf(run, buff) });
+        sellable: !!run.shop && buff.kind !== 'instant' && !D().hasTag(buff, 'hidden'), sellPrice: sellPriceOf(run, buff) });
     };
     (run.permanent || []).forEach(add);
     (run.limited || []).forEach(add);

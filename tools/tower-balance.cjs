@@ -438,8 +438,8 @@ function autoPick(ctx, mode) {
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 29 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 40 &&
       ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 5 &&
-      ctx.TowerData.BUFFS.filter((b) => b.endlessOnly).length === 8);
-    t('主塔池只吃限次且非无尽专属', ctx.TowerData.towerPool.every((b) => b.kind === 'limited' && !b.endlessOnly));
+      ctx.TowerData.BUFFS.filter((b) => ctx.TowerData.hasTag(b, 'endless') && !ctx.TowerData.hasTag(b, 'tower')).length === 8);
+    t('主塔池只吃限次且非无尽专属', ctx.TowerData.towerPool.every((b) => b.kind === 'limited' && !(ctx.TowerData.hasTag(b, 'endless') && !ctx.TowerData.hasTag(b, 'tower'))));
     t('单场 buff 加强（蓄力一击 40% / 血饮狂刀 45%）',
       ctx.TowerData.BUFF_BY_ID.N01.mods.powerMul === 0.40 && ctx.TowerData.BUFF_BY_ID.N06.mods.lifestealPct === 0.45);
     Tower.startEndlessRun();
@@ -558,7 +558,7 @@ function autoPick(ctx, mode) {
   {
     const T = ctx.TowerData;
     t('名贵手表：稀有 / 永久 / 商店不卖', T.BUFF_BY_ID.C24.rarity === 1 && T.BUFF_BY_ID.C24.kind === 'permanent' &&
-      T.BUFF_BY_ID.C24.shopBanned === true && T.BUFF_BY_ID.C24.mods.sellValue === 200);
+      !T.hasTag(T.BUFF_BY_ID.C24, 'shop') && T.BUFF_BY_ID.C24.mods.sellValue === 200);
     t('商店货架池不含名贵手表', !(T.shopPool || []).some((b) => b.id === 'C24'));
     const r = freshEndless(State, Tower);
     r.shop = Tower.shopState ? (Tower.shopState() || null) : null;
@@ -580,8 +580,8 @@ function autoPick(ctx, mode) {
   // 选取型隐藏 buff：神兵淬炼 / 秘技通神（立即生效、隐藏、不可出售、一局一次）
   {
     const T = ctx.TowerData, r = freshEndless(State, Tower);
-    t('神兵淬炼/秘技通神：史诗·隐藏·unique·商店都能出', T.BUFF_BY_ID.C32.hidden === true && T.BUFF_BY_ID.C33.hidden === true &&
-      T.BUFF_BY_ID.C32.unique === true && T.inPool('shop', T.BUFF_BY_ID.C32) && T.inPool('choice', T.BUFF_BY_ID.C33));
+    t('神兵淬炼/秘技通神：史诗·隐藏·unique·商店都能出', T.hasTag(T.BUFF_BY_ID.C32, 'hidden') && T.hasTag(T.BUFF_BY_ID.C33, 'hidden') &&
+      T.hasTag(T.BUFF_BY_ID.C32, 'unique') && T.inPool('shop', T.BUFF_BY_ID.C32) && T.inPool('choice', T.BUFF_BY_ID.C33));
     const res = Tower.debugGrantBuff('C32');
     t('拿到神兵淬炼：立即进入待选取（pendingPick=weapon）', res.ok === true && r.pendingPick && r.pendingPick.kind === 'weapon');
     t('隐藏型不进增益面板', !Tower.ownedBuffs('endless').some((b) => b.id === 'C32'));
@@ -612,7 +612,7 @@ function autoPick(ctx, mode) {
   // 第 2 项（本轮）：槽位 buff、以战养战、登顶者、破釜沉舟
   {
     const T = ctx.TowerData, r = freshEndless(State, Tower);
-    t('扩容背包：史诗 / unique / +1 槽 / 商店可出', T.BUFF_BY_ID.C30.rarity === 2 && T.BUFF_BY_ID.C30.unique === true &&
+    t('扩容背包：史诗 / unique / +1 槽 / 商店可出', T.BUFF_BY_ID.C30.rarity === 2 && T.hasTag(T.BUFF_BY_ID.C30, 'unique') &&
       T.BUFF_BY_ID.C30.mods.permSlot === 1 && T.inPool('shop', T.BUFF_BY_ID.C30));
     t('仓库钥匙：传奇 / unique / +2 槽 / 仅战斗', T.BUFF_BY_ID.C31.rarity === 3 && T.BUFF_BY_ID.C31.mods.permSlot === 2 &&
       !T.inPool('shop', T.BUFF_BY_ID.C31) && T.inPool('choice', T.BUFF_BY_ID.C31));
@@ -646,7 +646,7 @@ function autoPick(ctx, mode) {
     const T = ctx.TowerData;
     /* 易碎烙印（本轮第 7 项）虽然也是 limited，但次数 1000 只是个「不会耗尽」的写法，
      * 它真正的结束方式是每场 5% 损毁 —— 不参与「场次档位」这条自检。 */
-    const lim = T.BUFFS.filter((b) => b.kind === 'limited' && !b.endlessOnly &&
+    const lim = T.BUFFS.filter((b) => b.kind === 'limited' && !(T.hasTag(b, 'endless') && !T.hasTag(b, 'tower')) &&
       !(b.mods && b.mods.fragileBreakPct));
     const kinds = [...new Set(lim.map((b) => b.uses))].sort((a, b) => a - b);
     t('限次次数覆盖 1/2/3/5/10（补给的 1 场）', kinds.join(',') === '1,2,3,5,10');

@@ -172,6 +172,35 @@ hr('3. 展示口径：无尽塔「增益集锦」不含挑战塔专属');
 }
 
 /* ============================================================ */
+hr('3.5 冗余清理：数据里不再有 xxxOnly / stackable / unique… 这些布尔字段');
+{
+  const TD = setup();
+  const FORBIDDEN = ['towerOnly', 'endlessOnly', 'battleOnly', 'shopBanned',
+    'stackable', 'repeatable', 'unique', 'nextBattle', 'hidden'];
+  check('92 条增益里一条冗余字段都没有', () => {
+    const bad = [];
+    for (const b of TD.BUFFS) {
+      const hit = FORBIDDEN.filter((k) => k in b);
+      if (hit.length) bad.push(b.id + ':' + hit.join('|'));
+    }
+    assert.equal(bad.length, 0, '仍有冗余字段：' + bad.join(', '));
+  });
+  check('页面代码里也不再读这些字段（只读标签）', () => {
+    for (const f of ['js/tower.js', 'js/tower-ui.js', 'js/tower-data.js']) {
+      const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+      for (const k of FORBIDDEN) {
+        /* 只允许出现在「禁用清单 / 词表 / 注释」里：代码读取形如 .字段 或 ["字段"] */
+        /* 只认「字段读取」：排除对象字面量的 key（后面跟冒号）与函数调用（后面跟括号，
+         * 例如 Tower.nextBattle(mode) 是 API 调用，跟增益字段无关）。 */
+        const readRe = new RegExp('\\.[' + k[0] + ']' + k.slice(1) + '\\b(?!\\s*[:(])');
+        const hits = src.split('\n').filter((line) => readRe.test(line) && !/FORBIDDEN_FIELDS|BUFF_TAGS|^\s*\*|\/\//.test(line));
+        assert.equal(hits.length, 0, f + ' 仍在读 ' + k + '：' + hits.slice(0, 2).join(' / '));
+      }
+    }
+  });
+}
+
+/* ============================================================ */
 hr('4. 反向：坏数据必须在加载期就抛错（校验真的在跑）');
 {
   const bad = (name, patch, expect) => check(name, () => {
@@ -190,9 +219,12 @@ hr('4. 反向：坏数据必须在加载期就抛错（校验真的在跑）');
     /没标 tower\/endless|没有场所标签/);
   bad('行为标签与 kind 冲突（limited 标在永久类上）→ 抛错', (src) => src.replace("{ id: 'C02', tags: ['tower', 'endless', 'battle', 'shop'],", "{ id: 'C02', tags: ['tower', 'endless', 'battle', 'shop', 'limited'],"),
     /limited/);
-  bad('旧字段与标签冲突（endlessOnly: false 挂在无尽专属上）→ 抛错',
-    (src) => src.replace("kind: 'instant', endlessOnly: true, desc: '立刻获得 60 试炼币'", "kind: 'instant', endlessOnly: false, desc: '立刻获得 60 试炼币'"),
-    /字段 endlessOnly/);
+  bad('又写回冗余字段（endlessOnly）→ 抛错',
+    (src) => src.replace("{ id: 'E02', tags: ['endless', 'battle'],", "{ id: 'E02', tags: ['endless', 'battle'], endlessOnly: true,"),
+    /还写着冗余字段 endlessOnly/);
+  bad('又写回冗余字段（stackable）→ 抛错',
+    (src) => src.replace("{ id: 'C50', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'],", "{ id: 'C50', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], stackable: true,"),
+    /还写着冗余字段 stackable/);
 }
 
 console.log('\n' + (fail ? '' : '') + '合计 ' + pass + ' 通过 / ' + fail + ' 失败');

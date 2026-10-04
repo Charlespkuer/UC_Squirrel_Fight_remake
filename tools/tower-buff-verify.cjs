@@ -427,7 +427,7 @@ hr('本轮 1a：虚空铭文（附魔一个永久增益免占位）');
   check('虚空铭文进入「选取永久增益」状态', !!(g && g.ok && r1.pendingPick && r1.pendingPick.kind === 'permBuff'), JSON.stringify(r1.pendingPick));
   const cands = Tower.pickCandidates('permBuff');
   check('候选来自已有的永久增益（排除隐藏型）', cands.length > 0 && cands.every((c) =>
-    TowerData.BUFF_BY_ID[c.id] && !TowerData.BUFF_BY_ID[c.id].hidden), cands.map((c) => c.id).join(','));
+    TowerData.BUFF_BY_ID[c.id] && !TowerData.hasTag(TowerData.BUFF_BY_ID[c.id], 'hidden')), cands.map((c) => c.id).join(','));
   const picked = cands[0];
   const before = (r1.permanent || []).length;
   const ap = Tower.applyPickBuff('permBuff', picked.id);
@@ -643,8 +643,8 @@ hr('本轮 2：商店里已拥有的可叠加增益要能高光');
     const st = Tower.shopState();
     const c06 = (st.slots || []).find((x) => x.id === 'C06');
     const c16 = (st.slots || []).find((x) => x.id === 'C16');
-    const anyStack = (st.slots || []).filter((x) => x.ownedStacks > 0 && x.stackable);
-    check('商店数据带上 ownedStacks/stackable', (st.slots || []).every((x) => x.ownedStacks !== undefined && x.stackable !== undefined));
+    const anyStack = (st.slots || []).filter((x) => x.ownedStacks > 0 && x.canStack);
+    check('商店数据带上 ownedStacks/canStack', (st.slots || []).every((x) => x.ownedStacks !== undefined && x.canStack !== undefined));
     check('已拥有的可叠加增益能被识别出来（若本次货架刷到）',
       !(c06 || c16) || anyStack.length >= 1,
       '刷到 C06=' + !!c06 + ' C16=' + !!c16 + '，可高光 ' + anyStack.length + ' 个');

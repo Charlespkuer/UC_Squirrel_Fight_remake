@@ -33,7 +33,7 @@ const SCAN_EXT = ['.html', '.css', '.js', '.json'];
 // 以及 Tauri 的暂存目录（src-tauri/web 是 build-tauri-web.cjs 复制出来的构建产物，
 // 其中 references/orig 本来就带一批「引用了但原版没打包」的路径，不该算发布断链）
 // 按「路径结尾」判断，不写死 tools/ 在第几层（放哪都能用）
-const SKIP_DIRS = new Set(['node_modules', '.git', 'references/orig', 'src-tauri', 'apk-audit', 'research/original']);
+const SKIP_DIRS = new Set(['node_modules', '.git', 'js/orig', 'references/orig', 'src-tauri', 'apk-audit', 'research/original']);
 const ROOTS = 'images|css|js|audio|music|fonts|assets';
 // 引号/括号里的资源路径：以四个已知资源目录开头，允许中文与常见符号
 const REF_RE = new RegExp('["\'(`]((?:' + ROOTS + ')/[A-Za-z0-9_@%\\-./\\u4e00-\\u9fa5]*)', 'g');

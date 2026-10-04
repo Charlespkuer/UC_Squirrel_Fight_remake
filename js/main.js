@@ -348,11 +348,9 @@
   /* ============================================================
    * 存档告警与自动重连
    *
-   * 病根（实测）：启动时如果服务器晚了一步、或者页面是被 file:// 打开、
+   * 触发场景：启动时如果服务器晚了一步、或者页面是被 file:// 打开、
    * 或者端口上蹲着一个没有 /__save 的旧服务器，fileLoad() 就会失败；
-   * 以前这里会**静默**退回 localStorage 里那份残留的旧档（比如 1 级），
-   * 玩家看到的就是「双击启动器载入了一个新存档」，而 save/progress.json
-   * 里明明还是 32 级。
+   * 此时绝不能静默退回 localStorage 里残留的旧档——必须挂红横幅明示并自动重连。
    *
    * 现在：① 磁盘存档永远是第一优先，读不到才回落，并且立刻在画面顶部
    *       挂一条横幅把原因写清楚（app 窗口里 confirm() 可能被吞掉，
@@ -428,9 +426,6 @@
     });
   }
 
-  /** 探针/读档失败时自动重试：服务器刚起来时可能还没开始监听
-   *  （实测：双击启动器时服务器要 1~3 秒才 bind 上端口，页面可能先开一步）。
-   *  整段重试约 12 秒；多次都失败就挂一条「现在用的是浏览器兜底存档」的横幅（不静默）。 */
   async function retryFileSave() {
     if (State.fileLoadedThisBoot()) { hideSaveWarning(); return true; }
     const delays = [300, 600, 1000, 1500, 2000, 2500, 3000];
@@ -693,7 +688,6 @@
     let settled = false;
     const controller = await Battle.run({
       canvas, me, foe, region: opts.region, kind: opts.kind, collectDrops: opts.collectDrops !== false,
-      // 挑战塔不给跳过（要真打），改成右下角 1×/2× 倍速切换
       allowSkip: opts.allowSkip, speedToggle: opts.speedToggle,
       // 挑战塔 boss 机制：贴一条进战斗画面（opts.trial = {text}）
       trial: opts.trial,

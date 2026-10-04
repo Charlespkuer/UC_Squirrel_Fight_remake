@@ -127,9 +127,7 @@
     let stopped = false, skipped = false, ending = false, raf = 0, round = 99, countdown = null;
     let last = performance.now(), shake = 0, combatStarted = false;
     // 右下角那颗按钮的绘制与点击区共用这个矩形。原版字面坐标 (983,609) 的 164x60 框会把
-    // 「跳过」两个字挤出圆角格，故保留原来的 190x70 比例。
     const skipRect = { x: 964, y: 605, w: 190, h: 70 };
-    // 挑战塔等玩法不给跳过（要真打），改成 1×/2×/3× 倍速循环切换；两者都不开时右下角不留按钮。
     const speedToggle = !!opts.speedToggle;
     const allowSkip = opts.allowSkip !== false;
     let speed = 1;
@@ -160,7 +158,7 @@
     function cornerAction() {
       if (!speedToggle) { controller.skip(); return; }
       if (ending || stopped) return;
-      speed = speed === 1 ? 2 : speed === 2 ? 3 : 1;   // 第 1 项：三档倍速循环
+      speed = speed === 1 ? 2 : speed === 2 ? 3 : 1;
       skipButton.textContent = cornerLabel();
       skipButton.setAttribute('aria-label', '切换战斗速度（当前 ' + speed + '×）');
     }
@@ -299,9 +297,6 @@
             { size: 24, align: 'left', color: '#8fe8ff' });
         }
       }
-      /* 挑战塔：三侠大招留下的「贯穿本层」削弱，挂在玩家血条正下方（第 3 项）。
-       * 第 5 项：胶囊里带上「谁给的」——用来源大侠的颜色描边 + 名字前缀，
-       * 一眼能看出是螳螂/仙鹤/熊猫中的哪一个。 */
       const debuffs = Array.isArray(opts.debuffs) ? opts.debuffs : [];
       if (debuffs.length) {
         let dx = 8;

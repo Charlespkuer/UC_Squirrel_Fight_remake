@@ -92,6 +92,8 @@ async function main() {
   if (!S) { P.fatal = '存档未就绪'; return; }
 
   const shot = q.get('shot') || 'fusepage';
+  /* 停在主界面（截图用） */
+  if (shot === 'home') { P.done = true; P.errors = window.__errs.slice(); return; }
   Object.assign(S, { level: 60, goldPoint: 999999 });
   S.weapons = ['15:9', '6:5'];
   S.skills = ['12:1', '18:1', '23:1'];

@@ -34,10 +34,7 @@
   const ARENA_EXP = [150, 75, 45, 0];
   const ARENA_FRAGMENT_SHARDS = [8, 6, 4, 3];
   function addProp(id, count) { const s = State.state(); s.props[id] = (s.props[id] || 0) + count; }
-  /** extra：额外按钮（第 7 项天梯赛的「继续挑战」就是走这里），排在最前面当主按钮。 */
   function outcome(win, reward, text, again, label, extra) {
-    /* 需求：竞技场的「返回竞技场」要放在**右边**（它是这一屏的主操作 —— 点完可以继续报名），
-     * 「查看录像」是次要入口放左边。用 primary/muted 显式指定，避免被关键词规则排到左边。 */
     const buttons = (extra || []).concat([
       { label: '\u67e5\u770b\u5f55\u50cf', muted: true, run: () => UI.runAction('messages') },
       { label: label || '\u8fd4\u56de', primary: true, run: again },
@@ -78,7 +75,6 @@
       { art: 30, name: '\u5929\u68af\u8d5b', text: '30\u7ea7\u5f00\u542f\uff0c\u8d62\u79ef\u5206\u3001\u4e89\u91d1\u676f', action: 'arena-rank' },
     ];
     const resume = run ? '<div class="extra-resume">\u4f60\u5df2\u62a5\u540d\uff0c\u65e0\u9700\u518d\u6b21\u6d88\u8017\u4f53\u529b\u3002' + button(run.phase === 'final' ? '\u7ee7\u7eed\u51b3\u8d5b' : run.phase === 'third' ? '\u7ee7\u7eed\u5b63\u519b\u8d5b' : '\u7ee7\u7eed\u6bd4\u8d5b', 'arena-resume', 'tiny gold') + '</div>' : '';
-    /* 第 1 项：报名页直接写清楚「体力不足会自动喝哪瓶药」，不再额外弹窗。 */
     let potionHint = '';
     if (s.energy < 30) {
       const deficit = 30 - s.energy;
@@ -99,16 +95,6 @@
     if (State.state().level >= level) return true;
     alert((kind ? '\u788e\u7247\u7ade\u6280\u573a' : '\u7ecf\u9a8c\u7ade\u6280\u573a') + '\u9700\u8981\u8fbe\u5230' + level + '\u7ea7\u3002'); return false;
   }
-  /**
-   * 竞技场报名：**判定并扣费**（唯一入口，保证「进场必付费」）。
-   *
-   * 需求：两个竞技场的优先级统一为 **体力 > 准入道具 > 喝体力药剂**。
-   *   · 体力 ≥ 30 → 扣 30 体力（有徽章/英雄帖也先扣体力）
-   *   · 体力不足 → 碎片场花勇气徽章(39)、经验场花英雄帖(36)
-   *   · 两者都没有 → 喝体力药剂补到 30，再扣 30 体力
-   *   · 徽章与英雄帖**互不通用**：碎片场不接受英雄帖，经验场也不接受勇气徽章
-   * 返回 { ok:true, by:'energy'|'item', itemId?, potionUsed } 或 { ok:false, reason }。
-   */
   function payArenaEntry(s, kind) {
     const NEED = 30;
     const admission = kind ? 39 : 36;                 // 碎片场=勇气徽章，经验场=英雄帖
@@ -121,7 +107,6 @@
       const after = Number(s.energy) || 0;
       return after <= before - NEED || freeEnergyDebug();
     };
-    /* ① 体力优先：够就先扣体力（不再先花道具）。 */
     if (s.energy >= NEED) {
       if (!payEnergy()) return { ok: false, reason: 'energy-not-deducted' };
       return { ok: true, by: 'energy' };
@@ -135,10 +120,6 @@
       State.save();
       return { ok: true, by: 'item', itemId: admission };
     }
-    /* ③ 最后才喝体力药剂：补到 30 之后仍需再扣掉 30 体力。
-     * **先只检查、不真喝**：万一现有药剂补不到 30（例如只有小体力药剂 +10），
-     * 就不能把药喝掉再宣布报名失败 —— 那是白扔一瓶药（踩过）。
-     * 检查顺序与 autoEnergyPotion 一致：缺得少先看小药，缺得多先看大药。 */
     const deficit = NEED - Math.max(0, Number(s.energy) || 0);
     const order = deficit <= 10 ? [1, 2] : [2, 1];
     const per = { 1: 10, 2: 30 };
@@ -168,9 +149,6 @@
        *   `if (s.energy < 30) { ...道具... }` + `if (s.energy >= 30) { consumeEnergy }`，
        * 两段都可能被绕过（体力量不足时道具没扣、consumeEnergy 又失败就直接往下走），
        * 现在只要判定通过就一定扣掉，判定不通过就一定 return。 */
-      /* 扣费由 payArenaEntry 统一负责，并在内部**按实际扣掉的那一项**精确校验；
-       * 这里不再用「体力+道具总和」做粗判 —— 那个总和会被同一流程里的
-       * 自动喝药 / 体力恢复 / 道具结算掩盖或抵消，从而误报「报名异常」。 */
       const pay = payArenaEntry(s, kind);
       if (!pay.ok) {
         if (pay.reason === 'no-energy-no-item') {
@@ -236,21 +214,10 @@
   }
 
   let rankAttempt = null;
-  /* 需求：天梯赛**周日不再休赛**（原版为周一至周六进行、周日休赛）。
-   * 因此这里不再保留任何「今天是不是周日」的判据，UI 与开战校验里的相关分支也已删除；
-   * 每天 20 场的上限与按天重置逻辑不变。 */
-  /* 第 2 项：天梯匹配不再「永远贴着玩家等级 ±3」，而是**只跟金杯数挂钩**：
-   * 0 杯从 30 级档起步（天梯本来就是 30 级解锁），每 15 杯 +1 级，600 杯封顶到 70 级。
-   * 匹配到的实际等级在这个期望上做 ±4 的随机，但均值就是这条曲线，且永远不超过 70。
-   * 于是「杯数」就是天梯的进度条：低杯期对手软、攒杯后一路对上满级对手；
-   * 花金杯买商店奖励会降杯，也顺手降一点难度（原版攻略里金杯就是可花掉的货币）。 */
   /* ============================================================
    * 【EX2】天梯赛（匹配/积分/商店）
    * ============================================================ */
   const RANK_LEVEL_BASE = 30, RANK_INTEGRAL_BASE = 1500, RANK_INTEGRAL_PER_LEVEL = 25, RANK_LEVEL_SPREAD = 4;
-  /** 第 2 项：匹配档位跟**积分**挂钩（积分是排行榜评分、不会被花掉）。
-   *  1500 分（天梯初始分）对应 30 级档，每多 25 分 +1 级，2500 分封顶到 70 级；
-   *  实际等级在期望上 ±4 抖动，但均值就是这条曲线，且永远不超过 70。 */
   function rankFoeLevel(integral, cap) {
     const top = Math.max(1, Math.min(State.MAX_PLAYER_LEVEL || 70, Number(cap) || 70));
     const expect = RANK_LEVEL_BASE + Math.max(0, (Number(integral) || 0) - RANK_INTEGRAL_BASE) / RANK_INTEGRAL_PER_LEVEL;
@@ -263,9 +230,6 @@
     return Math.max(1, Math.min(top, Math.round(
       RANK_LEVEL_BASE + Math.max(0, (Number(integral) || 0) - RANK_INTEGRAL_BASE) / RANK_INTEGRAL_PER_LEVEL)));
   }
-  /* 第 3 项：兑换次数重新按**周**重置 —— 《攻略》原文「狂战套装，永久属性，每种每周只能购买一件」。
-   * 一周只能买 1 件，所以四项永久属性 + 狂战套装（以及 timesLimit=1 的卷轴）合计每周各 1 次；
-   * timesLimit = -1 的超级药丸不设上限。商店本身仍按天开放（这条是之前刻意保留的差异）。 */
   function rankWeekKey() {
     const d = new Date(Date.now());
     d.setDate(d.getDate() - (d.getDay() + 6) % 7);      // 周一为一周起点
@@ -303,8 +267,6 @@
     });
     match.disabled = s.joinRankCount >= 20 || !!rankAttempt;
   }
-  /* 第 7 项：天梯赛开战逻辑抽成独立函数，战果弹窗里的「继续挑战」按钮直接复用它
-   * （原来只能先点「返回天梯赛」、再点一次「开始匹配」）。 */
   function rankMatch() {
     {
       const s = State.state();
@@ -316,7 +278,7 @@
       if (s.goldPoint < fee) { alert('\u7b2c11\u81f320\u573a\u6bcf\u573a\u9700\u89815\u91d1\u677e\u679c\uff0c\u5f53\u524d\u91d1\u677e\u679c\u4e0d\u8db3\u3002'); return; }
       const attempt = { owner: s, date: State.localDate(), fee, settled: false };
       rankAttempt = attempt; s.joinRankCount++; s.goldPoint -= fee; State.save();
-      const foe = State.genAI(rankFoeLevel(s.integral));   // 第 2 项：等级期望跟积分挂钩
+      const foe = State.genAI(rankFoeLevel(s.integral));
       const interrupted = () => {
         if (attempt.settled || rankAttempt !== attempt || State.state() !== s) return;
         attempt.settled = true; rankAttempt = null;
@@ -367,7 +329,6 @@
     });
   }
 
-
   // \u666e\u901a\u836f\u4e38\uff08\u5927\u529b/\u654f\u6377/\u901f\u5ea6/\u7ecf\u9a8c\u4e38\uff09\uff1a\u62bd\u5956\u91cc\u7684\u300c\u968f\u673a\u666e\u901a\u836f\u4e38\u00d72\u300d\u4ece\u8fd9\u56db\u79cd\u91cc\u62bd
   /* ============================================================
    * 【EX3】抽奖
@@ -387,9 +348,6 @@
     if (s.lotteryDate !== legacyToday) s.lotteryFree = 1;
     s.lotteryDate = today; State.save();
   }
-  /** 本轮第 5 项：抽奖卷数量要能「即时更新」。
-   *  塔里结算完抽奖卷之后（放弃本局 / 结算弹窗 / 去抽奖），外部会调它把当前页面上
-   *  的抽奖卷数字就地刷新，不必等玩家重新进页面。 */
   function refreshTickets() {
     const s = State.state(); if (!s) return;
     const n = s.props[50] || 0;
@@ -416,7 +374,6 @@
     /** 当前手上的抽奖资源：每日免费次数 + 仓库抽奖卷 + 金松果（每次 20）。 */
     const affordable = (n) => Math.max(0, s.lotteryFree || 0) + Math.max(0, s.props[TICKET] || 0)
       + Math.floor(Math.max(0, s.goldPoint) / 20) >= n;
-    /** 单抽按钮文案：直接把这一次要花什么写出来（原来的说明文字已经删掉）。 */
     const spinLabel = () => (s.lotteryFree > 0 ? '免费抽奖'
       : (s.props[TICKET] || 0) > 0 ? '用抽奖卷抽奖' : '20 金松果抽奖');
     /** 一次抽奖的**立即结算**（扣费顺序：每日免费 → 抽奖卷 → 20 金松果）。
@@ -448,13 +405,10 @@
     };
 
     const content = '<h2 class="extra-lottery-heading cartoon">\u6bcf\u65e5\u5e78\u8fd0\u62bd\u5956</h2>' +
-      /* 需求：右上角标注仓库里的抽奖卷数量（refreshTickets() 会就地刷新 [data-lottery-ticket]）。 */
       '<div class="lottery-ticket-corner">\u62bd\u5956\u5377 <b data-lottery-ticket>' + (s.props[TICKET] || 0) + '</b> \u5f20</div>' +
       '<div class="extra-lottery-prizes">' +
       prizes.map((prize, i) => '<div class="extra-prize" data-prize="' + i + '">' + C().icon('prop', prize.id) + '<span>' + prize.label + '</span></div>').join('') +
       '</div>' +
-      /* 说明文字（「每天免费 1 次，之后优先用抽奖卷…当前金松果」）已按需求删除：
-       * 费用直接写在按钮上，抽奖卷数量挪到右上角。 */
       '<div class="extra-lottery-footer"><div><b data-lottery-status>\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21</b></div>' +
       '<div class="lottery-buttons">' +
       button(spinLabel(), 'lottery-spin', 'gold') + button('\u8fde\u62bd 10 \u6b21', 'lottery-spin10', 'gold') + '</div></div>';
@@ -503,8 +457,6 @@
     });
     spin.disabled = spinning;
 
-    /* 需求：连抽 10 次（一次结算 10 抽，最后给一张汇总清单）。
-     * 资源不够 10 次时直接说明差多少，不做「抽到一半没钱」的中间态。 */
     const spin10 = on(p, 'lottery-spin10', () => {
       if (version !== lotteryVersion || !p.isConnected || spinning) return;
       refreshLotteryDay();
@@ -520,7 +472,6 @@
       State.save();
       animateThen(24, () => {
         afterDraw();
-        /* 需求：十连结果**一屏铺开**，用与抽奖页奖励格同款的 5×2 排布，不做上下滚动。 */
         const cells = got.map((g) => '<div class="extra-prize won">' + C().icon('prop', g.icon) +
           '<span>' + g.label + '</span></div>').join('');
         const ups = [];
@@ -843,7 +794,6 @@
     const list = '<div class="toplist-rows">' + rows.slice(0, 15).map((r, i) => {
       const rank = i + 1, medal = rank <= 3 ? '\u2460\u2461\u2462'[rank - 1] : String(rank);
       const shown = r.inLadder !== false;
-      // 自己不够级时金杯/积分留空，不再显示 0 金杯
       const cupText = ladderTab && r.npc === false && !qualified ? '\u2014' : (shown ? r.cup + ' \u91d1\u676f' : '\u2014');
       const scoreText = ladderTab && r.npc === false && !qualified ? '\u2014' : (shown ? String(r.integral) : '\u2014');
       return '<div class="toplist-row' + (r.npc ? '' : ' me') + (shown ? '' : ' unranked') + '"><span class="toplist-rank">' + medal + '</span>' +

@@ -25,22 +25,13 @@
   const testMode = typeof location !== 'undefined' && /(?:^|[?&])(?:test=[12]|qa=1)(?:&|$)/.test(location.search || '');
   const SAVE_KEY = testMode ? 'ssdz_test_save_v1' : 'ssdz_save_v1';
   const ENERGY_INTERVAL = 5 * 60 * 1000;
-  /* 使用药剂可以把体力顶到上限之上，最高 999；超过上限的部分只是不再自然回复，
-   * 不会被清掉。maxEnergy 仍然是自然回复/每日回复的目标上限。 */
   const ENERGY_HARD_CAP = 999;
   /* 单个道具的数量上限：任何来源（掉落、礼包、任务、商店、调试）都不会超过它。
    * 收口放在 save()/normalizeSave 里，这样新增道具的地方不用各自记一遍。 */
   const PROP_HARD_CAP = 9999;
   /* 这三个编号在原版里是货币/经验值（挂进背包也用不掉），存档里出现就直接忽略。 */
   const CURRENCY_PROP_IDS = [8, 15, 40];
-  /* 满级 70 级（原版也是到 70 级封顶）。
-   * 体力上限由等级决定：1 级 90 点，2~3 级每级 +3、4~20 级每级 +2、21~70 级每级 +1，
-   * 合计 +6+34+50 = 90 → 69 级正好 179、满级 70 级 180
-   * （低等级段从原来的 +3/+2 降下来，成长更多地摊到 21 级以后）。 */
   const MAX_PLAYER_LEVEL = 70;
-  /* 升级成长的点位预算与旧规则完全一致：每级 3 点 + 生命 5。
-   * 变化只在「其中 1 点不再随机」——它留给玩家自选（力/敏/速/生命），
-   * 而且必须在升级时就选掉，不会攒着。 */
   const FREE_POINT_RANDOM = 2;
   /* 自选点能加的四项，以及每一点给多少（生命一点 = 5 点血，和随机点、
    * 永久属性道具 19 的口径一致）。 */
@@ -88,7 +79,6 @@
     }).filter(Boolean);
   }
 
-  // 旧版存档缺字段时补全独立副本；不重置已有等级、资源和关卡。
   function normalizeSave(raw) {
     const next = Object.assign(clone(GData.NEW_PLAYER), raw);
     next.level = Math.max(1, Math.min(MAX_PLAYER_LEVEL, integer(next.level, GData.NEW_PLAYER.level, 1)));
@@ -110,7 +100,6 @@
     next.integral = next.integral == null ? null : integer(next.integral, 0);
     next.name = typeof next.name === 'string' && next.name.trim() ? next.name : '小松鼠';
     next.lastEnergyTs = Number(next.lastEnergyTs) > 0 ? Math.min(Date.now(), integer(next.lastEnergyTs, Date.now(), 1)) : Date.now();
-    // 升级失败累积（第 5 项）：只保留 'w15'/'s7' 这种键，值收敛到正整数
     next.upgradeFails = (() => {
       const src = object(raw.upgradeFails) ? raw.upgradeFails : {};
       const out = {};
@@ -130,7 +119,6 @@
       .filter((d) => object(d) && validLocalDate(d.date))
       .slice(-EARN_DAYS)
       .map((d) => ({ date: d.date, exp: Math.max(0, integer(d.exp, 0)), gold: Math.max(0, integer(d.gold, 0)) }));
-    // 自由属性点撤回栈（第 2 项）：只保留合法的四项键
     next.pointUndo = (Array.isArray(raw.pointUndo) ? raw.pointUndo : [])
       .filter((key) => STAT_KEYS.includes(key)).slice(-500);
     next.weapons = normalizeItems(next.weapons, weaponsMap);
@@ -140,7 +128,6 @@
       next[key] = {};
       for (const id of Object.keys(source)) {
         // 8 金松果 / 15 经验 / 40 金杯是货币与经验值（原版 useType 0/3），不该出现在背包里；
-        // 早期调试面板曾经把它们当道具发过，读档时清掉。
         if (CURRENCY_PROP_IDS.includes(Number(id))) continue;
         const count = Math.min(PROP_HARD_CAP, integer(source[id], 0));
         if (propMap.getValue(id) && count > 0) next[key][id] = count;
@@ -520,7 +507,6 @@
       totalExp += daily.exp; totalGold += daily.gold; count++;
     }
     if (!count) return { ok: false, msg: '暂无可领取的昨日日供，新收徒需等待次日结算。' };
-    // 日供发下来的资源不再计入「我的当日收益」，否则会滚雪球
     const ups = totalExp > 0 ? gainExp(totalExp, { noTrack: true }) : [];
     if (totalGold > 0) addGold(totalGold, { count: false });
     save();
@@ -585,7 +571,6 @@
     try {
       clampProps();
       S.savedAt = Date.now();
-      // 有本地服务器：主存档就是 save/progress.json，浏览器里不再留副本
       if (storageMode() === 'file') { scheduleFileWrite(); return true; }
       localStorage.setItem(SAVE_KEY, JSON.stringify(S));
       return true;
@@ -817,7 +802,6 @@
       dirty: fileState.dirty, path: fileState.path, reason: fileState.reason,
     };
   }
-  /** 这次启动到底把磁盘上的正式存档读进来了没有（boot 用它决定要不要提示玩家）。 */
   function fileLoadedThisBoot() { return fileState.lastRead > 0; }
   /** 保存后延迟写文件（连点几下只写一次）；页面要关掉时立刻补写。 */
   function scheduleFileWrite() {
@@ -999,10 +983,6 @@
    * 【S6】升级武器/技能（成功率/费用/失败保护）
    * ============================================================ */
   // ---------- 升级武器/技能（upgradeMap: 成功率/费用/卷轴/玩家等级限制） ----------
-  /* 需求：升级一次统一 40 金松果（原表是 50，10→11 那行 100）。
-   * 失败保护：每次失败后成功率 +5 个百分点，累积到成功为止，成功即清零；
-   * 失败次数按「武器/技能 + id」存在存档的 upgradeFails 里。
-   * 原表 upgradeMap 来自 GameDict，保持逐字节不动，只在这里覆盖取值。 */
   const UPGRADE_COIN = 40;
   const UPGRADE_FAIL_BONUS = 5;   // 每次失败 +5%
   /* ============================================================
@@ -1180,7 +1160,6 @@
    * 字典里 price 为 0 或占位 1 的道具（兑换用的卷轴、碎片、礼包、天梯碎片、
    * 超级药丸、果实种子这类「不可购买」的物品）不开放回收；
    * PROP_SELL_OVERRIDES 留作个别道具单独定价的例外表。 */
-  /* 恶魔果实（48）在字典里没有售价（不可购买），按需求单独定价 100 金松果回收。 */
   const PROP_SELL_OVERRIDES = Object.freeze({
     48: 100,   // 恶魔果实：字典无价，单独定价 100
     21: 2,     // 技能卷轴：2 金松果一张
@@ -1309,15 +1288,10 @@
     return { ok: true, gear: g };
   }
   // 融合: 3件同名同品质 → 高一级品质（简化：3件蓝→随机紫）
-  /* 第 2 项：融合不再要求同名，只要求**同部位 + 同品质**；产物是该部位、品质 +1 的随机装备。
-   * 部位取 gearMap 的 type（0 头巾 / 1 手套 / 2 衣服 / 3 鞋），品质取 gearSetMap 的 quality。 */
   function gearPart(id) {
     const def = gearMap.getValue(id);
     return def ? Number(def.type) : -1;
   }
-  /** 注意：这是「按装备 id 取图鉴品质」，和下面按**实例**取品质的 gearQuality 不是一回事
-   *  —— 两个同名函数并存过一次，函数声明提升让 sellGear 拿到了这个 id 版，
-   *  于是所有紫装的回收价都掉到白装档（55~60）。改名成 gearPartQuality 后不再冲突。 */
   function gearPartQuality(id) {
     const def = gearMap.getValue(id);
     const set = def ? gearSetMap.getValue(parseInt(def.setId)) : null;
@@ -1370,7 +1344,6 @@
     save();
     return { ok: true, gear: g };
   }
-  /** 第 3 项：体力不足时自动喝体力药剂（优先刚好够用的小药剂，其次大药剂）。 */
   function autoEnergyPotion(need) {
     const s = state();
     const deficit = Math.max(0, (Number(need) || 0) - s.energy);
@@ -1530,7 +1503,6 @@
       case 1: case 2: {
         tickEnergy();
         if (S.energy >= ENERGY_HARD_CAP) return { ok: false, msg: '体力已达上限 ' + ENERGY_HARD_CAP + ' 点' };
-        // 药剂可以把体力顶到自然上限之上，只是不再自然回复
         const per = id === 1 ? 10 : 30;
         const restored = Math.min(per, ENERGY_HARD_CAP - S.energy);
         S.energy += restored;
@@ -1654,7 +1626,7 @@
   /* ============================================================
    * 【S12】天使果实 / 恶魔果实（随机三选一）
    * ============================================================ */
-  /* ---------- 天使果实 / 恶魔果实（第 3 项：随机三选一） ----------
+  /* ---------- 天使果实 / 恶魔果实 ----------
    * 天使果实：从「还能学」的池子里随机抽最多 3 个候选，玩家挑一个学会；
    * 恶魔果实：从已拥有的武器/技能里随机抽最多 3 个候选，玩家挑一个遗忘。
    * 都不再是「直接随机生效」。候选在 useProp 里只负责回传，真正改动在 applyFruitChoice。 */
@@ -1887,9 +1859,7 @@
     if (!Number.isFinite(amount) || amount <= 0) return ups;
     const gained = Math.round(amount);
     S.exp += gained;
-    // 日供本身发下来的经验不再计入当日收益，否则「领得多→明天更多」会滚雪球
     if (!(opts && opts.noTrack)) trackEarn('exp', gained);
-    // 满级 70 级封顶：到了 70 级就不再升级（经验继续累积，等以后开放等级）
     while (S.level < MAX_PLAYER_LEVEL && S.exp >= GData.nextExp(S.level)) {
       S.exp -= GData.nextExp(S.level);
       S.level++;
@@ -1903,7 +1873,6 @@
       const { power: pw, agility: ag, speed: sp, hp } = growth;
       S.power += pw; S.agility += ag; S.speed += sp; S.maxHp += hp;
       // 第 3 点由玩家在升级弹窗里自选（力/敏/速/生命）；某一项占比过低时
-      // 系统直接代选，那一点立刻进属性，不再挂起等玩家。
       let freePoint = 0, autoPoint = null;
       if (!bookLevel) {
         const forced = forcedStat();
@@ -1993,14 +1962,6 @@
    * 【S17】超级松鼠（原版 VIP）
    * ============================================================ */
   // ---------- 超级松鼠（原版 VIP） ----------
-  /* 特权与等级表直接取自原客户端 js/ssdz-pkg2.js 的 VIP 界面内嵌文案：
-   *   1、角色等级10级以上的VIP可以跳过战斗；2、被动经验上限最高400/天；
-   *   3、体力恢复速度最快1.5倍；4、昵称以尊贵标识展示；
-   *   5、首次开通永久赠送6个装备格子；6、师父是VIP时徒弟每日额外获得金松果；
-   *   7、主动挑战VIP玩家所得经验上涨30%；8、体力上限提升（本项目改为「当前等级应有的上限 +60」）。
-   * 原版按天售卖（buyVIP.do）；离线版改成金松果购买（7 天 150 / 30 天 500）。
-   * 到期只是停掉特权，存档里的 vip.level / vip.exp 一直保留，续费后从原等级继续。
-   * 「跳过战斗」在本项目对所有10级以上玩家开放（原版也是 VIP 或 等级>9），因此不作为VIP独占。 */
   const VIP_LEVELS = [   // [等级, 被动经验上限/天, 体力恢复倍率]
     [1, 150, 1.1], [2, 150, 1.2], [3, 200, 1.2], [4, 200, 1.3], [5, 250, 1.3],
     [6, 300, 1.4], [7, 300, 1.4], [8, 350, 1.5], [9, 350, 1.5], [10, 400, 1.5],
@@ -2152,15 +2113,8 @@
    * nextExp 每级涨得比这里快，所以每升一级需要的场次仍然越来越多。 */
   const CHALLENGE_EXP_BASE = 20;
   const CHALLENGE_EXP_PER_LEVEL = 0.65;
-  /* 等级成长到 20 级封顶：之后单场经验不再随等级上涨。20 级同级 33 点/场，
-   * 压实等级差之后最大等级差（+3）约 45 点/场 = 4.5 点体力，
-   * 仍在经验竞技场 150/30 = 5.0 之下。 */
   const CHALLENGE_EXP_CAP_LEVEL = 20;
   const EXP_DIFF_STEP = 0.14;           // 每高 1 级 +14%（先算线性倍率，再压实）
-  /* 等级差压实指数：mult' = mult^EXP_DIFF_TIGHTEN（同级仍是 1.00×，锚点不变）。
-   * 需求「锁紧等级差与经验期望的关系」= 让经验在各等级差下更贴近同级基准。
-   * 下限是 exp 竞技场验收线给的：最大等级差（+3）的体力效率必须**严格大于**
-   * 竞技场的 88%（4.4/5.0）。0.85 时正好等于 4.40 会踩线，所以取 0.88（→4.48）。 */
   const EXP_DIFF_TIGHTEN = 0.88;
   const EXP_DIFF_FLOOR = 0.3;           // 对手低很多时的最低倍率
   const EXP_DIFF_CAP = 2.2;
@@ -2556,11 +2510,6 @@
    * 【S22】每日任务
    * ============================================================ */
   // ---------- 每日任务 ----------
-  /* 原版没有每日任务（「活动」由服务端下发），这是按需求的单机补充：
-   * 每天用日期做种子从池子里抽 4 条，进度来自当天真实行为计数，刷新/重开当天不变。
-   * 计数统一走 bumpDaily()，日期跟着 dailyStatsDate 一起重置。
-   * minLevel：这条任务要几级才做得了（关卡 10 级开启、经验竞技场 11 级、碎片竞技场 20 级、
-   * 天梯 30 级、宝石 45 级才有产出）——抽题时只从「当前等级能完成」的任务里选。 */
   const QUEST_TYPES = [
     { key: 'win',       name: '赢下 {n} 场对战',          steps: [2, 3, 5] },
     { key: 'fight',     name: '进行 {n} 场战斗',          steps: [4, 6, 8] },
@@ -2618,9 +2567,6 @@
     for (const key of QUEST_KEYS) counters[key] = 0;
     return counters;
   }
-  /* 奖励池：金松果、经验与各种道具**一起加权乱抽**（金松果/经验不再是固定奖励），
-   * 每条任务只抽 1~2 项。weight 是权重：越"高级"的东西权重越低
-   * （超级经验丸只有 0.06，大约 1/14 的概率）。药丸数量固定 1 个。 */
   const QUEST_GOLD = { kind: 'gold', weight: 1.4, range: [10, 30] };
   const QUEST_EXP = { kind: 'exp', weight: 1.4, range: [50, 80] };
   const QUEST_EXTRA_POOL = [

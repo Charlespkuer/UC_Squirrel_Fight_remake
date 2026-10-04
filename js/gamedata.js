@@ -74,20 +74,10 @@
     17: [{ power: 28, agility: 27, speed: 28 }, { power: 33, agility: 31, speed: 32 }, { power: 52, agility: 48, speed: 50 }],
     18: [{ power: 31, agility: 30, speed: 31 }, { power: 36, agility: 34, speed: 35 }, { power: 58, agility: 54, speed: 56 }],
   });
-  /* 关卡奖励倍率：上一轮按需求翻倍过，本轮按用户要求**换回原表数值**（系数保持 1）。
-   * 保留这两个常量是为了以后调平衡时只改一处。 */
   const STAGE_REWARD_MULT = 1;
   const STAGE_GOLD_MULT = 1;
-  /* 关卡碎片掉落：掉率换回最初的 0.42 + 星级×0.03（★1 45% ~ ★6 60%），
-   * 也就是每场期望 = 掉率 × 3.5 ≈ 1.58 ~ 2.1 片，与最早的版本一致；
-   * 但数量区间仍然收窄在 2~5（均值 3.5、标准差 1.12），方差不再回到 1~6 那种。
-   * 越级仍然是 tierUp 概率掉高一档颜色，蓝碎片封顶。 */
   const STAGE_FRAGMENT = Object.freeze({ base: 0.42, perStar: 0.03, min: 2, max: 5, tierUp: 0.72 });
   function stageFragmentChance(star) { return Math.min(1, STAGE_FRAGMENT.base + star * STAGE_FRAGMENT.perStar); }
-  /* 常驻挑战关卡再收一道（需求：碎片期望「略微调低」）。
-   * 单独一个系数而不是改 STAGE_FRAGMENT，是为了不动挑战塔的产出——
-   * 塔文档写明它的碎片期望「等同于挑战模式单场」，那条一致性由 stageFragmentChance 保持。
-   * 0.88 → ★1 每场 1.39 片、★6 1.85 片（原 1.58 / 2.10）。 */
   const STAGE_FRAGMENT_MUL = 0.88;
   function stageChallengeFragmentChance(star) { return Math.min(1, stageFragmentChance(star) * STAGE_FRAGMENT_MUL); }
   function stageFragmentCount(random) {
@@ -96,12 +86,9 @@
   }
   const stageScale = (value, factor) => Math.max(1, Math.round(Number(value) * factor));
 
-  /* ===== 关卡强度模型：按「推荐等级」标定（本轮用 tools/stage-balance.cjs 实测调过） =====
+  /* ===== 关卡强度模型：按「推荐等级」标定 =====
    * 推荐等级 = [10,15,20][类型] + 星级 − 1 → 螳螂 ★1-6 ↔ 10-15、仙鹤 ↔ 15-20、熊猫 ↔ 20-25。
-   * 实测推荐等级下随机玩家（同等级 AI：同等成长预算 + 该等级装备/武技）的均值：
-   *   三围 ≈ 1.53×等级 − 2.23　生命 ≈ 13.58×等级 − 10.44
-   *   （tools/player-curve.cjs 每级 2000 采样、10~25 级最小二乘；升级改成
-   *    「2 点随机 + 1 点自选（力/敏/速/生命）」后重测，见 apk-alignment D42）
+   * 推荐等级下玩家的基准均值：三围 ≈ 1.53×等级 − 2.23　生命 ≈ 13.58×等级 − 10.44。
    * 关卡 NPC 的三维与血量直接按这个基准算：
    *   学徒/拳师/大侠 三围 = 玩家 × 0.70/0.78/0.72（再乘类型系数，见下）
    *   学徒/拳师/大侠 血量 = 玩家 × 0.90/1.05/1.20
@@ -177,8 +164,6 @@
   }
   const stageRoleIndex = (npcIndex) => Math.max(1, Math.min(3, Math.round(Number(npcIndex) || 1))) - 1;
 
-  /* 常驻挑战关卡血量整体上调（需求 15~20%，取 +18%）：三种敌人 × 6 难度共 18 关一起抬，
-   * 攻击三维不动，所以是「更耐打」而不是「更疼」。想让关卡回到上调前把这里设成 1 即可。 */
   const STAGE_HP_MUL = 1.18;
   function stageNpcHp(stageId, npcIndex) {
     const role = stageRoleIndex(npcIndex);
@@ -263,10 +248,6 @@
     return Object.keys(merged).map((id) => ({ id: Number(id), count: merged[id] }));
   }
 
-  /* 1 / 5 / 10 / 15 / 20 级礼包（原表 giftMap 28~32）：
-   * 金松果按用户要求**回到旧版数量**（50/50/100/150/200），20 级礼包只给 30 蓝色碎片；
-   * 大小体力药剂都给但数量不多（小 ×3、大 ×2）；额外加卷轴与经验丸，让奖励种类丰富一些。
-   * 原表逐字节保留在 GameDict.js 里，state.js 打开礼包时优先读这份清单。 */
   const GIFT_PACK_BOOST = Object.freeze({
     28: [[29, 1], [8, 50], [1, 3], [2, 2], [21, 3], [22, 3]],
     29: [[30, 1], [8, 50], [1, 3], [2, 2], [21, 3], [22, 3], [7, 1]],

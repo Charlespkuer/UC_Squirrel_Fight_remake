@@ -185,17 +185,17 @@ test('限次类：用尽消失后仍查得到，剩余场数与用尽记录都�
 test('当前实际提升：列出所有生效增益的合计效果（不是只报个名字）', () => {
   const c = setup();
   freshRun(c);
-  c.Tower.debugGrantBuff('C01');                      // 磐石之躯：生命上限 +20%
+  c.Tower.debugGrantBuff('C29');                      // 体质：生命上限 +10%（永久）
   c.Tower.debugGrantBuff('N01');                      // 蓄力一击：攻击 +40%（2 场）
-  c.Tower.debugGrantBuff('N07');                      // 破军：暴击率 +25%（3 场）
-  c.Tower.debugGrantBuff('G05');                      // 铁布衫：受到伤害 −25%（本层 5 场）
+  c.Tower.debugGrantBuff('N07');                      // 破军：暴击率 +20%、暴击伤害 +30%（3 场）
+  c.Tower.debugGrantBuff('M03');                      // 坚守：受到伤害 −30%（2 场）
   const rep = c.Tower.debugBuffReport('endless');
   const map = Object.fromEntries(rep.effects);
   assert.ok(map['生命上限'], '应当列出生命上限：' + JSON.stringify(rep.effects));
-  assert.match(map['生命上限'], /\+20%/, '生命上限应当 +20%（永久类会写进「永久累计」）：' + map['生命上限']);
+  assert.match(map['生命上限'], /\+10%/, '生命上限应当 +10%（永久类会写进「永久累计」）：' + map['生命上限']);
   assert.ok(map['攻击'] && /\+40%/.test(map['攻击']), '攻击应当 +40%：' + map['攻击']);
-  assert.ok(map['暴击率'] && /\+25%/.test(map['暴击率']), '暴击率应当 +25%：' + map['暴击率']);
-  assert.ok(map['受到伤害'] && /-25%/.test(map['受到伤害']), '受到伤害应当 −25%：' + map['受到伤害']);
+  assert.ok(map['暴击率'] && /\+20%/.test(map['暴击率']), '暴击率应当 +20%：' + map['暴击率']);
+  assert.ok(map['受到伤害'] && /-30%/.test(map['受到伤害']), '受到伤害应当 −30%：' + map['受到伤害']);
   // 槽位占用也要报出来（永久类上限 5）
   assert.ok(rep.slots && rep.slots.cap > 0, '应当报出永久槽位占用：' + JSON.stringify(rep.slots));
   assert.ok(rep.slots.used >= 1, '至少占 1 个永久槽：' + JSON.stringify(rep.slots));
@@ -211,7 +211,7 @@ test('挑战塔/无对局都要给明确答复，不能抛错', () => {
 test('调试台渲染：三块都出来（当前提升 / 已获得过的全部 / 流水）', () => {
   const c = setup();
   freshRun(c);
-  c.Tower.debugGrantBuff('C01');    // 永久：生命上限 +20%
+  c.Tower.debugGrantBuff('C29');    // 永久：生命上限 +10%
   c.Tower.debugGrantBuff('N01');    // 限次：攻击 +40%，2 场
   c.Tower.debugGrantBuff('E03');    // 一次生效：+120 试炼币
 
@@ -235,8 +235,8 @@ test('调试台渲染：三块都出来（当前提升 / 已获得过的全部 /
   assert.match(html, /已获得过的全部增益/, '要有「已获得过的全部」那一块');
   assert.match(html, /获取 \/ 消失流水/, '要有流水那一块');
   assert.match(html, /生命上限/, '效果清单里要列出生命上限');
-  assert.match(html, /\+20%/, '生命上限的数值要带出来');
-  assert.match(html, /磐石之躯/, '永久增益要出现在已获得列表里');
+  assert.match(html, /\+10%/, '生命上限的数值要带出来');
+  assert.match(html, /体质/, '永久增益要出现在已获得列表里');
   assert.match(html, /财源滚滚/, '一次生效类也要出现在已获得列表里');
   assert.match(html, /已立即生效/, '一次生效类要标「已立即生效」');
   assert.match(html, /debug-effect/, '效果清单要用手搓的 pill 样式（.debug-effect）');

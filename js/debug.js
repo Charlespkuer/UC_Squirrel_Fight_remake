@@ -178,7 +178,7 @@
         S.dailyStatsDate = today;
         S.dailyWins = 0; S.dailyFails = 0;
         S.joinRankCount = 0;                       // 天梯赛今日已参赛场次
-        S.rankPurchaseWeek = ''; S.rankPurchases = {};  // 金杯商店每周限兑（第 3 项：按周重置）
+        S.rankPurchaseWeek = ''; S.rankPurchases = {};
         S.lotteryDate = today; S.lotteryFree = 1;  // 每日免费抽奖
         S.quests = null; S.dailyCounters = null;   // 每日任务：进度与领取状态清空，下次打开活动页重抽
         S.masterKickDate = '';                     // 师父今天又能让一名徒弟离开
@@ -350,8 +350,6 @@
     panel.innerHTML =
       '<header class="debug-head"><b>调试面板</b><span class="debug-hint">Ctrl+Shift+D</span><button type="button" class="debug-x" aria-label="关闭调试面板">×</button></header>' +
       '<div class="debug-body"><ul class="debug-list">' +
-      /* 第 2 项：开关行不再显示二级描述文字（一行一个开关，工整且占位少）；
-       * 说明文字改为 title 悬停提示，需要时鼠标停一下就能看到，不占面板空间。 */
       TOGGLES.map((t) => '<li><label class="debug-row" data-key="' + t.key + '" title="' + esc(t.note || t.label) + '"><input type="checkbox" data-key="' + t.key + '"' + (state[t.key] ? ' checked' : '') + '><span class="debug-name">' + esc(t.label) + '</span></label></li>').join('') +
       '</ul><div class="debug-grant">' +
       '<span class="debug-grant-title">快速获取物品</span>' +
@@ -494,7 +492,6 @@
 
     mark();
     // 启动时只还原面板显示；已保存的开关由游戏本身按标记生效，
-    // 这里不再触发副作用（此时存档可能还没读出来）。
   }
 
   function msg(text) {

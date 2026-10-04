@@ -174,15 +174,16 @@ test('需求4：平衡数值逐条核对', () => {
   const c = setup();
   const TD = c.TowerData;
   assert.equal(TD.BUFF_BY_ID.C11.mods.winMaxHpFlat, 5, '以战养战应当每胜 +5');
-  assert.match(TD.BUFF_BY_ID.C11.desc, /\+5/, '文字也要是 +5');
+  /* 本轮增益表重做后文案改成数字口径（不再写「不封顶」），断言跟着改成数字说明 */
+  assert.match(TD.BUFF_BY_ID.C11.desc, /生命上限 \+5/, '文案要写明每胜 +5：' + TD.BUFF_BY_ID.C11.desc);
   assert.equal(TD.BUFF_BY_ID.C07.mods.winMaxHpPct, 0.02, '吞噬成长应当每胜 +2%');
   assert.equal(TD.BUFF_BY_ID.C07.mods.winMaxHpCap, 0.30, '吞噬成长上限应当 30%');
   assert.equal(TD.BUFF_BY_ID.C07.mods.killMaxHpPct, undefined, '吞噬成长不该再挂击杀成长');
-  assert.match(TD.BUFF_BY_ID.C07.desc, /\+2%/, '文字要写 +2%');
-  assert.match(TD.BUFF_BY_ID.C07.desc, /30%/, '文字要写 30%');
+  assert.match(TD.BUFF_BY_ID.C07.desc, /每胜利一场/, '文案要写明成长时机');
+  assert.match(TD.BUFF_BY_ID.C07.desc, /最多 \+30%/, '文案要写明上限：' + TD.BUFF_BY_ID.C07.desc);
   for (const id of ['C39', 'C40', 'C41', 'C42', 'C43', 'C44']) {
     assert.equal(TD.BUFF_BY_ID[id].mods.fragileBreakPct, 6, id + ' 的易碎概率应当 6%');
-    assert.match(TD.BUFF_BY_ID[id].desc, /6%/, id + ' 的文字也要是 6%');
+    assert.match(TD.BUFF_BY_ID[id].desc, /小概率损毁/, id + ' 的文案要说明会损毁');
   }
   assert.equal(TD.BUFF_BY_ID.N09.uses, 3, '晴空护符应当 3 次');
   assert.match(TD.BUFF_BY_ID.N09.desc, /3 场/, '晴空护符文字要写 3 场');
@@ -663,7 +664,7 @@ test('需求12：刷新只抬高稀有度期望、不设保底货品', () => {
   assert.ok(bigR40 > bigR20, '40 币档应当明显多于 20 币档：' + bigR40.toFixed(3) + ' vs ' + bigR20.toFixed(3));
 });
 
-test('需求13：新增益「重整旗鼓（普通，+1 币）」与「背水一战（史诗，+5 币）」', () => {
+test('需求13：新增益「重整旗鼓（普通，+1 币）」与「背水一战（史诗，+3 币）」', () => {
   const c = setup();
   const TD = c.TowerData;
   const e9 = TD.BUFF_BY_ID.E09, e10 = TD.BUFF_BY_ID.E10;
@@ -675,7 +676,7 @@ test('需求13：新增益「重整旗鼓（普通，+1 币）」与「背水一
   assert.equal(e10.rarity, 2, '背水一战应当是史诗');
   assert.equal(TD.RARITY_NAME[e10.rarity], '史诗');
   assert.equal(e9.mods.instantRetry, 1, '重整旗鼓 +1 枚');
-  assert.equal(e10.mods.instantRetry, 5, '背水一战 +5 枚');
+  assert.equal(e10.mods.instantRetry, 3, '背水一战 +3 枚（本轮增益表重做后的数值）');
 
   const tok = () => Number(c.Tower._debugRun('endless').retryToken) || 0;
   assert.equal(tok(), 0, '初始 0 枚');
@@ -684,7 +685,7 @@ test('需求13：新增益「重整旗鼓（普通，+1 币）」与「背水一
   c.Tower.debugGrantBuff('E09');
   assert.equal(tok(), 2, '可叠加');
   c.Tower.debugGrantBuff('E10');
-  assert.equal(tok(), 7, '背水一战 +5 枚');
+  assert.equal(tok(), 5, '背水一战 +3 枚（2 + 3）');
   assert.equal((c.Tower._debugRun('endless').permanent || []).length, 0, '一次生效类不占永久位');
 
   // 拿到的币真的能用来回滚
@@ -696,9 +697,9 @@ test('需求13：新增益「重整旗鼓（普通，+1 币）」与「背水一
   const live = c.Tower._debugRun('endless');
   const rw = c.Tower.reportBattle('endless', live.attempt, false, 0);
   assert.ok(rw.retryable, '有币时失败应当可回滚：' + JSON.stringify(rw));
-  assert.equal(rw.retryLeft, 7, '要报出 7 枚');
+  assert.equal(rw.retryLeft, 5, '要报出 5 枚（重整旗鼓 ×2 + 背水一战 +3）');
   assert.ok(c.Tower.retryBattle().ok, '应当能回滚');
-  assert.equal(tok(), 6, '回滚消耗 1 枚');
+  assert.equal(tok(), 4, '回滚消耗 1 枚（5 - 1）');
 });
 
 test('需求14：用「补给」替代「紧急包扎」，去掉后者；金蝉脱壳 3 → 10', () => {
@@ -723,36 +724,57 @@ test('需求14：用「补给」替代「紧急包扎」，去掉后者；金蝉
   for (const x of ch) assert.equal(x.type, 'buff', '选择项必须都是真增益：' + JSON.stringify(x));
 });
 
-test('需求15：全场五折进店被消耗（按份数，多份可折多家店）', () => {
+test('需求15：E04「steam大促」一次性 7 折；E01「立即进货」战后开店，与 E04 叠加为 3.5 折', () => {
   const c = setup();
+  const TD = c.TowerData;
   const run = c.Tower._debugRun('endless');
   run.coins = 100000; run.permanent = [];
-  // 拿到两份
+  /* ---- E04：本轮改成「立即生效 + 不可叠加 + 下一家店 −30%」 ---- */
+  assert.equal(TD.BUFF_BY_ID.E04.kind, 'instant', 'E04 应当是立即生效类型');
+  assert.equal(TD.BUFF_BY_ID.E04.maxStacks, 1, 'E04 不可叠加');
+  assert.equal(TD.BUFF_BY_ID.E04.mods.shopDiscount, 0.30, 'E04 折扣应当是 30%');
   c.Tower.debugGrantBuff('E04');
   assert.equal(c.Tower._debugRun('endless').shopDiscount, 1, '第 1 次应当是 1 份');
-  c.Tower.debugGrantBuff('E04');
-  assert.equal(c.Tower._debugRun('endless').shopDiscount, 2, '再拿一次应当叠成 2 份');
-  // 开第一家店 → 消耗 1 份，价格减半
+  // 再拿一次 —— 不可叠加，所以仍然是 1 份（走 addBuff 会被叠层上限挡住）
+  const again = c.Tower.addBuff(c.Tower._debugRun('endless'), 'E04');
+  assert.ok(!again.ok, 'E04 不可叠加：再拿一次应当被拒（' + (again.msg || '') + '）');
+  assert.equal(c.Tower._debugRun('endless').shopDiscount, 1, '份数不该变多');
+  // 开一家店 → 消耗掉，价格 7 折
   const r = c.Tower._debugRun('endless');
   r.choices = [{ type: 'buff', id: 'C02' }]; r.restShopUsed = false; r.phase = null;
   assert.ok(c.Tower.openRestShop().ok, '应当能开休整商店');
-  assert.equal(c.Tower._debugRun('endless').shopDiscount, 1, '进店应当消耗 1 份');
+  assert.equal(c.Tower._debugRun('endless').shopDiscount, 0, '进店应当消耗掉');
   assert.equal(c.Tower._debugRun('endless').shop.discount, true, '这家店应当吃到折扣');
-  const st1 = c.Tower.shopState();
-  assert.ok(st1.slots.length, '货架应当有货');
+  assert.ok(Math.abs(c.Tower._debugRun('endless').shop.discountPct - 0.30) < 1e-6,
+    '折扣比例应当是 0.30，实测 ' + c.Tower._debugRun('endless').shop.discountPct);
   c.Tower.closeShop();
-  // 开第二家店 → 再消耗 1 份
-  const r2 = c.Tower._debugRun('endless');
-  r2.choices = [{ type: 'buff', id: 'C02' }]; r2.restShopUsed = false; r2.phase = null;
-  assert.ok(c.Tower.openRestShop().ok);
-  assert.equal(c.Tower._debugRun('endless').shopDiscount, 0, '第二家店应当把第 2 份也用掉');
-  assert.equal(c.Tower._debugRun('endless').shop.discount, true, '第二家店也应当打折');
-  c.Tower.closeShop();
-  // 第三家店没份了 → 原价
+  // 没份了 → 原价
   const r3 = c.Tower._debugRun('endless');
   r3.choices = [{ type: 'buff', id: 'C02' }]; r3.restShopUsed = false; r3.phase = null;
   assert.ok(c.Tower.openRestShop().ok);
   assert.equal(c.Tower._debugRun('endless').shop.discount, false, '没份了就是原价');
+  c.Tower.closeShop();
+
+  /* ---- E01「立即进货」：限次 1、下一场战斗后开店、单用 5 折 ---- */
+  const e01 = TD.BUFF_BY_ID.E01;
+  assert.equal(e01.kind, 'limited', 'E01 应当是限次类');
+  assert.equal(e01.uses, 1, 'E01 限次 1');
+  assert.equal(e01.nextBattle, true, 'E01 是「下一场战斗」类');
+  assert.equal(e01.mods.postBattleShop, 1, 'E01 应当挂「战后开店」');
+  assert.equal(e01.mods.postBattleShopDiscount, 0.50, 'E01 单用 5 折');
+  assert.ok(!e01.mods.openShop, 'E01 不该再用「立刻开店」的旧口径');
+
+  /* ---- E01 + E04 同时生效 → 合并成 3.5 折（−65%），不是简单相加 ----
+   * 注意 E04 一局只能拿一次（instant + maxStacks 1），所以这里直接把「E04 已生效、还没进店」
+   * 的状态摆好，再拿 E01 —— 这样测的是合并口径本身。 */
+  const r4 = c.Tower._debugRun('endless');
+  r4.permanent = []; r4.limited = []; r4.postBattleShop = 0;
+  r4.shopDiscount = 1; r4.shopDiscountPct = 0.30;      // 模拟 steam大促 已挂上
+  c.Tower.debugGrantBuff('E01');
+  const rr = c.Tower._debugRun('endless');
+  assert.equal(rr.postBattleShop, 1, 'E01 应当挂上「战后开店」');
+  assert.ok(Math.abs(rr.shopDiscountPct - 0.65) < 1e-6,
+    'E01 + E04 叠加后应当是 −65%（3.5 折），实测 ' + rr.shopDiscountPct);
 });
 
 test('需求16：烙印各自独立随机数；存在时半效、损毁后全额且本局永久', () => {
@@ -970,9 +992,11 @@ test('需求21：挑战塔不再生成任何「只有无尽塔用得上」的增
   /* 池子规模：towerPool 现在是「挑战塔**归属**」的完整名单（场间选择池），
    * 包含限次类与永久类 —— 塔里本来就能选到永久增益（无尽塔专属的除外）。 */
   const towerLimited = TD.towerPool.filter((b) => b.kind === 'limited');
-  assert.equal(towerLimited.length, 31, '挑战塔的限次类应当是 31 条（19 通用 + 12 专属），实测 ' + towerLimited.length);
-  assert.equal(towerLimited.filter((b) => b.towerOnly).length, 31, '其中 31 条是挑战塔专属（含 N/M/G/T 四系）');
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 35, '永久类也属于挑战塔池（共 35 条）');
+  /* 本轮改动：删掉 G03-G05（3 条）与 T03/T06/T08/T09（4 条）→ 挑战塔专属限次类 31 → 24；
+   * 永久类因为删掉 C08、并把 C03（猎侠者）改成**无尽专属**（不再进挑战塔池），35 → 33。 */
+  assert.equal(towerLimited.length, 24, '挑战塔的限次类应当是 24 条（本轮删了 7 条专属），实测 ' + towerLimited.length);
+  assert.equal(towerLimited.filter((b) => b.towerOnly).length, 24, '其中 24 条是挑战塔专属（含 N/M/G/T 四系）');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 33, '永久类也属于挑战塔池（共 33 条）');
   assert.equal(TD.towerPool.filter((b) => b.kind === 'instant').length, 0, '即时类不进选择池');
   // 无尽池不该混入挑战塔专属（它们按「一场定胜负」设计）
   assert.equal(TD.endlessPool.filter((b) => b.towerOnly).length, 0, '无尽选择池不该有挑战塔专属');
@@ -1096,13 +1120,21 @@ test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => 
     assert.equal(b.nextBattle, true, b.id + ' 应当 nextBattle');
     assert.match(b.desc, /下一场战斗/, b.id + ' 文案要写「下一场战斗」');
   }
-  // 关键几条的数值
-  assert.equal(TD.BUFF_BY_ID.T01.mods.openerPowerMul, 0.50, '开局狂热：前 5 回合 +50%');
-  assert.equal(TD.BUFF_BY_ID.T01.mods.openerRounds, 5, '开局狂热：5 回合');
-  assert.equal(TD.BUFF_BY_ID.T01.mods.fatiguePowerMul, 0.20, '开局狂热：之后 −20%');
-  assert.equal(TD.BUFF_BY_ID.T02.mods.dodgeMul, 0.50, '烟幕：闪避率 +50%');
-  assert.equal(TD.BUFF_BY_ID.T03.mods.speedMul, 0.30, '疾风之靴：速度 +30%');
-  assert.equal(TD.BUFF_BY_ID.T04.mods.mustHitAll, 1, '锁定打击：所有攻击必中');
+  // 关键几条的数值（本轮 T 组重排过：删掉 T03/T06/T08/T09 之后其余前移）
+  assert.equal(TD.BUFF_BY_ID.T01.mods.weaponBoostUses, 3, '闪亮登场：前 3 次使用武器');
+  assert.equal(TD.BUFF_BY_ID.T01.mods.weaponBoostPowerMul, 0.50, '闪亮登场：前 3 次武器攻击 +50%');
+  assert.equal(TD.BUFF_BY_ID.T01.mods.weaponBoostMustHit, 1, '闪亮登场：前 3 次武器必中');
+  assert.equal(TD.BUFF_BY_ID.T01.mods.weaponBoostReflectImmune, 1, '闪亮登场：前 3 次武器免疫反伤');
+  assert.equal(TD.BUFF_BY_ID.T01.mods.weaponBoostFatigueMul, 0.20, '闪亮登场：之后我方攻击 −20%');
+  assert.equal(TD.BUFF_BY_ID.T01.mods.openerPowerMul, undefined, '闪亮登场不该再按「出手次数」分档');
+  assert.equal(TD.BUFF_BY_ID.T02.mods.dodgeMul, 0.50, '烟幕：闪避率 ×1.5');
+  assert.equal(TD.BUFF_BY_ID.T03.mods.mustHitAll, 1, '锁定打击：所有攻击必中');
+  assert.equal(TD.BUFF_BY_ID.T04.mods.critBonus, 30, '见血封喉：暴击率 +30%');
+  assert.equal(TD.BUFF_BY_ID.T04.mods.critDmgBonus, 0.50, '见血封喉：暴击伤害 +50%');
+  assert.equal(TD.BUFF_BY_ID.T05.mods.thornsPct, 0.50, '以血换血：反弹 50%');
+  assert.equal(TD.BUFF_BY_ID.T07.mods.startHealPct, 1.00, '不动如山：开战回满生命');
+  assert.equal(TD.BUFF_BY_ID.T08.mods.weaponFreeUses, 1, '先发制人：首次使用武器不消耗回合');
+  assert.equal(TD.BUFF_BY_ID.T08.mods.firstHitZero, 1, '先发制人：第一次受伤为 0');
 
   // 实战：每条专属都要真的把 mods 写到玩家面板上（mods 是逐字段挑的，漏一个就静默失效）
   function freshTower() {
@@ -1116,10 +1148,12 @@ test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => 
     return { c: cc, run: r };
   }
   const EXPECT = {
-    T01: ['openerPowerMul', 'fatiguePowerMul', 'openerRounds'],
-    T02: ['dodgeMul'], T04: ['mustHitAll'], T05: ['critBonus', 'critDmgBonus'],
-    T06: ['takenMul'], T07: ['thornsPct'], T08: ['openStrikePct'], T09: ['lifestealPct'],
-    T11: ['regenPct'], T12: ['firstSkillFree', 'firstHitZero'],
+    T01: ['weaponBoostUses', 'weaponBoostPowerMul', 'weaponBoostMustHit', 'weaponBoostReflectImmune',
+      'weaponBoostFatigueMul'],
+    T02: ['dodgeMul'], T03: ['mustHitAll'], T04: ['critBonus', 'critDmgBonus'],
+    T05: ['thornsPct'], T06: ['takenMul'],
+    /* T07 的 maxHpMul / startHealPct 是**面板与开战回血**口径（不进 me.mods），只有 regenPct 进 mods。 */
+    T07: ['regenPct'], T08: ['weaponFreeUses', 'firstHitZero'],
   };
   for (const [id, keys] of Object.entries(EXPECT)) {
     const t = freshTower();
@@ -1131,8 +1165,8 @@ test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => 
     nx.adjustMe(me);
     for (const k of keys) assert.ok(me.mods && me.mods[k] != null, id + ' 的 ' + k + ' 没写进玩家 mods：' + JSON.stringify(me.mods));
   }
-  // T03/T10 走 speedMul → 直接改面板速度
-  for (const id of ['T03', 'T10']) {
+  // T06（背水一战）走 speedMul → 直接改面板速度
+  for (const id of ['T06']) {
     const t = freshTower();
     t.c.Tower.addBuff(t.run, id);
     const nx = t.c.Tower.nextBattle('tower');
@@ -1142,31 +1176,74 @@ test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => 
     assert.ok(me.speed > 120, id + ' 应当提升面板速度，实测 ' + me.speed);
   }
 
-  // 开局狂热的分档必须真的作用在战斗里（无武器时普攻伤害≈力量，能干净量出倍率）
-  const foe = { name: '木人', level: 70, power: 50, agility: 1, speed: 50, hp: 2000000, maxHp: 2000000,
+  /* ---- 本轮重做的三条机制的**战斗实测** ----
+   * ① 疾风先手/先发制人（M02/T08）：前 N 次使用武器不消耗回合
+   * ② 闪亮登场（T01）：前 3 次使用武器 +50%，之后我方攻击 −20%
+   * 实测都走 Sim，因为 mods 写上面板 ≠ 战斗里真的生效。 */
+  const foe2 = { name: '木人', level: 70, power: 50, agility: 1, speed: 50, hp: 3000000, maxHp: 3000000,
     baseStats: { power: 50, agility: 1, speed: 50 }, weapons: [], skills: [], wears: [], effects: {} };
-  const mk = (extra) => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 60000, hp: 60000,
-    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0,
-    mods: Object.assign({ mustHitAll: 1 }, extra || {}) });
-  /* 按**出手序号**对齐采样：闪避也没关系（那一格记 0），这样两组的第 n 次出手一一对应，
-   * 倍率才是干净的（若不补齐会错位，实测会量出 ×1.79 这种假值）。 */
-  const dmg = (mods) => {
-    const sim = c.Sim.simulate(mk(mods), JSON.parse(JSON.stringify(foe)));
-    return sim.rounds.filter((x) => x.attacker === 0 && x.action === 'common').map((x) => Number(x.dmg) || 0);
-  };
   const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
-  /* 单局伤害方差不小（暴击/命中浮动），多局平均后再比，倍率才稳。 */
-  const mean = (mods, n) => {
-    const rows = [];
-    for (let i = 0; i < n; i++) rows.push(dmg(mods));
-    const len = Math.min.apply(null, rows.map((r) => r.length));
-    return Array.from({ length: len }, (_, i) => avg(rows.map((r) => r[i])));
-  };
-  const base = mean({}, 24), op = mean({ openerPowerMul: 0.5, fatiguePowerMul: 0.2, openerRounds: 5 }, 24);
-  const r5 = avg(op.slice(0, 5)) / avg(base.slice(0, 5));
-  const r6 = avg(op.slice(5, 10)) / avg(base.slice(5, 10));
-  assert.ok(r5 > 1.35 && r5 < 1.65, '前 5 回合应当约 ×1.50，实测 ×' + r5.toFixed(2));
-  assert.ok(r6 > 0.68 && r6 < 0.92, '第 6 回合起应当约 ×0.80，实测 ×' + r6.toFixed(2));
+  const WEAP = [{ id: 3, level: 1, lo: 200, hi: 200, type: '近战' }];
+  const mk2 = (extra) => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 60000, hp: 60000,
+    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: JSON.parse(JSON.stringify(WEAP)),
+    skills: [], wears: [], effects: {}, masterLevel: 0,
+    mods: Object.assign({ mustHitAll: 1 }, extra || {}) });
+  const simOf = (mods) => c.Sim.simulate(mk2(mods), JSON.parse(JSON.stringify(foe2)));
+
+  // ① 前 N 次使用武器必须拿到「再行动一次」的标记，而且只能有 N 次
+  for (const [n, id] of [[3, 'M02'], [1, 'T08']]) {
+    const free = simOf({ weaponFreeUses: n }).rounds
+      .filter((r) => r.attacker === 0 && r.action === 'weapon' && r.actAgain).length;
+    assert.equal(free, n, id + '：应当恰好有 ' + n + ' 次使用武器不消耗回合，实测 ' + free);
+  }
+  assert.equal(simOf({}).rounds.filter((r) => r.attacker === 0 && r.action === 'weapon' && r.actAgain).length, 0,
+    '没有该 buff 时不该出现「不消耗回合」的武器');
+
+  // ② 闪亮登场：强化必须**只落在前 3 次使用武器**上（用 round 上的显式标记判定，不受暴击随机影响）
+  for (const n of [3, 1]) {
+    const rounds = simOf({ weaponBoostUses: n, weaponBoostPowerMul: 0.50, weaponBoostMustHit: 1,
+      weaponBoostFatigueMul: 0.20 }).rounds.filter((r) => r.attacker === 0 && r.action === 'weapon');
+    const marked = rounds.filter((r) => r.weaponBoost != null);
+    assert.equal(marked.length, n, '闪亮登场：应当恰好有 ' + n + ' 次武器吃到强化，实测 ' + marked.length);
+    assert.equal(marked.map((r) => r.weaponBoost).join(','),
+      Array.from({ length: n }, (_, i) => i + 1).join(','),
+      '闪亮登场：吃强化的应当是第 1…' + n + ' 次使用武器，实测 ' + JSON.stringify(marked.map((r) => r.weaponBoost)) +
+      '（共 ' + rounds.length + ' 次武器、标记 ' + marked.length + ' 次）');
+    /* 强化期的武器必须必中：带 mustHit 时不该出现 dodge。 */
+    assert.ok(!marked.some((r) => r.dodge), '闪亮登场：强化期的武器应当必中');
+    /* 之后我方攻击 −20%：单场里只有 n（1 或 3）次强化样本，暴击噪声能把比值压到 1 以下，
+     * 所以这里**跨 40 场取平均**再比（期望 ×1.5 / ×0.8 ≈ 1.875，阈值 1.3 很稳）。 */
+    const dmgOf = (rs) => rs.map((r) => Number(r.dmg) || 0);
+    let front = 0, frontN = 0, back = 0, backN = 0;
+    for (let k = 0; k < 40; k++) {
+      const rw = simOf({ weaponBoostUses: n, weaponBoostPowerMul: 0.50, weaponBoostMustHit: 1,
+        weaponBoostFatigueMul: 0.20 }).rounds.filter((r) => r.attacker === 0 && r.action === 'weapon');
+      for (const v of dmgOf(rw.slice(0, n))) { front += v; frontN++; }
+      for (const v of dmgOf(rw.slice(n, n + 4))) { back += v; backN++; }
+    }
+    if (frontN > 0 && backN > 0 && back > 0) {
+      const ratio = (front / frontN) / (back / backN);
+      assert.ok(ratio > 1.3, '闪亮登场：强化期伤害应当明显高于衰减期，实测 ×' + ratio.toFixed(2) +
+        '（跨 40 场：强化 ' + Math.round(front / frontN) + ' vs 衰减 ' + Math.round(back / backN) + '）');
+    }
+  }
+  assert.equal(simOf({}).rounds.filter((r) => r.attacker === 0 && r.action === 'weapon' && r.weaponBoost != null).length,
+    0, '没有该 buff 时不该出现强化标记');
+
+  // ③ 金蝉脱壳（N04）：首次致死改成「按 30% 上限复活」，而且提示要用自己的名字
+  {
+    const t = freshTower();
+    assert.ok(t.c.Tower.addBuff(t.run, 'N04').ok, 'N04 应当能加入');
+    const nxb = t.c.Tower.nextBattle('tower');
+    const meb = { name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 60000, hp: 60000,
+      baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {},
+      masterLevel: 0 };
+    nxb.adjustMe(meb);
+    const sv = (meb.mods.deathSaves || [])[0];
+    assert.ok(sv, 'N04 应当写进 me.mods.deathSaves');
+    assert.ok(Math.abs(sv.healPct - 0.30) < 1e-6, 'N04：复活回复 30% 上限，实测 ' + sv.healPct);
+    assert.equal(sv.name, '金蝉脱壳', 'N04：复活提示要用自己的名字，实测 ' + sv.name);
+  }
 });
 
 test('需求25：挑战塔碎片只掉蓝色（不再有白/绿）', () => {
@@ -1328,7 +1405,7 @@ test('需求26：积分扩展（拿增益计分 + 两个隐藏成就）', () => 
   r.phase = null; r.choices = null;
   /* 全部走 addBuff 并每步重新取 run 引用（debugGrantBuff 拿的是内部引用，
    * 与这里持有的 r 可能不是同一个对象，混用会导致增益没真正入账）。 */
-  for (const id of ['G07', 'N01', 'C02', 'C02', 'C02']) c.Tower.addBuff(run(), id);
+  for (const id of ['G04', 'N01', 'C02', 'C02', 'C02']) c.Tower.addBuff(run(), id);
   const bonus = c.Tower.debugBuffReport('endless').effects.find(([k]) => k === '攻击');
   assert.ok(bonus && parseFloat(bonus[1].replace('+', '')) > 100,
     '前置条件：本场攻击加成应当 >100%，实测 ' + JSON.stringify(bonus));
@@ -1575,7 +1652,7 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
     assert.ok(!TD.endlessPool.some((x) => x.id === b.id), b.id + ' 不该进无尽选择池');
     assert.ok(!TD.shopPool.some((x) => x.id === b.id), b.id + ' 不该进无尽商店池 ← 需求点名的泄漏');
   }
-  assert.equal(TD.BUFFS.filter((x) => x.towerOnly).length, 31, '应当有 31 条挑战塔专属');
+  assert.equal(TD.BUFFS.filter((x) => x.towerOnly).length, 24, '应当有 24 条挑战塔专属（本轮删了 7 条）');
 
   // 3) 无尽专属（显式标记或带无尽专属 mod）：绝不能出现在挑战塔池
   for (const b of TD.BUFFS) {
@@ -1620,8 +1697,8 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
 
   // 7) 挑战塔池的构成可解释
   assert.equal(TD.towerPool.length, byTag('T.choice').split(',').length, '池子大小要自洽');
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'limited').length, 31, '限次类 31 条');
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 35, '永久类 35 条');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'limited').length, 24, '限次类 24 条（本轮删了 7 条专属）');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 33, '永久类 33 条（删掉 C08、C03 改无尽专属）');
 });
 
 test('需求32：池子分离的端到端实测（真跑两种塔的抽取，零交叉）', () => {
@@ -1687,8 +1764,10 @@ test('需求33：挥金如土（C36）每 10 币一次随机项，且购买它�
   const c = setup();
   const TD = c.TowerData;
   assert.equal(TD.BUFF_BY_ID.C36.mods.shopSpendStep, 5, '步长应当是 5 试炼币');
-  assert.match(TD.BUFF_BY_ID.C36.desc, /5 试炼币/, '文案要写 5 试炼币：' + TD.BUFF_BY_ID.C36.desc);
-  assert.match(TD.BUFF_BY_ID.C36.desc, /购买本增益的花费/, '文案要说明含自身花费');
+  assert.match(TD.BUFF_BY_ID.C36.desc, /试炼币/, '文案要写明与试炼币消费挂钩：' + TD.BUFF_BY_ID.C36.desc);
+  /* 文案改成「每在试炼商店消费 5 试炼币…」；「买它自己也算」由下面的实战断言覆盖
+   *（买完它之后 shopSpend 已经计入了那 100 币 —— 见后面的 procs 断言）。 */
+  assert.match(TD.BUFF_BY_ID.C36.desc, /试炼商店消费/, '文案要写明是「商店消费」口径：' + TD.BUFF_BY_ID.C36.desc);
 
   const run = c.Tower._debugRun('endless');
   run.permanent = []; run.limited = []; run.coins = 999999;
@@ -1802,10 +1881,14 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
   const c = setup();
   const TD = c.TowerData, T = c.Tower, S = c.State;
   const STACKABLE = TD.BUFFS.filter((b) => b.stackable).map((b) => b.id).sort();
-  /* C50「抉择扩充」也是 stackable，但它的叠层效果是「选项数 +1/层」而不是属性成比例；
-   * C14「涅槃」同理 —— 每层多给一次复活机会（本轮改成可叠 2 层），也不是属性成比例。
-   * 这两条都摘出来单独断言，只保留「按层数成比例」的那几条在这个循环里。 */
-  assert.equal(STACKABLE.join(','), 'C06,C07,C11,C12,C14,C16,C17,C50', '可叠层增益清单变了：' + STACKABLE.join(','));
+  /* 本轮新增的可叠层（对应「Cxx 可叠加 N 层」那组需求）：
+   *   C03/C10/C19/C21/C22/C23 → 3 层；C24 → 2 层；C26-C29 → **无上限**（unlimitedStacks）。
+   * C50「抉择扩充」也是 stackable，但叠层效果是「选项数 +1/层」而不是属性成比例；
+   * C14「涅槃」同理（每层多一次复活机会）。这两条摘出来单独断言。
+   * C16/C17 改成「开战第一回合回血」后按胜场量不到，比例由需求65 单独覆盖。 */
+  assert.equal(STACKABLE.join(','),
+    'C03,C06,C07,C10,C11,C12,C14,C16,C17,C19,C21,C22,C23,C24,C26,C27,C28,C29,C50',
+    '可叠层增益清单变了：' + STACKABLE.join(','));
 
   /* 跑一小段真实流程，取某个累计字段（固定层数，排除推进噪声）。 */
   const measure = (id, stacks, wins, field, fixedLayer) => {
@@ -2124,17 +2207,19 @@ test('需求39：反击也算「敌方的一次攻击」——先机预判被反
   assert.ok(/r\.firstHitZero = true;/.test(src), '主回合要记下这次归零');
 });
 
-test('需求40：狂怒（C20）阈值 50%，且低血时攻击+50%、敏捷+20%、速度+20%', () => {
+test('需求40：狂怒（C20）阈值 50%，低血时最终伤害 ×1.5（终乘）、敏捷+20%、速度+20%', () => {
   const c = setup();
   const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;
 
   /* 定义与文案 */
   const m = TD.BUFF_BY_ID.C20.mods;
   assert.equal(m.lowHpAt, 0.50, '阈值应当是 50%');
-  assert.equal(m.lowHpPowerMul, 0.50, '攻击 +50%');
+  /* 本轮改动：低血的那份攻击加成不再是「力量面板 +50%」，而是**最终伤害终乘 ×1.5**。 */
+  assert.equal(m.lowHpFinalMul, 0.50, '低血最终伤害 ×1.5');
+  assert.equal(m.lowHpPowerMul, undefined, '不该再挂力量面板加成（已改为终乘）');
   assert.equal(m.lowHpAgilityMul, 0.20, '敏捷 +20%');
   assert.equal(m.lowHpSpeedMul, 0.20, '速度 +20%');
-  assert.match(TD.BUFF_BY_ID.C20.desc, /50%/, '文案要写 50%：' + TD.BUFF_BY_ID.C20.desc);
+  assert.match(TD.BUFF_BY_ID.C20.desc, /生命低于一半/, '文案要写明低血触发线：' + TD.BUFF_BY_ID.C20.desc);
   assert.match(TD.BUFF_BY_ID.C20.desc, /敏捷/, '文案要写敏捷：' + TD.BUFF_BY_ID.C20.desc);
   assert.match(TD.BUFF_BY_ID.C20.desc, /速度/, '文案要写速度：' + TD.BUFF_BY_ID.C20.desc);
 
@@ -2148,7 +2233,7 @@ test('需求40：狂怒（C20）阈值 50%，且低血时攻击+50%、敏捷+20%
   const me = { name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
     baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 };
   nx.adjustMe(me);
-  assert.equal(me.mods.lowHpPowerMul, 0.50, 'me.mods 要有 lowHpPowerMul');
+  assert.equal(me.mods.lowHpFinalMul, 0.50, 'me.mods 要有 lowHpFinalMul');
   assert.equal(me.mods.lowHpAgilityMul, 0.20, 'me.mods 要有 lowHpAgilityMul');
   assert.equal(me.mods.lowHpSpeedMul, 0.20, 'me.mods 要有 lowHpSpeedMul');
   assert.equal(me.mods.lowHpAt, 0.50, 'me.mods 要有 lowHpAt=0.50');
@@ -2156,7 +2241,7 @@ test('需求40：狂怒（C20）阈值 50%，且低血时攻击+50%、敏捷+20%
   const rep = T.debugBuffReport('endless');
   const low = rep.effects.filter((e) => /低血/.test(e[0]));
   assert.equal(low.length, 3, '效果清单应当有三条低血项：' + JSON.stringify(rep.effects));
-  assert.ok(low.some((e) => /攻击/.test(e[0]) && /\+50%/.test(e[1])), '要有低血攻击 +50%');
+  assert.ok(low.some((e) => /最终伤害/.test(e[0]) && /×1\.50/.test(e[1])), '要有低血最终伤害 ×1.50');
   assert.ok(low.some((e) => /敏捷/.test(e[0]) && /\+20%/.test(e[1])), '要有低血敏捷 +20%');
   assert.ok(low.some((e) => /速度/.test(e[0]) && /\+20%/.test(e[1])), '要有低血速度 +20%');
   const prog = (T.ownedBuffs('endless').find((b) => b.id === 'C20') || {}).progress || '';
@@ -2384,9 +2469,9 @@ test('需求42：叠层增益按层数计价 / 仓库钥匙不进商店 / 登顶
   const c12 = TD.BUFF_BY_ID.C12;
   assert.equal(c12.mods.winStatAfter10, 1, 'C12 应当是固定 +1');
   assert.equal(c12.mods.winPowerAfter10, undefined, '旧的百分比口径应当移除');
-  assert.match(c12.desc, /力量 \+1/, '文案要写力量 +1：' + c12.desc);
-  assert.match(c12.desc, /敏捷 \+1/, '文案要写敏捷 +1：' + c12.desc);
-  assert.match(c12.desc, /速度 \+1/, '文案要写速度 +1：' + c12.desc);
+  assert.match(c12.desc, /力量/, '文案要写力量成长：' + c12.desc);
+  assert.match(c12.desc, /敏捷/, '文案要写敏捷成长：' + c12.desc);
+  assert.match(c12.desc, /速度/, '文案要写速度成长：' + c12.desc);
   const grow = (stacks, layer, wins) => {
     S.newGame('c12' + Math.random());
     const s2 = S.state(); s2.level = 70; s2.props[23] = 99999;
@@ -3151,7 +3236,7 @@ test('需求52：体力药限购/售价、天梯周日不休赛、涅槃重做',
   assert.equal(c14.mods.revivePct, 0.50, '复活回复当前生命上限的 50%');
   assert.equal(c14.mods.reviveStatMul, 0.50, '复活后本场力/敏/速 +50%');
   assert.match(c14.desc, /涅槃|复活/, '文案要说明复活');
-  assert.match(c14.desc, /50%/, '文案要写 50%');
+  assert.match(c14.desc, /50%/, '文案要写明复活回复 50% 上限（本轮要求具体数值，不再写「一半」）');
   assert.match(c14.desc, /力|敏|速/, '文案要写力/敏/速加成：' + c14.desc);
 
   /* 引擎行为：复活回复 50% 上限，且复活后力/敏/速各 +50% */
@@ -4552,9 +4637,9 @@ test('需求65：战斗续航（C16/C17）改成开战第一回合结算，并�
   assert.equal(one.me.hp, 2500 + 250, 'C16 ×1 应当回 5% × 5000 = 250，实测 ' + one.me.hp);
   assert.equal(one.run.hpAbs, one.me.hp, 'HP 计数器要同步成开战回血后的血量');
 
-  /* ③ 叠层仍然严格成比例（C16 ×3 = 15%），C17 每层 10% */
-  const three = battleStart({ permanent: [{ id: 'C16', stacks: 3 }] });
-  assert.equal(three.me.hp, 2500 + 750, 'C16 ×3 应当回 15% × 5000 = 750，实测 ' + three.me.hp);
+  /* ③ 叠层仍然严格成比例；C16/C17 本轮**上限 2 层**（所以只有 ×1 / ×2 两档） */
+  const two = battleStart({ permanent: [{ id: 'C16', stacks: 2 }] });
+  assert.equal(two.me.hp, 2500 + 500, 'C16 ×2 应当回 10% × 5000 = 500，实测 ' + two.me.hp);
   const c17x2 = battleStart({ permanent: [{ id: 'C17', stacks: 2 }] });
   assert.equal(c17x2.me.hp, 2500 + 1000, 'C17 ×2 应当回 20% × 5000 = 1000，实测 ' + c17x2.me.hp);
 
@@ -5016,7 +5101,10 @@ test('需求72：涅槃（C14）一局可拿两次 —— 第 2 层改为「本�
   assert.equal(c14.maxStacks, 2, 'C14 一局最多 2 层');
   assert.equal(c14.mods.revivePct, 0.50, '复活仍然回 50% 上限');
   assert.equal(c14.mods.reviveStatMul, 0.50, '复活后力/敏/速 +50% 不变（第 2 层不再放大它）');
-  assert.match(c14.desc, /2 层|两次|2 次/, '文案要说明可以叠 2 层：' + c14.desc);
+  /* 本轮增益表重做后文案改成「每层战斗可复活一次…」；「一局能拿两次」由数据字段锁定 */
+  assert.equal(c14.stackable, true, '涅槃仍然可叠层');
+  assert.equal(c14.maxStacks, 2, '涅槃一局最多 2 层：' + c14.maxStacks);
+  assert.match(c14.desc, /每层战斗可复活一次/, '文案要写明每层可复活：' + c14.desc);
   openRun(3);
   assert.ok(T.addBuff(T._debugRun('endless'), 'C14').ok, '第 1 份应当能拿到');
   assert.ok(T.addBuff(T._debugRun('endless'), 'C14').ok, '第 2 份应当能拿到');
@@ -5117,8 +5205,8 @@ test('需求73：无尽主界面右上角显示「实际退出到手」的抽奖
   assert.equal(info.retryToken, 0, '开局没有重新挑战币');
   /* 拿到重新挑战币（E10 即时类）后总额要跟着涨 */
   T.applyInstant(T._debugRun('endless'), TD.BUFF_BY_ID.E10);
-  assert.equal(T.endlessInfo().run.retryToken, 5, 'E10 的 5 枚要能读出来');
-  assert.equal(T.endlessInfo().run.ticketsOnExit, T.endlessInfo().run.ticketsIfSettle + 5,
+  assert.equal(T.endlessInfo().run.retryToken, 3, 'E10 的 3 枚要能读出来（本轮增益表重做后的数值）');
+  assert.equal(T.endlessInfo().run.ticketsOnExit, T.endlessInfo().run.ticketsIfSettle + 3,
     '重挑币要 1:1 进总额：' + T.endlessInfo().run.ticketsOnExit);
   /* 换一层：档位跟着走 */
   const tb = T._debugRun('endless');

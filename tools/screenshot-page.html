@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>screenshot harness</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#222}iframe{border:0;width:1170px;height:690px;display:block}</style>
+<iframe id="f" src="/index.html"></iframe>
+<script>
+// 截图专用取景框：同域 iframe 载入游戏，按 shot 参数摆好场景；
+// test/qa 模式下会挂存档告警横幅，这里定时摘掉，保证画面干净。
+var q = new URLSearchParams(location.search);
+var shot = q.get('shot') || 'home';
+var f = document.getElementById('f');
+if (shot === 'battle') f.src = '/index.html?test=2';
+else if (q.get('src')) f.src = q.get('src');
+var titled = false;
+f.addEventListener('load', function () {
+  var w = f.contentWindow, d = f.contentDocument;
+  var t0 = Date.now();
+  var timer = setInterval(function () {
+    var warn = d.getElementById('save-warning');
+    if (warn) warn.remove();
+    if (shot === 'title' && w.Main && w.Main.showTitle && !d.querySelector('.title-screen')) {
+      w.Main.showTitle();
+    }
+    if (Date.now() - t0 > 30000) clearInterval(timer);
+  }, 150);
+});
+</script>

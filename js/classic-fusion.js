@@ -28,7 +28,6 @@
     const board = page.querySelector('.fusion-board');
     page.setAttribute('aria-label', '装备融合');
 
-    /* 第 2 项：材料只要**同部位 + 同品质**，不再要求同名；产物是该部位品质 +1 的随机装备。 */
     const PART_NAME = ['头巾', '手套', '衣服', '鞋子'];
     const partOf = (gear) => (gear ? State.gearPart(gear.id) : -1);
     const partLabel = (gear) => PART_NAME[partOf(gear)] || '装备';
@@ -60,10 +59,6 @@
       selected = selected.filter((key) => gears.some((gear) => gear.key === key && !gear.used && gear.quality < 4 && !isStarred(gear)));
       const first = gears.find((gear) => gear.key === selected[0]);
       // The original dictionary installs its own window.Map implementation.
-      /* 排序按**当前融合规则**来：材料只要同部位 + 同品质，所以「同部位同品质的件数」
-       * 才是能不能凑齐三件的关键 —— 不再优先把同名装备排在一起。
-       * 顺序：能当材料的优先 → 同组件数多的优先（越容易凑三件）→ 品质高的优先 →
-       * 部位（头/手/衣/鞋）→ id/钥匙，保证同一组一定挨在一起。 */
       const groups = Object.create(null);
       gears.forEach((gear) => {
         if (gear.used || gear.quality >= 4 || isStarred(gear)) return;

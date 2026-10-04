@@ -286,7 +286,6 @@
     const sets = {
       status: [['status','状态'],['weapons','武器'],['skills','技能']],
       challenge: [['challenge','随机'],['friends','好友'],['arena','竞技'],['stages','关卡']],
-      // 留言板与聊天合并成一个「聊天」页（第 2 项），不再单列
       message: [['messages','消息'],['chat','聊天'],['ranklog','天梯赛'],['revenge','复仇'],['toplist','排行榜']],
       bag: [['bag','背包'],['shop','商店'],['exchange','兑换']],
       system: [['system','系统'],['help','帮助'],['village','村庄'],['vip','超级松鼠']]
@@ -320,12 +319,6 @@
     opts = opts || {};
     const wrap = document.createElement('div'); wrap.className = 'classic-modal-overlay';
     // locked=true 时没有关闭叉：用于「必须选完才能继续」的自由属性点分配。
-    /* 需求：**主操作按钮放最右、取消/返回放最左**（例如「开始战斗 / 继续挑战 / 继续闯关」
-     * 都在右，「返回 / 稍后继续 / 结束本轮」都在左）。
-     * 原来按钮按传入顺序排、容器是 space-evenly，于是「开始战斗」会落在「返回」左边。
-     * 这里统一按「主操作 → 次要 → 取消」排序，一次覆盖所有弹窗。
-     * 判定：显式 primary / muted 标记最优先；否则按 cls 里的 gold（主）与 muted（取消），
-     * 再回退到标签语义（开始/继续/确定… 算主操作，返回/取消/稍后/结束… 算取消）。 */
     /* 显式角色优先（可预测）：primary/muted 标记 > cls 里的 gold/muted > 标签语义。
      * gold = 主操作（最右），muted = 取消/返回（最左），其余居中。
      * 只按「角色」排序、同级保持原顺序，所以顺序完全由 cls 决定，好维护。 */
@@ -340,7 +333,6 @@
       /* 延后/结束类居中偏左：注意它们里含有「继续」（如「稍后继续」），
        * 必须先于主操作规则判断，否则会被误当主操作排到最右。 */
       if (/稍后|暂不|待会|结束/.test(label)) return -1;
-      /* 主操作类最右（需求点名的「开始战斗 / 继续挑战 / 继续闯关」都在这里）。 */
       if (/开始|继续|确定|确认|闯关|挑战|再战|知道了/.test(label)) return 2;
       if (b.primary === true) return 2;
       return 0;
@@ -371,7 +363,7 @@
    *
    * 以前的写法是把每份存档塞成一个按钮、横着排 12 个：一个按钮上既写等级、又写角色名、
    * 还带全角日期（2026/10/2 15:20:09），在 755px 的弹窗里必然溢出屏幕。
-   * 现在改成一列紧凑的可滚动行：等级徽章 + 名字 + 简短时间 + 一个「载入」按钮。
+   * 一列紧凑的可滚动行：等级徽章 + 名字 + 简短时间 + 一个「载入」按钮。
    * ============================================================ */
   /* ============================================================
    * 【UC5】存档列表弹窗
@@ -451,7 +443,6 @@
     $('.home-energy',h).title = over
       ? '体力已超过自然上限（' + S.energy + '/' + S.maxEnergy + '），不会自然回复'
       : '每5分钟恢复1点体力' + (State.energyCountdown() ? '，下一点 '+State.energyCountdown() : '');
-    // 经验条只显示具体值 x/y（不再显示百分比），条内填充仍按比例
     const needExp = GData.nextExp(S.level);
     const pct = Math.min(100,100*S.exp/needExp);
     $('.home-subbar .exp-meter>i',h).style.width = pct+'%';
@@ -662,7 +653,6 @@
         }
       };
       if(S.energy<10){
-        /* 第 1 项：体力不足时弹「自动喝药」确认；确认后用持有药水补足体力并开战。 */
         const deficit = 10 - S.energy;
         const small = S.props[1] || 0, big = S.props[2] || 0;
         const useId = (deficit <= 10 && small) ? 1 : (big ? 2 : (small ? 1 : 0));
@@ -794,12 +784,9 @@
     let message,buttons;
     if(rw.complete){
       message='恭喜通关！三名对手全部击败。';
-      /* 需求：主操作（继续闯关）在右、导航（返回菜单）在左。
-       * 原来「返回菜单」被标成 gold（=主操作），排序后会跑到最右，与需求相反。 */
       buttons=[{label:'继续闯关',run:back},{label:'返回菜单',cls:'muted',run:home}];
     }else if(rw.win){
       message='已击败'+npc.name+'（'+idx+'/3）。继续挑战不再消耗挑战书，但下一场不会回满血（继承剩余血量并回复25%）。';
-      // 第 1 项：点一次就直接开下一场 —— 原来要先「继续挑战」再在确认弹窗里点「继续战斗」，
       // 连战本来就不消耗挑战书，没有必要再确认一次（确认弹窗仍保留在难度页进入时）。
       buttons=[{label:'继续挑战',run:()=>stageFight(stageId)},{label:'稍后继续',cls:'gold',run:back},{label:'结束本轮',cls:'muted',run:()=>stageAbandon(stageId)}];
     }else{
@@ -832,13 +819,9 @@
       (sellPrice&&(S.props[it.id]||0)>0?btn('卖出','prop-sell','small'):'')+'</div>':'';
     const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个'+(sellPrice?'　可回收 '+sellPrice+' 金松果/个':''))+'</div>'+bagActions:'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
     const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
-    // 兑换页不再挂「金杯商店 / 每日抽奖」（两个入口都在商店页）；商店页左下「每日抽奖」、右下「金杯商店」，
-    // 都用默认尺寸的按钮（比原来的 small 明显大一档）。
-    // 第 2 项：这两个入口缩小到和「装备融合」入口同一档（.uc-button.entry-pill）
     const bagFooter=shop?{left:btn('每日抽奖','lottery','gold entry-pill'),right:btn('金杯商店','rank-shop','gold entry-pill')}:{};
     const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,Object.assign({cls:'classic-bag-board'+(shop?' shop-board':''),counter:(bagPage+1)+'/'+total},bagFooter));
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
-    // 第 2 项：把「来的那一页」原样传下去（true=商店 / 'exchange'=兑换 / false=背包），
     // 否则兑换页点进详情再返回会掉回背包页。
     $('[data-action="prop-action"]',p)?.addEventListener('click',()=>openProp(selectedProp,mode));
     $('[data-action="prop-sell"]',p)?.addEventListener('click',()=>sellAsk(selectedProp,()=>openBag(mode,bagPage)));
@@ -862,7 +845,6 @@
     const wsNow=State.ownedWSCount?State.ownedWSCount():S.weapons.length+S.skills.length,wsMax=State.wsLimit(),wsFull=wsNow>=wsMax;
     const seedNote=isSeed?('<p class="small-label">武器/技能：<b class="'+(wsFull?'ws-full':'ws-ok')+'">'+wsNow+'/'+wsMax+(wsFull?'（已满，果实仍可合成，等有空位时再使用）':'（未满，可继续获得）')+'</b></p>'):'';
     const shardNote=isConvertShard?('<p class="small-label">当前 <b>'+(S.props[id]||0)+'</b>/'+GData.CONVERT_SHARD_COST+' 个　天梯赛里点飘出来的碎片获得</p>'):'';
-    // 药剂：可以把体力顶到自然上限之上（最高 999），只提示不再自然回复。
     // 碎片、果实种子、天梯碎片与宝石：每次合成消耗固定材料与金松果。
     // 所有道具都只有「使用/合成」一次一个动作：点完不关弹窗、不换界面，可以继续点。
     const isPotion=!shop&&(id===1||id===2);
@@ -927,7 +909,6 @@
         :isConvertShard?State.composeConvertPill()
         :isGem?State.mergeGems(id)
         :State.useProp(id);
-      // 天使/恶魔果实改成随机三选一：先关掉详情，弹三张候选卡让玩家挑
       if(!r.ok&&r.needsFruitChoice){m.close();fruitChoiceDialog(r);return;}
       toast(r.msg||(r.gear?'合成成功：'+r.gear.name:'操作完成'));
       if(!r.ok)return;
@@ -968,7 +949,6 @@
       refreshHeader();
     }
     syncLive();
-    // 注意：天使果实（45）在武技已满时**不再**禁用合成，果实可以先囤着。
   }
   /** 卖出背包道具（按字典价格的一半回收）：滑动条选数量后确认。 */
   function sellAsk(id,after) {
@@ -1160,16 +1140,11 @@
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openGears(gearPage-1));
     $('[data-action="next"]',p)?.addEventListener('click',()=>openGears(gearPage+1));
   }
-  /* 状态页左下角的「装备出售」（第 1 项）：把卖装备从「更换装备」里拆出来，
-   * 一屏列出背包里的装备和各自的回收价区间，点一下就能卖，不用先进装备详情。 */
   let gearSellPage = 0;
   const GEAR_SELL_PER = 6;   // 3 行 × 2 列，正好铺满板面，不用滚动
   const QUALITY_LABEL = ['普通', '优秀', '杰出', '卓越', '传说'];
   function openGearSell(pg) {
     gearSellPage = Math.max(0, typeof pg === 'number' ? pg : 0);
-    /* 需求（本轮）：**倒序**展示 —— 后进背包的（刚合成 / 刚融合出来的）排在最前，
-     * 免得卖掉新装备时每次都要翻到最后一页去找。S.gears 是「先进先出」的数组
-     * （addGear 用 push），所以这里整体反转即可。 */
     const gears = State.myGears().slice().reverse(), S = State.state();
     const total = Math.max(1, Math.ceil(gears.length / GEAR_SELL_PER));
     gearSellPage = Math.min(gearSellPage, total - 1);
@@ -1258,8 +1233,6 @@
     if (window.ClassicFusion) window.ClassicFusion.open();
     else legacy.runAction('gears');
   }
-  /* 需求：这些战斗类型的失败**不计入复仇**（仍可在「消息」里看录像）。
-   * 复仇页与「再次挑战」按钮都读这一份名单，避免两处口径不一致。 */
   const REVENGE_EXCLUDED_KINDS = ['tower', 'endless', 'stage'];
   /** 这条记录能不能复仇（败绩 + 不在排除名单里，复仇再失败也不算新的败绩）。 */
   /* ============================================================
@@ -1272,21 +1245,15 @@
     tab=typeof tab==='string'?tab:'messages';pg=pg||0;
     let list=State.battleHistory?State.battleHistory():[];
     if(tab==='ranklog')list=list.filter(r=>r.kind==='rank');
-    /* 需求：**挑战塔 / 无尽塔 / 挑战关**的失败不计入复仇 —— 这三类是「连战/爬塔」流程，
-     * 失败已经由各自的机制处理（塔内就地再战、关卡可花挑战书复活），
-     * 再挂一条「再次挑战」既没有意义、也会把复仇页刷得又长又杂。
-     * 它们仍然会出现在「消息」标签里，录像照常可看。 */
     if(tab==='revenge')list=list.filter(canRevenge);
     const total=Math.max(1,Math.ceil(list.length/2));pg=Math.min(pg,total-1);
     const html=list.slice(pg*2,pg*2+2).map(r=>{
       const d=new Date(r.createdAt),time=(d.getMonth()+1)+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
-      // 第 4 项：复仇页的每条败绩都带一个「再次挑战」——用录像里记下的对手数据重打一次，
       // 赢了给少量经验与金松果（补一点上次失败少拿的），每条记录只能成功复仇一次。
       const rev=tab==='revenge'&&canRevenge(r);
       const revengeBtn=!rev?'':(r.revenged
         ?'<button class="uc-button tiny muted" data-revenged="1" disabled>已复仇</button>'
         :'<button class="uc-button tiny gold" data-revenge="'+esc(r.id)+'">再次挑战</button>');
-      /* 需求：标明这一场来自哪里 —— 塔与关卡的失败不计入复仇，列表里要能看出来。 */
       const KIND_LABEL={challenge:'挑战',stage:'关卡',tower:'挑战塔',endless:'无尽塔',arena:'竞技场',rank:'天梯赛',friend:'切磋',master:'师徒',revenge:'复仇'};
       const kindTag=(KIND_LABEL[r.kind]||'挑战')+' · ';
       return '<article class="message-card"><span class="message-stamp '+(r.winner?'loss':'')+'">'+(r.winner?'败':'胜')+'</span>'+kindTag+'你挑战了【'+esc(r.foe.name)+'】，'+(r.winner?'遗憾落败。':'获得胜利！')+'<time>'+time+'</time>'+
@@ -1364,8 +1331,6 @@
   }
   /** 旧的留言板入口保留成别名，统一走合并后的聊天页。 */
   function openBoard() { openChat(); }
-  /* 好友聊天（第 2 项：留言板并到这里，只保留一个界面）：
-   * 单机版没有服务端，照留言板的做法留一块待开发区域，不跳到「消息」（那是战斗日志）。 */
   function openChat() {
     page('message','chat','<div class="empty-state">好友聊天 · 留言板<br><span class="small-label">这里会显示你和好友的聊天消息，留言板也已并入这一页。<br>本地怀旧版暂不连接公共聊天与留言服务，敬请期待。<br>好友间的切磋与战绩可在「好友」里查看，战斗录像在「消息」中。</span></div>');
   }
@@ -1377,7 +1342,6 @@
     const quests = State.questStatus();
     const gift = '<div class="daily-gift"><div class="daily-gift-text"><h3>每日礼包</h3><p>每天回家都有一份小礼物：金松果 ×150、挑战书 ×1</p></div>' +
       btn(d.claimed ? '今日已领取' : '领取礼包', 'claim-gift', d.claimed ? 'muted' : 'gold') + '</div>';
-    // 奖励连图标带名字一起显示，金松果不再只剩一个数字
     const rewardIcon = (r) => r.kind === 'gold' ? spr('resource_1', 18)
       : r.kind === 'exp' ? '<img alt="" src="images/classic/new-reference/drop-exp-classic.png">'
         : icon('prop', r.id);
@@ -1428,9 +1392,6 @@
     return '<div class="sync-panel"><div class="sync-head">存档位置：' + state + '</div>' +
       '<div class="sync-actions">' + btn('立即写入存档文件', 'save-write', 'small' + (useFile ? '' : ' muted')) +
       btn('载入存档文件', 'save-load', 'small' + (useFile ? '' : ' muted')) +
-      /* 需求：去掉「从磁盘载入」—— 它和系统页上的「导入存档」指向同一个 importSave()，
-       * 属于重复入口（两个按钮做同一件事，容易让人以为行为不同）。
-       * 「从存档列表导入」保留：它走的是服务器 save/ 目录，不是同一功能。 */
       btn('从存档列表导入', 'save-import-list', 'small') + '</div></div>';
   }
   /** 选一个本地 .json 文件；返回 Promise<File|null>（null = 用户取消）。
@@ -1532,9 +1493,6 @@
   /** 把一份存档 JSON 写进正式存档：文件模式先备份再强制写回，兜底模式写 localStorage。 */
   async function applyImportedSave(raw, data) {
     let info = State.fileInfo ? State.fileInfo() : {};
-    /* 现在明明是「浏览器兜底模式」，但本地服务器的存档接口其实是好的 —— 说明这次只是
-     * 启动时没连上。这时候如果按兜底模式把档写进 localStorage，磁盘上那份正式存档
-     * 会在下次启动时重新占上风，等于玩家白导一次。所以先重新探一次：能连上就按文件模式走。 */
     if (info.mode !== 'file' && State.fileProbe) {
       try {
         if (await State.fileProbe()) info = State.fileInfo ? State.fileInfo() : info;
@@ -1769,9 +1727,6 @@
     const slider='<div class="setting-slider" data-slider="volume"><span class="slider-label">音乐音量</span>'+
       '<input type="range" min="0" max="100" step="1" value="'+vol+'" aria-label="音乐音量">'+
       '<b class="slider-value">'+vol+'%</b></div>';
-    /* 第 3 项：分辨率与全面屏收进上面那一排，和音乐/导出存档/导入存档/更改昵称
-     * 拼成「两排 6 个按钮」。分辨率不再是 6 个并排的小按钮，而是一个循环按钮
-     * （按钮上直接写着当前档位，点一下换下一档），长说明改挂 title 悬停提示。 */
     const resolutions=State.RESOLUTIONS||[];
     const resShort=(r)=>!r?'自动':r.key==='auto'?'自动':r.label.replace(' × ','×');
     const resIndex=Math.max(0,resolutions.findIndex((r)=>r.key===st.resolution));
@@ -1787,7 +1742,6 @@
         resolutions.map((r)=>r.label).join(' → ')+'。画面按这一档等比缩放并居中；窗口装不下时自动按窗口缩小，不会溢出。')+
       sysBtn(st.fullscreen?'全面屏：开':'全面屏：关','fullscreen','','开启后画面铺满整个窗口（不留黑边，窗口比例差得多时会有轻微拉伸），同时尝试进入系统全屏；按 Esc 可退出系统全屏。')+
       '</div>';
-    // 底部那段「松鼠大战 · 怀旧单机版 / 进度默认写进…」的提示按需求去掉（存档位置在下面的存档面板里有）
     const p=page('system','system',grid+slider+saveFilePanel()+syncPanel());
     $('[data-action="sound"]',p).onclick=()=>{Main.setMuted(!mute);openSystem();};
     $('[data-action="save-write"]',p).onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};
@@ -1798,7 +1752,6 @@
       try{const r=await fetch('/__saves',{cache:'no-store'});const j=await r.json();list=(j&&j.saves)||[];}
       catch(e){toast('读不到存档列表：本地服务器没开？');return;}
       if(!list.length){toast('save/ 与 save/backup/ 里没有可用存档');return;}
-      // 紧凑的可滚动列表（不再把等级/名字/时间全塞进按钮里，避免溢出屏幕）
       saveListDialog(list, async (it)=>{
         try{
           const r=await fetch('/__saves/get?rel='+encodeURIComponent(it.rel),{cache:'no-store'});

@@ -592,6 +592,65 @@ test('需求9.6：本轮新增 6 个增益 —— 池子归属 + 豪掷千金 / 
     '拿到的限次增益应当真的记在本局里');
 });
 
+test('需求9.7：时来运转（E12）—— 天命所归的下位，史诗即时，仅商店、一局一次', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower;
+  const E12 = TD.BUFF_BY_ID.E12;
+  assert.ok(E12, '应当有 E12 时来运转');
+  assert.equal(E12.rarity, 2, '史诗稀有度');
+  assert.equal(TD.RARITY_NAME[E12.rarity], '史诗');
+  assert.equal(E12.kind, 'instant', '即时生效');
+  assert.equal(E12.maxStacks, 1, '一局只能拿一次');
+  assert.ok(TD.hasTag(E12, 'oncePerRun'), '带 oncePerRun 标签');
+  assert.ok(TD.hasTag(E12, 'endless') && TD.hasTag(E12, 'shop'), '无尽塔 + 商店');
+  assert.ok(!TD.hasTag(E12, 'battle'), '不该进战斗奖励池（仅商店购买获取）');
+  assert.ok(!TD.hasTag(E12, 'tower'), '不该进挑战塔');
+  assert.equal(E12.mods.rerollTiltMul, 2, '刷新提速 ×2');
+  assert.match(E12.desc, /商店/, '文案要写明只在商店出售：' + E12.desc);
+
+  /* ---- 池子：只在商店池，战斗奖励池 / 挑战塔池都没有它 ---- */
+  assert.ok(TD.shopPool.some((b) => b.id === 'E12'), '应当能在商店买到');
+  assert.equal(TD.endlessPool.filter((b) => b.id === 'E12').length, 0, '不该进无尽塔的战斗奖励池');
+  assert.equal(TD.towerPool.filter((b) => b.id === 'E12').length, 0, '不该进挑战塔池');
+
+  /* ---- 效果：每 10 币带来的稀有度提升翻倍（等价于「同样的钱按两倍算」）---- */
+  const withE12 = { instantIds: [{ id: 'E12', count: 1 }] };
+  const none = { instantIds: [] };
+  assert.equal(TD.tiltRateMul(none), 1, '没有 E12 时是原速');
+  assert.equal(TD.tiltRateMul(withE12), 2, '有 E12 时速度翻倍');
+  for (const paid of [10, 20, 30, 50]) {
+    assert.ok(Math.abs(TD.rerollTilt(paid, withE12) - TD.rerollTilt(paid * 2, none)) < 1e-9,
+      'paid=' + paid + ' 时应当等价于没它时花两倍钱：' +
+      TD.rerollTilt(paid, withE12).toFixed(4) + ' vs ' + TD.rerollTilt(paid * 2, none).toFixed(4));
+  }
+  const e0 = TD.rerollExpectation(30, none), e1 = TD.rerollExpectation(30, withE12);
+  assert.equal(e0.tiltRateMul, 1);
+  assert.equal(e1.tiltRateMul, 2);
+  assert.ok(e1.epics > e0.epics * 1.5, '期望史诗件数应当明显提高：' + e0.epics + ' → ' + e1.epics);
+  assert.ok(e1.meanRarity > e0.meanRarity, '平均稀有度应当提高：' + e0.meanRarity + ' → ' + e1.meanRarity);
+  /* 场间三选一的倾斜不受影响（它走的是另一条调用，不带 run） */
+  assert.ok(Math.abs(TD.rerollTilt(30) - TD.rerollTilt(30, none)) < 1e-9, '不传 run 时行为不变');
+
+  /* ---- 一局一次：买到之后商店再也不会刷出它 ---- */
+  const run = T._debugRun('endless');
+  run.permanent = []; run.limited = []; run.coins = 5000;
+  run.shop = null; run.phase = null; run.choices = [{ type: 'buff', id: 'C02' }]; run.restShopUsed = false;
+  assert.ok(T.openRestShop().ok, '应当能开休整商店');
+  assert.equal(T.ownableOf(T._debugRun('endless'), E12), true, '还没拿到时应当能获得（店里会刷出来）');
+  /* 直接把 E12 塞进这一页货架，走真实购买路径。
+   * 注意要改**本局对象上的 shop**（shopState() 返回的是快照，改它不影响购买）。 */
+  T._debugRun('endless').shop.slots[0] = { id: 'E12', sold: false, price: 100 };
+  const bought = T.buyShopSlot(0);
+  assert.ok(bought.ok, '应当能买到时来运转：' + (bought.msg || ''));
+  const after = T._debugRun('endless');
+  assert.ok((after.instantIds || []).some((x) => x.id === 'E12'), '购买后要登记成「本局已获得」');
+  assert.equal(T.ownableOf(after, E12), false, '一局一次：之后不该再能获得');
+  assert.equal(T.rollShopSlotsOf(after, 0).filter((sl) => sl.id === 'E12').length, 0,
+    '之后刷新也不该再刷出它');
+  assert.equal(TD.rerollExpectation(30, after).tiltRateMul, 2, '买完之后刷新提速要生效');
+  T.closeShop();
+});
+
 test('需求10：商店价格在 -3 ~ +3 随机，且期望不变', () => {
   const c = setup();
   const TD = c.TowerData;
@@ -1873,7 +1932,11 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
   // 4) 无尽商店池的边界
   assert.ok(!TD.shopPool.some((b) => !TD.hasTag(b, 'shop')), '不上商店的（名贵手表）不该进商店池');
   assert.ok(TD.shopPool.some((b) => b.id === 'N09'), '环境类晴空护符应当能在无尽商店买到');
-  assert.equal(TD.shopPool.filter((b) => b.kind === 'instant').length, 0, '即时类不该进商店池');
+  /* 即时类默认不上商店；**只有显式标了 shop 标签的例外**（E12 时来运转 = 天命所归的下位，
+   * 定位就是「仅商店购买获取」）。这条断言把这个例外锁成唯一一条。 */
+  assert.equal(TD.shopPool.filter((b) => b.kind === 'instant').map((b) => b.id).join(','), 'E12',
+    '只有时来运转（E12）这一条即时类能在商店出售，实测 ' +
+    TD.shopPool.filter((b) => b.kind === 'instant').map((b) => b.id).join(','));
 
   // 5) 三个池子的名单必须与 roster 完全一致（不能各自写谓词）
   const byTag = (tag) => TD.BUFFS.filter((b) => roster(b.id).indexOf(tag) >= 0).map((b) => b.id).join(',');

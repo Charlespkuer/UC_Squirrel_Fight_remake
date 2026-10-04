@@ -337,6 +337,7 @@
     if (m.shopDiscount) parts.push('下一家商店 ' + shopDiscountLabel(m.shopDiscount));
     if (m.postBattleShop) parts.push('下一场战斗后开一次商店');
     if (m.instantRetry) parts.push('铸币 +' + m.instantRetry);
+    if (m.rerollTiltMul) parts.push('商店刷新稀有线提速 ×' + m.rerollTiltMul);
     return parts.join('、') || (buff && buff.desc) || '立即生效';
   }
 
@@ -2525,7 +2526,8 @@
   }
   function rollShopSlots(run, paid) {
     const pool = D().shopPool || D().endlessPool, slots = [], taken = new Set();
-    const weights = D().tiltWeights(D().rerollTilt(paid || 0), run);
+    /* 传 run：把「时来运转」（E12）的刷新加速算进这一页的稀有度倾斜里。 */
+    const weights = D().tiltWeights(D().rerollTilt(paid || 0, run), run);
     for (let i = 0; i < D().SHOP.slots; i++) {
       const want = rollRarity(weights);
       const avail = (r) => pool.filter((b) => b.rarity === r && !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));

@@ -296,6 +296,8 @@
     if (m.firstDodge) parts.push('每场战斗中第一次被攻击时必定闪避');
     if (m.roundMaxHpMul) parts.push('战斗中每回合双方生命上限 ×' + Math.round(m.roundMaxHpMul * 100) + '%（向下取整）；每场战斗结束时清零');
     if (m.shopSpendLimited) parts.push('每在试炼商店消费 ' + m.shopSpendLimited + ' 试炼币 → 立即获得 1 个随机限次增益');
+    if (m.rerollTiltMul) parts.push('本局商店刷新的稀有度提升速度 ×' + m.rerollTiltMul +
+      '（每花 10 试炼币带来的提升翻倍）');
     if (m.shopEnterCoins) parts.push('每进入一次试炼商店 +' + m.shopEnterCoins + ' 试炼币' +
       (b.stacks > 1 ? '（可叠 ' + b.stacks + ' 层）' : ''));
     if (m.mustHitAll) parts.push('这一场所有攻击必中');
@@ -1131,12 +1133,15 @@
         (shop.rerollCapped ? '本次 ' + shop.rerollNextPrice + ' 币（最高价，不再涨）'
           : '本次 ' + shop.rerollNextPrice + ' 币，下次更贵')) + '</i>' +
       '<span>' + (function () {
-        const now = TowerData.rerollExpectation(shop.rerollFree ? 0 : shop.rerollNextPrice);
+        /* 传 run：把「时来运转」（E12）的刷新提速反映到期望数字上。 */
+        const liveRun = (Tower.endlessInfo() || {}).run || null;
+        const now = TowerData.rerollExpectation(shop.rerollFree ? 0 : shop.rerollNextPrice, liveRun);
         const nextPaid = shop.rerollFree ? shop.rerollNextPrice : TowerData.rerollPriceAt(shop.rerollCount + 1);
-        const nxt = TowerData.rerollExpectation(nextPaid);
+        const nxt = TowerData.rerollExpectation(nextPaid, liveRun);
         const f = (v) => (Math.round(v * 100) / 100).toFixed(2);
+        const speed = now.tiltRateMul > 1 ? '（时来运转：提速 ×' + now.tiltRateMul + '）' : '';
         return '越贵越好：本次期望史诗 ' + f(now.epics) + ' 件、传奇 ' + f(now.weights[3] * (TowerData.SHOP.slots || 5)) +
-          ' 件；' + (shop.rerollCapped && !shop.rerollFree
+          ' 件' + speed + '；' + (shop.rerollCapped && !shop.rerollFree
             ? '已到最高价，期望不再提高'
             : '下次（' + nextPaid + ' 币）期望史诗 ' + f(nxt.epics) + ' 件') +
           '。当前拥有与已售出的不会再出现';

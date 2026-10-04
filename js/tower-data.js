@@ -313,9 +313,26 @@
    * 为什么不用「保底某一件」：那是硬替换，货架会出现「1 件传奇 + 4 件普通」这种
    * 结构突变；倾斜是整架一起变好，体感更像「这家店真的更高级」。
    * ============================================================ */
-  /** 倾斜系数：花了 paid 币之后的 p。 */
-  function rerollTilt(paid) {
-    const money = Math.max(0, Number(paid) || 0);
+  /** 即时类增益本局已获得几次（即时类不进 permanent/limited，另记在 run.instantIds 上）。
+   *  与 tower.js 的 instantOwnedCount 同一口径（这里自己读一份，避免模块反向依赖）。 */
+  function instantOwned(run, id) {
+    if (!run) return 0;
+    let n = 0;
+    for (const row of run.instantIds || []) if (row && row.id === id) n += Math.max(1, Math.floor(Number(row.count) || 1));
+    return n;
+  }
+  /** 「每 10 试炼币」的倾斜速度倍率：时来运转（E12）每持有一层就把这个速度 ×mods.rerollTiltMul。
+   *  只作用于**商店刷新**（rollShopSlots / rerollExpectation）；场间三选一的倾斜不受影响。 */
+  function tiltRateMul(run) {
+    const n = instantOwned(run, 'E12');
+    if (!n) return 1;
+    const mul = Math.max(1, Number((BUFF_BY_ID.E12.mods || {}).rerollTiltMul) || 2);
+    return 1 + (mul - 1) * n;
+  }
+  /** 倾斜系数：花了 paid 币之后的 p。
+   *  传 run 时把「时来运转」的加速算进去（等价于同样的钱多花了一倍）。 */
+  function rerollTilt(paid, run) {
+    const money = Math.max(0, Number(paid) || 0) * tiltRateMul(run);
     const g = Math.max(1, Number(SHOP.rerollTiltGrowth) || 1.25);
     return Math.pow(g, money / 10);
   }
@@ -385,11 +402,12 @@
     const slots = Math.max(1, (SHOP && SHOP.slots) || 5);
     const mean = (w) => w.reduce((a, v, i) => a + v * i, 0);
     /* run 可选：传入后按「已拥有传奇数」再压传奇那一档，与商店实际抽取同口径。 */
-    const base = tiltWeights(1, run), tilted = tiltWeights(rerollTilt(paid), run);
+    const base = tiltWeights(1, run), tilted = tiltWeights(rerollTilt(paid, run), run);
     const epics = (w) => w.reduce((a, v, i) => a + v * (i >= 2 ? 1 : 0), 0) * slots;
     return {
       paid: Math.max(0, Number(paid) || 0),
-      tilt: +rerollTilt(paid).toFixed(4),
+      tilt: +rerollTilt(paid, run).toFixed(4),
+      tiltRateMul: +tiltRateMul(run).toFixed(2),
       weights: tilted.map((v) => +v.toFixed(4)),
       meanRarity: +mean(tilted).toFixed(4),
       baseMeanRarity: +mean(base).toFixed(4),
@@ -1006,6 +1024,12 @@
     { id: 'C15', tags: ['tower', 'endless', 'battle', 'shop'], name: '增幅水晶', rarity: 2, kind: 'permanent', desc: '本局内所有 buff 的效果 ×1.4', mods: { globalMul: 1.40 } },
     { id: 'E09', tags: ['endless', 'battle'], name: '重整旗鼓', rarity: 0, kind: 'instant',
       desc: '立即获得 1 枚铸币', mods: { instantRetry: 1 } },
+    /* 时来运转（E12）：天命所归（C51）的下位 —— 史诗·即时、**只在商店出售**、一局一次；
+     *  效果是把「商店刷新每 10 试炼币带来的稀有度倾斜」翻倍。
+     *  注意 tags 里**没有 battle**：它不会进战斗奖励池（只能在商店买到）。 */
+    { id: 'E12', tags: ['endless', 'shop', 'oncePerRun'], name: '时来运转', rarity: 2, kind: 'instant', maxStacks: 1,
+      desc: '本局商店刷新时，每花 10 试炼币带来的稀有度提升**翻倍**（仅商店出售，一局一次）',
+      mods: { rerollTiltMul: 2 } },
     { id: 'E10', tags: ['endless', 'battle'], name: '背水一战', rarity: 2, kind: 'instant',
       desc: '立即获得 3 枚铸币', mods: { instantRetry: 3 } },
     { id: 'E07', tags: ['endless', 'battle', 'oncePerRun', 'repeatable'], name: '挫锐', rarity: 0, kind: 'instant', maxStacks: 1,
@@ -1236,7 +1260,7 @@
     'openShop', 'instantRetry', 'enemyMaxHpDown', 'permSlot', 'pickWeaponPct',
     'pickSkillPct', 'pickPermanentFree', 'sellValue', 'sellGrowthPerWin', 'postBattleShop',
     'postBattleShopDiscount', 'shopSpendStep', 'shopSpendStat', 'shopSpendHp',
-    'shopSpendLimited', 'shopEnterCoins',
+    'shopSpendLimited', 'shopEnterCoins', 'rerollTiltMul',
   ];
   function hasEndlessOnlyMod(b) { return Object.keys(b.mods || {}).some((k) => ENDLESS_ONLY_MODS.indexOf(k) >= 0); }
   function poolRoster(b) {
@@ -1318,7 +1342,7 @@
     endlessDepthMul, ENDLESS_DEEP_LAYER,
     buffScore, reviveScoreAt,
     SHOP_PRICE_OFFSET, rollShopPrice,
-    rerollPriceAt, rerollPriceCapped, rerollTilt, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,
+    rerollPriceAt, rerollPriceCapped, rerollTilt, tiltRateMul, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,
     shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,
     BUFF_TAGS, POOL_TAGS, hasTag, tagsOf, buffsWithTag, poolsOf,
     legendWeightFactor, legendOwnedCount, allRepeatableLegendsOwned, LEGEND_BASE_WEIGHT, rarityBoostOf,

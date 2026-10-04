@@ -1,8 +1,19 @@
 /* UC 松鼠大战战斗播放器。动作、装备替换位与命中帧取自原版 APK。
  * 原版时间轴已包含接近、闪避、返回的位置；松鼠朝右，NPC 默认朝左。
  */
+
+/* ------------------------------------------------------------
+ * 目录：战斗播放器（按回合事件流驱动动画）
+ * Ctrl+F 搜节号（如「【BT1】」）直达对应代码块。
+ *
+ *  【BT1】常量与素材表  【BT2】NPC 头像与动画名映射  【BT3】战斗播放主流程 run
+ *  【BT4】导出 window.Battle
+ * ------------------------------------------------------------ */
 (function () {
   'use strict';
+  /* ============================================================
+   * 【BT1】常量与素材表（图集/特效/命中帧）
+   * ============================================================ */
   const W = 1170, H = 690, FPS = 20;
   const SQ = ['SQ_01', 'SQ_02', 'weaponAttack', 'throwweaponAttack'];
   const NPC_SHEETS = { tl: ['tl'], xh: ['xh1', 'xh2'], xm: ['xm1', 'xm2'], wood: ['woodman1', 'woodman2'] };
@@ -56,6 +67,9 @@
     15: ['skill_15_1', 'effect_skill_15_defend'], 18: ['skill_18_2', 'effect_skill_18_defend_2'] };
   let activeController = null;
 
+  /* ============================================================
+   * 【BT2】NPC 头像与动画名映射
+   * ============================================================ */
   function makeAvatar(npcType) {
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 122;
     const ctx = canvas.getContext('2d');
@@ -77,6 +91,9 @@
     try { const item = map.getValue(id); return item ? item.name : fallback; } catch (e) { return fallback; }
   }
 
+  /* ============================================================
+   * 【BT3】战斗播放主流程 run
+   * ============================================================ */
   async function run(opts) {
     if (activeController) activeController.cancel();
     const canvas = opts.canvas, ctx = canvas.getContext('2d');
@@ -518,5 +535,8 @@
     perform().catch((error) => { controller.cancel(); console.error('[battle]', error); if (opts.onError) opts.onError(error); });
     return controller;
   }
+  /* ============================================================
+   * 【BT4】导出 window.Battle
+   * ============================================================ */
   window.Battle = { run, makeAvatar, REGIONS, weaponLabelFor, isThrowing };
 })();

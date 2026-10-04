@@ -30,7 +30,8 @@
 .empty-slot{cursor:default}.collection-board .empty-slot .item-icon,.classic-bag-board .empty-slot .item-icon{background:#e6d5a9;border:0;box-shadow:none;border-radius:30px;opacity:.7}
 /* 翻页箭头保持居中偏侧的原有位置（原版字面坐标 (7,371)/(1094,371) 会把箭头压到
  * 底板边缘上，观感反而更差，故回退）。 */
-.page-arrow{top:37%;right:9px}.page-arrow.prev{left:8px}.page-arrow .uc-button.arrow{width:62px;height:62px;min-height:0;min-width:0;padding:0 0 10px;border:5px solid #278000;background:#8bd000;box-shadow:inset 0 0 0 3px #d1f48a;border-radius:50%;font-family:Arial,sans-serif;font-size:62px;line-height:1;-webkit-text-stroke:0;text-shadow:none;color:#fff9ce;display:flex;align-items:center;justify-content:center}
+.page-arrow{top:37%;right:9px}.page-arrow.prev{left:8px}.page-arrow .uc-button.arrow{width:62px;height:62px;min-height:0;min-width:0;padding:0;border:5px solid #278000;background:#8bd000;box-shadow:inset 0 0 0 3px #d1f48a;color:#fff9ce}
+.page-arrow .uc-button.arrow .chev{--chev-size:30px;--chev-w:8px;--chev-l:8px;--chev-r:8px}
 .classic-tabs.bag-tabs{padding:5px 12px 5px 110px;gap:28px}
 .bag-tabs .uc-tab{flex:0 0 233px;font-size:51px}.bag-tabs .uc-tab.active{background:linear-gradient(#fffdf0,#e6dfce);border-color:#847966;box-shadow:inset 0 0 0 4px #fffdf2}
 .bag-coins{position:relative;flex:1;min-width:160px;height:63px;border-radius:45px;background:#6c3b16;color:white;font:38px Georgia,serif;display:flex;align-items:center;justify-content:center;gap:8px}
@@ -123,6 +124,15 @@
 .gear-modal .gear-note{position:static;text-align:center;font-size:27px;margin-bottom:12px;color:#6d321d}.gear-modal .gear-layout{height:365px;grid-template-columns:38% 62%;gap:5px}.gear-modal .gear-slots{position:relative;display:block}.gear-modal .gear-slots .catalog-cell{position:absolute;width:140px;height:134px}.gear-modal .gear-slots .catalog-cell:nth-child(1){top:0;left:119px}.gear-modal .gear-slots .catalog-cell:nth-child(2){top:122px;left:202px}.gear-modal .gear-slots .catalog-cell:nth-child(3){top:122px;left:35px}.gear-modal .gear-slots .catalog-cell:nth-child(4){top:244px;left:119px}.gear-modal .gear-slots .item-icon{width:133px;height:119px;background:#ede0bd;border-radius:29px;border:3px solid #a88256;box-shadow:inset 0 0 0 3px #fff7dc}
 .gear-modal .gear-list{gap:3px 17px;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)}.gear-modal .gear-list .item-icon{width:147px;height:138px;border-radius:30px}.gear-modal .gear-list .item-caption{font:27px/32px "SimSun","Songti SC","STSong",serif}.gear-modal .gear-capacity{position:absolute;bottom:80px;right:37px;font-size:25px;color:#7b542d}.gear-modal .page-arrow{top:43%;right:2px}.gear-modal .page-arrow.prev{left:350px}
 
+/* 装备详情弹窗的按钮排（`.gear-detail` 是 openGear 独有的，用 :has 认它）。
+ * 传说（橙）装会多一个「镶嵌/拆卸宝石」，最多 5 个按钮；基础规则
+ * `.modal-buttons .uc-button{min-width:200px}` + `gap:28px` 一排要 1112px，
+ * 弹窗里只有 926px —— 整排会从弹窗右边顶出去（用户反馈「一排 5 个按钮超出屏幕」）。
+ * 旧修复把按钮整体改小（去掉 min-width、压内边距），代价是按钮比全游戏其它弹窗小一号。
+ * 现在恢复标准按钮尺寸，改用**换行**：最坏组合（装备 + 拆卸宝石（5金） + 星标 + 出售 + 返回）
+ * 自动排成 4+1 或 3+2 两行，单排最宽 884px < 926px，既不溢出也统一了风格。 */
+.classic-modal:has(.gear-detail) .modal-buttons{flex-wrap:wrap;gap:16px 24px}
+
 /* 自由属性点：升级时必选的分配弹窗（无关闭叉）；点数不在其它地方常驻显示 */
 .classic-modal-overlay.point-dialog>.classic-modal.small-modal{max-height:600px;width:800px}
 .classic-modal-overlay.point-dialog>.classic-modal.small-modal>.modal-body{max-height:470px;overflow-y:auto}
@@ -205,9 +215,8 @@
 /* 升级失败保护（第 5 项）：失败后成功率每次 +5%，在成功率旁边标出来 */
 .detail-upgrade .upgrade-pity { font-size: 22px; font-style: normal; color: #8a6a3a; }
 
-/* 翻页箭头：‹ › 在 Arial 下的墨迹中心比圆框圆心低 5px（截图逐像素量出来的）。
-   用 padding-bottom 顶回圆心——不能用 transform，那会把整个圆框一起搬走。
-   1px padding-bottom ≈ 0.48px 视觉上移，所以取 10px。 */
+/* 翻页箭头：‹ › 字形已废弃（Arial/Georgia 的墨迹中心天生偏下，且随平台字体回退漂移），
+   现用 .chev 边框人字形（见 classic.css），几何对称、天然居中。 */
 
 /* 状态页的力/敏/速/命数字（第 3 项）：Georgia 数字的字面重心偏低，
    单独把数字上移 6px，圆形字徽不动。 */

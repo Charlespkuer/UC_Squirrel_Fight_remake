@@ -3,10 +3,21 @@
  * 经验表来自百度百科 UC松鼠大战词条；NPC/武器/技能/装备等
  * 数值直接读自原版 GameDict.js
  * ============================================================ */
+
+/* ------------------------------------------------------------
+ * 目录：复刻版游戏常量（经验/关卡/终局数值）
+ * Ctrl+F 搜节号（如「【GD1】」）直达对应代码块。
+ *
+ *  【GD1】经验表与学习限制  【GD2】关卡数值  【GD3】真·武器 / 真·技能
+ *  【GD4】导出 window.GData
+ * ------------------------------------------------------------ */
 (function () {
   'use strict';
 
   // references/new/reference.md 的逐级经验表。51级以后缺史料，沿用每级+250的离线补足。
+  /* ============================================================
+   * 【GD1】经验表与学习限制
+   * ============================================================ */
   const EXP_TABLE = [0, 20, 60, 140, 220, 310, 400, 490, 580, 680, 850, 1020, 1140, 1270, 1400,
     1530, 1660, 1790, 1930, 2070, 2220, 2360, 2510, 2660, 2810, 2960, 3110, 3270, 3430, 3590,
     3750, 3910, 4080, 4240, 4410, 4580, 4750, 4920, 5100, 5270, 5450, 5630, 5810, 5990, 6170,
@@ -36,6 +47,9 @@
   }
 
   // 关卡类型（stageId 1-6 螳螂, 7-12 仙鹤, 13-18 熊猫；每类 6 星）
+  /* ============================================================
+   * 【GD2】关卡数值（类型/血量/经验/碎片）
+   * ============================================================ */
   const STAGE_TYPES = [
     { name: '螳螂', desc: '身手敏捷，攻击速度快，当生命过低时会有惊人的爆发力', recommend: '建议10-15级玩家挑战', anim: 'tl', sheets: ['tl', 'tl_effect'] },
     { name: '仙鹤', desc: '动作优雅，柔中带刚，前期凶猛但不擅长持久战', recommend: '建议15-20级玩家挑战', anim: 'xh', sheets: ['xh1', 'xh2', 'xh_effect1', 'xh_effect2'] },
@@ -101,6 +115,9 @@
   const STAGE_ROLE_HP = Object.freeze([0.90, 1.05, 1.20]);
   const STAGE_TYPE_SCALE = Object.freeze({ tl: 1.15, xh: 0.92, xm: 1.02 });
   const STAGE_PLAYER_CURVE = Object.freeze({ statPer: 1.53, statBase: -2.23, hpPer: 13.58, hpBase: -10.44 });
+  /* ============================================================
+   * 【GD3】真·武器 / 真·技能（终局线）
+   * ============================================================ */
   /* ---------- 真·武器 / 真·技能（终局线） ----------
    * 等级口径沿用原表：1~10 是普通，11~15 依次是真1~真5（upgradeMap 第 10~14 行
    * 的成功率 100/8/5/4/3% 正好对上「真1~真5」）。所以真等级 = 等级 − 10。
@@ -314,6 +331,9 @@
   }
   applyPropRemarkFixes();
 
+  /* ============================================================
+   * 【GD4】导出 window.GData
+   * ============================================================ */
   window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
     STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
     trueLevel, trueSkillValue, trueSkillRow, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,

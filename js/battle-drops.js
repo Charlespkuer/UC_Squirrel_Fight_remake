@@ -11,8 +11,18 @@
  *   tools/research-floating-drops.md). Reward odds came from the unavailable
  *   server; this small pool is an explicit offline balance, separate from battle
  *   damage and stage loot. */ 
+
+/* ------------------------------------------------------------
+ * 目录：战斗掉落拾取（原版 FightProps 复刻）
+ * Ctrl+F 搜节号（如「【BD1】」）直达对应代码块。
+ *
+ *  【BD1】规则与掉落池  【BD2】掉落计划  【BD3】拾取动画与发放
+ * ------------------------------------------------------------ */
 (function () {
   'use strict';
+  /* ============================================================
+   * 【BD1】规则与掉落池
+   * ============================================================ */
   const RULES = Object.freeze({ fps: 15, frames: [30, 180, 340], jitter: 130, lifetime: 31 / 15 * 1000 });
   const POOL = [
     { id: 15, name: '经验', count: 5, weight: 30 },
@@ -39,6 +49,9 @@
     { id: 26, name: '蓝色碎片', count: 1, weight: 6 },
   ];
   const poolFor = (kind) => (kind === 'rank' ? LADDER_POOL : POOL);
+  /* ============================================================
+   * 【BD2】掉落计划（按帧数摇号）
+   * ============================================================ */
   function plan(random, kind) {
     random = random || Math.random;
     const pool = poolFor(kind);
@@ -49,6 +62,9 @@
       return { ...reward, index, at: (frame + offset) / RULES.fps * 1000 };
     });
   }
+  /* ============================================================
+   * 【BD3】拾取动画与发放
+   * ============================================================ */
   function create(options) {
     const opts = options || {}, drops = plan(opts.random, opts.kind), collected = [], upgrades = [], awarded = new Set();
     const owner = State.state();

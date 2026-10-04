@@ -1,5 +1,12 @@
 """重新裁三张首页小图标（活动 / 聊天 / 村庄）与经典松鼠立绘。
 
+> **⚠ 首页那三张图已经改由 `tools/refine-home-assets.py` 生成，别再跑这个脚本的那部分。**
+> 用户反馈「村庄那张抠图做得很差」之后，village 改成从
+> `references/_tmp_village_region.png` 按描边 flood fill 重抠，chat / activity 直接
+> 换成原版资源图 `sprites/resource_1-16.png` / `resource_16-0.png`，三张都走了超分。
+> 本脚本第 1 条的多边形做法**会把这些成果盖掉**；要重跑请跑完再跑一次
+> `python tools/refine-home-assets.py`。（下方历史说明保留原样，便于追溯。）
+
 用户在反馈里提了两件事：
 
 1. 「活动 / 聊天 / 村庄三个图标没裁干净的边角裁一下」——原先是

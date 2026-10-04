@@ -22,9 +22,21 @@
  *                 emptyMaxHpMul, lowHpTakenMul, lowHpLifestealPct, lowHpRegenPct/lowHpRegenAt,
  *                 lowHpPowerMul/lowHpAgilityMul/lowHpSpeedMul/lowHpAt}
  * ============================================================ */
+
+/* ------------------------------------------------------------
+ * 目录：战斗模拟器（回合事件流）
+ * Ctrl+F 搜节号（如「【SM1】」）直达对应代码块。
+ *
+ *  【SM1】随机小件与规则表 RULES  【SM2】参战者构建  【SM3】状态修正与属性工具
+ *  【SM4】出手权重与武器/技能选取  【SM5】闪避 / 暴击 / 被动加成  【SM6】减伤链
+ *  【SM7】主模拟循环 simulate  【SM8】导出 window.Sim
+ * ------------------------------------------------------------ */
 (function () {
   'use strict';
 
+  /* ============================================================
+   * 【SM1】随机小件与规则表 RULES
+   * ============================================================ */
   function R(lo, hi) { return lo + Math.floor(Math.random() * (hi - lo + 1)); }
   function chance(pct) { return Math.random() * 100 < pct; }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -95,6 +107,9 @@
    *   npcType: null|'tl'|'xh'|'xm'|'wood',
    *   mech?: string[], mods?: object}   ← 挑战塔扩展
    */
+  /* ============================================================
+   * 【SM2】参战者构建（含塔机制注入字段）
+   * ============================================================ */
   function makeCombatant(f, side) {
     const stat = (value, fallback) => Number.isFinite(Number(value)) ? Math.max(1, Number(value)) : fallback;
     const skills = {};
@@ -177,6 +192,9 @@
    *  复活甲不会触发 —— 玩家会以为「buff 没生效」。 */
   /** 塔 buff「反噬豁免」：免疫**一切**反伤（荆棘铁壁 / 荆棘之甲 / 镜鳞反噬 / 绝对防御反伤）。
    *  判据放在被反伤的那一方（att）身上 —— 也就是「我方出手时不会被弹」。 */
+  /* ============================================================
+   * 【SM3】状态修正与属性工具
+   * ============================================================ */
   function reflectImmune(c) { return !!(c && c.mods && Number(c.mods.reflectImmune) > 0); }
   function tryDeathSave(def, r) {
     if (!def || def.hp > 0) return false;
@@ -286,6 +304,9 @@
 
   function pickOne(list) { return list[Math.floor(Math.random() * list.length)]; }
   /** 「本场没用过」的基准权重；用过的按各自的二次使用概率降权，所以一用再用会被明显压掉。 */
+  /* ============================================================
+   * 【SM4】出手权重与武器/技能选取
+   * ============================================================ */
   const UNUSED_WEIGHT = 100;
   /** 刚刚用过的那一个再额外打折，避免连着两回合是同一把/同一个。 */
   const LAST_PENALTY = 0.3;
@@ -374,6 +395,9 @@
     return pickWeighted(att.weapons, (w) => weaponWeight(att, w.id));
   }
 
+  /* ============================================================
+   * 【SM5】闪避 / 暴击 / 被动加成
+   * ============================================================ */
   function dodgeChance(att, def) {
     /* 本轮第 1 项：百步穿杨（mustHitAll）—— 接下来 3 场「所有攻击必中」，
      * 所以这里直接返回 0 闪避率（普攻/武器/技能/反击全都覆盖）。
@@ -460,6 +484,9 @@
     if (!boost) return out;                                  // 没加成：原样
     return Math.min(out, again ? BOOSTED_AGAIN_CAP : BOOSTED_FIRST_CAP);
   }
+  /* ============================================================
+   * 【SM6】减伤链（护盾/绝对防御/减伤）
+   * ============================================================ */
   function dmgReduce(def, dmg, opts) {
     opts = opts || {};
     let out = { dmg, guiJia: 0, jueDui: 0, rebound: 0 };
@@ -510,6 +537,9 @@
   }
 
   /** 主模拟：返回 {rounds, winner(0|1), maxHp:[a,b]} */
+  /* ============================================================
+   * 【SM7】主模拟循环 simulate
+   * ============================================================ */
   function simulate(f0, f1, options) {
     options = options || {};
     const rules = {
@@ -1196,6 +1226,9 @@
     return { rounds, winner, maxHp: [A.maxHp, B.maxHp], startShell: startShell, names: [A.name, B.name] };
   }
 
+  /* ============================================================
+   * 【SM8】导出 window.Sim
+   * ============================================================ */
   window.Sim = {
     simulate, rules: RULES,
     // 供 tools/test-combat-rules.cjs 直接校验出手权重（不用统计近似）

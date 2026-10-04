@@ -8,6 +8,7 @@ node_modules/
 package-lock.json
 _site/
 dist/
+__pycache__/
 
 # Tauri 桌面版：web/ 由 tools/build-tauri-web.cjs 生成，
 # icons/ 由 `npx tauri icon app-icon.png` 生成，target/ 是 Rust 编译产物
@@ -32,5 +33,11 @@ tools/research/battle-check/
 
 # 双机同步：名字 / 对端地址 / 口令每台机器都不一样，不进仓库（首次运行会自动生成）
 scripts/sync/sync.config.json
+
+# AI 超分（tools/ai-upscale.py）：out/ 是跑出来的中间产物与对比图，属本地产物。
+# 1x 原始按钮留档在 references/ 下（references/ 整目录上面已忽略）——只作参考，
+# 不进游戏也不进仓库；.bak-upscale/ 是原地放大前的 1x 备份（buttons / icons 都有）。
+out/
+images/classic/**/.bak-upscale/
 
 

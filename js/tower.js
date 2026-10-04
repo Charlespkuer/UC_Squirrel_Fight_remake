@@ -2,6 +2,16 @@
  * tower.js — 无尽挑战塔 · 主塔 + 无尽模式状态机
  * 依据 docs/无尽挑战塔系统设计文档.md v2.0。
  *
+ * 目录（Ctrl+F 搜「【T编号】」直达；全部是一个 IIFE 里的函数/常量声明，
+ * 函数声明提升 + 运行期才取值，因此分节顺序不影响运行）：
+ *   【T1】存档与对局归一化      【T8】战斗调度            【T15】增益的获得/失去/即时生效
+ *   【T2】解锁条件              【T9】战斗结算            【T16】选取型强化：武器/技能/虚空铭文
+ *   【T3】层结构与敌人预告      【T10】计分与隐藏成就     【T17】无尽：试炼币商店
+ *   【T4】增益聚合与效果汇总    【T11】环境词缀（无尽塔） 【T18】无尽：结算点与永久牺牲
+ *   【T5】对局状态口径          【T12】层通关与推进       【T19】放弃与认输
+ *   【T6】敌人构建              【T13】场间抉择：4 选 1   【T20】界面展示信息
+ *   【T7】开局：发起对局        【T14】易碎烙印           【T21】模块导出 window.Tower
+ *
  * 存档字段（normalizeSave 浅校验，这里深校验）：
  *   S.tower   = { maxLayer, run|null }
  *   S.endless = { best, weekBest, weekKey, bestLayer, shieldDate, run|null }
@@ -34,7 +44,10 @@
 
   function debug(flag) { return typeof debugOn === 'function' && debugOn(flag); }
 
-  // ---------- 存档 ----------
+  /* ============================================================
+   * 【T1】存档与对局归一化 —— S.tower / S.endless / normalizeRun
+   * ============================================================ */
+
   function tower() {
     const s = S();
     if (!s.tower || typeof s.tower !== 'object') s.tower = { maxLayer: 0, run: null };
@@ -222,7 +235,10 @@
     return run;
   }
 
-  // ---------- 解锁 ----------
+  /* ============================================================
+   * 【T2】解锁条件 —— unlocked
+   * ============================================================ */
+
   function unlocked() {
     const s = S();
     if (s.level < UNLOCK_LEVEL) return { ok: false, msg: '达到 30 级后解锁挑战塔。' };
@@ -232,7 +248,10 @@
     return { ok: true };
   }
 
-  // ---------- 层结构 ----------
+  /* ============================================================
+   * 【T3】层结构与敌人预告 —— buildPlan / preview / planInfo
+   * ============================================================ */
+
   /** 第 4 场的随机 boss：只由层数决定（第 1 项：不按天随机）—— 同层固定，换层才换。 */
   function bossEntry(layer, salt, squirrelsOnly) { return D().bossFor(layer, salt, squirrelsOnly); }
   function buildPlan(layer, salt, squirrelsOnly) {   // 第 1 项：salt = 本局随机盐，让每局的 boss/三侠顺序都不同
@@ -294,7 +313,11 @@
     return run.plan.map((entry) => Object.assign({ kind: entry.kind }, entryInfo(entry)));
   }
 
-  // ---------- buff 聚合 ----------
+  /* ============================================================
+   * 【T4】增益聚合与效果汇总 —— aggregate / buffEffectLines
+   * 结算顺序锁定（见文档 6.5）：基础 → 叠层累积 → C15 全局乘区。
+   * ============================================================ */
+
   function ownedEntry(run, id) {
     for (const list of [run.permanent || [], run.limited || []]) {
       const found = (list || []).find((b) => b.id === id);
@@ -560,7 +583,196 @@
     return lines;
   }
 
-  // ---------- 敌人构建 ----------
+  /* ============================================================
+   * 【T5】对局状态口径：血量 · 槽位 · 计数
+   * 血量是绝对值口径（hpAbs），槽位按「实际占用」计（permUsed），
+   * 「累计获得过几份」与「现在还剩几份」是两个口径（obtainedCountOf vs buffCountOf）。
+   * ============================================================ */
+  /** 永久增益槽位数：基础 5 + 扩容类 buff 给的名额。 */
+  function permSlots(run) { return (D().PERMANENT_SLOTS || 5) + Math.max(0, Number(run && run.permSlots) || 0); }
+  /* ============================================================
+   * 血量：**绝对值口径**（需求：血量继承按绝对值而不是百分比）
+   *
+   *   run.hpAbs —— **全局实际血量计数器**：战斗结束时把剩余血量写进去，
+   *                并且在写入时就按「局外口径的上限」裁掉超出部分（真裁，不是显示时裁）。
+   *                下一场把它放进「非战斗期间算出的上限」，所以进场血量不会高于局外上限。
+   *                旧档只有百分比 run.carry，这里按当时的上限折算一次。
+   *
+   * 「按最大生命百分比回血」在绝对值模型下等于「加一个固定的绝对量」，所以需要一个
+   * 参考上限：战斗中用本场实际 maxHp；换层等「还没有下一场」的时机用上一场记下的
+   * run.lastMaxHp（就是玩家看到的那条血上限）。
+   * ============================================================ */
+  function hpAbsOf(run, fallbackMaxHp) {
+    if (!run) return Math.max(1, Math.round(Number(fallbackMaxHp) || 1));
+    const v = Number(run.hpAbs);
+    if (Number.isFinite(v) && v > 0) return Math.max(1, Math.round(v));
+    /* 没有 hpAbs 的历史档（或全新一局）：按「最近一次已知上限 × carry」折算。
+     * 全新一局 carry=1、上限还没记过 —— 此时必须以**本次的上限**为基准，
+     * 否则会折算出 1 点血（实测第一场 hp=1）。 */
+    const ref = Math.max(1, Math.round(Number(run.refMaxHp) || Number(run.lastMaxHp) || Number(fallbackMaxHp) || 0));
+    return Math.max(1, Math.round(ref * clamp01(run.carry == null ? 1 : run.carry)));
+  }
+  /** 非战斗期间按「最大生命的百分比」回血：换算成绝对值后累加（自动受上限约束）。 */
+  function healAbs(run, pct, refMaxHp) {
+    const p = Math.max(0, Number(pct) || 0);
+    if (!p) return 0;
+    const ref = Math.max(1, Math.round(Number(refMaxHp) || Number(run && run.refMaxHp) || Number(run && run.lastMaxHp) || 0));
+    const gain = Math.max(1, Math.round(ref * p));
+    run.hpAbs = hpAbsOf(run) + gain;
+    return gain;
+  }
+  /** 这条增益**是否真的占用永久槽位**。
+   * 「立即生效类」都不占槽 —— 它们的收益是当场结算（或当场登记一个待选目标），
+   * 不会留在永久栏里，所以槽位满时照样应当能拿：
+   *   · kind === 'instant'（即时类）
+   *   · 选取型 pickWeaponPct / pickSkillPct（神兵淬炼 C32 / 秘技通神 C33）
+   *   · 虚空铭文 pickPermanentFree
+   *   · 扩容类 permSlot（扩容背包 C30 / 仓库钥匙 C31）
+   * addBuff 早就有对应的提前分支，但**满格判定**（界面提示 + 商店拦截）原来只看
+   * kind === 'permanent'，于是槽位满时买不了这几条 —— 这正是本条需求要修的。
+   * 注意：永久类的**百分比生命上限**（maxHpMul）是折算进 run.hpBonus 的，仍然占槽。 */
+  function occupiesPermSlot(buff) {
+    if (!buff || buff.kind !== 'permanent') return false;
+    const m = buff.mods || {};
+    if (m.pickWeaponPct || m.pickSkillPct || m.pickPermanentFree || m.permSlot) return false;
+    return true;
+  }
+  /** C48 铜墙铁壁的减伤累计（含上限封顶口径）。 */
+  function winTakenMulOf(run) {
+    if (!run) return 0;
+    const c48 = stacksOf(run, 'C48');
+    if (!c48) return 0;
+    const cap = (Number(D().BUFF_BY_ID.C48.mods.winTakenMulCap) || 0.25) * c48;
+    return Math.min(cap, Math.max(0, Number(run.winTakenMul) || 0));
+  }
+  /** C07 吞噬成长的百分比累计（含上限封顶口径，与 adjustMe 保持一致）。 */
+  function winMaxHpOf(run) {
+    if (!run) return 0;
+    const c07 = stacksOf(run, 'C07');
+    const cap = c07 ? (D().BUFF_BY_ID.C07.mods.winMaxHpCap || 0.30) * c07 * globalMul(run) : 0;
+    return Math.min(cap, Math.max(0, Number(run.winMaxHp) || 0));
+  }
+  /** 记一次「即时类已获得」（用于重复获得概率递减）。 */
+  function bumpInstant(run, id) {
+    if (!run || !id) return;
+    run.instantIds = Array.isArray(run.instantIds) ? run.instantIds : [];
+    const row = run.instantIds.find((x) => x && x.id === id);
+    if (row) row.count = Math.max(1, Math.floor(Number(row.count) || 1)) + 1;
+    else run.instantIds.push({ id: id, count: 1 });
+  }
+  /** 本局某条增益的**总层数**（permanent 与 limited 都要数）——
+   *  烙印类（C49 / C52）记在 run.limited 上，只查 permanent 会永远数到 0。 */
+  function buffCountOf(run, id) {
+    if (!run) return 0;
+    let n = 0;
+    for (const row of run.permanent || []) if (row && row.id === id) n += Math.max(1, Math.floor(Number(row.stacks) || 1));
+    for (const row of run.limited || []) if (row && row.id === id) n += Math.max(1, Math.floor(Number(row.stacks) || 1));
+    return n;
+  }
+  /* ============================================================
+   * 「本局累计获得过几份」—— 与「现在还剩几份」分开的两个口径。
+   *
+   * 易碎烙印（C49 终焉烙印 / C39~C44 属性烙印 / C52 涌泉烙印）碎掉之后，
+   * rollFragileBuffs 会把那一行**从 run.limited 里删掉**（加成转进 fragileBurned）。
+   * 于是 buffCountOf / stacksOf 都会少算一份：层数上限（C49 最多 3 次）与
+   * 「重复获得降权」都会因为碎掉而回退 —— 玩家可以靠「等它碎」反复刷同一条烙印。
+   * 需求（本轮）：**碎掉的那一份也要计入**，所以单独记一份只增不减的流水。
+   * ============================================================ */
+  /** 本局累计获得过的份数（只增不减；目前只对易碎烙印记账）。 */
+  function fragileGotOf(run, id) {
+    const t = run && run.fragileGot;
+    return Math.max(0, Math.floor(Number(t && t[id]) || 0));
+  }
+  /** 层数上限 / 可获得性 / 重复降权统一用这个口径：在册份数 与 累计获得份数 取大。 */
+  function obtainedCountOf(run, id) {
+    return Math.max(buffCountOf(run, id), fragileGotOf(run, id));
+  }
+  /** 某个**即时类**增益本局已获得的次数（即时类不进 permanent/limited，另记在 instantIds 上）。 */
+  function instantOwnedCount(run, id) {
+    if (!run) return 0;
+    let n = 0;
+    for (const row of run.instantIds || []) if (row && row.id === id) n += Math.max(1, Math.floor(Number(row.count) || 1));
+    return n;
+  }
+  /** 本轮第 1 项：**实际占用**的永久槽位数 = 拥有数 − 被「虚空铭文」附魔免占位的数量。
+   *  槽位判断、面板计数、C34「空槽换攻击」全部走这里，避免三处各算一套。 */
+  function permUsed(run) {
+    const list = (run && run.permanent) || [];
+    const free = ((run && run.slotFreeIds) || []).filter((id) => list.some((b) => b.id === id));
+    return Math.max(0, list.length - free.length);
+  }
+  /**
+   * 永久增益列表的**校验（不裁剪）** —— bug 修复。
+   *
+   * 原来 normalizeRun 用 `slice(0, permSlots)` 按**数组长度**裁剪，而 addBuff 的
+   * 满格判断按 `permUsed`（已扣掉虚空铭文免占位的那些）。口径不一致就会丢东西：
+   *   上限 8、占用 7/8、其中 1 个免占位（数组长度 8）→ addBuff 认为没满、正常推入
+   *   → 长度 9 → slice(0,8) 把**最后一项（刚拿到的那份）**切掉
+   *   → 玩家看到「拿到了又直接消失」（实测复刻到：C03 / C45 都这样没了）。
+   *
+   * 现在上限的维护**收口在 addBuff**（加入前按「加入后占用是否超上限」判定），
+   * 这里只做校验：真超了就告警，但**绝不丢弃玩家已有的增益**。
+   */
+  function repairPermanentSlots(run, list) {
+    const cap = permSlots(run);
+    const used = permUsed(run);
+    if (used > cap && typeof console !== 'undefined' && console.warn) {
+      console.warn('[tower] 永久增益占用槽位超过上限：' + used + '/' + cap +
+        '（列表 ' + list.length + ' 项，含免占位 ' + (list.length - used) + ' 项）—— 保留不丢弃，请检查 addBuff 的满格判定');
+    }
+    return list;
+  }
+  /** 本轮第 4 项：**当前**血量上限（血条悬停显示用）。
+   * 不直接用「上一场开战时的 maxHp」，是因为两次战斗之间玩家可能刚拿了增益 ——
+   * 那样悬停会显示过期数字。这里按 adjustMe 的同一个公式现算：
+   *   基础上限 ×(1 + 增益 maxHpMul + 永久 hpBonus) ×本层削弱 + 固定加成（以战养战 / 挥金如土）。
+   * 基础上限由 adjustMe 每场记到 run.baseMaxHp（是「未加塔 buff」的那一份）。 */
+  function currentMaxHp(run) {
+    const base = Number(run && run.baseMaxHp) || 0;
+    if (!(base > 0)) return 0;
+    /* **这里只算「长期有效」的上限，不能把战斗内的临时上限算进来。**
+     * 曾经的 bug：把「空血上限」（emptyMaxHpMul，浴血重生 / 濒死觉悟 / 血之契约）
+     * 也加到局外展示上 —— 于是玩家在局外（战前准备、休整点）就看到血上限被抬高，
+     * 而那部分其实只在战斗内存在。
+     *
+     * 口径：
+     *   · 长期加成 —— run.hpBonus（永久 maxHpMul 在获得时就折算进去了）、
+     *     run.winMaxHp（C07 每胜成长）、run.winHpFlat / spendGain.hp（固定值）
+     *   · 战斗内临时上限 —— emptyMaxHpMul、限次类 maxHpMul、本层 debuff，
+     *     一律不进局外展示；战斗结束后界面会退回到「最近一场的真实上限」来显示。 */
+    const stickyHp = Math.max(0, Number(run.hpBonus) || 0);
+    const winMaxHp = winMaxHpOf(run);
+    const flat = Math.max(0, Number(run.winHpFlat) || 0) +
+      (run.spendGain ? Math.max(0, Number(run.spendGain.hp) || 0) : 0);
+    return Math.max(1, Math.round(base * (1 + stickyHp + winMaxHp)) + flat);
+  }
+  /** 当前血量（绝对口径）：hpAbs 裁到当前上限。 */
+  function currentHp(run) {
+    /* run.hpAbs 是**全局实际血量计数器**（已在 reportBattle 里按局外上限裁过），
+     * 所以这里通常只做防御性裁剪（上限因卖增益/吃 debuff 变小时才会真的裁到）。
+     * 展示口径的优先级：
+     *  · 战斗**进行中**时 run.lastMaxHp 就是本场真实上限（含空血上限等临时加成），
+     *    此时 currentMaxHp() 只反映长期加成 —— 所以直接用 lastMaxHp 更准。
+     *  · 战斗之间（拿到新永久增益、还没打下一场）用 currentMaxHp()，
+     *    这样「刚买的增益」能立刻在血条上看到。
+     * 另外：临时上限只在战斗中有效，战斗一结束就应当消失（见 currentMaxHp 的说明）。 */
+    const longCap = currentMaxHp(run);
+    const battleCap = Math.max(0, Math.round(Number(run && run.lastMaxHp) || 0));
+    const live = !!(run && run.attempt);          // 战斗进行中
+    const cap = live && battleCap > 0 ? battleCap : (longCap > 0 ? longCap : battleCap);
+    const hp = hpAbsOf(run, cap);
+    /* **同步全局计数器**：局外上限如果比计数器低（卖掉/失去永久上限增益、
+     * 吃跨层 debuff…），被压下来的那部分要真正写回 run.hpAbs ——
+     * 否则局外显示虽然按上限裁过，计数器里却还留着「多出来的血」，
+     * 下次上限一变高它又会冒出来。
+     * 只向**下**同步：计数器不会因为上限变大而自动补血。 */
+    if (cap > 0 && Number(run.hpAbs) > cap) run.hpAbs = cap;
+    return { hp: cap > 0 ? Math.min(hp, cap) : hp, maxHp: cap };
+  }
+  /* ============================================================
+   * 【T6】敌人构建 —— buildFoe / regionOf
+   * ============================================================ */
+
   function buildFoe(mode, layer, entry, salt) {
     const TD = D();
     const LT = mode === 'tower' ? TD.towerLevel(layer) : TD.endlessLevel(layer);
@@ -656,7 +868,10 @@
     return HERO_REGION[anim] != null ? HERO_REGION[anim] : 0;
   }
 
-  // ---------- 开局 ----------
+  /* ============================================================
+   * 【T7】开局：发起对局 —— startTowerRun / startEndlessRun
+   * ============================================================ */
+
   function startTowerRun() {
     const lock = unlocked();
     if (!lock.ok) return lock;
@@ -707,7 +922,10 @@
     }
   }
 
-  // ---------- 战斗调度 ----------
+  /* ============================================================
+   * 【T8】战斗调度 —— nextBattle / retryBattle / interruptBattle
+   * ============================================================ */
+
   /** 深拷贝一份对局状态（优先用 structuredClone，退回 JSON —— 用 Object.assign 会被 __proto__ 坑到）。 */
   function cloneRun(run) {
     if (typeof structuredClone === 'function') { try { return structuredClone(run); } catch (e) { /* 落到 JSON */ } }
@@ -975,75 +1193,6 @@
       debuffs: (run.debuffs || []).slice(), achievements: toasts,
       battleNo: run.idx + 1, battleCount: run.plan.length, layer: run.layer };
   }
-  /* ============================================================
-   * 计分：所有加分都走这里，顺带记录「本局成就」流水（供界面飘提示与结算展示）
-   * ============================================================ */
-  function addScore(run, points, tag) {
-    const pts = Math.max(0, Math.round(Number(points) || 0));
-    if (!run || !pts) return 0;
-    run.score = Math.max(0, Math.floor(Number(run.score) || 0)) + pts;
-    if (tag) {
-      run.scoreLog = Array.isArray(run.scoreLog) ? run.scoreLog : (run.scoreLog = []);
-      run.scoreLog.push({ tag: tag, points: pts, layer: Math.max(1, Number(run.layer) || 1) });
-      if (run.scoreLog.length > 60) run.scoreLog.splice(0, run.scoreLog.length - 60);
-    }
-    return pts;
-  }
-  /**
-   * 记录一条隐藏成就。**同一 key 只记一次**，所以「可重复」是靠调用方给递增的 key
-   * （死而复生用 revive:1 / revive:2…）实现的 —— 这样成就列表不会出现重复条目，
-   * 同时每次触发都能得分。
-   * 顺带推进「待界面显示」的队列（成就提示在 explore 的所有路径上统一取出）。
-   */
-  function markAchievement(run, key, name, points) {
-    if (!run) return null;
-    run.achievements = Array.isArray(run.achievements) ? run.achievements : (run.achievements = []);
-    if (run.achievements.some((a) => a.key === key)) return null;
-    const item = { key: key, name: name, points: Math.max(0, Math.round(Number(points) || 0)),
-      layer: Math.max(1, Number(run.layer) || 1) };
-    run.achievements.push(item);
-    if (run.achievements.length > 40) run.achievements.splice(0, run.achievements.length - 40);
-    run.pendingToasts = Array.isArray(run.pendingToasts) ? run.pendingToasts : (run.pendingToasts = []);
-    run.pendingToasts.push(item);
-    if (run.pendingToasts.length > 12) run.pendingToasts.splice(0, run.pendingToasts.length - 12);
-    return item;
-  }
-  /** 取出所有待显示的成就提示（并清空队列）。界面在每次操作后调它。 */
-  function takeAchievementToasts(run) {
-    if (!run) return [];
-    const list = Array.isArray(run.pendingToasts) ? run.pendingToasts.slice() : [];
-    run.pendingToasts = [];
-    return list;
-  }
-  /** 获取增益 → 计分（场间选择与商店购买都走这里）。 */
-  function scoreBuffAcquire(run, buff) {
-    if (!run || run.mode !== 'endless' || !buff) return 0;
-    return addScore(run, D().buffScore(buff.rarity), '获得增益·' + buff.name);
-  }
-  /** 需求：某项 buff 加成跨过阈值 → 隐藏成就。在 buildFoe 里用本场的 aggregate 检查。 */
-  function checkStatAchievements(run, agg) {
-    if (!run || run.mode !== 'endless' || !agg) return [];
-    const got = [];
-    const peaks = run.statPeaks = Object.assign({}, run.statPeaks || {});
-    const NAMES = { powerMul: '攻击', agilityMul: '敏捷', speedMul: '速度', maxHpMul: '生命上限' };
-    for (const [field, label] of Object.entries(NAMES)) {
-      const before = Math.max(0, Number(peaks[field]) || 0);
-      const pct = Math.max(0, Number(agg[field]) || 0);
-      /* 峰值只增不减：buff 掉了成就也已经拿到手（那才是「曾经达成」）。 */
-      if (pct > before) peaks[field] = pct;
-      const after = Number(peaks[field]) || 0;
-      for (const m of D().SCORE.statMilestones) {
-        /* 必须「本次这一下跨过」才触发：before < 阈值 ≤ after。
-         * 只写 `after >= 阈值` 会把整档一次性全点亮（曾经写反过：峰值一到 100%
-         * 就把 100/150/200/300 四条一起记，实测一场刷出 16 个成就 +3000 分）。 */
-        if (!(before < m.at && after >= m.at)) continue;
-        const key = 'stat:' + field + ':' + Math.round(m.at * 100);
-        const item = markAchievement(run, key, '超凡入圣 · ' + label + ' +' + Math.round(m.at * 100) + '%', m.points);
-        if (item) { addScore(run, m.points, '隐藏成就·' + item.name); got.push(item); }
-      }
-    }
-    return got;
-  }
   /** 手上有没有重新挑战币（以及有没有可用的快照）。 */
   function canRetry(run) {
     return !!(run && run.mode === 'endless' && Number(run.retryToken) > 0 && run.retrySnap);
@@ -1074,7 +1223,10 @@
     return true;
   }
 
-  // ---------- 战斗结算 ----------
+  /* ============================================================
+   * 【T9】战斗结算 —— reportBattle / 失败与弃权结算
+   * ============================================================ */
+
   /**
    * 三侠的招牌技给玩家留削弱：扫一遍这场战斗的事件，只有大招真的放出来了才生效。
    * 打得够快 / 打断它，就能整层规避 —— 这是本层的第一层对策。
@@ -1461,7 +1613,80 @@
     out.best = e.best; out.weekBest = e.weekBest;
   }
 
-  // ---------- 环境词缀（无尽塔）----------
+  /* ============================================================
+   * 【T10】计分与隐藏成就 —— addScore / markAchievement / checkStatAchievements
+   * 所有加分都走这里，顺带记录「本局成就」流水（供界面飘提示与结算展示）。
+   * ============================================================ */
+  function addScore(run, points, tag) {
+    const pts = Math.max(0, Math.round(Number(points) || 0));
+    if (!run || !pts) return 0;
+    run.score = Math.max(0, Math.floor(Number(run.score) || 0)) + pts;
+    if (tag) {
+      run.scoreLog = Array.isArray(run.scoreLog) ? run.scoreLog : (run.scoreLog = []);
+      run.scoreLog.push({ tag: tag, points: pts, layer: Math.max(1, Number(run.layer) || 1) });
+      if (run.scoreLog.length > 60) run.scoreLog.splice(0, run.scoreLog.length - 60);
+    }
+    return pts;
+  }
+  /**
+   * 记录一条隐藏成就。**同一 key 只记一次**，所以「可重复」是靠调用方给递增的 key
+   * （死而复生用 revive:1 / revive:2…）实现的 —— 这样成就列表不会出现重复条目，
+   * 同时每次触发都能得分。
+   * 顺带推进「待界面显示」的队列（成就提示在 explore 的所有路径上统一取出）。
+   */
+  function markAchievement(run, key, name, points) {
+    if (!run) return null;
+    run.achievements = Array.isArray(run.achievements) ? run.achievements : (run.achievements = []);
+    if (run.achievements.some((a) => a.key === key)) return null;
+    const item = { key: key, name: name, points: Math.max(0, Math.round(Number(points) || 0)),
+      layer: Math.max(1, Number(run.layer) || 1) };
+    run.achievements.push(item);
+    if (run.achievements.length > 40) run.achievements.splice(0, run.achievements.length - 40);
+    run.pendingToasts = Array.isArray(run.pendingToasts) ? run.pendingToasts : (run.pendingToasts = []);
+    run.pendingToasts.push(item);
+    if (run.pendingToasts.length > 12) run.pendingToasts.splice(0, run.pendingToasts.length - 12);
+    return item;
+  }
+  /** 取出所有待显示的成就提示（并清空队列）。界面在每次操作后调它。 */
+  function takeAchievementToasts(run) {
+    if (!run) return [];
+    const list = Array.isArray(run.pendingToasts) ? run.pendingToasts.slice() : [];
+    run.pendingToasts = [];
+    return list;
+  }
+  /** 获取增益 → 计分（场间选择与商店购买都走这里）。 */
+  function scoreBuffAcquire(run, buff) {
+    if (!run || run.mode !== 'endless' || !buff) return 0;
+    return addScore(run, D().buffScore(buff.rarity), '获得增益·' + buff.name);
+  }
+  /** 需求：某项 buff 加成跨过阈值 → 隐藏成就。在 buildFoe 里用本场的 aggregate 检查。 */
+  function checkStatAchievements(run, agg) {
+    if (!run || run.mode !== 'endless' || !agg) return [];
+    const got = [];
+    const peaks = run.statPeaks = Object.assign({}, run.statPeaks || {});
+    const NAMES = { powerMul: '攻击', agilityMul: '敏捷', speedMul: '速度', maxHpMul: '生命上限' };
+    for (const [field, label] of Object.entries(NAMES)) {
+      const before = Math.max(0, Number(peaks[field]) || 0);
+      const pct = Math.max(0, Number(agg[field]) || 0);
+      /* 峰值只增不减：buff 掉了成就也已经拿到手（那才是「曾经达成」）。 */
+      if (pct > before) peaks[field] = pct;
+      const after = Number(peaks[field]) || 0;
+      for (const m of D().SCORE.statMilestones) {
+        /* 必须「本次这一下跨过」才触发：before < 阈值 ≤ after。
+         * 只写 `after >= 阈值` 会把整档一次性全点亮（曾经写反过：峰值一到 100%
+         * 就把 100/150/200/300 四条一起记，实测一场刷出 16 个成就 +3000 分）。 */
+        if (!(before < m.at && after >= m.at)) continue;
+        const key = 'stat:' + field + ':' + Math.round(m.at * 100);
+        const item = markAchievement(run, key, '超凡入圣 · ' + label + ' +' + Math.round(m.at * 100) + '%', m.points);
+        if (item) { addScore(run, m.points, '隐藏成就·' + item.name); got.push(item); }
+      }
+    }
+    return got;
+  }
+  /* ============================================================
+   * 【T11】环境词缀（无尽塔） —— rollEnvAfterBattle / applyEnvTo
+   * ============================================================ */
+
   function envList(run) { return Array.isArray(run.env) ? run.env : (run.env = []); }
   /** 「幻影回响」：**只**在三侠战生效的「胜利后立刻再战同一场」概率。
    *  多条同时生效时按 1-(1-p1)(1-p2) 合并；没有生效则返回 0。
@@ -1691,7 +1916,10 @@
     return { mine, enemy, sh };
   }
 
-  // ---------- 层通关 ----------
+  /* ============================================================
+   * 【T12】层通关与推进 —— layerClear / advanceLayer
+   * ============================================================ */
+
   function layerClear(mode, run, out) {
     out.layerComplete = true;
     out.layer = run.layer;
@@ -1788,7 +2016,10 @@
     if (lost) run.pendingToasts = (run.pendingToasts || []).concat(['碎掉的烙印失效：' + lost.label]).slice(-12);
   }
 
-  // ---------- 场间 4 选 1 ----------
+  /* ============================================================
+   * 【T13】场间抉择：增益 4 选 1 —— rollChoices / pickChoice
+   * ============================================================ */
+
   /** 第 2 项：unique（扩容类）buff 一局只能拿一次 —— 拿过就不再进任何池子。 */
   function poolFilter(run, buff) {
     /* maxStacks：这条增益的**层数上限**（默认取全局 STACK_MAX）。
@@ -1816,34 +2047,6 @@
     if (run.pendingPick && run.pendingPick.buffId === buff.id) return false;
     return !(run.permanent || []).some((b) => b.id === buff.id);
   }
-  /* ============================================================
-   * 秘技通神（C33）能抽中的「特殊技能」—— 玩家没学也会进候选，选中即领悟。
-   *
-   * ① 防御类：绝对防御(16) 与 龟甲术(7)。
-   *    它们不进出手池（是「受击自动触发」的被动），所以「提升触发概率」只能靠
-   *    sim 的 passiveSkillBoost（读 fighter.effects[id]）单独乘一次。
-   * ② 小宇宙爆发(14)：虽然是主动技，但每场只能放一次、本身也不造成伤害，
-   *    「触发概率」对它毫无意义 —— 需求把它改成**开战第一招必定放它**
-   *    （tower 写 mods.cosmosFirst，sim 在选招时强制）。
-   * ============================================================ */
-  const PICKABLE_DEFENSE = [16, 7];
-  const isPickableDefense = (id) => PICKABLE_DEFENSE.indexOf(Number(id)) >= 0;
-  const PICKABLE_COSMOS = 14;
-  const isPickableCosmos = (id) => Number(id) === PICKABLE_COSMOS;
-  /** run.skillBoost[14] 只当「已抽中小宇宙」的开关用（不参与 effects 加成）。 */
-  const COSMOS_PICK_BOOST = 1;
-  /* 防御技抽中时的触发概率提升幅度（相对加成：2.0 = 触发率 ×3）。
-   * 这两条是「受击自动触发」的防御被动，技能等级对它们的作用很小
-   *（绝对防御等级只影响反伤比例、龟甲术等级只影响抵挡比例），
-   * 真正决定强度的是**触发概率** —— 所以选中时给一个大幅加成。
-   * 需求（本轮）：**绝对防御**的上升幅度略微削弱 —— 2.0 → 1.5（触发率 ×3 → ×2.5）：
-   *   首次 22 → 55（原 66）、二次及以后 13 → 32.5（原 39）。
-   * 龟甲术保持 2.0 不变（它的封顶本来就按 45 设计，见 sim 的 BOOSTED_AGAIN_CAP）。 */
-  const DEFENSE_PICK_BOOST = 2.0;
-  const JUE_DUI_PICK_BOOST = 1.5;
-  const defensePickBoostOf = (id) => (Number(id) === 16 ? JUE_DUI_PICK_BOOST : DEFENSE_PICK_BOOST);
-  /** 候选按钮上的「抽中后会怎样」提示（界面用它替代 Lv 显示）。 */
-  const PICK_NOTE = { 14: '开战第一招必放', 16: '触发概率提升', 7: '触发概率提升' };
   /** 战斗奖励的稀有度倾斜：按「花了这么多币刷新后」的商店水平取。
    *  10 币 = rerollTilt 调一次 1.20，实测史诗档从 10.1% 抬到约 17%。 */
   const CHOICE_TILT_PAID = 10;
@@ -1945,6 +2148,9 @@
     return Object.assign({}, res, pts ? { score: pts } : null,
       { achievements: takeAchievementToasts(run) });
   }
+  /* ============================================================
+   * 【T14】易碎烙印：生效 · 损毁 · 作废 —— fragileBonus / rollFragileBuffs / loseRandomBrokenMark
+   * ============================================================ */
   /** 需求 3：烙印加成的实际生效值 = 基础 × 0.5（未损毁）+ 已损毁的永久份。
    *  未损毁时半效；损毁时把「基础」整份转成永久（burned += base），于是变成 1.5×基础，
    *  相对半效状态正好翻三倍，且此后不再受烙印是否还在影响。 */
@@ -2057,6 +2263,123 @@
     run.fragileSeeds[id] = st;
     return (st / 4294967296) * 100 < pct;
   }
+  /** 需求 3：易碎烙印的损毁判定（每场战斗一次，默认 6%）。
+   * 每条烙印有**自己的随机序列**（fragileRoll）；损毁后该烙印的基础加成整份转为
+   * 本局永久保留（fragileBurned），所以「损毁」是升级而不是削弱。 */
+  function rollFragileBuffs(run) {
+    const broken = [];
+    run.limited = (run.limited || []).filter((b) => {
+      const def = D().BUFF_BY_ID[b.id];
+      const pct = def && def.mods && def.mods.fragileBreakPct;
+      if (!pct || b.on === false) return true;
+      /* 需求 3：每条烙印用自己的随机序列，互不共用 Math.random。 */
+      if (fragileRoll(run, b.id, Number(pct))) {
+        broken.push(def.name);
+        const key = def.mods.fragileStat;
+        if (key) {
+          run.fragileBurned = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBurned || {});
+          run.fragileBurned[key] = Math.max(0, Number(run.fragileBurned[key]) || 0) +
+            Math.max(0, Number(def.mods.fragilePct) || 0);
+        }
+        /* 终乘烙印：损毁把一份「存在」层转成「损毁」层（1.25^n → 1.25^(n-1) × 1.5）。 */
+        if (def.mods.fragileFinalMul) {
+          run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0) - 1);
+          run.fragileMulBurned = Math.max(0, Math.floor(Number(run.fragileMulBurned) || 0)) + 1;
+        }
+        /* 淘金烙印：损毁把一份「存在」层转成「损毁」层（+15% → +30%）。 */
+        if (def.mods.fragileCoinAddAlive !== undefined) {
+          run.fragileCoinBase = Math.max(0, Math.floor(Number(run.fragileCoinBase) || 0) - 1);
+          /* 直接把损毁份记进明细数组 —— 这是加成的**真源**（rebuildFragileTotals 也会重算它）。
+           * 顺带修一个老 bug：涌泉烙印（C52）原来只写了 brokenMarks、没写 fragileHealBurned，
+           * 于是「损毁后 +20% 治疗」要等到某次「碎烙印作废」触发 rebuild 才生效。 */
+          run.fragileCoinBurned = (Array.isArray(run.fragileCoinBurned) ? run.fragileCoinBurned : [])
+            .concat([Math.max(0, Number(def.mods.fragileCoinAddBurned) || 0)]);
+        }
+        if (def.mods.fragileHealAddAlive !== undefined) {
+          run.fragileHealBurned = (Array.isArray(run.fragileHealBurned) ? run.fragileHealBurned : [])
+            .concat([Math.max(0, Number(def.mods.fragileHealAddBurned) || 0)]);
+        }
+        /* 明细：碎掉的每一条都登记一份，供「30 层后每 2 层作废一条」抽取。 */
+        run.brokenMarks = Array.isArray(run.brokenMarks) ? run.brokenMarks : [];
+        if (def.mods.fragileStat) {
+          run.brokenMarks.push({ kind: 'stat', stat: def.mods.fragileStat,
+            pct: Math.max(0, Number(def.mods.fragilePct) || 0) });
+        } else if (def.mods.fragileHealAddAlive !== undefined) {
+          run.brokenMarks.push({ kind: 'heal',
+            alive: Math.max(0, Number(def.mods.fragileHealAddAlive) || 0),
+            burned: Math.max(0, Number(def.mods.fragileHealAddBurned) || 0) });
+        } else if (def.mods.fragileCoinAddAlive !== undefined) {
+          run.brokenMarks.push({ kind: 'coin',
+            alive: Math.max(0, Number(def.mods.fragileCoinAddAlive) || 0),
+            burned: Math.max(0, Number(def.mods.fragileCoinAddBurned) || 0) });
+        } else if (def.mods.fragileFinalMul) {
+          run.brokenMarks.push({ kind: 'final',
+            alive: Math.max(0, Number(def.mods.fragileAddAlive) || 0),
+            burned: Math.max(0, Number(def.mods.fragileAddBurned) || 0) });
+        }
+        logBuff(run, b.id, 'break', { detail: '易碎损毁（升级为全额并永久保留）' });
+        return false;
+      }
+      return true;
+    });
+    return broken;
+  }
+  /** 本轮第 3 项：卖出/失去**成长类**增益时，把它累计出来的运行态一并清零 ——
+   *  再买回来是从 0 重新长，而不是接着上次的进度（吞噬成长就是典型）。
+   *  （叠层数本身在重新获得时本来就是 1；过去漏掉的是这些「跑出来的数值」。） */
+  function resetGrowth(run, id, stacks) {
+    if (!run) return false;
+    const n = Math.max(1, Math.floor(Number(stacks) || 1));      // 卖出/失去的是**整条**（含所有层数）
+    if (id === 'C06') run.killPower = 0;
+    /* 需求：**成长类累积的生命上限在被替换/卖出后不消失**。
+     * C07（吞噬成长，百分比）与 C11（以战养战，固定值）都是「本局累计」的上限收益，
+     * 原来这里直接清零 —— 玩家换掉/卖掉它，之前攒的血上限就凭空没了。
+     * 现在改成**冻结进 run.hpBonus**（与永久 maxHpMul 同一口径：卖掉/替换后仍然保留），
+     * 所以效果继续生效，只是不再继续增长。
+     * 注意 hpBonus 是「百分比」口径，固定值那一份要先折算成比例再并入。 */
+    else if (id === 'C07') { run.hpBonus = Math.max(0, Number(run.hpBonus) || 0) + Math.max(0, Number(run.winMaxHp) || 0); run.winMaxHp = 0; }
+    else if (id === 'C11') {
+      const flat = Math.max(0, Number(run.winHpFlat) || 0);
+      const base = Math.max(1, Number(run.baseMaxHp) || 0);
+      run.hpBonus = Math.max(0, Number(run.hpBonus) || 0) + (base > 0 ? flat / base : 0);
+      run.winHpFlat = 0;
+    }
+    else if (id === 'C12') { run.winStatPower = 0; run.winStatAgility = 0; run.winStatSpeed = 0; }
+    /* C48 铜墙铁壁：它的「已累计减伤」同样是本局攒出来的收益，替换/卖出后**保留**
+     *（与 C07/C11 一致），所以这里不清零。 */
+    else if (id === 'C25') run.sellBonus = 0;
+    else if (id === 'C36') { run.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; run.shopSpend = 0; }
+    else {
+      /* 第 7 项：烙印被**主动卖掉/换掉/失去**时，才把 sticky 加成收回去
+       * （5% 损毁那条路径不走这里，所以损毁不掉加成）。 */
+      const def = D().BUFF_BY_ID[id];
+      if (def && def.mods && def.mods.fragileStat) {
+        /* 主动卖出/被换掉：基础那份按层数收回（损毁得到的永久份保留 —— 那是 6% 判定给的奖励）。 */
+        const key = def.mods.fragileStat;
+        const pct = Math.max(0, Number(def.mods.fragilePct) || 0);
+        run.fragileBase = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBase || {});
+        run.fragileBase[key] = Math.max(0, run.fragileBase[key] - pct * n);
+        return true;
+      }
+      /* 终乘（C49）/ 治疗（C52）/ 淘金（C53）烙印：主动失去时把**未破碎的那一份**按层数收回 ——
+       * 损毁得到的永久份保留（与属性烙印同一口径）。
+       * 注意 run.fragileGot（「一局获得过几份」）不回退：那是层数上限与重复降权的口径，
+       * 与「现在还持有几份」无关（否则卖掉再买回来就能绕开层数上限）。 */
+      if (def && def.mods && def.mods.fragileFinalMul) {
+        run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0) - n);
+        return true;
+      }
+      if (def && def.mods && def.mods.fragileCoinAddAlive !== undefined) {
+        run.fragileCoinBase = Math.max(0, Math.floor(Number(run.fragileCoinBase) || 0) - n);
+        return true;
+      }
+      return false;
+    }
+    return true;
+  }
+  /* ============================================================
+   * 【T15】增益的获得 / 失去 / 即时生效 —— addBuff / applyInstant / toggleLimited
+   * ============================================================ */
   /** 「获得这个增益时」立刻要结算的东西（新增与叠加两条路径都要走）。
    *  · 易碎烙印：登记基础加成（存在时半效、损毁后全额并本局永久保留）
    *  · 生命上限增益：按字面「回复等量生命」—— 新上限比旧上限多出来的部分补进当前血量
@@ -2274,7 +2597,143 @@
     save();
     return { ok: true, id, on: b.on };
   }
-  // ---------- 无尽：试炼币商店 ----------
+  /* ============================================================
+   * 【T16】选取型强化：武器 / 技能 / 虚空铭文 —— pickCandidates / applyPickBuff
+   * ============================================================ */
+  /* ============================================================
+   * 秘技通神（C33）能抽中的「特殊技能」—— 玩家没学也会进候选，选中即领悟。
+   *
+   * ① 防御类：绝对防御(16) 与 龟甲术(7)。
+   *    它们不进出手池（是「受击自动触发」的被动），所以「提升触发概率」只能靠
+   *    sim 的 passiveSkillBoost（读 fighter.effects[id]）单独乘一次。
+   * ② 小宇宙爆发(14)：虽然是主动技，但每场只能放一次、本身也不造成伤害，
+   *    「触发概率」对它毫无意义 —— 需求把它改成**开战第一招必定放它**
+   *    （tower 写 mods.cosmosFirst，sim 在选招时强制）。
+   * ============================================================ */
+  const PICKABLE_DEFENSE = [16, 7];
+  const isPickableDefense = (id) => PICKABLE_DEFENSE.indexOf(Number(id)) >= 0;
+  const PICKABLE_COSMOS = 14;
+  const isPickableCosmos = (id) => Number(id) === PICKABLE_COSMOS;
+  /** run.skillBoost[14] 只当「已抽中小宇宙」的开关用（不参与 effects 加成）。 */
+  const COSMOS_PICK_BOOST = 1;
+  /* 防御技抽中时的触发概率提升幅度（相对加成：2.0 = 触发率 ×3）。
+   * 这两条是「受击自动触发」的防御被动，技能等级对它们的作用很小
+   *（绝对防御等级只影响反伤比例、龟甲术等级只影响抵挡比例），
+   * 真正决定强度的是**触发概率** —— 所以选中时给一个大幅加成。
+   * 需求（本轮）：**绝对防御**的上升幅度略微削弱 —— 2.0 → 1.5（触发率 ×3 → ×2.5）：
+   *   首次 22 → 55（原 66）、二次及以后 13 → 32.5（原 39）。
+   * 龟甲术保持 2.0 不变（它的封顶本来就按 45 设计，见 sim 的 BOOSTED_AGAIN_CAP）。 */
+  const DEFENSE_PICK_BOOST = 2.0;
+  const JUE_DUI_PICK_BOOST = 1.5;
+  const defensePickBoostOf = (id) => (Number(id) === 16 ? JUE_DUI_PICK_BOOST : DEFENSE_PICK_BOOST);
+  /** 候选按钮上的「抽中后会怎样」提示（界面用它替代 Lv 显示）。 */
+  const PICK_NOTE = { 14: '开战第一招必放', 16: '触发概率提升', 7: '触发概率提升' };
+  /** 选取型 buff 的三选一候选：从玩家已有的武器/技能里随机挑最多 3 个。 */
+  function pickCandidates(kind) {
+    const run = endless().run;
+    if (!run) return [];
+    /* 本轮第 1 项：虚空铭文选的是「已有的永久增益」（隐藏型不参与，它们本就不占槽）。 */
+    if (kind === 'permBuff') {
+      const pool = (run.permanent || [])
+        .map((b) => ({ id: b.id, buff: D().BUFF_BY_ID[b.id], stacks: b.stacks || 1 }))
+        .filter((x) => x.buff && !x.buff.hidden);
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+      }
+      return pool.slice(0, 3).map((x) => ({ id: x.id, name: x.buff.name, rarity: x.buff.rarity, stacks: x.stacks }));
+    }
+    /* 秘技通神（C33）：只抽**主动技能**，外加两条特殊技能 —— 防御被动（绝对防御/龟甲术）
+     * 与小宇宙爆发（14）。前者不进出手池、「提升触发概率」走 sim 的 passiveSkillBoost；
+     * 后者的收益是「开战第一招必定放它」（见 applyPickBuff / adjustMe / sim 的 cosmosFirst）。
+     * 其余被动/防御类技能（力王附体 / 风驰电掣 / 武器好手 / 装死 / 皮糙肉厚…）
+     * 抽到等于白拿一整份传奇增益，所以一律不进候选。
+     * 技能表里的 type 字段是权威口径（'主动' / '被动' / '防御'）。 */
+    const isActiveSkill = (id) => {
+      const map = (typeof skillsMap !== 'undefined' && skillsMap) ? skillsMap : (window.skillsMap || null);
+      const it = map && map.getValue ? map.getValue(Number(id)) : null;
+      const t = it && it.type ? String(it.type) : '';
+      return t === '主动';
+    };
+    const pickableSkill = (id) => isActiveSkill(id) || isPickableDefense(id) || isPickableCosmos(id);
+    let list;
+    if (kind === 'skill') {
+      list = (State.mySkills ? State.mySkills() : []).filter((sk) => sk && pickableSkill(sk.id));
+      /* 候选里补齐「玩家还没学的特殊技能」——防御技 16/7 与小宇宙爆发 14。
+       * 它们按 id 造一层占位，选中后由 applyPickBuff 真正写进技能表。 */
+      const have = new Set(list.map((sk) => Number(sk.id)));
+      const map = (typeof skillsMap !== 'undefined' && skillsMap) ? skillsMap : (window.skillsMap || null);
+      for (const id of PICKABLE_DEFENSE.concat([PICKABLE_COSMOS])) {
+        if (have.has(id)) continue;
+        const it = map && map.getValue ? map.getValue(id) : null;
+        if (it) list = list.concat([{ id: id, level: 1, name: it.name, type: it.type }]);
+      }
+      /* 特殊技能在界面上不是「Lv 越高越好」，所以给它们挂一句提示。 */
+      list = list.map((sk) => {
+        const note = PICK_NOTE[Number(sk.id)];
+        return note ? Object.assign({}, sk, { note: note }) : sk;
+      });
+    } else {
+      list = (State.myWeapons ? State.myWeapons() : []);
+    }
+    const pool = list.slice();
+    for (let i = pool.length - 1; i > 0; i--) {           // 洗牌
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+    }
+    return pool.slice(0, 3);
+  }
+  /** 落地选取：武器记 weaponBoost[id]，技能记 skillBoost[id]（本局有效）。 */
+  function applyPickBuff(kind, id) {
+    const run = endless().run;
+    if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
+    const pend = run.pendingPick;
+    if (!pend || pend.kind !== kind) return { ok: false, msg: '现在没有待选取的强化。' };
+    /* 本轮第 1 项：虚空铭文落地 —— 记进 slotFreeIds，permUsed() 之后就会把它排除。 */
+    if (kind === 'permBuff') {
+      if (!(run.permanent || []).some((b) => b.id === id)) return { ok: false, msg: '你还没有这个永久增益。' };
+      run.slotFreeIds = (run.slotFreeIds || []).concat([id]).filter((v, i, a) => a.indexOf(v) === i);
+      /* 第 4 项：落地才算用掉。这里也去重 —— 玩家存档里出现过 pickBuffIds 重复登记
+       * （同一 id 出现两次），虽然逻辑上无害，但会让「一局一次」的名单越来越脏。 */
+      run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId || 'C37']).filter((v, i, a) => a.indexOf(v) === i);
+      run.pendingPick = null;
+      save();
+      return { ok: true, kind, id, slotFree: true };
+    }
+    const key = kind === 'skill' ? 'skillBoost' : 'weaponBoost';
+    run[key] = run[key] || {};
+    let pct = pend.pct;
+    if (kind === 'skill' && isPickableCosmos(id)) {
+      /* 小宇宙爆发（14）：与防御技同样是「没学也直接给」，但收益不是触发概率 ——
+       * 而是**开战第一招必定放它**（adjustMe 把它翻成 me.mods.cosmosFirst，
+       * sim 选招时强制）。run.skillBoost[14] 只当开关用。 */
+      if (!(S().skills || []).some((sk) => Number(sk.id) === Number(id))) {
+        State.setWS('skill', Number(id), 1);
+      }
+      run[key][Number(id)] = COSMOS_PICK_BOOST;
+      pct = COSMOS_PICK_BOOST;
+    } else if (kind === 'skill' && isPickableDefense(id)) {
+      /* 绝对防御 / 龟甲术是「受击自动触发」的防御被动，不给它们叠加技能等级，
+       * 而是把触发概率**大幅**提升（详见下方 defensePickBoostOf 的说明）。 */
+      if (!(S().skills || []).some((sk) => Number(sk.id) === Number(id))) {
+        State.setWS('skill', Number(id), 1);
+      }
+      const before = Number(run[key][Number(id)]) || 0;
+      run[key][Number(id)] = before + defensePickBoostOf(id);
+      pct = run[key][Number(id)];
+    } else {
+      run[key][Number(id)] = Math.max(Number(run[key][Number(id)]) || 0, pct);
+    }
+    /* 本轮第 4 项：真正选定了才算「一局一次」用掉（原来在拿到的时候就登记了）。 */
+    if (pend.buffId) run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId]).filter((v, i, a) => a.indexOf(v) === i);
+    run.pendingPick = null;
+    save();
+    return { ok: true, kind, id: Number(id), pct: pct };
+  }
+  /* ============================================================
+   * 【T17】无尽：试炼币商店 —— makeShop / buyShopSlot / sellBuff / rerollShop
+   * ============================================================ */
+
   function makeShop(run) {
     /* 需求 2：全场五折（E04）进店**必须被消耗掉**。
      *
@@ -2553,403 +3012,6 @@
     }
     return { ok: false, msg: '本局没有这个增益。' };
   }
-  /** 选取型 buff 的三选一候选：从玩家已有的武器/技能里随机挑最多 3 个。 */
-  function pickCandidates(kind) {
-    const run = endless().run;
-    if (!run) return [];
-    /* 本轮第 1 项：虚空铭文选的是「已有的永久增益」（隐藏型不参与，它们本就不占槽）。 */
-    if (kind === 'permBuff') {
-      const pool = (run.permanent || [])
-        .map((b) => ({ id: b.id, buff: D().BUFF_BY_ID[b.id], stacks: b.stacks || 1 }))
-        .filter((x) => x.buff && !x.buff.hidden);
-      for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
-      }
-      return pool.slice(0, 3).map((x) => ({ id: x.id, name: x.buff.name, rarity: x.buff.rarity, stacks: x.stacks }));
-    }
-    /* 秘技通神（C33）：只抽**主动技能**，外加两条特殊技能 —— 防御被动（绝对防御/龟甲术）
-     * 与小宇宙爆发（14）。前者不进出手池、「提升触发概率」走 sim 的 passiveSkillBoost；
-     * 后者的收益是「开战第一招必定放它」（见 applyPickBuff / adjustMe / sim 的 cosmosFirst）。
-     * 其余被动/防御类技能（力王附体 / 风驰电掣 / 武器好手 / 装死 / 皮糙肉厚…）
-     * 抽到等于白拿一整份传奇增益，所以一律不进候选。
-     * 技能表里的 type 字段是权威口径（'主动' / '被动' / '防御'）。 */
-    const isActiveSkill = (id) => {
-      const map = (typeof skillsMap !== 'undefined' && skillsMap) ? skillsMap : (window.skillsMap || null);
-      const it = map && map.getValue ? map.getValue(Number(id)) : null;
-      const t = it && it.type ? String(it.type) : '';
-      return t === '主动';
-    };
-    const pickableSkill = (id) => isActiveSkill(id) || isPickableDefense(id) || isPickableCosmos(id);
-    let list;
-    if (kind === 'skill') {
-      list = (State.mySkills ? State.mySkills() : []).filter((sk) => sk && pickableSkill(sk.id));
-      /* 候选里补齐「玩家还没学的特殊技能」——防御技 16/7 与小宇宙爆发 14。
-       * 它们按 id 造一层占位，选中后由 applyPickBuff 真正写进技能表。 */
-      const have = new Set(list.map((sk) => Number(sk.id)));
-      const map = (typeof skillsMap !== 'undefined' && skillsMap) ? skillsMap : (window.skillsMap || null);
-      for (const id of PICKABLE_DEFENSE.concat([PICKABLE_COSMOS])) {
-        if (have.has(id)) continue;
-        const it = map && map.getValue ? map.getValue(id) : null;
-        if (it) list = list.concat([{ id: id, level: 1, name: it.name, type: it.type }]);
-      }
-      /* 特殊技能在界面上不是「Lv 越高越好」，所以给它们挂一句提示。 */
-      list = list.map((sk) => {
-        const note = PICK_NOTE[Number(sk.id)];
-        return note ? Object.assign({}, sk, { note: note }) : sk;
-      });
-    } else {
-      list = (State.myWeapons ? State.myWeapons() : []);
-    }
-    const pool = list.slice();
-    for (let i = pool.length - 1; i > 0; i--) {           // 洗牌
-      const j = Math.floor(Math.random() * (i + 1));
-      const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
-    }
-    return pool.slice(0, 3);
-  }
-  /** 落地选取：武器记 weaponBoost[id]，技能记 skillBoost[id]（本局有效）。 */
-  function applyPickBuff(kind, id) {
-    const run = endless().run;
-    if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
-    const pend = run.pendingPick;
-    if (!pend || pend.kind !== kind) return { ok: false, msg: '现在没有待选取的强化。' };
-    /* 本轮第 1 项：虚空铭文落地 —— 记进 slotFreeIds，permUsed() 之后就会把它排除。 */
-    if (kind === 'permBuff') {
-      if (!(run.permanent || []).some((b) => b.id === id)) return { ok: false, msg: '你还没有这个永久增益。' };
-      run.slotFreeIds = (run.slotFreeIds || []).concat([id]).filter((v, i, a) => a.indexOf(v) === i);
-      /* 第 4 项：落地才算用掉。这里也去重 —— 玩家存档里出现过 pickBuffIds 重复登记
-       * （同一 id 出现两次），虽然逻辑上无害，但会让「一局一次」的名单越来越脏。 */
-      run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId || 'C37']).filter((v, i, a) => a.indexOf(v) === i);
-      run.pendingPick = null;
-      save();
-      return { ok: true, kind, id, slotFree: true };
-    }
-    const key = kind === 'skill' ? 'skillBoost' : 'weaponBoost';
-    run[key] = run[key] || {};
-    let pct = pend.pct;
-    if (kind === 'skill' && isPickableCosmos(id)) {
-      /* 小宇宙爆发（14）：与防御技同样是「没学也直接给」，但收益不是触发概率 ——
-       * 而是**开战第一招必定放它**（adjustMe 把它翻成 me.mods.cosmosFirst，
-       * sim 选招时强制）。run.skillBoost[14] 只当开关用。 */
-      if (!(S().skills || []).some((sk) => Number(sk.id) === Number(id))) {
-        State.setWS('skill', Number(id), 1);
-      }
-      run[key][Number(id)] = COSMOS_PICK_BOOST;
-      pct = COSMOS_PICK_BOOST;
-    } else if (kind === 'skill' && isPickableDefense(id)) {
-      /* 绝对防御 / 龟甲术是「受击自动触发」的防御被动，不给它们叠加技能等级，
-       * 而是把触发概率**大幅**提升（详见下方 defensePickBoostOf 的说明）。 */
-      if (!(S().skills || []).some((sk) => Number(sk.id) === Number(id))) {
-        State.setWS('skill', Number(id), 1);
-      }
-      const before = Number(run[key][Number(id)]) || 0;
-      run[key][Number(id)] = before + defensePickBoostOf(id);
-      pct = run[key][Number(id)];
-    } else {
-      run[key][Number(id)] = Math.max(Number(run[key][Number(id)]) || 0, pct);
-    }
-    /* 本轮第 4 项：真正选定了才算「一局一次」用掉（原来在拿到的时候就登记了）。 */
-    if (pend.buffId) run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId]).filter((v, i, a) => a.indexOf(v) === i);
-    run.pendingPick = null;
-    save();
-    return { ok: true, kind, id: Number(id), pct: pct };
-  }
-  /** 永久增益槽位数：基础 5 + 扩容类 buff 给的名额。 */
-  function permSlots(run) { return (D().PERMANENT_SLOTS || 5) + Math.max(0, Number(run && run.permSlots) || 0); }
-  /** 本轮第 1 项：**实际占用**的永久槽位数 = 拥有数 − 被「虚空铭文」附魔免占位的数量。
-   *  槽位判断、面板计数、C34「空槽换攻击」全部走这里，避免三处各算一套。 */
-  /* ============================================================
-   * 血量：**绝对值口径**（需求：血量继承按绝对值而不是百分比）
-   *
-   *   run.hpAbs —— **全局实际血量计数器**：战斗结束时把剩余血量写进去，
-   *                并且在写入时就按「局外口径的上限」裁掉超出部分（真裁，不是显示时裁）。
-   *                下一场把它放进「非战斗期间算出的上限」，所以进场血量不会高于局外上限。
-   *                旧档只有百分比 run.carry，这里按当时的上限折算一次。
-   *
-   * 「按最大生命百分比回血」在绝对值模型下等于「加一个固定的绝对量」，所以需要一个
-   * 参考上限：战斗中用本场实际 maxHp；换层等「还没有下一场」的时机用上一场记下的
-   * run.lastMaxHp（就是玩家看到的那条血上限）。
-   * ============================================================ */
-  function hpAbsOf(run, fallbackMaxHp) {
-    if (!run) return Math.max(1, Math.round(Number(fallbackMaxHp) || 1));
-    const v = Number(run.hpAbs);
-    if (Number.isFinite(v) && v > 0) return Math.max(1, Math.round(v));
-    /* 没有 hpAbs 的历史档（或全新一局）：按「最近一次已知上限 × carry」折算。
-     * 全新一局 carry=1、上限还没记过 —— 此时必须以**本次的上限**为基准，
-     * 否则会折算出 1 点血（实测第一场 hp=1）。 */
-    const ref = Math.max(1, Math.round(Number(run.refMaxHp) || Number(run.lastMaxHp) || Number(fallbackMaxHp) || 0));
-    return Math.max(1, Math.round(ref * clamp01(run.carry == null ? 1 : run.carry)));
-  }
-  /** 非战斗期间按「最大生命的百分比」回血：换算成绝对值后累加（自动受上限约束）。 */
-  function healAbs(run, pct, refMaxHp) {
-    const p = Math.max(0, Number(pct) || 0);
-    if (!p) return 0;
-    const ref = Math.max(1, Math.round(Number(refMaxHp) || Number(run && run.refMaxHp) || Number(run && run.lastMaxHp) || 0));
-    const gain = Math.max(1, Math.round(ref * p));
-    run.hpAbs = hpAbsOf(run) + gain;
-    return gain;
-  }
-  /** 这条增益**是否真的占用永久槽位**。
-   * 「立即生效类」都不占槽 —— 它们的收益是当场结算（或当场登记一个待选目标），
-   * 不会留在永久栏里，所以槽位满时照样应当能拿：
-   *   · kind === 'instant'（即时类）
-   *   · 选取型 pickWeaponPct / pickSkillPct（神兵淬炼 C32 / 秘技通神 C33）
-   *   · 虚空铭文 pickPermanentFree
-   *   · 扩容类 permSlot（扩容背包 C30 / 仓库钥匙 C31）
-   * addBuff 早就有对应的提前分支，但**满格判定**（界面提示 + 商店拦截）原来只看
-   * kind === 'permanent'，于是槽位满时买不了这几条 —— 这正是本条需求要修的。
-   * 注意：永久类的**百分比生命上限**（maxHpMul）是折算进 run.hpBonus 的，仍然占槽。 */
-  function occupiesPermSlot(buff) {
-    if (!buff || buff.kind !== 'permanent') return false;
-    const m = buff.mods || {};
-    if (m.pickWeaponPct || m.pickSkillPct || m.pickPermanentFree || m.permSlot) return false;
-    return true;
-  }
-  /** C48 铜墙铁壁的减伤累计（含上限封顶口径）。 */
-  function winTakenMulOf(run) {
-    if (!run) return 0;
-    const c48 = stacksOf(run, 'C48');
-    if (!c48) return 0;
-    const cap = (Number(D().BUFF_BY_ID.C48.mods.winTakenMulCap) || 0.25) * c48;
-    return Math.min(cap, Math.max(0, Number(run.winTakenMul) || 0));
-  }
-  /** C07 吞噬成长的百分比累计（含上限封顶口径，与 adjustMe 保持一致）。 */
-  function winMaxHpOf(run) {
-    if (!run) return 0;
-    const c07 = stacksOf(run, 'C07');
-    const cap = c07 ? (D().BUFF_BY_ID.C07.mods.winMaxHpCap || 0.30) * c07 * globalMul(run) : 0;
-    return Math.min(cap, Math.max(0, Number(run.winMaxHp) || 0));
-  }
-  /** 记一次「即时类已获得」（用于重复获得概率递减）。 */
-  function bumpInstant(run, id) {
-    if (!run || !id) return;
-    run.instantIds = Array.isArray(run.instantIds) ? run.instantIds : [];
-    const row = run.instantIds.find((x) => x && x.id === id);
-    if (row) row.count = Math.max(1, Math.floor(Number(row.count) || 1)) + 1;
-    else run.instantIds.push({ id: id, count: 1 });
-  }
-  /** 本局某条增益的**总层数**（permanent 与 limited 都要数）——
-   *  烙印类（C49 / C52）记在 run.limited 上，只查 permanent 会永远数到 0。 */
-  function buffCountOf(run, id) {
-    if (!run) return 0;
-    let n = 0;
-    for (const row of run.permanent || []) if (row && row.id === id) n += Math.max(1, Math.floor(Number(row.stacks) || 1));
-    for (const row of run.limited || []) if (row && row.id === id) n += Math.max(1, Math.floor(Number(row.stacks) || 1));
-    return n;
-  }
-  /* ============================================================
-   * 「本局累计获得过几份」—— 与「现在还剩几份」分开的两个口径。
-   *
-   * 易碎烙印（C49 终焉烙印 / C39~C44 属性烙印 / C52 涌泉烙印）碎掉之后，
-   * rollFragileBuffs 会把那一行**从 run.limited 里删掉**（加成转进 fragileBurned）。
-   * 于是 buffCountOf / stacksOf 都会少算一份：层数上限（C49 最多 3 次）与
-   * 「重复获得降权」都会因为碎掉而回退 —— 玩家可以靠「等它碎」反复刷同一条烙印。
-   * 需求（本轮）：**碎掉的那一份也要计入**，所以单独记一份只增不减的流水。
-   * ============================================================ */
-  /** 本局累计获得过的份数（只增不减；目前只对易碎烙印记账）。 */
-  function fragileGotOf(run, id) {
-    const t = run && run.fragileGot;
-    return Math.max(0, Math.floor(Number(t && t[id]) || 0));
-  }
-  /** 层数上限 / 可获得性 / 重复降权统一用这个口径：在册份数 与 累计获得份数 取大。 */
-  function obtainedCountOf(run, id) {
-    return Math.max(buffCountOf(run, id), fragileGotOf(run, id));
-  }
-  /** 某个**即时类**增益本局已获得的次数（即时类不进 permanent/limited，另记在 instantIds 上）。 */
-  function instantOwnedCount(run, id) {
-    if (!run) return 0;
-    let n = 0;
-    for (const row of run.instantIds || []) if (row && row.id === id) n += Math.max(1, Math.floor(Number(row.count) || 1));
-    return n;
-  }
-  function permUsed(run) {
-    const list = (run && run.permanent) || [];
-    const free = ((run && run.slotFreeIds) || []).filter((id) => list.some((b) => b.id === id));
-    return Math.max(0, list.length - free.length);
-  }
-  /**
-   * 永久增益列表的**校验（不裁剪）** —— bug 修复。
-   *
-   * 原来 normalizeRun 用 `slice(0, permSlots)` 按**数组长度**裁剪，而 addBuff 的
-   * 满格判断按 `permUsed`（已扣掉虚空铭文免占位的那些）。口径不一致就会丢东西：
-   *   上限 8、占用 7/8、其中 1 个免占位（数组长度 8）→ addBuff 认为没满、正常推入
-   *   → 长度 9 → slice(0,8) 把**最后一项（刚拿到的那份）**切掉
-   *   → 玩家看到「拿到了又直接消失」（实测复刻到：C03 / C45 都这样没了）。
-   *
-   * 现在上限的维护**收口在 addBuff**（加入前按「加入后占用是否超上限」判定），
-   * 这里只做校验：真超了就告警，但**绝不丢弃玩家已有的增益**。
-   */
-  function repairPermanentSlots(run, list) {
-    const cap = permSlots(run);
-    const used = permUsed(run);
-    if (used > cap && typeof console !== 'undefined' && console.warn) {
-      console.warn('[tower] 永久增益占用槽位超过上限：' + used + '/' + cap +
-        '（列表 ' + list.length + ' 项，含免占位 ' + (list.length - used) + ' 项）—— 保留不丢弃，请检查 addBuff 的满格判定');
-    }
-    return list;
-  }
-  /** 本轮第 4 项：**当前**血量上限（血条悬停显示用）。
-   * 不直接用「上一场开战时的 maxHp」，是因为两次战斗之间玩家可能刚拿了增益 ——
-   * 那样悬停会显示过期数字。这里按 adjustMe 的同一个公式现算：
-   *   基础上限 ×(1 + 增益 maxHpMul + 永久 hpBonus) ×本层削弱 + 固定加成（以战养战 / 挥金如土）。
-   * 基础上限由 adjustMe 每场记到 run.baseMaxHp（是「未加塔 buff」的那一份）。 */
-  function currentMaxHp(run) {
-    const base = Number(run && run.baseMaxHp) || 0;
-    if (!(base > 0)) return 0;
-    /* **这里只算「长期有效」的上限，不能把战斗内的临时上限算进来。**
-     * 曾经的 bug：把「空血上限」（emptyMaxHpMul，浴血重生 / 濒死觉悟 / 血之契约）
-     * 也加到局外展示上 —— 于是玩家在局外（战前准备、休整点）就看到血上限被抬高，
-     * 而那部分其实只在战斗内存在。
-     *
-     * 口径：
-     *   · 长期加成 —— run.hpBonus（永久 maxHpMul 在获得时就折算进去了）、
-     *     run.winMaxHp（C07 每胜成长）、run.winHpFlat / spendGain.hp（固定值）
-     *   · 战斗内临时上限 —— emptyMaxHpMul、限次类 maxHpMul、本层 debuff，
-     *     一律不进局外展示；战斗结束后界面会退回到「最近一场的真实上限」来显示。 */
-    const stickyHp = Math.max(0, Number(run.hpBonus) || 0);
-    const winMaxHp = winMaxHpOf(run);
-    const flat = Math.max(0, Number(run.winHpFlat) || 0) +
-      (run.spendGain ? Math.max(0, Number(run.spendGain.hp) || 0) : 0);
-    return Math.max(1, Math.round(base * (1 + stickyHp + winMaxHp)) + flat);
-  }
-  /** 当前血量（绝对口径）：hpAbs 裁到当前上限。 */
-  function currentHp(run) {
-    /* run.hpAbs 是**全局实际血量计数器**（已在 reportBattle 里按局外上限裁过），
-     * 所以这里通常只做防御性裁剪（上限因卖增益/吃 debuff 变小时才会真的裁到）。
-     * 展示口径的优先级：
-     *  · 战斗**进行中**时 run.lastMaxHp 就是本场真实上限（含空血上限等临时加成），
-     *    此时 currentMaxHp() 只反映长期加成 —— 所以直接用 lastMaxHp 更准。
-     *  · 战斗之间（拿到新永久增益、还没打下一场）用 currentMaxHp()，
-     *    这样「刚买的增益」能立刻在血条上看到。
-     * 另外：临时上限只在战斗中有效，战斗一结束就应当消失（见 currentMaxHp 的说明）。 */
-    const longCap = currentMaxHp(run);
-    const battleCap = Math.max(0, Math.round(Number(run && run.lastMaxHp) || 0));
-    const live = !!(run && run.attempt);          // 战斗进行中
-    const cap = live && battleCap > 0 ? battleCap : (longCap > 0 ? longCap : battleCap);
-    const hp = hpAbsOf(run, cap);
-    /* **同步全局计数器**：局外上限如果比计数器低（卖掉/失去永久上限增益、
-     * 吃跨层 debuff…），被压下来的那部分要真正写回 run.hpAbs ——
-     * 否则局外显示虽然按上限裁过，计数器里却还留着「多出来的血」，
-     * 下次上限一变高它又会冒出来。
-     * 只向**下**同步：计数器不会因为上限变大而自动补血。 */
-    if (cap > 0 && Number(run.hpAbs) > cap) run.hpAbs = cap;
-    return { hp: cap > 0 ? Math.min(hp, cap) : hp, maxHp: cap };
-  }
-  /** 需求 3：易碎烙印的损毁判定（每场战斗一次，默认 6%）。
-   * 每条烙印有**自己的随机序列**（fragileRoll）；损毁后该烙印的基础加成整份转为
-   * 本局永久保留（fragileBurned），所以「损毁」是升级而不是削弱。 */
-  function rollFragileBuffs(run) {
-    const broken = [];
-    run.limited = (run.limited || []).filter((b) => {
-      const def = D().BUFF_BY_ID[b.id];
-      const pct = def && def.mods && def.mods.fragileBreakPct;
-      if (!pct || b.on === false) return true;
-      /* 需求 3：每条烙印用自己的随机序列，互不共用 Math.random。 */
-      if (fragileRoll(run, b.id, Number(pct))) {
-        broken.push(def.name);
-        const key = def.mods.fragileStat;
-        if (key) {
-          run.fragileBurned = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBurned || {});
-          run.fragileBurned[key] = Math.max(0, Number(run.fragileBurned[key]) || 0) +
-            Math.max(0, Number(def.mods.fragilePct) || 0);
-        }
-        /* 终乘烙印：损毁把一份「存在」层转成「损毁」层（1.25^n → 1.25^(n-1) × 1.5）。 */
-        if (def.mods.fragileFinalMul) {
-          run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0) - 1);
-          run.fragileMulBurned = Math.max(0, Math.floor(Number(run.fragileMulBurned) || 0)) + 1;
-        }
-        /* 淘金烙印：损毁把一份「存在」层转成「损毁」层（+15% → +30%）。 */
-        if (def.mods.fragileCoinAddAlive !== undefined) {
-          run.fragileCoinBase = Math.max(0, Math.floor(Number(run.fragileCoinBase) || 0) - 1);
-          /* 直接把损毁份记进明细数组 —— 这是加成的**真源**（rebuildFragileTotals 也会重算它）。
-           * 顺带修一个老 bug：涌泉烙印（C52）原来只写了 brokenMarks、没写 fragileHealBurned，
-           * 于是「损毁后 +20% 治疗」要等到某次「碎烙印作废」触发 rebuild 才生效。 */
-          run.fragileCoinBurned = (Array.isArray(run.fragileCoinBurned) ? run.fragileCoinBurned : [])
-            .concat([Math.max(0, Number(def.mods.fragileCoinAddBurned) || 0)]);
-        }
-        if (def.mods.fragileHealAddAlive !== undefined) {
-          run.fragileHealBurned = (Array.isArray(run.fragileHealBurned) ? run.fragileHealBurned : [])
-            .concat([Math.max(0, Number(def.mods.fragileHealAddBurned) || 0)]);
-        }
-        /* 明细：碎掉的每一条都登记一份，供「30 层后每 2 层作废一条」抽取。 */
-        run.brokenMarks = Array.isArray(run.brokenMarks) ? run.brokenMarks : [];
-        if (def.mods.fragileStat) {
-          run.brokenMarks.push({ kind: 'stat', stat: def.mods.fragileStat,
-            pct: Math.max(0, Number(def.mods.fragilePct) || 0) });
-        } else if (def.mods.fragileHealAddAlive !== undefined) {
-          run.brokenMarks.push({ kind: 'heal',
-            alive: Math.max(0, Number(def.mods.fragileHealAddAlive) || 0),
-            burned: Math.max(0, Number(def.mods.fragileHealAddBurned) || 0) });
-        } else if (def.mods.fragileCoinAddAlive !== undefined) {
-          run.brokenMarks.push({ kind: 'coin',
-            alive: Math.max(0, Number(def.mods.fragileCoinAddAlive) || 0),
-            burned: Math.max(0, Number(def.mods.fragileCoinAddBurned) || 0) });
-        } else if (def.mods.fragileFinalMul) {
-          run.brokenMarks.push({ kind: 'final',
-            alive: Math.max(0, Number(def.mods.fragileAddAlive) || 0),
-            burned: Math.max(0, Number(def.mods.fragileAddBurned) || 0) });
-        }
-        logBuff(run, b.id, 'break', { detail: '易碎损毁（升级为全额并永久保留）' });
-        return false;
-      }
-      return true;
-    });
-    return broken;
-  }
-  /** 本轮第 3 项：卖出/失去**成长类**增益时，把它累计出来的运行态一并清零 ——
-   *  再买回来是从 0 重新长，而不是接着上次的进度（吞噬成长就是典型）。
-   *  （叠层数本身在重新获得时本来就是 1；过去漏掉的是这些「跑出来的数值」。） */
-  function resetGrowth(run, id, stacks) {
-    if (!run) return false;
-    const n = Math.max(1, Math.floor(Number(stacks) || 1));      // 卖出/失去的是**整条**（含所有层数）
-    if (id === 'C06') run.killPower = 0;
-    /* 需求：**成长类累积的生命上限在被替换/卖出后不消失**。
-     * C07（吞噬成长，百分比）与 C11（以战养战，固定值）都是「本局累计」的上限收益，
-     * 原来这里直接清零 —— 玩家换掉/卖掉它，之前攒的血上限就凭空没了。
-     * 现在改成**冻结进 run.hpBonus**（与永久 maxHpMul 同一口径：卖掉/替换后仍然保留），
-     * 所以效果继续生效，只是不再继续增长。
-     * 注意 hpBonus 是「百分比」口径，固定值那一份要先折算成比例再并入。 */
-    else if (id === 'C07') { run.hpBonus = Math.max(0, Number(run.hpBonus) || 0) + Math.max(0, Number(run.winMaxHp) || 0); run.winMaxHp = 0; }
-    else if (id === 'C11') {
-      const flat = Math.max(0, Number(run.winHpFlat) || 0);
-      const base = Math.max(1, Number(run.baseMaxHp) || 0);
-      run.hpBonus = Math.max(0, Number(run.hpBonus) || 0) + (base > 0 ? flat / base : 0);
-      run.winHpFlat = 0;
-    }
-    else if (id === 'C12') { run.winStatPower = 0; run.winStatAgility = 0; run.winStatSpeed = 0; }
-    /* C48 铜墙铁壁：它的「已累计减伤」同样是本局攒出来的收益，替换/卖出后**保留**
-     *（与 C07/C11 一致），所以这里不清零。 */
-    else if (id === 'C25') run.sellBonus = 0;
-    else if (id === 'C36') { run.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; run.shopSpend = 0; }
-    else {
-      /* 第 7 项：烙印被**主动卖掉/换掉/失去**时，才把 sticky 加成收回去
-       * （5% 损毁那条路径不走这里，所以损毁不掉加成）。 */
-      const def = D().BUFF_BY_ID[id];
-      if (def && def.mods && def.mods.fragileStat) {
-        /* 主动卖出/被换掉：基础那份按层数收回（损毁得到的永久份保留 —— 那是 6% 判定给的奖励）。 */
-        const key = def.mods.fragileStat;
-        const pct = Math.max(0, Number(def.mods.fragilePct) || 0);
-        run.fragileBase = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBase || {});
-        run.fragileBase[key] = Math.max(0, run.fragileBase[key] - pct * n);
-        return true;
-      }
-      /* 终乘（C49）/ 治疗（C52）/ 淘金（C53）烙印：主动失去时把**未破碎的那一份**按层数收回 ——
-       * 损毁得到的永久份保留（与属性烙印同一口径）。
-       * 注意 run.fragileGot（「一局获得过几份」）不回退：那是层数上限与重复降权的口径，
-       * 与「现在还持有几份」无关（否则卖掉再买回来就能绕开层数上限）。 */
-      if (def && def.mods && def.mods.fragileFinalMul) {
-        run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0) - n);
-        return true;
-      }
-      if (def && def.mods && def.mods.fragileCoinAddAlive !== undefined) {
-        run.fragileCoinBase = Math.max(0, Math.floor(Number(run.fragileCoinBase) || 0) - n);
-        return true;
-      }
-      return false;
-    }
-    return true;
-  }
   /** 卖出价：名贵手表这类有固定 sellValue 的按固定值，其它按商店价 40%。
    *  需求：**可叠加增益按层数计价** —— 卖出是把整条（含所有层数）一起卖掉，
    *  所以这里要乘上当前层数；否则买 3 层只收回 1 份的钱（实测踩过）。 */
@@ -3013,7 +3075,10 @@
     return { ok: true };
   }
 
-  // ---------- 无尽：结算点 ----------
+  /* ============================================================
+   * 【T18】无尽：结算点与永久牺牲 —— checkpointInfo / sacrificePerm
+   * ============================================================ */
+
   function checkpointInfo() {
     const run = endless().run;
     if (!run) return null;
@@ -3130,7 +3195,10 @@
     return { ok: true, layer: run.layer };
   }
 
-  // ---------- 放弃 ----------
+  /* ============================================================
+   * 【T19】放弃与认输 —— abandon
+   * ============================================================ */
+
   function abandon(mode) {
     if (mode === 'tower') {
       const run = tower().run;
@@ -3154,7 +3222,10 @@
     return out;
   }
 
-  // ---------- 展示用信息 ----------
+  /* ============================================================
+   * 【T20】界面展示信息 —— towerInfo / endlessInfo / ownedBuffs
+   * ============================================================ */
+
   function towerInfo() {
     const t = tower(), s = S();
     const layer = t.maxLayer + 1;
@@ -3347,6 +3418,9 @@
     return out;
   }
 
+  /* ============================================================
+   * 【T21】模块导出 —— window.Tower（界面与测试的入口面）
+   * ============================================================ */
   window.Tower = {
     unlocked, towerInfo, endlessInfo, preview, planInfo, ownedBuffs, bossPool, debugGrantBuff, debugLoseBuff, pickCandidates, applyPickBuff,
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,

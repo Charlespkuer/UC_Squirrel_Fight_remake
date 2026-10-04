@@ -1,4 +1,13 @@
 /* Additional classic UC screens. All progression stays in the current State save. */
+
+/* ------------------------------------------------------------
+ * 目录：经典 UC 扩展界面（竞技场/天梯/抽奖/师徒/排行/VIP）
+ * Ctrl+F 搜节号（如「【EX1】」）直达对应代码块。
+ *
+ *  【EX1】竞技场  【EX2】天梯赛  【EX3】抽奖
+ *  【EX4】师徒系统  【EX5】排行榜  【EX6】超级松鼠
+ *  【EX7】导出 window.ClassicExtras
+ * ------------------------------------------------------------ */
 (function () {
   'use strict';
   const C = () => UI.classic;
@@ -19,6 +28,9 @@
   }
   function alert(text) { C().modal('\u63d0\u793a', '<p>' + esc(text) + '</p>', [{ label: '\u77e5\u9053\u4e86' }], { small: true }); }
   // \u56db\u540d\u5956\u52b1\uff08\u51a0/\u4e9a/\u5b63/\u7b2c\u56db\uff09\u3002\u788e\u7247\u573a\u53ea\u7ed9\u788e\u7247\uff0c\u4e0d\u53d1\u7ecf\u9a8c\u3002
+  /* ============================================================
+   * 【EX1】竞技场（门票/战斗/结算）
+   * ============================================================ */
   const ARENA_EXP = [150, 75, 45, 0];
   const ARENA_FRAGMENT_SHARDS = [8, 6, 4, 3];
   function addProp(id, count) { const s = State.state(); s.props[id] = (s.props[id] || 0) + count; }
@@ -232,6 +244,9 @@
    * 匹配到的实际等级在这个期望上做 ±4 的随机，但均值就是这条曲线，且永远不超过 70。
    * 于是「杯数」就是天梯的进度条：低杯期对手软、攒杯后一路对上满级对手；
    * 花金杯买商店奖励会降杯，也顺手降一点难度（原版攻略里金杯就是可花掉的货币）。 */
+  /* ============================================================
+   * 【EX2】天梯赛（匹配/积分/商店）
+   * ============================================================ */
   const RANK_LEVEL_BASE = 30, RANK_INTEGRAL_BASE = 1500, RANK_INTEGRAL_PER_LEVEL = 25, RANK_LEVEL_SPREAD = 4;
   /** 第 2 项：匹配档位跟**积分**挂钩（积分是排行榜评分、不会被花掉）。
    *  1500 分（天梯初始分）对应 30 级档，每多 25 分 +1 级，2500 分封顶到 70 级；
@@ -354,6 +369,9 @@
 
 
   // \u666e\u901a\u836f\u4e38\uff08\u5927\u529b/\u654f\u6377/\u901f\u5ea6/\u7ecf\u9a8c\u4e38\uff09\uff1a\u62bd\u5956\u91cc\u7684\u300c\u968f\u673a\u666e\u901a\u836f\u4e38\u00d72\u300d\u4ece\u8fd9\u56db\u79cd\u91cc\u62bd
+  /* ============================================================
+   * 【EX3】抽奖
+   * ============================================================ */
   const NORMAL_PILLS = [3, 4, 5, 7];
   const prizes = [
     { id: 22, count: 10, label: '\u6b66\u5668\u5377\u8f74 \u00d710' }, { id: 21, count: 10, label: '\u6280\u80fd\u5377\u8f74 \u00d710' },
@@ -513,6 +531,9 @@
     });
     spin10.disabled = spinning;
   }
+  /* ============================================================
+   * 【EX4】师徒系统
+   * ============================================================ */
   // ==================== \u5e08\u5f92\u7cfb\u7edf ====================
   // \u53c2\u8003\u8bbe\u5b9a\uff1a\u62dc\u5e08\u540e\u81ea\u52a8\u5b66\u4f1a\u300c\u5e08\u7236\u9a7e\u5230\u300d\uff1b\u6536\u5f92\u9700\u5148\u6253\u8d25\u5bf9\u65b9\uff08\u5bf9\u65b9\u5df2\u6709\u5e08\u7236\u5219\u6253\u4ed6\u5e08\u7236\uff09\uff1b
   // \u6536\u5f92\u4e0a\u9650\u968f\u7b49\u7ea71/2/3\u4eba\uff1b\u6628\u65e5\u65e5\u8d21\u7531\u6301\u4e45\u5316\u7684\u6709\u9650\u79bb\u7ebf\u6218\u6597\u8d26\u76ee\u630910%/5%\u7ed3\u7b97\u3002
@@ -739,6 +760,9 @@
   /* \u539f\u7248 loadRankList / LoadRank \u7531\u670d\u52a1\u7aef\u4e0b\u53d1\u771f\u5b9e\u73a9\u5bb6\u699c\uff1b\u5355\u673a\u7248\u7528\u786e\u5b9a\u6027\u968f\u673a
    * \uff08\u6bcf\u5468\u4e00\u4e2a\u79cd\u5b50\uff09\u751f\u6210\u4e00\u6279\u79bb\u7ebf\u677e\u9f20\uff0c\u518d\u628a\u73a9\u5bb6\u63d2\u8fdb\u53bb\uff0c\u56e0\u6b64\u540c\u4e00\u5468\u5185\u699c\u5355\u7a33\u5b9a\u3002 */
   let toplistTab = 'level';
+  /* ============================================================
+   * 【EX5】排行榜（固定种子模拟榜）
+   * ============================================================ */
   const RANK_LEVEL = 30;   // 原版天梯赛 30 级开启
   const TOPLIST_TABS = [['level', '\u7b49\u7ea7'], ['cup', '\u91d1\u676f'], ['integral', '\u79ef\u5206']];
   const TOPLIST_TITLES = ['\u677e\u9f20\u5c0f\u9738', '\u68ee\u6797\u4e00\u9738', '\u98ce\u901f\u4f20\u5947', '\u575a\u679c\u5927\u738b',
@@ -840,6 +864,9 @@
   // ---------- \u8d85\u7ea7\u677e\u9f20\uff08\u539f\u7248 VIP\uff1b\u6539\u6210\u91d1\u677e\u679c\u8d2d\u4e70\u7684\u5355\u673a\u7248\uff09 ----------
   /* \u7279\u6743\u6587\u6848\u4e0e\u7b49\u7ea7\u8868\u53d6\u81ea\u539f\u5ba2\u6237\u7aef js/ssdz-pkg2.js \u7684 VIP \u754c\u9762\u5185\u5d4c\u6587\u672c\uff0c
    * \u539f\u7248\u6309\u5929\u552e\u5356\uff08buyVIP.do\uff09\uff0c\u8fd9\u91cc\u6539\u6210\u91d1\u677e\u679c\u3002 */
+  /* ============================================================
+   * 【EX6】超级松鼠（VIP）
+   * ============================================================ */
   const VIP_PRIVILEGES = [
     '\u89d2\u8272\u7b49\u7ea710\u7ea7\u4ee5\u4e0a\u7684VIP\u53ef\u4ee5\u8df3\u8fc7\u6218\u6597\uff08\u53ef\u81ea\u52a8\u83b7\u5f97\u70b9\u51fb\u7c7b\u9053\u5177\uff09',
     '\u88ab\u52a8\u7ecf\u9a8c\u4e0a\u9650\u5927\u5e45\u63d0\u9ad8\uff0c\u6700\u9ad8\u53ef\u8fbe400\u7ecf\u9a8c/\u5929',
@@ -879,6 +906,9 @@
     }
   }
 
+  /* ============================================================
+   * 【EX7】导出 window.ClassicExtras
+   * ============================================================ */
   window.ClassicExtras = {
     payArenaEntry, arena, rank, rankShop: () => rankShop(0), lottery, refreshTickets, master, toplist, vip, lotteryPrizes: prizes,
     rankFoeLevel, rankFoeExpectLevel };

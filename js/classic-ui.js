@@ -1,4 +1,16 @@
 /* Classic UC screens reconstructed from references. Gameplay remains in State / Sim. */
+
+/* ------------------------------------------------------------
+ * 目录：经典 UC 界面（主界面/背包/装备/挑战/关卡/同步）
+ * Ctrl+F 搜节号（如「【UC1】」）直达对应代码块。
+ *
+ *  【UC1】基础小件  【UC2】位图数字  【UC3】图标与属性 HTML
+ *  【UC4】页面骨架  【UC5】存档列表弹窗  【UC6】主界面首页
+ *  【UC7】状态页与图鉴  【UC8】挑战  【UC9】关卡
+ *  【UC10】背包与道具  【UC11】果实三选一 / 属性分配 / 升级选择  【UC12】装备
+ *  【UC13】消息 / 复仇 / 好友 / 聊天  【UC14】每日  【UC15】存档导入
+ *  【UC16】云同步  【UC17】系统设置 / 村庄 / 攻略  【UC18】兜底分发与导出 UI.classic
+ * ------------------------------------------------------------ */
 (function () {
   'use strict';
   const legacy = window.UI;
@@ -28,7 +40,10 @@
    * 弹窗里的按钮必须和「继续闯关」「稍后继续」这些手搓按钮同一套样式 ——
    * 同一个弹窗里一个贴图、一个手搓，美术会不一致。 */
   const buttonArt = { '返回菜单':'return-menu', '更换装备':'change-equipment' };
-  const btn = (label, action, cls, art) => '<button type="button" class="uc-button ' + (cls || '') + '" data-action="' + esc(action) + '">' + ((art && buttonArt[label]) ? '<span class="reference-button-label">'+esc(label)+'</span><img alt="" class="classic-button-art" src="images/classic/new-reference/buttons/'+buttonArt[label]+'.png">' : esc(label)) + '</button>';
+  /* 翻页箭头不用字体字形（Arial/Georgia 的 ‹ › 墨迹中心天生偏离圆心，且 Windows/macOS
+   * 字体回退不同，padding 补偿在一台机器上量好、换台机器又歪）；改用 CSS 边框画的
+   * 人字形（.chev），几何对称、跨平台一致。字形保留在视觉隐藏 span 里供读屏。 */
+  const btn = (label, action, cls, art) => '<button type="button" class="uc-button ' + (cls || '') + '" data-action="' + esc(action) + '">' + ((art && buttonArt[label]) ? '<span class="reference-button-label">'+esc(label)+'</span><img alt="" class="classic-button-art" src="images/classic/new-reference/buttons/'+buttonArt[label]+'.png">' : (label === '‹' || label === '›') ? '<span class="reference-button-label">' + label + '</span><i class="chev ' + (label === '‹' ? 'chev-l' : 'chev-r') + '" aria-hidden="true"></i>' : esc(label)) + '</button>';
   const spriteCache = Object.create(null);
   let screen = 'home', timer = 0, activePortrait = null, lastRefresh = 0;
   let catalogPage = 0, bagPage = 0, gearPage = 0;
@@ -37,6 +52,9 @@
   let opponents = [], selectedOpponent = null;
   let heroWears = [], wearSignature = '', wearRequest = '';
   // 主页限时药丸角标：id → 效果简述（与 State.useProp/totalStats 的生效口径一致）
+  /* ============================================================
+   * 【UC1】基础小件：esc / VIP 徽标 / 事件绑定 / 贴图
+   * ============================================================ */
   const BUFF_PROPS = [[3, '力量+20%'], [4, '敏捷+20%'], [5, '速度+20%'], [7, '挑战经验+40%'], [41, '力量+40%'], [42, '敏捷+40%'], [43, '速度+40%'], [44, '挑战经验+60%']];
   let buffSignature = '';
   const classicPortrait = new Image(); classicPortrait.src = 'images/classic/squirrel-classic.png';
@@ -75,6 +93,9 @@
   // 用 canvas 按设计尺寸 1:1 绘制再交给 --uiscale 缩放，所以任何窗口
   // 尺寸下边缘都干净（纯 CSS 百分背景在 Chrome 上切不出正确的字）。
   // --st 是横向拉伸：图集里的数字比参考图窄，拉宽后更接近截图观感。
+  /* ============================================================
+   * 【UC2】位图数字（原版数字贴图渲染）
+   * ============================================================ */
   const NUM_SHEET = 'images/num_28.png', NUM_W = 26, NUM_H = 23;
   const NUM_KEYS = '0123456789%×';
   const numImage = new Image(); numImage.src = NUM_SHEET;
@@ -152,6 +173,9 @@
     renderNumbers(host);
   }
   // Original atlases alternate a colour row and a grey row. Item IDs retain gaps.
+  /* ============================================================
+   * 【UC3】图标与属性 HTML
+   * ============================================================ */
   function atlasIcon(kind, id, locked, trueForm) {
     // 真·武器用的是素材库里的另一套图：images/classic/icons/weapon-true-<id>.png
     if (kind === 'weapon' && trueForm) return 'images/classic/icons/weapon-true-' + id + (locked ? '-locked' : '') + '.png';
@@ -254,6 +278,9 @@
     if (bodies.length) bodies[bodies.length-1].insertAdjacentHTML('beforeend',html);
     else modal('战斗拾取',html,[{label:'确定'}],{small:true});
   }
+  /* ============================================================
+   * 【UC4】页面骨架：tabs / page / modal / notice / toast
+   * ============================================================ */
   function home() { Main.showHome(); }
   function tabs(group, active) {
     const sets = {
@@ -346,6 +373,9 @@
    * 还带全角日期（2026/10/2 15:20:09），在 755px 的弹窗里必然溢出屏幕。
    * 现在改成一列紧凑的可滚动行：等级徽章 + 名字 + 简短时间 + 一个「载入」按钮。
    * ============================================================ */
+  /* ============================================================
+   * 【UC5】存档列表弹窗
+   * ============================================================ */
   function ssdzSizeText(n) {
     const v = Number(n) || 0;
     return v >= 1048576 ? (v / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(v / 1024)) + ' KB';
@@ -394,10 +424,13 @@
     return m;
   }
 
+  /* ============================================================
+   * 【UC6】主界面首页（canvas 渲染 + 松鼠画像）
+   * ============================================================ */
   function renderHome() {
     screen = 'home'; activePortrait = null;
     const S = State.state();
-    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label" role="img" aria-label="经验" title="经验">' + spr('draw', 15, 'home-exp-art') + '</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/classic/home/activity.png">' + '</button><button class="picture-button" data-action="chat">' + '<img alt="" src="images/classic/home/chat.png">' + '<span>聊天</span></button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/classic/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
+    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label" role="img" aria-label="经验" title="经验">' + spr('draw', 15, 'home-exp-art') + '</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/classic/home/activity.png">' + '</button><button class="picture-button" data-action="chat" aria-label="聊天">' + '<img alt="" src="images/classic/home/chat.png">' + '</button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/classic/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
     bind($('.classic-home'),actions);buffSignature='';
     refreshHome();
     renderNumbers();
@@ -517,6 +550,9 @@
     return [{id:'bag',x:22,y:559,w:200,h:114},{id:'status',x:237,y:559,w:200,h:114},{id:'challenge',x:453,y:559,w:276,h:114},{id:'messages',x:746,y:559,w:200,h:114},{id:'system',x:961,y:559,w:200,h:114}];
   }
   function portrait(c,options){activePortrait={canvas:c,options:options||{useHeroWears:true}};}
+  /* ============================================================
+   * 【UC7】状态页与图鉴
+   * ============================================================ */
   function openStatus() {
     const S=State.state(),st=State.totalStats(),fights=S.dailyWins+S.dailyFails;
     const p=page('status','status','<canvas class="status-character" width="497" height="341" aria-label="我的松鼠"></canvas><div class="status-right"><div class="status-exp"><span class="home-exp-label">Exp</span><div class="exp-meter"><i style="width:'+Math.min(100,100*S.exp/GData.nextExp(S.level))+'%"></i><span>'+S.exp+'/'+GData.nextExp(S.level)+'</span></div></div><dl class="status-lines"><dt>今日胜率：</dt><dd>'+(fights?Math.round(S.dailyWins/fights*100):0)+'%</dd><dt>战斗场次：</dt><dd>'+(S.allWins+S.allFails)+'</dd></dl><div class="status-buttons">'+btn('更换装备','gears','gold',true)+btn('装备融合','merge','gold')+'</div></div>'+statsHtml(st));
@@ -564,6 +600,9 @@
       const r=State.doUpgrade(kind,id);toast(r.msg);openCatalog(kind,catalogPage);openItem(kind,id);
     }},{label:'返回',cls:'muted'}]);
   }
+  /* ============================================================
+   * 【UC8】挑战（PVP vs AI）
+   * ============================================================ */
   function genOpponents() {
     const S=State.state();
     // 三个对手在玩家等级附近浮动，并带随机装备；等级差与名字都随机
@@ -650,6 +689,9 @@
   const NPC_FILE={tl:'mantis',xh:'crane',xm:'panda'};
   /** 关卡结算里的升级奖励：与首页共用的 upgradeReward 同款样式，
    *  但这里自带一份最小实现，方便测试只注入本段代码时也能跑。 */
+  /* ============================================================
+   * 【UC9】关卡（含挑战塔/无尽塔入口）
+   * ============================================================ */
   function stageUpsHtml(ups) {
     if (!ups || !ups.length) return '';
     return '<div class="reward-stack">' + ups.map(function (u) {
@@ -770,6 +812,9 @@
     const gemDrop=rw.gem?'<p>获得'+esc(rw.gem.name)+' ×1</p>':'';
     modal('关卡战果','<div class="result-box"><div class="result-title '+(rw.win?'win':'lose')+'">'+(rw.win?'胜 利！':'再接再厉')+'</div>'+reward+'<p>'+esc(message)+'</p>'+drop+gemDrop+stageUpsHtml(rw.ups)+'</div>',buttons);
   }
+  /* ============================================================
+   * 【UC10】背包与道具（含出售/果实三选一）
+   * ============================================================ */
   function openBag(shop,pg) {
     const exchange=shop==='exchange',mode=shop;shop=shop===true;bagPage=pg||0;
     const S=State.state(),items=[];
@@ -955,6 +1000,9 @@
   }
   /* 天使果实 / 恶魔果实：随机三选一（天使=学会一个，恶魔=遗忘一个）。
    * 候选由 State.fruitOptions 抽好，这里只负责展示与回传选择。 */
+  /* ============================================================
+   * 【UC11】果实三选一 / 属性分配 / 升级选择
+   * ============================================================ */
   function fruitChoiceDialog(r) {
     const isGain = r.mode === 'gain';
     const card = (c, i) => '<button type="button" class="ws-choice" data-fruit-pick="' + i + '">' +
@@ -1091,6 +1139,9 @@
     if(typeof State.pendingWS==='function'&&State.pendingWS()>0)return wsChoiceDialog();
     return promptFreePoints();
   }
+  /* ============================================================
+   * 【UC12】装备：列表/详情/出售/镶嵌/融合入口
+   * ============================================================ */
   function gearImg(g) {
     return '<img alt="" src="images/classic/icons/gear-'+g.id+'.png">';
   }
@@ -1186,7 +1237,7 @@
     }
     /* 星标：防止手滑把好装备卖掉/合掉（融合与出售都会跳过星标装备）。 */
     const starred = State.isGearStarred(g);
-    buttons.push({label: starred ? '取消星标' : '加星标（防误合/误卖）', cls: starred ? 'gold' : 'muted',
+    buttons.push({label: starred ? '取消星标' : '星标', cls: starred ? 'gold' : 'muted',
       run:()=>{const r=State.toggleGearStar(key);toast(r.msg);openGear(key);}});
     if(!starred){
       buttons.push({label:'出售',cls:'muted',run:()=>notice('确定以 '+(State.gearSellRange(State.gearQuality(g))[0])+'~'+(State.gearSellRange(State.gearQuality(g))[1])+' 金松果出售【'+g.name+'】吗？',[{label:'出售',run:()=>{const got=State.sellGear(key);toast('卖出【'+g.name+'】，获得 '+got+' 金松果');openGears(gearPage);}},{label:'返回',cls:'muted'}])});
@@ -1211,6 +1262,9 @@
    * 复仇页与「再次挑战」按钮都读这一份名单，避免两处口径不一致。 */
   const REVENGE_EXCLUDED_KINDS = ['tower', 'endless', 'stage'];
   /** 这条记录能不能复仇（败绩 + 不在排除名单里，复仇再失败也不算新的败绩）。 */
+  /* ============================================================
+   * 【UC13】消息 / 复仇 / 好友 / 聊天
+   * ============================================================ */
   function canRevenge(r) {
     return !!r && r.winner !== 0 && r.kind !== 'revenge' && REVENGE_EXCLUDED_KINDS.indexOf(r.kind) < 0;
   }
@@ -1315,6 +1369,9 @@
   function openChat() {
     page('message','chat','<div class="empty-state">好友聊天 · 留言板<br><span class="small-label">这里会显示你和好友的聊天消息，留言板也已并入这一页。<br>本地怀旧版暂不连接公共聊天与留言服务，敬请期待。<br>好友间的切磋与战绩可在「好友」里查看，战斗录像在「消息」中。</span></div>');
   }
+  /* ============================================================
+   * 【UC14】每日（礼包/任务）与存档面板
+   * ============================================================ */
   function openDaily() {
     const d = State.dailyStatus();
     const quests = State.questStatus();
@@ -1381,6 +1438,9 @@
    *  input[type=file]：游离节点上的 .click() 会静默无反应，看起来就是
    *  「载入存档文件点不动、选不了文件」。所以这里把 input 放进 body 再点，
    *  并且复用同一个节点（避免反复插入）。 */
+  /* ============================================================
+   * 【UC15】存档导入（JSON 文件）
+   * ============================================================ */
   function pickJsonFile() {
     return new Promise((resolve) => {
       let input = $('#ssdz-file-picker');
@@ -1525,6 +1585,9 @@
   const SYNC_API = 'http://127.0.0.1:8788';
   const syncState = { checked: false, ok: false, info: null, reason: '', busy: false, job: null, result: null, timer: 0 };
 
+  /* ============================================================
+   * 【UC16】云同步（上传/下载/进度）
+   * ============================================================ */
   async function syncFetch(pathname, opts) {
     opts = opts || {};
     const ctl = typeof AbortController === 'function' ? new AbortController() : null;
@@ -1696,6 +1759,9 @@
     if (screen === 'system') { openSystem(); } else { paintSyncProgress(); }
     toast(syncState.result.ok ? '同步成功' : (syncState.result.skipped ? '已跳过（对面更新）' : '同步失败，看面板提示'));
   }
+  /* ============================================================
+   * 【UC17】系统设置 / 村庄 / 攻略
+   * ============================================================ */
   function openSystem() {
     const mute=Main.isMuted&&Main.isMuted();
     const vol=Math.round(100*((Main.volume&&Main.volume())||0));
@@ -1874,6 +1940,9 @@
     $$('[data-guide]', p).forEach((b) => b.onclick = () => openGuideItem(+b.dataset.guide));
     return p;
   }
+  /* ============================================================
+   * 【UC18】兜底分发与导出 UI.classic
+   * ============================================================ */
   function fallback(key){if(window.ClassicExtras && window.ClassicExtras[key])window.ClassicExtras[key]();else legacy.runAction(key);}
   const actions={home,exchange:()=>openBag('exchange'),status:openStatus,weapons:()=>openCatalog('weapon'),skills:()=>openCatalog('skill'),challenge:()=>openChallenge(),battle:()=>openChallenge(),stages:openStages,bag:()=>openBag(),shop:()=>openBag(true),gears:()=>openGears(),messages:()=>openMessages(),ranklog:()=>openMessages('ranklog'),revenge:()=>openMessages('revenge'),board:openBoard,chat:openChat,'gear-sell':()=>openGearSell(0),friends:openFriends,daily:openDaily,system:openSystem,village:openVillage,help:openHelp,arena:()=>fallback('arena'),rank:()=>fallback('rank'),lottery:()=>fallback('lottery'),master:()=>fallback('master'),toplist:()=>fallback('toplist'),vip:()=>fallback('vip')};
   function runAction(key){if(actions[key])actions[key]();}

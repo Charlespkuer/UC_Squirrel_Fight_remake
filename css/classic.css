@@ -16,8 +16,16 @@ button,input,select{font:inherit}button{touch-action:manipulation}button:focus-v
 .uc-button.muted,.uc-button:disabled{background:linear-gradient(#fffef1,#ede9d4 45%,#c7c5b9);box-shadow:inset 0 3px white,inset 0 -2px #9c9b8a;cursor:default;filter:none;color:#fcfcf6}
 .uc-button.small{font-size:28px;min-height:47px;padding:5px 22px;border-width:2px;-webkit-text-stroke:1.2px #5d3f21}
 .uc-button.tiny{font-size:23px;min-height:37px;padding:3px 16px;border-width:2px;letter-spacing:0;-webkit-text-stroke:1px #5d3f21}
-/* 翻页圆钮（‹ ›）的字形墨迹相对按钮中心偏下（52px 按钮，line-height:1 也无效）；用 box-sizing:border-box 下的 padding-bottom 把内容盒上移，箭头才真正居中。 */
-.uc-button.arrow{padding:0 0 23%;width:52px;height:52px;min-height:0;box-sizing:border-box;font-family:Arial,sans-serif;font-size:48px;line-height:1;border-radius:50%;letter-spacing:0;display:inline-flex;align-items:center;justify-content:center}
+/* 翻页圆钮：箭头是 CSS 边框画的人字形（.chev），上下左右几何对称，天然居中——
+   不再用 ‹ › 字体字形（其墨迹中心依字体/平台漂移，padding 补偿不可靠）。
+   光学微调用相对定位 left（flex 居中的是未旋转的方盒，left 在屏幕坐标里平移）。 */
+.uc-button.arrow{padding:0;width:52px;height:52px;min-height:0;box-sizing:border-box;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
+.uc-button .chev{--chev-size:24px;--chev-w:7px;display:block;position:relative;
+  width:var(--chev-size);height:var(--chev-size);box-sizing:border-box;border:0 solid currentColor}
+/* left 按几何居中公式 (s−w)/(2√2) 取整：人字形墨迹范围是 [−s/√2, +w/√2]，
+   平移这么多才能让包围盒真正居中（探针截图逐像素验证，见 tools/arrow-center-probe.html）。 */
+.uc-button .chev-l{border-left-width:var(--chev-w);border-bottom-width:var(--chev-w);transform:rotate(45deg);left:var(--chev-l,6px)}
+.uc-button .chev-r{border-top-width:var(--chev-w);border-right-width:var(--chev-w);transform:rotate(45deg);left:calc(0px - var(--chev-r,6px))}
 /* 顶部状态栏：昵称与体力按参考图做成「深色内嵌槽」——外层金条 +
    内层深棕渐变 + 白色内描边，形成二重深色背景。 */
 .home-status{position:absolute;top:12px;left:17px;right:17px;height:91px;border:4px solid #94713a;border-radius:49px;background:linear-gradient(#fff7b2,#ffdf75 47%,#f8b72d);box-shadow:inset 0 4px 0 #ffffcd,0 3px 1px #f8fff2;display:flex;align-items:center;padding:0 36px;gap:20px}
@@ -217,9 +225,11 @@ button,input,select{font:inherit}button{touch-action:manipulation}button:focus-v
 #ui:has(.classic-page) .classic-home{visibility:hidden}
 .item-icon:has(.reference-art){border:0;background:transparent;box-shadow:none;border-radius:0;overflow:visible}
 .item-icon>.reference-art{width:100%;height:100%}
-.village-door{background:none;border:0;box-shadow:none;width:130px;height:130px;right:30px;bottom:150px}
+.village-door{background:none;border:0;box-shadow:none;width:110px;height:110px;right:40px;bottom:160px}
 .village-door:before,.village-door:after{display:none}.village-door img{width:100%;height:100%;object-fit:contain}
 .home-side [data-action="daily"] img{width:95px;height:100px}.home-side{gap:18px}
+/* 两个图标并排在同一列里，盒子尺寸要一致才不显得一胖一瘦（chat 原来是 78×76 的基础值）。 */
+.home-side [data-action="chat"] img{width:95px;height:100px}
 /* 原版位图数字块（num_28：26×23/字）：canvas 按设计尺寸逐字绘制，再由 #ui 的
    --uiscale 统一缩放。宽度由 --w（renderNumbers 按字数与拉伸比算出）决定，
    canvas 绝对定位填满，避免 canvas 固有尺寸参与布局把格子撑宽。

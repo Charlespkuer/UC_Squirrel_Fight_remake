@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<base href="/">
+<!-- 本轮 UI 改动验证探针（开发用，不属于游戏本体）。
+     用法：node scripts/serve.js --no-save 8199
+           打开 http://127.0.0.1:8199/tools/ui-verify-probe.html
+     可选 ?shot=fusepage|fusesuccess|fusesell|geardetail 停在该画面便于截图。
+     诊断 JSON 塞进隐藏的 <pre id="probe-json">，可用 headless Chrome --dump-dom 抓取。
+     始终使用 QA 隔离存档，不读写正式存档。 -->
+<script>
+(function () {
+  const url = new URL(location.href);
+  url.searchParams.set('qa', '1');
+  url.searchParams.delete('test');
+  history.replaceState(null, '', url.href);
+})();
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UI 改动验证探针（开发用）</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/classic.css">
+<link rel="stylesheet" href="css/classic-extras.css">
+<link rel="stylesheet" href="css/classic-fusion.css">
+<link rel="stylesheet" href="css/debug.css">
+<link rel="stylesheet" href="css/battle-drops.css">
+<link rel="stylesheet" href="css/classic-refine.css">
+<link rel="stylesheet" href="css/tower.css">
+<script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push((e.message || '') + ' @ ' + (e.filename || '') + ':' + (e.lineno || 0)); });
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('Promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)); });
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="ui"></div>
+  <div id="boot-note">初始化…</div>
+</div>
+<script src="references/orig/Map.min.js"></script>
+<script src="references/orig/GameDict.js"></script>
+<script src="references/orig/animationStr.js"></script>
+<script src="references/orig/assets.js"></script>
+<script src="references/orig/asset2.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/gamedata.js"></script>
+<script src="js/tower-data.js"></script>
+<script src="js/state.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/tower.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/battle-drops.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/classic-ui.js"></script>
+<script src="js/classic-extras.js"></script>
+<script src="js/classic-fusion.js"></script>
+<script src="js/tower-ui.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+<script>
+window.__PROBE = { steps: [] };
+const P = window.__PROBE;
+const q = new URLSearchParams(location.search);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const $$ = (sel) => [...document.querySelectorAll(sel)];
+const text = (el) => (el ? (el.textContent || '').replace(/\s+/g, ' ').trim() : null);
+const flush = (ms) => new Promise((r) => setTimeout(r, ms || 260));
+const rect = (sel) => { const el = document.querySelector(sel); if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }; };
+
+/* 人字形箭头的几何中心 vs 按钮盒子中心（CSS 边框人字形应当几何居中） */
+function chevCenter(btn) {
+  const b = btn.getBoundingClientRect();
+  const chev = btn.querySelector('.chev');
+  if (!chev) return null;
+  const c = chev.getBoundingClientRect();
+  return { dx: +(c.left + c.width / 2 - (b.left + b.width / 2)).toFixed(2),
+    dy: +(c.top + c.height / 2 - (b.top + b.height / 2)).toFixed(2),
+    chevBox: { w: Math.round(c.width), h: Math.round(c.height) } };
+}
+
+async function main() {
+  for (let i = 0; i < 200 && !document.querySelector('#start-btn'); i++) await sleep(100);
+  if (!document.querySelector('#start-btn')) { P.fatal = '标题页未出现'; return; }
+  document.querySelector('#start-btn').click();
+  for (let i = 0; i < 60 && document.querySelector('.title-screen'); i++) await sleep(100);
+  await flush(400);
+  const S = State.state();
+  if (!S) { P.fatal = '存档未就绪'; return; }
+
+  const shot = q.get('shot') || 'fusepage';
+  Object.assign(S, { level: 60, goldPoint: 999999 });
+  S.weapons = ['15:9', '6:5'];
+  S.skills = ['12:1', '18:1', '23:1'];
+  S.props = { 22: 999, 21: 999 };
+
+  /* ---------- 融合页：分页人字形箭头（第 1 项） ---------- */
+  if (shot === 'fusepage' || shot === 'fusesuccess' || shot === 'fusesell') {
+    S.gears = [];
+    // 9 件同部位（头）白装：一页 6 件，必然翻页；前 3 件可当材料
+    for (let i = 0; i < 9; i++) State.addGear(State.gearIdsOf(0, 0)[i % State.gearIdsOf(0, 0).length], []);
+    State.save();
+    ClassicFusion.open();
+    await flush(340);
+    P.paginationExists = !!document.querySelector('.fusion-pagination');
+    P.chevCount = $$('.fusion-pagination .chev').length;
+    // 翻到第 2 页让两个箭头都可用，再量中心
+    const nxt = document.querySelector('.fusion-pagination [data-fusion-action="next"]');
+    if (nxt) { nxt.click(); await flush(300); }
+    P.pageLabel = text(document.querySelector('.fusion-pagination span'));
+    P.chevCenters = $$('.fusion-pagination .uc-button').map(chevCenter);
+    P.prevDisabled = document.querySelector('.fusion-pagination [data-fusion-action="previous"]').disabled;
+    P.nextDisabled = document.querySelector('.fusion-pagination [data-fusion-action="next"]').disabled;
+  }
+
+  /* ---------- 融合成功弹窗：卖出按钮（第 3 项） ---------- */
+  if (shot === 'fusesuccess' || shot === 'fusesell') {
+    // 选前 3 张卡（同部位同品质，必然可融合）
+    const cards = $$('.fusion-gear:not([disabled])');
+    P.selectableCards = cards.length;
+    for (let i = 0; i < 3 && i < cards.length; i++) { cards[i].click(); await flush(200); }
+    const fuseBtn = document.querySelector('[data-fusion-action="fuse"]');
+    P.fuseEnabled = fuseBtn && !fuseBtn.disabled;
+    const gearsBefore = State.myGears().length;
+    const goldBefore = State.state().goldPoint;
+    if (fuseBtn) fuseBtn.click();
+    await flush(360);
+    const overlayOf = () => $$('.classic-modal-overlay').pop();
+    const inLast = (sel) => { const o = overlayOf(); return o ? [...o.querySelectorAll(sel)] : []; };
+    const modal = overlayOf();
+    P.successTitle = text(modal && modal.querySelector('.modal-title'));
+    P.successButtons = inLast('.modal-buttons button').map((b) => b.textContent.trim());
+    P.successBtnRects = inLast('.modal-buttons button').map((b) => {
+      const r = b.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; });
+    P.newGearCount = State.myGears().length - gearsBefore + 3;   // 净变化 + 消耗的 3 件
+    if (shot === 'fusesuccess') { P.done = true; P.errors = window.__errs.slice(); return; }
+    // fusesell：真的点「卖出」→ 确认框 → 卖出，验证整条链路
+    const sellBtn = inLast('.modal-buttons button').find((b) => /卖出/.test(b.textContent));
+    if (sellBtn) sellBtn.click();
+    await flush(320);
+    P.overlayCountAfterSell = $$('.classic-modal-overlay').length;
+    const confirmModal = overlayOf();
+    P.confirmTitle = text(confirmModal && confirmModal.querySelector('.modal-title'));
+    P.confirmText = text(confirmModal && confirmModal.querySelector('.modal-body'));
+    const okBtn = inLast('.modal-buttons button').find((b) => b.textContent.trim() === '卖出');
+    const before2 = State.myGears().length;
+    if (okBtn) okBtn.click();
+    await flush(320);
+    P.sellResult = { removed: State.myGears().length === before2 - 1,
+      goldDelta: State.state().goldPoint - (goldBefore - 50),
+      modalClosed: !$$('.classic-modal-overlay').length };
+    P.done = true; P.errors = window.__errs.slice(); return;
+  }
+  if (shot === 'fusepage') { P.done = true; P.errors = window.__errs.slice(); return; }
+
+  /* ---------- 装备详情弹窗：传说装 5 按钮不溢出（第 2 项） ---------- */
+  if (shot === 'geardetail') {
+    S.gears = [];
+    // 一件传说（橙）头巾：不镶嵌、不星标 → 详情应有 5 个按钮（最坏情况）
+    const ids = State.gearIdsOf(0, 3);
+    const made = State.addGear(ids[0], [{ id: 1, level: 3 }, { id: 5, level: 2 }]);
+    const inst = S.gears.find((x) => x.key === made.key);
+    inst.orange = true;
+    State.save();
+    UI.runAction('gears');
+    await flush(340);
+    const cell = document.querySelector('[data-gear="' + made.key + '"]') || document.querySelector('[data-gear]');
+    if (cell) cell.click();
+    await flush(340);
+    P.overlayCount = $$('.classic-modal-overlay').length;
+    const overlay = $$('.classic-modal-overlay').pop();
+    const box = overlay && overlay.querySelector('.classic-modal');
+    const inOverlay = (sel) => (overlay ? [...overlay.querySelectorAll(sel)] : []);
+    P.detailButtons = inOverlay('.modal-buttons button').map((b) => b.textContent.trim());
+    P.detailBtnRects = inOverlay('.modal-buttons button').map((b) => {
+      const r = b.getBoundingClientRect(); return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }; });
+    const mRect = box && box.getBoundingClientRect();
+    const btnRow = overlay && overlay.querySelector('.modal-buttons');
+    const rRect = btnRow && btnRow.getBoundingClientRect();
+    P.modalBox = mRect ? { w: Math.round(mRect.width), h: Math.round(mRect.height) } : null;
+    P.buttonsRow = rRect ? { w: Math.round(rRect.width), h: Math.round(rRect.height), rows: new Set(P.detailBtnRects.map((b) => b.y)).size } : null;
+    P.btnFont = btnRow ? getComputedStyle(btnRow.querySelector('button')).fontSize : null;
+    P.btnMinWidth = btnRow ? getComputedStyle(btnRow.querySelector('button')).minWidth : null;
+    P.overflow = mRect && rRect ? (rRect.right > mRect.right + 1 || rRect.bottom > mRect.bottom + 1) : null;
+    P.done = true; P.errors = window.__errs.slice(); return;
+  }
+
+  P.done = true;
+  P.errors = window.__errs.slice();
+}
+function dump() {
+  const pre = document.createElement('pre');
+  pre.id = 'probe-json';
+  pre.style.cssText = 'position:fixed;left:-99999px;top:0;';
+  pre.textContent = JSON.stringify(P);
+  document.body.appendChild(pre);
+}
+main().then(dump).catch((e) => { P.fatal = String(e && e.stack || e); dump(); });
+</script>
+</body>
+</html>

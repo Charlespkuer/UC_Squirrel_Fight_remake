@@ -88,7 +88,8 @@
 .fusion-count{font-size:19px;color:#a18151}
 .fusion-inventory-heading>.uc-button{font-size:20px;min-height:32px;padding:2px 14px}
 .fusion-pagination{display:flex;align-items:center;gap:10px;font-size:21px;justify-content:flex-end;min-width:150px}
-.fusion-pagination .uc-button{min-height:31px;height:31px;width:34px;padding:0;font:29px/1 Georgia,serif;letter-spacing:0}
+.fusion-pagination .uc-button{min-height:31px;height:31px;width:34px;padding:0}
+.fusion-pagination .uc-button .chev{--chev-size:11px;--chev-w:4px;--chev-l:2.5px;--chev-r:2.5px;filter:drop-shadow(0 1px 0 #6a4a2a)}
 .fusion-pagination>span{min-width:56px;text-align:center;color:#8c612e}
 
 .fusion-inventory{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(6,1fr);gap:10px;align-content:start;
@@ -115,6 +116,15 @@
 .fusion-gear:disabled .fusion-card-state{background:#e2dbcbeb;color:#7b6d55}
 .fusion-empty{grid-column:1/-1;align-self:center;text-align:center;font-size:25px;line-height:1.6;color:#9b835b}
 .fusion-empty span{font-size:21px}
+
+/* 星标装备在融合页的呈现：星标 = 「别把我合掉」的保护标记，所以卡片直接置灰禁用，
+ * 右上角挂 ★，状态栏写明「已加星标」，材料区顶上也给一句总数。
+ * 注意 .fusion-frame 是 overflow:hidden，★ 必须挂在 frame 外面（.fusion-gear 是
+ * position:relative），否则会被裁掉。 */
+.fusion-starred-note{font-size:19px;color:#b8860b;white-space:nowrap}
+.fusion-gear .gear-star{left:auto;right:3px;top:3px;font-size:22px}
+.fusion-gear.starred .fusion-frame{border-color:#ffd323}
+.fusion-gear.starred .fusion-card-state{background:#f7ecc9f2;color:#a8842a}
 
 /* ---------- 状态条 ---------- */
 .fusion-status{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:9px;margin:0 auto;

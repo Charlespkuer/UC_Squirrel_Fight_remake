@@ -33,7 +33,12 @@ const SCAN_EXT = ['.html', '.css', '.js', '.json'];
 // 以及 Tauri 的暂存目录（src-tauri/web 是 build-tauri-web.cjs 复制出来的构建产物，
 // 其中 references/orig 本来就带一批「引用了但原版没打包」的路径，不该算发布断链）
 // 按「路径结尾」判断，不写死 tools/ 在第几层（放哪都能用）
-const SKIP_DIRS = new Set(['node_modules', '.git', 'references/orig', 'src-tauri', 'apk-audit', 'research/original']);
+/* 跳过不参与发布的目录：
+ *   · references/orig / **js/orig** —— 原版归档源码。它们引用的都是**原版客户端自己的**
+ *     路径（js/orig/index.js 里的 js/Matrix2D.js、FightStats.js 里的 images/fightBg_seaWorld_*.png …），
+ *     本来就没随本仓库发布，算「发布断链」是误报 —— 这也是 CI 之前整条挂掉的根因；
+ *   · src-tauri / apk-audit / research/original / out —— 构建产物与本地取证/超分产物。 */
+const SKIP_DIRS = new Set(['node_modules', '.git', 'references/orig', 'js/orig', 'src-tauri', 'apk-audit', 'research/original', 'out']);
 const ROOTS = 'images|css|js|audio|music|fonts|assets';
 // 引号/括号里的资源路径：以四个已知资源目录开头，允许中文与常见符号
 const REF_RE = new RegExp('["\'(`]((?:' + ROOTS + ')/[A-Za-z0-9_@%\\-./\\u4e00-\\u9fa5]*)', 'g');

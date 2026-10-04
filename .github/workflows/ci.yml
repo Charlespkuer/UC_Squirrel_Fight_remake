@@ -33,7 +33,7 @@ jobs:
       - name: 单元与集成测试
         shell: bash
         run: |
-          for t in test-state test-balance test-points test-combat-rules test-battle-drops \
+          for t in test-state test-balance test-points test-combat-rules test-buff-tags test-battle-drops \
                    test-main-battle test-extras test-fusion test-stages test-stage-balance \
                    test-sync; do
             echo "──── $t ────"

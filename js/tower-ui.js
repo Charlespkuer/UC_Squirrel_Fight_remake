@@ -434,7 +434,9 @@
    * 【U5】入口图鉴与塔身可视化 —— buffCatalogHtml / towerVisual / planHtml
    * ============================================================ */
   function buffCatalogHtml() {
-    const list = TowerData.BUFFS.filter((b) => !b.endlessOnly || b.kind !== 'instant');
+    /* 增益集锦 = **无尽塔的全增益展示**：只列带无尽塔标签的条目，
+     * 挑战塔专属（tower-only）一条都不出现；hidden 的（选取型强化）也不列。 */
+    const list = TowerData.BUFFS.filter((b) => TowerData.hasTag(b, 'endless') && !TowerData.hasTag(b, 'hidden'));
     const byRarity = [0, 1, 2, 3].map((r) => list.filter((b) => b.rarity === r));
     const kindName = { limited: '限次', permanent: '永久', instant: '即时' };
     return '<div class="tower-buffs buff-catalog"><h4>增益集锦 <span class="buff-slot-count">共 ' + list.length + ' 种 · 悬停看效果</span></h4>' +

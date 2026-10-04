@@ -815,8 +815,10 @@
     // 卖出只在背包的「一级界面」（右侧道具栏，紧挨着 使用/合成）出现：
     // 商店页不给卖，点开「使用」后的二级弹窗里也没有卖出。
     const mainLabel=shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看';
-    const bagActions=it?'<div class="bag-actions">'+btn(mainLabel,'prop-action','small gold')+
-      (sellPrice&&(S.props[it.id]||0)>0?btn('卖出','prop-sell','small'):'')+'</div>':'';
+    /* 按钮顺序（需求）：**卖出在左、使用/合成在右** —— 主操作仍然是最醒目的金色按钮。 */
+    const bagActions=it?'<div class="bag-actions">'+
+      (sellPrice&&(S.props[it.id]||0)>0?btn('卖出','prop-sell','small'):'')+
+      btn(mainLabel,'prop-action','small gold')+'</div>':'';
     const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个'+(sellPrice?'　可回收 '+sellPrice+' 金松果/个':''))+'</div>'+bagActions:'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
     const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
     const bagFooter=shop?{left:btn('每日抽奖','lottery','gold entry-pill'),right:btn('金杯商店','rank-shop','gold entry-pill')}:{};

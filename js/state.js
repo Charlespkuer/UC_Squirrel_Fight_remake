@@ -2111,11 +2111,17 @@
    * 封顶后同级一场 33 点、最大等级差（+3）约 47 点，也就是 4.7 点体力，
    * 略低于经验竞技场的 150/30 = 5.0（竞技场仍是最快的经验来源）。
    * nextExp 每级涨得比这里快，所以每升一级需要的场次仍然越来越多。 */
-  const CHALLENGE_EXP_BASE = 20;
-  const CHALLENGE_EXP_PER_LEVEL = 0.65;
+  /* 随机挑战经验（2026-10 下调）：同级收益整体降低，等级差带来的增幅也大幅收窄。
+   *   1) 同级基准：20 + 等级×0.65 → **16 + 等级×0.55**（20 级：33 → 27，−18%；1 级：21 → 17）
+   *   2) 等级差：线性 +14%/级、压实指数 0.88 → **+9%/级、压实 0.78**
+   *      同样越 3 级：倍率 1.36 → 1.22（经验 45 → 33，−27%），越级不再「滚雪球」。
+   * 竞技场（冠军 150／30 体力）保持不变 —— 它是 4 人两轮、要赢才拿满，
+   * 单位体力的**期望**仍与随机挑战同档；这轮只动随机挑战这一侧。 */
+  const CHALLENGE_EXP_BASE = 16;
+  const CHALLENGE_EXP_PER_LEVEL = 0.55;
   const CHALLENGE_EXP_CAP_LEVEL = 20;
-  const EXP_DIFF_STEP = 0.14;           // 每高 1 级 +14%（先算线性倍率，再压实）
-  const EXP_DIFF_TIGHTEN = 0.88;
+  const EXP_DIFF_STEP = 0.09;           // 每高 1 级 +9%（先算线性倍率，再压实）
+  const EXP_DIFF_TIGHTEN = 0.78;
   const EXP_DIFF_FLOOR = 0.3;           // 对手低很多时的最低倍率
   const EXP_DIFF_CAP = 2.2;
   const ARENA_CHAMPION_EXP = 150;

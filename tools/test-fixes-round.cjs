@@ -996,7 +996,9 @@ test('需求21：挑战塔不再生成任何「只有无尽塔用得上」的增
    * 永久类因为删掉 C08、并把 C03（猎侠者）改成**无尽专属**（不再进挑战塔池），35 → 33。 */
   assert.equal(towerLimited.length, 24, '挑战塔的限次类应当是 24 条（本轮删了 7 条专属），实测 ' + towerLimited.length);
   assert.equal(towerLimited.filter((b) => b.towerOnly).length, 24, '其中 24 条是挑战塔专属（含 N/M/G/T 四系）');
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 33, '永久类也属于挑战塔池（共 33 条）');
+  /* 本轮「严格池子管理」：C36 挥金如土挂在试炼商店消费上 → 改成无尽塔专属，
+   * 永久类 33 → 32。 */
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 32, '永久类也属于挑战塔池（共 32 条）');
   assert.equal(TD.towerPool.filter((b) => b.kind === 'instant').length, 0, '即时类不进选择池');
   // 无尽池不该混入挑战塔专属（它们按「一场定胜负」设计）
   assert.equal(TD.endlessPool.filter((b) => b.towerOnly).length, 0, '无尽选择池不该有挑战塔专属');
@@ -1026,7 +1028,7 @@ test('需求22：压实随机挑战的经验等级差，同级经验不变', () 
     assert.equal(S.challengeExp(lv, lv), Math.round(S.CHALLENGE_EXP_BASE + Math.min(lv, S.CHALLENGE_EXP_CAP_LEVEL) * S.CHALLENGE_EXP_PER_LEVEL),
       lv + ' 级同级经验应当不变');
   }
-  assert.equal(S.challengeExp(20, 20), 33, '20 级同级应当是 33 点');
+  assert.equal(S.challengeExp(20, 20), 27, '20 级同级应当是 27 点（本轮下调后）');
 
   // 2) 等级差的影响被压紧：同样差 3 级，现在必须比「线性未压实」更贴近同级
   const linear = (d, lv) => {
@@ -1034,18 +1036,28 @@ test('需求22：压实随机挑战的经验等级差，同级经验不变', () 
     const m = Math.max(0.3, Math.min(2.2, 1 + d * S.EXP_DIFF_STEP));
     return Math.round(base * m);
   };
+  /* 取整后 1 级的差可能刚好相同（29 vs 29），所以「严格更贴近 1」用未取整的倍率比，
+   * 取整后的值只要求 ≤ / ≥。 */
+  const raw = (d, lv) => {
+    const base = S.CHALLENGE_EXP_BASE + Math.min(lv, S.CHALLENGE_EXP_CAP_LEVEL) * S.CHALLENGE_EXP_PER_LEVEL;
+    const m = Math.max(0.3, Math.min(2.2, 1 + d * S.EXP_DIFF_STEP));
+    return base * Math.pow(m, S.EXP_DIFF_TIGHTEN);
+  };
   for (const d of [1, 2, 3]) {
-    assert.ok(S.challengeExp(20 + d, 20) < linear(d, 20),
-      '越级 ' + d + ' 级的经验应当比未压实时更低：' + S.challengeExp(20 + d, 20) + ' vs ' + linear(d, 20));
+    assert.ok(raw(d, 20) < linear(d, 20), '越级 ' + d + ' 级压实后应当更贴近同级（未取整）');
+    assert.ok(S.challengeExp(20 + d, 20) <= linear(d, 20),
+      '越级 ' + d + ' 级的经验不该高于未压实：' + S.challengeExp(20 + d, 20) + ' vs ' + linear(d, 20));
   }
   for (const d of [-1, -2, -3]) {
-    assert.ok(S.challengeExp(20 + d, 20) > linear(d, 20),
-      '打低 ' + (-d) + ' 级的经验应当比未压实时更高（不吃亏）：' + S.challengeExp(20 + d, 20) + ' vs ' + linear(d, 20));
+    assert.ok(raw(d, 20) > linear(d, 20), '打低 ' + (-d) + ' 级压实后应当更高（未取整）');
+    assert.ok(S.challengeExp(20 + d, 20) >= linear(d, 20),
+      '打低 ' + (-d) + ' 级的经验不该低于未压实：' + S.challengeExp(20 + d, 20) + ' vs ' + linear(d, 20));
   }
   // 倍率随等级差单调，且仍然「越级更多、低级更少」
   let prev = 0;
+  const anchor20 = S.challengeExp(20, 20);
   for (const d of [-1, 0, 1, 2, 3]) {
-    const m = S.challengeExp(20 + d, 20) / 33;
+    const m = S.challengeExp(20 + d, 20) / anchor20;
     assert.ok(m > prev, '倍率应当随等级差单调上升：diff ' + d + ' = ' + m.toFixed(3));
     prev = m;
   }
@@ -1060,7 +1072,10 @@ test('需求22：压实随机挑战的经验等级差，同级经验不变', () 
   const arena = S.ARENA_EXP_PER_ENERGY;
   const capMax = S.challengeExp(20 + 3, 20) / 10;
   assert.ok(capMax < arena, '封顶最大等级差应低于竞技场：' + capMax.toFixed(2));
-  assert.ok(capMax > arena * 0.88, '不应低太多：' + capMax.toFixed(2));
+  /* 本轮把随机挑战整体下调（同级 33→27、越 3 级 45→33），竞技场（冠军 150／30 体力）
+   * 保持不动 —— 它是 4 人两轮、要赢才拿满，单位体力看**期望**仍与随机挑战同档。
+   * 所以这条验收线的下限从「不低于竞技场 88%」放宽到 60%（只挡住「挑战变得毫无意义」）。 */
+  assert.ok(capMax > arena * 0.6, '不应低太多：' + capMax.toFixed(2));
   for (let lv = 1; lv <= 60; lv++) {
     for (let d = -1; d <= 3; d++) {
       const eff = S.challengeExp(lv + d, lv) / 10;
@@ -1682,8 +1697,9 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
 
   // 6) 标记规范化：带无尽专属 mod 的条目必须同时显式标 endlessOnly（让数据自解释，
   //    不再只靠 roster 的计算兜住 —— 否则以后新增条目很容易又漏标。）
-  const unmarked = TD.BUFFS.filter((b) => !b.endlessOnly && hasEM(b)).map((b) => b.id);
-  assert.equal(unmarked.length, 0, '带无尽专属 mod 却没标 endlessOnly：' + JSON.stringify(unmarked));
+  /* 本轮改成标签驱动：这里直接看**标签**（旧字段 endlessOnly 只在校验时对账，不再写回）。 */
+  const unmarked = TD.BUFFS.filter((b) => TD.hasTag(b, 'tower') && hasEM(b)).map((b) => b.id);
+  assert.equal(unmarked.length, 0, '带无尽专属 mod 却仍标了挑战塔：' + JSON.stringify(unmarked));
   for (const id of ['C24', 'C25', 'C30', 'C31', 'C32', 'C33', 'C37', 'C45']) {
     assert.equal(TD.BUFF_BY_ID[id].endlessOnly, true, id + ' 应当标 endlessOnly');
   }
@@ -1698,7 +1714,7 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
   // 7) 挑战塔池的构成可解释
   assert.equal(TD.towerPool.length, byTag('T.choice').split(',').length, '池子大小要自洽');
   assert.equal(TD.towerPool.filter((b) => b.kind === 'limited').length, 24, '限次类 24 条（本轮删了 7 条专属）');
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 33, '永久类 33 条（删掉 C08、C03 改无尽专属）');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 32, '永久类 32 条（C36 改无尽专属后）');
 });
 
 test('需求32：池子分离的端到端实测（真跑两种塔的抽取，零交叉）', () => {

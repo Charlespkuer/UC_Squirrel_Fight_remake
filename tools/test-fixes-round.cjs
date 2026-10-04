@@ -765,16 +765,56 @@ test('需求15：E04「steam大促」一次性 7 折；E01「立即进货」战�
   assert.ok(!e01.mods.openShop, 'E01 不该再用「立刻开店」的旧口径');
 
   /* ---- E01 + E04 同时生效 → 合并成 3.5 折（−65%），不是简单相加 ----
+   * 合并发生在**开店那一刻**（makeShop），不是拿到 buff 的那一刻：
    * 注意 E04 一局只能拿一次（instant + maxStacks 1），所以这里直接把「E04 已生效、还没进店」
-   * 的状态摆好，再拿 E01 —— 这样测的是合并口径本身。 */
+   * 的状态摆好，再拿 E01，然后真打一场触发战后开店。 */
+  const fightOnce = (cc) => {
+    /* 场间选择会挡住下一场，测试里直接跳过（真实流程由界面点选）。 */
+    const rr0 = cc.Tower._debugRun('endless');
+    rr0.choices = null; rr0.phase = null;
+    const nx = cc.Tower.nextBattle('endless');
+    assert.ok(nx.ok, '应当能开战：' + nx.msg);
+    return cc.Tower.reportBattle('endless', nx.token, true, 0.8, null);
+  };
   const r4 = c.Tower._debugRun('endless');
-  r4.permanent = []; r4.limited = []; r4.postBattleShop = 0;
+  r4.permanent = []; r4.limited = []; r4.idx = 0; r4.phase = null;
   r4.shopDiscount = 1; r4.shopDiscountPct = 0.30;      // 模拟 steam大促 已挂上
   c.Tower.debugGrantBuff('E01');
   const rr = c.Tower._debugRun('endless');
-  assert.equal(rr.postBattleShop, 1, 'E01 应当挂上「战后开店」');
-  assert.ok(Math.abs(rr.shopDiscountPct - 0.65) < 1e-6,
-    'E01 + E04 叠加后应当是 −65%（3.5 折），实测 ' + rr.shopDiscountPct);
+  assert.equal('postBattleShop' in rr, false, 'E01 不再往 run 上写 postBattleShop 缓存');
+  fightOnce(c);
+  const shopA = c.Tower._debugRun('endless').shop;
+  assert.ok(shopA && shopA.discount === true, 'E01 开着时战后应当开店且带折扣');
+  assert.ok(Math.abs(shopA.discountPct - 0.65) < 1e-6,
+    'E01 + E04 叠加后应当是 −65%（3.5 折），实测 ' + shopA.discountPct);
+
+  /* ---- 回归：**把 E01 关掉之后不该再开店**（用户报的 bug）---- */
+  const r5 = c.Tower._debugRun('endless');
+  r5.shop = null; r5.phase = null; r5.shopDiscount = 0; r5.shopDiscountPct = 0;
+  r5.limited = [{ id: 'E01', stacks: 1, uses: 1, on: true }];
+  assert.ok(c.Tower.toggleLimited('E01', false).ok, '应当能把 E01 关掉');
+  fightOnce(c);
+  const afterOff = c.Tower._debugRun('endless');
+  assert.equal(afterOff.phase, null, '关掉 E01 之后不该再进商店：' + afterOff.phase);
+  assert.ok(!afterOff.shop, '关掉 E01 之后不该开店');
+  assert.equal(afterOff.limited.filter((b) => b.id === 'E01' && b.uses > 0).length, 1,
+    '关掉的限次不该被消耗（关掉不扣次数）');
+  /* 再打一场，仍然不该开店（原来每场都会开） */
+  fightOnce(c);
+  assert.ok(!c.Tower._debugRun('endless').shop, '关掉之后连着几场都不该开店');
+
+  /* ---- 关掉再打开 → 恢复生效，单用 5 折，且只开这一次 ---- */
+  const r6 = c.Tower._debugRun('endless');
+  r6.shop = null; r6.phase = null; r6.choices = null;
+  assert.ok(c.Tower.toggleLimited('E01', true).ok, '应当能重新打开 E01');
+  fightOnce(c);
+  const r7 = c.Tower._debugRun('endless');
+  assert.ok(r7.shop, '重新打开之后应当照常开店');
+  assert.ok(Math.abs(r7.shop.discountPct - 0.50) < 1e-6,
+    '单用 E01 应当是 5 折，实测 ' + r7.shop.discountPct);
+  r7.shop = null; r7.phase = null; r7.choices = null;
+  fightOnce(c);
+  assert.ok(!c.Tower._debugRun('endless').shop, 'E01 用完（限次 1）之后不该再开店');
 });
 
 test('需求16：烙印各自独立随机数；存在时半效、损毁后全额且本局永久', () => {

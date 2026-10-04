@@ -78,6 +78,9 @@
   /** 深校验一份读档出来的 run：坏档直接作废（不收费、不掉层）。 */
   function normalizeRun(run, mode) {
     if (!run || typeof run !== 'object') return null;
+    /* 旧档里存着 E01 的 run.postBattleShop 缓存：这套缓存已经废弃
+     *（改成按「当前开着的立即进货」现算），读到就清掉。 */
+    if ('postBattleShop' in run) delete run.postBattleShop;
     const layer = Math.floor(Number(run.layer));
     if (!Number.isFinite(layer) || layer < 1 || !Array.isArray(run.plan) || !run.plan.length) return null;
     /* 旧档 id 迁移：G/T 两组重排过序号（见 tower-data.js 的 LEGACY_BUFF_IDS）。
@@ -351,6 +354,20 @@
     const list = Array.isArray(run.buffLog) ? run.buffLog : (run.buffLog = []);
     list.push(Object.assign({ id: String(id), event: String(event), layer: Math.max(1, Number(run.layer) || 1) }, extra || {}));
     if (list.length > BUFF_LOG_MAX) list.splice(0, list.length - BUFF_LOG_MAX);
+  }
+  /** E01「立即进货」当前实际生效的折扣比例（0 = 没有生效的）。
+   *  **必须按「条目现在是不是开着」现算**：原来拿到时把效果写进 run.postBattleShop /
+   *  run.shopDiscount 缓存，玩家把 E01 关掉之后缓存还在 —— 于是关掉了照样每场结束进商店。
+   *  口径：开着的（on !== false）且没用完（uses > 0）的立即进货才作数。 */
+  function activeShopCredit(run) {
+    let pct = 0;
+    for (const e of run.limited || []) {
+      if (e.on === false || !(e.uses > 0)) continue;
+      const def = D().BUFF_BY_ID[e.id];
+      const m = def && def.mods;
+      if (m && m.postBattleShop) pct = Math.max(pct, Number(m.postBattleShopDiscount) || D().SHOP_DISCOUNT_E01);
+    }
+    return pct;
   }
   function consumeLimited(run) {
     for (const b of run.limited || []) {
@@ -1328,6 +1345,9 @@
      *   · 层号不变，所以不会触发跨层回血，也不会提前进下一层 */
     const echoP = (entry.kind === 'hero') ? echoRepeatChance(run) : 0;
     run.idx++;
+    /* E01 立即进货：要在**扣限次之前**取一次 —— 它的限次就消耗在这一场，
+     * 扣完条目会被移除，之后就算不出「本该开一次店」了。 */
+    const shopCreditPct = activeShopCredit(run);
     consumeLimited(run);
     const brokenFragile = rollFragileBuffs(run);
     if (brokenFragile.length) out.fragileBroken = brokenFragile;
@@ -1353,12 +1373,12 @@
       save();
       return out;
     }
-    if (run.idx >= run.plan.length) return layerClear(mode, run, out);
+    if (run.idx >= run.plan.length) return layerClear(mode, run, out, shopCreditPct);
     /* E01「立即进货」：这一场打完之后立刻再开一次试炼商店。
      * 放在 layerClear 之后判定 —— 整层打完时由 layerClear 自己的「每 5 层」逻辑开店，
      * 这里只补「层还没打完、但 buff 要求马上开店」的那种情况。 */
-    if (mode === 'endless' && run.postBattleShop) {
-      run.shop = makeShop(run);
+    if (mode === 'endless' && shopCreditPct > 0) {
+      run.shop = makeShop(run, shopCreditPct);
       run.phase = 'shop';
       out.phase = 'shop';
       out.postBattleShop = true;
@@ -1732,7 +1752,7 @@
    * 【T12】层通关与推进 —— layerClear / advanceLayer
    * ============================================================ */
 
-  function layerClear(mode, run, out) {
+  function layerClear(mode, run, out, shopPct) {
     out.layerComplete = true;
     out.layer = run.layer;
     // 本层已全清：留一份快照，主界面在商店/结算点阶段仍能看到「最后一个敌人 已战胜」
@@ -1776,7 +1796,7 @@
     }
     out.score = run.score; out.coins = run.coins;
     if (run.layer % 5 === 0) {                           // 每 5 层：商店 → 结算点
-      run.shop = makeShop(run);
+      run.shop = makeShop(run, shopPct);
       run.phase = 'shop';
       out.phase = 'shop';
     } else {
@@ -2153,15 +2173,10 @@
       run.shopDiscount = Math.max(0, Math.floor(Number(run.shopDiscount) || 0)) + 1;
       run.shopDiscountPct = Math.max(Number(run.shopDiscountPct) || 0, Number(buff.mods.shopDiscount) || 0);
     }
-    /* E01「立即进货」：下一场战斗结束后开一次店（折扣比例在这里就跟 E04 合并好）。 */
-    if (buff.mods && buff.mods.postBattleShop) {
-      run.postBattleShop = 1;
-      run.shopDiscount = Math.max(0, Math.floor(Number(run.shopDiscount) || 0)) + 1;
-      const own = Number(buff.mods.postBattleShopDiscount) || D().SHOP_DISCOUNT_E01;
-      const cur = Number(run.shopDiscountPct) || 0;
-      /* 与 steam大促（−30%）同时生效时按用户口径合并成 −65%（3.5 折），不做简单相加。 */
-      run.shopDiscountPct = (cur > 0 && cur < own) ? D().SHOP_DISCOUNT_BOTH : Math.max(cur, own);
-    }
+    /* E01「立即进货」**不再往 run 上写缓存**：它的效果（战后开店 + 5 折）由
+     * activeShopCredit(run) 在「这一场打完之后」按条目当时是否开着现算 ——
+     * 玩家把它关掉就该立刻不生效（原来写死的 run.postBattleShop 关掉也照样开店）。
+     * 与 steam大促（−30%）的合并也挪到 makeShop 里（谁先拿都不影响结果）。 */
     /* C01「磐石之躯」：获得时立刻按当前（局外口径）生命上限回血。 */
     if (buff.mods && buff.mods.healOnGainPct) {
       healAbs(run, Number(buff.mods.healOnGainPct) * globalMul(run), currentMaxHp(run));
@@ -2441,17 +2456,24 @@
    * 【T17】无尽：试炼币商店 —— makeShop / buyShopSlot / sellBuff / rerollShop
    * ============================================================ */
 
-  function makeShop(run) {
+  /** 开一次商店。
+   *  `e01Pct` = 本次「立即进货」带来的折扣（由调用方在扣限次前现算，见 activeShopCredit）。
+   *  折扣比例由「哪几张折扣券在生效」决定：即时券走 run.shopDiscount/run.shopDiscountPct
+   *  （E04 steam大促 −30% 等），E01 −50% 另有来源；两者同时生效按用户口径合并成 −65%（3.5 折），
+   *  不做简单相加。老口径没有比例字段时退回 0.5 兼容。 */
+  function makeShop(run, e01Pct) {
     const stacks = Math.max(0, Math.floor(Number(run.shopDiscount) || 0));
-    const discount = stacks > 0;
-    /* 折扣比例由「哪几张折扣券在生效」决定（E04 −30% / E01 −50% / 两者 −65%），
-     * 老口径没有比例字段时退回 0.5 兼容。 */
-    const discountPct = discount ? Math.max(0, Number(run.shopDiscountPct) || 0.5) : 0;
-    if (discount) {
-      run.shopDiscount = stacks - 1;                  // 消耗 1 份
+    const instantPct = Math.max(0, Number(run.shopDiscountPct) || 0);
+    const own = Math.max(0, Number(e01Pct) || 0);
+    let discountPct = 0;
+    if (own > 0 && stacks > 0) discountPct = (instantPct > 0 && instantPct < own) ? D().SHOP_DISCOUNT_BOTH : Math.max(instantPct, own);
+    else if (own > 0) discountPct = own;
+    else if (stacks > 0) discountPct = instantPct || 0.5;
+    const discount = discountPct > 0;
+    if (stacks > 0) {
+      run.shopDiscount = stacks - 1;                  // 消耗 1 份即时折扣券
       if (run.shopDiscount <= 0) run.shopDiscountPct = 0;
     }
-    if (run.postBattleShop) run.postBattleShop = 0;
     return { layer: run.layer, slots: rollShopSlots(run), retrySold: false, rerollFree: true,
       discount, discountPct, rerollCount: 0, rerollPaid: 0 };
   }

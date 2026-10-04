@@ -131,6 +131,13 @@
       /* 需求 3：烙印两段加成 + 独立随机种子；旧档 stickyStat → fragileBurned。 */
       run.fragileBase = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBase || {});
       run.fragileBurned = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBurned || {});
+      /* 本轮需求：烙印「累计获得过几份」的流水（只增不减，碎掉的也计入）。
+       * 旧档没有这个字段 —— 已有的在册层数当作它的起点（保守：宁少算不多算）。 */
+      run.fragileGot = Object.assign({}, run.fragileGot || {});
+      /* 淘金烙印（C53）：未破碎份数 + 已破碎的明细（与 run.fragileHealBurned 同一套形状）。 */
+      run.fragileCoinBase = Math.max(0, Math.floor(Number(run.fragileCoinBase) || 0));
+      run.fragileCoinBurned = Array.isArray(run.fragileCoinBurned)
+        ? run.fragileCoinBurned.map((v) => Math.max(0, Number(v) || 0)).filter((v) => v > 0) : [];
       /* 需求：破碎烙印要能被**逐条**移除（30 层后每 2 层随机抽一条碎掉的烙印作废），
        * 所以除了「合计值」还留一份**明细**：
        *   run.brokenMarks      —— [{ kind:'stat',   stat:'power', pct:0.08 }]
@@ -338,7 +345,10 @@
    * 聚合当前生效的 buff 为本场战斗的修正。
    * foeCtx = {hero, poolNpc, elite}，用于「特定 NPC 触发」类乘区。
    */
-  /** 某个 mod 在本局的合计值（战斗外结算用，例如战后续航）——带叠层与增幅水晶乘区。 */
+  /** 某个 mod 在本局的合计值（不参与 adjustMe 的「场外」结算用，例如每胜利上限
+   *  winMaxHpFlat / 商店消费成长）——带叠层与增幅水晶乘区。
+   *  注意：「开战回血」类（补给 N08 / 战斗续航 C16·C17）不在这里，它们走 aggregate
+   *  的 startHealPct，必须在 adjustMe 里按**本场真实上限**结算。 */
   function runModTotal(run, key) {
     const g = globalMul(run);
     let sum = 0;
@@ -353,8 +363,8 @@
      * 都会让我方敏捷直接变成 NaN。 */
     const agg = { powerMul: 0, agilityMul: 0, maxHpMul: 0, critBonus: 0, critDmgBonus: 0, dodgeBonus: 0, takenMul: 0,
       regenPct: 0, lifestealPct: 0, shellPct: 0, openStrikePct: 0, enemyPowerDown: 0, startHealPct: 0,
-      mustHitFirst: 0, firstSkillFree: 0, deathSaves: [], dmgMul: 1, revivePct: 0, reviveStatMul: 0,
-      speedMul: 0, winHealPct: 0, thornsPct: 0, lowHpPowerMul: 0, lowHpAt: 0,
+      mustHitFirst: 0, firstSkillFree: 0, deathSaves: [], dmgMul: 1, revivePct: 0, reviveStatMul: 0, reviveMax: 0,
+      speedMul: 0, thornsPct: 0, lowHpPowerMul: 0, lowHpAt: 0,
       lowHpAgilityMul: 0, lowHpSpeedMul: 0,
       emptyMaxHpMul: 0, lowHpTakenMul: 0, lowHpLifestealPct: 0, lowHpRegenPct: 0, lowHpRegenAt: 0,
       reflectImmune: 0, winTakenMulPct: 0, winTakenMulCap: 0,
@@ -392,7 +402,6 @@
       if (m.openerRounds) agg.openerRounds = Math.max(agg.openerRounds, Number(m.openerRounds) || 5);
       if (m.dodgeMul) agg.dodgeMul += m.dodgeMul * k;
 
-      if (m.winHealPct) agg.winHealPct += m.winHealPct * k;                       // 战后续航（可叠加）
       if (m.thornsPct) agg.thornsPct += m.thornsPct * k;                         // 荆棘之甲
       if (m.mustHitAll) agg.mustHitAll = 1;                                      // 第 1 项：百步穿杨
       if (m.firstHitZero) agg.firstHitZero = 1;                                  // 第 1 项：先机预判
@@ -423,10 +432,13 @@
       if (m.firstSkillFree) agg.firstSkillFree = 1;
       if (m.deathSave) agg.deathSaves.push({});                                  // 金蝉脱壳：保留 1 血
       /* 涅槃（原不死鸟）：每层一次复活甲。revivePct = 复活回复的生命上限比例；
-       * reviveStatMul = 复活后本场战斗力/敏/速的加成（叠层时按层数放大）。 */
+       * reviveStatMul = 复活后本场战斗力/敏/速的加成；
+       * reviveMax = 本层拥有几次复活机会（C14 可叠 2 层：第 2 层**只多给一次复活机会**，
+       *   不再放大复活后的属性加成，见 tower-data 的 C14 说明）。 */
       if (m.revivePct) {
         agg.revivePct = Math.max(agg.revivePct || 0, Math.min(0.9, m.revivePct * g));
-        agg.reviveStatMul = Math.max(agg.reviveStatMul || 0, (Number(m.reviveStatMul) || 0) * stacks);
+        agg.reviveStatMul = Math.max(agg.reviveStatMul || 0, Number(m.reviveStatMul) || 0);
+        agg.reviveMax = Math.max(agg.reviveMax || 0, Math.max(1, Math.floor(stacks)));
       }
       if (foeCtx.hero && m.dmgMulType) agg.dmgMul *= 1 + m.dmgMulType * k;       // 猎侠者
       if (foeCtx.poolNpc && m.dmgMulMech) agg.dmgMul *= 1 + m.dmgMulMech * k;    // 机制破解
@@ -485,10 +497,11 @@
     if (a.lifestealPct) lines.push(['攻击吸血', pct(a.lifestealPct)]);
     if (a.thornsPct) lines.push(['荆棘反伤', pct(a.thornsPct)]);
     if (a.shellPct) lines.push(['护盾', pct(a.shellPct)]);
+    /* 「开战回血」= 补给 N08 与战斗续航 C16·C17 共用的那一条：每场战斗第一回合
+     * 按本场真实上限（含空血上限）回复，所以这里只报比例，不报「按上一场上限」的绝对值。 */
     if (a.startHealPct) lines.push(['开战回血', pct(a.startHealPct) + ' 最大生命']);
     if (a.reflectImmune) lines.push(['反噬豁免', '免疫一切反伤']);
     { const wt = winTakenMulOf(run); if (wt > 0) lines.push(['减伤成长（每胜利 −1%）', pct(wt)]); }
-    if (a.winHealPct) lines.push(['战斗胜利后回血', pct(a.winHealPct)]);
     if (a.openStrikePct) lines.push(['开局打击', pct(a.openStrikePct) + ' 敌最大生命']);
     if (a.enemyPowerDown) lines.push(['敌人攻击', pct(-a.enemyPowerDown)]);
     /* 空血上限是乘法叠加的，清单里显示**合并后的真实比例**：
@@ -505,9 +518,14 @@
       pct(a.lowHpRegenPct) + '，最多回到 ' + Math.round(a.lowHpRegenAt * 100) + '%']);
     if (a.dmgMul && a.dmgMul !== 1) lines.push(['对本场敌人伤害', pct(a.dmgMul - 1)]);
     if (a.revivePct) {
-      lines.push(['复活（每层一次）', pct(a.revivePct) + ' 生命' +
-        (a.reviveStatMul ? '，复活后本场力/敏/速 +' + pct(a.reviveStatMul) : '')]);
+      const perLayer = Math.max(1, Math.floor(a.reviveMax || 1));
+      const usedNow = (run.reviveLayer || 0) === run.layer ? Math.max(0, Math.floor(Number(run.reviveUsed) || 0)) : 0;
+      lines.push(['复活（每层 ' + perLayer + ' 次）', pct(a.revivePct) + ' 生命' +
+        (a.reviveStatMul ? '，复活后本场力/敏/速 +' + pct(a.reviveStatMul) : '') +
+        (perLayer > 1 ? '（本层已用 ' + usedNow + '/' + perLayer + '）' : '')]);
     }
+    /* 淘金烙印（C53）：战斗代币加成（存在 +15% / 损毁 +30%）。 */
+    { const cn = fragileCoinBonus(run); if (cn > 0) lines.push(['试炼币获取（每场胜利）', pct(cn)]); }
     if (a.deathSaves && a.deathSaves.length) lines.push(['免死', a.deathSaves.length + ' 次（保留 1 血）']);
     if (a.mustHitFirst) lines.push(['必中', '首次攻击']);
     if (a.mustHitAll) lines.push(['必中', '全部攻击']);
@@ -774,8 +792,14 @@
         if (inst) weaponMul = Math.max(weaponMul, 1 + Number(wBoost[key] || 0));
       }
       const sBoost = run.skillBoost || {};
+      /* 小宇宙爆发（14）是「开战第一招必放」的开关，不是 effects 里的加成 ——
+       * 注意 effects['14'] 在 sim 里是**木剑（武器 3）**的伤害系数
+       *（效果槽 14 = 「木剑伤害 +N%」，口径是 w.id + 11），
+       * 顺手写进去会让木剑白涨 25%，所以必须单独拎出来。 */
+      const cosmosFirst = Number(sBoost[PICKABLE_COSMOS] || 0) > 0 ? 1 : 0;
       if (me.effects) {
         for (const key of Object.keys(sBoost)) {
+          if (Number(key) === PICKABLE_COSMOS) continue;
           const cur = Number(me.effects[key]) || 0;
           me.effects[key] = Math.max(cur * (1 + Number(sBoost[key] || 0)), cur + 25);
         }
@@ -831,35 +855,41 @@
 
       // maxHpMul 的「回复等量生命」= 按比例继承到新上限（正增益不亏比例、负增益同步缩血）
       me.maxHp = scaledMaxHp;
-      /* ============================================================
-       * 「开局回血」类（补给 N08 等）：回复 X% **最大生命**。
-       *
-       * 需求：这里的「最大生命」要吃到**局内加生命上限**的加成。
-       * 原来用的是 run.lastMaxHp（**上一场**记下的上限），于是本局吃到的
-       * 「生命上限 +N%」（体质 C29 / 磐石之躯 / 五层回响…）与固定值成长
-       *（以战养战 C11 / 挥金如土 C36）都算不进去，回血量偏小。
-       *
-       * 现在放在这里、用 me.maxHp 作基准 —— 它已经含：
-       *   baseMaxHp（含局内 maxHpMul 与固定值成长）+ 空血上限 + 限次类 maxHpMul。
-       * 注意 me.hp 已在上面按「不含空血上限」初始化过，所以这里按比例再补一份：
-       *   回血后的血条 = 进场血 + X% × 上限（不超过上限）。
-       * ============================================================ */
-      if (agg.startHealPct > 0 && me.maxHp > 0) {
-        const gain = Math.max(1, Math.round(me.maxHp * agg.startHealPct));
-        me.hp = Math.min(me.maxHp, me.hp + gain);
-        run.hpAbs = me.hp;
-        agg.startHealGain = gain;
-        agg.startHealRef = me.maxHp;
-      }
       /* 需求：血量继承按**绝对值** —— 把上一场记下的剩余血量直接放进新上限，
        * 超出上限的部分裁掉。（空血上限只抬 maxHp，不动 hpAbs，
-       * 所以那部分天然是空的；旧档的 carry 由 hpAbsOf 按当时上限折算一次。） */
+       * 所以那部分天然是空的；旧档的 carry 由 hpAbsOf 按当时上限折算一次。）
+       * 这一步按**不含空血上限的基准上限**裁：进场血量不能靠空血上限白涨。 */
       /* 全新一局：计数器还没建立（没有历史血量），此时以「不含空血上限的基准上限」
        * 作为初始血量 —— 否则第一场会把空血上限一起带进来、满血进场超过局外上限
        *（实测 +30%/+50% 空上限时第一场是 9000/9000，而局外上限只有 5000）。 */
       const initHp = Math.max(1, Math.min(baseMaxHp, hpAbsOf(run, baseMaxHp)));
       me.hp = Math.max(1, Math.min(maxHp, initHp));
       if (!(Number(run.hpAbs) > 0)) run.hpAbs = me.hp;      // 建立计数器 */
+      /* ============================================================
+       * 「开战回血」类（补给 N08 / 战斗续航 C16·C17）：**本场第一回合**回复 X% 最大生命。
+       *
+       * 需求：这里的「最大生命」要吃到**局内加生命上限**的加成。
+       * 原来用的是 run.lastMaxHp（**上一场**记下的上限），于是本局吃到的
+       * 「生命上限 +N%」（体质 C29 / 磐石之躯 / 五层回响…）与固定值成长
+       *（以战养战 C11 / 挥金如土 C36）都算不进去，回血量偏小。
+       *
+       * 现在用 me.maxHp 作基准 —— 它已经含：
+       *   baseMaxHp（含局内 maxHpMul 与固定值成长）+ 空血上限 + 限次类 maxHpMul。
+       *
+       * 位置很关键：必须放在上面那次「按 baseMaxHp 裁进场血」**之后**。
+       * 放在它之前的话，回血会被 `Math.min(baseMaxHp, …)` 再裁一次，
+       * 于是「空血上限」那部分永远吃不到（这正是本轮要修的点）。
+       * 放在它之后 = 回血按含空血上限的上限算，且真的能填进空的那部分，
+       * 只受 me.maxHp 封顶（不会超过本场血条）。
+       * ============================================================ */
+      if (agg.startHealPct > 0 && me.maxHp > 0) {
+        const beforeHeal = me.hp;
+        const gain = Math.max(1, Math.round(me.maxHp * agg.startHealPct));
+        me.hp = Math.min(me.maxHp, me.hp + gain);
+        run.hpAbs = me.hp;
+        agg.startHealGain = me.hp - beforeHeal;      // 实际回血量（可能被本场上限截断）
+        agg.startHealRef = me.maxHp;
+      }
 
       /* 本轮第 4 项：记下基础上限（未加塔 buff 的那一份）与本场真实上限 / 当前血量。 */
       run.lastMaxHp = scaledMaxHp;
@@ -883,6 +913,8 @@
       if (agg.openStrikePct) mods.openStrikePct = agg.openStrikePct;
       if (agg.mustHitFirst) mods.mustHitFirst = 1;
       if (agg.firstSkillFree) mods.firstSkillFree = 1;
+      /* 秘技通神（C33）抽中小宇宙爆发：开战第一招必定放它（sim 里强制出招）。 */
+      if (cosmosFirst) mods.cosmosFirst = 1;
       if (agg.dmgMul !== 1) mods.dmgMul = agg.dmgMul;
       if (agg.thornsPct) mods.thornsPct = Math.min(0.6, agg.thornsPct);          // 荆棘之甲（sim 里结算）
       if (agg.mustHitAll) mods.mustHitAll = 1;                                  // 第 1 项：百步穿杨（整个一场必中）
@@ -906,9 +938,16 @@
         /* 统一阈值：所有低血效果共用一个 lowHpAt（没有显式值的来源按 0.35 兜底）。 */
         mods.lowHpAt = agg.lowHpAt || agg.lowHpRegenAt || 0.5;
       }
-      // 第 2 项：不死鸟按「每层一次」发放（本层已经触发过就不再给）
-      if (agg.revivePct && (run.reviveLayer || 0) !== run.layer) {
-        mods.deathSaves = (mods.deathSaves || []).concat([{ healPct: agg.revivePct, statMul: agg.reviveStatMul || 0 }]);
+      /* 涅槃按「每层 N 次」发放：N = 涅槃层数（1 层 1 次、2 层 2 次）。
+       * 本层已经用掉的次数记在 run.reviveUsed 上（换层自动从 0 重算）——
+       * 所以叠到 2 层、这一层已经复活过一次时，这里只会再补 1 份。 */
+      if (agg.revivePct) {
+        const perLayer = Math.max(1, Math.floor(agg.reviveMax || 1));
+        const used = (run.reviveLayer || 0) === run.layer ? Math.max(0, Math.floor(Number(run.reviveUsed) || 0)) : 0;
+        const left = Math.max(0, perLayer - used);
+        for (let i = 0; i < left; i++) {
+          mods.deathSaves = (mods.deathSaves || []).concat([{ healPct: agg.revivePct, statMul: agg.reviveStatMul || 0, revive: 1 }]);
+        }
       }
       if (agg.deathSaves.length) mods.deathSaves = (mods.deathSaves || []).concat(agg.deathSaves);
       /* 环境词缀（我方侧）也要并进这一份最终 mods 里 ——
@@ -1109,8 +1148,9 @@
      * 就会跟着进场 —— 虽然局外显示按上限裁过，但下一场又被放出来。
      * 这里按**局外口径的上限**裁剪后再写入，计数器就与局外所见完全一致。
      *
-     * 注意：这只影响「战斗结束时剩下的血」。战斗开始后由其它 buff 回复的血
-     * （开战回血 / 跨层回血 / 每胜回血）是**另外累加**到计数器上的，不受这里影响。
+     * 注意：这只影响「战斗结束时剩下的血」。战斗**之中/开战**由其它 buff 回复的血
+     * （开战回血 / 跨层回血 / 精英回血 / 每回合回血）是**另外累加**到计数器上的，
+     * 不受这里影响。
      * ============================================================ */
     const outCap = currentMaxHp(run);            // 局外口径上限（不含战斗内临时加成）
     const endHp = (outCap > 0) ? Math.min(rawHp, outCap) : rawHp;
@@ -1126,8 +1166,18 @@
     const battleIdx = Math.max(0, Math.floor(Number(run.idx) || 0));
     const out = { ok: true, win: true, elite: isElite, entryKind: entry.kind };
     // 三侠的大招会给玩家留一层削弱（第 3 项）
-    // 第 2 项：本场触发了复活甲 → 本层的不死鸟用掉
-    if (stacksOf(run, 'C14') && result && Array.isArray(result.rounds) && result.rounds.some((r) => r.deathSave)) run.reviveLayer = run.layer;
+    /* 第 2 项：本场触发了复活甲 → 记下「本层用掉几次」。
+     * 涅槃可叠 2 层（每层 2 次机会），所以要按**次数**累计而不是只标记层号：
+     *   run.reviveLayer = 本层层号；run.reviveUsed = 本层已经用掉的次数。
+     * 只看 r.revive 标记（涅槃的 deathSave 带 healPct/statMul + revive:1），
+     * 金蝉脱壳（N04）也是 deathSave，但它不算涅槃的次数。 */
+    if (stacksOf(run, 'C14') && result && Array.isArray(result.rounds)) {
+      const revives = result.rounds.filter((r) => r.deathSave && r.revive).length;
+      if (revives > 0) {
+        if ((run.reviveLayer || 0) !== run.layer) { run.reviveLayer = run.layer; run.reviveUsed = 0; }
+        run.reviveUsed = Math.max(0, Math.floor(Number(run.reviveUsed) || 0)) + revives;
+      }
+    }
     /* 隐藏成就「死而复生」：统计本场触发了几次免死/复活（不死鸟、金蝉脱壳都算），
      * 累计到档位就加分 —— 分档递增、12 次封顶（防「故意挨打刷分」）。 */
     if (mode === 'endless' && result && Array.isArray(result.rounds)) {
@@ -1160,15 +1210,14 @@
       out.potGold = run.pot;
     } else {
       const g = globalMul(run);
-      // 战后续航（C16/C17，可叠加）：每场胜利后回复 X% 最大生命
-      const winHeal = runModTotal(run, 'winHealPct');
-      if (winHeal > 0) {
-        healAbs(run, winHeal, refMax);
-        out.winHeal = winHeal;
-      }
+      /* 战斗续航（C16/C17）原来在这里结算「胜利后回 X% 最大生命」，
+       * 本轮改成**每一场战斗的第一回合**（下一场开战）按本场真实上限回血 ——
+       * 见 adjustMe 里的 startHealPct 段。这里不再有「战后回血」这一步，
+       * 所以 `out.winHeal` 也一并去掉了（它只剩测试在用，现已改测开战回血）。 */
       addScore(run, D().SCORE.battle, '战斗胜利');
-      /* 第 1 项：试炼币加成（战利品类限次 buff，remaining 次数在下面统一扣） */
-      let coinMul = 1 + (runModTotal(run, 'coinBoostPct') || 0);
+      /* 第 1 项：试炼币加成（战利品类限次 buff，remaining 次数在下面统一扣）
+       * + 淘金烙印（C53，存在 +15% / 损毁 +30%）—— 同样只在**胜利**时结算。 */
+      let coinMul = 1 + (runModTotal(run, 'coinBoostPct') || 0) + fragileCoinBonus(run);
       /* 贪婪裂隙：我方试炼币按实例上摇出来的比例加成（被反弹/被剥夺时就不给）。
        * 以前这里写死 +50%，与实例数值无关。 */
       {
@@ -1234,7 +1283,7 @@
     /* 幻影回响（三侠战）：胜利后按概率**立刻再战同一场**。
      * 做法是把层内序号回退一格 —— 这样：
      *   · 下一场取到的还是同一个 entry（三侠由 heroOrder(layer, salt) 固定，所以是同一场）
-     *   · 猎杀时刻 / 吞噬成长 / 以战养战 / 登顶者 / 战后续航 等**战斗叠层**增益
+     *   · 猎杀时刻 / 吞噬成长 / 以战养战 / 登顶者 / 战斗续航（开战回血）等**战斗叠层**增益
      *     天然把这一场也算进去（不用逐个特殊处理）
      *   · 层号不变，所以不会触发跨层回血，也不会提前进下一层 */
     const echoP = (entry.kind === 'hero') ? echoRepeatChance(run) : 0;
@@ -1270,21 +1319,25 @@
     }
     if (run.idx >= run.plan.length) return layerClear(mode, run, out);
     const won = run.idx, len = run.plan.length;
-    /* 场间选择：普通层（4 场）在第 4 场前给一次；x10 层（5 场）在第 5 场
-     * **塔顶 boss 前**给一次。
+    /* 场间选择（本轮修 bug）：**每一层**打完第 3 场都要给一次 —— 也就是「第 4 场之前」。
      *
-     * 修 bug：原来这里是 `won === 3 || (won === 4 && len === 5)` ——
-     * `won === 3` **没看 len**，于是 5 场层打完第 4 场时才挂上三选一，
-     * 而下一轮 `nextBattle` 会先结算层完成、直接进商店/进下一层，
-     * 第 5 场（塔顶 boss）**被整个跳过**（玩家再也打不到狂战松鼠）。
-     * 现在按 len 决定触发点：4 场层 → 3，5 场层 → 4。 */
-    const choiceAfter = len === 5 ? 4 : 3;
+     * 原来的写法是 `choiceAfter = len === 5 ? 4 : 3`，把 x10 层（5 场层）的那次选择
+     * 挪到了第 5 场前 —— 于是 10n 层的**第 4 场前没有多选一**（玩家实测反馈的就是这条）。
+     * 历史原因：更早的版本是 `won === 3 || (won === 4 && len === 5)`，
+     * 5 场层会连着挂两次选择，玩家不选就没法继续，所以当时干脆只保留第 5 场前那一次。
+     *
+     * 现在的口径：
+     *   · 所有层：打完第 3 场 → 第 4 场前给一次（与普通层同一节奏）；
+     *   · x10 层额外在打完第 4 场 → 第 5 场（塔顶 boss）前再给一次。
+     * 两次都是「点一下选项」就能继续，不会卡流程（nextBattle 只要求先选完当前那份）。 */
+    const choiceAfter = 3;
+    const extraChoice = len === 5;
     // 第 1 项：属性药丸按战斗数递减（胜败都算一场）
     for (const k of ['power', 'agility', 'speed']) {
       const slot = (run.pillSlots || {})[k];
       if (slot && slot.battles > 0) { slot.battles--; if (slot.battles <= 0) run.pillSlots[k] = null; }
     }
-    if (won === choiceAfter) run.choices = rollChoices(mode, run);
+    if (won === choiceAfter || (extraChoice && won === 4)) run.choices = rollChoices(mode, run);
     out.achievements = takeAchievementToasts(run);
     out.choices = run.choices;
     out.permanent = (run.permanent || []).length;
@@ -1713,13 +1766,14 @@
      * 已经叠满的就不该再出现在任何池子里 —— 商店、场间三选一、战斗奖励都走这里。
      * 例：「抉择扩充」(C50) 叠满 3 层后不再刷新。 */
     const cap = Math.max(1, Math.floor(Number(buff.maxStacks) || D().STACK_MAX));
-    if (buff.stackable && buffCountOf(run, buff.id) >= cap) return false;
+    /* 层数口径用「累计获得过几份」（含碎掉的烙印），否则碎一条就能再刷一条。 */
+    if (buff.stackable && obtainedCountOf(run, buff.id) >= cap) return false;
     /* maxUses：**限次类**的「本局最多获得 N 次」上限（例：终焉烙印最多 3 次）。
      * 用 maxStacks 当阈值，但判据是总数而不是可叠层标记 —— 烙印不进 permanent，
      * 所以不能只靠上面那条 stackable 判断。 */
     if (!buff.stackable && buff.maxStacks) {
       /* 即时类不进 permanent / limited，另记在 instantIds 上；两者一起数。 */
-      const got = buffCountOf(run, buff.id) + instantOwnedCount(run, buff.id);
+      const got = obtainedCountOf(run, buff.id) + instantOwnedCount(run, buff.id);
       if (got >= Math.max(1, Math.floor(buff.maxStacks))) return false;
     }
     /* repeatable：允许**重复出现**（例如虚空铭文 —— 每次只让一个永久增益免占位，
@@ -1733,17 +1787,34 @@
     if (run.pendingPick && run.pendingPick.buffId === buff.id) return false;
     return !(run.permanent || []).some((b) => b.id === buff.id);
   }
-  /* 秘技通神（C33）可以抽中的防御类技能：绝对防御(16) 与 龟甲术(7)。
-   * 它们不进出手池，但被选中后会大幅提升**触发概率**（见 sim 的 passiveSkillBoost
-   * 与下面的 DEFENSE_PICK_BOOST）。即使玩家还没学，也会出现在候选里（选中即领悟）。 */
+  /* ============================================================
+   * 秘技通神（C33）能抽中的「特殊技能」—— 玩家没学也会进候选，选中即领悟。
+   *
+   * ① 防御类：绝对防御(16) 与 龟甲术(7)。
+   *    它们不进出手池（是「受击自动触发」的被动），所以「提升触发概率」只能靠
+   *    sim 的 passiveSkillBoost（读 fighter.effects[id]）单独乘一次。
+   * ② 小宇宙爆发(14)：虽然是主动技，但每场只能放一次、本身也不造成伤害，
+   *    「触发概率」对它毫无意义 —— 需求把它改成**开战第一招必定放它**
+   *    （tower 写 mods.cosmosFirst，sim 在选招时强制）。
+   * ============================================================ */
   const PICKABLE_DEFENSE = [16, 7];
   const isPickableDefense = (id) => PICKABLE_DEFENSE.indexOf(Number(id)) >= 0;
-  /* 秘技通神抽中绝对防御 / 龟甲术时的触发概率提升幅度。
+  const PICKABLE_COSMOS = 14;
+  const isPickableCosmos = (id) => Number(id) === PICKABLE_COSMOS;
+  /** run.skillBoost[14] 只当「已抽中小宇宙」的开关用（不参与 effects 加成）。 */
+  const COSMOS_PICK_BOOST = 1;
+  /* 防御技抽中时的触发概率提升幅度（相对加成：2.0 = 触发率 ×3）。
    * 这两条是「受击自动触发」的防御被动，技能等级对它们的作用很小
    *（绝对防御等级只影响反伤比例、龟甲术等级只影响抵挡比例），
    * 真正决定强度的是**触发概率** —— 所以选中时给一个大幅加成。
-   * 数值口径：effects['16'] / effects['7'] 是「相对加成」，2.0 = 触发率 ×3。 */
+   * 需求（本轮）：**绝对防御**的上升幅度略微削弱 —— 2.0 → 1.5（触发率 ×3 → ×2.5）：
+   *   首次 22 → 55（原 66）、二次及以后 13 → 32.5（原 39）。
+   * 龟甲术保持 2.0 不变（它的封顶本来就按 45 设计，见 sim 的 BOOSTED_AGAIN_CAP）。 */
   const DEFENSE_PICK_BOOST = 2.0;
+  const JUE_DUI_PICK_BOOST = 1.5;
+  const defensePickBoostOf = (id) => (Number(id) === 16 ? JUE_DUI_PICK_BOOST : DEFENSE_PICK_BOOST);
+  /** 候选按钮上的「抽中后会怎样」提示（界面用它替代 Lv 显示）。 */
+  const PICK_NOTE = { 14: '开战第一招必放', 16: '触发概率提升', 7: '触发概率提升' };
   /** 战斗奖励的稀有度倾斜：按「花了这么多币刷新后」的商店水平取。
    *  10 币 = rerollTilt 调一次 1.20，实测史诗档从 10.1% 抬到约 17%。 */
   const CHOICE_TILT_PAID = 10;
@@ -1805,20 +1876,22 @@
       const got = instantOwnedCount(run, buff.id);
       return got < Math.max(1, Math.floor(buff.maxStacks));
     }
+    /* 层数上限要按「**累计获得过几份**」判（碎掉的烙印也算一份）——
+     * 必须放在 `if (!owned) return true` **之前**：烙印碎掉后会被移出 run.limited，
+     * 在册份数为 0，否则这里会被直接放行、又能再刷一条（正是本轮要修的）。 */
+    if (buff.maxStacks && obtainedCountOf(run, buff.id) >= Math.max(1, Math.floor(buff.maxStacks))) return false;
     const owned = ownedEntry(run, buff.id);
     if (!owned) return true;
     /* 可叠层类的上限：优先用该增益自己的 maxStacks（例如 C50 只到 3 层），
      * 没写就用全局 STACK_MAX。叠满即视为「不可再获得」。 */
     if (buff.stackable !== true) {
-      /* 烙印类 / 即时类等「一局最多 N 次」的：到上限就不可再获得。 */
-      if (buff.maxStacks) {
-        const got = buffCountOf(run, buff.id) + instantOwnedCount(run, buff.id);
-        return got < Math.max(1, Math.floor(buff.maxStacks));
-      }
-      return false;                                                   // 同名唯一
+      /* 既没有 stackable 也没有 maxStacks 的才是「同名唯一」；
+       * 带 maxStacks 的烙印类（C49 等）可以叠到上限 —— 上限在前置判断里已把过关。 */
+      if (!buff.maxStacks) return false;
+      return obtainedCountOf(run, buff.id) < Math.max(1, Math.floor(buff.maxStacks));
     }
     const cap = Math.max(1, Math.floor(Number(buff.maxStacks) || D().STACK_MAX));
-    return owned.stacks < cap;
+    return obtainedCountOf(run, buff.id) < cap;
   }
   /** 摇一个稀有度。默认用自然掉率权重；刷新时传入倾斜后的权重。 */
   function rollRarity(weights) {
@@ -1877,18 +1950,34 @@
     for (const v of list) sum += Math.max(0, Number(v) || 0);
     return sum;
   }
+  /** 淘金烙印（C53「淘金烙印」）的战斗代币加成：按层加算（存在 +15%/层、损毁 +30%/层）。
+   *  注意它**不复用** run.fragileMulBase —— 那个字段是「终乘烙印」的倍率层数
+   *（C49 与 C52 都带 fragileFinalMul 标记，两件事历史上被挂在同一份计数上），
+   *  淘金烙印不属于终乘类，所以单独记 `run.fragileCoinBase` + `run.fragileCoinBurned`。 */
+  function fragileCoinBonus(run) {
+    const base = Math.max(0, Math.floor(Number(run && run.fragileCoinBase) || 0));
+    const list = Array.isArray(run && run.fragileCoinBurned) ? run.fragileCoinBurned : [];
+    if (!base && !list.length) return 0;
+    const m = D().BUFF_BY_ID.C53.mods;
+    let sum = (Number(m.fragileCoinAddAlive) || 0.15) * base;
+    for (const v of list) sum += Math.max(0, Number(v) || 0);
+    return sum;
+  }
   /** 把明细重新汇总成「合计值」（移除明细后必须重算）。 */
   function rebuildFragileTotals(run) {
     if (!run) return;
     run.fragileBurned = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBurned || {});
     run.fragileBurned.power = 0; run.fragileBurned.agility = 0; run.fragileBurned.speed = 0;
     run.fragileHealBurned = [];
+    run.fragileCoinBurned = [];
     for (const m of run.brokenMarks || []) {
       if (m.kind === 'stat' && m.stat) {
         if (run.fragileBurned[m.stat] === undefined) run.fragileBurned[m.stat] = 0;
         run.fragileBurned[m.stat] += Math.max(0, Number(m.pct) || 0);
       } else if (m.kind === 'heal') {
         run.fragileHealBurned.push(Math.max(0, Number(m.burned) || 0));
+      } else if (m.kind === 'coin') {
+        run.fragileCoinBurned.push(Math.max(0, Number(m.burned) || 0));
       }
     }
   }
@@ -1909,6 +1998,10 @@
       label = statName + '烙印（已损毁 +' + Math.round((Number(m.pct) || 0) * 100) + '%）';
     } else if (m.kind === 'heal') {
       label = '涌泉烙印（已损毁 +' + Math.round((Number(m.burned) || 0) * 100) + '% 治疗）';
+    } else if (m.kind === 'coin') {
+      /* 淘金烙印的已损毁份数是**明细数组**，rebuildFragileTotals 会重算 ——
+       * 这里只给个可读的名字（未破碎份数 run.fragileCoinBase 与它无关，不动）。 */
+      label = '淘金烙印（已损毁 +' + Math.round((Number(m.burned) || 0) * 100) + '% 试炼币）';
     } else if (m.kind === 'final') {
       label = '终焉烙印（已损毁 +' + Math.round((Number(m.burned) || 0) * 100) + '%）';
       run.fragileMulBurned = Math.max(0, Math.floor(Number(run.fragileMulBurned) || 0) - 1);
@@ -1955,6 +2048,15 @@
     }
     /* 需求 3：每条烙印有自己的碎裂随机数种子（不再共用 Math.random）。 */
     if (buff.mods && buff.mods.fragileBreakPct) {
+      /* 本轮需求：**碎掉的烙印也要计入「获得过的份数」** ——
+       * 这一行只在获得的当下 +1，之后无论碎没碎、卖没卖都不再回退，
+       * 供层数上限（C49 最多 3 次）与重复获得降权使用（见 obtainedCountOf）。 */
+      run.fragileGot = Object.assign({}, run.fragileGot || {});
+      run.fragileGot[buff.id] = Math.max(0, Math.floor(Number(run.fragileGot[buff.id]) || 0)) + 1;
+      /* 淘金烙印（C53）：登记「未破碎份数」，损毁时再转进 run.fragileCoinBurned。 */
+      if (buff.mods.fragileCoinAddAlive !== undefined) {
+        run.fragileCoinBase = Math.max(0, Math.floor(Number(run.fragileCoinBase) || 0)) + 1;
+      }
       run.fragileSeeds = Object.assign({}, run.fragileSeeds || {});
       /* 计分扩展：成就 / 加成峰值 / 复活计数 / 本局加分流水。 */
       run.achievements = Array.isArray(run.achievements) ? run.achievements.slice(0, 40) : [];
@@ -1982,6 +2084,13 @@
       /* 即时类不进 permanent / limited，所以「已获得几次」要单独记账 ——
        * 这是 E07 挫锐 / E08 卸甲「一局只能生效一次」以及「天命所归」
        * 重复获得降权的判据来源（见 poolFilter 的 maxStacks 与 pickByShopWeight）。 */
+      /* 需求（本轮）：instant + maxStacks 的「一局只能获得一次」在**这里再硬拦一道** ——
+       * poolFilter / ownable 只保证「不再被摇出来」，但货架是**先摇后买**的：
+       * 同一件已经摆在货架上、又从战斗奖励里拿到时，直接购买会被放行、静默生效第二次
+       *（C51 天命所归 就会白拿一层稀有度加成）。买不成的退款逻辑在 buyShopSlot 里已有。 */
+      if (buff.maxStacks && instantOwnedCount(run, id) >= Math.max(1, Math.floor(buff.maxStacks))) {
+        return { ok: false, msg: '【' + buff.name + '】一局只能获得一次。' };
+      }
       bumpInstant(run, id);
       const r = applyInstant(run, buff);
       logBuff(run, id, 'instant', { detail: instantDetail(buff) });
@@ -2033,7 +2142,12 @@
     const list = run[listKey] || (run[listKey] = []);
     const owned = list.find((b) => b.id === id);
     if (owned) {
-      owned.stacks = Math.min(D().STACK_MAX, owned.stacks + 1);
+      /* 叠层上限：该增益自己的 maxStacks（可叠层的），否则全局 STACK_MAX。
+       * **叠满就拒绝**（与 poolFilter / ownable 同一口径）—— 否则「一局两次」的涅槃
+       * 会被第三次 addBuff 直接叠到 3 层（正常路径摇不到它，但兜底必须一致）。 */
+      const cap = Math.max(1, Math.floor(Number(buff.maxStacks) || D().STACK_MAX));
+      if (owned.stacks >= cap) return { ok: false, msg: '【' + buff.name + '】已经叠满了（上限 ' + cap + ' 层）。' };
+      owned.stacks = Math.min(cap, owned.stacks + 1);
       /* 塔内限次增益不累加次数（就是「下一场」这一份），但可以叠层提高强度。 */
       if (buff.kind === 'limited') { if (run.mode !== 'tower') owned.uses += buff.uses || 1; owned.on = true; }
       /* 本轮修复：重复获得同名增益（叠加）时也要执行「获得时结算」——
@@ -2050,14 +2164,15 @@
       if (!replaceId) return { ok: false, needsReplace: true, buff, msg: '永久增益已满，先选一个替换掉' };
       const at = list.findIndex((b) => b.id === replaceId);
       if (at < 0) return { ok: false, needsReplace: true, buff, msg: '要替换的增益不存在' };
+      const replacedStacks = Math.max(1, Math.floor(Number(list[at] && list[at].stacks) || 1));
       /* 换掉一个**免占位**的不会腾出槽位（它本来就不占），所以换它没有意义 —— 明确拒绝，
        * 免得玩家点了「替换」却发现还是买不了。 */
       if ((run.slotFreeIds || []).indexOf(replaceId) >= 0) {
         return { ok: false, needsReplace: true, buff, msg: '【' + replaceId + '】已被虚空铭文附魔、不占槽位，换它腾不出位置' };
       }
       list.splice(at, 1);
-      /* 第 3 项：被替换掉的成长类增益，把它的累计一起清掉。 */
-      resetGrowth(run, replaceId);
+      /* 第 3 项：被替换掉的成长类增益，把它的累计一起清掉（烙印类要按层数收回）。 */
+      resetGrowth(run, replaceId, replacedStacks);
       run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== replaceId);
       logBuff(run, replaceId, 'lose', { detail: '被【' + buff.name + '】替换掉' });
     }
@@ -2147,23 +2262,27 @@
    * p 由这次刷新实际付掉的钱决定（每 10 币 ×1.25）。整架货一起变好，不出现结构突变。 */
   /** 从一个候选里抽一件，按 buff.shopWeight 加权（默认 1）—— 用来压低个别 overpowered
    * 增益在商店出现的概率（例如不死鸟）。权重只影响「谁被抽中」，不影响稀有度倾斜。 */
+  /** 一条增益在「按权重抽一个候选」时的**相对权重** = shopWeight × 重复获得惩罚。
+   *  抽奖（pickByShopWeight）与测试/界面共用这一份口径，避免两处各算一套。
+   *
+   *  重复惩罚：repeatable（可重复获得）的传奇增益，每**已获得过 1 份**，
+   *  被抽中的权重就再乘 repeatWeight（默认 0.35）—— 越拿越难刷到。
+   *  份数按「累计获得过几份」算：碎掉的烙印（C49 等）也要计入（本轮需求）。 */
+  function buffWeightOf(run, b) {
+    let w = Math.max(0, Number(b.shopWeight) || 1);
+    const rw = b.mods && Number(b.mods.repeatWeight);
+    if (run && rw > 0 && rw < 1) {
+      const owned = b.kind === 'instant'
+        ? instantOwnedCount(run, b.id)
+        : Math.max(0, obtainedCountOf(run, b.id) - 1);
+      if (owned > 0) w *= Math.pow(rw, owned);
+    }
+    return w;
+  }
   function pickByShopWeight(list, run) {
     if (!list || !list.length) return null;
     if (list.length === 1) return list[0];
-    /* 权重 = shopWeight × 重复获得惩罚：
-     *   repeatable（可重复获得）的传奇增益，每已拥有 1 份，
-     *   被抽中的权重就再乘 repeatWeight（默认 0.35）—— 越拿越难刷到。 */
-    const weightOf = (b) => {
-      let w = Math.max(0, Number(b.shopWeight) || 1);
-      const rw = b.mods && Number(b.mods.repeatWeight);
-      if (run && rw > 0 && rw < 1) {
-        const owned = b.kind === 'instant'
-          ? instantOwnedCount(run, b.id)
-          : Math.max(0, stacksOf(run, b.id) - 1);
-        if (owned > 0) w *= Math.pow(rw, owned);
-      }
-      return w;
-    };
+    const weightOf = (b) => buffWeightOf(run, b);
     let total = 0;
     for (const b of list) total += weightOf(b);
     if (!(total > 0)) return list[Math.floor(Math.random() * list.length)];
@@ -2376,8 +2495,10 @@
       const i = (list || []).findIndex((b) => (typeof b === 'string' ? b === id : b.id === id));
       if (i >= 0) {
         const removed = list[i];
+        const removedStacks = (removed && typeof removed === 'object')
+          ? Math.max(1, Math.floor(Number(removed.stacks) || 1)) : 1;
         list.splice(i, 1);
-        resetGrowth(run, id);                                                      // 第 3 项：成长累计清零
+        resetGrowth(run, id, removedStacks);                                       // 第 3 项：成长累计清零（按层数）
         /* 第 1 / 4 项：任何情况下都把「附魔免占位」与「一局一次」的登记一起撤掉 ——
          * 原来只在命中 pickBuffIds 那条分支里撤，若在别的名单里先命中就会残留登记，
          * 于是「失去之后再也刷不到」。 */
@@ -2411,10 +2532,11 @@
       }
       return pool.slice(0, 3).map((x) => ({ id: x.id, name: x.buff.name, rarity: x.buff.rarity, stacks: x.stacks }));
     }
-    /* 秘技通神（C33）：**只抽主动技能**。
-     * 它的效果是把该技能的「触发概率」大幅提升，而被动/防御类技能
-     * （力王附体 / 风驰电掣 / 武器好手 / 装死 / 皮糙肉厚 / 绝对防御…）
-     * 根本不进出手池，抽到它们等于白拿一整份传奇增益。
+    /* 秘技通神（C33）：只抽**主动技能**，外加两条特殊技能 —— 防御被动（绝对防御/龟甲术）
+     * 与小宇宙爆发（14）。前者不进出手池、「提升触发概率」走 sim 的 passiveSkillBoost；
+     * 后者的收益是「开战第一招必定放它」（见 applyPickBuff / adjustMe / sim 的 cosmosFirst）。
+     * 其余被动/防御类技能（力王附体 / 风驰电掣 / 武器好手 / 装死 / 皮糙肉厚…）
+     * 抽到等于白拿一整份传奇增益，所以一律不进候选。
      * 技能表里的 type 字段是权威口径（'主动' / '被动' / '防御'）。 */
     const isActiveSkill = (id) => {
       const map = (typeof skillsMap !== 'undefined' && skillsMap) ? skillsMap : (window.skillsMap || null);
@@ -2422,19 +2544,24 @@
       const t = it && it.type ? String(it.type) : '';
       return t === '主动';
     };
-    const pickableSkill = (id) => isActiveSkill(id) || isPickableDefense(id);
+    const pickableSkill = (id) => isActiveSkill(id) || isPickableDefense(id) || isPickableCosmos(id);
     let list;
     if (kind === 'skill') {
       list = (State.mySkills ? State.mySkills() : []).filter((sk) => sk && pickableSkill(sk.id));
-      /* 候选里补齐「玩家还没学的可抽防御技」——它们按 id 造一层占位，
-       * 选中后由 applyPickBuff 真正写进技能表。 */
+      /* 候选里补齐「玩家还没学的特殊技能」——防御技 16/7 与小宇宙爆发 14。
+       * 它们按 id 造一层占位，选中后由 applyPickBuff 真正写进技能表。 */
       const have = new Set(list.map((sk) => Number(sk.id)));
       const map = (typeof skillsMap !== 'undefined' && skillsMap) ? skillsMap : (window.skillsMap || null);
-      for (const id of PICKABLE_DEFENSE) {
+      for (const id of PICKABLE_DEFENSE.concat([PICKABLE_COSMOS])) {
         if (have.has(id)) continue;
         const it = map && map.getValue ? map.getValue(id) : null;
         if (it) list = list.concat([{ id: id, level: 1, name: it.name, type: it.type }]);
       }
+      /* 特殊技能在界面上不是「Lv 越高越好」，所以给它们挂一句提示。 */
+      list = list.map((sk) => {
+        const note = PICK_NOTE[Number(sk.id)];
+        return note ? Object.assign({}, sk, { note: note }) : sk;
+      });
     } else {
       list = (State.myWeapons ? State.myWeapons() : []);
     }
@@ -2465,14 +2592,23 @@
     const key = kind === 'skill' ? 'skillBoost' : 'weaponBoost';
     run[key] = run[key] || {};
     let pct = pend.pct;
-    if (kind === 'skill' && PICKABLE_DEFENSE.indexOf(Number(id)) >= 0) {
+    if (kind === 'skill' && isPickableCosmos(id)) {
+      /* 小宇宙爆发（14）：与防御技同样是「没学也直接给」，但收益不是触发概率 ——
+       * 而是**开战第一招必定放它**（adjustMe 把它翻成 me.mods.cosmosFirst，
+       * sim 选招时强制）。run.skillBoost[14] 只当开关用。 */
+      if (!(S().skills || []).some((sk) => Number(sk.id) === Number(id))) {
+        State.setWS('skill', Number(id), 1);
+      }
+      run[key][Number(id)] = COSMOS_PICK_BOOST;
+      pct = COSMOS_PICK_BOOST;
+    } else if (kind === 'skill' && isPickableDefense(id)) {
       /* 绝对防御 / 龟甲术是「受击自动触发」的防御被动，不给它们叠加技能等级，
-       * 而是把触发概率**大幅**提升（详见下方 applyDefenseBoost 的说明）。 */
+       * 而是把触发概率**大幅**提升（详见下方 defensePickBoostOf 的说明）。 */
       if (!(S().skills || []).some((sk) => Number(sk.id) === Number(id))) {
         State.setWS('skill', Number(id), 1);
       }
       const before = Number(run[key][Number(id)]) || 0;
-      run[key][Number(id)] = before + DEFENSE_PICK_BOOST;
+      run[key][Number(id)] = before + defensePickBoostOf(id);
       pct = run[key][Number(id)];
     } else {
       run[key][Number(id)] = Math.max(Number(run[key][Number(id)]) || 0, pct);
@@ -2565,6 +2701,24 @@
     for (const row of run.permanent || []) if (row && row.id === id) n += Math.max(1, Math.floor(Number(row.stacks) || 1));
     for (const row of run.limited || []) if (row && row.id === id) n += Math.max(1, Math.floor(Number(row.stacks) || 1));
     return n;
+  }
+  /* ============================================================
+   * 「本局累计获得过几份」—— 与「现在还剩几份」分开的两个口径。
+   *
+   * 易碎烙印（C49 终焉烙印 / C39~C44 属性烙印 / C52 涌泉烙印）碎掉之后，
+   * rollFragileBuffs 会把那一行**从 run.limited 里删掉**（加成转进 fragileBurned）。
+   * 于是 buffCountOf / stacksOf 都会少算一份：层数上限（C49 最多 3 次）与
+   * 「重复获得降权」都会因为碎掉而回退 —— 玩家可以靠「等它碎」反复刷同一条烙印。
+   * 需求（本轮）：**碎掉的那一份也要计入**，所以单独记一份只增不减的流水。
+   * ============================================================ */
+  /** 本局累计获得过的份数（只增不减；目前只对易碎烙印记账）。 */
+  function fragileGotOf(run, id) {
+    const t = run && run.fragileGot;
+    return Math.max(0, Math.floor(Number(t && t[id]) || 0));
+  }
+  /** 层数上限 / 可获得性 / 重复降权统一用这个口径：在册份数 与 累计获得份数 取大。 */
+  function obtainedCountOf(run, id) {
+    return Math.max(buffCountOf(run, id), fragileGotOf(run, id));
   }
   /** 某个**即时类**增益本局已获得的次数（即时类不进 permanent/limited，另记在 instantIds 上）。 */
   function instantOwnedCount(run, id) {
@@ -2669,6 +2823,19 @@
           run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0) - 1);
           run.fragileMulBurned = Math.max(0, Math.floor(Number(run.fragileMulBurned) || 0)) + 1;
         }
+        /* 淘金烙印：损毁把一份「存在」层转成「损毁」层（+15% → +30%）。 */
+        if (def.mods.fragileCoinAddAlive !== undefined) {
+          run.fragileCoinBase = Math.max(0, Math.floor(Number(run.fragileCoinBase) || 0) - 1);
+          /* 直接把损毁份记进明细数组 —— 这是加成的**真源**（rebuildFragileTotals 也会重算它）。
+           * 顺带修一个老 bug：涌泉烙印（C52）原来只写了 brokenMarks、没写 fragileHealBurned，
+           * 于是「损毁后 +20% 治疗」要等到某次「碎烙印作废」触发 rebuild 才生效。 */
+          run.fragileCoinBurned = (Array.isArray(run.fragileCoinBurned) ? run.fragileCoinBurned : [])
+            .concat([Math.max(0, Number(def.mods.fragileCoinAddBurned) || 0)]);
+        }
+        if (def.mods.fragileHealAddAlive !== undefined) {
+          run.fragileHealBurned = (Array.isArray(run.fragileHealBurned) ? run.fragileHealBurned : [])
+            .concat([Math.max(0, Number(def.mods.fragileHealAddBurned) || 0)]);
+        }
         /* 明细：碎掉的每一条都登记一份，供「30 层后每 2 层作废一条」抽取。 */
         run.brokenMarks = Array.isArray(run.brokenMarks) ? run.brokenMarks : [];
         if (def.mods.fragileStat) {
@@ -2678,6 +2845,10 @@
           run.brokenMarks.push({ kind: 'heal',
             alive: Math.max(0, Number(def.mods.fragileHealAddAlive) || 0),
             burned: Math.max(0, Number(def.mods.fragileHealAddBurned) || 0) });
+        } else if (def.mods.fragileCoinAddAlive !== undefined) {
+          run.brokenMarks.push({ kind: 'coin',
+            alive: Math.max(0, Number(def.mods.fragileCoinAddAlive) || 0),
+            burned: Math.max(0, Number(def.mods.fragileCoinAddBurned) || 0) });
         } else if (def.mods.fragileFinalMul) {
           run.brokenMarks.push({ kind: 'final',
             alive: Math.max(0, Number(def.mods.fragileAddAlive) || 0),
@@ -2693,8 +2864,9 @@
   /** 本轮第 3 项：卖出/失去**成长类**增益时，把它累计出来的运行态一并清零 ——
    *  再买回来是从 0 重新长，而不是接着上次的进度（吞噬成长就是典型）。
    *  （叠层数本身在重新获得时本来就是 1；过去漏掉的是这些「跑出来的数值」。） */
-  function resetGrowth(run, id) {
+  function resetGrowth(run, id, stacks) {
     if (!run) return false;
+    const n = Math.max(1, Math.floor(Number(stacks) || 1));      // 卖出/失去的是**整条**（含所有层数）
     if (id === 'C06') run.killPower = 0;
     /* 需求：**成长类累积的生命上限在被替换/卖出后不消失**。
      * C07（吞噬成长，百分比）与 C11（以战养战，固定值）都是「本局累计」的上限收益，
@@ -2719,11 +2891,23 @@
        * （5% 损毁那条路径不走这里，所以损毁不掉加成）。 */
       const def = D().BUFF_BY_ID[id];
       if (def && def.mods && def.mods.fragileStat) {
-        /* 主动卖出/被换掉：基础那份收回（损毁得到的永久份保留 —— 那是 6% 判定给的奖励）。 */
+        /* 主动卖出/被换掉：基础那份按层数收回（损毁得到的永久份保留 —— 那是 6% 判定给的奖励）。 */
         const key = def.mods.fragileStat;
         const pct = Math.max(0, Number(def.mods.fragilePct) || 0);
         run.fragileBase = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBase || {});
-        run.fragileBase[key] = Math.max(0, run.fragileBase[key] - pct);
+        run.fragileBase[key] = Math.max(0, run.fragileBase[key] - pct * n);
+        return true;
+      }
+      /* 终乘（C49）/ 治疗（C52）/ 淘金（C53）烙印：主动失去时把**未破碎的那一份**按层数收回 ——
+       * 损毁得到的永久份保留（与属性烙印同一口径）。
+       * 注意 run.fragileGot（「一局获得过几份」）不回退：那是层数上限与重复降权的口径，
+       * 与「现在还持有几份」无关（否则卖掉再买回来就能绕开层数上限）。 */
+      if (def && def.mods && def.mods.fragileFinalMul) {
+        run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0) - n);
+        return true;
+      }
+      if (def && def.mods && def.mods.fragileCoinAddAlive !== undefined) {
+        run.fragileCoinBase = Math.max(0, Math.floor(Number(run.fragileCoinBase) || 0) - n);
         return true;
       }
       return false;
@@ -2758,7 +2942,7 @@
         const stacks = Math.max(1, Math.floor(Number(list[i].stacks) || 1));
         const gain = sellPriceOf(run, buff);          // 已含层数
         list.splice(i, 1);
-        resetGrowth(run, id);                                                      // 第 3 项：成长累计清零
+        resetGrowth(run, id, stacks);                                              // 第 3 项：成长累计清零（按层数）
         run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== id);         // 第 1 项：附魔记录一并清掉
         run.coins += gain;
         logBuff(run, id, 'lose', { detail: '商店卖出 ' + (stacks > 1 ? ('×' + stacks + ' 层 ') : '') + '+' + gain + ' 试炼币' });
@@ -3151,6 +3335,11 @@
     poolFilterOf: (run, buff) => poolFilter(run || endless().run, buff),
     /* 只读：本条增益当前还能不能获得（叠层上限口径）。 */
     ownableOf: (run, buff) => ownable(run || endless().run, buff),
+    /* 只读：一条增益当前的抽中权重（shopWeight × 重复获得惩罚，含碎掉的烙印份数）。
+     * 测试用；界面也可以拿它显示「重复获得概率」。 */
+    buffWeightOf: (run, id) => buffWeightOf(run || endless().run, D().BUFF_BY_ID[id]),
+    /* 只读：某条增益本局「累计获得过几份」（含已碎掉的烙印）。 */
+    obtainedCountOf: (run, id) => obtainedCountOf(run || endless().run, id),
     /* 只读：当前战斗奖励的选项目数（基础 3 + 抉择扩充层数，上限 6）。 */
     choiceSlotsOf: (run) => choiceSlotsOf(run || endless().run),
     /* 只读：选取型 buff 的候选（测试用；skill 会过滤掉被动/防御类）。 */

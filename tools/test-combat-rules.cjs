@@ -181,33 +181,53 @@ test('龟甲术首次触发后仍可二次触发（不再是一次性）', () =>
   assert.ok(several > 0, '没有装备附加能力时也应当能二次触发，实测 ' + several + '/200 场出现');
 });
 
-test('绝对防御：首次 22%，二次及以后 13%（都低于原来的 30%）', () => {
+test('绝对防御：首次 22%，之后逐次递减（22/13/9/6/4/3/2…，对敌我都生效）', () => {
   const c = game();
   const rules = c.Sim.rules;
   assert.equal(rules.jueDuiChance, 22);
+  assert.equal(rules.jueDuiAgain, 13);
   assert.ok(rules.jueDuiChance < 30, '首次概率必须低于原来的 30%');
-  assert.ok(rules.jueDuiAgain < rules.jueDuiChance, '二次及以后必须比首次更低');
-  // 单次受击（只打一下）：触发率应贴着首次的 22%
-  let firstHits = 0, firstBlocks = 0, manyHits = 0, manyBlocks = 0;
-  /* 样本量：400 次里只有约 1/3 是「单次受击」，比例的标准差 ≈ 3.6%，
-   * 而容差是 ±5%（约 1.4σ）→ 约 16% 的概率误报。加到 1500 次，
-   * 单次受击样本约 500，标准差降到 ≈1.9%，容差变成约 2.7σ，才真正稳。 */
-  for (let i = 0; i < 1500; i++) {
-    const ev = rounds(randomGame(), { power: 30, weapons: ['6:1'], hp: 100000 }, { skills: ['16:1'], hp: 100000 });
-    let n = 0;
+  assert.ok(rules.jueDuiAgain < rules.jueDuiChance, '第二次必须比首次更低');
+  assert.ok(rules.jueDuiDecay > 0 && rules.jueDuiDecay < 1, '应当有一个小于 1 的衰减系数：' + rules.jueDuiDecay);
+  assert.ok(rules.jueDuiMin > 0, '递减要有下限（不能变成 0 = 技能彻底失效）：' + rules.jueDuiMin);
+  /* 曲线本身：严格递减到下限为止（需求点名的「第二次 < 第一次、第三次 < 第二次…」） */
+  const mkDef = () => ({ name: 'd', level: 60, power: 100, agility: 100, speed: 100, hp: 1000, maxHp: 1000,
+    weapons: [], skills: { 16: 1 }, effects: {}, baseStats: { power: 100, agility: 100, speed: 100 } });
+  const curve = [0, 1, 2, 3, 4, 5, 6, 7].map((n) => c.Sim.jueDuiChanceOf(mkDef(), n));
+  assert.deepEqual(curve.slice(0, 3), [22, 13, 9], '曲线应当是 22 / 13 / 9：' + curve.join('/'));
+  for (let i = 1; i < 6; i++) {
+    assert.ok(curve[i] < curve[i - 1], '第 ' + (i + 1) + ' 次必须低于第 ' + i + ' 次：' + curve.join('/'));
+  }
+  assert.ok(curve[7] >= rules.jueDuiMin, '到下限后不再下降：' + curve.join('/'));
+  /* 兼容旧的布尔口径：false = 首次、true = 第二次 */
+  assert.equal(c.Sim.jueDuiChanceOf(mkDef(), false), 22);
+  assert.equal(c.Sim.jueDuiChanceOf(mkDef(), true), 13);
+  /* 对敌我都生效：sim 里两侧都会走 dmgReduce，同一场里各自记「已经挡过几次」。
+   * 注意不能按「本场第 n 次受击」统计 —— 第一次没挡下来时计数仍然是 0，
+   * 第二次受击还是 22% 那一档（实测按受击序号算是 21%，会误判）。
+   * 正确做法是**按当前已触发次数分桶**：count=0 / 1 / 2 / 3+。 */
+  const byCount = {};
+  for (let i = 0; i < 800; i++) {
+    const ev = rounds(randomGame(), { power: 30, weapons: ['6:1'], hp: 100000 },
+      { skills: ['16:1'], hp: 100000 });
+    let count = 0;                                  // 本场已经挡过几次（= sim 里的 jueDuiCount）
     for (const r of ev) {
       if (r.attacker !== 0 || r.dodge || r.action === 'rest') continue;
-      n++;
-      manyHits++; if (r.jueDui) manyBlocks++;
-      if (n === 1) { firstHits++; if (r.jueDui) firstBlocks++; }
+      const key = Math.min(3, count);
+      byCount[key] = byCount[key] || { hits: 0, blocks: 0 };
+      byCount[key].hits++;
+      if (r.jueDui) { byCount[key].blocks++; count++; }
     }
   }
-  const firstRate = firstBlocks / firstHits;
-  assert.ok(Math.abs(firstRate - 0.22) < 0.05, '首次受击实测 ' + (firstRate * 100).toFixed(1) + '% 应接近 22%');
-  // 整场累计：首次 22% + 之后 13%，长期应明显低于 22% 但高于 13%
-  const longRate = manyBlocks / manyHits;
-  assert.ok(longRate < 0.20, '整场累计触发率 ' + (longRate * 100).toFixed(1) + '% 应明显低于首次的 22%（二次档 13% 在压）');
-  assert.ok(longRate > 0.10, '整场累计触发率 ' + (longRate * 100).toFixed(1) + '% 不该低于二次档太多');
+  const rateAt = (k) => (byCount[k] && byCount[k].hits >= 50 ? byCount[k].blocks / byCount[k].hits : NaN);
+  const rate0 = rateAt(0), rate1 = rateAt(1), rate2 = rateAt(2);
+  assert.ok(Number.isFinite(rate0) && Number.isFinite(rate1) && Number.isFinite(rate2),
+    '三个桶都要有足够样本：' + JSON.stringify(byCount));
+  assert.ok(Math.abs(rate0 - 0.22) < 0.06, '未挡过时实测 ' + (rate0 * 100).toFixed(1) + '% 应接近 22%');
+  assert.ok(rate1 < rate0, '挡过 1 次之后应当更低：' + (rate0 * 100).toFixed(1) + '% vs ' + (rate1 * 100).toFixed(1) + '%');
+  assert.ok(rate2 < rate1, '挡过 2 次之后应当再低：' + (rate1 * 100).toFixed(1) + '% vs ' + (rate2 * 100).toFixed(1) + '%');
+  assert.ok(rate1 < 0.19 && rate2 < 0.14, '实测档位应贴近 13% / 9%：' +
+    (rate1 * 100).toFixed(1) + '% / ' + (rate2 * 100).toFixed(1) + '%');
 });
 
 test('同时有龟甲术与绝对防御时，每次受击的受伤期望更低（不会被挤占）', () => {
@@ -306,8 +326,8 @@ test('来点松果可以二次触发，但概率是所有武器/技能里最低�
   assert.equal(rate(14), rules.repeatSkill, '没点名的技能（小宇宙爆发）保持基准');
   assert.equal(rate(18), rules.repeatSkill, '没点名的技能（吸铁大法）保持基准');
   assert.ok(rate(17) < rate(8) && rate(17) < rate(15), '来点松果仍是最低档');
-  // 绝对防御是受击自动触发，不进出手池，但同样要「二次及以后更难触发」
-  assert.ok(rules.jueDuiAgain < rules.jueDuiChance, '绝对防御二次触发概率要低于首次');
+  // 绝对防御是受击自动触发，不进出手池，但同样要「越挡越难再挡」
+  assert.ok(rules.jueDuiAgain < rules.jueDuiChance, '绝对防御第二次触发概率要低于首次');
   assert.ok(rules.jueDuiAgain <= rules.repeatSkillMedium, '绝对防御的二次档要和中幅下调一个量级');
   /* 需求 3：来点松果**不允许在同一回合内多次触发**（它自带追加行动，
    * 早期实现会在同一回合里连着放两次）。同一场可以有多次，但两次之间

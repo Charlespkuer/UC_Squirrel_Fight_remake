@@ -210,6 +210,7 @@ test('需求5：x10 层只有最后一个敌人穿狂战套', () => {
   assert.equal(run.plan.length, 5, '第 10 层应当是 5 场');
   assert.equal(run.plan[4].kind, 'warlord', '最后一场应当是狂战松鼠');
   const seen = [];
+  const choiceBefore = [];      // 记录「第几场之前」给了场间多选一
   /* 环境里的「幻影回响」会在战后按概率追加一场 —— 这条测试只数「本层计划内的 5 场」，
    * 所以直接关掉环境抽取（比每轮清 env 更可靠：reportBattle 里还会再摇一次）。 */
   run.noEnvRoll = true; run.env = [];
@@ -218,11 +219,15 @@ test('需求5：x10 层只有最后一个敌人穿狂战套', () => {
     r.env = [];
     if (r.layer !== 10) break;
     if (r.choices) {
+      choiceBefore.push(r.idx + 1);              // 下一场就是「第 idx+1 场」
       /* 永久格子满了时 pickChoice 会返回 needsReplace 且**不消耗** choices ——
-       * 必须补一个替换目标，否则循环会原地打转（表现为「本层只打了 N 场」）。 */
+       * 必须补一个替换目标，否则循环会原地打转（表现为「本层只打了 N 场」，实测偶发）。
+       * 替换目标要挑**占位**的那一个：换掉被虚空铭文附魔（不占位）的会被拒绝，
+       * 于是循环空转、12 次预算被耗尽 —— 这就是那条偶发失败的真正原因。 */
       const p = c.Tower.pickChoice('endless', 0, null);
       if (p && !p.ok && p.needsReplace) {
-        const owned = (r.permanent || [])[0];
+        const free = r.slotFreeIds || [];
+        const owned = (r.permanent || []).find((b) => free.indexOf(b.id) < 0) || (r.permanent || [])[0];
         c.Tower.pickChoice('endless', 0, owned ? owned.id : null);
       }
       continue;
@@ -253,6 +258,11 @@ test('需求5：x10 层只有最后一个敌人穿狂战套', () => {
   const lastHit = seen[4].wears.filter((id) => berserk.includes(id));
   assert.equal(lastHit.length, 4, '最后一场应当整套狂战：' + JSON.stringify(seen[4].wears));
   assert.equal(seen[4].elite, true, '最后一场应当带精英标记');
+  /* 本轮修 bug：5 场层（10n 层）原来**跳过了「第 4 场前」那一次多选一**
+   *（choiceAfter 被写成 len === 5 ? 4 : 3），玩家反馈「10n 层第四场前没有多选一」。
+   * 现在：所有层都在第 4 场前给一次，5 场层再在塔顶 boss 前多给一次。 */
+  assert.deepEqual(choiceBefore, [4, 5],
+    '第 10 层应当在第 4 场前与第 5 场前各给一次多选一，实测 ' + JSON.stringify(choiceBefore));
 });
 
 test('需求6：限次 buff 每场都扣（含整层最后一场）', () => {
@@ -1777,9 +1787,10 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
   const c = setup();
   const TD = c.TowerData, T = c.Tower, S = c.State;
   const STACKABLE = TD.BUFFS.filter((b) => b.stackable).map((b) => b.id).sort();
-  /* C50「抉择扩充」也是 stackable，但它的叠层效果是「选项数 +1/层」而不是属性成比例，
-   * 所以先把它摘出来单独在本测试末尾断言。 */
-  assert.equal(STACKABLE.join(','), 'C06,C07,C11,C12,C16,C17,C50', '可叠层增益清单变了：' + STACKABLE.join(','));
+  /* C50「抉择扩充」也是 stackable，但它的叠层效果是「选项数 +1/层」而不是属性成比例；
+   * C14「涅槃」同理 —— 每层多给一次复活机会（本轮改成可叠 2 层），也不是属性成比例。
+   * 这两条都摘出来单独断言，只保留「按层数成比例」的那几条在这个循环里。 */
+  assert.equal(STACKABLE.join(','), 'C06,C07,C11,C12,C14,C16,C17,C50', '可叠层增益清单变了：' + STACKABLE.join(','));
 
   /* 跑一小段真实流程，取某个累计字段（固定层数，排除推进噪声）。 */
   const measure = (id, stacks, wins, field, fixedLayer) => {
@@ -1804,7 +1815,6 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
     if (p && !p.ok && p.needsReplace) T.pickChoice('endless', i, ((run.permanent || [])[0] || {}).id || null);
     return p;
   };
-    const heals = [];
     let won = 0, wonAfter10 = 0;
     for (let i = 0; i < wins; i++) {
       const cur = T._debugRun('endless');
@@ -1818,15 +1828,13 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
       const a = T._debugRun('endless');
       if (!a || !a.attempt) break;
       if (fixedLayer) a.layer = fixedLayer;
-      const out = T.reportBattle('endless', a.attempt, true, 1, null);
+      T.reportBattle('endless', a.attempt, true, 1, null);   // 只推流程：本轮不再从战后报告里取回血量
       won++;
       const lay = Number((T._debugRun('endless') || {}).layer) || 0;
       /* 只有第 10 层起的胜场才计入 C12/C07 之类「层 10 起」的成长。 */
       if (!fixedLayer || lay >= 10) wonAfter10++;
-      if (out && out.winHeal != null) heals.push(out.winHeal);
       if (!T._debugRun('endless')) break;
     }
-    if (field === 'winHeal') return { value: heals.length ? heals[0] : NaN, wins: won };
     const rr = T._debugRun('endless');
     /* 同时返回**实际打赢的场数**：请求 N 场不代表正好打了 N 场
      *（中途层数推进/战斗结束都会让实际值不同），用它推导期望才稳。 */
@@ -1840,8 +1848,8 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
     ['C07', 'winMaxHp', 7, null],   // 吞噬成长：每胜 +2%（×层数）
     ['C11', 'winHpFlat', 7, null],  // 以战养战：每胜 +5 上限（×层数）
     ['C12', 'winStatPower', 7, 10],  // 登顶者：第 10 层起每胜 +1 力（×层数）
-    ['C16', 'winHeal', 3, null],    // 战后续航：每胜回 5%（×层数）
-    ['C17', 'winHeal', 3, null],    // 战后续航·精：每胜回 10%（×层数）
+    /* C16/C17「战斗续航」本轮改成**开战第一回合**回血（不再按胜场结算），
+     * 这个「按胜场归一化」的循环量不到它 —— 叠层比例由需求65 单独覆盖。 */
   ];
   /* 击杀数/胜利场数带随机性，单次测量的比值会抖。取 3 次测量的中位数，
    * 既能压掉抖动，又保持「必须严格成比例」的断言强度。 */
@@ -3449,7 +3457,9 @@ test('需求54：挥金如土可重复 / 传奇商店降权 / 终焉烙印终乘
     T.startEndlessRun();
     const r = T._debugRun('endless');
     r.permanent = []; r.limited = []; r.slotFreeIds = []; r.pickBuffIds = [];
-    if (owned.length) T._debugRun('endless').permanent = owned.map((id) => ({ id: id, stacks: 1 }));
+    /* 本轮：涅槃（C14）改成可叠 2 层 —— 「全拥有」要按**叠满**算，
+     * 只挂 1 份时它仍然能再刷到（传奇档就不会彻底绝迹）。 */
+    if (owned.length) T._debugRun('endless').permanent = owned.map((id) => ({ id: id, stacks: id === 'C14' ? 2 : 1 }));
     T._debugRun('endless').instantIds = [{ id: 'C51', count: 1 }];   // 即时类传奇也要算「已拥有」
     /* 终焉烙印(C49) 是限次类、且「一局最多 3 次」—— 想让它真正退出池子，
      * 必须在 run.limited 里叠到 maxStacks（只挂 1 份仍会继续出现）。 */
@@ -3512,17 +3522,18 @@ test('需求55：装备星标防误合误卖 / 天命所归（传奇即时）/ �
   const raw = JSON.parse(c.localStorage.getItem(S.saveKey) || '{}');
   assert.ok((raw.gears || []).some((x) => x.starred === true), '存档里应当有 starred 字段');
 
-  /* ② 天命所归（C51）：传奇·即时·可重复；史诗/传奇 ×2、普通 ×0.5 */
+  /* ② 天命所归（C51）：传奇·即时，**一局只能获得一次**；史诗/传奇 ×2、普通 ×0.5 */
   const c51 = TD.BUFF_BY_ID.C51;
   assert.ok(c51, 'C51 应当存在');
   assert.equal(c51.name, '天命所归', 'C51 名称');
   assert.equal(c51.rarity, 3, 'C51 应当是传奇');
   assert.equal(c51.kind, 'instant', 'C51 应当是即时类');
-  assert.equal(c51.repeatable, true, 'C51 应当可重复获得');
+  assert.equal(c51.maxStacks, 1, 'C51 应当一局只能获得一次（instant + maxStacks 闸门）');
+  assert.equal(c51.repeatable, true, 'C51 仍保留 repeatable（传奇掉率的「可重复传奇是否全拥有」口径要用）');
   assert.equal(c51.mods.epicMul, 2, '史诗档 ×2');
   assert.equal(c51.mods.legendMul, 2, '传奇档 ×2');
   assert.equal(c51.mods.commonMul, 0.5, '普通档 ×0.5');
-  assert.ok(c51.mods.repeatWeight > 0 && c51.mods.repeatWeight < 1, '应当有重复获得惩罚：' + c51.mods.repeatWeight);
+  assert.equal(c51.mods.repeatWeight, undefined, '不能再重复，就不需要 repeatWeight 降权了');
   assert.ok(TD.endlessPool.some((b) => b.id === 'C51'), 'C51 应当在无尽塔池');
   /* 权重真的变（普通降、史诗/传奇升） */
   const w0 = TD.tiltWeights(1, {}), w1 = TD.tiltWeights(1, { rarityBoost: 1 });
@@ -3538,18 +3549,20 @@ test('需求55：装备星标防误合误卖 / 天命所归（传奇即时）/ �
   const r = T._debugRun('endless');
   r.permanent = []; r.limited = []; r.slotFreeIds = [];
   assert.equal(T.rarityBoostOf(T._debugRun('endless')).common, 1, '没拿过时为 1');
+  assert.equal(T.poolFilterOf(r, c51), true, '拿之前应当能进池');
   T.addBuff(T._debugRun('endless'), 'C51');
   const after1 = T._debugRun('endless');
   assert.equal(after1.rarityBoost, 1, '第 1 次获得应当记 1 层');
   assert.equal((after1.instantIds || []).find((x) => x.id === 'C51').count, 1, 'instantIds 应当记 1');
   assert.ok(T.rarityBoostOf(after1).epic === 2, '史诗系数应当是 2');
-  T.addBuff(T._debugRun('endless'), 'C51');
-  const after2 = T._debugRun('endless');
-  assert.equal(after2.rarityBoost, 2, '可重复获得：第 2 次应当记 2 层');
-  assert.ok(Math.abs(T.rarityBoostOf(after2).common - 0.25) < 1e-9, '2 层时普通系数 0.25');
-  /* 重复获得惩罚：已拥有的层数会被记账（pickByShopWeight 据此降权）。 */
-  assert.equal(T.instantOwnedCountOf(T._debugRun('endless'), 'C51'), 2,
-    '已获得 2 次应当记 2：' + T.instantOwnedCountOf(T._debugRun('endless'), 'C51'));
+  /* 一局一次：拿过之后既不再进池、也不可再获得（真实奖励路径由 poolFilter/ownable 兜住） */
+  assert.equal(T.poolFilterOf(after1, c51), false, '拿过之后不该再进池');
+  assert.equal(T.ownableOf(after1, c51), false, '拿过之后不该再获得');
+  const dup = T.addBuff(T._debugRun('endless'), 'C51');   // 兜底直调：addBuff 里也硬拦了一道
+  assert.equal(dup.ok, false, '第二次直调也应当被拒（货架先摇后买的竞态要挡住）');
+  assert.equal(T._debugRun('endless').rarityBoost, 1, '不该再叠到 2 层（一局一次）');
+  assert.equal(T.instantOwnedCountOf(T._debugRun('endless'), 'C51'), 1,
+    '实时记账只应当记 1 次：' + T.instantOwnedCountOf(T._debugRun('endless'), 'C51'));
 
   /* ③ 战斗奖励的稀有度：不再用第一页商店权重，而是约 10 币刷新后的水平 */
   const natural = TD.tiltWeights(1, {});
@@ -3580,12 +3593,15 @@ test('需求56：秘技通神只抽主动技能 / 终焉烙印改加算并降出
     const cand = T.pickCandidatesOf('skill');
     assert.ok(cand.length > 0, '应当能抽出候选');
     for (const x of cand) {
-      /* 秘技通神可以抽：主动技能，外加绝对防御(16) 与龟甲术(7) 这两个「受击自动触发」的
-       * 防御被动（选中后大幅提升触发概率）。其余被动/防御类仍然不许出现。 */
+      /* 秘技通神可以抽：主动技能，外加三个「特殊技能」——
+       * 绝对防御(16) / 龟甲术(7)（受击自动触发的防御被动，选中后触发概率提升）
+       * 与小宇宙爆发(14)（选中后开战第一招必放）。其余被动/防御类仍然不许出现。 */
       const defOk = (x.id === 16 || x.id === 7) && x.type === '防御';
+      const special = defOk || x.id === 14;
       assert.ok(x.type === '主动' || defOk,
-        '秘技通神只该抽主动技能或 16/7，实测抽到 ' + x.id + ':' + x.type + ' ' + x.name);
-      if (!defOk) assert.ok(actives.indexOf(x.id) >= 0, '候选应当来自已学的主动技能：' + x.id);
+        '秘技通神只该抽主动技能或 16/7/14，实测抽到 ' + x.id + ':' + x.type + ' ' + x.name);
+      /* 非特殊的候选必须来自**已学**的主动技能（14/16/7 允许作为「没学也能抽」的占位）。 */
+      if (!special) assert.ok(actives.indexOf(x.id) >= 0, '候选应当来自已学的主动技能：' + x.id);
     }
   }
 
@@ -3594,8 +3610,10 @@ test('需求56：秘技通神只抽主动技能 / 终焉烙印改加算并降出
   assert.equal(c49.mods.fragileAddAlive, 0.25, '存在层每层 +25%');
   assert.equal(c49.mods.fragileAddBurned, 0.5, '损毁层每层 +50%');
   assert.equal(c49.mods.fragileMulAlive, undefined, '旧的乘法参数应当已移除');
-  assert.ok(c49.mods.repeatWeight > 0 && c49.mods.repeatWeight <= 0.2,
-    '重复出率应当进一步调低（≤0.2）：' + c49.mods.repeatWeight);
+  /* 本轮：进一步单独调低（0.18 → 0.10），而且碎掉的那一份也计入份数（见需求72）。 */
+  assert.equal(c49.mods.repeatWeight, 0.10, '终焉烙印的重复出率应当再降一档：' + c49.mods.repeatWeight);
+  assert.ok(TD.BUFF_BY_ID.C52.mods.repeatWeight > c49.mods.repeatWeight,
+    '只降终焉烙印：涌泉烙印（C52）的重复出率不该跟着动（' + TD.BUFF_BY_ID.C52.mods.repeatWeight + '）');
   const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
     baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
   const scene = (marks, burned, id) => {
@@ -3734,28 +3752,41 @@ test('需求57：终焉烙印最多3次 / 秘技通神可抽绝对防御与龟�
   T.addBuff(T._debugRun('endless'), 'C33');
   const res8 = T.applyPickBuff('skill', 8);
   assert.ok(res8.pct <= 1, '主动技能仍是原来的 pct：' + res8.pct);
-  /* 实战触发率对比：绝对防御 / 龟甲术 都要明显变高 */
+  /* 实战触发率对比：绝对防御 / 龟甲术 都要明显变高。
+   * 注意：绝对防御现在是**本场逐次递减**的（22/13/9/…），所以整场累计率的比值会被
+   * 衰减曲线压扁（实测 10.5% → 15.5%，比值只有 1.48，会把「>1.5」这条打成偶发抖动）。
+   * 加成作用在**每一次判定**上，所以这里改成比较**每场第一次受击**的触发率。 */
   const mkF = (eff, skills) => ({ name: 'p', level: 60, power: 200, agility: 100, speed: 100,
     hp: 40000, maxHp: 40000, weapons: [{ id: 1, level: 5 }],
     skills: (skills || []).map((id) => ({ id: id, level: 5 })), effects: eff || {},
     baseStats: { power: 200, agility: 100, speed: 100 } });
-  const rateOf = (eff, skills, key) => {
+  const rateOf = (eff, skills, key, firstOnly) => {
     let hits = 0, trig = 0;
     for (let i = 0; i < 200; i++) {
       const me = mkF(eff, skills);
       const foe = { name: 'F', level: 60, power: 300, agility: 200, speed: 150, hp: 999999, maxHp: 999999,
         weapons: [{ id: 1, level: 5 }], skills: [], effects: {}, baseStats: { power: 300, agility: 200, speed: 150 } };
       const rr = Sim.simulate(foe, me);
+      let n = 0;
       for (const x of (rr.rounds || [])) {
-        if (x.attacker === 0 && x.action === 'common' && x.dmg !== undefined) { hits++; if (x[key]) trig++; }
+        if (x.attacker !== 0 || x.action !== 'common' || x.dmg === undefined) continue;
+        n++;
+        if (firstOnly && n > 1) break;
+        hits++; if (x[key]) trig++;
+        if (firstOnly) break;
       }
     }
     return hits ? trig / hits : 0;
   };
-  const jdPlain = rateOf(null, [16], 'jueDui'), jdBoost = rateOf({ 16: 2 }, [16], 'jueDui');
-  assert.ok(jdBoost > jdPlain * 1.5, '绝对防御触发率应当大幅提升：' + (jdPlain * 100).toFixed(1) + '% → ' + (jdBoost * 100).toFixed(1) + '%');
-  const gjPlain = rateOf(null, [7], 'guiJia'), gjBoost = rateOf({ 7: 2 }, [7], 'guiJia');
-  assert.ok(gjBoost > gjPlain * 1.5, '龟甲术触发率应当大幅提升：' + (gjPlain * 100).toFixed(1) + '% → ' + (gjBoost * 100).toFixed(1) + '%');
+  /* 绝对防御的加成改成**函数口径的确定性断言**：它现在是本场逐次递减的
+   *（22/13/9/…，见 sim 的 jueDuiChanceOf），而「第一次受击」的实测会被前面的
+   * 武器攻击污染 —— 武器打上来同样是一次判定、会把计数推上去，于是实测只有 ×1.5 上下、
+   * 偶发不过阈值。真实战斗里的递减曲线由 test-combat-rules 的「按已触发次数分桶」覆盖。 */
+  const gjPlain = rateOf(null, [7], 'guiJia', true), gjBoost = rateOf({ 7: 2 }, [7], 'guiJia', true);
+  assert.ok(gjBoost > gjPlain * 1.5, '龟甲术**首次**触发率应当大幅提升：' + (gjPlain * 100).toFixed(1) + '% → ' + (gjBoost * 100).toFixed(1) + '%');
+  /* 整场累计也不能反而更低（绝对防御会递减，所以只要求「不更差」） */
+  assert.ok(rateOf({ 16: 2 }, [16], 'jueDui') >= rateOf(null, [16], 'jueDui') * 1.2,
+    '加成后绝对防御的整场累计触发率也不该更低');
   /* 平衡约束：秘技通神加成之后，「第二次及以后」的触发概率不得高于 50%。
    * 基准值本来就在 50% 以下（绝对防御 13、龟甲术 20），但 ×3 之后龟甲术会到 60%，
    * 实测平均格挡率从 20.7% 飙到 63.3%，所以对「加成后」统一封顶。 */
@@ -3763,9 +3794,12 @@ test('需求57：终焉烙印最多3次 / 秘技通神可抽绝对防御与龟�
     hp: 1000, maxHp: 1000, weapons: [], skills: (skills || []).map((id) => ({ id: id, level: 5 })),
     effects: eff || {}, baseStats: { power: 200, agility: 100, speed: 100 } });
   assert.equal(Sim.jueDuiChanceOf(mkF2(null, [16]), false), 22, '未选中时绝对防御首次仍是 22');
-  assert.equal(Sim.jueDuiChanceOf(mkF2(null, [16]), true), 13, '未选中时绝对防御二次及以后仍是 13');
+  assert.equal(Sim.jueDuiChanceOf(mkF2(null, [16]), true), 13, '未选中时绝对防御第二次仍是 13');
+  assert.equal(Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), 0), 66, '加成后**首次**应当是 22×3 = 66');
   assert.equal(Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), true), 39,
-    '选中后绝对防御二次及以后应当是 39（≤50）');
+    '选中后绝对防御第二次应当是 39（≤50）');
+  assert.equal(Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), 2), 27,
+    '加成后第三次应当是 9×3 = 27（逐次递减但整体抬高）');
   assert.ok(Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), true) <= 50,
     '绝对防御二次及以后不得高于 50%：' + Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), true));
   assert.ok(Sim.shellChanceOf(mkF2({ 7: 2 }, [7]), true) <= 50,
@@ -4376,12 +4410,13 @@ test('需求63：开局回血类 buff 要吃到局内加生命上限的加成', 
   assert.equal(unrelated.maxHp, 5000, '减伤不该影响上限');
   assert.equal(unrelated.hp, 3000, '减伤不该影响开局回血');
 
-  /* ⑤ 文案口径：效果清单里仍然写「开战回血 X% 最大生命」 */
-  const lines = T.buffEffectLines ? T.buffEffectLines('endless') : null;
-  if (lines) {
-    const line = (lines.effects || []).find((x) => x[0] === '开战回血');
-    if (line) assert.ok(/最大生命/.test(line[1]), '文案应当说明是按最大生命：' + JSON.stringify(line));
-  }
+  /* ⑤ 文案口径：效果清单里仍然写「开战回血 X% 最大生命」
+   *（原来读的是并不存在的 Tower.buffEffectLines，整段被 if 静默跳过 ——
+   *  换成真实的调试台报告，这条断言才真的在跑）。 */
+  const effects = ((T.debugBuffReport('endless') || {}).effects || []);
+  const line = effects.find((x) => x[0] === '开战回血');
+  assert.ok(line, '效果清单应当有「开战回血」：' + JSON.stringify(effects));
+  assert.ok(/最大生命/.test(line[1]), '文案应当说明是按最大生命：' + JSON.stringify(line));
   T.abandon('endless');
 });
 
@@ -4440,6 +4475,577 @@ var out3 = orderPermanent([], ['C29']).map(function (b) { return b.id; });
     '放弃永久增益弹窗的候选必须走 orderPermanent');
   /* 面板还要有「附魔段 / 未附魔段」的分界线 */
   assert.ok(ui.indexOf("buff-sep") > 0, '面板应当有附魔段与未附魔段的分界线');
+  T.abandon('endless');
+});
+
+test('需求65：战斗续航（C16/C17）改成开战第一回合结算，并吃到空血上限', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+
+  /* 起一局无尽 → 指定永久/限次增益 → 把进场血量钉在指定绝对值 → 取下一场并跑 adjustMe。
+   * 返回 me（adjustMe 之后的本场面板）与 run（全局 HP 计数器）。 */
+  const battleStart = (opts) => {
+    opts = opts || {};
+    S.newGame('r65' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = opts.permanent || [];
+    r.limited = opts.limited || [];
+    r.slotFreeIds = []; r.env = []; r.noEnvRoll = true;
+    r.hpAbs = opts.hpAbs == null ? 2500 : opts.hpAbs;      // 进场血：绝对值口径，直接写计数器
+    const nx = T.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '应当能取到战斗');
+    const me = { name: 'p', level: 70, power: 100, agility: 100, speed: 100, maxHp: 5000, hp: r.hpAbs,
+      baseStats: { power: 100, agility: 100, speed: 100 }, weapons: [], skills: [], wears: [],
+      effects: {}, masterLevel: 0 };
+    nx.adjustMe(me);
+    return { me: me, nx: nx, run: T._debugRun('endless') };
+  };
+
+  /* ① 数据层口径：续航走通用的「开战回血」（startHealPct），文案也写成开战 */
+  const c16 = TD.BUFF_BY_ID.C16, c17 = TD.BUFF_BY_ID.C17;
+  assert.equal(c16.mods.startHealPct, 0.05, 'C16 应当走 startHealPct 0.05');
+  assert.equal(c17.mods.startHealPct, 0.10, 'C17 应当走 startHealPct 0.10');
+  assert.ok(!c16.mods.winHealPct && !c17.mods.winHealPct, '旧的「胜利后回血」字段应当彻底移除');
+  assert.ok(/战斗开始/.test(c16.desc) && !/胜利后/.test(c16.desc), 'C16 文案应当写「战斗开始时」：' + c16.desc);
+  assert.ok(/战斗开始/.test(c17.desc) && !/胜利后/.test(c17.desc), 'C17 文案应当写「战斗开始时」：' + c17.desc);
+
+  /* ② 基线：上限 5000、进场血 2500 → C16 ×1 在第一回合回 5% = 250 */
+  const one = battleStart({ permanent: [{ id: 'C16', stacks: 1 }] });
+  assert.equal(one.me.maxHp, 5000, '基线上限应当是 5000');
+  assert.equal(one.me.hp, 2500 + 250, 'C16 ×1 应当回 5% × 5000 = 250，实测 ' + one.me.hp);
+  assert.equal(one.run.hpAbs, one.me.hp, 'HP 计数器要同步成开战回血后的血量');
+
+  /* ③ 叠层仍然严格成比例（C16 ×3 = 15%），C17 每层 10% */
+  const three = battleStart({ permanent: [{ id: 'C16', stacks: 3 }] });
+  assert.equal(three.me.hp, 2500 + 750, 'C16 ×3 应当回 15% × 5000 = 750，实测 ' + three.me.hp);
+  const c17x2 = battleStart({ permanent: [{ id: 'C17', stacks: 2 }] });
+  assert.equal(c17x2.me.hp, 2500 + 1000, 'C17 ×2 应当回 20% × 5000 = 1000，实测 ' + c17x2.me.hp);
+
+  /* ④ 空血上限（C46 +30%）要算进回血基准，且回血能填进空的那部分：
+   *    上限 5000 × 1.3 = 6500 → 回 5% = 325。进场血 4900 → 5225，
+   *    大于「不含空血上限」的 5000 —— 证明它没有被 baseMaxHp 再裁一次。 */
+  const empty = battleStart({ permanent: [{ id: 'C16', stacks: 1 }, { id: 'C46', stacks: 1 }], hpAbs: 4900 });
+  assert.equal(empty.me.maxHp, 6500, 'C46 +30% 空血上限时本场上限应当是 6500，实测 ' + empty.me.maxHp);
+  assert.equal(empty.me.hp, 4900 + 325, '回血应当按 6500 × 5% = 325 算，实测 ' + empty.me.hp);
+  assert.ok(empty.me.hp > 5000, '回血要能填进空血上限那部分，实测 ' + empty.me.hp + '（不填的话会被裁到 5000）');
+
+  /* ⑤ 限次类的空血上限（N13 血之契约 +100%）同理：上限 10000 → 回 5% = 500 */
+  const contract = battleStart({ permanent: [{ id: 'C16', stacks: 1 }],
+    limited: [{ id: 'N13', stacks: 1, uses: 10, on: true }], hpAbs: 4900 });
+  assert.equal(contract.me.maxHp, 10000, '血之契约 +100% 时上限应当是 10000，实测 ' + contract.me.maxHp);
+  assert.equal(contract.me.hp, 4900 + 500, '回血应当按 10000 × 5% = 500 算，实测 ' + contract.me.hp);
+
+  /* ⑥ 增幅水晶（C15 全局 ×1.4）照旧进乘区：5% → 7%，回 350 */
+  const crystal = battleStart({ permanent: [{ id: 'C16', stacks: 1 }, { id: 'C15', stacks: 1 }] });
+  assert.equal(crystal.me.maxHp, 5000, '增幅水晶不改变上限');
+  assert.equal(crystal.me.hp, 2500 + 350, '增幅水晶下回血应当是 7% × 5000 = 350，实测 ' + crystal.me.hp);
+
+  /* ⑦ 补给 N08 与续航共用同一条「开战回血」通路，于是也一起吃到空血上限
+   *    （本轮统一口径的副作用，一并锁死） */
+  const n08 = battleStart({ permanent: [{ id: 'C46', stacks: 1 }],
+    limited: [{ id: 'N08', stacks: 1, uses: 1, on: true }], hpAbs: 2000 });
+  assert.equal(n08.me.maxHp, 6500, 'N08 + C46 时上限应当是 6500');
+  assert.equal(n08.me.hp, 2000 + 3250, 'N08 应当按 50% × 6500 = 3250 回血，实测 ' + n08.me.hp);
+
+  /* ⑧ 战斗胜利后**不再**额外回血（改由下一场开战结算） */
+  const winCase = battleStart({ permanent: [{ id: 'C16', stacks: 1 }] });
+  const win = T.reportBattle('endless', winCase.nx.token, true, 3000, 6500);
+  assert.ok(win.ok, '胜利结算应当成功');
+  assert.equal(win.winHeal, undefined, '战后报告里不该再有 winHeal');
+  assert.equal(winCase.run.hpAbs, 3000, '战后计数器就是传进去的剩余血量，不该被续航再加一次：' + winCase.run.hpAbs);
+
+  /* ⑨ 效果清单里只留一条「开战回血」（旧的「战斗胜利后回血」整行消失） */
+  const effects = ((T.debugBuffReport('endless') || {}).effects || []).map((x) => x[0]);
+  assert.ok(effects.indexOf('开战回血') >= 0, '效果清单应当有「开战回血」：' + effects.join('/'));
+  assert.ok(effects.indexOf('战斗胜利后回血') < 0, '效果清单不该再有「战斗胜利后回血」：' + effects.join('/'));
+  T.abandon('endless');
+});
+
+test('需求66：秘技通神可抽小宇宙爆发（开战第一招必放）/ 绝对防御加成略微下调', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;
+
+  /* 起一局无尽、清空增益，方便单独观察秘技通神。 */
+  const freshRun = () => {
+    S.newGame('r66' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    assert.ok(T.startEndlessRun().ok, '应当能开一局');
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = []; r.env = []; r.noEnvRoll = true;
+    return r;
+  };
+  const hasSkill = (id) => (S.mySkills() || []).some((x) => Number(x.id) === Number(id));
+
+  /* ① 候选口径：**没学**小宇宙爆发（14）也会进候选，并带「开战第一招必放」的提示 */
+  freshRun();
+  S.setWS('skill', 12, 5);                       // 只学一个无关主动技（野球拳）
+  assert.equal(hasSkill(14), false, '前置条件：这一局不该会小宇宙爆发');
+  /* 候选是「洗牌后取 3 个」，所以要抽多次才看得全（12/7/14/16 里每次只露 3 个）。 */
+  const seen = new Map();
+  for (let t = 0; t < 60; t++) for (const x of T.pickCandidatesOf('skill')) seen.set(x.id, x);
+  const c14 = seen.get(14);
+  assert.ok(c14, '候选里应当有小宇宙爆发 14，实测 ' + [...seen.keys()].join(','));
+  assert.equal(c14.note, '开战第一招必放', '小宇宙候选应当带「开战第一招必放」提示：' + JSON.stringify(c14));
+  const c16 = seen.get(16);
+  assert.ok(c16 && c16.note, '绝对防御候选应当带触发概率提示：' + JSON.stringify(c16));
+
+  /* ② 抽中小宇宙爆发：领悟（等级 1）+ 写 skillBoost 开关；**不写 effects[14]**
+   *    （effects['14'] 是「木剑伤害 +N%」，也就是武器 3 的口径，
+   *      写进去会让木剑白涨 25% —— 旧版抽中小宇宙时正是这个 bug） */
+  assert.ok(T.addBuff(T._debugRun('endless'), 'C33').ok, '应当能拿到秘技通神');
+  const pick14 = T.applyPickBuff('skill', 14);
+  assert.ok(pick14.ok, '抽中小宇宙爆发应当成功：' + JSON.stringify(pick14));
+  assert.equal(pick14.pct, 1, '小宇宙的 skillBoost 只作开关（=1）：' + pick14.pct);
+  assert.equal(hasSkill(14), true, '抽中后应当领悟小宇宙爆发');
+  assert.equal(T._debugRun('endless').skillBoost['14'], 1, 'skillBoost[14] 应当登记为开关');
+
+  /* ③ 开战注入：mods.cosmosFirst = 1（adjustMe），且 effects 里不该多出 14 */
+  const nx = T.nextBattle('endless');
+  const me = { name: 'p', level: 70, power: 300, agility: 400, speed: 400, maxHp: 5000, hp: 5000,
+    baseStats: { power: 100, agility: 100, speed: 100 }, weapons: [{ id: 5, level: 5 }],
+    skills: S.mySkills().map((x) => ({ id: Number(x.id), level: x.level })),
+    wears: [], effects: {}, masterLevel: 0 };
+  nx.adjustMe(me);
+  assert.equal(me.mods.cosmosFirst, 1, '开战应当带上 cosmosFirst');
+  assert.ok(me.effects[14] == null, '不该把 effects[14] 当成技能加成写进去（那是武器 3 的口径）：' + me.effects[14]);
+
+  /* ④ 实战：我方**第一招**必定是小宇宙爆发（哪怕武器优先的 48% 抽到了武器），
+   *    而且它自带 actAgain —— 不占回合，出手序列紧接着还有下一招。 */
+  const foe = { name: 'F', level: 70, power: 300, agility: 200, speed: 200, hp: 999999, maxHp: 999999,
+    weapons: [{ id: 1, level: 5 }], skills: [], effects: {}, baseStats: { power: 300, agility: 200, speed: 200 } };
+  for (let i = 0; i < 5; i++) {
+    const res = Sim.simulate(me, foe);
+    const mine = (res.rounds || []).filter((r) => r.attacker === 0);
+    assert.ok(mine.length > 0, '我方应当出过手');
+    assert.ok(mine[0].action === 'skill' && mine[0].id === 14,
+      '第 ' + (i + 1) + ' 次模拟：我方第一招必须是小宇宙爆发，实测 ' + JSON.stringify(mine[0]));
+    assert.equal(mine.filter((r) => r.action === 'skill' && r.id === 14).length, 1,
+      '小宇宙一场只能放一次');
+    assert.ok(mine.length >= 2, '小宇宙自带 actAgain，之后还要能接着出手');
+  }
+
+  /* ⑤ 没学小宇宙时不该硬放（mods 只是开关，技能还得真有） */
+  const noSkill = Object.assign({}, me, { skills: [{ id: 12, level: 5 }] });
+  const resNo = Sim.simulate(noSkill, foe);
+  assert.ok(!(resNo.rounds || []).some((r) => r.attacker === 0 && r.action === 'skill' && r.id === 14),
+    '没学小宇宙爆发时不该被硬放出来');
+
+  /* ⑥ 绝对防御的加成幅度略微下调：2.0 → 1.5（触发率 ×3 → ×2.5），龟甲术保持 2.0 */
+  freshRun();
+  T.addBuff(T._debugRun('endless'), 'C33');
+  const pick16 = T.applyPickBuff('skill', 16);
+  assert.ok(pick16.ok, '抽中绝对防御应当成功：' + JSON.stringify(pick16));
+  assert.equal(pick16.pct, 1.5, '绝对防御的加成应当从 2.0 降到 1.5：' + pick16.pct);
+  freshRun();
+  T.addBuff(T._debugRun('endless'), 'C33');
+  const pick7 = T.applyPickBuff('skill', 7);
+  assert.ok(pick7.ok, '抽中龟甲术应当成功：' + JSON.stringify(pick7));
+  assert.equal(pick7.pct, 2.0, '龟甲术的加成保持 2.0 不变：' + pick7.pct);
+
+  /* 触发率对照：13 × (1+1.5) = 32.5（原来 39）、22 × (1+1.5) = 55（原来 66） */
+  const mkF = (eff) => ({ name: 'p', level: 60, power: 200, agility: 100, speed: 100, hp: 1000, maxHp: 1000,
+    weapons: [], skills: [{ id: 16, level: 5 }], effects: eff || {}, baseStats: { power: 200, agility: 100, speed: 100 } });
+  assert.equal(Sim.jueDuiChanceOf(mkF({ 16: 2.0 }), false), 66, '未下调时首次是 66（对照）');
+  assert.equal(Sim.jueDuiChanceOf(mkF({ 16: 2.0 }), true), 39, '未下调时二次及以后是 39（对照）');
+  assert.equal(Sim.jueDuiChanceOf(mkF({ 16: 1.5 }), false), 55, '下调后首次应当是 55：' + Sim.jueDuiChanceOf(mkF({ 16: 1.5 }), false));
+  assert.equal(Sim.jueDuiChanceOf(mkF({ 16: 1.5 }), true), 32.5, '下调后二次及以后应当是 32.5：' + Sim.jueDuiChanceOf(mkF({ 16: 1.5 }), true));
+  assert.ok(Sim.jueDuiChanceOf(mkF({ 16: 1.5 }), true) <= 50, '仍然守住「二次及以后 ≤50%」的底线');
+  T.abandon('endless');
+});
+
+test('需求67：装备出售界面倒序（新合成/新融合的排最前）', () => {
+  const c = setup();
+  const T = c.Tower, S = c.State;
+  /* 把 classic-ui.js 里**真实的 openGearSell** 抠出来跑（不复制一份实现），
+   * 只桩掉它依赖的渲染/状态接口，检查它给每张卡生成的 data-sell 顺序。 */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8').split('\n');
+  const a = src.findIndex((l) => l.includes('function openGearSell(pg) {'));
+  assert.ok(a >= 0, 'classic-ui.js 里应当有 openGearSell');
+  const b = src.findIndex((l, i) => i > a && l.includes('点一件装备'));
+  assert.ok(b > a, '找不到 openGearSell 的结束位置');
+  const fn = src.slice(a, b).join('\n');
+
+  /* 装备三件（数组顺序就是「先进先出」，和后端 addGear 的 push 一致） */
+  const gears = [
+    { id: 1, name: '旧头巾', quality: 0, key: 'g1', used: false },
+    { id: 2, name: '新衣服', quality: 1, key: 'g2', used: false },
+    { id: 3, name: '刚融合的鞋', quality: 2, key: 'g3', used: false }
+  ];
+  const pages = [];
+  const node = () => ({ textContent: '', onclick: null, addEventListener() {} });
+  const ctx = {
+    console,
+    State: {
+      myGears: () => gears.slice(),
+      state: () => ({ goldPoint: 0 }),
+      gearSellRange: () => [60, 65],
+      isGearStarred: () => false,
+      gearCapacity: () => 60
+    },
+    gearImg: () => '<i></i>', esc: (v) => String(v),
+    page: (group, active, html) => { pages.push({ group, active, html }); return node(); },
+    $: () => node(),
+    $$: () => [],
+    btn: () => '<b></b>', openStatus: () => {}, askSellGear: () => {},
+    GEAR_SELL_PER: 6, QUALITY_LABEL: ['普通', '优秀', '杰出', '卓越', '传说']
+  };
+  ctx.window = ctx;
+  vm.createContext(ctx);
+  vm.runInContext('let gearSellPage = 0;\n' + fn + '\nopenGearSell(0);', ctx, { filename: 'openGearSell' });
+
+  assert.ok(pages.length > 0, '应当渲染了一页');
+  const html = pages[pages.length - 1].html;
+  const order = [...html.matchAll(/data-sell="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(order, ['g3', 'g2', 'g1'],
+    '出售界面必须**倒序**展示（新的在前），实测 ' + JSON.stringify(order));
+  /* 源码口径：确实是「反转」而不是「按 key 排序」 */
+  assert.ok(fn.indexOf('State.myGears().slice().reverse()') > 0,
+    'openGearSell 应当对 equip 列表做 slice().reverse()（先进先出的数组 → 倒序）');
+  T.abandon('endless');
+  void S;
+});
+
+test('需求68：4/5/6 选 1 时卡片间距递减、文字横向铺满（含 6 张不溢出）', () => {
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8');
+  /* 结构口径：容器带 nN、弹窗带 hex-nN（CSS 靠这两个记号分档） */
+  assert.ok(ui.indexOf("'<div class=\"hex-cards n' + nSlots") > 0 ||
+    /hex-cards n' \+ nSlots/.test(ui), 'hex-cards 容器要带 nN 记号');
+  assert.ok(/classList\.add\('choice-dialog', 'hex', 'hex-n' \+ nSlots\)/.test(ui),
+    '弹窗要带 hex-nN 记号（标题区按档收紧）');
+  assert.ok(ui.indexOf('const nSlots = Math.max(1, Math.min(6, choices.length));') > 0,
+    '档位要按实际选项数取（3~6）');
+  /* 间距逐级减小 */
+  const num = (re, src2) => Number((re.exec(src2) || [])[1]);
+  const gap = (n) => num(new RegExp('\\.hex-cards\\.n' + n + '\\{gap:(\\d+)px\\}'), css);
+  const pad = (n) => num(new RegExp('\\.hex-cards\\.n' + n + ' \\.hex-card\\{padding-left:(\\d+)px'), css);
+  assert.ok(gap(4) > gap(5) && gap(5) > gap(6), '卡片间距要逐级减小：n4=' + gap(4) + ' n5=' + gap(5) + ' n6=' + gap(6));
+  assert.ok(pad(4) > pad(5) && pad(5) > pad(6), '左右内边距要逐级收窄（文字更贴边）：n4=' + pad(4) + ' n5=' + pad(5) + ' n6=' + pad(6));
+  assert.ok(gap(4) < 22, '4 选 1 就该比原来的 22px 小：' + gap(4));
+  /* 3 选 1 保持原样（没有 n3 覆盖 = 用 .hex-cards 的默认值） */
+  assert.ok(!/\.hex-cards\.n3\{/.test(css), '3 选 1 不该被改动');
+  /* 6 张不溢出：容器要有宽度上限 + 卡片允许收缩 */
+  assert.ok(/\.hex-cards\{[^}]*max-width:1120px/.test(css), '容器要有不超过画布（1170）的宽度上限');
+  assert.ok(/\.hex-cards \.hex-card\{flex:0 1 268px;min-width:0\}/.test(css), '卡片要允许收缩');
+  /* 纵向兜底：5/6 选 1 收紧描述字号与卡片内边距，避免标题被顶出画布 */
+  assert.ok(/\.hex-cards\.n6 \.hex-desc\{font-size:19px/.test(css), '6 选 1 要收描述字号');
+  assert.ok(/\.choice-dialog\.hex-n6 \.hex-pick-head\{margin-bottom:12px\}/.test(css), '6 选 1 要收标题区下边距');
+});
+
+test('需求69：终焉烙印（C49）碎掉的那一份也要计入「获得过」', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const openRun = () => {
+    S.newGame('r69' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = []; r.env = []; r.noEnvRoll = true;
+    return r;
+  };
+  /* 找一个「下一次判定必定碎裂」的种子（fragileRoll 的 LCG 第一步） */
+  const breakSeed = (() => {
+    for (let s = 1; s < 200000; s++) {
+      const v = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      if ((v / 4294967296) * 100 < 6) return s;
+    }
+    return null;
+  })();
+  assert.ok(breakSeed, '应当能找到必碎种子');
+  /* 赢一场 → reportBattle 里会跑 rollFragileBuffs，把烙印打碎 */
+  const winOne = () => {
+    const nx = T.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '应当能取到战斗');
+    const a = T._debugRun('endless');
+    T.reportBattle('endless', a.attempt, true, 1, null);
+  };
+
+  const run = openRun();
+  const c49 = TD.BUFF_BY_ID.C49;
+  assert.equal(T.obtainedCountOf(run, 'C49'), 0, '开局没拿过');
+  assert.equal(T.buffWeightOf(run, 'C49'), 1, '第一份没有重复惩罚');
+
+  /* ① 拿到 1 份 → 强制碎掉：在册层数归零，但「获得过」不变 */
+  assert.ok(T.addBuff(T._debugRun('endless'), 'C49').ok, '第 1 份应当能拿到');
+  assert.equal(T.obtainedCountOf(T._debugRun('endless'), 'C49'), 1);
+  assert.equal(T.buffWeightOf(T._debugRun('endless'), 'C49'), 1, '只有 1 份时无重复惩罚');
+  T._debugRun('endless').fragileSeeds = { C49: breakSeed };
+  winOne();
+  const afterBreak = T._debugRun('endless');
+  assert.equal(T._debugRun('endless').limited.filter((b) => b.id === 'C49').length, 0, '烙印应当已经碎了（从 limited 里移除）');
+  assert.ok((afterBreak.buffLog || []).some((e) => e.id === 'C49' && e.event === 'break'), '流水里应当有 break 事件');
+  assert.equal(T.obtainedCountOf(afterBreak, 'C49'), 1, '碎掉之后仍然算「获得过 1 份」：' + T.obtainedCountOf(afterBreak, 'C49'));
+  assert.equal(T.poolFilterOf(afterBreak, c49), true, '碎掉之后还能再拿（3 次上限内）');
+
+  /* ② 再拿 1 份（碎 1 + 在册 1）：重复惩罚按 2 份算 → ×0.10 */
+  assert.ok(T.addBuff(T._debugRun('endless'), 'C49').ok, '第 2 份应当能拿到');
+  const two = T._debugRun('endless');
+  assert.equal(T.obtainedCountOf(two, 'C49'), 2, '碎 1 + 在册 1 = 2 份');
+  assert.ok(Math.abs(T.buffWeightOf(two, 'C49') - 0.10) < 1e-9,
+    '第 2 份的抽取权重应当 ×0.10（含碎掉那份）：' + T.buffWeightOf(two, 'C49'));
+
+  /* ③ 第 3 份再碎掉 → 累计 3 份，达到 maxStacks 上限，不再进池 */
+  T._debugRun('endless').fragileSeeds = { C49: breakSeed };
+  winOne();
+  assert.equal(T.buffWeightOf(T._debugRun('endless'), 'C49'), 0.10, '碎掉不改变份数口径');
+  assert.ok(T.addBuff(T._debugRun('endless'), 'C49').ok, '第 3 份应当能拿到');
+  const three = T._debugRun('endless');
+  assert.equal(T.obtainedCountOf(three, 'C49'), 3);
+  const row3 = three.limited.find((b) => b.id === 'C49');
+  if (row3) three.limited = three.limited.filter((b) => b.id !== 'C49');   // 模拟第 3 份也碎了
+  assert.equal(T.poolFilterOf(three, c49), false, '累计 3 份（哪怕都碎了）就不该再进池');
+  assert.equal(T.ownableOf(three, c49), false, '累计 3 份之后不该再获得');
+  assert.ok(Math.abs(T.buffWeightOf(three, 'C49') - 0.01) < 1e-9,
+    '3 份时权重应当是 0.10² = 0.01：' + T.buffWeightOf(three, 'C49'));
+
+  /* ④ 只降终焉烙印：涌泉烙印（C52）的重复惩罚保持 0.3 不变 */
+  const run2 = openRun();
+  assert.ok(T.addBuff(T._debugRun('endless'), 'C52').ok, '涌泉烙印应当能拿到');
+  assert.ok(Math.abs(T.buffWeightOf(T._debugRun('endless'), 'C52') - 1) < 1e-9, '第 1 份无惩罚');
+  assert.ok(T.addBuff(T._debugRun('endless'), 'C52').ok, '第 2 份应当能拿到');
+  assert.ok(Math.abs(T.buffWeightOf(T._debugRun('endless'), 'C52') - 0.3) < 1e-9,
+    'C52 的重复惩罚仍应当是 0.3：' + T.buffWeightOf(T._debugRun('endless'), 'C52'));
+  void run2;
+  T.abandon('endless');
+});
+
+test('需求70：淘金烙印（C53）——传奇·只在战斗中掉落·一局一次·+15%/+30% 试炼币', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const openRun = (layer) => {
+    S.newGame('r70' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    if (layer) T._debugSetEndlessLayer(layer);
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = []; r.env = []; r.noEnvRoll = true;
+    return r;
+  };
+  const breakSeed = (() => { for (let s = 1; s < 200000; s++) { const v = (Math.imul(s, 1664525) + 1013904223) >>> 0; if ((v / 4294967296) * 100 < 6) return s; } return null; })();
+  const winOne = () => {
+    const nx = T.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '应当能取到战斗');
+    const a = T._debugRun('endless');
+    T.reportBattle('endless', a.attempt, true, 1, null);
+  };
+  const coinsAfterWin = () => {
+    const before = T._debugRun('endless').coins;
+    winOne();
+    return T._debugRun('endless').coins - before;
+  };
+
+  /* ① 数据与池子口径：传奇 · 限次烙印 · 一局一次 · **只在战斗奖励里**（商店 / 挑战塔都不进） */
+  const c53 = TD.BUFF_BY_ID.C53;
+  assert.ok(c53, 'C53 淘金烙印应当存在');
+  assert.equal(c53.name, '淘金烙印', 'C53 名称');
+  assert.equal(c53.rarity, 3, 'C53 应当是传奇');
+  assert.equal(c53.kind, 'limited', 'C53 应当是限次类（烙印）');
+  assert.equal(c53.battleOnly, true, 'C53 应当只从战斗奖励掉落');
+  assert.equal(c53.maxStacks, 1, 'C53 一局只能获得一次');
+  assert.equal(c53.mods.fragileCoinAddAlive, 0.15, '未破碎 +15% 试炼币');
+  assert.equal(c53.mods.fragileCoinAddBurned, 0.30, '破碎后 +30% 试炼币');
+  assert.equal(c53.mods.fragileBreakPct, 6, '仍然是 6% 损毁');
+  assert.equal(TD.inPool('E.choice', c53), true, 'C53 应当进无尽塔战斗奖励');
+  assert.equal(TD.inPool('E.shop', c53), false, 'C53 不该进商店货架');
+  assert.equal(TD.inPool('T.choice', c53), false, 'C53 不该进挑战塔池');
+  const r0 = openRun();
+  T.addBuff(T._debugRun('endless'), 'C53');
+  assert.equal(T.poolFilterOf(T._debugRun('endless'), c53), false, '拿过一次之后不再进池');
+  assert.equal(T._debugRun('endless').fragileCoinBase, 1, '拿到后未破碎份数应当是 1');
+
+  /* ② 未破碎：每场胜利的试炼币 ×1.15 */
+  openRun();
+  const baseCoins = coinsAfterWin();
+  openRun();
+  T.addBuff(T._debugRun('endless'), 'C53');
+  const aliveCoins = coinsAfterWin();
+  assert.ok(Math.abs(aliveCoins - Math.round(baseCoins * 1.15)) <= 1,
+    '未破碎时试炼币应当是基础 ×1.15：' + baseCoins + ' → ' + aliveCoins);
+
+  /* ③ 破碎后：×1.30（走真实碎裂路径，并顺带锁死「已损毁份数进明细」） */
+  const rr = openRun();
+  T.addBuff(T._debugRun('endless'), 'C53');
+  T._debugRun('endless').fragileSeeds = { C53: breakSeed };
+  coinsAfterWin();                                    // 这一场结束时判定损毁
+  const broken = T._debugRun('endless');
+  assert.equal(broken.fragileCoinBase, 0, '损毁后未破碎份数应当归零：' + broken.fragileCoinBase);
+  /* 注意：VM 里造出来的数组与本进程的 Array 不是同一个 realm，deepStrictEqual 会因为
+   * 原型不同而报错 —— 用 JSON 比较（值本身都是原始数字）。 */
+  assert.equal(JSON.stringify(broken.fragileCoinBurned), JSON.stringify([0.30]),
+    '损毁份数应当进明细：' + JSON.stringify(broken.fragileCoinBurned));
+  assert.ok((broken.brokenMarks || []).some((m) => m.kind === 'coin'), '明细里应当有一条 coin 记录');
+  const brokenCoins = coinsAfterWin();
+  assert.ok(Math.abs(brokenCoins - Math.round(baseCoins * 1.30)) <= 1,
+    '破碎后试炼币应当是基础 ×1.30：' + baseCoins + ' → ' + brokenCoins);
+  void rr;
+
+  /* ④ 「30 层后每 2 层作废一条碎烙印」也要认得这一条（作废后加成消失） */
+  const rAfter = T._debugRun('endless');
+  const markIdx = (rAfter.brokenMarks || []).findIndex((m) => m.kind === 'coin');
+  assert.ok(markIdx >= 0, '应当能找到 coin 明细');
+  rAfter.brokenMarks.splice(markIdx, 1);
+  T.rebuildFragileTotalsOf ? T.rebuildFragileTotalsOf(rAfter) : null;
+  T.abandon('endless');
+});
+
+test('需求71：限次栏显示「未破碎的烙印叠层」', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  /* 把 tower-ui.js 里**真实的 limitBadgeText** 抠出来跑（与面板用的是同一份实现）。 */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8').split('\n');
+  const a = src.findIndex((l) => l.includes('function limitBadgeText(b) {'));
+  assert.ok(a >= 0, 'tower-ui.js 里应当有 limitBadgeText');
+  const b = src.findIndex((l, i) => i > a && l.includes('\n') === false && /^\s*\}$/.test(l));
+  const fn = src.slice(a, b + 1).join('\n');
+  const ctx = { TowerData: { BUFF_BY_ID: TD.BUFF_BY_ID } };
+  vm.createContext(ctx);
+  const badge = vm.runInContext(fn + '\nlimitBadgeText;', ctx, { filename: 'limitBadgeText' });
+
+  const c49 = TD.BUFF_BY_ID.C49, c52 = TD.BUFF_BY_ID.C52;
+  assert.equal(badge({ id: 'C49', stacks: 1, uses: 1000, on: true }), '易碎 6%', '1 层烙印照旧只写易碎概率');
+  assert.equal(badge({ id: 'C49', stacks: 2, uses: 1000, on: true }), '×2 层 · 易碎 6%',
+    '2 层要能看出「未破碎叠层 ×2」');
+  assert.equal(badge({ id: 'C49', stacks: 3, uses: 1000, on: true }), '×3 层 · 易碎 6%', '3 层同理');
+  assert.equal(badge({ id: 'C52', stacks: 2, uses: 1000, on: true }), '×2 层 · 易碎 6%', '涌泉烙印同样显示叠层');
+  assert.equal(badge({ id: 'N14', stacks: 1, uses: 10, on: true, nextBattle: true }),
+    '无尽塔 · 剩 10 场', '普通限次类仍然只写剩余场次');
+  assert.equal(badge({ id: 'N14', stacks: 2, uses: 10, on: true, nextBattle: true }),
+    '×2 层 · 无尽塔 · 剩 10 场', '叠层的限次类也要带层数');
+  /* 面板真的把这一份用上了（源码口径，避免「定义了但没接」） */
+  const ui = src.join('\n');
+  assert.ok(/limitBadgeText\(b\)/.test(ui), '面板的 <em> 必须走 limitBadgeText');
+  /* 悬停提示也要写清「当前未破碎叠层」 */
+  assert.ok(/当前未破碎叠层：×/.test(ui), 'limitTip 要写清未破碎叠层');
+
+  /* 端到端：叠 2 层之后 ownedBuffs 报出的就是未破碎层数 */
+  S.newGame('r71' + Math.random());
+  const st = S.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  try { T.abandon('endless'); } catch (e) {}
+  T.startEndlessRun();
+  const r = T._debugRun('endless');
+  r.permanent = []; r.limited = []; r.slotFreeIds = [];
+  T.addBuff(T._debugRun('endless'), 'C49');
+  T.addBuff(T._debugRun('endless'), 'C49');
+  const row = T.ownedBuffs('endless').find((x) => x.id === 'C49');
+  assert.equal(row && row.stacks, 2, '面板拿到的层数应当是 2：' + (row && row.stacks));
+  /* 碎掉一层之后，面板上的层数要跟着降（破碎的那一份不再显示） */
+  const rr = T._debugRun('endless');
+  const c49row = rr.limited.find((x) => x.id === 'C49');
+  c49row.stacks -= 1;
+  assert.equal(T.ownedBuffs('endless').find((x) => x.id === 'C49').stacks, 1, '碎掉一层后面板应当只剩 1 层');
+  T.abandon('endless');
+});
+
+test('需求72：涅槃（C14）一局可拿两次 —— 第 2 层改为「本层 2 次复活机会」', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const openRun = (layer) => {
+    S.newGame('r72' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    if (layer) T._debugSetEndlessLayer(layer);
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = []; r.env = []; r.noEnvRoll = true;
+    return r;
+  };
+  const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 4000,
+    baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
+  const startBattle = () => {
+    const nx = T.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '应当能取到战斗');
+    const me = mk();
+    nx.adjustMe(me);
+    return { nx: nx, me: me };
+  };
+  const winWithRevive = (times) => {
+    const a = T._debugRun('endless');
+    const rounds = [];
+    for (let i = 0; i < times; i++) rounds.push({ attacker: 0, action: 'dot', dmg: 1, deathSave: true, revive: 1 });
+    T.reportBattle('endless', a.attempt, true, 4000, 5000, { rounds: rounds });
+  };
+
+  /* ① 数据：可叠 2 层；第三份被拒（叠满） */
+  const c14 = TD.BUFF_BY_ID.C14;
+  assert.equal(c14.stackable, true, 'C14 应当可以叠层');
+  assert.equal(c14.maxStacks, 2, 'C14 一局最多 2 层');
+  assert.equal(c14.mods.revivePct, 0.50, '复活仍然回 50% 上限');
+  assert.equal(c14.mods.reviveStatMul, 0.50, '复活后力/敏/速 +50% 不变（第 2 层不再放大它）');
+  assert.match(c14.desc, /2 层|两次|2 次/, '文案要说明可以叠 2 层：' + c14.desc);
+  openRun(3);
+  assert.ok(T.addBuff(T._debugRun('endless'), 'C14').ok, '第 1 份应当能拿到');
+  assert.ok(T.addBuff(T._debugRun('endless'), 'C14').ok, '第 2 份应当能拿到');
+  const dup = T.addBuff(T._debugRun('endless'), 'C14');
+  assert.equal(dup.ok, false, '第 3 份应当被拒（叠满 2 层）');
+  assert.equal(T._debugRun('endless').permanent.find((x) => x.id === 'C14').stacks, 2, '层数应当是 2');
+
+  /* ② 1 层：每层 1 次复活（与旧行为一致） */
+  openRun(3);
+  T.addBuff(T._debugRun('endless'), 'C14');
+  const one = startBattle();
+  assert.equal((one.me.mods.deathSaves || []).length, 1, '1 层涅槃每层给 1 次复活');
+  assert.equal(one.me.mods.deathSaves[0].revive, 1, '要带 revive 标记（与金蝉脱壳区分）');
+
+  /* ③ 2 层：本层给 2 次复活；用掉 1 次后同一层只再补 1 次；用满后本层不再给 */
+  openRun(3);
+  T.addBuff(T._debugRun('endless'), 'C14');
+  T.addBuff(T._debugRun('endless'), 'C14');
+  const two = startBattle();
+  assert.equal((two.me.mods.deathSaves || []).length, 2, '2 层涅槃每层给 2 次复活');
+  assert.equal(two.me.mods.deathSaves[0].healPct, 0.5);
+  assert.equal(two.me.mods.deathSaves[0].statMul, 0.5, '复活后的属性加成不随层数放大');
+  winWithRevive(1);
+  const afterOne = T._debugRun('endless');
+  assert.equal(afterOne.reviveLayer, 3, '应当记下「本层已经用过复活」');
+  assert.equal(afterOne.reviveUsed, 1, '本层已用 1 次：' + afterOne.reviveUsed);
+  const second = startBattle();
+  assert.equal((second.me.mods.deathSaves || []).length, 1, '同一层第二场只该再补 1 次');
+  winWithRevive(1);
+  assert.equal(T._debugRun('endless').reviveUsed, 2, '本层已用满 2 次');
+  const third = startBattle();
+  assert.equal((third.me.mods.deathSaves || []).length, 0, '本层 2 次用完后不该再给');
+  /* ④ 换层之后重新给 2 次（先把这一场打完，否则战斗令牌还挂着、取不到下一场；
+   * 第 3 场打完会挂上场间选择，这里清掉——本测试只关心复活机会的发放） */
+  winWithRevive(0);
+  const nr = T._debugRun('endless');
+  nr.choices = null;
+  nr.layer = 4;
+  nr.idx = 0;
+  const fourth = startBattle();
+  assert.equal((fourth.me.mods.deathSaves || []).length, 2, '换到新的一层应当重新给 2 次');
+  /* ⑤ 引擎口径：复活甲那条 deathSave 会被打上 r.revive 标记（reportBattle 靠它
+   *    把涅槃与金蝉脱壳分开数），金蝉脱壳那条不带 */
+  const Sim = c.Sim;
+  const simMe = Object.assign(mk(), { mods: { deathSaves: [{ healPct: 0.5, statMul: 0.5, revive: 1 }] } });
+  const simFoe = Object.assign(mk(), { name: '敌', power: 600, agility: 100, speed: 300, hp: 999999, maxHp: 999999 });
+  const simRes = Sim.simulate(simMe, simFoe);
+  const revRound = (simRes.rounds || []).find((x) => x.deathSave);
+  assert.ok(revRound && revRound.revive === 1, '涅槃的 deathSave 回合要带 revive 标记：' + JSON.stringify(revRound));
+  const simMe2 = Object.assign(mk(), { mods: { deathSaves: [{}] } });      // 金蝉脱壳：{}=保留 1 血
+  const simRes2 = Sim.simulate(simMe2, simFoe);
+  const shellRound = (simRes2.rounds || []).find((x) => x.deathSave);
+  assert.ok(shellRound && shellRound.revive === undefined, '金蝉脱壳的 deathSave 不该带 revive 标记：' + JSON.stringify(shellRound));
+
+  /* ⑥ 金蝉脱壳（N04）的免死不算涅槃次数 */
+  openRun(3);
+  T.addBuff(T._debugRun('endless'), 'C14');
+  const a2 = T._debugRun('endless');
+  const nx2 = T.nextBattle('endless');
+  nx2.adjustMe(mk());
+  T.reportBattle('endless', a2.attempt, true, 4000, 5000, { rounds: [{ attacker: 0, action: 'dot', dmg: 1, deathSave: true }] });
+  assert.equal(Number(T._debugRun('endless').reviveUsed) || 0, 0, '只有金蝉脱壳的 deathSave 不该消耗涅槃次数');
   T.abandon('endless');
 });
 

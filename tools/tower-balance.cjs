@@ -428,7 +428,7 @@ function autoPick(ctx, mode) {
       (S.props[50] || 0) === ticketsBefore + failOut.tickets);
     t('无尽：失败后本局结束', !Tower.endlessInfo().run);
   }
-  // 第 4 项：新 buff（战后续航可叠加 / 反伤 / 狂怒 / 速度 / 战后回血）
+  // 第 4 项：新 buff（战斗续航可叠加 / 反伤 / 狂怒 / 速度），续航已改成开战回血
   {
     // 第 1 项：buff 改成「限次 / 永久」两分法 + 即时经济类
     /* 本轮（第 3/6/9 项）新增 5 个：E07/E08（即时·削敌方生命上限）、
@@ -453,8 +453,14 @@ function autoPick(ctx, mode) {
     t('新永久 buff 进入战斗（反伤 20% / 狂怒 50% / 速度 +15%）',
       me2.mods.thornsPct === 0.2 && me2.mods.lowHpPowerMul === 0.5 && me2.mods.lowHpAt === 0.40 &&
       Math.abs(me2.speed - Math.round(spd0 * 1.15)) <= 1);
-    const winOut = Tower.reportBattle('endless', nb.token, true, 0.5, { rounds: [] });
-    t('战后续航可叠加（5% + 10%×2 = 25%）', Math.abs((winOut.winHeal || 0) - 0.25) < 1e-6 && Math.abs(r.carry - 0.75) < 1e-6);
+    /* 战斗续航（C16 5% + C17 10%×2 = 25%）：改成**开战第一回合**按本场真实上限回血。
+     * carry 0.5 折出来的进场血是 50%，开战再回 25% → 血条 75%（与旧版「战后回血」
+     * 的 75% 数值巧合一致，但时机、基准与「能填进空血上限」都变了）。 */
+    const hpIn = Math.round(me2.maxHp * 0.5);
+    t('战斗续航改成开战结算且可叠加（5% + 10%×2 = 25% → 50% + 25% = 75%）',
+      Math.abs(me2.hp - Math.min(me2.maxHp, hpIn + Math.round(me2.maxHp * 0.25))) <= 1);
+    const winOut = Tower.reportBattle('endless', nb.token, true, me2.hp, me2.maxHp);
+    t('战斗胜利后不再由续航回血（改到下一场开战结算）', winOut.ok === true && winOut.winHeal == null);
     // 第 1 项：永久上限 5 格、限次可开关且打完扣次数
     {
       const r2 = State.state().endless.run;

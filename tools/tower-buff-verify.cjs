@@ -624,7 +624,7 @@ hr('本轮 2：商店里已拥有的可叠加增益要能高光');
 {
   freshRun();
   Tower.debugGrantBuff('C06');            // 猎杀时刻：永久 + stackable
-  Tower.debugGrantBuff('C16');            // 战后续航：永久 + stackable
+  Tower.debugGrantBuff('C16');            // 战斗续航：永久 + stackable
   run_coins: {
     const run = Tower._debugRun('endless');
     run.coins = 9999;

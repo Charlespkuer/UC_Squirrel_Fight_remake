@@ -259,7 +259,9 @@
     if (m.lifestealPct) parts.push('吸血合计 ' + Math.round(m.lifestealPct * b.stacks * 100) + '%');
     if (m.thornsPct) parts.push('反伤合计 ' + Math.round(m.thornsPct * b.stacks * 100) + '%');
     if (m.speedMul) parts.push('速度合计 +' + Math.round(m.speedMul * b.stacks * 100) + '%');
-    if (m.winHealPct) parts.push('每场胜利回血合计 ' + Math.round(m.winHealPct * b.stacks * 100) + '%');
+    /* 战斗续航（C16/C17）：效果在**每场战斗的第一回合**结算（adjustMe 的 startHealPct），
+     * 不是一个「战斗外累计」的数值，所以文案按「开战回血」写。 */
+    if (m.startHealPct) parts.push('每场战斗开始回血合计 ' + Math.round(m.startHealPct * b.stacks * 100) + '%');
     if (m.killPowerPct) parts.push('每击杀攻击 +' + Math.round(m.killPowerPct * b.stacks * 100) + '%');
     /* 原来这里还有一条 `m.killMaxHpPct` —— 那个 mod 在任何增益上都不存在（死代码），
      * 换成真正在用的「每胜利生命上限」字段（C07 吞噬成长）。 */
@@ -275,7 +277,12 @@
     if (m.winMaxHpPct) parts.push('每胜利生命上限 +' + Math.round(m.winMaxHpPct * b.stacks * 100) + '%');
     if (m.winMaxHpFlat) parts.push('每胜利生命上限 +' + Math.round(m.winMaxHpFlat * b.stacks));
     if (m.winStatAfter10) parts.push('第 10 层起每胜利 力/敏/速 各 +' + (m.winStatAfter10 * b.stacks));
-    if (m.revivePct) parts.push('复活回血 ' + Math.round(m.revivePct * 100) + '%');
+    if (m.revivePct) {
+      parts.push('复活回血 ' + Math.round(m.revivePct * 100) + '%' +
+        (m.reviveStatMul ? '，复活后本场力/敏/速 +' + Math.round(m.reviveStatMul * 100) + '%' : ''));
+      /* 涅槃可叠 2 层：本层复活机会 = 层数（第 2 层不改属性加成，只多一次机会）。 */
+      parts.push('本层复活机会：' + Math.max(1, Math.floor(Number(b.stacks) || 1)) + ' 次');
+    }
     if (m.globalMul) parts.push('全局增幅 ×' + m.globalMul + (b.stacks > 1 ? '，可叠 ' + b.stacks + ' 层' : ''));
     /* 本轮第 6 / 9 项的新增益：把「当前到底加了多少」写清楚 */
     if (m.powerPerEmptySlot) parts.push('每个空的永久增益位 攻击 +' + Math.round(m.powerPerEmptySlot * 100) + '%');
@@ -302,6 +309,10 @@
     const fragile = buff.mods && buff.mods.fragileBreakPct;
     if (fragile) {
       return [buff.name + '（' + RARITY[buff.rarity] + ' · 易碎）', buff.desc,
+        /* 需求（本轮）：把**未破碎的叠层**写清楚 —— 烙印碎掉后那一条会从列表里消失，
+         * 所以面板上的 ×N 就是「还没碎、正在生效的层数」。 */
+        '当前未破碎叠层：×' + (b.stacks || 1) +
+          ((b.stacks || 1) > 1 ? '（每层独立计时，各自有 ' + fragile + '% 概率损毁）' : '（1 层，' + fragile + '% 概率损毁）'),
         '每打完一场有 ' + fragile + '% 概率损毁；损毁后加成仍然保留',
         b.on ? '当前生效中 · 点一下可以关掉' : '当前已关闭 · 点一下重新开启'].join('\n');
     }
@@ -318,6 +329,18 @@
     return [buff.name + '（' + RARITY[buff.rarity] + ' · 限次 ' + (buff.uses || 1) + ' 场）', buff.desc,
       '剩余 ' + b.uses + ' 场（每打完一场扣 1，扣完自动消失）',
       b.on ? '当前生效中 · 点一下可以关掉（关掉不扣次数）' : '当前已关闭 · 点一下重新开启'].join('\n');
+  }
+  /** 限次增益徽标上的文字（剩余场次 / 易碎概率 + **未破碎的叠层**）。
+   *  需求（本轮）：烙印可以在限次栏里叠层，但未破碎的层数原来在面板上看不出来 ——
+   *  这里统一在徽标前面补上「×N 层 ·」。
+   *  抽成独立函数是为了让测试能直接跑这一份口径（slicing 真实源码，不复制实现）。 */
+  function limitBadgeText(b) {
+    const def = TowerData.BUFF_BY_ID[b.id] || {};
+    const stackTag = b.stacks > 1 ? '×' + b.stacks + ' 层 · ' : '';
+    if (def.towerOnly && def.nextBattle) return stackTag + '下一场';
+    if (def.mods && def.mods.fragileBreakPct) return stackTag + '易碎 ' + def.mods.fragileBreakPct + '%';
+    if (def.nextBattle) return stackTag + '无尽塔 · 剩 ' + b.uses + ' 场';   // 无尽塔的单场限次类
+    return stackTag + '剩 ' + b.uses + ' 场';
   }
   /** 第 1 项：无尽主界面的增益面板 —— 永久（最多 5 格）+ 限次（可开关、扣次用完即消失）。 */
   function buffPanelsHtml(mode) {
@@ -355,15 +378,7 @@
       ? lim.map((b) => '<button type="button" class="limit-tag r' + b.rarity + (b.on ? '' : ' off') + '" data-toggle="' + b.id +
           '" data-tip="' + esc(limitTip(b)) + '" title="' + esc(limitTip(b)) + '">' +
           '<b>' + esc(b.name) + '</b><i>' + (b.on ? '生效中' : '已关闭') + '</i><em>' +
-        (function () {
-          const def = TowerData.BUFF_BY_ID[b.id] || {};
-          /* 只有挑战塔专属才写「下一场」；无尽塔的 nextBattle 限次类要显示真实剩余次数
-           *（N13 血之契约 / N14 铁血护盾 都是 10 次限次，必须看得出剩几次）。 */
-          if (def.towerOnly && def.nextBattle) return '下一场';
-          if (def.mods && def.mods.fragileBreakPct) return '易碎 ' + def.mods.fragileBreakPct + '%';
-          if (def.nextBattle) return '无尽塔 · 剩 ' + b.uses + ' 场';   // 无尽塔的单场限次类
-          return '剩 ' + b.uses + ' 场';
-        })() + '</em></button>').join('')
+          limitBadgeText(b) + '</em></button>').join('')
       : '<span class="buff-empty">还没有限次增益</span>';
     return '<div class="tower-buffs endless-buffs">' +
       '<h4>永久增益 <span class="buff-slot-count">' + (run.permUsed == null ? perm.length : run.permUsed) + '/' + cap + '</span>' +
@@ -865,9 +880,13 @@
             '<i>' + esc(d.short || d.hero || '大侠') + '</i>' + esc(d.text || d.name) + '</span>').join('') + '</div>'
         : '') +
       '</div>';
-    const body = head + '<div class="hex-cards">' + choices.map(choiceCard).join('') + '</div>';
+    /* 需求（本轮）：抉择扩充叠起来之后是 4/5/6 选 1，一排会挤 —— 容器上带一个 nN 记号，
+     * 由 CSS 按数量递减卡片间距、缩窄卡片内边距（介绍文字能横向铺得更满），
+     * 并给容器一个宽度上限 + 允许卡片收缩，保证 6 张也一定在画布内。 */
+    const nSlots = Math.max(1, Math.min(6, choices.length));
+    const body = head + '<div class="hex-cards n' + nSlots + '">' + choices.map(choiceCard).join('') + '</div>';
     const m = modal('', body, [], { locked: true });
-    m.element.classList.add('choice-dialog', 'hex');
+    m.element.classList.add('choice-dialog', 'hex', 'hex-n' + nSlots);
     m.element.querySelectorAll('[data-choice]').forEach((el) => {
       el.onclick = () => {
         const picked = Tower.pickChoice(mode, Number(el.dataset.choice));
@@ -953,9 +972,10 @@
       notice('你还没有任何' + label + '可选，这次强化先留着（之后拿到' + label + '再自动弹出）。', [{ label: '知道了', cls: 'gold', run: () => openEndless() }]);
       return;
     }
-    /* 按钮只写名字，等级换行显示（modal 按钮是 esc() 输出，用 \n + white-space:pre-line 换行） */
+    /* 按钮只写名字，副标题换行显示（modal 按钮是 esc() 输出，用 \n + white-space:pre-line 换行）。
+     * 特殊技能（小宇宙爆发 / 绝对防御 / 龟甲术）不按 Lv 展示，而是按 pickCandidates 给的 note。 */
     const buttons = cands.map((c) => ({
-      label: c.name + '\n' + (isPerm ? ('×' + (c.stacks || 1) + ' 层') : ('Lv' + (c.level || 1))),
+      label: c.name + '\n' + (isPerm ? ('×' + (c.stacks || 1) + ' 层') : (c.note || ('Lv' + (c.level || 1)))),
       cls: 'small pick-buff-btn' + (pending.kind === 'skill' ? '' : ' gold'),
       run: () => {
         const r = Tower.applyPickBuff(pending.kind, c.id);
@@ -966,7 +986,8 @@
     modal(isPerm ? '附魔 · 选一个永久增益' : ('三选一 · ' + label + '强化'), '<p>' + esc(isPerm
       ? '从下面三张里选一个永久增益：它不再占用永久增益位（可叠加的则全部层数一起免疫占位，本局有效）。'
       : (pending.kind === 'skill'
-        ? '从下面三个技能里选一个：它的触发概率大幅提升（本局有效）。'
+        ? '从下面三个技能里选一个：主动技的触发概率大幅提升；防御技（绝对防御 / 龟甲术）另按被动触发概率加成；'
+          + '小宇宙爆发则是「战斗开始后第一招必定放它」（本局有效）。'
         : '从下面三把武器里选一个：它的伤害 +100%（本局有效）。')) + '</p>', buttons, { small: true });
   }
   /* ============================================================

@@ -141,8 +141,8 @@
     /* —— 回响类：不改战斗数值，只改「打完这一场之后会发生什么」 ——
      * 幻影回响：**只**在三侠战生效，胜利后有 %repeatChance% 概率立刻再打同一场。
      * 数值随层数在 17%~23% 之间取值（见 repeatChanceInterval），
-     * 目的是让「战斗叠层」类增益（猎杀时刻 / 吞噬成长 / 以战养战 / 登顶者 / 战后续航）
-     * 多一份弹性空间 —— 重复的那一场同样计入叠层。 */
+     * 目的是让「战斗叠层」类增益（猎杀时刻 / 吞噬成长 / 以战养战 / 登顶者 / 战斗续航）
+     * 多一份弹性空间 —— 重复的那一场同样计入叠层（战斗续航也会再结算一次开战回血）。 */
     { id: 'echo', name: '幻影回响', bad: false, repeatOnly: true, maxStacks: 1,
       mods: { repeatChance: [0.17, 0.23, 'pct'] },
       desc: '三侠战胜利后有 %repeatChance% 概率立刻再战同一场（每场战斗至多触发一次；重复的战斗同样计入叠层）' },
@@ -935,9 +935,15 @@
     { id: 'C09', name: '逢五强化', rarity: 1, kind: 'permanent', desc: '在 5 的倍数层攻击 +30%、生命上限 +30%（仅该层）', mods: { x10Boost: 0.30 } },
     { id: 'C10', name: '机制破解', rarity: 1, kind: 'permanent', desc: '对带专属机制的敌人伤害 +25%', mods: { dmgMulMech: 0.25 } },
     /* 第 4 项新增的跨层类型：续航 / 反伤 / 低血狂怒 / 暴击 / 闪避 / 速度 ——
-     * 让「本局永久」这一档不再只有纯数值放大，选到就能改变打法。 */
-    { id: 'C16', name: '战后续航', rarity: 1, kind: 'permanent', stackable: true, desc: '每场战斗胜利后回复 5% 最大生命（可叠加）', mods: { winHealPct: 0.05 } },
-    { id: 'C17', name: '战后续航·精', rarity: 2, kind: 'permanent', stackable: true, desc: '每场战斗胜利后回复 10% 最大生命（可叠加）', mods: { winHealPct: 0.10 } },
+     * 让「本局永久」这一档不再只有纯数值放大，选到就能改变打法。
+     *
+     * 续航（原「战后续航」，本轮改名「战斗续航」）：效果是**每一场战斗的第一回合**
+     * 回复 X% 最大生命，走通用的 startHealPct 通路（与补给 N08 同一条），
+     * 于是它按**本场真实上限**（含空血上限）结算，而不是按上一场记下的上限。 */
+    { id: 'C16', name: '战斗续航', rarity: 1, kind: 'permanent', stackable: true,
+      desc: '每场战斗开始时（第一回合）回复 5% 最大生命（可叠加）', mods: { startHealPct: 0.05 } },
+    { id: 'C17', name: '战斗续航·精', rarity: 2, kind: 'permanent', stackable: true,
+      desc: '每场战斗开始时（第一回合）回复 10% 最大生命（可叠加）', mods: { startHealPct: 0.10 } },
     { id: 'C18', name: '吸血精通', rarity: 1, kind: 'permanent', desc: '所有攻击附带 12% 吸血', mods: { lifestealPct: 0.12 } },
     { id: 'C19', name: '荆棘之甲', rarity: 1, kind: 'permanent', desc: '受到伤害时反弹 20% 给敌人', mods: { thornsPct: 0.20 } },
     /* 狂怒：低血时同时强化攻/敏/速（阈值 50%）。
@@ -984,9 +990,11 @@
     /* shopWeight：单件在商店里的相对权重（默认 1）。涅槃每层一次复活甲，
      * 放进商店会让「买一次=整局每层都多一条命」，强度远超同档传奇，
      * 所以按需求大幅降低它上架的概率。
-     * 重做（原「不死鸟」）：复活后**本场战斗**力/敏/速均 +50%（reviveStatMul）。 */
-    { id: 'C14', name: '涅槃', rarity: 3, kind: 'permanent', shopWeight: 0.12,
-      desc: '每层拥有一次复活甲：复活时回复当前生命上限的 50%，且本场战斗力量、敏捷、速度均 +50%',
+     * 重做（原「不死鸟」）：复活后**本场战斗**力/敏/速均 +50%（reviveStatMul）。
+     * 本轮：可以在一局里拿两次（stackable + maxStacks 2）——**第 2 层不再加大复活后的属性加成**，
+     * 而是让「本层的复活机会」从 1 次变成 2 次（见 tower.js 的 agg.reviveMax / run.reviveUsed）。 */
+    { id: 'C14', name: '涅槃', rarity: 3, kind: 'permanent', shopWeight: 0.12, stackable: true, maxStacks: 2,
+      desc: '每层拥有一次复活甲：复活时回复当前生命上限的 50%，且本场战斗力量、敏捷、速度均 +50%（可叠 2 层，第 2 层改为「本层 2 次复活机会」）',
       mods: { revivePct: 0.50, reviveStatMul: 0.50 } },
     /* —— 第 1 项新增：与经济系统挂钩的 buff（仅无尽；instant 的拿到就结算，不占永久 5 格） —— */
     /* ============================================================
@@ -994,13 +1002,15 @@
      *   epicMul / legendMul = 2   → 史诗与传奇档权重 ×2
      *   commonMul = 0.5           → 普通档权重 ×0.5
      * 影响范围：战斗奖励的选项池（rollChoices）与试炼商店货架（rollShopSlots）。
-     * 可重复获得，但重复获得概率降低（repeatWeight 走加权抽取，越拿越低）。
+     * 最初设计成「可重复获得、越拿越难」（repeatWeight），现已改为**一局一次**：
+     * 这套通用闸门（与 E07 挫锐 / E08 卸甲 同一口径）—— poolFilter / ownable
+     * 用 instantOwnedCount 判上限，拿过一次之后就不再进任何池子。
+     * 之所以继续保留 `repeatable: true`：传奇掉率里的「可重复传奇是否已全部拥有」
+     * 仍要把它算作一份（见 allRepeatableLegendsOwned），语义是「它能重复出现在池子里」。
      * ============================================================ */
-    { id: 'C51', name: '天命所归', rarity: 3, kind: 'instant', endlessOnly: true, repeatable: true,
-      desc: '立即生效：本局战斗奖励与商店的史诗/传奇出率 ×2、普通出率 ×0.5（可重复获得，重复获得概率递减）',
-      /* repeatWeight：已拥有时，它被抽中的权重乘这个系数（叠加层数次幂）。
-       * 「天命所归」可以重复获得，但每多拿一层就更难再刷到。 */
-      mods: { rarityBoost: 1, epicMul: 2, legendMul: 2, commonMul: 0.5, repeatWeight: 0.35 } },
+    { id: 'C51', name: '天命所归', rarity: 3, kind: 'instant', endlessOnly: true, repeatable: true, maxStacks: 1,
+      desc: '立即生效：本局战斗奖励与商店的史诗/传奇出率 ×2、普通出率 ×0.5（一局只能获得一次）',
+      mods: { rarityBoost: 1, epicMul: 2, legendMul: 2, commonMul: 0.5 } },
     { id: 'E01', name: '立即进货', rarity: 1, kind: 'instant', endlessOnly: true, desc: '立刻开一次试炼商店（不影响 5 层一次的结算点）', mods: { openShop: 1 } },
     { id: 'E02', name: '试炼补贴', rarity: 0, kind: 'instant', endlessOnly: true, desc: '立刻获得 60 试炼币', mods: { instantCoins: 60 } },
     { id: 'E03', name: '财源滚滚', rarity: 1, kind: 'instant', endlessOnly: true, desc: '立刻获得 120 试炼币', mods: { instantCoins: 120 } },
@@ -1123,14 +1133,24 @@
      * 可重复获得，每次独立相乘（多层 = 1.5^n，而不是 1+0.5n）。 */
     { id: 'C49', name: '终焉烙印', rarity: 3, kind: 'limited', uses: 1000, endlessOnly: true, repeatable: true, maxStacks: 3,
       desc: '终乘烙印：存在时力量/敏捷/速度/生命上限 +25%；损毁后本局 +50%（可重复获得，按层**加算**）',
-      /* repeatWeight：可重复获得，但已拥有时被抽中的权重 ×0.18^层数（越拿越难刷到）。
+      /* repeatWeight：可重复获得，但已拥有时被抽中的权重 ×0.10^份数（越拿越难刷到）。
+       * 本轮进一步单独调低（0.18 → 0.10），而且**碎掉的那一份也计入份数** ——
+       * 烙印碎掉后会从 run.limited 里移除（加成转进 fragileBurned），
+       * 所以「已获得份数」取 max(在册层数, run.fragileGot) —— 见 tower.js 的 obtainedCountOf。
        * 叠层按**加算**：n 层损毁 = 1 + 0.5n（不再是 1.5^n）。 */
-      mods: { fragileFinalMul: true, fragileAddAlive: 0.25, fragileAddBurned: 0.5, fragileBreakPct: 6, repeatWeight: 0.18 } },
+      mods: { fragileFinalMul: true, fragileAddAlive: 0.25, fragileAddBurned: 0.5, fragileBreakPct: 6, repeatWeight: 0.10 } },
     /* 稀有烙印「涌泉烙印」：跳绿字的回血量 +10%；损毁后本局 +20%（同样是加算层）。 */
     { id: 'C52', name: '涌泉烙印', rarity: 1, kind: 'limited', uses: 1000, endlessOnly: true, repeatable: true,
       desc: '治疗烙印：跳跃绿字的回血量 +10%；损毁后本局 +20%（可重复获得，按层加算）',
       mods: { fragileFinalMul: true, fragileHealAddAlive: 0.10, fragileHealAddBurned: 0.20,
         fragileBreakPct: 6, repeatWeight: 0.3 } },
+    /* 传奇烙印「淘金烙印」：**只在战斗奖励里掉落**（battleOnly → 不进商店货架），一局一次。
+     * 每场战斗的试炼币获取 +15%；损毁后本局 +30%（同样是「存在/损毁」两段加算）。
+     * 记账字段与前两条烙印同一套：run.fragileCoinBase（未破碎份数）+
+     * run.fragileCoinBurned（已破碎份数的明细数组），见 tower.js 的 fragileCoinBonus。 */
+    { id: 'C53', name: '淘金烙印', rarity: 3, kind: 'limited', uses: 1000, endlessOnly: true, battleOnly: true, maxStacks: 1,
+      desc: '淘金烙印：每场战斗的试炼币获取 +15%；损毁后本局 +30%（每打完一场有 6% 概率损毁；一局只能获得一次）',
+      mods: { fragileCoinAddAlive: 0.15, fragileCoinAddBurned: 0.30, fragileBreakPct: 6 } },
     { id: 'C38', name: '先机预判', rarity: 2, kind: 'permanent',
       desc: '每场战斗敌方对我方造成的第一次伤害变为 0（反伤、中毒等非攻击伤害不会消耗它）',
       mods: { firstHitZero: 1 } },

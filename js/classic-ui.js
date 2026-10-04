@@ -1116,7 +1116,10 @@
   const QUALITY_LABEL = ['普通', '优秀', '杰出', '卓越', '传说'];
   function openGearSell(pg) {
     gearSellPage = Math.max(0, typeof pg === 'number' ? pg : 0);
-    const gears = State.myGears(), S = State.state();
+    /* 需求（本轮）：**倒序**展示 —— 后进背包的（刚合成 / 刚融合出来的）排在最前，
+     * 免得卖掉新装备时每次都要翻到最后一页去找。S.gears 是「先进先出」的数组
+     * （addGear 用 push），所以这里整体反转即可。 */
+    const gears = State.myGears().slice().reverse(), S = State.state();
     const total = Math.max(1, Math.ceil(gears.length / GEAR_SELL_PER));
     gearSellPage = Math.min(gearSellPage, total - 1);
     const shown = gears.slice(gearSellPage * GEAR_SELL_PER, gearSellPage * GEAR_SELL_PER + GEAR_SELL_PER);

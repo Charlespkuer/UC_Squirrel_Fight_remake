@@ -246,7 +246,29 @@
 .hex-debuff i{font-style:normal;font-size:18px;color:#fff;background:var(--hero-color,#a8453a);
   border-radius:8px;padding:1px 8px}
 
-.hex-cards{display:flex;justify-content:center;align-items:stretch;gap:22px}
+/* 需求（本轮）：4/5/6 选 1 时卡片会挤在一排。
+ *   · 容器给一个不超过画布（1170）的宽度上限，卡片允许收缩 ——
+ *     原来的 6×268 + 5×22 = 1718 会直接溢出屏幕；
+ *   · n4 / n5 / n6 逐级减小卡片间距；
+ *   · 同步缩窄卡片**左右内边距**：介绍文字到卡片边缘的距离变小，
+ *     同样宽的卡片里能横向覆盖更多字。 */
+.hex-cards{display:flex;justify-content:center;align-items:stretch;gap:22px;max-width:1120px;margin:0 auto}
+.hex-cards .hex-card{flex:0 1 268px;min-width:0}
+.hex-cards.n4{gap:16px}
+.hex-cards.n5{gap:10px}
+.hex-cards.n6{gap:6px}
+.hex-cards.n4 .hex-card{padding-left:15px;padding-right:15px}
+.hex-cards.n5 .hex-card{padding-left:10px;padding-right:10px}
+.hex-cards.n6 .hex-card{padding-left:6px;padding-right:6px}
+/* 5/6 选 1 时纵向也要收一点：卡片变窄之后介绍文字换行更多，
+ * 最长的那几条描述会把标题顶出画布（实测 6 选 1 + 最长描述 = 694px > 画布 690px）。
+ * 只动描述字号/行高与卡片上下内边距、以及标题区的下边距，不动配色与字号层级。 */
+.hex-cards.n5 .hex-desc{font-size:21px;line-height:1.35}
+.hex-cards.n6 .hex-desc{font-size:19px;line-height:1.32}
+.hex-cards.n5 .hex-card,.hex-cards.n6 .hex-card{padding-top:28px;padding-bottom:18px}
+.choice-dialog.hex-n5 .hex-pick-head,.choice-dialog.hex-n6 .hex-pick-head{margin-bottom:12px}
+.choice-dialog.hex-n6 .hex-emblem{font-size:38px}
+.choice-dialog.hex-n6 .hex-name{font-size:27px}
 .hex-card{position:relative;display:flex;flex-direction:column;align-items:center;gap:8px;
   width:268px;padding:34px 20px 24px;border-radius:26px;cursor:pointer;font-family:inherit;
   border:4px solid #6f5a33;background:linear-gradient(180deg,#2d3a4c,#1b2430);

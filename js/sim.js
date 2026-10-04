@@ -18,6 +18,7 @@
  *                 dodgeBonus, dodgeMul, takenMul, regenPct, lifestealPct, shellPct,
  *                 openerPowerMul/openerRounds/fatiguePowerMul,
  *                 mustHitFirst, firstSkillFree, openStrikePct,
+ *                 cosmosFirst（秘技通神抽中小宇宙爆发：第一招必定放它）,
  *                 emptyMaxHpMul, lowHpTakenMul, lowHpLifestealPct, lowHpRegenPct/lowHpRegenAt,
  *                 lowHpPowerMul/lowHpAgilityMul/lowHpSpeedMul/lowHpAt}
  * ============================================================ */
@@ -47,9 +48,11 @@
      * 它「必中 + 1~6 倍伤害」，重复触发时方差极大，是所有技能里最该压一档的。 */
     repeatBySkill: { 8: 13, 12: 13, 15: 13, 23: 10 },
     /* 绝对防御是**受击自动触发**的技能（不进出手池），所以它不按 repeatBySkill 走，
-     * 而是「首次 22% / 二次及以后 13%」——和龟甲术首次 35 / 再次 20 一样的口径。
-     * 13/22 比上面那三档的降幅还大一点，因为它是「每次都白挡一下」的强被动。 */
+     * 而是「首次 22%、之后逐次递减」——同一场里挡得越多，下一次越难再挡
+     *（需求：第二次 < 第一次、第三次 < 第二次…，敌我都生效）。
+     * 衰减口径见 jueDuiChanceOf：13 × 0.7^(n-1)，下限 jueDuiMin（2%）。 */
     jueDuiChance: 22, jueDuiAgain: 13,
+    jueDuiDecay: 0.7, jueDuiMin: 2,
     shellFirst: 35, shellAgain: 20,
     /* 题面·蚀骨：玩家每次出手叠 1 层「攻击 −3%」，这个上限同时被代码与 NPC 文案使用 ——
      * 抽成常量，免得一边改、另一边忘（此前 10 层写在两处）。 */
@@ -132,7 +135,7 @@
       baseStats: Object.fromEntries(['power', 'agility', 'speed'].map((key) => [key, stat(f.baseStats?.[key], stat(f[key], 1))])),
       // 战斗内状态
       ap: 0, restNext: false, pendingWeapon: null, stun: 0, silence: 0, disarm: 0, shellCharges: 0,
-      mustHitNext: !!(mods && mods.mustHitFirst), stripTurns: 0, usedFakeDie: false, usedMaster: false, usedShell: false, usedCosmos: false, usedSnack: false, usedJueDui: false,
+      mustHitNext: !!(mods && mods.mustHitFirst), stripTurns: 0, usedFakeDie: false, usedMaster: false, usedShell: false, usedCosmos: false, usedSnack: false, jueDuiCount: 0,
       // 题面·枯泉：治疗量倍率（0 = 完全封疗）
       healMul: 1,
       usedUlt: false, acted: false, usedFreeSkill: false,
@@ -174,6 +177,9 @@
       if (r) {
         r.deathSave = true;
         r.reviveStatMul = mul > 0 ? mul : undefined;
+        /* 涅槃（复活甲）与金蝉脱壳都是 deathSave，但塔里需要分开数「涅槃用掉几次」
+         *（C14 叠 2 层时每层有 2 次机会）—— 所以复活甲那一条打上显式标记。 */
+        r.revive = sv.revive ? 1 : undefined;
         r.noteText = (r.noteText ? r.noteText + '·' : '') + (sv.healPct ? '涅槃' : '金蝉脱壳');
         r.noteSide = def.side;
       }
@@ -351,10 +357,11 @@
 
   /**
    * 「被动技能触发提升」—— 秘技通神（C33）选中绝对防御 / 龟甲术之后写进
-   * `effects['技能ID']` 的加成值（例如 effects['16'] = 2.0 表示 +200%）。
+   * `effects['技能ID']` 的加成值（例如 effects['16'] = 1.5 表示 +150%）。
    * 绝对防御与龟甲术都是**受击自动触发**、不进出手池的技能，
    * 所以它们不吃 skillWeight 那套权重，必须在这里单独乘一次。
-   */
+   * （C33 抽中小宇宙爆发不走这里 —— 它的收益是「第一招必放」，见 playerLikeAction
+   *   里的 forceCosmos / mods.cosmosFirst。） */
   function passiveSkillBoost(f, id) {
     if (!f) return 0;
     const raw = f.effects && f.effects[id] != null ? f.effects[id]
@@ -362,7 +369,6 @@
     const v = Number(raw);
     return Number.isFinite(v) ? Math.max(0, v) : 0;
   }
-  /** 绝对防御的单次触发概率（%）：首次 / 二次及以后，再乘被动加成。 */
   /**
    * 秘技通神把防御被动的触发率按 `1 + boost` 放大之后的**上限**（百分比）。
    *
@@ -378,12 +384,29 @@
    */
   const BOOSTED_AGAIN_CAP = 45;
   const BOOSTED_FIRST_CAP = 90;
-  function jueDuiChanceOf(def, again) {
-    const base = again ? RULES.jueDuiAgain : RULES.jueDuiChance;
+  /**
+   * 绝对防御的单次触发概率（%）：按**这一场已经挡过几次**逐次递减。
+   *
+   * 需求（本轮）：同一场战斗里，第 2 次 < 第 1 次、第 3 次 < 第 2 次…（对敌我都生效）。
+   * 口径：
+   *   · 第 1 次（count = 0）：RULES.jueDuiChance = 22%
+   *   · 之后每次：13% × 0.7^(count-1)，四舍五入，最低 RULES.jueDuiMin = 2%
+   *     → 22 / 13 / 9 / 6 / 4 / 3 / 2 / 2 …
+   *   · 秘技通神（C33）的 boost 仍然乘在**这一次**的概率上（首次与后续各自封顶），
+   *     所以加成后整条曲线整体抬高（55 / 32.5 / 22.5 / 15 / 10 / 7.5 / 5 …），
+   *     但「越来越低」的关系不变。
+   * 第二个参数接受「已触发次数」（count）——兼容旧的布尔写法：
+   * `false → 0`、`true → 1`，正好分别对应「首次」与「第二次」。
+   */
+  function jueDuiChanceOf(def, count) {
+    const n = Math.max(0, Math.floor(Number(count) || 0));
+    const base = n === 0
+      ? RULES.jueDuiChance
+      : Math.max(RULES.jueDuiMin, Math.round(RULES.jueDuiAgain * Math.pow(RULES.jueDuiDecay, n - 1)));
     const boost = passiveSkillBoost(def, 16);
     const out = base * (1 + boost);
     if (!boost) return out;                                  // 没加成：原样
-    return Math.min(out, again ? BOOSTED_AGAIN_CAP : BOOSTED_FIRST_CAP);
+    return Math.min(out, n === 0 ? BOOSTED_FIRST_CAP : BOOSTED_AGAIN_CAP);
   }
   /** 龟甲术的单次触发概率（%）：首次 / 二次及以后（二次还带装备与技能等级加成）。 */
   function shellChanceOf(def, again) {
@@ -400,11 +423,13 @@
     let out = { dmg, guiJia: 0, jueDui: 0, rebound: 0 };
     const gearReduction = opts.action === 'weapon' ? effect(def, opts.weaponType === '投掷' ? 10 : 9) : opts.action === 'skill' ? effect(def, 11) : 0;
     out.dmg = Math.round(out.dmg * (1 - clamp(gearReduction, 0, 80) / 100));
-    /* 绝对防御是受击自动触发、不进出手池的技能，所以「二次及以后」用单独的档：
-     * 首次 jueDuiChance%，之后再挨打只有 jueDuiAgain% 再挡一次（口径同龟甲术）。 */
+    /* 绝对防御是受击自动触发、不进出手池的技能，所以「挡过几次」单独记：
+     * 同一场里每挡一次，下一次的触发率就按 jueDuiChanceOf 的曲线往下降
+     *（22 / 13 / 9 / 6 / 4 / 3 / 2 …；对敌我都生效）。
+     * 旧的布尔 `usedJueDui` 已被这个计数取代（它只够区分「首次/之后」两档）。 */
     if (def.skills[16] && def.silence <= 0
-        && chance(jueDuiChanceOf(def, !!def.usedJueDui))) {
-      def.usedJueDui = true;
+        && chance(jueDuiChanceOf(def, def.jueDuiCount || 0))) {
+      def.jueDuiCount = Math.max(0, Math.floor(Number(def.jueDuiCount) || 0)) + 1;
       const pct = 40 + 4 * (def.skills[16] - 1);
       out.jueDui = out.dmg; out.rebound = Math.round(out.dmg * pct / 100); out.dmg = 0;
       return out;
@@ -530,6 +555,7 @@
         }
         r.deathSave = true;
         r.reviveStatMul = mul2 > 0 ? mul2 : undefined;
+        r.revive = sv.revive ? 1 : undefined;      // 同 tryDeathSave：区分涅槃与金蝉脱壳
         r.noteText = sv.healPct ? '涅槃' : '金蝉脱壳'; r.noteSide = def.side;
       } else if (def.hp - dmg <= 0 && godSave(def)) {
         dmg = Math.max(0, def.hp - 1);
@@ -821,8 +847,16 @@
         !(id === 14 && att.usedCosmos) && !(id === 17 && att.usedSnack) && !(id === 17 && att.hp >= att.maxHp) &&
         !att.turnSkills[id]);
       const canSkill = actives.length > 0 && att.silence <= 0;
+      /* 秘技通神（C33）抽中小宇宙爆发（14）：**我方第一招**必定是它。
+       *   · 只在「真的能放技能」时强求（被沉默 / 眩晕 / 休息时保留，等第一次能出手再放）；
+       *   · 放完之后 usedCosmos 置位，本场不再强求（小宇宙本来也是每场一次）；
+       *   · 它自带 actAgain（不占回合），所以这一步只决定「出招顺序」，不亏输出。 */
+      const forceCosmos = !!(att.mods && att.mods.cosmosFirst) && !att.usedCosmos && canSkill &&
+        actives.some((id) => Number(id) === 14);
       let kind;
-      if (att.pattern) {
+      if (forceCosmos) {
+        kind = 'skill';
+      } else if (att.pattern) {
         // 挑战塔的松鼠对手：按固定循环出招（玩家可以背板）。
         // 这一步用不了就顺延到下一个能用的，不会因为缴械/沉默而卡住。
         const want = att.pattern[att.patternStep % att.pattern.length];
@@ -910,9 +944,10 @@
       }
 
       if (kind === 'skill') {
-        const sid = att.pattern
-          ? nextPatternSkill(att, actives)                              // 固定循环：按技能表的轮转顺序出
-          : pickSkill(att, actives);
+        const sid = forceCosmos ? 14                                    // 秘技通神：第一招强制小宇宙爆发
+          : (att.pattern
+            ? nextPatternSkill(att, actives)                            // 固定循环：按技能表的轮转顺序出
+            : pickSkill(att, actives));
         att.usedSkills[sid] = true;
         att.turnSkills[sid] = true;
         att.lastSkillId = sid;

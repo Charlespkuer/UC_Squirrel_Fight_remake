@@ -688,6 +688,84 @@ test('固定循环的敌人不会把同一招连着放（技能冷却按出手�
   assert.ok(ids.includes(12) && ids.includes(23), '两招都要用到（不是只放一招）：' + ids.join(','));
 });
 
+/* ============================================================
+ * 本轮新增的 4 个「战斗中」增益（塔 buff）
+ *   C54 越战越勇 / C55 后发制人 / C56 风影身法 / C57 玉石俱焚
+ * 用 game(0.5) 钉住 Math.random，暴击/闪避噪声消失，断言可以写死。
+ * ============================================================ */
+const auraFighter = (extra = {}) => fighter(Object.assign({
+  power: 100, agility: 100, speed: 100, hp: 100000, maxHp: 100000,
+  baseStats: { power: 100, agility: 100, speed: 100 } }, extra));
+const actOf = (rounds, side) => rounds.filter((r) => r.attacker === side && ['weapon', 'skill', 'common'].includes(r.action));
+const auraRows = (rounds, side, note) => rounds.filter((r) => r.attacker === side && r.action === 'buff' && r.noteText === note);
+
+test('越战越勇（C54）：每回合开始力/敏/速各 +1.5%，只在本次战斗里累加', () => {
+  const g = game(0.5);
+  const res = g.Sim.simulate(auraFighter({ mods: { roundStatPct: 0.015 } }), auraFighter());
+  const mine = actOf(res.rounds, 0);
+  assert.equal(auraRows(res.rounds, 0, '越战越勇').length, mine.length,
+    '每次我方出手都应当结算一次「越战越勇」，实测 ' + auraRows(res.rounds, 0, '越战越勇').length + ' / ' + mine.length);
+  /* 效果确实在涨：最后几次出手的伤害明显高于最开始几次（+1.5%/次、每次都累加） */
+  const dmg = mine.map((r) => Number(r.dmg) || 0);
+  assert.ok(dmg.length >= 6, '样本太少：' + dmg.length);
+  const head = dmg.slice(0, 3).reduce((a, b) => a + b, 0);
+  const tail = dmg.slice(-3).reduce((a, b) => a + b, 0);
+  assert.ok(tail > head * 1.05, '伤害应当随回合上升：前 3 次 ' + head + ' vs 后 3 次 ' + tail);
+  /* 不带这个 mod 时不该出现该结算行 */
+  const plain = g.Sim.simulate(auraFighter(), auraFighter());
+  assert.equal(auraRows(plain.rounds, 0, '越战越勇').length, 0, '没有该增益就不该有结算行');
+});
+
+test('后发制人（C55）：把落后最多的一项补上差距的 10%', () => {
+  const g = game(0.5);
+  const weak = auraFighter({ power: 20, agility: 20, speed: 20, baseStats: { power: 20, agility: 20, speed: 20 }, mods: { catchUpPct: 0.10 } });
+  const strong = auraFighter({ power: 200, agility: 200, speed: 200, baseStats: { power: 200, agility: 200, speed: 200 } });
+  const res = g.Sim.simulate(weak, strong);
+  const rows = auraRows(res.rounds, 0, '后发制人');
+  assert.ok(rows.length > 0, '三项都落后时每回合都应当补一次');
+  assert.equal(rows.length, actOf(res.rounds, 0).length, '每次我方出手都补一次');
+  /* 效果：伤害随回合抬升（差距被逐步补上） */
+  const dmg = actOf(res.rounds, 0).map((r) => Number(r.dmg) || 0);
+  assert.ok(dmg.length >= 6, '样本太少：' + dmg.length);
+  assert.ok(dmg.slice(-3).reduce((a, b) => a + b, 0) > dmg.slice(0, 3).reduce((a, b) => a + b, 0),
+    '落后时伤害应当逐回合抬升');
+  /* 三项都不落后 → 不补 */
+  const even = g.Sim.simulate(auraFighter({ mods: { catchUpPct: 0.10 } }), auraFighter());
+  assert.equal(auraRows(even.rounds, 0, '后发制人').length, 0, '不落后就不该补');
+});
+
+test('风影身法（C56）：每场第一次被攻击必定闪避', () => {
+  const g = game(0.5);
+  const res = g.Sim.simulate(auraFighter({ mods: { firstDodge: 1 } }), auraFighter());
+  const firstEnemyHit = res.rounds.find((r) => r.attacker === 1 && (Number(r.dmg) > 0 || r.dodge));
+  assert.ok(firstEnemyHit, '应当有敌方攻击');
+  assert.equal(firstEnemyHit.dodge, true, '第一次被打中必定闪避');
+  assert.match(String(firstEnemyHit.noteText || ''), /风影身法/, '闪避要标明来源：' + firstEnemyHit.noteText);
+  assert.equal(res.rounds.filter((r) => r.attacker === 0 && r.dodge).length, 0, '它只管我方挨打那一次');
+  /* 不带这个 mod 的同一场对局：第一击不该必定闪避 */
+  const plain = game(0.5).Sim.simulate(auraFighter(), auraFighter());
+  const plainFirst = plain.rounds.find((r) => r.attacker === 1 && (Number(r.dmg) > 0 || r.dodge));
+  assert.ok(!plainFirst || plainFirst.dodge !== true, '没有该增益时第一击不该必定闪避');
+});
+
+test('玉石俱焚（C57）：每回合双方生命上限各 ×90%（向下取整），当前血量跟着裁', () => {
+  const g = game(0.5);
+  const res = g.Sim.simulate(auraFighter({ mods: { roundMaxHpMul: 0.9 } }), auraFighter());
+  const rows = auraRows(res.rounds, 0, '玉石俱焚');
+  assert.ok(rows.length > 0, '每回合都该结算一次');
+  const start = 100000;
+  assert.ok(res.maxHp[0] < start && res.maxHp[1] < start,
+    '双方上限都该变小：' + res.maxHp.join(' / '));
+  assert.equal(res.maxHp[0], res.maxHp[1], '双方起点相同，压缩次数也相同 → 最终上限应当一致');
+  /* 0.9^k 的量级（每步都 floor，所以只会更小一点点） */
+  const k = rows.length;
+  const upper = Math.floor(start * Math.pow(0.9, k)) + 1;
+  assert.ok(res.maxHp[0] <= upper, '压缩量应当与回合数吻合：' + res.maxHp[0] + ' > ' + upper);
+  assert.ok(res.maxHp[0] > Math.floor(start * Math.pow(0.9, k + 2)), '压缩不该过头');
+  const plain = game(0.5).Sim.simulate(auraFighter(), auraFighter());
+  assert.equal(plain.maxHp[0], plain.maxHp[1], '没有该增益时双方上限不变');
+});
+
 let failed = 0;
 for (const [name, run] of tests) {
   try { run(); console.log('PASS ' + name); }

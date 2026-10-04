@@ -475,6 +475,123 @@ test('需求9.5：铸币（原名「重新挑战币」）改名彻底 + 无尽�
   assert.equal(TD.BUFF_BY_ID.E10.mods.instantRetry, 3, '「背水一战」给 3 枚铸币');
 });
 
+test('需求9.6：本轮新增 6 个增益 —— 池子归属 + 豪掷千金 / 门庭若市', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower;
+  const tag = (id, t) => TD.hasTag(TD.BUFF_BY_ID[id], t);
+  /* 本测试要在好几段里改 run 的字段：每段开始前确保有一局干净的无尽塔在跑
+   *（上一段可能已经打到失败/结束，_debugRun 会变成 null）。 */
+  const ensureRun = () => {
+    let r = T._debugRun('endless');
+    if (r && !r.attempt) return r;
+    try { if (r) T.abandon('endless'); } catch (e) { /* 忽略 */ }
+    c.State.newGame('new6-' + Math.random());
+    const st6 = c.State.state(); st6.level = 70; st6.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st6.stages[i] = { npcIndex: 3, passed: true };
+    T._debugSetLayer(9);
+    assert.ok(T.startEndlessRun().ok, '应当能开一局无尽塔');
+    return T._debugRun('endless');
+  };
+  /* ---- 1) 池子归属：默认仅无尽塔；C54 / C57 挑战塔也保留 ---- */
+  for (const id of ['C54', 'C57']) {
+    assert.ok(tag(id, 'tower'), id + ' 挑战塔应当保留');
+  }
+  for (const id of ['C55', 'C56', 'C58', 'C59']) {
+    assert.ok(tag(id, 'endless') && !tag(id, 'tower'), id + ' 应当仅无尽塔');
+  }
+  for (const id of ['C54', 'C55', 'C56', 'C57', 'C58', 'C59']) {
+    assert.ok(tag(id, 'endless') && tag(id, 'battle') && tag(id, 'shop'), id + ' 应当进无尽池与商店');
+  }
+  assert.ok(TD.towerPool.some((b) => b.id === 'C54') && TD.towerPool.some((b) => b.id === 'C57'),
+    'C54 / C57 应当在挑战塔池里');
+  assert.equal(TD.towerPool.filter((b) => ['C55', 'C56', 'C58', 'C59'].includes(b.id)).length, 0,
+    '另外 4 条不该进挑战塔池');
+
+  /* ---- 2) 数据口径 ---- */
+  assert.equal(TD.BUFF_BY_ID.C54.kind, 'permanent', 'C54 是永久');
+  assert.equal(TD.BUFF_BY_ID.C54.rarity, 2, 'C54 是史诗');
+  assert.equal(TD.BUFF_BY_ID.C54.maxStacks, 2, 'C54 可叠 2 层');
+  assert.equal(TD.BUFF_BY_ID.C55.rarity, 3, 'C55 是传奇');
+  assert.equal(TD.BUFF_BY_ID.C56.rarity, 1, 'C56 是稀有');
+  assert.equal(TD.BUFF_BY_ID.C57.kind, 'limited', 'C57 是限次');
+  assert.equal(TD.BUFF_BY_ID.C57.uses, 10, 'C57 限 10 次');
+  assert.ok(tag('C57', 'nextBattle'), 'C57 是「下一场战斗」类（挑战塔的文案口径）');
+  assert.equal(TD.BUFF_BY_ID.C59.maxStacks, 3, 'C59 可叠 3 层');
+
+  /* ---- 2.5) 越战越勇（C54）可叠 2 层：面板里的每回合加成按层数翻倍 ---- */
+  {
+    const rr = ensureRun();
+    rr.permanent = [{ id: 'C54', stacks: 1 }]; rr.limited = []; rr.env = []; rr.choices = null; rr.phase = null;
+    const nx = T.nextBattle('endless');
+    assert.ok(nx.ok, '应当能开战：' + nx.msg);
+    const me1 = c.State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+    nx.adjustMe(me1);
+    assert.ok(Math.abs(Number(me1.mods.roundStatPct) - 0.015) < 1e-9,
+      '1 层时每回合 +1.5%，实测 ' + me1.mods.roundStatPct);
+    T.reportBattle('endless', nx.token, false, 0.01, null);
+    const rr2 = T._debugRun('endless');
+    if (rr2) {
+      rr2.permanent = [{ id: 'C54', stacks: 2 }]; rr2.choices = null; rr2.phase = null; rr2.limited = [];
+      const nx2 = T.nextBattle('endless');
+      if (nx2.ok) {
+        const me2 = c.State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+        nx2.adjustMe(me2);
+        assert.ok(Math.abs(Number(me2.mods.roundStatPct) - 0.03) < 1e-9,
+          '2 层时应当翻倍到 +3%，实测 ' + me2.mods.roundStatPct);
+        T.reportBattle('endless', nx2.token, false, 0.01, null);
+      }
+    }
+  }
+
+  /* ---- 3) 门庭若市（C59）：每进一次商店 +100 × 层数 ---- */
+  const run = ensureRun();
+  run.permanent = [{ id: 'C59', stacks: 3 }]; run.limited = []; run.coins = 0;
+  run.shop = null; run.phase = null; run.choices = [{ type: 'buff', id: 'C02' }]; run.restShopUsed = false;
+  assert.ok(T.openRestShop().ok, '应当能开休整商店');
+  const afterEnter = T._debugRun('endless');
+  assert.equal(afterEnter.coins, 300, '3 层门庭若市进店应当 +300 试炼币，实测 ' + afterEnter.coins);
+  assert.equal(afterEnter.shop.enterCoins, 300, '商店对象要带上这次进店给的币');
+  T.closeShop();
+  /* 只有 1 层时是 +100 */
+  const r1 = ensureRun();
+  r1.permanent = [{ id: 'C59', stacks: 1 }]; r1.coins = 0; r1.shop = null; r1.phase = null;
+  r1.choices = [{ type: 'buff', id: 'C02' }]; r1.restShopUsed = false;
+  assert.ok(T.openRestShop().ok);
+  assert.equal(T._debugRun('endless').coins, 100, '1 层时进店 +100');
+  T.closeShop();
+
+  /* ---- 4) 豪掷千金（C58）：每消费 100 试炼币立刻给一个随机限次增益 ---- */
+  const r2 = ensureRun();
+  r2.permanent = [{ id: 'C58', stacks: 1 }]; r2.limited = []; r2.coins = 5000;
+  r2.shop = null; r2.phase = null; r2.choices = [{ type: 'buff', id: 'C02' }]; r2.restShopUsed = false;
+  r2.shopSpendLimited = 0;
+  assert.ok(T.openRestShop().ok, '应当能开休整商店');
+  const before = T._debugRun('endless').limited.length;
+  let spent = 0, gained = [], guard = 0;
+  while (guard++ < 8) {
+    const st = T.shopState();
+    const idx = st ? st.slots.findIndex((x) => !x.sold && x.price <= T._debugRun('endless').coins) : -1;
+    if (idx < 0) break;
+    const price = st.slots[idx].price;
+    const b = T.buyShopSlot(idx);
+    if (!b.ok) break;
+    spent += price;
+    if (b.shopSpend && b.shopSpend.limited) gained = gained.concat(b.shopSpend.limited);
+    if (spent >= 400) break;
+  }
+  assert.ok(spent > 0, '应当买到了东西');
+  assert.equal(gained.length, Math.floor(spent / 100),
+    '每满 100 试炼币应当给一个随机限次增益：花了 ' + spent + ' 币 → ' + JSON.stringify(gained));
+  for (const id of gained) {
+    assert.ok(TD.BUFF_BY_ID[id] && TD.BUFF_BY_ID[id].kind === 'limited', '给的必须是限次增益：' + id);
+    assert.ok(TD.hasTag(TD.BUFF_BY_ID[id], 'endless'), '给的必须是无尽塔池里的：' + id);
+  }
+  assert.equal(Number(T._debugRun('endless').shopSpendLimited) || 0, spent % 100,
+    '余额应当是花了多少对 100 取余');
+  assert.ok(T._debugRun('endless').limited.length >= before + gained.length - 2,
+    '拿到的限次增益应当真的记在本局里');
+});
+
 test('需求10：商店价格在 -3 ~ +3 随机，且期望不变', () => {
   const c = setup();
   const TD = c.TowerData;
@@ -1063,11 +1180,11 @@ test('需求21：挑战塔不再生成任何「只有无尽塔用得上」的增
   const towerLimited = TD.towerPool.filter((b) => b.kind === 'limited');
   /* 本轮改动：删掉 G03-G05（3 条）与 T03/T06/T08/T09（4 条）→ 挑战塔专属限次类 31 → 24；
    * 永久类因为删掉 C08、并把 C03（猎侠者）改成**无尽专属**（不再进挑战塔池），35 → 33。 */
-  assert.equal(towerLimited.length, 24, '挑战塔的限次类应当是 24 条（本轮删了 7 条专属），实测 ' + towerLimited.length);
+  assert.equal(towerLimited.length, 25, '挑战塔的限次类应当是 25 条（含本轮新增的 C57 玉石俱焚），实测 ' + towerLimited.length);
   assert.equal(towerLimited.filter((b) => TD.hasTag(b, 'tower') && !TD.hasTag(b, 'endless')).length, 24, '其中 24 条是挑战塔专属（含 N/M/G/T 四系）');
   /* 本轮「严格池子管理」：C36 挥金如土挂在试炼商店消费上 → 改成无尽塔专属，
    * 永久类 33 → 32。 */
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 32, '永久类也属于挑战塔池（共 32 条）');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 33, '永久类也属于挑战塔池（共 33 条，含本轮新增的 C54）');
   assert.equal(TD.towerPool.filter((b) => b.kind === 'instant').length, 0, '即时类不进选择池');
   // 无尽池不该混入挑战塔专属（它们按「一场定胜负」设计）
   assert.equal(TD.endlessPool.filter((b) => TD.hasTag(b, 'tower') && !TD.hasTag(b, 'endless')).length, 0, '无尽选择池不该有挑战塔专属');
@@ -1782,8 +1899,8 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
 
   // 7) 挑战塔池的构成可解释
   assert.equal(TD.towerPool.length, byTag('T.choice').split(',').length, '池子大小要自洽');
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'limited').length, 24, '限次类 24 条（本轮删了 7 条专属）');
-  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 32, '永久类 32 条（C36 改无尽专属后）');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'limited').length, 25, '限次类 25 条（含本轮新增的 C57）');
+  assert.equal(TD.towerPool.filter((b) => b.kind === 'permanent').length, 33, '永久类 33 条（含本轮新增的 C54）');
 });
 
 test('需求32：池子分离的端到端实测（真跑两种塔的抽取，零交叉）', () => {
@@ -1971,8 +2088,10 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
    * C50「抉择扩充」也是 stackable，但叠层效果是「选项数 +1/层」而不是属性成比例；
    * C14「涅槃」同理（每层多一次复活机会）。这两条摘出来单独断言。
    * C16/C17 改成「开战第一回合回血」后按胜场量不到，比例由需求65 单独覆盖。 */
+  /* 本轮新增的可叠层：C54「越战越勇」（2 层，每层每回合 +1.5%）、
+   * C59「门庭若市」（3 层，每层每进一次商店 +100 试炼币）。 */
   assert.equal(STACKABLE.join(','),
-    'C03,C06,C07,C10,C11,C12,C14,C16,C17,C19,C21,C22,C23,C24,C26,C27,C28,C29,C50',
+    'C03,C06,C07,C10,C11,C12,C14,C16,C17,C19,C21,C22,C23,C24,C26,C27,C28,C29,C50,C54,C59',
     '可叠层增益清单变了：' + STACKABLE.join(','));
 
   /* 跑一小段真实流程，取某个累计字段（固定层数，排除推进噪声）。 */
@@ -3661,7 +3780,8 @@ test('需求54：挥金如土可重复 / 传奇商店降权 / 终焉烙印终乘
   /* 注意：终焉烙印(C49) 现在是「一局最多 3 次」，只写 permanent 里 1 份并不算叠满，
    * 所以全拥有后它还会少量出现（直到 maxStacks）。这里改成对比「出率大幅下降」。 */
   /* 「全拥有」= 四条可重复传奇都到手且**叠满**（C49 需 3 层），此时传奇应彻底绝迹。 */
-  const m0 = measure([]), mAll = measure(['C14', 'C36', 'C37']);
+  /* 本轮新增了传奇 C55「后发制人」（店里能刷到），所以「全传奇拥有」的清单也要带上它。 */
+  const m0 = measure([]), mAll = measure(['C14', 'C36', 'C37', 'C55']);
   assert.ok(m0.leg > 0, '未拥有时应当能刷到传奇：' + m0.leg);
   assert.equal(mAll.leg, 0, '全部可重复传奇叠满后不该再刷到传奇：' + mAll.leg);
   assert.ok(mAll.epic > 0.05, '史诗仍应当正常出现（货架不会退化成纯普通）：' + mAll.epic);

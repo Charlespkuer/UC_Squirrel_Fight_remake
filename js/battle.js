@@ -399,6 +399,13 @@
       const att = r.attacker, def = 1 - att, f = fighters[att];
       const beforeHp = hps.slice();
       if (r.action === 'dot') { applyHp(r); floater(r.selfDot ? att : def, '-' + r.dmg, 'y'); if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y'); await wait(400); return; }
+      if (r.action === 'buff') {
+        /* 塔 buff：回合开始的自增益（越战越勇 / 后发制人 / 玉石俱焚）——
+         * 没有伤害也没有治疗，只飘一行字说明，别掉进下面的攻击分支播动画。 */
+        if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y');
+        await wait(320);
+        return;
+      }
       if (r.action === 'regen') {   // 塔机制/buff：回合开始回复（百草回春/活血丹/回春术）
         applyHp(r); floater(att, '+' + r.heal, 'g'); if (r.noteText) floater(att, r.noteText, 'y');
         await wait(420); return;

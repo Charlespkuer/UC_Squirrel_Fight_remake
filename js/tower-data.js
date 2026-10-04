@@ -1065,6 +1065,33 @@
     { id: 'C53', tags: ['endless', 'battle', 'limited', 'oncePerRun'], name: '淘金烙印', rarity: 3, kind: 'limited', uses: 1000, maxStacks: 1,
       desc: '战斗获得试炼币 +15%，损毁后本局 +30%；每打完一场小概率损毁（6%）',
       mods: { fragileCoinAddAlive: 0.15, fragileCoinAddBurned: 0.30, fragileBreakPct: 6 } },
+    /* ============================================================
+     * 本轮新增 6 个（2026-10）：默认仅无尽塔；带 tower 标签的两条挑战塔也保留
+     *   C54 越战越勇（史诗·永久·可叠 2 层）—— 挑战塔保留
+     *   C55 后发制人（传奇·永久）
+     *   C56 风影身法（稀有·永久）
+     *   C57 玉石俱焚（史诗·限次 10）—— 挑战塔保留
+     *   C58 豪掷千金（史诗·永久）
+     *   C59 门庭若市（史诗·永久·可叠 3 层）
+     * ============================================================ */
+    { id: 'C54', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '越战越勇', rarity: 2, kind: 'permanent', maxStacks: 2,
+      desc: '战斗中每回合开始时，力量、敏捷、速度各 +1.5%（可叠 2 层）；每场战斗结束时清零',
+      mods: { roundStatPct: 0.015 } },
+    { id: 'C55', tags: ['endless', 'battle', 'shop'], name: '后发制人', rarity: 3, kind: 'permanent',
+      desc: '战斗中每回合开始时，若力/敏/速有一项低于对手，就把差距最大的那一项补上「差距的 10%」；每场战斗结束时清零',
+      mods: { catchUpPct: 0.10 } },
+    { id: 'C56', tags: ['endless', 'battle', 'shop'], name: '风影身法', rarity: 1, kind: 'permanent',
+      desc: '每场战斗中，我方**第一次受到攻击时必定闪避**',
+      mods: { firstDodge: 1 } },
+    { id: 'C57', tags: ['tower', 'endless', 'battle', 'shop', 'limited', 'nextBattle'], name: '玉石俱焚', rarity: 2, kind: 'limited', uses: 10,
+      desc: '下一场战斗每回合开始时，我方与敌方的生命上限各 ×90%（向下取整），当前血量跟着裁；每场战斗结束时清零',
+      mods: { roundMaxHpMul: 0.90 } },
+    { id: 'C58', tags: ['endless', 'battle', 'shop'], name: '豪掷千金', rarity: 2, kind: 'permanent',
+      desc: '每在试炼商店消费 100 试炼币，立即获得 1 个随机限次增益',
+      mods: { shopSpendLimited: 100 } },
+    { id: 'C59', tags: ['endless', 'battle', 'shop', 'stackable'], name: '门庭若市', rarity: 2, kind: 'permanent', maxStacks: 3,
+      desc: '每进入一次试炼商店，立即获得 100 试炼币（可叠 3 层）',
+      mods: { shopEnterCoins: 100 } },
     { id: 'C38', tags: ['tower', 'endless', 'battle', 'shop'], name: '先机预判', rarity: 2, kind: 'permanent',
       desc: '每场战斗敌方对我方的第一次伤害为 0',
       mods: { firstHitZero: 1 } },
@@ -1209,6 +1236,7 @@
     'openShop', 'instantRetry', 'enemyMaxHpDown', 'permSlot', 'pickWeaponPct',
     'pickSkillPct', 'pickPermanentFree', 'sellValue', 'sellGrowthPerWin', 'postBattleShop',
     'postBattleShopDiscount', 'shopSpendStep', 'shopSpendStat', 'shopSpendHp',
+    'shopSpendLimited', 'shopEnterCoins',
   ];
   function hasEndlessOnlyMod(b) { return Object.keys(b.mods || {}).some((k) => ENDLESS_ONLY_MODS.indexOf(k) >= 0); }
   function poolRoster(b) {

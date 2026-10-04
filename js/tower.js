@@ -403,7 +403,8 @@
       winStatAfter10: 0,
       weaponFreeUses: 0, weaponBoostUses: 0, weaponBoostPowerMul: 0, weaponBoostMustHit: 0,
       weaponBoostReflectImmune: 0, weaponBoostFatigueMul: 0, lowHpFinalMul: 0,
-      openerPowerMul: 0, openerRounds: 0, fatiguePowerMul: 0, dodgeMul: 0 };
+      openerPowerMul: 0, openerRounds: 0, fatiguePowerMul: 0, dodgeMul: 0,
+      roundStatPct: 0, catchUpPct: 0, roundMaxHpMul: 0, firstDodge: 0 };
     eachBuff(run, (buff, stacks) => {
       const m = buff.mods, k = stacks * g;
       if (m.powerMul) agg.powerMul += m.powerMul * k;
@@ -432,6 +433,13 @@
       if (m.thornsPct) agg.thornsPct += m.thornsPct * k;                         // 荆棘之甲
       if (m.mustHitAll) agg.mustHitAll = 1;
       if (m.firstHitZero) agg.firstHitZero = 1;
+      /* 本轮新增（战斗中每回合结算的那几条）：比例按「层数 × 全局倍率」累加，
+       * 布尔型只置 1，乘区型（玉石俱焚）取所有来源里最强的一档。 */
+      if (m.roundStatPct) agg.roundStatPct += m.roundStatPct * k;
+      if (m.catchUpPct) agg.catchUpPct = Math.max(agg.catchUpPct, m.catchUpPct * k);
+      if (m.roundMaxHpMul) agg.roundMaxHpMul = agg.roundMaxHpMul > 0
+        ? Math.min(agg.roundMaxHpMul, Number(m.roundMaxHpMul)) : Number(m.roundMaxHpMul);
+      if (m.firstDodge) agg.firstDodge = 1;
       /* 狂怒：低血时攻/敏/速同时提升；阈值取所有来源里的最高值（同一套 lowHpAt）。 */
       /* 反噬豁免：免疫一切反伤（限次类，战斗内生效）。 */
       if (m.reflectImmune) agg.reflectImmune = Math.max(agg.reflectImmune, Number(m.reflectImmune) || 0);
@@ -1077,6 +1085,11 @@
        * 所以这里要把面板字段一起写上。 */
       if (healBonus > 0) me.healMul = 1 + healBonus;
       if (agg.emptyMaxHpMul) mods.emptyMaxHpMul = agg.emptyMaxHpMul;
+      /* 回合开始类（越战越勇 / 后发制人 / 玉石俱焚 / 风影身法）—— sim 侧按这些字段结算。 */
+      if (agg.roundStatPct) mods.roundStatPct = agg.roundStatPct;
+      if (agg.catchUpPct) mods.catchUpPct = agg.catchUpPct;
+      if (agg.roundMaxHpMul > 0 && agg.roundMaxHpMul < 1) mods.roundMaxHpMul = agg.roundMaxHpMul;
+      if (agg.firstDodge) mods.firstDodge = agg.firstDodge;
       /* 按武器次数结算的两条（疾风先手 / 先发制人 / 闪亮登场）。 */
       if (agg.weaponFreeUses) mods.weaponFreeUses = agg.weaponFreeUses;
       if (agg.weaponBoostUses) {
@@ -2462,6 +2475,14 @@
    *  （E04 steam大促 −30% 等），E01 −50% 另有来源；两者同时生效按用户口径合并成 −65%（3.5 折），
    *  不做简单相加。老口径没有比例字段时退回 0.5 兼容。 */
   function makeShop(run, e01Pct) {
+    /* C59「门庭若市」：每进一次试炼商店立刻给 100 × 层数 试炼币
+     *（商店的每条进入路径都走这里：5 层结算点 / 立即进货 / 休整商店 / 立即开店）。 */
+    let enterCoins = 0;
+    const enterStacks = stacksOf(run, 'C59');
+    if (enterStacks > 0) {
+      enterCoins = Math.max(0, Math.round(Number(D().BUFF_BY_ID.C59.mods.shopEnterCoins) || 100) * enterStacks);
+      if (enterCoins > 0) run.coins = Math.max(0, Number(run.coins) || 0) + enterCoins;
+    }
     const stacks = Math.max(0, Math.floor(Number(run.shopDiscount) || 0));
     const instantPct = Math.max(0, Number(run.shopDiscountPct) || 0);
     const own = Math.max(0, Number(e01Pct) || 0);
@@ -2475,7 +2496,8 @@
       if (run.shopDiscount <= 0) run.shopDiscountPct = 0;
     }
     return { layer: run.layer, slots: rollShopSlots(run), retrySold: false, rerollFree: true,
-      discount, discountPct, rerollCount: 0, rerollPaid: 0 };
+      discount, discountPct, rerollCount: 0, rerollPaid: 0,
+      enterCoins: enterCoins || undefined };
   }
   /** 从一个候选里抽一件，按 buff.shopWeight 加权（默认 1）—— 用来压低个别 overpowered
    * 增益在商店出现的概率（例如不死鸟）。权重只影响「谁被抽中」，不影响稀有度倾斜。 */
@@ -2548,25 +2570,53 @@
         return { id: s.id, sold: s.sold, name: b.name, desc: b.desc, rarity: b.rarity, kind: b.kind, price: shopPriceOf(b, s),
           ownedStacks: mine ? (mine.stacks || 1) : 0, canStack: D().hasTag(b, 'stackable') }; }) };
   }
+  /** C58「豪掷千金」：从**无尽塔**的限次池里随机抽一个「还能拿」的，立刻获得。
+   *  抽不到（池子空了 / 都拿满了）就返回 null（不消耗这一档进度）。 */
+  function grantRandomLimited(run) {
+    const pool = D().endlessPool.filter((b) => b.kind === 'limited' && ownable(run, b) && poolFilter(run, b));
+    if (!pool.length) return null;
+    const pick = pickByShopWeight(pool, run) || pool[Math.floor(Math.random() * pool.length)];
+    const got = addBuff(run, pick.id);
+    return got && got.ok ? pick.id : null;
+  }
+  /** 在试炼商店消费后的两类收益（各自独立累计）：
+   *   · C36 挥金如土：每 N 币 → 随机一项固定属性
+   *   · C58 豪掷千金：每 100 币 → 立刻获得一个随机限次增益 */
   function addShopSpend(run, amount, flags) {
     const spend = Math.max(0, Number(amount) || 0);
     if (!(spend > 0)) return null;
     const assumeOwned = !!(flags && flags.assumeOwned);
-    if (!assumeOwned && !stacksOf(run, 'C36')) return null;   // 没这个增益就不累计
-    const mm = D().BUFF_BY_ID.C36.mods, step = Math.max(1, Number(mm.shopSpendStep) || 20);
-    run.shopSpend = Math.max(0, Number(run.shopSpend) || 0) + spend;
-    const opts = ['power', 'agility', 'speed', 'hp'];
+    const c36 = assumeOwned ? 1 : stacksOf(run, 'C36');
+    const c58 = stacksOf(run, 'C58');
+    if (!c36 && !c58) return null;                      // 两个增益都没有就不累计
     const gained = [];
-    while (run.shopSpend >= step) {
-      run.shopSpend -= step;
-      const key = opts[Math.floor(Math.random() * opts.length)];
-      run.spendGain = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, run.spendGain || {});
-      run.spendGain[key] += key === 'hp'
-        ? Math.max(0, Number(mm.shopSpendHp) || 5)
-        : Math.max(0, Number(mm.shopSpendStat) || 1);
-      gained.push(key);
+    if (c36) {
+      const mm = D().BUFF_BY_ID.C36.mods, step = Math.max(1, Number(mm.shopSpendStep) || 20);
+      run.shopSpend = Math.max(0, Number(run.shopSpend) || 0) + spend;
+      const opts = ['power', 'agility', 'speed', 'hp'];
+      while (run.shopSpend >= step) {
+        run.shopSpend -= step;
+        const key = opts[Math.floor(Math.random() * opts.length)];
+        run.spendGain = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, run.spendGain || {});
+        run.spendGain[key] += key === 'hp'
+          ? Math.max(0, Number(mm.shopSpendHp) || 5)
+          : Math.max(0, Number(mm.shopSpendStat) || 1);
+        gained.push(key);
+      }
     }
-    return gained.length ? { gained, spendGain: Object.assign({}, run.spendGain) } : null;
+    const limited = [];
+    if (c58) {
+      const step58 = Math.max(1, Number(D().BUFF_BY_ID.C58.mods.shopSpendLimited) || 100);
+      run.shopSpendLimited = Math.max(0, Number(run.shopSpendLimited) || 0) + spend;
+      while (run.shopSpendLimited >= step58) {
+        const id = grantRandomLimited(run);
+        if (!id) break;
+        run.shopSpendLimited -= step58;
+        limited.push(id);
+      }
+    }
+    if (!gained.length && !limited.length) return null;
+    return { gained: gained, limited: limited, spendGain: Object.assign({}, run.spendGain || {}) };
   }
   function buyShopSlot(index, replaceId) {
     const run = endless().run;

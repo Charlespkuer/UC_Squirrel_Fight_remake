@@ -19,6 +19,7 @@
  *                 openerPowerMul/openerRounds/fatiguePowerMul,
  *                 mustHitFirst, firstSkillFree, openStrikePct,
  *                 cosmosFirst（秘技通神抽中小宇宙爆发：第一招必定放它）,
+ *                 roundStatPct, catchUpPct, roundMaxHpMul, firstDodge,
  *                 emptyMaxHpMul, lowHpTakenMul, lowHpLifestealPct, lowHpRegenPct/lowHpRegenAt,
  *                 lowHpPowerMul/lowHpAgilityMul/lowHpSpeedMul/lowHpAt}
  * ============================================================ */
@@ -242,6 +243,49 @@
   function lowHpActive(c) {
     const th = c.mods && Number(c.mods.lowHpAt);
     return !!(th > 0 && c.maxHp > 0 && c.hp <= c.maxHp * th);
+  }
+  /* ============================================================
+   * 回合开始类增益（塔 buff，每场战斗重置）
+   *
+   *   roundStatPct   越战越勇：力/敏/速各按「基础值 × 比例」逐回合累加（可叠层，比例里已含层数）
+   *   catchUpPct     后发制人：有一项落后对手时，把差距最大的那项补上「差距 × 比例」
+   *   roundMaxHpMul  玉石俱焚：双方生命上限各乘一次（向下取整），当前血量跟着裁
+   *
+   * 三者都写在 **buffFlat / maxHp** 上，而每个战斗体是 simulate() 里新建的
+   *（makeCombatant 每次都重置 buffFlat），所以「每场战斗结束时加成消失」天然成立。
+   * ============================================================ */
+  function applyRoundAuras(actor, foe, push) {
+    const m = actor.mods || {};
+    const statPct = Number(m.roundStatPct) || 0;
+    if (statPct > 0) {
+      for (const key of ['power', 'agility', 'speed']) {
+        const base = Number(statOf(actor, key)) || 0;
+        actor.buffFlat[key] = (actor.buffFlat[key] || 0) + Math.max(1, Math.round(base * statPct));
+      }
+      if (push) push({ attacker: actor.side, action: 'buff', noteText: '越战越勇', noteSide: actor.side });
+    }
+    const catchPct = Number(m.catchUpPct) || 0;
+    if (catchPct > 0 && foe && foe.hp > 0) {
+      const eff = { power: effPower, agility: effAgility, speed: effSpeed };
+      let best = null;
+      for (const key of ['power', 'agility', 'speed']) {
+        const gap = eff[key](foe) - eff[key](actor);
+        if (gap > 0 && (!best || gap > best.gap)) best = { key: key, gap: gap };
+      }
+      if (best) {
+        actor.buffFlat[best.key] = (actor.buffFlat[best.key] || 0) + Math.max(1, Math.round(best.gap * catchPct));
+        if (push) push({ attacker: actor.side, action: 'buff', noteText: '后发制人', noteSide: actor.side });
+      }
+    }
+    const hpMul = Number(m.roundMaxHpMul) || 0;
+    if (hpMul > 0 && hpMul < 1) {
+      for (const c of [actor, foe]) {
+        if (!c || c.hp <= 0) continue;
+        c.maxHp = Math.max(1, Math.floor(c.maxHp * hpMul));
+        if (c.hp > c.maxHp) c.hp = c.maxHp;
+      }
+      if (push) push({ attacker: actor.side, action: 'buff', noteText: '玉石俱焚', noteSide: actor.side });
+    }
   }
   /**
    * **低血减伤的即时结算**：把一次伤害按「越过 lowHpAt 阈值线」切成两段。
@@ -546,6 +590,16 @@
       if (dmg > 0 && att.mods && Number(att.mods.lowHpFinalMul) > 0 && lowHpActive(att)) {
         dmg = Math.round(dmg * (1 + Number(att.mods.lowHpFinalMul)));
         r.rageFinalMul = Number(att.mods.lowHpFinalMul);
+      }
+      /* 塔 buff「风影身法」：每场战斗**第一次受到攻击时必定闪避**。
+       * 放在这里与「先机预判」（首次伤害为 0）同一处：已经把命中判完、伤害算出来了，
+       * 直接把它归零并打上闪避标记 —— 武器分支的常规闪避判定在更前面，所以那一次
+       * 天然逃掉的不消耗这个「必定闪避」额度。 */
+      if (dmg > 0 && def.mods && Number(def.mods.firstDodge) > 0 && !def.mods.firstDodgeUsed) {
+        def.mods.firstDodgeUsed = true;
+        dmg = 0;
+        r.dodge = true;
+        r.noteText = (r.noteText ? r.noteText + '·' : '') + '风影身法'; r.noteSide = def.side;
       }
       if (dmg > 0 && def.mods && def.mods.firstHitZero && !def.mods.firstHitZeroUsed) {
         def.mods.firstHitZeroUsed = true;
@@ -1121,6 +1175,8 @@
       actor.turnSkills = {};
       for (const cdId of Object.keys(actor.skillCd || {})) if (actor.skillCd[cdId] > 0) actor.skillCd[cdId]--;
       const def = actor === A ? B : A;
+      /* 回合开始类增益（越战越勇 / 后发制人 / 玉石俱焚）：每场战斗结束自动清零。 */
+      applyRoundAuras(actor, def, pushRound);
       // 回合开始回复（药师「百草回春」/ 塔 buff「活血丹」「回春术」）
       const regenPct = (actor.mech.includes('regen') ? 0.03 : 0) + (actor.mods && Number(actor.mods.regenPct) || 0);
       /* 塔 buff「浴血重生」：低血时每回合回血，但**最多回到 lowHpRegenAt 这条线**

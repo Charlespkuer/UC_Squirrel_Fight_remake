@@ -288,6 +288,16 @@
     if (m.shopSpendStep) parts.push('每消费 ' + m.shopSpendStep + ' 试炼币 → 随机获得 力+' + (m.shopSpendStat || 1) +
       ' / 敏+' + (m.shopSpendStat || 1) + ' / 速+' + (m.shopSpendStat || 1) + ' / 生命上限+' + (m.shopSpendHp || 5) + ' 其中一项');
     if (m.firstHitZero) parts.push('每场战斗敌方对我方的第一次攻击伤害归零');
+    /* —— 本轮新增 6 个 —— */
+    if (m.roundStatPct) parts.push('战斗中每回合开始 力/敏/速 各 +' +
+      (Math.round(m.roundStatPct * b.stacks * 1000) / 10) + '%' + (b.stacks > 1 ? '（可叠 ' + b.stacks + ' 层）' : '') +
+      '；每场战斗结束时清零');
+    if (m.catchUpPct) parts.push('战斗中每回合把「落后对手最多」的那一项补上差距的 ' + Math.round(m.catchUpPct * 100) + '%；每场战斗结束时清零');
+    if (m.firstDodge) parts.push('每场战斗中第一次被攻击时必定闪避');
+    if (m.roundMaxHpMul) parts.push('战斗中每回合双方生命上限 ×' + Math.round(m.roundMaxHpMul * 100) + '%（向下取整）；每场战斗结束时清零');
+    if (m.shopSpendLimited) parts.push('每在试炼商店消费 ' + m.shopSpendLimited + ' 试炼币 → 立即获得 1 个随机限次增益');
+    if (m.shopEnterCoins) parts.push('每进入一次试炼商店 +' + m.shopEnterCoins + ' 试炼币' +
+      (b.stacks > 1 ? '（可叠 ' + b.stacks + ' 层）' : ''));
     if (m.mustHitAll) parts.push('这一场所有攻击必中');
     if (m.mustHitFirst) parts.push('首次攻击必中');
     if (m.pickPermanentFree) parts.push('可给一个已有的永久增益附魔免占位');
@@ -754,7 +764,7 @@
             if (res && res.layerTickets > 0) msgs.push('按第 ' + res.layer + ' 层结算：抽奖卷 +' + res.layerTickets);
             if (res && res.retryLeft > 0) msgs.push(res.retryMsg);
             if (msgs.length) msgs.push('本局共 +' + res.tickets + ' 张');
-            if (msgs.length) toast(msgs.join('；'));
+            if (msgs.length) runToast(msgs.join('；'));
           } },
         { label: '继续冲塔', cls: 'gold' },
       ], { small: true });
@@ -1088,6 +1098,11 @@
   function openShop(revisit) {
     const shop = Tower.shopState();
     if (!shop) { notice('商店还没开张：每通过 5 层开放一次。'); return; }
+    /* 门庭若市（C59）：进门就给试炼币 —— 只在第一次渲染这家店时提示。 */
+    if (shop.enterCoins && !shop.enterCoinsShown) {
+      shop.enterCoinsShown = true;
+      runToast('门庭若市：进店获得 ' + shop.enterCoins + ' 试炼币');
+    }
     const rarityCls = (r) => 'r' + r;
     /* 注意：这是**商店槽位上报行**的字段 canStack（由 tower.js 用标签算好），
      * 不是增益数据里的字段 —— 旧数据字段 stackable 已经删掉、只留标签。 */
@@ -1140,6 +1155,11 @@
       const r = Tower.buyShopSlot(i);
       if (r && r.needsReplace) { offerShopReplace(i, r.buff); return; }
       if (!r.ok) { notice(r.msg || '买不了。'); return; }
+      /* 豪掷千金（C58）：消费达标时当场给了一个随机限次增益，提示一下名字。 */
+      const got = r.shopSpend && r.shopSpend.limited;
+      if (got && got.length) {
+        runToast('豪掷千金：获得「' + got.map((id) => (TowerData.BUFF_BY_ID[id] || {}).name || id).join('」「') + '」');
+      }
       openShop(revisit);
     }));
     on(p, 'retry', () => {

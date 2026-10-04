@@ -84,6 +84,13 @@
     }
     /* 段位机制已并入环境词缀：run.mechs 只作历史兼容，永远为空。 */
     run.mechs = [];
+    /* 【本轮删除】力/敏/速药丸槽整块移除：旧存档里的 run.pillSlots 直接丢掉
+     *（药丸在「嵌入」那一刻就已从背包扣掉，且那三个槽位的效果已经不存在，
+     * 留着字段只会让旧档带着无效数据；本局结束后自然消失）。 */
+    if (run.pillSlots) delete run.pillSlots;
+    /* 即时削弱的累计值（E07/E08 生命上限、E11 攻击力）：夹在 0~0.8，坏值不许把敌人打成 0。 */
+    run.enemyMaxHpDown = Math.max(0, Math.min(0.8, Number(run.enemyMaxHpDown) || 0));
+    run.enemyPowerDown = Math.max(0, Math.min(0.8, Number(run.enemyPowerDown) || 0));
     /* 槽位相关字段的**防御性规范化**（当前存档已经会带上它们，这里是第二道闸）：
      * permSlotIds 是权威记录、permSlots 由它派生、两者取最大值兼容旧档 ——
      * 只要有一份字段缺失（旧档 / 同步来的残缺档），下面那行
@@ -676,7 +683,9 @@
     const salt = (Date.now() % 1000000) + ':' + Math.floor(Math.random() * 1e6);
     const run = { layer: 1, plan: buildPlan(1, salt, true), idx: 0, carry: 1, salt,
       mode: 'endless', permanent: [], limited: [], coins: 0, score: 0, bestLayer: 0,
-      pillSlots: { power: null, agility: null, speed: null },
+      /* 【本轮删除】pillSlots（力/敏/速药丸槽）不再存在 */
+      /* 即时削弱累计（E07/E08 生命上限、E11 攻击力）：拿到就记在这里，之后每场都生效。 */
+      enemyMaxHpDown: 0, enemyPowerDown: 0,
       killPower: 0, bonusPower: 0, shop: null, phase: null, choices: null, debuffs: [],
       retryToken: 0, retrySnap: null,
       achievements: [], scoreLog: [], statPeaks: {}, pendingToasts: [],
@@ -731,8 +740,11 @@
     const agg = aggregate(run, foeCtx);
     /* 隐藏成就「超凡入圣」：本场聚合出来的 buff 加成（不含装备/等级）跨过阈值就记一次。 */
     checkStatAchievements(run, agg);
-    // M01 威慑：直接压敌人力量
-    if (agg.enemyPowerDown > 0) built.foe.power = Math.max(1, Math.round(built.foe.power * (1 - agg.enemyPowerDown)));
+    /* M01 威慑（本场 buff 的聚合值）+ 即时削弱 E11「挫锋」（记录在 run.enemyPowerDown 上）：
+     * 两者相加后一起压敌人力量，上限 80%（别把敌人打成 0 攻击）。 */
+    const foePowerDown = Math.max(0, Math.min(0.8,
+      Math.max(0, Number(run.enemyPowerDown) || 0) + Math.max(0, Number(agg.enemyPowerDown) || 0)));
+    if (foePowerDown > 0) built.foe.power = Math.max(1, Math.round(built.foe.power * (1 - foePowerDown)));
     /* 本轮第 3 项：挫锐 / 卸甲 —— 本局所有敌人生命上限按累计比例下调。
      * 这是「即时」类增益，登记在 run.enemyMaxHpDown 上，之后每场都生效（不占增益位）。 */
     const foeHpDown = Math.max(0, Math.min(0.6, Number(run.enemyMaxHpDown) || 0));
@@ -809,13 +821,8 @@
       me.power = Math.max(1, Math.round(me.power * (1 + powerMul) * dPower * weaponMul));
       me.agility = Math.max(1, Math.round(me.agility * dAgi * (1 + agg.agilityMul)));
       me.speed = Math.max(1, Math.round(me.speed * dSpd * (1 + agg.speedMul)));
-      // 第 1 项：属性药丸（塔内 20 场）—— 与 State.totalStats 的药剂口径一致
-      for (const k of ['power', 'agility', 'speed']) {
-        const slot = (run.pillSlots || {})[k];
-        const eff = slot && D().pillEffect(slot.id);
-        if (eff) me[k] += Math.max(Math.floor(me[k] * eff.pct), eff.min);
-      }
-      /* 第 9 项：挥金如土累计的力/敏/速（固定值，和药丸一样直接加到面板属性上）。 */
+      /* 第 9 项：挥金如土累计的力/敏/速（固定值，直接加到面板属性上）。
+       * （本轮删除：原来这里还有「属性药丸（塔内 20 场）」那一段加成。） */
       if (run.spendGain) {
         for (const k of ['power', 'agility', 'speed']) me[k] += Math.max(0, Number(run.spendGain[k]) || 0);
       }
@@ -1332,11 +1339,6 @@
      * 两次都是「点一下选项」就能继续，不会卡流程（nextBattle 只要求先选完当前那份）。 */
     const choiceAfter = 3;
     const extraChoice = len === 5;
-    // 第 1 项：属性药丸按战斗数递减（胜败都算一场）
-    for (const k of ['power', 'agility', 'speed']) {
-      const slot = (run.pillSlots || {})[k];
-      if (slot && slot.battles > 0) { slot.battles--; if (slot.battles <= 0) run.pillSlots[k] = null; }
-    }
     if (won === choiceAfter || (extraChoice && won === 4)) run.choices = rollChoices(mode, run);
     out.achievements = takeAchievementToasts(run);
     out.choices = run.choices;
@@ -1397,12 +1399,11 @@
   function doFail(run, out) {
     const e = endless();
     /* 第 3 项：失败不再把奖励归零 —— 直接按**当前层应得的抽奖卷**结算（和结算点离场同一个口径），
-     * 分数也照常入账。这样「撑到更深」永远有意义，不会一次失败全打水漂。 */
+     * 分数也照常入账。这样「撑到更深」永远有意义，不会一次失败全打水漂。
+     * 本轮：与结算离场/放弃本局完全统一 —— 剩余试炼币同样 1:1 折现。 */
     out = out || { ok: true, win: false, layer: run.layer, score: run.score, bestLayer: run.bestLayer };
     out.win = false;
-    const tickets = D().endlessTickets(run.layer);
-    if (tickets > 0) S().props[TICKET_PROP] = (S().props[TICKET_PROP] || 0) + tickets;
-    out.tickets = tickets;
+    settleRunTickets(run, out);
     out.shield = false;
     out.settled = true;
     settleScore(run, out);
@@ -1415,6 +1416,34 @@
     }
     e.run = null;
     save();
+    return out;
+  }
+  /**
+   * **退出本局的统一结算**：本层应得的抽奖卷 + 剩余**重新挑战币** 1:1 折现。
+   *
+   * - 需求（上一轮）：三条路径「结算点·结算离场 / 放弃本局 / 失败结算」走同一个函数，收益完全一致。
+   * - 需求（本轮修正）：**多的重新挑战币（商店左下 50 币 1 枚的那个）1:1 结算为抽奖卷**；
+   *   **剩余试炼币不折现**（本局结束即作废）—— 之前误把试炼币也 1:1 折了券，本轮改回来。
+   * - 明细写进 out：layerTickets（本层应得）/ retryLeft（折现的重挑币数）/
+   *   forfeitCoins（作废的试炼币数，只用于提示）/ tickets（本次共发多少张）/ ticketsTotal。
+   *   （endlessInfo 的 ticketsOnExit 与这里同口径。）
+   */
+  function settleRunTickets(run, out) {
+    out = out || {};
+    const layerTickets = Math.max(0, Math.floor(Number(D().endlessTickets(run.layer)) || 0));
+    const coins = Math.max(0, Math.floor(Number(run.coins) || 0));
+    const retryTokens = Math.max(0, Math.floor(Number(run.retryToken) || 0));
+    const gain = layerTickets + retryTokens;
+    if (gain > 0) S().props[TICKET_PROP] = (S().props[TICKET_PROP] || 0) + gain;
+    run.coins = 0;              // 试炼币随本局作废（不折现，只报个数给界面提示）
+    run.retryToken = 0;
+    run.retrySnap = null;
+    out.layerTickets = layerTickets;
+    out.retryLeft = retryTokens;
+    out.forfeitCoins = coins;
+    out.tickets = gain;
+    out.ticketsTotal = S().props[TICKET_PROP] || 0;
+    if (retryTokens > 0) out.retryMsg = retryTokens + ' 枚重新挑战币已 1:1 兑换为 ' + retryTokens + ' 张抽奖卷';
     return out;
   }
   /** 玩家在有重新挑战币的情况下选择「放弃本局」→ 现在才真正结算失败。 */
@@ -2207,10 +2236,15 @@
     const m = buff.mods || {};
     const out = { ok: true, buff, instant: true };
     if (m.instantCoins) { run.coins = Math.max(0, (run.coins || 0) + m.instantCoins); out.coins = m.instantCoins; }
-    /* 本轮第 3 项：即时削弱 —— 累加到本局全局，下一场 buildFoe 起对所有敌人生效。 */
+    /* 即时削弱 —— 累加到本局全局，下一场 buildFoe 起对所有敌人生效。
+     * E07/E08 削生命上限（enemyMaxHpDown）、E11「挫锋」削攻击力（enemyPowerDown）。 */
     if (m.enemyMaxHpDown) {
-      run.enemyMaxHpDown = Math.min(0.6, Math.max(0, Number(run.enemyMaxHpDown) || 0) + Number(m.enemyMaxHpDown));
+      run.enemyMaxHpDown = Math.min(0.8, Math.max(0, Number(run.enemyMaxHpDown) || 0) + Number(m.enemyMaxHpDown));
       out.enemyMaxHpDown = run.enemyMaxHpDown;
+    }
+    if (m.enemyPowerDown) {
+      run.enemyPowerDown = Math.min(0.8, Math.max(0, Number(run.enemyPowerDown) || 0) + Number(m.enemyPowerDown));
+      out.enemyPowerDown = run.enemyPowerDown;
     }
     /* 需求 3：立即获得重新挑战币（普通 1 枚 / 史诗 5 枚）。 */
     if (m.instantRetry) {
@@ -2337,6 +2371,8 @@
     return { coins: run.coins, layer: run.shop.layer, rerollFree: run.shop.rerollFree,
       rerollCount: Number(run.shop.rerollCount) || 0,
       rerollNextPrice: D().rerollPriceAt(Number(run.shop.rerollCount) || 0),
+      /* 本轮需求：刷新价封顶 50 —— 界面据此把「下次更贵」换成「已是最高价」 */
+      rerollCapped: D().rerollPriceCapped(Number(run.shop.rerollCount) || 0),
       rerollLastPaid: Number(run.shop.rerollPaid) || 0,
       retrySold: !!run.shop.retrySold, retryPrice: D().SHOP.retryPrice,
       retryToken: Math.max(0, Number(run.retryToken) || 0),
@@ -2966,20 +3002,6 @@
     save();
     return { ok: true };
   }
-  /** 第 1 项：往槽位里嵌一颗属性药丸（消耗背包道具，塔内持续 20 场战斗）。 */
-  function usePillSlot(key, propId) {
-    const run = endless().run;
-    if (!run) return { ok: false, msg: '没有进行中的无尽局。' };
-    const slotDef = (D().PILL_SLOTS || []).find((x) => x.key === key);
-    const eff = D().pillEffect(propId);
-    if (!slotDef || !eff || eff.stat !== key) return { ok: false, msg: '这颗药丸和槽位不匹配。' };
-    if (!(S().props[propId] > 0)) return { ok: false, msg: '背包里没有这种药丸。' };
-    S().props[propId]--;
-    run.pillSlots = run.pillSlots || { power: null, agility: null, speed: null };
-    run.pillSlots[key] = { id: Number(propId), battles: D().PILL_BATTLES || 20 };
-    save();
-    return { ok: true, id: Number(propId), battles: D().PILL_BATTLES || 20 };
-  }
   function closeShop() {
     /* 关店只结束「这家店的折扣」，不该把**还没用掉的份数**一起清掉
      * （那是玩家花钱买的，下一家店还要用）。 */
@@ -2996,18 +3018,23 @@
     const run = endless().run;
     if (!run) return null;
     const s = D().endlessSegment(run.layer);
-    return { layer: run.layer, score: run.score, coins: run.coins,
-      ticketsNow: D().endlessTickets(run.layer),
+    const coins = Math.max(0, Math.floor(Number(run.coins) || 0));
+    const tokens = Math.max(0, Math.floor(Number(run.retryToken) || 0));
+    const now = D().endlessTickets(run.layer);
+    return { layer: run.layer, score: run.score, coins, retryToken: tokens,
+      ticketsNow: now,
+      /* 「立刻能领多少」= 本层应得 + 重挑币折现（试炼币不折现、只作废；
+       * 与界面上的「离场可得」、放弃本局、失败结算完全一致） */
+      ticketsNowTotal: now + tokens,
       ticketsNext: D().endlessTickets((s + 1) * 5),       // 下一结算点（再撑 5 层）的升档面值
       nextCheckpoint: (s + 1) * 5 };
   }
-  /** 结算离场：抽奖卷入包，分数入账，本局结束。 */
+  /** 结算离场：抽奖卷入包（含剩余试炼币 1:1 折现），分数入账，本局结束。 */
   function settleEndless() {
     const e = endless(), run = e.run;
     if (!run || run.phase !== 'checkpoint') return { ok: false };
-    const tickets = D().endlessTickets(run.layer);
-    S().props[TICKET_PROP] = (S().props[TICKET_PROP] || 0) + tickets;
-    const out = { ok: true, tickets, score: run.score, layer: run.layer };
+    const out = { ok: true, score: run.score, layer: run.layer };
+    settleRunTickets(run, out);          // 与放弃本局 / 失败结算同一条结算
     settleScore(run, out);
     e.run = null;
     save();
@@ -3118,20 +3145,10 @@
     if (!run || run.attempt) return { ok: false };
     const out = { ok: true, score: run.score, layer: run.layer };
     settleScore(run, out);
-    /* 需求：本局**多余的试炼币按 1:1 换成抽奖卷** ——
-     * 主动放弃时不该让攒下来的币白白蒸发（原来直接丢掉）。 */
-    const leftCoins = Math.max(0, Math.floor(Number(run.coins) || 0));
-    if (leftCoins > 0) {
-      S().props[TICKET_PROP] = (S().props[TICKET_PROP] || 0) + leftCoins;
-      run.coins = 0;
-      out.coinsLeft = leftCoins;
-      out.tickets = leftCoins;
-      out.ticketsTotal = S().props[TICKET_PROP];
-      out.convertMsg = '放弃本局：' + leftCoins + ' 试炼币已 1:1 兑换为 ' + leftCoins + ' 张抽奖卷';
-    } else {
-      out.coinsLeft = 0;
-      out.tickets = 0;
-    }
+    /* **退出本局的统一结算**（本轮）：本层应得 + 剩余试炼币 1:1 折现 ——
+     * 与结算点「结算离场」、失败结算走的是同一个 settleRunTickets()，收益完全一致。
+     * （以前这里漏了「本层应得那一份」，而结算离场与失败又不折现币，三条路各算各的。） */
+    settleRunTickets(run, out);
     endless().run = null;
     save();
     return out;
@@ -3203,12 +3220,20 @@
         fragileBurned: Object.assign({ power: 0, agility: 0, speed: 0 }, e.run.fragileBurned || {}),
         // 本轮第 3 / 9 项：即时削弱累计 + 挥金如土的消费进度（界面要显示）
         enemyMaxHpDown: Math.max(0, Number(e.run.enemyMaxHpDown) || 0),
+        enemyPowerDown: Math.max(0, Number(e.run.enemyPowerDown) || 0),
         shopSpend: Math.max(0, Number(e.run.shopSpend) || 0),
         spendGain: Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, e.run.spendGain || {}),
         permCap: permSlots(e.run),
         finished: e.run.finished || null,
-        pillSlots: Object.assign({}, e.run.pillSlots || {}),
-        ticketsIfSettle: D().endlessTickets(e.run.layer) } : null };
+        /* 无尽主界面右上角显示用的三个数（口径与 settleRunTickets 完全一致）：
+         *   · ticketsIfSettle —— 只算「本层应得」那一份（5 层一个档位）
+         *   · retryToken      —— 手上的重新挑战币（失败后回滚本场再打一次；结算时 1:1 折券）
+         *   · ticketsOnExit   —— 现在退出**实际到手**的总额 = 本层应得 + 重挑币折现
+         *                        （剩余试炼币不折现，随本局作废） */
+        retryToken: Math.max(0, Math.floor(Number(e.run.retryToken) || 0)),
+        ticketsIfSettle: D().endlessTickets(e.run.layer),
+        ticketsOnExit: D().endlessTickets(e.run.layer)
+          + Math.max(0, Math.floor(Number(e.run.retryToken) || 0)) } : null };
   }
   /** 本轮第 7 项：成长/累计类增益的**真实进度**（面板 + 悬停都用它）。
    * 原来面板只显示 entry.stacks（这个增益拿过几次），所以「吞噬成长」这类
@@ -3325,7 +3350,7 @@
   window.Tower = {
     unlocked, towerInfo, endlessInfo, preview, planInfo, ownedBuffs, bossPool, debugGrantBuff, debugLoseBuff, pickCandidates, applyPickBuff,
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,
-    pickChoice, toggleLimited, addBuff, applyInstant, openRestShop, usePillSlot,
+    pickChoice, toggleLimited, addBuff, applyInstant, openRestShop,
     shopState, buyShopSlot, buyRetryToken, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp,
     canRetry, retryBattle, declineRetry, isTowerBattleBuff, takeAchievementToasts,
     /* 只读：摇一页商店货架（不改状态）。测试用它统计各增益的上架概率

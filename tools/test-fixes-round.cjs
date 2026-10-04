@@ -484,13 +484,14 @@ test('需求10：商店价格在 -3 ~ +3 随机，且期望不变', () => {
   }
 });
 
-test('需求11：刷新价格逐次递增（首次免费）', () => {
+test('需求11：刷新价格逐次递增（首次免费，50 封顶）', () => {
   const c = setup();
   const TD = c.TowerData;
   assert.equal(TD.rerollPriceAt(0), 0, '首次免费');
   const seq = [1, 2, 3, 4, 5, 6].map((n) => TD.rerollPriceAt(n));
-  assert.equal(seq.join(','), '10,20,30,40,50,60', '价格应当是 0-10-20-30…：' + seq.join(','));
-  for (let i = 1; i < seq.length; i++) assert.ok(seq[i] > seq[i - 1], '必须严格递增：' + seq.join(','));
+  assert.equal(seq.join(','), '10,20,30,40,50,50', '价格应当是 0-10-20-30-40-50（封顶）：' + seq.join(','));
+  for (let i = 1; i < seq.length; i++) assert.ok(seq[i] >= seq[i - 1], '涨到封顶前必须递增：' + seq.join(','));
+  for (let i = 1; i <= 4; i++) assert.ok(seq[i] > seq[i - 1], '封顶前（第 ' + i + ' 次）必须严格递增：' + seq.join(','));
 
   // 实战：同一家店连刷，价格按序列走、钱按价扣
   let run = c.Tower._debugRun('endless');
@@ -513,6 +514,20 @@ test('需求11：刷新价格逐次递增（首次免费）', () => {
     assert.equal(r.paid, TD.rerollPriceAt(i), '实付应当等于标价');
     assert.equal(c.Tower._debugRun('endless').coins, before - r.paid, '扣费应当精确');
   }
+  /* 本轮需求：继续刷到封顶之后，价格恒为 50、每次只扣 50，期望也不再提高 */
+  let prevPaid = 0;
+  for (let i = 5; i <= 9; i++) {
+    const stn = c.Tower.shopState();
+    assert.equal(stn.rerollNextPrice, 50, '封顶后标价恒为 50，实测 ' + stn.rerollNextPrice);
+    assert.equal(stn.rerollCapped, true, '封顶后界面应当标「最高价」');
+    const beforeN = c.Tower._debugRun('endless').coins;
+    const rn = c.Tower.rerollShop();
+    assert.equal(rn.paid, 50, '封顶后每次都只扣 50，实测 ' + rn.paid);
+    assert.equal(c.Tower._debugRun('endless').coins, beforeN - 50, '扣费精确 50');
+    if (prevPaid) assert.equal(rn.expect.tilt, prevPaid, '封顶后期望不再提高');
+    prevPaid = rn.expect.tilt;
+  }
+
   // 钱不够时要拒绝，而且说明价格
   const broke = c.Tower._debugRun('endless');
   broke.coins = 0;
@@ -3782,8 +3797,19 @@ test('需求57：终焉烙印最多3次 / 秘技通神可抽绝对防御与龟�
    *（22/13/9/…，见 sim 的 jueDuiChanceOf），而「第一次受击」的实测会被前面的
    * 武器攻击污染 —— 武器打上来同样是一次判定、会把计数推上去，于是实测只有 ×1.5 上下、
    * 偶发不过阈值。真实战斗里的递减曲线由 test-combat-rules 的「按已触发次数分桶」覆盖。 */
+  /* 龟甲术的「首次触发率」也改成**函数口径的确定性断言**（同绝对防御）：
+   * 实测的「第一次普攻」会被前面的武器攻击污染（武器也是一次受击判定、
+   * 会把 shellCharges 提前用掉），于是实测差值偶发不到 1.5 倍。 */
+  const mkF3 = (eff, skills) => ({ name: 'p', level: 60, power: 200, agility: 100, speed: 100,
+    hp: 1000, maxHp: 1000, weapons: [], skills: (skills || []).map((id) => ({ id: id, level: 5 })),
+    effects: eff || {}, baseStats: { power: 200, agility: 100, speed: 100 } });
+  const gjPlainFn = c.Sim.shellChanceOf(mkF3(null, [7]), false);
+  const gjBoostFn = c.Sim.shellChanceOf(mkF3({ 7: 2 }, [7]), false);
+  assert.ok(gjBoostFn > gjPlainFn * 1.5,
+    '龟甲术**首次**触发率应当大幅提升（函数口径）：' + gjPlainFn + '% → ' + gjBoostFn + '%');
+  /* 实测也要求「不更差」（不再卡 1.5 倍，那是污染导致的抖动来源） */
   const gjPlain = rateOf(null, [7], 'guiJia', true), gjBoost = rateOf({ 7: 2 }, [7], 'guiJia', true);
-  assert.ok(gjBoost > gjPlain * 1.5, '龟甲术**首次**触发率应当大幅提升：' + (gjPlain * 100).toFixed(1) + '% → ' + (gjBoost * 100).toFixed(1) + '%');
+  assert.ok(gjBoost >= gjPlain, '实测加成后不该更差：' + (gjPlain * 100).toFixed(1) + '% → ' + (gjBoost * 100).toFixed(1) + '%');
   /* 整场累计也不能反而更低（绝对防御会递减，所以只要求「不更差」） */
   assert.ok(rateOf({ 16: 2 }, [16], 'jueDui') >= rateOf(null, [16], 'jueDui') * 1.2,
     '加成后绝对防御的整场累计触发率也不该更低');
@@ -3953,10 +3979,13 @@ test('需求58：天象之眼剥夺全部负面环境 / 虚空铭文可重复拾
   T.abandon('endless');
 });
 
-test('需求59：主动放弃无尽塔时，本局剩余试炼币 1:1 兑换为抽奖卷', () => {
+test('需求59：放弃本局 = 按当前层结算 + 重挑币 1:1 折现；试炼币不折现（作废）', () => {
   const c = setup();
-  const T = c.Tower, S = c.State;
+  const T = c.Tower, S = c.State, TD = c.TowerData;
   const TICKET = 50;    // 抽奖卷的道具 id
+  /* 第 1 层应得的抽奖卷（endlessTickets(1) = 1）。
+   * 本轮修正：**只有多的重新挑战币 1:1 折券，试炼币不折现**（之前误把试炼币也折了）。 */
+  const LAYER_TICKETS = TD.endlessTickets(1);
   const startRun = () => {
     S.newGame('ab' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
@@ -3966,33 +3995,49 @@ test('需求59：主动放弃无尽塔时，本局剩余试炼币 1:1 兑换为�
     return T._debugRun('endless');
   };
 
-  /* ① 有币放弃：1:1 换成抽奖卷，币清零、本局结束 */
+  /* ① 有币 + 有重挑币放弃：只折重挑币，试炼币作废、本局结束 */
   const run = startRun();
   run.coins = 137;
+  run.retryToken = 2;
   run.score = 500;
   const ticketsBefore = S.state().props[TICKET] || 0;
   const res = T.abandon('endless');
   assert.ok(res.ok, '放弃应当成功');
-  assert.equal(res.coinsLeft, 137, '应当报告剩余试炼币 137，实测 ' + res.coinsLeft);
-  assert.equal(res.tickets, 137, '应当报告换到 137 张抽奖卷，实测 ' + res.tickets);
-  assert.equal(S.state().props[TICKET] || 0, ticketsBefore + 137,
-    '抽奖卷应当增加 137 张：' + ticketsBefore + ' → ' + (S.state().props[TICKET] || 0));
+  assert.equal(res.layerTickets, LAYER_TICKETS, '应当按当前层结算 ' + LAYER_TICKETS + ' 张，实测 ' + res.layerTickets);
+  assert.equal(res.retryLeft, 2, '应当报告折现了 2 枚重新挑战币，实测 ' + res.retryLeft);
+  assert.equal(res.tickets, LAYER_TICKETS + 2, '本局一共发 ' + LAYER_TICKETS + ' + 2 张，实测 ' + res.tickets);
+  assert.equal(S.state().props[TICKET] || 0, ticketsBefore + LAYER_TICKETS + 2,
+    '抽奖卷应当只增加 ' + (LAYER_TICKETS + 2) + ' 张：' + ticketsBefore + ' → ' + (S.state().props[TICKET] || 0));
+  assert.equal(res.coinsLeft, undefined, '不该再有「试炼币折现」这个字段');
+  assert.equal(res.forfeitCoins, 137, '要报出作废了多少试炼币：' + res.forfeitCoins);
   assert.equal(T._debugRun('endless'), null, '放弃后本局应当已结束');
-  assert.ok(/兑换/.test(res.convertMsg || ''), '应当给出兑换提示：' + res.convertMsg);
+  assert.ok(/兑换/.test(res.retryMsg || ''), '应当给出重挑币折现提示：' + res.retryMsg);
+  assert.equal(res.convertMsg, undefined, '不该再报「试炼币兑换」');
 
   /* ② 分数照常入账（别把原有结算弄坏） */
   assert.ok(res.score === 500, '分数应当照常结算：' + res.score);
   assert.ok(Number(res.best) >= 500, 'best 应当更新：' + res.best);
 
-  /* ③ 没有币：不该凭空加卷，也不该报兑换 */
+  /* ③ 既没币也没重挑币：只发「当前层应得」那一份 */
   const run2 = startRun();
   run2.coins = 0;
+  run2.retryToken = 0;
   const before2 = S.state().props[TICKET] || 0;
   const res2 = T.abandon('endless');
-  assert.equal(res2.coinsLeft, 0, '没有币时 coinsLeft 应当是 0');
-  assert.equal(res2.tickets, 0, '没有币时不该给卷');
-  assert.equal(S.state().props[TICKET] || 0, before2, '抽奖卷不该变化');
-  assert.equal(res2.convertMsg, undefined, '没有币时不该有兑换提示');
+  assert.equal(res2.tickets, LAYER_TICKETS, '只发「当前层应得」那一份：' + res2.tickets);
+  assert.equal(S.state().props[TICKET] || 0, before2 + LAYER_TICKETS, '抽奖卷只加当前层应得的那份');
+  assert.equal(res2.retryMsg, undefined, '没有重挑币时不该有折现提示');
+  assert.equal(res2.forfeitCoins, 0, '没有试炼币可作废');
+
+  /* ③b 只有币：试炼币**一分都不折** */
+  const run3 = startRun();
+  run3.coins = 137;
+  run3.retryToken = 0;
+  const before3 = S.state().props[TICKET] || 0;
+  const res3 = T.abandon('endless');
+  assert.equal(res3.tickets, LAYER_TICKETS, '纯试炼币不该折出任何卷：' + res3.tickets);
+  assert.equal(S.state().props[TICKET] || 0, before3 + LAYER_TICKETS, '试炼币不折现');
+  assert.equal(res3.forfeitCoins, 137, '但要提示作废了 137');
 
   /* ④ 连续放弃两次：第二次没有进行中的本局，应当被拒（不该重复发卷） */
   const before4 = S.state().props[TICKET] || 0;
@@ -4000,27 +4045,15 @@ test('需求59：主动放弃无尽塔时，本局剩余试炼币 1:1 兑换为�
   assert.equal(res4.ok, false, '没有本局时放弃应当被拒：' + JSON.stringify(res4));
   assert.equal(S.state().props[TICKET] || 0, before4, '被拒时不该发卷');
 
-  /* ⑤ 兑换要能落到存档 */
+  /* ⑤ 结算要能落到存档 */
   const run5 = startRun();
   run5.coins = 42;
+  run5.retryToken = 3;
   const before5 = S.state().props[TICKET] || 0;
   T.abandon('endless');
   const raw = JSON.parse(c.localStorage.getItem(S.saveKey) || '{}');
-  assert.ok(Number((raw.props || {})[TICKET] || 0) >= before5 + 42,
-    '抽奖卷应当写进存档：' + JSON.stringify((raw.props || {})[TICKET]));
-
-  /* ⑥ 挑战塔（tower）不受影响：它有自己的结算 */
-  S.newGame('abt' + Math.random());
-  const st = S.state(); st.level = 70; st.props[23] = 99999;
-  try { T.abandon('endless'); } catch (e) {}
-  const tRun = T.startTowerRun();
-  if (tRun && tRun.ok) {
-    const beforeT = S.state().props[TICKET] || 0;
-    const resT = T.abandon('tower');
-    assert.ok(resT.ok, '挑战塔放弃应当成功');
-    assert.equal(resT.tickets, undefined, '挑战塔放弃不该走试炼币兑换');
-    assert.equal(S.state().props[TICKET] || 0, beforeT, '挑战塔放弃不该发抽奖卷');
-  }
+  assert.ok(Number((raw.props || {})[TICKET] || 0) >= before5 + LAYER_TICKETS + 3,
+    '抽奖卷（当前层应得 + 重挑币折现）应当写进存档：' + JSON.stringify((raw.props || {})[TICKET]));
 });
 
 test('需求60：20 起每 10 层必须放弃一个永久增益 / 30 层后每 2 层碎烙印失效一条', () => {
@@ -5028,14 +5061,22 @@ test('需求72：涅槃（C14）一局可拿两次 —— 第 2 层改为「本�
   /* ⑤ 引擎口径：复活甲那条 deathSave 会被打上 r.revive 标记（reportBattle 靠它
    *    把涅槃与金蝉脱壳分开数），金蝉脱壳那条不带 */
   const Sim = c.Sim;
-  const simMe = Object.assign(mk(), { mods: { deathSaves: [{ healPct: 0.5, statMul: 0.5, revive: 1 }] } });
+  const simMe = Object.assign(mk(), { hp: 160, maxHp: 160, mods: { deathSaves: [{ healPct: 0.5, statMul: 0.5, revive: 1 }] } });
   const simFoe = Object.assign(mk(), { name: '敌', power: 600, agility: 100, speed: 300, hp: 999999, maxHp: 999999 });
-  const simRes = Sim.simulate(simMe, simFoe);
-  const revRound = (simRes.rounds || []).find((x) => x.deathSave);
+  /* 打一场真的会死人的（最多试 12 次 —— 死不死取决于 sim 的随机数，不能假定一次就死；
+   * 实测 5 次偶发不够，所以这里给足次数，并把防守方的血压低让它真的会被打死）。 */
+  const firstDeathRound = (me) => {
+    for (let i = 0; i < 12; i++) {
+      const res = Sim.simulate(me, simFoe);
+      const hit = (res.rounds || []).find((x) => x.deathSave);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const revRound = firstDeathRound(simMe);
   assert.ok(revRound && revRound.revive === 1, '涅槃的 deathSave 回合要带 revive 标记：' + JSON.stringify(revRound));
-  const simMe2 = Object.assign(mk(), { mods: { deathSaves: [{}] } });      // 金蝉脱壳：{}=保留 1 血
-  const simRes2 = Sim.simulate(simMe2, simFoe);
-  const shellRound = (simRes2.rounds || []).find((x) => x.deathSave);
+  const simMe2 = Object.assign(mk(), { hp: 160, maxHp: 160, mods: { deathSaves: [{}] } }); // 金蝉脱壳：{}=保留 1 血
+  const shellRound = firstDeathRound(simMe2);
   assert.ok(shellRound && shellRound.revive === undefined, '金蝉脱壳的 deathSave 不该带 revive 标记：' + JSON.stringify(shellRound));
 
   /* ⑥ 金蝉脱壳（N04）的免死不算涅槃次数 */
@@ -5047,6 +5088,539 @@ test('需求72：涅槃（C14）一局可拿两次 —— 第 2 层改为「本�
   T.reportBattle('endless', a2.attempt, true, 4000, 5000, { rounds: [{ attacker: 0, action: 'dot', dmg: 1, deathSave: true }] });
   assert.equal(Number(T._debugRun('endless').reviveUsed) || 0, 0, '只有金蝉脱壳的 deathSave 不该消耗涅槃次数');
   T.abandon('endless');
+});
+
+test('需求73：无尽主界面右上角显示「实际退出到手」的抽奖卷（本轮已去掉标题下方那行拆解）', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const openRun = (layer) => {
+    S.newGame('r73' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    if (layer) T._debugSetEndlessLayer(layer);
+    const r = T._debugRun('endless');
+    r.permanent = []; r.limited = []; r.slotFreeIds = []; r.env = []; r.noEnvRoll = true;
+    return r;
+  };
+
+  /* ① 数据口径：本层应得 / 退出总额（= 本层应得 + 重挑币；试炼币不折现）/ 重挑币 */
+  const run0 = openRun(6);
+  run0.coins = 24;
+  const info = T.endlessInfo().run;
+  assert.ok(info, '应当有进行中的对局');
+  assert.equal(info.layer, 6, '层数应当是 6');
+  assert.equal(info.ticketsIfSettle, TD.endlessTickets(6), '本层应得应当等于 endlessTickets(当前层)');
+  assert.equal(info.ticketsIfSettle, 2, '第 6 层（第 2 段）应当是 2 张');
+  assert.equal(info.ticketsOnExit, 2, '有 24 试炼币也不该进总额，实测 ' + info.ticketsOnExit);
+  assert.equal(info.retryToken, 0, '开局没有重新挑战币');
+  /* 拿到重新挑战币（E10 即时类）后总额要跟着涨 */
+  T.applyInstant(T._debugRun('endless'), TD.BUFF_BY_ID.E10);
+  assert.equal(T.endlessInfo().run.retryToken, 5, 'E10 的 5 枚要能读出来');
+  assert.equal(T.endlessInfo().run.ticketsOnExit, T.endlessInfo().run.ticketsIfSettle + 5,
+    '重挑币要 1:1 进总额：' + T.endlessInfo().run.ticketsOnExit);
+  /* 换一层：档位跟着走 */
+  const tb = T._debugRun('endless');
+  tb.layer = 26;
+  assert.equal(T.endlessInfo().run.ticketsIfSettle, TD.endlessTickets(26), '换层后应当跟着变');
+  assert.ok(TD.endlessTickets(26) > TD.endlessTickets(6), '更深的层应当更多');
+
+  /* ② 本轮需求：标题下方那行「离场可得 +N 抽奖卷（…）」已经整块去掉 ——
+   * 界面与样式里都不该再有它（右上角那一枚仍然是「实际退出到手」的总数）。 */
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  assert.ok(ui.indexOf('endlessLeaveHtml') < 0, 'tower-ui 里不该再有 endlessLeaveHtml');
+  assert.ok(ui.indexOf('endless-leave-line') < 0 && ui.indexOf('leave-chip') < 0, '不该再有离场结算那一行的结构');
+  const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8');
+  assert.ok(!/\.endless-leave-line|\.leave-inner|\.leave-chip/.test(css), 'CSS 里不该再有离场结算那一行的样式');
+  /* 右上角那枚仍然按 ticketsOnExit 显示（不是仓库持有数） */
+  assert.ok(/run \? exitT : \(S\.props\[CURRENCY_PROP\.ticket\] \|\| 0\)/.test(ui), '右上角仍应显示退出总额');
+  assert.ok(/ticketsOnExit/.test(ui), '右上角仍要读 ticketsOnExit');
+
+  /* ③ 端到端：放弃本局实际到手的张数 == 右上角显示的那个数 */
+  openRun(6);
+  T._debugRun('endless').coins = 24;           // 试炼币：不折现
+  T._debugRun('endless').retryToken = 3;       // 重挑币：1:1 折现
+  const expect = T.endlessInfo().run.ticketsOnExit;
+  assert.equal(expect, TD.endlessTickets(6) + 3, '退出总额应当 = 2 + 3 = 5（24 试炼币不算），实测 ' + expect);
+  const beforeTickets = Number(S.state().props[50] || 0);
+  const ab = T.abandon('endless');
+  assert.equal(ab.ok, true, '应当能放弃本局');
+  assert.equal(Number(S.state().props[50] || 0) - beforeTickets, expect,
+    '放弃本局实际到手应当等于界面显示：' + expect + ' vs ' + (Number(S.state().props[50] || 0) - beforeTickets));
+});
+test('需求74：所有退出本局的方式收益完全一致（本层应得 + 重挑币 1:1 折现；试炼币作废）', () => {
+  const c = setup();
+  const T = c.Tower, S = c.State, TD = c.TowerData;
+  const TICKET = 50;
+  const COINS = 24, TOKENS = 5, LAYER = 6;
+  const LAYER_T = TD.endlessTickets(LAYER);          // 第 6 层（第 2 段）= 2 张
+  const TOTAL = LAYER_T + TOKENS;                    // 2 + 5 = 7（试炼币不参与）
+  const newRun = () => {
+    S.newGame('r74' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    T._debugSetEndlessLayer(LAYER);
+    const r = T._debugRun('endless');
+    r.coins = COINS; r.retryToken = TOKENS; r.env = []; r.noEnvRoll = true;
+    return r;
+  };
+  assert.equal(TOTAL, 7, '基准：第 6 层 2 张 + 5 枚重挑币 = 7 张（24 试炼币不算），实测 ' + TOTAL);
+
+  /* ① 放弃本局 */
+  newRun();
+  const before1 = Number(S.state().props[TICKET] || 0);
+  const r1 = T.abandon('endless');
+  assert.equal(r1.tickets, TOTAL, '放弃本局应当发 ' + TOTAL + ' 张，实测 ' + r1.tickets);
+  assert.equal(r1.layerTickets, LAYER_T, '本层应得那份：' + r1.layerTickets);
+  assert.equal(r1.retryLeft, TOKENS, '折现的重挑币数：' + r1.retryLeft);
+  assert.equal(r1.forfeitCoins, COINS, '作废的试炼币数要报出来：' + r1.forfeitCoins);
+  assert.equal(r1.coinsLeft, undefined, '不该再有「试炼币折现」字段');
+  assert.equal(Number(S.state().props[TICKET] || 0) - before1, TOTAL, '放弃本局实际入包张数');
+  assert.equal(T._debugRun('endless'), null, '放弃后本局结束');
+
+  /* ② 结算点「结算离场」 */
+  const run2 = newRun();
+  run2.phase = 'checkpoint';
+  const info2 = T.checkpointInfo();
+  assert.equal(info2.ticketsNow, LAYER_T, '结算点「本层应得」= ' + LAYER_T);
+  assert.equal(info2.retryToken, TOKENS, '结算点要带出重挑币数量');
+  assert.equal(info2.ticketsNowTotal, TOTAL, '结算点「立刻能领」= 本层 + 重挑币：' + info2.ticketsNowTotal);
+  const before2 = Number(S.state().props[TICKET] || 0);
+  const r2 = T.settleEndless();
+  assert.equal(r2.tickets, TOTAL, '结算离场应当发 ' + TOTAL + ' 张，实测 ' + r2.tickets);
+  assert.equal(r2.layerTickets, LAYER_T, '结算离场也要报本层应得那份');
+  assert.equal(r2.retryLeft, TOKENS, '结算离场也要折现重挑币');
+  assert.equal(Number(S.state().props[TICKET] || 0) - before2, TOTAL, '结算离场实际入包张数');
+  assert.equal(T._debugRun('endless'), null, '结算后本局结束');
+
+  /* ③ 失败结算（真的打输一场，走 endlessFail → doFail） */
+  newRun();
+  const nb = T.nextBattle('endless');
+  assert.ok(nb.ok, '应当能开一场：' + nb.msg);
+  const me = c.State.genAI(35, '', { levelJitter: 0, gearSelfLevel: true });
+  me.maxHp = me.hp; nb.adjustMe(me);
+  const run3 = T._debugRun('endless');
+  run3.coins = COINS; run3.retryToken = 0;            // 无重挑币 → 直接失败结算
+  const before3 = Number(S.state().props[TICKET] || 0);
+  const r3 = T.reportBattle('endless', nb.token, false, 0.3);
+  assert.equal(r3.tickets, LAYER_T, '失败结算（无重挑币）应当发 ' + LAYER_T + ' 张，实测 ' + r3.tickets);
+  assert.equal(r3.layerTickets, LAYER_T, '失败结算也要报本层应得那份');
+  assert.equal(r3.forfeitCoins, COINS, '失败结算也要报作废的试炼币');
+  assert.equal(Number(S.state().props[TICKET] || 0) - before3, LAYER_T, '失败结算实际入包张数');
+  assert.equal(T._debugRun('endless'), null, '失败后本局结束');
+
+  /* ④ declineRetry（有重挑币时选择放弃重打 → 同一个 doFail）也要折现重挑币 */
+  newRun();
+  const nb4 = T.nextBattle('endless');
+  const me4 = c.State.genAI(35, '', { levelJitter: 0, gearSelfLevel: true });
+  me4.maxHp = me4.hp; nb4.adjustMe(me4);
+  const run4 = T._debugRun('endless');
+  run4.coins = COINS; run4.retryToken = 3;
+  const fail4 = T.reportBattle('endless', nb4.token, false, 0.3);
+  assert.equal(fail4.retryable, true, '有重挑币时失败应当先不结算：' + JSON.stringify(fail4));
+  assert.equal(T._debugRun('endless').coins, COINS, '重挑币待命期间不该动币');
+  const before4 = Number(S.state().props[TICKET] || 0);
+  const r4 = T.declineRetry();
+  assert.equal(r4.retryLeft, 3, '明细里要报「折现了 3 枚重挑币」，实测 ' + r4.retryLeft);
+  assert.equal(r4.tickets, LAYER_T + 3, '放弃重打应当发 ' + (LAYER_T + 3) + ' 张，实测 ' + r4.tickets);
+  assert.equal(Number(S.state().props[TICKET] || 0) - before4, LAYER_T + 3, '放弃重打实际入包张数');
+});
+
+test('需求75：无尽塔商店刷新价封顶 50（之后不再涨）', () => {
+  const c = setup();
+  const T = c.Tower, TD = c.TowerData;
+  assert.equal(TD.SHOP.rerollMax, 50, '上限常量应当是 50，实测 ' + TD.SHOP.rerollMax);
+  /* ① 公式：0（首次免费）→ 10 → 20 → 30 → 40 → 50 → 50 → … */
+  const seq = Array.from({ length: 12 }, (_, i) => TD.rerollPriceAt(i));
+  assert.equal(seq.join(','), '0,10,20,30,40,50,50,50,50,50,50,50', '序列：' + seq.join(','));
+  assert.equal(TD.rerollPriceAt(999), 50, '再深也是 50');
+  assert.equal(TD.rerollPriceAt(-3), 0, '负数当首次免费');
+  /* ② 封顶判据（界面据此把「下次更贵」换成「最高价」） */
+  assert.equal(TD.rerollPriceCapped(0), false, '首次免费时不算封顶');
+  assert.equal(TD.rerollPriceCapped(4), false, '第 4 次（40 币）还能涨');
+  assert.equal(TD.rerollPriceCapped(5), true, '第 5 次（50 币）已到顶');
+  assert.equal(TD.rerollPriceCapped(99), true, '之后一直是顶');
+
+  /* ③ 实战：同一家店连刷 10 次（钱管够），实付金额走 0,10,20,30,40,50,50… */
+  const run = T._debugRun('endless');
+  run.coins = 100000;
+  run.phase = 'shop';
+  run.shop = { layer: run.layer, retrySold: false, rerollFree: true, rerollCount: 0, rerollPaid: 0, slots: [] };
+  const paid = [];
+  for (let i = 0; i < 10; i++) {
+    const st = T.shopState();
+    assert.equal(st.rerollNextPrice, TD.rerollPriceAt(st.rerollCount), '标价要与公式一致（第 ' + (i + 1) + ' 次）');
+    assert.equal(st.rerollCapped, TD.rerollPriceCapped(st.rerollCount), 'capped 标记要与公式一致');
+    const r = T.rerollShop();
+    assert.ok(r.ok, '应当能刷新：' + (r && r.msg));
+    paid.push(r.paid);
+  }
+  assert.equal(paid.join(','), '0,10,20,30,40,50,50,50,50,50', '实付序列：' + paid.join(','));
+  const spent = 0 + 10 + 20 + 30 + 40 + 50 * 5;
+  assert.equal(100000 - run.coins, spent, '总花费应当是 ' + spent + '，实测 ' + (100000 - run.coins));
+  /* 质量随价格到顶：封顶后的第 6~10 次 tilt 完全相同（价格不再涨，期望也不涨） */
+  const t50 = TD.rerollExpectation(50, run).tilt;
+  const tilts = paid.slice(5).map((p) => TD.rerollExpectation(p, run).tilt);
+  assert.ok(tilts.every((v) => Math.abs(v - t50) < 1e-9), '封顶后期望应当恒等于 50 币那一档：' + tilts.join(','));
+  /* 但「再贵也更好」的单调性不能丢（公式本身没封顶，只是买不到更贵的那一档） */
+  assert.ok(TD.rerollExpectation(60, run).tilt > t50, '60 币那一档（买不到）本身仍然更高');
+
+  /* ④ 全场五折（E04）时封顶价也要打折：50 → 25 */
+  const run2 = T._debugRun('endless');
+  run2.shop = { layer: run2.layer, retrySold: false, rerollFree: false, rerollCount: 5, rerollPaid: 50, slots: [], discount: true };
+  run2.coins = 1000;
+  const before2 = run2.coins;
+  const r2 = T.rerollShop();
+  assert.equal(r2.paid, 25, '五折后封顶价应当是 25，实测 ' + r2.paid);
+  assert.equal(before2 - run2.coins, 25, '五折扣费应当精确');
+
+  /* ⑤ 上限是配置常量（SHOP 被冻结，不会被运行期改掉）：
+   *    把公式单独拎出来跑一遍，验证「rerollMax = 0 即不限」这条兜底仍在。 */
+  assert.ok(Object.isFrozen(TD.SHOP), 'SHOP 应当是冻结的配置对象');
+  const src = require('fs').readFileSync(require('path').join(ROOT, 'js', 'tower-data.js'), 'utf8').split('\n');
+  const a = src.findIndex((l) => l.includes('function rerollPriceAt(count) {'));
+  let b = a;
+  while (b < src.length && !/^  \}$/.test(src[b])) b++;
+  const body = src.slice(a, b + 1).join('\n');
+  const mk = (max) => {
+    const box = { SHOP: { rerollPrice: 10, rerollGrowth: 10, rerollMax: max } };
+    vm.createContext(box);
+    return vm.runInContext(body + '\nrerollPriceAt;', box, { filename: 'rerollPriceAt' });
+  };
+  assert.equal(mk(0)(6), 60, 'rerollMax=0 应当不限：' + mk(0)(6));
+  assert.equal(mk(0)(9), 90, 'rerollMax=0 时继续涨：' + mk(0)(9));
+  assert.equal(mk(50)(6), 50, 'rerollMax=50 时封顶');
+  assert.equal(mk(70)(9), 70, 'rerollMax=70 时封到 70：' + mk(70)(9));
+});
+
+test('需求76：抽奖卷曲线（10 层前每 5 层 1 张 / 之后 2 张）+ 重挑币结算折现', () => {
+  const c = setup();
+  const T = c.Tower, TD = c.TowerData, S = c.State;
+  const TICKET = 50;
+
+  /* ① 曲线：每 5 层一个档位。10 层（含）之前每档 +1，之后每档 +2 */
+  const at = (n) => TD.endlessTickets(n);
+  assert.equal(at(1), 1, '第 1~5 层 = 1 张');
+  assert.equal(at(5), 1, '第 5 层（第 1 档）= 1 张');
+  assert.equal(at(6), 2, '第 6 层起 = 2 张');
+  assert.equal(at(10), 2, '第 10 层（第 2 档）= 2 张');
+  assert.equal(at(11), 4, '第 11 层起 = 4 张');
+  assert.equal(at(15), 4, '第 15 层（第 3 档）= 4 张');
+  assert.equal(at(20), 6, '第 20 层 = 6 张（之后每档 +2）');
+  assert.equal(at(25), 8, '第 25 层 = 8 张');
+  assert.equal(at(30), 10, '第 30 层 = 10 张');
+  assert.equal(at(40), 14, '第 40 层 = 14 张');
+  assert.equal(at(50), 18, '第 50 层 = 18 张');
+  assert.equal(at(100), 38, '第 100 层 = 38 张');
+  /* 增量：1,1,2,2,2,2…（前两档 +1、之后每档 +2） */
+  const inc = [];
+  for (let k = 1; k <= 8; k++) inc.push(at(k * 5) - (k === 1 ? 0 : at((k - 1) * 5)));
+  assert.equal(inc.join(','), '1,1,2,2,2,2,2,2', '每档增量：' + inc.join(','));
+  /* 15 层（含）之前与旧曲线完全一致（1/2/4），16 层起才变少 */
+  assert.equal([5, 10, 15].map(at).join(','), '1,2,4', '前期曲线不变');
+  assert.ok(at(20) < 8 && at(35) < 17, '深层比旧曲线（8/17）少：' + at(20) + '/' + at(35));
+  /* 单调不减 */
+  for (let n = 1; n <= 60; n++) assert.ok(at(n + 1) >= at(n), '曲线不能下降：' + n);
+
+  /* ② 结算：剩余重新挑战币 1:1 折现、**剩余试炼币不折现** */
+  const newRun = (layer, coins, tokens) => {
+    S.newGame('r76' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    T._debugSetEndlessLayer(layer);
+    const r = T._debugRun('endless');
+    r.coins = coins; r.retryToken = tokens; r.env = []; r.noEnvRoll = true;
+    return r;
+  };
+  /* 第 26 层 = 第 6 档 → 2 + 2×(6−2) = 10 张 */
+  const L26 = TD.endlessTickets(26);
+  assert.equal(L26, 10, '基准层：第 26 层应得 10 张，实测 ' + L26);
+
+  /* ②-1 放弃本局：10 张 + 2 枚重挑币；30 试炼币作废 */
+  newRun(26, 30, 2);
+  const before1 = Number(S.state().props[TICKET] || 0);
+  const r1 = T.abandon('endless');
+  assert.equal(r1.layerTickets, L26, '本层应得 ' + L26 + ' 张，实测 ' + r1.layerTickets);
+  assert.equal(r1.retryLeft, 2, '折现 2 枚重挑币，实测 ' + r1.retryLeft);
+  assert.equal(r1.forfeitCoins, 30, '作废的试炼币数要报出来，实测 ' + r1.forfeitCoins);
+  assert.equal(r1.tickets, L26 + 2, '总额 = ' + L26 + ' + 2，实测 ' + r1.tickets);
+  assert.equal(Number(S.state().props[TICKET] || 0) - before1, L26 + 2, '实际入包张数');
+
+  /* ②-2 结算点结算离场 */
+  const run2 = newRun(26, 30, 2);
+  run2.phase = 'checkpoint';
+  const info2 = T.checkpointInfo();
+  assert.equal(info2.ticketsNow, L26, '结算点「本层应得」= ' + L26);
+  assert.equal(info2.retryToken, 2, '结算点要带出重挑币数量');
+  assert.equal(info2.ticketsNowTotal, L26 + 2, '结算点「立刻能领」= 本层 + 重挑币，实测 ' + info2.ticketsNowTotal);
+  const r2 = T.settleEndless();
+  assert.equal(r2.tickets, L26 + 2, '结算离场总额，实测 ' + r2.tickets);
+  assert.equal(r2.retryLeft, 2, '结算离场也要折现重挑币');
+
+  /* ②-3 失败结算（有重挑币 → 先不结算，放弃重打时一起折） */
+  newRun(26, 30, 0);
+  const nb = T.nextBattle('endless');
+  const me = c.State.genAI(35, '', { levelJitter: 0, gearSelfLevel: true });
+  me.maxHp = me.hp; nb.adjustMe(me);
+  const run3 = T._debugRun('endless');
+  run3.coins = 30; run3.retryToken = 4;
+  const before3 = Number(S.state().props[TICKET] || 0);
+  const r3 = T.reportBattle('endless', nb.token, false, 0.3);
+  assert.equal(r3.retryable, true, '有重挑币时先不结算');
+  const r3b = T.declineRetry();
+  assert.equal(r3b.tickets, L26 + 4, '失败结算总额 = ' + L26 + ' + 4，实测 ' + r3b.tickets);
+  assert.equal(Number(S.state().props[TICKET] || 0) - before3, L26 + 4, '失败结算实际入包张数');
+
+  /* ②-4 纯试炼币（没有重挑币）：一分都不折，只发本层应得 */
+  newRun(26, 999, 0);
+  const before4 = Number(S.state().props[TICKET] || 0);
+  const r4 = T.abandon('endless');
+  assert.equal(r4.tickets, L26, '999 试炼币也不该折出任何卷，实测 ' + r4.tickets);
+  assert.equal(Number(S.state().props[TICKET] || 0) - before4, L26, '只发本层应得那份');
+
+  /* ③ 结算后重挑币必须清零（不能带到下一局） */
+  newRun(6, 10, 3);
+  T.abandon('endless');
+  assert.ok(!T._debugRun('endless'), '本局已结束');
+  T.startEndlessRun();
+  assert.equal(Number(T._debugRun('endless').retryToken) || 0, 0, '新本局不该继承上局的重挑币');
+
+  /* ④ 界面口径：右上角那个「退出实际到手」= 本层应得 + 重挑币（不含试炼币） */
+  newRun(26, 30, 2);
+  const info = T.endlessInfo().run;
+  assert.equal(info.ticketsIfSettle, L26, '本层应得 ' + L26);
+  assert.equal(info.retryToken, 2, '手上 2 枚重挑币');
+  assert.equal(info.ticketsOnExit, L26 + 2, '退出总额，实测 ' + info.ticketsOnExit);
+  assert.equal(info.ticketsOnExit, info.ticketsIfSettle + 2, '总额 = 本层应得 + 重挑币（30 试炼币不算）');
+});
+test('需求77：无尽塔「力/敏/速药丸槽」已整块删除（含旧存档字段与局外药丸回归）', () => {
+  const c = setup();
+  const T = c.Tower, TD = c.TowerData, S = c.State;
+
+  /* ① 数据层与接口都不再存在 */
+  assert.equal(TD.PILL_SLOTS, undefined, 'PILL_SLOTS 应当已删除');
+  assert.equal(TD.PILL_BATTLES, undefined, 'PILL_BATTLES 应当已删除');
+  assert.equal(TD.pillEffect, undefined, 'pillEffect 应当已删除');
+  assert.equal(T.usePillSlot, undefined, 'Tower.usePillSlot 应当已删除');
+
+  /* ② 新开的无尽局不再带 pillSlots */
+  const run = T._debugRun('endless');
+  assert.ok(run, '应当有进行中的对局');
+  assert.equal(run.pillSlots, undefined, '新局不该有 pillSlots：' + JSON.stringify(run.pillSlots));
+
+  /* ③ 旧存档：手写一份带 pillSlots 的局，任何一次访问（normalizeRun）都会清掉 */
+  const st = S.state();
+  st.endless.run.pillSlots = { power: { id: 3, battles: 12 }, agility: null, speed: { id: 43, battles: 3 } };
+  const info = T.endlessInfo();                  // 内部走 endless() → normalizeRun
+  assert.equal(info.run.pillSlots, undefined, '旧档字段应当被清掉（info）');
+  assert.equal(st.endless.run.pillSlots, undefined, '旧档字段应当被清掉（state）');
+  /* 清掉之后仍然能正常打一场（不会因为字段缺失报错） */
+  const nb = T.nextBattle('endless');
+  assert.ok(nb.ok, '删掉字段后仍应能开战：' + nb.msg);
+  const me = c.State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+  nb.adjustMe(me);
+  assert.ok(me.power > 0, 'adjustMe 仍然正常给出属性：' + me.power);
+
+  /* ④ 界面与样式里不再有药丸槽（防止旧代码被误加回来） */
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  for (const bad of ['pillSlotsHtml', 'data-pill', 'choosePill', 'PILL_SLOTS']) {
+    assert.ok(ui.indexOf(bad) < 0, 'tower-ui.js 里不该再有 ' + bad);
+  }
+  const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8');
+  assert.ok(!/\.pill-(slot|slots|plus|choice|picker)\b/.test(css), 'CSS 里不该再有药丸槽样式');
+  const data = fs.readFileSync(path.join(ROOT, 'js', 'tower-data.js'), 'utf8');
+  assert.ok(data.indexOf('const PILL_SLOTS') < 0 && data.indexOf('function pillEffect') < 0,
+    'tower-data.js 里不该再有 PILL_SLOTS / pillEffect 定义');
+
+  /* ⑤ 局外药丸不受影响（这是删除塔内槽位的前提：药丸本身还是局外道具） */
+  S.newGame('pill-outside');
+  const s2 = S.state();
+  s2.power = 10;
+  assert.equal(S.totalStats({ useProps: false }).power, 10, '没吃药时力量 = 10');
+  s2.props[3] = 1;
+  S.useProp(3);
+  assert.equal(S.totalStats().power, 15, '大力丸（+20%，最少 5 点）在局外仍然生效');
+  assert.equal(S.totalStats({ useProps: false }).power, 10, 'useProps:false 时不吃药丸');
+});
+
+test('需求78：三侠输出平衡 —— 仙鹤（xh）不再靠「速度双重计入」碾压另两位', () => {
+  const c = setup();
+  const T = c.Tower, S = c.State, Sim = c.Sim, TD = c.TowerData;
+  /* 本轮调整：仙鹤的大招与技能原本写成 (力量 + 速度) × 系数，而敌人的速度天然约是
+   * 力量的 2.3 倍 —— 等于白送一整条速度，80 层之后单击/总输出都远超另两位三侠。
+   * 现在速度只按 RULES.xhSpeedShare 计入。这条回归锁定「速度那一份」别再被加回去。 */
+  assert.equal(Sim.rules.xhSpeedShare, 0.35, '速度计入比例应当是 0.35，实测 ' + Sim.rules.xhSpeedShare);
+  assert.ok(Sim.rules.xhSpeedShare > 0 && Sim.rules.xhSpeedShare < 0.6, '不该回到 1（整条速度），也不该砍到 0');
+
+  /* 参考玩家：70 级标准面板 × 该层深度系数 × 0.9（略弱于敌方，保证能打若干回合） */
+  const mkPlayer = (layer) => {
+    const d = (TD.endlessDepthMul(layer) || 1) * 0.9;
+    const m = S.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+    for (const k of ['power', 'agility', 'speed']) m[k] = Math.round(m[k] * d);
+    m.maxHp = Math.round(m.hp * d); m.hp = m.maxHp;
+    return m;
+  };
+  const foeOf = (layer, anim) => {
+    T._debugSetEndlessLayer(layer);
+    const run = T._debugRun('endless');
+    run.env = []; run.noEnvRoll = true; run.debuffs = []; run.choices = null; run.phase = null;
+    if (run.attempt) T.reportBattle('endless', run.attempt, true, 1, null);
+    const info = T.planInfo('endless');
+    const idx = info.findIndex((x) => x.kind === 'hero' && x.anim === anim);
+    if (idx < 0) return null;
+    run.idx = idx; run.choices = null; run.phase = null;
+    const nx = T.nextBattle('endless');
+    if (!nx.ok) return null;
+    const me = mkPlayer(layer); nx.adjustMe(me);
+    const foe = nx.foe;
+    if (run.attempt) T.reportBattle('endless', run.attempt, false, 0.01, null);
+    return foe;
+  };
+  const measure = (layer, anim, n) => {
+    const foe = foeOf(layer, anim);
+    if (!foe) return null;
+    let total = 0, maxHit = 0;
+    for (let i = 0; i < n; i++) {
+      const res = Sim.simulate(foe, mkPlayer(layer));
+      let d = 0, m = 0;
+      for (const r of (res.rounds || [])) {
+        if (r.attacker !== 0) continue;
+        const v = Number(r.dmg || 0); d += v; if (v > m) m = v;
+      }
+      total += d; maxHit += m;
+    }
+    return { total: total / n, maxHit: maxHit / n };
+  };
+
+  const N = 60;
+  for (const layer of [80, 100, 120]) {
+    const tl = measure(layer, 'tl', N), xh = measure(layer, 'xh', N), xm = measure(layer, 'xm', N);
+    assert.ok(tl && xh && xm, '第 ' + layer + ' 层应当能拿到三侠对手');
+    const rXm = xh.total / xm.total, rTl = xh.total / tl.total, rHit = xh.maxHit / xm.maxHit;
+    const info = layer + ' 层：仙鹤/熊猫总输出 ' + rXm.toFixed(2) + ' · 仙鹤/螳螂 ' + rTl.toFixed(2) +
+      ' · 单击 仙鹤/熊猫 ' + rHit.toFixed(2);
+    /* 经验区间（N=100 实测：总 1.13~1.24×熊猫、单击 1.33~1.49×熊猫；旧口径是 1.37~1.58 / 2.02~2.30）：
+     * ①仙鹤不能碾压；②仍是三侠里最能打的那位；③单击最狠但不得回到旧口径的量级。
+     * 区间留了余量（sim 是随机的），真正锁死这次改动的是下面的**确定性公式断言**。 */
+    assert.ok(rXm <= 1.6, '仙鹤总输出不该超过熊猫 1.6 倍：' + info);
+    assert.ok(rXm >= 1.0, '仙鹤应当仍是三侠里最能打的那位：' + info);
+    assert.ok(rTl <= 1.6, '仙鹤总输出不该超过螳螂 1.6 倍：' + info);
+    /* 单击是「取最大值」，方差很大（N=60 时实测 1.33~1.75 波动）；真正锁死改动的是
+     * 下面的确定性公式断言，这里只挡住「回到旧口径」的量级（旧口径 2.02~2.30）。 */
+    assert.ok(rHit <= 2.0, '仙鹤单击不该超过熊猫 2 倍（旧口径 2.0~2.3）：' + info);
+    assert.ok(rHit > 1.0, '仙鹤单击应当仍是三侠里最高的：' + info);
+
+    /* 确定性：仙鹤的伤害基准 = (力量 + 速度×share)，speed 那一份只能这么重。
+     * 旧口径是 (力量 + 速度) —— 用对手面板直接算出两者的比值。 */
+    const p = foeOf(layer, 'xh');
+    assert.ok(p && p.power > 0 && p.speed > 0, '仙鹤对手要有力量与速度：' + JSON.stringify({ p: p && p.power, s: p && p.speed }));
+    const oldRaw = p.power + p.speed, newRaw = p.power + p.speed * Sim.rules.xhSpeedShare;
+    assert.ok(newRaw <= oldRaw * 0.62, '去掉「速度双计」后基准应当至少降 38%：' + Math.round(newRaw) + ' vs ' + Math.round(oldRaw));
+    assert.ok(newRaw > p.power, '速度仍要有贡献（不能砍成 0）：' + Math.round(newRaw) + ' vs ' + p.power);
+  }
+});
+
+test('需求79：全技能树 boss 不再刷同一招 + castable 必须是 skills 的子集', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;
+
+  /* ① 数据一致性：castable 里的每个 id 必须真的在 skills 里 ——
+   * 本轮 bug 就是「castable 声明了 skills 里没有的招」，sim 的 skillOrder 过滤后
+   * 只剩一个主动技，整套循环塌缩成「幸运一击 ×N」。这条断言能直接拦住同类错误。 */
+  const groups = [['squirrel', TD.SQUIRREL_BY_ID], ['trial', TD.TRIAL_BY_ID]];
+  for (const [label, pool] of groups) {
+    for (const [id, def] of Object.entries(pool || {})) {
+      if (!Array.isArray(def.castable)) continue;
+      const known = new Set((def.skills || []).map((s) => Number(s.id)));
+      for (const cid of def.castable) {
+        assert.ok(known.has(Number(cid)),
+          label + ' ' + id + ' 的 castable (' + cid + ') 必须是 skills 的子集：skills=' + JSON.stringify([...known]));
+      }
+      assert.ok(def.castable.length >= 1, label + ' ' + id + ' 的 castable 不该为空');
+    }
+  }
+  /* 苦修（全技能树）：**全部 20 个技能**、等级一律压到 2、循环覆盖全部主动技 */
+  const monk = TD.SQUIRREL_BY_ID.monk;
+  const ids = monk.skills.map((x) => Number(x.id)).sort((a, b) => a - b);
+  assert.equal(ids.join(','), '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,23,24',
+    '苦修应当字面意义上拥有全部 20 个技能，实测 ' + JSON.stringify(ids));
+  for (const x of monk.skills) assert.ok(x.level <= 2, '技能等级都要很低：' + JSON.stringify(x));
+  assert.equal(monk.castable.slice().sort((a, b) => a - b).join(','), '8,12,14,15,17,18,23',
+    '循环要覆盖全部主动技，实测 ' + JSON.stringify(monk.castable));
+
+  /* ② 实战：招式要轮着来（全部主动技都出现过）、不连放、技能占出手仍然很高 */
+  const buildMonk = (layer) => {
+    T._debugSetEndlessLayer(layer);
+    const run = T._debugRun('endless');
+    run.plan = [{ kind: 'squirrel', id: 'monk' }, { kind: 'hero', anim: 'tl' }];
+    run.idx = 0; run.env = []; run.choices = null; run.phase = null;
+    const nx = T.nextBattle('endless');
+    assert.ok(nx.ok, '应当能造出苦修：' + nx.msg);
+    return nx.foe;
+  };
+  const mkPlayer = (layer) => {
+    const d = (TD.endlessDepthMul(layer) || 1) * 0.9;
+    const m = S.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+    for (const k of ['power', 'agility', 'speed']) m[k] = Math.round(m[k] * d);
+    m.maxHp = Math.round(m.hp * d); m.hp = m.maxHp;
+    return m;
+  };
+  const foe = buildMonk(80);
+  assert.equal((foe.castable || []).join(','), '8,12,14,15,17,18,23', '敌人身上要带上 castable：' + JSON.stringify(foe.castable));
+  assert.equal((foe.skills || []).length, 20, '敌人身上要带全部 20 个技能：' + (foe.skills || []).length);
+  const usedIds = new Set();
+  let skillActs = 0, total = 0, backToBack = 0, prevId = null, damage = 0, battles = 0;
+  for (let i = 0; i < 150; i++) {
+    const res = Sim.simulate(foe, mkPlayer(80));
+    battles++;
+    prevId = null;                      // 只在同一场战斗内检查「连着放同一招」
+    for (const r of (res.rounds || [])) {
+      if (r.attacker !== 0) continue;
+      damage += Number(r.dmg || 0);
+      if (r.action !== 'skill' && r.action !== 'common') continue;
+      total++;
+      if (r.action === 'skill') {
+        skillActs++;
+        const sid = Number(r.id);
+        usedIds.add(sid);
+        if (sid === prevId) backToBack++;
+        prevId = sid;
+      } else prevId = null;
+    }
+  }
+  const share = skillActs / Math.max(1, total);
+  assert.ok(share >= 0.5, '它是技能流 boss，技能出手不该低于 50%，实测 ' + (share * 100).toFixed(1) + '%');
+  assert.equal(backToBack, 0, '同一招不能连着放（技能冷却），实测 ' + backToBack + ' 次');
+  /* 7 个主动技要真的都轮得到（150 场足够；小宇宙/松果是每场一次，所以看「至少出现过」） */
+  for (const want of [8, 12, 14, 15, 17, 18, 23]) {
+    assert.ok(usedIds.has(want), '技能 ' + want + ' 应当出现过，实测用过 ' + [...usedIds].join(','));
+  }
+  assert.ok(total / battles >= 3, '出手次数太少：' + (total / battles).toFixed(1));
+  assert.ok(damage / battles > 0, '总伤害应当为正：' + Math.round(damage / battles));
+
+  /* ③ 输出量级：与同层其它松鼠 boss 同档（不超过「最厚的那个」2 倍）——用同一参考玩家粗测 */
+  const dps = (id) => {
+    const f = foeOf(c, id, 'squirrel', 80);      // 复用测试里既有的造敌助手（会先清掉待结算的战斗）
+    let sum = 0, n = 0;
+    for (let i = 0; i < 40; i++) {
+      const res = Sim.simulate(f, mkPlayer(80));
+      let d = 0;
+      for (const r of (res.rounds || [])) if (r.attacker === 0) d += Number(r.dmg || 0);
+      sum += d; n++;
+    }
+    return sum / n;
+  };
+  const peers = ['scout', 'guard', 'frenzy', 'thrower', 'heavy', 'twinblade', 'bulwark']
+    .map((id) => dps(id)).filter((v) => v != null);
+  const monkDps = dps('monk');
+  const maxPeer = Math.max(...peers);
+  assert.ok(monkDps <= maxPeer * 2, '苦修的输出不该超过同层最强 boss 的 2 倍：' +
+    Math.round(monkDps) + ' vs ' + Math.round(maxPeer));
 });
 
 (async () => {

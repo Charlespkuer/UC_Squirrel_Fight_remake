@@ -614,6 +614,80 @@ test('关卡连战入场：当前血量按比例继承，但生命上限保持�
   assert.equal(short.winner, 1, '残血一方应当战败，而不是按 10/10 满血拖到判定');
 });
 
+test('低血减伤是**即时结算**的：按「越过阈值」把这一击切成两段', () => {
+  const g = game();
+  const Sim = g.Sim;
+  const def = (hp, mul, th) => ({ name: 'p', level: 20, power: 10, agility: 10, speed: 10,
+    hp, maxHp: 100, weapons: [], skills: [], mods: { lowHpAt: th === undefined ? 0.5 : th, lowHpTakenMul: mul } });
+  const mul = -0.5;                       // 阈值 50% 以下减伤 50%
+  /* 用户给的口径：上限 100、当前 60（60%）、挨 20 点 → 只掉 15 → 剩 45（旧算法是剩 40） */
+  assert.equal(Sim.lowHpTakenDamage(def(60, mul), 20, mul), 15, '60% 挨 20 应当只吃 15');
+  assert.equal(60 - Sim.lowHpTakenDamage(def(60, mul), 20, mul), 45, '最终血量应当是 45');
+  /* 边界：正好打到阈值线 → 整段全额；够不到阈值线 → 全额 */
+  assert.equal(Sim.lowHpTakenDamage(def(60, mul), 10, mul), 10, '正好打到线：全额');
+  assert.equal(Sim.lowHpTakenDamage(def(60, mul), 5, mul), 5, '够不到线：全额');
+  /* 已经低于阈值：整段减伤（与旧行为一致） */
+  assert.equal(Sim.lowHpTakenDamage(def(40, mul), 20, mul), 10, '整段在阈下：全额减伤');
+  assert.equal(Sim.lowHpTakenDamage(def(50, mul), 20, mul), 10, '正好在线上：整段减伤');
+  /* 多档：减伤 25% / 阈值 40%（100 的 40% = 线在 40；当前 50 → 越线前 10 全额 + 后 10×0.75） */
+  assert.equal(Sim.lowHpTakenDamage(def(50, -0.25, 0.4), 20, -0.25), Math.round(10 + 10 * 0.75), '25% 减伤的分段');
+  /* 没有阈值（旧数据）→ 整段减伤，不能因为缺字段就变成全额 */
+  assert.equal(Sim.lowHpTakenDamage({ hp: 60, maxHp: 100, mods: { lowHpTakenMul: mul } }, 20, mul), 10, '没有阈值时按整段减伤');
+  /* 减伤 100%（mul = −1）→ 越过的部分归零，但仍然会被打到阈值线 */
+  assert.equal(Sim.lowHpTakenDamage(def(60, -1), 20, -1), 10, '减伤 100% 时只掉到阈值线');
+});
+
+test('低血减伤在真实战斗里生效（打不到线上的那一段不吃减伤）', () => {
+  const g = game();
+  /* 防守方满血 200、带 50% 低血减伤；攻击方每次固定 60 点（力量 60、无暴击技能）。
+   * 第一次挨打：200 → 140（还在 50% 线上，全额）
+   * 第二次：140 → 80（仍然全额，因为 140→80 越过了 100 这条线？80 < 100 → 分段：
+   *   140−100=40 全额 + 越过 100 的 20×0.5=10 → 共 50 → 140−50=90） */
+  const me = fighter({ hp: 200, maxHp: 200, power: 1, agility: 1, speed: 1,
+    mods: { lowHpAt: 0.5, lowHpTakenMul: -0.5 } });
+  const foe = fighter({ hp: 100000, power: 60, agility: 1, speed: 200 });
+  const res = g.Sim.simulate(foe, me, {});
+  const hits = (res.rounds || []).filter((r) => r.attacker === 0 && r.dmg > 0);
+  assert.ok(hits.length >= 2, '至少要有两次受击：' + hits.length);
+  const first = hits[0].dmg, second = hits[1].dmg, third = hits.length > 2 ? hits[2].dmg : null;
+  assert.equal(first, 60, '第一击（200→140，全程在阈值线上）应当全额：' + first);
+  /* 第二击 140→90：140−100=40 全额 + 越过 100 的 20 减半（10）→ 50 */
+  assert.equal(second, 50, '第二击应当按分段结算（40 + 20×0.5 = 50）：' + second);
+  /* 第三击整段都在阈值线下（90 < 100）→ 全额减伤 30 */
+  assert.ok(third === null || third === 30, '第三击应当整段减伤（60×0.5 = 30）：' + third);
+});
+
+test('固定循环的敌人不会把同一招连着放（技能冷却按出手次数算）', () => {
+  /* 起因：无械苦修·空明 的技能表是「3 个被动 + 1 个主动」，循环只认主动技，
+   * 于是整套循环塌缩成「幸运一击 ×N」（实测 74% 的出手都是它）。
+   * 现在同一招用掉后至少要隔 RULES.skillCooldown 次出手才能再用。 */
+  const g = randomGame();
+  assert.ok(g.Sim.rules.skillCooldown >= 1, '冷却至少 1 次出手：' + g.Sim.rules.skillCooldown);
+  /* 只带一个主动技（23 幸运一击）的固定循环敌人 */
+  const oneTrick = () => fighter({ name: '苦修', skills: [{ id: 23, level: 8 }], pattern: ['skill', 'skill', 'common', 'skill'],
+    power: 20, speed: 20, hp: 100000, weapons: [] });
+  const sim = g.Sim.simulate(oneTrick(), fighter({ hp: 100000, power: 1, agility: 1, speed: 1 }));
+  const mine = sim.rounds.filter((x) => x.attacker === 0 && (x.action === 'skill' || x.action === 'common'));
+  const kinds = mine.map((x) => (x.action === 'skill' ? 'S' : 'C'));
+  assert.ok(kinds.length >= 4, '出手次数太少：' + kinds.join(''));
+  /* 冷却生效：序列里不该出现「相邻两次都是技能」 */
+  for (let i = 1; i < kinds.length; i++) {
+    assert.ok(!(kinds[i] === 'S' && kinds[i - 1] === 'S'),
+      '同一招不能连着放（冷却 ' + g.Sim.rules.skillCooldown + ' 次出手）：' + kinds.join(''));
+  }
+  /* 而且它并没有被彻底废掉：整场至少放出来一次 */
+  assert.ok(kinds.includes('S'), '技能还是要能放出来：' + kinds.join(''));
+
+  /* 反过来：多个主动技的正常轮转不受影响（元素术鼠 12/17 那种） */
+  const twoSkills = () => fighter({ name: '轮转', skills: [{ id: 12, level: 8 }, { id: 23, level: 8 }], pattern: ['skill', 'skill', 'skill', 'common'],
+    power: 20, speed: 20, hp: 100000, weapons: [] });
+  const sim2 = g.Sim.simulate(twoSkills(), fighter({ hp: 100000, power: 1, agility: 1, speed: 1 }));
+  const ids = sim2.rounds.filter((x) => x.attacker === 0 && x.action === 'skill').map((x) => Number(x.id));
+  assert.ok(ids.length >= 3, '轮转型敌人应当持续放技能：' + ids.join(','));
+  for (let i = 1; i < ids.length; i++) assert.notEqual(ids[i], ids[i - 1], '同一招仍然不能连着放：' + ids.join(','));
+  assert.ok(ids.includes(12) && ids.includes(23), '两招都要用到（不是只放一招）：' + ids.join(','));
+});
+
 let failed = 0;
 for (const [name, run] of tests) {
   try { run(); console.log('PASS ' + name); }

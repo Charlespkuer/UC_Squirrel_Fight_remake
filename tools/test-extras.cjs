@@ -579,6 +579,68 @@ test('抽奖首抽免费、防双击，付费经验奖扣20并真正升级', () 
   assertBalanced(g.markup);
 });
 
+test('每日抽奖：右上角抽奖卷角标 + 删掉底部说明 + 连抽 10 次', () => {
+  const g = setup(), s = g.c.State.state();
+  s.lotteryFree = 1; s.props[50] = 3; s.goldPoint = 100;      // 免费 1 + 抽奖卷 3 + 金松果 100
+  g.c.ClassicExtras.lottery();
+  const html = g.markup.at(-1)[1];
+  /* ① 右上角标注仓库抽奖卷数量（refreshTickets 就地刷新用的就是 [data-lottery-ticket]） */
+  assert.ok(/lottery-ticket-corner/.test(html), '要有右上角角标：' + html.slice(0, 200));
+  assert.ok(/lottery-ticket-corner[\s\S]*?data-lottery-ticket/.test(html), '角标里要带抽奖卷数量节点');
+  assert.ok(/data-lottery-ticket>3</.test(html), '角标应当显示仓库里的 3 张：' + html.slice(0, 260));
+  /* ② 底部那两句说明（「每天免费一次，之后…」「当前金松果：」）已经删掉 */
+  assert.ok(html.indexOf('每天免费') < 0, '底部不该再有「每天免费一次…」说明');
+  assert.ok(html.indexOf('当前金松果') < 0, '底部不该再有「当前金松果：」');
+  assert.ok(html.indexOf('data-lottery-gold') < 0, '金松果节点已随说明一起删除');
+  /* ③ 保留「今日免费 N 次」状态与两个按钮 */
+  assert.ok(/data-lottery-status/.test(html), '今日免费次数状态要保留');
+  assert.ok(/data-action="lottery-spin"/.test(html) && /data-action="lottery-spin10"/.test(html), '要有单抽与连抽两个按钮');
+  /* ④ 单抽按钮文案按当前资源变化（说明文字删掉后靠按钮表达费用） */
+  assert.ok(/免费抽奖/.test(html), '有免费次数时按钮写「免费抽奖」');
+  s.lotteryFree = 0; s.props[50] = 2;
+  g.c.ClassicExtras.lottery();
+  assert.ok(/用抽奖卷抽奖/.test(g.markup.at(-1)[1]), '有抽奖卷时按钮写「用抽奖卷抽奖」');
+  s.props[50] = 0; s.goldPoint = 60;
+  g.c.ClassicExtras.lottery();
+  assert.ok(/20 金松果抽奖/.test(g.markup.at(-1)[1]), '只能花金松果时按钮写「20 金松果抽奖」');
+
+  /* ⑤ 连抽 10 次：扣费顺序「免费 → 抽奖卷 → 金松果」，每日任务按 10 次计数 */
+  const g2 = setup(), s2 = g2.c.State.state();
+  /* 注意：refreshLotteryDay() 在跨天时会把免费次数重置为 1，所以这里要先把日期钉成今天 */
+  s2.lotteryDate = new g2.c.Date(g2.c.Date.now()).toDateString();
+  s2.lotteryFree = 2; s2.props[50] = 5; s2.goldPoint = 100;    // 2 免费 + 5 卷 + 100 金（=5 次）→ 12 次够抽 10
+  g2.c.ClassicExtras.lottery();
+  const beforeTickets = s2.props[50], beforeGold = s2.goldPoint;
+  g2.math.random = () => 0;              // 固定抽到「不发金松果」的那一档，好核对扣费
+  g2.click('lottery-spin10');
+  assert.equal(s2.lotteryFree, 0, '先吃掉 2 次免费');
+  assert.equal(s2.props[50] || 0, 0, '再吃掉 5 张抽奖卷（扣到 0 时字段会被删掉）');
+  assert.equal(s2.goldPoint, beforeGold - 60, '剩下 3 次按 20 金松果扣');
+  assert.equal(s2.dailyCounters.lottery, 10, '连抽 10 次要给每日任务记 10 次');
+  assert.equal(g2.saved().dailyCounters.lottery, 10, '计数要立即落盘');
+  g2.flushTimers();
+  const ten = g2.modals.at(-1);
+  assert.equal(ten.title, '连抽 10 次', '结束后要弹十连汇总：' + ten.title);
+  /* 十连结果要一屏铺开：5×2 的奖励格（与抽奖页同款样式），不做上下滚动 */
+  assert.equal((ten.html.match(/class="extra-prize won"/g) || []).length, 10, '十连结果要有 10 个奖励格');
+  assert.ok(/lottery-result-grid/.test(ten.html), '十连结果要用 5×2 网格：' + ten.html.slice(0, 200));
+  assert.ok(ten.html.indexOf('lottery-win-row') < 0, '不该再用滚动列表样式');
+  assertBalanced(g2.markup);
+
+  /* ⑥ 资源不够 10 次：直接拒绝，一点资源都不扣 */
+  const g3 = setup(), s3 = g3.c.State.state();
+  s3.lotteryDate = new g3.c.Date(g3.c.Date.now()).toDateString();
+  s3.lotteryFree = 0; s3.props[50] = 2; s3.goldPoint = 40;      // 2 张卷 + 2 次金松果 = 4 次 < 10
+  g3.c.ClassicExtras.lottery();
+  const goldBefore = s3.goldPoint, ticketBefore = s3.props[50];
+  g3.click('lottery-spin10');
+  assert.equal(s3.goldPoint, goldBefore, '不够 10 次时不该扣金松果');
+  assert.equal(s3.props[50], ticketBefore, '不够 10 次时不该扣抽奖卷');
+  assert.equal((s3.dailyCounters || {}).lottery || 0, 0, '不够 10 次时不该计入每日任务');
+  assert.ok(/连抽 10 次需要/.test(g3.modals.at(-1).html), '要说明差多少资源：' + g3.modals.at(-1).html);
+  assertBalanced(g3.markup);
+});
+
 test('每条每日任务都有计数来源（防止再出现「抽奖任务不识别」）', () => {
   const source = ['js/state.js', 'js/classic-extras.js', 'js/battle-drops.js']
     .map((file) => fs.readFileSync(path.join(rootDir, file), 'utf8')).join('\n');

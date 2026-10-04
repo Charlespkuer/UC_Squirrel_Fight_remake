@@ -380,7 +380,8 @@ function autoPick(ctx, mode) {
   t('结算离场：1 张抽奖卷入包、分数入账', settled.ok && settled.tickets === 1 && (S.props[50] || 0) === tickets0 + 1 && Tower.endlessInfo().best > 0);
 
   // 抽奖卷曲线：T(1..7 段) = 1/2/4/8/11/14/17（20 层后线性 +3/段）
-  t('抽奖卷曲线 20 层后线性', [5, 10, 15, 20, 25, 30, 35].map((n) => TowerData.endlessTickets(n)).join(',') === '1,2,4,8,11,14,17');
+  /* 本轮平衡调整：10 层前每档 +1、之后每档 +2（旧曲线 20 层后是每档 +3） */
+  t('抽奖卷曲线：10 层前每 5 层 1 张、之后每 5 层 2 张', [5, 10, 15, 20, 25, 30, 35].map((n) => TowerData.endlessTickets(n)).join(',') === '1,2,4,6,8,10,12');
 
   // —— 无尽失败：卷作废 + 15 层保底 ——
   Tower.startEndlessRun();
@@ -543,28 +544,14 @@ function autoPick(ctx, mode) {
     t('换层后休整商店次数重置', advanced && r.restShopUsed === false && r.layer === 2);
     Tower.abandon('endless');
   }
-  // 第 1 项：三种属性药丸槽位（塔内 20 场）
+  /* 【本轮删除】三种属性药丸槽位（塔内 20 场）整块移除：
+   * 不再有 usePillSlot / run.pillSlots / PILL_SLOTS，药丸只在局外 totalStats 生效。
+   * 这里只留一条「接口确实没了」的断言，防止旧代码被误加回来。 */
   {
     const r = freshEndless(State, Tower);
-    S.props[3] = 2; S.props[41] = 1;
-    t('药丸槽位：没道具/不匹配都不行', Tower.usePillSlot('power', 4).ok === false);
-    const used = Tower.usePillSlot('power', 3);
-    t('嵌入大力丸：扣道具 + 记 20 场', used.ok === true && S.props[3] === 1 && r.pillSlots.power.battles === 20);
-    S.props[3] = 0; S.props[41] = 0;
-    t('没有道具时不能嵌', Tower.usePillSlot('power', 41).ok === false && r.pillSlots.power.id === 3);
-    // 生效：+20% 力量（最少 5 点）
-    const nb = Tower.nextBattle('endless');
-    const me = State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
-    const base = me.power;
-    nb.adjustMe(me);
-    t('大力丸让力量 +20%（最少 5 点）', me.power - base >= Math.max(5, Math.floor(base * 0.2)) - 1);
-    // 打一场扣一场，20 场后消失
-    Tower.reportBattle('endless', nb.token, true, 0.8, { rounds: [] });
-    t('药丸按战斗数递减', r.pillSlots.power && r.pillSlots.power.battles === 19);
-    r.pillSlots.power.battles = 1;
-    const nb2 = Tower.nextBattle('endless');
-    Tower.reportBattle('endless', nb2.token, true, 0.8, { rounds: [] });
-    t('用完自动清空槽位', r.pillSlots.power === null);
+    t('药丸槽位接口已删除（usePillSlot / run.pillSlots / PILL_SLOTS 都不存在）',
+      typeof Tower.usePillSlot === 'undefined' && typeof ctx.TowerData.PILL_SLOTS === 'undefined' &&
+      typeof ctx.TowerData.pillEffect === 'undefined' && r.pillSlots === undefined);
     Tower.abandon('endless');
   }
   // 第 1 项（本轮）：名贵手表（商店不卖、卖出 200）+ 战利品账本（按胜场累计卖出收益）

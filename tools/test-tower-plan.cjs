@@ -148,7 +148,16 @@ test('全技能树 boss（无械苦修·空明）已被下调：三围更低、�
   assert.ok(monk.bias.agility <= 1.10, '敏捷不该还高于 1.10：' + monk.bias.agility);
   for (const s of monk.skills) assert.ok(s.level <= 8, '技能 ' + s.id + ' 等级应当 ≤8：' + s.level);
   assert.equal(monk.weapons.length, 0, '它仍然不带武器（特征保留）');
-  assert.equal(monk.skills.length, 4, '仍然是全技能树那 4 个技能（特征保留）');
+  /* 本轮：改成**字面意义上的全技能树** —— 全部 20 个技能都会，但等级一律压到 2
+   *（原来只有 [2,7,16,23]，三个被动 + 一个主动，固定循环因此塌缩成「幸运一击 ×N」）。 */
+  const ids = monk.skills.map((s) => Number(s.id)).sort((a, b) => a - b);
+  assert.equal(ids.join(','), '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,23,24',
+    '应当是全部 20 个技能：' + JSON.stringify(ids));
+  for (const s of monk.skills) assert.ok(s.level <= 2, '技能等级要压得很低：' + JSON.stringify(s));
+  assert.equal((monk.castable || []).slice().sort((a, b) => a - b).join(','), '8,12,14,15,17,18,23',
+    '循环要覆盖全部主动技：' + JSON.stringify(monk.castable));
+  const known = new Set(ids);
+  for (const cid of monk.castable) assert.ok(known.has(Number(cid)), 'castable 必须是 skills 的子集：' + cid);
 });
 
 test('削弱后的 monk 不再是碾压级 boss（实战胜率不再垫底）', () => {
@@ -198,7 +207,7 @@ test('削弱后的 monk 不再是碾压级 boss（实战胜率不再垫底）', 
   assert.ok(foe.power < 120, '力量仍然偏高：' + foe.power);
   assert.ok(foe.agility < 175, '敏捷仍然偏高：' + foe.agility);
   assert.ok(foe.speed < 165, '速度仍然偏高：' + foe.speed);
-  for (const s of foe.skills) assert.ok(s.level <= 10, '实战里技能等级仍然偏高：' + JSON.stringify(foe.skills));
+  for (const s of foe.skills) assert.ok(s.level <= 8, '实战里技能等级仍然偏高（buildFoe 会 +3）：' + JSON.stringify(foe.skills));
 });
 
 (async () => {

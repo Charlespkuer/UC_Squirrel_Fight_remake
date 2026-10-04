@@ -353,21 +353,6 @@
 .tower-plan.compact .tower-plan-type { font-size: 15px; }
 
 /* 第 1 项：无尽主界面右上角的三个属性药丸槽位 */
-.tower-head .pill-slots { display: flex; gap: 8px; }
-.pill-slot { width: 54px; height: 54px; border-radius: 14px; border: 3px dashed #c9a468; background: rgba(255,250,235,.9);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; color: #8a6a3a; }
-.pill-slot.filled { border-style: solid; border-color: #c58a3c; background: #fff6dd; }
-.pill-slot img { width: 26px; height: 26px; object-fit: contain; }
-.pill-slot b { font-size: 15px; color: #a8453a; }
-.pill-slot i { font-size: 14px; font-style: normal; }
-.pill-slot .pill-plus { font-size: 22px; line-height: 1; color: #c9a468; }
-.pill-picker { display: flex; flex-direction: column; gap: 10px; }
-.pill-choice { display: flex; align-items: center; gap: 12px; background: #fff8e6; border-radius: 16px; padding: 8px 12px; }
-.pill-choice.empty { opacity: .55; }
-.pill-choice img { width: 40px; height: 40px; object-fit: contain; }
-.pill-choice b { font-size: 21px; color: #7a4a18; }
-.pill-choice span { display: block; font-size: 17px; color: #8a6a3a; }
-.pill-choice i { font-style: normal; font-size: 16px; color: #a8453a; }
 /* 第 3 项：当前遭遇的机制（名字 + 具体效果） */
 .mech-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .mech-bar b { font-size: 18px; color: #7a4a18; }
@@ -385,7 +370,6 @@
 .endless-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .endless-title-row .tower-currency { position: static; }
 .endless-score { margin: 0 0 4px; font-size: 18px; color: #8a6a3a; }
-.endless-left .tower-head .pill-slots, .endless-left .pill-slots { justify-content: flex-start; margin-bottom: 2px; }
 .endless-left .tower-buffs { margin: 2px 0; }
 .endless-left .tower-buffs h4 { font-size: 17px; margin: 2px 0; }
 .endless-left .buff-tags { gap: 5px; }
@@ -403,10 +387,6 @@
 .tower-plan.vertical .tower-plan-type { font-size: 15px; padding: 0 6px; }
 
 /* 一屏放下：再压一档（药丸槽、对手行、行距） */
-.endless-left .pill-slot { width: 44px; height: 44px; border-width: 2px; }
-.endless-left .pill-slot img { width: 20px; height: 20px; }
-.endless-left .pill-slot b { font-size: 13px; }
-.endless-left .pill-slot i { font-size: 12px; }
 .endless-left .endless-score { margin: 0; font-size: 17px; }
 .tower-plan.vertical li { padding: 2px 6px; }
 .tower-plan.vertical li b { white-space: nowrap; }
@@ -430,8 +410,6 @@
 
 /* 第 2 项再调整：药丸槽横排放在「本层对手」上面；血量挪到左上、去掉「继承」两字；
    货币紧跟标题（不再被右列遮住）；继续战斗/放弃本局单独一行，不与其它 ui 对齐。 */
-.endless-foes .pill-slots { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: 6px; margin-bottom: 4px; }
-.endless-foes .pill-slot { width: 40px; height: 40px; }
 .endless-title-row { justify-content: flex-start; gap: 14px; }
 .endless-title-row .tower-currency { position: static; }
 .endless-hp { margin: 0 0 4px; }
@@ -459,13 +437,6 @@
 .endless-score-box i { font-style: normal; font-size: 15px; color: #a98a5c; font-family: inherit; }
 .endless-score-box b { font-size: 24px; color: #a8641c; }
 /* 三个药丸槽：等腰三角（上 1 下 2），整体贴右上角 */
-.endless-title-row .pill-slots { margin-left: auto; display: grid; grid-template-columns: repeat(2, auto);
-  justify-items: center; align-items: center; gap: 5px 8px; }
-.endless-title-row .pill-slots .pill-slot:first-child { grid-column: 1 / span 2; }
-.endless-title-row .pill-slot { width: 50px; height: 50px; }
-.endless-title-row .pill-slot img { width: 24px; height: 24px; }
-.endless-title-row .pill-slot b { font-size: 14px; }
-.endless-title-row .pill-slot i { font-size: 13px; }
 /* 血量：贴标题、放大 */
 .endless-hp { margin: -2px 0 4px; }
 .endless-hp span { font-size: 19px; color: #7a4a18; }
@@ -477,13 +448,6 @@
 .endless-actions .uc-button[data-action="abandon"] { position: relative; top: 8px; margin-right: 4px; }
 
 /* 药丸槽：绝对定位贴右上角（不参与左列宽度计算，避免把标题行挤爆） */
-.endless-pills { position: absolute; top: 6px; right: 10px; }
-.endless-pills .pill-slots { display: grid; grid-template-columns: repeat(2, auto); justify-items: center; align-items: center; gap: 5px 9px; }
-.endless-pills .pill-slots .pill-slot:first-child { grid-column: 1 / span 2; }
-.endless-pills .pill-slot { width: 52px; height: 52px; }
-.endless-pills .pill-slot img { width: 25px; height: 25px; }
-.endless-pills .pill-slot b { font-size: 14px; }
-.endless-pills .pill-slot i { font-size: 13px; }
 .endless-foes { margin-right: 66px; }
 .endless-title-row { overflow: hidden; }
 .endless-title-row { white-space: nowrap; }
@@ -491,22 +455,11 @@
 /* 药丸槽放回右列顶部（三角、贴右边缘），不与对手行重叠 */
 .endless-foes { display: flex; flex-direction: column; align-items: flex-end; margin-right: 20px; }
 .endless-foes .tower-plan, .endless-foes .tower-plan-title { align-self: stretch; }
-.endless-foes .pill-slots { display: grid; grid-template-columns: repeat(2, auto); justify-items: center; align-items: center;
-  gap: 4px 8px; margin-bottom: 6px; }
-.endless-foes .pill-slots .pill-slot:first-child { grid-column: 1 / span 2; }
-.endless-foes .pill-slot { width: 50px; height: 50px; }
-.endless-foes .pill-slot img { width: 24px; height: 24px; }
-.endless-pills { display: none; }
 
 /* 第四轮微调：按钮更靠下；药丸槽略缩小并更贴右上；对手行放大到能看清立绘；
    顶栏给分数字留位置；增益面板松一点、字大一点。 */
 .endless-actions { margin: 16px 6px 0 0; }
-.endless-foes .pill-slot { width: 44px; height: 44px; }
-.endless-foes .pill-slot img { width: 21px; height: 21px; }
-.endless-foes .pill-slot b { font-size: 12px; }
-.endless-foes .pill-slot i { font-size: 12px; }
 .endless-foes { margin-right: 6px; }
-.endless-foes .pill-slots { margin: -2px 0 6px; }
 .tower-plan.vertical .foe-portrait { width: 56px; height: 56px; }
 .tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 56px; }
 .tower-plan.vertical li { padding: 3px 8px; }
@@ -532,8 +485,6 @@
 .endless-run { grid-template-columns: minmax(0, 1fr) 236px; gap: 8px; }
 /* 力/敏/速继续往右上；对手行放大（去掉「本层对手」标题后空间更足） */
 .endless-foes { margin-right: 0; align-items: flex-end; }
-.endless-foes .pill-slots { margin: -6px -2px 2px; gap: 3px 6px; }
-.endless-foes .pill-slot { width: 42px; height: 42px; }
 .tower-plan.vertical .foe-portrait { width: 64px; height: 64px; }
 .tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 64px; }
 .tower-plan.vertical li { padding: 2px 8px; }
@@ -549,20 +500,11 @@
 .tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 56px; }
 .tower-plan.vertical li { padding: 0 8px; }
 .tower-plan.vertical { gap: 3px; }
-.endless-foes .pill-slot { width: 40px; height: 40px; }
-.endless-foes .pill-slot img { width: 19px; height: 19px; }
-.endless-foes .pill-slots { gap: 2px 5px; }
 
 /* 第六轮：纵向显示区域放大（塔页专用，不动其它页）+ 药丸槽移到左下角 */
 .classic-board.tower-board { top: 100px; padding: 6px 32px 4px; }
 .endless-actions { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 10px 6px 0 0; }
 .endless-action-btns { display: flex; align-items: flex-end; gap: 12px; }
-.endless-actions .pill-slots { display: grid; grid-template-columns: repeat(2, auto); justify-items: center; align-items: center;
-  gap: 4px 8px; margin: 0 0 0 4px; }
-.endless-actions .pill-slots .pill-slot:first-child { grid-column: 1 / span 2; }
-.endless-actions .pill-slot { width: 46px; height: 46px; }
-.endless-actions .pill-slot img { width: 22px; height: 22px; }
-.endless-foes .pill-slots { display: none; }
 
 /* 第七轮：塔身去掉底部那层「底座」阴影、整体上提；对手列往中间并放大；
    货币贴右上边缘并下移；按钮固定在右下角不随滚动。 */
@@ -578,23 +520,17 @@
 /* 货币+分数：贴页面右上边缘、下移一点 */
 .endless-topright { position: absolute; top: 14px; right: 12px; display: inline-flex; align-items: center; gap: 12px; }
 .endless-title-row .endless-topright { position: static; }
+
 /* 底部按钮固定右下角，不随滚动 */
 .endless-actions { position: absolute; right: 16px; bottom: 10px; margin: 0; display: flex; align-items: flex-end; justify-content: space-between; width: auto; gap: 18px; }
 .tower-page.has-footer .tower-main { padding-bottom: 66px; }
 .endless-actions .uc-button[data-action="fight"] { min-height: 58px; font-size: 30px; padding: 5px 26px; }
 .endless-actions .uc-button[data-action="abandon"] { min-height: 40px; font-size: 21px; }
-.endless-actions .pill-slots { position: absolute; left: 0; bottom: 0; }
 
 /* 收口：货币贴右上且不压对手（对手列整体下移）；左列底部药丸槽；对手立绘给足尺寸 */
 .endless-foes { margin-top: 62px; margin-right: 30px; }
 .tower-plan.vertical .foe-portrait { width: 88px; height: 66px; overflow: visible; }
 .tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { width: 100%; height: 100%; max-height: 66px; object-fit: contain; }
-.endless-left .pill-slots { display: grid; grid-template-columns: repeat(2, auto); justify-items: center; align-items: center;
-  gap: 4px 8px; margin: 6px 0 0 2px; }
-.endless-left .pill-slots .pill-slot:first-child { grid-column: 1 / span 2; }
-.endless-left .pill-slot { width: 46px; height: 46px; }
-.endless-left .pill-slot img { width: 22px; height: 22px; }
-.endless-actions .pill-slots { display: none; }
 
 /* 对手立绘：再放大一档，并加浅色底衬让立绘卡在奶油底上更清楚 */
 .tower-plan.vertical .foe-portrait { width: 108px; height: 82px; background: rgba(255, 248, 230, .9);
@@ -604,13 +540,6 @@
 
 /* 第八轮微调 */
 /* 1) 力敏速：缩小、水平并排，放在试炼币左边 */
-.endless-topright .pill-slots { display: flex; flex-direction: row; align-items: center; gap: 5px; margin: 0 4px 0 0; }
-.endless-topright .pill-slot { width: 34px; height: 34px; border-width: 2px; }
-.endless-topright .pill-slot img { width: 17px; height: 17px; }
-.endless-topright .pill-slot i { font-size: 11px; }
-.endless-topright .pill-slot b { font-size: 12px; }
-.endless-topright .pill-slots .pill-slot:first-child { grid-column: auto; }
-.endless-left .pill-slots, .endless-actions .pill-slots { display: none; }
 /* 2) 塔身图像往下一点（原来看起来偏上没居中） */
 .tower-visual { margin-top: 10px; }
 /* 3) 血量：左端空两格（不与「无尽模式」对齐），纵向间距略放大 */
@@ -638,9 +567,6 @@
 .endless-foes { margin-left: 16px; }
 
 /* 第十轮：药丸槽无文字（图标居中）、塔身楼层间距拉大、对手名字/类型上下左右居中且间距加大 */
-.endless-topright .pill-slot { display: flex; align-items: center; justify-content: center; padding: 0; }
-.endless-topright .pill-slot i { display: none; }
-.endless-topright .pill-slot .pill-plus { font-size: 20px; }
 .tower-floors { gap: 12px; }
 .tower-plan.vertical li { align-content: center; row-gap: 6px; justify-items: center; }
 .tower-plan.vertical li > b { justify-self: center; text-align: center; }

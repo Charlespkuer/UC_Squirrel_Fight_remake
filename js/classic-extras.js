@@ -393,21 +393,23 @@
     spinning = false;
     refreshLotteryDay();
     const s = State.state();
-    const p = C().page('bag', 'bag', '<h2 class="extra-lottery-heading cartoon">\u6bcf\u65e5\u5e78\u8fd0\u62bd\u5956</h2><div class="extra-lottery-prizes">' + prizes.map((prize, i) => '<div class="extra-prize" data-prize="' + i + '">' + C().icon('prop', prize.id) + '<span>' + prize.label + '</span></div>').join('') + '</div><div class="extra-lottery-footer"><div><b data-lottery-status>\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21</b><span>\u6bcf\u5929\u514d\u8d391\u6b21\uff0c\u4e4b\u540e\u4f18\u5148\u7528\u62bd\u5956\u5377\uff08\u73b0\u6709 <strong data-lottery-ticket>' + (s.props[50] || 0) + '</strong> \u5f20\uff09\uff0c\u518d\u626320\u91d1\u677e\u679c<br>\u5f53\u524d\u91d1\u677e\u679c\uff1a<strong data-lottery-gold>' + s.goldPoint + '</strong></span></div>' + button(spinning ? '\u62bd\u5956\u4e2d\u2026' : s.lotteryFree > 0 ? '\u514d\u8d39\u62bd\u5956' : '\u518d\u62bd\u4e00\u6b21', 'lottery-spin', 'gold') + '</div>', { cls: 'extra-board lottery-extra-board' });
-    back(p, () => UI.runAction('bag'), '\u8fd4\u56de\u9053\u5177');
-    const spin = on(p, 'lottery-spin', () => {
-      if (version !== lotteryVersion || !p.isConnected || spinning) return;
-      refreshLotteryDay();
-      if (s.lotteryFree < 1 && !(s.props[50] > 0) && s.goldPoint < 20) { alert('\u91d1\u677e\u679c\u4e0d\u8db320\u4e14\u6ca1\u6709\u62bd\u5956\u5377\uff0c\u660e\u5929\u8fd8\u6709\u4e00\u6b21\u514d\u8d39\u673a\u4f1a\u3002'); return; }
-      spinning = true; spin.disabled = true; spin.textContent = '\u62bd\u5956\u4e2d\u2026';
-      // 扣费顺序：每日免费次数 → 抽奖卷（无尽挑战塔产出）→ 20 金松果
+    const TICKET = 50;
+
+    /** 当前手上的抽奖资源：每日免费次数 + 仓库抽奖卷 + 金松果（每次 20）。 */
+    const affordable = (n) => Math.max(0, s.lotteryFree || 0) + Math.max(0, s.props[TICKET] || 0)
+      + Math.floor(Math.max(0, s.goldPoint) / 20) >= n;
+    /** 单抽按钮文案：直接把这一次要花什么写出来（原来的说明文字已经删掉）。 */
+    const spinLabel = () => (s.lotteryFree > 0 ? '免费抽奖'
+      : (s.props[TICKET] || 0) > 0 ? '用抽奖卷抽奖' : '20 金松果抽奖');
+    /** 一次抽奖的**立即结算**（扣费顺序：每日免费 → 抽奖卷 → 20 金松果）。
+     *  一次点击立即结算，离开动画页或刷新页面不会漏奖或多发奖励。 */
+    const settleOne = () => {
       if (s.lotteryFree > 0) s.lotteryFree--;
-      else if (s.props[50] > 0) { s.props[50]--; if (s.props[50] <= 0) delete s.props[50]; }
+      else if (s.props[TICKET] > 0) { s.props[TICKET]--; if (s.props[TICKET] <= 0) delete s.props[TICKET]; }
       else s.goldPoint -= 20;
-      // \u4e00\u6b21\u70b9\u51fb\u7acb\u5373\u3001\u539f\u5b50\u5730\u7ed3\u7b97\u3002\u79bb\u5f00\u52a8\u753b\u9875\u6216\u5237\u65b0\u9875\u9762\u4e0d\u4f1a\u6f0f\u5956\u6216\u591a\u53d1\u5956\u52b1\u3002
       const selected = Math.floor(Math.random() * prizes.length), prize = prizes[selected];
-      // \u300c\u968f\u673a\u666e\u901a\u836f\u4e38\u00d72\u300d\uff1a\u5f53\u573a\u4ece\u56db\u79cd\u666e\u901a\u836f\u4e38\u91cc\u62bd\uff0c\u76f8\u540c\u7684\u5408\u5e76\u6210 \u00d72
-      let prizeLabel = prize.label, prizeIcon = prize.id;
+      // 「随机普通药丸 ×2」：当场从四种普通药丸里抽，相同的合并成 ×2
+      let label = prize.label, icon = prize.id;
       if (prize.pills) {
         const merged = Object.create(null);
         for (let i = 0; i < prize.pills; i++) {
@@ -416,36 +418,100 @@
         }
         const ids = Object.keys(merged).map(Number);
         for (const pid of ids) addProp(pid, merged[pid]);
-        prizeLabel = ids.map((pid) => (propMap.getValue(pid) || { name: pid }).name + ' \u00d7' + merged[pid]).join('\u3001');
-        prizeIcon = ids[0];
+        label = ids.map((pid) => (propMap.getValue(pid) || { name: pid }).name + ' \u00d7' + merged[pid]).join('\u3001');
+        icon = ids[0];
       }
       if (prize.gold) State.addGold(prize.gold);
       if (prize.count) addProp(prize.id, prize.count);
       const ups = prize.exp ? State.gainExp(prize.exp) : [];
-      // 每日任务「抽取 {n} 次每日幸运抽奖」：一次点击算一次（奖励当场结算，离开动画页也照样计数）
+      // 每日任务「抽取 {n} 次每日幸运抽奖」：一抽算一次（奖励当场结算，离开动画页也照样计数）
       if (State.bumpDaily) State.bumpDaily('lottery', 1);
-      State.save();
+      return { label, icon, selected, ups };
+    };
+
+    const content = '<h2 class="extra-lottery-heading cartoon">\u6bcf\u65e5\u5e78\u8fd0\u62bd\u5956</h2>' +
+      /* 需求：右上角标注仓库里的抽奖卷数量（refreshTickets() 会就地刷新 [data-lottery-ticket]）。 */
+      '<div class="lottery-ticket-corner">\u62bd\u5956\u5377 <b data-lottery-ticket>' + (s.props[TICKET] || 0) + '</b> \u5f20</div>' +
+      '<div class="extra-lottery-prizes">' +
+      prizes.map((prize, i) => '<div class="extra-prize" data-prize="' + i + '">' + C().icon('prop', prize.id) + '<span>' + prize.label + '</span></div>').join('') +
+      '</div>' +
+      /* 说明文字（「每天免费 1 次，之后优先用抽奖卷…当前金松果」）已按需求删除：
+       * 费用直接写在按钮上，抽奖卷数量挪到右上角。 */
+      '<div class="extra-lottery-footer"><div><b data-lottery-status>\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21</b></div>' +
+      '<div class="lottery-buttons">' +
+      button(spinLabel(), 'lottery-spin', 'gold') + button('\u8fde\u62bd 10 \u6b21', 'lottery-spin10', 'gold') + '</div></div>';
+    const p = C().page('bag', 'bag', content, { cls: 'extra-board lottery-extra-board' });
+    back(p, () => UI.runAction('bag'), '\u8fd4\u56de\u9053\u5177');
+
+    /* 抽奖动画：依次点亮奖品格；结束后回调（单抽 / 连抽共用）。 */
+    const animateThen = (steps, done) => {
       let step = 0;
-      const steps = 20 + selected;
-      function animate() {
+      const walk = () => {
         if (version !== lotteryVersion) return;
         if (!p.isConnected) { spinning = false; return; }
-        p.querySelectorAll('[data-prize]').forEach(cell => cell.classList.toggle('lit', +cell.dataset.prize === step % 10));
-        if (step++ < steps) { setTimeout(animate, step > 17 ? 125 : 65); return; }
-        spinning = false; spin.disabled = false; spin.textContent = '\u518d\u62bd\u4e00\u6b21';
-        find(p, '[data-lottery-status]').textContent = '\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21';
-        find(p, '[data-lottery-gold]').textContent = s.goldPoint;
-        /* \u9700\u6c42 8\uff1a\u62bd\u5956\u5377\u6570\u91cf\u4e5f\u8981\u5373\u65f6\u66f4\u65b0\u3002
-         * \u539f\u6765\u8fd9\u91cc\u53ea\u5237\u65b0\u4e86\u300c\u4eca\u65e5\u514d\u8d39\u6b21\u6570\u300d\u4e0e\u300c\u91d1\u677e\u679c\u300d\uff0c
-         * \u9875\u9762\u4e0a\u7684\u300c\u73b0\u6709 N \u5f20\u300d\u62bd\u5956\u5377\u8fd8\u662f\u62bd\u4e4b\u524d\u7684\u6570\u5b57\u3002 */
-        refreshTickets();
-        // \u9876\u90e8\u6807\u7b7e\u6761\u53f3\u4e0a\u89d2\u7684\u91d1\u677e\u679c\u4e5f\u8981\u7acb\u523b\u8ddf\u4e0a\uff08\u9875\u9762\u4e0d\u91cd\u5efa\uff09
-        if (UI.refreshHeader) UI.refreshHeader();
-        C().modal('\u83b7\u5f97\u5956\u52b1', '<div class="extra-lottery-win">' + C().icon('prop', prizeIcon) + '<strong>' + prizeLabel + '</strong></div>' + C().upsHtml(ups), [{ label: '\u786e\u5b9a' }], { small: true });
-      }
-      animate();
+        p.querySelectorAll('[data-prize]').forEach((cell) => cell.classList.toggle('lit', +cell.dataset.prize === step % prizes.length));
+        if (step++ < steps) { setTimeout(walk, step > steps - 5 ? 125 : 55); return; }
+        done();
+      };
+      walk();
+    };
+    const setBusy = (busy) => {
+      p.querySelectorAll('.lottery-buttons .uc-button').forEach((b) => { b.disabled = busy; });
+      const one = find(p, '[data-action="lottery-spin"]');
+      if (one) one.textContent = busy ? '\u62bd\u5956\u4e2d\u2026' : spinLabel();
+      const ten = find(p, '[data-action="lottery-spin10"]');
+      if (ten) ten.textContent = busy ? '\u62bd\u5956\u4e2d\u2026' : '\u8fde\u62bd 10 \u6b21';
+    };
+    /** 抽完之后统一收尾：刷新免费次数 / 抽奖卷 / 顶栏金松果。 */
+    const afterDraw = () => {
+      spinning = false; setBusy(false);
+      const st = find(p, '[data-lottery-status]');
+      if (st) st.textContent = '\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21';
+      refreshTickets();
+      if (UI.refreshHeader) UI.refreshHeader();
+    };
+
+    const spin = on(p, 'lottery-spin', () => {
+      if (version !== lotteryVersion || !p.isConnected || spinning) return;
+      refreshLotteryDay();
+      if (!affordable(1)) { alert('\u91d1\u677e\u679c\u4e0d\u8db320\u4e14\u6ca1\u6709\u62bd\u5956\u5377\uff0c\u660e\u5929\u8fd8\u6709\u4e00\u6b21\u514d\u8d39\u673a\u4f1a\u3002'); return; }
+      spinning = true; setBusy(true);
+      const got = settleOne();
+      State.save();
+      animateThen(20 + got.selected, () => {
+        afterDraw();
+        C().modal('\u83b7\u5f97\u5956\u52b1', '<div class="extra-lottery-win">' + C().icon('prop', got.icon) + '<strong>' + got.label + '</strong></div>' + C().upsHtml(got.ups), [{ label: '\u786e\u5b9a' }], { small: true });
+      });
     });
     spin.disabled = spinning;
+
+    /* 需求：连抽 10 次（一次结算 10 抽，最后给一张汇总清单）。
+     * 资源不够 10 次时直接说明差多少，不做「抽到一半没钱」的中间态。 */
+    const spin10 = on(p, 'lottery-spin10', () => {
+      if (version !== lotteryVersion || !p.isConnected || spinning) return;
+      refreshLotteryDay();
+      if (!affordable(10)) {
+        alert('\u8fde\u62bd 10 \u6b21\u9700\u8981 10 \u6b21\u7684\u8d44\u6e90\uff1a\u4eca\u65e5\u514d\u8d39 ' + Math.max(0, s.lotteryFree || 0) +
+          ' \u6b21 + \u62bd\u5956\u5377 ' + Math.max(0, s.props[TICKET] || 0) + ' \u5f20 + \u91d1\u677e\u679c ' +
+          Math.max(0, s.goldPoint) + '\uff08\u6bcf\u6b21 20\uff09\u3002');
+        return;
+      }
+      spinning = true; setBusy(true);
+      const got = [];
+      for (let i = 0; i < 10; i++) got.push(settleOne());
+      State.save();
+      animateThen(24, () => {
+        afterDraw();
+        /* 需求：十连结果**一屏铺开**，用与抽奖页奖励格同款的 5×2 排布，不做上下滚动。 */
+        const cells = got.map((g) => '<div class="extra-prize won">' + C().icon('prop', g.icon) +
+          '<span>' + g.label + '</span></div>').join('');
+        const ups = [];
+        for (const g of got) if (g.ups && g.ups.length) ups.push.apply(ups, g.ups);
+        C().modal('\u8fde\u62bd 10 \u6b21', '<div class="extra-lottery-win grid"><div class="lottery-result-grid">' +
+          cells + '</div></div>' + C().upsHtml(ups), [{ label: '\u786e\u5b9a' }], { small: true });
+      });
+    });
+    spin10.disabled = spinning;
   }
   // ==================== \u5e08\u5f92\u7cfb\u7edf ====================
   // \u53c2\u8003\u8bbe\u5b9a\uff1a\u62dc\u5e08\u540e\u81ea\u52a8\u5b66\u4f1a\u300c\u5e08\u7236\u9a7e\u5230\u300d\uff1b\u6536\u5f92\u9700\u5148\u6253\u8d25\u5bf9\u65b9\uff08\u5bf9\u65b9\u5df2\u6709\u5e08\u7236\u5219\u6253\u4ed6\u5e08\u7236\uff09\uff1b

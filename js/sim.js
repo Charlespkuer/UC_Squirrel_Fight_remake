@@ -54,6 +54,21 @@
     jueDuiChance: 22, jueDuiAgain: 13,
     jueDuiDecay: 0.7, jueDuiMin: 2,
     shellFirst: 35, shellAgain: 20,
+    /* 三侠·仙鹤（xh）的伤害基准里**速度只带这一份**。
+     * 敌人（含三侠）的速度天然约是力量的 2.3 倍，而仙鹤的大招与技能原本都写成
+     * `(力量 + 速度) × 系数` —— 等于白送一整条速度，80 层之后单击/技能都远超另两位三侠
+     * （实测每场总输出 ≈ 螳螂 2.4~3.4 倍、熊猫 2.4~2.6 倍）。现在速度按 35% 计入：
+     * `(力量 + 速度 × xhSpeedShare)`，改动后仙鹤仍是「单击最狠的开场爆发」，
+     * 但总输出回到与熊猫同一档（详见 tools 里的三侠平衡回归）。 */
+    xhSpeedShare: 0.35,
+    /* 同一招的冷却（按「出手次数」计，不是按回合）：
+     * 一个技能用掉之后，**接下来这么多次出手**都不再选它。
+     * 只作用于**固定循环型**的敌人（att.pattern 非空），玩家与三侠的出手不受影响。
+     * 起因：固定循环型的敌人（无械苦修·空明 / 斥候松鼠…）技能表里常常只有 1 个主动技，
+     * 循环一塌缩就会把同一招连放（实测空明 74% 的出手都是「幸运一击」）；
+     * 有了冷却是「最多连续放一次」，配合下面 castable 的轮转才是「技能频繁但花样正常」。
+     * 3~4 个主动技的正常轮转（元素术鼠 12/17）不受影响：同一招本来就要隔 3 次出手才回来。 */
+    skillCooldown: 2,
     /* 题面·蚀骨：玩家每次出手叠 1 层「攻击 −3%」，这个上限同时被代码与 NPC 文案使用 ——
      * 抽成常量，免得一边改、另一边忘（此前 10 层写在两处）。 */
     erodeMax: 15,
@@ -128,6 +143,8 @@
       patternSkillIdx: 0,
       /* 「同一回合内只能用一次」的锚点：turnId 变化 = 换了一个回合。 */
       turnId: 0, lastTurnId: -1, turnSkills: {},
+      /* 技能冷却（id → 还要等几次出手；见 RULES.skillCooldown）。 */
+      skillCd: {},
       effects: f.effects || {}, masterLevel: Math.max(0, Number(f.masterLevel) || 0),
       // 攻略.md 的裸属性解释与 PPT 的含装备解释冲突。本版采用前者，
       // callers provide growth stats excluding equipment, skills and pills.
@@ -216,6 +233,31 @@
   function lowHpActive(c) {
     const th = c.mods && Number(c.mods.lowHpAt);
     return !!(th > 0 && c.maxHp > 0 && c.hp <= c.maxHp * th);
+  }
+  /**
+   * **低血减伤的即时结算**：把一次伤害按「越过 lowHpAt 阈值线」切成两段。
+   *
+   *   · 把血量打到阈值线为止的那一段（阈值以上）→ 全额；
+   *   · 越过阈值线之后的那一段 → 乘 (1 + mul)（mul 为负，例如 −0.5 = 减伤 50%）。
+   *
+   * 已经低于阈值时（整段都在阈下）退化成「全额减伤」，与旧行为一致；
+   * 这一击打不到阈值线时整段全额（原来也是这样）。多次伤害/多段武器逐段结算，
+   * 因为调用方每段都会传入「当前血量」，第二段自然就整段吃减伤了。
+   */
+  function lowHpTakenDamage(def, dmg, mul) {
+    const d = Math.max(0, Number(dmg) || 0);
+    const cut = Math.max(0, 1 + (Number(mul) || 0));            // 减伤后的倍率（0~1）
+    const th = Number(def.mods && def.mods.lowHpAt) || 0;
+    const maxHp = Math.max(0, Number(def.maxHp) || 0);
+    const hp = Math.max(0, Number(def.hp) || 0);
+    if (!(th > 0) || !(maxHp > 0)) return Math.round(d * cut);  // 没阈值：整段减伤（旧口径）
+    /* 注意：这里**不做 cut<=0 的提前返回** —— 减伤 100% 时也应该先把阈值以上那一段打完
+     *（否则「一击直接归零」，与分段口径矛盾）。cut 最小 0，越线那一段乘 0 即为 0。 */
+    const line = maxHp * th;                                    // 阈值线（绝对血量）
+    const above = Math.max(0, hp - line);                       // 打到线之前的那一段
+    if (d <= above) return d;                                   // 这一击打不到线 → 全额
+    const below = d - above;                                    // 越过线的那一段
+    return Math.round(above + below * cut);
   }
   function effAgility(c) {
     let a = statOf(c, 'agility') * (1 - c.debuffs.agility / 100) + c.buffFlat.agility;
@@ -455,9 +497,12 @@
       out.dmg = Math.round(out.dmg * (100 - pct) / 100);
     }
     if (def.mods && def.mods.takenMul) out.dmg = Math.round(out.dmg * (1 + Number(def.mods.takenMul)));   // 塔 buff「铁布衫」
-    /* 塔 buff「铁血护盾 / 濒死觉悟」：**低血时**才减伤（与狂怒共用 lowHpAt 阈值）。 */
-    if (def.mods && def.mods.lowHpTakenMul && lowHpActive(def)) {
-      out.dmg = Math.round(out.dmg * (1 + Number(def.mods.lowHpTakenMul)));
+    /* 塔 buff「铁血护盾 / 濒死觉悟」：低血减伤 —— **即时结算**（本轮需求）。
+     * 原来只在「这一击打出来时已经低于阈值」才整段减伤，于是 60% 血挨一刀到 40%，
+     * 减伤一点没吃到；现在按「越过阈值」把这一击切成两段：阈值以上全吃，越过的部分才减伤。
+     * 例：上限 100、当前 60、阈值 50%、减伤 50%、这一击 20 → 10 + 10×0.5 = 15 → 最终 45。 */
+    if (def.mods && Number(def.mods.lowHpTakenMul)) {
+      out.dmg = lowHpTakenDamage(def, out.dmg, Number(def.mods.lowHpTakenMul));
     }
     if (def.mech.includes('trialCore') && def.mechState.core) out.dmg = Math.round(out.dmg * 0.3);        // 题面·熔核：成型后受伤 −70%
     out.dmg = Math.max(1, out.dmg);
@@ -644,7 +689,9 @@
       if (att.npcType === 'xh') {
         // 仙鹤展翅：开场第一次行动的重击，契合“前期凶猛”
         r.ultName = '仙鹤展翅';
-        const raw = Math.round((effPower(att) + effSpeed(att)) * 1.35);
+        /* 只有力量全额 + 速度的 xhSpeedShare（见 RULES 注释：敌人速度约是力量的 2.3 倍，
+         * 直接 (力量+速度) 等于白送一整条速度）。 */
+        const raw = Math.round((effPower(att) + effSpeed(att) * RULES.xhSpeedShare) * 1.35);
         if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
         applyDamage(att, def, raw, r, { action: 'skill' });
         pushRound(r); return;
@@ -753,7 +800,7 @@
         const lv = att.skills[sid];
         let raw;
         if (att.npcType === 'tl') { raw = Math.round(effPower(att) * (0.6 + Math.random() * 0.3)); r.multiHit = 2; } // 螳螂双击
-        else if (att.npcType === 'xh') { raw = Math.round((effPower(att) + effSpeed(att)) * (0.9 + lv * 0.1)); }
+        else if (att.npcType === 'xh') { raw = Math.round((effPower(att) + effSpeed(att) * RULES.xhSpeedShare) * (0.9 + lv * 0.1)); }
         else { raw = Math.round(effPower(att) * (1.3 + lv * 0.1)); } // 熊猫重击
         if (att.npcType === 'xh' && att.npcActs <= 3) raw = Math.round(raw * 1.3); // 仙鹤前期凶猛
         if (rhythm) { raw = Math.round(raw * 2.5); r.crit = true; }
@@ -845,6 +892,7 @@
        * 排除规则：小宇宙爆发每场一次、来点松果每场一次且满血不放、本回合已用过的不能再用。 */
       const actives = (att.skillOrder || ACTIVE_SKILLS).filter((id) => att.skills[id] &&
         !(id === 14 && att.usedCosmos) && !(id === 17 && att.usedSnack) && !(id === 17 && att.hp >= att.maxHp) &&
+        !(att.pattern && att.skillCd && att.skillCd[id] > 0) &&        // 冷却中（只对固定循环的敌人生效）
         !att.turnSkills[id]);
       const canSkill = actives.length > 0 && att.silence <= 0;
       /* 秘技通神（C33）抽中小宇宙爆发（14）：**我方第一招**必定是它。
@@ -951,6 +999,10 @@
         att.usedSkills[sid] = true;
         att.turnSkills[sid] = true;
         att.lastSkillId = sid;
+        /* 记冷却：+1 是因为「本次出手开始时已经自减过一格」，这样刚好挡掉接下来 N 次出手。
+         * 只对**固定循环型**的敌人记 —— 玩家侧的技能选择有自己的 repeatBySkill 权重体系，
+         * 不该被这条 NPC 防刷规则顺手削弱。 */
+        if (att.pattern) att.skillCd[sid] = Number(RULES.skillCooldown) + 1;
         const lv = att.skills[sid];
         r.action = 'skill'; r.id = sid; r.level = lv;
         // 塔 buff「疾风先手」：本局首次技能不消耗回合
@@ -1067,6 +1119,9 @@
       actor.turnId = Number(actor.turnId || 0) + 1;
       actor.acts = Number(actor.acts || 0) + 1;      // 出手次数（塔 buff「开局狂热」按它分档）
       actor.turnSkills = {};
+      /* 技能冷却按「出手次数」推进：这次出手开始时先自减一格，
+       * 于是「用招那一拍之后、接下来 RULES.skillCooldown 次出手」都会被挡（见 actives 过滤）。 */
+      for (const cdId of Object.keys(actor.skillCd || {})) if (actor.skillCd[cdId] > 0) actor.skillCd[cdId]--;
       const def = actor === A ? B : A;
       // 回合开始回复（药师「百草回春」/ 塔 buff「活血丹」「回春术」）
       const regenPct = (actor.mech.includes('regen') ? 0.03 : 0) + (actor.mods && Number(actor.mods.regenPct) || 0);
@@ -1150,6 +1205,8 @@
     /* 防御被动的单次触发概率（%）与被动加成读取 —— 供测试/调参直接核对，
      * 不用靠统计近似（绝对防御 16 / 龟甲术 7）。 */
     jueDuiChanceOf, shellChanceOf, passiveSkillBoost,
+    /* 低血减伤的即时结算（纯函数）—— 供测试直接核对分段口径 */
+    lowHpTakenDamage,
     defenseCaps: { again: BOOSTED_AGAIN_CAP, first: BOOSTED_FIRST_CAP },
   };
 })();

@@ -418,9 +418,27 @@
       const run = Tower.endlessInfo().run;
       const items = [];
       if (run) items.push({ name: '试炼币', value: run.coins });
-      items.push({ name: '抽奖卷', value: S.props[CURRENCY_PROP.ticket] || 0 });
+      /* 需求（本轮）：这一枚显示**实际退出到手的总抽奖卷**，而不是仓库持有总数 ——
+       * 「放弃本局」= 本层应得（与结算离场/失败结算同一口径）+ 剩余试炼币 1:1 折现，
+       * 数值直接取 Tower 算好的 run.ticketsOnExit（与 abandon() 实现同源）。
+       * 拆解写在悬停里；没有对局时（入口页）才退回显示持有总数。 */
+      const exitT = run ? Math.max(0, Math.floor(Number(run.ticketsOnExit) || 0)) : 0;
+      const layerT = run ? Math.max(0, Math.floor(Number(run.ticketsIfSettle) || 0)) : 0;
+      const coins = run ? Math.max(0, Math.floor(Number(run.coins) || 0)) : 0;
+      const tokens = run ? Math.max(0, Math.floor(Number(run.retryToken) || 0)) : 0;
+      items.push({
+        name: '抽奖卷',
+        value: run ? exitT : (S.props[CURRENCY_PROP.ticket] || 0),
+        tip: run
+          ? ('现在退出实际到手 ' + exitT + ' 张：本层应得 ' + layerT + ' 张 + 重新挑战币 ' + tokens +
+             ' 枚 1:1 折现 ' + tokens + ' 张。\n' +
+             '· 剩余试炼币（当前 ' + coins + ' 枚）**不折现**，本局结束即作废\n' +
+             '· 结算点「结算离场」/「放弃本局」/ 失败结算 三条路收益完全一致，都是这个数\n' +
+             '· 仓库里已有的抽奖卷不在这个数字里（去「每日幸运抽奖」页看总数）')
+          : '仓库持有的抽奖卷总数'
+      });
       return '<div class="tower-currency text-only">' + items.map((it) =>
-        '<span class="currency-item"><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';
+        '<span class="currency-item"' + (it.tip ? ' data-tip="' + esc(it.tip) + '" title="' + esc(it.tip) + '"' : '') + '><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';
     }
     const items = [{ icon: 'images/classic/icons/prop-23.png', name: '挑战书', value: S.props[CURRENCY_PROP.book] || 0 },
       { icon: 'images/classic/icons/prop-1.png', name: '金松果', value: S.goldPoint }];
@@ -428,22 +446,16 @@
       '<span class="currency-item" data-live-gold="' + (it.name === '金松果' ? '1' : '') + '">' +
       '<img alt="" src="' + it.icon + '"><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';
   }
-  /** 第 1 项：无尽塔右上角的三个属性药丸槽位（点一下从背包里嵌一颗，塔内持续 20 场）。 */
-  function pillSlotsHtml(pillSlots) {
-    const S = State.state();
-    const slots = pillSlots || {};
-    return '<div class="pill-slots">' + (TowerData.PILL_SLOTS || []).map((def) => {
-      const cur = slots[def.key];
-      const eff = cur && TowerData.pillEffect(cur.id);
-      const icon = 'images/classic/icons/prop-' + (cur ? cur.id : def.ids[0]) + '.png';
-      const tip = cur
-        ? (propName(cur.id) + '：' + def.name + ' ' + (eff && eff.pct === 0.4 ? '+40%' : '+20%') + '，还剩 ' + cur.battles + ' 场')
-        : '点一下嵌入' + def.name + '药丸（背包里有：' + def.ids.map((id) => (S.props[id] || 0) + '×' + propName(id)).join('、') + '）';
-      return '<button type="button" class="pill-slot' + (cur ? ' filled' : '') + '" data-pill="' + def.key + '" title="' + esc(tip) + '">' +
-        (cur ? '<img alt="" src="' + icon + '"><b>' + cur.battles + '</b>' : '<span class="pill-plus">+</span>') +
-        '</button>';
-    }).join('') + '</div>';
-  }
+  /* ============================================================
+   * 无尽主界面右上角的「离场结算」一行（本轮需求）
+   *
+   * 需求：右上角原来只显示**持有**的抽奖卷（很可能是 0，看着就像没显示），
+   * 玩家想知道的是「按当前层退出能拿几张」。所以补一行：
+   *   · 离场可得 +N 抽奖卷 —— 与「结算点·结算离场 / 失败结算」同一口径
+   *     （endlessTickets(当前层)，即 Tower.endlessInfo().run.ticketsIfSettle）
+   *   · 重新挑战币 ×M —— 失败后可回滚本场再打一次（不折现，所以不并进上面那个数字）
+   * 两个数字都从 endlessInfo().run 里取，纯函数（便于测试直接跑这一份实现）。
+   * ============================================================ */
   function propName(id) {
     try { const p = propMap.getValue(id); return p ? p.name : ('道具' + id); } catch (e) { return '道具' + id; }
   }
@@ -643,7 +655,8 @@
        * 血量紧贴标题下方（分数已经挪进顶栏，所以这里整体上提），字号与血条都放大一档；
        * 「继续战斗」在右下角，「放弃本局」更小、压在它左边偏下。 */
       main = '<div class="endless-run">' +
-        '<div class="endless-topright">' + pillSlotsHtml(run.pillSlots) + currencyHtml('endless') +
+        /* 右上角：药丸槽 + 试炼币/抽奖卷 + 分数框（横向一行，位置不变）。 */
+        '<div class="endless-topright">' + currencyHtml('endless') +
         '<span class="endless-score-box"><i>分数</i><b>' + run.score + '</b></span></div>' +
         '<div class="endless-left">' +
         '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
@@ -654,10 +667,18 @@
          * 三侠削弱（贯穿本层）与挫锐/卸甲（本局全局减益）是「本局累积的减益」，
          * 不是环境，所以仍旧跟在同一行后面，方便一眼看全。 */
         envPanelHtml(run, { label: '当前环境' }) +
-          (run.enemyMaxHpDown > 0
-            ? '<div class="tower-rule mech-bar"><b>本局全局减益</b><span class="mech-chip debuff-chip enemy-down" data-tip="' +
-              esc('挫锐 / 卸甲：本局所有敌人的生命上限都按这个比例扣') + '">敌人生命上限 −' +
-              Math.round(run.enemyMaxHpDown * 100) + '%<i>本局全程</i></span></div>'
+          (run.enemyMaxHpDown > 0 || run.enemyPowerDown > 0
+            ? '<div class="tower-rule mech-bar"><b>本局全局减益</b>' +
+              (run.enemyMaxHpDown > 0
+                ? '<span class="mech-chip debuff-chip enemy-down" data-tip="' +
+                  esc('挫锐 / 卸甲：本局所有敌人的生命上限都按这个比例扣') + '">敌人生命上限 −' +
+                  Math.round(run.enemyMaxHpDown * 100) + '%<i>本局全程</i></span>' : '') +
+              /* 本轮新增 E11「挫锋」：本局敌人攻击力 −15%（即时类，与 M01 威慑的聚合值相加） */
+              (run.enemyPowerDown > 0
+                ? '<span class="mech-chip debuff-chip enemy-down" data-tip="' +
+                  esc('挫锋：本局所有敌人的攻击力都按这个比例扣（与「威慑」叠加）') + '">敌人攻击力 −' +
+                  Math.round(run.enemyPowerDown * 100) + '%<i>本局全程</i></span>' : '') +
+              '</div>'
             : '') +
           (run.debuffs && run.debuffs.length
             ? '<div class="tower-rule mech-bar"><b>本层削弱（贯穿本层）</b>' +
@@ -729,9 +750,6 @@
     flushRunToasts();   // 「碎掉的烙印失效」这类过程提示
     /* 20 起每 10 层：出商店后必须放弃一个永久增益（不可取消）。 */
     if (info.run && info.run.phase === 'sacrifice') setTimeout(() => openPermSacrifice(), 60);
-    p.querySelectorAll('[data-pill]').forEach((el) => {
-      el.onclick = () => choosePill(el.dataset.pill);
-    });
     on(p, 'rest-shop', () => {
       const res = Tower.openRestShop();
       if (!res.ok) { notice(res.msg || '现在不能开商店。'); return; }
@@ -739,15 +757,25 @@
     });
     on(p, 'abandon', () => {
       const leftCoins = Math.max(0, Math.floor(Number((info.run || {}).coins) || 0));
-      /* 把「本局剩余试炼币 1:1 换抽奖卷」明确写进确认框 —— 否则玩家不知道币不会白丢。 */
+      const leftTokens = Math.max(0, Math.floor(Number((info.run || {}).retryToken) || 0));
+      /* 确认框要把结算口径说全（本轮修正）：
+       *   · 本层应得的抽奖卷照发；
+       *   · 手上的重新挑战币 1:1 折成抽奖卷（这是「多的重挑币」的唯一出路）；
+       *   · 剩余试炼币**不折现**，会随本局作废 —— 必须明说，否则玩家以为币白攒了。 */
       modal('放弃本局',
         '<p>放弃后按当前层应得的抽奖卷结算（分数照常入账）' +
-        (leftCoins > 0 ? '，并且本局剩余的 <b>' + leftCoins + '</b> 试炼币会 <b>1:1</b> 兑换为抽奖卷' : '') +
+        (leftTokens > 0 ? '，手上的 <b>' + leftTokens + '</b> 枚重新挑战币会 <b>1:1</b> 折成抽奖卷' : '') +
+        (leftCoins > 0 ? '；本局剩余的 <b>' + leftCoins + '</b> 试炼币<b>不折现</b>，会随本局作废' : '') +
         '，确定吗？</p>', [
         { label: '放弃', cls: 'muted', run: () => {
             const res = Tower.abandon('endless');
             syncTickets(); openEndless();
-            if (res && res.coinsLeft > 0) toast(res.convertMsg);
+            /* 结算提示：本层应得的那一份 + 试炼币折现的那一份，分别说清楚。 */
+            const msgs = [];
+            if (res && res.layerTickets > 0) msgs.push('按第 ' + res.layer + ' 层结算：抽奖卷 +' + res.layerTickets);
+            if (res && res.retryLeft > 0) msgs.push(res.retryMsg);
+            if (msgs.length) msgs.push('本局共 +' + res.tickets + ' 张');
+            if (msgs.length) toast(msgs.join('；'));
           } },
         { label: '继续冲塔', cls: 'gold' },
       ], { small: true });
@@ -935,33 +963,6 @@
         } },
        { label: '返回', run: () => C().home() }], { small: true });
   }
-  /** 第 1 项：点药丸槽位 → 列出背包里该属性的药丸（普通/超级），选一颗嵌进去。 */
-  function choosePill(key) {
-    const run = Tower.endlessInfo().run;
-    if (!run) return;
-    const def = (TowerData.PILL_SLOTS || []).find((x) => x.key === key);
-    if (!def) return;
-    const S = State.state();
-    const rows = def.ids.map((id) => {
-      const have = S.props[id] || 0;
-      const eff = TowerData.pillEffect(id);
-      return '<div class="pill-choice' + (have ? '' : ' empty') + '"><img alt="" src="images/classic/icons/prop-' + id + '.png">' +
-        '<div><b>' + esc(propName(id)) + '</b><span>' + def.name + ' +' + (eff.pct === 0.4 ? '40%' : '20%') +
-        '（最少 ' + eff.min + ' 点）· 塔内 ' + TowerData.PILL_BATTLES + ' 场</span><i>背包 ' + have + ' 颗</i></div></div>';
-    }).join('');
-    const buttons = def.ids.filter((id) => (S.props[id] || 0) > 0).map((id) => ({
-      label: '嵌入 ' + propName(id), cls: 'small gold',
-      run: () => {
-        const res = Tower.usePillSlot(key, id);
-        if (!res.ok) { notice(res.msg); return; }
-        openEndless();
-      },
-    }));
-    buttons.push({ label: '返回', cls: 'muted', run: () => openEndless() });
-    modal('嵌入' + def.name + '药丸', '<div class="pill-picker">' + rows + '</div>' +
-      '<p class="small-label">药丸在无尽塔内持续 ' + TowerData.PILL_BATTLES + ' 场战斗（胜败都算），会扣背包里的道具。</p>',
-      buttons, { small: true });
-  }
   /** 选取型 buff（神兵淬炼 / 秘技通神）：立即从已有武器或技能里三选一，选完立刻生效。 */
   function openPickBuff(pending) {
     const cands = Tower.pickCandidates(pending.kind);
@@ -1073,7 +1074,8 @@
       '<div class="result-box"><div class="result-title lose">再试一次？</div>' +
       '<p>倒在第 ' + rw.layer + ' 层第 ' + (rw.battleNo || '?') + '/' + (rw.battleCount || 4) + ' 场。</p>' +
       '<p class="gold-text">消耗 1 枚重新挑战币，回滚到本场开始前（血量 / 试炼币 / 分数 / 增益次数全部还原），再打一次。</p>' +
-      '<div class="result-lines">现有重新挑战币 <b>' + (rw.retryLeft || 0) + '</b> 枚 · 本局分数 ' + rw.score + '</div></div>',
+      '<div class="result-lines">现有重新挑战币 <b>' + (rw.retryLeft || 0) + '</b> 枚 · 本局分数 ' + rw.score +
+      ' · 选「放弃本局」也一样按当前层应得 + 试炼币折现结算</div></div>',
       [{ label: '用 1 枚重新挑战', cls: 'gold', run: () => {
           const r = Tower.retryBattle();
           if (!r.ok) { notice(r.msg || '回滚失败。'); endlessDefeat(rw); return; }
@@ -1094,11 +1096,25 @@
     return '<div class="achieve-summary"><b>本局隐藏成就 ' + list.length + ' 个 · 合计 +' + total + ' 分</b>' +
       list.map((x) => '<span>' + esc(x.name) + '<i>+' + (Number(x.points) || 0) + '</i></span>').join('') + '</div>';
   }
+  /** 退出结算的明细文案（本层应得 + 试炼币 1:1 折现）——三条退出路径统一口径。 */
+  function settleBreakdownHtml(r) {
+    const layerT = Math.max(0, Math.floor(Number(r && r.layerTickets) || 0));
+    const coins = Math.max(0, Math.floor(Number(r && r.forfeitCoins) || 0));
+    const tokens = Math.max(0, Math.floor(Number(r && r.retryLeft) || 0));
+    const total = Math.max(0, Math.floor(Number(r && r.tickets) || 0));
+    if (!coins && !tokens) return '';
+    return '<p class="small-label">明细：本层应得 ' + layerT + ' 张' +
+      (tokens ? ' + 剩余 ' + tokens + ' 枚重新挑战币 1:1 折现 ' + tokens + ' 张' : '') +
+      ' = <b>' + total + '</b> 张' +
+      (coins ? '（剩余 ' + coins + ' 试炼币不折现，随本局作废）' : '') + '</p>';
+  }
   function endlessDefeat(rw) {
-    // 第 3 项：失败不再归零 —— 直接按当前层应得的抽奖卷结算
+    /* 第 3 项：失败不再归零 —— 直接按当前层应得的抽奖卷结算；
+     * 本轮：剩余试炼币同样 1:1 折现（与结算离场 / 放弃本局收益完全一致）。 */
     modal('挑战失败', '<div class="result-box"><div class="result-title lose">倒在了第 ' + rw.layer + ' 层</div>' +
       '<div class="result-lines">本局分数 ' + rw.score + '（历史最高 ' + rw.best + '）</div>' +
       '<p class="gold-text">按当前进度结算：抽奖卷 +' + (rw.tickets || 0) + '（第 ' + rw.layer + ' 层应得）</p>' +
+      settleBreakdownHtml(rw) +
       (rw.shield ? '<p class="gold-text">保底奖励：本局到达过 15 层，赠送 1 次免费抽奖（每日限 1 次）！</p>' : '') +
       achieveSummaryHtml() + '</div>',
       [{ label: '再来一局', cls: 'gold', run: openEndless }, { label: '返回', run: () => C().home() }], { small: true });
@@ -1130,8 +1146,11 @@
       '<span>失败时消耗 1 枚，回滚到该场战斗开始前再打一次</span>' +
       (shop.retrySold ? '<em>已购买</em>' : C().btn(shop.retryPrice + ' 币', 'retry', 'small gold')) + '</div>' +
       '<div class="shop-slot reroll"><b>刷新货架</b>' +
+      /* 本轮需求：刷新价封顶 50 —— 到顶之后不再写「下次更贵」，改成「已是最高价」。 */
       '<i>第 ' + (shop.rerollCount + 1) + ' 次刷新 · ' +
-      (shop.rerollFree ? '本次免费' : '本次 ' + shop.rerollNextPrice + ' 币，下次更贵') + '</i>' +
+      (shop.rerollFree ? '本次免费' :
+        (shop.rerollCapped ? '本次 ' + shop.rerollNextPrice + ' 币（最高价，不再涨）'
+          : '本次 ' + shop.rerollNextPrice + ' 币，下次更贵')) + '</i>' +
       /* 需求 1：价格越高，稀有度期望越高（无保底）—— 把这次和下次的期望明说，玩家才敢花。 */
       '<span>' + (function () {
         const now = TowerData.rerollExpectation(shop.rerollFree ? 0 : shop.rerollNextPrice);
@@ -1139,7 +1158,10 @@
         const nxt = TowerData.rerollExpectation(nextPaid);
         const f = (v) => (Math.round(v * 100) / 100).toFixed(2);
         return '越贵越好：本次期望史诗 ' + f(now.epics) + ' 件、传奇 ' + f(now.weights[3] * (TowerData.SHOP.slots || 5)) +
-          ' 件；下次（' + nextPaid + ' 币）期望史诗 ' + f(nxt.epics) + ' 件。当前拥有与已售出的不会再出现';
+          ' 件；' + (shop.rerollCapped && !shop.rerollFree
+            ? '已到最高价，期望不再提高'
+            : '下次（' + nextPaid + ' 币）期望史诗 ' + f(nxt.epics) + ' 件') +
+          '。当前拥有与已售出的不会再出现';
       })() + '</span>' +
       C().btn(shop.rerollFree ? '免费刷新' : shop.rerollNextPrice + ' 币刷新', 'reroll', 'small') + '</div></div>' +
       '<h4>出售增益（回收 40%，限次与永久都可卖）</h4><div class="shop-sell">' + sellRows + '</div>' +
@@ -1157,10 +1179,10 @@
       const r = Tower.buyShopSlot(i);
       if (r && r.needsReplace) { offerShopReplace(i, r.buff); return; }
       if (!r.ok) { notice(r.msg || '买不了。'); return; }
-      const back = () => openShop(revisit);
-      /* 计分扩展：商店买到的增益也算分。 */
-      if (r.score) notice('已购入「' + r.buff.name + '」· 得分 +' + r.score + '（获取增益）', [{ label: '知道了', run: back }]);
-      else back();
+      /* 需求：买完直接回商店页 —— 不再弹「已购入…得分 +N（获取增益）」那个窗。
+       * 分数照常暗中累计（buyShopSlot 里已经记进 run.score），
+       * 买没买到看货架的「已售出」与试炼币余额就够了。 */
+      openShop(revisit);
     }));
     on(p, 'retry', () => {
       const r = Tower.buyRetryToken();
@@ -1171,7 +1193,8 @@
     on(p, 'reroll', () => {
       const r = Tower.rerollShop();
       if (!r.ok) notice(r.msg || '刷新失败。');
-      else if (r.paid > 0) notice('已花 ' + r.paid + ' 币刷新，本页期望史诗 ' + (r.expect ? r.expect.epics.toFixed(2) : '?') + ' 件 · 下次 ' + r.nextPrice + ' 币');
+      else if (r.paid > 0) notice('已花 ' + r.paid + ' 币刷新，本页期望史诗 ' + (r.expect ? r.expect.epics.toFixed(2) : '?') +
+        ' 件 · 下次 ' + r.nextPrice + ' 币' + (r.nextPrice === r.paid ? '（已到最高价）' : ''));
       openShop(revisit);
     });
     owned.forEach((b) => on(p, 'sell' + b.id, () => { Tower.sellBuff(b.id); openShop(revisit); }));
@@ -1185,6 +1208,7 @@
       if (!out || !out.ok) { notice('现在还不能结算。'); return; }
       modal('本局结算', '<div class="result-box"><div class="result-title win">见好就收</div>' +
         '<p>抽奖卷 +<b class="gold-text">' + (out.tickets || 0) + '</b>（第 ' + out.layer + ' 层）</p>' +
+        settleBreakdownHtml(out) +
         '<div class="result-lines">分数 ' + out.score + ' 已入账 · 历史最高 ' + out.best + '</div></div>',
         [{ label: '返回无尽塔', cls: 'gold', run: () => openEndless() }], { small: true });
     });
@@ -1236,9 +1260,11 @@
     const info = Tower.checkpointInfo();
     if (!info) { openEndless(); return; }
     modal('结算点 · 第 ' + info.layer + ' 层', '<div class="checkpoint-box">' +
-      '<div class="checkpoint-option"><b>结算离场</b><span>立刻领取 <b class="gold-text">' + info.ticketsNow + '</b> 张抽奖卷，本局结束（分数入账）</span></div>' +
-      '<div class="checkpoint-option"><b>继续挑战</b><span>撑到第 ' + info.nextCheckpoint + ' 层可得 <b class="gold-text">' + info.ticketsNext + '</b> 张；中途失败也会按当时层数应得结算</span></div>' +
-      '<p class="small-label">本局分数 ' + info.score + ' · 试炼币 ' + info.coins + '</p></div>',
+      '<div class="checkpoint-option"><b>结算离场</b><span>立刻领取 <b class="gold-text">' + info.ticketsNowTotal + '</b> 张抽奖卷' +
+        '（本层应得 ' + info.ticketsNow +
+        (info.retryToken ? ' + 重新挑战币 ' + info.retryToken + ' 枚 1:1 折现' : '') + '），本局结束（分数入账）</span></div>' +
+      '<div class="checkpoint-option"><b>继续挑战</b><span>撑到第 ' + info.nextCheckpoint + ' 层本层应得升到 <b class="gold-text">' + info.ticketsNext + '</b> 张（试炼币照常折现）；中途失败也按同一口径结算</span></div>' +
+      '<p class="small-label">本局分数 ' + info.score + ' · 试炼币 ' + info.coins + '（不折现，随本局作废）</p></div>',
       [
         { label: '结算离场', cls: 'gold', run: () => { const r = Tower.settleEndless(); if (r.ok) settleResult(r); else openEndless(); } },
         { label: '继续挑战', run: () => { Tower.continueEndless(); fight('endless'); } },
@@ -1247,6 +1273,7 @@
   function settleResult(r) {
     modal('结算完成', '<div class="result-box"><div class="result-title win">满载而归！</div>' +
       '<div class="result-lines">抽奖卷 +' + r.tickets + '　本局分数 ' + r.score + '</div>' +
+      settleBreakdownHtml(r) +
       '<p class="small-label">抽奖卷可在「每日幸运抽奖」里抵扣抽奖次数（免费次数用完后优先消耗）。</p></div>',
       [{ label: '再来一局', cls: 'gold', run: openEndless }, { label: '去抽奖', run: () => { syncTickets();
             if (window.ClassicExtras && ClassicExtras.lottery) ClassicExtras.lottery(); else UI.runAction('lottery'); } }, { label: '返回', run: () => C().home() }], { small: true });

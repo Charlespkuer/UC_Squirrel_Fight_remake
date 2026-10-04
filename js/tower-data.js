@@ -6,7 +6,7 @@
  *   主塔强度系数 M(n)  = (1+0.03⌊(m−1)/5⌋)(1+0.04⌊(m−1)/10⌋), m=min(n,30)（tower-tune v6 实测值）
  *   主塔单层松果 G(n)  = 15/20/28/38 分段；21 层起 38+3(n−20)，封顶 68
  *   无尽段系数   B(s)  = min(10, 1.5^(s−1)), s=⌈n/5⌉
- *   抽奖卷       T(s)  = 2^(s−1)（s≤4）；8+3(s−4)（s≥5）——20 层后线性
+ *   抽奖卷       T(s)  = s（s≤2）；2+2(s−2)（s≥3）——10 层前每档 +1、之后每档 +2
  * ============================================================ */
 (function () {
   'use strict';
@@ -88,9 +88,19 @@
     for (let i = 0; i < count; i++) out.push(ENDLESS_MECH_ORDER[(off + i) % ENDLESS_MECH_ORDER.length]);
     return out;
   }
+  /* 抽奖卷曲线（本轮平衡调整）：**10 层之前每 5 层给 1 张，之后每 5 层给 2 张**。
+   *
+   * 也就是每个 5 层档位的增量：第 1、2 档（5 / 10 层）+1，第 3 档起（15 层起）+2：
+   *
+   *   层   5  10  15  20  25  30  35  40  45  50
+   *   张   1   2   4   6   8  10  12  14  16  18
+   *
+   * 旧曲线是「20 层前翻倍（1/2/4/8）、之后每段 +3（11/14/17/20…）」：20 层 8 张、
+   * 35 层 17 张、50 层 26 张 —— 越往后越宽；本轮压成一条平缓的直线，
+   * 15 层（含）之前与旧曲线完全一致（1/2/4），16 层起才变少。 */
   function endlessTickets(n) {
     const s = endlessSegment(n);
-    return s <= 4 ? Math.pow(2, s - 1) : 8 + 3 * (s - 4);
+    return s <= 2 ? s : 2 + 2 * (s - 2);
   }
   /* 段间怪物机制叠加顺序（固定顺序，方便玩家预判）。
    * 第 1 项修正：原来 `slice(0, 段数-1)` 只增不减，于是从第 2 段（6 层）起
@@ -287,10 +297,15 @@
     /* 需求 1：左下角那个即时回血改掉了 —— 现在是「重新挑战币」，
      * 花 50 币买 1 枚；失败后可用 1 枚回滚到本场战斗开始前的状态再打一次。 */
     retryPrice: 50,                // 重新挑战币：失败后回滚到本场开始前
-    /* 需求 1：刷新价格**逐次递增**（首次免费，之后 15 / 25 / 40 / 60 / 85 …），
+    /* 需求 1：刷新价格**逐次递增**（首次免费，之后 10 / 20 / 30 / 40 / 50 …），
      * 而且刷新价越高、下一页货架的稀有度期望越高 —— 见 tiltWeights()。 */
     rerollPrice: 10,               // 第一次付费刷新的价格（之后每次 +rerollGrowth）
-    rerollGrowth: 10,              // 涨价步长：10 → 20 → 30 → 40 → 50 …
+    rerollGrowth: 10,              // 涨价步长：10 → 20 → 30 → 40 → 50
+    /* 本轮需求：刷新价**封顶 50**，到顶之后不再涨（0 → 10 → 20 → 30 → 40 → 50 → 50 → …）。
+     * 注意货架质量是按「这一次实际付了多少」算的（rerollTilt(paid)），所以价格到顶之后
+     * 质量也停在 50 币那一档（期望史诗 ≈ 2.24 件 / 5 格）——「最贵 50，之后不会再涨」
+     * 指的是价格与期望都到顶。设 0 表示不限（旧行为）。 */
+    rerollMax: 50,
     /* 需求：刷新不设「保底货品」，只把**稀有度期望**往上推 —— 靠稀有度倾斜实现。
      * 每 10 币让倾斜系数乘 rerollTiltGrowth（1.20），见 tiltWeights()。
      *
@@ -310,13 +325,25 @@
 
   /**
    * 需求 1：第 n 次刷新（n 从 0 开始，0 是首次免费）的价格。
-   * 免费那一次不计价；之后每次 +10：10 → 20 → 30 → 40 → 50 …
+   * 免费那一次不计价；之后每次 +10：10 → 20 → 30 → 40 → **50（封顶，不再涨）**。
+   * 本轮需求：上限由 SHOP.rerollMax 决定（0 = 不限）。
    */
   function rerollPriceAt(count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
     if (n <= 0) return 0;                                   // 首次免费
     const step = Math.max(0, Number(SHOP.rerollGrowth) || 10);
-    return Math.round(SHOP.rerollPrice + step * (n - 1));
+    const raw = SHOP.rerollPrice + step * (n - 1);
+    const max = Math.max(0, Number(SHOP.rerollMax) || 0);
+    return Math.round(max > 0 ? Math.min(raw, max) : raw);
+  }
+  /** 刷新价是否已经封顶（界面用它把「下次更贵」换成「已是最高价」）。 */
+  function rerollPriceCapped(count) {
+    /* 只比较公式本身（不含折扣）：下一次的价格不再高于这次就算到顶。 */
+    const max = Math.max(0, Number(SHOP.rerollMax) || 0);
+    if (!max) return false;
+    const n = Math.max(0, Math.floor(Number(count) || 0));
+    const step = Math.max(0, Number(SHOP.rerollGrowth) || 10);
+    return SHOP.rerollPrice + step * Math.max(0, n - 1) >= max;
   }
   /* ============================================================
    * 刷新质量：**不设保底货品**，只抬高稀有度期望
@@ -614,15 +641,28 @@
       pattern: ['weapon', 'common', 'weapon', 'skill'],
       patternDesc: '固定循环：大槌 → 普攻 → 大槌 → 震地',
       mechDesc: '只用势大力沉的武器：出手慢但一击破盾，被击中会掉护甲' },
-    /* 全技能树的那只（苦修）：技能不间断、每轮都在放，实测强度明显高于其它 boss。
-     * 需求「额外降低其力敏速属性以及技能等级」——三围各降一档、技能 12 级降到 9 级，
-     * 但保留「技能频繁 + 高闪避」这个特征（它仍是最会放技能的那只，只是不再碾压）。 */
+    /* 全技能树的那只（苦修）：**字面意义上会全部 20 个技能**（1~18 / 23 / 24），
+     * 但等级压得很低 —— 它靠「招式多、被动齐、技能频繁、闪避高」立身，而不是靠数值碾压。
+     *
+     * 历史上这里只写了 [2 身手敏捷, 7 龟甲术, 16 绝对防御, 23 幸运一击]：三个被动 + 一个主动，
+     * 而 sim 的固定循环只认主动技，于是整套循环塌缩成「幸运一击 ×N」（实测 74% 的出手）。
+     * 现在 castable 列全部主动技，循环按 skillOrder 逐个轮转（配 RULES.skillCooldown 防连放）：
+     *   8 色诱之术 / 12 野球拳 / 14 小宇宙爆发 / 15 通灵召唤 / 17 来点松果 / 18 吸铁大法 / 23 幸运一击
+     * 被动那 13 个（力王附体~致命反击、装死、龟甲术、绝对防御…）也全都在 skills 里，
+     * 于是它同时有：装死保命、龟甲术 + 绝对防御双保险、皮糙肉厚减伤、移形换位闪避、致命反击。
+     * 三围倍率与技能等级都压过一档（见 tools/test-tower-plan.cjs 的回归断言）。 */
     { id: 'monk', name: '无械苦修·空明', type: '苦修型', region: 4, gear: 'curse3',
       bias: { power: 0.66, agility: 1.06, speed: 1.00, hp: 0.96 },
-      weapons: [], skills: [{ id: 2, level: 8 }, { id: 7, level: 8 }, { id: 16, level: 8 }, { id: 23, level: 8 }],
+      weapons: [],
+      /* 全部 20 个技能（1~18 / 23 / 24），等级一律 **2** —— 字面意义上的「全技能树」，
+       * 但每一招都很浅：buildFoe 会按目标等级小幅上调（70 级时 +3），深层实测也就 5 级。
+       * 实测（参考玩家，每档 50 场）：每场输出 ≈ 同层其它 boss 中位数的 0.94~1.28 倍，
+       * 始终低于最强的元素术鼠；招式占比 技能 74~80% / 普攻 20~26%（它的身份就是技能流）。 */
+      skills: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 23, 24].map((id) => ({ id, level: 2 })),
+      castable: [8, 12, 14, 15, 17, 18, 23],
       pattern: ['skill', 'skill', 'common', 'skill'],
       patternDesc: '固定循环：技能 → 技能 → 普攻 → 技能',
-      mechDesc: '不带任何武器、全技能树：技能触发极频繁，闪避高（力/敏/速与技能等级已下调）' },
+      mechDesc: '不带任何武器、全技能树（20 个技能全都会，但等级很低）：技能频繁且招式不重复，闪避高、会装死与反击' },
     { id: 'twinblade', name: '双匕游侠·夜刃', type: '连击型', region: 4, gear: 'ninja3',
       bias: { power: 1.05, agility: 1.20, speed: 1.30, hp: 0.95 },
       weapons: [{ id: 9, level: 11 }], skills: [{ id: 9, level: 11 }, { id: 10, level: 11 }],
@@ -1079,6 +1119,14 @@
       desc: '立刻让本局所有敌人的生命上限 −10%（此后每场都生效，不占增益位）', mods: { enemyMaxHpDown: 0.10 } },
     { id: 'E08', name: '卸甲', rarity: 1, kind: 'instant', endlessOnly: true, repeatable: true, maxStacks: 1,
       desc: '立刻让本局所有敌人的生命上限 −15%（此后每场都生效，不占增益位）', mods: { enemyMaxHpDown: 0.15 } },
+    /* 本轮需求：史诗级即时削弱 —— 本局所有敌人**攻击力**永久 −15%。
+     * 与 E07/E08（削生命上限）同一形状，但打的是力量：拿到就登记到 run.enemyPowerDown，
+     * 之后每场 buildFoe 都按比例压力量（与 M01 威慑的聚合值相加）。
+     * 一局只能拿一次（maxStacks 1），而且**只在战斗奖励里掉落**（battleOnly → 不进商店货架）。 */
+    { id: 'E11', name: '挫锋', rarity: 2, kind: 'instant', endlessOnly: true, battleOnly: true,
+      repeatable: true, maxStacks: 1,
+      desc: '立刻让本局所有敌人的攻击力 −15%（此后每场都生效，不占增益位；一局只能获得一次）',
+      mods: { enemyPowerDown: 0.15 } },
     /* —— 本轮第 6 项：和永久增益槽位互动的攻击 buff ——
      * C34 是「空槽越多越强」，C35 是「永久 buff 越多越强」，两者取向相反，
      * 放在一起才逼出「要不要占满 5 格」的真实取舍。 */
@@ -1301,24 +1349,9 @@
   const shopPool = ROSTERS.filter((r) => r.pools.indexOf('E.shop') >= 0).map((r) => r.b);
   /** 永久增益的持有上限（第 1 项：无尽主界面最多 5 个，同名叠层仍算 1 格）。 */
   const PERMANENT_SLOTS = 5;
-  /* 第 1 项：无尽塔的「三种属性药丸」槽位 —— 消耗背包里的药丸，塔内持续 20 场战斗。
-   * 效果口径跟 State.totalStats 里的一致：普通丸 +20%（最少 5 点）、超级丸 +40%（最少 10 点）。 */
-  const PILL_BATTLES = 20;
-  const PILL_SLOTS = [
-    { key: 'power', name: '力量', ids: [3, 41] },
-    { key: 'agility', name: '敏捷', ids: [4, 42] },
-    { key: 'speed', name: '速度', ids: [5, 43] },
-  ];
-  function pillEffect(id) {
-    const n = Number(id);
-    if (n === 3) return { stat: 'power', pct: 0.20, min: 5 };
-    if (n === 4) return { stat: 'agility', pct: 0.20, min: 5 };
-    if (n === 5) return { stat: 'speed', pct: 0.20, min: 5 };
-    if (n === 41) return { stat: 'power', pct: 0.40, min: 10 };
-    if (n === 42) return { stat: 'agility', pct: 0.40, min: 10 };
-    if (n === 43) return { stat: 'speed', pct: 0.40, min: 10 };
-    return null;
-  }
+  /* 【本轮删除】无尽塔的「力/敏/速药丸槽」整块移除（PILL_BATTLES / PILL_SLOTS / pillEffect）。
+   * 药丸现在只走局外口径（State.totalStats 的力量/敏捷/速度丸），塔内不再有额外加成、
+   * 也不再在界面上占三个槽位；旧存档里的 run.pillSlots 由 tower.js 的 normalizeRun 清掉。 */
 
   window.TowerData = {
     towerLevel, towerMult, towerGold, towerGoldShares, TOWER_FAIL_CONSOLATION,
@@ -1333,8 +1366,8 @@
     endlessDepthMul, ENDLESS_DEEP_LAYER,
     buffScore, reviveScoreAt,
     SHOP_PRICE_OFFSET, rollShopPrice,
-    rerollPriceAt, rerollTilt, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,
-    PILL_BATTLES, PILL_SLOTS, pillEffect, shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,
+    rerollPriceAt, rerollPriceCapped, rerollTilt, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,
+    shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,
     legendWeightFactor, legendOwnedCount, allRepeatableLegendsOwned, LEGEND_BASE_WEIGHT, rarityBoostOf,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,

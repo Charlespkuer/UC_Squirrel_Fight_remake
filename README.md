@@ -41,6 +41,33 @@
   每 5 层试炼商店、每 10 层里程碑奖励，随时可结算离场。
 - **双机同步**：Mac ↔ Windows 通过 ZeroTier 互推存档与游戏文件（`scripts/一键同步`）。
 
+## 修恶性 Bug：无尽战斗打完卡在主界面、而且再也进不去无尽（2026-10）
+
+现象（用户报）：无尽战斗结束后卡着退回主界面，同时无法再进入无尽模式。
+
+根因：上一轮为「C57 两塔两套口径」改 `choiceCard(c, i, mode)` 时，把**无尽塔首页**
+`openEndless()` 里那处调用也写成了裸 `mode` —— 而 `openEndless()` **没有 mode 这个参数**
+（它是无尽的首页，口径本来就该写死 `'endless'`）。于是只要 `run.choices` 有值
+（**每层第 3 场打完就会给「休整点·选一张」**，也就是几乎每局都会碰到），
+`openEndless()` 立刻 `ReferenceError: mode is not defined`：
+
+- 抛错发生在战斗 `onEnd` 里的 `reopen(mode)` → 被 `perform().catch` 接住 →
+  走 `onError` → `Tower.interruptBattle()` 只清掉 attempt、**不重绘界面** →
+  屏幕停在主界面、本局却还活着 → 再进无尽就提示「本局无尽挑战尚未结束」。
+- 因为异常被 battle 的 catch 吞掉，控制台**没有任何报错**，所以更难查。
+
+修法：`openEndless()` 里改成 `choiceCard(c, i, 'endless')`（并留注释说明为什么不能写裸 mode）。
+
+排查手段（记录一下，这轮摸索出来的）
+- headless 里战斗回放**跑不动**（rAF 驱动，木桩场都停在 round 0），所以改成
+  「探针里把无尽流程的 `allowSkip:false` 临时改成 true → 点跳过 → 立刻打完一整场」，
+  这样才真正跑到游戏自己的 `onEnd → reportBattle → reopen → afterBattle`；
+  再用 spy 包住 `Tower.reportBattle` 观察实际走到了哪个分支。
+
+回归守卫：新增「需求9.0」——抠出 `openEndless()` 的函数体、去掉注释后断言**没有裸 `mode`**，
+并断言选牌口径写死 `'endless'`；运行时再造一次「第 3 场胜利 → 待选牌」的状态，
+确认 `endlessInfo().run.choices` 正常带出。**已验证这条守卫能抓住本次 bug。**
+
 ## 修 Bug：战斗播不了（模块加载期 ReferenceError）（2026-10）
 
 上一轮修 C57 显示时，我把 `applyRoundCaps` 写在了 `Battle.run` **内部**，却又在模块作用域

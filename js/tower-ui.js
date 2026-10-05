@@ -669,7 +669,10 @@
               run.env.map((e) => envChip(e, { compact: true })).join('') + '</div>'
             : '') +
           '<div class="hex-row">' +
-          run.choices.map((c, i) => choiceCard(c, i, mode)).join('') + '</div></div>' : '';
+          /* 这里是**无尽塔**的首页：口径固定传 'endless'。
+           * 注意不要写成裸 mode —— openEndless() 作用域里没有 mode，
+           * 一旦 run.choices 有值就会 ReferenceError，整屏渲染不出来（战斗回来会卡住）。 */
+          run.choices.map((c, i) => choiceCard(c, i, 'endless')).join('') + '</div></div>' : '';
       /* 顶栏：标题 → 试炼币/抽奖卷 → 分数框 → 右边缘的三个药丸槽（等腰三角摆放）。
        * 血量紧贴标题下方（分数已经挪进顶栏，所以这里整体上提），字号与血条都放大一档；
        * 「继续战斗」在右下角，「放弃本局」更小、压在它左边偏下。 */

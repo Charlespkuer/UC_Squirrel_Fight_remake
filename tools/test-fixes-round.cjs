@@ -443,6 +443,58 @@ test('需求9b：有币时选择「放弃本局」→ 才真正结算失败', ()
   assert.ok(!c.Tower._debugRun('endless'), '放弃后对局结束');
 });
 
+test('需求9.0：无尽塔首页在「战后待选牌」状态下必须能渲染（openEndless 里不能有裸 mode）', () => {
+  const c = setup();
+  const T = c.Tower;
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const bodyOf = (head) => {
+    const at = src.indexOf(head);
+    assert.ok(at >= 0, '源码里应当有 ' + head);
+    let k = src.indexOf('{', at), depth = 0, e = k;
+    while (e < src.length) {
+      const ch = src[e];
+      if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) break; }
+      e++;
+    }
+    return src.slice(at, e + 1);
+  };
+  /* 曾经的事故：把 choiceCard 的 mode 参数写成裸 mode，而 openEndless() 作用域里没有 mode
+   * → run.choices 一有值就 ReferenceError → 整屏渲染不出来，战斗结束回来卡在主界面、
+   * 而且本局还没结束（再进无尽提示「本局尚未结束」）。 */
+  const openEndless = bodyOf('function openEndless()');
+  const code = openEndless.replace(/\/\*[\s\S]*?\*\//g, ' ');      // 去掉注释再查
+  assert.ok(!/\bmode\b/.test(code),
+    'openEndless() 里不该出现裸 mode（它没有这个参数）：' + (code.match(/.{0,40}\bmode\b.{0,40}/) || [''])[0]);
+  assert.match(openEndless, /choiceCard\(c, i, 'endless'\)/, '无尽首页的选牌口径应当写死 endless');
+  /* openTower 里若有选牌，也必须用自己作用域里真实存在的 mode */
+  const openTower = bodyOf('function openTower(');
+  if (/choiceCard\(/.test(openTower)) {
+    assert.ok(/function openTower\([^)]*\bmode\b/.test(openTower) || /choiceCard\([^)]*'tower'/.test(openTower),
+      'openTower 里用 choiceCard 时必须传真实存在的 mode 或字面量 tower');
+  }
+
+  /* 运行时再确认一次：造出「战后待选牌」的状态，无尽首页能渲染出来 */
+  c.State.newGame('endless-choice');
+  const st = c.State.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  T._debugSetLayer(9);
+  try { if (T._debugRun('endless')) T.abandon('endless'); } catch (e) { /* 忽略 */ }
+  assert.ok(T.startEndlessRun().ok);
+  T._debugSetEndlessLayer(6);
+  const run = T._debugRun('endless');
+  run.permanent = []; run.limited = []; run.idx = 2; run.phase = null; run.choices = null;
+  /* 打到本层第 3 场：战利品结算会给 run.choices（也就是界面要渲染选牌的那一刻） */
+  const nx = T.nextBattle('endless');
+  assert.ok(nx.ok, '应当能开战：' + nx.msg);
+  const me = c.State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+  me.maxHp = me.hp; nx.adjustMe(me);
+  T.reportBattle('endless', nx.token, true, Math.round(me.hp * 0.8), Math.round(me.maxHp));
+  const after = T._debugRun('endless');
+  assert.ok(after && after.choices && after.choices.length, '第 3 场胜利后应当有待选牌');
+  assert.equal(T.endlessInfo().run.choices.length, after.choices.length, 'endlessInfo 也要把它带出来');
+});
+
 test('需求9.1：玉石俱焚确实生效 —— 战斗内双方血量上限真的被压低（并且能显示出来）', () => {
   const c = setup();
   const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;

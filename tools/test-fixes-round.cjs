@@ -466,6 +466,15 @@ test('需求9.4：道具卖出 = 「返回 / 卖出」弹窗，点一下卖 1 �
   /* 卖光后按钮禁用 + 数字实时刷新 */
   assert.ok(dlg.slice(0, 2600).indexOf('b.disabled=held<1') > 0, '卖光后应当把卖出按钮禁用');
   assert.ok(dlg.slice(0, 2600).indexOf("data-live=\"sell-held\"") > 0, '弹窗里应当实时显示剩余数量');
+  /* 背包按钮文案就是「卖出」（不要「卖出 1 个」这种带数量的写法） */
+  assert.ok(src.indexOf("btn('卖出','prop-sell'") > 0, '背包按钮文案应当是「卖出」');
+  assert.ok(src.indexOf('卖出 1 个') < 0, '不该再有「卖出 1 个」的文案');
+  /* 卖出弹窗里不该再有「点「卖出」卖出 1 个，可得…」那行提示 */
+  assert.ok(dlg.slice(0, 2600).indexOf('sell-tip') < 0, '卖出弹窗不该再有那行操作提示');
+  assert.ok(src.indexOf('点「卖出」卖出 1 个') < 0, '那行提示文案应当删干净');
+  /* 使用弹窗里不该再显示「硬上限 999」 */
+  assert.ok(src.indexOf("'　硬上限 '+cap") < 0, '使用弹窗的体力标签不该再拼「硬上限 999」');
+  assert.ok(src.indexOf('　硬上限 ') < 0, '实时刷新的那一处也要去掉');
 
   /* ---- 3) 模型口径：一次只减 1 个、按回收价进账 ---- */
   S.newGame('sell-one');

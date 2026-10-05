@@ -817,7 +817,7 @@
     const mainLabel=shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看';
     /* 按钮顺序（需求）：**卖出在左、使用/合成在右** —— 主操作仍然是最醒目的金色按钮。 */
     const bagActions=it?'<div class="bag-actions">'+
-      (sellPrice&&(S.props[it.id]||0)>0?btn('卖出 1 个','prop-sell','small'):'')+
+      (sellPrice&&(S.props[it.id]||0)>0?btn('卖出','prop-sell','small'):'')+
       btn(mainLabel,'prop-action','small gold')+'</div>':'';
     const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个'+(sellPrice?'　可回收 '+sellPrice+' 金松果/个':''))+'</div>'+bagActions:'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
     const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
@@ -826,7 +826,7 @@
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
     // 否则兑换页点进详情再返回会掉回背包页。
     $('[data-action="prop-action"]',p)?.addEventListener('click',()=>openProp(selectedProp,mode));
-    /* 卖出：与「使用」同一套交互 —— 点「卖出 1 个」打开卖出弹窗
+    /* 卖出：与「使用」同一套交互 —— 点「卖出」打开卖出弹窗
      * （左下「返回」/ 右下「卖出」），在弹窗里点一下卖 1 个、弹窗不关，卖光为止。 */
     $('[data-action="prop-sell"]',p)?.addEventListener('click',()=>sellDialog(selectedProp,()=>openBag(mode,bagPage)));
     if(status&&!status.remaining)$('[data-action="prop-action"]',p).disabled=true;
@@ -862,7 +862,7 @@
     const blockReason=()=>{
       if(shop)return status.remaining?'':'今日已经卖完了，明天再来。';
       const now=(State.state().props[id]||0);
-      if(isPotion)return State.state().energy>=cap?'体力已达硬上限 '+cap+' 点，无法继续使用。':(now<1?'背包里没有体力药剂了。':'');
+      if(isPotion)return State.state().energy>=cap?'体力已经满了，无法继续使用。':(now<1?'背包里没有体力药剂了。':'');
       if(isFragment||isSeed||isConvertShard){
         if(now<batchCost)return '材料不足：还需要 '+(batchCost-now)+' 个'+base.name+'。';
         if(S.goldPoint<batchGold)return '金松果不足：每次合成需要 '+batchGold+' 个。';
@@ -879,7 +879,7 @@
     };
     const liveOwn=()=>String(State.state().props[id]||0);
     const potionNote=isPotion?('<p class="small-label">体力：<b data-live="potion" class="'+((S.energy>S.maxEnergy)?'ws-full':'ws-ok')+'">'+S.energy+'/'+S.maxEnergy+'</b>'+
-      '　硬上限 '+cap+(S.energy>S.maxEnergy?'（超出部分不自然回复，仍可用于挑战）':'')+'</p>'):'';
+      (S.energy>S.maxEnergy?'（超出部分不自然回复，仍可用于挑战）':'')+'</p>'):'';
     const batchNote=(isFragment||isSeed||isConvertShard||isGem)?('<p class="small-label">每次合成：'+base.name+' ×'+batchCost+' + 金松果 ×'+batchGold+'　→　'+batchName+'</p>'):'';
     const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-description">'+esc(base.remark||'')+'</div>'+
       '<div class="small-label">拥有 <b data-live="own">'+(S.props[id]||0)+'</b> 个'+(shop?'　售价 '+base.price+' 金松果<br>每日限购 '+status.limit+' 件，今日剩余 <b data-live="stock">'+status.remaining+'</b> 件':'')+'</div></div></div>'+
@@ -939,7 +939,7 @@
         potion.className=now.energy>now.maxEnergy?'ws-full':'ws-ok';
         const note=$('[data-live="potion"]',m.element).parentElement;
         const extra=now.energy>now.maxEnergy?'（超出部分不自然回复，仍可用于挑战）':'';
-        if(note)note.innerHTML='体力：<b data-live="potion" class="'+(now.energy>now.maxEnergy?'ws-full':'ws-ok')+'">'+now.energy+'/'+now.maxEnergy+'</b>　硬上限 '+cap+extra;
+        if(note)note.innerHTML='体力：<b data-live="potion" class="'+(now.energy>now.maxEnergy?'ws-full':'ws-ok')+'">'+now.energy+'/'+now.maxEnergy+'</b>'+extra;
       }
       const reason=blockReason();
       const hint=$('[data-live="hint"]',m.element);
@@ -966,7 +966,7 @@
       '<h3 class="detail-name">'+esc(name)+'</h3>'+
       '<div class="detail-description">每个可回收 '+price+' 金松果。</div>'+
       '<div class="small-label">拥有 <b data-live="sell-held">'+held0+'</b> 个　金松果：<b data-live="sell-gold">'+S.goldPoint+'</b></div>'+
-      '<div class="use-preview" role="status" data-live="sell-tip"></div></div></div>';
+      '</div></div>';
     const m=modal('卖出道具',content,[
       {label:'返回',cls:'muted',run:()=>{m.close();if(after)after();}},
       {label:'卖出',cls:'gold',primary:true,close:false,run:()=>{
@@ -983,7 +983,7 @@
       const now=State.state(),held=now.props[id]||0;
       const set=(key,value)=>{const el=$('[data-live="'+key+'"]',m.element);if(el)el.textContent=value;};
       set('sell-held',held);set('sell-gold',now.goldPoint);
-      set('sell-tip',held>0?('点「卖出」卖出 1 个，可得 '+price+' 金松果；卖完为止'):'已经卖光了');
+      /* 卖光之后只把按钮置灰即可（不再显示提示文案）。 */
       const b=sellBtn();if(b)b.disabled=held<1;
     }
     /* 右上角的 × 也能关弹窗 —— 关掉之后同样要把背包刷新到最新数量。 */

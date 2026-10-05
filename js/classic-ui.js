@@ -28,7 +28,7 @@
   const $ = (s, root) => (root || document).querySelector(s);
   const $$ = (s, root) => [...(root || document).querySelectorAll(s)];
   /** 滑动条的「已选 / 未选」两段配色：把百分比写进 --fill，CSS 用它切分
-   *  左（金色已选）右（浅色未选）。卖出数量与音量共用。 */
+   *  左（金色已选）右（浅色未选）。目前只有音乐音量在用（卖出改成点一下卖 1 个）。 */
   const fillRange = (el) => {
     if (!el) return;
     const min = Number(el.min) || 0, max = Number(el.max);
@@ -817,7 +817,7 @@
     const mainLabel=shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看';
     /* 按钮顺序（需求）：**卖出在左、使用/合成在右** —— 主操作仍然是最醒目的金色按钮。 */
     const bagActions=it?'<div class="bag-actions">'+
-      (sellPrice&&(S.props[it.id]||0)>0?btn('卖出','prop-sell','small'):'')+
+      (sellPrice&&(S.props[it.id]||0)>0?btn('卖出 1 个','prop-sell','small'):'')+
       btn(mainLabel,'prop-action','small gold')+'</div>':'';
     const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个'+(sellPrice?'　可回收 '+sellPrice+' 金松果/个':''))+'</div>'+bagActions:'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
     const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
@@ -826,7 +826,9 @@
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
     // 否则兑换页点进详情再返回会掉回背包页。
     $('[data-action="prop-action"]',p)?.addEventListener('click',()=>openProp(selectedProp,mode));
-    $('[data-action="prop-sell"]',p)?.addEventListener('click',()=>sellAsk(selectedProp,()=>openBag(mode,bagPage)));
+    /* 卖出：与「使用」同一套交互 —— 点一下卖 1 个、原地刷新，
+     * 不弹窗、不选数量、也不离开当前这一页（背包页与页码都保持）。 */
+    $('[data-action="prop-sell"]',p)?.addEventListener('click',()=>sellOne(selectedProp,()=>openBag(mode,bagPage)));
     if(status&&!status.remaining)$('[data-action="prop-action"]',p).disabled=true;
     $('[data-action="rank-shop"]',p)?.addEventListener('click',()=>ClassicExtras.rankShop());
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openBag(mode,bagPage-1));
@@ -952,33 +954,15 @@
     }
     syncLive();
   }
-  /** 卖出背包道具（按字典价格的一半回收）：滑动条选数量后确认。 */
-  function sellAsk(id,after) {
-    const S=State.state(),price=State.propSellPrice(id),held=S.props[id]||0,def=propMap.getValue(id);
+  /** 卖出**1 个**背包道具（按字典价格的一半回收）。
+   *  交互与「使用」一致：点一下卖一个、原地刷新该页，不弹窗、不选数量、不退出页面。
+   *  想卖多个就多点几下（背包会实时显示剩余数量，卖完按钮自动消失）。 */
+  function sellOne(id,after) {
+    const S=State.state(),price=State.propSellPrice(id),held=S.props[id]||0;
     if(!price||held<1){toast('背包里没有可卖的道具');return;}
-    let n=held;
-    const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div><h3 class="detail-name">'+esc(def?def.name:'道具')+'</h3>'+
-      '<div class="detail-description">每个 '+price+' 金松果，背包里有 '+held+' 个。</div><div class="small-label">金松果：'+S.goldPoint+'</div></div></div>'+
-      '<div class="setting-slider use-slider" data-slider="sell-count"><span class="slider-label">卖出数量</span>'+
-      '<input type="range" min="1" max="'+held+'" step="1" value="'+held+'" aria-label="卖出数量">'+
-      '<b class="slider-value">'+held+'</b><span class="use-preview" role="status"></span></div>';
-    const m=modal('卖出道具',content,[{label:'确认卖出',run:()=>{
-      const r=State.sellProp(id,n);
-      toast(r.msg||'操作完成');
-      if(r.ok){m.close();if(after)after();}
-    }},{label:'返回',cls:'muted'}],{small:true});
-    const range=$('[data-slider="sell-count"] input',m.element);
-    const value=$('[data-slider="sell-count"] .slider-value',m.element);
-    const preview=$('.use-preview',m.element);
-    const sellBtn=$('[data-action="0"]',m.element);
-    const refresh=()=>{
-      if(value)value.textContent=n;
-      if(sellBtn)sellBtn.textContent='确认卖出 ×'+n;
-      if(preview)preview.textContent='可得 '+(n*price)+' 金松果，卖出后剩 '+(held-n)+' 个';
-      fillRange(range);                       // 左金色已选、右浅色未选
-    };
-    if(range)range.addEventListener('input',()=>{n=Math.max(1,Math.min(held,Number(range.value)||1));refresh();});
-    refresh();
+    const r=State.sellProp(id,1);
+    toast(r.msg||('卖出 1 个，获得 '+price+' 金松果'));
+    if(r.ok&&after)after();
   }
   /* 天使果实 / 恶魔果实：随机三选一（天使=学会一个，恶魔=遗忘一个）。
    * 候选由 State.fruitOptions 抽好，这里只负责展示与回传选择。 */

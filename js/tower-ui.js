@@ -5,7 +5,7 @@
  *
  * 目录（Ctrl+F 搜「【U编号】」直达）：
  *   【U1】基础助手              【U7】无尽页面            【U13】无尽：里程碑·重试·战败结算
- *   【U2】通用小件              【U8】战斗闭环            【U14】无尽：试炼币商店
+ *   【U2】通用小件              【U8】战斗闭环            【U14】无尽：试炼币商店 + U14b 铸币商店
  *   【U3】对手头像与立绘        【U9】场间抉择弹窗        【U15】无尽：永久牺牲
  *   【U4】增益面板与货币条      【U10】主塔结算           【U16】无尽：结算点与结算
  *   【U5】入口图鉴与塔身可视化  【U11】选取型强化弹窗     【U17】模块导出 window.TowerUI
@@ -89,7 +89,7 @@
     const maxHp = Number(run && run.curMaxHp) || Number(run && run.lastMaxHp) || 0;
     if (!(maxHp > 0)) return '血量上限：打完第一场后显示';
     const hp = Math.max(0, Math.round(Number(run && run.curHp != null ? run.curHp : run.lastHp) || 0));
-    return '当前血量 ' + hp + ' / 上限 ' + maxHp + '（下一场按**绝对值**继承，超出上限的部分裁掉）';
+    return '当前血量 ' + hp + ' / 上限 ' + maxHp;
   }
   let tipEl = null;
   function showTip(text, anchor) {
@@ -264,13 +264,15 @@
     if (m.killPowerPct) parts.push('每击杀攻击 +' + Math.round(m.killPowerPct * b.stacks * 100) + '%');
     /* 原来这里还有一条 `m.killMaxHpPct` —— 那个 mod 在任何增益上都不存在（死代码），
      * 换成真正在用的「每胜利生命上限」字段（C07 吞噬成长）。 */
-    /* 狂怒：低血时攻/敏/速同时生效（阈值 + 三项一起写清楚）。 */
+    /* 狂怒：低血时攻/敏/速同时生效（阈值 + 三项一起写清楚）。
+     * 敏捷/速度这两份是**终乘**（乘在最终值上，不并进敏捷/速度面板），所以这里按 ×N 写，
+     * 免得玩家以为只是「面板 +20%」。 */
     if (m.lowHpPowerMul || m.lowHpAgilityMul || m.lowHpSpeedMul) {
       const low = '生命低于 ' + Math.round((m.lowHpAt || 0.5) * 100) + '% 时';
       const bits = [];
       if (m.lowHpPowerMul) bits.push('攻击 +' + Math.round(m.lowHpPowerMul * b.stacks * 100) + '%');
-      if (m.lowHpAgilityMul) bits.push('敏捷 +' + Math.round(m.lowHpAgilityMul * b.stacks * 100) + '%');
-      if (m.lowHpSpeedMul) bits.push('速度 +' + Math.round(m.lowHpSpeedMul * b.stacks * 100) + '%');
+      if (m.lowHpAgilityMul) bits.push('最终敏捷 ×' + (1 + m.lowHpAgilityMul * b.stacks).toFixed(2));
+      if (m.lowHpSpeedMul) bits.push('最终速度 ×' + (1 + m.lowHpSpeedMul * b.stacks).toFixed(2));
       parts.push(low + bits.join('、'));
     }
     if (m.winMaxHpPct) parts.push('每胜利生命上限 +' + Math.round(m.winMaxHpPct * b.stacks * 100) + '%');
@@ -377,10 +379,19 @@
           '<b>' + esc(b.name) + '</b><i>' + (b.on ? '生效中' : '已关闭') + '</i><em>' +
           limitBadgeText(b) + '</em></button>').join('')
       : '<span class="buff-empty">还没有限次增益</span>';
+    /* 讨价还价（E14）：即时类不进 permanent/limited，所以在这里单独把「攒着还没兑现的份数」
+     * 摆出来 —— 不然玩家看不到自己叠了几层，进店前也预期不了。 */
+    const halfPending = Math.max(0, Number(run.shopHalfPending) || 0);
+    const halfHtml = halfPending > 0
+      ? '<div class="buff-pending"><span class="pending-chip" data-tip="' +
+        esc('讨价还价 ×' + halfPending + '：下一次进入商店（试炼商店或铸币商店）时，那一页有 ' +
+          halfPending + ' 件随机商品价格减半（向下取整）、不会重复打同一件') + '">讨价还价 ×' + halfPending +
+        '<i>下次进店 ' + halfPending + ' 件对折</i></span></div>'
+      : '';
     return '<div class="tower-buffs endless-buffs">' +
       '<h4>永久增益 <span class="buff-slot-count">' + (run.permUsed == null ? perm.length : run.permUsed) + '/' + cap + '</span>' +
       (replaceTarget ? '<span class="replace-hint">选一个要拿掉的（再点增益卡确认）</span>' : '') + '</h4>' +
-      '<div class="buff-tags">' + permHtml + '</div>' + progHtml +
+      '<div class="buff-tags">' + permHtml + '</div>' + progHtml + halfHtml +
       '<h4>限次增益 <span class="buff-slot-count">点一下开关</span></h4>' +
       '<div class="buff-tags">' + limHtml + '</div></div>';
   }
@@ -640,10 +651,15 @@
   function openEndless() {
     const info = Tower.endlessInfo();
     let main, footer = null;
+    /* 「还没开始」= 本局还在第 1 层、一场都没打完。
+     * 这一屏**不显示抽奖卷 / 铸币**：currencyHtml 在「有对局」时显示的是**本局应得**的张数
+     * （ticketsOnExit），玩家会误以为是自己仓库里的存量；所以干脆整块不渲染。
+     * 打完第一场之后恢复显示（那时右上角的数字才有意义）。 */
+    const notStarted = !!(info.run && info.run.layer === 1 && !(info.run.score > 0) && !(info.run.lastCoinsGained > 0));
     if (info.run) {
       const run = info.run;
       const nextLabel = run.choices ? '先选一张增益'
-        : run.phase === 'shop' ? '进入试炼商店'
+        : run.phase === 'shop' ? (run.mintShop ? '进入铸币商店' : '进入试炼商店')
         : run.phase === 'checkpoint' ? '前往结算点'
         : run.phase === 'sacrifice' ? '放弃一个永久增益' : '继续战斗';
       /* 只认 run.plan（实战真正会打的那一串）。以前这里另算一遍 preview(layer, salt)，
@@ -677,11 +693,12 @@
        * 血量紧贴标题下方（分数已经挪进顶栏，所以这里整体上提），字号与血条都放大一档；
        * 「继续战斗」在右下角，「放弃本局」更小、压在它左边偏下。 */
       main = '<div class="endless-run">' +
-        /* 右上角：药丸槽 + 试炼币/抽奖卷 + 分数框（横向一行，位置不变）。 */
-        '<div class="endless-topright">' + currencyHtml('endless') +
+        /* 右上角：药丸槽 + 试炼币/抽奖卷 + 分数框（横向一行，位置不变）。
+         * 本局还没打完第一场时不放货币条（见 notStarted 的说明），只留分数框。 */
+        '<div class="endless-topright">' + (notStarted ? '' : currencyHtml('endless')) +
         '<span class="endless-score-box"><i>分数</i><b>' + run.score + '</b></span></div>' +
         '<div class="endless-left">' +
-        '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层（第 ' + run.segment + ' 段）</h2>' +
+        '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层' +
         '</div>' +
         carryBar(run.curHp, run.curMaxHp, '血量', 'endless-hp', hpTip(run)) +
         /* 环境词缀（唯一常驻负面机制）：
@@ -697,7 +714,7 @@
                   Math.round(run.enemyMaxHpDown * 100) + '%<i>本局全程</i></span>' : '') +
               (run.enemyPowerDown > 0
                 ? '<span class="mech-chip debuff-chip enemy-down" data-tip="' +
-                  esc('挫锋：本局所有敌人的攻击力都按这个比例扣（与「威慑」叠加）') + '">敌人攻击力 −' +
+                  esc('挫锋：立刻让本局所有敌人的攻击力 −15%') + '">敌人攻击力 −' +
                   Math.round(run.enemyPowerDown * 100) + '%<i>本局全程</i></span>' : '') +
               '</div>'
             : '') +
@@ -715,13 +732,14 @@
         C().btn('放弃本局', 'abandon', 'muted tiny') +
         C().btn(nextLabel, 'fight', 'gold') + '</span></div>';
     } else {
+      /* 还没开始（没有进行中的对局）：这一屏也**不显示抽奖卷 / 铸币**，
+       * 下方那行「现有抽奖卷 X 张」一并去掉 —— 只留「开始冲塔」一个按钮。
+       * 想看仓库抽奖卷总数请去「每日幸运抽奖」页（那边的口径就是仓库存量）。 */
       main = '<h2 class="tower-title">无尽模式</h2>' +
         '<div class="tower-stats">历史最高 <b class="gold-text">' + info.best + '</b> 分 · 本周最高 ' + info.weekBest + ' 分 · 最深 ' + info.bestLayer + ' 层</div>' +
-        currencyHtml('endless') +
         buffCatalogHtml() + bossCatalogHtml();
       footer = '<div class="tower-actions tower-footer">' +
-        '<span class="tower-book-count">现有抽奖卷 ' + info.tickets + ' 张</span>' +
-        C().btn('开始冲塔（免费）', 'fight', 'gold') + '</div>';
+        C().btn('开始冲塔', 'fight', 'gold') + '</div>';
     }
     const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + '">' + towerVisual(info.run ? info.run.layer : 1, 0, 'endless') +
       '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';
@@ -810,13 +828,21 @@
       reopen(mode);
       notice('战斗播放中断，进度已保留，可重新挑战这一场。');
     };
+    /* 无尽塔 30 层起，右下角在倍速键之外**再给一个跳过键**（用户口径）。
+     * 30 层正是深度曲线 endlessDepthMul 开始生效的层数（TowerData.ENDLESS_DEEP_LAYER），
+     * 也就是「一局要打很久」的阶段，所以从这里开始允许跳过播放。
+     * 跳过不影响胜负与收益：回合流本来就由 Sim.simulate 一次算完，跳过只是不播动画；
+     * 塔内战斗本来也关了飘物（collectDrops:false），不会因为跳过丢掉落。 */
+    const runNow = mode === 'tower' ? Tower.towerInfo().run : Tower.endlessInfo().run;
+    const layerNow = runNow ? Math.max(1, Math.floor(Number(runNow.layer) || 1)) : 1;
+    const skipAllowed = Tower.skipPlaybackAllowed(mode, layerNow);
     try {
       Promise.resolve(Main.startBattle(nx.foe, {
         region: nx.region, kind: mode, useProps: false, hpRatio: nx.hpRatio, adjustMe: nx.adjustMe,
         debuffs: nx.debuffs || [],
         // boss 机制：贴一条在战斗画面里（进层预告 / 选 buff 页都读过，这里是备忘）
         trial: nx.info && nx.info.mechDesc ? { text: nx.info.mechDesc } : null,
-        allowSkip: false, speedToggle: true,
+        allowSkip: skipAllowed, speedToggle: true,
         // 塔的产出全部由状态机结算（松果/压缩碎片/抽奖卷），关掉战斗飘物，
         // 否则免门票的无尽模式可以无限刷飘物松果与经验。
         collectDrops: false,
@@ -825,7 +851,11 @@
           const hp = r && Array.isArray(r.hpAfter) ? r.hpAfter[0] : null;
           const cap = r && Array.isArray(r.maxHp) ? r.maxHp[0] : (nx.effMaxHp ? nx.effMaxHp() : 0);
           const abs = w === 0 && Number.isFinite(hp) ? Math.max(1, Math.round(hp)) : 0;
-          const rw = Tower.reportBattle(mode, nx.token, w === 0, abs, cap);
+          /* **必须把战斗结果 `r` 一起交给状态机**：报告里的 rounds 里有 deathSave / revive 标记，
+           * 涅槃（C14）的「每层 N 次」计数与隐藏成就「死而复生」都靠它。
+           * 以前这里只传了 5 个参数，于是 C14 的计数在真实战斗里永远不涨 ——
+           * 表现为「每场战斗都能复活一次」（用户报的 bug），成就也从来不触发。 */
+          const rw = Tower.reportBattle(mode, nx.token, w === 0, abs, cap, r);
           reopen(mode);
           if (!rw.ok) return;                 // 令牌已作废的迟到回调，静默忽略
           afterBattle(mode, rw);
@@ -848,7 +878,24 @@
       return;
     }
     if (mode === 'endless') {
-      const cont = () => { if (rw.layerComplete && rw.phase === 'shop') openShop(); else openEndless(); };
+      /* 铸币商店（战后 5% 小店）一开出来就**直接进店**：它是限时偶遇，藏在首页按钮后面
+       * 容易被当成普通「继续战斗」而错过；层末那次也一样（rw.mintShop 与 layerComplete 都会带上）。
+       * E01「立即进货」的店仍旧留在首页按钮上（老行为不动）。 */
+      const cont = () => {
+        if (rw.phase === 'shop' && (rw.mintShop || rw.layerComplete)) openShop();
+        else openEndless();
+      };
+      /* 时间回廊（E15）：这一场打完就从本层第 1 场重开 —— 必须明确告诉玩家，
+       * 否则「怎么又回到第 1 场了」会很懵。 */
+      if (rw.layerRestart) {
+        const lr = rw.layerRestart;
+        modal('时间回廊', '<div class="result-box"><div class="result-title">回 廊</div>' +
+          '<p>本层重新开始 —— 回到第 <b>1</b> 场再打一遍。</p>' +
+          '<p class="dim">手上的增益、试炼币、分数与血量都<b>原样保留</b>，敌人的数值也不会提升' +
+          '（第 ' + lr.layer + ' 层 · 第 ' + lr.battleNo + '/' + lr.battleCount + ' 场的收益照常入账）。</p></div>',
+          [{ label: '回到本层开头', cls: 'gold', run: () => openEndless() }], { small: true });
+        return;
+      }
       if (rw.milestone) { milestoneModal(rw, cont); return; }
       if (rw.repeat) {
         const rp = rw.repeat;
@@ -983,19 +1030,30 @@
       notice('你还没有任何' + label + '可选，这次强化先留着（之后拿到' + label + '再自动弹出）。', [{ label: '知道了', cls: 'gold', run: () => openEndless() }]);
       return;
     }
+    /* 「已经被虚空铭文附魔过」的要在三选一里标出来（用户口径）：
+     * 它们已经不再占位，再选一次没有额外收益 —— 标出来玩家才不会白选。 */
+    const freeIds = ((Tower.endlessInfo() || {}).run || {}).slotFreeIds || [];
+    const isFree = (id) => freeIds.indexOf(id) >= 0;
+    const doneCount = isPerm ? cands.filter((c) => isFree(c.id)).length : 0;
     /* 按钮只写名字，副标题换行显示（modal 按钮是 esc() 输出，用 \n + white-space:pre-line 换行）。
      * 特殊技能（小宇宙爆发 / 绝对防御 / 龟甲术）不按 Lv 展示，而是按 pickCandidates 给的 note。 */
-    const buttons = cands.map((c) => ({
-      label: c.name + '\n' + (isPerm ? ('×' + (c.stacks || 1) + ' 层') : (c.note || ('Lv' + (c.level || 1)))),
-      cls: 'small pick-buff-btn' + (pending.kind === 'skill' ? '' : ' gold'),
-      run: () => {
-        const r = Tower.applyPickBuff(pending.kind, c.id);
-        if (!r.ok) notice(r.msg || '强化失败。');
-        openEndless();
-      },
-    }));
+    const buttons = cands.map((c) => {
+      const free = isPerm && isFree(c.id);
+      return {
+        label: c.name + '\n' + (isPerm
+          ? ('×' + (c.stacks || 1) + ' 层' + (free ? ' · 已附魔（不占位）' : ''))
+          : (c.note || ('Lv' + (c.level || 1)))),
+        cls: 'small pick-buff-btn' + (free ? ' pick-done' : (pending.kind === 'skill' ? '' : ' gold')),
+        run: () => {
+          const r = Tower.applyPickBuff(pending.kind, c.id);
+          if (!r.ok) notice(r.msg || '强化失败。');
+          openEndless();
+        },
+      };
+    });
     modal(isPerm ? '附魔 · 选一个永久增益' : ('三选一 · ' + label + '强化'), '<p>' + esc(isPerm
       ? '从下面三张里选一个永久增益：它不再占用永久增益位（可叠加的则全部层数一起免疫占位，本局有效）。'
+        + (doneCount ? '标着「已附魔」的已经生效过了 —— 再选一次不会多出收益，优先挑没标的。' : '')
       : (pending.kind === 'skill'
         ? '从下面三个技能里选一个：主动技的触发概率大幅提升；防御技（绝对防御 / 龟甲术）另按被动触发概率加成；'
           + '小宇宙爆发则是「战斗开始后第一招必定放它」（本局有效）。'
@@ -1126,6 +1184,8 @@
   function openShop(revisit) {
     const shop = Tower.shopState();
     if (!shop) { notice('商店还没开张：每通过 5 层开放一次。'); return; }
+    /* 铸币商店与试炼商店共用 run.shop，但界面完全两套（铸币交易 + 免费交换）—— 在这里分流。 */
+    if (shop.mint) { openMintShop(); return; }
     /* 门庭若市（C59）：进门就给试炼币 —— 由 Tower 领取并清零，保证只飘一次字
      *（shopState() 是快照，往它上面写标记不会生效）。 */
     const enterCoins = Tower.claimShopEnterCoins ? Tower.claimShopEnterCoins() : 0;
@@ -1136,13 +1196,18 @@
     const stackableOwned = (s) => s.ownedStacks > 0 && s.canStack;
     const slots = shop.slots.map((s, i) =>
       '<div class="shop-slot ' + rarityCls(s.rarity) + (s.sold ? ' sold' : '') +
-        (stackableOwned(s) ? ' owned-stack' : '') + '"><b>' + esc(s.name) + '</b>' +
+        (stackableOwned(s) ? ' owned-stack' : '') + (s.half ? ' half' : '') + '"><b>' + esc(s.name) + '</b>' +
       '<i>' + RARITY[s.rarity] + ' · ' + (SCOPE[s.kind] || '增益') + '</i><span>' + esc(s.desc) + '</span>' +
+      (s.half ? '<em class="half-hint">讨价还价 · 对折（原价 ' + s.listPrice + ' 币）</em>' : '') +
       (stackableOwned(s) ? '<em class="stack-hint">已有 ×' + s.ownedStacks + ' · 可叠层</em>' : '') +
       (s.sold ? '<em>已购入</em>' : C().btn(s.price + ' 币', 'buy' + i, 'small gold')) + '</div>').join('');
-    const owned = Tower.ownedBuffs('endless').filter((b) => b.kind !== 'instant');
+    /* 出售列表：**按获得先后倒序**（最新拿到的在最上，点开就能卖），被虚空铭文附魔（不占位）
+     * 的一律沉到最后 —— 排序在 Tower.sellListOf 里（跨永久/限次混排），这里只负责渲染。 */
+    const owned = Tower.sellListOf('endless');
     const sellRows = owned.length ? owned.map((b) =>
-      '<div class="shop-sell-row">' + buffTag(b, b.stacks) + C().btn('卖出 +' + b.sellPrice, 'sell' + b.id, 'tiny muted') + '</div>').join('') :
+      '<div class="shop-sell-row' + (b.slotFree ? ' slot-free' : '') + '">' + buffTag(b, b.stacks) +
+      (b.slotFree ? '<em class="slot-free-hint">虚空铭文 · 不占位</em>' : '') +
+      C().btn('卖出 +' + b.sellPrice, 'sell' + b.id, 'tiny muted') + '</div>').join('') :
       '<div class="small-label">还没有可出售的增益</div>';
     const content = '<div class="tower-shop">' +
       '<h2 class="tower-title">试炼商店 <span class="shop-coins">试炼币 ' + shop.coins + '</span></h2>' +
@@ -1165,14 +1230,22 @@
         const nxt = TowerData.rerollExpectation(nextPaid, liveRun);
         const f = (v) => (Math.round(v * 100) / 100).toFixed(2);
         const speed = now.tiltRateMul > 1 ? '（时来运转：提速 ×' + now.tiltRateMul + '）' : '';
+        /* 稀有度收益在 rerollTiltCap（50）那一档封顶：价格还能涨到 70，但期望不再变好。
+         * 界面上要写清楚，别让玩家以为「再加钱就会更好」。 */
+        const cap = Math.max(0, Number((TowerData.SHOP || {}).rerollTiltCap) || 0);
+        const tiltCapped = cap > 0 && nextPaid >= cap && now.tilt >= nxt.tilt - 1e-9;
         return '越贵越好：本次期望史诗 ' + f(now.epics) + ' 件、传奇 ' + f(now.weights[3] * (TowerData.SHOP.slots || 5)) +
-          ' 件' + speed + '；' + (shop.rerollCapped && !shop.rerollFree
-            ? '已到最高价，期望不再提高'
+          ' 件' + speed + '；' + ((shop.rerollCapped && !shop.rerollFree) || tiltCapped
+            ? '已到收益上限，期望不再提高（' + (cap > 0 ? cap + ' 币那一档封顶' : '最高价') + '）'
             : '下次（' + nextPaid + ' 币）期望史诗 ' + f(nxt.epics) + ' 件') +
-          '。当前拥有与已售出的不会再出现';
+          '。当前拥有与已售出的不会再出现' +
+          /* 讨价还价（E14）：刷新出的每一页都会重新打折，写清件数免得玩家以为只有第一页。 */
+          (shop.halfPerPage > 0 ? '。讨价还价：每次刷新出的新一页同样有 ' + shop.halfPerPage + ' 件对折' : '');
       })() + '</span>' +
       C().btn(shop.rerollFree ? '免费刷新' : shop.rerollNextPrice + ' 币刷新', 'reroll', 'small') + '</div></div>' +
-      '<h4>出售增益（回收 40%，限次与永久都可卖）</h4><div class="shop-sell">' + sellRows + '</div>' +
+      '<h4>出售增益（回收 40%，限次与永久都可卖）</h4>' +
+      '<p class="small-label">按<b>获得的先后</b>排列：<b>最新拿到的在最上</b>（不用往下拖就能卖）；被虚空铭文附魔（不占位）的排在最后。</p>' +
+      '<div class="shop-sell">' + sellRows + '</div>' +
       '</div>';
     const p = C().page('challenge', 'stages', content, {
       cls: 'tower-board',
@@ -1207,10 +1280,18 @@
     });
     owned.forEach((b) => on(p, 'sell' + b.id, () => { Tower.sellBuff(b.id); openShop(revisit); }));
     on(p, 'leave', () => {
-      /* 休整商店 / 战后立即进货 / 立即开店 —— 关掉后回去继续打这一层；
+      /* 休整商店 / 战后立即进货（E01）/ 立即开店 —— 关掉后回去继续打这一层；
        * 只有「每 5 层」的结算商店才去结算点。判据由 Tower 给（shopState 里的标记），
-       * 界面不再自己猜层数。 */
-      if (revisit || shop.rest || shop.postBattle || !shop.boundary) { openEndless(); return; }
+       * 界面不再自己猜层数。
+       * **必须真的把店关掉**（Tower.closeShop / continueFromShop 都会收摊）：
+       * 原来这一支只 openEndless() 而没有关店，phase 还停在 'shop' →
+       * 首页按钮继续写「进入试炼商店」→ 玩家点了又进同一家店，看着就像「离不开商店」
+       * （用户报的 bug）。 */
+      if (revisit || shop.rest || shop.postBattle || !shop.boundary) {
+        Tower.closeShop();
+        openEndless();
+        return;
+      }
       Tower.continueFromShop();       // 直接进下一段，不弹结算点窗口
       openEndless();
     });
@@ -1223,6 +1304,125 @@
         '<div class="result-lines">分数 ' + out.score + ' 已入账 · 历史最高 ' + out.best + '</div></div>',
         [{ label: '返回无尽塔', cls: 'gold', run: () => openEndless() }], { small: true });
     });
+  }
+
+  /* ============================================================
+   * 【U14b】无尽：铸币商店（战后 5% 随机小店） —— openMintShop
+   *
+   * 规则（用户口径）：5 层之后的 x2/x3/x4 与 x7/x8/x9 层，每场战斗结束后 5% 概率刷出；
+   * 同一组连续三层最多刷出一次。店里**花铸币买一件**（价格按稀有度固定 0/1/2/3）
+   * 或者**免费拿自己的一件增益换一件**，二者做成其一店就消失（也可以直接送客）。
+   * 免费刷新一次货架，刷新之后就不能再交换了。
+   * ============================================================ */
+
+  /** 铸币商店：买下 / 换完之后的事（店已经收摊）。 */
+  function afterMintAction(text, r) {
+    openEndless();                                    // 先把首页重绘好（店没了）
+    runToast(text);
+    if (r && r.pendingPick) openPickBuff(r.pendingPick);   // 选取型（神兵淬炼等）接着做三选一
+  }
+  /** 永久增益满格时在铸币商店买东西：先选一个拿掉（与试炼商店同一套替换弹窗）。 */
+  function offerMintReplace(index, buff) {
+    offerPermanentReplace({
+      prompt: '要买下【' + esc(buff.name) + '】，先拿掉下面哪一个？',
+      footNote: '被换掉的那个会从构筑里移除（成长类增益的累计也一起清零）',
+      onPick: (b) => {
+        const r = Tower.buyMintSlot(index, b.id);
+        if (!r.ok) { notice(r.msg || '买不了。'); openMintShop(); return; }
+        afterMintAction('买下了【' + r.buff.name + '】（铸币 −' + r.price + '）', r);
+      },
+      onCancel: () => openMintShop(),
+    });
+  }
+  /** 免费交换的确认：换回什么是**当场摇**的，所以这里只确认「要不要拿它去换」。 */
+  function confirmMintSwap(b) {
+    modal('免费交换', '<p>把【' + esc(b.name) + '】（' + (RARITY[b.rarity] || '') + '）拿出去，换回一件新的？</p>' +
+      '<p class="small-label">大概率换回**同稀有度的运营类**增益（普通件有 50% 升成稀有件），' +
+      '小概率换回同稀有度的非运营增益。换完之后这家铸币商店立刻就走。</p>',
+      [{ label: '再想想', cls: 'muted', run: () => openMintShop() },
+       { label: '交换', cls: 'gold', run: () => {
+         const r = Tower.swapMintBuff(b.id);
+         if (!r.ok) { notice(r.msg || '换不了。'); openMintShop(); return; }
+         openEndless();                              // 店已收摊 → 先把首页重绘好
+         modal('交换成功', '<div class="result-box"><div class="result-title win">换到了</div>' +
+           '<p class="dim">拿出去：' + esc(r.fromName) + '（' + (RARITY[r.fromRarity] || '') + '）</p>' +
+           '<p>换回：<b class="q' + (r.buff.rarity || 0) + '">' + esc(r.buff.name) + '</b>' +
+           '（' + (RARITY[r.buff.rarity] || '') + (TowerData.hasTag(r.buff, 'ops') ? ' · 运营类' : '') + '）</p>' +
+           '<p class="small-label">' + esc(TowerData.descOf(r.buff, 'endless')) + '</p></div>',
+           [{ label: '继续冲塔', cls: 'gold', run: () => { if (r.pendingPick) openPickBuff(r.pendingPick); } }], { small: true });
+       } }], { small: true });
+  }
+  function openMintShop(flash) {
+    const shop = Tower.shopState();
+    if (!shop || !shop.mint) { openEndless(); return; }
+    /* 门庭若市（C59）：铸币商店**同样算一次进店**（用户口径），进门就发试炼币。
+     * 与试炼商店同一套领取口径 —— 由 Tower 领一次并清零，界面只飘一次字。 */
+    const enterCoins = Tower.claimShopEnterCoins ? Tower.claimShopEnterCoins() : 0;
+    if (enterCoins > 0) runToast('门庭若市：进店获得 ' + enterCoins + ' 试炼币');
+    const rarityCls = (r) => 'r' + r;
+    const slots = shop.slots.map((s, i) =>
+      '<div class="shop-slot ' + rarityCls(s.rarity) + (s.ops ? ' ops' : '') + (s.sold ? ' sold' : '') + (s.half ? ' half' : '') + '">' +
+      '<b>' + esc(s.name) + '</b>' +
+      '<i>' + (RARITY[s.rarity] || '') + ' · ' + (SCOPE[s.kind] || '增益') + (s.ops ? ' · 运营' : '') + '</i>' +
+      '<span>' + esc(s.desc) + '</span>' +
+      (s.half ? '<em class="half-hint">讨价还价 · 对折（原价 ' + s.listPrice + ' 铸币）</em>' : '') +
+      (s.sold ? '<em>已购入</em>'
+        : C().btn(s.price > 0 ? (s.price + ' 铸币') : '免费拿走', 'mintbuy' + i, 'small gold')) + '</div>').join('');
+    /* 交换列表用与出售列表同一套排序（最新拿到的在最上、附魔不占位沉最后）：都是「挑自己的一条增益」。 */
+    const owned = Tower.sellListOf('endless');
+    const swapOpen = !!shop.swapAllowed;
+    const swapRows = owned.length ? owned.map((b) =>
+      '<div class="shop-sell-row' + (b.slotFree ? ' slot-free' : '') + '">' + buffTag(b, b.stacks) +
+      (b.slotFree ? '<em class="slot-free-hint">虚空铭文 · 不占位</em>' : '') +
+      (swapOpen ? C().btn('拿它交换', 'mintswap' + b.id, 'tiny')
+        : '<em class="mint-locked">已刷新 · 不可交换</em>') + '</div>').join('')
+      : '<div class="small-label">还没有可以交换的永久 / 限次增益</div>';
+    const content = '<div class="tower-shop mint">' +
+      '<h2 class="tower-title">铸币商店 <span class="shop-coins">铸币 ' + shop.retryToken + '</span>' +
+        '<span class="mint-coins">试炼币 ' + Math.max(0, Math.floor(Number(shop.coins) || 0)) + '</span></h2>' +
+      '<p class="mint-lead">战后偶遇的流动商人：<b>花铸币买走一件</b>，或者<b>拿自己的一件增益免费换一件</b> —— ' +
+        '做成其中任何一件，他立刻就走（也可以直接送客）。</p>' +
+      (flash ? '<p class="mint-flash">' + esc(flash) + '</p>' : '') +
+      '<div class="shop-shelf">' + slots + '</div>' +
+      '<div class="shop-extra">' +
+      '<div class="shop-slot reroll' + (shop.rerollFree ? '' : ' sold') + '"><b>刷新货架</b>' +
+      '<i>' + (shop.rerollFree ? '免费刷新 · 还剩 1 次' : '免费刷新已用掉') + '</i>' +
+      '<span>' + (shop.rerollFree
+        ? '重新摇一车货（稀有度分布不变，普通档概率依旧被压低）。<b>刷新之后就不能再用「免费交换」了。</b>'
+        : '这支商队不再接受交换，只能挑货或送客。') +
+        (shop.halfPerPage > 0 ? '<b>讨价还价：新一页同样有 ' + shop.halfPerPage + ' 件对折。</b>' : '') + '</span>' +
+      (shop.rerollFree ? C().btn('免费刷新', 'mintreroll', 'small') : '<em>已刷新</em>') + '</div>' +
+      '<div class="shop-slot price"><b>价格表</b><i>按稀有度固定 · 不吃折扣</i>' +
+      '<span>普通 ' + shop.mintPrices[0] + ' / 稀有 ' + shop.mintPrices[1] + ' / 史诗 ' + shop.mintPrices[2] +
+        ' / 传奇 ' + shop.mintPrices[3] + ' 铸币（普通件是赠品，0 铸币）。' +
+        '铸币可在试炼商店左下角用 50 试炼币换 1 枚，E09 / E10 也会给。</span></div>' +
+      '</div>' +
+      '<h4>' + (swapOpen ? '免费交换：选一件拿出去，换回一件同档的' : '免费交换已不可用（货架刷新过了）') + '</h4>' +
+      '<p class="small-label">大概率换回同稀有度的<b>运营类</b>增益（普通件有 50% 升成稀有件），' +
+        '小概率换回同稀有度的非运营增益。永久与限次都能拿去换（选中后整个条目一起换走）。</p>' +
+      '<div class="shop-sell">' + swapRows + '</div>' +
+      '</div>';
+    const p = C().page('challenge', 'stages', content, { cls: 'tower-board',
+      right: '<span class="footer-right">' + C().btn('继续战斗', 'mintleave', 'gold') + '</span>' });
+    bindTips(p);
+    /* 页脚「返回」= **只是回上一页，店不收摊**（用户口径）：回到无尽首页后按钮仍写「进入铸币商店」，
+     * 想好了再进来买/换/刷新都行。真正让这家店消失的只有三件事：
+     * 完成一次购买、完成一次交换、或者点这里的「继续战斗」。 */
+    back(p, () => openEndless());
+    shop.slots.forEach((s, i) => on(p, 'mintbuy' + i, () => {
+      const r = Tower.buyMintSlot(i);
+      if (r && r.needsReplace) { offerMintReplace(i, r.buff); return; }
+      if (!r.ok) { notice(r.msg || '买不了。'); return; }
+      afterMintAction('买下了【' + r.buff.name + '】（铸币 −' + r.price + '，剩 ' + r.left + ' 枚）', r);
+    }));
+    on(p, 'mintreroll', () => {
+      const r = Tower.rerollMintShop();
+      if (!r.ok) { notice(r.msg || '刷新失败。'); return; }
+      openMintShop('货架换了一批 —— 这支商队不再接受交换了。');
+    });
+    owned.forEach((b) => on(p, 'mintswap' + b.id, () => confirmMintSwap(b)));
+    /* 「继续战斗」：这家店到此为止（收摊）→ 回首页继续打。 */
+    on(p, 'mintleave', () => { Tower.leaveMintShop(); openEndless(); });
   }
 
   /* ============================================================
@@ -1290,5 +1490,5 @@
   /* ============================================================
    * 【U17】模块导出 —— window.TowerUI
    * ============================================================ */
-  window.TowerUI = { openTower, openEndless };
+  window.TowerUI = { openTower, openEndless, openMintShop, openPickBuff };
 })();

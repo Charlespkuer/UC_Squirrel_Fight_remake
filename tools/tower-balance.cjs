@@ -434,11 +434,11 @@ function autoPick(ctx, mode) {
     // 第 1 项：buff 改成「限次 / 永久」两分法 + 即时经济类
     /* 本轮（第 3/6/9 项）新增 5 个：E07/E08（即时·削敌方生命上限）、
      * C34/C35/C36（永久·空槽攻击 / 永久数攻击 / 商店消费成长）→ 58 → 63。 */
-    t('无尽池：限次 29 / 永久 40 / 即时 5（共 74，含环境对抗三档）+ 8 个无尽专属', ctx.TowerData.BUFFS.length === 74 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 29 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 40 &&
-      ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 5 &&
-      ctx.TowerData.BUFFS.filter((b) => ctx.TowerData.hasTag(b, 'endless') && !ctx.TowerData.hasTag(b, 'tower')).length === 8);
+    t('增益总表：限次 44 / 永久 47 / 即时 11（共 102）+ 44 个无尽专属', ctx.TowerData.BUFFS.length === 102 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'limited').length === 44 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'permanent').length === 47 &&
+      ctx.TowerData.BUFFS.filter((b) => b.kind === 'instant').length === 11 &&
+      ctx.TowerData.BUFFS.filter((b) => ctx.TowerData.hasTag(b, 'endless') && !ctx.TowerData.hasTag(b, 'tower')).length === 44);
     t('主塔池只吃限次且非无尽专属', ctx.TowerData.towerPool.every((b) => b.kind === 'limited' && !(ctx.TowerData.hasTag(b, 'endless') && !ctx.TowerData.hasTag(b, 'tower'))));
     t('单场 buff 加强（蓄力一击 40% / 血饮狂刀 45%）',
       ctx.TowerData.BUFF_BY_ID.N01.mods.powerMul === 0.40 && ctx.TowerData.BUFF_BY_ID.N06.mods.lifestealPct === 0.45);

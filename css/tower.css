@@ -319,7 +319,38 @@
 .shop-slot.reroll { border-color: #a08ac0; background: #f8f5ff; }
 .shop-sell { display: flex; flex-direction: column; gap: 8px; max-height: 170px; overflow-y: auto; }
 .shop-sell-row { display: flex; align-items: center; gap: 12px; }
+/* 虚空铭文附魔过（不占位）的那几条：排在最后，给个淡提示免得玩家以为排序坏了。 */
+.shop-sell-row.slot-free { opacity: 0.86; }
+.shop-sell-row .slot-free-hint {
+  padding: 1px 8px; border-radius: 999px; font-size: 17px; font-style: normal;
+  color: #5a4a8a; background: #efeaff; border: 1px solid #cfc2f0;
+}
 .tower-shop h4 { margin: 12px 0 8px; font-size: 24px; color: #7a4a18; }
+
+/* ---------- 无尽：铸币商店（战后 5% 随机小店） ---------- */
+.tower-shop.mint { border-left: 6px solid #c9a227; padding-left: 10px; }
+.tower-shop.mint .shop-coins { color: #9a6b00; }
+/* 铸币商店标题上的试炼币余额（门庭若市 C59 现在进店也发试炼币，所以要能看见）。 */
+.tower-shop.mint .mint-coins { float: right; margin-right: 18px; font-size: 22px; color: #8a6a3a; }
+.mint-lead { margin: 6px 0 10px; font-size: 20px; line-height: 1.5; color: #765432; }
+.mint-flash {
+  margin: 0 0 10px; padding: 6px 12px; border-radius: 12px; font-size: 19px;
+  color: #7a4a18; background: #fdf3d8; border: 2px dashed #d9bd88;
+}
+.shop-slot.ops { border-color: #c9a227; background: #fffdf2; }
+.shop-slot.ops i { color: #9a6b00; }
+.shop-slot.price { border-color: #c9a227; background: #fdf8e6; }
+.mint-locked { color: #a98a5c; font-size: 18px; }
+
+/* ---------- 讨价还价（E14）：对折的货架格与待兑现提示 ---------- */
+.shop-slot.half { border-color: #4b9e6a; box-shadow: 0 0 0 3px #d6f2df inset; background: #f4fdf7; }
+.shop-slot .half-hint { color: #1f6b42; font-weight: 700; font-size: 18px; text-align: center; }
+.buff-pending { margin: 4px 0 2px; }
+.pending-chip {
+  display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px; border-radius: 12px;
+  font-size: 18px; color: #1f6b42; background: #eafaf0; border: 2px solid #8fd3a9; cursor: help;
+}
+.pending-chip i { font-style: normal; font-size: 16px; color: #4b8a66; }
 
 /* ---------- 结算点 ---------- */
 .checkpoint-box { display: flex; flex-direction: column; gap: 14px; }
@@ -693,6 +724,8 @@
 
 /* 三选一强化按钮：名字一行、等级一行，按钮自适应宽度 */
 .uc-button.pick-buff-btn { white-space: pre-line; line-height: 1.25; text-align: center; min-width: 200px; padding: 6px 16px; }
+/* 「已经被虚空铭文附魔过」的那张：标出来（再选一次没有额外收益），配色与可选的区分开。 */
+.uc-button.pick-buff-btn.pick-done { border-color: #7c6bb0; background: #f2eeff; color: #4a3d78; }
 
 /* ---------- 本轮第 3 / 4 / 7 项新增的小件 ---------- */
 /* 选牌弹窗里的「本段机制」一行（和 .hex-next 同一套紫色系） */

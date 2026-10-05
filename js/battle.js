@@ -70,6 +70,27 @@
   /* ============================================================
    * 【BT2】NPC 头像与动画名映射
    * ============================================================ */
+  /* 右下角操作区的布局（纯函数，导出给测试直接核对）。
+   * 原版字面坐标 (983,609) 的 164x60 框会压到血条，所以基准块用 190x70：
+   *   · 只有倍速 / 只有跳过 → 该键占满整块（与旧版逐像素一致）；
+   *   · 两个都要 → 横切成两半，中间留 8px 缝（无尽塔 30 层起）。
+   * 返回 { rects: { speed, skip }, both, base }，rect 为 null 表示这个键不显示。 */
+  function cornerLayout(speedToggle, allowSkip) {
+    const base = { x: 964, y: 605, w: 190, h: 70 };
+    if (speedToggle && allowSkip) {
+      const gap = 8, w = Math.floor((base.w - gap) / 2);
+      return {
+        both: true, base,
+        rects: {
+          speed: { x: base.x, y: base.y, w: w, h: base.h },
+          skip: { x: base.x + w + gap, y: base.y, w: base.w - w - gap, h: base.h },
+        },
+      };
+    }
+    if (speedToggle) return { both: false, base, rects: { speed: base, skip: null } };
+    if (allowSkip) return { both: false, base, rects: { speed: null, skip: base } };
+    return { both: false, base, rects: { speed: null, skip: null } };
+  }
   function makeAvatar(npcType) {
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 122;
     const ctx = canvas.getContext('2d');
@@ -146,26 +167,40 @@
     const floaters = [], sleepers = new Set();
     let stopped = false, skipped = false, ending = false, raf = 0, round = 99, countdown = null;
     let last = performance.now(), shake = 0, combatStarted = false;
-    // 右下角那颗按钮的绘制与点击区共用这个矩形。原版字面坐标 (983,609) 的 164x60 框会把
-    const skipRect = { x: 964, y: 605, w: 190, h: 70 };
+    /* 右下角操作区：绘制与点击区共用同一组矩形。
+     * 原版字面坐标 (983,609) 的 164x60 框会把按钮压出血条，所以用 190x70。
+     * 2026-10：无尽塔 30 层起**同时**要倍速键与跳过键 —— 两个都在时把这块横切成两半
+     * （中间留 8px 缝），只有一个时仍占满整块，与旧版逐像素一致。 */
     const speedToggle = !!opts.speedToggle;
     const allowSkip = opts.allowSkip !== false;
     let speed = 1;
-    const cornerLabel = () => (speedToggle ? speed + '×' : '跳过');
+    const corner = cornerLayout(speedToggle, allowSkip);
+    const cornerRects = corner.rects;
+    const cornerBoth = corner.both;
+    /* 两个键时字号要小一档（190 的一半装不下 46px 的两个字）。 */
+    const cornerFont = cornerBoth ? 34 : 46;
+    const cornerVisible = !!(cornerRects.speed || cornerRects.skip);
     const previousClick = canvas.onclick;
     const ui = document.getElementById('ui');
     const pickups = opts.collectDrops && !opts.result && window.BattleDrops ? BattleDrops.create({ root: ui, random: opts.dropRandom, kind: opts.kind }) : null;
-    const skipButton = document.createElement('button');
-    skipButton.type = 'button';
-    skipButton.setAttribute('aria-label', speedToggle ? '切换战斗速度' : '跳过战斗');
-    skipButton.textContent = cornerLabel();
-    // 无障碍点击层跟着 skipRect 走，避免两处坐标各改一半而错位。
-    const rectStyle = ['left:' + (skipRect.x / W * 100).toFixed(3) + '%', 'top:' + (skipRect.y / H * 100).toFixed(3) + '%',
-      'width:' + (skipRect.w / W * 100).toFixed(3) + '%', 'height:' + (skipRect.h / H * 100).toFixed(3) + '%'].join(';');
-    skipButton.style.cssText = 'position:absolute;' + rectStyle + ';padding:0;border:0;background:transparent;color:transparent;cursor:pointer;pointer-events:auto;z-index:20;';
-    if (ui && (allowSkip || speedToggle)) ui.appendChild(skipButton);
+    // 无障碍点击层跟着矩形走，避免两处坐标各改一半而错位。
+    const rectStyleOf = (r) => ['left:' + (r.x / W * 100).toFixed(3) + '%', 'top:' + (r.y / H * 100).toFixed(3) + '%',
+      'width:' + (r.w / W * 100).toFixed(3) + '%', 'height:' + (r.h / H * 100).toFixed(3) + '%'].join(';');
+    const cornerDom = [];
+    function addCornerButton(rect, label, aria) {
+      if (!ui || !rect) return null;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('aria-label', aria);
+      b.textContent = label;
+      b.style.cssText = 'position:absolute;' + rectStyleOf(rect) + ';padding:0;border:0;background:transparent;color:transparent;cursor:pointer;pointer-events:auto;z-index:20;';
+      ui.appendChild(b); cornerDom.push(b);
+      return b;
+    }
+    const speedButton = addCornerButton(cornerRects.speed, speed + '×', '切换战斗速度');
+    const skipButton = addCornerButton(cornerRects.skip, '跳过', '跳过战斗');
     function clean() {
-      cancelAnimationFrame(raf); skipButton.remove();
+      cancelAnimationFrame(raf); for (const b of cornerDom) b.remove();
       if (pickups) pickups.close();
       if (canvas.onclick === onClick) canvas.onclick = previousClick;
       canvas.style.cursor = '';
@@ -174,21 +209,26 @@
     }
     const controller = { cancel() { stopped = true; clean(); }, skip() { if (!ending && !skipped && !stopped) { skipped = true; if (pickups) pickups.skip(); for (const wake of [...sleepers]) wake(); } }, result };
     activeController = controller;
-    /** 右下角按钮被按下的动作：倍速模式切速度，否则跳过。 */
-    function cornerAction() {
-      if (!speedToggle) { controller.skip(); return; }
-      if (ending || stopped) return;
+    /** 右下角「倍速」键：1× → 2× → 3× → 1× 循环。 */
+    function speedAction() {
+      if (ending || stopped || !speedButton) return;
       speed = speed === 1 ? 2 : speed === 2 ? 3 : 1;
-      skipButton.textContent = cornerLabel();
-      skipButton.setAttribute('aria-label', '切换战斗速度（当前 ' + speed + '×）');
+      speedButton.textContent = speed + '×';
+      speedButton.setAttribute('aria-label', '切换战斗速度（当前 ' + speed + '×）');
     }
-    skipButton.onclick = cornerAction;
+    /** 右下角「跳过」键：直接跳到结算（结果早已由模拟器算好，跳过不改变胜负）。 */
+    function skipAction() { controller.skip(); }
+    if (speedButton) speedButton.onclick = speedAction;
+    if (skipButton) skipButton.onclick = skipAction;
     function onClick(event) {
       const rect = canvas.getBoundingClientRect();
       const x = (event.clientX - rect.left) * W / rect.width, y = (event.clientY - rect.top) * H / rect.height;
-      if (x >= skipRect.x && x <= skipRect.x + skipRect.w && y >= skipRect.y && y <= skipRect.y + skipRect.h) cornerAction();
+      for (const [r, act] of [[cornerRects.speed, speedAction], [cornerRects.skip, skipAction]]) {
+        if (!r) continue;
+        if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) { act(); return; }
+      }
     }
-    canvas.onclick = (allowSkip || speedToggle) ? onClick : null;
+    canvas.onclick = cornerVisible ? onClick : null;
     const aborted = () => stopped || skipped;
     function wait(ms) {
       if (aborted()) return Promise.resolve();
@@ -349,16 +389,20 @@
         ctx.roundRect(W / 2 - bw / 2, 160, bw, 40, 20); ctx.stroke();
         Engine.text(ctx, label, W / 2, 188, { size: 22, align: 'center', color: '#f4e6ff', stroke: false });
       }
-      if (!ending && (allowSkip || speedToggle)) {
-        const b = skipRect;
-        const fast = speedToggle && speed > 1;
-        rounded(b.x, b.y + 5, b.w, b.h, 34, fast ? '#0d2a45' : '#23350a');
-        const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
-        if (fast) { g.addColorStop(0, '#8fd8ff'); g.addColorStop(.4, '#4aa8ee'); g.addColorStop(1, '#1c6fbe'); }
-        else { g.addColorStop(0, '#cefa79'); g.addColorStop(.4, '#98df41'); g.addColorStop(1, '#6cac18'); }
-        rounded(b.x, b.y, b.w, b.h, 34, g);
-        ctx.lineWidth = 4; ctx.strokeStyle = fast ? '#123c63' : '#374f11'; ctx.stroke();
-        Engine.text(ctx, cornerLabel(), b.x + b.w / 2, b.y + 52, { size: 46, align: 'center', color: '#fff', strokeColor: fast ? '#123c63' : '#432715', lineWidth: 7 });
+      if (!ending && cornerVisible) {
+        /* 画一个圆角键：fast = 倍速（蓝色，>1× 时才亮）；否则是跳过（绿色）。 */
+        const drawKey = (b, label, fast) => {
+          rounded(b.x, b.y + 5, b.w, b.h, 34, fast ? '#0d2a45' : '#23350a');
+          const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
+          if (fast) { g.addColorStop(0, '#8fd8ff'); g.addColorStop(.4, '#4aa8ee'); g.addColorStop(1, '#1c6fbe'); }
+          else { g.addColorStop(0, '#cefa79'); g.addColorStop(.4, '#98df41'); g.addColorStop(1, '#6cac18'); }
+          rounded(b.x, b.y, b.w, b.h, 34, g);
+          ctx.lineWidth = 4; ctx.strokeStyle = fast ? '#123c63' : '#374f11'; ctx.stroke();
+          Engine.text(ctx, label, b.x + b.w / 2, b.y + (cornerBoth ? 47 : 52),
+            { size: cornerFont, align: 'center', color: '#fff', strokeColor: fast ? '#123c63' : '#432715', lineWidth: 7 });
+        };
+        if (cornerRects.speed) drawKey(cornerRects.speed, speed + '×', speed > 1);
+        if (cornerRects.skip) drawKey(cornerRects.skip, '跳过', false);
       }
     }
     function render(now) {
@@ -539,7 +583,7 @@
         round = Math.max(0, 99 - i); await playRound(result.rounds[i]);
       }
       if (stopped) return;
-      ending = true; skipButton.remove();
+      ending = true; for (const b of cornerDom) b.remove();
       if (pickups) pickups.close();
       const finalRound = result.rounds[result.rounds.length - 1]; if (finalRound) applyHp(finalRound);
       // skip 唤醒当前动作后直接完成；自然结束保留倒地末帧和胜利演出。
@@ -572,5 +616,6 @@
    * ============================================================ */
   window.Battle = {
     /* 内部纯函数（供 tools/*.cjs 直接单测；游戏逻辑不依赖它） */
-    _applyRoundCaps: applyRoundCaps, run, makeAvatar, REGIONS, weaponLabelFor, isThrowing };
+    _applyRoundCaps: applyRoundCaps, _cornerLayout: cornerLayout,
+    run, makeAvatar, REGIONS, weaponLabelFor, isThrowing };
 })();

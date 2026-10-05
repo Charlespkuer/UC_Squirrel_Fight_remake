@@ -7,7 +7,7 @@
  *   fighter.mech: NPC 专属机制 id 数组（berserk/rhythmCrit/regen/thorns/
  *                 poison/freeze/wolf/lifesteal/shell/devour）
  *                 题面（最终位对手，玩家式 AI 也生效）：
- *                 trialCore（第 7 次行动起受伤 −70%、力敏速 +50%）
+ *                 trialCore（每过一回合 +10% 减伤、第 8 回合起封顶 70%；第 7 次行动起力敏速 +50%）
  *                 trialMoss（每回合回 6% 最大生命，配 thorns 反弹 15%）
  *                 trialDry（封死玩家治疗，每 3 次行动吸取玩家 10% 当前生命）
  *                 trialFrost（第 1/4/7… 次行动冻结玩家）
@@ -46,25 +46,34 @@
   const RULES = Object.freeze({
     // 师父驾到：生命不高于 50% 时开始尝试救场（原 35%），每场至多一次
     masterHpRatio: 0.50, masterChance: 35,
-    /* 出手时的「二次使用」概率（%）。做法是两层池子：本场没用过的武器/技能优先，
-     * 只有这个概率才回头用旧的那把/那个，所以「用过的」实际出场率被明显压低。
-     * 现在按技能分档（见 repeatBySkill）：越强的技能，二次及以后越难被再放一次。
-     * 来点松果（17）单独取最低档 repeatSnack，必须严格低于其它武器与技能
-     * （tools/test-combat-rules.cjs 有断言锁住这一点）。 */
-    repeatWeapon: 25, repeatSkill: 20, repeatSnack: 5,
-    /* 二次及以后使用概率（%）。基准 20 = repeatSkill。
-     *   · medium：本来最常见、影响最大的三个（色诱/野球拳/来点松果）中幅下调；
-     *   · small ：通灵召唤（幸运一击本次再单独下调，见 repeatBySkill 的 23）。
-     * 这两个档位都必须低于 repeatSkill，且 repeatSnack 仍是最低。 */
-    repeatSkillMedium: 13, repeatSkillSmall: 13,
-    /* 23 = 幸运一击：本次单独再下调（从 17% 降到 10%）——
-     * 它「必中 + 1~6 倍伤害」，重复触发时方差极大，是所有技能里最该压一档的。 */
-    repeatBySkill: { 8: 13, 12: 13, 15: 13, 23: 10 },
+    /* 出手时的「二次使用」权重（%）。做法是两层池子：本场没用过的武器/技能优先，
+     * 只有这个权重才回头用旧的那把/那个，所以「用过的」实际出场率被明显压低。
+     * 2026-10 用户口径，简化为三档（不再按技能逐个分档）：
+     *   · 武器：用过之后一律 repeatWeapon（30）；
+     *   · 来点松果（17）/ 野球拳（12）：第 1 次用过后 repeatSpecialFirst（15），
+     *     第 2 次及以后 repeatSpecialAgain（5，到底不再下降）；
+     *   · 其余技能：用过之后一律 repeatSkill（20）。
+     * 「刚用过的那一个再 ×LAST_PENALTY(0.3)」对以上三档都生效。 */
+    repeatWeapon: 30,
+    repeatSkill: 20,
+    repeatSpecialFirst: 15, repeatSpecialAgain: 5,
+    /* 徒手攻击的基准权重：与武器/技能的候选权重放进同一个池子竞争（不再是固定百分比）。
+     *   · 持有的武器/技能越多 → 工具权重总和越大 → 徒手占比越低；
+     *   · 全部用过一遍之后工具权重整体掉到 5~30 → 徒手占比自动抬高；
+     *   · 只有一个主动技、且已经用过时，它的权重降到二次使用概率，
+     *     不会再出现「类型抽中技能 → 只能放它」的强制复用。
+     * 30 ≈ 「1 武器 + 1 技能（各 100 权重）」时徒手约 13%，与旧的固定 12% 接近。 */
+    commonAttackWeight: 30,
+    /* 三侠等纯 NPC 分支（没有武器池）的固定档位：30% 技能 / 70% 普攻。 */
+    npcSkillChance: 30,
     jueDuiChance: 22, jueDuiAgain: 13,
     jueDuiDecay: 0.7, jueDuiMin: 2,
     shellFirst: 35, shellAgain: 20,
     xhSpeedShare: 0.35,
     skillCooldown: 2,
+    /* 题面·熔核·炽壳：**每过一回合**叠一层减伤（+10%/层），第 8 回合起封顶 70%。
+     * 层数上限 = 0.70 / 0.10 = 7（coreReduceOf 与 mechDesc 共用同一份数字）。 */
+    coreReducePerRound: 0.10, coreReduceCap: 0.70,
     /* 题面·蚀骨：玩家每次出手叠 1 层「攻击 −3%」，这个上限同时被代码与 NPC 文案使用 ——
      * 抽成常量，免得一边改、另一边忘（此前 10 层写在两处）。 */
     erodeMax: 15,
@@ -125,7 +134,8 @@
       side, name: f.name, level: stat(f.level, 1), npcType: f.npcType || null,
       power: stat(f.power, 1), agility: stat(f.agility, 1), speed: stat(f.speed, 1),
       maxHp: fullHp, hp: Math.max(1, Math.min(stat(f.hp, 1), fullHp)),
-      weapons, skills, usedWeapons: {}, usedSkills: {}, lastWeaponId: null, lastSkillId: null,
+      weapons, skills, usedWeapons: {}, usedSkills: {}, /* 每个技能「本场用过几次」——野球拳（12）的快速衰减要用它。 */
+      skillUseCount: {}, lastWeaponId: null, lastSkillId: null,
       /* 完整技能表的稳定顺序（skills 是「id → 等级」的对象，不是数组！）。
        * 原版这里写的是 skills[id] 下标访问，永远取不到东西 —— 所以固定循环的技能
        * 只能退化成「取 actives 里最小的 id」，元素术鼠因此整场都在放来点松果。 */
@@ -153,6 +163,9 @@
       /* 治疗量倍率（塔侧赛前写入：涌泉烙印 C52 按层给 +10%/层，损毁层 +20%）。
        * 战斗中被「枯泉」这类机制清零 = 完全封疗。所有治疗都走 healOf()，所以只要这里读进来就全生效。 */
       healMul: Number.isFinite(Number(f.healMul)) && Number(f.healMul) >= 0 ? Number(f.healMul) : 1,
+      /* 秘技通神（C33）的「该技能触发概率 +N%」专用通道：{ 技能id: 比例 }。
+       * 与 effects 分开，避免和装备词条/武器效果槽的编号撞车。 */
+      skillBoost: f.skillBoost && typeof f.skillBoost === 'object' ? Object.assign({}, f.skillBoost) : {},
       usedUlt: false, acted: false, usedFreeSkill: false,
       swordDodge: 0, meteorDodge: 0, debuffs: { power: 0, agility: 0, speed: 0 },
       dot: null, // {dmg, rounds} 或 {pct, rounds}（按当前生命比例扣血）
@@ -164,7 +177,7 @@
       // 松鼠对手的固定出招循环（tower-data.js 定义）：['common'|'weapon'|'skill', …]
       pattern: Array.isArray(f.pattern) && f.pattern.length ? f.pattern.slice() : null,
       patternStep: 0,
-      mechState: { basePower: stat(f.power, 1), berserk: false, core: false, bfStep: 0, erode: 0 },
+      mechState: { basePower: stat(f.power, 1), berserk: false, core: false, coreStack: 0, bfStep: 0, erode: 0 },
       shell: Math.round(fullHp * ((mech.includes('shell') ? 0.30 : 0) + (mods && mods.shellPct || 0))),
       pendingNote: null,
     };
@@ -364,19 +377,31 @@
   /**
    * 出手权重（武器/技能共用口径，并导出给测试直接校验）：
    *   - 本场没用过 → UNUSED_WEIGHT（远高于用过的，所以优先，但不是绝对优先）；
-   *   - 已经用过   → 它的「二次使用概率」；来点松果（17）取最低档 repeatSnack；
+   *   - 已经用过   → 它的「二次使用权重」（见下面的三档口径）；
    *   - 上一回合刚用过的那一个再乘 LAST_PENALTY，避免连着重复同一把/同一个。
-   * 「所有技能的二次使用概率被调低」和「来点松果最低」两条都落在这里。
    */
-  /** 某个技能「二次及以后」的使用概率（%）。未列出的用基准 repeatSkill。 */
-  function repeatRateOf(id) {
-    if (id === 17) return RULES.repeatSnack;                 // 来点松果：最低档，不许被别档追平
-    const tier = RULES.repeatBySkill[id];
-    return Number.isFinite(tier) ? tier : RULES.repeatSkill;
+  /** 某个技能「已经用过 count 次之后，下一次再放」的权重（%）。2026-10 三档口径：
+   *   · 来点松果（17）/ 野球拳（12）：第 1 次用过后 15，第 2 次及以后 5（到底，不再下降）；
+   *   · 其余技能：一律 20。
+   *  count = 本场**已经用过**的次数（0 表示还没用过 —— 那时调用方直接用 UNUSED_WEIGHT，不走这里）。
+   *  绝对防御是另一套（jueDuiChanceOf：22/13/9/6/4/3/2 的 ×0.7 慢衰减），不进出手池。 */
+  function repeatRateOf(id, count) {
+    const n = Math.max(0, Math.floor(Number(count) || 0));
+    if (id !== 12 && id !== 17) return RULES.repeatSkill;
+    return n <= 1 ? RULES.repeatSpecialFirst : RULES.repeatSpecialAgain;
+  }
+  /** 某个技能本场已经用过几次（玩家与敌人都记在各自的 skillUseCount 上）。 */
+  function skillUseCountOf(att, id) {
+    if (!att || !att.skillUseCount) return 0;
+    return Math.max(0, Math.floor(Number(att.skillUseCount[id]) || 0));
   }
   function skillWeight(att, id) {
-    let w = att.usedSkills[id] ? repeatRateOf(id) : UNUSED_WEIGHT;
+    let w = att.usedSkills[id] ? repeatRateOf(id, skillUseCountOf(att, id)) : UNUSED_WEIGHT;
     if (att.lastSkillId === id) w *= LAST_PENALTY;
+    /* 秘技通神（C33）：该技能的触发概率 ×(1+加成)。走独立的 skillBoost 通道，
+     * 不再借用 effects（那是装备词条/武器效果槽的编号空间，会造成串味）。 */
+    const boost = Number(att.skillBoost && att.skillBoost[id]) || 0;
+    if (boost > 0) w *= 1 + boost;
     return w;
   }
   function weaponWeight(att, id) {
@@ -386,32 +411,38 @@
   }
 
   /** 技能选择：按 skillWeight 加权 → 没用过的优先、二次使用被压掉、来点松果最低。 */
-  /* ---------- 出手类型概率（百分比；武器 / 技能 / 普攻 划分） ----------
-   * 默认：武器 48 / 技能 40 / 普攻 12（普攻意愿比原来更低一档）。
-   * 武器与技能**都至少用过一遍**之后：武器 70 / 技能 18 / 普攻 12 ——
-   *   技能比武器强力，用过一轮之后不该再被反复放，所以把权重挪给武器。
-   * 只有武器 / 只有技能时是 78/22、70/30；
-   * 三侠 NPC（npcAction）没有武器池，用它自己那一行 70/30，行为与本项改动前一致。 */
-  const KIND_BOTH = [48, 88];
-  const KIND_BOTH_ALL_USED = [70, 88];
-  const KIND_WEAPON_ONLY = [78, 100];
-  const KIND_SKILL_ONLY = [70, 100];
-  const KIND_NPC_SKILL_ONLY = [30, 100];
-  /** 一次 Math.random() 决定出手类型（和原来 chance() 的消耗一致，不影响既有随机序列）。 */
-  function pickKind(canWeapon, canSkill, allUsed, npcSkillOnly) {
-    const roll = Math.random() * 100;
-    if (canWeapon && canSkill) {
-      const t = allUsed ? KIND_BOTH_ALL_USED : KIND_BOTH;
-      return roll < t[0] ? 'weapon' : roll < t[1] ? 'skill' : 'common';
-    }
-    if (canWeapon) return roll < KIND_WEAPON_ONLY[0] ? 'weapon' : 'common';
-    if (canSkill) return roll < (npcSkillOnly ? KIND_NPC_SKILL_ONLY[0] : KIND_SKILL_ONLY[0]) ? 'skill' : 'common';
+  /* ---------- 出手类型：武器 / 技能 / 徒手（权重竞争，不再是固定百分比） ----------
+   * 把两边的**实际候选权重**加总，再和「徒手」权重一起抽一次：
+   *   · 候选越多 → 工具总权重越大 → 徒手越少（持有的武技数量直接决定普攻欲望）；
+   *   · 全部用过一遍 → 每个候选的权重掉到二次使用概率（5~25）→ 徒手占比自然抬高；
+   *   · 只剩一个主动技时，它用过之后的份额就是它的二次使用概率，
+   *     不会因为「类型落在技能上」而被强行复用（修掉旧固定档位的那个副作用）。
+   * 抽签仍然只消耗一次 Math.random()，所以既有的随机序列长度不变。 */
+  function pickKind(att, weapons, actives) {
+    let weaponSum = 0;
+    for (const w of weapons || []) weaponSum += weaponWeight(att, w.id);
+    let skillSum = 0;
+    for (const id of actives || []) skillSum += skillWeight(att, id);
+    const total = weaponSum + skillSum + RULES.commonAttackWeight;
+    const roll = Math.random() * total;
+    if (roll < weaponSum) return 'weapon';
+    if (roll < weaponSum + skillSum) return 'skill';
     return 'common';
   }
-  /** 本场的武器与「当前可用的主动技能」是否都已经至少用过一次。 */
-  function allToolsUsed(att, actives) {
-    if (!att.weapons.length || !actives.length) return false;
-    return att.weapons.every((w) => att.usedWeapons[w.id]) && actives.every((id) => att.usedSkills[id]);
+  /** 纯 NPC（三侠）没有武器池，沿用固定档位 30% 技能 / 70% 普攻。 */
+  function pickNpcKind() {
+    return Math.random() * 100 < RULES.npcSkillChance ? 'skill' : 'common';
+  }
+
+  /** 出手类型的三份权重（供测试/调参直接核对，不用统计近似）。 */
+  function kindWeights(att, weapons, actives) {
+    let weapon = 0;
+    for (const w of weapons || []) weapon += weaponWeight(att, w.id);
+    let skill = 0;
+    for (const id of actives || []) skill += skillWeight(att, id);
+    const common = RULES.commonAttackWeight;
+    const total = weapon + skill + common;
+    return { weapon, skill, common, total, weaponShare: weapon / total, skillShare: skill / total, commonShare: common / total };
   }
 
   /** 固定循环出招：按「技能表的轮转顺序」依次放技能，缺一个就顺延到下一个能用的。
@@ -430,6 +461,16 @@
   }
   function pickSkill(att, actives) {
     return pickWeighted(actives, (id) => skillWeight(att, id));
+  }
+  /** 野球拳（12）的闸门：**每个战斗单位都遵循**（玩家、固定循环的敌人、玩家式 AI 全都一样）。
+   *  第一次照放；从第二次起，每一次「本回合能不能放它」都按 repeatRateOf(12, 已用次数) 掷一次：
+   *  没抽中就把它排除在可用技能之外 —— 于是有别的技能就让位给别的，没有就改普攻。
+   *  （技能权重那条曲线同时也在 skillWeight 里生效，多技能时它被选中的份额本来就低。） */
+  function yakyuGated(att) {
+    if (!att) return false;
+    const used = skillUseCountOf(att, 12);
+    if (used <= 0) return false;
+    return !chance(repeatRateOf(12, used));
   }
   /** 武器选择：同一套口径。 */
   function pickWeapon(att) {
@@ -461,20 +502,36 @@
 
   /**
    * 「被动技能触发提升」—— 秘技通神（C33）选中绝对防御 / 龟甲术之后写进
-   * `effects['技能ID']` 的加成值（例如 effects['16'] = 1.5 表示 +150%）。
+   * `skillBoost['技能ID']` 的加成值（例如 skillBoost['16'] = 1.5 表示 +150%）。
+   *
+   * **专用通道**：以前这里读的是 `effects['技能ID']`，但 effects 的键位同时属于
+   * 装备词条与武器效果槽（例如 effects['7'] = 投掷武器伤害 +N%、effects['16'] = 死老鼠伤害 +N%），
+   * 于是 C33 会顺带强化某把武器、装备词条也会顺带提升龟甲术触发率。现在只认 skillBoost。
+   *
    * 绝对防御与龟甲术都是**受击自动触发**、不进出手池的技能，
    * 所以它们不吃 skillWeight 那套权重，必须在这里单独乘一次。
    * （C33 抽中小宇宙爆发不走这里 —— 它的收益是「第一招必放」，见 playerLikeAction
    *   里的 forceCosmos / mods.cosmosFirst。） */
   function passiveSkillBoost(f, id) {
     if (!f) return 0;
-    const raw = f.effects && f.effects[id] != null ? f.effects[id]
-      : (f.mods && f.mods[id] != null ? f.mods[id] : 0);
-    const v = Number(raw);
+    const v = Number(f.skillBoost && f.skillBoost[id]);
     return Number.isFinite(v) ? Math.max(0, v) : 0;
   }
   const BOOSTED_AGAIN_CAP = 45;
   const BOOSTED_FIRST_CAP = 90;
+  /** 题面·熔核·炽壳的减伤层数上限（= 封顶 / 每层）。 */
+  function coreMaxStacks() {
+    const per = Math.max(0.01, Number(RULES.coreReducePerRound) || 0.10);
+    return Math.max(1, Math.round((Number(RULES.coreReduceCap) || 0.70) / per));
+  }
+  /** 熔核·炽壳的减伤比例：**每过一回合** +10%，第 8 回合起封顶 70%。
+   *  count = 本场已经过完的回合数（0 → 一层都没有）。纯函数，供测试直接核对曲线。 */
+  function coreReduceOf(count) {
+    const per = Math.max(0, Number(RULES.coreReducePerRound) || 0);
+    const cap = Math.max(0, Number(RULES.coreReduceCap) || 0);
+    const n = Math.max(0, Math.min(coreMaxStacks(), Math.floor(Number(count) || 0)));
+    return Math.round(Math.min(cap, n * per) * 100) / 100;
+  }
   function jueDuiChanceOf(def, count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
     const base = n === 0
@@ -534,7 +591,12 @@
     if (def.mods && Number(def.mods.lowHpTakenMul)) {
       out.dmg = lowHpTakenDamage(def, out.dmg, Number(def.mods.lowHpTakenMul));
     }
-    if (def.mech.includes('trialCore') && def.mechState.core) out.dmg = Math.round(out.dmg * 0.3);        // 题面·熔核：成型后受伤 −70%
+    if (def.mech.includes('trialCore')) {
+      /* 题面·熔核·炽壳：**每过一回合**再叠一层减伤（10%/层，第 8 回合起封顶 70%）——
+       * 以前是「第 7 次行动突然 −70%」，现在是逐回合变硬，前期就该开始提速。 */
+      const dr = coreReduceOf(def.mechState.coreStack || 0);
+      if (dr > 0) out.dmg = Math.round(out.dmg * (1 - dr));
+    }
     out.dmg = Math.max(1, out.dmg);
     return out;
   }
@@ -612,6 +674,13 @@
         dmg = 0;
         r.firstHitZero = true;
         r.noteText = (r.noteText ? r.noteText + '·' : '') + '先机预判'; r.noteSide = def.side;
+        /* 先机预判（C38）：挡下这一击之后，**我方立刻额外行动一次且不消耗回合**。
+         * 与「装死」同一条路径 —— 把 immediate 指给受击方，主循环下一轮直接让它出手，
+         * 不经过行动条（所以是真·不消耗回合，而不是加速）。 */
+        if (def.mods.firstHitZeroFreeTurn && def.hp > 0) {
+          r.firstHitZeroFreeTurn = true;
+          if (!immediate) immediate = { actor: def, reason: 'firstHitZero' };
+        }
       }
       if (red.jueDui) { r.jueDui = true; r.rebound = red.rebound; }
       if (red.guiJia) r.guiJia = red.guiJia;
@@ -760,7 +829,16 @@
       /* ---------------- 挑战塔题面（最终位对手） ----------------
        * 题面文本写的是「第 N 回合」；这里统一把 att.npcActs 当作它的出手次数。 */
       const acts = att.npcActs || 0;
-      // 熔核：第 5 次行动起硬度暴涨（受伤 −80%、力敏速 +50%）—— 强制前 4 回合速杀
+      /* 熔核·炽壳：每过一回合叠一层减伤（+10%，第 8 回合起封顶 70%）；
+       * 第 7 次行动起的「熔核成型」（力/敏/速 +50%）保留 —— 它是这只 boss 的爆发窗口另一半。 */
+      if (att.mech.includes('trialCore')) {
+        const stack = Math.min(coreMaxStacks(), Math.max(0, Math.floor(Number(att.mechState.coreStack) || 0)) + 1);
+        if (stack !== att.mechState.coreStack) {
+          att.mechState.coreStack = stack;
+          att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') +
+            '熔核·减伤 ' + Math.round(coreReduceOf(stack) * 100) + '%';
+        }
+      }
       if (att.mech.includes('trialCore') && !att.mechState.core && acts >= 7) {
         att.mechState.core = true;
         for (const key of ['power', 'agility', 'speed']) att.buffFlat[key] += Math.max(1, Math.round(att[key] * 0.5));
@@ -827,9 +905,8 @@
         : att.npcType === 'xm' ? att.hp < att.maxHp * 0.4 : false)) {
         att.usedUlt = true; npcUlt(att, def); return;
       }
-      // NPC：70% 普攻，30% 技能
-      // 与玩家共用 pickKind；三侠没有武器池，走它自己的 70/30 分支
-      const useSkill = Object.keys(att.skills).length > 0 && pickKind(false, true, false, true) === 'skill';
+      // NPC：70% 普攻，30% 技能（三侠没有武器池，走它自己的固定档位）
+      const useSkill = Object.keys(att.skills).length > 0 && pickNpcKind() === 'skill';
       const r = { attacker: att.side, action: 'common', npcSkill: false };
       if (useSkill) {
         r.action = 'skill'; r.npcSkill = true;
@@ -923,6 +1000,7 @@
        * 排除规则：小宇宙爆发每场一次、来点松果每场一次且满血不放、本回合已用过的不能再用。 */
       const actives = (att.skillOrder || ACTIVE_SKILLS).filter((id) => att.skills[id] &&
         !(id === 14 && att.usedCosmos) && !(id === 17 && att.usedSnack) && !(id === 17 && att.hp >= att.maxHp) &&
+        !(Number(id) === 12 && yakyuGated(att)) &&                    // 野球拳：越用越难（第 3 次到底）
         !(att.pattern && att.skillCd && att.skillCd[id] > 0) &&        // 冷却中（只对固定循环的敌人生效）
         !att.turnSkills[id]);
       const canSkill = actives.length > 0 && att.silence <= 0;
@@ -940,7 +1018,7 @@
         else if (want === 'skill' && !canSkill) kind = canWeapon ? 'weapon' : 'common';
         else kind = (want === 'weapon' || want === 'skill') ? want : 'common';
       } else {
-        kind = pickKind(canWeapon, canSkill, allToolsUsed(att, actives), false);
+        kind = pickKind(att, canWeapon ? att.weapons : [], canSkill ? actives : []);
       }
       if (att.pendingWeapon && canWeapon) kind = 'weapon';
 
@@ -1059,10 +1137,11 @@
             ? nextPatternSkill(att, actives)                            // 固定循环：按技能表的轮转顺序出
             : pickSkill(att, actives));
         att.usedSkills[sid] = true;
+        att.skillUseCount[sid] = skillUseCountOf(att, sid) + 1;      // 野球拳（12）的衰减要用「用过几次」
         att.turnSkills[sid] = true;
         att.lastSkillId = sid;
         /* 记冷却：+1 是因为「本次出手开始时已经自减过一格」，这样刚好挡掉接下来 N 次出手。
-         * 只对**固定循环型**的敌人记 —— 玩家侧的技能选择有自己的 repeatBySkill 权重体系，
+         * 只对**固定循环型**的敌人记 —— 玩家侧的技能选择有自己的二次使用权重体系，
          * 不该被这条 NPC 防刷规则顺手削弱。 */
         if (att.pattern) att.skillCd[sid] = Number(RULES.skillCooldown) + 1;
         const lv = att.skills[sid];
@@ -1263,8 +1342,16 @@
     simulate, rules: RULES,
     // 供 tools/test-combat-rules.cjs 直接校验出手权重（不用统计近似）
     actionWeights: { skill: skillWeight, weapon: weaponWeight },
+    /* 三个「有效属性」的唯一出口（供测试/调参直接核对：终乘类加成到底乘在哪一层）。
+     * 传一个战斗体（至少要 stat/baseStats、buffFlat、debuffs、mods、hp/maxHp）。 */
+    effStatsOf: (c) => ({ power: effPower(c), agility: effAgility(c), speed: effSpeed(c) }),
     // 各技能「二次及以后」的出手概率（%），供测试与调参直接读
-    repeatRateOf,
+    repeatRateOf, skillUseCountOf,
+    /* 出手类型的三份权重（武器/技能/徒手）与占比 —— 供测试直接核对
+     * 「持有的武技越多 → 徒手越少」「全部用过一遍 → 徒手变多」。 */
+    kindWeights,
+    /* 题面·熔核·炽壳的减伤曲线（每回合 +10%、封顶 70%）—— 纯函数，供测试直接核对 */
+    coreReduceOf, coreMaxStacks,
     /* 防御被动的单次触发概率（%）与被动加成读取 —— 供测试/调参直接核对，
      * 不用靠统计近似（绝对防御 16 / 龟甲术 7）。 */
     jueDuiChanceOf, shellChanceOf, passiveSkillBoost,

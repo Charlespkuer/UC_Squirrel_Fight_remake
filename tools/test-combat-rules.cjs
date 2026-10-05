@@ -303,32 +303,30 @@ test('沉默之斧同时抑制武器好手等被动技能', () => {
   assert.equal(muted.dmg, withoutSkill.dmg);
 });
 
-test('来点松果可以二次触发，但概率是所有武器/技能里最低的', () => {
+test('二次使用权重三档口径：17/12 一次后 15、二次后 5；其余技能 20；武器 30', () => {
   const rules = game().Sim.rules;
-  assert.ok(rules.repeatSnack < rules.repeatSkill, '来点松果二次概率要低于其它技能');
-  assert.ok(rules.repeatSnack < rules.repeatWeapon, '来点松果二次概率要低于武器');
-  assert.ok(rules.repeatSkill < 50, '所有技能的二次使用概率都该被调低');
-  /* 分档下调（本次需求）：中幅 = 色诱之术/野球拳/来点松果，
-   * 小幅 = 通灵召唤/幸运一击；没点名的技能保持基准不变。 */
+  assert.ok(rules.repeatSpecialAgain < rules.repeatSpecialFirst, '两段式：先 15 再 5');
+  assert.ok(rules.repeatSpecialFirst < rules.repeatSkill, '17/12 的第 1 档要低于其它技能');
+  assert.ok(rules.repeatSkill < rules.repeatWeapon, '技能二次档要低于武器二次档');
   const Sim = game().Sim;
-  const rate = (id) => Sim.repeatRateOf(id);
-  for (const id of [8, 12, 17]) {
-    assert.ok(rate(id) < rules.repeatSkill, '技能 ' + id + ' 的二次概率应该比基准更低（中幅下调）');
-    assert.ok(rate(id) <= rules.repeatSkillMedium, '技能 ' + id + ' 应该落在中幅档（≤' + rules.repeatSkillMedium + '%）');
+  const rate = (id, n) => Sim.repeatRateOf(id, n);
+  /* 来点松果（17）/ 野球拳（12）：第 1 次用过后 15，第 2 次及以后 5（到底） */
+  for (const id of [17, 12]) {
+    assert.equal(rate(id, 1), rules.repeatSpecialFirst, '技能 ' + id + ' 用过 1 次 → 15');
+    assert.equal(rate(id, 2), rules.repeatSpecialAgain, '技能 ' + id + ' 用过 2 次 → 5');
+    assert.equal(rate(id, 9), rules.repeatSpecialAgain, '技能 ' + id + ' 之后一直是 5（不再下降）');
   }
-  /* 小幅档：通灵召唤（15）与幸运一击（23）。幸运一击本次**再单独下调**一档
-   * （10%，低于小幅档），因为它「必中 + 1~6 倍伤害」，重复触发时方差极大。 */
-  assert.ok(rate(15) < rules.repeatSkill, '技能 15 的二次概率应该被小幅下调');
-  assert.ok(rate(15) >= rules.repeatSkillMedium && rate(15) <= rules.repeatSkillSmall,
-    '技能 15 应该落在小幅档');
-  assert.ok(rate(23) < rate(15), '幸运一击应当低于同档的通灵召唤：' + rate(23) + ' vs ' + rate(15));
-  assert.ok(rate(23) > rules.repeatSnack, '但仍应高于最低档的来点松果');
-  assert.equal(rate(14), rules.repeatSkill, '没点名的技能（小宇宙爆发）保持基准');
-  assert.equal(rate(18), rules.repeatSkill, '没点名的技能（吸铁大法）保持基准');
-  assert.ok(rate(17) < rate(8) && rate(17) < rate(15), '来点松果仍是最低档');
+  /* 其余技能：任何次数都是 20 */
+  for (const id of [8, 14, 15, 18, 23]) {
+    for (const n of [0, 1, 2, 5]) assert.equal(rate(id, n), rules.repeatSkill, '技能 ' + id + ' 用过 ' + n + ' 次 → 20');
+  }
+  /* 武器：用过之后一律 30（刚用过再 ×0.3 = 9） */
+  const w = Sim.actionWeights.weapon;
+  assert.equal(w({ usedWeapons: {}, lastWeaponId: null }, 6), 100, '没用过的武器 = 100');
+  assert.equal(w({ usedWeapons: { 6: true }, lastWeaponId: null }, 6), rules.repeatWeapon, '用过的武器 = 30');
+  assert.equal(w({ usedWeapons: { 6: true }, lastWeaponId: 6 }, 6), rules.repeatWeapon * 0.3, '刚用过的武器 = 9');
   // 绝对防御是受击自动触发，不进出手池，但同样要「越挡越难再挡」
   assert.ok(rules.jueDuiAgain < rules.jueDuiChance, '绝对防御第二次触发概率要低于首次');
-  assert.ok(rules.jueDuiAgain <= rules.repeatSkillMedium, '绝对防御的二次档要和中幅下调一个量级');
   /* 需求 3：来点松果**不允许在同一回合内多次触发**（它自带追加行动，
    * 早期实现会在同一回合里连着放两次）。同一场可以有多次，但两次之间
    * 必须夹着对手的行动 —— 也就是不能背靠背。 */
@@ -346,11 +344,20 @@ test('来点松果可以二次触发，但概率是所有武器/技能里最低�
   assert.ok(total > 0, '400 场里来点松果应当至少放出来过（实测 ' + total + ' 次）');
   /* 「二次使用概率最低」直接用导出权重校验：来点松果自身是 actAgain 技能（不占回合），
    * 用「场均使用次数」比较会被这个特性干扰，量不出概率差。 */
-  const w = game().Sim.actionWeights.skill;
-  const spent = { usedSkills: { 17: true, 12: true, 23: true }, lastSkillId: null };
-  const snack = w(spent, 17);
-  for (const id of [12, 23]) assert.ok(snack < w(spent, id), '来点松果二次权重 ' + snack + ' 应低于技能 ' + id + ' 的 ' + w(spent, id));
-  assert.ok(snack < game().Sim.actionWeights.weapon({ usedWeapons: { 6: true }, lastWeaponId: null }, 6), '也应低于武器');
+  /* 权重口径复核：17 与 12 同档（15 → 5），始终低于其余技能（20）与武器（30） */
+  const W2 = game().Sim.actionWeights.skill;
+  const one = { usedSkills: { 17: true, 12: true, 23: true, 18: true }, skillUseCount: { 17: 1, 12: 1, 23: 1, 18: 1 }, lastSkillId: null };
+  const two = { usedSkills: { 17: true, 12: true, 23: true, 18: true }, skillUseCount: { 17: 2, 12: 2, 23: 2, 18: 2 }, lastSkillId: null };
+  for (const id of [17, 12]) {
+    assert.equal(W2(one, id), 15, '技能 ' + id + ' 用过 1 次权重 15');
+    assert.equal(W2(two, id), 5, '技能 ' + id + ' 用过 2 次权重 5');
+  }
+  for (const id of [23, 18]) {
+    assert.equal(W2(one, id), 20, '其它技能 ' + id + ' 用过之后一律 20');
+    assert.equal(W2(two, id), 20, '其它技能 ' + id + ' 用多少次都是 20');
+  }
+  assert.ok(W2(two, 17) < W2(two, 23) && W2(two, 17) < W2(two, 18), '17 的二次权重仍低于其它技能');
+  assert.ok(W2(two, 17) < game().Sim.actionWeights.weapon({ usedWeapons: { 6: true }, lastWeaponId: null }, 6), '也低于武器');
 });
 
 test('出手时优先用本场没用过的武器与技能（并非绝对）', () => {
@@ -417,15 +424,44 @@ test('真·技能：真5端点与线性插值生效（龟甲必多次、幸运�
   assert.equal(G.GData.trueWeaponBonus({ id: 12, level: 15 }, 'dot'), 6, '真狼牙棒 +6 持续伤害');
 });
 
-test('武技都使用过一遍之后，出手更偏向武器（压低技能重复率）', () => {
+test('出手类型：徒手欲望随「持有武技数量」下降、随「全部用过一遍」上升', () => {
+  const S = game().Sim;
+  const W = (id) => ({ id });
+  const att = (extra) => Object.assign({ usedWeapons: {}, usedSkills: {}, skillUseCount: {}, lastWeaponId: null, lastSkillId: null }, extra || {});
+  const share = (a, ws, sk) => S.kindWeights(a, ws, sk).commonShare;
+  const ws = [W(6), W(8), W(13)], sk = [12, 18, 23];
+  /* ② 确定性口径：权重池直接给出占比，不依赖采样 */
+  const few = share(att(), [W(6)], [12]);
+  const many = share(att(), ws, sk);
+  assert.ok(many < few,
+    '持有的武器/技能越多，徒手欲望应当越低：1+1 徒手 ' + (few * 100).toFixed(1) + '% vs 3+3 ' + (many * 100).toFixed(1) + '%');
+  const spent = att();
+  ws.forEach((w) => { spent.usedWeapons[w.id] = true; });
+  sk.forEach((id) => { spent.usedSkills[id] = true; spent.skillUseCount[id] = 1; });
+  const after = share(spent, ws, sk);
+  assert.ok(after > many + 0.05,
+    '全部用过一遍之后徒手欲望应当明显变高：' + (many * 100).toFixed(1) + '% → ' + (after * 100).toFixed(1) + '%');
+  /* 只有一个主动技：用过之后它的份额降到二次使用概率，不会再因为「类型抽中技能」而被强制复用 */
+  const one = att(); one.usedSkills[12] = true; one.skillUseCount[12] = 1;
+  const k1 = S.kindWeights(one, [], [12]);
+  const kFresh = S.kindWeights(att(), [], [12]);
+  assert.ok(k1.skillShare < kFresh.skillShare, '用过之后技能份额必须低于没用过时');
+  assert.ok(k1.skillShare < 0.5,
+    '只有一个主动技且用过之后，它不该再占掉大半出手：' + (k1.skillShare * 100).toFixed(1) + '%');
+  /* 秘技通神（C33）走独立通道 skillBoost：提高该技能份额；装备词条不再被误当成技能加成 */
+  const boosted = S.kindWeights(att({ skillBoost: { 12: 0.6 } }), [], [12]);
+  assert.ok(boosted.skillShare > kFresh.skillShare, '+60% 触发应当提高该技能的出手份额');
+  assert.equal(S.passiveSkillBoost({ effects: { 16: 1.5 } }, 16), 0, '装备词条不再被当成技能加成');
+  assert.equal(S.passiveSkillBoost({ skillBoost: { 16: 1.5 } }, 16), 1.5, 'skillBoost 才是技能加成的通道');
+
+  /* ③ 实战采样：全部用过一遍之后，普攻占比也要真的变高 */
   const WEAPONS = ['6:1', '8:1', '13:1'], SKILLS = ['12:1', '18:1', '23:1'];
   const wIds = WEAPONS.map((x) => x.split(':')[0]), sIds = SKILLS.map((x) => x.split(':')[0]);
-  let beforeW = 0, beforeS = 0, afterW = 0, afterS = 0, runs = 0;
-  for (let i = 0; i < 120; i++) {
+  let beforeC = 0, afterC = 0, beforeT = 0, afterT = 0, runs = 0;
+  for (let i = 0; i < 160; i++) {
     const ev = rounds(randomGame(),
       { power: 30, weapons: WEAPONS, skills: SKILLS, hp: 100000 },
       { power: 5, hp: 100000 });
-    // 找到「六件武技都至少用过一次」的那一回合
     const usedW = new Set(), usedS = new Set();
     let cut = -1;
     ev.forEach((r, idx) => {
@@ -438,15 +474,17 @@ test('武技都使用过一遍之后，出手更偏向武器（压低技能重�
     runs++;
     ev.forEach((r, idx) => {
       if (r.attacker !== 0) return;
-      if (r.action === 'weapon') { if (idx < cut) beforeW++; else afterW++; }
-      else if (r.action === 'skill') { if (idx < cut) beforeS++; else afterS++; }
+      const isCommon = r.action === 'common';
+      const isTool = r.action === 'weapon' || r.action === 'skill';
+      if (!isCommon && !isTool) return;
+      if (idx < cut) { if (isCommon) beforeC++; else beforeT++; }
+      else { if (isCommon) afterC++; else afterT++; }
     });
   }
   assert.ok(runs > 40, '样本足够：' + runs);
-  const shareBefore = beforeW / (beforeW + beforeS), shareAfter = afterW / (afterW + afterS);
-  assert.ok(shareAfter > shareBefore + 0.1,
-    '用过一遍之后应当更偏向武器：之前 ' + (shareBefore * 100).toFixed(0) + '% → 之后 ' + (shareAfter * 100).toFixed(0) + '%');
-  assert.ok(shareAfter > 0.7, '之后武器占比应明显过半：' + (shareAfter * 100).toFixed(0) + '%');
+  const commonBefore = beforeC / (beforeC + beforeT), commonAfter = afterC / (afterC + afterT);
+  assert.ok(commonAfter > commonBefore + 0.05,
+    '用过一遍之后普攻占比应当上升：之前 ' + (commonBefore * 100).toFixed(0) + '% → 之后 ' + (commonAfter * 100).toFixed(0) + '%');
 });
 
 test('仙鹤大招「仙鹤展翅」是其首次行动且每场仅一次', () => {
@@ -490,24 +528,72 @@ const trialFoe = (mech, extra = {}) => fighter({ name: '题面', mech, pattern: 
 /** 玩家每次出手打掉的血量（按顺序）。 */
 const hitSeq = (events) => Array.from(events).filter((r) => r.attacker === 0 && r.dmg > 0).map((r) => r.dmg);
 
-test('题面·熔核：第 5 次行动成型（受伤 −80%、力敏速 +50%），逼前 4 回合速杀', () => {
-  // 高血对手 + 弱玩家：成型前每次普攻都能打出伤害，成型后骤降
+test('题面·熔核：每过一回合 +10% 减伤（第 8 回合起封顶 70%），第 7 次行动起力敏速 +50%', () => {
+  const g = game(0.99);
+  const rules = g.Sim.rules;
+  assert.ok(rules.coreReducePerRound > 0 && rules.coreReduceCap > 0, '规则表要有熔核的减伤参数');
+  /* 曲线本身（纯函数）：0 / 10 / 20 … 70 封顶 */
+  const curve = [0, 1, 2, 3, 6, 7, 8, 20].map((n) => g.Sim.coreReduceOf(n));
+  assert.deepEqual(curve.slice(0, 4), [0, 0.1, 0.2, 0.3], '逐回合 +10%：' + curve.join('/'));
+  assert.equal(curve[4], 0.6, '第 7 回合 60%：' + curve.join('/'));
+  assert.equal(curve[5], rules.coreReduceCap, '第 8 回合封顶：' + curve.join('/'));
+  assert.equal(curve[6], rules.coreReduceCap, '到顶之后不再涨：' + curve.join('/'));
+  assert.equal(curve[7], rules.coreReduceCap, '深层也还是封顶：' + curve.join('/'));
+  assert.equal(g.Sim.coreMaxStacks(), Math.round(rules.coreReduceCap / rules.coreReducePerRound), '层数上限 = 封顶 / 每层');
+  /* 实战：高血对手 + 弱玩家 —— 挨打伤害应当**逐回合单调下降**，最后稳定在 ≈30% */
   const make = () => {
-    const g = game(0.99);
-    return rounds(g, fighter({ power: 40, hp: 100000 }), trialFoe(['trialCore'], { power: 1, hp: 4000 }));
+    const gg = game(0.99);
+    return rounds(gg, fighter({ power: 40, hp: 100000 }), trialFoe(['trialCore'], { power: 1, hp: 4000 }));
   };
   const events = make();
-  const mark = events.findIndex((r) => /熔核成型/.test(r.noteText || ''));
-  assert.ok(mark > 0, '第 5 次行动应打出「熔核成型」');
   const dmg = hitSeq(events);
-  const before = dmg.slice(0, 4);
-  const after = dmg.slice(dmg.length - 3);
-  assert.ok(before.length >= 3 && after.length >= 3, '成型前后都应有足够的采样');
+  assert.ok(dmg.length >= 6, '需要有足够长的战斗：' + dmg.join(','));
+  const early = dmg.slice(0, 3);
+  const late = dmg.slice(-3);
   const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
-  assert.ok(avg(after) < avg(before) * 0.35, '成型后受伤应低于成型前的 35%（实测 ' +
-    avg(before).toFixed(1) + ' → ' + avg(after).toFixed(1) + '）');
-  // 成型时会给自己加力敏速：玩家挨的伤害随之变高
+  assert.ok(avg(late) < avg(early) * 0.5, '越打越硬：' + avg(early).toFixed(1) + ' → ' + avg(late).toFixed(1));
+  assert.ok(events.some((r) => /熔核·减伤 10%/.test(r.noteText || '')), '每回合的减伤要挂提示');
+  const mark = events.findIndex((r) => /熔核成型/.test(r.noteText || ''));
+  assert.ok(mark > 0, '第 7 次行动应打出「熔核成型」（力敏速 +50% 那一半）');
   assert.ok(events.some((r) => r.attacker === 1 && r.dmg > 0), '对手要能造成伤害');
+  /* 封顶就是 70%：把减伤算到顶时，伤害应当只剩三成（与旧的 −70% 口径一致） */
+  assert.equal(g.Sim.coreReduceOf(99), 0.7);
+});
+
+test('题面·野球拳（12）：用过 1 次 15、用过 2 次起 5 到底（敌我都遵循）', () => {
+  const g = game();
+  const rules = g.Sim.rules;
+  const rate = (n) => g.Sim.repeatRateOf(12, n);
+  assert.equal(rate(0), rules.repeatSpecialFirst, '还没用过时的档位（=用过 1 次后）是 15');
+  assert.equal(rate(1), rules.repeatSpecialFirst, '用过 1 次 → 15');
+  assert.ok(rate(2) < rate(1), '用过 2 次必须低于 1 次：' + rate(1) + ' → ' + rate(2));
+  assert.equal(rate(2), rules.repeatSpecialAgain, '用过 2 次就到 5：' + rate(2));
+  assert.equal(rate(9), rules.repeatSpecialAgain, '再往后一直是 5：' + rate(9));
+  /* 比绝对防御「远快到底」：绝对防御是 22→13→9→6→4→3→2 的慢衰减 */
+  const jue = (n) => g.Sim.jueDuiChanceOf({ skills: { 16: 1 }, effects: {}, mods: {} }, n);
+  assert.ok(rate(2) <= jue(2), '用过 2 次时野球拳不高于绝对防御：' + rate(2) + ' vs ' + jue(2));
+  assert.ok(rate(2) < jue(1), '野球拳到底更快（绝对防御第二次还有 ' + jue(1) + '%）：' + rate(2));
+  /* 出手权重也用同一份曲线：同一个战斗体，用过 1 次 / 2 次之后权重递减 */
+  const mk = (count) => {
+    const att = { skills: { 12: 8 }, usedSkills: { 12: true }, skillUseCount: { 12: count }, lastSkillId: null };
+    return g.Sim.actionWeights.skill(att, 12);
+  };
+  assert.equal(mk(1), rules.repeatSpecialFirst, '用过 1 次权重 15：' + mk(1));
+  assert.equal(mk(2), rules.repeatSpecialAgain, '用过 2 次权重 5：' + mk(2));
+  assert.equal(mk(5), rules.repeatSpecialAgain, '到底之后不再下降');
+  /* 实战（玩家侧，只带这一个技能）：第 2 次起每回合只有这条曲线的概率还能放，
+   * 没抽中就只能普攻 —— 所以「每回合都能放」的旧口径必须被压下来。 */
+  let uses = 0, acts = 0;
+  for (let i = 0; i < 60; i++) {
+    const ev = rounds(randomGame(), { skills: [{ id: 12, level: 8 }], power: 20, weapons: [], hp: 100000 },
+      { hp: 100000, power: 1, agility: 1, speed: 1 });
+    const mine = ev.filter((r) => r.attacker === 0 && (r.action === 'skill' || r.action === 'common' || r.action === 'weapon'));
+    uses += mine.filter((r) => r.id === 12).length;
+    acts += mine.length;
+  }
+  const perAction = uses / Math.max(1, acts);
+  assert.ok(perAction < 0.15, '野球拳不该每回合都能放（实测每回合 ' + (perAction * 100).toFixed(1) + '%）');
+  assert.ok(uses > 0, '第一次仍然要放得出来');
 });
 
 test('题面·苔龟：每回合回复 6% 最大生命，并且反弹 15% 伤害', () => {
@@ -678,13 +764,25 @@ test('固定循环的敌人不会把同一招连着放（技能冷却按出手�
   /* 而且它并没有被彻底废掉：整场至少放出来一次 */
   assert.ok(kinds.includes('S'), '技能还是要能放出来：' + kinds.join(''));
 
-  /* 反过来：多个主动技的正常轮转不受影响（元素术鼠 12/17 那种） */
+  /* 反过来：多个主动技的正常轮转不受影响（元素术鼠 12/17 那种）。
+   * 注意断言口径：野球拳（12）现在有「越用越难」的闸门，12 被压掉时中间会插普攻，
+   * 所以不能拿「技能子序列」当反例 —— 真正要守的是**冷却**：
+   * 同一招两次使用之间必须至少隔 RULES.skillCooldown 次出手。 */
   const twoSkills = () => fighter({ name: '轮转', skills: [{ id: 12, level: 8 }, { id: 23, level: 8 }], pattern: ['skill', 'skill', 'skill', 'common'],
     power: 20, speed: 20, hp: 100000, weapons: [] });
   const sim2 = g.Sim.simulate(twoSkills(), fighter({ hp: 100000, power: 1, agility: 1, speed: 1 }));
-  const ids = sim2.rounds.filter((x) => x.attacker === 0 && x.action === 'skill').map((x) => Number(x.id));
+  const seq = sim2.rounds.filter((x) => x.attacker === 0 && (x.action === 'skill' || x.action === 'common'))
+    .map((x) => (x.action === 'skill' ? Number(x.id) : 'C'));
+  const ids = seq.filter((v) => v !== 'C');
   assert.ok(ids.length >= 3, '轮转型敌人应当持续放技能：' + ids.join(','));
-  for (let i = 1; i < ids.length; i++) assert.notEqual(ids[i], ids[i - 1], '同一招仍然不能连着放：' + ids.join(','));
+  const lastAt = {}; let minGap = Infinity;
+  seq.forEach((v, i) => {
+    if (v === 'C') return;
+    if (lastAt[v] != null) minGap = Math.min(minGap, i - lastAt[v]);
+    lastAt[v] = i;
+  });
+  assert.ok(minGap >= g.Sim.rules.skillCooldown + 1,
+    '同一招两次使用之间至少隔 ' + g.Sim.rules.skillCooldown + ' 次出手，实测最小间隔 ' + minGap + '：' + seq.join(','));
   assert.ok(ids.includes(12) && ids.includes(23), '两招都要用到（不是只放一招）：' + ids.join(','));
 });
 

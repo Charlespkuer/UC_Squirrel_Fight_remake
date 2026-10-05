@@ -295,6 +295,16 @@
     if (window.TowerUI && TowerUI.openEndless && State.state().endless && State.state().endless.run) TowerUI.openEndless();
     return r.ok ? '失去【' + ((def && def.name) || id) + '】' : (r.msg || '没成功');
   }
+  /** 无尽塔专属调试：**立刻生成一个铸币商店**（跳过 5%~10% 的概率与层区间判定）。
+   *  走正式开店路径（掷货架 / 讨价还价对折 / C59 进门币都照常），只是不占「本组已刷过」的名额。 */
+  function spawnMintShop() {
+    if (!(window.Tower && Tower._debugSpawnMintShop)) return '当前版本没有这个接口';
+    const r = Tower._debugSpawnMintShop();
+    if (!r || !r.ok) return (r && r.msg) || '没成功';
+    if (window.TowerUI && TowerUI.openMintShop) TowerUI.openMintShop();
+    renderOwned();
+    return '已在第 ' + r.layer + ' 层生成铸币商店（' + r.slots + ' 件货）';
+  }
 
   /* 8 金松果 / 15 经验 / 40 金杯在原版里就是货币或经验值，不是背包道具：
    * 挂进背包只是个用不掉的死物（useType 0/3），所以取物时直接加到对应字段上。 */
@@ -375,6 +385,9 @@
       '<select data-buff-select aria-label="选择要获得或失去的增益">' + buffOptions() + '</select>' +
       '<button type="button" class="uc-button tiny" data-buff-grant="1">获得</button>' +
       '<button type="button" class="uc-button tiny muted" data-buff-lose="1">失去</button></label>' +
+      /* 无尽塔专属：立刻开一家铸币商店（不看概率/层区间，也不占本组的自然刷出名额） */
+      '<div class="debug-grant-row debug-ws-row"><span class="debug-ws-tag">铸币商店</span>' +
+      '<button type="button" class="uc-button tiny" data-mint-shop="1" title="无尽塔专属：立刻生成一个铸币商店（跳过 5%~10% 的概率与层区间判定，也不占本组的自然刷出名额）">立即生成一个铸币商店</button></div>' +
       '<div class="debug-ws-owned" data-buff-owned></div>' +
       /* 增益总览：当前生效 + 已获得过的全部（含一次生效、用尽、损毁、失去）+ 累计提升效果 */
       '<div class="debug-buff-report" data-buff-report></div>' +
@@ -434,6 +447,8 @@
     // 无尽塔增益：下拉选一个，就能「获得」或「失去」
     panel.querySelector('[data-buff-grant]').onclick = () => msg(grantBuff(panel.querySelector('[data-buff-select]').value));
     panel.querySelector('[data-buff-lose]').onclick = () => msg(loseBuff(panel.querySelector('[data-buff-select]').value));
+    // 无尽塔专属：立刻生成一个铸币商店
+    panel.querySelector('[data-mint-shop]').onclick = () => msg(spawnMintShop());
     panel.querySelector('[data-buff-owned]').onclick = (e) => {
       const b = e.target.closest('[data-buff-forget]');
       if (b) msg(loseBuff(b.dataset.buffForget));

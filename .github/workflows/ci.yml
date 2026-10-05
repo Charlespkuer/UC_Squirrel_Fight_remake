@@ -35,7 +35,7 @@ jobs:
         run: |
           for t in test-state test-balance test-points test-combat-rules test-buff-tags test-battle-drops \
                    test-main-battle test-extras test-fusion test-stages test-stage-balance \
-                   test-sync; do
+                   test-mint-shop test-sync; do
             echo "──── $t ────"
             node "tools/$t.cjs"
           done

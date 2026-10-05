@@ -46,6 +46,9 @@ function setup() {
   S.level = 70;
   S.props = Object.assign({}, S.props, { 23: 30 });      // 挑战书，够开挑战塔
   for (let i = 1; i <= 18; i++) S.stages[i] = { npcIndex: 3, passed: true };
+  /* 场间选择里排除 E01（战后开店）/ E15（重开本层）：本用例要「界面 N 条 = 实战 N 场」，
+   * 抽到它们会把实战场次变多/变少。 */
+  c.Tower._debugSetNoFlowBuffs(true);
   c.__seed = (n) => vm.runInContext(
     'Math.random=(function(){let s=' + n + ';return function(){s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296;};})();', c);
   return c;
@@ -62,14 +65,20 @@ function playLayer(c, mode) {
     if (!run || run.layer !== startLayer) break;           // 已经进入下一层
     if (run.choices) {
       /* 永久位满了 pickChoice 会返回 needsReplace（不消耗 choices），
-       * 这里补一个替换目标，否则会空转到 guard 上限。 */
-      const pick = c.Tower.pickChoice(mode, 0, null);
+       * 这里补一个替换目标，否则会空转到 guard 上限。
+       * 另外要避开两张**会改层内流程**的增益：E01 会在下一场后开店、E15 会把本层从第 1 场重开 ——
+       * 选到它们的话「界面 N 条 = 实战 N 场」的比对就散了（本用例只关心顺序）。 */
+      const safe = run.choices.findIndex((c) => c && c.id !== 'E01' && c.id !== 'E15');
+      const pick = c.Tower.pickChoice(mode, safe < 0 ? 0 : safe, null);
       if (pick && !pick.ok && pick.needsReplace) {
         const owned = (run.permanent || [])[0];
-        c.Tower.pickChoice(mode, 0, owned ? owned.id : null);
+        c.Tower.pickChoice(mode, safe < 0 ? 0 : safe, owned ? owned.id : null);
       }
       continue;
     }
+    /* 铸币商店（战后 5% 随机小店）是**层中的插曲**，不是「本层战斗结束」——
+     * 送客之后接着打。不处理的话它会把整层截断，「界面 N 条 = 实战 N 场」就会红。 */
+    if (run.phase === 'shop' && run.shop && run.shop.mint) { c.Tower.leaveMintShop(); continue; }
     if (run.phase) break;                                  // 商店/结算点：本层战斗已结束
     /* 隔离环境：环境里有「幻影回响」会按概率把同一场再打一遍，
      * 那会让「界面 N 条 = 实战 N 场」的比对多出一项（实测偶发）。

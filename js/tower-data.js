@@ -1080,7 +1080,10 @@
     /* 稀有烙印「涌泉烙印」：跳绿字的回血量 +10%；损毁后本局 +20%（同样是加算层）。 */
     { id: 'C52', tags: ['endless', 'battle', 'shop', 'limited', 'repeatable'], name: '涌泉烙印', rarity: 1, kind: 'limited', uses: 1000,
       desc: '治疗量 +10%，损毁后本局 +20%',
-      mods: { fragileFinalMul: true, fragileHealAddAlive: 0.10, fragileHealAddBurned: 0.20,
+      /* 注意**不要**挂 fragileFinalMul —— 那是 C49「终乘烙印」的标记，
+       * 两层历史上一旦共用同一个计数，C49 的层数会去加治疗、C52 的层数会去加力敏速上限。
+       * 涌泉烙印用自己的一套：fragileHealBase / fragileHealBurned。 */
+      mods: { fragileHealAddAlive: 0.10, fragileHealAddBurned: 0.20,
         fragileBreakPct: 6, repeatWeight: 0.3 } },
     /* 传奇烙印「淘金烙印」：**只在战斗奖励里掉落**（battleOnly → 不进商店货架），一局一次。
      * 每场战斗的试炼币获取 +15%；损毁后本局 +30%（同样是「存在/损毁」两段加算）。

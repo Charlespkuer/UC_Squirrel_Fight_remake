@@ -163,6 +163,15 @@
         ? run.fragileCoinBurned.map((v) => Math.max(0, Number(v) || 0)).filter((v) => v > 0) : [];
       run.fragileHealBurned = Array.isArray(run.fragileHealBurned)
         ? run.fragileHealBurned.map((v) => Math.max(0, Number(v) || 0)).filter((v) => v > 0) : [];
+      /* 治疗烙印（C52）：未破碎份数独立记账（与淘金烙印同一套形状）。
+       * 老存档没有这个字段，而且历史上它和 C49 的 fragileMulBase 混在一起 —— 这里做一次性迁移：
+       * 把「当前持有的 C52 层数」从 fragileMulBase 里摘出来，还给 fragileHealBase。 */
+      if (run.fragileHealBase === undefined) {
+        const c52 = (run.limited || []).reduce((n, b) => n + (b && b.id === 'C52' ? Math.max(0, Math.floor(Number(b.stacks) || 1)) : 0), 0);
+        run.fragileHealBase = c52;
+        if (c52 > 0) run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0) - c52);
+      }
+      run.fragileHealBase = Math.max(0, Math.floor(Number(run.fragileHealBase) || 0));
       run.brokenMarks = Array.isArray(run.brokenMarks)
         ? run.brokenMarks.filter((m) => m && typeof m.kind === 'string')
           .map((m) => ({
@@ -644,6 +653,9 @@
     const ref = Math.max(1, Math.round(Number(run.refMaxHp) || Number(run.lastMaxHp) || Number(fallbackMaxHp) || 0));
     return Math.max(1, Math.round(ref * clamp01(run.carry == null ? 1 : run.carry)));
   }
+  /** 「涌泉烙印」（C52）的治疗加成倍率：**增益/技能造成的治疗**都要乘上它。
+   *  注意不作用于「规则回血」（层间结算回血、自动回血、药丸）——那些不是增益给的。 */
+  function healBonusMul(run) { return 1 + fragileHealBonus(run); }
   /** 非战斗期间按「最大生命的百分比」回血：换算成绝对值后累加（自动受上限约束）。 */
   function healAbs(run, pct, refMaxHp) {
     const p = Math.max(0, Number(pct) || 0);
@@ -1044,7 +1056,8 @@
        * ============================================================ */
       if (agg.startHealPct > 0 && me.maxHp > 0) {
         const beforeHeal = me.hp;
-        const gain = Math.max(1, Math.round(me.maxHp * agg.startHealPct));
+        /* 开战回血（补给 N08 / 战斗续航 C16·C17）也算治疗：涌泉烙印照常加成。 */
+        const gain = Math.max(1, Math.round(me.maxHp * agg.startHealPct * healBonusMul(run)));
         me.hp = Math.min(me.maxHp, me.hp + gain);
         run.hpAbs = me.hp;
         agg.startHealGain = me.hp - beforeHeal;      // 实际回血量（可能被本场上限截断）
@@ -1348,12 +1361,12 @@
         run.winMaxHp = Math.min((c07m.winMaxHpCap || 0.30) * c07 * g, (Number(run.winMaxHp) || 0) + (c07m.winMaxHpPct || 0.02) * c07 * g);
       }
       const c11 = stacksOf(run, 'C11');
-      if (c11) healAbs(run, 0.03 * c11 * g, refMax);
+      if (c11) healAbs(run, 0.03 * c11 * g * healBonusMul(run), refMax);
       if (isElite) {
         addScore(run, D().SCORE.elite, '击败精英');
         run.coins += D().COINS.elite;
         const c13 = stacksOf(run, 'C13');
-        if (c13) healAbs(run, D().BUFF_BY_ID.C13.mods.eliteHealAfter * g, refMax);
+        if (c13) healAbs(run, D().BUFF_BY_ID.C13.mods.eliteHealAfter * g * healBonusMul(run), refMax);
       }
     /* 本场战斗的试炼币增量（界面右上角标在「试炼币」旁边；下一场会被刷新）。 */
     run.lastCoinsGained = Math.max(0, Math.round((Number(run.coins) || 0) - coinsBeforeBattle));
@@ -1985,7 +1998,8 @@
   }
   /** 治疗烙印（C52「涌泉烙印」）的最终治疗加成：按层加算（存在 +10%/层、损毁 +20%/层）。 */
   function fragileHealBonus(run) {
-    const b = Math.max(0, Math.floor(Number(run && run.fragileMulBase) || 0));
+    /* 只数「涌泉烙印」自己的层数：C49 的层数不再顺带加治疗。 */
+    const b = Math.max(0, Math.floor(Number(run && run.fragileHealBase) || 0));
     const list = Array.isArray(run && run.fragileHealBurned) ? run.fragileHealBurned : [];
     if (!b && !list.length) return 0;
     const m = D().BUFF_BY_ID.C52.mods;
@@ -2090,6 +2104,7 @@
             .concat([Math.max(0, Number(def.mods.fragileCoinAddBurned) || 0)]);
         }
         if (def.mods.fragileHealAddAlive !== undefined) {
+          run.fragileHealBase = Math.max(0, Math.floor(Number(run.fragileHealBase) || 0) - 1);
           run.fragileHealBurned = (Array.isArray(run.fragileHealBurned) ? run.fragileHealBurned : [])
             .concat([Math.max(0, Number(def.mods.fragileHealAddBurned) || 0)]);
         }
@@ -2152,6 +2167,11 @@
         run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0) - n);
         return true;
       }
+      if (def && def.mods && def.mods.fragileHealAddAlive !== undefined) {
+        /* 涌泉烙印被卖掉/换掉：未破碎的那一份按层数收回（损毁得到的永久份保留）。 */
+        run.fragileHealBase = Math.max(0, Math.floor(Number(run.fragileHealBase) || 0) - n);
+        return true;
+      }
       if (def && def.mods && def.mods.fragileCoinAddAlive !== undefined) {
         run.fragileCoinBase = Math.max(0, Math.floor(Number(run.fragileCoinBase) || 0) - n);
         return true;
@@ -2172,6 +2192,9 @@
     /* 终乘烙印：每获得一份就 +1 层（重复获得独立相乘）。 */
     if (buff.mods && buff.mods.fragileFinalMul) {
       run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0)) + 1;
+    }
+    if (buff.mods && buff.mods.fragileHealAddAlive !== undefined) {
+      run.fragileHealBase = Math.max(0, Math.floor(Number(run.fragileHealBase) || 0)) + 1;
     }
     if (buff.mods && buff.mods.fragileStat) {
       const key = buff.mods.fragileStat;
@@ -2206,7 +2229,7 @@
      * 与 steam大促（−30%）的合并也挪到 makeShop 里（谁先拿都不影响结果）。 */
     /* C01「磐石之躯」：获得时立刻按当前（局外口径）生命上限回血。 */
     if (buff.mods && buff.mods.healOnGainPct) {
-      healAbs(run, Number(buff.mods.healOnGainPct) * globalMul(run), currentMaxHp(run));
+      healAbs(run, Number(buff.mods.healOnGainPct) * globalMul(run) * healBonusMul(run), currentMaxHp(run));
     }
   }
   /** 加一个 buff。永久类要过 5 格上限（满则返回 needsReplace，由界面选一个替换）。 */

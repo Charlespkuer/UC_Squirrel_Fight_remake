@@ -443,6 +443,117 @@ test('需求9b：有币时选择「放弃本局」→ 才真正结算失败', ()
   assert.ok(!c.Tower._debugRun('endless'), '放弃后对局结束');
 });
 
+test('需求9.9：涌泉烙印（C52）真的生效 —— 师父驾到等治疗按层加成，并与回血类 buff 联动', () => {
+  const c = setup();
+  const T = c.Tower, S = c.State, Sim = c.Sim;
+  c.State.newGame('c52-heal');
+  const st = c.State.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  T._debugSetLayer(9);
+  assert.ok(T.startEndlessRun().ok);
+  T._debugSetEndlessLayer(6);
+  const run = T._debugRun('endless');
+  run.permanent = []; run.limited = []; run.choices = null; run.phase = null;
+  const add = (id) => assert.ok(T.addBuff(T._debugRun('endless'), id).ok, '应当能拿到 ' + id);
+  const board = () => {
+    const nx = T.nextBattle('endless');
+    assert.ok(nx.ok, '应当能开战：' + nx.msg);
+    const me = S.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+    me.maxHp = me.hp;
+    nx.adjustMe(me);
+    return { nx, me };
+  };
+
+  /* ---- 1) 面板字段：治疗倍率按层加算（1 层 1.1 / 2 层 1.2） ---- */
+  add('C52');
+  const one = board();
+  assert.equal(one.me.healMul, 1.1, '1 层涌泉烙印 → 治疗 ×1.1，实测 ' + one.me.healMul);
+  T.reportBattle('endless', one.nx.token, true, 0.8, null);
+  const r1 = T._debugRun('endless'); if (r1 && r1.choices) T.pickChoice('endless', 0, (r1.permanent[0] || {}).id);
+  const r2 = T._debugRun('endless'); if (r2 && r2.phase === 'shop') T.closeShop();
+
+  /* ---- 2) 师父驾到（技能 13）：真的按倍率回血 ---- */
+  const masterHeal = (me) => {
+    me.skills = ['13:1']; me.masterLevel = 4;
+    me.hp = Math.max(1, Math.floor(me.maxHp * 0.3));       // 低于 50%：师父会来
+    const foe = Object.assign({}, one.nx.foe, { power: 1, agility: 1, speed: 1, skills: [], mech: [], hp: 100000, maxHp: 100000 });
+    const res = Sim.simulate(me, foe, { masterChance: 100, masterHpRatio: 1 });
+    const row = (res.rounds || []).find((r) => r.action === 'skill' && Number(r.id) === 13);
+    return row ? row.healSelf : null;
+  };
+  const withC52 = masterHeal(one.me);
+  delete one.me.healMul;                                   // 同一份面板，只拿掉治疗倍率
+  const without = masterHeal(one.me);
+  assert.equal(without, 16, '师父等级 4 → 基础治疗 16，实测 ' + without);
+  assert.equal(withC52, 18, '涌泉烙印 1 层时应当回 18（16×1.1），实测 ' + withC52);
+
+  /* ---- 3) 与其它回血类 buff 的联动：开战回血 / 胜利回血 / 精英回血 / 获得回血 ---- */
+  const towerSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  assert.match(towerSrc, /0\.03 \* c11 \* g \* healBonusMul\(run\), refMax\)/, 'C11 胜利回血要吃治疗加成');
+  assert.match(towerSrc, /eliteHealAfter \* g \* healBonusMul\(run\)/, 'C13 精英回血要吃治疗加成');
+  assert.match(towerSrc, /healOnGainPct\) \* globalMul\(run\) \* healBonusMul\(run\)/, '获得时回血要吃治疗加成');
+  assert.match(towerSrc, /agg\.startHealPct \* healBonusMul\(run\)/, '开战回血（C10/C16/C17、N08）要吃治疗加成');
+  assert.match(towerSrc, /function healBonusMul\(run\) \{ return 1 \+ fragileHealBonus\(run\); \}/, '治疗加成倍率的定义');
+  /* sim 侧：healOf 统一读 fighter.healMul（这就是「师父驾到不生效」的根因） */
+  const simSrc = fs.readFileSync(path.join(ROOT, 'js', 'sim.js'), 'utf8');
+  assert.match(simSrc, /healMul: Number\.isFinite\(Number\(f\.healMul\)\)/, 'makeCombatant 必须把赛前的治疗倍率读进来');
+  assert.match(simSrc, /function healOf\(c, amount\) \{ return Math\.max\(0, Math\.round\(Number\(amount\) \* \(c\.healMul == null \? 1 : c\.healMul\)\)\); \}/,
+    '所有治疗都走 healOf（枯泉封疗也是改这个字段）');
+
+  /* ---- 4) 与「终焉烙印」（C49）的层数**不能互相加成** ----
+   * 两条烙印历史共用 run.fragileMulBase：C49 的层数会去加治疗、C52 的层数会去加力敏速上限。 */
+  const freshRun = () => {
+    c.State.newGame('c52-cross' + Math.random());
+    const st2 = c.State.state(); st2.level = 70; st2.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st2.stages[i] = { npcIndex: 3, passed: true };
+    T._debugSetLayer(9);
+    try { if (T._debugRun('endless')) T.abandon('endless'); } catch (e) { /* 忽略 */ }
+    assert.ok(T.startEndlessRun().ok);
+    T._debugSetEndlessLayer(6);
+    const rr = T._debugRun('endless');
+    rr.permanent = []; rr.limited = []; rr.choices = null; rr.phase = null;
+    return rr;
+  };
+  const panel = () => {
+    const nx2 = T.nextBattle('endless');
+    assert.ok(nx2.ok, '应当能开战：' + nx2.msg);
+    const me2 = S.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+    me2.maxHp = me2.hp;
+    const before = me2.power;
+    nx2.adjustMe(me2);
+    return { me: me2, powerMul: me2.power / before };
+  };
+  freshRun();
+  T.addBuff(T._debugRun('endless'), 'C49');
+  let p1 = panel();
+  assert.ok(!p1.me.healMul, '只有 C49 时不该有治疗加成，实测 healMul=' + p1.me.healMul);
+  assert.ok(p1.powerMul > 1.2, 'C49 自己还是要给 力/敏/速 ×1.25：实测 ×' + p1.powerMul.toFixed(2));
+  freshRun();
+  T.addBuff(T._debugRun('endless'), 'C52');
+  p1 = panel();
+  assert.equal(p1.me.healMul, 1.1, '只有 C52 时治疗 ×1.1（不该被 C49 的空计数带偏）');
+  assert.ok(p1.powerMul < 1.05, 'C52 不该给 力/敏/速 加成：实测 ×' + p1.powerMul.toFixed(2));
+  freshRun();
+  T.addBuff(T._debugRun('endless'), 'C49');
+  T.addBuff(T._debugRun('endless'), 'C52');
+  p1 = panel();
+  assert.equal(p1.me.healMul, 1.1, 'C49×1 + C52×1 时治疗仍然是 ×1.1（不是 ×1.2）');
+  assert.ok(p1.powerMul > 1.2 && p1.powerMul < 1.3, '终乘倍率也只按 C49 的 1 层算：实测 ×' + p1.powerMul.toFixed(2));
+  assert.equal(T._debugRun('endless').fragileMulBase, 1, '终乘层数只数 C49：实测 ' + T._debugRun('endless').fragileMulBase);
+
+  /* ---- 5) 老存档迁移：历史上 C52 的层数混在 fragileMulBase 里 ----
+   * 任何一次访问都会走 normalizeRun：把 C52 的层数摘出来还给 fragileHealBase。 */
+  freshRun();
+  const legacy = T._debugRun('endless');
+  legacy.limited = [{ id: 'C52', stacks: 1, uses: 10, on: true }];
+  legacy.fragileMulBase = 2;            // 1×C49 + 1×C52 混在一起
+  legacy.fragileMulBurned = 0;
+  delete legacy.fragileHealBase;
+  T.endlessInfo();                       // 内部走 endless() → normalizeRun
+  assert.equal(legacy.fragileHealBase, 1, '迁移后治疗层数应当等于持有的 C52 层数');
+  assert.equal(legacy.fragileMulBase, 1, '同时要把 C52 的份数从终乘层数里摘出来');
+});
+
 test('需求9.8：店的方向按「怎么开的」走 —— 战后立即进货关掉后回继续打，别把整层推走', () => {
   const c = setup();
   const T = c.Tower, S = c.State;
@@ -4333,6 +4444,7 @@ test('需求56：秘技通神只抽主动技能 / 终焉烙印改加算并降出
     if (burned) {
       const rr = T._debugRun('endless');
       rr.fragileMulBase = 0; rr.fragileMulBurned = burned;
+      rr.fragileHealBase = 0;                 // 「全碎了」：不剩未破碎份数
       /* 治疗烙印(C52) 的「已损毁」现在是**逐条明细**（供 30 层后随机作废），
        * 所以这里要把明细一起写好，否则 fragileHealBonus 读不到。 */
       rr.fragileHealBurned = new Array(burned).fill(0.20);
@@ -4357,7 +4469,11 @@ test('需求56：秘技通神只抽主动技能 / 终焉烙印改加算并降出
   assert.equal(c52.name, '涌泉烙印', 'C52 名称');
   assert.equal(c52.rarity, 1, 'C52 应当是稀有');
   assert.equal(c52.kind, 'limited', 'C52 应当是限次类（烙印）');
-  assert.equal(c52.mods.fragileFinalMul, true, 'C52 是烙印（终结算）');
+  /* C52 是烙标记，但**必须用自己那套层数**（fragileHealBase / fragileHealBurned）：
+   * 历史上一旦挂上 C49 的 fragileFinalMul 标记，两条烙印就共用 fragileMulBase，
+   * 导致「C49 的层数加治疗、C52 的层数加力敏速上限」——两个方向都是错的。 */
+  assert.ok(!c52.mods.fragileFinalMul, 'C52 不该挂 C49 的终乘标记');
+  assert.equal(c52.mods.fragileHealAddAlive, 0.10, 'C52 有自己的「存在」份数计数');
   assert.equal(c52.mods.fragileHealAddAlive, 0.10, '存在时治疗 +10%');
   assert.equal(c52.mods.fragileHealAddBurned, 0.20, '损毁后治疗 +20%');
   assert.ok(TD.endlessPool.some((b) => b.id === 'C52'), 'C52 应当在无尽塔池');

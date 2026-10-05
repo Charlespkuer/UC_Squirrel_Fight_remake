@@ -774,6 +774,48 @@ test('玉石俱焚（C57）：每回合双方生命上限各 ×90%（向下取�
   assert.ok(rows[1].maxHp[0] < rows[0].maxHp[0], '每结算一次都继续压低');
 });
 
+/* ============================================================
+ * 涌泉烙印（C52）：治疗量倍率 healMul
+ *   塔侧赛前写 f.healMul（+10%/层），sim 的 healOf() 统一读它。
+ *   这里锁住：师父驾到（技能 13）等**所有**治疗点都吃这个倍率，
+ *   而「枯泉」把它清零 = 完全封疗。
+ * ============================================================ */
+test('C52 治疗量倍率：师父驾到（技能 13）按 healMul 放大，枯泉清零则封疗', () => {
+  const heal13 = (mul) => {
+    const g = game(0.01);                     // 钉住随机：师父驾到的判定必过、且不闪避
+    const res = g.Sim.simulate(
+      fighter({ power: 5, agility: 50, speed: 50, hp: 1000, maxHp: 10000, masterLevel: 4,
+        skills: ['13:1'], healMul: mul }),
+      fighter({ power: 1, agility: 1, speed: 1, hp: 100000, maxHp: 100000 }));
+    const row = (res.rounds || []).find((r) => r.action === 'skill' && Number(r.id) === 13);
+    return row ? row.healSelf : null;
+  };
+  assert.equal(heal13(1), 16, '师父等级 4 → 基础治疗 16');
+  assert.equal(heal13(1.1), 18, '×1.1 → 18（涌泉烙印 1 层）');
+  assert.equal(heal13(1.2), 19, '×1.2 → 19（2 层）');
+  assert.equal(heal13(1.5), 24, '×1.5 → 24');
+  assert.equal(heal13(0), 0, '枯泉封疗：healMul=0 时一点都回不了');
+  /* 其它治疗点也吃同一个倍率：吸血（lifesteal）与回合回血（regen） */
+  const ls = (mul) => {
+    const g = game(0.5);
+    const res = g.Sim.simulate(
+      fighter({ power: 100, agility: 100, speed: 100, hp: 5000, maxHp: 1000000, mods: { lifestealPct: 0.5 }, healMul: mul }),
+      fighter({ power: 1, agility: 1, speed: 1, hp: 100000, maxHp: 100000 }));
+    const row = res.rounds.find((r) => r.lifesteal);      // 只看第一次（后面会被「回到满血」截断）
+    return row ? row.lifesteal : 0;
+  };
+  assert.equal(ls(1.2), Math.round(ls(1) * 1.2), '吸血也要被放大：×1 = ' + ls(1) + ' / ×1.2 = ' + ls(1.2));
+  const rg = (mul) => {
+    const g = game(0.5);
+    const res = g.Sim.simulate(
+      fighter({ power: 1, agility: 1, speed: 1, hp: 5000, maxHp: 1000000, mods: { regenPct: 0.05 }, healMul: mul }),
+      fighter({ power: 1, agility: 1, speed: 1, hp: 100000, maxHp: 100000 }));
+    const row = res.rounds.find((r) => r.action === 'regen' && (r.heal || 0) > 0);   // 同理只看第一次
+    return row ? row.heal : 0;
+  };
+  assert.equal(rg(1.2), Math.round(rg(1) * 1.2), '回合回血也要被放大：×1 = ' + rg(1) + ' / ×1.2 = ' + rg(1.2));
+});
+
 let failed = 0;
 for (const [name, run] of tests) {
   try { run(); console.log('PASS ' + name); }

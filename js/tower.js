@@ -1227,6 +1227,9 @@
     const run = box.run;
     if (!run || run.attempt !== token) return { ok: false };
     delete run.attempt;
+    /* 「上一场战斗赚了多少试炼币」：每场先清零 —— 输掉的那一场自然是 0，
+     * 赢了再由下面的战利品结算写回真实增量（主界面右上角就标这个数）。 */
+    run.lastCoinsGained = 0;
     const entry = run.plan[run.idx];
     const isElite = entry.kind === 'warlord';   // x10 第 5 场的狂战松鼠
     if (!win) {
@@ -1328,6 +1331,9 @@
           run.winStatSpeed = Math.max(0, Number(run.winStatSpeed) || 0) + per;
         }
       }
+      /* 「本场战斗赚了多少试炼币」——无尽塔主界面右上角要显示这个增量。
+       * 先记下战前余额，等这一场的所有进账（基础 + 精英）都算完再取差值。 */
+      const coinsBeforeBattle = Math.max(0, Number(run.coins) || 0);
       run.coins += Math.round(D().COINS.battle * coinMul);
       // 击杀叠层类（基础 → 叠层 → C15）
       const c06 = stacksOf(run, 'C06');
@@ -1349,6 +1355,9 @@
         const c13 = stacksOf(run, 'C13');
         if (c13) healAbs(run, D().BUFF_BY_ID.C13.mods.eliteHealAfter * g, refMax);
       }
+    /* 本场战斗的试炼币增量（界面右上角标在「试炼币」旁边；下一场会被刷新）。 */
+    run.lastCoinsGained = Math.max(0, Math.round((Number(run.coins) || 0) - coinsBeforeBattle));
+    out.coinsGained = run.lastCoinsGained;
     out.score = run.score; out.coins = run.coins;
     }
     /* 幻影回响（三侠战）：胜利后按概率**立刻再战同一场**。
@@ -2960,6 +2969,8 @@
     return { best: e.best, weekBest: e.weekBest, bestLayer: e.bestLayer,
       tickets: S().props[TICKET_PROP] || 0,
       run: e.run ? { layer: e.run.layer, score: e.run.score, coins: e.run.coins, carry: e.run.carry,
+        /* 上一场战斗赚到的试炼币（主界面右上角标在「试炼币」旁边）。 */
+        lastCoinsGained: Math.max(0, Math.floor(Number(e.run.lastCoinsGained) || 0)),
         battleNo: e.run.idx + 1, battleCount: e.run.plan.length, phase: e.run.phase,
       debuffs: (e.run.debuffs || []).slice(),
         choices: e.run.choices ? e.run.choices.slice() : null,

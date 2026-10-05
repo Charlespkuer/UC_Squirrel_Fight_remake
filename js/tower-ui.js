@@ -407,7 +407,19 @@
     if (mode === 'endless') {
       const run = Tower.endlessInfo().run;
       const items = [];
-      if (run) items.push({ name: '试炼币', value: run.coins });
+      /* 试炼币：除了本局持有量，再把**上一场战斗赚到的**标在旁边（回到主界面就能看到）。 */
+      if (run) {
+        const gained = Math.max(0, Math.floor(Number(run.lastCoinsGained) || 0));
+        items.push({
+          name: '试炼币',
+          value: run.coins,
+          delta: gained || 0,
+          tip: '本局持有 ' + Math.max(0, Math.floor(Number(run.coins) || 0)) + ' 试炼币' +
+            (gained ? ('\n上一场战斗获得 ' + gained + ' 枚（基础 ' + (TowerData.COINS ? TowerData.COINS.battle : 8) +
+              '，含战利品加成；击败精英另有 +' + (TowerData.COINS ? TowerData.COINS.elite : 0) + '）') : '') +
+            '\n退出本局时剩余试炼币不折现（作废），只有铸币 1:1 折成抽奖卷'
+        });
+      }
       const exitT = run ? Math.max(0, Math.floor(Number(run.ticketsOnExit) || 0)) : 0;
       const layerT = run ? Math.max(0, Math.floor(Number(run.ticketsIfSettle) || 0)) : 0;
       const coins = run ? Math.max(0, Math.floor(Number(run.coins) || 0)) : 0;
@@ -436,7 +448,9 @@
           : '铸币：失败时回滚本场再打一次；退出时 1:1 折成抽奖卷'
       });
       return '<div class="tower-currency text-only">' + items.map((it) =>
-        '<span class="currency-item"' + (it.tip ? ' data-tip="' + esc(it.tip) + '" title="' + esc(it.tip) + '"' : '') + '><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';
+        '<span class="currency-item"' + (it.tip ? ' data-tip="' + esc(it.tip) + '" title="' + esc(it.tip) + '"' : '') + '><b>' + it.value + '</b>' +
+        (it.delta ? '<em class="currency-delta">+' + it.delta + '</em>' : '') +
+        '<i>' + it.name + '</i></span>').join('') + '</div>';
     }
     const items = [{ icon: 'images/classic/icons/prop-23.png', name: '挑战书', value: S.props[CURRENCY_PROP.book] || 0 },
       { icon: 'images/classic/icons/prop-1.png', name: '金松果', value: S.goldPoint }];

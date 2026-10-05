@@ -60,6 +60,9 @@
 /* 第 3 项：无尽塔的货币条只留文字 */
 .tower-currency.text-only .currency-item { background: rgba(196, 158, 92, .16); border-radius: 12px; padding: 1px 12px; }
 .tower-currency b { font-size: 22px; color: #a8641c; }
+/* 上一场战斗赚到的试炼币：贴在「试炼币」数字右边的小增量（+8 这种）。 */
+.tower-currency .currency-delta { font-size: 15px; font-weight: 700; color: #2f8f3d; letter-spacing: .2px; }
+.endless-title-row .tower-currency .currency-delta { font-size: 13px; }
 .tower-page.has-footer .tower-main { padding-bottom: 46px; }
 /* 第 1 项：数量提示在按钮左边，按钮贴到卡片最右；
    不再画那层半透明底（用户要去掉），按钮也缩小一档、再往下压一点，

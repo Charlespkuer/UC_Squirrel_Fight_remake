@@ -443,6 +443,49 @@ test('需求9b：有币时选择「放弃本局」→ 才真正结算失败', ()
   assert.ok(!c.Tower._debugRun('endless'), '放弃后对局结束');
 });
 
+test('需求9.3：无尽塔主界面右上角标注「本场战斗获得多少试炼币」', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  c.State.newGame('coin-gain');
+  const st = c.State.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  T._debugSetLayer(9);
+  assert.ok(T.startEndlessRun().ok);
+  T._debugSetEndlessLayer(3);
+  const run = T._debugRun('endless');
+  run.permanent = []; run.limited = []; run.choices = null; run.phase = null; run.coins = 0;
+  run.lastCoinsGained = 0;
+
+  /* ---- 赢一场：coins 增量 = COINS.battle（没有战利品加成时） ---- */
+  const nx = T.nextBattle('endless');
+  assert.ok(nx.ok, '应当能开战：' + nx.msg);
+  const rw = T.reportBattle('endless', nx.token, true, 0.8, null);
+  const after = T._debugRun('endless');
+  assert.equal(after.coins, TD.COINS.battle, '战利品应当是基础值：' + after.coins);
+  assert.equal(after.lastCoinsGained, TD.COINS.battle,
+    '赢一场后 lastCoinsGained 应当是本场增量：' + after.lastCoinsGained);
+  assert.equal(rw.coinsGained, TD.COINS.battle, '返回结果里也要带上本次增量：' + rw.coinsGained);
+  /* 无尽主界面读的就是 endlessInfo().run（这是个白名单拷贝，漏了字段界面就看不到） */
+  assert.equal(T.endlessInfo().run.lastCoinsGained, TD.COINS.battle,
+    'endlessInfo().run 必须带上 lastCoinsGained，否则右上角标不出来');
+
+  /* ---- 输一场：本场增量归零（不会留着上一场的数字） ---- */
+  const nx2 = T.nextBattle('endless');
+  if (nx2.ok) {
+    T.reportBattle('endless', nx2.token, false, 0.01, null);
+    const r2 = T._debugRun('endless');
+    if (r2) assert.equal(Number(r2.lastCoinsGained) || 0, 0, '输掉的这一场增量应当是 0');
+  }
+
+  /* ---- 界面接线：试炼币那一项要渲染出 +N 的增量，并写进悬停 ---- */
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  assert.match(ui, /delta:\s*gained/, '试炼币项要带上 delta 字段');
+  assert.match(ui, /currency-delta/, '要渲染出 .currency-delta 增量元素');
+  assert.match(ui, /上一场战斗获得/, '悬停里要说明这是上一场战斗获得的');
+  const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8');
+  assert.match(css, /\.tower-currency \.currency-delta/, '增量要有自己的样式');
+});
+
 test('需求9.4：道具卖出 = 「返回 / 卖出」弹窗，点一下卖 1 个、弹窗不关', () => {
   const c = setup();
   const S = c.State;

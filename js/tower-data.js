@@ -1238,29 +1238,29 @@
       /* pityWeight = 1：保底池里与 C49 按 1 : 2 分配（见 LEGEND_PITY）。 */
       mods: { pickPermanentFree: 1, weightDivBy: 'enchanted', weightDivOffset: 1, pityWeight: 1 } },
     { id: 'C39', tags: ['endless', 'battle', 'shop', 'limited'], name: '力量烙印', rarity: 0, kind: 'limited', uses: 1000,
-      desc: '力量 +8%（烙印存在时只生效一半 = +4%），损毁后 +12% 并本局永久保留；每打完一场小概率损毁（6%）',
+      desc: '力量 +8%，损毁后 +12% 并本局永久保留；每胜利一场6%概率损毁',
       mods: { fragileStat: 'power', fragilePct: 0.08, fragileBreakPct: 6 } },
     { id: 'C40', tags: ['endless', 'battle', 'shop', 'limited'], name: '敏捷烙印', rarity: 0, kind: 'limited', uses: 1000,
-      desc: '敏捷 +8%（烙印存在时只生效一半 = +4%），损毁后 +12% 并本局永久保留；每打完一场小概率损毁（6%）',
+      desc: '敏捷 +8%，损毁后 +12% 并本局永久保留；每胜利一场6%概率损毁',
       mods: { fragileStat: 'agility', fragilePct: 0.08, fragileBreakPct: 6 } },
     { id: 'C41', tags: ['endless', 'battle', 'shop', 'limited'], name: '速度烙印', rarity: 0, kind: 'limited', uses: 1000,
-      desc: '速度 +8%（烙印存在时只生效一半 = +4%），损毁后 +12% 并本局永久保留；每打完一场小概率损毁（6%）',
+      desc: '速度 +8%，损毁后 +12% 并本局永久保留；每胜利一场6%概率损毁',
       mods: { fragileStat: 'speed', fragilePct: 0.08, fragileBreakPct: 6 } },
     { id: 'C42', tags: ['endless', 'battle', 'shop', 'limited'], name: '力量烙印·精', rarity: 1, kind: 'limited', uses: 1000,
-      desc: '力量 +14%（烙印存在时只生效一半 = +7%），损毁后 +21% 并本局永久保留；每打完一场小概率损毁（6%）',
+      desc: '力量 +14%，损毁后 +21% 并本局永久保留；每胜利一场6%概率损毁',
       mods: { fragileStat: 'power', fragilePct: 0.14, fragileBreakPct: 6 } },
     { id: 'C43', tags: ['endless', 'battle', 'shop', 'limited'], name: '敏捷烙印·精', rarity: 1, kind: 'limited', uses: 1000,
-      desc: '敏捷 +14%（烙印存在时只生效一半 = +7%），损毁后 +21% 并本局永久保留；每打完一场小概率损毁（6%）',
+      desc: '敏捷 +14%，损毁后 +21% 并本局永久保留；每胜利一场6%概率损毁',
       mods: { fragileStat: 'agility', fragilePct: 0.14, fragileBreakPct: 6 } },
     { id: 'C44', tags: ['endless', 'battle', 'shop', 'limited'], name: '速度烙印·精', rarity: 1, kind: 'limited', uses: 1000,
-      desc: '速度 +14%（烙印存在时只生效一半 = +7%），损毁后 +21% 并本局永久保留；每打完一场小概率损毁（6%）',
+      desc: '速度 +14%，损毁后 +21% 并本局永久保留；每胜利一场6%概率损毁',
       mods: { fragileStat: 'speed', fragilePct: 0.14, fragileBreakPct: 6 } },
     /* 传奇烙印「终焉烙印」：**终乘**类 —— 先把局内所有加算/成长算完，最后再乘。
      * 存在时 力/敏/速/生命上限 ×1.25；损毁后本局 ×1.5。
      * 可重复获得、**没有次数上限**；加成是**按层加算**（1 + 0.25×存在层 + 0.5×损毁层），
      * 不是 1.5^n —— 指数增长会在长局里失控，加算才可控。 */
     { id: 'C49', tags: ['endless', 'battle', 'shop', 'limited', 'repeatable'], name: '终焉烙印', rarity: 3, kind: 'limited', uses: 1000,
-      desc: '力/敏/速/生命上限 +25%（终乘），损毁后本局 +50%；每打完一场小概率损毁',
+      desc: '力/敏/速/生命上限 +25%（终乘），损毁后本局 +50%；每胜利一场6%概率损毁',
       /* weightDivBy: 'owned' —— 身上已有的份数（含碎掉的）越多，商店再出现它的权重越低：
        * **weight = 初始 ÷ 份数**（0~1 份 → ×1；2 份 → ÷2；3 份 → ÷3）。
        * 2026-10 调整：原来是「每份 ×0.10」（1/2/3 份 → ×1 / ×0.1 / ×0.01），实在太难再刷到，
@@ -1284,7 +1284,7 @@
      * 记账字段与前两条烙印同一套：run.fragileCoinBase（未破碎份数）+
      * run.fragileCoinBurned（已破碎份数的明细数组），见 tower.js 的 fragileCoinBonus。 */
     { id: 'C53', tags: ['endless', 'battle', 'limited', 'oncePerRun', 'ops'], name: '淘金烙印', rarity: 3, kind: 'limited', uses: 1000, maxStacks: 1,
-      desc: '战斗获得试炼币 +15%，损毁后本局 +30%；每打完一场小概率损毁（6%）',
+      desc: '战斗获得试炼币 +15%，损毁后本局 +30%；每胜利一场6%概率损毁',
       mods: { fragileCoinAddAlive: 0.15, fragileCoinAddBurned: 0.30, fragileBreakPct: 6 } },
     /* ============================================================
      * 本轮新增 6 个（2026-10）：默认仅无尽塔；带 tower 标签的两条挑战塔也保留
@@ -1299,7 +1299,7 @@
       desc: '战斗中每回合开始时，力量、敏捷、速度各 +1.5%（可叠 2 层）；每场战斗结束时清零',
       mods: { roundStatPct: 0.015 } },
     { id: 'C55', tags: ['endless', 'battle', 'shop'], name: '后发制人', rarity: 3, kind: 'permanent',
-      desc: '战斗中每回合开始时，若力/敏/速有一项低于对手，就把差距最大的那一项补上「差距的 10%」；每场战斗结束时清零',
+      desc: '战斗中每回合开始时，若力/敏/速有一项低于对手，将差距最大的一项补上10%；每场战斗结束时清零',
       mods: { catchUpPct: 0.10 } },
     { id: 'C56', tags: ['endless', 'battle', 'shop'], name: '风影身法', rarity: 1, kind: 'permanent',
       desc: '每场战斗中，我方第一次受到攻击时必定闪避',

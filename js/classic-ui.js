@@ -826,9 +826,9 @@
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
     // 否则兑换页点进详情再返回会掉回背包页。
     $('[data-action="prop-action"]',p)?.addEventListener('click',()=>openProp(selectedProp,mode));
-    /* 卖出：与「使用」同一套交互 —— 点一下卖 1 个、原地刷新，
-     * 不弹窗、不选数量、也不离开当前这一页（背包页与页码都保持）。 */
-    $('[data-action="prop-sell"]',p)?.addEventListener('click',()=>sellOne(selectedProp,()=>openBag(mode,bagPage)));
+    /* 卖出：与「使用」同一套交互 —— 点「卖出 1 个」打开卖出弹窗
+     * （左下「返回」/ 右下「卖出」），在弹窗里点一下卖 1 个、弹窗不关，卖光为止。 */
+    $('[data-action="prop-sell"]',p)?.addEventListener('click',()=>sellDialog(selectedProp,()=>openBag(mode,bagPage)));
     if(status&&!status.remaining)$('[data-action="prop-action"]',p).disabled=true;
     $('[data-action="rank-shop"]',p)?.addEventListener('click',()=>ClassicExtras.rankShop());
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openBag(mode,bagPage-1));
@@ -954,15 +954,42 @@
     }
     syncLive();
   }
-  /** 卖出**1 个**背包道具（按字典价格的一半回收）。
-   *  交互与「使用」一致：点一下卖一个、原地刷新该页，不弹窗、不选数量、不退出页面。
-   *  想卖多个就多点几下（背包会实时显示剩余数量，卖完按钮自动消失）。 */
-  function sellOne(id,after) {
-    const S=State.state(),price=State.propSellPrice(id),held=S.props[id]||0;
-    if(!price||held<1){toast('背包里没有可卖的道具');return;}
-    const r=State.sellProp(id,1);
-    toast(r.msg||('卖出 1 个，获得 '+price+' 金松果'));
-    if(r.ok&&after)after();
+  /** 卖出道具：与「使用」同一套交互的弹窗。
+   *  · 左下「返回」→ 回到背包（并把背包按最新数量重绘）
+   *  · 右下「卖出」→ **卖 1 个**，弹窗不关、数字实时刷新，可以一直点；卖光后按钮禁用
+   *  没有滑动条、不选数量、也不会自己退出。 */
+  function sellDialog(id,after) {
+    const S=State.state(),price=State.propSellPrice(id),held0=S.props[id]||0,def=propMap.getValue(id);
+    if(!price||held0<1){toast('背包里没有可卖的道具');return;}
+    const name=def?def.name:'道具';
+    const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div>'+
+      '<h3 class="detail-name">'+esc(name)+'</h3>'+
+      '<div class="detail-description">每个可回收 '+price+' 金松果。</div>'+
+      '<div class="small-label">拥有 <b data-live="sell-held">'+held0+'</b> 个　金松果：<b data-live="sell-gold">'+S.goldPoint+'</b></div>'+
+      '<div class="use-preview" role="status" data-live="sell-tip"></div></div></div>';
+    const m=modal('卖出道具',content,[
+      {label:'返回',cls:'muted',run:()=>{m.close();if(after)after();}},
+      {label:'卖出',cls:'gold',primary:true,close:false,run:()=>{
+        const r=State.sellProp(id,1);
+        toast(r.msg||'操作完成');
+        sync();
+        if(!r.ok)after&&after();
+      }},
+    ],{small:true});
+    const sellBtn=()=>Array.prototype.slice.call(m.element.querySelectorAll('.modal-buttons button'))
+      .find((b)=>b.textContent.trim()==='卖出');
+    /** 只更新弹窗里的实时数字与按钮状态（不重建弹窗，避免界面跳动）。 */
+    function sync(){
+      const now=State.state(),held=now.props[id]||0;
+      const set=(key,value)=>{const el=$('[data-live="'+key+'"]',m.element);if(el)el.textContent=value;};
+      set('sell-held',held);set('sell-gold',now.goldPoint);
+      set('sell-tip',held>0?('点「卖出」卖出 1 个，可得 '+price+' 金松果；卖完为止'):'已经卖光了');
+      const b=sellBtn();if(b)b.disabled=held<1;
+    }
+    /* 右上角的 × 也能关弹窗 —— 关掉之后同样要把背包刷新到最新数量。 */
+    const closeBtn=$('.modal-close',m.element);
+    if(closeBtn){const prev=closeBtn.onclick;closeBtn.onclick=(e)=>{if(prev)prev.call(closeBtn,e);if(after)after();};}
+    sync();
   }
   /* 天使果实 / 恶魔果实：随机三选一（天使=学会一个，恶魔=遗忘一个）。
    * 候选由 State.fruitOptions 抽好，这里只负责展示与回传选择。 */

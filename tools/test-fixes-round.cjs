@@ -443,24 +443,29 @@ test('需求9b：有币时选择「放弃本局」→ 才真正结算失败', ()
   assert.ok(!c.Tower._debugRun('endless'), '放弃后对局结束');
 });
 
-test('需求9.4：道具卖出改成「点一下卖 1 个」，不弹滑动条、不退出该页', () => {
+test('需求9.4：道具卖出 = 「返回 / 卖出」弹窗，点一下卖 1 个、弹窗不关', () => {
   const c = setup();
   const S = c.State;
   const src = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
-  /* ---- 1) 滑动条版本彻底移除（源码里不该再有卖出数量的滑块与弹窗） ---- */
+  /* ---- 1) 滑动条版本彻底移除 ---- */
   assert.ok(src.indexOf('sell-count') < 0, '不该再有 sell-count 滑块');
   assert.ok(src.indexOf('卖出数量') < 0, '不该再有「卖出数量」标签');
-  assert.ok(src.indexOf("function sellAsk") < 0, '旧的 sellAsk（滑动条选数量后确认）应当删掉');
-  /* ---- 2) 新交互：卖 1 个 + 原地刷新 ---- */
-  assert.match(src, /function sellOne\(id,\s*after\)/,
-    '应当有 sellOne（卖 1 个的入口）');
-  assert.match(src, /State\.sellProp\(id,\s*1\)/, 'sellOne 必须只卖 1 个');
-  assert.match(src, /btn\('卖出 1 个','prop-sell'/,
-    '背包按钮文案应当是「卖出 1 个」');
-  const sellLine = src.split('\n').find((l) => l.indexOf('[data-action="prop-sell"]') >= 0 && l.indexOf('addEventListener') >= 0) || '';
-  assert.ok(sellLine.indexOf('sellOne(selectedProp') > 0, '卖出按钮应当直接调 sellOne：' + sellLine.trim());
-  assert.ok(sellLine.indexOf('openBag(mode,bagPage)') > 0,
-    '卖完应当是原地重绘当前页（openBag(mode, bagPage)），不关页面：' + sellLine.trim());
+  assert.ok(src.indexOf('function sellAsk') < 0, '旧的 sellAsk（滑动条选数量后确认）应当删掉');
+  assert.ok(src.indexOf('function sellOne') < 0, '不应该再是「点一下直接卖」的无弹窗版本');
+
+  /* ---- 2) 弹窗式交互：入口 → sellDialog → 内部只卖 1 个 ---- */
+  const entryLine = src.split('\n').find((l) => l.indexOf('[data-action="prop-sell"]') >= 0 && l.indexOf('addEventListener') >= 0) || '';
+  assert.ok(entryLine.indexOf('sellDialog(selectedProp') > 0, '背包「卖出 1 个」应当打开卖出弹窗：' + entryLine.trim());
+  assert.ok(entryLine.indexOf('openBag(mode,bagPage)') > 0, '关掉弹窗后应当把背包重绘到最新数量');
+  assert.match(src, /function sellDialog\(id,\s*after\)/, '应当有 sellDialog');
+  const dlg = src.slice(src.indexOf('function sellDialog(id,after)'));
+  assert.ok(dlg.slice(0, 2600).indexOf('State.sellProp(id,1)') > 0, '弹窗里的卖出必须只卖 1 个');
+  /* 两个按钮：返回（muted → 自动排最左）+ 卖出（primary → 自动排最右） */
+  assert.match(dlg.slice(0, 2600), /\{label:'返回',cls:'muted'/, '应当有「返回」按钮（muted → 最左）');
+  assert.match(dlg.slice(0, 2600), /\{label:'卖出',cls:'gold',primary:true,close:false/, '应当有「卖出」按钮（primary → 最右，且点完不关弹窗）');
+  /* 卖光后按钮禁用 + 数字实时刷新 */
+  assert.ok(dlg.slice(0, 2600).indexOf('b.disabled=held<1') > 0, '卖光后应当把卖出按钮禁用');
+  assert.ok(dlg.slice(0, 2600).indexOf("data-live=\"sell-held\"") > 0, '弹窗里应当实时显示剩余数量');
 
   /* ---- 3) 模型口径：一次只减 1 个、按回收价进账 ---- */
   S.newGame('sell-one');
@@ -474,7 +479,6 @@ test('需求9.4：道具卖出改成「点一下卖 1 个」，不弹滑动条�
   assert.equal(r.sold, 1, '一次只卖 1 个');
   assert.equal(st.props[id], 2, '背包应当剩 2 个');
   assert.equal(st.goldPoint, 100 + price, '应当按回收价进账：' + price);
-  /* 卖到 0：再卖会失败（界面上按钮也会随之消失） */
   S.sellProp(id, 1); S.sellProp(id, 1);
   assert.equal(st.props[id], undefined, '卖光之后不该还留着 0 个的条目');
   assert.equal(S.sellProp(id, 1).ok, false, '没有库存时应当拒绝');

@@ -443,6 +443,67 @@ test('需求9b：有币时选择「放弃本局」→ 才真正结算失败', ()
   assert.ok(!c.Tower._debugRun('endless'), '放弃后对局结束');
 });
 
+test('需求9.1：玉石俱焚确实生效 —— 战斗内双方血量上限真的被压低（并且能显示出来）', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;
+  c.State.newGame('c57-live');
+  const st = c.State.state(); st.level = 70; st.props[23] = 99999;
+  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  T._debugSetLayer(9);
+  assert.ok(T.startEndlessRun().ok);
+  T._debugSetEndlessLayer(6);
+  const run = T._debugRun('endless');
+  run.permanent = []; run.limited = []; run.choices = null; run.phase = null;
+  assert.ok(T.addBuff(run, 'C57').ok, '应当能拿到玉石俱焚');
+
+  /* 走真实路径：nextBattle → adjustMe（Main.startBattle 就是这么做的）→ Sim.simulate */
+  const nx = T.nextBattle('endless');
+  assert.ok(nx.ok, '应当能开战：' + nx.msg);
+  const me = S.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+  me.maxHp = me.hp;
+  nx.adjustMe(me);
+  assert.equal(Number(me.mods.roundMaxHpMul), 0.9, '本场修正里必须带上 roundMaxHpMul');
+  /* 敌人面板只保证有 hp（maxHp 可能没写，sim 内部按 hp 当满血） */
+  const before = { me: Math.round(me.maxHp), foe: Math.round(nx.foe.maxHp || nx.foe.hp) };
+  const res = Sim.simulate(me, nx.foe);
+  const rows = res.rounds.filter((r) => r.noteText === '玉石俱焚');
+  assert.ok(rows.length > 0, '整场里应当出现「玉石俱焚」的回合结算');
+  assert.ok(res.maxHp[0] < before.me, '我方血量上限真的被压低了：' + before.me + ' → ' + res.maxHp[0]);
+  assert.ok(res.maxHp[1] < before.foe, '敌方血量上限也被压低了：' + before.foe + ' → ' + res.maxHp[1]);
+  assert.ok(rows[0].maxHp && rows[0].maxHp[0] === Math.floor(before.me * 0.9),
+    '第一次结算就该是 floor(初始上限 ×0.9)：' + JSON.stringify(rows[0].maxHp));
+
+  /* 战斗回放要消费这个 payload（否则只看到飘字、看不到上限变化）——
+   * 把回放里的纯函数抠出来直接跑：血条上限与当前血量都要被压低。 */
+  const battleSrc = fs.readFileSync(path.join(ROOT, 'js', 'battle.js'), 'utf8');
+  assert.match(battleSrc, /function applyRoundCaps\(maxHpArr, hpsArr, r\)/, '回放要有 applyRoundCaps');
+  assert.match(battleSrc, /上限 ' \+ maxHp\[side\]/, '上限变化时要有飘字提示');
+  const fn = (() => {
+    const at = battleSrc.indexOf('function applyRoundCaps(maxHpArr, hpsArr, r) {');
+    let k = battleSrc.indexOf('{', at), depth = 0, e = k;
+    while (e < battleSrc.length) {
+      const ch = battleSrc[e];
+      if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) break; }
+      e++;
+    }
+    return battleSrc.slice(at, e + 1);
+  })();
+  const caps = vm.runInNewContext(fn + '\napplyRoundCaps;', {});
+  const maxArr = [1000, 1000], hpArr = [1000, 1000];
+  const r1 = caps(maxArr, hpArr, { maxHp: [900, 900], hp: [900, 900] });
+  assert.equal(r1.capped, true, '第一次应当判定为「压低了」');
+  assert.deepEqual(maxArr.slice(), [900, 900], '血条上限要跟着压低：' + JSON.stringify(maxArr));
+  assert.deepEqual(hpArr.slice(), [900, 900], '当前血量也要跟着裁：' + JSON.stringify(hpArr));
+  caps(maxArr, hpArr, { maxHp: [810, 810], hp: [805, 810] });
+  assert.deepEqual(maxArr.slice(), [810, 810], '继续压低');
+  assert.deepEqual(hpArr.slice(), [805, 810], '当前血量按回合给的数值走');
+  const max2 = [500, 500], hp2 = [400, 300];
+  assert.equal(caps(max2, hp2, { noteText: '越战越勇' }).capped, false, '没有 maxHp 的回合不该动上限');
+  assert.deepEqual(max2.slice(), [500, 500], '上限保持不动');
+  assert.deepEqual(hp2.slice(), [400, 300], '血量也保持不动');
+});
+
 test('需求9.3：无尽塔主界面右上角标注「本场战斗获得多少试炼币」', () => {
   const c = setup();
   const TD = c.TowerData, T = c.Tower, S = c.State;

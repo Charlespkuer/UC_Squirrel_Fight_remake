@@ -284,7 +284,11 @@
         c.maxHp = Math.max(1, Math.floor(c.maxHp * hpMul));
         if (c.hp > c.maxHp) c.hp = c.maxHp;
       }
-      if (push) push({ attacker: actor.side, action: 'buff', noteText: '玉石俱焚', noteSide: actor.side });
+      /* 把两边的新上限/当前血量一起写进这一回合：战斗回放要据此更新血条，
+       * 否则玩家在战斗里只看得到飘字、看不到「血量上限变化」。 */
+      const bySide = (pick) => (actor.side === 0 ? [pick(actor), pick(foe)] : [pick(foe), pick(actor)]);
+      if (push) push({ attacker: actor.side, action: 'buff', noteText: '玉石俱焚', noteSide: actor.side,
+        maxHp: bySide((c) => c.maxHp), hp: bySide((c) => c.hp) });
     }
   }
   /**

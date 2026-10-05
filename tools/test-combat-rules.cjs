@@ -764,6 +764,14 @@ test('玉石俱焚（C57）：每回合双方生命上限各 ×90%（向下取�
   assert.ok(res.maxHp[0] > Math.floor(start * Math.pow(0.9, k + 2)), '压缩不该过头');
   const plain = game(0.5).Sim.simulate(auraFighter(), auraFighter());
   assert.equal(plain.maxHp[0], plain.maxHp[1], '没有该增益时双方上限不变');
+  /* 回合payload要带上两边的新上限与当前血量：战斗回放靠它更新血条
+   *（否则玩家在战斗里只看到飘字、看不到血量上限变化 —— 这就是用户报的问题）。 */
+  assert.ok(Array.isArray(rows[0].maxHp) && rows[0].maxHp.length === 2,
+    '玉石俱焚的回合要带 maxHp[2]：' + JSON.stringify(rows[0].maxHp));
+  assert.equal(rows[0].maxHp[0], Math.floor(start * 0.9), '第 1 次结算后我方上限 = floor(初始 ×0.9)');
+  assert.equal(rows[0].maxHp[1], Math.floor(start * 0.9), '敌方同理');
+  assert.ok(Array.isArray(rows[0].hp) && rows[0].hp.every((v) => v <= start), '还要带当前血量');
+  assert.ok(rows[1].maxHp[0] < rows[0].maxHp[0], '每结算一次都继续压低');
 });
 
 let failed = 0;

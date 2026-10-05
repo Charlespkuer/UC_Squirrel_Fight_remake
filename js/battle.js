@@ -232,6 +232,25 @@
       const count = floaters.filter((f) => f.side === side && f.age < 250).length;
       floaters.push({ side, text: String(text), color: color || 'r', big: !!big, x: p.x, y: p.y - count * 43, age: 0 });
     }
+    /** 把回合里的「新上限 / 当前血量」应用到血条数组上（玉石俱焚这类**压缩上限**的效果）。
+     *  独立成纯函数：一是逻辑清楚，二是单测可以直接跑它（战斗回放本体依赖 rAF，headless 里驱动不动）。
+     *  返回 { capped } —— 这一回合有没有真的压低上限（用来决定要不要飘字）。 */
+    function applyRoundCaps(maxHpArr, hpsArr, r) {
+      let capped = false;
+      if (Array.isArray(r.maxHp) && r.maxHp.length === 2) {
+        for (const side of [0, 1]) {
+          const next = Math.max(1, Math.round(Number(r.maxHp[side]) || maxHpArr[side]));
+          if (next < maxHpArr[side]) { maxHpArr[side] = next; capped = true; }
+        }
+      }
+      if (Array.isArray(r.hp) && r.hp.length === 2) {
+        for (const side of [0, 1]) {
+          const v = Math.max(0, Math.min(maxHpArr[side], Math.round(Number(r.hp[side]) || hpsArr[side])));
+          if (v !== hpsArr[side]) hpsArr[side] = v;
+        }
+      }
+      return { capped: capped };
+    }
     function applyHp(r, counterPending, before) {
       if (Array.isArray(r.shellAfter) && r.shellAfter.length === 2) {
         for (let side = 0; side < 2; side++) shields[side] = Math.max(0, Math.round(Number(r.shellAfter[side]) || 0));
@@ -398,11 +417,21 @@
     async function playRound(r) {
       const att = r.attacker, def = 1 - att, f = fighters[att];
       const beforeHp = hps.slice();
+      const beforeMax = maxHp.slice();
       if (r.action === 'dot') { applyHp(r); floater(r.selfDot ? att : def, '-' + r.dmg, 'y'); if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y'); await wait(400); return; }
       if (r.action === 'buff') {
         /* 塔 buff：回合开始的自增益（越战越勇 / 后发制人 / 玉石俱焚）——
-         * 没有伤害也没有治疗，只飘一行字说明，别掉进下面的攻击分支播动画。 */
+         * 没有伤害也没有治疗，只飘一行字说明，别掉进下面的攻击分支播动画。
+         * 但「玉石俱焚」会同时压低**双方的血量上限**，所以要把上限与当前血量
+         * 一起更新到血条上（否则玩家在战斗里只看到飘字、看不到上限变化）。 */
+        const capResult = applyRoundCaps(maxHp, hps, r);
         if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y');
+        /* 上限被压下来了：两边各飘一次新上限，配合血条数字一起看得到效果。 */
+        if (capResult.capped) {
+          for (const side of [0, 1]) {
+            if (Number(r.maxHp[side]) < beforeMax[side]) floater(side, '上限 ' + maxHp[side], 'y');
+          }
+        }
         await wait(320);
         return;
       }
@@ -540,5 +569,7 @@
   /* ============================================================
    * 【BT4】导出 window.Battle
    * ============================================================ */
-  window.Battle = { run, makeAvatar, REGIONS, weaponLabelFor, isThrowing };
+  window.Battle = {
+    /* 内部纯函数（供 tools/*.cjs 直接单测；游戏逻辑不依赖它） */
+    _applyRoundCaps: applyRoundCaps, run, makeAvatar, REGIONS, weaponLabelFor, isThrowing };
 })();

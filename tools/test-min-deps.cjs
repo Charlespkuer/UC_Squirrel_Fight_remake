@@ -308,6 +308,72 @@ record('js/gamedict.js 与 references/orig/ 的抽取结果一致（可重生成
   assert.equal(r.status, 0, 'gamedict.js 不是最新的：\n' + (r.stderr || r.stdout));
 });
 
+/* 每个「浏览器侧模块」都必须能在最小环境下**加载成功**并挂上自己的全局。
+ * 这条是补一个真实的坑：js/battle.js 曾经在模块作用域引用了一个只存在于
+ * Battle.run 内部的函数 → 文件一加载就 ReferenceError → window.Battle 根本没挂上，
+ * 于是「战斗完全播不了」。当时 20 个工具全绿却没抓到，因为它们都不加载 battle.js。 */
+record('浏览器侧模块都能加载并挂上全局（battle / tower / tower-ui / classic-ui …）', () => {
+  /* 注意：debug.js / main.js 在加载期就会去建面板、绑 DOM 事件，需要真浏览器环境，
+   * 这里只覆盖「纯逻辑 + 界面模块」——它们正是之前 battle.js 那种加载期引用错误的受害者。 */
+  const files = ['js/sim.js', 'js/tower-data.js', 'js/state.js', 'js/tower.js', 'js/battle.js',
+    'js/battle-drops.js', 'js/ui.js', 'js/classic-ui.js', 'js/classic-extras.js', 'js/classic-fusion.js',
+    'js/tower-ui.js'];
+  const store = new Map();
+  const c = {
+    console,
+    Date,
+    JSON, Math, Object, Array, String, Number, Boolean, RegExp, Error, Promise, Set, Map,
+    setTimeout: () => 0, clearTimeout: () => 0, setInterval: () => 0, clearInterval: () => 0,
+    requestAnimationFrame: () => 0, cancelAnimationFrame: () => 0,
+    navigator: { userAgent: 'node', language: 'zh-CN', platform: 'node' },
+    performance: { now: () => 0 },
+    getComputedStyle: () => ({ getPropertyValue: () => '' }),
+    Image: function Image() { return { style: {}, addEventListener() {}, set src(v) { this._src = v; }, get src() { return this._src; } }; },
+    Audio: function Audio() { return { play: () => Promise.resolve(), pause() {}, addEventListener() {}, removeEventListener() {}, volume: 1, currentTime: 0 }; },
+    Event: function Event(t) { this.type = t; }, CustomEvent: function CustomEvent(t) { this.type = t; },
+    alert() {}, confirm: () => false, prompt: () => null,
+    location: { search: '?qa=1', href: 'http://local/' },
+    localStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
+    document: null,
+  };
+  /* 极简 DOM 桩：够模块在加载期建面板/绑事件即可（不求渲染正确） */
+  const fakeEl = () => {
+    const el = {
+      style: {}, dataset: {}, classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+      children: [], childNodes: [], value: '', textContent: '', innerHTML: '', checked: false, disabled: false,
+      appendChild(child) { this.children.push(child); return child; },
+      removeChild() {}, insertBefore(ch) { return ch; }, remove() {}, setAttribute() {}, getAttribute: () => null,
+      removeAttribute() {}, addEventListener() {}, removeEventListener() {}, focus() {}, blur() {}, click() {},
+      querySelector: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 }),
+      getContext: () => ({ save() {}, restore() {}, drawImage() {}, clearRect() {}, fillRect() {}, beginPath() {}, closePath() {}, arc() {}, fill() {}, stroke() {}, moveTo() {}, lineTo() {}, translate() {}, scale() {}, rotate() {}, setTransform() {}, fillText() {}, measureText: () => ({ width: 0 }), createPattern: () => null, getImageData: () => ({ data: [] }), putImageData() {}, createLinearGradient: () => ({ addColorStop() {} }), globalAlpha: 1, globalCompositeOperation: '', imageSmoothingEnabled: false }),
+      width: 1170, height: 690, offsetWidth: 1170, offsetHeight: 690,
+    };
+    return el;
+  };
+  c.document = {
+    addEventListener() {}, removeEventListener() {}, createElement: fakeEl, createElementNS: fakeEl,
+    querySelector: () => null, querySelectorAll: () => [], getElementById: () => null,
+    body: fakeEl(), documentElement: fakeEl(), head: fakeEl(),
+    readyState: 'complete', hidden: false, visibilityState: 'visible', title: '',
+  };
+  c.window = c; c.self = c; c.globalThis = c;
+  c.addEventListener = () => {}; c.removeEventListener = () => {}; c.dispatchEvent = () => true;
+  vm.createContext(c);
+  for (const f of ['js/gamedict.js', ...files]) {
+    const full = path.join(ROOT, f);
+    if (!fs.existsSync(full)) continue;
+    try {
+      vm.runInContext(fs.readFileSync(full, 'utf8'), c, { filename: f });
+    } catch (e) {
+      assert.fail(f + ' 加载失败：' + (e && e.message));
+    }
+  }
+  for (const [key, need] of [['Battle', 'run'], ['Tower', 'endlessInfo'], ['TowerData', 'BUFFS'], ['TowerUI', 'openEndless'], ['Sim', 'simulate']]) {
+    assert.ok(c[key], '加载完之后 window.' + key + ' 应当存在');
+    assert.ok(c[key][need], 'window.' + key + '.' + need + ' 应当存在');
+  }
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of results) {

@@ -41,6 +41,22 @@
   每 5 层试炼商店、每 10 层里程碑奖励，随时可结算离场。
 - **双机同步**：Mac ↔ Windows 通过 ZeroTier 互推存档与游戏文件（`scripts/一键同步`）。
 
+## 修 Bug：战斗播不了（模块加载期 ReferenceError）（2026-10）
+
+上一轮修 C57 显示时，我把 `applyRoundCaps` 写在了 `Battle.run` **内部**，却又在模块作用域
+的 `window.Battle = { … }` 里导出它 → `js/battle.js` 一加载就 `ReferenceError: applyRoundCaps is not defined`
+→ `window.Battle` 根本没挂上 →「战斗完全播不了」。
+
+修法：把 `applyRoundCaps` 挪到模块作用域（它本来就是纯函数），`run` 内部照常调用，导出不变。
+
+**顺带补了一条守卫**：`tools/test-min-deps.cjs` 新增「浏览器侧模块都能加载并挂上全局 ——
+sim / tower-data / state / tower / battle / battle-drops / ui / classic-ui / classic-extras /
+classic-fusion / tower-ui」，在一个极简 DOM 桩里逐个 `runInContext`，并断言
+`window.Battle.run` / `Tower.endlessInfo` / `TowerData.BUFFS` / `TowerUI.openEndless` / `Sim.simulate` 都在。
+这条守卫**已验证能抓住本次这个 bug**（临时把函数挪回 `run` 内部 → 立刻报
+「js/battle.js 加载失败：applyRoundCaps is not defined」）。
+之所以之前 20 个工具全绿却没发现，就是因为没有任何一个工具加载过 `js/battle.js`。
+
 ## 修 Bug：玉石俱焚「血量上限没有变化」看不到（2026-10）
 
 现象：装了 C57 之后战斗里看不到血量上限变化（用户报的）。

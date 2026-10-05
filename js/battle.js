@@ -94,6 +94,26 @@
   /* ============================================================
    * 【BT3】战斗播放主流程 run
    * ============================================================ */
+    /** 把回合里的「新上限 / 当前血量」应用到血条数组上（玉石俱焚这类**压缩上限**的效果）。
+   *  独立成纯函数：一是逻辑清楚，二是单测可以直接跑它（战斗回放本体依赖 rAF，headless 里驱动不动）。
+   *  返回 { capped } —— 这一回合有没有真的压低上限（用来决定要不要飘字）。 */
+  function applyRoundCaps(maxHpArr, hpsArr, r) {
+    let capped = false;
+    if (Array.isArray(r.maxHp) && r.maxHp.length === 2) {
+      for (const side of [0, 1]) {
+        const next = Math.max(1, Math.round(Number(r.maxHp[side]) || maxHpArr[side]));
+        if (next < maxHpArr[side]) { maxHpArr[side] = next; capped = true; }
+      }
+    }
+    if (Array.isArray(r.hp) && r.hp.length === 2) {
+      for (const side of [0, 1]) {
+        const v = Math.max(0, Math.min(maxHpArr[side], Math.round(Number(r.hp[side]) || hpsArr[side])));
+        if (v !== hpsArr[side]) hpsArr[side] = v;
+      }
+    }
+    return { capped: capped };
+  }
+
   async function run(opts) {
     if (activeController) activeController.cancel();
     const canvas = opts.canvas, ctx = canvas.getContext('2d');
@@ -231,25 +251,6 @@
       const p = point(side);
       const count = floaters.filter((f) => f.side === side && f.age < 250).length;
       floaters.push({ side, text: String(text), color: color || 'r', big: !!big, x: p.x, y: p.y - count * 43, age: 0 });
-    }
-    /** 把回合里的「新上限 / 当前血量」应用到血条数组上（玉石俱焚这类**压缩上限**的效果）。
-     *  独立成纯函数：一是逻辑清楚，二是单测可以直接跑它（战斗回放本体依赖 rAF，headless 里驱动不动）。
-     *  返回 { capped } —— 这一回合有没有真的压低上限（用来决定要不要飘字）。 */
-    function applyRoundCaps(maxHpArr, hpsArr, r) {
-      let capped = false;
-      if (Array.isArray(r.maxHp) && r.maxHp.length === 2) {
-        for (const side of [0, 1]) {
-          const next = Math.max(1, Math.round(Number(r.maxHp[side]) || maxHpArr[side]));
-          if (next < maxHpArr[side]) { maxHpArr[side] = next; capped = true; }
-        }
-      }
-      if (Array.isArray(r.hp) && r.hp.length === 2) {
-        for (const side of [0, 1]) {
-          const v = Math.max(0, Math.min(maxHpArr[side], Math.round(Number(r.hp[side]) || hpsArr[side])));
-          if (v !== hpsArr[side]) hpsArr[side] = v;
-        }
-      }
-      return { capped: capped };
     }
     function applyHp(r, counterPending, before) {
       if (Array.isArray(r.shellAfter) && r.shellAfter.length === 2) {

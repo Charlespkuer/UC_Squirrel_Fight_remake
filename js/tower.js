@@ -2578,7 +2578,7 @@
       rerollPrice: D().SHOP.rerollPrice,
       slots: run.shop.slots.map((s) => { const b = D().BUFF_BY_ID[s.id];
         const mine = (run.permanent || []).find((x) => x.id === s.id) || (run.limited || []).find((x) => x.id === s.id);
-        return { id: s.id, sold: s.sold, name: b.name, desc: b.desc, rarity: b.rarity, kind: b.kind, price: shopPriceOf(b, s),
+        return { id: s.id, sold: s.sold, name: b.name, desc: D().descOf(b, 'endless'), rarity: b.rarity, kind: b.kind, price: shopPriceOf(b, s),
           ownedStacks: mine ? (mine.stacks || 1) : 0, canStack: D().hasTag(b, 'stackable') }; }) };
   }
   /** C58「豪掷千金」：从**无尽塔**的限次池里随机抽一个「还能拿」的，立刻获得。
@@ -3117,7 +3117,7 @@
       /* 查不到定义的条目进不来：normalizeRun 的 cleanBuffs 已经先过滤过一遍
        * （只有 BUFF_BY_ID 里存在的 id 才会留在 permanent / limited 里）。 */
       if (!buff || D().hasTag(buff, 'hidden')) return;   // 隐藏型（背包/选取类）不进增益面板
-      out.push({ id: buff.id, name: buff.name, desc: buff.desc, rarity: buff.rarity, kind: buff.kind,        scopeName: scopeName[buff.kind], stacks: entry.stacks || 1,
+      out.push({ id: buff.id, name: buff.name, desc: D().descOf(buff, mode), rarity: buff.rarity, kind: buff.kind,        scopeName: scopeName[buff.kind], stacks: entry.stacks || 1,
         progress: progressOf(run, buff.id),
         uses: buff.kind === 'limited' ? entry.uses : undefined,
         nextBattle: D().hasTag(buff, 'nextBattle'),   // 挑战塔里 = 「下一场战斗」，卡面不显示限次

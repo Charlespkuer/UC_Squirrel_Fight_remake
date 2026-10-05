@@ -1107,8 +1107,11 @@
     { id: 'C56', tags: ['endless', 'battle', 'shop'], name: '风影身法', rarity: 1, kind: 'permanent',
       desc: '每场战斗中，我方**第一次受到攻击时必定闪避**',
       mods: { firstDodge: 1 } },
+    /* 双塔口径不同：挑战塔的限次类一律写「下一场战斗」（那里一场就是一层）；
+     * 无尽塔是**10 次限次**，界面按「限次 10 / 剩余 N 场」显示，所以另给一份文案。 */
     { id: 'C57', tags: ['tower', 'endless', 'battle', 'shop', 'limited', 'nextBattle'], name: '玉石俱焚', rarity: 2, kind: 'limited', uses: 10,
       desc: '下一场战斗每回合开始时，我方与敌方的生命上限各 ×90%（向下取整），当前血量跟着裁；每场战斗结束时清零',
+      descEndless: '限次 10 场：每场战斗中，每回合开始时我方与敌方的生命上限各 ×90%（向下取整），当前血量跟着裁；每场战斗结束时清零',
       mods: { roundMaxHpMul: 0.90 } },
     { id: 'C58', tags: ['endless', 'battle', 'shop'], name: '豪掷千金', rarity: 2, kind: 'permanent',
       desc: '每在试炼商店消费 100 试炼币，立即获得 1 个随机限次增益',
@@ -1251,6 +1254,14 @@
   function tagsOf(b) { return tagSet(b).slice(); }
   function buffsWithTag(t) { return BUFFS.filter((b) => hasTag(b, t)); }
   function poolsOf(b) { return Object.keys(POOL_TAGS).filter((pool) => POOL_TAGS[pool].every((t) => hasTag(b, t))); }
+  /** 增益说明：**按所在塔取不同文案**。
+   *  只有需要两套说法的条目才写 descEndless（例：C57 玉石俱焚 —— 挑战塔写「下一场战斗」，
+   *  无尽塔是 10 次限次，要写清「限次 10 场」并让界面显示剩余次数）。 */
+  function descOf(buff, mode) {
+    if (!buff) return '';
+    if (mode === 'endless' && buff.descEndless) return buff.descEndless;
+    return buff.desc;
+  }
   /* 无尽专属 mod：带这些效果的增益只在无尽塔成立（环境词缀 / 试炼币 / 商店 /
    * 铸币 / 结算 / 商店消费相关）。挑战塔带这类标签/效果一律加载期报错。 */
   const ENDLESS_ONLY_MODS = [
@@ -1344,7 +1355,7 @@
     SHOP_PRICE_OFFSET, rollShopPrice,
     rerollPriceAt, rerollPriceCapped, rerollTilt, tiltRateMul, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,
     shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,
-    BUFF_TAGS, POOL_TAGS, hasTag, tagsOf, buffsWithTag, poolsOf,
+    BUFF_TAGS, POOL_TAGS, hasTag, tagsOf, buffsWithTag, poolsOf, descOf,
     legendWeightFactor, legendOwnedCount, allRepeatableLegendsOwned, LEGEND_BASE_WEIGHT, rarityBoostOf,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,

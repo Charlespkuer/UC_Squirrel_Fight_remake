@@ -486,6 +486,57 @@ test('需求9.3：无尽塔主界面右上角标注「本场战斗获得多少�
   assert.match(css, /\.tower-currency \.currency-delta/, '增量要有自己的样式');
 });
 
+test('需求9.2：玉石俱焚（C57）双塔两套口径 —— 挑战塔「下一场」/ 无尽塔「限次 10 · 剩 N 场」', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower;
+  const b = TD.BUFF_BY_ID.C57;
+  assert.ok(b, '应当有 C57 玉石俱焚');
+  assert.equal(b.kind, 'limited', '限次类');
+  assert.equal(b.uses, 10, '限次 10 次');
+  assert.ok(TD.hasTag(b, 'tower') && TD.hasTag(b, 'endless'), '两座塔都有它');
+
+  /* ---- 1) 两套文案 ---- */
+  const towerDesc = TD.descOf(b, 'tower');
+  const endlessDesc = TD.descOf(b, 'endless');
+  assert.match(towerDesc, /下一场战斗/, '挑战塔口径要写「下一场战斗」：' + towerDesc);
+  assert.match(endlessDesc, /限次 10 场/, '无尽塔口径要写「限次 10 场」：' + endlessDesc);
+  assert.ok(endlessDesc.indexOf('下一场战斗') < 0, '无尽塔口径不该再说「下一场战斗」：' + endlessDesc);
+  assert.equal(TD.descOf(b), towerDesc, '不传 mode 时沿用默认（挑战塔）文案');
+
+  /* ---- 2) 界面判据与角标：抠出真实实现跑一遍 ---- */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const grab = (head) => {
+    const at = src.indexOf(head);
+    assert.ok(at >= 0, '源码里应当有 ' + head);
+    let i2 = src.indexOf('{', at), depth = 0, k = i2;
+    while (k < src.length) {
+      const ch = src[k];
+      if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) break; }
+      k++;
+    }
+    return src.slice(at, k + 1);
+  };
+  const ctx = { TowerData: TD, SCOPE: { limited: '限次' }, RARITY: TD.RARITY_NAME };
+  const code = grab('function isTowerNext(b, mode)') + '\n' + grab('function limitBadgeText(b)') + '\n' +
+    'out = { t: isTowerNext(def, "tower"), e: isTowerNext(def, "endless"), d: isTowerNext(def),' +
+    ' badgeE: limitBadgeText({ id: "C57", uses: 7, stacks: 1 }) };';
+  ctx.def = b;
+  require('node:vm').runInNewContext(code, ctx);
+  assert.equal(ctx.out.t, true, '挑战塔里应当按「下一场」显示');
+  assert.equal(ctx.out.e, false, '无尽塔里不该按「下一场」显示');
+  assert.equal(ctx.out.d, true, '不传 mode 时保持历史口径（挑战塔）');
+  assert.match(ctx.out.badgeE, /剩 7 场/, '无尽塔角标要带上当前剩余次数：' + ctx.out.badgeE);
+  assert.ok(ctx.out.badgeE.indexOf('下一场') < 0, '无尽塔角标不该写「下一场」：' + ctx.out.badgeE);
+  /* 无尽塔的悬停要用无尽口径的文案 + 剩余场次 */
+  assert.match(src, /TowerData\.descOf\(buff, 'endless'\)/, '限次悬停要用无尽口径文案');
+  assert.match(src, /剩余 ' \+ b\.uses \+ ' 场/, '悬停要写剩余场次');
+  /* 面板/商店/集锦都走 descOf */
+  assert.match(src, /TowerData\.descOf\(b, 'endless'\)/, '集锦与商店卡片要用无尽口径');
+  const towerSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  assert.match(towerSrc, /descOf\(buff, mode\)/, 'ownedBuffs 要按模式取文案');
+});
+
 test('需求9.4：道具卖出 = 「返回 / 卖出」弹窗，点一下卖 1 个、弹窗不关', () => {
   const c = setup();
   const S = c.State;
@@ -5386,10 +5437,22 @@ test('需求71：限次栏显示「未破碎的烙印叠层」', () => {
   assert.ok(a >= 0, 'tower-ui.js 里应当有 limitBadgeText');
   const b = src.findIndex((l, i) => i > a && l.includes('\n') === false && /^\s*\}$/.test(l));
   const fn = src.slice(a, b + 1).join('\n');
-  /* limitBadgeText 现在按标签判定（TowerData.hasTag），所以桩里也要带上它。 */
+  /* limitBadgeText 依赖 isTowerNext（按标签 + 模式判定），把那份真实实现也一起抠出来。 */
+  const joined = src.join('\n');
+  const ia = joined.indexOf('function isTowerNext(b, mode) {');
+  assert.ok(ia >= 0, 'tower-ui.js 里应当有 isTowerNext');
+  let ik = joined.indexOf('{', ia), depth = 0, ie = ik;
+  while (ie < joined.length) {
+    const ch = joined[ie];
+    if (ch === '{') depth++;
+    else if (ch === '}') { depth--; if (depth === 0) break; }
+    ie++;
+  }
+  const helper = joined.slice(ia, ie + 1);
+  /* 两个函数都按标签判定（TowerData.hasTag），所以桩里也要带上它。 */
   const ctx = { TowerData: { BUFF_BY_ID: TD.BUFF_BY_ID, hasTag: TD.hasTag } };
   vm.createContext(ctx);
-  const badge = vm.runInContext(fn + '\nlimitBadgeText;', ctx, { filename: 'limitBadgeText' });
+  const badge = vm.runInContext(helper + '\n' + fn + '\nlimitBadgeText;', ctx, { filename: 'limitBadgeText' });
 
   const c49 = TD.BUFF_BY_ID.C49, c52 = TD.BUFF_BY_ID.C52;
   assert.equal(badge({ id: 'C49', stacks: 1, uses: 1000, on: true }), '易碎 6%', '1 层烙印照旧只写易碎概率');

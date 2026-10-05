@@ -328,21 +328,22 @@
      * 无尽塔里的 N13 血之契约 / N14 铁血护盾同样带它，但它们是 **10 次限次**，
      * 必须照常显示总次数与当前剩余次数（否则玩家只看到「下一场」，
      * 完全看不出它其实还能用 10 场）。 */
-    if (TowerData.hasTag(buff, 'tower') && TowerData.hasTag(buff, 'nextBattle')) {
+    if (isTowerNext(buff, 'endless')) {
       return [buff.name + '（' + RARITY[buff.rarity] + ' · 挑战塔 · 下一场战斗）', buff.desc,
         '打完这一场就消失（挑战塔的增益只服务下一场）',
         b.on ? '当前生效中 · 点一下可以关掉' : '当前已关闭 · 点一下重新开启'].join('\n');
     }
-    return [buff.name + '（' + RARITY[buff.rarity] + ' · 限次 ' + (buff.uses || 1) + ' 场）', buff.desc,
+    return [buff.name + '（' + RARITY[buff.rarity] + ' · 限次 ' + (buff.uses || 1) + ' 场）',
+      TowerData.descOf(buff, 'endless'),
       '剩余 ' + b.uses + ' 场（每打完一场扣 1，扣完自动消失）',
       b.on ? '当前生效中 · 点一下可以关掉（关掉不扣次数）' : '当前已关闭 · 点一下重新开启'].join('\n');
   }
   function limitBadgeText(b) {
     const def = TowerData.BUFF_BY_ID[b.id] || {};
     const stackTag = b.stacks > 1 ? '×' + b.stacks + ' 层 · ' : '';
-    if (TowerData.hasTag(def, 'tower') && TowerData.hasTag(def, 'nextBattle')) return stackTag + '下一场';
+    if (isTowerNext(def, 'endless')) return stackTag + '下一场';
     if (def.mods && def.mods.fragileBreakPct) return stackTag + '易碎 ' + def.mods.fragileBreakPct + '%';
-    if (TowerData.hasTag(def, 'nextBattle')) return stackTag + '无尽塔 · 剩 ' + b.uses + ' 场';   // 无尽塔的单场限次类
+    if (TowerData.hasTag(def, 'nextBattle')) return stackTag + '无尽塔 · 剩 ' + b.uses + ' 场';   // 无尽塔的限次类（含 C57）
     return stackTag + '剩 ' + b.uses + ' 场';
   }
   function buffPanelsHtml(mode) {
@@ -474,8 +475,12 @@
   /* 卡片/悬停用的判据：**挑战塔专属**的「下一场战斗」限次类。
    * 判据全部走标签（tower ∧ nextBattle）；无尽塔的 N13/N14 同样带 nextBattle 标签，
    * 但它们是 10 次限次，必须照常显示总次数。 */
-  function isTowerNext(b) {
-    return !!(b && TowerData.hasTag(b, 'tower') && TowerData.hasTag(b, 'nextBattle'));
+  function isTowerNext(b, mode) {
+    /* 「只服务下一场战斗」是**挑战塔**的口径（那里一场就是一层）。
+     * 无尽塔里同样的条目（C57 玉石俱焚）是 10 次限次，必须照常显示「限次 10 / 剩余 N 场」。
+     * mode 省略时按挑战塔处理（历史调用点都是塔内卡片）。 */
+    return !!(b && (mode === undefined || mode === 'tower') &&
+      TowerData.hasTag(b, 'tower') && TowerData.hasTag(b, 'nextBattle'));
   }
   function buffCatalogHtml() {
     /* 增益集锦 = **无尽塔的全增益展示**：只列带无尽塔标签的条目，
@@ -488,9 +493,10 @@
         ? '<div class="catalog-row"><b class="catalog-rarity r' + r + '">' + (RARITY[r] || '') + '</b>' +
           '<div class="buff-tags">' + group.map((b) => '<span class="buff-tag r' + b.rarity + '" data-tip="' +
             esc(b.name + '（' + (RARITY[b.rarity] || '') + ' · ' +
-              ((isTowerNext(b)) ? '下一场' : (kindName[b.kind] || '')) +
-              (b.kind === 'limited' ? (isTowerNext(b) ? ' 下一场战斗' : ' ' + (b.uses || 1) + ' 场') : '') + '）\n' + b.desc) +
-            '" title="' + esc(b.desc) + '">' + esc(b.name) + '<i>' + (kindName[b.kind] || '') + '</i></span>').join('') +
+              (isTowerNext(b, 'endless') ? '下一场' : (kindName[b.kind] || '')) +
+              (b.kind === 'limited' ? (isTowerNext(b, 'endless') ? ' 下一场战斗' : ' ' + (b.uses || 1) + ' 场') : '') + '）\n' +
+              TowerData.descOf(b, 'endless')) +
+            '" title="' + esc(TowerData.descOf(b, 'endless')) + '">' + esc(b.name) + '<i>' + (kindName[b.kind] || '') + '</i></span>').join('') +
           '</div></div>' : '').join('') + '</div>';
   }
   /** BOSS 卡的头像：用独立的 data-boss-art，渲染完由 paintBossCatalog 逐张作画（不会和同页其它画布串号）。 */
@@ -663,7 +669,7 @@
               run.env.map((e) => envChip(e, { compact: true })).join('') + '</div>'
             : '') +
           '<div class="hex-row">' +
-          run.choices.map((c, i) => choiceCard(c, i)).join('') + '</div></div>' : '';
+          run.choices.map((c, i) => choiceCard(c, i, mode)).join('') + '</div></div>' : '';
       /* 顶栏：标题 → 试炼币/抽奖卷 → 分数框 → 右边缘的三个药丸槽（等腰三角摆放）。
        * 血量紧贴标题下方（分数已经挪进顶栏，所以这里整体上提），字号与血条都放大一档；
        * 「继续战斗」在右下角，「放弃本局」更小、压在它左边偏下。 */
@@ -863,18 +869,19 @@
    * ============================================================ */
 
   const RARITY_CLASS = ['r0', 'r1', 'r2', 'r3'];
-  function choiceCard(c, i) {
+  function choiceCard(c, i, mode) {
     const b = TowerData.BUFF_BY_ID[c.id];
     if (!b) return '';
+    const towerNext = isTowerNext(b, mode);
     return '<button type="button" class="hex-card ' + RARITY_CLASS[b.rarity] + '" data-choice="' + i + '">' +
       '<span class="hex-ribbon">' + RARITY[b.rarity] + '</span>' +
       '<span class="hex-emblem">' + (b.rarity === 2 ? '★' : b.rarity === 1 ? '◆' : '●') + '</span>' +
       '<b class="hex-name">' + esc(b.name) + '</b>' +
-      '<span class="hex-scope">' + (isTowerNext(b) ? '挑战塔' : SCOPE[b.kind]) +
+      '<span class="hex-scope">' + (towerNext ? '挑战塔' : SCOPE[b.kind]) +
         (b.kind === 'limited'
-          ? (isTowerNext(b) ? ' · 下一场战斗' : ' · ' + (b.uses || 1) + ' 场')
+          ? (towerNext ? ' · 下一场战斗' : ' · 限次 ' + (b.uses || 1) + ' 场')
           : '') + '</span>' +
-      '<span class="hex-desc">' + esc(b.desc) + '</span></button>';
+      '<span class="hex-desc">' + esc(TowerData.descOf(b, mode)) + '</span></button>';
   }
   function offerChoice(mode, choices) {
     const info = mode === 'tower' ? Tower.towerInfo() : Tower.endlessInfo();
@@ -907,7 +914,9 @@
         : '') +
       '</div>';
     const nSlots = Math.max(1, Math.min(6, choices.length));
-    const body = head + '<div class="hex-cards n' + nSlots + '">' + choices.map(choiceCard).join('') + '</div>';
+    /* 注意要显式传 mode：Array.map 会把「数组本身」当第三个参数塞进来，
+     * 那样卡片的「挑战塔 / 无尽塔」口径就全判成无尽塔了。 */
+    const body = head + '<div class="hex-cards n' + nSlots + '">' + choices.map((c, i) => choiceCard(c, i, mode)).join('') + '</div>';
     const m = modal('', body, [], { locked: true });
     m.element.classList.add('choice-dialog', 'hex', 'hex-n' + nSlots);
     m.element.querySelectorAll('[data-choice]').forEach((el) => {
@@ -916,7 +925,7 @@
         m.close();
         if (!picked.ok) { reopen(mode); return; }
         flushAchievements(picked.achievements);
-        const text = '获得增益「' + picked.buff.name + '」：' + picked.buff.desc;
+        const text = '获得增益「' + picked.buff.name + '」：' + TowerData.descOf(picked.buff, mode);
         const bonus = picked.score ? '<p class="gold-text">得分 +' + picked.score + '（获取增益）</p>' : '';
         modal('休整完毕', '<p>' + esc(text) + '</p>' + bonus,
           [{ label: '继续战斗', cls: 'gold', run: () => fight(mode) }], { small: true });

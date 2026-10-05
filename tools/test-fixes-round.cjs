@@ -443,6 +443,86 @@ test('需求9b：有币时选择「放弃本局」→ 才真正结算失败', ()
   assert.ok(!c.Tower._debugRun('endless'), '放弃后对局结束');
 });
 
+test('需求9.8：店的方向按「怎么开的」走 —— 战后立即进货关掉后回继续打，别把整层推走', () => {
+  const c = setup();
+  const T = c.Tower, S = c.State;
+  const fresh = (layer) => {
+    S.newGame('shop-route' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    T._debugSetLayer(9);
+    try { if (T._debugRun('endless')) T.abandon('endless'); } catch (e) { /* 忽略 */ }
+    assert.ok(T.startEndlessRun().ok, '应当能开一局');
+    T._debugSetEndlessLayer(layer);
+    const run = T._debugRun('endless');
+    run.permanent = []; run.limited = []; run.choices = null; run.phase = null;
+    return run;
+  };
+  const fight = (win) => {
+    const nx = T.nextBattle('endless');
+    assert.ok(nx.ok, '应当能开战：' + nx.msg);
+    return T.reportBattle('endless', nx.token, win !== false, 0.8, null);
+  };
+  const clearChoice = () => {
+    const r = T._debugRun('endless');
+    if (r && r.choices) T.pickChoice('endless', 0, (r.permanent[0] || {}).id);
+  };
+
+  /* ---- 第 10 层：第 1 场打完用「立即进货」开店 ---- */
+  const run = fresh(10);
+  assert.ok(T.addBuff(T._debugRun('endless'), 'E01').ok, '应当能拿到立即进货');
+  fight();
+  let r = T._debugRun('endless');
+  assert.equal(r.phase, 'shop', '战后应当开店');
+  assert.equal(T.shopState().postBattle, true, 'shopState 要告诉界面「这家店是战后临时开的」');
+  assert.equal(T.shopState().boundary, false, '它不是每 5 层的结算商店');
+  /* 关店：必须回到「继续打」，不能去结算点 */
+  assert.ok(T.closeShop().ok, '应当能关店');
+  r = T._debugRun('endless');
+  assert.equal(r.phase, null, '关掉战后商店之后应当回去继续打，实测 phase=' + r.phase);
+  clearChoice();
+
+  /* ---- 把本层剩下的场次打完：层通商店必须还在（用户报的「后面的商店消失了」） ---- */
+  const planLen = r.plan.length;
+  const shops = [];
+  for (let i = 2; i <= planLen; i++) {
+    const rw = fight();
+    const rr = T._debugRun('endless');
+    assert.equal(rr.layer, 10, '第 ' + i + ' 场之后仍然应当停在第 10 层，实测 ' + rr.layer);
+    if (rr.phase === 'shop') shops.push({ after: i, boundary: !!T.shopState().boundary, complete: !!rw.layerComplete });
+    if (rr.phase === 'shop') {
+      assert.equal(T.shopState().boundary, true, '第 ' + i + ' 场后的店应当是每 5 层的结算商店');
+      assert.ok(T.closeShop().ok);
+      assert.equal(T._debugRun('endless').phase, 'checkpoint', '结算商店关掉后应当去结算点');
+      assert.ok(T.continueEndless().ok, '应当能从结算点继续');
+    }
+    clearChoice();
+  }
+  assert.equal(shops.length, 1, '整层应当只出现一次结算商店（层通），实测 ' + JSON.stringify(shops));
+  assert.equal(shops[0].after, planLen, '层通商店应当出现在本层最后一场之后');
+  assert.equal(T._debugRun('endless').layer, 11, '继续之后应当进入第 11 层');
+
+  /* ---- 休整商店：关掉也回继续打 ---- */
+  fresh(10);
+  const rr2 = T._debugRun('endless');
+  rr2.choices = [{ type: 'buff', id: 'C02' }]; rr2.restShopUsed = false; rr2.phase = null;
+  assert.ok(T.openRestShop().ok, '应当能开休整商店');
+  assert.equal(T.shopState().rest, true, 'shopState 要带上 rest 标记');
+  assert.ok(T.closeShop().ok);
+  assert.equal(T._debugRun('endless').phase, null, '休整商店关掉后回继续打');
+
+  /* ---- 门庭若市：进店奖励由 Tower 领取一次（界面上只飘一次） ---- */
+  fresh(10);
+  const r3 = T._debugRun('endless');
+  r3.permanent = [{ id: 'C59', stacks: 2 }]; r3.coins = 0; r3.shop = null; r3.phase = null;
+  r3.choices = [{ type: 'buff', id: 'C02' }]; r3.restShopUsed = false;
+  assert.ok(T.openRestShop().ok, '应当能开休整商店');
+  assert.equal(T._debugRun('endless').coins, 200, '2 层门庭若市进店应当 +200');
+  assert.equal(T.claimShopEnterCoins(), 200, '第一次领取应当拿到 200');
+  assert.equal(T.claimShopEnterCoins(), 0, '领过之后应当清零（界面不会重复飘字）');
+  assert.equal(T.shopState().enterCoins, 0, 'shopState 里也该是 0 了');
+});
+
 test('需求9.0：无尽塔首页在「战后待选牌」状态下必须能渲染（openEndless 里不能有裸 mode）', () => {
   const c = setup();
   const T = c.Tower;

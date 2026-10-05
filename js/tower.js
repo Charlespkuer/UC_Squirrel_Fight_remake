@@ -1402,6 +1402,9 @@
      * 这里只补「层还没打完、但 buff 要求马上开店」的那种情况。 */
     if (mode === 'endless' && shopCreditPct > 0) {
       run.shop = makeShop(run, shopCreditPct);
+      /* 标记「这家店是打完这一场临时开的」——关店后要**回去继续打**，
+       * 而不是去结算点（那是「每 5 层」的商店才有的下一步）。 */
+      run.shop.postBattle = true;
       run.phase = 'shop';
       out.phase = 'shop';
       out.postBattleShop = true;
@@ -1820,6 +1823,7 @@
     out.score = run.score; out.coins = run.coins;
     if (run.layer % 5 === 0) {                           // 每 5 层：商店 → 结算点
       run.shop = makeShop(run, shopPct);
+      run.shop.boundary = true;                          // 只有这家店关掉之后去结算点
       run.phase = 'shop';
       out.phase = 'shop';
     } else {
@@ -2339,6 +2343,7 @@
     if (m.openShop) {
       // 立刻开一次商店：不动 5 层一次的结算点节奏（phase 用完即恢复）
       run.shop = makeShop(run);
+      run.shop.postBattle = true;
       run.phase = 'shop';
       out.shop = true;
     }
@@ -2565,10 +2570,22 @@
     }
     return slots;
   }
+  /** 领取「门庭若市」（C59）这家店进门时给的试炼币（领一次就清零，界面飘字用）。 */
+  function claimShopEnterCoins() {
+    const run = endless().run;
+    if (!run || !run.shop) return 0;
+    const gain = Math.max(0, Math.round(Number(run.shop.enterCoins) || 0));
+    if (gain > 0) { run.shop.enterCoins = 0; save(); }
+    return gain;
+  }
   function shopState() {
     const run = endless().run;
     if (!run || !run.shop) return null;
-    return { coins: run.coins, layer: run.shop.layer, rerollFree: run.shop.rerollFree,
+    return { coins: run.coins, layer: run.shop.layer,
+      /* 这家店是怎么开的：界面据此决定「离开」按钮回哪里，别让它自己猜。 */
+      rest: !!run.shop.rest, postBattle: !!run.shop.postBattle, boundary: !!run.shop.boundary,
+      enterCoins: Math.max(0, Math.round(Number(run.shop.enterCoins) || 0)),
+      rerollFree: run.shop.rerollFree,
       rerollCount: Number(run.shop.rerollCount) || 0,
       rerollNextPrice: D().rerollPriceAt(Number(run.shop.rerollCount) || 0),
       rerollCapped: D().rerollPriceCapped(Number(run.shop.rerollCount) || 0),
@@ -2801,7 +2818,14 @@
     { const r = endless().run; if (r && r.shop) r.shop.discount = false; }
     const run = endless().run;
     if (!run || run.phase !== 'shop') return { ok: false };
-    run.phase = run.shop && run.shop.rest ? null : 'checkpoint';   // 休整商店：回战斗；结算商店：去结算点
+    /* 去向按**这家店是怎么开的**决定，而不是按层数：
+     *   · 休整商店（rest）/ 战后立即进货（postBattle）/ 立即开店 —— 关掉后回去继续打
+     *   · 每 5 层的结算商店（boundary）—— 关掉后去结算点
+     * 原来只判 rest，于是「第 10 层第 1 场打完用立即进货开的店」关掉后被当成结算商店，
+     * 一走 continueEndless 就把整层直接推进到下一层 —— 本层剩下的场次与**层通商店**
+     * 全都被跳过（用户报的「后面的商店消失了」）。 */
+    const shop = run.shop || {};
+    run.phase = (!shop.rest && !shop.postBattle) ? 'checkpoint' : null;
     save();
     return { ok: true };
   }
@@ -3136,7 +3160,7 @@
     unlocked, towerInfo, endlessInfo, preview, planInfo, ownedBuffs, bossPool, debugGrantBuff, debugLoseBuff, pickCandidates, applyPickBuff,
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,
     pickChoice, toggleLimited, addBuff, applyInstant, openRestShop,
-    shopState, buyShopSlot, buyRetryToken, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp,
+    shopState, buyShopSlot, buyRetryToken, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp, claimShopEnterCoins,
     canRetry, retryBattle, declineRetry, isTowerBattleBuff, takeAchievementToasts,
     /* 只读：摇一页商店货架（不改状态）。测试用它统计各增益的上架概率
      *（例如不死鸟 shopWeight 的效果），界面也可以拿来做「货架预览」。 */

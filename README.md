@@ -41,6 +41,45 @@
   每 5 层试炼商店、每 10 层里程碑奖励，随时可结算离场。
 - **双机同步**：Mac ↔ Windows 通过 ZeroTier 互推存档与游戏文件（`scripts/一键同步`）。
 
+## 修 Bug：关掉「立即进货」开的店会把整层推走，层通商店消失（2026-10）
+
+现象（用户报）：第 10 层第 3 场打完后用「下一场战斗后立即开启商店」（E01 立即进货）开店，
+第 10 层最后一场打完后本该再开一次**层通商店**，但那个商店没有出现。
+
+根因：`closeShop()` 只用 `shop.rest` 区分去向：
+
+```js
+run.phase = run.shop && run.shop.rest ? null : 'checkpoint';   // 休整商店回战斗，其余都去结算点
+```
+
+- 战后临时开的店（E01 / 立即开店）**没有 rest 标记** → 被当成「每 5 层的结算商店」→
+  关店后 `phase = 'checkpoint'` → 界面给「前往结算点」→ 一点 `continueEndless()`
+  就 `advanceLayer()`，整层剩下的场次（以及**层通商店**）全被跳过。
+- 顺带发现同一个根上的第二处：`shopState()`（给界面的快照）**从来没带出 `rest`**，
+  所以界面里 `shop.rest` 永远是 undefined → 「离开」按钮同样走错分支。
+  （`enterCoins` 也没带出来，导致 C59 门庭若市的进店飘字根本不显示。）
+
+修法：店铺**按「怎么开的」**决定去向，标记放在店上、由 `shopState()` 如实传给界面。
+
+| 店 | 标记 | 关店后 |
+|---|---|---|
+| 休整商店 | `rest` | 回继续打 |
+| 战后立即进货（E01）/ 立即开店 | `postBattle` | 回继续打 |
+| 每 5 层的结算商店 | `boundary` | 去结算点 |
+
+- `closeShop()`：`run.phase = (!shop.rest && !shop.postBattle) ? 'checkpoint' : null;`
+- `shopState()` 补上 `rest` / `postBattle` / `boundary` / `enterCoins`
+- 界面「离开」按钮：`if (revisit || shop.rest || shop.postBattle || !shop.boundary) { openEndless(); return; }`
+- 新增 `Tower.claimShopEnterCoins()`：进店奖励领取一次即清零，界面只飘一次字
+
+验证（第 10 层全程）：第 1 场打完开店（`postBattle`）→ 关店后 `phase = null`、仍停在第 10 层 →
+第 2~5 场照打 → **第 5 场后出现层通商店**（`boundary`）→ 关店去结算点 → 继续 → 第 11 层。
+真实浏览器里也确认了第 3 场后 `phase='shop'`、`layer=10`、`shop.postBattle=true`。
+
+回归守卫：新增「需求9.8」（test-fixes-round 89 → 90 项）—— 整层只出现一次层通商店、
+必须出现在最后一场之后、E01/休整商店关掉都回继续打、结算商店才去结算点、
+以及 `claimShopEnterCoins()` 只领一次。
+
 ## 修恶性 Bug：无尽战斗打完卡在主界面、而且再也进不去无尽（2026-10）
 
 现象（用户报）：无尽战斗结束后卡着退回主界面，同时无法再进入无尽模式。

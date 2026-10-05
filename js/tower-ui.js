@@ -1126,11 +1126,10 @@
   function openShop(revisit) {
     const shop = Tower.shopState();
     if (!shop) { notice('商店还没开张：每通过 5 层开放一次。'); return; }
-    /* 门庭若市（C59）：进门就给试炼币 —— 只在第一次渲染这家店时提示。 */
-    if (shop.enterCoins && !shop.enterCoinsShown) {
-      shop.enterCoinsShown = true;
-      runToast('门庭若市：进店获得 ' + shop.enterCoins + ' 试炼币');
-    }
+    /* 门庭若市（C59）：进门就给试炼币 —— 由 Tower 领取并清零，保证只飘一次字
+     *（shopState() 是快照，往它上面写标记不会生效）。 */
+    const enterCoins = Tower.claimShopEnterCoins ? Tower.claimShopEnterCoins() : 0;
+    if (enterCoins > 0) runToast('门庭若市：进店获得 ' + enterCoins + ' 试炼币');
     const rarityCls = (r) => 'r' + r;
     /* 注意：这是**商店槽位上报行**的字段 canStack（由 tower.js 用标签算好），
      * 不是增益数据里的字段 —— 旧数据字段 stackable 已经删掉、只留标签。 */
@@ -1208,7 +1207,10 @@
     });
     owned.forEach((b) => on(p, 'sell' + b.id, () => { Tower.sellBuff(b.id); openShop(revisit); }));
     on(p, 'leave', () => {
-      if (revisit || shop.rest) { openEndless(); return; }
+      /* 休整商店 / 战后立即进货 / 立即开店 —— 关掉后回去继续打这一层；
+       * 只有「每 5 层」的结算商店才去结算点。判据由 Tower 给（shopState 里的标记），
+       * 界面不再自己猜层数。 */
+      if (revisit || shop.rest || shop.postBattle || !shop.boundary) { openEndless(); return; }
       Tower.continueFromShop();       // 直接进下一段，不弹结算点窗口
       openEndless();
     });

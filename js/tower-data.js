@@ -276,6 +276,9 @@
    * ============================================================ */
 
   const COINS = Object.freeze({ battle: 8, layer: 20, elite: 15 });
+  /* 结算离场时「铸币 → 抽奖卷」的兑换上限（用户口径 2026-10）：
+   * 最多 10 枚铸币按 1:1 换成抽奖卷，**超出的部分不再转化**（铸币本身随本局作废）。 */
+  const TICKET_FROM_MINT_CAP = 10;
   const SHOP_PRICE_OFFSET = 3;
   function rollShopPrice(base) {
     const b = Math.max(1, Number(base) || 1);
@@ -468,7 +471,13 @@
     return need.length > 0 && need.every((b) => own.has(b.id));
   }
   /** 传奇那一档的权重系数（1 = 没拿过任何传奇）。 */
+  /* 2026-10 用户口径（任务3）：**去掉传奇档的档位级降权**
+   *（原来 = 0.88^已拥有传奇数 ×（全部可重复传奇到手 ? 0.35 : 1））。
+   * 保留函数与口径，只用一个开关关掉 —— 想恢复把这里改回 true 即可。
+   * 现在传奇的稀有度只由**个体**规律决定（repeatWeight / shopWeight），整个传奇档不再跟着缩水。 */
+  const LEGEND_TIER_DECAY = false;
   function legendWeightFactor(run) {
+    if (!LEGEND_TIER_DECAY) return 1;
     const owned = legendOwnedCount(run);
     let f = Math.pow(1 - LEGEND_HOLD_PENALTY, owned);
     if (allRepeatableLegendsOwned(run)) f *= LEGEND_ALL_OWNED_PENALTY;
@@ -1042,10 +1051,10 @@
     // —— 跨层类（仅无尽，本局永久） ——
     /* 语义：生命上限 +20%（永久，拿到就折算进 run.hpBonus），并回复等量生命。
      * 注意它与「获得时回血」类（healOnGainPct）不是一回事 —— 后者只回血、不抬上限。 */
-    { id: 'C01', tags: ['tower', 'endless', 'battle', 'shop'], name: '磐石之躯', rarity: 1, kind: 'permanent', desc: '生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
-    { id: 'C02', tags: ['tower', 'endless', 'battle', 'shop'], name: '磨砺', rarity: 0, kind: 'permanent', desc: '攻击 +10%', mods: { powerMul: 0.10 } },
+    { id: 'C01', tags: ['tower', 'endless', 'shop'], name: '磐石之躯', rarity: 1, kind: 'permanent', desc: '生命上限 +20%，并回复等量生命', mods: { maxHpMul: 0.20 } },
+    { id: 'C02', tags: ['tower', 'endless', 'battle', 'shop'], name: '磨砺', rarity: 0, kind: 'permanent', desc: '攻击 +30%', mods: { powerMul: 0.30 } },
     { id: 'C03', tags: ['endless', 'battle', 'shop', 'stackable'], name: '猎侠者', rarity: 0, kind: 'permanent', maxStacks: 3, desc: '对螳螂/仙鹤/熊猫伤害 +25%', mods: { dmgMulType: 0.25 } },
-    { id: 'C04', tags: ['tower', 'endless', 'battle', 'shop'], name: '生命源泉', rarity: 1, kind: 'permanent', desc: '每进入新的一层，该层第一场战斗开战时回复 100% 生命', mods: { layerFirstHealPct: 1.00 } },
+    { id: 'C04', tags: ['tower', 'endless', 'shop'], name: '生命源泉', rarity: 1, kind: 'permanent', desc: '每进入新的一层，该层第一场战斗开战时回复 100% 生命', mods: { layerFirstHealPct: 1.00 } },
     { id: 'C05', tags: ['tower', 'endless', 'battle', 'shop'], name: '坚韧壁垒', rarity: 1, kind: 'permanent', desc: '每场战斗开局获得 15% 最大生命的护盾', mods: { shellPct: 0.15 } },
     { id: 'C06', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '猎杀时刻', rarity: 1, kind: 'permanent', desc: '每击杀 1 个敌人攻击 +2%，最多 +30%', mods: { killPowerPct: 0.02, killPowerCap: 0.30 } },
     { id: 'C07', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '吞噬成长', rarity: 1, kind: 'permanent',
@@ -1099,13 +1108,21 @@
     { id: 'C21', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '暴击精通', rarity: 0, kind: 'permanent', maxStacks: 3, desc: '暴击率 +15%', mods: { critBonus: 15 } },
     { id: 'C22', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '闪避精通', rarity: 0, kind: 'permanent', maxStacks: 3, desc: '闪避率 +20%', mods: { dodgeBonus: 20 } },
     { id: 'C23', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '轻身术', rarity: 0, kind: 'permanent', maxStacks: 3, desc: '速度 +20%', mods: { speedMul: 0.20 } },
-    { id: 'C11', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '以战养战', rarity: 2, kind: 'permanent', desc: '每胜利一场，生命上限 +5', mods: { winMaxHpFlat: 5 } },
-    /* 登顶者：第 10 层起每胜利一场，本局固定 +1 力 / +1 敏 / +1 速（不封顶、可叠层）。 */
-    { id: 'C12', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '登顶者', rarity: 2, kind: 'permanent',
-      desc: '第 10 层起，每胜利一场，本局力量 +1、敏捷 +1、速度 +1',
+    /* 以战养战：**不能再叠加**（用户口径 2026-10）。去掉 stackable 并锁定 1 份：
+     * 既不会同格叠层，也不会按「叠满开新栏位」的通用规则再占一格（见 addBuff 的 permanent 分支）。 */
+    { id: 'C11', tags: ['tower', 'endless', 'battle', 'shop', 'oncePerRun'], name: '以战养战', rarity: 2, kind: 'permanent', maxStacks: 1, desc: '每胜利一场，生命上限 +5', mods: { winMaxHpFlat: 5 } },
+    /* 登顶者：第 10 层起每胜利一场，本局固定 +1 力 / +1 敏 / +1 速。
+     * 2026-10 用户口径：**强度削弱为原来的 1/3** —— 原来可叠 3 层（每场最多 +3/项），
+     * 现在锁定 1 份（+1/项 × 1 层）＝ 原来的 1/3，文案也按用户给的写法收敛。 */
+    { id: 'C12', tags: ['tower', 'endless', 'battle', 'shop', 'oncePerRun'], name: '登顶者', rarity: 2, kind: 'permanent', maxStacks: 1,
+      desc: '第 10 层起，每胜利一场，本局力&敏&速 +1',
       mods: { winStatAfter10: 1 } },
-    { id: 'C13', tags: ['tower', 'endless', 'battle', 'shop'], name: '精英杀手', rarity: 2, kind: 'permanent', desc: '对精英伤害 +40%；击败精英后回复 20% 最大生命', mods: { dmgMulElite: 0.40, eliteHealAfter: 0.20 } },
-    { id: 'C14', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '涅槃', rarity: 3, kind: 'permanent', shopWeight: 0.12, maxStacks: 2,
+    { id: 'C13', tags: ['tower', 'endless', 'battle', 'shop'], name: '精英杀手', rarity: 2, kind: 'permanent',
+      desc: '对精英伤害 +40%；击败精英后回复 20% 最大生命并增加 10% 最大生命',
+      mods: { dmgMulElite: 0.40, eliteHealAfter: 0.20, eliteMaxHpAfter: 0.10 } },
+    /* noRestack（任务4）：**拿满 maxStacks 后移出本局可获得池**（与后发制人/挥金如土同组）。
+     * shopWeight（任务2）：2026-10 由 0.12 上调到 0.5。 */
+    { id: 'C14', tags: ['tower', 'endless', 'battle', 'shop', 'stackable', 'noRestack'], name: '涅槃', rarity: 3, kind: 'permanent', shopWeight: 0.5, maxStacks: 2,
       desc: '每层战斗可复活一次；复活回复 50% 生命上限，本场力量、敏捷、速度 +50%',
       mods: { revivePct: 0.50, reviveStatMul: 0.50 } },
     /* ============================================================
@@ -1224,19 +1241,22 @@
      * 用 oncePerRun + maxStacks 1（加载期校验要求二者配套）：ownable / poolFilter 两道闸都会在
      * 拿到之后把它挡在池子外，addBuff 也不会再叠第二层。 */
     { id: 'C36', tags: ['endless', 'battle', 'shop', 'oncePerRun', 'ops'], name: '挥金如土', rarity: 3, kind: 'permanent', maxStacks: 1,
-      desc: '每在试炼商店消费 5 试炼币，随机获得「力 +1 / 敏 +1 / 速 +1 / 生命上限 +5」中的一项（一局只能获得一次，不可叠加）',
+      desc: '每在试炼商店消费5&10&15试炼币，随机获得「力 +1 / 敏 +1 / 速 +1 / 生命上限 +5」中的一项',
       /* pityWeight = 0：**不进传奇保底池**。它是运营向（每花 5 币换属性），
        * 不该作为「熬了很久终于出的传奇」；也更符合用户口径的极端情况分布（见 LEGEND_PITY）。 */
-      mods: { shopSpendStep: 5, shopSpendStat: 1, shopSpendHp: 5, pityWeight: 0 } },
+      /* 2026-10 用户口径：**分段涨价**（文案已由用户写成 5&10&15，这里只落实机制）。
+       * shopSpendTiers[i] = 第 i 段「每次属性提升」需要的试炼币，shopSpendTierSize = 每段多少次提升：
+       *   前 20 次 → 每次 5 币；第 21~40 次 → 每次 10 币；第 41 次起 → 每次 15 币。
+       * 单段写法仍保留 shopSpendStep 作为兜底（旧档 / 未配置 tiers 时按它算）。 */
+      mods: { shopSpendStep: 5, shopSpendTiers: [5, 10, 15], shopSpendTierSize: 20,
+        shopSpendStat: 1, shopSpendHp: 5, pityWeight: 0 } },
     { id: 'C37', tags: ['endless', 'battle', 'shop', 'repeatable', 'hidden', 'ops'], name: '虚空铭文', rarity: 3, kind: 'permanent',
       desc: '从永久增益里选一个附赠铭文：它不再占用永久增益位（本局每多附魔一个，这张铭文与整个传奇档的出现概率都会再低一档）',
-      /* weightDivBy: 'enchanted' + weightDivOffset: 1 —— **本局每附魔一个永久增益，
-       * 上架/出现权重就变成「原权重 ÷ (附魔数 + 1)」**（0 个 → ÷1；1 个 → ÷2；2 个 → ÷3）。
-       * 2026-10 二次调整：原来用 ÷n，0 与 1 个附魔完全不降权，玩家第一次附魔后体感「还是老出它」；
-       * 加 offset 让第一次就生效。降权现在还会**按比例缩小整个传奇档的预算**
-       *（见 tower.js 的 dynamicTierWeights）。 */
-      /* pityWeight = 1：保底池里与 C49 按 1 : 2 分配（见 LEGEND_PITY）。 */
-      mods: { pickPermanentFree: 1, weightDivBy: 'enchanted', weightDivOffset: 1, pityWeight: 1 } },
+      /* 2026-10 用户口径（任务3）：下降规律由「1/n」改成「×0.88^n」——
+       * repeatWeight: 0.88 → 第 n 份权重 = 0.88^(n-1)（第 1 份 ×1、第 2 份 ×0.88、第 3 份 ×0.7744…）。
+       * 与终焉烙印（C49）**同一套规律**（两条都是 repeatWeight 0.88），仍然是 1:1。 */
+      /* pityWeight = 1：与 C49 同为 1 → 保底池里两条传奇 **1 : 1**（见 LEGEND_PITY）。 */
+      mods: { pickPermanentFree: 1, repeatWeight: 0.88, pityWeight: 1 } },
     { id: 'C39', tags: ['endless', 'battle', 'shop', 'limited'], name: '力量烙印', rarity: 0, kind: 'limited', uses: 1000,
       desc: '力量 +8%，损毁后 +12% 并本局永久保留；每胜利一场6%概率损毁',
       mods: { fragileStat: 'power', fragilePct: 0.08, fragileBreakPct: 6 } },
@@ -1265,11 +1285,12 @@
        * **weight = 初始 ÷ 份数**（0~1 份 → ×1；2 份 → ÷2；3 份 → ÷3）。
        * 2026-10 调整：原来是「每份 ×0.10」（1/2/3 份 → ×1 / ×0.1 / ×0.01），实在太难再刷到，
        * 现在与虚空铭文同一套口径（用户口径：weight = x / n）。 */
-      /* pityWeight = 2：保底池里占 2/3（见 LEGEND_PITY）。
+      /* pityWeight = 1：与 C37 同为 1 → 保底池里两条传奇 **1 : 1**（见 LEGEND_PITY）。
        * 2026-10 用户口径：**移除次数上限**（原 maxStacks 3 + 累计口径 = 拿过 3 次就永久出池，
        * 哪怕全碎了/卖掉了）。改成 unlimitedStacks：可以一直刷，靠 weightDivBy ÷n 自然降频，
        * 加成是按层加算（线性），所以无限叠加不会指数失控。 */
-      mods: { fragileFinalMul: true, fragileAddAlive: 0.25, fragileAddBurned: 0.5, fragileBreakPct: 6, weightDivBy: 'owned', pityWeight: 2 },
+      mods: { fragileFinalMul: true, fragileAddAlive: 0.25, fragileAddBurned: 0.5, fragileBreakPct: 6,
+        repeatWeight: 0.88, pityWeight: 1 },
       unlimitedStacks: true },
     /* 稀有烙印「涌泉烙印」：跳绿字的回血量 +10%；损毁后本局 +20%（同样是加算层）。 */
     { id: 'C52', tags: ['endless', 'battle', 'shop', 'limited', 'repeatable'], name: '涌泉烙印', rarity: 1, kind: 'limited', uses: 1000,
@@ -1277,8 +1298,10 @@
       /* 注意**不要**挂 fragileFinalMul —— 那是 C49「终乘烙印」的标记，
        * 两层历史上一旦共用同一个计数，C49 的层数会去加治疗、C52 的层数会去加力敏速上限。
        * 涌泉烙印用自己的一套：fragileHealBase / fragileHealBurned。 */
+      /* 2026-10 用户口径：**取消 C52 的权重下降**（原 repeatWeight 0.3 = 每多一份 ×0.3）。
+       * 现在它像普通可重复件一样，不再随份数降权。 */
       mods: { fragileHealAddAlive: 0.10, fragileHealAddBurned: 0.20,
-        fragileBreakPct: 6, repeatWeight: 0.3 } },
+        fragileBreakPct: 6 } },
     /* 传奇烙印「淘金烙印」：**只在战斗奖励里掉落**（battleOnly → 不进商店货架），一局一次。
      * 每场战斗的试炼币获取 +15%；损毁后本局 +30%（同样是「存在/损毁」两段加算）。
      * 记账字段与前两条烙印同一套：run.fragileCoinBase（未破碎份数）+
@@ -1298,7 +1321,8 @@
     { id: 'C54', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '越战越勇', rarity: 2, kind: 'permanent', maxStacks: 2,
       desc: '战斗中每回合开始时，力量、敏捷、速度各 +1.5%（可叠 2 层）；每场战斗结束时清零',
       mods: { roundStatPct: 0.015 } },
-    { id: 'C55', tags: ['endless', 'battle', 'shop'], name: '后发制人', rarity: 3, kind: 'permanent',
+    /* noRestack（任务4）：同名唯一，拿到一次后移出本局可获得池。 */
+    { id: 'C55', tags: ['endless', 'battle', 'shop', 'noRestack'], name: '后发制人', rarity: 3, kind: 'permanent',
       desc: '战斗中每回合开始时，若力/敏/速有一项低于对手，将差距最大的一项补上10%；每场战斗结束时清零',
       mods: { catchUpPct: 0.10 } },
     { id: 'C56', tags: ['endless', 'battle', 'shop'], name: '风影身法', rarity: 1, kind: 'permanent',
@@ -1435,6 +1459,7 @@
     nextBattle: '效果只服务下一场战斗',
     stackable: '可叠层：可重复获得并叠加',
     oncePerRun: '每局限次获得：一局只能拿到一次',
+    noRestack: '拿满上限后移出本局可获得池（不参与「叠满开新栏位」的通用规则）',
     repeatable: '可重复获得（非同名唯一）',
     unique: '同名唯一：拿到后不再进池',
     hidden: '不进「增益集锦」展示',
@@ -1581,12 +1606,12 @@
     buffScore, reviveScoreAt,
     SHOP_PRICE_OFFSET, rollShopPrice,
     rerollPriceAt, rerollPriceCapped, rerollTilt, tiltRateMul, rawTierWeights, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,
-    TIER_DYNAMIC_WEIGHTS, TIER_AVG_INCLUDES_STATIC, LEGEND_PITY,
+    TIER_DYNAMIC_WEIGHTS, TIER_AVG_INCLUDES_STATIC, LEGEND_PITY, TICKET_FROM_MINT_CAP,
     shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,
     MINT_SHOP, mintLayerOk, mintGroupOf, mintPrice, mintWeights, rollMintRarity, mintChance,
     mintPool, opsPool, MINT_EXCLUDE_MODS,
     BUFF_TAGS, POOL_TAGS, hasTag, tagsOf, buffsWithTag, poolsOf, descOf,
-    legendWeightFactor, legendOwnedCount, allRepeatableLegendsOwned, LEGEND_BASE_WEIGHT, rarityBoostOf,
+    legendWeightFactor, legendOwnedCount, allRepeatableLegendsOwned, LEGEND_BASE_WEIGHT, LEGEND_TIER_DECAY, rarityBoostOf,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,

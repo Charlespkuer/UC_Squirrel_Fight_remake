@@ -203,7 +203,10 @@ test('需求4：平衡数值逐条核对', () => {
   assert.match(TD.BUFF_BY_ID.C07.desc, /最多 \+30%/, '文案要写明上限：' + TD.BUFF_BY_ID.C07.desc);
   for (const id of ['C39', 'C40', 'C41', 'C42', 'C43', 'C44']) {
     assert.equal(TD.BUFF_BY_ID[id].mods.fragileBreakPct, 6, id + ' 的易碎概率应当 6%');
-    assert.match(TD.BUFF_BY_ID[id].desc, /小概率损毁/, id + ' 的文案要说明会损毁');
+    /* 文案措辞由用户改过（10.6.1：「每胜利一场6%概率损毁」），
+     * 这里只守住意图：必须说明会损毁，且要写出概率。 */
+    assert.match(TD.BUFF_BY_ID[id].desc, /损毁/, id + ' 的文案要说明会损毁');
+    assert.match(TD.BUFF_BY_ID[id].desc, /(6%|小概率)/, id + ' 的文案要写明损毁概率：' + TD.BUFF_BY_ID[id].desc);
   }
   assert.equal(TD.BUFF_BY_ID.N09.uses, 3, '晴空护符应当 3 次');
   assert.match(TD.BUFF_BY_ID.N09.desc, /3 场/, '晴空护符文字要写 3 场');
@@ -2230,6 +2233,9 @@ test('需求26：积分扩展（拿增益计分 + 两个隐藏成就）', () => 
   r.phase = null; r.choices = null;
   /* 全部走 addBuff 并每步重新取 run 引用（debugGrantBuff 拿的是内部引用，
    * 与这里持有的 r 可能不是同一个对象，混用会导致增益没真正入账）。 */
+  /* 任务3 之后同名永久增益可以多栏位叠加，前面的用例可能已经把攻击乘区堆得很高；
+   * 这一段先清空本局增益，让「跨档点亮」的判定落在可控的 +140% 上。 */
+  r.permanent = []; r.limited = []; r.slotFreeIds = [];
   for (const id of ['G04', 'N01', 'C02', 'C02', 'C02']) c.Tower.addBuff(run(), id);
   const bonus = c.Tower.debugBuffReport('endless').effects.find(([k]) => k === '攻击');
   assert.ok(bonus && parseFloat(bonus[1].replace('+', '')) > 100,
@@ -2245,7 +2251,12 @@ test('需求26：积分扩展（拿增益计分 + 两个隐藏成就）', () => 
   assert.equal(ach.length, expectedTiers.length,
     '应当点亮 ' + expectedTiers.length + ' 档，实测 ' + JSON.stringify(ach.map((x) => x.name)));
   assert.ok(ach.some((x) => /\+100%/.test(x.name)), '必须含 +100% 档');
-  assert.ok(!ach.some((x) => /\+200%|\+300%/.test(x.name)), '不该点亮未跨过的更高档：' + JSON.stringify(ach.map((x) => x.name)));
+  /* 关键不变量：点亮的档位都不能超过本场实际峰值（原来写死「不含 200%/300%」，
+   * 但任务3 放开叠层后峰值可能更高 —— 按峰值判断才是这条用例的真正意图）。 */
+  const litPct = ach.map((x) => Number((String(x.name).match(/\+(\d+)%/) || [])[1]))
+    .filter((v) => Number.isFinite(v));
+  assert.ok(litPct.every((pct) => pct / 100 <= peaks.powerMul + 1e-9),
+    '不该点亮超过本场峰值的档：峰值 ' + peaks.powerMul + ' 但点亮了 ' + JSON.stringify(litPct));
   assert.equal(run().score, expectedTiers.reduce((a, m) => a + m.points, 0), '加成成就的分值要对');
   // 再调两次不该重复点亮同一档
   c.Tower.nextBattle('endless');
@@ -2591,10 +2602,14 @@ test('需求32：池子分离的端到端实测（真跑两种塔的抽取，零
   assert.equal(outOfEndless.length, 0, '无尽塔抽到了池外条目：' + JSON.stringify(outOfEndless));
 });
 
-test('需求33：挥金如土（C36）每 10 币一次随机项，且购买它自身的花费也计入', () => {
+test('需求33：挥金如土（C36）分段步长 5→10→15，且购买它自身的花费也计入', () => {
   const c = setup();
   const TD = c.TowerData;
-  assert.equal(TD.BUFF_BY_ID.C36.mods.shopSpendStep, 5, '步长应当是 5 试炼币');
+  assert.equal(TD.BUFF_BY_ID.C36.mods.shopSpendStep, 5, '起步步长应当是 5 试炼币');
+  /* 2026-10 用户口径：前 20 次提升每次 5 币、第 21~40 次每次 10 币、之后每次 15 币。 */
+  assert.equal(JSON.stringify(TD.BUFF_BY_ID.C36.mods.shopSpendTiers), JSON.stringify([5, 10, 15]),
+    '分段步长应当是 [5,10,15]');
+  assert.equal(TD.BUFF_BY_ID.C36.mods.shopSpendTierSize, 20, '每段 20 次提升');
   assert.match(TD.BUFF_BY_ID.C36.desc, /试炼币/, '文案要写明与试炼币消费挂钩：' + TD.BUFF_BY_ID.C36.desc);
   /* 文案改成「每在试炼商店消费 5 试炼币…」；「买它自己也算」由下面的实战断言覆盖
    *（买完它之后 shopSpend 已经计入了那 100 币 —— 见后面的 procs 断言）。 */
@@ -2610,14 +2625,15 @@ test('需求33：挥金如土（C36）每 10 币一次随机项，且购买它�
       slots: [{ id: id, sold: false, price: price }] };
     return r;
   };
-  // ① 买 C36 自身的花费要吃到加成：160 币 → 16 次
+  // ① 买 C36 自身的花费要吃到加成：160 币 = 前 20 次 ×5（100 币）+ 后 6 次 ×10（60 币）
   mkShop('C36', 160);
   const bought = c.Tower.buyShopSlot(0);
   assert.ok(bought.ok, '应当能买到挥金如土');
   let r = c.Tower._debugRun('endless');
   const procs = (g) => g.power + g.agility + g.speed + g.hp / 5;   // 血是 +5/次，折算成「次」
-  assert.equal(procs(r.spendGain), 32, '160 币应当触发 32 次（每 5 币一次），实测 ' + procs(r.spendGain));
-  assert.equal(r.shopSpend, 0, '160 是 5 的整数倍，余数应为 0，实测 ' + r.shopSpend);
+  assert.equal(procs(r.spendGain), 26, '160 币应当触发 26 次（20×5 + 6×10），实测 ' + procs(r.spendGain));
+  assert.equal(r.shopSpendProcs, 26, '已提升次数要记账：' + r.shopSpendProcs);
+  assert.equal(r.shopSpend, 0, '160 刚好用完，余数应为 0，实测 ' + r.shopSpend);
   /* ② 每次只加「1 力 / 1 敏 / 1 速 / 5 血」中的一项。
    * 正确的不变量：四项折算后**总和**等于触发次数，且每项非负 ——
    * 原来写「单项 ≤ 16」是错的：32 次随机分配里某一项完全可能超过半数（实测 hp 到 30）。 */
@@ -2625,19 +2641,27 @@ test('需求33：挥金如土（C36）每 10 币一次随机项，且购买它�
   assert.ok(g.power >= 0 && g.agility >= 0 && g.speed >= 0 && g.hp >= 0,
     '各项不该为负：' + JSON.stringify(g));
   assert.equal(g.hp % 5, 0, '生命那一项应当是 5 的整数倍：' + g.hp);
-  assert.equal(procs(g), 32, '四项折算后总和应当等于触发次数：' + JSON.stringify(g));
+  assert.equal(procs(g), 26, '四项折算后总和应当等于触发次数：' + JSON.stringify(g));
   assert.ok(r.spendGain.hp % 5 === 0, '生命项应当是 5 的倍数，实测 ' + r.spendGain.hp);
-  // ③ 后续消费继续累计：再买 30 币 → 累计 19 次
+  // ③ 第 21~40 次是每次 10 币：再买 30 币 → +3 次 → 累计 29 次
   mkShop('C01', 30);
   c.Tower.buyShopSlot(0);
   r = c.Tower._debugRun('endless');
-  assert.equal(procs(r.spendGain), 38, '再消费 30 币应当累计到 38 次，实测 ' + procs(r.spendGain));
+  assert.equal(procs(r.spendGain), 29, '再消费 30 币（每次 10 币）应当累计到 29 次，实测 ' + procs(r.spendGain));
+  // ③b 跨进第三段（第 41 次起每次 15 币）：再花 200 币
+  //     procs 29 → 40 共 11 次 ×10 = 110 币，剩下 90 币 ÷15 = 6 次 → 累计 46 次、余 0
+  mkShop('C03', 200);
+  c.Tower.buyShopSlot(0);
+  r = c.Tower._debugRun('endless');
+  assert.equal(procs(r.spendGain), 46, '跨段后应当累计到 46 次，实测 ' + procs(r.spendGain));
+  assert.equal(r.shopSpendProcs, 46, '次数记账要同步：' + r.shopSpendProcs);
+  assert.equal(r.shopSpend, 0, '200 币刚好用完，余数应为 0，实测 ' + r.shopSpend);
   // ④ 没钱时不买、也不记账
   mkShop('C02', 200);
   c.Tower._debugRun('endless').coins = 50;
   const poor = c.Tower.buyShopSlot(0);
   assert.ok(!poor.ok, '钱不够应当买不成');
-  assert.equal(procs(c.Tower._debugRun('endless').spendGain), 38, '买不成时不该记账');
+  assert.equal(procs(c.Tower._debugRun('endless').spendGain), 46, '买不成时不该记账');
 });
 
 test('需求34：护盾环境削弱为 18%~28%', () => {
@@ -2719,8 +2743,10 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
    * C16/C17 改成「开战第一回合回血」后按胜场量不到，比例由需求65 单独覆盖。 */
   /* 本轮新增的可叠层：C54「越战越勇」（2 层，每层每回合 +1.5%）、
    * C59「门庭若市」（3 层，每层每进一次商店 +100 试炼币）。 */
+  /* 2026-10 用户口径：以战养战（C11）不能再叠加、登顶者（C12）削弱为 1/3（锁定 1 份）
+   * → 两条都去掉了 stackable，改用 oncePerRun + maxStacks 1。 */
   assert.equal(STACKABLE.join(','),
-    'C03,C06,C07,C10,C11,C12,C14,C16,C17,C19,C21,C22,C23,C24,C26,C27,C28,C29,C50,C54,C59',
+    'C03,C06,C07,C10,C14,C16,C17,C19,C21,C22,C23,C24,C26,C27,C28,C29,C50,C54,C59',
     '可叠层增益清单变了：' + STACKABLE.join(','));
 
   /* 跑一小段真实流程，取某个累计字段（固定层数，排除推进噪声）。 */
@@ -2777,8 +2803,10 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
      *（7 场时实测比值会落到 2.7~3.5）。 */
     ['C06', 'killPower', 14, 10],   // 猎杀时刻：每击杀 +2%（×层数）
     ['C07', 'winMaxHp', 7, null],   // 吞噬成长：每胜 +2%（×层数）
-    ['C11', 'winHpFlat', 7, null],  // 以战养战：每胜 +5 上限（×层数）
-    ['C12', 'winStatPower', 7, 10],  // 登顶者：第 10 层起每胜 +1 力（×层数）
+    /* 2026-10：以战养战（C11）与登顶者（C12）都锁死 1 份、不再可叠层
+     *（用户口径：C11 不可叠加、C12 削弱为原来的 1/3），所以从「叠层成比例」用例里摘掉 ——
+     *强行塞 stacks:3 会在存档归一化时被 stackCap 夹回 1（实测比值恒为 1.00）。
+     * 它们的「一局一次 + 新栏位不适用」由需求36 的 stackable 清单与需求42 ③ 覆盖。 */
     /* C16/C17「战斗续航」本轮改成**开战第一回合**回血（不再按胜场结算），
      * 这个「按胜场归一化」的循环量不到它 —— 叠层比例由需求65 单独覆盖。 */
   ];
@@ -2836,14 +2864,17 @@ test('需求36b：C50「抉择扩充」的叠层是「选项目数 +1/层」，�
     T.addBuff(T._debugRun('endless'), 'C50');
     assert.equal(T.choiceSlotsOf(T._debugRun('endless')), 3 + n, n + ' 层应当是 ' + (3 + n) + ' 选一');
   }
-  /* 叠满：不再进池、也不可再获得 */
-  assert.equal(T.poolFilterOf(T._debugRun('endless'), TD.BUFF_BY_ID.C50), false,
-    '叠满 3 层后不该再进任何池子');
-  assert.equal(T.ownableOf(T._debugRun('endless'), TD.BUFF_BY_ID.C50), false,
-    '叠满 3 层后不该再获得');
-  /* 超出上限也不会继续加（addBuff 受 STACK_MAX 限制） */
-  T.addBuff(T._debugRun('endless'), 'C50');
-  assert.equal(T.choiceSlotsOf(T._debugRun('endless')), 6, '仍然封顶在六选一');
+  /* 任务3：叠满之后**仍然**在池子里、也仍然能拿 —— 会另开一个背包栏位继续叠。
+   * 效果侧不受影响：选择张数本来就被 choiceSlotsOf 封顶在 6。 */
+  assert.equal(T.poolFilterOf(T._debugRun('endless'), TD.BUFF_BY_ID.C50), true,
+    '叠满 3 层后仍然应当留在池子里（任务3）');
+  assert.equal(T.ownableOf(T._debugRun('endless'), TD.BUFF_BY_ID.C50), true,
+    '叠满 3 层后仍然应当能获得（改成开新栏位）');
+  const again50 = T.addBuff(T._debugRun('endless'), 'C50');
+  assert.ok(again50.ok, '叠满后第 4 份应当能拿到（新栏位）：' + JSON.stringify(again50));
+  const rows50 = (T._debugRun('endless').permanent || []).filter((b) => b.id === 'C50');
+  assert.equal(rows50.length, 2, '应当占两个栏位：' + JSON.stringify(rows50));
+  assert.equal(T.choiceSlotsOf(T._debugRun('endless')), 6, '选择张数仍然封顶在六选一');
   T.abandon('endless');
 });
 
@@ -3326,13 +3357,17 @@ test('需求42：叠层增益按层数计价 / 仓库钥匙不进商店 / 登顶
     }
   }
 
-  /* ---- ③ 登顶者：第 10 层起每胜 +1 力/敏/速（固定值，不吃百分比乘区） ---- */
+  /* ---- ③ 登顶者：第 10 层起每胜 +1 力/敏/速（固定值，不吃百分比乘区；一局一份） ---- */
   const c12 = TD.BUFF_BY_ID.C12;
   assert.equal(c12.mods.winStatAfter10, 1, 'C12 应当是固定 +1');
   assert.equal(c12.mods.winPowerAfter10, undefined, '旧的百分比口径应当移除');
-  assert.match(c12.desc, /力量/, '文案要写力量成长：' + c12.desc);
-  assert.match(c12.desc, /敏捷/, '文案要写敏捷成长：' + c12.desc);
-  assert.match(c12.desc, /速度/, '文案要写速度成长：' + c12.desc);
+  /* 2026-10 用户口径：**削弱为原来的 1/3** —— 原来可叠 3 层（每场最多 +3/项），
+   * 现在锁定 1 份（+1/项），也就是原来上限的 1/3。文案按用户给的写法。 */
+  assert.equal(c12.maxStacks, 1, 'C12 现在锁定 1 份（原来的 1/3 强度）：' + c12.maxStacks);
+  assert.equal(TD.hasTag(c12, 'oncePerRun'), true, 'C12 应当是一局一次（不能再叠）');
+  assert.equal(TD.hasTag(c12, 'stackable'), false, 'C12 不再可叠层');
+  assert.match(c12.desc, /力&敏&速/, '文案要写力&敏&速：' + c12.desc);
+  assert.match(c12.desc, /第 10 层起/, '文案要写第 10 层起：' + c12.desc);
   const grow = (stacks, layer, wins) => {
     S.newGame('c12' + Math.random());
     const s2 = S.state(); s2.level = 70; s2.props[23] = 99999;
@@ -3365,12 +3400,17 @@ test('需求42：叠层增益按层数计价 / 仓库钥匙不进商店 / 登顶
     return { wins: w, p: fin ? Number(fin.winStatPower || 0) : NaN,
       a: fin ? Number(fin.winStatAgility || 0) : NaN, s: fin ? Number(fin.winStatSpeed || 0) : NaN };
   };
-  const one1 = grow(1, 10, 5), three1 = grow(3, 10, 5), below = grow(1, 5, 5);
+  const one1 = grow(1, 10, 5), below = grow(1, 5, 5);
   assert.equal(one1.p, one1.wins * 1, '×1 应当每胜 +1：' + JSON.stringify(one1));
   assert.equal(one1.a, one1.wins * 1, '敏捷也要 +1');
   assert.equal(one1.s, one1.wins * 1, '速度也要 +1');
-  assert.equal(three1.p, three1.wins * 3, '×3 层应当每胜 +3：' + JSON.stringify(three1));
   assert.equal(below.p, 0, '层数 <10 时不该累计：' + JSON.stringify(below));
+  /* 不能再叠：第二份直接被拒（这条同时守住「削弱为原来 1/3」不会被任务3 的
+   * 「叠满开新栏位」重新放开）。 */
+  const dup12 = T.addBuff(T._debugRun('endless'), 'C12');
+  assert.equal(dup12.ok, false, '第二份登顶者应当被拒：' + JSON.stringify(dup12));
+  assert.equal(T.poolFilterOf(T._debugRun('endless'), c12), false, '拿过之后不该再进池');
+  assert.equal(T.ownableOf(T._debugRun('endless'), c12), false, '拿过之后不该再获得');
   /* 面板进度要写清三项 */
   const r3 = T._debugRun('endless');
   r3.winStatPower = 15; r3.winStatAgility = 15; r3.winStatSpeed = 15;
@@ -3964,8 +4004,8 @@ test('需求50：N13/N14 的界面口径（无尽塔 10 次限次）+ 寒霜锁�
 
   /* ③ 不死鸟：商店权重显著低于其它传奇 */
   const c14 = TD.BUFF_BY_ID.C14;
-  assert.ok(Number(c14.shopWeight) > 0 && Number(c14.shopWeight) < 0.5,
-    '不死鸟的商店权重应当明显小于 1：' + c14.shopWeight);
+  /* 2026-10 用户口径：0.12 → 0.5（仍然是「低于同档」的设计意图，只是没那么极端）。 */
+  assert.equal(Number(c14.shopWeight), 0.5, '不死鸟的商店权重应当是 0.5：' + c14.shopWeight);
   assert.equal(TD.BUFF_BY_ID.C36.shopWeight, undefined, '其它传奇不该被顺手改权重（默认 1）');
   /* 统计：不死鸟的上架概率应当远低于同档其它传奇 */
   S.newGame('shopprob' + Math.random());
@@ -4093,7 +4133,7 @@ test('需求52：体力药限购/售价、天梯周日不休赛、涅槃重做',
   const c14 = TD.BUFF_BY_ID.C14;
   assert.equal(c14.name, '涅槃', 'C14 应当已改名为涅槃');
   assert.equal(c14.rarity, 3, '仍是传奇');
-  assert.equal(c14.shopWeight, 0.12, '商店权重仍保持很低');
+  assert.equal(c14.shopWeight, 0.5, '商店权重 2026-10 上调到 0.5（仍然低于同档基准 1）');
   assert.equal(c14.mods.revivePct, 0.50, '复活回复当前生命上限的 50%');
   assert.equal(c14.mods.reviveStatMul, 0.50, '复活后本场力/敏/速 +50%');
   assert.match(c14.desc, /涅槃|复活/, '文案要说明复活');
@@ -4341,7 +4381,8 @@ test('需求54：挥金如土一局一次 / 传奇商店降权 / 终焉烙印终
   assert.equal(c49.mods.fragileFinalMul, true, 'C49 是终乘烙印');
   assert.equal(c49.mods.fragileAddAlive, 0.25, '存在时 +25%');
   assert.equal(c49.mods.fragileAddBurned, 0.5, '损毁后 +50%');
-  assert.equal(c49.mods.weightDivBy, 'owned', '按身上份数做除法降权（2026-10 口径）：' + c49.mods.weightDivBy);
+  assert.equal(c49.mods.repeatWeight, 0.88, '降权口径 2026-10 改成「每份 ×0.88」：' + c49.mods.repeatWeight);
+  assert.equal(c49.mods.weightDivBy, undefined, '不再用除法降权：' + c49.mods.weightDivBy);
   assert.ok(c49.mods.fragileBreakPct > 0, '应当有损毁概率');
   assert.ok(TD.endlessPool.some((b) => b.id === 'C49'), 'C49 应当在无尽塔池');
   /* 实战：无烙印 / n 层存在 / n 层损毁 的倍率 */
@@ -4458,7 +4499,11 @@ test('需求54：挥金如土一局一次 / 传奇商店降权 / 终焉烙印终
   const m0 = measure([]), mAll = measure(['C14', 'C36', 'C37', 'C55']);
   assert.ok(m0.leg > 0, '未拥有时应当能刷到传奇：' + m0.leg);
   assert.ok(mAll.leg > 0, '全拥有后仍会（极少量）出现：' + mAll.leg);
-  assert.ok(mAll.leg < m0.leg / 3,
+  /* 「大幅降权」而不是「绝迹」：任务3 之后永久传奇（C14/C55）拿满也仍在池里，
+   * 所以降权只由 legendWeightFactor + 个体 ÷n 提供，实测 ≈ 0.35 倍。
+   * 阈值留到 1/2：这是抽样估计（15000 格），比值本身有 ~13% 的抖动，
+   * 卡在 1/3 会把正常抖动误报成失败。 */
+  assert.ok(mAll.leg < m0.leg / 2,
     '全拥有后传奇应当大幅降权：' + (m0.leg * 100).toFixed(3) + '% → ' + (mAll.leg * 100).toFixed(3) + '%');
   assert.ok(mAll.epic > 0.05, '史诗仍应当正常出现（货架不会退化成纯普通）：' + mAll.epic);
   T.abandon('endless');
@@ -4591,12 +4636,13 @@ test('需求56：秘技通神只抽主动技能 / 终焉烙印改加算并降出
   assert.equal(c49.mods.fragileAddAlive, 0.25, '存在层每层 +25%');
   assert.equal(c49.mods.fragileAddBurned, 0.5, '损毁层每层 +50%');
   assert.equal(c49.mods.fragileMulAlive, undefined, '旧的乘法参数应当已移除');
-  /* 2026-10：不再用「每份 ×0.10」的指数降权（那让第 2/3 份几乎刷不到），
-   * 改成与虚空铭文同一套口径 —— 权重 = 初始 ÷ 身上份数（见需求93）。 */
-  assert.equal(c49.mods.repeatWeight, undefined, '终焉烙印不再用指数降权：' + c49.mods.repeatWeight);
-  assert.equal(c49.mods.weightDivBy, 'owned', '改成「按身上份数做除法」：' + c49.mods.weightDivBy);
-  assert.ok(TD.BUFF_BY_ID.C52.mods.repeatWeight > 0,
-    '涌泉烙印（C52）仍然保留自己的重复出率惩罚（' + TD.BUFF_BY_ID.C52.mods.repeatWeight + '）');
+  /* 2026-10 用户口径（第二次调整）：降权改成「每份 ×0.88」，与虚空铭文同一套规律。
+   *（历史：×0.10 → ÷份数 → ×0.88，曲线断言见需求93。） */
+  assert.equal(c49.mods.repeatWeight, 0.88, '终焉烙印用「每份 ×0.88」：' + c49.mods.repeatWeight);
+  assert.equal(c49.mods.weightDivBy, undefined, '不再用除法：' + c49.mods.weightDivBy);
+  /* 2026-10 用户口径：**取消 C52 的权重下降**（原来 repeatWeight 0.3）。 */
+  assert.equal(TD.BUFF_BY_ID.C52.mods.repeatWeight, undefined,
+    '涌泉烙印（C52）的权重下降应当已取消：' + TD.BUFF_BY_ID.C52.mods.repeatWeight);
   const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
     baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
   const scene = (marks, burned, id) => {
@@ -5805,8 +5851,8 @@ test('需求69：终焉烙印（C49）碎掉的那一份也要计入「获得过
   assert.ok(T.addBuff(T._debugRun('endless'), 'C49').ok, '第 2 份应当能拿到');
   const two = T._debugRun('endless');
   assert.equal(T.obtainedCountOf(two, 'C49'), 2, '碎 1 + 在册 1 = 2 份');
-  assert.ok(Math.abs(T.buffWeightOf(two, 'C49') - 0.5) < 1e-9,
-    '第 2 份的抽取权重应当是 1/2（含碎掉那份）：' + T.buffWeightOf(two, 'C49'));
+  assert.ok(Math.abs(T.buffWeightOf(two, 'C49') - 0.88) < 1e-9,
+    '第 2 份的抽取权重应当是 ×0.88（含碎掉那份）：' + T.buffWeightOf(two, 'C49'));
 
   /* ③ 第 3 份再碎掉 → 累计 3 份。
    * 2026-10 用户口径：**累计口径只用来降权，不再当上限**（原来是「累计 3 份就永远出池」）——
@@ -6028,8 +6074,15 @@ test('需求72：涅槃（C14）一局可拿两次 —— 第 2 层改为「本�
   openRun(3);
   assert.ok(T.addBuff(T._debugRun('endless'), 'C14').ok, '第 1 份应当能拿到');
   assert.ok(T.addBuff(T._debugRun('endless'), 'C14').ok, '第 2 份应当能拿到');
+  /* 任务4（2026-10 用户口径）：涅槃属于 noRestack 那一组 —— **拿满 2 层后出池**，
+   * 不参与「叠满开新栏位」的通用规则，所以第 3 份必须被拒。 */
+  assert.equal(TD.hasTag(c14, 'noRestack'), true, '涅槃应当带 noRestack 标签');
   const dup = T.addBuff(T._debugRun('endless'), 'C14');
-  assert.equal(dup.ok, false, '第 3 份应当被拒（叠满 2 层）');
+  assert.equal(dup.ok, false, '第 3 份应当被拒（拿满即出池）：' + JSON.stringify(dup));
+  assert.equal(T.poolFilterOf(T._debugRun('endless'), c14), false, '拿满后不该再进池');
+  assert.equal(T.ownableOf(T._debugRun('endless'), c14), false, '拿满后不该再获得');
+  const rows14 = (T._debugRun('endless').permanent || []).filter((b) => b.id === 'C14');
+  assert.equal(rows14.length, 1, '仍然只有一条栏位：' + JSON.stringify(rows14));
   assert.equal(T._debugRun('endless').permanent.find((x) => x.id === 'C14').stacks, 2, '层数应当是 2');
 
   /* ② 1 层：每层 1 次复活（与旧行为一致） */
@@ -7495,45 +7548,63 @@ test('需求93：本轮商店平衡 —— E01 削弱 / 虚空铭文自我降权
     'E01 + E04 仍是 −65%（3.5 折），实测 ' + shopA.discountPct);
   T.closeShop();
 
-  /* ② 虚空铭文（C37）：**weight = 初始 ÷ 附魔数量**（用户口径 x/n） */
+  /* ② 虚空铭文（C37）：2026-10 用户口径 —— 下降规律 = **每份 ×0.88**（与 C49 同一套，1:1）。
+   * 注意口径变了：降权现在由 **C37 自己的份数** 驱动（repeatWeight），不再看附魔数量。 */
   const run = T._debugRun('endless');
   run.slotFreeIds = []; run.permanent = []; run.limited = []; run.acqSeq = 0;
   const w0 = T.buffWeightOf(run, 'C37');
-  run.slotFreeIds = ['C01'];
+  run.permanent = [{ id: 'C37', stacks: 1 }];
   const w1 = T.buffWeightOf(run, 'C37');
-  run.slotFreeIds = ['C01', 'C02'];
+  run.permanent = [{ id: 'C37', stacks: 2 }];
   const w2 = T.buffWeightOf(run, 'C37');
-  run.slotFreeIds = ['C01', 'C02', 'C05'];
+  run.permanent = [{ id: 'C37', stacks: 3 }];
   const w3 = T.buffWeightOf(run, 'C37');
-  run.slotFreeIds = ['C01', 'C02', 'C05', 'C11', 'C12'];
+  run.permanent = [{ id: 'C37', stacks: 5 }];
   const w5 = T.buffWeightOf(run, 'C37');
-  assert.ok(w0 > w1 && w1 > w2 && w2 > w3 && w3 > w5, '附魔越多权重越低：' + [w0, w1, w2, w3, w5].join(' > '));
+  assert.ok(w0 === w1 && w1 > w2 && w2 > w3 && w3 > w5,
+    '第 1 份不降权、之后每份 ×0.88：' + [w0, w1, w2, w3, w5].join(' / '));
+  assert.ok(Math.abs(w2 - 0.88) < 1e-9 && Math.abs(w3 - 0.88 * 0.88) < 1e-9,
+    '曲线应当是 0.88^(n-1)：' + [w1, w2, w3].join(' / '));
+  /* 与 C49 逐档对齐：同样 0/1/2/3/5 份时的权重必须完全相同。 */
+  const c49w = (n) => {
+    /* 用**临时对象**，不要碰实时 run —— 否则 fragileGot 会留在本局里污染后面的断言。 */
+    const rr = { permanent: [], limited: n > 0 ? [{ id: 'C49', stacks: n, uses: 1000, on: true }] : [],
+      fragileGot: n > 0 ? { C49: n } : {}, slotFreeIds: [], pickBuffIds: [], instantIds: [], permSlotIds: [] };
+    return T.buffWeightOf(rr, 'C49');
+  };
+  const pairs = [[0, w0], [1, w1], [2, w2], [3, w3], [5, w5]];
+  for (const [n, w] of pairs) {
+    assert.ok(Math.abs(c49w(n) - w) < 1e-9,
+      n + ' 份时 C37 与 C49 的权重必须一致：C37=' + w + ' C49=' + c49w(n));
+  }
+  assert.equal(TD.BUFF_BY_ID.C37.mods.pityWeight, 1, 'C37 保底权重 1');
+  assert.equal(TD.BUFF_BY_ID.C49.mods.pityWeight, 1, 'C49 保底权重 1 → 两条 1:1');
   assert.equal(w0, 1, '0 个附魔 → 不降权（÷1）');
-  assert.ok(Math.abs(w1 - w0 / 2) < 1e-9, '1 个附魔 → ÷2（2026-10 起第一次就生效）：' + w1);
-  assert.ok(Math.abs(w2 - w0 / 3) < 1e-9, '2 个附魔 → ÷3：' + w2);
-  assert.ok(Math.abs(w3 - w0 / 4) < 1e-9, '3 个附魔 → ÷4：' + w3);
-  assert.ok(Math.abs(w5 - w0 / 6) < 1e-9, '5 个附魔 → ÷6：' + w5);
-  assert.equal(TD.BUFF_BY_ID.C37.mods.weightDivBy, 'enchanted', '口径写在数据里');
-  assert.equal(TD.BUFF_BY_ID.C37.mods.weightDivOffset, 1, 'C37 用 ÷(n+1) 口径');
-  /* 终焉烙印（C49）：同一套除法口径，n = 身上已有的份数（含碎掉的）*/
+  /* 与 C49 完全同形：第 1 份 ×1，之后每多一份 ×0.88。 */
+  assert.ok(Math.abs(w1 - w0) < 1e-9, '第 1 份 → 不降权（×1）：' + w1);
+  assert.ok(Math.abs(w2 - w0 * 0.88) < 1e-9, '第 2 份 → ×0.88：' + w2);
+  assert.ok(Math.abs(w3 - w0 * Math.pow(0.88, 2)) < 1e-9, '第 3 份 → ×0.7744：' + w3);
+  assert.ok(Math.abs(w5 - w0 * Math.pow(0.88, 4)) < 1e-9, '第 5 份 → ×0.5997：' + w5);
+  assert.equal(TD.BUFF_BY_ID.C37.mods.repeatWeight, 0.88, '口径写在数据里');
+  assert.equal(TD.BUFF_BY_ID.C37.mods.weightDivBy, undefined, 'C37 不再用除法口径');
+  /* 终焉烙印（C49）：与 C37 **同一套规律**（每份 ×0.88），n = 身上已有的份数（含碎掉的）。 */
   const run49 = T._debugRun('endless');
-  run49.permanent = []; run49.limited = []; run49.slotFreeIds = []; run49.acqSeq = 0;
+  run49.permanent = []; run49.limited = []; run49.slotFreeIds = []; run49.acqSeq = 0; run49.fragileGot = {};
   const b49 = T.buffWeightOf(run49, 'C49');
-  assert.equal(TD.BUFF_BY_ID.C49.mods.weightDivBy, 'owned', 'C49 用「按份数」的口径');
+  assert.equal(TD.BUFF_BY_ID.C49.mods.repeatWeight, 0.88, 'C49 用「每份 ×0.88」的口径');
   run49.limited = [{ id: 'C49', stacks: 1, uses: 1000, on: true }];
   assert.equal(T.buffWeightOf(run49, 'C49'), b49, '身上 1 份 → 不降权');
   run49.limited = [{ id: 'C49', stacks: 2, uses: 1000, on: true }];
-  assert.ok(Math.abs(T.buffWeightOf(run49, 'C49') - b49 / 2) < 1e-9, '2 份 → ÷2：' + T.buffWeightOf(run49, 'C49'));
+  assert.ok(Math.abs(T.buffWeightOf(run49, 'C49') - b49 * 0.88) < 1e-9, '2 份 → ×0.88：' + T.buffWeightOf(run49, 'C49'));
   run49.limited = [{ id: 'C49', stacks: 3, uses: 1000, on: true }];
-  assert.ok(Math.abs(T.buffWeightOf(run49, 'C49') - b49 / 3) < 1e-9, '3 份 → ÷3：' + T.buffWeightOf(run49, 'C49'));
-  /* 碎掉的那一份也算「身上有」：`obtainedCountOf` = max(在册份数, run.fragileGot 累计份数)。
-   * 这里模拟「在册 1 份 + 之前碎过 1 份」→ 累计 2 份 → ÷2（比只算在册的 1 份更低）。 */
+  assert.ok(Math.abs(T.buffWeightOf(run49, 'C49') - b49 * Math.pow(0.88, 2)) < 1e-9,
+    '3 份 → ×0.7744：' + T.buffWeightOf(run49, 'C49'));
+  /* 碎掉的那一份也算「身上有」：`obtainedCountOf` = max(在册份数, run.fragileGot 累计份数)。 */
   run49.limited = [{ id: 'C49', stacks: 1, uses: 1000, on: true }];
-  const live1 = T.buffWeightOf(run49, 'C49');
   run49.fragileGot = { C49: 2 };
   const withBroken = T.buffWeightOf(run49, 'C49');
   assert.equal(T.obtainedCountOf(run49, 'C49'), 2, '在册 1 + 碎过 1 = 累计 2 份');
-  assert.ok(Math.abs(withBroken - b49 / 2) < 1e-9, '碎掉的烙印也计入份数 → ÷2：' + withBroken);
+  assert.ok(Math.abs(withBroken - b49 * 0.88) < 1e-9, '碎掉的烙印也计入份数 → ×0.88：' + withBroken);
   assert.ok(withBroken < live1, '含碎掉的那份时权重更低：' + withBroken + ' < ' + live1);
   run49.fragileGot = {};
   /* 别的增益不受影响（只有带 weightDivBy 的才降权） */
@@ -7819,9 +7890,11 @@ test('需求96：动态稀有度权重——个体降权会按比例缩小整档
     assert.ok(Math.abs(base[i] - now[i]) < 1e-9,
       TD.RARITY_NAME[i] + ' 档默认占比应当与旧口径一致：' + now[i] + ' vs ' + base[i]);
   }
-  /* ② 个体降权 → 整档预算按「档内平均倍率」缩水（用户公式：δ - k·δ/d 的等价写法） */
+  /* ② 个体降权 → 整档预算按「档内平均倍率」缩水（用户公式：δ - k·δ/d 的等价写法）。
+   * 2026-10：C37 的降权由**自己的份数**驱动（repeatWeight 0.88）→ 3 份时权重 ×0.7744。 */
+  run.permanent = []; run.slotFreeIds = [];
   const before = share(TD.shopPool);
-  run.slotFreeIds = ['C01', 'C02', 'C05'];          // C37 的 weightDivBy 生效 → 权重 ÷4
+  run.permanent = [{ id: 'C37', stacks: 3 }];
   const after = share(TD.shopPool);
   assert.ok(after[3] < before[3], '传奇档的总概率必须跟着 C37 降权一起变小：' +
     (before[3] * 100).toFixed(3) + '% → ' + (after[3] * 100).toFixed(3) + '%');
@@ -7831,17 +7904,17 @@ test('需求96：动态稀有度权重——个体降权会按比例缩小整档
   for (const i of [0, 1, 2]) assert.ok(after[i] > before[i], TD.RARITY_NAME[i] + ' 档应当因为传奇缩水而略升');
   /* ③ 该档只剩 1 件可用时，个体权重也必须继续生效（旧版 list.length===1 直接返回，权重被忽略） */
   const only37 = TD.shopPool.filter((b) => b.id === 'C37');
+  run.permanent = [];
+  const one1 = T.dynamicTierWeightsOf(run, only37);          // 0 份 → 无降权
+  run.permanent = [{ id: 'C37', stacks: 3 }];                // 3 份 → ×0.7744
   const one0 = T.dynamicTierWeightsOf(run, only37);
-  const saved = run.slotFreeIds; run.slotFreeIds = [];
-  const one1 = T.dynamicTierWeightsOf(run, only37);
-  run.slotFreeIds = saved;
   const baseLegend = TD.rawTierWeights(1, run)[3];
   assert.ok(Math.abs(one1[3] - baseLegend) < 1e-9, '没有降权时传奇档预算 = 基准：' + one1[3]);
-  assert.ok(Math.abs(one0[3] - baseLegend / 4) < 1e-9,
-    '只剩 C37 且权重 ÷4 时，整档预算也应当 ÷4：' + one0[3] + ' vs ' + (baseLegend / 4));
-  /* ④ C37 自身概率随附魔数单调下降，且传奇档一起下降 */
+  assert.ok(Math.abs(one0[3] - baseLegend * Math.pow(0.88, 2)) < 1e-9,
+    '只剩 C37 且权重 ×0.7744 时，整档预算也应当按同倍数缩水：' + one0[3] + ' vs ' + (baseLegend * Math.pow(0.88, 2)));
+  /* ④ C37 自身概率随**自己的份数**单调下降，且传奇档一起下降 */
   const own = (n) => {
-    run.slotFreeIds = new Array(n).fill('x');
+    run.permanent = n > 0 ? [{ id: 'C37', stacks: n }] : [];
     const w = T.dynamicTierWeightsOf(run, TD.shopPool);
     const tot = w.reduce((a, b) => a + b, 0) || 1;
     const legends = TD.shopPool.filter((b) => b.rarity === 3);
@@ -7849,10 +7922,11 @@ test('需求96：动态稀有度权重——个体降权会按比例缩小整档
     return { tier: w[3] / tot, self: (w[3] / tot) * (T.buffWeightOf(run, TD.BUFF_BY_ID.C37) / sum) };
   };
   const o0 = own(0), o1 = own(1), o3 = own(3);
-  assert.ok(o0.self > o1.self && o1.self > o3.self,
-    'C37 自身概率应当随附魔单调下降：' + [o0.self, o1.self, o3.self].map((v) => (v * 100).toFixed(4) + '%').join(' > '));
-  assert.ok(o0.tier > o1.tier && o1.tier > o3.tier,
-    '传奇档总概率也应当随附魔单调下降：' + [o0.tier, o1.tier, o3.tier].map((v) => (v * 100).toFixed(3) + '%').join(' > '));
+  /* 第 1 份 ×1（不降权）→ 只比较 0/1 的「不升」+ 1→3 的严格下降。 */
+  assert.ok(o0.self >= o1.self && o1.self > o3.self,
+    'C37 自身概率应当随份数单调下降：' + [o0.self, o1.self, o3.self].map((v) => (v * 100).toFixed(4) + '%').join(' > '));
+  assert.ok(o0.tier >= o1.tier && o1.tier > o3.tier,
+    '传奇档总概率也应当随份数单调下降：' + [o0.tier, o1.tier, o3.tier].map((v) => (v * 100).toFixed(3) + '%').join(' > '));
   /* ⑤ 商店刷新倾斜仍然叠在动态权重之上（越刷越偏向高稀有度） */
   const legendAt = (paid) => {
     const w = T.dynamicTierWeightsOf(run, TD.shopPool, TD.rawTierWeights(TD.rerollTilt(paid, run), run));
@@ -7921,7 +7995,7 @@ test('需求97：无尽塔 30 层起战斗右下角同时给倍速键与跳过�
     '两座塔都要保留倍速键，无尽塔 30 层起同时允许跳过');
 });
 
-test('需求98：传奇保底（B 方案）——repeatable 不再被 ownable 误杀 + 保底分布 1/3 C37 : 2/3 C49', () => {
+test('需求98：传奇保底（B 方案）——repeatable 不再被 ownable 误杀 + C37:C49 保底 1:1', () => {
   const c = setup();
   const TD = c.TowerData, T = c.Tower;
   const mkRun = (extra) => Object.assign({ permanent: [], limited: [], permSlotIds: [], pickBuffIds: [],
@@ -7966,7 +8040,8 @@ test('需求98：传奇保底（B 方案）——repeatable 不再被 ownable �
   assert.equal(T._debugNotePityRoll(r0, null, true), 1, '清零后重新计数');
   assert.equal(T._debugNotePityRoll(r0, null, false), 1, '传奇池为空时不累加（不空转）');
 
-  /* ③ 极端情况：全部传奇到手 + C14 叠满 + C49 仍可叠 → 可用传奇 = C36/C37/C49 */
+  /* ③ 极端情况：全部传奇到手。任务3 之后「永久增益拿满也不再出池」，
+   *    所以 C14（涅槃）与 C55（后发制人）会一直留在候选里；C36 是 oncePerRun（拿过就出池）。 */
   const legIds = ['C51', 'C31', 'E15', 'C36', 'C37', 'C53', 'C55', 'C49'];
   const extreme = mkRun({
     permanent: legIds.filter((id) => id !== 'C49').map((id) => ({ id, stacks: 1 })).concat([{ id: 'C14', stacks: 2 }]),
@@ -7974,27 +8049,42 @@ test('需求98：传奇保底（B 方案）——repeatable 不再被 ownable �
     instantIds: [{ id: 'C51' }],
     slotFreeIds: new Array(20).fill('x'), fragileGot: { C49: 1 },
   });
-  /* C36 也已在身上（一局一次）→ 极端情况可用传奇只剩 C37/C49，保底池天然就是这两条。 */
+  /* 任务4 之后：涅槃拿满 2 层出池、后发制人拿到出池、挥金如土一局一次 → 极端情况**只剩 C37/C49**。 */
   const avail = TD.shopPool.filter((b) => T.ownableOf(extreme, b) && T.poolFilterOf(extreme, b) && b.rarity === 3);
   assert.equal(avail.map((b) => b.id).sort().join(','), 'C37,C49',
     '极端情况可用传奇：' + avail.map((b) => b.id).join('、'));
   assert.equal(TD.BUFF_BY_ID.C36.mods.pityWeight, 0, 'C36 不进保底池（运营向）');
   assert.equal(TD.BUFF_BY_ID.C37.mods.pityWeight, 1, 'C37 保底权重 1');
-  assert.equal(TD.BUFF_BY_ID.C49.mods.pityWeight, 2, 'C49 保底权重 2 → 与 C37 形成 1:2');
+  assert.equal(TD.BUFF_BY_ID.C49.mods.pityWeight, 1, 'C49 保底权重 1 → 与 C37 形成 1:1（用户口径）');
 
-  /* ④ 真实抽取路径：计数顶满后，第一格必是传奇，且分布 ≈ 1/3 C37 + 2/3 C49 */
-  let c37 = 0, c49 = 0;
-  for (let i = 0; i < 900; i++) {
+  /* ④ 真实抽取路径：计数顶满后第一格必是传奇；保底池 = 当前所有可用传奇
+   *（任务3 之后 C14/C55 这类永久传奇也不再出池），每条按 pityWeight 加权。
+   * 用户口径（任务4）：**C37 与 C49 必须 1:1** —— 权重同为 1，所以两者出现次数应当基本相等。 */
+  const pityCount = {};
+  const N = 1500;
+  /* 现在只剩两条、权重相同 → 每次保底是 1:1 的伯努利，期望各 50%。 */
+  for (let i = 0; i < N; i++) {
     extreme.legendPity = T.legendPityNeed();
     const slots = T._debugRollShopSlots(extreme, 0);
     const first = TD.BUFF_BY_ID[slots[0].id];
     assert.equal(first.rarity, 3, '保底那一格必须是传奇，实测 ' + first.id);
-    if (first.id === 'C37') c37++; else if (first.id === 'C49') c49++;
-    else assert.fail('保底不该给出 ' + first.id);
+    assert.ok(avail.some((b) => b.id === first.id), '保底只能给当前可用的传奇：' + first.id);
+    pityCount[first.id] = (pityCount[first.id] || 0) + 1;
   }
-  const share = c37 / (c37 + c49);
-  assert.ok(share > 0.28 && share < 0.39,
-    'C37 应当占 ≈1/3（实测 ' + (share * 100).toFixed(1) + '%，' + c37 + ' / ' + c49 + '）');
+  for (const b of avail) {
+    assert.ok((pityCount[b.id] || 0) > 0, b.id + ' 也应当被保底抽到过：' + JSON.stringify(pityCount));
+  }
+  const c37 = pityCount.C37 || 0, c49 = pityCount.C49 || 0;
+  assert.equal(avail.length, 2, '极端情况可用传奇 2 条（C37/C49）');
+  /* 1:1 是统计性质：每次保底按 1:1 加权，N 次后次数差服从 σ≈√(2Np(1−p))。
+   * N=1500、p=1/2 → σ≈19.4，留 4σ≈78（0.052N）的容差。 */
+  assert.ok(Math.abs(c37 - c49) < N * 0.06,
+    'C37 与 C49 必须 1:1（实测 ' + c37 + ' : ' + c49 + '，N=' + N + '）');
+  for (const id of Object.keys(pityCount)) {
+    /* 每条 p=1/2：4σ ≈ 0.05N → 用 ±0.09N 留足余量。 */
+    assert.ok(pityCount[id] > N * 0.41 && pityCount[id] < N * 0.59,
+      id + ' 应当占 ≈1/2（实测 ' + (pityCount[id] / N * 100).toFixed(1) + '%）');
+  }
 
   /* ⑤ 计数语义：保底那一格之后，剩下的非传奇格继续累加 */
   extreme.legendPity = T.legendPityNeed();
@@ -8010,7 +8100,61 @@ test('需求98：传奇保底（B 方案）——repeatable 不再被 ownable �
   assert.ok(picked.length >= 3, '一组选项至少 3 个');
   const firstPick = TD.BUFF_BY_ID[picked[0].id];
   assert.equal(firstPick.rarity, 3, '战斗奖励的第一个选项应当是保底传奇，实测 ' + firstPick.id);
-  assert.ok(['C37', 'C49'].includes(firstPick.id), '保底只可能给 C37/C49：' + firstPick.id);
+  assert.ok(avail.some((b) => b.id === firstPick.id),
+    '保底只可能给当前可用的传奇：' + firstPick.id + '（可用 ' + avail.map((b) => b.id).join('、') + '）');
+});
+
+test('需求99：铸币→抽奖卷 兑换上限 10（超出部分不再转化）', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  assert.equal(TD.TICKET_FROM_MINT_CAP, 10, '兑换上限应当是 10');
+  const TICKET_PROP = 50;
+  const open = (layer, tokens) => {
+    S.newGame('mintcap' + Math.random());
+    const st = S.state(); st.level = 70; st.props[23] = 99999;
+    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    try { T.abandon('endless'); } catch (e) {}
+    T.startEndlessRun();
+    const r = T._debugRun('endless');
+    r.layer = layer; r.phase = 'checkpoint';
+    r.retryToken = tokens;
+    return r;
+  };
+  /* ① 3 枚铸币 → 3 张卷（没到上限，全转） */
+  let r = open(5, 3);
+  let before = Number(S.state().props[TICKET_PROP]) || 0;
+  let out = T.settleEndless();
+  assert.equal(out.retryConverted, 3, '3 枚应当全转：' + out.retryConverted);
+  assert.equal(out.retryForfeited, 0, '不该有被丢弃的：' + out.retryForfeited);
+  assert.ok(/3 枚铸币已 1:1 兑换为 3 张抽奖卷/.test(out.retryMsg), '提示语要写明兑换：' + out.retryMsg);
+  assert.equal(Number(S.state().props[TICKET_PROP]) - before, out.tickets, '到账张数要等于 out.tickets');
+  assert.equal(out.tickets, out.layerTickets + 3, '总张数 = 层奖励 + 3');
+
+  /* ② 25 枚铸币 → 只转 10 张，其余 15 枚作废 */
+  r = open(5, 25);
+  before = Number(S.state().props[TICKET_PROP]) || 0;
+  out = T.settleEndless();
+  assert.equal(out.retryConverted, 10, '最多转 10 枚：' + out.retryConverted);
+  assert.equal(out.retryForfeited, 15, '超出 15 枚不再转化：' + out.retryForfeited);
+  assert.ok(/兑换上限 10 枚/.test(out.retryMsg) && /15 枚不再转化/.test(out.retryMsg),
+    '提示语要写明超限部分：' + out.retryMsg);
+  assert.equal(out.tickets, out.layerTickets + 10, '总张数 = 层奖励 + 10');
+  assert.equal(Number(S.state().props[TICKET_PROP]) - before, out.tickets, '到账张数要对');
+  assert.equal(T._debugRun('endless'), null, '结算后本局要清空');
+
+  /* ③ 恰好 10 枚：全转、不报超限 */
+  r = open(5, 10);
+  out = T.settleEndless();
+  assert.equal(out.retryConverted, 10);
+  assert.equal(out.retryForfeited, 0, '恰好 10 枚不该被算成超限：' + out.retryForfeited);
+  assert.ok(!/兑换上限/.test(out.retryMsg || ''), '恰好 10 枚不显示超限提示：' + out.retryMsg);
+
+  /* ④ 0 枚铸币：不显示铸币提示，只发层奖励 */
+  r = open(5, 0);
+  out = T.settleEndless();
+  assert.equal(out.retryConverted, 0);
+  assert.equal(out.retryMsg, undefined, '没有铸币就不该有兑换提示：' + out.retryMsg);
+  assert.equal(out.tickets, out.layerTickets, '只发层奖励');
 });
 
 (async () => {

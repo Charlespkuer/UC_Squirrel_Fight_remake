@@ -127,6 +127,8 @@
     run.enemyMaxHpDown = Math.max(0, Math.min(ENEMY_MAXHP_DOWN_CAP, Number(run.enemyMaxHpDown) || 0));
     /* 传奇保底计数（B 方案）：跨场 / 跨层保留，换局从 0 开始。 */
     run.legendPity = Math.max(0, Math.floor(Number(run.legendPity) || 0));
+    /* 挥金如土（C36）的「已提升次数」：分段涨价的口径，坏值不许为负。 */
+    run.shopSpendProcs = Math.max(0, Math.floor(Number(run.shopSpendProcs) || 0));
     run.enemyPowerDown = Math.max(0, Math.min(0.8, Number(run.enemyPowerDown) || 0));
     /* 槽位相关字段的**防御性规范化**（当前存档已经会带上它们，这里是第二道闸）：
      * permSlotIds 是权威记录、permSlots 由它派生、两者取最大值兼容旧档 ——
@@ -386,7 +388,32 @@
     }
     return null;
   }
-  function stacksOf(run, id) { const b = ownedEntry(run, id); return b ? b.stacks : 0; }
+  /** 【任务3】同名增益可能占**多个背包栏位**（叠满后开新栏位），所以层数要跨栏位求和 ——
+   *  聚合、封顶、成长计算全都依赖这个「总层数」口径。 */
+  function stacksOf(run, id) {
+    if (!run) return 0;
+    let n = 0;
+    for (const list of [run.permanent || [], run.limited || []]) {
+      for (const b of list) {
+        if (b && b.id === id) n += Math.max(1, Math.floor(Number(b.stacks) || 1));
+      }
+    }
+    return n;
+  }
+  /** 【任务3】永久增益是否「可无限同名拾取」——叠满后另开一个背包栏位继续叠加。
+   *  排除两类：
+   *   · oncePerRun（一局一次：挥金如土 / 登顶者 / 以战养战…）——
+   *     必须保持「一局只拿一次」，否则会绕过刚做的削弱；
+   *   · 不占槽的选取型 / 扩容型（仓库钥匙 / 抉择扩充…）—— 重复获得没有意义，
+   *     而且 addBuff 里本来就有「一局一次」的硬闸。 */
+  function permanentRestackable(buff) {
+    if (!buff || buff.kind !== 'permanent') return false;
+    if (D().hasTag(buff, 'oncePerRun')) return false;
+    /* noRestack（任务4）：涅槃 / 后发制人 / 挥金如土这一组**拿满上限后移出可获得池**，
+     * 不走「叠满开新栏位」的通用规则。 */
+    if (D().hasTag(buff, 'noRestack')) return false;
+    return occupiesPermSlot(buff);
+  }
   function globalMul(run) {
     const st = stacksOf(run, 'C15');
     return st ? Math.pow(D().BUFF_BY_ID.C15.mods.globalMul, st) : 1;
@@ -1503,7 +1530,12 @@
         addScore(run, D().SCORE.elite, '击败精英');
         run.coins += D().COINS.elite;
         const c13 = stacksOf(run, 'C13');
-        if (c13) healAbs(run, D().BUFF_BY_ID.C13.mods.eliteHealAfter * g * healBonusMul(run), refMax);
+        if (c13) {
+          healAbs(run, D().BUFF_BY_ID.C13.mods.eliteHealAfter * g * healBonusMul(run), refMax);
+          /* 2026-10 增强（任务5）：击败精英**再 +10% 生命上限**（粘性，与其它永久生命加成同口径）。 */
+          const addHp = Number(D().BUFF_BY_ID.C13.mods.eliteMaxHpAfter) || 0;
+          if (addHp > 0) run.hpBonus = Math.max(0, Number(run.hpBonus) || 0) + addHp * c13 * g;
+        }
       }
     /* 本场战斗的试炼币增量（界面右上角标在「试炼币」旁边；下一场会被刷新）。 */
     run.lastCoinsGained = Math.max(0, Math.round((Number(run.coins) || 0) - coinsBeforeBattle));
@@ -1672,7 +1704,11 @@
     const layerTickets = Math.max(0, Math.floor(Number(D().endlessTickets(run.layer)) || 0));
     const coins = Math.max(0, Math.floor(Number(run.coins) || 0));
     const retryTokens = Math.max(0, Math.floor(Number(run.retryToken) || 0));
-    const gain = layerTickets + retryTokens;
+    /* 铸币 → 抽奖卷有上限（默认 10）：超出部分**不再转化**，随本局作废。 */
+    const mintCap = Math.max(0, Math.floor(Number(D().TICKET_FROM_MINT_CAP) || 0));
+    const retryConverted = Math.min(mintCap, retryTokens);
+    const retryForfeited = Math.max(0, retryTokens - retryConverted);
+    const gain = layerTickets + retryConverted;
     if (gain > 0) S().props[TICKET_PROP] = (S().props[TICKET_PROP] || 0) + gain;
     run.coins = 0;              // 试炼币随本局作废（不折现，只报个数给界面提示）
     run.retryToken = 0;
@@ -1682,7 +1718,13 @@
     out.forfeitCoins = coins;
     out.tickets = gain;
     out.ticketsTotal = S().props[TICKET_PROP] || 0;
-    if (retryTokens > 0) out.retryMsg = retryTokens + ' 枚铸币已 1:1 兑换为 ' + retryTokens + ' 张抽奖卷';
+    out.retryConverted = retryConverted;
+    out.retryForfeited = retryForfeited;
+    out.mintTicketCap = mintCap;
+    if (retryConverted > 0) {
+      out.retryMsg = retryConverted + ' 枚铸币已 1:1 兑换为 ' + retryConverted + ' 张抽奖卷'
+        + (retryForfeited > 0 ? ('（兑换上限 ' + mintCap + ' 枚，超出 ' + retryForfeited + ' 枚不再转化）') : '');
+    }
     return out;
   }
   /** 玩家在有铸币的情况下选择「放弃本局」→ 现在才真正结算失败。 */
@@ -2087,6 +2129,14 @@
 
   function poolFilter(run, buff) {
     const cap = D().stackCap(buff);
+    /* 【任务3】永久增益永远留在池子里（叠满也能再拿，见 addBuff 的开新栏位分支）。 */
+    if (permanentRestackable(buff)) return true;
+    /* 【任务4】noRestack（涅槃 / 后发制人 / 挥金如土这一组）：**拿满上限后出池**。
+     * 有 maxStacks 的按上限判；没有的（后发制人）按「同名唯一」判。 */
+    if (D().hasTag(buff, 'noRestack')) {
+      if (buff.maxStacks) return obtainedCountOf(run, buff.id) < Math.max(1, Math.floor(buff.maxStacks));
+      return !(run.permanent || []).some((b) => b.id === buff.id);
+    }
     /* 层数口径用「累计获得过几份」（含碎掉的烙印），否则碎一条就能再刷一条。 */
     if (D().hasTag(buff, 'stackable') && obtainedCountOf(run, buff.id) >= cap) return false;
     /* maxUses：**限次类**的「本局最多获得 N 次」上限（例：终焉烙印最多 3 次）。
@@ -2174,6 +2224,8 @@
       const got = instantOwnedCount(run, buff.id);
       return got < Math.max(1, Math.floor(buff.maxStacks));
     }
+    /* 【任务3】永久增益不再「拿满就出池」：永远可以再拿（叠满 → 由 addBuff 开新栏位）。 */
+    if (permanentRestackable(buff)) return true;
     if (buff.maxStacks && obtainedCountOf(run, buff.id) >= Math.max(1, Math.floor(buff.maxStacks))) return false;
     /* 带 repeatable 标签的**不适用「同名唯一」**：它们的数量由 maxStacks（上面的早返回）
      * 或个体自惩罚（repeatWeight / weightDivBy）控制。poolFilter 里本来就有这条规则，
@@ -2404,7 +2456,7 @@
     /* C48 铜墙铁壁：它的「已累计减伤」同样是本局攒出来的收益，替换/卖出后**保留**
      *（与 C07/C11 一致），所以这里不清零。 */
     else if (id === 'C25') run.sellBonus = 0;
-    else if (id === 'C36') { run.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; run.shopSpend = 0; }
+    else if (id === 'C36') { run.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; run.shopSpend = 0; run.shopSpendProcs = 0; }
     else {
       const def = D().BUFF_BY_ID[id];
       if (def && def.mods && def.mods.fragileStat) {
@@ -2445,6 +2497,12 @@
    *    （原来只保持百分比，玩家看到血条没动就以为没生效）。比例推一下与上限无关：
    *      carry' = (carry + m) / (1 + m)   （m 为 maxHpMul，负值则同步缩血） */
   function applyBuffOnAcquire(run, buff) {
+    /* 永久增益的生命上限加成是**粘性**的（拿到就折算进 run.hpBonus，卖掉不回落），
+     * 所以每一次「获得」都要折算一次 —— 任务3 之后同栏位叠层也要算，
+     * 否则第 2/3 层会白拿（只有开新栏位那条路才会加）。 */
+    if (buff.kind === 'permanent' && buff.mods && buff.mods.maxHpMul) {
+      run.hpBonus = Math.max(0, Number(run.hpBonus) || 0) + Number(buff.mods.maxHpMul);
+    }
     /* 终乘烙印：每获得一份就 +1 层（没有次数上限，重复获得按层加算）。 */
     if (buff.mods && buff.mods.fragileFinalMul) {
       run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0)) + 1;
@@ -2546,18 +2604,25 @@
     const listKey = buff.kind === 'permanent' ? 'permanent' : 'limited';
     const list = run[listKey] || (run[listKey] = []);
     const owned = list.find((b) => b.id === id);
+    /* 本栏位是否已叠满（叠满的永久增益要另开一个背包栏位 —— 任务3）。 */
+    let restackSlot = false;
     if (owned) {
-      /* 叠层上限：该增益自己的 maxStacks（可叠层的），否则全局 STACK_MAX。
-       * **叠满就拒绝**（与 poolFilter / ownable 同一口径）—— 否则「一局两次」的涅槃
-       * 会被第三次 addBuff 直接叠到 3 层（正常路径摇不到它，但兜底必须一致）。 */
+      /* 叠层上限：该增益自己的 maxStacks（可叠层的），否则全局 STACK_MAX。 */
       const cap = D().stackCap(buff);
-      if (owned.stacks >= cap) return { ok: false, msg: '【' + buff.name + '】已经叠满了（上限 ' + cap + ' 层）。' };
+      restackSlot = owned.stacks >= cap;
+      /* 限次类（烙印等）叠满即拒绝，保持老口径。 */
+      if (restackSlot && !permanentRestackable(buff)) {
+        return { ok: false, msg: '【' + buff.name + '】已经叠满了（上限 ' + cap + ' 层）。' };
+      }
+      if (!restackSlot) {
       owned.stacks = Math.min(cap, owned.stacks + 1);
       /* 塔内限次增益不累加次数（就是「下一场」这一份），但可以叠层提高强度。 */
       if (buff.kind === 'limited') { if (run.mode !== 'tower') owned.uses += buff.uses || 1; owned.on = true; }
       applyBuffOnAcquire(run, buff);
       logBuff(run, id, 'stack', { stacks: owned.stacks, detail: '叠到 ×' + owned.stacks });
       return { ok: true, buff, stacks: owned.stacks };
+      }
+      /* 叠满的永久增益继续往下走：满格判定 → （必要时）替换 → push 一条新栏位。 */
     }
     /* 满格判定按**加入后的占用**：占位类增益会 +1，所以只要 permUsed + 1 > 上限就得替换。
      * 免占位的（虚空铭文附魔过的）不占位，不受此限。 */
@@ -2578,10 +2643,7 @@
       run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== replaceId);
       logBuff(run, replaceId, 'lose', { detail: '被【' + buff.name + '】替换掉' });
     }
-    applyBuffOnAcquire(run, buff);
-    if (buff.kind === 'permanent' && buff.mods && buff.mods.maxHpMul) {
-      run.hpBonus = (run.hpBonus || 0) + buff.mods.maxHpMul;
-    }
+    applyBuffOnAcquire(run, buff);   // 含永久 maxHpMul 的粘性折算（见该函数）
     /* 塔内一切限次增益都只服务下一场战斗。 */
     const towerLimitedUses = run.mode === 'tower' ? 1 : (buff.uses || 1);
     list.push(buff.kind === 'limited'
@@ -2592,7 +2654,9 @@
         && typeof console !== 'undefined' && console.warn) {
       console.warn('[tower] 永久增益占用槽位超上限：' + permUsed(run) + '/' + permSlots(run) + '（id=' + id + '）');
     }
-    logBuff(run, id, 'get', { detail: buff.kind === 'permanent' ? '永久' : (run.mode === 'tower' ? '下一场战斗' : ('限次 ' + towerLimitedUses + ' 场')) });
+    logBuff(run, id, 'get', { detail: restackSlot
+      ? '新栏位（原栏位已叠满，继续叠加）'
+      : (buff.kind === 'permanent' ? '永久' : (run.mode === 'tower' ? '下一场战斗' : ('限次 ' + towerLimitedUses + ' 场'))) });
     return { ok: true, buff };
   }
   /** 瞬时经济 buff（立即进货 / 立即得试炼币 / 全场五折）。 */
@@ -3049,6 +3113,18 @@
   /** 在试炼商店消费后的两类收益（各自独立累计）：
    *   · C36 挥金如土：每 N 币 → 随机一项固定属性
    *   · C58 豪掷千金：每 100 币 → 立刻获得一个随机限次增益 */
+  /** 挥金如土（C36）第 procs 次属性提升需要花多少试炼币（分段涨价）。
+   *  数据：mods.shopSpendTiers = [5,10,15]、mods.shopSpendTierSize = 20
+   *  → 前 20 次每次 5 币、第 21~40 次每次 10 币、第 41 次起每次 15 币。
+   *  没配 tiers 时退回单一 shopSpendStep（旧档 / 别的增益复用本函数时也安全）。 */
+  function shopSpendStepFor(buff, procs) {
+    const m = (buff && buff.mods) || {};
+    const tiers = Array.isArray(m.shopSpendTiers) ? m.shopSpendTiers.filter((v) => Number(v) > 0) : null;
+    if (!tiers || !tiers.length) return Math.max(1, Number(m.shopSpendStep) || 20);
+    const size = Math.max(1, Math.floor(Number(m.shopSpendTierSize) || 20));
+    const idx = Math.min(tiers.length - 1, Math.floor(Math.max(0, procs) / size));
+    return Math.max(1, Number(tiers[idx]) || 1);
+  }
   function addShopSpend(run, amount, flags) {
     const spend = Math.max(0, Number(amount) || 0);
     if (!(spend > 0)) return null;
@@ -3058,11 +3134,15 @@
     if (!c36 && !c58) return null;                      // 两个增益都没有就不累计
     const gained = [];
     if (c36) {
-      const mm = D().BUFF_BY_ID.C36.mods, step = Math.max(1, Number(mm.shopSpendStep) || 20);
+      const mm = D().BUFF_BY_ID.C36.mods;
       run.shopSpend = Math.max(0, Number(run.shopSpend) || 0) + spend;
+      run.shopSpendProcs = Math.max(0, Math.floor(Number(run.shopSpendProcs) || 0));
       const opts = ['power', 'agility', 'speed', 'hp'];
-      while (run.shopSpend >= step) {
-        run.shopSpend -= step;
+      /* 步长随「已提升次数」分段（5 → 10 → 15），所以每次循环都要重新取。 */
+      let guard = 0;
+      while (run.shopSpend >= shopSpendStepFor(D().BUFF_BY_ID.C36, run.shopSpendProcs) && guard++ < 100000) {
+        run.shopSpend -= shopSpendStepFor(D().BUFF_BY_ID.C36, run.shopSpendProcs);
+        run.shopSpendProcs += 1;
         const key = opts[Math.floor(Math.random() * opts.length)];
         run.spendGain = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, run.spendGain || {});
         run.spendGain[key] += key === 'hp'
@@ -3226,15 +3306,17 @@
     }
     return { ok: false, msg: '本局没有这个增益。' };
   }
-  function sellPriceOf(run, buff) {
+  /** 卖出价：默认按「全部栏位的总层数」算；传入 stacks 时按**单个栏位**算
+   *  （任务3 之后同名增益可能占多个栏位，逐栏位卖必须按那一栏的层数计价）。 */
+  function sellPriceOf(run, buff, stacks) {
     const base = buff.mods && buff.mods.sellValue
       ? Number(buff.mods.sellValue)
       : Math.max(1, Math.round(D().shopPrice(buff) * D().SHOP.sellBack));
-    const stacks = Math.max(1, Math.floor(stacksOf(run, buff.id) || 1));
+    const n = Math.max(1, Math.floor(Number(stacks != null ? stacks : stacksOf(run, buff.id)) || 1));
     const unit = (buff.id === 'C25' && stacksOf(run, 'C25') > 0)
       ? base + Math.max(0, Math.floor(Number(run.sellBonus) || 0))
       : base;
-    return unit * stacks;
+    return unit * n;
   }
   function sellBuff(id) {
     const run = endless().run;
@@ -3244,10 +3326,12 @@
     const buff = D().BUFF_BY_ID[id];
     if (!buff || buff.kind === 'instant' || D().hasTag(buff, 'hidden')) return { ok: false };   // 隐藏型不可出售（只有即时类不留存、无从卖出）
     for (const list of [run.permanent || [], run.limited || []]) {
-      const i = (list || []).findIndex((b) => b.id === id);
+      /* 【任务3】同名可能有多栏位 → 卖**最后拿到的那一栏**（LIFO，与商店列表倒序一致）。 */
+      let i = -1;
+      for (let k = (list || []).length - 1; k >= 0; k--) { if (list[k] && list[k].id === id) { i = k; break; } }
       if (i >= 0) {
         const stacks = Math.max(1, Math.floor(Number(list[i].stacks) || 1));
-        const gain = sellPriceOf(run, buff);          // 已含层数
+        const gain = sellPriceOf(run, buff, stacks);   // 只算这一栏的层数
         list.splice(i, 1);
         resetGrowth(run, id, stacks);
         run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== id);
@@ -3548,10 +3632,7 @@
       /* 兜底（正常走不到）：把源增益原样放回去，不让玩家白掉一条。 */
       const L = buff.kind === 'permanent' ? (run.permanent || (run.permanent = [])) : (run.limited || (run.limited = []));
       if (taken) L.push(taken.row);
-      applyBuffOnAcquire(run, buff);
-      if (buff.kind === 'permanent' && buff.mods && buff.mods.maxHpMul) {
-        run.hpBonus = Math.max(0, Number(run.hpBonus) || 0) + buff.mods.maxHpMul;
-      }
+      applyBuffOnAcquire(run, buff);   // 含永久 maxHpMul 的粘性折算（见该函数）
       run.slotFreeIds = (run.slotFreeIds || []).concat([id]).filter((v, i, a) => a.indexOf(v) === i);
       save();
       return { ok: false, msg: (res && res.msg) || '交换失败。' };
@@ -3889,9 +3970,10 @@
     }
     if (id === 'C36') {
       const sg = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, run.spendGain || {});
-      const step = Math.max(1, Number(D().BUFF_BY_ID.C36.mods.shopSpendStep) || 20);
+      const procs = Math.max(0, Math.floor(Number(run.shopSpendProcs) || 0));
+      const step = shopSpendStepFor(D().BUFF_BY_ID.C36, procs);
       return '已累计 力 +' + sg.power + ' / 敏 +' + sg.agility + ' / 速 +' + sg.speed + ' / 生命 +' + sg.hp +
-        '（距下次 ' + Math.floor(Number(run.shopSpend) || 0) + '/' + step + ' 试炼币）';
+        '（已提升 ' + procs + ' 次 · 距下次 ' + Math.floor(Number(run.shopSpend) || 0) + '/' + step + ' 试炼币）';
     }
     return null;
   }
@@ -3923,7 +4005,8 @@
          * 商店的出售 / 交换列表按这两个字段排（见 sortForSell）。 */
         at: Math.max(0, Math.floor(Number(entry.at) || 0)),
         slotFree: (run.slotFreeIds || []).indexOf(buff.id) >= 0,
-        sellable: !!run.shop && buff.kind !== 'instant' && !D().hasTag(buff, 'hidden'), sellPrice: sellPriceOf(run, buff) });
+        sellable: !!run.shop && buff.kind !== 'instant' && !D().hasTag(buff, 'hidden'),
+        sellPrice: sellPriceOf(run, buff, entry.stacks || 1) });
     };
     (run.permanent || []).forEach(add);
     (run.limited || []).forEach(add);

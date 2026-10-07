@@ -117,10 +117,10 @@ test('损毁消失类：易碎烙印损毁后仍能查到，且「永久保留�
   const c = setup();
   freshRun(c);
   const run = c.Tower._debugRun('endless');
-  const g = c.Tower.debugGrantBuff('C39');           // 力量烙印：基础 +8%，存在时半效
+  const g = c.Tower.debugGrantBuff('C39');           // 力量烙印：存在 +5%，损毁后 +8%
   assert.ok(g.ok, '应该能获得易碎烙印');
-  /* 需求 3：拿到时登记的是「基础加成」（不是 stickyStat），实际生效值 = 基础的一半。 */
-  assert.equal(Number((run.fragileBase || {}).power), 0.08, '拿到烙印时应当登记基础加成 0.08');
+  /* 2026-10：拿到时登记的是**存在值**（fragilePct，不再是「基础的一半」）。 */
+  assert.equal(Number((run.fragileBase || {}).power), 0.05, '拿到烙印时应当登记存在值 0.05');
 
   // 强行让它损毁：连打若干场直到碎裂（每条烙印有自己的随机序列，不能靠改 Math.random）
   let broken = false;
@@ -140,15 +140,15 @@ test('损毁消失类：易碎烙印损毁后仍能查到，且「永久保留�
   assert.match(tags, /已损毁/, '应当能看到「损毁」这一条：' + tags);
   const broke = rep.history.find((e) => e.id === 'C39' && e.event === 'break');
   assert.ok(broke, '流水里应当有损毁记录：' + JSON.stringify(rep.history));
-  /* 需求 3：损毁后升为全额并本局永久保留 —— 实际 = 0.5×基础 + 已损毁那份。
+  /* 2026-10：损毁后升为损毁值（fragileBurnedPct）并本局永久保留 ——
+   * 实际 = 尚未破碎的存在值 + 已损毁那份。
    * 注意：这 300 场里玩家**可能在休整点又选到同一枚烙印**（C39 在无尽选择池与商店池里），
-   * 那样 fragileBase 会涨到 0.16、显示 +24% —— 所以期望必须按**真实的 base/burned**推导，
-   * 不能硬编码 +12%（原来那样写会让这条断言随机红）。 */
+   * 所以期望必须按**真实的 base/burned**推导，不能硬编码百分比。 */
   const powerLine = rep.effects.find(([k]) => /烙印.*攻击/.test(k));
   assert.ok(powerLine, '效果清单里应当仍列出烙印攻击：' + JSON.stringify(rep.effects));
-  assert.match(powerLine[0], /已损毁/, '损毁后要标「已损毁·全额永久」：' + powerLine[0]);
+  assert.match(powerLine[0], /已损毁/, '损毁后要标「已损毁」：' + powerLine[0]);
   const fb = after.fragileBase || {}, bn = after.fragileBurned || {};
-  const expectPct = Math.round((Number(fb.power || 0) * 0.5 + Number(bn.power || 0)) * 100);
+  const expectPct = Math.round((Number(fb.power || 0) + Number(bn.power || 0)) * 100);
   assert.ok(expectPct > 0, '损毁后应当有永久保留的加成：' + expectPct);
   assert.match(powerLine[1], new RegExp('\\+' + expectPct + '%'),
     '损毁后的实际加成应当是 +' + expectPct + '%（基础 ' + fb.power + ' + 已损毁 ' + bn.power + '）：' + powerLine[1]);

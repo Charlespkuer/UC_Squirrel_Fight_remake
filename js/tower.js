@@ -1,6 +1,6 @@
 /* ============================================================
  * tower.js — 无尽挑战塔 · 主塔 + 无尽模式状态机
- * 依据 docs/无尽挑战塔系统设计文档.md v2.0。
+ * 状态机 + 结算 + 商店 + 界面数据出口；改动请同步 tools/test-fixes-round.cjs 的对应需求用例。
  *
  * 目录（Ctrl+F 搜「【T编号】」直达；全部是一个 IIFE 里的函数/常量声明，
  * 函数声明提升 + 运行期才取值，因此分节顺序不影响运行）：
@@ -81,6 +81,53 @@
     d.setDate(d.getDate() - (d.getDay() + 6) % 7);
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
+  /* ============================================================
+   * 【T1.5】同名增益「逐条」身份（uid）与逐栏成长/破碎状态
+   *
+   * 同名增益可以并排占多个背包栏位，于是「同名」≠「同一条」：
+   *   · 每条栏位有一个自增 `uid`（暗中标记，界面不显示）；
+   *   · 「附魔免占位」记在行上（`row.slotFree`）；
+   *   · **成长进度**记在行上（`row.grow`），run 上的旧字段只是「各栏求和」的镜像；
+   *   · **破碎随机数**记在行上（`row.fragileSeed`），同名的每一条、每一份都各摇各的。
+   * 所有「针对某一条」的操作（附魔 / 卖出 / 交换 / 移除 / 替换 / 取消）都必须传 uid。
+   * ============================================================ */
+  const GROW_FIELDS = ['killPower', 'winMaxHp', 'winHpFlat', 'winStatPower', 'winStatAgility', 'winStatSpeed', 'winTakenMul', 'sellBonus'];
+  const GROW_SPEND_FIELDS = ['power', 'agility', 'speed', 'hp'];
+  /** 逐栏成长对象：只保留已知字段与正数（坏档兜底）。 */
+  function cleanGrowObj(g) {
+    if (!g || typeof g !== 'object') return null;
+    const out = {};
+    for (const k of GROW_FIELDS) { const v = Math.max(0, Number(g[k]) || 0); if (v > 0) out[k] = v; }
+    if (g.spend && typeof g.spend === 'object') {
+      const sp = {};
+      for (const k of GROW_SPEND_FIELDS) { const v = Math.max(0, Number(g.spend[k]) || 0); if (v > 0) sp[k] = v; }
+      if (GROW_SPEND_FIELDS.some((k) => sp[k] > 0)) out.spend = sp;
+    }
+    return Object.keys(out).length ? out : null;
+  }
+  function growAdd(row, key, val) {
+    const v = Number(val) || 0;
+    if (!row || !(v > 0) || GROW_FIELDS.indexOf(key) < 0) return;
+    row.grow = row.grow || {};
+    row.grow[key] = Math.max(0, Number(row.grow[key]) || 0) + v;
+  }
+  /** 逐栏成长读值（没有该栏的 grow 时为 0）。 */
+  function growOf(row, key) { return Math.max(0, Number(row && row.grow && row.grow[key]) || 0); }
+  /** 【同名逐条】把成长同时记进**这一栏的账本**与 run 级合计（run 级仍是读取口径）。
+   *  这样：① 旧调用方直接读写 run 字段仍然有效；② 卖出 / 交换某一栏时能精确扣掉它那一份。 */
+  function addGrow(run, row, key, val) {
+    const v = Number(val) || 0;
+    if (!(v > 0) || GROW_FIELDS.indexOf(key) < 0) return;
+    growAdd(row, key, v);
+    if (run) run[key] = Math.max(0, Number(run[key]) || 0) + v;
+  }
+  /** 【同名逐条】从 run 合计里扣掉**这一栏自己的**成长账（返回扣掉的量）。 */
+  function subGrow(run, row, key) {
+    const v = growOf(row, key);
+    if (!(v > 0) || !run) return v;
+    run[key] = Math.max(0, (Number(run[key]) || 0) - v);
+    return v;
+  }
   /** 深校验一份读档出来的 run：坏档直接作废（不收费、不掉层）。 */
   function normalizeRun(run, mode) {
     if (!run || typeof run !== 'object') return null;
@@ -109,6 +156,22 @@
         const out = { id: def.id, stacks: clampStacks(def, b.stacks) };
         const at = Math.max(0, Math.floor(Number(b && b.at) || 0));
         if (at > 0) out.at = at;
+        /* 【2026-10 关键修复】栏位上的**消费进度**必须留在白名单里：
+         * C36 用 `spend/procs`、C58 用 `limitedSpend`（见 addShopSpend 的「每栏各记一份」）。
+         * 原来这里只保留 id/stacks/at → 每次归一化都把进度抹成 0 →
+         * 多个「豪掷千金 / 挥金如土」永远只触发一次（用户报的 bug 的另一半）。 */
+        if (b && b.spend != null) out.spend = Math.max(0, Number(b.spend) || 0);
+        if (b && b.procs != null) out.procs = Math.max(0, Math.floor(Number(b.procs) || 0));
+        if (b && b.limitedSpend != null) out.limitedSpend = Math.max(0, Number(b.limitedSpend) || 0);
+        /* 【2026-10 同名逐条】每栏自己的成长进度与破碎随机数种子必须留在白名单里。 */
+        const grow = cleanGrowObj(b && b.grow);
+        if (grow) out.grow = grow;
+        const fseed = Math.max(0, Math.floor(Number(b && b.fragileSeed) || 0));
+        if (fseed > 0) out.fragileSeed = fseed;
+        /* 【任务2】栏位身份与「附魔免占位」都是**逐条**的，必须留在白名单里。 */
+        const uid = Math.max(0, Math.floor(Number(b && b.uid) || 0));
+        if (uid > 0) out.uid = uid;
+        if (b && b.slotFree === true) out.slotFree = true;
         return out;
       }) : []);
     run.layer = layer;
@@ -127,8 +190,39 @@
     run.enemyMaxHpDown = Math.max(0, Math.min(ENEMY_MAXHP_DOWN_CAP, Number(run.enemyMaxHpDown) || 0));
     /* 传奇保底计数（B 方案）：跨场 / 跨层保留，换局从 0 开始。 */
     run.legendPity = Math.max(0, Math.floor(Number(run.legendPity) || 0));
-    /* 挥金如土（C36）的「已提升次数」：分段涨价的口径，坏值不许为负。 */
+    /* 挥金如土（C36）的「已提升次数」：分段涨价的口径，坏值不许为负。
+     * 【2026-10】进度已改成「每栏各记一份」，这里把旧档的单计数器迁进第一栏；
+     * 之后镜像字段由 syncSpendMirrors 维护（读旧字段的界面 / 探针不受影响）。 */
     run.shopSpendProcs = Math.max(0, Math.floor(Number(run.shopSpendProcs) || 0));
+    /* 选取型增益的累计次数（虚空铭文的降权依据）：坏值不许为负。 */
+    if (run.pickGot && typeof run.pickGot === 'object') {
+      const cleanGot = {};
+      for (const k of Object.keys(run.pickGot)) {
+        const v = Math.max(0, Math.floor(Number(run.pickGot[k]) || 0));
+        if (v > 0) cleanGot[k] = v;
+      }
+      run.pickGot = cleanGot;
+    }
+    (function migrateSpendProgress() {
+      const legacy = Math.max(0, Number(run.shopSpend) || 0);
+      const legacyProcs = Math.max(0, Math.floor(Number(run.shopSpendProcs) || 0));
+      const legacy58 = Math.max(0, Number(run.shopSpendLimited) || 0);
+      const row36 = (run.permanent || []).find((b) => b && b.id === 'C36');
+      const row58 = (run.permanent || []).find((b) => b && b.id === 'C58');
+      if (row36) {
+        if (row36.spend == null && row36.procs == null && (legacy > 0 || legacyProcs > 0)) {
+          row36.spend = legacy; row36.procs = legacyProcs;
+        }
+        row36.spend = Math.max(0, Number(row36.spend) || 0);
+        row36.procs = Math.max(0, Math.floor(Number(row36.procs) || 0));
+      }
+      if (row58) {
+        if (row58.limitedSpend == null && legacy58 > 0) row58.limitedSpend = legacy58;
+        row58.limitedSpend = Math.max(0, Number(row58.limitedSpend) || 0);
+      }
+      /* 顺带把镜像字段同步成「各栏求和」（卖 / 替换掉一栏之后镜像不会残留旧值）。 */
+      syncSpendMirrors(run);
+    })();
     run.enemyPowerDown = Math.max(0, Math.min(0.8, Number(run.enemyPowerDown) || 0));
     /* 槽位相关字段的**防御性规范化**（当前存档已经会带上它们，这里是第二道闸）：
      * permSlotIds 是权威记录、permSlots 由它派生、两者取最大值兼容旧档 ——
@@ -142,7 +236,30 @@
       return sum + Math.max(0, Number(def && def.mods && def.mods.permSlot) || 0);
     }, 0);
     run.permSlots = Math.max(slotFromIds, Math.max(0, Number(run.permSlots) || 0));
+    /* slotFreeIds 现在是**镜像**（被附魔行的 id 去重）；权威标记在各行自己的 slotFree 上。
+     * 旧档只存了 id 列表 → 把每个 id 迁到**第一条**同名栏位（多栏同名是任务3 之后才有的）。 */
     run.slotFreeIds = cleanIds(run.slotFreeIds);
+    (function migrateSlotFree() {
+      const legacy = run.slotFreeIds.slice();
+      for (const id of legacy) {
+        const rows = (run.permanent || []).filter((b) => b && b.id === id);
+        if (!rows.length || rows.some((b) => rowFreeOf(b))) continue;
+        rows[0].slotFree = true;
+      }
+      syncSlotFree(run);
+    })();
+    /* 栏位身份：老档没有 uid → 按顺序补一个，并保证唯一。 */
+    (function ensureUids() {
+      run.rowUidSeq = Math.max(0, Math.floor(Number(run.rowUidSeq) || 0));
+      const seen = Object.create(null);
+      for (const row of (run.permanent || []).concat(run.limited || [])) {
+        let uid = Math.max(0, Math.floor(Number(row && row.uid) || 0));
+        if (!uid || seen[uid]) uid = run.rowUidSeq + 1;
+        seen[uid] = true;
+        row.uid = uid;
+        if (uid > run.rowUidSeq) run.rowUidSeq = uid;
+      }
+    })();
     run.pickBuffIds = cleanIds(run.pickBuffIds);
     /* **绝不在这里丢弃永久增益**。
      * 原来这里写的是 `slice(0, permSlots(run))` —— 按数组长度一刀切，
@@ -160,6 +277,17 @@
         const def = buffDef(b);
         const out = { id: def.id, stacks: clampStacks(def, b.stacks),
           uses: Math.max(0, Math.floor(Number(b.uses) || 0)), on: b.on !== false };
+        if (b && b.spend != null) out.spend = Math.max(0, Number(b.spend) || 0);
+        if (b && b.procs != null) out.procs = Math.max(0, Math.floor(Number(b.procs) || 0));
+        if (b && b.limitedSpend != null) out.limitedSpend = Math.max(0, Number(b.limitedSpend) || 0);
+        /* 【2026-10 同名逐条】逐栏成长与破碎种子。 */
+        const grow2 = cleanGrowObj(b && b.grow);
+        if (grow2) out.grow = grow2;
+        const fseed2 = Math.max(0, Math.floor(Number(b && b.fragileSeed) || 0));
+        if (fseed2 > 0) out.fragileSeed = fseed2;
+        const uid = Math.max(0, Math.floor(Number(b && b.uid) || 0));
+        if (uid > 0) out.uid = uid;
+        if (b && b.slotFree === true) out.slotFree = true;
         const at = Math.max(0, Math.floor(Number(b && b.at) || 0));    // 同上：获得顺序号要留着
         if (at > 0) out.at = at;
         return out;
@@ -167,6 +295,32 @@
       .filter((b) => b.uses > 0);
     if (run.mode === 'tower') run.limited = run.limited.map((b) => Object.assign(b, { uses: 1, on: true }));
     if (!Array.isArray(run.buffs)) run.buffs = [];
+    /* 【2026-10 同名逐条】老档的成长值是 run 级的（各同名栏共用），一次性抄进
+     * 「第一条同名栏位」的 `row.grow` 账本 —— run 级字段保持不动（仍是读取口径），
+     * 以后卖出 / 交换某一栏时只扣**那一栏账本里**的量。 */
+    if (!run.growByRow) {
+      const allRows = (run.permanent || []).concat(run.limited || []);
+      const firstRowOf = (id) => allRows.find((b) => b && b.id === id) || null;
+      const hand = (id, key, val) => {
+        const v = Math.max(0, Number(val) || 0);
+        const row = firstRowOf(id);
+        if (row && v > 0) growAdd(row, key, v);
+      };
+      hand('C06', 'killPower', run.killPower);
+      hand('C07', 'winMaxHp', run.winMaxHp);
+      hand('C11', 'winHpFlat', run.winHpFlat);
+      if (run.winStatPower > 0 || run.winStatAgility > 0 || run.winStatSpeed > 0) {
+        const row = firstRowOf('C12');
+        if (row) {
+          growAdd(row, 'winStatPower', run.winStatPower);
+          growAdd(row, 'winStatAgility', run.winStatAgility);
+          growAdd(row, 'winStatSpeed', run.winStatSpeed);
+        }
+      }
+      hand('C25', 'sellBonus', run.sellBonus);
+      hand('C48', 'winTakenMul', run.winTakenMul);
+      run.growByRow = 1;
+    }
     // 注意：attempt/choices 的作废只在读档时做（state.js normalizeSave），
     // 这里是每次访问都会跑的深校验，不能动进行中的战斗令牌。
     if (mode === 'tower') run.pot = Math.max(0, Math.floor(Number(run.pot) || 0));
@@ -178,6 +332,15 @@
       run.winMaxHp = Math.max(0, Number(run.winMaxHp) || 0);
       run.fragileBase = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBase || {});
       run.fragileBurned = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBurned || {});
+      /* 2026-10 语义迁移：`fragileBase` 原来存的是「名义值、按半效生效」（8% 名义 → 实际 4%），
+       * 现在存「存在时的全额值」。老档（没有 fragileAliveFull 标记）把力/敏/速的 base 减半，
+       * 免得升级后凭空变强。 */
+      if (!run.fragileAliveFull) {
+        for (const k of ['power', 'agility', 'speed']) {
+          run.fragileBase[k] = Math.max(0, Number(run.fragileBase[k]) || 0) / 2;
+        }
+        run.fragileAliveFull = 1;
+      }
       run.fragileGot = Object.assign({}, run.fragileGot || {});
       /* 淘金烙印（C53）：未破碎份数 + 已破碎的明细（与 run.fragileHealBurned 同一套形状）。 */
       run.fragileCoinBase = Math.max(0, Math.floor(Number(run.fragileCoinBase) || 0));
@@ -323,8 +486,14 @@
      * 削弱跟着「哪一位大侠」走（HERO_DEBUFF[anim]），所以顺序一变，本层要吃的削弱顺序也变，
      * 但三种削弱的组合固定，玩家看预告里的头像就知道等一下会被套上什么。 */
     const plan = D().heroOrder(layer, salt).map((anim) => ({ kind: 'hero', anim }));
-    // 第 4 场 = 随机 boss（20 选 1：7 个带机制的松鼠 + 3 只平庸松鼠 + 10 个机制 NPC）
-    plan.push(bossEntry(layer, salt, squirrelsOnly));
+    // 第 4 场 = 随机 boss（挑战塔 27 选 1；无尽塔 18 选 1，含「狂战松鼠」精英）
+    const boss = bossEntry(layer, salt, squirrelsOnly);
+    /* 池子里抽到狂战松鼠时，把本层的 layer/salt 挂在 entry 上：
+     * 变体（无双/铁壁/血怒/霜狱/无常）由 warlordFor(layer, salt) 决定，
+     * entryInfo / regionOf 都读 entry._layer / _salt —— 不挂就会退回第一只，
+     * 于是「预告」与「实战」不是同一只（见 planInfo 的一致性要求）。 */
+    if (boss && boss.kind === 'warlord') { boss._layer = layer; boss._salt = salt; }
+    plan.push(boss);
     // x10 层第 5 场 = 固定狂战松鼠（松鼠形态 + 全身狂战套 + 精英）
     if (layer % 10 === 0) plan.push({ kind: 'warlord', id: 'warlord', _layer: layer, _salt: salt });
     return plan;
@@ -381,12 +550,29 @@
    * 结算顺序锁定（见文档 6.5）：基础 → 叠层累积 → C15 全局乘区。
    * ============================================================ */
 
-  function ownedEntry(run, id) {
-    for (const list of [run.permanent || [], run.limited || []]) {
-      const found = (list || []).find((b) => b.id === id);
-      if (found) return found;
+  /** 【2026-10 同名逐条】按「栏位引用」找一条：**数字 = uid**（精确到那一条），
+   *  否则按 id 找**最后一条**（与商店出售列表的倒序 / LIFO 口径一致）。
+   *  返回 { row, list }；找不到返回 null。 */
+  function findRowRef(run, ref) {
+    if (!run) return null;
+    const lists = [run.permanent || [], run.limited || []];
+    const n = Math.floor(Number(ref) || 0);
+    if (n > 0) {
+      for (const L of lists) {
+        const row = (L || []).find((b) => b && Number(b.uid) === n);
+        if (row) return { row: row, list: L };
+      }
+    }
+    for (const L of lists) {
+      for (let i = (L || []).length - 1; i >= 0; i--) {
+        if (L[i] && L[i].id === ref) return { row: L[i], list: L };
+      }
     }
     return null;
+  }
+  function ownedEntry(run, id) {
+    const hit = findRowRef(run, id);
+    return hit ? hit.row : null;
   }
   /** 【任务3】同名增益可能占**多个背包栏位**（叠满后开新栏位），所以层数要跨栏位求和 ——
    *  聚合、封顶、成长计算全都依赖这个「总层数」口径。 */
@@ -412,6 +598,9 @@
     /* noRestack（任务4）：涅槃 / 后发制人 / 挥金如土这一组**拿满上限后移出可获得池**，
      * 不走「叠满开新栏位」的通用规则。 */
     if (D().hasTag(buff, 'noRestack')) return false;
+    /* 【任务2】`unique`（纯开关类：天象之眼 / 风影身法 / 先机预判 / 逢五强化 / 生命源泉）：
+     * 多份没有意义 → **身上有就不再出现**，而不是并排占一堆格子。 */
+    if (D().hasTag(buff, 'unique')) return false;
     return occupiesPermSlot(buff);
   }
   function globalMul(run) {
@@ -501,12 +690,30 @@
       weaponFreeUses: 0, weaponBoostUses: 0, weaponBoostPowerMul: 0, weaponBoostMustHit: 0,
       weaponBoostReflectImmune: 0, weaponBoostFatigueMul: 0, lowHpFinalMul: 0,
       openerPowerMul: 0, openerRounds: 0, fatiguePowerMul: 0, dodgeMul: 0,
-      roundStatPct: 0, catchUpPct: 0, roundMaxHpMul: 0, firstDodge: 0 };
+      roundStatPct: 0, catchUpPct: 0, roundMaxHpMul: 0, firstDodge: 0,
+      /* 2026-10 新增（N16 战意沸腾 / N17 血蚀印记）：
+       *   startStatFlat    战斗开始时固定 力/敏/速 +N
+       *   startMaxHpFlat   战斗开始时生命上限 +N（固定值）
+       *   enemyHpDrainPct  每回合开始时对敌人造成其**当前生命** N% 的伤害 */
+      startStatFlat: 0, startMaxHpFlat: 0, enemyHpDrainPct: 0 };
     eachBuff(run, (buff, stacks) => {
       const m = buff.mods, k = stacks * g;
       if (m.powerMul) agg.powerMul += m.powerMul * k;
       if (m.powerPerEmptySlot) agg.powerMul += m.powerPerEmptySlot * Math.max(0, permSlots(run) - permUsed(run)) * k;
-      if (m.powerPerPermBuff) agg.powerMul += m.powerPerPermBuff * (run.permanent || []).length * k;
+      if (m.powerPerPermBuff) {
+        /* 【2026-10 用户口径】被虚空铭文附魔的永久件按 `powerPerPermBuffEnchantedWeight`
+         * （默认 0.2 → 只给 2% 而不是 10%）计入，普通件按 1 计。
+         * 份数可能是小数（附魔件 0.2 的累加），浮点求和会出现 3.4000000000000004 这种值 ——
+         * 统一**保留一位小数**再参与计算与显示。 */
+        const w = m.powerPerPermBuffEnchantedWeight != null
+          ? Math.max(0, Number(m.powerPerPermBuffEnchantedWeight))
+          : 1;
+        const rows = run.permanent || [];
+        let count = 0;
+        for (const row of rows) count += rowFreeOf(row) ? w : 1;
+        count = Math.round(count * 10) / 10;
+        agg.powerMul += m.powerPerPermBuff * count * k;
+      }
       if (m.winStatAfter10) agg.winStatAfter10 += 1;
       if (m.maxHpMul) { if (buff.kind === 'limited') agg.maxHpMul += m.maxHpMul * k; }
       if (m.critBonus) agg.critBonus += m.critBonus * k;
@@ -539,6 +746,10 @@
       if (m.roundMaxHpMul) agg.roundMaxHpMul = agg.roundMaxHpMul > 0
         ? Math.min(agg.roundMaxHpMul, Number(m.roundMaxHpMul)) : Number(m.roundMaxHpMul);
       if (m.firstDodge) agg.firstDodge = 1;
+      /* 2026-10 新增限次类：战意沸腾（固定力/敏/速与血上限）与血蚀印记（按敌人当前血抽血）。 */
+      if (m.startStatFlat) agg.startStatFlat += m.startStatFlat * k;
+      if (m.startMaxHpFlat) agg.startMaxHpFlat += m.startMaxHpFlat * k;
+      if (m.enemyHpDrainPct) agg.enemyHpDrainPct += m.enemyHpDrainPct * k;
       /* 狂怒：低血时攻/敏/速同时提升；阈值取所有来源里的最高值（同一套 lowHpAt）。 */
       /* 反噬豁免：免疫一切反伤（限次类，战斗内生效）。 */
       if (m.reflectImmune) agg.reflectImmune = Math.max(agg.reflectImmune, Number(m.reflectImmune) || 0);
@@ -647,6 +858,10 @@
     if (a.reflectImmune) lines.push(['反噬豁免', '免疫一切反伤']);
     { const wt = winTakenMulOf(run); if (wt > 0) lines.push(['减伤成长（每胜利 −1%）', pct(wt)]); }
     if (a.openStrikePct) lines.push(['开局打击', pct(a.openStrikePct) + ' 敌最大生命']);
+    /* 2026-10 新增：N16 战意沸腾（固定力/敏/速与血上限）、N17 血蚀印记（每回合按敌人当前血抽血）。 */
+    if (a.startStatFlat) lines.push(['战意沸腾', '力/敏/速 +' + Math.round(a.startStatFlat)]);
+    if (a.startMaxHpFlat) lines.push(['战意沸腾', '生命上限 +' + Math.round(a.startMaxHpFlat)]);
+    if (a.enemyHpDrainPct) lines.push(['血蚀印记', '每回合抽 ' + pct(Math.min(1, a.enemyHpDrainPct)) + ' 当前生命']);
     if (a.enemyPowerDown) lines.push(['敌人攻击', pct(-a.enemyPowerDown)]);
     /* 空血上限是乘法叠加的，清单里显示**合并后的真实比例**：
      * 空的部分 / 最终上限，这样玩家看到的数字与战斗里的实际占比一致。 */
@@ -699,7 +914,7 @@
     if (run.bonusPower) lines.push(['加成累积（攻击）', pct(run.bonusPower)]);
     for (const [k, name] of [['power', '攻击'], ['agility', '敏捷'], ['speed', '速度']]) {
       const fb = fragileBonus(run, k);
-      if (fb.value) lines.push(['烙印·' + name + (fb.burned ? '（已损毁·全额永久）' : '（存在·半效）'), pct(fb.value)]);
+      if (fb.value) lines.push(['烙印·' + name + (fb.burned ? '（已损毁·永久保留）' : '（存在）'), pct(fb.value)]);
     }
     if (run.spendGain && (run.spendGain.power || run.spendGain.agility || run.spendGain.speed || run.spendGain.hp)) {
       const g = run.spendGain;
@@ -802,6 +1017,21 @@
    * 碎掉的烙印也要计入累计（否则层数上限与重复降权会因碎掉而回退，
    * 可以靠「等它碎」反复刷同一条），所以单独记一份只增不减的流水。
    * ============================================================ */
+  /** 选取型增益（虚空铭文 C37 / 神兵淬炼 C32 / 秘技通神 C33 …）的**累计获得次数**。
+   *  【2026-10 修复】它们不进 permanent/limited（不占栏位、不叠层，见 addBuff 的早退分支），
+   *  所以 `buffCountOf` 永远是 0 → C37 的 `repeatWeight: 0.88` **从来没生效过**，
+   *  而终焉烙印（C49）有栏位、份数一涨就降权 → 于是「虚空铭文越刷越多、终焉烙印越来越少」。
+   *  这里单独记一份只增不减的流水，并接进 obtainedCountOf。 */
+  function pickGotOf(run, id) {
+    const t = run && run.pickGot;
+    return Math.max(0, Math.floor(Number(t && t[id]) || 0));
+  }
+  function notePickGot(run, id) {
+    if (!run || !id) return 0;
+    const n = pickGotOf(run, id) + 1;
+    run.pickGot = Object.assign({}, run.pickGot || {}, { [id]: n });
+    return n;
+  }
   /** 本局累计获得过的份数（只增不减；目前只对易碎烙印记账）。 */
   function fragileGotOf(run, id) {
     const t = run && run.fragileGot;
@@ -809,7 +1039,7 @@
   }
   /** 层数上限 / 可获得性 / 重复降权统一用这个口径：在册份数 与 累计获得份数 取大。 */
   function obtainedCountOf(run, id) {
-    return Math.max(buffCountOf(run, id), fragileGotOf(run, id));
+    return Math.max(buffCountOf(run, id), fragileGotOf(run, id), pickGotOf(run, id));
   }
   /** 某个**即时类**增益本局已获得的次数（即时类不进 permanent/limited，另记在 instantIds 上）。 */
   function instantOwnedCount(run, id) {
@@ -820,8 +1050,11 @@
   }
   function permUsed(run) {
     const list = (run && run.permanent) || [];
-    const free = ((run && run.slotFreeIds) || []).filter((id) => list.some((b) => b.id === id));
-    return Math.max(0, list.length - free.length);
+    /* 【2026-10 任务2】逐条数：只有**被附魔的那一条**免占位，
+     * 同名的另一条照样占位（原来按 id 一刀切，会让同名件全部免占位）。 */
+    let used = 0;
+    for (const row of list) if (!rowFreeOf(row)) used++;
+    return Math.max(0, used);
   }
   function repairPermanentSlots(run, list) {
     const cap = permSlots(run);
@@ -988,7 +1221,9 @@
       killPower: 0, bonusPower: 0, shop: null, phase: null, choices: null, debuffs: [],
       retryToken: 0, retrySnap: null,
       achievements: [], scoreLog: [], statPeaks: {}, pendingToasts: [],
-      deathSaves: 0, reviveCount: 0, reviveTierPaid: 0 };
+      deathSaves: 0, reviveCount: 0, reviveTierPaid: 0,
+      /* 新口径标记：fragileBase 存「存在时的全额值」（见 normalizeRun 的语义迁移）。 */
+      fragileAliveFull: 1 };
     if (debug('endlessCoin')) run.coins = 9999;
     e.run = run;
     save();
@@ -1071,7 +1306,7 @@
        * 所以空出来的那部分永远是真的空的。
        * ============================================================ */
       const emptyPct = Math.max(0, Number(agg.emptyMaxHpMul) || 0);
-      const flatHp = Math.max(0, Number(run.winHpFlat) || 0) + spendHp;
+      const flatHp = Math.max(0, Number(run.winHpFlat) || 0) + spendHp + Math.max(0, Number(agg.startMaxHpFlat) || 0);
       const baseMaxHp = Math.max(1, Math.round(me.maxHp * (1 + maxHpMul + stickyHp + winMaxHp) * dMaxHp) + flatHp);
       const emptyPart = Math.max(0, Math.round(baseMaxHp * emptyPct));
       const maxHp = baseMaxHp + emptyPart;
@@ -1110,6 +1345,9 @@
       me.power += Math.max(0, Number(run.winStatPower) || 0);
       me.agility += Math.max(0, Number(run.winStatAgility) || 0);
       me.speed += Math.max(0, Number(run.winStatSpeed) || 0);
+      /* 战意沸腾（N16）：每场战斗开始时固定 力/敏/速 +N（不吃百分比乘区，与「登顶者」同口径）。 */
+      const startFlatStat = Math.max(0, Number(agg.startStatFlat) || 0);
+      if (startFlatStat) { me.power += startFlatStat; me.agility += startFlatStat; me.speed += startFlatStat; }
       for (const d of debuffs) {
         if (d.kind !== 'lock') continue;
         if (d.what === 'weapon') me.weapons = (me.weapons || []).filter((w) => Number(w.id) !== Number(d.id));
@@ -1154,7 +1392,11 @@
        * 位置很关键：必须放在「按 baseMaxHp 裁进场血」**之后**，否则回血会被再裁一次、
        * 空血上限那部分永远填不进去；放在其后则只受 me.maxHp 封顶（不超过本场血条）。
        * ============================================================ */
-      if (agg.startHealPct > 0 && me.maxHp > 0) {
+      /* 枯泉·涸井（trialDry）「封死对手的一切治疗」：**开战回血也要封**。
+       * 这段发生在战斗准备阶段，早于 sim 把 def.healMul 归零，所以必须在这里拦一道 ——
+       * 否则 C04/C16/C17 的开战回血会绕过封疗（用户报「枯泉没生效」的主因之一）。 */
+      const foeSealsHeal = !!(D().mechSealsHeal && D().mechSealsHeal(built && built.foe && built.foe.mech));
+      if (agg.startHealPct > 0 && me.maxHp > 0 && !foeSealsHeal) {
         const beforeHeal = me.hp;
         /* 开战回血（补给 N08 / 战斗续航 C16·C17）也算治疗：涌泉烙印照常加成。 */
         const gain = Math.max(1, Math.round(me.maxHp * agg.startHealPct * healBonusMul(run)));
@@ -1205,6 +1447,11 @@
       if (agg.catchUpPct) mods.catchUpPct = agg.catchUpPct;
       if (agg.roundMaxHpMul > 0 && agg.roundMaxHpMul < 1) mods.roundMaxHpMul = agg.roundMaxHpMul;
       if (agg.firstDodge) mods.firstDodge = agg.firstDodge;
+      /* 血蚀印记（N17）：每回合开始时对敌人造成其当前生命 N% 的伤害（封顶 100%，避免多份叠成秒杀）。 */
+      if (agg.enemyHpDrainPct) {
+        mods.enemyHpDrainPct = Math.min(1, Math.max(0, Number(agg.enemyHpDrainPct) || 0));
+        mods.enemyHpDrainNote = '血蚀印记';
+      }
       /* 按武器次数结算的两条（疾风先手 / 先发制人 / 闪亮登场）。 */
       if (agg.weaponFreeUses) mods.weaponFreeUses = agg.weaponFreeUses;
       if (agg.weaponBoostUses) {
@@ -1252,12 +1499,12 @@
       battleNo: run.idx + 1, battleCount: run.plan.length, layer: run.layer };
   }
   /** 战斗播放是否允许「跳过」（纯函数，UI 与测试共用）。
-   *  无尽塔 30 层起 —— 正是深度曲线 endlessDepthMul 开始生效、一局要打很久的阶段。
+   *  无尽塔 20 层起（用户口径 2026-10：由 30 层下调）—— 到这一阶段一场要打很久。
    *  跳过不影响胜负与收益：回合流本来就由 Sim.simulate 一次算完，跳过只是不播动画；
    *  塔内战斗也关了飘物（collectDrops:false），不会因为跳过丢掉落。 */
   function skipPlaybackAllowed(mode, layer) {
     if (mode !== 'endless') return false;
-    const from = Math.max(1, Math.floor(Number(D().ENDLESS_DEEP_LAYER) || 30));
+    const from = Math.max(1, Math.floor(Number(D().ENDLESS_SKIP_LAYER) || 20));
     return Math.max(1, Math.floor(Number(layer) || 1)) >= from;
   }
 
@@ -1486,44 +1733,54 @@
           coinMul += Math.max(0, envModTotal(run, 'coinBonus', { mineOnly: true }));
         }
       }
-      run.sellBonus = (run.sellBonus || 0) + (runModTotal(run, 'sellGrowthPerWin') || 0);
-      run.winHpFlat = (run.winHpFlat || 0) + (runModTotal(run, 'winMaxHpFlat') || 0);
-      /* 铜墙铁壁（减伤成长）：每胜利一场累计，封顶见 winTakenMulCap。 */
-      {
-        const c48 = stacksOf(run, 'C48');
-        if (c48) {
-          const per = Number(D().BUFF_BY_ID.C48.mods.winTakenMulPct) || 0.01;
-          const cap = (Number(D().BUFF_BY_ID.C48.mods.winTakenMulCap) || 0.25) * c48;
-          run.winTakenMul = Math.min(cap, Math.max(0, Number(run.winTakenMul) || 0) + per * c48);
+      /* ============================================================
+       * 【2026-10 同名逐条】成长进度**同时**记进两处：
+       *   · `row.grow` —— 这一栏自己的账本（卖出 / 交换时精确扣它那一份）；
+       *   · run 级字段 —— 各栏求和的读取口径（聚合 / 界面 / 探针不受影响）。
+       * ============================================================ */
+      const eachRow = (fn) => {
+        for (const row of (run.permanent || [])) {
+          const def = row && D().BUFF_BY_ID[row.id];
+          if (def) fn(row, def, Math.max(1, Math.floor(Number(row.stacks) || 1)));
         }
-      }
-      /* 登顶者（可叠层）：第 10 层起每胜一场，本局固定 +1 力/敏/速 × 层数。
-       * 固定值不参与全局倍率（增幅水晶只管百分比乘区），这也和「以战养战 +5 上限」同口径。 */
-      if (battleLayer >= 10) {
-        const c12 = stacksOf(run, 'C12');
-        if (c12) {
-          const per = Math.max(0, Number(D().BUFF_BY_ID.C12.mods.winStatAfter10) || 1) * c12;
-          run.winStatPower = Math.max(0, Number(run.winStatPower) || 0) + per;
-          run.winStatAgility = Math.max(0, Number(run.winStatAgility) || 0) + per;
-          run.winStatSpeed = Math.max(0, Number(run.winStatSpeed) || 0) + per;
+      };
+      eachRow((row, def, st) => {
+        const m = def.mods || {};
+        if (m.sellGrowthPerWin) addGrow(run, row, 'sellBonus', m.sellGrowthPerWin * st * g);
+        if (m.winMaxHpFlat) addGrow(run, row, 'winHpFlat', m.winMaxHpFlat * st * g);
+        /* 铜墙铁壁（减伤成长）：每胜利一场累计，封顶见 winTakenMulCap（按该栏层数）。 */
+        if (m.winTakenMulPct) {
+          const cap = (Number(m.winTakenMulCap) || 0.25) * st;
+          const cur = growOf(row, 'winTakenMul');
+          const next = Math.min(cap, cur + (Number(m.winTakenMulPct) || 0.01) * st);
+          addGrow(run, row, 'winTakenMul', next - cur);
         }
-      }
+        /* 登顶者（可叠层）：第 10 层起每胜一场，本局固定 +1 力/敏/速 × 层数。 */
+        if (m.winStatAfter10 && battleLayer >= 10) {
+          const per = Math.max(0, Number(m.winStatAfter10) || 1) * st;
+          addGrow(run, row, 'winStatPower', per);
+          addGrow(run, row, 'winStatAgility', per);
+          addGrow(run, row, 'winStatSpeed', per);
+        }
+        /* 猎杀时刻（C06）：每杀一个敌人攻击 +2%，上限 +30% × 层数。 */
+        if (m.killPowerPct) {
+          const cap = (m.killPowerCap || 0.40) * st * g;
+          const cur = growOf(row, 'killPower');
+          const next = Math.min(cap, cur + (m.killPowerPct || 0.02) * st * g);
+          addGrow(run, row, 'killPower', next - cur);
+        }
+        /* 吞噬成长（C07）：每胜一场生命上限 +2%，上限 +30% × 层数。 */
+        if (m.winMaxHpPct) {
+          const cap = (m.winMaxHpCap || 0.30) * st * g;
+          const cur = growOf(row, 'winMaxHp');
+          const next = Math.min(cap, cur + (m.winMaxHpPct || 0.02) * st * g);
+          addGrow(run, row, 'winMaxHp', next - cur);
+        }
+      });
       /* 「本场战斗赚了多少试炼币」——无尽塔主界面右上角要显示这个增量。
        * 先记下战前余额，等这一场的所有进账（基础 + 精英）都算完再取差值。 */
       const coinsBeforeBattle = Math.max(0, Number(run.coins) || 0);
       run.coins += Math.round(D().COINS.battle * coinMul);
-      // 击杀叠层类（基础 → 叠层 → C15）
-      const c06 = stacksOf(run, 'C06');
-      if (c06) {
-        const c06m = D().BUFF_BY_ID.C06.mods;
-        run.killPower = Math.min((c06m.killPowerCap || 0.40) * c06 * g,
-          run.killPower + (c06m.killPowerPct || 0.02) * c06 * g);
-      }
-      const c07 = stacksOf(run, 'C07');
-      if (c07) {
-        const c07m = D().BUFF_BY_ID.C07.mods;
-        run.winMaxHp = Math.min((c07m.winMaxHpCap || 0.30) * c07 * g, (Number(run.winMaxHp) || 0) + (c07m.winMaxHpPct || 0.02) * c07 * g);
-      }
       const c11 = stacksOf(run, 'C11');
       if (c11) healAbs(run, 0.03 * c11 * g * healBonusMul(run), refMax);
       if (isElite) {
@@ -1611,6 +1868,22 @@
         openMintShop(run, battleLayer);
         out.phase = 'shop';
         out.mintShop = true;
+        save();
+      }
+      /* E01「立即进货」在**整层最后一场**也必须开出来。
+       * 修 bug：原来这一支直接 `return cleared`，把「立即开店」整个跳过了 ——
+       * 限次已经在这一场扣掉（`consumeLimited`），店却没开，等于白扣一次。
+       * 现在的口径：
+       *   · 非 x5 层：layerClear 只推进层号、不开店 → 这里按「战后临时小店」开出来
+       *     （`postBattle: true`，关掉后回到新层的战斗流程）。
+       *   · x5 层：layerClear 已经开了**结算商店**，并且已经吃到了 E01 的折扣
+       *     （`makeShop(run, shopCreditPct)`）→ 不再叠开第二家店，E01 的价值以折扣兑现。 */
+      if (mode === 'endless' && shopCreditPct > 0 && !run.shop) {
+        run.shop = makeShop(run, shopCreditPct);
+        run.shop.postBattle = true;
+        run.phase = 'shop';
+        out.phase = 'shop';
+        out.postBattleShop = true;
         save();
       }
       return cleared;
@@ -2152,6 +2425,8 @@
     if ((run.pickBuffIds || []).includes(buff.id)) return false;
     if ((run.permSlotIds || []).includes(buff.id)) return false;
     if (run.pendingPick && run.pendingPick.buffId === buff.id) return false;
+    /* 天命所归由「即时」改「永久」后，老档里它可能还记在 instantIds 上 —— 同样视为已拥有。 */
+    if (instantOwnedCount(run, buff.id) > 0) return false;
     return !(run.permanent || []).some((b) => b.id === buff.id);
   }
   const CHOICE_TILT_PAID = 10;
@@ -2271,10 +2546,15 @@
   /* ============================================================
    * 【T14】易碎烙印：生效 · 损毁 · 作废 —— fragileBonus / rollFragileBuffs / loseRandomBrokenMark
    * ============================================================ */
+  /** 易碎属性烙印的当前加成（2026-10 削弱后的口径）。
+   *  「破碎前后」是两个确切数值：
+   *    · base   = 未破碎（存在）的加成，取 `mods.fragilePct`；
+   *    · burned = 已损毁的加成，取 `mods.fragileBurnedPct`（破碎时从 base 挪过来）。
+   *  两者直接相加就是当前总加成（**不再有「半效」**）。 */
   function fragileBonus(run, key) {
     const base = Math.max(0, Number((run.fragileBase || {})[key]) || 0);
     const burned = Math.max(0, Number((run.fragileBurned || {})[key]) || 0);
-    return { base: base, burned: burned, value: base * 0.5 + burned };
+    return { base: base, burned: burned, value: base + burned };
   }
   /**
    * 终乘烙印（C49「终焉烙印」）的最终倍率。
@@ -2355,22 +2635,85 @@
     rebuildFragileTotals(run);
     return { label: label, kind: m.kind, stat: m.stat };
   }
-  function fragileRoll(run, id, pct) {
+  /** 逐栏（逐条）的破碎随机数：种子存在**行上**（`row.fragileSeed`），
+   *  同名的每一条、叠加的每一份都各摇各的，不再共用 `run.fragileSeeds[id]`。
+   *  向后兼容：老档 / 测试仍可用 `run.fragileSeeds[id]` 注入「下一步必碎」的初始状态 ——
+   *  第一次为某条行取种子时优先用它（**用完即删**，免得同名其它栏共用同一条序列）。 */
+  function fragileRoll(run, row, pct) {
+    if (!row) return false;
     run.fragileSeeds = Object.assign({}, run.fragileSeeds || {});
-    let st = run.fragileSeeds[id];
-    if (!Number.isFinite(st)) {
-      /* 种子来源：本局 salt（无尽有、挑战塔没有）+ 当前层 + 烙印 id。
-       * 挑战塔的 run 没有 salt，如果只用 id 派生，各烙印的初始状态会**完全相同** ——
-       * 第一次判定就会「一碎全碎」。加上层数就能保证每层不同、每条烙印不同。 */
-      const key = String(run.salt == null ? 'run' : run.salt) + '#' + (Number(run.layer) || 0) + '#' + id;
+    const id = row.id;
+    let st = Math.max(0, Math.floor(Number(row.fragileSeed) || 0));
+    if (!st) {
+      const legacy = run.fragileSeeds[id];
+      if (Number.isFinite(legacy)) {
+        st = (Math.floor(legacy) >>> 0);
+        delete run.fragileSeeds[id];             // 只用一次
+      }
+    }
+    if (!st) {
+      /* 种子来源：本局 salt + 当前层 + 增益 id + **栏位 uid**（同名各栏互不相同）。 */
+      const key = String(run.salt == null ? 'run' : run.salt) + '#' + (Number(run.layer) || 0)
+        + '#' + id + '#' + Math.max(0, Math.floor(Number(row.uid) || 0));
       let h = 0x811c9dc5;
       for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
       h ^= (Date.now() & 0xffff) << 13;              // 每次开局再抖一次，避免跨局完全一致
       st = h >>> 0 || 1;
     }
     st = (Math.imul(st, 1664525) + 1013904223) >>> 0;
-    run.fragileSeeds[id] = st;
+    row.fragileSeed = st;
     return (st / 4294967296) * 100 < pct;
+  }
+  /** 结算一条「碎裂烙印」的一份：把存在值转成损毁值（明细 / 合计 / 层数一起更新）。
+   *  【2026-10 同名逐条】每**一份**各摇各的：一份碎了只掉那一份（层数 −1），全碎才移除整栏。 */
+  function breakOneFragileCopy(run, def, row) {
+    if (def.mods.fragileStat) {
+      /* 属性烙印：破碎 = 把这一份从「存在值」换成「损毁值」——
+       * 存在那份（fragilePct）从 base 里收回，损毁那份（fragileBurnedPct）记进 burned。 */
+      const alive = Math.max(0, Number(def.mods.fragilePct) || 0);
+      const burnedPct = Math.max(0, Number(def.mods.fragileBurnedPct != null
+        ? def.mods.fragileBurnedPct : alive) || 0);
+      run.fragileBase = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBase || {});
+      run.fragileBurned = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBurned || {});
+      run.fragileBase[def.mods.fragileStat] = Math.max(0, (Number(run.fragileBase[def.mods.fragileStat]) || 0) - alive);
+      run.fragileBurned[def.mods.fragileStat] = Math.max(0, Number(run.fragileBurned[def.mods.fragileStat]) || 0) + burnedPct;
+    }
+    /* 终乘烙印：损毁把一份「存在」层转成「损毁」层（加算口径下 = 多一份的倍率）。 */
+    if (def.mods.fragileFinalMul) {
+      run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0) - 1);
+      run.fragileMulBurned = Math.max(0, Math.floor(Number(run.fragileMulBurned) || 0)) + 1;
+    }
+    /* 淘金烙印：损毁把一份「存在」层转成「损毁」层（+15% → +30%）。 */
+    if (def.mods.fragileCoinAddAlive !== undefined) {
+      run.fragileCoinBase = Math.max(0, Math.floor(Number(run.fragileCoinBase) || 0) - 1);
+      run.fragileCoinBurned = (Array.isArray(run.fragileCoinBurned) ? run.fragileCoinBurned : [])
+        .concat([Math.max(0, Number(def.mods.fragileCoinAddBurned) || 0)]);
+    }
+    if (def.mods.fragileHealAddAlive !== undefined) {
+      run.fragileHealBase = Math.max(0, Math.floor(Number(run.fragileHealBase) || 0) - 1);
+      run.fragileHealBurned = (Array.isArray(run.fragileHealBurned) ? run.fragileHealBurned : [])
+        .concat([Math.max(0, Number(def.mods.fragileHealAddBurned) || 0)]);
+    }
+    /* 明细：碎掉的每一份都登记一条，供「30 层后每 2 层作废一条」抽取。 */
+    run.brokenMarks = Array.isArray(run.brokenMarks) ? run.brokenMarks : [];
+    if (def.mods.fragileStat) {
+      /* 明细里记的是**损毁后的那份值**（重建 burned 合计时按它累加）。 */
+      run.brokenMarks.push({ kind: 'stat', stat: def.mods.fragileStat,
+        pct: Math.max(0, Number(def.mods.fragileBurnedPct != null
+          ? def.mods.fragileBurnedPct : def.mods.fragilePct) || 0) });
+    } else if (def.mods.fragileHealAddAlive !== undefined) {
+      run.brokenMarks.push({ kind: 'heal',
+        alive: Math.max(0, Number(def.mods.fragileHealAddAlive) || 0),
+        burned: Math.max(0, Number(def.mods.fragileHealAddBurned) || 0) });
+    } else if (def.mods.fragileCoinAddAlive !== undefined) {
+      run.brokenMarks.push({ kind: 'coin',
+        alive: Math.max(0, Number(def.mods.fragileCoinAddAlive) || 0),
+        burned: Math.max(0, Number(def.mods.fragileCoinAddBurned) || 0) });
+    } else if (def.mods.fragileFinalMul) {
+      run.brokenMarks.push({ kind: 'final',
+        alive: Math.max(0, Number(def.mods.fragileAddAlive) || 0),
+        burned: Math.max(0, Number(def.mods.fragileAddBurned) || 0) });
+    }
   }
   function rollFragileBuffs(run) {
     const broken = [];
@@ -2378,52 +2721,16 @@
       const def = D().BUFF_BY_ID[b.id];
       const pct = def && def.mods && def.mods.fragileBreakPct;
       if (!pct || b.on === false) return true;
-      if (fragileRoll(run, b.id, Number(pct))) {
+      /* 每一份各摇各的：同时碎几份就掉几份；一份不剩才移除整栏。 */
+      const copies = Math.max(1, Math.floor(Number(b.stacks) || 1));
+      for (let i = 0; i < copies; i++) {
+        if (!fragileRoll(run, b, Number(pct))) continue;
         broken.push(def.name);
-        const key = def.mods.fragileStat;
-        if (key) {
-          run.fragileBurned = Object.assign({ power: 0, agility: 0, speed: 0 }, run.fragileBurned || {});
-          run.fragileBurned[key] = Math.max(0, Number(run.fragileBurned[key]) || 0) +
-            Math.max(0, Number(def.mods.fragilePct) || 0);
-        }
-        /* 终乘烙印：损毁把一份「存在」层转成「损毁」层（加算口径下 = 多 0.25 的倍率）。 */
-        if (def.mods.fragileFinalMul) {
-          run.fragileMulBase = Math.max(0, Math.floor(Number(run.fragileMulBase) || 0) - 1);
-          run.fragileMulBurned = Math.max(0, Math.floor(Number(run.fragileMulBurned) || 0)) + 1;
-        }
-        /* 淘金烙印：损毁把一份「存在」层转成「损毁」层（+15% → +30%）。 */
-        if (def.mods.fragileCoinAddAlive !== undefined) {
-          run.fragileCoinBase = Math.max(0, Math.floor(Number(run.fragileCoinBase) || 0) - 1);
-          run.fragileCoinBurned = (Array.isArray(run.fragileCoinBurned) ? run.fragileCoinBurned : [])
-            .concat([Math.max(0, Number(def.mods.fragileCoinAddBurned) || 0)]);
-        }
-        if (def.mods.fragileHealAddAlive !== undefined) {
-          run.fragileHealBase = Math.max(0, Math.floor(Number(run.fragileHealBase) || 0) - 1);
-          run.fragileHealBurned = (Array.isArray(run.fragileHealBurned) ? run.fragileHealBurned : [])
-            .concat([Math.max(0, Number(def.mods.fragileHealAddBurned) || 0)]);
-        }
-        /* 明细：碎掉的每一条都登记一份，供「30 层后每 2 层作废一条」抽取。 */
-        run.brokenMarks = Array.isArray(run.brokenMarks) ? run.brokenMarks : [];
-        if (def.mods.fragileStat) {
-          run.brokenMarks.push({ kind: 'stat', stat: def.mods.fragileStat,
-            pct: Math.max(0, Number(def.mods.fragilePct) || 0) });
-        } else if (def.mods.fragileHealAddAlive !== undefined) {
-          run.brokenMarks.push({ kind: 'heal',
-            alive: Math.max(0, Number(def.mods.fragileHealAddAlive) || 0),
-            burned: Math.max(0, Number(def.mods.fragileHealAddBurned) || 0) });
-        } else if (def.mods.fragileCoinAddAlive !== undefined) {
-          run.brokenMarks.push({ kind: 'coin',
-            alive: Math.max(0, Number(def.mods.fragileCoinAddAlive) || 0),
-            burned: Math.max(0, Number(def.mods.fragileCoinAddBurned) || 0) });
-        } else if (def.mods.fragileFinalMul) {
-          run.brokenMarks.push({ kind: 'final',
-            alive: Math.max(0, Number(def.mods.fragileAddAlive) || 0),
-            burned: Math.max(0, Number(def.mods.fragileAddBurned) || 0) });
-        }
-        logBuff(run, b.id, 'break', { detail: '易碎损毁（升级为全额并永久保留）' });
-        return false;
+        breakOneFragileCopy(run, def, b);
+        b.stacks = Math.max(0, Math.floor(Number(b.stacks) || 1) - 1);
+        logBuff(run, b.id, 'break', { uid: b.uid, detail: '易碎损毁（这一份升级为全额并永久保留）' });
       }
-      return true;
+      return (Math.floor(Number(b.stacks) || 0)) > 0;
     });
     return broken;
   }
@@ -2437,26 +2744,55 @@
     if (id === 'C33') { run.skillBoost = {}; return true; }
     return false;
   }
-  function resetGrowth(run, id, stacks) {
+  /** 失去一条增益时的成长回收（卖出 / 交换 / 替换 / 调试移除）。
+   *  【2026-10 同名逐条】`row` 是**被移除的那一条**（已经从表里摘掉）：
+   *    · 只扣**这一栏账本里**的成长（`row.grow`），同名其它栏不受影响；
+   *    · C07 / C11 是「粘性」的 —— 把这一条攒到的量折算进 run.hpBonus；
+   *    · C48 按老口径**保留**累计减伤，不扣。
+   *  不传 `row` 时退回旧口径（老调用点 / 测试兜底）：按 id 清掉 run 级字段。 */
+  function resetGrowth(run, id, stacks, row) {
     if (!run) return false;
     const n = Math.max(1, Math.floor(Number(stacks) || 1));      // 卖出/失去的是**整条**（含所有层数）
-    if (id === 'C06') run.killPower = 0;
-    else if (id === 'C07') { run.hpBonus = Math.max(0, Number(run.hpBonus) || 0) + Math.max(0, Number(run.winMaxHp) || 0); run.winMaxHp = 0; }
+    /* 【同名逐条】这条行**有没有自己的账本**：
+     *   · 有 → 只扣它那一份（同名其它栏不受影响）；
+     *   · 没有（老档 / 外部直接塞进表里的行）→ 按老口径把它当成「整份 run 级累计」处理。 */
+    const hasLedger = !!(row && row.grow && Object.keys(row.grow).length);
+    const perRow = !!row && hasLedger;
+    const rowGrow = (key) => (perRow ? growOf(row, key) : 0);
+    if (id === 'C06') {
+      if (perRow) subGrow(run, row, 'killPower'); else run.killPower = 0;
+    }
+    else if (id === 'C07') {
+      const v = perRow ? rowGrow('winMaxHp') : Math.max(0, Number(run.winMaxHp) || 0);
+      run.hpBonus = Math.max(0, Number(run.hpBonus) || 0) + v;
+      if (perRow) subGrow(run, row, 'winMaxHp'); else run.winMaxHp = 0;
+    }
     else if (id === 'C11') {
-      const flat = Math.max(0, Number(run.winHpFlat) || 0);
+      const flat = perRow ? rowGrow('winHpFlat') : Math.max(0, Number(run.winHpFlat) || 0);
       const base = Math.max(1, Number(run.baseMaxHp) || 0);
       run.hpBonus = Math.max(0, Number(run.hpBonus) || 0) + (base > 0 ? flat / base : 0);
-      run.winHpFlat = 0;
+      if (perRow) subGrow(run, row, 'winHpFlat'); else run.winHpFlat = 0;
     }
-    else if (id === 'C12') { run.winStatPower = 0; run.winStatAgility = 0; run.winStatSpeed = 0; }
+    else if (id === 'C12') {
+      if (perRow) { subGrow(run, row, 'winStatPower'); subGrow(run, row, 'winStatAgility'); subGrow(run, row, 'winStatSpeed'); }
+      else { run.winStatPower = 0; run.winStatAgility = 0; run.winStatSpeed = 0; }
+    }
     /* 选取型强化（C32 神兵淬炼 / C33 秘技通神）：加成是绑在这条增益身上的，
      * 卖出/被替换时必须一起清掉，否则「加成还在、增益已经没了」——
      * 而且它们 unique，再也刷不到第二次。 */
     else if (id === 'C32' || id === 'C33') dropPickBoost(run, id);
     /* C48 铜墙铁壁：它的「已累计减伤」同样是本局攒出来的收益，替换/卖出后**保留**
-     *（与 C07/C11 一致），所以这里不清零。 */
-    else if (id === 'C25') run.sellBonus = 0;
-    else if (id === 'C36') { run.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 }; run.shopSpend = 0; run.shopSpendProcs = 0; }
+     *（与 C07/C11 一致），所以这里不清零、也不扣账本。 */
+    else if (id === 'C25') { if (perRow) subGrow(run, row, 'sellBonus'); else run.sellBonus = 0; }
+    /* 天命所归（C51）：永久件被卖出/替换，稀有度加成也要一起收回（否则「加成还在、增益没了」）。 */
+    else if (id === 'C51') run.rarityBoost = Math.max(0, Math.floor(Number(run.rarityBoost) || 0) - n);
+    else if (id === 'C36') {
+      if (!perRow) {
+        run.spendGain = { power: 0, agility: 0, speed: 0, hp: 0 };
+        run.shopSpend = 0; run.shopSpendProcs = 0;
+        clearSpendProgress(run, 'C36');            // 【2026-10】各栏自己的进度也要清
+      }
+    }
     else {
       const def = D().BUFF_BY_ID[id];
       if (def && def.mods && def.mods.fragileStat) {
@@ -2492,11 +2828,16 @@
    * 【T15】增益的获得 / 失去 / 即时生效 —— addBuff / applyInstant / toggleLimited
    * ============================================================ */
   /** 「获得这个增益时」立刻要结算的东西（新增与叠加两条路径都要走）。
-   *  · 易碎烙印：登记基础加成（存在时半效、损毁后全额并本局永久保留）
+   *  · 易碎烙印：登记存在时的加成（`fragilePct`）；损毁后换成 `fragileBurnedPct` 并本局永久保留
    *  · 生命上限增益：按字面「回复等量生命」—— 新上限比旧上限多出来的部分补进当前血量
    *    （原来只保持百分比，玩家看到血条没动就以为没生效）。比例推一下与上限无关：
    *      carry' = (carry + m) / (1 + m)   （m 为 maxHpMul，负值则同步缩血） */
   function applyBuffOnAcquire(run, buff) {
+    /* 天命所归（C51）：2026-10 起由**即时**改为**永久**，而 permanent 不经过 applyInstant ——
+     * 所以稀有度加成必须在「获得时」写进 run.rarityBoost（数量就是本局的加成层数）。 */
+    if (buff.mods && buff.mods.rarityBoost) {
+      run.rarityBoost = Math.max(0, Math.floor(Number(run.rarityBoost) || 0)) + 1;
+    }
     /* 永久增益的生命上限加成是**粘性**的（拿到就折算进 run.hpBonus，卖掉不回落），
      * 所以每一次「获得」都要折算一次 —— 任务3 之后同栏位叠层也要算，
      * 否则第 2/3 层会白拿（只有开新栏位那条路才会加）。 */
@@ -2554,6 +2895,57 @@
     run.acqSeq = Math.max(0, Math.floor(Number(run.acqSeq) || 0)) + 1;
     return run.acqSeq;
   }
+  /* ---------------------------------------------------------------------------
+   * 【2026-10 任务2】栏位身份（uid）与「附魔免占位」的**逐条**标记
+   *
+   * 同名增益可以并排占多个背包栏位（任务3 起），于是「同名」不再等于「同一条」：
+   *   · 不同叠层类的同名件各有各的层数，不能互相借用；
+   *   · 虚空铭文附魔**只作用于被点的那一条**，不能把同名的另一条也标成「已附魔（不占位）」。
+   * 做法：每条栏位盖一个自增 `uid`（暗中标记，界面不显示），附魔改记在**行上**（`row.slotFree`）；
+   * `run.slotFreeIds` 降级为**镜像**（被附魔行的 id 去重），旧档 / 探针 / 统计继续能读。
+   * ------------------------------------------------------------------------- */
+  function nextUid(run) {
+    run.rowUidSeq = Math.max(0, Math.floor(Number(run.rowUidSeq) || 0)) + 1;
+    return run.rowUidSeq;
+  }
+  function rowFreeOf(row) { return !!(row && row.slotFree === true); }
+  /** 把镜像字段同步成「被附魔行的 id 去重」。
+   *  【2026-10 同名逐条】镜像**只**由行上的 `slotFree` 派生 —— 不再保留「名下还没有栏位」的
+   *  旧 id 登记：那一套会让「失去被附魔的增益」之后 id 仍留在镜像里，玩家再拿到同名件时
+   *  又被 migrateSlotFree 标成已附魔（用户报的「新拿到的同名件显示成已附魔」的根因之一）。
+   *  老档的 id 登记只在 normalizeRun 的 migrateSlotFree 里一次性迁到**已存在的**栏位上。 */
+  function syncSlotFree(run) {
+    if (!run) return;
+    const ids = [];
+    for (const row of (run.permanent || [])) {
+      if (rowFreeOf(row) && ids.indexOf(row.id) < 0) ids.push(row.id);
+    }
+    run.slotFreeIds = ids;
+  }
+  /** 按 uid 找栏位（找不到再退回「按 id 找第一条」）。 */
+  function findRow(run, ref) {
+    const list = (run && run.permanent) || [];
+    const n = Math.floor(Number(ref) || 0);
+    if (n > 0) { const byUid = list.find((b) => b && Number(b.uid) === n); if (byUid) return byUid; }
+    return list.find((b) => b && b.id === ref) || null;
+  }
+  /** 虚空铭文（C37）的**合法附魔目标**（2026-10 用户口径，用来压掉「大量同名件逐个附魔」）：
+   *   · 这一条**已经被附魔** → 仍然可选（但再选一次没有额外收益，界面会标出来）；
+   *   · 这一条没被附魔，**但同名的另一条已经被附魔** → **不可选**（挡住同名多栏刷免占位）；
+   *   · 其余情况 → 可选。
+   *  也就是「同名件里最多只有一条能被虚空铭文附魔」。 */
+  function enchantEligible(row, run) {
+    if (!row) return false;
+    if (rowFreeOf(row)) return true;
+    return !(run.permanent || []).some((b) => b && b.id === row.id && rowFreeOf(b));
+  }
+  /** 附魔（虚空铭文）：**只标记这一条**。返回被标记的行。 */
+  function markRowFree(run, row) {
+    if (!run || !row) return null;
+    row.slotFree = true;
+    syncSlotFree(run);
+    return row;
+  }
   /** 加一个 buff。永久类要过 5 格上限（满则返回 needsReplace，由界面选一个替换）。 */
   function addBuff(run, id, replaceId) {
     const buff = D().BUFF_BY_ID[id];
@@ -2576,6 +2968,7 @@
         return { ok: false, msg: '这类选取增益一局只能获得一次。' };
       }
       run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]);
+      notePickGot(run, buff.id);
       run.pendingPick = buff.mods.pickWeaponPct
         ? { kind: 'weapon', buffId: buff.id, pct: buff.mods.pickWeaponPct }
         : { kind: 'skill', buffId: buff.id, pct: buff.mods.pickSkillPct };
@@ -2588,6 +2981,7 @@
         return { ok: false, msg: '这类选取增益一局只能获得一次。' };
       }
       run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]).filter((v, i, a) => a.indexOf(v) === i);
+      notePickGot(run, buff.id);          // 虚空铭文：每次都记一份，降权才有依据（见 pickGotOf）
       run.pendingPick = { kind: 'permBuff', buffId: buff.id };
       logBuff(run, id, 'get', { detail: '虚空铭文（待选永久增益）' });
       save();
@@ -2603,7 +2997,12 @@
     }
     const listKey = buff.kind === 'permanent' ? 'permanent' : 'limited';
     const list = run[listKey] || (run[listKey] = []);
-    const owned = list.find((b) => b.id === id);
+    /* 【任务3 修正】同名可能占多个背包栏位，这里取**最后一个**（最新开的那一栏）：
+     * 它没满就往里叠，满了才另开一栏。原来用 `find`（第一个匹配）→ 第一栏满了之后
+     * **每一份都新开一栏、每栏永远停在 1 层**（实测 9 栏只能拿到 11 层，而设计上应当是
+     * 9 栏 × 3 层 = 27 层）。取最后一栏才能让「叠满后使用另一个背包栏位**继续叠加**」成立。 */
+    let owned = null;
+    for (const b of list) { if (b && b.id === id) owned = b; }
     /* 本栏位是否已叠满（叠满的永久增益要另开一个背包栏位 —— 任务3）。 */
     let restackSlot = false;
     if (owned) {
@@ -2630,25 +3029,32 @@
      * return 了，这里再统一用 occupiesPermSlot 收口（两道闸，防止将来新增不占槽类型时漏改）。 */
     if (occupiesPermSlot(buff) && permUsed(run) + 1 > permSlots(run)) {
       if (!replaceId) return { ok: false, needsReplace: true, buff, msg: '永久增益已满，先选一个替换掉' };
-      const at = list.findIndex((b) => b.id === replaceId);
+      /* 【2026-10 同名逐条】`replaceId` 优先当 uid（精确替换被点的那一条）；否则按 id 取最后一条。 */
+      const rn = Math.floor(Number(replaceId) || 0);
+      let at = -1;
+      if (rn > 0) at = list.findIndex((b) => b && Number(b.uid) === rn);
+      if (at < 0) at = list.findIndex((b) => b && b.id === replaceId);
       if (at < 0) return { ok: false, needsReplace: true, buff, msg: '要替换的增益不存在' };
-      const replacedStacks = Math.max(1, Math.floor(Number(list[at] && list[at].stacks) || 1));
+      const replacedRow = list[at];
+      const replacedId = replacedRow.id;
+      const replacedStacks = Math.max(1, Math.floor(Number(replacedRow && replacedRow.stacks) || 1));
       /* 换掉一个**免占位**的不会腾出槽位（它本来就不占），所以换它没有意义 —— 明确拒绝，
        * 免得玩家点了「替换」却发现还是买不了。 */
-      if ((run.slotFreeIds || []).indexOf(replaceId) >= 0) {
-        return { ok: false, needsReplace: true, buff, msg: '【' + replaceId + '】已被虚空铭文附魔、不占槽位，换它腾不出位置' };
+      if (rowFreeOf(replacedRow)) {
+        return { ok: false, needsReplace: true, buff, msg: '【' + replacedId + '】已被虚空铭文附魔、不占槽位，换它腾不出位置' };
       }
       list.splice(at, 1);
-      resetGrowth(run, replaceId, replacedStacks);
-      run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== replaceId);
-      logBuff(run, replaceId, 'lose', { detail: '被【' + buff.name + '】替换掉' });
+      resetGrowth(run, replacedId, replacedStacks, replacedRow);
+      /* 只移除被替换的那一条：**不要去清同名的其它栏位**的附魔标记。 */
+      syncSlotFree(run);
+      logBuff(run, replacedId, 'lose', { detail: '被【' + buff.name + '】替换掉' });
     }
     applyBuffOnAcquire(run, buff);   // 含永久 maxHpMul 的粘性折算（见该函数）
     /* 塔内一切限次增益都只服务下一场战斗。 */
     const towerLimitedUses = run.mode === 'tower' ? 1 : (buff.uses || 1);
     list.push(buff.kind === 'limited'
-      ? { id, stacks: 1, uses: towerLimitedUses, on: true, at: nextAcqSeq(run) }
-      : { id, stacks: 1, at: nextAcqSeq(run) });
+      ? { id, stacks: 1, uses: towerLimitedUses, on: true, at: nextAcqSeq(run), uid: nextUid(run) }
+      : { id, stacks: 1, at: nextAcqSeq(run), uid: nextUid(run) });
     /* 自检：加入后占用不应超过上限（前面已按「加入后占用」判定过，正常不会触发）。 */
     if (buff.kind === 'permanent' && permUsed(run) > permSlots(run)
         && typeof console !== 'undefined' && console.warn) {
@@ -2708,14 +3114,18 @@
     save();
     return out;
   }
-  function toggleLimited(id, on) {
+  /** 限次增益的开关。`ref` 优先当 uid（精确切那一条），否则按 id 取第一条。 */
+  function toggleLimited(ref, on) {
     const run = endless().run;
     if (!run) return { ok: false };
-    const b = (run.limited || []).find((x) => x.id === id);
+    const n = Math.floor(Number(ref) || 0);
+    const list = run.limited || [];
+    const b = (n > 0 ? list.find((x) => x && Number(x.uid) === n) : null)
+      || list.find((x) => x.id === ref);
     if (!b) return { ok: false };
     b.on = on === undefined ? b.on === false : !!on;
     save();
-    return { ok: true, id, on: b.on };
+    return { ok: true, id: b.id, uid: b.uid, on: b.on };
   }
   /* ============================================================
    * 【T16】选取型强化：武器 / 技能 / 虚空铭文 —— pickCandidates / applyPickBuff
@@ -2741,19 +3151,31 @@
   const defensePickBoostOf = (id) => (Number(id) === 16 ? JUE_DUI_PICK_BOOST : DEFENSE_PICK_BOOST);
   /** 候选按钮上的「抽中后会怎样」提示（界面用它替代 Lv 显示）。 */
   const PICK_NOTE = { 14: '开战第一招必放', 16: '触发概率提升', 7: '触发概率提升' };
+  /** 玩家当前是否已拥有某技能。
+   *  【Bug 修复】S().skills 是 "id:lv" 字符串数组（不是 {id, level} 对象），
+   *  旧写法 `(S().skills).some((sk) => Number(sk.id) === id)` 里 sk.id 恒为 undefined
+   *  → NaN，判断永远为 false，于是下面 applyPickBuff 会对**已学会**的绝对防御/龟甲术/
+   *  小宇宙爆发调用 setWS('skill', id, 1)，把已有等级直接冲成 1 级。 */
+  const ownsSkill = (id) => (S().skills || [])
+    .some((sk) => Number(String(sk).split(':')[0]) === Number(id));
   /** 选取型 buff 的三选一候选：从玩家已有的武器/技能里随机挑最多 3 个。 */
   function pickCandidates(kind) {
     const run = endless().run;
     if (!run) return [];
     if (kind === 'permBuff') {
       const pool = (run.permanent || [])
-        .map((b) => ({ id: b.id, buff: D().BUFF_BY_ID[b.id], stacks: b.stacks || 1 }))
-        .filter((x) => x.buff && !D().hasTag(x.buff, 'hidden'));
+        .map((b) => ({ id: b.id, uid: b.uid, buff: D().BUFF_BY_ID[b.id], stacks: b.stacks || 1, free: rowFreeOf(b) }))
+        .filter((x) => x.buff && !D().hasTag(x.buff, 'hidden'))
+        /* 【用户口径 2026-10】同名的另一条已被附魔 → 这一条（未附魔的）不进候选。 */
+        .filter((x) => enchantEligible((run.permanent || []).find((r) => r && Number(r.uid) === Number(x.uid)), run));
       for (let i = pool.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
       }
-      return pool.slice(0, 3).map((x) => ({ id: x.id, name: x.buff.name, rarity: x.buff.rarity, stacks: x.stacks }));
+      /* 候选按**栏位**给出（同名多栏各占一个候选），带上 uid 让界面能精确指到那一条；
+       * `slotFree` 也逐条给：同名件里只有被附魔的那一条才算「已附魔（不占位）」。 */
+      return pool.slice(0, 3).map((x) => ({ id: x.id, uid: x.uid, name: x.buff.name, rarity: x.buff.rarity,
+        stacks: x.stacks, slotFree: x.free }));
     }
     /* 秘技通神（C33）：只抽**主动技能**，外加两条特殊技能 —— 防御被动（绝对防御/龟甲术）
      * 与小宇宙爆发（14）。前者不进出手池、「提升触发概率」走 sim 的 passiveSkillBoost；
@@ -2802,12 +3224,18 @@
     const pend = run.pendingPick;
     if (!pend || pend.kind !== kind) return { ok: false, msg: '现在没有待选取的强化。' };
     if (kind === 'permBuff') {
-      if (!(run.permanent || []).some((b) => b.id === id)) return { ok: false, msg: '你还没有这个永久增益。' };
-      run.slotFreeIds = (run.slotFreeIds || []).concat([id]).filter((v, i, a) => a.indexOf(v) === i);
+      /* `id` 现在既可以是 uid（界面走这条）也可以是增益 id（老调用 / 测试兜底）。 */
+      const row = findRow(run, id);
+      if (!row) return { ok: false, msg: '你还没有这个永久增益。' };
+      if (!enchantEligible(row, run)) {
+        return { ok: false, msg: '【' + (D().BUFF_BY_ID[row.id] || {}).name +
+          '】已经有一条被虚空铭文附魔了 —— 同名件里只能附魔一条，这一条不行。' };
+      }
+      markRowFree(run, row);                     // **只标记这一条**（同名另一条不受影响）
       run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId || 'C37']).filter((v, i, a) => a.indexOf(v) === i);
       run.pendingPick = null;
       save();
-      return { ok: true, kind, id, slotFree: true };
+      return { ok: true, kind, id: row.id, uid: row.uid, slotFree: true };
     }
     const key = kind === 'skill' ? 'skillBoost' : 'weaponBoost';
     run[key] = run[key] || {};
@@ -2816,7 +3244,7 @@
       /* 小宇宙爆发（14）：与防御技同样是「没学也直接给」，但收益不是触发概率 ——
        * 而是**开战第一招必定放它**（adjustMe 把它翻成 me.mods.cosmosFirst，
        * sim 选招时强制）。run.skillBoost[14] 只当开关用。 */
-      if (!(S().skills || []).some((sk) => Number(sk.id) === Number(id))) {
+      if (!ownsSkill(id)) {
         State.setWS('skill', Number(id), 1);
       }
       run[key][Number(id)] = COSMOS_PICK_BOOST;
@@ -2824,7 +3252,7 @@
     } else if (kind === 'skill' && isPickableDefense(id)) {
       /* 绝对防御 / 龟甲术是「受击自动触发」的防御被动，不给它们叠加技能等级，
        * 而是把触发概率**大幅**提升（详见下方 defensePickBoostOf 的说明）。 */
-      if (!(S().skills || []).some((sk) => Number(sk.id) === Number(id))) {
+      if (!ownsSkill(id)) {
         State.setWS('skill', Number(id), 1);
       }
       const before = Number(run[key][Number(id)]) || 0;
@@ -2909,7 +3337,7 @@
     const divBy = b.mods.weightDivBy;
     if (divBy === 'enchanted' || divBy === 'owned') {
       const n = divBy === 'enchanted'
-        ? (run.slotFreeIds || []).length
+        ? (run.permanent || []).filter((row) => rowFreeOf(row)).length
         : obtainedCountOf(run, b.id);
       /* weightDivOffset = 0 时是「÷n」（0~1 份不降权，C49 的口径）；
        * = 1 时是「÷(n+1)」—— 0 份 → ÷1（不降），1 份 → ÷2，2 份 → ÷3。
@@ -2932,17 +3360,26 @@
    * 档内没有可用件时预算为 0（旧版要顺延到邻近档，这里天然不会摇到空档）。
    * 与旧的「两步式」在 m_b 全为 1 时**完全等价**。
    * ============================================================ */
-  function dynamicTierWeights(baseTier, run, list) {
+  /** 动态档位权重的通用实现：`weightOfFn(run, b)` 决定「个体倍率」。
+   *  `dynamicTierWeights` 是它的默认口径（静态 shopWeight + 动态惩罚）；
+   *  传自定义 `weightOfFn` 可换一套个体倍率（「豪掷千金」现在直接用整池权重表，
+   *  见 limitedGrantWeights，不再需要这个自定义口子，但保留给测试/其它池子用）。 */
+  function dynamicTierWeightsBy(baseTier, run, list, weightOfFn) {
     const base = Array.isArray(baseTier) && baseTier.length ? baseTier : D().RARITY_WEIGHTS;
     if (D().TIER_DYNAMIC_WEIGHTS === false) return base.slice();
     const includeStatic = D().TIER_AVG_INCLUDES_STATIC === true;
+    const fn = typeof weightOfFn === 'function' ? weightOfFn
+      : (includeStatic ? buffWeightOf : buffDynamicPenaltyOf);
     const sum = [0, 0, 0, 0], n = [0, 0, 0, 0];
     for (const b of list || []) {
       const r = Math.max(0, Math.min(3, Math.floor(Number(b && b.rarity) || 0)));
-      const m = includeStatic ? buffWeightOf(run, b) : buffDynamicPenaltyOf(run, b);
-      sum[r] += Math.max(0, m); n[r] += 1;
+      const m = fn(run, b);
+      sum[r] += Math.max(0, Number(m) || 0); n[r] += 1;
     }
     return base.map((v, r) => (n[r] > 0 ? Math.max(0, Number(v) || 0) * (sum[r] / n[r]) : 0));
+  }
+  function dynamicTierWeights(baseTier, run, list) {
+    return dynamicTierWeightsBy(baseTier, run, list, null);
   }
   /** 摇档用的兜底：全部预算都是 0（例如整池都没有动态惩罚之外的可选项）时退回 baseTier。 */
   function rollableTierWeights(weights, fallback) {
@@ -3001,9 +3438,8 @@
     notePityRoll(run, buff, candidates.some((b) => b.rarity === 3));
     return { buff, pity };
   }
-  /** 按权重抽一件。
-   *  `extraOf`（可选）返回一个额外的倍率 —— 例如「豪掷千金」抽随机限次增益时按稀有度再压一档
-   *  （见 grantRandomLimited 的 limitedRarityMul）。 */
+  /** 按权重抽一件（权重 = buffWeightOf，可选再乘一个额外倍率 `extraOf`）。
+   *  「豪掷千金」现在走自己的 limitedGrantWeights（把档位动态权重摊到每件上直接抽签）。 */
   function pickByShopWeight(list, run, extraOf) {
     if (!list || !list.length) return null;
     if (list.length === 1) return list[0];
@@ -3045,6 +3481,18 @@
         taken.add(buff.id);
       }
     }
+    /* 传奇保底计数与「玩家最终看到的这一页」保持一致：
+     * 上面「保证至少一件限次」的换格发生在逐格 notePityRoll 之后，被换掉的那一格
+     * 可能正好是传奇（或被换上的正是传奇）—— 不重算就会让 run.legendPity 与页面口径对不上
+     * （测试/探针按页面逐格复算时会出现 0 vs 2 这种差异）。 */
+    if (pool.some((b) => b.rarity === 3 && ownable(run, b) && poolFilter(run, b))) {
+      let pity = 0;
+      for (const s of slots) {
+        const b = D().BUFF_BY_ID[s.id];
+        if (b && b.rarity === 3) pity = 0; else pity++;
+      }
+      run.legendPity = pity;
+    }
     return slots;
   }
   /** 领取「门庭若市」（C59）这家店进门时给的试炼币（领一次就清零，界面飘字用）。 */
@@ -3084,29 +3532,66 @@
       halfCount: run.shop.slots.filter((s) => s && s.half).length,
       halfPerPage: Math.max(0, Math.floor(Number(run.shop.halfPerPage) || 0)),
       slots: run.shop.slots.map((s) => { const b = D().BUFF_BY_ID[s.id];
-        const mine = (run.permanent || []).find((x) => x.id === s.id) || (run.limited || []).find((x) => x.id === s.id);
+        /* 【2026-10 同名逐条】「已有 ×N」要跨同名多栏**求和**，不是只看第一栏。 */
         const listPrice = mint ? D().mintPrice(b) : Math.max(0, Math.round(Number(s.price) || 0));
         return { id: s.id, sold: s.sold, name: b.name, desc: D().descOf(b, 'endless'), rarity: b.rarity, kind: b.kind,
           price: mint ? (s.half ? Math.floor(listPrice / 2) : listPrice) : shopPriceOf(b, s),
           /* 讨价还价对折过的格子：界面显示「对折 · 原价 X」。 */
           half: !!s.half, listPrice: listPrice,
           ops: D().hasTag(b, 'ops'),
-          ownedStacks: mine ? (mine.stacks || 1) : 0, canStack: D().hasTag(b, 'stackable') }; }) };
+          ownedStacks: stacksOf(run, s.id), canStack: D().hasTag(b, 'stackable') }; }) };
   }
-  /** 「豪掷千金」（C58）抽随机限次增益时的**按稀有度倍率**（1 = 不调整）。
-   *  2026-10 削弱：史诗 ×0.5、传奇 ×0.35 —— 原来等权重抽，史诗及以上拿得太容易。 */
-  function limitedRarityExtra(run, b) {
-    const mul = (D().BUFF_BY_ID.C58.mods || {}).limitedRarityMul || [];
-    const v = Number(mul[b.rarity]);
-    return Number.isFinite(v) && v >= 0 ? v : 1;
+  /** 「豪掷千金」（C58）抽随机限次增益：**基准刷新档**（默认 10 试炼币）。
+   *  用户口径 2026-10：把默认权重从「30 币刷新」下调到「10 币刷新」。 */
+  function limitedRerollPaid() {
+    const m = (D().BUFF_BY_ID.C58 && D().BUFF_BY_ID.C58.mods) || {};
+    const raw = m.limitedDefaultRerollPaid != null ? m.limitedDefaultRerollPaid : 10;
+    return Math.max(0, Number(raw) || 0);
+  }
+  /** 限次池里每件的**动态权重**（商店在「花 limitedRerollPaid 币刷新」那一刻的口径）：
+   *
+   *    档位预算 tier[r] = dynamicTierWeights(rawTierWeights(rerollTilt(paid)), run, pool)[r]
+   *                       —— 基准档位权重 × 档内平均动态惩罚；
+   *    件权重   w_b     = tier[rarity_b] × buffWeightOf(b) / Σ_{同档} buffWeightOf
+   *                       —— 把档位预算按**档内个体权重占比**摊到每一件上。
+   *
+   *  这就是「商店花 10 币刷新时，每件限次增益被抽中的动态权重」。用户口径：**不直接套用**
+   *  刷新后的档位分布（那会变成「先摇档、再档内抽」），而是把这些权重和 buff 混在一起
+   *  **直接抽签**（见 grantRandomLimited）。
+   *  返回 [{ buff, weight }]，池子为空时返回 []。 */
+  function limitedGrantWeights(run) {
+    const pool = D().endlessPool.filter((b) => b.kind === 'limited' && ownable(run, b) && poolFilter(run, b));
+    if (!pool.length) return [];
+    const rar = (b) => Math.max(0, Math.min(3, Math.floor(Number(b && b.rarity) || 0)));
+    const baseTier = D().rawTierWeights(D().rerollTilt(limitedRerollPaid()), run);
+    const tier = dynamicTierWeights(baseTier, run, pool);
+    const sum = [0, 0, 0, 0];
+    for (const b of pool) sum[rar(b)] += Math.max(0, buffWeightOf(run, b));
+    return pool.map((b) => {
+      const r = rar(b);
+      const mw = Math.max(0, buffWeightOf(run, b));
+      return { buff: b, weight: sum[r] > 0 ? Math.max(0, Number(tier[r]) || 0) * (mw / sum[r]) : 0 };
+    });
+  }
+  /** 单件限次增益在「豪掷千金」里的动态权重（测试/调试用；内部按整池现算）。 */
+  function limitedGrantWeightOf(run, b) {
+    if (!b) return 0;
+    const hit = limitedGrantWeights(run).find((x) => x.buff.id === b.id);
+    return hit ? hit.weight : 0;
   }
   /** C58「豪掷千金」：从**无尽塔**的限次池里随机抽一个「还能拿」的，立刻获得。
    *  抽不到（池子空了 / 都拿满了）就返回 null（不消耗这一档进度）。 */
   function grantRandomLimited(run) {
-    const pool = D().endlessPool.filter((b) => b.kind === 'limited' && ownable(run, b) && poolFilter(run, b));
-    if (!pool.length) return null;
-    const extraOf = (b) => limitedRarityExtra(run, b);
-    const pick = pickByShopWeight(pool, run, extraOf) || pool[Math.floor(Math.random() * pool.length)];
+    const list = limitedGrantWeights(run);
+    if (!list.length) return null;
+    const total = list.reduce((a, x) => a + Math.max(0, x.weight), 0);
+    let pick = list[list.length - 1].buff;
+    if (total > 0) {
+      let roll = Math.random() * total;
+      for (const x of list) { roll -= Math.max(0, x.weight); if (roll < 0) { pick = x.buff; break; } }
+    } else {
+      pick = list[Math.floor(Math.random() * list.length)].buff;
+    }
     const got = addBuff(run, pick.id);
     return got && got.ok ? pick.id : null;
   }
@@ -3125,43 +3610,87 @@
     const idx = Math.min(tiers.length - 1, Math.floor(Math.max(0, procs) / size));
     return Math.max(1, Number(tiers[idx]) || 1);
   }
+  /* ---- 消费类增益的进度记账（2026-10 改版：**每一栏各记一份**）----------------
+   * 用户报的 bug：多个「豪掷千金 / 挥金如土」只会触发一个。根因是进度记在 `run` 上的
+   * **单一计数器**里，多份时只是把这段共享进度推快一点，而不是「每份各自累计」。
+   * 现在把计数器搬到**每个背包栏位自己身上**：
+   *   · C36 挥金如土：`row.spend` / `row.procs` —— 分段涨价（5/10/15）也按**该份自己的次数**算，
+   *     所以 2 份各提 20 次（合计 40）而不是共享计数器提前跳档（那样只有 30）。
+   *   · C58 豪掷千金：`row.limitedSpend` —— 每满 100 币，**这一份**给一个随机限次增益。
+   * 旧的 `run.shopSpend / run.shopSpendProcs / run.shopSpendLimited` 保留为**镜像**（各栏求和），
+   * 界面 / 存档 / 探针继续读它们即可。
+   * ------------------------------------------------------------------------- */
+  /** 把某个 id 的所有栏位的进度计数清零（C36 重置分段时用）。 */
+  function clearSpendProgress(run, id) {
+    const key = id === 'C58' ? 'limitedSpend' : 'spend';
+    for (const row of (run.permanent || [])) {
+      if (row && row.id === id) { row[key] = 0; if (id === 'C36') row.procs = 0; }
+    }
+  }
+  /** 把各栏进度汇总回镜像字段（界面只读这几个）。 */
+  function syncSpendMirrors(run) {
+    const sum = (id, key) => (run.permanent || []).reduce((n, b) =>
+      n + (b && b.id === id ? Math.max(0, Number(b[key]) || 0) : 0), 0);
+    run.shopSpend = sum('C36', 'spend');
+    run.shopSpendProcs = sum('C36', 'procs');
+    run.shopSpendLimited = sum('C58', 'limitedSpend');
+  }
   function addShopSpend(run, amount, flags) {
     const spend = Math.max(0, Number(amount) || 0);
     if (!(spend > 0)) return null;
-    const assumeOwned = !!(flags && flags.assumeOwned);
-    const c36 = assumeOwned ? 1 : stacksOf(run, 'C36');
-    const c58 = stacksOf(run, 'C58');
-    if (!c36 && !c58) return null;                      // 两个增益都没有就不累计
+    /* 兼容旧调用口径：`assumeOwned` = 「这一笔也要算给 C36」（买 C36 本身时）。 */
+    const c36Rows = (run.permanent || []).filter((b) => b && b.id === 'C36');
+    const c58Rows = (run.permanent || []).filter((b) => b && b.id === 'C58');
+    if (!c36Rows.length && !c58Rows.length && !(flags && flags.assumeOwned)) return null;
     const gained = [];
-    if (c36) {
-      const mm = D().BUFF_BY_ID.C36.mods;
+    const mm36 = D().BUFF_BY_ID.C36.mods;
+    const opts = ['power', 'agility', 'speed', 'hp'];
+    const grantOnce = () => {
+      const key = opts[Math.floor(Math.random() * opts.length)];
+      run.spendGain = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, run.spendGain || {});
+      run.spendGain[key] += key === 'hp'
+        ? Math.max(0, Number(mm36.shopSpendHp) || 5)
+        : Math.max(0, Number(mm36.shopSpendStat) || 1);
+      gained.push(key);
+    };
+    /* 兜底：调用方说「算给 C36」但栏位还没建出来（理论上不会）→ 记在镜像字段上。 */
+    if (!c36Rows.length && !c58Rows.length) {
       run.shopSpend = Math.max(0, Number(run.shopSpend) || 0) + spend;
       run.shopSpendProcs = Math.max(0, Math.floor(Number(run.shopSpendProcs) || 0));
-      const opts = ['power', 'agility', 'speed', 'hp'];
-      /* 步长随「已提升次数」分段（5 → 10 → 15），所以每次循环都要重新取。 */
       let guard = 0;
       while (run.shopSpend >= shopSpendStepFor(D().BUFF_BY_ID.C36, run.shopSpendProcs) && guard++ < 100000) {
         run.shopSpend -= shopSpendStepFor(D().BUFF_BY_ID.C36, run.shopSpendProcs);
         run.shopSpendProcs += 1;
-        const key = opts[Math.floor(Math.random() * opts.length)];
-        run.spendGain = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, run.spendGain || {});
-        run.spendGain[key] += key === 'hp'
-          ? Math.max(0, Number(mm.shopSpendHp) || 5)
-          : Math.max(0, Number(mm.shopSpendStat) || 1);
-        gained.push(key);
+        grantOnce();
+      }
+      if (!gained.length) return null;
+      return { gained: gained, limited: [], spendGain: Object.assign({}, run.spendGain || {}) };
+    }
+    /* C36：每一栏各自累计 + 各自分段（该份自己的 procs 决定步长）。 */
+    for (const row of c36Rows) {
+      row.spend = Math.max(0, Number(row.spend) || 0) + spend;
+      row.procs = Math.max(0, Math.floor(Number(row.procs) || 0));
+      let guard = 0;
+      while (row.spend >= shopSpendStepFor(D().BUFF_BY_ID.C36, row.procs) && guard++ < 100000) {
+        row.spend -= shopSpendStepFor(D().BUFF_BY_ID.C36, row.procs);
+        row.procs += 1;
+        grantOnce();
       }
     }
+    /* C58：每一栏各自攒 100 币 → 各自给一个随机限次增益。 */
+    const step58 = Math.max(1, Number(D().BUFF_BY_ID.C58.mods.shopSpendLimited) || 100);
     const limited = [];
-    if (c58) {
-      const step58 = Math.max(1, Number(D().BUFF_BY_ID.C58.mods.shopSpendLimited) || 100);
-      run.shopSpendLimited = Math.max(0, Number(run.shopSpendLimited) || 0) + spend;
-      while (run.shopSpendLimited >= step58) {
+    for (const row of c58Rows) {
+      row.limitedSpend = Math.max(0, Number(row.limitedSpend) || 0) + spend;
+      let guard = 0;
+      while (row.limitedSpend >= step58 && guard++ < 1000) {
         const id = grantRandomLimited(run);
         if (!id) break;
-        run.shopSpendLimited -= step58;
+        row.limitedSpend -= step58;
         limited.push(id);
       }
     }
+    syncSpendMirrors(run);
     if (!gained.length && !limited.length) return null;
     return { gained: gained, limited: limited, spendGain: Object.assign({}, run.spendGain || {}) };
   }
@@ -3198,7 +3727,10 @@
       return { ok: false, msg: (res && res.msg) || '这件增益现在买不了。' };
     }
     /* 挥金如土：按**最终是否拥有** C36 记账，于是买它本身的那笔也算进去。 */
-    const spend = addShopSpend(run, price, { assumeOwned: stacksOf(run, 'C36') > 0 });
+    /* addBuff 已经把这一件记进栏位了 → 这里读到的是**买完之后的真实份数**：
+     * 买 C36 本身时那笔消费照样算进新栏位（老口径不变）。 */
+    const c36After = stacksOf(run, 'C36');
+    const spend = addShopSpend(run, price, { assumeOwned: c36After > 0 });
     const pts = scoreBuffAcquire(run, buff);
     save();
     return { ok: true, buff, price, instant: !!res.instant, score: pts,
@@ -3270,35 +3802,48 @@
     save();
     return { ok: !!(res && res.ok), buff, res };
   }
-  function debugLoseBuff(id) {
+  /** 调试台：失去一条增益。`ref` 优先当 uid（精确移除那一条），否则按 id 取**最后一条**。 */
+  function debugLoseBuff(ref) {
     const run = endless().run;
     if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
-    if (run.pendingPick && run.pendingPick.buffId === id) {
+    if (run.pendingPick && run.pendingPick.buffId === ref) {
       run.pendingPick = null;
-      run.pickBuffIds = (run.pickBuffIds || []).filter((x) => x !== id);
-      dropPickBoost(run, id);
-      logBuff(run, id, 'lose', { detail: '调试台取消待选取' });
+      run.pickBuffIds = (run.pickBuffIds || []).filter((x) => x !== ref);
+      dropPickBoost(run, ref);
+      logBuff(run, ref, 'lose', { detail: '调试台取消待选取' });
       save();
-      return { ok: true, id, cancelledPick: true };
+      return { ok: true, id: ref, cancelledPick: true };
     }
-    for (const list of [run.permanent || [], run.limited || [], run.permSlotIds || [], run.pickBuffIds || []]) {
-      const i = (list || []).findIndex((b) => (typeof b === 'string' ? b === id : b.id === id));
+    /* 1) 先按「栏位引用」精确移除（uid 或 id-LIFO）。 */
+    const hit = findRowRef(run, ref);
+    if (hit) {
+      const row = hit.row, list = hit.list, id = row.id;
+      const removedStacks = Math.max(1, Math.floor(Number(row.stacks) || 1));
+      list.splice(list.indexOf(row), 1);
+      resetGrowth(run, id, removedStacks, row);
+      syncSlotFree(run);
+      run.pickBuffIds = (run.pickBuffIds || []).filter((x) => x !== id);
+      run.permSlotIds = (run.permSlotIds || []).filter((x) => x !== id);
+      dropPickBoost(run, id);
+      if (run.pendingPick && run.pendingPick.buffId === id) run.pendingPick = null;
+      logBuff(run, id, 'lose', { detail: '调试台失去' });
+      save();
+      return { ok: true, id, uid: row.uid };
+    }
+    /* 2) 再处理字符串名单（扩容类 / 选取型的登记）。 */
+    for (const list of [run.permSlotIds || [], run.pickBuffIds || []]) {
+      const i = (list || []).findIndex((b) => (typeof b === 'string' ? b === ref : b.id === ref));
       if (i >= 0) {
         const removed = list[i];
-        const removedStacks = (removed && typeof removed === 'object')
-          ? Math.max(1, Math.floor(Number(removed.stacks) || 1)) : 1;
+        const id = typeof removed === 'string' ? removed : removed.id;
         list.splice(i, 1);
-        resetGrowth(run, id, removedStacks);
-        /* 第 1 / 4 项：任何情况下都把「附魔免占位」与「一局一次」的登记一起撤掉 ——
-         * 原来只在命中 pickBuffIds 那条分支里撤，若在别的名单里先命中就会残留登记，
-         * 于是「失去之后再也刷不到」。 */
-        run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== id);
+        resetGrowth(run, id, 1);
+        syncSlotFree(run);
         run.pickBuffIds = (run.pickBuffIds || []).filter((x) => x !== id);
         run.permSlotIds = (run.permSlotIds || []).filter((x) => x !== id);
         // 选取型被移除时，连带清掉它强化过的武器/技能与待选取状态
         dropPickBoost(run, id);
         if (run.pendingPick && run.pendingPick.buffId === id) run.pendingPick = null;
-        if (list === run.permanent && removed && removed.id === id) { /* 永久类移除后不回落生命上限 */ }
         logBuff(run, id, 'lose', { detail: '调试台失去' });
         save();
         return { ok: true, id };
@@ -3306,42 +3851,39 @@
     }
     return { ok: false, msg: '本局没有这个增益。' };
   }
-  /** 卖出价：默认按「全部栏位的总层数」算；传入 stacks 时按**单个栏位**算
-   *  （任务3 之后同名增益可能占多个栏位，逐栏位卖必须按那一栏的层数计价）。 */
-  function sellPriceOf(run, buff, stacks) {
+  /** 卖出价：默认按「全部栏位的总层数」算；传入 stacks 时按**单个栏位**算。
+   *  【2026-10 同名逐条】传入 `row` 时，C25 的累计加价只算**这一栏自己的** `row.grow.sellBonus`。 */
+  function sellPriceOf(run, buff, stacks, row) {
     const base = buff.mods && buff.mods.sellValue
       ? Number(buff.mods.sellValue)
       : Math.max(1, Math.round(D().shopPrice(buff) * D().SHOP.sellBack));
     const n = Math.max(1, Math.floor(Number(stacks != null ? stacks : stacksOf(run, buff.id)) || 1));
-    const unit = (buff.id === 'C25' && stacksOf(run, 'C25') > 0)
-      ? base + Math.max(0, Math.floor(Number(run.sellBonus) || 0))
+    const bonus = (row && growOf(row, 'sellBonus') > 0) ? growOf(row, 'sellBonus') : Math.max(0, Number(run.sellBonus) || 0);
+    const unit = (buff.id === 'C25' && (row ? true : stacksOf(run, 'C25') > 0))
+      ? base + Math.max(0, Math.floor(bonus))
       : base;
     return unit * n;
   }
-  function sellBuff(id) {
+  /** 卖出：`ref` 优先当 uid（精确卖那一条），否则按 id 卖**最后拿到的那一栏**（LIFO）。 */
+  function sellBuff(ref) {
     const run = endless().run;
     if (!run || !run.shop) return { ok: false };
     const guard = trialShopGuard(run);
     if (guard) return guard;
+    const hit = findRowRef(run, ref);
+    if (!hit) return { ok: false };
+    const row = hit.row, list = hit.list, id = row.id;
     const buff = D().BUFF_BY_ID[id];
-    if (!buff || buff.kind === 'instant' || D().hasTag(buff, 'hidden')) return { ok: false };   // 隐藏型不可出售（只有即时类不留存、无从卖出）
-    for (const list of [run.permanent || [], run.limited || []]) {
-      /* 【任务3】同名可能有多栏位 → 卖**最后拿到的那一栏**（LIFO，与商店列表倒序一致）。 */
-      let i = -1;
-      for (let k = (list || []).length - 1; k >= 0; k--) { if (list[k] && list[k].id === id) { i = k; break; } }
-      if (i >= 0) {
-        const stacks = Math.max(1, Math.floor(Number(list[i].stacks) || 1));
-        const gain = sellPriceOf(run, buff, stacks);   // 只算这一栏的层数
-        list.splice(i, 1);
-        resetGrowth(run, id, stacks);
-        run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== id);
-        run.coins += gain;
-        logBuff(run, id, 'lose', { detail: '商店卖出 ' + (stacks > 1 ? ('×' + stacks + ' 层 ') : '') + '+' + gain + ' 试炼币' });
-        save();
-        return { ok: true, gain };
-      }
-    }
-    return { ok: false };
+    if (!buff || buff.kind === 'instant' || D().hasTag(buff, 'hidden')) return { ok: false };   // 隐藏型不可出售
+    const stacks = Math.max(1, Math.floor(Number(row.stacks) || 1));
+    const gain = sellPriceOf(run, buff, stacks, row);   // 只算这一栏的层数（含这一栏自己的累计加价）
+    list.splice(list.indexOf(row), 1);
+    resetGrowth(run, id, stacks, row);
+    syncSlotFree(run);
+    run.coins += gain;
+    logBuff(run, id, 'lose', { detail: '商店卖出 ' + (stacks > 1 ? ('×' + stacks + ' 层 ') : '') + '+' + gain + ' 试炼币' });
+    save();
+    return { ok: true, gain, id, uid: row.uid };
   }
   /** 商店逛完：进入结算点（每 5 层的固定流程 商店 → 结算）。 */
   function openRestShop() {
@@ -3553,13 +4095,12 @@
       score: pts, pendingPick: res.pendingPick || null };
   }
   /** 收走一件已有增益（交换的「取走」那一半）：增益本体 + 槽位 / 附魔 / 成长登记一起回收。 */
-  function takeOwnedBuff(run, id) {
-    let row = null, list = null;
-    for (const L of [run.permanent || [], run.limited || []]) {
-      const found = (L || []).find((b) => b.id === id);
-      if (found) { row = found; list = L; break; }
-    }
-    if (!row) return null;
+  function takeOwnedBuff(run, ref) {
+    /* 【2026-10 同名逐条】`ref` 优先当 uid（精确到那一条），否则按 id 取最后一条。 */
+    const hit = findRowRef(run, ref);
+    if (!hit) return null;
+    const row = hit.row, list = hit.list;
+    const id = row.id;
     const stacks = Math.max(1, Math.floor(Number(row.stacks) || 1));
     const snapshot = Object.assign({}, row);
     list.splice(list.indexOf(row), 1);
@@ -3575,8 +4116,8 @@
       dropPickBoost(run, id);
       if (run.pendingPick && run.pendingPick.buffId === id) run.pendingPick = null;
     }
-    run.slotFreeIds = (run.slotFreeIds || []).filter((x) => x !== id);
-    resetGrowth(run, id, stacks);                            // 成长类累计按「卖出」同一口径回收
+    syncSlotFree(run);                                       // 行已摘掉 → 镜像跟着重算
+    resetGrowth(run, id, stacks, snapshot);                  // 只回收**这一栏**的成长
     logBuff(run, id, 'lose', { detail: '铸币商店交换' });
     return { row: snapshot, stacks: stacks };
   }
@@ -3609,31 +4150,34 @@
     const anyList = D().mintPool.filter((b) => b.id !== srcId && ownable(run, b) && poolFilter(run, b));
     return anyList.length ? (pickByShopWeight(anyList, run) || anyList[0]) : null;
   }
-  /** 免费交换：拿自己的一件永久 / 限次增益，换一件新的（不花铸币）；做成就收摊。 */
-  function swapMintBuff(id) {
+  /** 免费交换：拿自己的一件永久 / 限次增益，换一件新的（不花铸币）；做成就收摊。
+   *  【2026-10 同名逐条】`ref` 优先当 uid（交换指定的那一条），否则按 id 取最后一条。 */
+  function swapMintBuff(ref) {
     const run = endless().run;
     if (!run || !run.shop || !run.shop.mint) return { ok: false, msg: '现在不在铸币商店里。' };
     if (!swapAllowedOf(run)) return { ok: false, msg: '刷新过货架之后就不能再免费交换了。' };
+    const hit = findRowRef(run, ref);
+    if (!hit) return { ok: false, msg: '这件增益不在本局身上。' };
+    const row = hit.row;
+    const id = row.id;
     const buff = D().BUFF_BY_ID[id];
     if (!buff) return { ok: false, msg: '没有这件增益。' };
     if (buff.kind === 'instant' || D().hasTag(buff, 'hidden')) return { ok: false, msg: '只有永久 / 限次增益能拿去交换。' };
-    const row = ownedEntry(run, id);
-    if (!row) return { ok: false, msg: '这件增益不在本局身上。' };
     /* 免占位的（虚空铭文附魔过）换掉腾不出格子：提前说清楚，别先收走再失败。 */
     const target = rollSwapTarget(run, buff);
     if (!target) return { ok: false, msg: '现在没有能换给你的增益（池子里的都被你拿满了）。' };
-    if ((run.slotFreeIds || []).includes(id) && occupiesPermSlot(target)
+    if (rowFreeOf(row) && occupiesPermSlot(target)
         && permUsed(run) >= permSlots(run)) {
       return { ok: false, msg: '【' + buff.name + '】已被虚空铭文附魔、不占槽位；永久增益栏已满，换它腾不出位置。' };
     }
-    const taken = takeOwnedBuff(run, id);
+    const taken = takeOwnedBuff(run, Number(row.uid) > 0 ? Number(row.uid) : id);
     const res = addBuff(run, target.id);
     if (!res || !res.ok) {
       /* 兜底（正常走不到）：把源增益原样放回去，不让玩家白掉一条。 */
       const L = buff.kind === 'permanent' ? (run.permanent || (run.permanent = [])) : (run.limited || (run.limited = []));
       if (taken) L.push(taken.row);
       applyBuffOnAcquire(run, buff);   // 含永久 maxHpMul 的粘性折算（见该函数）
-      run.slotFreeIds = (run.slotFreeIds || []).concat([id]).filter((v, i, a) => a.indexOf(v) === i);
+      if (taken && taken.row && taken.row.slotFree) markRowFree(run, taken.row);
       save();
       return { ok: false, msg: (res && res.msg) || '交换失败。' };
     }
@@ -3641,7 +4185,7 @@
     const pts = scoreBuffAcquire(run, target);
     closeMintShop(run);
     save();
-    return { ok: true, from: id, fromName: buff.name, fromRarity: buff.rarity,
+    return { ok: true, from: id, fromUid: row.uid, fromName: buff.name, fromRarity: buff.rarity,
       buff: target, score: pts, pendingPick: res.pendingPick || null };
   }
   /** 免费刷新货架（一次）。刷新之后就不能再用「免费交换」了。 */
@@ -3718,29 +4262,28 @@
   /** 本局可被放弃的永久增益（隐藏型本来就不占槽，不算）。 */
   function sacrificeCandidates(run) {
     return (run.permanent || [])
-      .map((b) => ({ id: b.id, stacks: Math.max(1, Math.floor(Number(b.stacks) || 1)),
+      .map((b) => ({ id: b.id, uid: b.uid, slotFree: rowFreeOf(b), stacks: Math.max(1, Math.floor(Number(b.stacks) || 1)),
         buff: D().BUFF_BY_ID[b.id] }))
       .filter((x) => x.buff && !D().hasTag(x.buff, 'hidden'));
   }
-  /** 放弃一个永久增益（20 起每 10 层的必经步骤）。放弃后继续推进到下一层。 */
-  function sacrificePerm(id) {
+  /** 放弃一个永久增益（20 起每 10 层的必经步骤）。`ref` 优先当 uid（精确到那一条）。放弃后继续推进到下一层。 */
+  function sacrificePerm(ref) {
     const run = endless().run;
     if (!run || run.phase !== 'sacrifice') return { ok: false, msg: '现在不是放弃永久增益的时机。' };
-    const cands = sacrificeCandidates(run);
-    if (!cands.length) {                      // 没有可放弃的（理论上不会走到）→ 直接放行
-      run.phase = null; advanceLayer(run, 'endless'); save();
-      return { ok: true, skipped: true };
-    }
-    const pick = cands.find((x) => x.id === id);
-    if (!pick) return { ok: false, msg: '只能放弃你已有的永久增益。' };
+    const hit = findRowRef(run, ref);
+    const row = hit && hit.list === run.permanent ? hit.row : null;
+    if (!row) return { ok: false, msg: '只能放弃你已有的永久增益。' };
+    const id = row.id;
+    const pick = { id: id, buff: D().BUFF_BY_ID[id] };
+    if (!pick.buff) return { ok: false, msg: '只能放弃你已有的永久增益。' };
     /* 从永久列表里摘掉（叠层的一次只掉一层，掉光才移出）。 */
-    const row = (run.permanent || []).find((b) => b.id === id);
-    if (row) {
-      row.stacks = Math.max(0, Math.floor(Number(row.stacks) || 1) - 1);
-      if (row.stacks <= 0) run.permanent = run.permanent.filter((b) => b !== row);
+    row.stacks = Math.max(0, Math.floor(Number(row.stacks) || 1) - 1);
+    if (row.stacks <= 0) {
+      /* 老口径：放弃**不回收**成长 —— run 级字段保持不动，只把这一条从永久表移除。 */
+      run.permanent = run.permanent.filter((b) => b !== row);
     }
     /* 虚空铭文的免占位要一并清掉（那条增益已经不在本局了）。 */
-    run.slotFreeIds = (run.slotFreeIds || []).filter((v) => v !== id);
+    syncSlotFree(run);
     /* 成长类已经冻结进 run 的收益**不回收**（与「卖出/替换后保留」的既有口径一致），
      * 但治愈类/烙印类的即时登记要按份数退回：这里只处理「获得时写进 run 的一次性登记」。 */
     const mods = pick.buff.mods || {};
@@ -3748,7 +4291,7 @@
     /* 兜底：选取型强化（C32/C33）目前带 hidden、不会出现在放弃候选里；
      * 万一将来去掉 hidden，这里保证加成与待选取状态一起清掉。 */
     if (id === 'C32' || id === 'C33') { dropPickBoost(run, id); run.pickBuffIds = (run.pickBuffIds || []).filter((x) => x !== id); }
-    const log = { id: id, name: pick.buff.name, stacks: row ? 0 : 0 };
+    const log = { id: id, name: pick.buff.name, stacks: row.stacks };
     run.lastSacrifice = { id: id, name: pick.buff.name, layer: run.layer };
     run.phase = null;
     advanceLayer(run, 'endless');
@@ -3892,12 +4435,19 @@
         ticketsOnExit: D().endlessTickets(e.run.layer)
           + Math.max(0, Math.floor(Number(e.run.retryToken) || 0)) } : null };
   }
-  function progressOf(run, id) {
+  function progressOf(run, id, row) {
     const g = globalMul(run);
     const pct = (v) => Math.round((Number(v) || 0) * 100);
+    /* 【2026-10 同名逐条】传了 `row` 就显示**这一栏自己的**成长进度，不再各栏显示同一个合计；
+     * 这一栏还没有账本（老档 / 外部直接写了 run 级字段）时退回 run 级合计。 */
+    const rowStacks = (fallbackId) => (row ? Math.max(1, Math.floor(Number(row.stacks) || 1)) : Math.max(1, stacksOf(run, fallbackId)));
+    const rowVal = (key, fallback) => {
+      const v = row ? growOf(row, key) : 0;
+      return v > 0 ? v : Math.max(0, Number(fallback) || 0);
+    };
     if (id === 'C06') {
-      const cap = D().BUFF_BY_ID.C06.mods.killPowerCap * Math.max(1, stacksOf(run, 'C06')) * g;
-      return '已累计 攻击 +' + pct(run.killPower) + '%（上限 +' + pct(cap) + '%）';
+      const cap = D().BUFF_BY_ID.C06.mods.killPowerCap * rowStacks('C06') * g;
+      return '已累计 攻击 +' + pct(rowVal('killPower', run.killPower)) + '%（上限 +' + pct(cap) + '%）';
     }
     /* C07 吞噬成长：累计值在 run.winMaxHp、上限字段是 mods.winMaxHpCap。
      * 原来这里读的是运行态里的「击杀成长」历史字段，以及一个**根本不存在的上限字段**
@@ -3907,27 +4457,42 @@
      * 于是面板永远显示「生命上限 +0%（上限 +0%）」，看起来就像这条增益完全没生效
      * （效果本身其实是好的，只是显示错了）。 */
     if (id === 'C07') {
-      const cap = D().BUFF_BY_ID.C07.mods.winMaxHpCap * Math.max(1, stacksOf(run, 'C07')) * g;
-      return '已累计 生命上限 +' + pct(run.winMaxHp) + '%（上限 +' + pct(cap) + '%）';
+      const cap = D().BUFF_BY_ID.C07.mods.winMaxHpCap * rowStacks('C07') * g;
+      return '已累计 生命上限 +' + pct(rowVal('winMaxHp', run.winMaxHp)) + '%（上限 +' + pct(cap) + '%）';
     }
-    if (id === 'C11') return '已累计 生命上限 +' + Math.round(Number(run.winHpFlat) || 0);
+    if (id === 'C11') return '已累计 生命上限 +' + Math.round(rowVal('winHpFlat', run.winHpFlat));
     if (id === 'C34' || id === 'C35') {
       const def34 = D().BUFF_BY_ID[id];
       const stacks34 = stacksOf(run, id) || 1;
       const per = (def34.mods.powerPerEmptySlot != null ? def34.mods.powerPerEmptySlot : def34.mods.powerPerPermBuff) * g;
-      const n = id === 'C34'
+      let n = id === 'C34'
         ? Math.max(0, permSlots(run) - permUsed(run))
-        : (run.permanent || []).length;
-      const total = per * n * stacks34;
+        : (function () {
+            /* C35 厚积薄发：附魔件按 enchantedWeight（0.2）折算，与 aggregate 同口径。
+             * 累加出来的是浮点数 —— **计算与显示都保留一位小数**（用户口径 2026-10），
+             * 否则面板会出现「3.4000000000000004 个永久增益」。 */
+            const w = def34.mods.powerPerPermBuffEnchantedWeight != null
+              ? Math.max(0, Number(def34.mods.powerPerPermBuffEnchantedWeight)) : 1;
+            let c = 0;
+            for (const row of (run.permanent || [])) c += rowFreeOf(row) ? w : 1;
+            return c;
+          })();
+      n = Math.round(n * 10) / 10;
+      /* total 用**已保留一位小数的份数**算，避免 0.2 累加带来的浮点尾巴。 */
+      const total = Math.round(per * n * stacks34 * 1000) / 1000;
       const unit = id === 'C34' ? '空槽' : '永久增益';
-      return '当前 ' + n + ' 个' + unit + ' × ' + Math.round(per * 100) + '%' +
-        (stacks34 > 1 ? ' × ' + stacks34 + ' 层' : '') + ' = 攻击 +' + Math.round(total * 100) + '%' +
+      /* 份数：轻装上阵（C34）是整数空槽，原样显示；厚积薄发（C35）固定一位小数。
+       * 百分比保留一位小数并按需去掉多余的 .0（10.0% → 10%）。 */
+      const countText = id === 'C34' ? String(n) : n.toFixed(1);
+      const pctText = (v) => { const s = (v * 100).toFixed(1); return s.replace(/\.0$/, ''); };
+      return '当前 ' + countText + ' 个' + unit + ' × ' + Math.round(per * 100) + '%' +
+        (stacks34 > 1 ? ' × ' + stacks34 + ' 层' : '') + ' = 攻击 +' + pctText(total) + '%' +
         '（永久位 ' + permUsed(run) + '/' + permSlots(run) + '）';
     }
     if (id === 'C12') {
-      return '第 10 层起已累计 力 +' + Math.round(Number(run.winStatPower) || 0) +
-        ' / 敏 +' + Math.round(Number(run.winStatAgility) || 0) +
-        ' / 速 +' + Math.round(Number(run.winStatSpeed) || 0);
+      return '第 10 层起已累计 力 +' + Math.round(rowVal('winStatPower', run.winStatPower)) +
+        ' / 敏 +' + Math.round(rowVal('winStatAgility', run.winStatAgility)) +
+        ' / 速 +' + Math.round(rowVal('winStatSpeed', run.winStatSpeed));
     }
     if (id === 'C20') {
       /* 三项都是「终乘」：写在最终值上，而不是并进攻击/敏捷/速度面板（否则会被别的乘区稀释）。
@@ -3948,11 +4513,12 @@
     }
     if (id === 'N14') return '生命 ≤' + pct(D().BUFF_BY_ID.N14.mods.lowHpAt) + '% 时减伤 ' + pct(-D().BUFF_BY_ID.N14.mods.lowHpTakenMul);
     if (id === 'C48') {
-      const cap = (D().BUFF_BY_ID.C48.mods.winTakenMulCap || 0.25) * Math.max(1, stacksOf(run, 'C48'));
-      return '已累计 受到伤害 −' + pct(winTakenMulOf(run)) + '（上限 −' + pct(cap) + '）';
+      const cap = (D().BUFF_BY_ID.C48.mods.winTakenMulCap || 0.25) * rowStacks('C48');
+      const v = row ? growOf(row, 'winTakenMul') : winTakenMulOf(run);
+      return '已累计 受到伤害 −' + pct(v) + '（上限 −' + pct(cap) + '）';
     }
     if (id === 'N15') return '接下来免疫一切反伤（荆棘 / 镜鳞 / 绝对防御）';
-    if (id === 'C25') return '本局已累计 卖价 +' + Math.round(Number(run.sellBonus) || 0) + ' 试炼币（只加自己）';
+    if (id === 'C25') return '这一本已累计 卖价 +' + Math.round(rowVal('sellBonus', run.sellBonus)) + ' 试炼币（只加自己）';
     const def = D().BUFF_BY_ID[id];
     if (def && def.mods && def.mods.fragileStat) {
       const key = def.mods.fragileStat;
@@ -3960,20 +4526,36 @@
       const fb = fragileBonus(run, key);
       const now = Math.round(fb.value * 100);
       if (fb.burned) return (names[key] || key) + ' +' + now + '%（已损毁：全额并本局永久保留）';
-      /* 「损毁后」的预览必须和 fragileBonus 同一口径：损毁把这一份从「半效」变成
-       * 「整份进 burned」，即 0.5×base + burned + 本条的 pct（不回收 base）。
-       * 以前显示的是 base + burned，会把 12% 说成 16%。 */
-      const nextPct = Math.max(0, Number(def.mods.fragilePct) || 0);
-      const after = Math.round((fb.base * 0.5 + fb.burned + nextPct) * 100);
-      return (names[key] || key) + ' +' + now + '%（烙印存在：半效；损毁后升为 ' +
+      /* 「损毁后」的预览必须和 fragileBonus 同一口径：破碎把这一份从「存在值」
+       * （fragilePct）换成「损毁值」（fragileBurnedPct），base 这份被收回。 */
+      const alive = Math.max(0, Number(def.mods.fragilePct) || 0);
+      const burnedNext = Math.max(0, Number(def.mods.fragileBurnedPct != null
+        ? def.mods.fragileBurnedPct : alive) || 0);
+      const after = Math.round((fb.base - alive + fb.burned + burnedNext) * 100);
+      return (names[key] || key) + ' +' + now + '%（烙印存在；损毁后升为 ' +
         after + '% 并本局永久保留）';
     }
     if (id === 'C36') {
       const sg = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, run.spendGain || {});
-      const procs = Math.max(0, Math.floor(Number(run.shopSpendProcs) || 0));
-      const step = shopSpendStepFor(D().BUFF_BY_ID.C36, procs);
+      /* 各栏各自记进度：总次数求和，「距下次」取**最快满的那一栏**（玩家最关心的数）。 */
+      const rows36 = (run.permanent || []).filter((b) => b && b.id === 'C36');
+      const procs = rows36.length
+        ? rows36.reduce((n, b) => n + Math.max(0, Math.floor(Number(b.procs) || 0)), 0)
+        : Math.max(0, Math.floor(Number(run.shopSpendProcs) || 0));
+      const copies = Math.max(1, rows36.length || stacksOf(run, 'C36'));
+      let best = null;
+      for (const row of rows36) {
+        const p = Math.max(0, Math.floor(Number(row.procs) || 0));
+        const st = shopSpendStepFor(D().BUFF_BY_ID.C36, p);
+        const have = Math.max(0, Number(row.spend) || 0);
+        const left = Math.max(0, st - have);
+        if (!best || left < best.left) best = { left: left, step: st, have: have };
+      }
+      const step = best ? best.step : shopSpendStepFor(D().BUFF_BY_ID.C36, procs);
+      const have = best ? best.have : Math.floor(Number(run.shopSpend) || 0);
       return '已累计 力 +' + sg.power + ' / 敏 +' + sg.agility + ' / 速 +' + sg.speed + ' / 生命 +' + sg.hp +
-        '（已提升 ' + procs + ' 次 · 距下次 ' + Math.floor(Number(run.shopSpend) || 0) + '/' + step + ' 试炼币）';
+        '（已提升 ' + procs + ' 次' + (copies > 1 ? ' · ×' + copies + ' 份' : '') +
+        ' · 距下次 ' + have + '/' + step + ' 试炼币）';
     }
     return null;
   }
@@ -3997,16 +4579,17 @@
        * （只有 BUFF_BY_ID 里存在的 id 才会留在 permanent / limited 里）。 */
       if (!buff || D().hasTag(buff, 'hidden')) return;   // 隐藏型（背包/选取类）不进增益面板
       out.push({ id: buff.id, name: buff.name, desc: D().descOf(buff, mode), rarity: buff.rarity, kind: buff.kind,        scopeName: scopeName[buff.kind], stacks: entry.stacks || 1,
-        progress: progressOf(run, buff.id),
+        progress: progressOf(run, buff.id, entry),
         uses: buff.kind === 'limited' ? entry.uses : undefined,
         nextBattle: D().hasTag(buff, 'nextBattle'),   // 挑战塔里 = 「下一场战斗」，卡面不显示限次
         on: buff.kind === 'limited' ? entry.on !== false : true,
         /* 获得顺序（越早拿到的越小）与「是否被虚空铭文附魔过（不占位）」——
          * 商店的出售 / 交换列表按这两个字段排（见 sortForSell）。 */
         at: Math.max(0, Math.floor(Number(entry.at) || 0)),
-        slotFree: (run.slotFreeIds || []).indexOf(buff.id) >= 0,
+        /* 【任务2】逐条判断：同名件里只有被附魔的那一条显示「不占位」。 */
+        slotFree: rowFreeOf(entry), uid: entry.uid,
         sellable: !!run.shop && buff.kind !== 'instant' && !D().hasTag(buff, 'hidden'),
-        sellPrice: sellPriceOf(run, buff, entry.stacks || 1) });
+        sellPrice: sellPriceOf(run, buff, entry.stacks || 1, entry) });
     };
     (run.permanent || []).forEach(add);
     (run.limited || []).forEach(add);
@@ -4066,6 +4649,13 @@
     poolFilterOf: (run, buff) => poolFilter(run || endless().run, buff),
     /* 只读：本条增益当前还能不能获得（叠层上限口径）。 */
     ownableOf: (run, buff) => ownable(run || endless().run, buff),
+    /* 只读（测试/文档）：这件永久增益「叠满后能不能另开一个背包栏位继续叠」。
+     * false = 拿满即出池（oncePerRun / noRestack / 不占槽的选取型）。 */
+    permanentRestackableOf: (buff) => permanentRestackable(buff),
+    /* 只读（测试/探针）：永久增益**逐条**统计的占位数量（被附魔的那些不占位）。 */
+    permUsedOf: (run) => permUsed(run || endless().run),
+    permSlotsOf: (run) => permSlots(run || endless().run),
+    stacksOf: (run, id) => stacksOf(run || endless().run, id),
     /* 只读：一条增益当前的抽中权重（shopWeight × 重复获得惩罚，含碎掉的烙印份数）。
      * 测试用；界面也可以拿它显示「重复获得概率」。 */
     buffWeightOf: (run, idOrBuff) => {
@@ -4073,12 +4663,20 @@
       const b = (idOrBuff && typeof idOrBuff === 'object') ? idOrBuff : D().BUFF_BY_ID[idOrBuff];
       return buffWeightOf(r, b);
     },
-    /* 只读：「豪掷千金」抽限次增益时的权重（含按稀有度的削弱倍率）。测试用。 */
-    limitedRarityExtraOf: (run, id) => limitedRarityExtra(run || endless().run, D().BUFF_BY_ID[id]),
-    limitedGrantWeightOf: (run, id) => {
-      const r = run || endless().run, b = D().BUFF_BY_ID[id];
-      return buffWeightOf(r, b) * limitedRarityExtra(r, b);
+    /* 只读：一条增益的**动态惩罚**（随本局状态变化，恒 ≤1）—— 豪掷千金/测试用。 */
+    buffDynamicPenaltyOf: (run, idOrBuff) => {
+      const r = run || endless().run;
+      const b = (idOrBuff && typeof idOrBuff === 'object') ? idOrBuff : D().BUFF_BY_ID[idOrBuff];
+      return buffDynamicPenaltyOf(r, b);
     },
+    /* 只读：「豪掷千金」抽限次增益时的权重。测试用。
+     *   limitedRerollPaidOf  ：基准刷新档（默认 10 试炼币）；
+     *   limitedGrantWeightsOf：整池 [{buff, weight}]（商店该档下的动态权重，直接抽签）；
+     *   limitedGrantWeightOf ：单件权重（内部按整池现算）。 */
+    limitedRerollPaidOf: () => limitedRerollPaid(),
+    limitedGrantWeightsOf: (run) => limitedGrantWeights(run || endless().run)
+      .map((x) => ({ id: x.buff.id, weight: x.weight })),
+    limitedGrantWeightOf: (run, id) => limitedGrantWeightOf(run || endless().run, D().BUFF_BY_ID[id]),
     /* 只读（测试/调试）：按当前对局状态算「动态档位权重」。
      * 传 pool（可选，默认无尽池）与 baseTier（可选，默认未归一化档位权重）。 */
     dynamicTierWeightsOf: (run, pool, baseTier) => {
@@ -4099,6 +4697,27 @@
     /* 调试/测试：直接摇一页试炼商店货架 / 一组战斗奖励选项（走真实抽取路径，含传奇保底）。 */
     _debugRollShopSlots: (run, paid) => rollShopSlots(run || endless().run, paid || 0),
     _debugRollChoices: (mode, run) => rollChoices(mode || 'endless', run || endless().run),
+    /* 调试/测试：走真实的「豪掷千金随机限次增益」抽取路径，返回抽到的 id（池空则 null）。 */
+    _debugGrantRandomLimited: (run) => grantRandomLimited(run || endless().run),
+    /* 调试/测试：对某一条栏位单独摇一次破碎判定（pct=0 时只推进/记录它自己的随机数种子）。
+     * 用来验证「逐条（uid）各自持有破碎随机数」。 */
+    _debugFragileRollOf: (run, ref, pct) => {
+      const r = run || endless().run;
+      const hit = findRowRef(r, ref);
+      if (!hit) return null;
+      const broke = fragileRoll(r, hit.row, Math.max(0, Number(pct) || 0));
+      return { id: hit.row.id, uid: hit.row.uid, seed: hit.row.fragileSeed, broke: broke };
+    },
+    /* 只读：某一条栏位自己的成长账本（同名逐条口径）。 */
+    rowGrowOf: (run, ref) => {
+      const hit = findRowRef(run || endless().run, ref);
+      return hit ? cleanGrowObj(hit.row.grow) : null;
+    },
+    /* 只读：某一条栏位自己的引用（uid 优先）。 */
+    rowRefOf: (run, ref) => {
+      const hit = findRowRef(run || endless().run, ref);
+      return hit ? { id: hit.row.id, uid: hit.row.uid, key: Number(hit.row.uid) > 0 ? String(hit.row.uid) : String(hit.row.id) } : null;
+    },
     /* 只读（测试/UI）：终焉烙印（C49）的最终乘区 —— 按层加算（1 + 0.25×存在 + 0.5×损毁）。 */
     fragileFinalMulOf: (run) => fragileFinalMul(run || endless().run),
     /* 只读（测试/UI）：传奇保底的当前计数与阈值（B 方案）。 */

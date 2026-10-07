@@ -164,6 +164,44 @@
   }
   const stageRoleIndex = (npcIndex) => Math.max(1, Math.min(3, Math.round(Number(npcIndex) || 1))) - 1;
 
+  /* ============================================================
+   * 【D5b】常驻挑战的「当日重复惩罚」
+   *
+   * 2026-10 第十四批（用户口径）：一天之内每多打一次常驻挑战，所有常驻挑战的
+   * 敌人全属性（力/敏/速/血）再 +5%，**叠加无上限** —— 抑制一天之内无限刷。
+   *   · count = State.challengeDailyCount()（每赢下一场关卡战斗 +1，随每日刷新归零）
+   *   · 乘区 = 1 + 0.05 × count（count = 0 → ×1，第一天照旧）
+   * 只作用在**关卡模式**的敌人构建上（classic-ui 的 stageFight）；
+   * 挑战塔 / 无尽塔走各自的敌人构建（tower.js 的 buildFoe），不读这里。
+   * ============================================================ */
+  const CHALLENGE_DAILY_STAT_STEP = 0.05;
+  function challengeDailyMul(count) {
+    const n = Math.max(0, Math.floor(Number(count) || 0));
+    return 1 + CHALLENGE_DAILY_STAT_STEP * n;
+  }
+  /** 把乘区套到一项数值上（至少 1，四舍五入）。 */
+  function challengeDailyScale(value, count) {
+    return Math.max(1, Math.round((Number(value) || 0) * challengeDailyMul(count)));
+  }
+  /** 关卡模式（常驻挑战）的敌人对象：三维走 stageNpcStats，血走 npc.hp（npcOf 已填攻略表），
+   *  最后统一套上「当日重复惩罚」乘区。两个 UI（classic-ui / 遗留 ui.js）共用这一份，
+   *  避免两边算法漂移。 */
+  function stageFoe(npc, stageId, anim, dailyCount) {
+    const st = stageNpcStats(npc);
+    const n = Math.max(0, Math.floor(Number(dailyCount) || 0));
+    return {
+      name: npc && npc.name, level: 10 + Number(stageId) * 2,
+      power: challengeDailyScale(st.power, n),
+      agility: challengeDailyScale(st.agility, n),
+      speed: challengeDailyScale(st.speed, n),
+      hp: challengeDailyScale(npc && npc.hp, n),
+      weapons: [],
+      skills: String((npc && npc.skills) || '').split('|').filter(Boolean)
+        .map((s) => { const q = s.split(':'); return { id: +q[0], level: +q[1] }; }),
+      npcType: anim,
+    };
+  }
+
   const STAGE_HP_MUL = 1.18;
   function stageNpcHp(stageId, npcIndex) {
     const role = stageRoleIndex(npcIndex);
@@ -222,6 +260,8 @@
     master: null, prentices: [],
     lastEnergyTs: 0, reborn: 0, joinRankCount: 0, lotteryDate: '', lotteryFree: 1,
     woodRecord: 0, dailyClaimDate: '', battles: [], shopPurchaseDate: '', shopPurchases: {},
+    /* 常驻挑战的「当日已通关次数」：{date, count}，每日递增惩罚的计数（见 State.challengeDailyCount）。 */
+    challengeDaily: null,
     tower: { maxLayer: 0, run: null },                                    // 无尽挑战塔（主塔）
     endless: { best: 0, weekBest: 0, weekKey: '', bestLayer: 0, shieldDate: '', run: null },
   };
@@ -318,5 +358,5 @@
   window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
     STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
     trueLevel, trueSkillValue, trueSkillRow, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
-    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize };
+    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize };
 })();

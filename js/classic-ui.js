@@ -567,7 +567,9 @@
       const has=own.find(x=>x.id===it.id);
       const selected=has && selectedItems[kind]===it.id;
       const trueForm = has && kind === 'weapon' && isTrueGear(has);
-      return '<button class="catalog-cell '+(!has?'locked':selected?'selected':'')+(trueForm?' true-form':'')+'" data-item="'+it.id+'" aria-label="'+esc(it.name)+(has?' '+levelLabel(has.level):' 尚未获得')+'"><span class="item-icon">'+icon(kind,it.id,!has,selected,trueForm)+'</span><span class="item-caption">'+(selected?esc(it.name):has?levelLabel(has.level):'')+'</span></button>';
+      /* 2026-10 用户口径：选中之后格子下方的说明**仍然显示等级**（LV/真N），
+       * 不再换成该武器 / 技能的名字（名字在详情弹窗里看）。 */
+      return '<button class="catalog-cell '+(!has?'locked':selected?'selected':'')+(trueForm?' true-form':'')+'" data-item="'+it.id+'" aria-label="'+esc(it.name)+(has?' '+levelLabel(has.level):' 尚未获得')+'"><span class="item-icon">'+icon(kind,it.id,!has,selected,trueForm)+'</span><span class="item-caption">'+(has?levelLabel(has.level):'')+'</span></button>';
     }).join('')+Array.from({length:10-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('');
     const p=page('status',key,'<div class="catalog-grid">'+cells+'</div>'+(catalogPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(catalogPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(catalogPage+1)+'/'+total,cls:'collection-board'});
     $$('[data-item]',p).forEach(b=>b.onclick=()=>{selectedItems[kind]=+b.dataset.item;openCatalog(kind,catalogPage);openItem(kind,+b.dataset.item);});
@@ -740,7 +742,12 @@
     const S=State.state(),type=GData.stageTypeOf(stageId),run=State.stageRun(stageId),idx=run?run.npcIndex:1,npc=State.npcOf(stageId,idx),reward=State.stageReward(stageId);
     const exhausted=run&&run.needsRevive&&run.revives>=2;
     const cost=exhausted?'复活机会已用完':run?(run.needsRevive?'复活需1个挑战书':'不消耗挑战书'):'每轮1个挑战书';
-    const text='<div class="mission-guide"><img alt="向导" src="images/classic/characters/master-classic.png"><div>【消耗】：'+cost+'<br>【奖励】：每场经验 '+GData.stageNpcExp(stageId,1)+'/'+GData.stageNpcExp(stageId,2)+'/'+GData.stageNpcExp(stageId,3)+'<br>通关得金松果'+reward.gold+'，每场胜利有几率得碎片<br><span class="small-label">现有挑战书 '+(S.props[23]||0)+' 个</span></div></div><p class="mission-description">连续击败3名敌人，后两场战斗不回满血（继承剩余血量并回复25%）。<br>当前对手：'+esc(npc.name)+'（'+idx+'/3）<br>'+(run?'本轮已复活 '+run.revives+'/2 次。':type.recommend+'。')+'</p>';
+    /* 常驻挑战的「当日重复惩罚」提示：今天已进行几次、当前敌方加成多少。 */
+    const dailyCount=State.challengeDailyCount?State.challengeDailyCount():0;
+    const dailyPct=Math.round((GData.challengeDailyMul(dailyCount)-1)*100);
+    const dailyHint='<br><span class="small-label">今日已通关 '+dailyCount+' 次常驻挑战：敌人全属性（力/敏/速/血）+'+
+      (dailyPct>0?('+'+dailyPct+'%'):'+0%')+'（每通关一整次再 +5%，每日 0/12 点重置）</span>';
+    const text='<div class="mission-guide"><img alt="向导" src="images/classic/characters/master-classic.png"><div>【消耗】：'+cost+'<br>【奖励】：每场经验 '+GData.stageNpcExp(stageId,1)+'/'+GData.stageNpcExp(stageId,2)+'/'+GData.stageNpcExp(stageId,3)+'<br>通关得金松果'+reward.gold+'，每场胜利有几率得碎片<br><span class="small-label">现有挑战书 '+(S.props[23]||0)+' 个</span></div></div><p class="mission-description">连续击败3名敌人，后两场战斗不回满血（继承剩余血量并回复25%）。<br>当前对手：'+esc(npc.name)+'（'+idx+'/3）<br>'+(run?'本轮已复活 '+run.revives+'/2 次。':type.recommend+'。')+dailyHint+'</p>';
     const buttons=exhausted?[{label:'结束本轮',run:()=>stageAbandon(stageId)}]:[{label:run?(run.needsRevive?'复活再战':'继续战斗'):'开始战斗',run:()=>stageFight(stageId)}];
     buttons.push({label:run?'稍后继续':'返回',cls:'muted'});
     modal('关卡挑战',text,buttons,{small:true});
@@ -757,9 +764,11 @@
     const npc=State.npcOf(stageId,started.npcIndex),type=GData.stageTypeOf(stageId);
     // 连续挑战不回满血：后两场继承上一场剩余血量，并回复25%
     const prevRun=State.stageRun(stageId),carryHp=prevRun&&Number.isFinite(prevRun.carryHp)?Math.min(1,prevRun.carryHp+0.25):undefined;
-    // 对手三维按关卡难度系数打折（GData.stageNpcStats），血量已在 npcOf 里处理过
-    const npcStats=GData.stageNpcStats(npc);
-    const foe={name:npc.name,level:10+stageId*2,power:npcStats.power,agility:npcStats.agility,speed:npcStats.speed,hp:+npc.hp,weapons:[],skills:(npc.skills||'').split('|').filter(Boolean).map(s=>{const a=s.split(':');return{id:+a[0],level:+a[1]};}),npcType:type.anim};
+    /* 对手：三维走关卡难度系数（GData.stageNpcStats），血量已在 npcOf 里按攻略表算好；
+     * 再统一套「常驻挑战当日重复惩罚」（GData.stageFoe → 今天每多赢一场，敌全属性 +5%）。
+     * 只影响关卡模式；挑战塔 / 无尽塔走各自的敌人构建（tower.js 的 buildFoe），不受影响。 */
+    const dailyCount=State.challengeDailyCount?State.challengeDailyCount():0;
+    const foe=GData.stageFoe(npc,stageId,type.anim,dailyCount);
     const backToStage=()=>openDifficulty(Math.floor((stageId-1)/6));
     const interrupted=()=>{State.interruptStageBattle(stageId,started.token);backToStage();notice('战斗播放中断，本轮进度已保留。重新进入关卡即可继续。');};
     try { Promise.resolve(Main.startBattle(foe,{region:type.anim==='tl'?3:type.anim==='xh'?4:1,kind:'stage',useProps:false,hpRatio:carryHp,

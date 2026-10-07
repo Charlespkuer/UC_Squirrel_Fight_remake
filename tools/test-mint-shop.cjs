@@ -831,7 +831,7 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     const to = pageSrc.indexOf('【U15】', from);
     assert.ok(from > 0 && to > from, '找不到 U14b 那一段');
     const body = pageSrc.slice(from, to);
-    for (const call of ['Tower.buyMintSlot(i)', 'Tower.rerollMintShop()', 'Tower.swapMintBuff(b.id)', 'Tower.leaveMintShop()']) {
+    for (const call of ['Tower.buyMintSlot(i)', 'Tower.rerollMintShop()', 'Tower.swapMintBuff(rowRef(b))', 'Tower.leaveMintShop()']) {
       assert.ok(body.includes(call), '铸币商店页应当调用 ' + call);
     }
   });
@@ -881,7 +881,8 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     run.shop = { mint: true, layer: 7, slots: [], rerollFree: true, rerollCount: 0, swapped: false };
     run.phase = 'shop';
     c.TowerUI.openMintShop();
-    ui.click('mintswapC01');
+    /* 【2026-10 同名逐条】交换按钮按 **uid**（精确到那一条栏位）绑定。 */
+    ui.click('mintswap' + c.Tower.rowRefOf(run, 'C01').key);
     const confirm = ui.last('modal');
     assert.ok(confirm && confirm.content.includes('磐石之躯'), '应当先弹确认窗：' + (confirm && confirm.title));
     ui.modalButton('交换').run();
@@ -1053,9 +1054,11 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     const ui = uiHarness(c);
     const T = c.Tower;
     const run = T._debugRun('endless');
-    run.permanent = [{ id: 'C02', stacks: 1 }, { id: 'C05', stacks: 2 }, { id: 'C11', stacks: 1 }];
+    /* 2026-10 修正后：没有 stackable 标签的件不再同栏叠层，
+     * 所以「层数照旧显示」这条要用**可以合法叠层**的件来验证（C22 闪避精通，上限 3）。 */
+    run.permanent = [{ id: 'C02', stacks: 1 }, { id: 'C22', stacks: 2 }, { id: 'C11', stacks: 1 }];
     run.limited = [];
-    run.slotFreeIds = ['C05'];                       // 坚韧壁垒已经附魔过
+    run.slotFreeIds = ['C22'];                       // 闪避精通已经附魔过
     run.pendingPick = { kind: 'permBuff', buffId: 'C37' };
     c.TowerUI.openPickBuff(run.pendingPick);
     const m = ui.last('modal');
@@ -1065,20 +1068,20 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     assert.equal(labels.length, 3, '三个候选：' + JSON.stringify(labels));
     const done = (m.buttons || []).filter((b) => /已附魔/.test(b.label));
     assert.equal(done.length, 1, '只有一个候选被标「已附魔」：' + JSON.stringify(labels));
-    assert.ok(/坚韧壁垒/.test(done[0].label), '标的正是已经附魔的那条：' + done[0].label);
+    assert.ok(/闪避精通/.test(done[0].label), '标的正是已经附魔的那条：' + done[0].label);
     assert.ok(/已附魔（不占位）/.test(done[0].label), '文案要写清「不占位」：' + done[0].label);
     assert.ok(/×2 层/.test(done[0].label), '层数照旧显示：' + done[0].label);
     assert.ok(/pick-done/.test(done[0].cls), '标记的那张要有独立样式：' + done[0].cls);
     for (const b of (m.buttons || [])) {
-      if (/坚韧壁垒/.test(b.label)) continue;
+      if (/闪避精通/.test(b.label)) continue;          // 已附魔的那张跳过（它本来就带标记）
       assert.ok(!/已附魔/.test(b.label), '没附魔的不该被标：' + b.label);
       assert.ok(/gold/.test(b.cls), '未附魔的保持金色可选样式：' + b.cls);
     }
     assert.ok(/优先挑没标的/.test(m.content), '说明里要点出「已附魔的再选没有额外收益」：' + m.content.slice(0, 200));
     /* 只是「标注」，不禁用：点了仍然能走完流程 */
-    const btn = (m.buttons || []).find((b) => /坚韧壁垒/.test(b.label));
+    const btn = (m.buttons || []).find((b) => /闪避精通/.test(b.label));
     btn.run();
-    assert.ok((run.slotFreeIds || []).indexOf('C05') >= 0, '已经附魔的仍是附魔状态');
+    assert.ok((run.slotFreeIds || []).indexOf('C22') >= 0, '已经附魔的仍是附魔状态');
     assert.equal(run.pendingPick, null, '选完清掉待选取');
   });
 

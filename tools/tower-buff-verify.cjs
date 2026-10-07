@@ -401,8 +401,21 @@ hr('上轮 9：挥金如土');
      * 所以「获得次数」= 属性点数 + 生命增量/5，且应等于 floor(总消费/10)。
      * （步长从 20 改成 10 是需求：增强挥金如土。） */
     const gains = statSum + Math.round((g1.hp - g0.hp) / 5);
-    const step = Math.max(1, Number(TowerData.BUFF_BY_ID.C36.mods.shopSpendStep) || 10);
-    const expectGains = Math.floor((spent + Number(r1.shopSpend || 0)) / step);
+    /* C36 现在是**分段涨价**（shopSpendTiers = [5,10,15]，每 shopSpendTierSize 次一档），
+     * 期望次数要按同一分段曲线算，不能再用单一 shopSpendStep。 */
+    const m36 = TowerData.BUFF_BY_ID.C36.mods;
+    const step = Math.max(1, Number(m36.shopSpendStep) || 5);
+    const tiers = (Array.isArray(m36.shopSpendTiers) && m36.shopSpendTiers.length) ? m36.shopSpendTiers : [step];
+    const tierSize = Math.max(1, Number(m36.shopSpendTierSize) || 20);
+    const expectGains = (function () {
+      let rem = spent + Number(r1.shopSpend || 0), procs = 0, guard = 0;
+      while (guard++ < 100000) {
+        const need = Math.max(1, Number(tiers[Math.min(tiers.length - 1, Math.floor(procs / tierSize))]) || step);
+        if (rem < need) break;
+        rem -= need; procs++;
+      }
+      return procs;
+    })();
     check('每消费 ' + step + ' 币只给四项中的一项', Math.abs(gains - expectGains) <= 1,
       '消费 ' + spent + '，剩余进度 ' + r1.shopSpend + '，共获得 ' + gains + ' 次（力+' + (g1.power - g0.power) +
       ' 敏+' + (g1.agility - g0.agility) + ' 速+' + (g1.speed - g0.speed) + ' 生命+' + (g1.hp - g0.hp) + '）');
@@ -430,7 +443,9 @@ hr('本轮 1a：虚空铭文（附魔一个永久增益免占位）');
     TowerData.BUFF_BY_ID[c.id] && !TowerData.hasTag(TowerData.BUFF_BY_ID[c.id], 'hidden')), cands.map((c) => c.id).join(','));
   const picked = cands[0];
   const before = (r1.permanent || []).length;
-  const ap = Tower.applyPickBuff('permBuff', picked.id);
+  /* 【2026-10 同名逐条】候选带 uid，附魔 / 失去都必须按 **uid** 精确到那一条栏位。 */
+  const pickedRef = (picked && picked.uid != null && Number(picked.uid) > 0) ? picked.uid : picked.id;
+  const ap = Tower.applyPickBuff('permBuff', pickedRef);
   const r2 = Tower._debugRun('endless');
   check('附魔落地成功', !!(ap && ap.ok), JSON.stringify(ap && (ap.msg || '')));
   check('permUsed 比拥有数少 1', r2.permUsed === undefined ? ((r2.permanent || []).length - (r2.slotFreeIds || []).length) === before - 1 : true,
@@ -439,7 +454,7 @@ hr('本轮 1a：虚空铭文（附魔一个永久增益免占位）');
   check('界面数据 permUsed 也少 1', info.run.permUsed === before - 1, 'permUsed=' + info.run.permUsed + ' cap=' + info.run.permCap);
   const again = Tower.debugGrantBuff('C29');
   check('腾出位置后又能再拿一个永久增益', !!(again && again.ok), JSON.stringify(again && again.res && (again.res.msg || 'ok')));
-  Tower.debugLoseBuff(picked.id);
+  Tower.debugLoseBuff(pickedRef);
   const r3 = Tower._debugRun('endless');
   check('失去被附魔的增益后附魔记录一并清掉', !(r3.slotFreeIds || []).includes(picked.id), JSON.stringify(r3.slotFreeIds || []));
   Tower.abandon('endless');
@@ -799,7 +814,7 @@ hr('本轮 5：扩容背包/仓库钥匙不会重复出现在商店');
 }
 
 // ---------- 本轮 7（需求 3 重做）：易碎属性烙印 ----------
-hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留、各自独立随机数');
+hr('易碎属性烙印：破碎前 5%、破碎后 8% 并本局永久保留、各自独立随机数');
 {
   freshRun();
   /* 注意：State.genAI 每次的属性带随机（装备品质），跨两次 genAI 比较绝对值会飘 ——
@@ -809,17 +824,17 @@ hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留�
   const meA = Object.assign({}, base); meA.maxHp = base.hp; nx1.adjustMe(meA);
   const pow0 = meA.power;
   Tower.reportBattle('endless', nx1.token, true, (Tower._debugRun('endless').lastHp || Tower._debugRun('endless').lastMaxHp || 1), Tower._debugRun('endless').lastMaxHp);
-  Tower.debugGrantBuff('C39');                       // 力量烙印：基础 +8%
+  Tower.debugGrantBuff('C39');                       // 力量烙印：存在 +5%
   const run1 = Tower._debugRun('endless');
-  check('拿到时登记基础加成 0.08', Math.abs((run1.fragileBase || {}).power - 0.08) < 1e-6, JSON.stringify(run1.fragileBase));
+  check('拿到时登记存在值 0.05', Math.abs((run1.fragileBase || {}).power - 0.05) < 1e-6, JSON.stringify(run1.fragileBase));
   check('旧的 stickyStat 已不再使用', run1.stickyStat === undefined, JSON.stringify(run1.stickyStat));
   const cur0 = Tower._debugRun('endless');
   const nx2 = Tower.nextBattle('endless');
   const me2 = Object.assign({}, base); me2.maxHp = base.hp; nx2.adjustMe(me2);
-  /* 需求 3：烙印存在时只吃一半 → 实际 +4% */
-  check('存在时半效（力量 +4%）', me2.power / pow0 > 1.02 && me2.power / pow0 < 1.06,
+  /* 2026-10 削弱：存在时就是卡片上的 5%（不再半效） */
+  check('存在时 +5%', me2.power / pow0 > 1.03 && me2.power / pow0 < 1.07,
     pow0 + ' -> ' + me2.power + '（×' + (me2.power / pow0).toFixed(3) + '）');
-  /* 这一场要保证烙印**不碎**，否则面板会变成「已损毁」而不是「存在：半效」。
+  /* 这一场要保证烙印**不碎**，否则面板会变成「已损毁」而不是「存在」。
    * 注入一个「下一步必定不碎」的种子（派生算法与 fragileRoll 一致）。 */
   const miss = (function () {
     const key = String(cur0.salt == null ? 'run' : cur0.salt) + '#' + (Number(cur0.layer) || 0) + '#C39';
@@ -833,13 +848,21 @@ hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留�
     }
     return null;
   })();
-  if (miss != null) cur0.fragileSeeds = { C39: miss };
+  /* 【2026-10】破碎随机数现在记在**行上**（`row.fragileSeed`）：
+   * 要让注入的「下一步必不碎」生效，得先把这一行自己的种子清 0（否则注入被忽略）。 */
+  if (miss != null) {
+    const row0 = (cur0.limited || []).find((b) => b.id === 'C39');
+    if (row0) row0.fragileSeed = 0;
+    cur0.fragileSeeds = { C39: miss };
+  }
   Tower.reportBattle('endless', nx2.token, true, (Tower._debugRun('endless').lastHp || Tower._debugRun('endless').lastMaxHp || 1), Tower._debugRun('endless').lastMaxHp);
   const info = Tower.ownedBuffs('endless').find((b) => b.id === 'C39');
-  check('面板写明「存在：半效」', !!(info && info.progress && info.progress.indexOf('半效') >= 0), info && info.progress);
-  /* 这一段后面会连打最多 200 场，中途玩家**可能又选到同一枚烙印**（基础加成会叠上去），
-   * 所以把「当前基础加成」记下来，后面按它推导期望，而不是写死 8%/12%。 */
+  check('面板写明「烙印存在」', !!(info && info.progress && info.progress.indexOf('烙印存在') >= 0), info && info.progress);
+  /* 这一段后面会连打最多 200 场，中途玩家**可能又选到同一枚烙印**（存在值会叠上去），
+   * 所以把「当前基础加成」记下来，后面按它推导期望，而不是写死数值。 */
   const baseAtStart = Number(((Tower._debugRun('endless').fragileBase || {}).power) || 0);
+  const ALIVE39 = Number(TowerData.BUFF_BY_ID.C39.mods.fragilePct);        // 0.05
+  const BURNED39 = Number(TowerData.BUFF_BY_ID.C39.mods.fragileBurnedPct);  // 0.08
   /* 连打直到损毁。每条烙印有自己的随机序列，不能靠改 Math.random 制造；
    * 直接注入一个「下一步必然碎裂」的种子状态（派生算法与 fragileRoll 一致），
    * 避免靠概率采样导致偶发失败。 */
@@ -878,8 +901,12 @@ hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留�
     if (cur.choices) { clearPhase(); }
     if (cur.phase === 'shop') { Tower.continueFromShop(); continue; }
     if (cur.phase === 'checkpoint') { Tower.continueEndless(); continue; }
+    const rowNow = (cur.limited || []).find((b) => b.id === 'C39');
     const hit = seedForHit(cur.salt, 'C39', TowerData.BUFF_BY_ID.C39.mods.fragileBreakPct, cur.layer);
-    if (hit != null) cur.fragileSeeds = { C39: hit };
+    if (hit != null && rowNow) {
+      rowNow.fragileSeed = 0;               // 逐条口径：清掉这一行自己的种子，注入才会被采用
+      cur.fragileSeeds = { C39: hit };
+    }
     const nx = Tower.nextBattle('endless');
     if (!nx || nx.ok === false) { clearPhase(); continue; }
     Tower.reportBattle('endless', nx.token, true, (Tower._debugRun('endless').lastHp || Tower._debugRun('endless').lastMaxHp || 1), Tower._debugRun('endless').lastMaxHp);
@@ -888,23 +915,30 @@ hr('易碎属性烙印：存在时半效、损毁后全额并本局永久保留�
   }
   check('烙印最终会损毁（注入必碎种子 / 自然概率）', broken, '200 场内未损毁');
   const run2 = Tower._debugRun('endless');
-  /* 需求 3：损毁后基础那份整份转为永久（burned += base）→ 实际 = 0.5×base + base = 1.5×base = 12% */
+  /* 2026-10 削弱：破碎 = 把这一份从「存在值」（fragilePct）换成「损毁值」（fragileBurnedPct）。
+   * 用**不变量**断言（对「连打期间又选到同一枚烙印」也稳健）：
+   *   fragileBase.power = 存在份数 × 5%；fragileBurned.power = 已损毁份数（brokenMarks）× 8%。
+   * 旧写法把期望写成「baseAtStart − 5%」，循环中途一旦又补上一份存在值就会偶发红。 */
+  const liveCopies39 = ((run2.limited || []).filter((b) => b.id === 'C39'))
+    .reduce((n, b) => n + Math.max(1, Math.floor(Number(b.stacks) || 1)), 0);
+  const brokenMarks39 = (run2.brokenMarks || []).filter((m) => m.kind === 'stat' && m.stat === 'power').length;
   const base2 = Number(((run2.fragileBase || {}).power) || 0), burned2 = Number(((run2.fragileBurned || {}).power) || 0);
-  check('损毁后升为全额并永久保留（已损毁份 = 当时的基础份）',
-    Math.abs(burned2 - baseAtStart) < 1e-6 && base2 >= baseAtStart - 1e-6,
-    'base=' + base2 + ' burned=' + burned2 + ' baseAtStart=' + baseAtStart);
-  // 再拿一次 → 基础再 +8%（已损毁那份不受影响）
-  Tower.debugGrantBuff('C39');
+  check('破碎后：存在那份被收回、损毁那份进 burned',
+    Math.abs(base2 - ALIVE39 * liveCopies39) < 1e-6 && Math.abs(burned2 - BURNED39 * brokenMarks39) < 1e-6,
+    'base=' + base2 + ' burned=' + burned2 + ' 存在份=' + liveCopies39 + ' 已损毁份=' + brokenMarks39 +
+    ' baseAtStart=' + baseAtStart);
+  // 再拿一次 → 存在值再 +5%（已损毁那份不受影响）；若循环结束时还留着一份存在值，grant 会被拒（同栏上限 1）
+  const got39 = Tower.debugGrantBuff('C39');
   const base3 = Number(((Tower._debugRun('endless').fragileBase || {}).power) || 0);
-  check('再拿一次基础继续叠加',
-    Math.abs(base3 - (base2 + 0.08)) < 1e-6,
-    'base3=' + base3 + ' base2=' + base2);
+  check('再拿一次存在值继续叠加',
+    (got39 && got39.ok) ? Math.abs(base3 - (base2 + ALIVE39)) < 1e-6 : Math.abs(base3 - base2) < 1e-6,
+    'base3=' + base3 + ' base2=' + base2 + ' 本次是否到手=' + !!(got39 && got39.ok));
   const burned3 = Number(((Tower._debugRun('endless').fragileBurned || {}).power) || 0);
-  // 主动卖掉 → **只收回一份基础加成**（8%），已损毁的永久份原样保留
+  // 主动卖掉 → **只收回一份存在值**（5%），已损毁的永久份原样保留
   Tower.debugLoseBuff('C39');
   const run3 = Tower._debugRun('endless');
-  check('主动失去只收回基础那份（永久份保留）',
-    Math.abs((Number((run3.fragileBase || {}).power) || 0) - (base3 - 0.08)) < 1e-6 &&
+  check('主动失去只收回存在那份（永久份保留）',
+    Math.abs((Number((run3.fragileBase || {}).power) || 0) - (base3 - ALIVE39)) < 1e-6 &&
     Math.abs((Number((run3.fragileBurned || {}).power) || 0) - burned3) < 1e-6,
     JSON.stringify({ baseBefore: base3, baseAfter: run3.fragileBase, burned: run3.fragileBurned, burnedBefore: burned3 }));
   Tower.abandon('endless');

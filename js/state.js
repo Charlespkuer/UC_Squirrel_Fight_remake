@@ -256,6 +256,10 @@
     next.quests = object(raw.quests) && Array.isArray(raw.quests.list) && typeof raw.quests.date === 'string' ? raw.quests : null;
     next.dailyCounters = object(raw.dailyCounters) && typeof raw.dailyCounters.date === 'string' ? raw.dailyCounters : null;
     next.dailyStatsDate = typeof next.dailyStatsDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(next.dailyStatsDate) ? next.dailyStatsDate : '';
+    /* 常驻挑战的「当日已通关次数」（每日递增惩罚的计数，见 challengeDailyCount）。 */
+    next.challengeDaily = object(raw.challengeDaily) && validLocalDate(raw.challengeDaily.date)
+      ? { date: raw.challengeDaily.date, count: Math.max(0, integer(raw.challengeDaily.count, 0, 0)) }
+      : null;
     next.shopPurchaseDate = typeof next.shopPurchaseDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(next.shopPurchaseDate) ? next.shopPurchaseDate : '';
     next.shopPurchases = {};
     if (object(raw.shopPurchases)) for (const id of Object.keys(raw.shopPurchases)) {
@@ -2437,7 +2441,12 @@
     const old = stageProgress(stageId);
     const nextNpc = Math.min(3, run.npcIndex + 1);
     S.stages[stageId] = { npcIndex: Math.max(old.npcIndex, nextNpc), passed: old.passed || complete };
-    if (complete) delete S.stageRuns[stageId];
+    if (complete) {
+      delete S.stageRuns[stageId];
+      /* 常驻挑战「当日已通关次数」+1：只在一整轮（3 场全胜）通关时记，
+       * 供「每通关一整次 → 敌全属性 +5%」的每日递增惩罚用（见 challengeDailyCount）。 */
+      noteChallengeClear();
+    }
     else {
       run.npcIndex = nextNpc;
       // 连续挑战不回满血：下一场只继承本场剩余血量（进入时再回复25%）
@@ -2503,9 +2512,36 @@
       S.joinRankCount = 0;
     }
     S.dailyStatsDate = date;
+    if (object(S.challengeDaily) && S.challengeDaily.date !== date) S.challengeDaily = null;
     if (S.quests && S.quests.date !== date) S.quests = null;
     if (S.dailyCounters && S.dailyCounters.date !== date) S.dailyCounters = null;
     save();
+  }
+  /* ============================================================
+   * 【S22b】常驻挑战的「当日已通关次数」
+   *
+   * 2026-10 第十五批（用户口径）：一天之内**每通关一整次常驻挑战**
+   * （3 场连战全胜 = 1 次），常驻挑战的**所有敌人**全属性（力/敏/速/血）再 +5%，
+   * 叠加无上限 —— 用来抑制「一天之内无限刷常驻挑战」。
+   *
+   * 与每日任务的 `stage` 计数区分开：那个是**每赢一场** +1（供任务「通关 N 次关卡挑战」用），
+   * 这里只在**一整轮通关**时 +1（见 finishStageBattle 的 complete 分支）。
+   * 随每日刷新（0 点 / 12 点，见 localDate）归零。
+   * 挑战塔与无尽塔走各自的敌人构建，不读这里，天然不受影响。
+   * ============================================================ */
+  function challengeDaily() {
+    const date = localDate();
+    const cur = object(S.challengeDaily) ? S.challengeDaily : null;
+    if (!cur || cur.date !== date) return { date, count: 0 };
+    return { date, count: Math.max(0, Math.floor(Number(cur.count) || 0)) };
+  }
+  function challengeDailyCount() { return challengeDaily().count; }
+  /** 通关一整次常驻挑战（3 场连战全胜）→ 当天次数 +1。 */
+  function noteChallengeClear() {
+    const cur = challengeDaily();
+    S.challengeDaily = { date: cur.date, count: cur.count + 1 };
+    save();
+    return S.challengeDaily.count;
   }
   function dailyStatus() {
     const date = localDate();
@@ -2796,7 +2832,7 @@
     MASTER_SKILL_ID, MASTER_SKILL_NAME,
     genAI, stageProgress, setStageProgress, npcOf, highestStageId, stageRun, stageAccess, stageReward,
     beginStageBattle, finishStageBattle, interruptStageBattle, abandonStageRun,
-    localDate, dailyStatus, refreshDaily: syncDailyStats, claimDaily, recordBattle, battleHistory,
+    localDate, dailyStatus, challengeDailyCount, noteChallengeClear, refreshDaily: syncDailyStats, claimDaily, recordBattle, battleHistory,
     questStatus, questClaimable, claimQuest, bumpDaily, QUEST_TYPES, QUEST_EXTRA_POOL, QUEST_GOLD, QUEST_EXP,
     questState, questAvailableAt, questPoolFor, QUEST_COUNT,
     settings, setSettings, normalizeSettings, RESOLUTIONS, resolutionHeight,

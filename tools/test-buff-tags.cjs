@@ -131,7 +131,7 @@ hr('2. 四个场所：池子 = 标签推导出的名单（不多不少）');
   check('挑战塔池里没有「只有无尽塔才有」的机制（试炼币 / 商店 / 环境 / 结算…）', () => {
     const MODS = ['envIgnore', 'envReflect', 'instantCoins', 'coinBoostPct', 'shopDiscount',
       'instantRetry', 'sellValue', 'sellGrowthPerWin', 'shopSpendStep', 'permSlot', 'postBattleShop', 'shopHalf',
-      'weightDivBy', 'weightDivOffset', 'limitedRarityMul', 'pityWeight'];
+      'weightDivBy', 'weightDivOffset', 'limitedDefaultRerollPaid', 'pityWeight'];
     for (const b of TD.towerPool) {
       const bad = Object.keys(b.mods || {}).filter((k) => MODS.indexOf(k) >= 0);
       assert.equal(bad.length, 0, b.id + ' 带无尽机制 ' + bad.join(','));
@@ -207,29 +207,47 @@ hr('4. 反向：坏数据必须在加载期就抛错（校验真的在跑）');
   const bad = (name, patch, expect) => check(name, () => {
     assert.throws(() => load(patch), expect, name + ' 竟然没抛错');
   });
-  bad('去掉某条的 tags → 抛错', (src) => src.replace("{ id: 'C01', tags: ['tower', 'endless', 'battle', 'shop'],", "{ id: 'C01',"),
-    /没有 tags/);
-  bad('写上未登记的标签 → 抛错', (src) => src.replace("{ id: 'C01', tags: [", "{ id: 'C01', tags: ['noSuchTag', "), /未登记的标签/);
-  bad('给无尽专属条目硬加 tower → 抛错', (src) => src.replace("{ id: 'E02', tags: ['endless', 'battle', 'ops'],", "{ id: 'E02', tags: ['tower', 'endless', 'battle', 'ops'],"),
+  /* 补丁锚点写成「按 id 换 tags 数组」，不写死标签内容 ——
+   * 池子标签是会随平衡调整变的（例如 C01/C04 已经去掉 battle），写死就会锚不上、
+   * 补丁静默失效（表现为「竟然没抛错」）。 */
+  const tagRe = (id) => new RegExp("(\\{ id: '" + id + "', tags: )\\[([^\\]]*)\\]");
+  const setTags = (src, id, inner) => {
+    assert.ok(tagRe(id).test(src), '补丁锚点失效：找不到 ' + id + ' 的 tags');
+    return src.replace(tagRe(id), "$1[" + inner + "]");
+  };
+  const addTag = (src, id, tag) => {
+    assert.ok(tagRe(id).test(src), '补丁锚点失效：找不到 ' + id + ' 的 tags');
+    return src.replace(tagRe(id), (m, p1, inner) => p1 + '[' + (inner.trim() ? inner + ', ' : '') + "'" + tag + "'" + ']');
+  };
+  const dropTags = (src, id) => {
+    const re = new RegExp("(\\{ id: '" + id + "', )tags: \\[[^\\]]*\\], ");
+    assert.ok(re.test(src), '补丁锚点失效：找不到 ' + id + ' 的 tags');
+    return src.replace(re, '$1');
+  };
+  const addFieldAfterTags = (src, id, field) => {
+    assert.ok(tagRe(id).test(src), '补丁锚点失效：找不到 ' + id + ' 的 tags');
+    /* 注意：match 后面的原文已经有一个逗号（`, name: ...`），这里只补字段本身。 */
+    return src.replace(tagRe(id), (m) => m + ', ' + field);
+  };
+
+  bad('去掉某条的 tags → 抛错', (src) => dropTags(src, 'C01'), /没有 tags/);
+  bad('写上未登记的标签 → 抛错', (src) => addTag(src, 'C01', 'noSuchTag'), /未登记的标签/);
+  bad('给无尽专属条目硬加 tower → 抛错', (src) => addTag(src, 'E02', 'tower'),
     /挑战塔池不该包含无尽专属增益 E02/);
   /* 注意顺序：battle 必须配塔标签那条检查在 shop 那条之前，所以这里挑一条本来就
    * 同时有 tower+battle 的通用增益（C02），只把 endless 拿掉，才测得到 shop 规则。 */
-  bad('shop 不带 endless → 抛错', (src) => src.replace("{ id: 'C02', tags: ['tower', 'endless', 'battle', 'shop'],", "{ id: 'C02', tags: ['tower', 'battle', 'shop'],"),
+  bad('shop 不带 endless → 抛错', (src) => setTags(src, 'C02', "'tower', 'battle', 'shop'"),
     /标了 shop 却没标 endless/);
-  bad('battle 却没有塔标签 → 抛错', (src) => src.replace("{ id: 'C02', tags: ['tower', 'endless', 'battle', 'shop'],", "{ id: 'C02', tags: ['battle'],"),
+  bad('battle 却没有塔标签 → 抛错', (src) => setTags(src, 'C02', "'battle'"),
     /没标 tower\/endless|没有场所标签/);
-  bad('行为标签与 kind 冲突（limited 标在永久类上）→ 抛错', (src) => src.replace("{ id: 'C02', tags: ['tower', 'endless', 'battle', 'shop'],", "{ id: 'C02', tags: ['tower', 'endless', 'battle', 'shop', 'limited'],"),
+  bad('行为标签与 kind 冲突（limited 标在永久类上）→ 抛错', (src) => addTag(src, 'C02', 'limited'),
     /limited/);
   bad('又写回冗余字段（endlessOnly）→ 抛错',
-    (src) => src.replace("{ id: 'E02', tags: ['endless', 'battle', 'ops'],", "{ id: 'E02', tags: ['endless', 'battle', 'ops'], endlessOnly: true,"),
-    /还写着冗余字段 endlessOnly/);
+    (src) => addFieldAfterTags(src, 'E02', 'endlessOnly: true'), /还写着冗余字段 endlessOnly/);
   bad('又写回冗余字段（stackable）→ 抛错',
-    (src) => src.replace("{ id: 'C50', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'],", "{ id: 'C50', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], stackable: true,"),
-    /还写着冗余字段 stackable/);
+    (src) => addFieldAfterTags(src, 'C50', 'stackable: true'), /还写着冗余字段 stackable/);
   /* 铸币商店的守门：ops（运营类）只能挂在无尽塔增益上。tower 专属的 T01 加上 ops 必须抛错。 */
-  bad('给挑战塔专属条目硬加 ops → 抛错',
-    (src) => src.replace("{ id: 'T01', tags: ['tower', 'battle', 'limited', 'nextBattle'],", "{ id: 'T01', tags: ['tower', 'battle', 'limited', 'nextBattle', 'ops'],"),
-    /标了 ops 却不是无尽塔增益/);
+  bad('给挑战塔专属条目硬加 ops → 抛错', (src) => addTag(src, 'T01', 'ops'), /标了 ops 却不是无尽塔增益/);
 }
 
 console.log('\n' + (fail ? '' : '') + '合计 ' + pass + ' 通过 / ' + fail + ' 失败');

@@ -71,25 +71,30 @@
    * 【BT2】NPC 头像与动画名映射
    * ============================================================ */
   /* 右下角操作区的布局（纯函数，导出给测试直接核对）。
-   * 原版字面坐标 (983,609) 的 164x60 框会压到血条，所以基准块用 190x70：
-   *   · 只有倍速 / 只有跳过 → 该键占满整块（与旧版逐像素一致）；
-   *   · 两个都要 → 横切成两半，中间留 8px 缝（无尽塔 30 层起）。
+   * 原版字面坐标 (983,609) 的 164x60 框会压到血条，所以基准块下移到右下角。
+   * 2026-10 用户口径：**所有**倍速 / 跳过键统一用「普通战斗的跳过键」那一档尺寸
+   * 190x70（贴住 1170x690 画布右下角，右/下各留 16px）：
+   *   · 只有倍速（挑战塔 / 无尽塔 <20 层）→ 单键 190x70；
+   *   · 只有跳过（普通战斗的跳过播放）→ 同样 190x70；
+   *   · 倍速 + 跳过（无尽塔 20 层起）→ **两个 190x70 在右下并排**（中间留 8px 缝），
+   *     整块正好贴住右下角（右边缘 1170−16）。
    * 返回 { rects: { speed, skip }, both, base }，rect 为 null 表示这个键不显示。 */
   function cornerLayout(speedToggle, allowSkip) {
-    const base = { x: 964, y: 605, w: 190, h: 70 };
+    const single = { x: W - 16 - 190, y: H - 15 - 70, w: 190, h: 70 };   // = { 964, 605, 190, 70 }
     if (speedToggle && allowSkip) {
-      const gap = 8, w = Math.floor((base.w - gap) / 2);
+      const gap = 8, w = single.w, h = single.h;
+      const x = W - 16 - (w * 2 + gap);                                  // 两个键一起贴右下角
       return {
-        both: true, base,
+        both: true, base: { x: x, y: single.y, w: w * 2 + gap, h: h },
         rects: {
-          speed: { x: base.x, y: base.y, w: w, h: base.h },
-          skip: { x: base.x + w + gap, y: base.y, w: base.w - w - gap, h: base.h },
+          speed: { x: x, y: single.y, w: w, h: h },
+          skip: { x: x + w + gap, y: single.y, w: w, h: h },
         },
       };
     }
-    if (speedToggle) return { both: false, base, rects: { speed: base, skip: null } };
-    if (allowSkip) return { both: false, base, rects: { speed: null, skip: base } };
-    return { both: false, base, rects: { speed: null, skip: null } };
+    if (speedToggle) return { both: false, base: single, rects: { speed: single, skip: null } };
+    if (allowSkip) return { both: false, base: single, rects: { speed: null, skip: single } };
+    return { both: false, base: single, rects: { speed: null, skip: null } };
   }
   function makeAvatar(npcType) {
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 122;
@@ -176,9 +181,8 @@
     let speed = 1;
     const corner = cornerLayout(speedToggle, allowSkip);
     const cornerRects = corner.rects;
-    const cornerBoth = corner.both;
-    /* 两个键时字号要小一档（190 的一半装不下 46px 的两个字）。 */
-    const cornerFont = cornerBoth ? 34 : 46;
+    /* 所有倍速 / 跳过键都用「普通战斗跳过键」那一档尺寸（190x70）→ 字号统一 46。 */
+    const cornerFont = 46;
     const cornerVisible = !!(cornerRects.speed || cornerRects.skip);
     const previousClick = canvas.onclick;
     const ui = document.getElementById('ui');
@@ -398,7 +402,7 @@
           else { g.addColorStop(0, '#cefa79'); g.addColorStop(.4, '#98df41'); g.addColorStop(1, '#6cac18'); }
           rounded(b.x, b.y, b.w, b.h, 34, g);
           ctx.lineWidth = 4; ctx.strokeStyle = fast ? '#123c63' : '#374f11'; ctx.stroke();
-          Engine.text(ctx, label, b.x + b.w / 2, b.y + (cornerBoth ? 47 : 52),
+          Engine.text(ctx, label, b.x + b.w / 2, b.y + b.h / 2 + Math.round(cornerFont * 0.36),
             { size: cornerFont, align: 'center', color: '#fff', strokeColor: fast ? '#123c63' : '#432715', lineWidth: 7 });
         };
         if (cornerRects.speed) drawKey(cornerRects.speed, speed + '×', speed > 1);

@@ -612,6 +612,17 @@
       masterChance: Number.isFinite(options.masterChance) ? clamp(options.masterChance, 0, 100) : RULES.masterChance,
     };
     const A = makeCombatant(f0, 0), B = makeCombatant(f1, 1);
+    /* 枯泉·涸井（封疗机制）：**从战斗开始就封**，而不是等它第一次出手 ——
+     * 否则先手玩家在它出手前打出的吸血 / 回血会整段漏过去（用户报「枯泉没生效」的另一半）。
+     * 机制清单以 tower-data 的 `mechSealsHeal` 为准（塔外没有 TowerData 时退回硬编码清单）。 */
+    (function sealHealingAtStart() {
+      const TD = window.TowerData;
+      const seals = (mechs) => (TD && typeof TD.mechSealsHeal === 'function'
+        ? TD.mechSealsHeal(mechs)
+        : (mechs || []).indexOf('trialDry') >= 0);
+      if (seals(B.mech)) A.healMul = 0;
+      if (seals(A.mech)) B.healMul = 0;
+    })();
     /* 开局护盾值（石像鬼机制 / 塔 buff「坚韧壁垒」）：给界面用 ——
      * 战斗一开始就要能把护盾画出来，不能等第一次挨打。 */
     const startShell = [Math.max(0, A.shell || 0), Math.max(0, B.shell || 0)];
@@ -762,6 +773,20 @@
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '镜鳞·反噬'; r.noteSide = def.side;
         }
+        /* 题面·沉默之壁：单次受到的伤害超过阈值（默认 25% 最大生命）时，
+         * **超出的那一截全额反弹**给出击方。
+         * 与镜鳞的区别：镜鳞按「整次伤害 × 百分比」反弹，这里只反「超出阈值的那一截」——
+         * 所以玩家可以压着阈值打（多段小伤害）来规避，是对「控伤」这一操作的奖励。
+         * 反噬豁免（reflectImmune）照常生效；阈值由 tower-data.js 注入，方便调平衡。 */
+        const ov = (def.mechParams && def.mechParams.trialOverflow) || null;
+        const ovThreshold = (ov && Number(ov.threshold)) || 0.25;
+        if (def.mech.includes('trialOverflow') && att.hp > 0 && !noReflect && dmg > def.maxHp * ovThreshold) {
+          const excess = Math.max(1, Math.round(dmg - def.maxHp * ovThreshold));
+          att.hp -= excess;
+          r.thornsDmg = (r.thornsDmg || 0) + excess;
+          r.noteText = (r.noteText ? r.noteText + '·' : '') + '沉默之壁·溢出反弹'; r.noteSide = def.side;
+          tryDeathSave(att, r);
+        }
         if (def.mech.includes('poison') && !att.dot && chance(30)) {  // 毒藤缠绕：30% 中毒
           att.dot = { pct: 0.03, rounds: 3 };
           r.poisonApplied = true;
@@ -861,7 +886,7 @@
       }
       // 枯泉：封死玩家治疗，并且每 3 次行动吸取玩家 10% 当前生命
       if (att.mech.includes('trialDry')) {
-        def.healMul = 0;
+        def.healMul = 0;                       // 兜底：每回合再压一次（防被别的加成顶回来）
         if (acts % 3 === 0 && def.hp > 0) {
           const drain = Math.max(1, Math.round(def.hp * 0.1));
           def.hp = Math.max(0, def.hp - drain);
@@ -1262,6 +1287,18 @@
       const def = actor === A ? B : A;
       /* 回合开始类增益（越战越勇 / 后发制人 / 玉石俱焚）：每场战斗结束自动清零。 */
       applyRoundAuras(actor, def, pushRound);
+      /* 塔 buff「血蚀印记」（N17）：每回合开始时对敌人造成其**当前生命** N% 的伤害。
+       * 按「当前血」算，所以越打越少；伤害走 dot 事件（回放画在受击方身上）。 */
+      const drainPct = Math.max(0, Number(actor.mods && actor.mods.enemyHpDrainPct) || 0);
+      if (drainPct > 0 && def.hp > 0) {
+        const drainDmg = Math.max(1, Math.round(def.hp * Math.min(1, drainPct)));
+        def.hp = Math.max(0, def.hp - drainDmg);
+        const drainRound = { attacker: actor.side, action: 'dot', dmg: drainDmg,
+          noteText: (actor.mods && actor.mods.enemyHpDrainNote) || '血蚀' };
+        tryDeathSave(def, drainRound);
+        pushRound(drainRound);
+        if (def.hp <= 0) { if (godSave(def)) def.hp = 1; else break; }
+      }
       // 回合开始回复（药师「百草回春」/ 塔 buff「活血丹」「回春术」）
       const regenPct = (actor.mech.includes('regen') ? 0.03 : 0) + (actor.mods && Number(actor.mods.regenPct) || 0);
       /* 塔 buff「浴血重生」：低血时每回合回血，但**最多回到 lowHpRegenAt 这条线**

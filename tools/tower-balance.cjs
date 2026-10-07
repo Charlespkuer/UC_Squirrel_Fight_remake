@@ -154,10 +154,13 @@ function autoPick(ctx, mode) {
     // 池子必须覆盖：7 个带机制的松鼠 + 3 只平庸松鼠 + 10 个机制 NPC（都不浪费）
     const kinds = {};
     for (const b of TowerData.BOSS_POOL) kinds[b.kind] = (kinds[b.kind] || 0) + 1;
-    /* C 项改造后：挑战塔池保留 NPC 机制怪；无尽塔只用「松鼠/试炼」池 */
+    /* C 项改造后：挑战塔池保留 NPC 机制怪；无尽塔只用「松鼠/试炼」池。
+     * 2026-10 第十四批：无尽池再并入「狂战松鼠」（1 条，变体按层数哈希取）→ 17 → 18；
+     * 挑战塔随机池不变（x10 第 5 场已固定一只狂战）。 */
     const eKinds = TowerData.ENDLESS_BOSS_POOL.reduce((m, p) => (m[p.kind] = (m[p.kind] || 0) + 1, m), {});
-    t('挑战塔 boss 池仍有 NPC 机制怪（10 个）', TowerData.BOSS_POOL.length === 26 && kinds.npc === 10 && kinds.squirrel === 9);
-    t('无尽塔 boss 池只有松鼠/试炼（无 NPC）', TowerData.ENDLESS_BOSS_POOL.length === 16 && !eKinds.npc && eKinds.squirrel === 9 && eKinds.trial === 7);
+    t('挑战塔 boss 池仍有 NPC 机制怪（10 个）', TowerData.BOSS_POOL.length === 27 && kinds.npc === 10 && kinds.squirrel === 9);
+    t('无尽塔 boss 池 = 松鼠/试炼 + 狂战松鼠（无 NPC）', TowerData.ENDLESS_BOSS_POOL.length === 18 && !eKinds.npc &&
+      eKinds.squirrel === 9 && eKinds.trial === 8 && eKinds.warlord === 1);
     t('无尽塔预告（第 4 场）永远不是 NPC',
       [1, 3, 5, 9, 15, 25, 33].every((L) => Tower.preview(L, 'env', true).every((x) => x.kind !== 'npc')));
     t('套装随层升级：1~3 层不出现蓝/紫、10 的倍数层固定狂战',
@@ -167,7 +170,7 @@ function autoPick(ctx, mode) {
     for (let day = 1; day <= 40; day++) {
       for (let n = 1; n <= 20; n++) seen.add(TowerData.bossFor(n, 'day-' + day).kind + ':' + TowerData.bossFor(n, 'day-' + day).id);
     }
-    t('换日期能把池子抽满（20 个 boss 都出得来）', seen.size === TowerData.BOSS_POOL.length);
+    t('换日期能把池子抽满（挑战塔 boss 都出得来）', seen.size === TowerData.BOSS_POOL.length);
     t('松鼠形态的 boss 都有固定且互不相同的装备',
       TowerData.BOSS_POOL.filter((b) => b.kind !== 'npc').every((b) => {
         const e = b.kind === 'trial' ? TowerData.TRIAL_BY_ID[b.id] : TowerData.SQUIRREL_BY_ID[b.id];

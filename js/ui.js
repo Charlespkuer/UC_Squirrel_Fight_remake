@@ -550,12 +550,10 @@
         if ((S.props[23] || 0) < 1) { toast('需要挑战书！可在商店购买'); return; }
         S.props[23]--; State.save();
         p.close();
-        const npcStats = GData.stageNpcStats(npc);
-        const foe = {
-          name: npc.name, level: 10 + stageId * 2, power: npcStats.power, agility: npcStats.agility, speed: npcStats.speed, hp: +npc.hp,
-          weapons: [], skills: (npc.skills || '').split('|').filter(Boolean).map((s) => { const q = s.split(':'); return { id: +q[0], level: +q[1] }; }),
-          npcType: type.anim,
-        };
+        /* 常驻挑战的「当日重复惩罚」与 classic-ui 的 stageFight 共用 GData.stageFoe
+         *（今天每多赢一场关卡战斗，敌全属性再 +5%）；塔/无尽的敌人不读它。 */
+        const dailyCount = State.challengeDailyCount ? State.challengeDailyCount() : 0;
+        const foe = GData.stageFoe(npc, stageId, type.anim, dailyCount);
         Main.startBattle(foe, {
           cost: 0, useProps: false, region: type.anim === 'tl' ? 3 : type.anim === 'xh' ? 4 : 1,
           onEnd: (winner) => {

@@ -195,7 +195,7 @@ hr('1. 数据层：刷出区间 / 组号 / 固定价 / 运营类标签');
   });
 
   check('ops（运营类）与用户口径一致', () => {
-    const want = ['E01', 'E02', 'E03', 'E04', 'E05', 'E06', 'E09', 'E10', 'E12', 'E13', 'E14',
+    const want = ['E01', 'E02', 'E03', 'E04', 'E05', 'E06', 'E09', 'E10', 'E12', 'E13', 'E14', 'E16',
       'C24', 'C25', 'C30', 'C31', 'C36', 'C37', 'C53', 'C58', 'C59'].sort().join(',');
     assert.equal(ids(TD.opsPool.slice().sort((a, b) => (a.id < b.id ? -1 : 1))), want);
     for (const b of TD.opsPool) assert.ok(TD.hasTag(b, 'endless'), b.id + ' 运营类应当只属于无尽塔');
@@ -964,7 +964,7 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     assert.ok(/data-mint-shop/.test(src) && /_debugSpawnMintShop/.test(src), '调试面板要接上这个接口');
   });
 
-  check('调试面板真的渲染出「立即生成一个铸币商店」，点它就能开一家（载入真 debug.js）', () => {
+  check('调试面板真的渲染出「铸币商店」「普通商店」，点它就能开一家（载入真 debug.js）', () => {
     const c = setup(7);
     const T = c.Tower;
     T._debugSetEndlessLayer(7);
@@ -974,7 +974,11 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     assert.ok(c.window.Debug && c.window.Debug.open, '应当挂上 window.Debug：' + Object.keys(c.window.Debug || {}).length);
     const panel = ui.find('data-mint-shop');
     assert.ok(panel, '面板 HTML 里应当有 data-mint-shop 按钮');
-    assert.ok(panel.innerHTML.includes('立即生成一个铸币商店'), '按钮文案要写清是「立即生成一个铸币商店」');
+    assert.ok(panel.innerHTML.includes('>铸币商店<'), '按钮文案缩减为「铸币商店」');
+    assert.ok(panel.innerHTML.includes('>普通商店<'), '同一行还应当有「普通商店」按钮');
+    assert.ok(/data-shop="1"/.test(panel.innerHTML), '普通商店按钮要挂 data-shop');
+    assert.ok(/data-endless-layer="1"/.test(panel.innerHTML) && /data-endless-layer="-1"/.test(panel.innerHTML),
+      '还应当有层数 ±1 的快速爬塔按钮');
     /* 点它：build() 与这里拿的是同一个元素（querySelector 按选择器缓存），所以 onclick 已经接好 */
     const btn = panel.querySelector('[data-mint-shop]');
     assert.equal(typeof btn.onclick, 'function', '按钮要绑上点击处理');
@@ -1217,6 +1221,138 @@ hr('9. 商店「离开」不被锁住（E01 立即进货 / 每 5 层结算商店
     const after = c.Tower._debugRun('endless');
     assert.equal(after.phase, null, '离开休整商店后应当回去继续打');
     assert.equal(after.shop, null);
+  });
+}
+
+/* ============================================================ */
+hr('10. 铸币商队（E16）：下一场战斗后必开一家铸币商店，顶掉普通商店');
+{
+  const E16 = (c) => c.TowerData.BUFF_BY_ID.E16;
+
+  check('数据：稀有 · 限次 1 · 下一场战斗生效 · 挂 postBattleMintShop（无尽专属 mod）', () => {
+    const c = setup(7);
+    const b = E16(c);
+    assert.ok(b, '应当有铸币商队（E16）');
+    assert.equal(b.rarity, 1, '用户口径：稀有');
+    assert.equal(b.kind, 'limited', '限次类');
+    assert.equal(b.uses, 1, '限次 1');
+    for (const t of ['endless', 'battle', 'shop', 'limited', 'nextBattle', 'ops']) {
+      assert.ok(c.TowerData.hasTag(b, t), 'E16 应当带标签 ' + t + '：' + JSON.stringify(b.tags));
+    }
+    assert.ok(!c.TowerData.hasTag(b, 'tower'), 'E16 是无尽塔专属');
+    assert.equal(b.mods.postBattleMintShop, 1, '效果键');
+    assert.ok(c.TowerData.ENDLESS_ONLY_MODS.indexOf('postBattleMintShop') >= 0, '要登记进 ENDLESS_ONLY_MODS');
+    assert.ok(c.TowerData.endlessPool.some((x) => x.id === 'E16'), '要能作为战斗奖励 / 场间选择拿到');
+    assert.ok(c.TowerData.shopPool.some((x) => x.id === 'E16'), '试炼商店也应当能卖');
+    assert.ok(c.TowerData.mintPool.some((x) => x.id === 'E16'), '铸币商店的货架 / 交换池里也应当在');
+  });
+
+  check('层中开打：这一场打完直接开铸币商店，限次用完即走', () => {
+    const c = setup(7);
+    c.__rand(0.99);
+    assert.ok(c.Tower.debugGrantBuff('E16').ok, '应当拿得到铸币商队');
+    const rw = winOne(c);
+    assert.equal(rw.mintShop, true, '这一场打完应当开铸币商店');
+    assert.equal(rw.phase, 'shop');
+    const run = c.Tower._debugRun('endless');
+    assert.ok(run.shop && run.shop.mint === true, 'run.shop 应当是铸币商店');
+    assert.equal(run.shop.byBuff, true, '要标记「这家店是限次增益触发的」');
+    assert.equal((run.limited || []).some((b) => b.id === 'E16'), false, '限次 1 → 用掉就没了');
+    assert.equal(run.mintGroup, -1, '额外送的一家店不该吃掉「本组自然刷出」的名额');
+    assert.equal(c.Tower.shopState().byBuff, true, '界面快照也要能看出是它触发的');
+    /* 铸币商店的离开：关店后回去继续打这一层 */
+    assert.ok(c.Tower.leaveMintShop().ok, '应当能送客');
+    assert.equal(c.Tower._debugRun('endless').phase, null, '送客后回到战斗流程');
+    assert.equal(c.Tower._debugRun('endless').shop, null);
+  });
+
+  check('顶掉 E01：同场挂着「立即进货」时由铸币商店顶上（一次战斗只开一家店）', () => {
+    const c = setup(7);
+    c.__rand(0.99);
+    assert.ok(c.Tower.debugGrantBuff('E01').ok, '拿一张立即进货');
+    assert.ok(c.Tower.debugGrantBuff('E16').ok, '再拿一张铸币商队');
+    const rw = winOne(c);
+    assert.equal(rw.mintShop, true, '应当开铸币商店');
+    assert.equal(rw.postBattleShop, undefined, '不该再开试炼商店');
+    const run = c.Tower._debugRun('endless');
+    assert.ok(run.shop && run.shop.mint === true, '只有铸币商店这一家');
+    assert.equal((run.limited || []).length, 0, '两张限次都消耗在这一场');
+  });
+
+  check('x5 层（结算商店那一步）：铸币商店顶上，但关店后照旧推进到下一层', () => {
+    const c = setup(5);
+    c.__rand(0.99);
+    for (let i = 0; i < 3; i++) winOne(c);              // 前三场正常打
+    assert.ok(c.Tower.debugGrantBuff('E16').ok, '最后一场前拿一张铸币商队（它只服务「下一场」）');
+    winOne(c);                                          // 第 5 层第 4 场 → 本该开结算商店
+    const run = c.Tower._debugRun('endless');
+    assert.equal(run.phase, 'shop');
+    assert.ok(run.shop && run.shop.mint === true, '结算商店被顶成铸币商店');
+    assert.equal(run.shop.boundary, true, '仍然带着「结算商店」的去向');
+    assert.equal(c.Tower.leaveMintShop().ok, true, '应当能送客');
+    const after = c.Tower._debugRun('endless');
+    assert.equal(after.layer, 6, '送客后推进到下一段（不能卡在已清空的本层）');
+    assert.equal(after.phase, null);
+    assert.equal(after.shop, null);
+  });
+
+  check('x20 层：顶掉的结算商店仍要先「放弃一个永久增益」（不能把推进弄丢）', () => {
+    const c = setup(20);
+    c.__rand(0.99);
+    assert.ok(c.Tower.debugGrantBuff('C02').ok, '先带一个永久增益');
+    for (let i = 0; i < 4; i++) winOne(c);              // 20 是 x10 层：共 5 场，先打完前 4 场
+    assert.ok(c.Tower.debugGrantBuff('E16').ok, '最后一场前拿一张铸币商队');
+    winOne(c);                                          // 第 20 层第 5 场（塔顶首领）
+    const run = c.Tower._debugRun('endless');
+    assert.ok(run.shop && run.shop.mint === true && run.shop.boundary === true, '应当是顶掉的铸币商店');
+    const left = c.Tower.leaveMintShop();
+    assert.equal(left.phase, 'sacrifice', '20 层清完要先放弃一个永久增益：' + JSON.stringify(left));
+    const after = c.Tower._debugRun('endless');
+    assert.equal(after.phase, 'sacrifice');
+    assert.equal(after.layer, 20, '还没推进到下一层');
+    assert.ok(c.Tower.sacrificePerm('C02').ok, '放弃之后应当照常推进');
+    assert.equal(c.Tower._debugRun('endless').layer, 21, '放弃完推进到第 21 层');
+  });
+
+  check('买 / 换之后收摊同样保留结算商店的去向（x5 层不会卡死）', () => {
+    const c = setup(5);
+    c.__rand(0.99);
+    const run = c.Tower._debugRun('endless');
+    for (let i = 0; i < 3; i++) winOne(c);
+    run.retryToken = 9;
+    assert.ok(c.Tower.debugGrantBuff('E16').ok, '最后一场前拿一张铸币商队');
+    const rw = winOne(c);                              // 最后一场 → 顶掉结算商店
+    assert.equal(rw.mintShop, true);
+    const r2 = c.Tower._debugRun('endless');
+    assert.ok(r2.shop && r2.shop.mint && r2.shop.boundary === true, '应当是顶掉的铸币商店');
+    const buy = c.Tower.buyMintSlot(0);
+    assert.equal(buy.ok, true, '应当买得到：' + (buy.msg || ''));
+    const after = c.Tower._debugRun('endless');
+    assert.equal(after.shop, null, '买完收摊');
+    assert.equal(after.layer, 6, '而且照旧推进到下一段');
+    assert.equal(after.phase, null);
+  });
+
+  check('自然刷出照旧：没有 E16 时仍然是 5% 概率那一条路（不会被它改口径）', () => {
+    const c = setup(7);
+    c.__rand(0);
+    const rw = winOne(c);
+    assert.equal(rw.mintShop, true, '概率拉满时自然刷出');
+    const run = c.Tower._debugRun('endless');
+    assert.equal(run.mintGroup, c.TowerData.mintGroupOf(7), '自然刷出才记「本组已刷过」');
+    assert.equal(!!run.shop.byBuff, false, '自然刷出的店不带「限次增益触发」标记');
+    assert.equal(c.Tower.shopState().byBuff, false);
+  });
+
+  check('界面：铸币商店页写清是「铸币商队」触发的（真界面模块冒烟）', () => {
+    const c = setup(7);
+    const ui = uiHarness(c);
+    c.__rand(0);
+    assert.ok(c.Tower.debugGrantBuff('E16').ok, '拿一张铸币商队');
+    winOne(c);
+    c.TowerUI.openMintShop();
+    const page = ui.last('page');
+    assert.ok(page.content.includes('铸币商队'), '要写清来由：' + page.content.slice(0, 200));
   });
 }
 

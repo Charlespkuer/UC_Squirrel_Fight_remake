@@ -90,18 +90,20 @@ git push origin v0.1.3
 
 | 文件 | 内容 |
 | --- | --- |
-| `squirrel-web-mac-v0.1.3.zip` | `index.html`、`css/`、`js/`、`images/`、`audio/`、`serve.js` + `serve.py`、`README.md`、`启动游戏.command`、`启动说明.txt` |
-| `squirrel-web-win-v0.1.3.zip` | 同上，启动脚本换成 `启动游戏.cmd` + `start-game.ps1`（两个文件必须在一起） |
+| `squirrel-web-mac-v0.1.3.zip` | `README.md`、`css/`、`js/`、`images/`、`audio/`、`启动说明.txt`，启动器在 `scripts/`（`启动游戏.command`、`serve.js` + `serve.py`、`index.html`） |
+| `squirrel-web-win-v0.1.3.zip` | 同上，`scripts/` 里多一个 `启动游戏.cmd` + `start-game.ps1`（两个文件必须在一起） |
 
-启动脚本的行为（`启动游戏.command` / `启动游戏.cmd`）：
+> 启动器都在 `scripts/` 里；两个平台都把 `squirrel_fight.exe` 放到 zip 根目录就会优先走原生窗口。
 
-1. 先看端口：已经被**带 `/__save` 存档接口**的服务器占着就直接用它；被别的程序占着（例如以前的 `python -m http.server`）就明确报错并**不打开浏览器**，让你换端口（`启动游戏.cmd 8081`）；
+启动脚本的行为（`scripts/启动游戏.command` / `scripts/启动游戏.cmd`）：
+
+1. 先看端口：已经被**带 `/__save` 存档接口**的服务器占着就直接用它；被别的程序占着（例如以前的 `python -m http.server`）就明确报错并**不打开浏览器**，让你换端口（`scripts\启动游戏.cmd 8081`）；
 2. 有 Node.js → `node serve.js 8080` 起服务器，**等端口真的监听成功**再用浏览器「应用窗口」打开（macOS 没有 Node 但有 `python3` → 走 `serve.py`，同样带存档接口）;
 3. 都没有 → 直接打开 `index.html`（并在说明里提醒可能被浏览器限制，进度只能存浏览器里）。
 
 Windows 的 `.cmd` 只是 ASCII 外壳（`cmd.exe` 读 `.cmd` 里的 UTF-8 中文会把中文注释当成命令执行，导致服务器起不来），中文提示与判断逻辑在 `start-game.ps1` 里，打包时两个文件都要带上。
 
-macOS 首次运行 `.command` 需要「右键 → 打开」；如果 zip 解压后没有执行权限，在终端执行一次 `chmod +x 启动游戏.command`（release 工作流已经 `chmod +x` 后再打包，正常情况不需要）。
+macOS 首次运行 `.command` 需要「右键 → 打开」；如果 zip 解压后没有执行权限，在终端执行一次 `chmod +x scripts/启动游戏.command`（release 工作流已经 `chmod +x` 后再打包，正常情况不需要）。
 
 > 本地先试一遍：`node serve.js 8080`，浏览器打开 `http://127.0.0.1:8080/`。
 

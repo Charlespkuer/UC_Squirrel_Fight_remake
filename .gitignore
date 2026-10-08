@@ -18,6 +18,13 @@ src-tauri/target/
 src-tauri/dist/
 src-tauri/node_modules/
 
+# 安卓：gen/android 是 `tauri android init` 生成的 Android 工程（可再生，不进仓库），
+# gen/schemas 是构建时生成的权限 schema。
+# ⚠️ 但那个工程里有两处**必要补丁**（node 路径硬编码、rust 任务改跳过），
+#    重新 init 之后要照 docs/安卓版构建与实测.md 的「生成工程里的两处补丁」再打一次。
+src-tauri/gen/android/
+src-tauri/gen/schemas/
+
 # macOS / Windows 的目录噪音
 .DS_Store
 Thumbs.db

@@ -5,7 +5,7 @@
 
 | 方案 | 产物 | 本地占用 | 前端从哪来 | 用在哪 |
 | --- | --- | --- | --- | --- |
-| **轻壳**（默认） | `src-tauri/dist/ssdz-classic.exe`，**2.86 MB** | exe 一个文件（`target/` 编译缓存可用 `--clean` 回收） | **游戏目录里的 `index.html` / `css` / `js` / `images` / `audio`**：外壳启动时自己起一个迷你 HTTP 服务器供起来 | 本机玩、便携包旁边玩 |
+| **轻壳**（默认） | `src-tauri/dist/squirrel_fight.exe`，**2.86 MB** | exe 一个文件（`target/` 编译缓存可用 `--clean` 回收） | **游戏目录里的 `index.html` / `css` / `js` / `images` / `audio`**：外壳启动时自己起一个迷你 HTTP 服务器供起来 | 本机玩、便携包旁边玩 |
 | **安装包** | `松鼠大战怀旧版_0.1.3_x64-setup.exe`，47 MB | 打完自动删掉临时的 `web/` | 编译进二进制（旁边没有游戏目录也能跑） | 发给别人装 |
 
 轻壳不复制、不嵌入任何前端资源，所以：
@@ -18,24 +18,27 @@
 
 ## A. 双击入口
 
-`E:\松鼠大战怀旧版\启动游戏.cmd` —— 优先开原生窗口，找不到原生版或它连开三次都没稳住，
+**Windows 正式入口现在是游戏根目录的 `squirrel_fight.exe`**（双击它就直接开原生窗口，不走脚本）。
+兜底入口是 `scripts\启动游戏.cmd`：优先开原生窗口，找不到原生版或它连开三次都没稳住，
 才退回「起服务器 + 浏览器应用窗口」。已经开着一个桌面版时再双击只会提示「已经在运行」。
 
-原生版按这个顺序找：`src-tauri\dist\ssdz-classic.exe` → `src-tauri\target\release\ssdz-classic.exe`
-（macOS 是 `.app` 包或 `src-tauri/dist/ssdz-classic`），加 `--browser` 可强制走浏览器路线。
+原生版按这个顺序找：`<游戏根>\squirrel_fight.exe` → `scripts\squirrel_fight.exe` →
+`src-tauri\dist\squirrel_fight.exe` → `src-tauri\target\release\squirrel_fight.exe`
+（macOS 是 `.app` 包或 `src-tauri/dist/squirrel_fight`），加 `--browser` 可强制走浏览器路线。
 
 ```bash
-# macOS / Linux
-bash 启动游戏.command
-bash 启动游戏.command --browser
+# macOS / Linux（启动器住在 scripts/ 里）
+bash scripts/启动游戏.command
+bash scripts/启动游戏.command --browser
 
 # Windows
-启动游戏.cmd            # 或直接双击 启动游戏.cmd
-启动游戏.cmd 8080 --browser
-启动游戏.cmd --no-save
+squirrel_fight.exe                 # 正式入口：双击开原生窗口
+scripts\启动游戏.cmd             # 兜底：没有 exe / 想用浏览器路线时
+scripts\启动游戏.cmd 8080 --browser
+scripts\启动游戏.cmd --no-save
 ```
 
-Windows 侧是 `启动游戏.cmd`（纯 ASCII 外壳）+ `start-game.ps1`（真正干活的部分）两个文件——
+Windows 兜底侧是 `启动游戏.cmd`（纯 ASCII 外壳）+ `start-game.ps1`（真正干活的部分）两个文件——
 cmd.exe 读 `.cmd` 里的 UTF-8 中文会把中文字节错位、把中文注释当命令执行
 （实测报 `'，其次' is not recognized`），于是**服务器没起来、浏览器却已经打开**，
 正好复现「没有本地服务器接口」。外壳保持 ASCII、中文与判断交给 PowerShell 就没这问题。
@@ -43,8 +46,10 @@ cmd.exe 读 `.cmd` 里的 UTF-8 中文会把中文字节错位、把中文注释
 ## B. 轻壳是怎么工作的
 
 ```
-双击 启动游戏.cmd
-   └─ start-game.ps1：找到游戏目录 → 起 dist/ssdz-classic.exe（cwd=游戏目录）
+双击 squirrel_fight.exe（根目录）
+   └─ Rust 外壳自己找游戏目录（往上找到含 index.html 的那层）
+      —— 或者走兜底：scripts\启动游戏.cmd
+   └─ start-game.ps1：找到游戏目录 → 起 squirrel_fight.exe（cwd=游戏目录）
         └─ Rust 外壳（src/main.rs，约 17 KB 源码，标准库实现迷你服务器）
              ├─ 找游戏目录：SSDZ_GAME_DIR → 当前目录 → 从 exe 往上找，都要求有 index.html
              ├─ 起本地服务器：127.0.0.1 的**随机端口**（不会和网页版的 8080 撞车）
@@ -66,7 +71,7 @@ cmd.exe 读 `.cmd` 里的 UTF-8 中文会把中文字节错位、把中文注释
 
 ```bash
 # 一次性：装 Rust（https://rustup.rs）+ 在 src-tauri 里 npm install + npx tauri icon app-icon.png
-node tools/build-tauri-app.cjs            # 编译 → src-tauri/dist/ssdz-classic.exe
+node tools/build-tauri-app.cjs            # 编译 → src-tauri/dist/squirrel_fight.exe
 node tools/build-tauri-app.cjs --clean    # 同上，然后 cargo clean（回收 target/）
 node tools/build-tauri-app.cjs --installer # 另打 NSIS 安装包（临时暂存 web/，打完自动删）
 ```
@@ -75,7 +80,7 @@ node tools/build-tauri-app.cjs --installer # 另打 NSIS 安装包（临时暂�
 
 | 项目 | 轻壳 | 安装包 |
 | --- | --- | --- |
-| 产物 | `dist/ssdz-classic.exe` **2.86 MB**（旧的内嵌版是 48.91 MB + 0.14 MB dll） | `松鼠大战怀旧版_0.1.3_x64-setup.exe` **47.02 MB** |
+| 产物 | `dist/squirrel_fight.exe` **2.86 MB**（旧的内嵌版是 48.91 MB + 0.14 MB dll） | `松鼠大战怀旧版_0.1.3_x64-setup.exe` **47.02 MB** |
 | 编译 | `cargo build --release` 首次约 1 分 20 秒~2 分 24 秒 | 再 +1 分钟打包 |
 | 中间产物 | `target/` 实测 **3.4 GB**（依赖树 + 调试符号）→ `--clean` 一键清零 | 同上 |
 | 运行时内存 | 39 MB | 62 MB |
@@ -115,7 +120,7 @@ src-tauri/
 ├─ package.json            app / app:clean / installer / dev / icon 脚本
 ├─ src/main.rs             迷你文件服务器 + 找游戏目录 + 存档命令 + 开窗口
 ├─ empty/index.html        只有几百字节：找不到游戏目录时显示的提示页
-├─ dist/ssdz-classic.exe   ← 构建产物（几 MB，不进版本库）
+├─ dist/squirrel_fight.exe   ← 构建产物（几 MB，不进版本库）
 ├─ web/                    ← 只有打安装包时临时生成（不进版本库）
 └─ icons/                  ← npx tauri icon app-icon.png 生成（不进版本库）
 ```
@@ -130,7 +135,7 @@ src-tauri/
 ```powershell
 # 1) 带调试端口启动
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'
-src-tauri\dist\ssdz-classic.exe
+src-tauri\dist\squirrel_fight.exe
 # 2) 另开终端
 node tools/research/tauri-inspect.cjs 9222 "location.href + ' | ' + State.fileInfo().mode + ' | ' + State.fileInfo().path"
 # → http://127.0.0.1:1362/index.html | file | save/progress.json
@@ -154,7 +159,7 @@ node tools/research/tauri-inspect.cjs 9222 "location.href + ' | ' + State.fileIn
    `documentElement.clientWidth/Height` 等比缩放，改窗口大小会自动适配。
 4. **不要同时开两个实例**写同一份存档：桌面版和浏览器版共存时，最后写入的那份覆盖前面的
    （启动器已经拦了「重复双击」，但浏览器那边开着的话仍要注意）。
-5. **轻壳需要游戏目录**：把 `ssdz-classic.exe` 单独拷到别处、旁边没有 `index.html` 时，
+5. **轻壳需要游戏目录**：把 `squirrel_fight.exe` 单独拷到别处、旁边没有 `index.html` 时，
    窗口会显示「没找到游戏目录」的提示页；想发给别人就用 `--installer` 打的安装包。
 
 ## I. 前端要改吗

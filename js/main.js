@@ -367,15 +367,21 @@
     const inFile = location.protocol === 'file:';
     const noApi = Number(info.code) === 404 || /404/.test(String(info.reason || ''));
     let how, color;
-    if (inFile) {
+    if (info.transportReady && !inFile) {
+      // 通道是好的，只是还没有存档文件（首次运行最常见）——不用红色报错吓人，
+      // 等第一次保存就会写出文件，这条横幅随后会自己消失。
+      color = '#1d5c3a';
+      how = '还没有存档文件，第一次保存后就会自动写到这里：' + (info.path || 'save/progress.json') +
+        '。现在可以直接开始玩。';
+    } else if (inFile) {
       color = '#7a1010';
-      how = '页面是 file:// 打开的，浏览器不允许读写存档文件。请关掉本窗口，用「启动游戏.command」重新启动游戏。';
+      how = '页面是 file:// 打开的，浏览器不允许读写存档文件。请关掉本窗口，用启动器重新打开游戏（Windows：双击根目录的 squirrel_fight.exe；macOS：双击 scripts/启动游戏.command）。';
     } else if (noApi) {
       color = '#8a4b00';
-      how = '这个服务器没有 /__save 存档接口（多半是 python -m http.server 之类的静态服务器）。请先把它关掉，再用「启动游戏.command」启动游戏。';
+      how = '这个服务器没有 /__save 存档接口（多半是 python -m http.server 之类的静态服务器）。请先把它关掉，再用启动器打开（Windows：squirrel_fight.exe；macOS：scripts/启动游戏.command）。';
     } else {
       color = '#7a1010';
-      how = '本地游戏服务没连上（多半是启动器还没把服务器拉起来，或者被别的程序占了端口）。请关掉本窗口，用「启动游戏.command」重新启动；也可以点上面的「重试连线」。';
+      how = '本地游戏服务没连上（多半是启动器还没把服务器拉起来，或者被别的程序占了端口）。请关掉本窗口，用启动器重新打开（Windows：squirrel_fight.exe；macOS：scripts/启动游戏.command）；也可以点上面的「重试连线」。';
     }
     const el = document.createElement('div');
     el.id = 'save-warning';
@@ -386,9 +392,12 @@
     saveBanner = el;   // 先登记：后面任何一步出错也不会重复挂第二条
     const text = document.createElement('div');
     text.style.cssText = 'flex:1 1 auto';
-    text.innerHTML = '<b>⚠ 现在用的是浏览器兜底存档，' +
-      'save/progress.json（磁盘上的正式存档）没有被读写。</b><br>' +
-      '<span style="opacity:.92">原因：' + esc(info.reason || info.error || '未知') + '<br>' + esc(how) + '</span>';
+    const firstRun = !!info.transportReady && !inFile;
+    text.innerHTML = (firstRun ? '<b>存档通道正常，还没有存档文件</b><br>' :
+      '<b>⚠ 现在用的是浏览器兜底存档，' +
+      'save/progress.json（磁盘上的正式存档）没有被读写。</b><br>') +
+      '<span style="opacity:.92">' + (firstRun ? '' : '原因：' + esc(info.reason || info.error || '未知') + '<br>') +
+      esc(how) + '</span>';
     const retryBtn = document.createElement('button');
     retryBtn.type = 'button';
     retryBtn.textContent = '重试连线';
@@ -398,7 +407,7 @@
       const ok = await State.fileProbe();
       if (ok && await State.fileLoad()) { location.reload(); return; }
       retryBtn.textContent = '重试连线';
-      if (UI && UI.toast) UI.toast('还是连不上本地服务器，确认「启动游戏.command」的窗口没报错后再试');
+      if (UI && UI.toast) UI.toast('还是连不上本地服务器，确认启动器（scripts/启动游戏.cmd 或 squirrel_fight.exe）的窗口没报错后再试');
     };
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
@@ -428,10 +437,13 @@
 
   async function retryFileSave() {
     if (State.fileLoadedThisBoot()) { hideSaveWarning(); return true; }
+    // 首次运行没有存档文件：只要第一笔存档写成功，这条横幅就该消失
+    if (((State.fileInfo() || {}).lastWrite || 0) > 0) { hideSaveWarning(); return true; }
     const delays = [300, 600, 1000, 1500, 2000, 2500, 3000];
     for (let i = 0; i < delays.length; i++) {
       await new Promise((r) => setTimeout(r, delays[i]));
       if (State.fileLoadedThisBoot()) { hideSaveWarning(); return true; }
+      if (((State.fileInfo() || {}).lastWrite || 0) > 0) { hideSaveWarning(); return true; }
       try {
         const available = await State.fileProbe();
         if (!available) continue;
@@ -439,7 +451,7 @@
         if (ok) { location.reload(); return true; }   // 连上了就以磁盘存档为准，重开一遍
       } catch (e) { /* 下一轮再试 */ }
     }
-    if (!State.fileLoadedThisBoot()) showSaveWarning();
+    if (!State.fileLoadedThisBoot() && !((State.fileInfo() || {}).lastWrite || 0)) showSaveWarning();
     return false;
   }
 

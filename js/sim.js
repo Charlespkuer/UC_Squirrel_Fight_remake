@@ -1392,6 +1392,10 @@
     /* 防御被动的单次触发概率（%）与被动加成读取 —— 供测试/调参直接核对，
      * 不用靠统计近似（绝对防御 16 / 龟甲术 7）。 */
     jueDuiChanceOf, shellChanceOf, passiveSkillBoost,
+    /* 闪避率的唯一出口（同样供测试/调参直接核对，不用统计近似）。
+     * 传两个战斗体：att = 攻击方、def = 挨打方（守方敏捷、移形换位、木剑/流星锤、
+     * 凌波微步/烟幕等全部在这一个函数里结算）。 */
+    dodgeChanceOf: (att, def) => dodgeChance(att, def),
     /* 低血减伤的即时结算（纯函数）—— 供测试直接核对分段口径 */
     lowHpTakenDamage,
     defenseCaps: { again: BOOSTED_AGAIN_CAP, first: BOOSTED_FIRST_CAP },

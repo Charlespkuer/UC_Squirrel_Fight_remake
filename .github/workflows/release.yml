@@ -28,15 +28,17 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="manual-$(date +%Y%m%d-%H%M)"; fi
           mkdir -p dist
 
-          # 一级目录只放「启动器 + 素材 + 子文件夹」：
-          #   启动游戏.*          双击开玩
+          # 一级目录只放「素材 + README + 子文件夹」（启动器都在 scripts\ 里）：
+          #   README.md
           #   css js images audio 素材（相对 URL 根解析，放哪一层都不影响）
-          #   scripts/            首页 index.html、停止游戏、一键同步、重启同步服务、
-          #                       serve.js/serve.py/start-game.ps1、sync/
+          #   scripts/            首页 index.html、启动游戏.command（macOS 双击这个）、
+          #                       启动游戏.cmd + start-game.ps1（Windows 兜底双击这个）、
+          #                       停止游戏、一键同步、重启同步服务、serve.js/serve.py、sync/
+          #                       把 squirrel_fight.exe 放到**游戏根目录**才会走原生窗口
           #   tools/（不进便携包）开发与验证
-          LAUNCHERS="启动游戏.cmd 启动游戏.command README.md"
+          LAUNCHERS="README.md"
           GAME="css js images audio"
-          SCRIPTS="index.html serve.js serve.py start-game.ps1 停止游戏.command 一键同步.command 一键同步.cmd 重启同步服务.cmd restart-sync.cmd cleanup-old-layout.cmd cleanup-old-layout.ps1"
+          SCRIPTS="index.html serve.js serve.py start-game.ps1 启动游戏.command 启动游戏.cmd 停止游戏.command 一键同步.command 一键同步.cmd 重启同步服务.cmd restart-sync.cmd cleanup-old-layout.cmd cleanup-old-layout.ps1"
 
           build() {          # $1 = 包名后缀（mac / win）
             name="squirrel-web-$1"
@@ -49,12 +51,13 @@ jobs:
             (cd scripts && cp -R $SCRIPTS "$out/scripts/")
             # 双机同步本体（零依赖）：入口脚本在 scripts/ 里，逻辑在 scripts/sync/ 里
             cp -R scripts/sync/sync.js scripts/sync/sync-win.ps1 scripts/sync/run-hidden.vbs "$out/scripts/sync/"
-            chmod +x "$out/启动游戏.command" "$out/scripts/停止游戏.command" "$out/scripts/一键同步.command" "$out/scripts/serve.py" 2>/dev/null || true
-            # Windows：.cmd 只是 ASCII 外壳，真正的逻辑在同目录的 .ps1 里
+            chmod +x "$out/scripts/启动游戏.command" "$out/scripts/停止游戏.command" "$out/scripts/一键同步.command" "$out/scripts/serve.py" 2>/dev/null || true
+            # Windows：.cmd 只是 ASCII 外壳（现在住在 scripts\ 里，和 start-game.ps1 同目录，
+            # 双击 scripts\启动游戏.cmd 即可；根目录不再放 .cmd），真正的逻辑在 .ps1 里
             # （cmd.exe 读 .cmd 里的 UTF-8 中文会把中文注释当命令，导致服务器起不来），
             # 而且 .cmd 必须是 CRLF，否则 if(...) 块与 goto 在部分环境下会出错。
             if [ "$1" = "win" ]; then
-              for f in "启动游戏.cmd" "scripts/一键同步.cmd" "scripts/重启同步服务.cmd" "scripts/restart-sync.cmd"; do
+              for f in "scripts/启动游戏.cmd" "scripts/一键同步.cmd" "scripts/重启同步服务.cmd" "scripts/restart-sync.cmd"; do
                 sed -i 's/\r$//' "$out/$f"
                 sed -i 's/$/\r/' "$out/$f"
               done
@@ -66,14 +69,17 @@ jobs:
           ================================
           1) 解压整个文件夹（首页在 scripts\index.html，素材在 css\ js\ images\ audio\，别只拖一个文件出来）
           2) 启动：
-             · Windows：双击 启动游戏.cmd（它会调用 scripts\start-game.ps1，scripts\ 要一起留着）
-             · macOS  ：双击 启动游戏.command
-               首次请右键 → 打开；若提示没有权限，先在「终端」里执行 chmod +x 启动游戏.command
+             · Windows：双击 scripts\启动游戏.cmd
+               （它是 ASCII 外壳，真正的逻辑是同目录的 start-game.ps1，两个都要留着）
+             · macOS  ：双击 scripts/启动游戏.command
+               首次请右键 → 打开；若提示没有权限，先在「终端」里执行 chmod +x scripts/启动游戏.command
+             · Windows 想开原生窗口：把 squirrel_fight.exe 放到游戏根目录（与 scripts/ 同级），
+               双击它即可；它不在时上面的 启动游戏.cmd 会退回浏览器应用窗口路线
              启动器会起一个本地服务器，并用浏览器的「应用窗口」模式打开：没有标签栏、没有地址栏，
              看着就是一个独立窗口。想用普通标签页就加参数 --browser（例如 启动游戏.cmd --browser）。
              双击后命令行窗口会自己关掉：服务器在后台隐藏运行（日志在 save\server.out.log 与
              save\server.err.log），要停掉它就跑一次 启动游戏.cmd --stop
-             （macOS 上是双击 停止游戏.command，或 bash 启动游戏.command --stop）。
+             （macOS 上是双击 scripts/停止游戏.command，或 bash scripts/启动游戏.command --stop）。
              端口默认 8080；如果被别的程序占用，启动器会直接告诉你换一个，例如 启动游戏.cmd 8081。
           3) Node.js（https://nodejs.org，装 LTS 版即可）与 Python 3 有任意一个就行
              （serve.js / serve.py 就在这个文件夹里）；
@@ -89,8 +95,11 @@ jobs:
             以后每次只要选 2~5 项就能一键互传。游戏里「系统 → 跨设备同步」也能按。
             细节看 README 的「双机同步」一节；配置在 scripts\sync\sync.config.json（每台机器一份）。
 
-          想要完全没有浏览器的独立程序窗口：仓库的 .github/workflows/tauri.yml 会构建
-            Windows（.exe 安装包）与 macOS（.dmg）原生安装包，源码在 src-tauri/。
+          想要完全没有浏览器的独立程序窗口：启动器本来就优先找原生版 ——
+             Windows 放 scripts\squirrel_fight.exe（或游戏根目录），macOS 放
+             scripts\squirrel_fight.app（或游戏根目录），双击对应启动器就直接开原生窗口；
+             仓库的 .github/workflows/tauri.yml 还能构建 Windows（.exe 安装包）与
+             macOS（.dmg）原生安装包，源码在 src-tauri/。
           TXT
             sed -i 's/^          //' "$out/启动说明.txt"
             (cd dist && zip -qr "$name-$TAG.zip" "$name")
@@ -106,7 +115,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="manual-$(date +%Y%m%d-%H%M)"; fi
-          NOTES="解压即玩：macOS 双击 启动游戏.command，Windows 双击 启动游戏.cmd，详细说明见包内「启动说明.txt」。"
+          NOTES="解压即玩：macOS 双击 scripts/启动游戏.command，Windows 双击 scripts\启动游戏.cmd（或把 squirrel_fight.exe 放根目录后双击它开原生窗口），详细说明见包内「启动说明.txt」。"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/*.zip --clobber
           else

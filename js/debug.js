@@ -305,6 +305,25 @@
     renderOwned();
     return '已在第 ' + r.layer + ' 层生成铸币商店（' + r.slots + ' 件货）';
   }
+  /** 无尽塔专属调试：**立刻生成一个普通（试炼）商店** —— 与铸币商店按钮同一口径，
+   *  只是货架换回试炼币交易，关掉后回去继续打。 */
+  function spawnShop() {
+    if (!(window.Tower && Tower._debugSpawnShop)) return '当前版本没有这个接口';
+    const r = Tower._debugSpawnShop();
+    if (!r || !r.ok) return (r && r.msg) || '没成功';
+    if (window.TowerUI && TowerUI.openShop) TowerUI.openShop();
+    renderOwned();
+    return '已在第 ' + r.layer + ' 层生成普通商店（' + r.slots + ' 件货）';
+  }
+  /** 无尽塔专属调试：**快速爬塔** —— 当前层数 ±1（没有对局时先开一局，落在第 1 层）。 */
+  function shiftEndlessLayer(delta) {
+    if (!(window.Tower && Tower._debugShiftEndlessLayer)) return '当前版本没有这个接口';
+    const r = Tower._debugShiftEndlessLayer(delta);
+    if (!r || !r.ok) return (r && r.msg) || '没成功';
+    renderOwned();
+    if (window.TowerUI && TowerUI.openEndless && State.state().endless && State.state().endless.run) TowerUI.openEndless();
+    return '无尽塔：现在是第 ' + r.layer + ' 层';
+  }
 
   /* 8 金松果 / 15 经验 / 40 金杯在原版里就是货币或经验值，不是背包道具：
    * 挂进背包只是个用不掉的死物（useType 0/3），所以取物时直接加到对应字段上。 */
@@ -385,9 +404,14 @@
       '<select data-buff-select aria-label="选择要获得或失去的增益">' + buffOptions() + '</select>' +
       '<button type="button" class="uc-button tiny" data-buff-grant="1">获得</button>' +
       '<button type="button" class="uc-button tiny muted" data-buff-lose="1">失去</button></label>' +
-      /* 无尽塔专属：立刻开一家铸币商店（不看概率/层区间，也不占本组的自然刷出名额） */
-      '<div class="debug-grant-row debug-ws-row"><span class="debug-ws-tag">铸币商店</span>' +
-      '<button type="button" class="uc-button tiny" data-mint-shop="1" title="无尽塔专属：立刻生成一个铸币商店（跳过 5%~10% 的概率与层区间判定，也不占本组的自然刷出名额）">立即生成一个铸币商店</button></div>' +
+      /* 无尽塔专属：快速爬塔（层数 ±1）—— 免去一层层打上去 */
+      '<div class="debug-grant-row debug-quick"><span class="debug-ws-tag">层数</span>' +
+      '<button type="button" class="uc-button tiny" data-endless-layer="1" title="无尽塔专属：当前层数 +1（还没有对局就先开一局，落在第 1 层）">层数 +1</button>' +
+      '<button type="button" class="uc-button tiny" data-endless-layer="-1" title="无尽塔专属：当前层数 −1（最低第 1 层）">层数 -1</button></div>' +
+      /* 无尽塔专属：手开商店 —— 铸币商店 / 普通（试炼）商店，都不看概率与层区间 */
+      '<div class="debug-grant-row debug-quick"><span class="debug-ws-tag">商店</span>' +
+      '<button type="button" class="uc-button tiny" data-mint-shop="1" title="无尽塔专属：立刻生成一个铸币商店（跳过 5%~10% 的概率与层区间判定，也不占本组的自然刷出名额）">铸币商店</button>' +
+      '<button type="button" class="uc-button tiny" data-shop="1" title="无尽塔专属：立刻生成一个普通（试炼）商店（跳过每 5 层的结算判定；关掉后回去继续打）">普通商店</button></div>' +
       '<div class="debug-ws-owned" data-buff-owned></div>' +
       /* 增益总览：当前生效 + 已获得过的全部（含一次生效、用尽、损毁、失去）+ 累计提升效果 */
       '<div class="debug-buff-report" data-buff-report></div>' +
@@ -447,8 +471,12 @@
     // 无尽塔增益：下拉选一个，就能「获得」或「失去」
     panel.querySelector('[data-buff-grant]').onclick = () => msg(grantBuff(panel.querySelector('[data-buff-select]').value));
     panel.querySelector('[data-buff-lose]').onclick = () => msg(loseBuff(panel.querySelector('[data-buff-select]').value));
-    // 无尽塔专属：立刻生成一个铸币商店
+    // 无尽塔专属：立刻生成一个铸币商店 / 一个普通商店；层数 ±1 快速爬塔
     panel.querySelector('[data-mint-shop]').onclick = () => msg(spawnMintShop());
+    panel.querySelector('[data-shop]').onclick = () => msg(spawnShop());
+    for (const b of panel.querySelectorAll('[data-endless-layer]')) {
+      b.onclick = () => msg(shiftEndlessLayer(Number(b.dataset.endlessLayer)));
+    }
     panel.querySelector('[data-buff-owned]').onclick = (e) => {
       const b = e.target.closest('[data-buff-forget]');
       if (b) msg(loseBuff(b.dataset.buffForget));

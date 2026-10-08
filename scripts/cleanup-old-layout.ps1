@@ -5,9 +5,9 @@
 #
 # 背景：以前两台机器是「平铺布局」——serve.js / serve.py / start-game.ps1 和几个
 # 辅助脚本都堆在游戏根目录。现在 Mac 那边已经改成：
-#     一级目录：启动游戏.cmd / 启动游戏.command / index.html / css js images audio / save
-#     scripts\ ：停止游戏.command、一键同步.*、重启同步服务.cmd、serve.js、serve.py、
-#                start-game.ps1、index.html、sync\
+#     一级目录：启动游戏.command / index.html / css js images audio / save
+#     scripts\ ：启动游戏.cmd（Windows 双击入口）、停止游戏.command、一键同步.*、
+#                重启同步服务.cmd、serve.js、serve.py、start-game.ps1、index.html、sync\
 #     tools\   ：开发与验证
 # Windows 这边同步过去之后，根目录仍留着旧副本（同步工具只增不删，这是为了不丢东西）。
 # 本脚本就把这些「已经搬到 scripts\ 里的旧副本」删掉。
@@ -16,7 +16,7 @@
 #     serve.js  serve.py  start-game.ps1
 #     停止游戏.command  一键同步.cmd  一键同步.command  重启同步服务.cmd
 #     tools\sync\            （里面的 sync.config.json 会先搬到 scripts\sync\，口令不会丢）
-# 不会碰：启动游戏.cmd、启动游戏.command、README.md、.github\、.gitignore、
+# 不会碰：启动游戏.cmd、启动游戏.command、README.md、.github\、.gitignore、squirrel_fight.exe、ssdz-classic.exe、
 #         index.html、css\ js\ images\ audio\、save\、scripts\、tools\ 的其它内容
 param()
 
@@ -73,7 +73,7 @@ if ($found.Count -eq 0 -and $foundDirs.Count -eq 0) {
   exit 0
 }
 Write-Host ''
-Write-Host '不会动：启动游戏.cmd、启动游戏.command、README.md、.github\、.gitignore、'
+Write-Host '不会动：启动游戏.cmd、启动游戏.command、README.md、.github\、.gitignore、squirrel_fight.exe、ssdz-classic.exe、'
 Write-Host '        css\ js\ images\ audio\、save\、scripts\、tools\ 的其它内容'
 Write-Host ''
 $ans = Read-Host '确认删除这些旧副本吗？输入 y 回车继续，其它键取消'

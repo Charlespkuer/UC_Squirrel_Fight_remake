@@ -1,0 +1,20 @@
+# 换行符规则 —— 只作用于 scripts/ 及其子目录
+# （.gitattributes 和 .gitignore 一样按目录生效：本文件的规则不会管到仓库根或 tools/）
+#
+# 为什么必须有：本机 core.autocrlf=true，而仓库原本没有 .gitattributes，
+# 于是 shell 脚本被检出成 CRLF —— bash 会直接报
+#   syntax error near unexpected token `$'do\r''
+# 实测 scripts/一键同步.command 就是这样（仓库里存的也是 CRLF），mac 上双击等于坏的。
+#
+# 约定（这个目录里正好放齐了所有需要照顾的文件）：
+#   · *.command / *.sh —— bash 脚本必须是 LF：存 LF、检出 LF，与平台无关；
+#   · *.cmd / *.bat    —— Windows 批处理必须是 CRLF（cmd.exe 对 LF 的 if(...) 块处理不稳）；
+#                         打包时 .github/workflows/release.yml 还会再转一次；
+#   · *.py             —— 按 LF（serve.py 在便携包里被 chmod +x 过，CRLF 会让 shebang 变成 python3\r）。
+#
+# 注意：tools/ 下的 *.py 不在这里的管辖范围（Python 不介意 CRLF，需要时可在 tools/ 另放一份）。
+*.command text eol=lf
+*.sh      text eol=lf
+*.py      text eol=lf
+*.cmd     text eol=crlf
+*.bat     text eol=crlf

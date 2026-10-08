@@ -1,4 +1,4 @@
-﻿/* ============================================================
+/* ============================================================
  * tower-data.js — 无尽挑战塔 · 数值与池子定义（纯数据）
  * 数值与池子集中在数据表里（改动请同步 tools/test-fixes-round.cjs 的对应需求用例）。
  *
@@ -1072,6 +1072,7 @@
   //   layer5HealPct x10Boost perLayerPowerAfter20 globalMul
   //   lowHpFinalMul(低血终乘) lowHpAgilityMul lowHpSpeedMul lowHpAt
   //   shopDiscount(折扣比例) postBattleShop/postBattleShopDiscount(战后开店)
+  //   postBattleMintShop(战后必开铸币商店，顶掉本场的普通商店)
   const BUFFS = Object.freeze([
     // —— 单场类（主塔+无尽通用） ——
     { id: 'N01', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '蓄力一击', rarity: 0, kind: 'limited', uses: 2, desc: '下一场战斗攻击 +40%', mods: { powerMul: 0.40 } },
@@ -1206,6 +1207,13 @@
     { id: 'E01', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle', 'ops'], name: '立即进货', rarity: 2, kind: 'limited', uses: 1,
       desc: '下一场战斗结束后立即开启一次试炼商店，全部商品 7 折；若同时持有「steam大促」，两档折扣叠加为 3.5 折',
       mods: { postBattleShop: 1, postBattleShopDiscount: 0.30 } },
+    /* E16「铸币商队」= E01「立即进货」的铸币版：下一场战斗后**必开一家铸币商店**（限次 1）。
+     * 与 E01 同场生效时由它**顶掉**那家试炼商店（用户口径：一次战斗只开一家店，铸币优先）；
+     * 那一场如果是每 5 层的最后一战，也顶掉结算商店 —— 但「关店后推进到下一层 / 先放弃一个
+     * 永久增益」的去向照旧保留（见 tower.js 的 openMintShop({boundary}) 与 closeMintShop）。 */
+    { id: 'E16', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle', 'ops'], name: '铸币商队', rarity: 1, kind: 'limited', uses: 1,
+      desc: '下一场战斗结束后立即生成 1 家铸币商店（若本场本该开出普通商店，则由它顶掉）',
+      mods: { postBattleMintShop: 1 } },
     { id: 'E02', tags: ['endless', 'battle', 'ops'], name: '试炼补贴', rarity: 0, kind: 'instant', desc: '立刻获得 60 试炼币', mods: { instantCoins: 60 } },
     { id: 'E03', tags: ['endless', 'battle', 'ops'], name: '财源滚滚', rarity: 1, kind: 'instant', desc: '立刻获得 120 试炼币', mods: { instantCoins: 120 } },
     { id: 'E04', tags: ['endless', 'battle', 'oncePerRun', 'ops'], name: 'steam大促', rarity: 1, kind: 'instant', maxStacks: 1,
@@ -1503,7 +1511,7 @@
      * 它是通用的「下一场战斗」减益，不是无尽专属。 */
     'openShop', 'instantRetry', 'enemyMaxHpDown', 'permSlot', 'pickWeaponPct',
     'pickSkillPct', 'pickPermanentFree', 'sellValue', 'sellGrowthPerWin', 'postBattleShop',
-    'postBattleShopDiscount', 'shopSpendStep', 'shopSpendStat', 'shopSpendHp',
+    'postBattleShopDiscount', 'postBattleMintShop', 'shopSpendStep', 'shopSpendStat', 'shopSpendHp',
     'shopSpendLimited', 'shopEnterCoins', 'rerollTiltMul', 'shopHalf', 'layerRestart',
     /* 「份数越多、再出现概率越低」（weight = 初始 ÷ n）与「豪掷千金」的默认权重（按稀有度）—— 都是无尽商店专属。 */
     'weightDivBy', 'weightDivOffset', 'limitedDefaultRerollPaid', 'pityWeight',

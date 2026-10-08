@@ -4,7 +4,7 @@
  * 用法：
  *   1) 带调试端口启动桌面版（PowerShell）：
  *        $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'
- *        src-tauri\target\release\ssdz-classic.exe
+ *        src-tauri\target\release\squirrel_fight.exe
  *   2) 另开一个终端：
  *        node tools/research/tauri-inspect.cjs 9222 "document.title"
  *

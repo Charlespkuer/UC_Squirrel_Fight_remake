@@ -18,13 +18,43 @@
 
 | 平台 | 方式 |
 |---|---|
-| macOS | 双击 `启动游戏.command`（停止：`bash 启动游戏.command --stop`） |
-| Windows | 双击 `启动游戏.cmd` |
-| 手动 | `node scripts/serve.js` → 浏览器打开 `http://127.0.0.1:8080/` |
+| Windows | 双击根目录的 **`squirrel_fight.exe`** —— 原生窗口（Tauri 桌面版），不经过浏览器 |
+| macOS | 双击 `scripts/启动游戏.command`（停止：`bash scripts/启动游戏.command --stop`） |
+| 手动 / 兜底 | `node scripts/serve.js` → 浏览器打开 `http://127.0.0.1:8080/` |
+
+Windows 的兜底入口是 `scripts\启动游戏.cmd`（纯 ASCII 外壳）+ `scripts\start-game.ps1`（真正干活的部分），
+用在「还没编译 exe / 没有 WebView2 / 想强制走浏览器路线 / 只读模式」这些场合：
+
+```
+scripts\启动游戏.cmd                 # 找不到 exe 时退回「本地服务器 + 浏览器应用窗口」
+scripts\启动游戏.cmd --browser       # 强制走浏览器路线
+scripts\启动游戏.cmd 8081 --no-save  # 换端口 + 只读（不写存档）
+scripts\启动游戏.cmd --stop          # 停掉后台的本地服务器
+```
+
+启动顺序：**先找 `squirrel_fight.exe`**（根目录 → `scripts\` → `src-tauri\dist\` → `src-tauri\target\release\`），
+找到就开原生窗口；没有或连开三次都没稳住，才退回「本地服务器 + 浏览器应用窗口」。
 
 存档默认写在 `save/progress.json`（磁盘优先，浏览器 localStorage 只是兜底）；
 启动时会自动体检存档，损坏时从 `save/backup/` 恢复快照。
 直接静态托管也能玩，但存档只留在浏览器里，双机同步不可用。
+
+### 安卓版（APK）
+
+游戏本体是纯 HTML/JS，所以能装到安卓手机上跑（Tauri 2 的 Android 支持，同一个 `src-tauri` 出包）：
+
+```powershell
+pwsh -File tools\build-apk.ps1 -Abi arm64-v8a -Release   # 真机
+pwsh -File tools\build-apk.ps1 -Abi x86_64               # 模拟器
+# 产物复制到 src-tauri\dist\ssdz-classic-<abi>-<profile>-<日期>.apk
+```
+
+手机上存档在应用私有目录 `/data/user/0/com.ssdz.classic/save/progress.json`，
+和电脑上是同一份格式，跨设备用游戏里「系统 → 导入/导出存档」。
+详细做法、踩过的坑与实测记录见 [docs/安卓版构建与实测.md](docs/安卓版构建与实测.md)。
+
+⚠️ 注意：Windows 的 `squirrel_fight.exe` **不能**装到安卓上（PE 格式 + Windows API），
+安卓必须用上面这个 APK；反过来 APK 也不能在 Windows 上跑。
 
 ## 玩法
 
@@ -36,9 +66,8 @@
 - **装备融合**：同部位同品质三件合成更高品质一件。
 - **竞技场与天梯**：经验场、碎片场、天梯赛（积分 / 金杯 / 周榜）。
 - **师徒与好友**：拜师收徒领贡品，好友切磋与随机挑战。
-- **挑战塔**：每层一张挑战书，连战只继承血量，层间三选一增益。
-- **无尽挑战塔**：免门票从 1 层冲分；限次 / 永久 / 即时三类增益、段位轮转机制、
-  每 5 层试炼商店、**x2~x4 / x7~x9 层按 `mintChance` 概率刷出的铸币商店（5%→10%，每 5 层 +0.5%）**、每 10 层里程碑奖励，随时可结算离场。
+- **挑战塔**：相对原版新增模式；类似于不封顶的关卡；每层一张挑战书，连战只继承血量，第三场后三选一增益。
+- **无尽挑战塔**：相对原版新增模式；免门票；rougelike无尽模式；通过组合限次/永久/即时三类增益，增强自身并挑战越来越强大的敌人，获取更高的分数与抽奖卷。
 - **双机同步**：Mac ↔ Windows 通过 ZeroTier 互推存档与游戏文件（`scripts/一键同步`）。
 
 ## 更新记录
@@ -47,7 +76,32 @@
 
 ## 开发
 
-纯静态、无构建步骤。`js/` 是全部游戏代码：
+纯静态：游戏本体没有构建步骤（`css`/`js`/`images`/`audio` 直接就是运行时产物），
+只有桌面壳与安卓壳需要编译。
+
+### 目录结构
+
+| 目录 / 文件 | 作用 | 主要内容 |
+|---|---|---|
+| `scripts/` | **运行入口与本地服务器**（双击启动、存档接口都在这） | `index.html` 首页（服务器把它映射成 `/`）、`serve.js` / `serve.py` 静态服务器（带 `/__save` 存档接口）、`启动游戏.command`（macOS 双击入口）、`启动游戏.cmd` + `start-game.ps1`（Windows 兜底入口）、`停止游戏.command`、`一键同步.command` / `一键同步.cmd`、`重启同步服务.cmd`、`cleanup-old-layout.*`（一次性整理旧布局）、`sync/` 双机同步本体、`.gitattributes`（本目录的换行符规则：bash 脚本 LF、`.cmd` CRLF） |
+| `js/` | **全部游戏代码**（见下表逐文件说明） | 启动流程、存档、战斗、塔、界面、静态数据 |
+| `css/` | 样式，按模块分文件 | `style.css`（基础）、`classic*.css`（复古界面）、`tower.css`（塔）、`battle-drops.css`、`debug.css` |
+| `images/` | 图片素材 | 背景与场景、UI 图标、角色图集（`images/orig/` 原版图集）、`screenshots/`（README 用的截图） |
+| `audio/` | 音效与 BGM | 战斗音效、主界面 BGM |
+| `src-tauri/` | **桌面壳与安卓壳**（Rust + Tauri 2，同一个 crate 出 exe 和 apk） | `src/lib.rs`（全部逻辑，按 `cfg(mobile)` 分支）、`src/main.rs`（桌面入口，仅 8 行）、`Cargo.toml`、`tauri.conf.json`、`tauri.android.conf.json`（安卓构建时自动合并）、`icons/`、`app-icon.png`、`gen/android/`（`tauri android init` 生成的安卓工程，**不进仓库**）、`web/` 与 `dist/`（构建产物） |
+| `tools/` | **开发与验证工具**（不参与运行） | `test-*.cjs`（十余个 Node 回归套件）、`tower-balance.cjs` / `deep-balance.cjs` 等数值与平衡脚本、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK）、`*guide.md` 与 `apk-alignment.md`（源码对齐研究）、`research/`、`verification/`、`apk-audit/` |
+| `docs/` | 设计与重构文档 | 挑战塔设计/重构、更新记录、[安卓版构建与实测](docs/安卓版构建与实测.md) |
+| `save/` | **运行时的存档目录**（不进仓库） | `progress.json` 正式存档、`backup/` 快照、`server.out.log` / `server.err.log` |
+| `references/` | 原版 APK 与参考素材（本地，不进仓库） | 供 `tools/apk-audit`、素材提取脚本对照 |
+| `out/` | AI 超分与开发期对比图的**临时工作区**（本地，不进仓库） | 实验对比图与分析脚本；删掉不影响游戏 |
+| `.github/` | CI 与发布 | `ci.yml`（回归）、`pages.yml`（在线试玩版）、`release.yml`（双平台便携 zip）、`tauri.yml`（桌面/移动安装包） |
+
+根目录只有三样：Windows 入口 `squirrel_fight.exe`、`README.md`、`.gitignore`（哪些本地产物不进仓库）。
+换行符规则放在 `scripts/.gitattributes`（`.gitattributes` 与 `.gitignore` 一样按目录生效，
+所以只作用于 `scripts/`）——bash 脚本必须 LF，否则 mac 上双击会报
+`syntax error near unexpected token '$'do\r''`。
+
+### js/ 各文件
 
 | 文件 | 职责 |
 |---|---|

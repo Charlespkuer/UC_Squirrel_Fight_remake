@@ -481,6 +481,27 @@
    * ============================================================ */
 
   function bossEntry(layer, salt, squirrelsOnly) { return D().bossFor(layer, salt, squirrelsOnly); }
+  /** 某个「松鼠系」对手在某一层**实际穿的套装**（`wearsOf` 的键）—— 预告与实战共用这一份。
+   *  · 10 的整数层：守关首领就是狂战套（塔顶的标志性外观），x10 的非首领保留自己那套；
+   *  · 非 10 的整数层：**一律**按该层的普通套装档位（`gearKeyForLayer`）。
+   *    狂战套用的是 4 号档，`gearKeyForLayer` 会从「≤ 该层档位上限」的普通套装里按层哈希挑一套，
+   *    所以**非整数层绝不会出现狂战套**（无尽塔第 4 场抽到狂战松鼠时也不允许 —— 用户口径）。 */
+  function gearKeyOf(layer, sq) {
+    const L = Math.max(1, Number(layer) || 1);
+    const key = (sq && sq.gear) ? sq.gear : 'ninja1';
+    if (L % 10 === 0) return key;
+    return D().gearKeyForLayer ? D().gearKeyForLayer(L, key) : key;
+  }
+  /** 「精英」判定 —— 预告与实战共用这一份（原来只在 buildFoe / reportBattle 各写一次
+   *  `entry.kind === 'warlord'`，所以 x5 层完全没有可感知的强度台阶）：
+   *  · 10 的整数层第 5 场：守关首领（狂战松鼠）；
+   *  · **每 5 层（非 x10）的本层最后一战**：逢五的精英台阶（三围 ×1.2 + 精英掉落/计分 +
+   *    C13 精英杀手生效）。x10 排除，避免一层里叠两个精英台阶。 */
+  function isEliteEntry(entry, layer, isLast) {
+    if (entry && entry.kind === 'warlord') return true;
+    const L = Number(layer) || 0;
+    return !!isLast && L > 0 && L % 5 === 0 && L % 10 !== 0;
+  }
   function buildPlan(layer, salt, squirrelsOnly) {
     /* 三侠顺序按层数随机（`heroOrder`，与日期无关）：同层固定 → 预告 = 实战、重试不变。
      * 削弱跟着「哪一位大侠」走（HERO_DEBUFF[anim]），所以顺序一变，本层要吃的削弱顺序也变，
@@ -498,20 +519,22 @@
     if (layer % 10 === 0) plan.push({ kind: 'warlord', id: 'warlord', _layer: layer, _salt: salt });
     return plan;
   }
-  function entryInfo(entry) {
+  function entryInfo(entry, layer, isLast) {
+    const elite = isEliteEntry(entry, layer != null ? layer : entry._layer, isLast);
     if (entry.kind === 'hero') return { name: HERO_NAME[entry.anim], anim: entry.anim, type: '三侠位', mechDesc: '', elite: false };
     if (entry.kind === 'warlord') {
-      /* 预告必须显示**这一层实际会遇到的**那只变体（同层固定 → 预告 = 实战）。 */
+      /* 预告必须显示**这一层实际会遇到的**那只变体与**实际穿的套装**（同层固定 → 预告 = 实战）：
+       * 非 10 的整数层抽到的狂战松鼠穿的是普通套装，预告里也不能画成狂战套。 */
       const w = D().warlordFor(entry._layer, entry._salt);
-      return { name: w.name, squirrel: true, gear: w.gear, elite: true, type: w.type,
+      return { name: w.name, squirrel: true, gear: gearKeyOf(entry._layer, w), elite: true, type: w.type,
         mechDesc: w.mechDesc, patternDesc: w.patternDesc, mechs: w.mech.slice() };
     }
     if (entry.kind === 'npc') {
       const npc = D().NPC_BY_ID[entry.id];
-      return { name: npc.name, anim: npc.anim, elite: false, type: npc.type, mechDesc: npc.mechDesc, mechs: [npc.mech] };
+      return { name: npc.name, anim: npc.anim, elite: elite, type: npc.type, mechDesc: npc.mechDesc, mechs: [npc.mech] };
     }
     const sq = entry.kind === 'trial' ? D().TRIAL_BY_ID[entry.id] : D().SQUIRREL_BY_ID[entry.id];
-    return { name: sq.name, squirrel: true, gear: sq.gear, elite: false, type: sq.type,
+    return { name: sq.name, squirrel: true, gear: sq.gear, elite: elite, type: sq.type,
       mechDesc: sq.mechDesc || '', patternDesc: sq.patternDesc || '', mechs: (sq.mech || []).slice() };
   }
   function bossPool() {
@@ -529,7 +552,8 @@
   }
   /** 入口页预告：当前层的全部对手（与 buildPlan 同源，所以预告 = 实战）。 */
   function preview(layer, salt, squirrelsOnly) {
-    return buildPlan(layer, salt, squirrelsOnly).map((entry) => Object.assign({ kind: entry.kind }, entryInfo(entry)));
+    const plan = buildPlan(layer, salt, squirrelsOnly);
+    return plan.map((entry, i) => Object.assign({ kind: entry.kind }, entryInfo(entry, layer, i === plan.length - 1)));
   }
   /* ============================================================
    * 对局中界面的权威敌人清单
@@ -542,7 +566,7 @@
   function planInfo(mode) {
     const run = (mode === 'tower' ? tower() : endless()).run;
     if (!run || !Array.isArray(run.plan) || !run.plan.length) return [];
-    return run.plan.map((entry) => Object.assign({ kind: entry.kind }, entryInfo(entry)));
+    return run.plan.map((entry, i) => Object.assign({ kind: entry.kind }, entryInfo(entry, run.layer, i === run.plan.length - 1)));
   }
 
   /* ============================================================
@@ -620,6 +644,7 @@
     if (m.enemyMaxHpDown) parts.push('本局敌人生命上限 −' + Math.round(m.enemyMaxHpDown * 100) + '%');
     if (m.shopDiscount) parts.push('下一家商店 ' + shopDiscountLabel(m.shopDiscount));
     if (m.postBattleShop) parts.push('下一场战斗后开一次商店');
+    if (m.postBattleMintShop) parts.push('下一场战斗后开一次铸币商店（顶掉普通商店）');
     if (m.instantRetry) parts.push('铸币 +' + m.instantRetry);
     if (m.shopHalf) parts.push('下次进店 ' + m.shopHalf + ' 件随机商品对折');
     if (m.rerollTiltMul) parts.push('商店刷新稀有线提速 ×' + m.rerollTiltMul);
@@ -654,6 +679,18 @@
       if (m && m.postBattleShop) pct = Math.max(pct, Number(m.postBattleShopDiscount) || D().SHOP_DISCOUNT_E01);
     }
     return pct;
+  }
+  /** E16「铸币商队」：这一场打完是否**必开一家铸币商店**（限次 1）。
+   *  与 activeShopCredit 同一口径：必须按「条目现在开不开着」现算，而且要在
+   *  `consumeLimited` **之前**取（扣完次数条目就被移除了）。
+   *  两家店同时挂着时以铸币商店优先 —— 用户口径：「若该场战斗后本应生成普通商店则顶掉」。 */
+  function activePostBattleMintShop(run) {
+    for (const e of run.limited || []) {
+      if (e.on === false || !(e.uses > 0)) continue;
+      const m = (D().BUFF_BY_ID[e.id] || {}).mods;
+      if (m && m.postBattleMintShop) return true;
+    }
+    return false;
   }
   function consumeLimited(run) {
     for (const b of run.limited || []) {
@@ -1101,7 +1138,7 @@
    * 【T6】敌人构建 —— buildFoe / regionOf
    * ============================================================ */
 
-  function buildFoe(mode, layer, entry, salt) {
+  function buildFoe(mode, layer, entry, salt, isLast) {
     const TD = D();
     const LT = mode === 'tower' ? TD.towerLevel(layer) : TD.endlessLevel(layer);
     const M = mode === 'tower' ? TD.towerMult(layer) : TD.endlessMult(layer);
@@ -1113,7 +1150,7 @@
     const statBase = GData.stagePlayerStat(LT), hpBase = GData.stagePlayerHp(LT);
     // 无尽段机制叠加：所有怪物按固定顺序追加机制
     const extra = [];
-    const elite = entry.kind === 'warlord';                 // x10 第 5 场：精英（×1.2）
+    const elite = isEliteEntry(entry, layer, isLast);       // x10 第 5 场首领 / 每 5 层的最后一战（×1.2）
     let name, bias, npcType, skills = [], weapons = [], pattern = null, mech;
     let mechParams = null, wears = null, castable = undefined;
     if (entry.kind === 'hero') {
@@ -1136,12 +1173,9 @@
       weapons = sq.weapons.map((w) => ({ id: w.id, level: Math.max(1, Math.min(15, w.level + up)) }));
       skills = sq.skills.map((k) => ({ id: k.id, level: Math.max(1, Math.min(15, k.level + up)) }));
       pattern = sq.pattern.slice();
-      const gearKey = sq.gear === 'berserk'
-        ? 'berserk'                                                  // 首领本人：狂战套（4 号档）
-        : (layer % 10 === 0
-          ? sq.gear                                                  // x10 非首领：用自己那套，别蹭狂战
-          : (TD.gearKeyForLayer ? TD.gearKeyForLayer(layer, sq.gear) : sq.gear));
-      wears = TD.wearsOf(gearKey);   // C：套装随层升级
+      /* 套装随层升级；**狂战套只属于 10 的整数层的守关首领**（见 gearKeyOf）——
+       * 无尽塔第 4 场抽到狂战松鼠（非整数层）时按普通档位换装。 */
+      wears = TD.wearsOf(gearKeyOf(layer, sq));
       mech = extra.slice();
       // 自己的机制永远在（无尽的段位机制只做叠加）
       for (const m of sq.mech || []) if (!mech.includes(m)) mech.push(m);
@@ -1260,7 +1294,8 @@
     if (run.choices) return { ok: false, msg: '请先完成场间选择。' };
     if (run.phase) return { ok: false, msg: '请先完成商店与结算。' };
     const entry = run.plan[run.idx];
-    const built = buildFoe(mode, run.layer, entry, run.salt);
+    const isLastBattle = run.idx === run.plan.length - 1;      // 本层最后一战（x5 的精英台阶在这里）
+    const built = buildFoe(mode, run.layer, entry, run.salt, isLastBattle);
     const foeCtx = { hero: entry.kind === 'hero', poolNpc: built.poolNpc, elite: built.elite };
     const agg = aggregate(run, foeCtx);
     /* 隐藏成就「超凡入圣」：本场聚合出来的 buff 加成（不含装备/等级）跨过阈值就记一次。 */
@@ -1492,7 +1527,7 @@
     snapshotBattle(run);
     save();
     const toasts = takeAchievementToasts(run);   // 例如「超凡入圣」是在这之前算出来的
-    return { ok: true, token: run.attempt, entry, info: entryInfo(entry), foe: built.foe,
+    return { ok: true, token: run.attempt, entry, info: entryInfo(entry, run.layer, isLastBattle), foe: built.foe,
       elite: built.elite, region: regionOf(entry), hpRatio: run.carry, adjustMe,
       effMaxHp: () => Math.max(1, Number(run.lastMaxHp) || Math.max(1, Number(built.foe && built.foe.hp) || 1)),
       debuffs: (run.debuffs || []).slice(), achievements: toasts,
@@ -1655,7 +1690,7 @@
      * 赢了再由下面的战利品结算写回真实增量（主界面右上角就标这个数）。 */
     run.lastCoinsGained = 0;
     const entry = run.plan[run.idx];
-    const isElite = entry.kind === 'warlord';   // x10 第 5 场的狂战松鼠
+    const isElite = isEliteEntry(entry, run.layer, run.idx === run.plan.length - 1);   // x10 塔顶 / 每 5 层最后一战
     if (!win) {
       const fail = mode === 'tower' ? towerFail(run) : endlessFail(run);
       if (fail && fail.retryable) { fail.battleNo = run.idx + 1; fail.battleCount = run.plan.length; }
@@ -1807,9 +1842,10 @@
      *   · 层号不变，所以不会触发跨层回血，也不会提前进下一层 */
     const echoP = (entry.kind === 'hero') ? echoRepeatChance(run) : 0;
     run.idx++;
-    /* E01 立即进货 / E15 时间回廊：要在**扣限次之前**取一次 —— 它们的限次就消耗在这一场，
-     * 扣完条目会被移除，之后就算不出「本该开一次店 / 本该重开本层」了。 */
+    /* E01 立即进货 / E16 铸币商队 / E15 时间回廊：要在**扣限次之前**取一次 —— 它们的限次
+     * 就消耗在这一场，扣完条目会被移除，之后就算不出「本该开一次店 / 本该重开本层」了。 */
     const shopCreditPct = activeShopCredit(run);
+    const mintCredit = activePostBattleMintShop(run);
     const layerRestart = hasActiveLayerRestart(run);
     consumeLimited(run);
     const brokenFragile = rollFragileBuffs(run);
@@ -1826,9 +1862,13 @@
     if (layerRestart) {
       const restartAt = restartLayer(run);
       out.layerRestart = { layer: restartAt, battleNo: battleIdx + 1, battleCount: run.plan.length };
-      /* 同一场如果还挂着 E01「立即进货」：店**照开**（它的限次已经扣掉了，不开就等于白扣）——
-       * 关掉店之后正好从本层第 1 场继续。 */
-      if (shopCreditPct > 0) {
+      /* 同一场如果还挂着 E01「立即进货」/ E16「铸币商队」：店**照开**（限次已经扣掉了，
+       * 不开就等于白扣）—— 关掉店之后正好从本层第 1 场继续。铸币商店优先（顶掉试炼商店）。 */
+      if (mintCredit) {
+        openMintShop(run, battleLayer, { noGroup: true, byBuff: true });
+        out.phase = 'shop';
+        out.mintShop = true;
+      } else if (shopCreditPct > 0) {
         run.shop = makeShop(run, shopCreditPct);
         run.shop.postBattle = true;
         run.phase = 'shop';
@@ -1857,14 +1897,22 @@
     }
     /* 铸币商店（5 层之后的 x2/x3/x4 与 x7/x8/x9 层）：每场战斗结束后 5% 概率刷出。
      * 判定放在回响之后 —— 回响会把同一场再打一遍并提前 return，不该为同一场摇两次；
-     * 这一场如果已经由 E01「立即进货」开了试炼商店就顺延（一次战斗不开两家店），
+     * 这一场如果已经由 E01「立即进货」/ E16「铸币商队」开了店就顺延（一次战斗不开两家店），
      * 而且**不记组号** → 这一组里后面那几场还有机会刷出来。 */
-    const mintRoll = (mode === 'endless' && shopCreditPct <= 0 && !noMintShop) && rollMintShop(run, battleLayer);
+    const mintRoll = (mode === 'endless' && shopCreditPct <= 0 && !mintCredit && !noMintShop) && rollMintShop(run, battleLayer);
     if (run.idx >= run.plan.length) {
-      const cleared = layerClear(mode, run, out, shopCreditPct);
-      /* 整层最后一场同样参与判定：layerClear 已经把层推进（x5 层还会开结算商店），
-       * 所以铸币商店在它之后挂上；已经有别的店就让位。 */
-      if (mintRoll && !run.shop) {
+      /* E16「铸币商队」：本场本该开出的普通商店统统由铸币商店顶上 ——
+       * x5 层的结算商店交给 layerClear 直接开成「结算去向」的铸币商店（boundary），
+       * 非 x5 层则和自然刷出的铸币商店一样，在层推进之后补上。 */
+      const cleared = layerClear(mode, run, out, shopCreditPct, mintCredit);
+      if (mintCredit && !run.shop) {
+        openMintShop(run, battleLayer, { noGroup: true, byBuff: true });
+        out.phase = 'shop';
+        out.mintShop = true;
+        save();
+      } else if (mintRoll && !run.shop) {
+        /* 整层最后一场同样参与判定：layerClear 已经把层推进（x5 层还会开结算商店），
+         * 所以铸币商店在它之后挂上；已经有别的店就让位。 */
         openMintShop(run, battleLayer);
         out.phase = 'shop';
         out.mintShop = true;
@@ -1877,8 +1925,9 @@
        *   · 非 x5 层：layerClear 只推进层号、不开店 → 这里按「战后临时小店」开出来
        *     （`postBattle: true`，关掉后回到新层的战斗流程）。
        *   · x5 层：layerClear 已经开了**结算商店**，并且已经吃到了 E01 的折扣
-       *     （`makeShop(run, shopCreditPct)`）→ 不再叠开第二家店，E01 的价值以折扣兑现。 */
-      if (mode === 'endless' && shopCreditPct > 0 && !run.shop) {
+       *     （`makeShop(run, shopCreditPct)`）→ 不再叠开第二家店，E01 的价值以折扣兑现。
+       *   · 同场挂着 E16 时：铸币商店已经顶上，E01 的那家不再叠开（一次战斗只开一家店）。 */
+      if (mode === 'endless' && shopCreditPct > 0 && !mintCredit && !run.shop) {
         run.shop = makeShop(run, shopCreditPct);
         run.shop.postBattle = true;
         run.phase = 'shop';
@@ -1888,10 +1937,13 @@
       }
       return cleared;
     }
-    /* E01「立即进货」：这一场打完之后立刻再开一次试炼商店。
-     * 放在 layerClear 之后判定 —— 整层打完时由 layerClear 自己的「每 5 层」逻辑开店，
-     * 这里只补「层还没打完、但 buff 要求马上开店」的那种情况。 */
-    if (mode === 'endless' && shopCreditPct > 0) {
+    /* 战后临时小店（层还没打完）：E16「铸币商队」优先 —— 它顶掉 E01 的试炼商店；
+     * 没有 E16 时才轮到 E01「立即进货」，最后才是自然刷出的铸币商店。 */
+    if (mode === 'endless' && mintCredit) {
+      openMintShop(run, battleLayer, { noGroup: true, byBuff: true });
+      out.phase = 'shop';
+      out.mintShop = true;
+    } else if (mode === 'endless' && shopCreditPct > 0) {
       run.shop = makeShop(run, shopCreditPct);
       /* 标记「这家店是打完这一场临时开的」——关店后要**回去继续打**，
        * 而不是去结算点（那是「每 5 层」的商店才有的下一步）。 */
@@ -2284,7 +2336,7 @@
    * 【T12】层通关与推进 —— layerClear / advanceLayer
    * ============================================================ */
 
-  function layerClear(mode, run, out, shopPct) {
+  function layerClear(mode, run, out, shopPct, mintShop) {
     out.layerComplete = true;
     out.layer = run.layer;
     // 本层已全清：留一份快照，主界面在商店/结算点阶段仍能看到「最后一个敌人 已战胜」
@@ -2328,8 +2380,15 @@
     }
     out.score = run.score; out.coins = run.coins;
     if (run.layer % 5 === 0) {                           // 每 5 层：商店 → 结算点
-      run.shop = makeShop(run, shopPct);
-      run.shop.boundary = true;                          // 只有这家店关掉之后去结算点
+      /* E16「铸币商队」：顶掉这次的结算商店 —— 位置与去向都不变（`boundary` 一样要打），
+       * 只是货架换成铸币商店（关店后仍按结算商店的去向推进，见 closeMintShop / leaveMintShop）。 */
+      if (mintShop) {
+        openMintShop(run, run.layer, { noGroup: true, byBuff: true, boundary: true });
+        out.mintShop = true;
+      } else {
+        run.shop = makeShop(run, shopPct);
+        run.shop.boundary = true;                          // 只有这家店关掉之后去结算点
+      }
       run.phase = 'shop';
       out.phase = 'shop';
     } else {
@@ -2441,7 +2500,7 @@
    * 注意只掐**自动那一次掷骰**（reportBattle 里的调用），`mintRollOf`（测试/探针读概率）
    * 与 `_debugSpawnMintShop`（调试台手开一家）都不受影响。 */
   let noMintShop = false;
-  const FLOW_BUFF_MODS = ['postBattleShop', 'layerRestart'];
+  const FLOW_BUFF_MODS = ['postBattleShop', 'postBattleMintShop', 'layerRestart'];
   function isFlowBuff(b) {
     const m = (b && b.mods) || {};
     return FLOW_BUFF_MODS.some((k) => m[k]);
@@ -3514,6 +3573,8 @@
     return { coins: run.coins, layer: run.shop.layer, mint: mint,
       /* 这家店是怎么开的：界面据此决定「离开」按钮回哪里，别让它自己猜。 */
       rest: !!run.shop.rest, postBattle: !!run.shop.postBattle, boundary: !!run.shop.boundary,
+      /* 是不是限次增益（E16 铸币商队）触发的那一家 —— 界面用来写清来由。 */
+      byBuff: !!run.shop.byBuff,
       enterCoins: Math.max(0, Math.round(Number(run.shop.enterCoins) || 0)),
       rerollFree: !!run.shop.rerollFree,
       rerollCount: Number(run.shop.rerollCount) || 0,
@@ -4039,11 +4100,19 @@
     applyShopHalf(run, slots, shop);
     return shop;
   }
-  /** 开一家铸币商店：记账「这一组连续三层已经出过」并把 phase 切到商店。
-   *  `opts.debug`（调试台用）**不记组号** —— 手开一家不该把这一组自然刷出的机会吃掉。 */
+  /** 开一家铸币商店：默认记账「这一组连续三层已经出过」并把 phase 切到商店。
+   *  opts.debug    调试台手开：**不记组号** —— 手开一家不该把这一组自然刷出的机会吃掉；
+   *  opts.noGroup  限次增益（E16 铸币商队）触发：同样不记组号 —— 它是额外送的一家店，
+   *                这一组后面几场照样可以自然刷出；
+   *  opts.byBuff   标记「这家店是限次增益触发的」（界面据此写清来由）；
+   *  opts.boundary 标记「它顶掉了每 5 层的结算商店」—— 收摊后按结算商店的去向推进
+   *                （见 closeMintShop / leaveMintShop）。 */
   function openMintShop(run, layer, opts) {
-    if (!(opts && opts.debug)) run.mintGroup = D().mintGroupOf(layer);
+    const o = opts || {};
+    if (!o.debug && !o.noGroup) run.mintGroup = D().mintGroupOf(layer);
     run.shop = makeMintShop(run, layer);
+    if (o.byBuff) run.shop.byBuff = true;
+    if (o.boundary) run.shop.boundary = true;
     run.phase = 'shop';
     return run.shop;
   }
@@ -4052,11 +4121,16 @@
     const shop = run && run.shop;
     return !!(shop && shop.mint && shop.swapped !== true && !(Number(shop.rerollCount) > 0));
   }
-  /** 收摊：买 / 换完成、或玩家直接走人 —— 这家店立刻消失（不会再来）。 */
+  /** 收摊：买 / 换完成、或玩家直接走人 —— 这家店立刻消失（不会再来）。
+   *  若这家店顶掉了「每 5 层的结算商店」（boundary），收摊后照旧走结算商店的去向：
+   * 20/30… 层先放弃一个永久增益，否则直接推进到下一层 —— 否则整局会卡在
+   * 「本层已清空、却没有下一步」的死状态里。 */
   function closeMintShop(run) {
     run = run || endless().run;
     if (!run || !run.shop) return false;
+    const boundary = run.shop.mint === true && run.shop.boundary === true;
     run.shop = null;
+    if (boundary) { advancePastBoundaryShop(run); return true; }
     run.phase = null;
     return true;
   }
@@ -4201,10 +4275,15 @@
     save();
     return { ok: true, slots: run.shop.slots.length };
   }
-  /** 直接走人：不买不换也一样收摊（这家店不会再来）。只对铸币商店有效。 */
+  /** 直接走人：不买不换也一样收摊（这家店不会再来）。只对铸币商店有效。
+   *  顶掉结算商店的那一家（boundary）按结算商店的去向推进 —— 与买 / 换后的收摊同一口径。 */
   function leaveMintShop() {
     const run = endless().run;
     if (!run || !run.shop || !run.shop.mint) return { ok: false, msg: '现在不是铸币商店。' };
+    if (run.shop.boundary === true) {
+      run.shop = null;
+      return advancePastBoundaryShop(run);
+    }
     closeMintShop(run);
     save();
     return { ok: true, layer: run.layer };
@@ -4240,10 +4319,10 @@
     save();
     return out;
   }
-  function continueFromShop() {
-    const run = endless().run;
-    if (!run || run.phase !== 'shop') return { ok: false };
-    run.shop = null;
+  /** 结算商店（每 5 层）关掉之后的去向：20/30… 层先放弃一个永久增益，否则推进到下一层。
+   *  试炼商店（continueFromShop）与「顶掉它的铸币商店」（closeMintShop / leaveMintShop）
+   *  共用这一份，免得哪一条路把整局的推进弄丢。 */
+  function advancePastBoundaryShop(run) {
     if (needPermSacrifice(run.layer) && (run.permanent || []).length) {
       run.phase = 'sacrifice';
       save();
@@ -4253,6 +4332,12 @@
     advanceLayer(run, 'endless');
     save();
     return { ok: true, layer: run.layer };
+  }
+  function continueFromShop() {
+    const run = endless().run;
+    if (!run || run.phase !== 'shop') return { ok: false };
+    run.shop = null;
+    return advancePastBoundaryShop(run);
   }
   /** 是否需要在「刚清完这一层」时放弃一个永久增益（20 起每 10 层）。 */
   function needPermSacrifice(layer) {
@@ -4369,7 +4454,7 @@
         lastHp: Math.max(0, Number(t.run.lastHp) || 0),
         curMaxHp: currentMaxHp(t.run),
         // 下一场是谁 + 它的机制（选 buff 页要展示「你接下来要打的那个 boss 是什么」）
-        next: t.run.plan[t.run.idx] ? Object.assign({ kind: t.run.plan[t.run.idx].kind }, entryInfo(t.run.plan[t.run.idx])) : null } : null,
+        next: t.run.plan[t.run.idx] ? Object.assign({ kind: t.run.plan[t.run.idx].kind }, entryInfo(t.run.plan[t.run.idx], t.run.layer, t.run.idx === t.run.plan.length - 1)) : null } : null,
       preview: preview(layer) };
   }
   function endlessInfo() {
@@ -4382,9 +4467,9 @@
         battleNo: e.run.idx + 1, battleCount: e.run.plan.length, phase: e.run.phase,
       debuffs: (e.run.debuffs || []).slice(),
         choices: e.run.choices ? e.run.choices.slice() : null,
-        next: e.run.plan[e.run.idx] ? Object.assign({ kind: e.run.plan[e.run.idx].kind }, entryInfo(e.run.plan[e.run.idx])) : null,
+        next: e.run.plan[e.run.idx] ? Object.assign({ kind: e.run.plan[e.run.idx].kind }, entryInfo(e.run.plan[e.run.idx], e.run.layer, e.run.idx === e.run.plan.length - 1)) : null,
         bestLayer: e.run.bestLayer, segment: D().endlessSegment(e.run.layer),
-        plan: (e.run.plan || []).map((entry) => Object.assign({ kind: entry.kind }, entryInfo(entry))),
+        plan: (e.run.plan || []).map((entry, i) => Object.assign({ kind: entry.kind }, entryInfo(entry, e.run.layer, i === e.run.plan.length - 1))),
         /* 计分扩展：成就列表 + 本局加分流水（界面用它做提示与结算展示）。 */
         achievements: (e.run.achievements || []).slice(),
         scoreLog: (e.run.scoreLog || []).slice(-12),
@@ -4622,6 +4707,30 @@
   }
 
   /* ============================================================
+   * 【T20b】调试台专属：把无尽对局直接挪到第 n 层
+   *   （`_debugSetEndlessLayer` / `_debugShiftEndlessLayer` 共用这一份）
+   * ============================================================ */
+  /** 把无尽对局挪到第 n 层（没有对局就先开一局）。plan 用与 advanceLayer 同一组参数重建，
+   *  保证界面上预告的第 4 场 boss 和实战是同一只。 */
+  function debugSetEndlessLayer(n) {
+    const layer = Math.max(1, Math.floor(Number(n) || 1));
+    const e = endless();
+    if (!e.run) { const r = startEndlessRun(); if (!r.ok) return r; }
+    e.run.layer = layer;
+    /* 必须和 advanceLayer 用同一组参数（salt + squirrelsOnly=true）重建，
+     * 否则第 4 场的 boss 会和界面预告的不是同一只。 */
+    e.run.plan = buildPlan(layer, e.run.salt, true);
+    e.run.idx = 0;
+    e.run.choices = null;
+    e.run.phase = null;
+    e.run.finished = null;
+    /* 挪层 = 换层：三侠削弱是「贯穿本层」的，跟着一起清（与 advanceLayer 同一口径）。 */
+    e.run.debuffs = [];
+    save();
+    return { ok: true, layer };
+  }
+
+  /* ============================================================
    * 【T21】模块导出 —— window.Tower（界面与测试的入口面）
    * ============================================================ */
   window.Tower = {
@@ -4844,22 +4953,27 @@
       save();
       return { ok: true, layer, slots: (e.run.shop && e.run.shop.slots.length) || 0 };
     },
-    _debugSetEndlessLayer(n) {
-      const layer = Math.max(1, Math.floor(Number(n) || 1));
+    /* 调试台专属：**立刻开一家普通（试炼）商店**（跳过每 5 层 / 概率判定）。
+     * 走正式开店路径（掷货架 / E04 折扣 / E14 对折 / C59 进门币），标记成「战后临时小店」——
+     * 「离开」收摊后回去继续打，不会顺带把整局推进到结算点。 */
+    _debugSpawnShop: () => {
       const e = endless();
-      if (!e.run) { const r = startEndlessRun(); if (!r.ok) return r; }
-      e.run.layer = layer;
-      /* 必须和 advanceLayer 用同一组参数（salt + squirrelsOnly=true）重建，
-       * 否则第 4 场的 boss 会和界面预告的不是同一只。 */
-      e.run.plan = buildPlan(layer, e.run.salt, true);
-      e.run.idx = 0;
-      e.run.choices = null;
-      e.run.phase = null;
-      e.run.finished = null;
-      /* 挪层 = 换层：三侠削弱是「贯穿本层」的，跟着一起清（与 advanceLayer 同一口径）。 */
-      e.run.debuffs = [];
+      if (!e.run) return { ok: false, msg: '当前没有无尽塔对局（先开始一局）。' };
+      const layer = Math.max(1, Math.floor(Number(e.run.layer) || 1));
+      e.run.shop = makeShop(e.run, 0);
+      e.run.shop.postBattle = true;
+      e.run.phase = 'shop';
       save();
-      return { ok: true, layer };
+      return { ok: true, layer, slots: (e.run.shop && e.run.shop.slots.length) || 0 };
+    },
+    _debugSetEndlessLayer(n) { return debugSetEndlessLayer(n); },
+    /* 调试台专属：无尽塔层数 ±1（快速爬塔）。没有对局时先开一局（落在第 1 层）；
+     * 最低夹在第 1 层，挪层口径与 _debugSetEndlessLayer 完全一致。 */
+    _debugShiftEndlessLayer(delta) {
+      const e = endless();
+      const d = Math.round(Number(delta) || 0);
+      if (!e.run) return debugSetEndlessLayer(1);
+      return debugSetEndlessLayer(Math.max(1, (Math.floor(Number(e.run.layer) || 1)) + d));
     },
   };
 })();

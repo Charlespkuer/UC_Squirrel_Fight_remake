@@ -6,10 +6,22 @@ authors = ["ssdz-classic"]
 edition = "2021"
 rust-version = "1.77"
 
-# 只有可执行文件：不再产出 lib/dll（少一个文件，产物更干净）
+# 两个产物，同一个 crate：
+#   * bin  squirrel_fight   → 桌面 exe（几 MB 的轻壳，前端在游戏目录里）
+#     注意：**包名仍是 ssdz-classic**（`[package] name` 不动），只把可执行文件名改成
+#     squirrel_fight；因为 Tauri 打包器默认按包名找二进制，所以 tauri.conf.json 里
+#     必须同时设 "mainBinaryName": "squirrel_fight"。
+#   * lib  ssdz_classic_lib → Android/iOS 用（移动端把前端嵌进安装包，
+#     由 tauri::mobile_entry_point 生成 JNI 入口；lib.rs 里按 cfg(mobile) 分支）
+#     安卓侧加载的是 libssdz_classic_lib.so，**这个名字不要动**（改了要同步改
+#     gen/android 里的 jniLibs 与 gradle 配置）。
 [[bin]]
-name = "ssdz-classic"
+name = "squirrel_fight"
 path = "src/main.rs"
+
+[lib]
+name = "ssdz_classic_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

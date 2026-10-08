@@ -610,7 +610,7 @@
    * ============================================================ */
   const SAVE_URL = '__save';
   const LEGACY_KEY = SAVE_KEY;                       // 旧的 localStorage 存档键
-  const fileState = { available: false, checked: false, code: 0, fileAt: 0, error: '', reason: '', lastWrite: 0, lastLoad: 0, lastRead: 0, lastReadErr: '', conflict: false, dirty: false, freshLocal: false, path: 'save/progress.json' };
+  const fileState = { available: false, transportReady: false, checked: false, code: 0, fileAt: 0, error: '', reason: '', lastWrite: 0, lastLoad: 0, lastRead: 0, lastReadErr: '', conflict: false, dirty: false, freshLocal: false, path: 'save/progress.json' };
   let fileTimer = 0;
   /* 存档读写通道：默认走本地服务器的 /__save；宿主（Tauri 等）可以替换成自己的实现。
    * transport = { label, path?, probe(), read(), write(json) }，全部返回 Promise。 */
@@ -674,11 +674,15 @@
       try {
         const meta = await saveTransport.probe();
         fileState.available = !!meta.ok;
+        // 区分「通道坏了」和「通道好用、只是还没有存档文件」——
+        // 手机上第一次运行就是后者，不该弹红色报错横幅。
+        fileState.transportReady = !!meta.ok;
         fileState.fileAt = Number(meta.savedAt) || 0;
         fileState.reason = fileState.available ? '' : (meta.msg || '存档通道不可用');
         fileState.error = '';
       } catch (e) {
         fileState.available = false;
+        fileState.transportReady = false;
         fileState.reason = '存档通道出错：' + String((e && e.message) || e);
         fileState.error = fileState.reason;
       }
@@ -688,7 +692,7 @@
     if (typeof fetch !== 'function') { fileState.checked = true; fileState.available = false; fileState.reason = '这个环境没有 fetch，无法读写存档文件'; return false; }
     if (isFileProtocol()) {
       fileState.checked = true; fileState.available = false;
-      fileState.reason = '页面是 file:// 打开的，浏览器不允许写文件。请用启动器（启动游戏.cmd / 启动游戏.command / node serve.js）打开游戏。';
+      fileState.reason = '页面是 file:// 打开的，浏览器不允许写文件。请用启动器打开游戏（Windows：squirrel_fight.exe 或 scripts/启动游戏.cmd；macOS：scripts/启动游戏.command；也可以 node scripts/serve.js）。';
       return false;
     }
     try {
@@ -798,6 +802,7 @@
   function fileInfo() {
     return {
       mode: storageMode(), available: fileState.available, checked: fileState.checked,
+      transportReady: fileState.transportReady,
       conflict: fileState.conflict, fileAt: fileState.fileAt, localAt: (S && S.savedAt) || 0,
       code: fileState.code,
       lastWrite: fileState.lastWrite, lastLoad: fileState.lastLoad,

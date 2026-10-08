@@ -45,6 +45,9 @@
 .debug-grant-note{margin:7px 0 0;font-size:11.5px;line-height:1.5;color:#987a4e}
 /* 武技：获得 / 遗忘 */
 .debug-ws .debug-grant-row{grid-template-columns:auto 1fr 54px auto}
+/* 无尽塔快捷行（层数 ±1 / 手开商店）：标签 + 两个等宽按钮，按钮文字不换行 */
+.debug-quick{grid-template-columns:auto 1fr 1fr}
+.debug-quick .uc-button{white-space:nowrap}
 .debug-ws-tag{font-size:12px;font-weight:700;color:#7a5528;white-space:nowrap}
 .debug-ws-owned{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;max-height:132px;overflow-y:auto}
 .debug-ws-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 4px 2px 8px;border-radius:12px;

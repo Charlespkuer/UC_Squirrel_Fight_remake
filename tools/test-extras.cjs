@@ -701,6 +701,11 @@ test('抽奖里改成两个随机普通药丸，不再直接发天使果实种�
   const table = g.c.ClassicExtras.lotteryPrizes;
   assert.equal(table.length, 10);
   assert.ok(table.every((p) => p.id !== 45), '奖池里不再有天使果实种子');
+  /* 2026-10 第十六批：大体力药剂（道具 2）从 ×4 削弱到 ×3 */
+  const big = table.filter((p) => p.id === 2);
+  assert.equal(big.length, 1, '奖池里应当只有一个大体力药剂奖位：' + JSON.stringify(big));
+  assert.equal(big[0].count, 3, '大体力药剂 ×3（本轮由 4 削弱到 3），实测 ' + big[0].count);
+  assert.match(big[0].label, /大体力药剂 ×3/, '文案同步：' + big[0].label);
   const pills = table.filter((p) => p.pills);
   assert.equal(pills.length, 1, '只有一个「随机普通药丸」奖位');
   assert.equal(pills[0].pills, 2, '一次给两个药丸');

@@ -1,12 +1,13 @@
 /* 桌面版的构建入口（以「本地尽量轻」为目标）。
  *
- *   node tools/build-tauri-app.cjs            # 编译 → 把 exe 拷到 src-tauri/dist/（约 3 MB）
+ *   node tools/build-tauri-app.cjs            # 编译 → 把 exe 拷到 src-tauri/dist/ 和**游戏根目录**（约 3 MB）
  *   node tools/build-tauri-app.cjs --clean    # 编译 → 拷贝 → cargo clean（删掉 target/，约 2.8 GB）
  *   node tools/build-tauri-app.cjs --installer # 另打一个 NSIS 安装包（临时暂存 web/，打完就删）
  *
  * 为什么要有这个脚本：
  *   Rust 的 target/ 是编译中间产物，动辄 2~3 GB，但**运行完全不需要**它；
- *   真正要留的只有 src-tauri/dist/ssdz-classic.exe（轻壳，几 MB，前端不在里面，
+ *   真正要留的只有 squirrel_fight.exe（轻壳，几 MB，前端不在里面，
+ *   游戏根目录那份就是 Windows 的双击入口；src-tauri/dist/ 里那份是留档，两者同一个文件）
  *   窗口自带迷你服务器，直接读游戏目录里的 index.html / images / audio）。
  *   所以平时用 --clean 构建，磁盘上就只多一个几 MB 的 exe。
  *
@@ -34,7 +35,9 @@ function findRoot(start) {
 const ROOT = findRoot(__dirname);
 const TAURI = path.join(ROOT, 'src-tauri');
 const DIST = path.join(TAURI, 'dist');
-const APP = path.join(DIST, 'ssdz-classic.exe');
+const APP = path.join(DIST, 'squirrel_fight.exe');
+/** Windows 双击入口：游戏根目录下的同名 exe（和 scripts/、css/ 同级）。 */
+const ROOT_APP = path.join(ROOT, 'squirrel_fight.exe');
 const WEB = path.join(TAURI, 'web');
 const args = process.argv.slice(2);
 const CLEAN = args.includes('--clean');
@@ -91,7 +94,7 @@ if (INSTALLER) process.on('exit', () => { try { fs.rmSync(WEB, { recursive: true
 const targetBefore = dirSize(path.join(TAURI, 'target'));
 run(cargo, ['build', '--release']);
 
-const built = path.join(TAURI, 'target', 'release', 'ssdz-classic.exe');
+const built = path.join(TAURI, 'target', 'release', 'squirrel_fight.exe');
 if (!fs.existsSync(built)) {
   console.error('[x] 没找到产物：' + built);
   process.exit(1);
@@ -99,6 +102,9 @@ if (!fs.existsSync(built)) {
 fs.mkdirSync(DIST, { recursive: true });
 fs.copyFileSync(built, APP);
 console.log('✓ 已生成 ' + path.relative(ROOT, APP) + '（' + mb(fs.statSync(APP).size) + '）');
+// 游戏根目录也放一份：那才是 Windows 的双击入口（scripts\启动游戏.cmd 也会先找它）
+fs.copyFileSync(built, ROOT_APP);
+console.log('✓ 已更新 ' + path.relative(ROOT, ROOT_APP) + '（' + mb(fs.statSync(ROOT_APP).size) + '，双击入口）');
 
 if (INSTALLER) {
   console.log('— 打安装包：临时暂存前端到 src-tauri/web（结束会删掉）');
@@ -138,6 +144,7 @@ if (CLEAN) {
 
 console.log('');
 console.log('桌面版目录现在是：');
-console.log('  ' + path.relative(ROOT, APP) + '  ' + mb(fs.statSync(APP).size) + '（轻壳：前端与存档都在游戏目录里）');
-console.log('  双击游戏目录里的 启动游戏.cmd 就会用它开原生窗口。');
+console.log('  ' + path.relative(ROOT, ROOT_APP) + '  ' + mb(fs.statSync(ROOT_APP).size) + '（游戏根目录的双击入口）');
+console.log('  ' + path.relative(ROOT, APP) + '  ' + mb(fs.statSync(APP).size) + '（同一个文件的留档副本）');
+console.log('  双击根目录那个 exe 就会开原生窗口；脚本入口是 scripts\\启动游戏.cmd（兜底）。');
 if (!CLEAN) console.log('  想立刻回收编译缓存：node tools/build-tauri-app.cjs --clean（会重新编译一次）');

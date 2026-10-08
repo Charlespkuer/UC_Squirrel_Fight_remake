@@ -130,7 +130,8 @@ hr('2. 四个场所：池子 = 标签推导出的名单（不多不少）');
   });
   check('挑战塔池里没有「只有无尽塔才有」的机制（试炼币 / 商店 / 环境 / 结算…）', () => {
     const MODS = ['envIgnore', 'envReflect', 'instantCoins', 'coinBoostPct', 'shopDiscount',
-      'instantRetry', 'sellValue', 'sellGrowthPerWin', 'shopSpendStep', 'permSlot', 'postBattleShop', 'shopHalf',
+      'instantRetry', 'sellValue', 'sellGrowthPerWin', 'shopSpendStep', 'permSlot', 'postBattleShop',
+      'postBattleMintShop', 'shopHalf',
       'weightDivBy', 'weightDivOffset', 'limitedDefaultRerollPaid', 'pityWeight'];
     for (const b of TD.towerPool) {
       const bad = Object.keys(b.mods || {}).filter((k) => MODS.indexOf(k) >= 0);

@@ -1,16 +1,17 @@
 ﻿# 松鼠大战怀旧复刻版 —— Windows 启动器（主体）
 #
-# 这个脚本是 启动游戏.cmd 的实际执行部分。分工原因：cmd.exe 读 .cmd 里的 UTF-8
-# 中文（尤其是文件中间改代码页 chcp 65001 时）会把中文字节错位、把中文注释当成命令，
-# 结果就是「服务器没起来，浏览器却打开了」——正是玩家反馈的「没有本地服务器接口」。
-# 所以 .cmd 只留 ASCII 外壳，中文提示与判断逻辑都在这里（PowerShell 处理 UTF-8 没问题）。
+# 这个脚本是 scripts\启动游戏.cmd 的实际执行部分（两者同目录）。分工原因：cmd.exe
+# 读 .cmd 里的 UTF-8 中文（尤其是文件中间改代码页 chcp 65001 时）会把中文字节错位、
+# 把中文注释当成命令，结果就是「服务器没起来，浏览器却打开了」——正是玩家反馈的
+# 「没有本地服务器接口」。所以 .cmd 只留 ASCII 外壳，中文提示与判断逻辑都在这里
+# （PowerShell 处理 UTF-8 没问题）。
 #
-# 用法：启动游戏.cmd [端口] [--no-save] [--browser] [--stop]（脚本就在游戏目录里）
+# 用法：scripts\启动游戏.cmd [端口] [--no-save] [--browser] [--stop]
 #   --no-save  只读模式，不写 save\progress.json
 #   --browser  不走原生窗口，改用浏览器的「应用窗口」打开（默认优先原生窗口）
 #
-# 打开顺序：①本机已经编译好的 Tauri 桌面版（src-tauri\target\release\ssdz-classic.exe）
-#           → 真正的原生窗口，完全不经过浏览器；
+# 打开顺序：①已经编译好的 Tauri 桌面版（游戏根目录里的 squirrel_fight.exe，或
+#             scripts\squirrel_fight.exe）→ 真正的原生窗口，完全不经过浏览器；
 #           ②没有原生版 → 起本地服务器，再用 Chrome/Edge 的 --app= 应用窗口打开。
 
 $ErrorActionPreference = 'Continue'
@@ -95,18 +96,28 @@ if ($args -contains '--stop') {
 }
 
 # ---------- 优先：已经编译好的原生窗口（Tauri 轻壳）----------
-# 轻壳（src-tauri\dist\ssdz-classic.exe，几 MB）自己不存前端：它启动时找游戏目录里的
-# index.html，用一个内置的迷你服务器供起来，存档也走游戏目录的 save/progress.json，
-# 所以和网页版是同一份代码、同一个存档文件。旧的 target\release 路径也认（兼容）。
+# 轻壳（几 MB）自己不存前端：它启动时找游戏目录里的 index.html，用一个内置的迷你
+# 服务器供起来，存档也走游戏目录的 save/progress.json，所以和网页版是同一份代码、
+# 同一个存档文件。
+# 名字与位置：**正式入口是游戏根目录的 squirrel_fight.exe**（双击它就直接开原生窗口，
+# 不需要走本脚本）；这里把本脚本同目录与旧的自编译输出目录也列上，纯粹为了兼容
+# 以前摆放过 / 手动编译出来的产物。旧文件名 ssdz-classic.exe 也继续认（改名前的产物）。
 # 原生窗口偶尔会在启动几秒内自己退出（WebView2 初始化被打断，实测大约十次里有一两次），
 # 所以启动后确认一下它还活着；连着三次都不行就自动退回浏览器路线，而不是丢给用户一个空白。
 $desktop = @(
+  (Join-Path $root 'squirrel_fight.exe'),
+  (Join-Path $here 'squirrel_fight.exe'),
+  (Join-Path $root 'src-tauri\dist\squirrel_fight.exe'),
+  (Join-Path $root 'src-tauri\target\release\squirrel_fight.exe'),
+  (Join-Path $root 'ssdz-classic.exe'),
+  (Join-Path $here 'ssdz-classic.exe'),
   (Join-Path $root 'src-tauri\dist\ssdz-classic.exe'),
   (Join-Path $root 'src-tauri\target\release\ssdz-classic.exe')
 ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if ((-not $forceBrowser) -and $desktop) {
-  # 已经开着一个就别再开第二个：两个实例写同一份存档会互相覆盖
-  if (Get-Process -Name 'ssdz-classic' -ErrorAction SilentlyContinue) {
+  # 已经开着一个就别再开第二个：两个实例写同一份存档会互相覆盖。
+  # 进程名跟着 exe 文件名走，所以新旧两个名字都要查。
+  if (Get-Process -Name 'squirrel_fight', 'ssdz-classic' -ErrorAction SilentlyContinue) {
     Write-Host '桌面版已经在运行了（看任务栏），不再重复打开。'
     exit 0
   }

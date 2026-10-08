@@ -1393,6 +1393,9 @@
         '<span class="mint-coins">试炼币 ' + Math.max(0, Math.floor(Number(shop.coins) || 0)) + '</span></h2>' +
       '<p class="mint-lead">战后偶遇的流动商人：<b>花铸币买走一件</b>，或者<b>拿自己的一件增益免费换一件</b> —— ' +
         '做成其中任何一件，他立刻就走（也可以直接送客）。</p>' +
+      /* E16「铸币商队」触发的那一家：写清来由（限次 1，用完这家店就没了） */
+      (shop.byBuff ? '<p class="mint-flash">限次增益「铸币商队」触发的商队' +
+        (shop.boundary ? '：它顶掉了这一段的结算商店，送客后照旧前往结算点' : '') + '。</p>' : '') +
       (flash ? '<p class="mint-flash">' + esc(flash) + '</p>' : '') +
       '<div class="shop-shelf">' + slots + '</div>' +
       '<div class="shop-extra">' +
@@ -1501,5 +1504,5 @@
   /* ============================================================
    * 【U17】模块导出 —— window.TowerUI
    * ============================================================ */
-  window.TowerUI = { openTower, openEndless, openMintShop, openPickBuff };
+  window.TowerUI = { openTower, openEndless, openMintShop, openShop, openPickBuff };
 })();

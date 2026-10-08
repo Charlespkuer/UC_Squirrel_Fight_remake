@@ -94,10 +94,11 @@ function foeOf(c, id, kind, layer) {
 
 const cases = [];
 function test(name, fn) { cases.push([name, fn]); }
-/** 「会改变层内流程」的增益：E01 会在下一场后开店、E15 会把本层从第 1 场重开。
+/** 「会改变层内流程」的增益：E01 会在下一场后开试炼商店、E16 会在下一场后开铸币商店、
+ *  E15 会把本层从第 1 场重开。
  *  只关心层内进度/商店节奏的用例不该随机选到它们（这条测试本来就是靠真随机跑的，
  *  选到之后场次计数就散了 —— 实测 需求9.8 偶发红就是这个原因）。 */
-const FLOW_BUFFS = ['E01', 'E15'];
+const FLOW_BUFFS = ['E01', 'E15', 'E16'];
 /** 从选择节点里挑一张**不改流程**的；都改了（极端情况）就退回第 0 张。 */
 function safeChoiceIndex(choices) {
   const list = Array.isArray(choices) ? choices : [];
@@ -1840,10 +1841,11 @@ test('需求21：挑战塔不再生成任何「只有无尽塔用得上」的增
   /* 本轮「严格池子管理」：C36 挥金如土挂在试炼商店消费上 → 改成无尽塔专属，
    * 永久类 33 → 32。 */
   /* 永久类的**条数会随池子调优变动**（用户正在调整哪些永久件进战斗奖励池：
-   * C01/C04 已去掉 battle 标签 → 只进商店不进奖励池）。这里只守下界 + 自洽，
-   * 不再钉死具体数字。 */
+   * C01/C04 已去掉 battle 标签 → 只进商店不进奖励池；2026-10 第十六批又有 10 件
+   * C06/C07/C09/C16/C50/C48/C11/C12/C15/C35 变成无尽专属 → 31 → 21）。
+   * 所以这里只守「用户确认过的下界 21」+ 自洽，不再钉死具体数字。 */
   const towerPerm = TD.towerPool.filter((b) => b.kind === 'permanent');
-  assert.ok(towerPerm.length >= 28, '永久类也属于挑战塔池（至少 28 条），实测 ' + towerPerm.length);
+  assert.ok(towerPerm.length >= 21, '永久类也属于挑战塔池（至少 21 条），实测 ' + towerPerm.length);
   assert.equal(towerPerm.length, TD.BUFFS.filter((b) => b.kind === 'permanent' && TD.hasTag(b, 'tower') && TD.hasTag(b, 'battle')).length,
     '永久类条数要与「tower + battle」标签口径一致');
   assert.equal(TD.towerPool.filter((b) => b.kind === 'instant').length, 0, '即时类不进选择池');
@@ -2574,8 +2576,8 @@ test('需求31：增益池标签严格规范（挑战塔与无尽塔是两个池
   // 7) 挑战塔池的构成可解释
   assert.equal(TD.towerPool.length, byTag('T.choice').split(',').length, '池子大小要自洽');
   assert.equal(TD.towerPool.filter((b) => b.kind === 'limited').length, 25, '限次类 25 条（含本轮新增的 C57）');
-  assert.ok(TD.towerPool.filter((b) => b.kind === 'permanent').length >= 28,
-    '永久类至少 28 条，实测 ' + TD.towerPool.filter((b) => b.kind === 'permanent').length);
+  assert.ok(TD.towerPool.filter((b) => b.kind === 'permanent').length >= 21,
+    '永久类至少 21 条，实测 ' + TD.towerPool.filter((b) => b.kind === 'permanent').length);
 });
 
 test('需求32：池子分离的端到端实测（真跑两种塔的抽取，零交叉）', () => {
@@ -7026,6 +7028,10 @@ test('需求86：时间回廊（E15）—— 下一场打完后从本层第 1 �
     const c = fresh(7, true);
     const before = c.Tower._debugRun('endless');
     before.idx = before.plan.length - 1;             // 摆到「最后一场」之前
+    /* 第 4 场可能抽到狂战松鼠（算精英，需求130）：那一场照常多拿一份精英试炼币。
+     * 这里要验的是「没发层通关的 COINS.layer」，不是「一定只有 COINS.battle」。 */
+    const last = before.plan[before.plan.length - 1];
+    const eliteCoins = last && last.kind === 'warlord' ? TD.COINS.elite : 0;
     const layer0 = before.layer, coins0 = before.coins, score0 = before.score;
     const { rw } = winHere(c);
     const after = c.Tower._debugRun('endless');
@@ -7035,7 +7041,7 @@ test('需求86：时间回廊（E15）—— 下一场打完后从本层第 1 �
     assert.equal(after.idx, 0, '回到第 1 场');
     assert.equal(after.finished, null, '不该留下「本层已通关」的快照');
     assert.ok(after.score - score0 < TD.SCORE.layer, '不发层通关分数：' + (after.score - score0));
-    assert.equal(after.coins - coins0, TD.COINS.battle, '只发这一场的试炼币（不发 COINS.layer）');
+    assert.equal(after.coins - coins0, TD.COINS.battle + eliteCoins, '只发这一场的试炼币（不发 COINS.layer）');
     assert.equal(after.phase, null, '不进结算点 / 商店');
     assert.equal(after.bestLayer, before.bestLayer, '最深层数不因为这个 buff 抬高（没走 layerClear）');
   }
@@ -7124,8 +7130,8 @@ test('需求86：时间回廊（E15）—— 下一场打完后从本层第 1 �
       '关掉开关时 E01 / E15 应当能从场间选择里摇到（这本来就是它们的获取途径）：' +
       ['E01', 'E15'].filter((id) => off.has(id)).join(',') + ' / 抽了 ' + off.size + ' 张');
     const on = collect(true, nodes);
-    const leak = ['E01', 'E15'].filter((id) => on.has(id));
-    assert.equal(leak.length, 0, '打开开关之后这两张牌不该再进选择池：' + leak.join(','));
+    const leak = ['E01', 'E15', 'E16'].filter((id) => on.has(id));
+    assert.equal(leak.length, 0, '打开开关之后这三张牌不该再进选择池：' + leak.join(','));
   }
 });
 
@@ -7381,7 +7387,7 @@ test('需求90：铸币商店的「返回」不收摊、「继续战斗」才收
   const dbgSrc = fs.readFileSync(path.join(ROOT, 'js', 'debug.js'), 'utf8');
   assert.ok(/data-mint-shop/.test(dbgSrc), '调试面板要加按钮');
   assert.ok(/_debugSpawnMintShop/.test(dbgSrc), '按钮要接 _debugSpawnMintShop');
-  assert.ok(/立即生成一个铸币商店/.test(dbgSrc), '文案要写清是「立即生成一个铸币商店」');
+  assert.ok(/data-mint-shop[^>]*>铸币商店</.test(dbgSrc), '文案缩减为「铸币商店」');
 });
 
 test('需求91：三侠削弱只「贯穿本层」—— 换层必须清掉（不再跨层保留或叠加）', () => {
@@ -9698,6 +9704,176 @@ test('需求130：挑战塔 20 层首领（无常）削弱 + 狂战松鼠进无�
   assert.ok(r20 >= 0.06,
     '20 层第 5 场（无常）削弱后单场胜率应当 ≥6%（原来约 1~3%）：' + (r20 * 100).toFixed(1) + '%');
   assert.ok(r20 <= 0.4, '也不该软成普通怪 —— 它仍是塔顶 boss：' + (r20 * 100).toFixed(1) + '%');
+});
+
+test('需求131：狂战套只准出现在 10 的整数层（无尽第 4 场抽到狂战松鼠时也换成普通套装）', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  S.state().props[23] = 9999;
+  const BERSERK = [201, 202, 203, 204];
+  const berserkCount = (wears) => (wears || []).filter((w) => BERSERK.includes(w.id)).length;
+  /* ① 非 x10 层：第 4 场如果是狂战松鼠，必须换成该层的普通套装，且**预告 = 实战** */
+  const orig = TD.bossFor;
+  TD.bossFor = () => ({ kind: 'warlord', id: 'warlord' });
+  for (const layer of [1, 3, 7, 9, 11, 19, 21, 29]) {
+    const ss = S.state(); if (ss.endless) ss.endless.run = null;
+    T.startEndlessRun();
+    const run = T._debugRun('endless');
+    run.layer = layer;
+    run.plan[3] = { kind: 'warlord', id: 'warlord', _layer: layer, _salt: run.salt };
+    const pv = T.preview(layer, run.salt, true);
+    assert.equal(pv[3].kind, 'warlord', layer + ' 层第 4 场应当是狂战松鼠');
+    assert.notEqual(pv[3].gear, 'berserk',
+      layer + ' 层（非整数层）的预告不该画成狂战套：' + pv[3].gear);
+    run.idx = 3;
+    const nx = T.nextBattle('endless');
+    assert.equal(nx.entry.kind, 'warlord');
+    assert.equal(berserkCount(nx.foe.wears), 0,
+      layer + ' 层第 4 场不该穿任何狂战件：' + JSON.stringify((nx.foe.wears || []).map((w) => w.id)));
+    assert.equal(TD.wearsOf(pv[3].gear).map((w) => w.id).join(','), (nx.foe.wears || []).map((w) => w.id).join(','),
+      layer + ' 层预告的套装必须与实战一致（' + pv[3].gear + '）');
+    const ss2 = S.state(); if (ss2.endless) ss2.endless.run = null;
+  }
+  TD.bossFor = orig;
+  /* ② x10 层第 5 场的守关首领：仍然整套狂战，预告也是狂战 */
+  for (const layer of [10, 20, 30]) {
+    const ss = S.state(); if (ss.tower) ss.tower.run = null;
+    T._debugSetLayer(layer - 1);
+    T.startTowerRun();
+    const run = T._debugRun('tower');
+    run.idx = 4;
+    const nx = T.nextBattle('tower');
+    assert.match(nx.info.name, /狂战松鼠/, layer + ' 层第 5 场必须是塔顶首领');
+    assert.equal(berserkCount(nx.foe.wears), 4,
+      layer + ' 层塔顶首领应当整套狂战：' + JSON.stringify((nx.foe.wears || []).map((w) => w.id)));
+    assert.equal(T.preview(layer, undefined, false)[4].gear, 'berserk', 'x10 层的预告仍是狂战套');
+    const ss2 = S.state(); if (ss2.tower) ss2.tower.run = null;
+  }
+  /* ③ 真实抽卡：x10 层第 4 场永远不会抽到狂战（狂战套只属于塔顶那一场） */
+  assert.ok(!TD.BOSS_POOL.some((x) => x.kind === 'warlord'), '挑战塔随机池不加狂战');
+  for (let s = 0; s < 60; s++) {
+    for (let layer = 1; layer <= 40; layer++) {
+      const e = TD.bossFor(layer, 'k' + s, true);
+      if (layer % 10 === 0) assert.notEqual(e.kind, 'warlord', 'x10 层第 4 场不该抽到狂战');
+    }
+  }
+  /* ④ gearKeyForLayer 的既有口径不变：x10 → 狂战；非 x10 → 普通档位 */
+  assert.equal(TD.gearKeyForLayer(10, 'ninja1'), 'berserk', 'x10 层仍是狂战');
+  assert.notEqual(TD.gearKeyForLayer(9, 'berserk'), 'berserk', '非 x10 层不允许狂战套');
+  assert.notEqual(TD.gearKeyForLayer(11, 'berserk'), 'berserk', '非 x10 层不允许狂战套');
+});
+
+test('需求132：每 5 层（非 x10）的最后一战改为精英 —— 原来 x5 与普通层毫无区别', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  S.state().props[23] = 9999;
+  const openBattle = (mode, layer, idx) => {
+    const ss = S.state(); if (ss.tower) ss.tower.run = null; if (ss.endless) ss.endless.run = null;
+    T._debugSetLayer(layer - 1);
+    if (mode === 'tower') T.startTowerRun(); else { T._debugSetEndlessLayer(layer); T.startEndlessRun(); }
+    const run = T._debugRun(mode);
+    run.layer = layer; run.idx = idx;
+    return { run, nx: T.nextBattle(mode) };
+  };
+  for (const mode of ['tower', 'endless']) {
+    const only = mode !== 'tower';
+    /* ① x5 层：最后一战（第 4 场）是精英，预告与实战一致。
+     * 注意预告必须用**这一局的 salt**（挑战塔无 salt）——否则抽到的是另一只 boss，比较无意义。 */
+    for (const layer of [5, 15, 25]) {
+      const { run, nx } = openBattle(mode, layer, 3);
+      const pv = T.preview(layer, mode === 'tower' ? undefined : run.salt, only);
+      assert.equal(pv.length, 4, layer + ' 层应当是 4 场');
+      assert.equal(pv[3].elite, true, mode + ' ' + layer + ' 层最后一战应当是精英（原来与普通层没区别）');
+      assert.ok(pv[3].type, '精英仍然带类型标签');
+      assert.equal(nx.elite, true, mode + ' ' + layer + ' 层实战 elite 标记');
+      assert.equal(nx.info.elite, true, '战报的 info.elite 也要一致');
+      assert.equal(pv[3].name, nx.info.name, '预告 = 实战：' + pv[3].name + ' vs ' + nx.info.name);
+    }
+    /* ② 非 x5 层：最后一战照旧不是精英（唯一例外是无尽池里随机抽到的狂战松鼠 —— 它本来就是精英） */
+    for (const layer of [4, 6, 14, 16, 24, 26, 29]) {
+      const { nx } = openBattle(mode, layer, 3);
+      const warlord = nx.entry.kind === 'warlord';
+      assert.equal(nx.elite, warlord,
+        mode + ' ' + layer + ' 层（非 x5）的精英标记只能来自狂战松鼠：' + nx.entry.kind);
+      assert.equal(nx.info.elite, nx.elite, '战报的 info.elite 也要一致');
+    }
+    /* ③ x10 层：第 4 场不是精英、第 5 场塔顶才是（一层只留一个精英台阶） */
+    for (const layer of [10, 20]) {
+      const pv = T.preview(layer, 'x5test', only);
+      assert.equal(pv.length, 5, layer + ' 层应当是 5 场');
+      assert.equal(pv[3].elite, false, layer + ' 层第 4 场不该是精英');
+      assert.equal(pv[4].elite, true, layer + ' 层第 5 场（塔顶首领）必须是精英');
+      assert.equal(openBattle(mode, layer, 3).nx.elite, false, layer + ' 层第 4 场实战不该是精英');
+      assert.equal(openBattle(mode, layer, 4).nx.elite, true, layer + ' 层第 5 场实战必须是精英');
+    }
+  }
+  /* ④ 精英奖励真的发：x5 层最后一战击败后至少拿到 SCORE.elite */
+  {
+    const { run, nx } = openBattle('endless', 5, 3);
+    const before = run.score;
+    T.reportBattle('endless', nx.token, true, 1, null);
+    const after = T._debugRun('endless');
+    const expect = TD.SCORE && Number(TD.SCORE.elite) ? Number(TD.SCORE.elite) : 50;
+    assert.ok(after.score - before >= expect,
+      '击败 x5 精英应当拿到精英分（≥' + expect + '），实测 +' + (after.score - before));
+  }
+});
+
+test('需求133：无尽专属调试 —— 快速爬塔「层数 +1 / -1」与手开「铸币商店 / 普通商店」', () => {
+  const c = setup();
+  const T = c.Tower;
+  /* ① 快速爬塔：没有对局时 ±1 都先开一局（落在第 1 层），有对局时按 ±1 挪层并夹在第 1 层 */
+  assert.ok(T.abandon('endless').ok, '先清掉 setup 里那局');
+  assert.equal(T._debugRun('endless'), null);
+  assert.equal(T._debugShiftEndlessLayer(1).layer, 1, '没有对局时 +1 先开局（落在第 1 层）');
+  assert.ok(T._debugRun('endless'), '应当已经开了一局');
+  assert.equal(T._debugShiftEndlessLayer(1).layer, 2, '+1');
+  assert.equal(T._debugShiftEndlessLayer(1).layer, 3, '+1');
+  assert.equal(T._debugShiftEndlessLayer(-1).layer, 2, '-1');
+  assert.equal(T._debugShiftEndlessLayer(-1).layer, 1, '-1');
+  assert.equal(T._debugShiftEndlessLayer(-1).layer, 1, '最低夹在第 1 层');
+  assert.equal(T._debugShiftEndlessLayer(-99).layer, 1, '再退也不低于 1');
+  /* 挪层口径与 _debugSetEndlessLayer 一致：plan 重建、层内进度归零 */
+  assert.equal(T._debugShiftEndlessLayer(9).layer, 10, '1 + 9 = 10');
+  const run = T._debugRun('endless');
+  assert.equal(run.idx, 0, '层内序号归零');
+  assert.equal(run.phase, null, '不在商店 / 结算阶段');
+  assert.equal(run.choices, null, '不残留上一层的选牌');
+  assert.equal(run.plan.length, 5, '第 10 层（x10）应当是 5 场');
+  /* 层数与预告对得上（重建 plan 用的是同一套 salt） */
+  assert.equal(T.planInfo('endless').length, run.plan.length, '界面预告与实战 plan 同源');
+
+  /* ② 手开「普通商店」：试炼商店 + 战后临时小店（关掉后回去继续打，不会被当成结算商店） */
+  const sp = T._debugSpawnShop();
+  assert.ok(sp.ok, '应当能立刻开出普通商店：' + (sp.msg || ''));
+  assert.equal(sp.layer, 10);
+  assert.equal(sp.slots, T.shopState().slots.length, '报告件数与实际货架一致');
+  assert.equal(T.shopState().mint, false, '必须是普通（试炼）商店');
+  assert.equal(T.shopState().postBattle, true, '标记成战后临时小店');
+  assert.equal(T._debugRun('endless').phase, 'shop');
+  assert.ok(T.closeShop().ok, '应当能关掉');
+  assert.equal(T._debugRun('endless').phase, null, '关掉后回到战斗流程');
+  assert.equal(T._debugRun('endless').shop, null);
+  assert.equal(T._debugRun('endless').layer, 10, '不该顺带把整局推进到结算点');
+
+  /* ③ 没有对局时两个手开接口都给明确提示 */
+  T.abandon('endless');
+  const noShop = T._debugSpawnShop();
+  assert.equal(noShop.ok, false);
+  assert.match(noShop.msg, /无尽塔对局/, '提示要说清原因：' + noShop.msg);
+  const noMint = T._debugSpawnMintShop();
+  assert.equal(noMint.ok, false);
+  assert.match(noMint.msg, /无尽塔对局/, '铸币商店也是同一口径：' + noMint.msg);
+
+  /* ④ 界面接线（真点击在 tools/test-mint-shop.cjs 里，这里守源码口径） */
+  const dbgSrc = fs.readFileSync(path.join(ROOT, 'js', 'debug.js'), 'utf8');
+  assert.ok(/data-endless-layer="1"/.test(dbgSrc) && /data-endless-layer="-1"/.test(dbgSrc), '要有层数 +1 / -1 按钮');
+  assert.ok(/_debugShiftEndlessLayer/.test(dbgSrc), '层数按钮要接 _debugShiftEndlessLayer');
+  assert.ok(/data-shop="1"/.test(dbgSrc) && /_debugSpawnShop/.test(dbgSrc), '要有普通商店按钮并接 _debugSpawnShop');
+  assert.ok(/data-mint-shop[^>]*>铸币商店</.test(dbgSrc), '铸币商店按钮文案缩减为「铸币商店」：' + dbgSrc.match(/data-mint-shop[^>]*>[^<]*</));
+  assert.ok(/data-shop[^>]*>普通商店</.test(dbgSrc), '普通商店按钮文案写「普通商店」：' + dbgSrc.match(/data-shop[^>]*>[^<]*</));
+  const cssSrc = fs.readFileSync(path.join(ROOT, 'css', 'debug.css'), 'utf8');
+  assert.ok(/\.debug-quick\{/.test(cssSrc), '快捷行要有自己的两列布局');
 });
 
 (async () => {

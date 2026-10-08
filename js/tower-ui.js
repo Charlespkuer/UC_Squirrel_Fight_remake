@@ -1306,6 +1306,12 @@
       Tower.continueFromShop();       // 直接进下一段，不弹结算点窗口
       openEndless();
     });
+    bindShopSettle(p);
+  }
+
+  /** 商店页的「结算离场」按钮：试炼商店（每 5 层结算商店 / 休整店）与**顶掉结算商店的
+   *  铸币商店**共用这一份 —— 后者本来就站在结算点上，不给离场等于把这一段的结算机会吞掉。 */
+  function bindShopSettle(p) {
     on(p, 'settle', () => {
       const out = Tower.settleFromShop();
       if (!out || !out.ok) { notice('现在还不能结算。'); return; }
@@ -1392,7 +1398,7 @@
       '<h2 class="tower-title">铸币商店 <span class="shop-coins">铸币 ' + shop.retryToken + '</span>' +
         '<span class="mint-coins">试炼币 ' + Math.max(0, Math.floor(Number(shop.coins) || 0)) + '</span></h2>' +
       '<p class="mint-lead">战后偶遇的流动商人：<b>花铸币买走一件</b>，或者<b>拿自己的一件增益免费换一件</b> —— ' +
-        '做成其中任何一件，他立刻就走（也可以直接送客）。</p>' +
+        '做成其中任何一件，他立刻就走。</p>' +
       /* E16「铸币商队」触发的那一家：写清来由（限次 1，用完这家店就没了） */
       (shop.byBuff ? '<p class="mint-flash">限次增益「铸币商队」触发的商队' +
         (shop.boundary ? '：它顶掉了这一段的结算商店，送客后照旧前往结算点' : '') + '。</p>' : '') +
@@ -1408,21 +1414,26 @@
       (shop.rerollFree ? C().btn('免费刷新', 'mintreroll', 'small') : '<em>已刷新</em>') + '</div>' +
       '<div class="shop-slot price"><b>价格表</b><i>按稀有度固定 · 不吃折扣</i>' +
       '<span>普通 ' + shop.mintPrices[0] + ' / 稀有 ' + shop.mintPrices[1] + ' / 史诗 ' + shop.mintPrices[2] +
-        ' / 传奇 ' + shop.mintPrices[3] + ' 铸币（普通件是赠品，0 铸币）。' +
-        '铸币可在试炼商店左下角用 50 试炼币换 1 枚，E09 / E10 也会给。</span></div>' +
+        ' / 传奇 ' + shop.mintPrices[3] + ' 铸币。' +
+        '铸币可在试炼商店左下角用 50 试炼币换取1。</span></div>' +
       '</div>' +
-      '<h4>' + (swapOpen ? '免费交换：选一件拿出去，换回一件同档的' : '免费交换已不可用（货架刷新过了）') + '</h4>' +
+      '<h4>' + (swapOpen ? '等价交换：失去一件，得到一件' : '免费交换已不可用（货架刷新过了）') + '</h4>' +
       '<p class="small-label">大概率换回同稀有度的<b>运营类</b>增益（普通件有 50% 升成稀有件），' +
-        '小概率换回同稀有度的非运营增益。永久与限次都能拿去换（选中后整个条目一起换走）。</p>' +
+        '小概率换回同稀有度的非运营增益，永久与限次都能进行交换。</p>' +
       '<div class="shop-sell">' + swapRows + '</div>' +
       '</div>';
+    /* boundary（E16「铸币商队」顶掉了每 5 层的结算商店）：它站在结算点上，
+     * 所以补回试炼商店那一枚「结算离场」；普通铸币商店（层中偶遇）照旧没有。 */
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board',
+      left: shop.boundary
+        ? '<span class="footer-left">' + C().btn('结算离场', 'settle', 'small gold') + '</span>' : '',
       right: '<span class="footer-right">' + C().btn('继续战斗', 'mintleave', 'gold') + '</span>' });
     bindTips(p);
     /* 页脚「返回」= **只是回上一页，店不收摊**（用户口径）：回到无尽首页后按钮仍写「进入铸币商店」，
      * 想好了再进来买/换/刷新都行。真正让这家店消失的只有三件事：
      * 完成一次购买、完成一次交换、或者点这里的「继续战斗」。 */
     back(p, () => openEndless());
+    if (shop.boundary) bindShopSettle(p);
     shop.slots.forEach((s, i) => on(p, 'mintbuy' + i, () => {
       const r = Tower.buyMintSlot(i);
       if (r && r.needsReplace) { offerMintReplace(i, r.buff); return; }

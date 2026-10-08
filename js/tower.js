@@ -4396,8 +4396,12 @@
   function settleFromShop() {
     const run = endless().run;
     if (!run || run.phase !== 'shop') return { ok: false };
-    /* 铸币商店不给「结算离场」（它是层中偶遇的小店，不是在结算点上）。 */
-    if (run.shop && run.shop.mint) return { ok: false, msg: '铸币商店不能结算离场。' };
+    /* 铸币商店不给「结算离场」（它是层中偶遇的小店，不是在结算点上）——
+     * 除了「顶掉每 5 层结算商店」的那一家（boundary）：它本来就站在结算点上，
+     * 不给离场等于把这一段的结算机会吞掉。 */
+    if (run.shop && run.shop.mint && run.shop.boundary !== true) {
+      return { ok: false, msg: '铸币商店不能结算离场。' };
+    }
     run.phase = 'checkpoint';
     return settleEndless();
   }

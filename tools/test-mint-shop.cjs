@@ -1344,6 +1344,37 @@ hr('10. 铸币商队（E16）：下一场战斗后必开一家铸币商店，顶
     assert.equal(c.Tower.shopState().byBuff, false);
   });
 
+  check('顶掉结算商店的那一家（boundary）补回「结算离场」；层中偶遇的铸币商店仍然没有', () => {
+    /* ① 层中偶遇的铸币商店：照旧不给结算离场（它不在结算点上） */
+    {
+      const c = setup(7);
+      const ui = uiHarness(c);
+      c.__rand(0);
+      winOne(c);
+      const run = c.Tower._debugRun('endless');
+      assert.ok(run.shop && run.shop.mint === true && !run.shop.boundary, '应当是自然刷出的铸币商店');
+      c.TowerUI.openMintShop();
+      assert.equal(String(ui.last('page').opts.left || ''), '', '页脚不该有结算离场');
+      assert.equal(c.Tower.settleFromShop().ok, false, '层中偶遇的铸币商店不能结算离场');
+    }
+    /* ② 顶掉每 5 层结算商店的那一家：它站在结算点上 → 页面与 API 都要能结算离场 */
+    {
+      const c = setup(5);
+      const ui = uiHarness(c);
+      c.__rand(0.99);
+      for (let i = 0; i < 3; i++) winOne(c);
+      assert.ok(c.Tower.debugGrantBuff('E16').ok, '最后一场前拿一张铸币商队');
+      winOne(c);
+      const run = c.Tower._debugRun('endless');
+      assert.ok(run.shop && run.shop.mint === true && run.shop.boundary === true, '应当是顶掉的铸币商店');
+      c.TowerUI.openMintShop();
+      assert.ok(/结算离场/.test(String(ui.last('page').opts.left || '')),
+        '页脚要有结算离场：' + JSON.stringify(ui.last('page').opts));
+      assert.equal(c.Tower.settleFromShop().ok, true, 'boundary 的铸币商店应当可以结算离场');
+      assert.equal(c.Tower.endlessInfo().run, null, '结算后本局结束');
+    }
+  });
+
   check('界面：铸币商店页写清是「铸币商队」触发的（真界面模块冒烟）', () => {
     const c = setup(7);
     const ui = uiHarness(c);

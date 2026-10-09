@@ -318,6 +318,14 @@
   }
   function page(group, active, content, opts) {
     opts = opts || {}; screen = active; activePortrait = null;
+    /* 重画**同一页**时别把人弹回页首：先记住旧滚动容器的位置，新页面挂上去后再放回去。
+     * 「把存档送过去 / 检查更新」这类原地动作会多次重画系统页 ——
+     * 内容比底板高（`.classic-board` 是 overflow-y:auto），不记住就会跳回顶部。
+     * 换页（home → system 之类）时旧 board 的 data-screen 不匹配，天然从 0 开始。 */
+    const oldBoard = (typeof document !== 'undefined')
+      ? document.querySelector('#ui .classic-page[data-screen="' + active + '"] > .classic-board') : null;
+    const keepTop = oldBoard ? oldBoard.scrollTop : 0;
+    const keepLeft = oldBoard ? oldBoard.scrollLeft : 0;
     const old = $('#ui .classic-page'); if (old) old.remove();
     $$('.classic-modal-overlay').forEach(e => e.remove());
     const p = document.createElement('section'); p.className = 'classic-page'; p.dataset.screen = active;
@@ -325,6 +333,10 @@
     $('#ui').appendChild(p);
     bind(p, Object.assign({}, actions, {home}));
     if(window.Main?.resizeLayout)Main.resizeLayout();
+    if (keepTop || keepLeft) {
+      const nb = Array.prototype.find.call(p.children, (el) => el && el.classList && el.classList.contains('classic-board'));
+      if (nb) { nb.scrollTop = keepTop; nb.scrollLeft = keepLeft; }
+    }
     promptLevelUpChoices();
     return p;
   }

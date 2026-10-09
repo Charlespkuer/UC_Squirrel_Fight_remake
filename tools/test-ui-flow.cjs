@@ -159,6 +159,79 @@ const results = [];
 function record(name, fn) { results.push([name, fn]); }
 
 /* ============================================================
+ * 需求145：原地重画当前页不能把人弹回页首
+ * 「把存档送过去」/「检查更新」这类动作会多次重画系统页，而系统页内容比底板高，
+ * 滚动容器是 .classic-board（overflow-y:auto）—— 重画后必须保持原来的滚动位置。
+ * 做法：把**真实的 page()** 切出来，配一个最小 DOM 桩（#ui 里一页 + 一个 board）。
+ * ============================================================ */
+record('原地重画系统页不弹回页首（送存档 / 检查更新）', () => {
+  const lines = fs.readFileSync(path.join(ROOT, 'js/classic-ui.js'), 'utf8').split('\n');
+  const pageSrc = slice(lines, 'function page(group, active, content, opts) {', '  function modal(title, content, buttons, opts) {')
+    .replace(/\n\s*function modal\(title, content, buttons, opts\) \{$/, '');
+
+  const made = { page: null };
+  function mkEl(cls) {
+    const el = {
+      className: cls || '', dataset: {}, _html: '', children: [], scrollTop: 0, scrollLeft: 0,
+      classList: { add() {}, contains: (x) => String(el.className).split(/\s+/).includes(x) },
+      appendChild(ch) { el.children.push(ch); return ch; },
+      remove() { if (made.page === el) made.page = null; },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+    };
+    Object.defineProperty(el, 'innerHTML', {
+      get: () => el._html,
+      set: (v) => {
+        el._html = v;
+        el.children = [];
+        /* 真实 page() 把 content 塞进 <div class="classic-board"> —— 桩里也造出这个子节点，
+         * 它才是滚动容器（重画时的位置恢复逻辑就作用在它身上）。 */
+        if (/classic-board/.test(v)) el.children.push(mkEl('classic-board'));
+      },
+    });
+    return el;
+  }
+  const sandbox = {
+    console, screen: null, activePortrait: null, actions: {},
+    tabs: () => '', btn: () => '<button></button>', esc: (v) => String(v == null ? '' : v),
+    bind() {}, home() {}, promptLevelUpChoices() {}, $$: () => [],
+  };
+  sandbox.window = sandbox;
+  sandbox.document = {
+    createElement: () => mkEl('classic-page'),
+    querySelector(sel) {
+      if (!made.page) return null;
+      const m = /data-screen="([^"]+)"/.exec(sel);
+      if (m && made.page.dataset.screen !== m[1]) return null;
+      return made.page.children.find((c) => c.classList.contains('classic-board')) || null;
+    },
+  };
+  sandbox.$ = (sel) => {
+    if (sel === '#ui') return { appendChild(ch) { made.page = ch; return ch; } };
+    if (sel === '#ui .classic-page') return made.page;
+    return null;
+  };
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(pageSrc + '\n;window.__page = page;', ctx, { filename: 'classic-ui.page.js' });
+  const open = (name) => vm.runInContext(
+    'window.__page("group", ' + JSON.stringify(name) + ', \'<div class="classic-board">内容</div>\')', ctx);
+  const board = () => made.page.children.find((c) => c.classList.contains('classic-board'));
+
+  open('system');
+  assert.ok(board(), '系统页应当有滚动容器 .classic-board');
+  board().scrollTop = 300;                 // 用户滚到了中段
+  open('system');                          // 「送存档 / 检查更新」触发的原地重画
+  assert.equal(board().scrollTop, 300, '同一页重画后滚动位置必须保持');
+  board().scrollTop = 120; open('system');
+  assert.equal(board().scrollTop, 120, '中段位置也要保持（不只是到底）');
+  open('home');                            // 换页：旧 board 的 data-screen 不匹配
+  assert.equal(board().scrollTop, 0, '换页应当从头显示');
+  open('system');
+  assert.equal(board().scrollTop, 0, '从别的页回到系统页同样从头显示');
+});
+
+
+/* ============================================================
  * 本轮需求：复仇范围 / 存档入口去重 / 主页 EXP 贴图
  * ============================================================ */
 

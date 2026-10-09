@@ -314,6 +314,12 @@ async function ping(port) {
         /updatePanelHtml/.test(uiSrc) && /update-source-sync/.test(uiSrc) && /update-source-release/.test(uiSrc)
         && /update-source-git/.test(uiSrc) && /update-page/.test(uiSrc));
       ok('同步服务的拉取接口支持 dry 预览', /dry: url\.searchParams\.get\('dry'\) === '1'/.test(syncSrc));
+      /* 旧客户端（没重编的 exe / 旧服务器进程）没有同源 /__update —— 界面必须回退到
+       * 本机同步服务新增的更新通道，否则用户就只能看到「本机不支持」。 */
+      ok('旧客户端也能更新：同步服务带 /local/update 通道，界面会回退过去',
+        /'\/local\/update\/check'/.test(syncSrc) && /'\/local\/update\/run'/.test(syncSrc)
+        && /runUpdateHelper/.test(syncSrc) && /\/local\/update\/check/.test(uiSrc) && /channel === 'sync'/.test(uiSrc)
+        && /syncPanel\(\)\+updatePanelHtml\(\)/.test(uiSrc));
     }
 
     console.log('\n双机同步回归通过：' + passed + ' 项');

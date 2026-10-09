@@ -1777,7 +1777,7 @@
    * 动手前还会自动把存档备份一份（save/backup/progress-…-before-update.json）。
    * ============================================================ */
   const UPDATE_PAGE = 'https://github.com/Charlespkuer/UC_Squirrel_Fight_remake/releases/latest';
-  const updState = { busy: false, pending: null, note: '', local: null, git: null, release: null, sync: null, result: null };
+  const updState = { busy: false, pending: null, note: '', channel: '', local: null, git: null, release: null, sync: null, result: null };
 
   /** 页面是不是从「本机磁盘」上跑的（轻壳 / 便携版 / 源码版）。网页版与安装版都不是 →
    *  那种情况下没有任何就地更新的余地，只能给下载页。 */
@@ -1794,7 +1794,9 @@
     if (/Mac OS X|Macintosh/i.test(ua)) return 'darwin';
     return 'linux';
   }
-  /** 调本机的 /__update（只传白名单参数，不传命令）。 */
+  /** 调本机的 /__update（只传白名单参数，不传命令）。
+   *  注意：这条路由只有**新版**的便携版服务器 / 轻壳 exe 才有；旧客户端会 404，
+   *  这时 updateCheck 会退到本机同步服务的 /local/update/*（那边同样是白名单 + 只允许本机）。 */
   async function updateFetch(pathname, opts) {
     opts = opts || {};
     const ctl = typeof AbortController === 'function' ? new AbortController() : null;
@@ -1817,11 +1819,27 @@
     updState.busy = true; updState.note = '正在检查…'; updState.result = null; updState.pending = null;
     if (screen === 'system') openSystem();
     try {
+      updState.channel = '';
       if (localDiskPage()) {
-        const r = await updateFetch('/__update?mode=check&platform=' + platformTag());
-        if (r && r.local) { updState.local = r.local; updState.git = r.git || null; updState.release = r.release || null; }
-        else { updState.local = null; updState.note = (r && r.msg) || '本机不支持自动更新'; }
-        if (r && r.local) updState.note = '';
+        let r = await updateFetch('/__update?mode=check&platform=' + platformTag());
+        if (r && r.local) updState.channel = 'origin';
+        if (!updState.channel) {
+          /* 退路：本机同步服务就是「本机 agent」（只允许 127.0.0.1 页面 + Origin 校验），
+           * 它跑 update-game.js 一样安全 —— 于是**旧 exe 不重编也能一键更新**。 */
+          try {
+            const q = await syncFetch('/local/update/check?platform=' + platformTag(), { timeout: 90000 });
+            if (q && q.local) { r = q; updState.channel = 'sync'; }
+          } catch (e) {
+            const msg = String((e && e.message) || '');
+            if (/没有这个接口|404|HTTP 404/.test(msg)) updState.note = '本机同步服务还是旧版本：先重启一次同步服务（「重启同步服务.cmd」，或同步菜单 9→3），之后这里就能一键更新。';
+          }
+        }
+        if (updState.channel) {
+          updState.local = r.local; updState.git = r.git || null; updState.release = r.release || null; updState.note = '';
+        } else {
+          updState.local = null; updState.git = null; updState.release = null;
+          if (!updState.note) updState.note = (r && r.msg) || '这个客户端不提供就地更新（旧客户端 / 安装版）：先用「另一台电脑」，或「打开下载页」。';
+        }
       } else {
         updState.local = null; updState.git = null; updState.release = null;
         updState.note = '这个页面不是从本机磁盘上跑的（网页版 / 安装版），没法就地更新 —— 用「打开下载页」装新版。';
@@ -1873,8 +1891,10 @@
         await syncRun('files', 'pull', false);
         const r = syncState.result || {};
         updState.result = { ok: r.ok !== false, mode: 'sync', files: r.done || (r.job && r.job.done) || 0, peer: r.peer, msg: r.msg, code: r.code };
+      } else if (updState.channel === 'sync') {
+        updState.result = await syncFetch('/local/update/run?mode=' + kind + '&platform=' + platformTag(), { method: 'POST', timeout: 1800000 });
       } else {
-        updState.result = await updateFetch('/__update?mode=' + kind, { method: 'POST' });
+        updState.result = await updateFetch('/__update?mode=' + kind + '&platform=' + platformTag(), { method: 'POST' });
       }
     } catch (e) {
       updState.result = { ok: false, code: 'ERROR', msg: String((e && e.message) || e) };
@@ -1931,7 +1951,9 @@
       tail = '<div class="sp-hint">' + updatePlanText(updState.pending) + '</div><div class="sp-actions">' +
         btn('确认更新', 'update-confirm', 'small gold' + dis) + btn('取消', 'update-cancel', 'small muted') + '</div>';
     } else {
-      tail = '<div class="sp-hint">更新只覆盖游戏文件、<b>不动存档</b>（动手前还会自动备份一份）；装完 / 拉完刷新页面即可。安装版与安卓只能用「打开下载页」。</div>' + updateResultHtml();
+      const via = updState.channel === 'sync' ? '本机同步服务' : updState.channel === 'origin' ? '本机服务器' : '';
+      tail = '<div class="sp-hint">更新只覆盖游戏文件、<b>不动存档</b>（动手前还会自动备份一份）；装完 / 拉完刷新页面即可。' +
+        (via ? '（走' + via + '就地更新）' : '安装版 / 安卓 / 网页版只能用「打开下载页」。') + '</div>' + updateResultHtml();
     }
     return '<div class="sync-panel update-panel"><div class="sync-head">' + head + '</div>' +
       '<div class="sync-actions">' + actions + '</div>' + tail +
@@ -1960,7 +1982,7 @@
         resolutions.map((r)=>r.label).join(' → ')+'。画面按这一档等比缩放并居中；窗口装不下时自动按窗口缩小，不会溢出。')+
       sysBtn(st.fullscreen?'全面屏：开':'全面屏：关','fullscreen','','开启后画面铺满整个窗口（不留黑边，窗口比例差得多时会有轻微拉伸），同时尝试进入系统全屏；按 Esc 可退出系统全屏。')+
       '</div>';
-    const p=page('system','system',supportPanelHtml()+updatePanelHtml()+grid+slider+saveFilePanel()+syncPanel());
+    const p=page('system','system',supportPanelHtml()+grid+slider+saveFilePanel()+syncPanel()+updatePanelHtml());
     $('[data-action="support"]',p).onclick=()=>openSupportModal();
     $('[data-action="sound"]',p).onclick=()=>{Main.setMuted(!mute);openSystem();};
     $('[data-action="save-write"]',p).onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};

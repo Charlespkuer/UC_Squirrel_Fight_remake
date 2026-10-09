@@ -231,6 +231,13 @@
     return false;
   }
 
+  /** 多段攻击汇总：装死发生在**谁**身上、是不是被反伤打出来的，也要一起带到外层回合。
+   *  （不带上 `fakeDieSide` 的话，回放会把「装死」画在挨打的那位身上 —— 见 battle.js 的 reaction。） */
+  function inheritFakeDie(r, rr) {
+    r.fakeDie = true;
+    if (rr.fakeDieSide != null) r.fakeDieSide = rr.fakeDieSide;
+    if (rr.fakeDieReflect) r.fakeDieReflect = true;
+  }
   /** 真·色诱之术：被脱光装备期间，装备提供的属性与附加能力全部失效（回到裸属性）。 */
   function stripped(c) { return Number(c.stripTurns) > 0; }
   function statOf(c, key) { return stripped(c) ? c.baseStats[key] : c[key]; }
@@ -655,6 +662,30 @@
       rounds.push(r);
     }
 
+    /* 反伤 / 反噬打到「出手方」身上时的结算：**和普通伤害走同一条致死保护链**
+     *（装死 → 涅槃 / 金蝉脱壳 → 调试图腾）。
+     * 2026-10 用户口径（需求143）：反伤打到死线时必须让**装死**正常触发 —— 以前这里只调
+     * tryDeathSave（它只认复活甲），于是有装死的角色会被绝对防御的反伤直接反死。
+     * 触发时装死的老规矩照旧：hp = 1、清掉眩晕、并**立刻获得一次行动**（同 applyDamage 那条路径）。
+     * `r.fakeDieSide` 记下装的死是谁 —— 战斗回放据此把「装死」的飘字与动作画在**正确的人**身上
+     *（普通受击时是挨打的那位，被反伤时是出手的那位）。 */
+    function reflectHurt(target, amount, r) {
+      const dmg = Math.max(0, Math.round(Number(amount) || 0));
+      if (!target || dmg <= 0 || target.hp <= 0) return 0;
+      if (target.hp - dmg <= 0 && target.skills && target.skills[6] && target.silence <= 0 && !target.usedFakeDie) {
+        target.usedFakeDie = true;
+        target.hp = 1;
+        target.stun = 0;
+        r.fakeDie = true;
+        r.fakeDieSide = target.side;
+        r.fakeDieReflect = true;
+        if (!immediate) immediate = { actor: target, reason: 'fakeDie' };
+        return dmg;
+      }
+      target.hp -= dmg;
+      tryDeathSave(target, r);
+      return dmg;
+    }
     function applyDamage(att, def, rawDmg, r, opts) {
       opts = opts || {};
       const action = opts.action || r.action;
@@ -718,6 +749,7 @@
         dmg = Math.max(0, def.hp - 1);
         def.hp = 1;
         r.fakeDie = true;
+        r.fakeDieSide = def.side;
         def.stun = 0;
         immediate = { actor: def, reason: 'fakeDie' };
       } else if (def.hp - dmg <= 0 && def.mods && Array.isArray(def.mods.deathSaves) && def.mods.deathSaves.length) {
@@ -749,9 +781,9 @@
           r.reflectBlocked = (r.reflectBlocked || 0) + red.rebound;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '反噬豁免'; r.noteSide = att.side;
         } else {
-          att.hp -= red.rebound;
           r.reboundHurt = red.rebound;
-          tryDeathSave(att, r);
+          /* 需求143：绝对防御的反伤同样过装死 —— 不再「直接反死」有装死的角色。 */
+          reflectHurt(att, red.rebound, r);
         }
       }
       // —— 受击/命中方机制（挑战塔 NPC 池） ——
@@ -760,18 +792,16 @@
         const noReflect = reflectImmune(att);
         if (def.mech.includes('thorns') && att.hp > 0 && !noReflect) {   // 荆棘铁壁：反弹 15%
           const reflect = Math.max(1, Math.round(dmg * 0.15));
-          att.hp -= reflect;
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
-          tryDeathSave(att, r);
+          reflectHurt(att, reflect, r);
         }
         // 塔 buff「荆棘之甲」：玩家侧反伤（跨层类）
         const thornsPct = def.mods && Number(def.mods.thornsPct) || 0;
         if (thornsPct > 0 && att.hp > 0 && !noReflect) {
           const reflect = Math.max(1, Math.round(dmg * thornsPct));
-          att.hp -= reflect;
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '荆棘之甲'; r.noteSide = def.side;
-          tryDeathSave(att, r);
+          reflectHurt(att, reflect, r);
         }
         // 题面·镜鳞：单次伤害超过阈值（默认 20% 最大生命）时，反弹该次伤害的 45%
         // （逼玩家压低单次伤害 / 走多段；阈值与反弹比例由 tower-data.js 注入，方便调平衡）
@@ -780,9 +810,10 @@
         const reflectPct = (mp && Number(mp.reflect)) || 0.6;
         if (def.mech.includes('trialMirror') && att.hp > 0 && !noReflect && dmg >= def.maxHp * threshold) {
           const reflect = Math.max(1, Math.round(dmg * reflectPct));
-          att.hp -= reflect;
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '镜鳞·反噬'; r.noteSide = def.side;
+          /* 镜鳞原来连 tryDeathSave 都没走（复活甲也不生效）—— 一并归到同一条致死保护链。 */
+          reflectHurt(att, reflect, r);
         }
         /* 题面·沉默之壁：单次受到的伤害超过阈值（默认 25% 最大生命）时，
          * **超出的那一截全额反弹**给出击方。
@@ -793,10 +824,9 @@
         const ovThreshold = (ov && Number(ov.threshold)) || 0.25;
         if (def.mech.includes('trialOverflow') && att.hp > 0 && !noReflect && dmg > def.maxHp * ovThreshold) {
           const excess = Math.max(1, Math.round(dmg - def.maxHp * ovThreshold));
-          att.hp -= excess;
           r.thornsDmg = (r.thornsDmg || 0) + excess;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '沉默之壁·溢出反弹'; r.noteSide = def.side;
-          tryDeathSave(att, r);
+          reflectHurt(att, excess, r);
         }
         if (def.mech.includes('poison') && !att.dot && chance(30)) {  // 毒藤缠绕：30% 中毒
           att.dot = { pct: 0.03, rounds: 3 };
@@ -828,6 +858,7 @@
           applyDamage(att, def, Math.round(effPower(att) * 0.36), rr, { action: 'skill' });
           total += rr.dmg;
           if (rr.reboundHurt) { r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt; r.jueDui = true; }
+          if (rr.fakeDie) inheritFakeDie(r, rr);
           if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
         }
         r.dmg = total; pushRound(r); return;
@@ -967,7 +998,7 @@
           if (rr.shellAbsorb) r.shellAbsorb = (r.shellAbsorb || 0) + rr.shellAbsorb;
           if (rr.lifesteal) r.lifesteal = (r.lifesteal || 0) + rr.lifesteal;
           if (rr.guiJia) r.guiJia = rr.guiJia;
-          if (rr.fakeDie) r.fakeDie = true;
+          if (rr.fakeDie) inheritFakeDie(r, rr);
           if (rr.deathSave) {
             r.deathSave = true; r.noteText = rr.noteText; r.noteSide = rr.noteSide;
             /* 涅槃的属性加成标记也要一起带上来，否则界面上看不到「复活后变强」这条提示。 */
@@ -1004,7 +1035,11 @@
       const counter = { action: 'common' };
       applyDamage(def, att, raw, counter, {});
       r.counterDmg = counter.dmg;
-      if (counter.fakeDie) r.counterFakeDie = true;
+      if (counter.fakeDie) {
+        r.counterFakeDie = true;
+        /* 反击里也可能出装死（反击者被绝对防御反伤打死）—— 小回合也要记清是谁装的死。 */
+        if (counter.fakeDieSide != null) r.counterFakeDieSide = counter.fakeDieSide;
+      }
       if (counter.reboundHurt) r.counterRebound = counter.reboundHurt;
       if (counter.thornsDmg) r.counterThorns = counter.thornsDmg;
       if (counter.firstHitZero) {
@@ -1141,7 +1176,7 @@
           if (rr.shellAbsorb) r.shellAbsorb = (r.shellAbsorb || 0) + rr.shellAbsorb;
           if (rr.lifesteal) r.lifesteal = (r.lifesteal || 0) + rr.lifesteal;
           if (rr.guiJia) r.guiJia = rr.guiJia;
-          if (rr.fakeDie) r.fakeDie = true;
+          if (rr.fakeDie) inheritFakeDie(r, rr);
           if (rr.deathSave) {
             r.deathSave = true; r.noteText = rr.noteText; r.noteSide = rr.noteSide;
             /* 涅槃的属性加成标记也要一起带上来，否则界面上看不到「复活后变强」这条提示。 */

@@ -10238,64 +10238,6 @@ test('需求137：自愿支持作者 —— 系统页入口 / 30 级一次性提
   });
 });
 
-test('需求138：调试台无尽塔专属 —— 快速获得指定数量的试炼币与铸币', () => {
-  const c = setup();
-  const T = c.Tower, S = c.State;
-  const run = T._debugRun('endless');
-  const debugSrc = fs.readFileSync(path.join(ROOT, 'js', 'debug.js'), 'utf8');
-  const cssSrc = fs.readFileSync(path.join(ROOT, 'css', 'debug.css'), 'utf8');
-
-  /* ① 试炼币：加法、累加、返回总额；数量夹在 1 ~ 1000000 */
-  const coins0 = run.coins;
-  const r1 = T._debugGrantCoins(500);
-  assert.deepEqual([r1.ok, r1.amount, r1.total], [true, 500, coins0 + 500], '试炼币 +500：' + JSON.stringify(r1));
-  assert.equal(T._debugRun('endless').coins, coins0 + 500, '写进了 run.coins');
-  assert.equal(T._debugGrantCoins(250).total, coins0 + 750, '可以连续加');
-  assert.equal(T._debugGrantCoins('').amount, 1, '空输入按 1 处理');
-  assert.equal(T._debugGrantCoins(0).amount, 1, '0 也按 1（与「快速获取物品 / 武技」一致）');
-  assert.equal(T._debugGrantCoins(99).amount, 99, '字符串数字也认');
-  assert.equal(T._debugGrantCoins(1e9).amount, 1000000, '上限 1000000');
-  assert.equal(T._debugGrantCoins(-5).amount, 1, '负数按 1');
-  const coinsNow = T._debugRun('endless').coins;
-
-  /* ② 铸币（内部字段 run.retryToken，试炼商店 50 币 1 枚那种） */
-  const mint0 = Math.max(0, Number(run.retryToken) || 0);
-  const r2 = T._debugGrantMint(10);
-  assert.deepEqual([r2.ok, r2.amount, r2.total], [true, 10, mint0 + 10], '铸币 +10：' + JSON.stringify(r2));
-  assert.equal(T._debugRun('endless').retryToken, mint0 + 10, '写进了 run.retryToken');
-  assert.equal(T._debugGrantMint(1000000).amount, 100000, '上限 100000');
-  assert.equal(T._debugGrantMint('7').amount, 7, '字符串数字也认');
-  /* 铸币要真的能用：试炼商店的铸币标价 50 试炼币 1 枚，这里直接给够买得起的量 */
-  assert.ok(T._debugRun('endless').retryToken >= 10, '铸币余额应当能买到商店里的东西');
-
-  /* ③ 数值只进局内经济：不加分、不改层数、不动其它字段 */
-  assert.equal(T._debugRun('endless').layer, run.layer, '不该改层数');
-  assert.equal(T._debugRun('endless').score, 0, '不该加分');
-  assert.equal(T._debugRun('endless').idx, run.idx, '不该推进层内进度');
-
-  /* ④ 没有对局时给明确提示（而且**不会**顺手开一局） */
-  T.abandon('endless');
-  const noRun = T._debugGrantCoins(100);
-  assert.equal(noRun.ok, false, '没有对局时应当失败');
-  assert.match(noRun.msg, /无尽塔对局/, '提示要说清原因：' + noRun.msg);
-  assert.equal(T._debugRun('endless'), null, '不该凭空开一局');
-  const noRunMint = T._debugGrantMint(10);
-  assert.equal(noRunMint.ok, false);
-  assert.match(noRunMint.msg, /无尽塔对局/, '铸币也是同一口径：' + noRunMint.msg);
-
-  /* ⑤ 面板接线（真点击在 tools/test-mint-shop.cjs 的 debugHarness 用例里）：UI + 处理器 + 样式 */
-  assert.ok(/data-endless-coins/.test(debugSrc) && /data-endless-grant-coins/.test(debugSrc), '要有试炼币数量框与按钮');
-  assert.ok(/data-endless-mint/.test(debugSrc) && /data-endless-grant-mint/.test(debugSrc), '要有铸币数量框与按钮');
-  assert.ok(/_debugGrantCoins/.test(debugSrc) && /_debugGrantMint/.test(debugSrc), '按钮要接上 Tower 的两个接口');
-  assert.ok(/type="number" data-endless-coins/.test(debugSrc) && /type="number" data-endless-mint/.test(debugSrc),
-    '两个数量框都应当是 number 输入');
-  assert.ok(/\.debug-num-row\{/.test(cssSrc), '数量行的三段布局要有自己的样式');
-  /* 界面文案要说清「数量」与「是什么」 */
-  assert.match(debugSrc, /试炼币[\s\S]{0,400}data-endless-coins/, '试炼币那一行要写清标签');
-  assert.match(debugSrc, /铸币[\s\S]{0,400}data-endless-mint/, '铸币那一行要写清标签');
-  assert.ok(coinsNow > coins0 && T._debugRun('endless') === null, '用例自己的数据核对');
-});
-
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

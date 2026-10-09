@@ -440,7 +440,9 @@
       const f = fighters[side];
       let name = f.npc ? npcAnim(f.npc, 'hit') : 'hitMe', fx = f.npc ? f.npc + '_effect_hitMe' : 'effect_hitMe';
       if (r.dodge) { name = f.npc ? npcAnim(f.npc, 'dodge') : 'runAround'; fx = f.npc ? f.npc + '_effect_runAround' : 'effect_runAround'; }
-      else if (!f.npc && r.fakeDie) { name = 'skill_6'; fx = 'effect_skill_6'; }
+      /* 装死可能由**反伤**打在出手方身上（需求143）—— 这时 fakeDieSide 指向的是出手方，
+       * 不能把装死动作套到挨打的那位身上（否则会顶掉他的「绝对防御」表现）。 */
+      else if (!f.npc && r.fakeDie && (r.fakeDieSide == null || Number(r.fakeDieSide) === Number(side))) { name = 'skill_6'; fx = 'effect_skill_6'; }
       else if (!f.npc && r.jueDui) { name = 'skill_16'; fx = 'effect_skill_16'; }
       else if (!f.npc && r.guiJia) { name = 'skill_7'; fx = 'effect_skill_7'; }
       else if (!f.npc && r.action === 'skill' && r.id === 18) {
@@ -509,7 +511,7 @@
       } else { name = 'fightCommonAttack'; fx = 'effect_commonAtack'; }
       if (!Engine.hasAnim(name)) { name = f.npc ? npcAnim(f.npc, 'idle') : 'fightCommonAttack'; fx = null; }
       const frames = Engine.anim(name), hit = Math.min(frames.length - 1, HIT_FRAME[name] || Math.floor(frames.length * .55));
-      let didHit = false, defending = Promise.resolve();
+      let didHit = false, defending = Promise.resolve(), reflectFakeDie = false;
       function impact() {
         if (didHit || aborted()) return;
         didHit = true; applyHp(r, true, beforeHp);
@@ -523,7 +525,12 @@
           if (r.dmg) floater(def, '-' + r.dmg, r.crit ? 'y' : 'r', !!r.crit);
           if (r.crit) { floater(def, '暴击', 'y', true); shake = 12; }
           if (r.hits > 1 || r.multiHit > 1) floater(def, (r.hits || r.multiHit) + '连击', 'y');
-          if (r.fakeDie) floater(def, '装死', 'y');
+          if (r.fakeDie) {
+            /* 普通受击 → 挨打的那位装死；被反伤 → **出手的那位**装死（需求143）。 */
+            const who = r.fakeDieSide == null ? def : r.fakeDieSide;
+            floater(who, '装死', 'y');
+            if (Number(who) !== Number(def)) reflectFakeDie = true;
+          }
           if (r.jueDui) floater(def, '绝对防御', 'y');
           if (r.debuffText) floater(def, r.debuffText, 'y');
           if (r.lifesteal) floater(att, '+' + r.lifesteal, 'g');
@@ -540,6 +547,10 @@
       if (!didHit && !aborted()) impact();
       await defending;
       if (aborted()) return;
+      /* 被反伤打出装死的出手方：等对方的「绝对防御」反馈播完，再补一段装死动作
+       *（与「反击装死」同一套表现；直接在 impact 里播会跟正在放的攻击动作抢帧）。 */
+      if (reflectFakeDie && hps[r.fakeDieSide] > 0) await reaction(r.fakeDieSide, { fakeDie: true });
+      if (aborted()) return;
       const moved = !f.npc ? (name === 'fightCommonAttack' || name === 'fightWeaponAttack') : name === f.npc + '_common_attack' && f.npc !== 'xh';
       let recoveredFromCounter = false;
       // 反击原版使用 beatBack；进攻者仍停在接近后的动作末帧，不提前瞬移回待机。
@@ -551,8 +562,10 @@
           if (counterHit || aborted()) return; counterHit = true; applyHp(r);
           if (r.counterDmg) floater(att, '-' + r.counterDmg, 'r');
           if (r.counterFakeDie) {
-            floater(att, '装死', 'y');
-            counterReaction = reaction(att, { fakeDie: true });
+            /* 同样分「挨反击的那位装死」与「反击者被反伤打死装死」两种情况。 */
+            const who = r.counterFakeDieSide == null ? att : r.counterFakeDieSide;
+            floater(who, '装死', 'y');
+            counterReaction = reaction(who, { fakeDie: true });
             return;
           }
           if (r.counterRebound) {

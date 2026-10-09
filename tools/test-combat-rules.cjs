@@ -278,6 +278,49 @@ test('绝对防御：投掷武器完全不触发（不挡、不反弹、也不�
   assert.equal(c.Sim.dmgReduce(mkDef(), 100, { action: 'common' }).jueDui, 100, '徒手照旧会被挡下');
 });
 
+test('绝对防御的反伤不再「直接反死」：有装死的一方会触发装死（需求143）', () => {
+  /* 随机钉成 0.15：徒手闪避（约 10%）不触发、绝对防御（首次 22%）必触发，
+   * 于是「反伤打到死线 → 装死」是确定性结论而不是统计近似。 */
+  const blockOf = (g, a) => rounds(g, a, { power: 1, agility: 1, speed: 1, hp: 5000000, skills: ['16:15'] })
+    .find((r) => r.jueDui && r.attacker === 0);
+
+  /* ① 有装死：留在 1 点血，并且立刻再行动一次（装死的老规矩照旧） */
+  const g = game(0.15);
+  const ev = rounds(g, { power: 4000, hp: 800, skills: ['6:1'] },
+    { power: 1, agility: 1, speed: 1, hp: 5000000, skills: ['16:15'] });
+  const block = ev.find((r) => r.jueDui && r.attacker === 0);
+  assert.ok(block, '应当出现一次「被绝对防御挡下」的回合');
+  assert.equal(block.dmg, 0, '这一击被完全挡下');
+  assert.ok(block.reboundHurt > 800, '反伤要超过出手方的血量（否则测不到致死）：' + block.reboundHurt);
+  assert.equal(block.fakeDie, true, '反伤打到死线必须触发装死');
+  assert.equal(block.fakeDieReflect, true, '要标出这次装死是反伤打出来的（回放据此画对位置）');
+  assert.equal(block.fakeDieSide, 0, '装死的是出手方（side 0）');
+  assert.equal(block.hpAfter[0], 1, '装死之后留在 1 点血，而不是被反死：' + JSON.stringify(block.hpAfter));
+  assert.equal(block.hpAfter[1], 5000000, '防守方没掉血（这一击被完全挡下）');
+  const i = ev.indexOf(block);
+  assert.equal(ev[i + 1] && ev[i + 1].attacker, 0, '装死之后出手方立刻再行动一次（不消耗回合）');
+
+  /* ② 对照：没有装死就被反伤直接打死（老行为不变） */
+  const noFd = blockOf(game(0.15), { power: 4000, hp: 800 });
+  assert.ok(noFd, '对照局同样要被挡下');
+  assert.ok(!noFd.fakeDie, '没有装死就不会触发');
+  assert.equal(noFd.hpAfter[0], 0, '没有装死 → 被反伤直接打死');
+
+  /* ③ 反噬豁免优先：免疫反伤的人根本不吃这一下，装死的次数也留着 */
+  const immune = blockOf(game(0.15), { power: 4000, hp: 800, skills: ['6:1'], mods: { reflectImmune: 1 } });
+  assert.ok(immune, '反噬豁免不影响「被挡下」这件事本身');
+  assert.ok(!immune.reboundHurt, '豁免之后没有实际反伤');
+  assert.ok(!immune.fakeDie, '没吃到伤害就不会触发装死');
+  assert.ok(immune.hpAfter[0] > 500, '反噬豁免的人不会被反伤打死（最多吃到对方那 1 点反击）：' + immune.hpAfter[0]);
+
+  /* ④ 接线：五种反伤（绝对防御 / 荆棘铁壁 / 荆棘之甲 / 镜鳞 / 沉默之壁）统一走 reflectHurt，
+   *  否则再加一处反伤就又会绕过装死 —— 这条守卫保的就是「只有一处致死判定」这件事。 */
+  const simSrc = fs.readFileSync(path.join(root, 'js', 'sim.js'), 'utf8');
+  assert.ok(!/att\.hp -= reflect/.test(simSrc) && !/att\.hp -= excess/.test(simSrc),
+    '反伤不该再直接扣血（必须过致死保护链）');
+  assert.ok((simSrc.match(/reflectHurt\(/g) || []).length >= 5, '五种反伤都要走 reflectHurt');
+});
+
 test('同时有龟甲术与绝对防御时，每次受击的受伤期望更低（不会被挤占）', () => {
   const measure = (skills) => {
     let taken = 0, hits = 0;

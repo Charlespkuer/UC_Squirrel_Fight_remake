@@ -988,6 +988,40 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     assert.equal(run.mintGroup, -1, '手开的店不占自然刷出的名额');
   });
 
+  check('调试台无尽塔专属：试炼币 / 铸币的数量夹取、累加与「没有对局」的报错（需求142）', () => {
+    const c = setup(7);
+    const T = c.Tower;
+    const run = T._debugRun('endless');
+    const coins0 = run.coins, mint0 = Math.max(0, Number(run.retryToken) || 0);
+    /* 试炼币：加法、累加、夹在 1~1000000（空输入 / 0 / 负数都按 1） */
+    const r1 = T._debugGrantCoins(500);
+    assert.deepEqual([r1.ok, r1.amount, r1.total], [true, 500, coins0 + 500], '试炼币 +500：' + JSON.stringify(r1));
+    assert.equal(T._debugRun('endless').coins, coins0 + 500, '写进了 run.coins');
+    assert.equal(T._debugGrantCoins(250).total, coins0 + 750, '可以连续加');
+    assert.equal(T._debugGrantCoins('').amount, 1, '空输入按 1');
+    assert.equal(T._debugGrantCoins(0).amount, 1, '0 也按 1（与「快速获取物品 / 武技」同口径）');
+    assert.equal(T._debugGrantCoins(99).amount, 99, '字符串数字也认');
+    assert.equal(T._debugGrantCoins(1e9).amount, 1000000, '上限 1000000');
+    assert.equal(T._debugGrantCoins(-5).amount, 1, '负数按 1');
+    /* 铸币（内部字段 run.retryToken，试炼商店 50 试炼币 1 枚那种） */
+    const r2 = T._debugGrantMint(10);
+    assert.deepEqual([r2.ok, r2.amount, r2.total], [true, 10, mint0 + 10], '铸币 +10：' + JSON.stringify(r2));
+    assert.equal(T._debugRun('endless').retryToken, mint0 + 10, '写进了 run.retryToken');
+    assert.equal(T._debugGrantMint(1000000).amount, 100000, '上限 100000');
+    assert.equal(T._debugGrantMint('7').amount, 7, '字符串数字也认');
+    /* 只进局内经济：不加分、不改层数、不推进层内进度 */
+    assert.equal(T._debugRun('endless').score, 0, '不该加分');
+    assert.equal(T._debugRun('endless').layer, run.layer, '不该改层数');
+    assert.equal(T._debugRun('endless').idx, run.idx, '不该推进层内进度');
+    /* 没有对局时给明确提示，而且**不会**顺手开一局（与「层数 ±1」刻意区分） */
+    T.abandon('endless');
+    const noRun = T._debugGrantCoins(100);
+    assert.equal(noRun.ok, false, '没有对局时应当失败');
+    assert.match(noRun.msg, /无尽塔对局/, '提示要说清原因：' + noRun.msg);
+    assert.equal(T._debugRun('endless'), null, '不该凭空开一局');
+    assert.equal(T._debugGrantMint(10).ok, false, '铸币也是同一口径');
+  });
+
   check('调试面板：填数量 → 点「获得」即可拿到对应的试炼币 / 铸币（载入真 debug.js 真点击）', () => {
     const c = setup(7);
     const T = c.Tower;

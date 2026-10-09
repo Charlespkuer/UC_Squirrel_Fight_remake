@@ -68,7 +68,7 @@ scripts\启动游戏.cmd --stop          # 停掉后台的本地服务器
    用游戏里「系统 → 导入/导出存档」互传。
 
 ⚠️ Windows 的 `squirrel_fight.exe`（PE 格式 + Windows API）**不能**装到安卓上，安卓必须用 APK；
-反过来 APK 也不能在 Windows 上跑。详细构建过程与踩坑见 [docs/安卓版构建与实测.md](docs/安卓版构建与实测.md)。
+反过来 APK 也不能在 Windows 上跑。构建命令与踩坑见 [docs/更新记录.md](docs/更新记录.md) 的「文档收敛」一条，以及 `tools/build-apk.ps1` 头部注释。
 
 ### ⑤ 从源码运行（可选）
 
@@ -126,8 +126,8 @@ node scripts/serve.js     # 起本地静态服务器（带存档接口）
 | `images/` | 图片素材 | 背景与场景、UI 图标、角色图集（`images/orig/` 原版图集）、`screenshots/`（README 用的截图） |
 | `audio/` | 音效与 BGM | 战斗音效、主界面 BGM |
 | `src-tauri/` | **桌面壳与安卓壳**（Rust + Tauri 2，同一个 crate 出 exe 和 apk） | `src/lib.rs`（全部逻辑，按 `cfg(mobile)` 分支）、`src/main.rs`（桌面入口，仅 8 行）、`Cargo.toml`、`tauri.conf.json`、`tauri.android.conf.json`（安卓构建时自动合并）、`icons/`、`app-icon.png`、`gen/android/`（`tauri android init` 生成的安卓工程，**不进仓库**）、`web/` 与 `dist/`（构建产物） |
-| `tools/` | **开发与验证工具**（不参与运行） | `test-*.cjs`（21 个 Node 回归套件，`test-fixes-round.cjs` 是主回归）+ `test-battle.js`（动画/图集）、`check-asset-paths.cjs`（资源路径体检）、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK）、`gen-vendor-data.cjs`（重新生成 `js/gamedict.js`）、`stage-balance.cjs`（关卡数值，被回归调用）、`publish-guide.md` / `tauri-guide.md`（发布与桌面壳指南） |
-| `docs/` | 设计与重构文档 | [挑战塔设计](docs/无尽挑战塔系统设计文档.md)、[更新记录](docs/更新记录.md)、[真化武器与技能数值](docs/真化武器与技能数值.md)（平衡调整对照表）、[支持作者与外部链接](docs/支持作者与外部链接.md)、[双语与本地化方案](docs/双语与本地化方案.md)、[安卓版构建与实测](docs/安卓版构建与实测.md) |
+| `tools/` | **开发与验证工具**（不参与运行） | 20 个 `test-*.cjs` 主题套件（一条用例对应一条规则；新用例放进主题相符的套件）+ `test-battle.js`（动画/图集）、`check-asset-paths.cjs`（资源路径体检）、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK）、`gen-vendor-data.cjs`（重新生成 `js/gamedict.js`）、`stage-balance.cjs`（关卡数值，被回归调用）、`publish-guide.md` / `tauri-guide.md`（发布与桌面壳指南） |
+| `docs/` | 说明文档（**新增需用户同意**，见 `docs/AGENTS.md`） | [更新记录](docs/更新记录.md)（唯一变更日志，最新在上）、[真化武器与技能数值](docs/真化武器与技能数值.md)（平衡对照表）、[双语与本地化方案](docs/双语与本地化方案.md)（未落地方案） |
 | `save/` | **运行时的存档目录**（不进仓库） | `progress.json` 正式存档、`backup/` 快照、`server.out.log` / `server.err.log` |
 | `references/` | 原版 APK 与参考素材（本地，不进仓库） | 只作对照/取证，游戏运行不读它 |
 | `out/` | AI 超分与开发期对比图的**临时工作区**（本地，不进仓库） | 实验对比图与分析脚本；删掉不影响游戏 |
@@ -163,4 +163,4 @@ node tools/test-ui-flow.cjs      # 界面流程
 
 完整条款见 [LICENSE](LICENSE)；商业授权或权利异议请通过 Issue 联系作者。
 「自愿支持作者」（爱发电）只是玩家对作者个人的打赏，**不换取任何游戏内好处**，不构成本项目的商业使用；
-具体实现与维护说明见 [docs/支持作者与外部链接.md](docs/支持作者与外部链接.md)。
+具体实现见 `js/main.js` 的 `Main.SUPPORT` / `openExternal`，要点见 [docs/更新记录.md](docs/更新记录.md)。

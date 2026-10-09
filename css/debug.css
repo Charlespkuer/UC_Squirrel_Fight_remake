@@ -112,3 +112,6 @@
 .debug-buff-log li.gone{opacity:.72}
 .debug-buff-log li.gone b{color:#9a6a4a}
 .debug-buff-log li.broken b{color:#b3562c}
+/* 无尽塔：局内货币（试炼币 / 铸币）的「指定数量」行 —— 标签 + 数字框 + 获得 */
+.debug-num-row{grid-template-columns:auto 1fr auto}
+.debug-num-row .uc-button{white-space:nowrap}

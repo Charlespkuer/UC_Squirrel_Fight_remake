@@ -4843,7 +4843,7 @@ test('需求57：终焉烙印最多3次 / 秘技通神可抽绝对防御与龟�
   const res8 = T.applyPickBuff('skill', 8);
   assert.ok(res8.pct <= 1, '主动技能仍是原来的 pct：' + res8.pct);
   /* 实战触发率对比：绝对防御 / 龟甲术 都要明显变高。
-   * 注意：绝对防御现在是**本场逐次递减**的（22/13/9/…），所以整场累计率的比值会被
+   * 注意：绝对防御现在是**本场逐次递减**的（22/17/13/…），所以整场累计率的比值会被
    * 衰减曲线压扁（实测 10.5% → 15.5%，比值只有 1.48，会把「>1.5」这条打成偶发抖动）。
    * 加成作用在**每一次判定**上，所以这里改成比较**每场第一次受击**的触发率。 */
   /* 秘技通神改成**独立通道** skillBoost（不再借用 effects —— 那是装备词条/武器槽的编号空间），
@@ -4871,7 +4871,7 @@ test('需求57：终焉烙印最多3次 / 秘技通神可抽绝对防御与龟�
     return hits ? trig / hits : 0;
   };
   /* 绝对防御的加成改成**函数口径的确定性断言**：它现在是本场逐次递减的
-   *（22/13/9/…，见 sim 的 jueDuiChanceOf），而「第一次受击」的实测会被前面的
+   *（22/17/13/…，见 sim 的 jueDuiChanceOf），而「第一次受击」的实测会被前面的
    * 武器攻击污染 —— 武器打上来同样是一次判定、会把计数推上去，于是实测只有 ×1.5 上下、
    * 偶发不过阈值。真实战斗里的递减曲线由 test-combat-rules 的「按已触发次数分桶」覆盖。 */
   /* 龟甲术的「首次触发率」也改成**函数口径的确定性断言**（同绝对防御）：
@@ -4891,18 +4891,18 @@ test('需求57：终焉烙印最多3次 / 秘技通神可抽绝对防御与龟�
   assert.ok(rateOf({ 16: 2 }, [16], 'jueDui') >= rateOf(null, [16], 'jueDui') * 1.2,
     '加成后绝对防御的整场累计触发率也不该更低');
   /* 平衡约束：秘技通神加成之后，「第二次及以后」的触发概率不得高于 50%。
-   * 基准值本来就在 50% 以下（绝对防御 13、龟甲术 20），但 ×3 之后龟甲术会到 60%，
+   * 基准值本来就在 50% 以下（绝对防御 17、龟甲术 20），但 ×3 之后龟甲术会到 60%，
    * 实测平均格挡率从 20.7% 飙到 63.3%，所以对「加成后」统一封顶。 */
   const mkF2 = (boost, skills) => ({ name: 'p', level: 60, power: 200, agility: 100, speed: 100,
     hp: 1000, maxHp: 1000, weapons: [], skills: (skills || []).map((id) => ({ id: id, level: 5 })),
     skillBoost: boost || {}, effects: {}, baseStats: { power: 200, agility: 100, speed: 100 } });
   assert.equal(Sim.jueDuiChanceOf(mkF2(null, [16]), false), 22, '未选中时绝对防御首次仍是 22');
-  assert.equal(Sim.jueDuiChanceOf(mkF2(null, [16]), true), 13, '未选中时绝对防御第二次仍是 13');
+  assert.equal(Sim.jueDuiChanceOf(mkF2(null, [16]), true), 17, '未选中时绝对防御第二次是 17（需求140 中幅提高）');
   assert.equal(Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), 0), 66, '加成后**首次**应当是 22×3 = 66');
-  assert.equal(Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), true), 39,
-    '选中后绝对防御第二次应当是 39（≤50）');
-  assert.equal(Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), 2), 27,
-    '加成后第三次应当是 9×3 = 27（逐次递减但整体抬高）');
+  assert.equal(Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), true), 45,
+    '选中后绝对防御第二次：17×3 = 51，被二次封顶压到 45');
+  assert.equal(Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), 2), 39,
+    '加成后第三次应当是 13×3 = 39（逐次递减但整体抬高）');
   assert.ok(Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), true) <= 50,
     '绝对防御二次及以后不得高于 50%：' + Sim.jueDuiChanceOf(mkF2({ 16: 2 }, [16]), true));
   assert.ok(Sim.shellChanceOf(mkF2({ 7: 2 }, [7]), true) <= 50,
@@ -4911,8 +4911,8 @@ test('需求57：终焉烙印最多3次 / 秘技通神可抽绝对防御与龟�
     '选中后首次不该到「必定格挡」：' + Sim.shellChanceOf(mkF2({ 7: 2 }, [7]), false));
   /* 未选中时不受任何封顶影响（保留原来的极端上限） */
   assert.equal(Sim.shellChanceOf(mkF2(null, [7]), false), 35, '未选中时龟甲术首次仍是 35');
-  assert.equal(Sim.jueDuiChanceOf(mkF2({ 16: 0.5 }, [16]), true), 19.5,
-    '小加成不受封顶影响（13 × 1.5）：' + Sim.jueDuiChanceOf(mkF2({ 16: 0.5 }, [16]), true));
+  assert.equal(Sim.jueDuiChanceOf(mkF2({ 16: 0.5 }, [16]), true), 25.5,
+    '小加成不受封顶影响（17 × 1.5）：' + Sim.jueDuiChanceOf(mkF2({ 16: 0.5 }, [16]), true));
 
   /* ③ 天象之眼（C45）必须拦住敌方自愈（以及其它「纯粹强化敌人自身」的环境） */
   assert.equal(TD.ENDLESS_ENV_BY_ID.regen.noReflect, true, '自愈回复应当标记 noReflect');
@@ -5767,13 +5767,14 @@ test('需求66：秘技通神可抽小宇宙爆发（开战第一招必放）/ �
   assert.ok(pick7.ok, '抽中龟甲术应当成功：' + JSON.stringify(pick7));
   assert.equal(pick7.pct, 2.0, '龟甲术的加成保持 2.0 不变：' + pick7.pct);
 
-  /* 触发率对照：13 × (1+1.5) = 32.5（原来 39）、22 × (1+1.5) = 55（原来 66） */
+  /* 触发率对照：17 × (1+1.5) = 42.5（原来 32.5）、22 × (1+1.5) = 55（原来 66）；
+   * ×3 那档 17×3 = 51 会被「二次及以后 ≤45」的封顶压成 45（需求140 抬高了基准）。 */
   const mkF = (boost) => ({ name: 'p', level: 60, power: 200, agility: 100, speed: 100, hp: 1000, maxHp: 1000,
     weapons: [], skills: [{ id: 16, level: 5 }], skillBoost: boost || {}, effects: {}, baseStats: { power: 200, agility: 100, speed: 100 } });
   assert.equal(Sim.jueDuiChanceOf(mkF({ 16: 2.0 }), false), 66, '未下调时首次是 66（对照）');
-  assert.equal(Sim.jueDuiChanceOf(mkF({ 16: 2.0 }), true), 39, '未下调时二次及以后是 39（对照）');
+  assert.equal(Sim.jueDuiChanceOf(mkF({ 16: 2.0 }), true), 45, '未下调时二次及以后：17×3=51 被封顶压到 45（对照）');
   assert.equal(Sim.jueDuiChanceOf(mkF({ 16: 1.5 }), false), 55, '下调后首次应当是 55：' + Sim.jueDuiChanceOf(mkF({ 16: 1.5 }), false));
-  assert.equal(Sim.jueDuiChanceOf(mkF({ 16: 1.5 }), true), 32.5, '下调后二次及以后应当是 32.5：' + Sim.jueDuiChanceOf(mkF({ 16: 1.5 }), true));
+  assert.equal(Sim.jueDuiChanceOf(mkF({ 16: 1.5 }), true), 42.5, '下调后二次及以后应当是 42.5：' + Sim.jueDuiChanceOf(mkF({ 16: 1.5 }), true));
   assert.ok(Sim.jueDuiChanceOf(mkF({ 16: 1.5 }), true) <= 50, '仍然守住「二次及以后 ≤50%」的底线');
   T.abandon('endless');
 });
@@ -10235,6 +10236,64 @@ test('需求137：自愿支持作者 —— 系统页入口 / 30 级一次性提
       });
     });
   });
+});
+
+test('需求138：调试台无尽塔专属 —— 快速获得指定数量的试炼币与铸币', () => {
+  const c = setup();
+  const T = c.Tower, S = c.State;
+  const run = T._debugRun('endless');
+  const debugSrc = fs.readFileSync(path.join(ROOT, 'js', 'debug.js'), 'utf8');
+  const cssSrc = fs.readFileSync(path.join(ROOT, 'css', 'debug.css'), 'utf8');
+
+  /* ① 试炼币：加法、累加、返回总额；数量夹在 1 ~ 1000000 */
+  const coins0 = run.coins;
+  const r1 = T._debugGrantCoins(500);
+  assert.deepEqual([r1.ok, r1.amount, r1.total], [true, 500, coins0 + 500], '试炼币 +500：' + JSON.stringify(r1));
+  assert.equal(T._debugRun('endless').coins, coins0 + 500, '写进了 run.coins');
+  assert.equal(T._debugGrantCoins(250).total, coins0 + 750, '可以连续加');
+  assert.equal(T._debugGrantCoins('').amount, 1, '空输入按 1 处理');
+  assert.equal(T._debugGrantCoins(0).amount, 1, '0 也按 1（与「快速获取物品 / 武技」一致）');
+  assert.equal(T._debugGrantCoins(99).amount, 99, '字符串数字也认');
+  assert.equal(T._debugGrantCoins(1e9).amount, 1000000, '上限 1000000');
+  assert.equal(T._debugGrantCoins(-5).amount, 1, '负数按 1');
+  const coinsNow = T._debugRun('endless').coins;
+
+  /* ② 铸币（内部字段 run.retryToken，试炼商店 50 币 1 枚那种） */
+  const mint0 = Math.max(0, Number(run.retryToken) || 0);
+  const r2 = T._debugGrantMint(10);
+  assert.deepEqual([r2.ok, r2.amount, r2.total], [true, 10, mint0 + 10], '铸币 +10：' + JSON.stringify(r2));
+  assert.equal(T._debugRun('endless').retryToken, mint0 + 10, '写进了 run.retryToken');
+  assert.equal(T._debugGrantMint(1000000).amount, 100000, '上限 100000');
+  assert.equal(T._debugGrantMint('7').amount, 7, '字符串数字也认');
+  /* 铸币要真的能用：试炼商店的铸币标价 50 试炼币 1 枚，这里直接给够买得起的量 */
+  assert.ok(T._debugRun('endless').retryToken >= 10, '铸币余额应当能买到商店里的东西');
+
+  /* ③ 数值只进局内经济：不加分、不改层数、不动其它字段 */
+  assert.equal(T._debugRun('endless').layer, run.layer, '不该改层数');
+  assert.equal(T._debugRun('endless').score, 0, '不该加分');
+  assert.equal(T._debugRun('endless').idx, run.idx, '不该推进层内进度');
+
+  /* ④ 没有对局时给明确提示（而且**不会**顺手开一局） */
+  T.abandon('endless');
+  const noRun = T._debugGrantCoins(100);
+  assert.equal(noRun.ok, false, '没有对局时应当失败');
+  assert.match(noRun.msg, /无尽塔对局/, '提示要说清原因：' + noRun.msg);
+  assert.equal(T._debugRun('endless'), null, '不该凭空开一局');
+  const noRunMint = T._debugGrantMint(10);
+  assert.equal(noRunMint.ok, false);
+  assert.match(noRunMint.msg, /无尽塔对局/, '铸币也是同一口径：' + noRunMint.msg);
+
+  /* ⑤ 面板接线（真点击在 tools/test-mint-shop.cjs 的 debugHarness 用例里）：UI + 处理器 + 样式 */
+  assert.ok(/data-endless-coins/.test(debugSrc) && /data-endless-grant-coins/.test(debugSrc), '要有试炼币数量框与按钮');
+  assert.ok(/data-endless-mint/.test(debugSrc) && /data-endless-grant-mint/.test(debugSrc), '要有铸币数量框与按钮');
+  assert.ok(/_debugGrantCoins/.test(debugSrc) && /_debugGrantMint/.test(debugSrc), '按钮要接上 Tower 的两个接口');
+  assert.ok(/type="number" data-endless-coins/.test(debugSrc) && /type="number" data-endless-mint/.test(debugSrc),
+    '两个数量框都应当是 number 输入');
+  assert.ok(/\.debug-num-row\{/.test(cssSrc), '数量行的三段布局要有自己的样式');
+  /* 界面文案要说清「数量」与「是什么」 */
+  assert.match(debugSrc, /试炼币[\s\S]{0,400}data-endless-coins/, '试炼币那一行要写清标签');
+  assert.match(debugSrc, /铸币[\s\S]{0,400}data-endless-mint/, '铸币那一行要写清标签');
+  assert.ok(coinsNow > coins0 && T._debugRun('endless') === null, '用例自己的数据核对');
 });
 
 (async () => {

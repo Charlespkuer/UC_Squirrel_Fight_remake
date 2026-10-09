@@ -66,8 +66,13 @@
     commonAttackWeight: 30,
     /* 三侠等纯 NPC 分支（没有武器池）的固定档位：30% 技能 / 70% 普攻。 */
     npcSkillChance: 30,
-    jueDuiChance: 22, jueDuiAgain: 13,
-    jueDuiDecay: 0.7, jueDuiMin: 2,
+    /* 绝对防御的触发曲线（2026-10 用户口径「中幅提高二次与多次触发」，需求140）：
+     *   首次 22%，之后 17 / 13 / 10 / 8 / 6 / 6 …（×0.78 慢衰减，地板 6）。
+     *   旧值是 13 / ×0.7 / 地板 2（22/13/9/6/4/3/2…）。
+     *   ★ 投掷类攻击**完全不触发**绝对防御（见 dmgReduce），所以这条曲线只由
+     *   近战 / 徒手 / 技能推进 —— 扔过来的武器不会把计数推上去、不降权。 */
+    jueDuiChance: 22, jueDuiAgain: 17,
+    jueDuiDecay: 0.78, jueDuiMin: 6,
     shellFirst: 35, shellAgain: 20,
     xhSpeedShare: 0.35,
     skillCooldown: 2,
@@ -384,7 +389,8 @@
    *   · 来点松果（17）/ 野球拳（12）：第 1 次用过后 15，第 2 次及以后 5（到底，不再下降）；
    *   · 其余技能：一律 20。
    *  count = 本场**已经用过**的次数（0 表示还没用过 —— 那时调用方直接用 UNUSED_WEIGHT，不走这里）。
-   *  绝对防御是另一套（jueDuiChanceOf：22/13/9/6/4/3/2 的 ×0.7 慢衰减），不进出手池。 */
+   *  绝对防御是另一套（jueDuiChanceOf：22/17/13/10/8/6/6 的 ×0.78 慢衰减、地板 6），
+   *  不进出手池；而且投掷类攻击根本不触发它（不挡也不降权）。 */
   function repeatRateOf(id, count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
     if (id !== 12 && id !== 17) return RULES.repeatSkill;
@@ -562,13 +568,18 @@
     out.dmg = Math.round(out.dmg * (1 - clamp(gearReduction, 0, 80) / 100));
     /* 绝对防御是受击自动触发、不进出手池的技能，所以「挡过几次」单独记：
      * 同一场里每挡一次，下一次的触发率就按 jueDuiChanceOf 的曲线往下降
-     *（22 / 13 / 9 / 6 / 4 / 3 / 2 …；对敌我都生效）。
-     * 旧的布尔 `usedJueDui` 已被这个计数取代（它只够区分「首次/之后」两档）。 */
-    if (def.skills[16] && def.silence <= 0
+     *（22 / 17 / 13 / 10 / 8 / 6 / 6 …地板 6；对敌我都生效）。
+     * 旧的布尔 `usedJueDui` 已被这个计数取代（它只够区分「首次/之后」两档）。
+     * 2026-10 用户口径（需求140）：**投掷类攻击根本不触发绝对防御** —— 不挡、不反弹，
+     * 也**不计入降权计数**（计数只在下面分支里 +1，跳过分支就等于扔过来的武器
+     * 不会把后续触发率压下去）。近战 / 徒手 / 技能照旧。 */
+    if (def.skills[16] && def.silence <= 0 && opts.weaponType !== '投掷'
         && chance(jueDuiChanceOf(def, def.jueDuiCount || 0))) {
       def.jueDuiCount = Math.max(0, Math.floor(Number(def.jueDuiCount) || 0)) + 1;
       const pct = 40 + 4 * (def.skills[16] - 1);
-      out.jueDui = out.dmg; out.rebound = Math.round(out.dmg * pct / 100); out.dmg = 0;
+      out.jueDui = out.dmg;
+      out.rebound = Math.round(out.dmg * pct / 100);
+      out.dmg = 0;
       return out;
     }
     if (def.skills[7] && def.silence <= 0) {
@@ -1119,9 +1130,13 @@
         let total = 0;
         for (let i = 0; i < hits; i++) {
           const rr = { dmg: 0 };
-          applyDamage(att, def, raw, rr, { ignoreFakeDie: w.id === 7, action: 'weapon', weaponType: w.type });
+          applyDamage(att, def, raw, rr, { ignoreFakeDie: w.id === 7 || trueW(w, 'ignoreFakeDie') > 0, action: 'weapon', weaponType: w.type });
           total += rr.dmg;
-          if (rr.reboundHurt) { r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt; r.jueDui = true; }
+          /* 「绝对防御触发了」这条标记必须**独立于反弹伤害**传播：投掷类被挡下时刻意不反弹
+           *（需求140），但战斗动画（battle.js 的 skill_16 / 「绝对防御」飘字）与塔的统计
+           * 都靠 r.jueDui 判断这次是不是被挡下的 —— 挂在 reboundHurt 上会整条丢掉。 */
+          if (rr.jueDui) r.jueDui = true;
+          if (rr.reboundHurt) r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt;
           if (rr.thornsDmg) r.thornsDmg = (r.thornsDmg || 0) + rr.thornsDmg;
           if (rr.shellAbsorb) r.shellAbsorb = (r.shellAbsorb || 0) + rr.shellAbsorb;
           if (rr.lifesteal) r.lifesteal = (r.lifesteal || 0) + rr.lifesteal;
@@ -1403,6 +1418,10 @@
     /* 防御被动的单次触发概率（%）与被动加成读取 —— 供测试/调参直接核对，
      * 不用靠统计近似（绝对防御 16 / 龟甲术 7）。 */
     jueDuiChanceOf, shellChanceOf, passiveSkillBoost,
+    /* 减伤链的即时结算（护盾 / 绝对防御 / 龟甲术 / 皮糙肉厚…）—— 纯函数，传
+     * (挨打方, 伤害, {action, weaponType})，供测试**确定性**核对触发与反弹，
+     * 不用靠统计近似（例：投掷类根本不触发绝对防御、也不推高降权计数）。 */
+    dmgReduce,
     /* 闪避率的唯一出口（同样供测试/调参直接核对，不用统计近似）。
      * 传两个战斗体：att = 攻击方、def = 挨打方（守方敏捷、移形换位、木剑/流星锤、
      * 凌波微步/烟幕等全部在这一个函数里结算）。 */

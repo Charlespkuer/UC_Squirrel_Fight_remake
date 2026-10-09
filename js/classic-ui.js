@@ -189,7 +189,22 @@
     return withPrefix === false ? String(level) : 'LV' + level;
   };
   const isTrueGear = (item) => !!item && (window.GData && GData.trueLevel ? GData.trueLevel(item.level) > 0 : Number(item.level) > 10);
+  /* 真形态专属卡面（带「真」字红章的方卡）：images/classic/reference-cards/<kind>-<id>.png。
+   * 那个目录里其实混着**两套**图：灰色版（未解锁时显示，见下面 icon() 里的 grey 名单）
+   * 与真·版（本名单）。真·版只覆盖一部分 id —— weapon 1/5/6/8、
+   * skill 1/2/4/5/6/10/11/12/13/16/17/24（与素材目录逐一对过，改素材时要同步这张表）。
+   * 其余真武器继续走 icons/weapon-true-<id>.png；真技能没有别的素材，就到此为止。 */
+  const TRUE_CARD_IDS = { weapon: [1, 5, 6, 8], skill: [1, 2, 4, 5, 6, 10, 11, 12, 13, 16, 17, 24] };
   function icon(kind, id, locked, selected, trueForm) {
+    /* 真形态优先走专属贴图 —— **必须放最前面**：下面「参考卡」那几条会提前 return，
+     * 而方天画戟(1)/死老鼠(5)/橡皮擦(7)/菜刀(8)/可口可乐(9)/死神镰刀(15) 都在
+     * reference.weapon.learned 里，导致真化武器在未选中时显示普通卡面，
+     * 点一下（selected=true）才变真形态。
+     * 2026-10 用户反馈：真化武技在武器&技能界面不直接展示特殊贴图（技能此前根本没有）。 */
+    if (trueForm && TRUE_CARD_IDS[kind] && TRUE_CARD_IDS[kind].includes(+id)) {
+      return '<img alt="" class="reference-art" src="images/classic/reference-cards/' + kind + '-' + id + '.png">';
+    }
+    if (kind === 'weapon' && trueForm) return '<img alt="" src="' + atlasIcon('weapon', id, locked, true) + '">';
     if(kind==='prop' && ((!selected && [1,2,4,5,10,12,21,22,23,24,26,36].includes(+id)) || selected && [3,11,25].includes(+id))) {
       return '<img alt="" class="reference-art" src="images/classic/new-reference/props/prop-'+id+(selected?'-selected':'')+'.png">';
     }
@@ -203,8 +218,6 @@
     }
     const grey={weapon:[2,3,4,7,9,10],skill:[3,7,8,9,14,15,18,23]};
     const fromReference=(locked && grey[kind]?.includes(+id)) || (!locked && kind==='skill' && [6,13].includes(+id));
-    // 真形态优先走真武器贴图（参考卡没有真版）
-    if (kind === 'weapon' && trueForm) return '<img alt="" src="' + atlasIcon('weapon', id, locked, true) + '">';
     return '<img alt="" '+(fromReference?'class="reference-art" ':'')+'src="'+(fromReference?'images/classic/reference-cards/'+kind+'-'+id+'.png':atlasIcon(kind,id,locked))+'">';
   }
   function statsHtml(stats, cls) {
@@ -566,7 +579,8 @@
     const cells=shown.map(it=>{
       const has=own.find(x=>x.id===it.id);
       const selected=has && selectedItems[kind]===it.id;
-      const trueForm = has && kind === 'weapon' && isTrueGear(has);
+      /* 真形态：武器与技能都算（2026-10 之前只判断武器，技能的真化贴图因此一直不显示）。 */
+      const trueForm = !!has && isTrueGear(has);
       /* 2026-10 用户口径：选中之后格子下方的说明**仍然显示等级**（LV/真N），
        * 不再换成该武器 / 技能的名字（名字在详情弹窗里看）。 */
       return '<button class="catalog-cell '+(!has?'locked':selected?'selected':'')+(trueForm?' true-form':'')+'" data-item="'+it.id+'" aria-label="'+esc(it.name)+(has?' '+levelLabel(has.level):' 尚未获得')+'"><span class="item-icon">'+icon(kind,it.id,!has,selected,trueForm)+'</span><span class="item-caption">'+(has?levelLabel(has.level):'')+'</span></button>';
@@ -586,7 +600,7 @@
     const unupgradeable=!isW && (base.type==='被动' && up?.max || id===13);
     const extra=isW?'伤害 '+(it?it.harmLo+'-'+it.harmHi:base.harm):'类别 '+esc(base.type);
     const right=locked?'<div class="locked-message">尚未获得<br><span class="small-label">升级、开启礼包有机会获得</span></div>':up?.max||unupgradeable?'<div class="locked-message">该'+(isW?'武器':'技能')+'<br>不能升级</div>':'<h3>需要　<span class="muted-text">已有</span></h3><div><span>金松果 '+up.coin+'</span><b>'+S.goldPoint+'</b></div><div><span>卷轴 '+up.book+'</span><b>'+(S.props[up.bookId]||0)+'</b></div><span class="upgrade-rate">成功率 '+up.rate+'%'+(up.fails?'<i class="upgrade-pity">（失败 '+up.fails+' 次，已加 '+up.fails*State.UPGRADE_FAIL_BONUS+'%）</i>':'')+'</span>'+(up.isTrue?'<span class="upgrade-true-tip">真化第 '+up.trueAttempt+' 次（当日 24:00 次数与费用清零，真化不吃失败保底）</span>':'')+'<span class="small-label">需要角色 '+up.levelLimit+' 级</span>';
-    const content='<div class="item-detail"><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-summary"><span class="item-icon">'+icon(kind,id,locked,false,isW&&isTrueGear(it))+'</span><div class="detail-rows"><span class="detail-row">'+(isW?'阶段':'等级')+' '+(it?levelLabel(it.level,false):1)+(it&&isTrueGear(it)?'（真形态）':'')+'</span><span class="detail-row">'+extra+'</span><span class="detail-row">类型 '+esc(base.type)+'</span></div></div><div class="detail-description">'+esc(description)+(isW&&it?'<br>升至下一阶段额外提升'+esc(base.harmAdd)+'点基础伤害！':'')+'</div></div><div class="detail-upgrade">'+right+'</div></div>';
+    const content='<div class="item-detail"><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-summary"><span class="item-icon">'+icon(kind,id,locked,false,isTrueGear(it))+'</span><div class="detail-rows"><span class="detail-row">'+(isW?'阶段':'等级')+' '+(it?levelLabel(it.level,false):1)+(it&&isTrueGear(it)?'（真形态）':'')+'</span><span class="detail-row">'+extra+'</span><span class="detail-row">类型 '+esc(base.type)+'</span></div></div><div class="detail-description">'+esc(description)+(isW&&it?'<br>升至下一阶段额外提升'+esc(base.harmAdd)+'点基础伤害！':'')+'</div></div><div class="detail-upgrade">'+right+'</div></div>';
     // 按钮顺序统一成「动作在前、返回在最后」，与其它弹窗一致
     modal(isW?'武器详情':'技能详情',content,[{label:locked?'尚未获得':up?.max||unupgradeable?'不能升级':'立即升级',cls:locked||up?.max||unupgradeable?'muted':'gold',run:()=>{
       if(locked||up?.max||unupgradeable)return;

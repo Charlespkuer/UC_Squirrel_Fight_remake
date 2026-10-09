@@ -988,6 +988,35 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     assert.equal(run.mintGroup, -1, '手开的店不占自然刷出的名额');
   });
 
+  check('调试面板：填数量 → 点「获得」即可拿到对应的试炼币 / 铸币（载入真 debug.js 真点击）', () => {
+    const c = setup(7);
+    const T = c.Tower;
+    const run = T._debugRun('endless');
+    const coins0 = run.coins, mint0 = Math.max(0, Number(run.retryToken) || 0);
+    const ui = debugHarness(c);
+    const panel = ui.find('data-endless-grant-coins');
+    assert.ok(panel, '面板 HTML 里应当有 data-endless-grant-coins 按钮');
+    assert.ok(/type="number" data-endless-coins/.test(panel.innerHTML), '试炼币那一行要有数量输入框');
+    assert.ok(/type="number" data-endless-mint/.test(panel.innerHTML), '铸币那一行要有数量输入框');
+    /* build() 与这里拿的是同一个元素（querySelector 按选择器缓存），所以输入框与 onclick 都已经接好 */
+    panel.querySelector('[data-endless-coins]').value = '777';
+    const coinBtn = panel.querySelector('[data-endless-grant-coins]');
+    assert.equal(typeof coinBtn.onclick, 'function', '试炼币「获得」要绑上点击处理');
+    coinBtn.onclick();
+    assert.equal(T._debugRun('endless').coins, coins0 + 777, '点一下应当加 777 试炼币');
+    panel.querySelector('[data-endless-mint]').value = '12';
+    const mintBtn = panel.querySelector('[data-endless-grant-mint]');
+    assert.equal(typeof mintBtn.onclick, 'function', '铸币「获得」要绑上点击处理');
+    mintBtn.onclick();
+    assert.equal(T._debugRun('endless').retryToken, mint0 + 12, '点一下应当加 12 铸币');
+    /* 界面读的是 endlessInfo().run（无尽首页右上角的试炼币与铸币）—— 快照也要跟上 */
+    assert.equal(T.endlessInfo().run.coins, coins0 + 777, '无尽主界面快照要拿到新的试炼币余额');
+    assert.equal(T.endlessInfo().run.retryToken, mint0 + 12, '铸币余额同样要进快照');
+    /* 反馈文案：面板底部的 .debug-msg 要写清加了多少、现在多少 */
+    const out = panel.querySelector('.debug-msg');
+    assert.match(String(out.textContent), /铸币 \+12（现有 \d+ 枚）/, '要点出加了 12 枚与现有多少：' + out.textContent);
+  });
+
   check('出售增益列表：按获得先后倒序（最新在最上），虚空铭文附魔的沉到最后', () => {
     const c = setup(7);
     const ui = uiHarness(c);

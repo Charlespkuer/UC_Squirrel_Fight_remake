@@ -95,10 +95,10 @@ function foeOf(c, id, kind, layer) {
 const cases = [];
 function test(name, fn) { cases.push([name, fn]); }
 /** 「会改变层内流程」的增益：E01 会在下一场后开试炼商店、E16 会在下一场后开铸币商店、
- *  E15 会把本层从第 1 场重开。
+ *  E15 会把本层从第 1 场重开、E17 会让下一场直接判胜（战斗结果被改写）。
  *  只关心层内进度/商店节奏的用例不该随机选到它们（这条测试本来就是靠真随机跑的，
  *  选到之后场次计数就散了 —— 实测 需求9.8 偶发红就是这个原因）。 */
-const FLOW_BUFFS = ['E01', 'E15', 'E16'];
+const FLOW_BUFFS = ['E01', 'E15', 'E16', 'E17'];
 /** 从选择节点里挑一张**不改流程**的；都改了（极端情况）就退回第 0 张。 */
 function safeChoiceIndex(choices) {
   const list = Array.isArray(choices) ? choices : [];
@@ -8142,8 +8142,9 @@ test('需求98：传奇保底（B 方案）——repeatable 不再被 ownable �
   assert.equal(T._debugNotePityRoll(r0, null, false), 1, '传奇池为空时不累加（不空转）');
 
   /* ③ 极端情况：全部传奇到手。2026-10 回调后：涅槃拿满 2 层出池、后发制人拿到出池、
-   *    C36 是 oncePerRun、C51 是 unique（永久且已有）→ 极端情况**只剩 C37/C49**。 */
-  const legIds = ['C51', 'C31', 'E15', 'C36', 'C37', 'C53', 'C55', 'C49'];
+   *    C36 是 oncePerRun、C51 是 unique（永久且已有）、E17（第十八批新增传奇限次）也拿到手
+   *    → 极端情况**只剩 C37/C49**。 */
+  const legIds = ['C51', 'C31', 'E15', 'E17', 'C36', 'C37', 'C53', 'C55', 'C49'];
   const extreme = mkRun({
     permanent: legIds.filter((id) => id !== 'C49').map((id) => ({ id, stacks: 1 })).concat([{ id: 'C14', stacks: 2 }]),
     limited: [{ id: 'C49', stacks: 1, uses: 1000, on: true }],
@@ -9036,10 +9037,12 @@ test('需求113：绝对防御（16）的等级不再被秘技通神冲回 1 级
 
 test('需求114：README 精简 —— 只留必要介绍，更新记录交给 git', () => {
   const md = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
-  assert.ok(md.split('\n').length < 120, 'README 应当明显精简（当前 ' + md.split('\n').length + ' 行）');
+  /* 2026-10 第十八批（用户口径）：README 里要放三平台「安装与运行」指导（含安装步骤），
+   * 所以行数上限从 120 放宽到 220；其余要求不变（不逐条同步更新日志、标题数量收敛）。 */
+  assert.ok(md.split('\n').length < 220, 'README 应当保持精简（当前 ' + md.split('\n').length + ' 行）');
   assert.ok(!/^## .*（20\d\d-\d\d）/.test(md), '不该再逐条同步更新日志：' + md.match(/^## .*（20\d\d-\d\d）.*$/m));
   assert.match(md, /## 玩法/, '保留玩法介绍');
-  assert.match(md, /## 启动/, '保留启动方式');
+  assert.match(md, /## 安装与启动/, '保留安装与启动方式（第十八批由「## 启动」扩写）');
   assert.match(md, /## 开发/, '保留开发说明');
   assert.match(md, /## 许可/, '保留许可');
   assert.match(md, /git log/, '改动记录指向 git 历史');
@@ -9876,10 +9879,370 @@ test('需求133：无尽专属调试 —— 快速爬塔「层数 +1 / -1」与�
   assert.ok(/\.debug-quick\{/.test(cssSrc), '快捷行要有自己的两列布局');
 });
 
+test('需求134：新增传奇·限次 3「假如我直接赢」—— 开战即判胜，且不随重复获得降权', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const b = TD.BUFF_BY_ID.E17;
+  assert.ok(b, '应当有「假如我直接赢」（E17）');
+  assert.equal(b.name, '假如我直接赢');
+  assert.equal(b.rarity, 3, '用户口径：传奇');
+  assert.equal(b.kind, 'limited');
+  assert.equal(b.uses, 3, '用户口径：限次 3');
+  assert.equal(b.mods.openKill, 1, '效果键是 openKill');
+  for (const t of ['endless', 'battle', 'limited', 'nextBattle', 'shop']) {
+    assert.ok(TD.hasTag(b, t), 'E17 应当带标签 ' + t + '：' + JSON.stringify(b.tags));
+  }
+  assert.ok(!TD.hasTag(b, 'tower'), '无尽塔专属（挑战塔不放这条机制）');
+  /* 用户口径：**不设重复获得时降权** —— 不写 repeatWeight / weightDivBy。
+   * （没写 pityWeight 也没关系：保底池缺省权重就是 1，见 tower.js 的 pityWeightOf。） */
+  assert.equal(b.mods.repeatWeight, undefined, '不能有 repeatWeight');
+  assert.equal(b.mods.weightDivBy, undefined, '不能有 weightDivBy');
+  assert.ok(TD.endlessPool.some((x) => x.id === 'E17'), '进无尽场间池');
+  assert.ok(TD.shopPool.some((x) => x.id === 'E17'), '试炼商店能卖');
+  assert.ok(TD.mintPool.some((x) => x.id === 'E17'), '铸币商店也能卖');
+
+  /* 真实路径：拿牌 → nextBattle → adjustMe（Main.startBattle 就是这么做的）→ Sim.simulate */
+  const run0 = T._debugRun('endless');
+  run0.permanent = []; run0.limited = []; run0.choices = null; run0.phase = null;
+  assert.ok(T.addBuff(run0, 'E17').ok, '应当拿得到');
+  const nx = T.nextBattle('endless');
+  assert.ok(nx && nx.ok !== false, '应当能开战：' + ((nx && nx.msg) || ''));
+  const me = S.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+  me.maxHp = me.hp;
+  nx.adjustMe(me);
+  assert.equal(me.mods.openKill, 1, '本场修正里必须带上 openKill');
+  const res = c.Sim.simulate(me, nx.foe);
+  assert.equal(res.winner, 0, '应当直接判我方胜');
+  assert.equal(res.rounds.length, 1, '只结算一条「开局清零」事件：' + res.rounds.length);
+  assert.equal(res.rounds[0].noteText, '假如我直接赢', '回放飘字');
+  assert.ok(res.rounds[0].dmg >= 1, '飘字要有实际伤害数值：' + res.rounds[0].dmg);
+  assert.equal(res.rounds[res.rounds.length - 1].hpAfter[1], 0, '敌方生命应当归零');
+
+  /* 限次 3：前三场都带 openKill，第四场就没了 */
+  let openKillBattles = 0;
+  for (let i = 0; i < 4; i++) {
+    const r = T._debugRun('endless');
+    if (!r) break;
+    if (r.choices) r.choices = null;
+    if (r.phase) break;
+    const n = i === 0 ? nx : T.nextBattle('endless');
+    if (!n || n.ok === false) break;
+    const m2 = S.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+    m2.maxHp = m2.hp;
+    n.adjustMe(m2);
+    if (m2.mods.openKill) openKillBattles++;
+    T.reportBattle('endless', n.token, true, 1, null);
+  }
+  assert.equal(openKillBattles, 3, '限次 3 → 前三场都是秒杀场，第四场不该再有 openKill');
+  assert.equal((T._debugRun('endless').limited || []).some((x) => x.id === 'E17'), false, '限次用完即走');
+
+  /* 不降权：就算同时持有 2 份（模拟）权重也不变；对照组终焉烙印（C49）会按 0.88^(n−1) 衰减 */
+  const run = T._debugRun('endless');
+  run.limited = [{ id: 'E17', stacks: 1, uses: 3, on: true, uid: 1, at: 1 },
+    { id: 'E17', stacks: 1, uses: 3, on: true, uid: 2, at: 2 }];
+  assert.equal(T.buffWeightOf(run, 'E17'), 1, '持有 2 份时权重仍是 1（不降权）');
+  run.limited = [{ id: 'C49', stacks: 1, uses: 1000, on: true, uid: 1, at: 1 },
+    { id: 'C49', stacks: 1, uses: 1000, on: true, uid: 2, at: 2 },
+    { id: 'C49', stacks: 1, uses: 1000, on: true, uid: 3, at: 3 }];
+  assert.ok(T.buffWeightOf(run, 'C49') < 1, '对照：终焉烙印（C49）持有 3 份会降权：' + T.buffWeightOf(run, 'C49'));
+
+  /* 调试台总览要能写出这条效果（buffEffectLines） */
+  run.limited = [{ id: 'E17', stacks: 1, uses: 3, on: true, uid: 9, at: 9 }];
+  const rep = T.debugBuffReport('endless');
+  assert.ok(rep && rep.ok, '增益总览应当读得到');
+  assert.ok(rep.effects.some((row) => /假如我直接赢/.test(row[0])), '效果清单里要有它：' + JSON.stringify(rep.effects));
+});
+
+test('需求135：无尽塔增益介绍补全 —— 每条都写明「最多叠几层 / 唯一 / 无限」', () => {
+  const c = setup();
+  const TD = c.TowerData;
+  const note = (id) => TD.stackNote(TD.BUFF_BY_ID[id]);
+  const desc = (id) => TD.descOf(TD.BUFF_BY_ID[id], 'endless');
+
+  /* ① 数据层：口径与 stackCap 一致 */
+  assert.equal(note('C26'), '可无限叠加', 'C26 蛮力：可无限叠加');
+  assert.equal(note('C27') && note('C28') && note('C29'), '可无限叠加', 'C27~C29 也是无限叠加');
+  assert.equal(note('C03'), '最多叠 3 层', 'C03 猎侠者：stackable 无 maxStacks → 同栏 3 层');
+  assert.equal(note('C14'), '最多叠 2 层，拿满后本局不再出现', 'C14 涅槃：maxStacks 2 + noRestack');
+  assert.equal(note('C50'), '最多叠 3 层，拿满后本局不再出现', 'C50 抉择扩充：3 层 + noRestack');
+  assert.equal(note('C59'), '最多叠 3 层，拿满后本局不再出现', 'C59 门庭若市：3 层 + noRestack');
+  assert.equal(note('C54'), '最多叠 2 层', 'C54 越战越勇：2 层');
+  assert.equal(note('C04'), '同名唯一，只有 1 层', 'C04 生命源泉：unique');
+  assert.equal(note('C36'), '同名最多 1 份，一局只可能拿到一次', 'C36 挥金如土：oncePerRun');
+  assert.equal(note('C55'), '同名唯一，只有 1 层', 'C55 后发制人：noRestack 且 cap=1');
+  assert.equal(note('C58'), '同名唯一，只有 1 层', 'C58 豪掷千金：noRestack 且 cap=1');
+  assert.equal(note('C01'), '不叠层：每份占一个新栏位', 'C01 这类普通永久件：同名多份 = 多栏位');
+  assert.equal(note('C49'), '可无限叠加', 'C49 终焉烙印：无限叠加（份数越多越难再出）');
+  assert.equal(note('C52'), '可无限叠加', 'C52 涌泉烙印：无限叠加');
+  assert.equal(note('C39'), '同名唯一，用尽或损毁后才可能再获得', '易碎烙印：损毁也要写进去');
+  assert.equal(note('E05'), '同名唯一，用尽后才可能再获得', '限次类：用完才可能再获得');
+  assert.equal(note('E16'), '同名唯一，用尽后才可能再获得', 'E16 也一样');
+  assert.equal(note('E14'), '可重复获得，效果可累积', 'E14 讨价还价：可重复获得');
+  assert.equal(note('N01'), '', '挑战塔专属（不在无尽体系里）不加叠层说明');
+
+  /* ② 展示层：descOf 每条无尽增益都带叠层说明，且不再出现双括号
+   *（即时类不做叠层，只有可重复获得的才补一句）。 */
+  const list = TD.BUFFS.filter((b) => TD.hasTag(b, 'endless') && !TD.hasTag(b, 'hidden'));
+  assert.ok(list.length > 70, '无尽增益数量应当 > 70：' + list.length);
+  for (const b of list) {
+    const d = TD.descOf(b, 'endless');
+    if (b.kind !== 'instant') {
+      assert.ok(d.includes('（') && /（[^（）]*）$/.test(d), b.id + ' 的介绍末尾应当有叠层说明：' + d);
+    }
+    assert.ok(!/（[^（）]*（/.test(d), b.id + ' 不该出现嵌套括号：' + d);
+  }
+  assert.equal(desc('C26'), '攻击 +20%（可无限叠加）', 'C26 卡面');
+  assert.equal(desc('C50'), '战斗获得的选择项 +1（最多叠 3 层，拿满后本局不再出现）', 'C50 卡面');
+  assert.match(desc('C51'), /同名唯一，只有 1 层/, 'C51 天命所归：unique');
+
+  /* ③ 旧文案里手写的层数已经搬进 stackNote（不重复、不脱节） */
+  assert.ok(!/可叠 \d 层|最多 \d 层|不可叠加/.test(TD.BUFF_BY_ID.C50.desc + TD.BUFF_BY_ID.C51.desc +
+    TD.BUFF_BY_ID.C54.desc + TD.BUFF_BY_ID.C59.desc), '这 4 条的层数说明应当由 stackNote 统一补，不再手写');
+});
+
+test('需求136：挑战塔主界面显示环境词缀；难度曲线封顶（无尽塔不封顶）', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower, S = c.State;
+  const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+
+  /* ① 主界面：挑战塔的「进行中」那一屏要有环境面板 + 三侠削弱面板 */
+  const at = uiSrc.indexOf('function openTower(');
+  assert.ok(at > 0, '找不到 openTower');
+  const body = uiSrc.slice(at, uiSrc.indexOf('【U7】', at));
+  assert.ok(/envPanelHtml\(run, \{ label: '当前环境' \}\)/.test(body), '挑战塔主界面要画环境面板：' + body.slice(0, 400));
+  assert.ok(/debuffPanel\(run\.debuffs\)/.test(body), '挑战塔主界面要保留三侠削弱面板');
+  assert.ok(/carryBar\(run\.curHp/.test(body), '血量条不能被挤掉');
+  assert.ok(!/无尽挑战塔 · 第/.test(body), '挑战塔的标题不该写成「无尽挑战塔」');
+  assert.match(body, /挑战塔 · 第/, '未开局那一屏的标题应当是「挑战塔 · 第 N 层」');
+
+  /* ② 挑战塔确实会吃到环境（老行为：环境与塔共用 reportBattle / nextBattle） */
+  c.State.state().props[23] = 99;
+  T._debugSetLayer(19);
+  assert.ok(T.startTowerRun().ok, '应当能开挑战塔');
+  const run = T._debugRun('tower');
+  run.env = [{ id: 'thorns', left: 5, values: { thornsPct: 0.15 } }];
+  run.envRolled = true;
+  run.choices = null; run.phase = null;
+  const nx = T.nextBattle('tower');
+  assert.ok(nx && nx.ok !== false, '应当能开战：' + ((nx && nx.msg) || ''));
+  /* 环境是在 adjustMe 那一刻写进敌我双方的（与实战同一条路径），所以必须先 adjustMe 再读 foe.mods。 */
+  const me = c.State.genAI(70, '', { levelJitter: 0, gearSelfLevel: true });
+  me.maxHp = me.hp;
+  nx.adjustMe(me);
+  assert.equal(Number(nx.foe.mods && nx.foe.mods.thornsPct), 0.15, '环境要真的作用在挑战塔的敌人身上');
+  /* 界面读的是 towerInfo().run —— 它必须把环境一起给出来（否则面板只会显示「当前没有环境词缀」）。 */
+  const info = T.towerInfo();
+  assert.ok(Array.isArray(info.run.env) && info.run.env.length === 1, 'towerInfo 要带上环境：' + JSON.stringify(info.run.env));
+  assert.equal(info.run.env[0].id, 'thorns', '环境 id');
+  assert.equal(info.run.env[0].left, 5, '剩余场数');
+  assert.match(String(info.run.env[0].text || ''), /反弹/, '要带上渲染好的文案：' + info.run.env[0].text);
+  T.abandon('tower');
+
+  /* ③ 难度曲线：**挑战塔封顶** —— 第 32 层与第 40 层的同名敌人血量完全相同 */
+  const towerHpAt = (layer) => {
+    const cc = setup();
+    const TT = cc.Tower;
+    TT._debugSetLayer(layer - 1);
+    assert.ok(TT.startTowerRun().ok, '挑战塔应当能开到第 ' + layer + ' 层');
+    const rr = TT._debugRun('tower');
+    rr.layer = layer;
+    rr.plan = [{ kind: 'hero', anim: 'tl' }];       // 固定同一个敌人，只比较层数带来的成长
+    rr.idx = 0; rr.choices = null; rr.phase = null;
+    const n2 = TT.nextBattle('tower');
+    assert.ok(n2 && n2.ok !== false, '应当能开战');
+    return Math.round(n2.foe.maxHp || n2.foe.hp);
+  };
+  assert.equal(TD.TOWER_MULT_CAP_LAYER, 30, '段位倍率的封顶层写在 data 里');
+  assert.equal(TD.TOWER_LEVEL_CAP, 70, '目标等级上限 = 玩家满级');
+  assert.equal(TD.towerMult(30), TD.towerMult(31), '第 30 层起段位倍率不再涨');
+  assert.equal(TD.towerMult(99), TD.towerMult(30), '再深也不涨');
+  assert.equal(TD.towerLevel(31), 70, '第 31 层起目标等级封顶 70');
+  assert.equal(TD.towerLevel(99), 70, '再深也封顶');
+  assert.equal(TD.towerGold(34), TD.towerGold(99), '通关金松果第 34 层起封顶');
+  assert.equal(TD.gearTierCap(20), 3, '第 20 层起套装档位封顶');
+  assert.equal(TD.gearTierCap(99), 3, '再深也是紫装档');
+  const hp32 = towerHpAt(32), hp40 = towerHpAt(40);
+  assert.equal(hp40, hp32, '挑战塔第 40 层的敌人血量必须与第 32 层一致（封顶）：' + hp32 + ' vs ' + hp40);
+
+  /* ④ 难度曲线：**无尽塔不封顶** —— 同一条 depth 曲线继续涨（敌人血量随层数上升） */
+  const endlessHpAt = (layer) => {
+    const cc = setup();
+    const TT = cc.Tower;
+    TT._debugSetEndlessLayer(layer);
+    const rr = TT._debugRun('endless');
+    rr.plan = [{ kind: 'hero', anim: 'tl' }];
+    rr.idx = 0; rr.choices = null; rr.phase = null;
+    const n2 = TT.nextBattle('endless');
+    assert.ok(n2 && n2.ok !== false, '应当能开战');
+    return Math.round(n2.foe.maxHp || n2.foe.hp);
+  };
+  assert.ok(TD.endlessDepthMul(40) > 1.3, '无尽塔 30 层后开始叠加深度曲线：' + TD.endlessDepthMul(40).toFixed(3));
+  assert.ok(TD.endlessDepthMul(60) > TD.endlessDepthMul(40) * 2, '而且没有上限：40→60 层翻倍以上');
+  const hpE40 = endlessHpAt(40), hpE60 = endlessHpAt(60);
+  assert.ok(hpE60 > hpE40 * 2, '无尽塔第 60 层的敌人血量应当远高于第 40 层：' + hpE40 + ' → ' + hpE60);
+});
+
+test('需求137：自愿支持作者 —— 系统页入口 / 30 级一次性提示 / 打开系统浏览器', () => {
+  const c = setup();
+  const S = c.State;
+  const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
+  const mainSrc = fs.readFileSync(path.join(ROOT, 'js', 'main.js'), 'utf8');
+  const rustSrc = fs.readFileSync(path.join(ROOT, 'src-tauri', 'src', 'lib.rs'), 'utf8');
+
+  /* ① 链接只有一个来源（main.js 的 Main.SUPPORT），并且是爱发电那个地址 */
+  assert.match(mainSrc, /url: 'https:\/\/ifdian\.net\/a\/Charlespkuer'/, '支持链接要写死成爱发电地址');
+  assert.match(mainSrc, /function openExternal\(/, '要有一个统一的「打开外部链接」出口');
+  assert.match(mainSrc, /function openSupport\(/, '还要有 openSupport 便捷入口');
+  assert.match(mainSrc, /core\.invoke\('open_external'/, '安装版 / 安卓要走 Rust 命令');
+  assert.match(mainSrc, /\/__open\?url=/, '轻壳模式要走内置服务器的 /__open');
+  assert.match(mainSrc, /window\.open\(url, '_blank'/, '浏览器 / 便携版退回 window.open');
+  assert.match(mainSrc, /SUPPORT, openExternal, openSupport/, '三个入口都要导出到 window.Main');
+
+  /* ② 系统页最上方：支持面板 + 按钮（源码口径） */
+  const sysAt = uiSrc.indexOf('function openSystem()');
+  assert.ok(sysAt > 0, '找不到 openSystem');
+  const sysBody = uiSrc.slice(sysAt, uiSrc.indexOf('function ', sysAt + 10));
+  assert.match(sysBody, /page\('system','system',supportPanelHtml\(\)\+/, '支持面板要放在系统页最上方');
+  assert.match(sysBody, /data-action="support"/, '按钮要挂 data-action=support');
+  assert.match(sysBody, /openSupportModal\(\)/, '按钮要打开支持弹窗');
+  assert.match(uiSrc, /function supportPanelHtml\(\)/, '要有面板构造器');
+  assert.match(uiSrc, /喜欢这个复刻版/, '面板文案');
+  const cssSrc = fs.readFileSync(path.join(ROOT, 'css', 'classic-refine.css'), 'utf8');
+  assert.match(cssSrc, /\.support-panel\{/, '面板样式');
+  assert.match(cssSrc, /\.support-input\{/, '「复制链接」输入框样式');
+
+  /* ③ 30 级一次性提示：只在升级奖励处理完之后弹，且只弹一次（落存档） */
+  assert.match(uiSrc, /function maybeSupportPrompt\(\)/, '要有一次性提示入口');
+  assert.match(uiSrc, /if \(\$\('\.classic-modal-overlay'\)\) return false;/, '有别的弹窗时先不打扰');
+  assert.match(uiSrc, /State\.supportPromptTake\(\)/, '取提示权要原子（落存档）');
+  const promptAt = uiSrc.indexOf('function promptLevelUpChoices()');
+  const promptBody = uiSrc.slice(promptAt, uiSrc.indexOf('\n  }', promptAt));
+  assert.match(promptBody, /maybeSupportPrompt\(\);/, '必须在三选一 / 属性点都处理完之后才提示');
+  assert.match(uiSrc, /openSupportModal,maybeSupportPrompt,supportPanelHtml/, '三个函数都要挂到 UI.classic（测试与调试可直呼）');
+
+  /* ④ 存档口径：到 30 级埋点 → 取一次 → 不再提示；reset 只给调试用 */
+  const st = c.State.state();
+  st.supportPrompt = false; st.supportPromptShown = false;
+  assert.equal(S.supportPromptPending(), false, '没到 30 级时不提示');
+  st.level = 29; st.exp = 0;                     // setup 里默认 70 级，这里回到 29 级再升一级
+  S.gainExp(c.GData.nextExp(29));
+  assert.equal(st.level, 30, '应当刚好升到 30 级');
+  assert.equal(S.supportPromptPending(), true, '到 30 级要埋下待提示标记');
+  assert.equal(S.supportPromptTake(), true, '第一次取得到提示权');
+  assert.equal(S.supportPromptPending(), false, '取过之后不再是待提示');
+  assert.equal(S.supportPromptTake(), false, '不会重复提示');
+  S.supportPromptReset();
+  assert.equal(S.supportPromptPending(), true, '调试可以把它恢复成待提示');
+  assert.equal(S.SUPPORT_LEVEL, 30, '提示等级写在 State 里');
+  assert.match(fs.readFileSync(path.join(ROOT, 'js', 'state.js'), 'utf8'), /if \(S\.level >= SUPPORT_PROMPT_LEVEL\) S\.supportPrompt = true;/,
+    'gainExp 里要埋点');
+
+  /* ⑤ 真跑一遍 openExternal 的四条分支（把源码切出来在 vm 里跑） */
+  const grab = (head) => {
+    const i = mainSrc.indexOf(head);
+    assert.ok(i >= 0, '找不到 ' + head);
+    let k = mainSrc.indexOf('{', i), depth = 0, e = k;
+    while (e < mainSrc.length) {
+      const ch = mainSrc[e];
+      if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) break; }
+      e++;
+    }
+    return mainSrc.slice(i, e + 1);
+  };
+  const code = grab('function viaOwnLocalServer()') + '\n' + grab('function plainWindowOpen(url)') + '\n' +
+    grab('function openExternal(url)') + '\n' + 'out = openExternal(URL);';
+  const runCase = (env) => {
+    const opened = [], invoked = [];
+    const ctx = {
+      URL: 'https://ifdian.net/a/Charlespkuer',
+      window: Object.assign({ location: env.location, __TAURI__: env.tauri }, env.win || {}),
+      fetch: env.fetch,
+      Promise, encodeURIComponent, console,
+    };
+    /* 桩：返回一个对象 = 开成功；返回 null = 被弹窗拦截（和真实浏览器一致）。 */
+    ctx.window.open = (u) => { opened.push(u); return env.openResult === undefined ? {} : env.openResult; };
+    require('node:vm').runInNewContext(code, ctx);
+    return { result: ctx.out, opened, invoked };
+  };
+  // ① 安装版 / 安卓：tauri.localhost + IPC → 走 open_external 命令
+  const invoked = [];
+  const appCase = runCase({
+    location: { hostname: 'tauri.localhost', port: '' },
+    tauri: { core: { invoke: (cmd, args) => { invoked.push([cmd, args]); return Promise.resolve(); } } },
+    fetch: undefined,
+  });
+  return Promise.resolve(appCase.result).then((ok) => {
+    assert.equal(ok, true, '安装版应当成功');
+    assert.equal(invoked[0][0], 'open_external', '要走 Rust 的 open_external 命令');
+    assert.equal(invoked[0][1].url, 'https://ifdian.net/a/Charlespkuer', '参数是支持链接');
+    /* ② 装了 opener 插件时优先用它 */
+    const viaPlugin = [];
+    const pluginCase = runCase({
+      location: { hostname: 'tauri.localhost', port: '' },
+      tauri: { opener: { openUrl: (u) => { viaPlugin.push(u); return Promise.resolve(); } },
+        core: { invoke: () => { throw new Error('不该走 invoke'); } } },
+      fetch: undefined,
+    });
+    return Promise.resolve(pluginCase.result).then(() => {
+      assert.equal(viaPlugin.length, 1, '有 opener 插件时应当直接用插件');
+      /* ③ 轻壳模式（Tauri + 本地服务器）：IPC 走不通，必须走 /__open（普通 HTTP） */
+      let hit = 0;
+      const shellCase = runCase({
+        location: { hostname: '127.0.0.1', port: '8080' },
+        tauri: { core: { invoke: () => { throw new Error('轻壳模式不该走 IPC'); } } },
+        fetch: (u) => { hit++; assert.match(u, /^\/__open\?url=/, '要请求 /__open'); return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) }); },
+      });
+      return Promise.resolve(shellCase.result).then((ok3) => {
+        assert.equal(ok3, true, '轻壳模式 /__open 成功');
+        assert.equal(hit, 1, '轻壳模式要走一次 /__open');
+        assert.equal(shellCase.opened.length, 0, '成功了就不该再 window.open');
+        let hit2 = 0;
+        const missCase = runCase({
+          location: { hostname: '127.0.0.1', port: '8080' },
+          tauri: { core: { invoke: () => { throw new Error('轻壳模式不该走 IPC'); } } },
+          fetch: () => { hit2++; return Promise.resolve({ ok: false, json: () => Promise.reject(new Error('404')) }); },
+        });
+        return Promise.resolve(missCase.result).then((ok4) => {
+          assert.equal(ok4, true, '旧 exe 没有 /__open 时退回 window.open');
+          assert.equal(hit2, 1, '试过一次 /__open');
+          assert.equal(missCase.opened.length, 1, '要真的调用 window.open');
+          /* ④ 便携版 / 网页版：不探测 /__open（会丢掉点击手势），直接同步 window.open */
+          const portableCase = runCase({
+            location: { hostname: '127.0.0.1', port: '8080' },
+            fetch: () => { throw new Error('便携版不该去请求 /__open'); },
+          });
+          const browserCase = runCase({ location: { hostname: 'example.com', port: '' } });
+          const blockedCase = runCase({ location: { hostname: 'example.com', port: '' }, openResult: null });
+          return Promise.all([Promise.resolve(portableCase.result), Promise.resolve(browserCase.result), Promise.resolve(blockedCase.result)]).then(([p1, b1, b2]) => {
+            assert.equal(p1, true, '便携版（本地服务器但没有 Tauri）直接 window.open');
+            assert.equal(portableCase.opened.length, 1, '便携版要 window.open 一次');
+            assert.equal(b1, true, '浏览器里 window.open 成功');
+            assert.equal(b2, false, '被浏览器拦下时要返回 false（界面据此显示「复制链接」）');
+            assert.match(uiSrc, /function showSupportFallback\(/, '要有「复制链接」兜底弹窗');
+            assert.match(uiSrc, /function copyText\(/, '要有复制文本');
+            /* ⑤ Rust 侧：轻壳的内置服务器要有 /__open，安装版/安卓要有 open_external 命令 */
+            assert.match(rustSrc, /if path == "\/__open"/, '内置服务器要加 /__open 路由');
+            assert.match(rustSrc, /fn open_api\(query: &str, out: &mut TcpStream\)/, '要有 /__open 的处理函数');
+            assert.match(rustSrc, /fn open_external\(url: String\) -> Result<\(\), String>/, '要有 open_external 命令');
+            assert.match(rustSrc, /generate_handler!\[save_path, save_meta, save_read, save_write, open_external\]/,
+              '命令要注册进 invoke_handler');
+            assert.match(rustSrc, /fn spawn_opener\(url: &str\)/, '要有跨平台的系统打开器');
+            assert.match(rustSrc, /android\.intent\.action\.VIEW/, '安卓走 Intent');
+            assert.match(rustSrc, /!\url\.contains\(\[/, '链接要过滤 shell 元字符');
+          });
+        });
+      });
+    });
+  });
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {
-    try { fn(); console.log('PASS ' + name); }
+    /* await：个别用例（例如「打开外部链接」的分支检查）内部有 Promise，
+     * 同步用例 await 一个普通返回值也没影响。 */
+    try { await fn(); console.log('PASS ' + name); }
     catch (e) { failed++; console.log('FAIL ' + name + ' | ' + (e && e.message)); if (process.env.SSDZ_VERBOSE) console.log(e && e.stack); }
   }
   console.log(failed ? `\n${failed} 项失败` : `\n全部通过（${cases.length} 项）`);

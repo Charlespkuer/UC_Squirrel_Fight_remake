@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /* ============================================================
- * tools/serve.js — 本地静态服务器（零依赖）
+ * scripts/serve.js — 本地静态服务器（零依赖）
  *
- * 用法: node tools/serve.js [端口] [--no-save]
+ * 用法: node scripts/serve.js [端口] [--no-save]
  * 然后浏览器打开 http://127.0.0.1:8080
  *
  * 说明：直接双击 index.html（file://）也能玩，但部分浏览器会
@@ -18,7 +18,7 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');   // serve.js 在 scripts/ 里，游戏根是上一层
 const ARGS = process.argv.slice(2);
-// 端口可以写在任意位置：node tools/serve.js --no-save 8080
+// 端口可以写在任意位置：node scripts/serve.js --no-save 8080
 // 显式传 0 = 让系统分配一个空闲端口（自动化测试用；启动日志里会打印真实端口）。
 const PORT_ARG = ARGS.find((a) => /^[0-9]+$/.test(a));
 const PORT = PORT_ARG === undefined ? 8080 : Number(PORT_ARG);

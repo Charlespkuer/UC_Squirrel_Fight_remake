@@ -102,7 +102,7 @@
   const numeral = (n) => String(n == null ? '' : n).replace(/[^0-9%×/.,:+-]/g, '');
   const numStretch = () => (window.Debug && Debug.numberStretch ? Debug.numberStretch() : 1.25);
   // 字距：字形宽度保持不变（沿用上面的横向拉伸），只把推进距离收紧。
-  // 图集里每个数字左右各有 2~7px 空白，收到 0.86 仍然留得住间隙（见 tools/apk-audit/num-ink.cjs）。
+  // 图集里每个数字左右各有 2~7px 空白，收到 0.86 仍然留得住间隙。
   const NUM_ADVANCE = 0.86;
 
   function renderNumbers(root) {
@@ -1139,7 +1139,12 @@
   function promptLevelUpChoices() {
     if($('.ws-choice-dialog'))return null;
     if(typeof State.pendingWS==='function'&&State.pendingWS()>0)return wsChoiceDialog();
-    return promptFreePoints();
+    const r = promptFreePoints();
+    if (r) return r;
+    /* 升级流程全部处理完了：这时才是「到 30 级 → 自愿支持作者」的最佳时机，
+     * 不会插在三选一 / 属性点前面（见 maybeSupportPrompt，取提示权是一次性的）。 */
+    maybeSupportPrompt();
+    return null;
   }
   /* ============================================================
    * 【UC12】装备：列表/详情/出售/镶嵌/融合入口
@@ -1764,7 +1769,8 @@
         resolutions.map((r)=>r.label).join(' → ')+'。画面按这一档等比缩放并居中；窗口装不下时自动按窗口缩小，不会溢出。')+
       sysBtn(st.fullscreen?'全面屏：开':'全面屏：关','fullscreen','','开启后画面铺满整个窗口（不留黑边，窗口比例差得多时会有轻微拉伸），同时尝试进入系统全屏；按 Esc 可退出系统全屏。')+
       '</div>';
-    const p=page('system','system',grid+slider+saveFilePanel()+syncPanel());
+    const p=page('system','system',supportPanelHtml()+grid+slider+saveFilePanel()+syncPanel());
+    $('[data-action="support"]',p).onclick=()=>openSupportModal();
     $('[data-action="sound"]',p).onclick=()=>{Main.setMuted(!mute);openSystem();};
     $('[data-action="save-write"]',p).onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};
     $('[data-action="save-load"]',p).onclick=loadSaveDialog;
@@ -1940,8 +1946,101 @@
       else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
     }
   });
+  /* ============================================================
+   * 【UC18】自愿支持作者（系统页入口 + 30 级一次性提示）
+   *
+   * 这个复刻版完全免费：没有内购、没有广告，也**不会拿支持换任何游戏内好处**。
+   * 链接与「打开系统浏览器」的统一实现在 main.js（`Main.SUPPORT` / `Main.openExternal`）：
+   *   · 轻壳模式 → 内置服务器的 `/__open`（Tauri 的 ACL 不允许远端来源调 IPC）
+   *   · 安装版 / 安卓 → Rust 命令 `open_external`
+   *   · 便携版 / 浏览器 → `window.open`
+   * 全部失败时退到「复制链接」兜底，玩家手动粘贴也能支持。
+   * ============================================================ */
+  function supportMeta() {
+    const s = (window.Main && Main.SUPPORT) || {};
+    return { url: s.url || 'https://ifdian.net/a/Charlespkuer', label: s.label || '爱发电' };
+  }
+  /** 复制文本：优先 Clipboard API，失败退回「选中 + execCommand」。 */
+  function copyText(text) {
+    const okMsg = '链接已复制，去浏览器里粘贴打开就行';
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => toast(okMsg), () => toast('复制失败，请手动选中复制'));
+        return true;
+      }
+    } catch (e) { /* 落回 execCommand */ }
+    try {
+      const el = document.createElement('textarea');
+      el.value = text; el.setAttribute('readonly', 'readonly');
+      el.style.position = 'fixed'; el.style.left = '-9999px'; el.style.opacity = '0';
+      document.body.appendChild(el); el.select(); el.setSelectionRange(0, el.value.length);
+      document.execCommand('copy'); el.remove(); toast(okMsg); return true;
+    } catch (e) { toast('复制失败，请手动选中复制'); return false; }
+  }
+  /** 打开支持链接（失败时给「复制链接」兜底弹窗）。 */
+  function openSupportLink(url) {
+    const u = url || supportMeta().url;
+    const fail = () => showSupportFallback(u);
+    let p;
+    try { p = (window.Main && Main.openExternal) ? Main.openExternal(u) : Promise.resolve(false); }
+    catch (e) { p = Promise.resolve(false); }
+    return Promise.resolve(p).then((ok) => { if (!ok) fail(); return !!ok; }, () => { fail(); return false; });
+  }
+  /** 「没能自动打开浏览器」的兜底：把链接摊出来，一键复制。 */
+  function showSupportFallback(url) {
+    const box = modal('用浏览器打开', '<div class="support-box"><p>没能自动打开浏览器 —— 复制下面的链接，' +
+      '在浏览器地址栏粘贴打开即可：</p><p><input class="support-input" readonly value="' + esc(url) +
+      '" aria-label="支持作者链接"></p></div>',
+      [{ label: '复制链接', cls: 'gold', close: false, run: () => copyText(url) },
+        { label: '知道了', cls: 'muted' }], { small: true });
+    const input = $('.support-input', box.element);
+    if (input) { input.focus(); input.select(); }
+    return box;
+  }
+  /**
+   * 「支持作者」弹窗。`opts.fromLevel` = 30 级那次一次性提示（文案不同）。
+   * 两个入口共用：系统页顶部的按钮、30 级提示。
+   */
+  function openSupportModal(opts) {
+    const o = opts || {};
+    const meta = supportMeta();
+    const lead = o.fromLevel
+      ? '你已经 30 级了 —— 谢谢你玩到这里！'
+      : '这个复刻版完全免费：没有内购、没有广告。';
+    const body = '<div class="support-box">' +
+      '<p class="support-lead">' + esc(lead) + '</p>' +
+      '<p>如果它让你找回了一点当年的感觉，可以<b>自愿</b>请作者喝杯咖啡；' +
+      '不打赏完全不影响游戏内容与平衡，也不解锁任何东西。</p>' +
+      '<p class="support-link">' + esc(meta.label) + '：<span class="support-url">' + esc(meta.url) + '</span></p>' +
+      '</div>';
+    return modal('支持作者', body, [
+      { label: '用浏览器打开' + meta.label, cls: 'gold', run: () => openSupportLink(meta.url) },
+      { label: '以后再说', cls: 'muted' },
+    ], { small: true });
+  }
+  /**
+   * 30 级的一次性提示。**只在没有别的弹窗时**触发（升级奖励 / 三选一 / 属性点都处理完之后），
+   * 取提示权是原子的：取到就立刻落存档，不会重复打扰。
+   */
+  function maybeSupportPrompt() {
+    if (!window.State || typeof State.supportPromptTake !== 'function') return false;
+    if ($('.classic-modal-overlay')) return false;          // 有别的弹窗：先不打扰
+    if (!State.supportPromptTake()) return false;
+    openSupportModal({ fromLevel: true });
+    return true;
+  }
+  /** 系统页最上方那一块：自愿支持作者。 */
+  function supportPanelHtml() {
+    const meta = supportMeta();
+    return '<div class="support-panel">' +
+      '<div class="support-panel-text"><b>喜欢这个复刻版？</b>' +
+      '<span>游戏完全免费、没有内购；如果它让你找回了一点当年的感觉，可以自愿支持作者（不影响任何游戏内容）。</span></div>' +
+      '<button type="button" class="uc-button gold support-btn" data-action="support" title="用系统浏览器打开' +
+      esc(meta.label) + '">支持作者</button></div>';
+  }
+
   window.UI={...legacy,renderHome,drawHomeHud,drawActor,runAction,currentScreen:()=>screen,refreshHome,renderNumbers,refreshHeader,
-    classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog},
+    classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog,openSupportModal,maybeSupportPrompt,supportPanelHtml,copyText,supportMeta},
     weaponIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('weapon',id)+'">',
     skillIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('skill',id)+'">',
     propIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('prop',id)+'">'};

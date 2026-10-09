@@ -116,7 +116,7 @@ src-tauri/
 ├─ tauri.conf.json         轻壳配置：frontendDist = empty（只放一个几百字节的「没找到游戏目录」提示页）
 ├─ tauri.bundle.conf.json  安装包配置：把 frontendDist 覆盖成临时的 web/
 ├─ tauri.windows.conf.json Windows 目标固定 nsis（MSI 会在 WiX light.exe 上失败）
-├─ app-icon.png            1024×1024 透明背景松鼠（由 refine-classic-icons.py 生成）
+├─ app-icon.png            1024×1024 透明背景松鼠（设计稿导出，随仓库提供）
 ├─ package.json            app / app:clean / installer / dev / icon 脚本
 ├─ src/main.rs             迷你文件服务器 + 找游戏目录 + 存档命令 + 开窗口
 ├─ empty/index.html        只有几百字节：找不到游戏目录时显示的提示页
@@ -137,7 +137,7 @@ src-tauri/
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'
 src-tauri\dist\squirrel_fight.exe
 # 2) 另开终端
-node tools/research/tauri-inspect.cjs 9222 "location.href + ' | ' + State.fileInfo().mode + ' | ' + State.fileInfo().path"
+# 需要查运行时状态时，用 Chrome/Edge 的 devtools 协议连 9222 端口自行检查
 # → http://127.0.0.1:1362/index.html | file | save/progress.json
 ```
 

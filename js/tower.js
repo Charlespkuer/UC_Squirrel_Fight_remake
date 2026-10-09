@@ -728,11 +728,12 @@
       weaponBoostReflectImmune: 0, weaponBoostFatigueMul: 0, lowHpFinalMul: 0,
       openerPowerMul: 0, openerRounds: 0, fatiguePowerMul: 0, dodgeMul: 0,
       roundStatPct: 0, catchUpPct: 0, roundMaxHpMul: 0, firstDodge: 0,
-      /* 2026-10 新增（N16 战意沸腾 / N17 血蚀印记）：
+      /* 2026-10 新增（N16 战意沸腾 / N17 血蚀印记 / E17 假如我直接赢）：
        *   startStatFlat    战斗开始时固定 力/敏/速 +N
        *   startMaxHpFlat   战斗开始时生命上限 +N（固定值）
-       *   enemyHpDrainPct  每回合开始时对敌人造成其**当前生命** N% 的伤害 */
-      startStatFlat: 0, startMaxHpFlat: 0, enemyHpDrainPct: 0 };
+       *   enemyHpDrainPct  每回合开始时对敌人造成其**当前生命** N% 的伤害
+       *   openKill         开战即把敌方生命清零（本场直接判胜；不触发敌方死亡豁免） */
+      startStatFlat: 0, startMaxHpFlat: 0, enemyHpDrainPct: 0, openKill: 0 };
     eachBuff(run, (buff, stacks) => {
       const m = buff.mods, k = stacks * g;
       if (m.powerMul) agg.powerMul += m.powerMul * k;
@@ -787,6 +788,8 @@
       if (m.startStatFlat) agg.startStatFlat += m.startStatFlat * k;
       if (m.startMaxHpFlat) agg.startMaxHpFlat += m.startMaxHpFlat * k;
       if (m.enemyHpDrainPct) agg.enemyHpDrainPct += m.enemyHpDrainPct * k;
+      /* E17「假如我直接赢」：纯开关（叠多少份都是「开战即胜」），不参与增幅水晶乘区。 */
+      if (m.openKill) agg.openKill = 1;
       /* 狂怒：低血时攻/敏/速同时提升；阈值取所有来源里的最高值（同一套 lowHpAt）。 */
       /* 反噬豁免：免疫一切反伤（限次类，战斗内生效）。 */
       if (m.reflectImmune) agg.reflectImmune = Math.max(agg.reflectImmune, Number(m.reflectImmune) || 0);
@@ -899,6 +902,7 @@
     if (a.startStatFlat) lines.push(['战意沸腾', '力/敏/速 +' + Math.round(a.startStatFlat)]);
     if (a.startMaxHpFlat) lines.push(['战意沸腾', '生命上限 +' + Math.round(a.startMaxHpFlat)]);
     if (a.enemyHpDrainPct) lines.push(['血蚀印记', '每回合抽 ' + pct(Math.min(1, a.enemyHpDrainPct)) + ' 当前生命']);
+    if (a.openKill) lines.push(['假如我直接赢', '开战即让敌方生命归零（本场直接判胜）']);
     if (a.enemyPowerDown) lines.push(['敌人攻击', pct(-a.enemyPowerDown)]);
     /* 空血上限是乘法叠加的，清单里显示**合并后的真实比例**：
      * 空的部分 / 最终上限，这样玩家看到的数字与战斗里的实际占比一致。 */
@@ -1190,7 +1194,7 @@
       for (const m of extra) if (!mech.includes(m)) mech.push(m);
     }
     const eliteMul = elite ? 1.2 : 1;   // 精英加成（x10 狂战）：作用在力量/敏捷/速度上
-    // 敌方数值：高血低攻（系数在 tower-data.js 里，带注释，方便 tower-tune 复调）
+    // 敌方数值：高血低攻（系数都在 tower-data.js 里，带注释，方便复调）
     // 力量单独用更低的系数，敏捷/速度维持原基准；血量抬高。
     const stat = (b, mul) => Math.max(1, Math.round(statBase * (mul || TD.FOE_STAT_MUL) * M * KM * b * eliteMul));
     const hero = entry.kind === 'hero';
@@ -1487,6 +1491,8 @@
         mods.enemyHpDrainPct = Math.min(1, Math.max(0, Number(agg.enemyHpDrainPct) || 0));
         mods.enemyHpDrainNote = '血蚀印记';
       }
+      /* 假如我直接赢（E17）：开战即让敌方生命归零（sim 的开局段结算）。 */
+      if (agg.openKill) mods.openKill = 1;
       /* 按武器次数结算的两条（疾风先手 / 先发制人 / 闪亮登场）。 */
       if (agg.weaponFreeUses) mods.weaponFreeUses = agg.weaponFreeUses;
       if (agg.weaponBoostUses) {
@@ -4454,6 +4460,18 @@
         curMaxHp: currentMaxHp(t.run), curHp: currentHp(t.run).hp, hpAbs: hpAbsOf(t.run), pot: t.run.pot, failedAt: t.run.failedAt == null ? null : t.run.failedAt,
         choices: t.run.choices ? t.run.choices.slice() : null,
         debuffs: (t.run.debuffs || []).slice(),
+        /* 环境词缀：挑战塔与无尽塔共用同一套环境（第 5 层起层内可能出现），
+         * 主界面要把它画出来（与无尽塔同一个 envPanelHtml），所以这里必须一起给出，
+         * 并且带上「本层摇到的实际数值」与渲染好的文案。 */
+        env: (t.run.env || []).map((x) => {
+          const def = D().ENDLESS_ENV_BY_ID[x.id] || { id: x.id, name: x.id, desc: '' };
+          const values = envValues(t.run, x);
+          const text = D().envText(def, values);
+          return Object.assign({}, def, {
+            left: x.left, values: values, text: text.text,
+            rangeText: D().envRangeText(def), mech: !!def.mech,
+          });
+        }),
         lastMaxHp: Math.max(0, Number(t.run.lastMaxHp) || 0),
         lastHp: Math.max(0, Number(t.run.lastHp) || 0),
         curMaxHp: currentMaxHp(t.run),
@@ -4937,7 +4955,7 @@
       return { ok: true, peaks: run.statPeaks };
     },
     /* 调试/探针用：把无尽对局直接挪到第 n 层（plan 一并重建，界面能正确显示
-     * 「当前遭遇的机制」，例如第 6 层的荆棘反伤）。截图页 tools/tower-ui-probe.html 用。 */
+     * 「当前遭遇的机制」，例如第 6 层的荆棘反伤）。 */
     /* 只读推进一层（测试用）：走真实 advanceLayer，因此会触发「30 层后每 2 层碎烙印失效」。 */
     _debugAdvanceLayer: () => {
       const e = endless();

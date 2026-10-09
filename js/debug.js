@@ -190,6 +190,12 @@
         if (window.UI && UI.refreshHeader) UI.refreshHeader();
         return '已重置：每日礼包、免费抽奖、天梯次数与限兑、每日任务、弟子日贡、刷新费用、体力计时';
       } },
+    { label: '重弹「支持作者」提示', note: '把 30 级那次「自愿支持作者」的一次性提示恢复成待提示：下一次首页刷新或升级奖励处理完之后会再弹一次（正式流程只在升到 30 级时弹一次）',
+      run() {
+        if (!(State.supportPromptReset && State.supportPromptReset())) return '当前版本没有这个接口';
+        if (window.UI && UI.classic && UI.classic.maybeSupportPrompt) UI.classic.maybeSupportPrompt();
+        return '已恢复支持作者提示（若首页没有立刻弹出，回一次首页或关掉当前弹窗即可）';
+      } },
   ];
 
   /** 彻底重置账号：清除武器与技能，回到全新开局。

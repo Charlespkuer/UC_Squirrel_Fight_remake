@@ -7,8 +7,8 @@
  *     this.fightingTimes == 340 + this.counter -> reward[2]
  *   with `this.counter = Math.round(Math.random() * 130)` set per battle, at 15fps.
  *   The original FightProps whitelist is ids {1,2,8,15,21,22,45,50}; the fragment
- *   ids 24/25/26 are NOT in it and are an explicit offline addition (see
- *   tools/research-floating-drops.md). Reward odds came from the unavailable
+ *   ids 24/25/26 are NOT in it and are an explicit offline addition.
+ *   Reward odds came from the unavailable
  *   server; this small pool is an explicit offline balance, separate from battle
  *   damage and stage loot. */ 
 

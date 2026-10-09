@@ -21,11 +21,27 @@
 
   /* ============================================================
    * 【D1】主塔公式 —— towerLevel / towerMult / towerGold
+   *
+   * **挑战塔的难度曲线是封顶的（用户口径 2026-10）**，三条轴各有一个上限：
+   *   · 目标等级 towerLevel：第 31 层起封顶 70 级（= 玩家满级）
+   *   · 段位倍率 towerMult：第 30 层起封顶（1.15 × 1.08 = ×1.242）
+   *   · 通关金松果 towerGold：第 34 层起封顶 88
+   * 再叠加**不随层数成长**的两项：套装档位 gearTierCap 第 20 层起封顶 3（紫装），
+   * 以及 buildFoe 里挑战塔的深度曲线恒为 1（`KM = 1`，只有无尽塔吃 endlessDepthMul）。
+   * 也就是说第 30 层之后，挑战塔只会换 boss 变体 / 套装外观，数值不再变强 ——
+   * 想核对这条口径跑 `tools/test-fixes-round.cjs` 的 `需求136`。
+   *
+   * 对照：**无尽塔不封顶** —— endlessMult 在 31 层封顶 ×10、endlessLevel 在 40 层封顶 70 级，
+   * 但 30 层之后另有一条无上限的 depth 曲线（endlessDepthMul，7%/层 → 50 层起 9%/层）。
    * ============================================================ */
 
-  function towerLevel(n) { return Math.min(70, Math.round(28 + 1.4 * (n - 1))); }
+  const TOWER_LEVEL_CAP = 70;        // 目标等级上限（= 玩家满级）
+  const TOWER_MULT_CAP_LAYER = 30;   // 段位倍率从这一层起不再增长
+  const TOWER_GOLD_CAP = 88;         // 通关金松果上限
+
+  function towerLevel(n) { return Math.min(TOWER_LEVEL_CAP, Math.round(28 + 1.4 * (n - 1))); }
   function towerMult(n) {
-    const m = Math.min(Math.max(1, n), 30);
+    const m = Math.min(Math.max(1, n), TOWER_MULT_CAP_LAYER);
     return (1 + 0.03 * Math.floor((m - 1) / 5)) * (1 + 0.04 * Math.floor((m - 1) / 10));
   }
   function towerGold(n) {
@@ -36,7 +52,7 @@
     if (n <= 10) return 30;
     if (n <= 15) return 38;
     if (n <= 20) return 48;
-    return Math.min(88, 48 + 3 * (n - 20));
+    return Math.min(TOWER_GOLD_CAP, 48 + 3 * (n - 20));
   }
   /** 层内逐场累积：前 battles-1 场各 floor(G/battles)，尾场补余数。 */
   function towerGoldShares(n, battles) {
@@ -1174,7 +1190,7 @@
      * 2026-10 用户口径：**背包里攒到 3 个之后就不再生成** —— 加 `noRestack`
      * （拿满 maxStacks 即出池，也不会再走「叠满开新栏位」的通用规则）。 */
     { id: 'C50', tags: ['endless', 'battle', 'shop', 'stackable', 'noRestack'], name: '抉择扩充', rarity: 1, kind: 'permanent', maxStacks: 3,
-      desc: '战斗获得的选择项 +1（最多 3 层）',
+      desc: '战斗获得的选择项 +1',
       mods: { choiceCount: 1 } },
     /* 减伤成长：每胜利一场，本局受到伤害再 −1%（上限 −25%）。
      * 与 C07（生命成长）/ C11（生命固定成长）/ C12（力敏速成长）同一族的「成长型」，
@@ -1202,7 +1218,7 @@
       desc: '每层战斗可复活一次；复活回复 50% 生命上限，本场力量、敏捷、速度 +50%',
       mods: { revivePct: 0.50, reviveStatMul: 0.50 } },
     { id: 'C51', tags: ['endless', 'battle', 'unique'], name: '天命所归', rarity: 3, kind: 'permanent', maxStacks: 1,
-      desc: '本局战斗奖励与商店的史诗/传奇出率 ×2、普通出率 ×0.5（不可叠加，拥有后本局不再出现）',
+      desc: '本局战斗奖励与商店的史诗/传奇出率 ×2、普通出率 ×0.5',
       mods: { rarityBoost: 1, epicMul: 2, legendMul: 2, commonMul: 0.5 } },
     { id: 'E01', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle', 'ops'], name: '立即进货', rarity: 2, kind: 'limited', uses: 1,
       desc: '下一场战斗结束后立即开启一次试炼商店，全部商品 7 折；若同时持有「steam大促」，两档折扣叠加为 3.5 折',
@@ -1214,6 +1230,14 @@
     { id: 'E16', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle', 'ops'], name: '铸币商队', rarity: 1, kind: 'limited', uses: 1,
       desc: '下一场战斗结束后立即生成 1 家铸币商店（若本场本该开出普通商店，则由它顶掉）',
       mods: { postBattleMintShop: 1 } },
+    /* E17「假如我直接赢」（2026-10 第十八批，用户口径）：**传奇 · 限次 3** 的纯战斗牌 ——
+     * 下一场战斗一开始就把敌方生命清零，本场直接判胜（`openKill`，见 sim.js 开局段）。
+     * 用户指定「用它平衡传奇限次池只剩终焉烙印（C49）的那种局面」，所以**故意不写
+     * repeatWeight / weightDivBy** —— 重复持有 / 重复获得都不会自我降权（其它传奇多多少少都降）。
+     * 不标 ops（它是战斗牌，不是运营牌），但带 shop → 试炼商店与铸币商店都能出现。 */
+    { id: 'E17', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle'], name: '假如我直接赢', rarity: 3, kind: 'limited', uses: 3,
+      desc: '下一场战斗开始时，敌方生命立即归零（本场直接判胜）· 共 3 场',
+      mods: { openKill: 1 } },
     { id: 'E02', tags: ['endless', 'battle', 'ops'], name: '试炼补贴', rarity: 0, kind: 'instant', desc: '立刻获得 60 试炼币', mods: { instantCoins: 60 } },
     { id: 'E03', tags: ['endless', 'battle', 'ops'], name: '财源滚滚', rarity: 1, kind: 'instant', desc: '立刻获得 120 试炼币', mods: { instantCoins: 120 } },
     { id: 'E04', tags: ['endless', 'battle', 'oncePerRun', 'ops'], name: 'steam大促', rarity: 1, kind: 'instant', maxStacks: 1,
@@ -1332,7 +1356,7 @@
       desc: '战斗获得试炼币 +15%，损毁后本局 +30%；每胜利一场6%概率损毁',
       mods: { fragileCoinAddAlive: 0.15, fragileCoinAddBurned: 0.30, fragileBreakPct: 6 } },
     { id: 'C54', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '越战越勇', rarity: 2, kind: 'permanent', maxStacks: 2,
-      desc: '战斗中每回合开始时，力量、敏捷、速度各 +1.5%（可叠 2 层）；每场战斗结束时清零',
+      desc: '战斗中每回合开始时，力量、敏捷、速度各 +1.5%；每场战斗结束时清零',
       mods: { roundStatPct: 0.015 } },
     /* noRestack（任务4）：同名唯一，拿到一次后移出本局可获得池。 */
     { id: 'C55', tags: ['endless', 'battle', 'shop', 'noRestack'], name: '后发制人', rarity: 3, kind: 'permanent',
@@ -1350,7 +1374,7 @@
       desc: '每在试炼商店消费 120 试炼币，立即获得 1 个随机限次增益（按商店刷新权重：越稀有越难出）',
       mods: { shopSpendLimited: 120, limitedDefaultRerollPaid: 10 } },
     { id: 'C59', tags: ['endless', 'battle', 'shop', 'stackable', 'noRestack', 'ops'], name: '门庭若市', rarity: 2, kind: 'permanent', maxStacks: 3,
-      desc: '每进入一次试炼商店，立即获得 80 试炼币（可叠 3 层）',
+      desc: '每进入一次试炼商店，立即获得 80 试炼币',
       mods: { shopEnterCoins: 80 } },
     { id: 'C38', tags: ['tower', 'endless', 'battle', 'shop', 'unique'], name: '先机预判', rarity: 2, kind: 'permanent',
       desc: '每场战斗敌方对我方的第一次伤害为 0，且我方立刻额外行动一次',
@@ -1495,13 +1519,44 @@
   function tagsOf(b) { return tagSet(b).slice(); }
   function buffsWithTag(t) { return BUFFS.filter((b) => hasTag(b, t)); }
   function poolsOf(b) { return Object.keys(POOL_TAGS).filter((pool) => POOL_TAGS[pool].every((t) => hasTag(b, t))); }
+  /** 叠层说明：写进 `descOf` 的尾巴，避免 100+ 条文案各写一遍、还容易跟数据脱节。
+   *  口径与 `stackCap` / `poolFilter` / `permanentRestackable` 完全一致：
+   *    · `unique`          → 同名唯一，拿到后本局不再出现（只有 1 层）
+   *    · `oncePerRun`      → 同名最多 1 份，一局只可能拿到一次
+   *    · `noRestack`       → 可叠到上限，拿满后本局不再出现（cap=1 时就是「只有 1 层」）
+   *    · `unlimitedStacks` → 可无限叠加（C26~C29 成长件 / C49 / C52 烙印）
+   *    · 写了 `maxStacks`   → 最多叠 N 层
+   *    · `stackable`（无 maxStacks）→ 同栏最多 STACK_MAX（3）层
+   *    · 其余永久件        → 不叠层：每份占一个新栏位（同名可多拿，栏位满了才停）
+   *    · 其余限次件        → 同名唯一，用尽（烙印还会损毁）后才可能再获得
+   *  只给**无尽塔**的增益补这条（挑战塔专属的「下一场」类推池逻辑不同，加了反而误导）；
+   *  即时类不做叠层，也只对可重复获得的写一句。 */
+  function stackNote(buff) {
+    if (!buff || !hasTag(buff, 'endless')) return '';
+    const cap = stackCap(buff);
+    if (buff.kind === 'instant') {
+      return hasTag(buff, 'repeatable') ? '可重复获得，效果可累积' : '';
+    }
+    if (hasTag(buff, 'unique')) return '同名唯一，只有 1 层';
+    if (hasTag(buff, 'oncePerRun')) return '同名最多 1 份，一局只可能拿到一次';
+    if (cap === Infinity) return '可无限叠加';
+    if (cap > 1) return hasTag(buff, 'noRestack') ? '最多叠 ' + cap + ' 层，拿满后本局不再出现' : '最多叠 ' + cap + ' 层';
+    if (hasTag(buff, 'noRestack')) return '同名唯一，只有 1 层';
+    if (buff.kind === 'limited') {
+      const fragile = !!(buff.mods && buff.mods.fragileBreakPct);
+      return fragile ? '同名唯一，用尽或损毁后才可能再获得' : '同名唯一，用尽后才可能再获得';
+    }
+    return '不叠层：每份占一个新栏位';
+  }
   /** 增益说明：**按所在塔取不同文案**。
    *  只有需要两套说法的条目才写 descEndless（例：C57 玉石俱焚 —— 挑战塔写「下一场战斗」，
-   *  无尽塔是 10 次限次，要写清「限次 10 场」并让界面显示剩余次数）。 */
+   *  无尽塔是 10 次限次，要写清「限次 10 场」并让界面显示剩余次数）。
+   *  末尾统一补一句叠层上限（见 stackNote），所以界面上每条增益都能看到「最多几层」。 */
   function descOf(buff, mode) {
     if (!buff) return '';
-    if (mode === 'endless' && buff.descEndless) return buff.descEndless;
-    return buff.desc;
+    const base = (mode === 'endless' && buff.descEndless) ? buff.descEndless : buff.desc;
+    const note = stackNote(buff);
+    return note ? base + '（' + note + '）' : base;
   }
   /* 无尽专属 mod：带这些效果的增益只在无尽塔成立（环境词缀 / 试炼币 / 商店 /
    * 铸币 / 结算 / 商店消费相关）。挑战塔带这类标签/效果一律加载期报错。 */
@@ -1609,6 +1664,7 @@
    * ============================================================ */
   window.TowerData = {
     towerLevel, towerMult, towerGold, towerGoldShares, TOWER_FAIL_CONSOLATION,
+    TOWER_LEVEL_CAP, TOWER_MULT_CAP_LAYER, TOWER_GOLD_CAP,
     endlessLevel, endlessSegment, endlessMult, endlessMechStacks, endlessMechs, ENDLESS_MECH_MAX, endlessTickets,
     GEAR_TIER, gearKeyForLayer, gearTierCap, ENDLESS_BOSS_POOL,
     ENDLESS_ENV, ENDLESS_ENV_BY_ID, envChance, rollEnvMods, envText, envRange, envRangeText, envPctKeys,
@@ -1626,7 +1682,7 @@
     shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,
     MINT_SHOP, mintLayerOk, mintGroupOf, mintPrice, mintWeights, rollMintRarity, mintChance,
     mintPool, opsPool, MINT_EXCLUDE_MODS,
-    BUFF_TAGS, POOL_TAGS, hasTag, tagsOf, buffsWithTag, poolsOf, descOf,
+    BUFF_TAGS, POOL_TAGS, hasTag, tagsOf, buffsWithTag, poolsOf, descOf, stackNote,
     legendWeightFactor, legendOwnedCount, allRepeatableLegendsOwned, LEGEND_BASE_WEIGHT, LEGEND_TIER_DECAY, rarityBoostOf,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,

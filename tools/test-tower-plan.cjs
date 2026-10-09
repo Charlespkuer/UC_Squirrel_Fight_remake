@@ -66,10 +66,10 @@ function playLayer(c, mode) {
     if (run.choices) {
       /* 永久位满了 pickChoice 会返回 needsReplace（不消耗 choices），
        * 这里补一个替换目标，否则会空转到 guard 上限。
-       * 另外要避开三张**会改层内流程**的增益：E01 会在下一场后开试炼商店、
-       * E16 会开铸币商店、E15 会把本层从第 1 场重开 ——
+       * 另外要避开四张**会改层内流程 / 战斗结果**的增益：E01 会在下一场后开试炼商店、
+       * E16 会开铸币商店、E17 会让下一场直接判胜、E15 会把本层从第 1 场重开 ——
        * 选到它们的话「界面 N 条 = 实战 N 场」的比对就散了（本用例只关心顺序）。 */
-      const safe = run.choices.findIndex((c) => c && c.id !== 'E01' && c.id !== 'E15' && c.id !== 'E16');
+      const safe = run.choices.findIndex((c) => c && c.id !== 'E01' && c.id !== 'E15' && c.id !== 'E16' && c.id !== 'E17');
       const pick = c.Tower.pickChoice(mode, safe < 0 ? 0 : safe, null);
       if (pick && !pick.ok && pick.needsReplace) {
         const owned = (run.permanent || [])[0];

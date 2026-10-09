@@ -1,8 +1,8 @@
 # 松鼠大战 · 怀旧单机复刻版
 
-把当年 UC 乐园《松鼠大战》的玩法做成**纯静态网页**的单机复刻：三侠闯关、背包装备、
+12年 UC 乐园中**松鼠大战**游戏玩法重做为**纯静态网页**的单机复刻：三侠闯关、背包装备、
 装备融合、竞技场天梯、师徒好友、挑战塔与无尽塔。没有构建步骤，双击启动器就能玩；
-存档写本地文件，也支持 Mac ↔ Windows 双机同步。
+存档写本地文件，同时支持 Mac ↔ Windows 双机同步。
 
 ## 游戏画面
 
@@ -14,16 +14,28 @@
 |---|---|
 | ![战斗](images/screenshots/battle.png) | ![无尽挑战塔](images/screenshots/endless.png) |
 
-## 启动
+## 安装与启动
 
-| 平台 | 方式 |
+> 三条路：
+**① 在线试玩**（不安装）
+**② Windows / macOS 便携包或安装包**
+**③ 安卓 APK**。
+> 存档全部留在本地，不上传任何服务器。
+
+### ① 在线试玩（不安装）
+
+浏览器打开 GitHub Pages 地址即可（仓库 Settings → Pages 选 “GitHub Actions”，推 main 自动部署）。
+存档落在浏览器 localStorage，换浏览器或清缓存会丢，适合先试玩。
+
+### ② Windows
+
+| 方式 | 安装 / 运行步骤 |
 |---|---|
-| Windows | 双击根目录的 **`squirrel_fight.exe`** —— 原生窗口（Tauri 桌面版），不经过浏览器 |
-| macOS | 双击 `scripts/启动游戏.command`（停止：`bash scripts/启动游戏.command --stop`） |
-| 手动 / 兜底 | `node scripts/serve.js` → 浏览器打开 `http://127.0.0.1:8080/` |
+| **便携包（推荐）** | 到 GitHub Releases 下载 `squirrel-web-win.zip` → 解压到任意目录（别放只读目录）→ 双击 `scripts\启动游戏.cmd`。根目录有 `squirrel_fight.exe` 时会直接开原生窗口 |
+| **安装包** | 下载 `*.exe`（NSIS）或 `*.msi` 双击安装 → 从开始菜单 / 桌面图标启动。需要系统自带 **WebView2**（Win11 自带，Win10 正常更新的机器一般也有） |
+| 直接用仓库里的 exe | 双击根目录 `squirrel_fight.exe`（免安装，但 `js/` `images/` 等素材要和它同目录） |
 
-Windows 的兜底入口是 `scripts\启动游戏.cmd`（纯 ASCII 外壳）+ `scripts\start-game.ps1`（真正干活的部分），
-用在「还没编译 exe / 没有 WebView2 / 想强制走浏览器路线 / 只读模式」这些场合：
+启动脚本（`scripts\启动游戏.cmd` + `scripts\start-game.ps1`，用于「还没编译 exe / 没有 WebView2 / 想强制走浏览器 / 只读模式」）：
 
 ```
 scripts\启动游戏.cmd                 # 找不到 exe 时退回「本地服务器 + 浏览器应用窗口」
@@ -35,26 +47,50 @@ scripts\启动游戏.cmd --stop          # 停掉后台的本地服务器
 启动顺序：**先找 `squirrel_fight.exe`**（根目录 → `scripts\` → `src-tauri\dist\` → `src-tauri\target\release\`），
 找到就开原生窗口；没有或连开三次都没稳住，才退回「本地服务器 + 浏览器应用窗口」。
 
-存档默认写在 `save/progress.json`（磁盘优先，浏览器 localStorage 只是兜底）；
-启动时会自动体检存档，损坏时从 `save/backup/` 恢复快照。
-直接静态托管也能玩，但存档只留在浏览器里，双机同步不可用。
+### ③ macOS
 
-### 安卓版（APK）
+| 方式 | 安装 / 运行步骤 |
+|---|---|
+| **便携包（推荐）** | 下载 `squirrel-web-mac.zip` → 解压 → 双击 `scripts/启动游戏.command`（停止：`bash scripts/启动游戏.command --stop`） |
+| **安装包** | 下载 `*.dmg` → 拖进「应用程序」→ **首次打开请右键（或按住 Control 点）→ 打开**：本项目未做代码签名 / 公证，直接双击会被 Gatekeeper 拦下 |
+| 打不开时 | 若提示「已损坏」或「无法验证开发者」：`xattr -dr com.apple.quarantine <游戏目录或 .app>`，然后再右键 → 打开 |
 
-游戏本体是纯 HTML/JS，所以能装到安卓手机上跑（Tauri 2 的 Android 支持，同一个 `src-tauri` 出包）：
+### ④ 安卓（APK）
 
-```powershell
-pwsh -File tools\build-apk.ps1 -Abi arm64-v8a -Release   # 真机
-pwsh -File tools\build-apk.ps1 -Abi x86_64               # 模拟器
-# 产物复制到 src-tauri\dist\ssdz-classic-<abi>-<profile>-<日期>.apk
+1. **拿 APK**：CI 不产出安卓包，需要本地打 —— `pwsh -File tools\build-apk.ps1 -Abi arm64-v8a -Release`
+   （真机）/ `-Abi x86_64`（模拟器），产物在 `src-tauri\dist\ssdz-classic-<abi>-<profile>-<日期>.apk`；
+   也可以直接用维护者分享的 APK。
+2. **装**：把 APK 传到手机（数据线 / 微信文件 / 网盘）→ 在文件管理器里点开 → 按提示到系统设置里
+   允许该来源「安装未知应用」→ 继续安装。
+3. 安装时若提示「来源不明 / 未经认证」是正常的：现在用的是 **debug 签名**（自用没问题；
+   要长期给别人的手机装，需要自己配 release 签名后重打）。
+4. 手机存档在应用私有目录 `/data/user/0/com.ssdz.classic/save/progress.json`，与电脑同一份格式 ——
+   用游戏里「系统 → 导入/导出存档」互传。
+
+⚠️ Windows 的 `squirrel_fight.exe`（PE 格式 + Windows API）**不能**装到安卓上，安卓必须用 APK；
+反过来 APK 也不能在 Windows 上跑。详细构建过程与踩坑见 [docs/安卓版构建与实测.md](docs/安卓版构建与实测.md)。
+
+### ⑤ 从源码运行（可选）
+
+```bash
+node scripts/serve.js     # 起本地静态服务器（带存档接口）
+# 浏览器打开 http://127.0.0.1:8080/
 ```
 
-手机上存档在应用私有目录 `/data/user/0/com.ssdz.classic/save/progress.json`，
-和电脑上是同一份格式，跨设备用游戏里「系统 → 导入/导出存档」。
-详细做法、踩过的坑与实测记录见 [docs/安卓版构建与实测.md](docs/安卓版构建与实测.md)。
+游戏本体是纯静态的、没有构建步骤；只有桌面壳 / 安卓壳需要编译（见下面「开发」）。
 
-⚠️ 注意：Windows 的 `squirrel_fight.exe` **不能**装到安卓上（PE 格式 + Windows API），
-安卓必须用上面这个 APK；反过来 APK 也不能在 Windows 上跑。
+### 存档位置
+
+| 场景 | 存档文件 |
+|---|---|
+| 便携包 / 源码运行 | 游戏目录 `save/progress.json` |
+| Windows 安装版 | `%APPDATA%\com.ssdz.classic\save\progress.json` |
+| macOS 安装版 | `~/Library/Application Support/com.ssdz.classic/save/progress.json` |
+| 安卓 | `/data/user/0/com.ssdz.classic/save/progress.json` |
+| 在线试玩 | 浏览器 localStorage（换浏览器 / 清缓存会丢） |
+
+磁盘优先、localStorage 只是兜底；启动时会自动体检存档，损坏就从 `save/backup/` 恢复快照，
+两处同时有存档时按 `savedAt` 取较新的那份。
 
 ## 玩法
 
@@ -66,9 +102,10 @@ pwsh -File tools\build-apk.ps1 -Abi x86_64               # 模拟器
 - **装备融合**：同部位同品质三件合成更高品质一件。
 - **竞技场与天梯**：经验场、碎片场、天梯赛（积分 / 金杯 / 周榜）。
 - **师徒与好友**：拜师收徒领贡品，好友切磋与随机挑战。
-- **挑战塔**：相对原版新增模式；类似于不封顶的关卡；每层一张挑战书，连战只继承血量，第三场后三选一增益。
-- **无尽挑战塔**：相对原版新增模式；免门票；rougelike无尽模式；通过组合限次/永久/即时三类增益，增强自身并挑战越来越强大的敌人，获取更高的分数与抽奖卷。
+- **挑战塔**：**相对原版新增模式**；类似于不封顶的关卡；每层一张挑战书，连战只继承血量，第三场后三选一增益。
+- **无尽挑战塔**：**相对原版新增模式**；免门票；rougelike无尽模式；通过组合限次/永久/即时三类增益，增强自身并挑战越来越强大的敌人，获取更高的分数与抽奖卷。
 - **双机同步**：Mac ↔ Windows 通过 ZeroTier 互推存档与游戏文件（`scripts/一键同步`）。
+- **完全免费**：没有内购、没有广告；「系统」页最上方有一个**自愿支持作者**的入口（爱发电），升到 30 级时也会提示一次 —— 打赏不换取任何游戏内好处，不影响内容与平衡。
 
 ## 更新记录
 
@@ -89,30 +126,19 @@ pwsh -File tools\build-apk.ps1 -Abi x86_64               # 模拟器
 | `images/` | 图片素材 | 背景与场景、UI 图标、角色图集（`images/orig/` 原版图集）、`screenshots/`（README 用的截图） |
 | `audio/` | 音效与 BGM | 战斗音效、主界面 BGM |
 | `src-tauri/` | **桌面壳与安卓壳**（Rust + Tauri 2，同一个 crate 出 exe 和 apk） | `src/lib.rs`（全部逻辑，按 `cfg(mobile)` 分支）、`src/main.rs`（桌面入口，仅 8 行）、`Cargo.toml`、`tauri.conf.json`、`tauri.android.conf.json`（安卓构建时自动合并）、`icons/`、`app-icon.png`、`gen/android/`（`tauri android init` 生成的安卓工程，**不进仓库**）、`web/` 与 `dist/`（构建产物） |
-| `tools/` | **开发与验证工具**（不参与运行） | `test-*.cjs`（十余个 Node 回归套件）、`tower-balance.cjs` / `deep-balance.cjs` 等数值与平衡脚本、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK）、`*guide.md` 与 `apk-alignment.md`（源码对齐研究）、`research/`、`verification/`、`apk-audit/` |
-| `docs/` | 设计与重构文档 | 挑战塔设计/重构、更新记录、[安卓版构建与实测](docs/安卓版构建与实测.md) |
+| `tools/` | **开发与验证工具**（不参与运行） | `test-*.cjs`（21 个 Node 回归套件，`test-fixes-round.cjs` 是主回归）+ `test-battle.js`（动画/图集）、`check-asset-paths.cjs`（资源路径体检）、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK）、`gen-vendor-data.cjs`（重新生成 `js/gamedict.js`）、`stage-balance.cjs`（关卡数值，被回归调用）、`publish-guide.md` / `tauri-guide.md`（发布与桌面壳指南） |
+| `docs/` | 设计与重构文档 | [挑战塔设计](docs/无尽挑战塔系统设计文档.md)、[更新记录](docs/更新记录.md)、[真化武器与技能数值](docs/真化武器与技能数值.md)（平衡调整对照表）、[支持作者与外部链接](docs/支持作者与外部链接.md)、[双语与本地化方案](docs/双语与本地化方案.md)、[安卓版构建与实测](docs/安卓版构建与实测.md) |
 | `save/` | **运行时的存档目录**（不进仓库） | `progress.json` 正式存档、`backup/` 快照、`server.out.log` / `server.err.log` |
-| `references/` | 原版 APK 与参考素材（本地，不进仓库） | 供 `tools/apk-audit`、素材提取脚本对照 |
+| `references/` | 原版 APK 与参考素材（本地，不进仓库） | 只作对照/取证，游戏运行不读它 |
 | `out/` | AI 超分与开发期对比图的**临时工作区**（本地，不进仓库） | 实验对比图与分析脚本；删掉不影响游戏 |
 | `.github/` | CI 与发布 | `ci.yml`（回归）、`pages.yml`（在线试玩版）、`release.yml`（双平台便携 zip）、`tauri.yml`（桌面/移动安装包） |
 
-根目录只有三样：Windows 入口 `squirrel_fight.exe`、`README.md`、`.gitignore`（哪些本地产物不进仓库）。
+根目录只有四样：`squirrel_fight.exe`（Windows 免安装入口）、`README.md`、`LICENSE`（许可协议）、
+`.gitignore`（哪些本地产物不进仓库）。
 换行符规则放在 `scripts/.gitattributes`（`.gitattributes` 与 `.gitignore` 一样按目录生效，
 所以只作用于 `scripts/`）——bash 脚本必须 LF，否则 mac 上双击会报
 `syntax error near unexpected token '$'do\r''`。
 
-### js/ 各文件
-
-| 文件 | 职责 |
-|---|---|
-| `main.js` | 启动流程、标题 / 主界面场景、存档告警 |
-| `state.js` | 存档读写、属性、关卡进度、背包 |
-| `engine.js` / `sim.js` | 战斗引擎 / 离线战斗模拟（共用规则） |
-| `battle.js` / `battle-drops.js` | 战斗表现 / 掉落 |
-| `tower.js` / `tower-data.js` / `tower-ui.js` | 挑战塔 + 无尽塔：规则 / 数值 / 界面 |
-| `classic-ui.js` / `classic-extras.js` / `classic-fusion.js` | 复古界面：主框架 / 周边系统 / 装备融合 |
-| `gamedata.js` / `gamedict.js` | 静态数据（`gamedict.js` 由脚本生成，勿手改） |
-| `ui.js` | 通用 UI 组件 |
 
 测试（Node 直接跑，无依赖）：
 
@@ -127,4 +153,14 @@ node tools/test-ui-flow.cjs      # 界面流程
 
 ## 许可
 
-仅供怀旧与学习交流，素材版权归原厂商所有。
+本项目是《松鼠大战》（UC 乐园）的**非商业同人复刻**：与原作者 / 原厂商无隶属或授权关系，
+作者不做任何商业行为，原作素材（名称、角色、美术、音频、原始数值数据）版权归原厂商所有，
+将在权利人要求时立即下架或调整。
+
+作者独立设计并实现的部分（复刻代码、新增玩法设计、数值表、文档与工具）© 2026 Charlespkuer：
+**允许**个人非商业使用、修改与免费分享（保留署名与本协议）；
+**未经书面授权，禁止**任何商业使用，也禁止把它作为商用素材 / 模板分发。
+
+完整条款见 [LICENSE](LICENSE)；商业授权或权利异议请通过 Issue 联系作者。
+「自愿支持作者」（爱发电）只是玩家对作者个人的打赏，**不换取任何游戏内好处**，不构成本项目的商业使用；
+具体实现与维护说明见 [docs/支持作者与外部链接.md](docs/支持作者与外部链接.md)。

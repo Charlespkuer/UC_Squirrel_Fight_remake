@@ -30,9 +30,9 @@ src-tauri/gen/schemas/
 Thumbs.db
 desktop.ini
 
-# 检查工具留下的临时截图
+# 开发截图是「跑出来」的产物（test-battle.js 会往 tools/research/battle-check/ 写图），
+# 需要留证据时手动 git add -f
 tools/research/tmp-*.png
-# 开发截图是「跑出来」的产物（headless-shot / test-battle 生成），要留证据时手动 git add -f
 tools/verification/*.png
 tools/research/*.png
 tools/research/*.jpg
@@ -41,7 +41,7 @@ tools/research/battle-check/
 # 双机同步：名字 / 对端地址 / 口令每台机器都不一样，不进仓库（首次运行会自动生成）
 scripts/sync/sync.config.json
 
-# AI 超分（tools/ai-upscale.py）：out/ 是跑出来的中间产物与对比图，属本地产物。
+# AI 超分：out/ 是跑出来的中间产物与对比图，属本地产物。
 # 1x 原始按钮留档在 references/ 下（references/ 整目录上面已忽略）——只作参考，
 # 不进游戏也不进仓库；.bak-upscale/ 是原地放大前的 1x 备份（buttons / icons 都有）。
 out/

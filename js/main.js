@@ -8,7 +8,7 @@
  *
  *  【MN1】启动与画布  【MN2】音频  【MN3】素材加载
  *  【MN4】战斗观察模式  【MN5】自检模式  【MN6】标题画面
- *  【MN7】主界面场景  【MN8】战斗调度  【MN9】导出 window.Main
+ *  【MN7】主界面场景  【MN8】战斗调度  【MN9】支持作者 / 打开外部链接  【MN10】导出 window.Main
  * ------------------------------------------------------------ */
 (function () {
   'use strict';
@@ -762,11 +762,83 @@
   }
 
   /* ============================================================
-   * 【MN9】导出 window.Main
+   * 【MN9】「自愿支持作者」与「打开外部链接」
+   *
+   * 这个复刻版完全免费：没有内购、没有广告，支持纯属自愿，不换取任何游戏内好处。
+   * 链接统一放这里，改渠道只动这一处（详见 docs/支持作者与外部链接.md）。
+   * ============================================================ */
+  const SUPPORT = Object.freeze({
+    url: 'https://ifdian.net/a/Charlespkuer',
+    label: '爱发电',
+  });
+  /** 当前页面是不是「我们自己的本地服务器」（轻壳模式 / 便携版的本地服务器）。 */
+  function viaOwnLocalServer() {
+    try {
+      const h = String((window.location && window.location.hostname) || '').toLowerCase();
+      const p = String((window.location && window.location.port) || '');
+      return !!p && (h === '127.0.0.1' || h === 'localhost' || h === '::1' || h === '[::1]');
+    } catch (e) { return false; }
+  }
+  function plainWindowOpen(url) {
+    try {
+      /* 注意：**不能**在 features 里写 'noopener' —— 按规范那样 window.open 一律返回 null，
+       * 就分不清「被弹窗拦截」和「其实开成功了」。这里开完手动断开 opener 引用。 */
+      const w = window.open(url, '_blank');
+      if (!w) return false;
+      try { w.opener = null; } catch (e) { /* 只读也不影响 */ }
+      return true;
+    } catch (e) { return false; }
+  }
+  /**
+   * 用系统默认浏览器打开一个 http(s) 链接。返回 Promise<boolean>（true = 已交给浏览器）。
+   *
+   * 三种运行环境各走一条路（顺序即优先级）：
+   *   1. **Tauri 安装版 / 安卓**（页面来自 tauri.localhost / tauri://）：走 Rust 命令
+   *      `open_external`（src-tauri 里注册）；装了 opener 插件时则直接用它。
+   *   2. **轻壳模式 / 便携版**（页面来自 http://127.0.0.1:端口）：轻壳的内置服务器提供
+   *      `/__open?url=…`（Tauri 的 ACL 不允许这种「远端来源」调用 IPC，所以只能走 HTTP）；
+   *      便携版（scripts/serve.js）没有这个路由 → 404 → 退回 window.open（那边就是真浏览器）。
+   *   3. 纯浏览器 / file://：window.open。
+   * 全部失败时返回 false，调用方据此显示「复制链接」兜底。
+   */
+  function openExternal(url) {
+    const u = String(url || '');
+    if (!/^https?:\/\//i.test(u)) return Promise.resolve(false);
+    const T = window.__TAURI__;
+    const ownServer = viaOwnLocalServer();
+    // ① 安装版 / 安卓（Tauri 应用，页面来自 tauri.localhost / tauri://）
+    if (T && !ownServer) {
+      if (T.opener && typeof T.opener.openUrl === 'function') {
+        try { return Promise.resolve(T.opener.openUrl(u)).then(() => true, () => false); } catch (e) { /* 落下一步 */ }
+      }
+      if (T.core && typeof T.core.invoke === 'function') {
+        return Promise.resolve(T.core.invoke('open_external', { url: u })).then(() => true, () => false);
+      }
+    }
+    // ② 轻壳模式（Tauri + 自己的本地服务器）：IPC 会被 ACL 拒，走内置服务器的 /__open
+    if (T && ownServer && typeof fetch === 'function') {
+      return fetch('/__open?url=' + encodeURIComponent(u), { cache: 'no-store' })
+        .then((r) => (r && r.ok ? r.json() : null))
+        .then((j) => (j && j.ok ? true : plainWindowOpen(u)))
+        .catch(() => plainWindowOpen(u));
+    }
+    /* ③ 便携版 / 网页版：直接同步 window.open。
+     * **不能先 await fetch**（哪怕只是探测 /__open）—— 那样会丢掉「用户点击」这个手势，
+     * 浏览器会把它当弹窗拦下来。 */
+    return Promise.resolve(plainWindowOpen(u));
+  }
+  /** 便捷入口：**尽力**打开「支持作者」页（失败不弹窗）。
+   *  界面请优先用 `UI.classic.openSupportModal()` —— 它带「复制链接」兜底。 */
+  function openSupport() { return openExternal(SUPPORT.url); }
+
+  /* ============================================================
+   * 【MN10】导出 window.Main
    * ============================================================ */
   window.Main = { showHome, showTitle, startBattle, replayBattle, resizeLayout:fitCanvas, setMuted, isMuted: () => muted,
     volume: volumeValue, setVolume, homePlayer: () => mainPlayer, setHomeFps, W, H,
-    settings: settingsSnapshot, setResolution, setFullscreen, isFullscreen: () => !!document.fullscreenElement };
+    settings: settingsSnapshot, setResolution, setFullscreen, isFullscreen: () => !!document.fullscreenElement,
+    /* 自愿支持作者：链接与「打开系统浏览器」的统一出口（界面只调这两个）。 */
+    SUPPORT, openExternal, openSupport };
 
   window.addEventListener('DOMContentLoaded', boot);
 })();

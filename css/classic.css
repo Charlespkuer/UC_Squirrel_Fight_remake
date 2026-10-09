@@ -23,7 +23,7 @@ button,input,select{font:inherit}button{touch-action:manipulation}button:focus-v
 .uc-button .chev{--chev-size:24px;--chev-w:7px;display:block;position:relative;
   width:var(--chev-size);height:var(--chev-size);box-sizing:border-box;border:0 solid currentColor}
 /* left 按几何居中公式 (s−w)/(2√2) 取整：人字形墨迹范围是 [−s/√2, +w/√2]，
-   平移这么多才能让包围盒真正居中（探针截图逐像素验证，见 tools/arrow-center-probe.html）。 */
+   平移这么多才能让包围盒真正居中（逐像素量过墨迹范围）。 */
 .uc-button .chev-l{border-left-width:var(--chev-w);border-bottom-width:var(--chev-w);transform:rotate(45deg);left:var(--chev-l,6px)}
 .uc-button .chev-r{border-top-width:var(--chev-w);border-right-width:var(--chev-w);transform:rotate(45deg);left:calc(0px - var(--chev-r,6px))}
 /* 顶部状态栏：昵称与体力按参考图做成「深色内嵌槽」——外层金条 +

@@ -16,6 +16,8 @@
 //   GET  /__save?meta=1  → {ok, exists, savedAt, size}
 //   GET  /__save         → {ok, exists, savedAt, data}
 //   POST /__save         → 校验 JSON 对象后写盘，返回 {ok, savedAt}
+// 外链 API（轻壳模式的「用浏览器打开」；安装版/安卓走 `open_external` 命令）：
+//   GET  /__open?url=…   → 校验 http(s) 后交给系统默认浏览器，返回 {ok} / {ok:false,msg}
 #![cfg_attr(all(windows, not(mobile)), windows_subsystem = "windows")]
 
 use std::fs;
@@ -369,6 +371,66 @@ fn save_api(method: &str, query: &str, body: &[u8], ctx: &Ctx, out: &mut TcpStre
     }
 }
 
+/// 用系统默认浏览器打开一个 http(s) 链接。
+///   桌面：Windows `cmd /C start`／macOS `open`／Linux `xdg-open`
+///   安卓：`am start -a android.intent.action.VIEW`（部分机型 SELinux 可能拦住 → 前端会退回「复制链接」）
+/// 链接先做白名单校验（只允许 http(s)、只允许可见 ASCII、禁掉 shell 元字符），
+/// 免得把一个带 `&` / `"` 的字符串交给 shell 解析。
+fn spawn_opener(url: &str) -> std::io::Result<()> {
+    let ok = (url.starts_with("https://") || url.starts_with("http://"))
+        && url.chars().all(|c| c.is_ascii_graphic())
+        && !url.contains(['"', '\'', '&', '|', '^', '<', '>', '`']);
+    if !ok {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "链接不合法（只允许 http(s) 网址）"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn().map(|_| ())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(url).spawn().map(|_| ())
+    }
+    #[cfg(all(unix, not(target_os = "macos"), not(target_os = "android"), not(target_os = "ios")))]
+    {
+        std::process::Command::new("xdg-open").arg(url).spawn().map(|_| ())
+    }
+    #[cfg(target_os = "android")]
+    {
+        std::process::Command::new("am")
+            .args(["start", "-a", "android.intent.action.VIEW", "-d", url])
+            .spawn()
+            .map(|_| ())
+    }
+    #[cfg(target_os = "ios")]
+    {
+        let _ = url;
+        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "iOS 请改用 tauri-plugin-opener"))
+    }
+}
+
+/// 命令：`open_external` —— 安装版 / 安卓（页面来自 tauri.localhost / tauri://）打开系统浏览器。
+/// 轻壳模式（页面来自 127.0.0.1 的本地服务器）走上面的 `/__open`，因为那边 IPC 会被 ACL 拒。
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    spawn_opener(&url).map_err(|e| e.to_string())
+}
+
+/// /__open?url=…：轻壳模式的「打开外部链接」入口（普通 HTTP，不受 Tauri capability 限制）。
+#[cfg(not(mobile))]
+fn open_api(query: &str, out: &mut TcpStream) -> std::io::Result<()> {
+    let url = query
+        .split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .find(|(k, _)| *k == "url")
+        .map(|(_, v)| percent_decode(v))
+        .unwrap_or_default();
+    match spawn_opener(&url) {
+        Ok(_) => respond_json(out, 200, "{\"ok\":true}"),
+        Err(e) => respond_json(out, 400, &json_err(&format!("打开浏览器失败：{e}"))),
+    }
+}
+
 /// 返回 true = 该关连接
 #[cfg(not(mobile))]
 fn handle_request(method: &str, target: &str, body: &[u8], ctx: &Ctx, out: &mut TcpStream) -> std::io::Result<bool> {
@@ -379,6 +441,12 @@ fn handle_request(method: &str, target: &str, body: &[u8], ctx: &Ctx, out: &mut 
     let path = percent_decode(raw_path);
     if path == "/__save" {
         save_api(method, query, body, ctx, out)?;
+        return Ok(false);
+    }
+    /* 「自愿支持作者」等外链：轻壳模式下页面来自 http://127.0.0.1:端口，
+     * 这种「远端来源」调不了 Tauri IPC（capability 会给 ACL 拒绝），所以走这条普通 HTTP。 */
+    if path == "/__open" {
+        open_api(query, out)?;
         return Ok(false);
     }
     if method != "GET" && method != "HEAD" {
@@ -547,7 +615,7 @@ const TITLE: &str = "松鼠大战 · 怀旧复刻版";
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![save_path, save_meta, save_read, save_write])
+        .invoke_handler(tauri::generate_handler![save_path, save_meta, save_read, save_write, open_external])
         .setup(|app| {
             let handle = app.handle().clone();
 

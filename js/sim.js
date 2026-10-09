@@ -1264,6 +1264,17 @@
       pushRound({ attacker: 0, action: 'dot', dmg, noteText: '先手制敌' });
     }
 
+    /* 塔 buff「假如我直接赢」（E17）：**开战即判胜** —— 把敌方当前生命直接清零。
+     * 口径（用户要求）：「下一场战斗开始时立即使得敌方生命值归零」，所以：
+     *   · 固定从**满血**清零，飘字写的是这一场真实被打掉的血量；
+     *   · **不走 tryDeathSave** —— 名字就是「直接赢」，敌方的装死 / 涅槃类豁免不触发；
+     *   · 放在主循环之前：血量为 0 时主循环不执行，`winner` 直接判我方胜（见函数末尾结算）。 */
+    if (A.mods && A.mods.openKill && B.hp > 0) {
+      const dmg = Math.max(1, Math.round(B.hp));
+      B.hp = 0;
+      pushRound({ attacker: 0, action: 'dot', dmg, noteText: '假如我直接赢' });
+    }
+
     // ---- 主循环：速度行动条 ----
     let immediate = null;
     while (A.hp > 0 && B.hp > 0 && actions < MAX_ACTIONS) {

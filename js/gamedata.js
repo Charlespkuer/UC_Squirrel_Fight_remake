@@ -304,7 +304,7 @@
   /* 天梯碎片（本项目新增，id 51）：原版数据里 51~100 是空号。
    * 依据 references/new/微信图片_20260924010916_259_2.jpg：天梯战里会飘出带「?」的金色碎片，
    * 攒够 10 个可以随机合成一个力量/敏捷/速度转化丸；恶魔果实种子也走同一条路。
-   * 图标 images/classic/icons/prop-51.png 由白色碎片改色加「?」得来（tools/make-fragment-icon.cjs）。
+   * 图标 images/classic/icons/prop-51.png 由白色碎片改色加「?」得来。
    * 同样只在 gamedata 里补行，GameDict.js 保持与 APK 逐字节一致。 */
   const CONVERT_SHARD_ID = 51;
   const CONVERT_SHARD_NAME = '天梯碎片';

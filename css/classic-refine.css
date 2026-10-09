@@ -349,3 +349,21 @@
 /* 永久增益面板：附魔（虚空铭文·不占位）段与未附魔段之间的分界 */
 .buff-sep{display:inline-block;width:2px;height:26px;margin:0 6px;vertical-align:middle;
   background:linear-gradient(to bottom,transparent,#8a6a3c,transparent);border-radius:2px}
+
+/* ============================================================
+   自愿支持作者（系统页顶部入口 + 30 级一次性提示）
+   完全免费、无内购：这里只做「打开浏览器」与文案展示。
+   ============================================================ */
+.support-panel{position:relative;z-index:1;display:flex;align-items:center;gap:14px;margin:0 30px 12px;
+  padding:12px 16px;border:3px solid #d9a441;border-radius:16px;
+  background:linear-gradient(#fff8dc,#ffeab0);box-shadow:0 3px 0 #c98f2a}
+.support-panel-text{display:flex;flex-direction:column;gap:4px;min-width:0}
+.support-panel-text b{color:#7a4a12;font-size:26px}
+.support-panel-text span{color:#8a6428;font-size:18px;line-height:1.35}
+.support-panel .support-btn{margin-left:auto;flex:0 0 auto}
+.support-box{display:flex;flex-direction:column;gap:10px;font-size:22px;line-height:1.55;color:#5c4326}
+.support-box p{margin:0}
+.support-lead{font-size:26px;color:#8a5a12;font-weight:700}
+.support-url{word-break:break-all;color:#3f6ea6}
+.support-input{width:100%;box-sizing:border-box;font:20px/1.4 inherit;padding:8px 10px;
+  border:2px solid #cbb98a;border-radius:10px;background:#fffdf5;color:#5c4326}

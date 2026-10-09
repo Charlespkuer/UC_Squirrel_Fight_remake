@@ -33,6 +33,8 @@
   const CURRENCY_PROP_IDS = [8, 15, 40];
   const MAX_PLAYER_LEVEL = 70;
   const FREE_POINT_RANDOM = 2;
+  /* 到这一级时给玩家一次「自愿支持作者」的提示（一次性，落存档；不换取任何游戏内好处）。 */
+  const SUPPORT_PROMPT_LEVEL = 30;
   /* 自选点能加的四项，以及每一点给多少（生命一点 = 5 点血，和随机点、
    * 永久属性道具 19 的口径一致）。 */
   const STAT_KEYS = ['power', 'agility', 'speed', 'hp'];
@@ -1691,6 +1693,30 @@
   }
   /** 还没选的「三选一」：升级发下来就必须选掉（和自由属性点一样，只是会排队）。 */
   function pendingWS() { return S && Array.isArray(S.wsPicks) ? S.wsPicks.length : 0; }
+  /* ============================================================
+   * 「自愿支持作者」的一次性提示（30 级）
+   *
+   * 规则（用户口径 2026-10）：升到 30 级时弹一次；界面在**升级奖励处理完之后**才弹，
+   * 不打断三选一 / 属性点流程（见 classic-ui 的 maybeSupportPrompt）。
+   * 只做提示，不换取任何游戏内好处；关掉 / 点过之后不再出现。
+   * ============================================================ */
+  function supportPromptPending() { return !!(S && S.supportPrompt) && !(S && S.supportPromptShown); }
+  /** 取一次提示权（原子）：真待提示时立刻记「已提示」并返回 true，否则 false。 */
+  function supportPromptTake() {
+    if (!supportPromptPending()) return false;
+    S.supportPromptShown = true;
+    save();
+    return true;
+  }
+  /** 调试用：把「支持作者」提示恢复成**待提示**（下一次合适的时机还会弹一次；不碰等级）。 */
+  function supportPromptReset() {
+    if (!S) return false;
+    S.supportPrompt = true;
+    S.supportPromptShown = false;
+    save();
+    return true;
+  }
+  const SUPPORT_LEVEL = SUPPORT_PROMPT_LEVEL;
   /** 当前这一组的三个候选。 */
   function currentWSChoices() { return pendingWS() ? (S.wsPicks[0] || []) : []; }
   /** 从当前这组里选一个（kind+id），学会它并把这组出队。 */
@@ -1872,6 +1898,9 @@
     while (S.level < MAX_PLAYER_LEVEL && S.exp >= GData.nextExp(S.level)) {
       S.exp -= GData.nextExp(S.level);
       S.level++;
+      /* 到 30 级：埋一个一次性的「自愿支持作者」提示（界面在升级奖励处理完之后才弹，
+       * 不会打断三选一 / 属性点流程；见 classic-ui 的 maybeSupportPrompt）。 */
+      if (S.level >= SUPPORT_PROMPT_LEVEL) S.supportPrompt = true;
       const bookLevel = GData.ATTRIBUTE_BOOK_LEVELS.includes(S.level);
       const growth = { power: 0, agility: 0, speed: 0, hp: bookLevel ? 0 : 5 };
       if (bookLevel) S.props[37] = (S.props[37] || 0) + 1;
@@ -2826,6 +2855,8 @@
     gemLevel, GEM_MERGE_RATES, rollGemDrop, mergeGems, socketGem, unsocketGem,
     totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, gainRandomWS, wsChoices, wsInfo,
     pendingWS, currentWSChoices, chooseWS, chooseWSRandom,
+    /* 30 级「自愿支持作者」的一次性提示（落存档，不换任何游戏内好处）。 */
+    supportPromptPending, supportPromptTake, supportPromptReset, SUPPORT_LEVEL,
     gainExp, consumeEnergy, tickPropStates, fightReward, revengeReward, markRevenged, REVENGE_EXP_RATIO, expBoostPct, gainExpWithBoost,
     apprenticeTributeExpRatio, apprenticeTributeGoldRatio, TRIBUTE_EXP_MIN, TRIBUTE_EXP_MAX, TRIBUTE_GOLD_MIN, TRIBUTE_GOLD_MAX,
     // 师徒

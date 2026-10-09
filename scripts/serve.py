@@ -3,10 +3,10 @@
 """松鼠大战怀旧复刻版 —— 纯 Python 本地服务器（不需要 Node.js）
 
 用法:
-    python3 tools/serve.py [端口]        # 默认 8080
-    python3 tools/serve.py 8080 --no-save
+    python3 scripts/serve.py [端口]        # 默认 8080
+    python3 scripts/serve.py 8080 --no-save
 
-和 tools/serve.js 行为一致：静态文件 + `/__save` 存档接口
+和 scripts/serve.js 行为一致：静态文件 + `/__save` 存档接口
 （存档写在 <游戏目录>/save/progress.json）。macOS 自带 python3，所以在
 没有 Node.js 的机器上也能把进度存进文件，而不是退回浏览器 localStorage。
 """

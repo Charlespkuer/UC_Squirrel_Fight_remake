@@ -24,8 +24,8 @@
 
 | 位置 | 说明 |
 | --- | --- |
-| `tools/apk-audit/measure-board.ps1`、`scan-strings.ps1` | PowerShell 脚本，用于量参考截图、扫 APK 字符串；macOS 上可改用 `pwsh`，或直接跳过（`.cjs` 版本的工具都是跨平台的） |
-| ~~`tools/research/*.cjs` 里写死的 Chrome 路径~~ | **本轮已修**：新增 `tools/research/find-chrome.cjs`，自动在 Windows / macOS / Linux 常见安装位置找 Chrome/Chromium/Edge，也支持环境变量 `CHROME_PATH` |
+| `references/` 下的原版 APK 与参考截图 | 只作对照/取证；游戏运行不读它 |
+| 无头浏览器截图 | 现在的仓库里不再带无头截图脚本：需要时用系统 Chrome + `--headless=new --screenshot`，或自行接 Playwright |
 | ~~`tools/test-battle.js` 的 canvas 依赖~~ | **本轮已修**：改为多处查找 `@napi-rs/canvas`，找不到就打印 `SKIP` 并正常退出（其余测试不受影响） |
 
 ### 一个已知限制：不要用 `file://` 直接双击 `index.html` 当日常玩法
@@ -52,8 +52,7 @@
 复现命令（同一页、同一个窗口尺寸，只切换是否显示占位滚动条）：
 
 ```bash
-node tools/research/headless-shot.cjs "http://127.0.0.1:8080/tools/research/gift-check.html?to=5" out.png --wait '#report-ready' --eval "JSON.stringify(window.__report.check)"              # macOS 式（隐藏滚动条）
-node tools/research/headless-shot.cjs "同上" out.png --wait '#report-ready' --scrollbars --eval "JSON.stringify(window.__report.check)"   # Windows 式（占位滚动条）
+google-chrome --headless=new --screenshot=out.png --window-size=1280,900 "http://127.0.0.1:8080/"   # 需要截图时直接用它
 ```
 
 

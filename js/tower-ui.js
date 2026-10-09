@@ -608,16 +608,21 @@
       main = '<div class="tower-head"><h2 class="tower-title">第 ' + run.layer + ' 层 · 第 ' + run.battleNo + '/' + run.battleCount + ' 场</h2>' +
         '<div class="tower-stats">已累积松果 <b class="gold-text">' + run.pot + '</b>（失败只保底 30%）</div></div>' +
         currencyHtml('tower') +
-        carryBar(run.curHp, run.curMaxHp, '血量', '', hpTip(run)) + debuffPanel(run.debuffs) + ownedBuffsHtml('tower') +
+        /* 环境词缀与「三侠削弱」都摆在这一屏（与无尽塔同一套组件）：
+         * 环境是挑战塔里**唯一会临时改变敌我数值**的东西，第 5 层起可能在层内抽到；
+         * 三侠削弱是「贯穿本层」的。不带这两块的话，玩家只会觉得「敌人怎么突然变强了」。 */
+        carryBar(run.curHp, run.curMaxHp, '血量', '', hpTip(run)) +
+        envPanelHtml(run, { label: '当前环境' }) + debuffPanel(run.debuffs) + ownedBuffsHtml('tower') +
         '<div class="tower-actions">' + C().btn('继续战斗', 'fight', 'gold') + C().btn('放弃本层', 'abandon', 'muted small') + '</div>';
     } else {
-      main = '<div class="tower-head"><h2 class="tower-title">无尽挑战塔 · 第 ' + info.nextLayer + ' 层</h2>' +
+      main = '<div class="tower-head"><h2 class="tower-title">挑战塔 · 第 ' + info.nextLayer + ' 层</h2>' +
         '<div class="tower-stats">目标等级 ' + info.level + ' · 强度 ×' + info.mult.toFixed(2) + ' · ' + info.battles + ' 场连战 · 通关金松果 <b class="gold-text">' + info.gold + '</b></div></div>' +
         currencyHtml('tower') +
         /* 把「三侠削弱」提示并进规则行（右上角多了货币条，版面高度要省下来），
          * 具体数值仍挂在悬停气泡里，信息不丢。 */
         '<p class="tower-rule" title="' + esc(heroDebuffTips()) + '">每层 1 张挑战书 · 连战只继承血量 · 对手顺序每层随机 · ' +
-        '三侠的大招会留贯穿本层的削弱（速杀可规避）· 通关另补 3 场挑战的掉落 · 悬停看机制</p>' +
+        '三侠的大招会留贯穿本层的削弱（速杀可规避）· 第 5 层起层内可能出现环境词缀（同无尽塔）· ' +
+        '通关另补 3 场挑战的掉落 · 悬停看机制</p>' +
         '<h4 class="tower-plan-title">本层对手预告</h4>' + planHtml(info.preview);
       footer = '<div class="tower-actions tower-footer">' +
         '<span class="tower-book-count">现有挑战书 ' + info.books + ' 张</span>' +
@@ -1398,7 +1403,7 @@
       '<h2 class="tower-title">铸币商店 <span class="shop-coins">铸币 ' + shop.retryToken + '</span>' +
         '<span class="mint-coins">试炼币 ' + Math.max(0, Math.floor(Number(shop.coins) || 0)) + '</span></h2>' +
       '<p class="mint-lead">战后偶遇的流动商人：<b>花铸币买走一件</b>，或者<b>拿自己的一件增益免费换一件</b> —— ' +
-        '做成其中任何一件，他立刻就走。</p>' +
+        '做成其中任何一件，他立刻就走（也可以直接送客）。</p>' +
       /* E16「铸币商队」触发的那一家：写清来由（限次 1，用完这家店就没了） */
       (shop.byBuff ? '<p class="mint-flash">限次增益「铸币商队」触发的商队' +
         (shop.boundary ? '：它顶掉了这一段的结算商店，送客后照旧前往结算点' : '') + '。</p>' : '') +

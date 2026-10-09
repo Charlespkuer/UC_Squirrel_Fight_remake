@@ -1670,11 +1670,14 @@
     return html + log;
   }
   function paintSyncProgress() {
-    const host = typeof document !== 'undefined' ? document.getElementById('sync-progress') : null;
-    if (!host) return;
     const html = syncProgressHtml();
-    host.innerHTML = html;
-    host.style.display = html ? '' : 'none';
+    /* 同步面板与「游戏更新」面板共用同一份进度（从另一台电脑更新时进度显示在更新面板里） */
+    for (const id of ['sync-progress', 'update-progress']) {
+      const host = typeof document !== 'undefined' ? document.getElementById(id) : null;
+      if (!host) continue;
+      host.innerHTML = html;
+      host.style.display = html ? '' : 'none';
+    }
   }
   /** 系统页里「跨设备同步」那一块。 */
   function syncPanel() {
@@ -1761,6 +1764,180 @@
   /* ============================================================
    * 【UC17】系统设置 / 村庄 / 攻略
    * ============================================================ */
+  /* ============================================================
+   * 【UC19】一键拉取远端更新（游戏更新面板）
+   *
+   * 三种「远端」，按可用性显示按钮（都不行就只剩「打开下载页」）：
+   *   · 另一台电脑：复用系统页已有的双机同步服务（/local/files/pull，ZeroTier/局域网）
+   *   · 本机 git 仓库：/__update?mode=git → `git pull --ff-only`
+   *   · GitHub Releases：/__update?mode=release → 便携包就地覆盖；安装包下载后交给系统打开
+   *
+   * /__update 由**本机服务器**提供（轻壳的内置服务器 / 便携版的 serve.js），
+   * 真正的活由零依赖的 scripts/update-game.js 干 —— 三条路都不碰 save/，
+   * 动手前还会自动把存档备份一份（save/backup/progress-…-before-update.json）。
+   * ============================================================ */
+  const UPDATE_PAGE = 'https://github.com/Charlespkuer/UC_Squirrel_Fight_remake/releases/latest';
+  const updState = { busy: false, pending: null, note: '', local: null, git: null, release: null, sync: null, result: null };
+
+  /** 页面是不是从「本机磁盘」上跑的（轻壳 / 便携版 / 源码版）。网页版与安装版都不是 →
+   *  那种情况下没有任何就地更新的余地，只能给下载页。 */
+  function localDiskPage() {
+    try {
+      const h = String(location.hostname || '');
+      return location.protocol === 'file:' || h === '127.0.0.1' || h === 'localhost' || h === '::1' || h === '[::1]';
+    } catch (e) { return false; }
+  }
+  function platformTag() {
+    const ua = String((typeof navigator !== 'undefined' && navigator.userAgent) || '');
+    if (/Android/i.test(ua)) return 'android';
+    if (/Windows/i.test(ua)) return 'win32';
+    if (/Mac OS X|Macintosh/i.test(ua)) return 'darwin';
+    return 'linux';
+  }
+  /** 调本机的 /__update（只传白名单参数，不传命令）。 */
+  async function updateFetch(pathname, opts) {
+    opts = opts || {};
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), opts.timeout || 900000) : 0;
+    try {
+      const res = await fetch(pathname, { method: opts.method || 'GET', cache: 'no-store', signal: ctl ? ctl.signal : undefined });
+      let body = null;
+      try { body = await res.json(); } catch (e) {}
+      if (!body) return { ok: false, code: 'NO_HELPER', msg: '这个客户端不支持就地更新（更新接口没有响应，HTTP ' + res.status + '）' };
+      return body;
+    } catch (e) {
+      return { ok: false, code: 'NO_HELPER', msg: '这个客户端不支持就地更新（连不上 ' + pathname.split('?')[0] + '）' };
+    } finally { if (timer) clearTimeout(timer); }
+  }
+  const sizeText = (n) => (Number(n) > 1048576 ? (Number(n) / 1048576).toFixed(1) + ' MB' : Math.max(0, Math.round(Number(n) / 1024)) + ' KB');
+
+  /** 检查：本机（版本 / git / Releases）+ 另一台电脑（待传文件数）。能查到什么显示什么。 */
+  async function updateCheck() {
+    if (updState.busy) return;
+    updState.busy = true; updState.note = '正在检查…'; updState.result = null; updState.pending = null;
+    if (screen === 'system') openSystem();
+    try {
+      if (localDiskPage()) {
+        const r = await updateFetch('/__update?mode=check&platform=' + platformTag());
+        if (r && r.local) { updState.local = r.local; updState.git = r.git || null; updState.release = r.release || null; }
+        else { updState.local = null; updState.note = (r && r.msg) || '本机不支持自动更新'; }
+        if (r && r.local) updState.note = '';
+      } else {
+        updState.local = null; updState.git = null; updState.release = null;
+        updState.note = '这个页面不是从本机磁盘上跑的（网页版 / 安装版），没法就地更新 —— 用「打开下载页」装新版。';
+      }
+      if (!syncState.checked) { try { await syncProbe(); } catch (e) {} }
+      const peers = Object.keys((syncState.info || {}).peers || {});
+      if (syncState.ok && peers.length) {
+        try {
+          const q = await syncFetch('/local/files/pull?dry=1&peer=' + encodeURIComponent(peers[0]), { method: 'POST', timeout: 120000 });
+          updState.sync = { peer: q.peer || peers[0], files: Number((q.job && q.job.total) || 0) };
+        } catch (e) { updState.sync = { peer: peers[0], files: null, error: String((e && e.message) || e) }; }
+      } else updState.sync = null;
+    } finally {
+      updState.busy = false;
+      if (screen === 'system') openSystem();
+    }
+  }
+  /** 点来源按钮 → 进入「确认」状态（不直接动手：git / 下载都是改文件的事）。 */
+  function updateAsk(kind) {
+    updState.pending = kind; updState.result = null;
+    if (screen === 'system') openSystem();
+  }
+  function updatePlanText(kind) {
+    if (kind === 'sync') {
+      const n = updState.sync && updState.sync.files;
+      return '从另一台电脑「' + esc(String((updState.sync && updState.sync.peer) || '对端')) + '」拉取' +
+        (n == null ? '有改动的游戏文件' : ' ' + n + ' 个有改动的游戏文件') +
+        '（只覆盖同名文件，不动存档、不动同步口令）。';
+    }
+    if (kind === 'git') {
+      const g = updState.git || {};
+      return '执行 <code>git pull --ff-only</code>' + (g.behind ? '（落后远端 ' + g.behind + ' 个提交）' : '') +
+        '。有未提交改动时会失败，不会覆盖你的改动。';
+    }
+    const r = updState.release || {};
+    const a = r.asset || {};
+    if (!r.ok) return '远端暂时没有适合本机的文件：' + esc(r.msg || '') + '（可以改用「打开下载页」）。';
+    if (r.kind === 'zip') return '下载远端 <b>' + esc(r.tag) + '</b> 的便携包 <b>' + esc(a.name) + '</b>（' + sizeText(a.size) + '），解压后覆盖游戏文件（跳过 save/）。';
+    return '下载远端 <b>' + esc(r.tag) + '</b> 的安装包 <b>' + esc(a.name) + '</b>（' + sizeText(a.size) + '）到 save/updates/，然后交给系统打开安装向导。';
+  }
+  /** 真跑。sync 走同步服务（带进度条），其余走 /__update。 */
+  async function updateRun(kind) {
+    if (updState.busy || !kind) return;
+    updState.pending = null; updState.busy = true; updState.result = null;
+    updState.note = kind === 'sync' ? '正在从另一台电脑拉取…' : '正在更新，别关窗口…';
+    if (screen === 'system') openSystem();
+    try {
+      if (kind === 'sync') {
+        await syncRun('files', 'pull', false);
+        const r = syncState.result || {};
+        updState.result = { ok: r.ok !== false, mode: 'sync', files: r.done || (r.job && r.job.done) || 0, peer: r.peer, msg: r.msg, code: r.code };
+      } else {
+        updState.result = await updateFetch('/__update?mode=' + kind, { method: 'POST' });
+      }
+    } catch (e) {
+      updState.result = { ok: false, code: 'ERROR', msg: String((e && e.message) || e) };
+    } finally {
+      updState.busy = false; updState.note = '';
+      if (screen === 'system') openSystem();
+    }
+  }
+  function updateResultHtml() {
+    const r = updState.result;
+    if (!r) return '';
+    if (r.ok === false) {
+      return '<div class="sp-head"><b class="sync-off">更新没成功</b></div><div class="sp-hint">' +
+        esc(r.msg || r.code || '未知原因') + '</div>' +
+        '<div class="sp-actions">' + btn('打开下载页', 'update-page', 'small gold') + '</div>';
+    }
+    const done = r.mode === 'release' && r.kind && r.kind !== 'zip';
+    const head = done ? '已下载并打开安装包' : '更新完成';
+    const detail = done
+      ? esc(String(r.asset && r.asset.name || '')) + ' → <code>' + esc(String(r.path || '')) + '</code>，按安装向导走完即可（装完记得重开客户端）。'
+      : (r.tag ? '已更新到 <b>' + esc(String(r.tag)) + '</b>　' : '') +
+        (r.files ? '覆盖 ' + r.files + ' 个文件' : '') + (r.bytes ? '（' + sizeText(r.bytes) + '）' : '') +
+        (r.msg ? esc(String(r.msg)) : '') + '　<b>请刷新页面</b>（轻壳 / 便携版刷新即生效）。';
+    return '<div class="sp-head"><b class="sync-on">' + head + '</b></div><div class="sp-hint">' + detail + '</div>' +
+      '<div class="sp-actions">' + btn('立即刷新', 'update-reload', 'small gold') + btn('打开下载页', 'update-page', 'small') + '</div>';
+  }
+  /** 系统页里的「游戏更新」面板。 */
+  function updatePanelHtml() {
+    const loc = updState.local || {};
+    const g = updState.git || {};
+    const rel = updState.release || {};
+    const peers = Object.keys((syncState.info || {}).peers || {});
+    let head = '游戏更新：<b>本机 ' + (loc.version ? esc(String(loc.version)) : '未检查') + '</b>';
+    if (updState.busy) head += ' <b class="sync-on">' + esc(updState.note || '处理中…') + '</b>';
+    else if (updState.note) head += ' <span class="small-label">' + esc(updState.note) + '</span>';
+    else if (loc.version) {
+      const bits = [];
+      if (g.isRepo) bits.push('git ' + (g.behind ? '落后 ' + g.behind + ' 个提交' : '已是最新'));
+      if (rel.ok) bits.push('GitHub 最新 ' + esc(rel.tag) + (rel.kind === 'zip' ? '（可就地覆盖）' : '（下载安装包）'));
+      else if (rel.code === 'NO_ASSET' && rel.tag) bits.push('GitHub ' + esc(rel.tag) + ' 没有适合本机的包');
+      if (updState.sync) bits.push('另一台电脑 ' + (updState.sync.files == null ? '状态未知' : updState.sync.files + ' 个文件可更新'));
+      head += '<span class="small-label">' + (bits.join('　') || '没有可用的更新来源') + '</span>';
+    }
+    const dis = updState.busy ? ' muted' : '';
+    let actions = btn(updState.local || updState.sync || updState.git ? '重新检查' : '检查更新', 'update-check', 'small' + dis);
+    if (!updState.pending) {
+      if (syncState.ok && peers.length) actions += btn('从另一台电脑更新', 'update-source-sync', 'small gold' + dis);
+      if (rel.ok) actions += btn('从 GitHub 更新' + (rel.kind === 'zip' ? '（就地覆盖）' : '（下载安装包）'), 'update-source-release', 'small gold' + dis);
+      if (g.isRepo) actions += btn('用 git 拉取', 'update-source-git', 'small gold' + dis);
+      actions += btn('打开下载页', 'update-page', 'small');
+    }
+    let tail = '';
+    if (updState.pending) {
+      tail = '<div class="sp-hint">' + updatePlanText(updState.pending) + '</div><div class="sp-actions">' +
+        btn('确认更新', 'update-confirm', 'small gold' + dis) + btn('取消', 'update-cancel', 'small muted') + '</div>';
+    } else {
+      tail = '<div class="sp-hint">更新只覆盖游戏文件、<b>不动存档</b>（动手前还会自动备份一份）；装完 / 拉完刷新页面即可。安装版与安卓只能用「打开下载页」。</div>' + updateResultHtml();
+    }
+    return '<div class="sync-panel update-panel"><div class="sync-head">' + head + '</div>' +
+      '<div class="sync-actions">' + actions + '</div>' + tail +
+      '<div class="sync-progress" id="update-progress" style="display:none"></div></div>';
+  }
+
   function openSystem() {
     const mute=Main.isMuted&&Main.isMuted();
     const vol=Math.round(100*((Main.volume&&Main.volume())||0));
@@ -1783,7 +1960,7 @@
         resolutions.map((r)=>r.label).join(' → ')+'。画面按这一档等比缩放并居中；窗口装不下时自动按窗口缩小，不会溢出。')+
       sysBtn(st.fullscreen?'全面屏：开':'全面屏：关','fullscreen','','开启后画面铺满整个窗口（不留黑边，窗口比例差得多时会有轻微拉伸），同时尝试进入系统全屏；按 Esc 可退出系统全屏。')+
       '</div>';
-    const p=page('system','system',supportPanelHtml()+grid+slider+saveFilePanel()+syncPanel());
+    const p=page('system','system',supportPanelHtml()+updatePanelHtml()+grid+slider+saveFilePanel()+syncPanel());
     $('[data-action="support"]',p).onclick=()=>openSupportModal();
     $('[data-action="sound"]',p).onclick=()=>{Main.setMuted(!mute);openSystem();};
     $('[data-action="save-write"]',p).onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};
@@ -1805,6 +1982,16 @@
         }catch(e){toast(e.message||'导入失败');}
       });
     };
+    /* 游戏更新：来源按钮 → 确认 → 执行；结果里的「立即刷新」用 location.reload() */
+    const updBtn=(action,fn)=>{const b=$('[data-action="'+action+'"]',p);if(b)b.onclick=fn;};
+    updBtn('update-check',()=>updateCheck());
+    updBtn('update-source-sync',()=>updateAsk('sync'));
+    updBtn('update-source-release',()=>updateAsk('release'));
+    updBtn('update-source-git',()=>updateAsk('git'));
+    updBtn('update-confirm',()=>updateRun(updState.pending));
+    updBtn('update-cancel',()=>{updState.pending=null;openSystem();});
+    updBtn('update-reload',()=>{try{location.reload();}catch(e){}});
+    updBtn('update-page',()=>openSupportLink(UPDATE_PAGE));
     const syncBtn=(action,fn)=>{const b=$('[data-action="'+action+'"]',p);if(b)b.onclick=fn;};
     syncBtn('sync-save-push',()=>syncRun('save','push'));
     syncBtn('sync-save-pull',()=>syncRun('save','pull'));
@@ -2054,7 +2241,8 @@
   }
 
   window.UI={...legacy,renderHome,drawHomeHud,drawActor,runAction,currentScreen:()=>screen,refreshHome,renderNumbers,refreshHeader,
-    classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog,openSupportModal,maybeSupportPrompt,supportPanelHtml,copyText,supportMeta},
+    classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog,openSupportModal,maybeSupportPrompt,supportPanelHtml,copyText,supportMeta,
+      updatePanelHtml,updateCheck,updateAsk,updateRun,updateFetch,updState,UPDATE_PAGE},
     weaponIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('weapon',id)+'">',
     skillIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('skill',id)+'">',
     propIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('prop',id)+'">'};

@@ -1165,7 +1165,9 @@ function createServer() {
         const m = p.match(/^\/local\/(save|files)\/(push|pull)$/);
         if (m && req.method === 'POST') {
           const kind = m[1], dir = m[2];
-          const opts = { force: url.searchParams.get('force') === '1' };
+          /* dry=1：只比对清单、报「会传几个文件」，不写任何东西 ——
+           * 游戏里的「一键更新」用它先给玩家看一眼这次要更新多少文件。 */
+          const opts = { force: url.searchParams.get('force') === '1', dry: url.searchParams.get('dry') === '1' };
           let peer = null;
           try {
             peer = await resolvePeer(url.searchParams.get('peer') || '');

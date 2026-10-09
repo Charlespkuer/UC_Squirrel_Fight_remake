@@ -51,6 +51,9 @@ jobs:
             (cd scripts && cp -R $SCRIPTS "$out/scripts/")
             # 双机同步本体（零依赖）：入口脚本在 scripts/ 里，逻辑在 scripts/sync/ 里
             cp -R scripts/sync/sync.js scripts/sync/sync-win.ps1 scripts/sync/run-hidden.vbs "$out/scripts/sync/"
+            # 版本标识：更新界面靠 version.json 显示「本机 v?」并与远端 tag 对比
+            printf '{\n  "version": "%s",\n  "commit": "%s",\n  "date": "%s",\n  "note": "由 CI 写入（发布便携包时覆盖）"\n}\n' \
+              "$TAG" "${GITHUB_SHA:0:7}" "$(date -u +%Y-%m-%d)" > "$out/version.json"
             chmod +x "$out/scripts/启动游戏.command" "$out/scripts/停止游戏.command" "$out/scripts/一键同步.command" "$out/scripts/serve.py" 2>/dev/null || true
             # Windows：.cmd 只是 ASCII 外壳（现在住在 scripts\ 里，和 start-game.ps1 同目录，
             # 双击 scripts\启动游戏.cmd 即可；根目录不再放 .cmd），真正的逻辑在 .ps1 里

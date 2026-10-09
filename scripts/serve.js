@@ -11,10 +11,15 @@
  * 存档文件（可选）：游戏会把存档同时写一份到 <游戏目录>/save/progress.json，
  * 既可当本地备份，也是接「自建同步服务」的接口层。
  * 接口只监听 127.0.0.1，加 --no-save 可整体关闭。
+ *
+ * POST /__update?mode=check|git|release|auto[&dry=1]  ——「一键拉取远端更新」。
+ *   真正干活的是 scripts/update-game.js（零依赖），这里只做参数白名单 + 把它的
+ *   stdout JSON 原样回给前端；动作是写死的，不接受客户端传命令或 URL。
  * ============================================================ */
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');   // serve.js 在 scripts/ 里，游戏根是上一层
 const ARGS = process.argv.slice(2);
@@ -157,6 +162,40 @@ http.createServer((req, res) => {
   } catch (_) { res.writeHead(400); res.end('400'); return; }
   if (rel === '/__save/backup') { try { handleBackupApi(req, res); } catch (e) { json(res, 500, { ok: false, msg: '备份失败：' + e.message }); } return; }
   if (rel === '/__save') { handleSaveApi(req, res, url).catch(() => json(res, 500, { ok: false, msg: '服务器内部错误' })); return; }
+  /* ---------- /__update：「一键拉取远端更新」（参数白名单，动作写死） ----------
+   * 真正干活的是 scripts/update-game.js；这里只负责：
+   *   · 校验参数（mode 白名单、asset 只允许普通文件名、dry 只允许 0/1）
+   *   · 用**当前 Node** 跑那个脚本，把 stdout 最后一行 JSON 原样回给前端
+   * 于是浏览器 / 壳 / 便携版走的是同一份逻辑，也不用给壳单独写一套下载+解压。 */
+  if (rel === '/__update') {
+    const mode = String(url.searchParams.get('mode') || 'auto');
+    const asset = String(url.searchParams.get('asset') || '');
+    const platform = String(url.searchParams.get('platform') || '');
+    const dry = url.searchParams.get('dry') === '1';
+    if (!['auto', 'check', 'git', 'release'].includes(mode)) { json(res, 400, { ok: false, code: 'BAD_MODE', msg: '不认识的更新方式：' + mode }); return; }
+    if (asset && !/^[A-Za-z0-9._-]{1,120}$/.test(asset)) { json(res, 400, { ok: false, code: 'BAD_ASSET', msg: '资源名不合法' }); return; }
+    if (platform && !['darwin', 'win32', 'linux', 'android'].includes(platform)) { json(res, 400, { ok: false, code: 'BAD_PLATFORM', msg: '平台参数不合法' }); return; }
+    if (mode !== 'check' && req.method !== 'POST') { json(res, 405, { ok: false, code: 'NEED_POST', msg: '更新动作只接受 POST' }); return; }
+    const script = path.join(ROOT, 'scripts', 'update-game.js');
+    if (!fs.existsSync(script)) { json(res, 501, { ok: false, code: 'NO_HELPER', msg: '这个包里没有 scripts/update-game.js，无法一键更新' }); return; }
+    const argv = [script, '--json', '--mode=' + mode, '--root=' + ROOT];
+    if (dry) argv.push('--dry');
+    if (asset) argv.push('--asset=' + asset);
+    if (platform) argv.push('--platform=' + platform);
+    execFile(process.execPath, argv, { timeout: 1800000, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+      const text = String(stdout || '').trim();
+      const last = text.split('\n').filter(Boolean).pop() || '';
+      let parsed = null;
+      try { parsed = JSON.parse(last); } catch (e) { parsed = null; }
+      if (parsed) {
+        parsed.log = String(stderr || '').trim().split('\n').filter(Boolean).slice(-8);
+        json(res, 200, parsed);
+      } else {
+        json(res, 500, { ok: false, code: 'HELPER_FAILED', msg: ((err && err.message) || '更新脚本没有返回结果') + (stderr ? '：' + String(stderr).trim().slice(-300) : '') });
+      }
+    });
+    return;
+  }
   /* 存档列表 / 读取：给「从存档列表导入」用（不依赖系统文件选择器，桌面壳里也能用）。 */
   if (rel === '/__saves' || rel.startsWith('/__saves/get')) {
     const SAVE_DIR = path.join(ROOT, 'save');

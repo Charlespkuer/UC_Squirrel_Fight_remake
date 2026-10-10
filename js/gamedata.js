@@ -9,7 +9,7 @@
  * Ctrl+F 搜节号（如「【GD1】」）直达对应代码块。
  *
  *  【GD1】经验表与学习限制  【GD2】关卡数值  【GD3】真·武器 / 真·技能
- *  【GD4】导出 window.GData
+ *  【GD4】导出 window.GData  【GD5】装备独立属性点表  【GD6】套装收益
  * ------------------------------------------------------------ */
 (function () {
   'use strict';
@@ -659,10 +659,150 @@
   for (const row of GEAR_BASE) GEAR_BASE_ATTR[row[0]] = row[5];
 
   /* ============================================================
+   * 【GD6】套装收益（**本复刻版新增，原版没有**）
+   * ============================================================ */
+  /* 原版的 gearSetMap.setId 只决定「使用等级 / 售价 / 品质颜色 / 贴图序号」，
+   * 穿满一套**没有任何额外收益**（见 references/orig/GameDict.js 与
+   * MainMovie.as 的 getEquips()：gather 属性时逐件相加，从不数同套件数）。
+   * 所以这一整套机制是本版自己设计的，目标是：
+   *   ① 让「凑齐一套同名的装备」本身成为一条追求线（现在装备只有名字/等级差异）；
+   *   ② 收益压在「1~2 条好词条」的量级 —— 玩家为了套装收益要放弃跨套挑词条的自由，
+   *      反之想要极品词条就得混搭、放弃套装收益；
+   *   ③ 收益特征尽量贴合套装名字（忍者=闪避、骑士=减伤、狂战=低血狂暴……）。
+   *
+   * 口径：
+   *   · **家族** = 装备名去掉部位后缀（忍者护额/拳套/服/鞋 → 忍者）。
+   *     同名跨品质算同一家族（忍者绿/蓝/紫都叫忍者），所以「凑名」比「凑某个 setId」宽松得多。
+   *   · 阈值只有 **2 件 / 4 件**两档，4 件档**叠加**在 2 件档之上（穿 4 件 = 2 件档 + 4 件档）。
+   *   · 数值 = 基础值 × 品质系数，品质取**所穿该家族装备里最低的那一件**
+   *     （套装成色按最差的一件算，所以要满收益就得整套同品质）。
+   *
+   * 键的含义（基础值以蓝装为 1.0 基准，改数值只动这张表）：
+   *   power/agility/speed/hp  → 属性合计（state.js 的 totalStats 直接加）
+   *   dmgMul                  → 造成的伤害 +N%（比例，0.06 = +6%）
+   *   critBonus/critDmgBonus  → 暴击率 / 暴击伤害 +N 个百分点
+   *   dodgeBonus              → 闪避率 +N 个百分点
+   *   takenMul                → 受到伤害 +N%（**负数为减伤**）
+   *   lifestealPct/thornsPct  → 吸血 / 反伤 N%
+   *   shellPct                → 开局护盾 = N% 最大生命
+   *   regenPct                → 每回合回复 N% 最大生命
+   *   openerPowerMul/openerRounds → 开场前 N 次出手攻击 +N%
+   *   lowHpAt + lowHp*        → 生命低于 N% 时生效的那一组（阈值不随品质缩放）
+   * 其余键先不开放：没有对应的结算口子，写了也不会生效。
+   *
+   * **数值量级是实测标定的**（配对模拟：25 级随机玩家 vs 23 级随机对手，同一随机流，
+   * 1000 组配对，见 docs/更新记录.md 第三十二/三十三批）。两条实测结论值得记住：
+   *   ① **速度最贵**（+1 速度 ≈ +3pt 胜率，+10 力量只有 ≈ +4pt），所以带速度的家族必须很少；
+   *   ② **反伤别给小数值** —— sim 里 `Math.max(1, round(伤害 × 比例))` 有 1 点地板，
+   *      1~2% 的反伤实际等于「每次挨打固定反 1 点」，实测能顶 +6pt，所以这张表不用 thornsPct。
+   */
+  /* 品质系数：白 / 绿 / 蓝 / 紫 / 橙。
+   * **橙 = 紫 × 1.5**（0.65 → 1.3 → 1.95）：橙装是三件紫装融合出来的顶级档，
+   * 收益比紫装再高一半，才对得起「3 件紫 → 1 件橙」的成本。 */
+  const SET_BONUS_TIER_MUL = Object.freeze([0.5, 0.75, 1, 1.3, 1.95]);
+  /* 全局强度系数：整张表一起放大 / 缩小（改平衡时先动这一个数）。
+   * 只乘「数值」，结构值（openerRounds / lowHpAt）不受影响。 */
+  const SET_BONUS_GLOBAL_MUL = 1.5;
+  /* 蓝套及以上的生命上限效果再单独乘一倍（见下表 hp 的取值口径）：
+   * 先按 ×5 试过，实测紫色时一个 2 件档就是 +78 生命（≈ 25 级玩家血量的 30%），
+   * 熊猫/犀牛只穿 2 件就顶别人满 4 件，家族之间彻底失衡 —— 用户改判为 ×2。 */
+  const SET_BONUS_HP_MUL = 2;
+  /* 白装专属家族：不属于「蓝套及以上」，生命不吃上面那一倍。 */
+  const SET_BONUS_HP_EXEMPT = Object.freeze(['斗斗', '挑斗']);
+  /* 家族品质下限（品质下标）：狂战是唯一的 50 级传说档，按橙装系数（1.95）计。 */
+  const SET_BONUS_FAMILY_FLOOR = Object.freeze({ 狂战: 4 });
+  /* 不随品质缩放的「结构值」与取整方式。 */
+  const SET_BONUS_RAW_KEYS = Object.freeze(['openerRounds', 'lowHpAt']);
+  const SET_BONUS_INT_KEYS = Object.freeze(['power', 'agility', 'speed', 'hp', 'openerRounds']);
+  /* 以「百分点」计数的键（暴击率 / 暴击伤害 / 闪避率）保留 1 位小数就够；
+   * 其余的键是**比例**（0.06 = 6%），必须留到 3 位小数 —— 否则 0.06 会被取整成 0.1（显示成 10%）。 */
+  const SET_BONUS_POINT_KEYS = Object.freeze(['critBonus', 'critDmgBonus', 'dodgeBonus']);
+  const SET_BONUS_ATTR_KEYS = Object.freeze(['power', 'agility', 'speed', 'hp']);
+  const SET_BONUS = Object.freeze({
+    /* —— 白装档（10 级入门，玩家很快就换掉，只给一点点起步优势；白装不属于「蓝套及以上」，
+     *     所以它的生命不吃 ×2） —— */
+    斗斗: { 2: { hp: 10 }, 4: { hp: 16, power: 2, agility: 2 } },
+    挑斗: { 2: { power: 3 }, 4: { power: 3, dmgMul: 0.03 } },
+    /* —— 绿/蓝/紫三档都在的中期家族 —— */
+    格斗: { 2: { power: 3 }, 4: { power: 5, hp: 10 } },
+    拳斗: { 2: { critBonus: 3 }, 4: { critBonus: 5, critDmgBonus: 25 } },
+    忍者: { 2: { dodgeBonus: 2 }, 4: { dodgeBonus: 3, speed: 1 } },
+    骑士: { 2: { takenMul: -0.03 }, 4: { hp: 8, takenMul: -0.04 } },
+    维京: { 2: { power: 3 }, 4: { power: 5, dmgMul: 0.04 } },
+    /* —— 蓝/紫两档的后期家族（各自一个明确特征） —— */
+    螳螂: { 2: { power: 4 }, 4: { lowHpAt: 0.5, lowHpPowerMul: 0.20, lowHpSpeedMul: 0.10 } },
+    仙鹤: { 2: { agility: 5, power: 3 }, 4: { openerPowerMul: 0.35, openerRounds: 4 } },
+    熊猫: { 2: { hp: 8 }, 4: { hp: 6, regenPct: 0.008 } },
+    浣熊: { 2: { lifestealPct: 0.03 }, 4: { hp: 10, lifestealPct: 0.05 } },
+    犀牛: { 2: { hp: 8 }, 4: { hp: 8, shellPct: 0.035 } },
+    幕府: { 2: { takenMul: -0.03 }, 4: { lowHpAt: 0.35, lowHpTakenMul: -0.15 } },
+    勇者: { 2: { power: 3, agility: 3 }, 4: { power: 3, agility: 3, hp: 8 } },
+    诅咒: { 2: { dmgMul: 0.06, takenMul: 0.04 }, 4: { dmgMul: 0.09, critDmgBonus: 15, takenMul: 0.06 } },
+    /* —— 唯一的 50 级传说档（天梯商店 / 紫装融合变异），按橙档系数 1.95 计 ——
+     * 吸血这里写 0.05：× 1.95 = 9.75% ≈ 10%（用户口径「狂战吸血削到 10%」）。 */
+    狂战: { 2: { power: 3, critBonus: 2 }, 4: { lowHpAt: 0.4, lowHpFinalMul: 0.10, lowHpPowerMul: 0.08, lowHpLifestealPct: 0.05 } },
+  });
+  /** 某家族在某个品质下的收益系数（品质系数 × 全局强度系数；狂战有下限）。 */
+  function setBonusTierMul(family, quality) {
+    const q = Math.max(0, Math.min(SET_BONUS_TIER_MUL.length - 1, Number(quality) || 0));
+    const floor = SET_BONUS_FAMILY_FLOOR[family];
+    return SET_BONUS_TIER_MUL[Math.max(q, floor == null ? 0 : floor)] * SET_BONUS_GLOBAL_MUL;
+  }
+  /** 把基础值按系数展开成实际数值：属性与 openerRounds 取整，其余保留小数（见上面的取整口径）。
+   *  `hp` 额外再吃一次 SET_BONUS_HP_MUL（「蓝套及以上的生命上限」那一条；白装家族不在内）。 */
+  function setBonusScale(family, quality, base) {
+    const mul = setBonusTierMul(family, quality);
+    const hpMul = SET_BONUS_HP_EXEMPT.includes(family) ? 1 : SET_BONUS_HP_MUL;
+    const out = {};
+    for (const [k, v] of Object.entries(base || {})) {
+      const n = Number(v) || 0;
+      if (!n) continue;
+      if (SET_BONUS_RAW_KEYS.includes(k)) { out[k] = n; continue; }
+      const scaled = n * mul * (k === 'hp' ? hpMul : 1);
+      if (SET_BONUS_INT_KEYS.includes(k)) { out[k] = Math.max(1, Math.round(scaled)); continue; }
+      const digits = SET_BONUS_POINT_KEYS.includes(k) ? 10 : 1000;
+      const r = Math.round(scaled * digits) / digits;
+      out[k] = r === 0 ? 0 : r;   // 把 -0 归一成 0（-0 是 falsy，会让收益在界面上凭空消失）
+    }
+    return out;
+  }
+  const setBonusTable = (family) => SET_BONUS[family] || null;
+  /** 收益数值 → 可直接显示的多行文案（界面与帮助共用，避免文案和数值走偏）。 */
+  function setBonusText(eff) {
+    eff = eff || {};
+    const num = (v) => String(Math.round(Number(v) * 10) / 10);
+    const pct = (v) => num(Math.abs(Number(v)) * 100);
+    const out = [];
+    for (const k of ['power', 'agility', 'speed', 'hp']) {
+      if (eff[k]) out.push({ power: '力量', agility: '敏捷', speed: '速度', hp: '生命' }[k] + ' +' + num(eff[k]));
+    }
+    if (eff.dmgMul) out.push('造成伤害 +' + pct(eff.dmgMul) + '%');
+    if (eff.critBonus) out.push('暴击率 +' + num(eff.critBonus) + '%');
+    if (eff.critDmgBonus) out.push('暴击伤害 +' + num(eff.critDmgBonus) + '%');
+    if (eff.dodgeBonus) out.push('闪避率 +' + num(eff.dodgeBonus) + '%');
+    if (eff.takenMul) out.push((eff.takenMul < 0 ? '受到伤害 −' : '受到伤害 +') + pct(eff.takenMul) + '%');
+    if (eff.lifestealPct) out.push('吸血 ' + pct(eff.lifestealPct) + '%');
+    if (eff.thornsPct) out.push('反伤 ' + pct(eff.thornsPct) + '%');
+    if (eff.shellPct) out.push('开局护盾 ' + pct(eff.shellPct) + '% 最大生命');
+    if (eff.regenPct) out.push('每回合回复 ' + pct(eff.regenPct) + '% 生命');
+    if (eff.openerPowerMul) out.push('开场 ' + (eff.openerRounds || 3) + ' 次出手攻击 +' + pct(eff.openerPowerMul) + '%');
+    const low = [];
+    if (eff.lowHpFinalMul) low.push('造成伤害 +' + pct(eff.lowHpFinalMul) + '%');
+    if (eff.lowHpPowerMul) low.push('力量 +' + pct(eff.lowHpPowerMul) + '%');
+    if (eff.lowHpSpeedMul) low.push('速度 +' + pct(eff.lowHpSpeedMul) + '%');
+    if (eff.lowHpTakenMul) low.push('受到伤害 −' + pct(eff.lowHpTakenMul) + '%');
+    if (eff.lowHpLifestealPct) low.push('吸血 ' + pct(eff.lowHpLifestealPct) + '%');
+    if (low.length) out.push('生命低于 ' + Math.round((Number(eff.lowHpAt) || 0.5) * 100) + '% 时：' + low.join('、'));
+    return out;
+  }
+
+  /* ============================================================
    * 【GD4】导出 window.GData
    * ============================================================ */
   window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
     STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
     trueLevel, trueSkillValue, trueSkillRow, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
-    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize };
+    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
+    SET_BONUS, SET_BONUS_TIER_MUL, SET_BONUS_GLOBAL_MUL, SET_BONUS_HP_MUL, SET_BONUS_FAMILY_FLOOR,
+    SET_BONUS_RAW_KEYS, SET_BONUS_ATTR_KEYS, setBonusTable, setBonusTierMul, setBonusScale, setBonusText };
 })();

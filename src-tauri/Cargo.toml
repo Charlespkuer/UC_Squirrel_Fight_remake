@@ -1,6 +1,6 @@
 [package]
 name = "ssdz-classic"
-version = "0.4.6"
+version = "0.4.7"
 description = "松鼠大战 怀旧复刻版 —— 轻量桌面窗口（自带迷你文件服务器，直接用游戏目录里的前端）"
 authors = ["ssdz-classic"]
 edition = "2021"

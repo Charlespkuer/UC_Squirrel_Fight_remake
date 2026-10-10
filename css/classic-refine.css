@@ -367,3 +367,14 @@
 .support-url{word-break:break-all;color:#3f6ea6}
 .support-input{width:100%;box-sizing:border-box;font:20px/1.4 inherit;padding:8px 10px;
   border:2px solid #cbb98a;border-radius:10px;background:#fffdf5;color:#5c4326}
+
+/* ---------- 套装收益（数值表见 js/gamedata.js【GD6】） ----------
+ * 装备页底部一行摘要 + 装备详情里的两档阈值。家族按装备名去掉部位后缀算，
+ * 所以「忍者护额/拳套/服/鞋」都算同一套；同名跨品质也拼得起来。 */
+.gear-modal .gear-set-line{position:absolute;left:37px;bottom:80px;right:300px;
+  font-size:22px;line-height:1.35;color:#6d321d}
+.gear-set-line b{color:#9f7125}
+.gear-detail .set-name{color:#a966b9}
+.set-bonus{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.set-bonus .set-tier{font-size:24px;color:#8f734e}
+.set-bonus .set-tier.on{color:#4f872b}

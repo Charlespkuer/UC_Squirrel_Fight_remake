@@ -1353,6 +1353,136 @@
   function gearName(id) { const d = gearMap.getValue(id); return d ? d.name : ''; }
   function gearSetOf(id) { const d = gearMap.getValue(id); return d ? parseInt(d.setId) : -1; }
 
+  /* ---------- 套装收益（数值表在 gamedata.js【GD6】，原版没有这套机制） ----------
+   * 家族 = 装备名去掉部位后缀 —— 「忍者护额/拳套/服/鞋」都算**忍者**家族，
+   * 所以同名跨品质（忍者绿/蓝/紫）能拼在一起，凑名的难度比凑某个 setId 低得多。
+   * 阈值只有 2 件 / 4 件两档，4 件档**叠加**在 2 件档之上。
+   * 品质取所穿该家族装备里**最低**的那一件（整套成色按最差的一件算）。
+   * 属性类收益并进 totalStats；战斗类收益由 applySetBonuses 写成 fighter.setFx ——
+   * **独立通道**，不复用塔 buff 的 mods（那是「本局增益」，与被脱光的装备是两回事）。 */
+  const GEAR_PART_SUFFIX = /(头巾|头饰|头盔|护额|手套|拳套|拳甲|服|铠甲|衣服|鞋|短靴)$/;
+  function gearSetFamily(id) {
+    const d = gearMap.getValue(id);
+    return d ? String(d.name).replace(GEAR_PART_SUFFIX, '') : '';
+  }
+  /** 当前**实际生效**的套装件数：家族 → { family, count, quality }。
+   *  默认数玩家（`S.gears` / `S.level`）；传 `list`/`level` 就数别人（对手）。
+   *  只数「已穿戴 + 等级够」的，与 totalStats / equipmentEffects 的口径一致。 */
+  function setPieceCounts(list, level) {
+    const gears = Array.isArray(list) ? list : S.gears;
+    const lv = Number.isFinite(Number(level)) ? Number(level) : S.level;
+    const map = {};
+    for (const g of gears) {
+      if (!g || g.used !== true) continue;
+      const gi = gearInst(g.id, g.ext, g.attr);
+      if (!gi || lv < gi.useLevel) continue;
+      const family = gearSetFamily(gi.id);
+      if (!family || !GData.setBonusTable(family)) continue;   // 表里没有的家族不参与
+      const q = gearQuality(g);
+      const entry = map[family] || (map[family] = { family, count: 0, quality: q });
+      entry.count++;
+      entry.quality = Math.min(entry.quality, q);
+    }
+    return map;
+  }
+  /** 某个家族的收益合计（2 件档 + 4 件档叠加）；不足 2 件返回 null。 */
+  function setBonusOf(entry) {
+    const table = entry && GData.setBonusTable(entry.family);
+    if (!table || !(entry.count >= 2)) return null;
+    const raw = GData.SET_BONUS_RAW_KEYS || [];
+    const eff = {};
+    const add = (src) => {
+      for (const [k, v] of Object.entries(src || {})) {
+        /* 结构值（openerRounds / lowHpAt）取大值而不是相加 —— 两档都给同一个键时不该翻倍。 */
+        eff[k] = raw.includes(k)
+          ? Math.max(Number(eff[k]) || 0, Number(v) || 0)
+          : (Number(eff[k]) || 0) + Number(v);
+      }
+    };
+    add(GData.setBonusScale(entry.family, entry.quality, table[2]));
+    if (entry.count >= 4) add(GData.setBonusScale(entry.family, entry.quality, table[4]));
+    return eff;
+  }
+  /** 当前生效的套装收益：{ stats:{power,agility,speed,hp}, fx:{战斗修正} }。
+   *  不传参数就是玩家自己；对手侧由 applyFoeSetBonuses 传它自己的装备表进来。 */
+  function setBonusEffects(list, level) {
+    const raw = GData.SET_BONUS_RAW_KEYS || [];
+    const counts = setPieceCounts(list, level);
+    const stats = { power: 0, agility: 0, speed: 0, hp: 0 };
+    const fx = {};
+    for (const family of Object.keys(counts)) {
+      const eff = setBonusOf(counts[family]);
+      if (!eff) continue;
+      for (const [k, v] of Object.entries(eff)) {
+        if (GData.SET_BONUS_ATTR_KEYS.includes(k)) stats[k] += Number(v) || 0;
+        else fx[k] = raw.includes(k)
+          ? Math.max(Number(fx[k]) || 0, Number(v) || 0)
+          : (Number(fx[k]) || 0) + (Number(v) || 0);
+      }
+    }
+    return { stats, fx };
+  }
+  /** 界面用：当前生效的家族 + 每档的收益文案与下一档进度（含只有 1 件的家族）。 */
+  function setBonusList() {
+    const counts = setPieceCounts();
+    const out = [];
+    for (const family of Object.keys(counts)) {
+      const entry = counts[family], table = GData.setBonusTable(family);
+      const eff = setBonusOf(entry);
+      const tier = entry.count >= 4 ? 4 : entry.count >= 2 ? 2 : 0;
+      out.push({
+        family, count: entry.count, quality: entry.quality, tier, active: tier > 0,
+        text: eff ? GData.setBonusText(eff) : [],
+        /* 2 件与 4 件两档各自的实际数值（界面里分别列出来，让玩家看得到「下一档给什么」）。 */
+        tiers: [2, 4].map((need) => ({
+          need, on: entry.count >= need,
+          text: GData.setBonusText(GData.setBonusScale(family, entry.quality, table[need])),
+        })),
+      });
+    }
+    out.sort((a, b) => (b.count - a.count) || (b.quality - a.quality) || a.family.localeCompare(b.family));
+    return out;
+  }
+  /** 某一件装备所属家族的套装信息（装备详情面板用）。
+   *  `viewQuality` 是**正在看的那一件**的品质：一件都还没穿时，用它来预估这一套的收益数值。 */
+  function setBonusForGear(id, viewQuality) {
+    const family = gearSetFamily(id);
+    const table = GData.setBonusTable(family);
+    if (!table) return null;
+    const entry = setPieceCounts()[family] || { family, count: 0, quality: 0 };
+    const quality = entry.count ? entry.quality : integer(viewQuality, 0);
+    return {
+      family, count: entry.count, quality,
+      tiers: [2, 4].map((need) => ({
+        need, on: entry.count >= need,
+        text: GData.setBonusText(GData.setBonusScale(family, quality, table[need])),
+      })),
+    };
+  }
+  /** 把套装收益的战斗修正写进本场 fighter（属性部分已经在 totalStats 里加过）。
+   *  写在独立字段 setFx 上：sim 侧只在读 mods 的地方顺带读一次，且被真·色诱之术
+   *  脱光装备时一起失效 —— 它本来就是装备给的。
+   *  `list`/`level` 不传就是玩家；对手侧走 applyFoeSetBonuses。 */
+  function applySetBonuses(fighter, list, level) {
+    if (!fighter || typeof fighter !== 'object') return null;
+    const fx = setBonusEffects(list, level).fx;
+    if (!Object.keys(fx).length) { delete fighter.setFx; return null; }
+    fighter.setFx = fx;
+    return fx;
+  }
+  /** **对手侧**：把套装收益（属性 + 战斗修正）落到 genAI 造出来的对手身上。
+   *  注意：**挑战塔 / 无尽塔的敌人不走这里** —— tower.js 的 buildFoe 自己按层数曲线造敌人，
+   *  那边的「套装」只用来决定外观（`wearsOf` 给的是贴图 wears），所以塔里两边都不吃套装收益。 */
+  function applyFoeSetBonuses(foe, gears, level) {
+    if (!foe || typeof foe !== 'object') return null;
+    const eff = setBonusEffects(gears, level);
+    foe.power += eff.stats.power;
+    foe.agility += eff.stats.agility;
+    foe.speed += eff.stats.speed;
+    foe.hp += eff.stats.hp;          // 对手的 hp 就是它的生命上限（与上面装备主属性的加法同口径）
+    return applySetBonuses(foe, gears, level);
+  }
+
   /* ---------- 融合的两条核心规则（数值都提在这里，方便调） ----------
    * ① 同名继承 / 变异狂战：只有「2 件同名」「3 件同名」才触发，两者互斥、概率加起来是 1。
    *    3 件同名比 2 件同名更容易保住原名。变异目标是狂战套（setId 51，紫档 id 201-204）；
@@ -1532,6 +1662,10 @@
       else if (gi.type === 2) hp += val;
       else speed += val;
     }
+    /* 套装收益的**属性部分**（战斗修正部分在 applySetBonuses，开局写进 fighter.setFx）。
+     * 只有「同一家族 ≥2 件」才生效，与装备主属性同一口径、一起被色诱之术脱掉。 */
+    const setStats = setBonusEffects().stats;
+    power += setStats.power; agility += setStats.agility; speed += setStats.speed; hp += setStats.hp;
     // 被动技能
     const sk = mySkills();
     const has = (id) => sk.find((x) => x.id === id);
@@ -2431,6 +2565,9 @@
         foe.effects[ext.id] = Math.max(foe.effects[ext.id] || 0, values[ext.level - 1]);
       }
     }
+    /* 套装收益：**对手也吃**（与玩家同一条数值表、同一套口径）。
+     * 挑战塔 / 无尽塔的敌人不经过这里（tower.js 的 buildFoe 自己造），所以那两种模式不受影响。 */
+    applyFoeSetBonuses(foe, foe.gears || [], finalLevel);
     for (const value of skills) {
       const skill = skillInst(value);
       const stat = { 1: 'power', 2: 'agility', 3: 'speed', 4: 'hp' }[skill.id];
@@ -2967,6 +3104,8 @@
     // 师徒
     apprenticeCap, learnSkill, setMaster, clearMaster, addPrentice, removePrentice,
     gearPart, gearPartQuality, gearIdsOf, autoEnergyPotion,
+    gearSetFamily, setPieceCounts, setBonusOf, setBonusEffects, setBonusList, setBonusForGear,
+    applySetBonuses, applyFoeSetBonuses,
     apprenticeDailyExp, apprenticeDailyGold, apprenticeDailyTotal, apprenticeDailyStatus,
     apprenticeLevelSum, apprenticeTributeRatio, claimApprenticeExp, canKickToday, kickPrentice,
     beginRecruitChallenge, finishRecruitChallenge, cancelRecruitChallenge,

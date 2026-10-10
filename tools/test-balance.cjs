@@ -221,7 +221,12 @@ test('同级AI基础成长预算一致，武技等级门槛及装备词条不越
       expected[['agility','power','hp','speed'][info.type]]+=info.abilityVal;
     }
     for(const value of foe.skills){const[id,lv]=value.split(':').map(Number),attr={1:'power',2:'agility',3:'speed',4:'hp'}[id];if(attr)expected[attr]+=Math.round(g.GData.passiveBonus(id,lv)*(1+(effects[id+26]||0)/100));}
+    /* 需求147：对手也吃套装收益（属性并进面板、战斗修正写 foe.setFx）——
+     * 这里是「AI 面板 = 裸属性 + 装备 + 被动 + 套装」的最后一项。 */
+    const setEff=g.State.setBonusEffects(foe.gears||[],level);
+    for(const attr of ['power','agility','speed','hp'])expected[attr]+=setEff.stats[attr];
     for(const attr of ['power','agility','speed','hp'])assert.equal(foe[attr],expected[attr]);same(foe.effects,effects);
+    same(foe.setFx||{},setEff.fx);
   }
 });
 

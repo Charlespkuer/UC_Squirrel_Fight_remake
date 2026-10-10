@@ -59,7 +59,9 @@ if (-not $root) {
   Read-Host '按回车键关闭'
   exit 1
 }
-Set-Location -LiteralPath $root
+# 故意不 Set-Location 到游戏目录：一个进程只要把游戏目录当工作目录，Windows 就拒绝
+# 改名/移动该目录（MoveFileEx 报 ERROR_ACCESS_DENIED，Explorer 显示成「正在被使用」）。
+# 下面所有路径都用 Join-Path $root 拼成绝对路径，不依赖工作目录。
 
 if (-not $sync) { $sync = Join-Path $root 'scripts\sync\sync.js' }
 if (-not (Test-Path -LiteralPath $sync)) { $sync = Join-Path $root 'tools\sync\sync.js' }

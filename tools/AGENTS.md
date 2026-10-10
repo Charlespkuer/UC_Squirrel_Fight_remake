@@ -30,7 +30,7 @@
 
 | 类别 | 文件 |
 |---|---|
-| 构建 | `build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK） |
+| 构建 | `build-release.ps1`（一键出包：版本对齐 + exe/安装包/APK + 清旧包 + 清 ~10GB 缓存）、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK） |
 | 回归 | `test-*.cjs`（主题套件）、`test-battle.js`、`check-asset-paths.cjs`（资源引用检查） |
 | 数值 / 数据 | `gen-vendor-data.cjs`、`stage-balance.cjs`、`test-balance.cjs` |
 | 指南 | `publish-guide.md`、`tauri-guide.md` |

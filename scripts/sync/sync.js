@@ -1322,7 +1322,11 @@ function winTaskXml() {
     '    <Exec>\n' +
     '      <Command>' + esc(cmd) + '</Command>\n' +
     '      <Arguments>' + esc(arg) + '</Arguments>\n' +
-    '      <WorkingDirectory>' + esc(ROOT) + '</WorkingDirectory>\n' +
+    // 故意不写 <WorkingDirectory>：任务计划会拿它当进程的工作目录，而一个进程
+    // 只要把游戏目录当工作目录，Windows 就拒绝改名/移动该目录（MoveFileEx 报
+    // ERROR_ACCESS_DENIED，Explorer 显示成「文件夹正在被使用」）。这里曾经写成
+    // ROOT，导致游戏目录永远改不了名，重启也没用（任务登录即重建）。
+    // sync.js 全部路径都来自 __dirname，不依赖工作目录。
     '    </Exec>\n' +
     '  </Actions>\n' +
     '</Task>\n';
@@ -1393,11 +1397,13 @@ async function daemonStart(quiet) {
   }
   const out = fs.openSync(OUT_LOG, 'a'), err = fs.openSync(ERR_LOG, 'a');
   const hidden = process.platform === 'win32' && fs.existsSync(WIN_HIDDEN_VBS);
+  // 不传 cwd：让游戏目录当工作目录会让它无法改名/移动（见上面 winTaskXml 的说明）。
+  // 起的是 sync.js 自己，它只用 __dirname，工作目录给不给都一样。
   const child = hidden
     ? spawn((process.env.SystemRoot || 'C:\\Windows') + '\\System32\\wscript.exe',
-        ['//B', '//Nologo', WIN_HIDDEN_VBS], { detached: true, stdio: 'ignore', cwd: ROOT, windowsHide: true })
+        ['//B', '//Nologo', WIN_HIDDEN_VBS], { detached: true, stdio: 'ignore', windowsHide: true })
     : spawn(process.execPath, [__filename, 'serve', '--port', String(cfg.port)], {
-        detached: true, stdio: ['ignore', out, err], cwd: ROOT,
+        detached: true, stdio: ['ignore', out, err],
       });
   child.unref();
   for (let i = 0; i < 40; i++) {
@@ -1448,7 +1454,8 @@ function autostartInstall() {
       '    <string>' + escapeXml(__filename) + '</string>\n' +
       '    <string>serve</string>\n' +
       '  </array>\n' +
-      '  <key>WorkingDirectory</key><string>' + escapeXml(ROOT) + '</string>\n' +
+      // 同样不写 WorkingDirectory：macOS 上把游戏目录当工作目录，一样会让它没法移动/改名。
+      // sync.js 只用 __dirname，不需要工作目录。
       '  <key>RunAtLoad</key><true/>\n' +
       '  <key>ProcessType</key><string>Background</string>\n' +
       '  <key>StandardOutPath</key><string>' + escapeXml(OUT_LOG) + '</string>\n' +

@@ -691,6 +691,10 @@
     };
     // 挑战塔等玩法在构建完玩家面板后注入本场的 buff 修正（属性乘区/护盾/吸血等）。
     if (typeof opts.adjustMe === 'function') opts.adjustMe(me);
+    /* 套装收益：属性部分已经在 totalStats 里加过，这里只落战斗修正（fighter.setFx）。
+     * 放在 adjustMe **之后** —— 塔的 buff 走 mods、套装走 setFx，两包互不覆盖；
+     * 也不吃塔的「增幅水晶」全局倍率（那是本局增益的倍率，装备收益不该被它放大）。 */
+    State.applySetBonuses(me);
     mode = 'battle';
     cancelAnimationFrame(rafId);
     $('#ui').innerHTML = '';

@@ -22,6 +22,14 @@
  *                 roundStatPct, catchUpPct, roundMaxHpMul, firstDodge,
  *                 emptyMaxHpMul, lowHpTakenMul, lowHpLifestealPct, lowHpRegenPct/lowHpRegenAt,
  *                 lowHpPowerMul/lowHpAgilityMul/lowHpSpeedMul/lowHpAt}
+ *   fighter.setFx: 套装收益的战斗修正包（**装备派生**，与塔 buff 的 mods 分开走一条通道，
+ *                 见 gamedata.js【GD6】/ state.js 的 applySetBonuses）。键与同名 mods 键同单位：
+ *                 { dmgMul, critBonus, critDmgBonus, dodgeBonus, takenMul, lifestealPct,
+ *                   thornsPct, shellPct, regenPct, openerPowerMul/openerRounds,
+ *                   lowHpAt, lowHpPowerMul, lowHpSpeedMul, lowHpTakenMul, lowHpLifestealPct,
+ *                   lowHpFinalMul }
+ *                 低血那一组用自己的 lowHpAt 判定（setLowHpActive），不会被塔 buff 的阈值覆盖；
+ *                 被真·色诱之术脱光装备（stripped）时整包失效。
  * ============================================================ */
 
 /* ------------------------------------------------------------
@@ -177,13 +185,16 @@
       buffFlat: { power: 0, agility: 0, speed: 0 },
       // —— 挑战塔扩展状态 ——
       mech, mods,
+      /* 套装收益（装备派生，独立通道；见 gamedata.js【GD6】）。 */
+      setFx: f.setFx && typeof f.setFx === 'object' ? Object.assign({}, f.setFx) : null,
       // 机制的可调数值（tower-data.js 里定，题面文本与判定共用一份，避免文案/数值走偏）
       mechParams: f.mechParams && typeof f.mechParams === 'object' ? f.mechParams : null,
       // 松鼠对手的固定出招循环（tower-data.js 定义）：['common'|'weapon'|'skill', …]
       pattern: Array.isArray(f.pattern) && f.pattern.length ? f.pattern.slice() : null,
       patternStep: 0,
       mechState: { basePower: stat(f.power, 1), berserk: false, core: false, coreStack: 0, bfStep: 0, erode: 0 },
-      shell: Math.round(fullHp * ((mech.includes('shell') ? 0.30 : 0) + (mods && mods.shellPct || 0))),
+      shell: Math.round(fullHp * ((mech.includes('shell') ? 0.30 : 0) + (mods && mods.shellPct || 0)
+        + (f.setFx && Number(f.setFx.shellPct) || 0))),
       pendingNote: null,
     };
   }
@@ -248,6 +259,8 @@
     // 塔 buff「狂怒」：自己血量低于阈值时攻击提升（只有进攻方结算，所以放在这里）
     const rage = c.mods && Number(c.mods.lowHpPowerMul) || 0;
     if (rage > 0 && lowHpActive(c)) p *= 1 + rage;
+    /* 套装收益的低血加攻（螳螂 / 狂战套）：用自己的阈值单独判一次。 */
+    if (setLowHpActive(c)) p *= 1 + setFx(c, 'lowHpPowerMul');
     /* 塔 buff「开局狂热」：按**本次战斗的出手次数**分档 ——
      * 前 openerRounds 次出手 ×(1+openerPowerMul)，之后 ×(1-fatiguePowerMul)。
      * 玩家与敌人共用这段逻辑，但只有拿到该 buff 的一方 mods 里才有这两个字段。 */
@@ -263,6 +276,12 @@
       const wFatigue = Number(c.mods.weaponBoostFatigueMul) || 0;
       const wCap = Number(c.mods.weaponBoostUses) || 0;
       if (wFatigue > 0 && wCap > 0 && (Number(c.weaponUses) || 0) > wCap) p *= 1 - wFatigue;
+    }
+    /* 套装收益的「开场强攻」（仙鹤套）：开场前 N 次出手加攻，没有疲劳段。 */
+    const setOpener = setFx(c, 'openerPowerMul');
+    if (setOpener > 0) {
+      const rounds = Math.max(1, Number(c.setFx && c.setFx.openerRounds) || 3);
+      if ((Number(c.acts) || 1) <= rounds) p *= 1 + setOpener;
     }
     return Math.max(1, Math.round(p));
   }
@@ -328,10 +347,11 @@
    * 这一击打不到阈值线时整段全额（原来也是这样）。多次伤害/多段武器逐段结算，
    * 因为调用方每段都会传入「当前血量」，第二段自然就整段吃减伤了。
    */
-  function lowHpTakenDamage(def, dmg, mul) {
+  function lowHpTakenDamage(def, dmg, mul, at) {
     const d = Math.max(0, Number(dmg) || 0);
     const cut = Math.max(0, 1 + (Number(mul) || 0));            // 减伤后的倍率（0~1）
-    const th = Number(def.mods && def.mods.lowHpAt) || 0;
+    /* 阈值默认取塔 buff 的 lowHpAt；套装收益（幕府套）传自己的 lowHpAt 进来。 */
+    const th = Number(at != null ? at : (def.mods && def.mods.lowHpAt)) || 0;
     const maxHp = Math.max(0, Number(def.maxHp) || 0);
     const hp = Math.max(0, Number(def.hp) || 0);
     if (!(th > 0) || !(maxHp > 0)) return Math.round(d * cut);  // 没阈值：整段减伤（旧口径）
@@ -353,9 +373,26 @@
     let v = statOf(c, 'speed') * (1 - c.debuffs.speed / 100) + c.buffFlat.speed;
     const m = c.mods && Number(c.mods.lowHpSpeedMul) || 0;
     if (m > 0 && lowHpActive(c)) v *= 1 + m;
+    if (setLowHpActive(c)) v *= 1 + setFx(c, 'lowHpSpeedMul');   // 套装收益（螳螂套）
     return Math.max(1, Math.round(v));
   }
   function effect(c, id) { return stripped(c) ? 0 : Math.max(0, Number(c.effects[id]) || 0); }
+  /* ---------- 套装收益（装备派生，见 gamedata.js【GD6】） ----------
+   * 走**独立通道** `c.setFx`，不复用塔 buff 的 `c.mods`：
+   *   · 它本来就是「装备给的」，所以被真·色诱之术脱光装备（stripped）时一并失效；
+   *   · 塔 buff 的 lowHpAt / openerRounds 是本局增益的结构值，不能被套装覆盖或反向污染。
+   * 单位与同名 mods 键**完全一致**（比例用 0.06、百分点用 6），方便两边对照着调。 */
+  function setFx(c, key) {
+    if (!c || !c.setFx || stripped(c)) return 0;
+    const v = Number(c.setFx[key]);
+    return Number.isFinite(v) ? v : 0;
+  }
+  /** 套装自己的低血阈值（与塔 buff 的 lowHpAt 各判各的）。 */
+  function setLowHpActive(c) {
+    if (!c || !c.setFx || stripped(c)) return false;
+    const th = Number(c.setFx.lowHpAt);
+    return !!(th > 0 && c.maxHp > 0 && c.hp <= c.maxHp * th);
+  }
   /** 真级工具：等级 11~15 = 真1~真5。 */
   const trueLvOf = (level) => (window.GData && GData.trueLevel ? GData.trueLevel(level) : Math.max(0, Math.min(5, (Number(level) || 0) - 10)));
   const trueVal = (id, level) => (window.GData && GData.trueSkillValue ? GData.trueSkillValue(id, level) : 0);
@@ -365,8 +402,8 @@
   function weaponEffect(w, base, perLevel, perTrueLevel) {
     return base + perLevel * (Math.min(w.level, 10) - 1) + (perTrueLevel || 0) * Math.max(0, w.level - 10);
   }
-  /** 塔 buff 的暴击伤害加成（比例）。 */
-  function critDmgBonus(att) { return (att.mods && Number(att.mods.critDmgBonus) || 0) / 100; }
+  /** 塔 buff 的暴击伤害加成（比例）＋ 套装收益的暴击伤害。 */
+  function critDmgBonus(att) { return ((att.mods && Number(att.mods.critDmgBonus) || 0) + setFx(att, 'critDmgBonus')) / 100; }
 
   function pickOne(list) { return list[Math.floor(Math.random() * list.length)]; }
   /** 「本场没用过」的基准权重；用过的按各自的二次使用概率降权，所以一用再用会被明显压掉。 */
@@ -503,6 +540,7 @@
     d *= 1 + (shift + def.swordDodge + def.meteorDodge) / 100;
     if (def.mods && def.mods.dodgeBonus) d += Number(def.mods.dodgeBonus);   // 塔 buff「凌波微步」（加算）
     if (def.mods && def.mods.dodgeMul) d *= 1 + Number(def.mods.dodgeMul);   // 塔 buff「烟幕」：闪避率 ×(1+n)
+    d += setFx(def, 'dodgeBonus');                                           // 套装收益（忍者套等）
     return clamp(d, 0, 55);
   }
 
@@ -510,6 +548,7 @@
     let c = 5;
     if (skill(att, 9)) c += 2 * skill(att, 9);                  // 暴击
     if (att.mods && att.mods.critBonus) c += Number(att.mods.critBonus);   // 塔 buff「鹰眼」
+    c += setFx(att, 'critBonus');                               // 套装收益（拳斗 / 狂战套）
     return c;
   }
 
@@ -606,9 +645,14 @@
       out.dmg = Math.round(out.dmg * (100 - pct) / 100);
     }
     if (def.mods && def.mods.takenMul) out.dmg = Math.round(out.dmg * (1 + Number(def.mods.takenMul)));   // 塔 buff「铁布衫」
+    const setTaken = setFx(def, 'takenMul');                       // 套装收益（骑士/幕府减伤、诅咒增伤）
+    if (setTaken) out.dmg = Math.round(out.dmg * (1 + setTaken));
     if (def.mods && Number(def.mods.lowHpTakenMul)) {
       out.dmg = lowHpTakenDamage(def, out.dmg, Number(def.mods.lowHpTakenMul));
     }
+    /* 套装收益的低血减伤（幕府套）：沿用同一套「按阈值线切两段」的算法，阈值单独传。 */
+    const setLowTaken = setFx(def, 'lowHpTakenMul');
+    if (setLowTaken) out.dmg = lowHpTakenDamage(def, out.dmg, setLowTaken, Number(def.setFx && def.setFx.lowHpAt) || 0);
     if (def.mech.includes('trialCore')) {
       /* 题面·熔核·炽壳：**每过一回合**再叠一层减伤（10%/层，第 8 回合起封顶 70%）——
        * 以前是「第 7 次行动突然 −70%」，现在是逐回合变硬，前期就该开始提速。 */
@@ -690,6 +734,8 @@
       opts = opts || {};
       const action = opts.action || r.action;
       if (att.mods && att.mods.dmgMul) rawDmg = Math.round(rawDmg * Number(att.mods.dmgMul));   // 塔 buff 伤害乘区（猎侠者/机制破解/精英杀手等，tower.js 按对手预算好）
+      const setDmgMul = 1 + setFx(att, 'dmgMul');                                                 // 套装收益的伤害乘区（挑斗/维京/诅咒套）
+      if (setDmgMul !== 1) rawDmg = Math.round(rawDmg * setDmgMul);
       if (action === 'skill') {
         rawDmg = Math.round(rawDmg * (1 + effect(att, 8) / 100));
         /* 真·皮糙肉厚：额外压制对手的暴击率（真5 压 50%）。
@@ -711,6 +757,12 @@
       if (dmg > 0 && att.mods && Number(att.mods.lowHpFinalMul) > 0 && lowHpActive(att)) {
         dmg = Math.round(dmg * (1 + Number(att.mods.lowHpFinalMul)));
         r.rageFinalMul = Number(att.mods.lowHpFinalMul);
+      }
+      /* 套装收益的「低血终乘」（狂战套）：与塔 buff 的狂怒同一位置、同一口径，
+       * 但判据用套装自己的阈值（setLowHpActive），两者互不干扰。 */
+      if (dmg > 0 && setLowHpActive(att)) {
+        const setFinal = setFx(att, 'lowHpFinalMul');
+        if (setFinal > 0) { dmg = Math.round(dmg * (1 + setFinal)); r.setLowHpFinalMul = setFinal; }
       }
       /* 塔 buff「风影身法」：每场战斗**第一次受到攻击时必定闪避**。
        * 放在这里与「先机预判」（首次伤害为 0）同一处：已经把命中判完、伤害算出来了，
@@ -795,12 +847,14 @@
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
           reflectHurt(att, reflect, r);
         }
-        // 塔 buff「荆棘之甲」：玩家侧反伤（跨层类）
-        const thornsPct = def.mods && Number(def.mods.thornsPct) || 0;
+        // 塔 buff「荆棘之甲」/ 套装反伤：玩家侧反伤（跨层类）
+        const modThorns = def.mods && Number(def.mods.thornsPct) || 0;
+        const thornsPct = modThorns + setFx(def, 'thornsPct');
         if (thornsPct > 0 && att.hp > 0 && !noReflect) {
           const reflect = Math.max(1, Math.round(dmg * thornsPct));
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
-          r.noteText = (r.noteText ? r.noteText + '·' : '') + '荆棘之甲'; r.noteSide = def.side;
+          /* 只有塔 buff 那一份才打「荆棘之甲」的飘字 —— 光靠套装反伤不该顶着 buff 的名字。 */
+          if (modThorns > 0) { r.noteText = (r.noteText ? r.noteText + '·' : '') + '荆棘之甲'; r.noteSide = def.side; }
           reflectHurt(att, reflect, r);
         }
         // 题面·镜鳞：单次伤害超过阈值（默认 20% 最大生命）时，反弹该次伤害的 45%
@@ -833,9 +887,10 @@
           r.poisonApplied = true;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '毒藤缠绕'; r.noteSide = def.side;
         }
-        let lsPct = (att.mech.includes('lifesteal') ? 0.30 : 0) + (att.mods && Number(att.mods.lifestealPct) || 0);
-        /* 低血吸血（濒死觉悟）：同样读 lowHpAt，按**攻击方当前血量**判定。 */
+        let lsPct = (att.mech.includes('lifesteal') ? 0.30 : 0) + (att.mods && Number(att.mods.lifestealPct) || 0) + setFx(att, 'lifestealPct');
+        /* 低血吸血（濒死觉悟 / 狂战套）：各读各的阈值，按**攻击方当前血量**判定。 */
         if (att.mods && att.mods.lowHpLifestealPct && lowHpActive(att)) lsPct += Number(att.mods.lowHpLifestealPct) || 0;
+        if (setLowHpActive(att)) lsPct += setFx(att, 'lowHpLifestealPct');
         if (lsPct > 0 && att.hp > 0) {                              // 血之渴望 / 血饮狂刀
           const heal = Math.min(att.maxHp - att.hp, healOf(att, dmg * lsPct));
           if (heal > 0) { att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
@@ -1361,7 +1416,7 @@
         if (def.hp <= 0) { if (godSave(def)) def.hp = 1; else break; }
       }
       // 回合开始回复（药师「百草回春」/ 塔 buff「活血丹」「回春术」）
-      const regenPct = (actor.mech.includes('regen') ? 0.03 : 0) + (actor.mods && Number(actor.mods.regenPct) || 0);
+      const regenPct = (actor.mech.includes('regen') ? 0.03 : 0) + (actor.mods && Number(actor.mods.regenPct) || 0) + setFx(actor, 'regenPct');
       /* 塔 buff「浴血重生」：低血时每回合回血，但**最多回到 lowHpRegenAt 这条线**
        *（把血线顶回阈值就停，不会靠回血脱出低血区）。 */
       const lrPct = (actor.mods && Number(actor.mods.lowHpRegenPct) || 0);

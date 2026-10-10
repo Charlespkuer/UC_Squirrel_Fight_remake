@@ -665,6 +665,40 @@ test('装备穿戴等级、槽位互斥、融合材料和附加属性生效', ()
   assert.equal(s.goldPoint, 70);   // 白装融合 30 金松果（按材料品质分档）
 });
 
+test('需求146：套装收益 —— 同名 2/4 件两档、按最低品质缩放，且真的进战斗', () => {
+  const g = game(), s = g.State.state();
+  s.level = 30;
+  const wear = (id) => { const it = g.State.addGear(id); assert.equal(g.State.wear(it.key), true, id + ' 可穿戴'); return it; };
+  const ninja = () => g.State.setBonusList().find((x) => x.family === '忍者');
+  /* 忍者紫（setId 15：护额 57 / 拳套 58 / 服 59 / 鞋 60）——先穿 2 件，只拿到 2 件档 */
+  wear(58); wear(59);
+  assert.equal(ninja().count, 2); assert.equal(ninja().tier, 2);
+  same(ninja().text, ['闪避率 +3.9%']);        // 2 × 紫装系数 1.3 × 全局 1.5
+  assert.equal(g.State.totalStats().speed, s.speed);       // 2 件档还没给速度
+  /* 补满 4 件：4 件档**叠加**在 2 件档上（先穿鞋、再穿护额，中间取一次基准） */
+  wear(60);
+  const speedWithShoe = g.State.totalStats().speed;      // 忍者鞋自身那段，此时还只有 2 件档
+  wear(57);
+  assert.equal(ninja().tier, 4);
+  same(ninja().text, ['速度 +2', '闪避率 +9.8%']);   // 速度 1×1.3×1.5 取整；闪避 (2+3)×1.3×1.5
+  assert.equal(g.State.setBonusEffects().stats.speed, 2);
+  assert.equal(g.State.totalStats().speed, speedWithShoe + 2);   // 套装的速度加成进了属性合计
+  /* 换掉一件紫手套 → 蓝手套（同家族、不同品质）：整套按**最低**品质算，收益掉到蓝装档 */
+  const blue = g.State.addGear(30);
+  assert.equal(g.State.wear(blue.key), true);
+  assert.equal(ninja().count, 4); assert.equal(ninja().quality, 2);
+  same(ninja().text, ['速度 +2', '闪避率 +7.5%']);
+  /* 战斗侧：走独立通道 setFx（不是塔 buff 的 mods），固定随机流下 A/B 对比 */
+  const me = { name: '我', level: 30, power: 40, agility: 40, speed: 40, hp: 400, maxHp: 400, weapons: [], skills: [], effects: {} };
+  const foe = { name: '敌', level: 30, power: 30, agility: 30, speed: 30, hp: 300, maxHp: 300, weapons: [], skills: [], effects: {} };
+  assert.equal(g.State.applySetBonuses(me), me.setFx);
+  assert.equal(me.setFx.dodgeBonus, 7.5);
+  const reseed = () => { let seed = 999; g.math.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; }; };
+  reseed(); const plain = g.Sim.simulate({ ...me, setFx: null }, foe, {}).rounds.length;
+  reseed(); const buffed = g.Sim.simulate({ ...me, setFx: { dmgMul: 2 } }, foe, {}).rounds.length;
+  assert.ok(buffed < plain, '套装收益的伤害乘区要真的缩短战斗：' + plain + ' → ' + buffed);
+});
+
 test('1/5/10/15/20 级礼包：金松果回到旧版数量，种类更丰富且不重复发放', () => {
   const g = game(), s = g.State.state();
   // 原表（GameDict）保持逐字节不动，实际清单在 GData.GIFT_PACK_BOOST 里

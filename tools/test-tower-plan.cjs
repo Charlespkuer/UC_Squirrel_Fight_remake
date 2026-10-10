@@ -220,6 +220,28 @@ test('削弱后的 monk 不再是碾压级 boss（实战胜率不再垫底）', 
   for (const s of foe.skills) assert.ok(s.level <= 8, '实战里技能等级仍然偏高（buildFoe 会 +3）：' + JSON.stringify(foe.skills));
 });
 
+test('需求147：挑战塔 / 无尽塔的敌人不吃套装收益（塔里的套装只决定外观）', () => {
+  const c = setup();
+  c.__seed(4321);
+  assert.ok(c.Tower.startTowerRun().ok, '应该能开挑战塔');
+  const t = c.Tower.nextBattle('tower');
+  assert.ok(t && t.foe, '挑战塔第一场应当能构建出敌人');
+  assert.equal(t.foe.setFx, undefined, '挑战塔敌人不该带套装收益（setFx）：' + t.foe.name);
+  c.Tower._debugSetLayer(9);
+  assert.ok(c.Tower.startEndlessRun().ok, '应该能开一局无尽塔');
+  const seen = [];
+  for (let layer = 1; layer <= 8 && seen.length < 4; layer++) {
+    c.Tower._debugSetEndlessLayer(layer);
+    const nx = c.Tower.nextBattle('endless');
+    if (!nx || nx.ok === false || !nx.foe) continue;          // 商店 / 选择点：跳过这一层
+    seen.push(nx.foe);
+    const after = c.Tower._debugRun('endless');
+    if (after.attempt) c.Tower.reportBattle('endless', after.attempt, true, 1, null);
+  }
+  assert.ok(seen.length >= 3, '应当能取到几场无尽塔敌人做样本：' + seen.length);
+  for (const foe of seen) assert.equal(foe.setFx, undefined, '无尽塔敌人不该带套装收益（setFx）：' + foe.name);
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

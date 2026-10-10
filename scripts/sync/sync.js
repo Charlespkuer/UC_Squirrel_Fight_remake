@@ -32,6 +32,9 @@
  *       --peer <名字或IP> / --interval <秒>（watch）
  *
  * 安全：接收端只在 <游戏目录> 里读写，路径必须是一段段普通目录（挡掉 ../、盘符），
+ *   · 更新通道：/local/update/check | /local/update/run（游戏内「一键拉取远端更新」，
+ *     实际执行 scripts/update-game.js；放在这里是因为轻壳 exe 的内置服务器要重编才有 /__update，
+ *     而这个服务本来就是「本机 agent」+ Node，旧 exe 也能靠它一键更新。）
  *       忽略清单里的东西永远不传；/api/* 需要 x-ssdz-token 与配置里的口令一致；
  *       /local/* 只允许本机（127.0.0.1）调用，且带 Origin 时必须是 127.0.0.1/localhost。
  * ============================================================ */
@@ -42,7 +45,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { spawn, execFileSync } = require('child_process');
+const { spawn, execFile, execFileSync } = require('child_process');
 
 // ---------------------------------------------------------------- 常量与路径
 
@@ -1053,6 +1056,27 @@ function allowedOrigin(req) {
   return undefined;
 }
 
+/** 跑一次 scripts/update-game.js（固定参数、白名单由调用方校验），把它的 JSON 结果拿回来。 */
+function runUpdateHelper(args) {
+  return new Promise((resolve) => {
+    const helper = path.join(ROOT, 'scripts', 'update-game.js');
+    if (!fs.existsSync(helper)) return resolve({ ok: false, code: 'NO_HELPER', msg: '这个游戏目录里没有 scripts/update-game.js，没法一键更新' });
+    execFile(process.execPath, [helper, '--json'].concat(args),
+      { timeout: 1800000, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+        const last = String(stdout || '').trim().split('\n').filter(Boolean).pop() || '';
+        let parsed = null;
+        try { parsed = JSON.parse(last); } catch (e) { parsed = null; }
+        if (parsed) {
+          parsed.log = String(stderr || '').trim().split('\n').filter(Boolean).slice(-8);
+          resolve(parsed);
+        } else {
+          resolve({ ok: false, code: 'HELPER_FAILED',
+            msg: ((err && err.message) || '更新脚本没有返回结果') + (stderr ? '：' + String(stderr).trim().slice(-300) : '') });
+        }
+      });
+  });
+}
+
 function createServer() {
   return http.createServer(async (req, res) => {
     let url;
@@ -1151,6 +1175,28 @@ function createServer() {
         if (p === '/local/progress') {
           return sendJson(res, 200, Object.assign({ ok: true }, jobSnapshot()), cors);
         }
+        /* ---------- 一键拉取远端更新（游戏内「游戏更新」面板） ----------
+         * 放在同步服务里而不是只放壳里：轻壳 exe 的内置服务器要重编才有 /__update，
+         * 而这里是「本机 agent」（只允许 127.0.0.1 页面 + Origin 校验）+ Node，旧 exe 也能用。 */
+        if (p === '/local/update/check') {
+          const plat = String(url.searchParams.get('platform') || '');
+          const args = ['--mode=check'];
+          if (/^(darwin|win32|linux|android)$/.test(plat)) args.push('--platform=' + plat);
+          return sendJson(res, 200, await runUpdateHelper(args), cors);
+        }
+        if (p === '/local/update/run') {
+          if (req.method !== 'POST') return sendJson(res, 405, { ok: false, code: 'NEED_POST', msg: '更新动作只接受 POST' }, cors);
+          const mode = String(url.searchParams.get('mode') || 'auto');
+          const asset = String(url.searchParams.get('asset') || '');
+          const plat = String(url.searchParams.get('platform') || '');
+          if (!['auto', 'git', 'release'].includes(mode)) return sendJson(res, 400, { ok: false, code: 'BAD_MODE', msg: '不认识的更新方式' }, cors);
+          if (asset && !/^[A-Za-z0-9._-]{1,120}$/.test(asset)) return sendJson(res, 400, { ok: false, code: 'BAD_ASSET', msg: '资源名不合法' }, cors);
+          const args = ['--mode=' + mode, '--root=' + ROOT];
+          if (url.searchParams.get('dry') === '1') args.push('--dry');
+          if (asset) args.push('--asset=' + asset);
+          if (/^(darwin|win32|linux|android)$/.test(plat)) args.push('--platform=' + plat);
+          return sendJson(res, 200, await runUpdateHelper(args), cors);
+        }
         // 同步存档之前先看一眼两边「进度」：被覆盖的那一侧更靠前时，页面会先确认一次
         if (p === '/local/save/preview') {
           const peer = await resolvePeer(url.searchParams.get('peer') || '');
@@ -1165,7 +1211,9 @@ function createServer() {
         const m = p.match(/^\/local\/(save|files)\/(push|pull)$/);
         if (m && req.method === 'POST') {
           const kind = m[1], dir = m[2];
-          const opts = { force: url.searchParams.get('force') === '1' };
+          /* dry=1：只比对清单、报「会传几个文件」，不写任何东西 ——
+           * 游戏里的「一键更新」用它先给玩家看一眼这次要更新多少文件。 */
+          const opts = { force: url.searchParams.get('force') === '1', dry: url.searchParams.get('dry') === '1' };
           let peer = null;
           try {
             peer = await resolvePeer(url.searchParams.get('peer') || '');

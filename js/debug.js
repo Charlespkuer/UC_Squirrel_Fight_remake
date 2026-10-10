@@ -327,8 +327,33 @@
     const r = Tower._debugShiftEndlessLayer(delta);
     if (!r || !r.ok) return (r && r.msg) || '没成功';
     renderOwned();
-    if (window.TowerUI && TowerUI.openEndless && State.state().endless && State.state().endless.run) TowerUI.openEndless();
+    refreshEndlessPage();
     return '无尽塔：现在是第 ' + r.layer + ' 层';
+  }
+  /** 无尽塔界面刷新：有对局就重画无尽主界面（与 grantBuff / shiftEndlessLayer 同一行为）。 */
+  function refreshEndlessPage() {
+    try {
+      if (window.TowerUI && TowerUI.openEndless && window.State && State.state()
+          && State.state().endless && State.state().endless.run) TowerUI.openEndless();
+    } catch (e) { /* 界面刷新失败不影响数值 */ }
+  }
+  /** 无尽塔专属调试：**直接发试炼币**（数量由面板输入框决定，等价于 E02/E03）。 */
+  function grantEndlessCoins(count) {
+    if (!(window.Tower && Tower._debugGrantCoins)) return '当前版本没有这个接口';
+    const r = Tower._debugGrantCoins(count);
+    if (!r || !r.ok) return (r && r.msg) || '没成功';
+    renderOwned();
+    refreshEndlessPage();
+    return '试炼币 +' + r.amount + '（第 ' + r.layer + ' 层现有 ' + r.total + '）';
+  }
+  /** 无尽塔专属调试：**直接发铸币**（数量由面板输入框决定，等价于 E09/E10）。 */
+  function grantEndlessMint(count) {
+    if (!(window.Tower && Tower._debugGrantMint)) return '当前版本没有这个接口';
+    const r = Tower._debugGrantMint(count);
+    if (!r || !r.ok) return (r && r.msg) || '没成功';
+    renderOwned();
+    refreshEndlessPage();
+    return '铸币 +' + r.amount + '（现有 ' + r.total + ' 枚）';
   }
 
   /* 8 金松果 / 15 经验 / 40 金杯在原版里就是货币或经验值，不是背包道具：
@@ -418,6 +443,13 @@
       '<div class="debug-grant-row debug-quick"><span class="debug-ws-tag">商店</span>' +
       '<button type="button" class="uc-button tiny" data-mint-shop="1" title="无尽塔专属：立刻生成一个铸币商店（跳过 5%~10% 的概率与层区间判定，也不占本组的自然刷出名额）">铸币商店</button>' +
       '<button type="button" class="uc-button tiny" data-shop="1" title="无尽塔专属：立刻生成一个普通（试炼）商店（跳过每 5 层的结算判定；关掉后回去继续打）">普通商店</button></div>' +
+      /* 无尽塔专属：直接发局内货币（试炼币 / 铸币），数量自己填 */
+      '<div class="debug-grant-row debug-num-row"><span class="debug-ws-tag">试炼币</span>' +
+      '<input type="number" data-endless-coins min="1" max="1000000" step="1" value="500" inputmode="numeric" aria-label="要获得的试炼币数量">' +
+      '<button type="button" class="uc-button tiny" data-endless-grant-coins="1" title="无尽塔专属：立刻获得指定数量的试炼币（与 E02/E03 的即时试炼币同一条口径；没有对局时先开始一局）">获得</button></div>' +
+      '<div class="debug-grant-row debug-num-row"><span class="debug-ws-tag">铸币</span>' +
+      '<input type="number" data-endless-mint min="1" max="100000" step="1" value="10" inputmode="numeric" aria-label="要获得的铸币数量">' +
+      '<button type="button" class="uc-button tiny" data-endless-grant-mint="1" title="无尽塔专属：立刻获得指定数量的铸币（试炼商店 50 试炼币换 1 枚的那种，与 E09/E10 同口径）">获得</button></div>' +
       '<div class="debug-ws-owned" data-buff-owned></div>' +
       /* 增益总览：当前生效 + 已获得过的全部（含一次生效、用尽、损毁、失去）+ 累计提升效果 */
       '<div class="debug-buff-report" data-buff-report></div>' +
@@ -483,6 +515,11 @@
     for (const b of panel.querySelectorAll('[data-endless-layer]')) {
       b.onclick = () => msg(shiftEndlessLayer(Number(b.dataset.endlessLayer)));
     }
+    // 无尽塔专属：直接发试炼币 / 铸币（数量取输入框，空输入按 1）
+    panel.querySelector('[data-endless-grant-coins]').onclick = () =>
+      msg(grantEndlessCoins(panel.querySelector('[data-endless-coins]').value));
+    panel.querySelector('[data-endless-grant-mint]').onclick = () =>
+      msg(grantEndlessMint(panel.querySelector('[data-endless-mint]').value));
     panel.querySelector('[data-buff-owned]').onclick = (e) => {
       const b = e.target.closest('[data-buff-forget]');
       if (b) msg(loseBuff(b.dataset.buffForget));

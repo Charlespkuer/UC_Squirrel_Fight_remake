@@ -226,6 +226,28 @@ test('离开融合页后遗留的点击不会扣款', () => {
   assert.equal(game.context.State.state().goldPoint, 100);
 });
 
+/* 规则条只能是一句话：它所在的 board 是固定高度的纵向 flex，规则条一长
+ * 就会把下面的装备列表（flex:1 1 auto）压到 0、装备卡整片消失。
+ * 2026-10 第二十九批就是这么炸的 —— 当时把整段说明连 <br> 塞了进去，
+ * flex 把每段文字拆成独立 item，规则条变成一堆竖条，装备列表被挤没。 */
+test('规则条保持单行且完整说明收在弹窗里', () => {
+  const game = setup([21, 21, 21]);
+  const rules = game.board.innerHTML.match(/<p class="fusion-rules">([\s\S]*?)<\/p>/);
+  assert.ok(rules, '规则条存在');
+  assert.ok(!rules[1].includes('<br>'), '规则条里不能有 <br>（flex 会把它拆成一堆竖条）');
+  const text = rules[1].replace(/<[^>]+>/g, '');
+  assert.ok(text.length <= 60, '规则条只放一句话，实际 ' + text.length + ' 字：' + text);
+  assert.ok(game.get('action', 'rules'), '有「详细规则」入口');
+  game.click('action', 'rules');
+  const modal = game.modals[game.modals.length - 1];
+  assert.equal(modal.title, '融合规则');
+  for (const key of ['材料', '费用', '产物', '名称', '词条']) {
+    assert.ok(modal.html.includes(key), '详细规则里要有「' + key + '」');
+  }
+  /* 装备卡必须照常渲染（这一步是在防「列表被挤没」的老毛病） */
+  assert.ok(game.board.innerHTML.includes('data-fusion-gear='), '装备列表要渲染出卡片');
+});
+
 for (const [name, run] of tests) {
   run();
   console.log('PASS ' + name);

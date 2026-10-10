@@ -4997,5 +4997,27 @@
       if (!e.run) return debugSetEndlessLayer(1);
       return debugSetEndlessLayer(Math.max(1, (Math.floor(Number(e.run.layer) || 1)) + d));
     },
+    /* 调试台专属：**直接发试炼币**（无尽塔的局内货币之一）。
+     *  与 E02/E03「试炼补贴 / 财源滚滚」的即时试炼币同一条口径（纯加法，不进任何乘区），
+     *  只是数量由调试台指定；没有对局时**不开新局**，直接报错（避免误点凭空开一局）。
+     *  数量夹在 1 ~ 1000000，空输入按 1 处理（与调试台「快速获取物品 / 武技」一致）。 */
+    _debugGrantCoins: (n) => {
+      const e = endless();
+      if (!e.run) return { ok: false, msg: '当前没有无尽塔对局（先开始一局）。' };
+      const amount = Math.max(1, Math.min(1000000, Math.round(Number(n) || 0)));
+      e.run.coins = Math.max(0, Number(e.run.coins) || 0) + amount;
+      save();
+      return { ok: true, amount, total: e.run.coins, layer: e.run.layer };
+    },
+    /* 调试台专属：**直接发铸币**（内部字段就是 `run.retryToken`；试炼商店 50 币换 1 枚那种）。
+     *  与 E09/E10 的即时铸币同一口径；数量夹在 1 ~ 100000。 */
+    _debugGrantMint: (n) => {
+      const e = endless();
+      if (!e.run) return { ok: false, msg: '当前没有无尽塔对局（先开始一局）。' };
+      const amount = Math.max(1, Math.min(100000, Math.round(Number(n) || 0)));
+      e.run.retryToken = Math.max(0, Number(e.run.retryToken) || 0) + amount;
+      save();
+      return { ok: true, amount, total: e.run.retryToken, layer: e.run.layer };
+    },
   };
 })();

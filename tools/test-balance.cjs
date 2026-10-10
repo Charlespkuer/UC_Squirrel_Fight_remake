@@ -215,7 +215,7 @@ test('同级AI基础成长预算一致，武技等级门槛及装备词条不越
     }
     const expected={...base},effects={};const slots=new Set();
     for(const gear of foe.gears||[]){
-      const info=g.State.gearInst(gear.id);assert.ok(info.useLevel<=level);assert.equal(slots.has(info.type),false);slots.add(info.type);
+      const info=g.State.gearInst(gear.id, gear.ext, gear.attr);assert.ok(info.useLevel<=level);assert.equal(slots.has(info.type),false);slots.add(info.type);
       assert.equal(gear.ext.length,info.quality>=3?2:info.quality===2?1:0);
       for(const ext of gear.ext){assert.ok(ext.level<=(info.quality===2?2:3));const amount=+g.attachmentMap.getValue(ext.id).ability.split(',')[ext.level-1];effects[ext.id]=Math.max(effects[ext.id]||0,amount);}
       expected[['agility','power','hp','speed'][info.type]]+=info.abilityVal;
@@ -315,7 +315,7 @@ test('宝石合成：3个同级+10金，成功升级，失败扣费且可能降�
   s.props[101] = 2; assert.equal(g.State.mergeGems(101).ok, false);          // 数量不足
   s.props[101] = 3; s.goldPoint = 5; assert.equal(g.State.mergeGems(101).ok, false); // 金松果不足
   s.goldPoint = 100;
-  g.math.random = () => 0.3;   // 0.3 < 60% 成功
+  g.math.random = () => 0.3;   // 0.3 < 88% 成功（1 级合成率 = 0.88^1）
   const ok = g.State.mergeGems(101);
   assert.equal(ok.success, true); assert.equal(s.props[102], 1); assert.equal(s.props[101], 0); assert.equal(s.goldPoint, 90);
   s.props[102] = 3;
@@ -341,7 +341,9 @@ test('橙装：3件同部位紫装融合为该部位随机传说，宝石免费�
   assert.equal(fused.ok, true); assert.equal(fused.gear.orange, true); assert.equal(fused.gear.quality, 4);
   assert.equal(g.State.gearPart(fused.gear.id), 1, '产物是同部位（手套，材料是 202 狂战拳甲）');
   assert.equal(g.State.gearPartQuality(fused.gear.id), 3, '底子仍是卓越品质，橙色是实例级');
-  assert.equal(fused.gear.ext[0].level, 2, '继承材料词条');
+  assert.equal(fused.gear.ext.length, 1, '只继承三件材料共有的那一条词条');
+  assert.equal(fused.gear.ext[0].id, 5, '共有词条 id 被保留');
+  assert.ok(fused.gear.ext[0].level >= 2, '星级取材料里的最高值（还有 50% 概率再升 1 星）');
   assert.equal(g.State.mergeGems(101).ok, false);
   // 镶嵌
   s.props[103] = 1;
@@ -349,12 +351,12 @@ test('橙装：3件同部位紫装融合为该部位随机传说，宝石免费�
   assert.equal(g.State.socketGem(plain.key, 103).ok, false, '非橙装不能镶嵌');
   const before = g.State.totalStats({ useProps: false }).power;
   const sock = g.State.socketGem(fused.gear.key, 103);
-  assert.equal(sock.ok, true); assert.equal(s.props[103], 0); assert.equal(s.goldPoint, 150, '镶嵌免费');
+  assert.equal(sock.ok, true); assert.equal(s.props[103], 0); assert.equal(s.goldPoint, 140, '镶嵌免费（紫装融合已扣 60）');
   // 产物是随机手套，主属性值要看实例（手套位一律加力量）
   const madeInst = g.State.myGears().find((x) => x.key === fused.gear.key);
   g.State.wear(fused.gear.key);
   const after = g.State.totalStats({ useProps: false }).power;
-  assert.equal(after, before + Math.round(madeInst.abilityVal * 1.12), '三级宝石主属性+12%');
+  assert.equal(after, before + Math.round(madeInst.abilityVal * 1.40), '三级宝石主属性 +40%（原版 5×(n²-n+2)）');
   assert.equal(g.State.socketGem(fused.gear.key, 103).ok, false, '每件限1颗');
   s.goldPoint = 3; assert.equal(g.State.unsocketGem(fused.gear.key).ok, false, '拆卸需5金');
   s.goldPoint = 50;
@@ -371,6 +373,94 @@ test('宝石掉落需45级，关卡通关20%、1级75%/2级25%', () => {
   const g1 = g.State.rollGemDrop(100); assert.equal(g1.id, 102, '低随机值给2级');
   g.math.random = () => 0.9;
   const g2 = g.State.rollGemDrop(100); assert.equal(g2.id, 101, '高随机值给1级');
+});
+
+test('装备主属性：基准取自原版属性点表，实例按 ±10% 浮动，小数值不被放大', () => {
+  const g = setup();
+  /* 原版 equipsArray 288 件，严格覆盖本版的 128 件 */
+  assert.equal(g.GData.GEAR_BASE.length, 288, '原版 288 件');
+  let checked = 0;
+  g.gearMap.each((id, def) => {
+    const type = parseInt(def.type);
+    assert.equal(g.GData.GEAR_BASE_ATTR[id], parseInt(def.abilities.split(',')[type]),
+      '基准表与 gearMap 逐条一致：id ' + id);
+    checked++;
+  });
+  assert.equal(checked, 128, '本版 128 件全部核对');
+  /* 基准 1~4 这种小数值，四舍五入后不会因为 ±10% 而翻倍 */
+  for (const id of [1, 2, 5, 9, 13]) {
+    assert.equal(g.State.rollGearAttr(id), g.State.gearBaseAttr(id), '小基准不出浮动：id ' + id);
+  }
+  /* 大基准（id 103 骑士服 紫 生命 70）会浮动，但始终落在 ±10% 内，且不止一个取值 */
+  const base = g.State.gearBaseAttr(103);
+  assert.equal(base, 70);
+  const seen = new Set();
+  for (let i = 0; i < 200; i++) {
+    const v = g.State.rollGearAttr(103);
+    assert.ok(Math.abs(v - base) <= Math.ceil(base * 0.1), '浮动不超 ±10%：' + v);
+    seen.add(v);
+  }
+  assert.ok(seen.size > 1, '大基准确实会浮动');
+  /* 浮动值落进实例并存档：读回来还是同一个数 */
+  const made = g.State.addGear(103);
+  assert.equal(g.s().gears.find((x) => x.key === made.key).attr, made.abilityVal, '浮动值写进存档');
+  assert.equal(g.State.myGears().find((x) => x.key === made.key).abilityVal, made.abilityVal, '读回来一致');
+  /* 老档没有 attr 字段时按基准值补 */
+  g.State.state().gears.push({ id: 103, key: 'legacy_attr', used: false, ext: [] });
+  g.State.save(); g.State.load();
+  assert.equal(g.s().gears.find((x) => x.key === 'legacy_attr').attr, 70, '老档按基准值补');
+});
+
+test('融合：同名大概率保名、小概率变异狂战；共有词条保留并概率升星', () => {
+  const g = setup(), s = g.s(); s.level = 50; s.goldPoint = 100000;
+  const seeded = g.math.random;
+  /* 材料都是蓝装头巾：21 格斗头巾 / 25 拳斗头巾 / 29 忍者护额 / 33 螳螂头饰 */
+  const fuse = (mats, rnd) => {
+    s.gears = [];
+    if (rnd !== undefined) g.math.random = () => rnd;
+    return g.State.mergeGears(mats.map((m) => g.State.addGear(m.id, m.ext).key));
+  };
+  const bare = (id) => ({ id, ext: [] });
+  /* 名称：三件同名 90% 保名 / 10% 变异狂战；两件同名 75% / 25% */
+  let r = fuse([bare(21), bare(21), bare(21)], 0.10);
+  assert.equal(r.gear.name, '格斗头巾', '三件同名大概率保住原名');
+  assert.ok(!r.gear.mutant, '保名时不算变异');
+  r = fuse([bare(21), bare(21), bare(21)], 0.99);
+  assert.equal(r.gear.name, '狂战头盔', '三件同名小概率变异成该部位的狂战件');
+  assert.equal(r.gear.mutant, true);
+  r = fuse([bare(21), bare(21), bare(25)], 0.10);
+  assert.equal(r.gear.name, '格斗头巾', '两件同名大概率保住原名');
+  r = fuse([bare(21), bare(21), bare(25)], 0.99);
+  assert.equal(r.gear.name, '狂战头盔', '两件同名小概率变异');
+  /* 三件全不同名 → 名称完全随机，且不触发变异 */
+  r = fuse([bare(25), bare(29), bare(33)], 0.05);
+  assert.equal(r.gear.name, '格斗头巾', '三件不同名走随机池（材料里没有这个名字）');
+  assert.ok(!r.gear.mutant, '不同名不触发变异');
+  assert.equal(s.goldPoint, 100000 - 50 * 5, '蓝装融合 50 金松果/次');
+  /* 词条：≥2 件共有的保留，按 50% 升星（上限 3）；只在单件里出现的不继承 */
+  r = fuse([
+    { id: 21, ext: [{ id: 27, level: 1 }, { id: 5, level: 3 }] },
+    { id: 21, ext: [{ id: 27, level: 2 }, { id: 5, level: 3 }] },
+    { id: 21, ext: [{ id: 27, level: 2 }, { id: 99, level: 1 }] },   // 99 不是合法词条，会被丢掉
+  ], 0.10);
+  const kept = r.gear.ext.slice().sort((a, b) => a.id - b.id);
+  /* 注意：产物对象来自 vm 沙箱，数组原型与宿主不同，必须用 same() 比较 */
+  same(kept.map((e) => e.id), [5, 27]);
+  assert.equal(kept.find((e) => e.id === 27).level, 3, '共有词条概率升星（2→3）');
+  assert.equal(kept.find((e) => e.id === 5).level, 3, '已满 3 星不再升');
+  /* 没有共有词条 → 产物词条随机生成 */
+  const seen = new Set();
+  for (let i = 0; i < 120; i++) {
+    g.math.random = seeded;
+    const rr = fuse([
+      { id: 21, ext: [{ id: 1, level: 1 }] },
+      { id: 21, ext: [{ id: 2, level: 1 }] },
+      { id: 21, ext: [{ id: 3, level: 1 }] },
+    ]);
+    assert.equal(rr.gear.ext.length, 2, '紫装 2 条词条');
+    rr.gear.ext.forEach((e) => seen.add(e.id));
+  }
+  assert.ok(seen.size > 3, '没有共有词条时产物词条随机（120 次出现 ' + seen.size + ' 种）');
 });
 
 let failed=0;

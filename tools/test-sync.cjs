@@ -1,4 +1,6 @@
-/* 双机同步（scripts/sync/sync.js）回归测试：在两个临时「游戏目录」之间真的传文件与存档。
+/* 双机同步（scripts/sync/sync.js）+ 一键拉取远端更新（scripts/update-game.js）回归测试：
+ * 在两个临时「游戏目录」之间真的传文件与存档；更新侧用手写的最小 zip 造一个「远端便携包」，
+ * 走一遍「解压 → 算计划 → 覆盖」的真实路径（不联网）。
  * 跑法：node tools/test-sync.cjs
  * 不需要 ZeroTier：两台「机器」都在 127.0.0.1 上，用不同的根目录模拟。 */
 const assert = require('node:assert/strict');
@@ -23,6 +25,53 @@ function ok(name, cond) {
   passed++;
   console.log('  ✓ ' + name);
 }
+/** 手写一个最小 zip（stored / 不压缩）：用例要造「远端便携包」，但不想依赖系统有没有 zip 命令。 */
+function crc32(buf) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    crc ^= buf[i];
+    for (let k = 0; k < 8; k++) crc = (crc >>> 1) ^ (0xEDB88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function makeZip(zipPath, dir) {
+  const files = [];
+  (function walk(d) {
+    for (const n of fs.readdirSync(d)) {
+      const abs = path.join(d, n);
+      if (fs.statSync(abs).isDirectory()) walk(abs);
+      else files.push([path.relative(dir, abs).split(path.sep).join('/'), fs.readFileSync(abs)]);
+    }
+  })(dir);
+  const chunks = [], central = [];
+  let offset = 0;
+  for (const [name, data] of files) {
+    const nameBuf = Buffer.from(name, 'utf8');
+    const crc = crc32(data);
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(0, 6); lh.writeUInt16LE(0, 8);
+    lh.writeUInt16LE(0, 10); lh.writeUInt16LE(0, 12); lh.writeUInt32LE(crc, 14);
+    lh.writeUInt32LE(data.length, 18); lh.writeUInt32LE(data.length, 22);
+    lh.writeUInt16LE(nameBuf.length, 26); lh.writeUInt16LE(0, 28);
+    chunks.push(lh, nameBuf, data);
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(0, 8);
+    cd.writeUInt16LE(0, 10); cd.writeUInt16LE(0, 12); cd.writeUInt16LE(0, 14); cd.writeUInt32LE(crc, 16);
+    cd.writeUInt32LE(data.length, 20); cd.writeUInt32LE(data.length, 24);
+    cd.writeUInt16LE(nameBuf.length, 28); cd.writeUInt16LE(0, 30); cd.writeUInt16LE(0, 32);
+    cd.writeUInt16LE(0, 34); cd.writeUInt16LE(0, 36); cd.writeUInt32LE(0, 38); cd.writeUInt32LE(offset, 42);
+    central.push(cd, nameBuf);
+    offset += lh.length + nameBuf.length + data.length;
+  }
+  const cdBuf = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(0, 4); eocd.writeUInt16LE(0, 6);
+  eocd.writeUInt16LE(files.length, 8); eocd.writeUInt16LE(files.length, 10);
+  eocd.writeUInt32LE(cdBuf.length, 12); eocd.writeUInt32LE(offset, 16); eocd.writeUInt16LE(0, 20);
+  fs.writeFileSync(zipPath, Buffer.concat([Buffer.concat(chunks), cdBuf, eocd]));
+  return files.length;
+}
+
 function write(file, text) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, text);
@@ -198,6 +247,80 @@ async function ping(port) {
     await sleep(500);
     out = run(A, ['push', '127.0.0.1', '--files'], true);
     ok('对端服务连不上时提示清楚', /连不上/.test(out) && /同步服务/.test(out));
+
+    // ---- 一键拉取远端更新：解压远端便携包 → 算计划 → 覆盖（存档与机器配置必须原样保留） ----
+    {
+      const upd = require(path.join(ROOT, 'scripts', 'update-game.js'));
+      ok('更新永远不覆盖存档 / 同步口令 / 取证与构建产物', upd.ignored('save/progress.json')
+        && upd.ignored('scripts/sync/sync.config.json') && upd.ignored('node_modules/pkg/index.js')
+        && upd.ignored('references/orig/x.bin') && upd.ignored('src-tauri/target/x') && upd.ignored('.git/config')
+        && !upd.ignored('js/a.js') && !upd.ignored('scripts/index.html'));
+
+      const vroot = path.join(TMP, 'vroot');
+      write(path.join(vroot, 'version.json'), JSON.stringify({ version: '9.9.9', commit: 'abc1234', date: '2026-01-01' }));
+      ok('本机版本取自 version.json', upd.readVersion(vroot).version === '9.9.9');
+
+      /* 造一个「远端便携包」：新版 js/a.js + 新文件 js/new.js + 故意改过的存档与同步口令
+       *（这两个必须被忽略，否则一键更新会毁掉玩家的档和两台机器的配对）。 */
+      const pkg = path.join(TMP, 'pkg');
+      write(path.join(pkg, 'scripts/index.html'), '<!DOCTYPE html>\n');
+      write(path.join(pkg, 'js/a.js'), 'console.log("new")\n');
+      write(path.join(pkg, 'js/new.js'), 'console.log("brand new")\n');
+      write(path.join(pkg, 'css/b.css'), 'body{color:red}\n');
+      write(path.join(pkg, 'version.json'), JSON.stringify({ version: '9.9.10' }));
+      write(path.join(pkg, 'save/progress.json'), '{"name":"远端"}\n');
+      write(path.join(pkg, 'scripts/sync/sync.config.json'), '{"token":"远端口令"}\n');
+      write(path.join(pkg, 'node_modules/pkg/index.js'), 'module.exports=1\n');
+      const zip = path.join(TMP, 'pkg.zip');
+      const entries = makeZip(zip, pkg);
+      ok('造出便携包 zip', entries >= 6 && fs.statSync(zip).size > 0);
+
+      const dest = path.join(TMP, 'unzip');
+      const ex = upd.extract(zip, dest);
+      ok('系统自带工具能解开便携包（tar / unzip / python）', ex.ok && !!ex.by);
+      const src = upd.findPackageRoot(dest);
+      ok('能认出包里的游戏目录', src === dest || (src && fs.existsSync(path.join(src, 'js'))));
+
+      const target = path.join(TMP, 'target');
+      write(path.join(target, 'scripts/index.html'), '<!DOCTYPE html>\n');
+      write(path.join(target, 'js/a.js'), 'console.log("old")\n');
+      write(path.join(target, 'save/progress.json'), '{"name":"本机","level":42}\n');
+      write(path.join(target, 'scripts/sync/sync.config.json'), '{"token":"本机口令"}\n');
+      const plan = upd.planTree(src).map((f) => f.p);
+      ok('计划 = 要覆盖的游戏文件，且排掉存档 / 口令 / node_modules',
+        plan.includes('js/a.js') && plan.includes('js/new.js') && plan.includes('css/b.css')
+        && !plan.some((x) => x.startsWith('save/') || x === 'scripts/sync/sync.config.json' || x.startsWith('node_modules')));
+
+      const dry = upd.applyFiles(target, src, upd.planTree(src), true);
+      ok('dry：只报数不写盘', dry.files === plan.length && fs.readFileSync(path.join(target, 'js/a.js'), 'utf8').includes('old'));
+
+      const backup = upd.backupSave(target);
+      const real = upd.applyFiles(target, src, upd.planTree(src), false);
+      ok('真更新：游戏文件被覆盖', real.files === plan.length
+        && fs.readFileSync(path.join(target, 'js/a.js'), 'utf8').includes('new')
+        && fs.existsSync(path.join(target, 'js/new.js')));
+      ok('存档与同步口令原样保留', fs.readFileSync(path.join(target, 'save/progress.json'), 'utf8').includes('本机')
+        && fs.readFileSync(path.join(target, 'scripts/sync/sync.config.json'), 'utf8').includes('本机口令'));
+      ok('更新前自动备份了一份存档', !!backup && fs.existsSync(path.join(target, backup)));
+
+      /* 接线：三种来源的入口都在（服务器两条 + 界面三按钮 + 同步服务的 dry 预览） */
+      const serveSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'serve.js'), 'utf8');
+      const rustSrc = fs.readFileSync(path.join(ROOT, 'src-tauri', 'src', 'lib.rs'), 'utf8');
+      const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
+      const syncSrc = fs.readFileSync(SYNC_SRC, 'utf8');
+      ok('便携版 / 源码版有 /__update 路由', /rel === '\/__update'/.test(serveSrc) && /update-game\.js/.test(serveSrc));
+      ok('轻壳 exe 有 /__update 路由（缺 Node 时给提示）', /"\/__update"/.test(rustSrc) && /NO_NODE/.test(rustSrc));
+      ok('系统页有「游戏更新」面板与三个来源 + 下载页兜底',
+        /updatePanelHtml/.test(uiSrc) && /update-source-sync/.test(uiSrc) && /update-source-release/.test(uiSrc)
+        && /update-source-git/.test(uiSrc) && /update-page/.test(uiSrc));
+      ok('同步服务的拉取接口支持 dry 预览', /dry: url\.searchParams\.get\('dry'\) === '1'/.test(syncSrc));
+      /* 旧客户端（没重编的 exe / 旧服务器进程）没有同源 /__update —— 界面必须回退到
+       * 本机同步服务新增的更新通道，否则用户就只能看到「本机不支持」。 */
+      ok('旧客户端也能更新：同步服务带 /local/update 通道，界面会回退过去',
+        /'\/local\/update\/check'/.test(syncSrc) && /'\/local\/update\/run'/.test(syncSrc)
+        && /runUpdateHelper/.test(syncSrc) && /\/local\/update\/check/.test(uiSrc) && /channel === 'sync'/.test(uiSrc)
+        && /syncPanel\(\)\+updatePanelHtml\(\)/.test(uiSrc));
+    }
 
     console.log('\n双机同步回归通过：' + passed + ' 项');
   } finally {

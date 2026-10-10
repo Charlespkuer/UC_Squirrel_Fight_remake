@@ -189,7 +189,22 @@
     return withPrefix === false ? String(level) : 'LV' + level;
   };
   const isTrueGear = (item) => !!item && (window.GData && GData.trueLevel ? GData.trueLevel(item.level) > 0 : Number(item.level) > 10);
+  /* 真形态专属卡面（带「真」字红章的方卡）：images/classic/reference-cards/<kind>-<id>.png。
+   * 那个目录里其实混着**两套**图：灰色版（未解锁时显示，见下面 icon() 里的 grey 名单）
+   * 与真·版（本名单）。真·版只覆盖一部分 id —— weapon 1/5/6/8、
+   * skill 1/2/4/5/6/10/11/12/13/16/17/24（与素材目录逐一对过，改素材时要同步这张表）。
+   * 其余真武器继续走 icons/weapon-true-<id>.png；真技能没有别的素材，就到此为止。 */
+  const TRUE_CARD_IDS = { weapon: [1, 5, 6, 8], skill: [1, 2, 4, 5, 6, 10, 11, 12, 13, 16, 17, 24] };
   function icon(kind, id, locked, selected, trueForm) {
+    /* 真形态优先走专属贴图 —— **必须放最前面**：下面「参考卡」那几条会提前 return，
+     * 而方天画戟(1)/死老鼠(5)/橡皮擦(7)/菜刀(8)/可口可乐(9)/死神镰刀(15) 都在
+     * reference.weapon.learned 里，导致真化武器在未选中时显示普通卡面，
+     * 点一下（selected=true）才变真形态。
+     * 2026-10 用户反馈：真化武技在武器&技能界面不直接展示特殊贴图（技能此前根本没有）。 */
+    if (trueForm && TRUE_CARD_IDS[kind] && TRUE_CARD_IDS[kind].includes(+id)) {
+      return '<img alt="" class="reference-art" src="images/classic/reference-cards/' + kind + '-' + id + '.png">';
+    }
+    if (kind === 'weapon' && trueForm) return '<img alt="" src="' + atlasIcon('weapon', id, locked, true) + '">';
     if(kind==='prop' && ((!selected && [1,2,4,5,10,12,21,22,23,24,26,36].includes(+id)) || selected && [3,11,25].includes(+id))) {
       return '<img alt="" class="reference-art" src="images/classic/new-reference/props/prop-'+id+(selected?'-selected':'')+'.png">';
     }
@@ -203,8 +218,6 @@
     }
     const grey={weapon:[2,3,4,7,9,10],skill:[3,7,8,9,14,15,18,23]};
     const fromReference=(locked && grey[kind]?.includes(+id)) || (!locked && kind==='skill' && [6,13].includes(+id));
-    // 真形态优先走真武器贴图（参考卡没有真版）
-    if (kind === 'weapon' && trueForm) return '<img alt="" src="' + atlasIcon('weapon', id, locked, true) + '">';
     return '<img alt="" '+(fromReference?'class="reference-art" ':'')+'src="'+(fromReference?'images/classic/reference-cards/'+kind+'-'+id+'.png':atlasIcon(kind,id,locked))+'">';
   }
   function statsHtml(stats, cls) {
@@ -305,6 +318,14 @@
   }
   function page(group, active, content, opts) {
     opts = opts || {}; screen = active; activePortrait = null;
+    /* 重画**同一页**时别把人弹回页首：先记住旧滚动容器的位置，新页面挂上去后再放回去。
+     * 「把存档送过去 / 检查更新」这类原地动作会多次重画系统页 ——
+     * 内容比底板高（`.classic-board` 是 overflow-y:auto），不记住就会跳回顶部。
+     * 换页（home → system 之类）时旧 board 的 data-screen 不匹配，天然从 0 开始。 */
+    const oldBoard = (typeof document !== 'undefined')
+      ? document.querySelector('#ui .classic-page[data-screen="' + active + '"] > .classic-board') : null;
+    const keepTop = oldBoard ? oldBoard.scrollTop : 0;
+    const keepLeft = oldBoard ? oldBoard.scrollLeft : 0;
     const old = $('#ui .classic-page'); if (old) old.remove();
     $$('.classic-modal-overlay').forEach(e => e.remove());
     const p = document.createElement('section'); p.className = 'classic-page'; p.dataset.screen = active;
@@ -312,6 +333,10 @@
     $('#ui').appendChild(p);
     bind(p, Object.assign({}, actions, {home}));
     if(window.Main?.resizeLayout)Main.resizeLayout();
+    if (keepTop || keepLeft) {
+      const nb = Array.prototype.find.call(p.children, (el) => el && el.classList && el.classList.contains('classic-board'));
+      if (nb) { nb.scrollTop = keepTop; nb.scrollLeft = keepLeft; }
+    }
     promptLevelUpChoices();
     return p;
   }
@@ -566,7 +591,8 @@
     const cells=shown.map(it=>{
       const has=own.find(x=>x.id===it.id);
       const selected=has && selectedItems[kind]===it.id;
-      const trueForm = has && kind === 'weapon' && isTrueGear(has);
+      /* 真形态：武器与技能都算（2026-10 之前只判断武器，技能的真化贴图因此一直不显示）。 */
+      const trueForm = !!has && isTrueGear(has);
       /* 2026-10 用户口径：选中之后格子下方的说明**仍然显示等级**（LV/真N），
        * 不再换成该武器 / 技能的名字（名字在详情弹窗里看）。 */
       return '<button class="catalog-cell '+(!has?'locked':selected?'selected':'')+(trueForm?' true-form':'')+'" data-item="'+it.id+'" aria-label="'+esc(it.name)+(has?' '+levelLabel(has.level):' 尚未获得')+'"><span class="item-icon">'+icon(kind,it.id,!has,selected,trueForm)+'</span><span class="item-caption">'+(has?levelLabel(has.level):'')+'</span></button>';
@@ -586,7 +612,7 @@
     const unupgradeable=!isW && (base.type==='被动' && up?.max || id===13);
     const extra=isW?'伤害 '+(it?it.harmLo+'-'+it.harmHi:base.harm):'类别 '+esc(base.type);
     const right=locked?'<div class="locked-message">尚未获得<br><span class="small-label">升级、开启礼包有机会获得</span></div>':up?.max||unupgradeable?'<div class="locked-message">该'+(isW?'武器':'技能')+'<br>不能升级</div>':'<h3>需要　<span class="muted-text">已有</span></h3><div><span>金松果 '+up.coin+'</span><b>'+S.goldPoint+'</b></div><div><span>卷轴 '+up.book+'</span><b>'+(S.props[up.bookId]||0)+'</b></div><span class="upgrade-rate">成功率 '+up.rate+'%'+(up.fails?'<i class="upgrade-pity">（失败 '+up.fails+' 次，已加 '+up.fails*State.UPGRADE_FAIL_BONUS+'%）</i>':'')+'</span>'+(up.isTrue?'<span class="upgrade-true-tip">真化第 '+up.trueAttempt+' 次（当日 24:00 次数与费用清零，真化不吃失败保底）</span>':'')+'<span class="small-label">需要角色 '+up.levelLimit+' 级</span>';
-    const content='<div class="item-detail"><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-summary"><span class="item-icon">'+icon(kind,id,locked,false,isW&&isTrueGear(it))+'</span><div class="detail-rows"><span class="detail-row">'+(isW?'阶段':'等级')+' '+(it?levelLabel(it.level,false):1)+(it&&isTrueGear(it)?'（真形态）':'')+'</span><span class="detail-row">'+extra+'</span><span class="detail-row">类型 '+esc(base.type)+'</span></div></div><div class="detail-description">'+esc(description)+(isW&&it?'<br>升至下一阶段额外提升'+esc(base.harmAdd)+'点基础伤害！':'')+'</div></div><div class="detail-upgrade">'+right+'</div></div>';
+    const content='<div class="item-detail"><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-summary"><span class="item-icon">'+icon(kind,id,locked,false,isTrueGear(it))+'</span><div class="detail-rows"><span class="detail-row">'+(isW?'阶段':'等级')+' '+(it?levelLabel(it.level,false):1)+(it&&isTrueGear(it)?'（真形态）':'')+'</span><span class="detail-row">'+extra+'</span><span class="detail-row">类型 '+esc(base.type)+'</span></div></div><div class="detail-description">'+esc(description)+(isW&&it?'<br>升至下一阶段额外提升'+esc(base.harmAdd)+'点基础伤害！':'')+'</div></div><div class="detail-upgrade">'+right+'</div></div>';
     // 按钮顺序统一成「动作在前、返回在最后」，与其它弹窗一致
     modal(isW?'武器详情':'技能详情',content,[{label:locked?'尚未获得':up?.max||unupgradeable?'不能升级':'立即升级',cls:locked||up?.max||unupgradeable?'muted':'gold',run:()=>{
       if(locked||up?.max||unupgradeable)return;
@@ -893,7 +919,7 @@
     const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-description">'+esc(base.remark||'')+'</div>'+
       '<div class="small-label">拥有 <b data-live="own">'+(S.props[id]||0)+'</b> 个'+(shop?'　售价 '+base.price+' 金松果<br>每日限购 '+status.limit+' 件，今日剩余 <b data-live="stock">'+status.remaining+'</b> 件':'')+'</div></div></div>'+
       seedNote+shardNote+potionNote+batchNote+
-      (isGem?'<p class="small-label">3 个同级宝石 + 10 金松果合成高一级，成功率 '+(State.GEM_MERGE_RATES[State.gemLevel(id)-1]*100)+'%；失败有 50% 几率一颗材料降 1 级（1级则碎裂）。</p>':'')+
+      (isGem?'<p class="small-label">3 个同级宝石 + 10 金松果合成高一级，成功率 '+Math.round(State.gemMergeRate(State.gemLevel(id))*100)+'%（0.88 的材料等级次方）；失败有 50% 几率一颗材料降 1 级（1级则碎裂）。</p>':'')+
       '<p class="small-label use-preview" data-live="hint" role="status"></p>';
     // 主按钮只在真的有动作时才给；否则会出现「返回」和尾部的「返回」两个按钮
     const label=shop?(status.remaining?'购买':'今日售罄'):isFragment?'合成装备':isConvertShard?'合成转化丸':isSeed?'合成果实':isGem?'合成宝石':id===37?'分配属性':canUse?'使用':'';
@@ -1191,7 +1217,7 @@
     const head = '<div class="gear-sell-head">' +
       '<span>背包里共 <b>' + gears.length + '</b> 件装备（容量 ' + gears.length + '/' + State.gearCapacity() + '）</span>' +
       '<span>当前金松果 <b class="gold-text">' + S.goldPoint + '</b></span>' +
-      '<span class="gear-sell-legend">回收价：白 55-60 · 绿 60-65 · 蓝 65-70 · 紫 70-75 · 橙 75-80</span></div>';
+      '<span class="gear-sell-legend">回收价：白 55-60 · 绿 60-65 · 蓝 65-70 · 紫 90-110 · 橙 180-220</span></div>';
     const body = gears.length
       ? '<div class="gear-sell-grid">' + shown.map(card).join('') + '</div>'
       : '<div class="empty-state">还没有装备<br><span class="small-label">挑战关卡获得碎片，10 个碎片可以合成一件装备</span></div>';
@@ -1230,8 +1256,8 @@
   }
   function openGear(key) {
     const g=State.myGears().find(x=>x.key===key);if(!g)return;
-    const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+(g.gem.id-100)*4+'%，附加 +'+(g.gem.ext)+'%）':'';
-    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+'<br>附加属性：<br>'+State.extText(g.ext).map(esc).join('<br>')+gemInfo+'</div></div>';
+    const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+State.gemPercent(g.gem.id-100)+'%，附加 +'+(g.gem.ext)+'%）':'';
+    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+(g.attrBase&&g.attrBase!==g.abilityVal?'（基准 '+g.attrBase+'，本件有浮动）':'')+'<br>附加属性：<br>'+State.extText(g.ext).map(esc).join('<br>')+gemInfo+'</div></div>';
     const buttons=[{label:g.used?'卸下':'装备',run:()=>{const ok=g.used?State.unwear(key):State.wear(key);if(ok===false)toast('等级不足，暂时无法装备');openGears(gearPage);}}];
     if(g.orange){
       if(g.gem)buttons.push({label:'拆卸宝石（5金）',run:()=>{const r=State.unsocketGem(key);toast(r.msg);openGear(key);}});
@@ -1656,11 +1682,14 @@
     return html + log;
   }
   function paintSyncProgress() {
-    const host = typeof document !== 'undefined' ? document.getElementById('sync-progress') : null;
-    if (!host) return;
     const html = syncProgressHtml();
-    host.innerHTML = html;
-    host.style.display = html ? '' : 'none';
+    /* 同步面板与「游戏更新」面板共用同一份进度（从另一台电脑更新时进度显示在更新面板里） */
+    for (const id of ['sync-progress', 'update-progress']) {
+      const host = typeof document !== 'undefined' ? document.getElementById(id) : null;
+      if (!host) continue;
+      host.innerHTML = html;
+      host.style.display = html ? '' : 'none';
+    }
   }
   /** 系统页里「跨设备同步」那一块。 */
   function syncPanel() {
@@ -1747,6 +1776,202 @@
   /* ============================================================
    * 【UC17】系统设置 / 村庄 / 攻略
    * ============================================================ */
+  /* ============================================================
+   * 【UC19】一键拉取远端更新（游戏更新面板）
+   *
+   * 三种「远端」，按可用性显示按钮（都不行就只剩「打开下载页」）：
+   *   · 另一台电脑：复用系统页已有的双机同步服务（/local/files/pull，ZeroTier/局域网）
+   *   · 本机 git 仓库：/__update?mode=git → `git pull --ff-only`
+   *   · GitHub Releases：/__update?mode=release → 便携包就地覆盖；安装包下载后交给系统打开
+   *
+   * /__update 由**本机服务器**提供（轻壳的内置服务器 / 便携版的 serve.js），
+   * 真正的活由零依赖的 scripts/update-game.js 干 —— 三条路都不碰 save/，
+   * 动手前还会自动把存档备份一份（save/backup/progress-…-before-update.json）。
+   * ============================================================ */
+  const UPDATE_PAGE = 'https://github.com/Charlespkuer/UC_Squirrel_Fight_remake/releases/latest';
+  const updState = { busy: false, pending: null, note: '', channel: '', local: null, git: null, release: null, sync: null, result: null };
+
+  /** 页面是不是从「本机磁盘」上跑的（轻壳 / 便携版 / 源码版）。网页版与安装版都不是 →
+   *  那种情况下没有任何就地更新的余地，只能给下载页。 */
+  function localDiskPage() {
+    try {
+      const h = String(location.hostname || '');
+      return location.protocol === 'file:' || h === '127.0.0.1' || h === 'localhost' || h === '::1' || h === '[::1]';
+    } catch (e) { return false; }
+  }
+  function platformTag() {
+    const ua = String((typeof navigator !== 'undefined' && navigator.userAgent) || '');
+    if (/Android/i.test(ua)) return 'android';
+    if (/Windows/i.test(ua)) return 'win32';
+    if (/Mac OS X|Macintosh/i.test(ua)) return 'darwin';
+    return 'linux';
+  }
+  /** 调本机的 /__update（只传白名单参数，不传命令）。
+   *  注意：这条路由只有**新版**的便携版服务器 / 轻壳 exe 才有；旧客户端会 404，
+   *  这时 updateCheck 会退到本机同步服务的 /local/update/*（那边同样是白名单 + 只允许本机）。 */
+  async function updateFetch(pathname, opts) {
+    opts = opts || {};
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), opts.timeout || 900000) : 0;
+    try {
+      const res = await fetch(pathname, { method: opts.method || 'GET', cache: 'no-store', signal: ctl ? ctl.signal : undefined });
+      let body = null;
+      try { body = await res.json(); } catch (e) {}
+      if (!body) return { ok: false, code: 'NO_HELPER', msg: '这个客户端不支持就地更新（更新接口没有响应，HTTP ' + res.status + '）' };
+      return body;
+    } catch (e) {
+      return { ok: false, code: 'NO_HELPER', msg: '这个客户端不支持就地更新（连不上 ' + pathname.split('?')[0] + '）' };
+    } finally { if (timer) clearTimeout(timer); }
+  }
+  const sizeText = (n) => (Number(n) > 1048576 ? (Number(n) / 1048576).toFixed(1) + ' MB' : Math.max(0, Math.round(Number(n) / 1024)) + ' KB');
+
+  /** 检查：本机（版本 / git / Releases）+ 另一台电脑（待传文件数）。能查到什么显示什么。 */
+  async function updateCheck() {
+    if (updState.busy) return;
+    updState.busy = true; updState.note = '正在检查…'; updState.result = null; updState.pending = null;
+    if (screen === 'system') openSystem();
+    try {
+      updState.channel = '';
+      if (localDiskPage()) {
+        let r = await updateFetch('/__update?mode=check&platform=' + platformTag());
+        if (r && r.local) updState.channel = 'origin';
+        if (!updState.channel) {
+          /* 退路：本机同步服务就是「本机 agent」（只允许 127.0.0.1 页面 + Origin 校验），
+           * 它跑 update-game.js 一样安全 —— 于是**旧 exe 不重编也能一键更新**。 */
+          try {
+            const q = await syncFetch('/local/update/check?platform=' + platformTag(), { timeout: 90000 });
+            if (q && q.local) { r = q; updState.channel = 'sync'; }
+          } catch (e) {
+            const msg = String((e && e.message) || '');
+            if (/没有这个接口|404|HTTP 404/.test(msg)) updState.note = '本机同步服务还是旧版本：先重启一次同步服务（「重启同步服务.cmd」，或同步菜单 9→3），之后这里就能一键更新。';
+          }
+        }
+        if (updState.channel) {
+          updState.local = r.local; updState.git = r.git || null; updState.release = r.release || null; updState.note = '';
+        } else {
+          updState.local = null; updState.git = null; updState.release = null;
+          if (!updState.note) updState.note = (r && r.msg) || '这个客户端不提供就地更新（旧客户端 / 安装版）：先用「另一台电脑」，或「打开下载页」。';
+        }
+      } else {
+        updState.local = null; updState.git = null; updState.release = null;
+        updState.note = '这个页面不是从本机磁盘上跑的（网页版 / 安装版），没法就地更新 —— 用「打开下载页」装新版。';
+      }
+      if (!syncState.checked) { try { await syncProbe(); } catch (e) {} }
+      const peers = Object.keys((syncState.info || {}).peers || {});
+      if (syncState.ok && peers.length) {
+        try {
+          const q = await syncFetch('/local/files/pull?dry=1&peer=' + encodeURIComponent(peers[0]), { method: 'POST', timeout: 120000 });
+          updState.sync = { peer: q.peer || peers[0], files: Number((q.job && q.job.total) || 0) };
+        } catch (e) { updState.sync = { peer: peers[0], files: null, error: String((e && e.message) || e) }; }
+      } else updState.sync = null;
+    } finally {
+      updState.busy = false;
+      if (screen === 'system') openSystem();
+    }
+  }
+  /** 点来源按钮 → 进入「确认」状态（不直接动手：git / 下载都是改文件的事）。 */
+  function updateAsk(kind) {
+    updState.pending = kind; updState.result = null;
+    if (screen === 'system') openSystem();
+  }
+  function updatePlanText(kind) {
+    if (kind === 'sync') {
+      const n = updState.sync && updState.sync.files;
+      return '从另一台电脑「' + esc(String((updState.sync && updState.sync.peer) || '对端')) + '」拉取' +
+        (n == null ? '有改动的游戏文件' : ' ' + n + ' 个有改动的游戏文件') +
+        '（只覆盖同名文件，不动存档、不动同步口令）。';
+    }
+    if (kind === 'git') {
+      const g = updState.git || {};
+      return '执行 <code>git pull --ff-only</code>' + (g.behind ? '（落后远端 ' + g.behind + ' 个提交）' : '') +
+        '。有未提交改动时会失败，不会覆盖你的改动。';
+    }
+    const r = updState.release || {};
+    const a = r.asset || {};
+    if (!r.ok) return '远端暂时没有适合本机的文件：' + esc(r.msg || '') + '（可以改用「打开下载页」）。';
+    if (r.kind === 'zip') return '下载远端 <b>' + esc(r.tag) + '</b> 的便携包 <b>' + esc(a.name) + '</b>（' + sizeText(a.size) + '），解压后覆盖游戏文件（跳过 save/）。';
+    return '下载远端 <b>' + esc(r.tag) + '</b> 的安装包 <b>' + esc(a.name) + '</b>（' + sizeText(a.size) + '）到 save/updates/，然后交给系统打开安装向导。';
+  }
+  /** 真跑。sync 走同步服务（带进度条），其余走 /__update。 */
+  async function updateRun(kind) {
+    if (updState.busy || !kind) return;
+    updState.pending = null; updState.busy = true; updState.result = null;
+    updState.note = kind === 'sync' ? '正在从另一台电脑拉取…' : '正在更新，别关窗口…';
+    if (screen === 'system') openSystem();
+    try {
+      if (kind === 'sync') {
+        await syncRun('files', 'pull', false);
+        const r = syncState.result || {};
+        updState.result = { ok: r.ok !== false, mode: 'sync', files: r.done || (r.job && r.job.done) || 0, peer: r.peer, msg: r.msg, code: r.code };
+      } else if (updState.channel === 'sync') {
+        updState.result = await syncFetch('/local/update/run?mode=' + kind + '&platform=' + platformTag(), { method: 'POST', timeout: 1800000 });
+      } else {
+        updState.result = await updateFetch('/__update?mode=' + kind + '&platform=' + platformTag(), { method: 'POST' });
+      }
+    } catch (e) {
+      updState.result = { ok: false, code: 'ERROR', msg: String((e && e.message) || e) };
+    } finally {
+      updState.busy = false; updState.note = '';
+      if (screen === 'system') openSystem();
+    }
+  }
+  function updateResultHtml() {
+    const r = updState.result;
+    if (!r) return '';
+    if (r.ok === false) {
+      return '<div class="sp-head"><b class="sync-off">更新没成功</b></div><div class="sp-hint">' +
+        esc(r.msg || r.code || '未知原因') + '</div>' +
+        '<div class="sp-actions">' + btn('打开下载页', 'update-page', 'small gold') + '</div>';
+    }
+    const done = r.mode === 'release' && r.kind && r.kind !== 'zip';
+    const head = done ? '已下载并打开安装包' : '更新完成';
+    const detail = done
+      ? esc(String(r.asset && r.asset.name || '')) + ' → <code>' + esc(String(r.path || '')) + '</code>，按安装向导走完即可（装完记得重开客户端）。'
+      : (r.tag ? '已更新到 <b>' + esc(String(r.tag)) + '</b>　' : '') +
+        (r.files ? '覆盖 ' + r.files + ' 个文件' : '') + (r.bytes ? '（' + sizeText(r.bytes) + '）' : '') +
+        (r.msg ? esc(String(r.msg)) : '') + '　<b>请刷新页面</b>（轻壳 / 便携版刷新即生效）。';
+    return '<div class="sp-head"><b class="sync-on">' + head + '</b></div><div class="sp-hint">' + detail + '</div>' +
+      '<div class="sp-actions">' + btn('立即刷新', 'update-reload', 'small gold') + btn('打开下载页', 'update-page', 'small') + '</div>';
+  }
+  /** 系统页里的「游戏更新」面板。 */
+  function updatePanelHtml() {
+    const loc = updState.local || {};
+    const g = updState.git || {};
+    const rel = updState.release || {};
+    const peers = Object.keys((syncState.info || {}).peers || {});
+    let head = '游戏更新：<b>本机 ' + (loc.version ? esc(String(loc.version)) : '未检查') + '</b>';
+    if (updState.busy) head += ' <b class="sync-on">' + esc(updState.note || '处理中…') + '</b>';
+    else if (updState.note) head += ' <span class="small-label">' + esc(updState.note) + '</span>';
+    else if (loc.version) {
+      const bits = [];
+      if (g.isRepo) bits.push('git ' + (g.behind ? '落后 ' + g.behind + ' 个提交' : '已是最新'));
+      if (rel.ok) bits.push('GitHub 最新 ' + esc(rel.tag) + (rel.kind === 'zip' ? '（可就地覆盖）' : '（下载安装包）'));
+      else if (rel.code === 'NO_ASSET' && rel.tag) bits.push('GitHub ' + esc(rel.tag) + ' 没有适合本机的包');
+      if (updState.sync) bits.push('另一台电脑 ' + (updState.sync.files == null ? '状态未知' : updState.sync.files + ' 个文件可更新'));
+      head += '<span class="small-label">' + (bits.join('　') || '没有可用的更新来源') + '</span>';
+    }
+    const dis = updState.busy ? ' muted' : '';
+    let actions = btn(updState.local || updState.sync || updState.git ? '重新检查' : '检查更新', 'update-check', 'small' + dis);
+    if (!updState.pending) {
+      if (syncState.ok && peers.length) actions += btn('从另一台电脑更新', 'update-source-sync', 'small gold' + dis);
+      if (rel.ok) actions += btn('从 GitHub 更新' + (rel.kind === 'zip' ? '（就地覆盖）' : '（下载安装包）'), 'update-source-release', 'small gold' + dis);
+      if (g.isRepo) actions += btn('用 git 拉取', 'update-source-git', 'small gold' + dis);
+      actions += btn('打开下载页', 'update-page', 'small');
+    }
+    let tail = '';
+    if (updState.pending) {
+      tail = '<div class="sp-hint">' + updatePlanText(updState.pending) + '</div><div class="sp-actions">' +
+        btn('确认更新', 'update-confirm', 'small gold' + dis) + btn('取消', 'update-cancel', 'small muted') + '</div>';
+    } else {
+      const via = updState.channel === 'sync' ? '本机同步服务' : updState.channel === 'origin' ? '本机服务器' : '';
+      tail = '<div class="sp-hint">更新只覆盖游戏文件、<b>不动存档</b>（动手前还会自动备份一份）；装完 / 拉完刷新页面即可。' +
+        (via ? '（走' + via + '就地更新）' : '安装版 / 安卓 / 网页版只能用「打开下载页」。') + '</div>' + updateResultHtml();
+    }
+    return '<div class="sync-panel update-panel"><div class="sync-head">' + head + '</div>' +
+      '<div class="sync-actions">' + actions + '</div>' + tail +
+      '<div class="sync-progress" id="update-progress" style="display:none"></div></div>';
+  }
+
   function openSystem() {
     const mute=Main.isMuted&&Main.isMuted();
     const vol=Math.round(100*((Main.volume&&Main.volume())||0));
@@ -1769,7 +1994,7 @@
         resolutions.map((r)=>r.label).join(' → ')+'。画面按这一档等比缩放并居中；窗口装不下时自动按窗口缩小，不会溢出。')+
       sysBtn(st.fullscreen?'全面屏：开':'全面屏：关','fullscreen','','开启后画面铺满整个窗口（不留黑边，窗口比例差得多时会有轻微拉伸），同时尝试进入系统全屏；按 Esc 可退出系统全屏。')+
       '</div>';
-    const p=page('system','system',supportPanelHtml()+grid+slider+saveFilePanel()+syncPanel());
+    const p=page('system','system',supportPanelHtml()+grid+slider+saveFilePanel()+syncPanel()+updatePanelHtml());
     $('[data-action="support"]',p).onclick=()=>openSupportModal();
     $('[data-action="sound"]',p).onclick=()=>{Main.setMuted(!mute);openSystem();};
     $('[data-action="save-write"]',p).onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};
@@ -1791,6 +2016,16 @@
         }catch(e){toast(e.message||'导入失败');}
       });
     };
+    /* 游戏更新：来源按钮 → 确认 → 执行；结果里的「立即刷新」用 location.reload() */
+    const updBtn=(action,fn)=>{const b=$('[data-action="'+action+'"]',p);if(b)b.onclick=fn;};
+    updBtn('update-check',()=>updateCheck());
+    updBtn('update-source-sync',()=>updateAsk('sync'));
+    updBtn('update-source-release',()=>updateAsk('release'));
+    updBtn('update-source-git',()=>updateAsk('git'));
+    updBtn('update-confirm',()=>updateRun(updState.pending));
+    updBtn('update-cancel',()=>{updState.pending=null;openSystem();});
+    updBtn('update-reload',()=>{try{location.reload();}catch(e){}});
+    updBtn('update-page',()=>openSupportLink(UPDATE_PAGE));
     const syncBtn=(action,fn)=>{const b=$('[data-action="'+action+'"]',p);if(b)b.onclick=fn;};
     syncBtn('sync-save-push',()=>syncRun('save','push'));
     syncBtn('sync-save-pull',()=>syncRun('save','pull'));
@@ -1903,8 +2138,8 @@
     if (id >= 101 && id <= 107) {
       const lv = id - 100;
       if (lv <= 2) lines.push('45 级起：通关关卡 20% 几率、竞技场（经验/碎片）获胜 15% 几率获得（一级 75% / 二级 25%）');
-      if (lv < 7) lines.push('合成：3 个同级 + 10 金松果，成功率 ' + (State.GEM_MERGE_RATES[lv - 1] * 100) + '%（失败有 50% 几率一颗材料降 1 级，1级则碎裂）');
-      lines.push('镶嵌：免费镶入橙装（3 件相同紫装融合而来），主属性 +' + lv * 4 + '%，附加属性效果随机提升，每件限 1 颗；拆卸 5 金松果');
+      if (lv < 7) lines.push('合成：3 个同级 + 10 金松果，成功率 ' + Math.round(State.gemMergeRate(lv) * 100) + '%（失败有 50% 几率一颗材料降 1 级，1级则碎裂）');
+      lines.push('镶嵌：免费镶入橙装（3 件相同紫装融合而来），主属性 +' + State.gemPercent(lv) + '%（沿用原版曲线 5×(n²−n+2)），附加属性效果随机提升，每件限 1 颗；拆卸 5 金松果');
     }
     if (!lines.length) lines.push('当前版本暂无产出途径（图鉴预留物品）');
     return lines;
@@ -1917,7 +2152,7 @@
   function openHelp() {
     const items = GUIDE_ITEMS.map((id) => '<button type="button" class="help-item" data-guide="' + id + '"><span class="item-icon">' + icon('prop', id) + '</span><span>' + esc(propMap.getValue(id).name) + '</span></button>').join('');
     // 帮助是「系统」分组下的正常页面（以前是弹窗，会挡住底下的界面）
-    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能。在状态页查看和升级。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。每轮消耗1张挑战书，连续击败3名敌人；失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件相同装备可以融合。</p><p><b>竞技场</b>：11级开启经验竞技场、20级开启碎片竞技场，报名一次打完两场。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45级后通关关卡、竞技场获胜有几率获得1-2级宝石；3个同级宝石+10金松果有几率合成高一级（失败可能降级）。3 件相同卓越（紫）装备可在「装备融合」里融为传说（橙）装备，宝石免费镶入橙装（每件限1颗），拆卸5金松果。</p><h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
+    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能。在状态页查看和升级。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。每轮消耗1张挑战书，连续击败3名敌人；失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件相同装备可以融合。</p><p><b>竞技场</b>：11级开启经验竞技场、20级开启碎片竞技场，报名一次打完两场。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45级后通关关卡、竞技场获胜有几率获得1-2级宝石；3个同级宝石+10金松果有几率合成高一级（失败可能降级）。3 件相同卓越（紫）装备可在「装备融合」里融为传说（橙）装备，宝石免费镶入橙装（每件限1颗），拆卸5金松果。融合时凑 2~3 件同名：大概率保住原名，小概率变异成狂战装备。</p><h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
     $$('[data-guide]', p).forEach((b) => b.onclick = () => openGuideItem(+b.dataset.guide));
     return p;
   }
@@ -2040,7 +2275,8 @@
   }
 
   window.UI={...legacy,renderHome,drawHomeHud,drawActor,runAction,currentScreen:()=>screen,refreshHome,renderNumbers,refreshHeader,
-    classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog,openSupportModal,maybeSupportPrompt,supportPanelHtml,copyText,supportMeta},
+    classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog,openSupportModal,maybeSupportPrompt,supportPanelHtml,copyText,supportMeta,
+      updatePanelHtml,updateCheck,updateAsk,updateRun,updateFetch,updState,UPDATE_PAGE},
     weaponIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('weapon',id)+'">',
     skillIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('skill',id)+'">',
     propIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('prop',id)+'">'};

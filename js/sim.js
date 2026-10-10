@@ -66,8 +66,13 @@
     commonAttackWeight: 30,
     /* 三侠等纯 NPC 分支（没有武器池）的固定档位：30% 技能 / 70% 普攻。 */
     npcSkillChance: 30,
-    jueDuiChance: 22, jueDuiAgain: 13,
-    jueDuiDecay: 0.7, jueDuiMin: 2,
+    /* 绝对防御的触发曲线（2026-10 用户口径「中幅提高二次与多次触发」，需求140）：
+     *   首次 22%，之后 17 / 13 / 10 / 8 / 6 / 6 …（×0.78 慢衰减，地板 6）。
+     *   旧值是 13 / ×0.7 / 地板 2（22/13/9/6/4/3/2…）。
+     *   ★ 投掷类攻击**完全不触发**绝对防御（见 dmgReduce），所以这条曲线只由
+     *   近战 / 徒手 / 技能推进 —— 扔过来的武器不会把计数推上去、不降权。 */
+    jueDuiChance: 22, jueDuiAgain: 17,
+    jueDuiDecay: 0.78, jueDuiMin: 6,
     shellFirst: 35, shellAgain: 20,
     xhSpeedShare: 0.35,
     skillCooldown: 2,
@@ -226,6 +231,13 @@
     return false;
   }
 
+  /** 多段攻击汇总：装死发生在**谁**身上、是不是被反伤打出来的，也要一起带到外层回合。
+   *  （不带上 `fakeDieSide` 的话，回放会把「装死」画在挨打的那位身上 —— 见 battle.js 的 reaction。） */
+  function inheritFakeDie(r, rr) {
+    r.fakeDie = true;
+    if (rr.fakeDieSide != null) r.fakeDieSide = rr.fakeDieSide;
+    if (rr.fakeDieReflect) r.fakeDieReflect = true;
+  }
   /** 真·色诱之术：被脱光装备期间，装备提供的属性与附加能力全部失效（回到裸属性）。 */
   function stripped(c) { return Number(c.stripTurns) > 0; }
   function statOf(c, key) { return stripped(c) ? c.baseStats[key] : c[key]; }
@@ -384,7 +396,8 @@
    *   · 来点松果（17）/ 野球拳（12）：第 1 次用过后 15，第 2 次及以后 5（到底，不再下降）；
    *   · 其余技能：一律 20。
    *  count = 本场**已经用过**的次数（0 表示还没用过 —— 那时调用方直接用 UNUSED_WEIGHT，不走这里）。
-   *  绝对防御是另一套（jueDuiChanceOf：22/13/9/6/4/3/2 的 ×0.7 慢衰减），不进出手池。 */
+   *  绝对防御是另一套（jueDuiChanceOf：22/17/13/10/8/6/6 的 ×0.78 慢衰减、地板 6），
+   *  不进出手池；而且投掷类攻击根本不触发它（不挡也不降权）。 */
   function repeatRateOf(id, count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
     if (id !== 12 && id !== 17) return RULES.repeatSkill;
@@ -562,13 +575,18 @@
     out.dmg = Math.round(out.dmg * (1 - clamp(gearReduction, 0, 80) / 100));
     /* 绝对防御是受击自动触发、不进出手池的技能，所以「挡过几次」单独记：
      * 同一场里每挡一次，下一次的触发率就按 jueDuiChanceOf 的曲线往下降
-     *（22 / 13 / 9 / 6 / 4 / 3 / 2 …；对敌我都生效）。
-     * 旧的布尔 `usedJueDui` 已被这个计数取代（它只够区分「首次/之后」两档）。 */
-    if (def.skills[16] && def.silence <= 0
+     *（22 / 17 / 13 / 10 / 8 / 6 / 6 …地板 6；对敌我都生效）。
+     * 旧的布尔 `usedJueDui` 已被这个计数取代（它只够区分「首次/之后」两档）。
+     * 2026-10 用户口径（需求140）：**投掷类攻击根本不触发绝对防御** —— 不挡、不反弹，
+     * 也**不计入降权计数**（计数只在下面分支里 +1，跳过分支就等于扔过来的武器
+     * 不会把后续触发率压下去）。近战 / 徒手 / 技能照旧。 */
+    if (def.skills[16] && def.silence <= 0 && opts.weaponType !== '投掷'
         && chance(jueDuiChanceOf(def, def.jueDuiCount || 0))) {
       def.jueDuiCount = Math.max(0, Math.floor(Number(def.jueDuiCount) || 0)) + 1;
       const pct = 40 + 4 * (def.skills[16] - 1);
-      out.jueDui = out.dmg; out.rebound = Math.round(out.dmg * pct / 100); out.dmg = 0;
+      out.jueDui = out.dmg;
+      out.rebound = Math.round(out.dmg * pct / 100);
+      out.dmg = 0;
       return out;
     }
     if (def.skills[7] && def.silence <= 0) {
@@ -644,6 +662,30 @@
       rounds.push(r);
     }
 
+    /* 反伤 / 反噬打到「出手方」身上时的结算：**和普通伤害走同一条致死保护链**
+     *（装死 → 涅槃 / 金蝉脱壳 → 调试图腾）。
+     * 2026-10 用户口径（需求143）：反伤打到死线时必须让**装死**正常触发 —— 以前这里只调
+     * tryDeathSave（它只认复活甲），于是有装死的角色会被绝对防御的反伤直接反死。
+     * 触发时装死的老规矩照旧：hp = 1、清掉眩晕、并**立刻获得一次行动**（同 applyDamage 那条路径）。
+     * `r.fakeDieSide` 记下装的死是谁 —— 战斗回放据此把「装死」的飘字与动作画在**正确的人**身上
+     *（普通受击时是挨打的那位，被反伤时是出手的那位）。 */
+    function reflectHurt(target, amount, r) {
+      const dmg = Math.max(0, Math.round(Number(amount) || 0));
+      if (!target || dmg <= 0 || target.hp <= 0) return 0;
+      if (target.hp - dmg <= 0 && target.skills && target.skills[6] && target.silence <= 0 && !target.usedFakeDie) {
+        target.usedFakeDie = true;
+        target.hp = 1;
+        target.stun = 0;
+        r.fakeDie = true;
+        r.fakeDieSide = target.side;
+        r.fakeDieReflect = true;
+        if (!immediate) immediate = { actor: target, reason: 'fakeDie' };
+        return dmg;
+      }
+      target.hp -= dmg;
+      tryDeathSave(target, r);
+      return dmg;
+    }
     function applyDamage(att, def, rawDmg, r, opts) {
       opts = opts || {};
       const action = opts.action || r.action;
@@ -707,6 +749,7 @@
         dmg = Math.max(0, def.hp - 1);
         def.hp = 1;
         r.fakeDie = true;
+        r.fakeDieSide = def.side;
         def.stun = 0;
         immediate = { actor: def, reason: 'fakeDie' };
       } else if (def.hp - dmg <= 0 && def.mods && Array.isArray(def.mods.deathSaves) && def.mods.deathSaves.length) {
@@ -738,9 +781,9 @@
           r.reflectBlocked = (r.reflectBlocked || 0) + red.rebound;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '反噬豁免'; r.noteSide = att.side;
         } else {
-          att.hp -= red.rebound;
           r.reboundHurt = red.rebound;
-          tryDeathSave(att, r);
+          /* 需求143：绝对防御的反伤同样过装死 —— 不再「直接反死」有装死的角色。 */
+          reflectHurt(att, red.rebound, r);
         }
       }
       // —— 受击/命中方机制（挑战塔 NPC 池） ——
@@ -749,18 +792,16 @@
         const noReflect = reflectImmune(att);
         if (def.mech.includes('thorns') && att.hp > 0 && !noReflect) {   // 荆棘铁壁：反弹 15%
           const reflect = Math.max(1, Math.round(dmg * 0.15));
-          att.hp -= reflect;
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
-          tryDeathSave(att, r);
+          reflectHurt(att, reflect, r);
         }
         // 塔 buff「荆棘之甲」：玩家侧反伤（跨层类）
         const thornsPct = def.mods && Number(def.mods.thornsPct) || 0;
         if (thornsPct > 0 && att.hp > 0 && !noReflect) {
           const reflect = Math.max(1, Math.round(dmg * thornsPct));
-          att.hp -= reflect;
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '荆棘之甲'; r.noteSide = def.side;
-          tryDeathSave(att, r);
+          reflectHurt(att, reflect, r);
         }
         // 题面·镜鳞：单次伤害超过阈值（默认 20% 最大生命）时，反弹该次伤害的 45%
         // （逼玩家压低单次伤害 / 走多段；阈值与反弹比例由 tower-data.js 注入，方便调平衡）
@@ -769,9 +810,10 @@
         const reflectPct = (mp && Number(mp.reflect)) || 0.6;
         if (def.mech.includes('trialMirror') && att.hp > 0 && !noReflect && dmg >= def.maxHp * threshold) {
           const reflect = Math.max(1, Math.round(dmg * reflectPct));
-          att.hp -= reflect;
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '镜鳞·反噬'; r.noteSide = def.side;
+          /* 镜鳞原来连 tryDeathSave 都没走（复活甲也不生效）—— 一并归到同一条致死保护链。 */
+          reflectHurt(att, reflect, r);
         }
         /* 题面·沉默之壁：单次受到的伤害超过阈值（默认 25% 最大生命）时，
          * **超出的那一截全额反弹**给出击方。
@@ -782,10 +824,9 @@
         const ovThreshold = (ov && Number(ov.threshold)) || 0.25;
         if (def.mech.includes('trialOverflow') && att.hp > 0 && !noReflect && dmg > def.maxHp * ovThreshold) {
           const excess = Math.max(1, Math.round(dmg - def.maxHp * ovThreshold));
-          att.hp -= excess;
           r.thornsDmg = (r.thornsDmg || 0) + excess;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '沉默之壁·溢出反弹'; r.noteSide = def.side;
-          tryDeathSave(att, r);
+          reflectHurt(att, excess, r);
         }
         if (def.mech.includes('poison') && !att.dot && chance(30)) {  // 毒藤缠绕：30% 中毒
           att.dot = { pct: 0.03, rounds: 3 };
@@ -817,6 +858,7 @@
           applyDamage(att, def, Math.round(effPower(att) * 0.36), rr, { action: 'skill' });
           total += rr.dmg;
           if (rr.reboundHurt) { r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt; r.jueDui = true; }
+          if (rr.fakeDie) inheritFakeDie(r, rr);
           if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
         }
         r.dmg = total; pushRound(r); return;
@@ -956,7 +998,7 @@
           if (rr.shellAbsorb) r.shellAbsorb = (r.shellAbsorb || 0) + rr.shellAbsorb;
           if (rr.lifesteal) r.lifesteal = (r.lifesteal || 0) + rr.lifesteal;
           if (rr.guiJia) r.guiJia = rr.guiJia;
-          if (rr.fakeDie) r.fakeDie = true;
+          if (rr.fakeDie) inheritFakeDie(r, rr);
           if (rr.deathSave) {
             r.deathSave = true; r.noteText = rr.noteText; r.noteSide = rr.noteSide;
             /* 涅槃的属性加成标记也要一起带上来，否则界面上看不到「复活后变强」这条提示。 */
@@ -993,7 +1035,11 @@
       const counter = { action: 'common' };
       applyDamage(def, att, raw, counter, {});
       r.counterDmg = counter.dmg;
-      if (counter.fakeDie) r.counterFakeDie = true;
+      if (counter.fakeDie) {
+        r.counterFakeDie = true;
+        /* 反击里也可能出装死（反击者被绝对防御反伤打死）—— 小回合也要记清是谁装的死。 */
+        if (counter.fakeDieSide != null) r.counterFakeDieSide = counter.fakeDieSide;
+      }
       if (counter.reboundHurt) r.counterRebound = counter.reboundHurt;
       if (counter.thornsDmg) r.counterThorns = counter.thornsDmg;
       if (counter.firstHitZero) {
@@ -1119,14 +1165,18 @@
         let total = 0;
         for (let i = 0; i < hits; i++) {
           const rr = { dmg: 0 };
-          applyDamage(att, def, raw, rr, { ignoreFakeDie: w.id === 7, action: 'weapon', weaponType: w.type });
+          applyDamage(att, def, raw, rr, { ignoreFakeDie: w.id === 7 || trueW(w, 'ignoreFakeDie') > 0, action: 'weapon', weaponType: w.type });
           total += rr.dmg;
-          if (rr.reboundHurt) { r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt; r.jueDui = true; }
+          /* 「绝对防御触发了」这条标记必须**独立于反弹伤害**传播：投掷类被挡下时刻意不反弹
+           *（需求140），但战斗动画（battle.js 的 skill_16 / 「绝对防御」飘字）与塔的统计
+           * 都靠 r.jueDui 判断这次是不是被挡下的 —— 挂在 reboundHurt 上会整条丢掉。 */
+          if (rr.jueDui) r.jueDui = true;
+          if (rr.reboundHurt) r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt;
           if (rr.thornsDmg) r.thornsDmg = (r.thornsDmg || 0) + rr.thornsDmg;
           if (rr.shellAbsorb) r.shellAbsorb = (r.shellAbsorb || 0) + rr.shellAbsorb;
           if (rr.lifesteal) r.lifesteal = (r.lifesteal || 0) + rr.lifesteal;
           if (rr.guiJia) r.guiJia = rr.guiJia;
-          if (rr.fakeDie) r.fakeDie = true;
+          if (rr.fakeDie) inheritFakeDie(r, rr);
           if (rr.deathSave) {
             r.deathSave = true; r.noteText = rr.noteText; r.noteSide = rr.noteSide;
             /* 涅槃的属性加成标记也要一起带上来，否则界面上看不到「复活后变强」这条提示。 */
@@ -1403,6 +1453,10 @@
     /* 防御被动的单次触发概率（%）与被动加成读取 —— 供测试/调参直接核对，
      * 不用靠统计近似（绝对防御 16 / 龟甲术 7）。 */
     jueDuiChanceOf, shellChanceOf, passiveSkillBoost,
+    /* 减伤链的即时结算（护盾 / 绝对防御 / 龟甲术 / 皮糙肉厚…）—— 纯函数，传
+     * (挨打方, 伤害, {action, weaponType})，供测试**确定性**核对触发与反弹，
+     * 不用靠统计近似（例：投掷类根本不触发绝对防御、也不推高降权计数）。 */
+    dmgReduce,
     /* 闪避率的唯一出口（同样供测试/调参直接核对，不用统计近似）。
      * 传两个战斗体：att = 攻击方、def = 挨打方（守方敏捷、移形换位、木剑/流星锤、
      * 凌波微步/烟幕等全部在这一个函数里结算）。 */

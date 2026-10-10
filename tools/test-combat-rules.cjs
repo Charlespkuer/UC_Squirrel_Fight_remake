@@ -154,6 +154,21 @@ test('橡皮擦和吸铁大法均可无视装死', () => {
   }
 });
 
+test('真·方天画戟无视装死（未真化时仍会被装死救回）', () => {
+  /* 需求138：真武器额外效果表 TRUE_WEAPON_BONUS[1] = { ignoreFakeDie: 1 }，
+   * sim.js 的武器伤害调用读它（原口径只有橡皮擦 7 走 ignoreFakeDie）。
+   * 注意方天画戟要「准备」一回合 —— 第一次出手是 rest 不造成伤害，
+   * 所以按 action==='weapon' 找真正打出的那一次。 */
+  const swing = (level) => rounds(game(), { weapons: ['1:' + level] }, { hp: 1, skills: ['6:1'] })
+    .find((r) => r.attacker === 0 && r.action === 'weapon');
+  const before = swing(10);                       // 10 级 = 未真化
+  assert.equal(before.fakeDie, true, '未真化的方天画戟应当被装死挡住');
+  assert.equal(before.hpAfter[1], 1, '装死后对手留 1 血');
+  const after = swing(11);                        // 11 级 = 真1
+  assert.equal(after.fakeDie, undefined, '真化后应当无视装死');
+  assert.equal(after.hpAfter[1], 0, '无视装死后对手直接归零');
+});
+
 test('色诱和通灵可以闪避，幸运一击始终必中', () => {
   for (const skill of [8, 15]) {
     // 技能选择、抽选、可选伤害随机值均为0，从而命中闪避判定。
@@ -181,11 +196,11 @@ test('龟甲术首次触发后仍可二次触发（不再是一次性）', () =>
   assert.ok(several > 0, '没有装备附加能力时也应当能二次触发，实测 ' + several + '/200 场出现');
 });
 
-test('绝对防御：首次 22%，之后逐次递减（22/13/9/6/4/3/2…，对敌我都生效）', () => {
+test('绝对防御：首次 22%，之后逐次递减到地板 6（22/17/13/10/8/6/6…，对敌我都生效）', () => {
   const c = game();
   const rules = c.Sim.rules;
   assert.equal(rules.jueDuiChance, 22);
-  assert.equal(rules.jueDuiAgain, 13);
+  assert.equal(rules.jueDuiAgain, 17);
   assert.ok(rules.jueDuiChance < 30, '首次概率必须低于原来的 30%');
   assert.ok(rules.jueDuiAgain < rules.jueDuiChance, '第二次必须比首次更低');
   assert.ok(rules.jueDuiDecay > 0 && rules.jueDuiDecay < 1, '应当有一个小于 1 的衰减系数：' + rules.jueDuiDecay);
@@ -194,14 +209,16 @@ test('绝对防御：首次 22%，之后逐次递减（22/13/9/6/4/3/2…，对�
   const mkDef = () => ({ name: 'd', level: 60, power: 100, agility: 100, speed: 100, hp: 1000, maxHp: 1000,
     weapons: [], skills: { 16: 1 }, effects: {}, baseStats: { power: 100, agility: 100, speed: 100 } });
   const curve = [0, 1, 2, 3, 4, 5, 6, 7].map((n) => c.Sim.jueDuiChanceOf(mkDef(), n));
-  assert.deepEqual(curve.slice(0, 3), [22, 13, 9], '曲线应当是 22 / 13 / 9：' + curve.join('/'));
+  assert.deepEqual(curve.slice(0, 3), [22, 17, 13], '曲线应当是 22 / 17 / 13：' + curve.join('/'));
+  assert.deepEqual(curve.slice(3, 6), [10, 8, 6], '地板前应当是 10 / 8 / 6：' + curve.join('/'));
   for (let i = 1; i < 6; i++) {
     assert.ok(curve[i] < curve[i - 1], '第 ' + (i + 1) + ' 次必须低于第 ' + i + ' 次：' + curve.join('/'));
   }
-  assert.ok(curve[7] >= rules.jueDuiMin, '到下限后不再下降：' + curve.join('/'));
+  assert.equal(curve[6], rules.jueDuiMin, '到地板后固定为下限：' + curve.join('/'));
+  assert.equal(curve[7], curve[6], '地板之后不再下降：' + curve.join('/'));
   /* 兼容旧的布尔口径：false = 首次、true = 第二次 */
   assert.equal(c.Sim.jueDuiChanceOf(mkDef(), false), 22);
-  assert.equal(c.Sim.jueDuiChanceOf(mkDef(), true), 13);
+  assert.equal(c.Sim.jueDuiChanceOf(mkDef(), true), 17);
   /* 对敌我都生效：sim 里两侧都会走 dmgReduce，同一场里各自记「已经挡过几次」。
    * 注意不能按「本场第 n 次受击」统计 —— 第一次没挡下来时计数仍然是 0，
    * 第二次受击还是 22% 那一档（实测按受击序号算是 21%，会误判）。
@@ -213,6 +230,9 @@ test('绝对防御：首次 22%，之后逐次递减（22/13/9/6/4/3/2…，对�
     let count = 0;                                  // 本场已经挡过几次（= sim 里的 jueDuiCount）
     for (const r of ev) {
       if (r.attacker !== 0 || r.dodge || r.action === 'rest') continue;
+      /* 需求140：投掷类武器**完全不触发**绝对防御，所以它不参与这条曲线的统计
+       *（否则会把实测概率稀释掉）。剩下的徒手 / 近战才推进计数。 */
+      if (r.wtype === '投掷') continue;
       const key = Math.min(3, count);
       byCount[key] = byCount[key] || { hits: 0, blocks: 0 };
       byCount[key].hits++;
@@ -226,8 +246,79 @@ test('绝对防御：首次 22%，之后逐次递减（22/13/9/6/4/3/2…，对�
   assert.ok(Math.abs(rate0 - 0.22) < 0.06, '未挡过时实测 ' + (rate0 * 100).toFixed(1) + '% 应接近 22%');
   assert.ok(rate1 < rate0, '挡过 1 次之后应当更低：' + (rate0 * 100).toFixed(1) + '% vs ' + (rate1 * 100).toFixed(1) + '%');
   assert.ok(rate2 < rate1, '挡过 2 次之后应当再低：' + (rate1 * 100).toFixed(1) + '% vs ' + (rate2 * 100).toFixed(1) + '%');
-  assert.ok(rate1 < 0.19 && rate2 < 0.14, '实测档位应贴近 13% / 9%：' +
+  assert.ok(rate1 < 0.23 && rate2 < 0.19, '实测档位应贴近 17% / 13%：' +
     (rate1 * 100).toFixed(1) + '% / ' + (rate2 * 100).toFixed(1) + '%');
+});
+
+test('绝对防御：投掷武器完全不触发（不挡、不反弹、也不降权）', () => {
+  /* 需求140。直接结算 Sim.dmgReduce，并把随机流钉成 0（连 22% 都是必触发）——
+   * 这样「投掷不触发」是**确定性**结论，不是统计近似。 */
+  const c = game(0);
+  const mkDef = () => ({ name: 'd', level: 60, power: 100, agility: 100, speed: 100, hp: 1000, maxHp: 1000,
+    weapons: [], skills: { 16: 1 }, effects: {}, baseStats: { power: 100, agility: 100, speed: 100 },
+    silence: 0, mods: {}, mech: [], debuffs: { power: 0, agility: 0, speed: 0 },
+    buffFlat: { power: 0, agility: 0, speed: 0 }, mechState: { coreStack: 0 }, shell: 0, jueDuiCount: 0 });
+
+  const def = mkDef();
+  const thrown = c.Sim.dmgReduce(def, 100, { action: 'weapon', weaponType: '投掷' });
+  assert.equal(thrown.dmg, 100, '投掷该照常打出伤害（完全不触发、不被挡）');
+  assert.equal(thrown.jueDui, 0, '投掷不该触发绝对防御');
+  assert.equal(thrown.rebound, 0, '投掷更不该有反弹');
+  assert.equal(def.jueDuiCount, 0, '投掷不该推进降权计数（不降权）');
+  for (let i = 0; i < 3; i++) c.Sim.dmgReduce(def, 100, { action: 'weapon', weaponType: '投掷' });
+  assert.equal(def.jueDuiCount, 0, '反复挨投掷也不该累加降权计数');
+
+  /* 对照①：近战照旧挡下 + 反弹 40%（1 级）+ 计数 +1 */
+  const melee = c.Sim.dmgReduce(def, 100, { action: 'weapon', weaponType: '近战' });
+  assert.equal(melee.dmg, 0, '近战应当被完全挡下');
+  assert.equal(melee.jueDui, 100, '近战要记下「被挡下的伤害」');
+  assert.equal(melee.rebound, 40, '近战 1 级反弹 40%');
+  assert.equal(def.jueDuiCount, 1, '近战被挡下要推进降权计数');
+  /* 对照②：徒手没有武器类型、不属于投掷，照旧触发 */
+  assert.equal(c.Sim.dmgReduce(mkDef(), 100, { action: 'common' }).jueDui, 100, '徒手照旧会被挡下');
+});
+
+test('绝对防御的反伤不再「直接反死」：有装死的一方会触发装死（需求143）', () => {
+  /* 随机钉成 0.15：徒手闪避（约 10%）不触发、绝对防御（首次 22%）必触发，
+   * 于是「反伤打到死线 → 装死」是确定性结论而不是统计近似。 */
+  const blockOf = (g, a) => rounds(g, a, { power: 1, agility: 1, speed: 1, hp: 5000000, skills: ['16:15'] })
+    .find((r) => r.jueDui && r.attacker === 0);
+
+  /* ① 有装死：留在 1 点血，并且立刻再行动一次（装死的老规矩照旧） */
+  const g = game(0.15);
+  const ev = rounds(g, { power: 4000, hp: 800, skills: ['6:1'] },
+    { power: 1, agility: 1, speed: 1, hp: 5000000, skills: ['16:15'] });
+  const block = ev.find((r) => r.jueDui && r.attacker === 0);
+  assert.ok(block, '应当出现一次「被绝对防御挡下」的回合');
+  assert.equal(block.dmg, 0, '这一击被完全挡下');
+  assert.ok(block.reboundHurt > 800, '反伤要超过出手方的血量（否则测不到致死）：' + block.reboundHurt);
+  assert.equal(block.fakeDie, true, '反伤打到死线必须触发装死');
+  assert.equal(block.fakeDieReflect, true, '要标出这次装死是反伤打出来的（回放据此画对位置）');
+  assert.equal(block.fakeDieSide, 0, '装死的是出手方（side 0）');
+  assert.equal(block.hpAfter[0], 1, '装死之后留在 1 点血，而不是被反死：' + JSON.stringify(block.hpAfter));
+  assert.equal(block.hpAfter[1], 5000000, '防守方没掉血（这一击被完全挡下）');
+  const i = ev.indexOf(block);
+  assert.equal(ev[i + 1] && ev[i + 1].attacker, 0, '装死之后出手方立刻再行动一次（不消耗回合）');
+
+  /* ② 对照：没有装死就被反伤直接打死（老行为不变） */
+  const noFd = blockOf(game(0.15), { power: 4000, hp: 800 });
+  assert.ok(noFd, '对照局同样要被挡下');
+  assert.ok(!noFd.fakeDie, '没有装死就不会触发');
+  assert.equal(noFd.hpAfter[0], 0, '没有装死 → 被反伤直接打死');
+
+  /* ③ 反噬豁免优先：免疫反伤的人根本不吃这一下，装死的次数也留着 */
+  const immune = blockOf(game(0.15), { power: 4000, hp: 800, skills: ['6:1'], mods: { reflectImmune: 1 } });
+  assert.ok(immune, '反噬豁免不影响「被挡下」这件事本身');
+  assert.ok(!immune.reboundHurt, '豁免之后没有实际反伤');
+  assert.ok(!immune.fakeDie, '没吃到伤害就不会触发装死');
+  assert.ok(immune.hpAfter[0] > 500, '反噬豁免的人不会被反伤打死（最多吃到对方那 1 点反击）：' + immune.hpAfter[0]);
+
+  /* ④ 接线：五种反伤（绝对防御 / 荆棘铁壁 / 荆棘之甲 / 镜鳞 / 沉默之壁）统一走 reflectHurt，
+   *  否则再加一处反伤就又会绕过装死 —— 这条守卫保的就是「只有一处致死判定」这件事。 */
+  const simSrc = fs.readFileSync(path.join(root, 'js', 'sim.js'), 'utf8');
+  assert.ok(!/att\.hp -= reflect/.test(simSrc) && !/att\.hp -= excess/.test(simSrc),
+    '反伤不该再直接扣血（必须过致死保护链）');
+  assert.ok((simSrc.match(/reflectHurt\(/g) || []).length >= 5, '五种反伤都要走 reflectHurt');
 });
 
 test('同时有龟甲术与绝对防御时，每次受击的受伤期望更低（不会被挤占）', () => {
@@ -569,7 +660,7 @@ test('题面·野球拳（12）：用过 1 次 15、用过 2 次起 5 到底（�
   assert.ok(rate(2) < rate(1), '用过 2 次必须低于 1 次：' + rate(1) + ' → ' + rate(2));
   assert.equal(rate(2), rules.repeatSpecialAgain, '用过 2 次就到 5：' + rate(2));
   assert.equal(rate(9), rules.repeatSpecialAgain, '再往后一直是 5：' + rate(9));
-  /* 比绝对防御「远快到底」：绝对防御是 22→13→9→6→4→3→2 的慢衰减 */
+  /* 比绝对防御「远快到底」：绝对防御是 22→17→13→10→8→6→5→4 的慢衰减 */
   const jue = (n) => g.Sim.jueDuiChanceOf({ skills: { 16: 1 }, effects: {}, mods: {} }, n);
   assert.ok(rate(2) <= jue(2), '用过 2 次时野球拳不高于绝对防御：' + rate(2) + ' vs ' + jue(2));
   assert.ok(rate(2) < jue(1), '野球拳到底更快（绝对防御第二次还有 ' + jue(1) + '%）：' + rate(2));

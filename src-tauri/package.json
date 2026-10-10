@@ -1,7 +1,7 @@
 {
   "name": "ssdz-classic-desktop",
   "private": true,
-  "version": "0.1.3",
+  "version": "0.4.6",
   "description": "松鼠大战 怀旧复刻版 —— 轻量桌面窗口（自带迷你文件服务器，直接用游戏目录里的前端与存档；exe 约 3 MB）",
   "scripts": {
     "app": "node ../tools/build-tauri-app.cjs",

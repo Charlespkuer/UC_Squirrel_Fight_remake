@@ -232,18 +232,19 @@ test('每日任务计数：合成/融合装备、宝石、使用/购买/卖出�
   s.props[24] = 20; s.goldPoint = 1000;
   assert.equal(S.composeGear(24).ok, true);
   assert.equal(c('merge'), 1, '碎片合成装备要计入 merge');
-  // 装备回收价按品质分档：白 55-60 / 绿 60-65 / 蓝 65-70 / 紫 70-75 / 橙 75-80
+  // 装备回收价按品质分档：白 55-60 / 绿 60-65 / 蓝 65-70 / 紫 90-110 / 橙 180-220
   // （回归：gearQuality 曾被同名的「按 id 取品质」函数顶掉，紫装一路掉到 55-60）
+  const SELL_RANGE = [[55, 60], [60, 65], [65, 70], [90, 110], [180, 220]];
   for (let q = 0; q <= 4; q++) {
     const [lo, hi] = S.gearSellRange(q);
-    assert.equal(lo, 55 + q * 5, '第 ' + q + ' 档下限');
-    assert.equal(hi, 60 + q * 5, '第 ' + q + ' 档上限');
+    assert.equal(lo, SELL_RANGE[q][0], '第 ' + q + ' 档下限');
+    assert.equal(hi, SELL_RANGE[q][1], '第 ' + q + ' 档上限');
   }
   {
     const purple = S.addGear(202);            // 狂战拳甲：卓越（紫）
     const before = s.goldPoint;
     const paid = S.sellGear(purple.key);
-    assert.ok(paid >= 70 && paid <= 75, '紫装回收价应落在 70-75，实际 ' + paid);
+    assert.ok(paid >= 90 && paid <= 110, '紫装回收价应落在 90-110，实际 ' + paid);
     assert.equal(s.goldPoint, before + paid, '卖价真的入账');
   }
 
@@ -446,9 +447,9 @@ test('升级一次 40 松果；失败后成功率每次 +5%，封顶 100%，成�
   assert.equal(S2.upgradeFails('weapon', 15), 0, '成功即清零');
 });
 
-test('卖出装备按品质给价：白55-60 / 绿60-65 / 蓝65-70 / 紫70-75 / 橙75-80', () => {
+test('卖出装备按品质给价：白55-60 / 绿60-65 / 蓝65-70 / 紫90-110 / 橙180-220', () => {
   const g = game(), S = g.State;
-  const expect = [[55, 60], [60, 65], [65, 70], [70, 75], [75, 80]];
+  const expect = [[55, 60], [60, 65], [65, 70], [90, 110], [180, 220]];
   expect.forEach(([lo, hi], q) => {
     assert.deepEqual(Array.from(S.gearSellRange(q)), [lo, hi], '品质 ' + q + ' 区间');
     for (let i = 0; i < 60; i++) {
@@ -456,7 +457,7 @@ test('卖出装备按品质给价：白55-60 / 绿60-65 / 蓝65-70 / 紫70-75 / 
       assert.ok(v >= lo && v <= hi, '品质 ' + q + ' 出价 ' + v + ' 应落在 ' + lo + '~' + hi);
     }
   });
-  assert.deepEqual(Array.from(S.gearSellRange(9)), [75, 80], '越界品质夹到最高档');
+  assert.deepEqual(Array.from(S.gearSellRange(9)), [180, 220], '越界品质夹到最高档');
   assert.deepEqual(Array.from(S.gearSellRange(-3)), [55, 60], '负品质夹到最低档');
 });
 
@@ -661,7 +662,7 @@ test('装备穿戴等级、槽位互斥、融合材料和附加属性生效', ()
   const three = g.State.addGear(1), four = g.State.addGear(1);
   const result = g.State.mergeGears([one.key, three.key, four.key]);
   assert.equal(result.ok, true); assert.equal(result.gear.quality, 1);
-  assert.equal(s.goldPoint, 50);
+  assert.equal(s.goldPoint, 70);   // 白装融合 30 金松果（按材料品质分档）
 });
 
 test('1/5/10/15/20 级礼包：金松果回到旧版数量，种类更丰富且不重复发放', () => {

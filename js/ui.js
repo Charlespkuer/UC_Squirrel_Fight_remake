@@ -869,7 +869,8 @@
         if (!State.wear(g.key)) { toast('等级不足，无法穿戴'); return; }
         p.close(); openGears();
       };
-      const sellBtn = el('button', 'btn', '卖' + g.price + '🌰');
+      const sellRange = State.gearSellRange(State.gearQuality(g));
+      const sellBtn = el('button', 'btn', '卖' + sellRange[0] + '-' + sellRange[1] + '🌰');
       sellBtn.onclick = () => { State.sellGear(g.key); toast('已卖出'); p.close(); openGears(); };
       const selBtn = el('button', 'btn btn-sel', '选择');
       selBtn.onclick = () => {
@@ -1038,7 +1039,7 @@
       '<p><b>属性</b>：力量决定伤害，敏捷决定闪避，速度决定出手频率，生命即血量。</p>' +
       '<p><b>武器/技能</b>：战斗中随机使用。升级需要金松果+卷轴，成功率随等级降低。</p>' +
       '<p><b>关卡</b>：10级起挑战螳螂→仙鹤→熊猫，需要挑战书，通关可得装备碎片。</p>' +
-      '<p><b>装备</b>：10个碎片+50金松果合成；3件相同装备+50金松果融合升品质。</p>' +
+      '<p><b>装备</b>：10个碎片+金松果合成（白30/绿40/蓝50）；3件同部位同品质装备+金松果融合升品质（白30/绿40/蓝50/紫60）。</p>' +
       '<p><b>转生</b>：使用转生果回到1级，属性成长更高（保留装备）。</p>' +
       '<p><b>存档</b>：自动保存在浏览器本地。</p>';
     const row = el('div', 'btn-row');

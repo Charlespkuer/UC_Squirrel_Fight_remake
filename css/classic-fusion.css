@@ -71,14 +71,29 @@
 .fusion-cost b{color:#b5821e;font-weight:normal}
 .fusion-guarantee{font-size:17px;color:#a18a61}
 
-/* ---------- 规则条 ---------- */
-.fusion-rules{flex:0 0 auto;display:flex;gap:9px;margin:0;padding:5px 16px;border-radius:22px;
-  background:#f7edd6;box-shadow:inset 0 0 0 3px #fffdf3;font-size:18px;line-height:24px;color:#8f7247;white-space:normal}
-.fusion-rules b{align-self:flex-start;flex-shrink:0;padding:1px 12px;border-radius:13px;
+/* ---------- 规则条 ----------
+ * 只放一句话：flex + nowrap + 省略号，永远撑不破、也永远不会把下面的装备列表挤掉。
+ * 需要完整说明时点右边的「详细规则」弹窗（.fusion-help）。
+ * 注意别在这里塞 <br>：flex 容器会把每段文字拆成独立的 flex item，直接变成一堆竖条。 */
+.fusion-rules{flex:0 0 auto;display:flex;align-items:center;gap:9px;margin:0;padding:4px 12px 4px 5px;border-radius:22px;
+  background:#f7edd6;box-shadow:inset 0 0 0 3px #fffdf3;font-size:18px;line-height:22px;color:#8f7247}
+.fusion-rules b{flex-shrink:0;padding:1px 12px;border-radius:13px;
   background:linear-gradient(#ffeeb0,#ffdc79);color:#7a4a11;font-weight:normal}
+.fusion-rules-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fusion-rules-text em{font-style:normal;color:#b5821e}
+.fusion-rules>.uc-button{flex-shrink:0;font-size:17px;min-height:27px;padding:1px 13px}
 
-/* ---------- 装备选择 ---------- */
-.fusion-inventory-panel{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;
+/* 详细规则弹窗 */
+.fusion-help{font-size:26px;line-height:1.6;color:#7b5a2e}
+.fusion-help p{margin:0 0 12px}
+.fusion-help p:last-child{margin-bottom:0}
+.fusion-help b{display:inline-block;min-width:74px;color:#a9762f;font-weight:normal}
+.fusion-help em{font-style:normal;color:#b8551f}
+
+/* ---------- 装备选择 ----------
+ * min-height 是硬底线：这块是 flex:1 1 auto，上方的规则条一旦变高它就
+ * 会被压到 0、装备卡整片消失（2026-10 第二十九批修）。 */
+.fusion-inventory-panel{flex:1 1 auto;min-height:150px;display:flex;flex-direction:column;
   border-radius:28px;background:#fdf8ea;box-shadow:inset 0 0 0 4px #fffdf3,inset 0 6px 12px #e0c89433;padding:7px 16px 6px}
 .fusion-inventory-heading{display:flex;align-items:center;gap:14px;flex:0 0 auto;height:36px}
 .fusion-inventory-heading h3{display:flex;align-items:center;gap:12px;font-size:24px;font-weight:normal;margin:0 auto 0 0;color:#8c612e}
@@ -151,4 +166,5 @@
 .fusion-quality-change{font-size:35px}
 .fusion-success-details p{font-size:27px;margin:13px 0}
 .fusion-success-details .fusion-effects{font-size:25px;color:#947040}
+.fusion-success-details .fusion-mutant{font-size:25px;color:#b8551f;font-weight:bold}
 .modal-body .fusion-success-note{text-align:center;font-size:23px;color:#a08256;margin:8px 0 0}

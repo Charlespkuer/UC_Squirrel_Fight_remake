@@ -159,6 +159,79 @@ const results = [];
 function record(name, fn) { results.push([name, fn]); }
 
 /* ============================================================
+ * 需求145：原地重画当前页不能把人弹回页首
+ * 「把存档送过去」/「检查更新」这类动作会多次重画系统页，而系统页内容比底板高，
+ * 滚动容器是 .classic-board（overflow-y:auto）—— 重画后必须保持原来的滚动位置。
+ * 做法：把**真实的 page()** 切出来，配一个最小 DOM 桩（#ui 里一页 + 一个 board）。
+ * ============================================================ */
+record('原地重画系统页不弹回页首（送存档 / 检查更新）', () => {
+  const lines = fs.readFileSync(path.join(ROOT, 'js/classic-ui.js'), 'utf8').split('\n');
+  const pageSrc = slice(lines, 'function page(group, active, content, opts) {', '  function modal(title, content, buttons, opts) {')
+    .replace(/\n\s*function modal\(title, content, buttons, opts\) \{$/, '');
+
+  const made = { page: null };
+  function mkEl(cls) {
+    const el = {
+      className: cls || '', dataset: {}, _html: '', children: [], scrollTop: 0, scrollLeft: 0,
+      classList: { add() {}, contains: (x) => String(el.className).split(/\s+/).includes(x) },
+      appendChild(ch) { el.children.push(ch); return ch; },
+      remove() { if (made.page === el) made.page = null; },
+      querySelector() { return null; },
+      querySelectorAll() { return []; },
+    };
+    Object.defineProperty(el, 'innerHTML', {
+      get: () => el._html,
+      set: (v) => {
+        el._html = v;
+        el.children = [];
+        /* 真实 page() 把 content 塞进 <div class="classic-board"> —— 桩里也造出这个子节点，
+         * 它才是滚动容器（重画时的位置恢复逻辑就作用在它身上）。 */
+        if (/classic-board/.test(v)) el.children.push(mkEl('classic-board'));
+      },
+    });
+    return el;
+  }
+  const sandbox = {
+    console, screen: null, activePortrait: null, actions: {},
+    tabs: () => '', btn: () => '<button></button>', esc: (v) => String(v == null ? '' : v),
+    bind() {}, home() {}, promptLevelUpChoices() {}, $$: () => [],
+  };
+  sandbox.window = sandbox;
+  sandbox.document = {
+    createElement: () => mkEl('classic-page'),
+    querySelector(sel) {
+      if (!made.page) return null;
+      const m = /data-screen="([^"]+)"/.exec(sel);
+      if (m && made.page.dataset.screen !== m[1]) return null;
+      return made.page.children.find((c) => c.classList.contains('classic-board')) || null;
+    },
+  };
+  sandbox.$ = (sel) => {
+    if (sel === '#ui') return { appendChild(ch) { made.page = ch; return ch; } };
+    if (sel === '#ui .classic-page') return made.page;
+    return null;
+  };
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(pageSrc + '\n;window.__page = page;', ctx, { filename: 'classic-ui.page.js' });
+  const open = (name) => vm.runInContext(
+    'window.__page("group", ' + JSON.stringify(name) + ', \'<div class="classic-board">内容</div>\')', ctx);
+  const board = () => made.page.children.find((c) => c.classList.contains('classic-board'));
+
+  open('system');
+  assert.ok(board(), '系统页应当有滚动容器 .classic-board');
+  board().scrollTop = 300;                 // 用户滚到了中段
+  open('system');                          // 「送存档 / 检查更新」触发的原地重画
+  assert.equal(board().scrollTop, 300, '同一页重画后滚动位置必须保持');
+  board().scrollTop = 120; open('system');
+  assert.equal(board().scrollTop, 120, '中段位置也要保持（不只是到底）');
+  open('home');                            // 换页：旧 board 的 data-screen 不匹配
+  assert.equal(board().scrollTop, 0, '换页应当从头显示');
+  open('system');
+  assert.equal(board().scrollTop, 0, '从别的页回到系统页同样从头显示');
+});
+
+
+/* ============================================================
  * 本轮需求：复仇范围 / 存档入口去重 / 主页 EXP 贴图
  * ============================================================ */
 
@@ -393,6 +466,69 @@ record('塔身楼层：13 层够高、塔身高度固定 470px（两塔一致）
   assert.ok(calls.length >= 2, '两个塔页都该调用 towerVisual：' + calls.join(' | '));
   assert.equal((ui2.match(/<div class="tower-visual"/g) || []).length, 1,
     '塔身 HTML 只该由 towerVisual() 一处产出（两处各写一套就会出现一高一矮）');
+});
+
+/* 2026-10 用户反馈①：真化武器在「武器&技能」图鉴里**不直接**显示真形态贴图，
+ * 要点进详情（selected=true）再退出才切换（根因：icon() 里「真形态优先」排在参考卡分支之后）。
+ * 用户反馈②：技能真化此前**根本没有**专属贴图，而 images/classic/reference-cards/ 里
+ * 备着带「真」字红章的真·卡面（例：真·来点松果 skill-17.png）。 */
+record('真化武技在武器&技能图鉴里直接显示专属贴图（技能也要，且名单与素材对得上）', () => {
+  const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
+  const start = uiSrc.indexOf('function atlasIcon(kind, id, locked, trueForm)');
+  assert.ok(start > 0, 'classic-ui.js 里应该还有 atlasIcon');
+  const end = uiSrc.indexOf('function statsHtml(stats, cls)', start);
+  assert.ok(end > start, 'classic-ui.js 里应该还有 statsHtml（icon 切片的终点）');
+  const ctx = vm.createContext({ Math, Number, String, Object, Array, Boolean, console });
+  ctx.window = ctx;
+  ctx.GData = { trueLevel: (lv) => Math.max(0, Math.min(5, Math.round(Number(lv) || 0) - 10)) };
+  const icon = vm.runInContext(uiSrc.slice(start, end) + '\nicon;', ctx, { filename: 'classic-ui.icon.js' });
+
+  /* 期望的映射（测试在这里钉死；代码里的名单若漂移，下面的 deepEqual 会报错） */
+  const CARD_WEAPONS = [1, 5, 6, 8];
+  const CARD_SKILLS = [1, 2, 4, 5, 6, 10, 11, 12, 13, 16, 17, 24];
+  const nums = (s) => (s.match(/\d+/g) || []).map(Number);
+  assert.deepEqual(nums((uiSrc.match(/TRUE_CARD_IDS = \{ weapon: \[([^\]]*)\]/) || [])[1] || ''),
+    CARD_WEAPONS, 'TRUE_CARD_IDS.weapon 应当只含 ' + CARD_WEAPONS.join('/'));
+  assert.deepEqual(nums((uiSrc.match(/TRUE_CARD_IDS = \{ weapon: \[[^\]]*\], skill: \[([^\]]*)\]/) || [])[1] || ''),
+    CARD_SKILLS, 'TRUE_CARD_IDS.skill 应当只含 ' + CARD_SKILLS.join('/'));
+
+  /* ① 有真·卡面的走卡面；没有的仍走 icons/weapon-true-<id>.png（17 把全覆盖） */
+  for (let id = 1; id <= 17; id++) {
+    const html = icon('weapon', id, false, false, true);
+    const want = CARD_WEAPONS.includes(id) ? 'reference-cards/weapon-' + id + '.png' : '/weapon-true-' + id + '.png';
+    assert.ok(html.includes(want), `真化武器 ${id} 应显示 ${want}：${html}`);
+  }
+  for (const id of CARD_SKILLS) {
+    assert.match(icon('skill', id, false, false, true), new RegExp('reference-cards/skill-' + id + '\\.png'),
+      `真化技能 ${id} 应显示真·卡面`);
+  }
+  /* 用户点名的例子：真·来点松果 */
+  assert.match(icon('skill', 17, false, false, true), /reference-cards\/skill-17\.png/, '真·来点松果要显示真·卡面');
+
+  /* ② 未真化 / 未拥有 不受影响（灰色版卡面仍归「未解锁」用） */
+  assert.match(icon('weapon', 1, false, false, false), /weapon-1-learned\.png/, '未真化的方天画戟仍走普通参考卡');
+  assert.match(icon('weapon', 1, true, false, false), /weapon-1-locked\.png/, '未拥有仍显示锁定图');
+  assert.ok(!/reference-cards/.test(icon('skill', 17, false, false, false)), '未真化的来点松果不该用真·卡面');
+  assert.match(icon('skill', 17, false, false, false), /icons\/skill-17\.png/, '未真化的来点松果走普通图标');
+  assert.match(icon('skill', 3, true, false, false), /reference-cards\/skill-3\.png/, '灰色版仍是未解锁用的那张');
+
+  /* ③ 接线：图鉴与详情弹窗都必须对**武器和技能**都算真形态（原来写死了 kind === 'weapon'） */
+  assert.match(uiSrc, /const trueForm = !!has && isTrueGear\(has\)/,
+    '图鉴的 trueForm 不能只判断武器，否则技能真化永远不出专属贴图');
+  assert.match(uiSrc, /icon\(kind,id,locked,false,isTrueGear\(it\)\)/,
+    '详情弹窗同样不能只判断武器');
+
+  /* ④ 名单里的每一张图都必须真的存在（写错 id 会变成裂图） */
+  const dir = path.join(ROOT, 'images', 'classic', 'reference-cards');
+  const greyLine = uiSrc.match(/const grey=\{weapon:\[([^\]]*)\],skill:\[([^\]]*)\]\}/) || [];
+  const pairs = [
+    ...CARD_WEAPONS.map((id) => ['weapon', id]), ...CARD_SKILLS.map((id) => ['skill', id]),
+    ...nums(greyLine[1] || '').map((id) => ['weapon', id]), ...nums(greyLine[2] || '').map((id) => ['skill', id]),
+  ];
+  assert.ok(pairs.length >= 26, '真·版 + 灰色版两组 id 都该解析出来，实测 ' + pairs.length);
+  for (const [kind, id] of pairs) {
+    assert.ok(fs.existsSync(path.join(dir, kind + '-' + id + '.png')), '素材缺失：' + kind + '-' + id + '.png');
+  }
 });
 
 (async () => {

@@ -4,12 +4,14 @@
  * 目录：装备融合界面（三合一）
  * Ctrl+F 搜节号（如「【FS1】」）直达对应代码块。
  *
- *  【FS1】打开融合页与材料校验  【FS2】渲染  【FS3】融合执行与成功弹窗
+ *  【FS1】打开融合页与材料校验  【FS2】渲染  【FS3】详细规则弹窗  【FS4】融合执行与成功弹窗
  * ------------------------------------------------------------ */
 (function () {
   'use strict';
-  const COST = 50, PAGE_SIZE = 6;
+  const PAGE_SIZE = 6;
   const qualities = ['普通', '优秀', '杰出', '卓越', '传说'];
+  /* 融合费用按**材料品质**分档（State.gearCostOf）：白 30 / 绿 40 / 蓝 50 / 紫 60。 */
+  const costOf = (gear) => (gear ? State.gearCostOf(gear.quality) : 0);
   const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const art = (gear) => '<img alt="" src="images/classic/icons/gear-' + Number(gear.id) + '.png">';
@@ -45,7 +47,8 @@
       if (materials.some((gear) => gear.quality >= 4)) return '传说装备已是最高品质';
       if (materials.some((gear) => partOf(gear) !== partOf(materials[0]))) return '需要 3 件同部位的装备';
       if (materials.some((gear) => gear.quality !== materials[0].quality)) return '需要 3 件同品质的装备';
-      if (State.state().goldPoint < COST) return '金松果不足，还需要 ' + (COST - State.state().goldPoint) + ' 个';
+      const cost = State.gearCostOf(materials[0].quality);
+      if (State.state().goldPoint < cost) return '金松果不足，还需要 ' + (cost - State.state().goldPoint) + ' 个';
       return '';
     }
 
@@ -119,8 +122,12 @@
         '<span class="fusion-wallet">' + classic.spr('resource_1', 18) + '<span>金松果 <b>' + State.state().goldPoint + '</b></span></span></header>' +
         '<div class="fusion-workbench"><div class="fusion-materials" aria-label="融合材料">' + materials + '</div>' +
         '<span class="fusion-arrow" aria-hidden="true">➜</span><div class="fusion-preview ' + (first ? 'q' + (first.quality + 1) : 'missing') + '"><span class="fusion-frame"><span class="fusion-question">?</span></span><span class="fusion-preview-label">' + (first ? qualities[first.quality + 1] + partLabel(first) : '更高品质') + '</span><span class="fusion-preview-hint">必得 1 件</span></div>' +
-        '<div class="fusion-operation"><span class="fusion-cost">消耗 <b>' + COST + '</b> 金松果</span><button type="button" class="uc-button gold" data-fusion-action="fuse"' + (reason || busy ? ' disabled' : '') + '>开始融合</button><span class="fusion-guarantee">品质提升一级 · 材料会被消耗</span></div></div>' +
-        '<p class="fusion-rules"><b>规则</b>3 件<b>同部位、同品质</b>装备（不必同名）+ ' + COST + ' 金松果，随机获得 1 件该部位、品质高一级的装备；3 件卓越（紫）同部位装备融合为传说（橙）装备，可镶嵌宝石。已加星标（★）的装备受保护，不会参与融合。</p>' +
+        '<div class="fusion-operation"><span class="fusion-cost">' + (first ? '消耗 <b>' + costOf(first) + '</b> 金松果' : '按品质 30 / 40 / 50 / 60') + '</span><button type="button" class="uc-button gold" data-fusion-action="fuse"' + (reason || busy ? ' disabled' : '') + '>开始融合</button><span class="fusion-guarantee">品质提升一级 · 材料会被消耗</span></div></div>' +
+        /* 规则条只留一行（flex + nowrap + 省略号），细节全部收进「详细规则」弹窗 ——
+         * 之前把整段说明塞在这里，<br> 会被 flex 拆成一堆竖条，还会把下面的装备列表挤没。 */
+        '<p class="fusion-rules"><b>规则</b>' +
+        '<span class="fusion-rules-text">3 件<em>同部位、同品质</em>装备 → 1 件<em>品质高一级</em>；凑同名可保名，小概率变异狂战</span>' +
+        '<button type="button" class="uc-button tiny muted" data-fusion-action="rules">详细规则</button></p>' +
         '<div class="fusion-inventory-panel"><div class="fusion-inventory-heading"><h3>选择装备<span class="fusion-pips" aria-label="已放入 ' + selected.length + ' / 3">' + pips + '</span><span class="fusion-count">已放入 ' + selected.length + '/3</span></h3>' + (starredInBag ? '<span class="fusion-starred-note" title="已加星标的装备受保护，不会参与融合；要拿它当材料请先去装备详情取消星标">★ 已加星标 ' + starredInBag + ' 件 · 不参与融合</span>' : '') + '<button type="button" class="uc-button tiny muted" data-fusion-action="clear"' + (selected.length ? '' : ' disabled') + '>清空材料</button><div class="fusion-pagination"><button type="button" class="uc-button tiny" data-fusion-action="previous" aria-label="上一页装备"' + (pageIndex === 0 ? ' disabled' : '') + '><i class="chev chev-l" aria-hidden="true"></i></button><span>' + (pageIndex + 1) + ' / ' + pages + '</span><button type="button" class="uc-button tiny" data-fusion-action="next" aria-label="下一页装备"' + (pageIndex + 1 >= pages ? ' disabled' : '') + '><i class="chev chev-r" aria-hidden="true"></i></button></div></div>' +
         '<div class="fusion-inventory">' + (cards || '<div class="fusion-empty">还没有可以选择的装备。<br><span>收集装备碎片，可在道具中合成装备。</span></div>') + '</div></div>' +
         '<p class="fusion-status' + (!reason ? ' ready' : '') + '" role="status" aria-live="polite"><i aria-hidden="true">' + (reason ? '!' : '✓') + '</i>' + esc(reason || '材料已齐全，可以融合！') + '</p>';
@@ -147,6 +154,7 @@
       action('previous').onclick = () => { pageIndex--; render({ action: 'previous' }); };
       action('next').onclick = () => { pageIndex++; render({ action: 'next' }); };
       action('fuse').onclick = fuse;
+      action('rules').onclick = showRules;
       if (focus) {
         const target = focus.key ? [...board.querySelectorAll('[data-fusion-gear]')].find((button) => button.dataset.fusionGear === focus.key) : action(focus.action);
         if (target && !target.disabled) target.focus({ preventScroll: true });
@@ -155,13 +163,33 @@
     }
 
     /* ============================================================
-     * 【FS3】融合执行与成功弹窗（含卖出）
+     * 【FS3】详细规则弹窗（规则条只放一句话，细节都收在这里）
+     * ============================================================ */
+    function showRules() {
+      const pct = (v) => Math.round(v * 100) + '%';
+      const n1 = 1 - State.FUSION_SAME_NAME_RATE[3];
+      const n2 = 1 - State.FUSION_SAME_NAME_RATE[2];
+      classic.modal('融合规则', '<div class="fusion-help">' +
+        '<p><b>材料</b>3 件同部位、同品质、未穿戴、未加星标（★）的装备，会被消耗。</p>' +
+        '<p><b>费用</b>白 ' + State.gearCostOf(0) + ' · 绿 ' + State.gearCostOf(1) +
+        ' · 蓝 ' + State.gearCostOf(2) + ' · 紫 ' + State.gearCostOf(3) + ' 金松果（按材料品质）。</p>' +
+        '<p><b>产物</b>该部位、品质高一级的 1 件；3 紫 → 传说橙（可镶嵌宝石）。</p>' +
+        '<p><b>名称</b>三件同名 ' + pct(State.FUSION_SAME_NAME_RATE[3]) + ' 保名 / ' + pct(n1) +
+        ' <em>变异狂战</em>；两件同名 ' + pct(State.FUSION_SAME_NAME_RATE[2]) + ' / ' + pct(n2) + '；全不同名随机。</p>' +
+        '<p><b>词条</b>≥2 件共有的保留（取最高星），各 ' + pct(State.FUSION_EXT_UPGRADE_RATE) +
+        ' 升 1 星（上限 3）；无共有则随机。</p>' +
+        '</div>', [{ label: '知道了', cls: 'gold' }]);
+    }
+
+    /* ============================================================
+     * 【FS4】融合执行与成功弹窗（含卖出）
      * ============================================================ */
     function fuse() {
       if (busy || !page.isConnected) return;
       const gears = State.myGears(), reason = validation(gears);
       if (reason) { render(); classic.toast(reason); return; }
       const previousQuality = gears.find((gear) => gear.key === selected[0]).quality;
+      const previousCost = State.gearCostOf(previousQuality);
       busy = true;
       let result;
       try { result = State.mergeGears(selected.slice()); }
@@ -172,7 +200,7 @@
       const effects = State.extText(gear.ext);
       /* 「卖出」：融合产物常是拿去变现的，介绍页直接给卖出入口（点不开确认就关弹窗，
        * close:false 让确认框叠在介绍页上，取消后介绍页还在）。 */
-      const success = classic.modal('融合成功', '<div class="fusion-success"><div class="fusion-success-item q' + gear.quality + '"><span class="fusion-frame">' + art(gear) + '</span><strong>' + esc(gear.name) + '</strong></div><div class="fusion-success-details"><div class="fusion-quality-change"><span class="q' + previousQuality + '">' + qualities[previousQuality] + '</span><span aria-hidden="true"> → </span><strong class="q' + gear.quality + '">' + qualities[gear.quality] + '</strong></div><p>基本属性：' + esc(gear.attrName) + ' +' + gear.abilityVal + '<br>使用等级：' + gear.useLevel + ' 级</p>' + (effects.length ? '<p class="fusion-effects">' + effects.map(esc).join('<br>') + '</p>' : '') + '</div></div><p class="fusion-success-note">已消耗 3 件材料和 50 金松果，新装备（' + (PART_NAME[State.gearPart(gear.id)] || '装备') + '）已放入装备背包。</p>', [
+      const success = classic.modal('融合成功', '<div class="fusion-success"><div class="fusion-success-item q' + gear.quality + '"><span class="fusion-frame">' + art(gear) + '</span><strong>' + esc(gear.name) + '</strong></div><div class="fusion-success-details"><div class="fusion-quality-change"><span class="q' + previousQuality + '">' + qualities[previousQuality] + '</span><span aria-hidden="true"> → </span><strong class="q' + gear.quality + '">' + qualities[gear.quality] + '</strong></div><p>基本属性：' + esc(gear.attrName) + ' +' + gear.abilityVal + '<br>使用等级：' + gear.useLevel + ' 级</p>' + (gear.mutant ? '<p class="fusion-mutant">⚡ <b>狂战变异</b>：这次没保住原名，变成了该部位的狂战装备</p>' : '') + (effects.length ? '<p class="fusion-effects">' + effects.map(esc).join('<br>') + '</p>' : '') + '</div></div><p class="fusion-success-note">已消耗 3 件材料和 ' + previousCost + ' 金松果，新装备（' + (PART_NAME[State.gearPart(gear.id)] || '装备') + '）已放入装备背包。</p>', [
         { label: '卖出', cls: 'muted', close: false, run: () => {
             const range = State.gearSellRange(State.gearQuality(gear));
             classic.modal('卖出装备', '<p>确定以 <b>' + range[0] + '~' + range[1] + '</b> 金松果卖出【' + esc(gear.name) + '】吗？</p>', [

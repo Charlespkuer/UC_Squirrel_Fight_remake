@@ -36,6 +36,7 @@ jobs:
           # css/、js/ 这些相对引用是相对 URL 根解析的，所以一个引用都不用改
           cp scripts/index.html _site/
           cp -R css js images audio _site/
+          [ -f version.json ] && cp version.json _site/ || true
           # 游戏本体没有任何构建步骤，原样发布即可
           du -sh _site
           find _site -maxdepth 1 -mindepth 1 | sort

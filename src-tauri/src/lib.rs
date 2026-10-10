@@ -18,6 +18,9 @@
 //   POST /__save         → 校验 JSON 对象后写盘，返回 {ok, savedAt}
 // 外链 API（轻壳模式的「用浏览器打开」；安装版/安卓走 `open_external` 命令）：
 //   GET  /__open?url=…   → 校验 http(s) 后交给系统默认浏览器，返回 {ok} / {ok:false,msg}
+//   POST /__update?mode=check|git|release|auto[&dry=1]  → 跑 scripts/update-game.js 并把它的 JSON 回给页面
+//        （「一键拉取远端更新」。真正干活的是那个零依赖 Node 脚本 —— 这样壳 / 便携版 / 浏览器
+//          三边共用同一份逻辑；本机没装 Node 时返回 {ok:false,code:"NO_NODE"}，界面自己退到下载页）
 #![cfg_attr(all(windows, not(mobile)), windows_subsystem = "windows")]
 
 use std::fs;
@@ -431,6 +434,93 @@ fn open_api(query: &str, out: &mut TcpStream) -> std::io::Result<()> {
     }
 }
 
+/// /__update?mode=…[&dry=1][&asset=…]：跑 scripts/update-game.js，把它的 stdout JSON 原样回给页面。
+/// 参数全部白名单校验；**不接受客户端传命令 / URL**，脚本路径也由壳自己拼。
+#[cfg(not(mobile))]
+fn update_api(query: &str, mode_allowed: bool, ctx: &Ctx, out: &mut TcpStream) -> std::io::Result<()> {
+    let mut mode = String::from("auto");
+    let mut asset = String::new();
+    let mut platform = String::new();
+    let mut dry = false;
+    for kv in query.split('&') {
+        let (k, v) = match kv.split_once('=') {
+            Some((k, v)) => (k, percent_decode(v)),
+            None => (kv, String::new()),
+        };
+        match k {
+            "mode" => mode = v,
+            "asset" => asset = v,
+            "platform" => platform = v,
+            "dry" => dry = v == "1" || v == "true",
+            _ => {}
+        }
+    }
+    if !["auto", "check", "git", "release"].contains(&mode.as_str()) {
+        return respond_json(out, 400, &json_err("不认识的更新方式"));
+    }
+    let asset_ok = asset.is_empty()
+        || (asset.len() <= 120
+            && asset.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')));
+    if !asset_ok {
+        return respond_json(out, 400, &json_err("资源名不合法"));
+    }
+    let platform_ok = platform.is_empty()
+        || ["darwin", "win32", "linux", "android"].contains(&platform.as_str());
+    if !platform_ok {
+        return respond_json(out, 400, &json_err("平台参数不合法"));
+    }
+    if mode != "check" && !mode_allowed {
+        // mode_allowed = 这次请求是 POST（更新会改文件，只允许 POST）
+        return respond_json(out, 405, &json_err("更新动作只接受 POST"));
+    }
+    let script = ctx.root.join("scripts").join("update-game.js");
+    if !script.exists() {
+        return respond_json(out, 501, "{\"ok\":false,\"code\":\"NO_HELPER\",\"msg\":\"这个包里没有 scripts/update-game.js，无法一键更新\"}");
+    }
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg(&script).arg("--json").arg(format!("--mode={mode}")).arg(format!("--root={}", ctx.root.display()));
+    if dry {
+        cmd.arg("--dry");
+    }
+    if !asset.is_empty() {
+        cmd.arg(format!("--asset={asset}"));
+    }
+    if !platform.is_empty() {
+        cmd.arg(format!("--platform={platform}"));
+    }
+    let output = match cmd.output() {
+        Ok(o) => o,
+        Err(e) => {
+            let code = if e.kind() == std::io::ErrorKind::NotFound { "NO_NODE" } else { "SPAWN_FAILED" };
+            let msg = if code == "NO_NODE" {
+                "这台机器上没有找到 node，无法一键更新；请用「打开下载页」手动更新".to_string()
+            } else {
+                format!("起不了更新脚本：{e}")
+            };
+            let body = format!("{{\"ok\":false,\"code\":\"{code}\",\"msg\":{}}}", serde_json::Value::from(msg));
+            return respond_json(out, 200, &body);
+        }
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let last = stdout.lines().filter(|l| !l.trim().is_empty()).last().unwrap_or("").trim().to_string();
+    let log_lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+    let log_tail: Vec<&str> = log_lines.iter().rev().take(8).rev().cloned().collect();
+    match serde_json::from_str::<serde_json::Value>(&last) {
+        Ok(mut v) => {
+            if v.is_object() {
+                v["log"] = serde_json::Value::from(log_tail);
+            }
+            respond_json(out, 200, &v.to_string())
+        }
+        Err(_) => {
+            let msg = format!("更新脚本没有返回结果：{}", stderr.trim());
+            let body = format!("{{\"ok\":false,\"code\":\"HELPER_FAILED\",\"msg\":{}}}", serde_json::Value::from(msg));
+            respond_json(out, 500, &body)
+        }
+    }
+}
+
 /// 返回 true = 该关连接
 #[cfg(not(mobile))]
 fn handle_request(method: &str, target: &str, body: &[u8], ctx: &Ctx, out: &mut TcpStream) -> std::io::Result<bool> {
@@ -447,6 +537,12 @@ fn handle_request(method: &str, target: &str, body: &[u8], ctx: &Ctx, out: &mut 
      * 这种「远端来源」调不了 Tauri IPC（capability 会给 ACL 拒绝），所以走这条普通 HTTP。 */
     if path == "/__open" {
         open_api(query, out)?;
+        return Ok(false);
+    }
+    /* 「一键拉取远端更新」：轻壳模式下页面来自 127.0.0.1，调不了 IPC，所以也走这条普通 HTTP。
+     * 只有 POST 才会真的改文件（check 允许 GET）。 */
+    if path == "/__update" {
+        update_api(query, method == "POST", ctx, out)?;
         return Ok(false);
     }
     if method != "GET" && method != "HEAD" {

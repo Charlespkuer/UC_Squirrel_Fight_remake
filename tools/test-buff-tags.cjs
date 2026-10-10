@@ -99,6 +99,19 @@ hr('1. 词表与数据：每条增益都必须显式声明标签');
       assert.ok(!(TD.hasTag(b, 'unique') && TD.hasTag(b, 'repeatable')), b.id + ' 同时 unique 与 repeatable');
     }
   });
+  /* 静态权重（shopWeight）是**商店货架与场间三选一共用**的那份抽中权重，缺省 1。
+   * 2026-10 用户口径：E01「立即进货」0.5、E16「铸币商队」0.5（全局）、C49「终焉烙印」0.8（初始权重）。
+   * 这里把它们钉死，同时保证没有别的增益被顺手改权。 */
+  check('静态权重只对指定增益降权：E01 / E16 = 0.5、C49 = 0.8（其余默认 1）', () => {
+    assert.equal(TD.BUFF_BY_ID.E01.shopWeight, 0.5, '立即进货的商店权重应当是 0.5');
+    assert.equal(TD.BUFF_BY_ID.E16.shopWeight, 0.5, '铸币商队的全局权重应当是 0.5');
+    assert.equal(TD.BUFF_BY_ID.C49.shopWeight, 0.8, '终焉烙印的初始权重应当是 0.8');
+    /* 注意：TD.BUFFS 是在 vm 里构造的，数组跨 realm，deepStrictEqual 会因原型不同而误报，
+     * 所以这里比字符串（与 test-state 的 same() 同一个道理）。 */
+    const custom = TD.BUFFS.filter((b) => b.shopWeight != null && b.shopWeight !== 1).map((b) => b.id).sort().join(',');
+    assert.equal(custom, 'C14,C49,E01,E16',
+      '声明了非默认静态权重的应当只有 C14（涅槃 0.5）/ C49（终焉烙印 0.8）/ E01（立即进货 0.5）/ E16（铸币商队 0.5），实测：' + custom);
+  });
 }
 
 /* ============================================================ */
@@ -132,7 +145,7 @@ hr('2. 四个场所：池子 = 标签推导出的名单（不多不少）');
     const MODS = ['envIgnore', 'envReflect', 'instantCoins', 'coinBoostPct', 'shopDiscount',
       'instantRetry', 'sellValue', 'sellGrowthPerWin', 'shopSpendStep', 'permSlot', 'postBattleShop',
       'postBattleMintShop', 'shopHalf',
-      'weightDivBy', 'weightDivOffset', 'limitedDefaultRerollPaid', 'pityWeight'];
+      'weightDivBy', 'weightDivOffset', 'weightDecay', 'limitedDefaultRerollPaid', 'pityWeight'];
     for (const b of TD.towerPool) {
       const bad = Object.keys(b.mods || {}).filter((k) => MODS.indexOf(k) >= 0);
       assert.equal(bad.length, 0, b.id + ' 带无尽机制 ' + bad.join(','));

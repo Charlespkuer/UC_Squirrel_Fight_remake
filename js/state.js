@@ -1226,10 +1226,24 @@
   })();
   function propSellPrice(id) {
     id = Number(id);
+    if (BAG_CURRENCY_PROP[id]) return 0;              // 货币类（金杯）不能卖
     if (PROP_SELL_OVERRIDES[id] != null) return PROP_SELL_OVERRIDES[id];
     const item = propMap.getValue(id);
     const price = item ? Math.max(0, Math.floor(Number(item.price) || 0)) : 0;
     return price >= MIN_SELL_PRICE ? Math.max(1, Math.floor(price / 2)) : 0;
+  }
+  /* 背包里的「货币类显示项」：金杯（40）在原版就是货币字段 `S.goldCup`，不进 `S.props`
+   *（normalizeSave 会把 props 里的 8/15/40 丢掉）。2026-10 用户口径「玩家的金杯数量会同步到背包中」：
+   * 背包里照样列出它、数量**直接读货币字段**（只有一个真值来源，不会出现两处对不上），
+   * 但不能卖也不能使用 —— 卖价 0，动作按钮只走「查看」。 */
+  const BAG_CURRENCY_PROP = Object.freeze({ 40: 'goldCup' });
+  function isBagCurrencyProp(id) { return !!BAG_CURRENCY_PROP[Number(id)]; }
+  /** 背包/详情里显示的持有量：货币类读货币字段，其余读 `S.props`。 */
+  function bagCountOf(id) {
+    id = Number(id);
+    const field = BAG_CURRENCY_PROP[id];
+    if (field) return Math.max(0, integer(S[field], 0));
+    return Math.max(0, integer(S.props[id], 0));
   }
   /** 当前可回收的道具编号（升序），供界面/帮助与测试使用。 */
   function sellableProps() {
@@ -1496,14 +1510,19 @@
   }
 
   /* ---------- 融合的两条核心规则（数值都提在这里，方便调） ----------
-   * ① 同名继承 / 变异狂战：只有「2 件同名」「3 件同名」才触发，两者互斥、概率加起来是 1。
-   *    3 件同名比 2 件同名更容易保住原名。变异目标是狂战套（setId 51，紫档 id 201-204）；
-   *    目标品质没有狂战件时（绿/蓝档）不掷变异，直接走同名。
-   * ② 词条继承：在 ≥2 件材料里都出现的词条保留下来，每条按 FUSION_EXT_UPGRADE_RATE 概率升 1 星
+   * ① 产物名称三选一（只有「2 件同名」「3 件同名」才进这一支）：
+   *    · **2 件同名**：50% 沿用原名 / **3% 变异狂战** / **47% 变成随机其它装备**；
+   *    · **3 件同名**：97% 沿用原名 / 3% 变异狂战（三件同名更容易保住名字）。
+   *    变异目标是狂战套（setId 51，紫档 id 201-204，按部位对应）；
+   *    目标品质没有狂战件时（绿/蓝档）不掷变异，那 3% 归到「随机其它」那一支。
+   *    2026-10 用户口径：变异率从初版 25%/10% 两轮下调到 **两件 3% / 三件 3%**，
+   *    并把两件同名「保不住名」的那部分明确成 47% 随机其它装备（以前是并回随机池）。 */
+  const FUSION_SAME_NAME_RATE = { 2: 0.50, 3: 0.97 };
+  const FUSION_MUTANT_RATE = { 2: 0.03, 3: 0.03 };
+  const FUSION_MUTANT_SET = 51;
+  /* ② 词条继承：在 ≥2 件材料里都出现的词条保留下来，每条按 FUSION_EXT_UPGRADE_RATE 概率升 1 星
    *    （上限 3 星，对应原版融合帮助第 4 条「融合时有几率提升附加属性的星级」）；
    *    一件共有词条都没有时，按目标品质的槽位数随机生成。 */
-  const FUSION_SAME_NAME_RATE = { 2: 0.75, 3: 0.90 };
-  const FUSION_MUTANT_SET = 51;
   const FUSION_EXT_UPGRADE_RATE = 0.5;
   const FUSION_EXT_MAX_LEVEL = 3;
   /* 产物品质 → 词条槽位数（绿 0 / 蓝 1 / 紫 2 / 橙 3）。 */
@@ -1539,9 +1558,11 @@
       return { id, level: lv };
     });
   }
-  /** 融合产物的目标装备。名称按「三件材料的同名情况」定：
-   *   · 三件同名 / 恰有两件同名 → 大概率沿用该名字，小概率变异成该部位的狂战件
-   *   · 三件全不同名 → 完全随机
+  /** 融合产物的目标装备。名称按「三件材料的同名情况」三选一：
+   *   · 两件同名 → 50% 沿用原名 / 3% 变异狂战 / 47% 随机其它装备
+   *   · 三件同名 → 97% 沿用原名 / 3% 变异狂战
+   *   · 三件全不同名 → 完全随机（不掷变异）
+   *  判定顺序 = 先掷变异、再掷保名，剩下的走随机其它；这样三段的概率就是字面值。
    *  若该名字在目标品质不存在（例如斗斗/挑斗白装没有绿装），退回完全随机。
    *  返回 { id, mutant }：mutant 为 true 表示这次是狂战变异。 */
   function pickMergeTarget(gs, part, targetQuality) {
@@ -1554,10 +1575,16 @@
     if (same) {
       const hit = pool.filter((id) => gearName(id) === same);
       const mutants = pool.filter((id) => gearSetOf(id) === FUSION_MUTANT_SET);
-      const rate = dup === 3 ? FUSION_SAME_NAME_RATE[3] : FUSION_SAME_NAME_RATE[2];
-      /* 只有目标品质确实有狂战件时才掷「变异」那一半，否则不浪费这一掷。 */
-      if (mutants.length && Math.random() >= rate) return { id: pick(mutants), mutant: true };
-      if (hit.length) return { id: pick(hit), mutant: false };
+      const others = pool.filter((id) => gearName(id) !== same);
+      const key = dup === 3 ? 3 : 2;
+      /* 只有目标品质确实有狂战件时才掷变异，否则那 3% 归到「随机其它」。 */
+      const mutantRate = mutants.length ? Math.max(0, Number(FUSION_MUTANT_RATE[key]) || 0) : 0;
+      const sameRate = Math.max(0, Number(FUSION_SAME_NAME_RATE[key]) || 0);
+      const roll = Math.random();
+      if (mutantRate > 0 && roll < mutantRate) return { id: pick(mutants), mutant: true };
+      if (hit.length && roll < mutantRate + sameRate) return { id: pick(hit), mutant: false };
+      if (others.length) return { id: pick(others), mutant: false };   // 两件同名剩下的 47%：随机其它装备
+      if (hit.length) return { id: pick(hit), mutant: false };         // 兜底：没有「其它」可挑就只能保名
     }
     return { id: pick(pool), mutant: false };
   }
@@ -3104,7 +3131,7 @@
     undoPoint, undoDepth, hasUpgradableWS,
     gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, extText, randomExt,
     gearBaseAttr, rollGearAttr, gearCostOf, GEAR_ATTR_JITTER,
-    FUSION_SAME_NAME_RATE, FUSION_MUTANT_SET, FUSION_EXT_UPGRADE_RATE,
+    FUSION_SAME_NAME_RATE, FUSION_MUTANT_RATE, FUSION_MUTANT_SET, FUSION_EXT_UPGRADE_RATE,
     toggleGearStar, isGearStarred, gearsInDisplayOrder,
     gemLevel, gemPercent, gemMergeRate, rollGemDrop, mergeGems, socketGem, unsocketGem,
     totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, gainRandomWS, wsChoices, wsInfo,
@@ -3129,6 +3156,7 @@
     questState, questAvailableAt, questPoolFor, QUEST_COUNT,
     settings, setSettings, normalizeSettings, RESOLUTIONS, resolutionHeight,
     sellProp, propSellPrice, sellableProps, PROP_SELL_OVERRIDES, MIN_SELL_PRICE,
+    BAG_CURRENCY_PROP, isBagCurrencyProp, bagCountOf,
     friendLimit, friendList, friendOf, addFriend, removeFriend, friendFoe, rollFriendCandidates, FRIEND_LIMIT,
     weaponList, skillList, setWeapon, setSkill, forgetWeapon, forgetSkill, setWS, forgetWS,
     composeConvertPill, challengeExp, challengeFightsPerLevel, usePropMany, energyHardCap, ENERGY_HARD_CAP, PROP_HARD_CAP,

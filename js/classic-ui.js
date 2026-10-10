@@ -843,7 +843,11 @@
   function openBag(shop,pg) {
     const exchange=shop==='exchange',mode=shop;shop=shop===true;bagPage=pg||0;
     const S=State.state(),items=[];
-    propMap.each((id,v)=>{if(exchange?[24,25,26,45,46,51].includes(+id):shop?v.buy==='true':S.props[id]>0)items.push({...v,id:+id});});
+    /* 背包（非商店/兑换页）里额外列出**货币类显示项**（金杯 40）：它的持有量在 `S.goldCup` 上，
+     * 不是 `S.props`，所以这里用 `State.bagCountOf` 读同一个真值来源（2026-10 用户口径）。 */
+    const bagCount=(id)=>State.bagCountOf?State.bagCountOf(id):(S.props[id]||0);
+    const bagHas=(id)=>bagCount(id)>0;
+    propMap.each((id,v)=>{if(exchange?[24,25,26,45,46,51].includes(+id):shop?v.buy==='true':(bagHas(+id)))items.push({...v,id:+id});});
     items.sort((a,b)=>a.id-b.id);
     const total=Math.max(1,Math.ceil(items.length/6));bagPage=Math.min(bagPage,total-1);
     const shown=items.slice(bagPage*6,bagPage*6+6);
@@ -855,10 +859,10 @@
     const mainLabel=shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看';
     /* 按钮顺序（需求）：**卖出在左、使用/合成在右** —— 主操作仍然是最醒目的金色按钮。 */
     const bagActions=it?'<div class="bag-actions">'+
-      (sellPrice&&(S.props[it.id]||0)>0?btn('卖出','prop-sell','small'):'')+
+      (sellPrice&&bagCount(it.id)>0?btn('卖出','prop-sell','small'):'')+
       btn(mainLabel,'prop-action','small gold')+'</div>':'';
-    const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个'+(sellPrice?'　可回收 '+sellPrice+' 金松果/个':''))+'</div>'+bagActions:'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
-    const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
+    const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+bagCount(it.id)+' 个'+(State.isBagCurrencyProp&&State.isBagCurrencyProp(it.id)?'（货币，天梯赛获得；不能卖也不能使用）':sellPrice?'　可回收 '+sellPrice+' 金松果/个':''))+'</div>'+bagActions:'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
+    const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+bagCount(it.id)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':bagCount(it.id))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
     const bagFooter=shop?{left:btn('每日抽奖','lottery','gold entry-pill'),right:btn('金杯商店','rank-shop','gold entry-pill')}:{};
     const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,Object.assign({cls:'classic-bag-board'+(shop?' shop-board':''),counter:(bagPage+1)+'/'+total},bagFooter));
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
@@ -920,7 +924,7 @@
       (S.energy>S.maxEnergy?'（超出部分不自然回复，仍可用于挑战）':'')+'</p>'):'';
     const batchNote=(isFragment||isSeed||isConvertShard||isGem)?('<p class="small-label">每次合成：'+base.name+' ×'+batchCost+' + 金松果 ×'+batchGold+'　→　'+batchName+'</p>'):'';
     const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-description">'+esc(base.remark||'')+'</div>'+
-      '<div class="small-label">拥有 <b data-live="own">'+(S.props[id]||0)+'</b> 个'+(shop?'　售价 '+base.price+' 金松果<br>每日限购 '+status.limit+' 件，今日剩余 <b data-live="stock">'+status.remaining+'</b> 件':'')+'</div></div></div>'+
+      '<div class="small-label">拥有 <b data-live="own">'+(State.bagCountOf?State.bagCountOf(id):(S.props[id]||0))+'</b> 个'+(shop?'　售价 '+base.price+' 金松果<br>每日限购 '+status.limit+' 件，今日剩余 <b data-live="stock">'+status.remaining+'</b> 件':'')+'</div></div></div>'+
       seedNote+shardNote+potionNote+batchNote+
       (isGem?'<p class="small-label">3 个同级宝石 + 10 金松果合成高一级，成功率 '+Math.round(State.gemMergeRate(State.gemLevel(id))*100)+'%（0.88 的材料等级次方）；失败有 50% 几率一颗材料降 1 级（1级则碎裂）。</p>':'')+
       '<p class="small-label use-preview" data-live="hint" role="status"></p>';
@@ -2179,7 +2183,7 @@
   function openHelp() {
     const items = GUIDE_ITEMS.map((id) => '<button type="button" class="help-item" data-guide="' + id + '"><span class="item-icon">' + icon('prop', id) + '</span><span>' + esc(propMap.getValue(id).name) + '</span></button>').join('');
     // 帮助是「系统」分组下的正常页面（以前是弹窗，会挡住底下的界面）
-    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能。在状态页查看和升级。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。每轮消耗1张挑战书，连续击败3名敌人；失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件相同装备可以融合。</p><p><b>竞技场</b>：11级开启经验竞技场、20级开启碎片竞技场，报名一次打完两场。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45级后通关关卡、竞技场获胜有几率获得1-2级宝石；3个同级宝石+10金松果有几率合成高一级（失败可能降级）。3 件相同卓越（紫）装备可在「装备融合」里融为传说（橙）装备，宝石免费镶入橙装（每件限1颗），拆卸5金松果。融合时凑 2~3 件同名：大概率保住原名，小概率变异成狂战装备。</p><p><b>套装收益</b>：同名装备算一套（「忍者护额/拳套/服/鞋」都是忍者套），穿满 <b>2 件 / 4 件</b>各给一档额外收益，4 件档叠加在 2 件档之上；收益按所穿该套里<b>最低品质</b>的那一件算，想拿满就得一整套同品质。代价是要放弃「跨套挑词条」的自由 —— 极品词条与套装收益只能二选一。每套的收益特征跟着名字走（忍者=闪避、骑士=减伤、狂战=低血狂暴……），在装备详情里能看到当前进度与下一档给什么。</p><h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
+    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能。在状态页查看和升级。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。每轮消耗1张挑战书，连续击败3名敌人；失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件相同装备可以融合。</p><p><b>竞技场</b>：11级开启经验竞技场、20级开启碎片竞技场，报名一次打完两场。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45级后通关关卡、竞技场获胜有几率获得1-2级宝石；3个同级宝石+10金松果有几率合成高一级（失败可能降级）。3 件相同卓越（紫）装备可在「装备融合」里融为传说（橙）装备，宝石免费镶入橙装（每件限1颗），拆卸5金松果。融合时凑同名：三件同名 97% 保住原名，两件同名 50% 保名 / 3% 变异狂战 / 47% 变成随机其它装备。</p><p><b>套装收益</b>：同名装备算一套（「忍者护额/拳套/服/鞋」都是忍者套），穿满 <b>2 件 / 4 件</b>各给一档额外收益，4 件档叠加在 2 件档之上；收益按所穿该套里<b>最低品质</b>的那一件算，想拿满就得一整套同品质。代价是要放弃「跨套挑词条」的自由 —— 极品词条与套装收益只能二选一。每套的收益特征跟着名字走（忍者=闪避、骑士=减伤、狂战=低血狂暴……），在装备详情里能看到当前进度与下一档给什么。</p><h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
     $$('[data-guide]', p).forEach((b) => b.onclick = () => openGuideItem(+b.dataset.guide));
     return p;
   }

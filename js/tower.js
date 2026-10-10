@@ -1765,15 +1765,18 @@
     } else {
       const g = globalMul(run);
       addScore(run, D().SCORE.battle, '战斗胜利');
-      let coinMul = 1 + (runModTotal(run, 'coinBoostPct') || 0) + fragileCoinBonus(run);
+      /* 试炼币的三个乘区**分开算**（界面提示要逐个写出来）：战利品（E05/E06/E07）/
+       * 淘金烙印（C53，含损毁档）/ 贪婪裂隙（环境，按实例摇出来的值）。 */
+      const coinBoostPct = Math.max(0, runModTotal(run, 'coinBoostPct') || 0);
+      const coinFragilePct = fragileCoinBonus(run);
+      let coinGreedPct = 0;
       /* 贪婪裂隙：我方试炼币按实例上摇出来的比例加成（被反弹/被剥夺时就不给）。
        * 以前这里写死 +50%，与实例数值无关。 */
       {
         const fx = envEffective(run);
-        if (fx.mine.includes('greed')) {
-          coinMul += Math.max(0, envModTotal(run, 'coinBonus', { mineOnly: true }));
-        }
+        if (fx.mine.includes('greed')) coinGreedPct = Math.max(0, envModTotal(run, 'coinBonus', { mineOnly: true }));
       }
+      const coinMul = 1 + coinBoostPct + coinFragilePct + coinGreedPct;
       /* ============================================================
        * 【2026-10 同名逐条】成长进度**同时**记进两处：
        *   · `row.grow` —— 这一栏自己的账本（卖出 / 交换时精确扣它那一份）；
@@ -1819,14 +1822,27 @@
         }
       });
       /* 「本场战斗赚了多少试炼币」——无尽塔主界面右上角要显示这个增量。
-       * 先记下战前余额，等这一场的所有进账（基础 + 精英）都算完再取差值。 */
+       * 先记下战前余额，等这一场的所有进账（基础 + 精英）都算完再取差值。
+       * 基础按**本场所在层**分段（1-5 → 5、6-10 → 6、11-15 → 7、16 起 → 8）；
+       * 精英从「固定 +N」改成**倍率**，与上面那些乘区相乘。 */
       const coinsBeforeBattle = Math.max(0, Number(run.coins) || 0);
-      run.coins += Math.round(D().COINS.battle * coinMul);
+      const coinBase = D().coinBattleBase(battleLayer);
+      const eliteMul = isElite ? Math.max(1, Number(D().COINS.eliteMul) || 3) : 1;
+      run.coins += Math.round(coinBase * coinMul * eliteMul);
+      /* 界面提示（试炼币那一格的悬停）要写「基础 x × 每个乘区」，所以把本场的账留一份在 run 上。 */
+      run.lastCoinBreak = {
+        base: coinBase, layer: battleLayer, band: D().coinBattleTierLabel(battleLayer),
+        elite: !!isElite, eliteMul,
+        boosts: [
+          { name: '战利品', pct: coinBoostPct },
+          { name: '淘金烙印', pct: coinFragilePct },
+          { name: '贪婪裂隙', pct: coinGreedPct },
+        ].filter((b) => b.pct > 0),
+      };
       const c11 = stacksOf(run, 'C11');
       if (c11) healAbs(run, 0.03 * c11 * g * healBonusMul(run), refMax);
       if (isElite) {
         addScore(run, D().SCORE.elite, '击败精英');
-        run.coins += D().COINS.elite;
         const c13 = stacksOf(run, 'C13');
         if (c13) {
           healAbs(run, D().BUFF_BY_ID.C13.mods.eliteHealAfter * g * healBonusMul(run), refMax);
@@ -3404,11 +3420,18 @@
       const n = divBy === 'enchanted'
         ? (run.permanent || []).filter((row) => rowFreeOf(row)).length
         : obtainedCountOf(run, b.id);
-      /* weightDivOffset = 0 时是「÷n」（0~1 份不降权，C49 的口径）；
-       * = 1 时是「÷(n+1)」—— 0 份 → ÷1（不降），1 份 → ÷2，2 份 → ÷3。
-       * C37 虚空铭文用后者：玩家第一次附魔就能感到它变稀有。 */
-      const div = n + Math.max(0, Number(b.mods.weightDivOffset) || 0);
-      if (div > 1) m /= div;
+      /* weightDecay（0 < v < 1）= **指数降权**：weight ×= v^n —— 与 repeatWeight 同一口径，
+       * 只是计数口径由 weightDivBy 决定（'enchanted' = 本局附魔数，'owned' = 已获得份数）。
+       * C37 虚空铭文用它（2026-10 用户口径「与终焉烙印类似，0.88^n，n 为附魔数」）：
+       * n=1 → 0.88、n=3 → 0.68，比原来的 ÷(n+1)（0.5 / 0.25）平缓得多。 */
+      const decay = Number(b.mods.weightDecay);
+      if (decay > 0 && decay < 1) m *= Math.pow(decay, n);
+      else {
+        /* 老口径（除法）：weightDivOffset = 0 时是「÷n」（0~1 份不降权，C49 早期的口径）；
+         * = 1 时是「÷(n+1)」—— 0 份 → ÷1（不降），1 份 → ÷2，2 份 → ÷3。 */
+        const div = n + Math.max(0, Number(b.mods.weightDivOffset) || 0);
+        if (div > 1) m /= div;
+      }
     }
     return m;
   }
@@ -3454,8 +3477,10 @@
   /* ============================================================
    * 传奇保底（B 方案，配置见 TowerData.LEGEND_PITY）
    *   · 每掷一格 +1；掷到传奇（自然或保底）清零；传奇池为空时不累加（避免空转）。
-   *   · 累计到 slots → 下一格**强制传奇档**，档内按 mods.pityWeight 挑（忽略 ÷n 等自惩罚），
-   *     所以「传奇全部拿完、只剩 C37/C49」时分布恒为 1/3 : 2/3。
+   *   · 累计到 slots → 下一格**强制传奇档**，档内按 mods.pityWeight × **个体降权** 挑。
+   *     2026-10 用户口径：以前这里**完全不吃** repeatWeight / weightDecay，于是「终焉烙印拿了
+   *     十几份」时保底仍按满权重把它发出来（玩家实测「第 10 次之后还是很高」的主因之一）。
+   *     现在与自然路径同口径：拿得越多，越不容易被保底抽中；pityWeight 仍决定「谁有资格进池」的相对偏好。
    * ============================================================ */
   function legendPityNeed() {
     const n = Math.floor(Number((D().LEGEND_PITY || {}).slots));
@@ -3467,19 +3492,24 @@
     if (!(candidates || []).some((b) => b.rarity === 3)) return false;
     return legendPityOf(run) >= legendPityNeed();
   }
-  /** 保底池里的加权抽取：只看 mods.pityWeight（缺省 1，0 = 不进池），不吃 shopWeight / ÷n。 */
+  /** 保底池里的加权抽取：mods.pityWeight（缺省 1，0 = 不进池）× **个体降权**
+   *（repeatWeight / weightDecay），但不吃静态 shopWeight —— 静态权重只管「自然抽取」那一侧。 */
   function pickByPityWeight(list, run) {
-    const pool = (list || []).filter((b) => pityWeightOf(b) > 0);
+    const pool = (list || []).filter((b) => pityWeightOf(b, run) > 0);
     if (!pool.length) return pickByShopWeight(list, run);      // 保底池空了就退回自然权重
     let total = 0;
-    for (const b of pool) total += pityWeightOf(b);
+    for (const b of pool) total += pityWeightOf(b, run);
     let roll = Math.random() * total;
-    for (const b of pool) { roll -= pityWeightOf(b); if (roll < 0) return b; }
+    for (const b of pool) { roll -= pityWeightOf(b, run); if (roll < 0) return b; }
     return pool[pool.length - 1];
   }
-  function pityWeightOf(b) {
+  /** 保底池里的个体权重：pityWeight（缺省 1、0 = 不进池）× 个体降权（repeatWeight / weightDecay）。
+   *  传 run 才吃降权；不传（旧调用点/探针）就只按 pityWeight，等价于 2026-10 之前的旧口径。 */
+  function pityWeightOf(b, run) {
     const v = Number(b && b.mods && b.mods.pityWeight);
-    return Number.isFinite(v) && v > 0 ? v : (b && b.mods && b.mods.pityWeight === 0 ? 0 : 1);
+    const base = Number.isFinite(v) && v > 0 ? v : (b && b.mods && b.mods.pityWeight === 0 ? 0 : 1);
+    if (base <= 0) return 0;
+    return run ? base * buffDynamicPenaltyOf(run, b) : base;
   }
   /** 记一笔：掷到传奇清零，否则 +1；传奇池为空时不累加。 */
   function notePityRoll(run, buff, hasLegendCandidate) {
@@ -4484,8 +4514,13 @@
     return { best: e.best, weekBest: e.weekBest, bestLayer: e.bestLayer,
       tickets: S().props[TICKET_PROP] || 0,
       run: e.run ? { layer: e.run.layer, score: e.run.score, coins: e.run.coins, carry: e.run.carry,
-        /* 上一场战斗赚到的试炼币（主界面右上角标在「试炼币」旁边）。 */
+        /* 上一场战斗赚到的试炼币（主界面右上角标在「试炼币」旁边）+ 那一场的乘区明细。 */
         lastCoinsGained: Math.max(0, Math.floor(Number(e.run.lastCoinsGained) || 0)),
+        lastCoinBreak: e.run.lastCoinBreak ? Object.assign({}, e.run.lastCoinBreak,
+          { boosts: (e.run.lastCoinBreak.boosts || []).map((b) => Object.assign({}, b)) }) : null,
+        /* 下一场（本层）的战斗基础试炼币，界面提示要用。 */
+        coinBase: D().coinBattleBase(e.run.layer),
+        coinBand: D().coinBattleTierLabel(e.run.layer),
         battleNo: e.run.idx + 1, battleCount: e.run.plan.length, phase: e.run.phase,
       debuffs: (e.run.debuffs || []).slice(),
         choices: e.run.choices ? e.run.choices.slice() : null,

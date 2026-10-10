@@ -30,13 +30,9 @@ src-tauri/gen/schemas/
 Thumbs.db
 desktop.ini
 
-# 开发截图是「跑出来」的产物（test-battle.js 会往 tools/research/battle-check/ 写图），
+# 开发截图是「跑出来」的产物（战斗回归的渲染图现在写 out/battle-check/，out/ 整目录已忽略），
 # 需要留证据时手动 git add -f
-tools/research/tmp-*.png
 tools/verification/*.png
-tools/research/*.png
-tools/research/*.jpg
-tools/research/battle-check/
 
 # 双机同步：名字 / 对端地址 / 口令每台机器都不一样，不进仓库（首次运行会自动生成）
 scripts/sync/sync.config.json

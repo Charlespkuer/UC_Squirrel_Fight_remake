@@ -425,17 +425,25 @@
     if (mode === 'endless') {
       const run = Tower.endlessInfo().run;
       const items = [];
-      /* 试炼币：除了本局持有量，再把**上一场战斗赚到的**标在旁边（回到主界面就能看到）。 */
+      /* 试炼币：除了本局持有量，再把**上一场战斗赚到的**标在旁边（回到主界面就能看到）。
+       * 悬停里写清这一场是怎么算出来的：基础（按层分段，动态）× 每个乘区（战利品 / 淘金烙印 /
+       * 贪婪裂隙 / 精英倍率），并把整张分层表列出来 —— 用户口径 2026-10。 */
       if (run) {
         const gained = Math.max(0, Math.floor(Number(run.lastCoinsGained) || 0));
+        const bk = run.lastCoinBreak || null;
+        const CO = TowerData.COINS || {};
+        const coinLine = bk
+          ? ('上一场战斗获得 ' + gained + ' 枚（基础 ' + bk.base + '（' + bk.band + '）' +
+             (bk.boosts || []).map((b) => ' × ' + b.name + ' +' + Math.round((Number(b.pct) || 0) * 100) + '%').join('') +
+             (bk.elite ? ' × 精英 ×' + bk.eliteMul : '') + '）')
+          : (gained ? ('上一场战斗获得 ' + gained + ' 枚') : '');
+        const nowBase = Math.max(1, Math.floor(Number(run.coinBase) || 0));
         items.push({
           name: '试炼币',
           value: run.coins,
           delta: gained || 0,
           tip: '本局持有 ' + Math.max(0, Math.floor(Number(run.coins) || 0)) + ' 试炼币' +
-            (gained ? ('\n上一场战斗获得 ' + gained + ' 枚（基础 ' + (TowerData.COINS ? TowerData.COINS.battle : 8) +
-              '，含战利品加成；击败精英另有 +' + (TowerData.COINS ? TowerData.COINS.elite : 0) + '）') : '') +
-            '\n退出本局时剩余试炼币不折现（作废），只有铸币 1:1 折成抽奖卷'
+            (coinLine ? ('\n' + coinLine) : '') 
         });
       }
       const exitT = run ? Math.max(0, Math.floor(Number(run.ticketsOnExit) || 0)) : 0;
@@ -446,11 +454,8 @@
         name: '抽奖卷',
         value: run ? exitT : (S.props[CURRENCY_PROP.ticket] || 0),
         tip: run
-          ? ('现在退出实际到手 ' + exitT + ' 张：本层应得 ' + layerT + ' 张 + 铸币 ' + tokens +
-             ' 枚 1:1 折现 ' + tokens + ' 张。\n' +
-             '· 剩余试炼币（当前 ' + coins + ' 枚）**不折现**，本局结束即作废\n' +
-             '· 结算点「结算离场」/「放弃本局」/ 失败结算 三条路收益完全一致，都是这个数\n' +
-             '· 仓库里已有的抽奖卷不在这个数字里（去「每日幸运抽奖」页看总数）')
+          ? ('现在退出获得 ' + exitT + ' 张 = 本层应得 ' + layerT + ' 张 + 铸币 ' + tokens +
+             ' 枚')
           : '仓库持有的抽奖卷总数'
       });
       /* 铸币（原名「重新挑战币」）：无尽塔主界面右上角直接标出**本场拥有多少枚**，
@@ -460,9 +465,8 @@
         value: run ? tokens : 0,
         tip: run
           ? ('本场拥有 ' + tokens + ' 枚铸币。\n' +
-             '· 战斗失败时可以花 1 枚回滚到该场开始前再打一次（血量 / 试炼币 / 分数 / 增益次数全部还原）\n' +
-             '· 退出本局时剩余的铸币按 1:1 折成抽奖卷（' + tokens + ' 枚 → ' + tokens + ' 张，已经算进左边「抽奖卷」那个数）\n' +
-             '· 试炼商店左下角可以用 50 试炼币买 1 枚')
+             '· 战斗失败时可花费 1 枚重新挑战\n' +
+             '· 退出本局时剩余的铸币按 1:1 折成抽奖卷')
           : '铸币：失败时回滚本场再打一次；退出时 1:1 折成抽奖卷'
       });
       return '<div class="tower-currency text-only">' + items.map((it) =>

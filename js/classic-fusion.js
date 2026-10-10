@@ -167,15 +167,18 @@
      * ============================================================ */
     function showRules() {
       const pct = (v) => Math.round(v * 100) + '%';
-      const n1 = 1 - State.FUSION_SAME_NAME_RATE[3];
-      const n2 = 1 - State.FUSION_SAME_NAME_RATE[2];
+      const mut = (k) => pct(Math.max(0, Number(State.FUSION_MUTANT_RATE[k]) || 0));
+      const same = (k) => pct(Math.max(0, Number(State.FUSION_SAME_NAME_RATE[k]) || 0));
+      /* 「随机其它」= 100% − 变异 − 保名（两件同名是 47%，三件同名是 0）。 */
+      const other = (k) => pct(Math.max(0, 1 - (Number(State.FUSION_MUTANT_RATE[k]) || 0) - (Number(State.FUSION_SAME_NAME_RATE[k]) || 0)));
       classic.modal('融合规则', '<div class="fusion-help">' +
         '<p><b>材料</b>3 件同部位、同品质、未穿戴、未加星标（★）的装备，会被消耗。</p>' +
         '<p><b>费用</b>白 ' + State.gearCostOf(0) + ' · 绿 ' + State.gearCostOf(1) +
         ' · 蓝 ' + State.gearCostOf(2) + ' · 紫 ' + State.gearCostOf(3) + ' 金松果（按材料品质）。</p>' +
         '<p><b>产物</b>该部位、品质高一级的 1 件；3 紫 → 传说橙（可镶嵌宝石）。</p>' +
-        '<p><b>名称</b>三件同名 ' + pct(State.FUSION_SAME_NAME_RATE[3]) + ' 保名 / ' + pct(n1) +
-        ' <em>变异狂战</em>；两件同名 ' + pct(State.FUSION_SAME_NAME_RATE[2]) + ' / ' + pct(n2) + '；全不同名随机。</p>' +
+        '<p><b>名称</b>三件同名 ' + same(3) + ' 保名 / ' + mut(3) + ' <em>变异狂战</em>；' +
+        '两件同名 ' + same(2) + ' 保名 / ' + mut(2) + ' <em>变异狂战</em> / ' + other(2) + ' 随机其它装备；' +
+        '三件全不同名则完全随机。品质太低（没有狂战件）时不掷变异，那部分并入随机。</p>' +
         '<p><b>词条</b>≥2 件共有的保留（取最高星），各 ' + pct(State.FUSION_EXT_UPGRADE_RATE) +
         ' 升 1 星（上限 3）；无共有则随机。</p>' +
         '</div>', [{ label: '知道了', cls: 'gold' }]);

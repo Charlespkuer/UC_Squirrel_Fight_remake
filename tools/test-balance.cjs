@@ -416,32 +416,39 @@ test('装备主属性：基准取自原版属性点表，实例按 ±10% 浮动�
   assert.equal(g.s().gears.find((x) => x.key === 'legacy_attr').attr, 70, '老档按基准值补');
 });
 
-test('融合：同名大概率保名、小概率变异狂战；共有词条保留并概率升星', () => {
+test('融合：同名按三段概率保名 / 变异狂战 / 随机其它；共有词条保留并概率升星', () => {
   const g = setup(), s = g.s(); s.level = 50; s.goldPoint = 100000;
   const seeded = g.math.random;
+  let fusions = 0;                     // 数次数，别把「50 金松果/次」写成硬编码的调用次数
   /* 材料都是蓝装头巾：21 格斗头巾 / 25 拳斗头巾 / 29 忍者护额 / 33 螳螂头饰 */
   const fuse = (mats, rnd) => {
     s.gears = [];
     if (rnd !== undefined) g.math.random = () => rnd;
+    fusions++;
     return g.State.mergeGears(mats.map((m) => g.State.addGear(m.id, m.ext).key));
   };
   const bare = (id) => ({ id, ext: [] });
-  /* 名称：三件同名 90% 保名 / 10% 变异狂战；两件同名 75% / 25% */
+  /* 名称（2026-10 三段概率）：三件同名 97% 保名 / 3% 变异；
+   * 两件同名 **50% 保名 / 3% 变异 / 47% 随机其它装备**。
+   * 判定顺序 = 先掷变异、再掷保名、剩下走随机其它（所以固定随机流的取值区间是 0~0.03 / 0.03~0.53 / 0.53~1）。 */
   let r = fuse([bare(21), bare(21), bare(21)], 0.10);
   assert.equal(r.gear.name, '格斗头巾', '三件同名大概率保住原名');
   assert.ok(!r.gear.mutant, '保名时不算变异');
-  r = fuse([bare(21), bare(21), bare(21)], 0.99);
-  assert.equal(r.gear.name, '狂战头盔', '三件同名小概率变异成该部位的狂战件');
+  r = fuse([bare(21), bare(21), bare(21)], 0.01);
+  assert.equal(r.gear.name, '狂战头盔', '三件同名 3% 变异成该部位的狂战件');
   assert.equal(r.gear.mutant, true);
   r = fuse([bare(21), bare(21), bare(25)], 0.10);
-  assert.equal(r.gear.name, '格斗头巾', '两件同名大概率保住原名');
-  r = fuse([bare(21), bare(21), bare(25)], 0.99);
-  assert.equal(r.gear.name, '狂战头盔', '两件同名小概率变异');
+  assert.equal(r.gear.name, '格斗头巾', '两件同名 50% 那一段：保住原名');
+  r = fuse([bare(21), bare(21), bare(25)], 0.01);
+  assert.equal(r.gear.name, '狂战头盔', '两件同名 3% 那一段：变异');
+  r = fuse([bare(21), bare(21), bare(25)], 0.70);
+  assert.ok(!r.gear.mutant, '两件同名 47% 那一段不算变异');
+  assert.notEqual(r.gear.name, '格斗头巾', '两件同名 47% 那一段：不再沿用原名，换成随机其它装备：' + r.gear.name);
   /* 三件全不同名 → 名称完全随机，且不触发变异 */
   r = fuse([bare(25), bare(29), bare(33)], 0.05);
   assert.equal(r.gear.name, '格斗头巾', '三件不同名走随机池（材料里没有这个名字）');
   assert.ok(!r.gear.mutant, '不同名不触发变异');
-  assert.equal(s.goldPoint, 100000 - 50 * 5, '蓝装融合 50 金松果/次');
+  assert.equal(s.goldPoint, 100000 - 50 * fusions, '蓝装融合 50 金松果/次（共 ' + fusions + ' 次）');
   /* 词条：≥2 件共有的保留，按 50% 升星（上限 3）；只在单件里出现的不继承 */
   r = fuse([
     { id: 21, ext: [{ id: 27, level: 1 }, { id: 5, level: 3 }] },

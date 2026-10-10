@@ -71,7 +71,9 @@ async function tick(ms = 50) {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 }
 async function until(target) { while (time < target) await tick(Math.min(50, target - time)); }
-function save(name) { fs.mkdirSync('tools/research/battle-check', { recursive: true }); fs.writeFileSync('tools/research/battle-check/' + name + '.png', canvas.toBuffer('image/png')); }
+/* 渲染图是**跑出来的产物**：按 tools/AGENTS.md 的「临时产物写 out/」落到 out/battle-check/
+ *（原来是 tools/research/battle-check/，每次跑回归都往 tools/ 里堆 ~10 MB）。 */
+function save(name) { fs.mkdirSync('out/battle-check', { recursive: true }); fs.writeFileSync('out/battle-check/' + name + '.png', canvas.toBuffer('image/png')); }
 (async () => {
   const fighter = { name: '小松鼠', level: 10, hp: 250, power: 30, agility: 20, speed: 20, weapons: [], skills: [] };
   const result = { winner: 0, rounds: [
@@ -177,5 +179,5 @@ function save(name) { fs.mkdirSync('tools/research/battle-check', { recursive: t
   assert(overkillHud.includes('42/100') && overkillHud.includes('0/100'), 'overkill counter shows actual HP before and after its hit');
   assert(!overkillHud.includes('61/100'), 'overkill damage cannot temporarily restore the attacker HP');
   assert.equal(errors.length, 0, errors.join('\n'));
-  console.log('Battle regression checks passed; original-atlas renders: tools/research/battle-check');
+  console.log('Battle regression checks passed; original-atlas renders: out/battle-check');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

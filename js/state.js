@@ -1190,6 +1190,18 @@
     addGold(gold); save();
     return gold;
   }
+  /* 「更换装备」页的展示顺序（用户口径 2026-10）：**穿着中 > 星标 > 获得顺序**。
+   *   · 第 1 档：当前穿在身上的（含「穿着 + 星标」，它仍然属于第 1 档）；
+   *   · 第 2 档：加了星标的（防误合/误卖的收藏品，玩家要找它们）；
+   *   · 第 3 档：其余按**获得时间**（`S.gears` 的先后，也就是入包顺序）排。
+   * 用显式下标做稳定排序，所以同一档里永远是「先拿到的在前」。 */
+  function gearsInDisplayOrder(list) {
+    const src = Array.isArray(list) ? list : myGears();
+    return src
+      .map((gear, index) => ({ gear, index, rank: (gear.used ? 0 : 2) + (isGearStarred(gear) ? 0 : 1) }))
+      .sort((a, b) => (a.rank - b.rank) || (a.index - b.index))
+      .map((item) => item.gear);
+  }
   /* 背包里可以直接卖的道具（装备走 sellGear）：默认按**字典价格的一半**回收
    * （向下取整），所以商店里买得到的、以及字典里标了价的材料都能卖。
    * 字典里 price 为 0 或占位 1 的道具（兑换用的卷轴、碎片、礼包、天梯碎片、
@@ -3093,7 +3105,7 @@
     gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, extText, randomExt,
     gearBaseAttr, rollGearAttr, gearCostOf, GEAR_ATTR_JITTER,
     FUSION_SAME_NAME_RATE, FUSION_MUTANT_SET, FUSION_EXT_UPGRADE_RATE,
-    toggleGearStar, isGearStarred,
+    toggleGearStar, isGearStarred, gearsInDisplayOrder,
     gemLevel, gemPercent, gemMergeRate, rollGemDrop, mergeGems, socketGem, unsocketGem,
     totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, gainRandomWS, wsChoices, wsInfo,
     pendingWS, currentWSChoices, chooseWS, chooseWSRandom,

@@ -699,6 +699,29 @@ test('需求146：套装收益 —— 同名 2/4 件两档、按最低品质缩�
   assert.ok(buffed < plain, '套装收益的伤害乘区要真的缩短战斗：' + plain + ' → ' + buffed);
 });
 
+test('需求148：「更换装备」页按「穿着中 > 星标 > 获得顺序」展示', () => {
+  const g = game(), s = g.State.state();
+  s.level = 30;
+  /* 按 a → b → c → d → e 的顺序入手（拳斗头巾/手套/服/鞋 + 忍者护额，部位互不冲突） */
+  const keys = [13, 14, 15, 16, 57].map((id) => g.State.addGear(id).key);
+  const [a, b, c, d, e] = keys;
+  const order = () => g.State.gearsInDisplayOrder().map((x) => x.key);
+  same(order(), keys);                                   // 什么都没做时就是获得顺序
+  g.State.wear(b);                                       // 穿着 → 最优先
+  g.State.toggleGearStar(d);                             // 星标 → 次优先
+  same(order(), [b, d, a, c, e]);
+  g.State.wear(c);                                       // 穿第二件（同部位互斥，b 保留）
+  same(order(), [b, c, d, a, e]);                        // 穿着组内仍是获得顺序（b 早于 c）
+  g.State.toggleGearStar(b);                             // 又穿又标 → 仍在第 1 档最前
+  same(order(), [b, c, d, a, e]);
+  g.State.unwear(b);                                     // 卸下后落到星标档（b 早于 d）
+  same(order(), [c, b, d, a, e]);
+  g.State.toggleGearStar(a);                             // 给 a 加星标 → 进星标档，同档内 a 最早入手
+  same(order(), [c, a, b, d, e]);
+  g.State.toggleGearStar(b);                             // 取消 b 的星标 → b 回到「获得顺序」档
+  same(order(), [c, a, d, b, e]);
+});
+
 test('1/5/10/15/20 级礼包：金松果回到旧版数量，种类更丰富且不重复发放', () => {
   const g = game(), s = g.State.state();
   // 原表（GameDict）保持逐字节不动，实际清单在 GData.GIFT_PACK_BOOST 里

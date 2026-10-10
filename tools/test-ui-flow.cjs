@@ -159,6 +159,64 @@ const results = [];
 function record(name, fn) { results.push([name, fn]); }
 
 /* ============================================================
+ * 需求150：道具图标两态同源（方案 A）
+ * 旧病：商店/背包里「点前」走参考截图 new-reference/props（带底板的截图卡片）、
+ * 「点后」走图集切图 icons/prop-*.png —— 同一件东西点一下换成画风与尺寸都不同的另一张图。
+ * 现在统一走图集：这里切出**真实的 icon()/atlasIcon()**，逐个 id 断言两态同图且不带 reference-art
+ * （不带 reference-art 才会拿到 .item-icon 的经典方框底色，选中态由绿框表达）。
+ * ============================================================ */
+record('道具图标点前点后是同一张图集图（不再在参考截图与图集之间跳）', () => {
+  const lines = fs.readFileSync(path.join(ROOT, 'js/classic-ui.js'), 'utf8').split('\n');
+  const code = slice(lines, 'function atlasIcon(kind, id, locked, trueForm) {', 'function statsHtml(stats, cls) {')
+    .replace(/\n\s*function statsHtml\(stats, cls\) \{$/, '');
+  const c = { console };
+  c.window = c;
+  vm.createContext(c);
+  vm.runInContext(code + '\nwindow.__icon = icon;', c, { filename: 'classic-ui.js (icon)' });
+  const src = (html) => (html.match(/src="([^"]+)"/) || [])[1];
+  /* 旧实现「两态不同源」的那批 id（A ∪ B）＋ 几个对照 id */
+  const ids = [1, 2, 3, 4, 5, 10, 11, 12, 21, 22, 23, 24, 25, 26, 36, 6, 7, 13, 37, 47, 50, 101, 107];
+  for (const id of ids) {
+    const before = c.__icon('prop', id, false, false);
+    const after = c.__icon('prop', id, false, true);
+    assert.equal(src(after), src(before), id + ' 号道具两态应当是同一张图：' + src(before) + ' vs ' + src(after));
+    assert.match(src(before), /images\/classic\/icons\/prop-\d+\.png$/, id + ' 号道具应当走图集切图：' + src(before));
+    assert.ok(!/reference-art/.test(before) && !/reference-art/.test(after),
+      id + ' 号道具不该再带 reference-art（否则格子会丢经典方框底色）');
+  }
+  // 其它类别不受影响：武器/技能该走参考卡的仍然走参考卡（注意第 5 个参数才是 trueForm）
+  assert.match(c.__icon('weapon', 1, false, true, true), /reference-cards\/weapon-1\.png/, '真·武器仍走真形态卡面');
+  assert.match(c.__icon('skill', 2, false, false), /new-reference\/cards\/skill-2-learned\.png/, '技能卡面不受影响');
+});
+
+/* ============================================================
+ * 需求149：「更换装备」页仍然是**每页 6 件 + 翻页**、格子固定尺寸，
+ * 并且最后一行格子的装备名不会被裁掉。
+ * 背景：中间试过「不分页 + 自适应格子」，用户否掉了（要翻页、不要自适应）；
+ * 而「最后一行名字被裁」的真正原因是**顶部说明行折成了两行**把网格往下推，
+ * 超出 .modal-body（overflow:hidden）的部分被裁 —— 所以这里把它钉死成一条契约。
+ * ============================================================ */
+record('装备页保留翻页与固定格子，且底部那一行名字不会被裁', () => {
+  const uiSrc = fs.readFileSync(path.join(ROOT, 'js/classic-ui.js'), 'utf8');
+  const cssSrc = fs.readFileSync(path.join(ROOT, 'css/classic-refine.css'), 'utf8');
+  // ① 翻页还在：每页 6 件 + 左右箭头
+  assert.match(uiSrc, /gears\.slice\(gearPage\*6,gearPage\*6\+6\)/, '装备页应当仍是每页 6 件');
+  assert.match(uiSrc, /openGears\(gearPage-1\)/, '左翻页箭头要接回 openGears');
+  assert.match(uiSrc, /openGears\(gearPage\+1\)/, '右翻页箭头要接回 openGears');
+  // ② 不再有自适应格子尺寸（用户口径：不使用自适应 UI 大小）
+  assert.ok(!/--gear-icon|--gear-cols|fitGearGrid/.test(uiSrc), '装备页不该再有自适应格子');
+  // ③ 说明行必须只占一行：nowrap 是这条的钥匙
+  assert.match(cssSrc, /\.gear-modal \.gear-note\{[^}]*white-space:nowrap/, '说明行要 nowrap，否则折行会把网格推下去');
+  // ④ 版式总高必须放得进弹窗内容区，并留出富余（否则最后一行会被裁）
+  const layout = Number((cssSrc.match(/\.gear-modal \.gear-layout\{height:(\d+)px/) || [])[1]);
+  assert.equal(layout, 365, '网格高度仍是 365px（改它就要重算这条契约）');
+  const contentH = 598 - 40 - 100;            // .gear-modal 高 598，上下内边距 40 / 100
+  const noteH = 27 * 1.55 + 8;                // 说明行：字号 27 × 行高 1.55 + 下边距 8（上边距已归零）
+  assert.ok(noteH + layout <= contentH - 10,
+    '说明行 + 网格要塞得进弹窗内容区并留富余：' + (noteH + layout).toFixed(0) + ' vs ' + contentH);
+});
+
+/* ============================================================
  * 需求145：原地重画当前页不能把人弹回页首
  * 「把存档送过去」/「检查更新」这类动作会多次重画系统页，而系统页内容比底板高，
  * 滚动容器是 .classic-board（overflow-y:auto）—— 重画后必须保持原来的滚动位置。

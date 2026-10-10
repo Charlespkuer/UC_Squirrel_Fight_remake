@@ -326,6 +326,8 @@
   position:absolute;top:-6px;left:-6px;font-size:18px;line-height:1;color:#ffd323;
   text-shadow:0 0 3px #000,0 0 6px #b8860b;pointer-events:none;
 }
+/* 「更换装备」页的星标：标在**装备名字前面**，不压在装备图上（用户口径 2026-10） */
+.gear-name-star{color:#ffd323;text-shadow:0 1px 1px #6b4a00,0 0 2px #000;margin-right:2px}
 .gear-sell-card.starred{border-color:#ffd323;box-shadow:0 0 6px rgba(255,211,35,.55)}
 .gear-sell-card .item-icon{position:relative}
 .star-text{color:#ffd323}
@@ -378,3 +380,14 @@
 .set-bonus{display:flex;flex-direction:column;gap:2px;margin-top:4px}
 .set-bonus .set-tier{font-size:24px;color:#8f734e}
 .set-bonus .set-tier.on{color:#4f872b}
+/* ============================================================
+   「更换装备」页的版式修正（2026-10）
+   症状：最后一行格子的**装备名被裁掉下半截**。
+   根因：顶部说明行一旦折成两行，就把下面的网格整体往下推 ~42px，
+        而 .modal-body 是 overflow:hidden，超出部分直接被裁。
+   修法：① 说明行只占一行（nowrap + 省略号，文字再长也不会折）；
+        ② 去掉它上面那 17px 的段间距、下边距收到 8px。
+   期望值：弹窗内容高 458px = 说明行 42+8 + 网格 365 = 415px，底部还剩 43px 富余。
+   ============================================================ */
+.gear-modal .gear-note{position:static;text-align:center;font-size:27px;
+  margin:0 8px 8px;color:#6d321d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

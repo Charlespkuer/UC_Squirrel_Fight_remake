@@ -205,9 +205,12 @@
       return '<img alt="" class="reference-art" src="images/classic/reference-cards/' + kind + '-' + id + '.png">';
     }
     if (kind === 'weapon' && trueForm) return '<img alt="" src="' + atlasIcon('weapon', id, locked, true) + '">';
-    if(kind==='prop' && ((!selected && [1,2,4,5,10,12,21,22,23,24,26,36].includes(+id)) || selected && [3,11,25].includes(+id))) {
-      return '<img alt="" class="reference-art" src="images/classic/new-reference/props/prop-'+id+(selected?'-selected':'')+'.png">';
-    }
+    /* 道具图标统一走图集切图（atlasIcon → images/classic/icons/prop-<id>.png）。
+     * 以前是「未选中走参考截图 new-reference/props（带底板的截图卡片）、选中走图集切图」，
+     * 同一件东西点一下就换成画风与尺寸都不同的另一张图（用户 2026-10 反馈「差异很大」）。
+     * 现在两态同一张图：选中与否由格子的边框/高亮表达 ——
+     * 图集图不带 .reference-art 类，所以 .item-icon 会拿回经典方框底色，
+     * 选中态就是 .catalog-cell.selected 的绿框，跟武器/技能/装备一个口径。 */
     const reference = {
       weapon: { learned: [1,5,7,8,9,15], locked: [2,3,4,6,10,12,13,14] },
       skill: { learned: [2,3,4,7,9,13,15,18], locked: [1,5,6,8,10,11,12,14,17] }
@@ -1199,9 +1202,11 @@
   function openGears(pg) {
     gearPage=typeof pg==='number'?pg:0;
     openStatus();
-    const gears=State.myGears(),total=Math.max(1,Math.ceil(gears.length/6));gearPage=Math.min(gearPage,total-1);
+    /* 列表顺序：穿着中 > 星标 > 获得顺序（规则在 state.js 的 gearsInDisplayOrder）。
+     * 仍然是**每页 6 件 + 翻页**、格子固定尺寸（用户口径 2026-10：不要自适应格子大小）。 */
+    const gears=State.gearsInDisplayOrder(),total=Math.max(1,Math.ceil(gears.length/6));gearPage=Math.min(gearPage,total-1);
     const slots=['头部','手部','身体','脚部'];
-    const content='<p class="gear-note">相同的附加属性效果不叠加，最高的1条生效！</p><div class="gear-layout"><div class="gear-slots">'+slots.map((name,i)=>{const g=gears.find(x=>x.used&&x.type===i);return '<button class="catalog-cell" '+(g?'data-gear="'+esc(g.key)+'"':'disabled')+'><span class="item-icon">'+(g?gearImg(g):'<span class="gear-empty">'+name+'</span>')+'</span></button>';}).join('')+'</div><div class="gear-list">'+gears.slice(gearPage*6,gearPage*6+6).map(g=>'<button class="catalog-cell '+(g.used?'selected':'')+'" data-gear="'+esc(g.key)+'"><span class="item-icon">'+gearImg(g)+(g.used?'<span class="equipped-check">✓</span>':'')+'</span><span class="item-caption q'+g.quality+'">'+esc(g.name)+'</span></button>').join('')+(gears.length?'':'<div class="empty-state">还没有装备<br><span class="small-label">挑战关卡获得碎片<br>10个碎片可合成一件装备</span><br>'+btn('去闯关','stages','small gold')+'</div>')+'</div></div>'+(gearPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(gearPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':'');
+    const content='<p class="gear-note">相同的附加属性效果不叠加，最高的1条生效！</p><div class="gear-layout"><div class="gear-slots">'+slots.map((name,i)=>{const g=gears.find(x=>x.used&&x.type===i);return '<button class="catalog-cell" '+(g?'data-gear="'+esc(g.key)+'"':'disabled')+'><span class="item-icon">'+(g?gearImg(g):'<span class="gear-empty">'+name+'</span>')+'</span></button>';}).join('')+'</div><div class="gear-list">'+gears.slice(gearPage*6,gearPage*6+6).map(g=>{const starred=State.isGearStarred(g);return '<button class="catalog-cell '+(g.used?'selected':'')+'" data-gear="'+esc(g.key)+'"><span class="item-icon">'+gearImg(g)+(g.used?'<span class="equipped-check">✓</span>':'')+'</span><span class="item-caption q'+g.quality+'">'+(starred?'<span class="gear-name-star" title="已加星标：不会被误融合或误出售">★</span>':'')+esc(g.name)+'</span></button>';}).join('')+(gears.length?'':'<div class="empty-state">还没有装备<br><span class="small-label">挑战关卡获得碎片<br>10个碎片可合成一件装备</span><br>'+btn('去闯关','stages','small gold')+'</div>')+'</div></div>'+(gearPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(gearPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':'');
     const m=modal('我的装备',content+'<span class="gear-capacity">容量 '+gears.length+'/'+State.gearCapacity()+'　'+(gearPage+1)+'/'+total+'</span>'+setBonusSummary(),[{label:'返回',cls:'gold'}]);
     const p=m.element;p.classList.add('gear-overlay');$('.classic-modal',p).classList.add('gear-modal');
     const list=$('.gear-list',p),n=gears.slice(gearPage*6,gearPage*6+6).length;
@@ -1276,7 +1281,11 @@
     const g=State.myGears().find(x=>x.key===key);if(!g)return;
     const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+State.gemPercent(g.gem.id-100)+'%，附加 +'+(g.gem.ext)+'%）':'';
     const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+(g.attrBase&&g.attrBase!==g.abilityVal?'（基准 '+g.attrBase+'，本件有浮动）':'')+'<br>附加属性：<br>'+State.extText(g.ext).map(esc).join('<br>')+gemInfo+setBonusBlock(g)+'</div></div>';
-    const buttons=[{label:g.used?'卸下':'装备',run:()=>{const ok=g.used?State.unwear(key):State.wear(key);if(ok===false)toast('等级不足，暂时无法装备');openGears(gearPage);}}];
+    /* 装 / 卸之后列表会重排（穿着 > 星标 > 获得顺序），所以**跟着这一件翻到它新位置所在的那一页**，
+     * 否则在后面的页上点「装备」，东西会当场跳到第一页、看不见了。 */
+    const buttons=[{label:g.used?'卸下':'装备',run:()=>{const ok=g.used?State.unwear(key):State.wear(key);if(ok===false)toast('等级不足，暂时无法装备');
+      const idx=State.gearsInDisplayOrder().findIndex(x=>x.key===key);
+      openGears(idx<0?gearPage:Math.floor(idx/6));}}];
     if(g.orange){
       if(g.gem)buttons.push({label:'拆卸宝石（5金）',run:()=>{const r=State.unsocketGem(key);toast(r.msg);openGear(key);}});
       else buttons.push({label:'镶嵌宝石',cls:'gold',run:()=>socketGemDialog(key)});

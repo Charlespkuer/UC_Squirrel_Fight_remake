@@ -57,9 +57,15 @@ scripts\启动游戏.cmd --stop          # 停掉后台的本地服务器
 
 ### ④ 安卓（APK）
 
-1. **拿 APK**：CI 不产出安卓包，需要本地打 —— `pwsh -File tools\build-apk.ps1 -Abi arm64-v8a -Release`
-   （真机）/ `-Abi x86_64`（模拟器），产物在 `src-tauri\dist\ssdz-classic-<abi>-<profile>-<日期>.apk`；
-   也可以直接用维护者分享的 APK。
+1. **拿 APK（顺带 Windows exe + 安装包）**：**双击 `scripts\打包.cmd`** 就行 —— 它会
+   版本号 patch +1（例如 0.4.8 → 0.4.9）、删掉上一版的旧包、编出
+   `src-tauri\dist\squirrel_fight_<版本>_arm64-v8a.apk`（真机）与 `squirrel_fight_<版本>_x64-setup.exe`，
+   最后自动清掉 `target\` / Gradle `build\` 那 5~10 GB 缓存。只想回收磁盘就双击 `scripts\清缓存.cmd`。
+   需要更细的控制时（`pwsh` 不在就用 `powershell`）：
+   `打包.cmd -Version 0.5.0`（指定版本）/ `-SkipApk`（只出 Windows）/ `-KeepCache`（保留缓存，下次编得快）/
+   `-DryRun`（只打印计划）；全部开关见 `tools\build-release.ps1` 头部注释。也可以单独打安卓包：
+   `powershell -File tools\build-apk.ps1 -Abi x86_64 -Release`（模拟器）。
+   产物落在 `src-tauri\dist\`，也可以直接用维护者分享的 APK。
 2. **装**：把 APK 传到手机（数据线 / 微信文件 / 网盘）→ 在文件管理器里点开 → 按提示到系统设置里
    允许该来源「安装未知应用」→ 继续安装。
 3. 安装时若提示「来源不明 / 未经认证」是正常的：现在用的是 **debug 签名**（自用没问题；
@@ -120,21 +126,23 @@ node scripts/serve.js     # 起本地静态服务器（带存档接口）
 
 | 目录 / 文件 | 作用 | 主要内容 |
 |---|---|---|
-| `scripts/` | **运行入口与本地服务器**（双击启动、存档接口都在这） | `index.html` 首页（服务器把它映射成 `/`）、`serve.js` / `serve.py` 静态服务器（带 `/__save` 存档接口与 `/__update` 一键更新接口）、`update-game.js`（一键拉取远端更新的执行体：git pull / GitHub 便携包 / 安装包，零依赖）、`启动游戏.command`（macOS 双击入口）、`启动游戏.cmd` + `start-game.ps1`（Windows 兜底入口）、`停止游戏.command`、`一键同步.command` / `一键同步.cmd`、`重启同步服务.cmd`、`cleanup-old-layout.*`（一次性整理旧布局）、`sync/` 双机同步本体、`.gitattributes`（本目录的换行符规则：bash 脚本 LF、`.cmd` CRLF） |
+| `scripts/` | **运行入口与本地服务器**（双击启动、存档接口、一键出包都在这） | `index.html` 首页（服务器把它映射成 `/`）、`serve.js` / `serve.py` 静态服务器（带 `/__save` 存档接口与 `/__update` 一键更新接口）、`update-game.js`（一键拉取远端更新的执行体：git pull / GitHub 便携包 / 安装包，零依赖；本机版本读同目录的 `version.json`）、`version.json`（版本标识）、`打包.cmd` / `清缓存.cmd`（一键出包 / 一键回收磁盘，薄壳转给 `tools\build-release.ps1`）、`启动游戏.command`（macOS 双击入口）、`启动游戏.cmd` + `start-game.ps1`（Windows 兜底入口）、`停止游戏.command`、`一键同步.command` / `一键同步.cmd`、`重启同步服务.cmd`、`cleanup-old-layout.*`（一次性整理旧布局）、`sync/` 双机同步本体、`.gitattributes`（本目录的换行符规则：bash 脚本 LF、`.cmd` CRLF） |
 | `js/` | **全部游戏代码**（见下表逐文件说明） | 启动流程、存档、战斗、塔、界面、静态数据 |
 | `css/` | 样式，按模块分文件 | `style.css`（基础）、`classic*.css`（复古界面）、`tower.css`（塔）、`battle-drops.css`、`debug.css` |
 | `images/` | 图片素材 | 背景与场景、UI 图标、角色图集（`images/orig/` 原版图集）、`screenshots/`（README 用的截图） |
 | `audio/` | 音效与 BGM | 战斗音效、主界面 BGM |
 | `src-tauri/` | **桌面壳与安卓壳**（Rust + Tauri 2，同一个 crate 出 exe 和 apk） | `src/lib.rs`（全部逻辑，按 `cfg(mobile)` 分支）、`src/main.rs`（桌面入口，仅 8 行）、`Cargo.toml`、`tauri.conf.json`、`tauri.android.conf.json`（安卓构建时自动合并）、`icons/`、`app-icon.png`、`gen/android/`（`tauri android init` 生成的安卓工程，**不进仓库**）、`web/` 与 `dist/`（构建产物） |
-| `tools/` | **开发与验证工具**（不参与运行） | 20 个 `test-*.cjs` 主题套件（一条用例对应一条规则；新用例放进主题相符的套件）+ `test-battle.js`（动画/图集）、`check-asset-paths.cjs`（资源路径体检）、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK）、`gen-vendor-data.cjs`（重新生成 `js/gamedict.js`）、`stage-balance.cjs`（关卡数值，被回归调用）、`publish-guide.md` / `tauri-guide.md`（发布与桌面壳指南） |
+| `tools/` | **开发与验证工具**（不参与运行） | 20 个 `test-*.cjs` 主题套件（一条用例对应一条规则；新用例放进主题相符的套件）+ `test-battle.js`（动画/图集）、`check-asset-paths.cjs`（资源路径体检）、`build-release.ps1`（**一键出包**：版本号 +1 → 清旧包 → exe/安装包/APK → 清 5~10 GB 缓存；根目录 `打包.cmd` / `清缓存.cmd` 是它的双击入口）、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK）、`gen-vendor-data.cjs`（重新生成 `js/gamedict.js`）、`stage-balance.cjs`（关卡数值，被回归调用）、`publish-guide.md` / `tauri-guide.md`（发布与桌面壳指南） |
 | `docs/` | 说明文档（**新增需用户同意**，见 `docs/AGENTS.md`） | [更新记录](docs/更新记录.md)（唯一变更日志，最新在上）、[真化武器与技能数值](docs/真化武器与技能数值.md)（平衡对照表）、[双语与本地化方案](docs/双语与本地化方案.md)（未落地方案） |
 | `save/` | **运行时的存档目录**（不进仓库） | `progress.json` 正式存档、`backup/` 快照、`server.out.log` / `server.err.log` |
 | `references/` | 原版 APK 与参考素材（本地，不进仓库） | 只作对照/取证，游戏运行不读它 |
 | `out/` | AI 超分与开发期对比图的**临时工作区**（本地，不进仓库） | 实验对比图与分析脚本；删掉不影响游戏 |
 | `.github/` | CI 与发布 | `ci.yml`（回归）、`pages.yml`（在线试玩版）、`release.yml`（双平台便携 zip）、`tauri.yml`（桌面/移动安装包） |
 
-根目录只有五样：`squirrel_fight.exe`（Windows 免安装入口）、`README.md`、`LICENSE`（许可协议）、
-`version.json`（版本标识，游戏内「游戏更新」拿它和远端 tag 对比）、`.gitignore`（哪些本地产物不进仓库）。
+根目录只有这五样：`squirrel_fight.exe`（Windows 免安装入口）、`README.md`、`LICENSE`（许可协议）、
+`启动游戏.command`（macOS 双击入口）、`.gitignore`（哪些本地产物不进仓库）。
+**别的都收进二级目录**：`scripts/version.json`（版本标识，游戏内「游戏更新」拿它和远端 tag 对比）、
+`scripts/打包.cmd` / `scripts/清缓存.cmd`（一键出包 / 一键回收磁盘）—— 根目录不再放 `.cmd`。
 换行符规则放在 `scripts/.gitattributes`（`.gitattributes` 与 `.gitignore` 一样按目录生效，
 所以只作用于 `scripts/`）——bash 脚本必须 LF，否则 mac 上双击会报
 `syntax error near unexpected token '$'do\r''`。

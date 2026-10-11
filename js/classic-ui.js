@@ -205,9 +205,12 @@
       return '<img alt="" class="reference-art" src="images/classic/reference-cards/' + kind + '-' + id + '.png">';
     }
     if (kind === 'weapon' && trueForm) return '<img alt="" src="' + atlasIcon('weapon', id, locked, true) + '">';
-    if(kind==='prop' && ((!selected && [1,2,4,5,10,12,21,22,23,24,26,36].includes(+id)) || selected && [3,11,25].includes(+id))) {
-      return '<img alt="" class="reference-art" src="images/classic/new-reference/props/prop-'+id+(selected?'-selected':'')+'.png">';
-    }
+    /* 道具图标统一走图集切图（atlasIcon → images/classic/icons/prop-<id>.png）。
+     * 以前是「未选中走参考截图 new-reference/props（带底板的截图卡片）、选中走图集切图」，
+     * 同一件东西点一下就换成画风与尺寸都不同的另一张图（用户 2026-10 反馈「差异很大」）。
+     * 现在两态同一张图：选中与否由格子的边框/高亮表达 ——
+     * 图集图不带 .reference-art 类，所以 .item-icon 会拿回经典方框底色，
+     * 选中态就是 .catalog-cell.selected 的绿框，跟武器/技能/装备一个口径。 */
     const reference = {
       weapon: { learned: [1,5,7,8,9,15], locked: [2,3,4,6,10,12,13,14] },
       skill: { learned: [2,3,4,7,9,13,15,18], locked: [1,5,6,8,10,11,12,14,17] }
@@ -840,7 +843,11 @@
   function openBag(shop,pg) {
     const exchange=shop==='exchange',mode=shop;shop=shop===true;bagPage=pg||0;
     const S=State.state(),items=[];
-    propMap.each((id,v)=>{if(exchange?[24,25,26,45,46,51].includes(+id):shop?v.buy==='true':S.props[id]>0)items.push({...v,id:+id});});
+    /* 背包（非商店/兑换页）里额外列出**货币类显示项**（金杯 40）：它的持有量在 `S.goldCup` 上，
+     * 不是 `S.props`，所以这里用 `State.bagCountOf` 读同一个真值来源（2026-10 用户口径）。 */
+    const bagCount=(id)=>State.bagCountOf?State.bagCountOf(id):(S.props[id]||0);
+    const bagHas=(id)=>bagCount(id)>0;
+    propMap.each((id,v)=>{if(exchange?[24,25,26,45,46,51].includes(+id):shop?v.buy==='true':(bagHas(+id)))items.push({...v,id:+id});});
     items.sort((a,b)=>a.id-b.id);
     const total=Math.max(1,Math.ceil(items.length/6));bagPage=Math.min(bagPage,total-1);
     const shown=items.slice(bagPage*6,bagPage*6+6);
@@ -852,10 +859,10 @@
     const mainLabel=shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看';
     /* 按钮顺序（需求）：**卖出在左、使用/合成在右** —— 主操作仍然是最醒目的金色按钮。 */
     const bagActions=it?'<div class="bag-actions">'+
-      (sellPrice&&(S.props[it.id]||0)>0?btn('卖出','prop-sell','small'):'')+
+      (sellPrice&&bagCount(it.id)>0?btn('卖出','prop-sell','small'):'')+
       btn(mainLabel,'prop-action','small gold')+'</div>':'';
-    const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+(S.props[it.id]||0)+' 个'+(sellPrice?'　可回收 '+sellPrice+' 金松果/个':''))+'</div>'+bagActions:'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
-    const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+(S.props[it.id]||0)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':(S.props[it.id]||0))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
+    const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+bagCount(it.id)+' 个'+(State.isBagCurrencyProp&&State.isBagCurrencyProp(it.id)?'（货币，天梯赛获得；不能卖也不能使用）':sellPrice?'　可回收 '+sellPrice+' 金松果/个':''))+'</div>'+bagActions:'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
+    const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+bagCount(it.id)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':bagCount(it.id))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
     const bagFooter=shop?{left:btn('每日抽奖','lottery','gold entry-pill'),right:btn('金杯商店','rank-shop','gold entry-pill')}:{};
     const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,Object.assign({cls:'classic-bag-board'+(shop?' shop-board':''),counter:(bagPage+1)+'/'+total},bagFooter));
     $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
@@ -917,9 +924,9 @@
       (S.energy>S.maxEnergy?'（超出部分不自然回复，仍可用于挑战）':'')+'</p>'):'';
     const batchNote=(isFragment||isSeed||isConvertShard||isGem)?('<p class="small-label">每次合成：'+base.name+' ×'+batchCost+' + 金松果 ×'+batchGold+'　→　'+batchName+'</p>'):'';
     const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-description">'+esc(base.remark||'')+'</div>'+
-      '<div class="small-label">拥有 <b data-live="own">'+(S.props[id]||0)+'</b> 个'+(shop?'　售价 '+base.price+' 金松果<br>每日限购 '+status.limit+' 件，今日剩余 <b data-live="stock">'+status.remaining+'</b> 件':'')+'</div></div></div>'+
+      '<div class="small-label">拥有 <b data-live="own">'+(State.bagCountOf?State.bagCountOf(id):(S.props[id]||0))+'</b> 个'+(shop?'　售价 '+base.price+' 金松果<br>每日限购 '+status.limit+' 件，今日剩余 <b data-live="stock">'+status.remaining+'</b> 件':'')+'</div></div></div>'+
       seedNote+shardNote+potionNote+batchNote+
-      (isGem?'<p class="small-label">3 个同级宝石 + 10 金松果合成高一级，成功率 '+(State.GEM_MERGE_RATES[State.gemLevel(id)-1]*100)+'%；失败有 50% 几率一颗材料降 1 级（1级则碎裂）。</p>':'')+
+      (isGem?'<p class="small-label">3 个同级宝石 + 10 金松果合成高一级，成功率 '+Math.round(State.gemMergeRate(State.gemLevel(id))*100)+'%（0.88 的材料等级次方）；失败有 50% 几率一颗材料降 1 级（1级则碎裂）。</p>':'')+
       '<p class="small-label use-preview" data-live="hint" role="status"></p>';
     // 主按钮只在真的有动作时才给；否则会出现「返回」和尾部的「返回」两个按钮
     const label=shop?(status.remaining?'购买':'今日售罄'):isFragment?'合成装备':isConvertShard?'合成转化丸':isSeed?'合成果实':isGem?'合成宝石':id===37?'分配属性':canUse?'使用':'';
@@ -1178,13 +1185,33 @@
   function gearImg(g) {
     return '<img alt="" src="images/classic/icons/gear-'+g.id+'.png">';
   }
+  /** 装备详情里的「套装收益」小节：两档阈值 + 当前进度 + 生效标记。
+   *  家族按**装备名去掉部位后缀**算（忍者护额/拳套/服/鞋 = 忍者一套），同名跨品质都算同一套；
+   *  数值按所穿该家族装备里**最低**的品质算（整套成色按最差的一件算）。 */
+  function setBonusBlock(g){
+    const info=State.setBonusForGear(g.id,g.quality);
+    if(!info)return '';
+    const label=['普通','优秀','杰出','卓越','传说'][info.quality]||'普通';
+    const rows=info.tiers.map(t=>'<span class="set-tier'+(t.on?' on':'')+'">'+(t.on?'✓':'○')+' '+t.need+' 件：'+esc(t.text.join('、'))+'</span>').join('');
+    const head='套装：<b class="set-name">'+esc(info.family)+'</b>　已穿 '+info.count+'/4 件'+(info.count?'（整套按最低品质「'+label+'」计）':'');
+    const hint=info.count<2?'<span class="small-label">再凑到 2 件同名'+esc(info.family)+'装备即可生效</span>':'';
+    return '<br>'+head+hint+'<div class="set-bonus">'+rows+'</div>';
+  }
+  /** 装备页顶部的一行「当前生效的套装收益」摘要（没有生效的套装时返回空串）。 */
+  function setBonusSummary(){
+    const list=State.setBonusList().filter(x=>x.active);
+    if(!list.length)return '';
+    return '<div class="gear-set-line">套装收益：'+list.map(x=>'<b>'+esc(x.family)+'</b> '+x.count+'/4（'+esc(x.text.join('、'))+'）').join('　')+'</div>';
+  }
   function openGears(pg) {
     gearPage=typeof pg==='number'?pg:0;
     openStatus();
-    const gears=State.myGears(),total=Math.max(1,Math.ceil(gears.length/6));gearPage=Math.min(gearPage,total-1);
+    /* 列表顺序：穿着中 > 星标 > 获得顺序（规则在 state.js 的 gearsInDisplayOrder）。
+     * 仍然是**每页 6 件 + 翻页**、格子固定尺寸（用户口径 2026-10：不要自适应格子大小）。 */
+    const gears=State.gearsInDisplayOrder(),total=Math.max(1,Math.ceil(gears.length/6));gearPage=Math.min(gearPage,total-1);
     const slots=['头部','手部','身体','脚部'];
-    const content='<p class="gear-note">相同的附加属性效果不叠加，最高的1条生效！</p><div class="gear-layout"><div class="gear-slots">'+slots.map((name,i)=>{const g=gears.find(x=>x.used&&x.type===i);return '<button class="catalog-cell" '+(g?'data-gear="'+esc(g.key)+'"':'disabled')+'><span class="item-icon">'+(g?gearImg(g):'<span class="gear-empty">'+name+'</span>')+'</span></button>';}).join('')+'</div><div class="gear-list">'+gears.slice(gearPage*6,gearPage*6+6).map(g=>'<button class="catalog-cell '+(g.used?'selected':'')+'" data-gear="'+esc(g.key)+'"><span class="item-icon">'+gearImg(g)+(g.used?'<span class="equipped-check">✓</span>':'')+'</span><span class="item-caption q'+g.quality+'">'+esc(g.name)+'</span></button>').join('')+(gears.length?'':'<div class="empty-state">还没有装备<br><span class="small-label">挑战关卡获得碎片<br>10个碎片可合成一件装备</span><br>'+btn('去闯关','stages','small gold')+'</div>')+'</div></div>'+(gearPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(gearPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':'');
-    const m=modal('我的装备',content+'<span class="gear-capacity">容量 '+gears.length+'/'+State.gearCapacity()+'　'+(gearPage+1)+'/'+total+'</span>',[{label:'返回',cls:'gold'}]);
+    const content='<p class="gear-note">相同的附加属性效果不叠加，最高的1条生效！</p><div class="gear-layout"><div class="gear-slots">'+slots.map((name,i)=>{const g=gears.find(x=>x.used&&x.type===i);return '<button class="catalog-cell" '+(g?'data-gear="'+esc(g.key)+'"':'disabled')+'><span class="item-icon">'+(g?gearImg(g):'<span class="gear-empty">'+name+'</span>')+'</span></button>';}).join('')+'</div><div class="gear-list">'+gears.slice(gearPage*6,gearPage*6+6).map(g=>{const starred=State.isGearStarred(g);return '<button class="catalog-cell '+(g.used?'selected':'')+'" data-gear="'+esc(g.key)+'"><span class="item-icon">'+gearImg(g)+(g.used?'<span class="equipped-check">✓</span>':'')+'</span><span class="item-caption q'+g.quality+'">'+(starred?'<span class="gear-name-star" title="已加星标：不会被误融合或误出售">★</span>':'')+esc(g.name)+'</span></button>';}).join('')+(gears.length?'':'<div class="empty-state">还没有装备<br><span class="small-label">挑战关卡获得碎片<br>10个碎片可合成一件装备</span><br>'+btn('去闯关','stages','small gold')+'</div>')+'</div></div>'+(gearPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(gearPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':'');
+    const m=modal('我的装备',content+'<span class="gear-capacity">容量 '+gears.length+'/'+State.gearCapacity()+'　'+(gearPage+1)+'/'+total+'</span>'+setBonusSummary(),[{label:'返回',cls:'gold'}]);
     const p=m.element;p.classList.add('gear-overlay');$('.classic-modal',p).classList.add('gear-modal');
     const list=$('.gear-list',p),n=gears.slice(gearPage*6,gearPage*6+6).length;
     if(n)list.insertAdjacentHTML('beforeend',Array.from({length:6-n},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join(''));
@@ -1217,7 +1244,7 @@
     const head = '<div class="gear-sell-head">' +
       '<span>背包里共 <b>' + gears.length + '</b> 件装备（容量 ' + gears.length + '/' + State.gearCapacity() + '）</span>' +
       '<span>当前金松果 <b class="gold-text">' + S.goldPoint + '</b></span>' +
-      '<span class="gear-sell-legend">回收价：白 55-60 · 绿 60-65 · 蓝 65-70 · 紫 70-75 · 橙 75-80</span></div>';
+      '<span class="gear-sell-legend">回收价：白 55-60 · 绿 60-65 · 蓝 65-70 · 紫 90-110 · 橙 180-220</span></div>';
     const body = gears.length
       ? '<div class="gear-sell-grid">' + shown.map(card).join('') + '</div>'
       : '<div class="empty-state">还没有装备<br><span class="small-label">挑战关卡获得碎片，10 个碎片可以合成一件装备</span></div>';
@@ -1256,13 +1283,17 @@
   }
   function openGear(key) {
     const g=State.myGears().find(x=>x.key===key);if(!g)return;
-    const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+(g.gem.id-100)*4+'%，附加 +'+(g.gem.ext)+'%）':'';
-    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+'<br>附加属性：<br>'+State.extText(g.ext).map(esc).join('<br>')+gemInfo+'</div></div>';
-    const buttons=[{label:g.used?'卸下':'装备',run:()=>{const ok=g.used?State.unwear(key):State.wear(key);if(ok===false)toast('等级不足，暂时无法装备');openGears(gearPage);}}];
-    if(g.orange){
-      if(g.gem)buttons.push({label:'拆卸宝石（5金）',run:()=>{const r=State.unsocketGem(key);toast(r.msg);openGear(key);}});
-      else buttons.push({label:'镶嵌宝石',cls:'gold',run:()=>socketGemDialog(key)});
-    }
+    const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+State.gemPercent(g.gem.id-100)+'%，附加 +'+(g.gem.ext)+'%）':'';
+    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+(g.attrBase&&g.attrBase!==g.abilityVal?'（基准 '+g.attrBase+'，本件有浮动）':'')+'<br>附加属性：<br>'+State.extText(g.ext).map(esc).join('<br>')+gemInfo+setBonusBlock(g)+'</div></div>';
+    /* 装 / 卸之后列表会重排（穿着 > 星标 > 获得顺序），所以**跟着这一件翻到它新位置所在的那一页**，
+     * 否则在后面的页上点「装备」，东西会当场跳到第一页、看不见了。 */
+    const buttons=[{label:g.used?'卸下':'装备',run:()=>{const ok=g.used?State.unwear(key):State.wear(key);if(ok===false)toast('等级不足，暂时无法装备');
+      const idx=State.gearsInDisplayOrder().findIndex(x=>x.key===key);
+      openGears(idx<0?gearPage:Math.floor(idx/6));}}];
+    /* 宝石：装上 / 卸下都要 5 金松果（2026-10 用户口径）。只要身上有宝石就一定给「卸下」，
+     * 不再依赖 orange 标记（宝石本来就只可能镶在橙装上，这里只是把它做得更稳、更好找）。 */
+    if(g.gem)buttons.push({label:'卸下宝石（5金）',run:()=>{const r=State.unsocketGem(key);toast(r.msg);openGear(key);}});
+    else if(g.orange)buttons.push({label:'镶嵌宝石（5金）',cls:'gold',run:()=>socketGemDialog(key)});
     /* 星标：防止手滑把好装备卖掉/合掉（融合与出售都会跳过星标装备）。 */
     const starred = State.isGearStarred(g);
     buttons.push({label: starred ? '取消星标' : '星标', cls: starred ? 'gold' : 'muted',
@@ -1271,14 +1302,17 @@
       buttons.push({label:'出售',cls:'muted',run:()=>notice('确定以 '+(State.gearSellRange(State.gearQuality(g))[0])+'~'+(State.gearSellRange(State.gearQuality(g))[1])+' 金松果出售【'+g.name+'】吗？',[{label:'出售',run:()=>{const got=State.sellGear(key);toast('卖出【'+g.name+'】，获得 '+got+' 金松果');openGears(gearPage);}},{label:'返回',cls:'muted'}])});
     }
     buttons.push({label:'返回',cls:'muted'});
-    modal((starred ? '★ ' : '') + '我的装备', content + (starred ? '<p class="small-label star-text">已加星标：不会被误融合或误出售。</p>' : ''), buttons);
+    const md=modal((starred ? '★ ' : '') + '我的装备', content + (starred ? '<p class="small-label star-text">已加星标：不会被误融合或误出售。</p>' : ''), buttons);
+    /* 橙装带宝石时这一行最多 5 个按钮（卸下 / 星标 / 出售 / 返回…），
+     * 200px 最小宽 + 28px 间距会超出弹窗宽度 → 让它换行，别把「返回」挤出可视区。 */
+    md.element.classList.add('gear-detail-overlay');
   }
-  // 镶嵌宝石：列出背包里各级宝石供选择，镶嵌免费
+  // 镶嵌宝石：列出背包里各级宝石供选择（装上 5 金松果，与卸下同价）
   function socketGemDialog(key) {
     const S=State.state();
     const gems=[101,102,103,104,105,106,107].filter(id=>(S.props[id]||0)>0);
     if(!gems.length){notice('背包里没有宝石。45级后通关关卡或在竞技场获胜有几率获得。',[{label:'知道了'}]);return;}
-    modal('选择宝石','<div class="gem-pick">'+gems.map(id=>'<button type="button" class="help-item" data-gem="'+id+'"><span class="item-icon">'+icon('prop',id)+'</span><span>'+esc(propMap.getValue(id).name)+' ×'+S.props[id]+'</span></button>').join('')+'</div><p class="small-label">镶嵌免费；附加属性提升幅度随机，可先拆卸（5金松果）再镶嵌来重随。</p>',[{label:'返回',cls:'muted'}],{small:true});
+    modal('选择宝石','<div class="gem-pick">'+gems.map(id=>'<button type="button" class="help-item" data-gem="'+id+'"><span class="item-icon">'+icon('prop',id)+'</span><span>'+esc(propMap.getValue(id).name)+' ×'+S.props[id]+'</span></button>').join('')+'</div><p class="small-label">镶嵌 5 金松果（卸下同样 5 金）；附加属性提升幅度随机，可先卸下再镶嵌来重随。</p>',[{label:'返回',cls:'muted'}],{small:true});
     const overlays=$$('.classic-modal-overlay'),m=overlays[overlays.length-1];
     $$('[data-gem]',m).forEach(b=>b.onclick=()=>{const r=State.socketGem(key,+b.dataset.gem);toast(r.msg);if(r.ok){m.remove();openGear(key);}});
   }
@@ -2138,8 +2172,8 @@
     if (id >= 101 && id <= 107) {
       const lv = id - 100;
       if (lv <= 2) lines.push('45 级起：通关关卡 20% 几率、竞技场（经验/碎片）获胜 15% 几率获得（一级 75% / 二级 25%）');
-      if (lv < 7) lines.push('合成：3 个同级 + 10 金松果，成功率 ' + (State.GEM_MERGE_RATES[lv - 1] * 100) + '%（失败有 50% 几率一颗材料降 1 级，1级则碎裂）');
-      lines.push('镶嵌：免费镶入橙装（3 件相同紫装融合而来），主属性 +' + lv * 4 + '%，附加属性效果随机提升，每件限 1 颗；拆卸 5 金松果');
+      if (lv < 7) lines.push('合成：3 个同级 + 10 金松果，成功率 ' + Math.round(State.gemMergeRate(lv) * 100) + '%（失败有 50% 几率一颗材料降 1 级，1级则碎裂）');
+      lines.push('镶嵌：免费镶入橙装（3 件相同紫装融合而来），主属性 +' + State.gemPercent(lv) + '%（沿用原版曲线 5×(n²−n+2)），附加属性效果随机提升，每件限 1 颗；拆卸 5 金松果');
     }
     if (!lines.length) lines.push('当前版本暂无产出途径（图鉴预留物品）');
     return lines;
@@ -2152,7 +2186,7 @@
   function openHelp() {
     const items = GUIDE_ITEMS.map((id) => '<button type="button" class="help-item" data-guide="' + id + '"><span class="item-icon">' + icon('prop', id) + '</span><span>' + esc(propMap.getValue(id).name) + '</span></button>').join('');
     // 帮助是「系统」分组下的正常页面（以前是弹窗，会挡住底下的界面）
-    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能。在状态页查看和升级。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。每轮消耗1张挑战书，连续击败3名敌人；失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件相同装备可以融合。</p><p><b>竞技场</b>：11级开启经验竞技场、20级开启碎片竞技场，报名一次打完两场。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45级后通关关卡、竞技场获胜有几率获得1-2级宝石；3个同级宝石+10金松果有几率合成高一级（失败可能降级）。3 件相同卓越（紫）装备可在「装备融合」里融为传说（橙）装备，宝石免费镶入橙装（每件限1颗），拆卸5金松果。</p><h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
+    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能。在状态页查看和升级。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。每轮消耗1张挑战书，连续击败3名敌人；失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件相同装备可以融合。</p><p><b>竞技场</b>：11级开启经验竞技场、20级开启碎片竞技场，报名一次打完两场。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45级后通关关卡、竞技场获胜有几率获得1-2级宝石；3个同级宝石+10金松果有几率合成高一级（失败可能降级）。3 件相同卓越（紫）装备可在「装备融合」里融为传说（橙）装备；宝石可镶入橙装（每件限1颗），**镶嵌与卸下各花 5 金松果**。融合时凑同名：三件同名 97% 保住原名，两件同名 50% 保名 / 3% 变异狂战 / 47% 变成随机其它装备。</p><p><b>套装收益</b>：同名装备算一套（「忍者护额/拳套/服/鞋」都是忍者套），穿满 <b>2 件 / 4 件</b>各给一档额外收益，4 件档叠加在 2 件档之上；收益按所穿该套里<b>最低品质</b>的那一件算，想拿满就得一整套同品质。代价是要放弃「跨套挑词条」的自由 —— 极品词条与套装收益只能二选一。每套的收益特征跟着名字走（忍者=闪避、骑士=减伤、狂战=低血狂暴……），在装备详情里能看到当前进度与下一档给什么。</p><h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
     $$('[data-guide]', p).forEach((b) => b.onclick = () => openGuideItem(+b.dataset.guide));
     return p;
   }

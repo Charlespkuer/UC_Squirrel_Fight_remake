@@ -120,7 +120,10 @@
 .classic-tabs .uc-tab:has(>.classic-button-art){height:83px;min-height:83px}
 .page-footer>.uc-button:has(>.classic-button-art){height:103px;min-width:397px;width:397px}
 .status-buttons .uc-button:has(>.classic-button-art){height:116px;width:280px}
-.gear-overlay{background:#45384da6}.gear-modal{width:1000px;height:598px;max-height:630px;padding:40px 25px 100px;border-radius:62px}.gear-modal .modal-body{height:100%;padding:0;overflow:hidden}.gear-modal .modal-title{font-size:48px}.gear-modal .modal-buttons{position:absolute;bottom:17px;left:0;right:0}.gear-modal .modal-close{display:none}
+.gear-overlay{background:#45384da6}
+/* 装备详情那一行按钮：橙装带宝石时会有「卸下宝石（5金）/ 星标 / 出售 / 返回」4~5 个，
+ * 200px 最小宽 + 28px 间距会超出弹窗宽度 → 允许换行（否则最右边的键会被挤出可视区）。 */
+.gear-detail-overlay .modal-buttons{flex-wrap:wrap;gap:16px 22px}.gear-modal{width:1000px;height:598px;max-height:630px;padding:40px 25px 100px;border-radius:62px}.gear-modal .modal-body{height:100%;padding:0;overflow:hidden}.gear-modal .modal-title{font-size:48px}.gear-modal .modal-buttons{position:absolute;bottom:17px;left:0;right:0}.gear-modal .modal-close{display:none}
 .gear-modal .gear-note{position:static;text-align:center;font-size:27px;margin-bottom:12px;color:#6d321d}.gear-modal .gear-layout{height:365px;grid-template-columns:38% 62%;gap:5px}.gear-modal .gear-slots{position:relative;display:block}.gear-modal .gear-slots .catalog-cell{position:absolute;width:140px;height:134px}.gear-modal .gear-slots .catalog-cell:nth-child(1){top:0;left:119px}.gear-modal .gear-slots .catalog-cell:nth-child(2){top:122px;left:202px}.gear-modal .gear-slots .catalog-cell:nth-child(3){top:122px;left:35px}.gear-modal .gear-slots .catalog-cell:nth-child(4){top:244px;left:119px}.gear-modal .gear-slots .item-icon{width:133px;height:119px;background:#ede0bd;border-radius:29px;border:3px solid #a88256;box-shadow:inset 0 0 0 3px #fff7dc}
 .gear-modal .gear-list{gap:3px 17px;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)}.gear-modal .gear-list .item-icon{width:147px;height:138px;border-radius:30px}.gear-modal .gear-list .item-caption{font:27px/32px "SimSun","Songti SC","STSong",serif}.gear-modal .gear-capacity{position:absolute;bottom:80px;right:37px;font-size:25px;color:#7b542d}.gear-modal .page-arrow{top:43%;right:2px}.gear-modal .page-arrow.prev{left:350px}
 
@@ -326,6 +329,8 @@
   position:absolute;top:-6px;left:-6px;font-size:18px;line-height:1;color:#ffd323;
   text-shadow:0 0 3px #000,0 0 6px #b8860b;pointer-events:none;
 }
+/* 「更换装备」页的星标：标在**装备名字前面**，不压在装备图上（用户口径 2026-10） */
+.gear-name-star{color:#ffd323;text-shadow:0 1px 1px #6b4a00,0 0 2px #000;margin-right:2px}
 .gear-sell-card.starred{border-color:#ffd323;box-shadow:0 0 6px rgba(255,211,35,.55)}
 .gear-sell-card .item-icon{position:relative}
 .star-text{color:#ffd323}
@@ -367,3 +372,30 @@
 .support-url{word-break:break-all;color:#3f6ea6}
 .support-input{width:100%;box-sizing:border-box;font:20px/1.4 inherit;padding:8px 10px;
   border:2px solid #cbb98a;border-radius:10px;background:#fffdf5;color:#5c4326}
+
+/* ---------- 套装收益（数值表见 js/gamedata.js【GD6】） ----------
+ * 装备页底部一行摘要 + 装备详情里的两档阈值。家族按装备名去掉部位后缀算，
+ * 所以「忍者护额/拳套/服/鞋」都算同一套；同名跨品质也拼得起来。 */
+.gear-modal .gear-set-line{position:absolute;left:37px;bottom:80px;right:300px;
+  font-size:22px;line-height:1.35;color:#6d321d}
+.gear-set-line b{color:#9f7125}
+.gear-detail .set-name{color:#a966b9}
+.set-bonus{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.set-bonus .set-tier{font-size:24px;color:#8f734e}
+.set-bonus .set-tier.on{color:#4f872b}
+/* ============================================================
+   「更换装备」页的版式修正（2026-10）
+   症状：最后一行格子的**装备名被裁掉下半截**。
+   根因：顶部说明行一旦折成两行，就把下面的网格整体往下推 ~42px，
+        而 .modal-body 是 overflow:hidden，超出部分直接被裁。
+   修法：① 说明行只占一行（nowrap + 省略号，文字再长也不会折）；
+        ② 去掉它上面那 17px 的段间距、下边距收到 8px。
+   期望值：弹窗内容高 458px = 说明行 42+8 + 网格 365 = 415px，底部还剩 43px 富余。
+   ============================================================ */
+/* 2026-10 用户反馈：说明行被弹窗标题「我的装备」压住 13px（实测：标题 47~101、
+ *   说明行 88~124）。这里给说明行加 24px 上边距，把它连同下面的网格一起往下挪 ——
+ *   实测挪完标题 47~101、说明行 109~145（空隙 8px），网格仍装得下（内容 433px < 可用 458px）。
+ *   底部那两行（容量 / 套装收益）与「返回」键是绝对定位在底边的，本来就在网格下方，
+ *   不受这次下移影响、也不会被压住。 */
+.gear-modal .gear-note{position:static;text-align:center;font-size:27px;
+  margin:24px 8px 8px;color:#6d321d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

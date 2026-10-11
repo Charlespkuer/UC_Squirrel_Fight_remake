@@ -269,6 +269,11 @@ button,input,select{font:inherit}button{touch-action:manipulation}button:focus-v
 .reward-icon{position:relative;width:96px;height:96px;border-radius:22px;background:linear-gradient(135deg,#fdf7dc,#e8c885);
   border:4px solid #8d6a3a;box-shadow:inset 0 0 0 4px #fffdf3;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .reward-icon-img{width:88%;height:88%;object-fit:contain}
+/* 升级奖励卡片里的**所有**图都要收进 96px 的格子：图集切图（道具/药剂/药丸/属性书）是 330px
+ * 的方图，只有属性卡带 .reward-icon-img，走 icon() 的礼物卡没有类 → 以前按原始像素铺开，
+ * 被 .reward-icon 的 overflow:hidden 裁成「放大的碎片」（用户 2026-10 反馈「随机奖励贴图没有缩放」）。
+ * 这里统一按 88% contain 缩放（.reward-icon 已是 flex 居中，参考卡 reference-art 也一起收进来）。 */
+.reward-icon>img{width:88%;height:88%;object-fit:contain}
 .reward-fallback{font-size:44px;font-weight:bold;color:#8d6a3a}
 .reward-card.red .reward-icon{border-color:#c0392b;box-shadow:inset 0 0 0 4px #ffe6df,0 0 10px #c0392b66}
 .reward-card.blue .reward-icon{border-color:#3b7ec0;box-shadow:inset 0 0 0 4px #e2eeff,0 0 10px #3b7ec066}

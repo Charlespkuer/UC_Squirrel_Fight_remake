@@ -70,9 +70,10 @@ while true; do
   echo "  9) 后台同步服务：启动 / 停止"
   echo "  a) 开机自启：安装 / 取消"
   echo "  c) 自检（连不上先点这个：ZeroTier / 服务 / 防火墙 / 对端）"
+  echo "  d) 删除多余文件（镜像式）：先演练，确认后再真删"
   echo "  q) 退出"
   echo
-  printf '选一个（1-9/a/c/q）：'
+  printf '选一个（1-9/a/c/d/q）：'
   read -r choice
   case "$choice" in
     1) run "状态" node "$SYNC" status ;;
@@ -106,7 +107,24 @@ while true; do
       esac
       pause ;;
     c|C) run "自检" node "$SYNC" doctor ;;
+    d|D)
+      echo
+      echo "  镜像式删除：会把「对端没有、本机却有」的多余文件在本机删掉。"
+      echo "  ⚠ 只删非忽略文件；.gitignore 里的（references/ save/ out/ 等）一律不动。"
+      echo "  ⚠ 删之前请先把本机的改动推过去，否则会连没推的改动一起删掉。"
+      echo "  先用 --dry 演练一遍，确认清单没问题再真删。"
+      echo
+      echo "  1) 先演练（只列不改）"
+      echo "  2) 真删（本机多出来的文件）"
+      printf '选一个：'
+      read -r sub
+      case "$sub" in
+        1) run "演练：会删什么" node "$SYNC" pull --files --delete --dry ;;
+        2) run "真删本机多余文件" node "$SYNC" pull --files --delete ;;
+        *) echo "已取消。" ;;
+      esac
+      pause ;;
     q|Q) exit 0 ;;
-    *) echo "看不懂「$choice」"; sleep 1 ;;
+    *) echo "看不懂「${choice}」"; sleep 1 ;;
   esac
 done

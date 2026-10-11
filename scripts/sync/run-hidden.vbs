@@ -12,16 +12,24 @@
 '      wscript.exe //B //Nologo "<this file>" "<node.exe>" "<sync.js>"
 '  With no arguments it just uses "node" from PATH.
 '
+'  IMPORTANT: this file must NOT set sh.CurrentDirectory to the game root.
+'  It used to (sh.CurrentDirectory = root), and that made the game folder
+'  impossible to rename or move: Windows refuses to rename a directory that
+'  is some process's current directory -- MoveFileEx returns
+'  ERROR_ACCESS_DENIED, which Explorer reports as "the folder is in use" --
+'  and this task re-created such a process at every logon and every 5
+'  minutes, so even a reboot did not clear it.
+'  sync.js derives every path from __dirname and never calls process.cwd(),
+'  so no working directory is needed here. Do not put one back.
+'
 '  Intentionally ASCII-only: wscript reads .vbs as ANSI by default.
 ' ============================================================
 Option Explicit
-Dim fso, sh, here, root, q, cmd
+Dim fso, sh, here, q, cmd
 Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh  = CreateObject("WScript.Shell")
 
 here = fso.GetParentFolderName(WScript.ScriptFullName)          ' ...\scripts\sync
-root = fso.GetParentFolderName(fso.GetParentFolderName(here))   ' the game root
-sh.CurrentDirectory = root
 
 q = Chr(34)
 If WScript.Arguments.Count >= 2 Then

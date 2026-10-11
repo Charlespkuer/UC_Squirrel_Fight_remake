@@ -257,8 +257,8 @@ async function ping(port) {
         && !upd.ignored('js/a.js') && !upd.ignored('scripts/index.html'));
 
       const vroot = path.join(TMP, 'vroot');
-      write(path.join(vroot, 'version.json'), JSON.stringify({ version: '9.9.9', commit: 'abc1234', date: '2026-01-01' }));
-      ok('本机版本取自 version.json', upd.readVersion(vroot).version === '9.9.9');
+      write(path.join(vroot, 'scripts/version.json'), JSON.stringify({ version: '9.9.9', commit: 'abc1234', date: '2026-01-01' }));
+      ok('本机版本取自 scripts/version.json', upd.readVersion(vroot).version === '9.9.9');
 
       /* 造一个「远端便携包」：新版 js/a.js + 新文件 js/new.js + 故意改过的存档与同步口令
        *（这两个必须被忽略，否则一键更新会毁掉玩家的档和两台机器的配对）。 */
@@ -267,7 +267,7 @@ async function ping(port) {
       write(path.join(pkg, 'js/a.js'), 'console.log("new")\n');
       write(path.join(pkg, 'js/new.js'), 'console.log("brand new")\n');
       write(path.join(pkg, 'css/b.css'), 'body{color:red}\n');
-      write(path.join(pkg, 'version.json'), JSON.stringify({ version: '9.9.10' }));
+      write(path.join(pkg, 'scripts/version.json'), JSON.stringify({ version: '9.9.10' }));
       write(path.join(pkg, 'save/progress.json'), '{"name":"远端"}\n');
       write(path.join(pkg, 'scripts/sync/sync.config.json'), '{"token":"远端口令"}\n');
       write(path.join(pkg, 'node_modules/pkg/index.js'), 'module.exports=1\n');

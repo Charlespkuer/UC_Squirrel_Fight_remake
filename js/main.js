@@ -691,6 +691,10 @@
     };
     // 挑战塔等玩法在构建完玩家面板后注入本场的 buff 修正（属性乘区/护盾/吸血等）。
     if (typeof opts.adjustMe === 'function') opts.adjustMe(me);
+    /* 套装收益：属性部分已经在 totalStats 里加过，这里只落战斗修正（fighter.setFx）。
+     * 放在 adjustMe **之后** —— 塔的 buff 走 mods、套装走 setFx，两包互不覆盖；
+     * 也不吃塔的「增幅水晶」全局倍率（那是本局增益的倍率，装备收益不该被它放大）。 */
+    State.applySetBonuses(me);
     mode = 'battle';
     cancelAnimationFrame(rafId);
     $('#ui').innerHTML = '';
@@ -700,7 +704,13 @@
     let settled = false;
     const controller = await Battle.run({
       canvas, me, foe, region: opts.region, kind: opts.kind, collectDrops: opts.collectDrops !== false,
-      allowSkip: opts.allowSkip, speedToggle: opts.speedToggle,
+      /* 右下角操作键：跳过 + 倍速，两个都要**等级解锁**（2026-10 用户口径）——
+       * 2 倍速 10 级、跳过 20 级，一开始两个都没有；调用方传 false 仍能单独关掉。
+       * 挑战塔 / 无尽塔本身要 30 级才开，所以塔里天然都有（塔的跳过另有「20 层起」的层数门槛）。
+       * 普通战斗的倍速上限是 2×（不给 3×），塔自己传 speedMax: 3 才拿得到 3×。 */
+      allowSkip: opts.allowSkip !== false && State.unlockedSkip(),
+      speedToggle: opts.speedToggle !== false && State.unlockedSpeed(),
+      speedMax: Number(opts.speedMax) > 0 ? Number(opts.speedMax) : 2,
       // 挑战塔 boss 机制：贴一条进战斗画面（opts.trial = {text}）
       trial: opts.trial,
       // 挑战塔：三侠大招留下的本层削弱（画在玩家血条下方）

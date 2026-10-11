@@ -75,9 +75,9 @@
    * 2026-10 用户口径：**所有**倍速 / 跳过键统一用「普通战斗的跳过键」那一档尺寸
    * 190x70（贴住 1170x690 画布右下角，右/下各留 16px）：
    *   · 只有倍速（挑战塔 / 无尽塔 <20 层）→ 单键 190x70；
-   *   · 只有跳过（普通战斗的跳过播放）→ 同样 190x70；
-   *   · 倍速 + 跳过（无尽塔 20 层起）→ **两个 190x70 在右下并排**（中间留 8px 缝），
-   *     整块正好贴住右下角（右边缘 1170−16）。
+   *   · 只有跳过（历史上普通战斗只有跳过）→ 同样 190x70；
+   *   · 倍速 + 跳过（**普通战斗**、以及无尽塔 20 层起）→ **两个 190x70 在右下并排**
+   *     （中间留 8px 缝，**倍速键在跳过键左侧**），整块正好贴住右下角（右边缘 1170−16）。
    * 返回 { rects: { speed, skip }, both, base }，rect 为 null 表示这个键不显示。 */
   function cornerLayout(speedToggle, allowSkip) {
     const single = { x: W - 16 - 190, y: H - 15 - 70, w: 190, h: 70 };   // = { 964, 605, 190, 70 }
@@ -174,10 +174,14 @@
     let last = performance.now(), shake = 0, combatStarted = false;
     /* 右下角操作区：绘制与点击区共用同一组矩形。
      * 原版字面坐标 (983,609) 的 164x60 框会把按钮压出血条，所以用 190x70。
-     * 2026-10：无尽塔 30 层起**同时**要倍速键与跳过键 —— 两个都在时把这块横切成两半
-     * （中间留 8px 缝），只有一个时仍占满整块，与旧版逐像素一致。 */
+     * 2026-10：**普通战斗**与「无尽塔 20 层起」都要**同时**有倍速键与跳过键 ——
+     * 两个都在时把这块横切成两半（倍速在左、跳过在右，中间留 8px 缝），
+     * 只有一个时仍占满整块，与旧版逐像素一致。 */
     const speedToggle = !!opts.speedToggle;
     const allowSkip = opts.allowSkip !== false;
+    /* 倍速上限：默认 3（挑战塔 / 无尽塔的 1×→2×→3×）；**普通战斗由 main.js 传 2**，
+     * 于是倍速键在 1×↔2× 之间来回切，不给 3×（2026-10 用户口径）。 */
+    const speedMax = Math.max(1, Math.min(3, Math.floor(Number(opts.speedMax) || 3)));
     let speed = 1;
     const corner = cornerLayout(speedToggle, allowSkip);
     const cornerRects = corner.rects;
@@ -213,10 +217,10 @@
     }
     const controller = { cancel() { stopped = true; clean(); }, skip() { if (!ending && !skipped && !stopped) { skipped = true; if (pickups) pickups.skip(); for (const wake of [...sleepers]) wake(); } }, result };
     activeController = controller;
-    /** 右下角「倍速」键：1× → 2× → 3× → 1× 循环。 */
+    /** 右下角「倍速」键：在 1×…speedMax× 之间循环（普通战斗 = 1×↔2×；塔 = 1×→2×→3×）。 */
     function speedAction() {
       if (ending || stopped || !speedButton) return;
-      speed = speed === 1 ? 2 : speed === 2 ? 3 : 1;
+      speed = speed >= speedMax ? 1 : speed + 1;
       speedButton.textContent = speed + '×';
       speedButton.setAttribute('aria-label', '切换战斗速度（当前 ' + speed + '×）');
     }

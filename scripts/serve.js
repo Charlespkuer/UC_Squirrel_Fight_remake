@@ -69,7 +69,10 @@ async function handleSaveApi(req, res, url) {
   if (NO_SAVE) return json(res, 503, { ok: false, msg: '服务器以 --no-save 启动，存档文件同步已关闭' });
   if (req.method === 'GET') {
     const st = saveStat();
-    if (url.searchParams.get('meta')) return json(res, 200, { ok: true, exists: st.exists, savedAt: st.savedAt, size: st.size, level: readSaveLevel(), minLevel: readMinLevel() });
+    /* meta 里带上**自己的游戏目录**：启动器据此判断「端口上那个服务器还是不是这个文件夹的」——
+     * 文件夹被改名/移动之后，旧服务器仍然占着端口，但它的根目录已经失效（页面全 404）。 */
+    if (url.searchParams.get('meta')) return json(res, 200, { ok: true, root: ROOT, exists: st.exists,
+      savedAt: st.savedAt, size: st.size, level: readSaveLevel(), minLevel: readMinLevel() });
     if (!st.exists) return json(res, 200, { ok: true, exists: false, savedAt: 0, data: null });
     try { return json(res, 200, { ok: true, exists: true, savedAt: st.savedAt, data: fs.readFileSync(SAVE_FILE, 'utf8') }); }
     catch (e) { return json(res, 500, { ok: false, msg: '读取存档失败：' + e.message }); }

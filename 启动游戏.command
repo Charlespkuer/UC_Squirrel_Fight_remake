@@ -237,10 +237,54 @@ save_api_ok() {
   command -v curl >/dev/null 2>&1 || return 1
   curl -fs -m 2 -o /dev/null "${URL}__save?meta=1" >/dev/null 2>&1
 }
+# 端口上那个服务器供得出页面吗？（文件夹被改名/移动后，旧服务器根目录失效 → 页面全 404）
+page_ok() {
+  command -v curl >/dev/null 2>&1 || return 1
+  code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' "$URL" 2>/dev/null)"
+  [ "$code" = "200" ]
+}
+# 那个服务器是不是**这个文件夹**的？（新版 serve.js / serve.py 会在 /__save?meta=1 里回 root）
+srv_root() {
+  command -v curl >/dev/null 2>&1 || return 1
+  curl -fs -m 3 "${URL}__save?meta=1" 2>/dev/null | sed -n 's/.*"root"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+# 把端口上那个「已经失效的旧服务器」收掉（只杀确实是服务器的那一个 PID）
+kill_stale_server() {
+  command -v lsof >/dev/null 2>&1 || return 1
+  stale_pid="$(lsof -nP -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1)"
+  [ -n "$stale_pid" ] || return 1
+  kill "$stale_pid" 2>/dev/null || return 1
+  i=0
+  while [ "$i" -lt 20 ]; do
+    port_busy "$PORT" || return 0
+    sleep 0.25; i=$((i + 1))
+  done
+  kill -9 "$stale_pid" 2>/dev/null || true
+  sleep 0.5
+  return 0
+}
 
 # ---- 端口被占用时不要硬起服务器 ----
 # 以前这里会直接起服务器，端口被占就 EADDRINUSE 退出，而浏览器已经打开，
 # 于是玩家看到的页面来自那个旧服务器（可能没有 /__save）→「没有本地服务器接口」。
+if port_busy "$PORT"; then
+  # ⚠️ 文件夹被改名 / 移动之后，**旧服务器仍然占着端口**，但它的根目录已经失效
+  #（serve.js 启动时把绝对路径记死在 ROOT 里）—— 页面全 404，玩家看到的就是「打不开游戏」。
+  # 而它的 /__save?meta=1 还能回 200，于是以前这里会「直接用它」，问题就一直卡住。
+  # 现在先看它供不供得出页面、报的 root 是不是本目录：不是就把它收掉，继续往下起一个新的。
+  if ! page_ok; then
+    echo "端口 $PORT 上有个旧服务器供不出页面（多半是它启动时的文件夹被改名/移动了）——先收掉它，再起新的。"
+    kill_stale_server || true
+  else
+    other_root="$(srv_root)"
+    if [ -n "$other_root" ] && [ "$other_root" != "$ROOT" ]; then
+      echo "端口 $PORT 上的服务器属于另一个目录：$other_root"
+      echo "（本目录是 ${ROOT}）——先收掉它，再起新的。"
+      kill_stale_server || true
+    fi
+  fi
+fi
+
 if port_busy "$PORT"; then
   if save_api_ok; then
     echo "端口 $PORT 上已经有一个带存档接口的服务器在跑，直接用它（不再新起一个）。"

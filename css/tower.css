@@ -864,3 +864,8 @@
 .replace-pick.r1 { border-left: 7px solid #6f9ec4; }
 .replace-pick.r2 { border-left: 7px solid #a77bd0; }
 .replace-pick.r3 { border-left: 7px solid #e0a72e; }
+
+/* 里程碑奖励弹窗里的道具图：图集切图是 330px 的方图，这里没有容器尺寸约束，
+ * 会以原始像素插在文字前面（用户 2026-10 反馈的「随机奖励贴图没缩放」同一类问题）。
+ * 和 .reward-icon / .chip-icon 一个口径：给死尺寸 + contain。 */
+.milestone-reward img{width:64px;height:64px;object-fit:contain;vertical-align:-18px;margin-right:8px}

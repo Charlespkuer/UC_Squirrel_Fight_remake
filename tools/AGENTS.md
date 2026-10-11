@@ -11,6 +11,9 @@
    多塞几条"顺带断言"。
 2. **一次性脚本不许留在 tools/。** 临时的探测 / 测量 / 对比脚本写到 `out/`（已 gitignore），
    用完即删。只有「会长期反复使用」的才配留在本目录。
+   **跑图 / 截图产物同理**：渲染图、对比图、审计截图一律写 `out/`（例：战斗回归的渲染图落
+   `out/battle-check/`）。2026-10 曾从 `tools/verification/`（118 张）与 `tools/research/`
+   （32 张）清掉 60 MB 这类本地产物 —— 不要往 `tools/` 里再堆 PNG。
 3. **不新增 HTML 探针页**（`*-probe.html` / `*-check.html`）。需要交互式验证时先问用户。
 4. **一个改动最多加一条用例。** 优先放进主题相符**且体积小**的套件；主题只在大套件里时
    （战斗规则 → `test-combat-rules.cjs`）也只能加一条。**严禁**往 `test-fixes-round.cjs`
@@ -30,7 +33,7 @@
 
 | 类别 | 文件 |
 |---|---|
-| 构建 | `build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK） |
+| 构建 | `build-release.ps1`（**一键出包**：版本号 patch +1 → 清上一版旧包 → exe/安装包/APK → 清 `target\` 等 5~10 GB 缓存；`scripts\打包.cmd` / `scripts\清缓存.cmd` 是它的双击入口 —— 双击入口一律放 `scripts\`，根目录不放 `.cmd`，薄壳会自动挑 pwsh/powershell 并把参数原样转进来）、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK） |
 | 回归 | `test-*.cjs`（主题套件）、`test-battle.js`、`check-asset-paths.cjs`（资源引用检查） |
 | 数值 / 数据 | `gen-vendor-data.cjs`、`stage-balance.cjs`、`test-balance.cjs` |
 | 指南 | `publish-guide.md`、`tauri-guide.md` |

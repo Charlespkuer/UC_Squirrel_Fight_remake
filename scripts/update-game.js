@@ -64,9 +64,10 @@ function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return null; }
 }
 
-/** 本机版本：优先 version.json（发布包 / CI 写的），退回 git 短哈希，再退回「未知」。 */
+/** 本机版本：优先 `scripts/version.json`（仓库里与发布包里都在这一层，由 CI / 打包脚本写入），
+ *  退回 git 短哈希，再退回「未知」。 */
 function readVersion(root) {
-  const v = readJson(path.join(root, 'version.json'));
+  const v = readJson(path.join(root, 'scripts', 'version.json'));
   if (v && v.version) return { version: String(v.version), commit: String(v.commit || ''), date: String(v.date || '') };
   const g = git(root, ['rev-parse', '--short', 'HEAD']);
   if (g.ok) return { version: 'dev-' + g.out.trim(), commit: g.out.trim(), date: '' };

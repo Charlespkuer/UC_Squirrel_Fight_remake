@@ -1200,7 +1200,10 @@
     const hero = entry.kind === 'hero';
     const warlord = entry.kind === 'warlord';           // x10 第 5 场
     const powMul = hero ? TD.FOE_HERO_POWER_MUL : warlord ? TD.FOE_WARLORD_POWER_MUL : TD.FOE_TRIAL_POWER_MUL;
-    const heroHp = hpBase * TD.FOE_HP_MUL * TD.FOE_HERO_HP_MUL * M * KM * bias.hp;
+    /* 「金松果还在增长期」（挑战塔第 26 层之前）敌人血量 ×0.9：那几层收益低，难度也放低一档。
+     * 无尽塔不吃这条（towerEarlyHpMul 内部按 mode 分流）。 */
+    const earlyHp = TD.towerEarlyHpMul(layer, mode);
+    const heroHp = hpBase * TD.FOE_HP_MUL * TD.FOE_HERO_HP_MUL * M * KM * bias.hp * earlyHp;
     const hpRatio = hero ? 1 : warlord ? TD.WARLORD_HP_RATIO : TD.bossHpRatio(bias.hp, layer);
     const foe = {
       name, level: LT, npcType,
@@ -1765,15 +1768,18 @@
     } else {
       const g = globalMul(run);
       addScore(run, D().SCORE.battle, '战斗胜利');
-      let coinMul = 1 + (runModTotal(run, 'coinBoostPct') || 0) + fragileCoinBonus(run);
+      /* 试炼币的三个乘区**分开算**（界面提示要逐个写出来）：战利品（E05/E06/E07）/
+       * 淘金烙印（C53，含损毁档）/ 贪婪裂隙（环境，按实例摇出来的值）。 */
+      const coinBoostPct = Math.max(0, runModTotal(run, 'coinBoostPct') || 0);
+      const coinFragilePct = fragileCoinBonus(run);
+      let coinGreedPct = 0;
       /* 贪婪裂隙：我方试炼币按实例上摇出来的比例加成（被反弹/被剥夺时就不给）。
        * 以前这里写死 +50%，与实例数值无关。 */
       {
         const fx = envEffective(run);
-        if (fx.mine.includes('greed')) {
-          coinMul += Math.max(0, envModTotal(run, 'coinBonus', { mineOnly: true }));
-        }
+        if (fx.mine.includes('greed')) coinGreedPct = Math.max(0, envModTotal(run, 'coinBonus', { mineOnly: true }));
       }
+      const coinMul = 1 + coinBoostPct + coinFragilePct + coinGreedPct;
       /* ============================================================
        * 【2026-10 同名逐条】成长进度**同时**记进两处：
        *   · `row.grow` —— 这一栏自己的账本（卖出 / 交换时精确扣它那一份）；
@@ -1819,14 +1825,27 @@
         }
       });
       /* 「本场战斗赚了多少试炼币」——无尽塔主界面右上角要显示这个增量。
-       * 先记下战前余额，等这一场的所有进账（基础 + 精英）都算完再取差值。 */
+       * 先记下战前余额，等这一场的所有进账（基础 + 精英）都算完再取差值。
+       * 基础按**本场所在层**分段（1-5 → 5、6-10 → 6、11-15 → 7、16 起 → 8）；
+       * 精英从「固定 +N」改成**倍率**，与上面那些乘区相乘。 */
       const coinsBeforeBattle = Math.max(0, Number(run.coins) || 0);
-      run.coins += Math.round(D().COINS.battle * coinMul);
+      const coinBase = D().coinBattleBase(battleLayer);
+      const eliteMul = isElite ? Math.max(1, Number(D().COINS.eliteMul) || 3) : 1;
+      run.coins += Math.round(coinBase * coinMul * eliteMul);
+      /* 界面提示（试炼币那一格的悬停）要写「基础 x × 每个乘区」，所以把本场的账留一份在 run 上。 */
+      run.lastCoinBreak = {
+        base: coinBase, layer: battleLayer, band: D().coinBattleTierLabel(battleLayer),
+        elite: !!isElite, eliteMul,
+        boosts: [
+          { name: '战利品', pct: coinBoostPct },
+          { name: '淘金烙印', pct: coinFragilePct },
+          { name: '贪婪裂隙', pct: coinGreedPct },
+        ].filter((b) => b.pct > 0),
+      };
       const c11 = stacksOf(run, 'C11');
       if (c11) healAbs(run, 0.03 * c11 * g * healBonusMul(run), refMax);
       if (isElite) {
         addScore(run, D().SCORE.elite, '击败精英');
-        run.coins += D().COINS.elite;
         const c13 = stacksOf(run, 'C13');
         if (c13) {
           healAbs(run, D().BUFF_BY_ID.C13.mods.eliteHealAfter * g * healBonusMul(run), refMax);
@@ -3350,20 +3369,51 @@
    *  `e01Pct` = 本次「立即进货」带来的折扣（由调用方在扣限次前现算，见 activeShopCredit）。
    *  折扣比例由「哪几张折扣券在生效」决定：即时券走 run.shopDiscount/run.shopDiscountPct
    *  （E04 steam大促 −30% 等），E01 也是 −30%（2026-10 由 −50% 削弱）；两者同时生效
-   *  按用户口径合并成 −65%（3.5 折），不做简单相加。 */
+   *  按用户口径合并成 −65%（3.5 折），不做简单相加。
+   *
+   *  【2026-10 修复】以前只要 `stacks > 0` 就无条件取 `instantPct || 0.5`，并在扣完份数后
+   *  把 `run.shopDiscountPct` **清成 0**。可是「这一家店」未必是 E04 该服务的那一家：
+   *  休整商店（openRestShop）/ 立即开店都是独立入口，它们会**先**把 E04 的份数吃掉。
+   *  于是「立即进货（E01）＋ steam大促（E04）」实际只按 E01 的 −30% 结算（7 折），
+   *  用户报的「没有 3.5 折」就是这么来的（完整分析见 openRestShop）。
+   *  现在改成：
+   *    ① 合并判定把「这一份即时券的比例」也算进去（`pendingInstantPct`）；
+   *    ② 只有**没走合并分支**时才当场扣掉即时券的份数；
+   *       走了合并分支就把它留到收摊（closeShop 按店上的 `combinedCoupon` 清），
+   *       这样休整商店（openRestShop）先开、E01 的店后开也不会把 E04 白白吃掉。
+   *  另外 openRestShop 也必须把 activeShopCredit 传进来 —— 它和「打完这场再开的店」
+   *  是同一个折扣口径，只是入口不同。 */
   function makeShop(run, e01Pct) {
+    /* 兜底：上一家「合并折扣店」如果没走 closeShop 就被顶掉（极少数路径，例如同场又开了
+     * 铸币商店），这里补一次收尾，避免那段高于 −30% 的折扣漏给下一家店。 */
+    if (run.shop && run.shop.combinedCoupon === true && run.shop.mint !== true) {
+      run.shopDiscount = Math.max(0, Math.floor(Number(run.shopDiscount) || 0) - 1);
+      if (run.shopDiscount <= 0) run.shopDiscountPct = 0;
+    }
     const enterCoins = grantShopEnterCoins(run);
     const stacks = Math.max(0, Math.floor(Number(run.shopDiscount) || 0));
     const instantPct = Math.max(0, Number(run.shopDiscountPct) || 0);
     const own = Math.max(0, Number(e01Pct) || 0);
-    let discountPct = 0;
+    /* 这一份即时折扣券的比例：优先用它自身记着的 `shopDiscountPct`，
+     * 旧档 / 手改档没有这个字段时才退回「当前生效的那张券」或数据表的 −30%。 */
+    const pendingInstantPct = stacks > 0
+      ? Math.max(instantPct, own || instantPct || D().SHOP_DISCOUNT_E04)
+      : 0;
     /* 两张券同时生效 → 取「合并值」（0.65）与两张券里更强的那张中较大者。
      * 之所以要带上 max(instantPct, own)：将来若出现比 0.65 更强的单张券，也不该被合并值压下去。 */
-    if (own > 0 && stacks > 0) discountPct = Math.max(D().SHOP_DISCOUNT_BOTH, instantPct, own);
+    const merged = own > 0 && stacks > 0;
+    let discountPct = 0;
+    if (merged) discountPct = Math.max(D().SHOP_DISCOUNT_BOTH, instantPct, own);
     else if (own > 0) discountPct = own;
-    else if (stacks > 0) discountPct = instantPct || 0.5;
+    else if (stacks > 0) discountPct = pendingInstantPct;
     const discount = discountPct > 0;
-    if (stacks > 0) {
+    if (merged) {
+      /* 合并成立 → **不在这里吃掉 E04**：把它的份数与比例都留着，
+       * 收摊时由 closeShop 按 `thisShop.combinedCoupon` 统一清
+       *（否则这段高于 −30% 的折扣会漏给下一家店）。 */
+    } else if (own > 0) {
+      /* E01 单独生效：只吃 E01 自己的限次，不动即时券。 */
+    } else if (stacks > 0) {
       run.shopDiscount = stacks - 1;                  // 消耗 1 份即时折扣券
       if (run.shopDiscount <= 0) run.shopDiscountPct = 0;
     }
@@ -3372,6 +3422,9 @@
     const slots = rollShopSlots(run);
     const shop = { layer: run.layer, slots: slots, retrySold: false, rerollFree: true,
       discount, discountPct, rerollCount: 0, rerollPaid: 0,
+      /* 这是一家「合并折扣店」（E04 + E01 同时生效）→ 收摊时要把 E04 那一份券清掉，
+       * 见 closeShop。标记写在店上而不是靠比例反推，避免将来出现更强的单张券时误判。 */
+      combinedCoupon: merged || undefined,
       enterCoins: enterCoins || undefined };
     applyShopHalf(run, slots, shop);
     return shop;
@@ -3404,11 +3457,18 @@
       const n = divBy === 'enchanted'
         ? (run.permanent || []).filter((row) => rowFreeOf(row)).length
         : obtainedCountOf(run, b.id);
-      /* weightDivOffset = 0 时是「÷n」（0~1 份不降权，C49 的口径）；
-       * = 1 时是「÷(n+1)」—— 0 份 → ÷1（不降），1 份 → ÷2，2 份 → ÷3。
-       * C37 虚空铭文用后者：玩家第一次附魔就能感到它变稀有。 */
-      const div = n + Math.max(0, Number(b.mods.weightDivOffset) || 0);
-      if (div > 1) m /= div;
+      /* weightDecay（0 < v < 1）= **指数降权**：weight ×= v^n —— 与 repeatWeight 同一口径，
+       * 只是计数口径由 weightDivBy 决定（'enchanted' = 本局附魔数，'owned' = 已获得份数）。
+       * C37 虚空铭文用它（2026-10 用户口径「与终焉烙印类似，0.88^n，n 为附魔数」）：
+       * n=1 → 0.88、n=3 → 0.68，比原来的 ÷(n+1)（0.5 / 0.25）平缓得多。 */
+      const decay = Number(b.mods.weightDecay);
+      if (decay > 0 && decay < 1) m *= Math.pow(decay, n);
+      else {
+        /* 老口径（除法）：weightDivOffset = 0 时是「÷n」（0~1 份不降权，C49 早期的口径）；
+         * = 1 时是「÷(n+1)」—— 0 份 → ÷1（不降），1 份 → ÷2，2 份 → ÷3。 */
+        const div = n + Math.max(0, Number(b.mods.weightDivOffset) || 0);
+        if (div > 1) m /= div;
+      }
     }
     return m;
   }
@@ -3454,8 +3514,10 @@
   /* ============================================================
    * 传奇保底（B 方案，配置见 TowerData.LEGEND_PITY）
    *   · 每掷一格 +1；掷到传奇（自然或保底）清零；传奇池为空时不累加（避免空转）。
-   *   · 累计到 slots → 下一格**强制传奇档**，档内按 mods.pityWeight 挑（忽略 ÷n 等自惩罚），
-   *     所以「传奇全部拿完、只剩 C37/C49」时分布恒为 1/3 : 2/3。
+   *   · 累计到 slots → 下一格**强制传奇档**，档内按 mods.pityWeight × **个体降权** 挑。
+   *     2026-10 用户口径：以前这里**完全不吃** repeatWeight / weightDecay，于是「终焉烙印拿了
+   *     十几份」时保底仍按满权重把它发出来（玩家实测「第 10 次之后还是很高」的主因之一）。
+   *     现在与自然路径同口径：拿得越多，越不容易被保底抽中；pityWeight 仍决定「谁有资格进池」的相对偏好。
    * ============================================================ */
   function legendPityNeed() {
     const n = Math.floor(Number((D().LEGEND_PITY || {}).slots));
@@ -3467,19 +3529,24 @@
     if (!(candidates || []).some((b) => b.rarity === 3)) return false;
     return legendPityOf(run) >= legendPityNeed();
   }
-  /** 保底池里的加权抽取：只看 mods.pityWeight（缺省 1，0 = 不进池），不吃 shopWeight / ÷n。 */
+  /** 保底池里的加权抽取：mods.pityWeight（缺省 1，0 = 不进池）× **个体降权**
+   *（repeatWeight / weightDecay），但不吃静态 shopWeight —— 静态权重只管「自然抽取」那一侧。 */
   function pickByPityWeight(list, run) {
-    const pool = (list || []).filter((b) => pityWeightOf(b) > 0);
+    const pool = (list || []).filter((b) => pityWeightOf(b, run) > 0);
     if (!pool.length) return pickByShopWeight(list, run);      // 保底池空了就退回自然权重
     let total = 0;
-    for (const b of pool) total += pityWeightOf(b);
+    for (const b of pool) total += pityWeightOf(b, run);
     let roll = Math.random() * total;
-    for (const b of pool) { roll -= pityWeightOf(b); if (roll < 0) return b; }
+    for (const b of pool) { roll -= pityWeightOf(b, run); if (roll < 0) return b; }
     return pool[pool.length - 1];
   }
-  function pityWeightOf(b) {
+  /** 保底池里的个体权重：pityWeight（缺省 1、0 = 不进池）× 个体降权（repeatWeight / weightDecay）。
+   *  传 run 才吃降权；不传（旧调用点/探针）就只按 pityWeight，等价于 2026-10 之前的旧口径。 */
+  function pityWeightOf(b, run) {
     const v = Number(b && b.mods && b.mods.pityWeight);
-    return Number.isFinite(v) && v > 0 ? v : (b && b.mods && b.mods.pityWeight === 0 ? 0 : 1);
+    const base = Number.isFinite(v) && v > 0 ? v : (b && b.mods && b.mods.pityWeight === 0 ? 0 : 1);
+    if (base <= 0) return 0;
+    return run ? base * buffDynamicPenaltyOf(run, b) : base;
   }
   /** 记一笔：掷到传奇清零，否则 +1；传奇池为空时不累加。 */
   function notePityRoll(run, buff, hasLegendCandidate) {
@@ -3958,7 +4025,15 @@
     if (!run || !run.choices) return { ok: false, msg: '只有休整点（每层第 3 场后）能开休整商店。' };
     if (run.restShopUsed) return { ok: false, msg: '本层的休整商店已经用过了。' };
     run.restShopUsed = true;
-    run.shop = makeShop(run);
+    /* 【2026-10 修复】休整商店同样要把「当前开着的立即进货（E01）」的折扣算进去 ——
+     * 它与「打完这场再开的那家店」是**同一个折扣口径**，只是入口不同。
+     * 以前这里不传 e01Pct：于是手上同时有 E04 steam大促 与 E01 时，
+     * 休整商店会先按 E04 的 −30% 结算，**并且把 E04 的份数与比例一起清零**
+     *（makeShop 的 `stacks > 0` 分支）→ 之后 E01 真正开出来的那家店只剩 −30%（7 折），
+     * 用户在「立即进货 ＋ steam大促」下永远看不到 3.5 折。
+     * 传了 e01Pct 之后，这里就会走合并分支（−65%），并且 E04 的份数**不会被这里吃掉**，
+     * 收摊时由 closeShop 统一清。 */
+    run.shop = makeShop(run, activeShopCredit(run));
     run.shop.rest = true;
     run.phase = 'shop';
     save();
@@ -3968,6 +4043,14 @@
     /* 关店只结束「这家店的折扣」，不该把**还没用掉的份数**一起清掉
      * （那是玩家花钱买的，下一家店还要用）。 */
     { const r = endless().run; if (r && r.shop) r.shop.discount = false; }
+    /* 【2026-10 修复】E04 的份数在「合并店」里故意留到最后，这里收摊时必须清干净：
+     * 合并店已经按 −65% 结算过了，再留着就会把这段高折扣漏给下一家店。
+     * 判据用店上的 `combinedCoupon` 标记（别靠 discountPct 反推，将来可能出现更强的单张券）。 */
+    { const r = endless().run;
+      if (r && r.shop && r.shop.combinedCoupon === true) {
+        r.shopDiscount = Math.max(0, Math.floor(Number(r.shopDiscount) || 0) - 1);
+        if (r.shopDiscount <= 0) r.shopDiscountPct = 0;
+      } }
     const run = endless().run;
     if (!run || run.phase !== 'shop') return { ok: false };
     /* 去向按**这家店是怎么开的**决定，而不是按层数：
@@ -4484,8 +4567,13 @@
     return { best: e.best, weekBest: e.weekBest, bestLayer: e.bestLayer,
       tickets: S().props[TICKET_PROP] || 0,
       run: e.run ? { layer: e.run.layer, score: e.run.score, coins: e.run.coins, carry: e.run.carry,
-        /* 上一场战斗赚到的试炼币（主界面右上角标在「试炼币」旁边）。 */
+        /* 上一场战斗赚到的试炼币（主界面右上角标在「试炼币」旁边）+ 那一场的乘区明细。 */
         lastCoinsGained: Math.max(0, Math.floor(Number(e.run.lastCoinsGained) || 0)),
+        lastCoinBreak: e.run.lastCoinBreak ? Object.assign({}, e.run.lastCoinBreak,
+          { boosts: (e.run.lastCoinBreak.boosts || []).map((b) => Object.assign({}, b)) }) : null,
+        /* 下一场（本层）的战斗基础试炼币，界面提示要用。 */
+        coinBase: D().coinBattleBase(e.run.layer),
+        coinBand: D().coinBattleTierLabel(e.run.layer),
         battleNo: e.run.idx + 1, battleCount: e.run.plan.length, phase: e.run.phase,
       debuffs: (e.run.debuffs || []).slice(),
         choices: e.run.choices ? e.run.choices.slice() : null,

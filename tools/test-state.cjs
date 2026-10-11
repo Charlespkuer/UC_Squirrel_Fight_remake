@@ -232,18 +232,19 @@ test('每日任务计数：合成/融合装备、宝石、使用/购买/卖出�
   s.props[24] = 20; s.goldPoint = 1000;
   assert.equal(S.composeGear(24).ok, true);
   assert.equal(c('merge'), 1, '碎片合成装备要计入 merge');
-  // 装备回收价按品质分档：白 55-60 / 绿 60-65 / 蓝 65-70 / 紫 70-75 / 橙 75-80
+  // 装备回收价按品质分档：白 55-60 / 绿 60-65 / 蓝 65-70 / 紫 90-110 / 橙 180-220
   // （回归：gearQuality 曾被同名的「按 id 取品质」函数顶掉，紫装一路掉到 55-60）
+  const SELL_RANGE = [[55, 60], [60, 65], [65, 70], [90, 110], [180, 220]];
   for (let q = 0; q <= 4; q++) {
     const [lo, hi] = S.gearSellRange(q);
-    assert.equal(lo, 55 + q * 5, '第 ' + q + ' 档下限');
-    assert.equal(hi, 60 + q * 5, '第 ' + q + ' 档上限');
+    assert.equal(lo, SELL_RANGE[q][0], '第 ' + q + ' 档下限');
+    assert.equal(hi, SELL_RANGE[q][1], '第 ' + q + ' 档上限');
   }
   {
     const purple = S.addGear(202);            // 狂战拳甲：卓越（紫）
     const before = s.goldPoint;
     const paid = S.sellGear(purple.key);
-    assert.ok(paid >= 70 && paid <= 75, '紫装回收价应落在 70-75，实际 ' + paid);
+    assert.ok(paid >= 90 && paid <= 110, '紫装回收价应落在 90-110，实际 ' + paid);
     assert.equal(s.goldPoint, before + paid, '卖价真的入账');
   }
 
@@ -446,9 +447,9 @@ test('升级一次 40 松果；失败后成功率每次 +5%，封顶 100%，成�
   assert.equal(S2.upgradeFails('weapon', 15), 0, '成功即清零');
 });
 
-test('卖出装备按品质给价：白55-60 / 绿60-65 / 蓝65-70 / 紫70-75 / 橙75-80', () => {
+test('卖出装备按品质给价：白55-60 / 绿60-65 / 蓝65-70 / 紫90-110 / 橙180-220', () => {
   const g = game(), S = g.State;
-  const expect = [[55, 60], [60, 65], [65, 70], [70, 75], [75, 80]];
+  const expect = [[55, 60], [60, 65], [65, 70], [90, 110], [180, 220]];
   expect.forEach(([lo, hi], q) => {
     assert.deepEqual(Array.from(S.gearSellRange(q)), [lo, hi], '品质 ' + q + ' 区间');
     for (let i = 0; i < 60; i++) {
@@ -456,7 +457,7 @@ test('卖出装备按品质给价：白55-60 / 绿60-65 / 蓝65-70 / 紫70-75 / 
       assert.ok(v >= lo && v <= hi, '品质 ' + q + ' 出价 ' + v + ' 应落在 ' + lo + '~' + hi);
     }
   });
-  assert.deepEqual(Array.from(S.gearSellRange(9)), [75, 80], '越界品质夹到最高档');
+  assert.deepEqual(Array.from(S.gearSellRange(9)), [180, 220], '越界品质夹到最高档');
   assert.deepEqual(Array.from(S.gearSellRange(-3)), [55, 60], '负品质夹到最低档');
 });
 
@@ -661,7 +662,64 @@ test('装备穿戴等级、槽位互斥、融合材料和附加属性生效', ()
   const three = g.State.addGear(1), four = g.State.addGear(1);
   const result = g.State.mergeGears([one.key, three.key, four.key]);
   assert.equal(result.ok, true); assert.equal(result.gear.quality, 1);
-  assert.equal(s.goldPoint, 50);
+  assert.equal(s.goldPoint, 70);   // 白装融合 30 金松果（按材料品质分档）
+});
+
+test('需求146：套装收益 —— 同名 2/4 件两档、按最低品质缩放，且真的进战斗', () => {
+  const g = game(), s = g.State.state();
+  s.level = 30;
+  const wear = (id) => { const it = g.State.addGear(id); assert.equal(g.State.wear(it.key), true, id + ' 可穿戴'); return it; };
+  const ninja = () => g.State.setBonusList().find((x) => x.family === '忍者');
+  /* 忍者紫（setId 15：护额 57 / 拳套 58 / 服 59 / 鞋 60）——先穿 2 件，只拿到 2 件档 */
+  wear(58); wear(59);
+  assert.equal(ninja().count, 2); assert.equal(ninja().tier, 2);
+  same(ninja().text, ['闪避率 +3.9%']);        // 2 × 紫装系数 1.3 × 全局 1.5
+  assert.equal(g.State.totalStats().speed, s.speed);       // 2 件档还没给速度
+  /* 补满 4 件：4 件档**叠加**在 2 件档上（先穿鞋、再穿护额，中间取一次基准） */
+  wear(60);
+  const speedWithShoe = g.State.totalStats().speed;      // 忍者鞋自身那段，此时还只有 2 件档
+  wear(57);
+  assert.equal(ninja().tier, 4);
+  same(ninja().text, ['速度 +2', '闪避率 +9.8%']);   // 速度 1×1.3×1.5 取整；闪避 (2+3)×1.3×1.5
+  assert.equal(g.State.setBonusEffects().stats.speed, 2);
+  assert.equal(g.State.totalStats().speed, speedWithShoe + 2);   // 套装的速度加成进了属性合计
+  /* 换掉一件紫手套 → 蓝手套（同家族、不同品质）：整套按**最低**品质算，收益掉到蓝装档 */
+  const blue = g.State.addGear(30);
+  assert.equal(g.State.wear(blue.key), true);
+  assert.equal(ninja().count, 4); assert.equal(ninja().quality, 2);
+  same(ninja().text, ['速度 +2', '闪避率 +7.5%']);
+  /* 战斗侧：走独立通道 setFx（不是塔 buff 的 mods），固定随机流下 A/B 对比 */
+  const me = { name: '我', level: 30, power: 40, agility: 40, speed: 40, hp: 400, maxHp: 400, weapons: [], skills: [], effects: {} };
+  const foe = { name: '敌', level: 30, power: 30, agility: 30, speed: 30, hp: 300, maxHp: 300, weapons: [], skills: [], effects: {} };
+  assert.equal(g.State.applySetBonuses(me), me.setFx);
+  assert.equal(me.setFx.dodgeBonus, 7.5);
+  const reseed = () => { let seed = 999; g.math.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; }; };
+  reseed(); const plain = g.Sim.simulate({ ...me, setFx: null }, foe, {}).rounds.length;
+  reseed(); const buffed = g.Sim.simulate({ ...me, setFx: { dmgMul: 2 } }, foe, {}).rounds.length;
+  assert.ok(buffed < plain, '套装收益的伤害乘区要真的缩短战斗：' + plain + ' → ' + buffed);
+});
+
+test('需求148：「更换装备」页按「穿着中 > 星标 > 获得顺序」展示', () => {
+  const g = game(), s = g.State.state();
+  s.level = 30;
+  /* 按 a → b → c → d → e 的顺序入手（拳斗头巾/手套/服/鞋 + 忍者护额，部位互不冲突） */
+  const keys = [13, 14, 15, 16, 57].map((id) => g.State.addGear(id).key);
+  const [a, b, c, d, e] = keys;
+  const order = () => g.State.gearsInDisplayOrder().map((x) => x.key);
+  same(order(), keys);                                   // 什么都没做时就是获得顺序
+  g.State.wear(b);                                       // 穿着 → 最优先
+  g.State.toggleGearStar(d);                             // 星标 → 次优先
+  same(order(), [b, d, a, c, e]);
+  g.State.wear(c);                                       // 穿第二件（同部位互斥，b 保留）
+  same(order(), [b, c, d, a, e]);                        // 穿着组内仍是获得顺序（b 早于 c）
+  g.State.toggleGearStar(b);                             // 又穿又标 → 仍在第 1 档最前
+  same(order(), [b, c, d, a, e]);
+  g.State.unwear(b);                                     // 卸下后落到星标档（b 早于 d）
+  same(order(), [c, b, d, a, e]);
+  g.State.toggleGearStar(a);                             // 给 a 加星标 → 进星标档，同档内 a 最早入手
+  same(order(), [c, a, b, d, e]);
+  g.State.toggleGearStar(b);                             // 取消 b 的星标 → b 回到「获得顺序」档
+  same(order(), [c, a, d, b, e]);
 });
 
 test('1/5/10/15/20 级礼包：金松果回到旧版数量，种类更丰富且不重复发放', () => {

@@ -41,7 +41,10 @@ if (-not $root) {
   Write-Host '找不到游戏文件（应该有 scripts\index.html）：请把整个文件夹一起解压后再双击启动器。'
   exit 2
 }
-Set-Location -LiteralPath $root
+# 故意不 Set-Location 到游戏目录：服务器进程会继承工作目录，而一个进程只要把游戏目录
+# 当工作目录，Windows 就拒绝改名/移动该目录（MoveFileEx 报 ERROR_ACCESS_DENIED，
+# Explorer 显示成「文件夹正在被使用」）。serve.js 用 __dirname 定位游戏根，
+# 下面所有路径也都用 Join-Path $root/$here 拼成绝对路径，不依赖工作目录。
 
 Write-Host '松鼠大战怀旧复刻版'
 Write-Host "目录：$root"

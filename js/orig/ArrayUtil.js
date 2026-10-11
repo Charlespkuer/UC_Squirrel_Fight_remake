@@ -1,2 +1,0 @@
-(function(){var g=Array.prototype,h=g.slice,f={indexOf:"indexOf"in g?function(c,d,a){return c.indexOf(d,a)}:function(c,d,a){for(var b=c.length,a=a<0?Math.max(0,b+a):a||0;a<b;a++)if(c[a]===d)return a;return-1},merge:function(){var c=h.call(arguments),d=[],a,b;for(a=0,b=c.length;a<b;a++)d=d.concat(c[a]);return f.unique(d)},unique:function(c){for(var d=[],a=0,b=c.length,e;a<b;a++)e=c[a],f.indexOf(d,e)===-1&&d.push(e);return d},indexOfKey:function(c,d,a,b){for(var e=c.length,b=b<0?Math.max(0,e+b):b||
-0;b<e;b++)if(c[b][d]==a)return b;return-1}};window.ArrayUtil=f})();

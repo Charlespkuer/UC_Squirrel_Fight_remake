@@ -1,4 +1,8 @@
-# js/orig —— 原始客户端源码归档
+# references/orig —— 原始客户端源码归档
+
+> 2026-10：原版源码在仓库里**只保留这一份**。以前 `js/orig/` 下还有一份副本，
+> 两份各自会被误当成"运行时依赖"，已经删掉；游戏运行只认 `js/gamedict.js`（由
+> `tools/gen-vendor-data.cjs` 从本目录抽取生成），**任何运行时代码都不引用本目录**。
 
 这里是从原版安卓包 `h5ssdz_9game_4230.apk` 的 `assets/game.zip` 中**原样复制**的原始脚本，
 逐字节未改动。APK 位于 `E:\squirrel fight1\uc松鼠大战电脑版 PC版\`：

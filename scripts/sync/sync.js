@@ -178,6 +178,12 @@ const DEFAULT_IGNORE = [
   '.git/', '.cache/', 'build/',
   // 运行期噪音（.gitignore 里没有这几条，但同步更不该搬它们）
   '*.log', '*.tmp', '*.swp', '*~',
+  // 开发截图（headless-shot / test-battle 跑出来的证据图）：本机产物，两台机器之间来回搬
+  // 只会白占空间。仓库的 .gitignore 已经忽略了它们，但**这里也要留** ——
+  // 同步的「游戏目录」可能是任意解压出来的目录（未必带 .gitignore），
+  // 而且 tools/test-sync.cjs 明确断言了「这两类截图不进清单」（见该文件第 154 行）。
+  'tools/verification/*.png', 'tools/research/*.png', 'tools/research/*.jpg',
+  'tools/research/tmp-*.png', 'tools/research/battle-check/',
   // macOS 资源分叉（.gitignore 里只有 .DS_Store，挡不住 ._xxx）
   '._*',
 ];

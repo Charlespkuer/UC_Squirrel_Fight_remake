@@ -37,14 +37,18 @@ function findRoot(start) {
   return path.resolve(start, '..');
 }
 const ROOT = findRoot(__dirname);
-/* 原版文件优先从 references/orig 读；还没搬的话读 js/orig（迁移期两边都认）。 */
-const ORIG_DIRS = [path.join(ROOT, 'references', 'orig'), path.join(ROOT, 'js', 'orig')];
+/* 原版文件**只从 references/orig 读**。
+ * 2026-10：js/orig/ 那份副本已删除 —— 原版源码在仓库里只保留 references/orig 一份，
+ * 免得两份副本各自漂移（以前这里有个「优先 references/orig，回退 js/orig」的双目录，
+ * 就是为了兼容迁移期；现在迁移完成，回退一并去掉）。
+ *
+ * ⚠️ references/ 在 .gitignore 里（参考素材不进仓库），所以 CI 检出后可能没有这个目录。
+ * `--check` 在找不到时会**跳过**而不是报错（见文件末尾），这是刻意保留的行为。 */
+const ORIG_DIR = path.join(ROOT, 'references', 'orig');
 function origFile(name) {
-  for (const dir of ORIG_DIRS) {
-    const f = path.join(dir, name);
-    if (fs.existsSync(f)) return f;
-  }
-  throw new Error('找不到原版文件 ' + name + '（应在 references/orig/ 或 js/orig/）');
+  const f = path.join(ORIG_DIR, name);
+  if (fs.existsSync(f)) return f;
+  throw new Error('找不到原版文件 ' + name + '（应在 references/orig/ 下；该目录不进仓库，需要本地有原版归档）');
 }
 
 /** 要迁出的数据字典：全局名 → 一句说明（写进生成文件的注释里）。 */
@@ -257,8 +261,8 @@ function build() {
 const target = path.join(ROOT, 'js', 'gamedict.js');
 const next = build();
 if (process.argv.includes('--check')) {
-  // references/orig/ 不存在（精简发布包）时没得比，直接跳过
-  const hasOrig = ORIG_DIRS.some((d) => fs.existsSync(path.join(d, 'GameDict.js')));
+  // references/orig/ 不存在（精简发布包 / CI 检出）时没得比，直接跳过
+  const hasOrig = fs.existsSync(path.join(ORIG_DIR, 'GameDict.js'));
   if (!hasOrig) { console.log('· 跳过：找不到 references/orig/（精简包里没有原版文件，属正常）'); process.exit(0); }
   const cur = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
   if (cur === next) { console.log('✓ js/gamedict.js 是最新的（' + (next.length / 1048576).toFixed(2) + ' MB）'); process.exit(0); }

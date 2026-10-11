@@ -75,10 +75,10 @@
     let elapsed = 0, next = 0, active = null, closed = false, button = null, notice = null, noticeUntil = 0;
     const root = opts.root;
     function removeButton() { if (button) button.remove(); button = null; active = null; }
-    // 拾取卡图标：经验用经典掉落图，有独立道具图的走 icons/prop-N，其余用原版 draw 图集
+    // 拾取卡图标：经验用经典掉落图，有独立道具图的走 icons/prop/prop-N，其余用原版 draw 图集
     const ICON_PROPS = [24, 25, 26, 51];
-    const iconSrc = (id) => id === 15 ? 'new-reference/drop-exp-classic.png'
-      : ICON_PROPS.includes(id) ? 'icons/prop-' + id + '.png'
+    const iconSrc = (id) => id === 15 ? 'icons/drop-exp-classic.png'
+      : ICON_PROPS.includes(id) ? 'icons/prop/prop-' + id + '.png'
         : 'sprites/draw-' + id + '.png';
     function show(reward) {
       removeButton(); active = reward;
@@ -86,7 +86,7 @@
       button = document.createElement('button'); button.type = 'button';
       button.className = 'battle-pickup';
       button.setAttribute('aria-label', '拾取' + reward.name + ' ×' + reward.count);
-      button.innerHTML = '<span class="pickup-card'+(reward.id===15?' classic-exp':'')+'"><img alt="" src="images/classic/' + iconSrc(reward.id) + '"></span><span class="pickup-prompt">请点击</span>';
+      button.innerHTML = '<span class="pickup-card'+(reward.id===15?' classic-exp':'')+'"><img alt="" src="images/ui/' + iconSrc(reward.id) + '"></span><span class="pickup-prompt">请点击</span>';
       button.onclick = () => collect(reward.index);
       root.appendChild(button);
     }

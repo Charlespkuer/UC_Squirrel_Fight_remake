@@ -36,7 +36,12 @@
     const min = Number(el.min) || 0, max = Number(el.max);
     const v = Number(el.value) || 0;
     const pct = Number.isFinite(max) && max > min ? ((v - min) / (max - min)) * 100 : 100;
-    el.style.setProperty('--fill', Math.max(0, Math.min(100, pct)).toFixed(2) + '%');
+    const clamped = Math.max(0, Math.min(100, pct));
+    el.style.setProperty('--fill', clamped.toFixed(2) + '%');
+    /* 【2026-10 用户口径】填充区要按**滑块半径**内缩：滑条本身有体积（圆钮直径 36px），
+     * 0% 应当对齐到「轨道左端 + 半个圆钮」，100% 对齐到「轨道右端 − 半个圆钮」。
+     * 所以除了百分比，再写一个**无单位**的 0~1 值给 CSS 做 calc（见 .setting-slider 的轨道规则）。 */
+    el.style.setProperty('--fillN', (clamped / 100).toFixed(4));
   };
   /* 少数按钮在原版里是整张切图。art 开关只给**页面页脚**那一处用：
    * 弹窗里的按钮必须和「继续闯关」「稍后继续」这些手搓按钮同一套样式 ——
@@ -45,11 +50,17 @@
   /* 翻页箭头不用字体字形（Arial/Georgia 的 ‹ › 墨迹中心天生偏离圆心，且 Windows/macOS
    * 字体回退不同，padding 补偿在一台机器上量好、换台机器又歪）；改用 CSS 边框画的
    * 人字形（.chev），几何对称、跨平台一致。字形保留在视觉隐藏 span 里供读屏。 */
-  const btn = (label, action, cls, art) => '<button type="button" class="uc-button ' + (cls || '') + '" data-action="' + esc(action) + '">' + ((art && buttonArt[label]) ? '<span class="reference-button-label">'+esc(label)+'</span><img alt="" class="classic-button-art" src="images/classic/new-reference/buttons/'+buttonArt[label]+'.png">' : (label === '‹' || label === '›') ? '<span class="reference-button-label">' + label + '</span><i class="chev ' + (label === '‹' ? 'chev-l' : 'chev-r') + '" aria-hidden="true"></i>' : esc(label)) + '</button>';
+  const btn = (label, action, cls, art) => '<button type="button" class="uc-button ' + (cls || '') + '" data-action="' + esc(action) + '">' + ((art && buttonArt[label]) ? '<span class="reference-button-label">'+esc(label)+'</span><img alt="" class="classic-button-art" src="images/ui/buttons/'+buttonArt[label]+'.png">' : (label === '‹' || label === '›') ? '<span class="reference-button-label">' + label + '</span><i class="chev ' + (label === '‹' ? 'chev-l' : 'chev-r') + '" aria-hidden="true"></i>' : esc(label)) + '</button>';
   const spriteCache = Object.create(null);
   let screen = 'home', timer = 0, activePortrait = null, lastRefresh = 0;
   let catalogPage = 0, bagPage = 0, gearPage = 0;
   let selectedProp = 0;
+  /* 卖出后**自动退回上一界面**的道具（2026-10 用户口径）：天使果实(47) / 恶魔果实(48)，
+   * 以及力量/敏捷/速度转化丸（10/11/12，用户口径：和两种果实一样，卖一个就退出去）。
+   * 这几样在背包里通常是「清仓」动作；其余道具保持「点一下卖 1 个、弹窗不关、卖光为止」。 */
+  const SELL_LEAVE_IDS = [47, 48, 10, 11, 12];
+  /* 图集图标的一级子目录：images/ui/icons/<dir>/<kind>-<id>.png（与磁盘结构一一对应）。 */
+  const ICON_DIRS = { gear: 'gear', weapon: 'weapon', skill: 'skill', prop: 'prop' };
   const selectedItems = {weapon:0,skill:0};
   let opponents = [], selectedOpponent = null;
   let heroWears = [], wearSignature = '', wearRequest = '';
@@ -59,9 +70,9 @@
    * ============================================================ */
   const BUFF_PROPS = [[3, '力量+20%'], [4, '敏捷+20%'], [5, '速度+20%'], [7, '挑战经验+40%'], [41, '力量+40%'], [42, '敏捷+40%'], [43, '速度+40%'], [44, '挑战经验+60%']];
   let buffSignature = '';
-  const classicPortrait = new Image(); classicPortrait.src = 'images/classic/squirrel-classic.png';
-  const berserkerPortrait = new Image(); berserkerPortrait.src = 'images/classic/squirrel-berserker-classic.png';
-  const ninjaPortrait = new Image(); ninjaPortrait.src = 'images/classic/new-reference/squirrel-green-outfit.png';
+  const classicPortrait = new Image(); classicPortrait.src = 'images/ui/characters/squirrel-classic.png';
+  const berserkerPortrait = new Image(); berserkerPortrait.src = 'images/ui/characters/squirrel-berserker-classic.png';
+  const ninjaPortrait = new Image(); ninjaPortrait.src = 'images/ui/characters/squirrel-green-outfit.png';
 
   function bind(root, actions) {
     $$('[data-action]', root).forEach(b => b.onclick = () => {
@@ -70,7 +81,7 @@
     });
   }
   function frameUrl(sheet, label) {
-    return 'images/classic/sprites/' + sheet + '-' + label + '.png';
+    return 'images/ui/sprites/' + sheet + '-' + label + '.png';
   }
   function spr(sheet, label, cls) {
     const url = frameUrl(sheet, label);
@@ -98,7 +109,7 @@
   /* ============================================================
    * 【UC2】位图数字（原版数字贴图渲染）
    * ============================================================ */
-  const NUM_SHEET = 'images/num_28.png', NUM_W = 26, NUM_H = 23;
+  const NUM_SHEET = 'images/ui/numbers/num_28.png', NUM_W = 26, NUM_H = 23;
   const NUM_KEYS = '0123456789%×';
   const numImage = new Image(); numImage.src = NUM_SHEET;
   const numeral = (n) => String(n == null ? '' : n).replace(/[^0-9%×/.,:+-]/g, '');
@@ -179,10 +190,13 @@
    * 【UC3】图标与属性 HTML
    * ============================================================ */
   function atlasIcon(kind, id, locked, trueForm) {
-    // 真·武器用的是素材库里的另一套图：images/classic/icons/weapon-true-<id>.png
-    if (kind === 'weapon' && trueForm) return 'images/classic/icons/weapon-true-' + id + (locked ? '-locked' : '') + '.png';
-    if(kind==='weapon' && +id===1 && !locked)return 'images/classic/icons/weapon-1-classic.png';
-    return 'images/classic/icons/' + kind + '-' + id + (locked ? '-locked' : '') + '.png';
+    /* 图标按类型分了目录（images/ui/icons/<类型>/<类型>-<id>.png），而 kind 是运行时变量，
+     * 所以查 ICON_DIRS 表 —— 不能再拼死路径（漏改这里会让背包/融合的图标全裂）。 */
+    const dir = ICON_DIRS[kind] || 'misc';
+    // 真·武器用的是素材库里的另一套图：images/ui/icons/weapon/weapon-true-<id>.png
+    if (kind === 'weapon' && trueForm) return 'images/ui/icons/weapon/weapon-true-' + id + (locked ? '-locked' : '') + '.png';
+    if(kind==='weapon' && +id===1 && !locked)return 'images/ui/icons/weapon/weapon-1-classic.png';
+    return 'images/ui/icons/' + dir + '/' + kind + '-' + id + (locked ? '-locked' : '') + '.png';
   }
   /** 等级 11~15 = 真1~真5；显示成「真N」，10 级及以下显示 LVn。 */
   const levelLabel = (level, withPrefix) => {
@@ -191,7 +205,7 @@
     return withPrefix === false ? String(level) : 'LV' + level;
   };
   const isTrueGear = (item) => !!item && (window.GData && GData.trueLevel ? GData.trueLevel(item.level) > 0 : Number(item.level) > 10);
-  /* 真形态专属卡面（带「真」字红章的方卡）：images/classic/reference-cards/<kind>-<id>.png。
+  /* 真形态专属卡面（带「真」字红章的方卡）：images/ui/cards/true/<kind>-<id>.png。
    * 那个目录里其实混着**两套**图：灰色版（未解锁时显示，见下面 icon() 里的 grey 名单）
    * 与真·版（本名单）。真·版只覆盖一部分 id —— weapon 1/5/6/8、
    * skill 1/2/4/5/6/10/11/12/13/16/17/24（与素材目录逐一对过，改素材时要同步这张表）。
@@ -204,10 +218,10 @@
      * 点一下（selected=true）才变真形态。
      * 2026-10 用户反馈：真化武技在武器&技能界面不直接展示特殊贴图（技能此前根本没有）。 */
     if (trueForm && TRUE_CARD_IDS[kind] && TRUE_CARD_IDS[kind].includes(+id)) {
-      return '<img alt="" class="reference-art" src="images/classic/reference-cards/' + kind + '-' + id + '.png">';
+      return '<img alt="" class="reference-art" src="images/ui/cards/true/' + kind + '-' + id + '.png">';
     }
     if (kind === 'weapon' && trueForm) return '<img alt="" src="' + atlasIcon('weapon', id, locked, true) + '">';
-    /* 道具图标统一走图集切图（atlasIcon → images/classic/icons/prop-<id>.png）。
+    /* 道具图标统一走图集切图（atlasIcon → images/ui/icons/prop/prop-<id>.png）。
      * 以前是「未选中走参考截图 new-reference/props（带底板的截图卡片）、选中走图集切图」，
      * 同一件东西点一下就换成画风与尺寸都不同的另一张图（用户 2026-10 反馈「差异很大」）。
      * 现在两态同一张图：选中与否由格子的边框/高亮表达 ——
@@ -219,11 +233,11 @@
     };
     const state = locked ? 'locked' : 'learned';
     if (reference[kind]?.[state].includes(+id) && !selected || kind==='skill' && +id===16 && !locked && selected) {
-      return '<img alt="" class="reference-art" src="images/classic/new-reference/cards/'+kind+'-'+id+'-'+state+'.png">';
+      return '<img alt="" class="reference-art" src="images/ui/cards/state/'+kind+'-'+id+'-'+state+'.png">';
     }
     const grey={weapon:[2,3,4,7,9,10],skill:[3,7,8,9,14,15,18,23]};
     const fromReference=(locked && grey[kind]?.includes(+id)) || (!locked && kind==='skill' && [6,13].includes(+id));
-    return '<img alt="" '+(fromReference?'class="reference-art" ':'')+'src="'+(fromReference?'images/classic/reference-cards/'+kind+'-'+id+'.png':atlasIcon(kind,id,locked))+'">';
+    return '<img alt="" '+(fromReference?'class="reference-art" ':'')+'src="'+(fromReference?'images/ui/cards/true/'+kind+'-'+id+'.png':atlasIcon(kind,id,locked))+'">';
   }
   function statsHtml(stats, cls) {
     // 数字单独包一层 .stat-value：状态页的四项数字要能单独往上微调，不带着圆形字徽一起动
@@ -309,7 +323,7 @@
       system: [['system','系统'],['help','帮助'],['village','村庄'],['vip','超级松鼠']]
     };
     const labels=sets[group].map(([id,t])=>{
-      const art=group==='status'?'<span class="reference-button-label">'+t+'</span><img alt="" class="classic-button-art" src="images/classic/new-reference/buttons/'+({status:'status',weapons:'weapon',skills:'skill'}[id])+'-'+(id===active?'active':'normal')+'.png">':t;
+      const art=group==='status'?'<span class="reference-button-label">'+t+'</span><img alt="" class="classic-button-art" src="images/ui/buttons/'+({status:'status',weapons:'weapon',skills:'skill'}[id])+'-'+(id===active?'active':'normal')+'.png">':t;
       return '<button class="uc-tab '+(id===active?'active':'')+'" data-action="'+id+'" aria-current="'+(id===active?'page':'false')+'">'+art+'</button>';
     }).join('');
     return '<nav class="classic-tabs ' + (sets[group].length > 3 ? 'four' : group==='bag'?'bag-tabs':'') + '" aria-label="游戏分页">' + labels + (group === 'challenge' ? '<span class="tab-energy">体力 ' + State.state().energy + '/' + State.state().maxEnergy + '</span>' : group==='bag'?'<span class="bag-coins">'+spr('resource_1',18)+'<b>'+State.state().goldPoint+'</b></span>':'') + '</nav>';
@@ -452,7 +466,7 @@
   function renderHome() {
     screen = 'home'; activePortrait = null;
     const S = State.state();
-    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label" role="img" aria-label="经验" title="经验">' + spr('draw', 15, 'home-exp-art') + '</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/classic/home/activity.png">' + '</button><button class="picture-button" data-action="chat" aria-label="聊天">' + '<img alt="" src="images/classic/home/chat.png">' + '</button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/classic/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
+    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label" role="img" aria-label="经验" title="经验">' + spr('draw', 15, 'home-exp-art') + '</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/ui/home/activity.png">' + '</button><button class="picture-button" data-action="chat" aria-label="聊天">' + '<img alt="" src="images/ui/home/chat.png">' + '</button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/ui/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
     bind($('.classic-home'),actions);buffSignature='';
     refreshHome();
     renderNumbers();
@@ -731,7 +745,7 @@
         '</div>';
     }).join('') + '</div>';
   }
-  function npcImage(type){return '<img alt="'+esc(type.name)+'" src="images/classic/characters/'+NPC_FILE[type.anim]+'-classic-card.png">';}
+  function npcImage(type){return '<img alt="'+esc(type.name)+'" src="images/ui/characters/'+NPC_FILE[type.anim]+'-classic-card.png">';}
   function openStages() {
     const content='<div class="npc-select">'+GData.STAGE_TYPES.map((t,i)=> (i?'<span class="npc-arrow">➜</span>':'')+'<div class="npc-card">'+npcImage(t)+btn('挑战他','type'+i,stageTypeAvailable(i)?'gold small':'muted small')+'</div>').join('')+'</div><div class="npc-description">10级可挑战盖世五侠。依次通过六种难度，才能挑战下一位高手。每轮连续击败3名敌人，收集装备碎片！</div>'+towerEntryHtml();
     const p=page('challenge','stages',content,{cls:'stages-scroll-board'});
@@ -762,7 +776,7 @@
     const type=GData.STAGE_TYPES[t];
     if(!type)return;
     if(!stageTypeAvailable(t)){notice(State.stageAccess(t*6+1).msg);return;}
-    const content='<img class="difficulty-portrait" alt="'+type.name+'" src="images/classic/characters/'+NPC_FILE[type.anim]+'-classic-card.png"><h2 class="difficulty-title">请选择难度</h2><div class="difficulty-grid">'+[1,2,3,4,5,6].map(st=>{const id=t*6+st,passed=State.stageProgress(id).passed,run=State.stageRun(id);return '<div class="star-challenge"><div>★ '+st+(passed?'　✓':'')+'</div>'+btn(run?'继续挑战':'挑战他','star'+st,State.stageAccess(id).ok?'small':'small muted')+'</div>';}).join('')+'</div>';
+    const content='<img class="difficulty-portrait" alt="'+type.name+'" src="images/ui/characters/'+NPC_FILE[type.anim]+'-classic-card.png"><h2 class="difficulty-title">请选择难度</h2><div class="difficulty-grid">'+[1,2,3,4,5,6].map(st=>{const id=t*6+st,passed=State.stageProgress(id).passed,run=State.stageRun(id);return '<div class="star-challenge"><div>★ '+st+(passed?'　✓':'')+'</div>'+btn(run?'继续挑战':'挑战他','star'+st,State.stageAccess(id).ok?'small':'small muted')+'</div>';}).join('')+'</div>';
     const p=page('challenge','stages',content);
     $('[data-action="home"]',p).textContent='返回';$('[data-action="home"]',p).onclick=openStages;
     [1,2,3,4,5,6].forEach(st=>$('[data-action="star'+st+'"]',p).onclick=()=>stageConfirm(t*6+st));
@@ -778,7 +792,7 @@
     const dailyPct=Math.round((GData.challengeDailyMul(dailyCount)-1)*100);
     const dailyHint='<br><span class="small-label">今日已通关 '+dailyCount+' 次常驻挑战：敌人全属性（力/敏/速/血）+'+
       (dailyPct>0?('+'+dailyPct+'%'):'+0%')+'（每通关一整次再 +5%，每日 0/12 点重置）</span>';
-    const text='<div class="mission-guide"><img alt="向导" src="images/classic/characters/master-classic.png"><div>【消耗】：'+cost+'<br>【奖励】：每场经验 '+GData.stageNpcExp(stageId,1)+'/'+GData.stageNpcExp(stageId,2)+'/'+GData.stageNpcExp(stageId,3)+'<br>通关得金松果'+reward.gold+'，每场胜利有几率得碎片<br><span class="small-label">现有挑战书 '+(S.props[23]||0)+' 个</span></div></div><p class="mission-description">连续击败3名敌人，后两场战斗不回满血（继承剩余血量并回复25%）。<br>当前对手：'+esc(npc.name)+'（'+idx+'/3）<br>'+(run?'本轮已复活 '+run.revives+'/2 次。':type.recommend+'。')+dailyHint+'</p>';
+    const text='<div class="mission-guide"><img alt="向导" src="images/ui/characters/master-classic.png"><div>【消耗】：'+cost+'<br>【奖励】：每场经验 '+GData.stageNpcExp(stageId,1)+'/'+GData.stageNpcExp(stageId,2)+'/'+GData.stageNpcExp(stageId,3)+'<br>通关得金松果'+reward.gold+'，每场胜利有几率得碎片<br><span class="small-label">现有挑战书 '+(S.props[23]||0)+' 个</span></div></div><p class="mission-description">连续击败3名敌人，后两场战斗不回满血（继承剩余血量并回复25%）。<br>当前对手：'+esc(npc.name)+'（'+idx+'/3）<br>'+(run?'本轮已复活 '+run.revives+'/2 次。':type.recommend+'。')+dailyHint+'</p>';
     const buttons=exhausted?[{label:'结束本轮',run:()=>stageAbandon(stageId)}]:[{label:run?(run.needsRevive?'复活再战':'继续战斗'):'开始战斗',run:()=>stageFight(stageId)}];
     buttons.push({label:run?'稍后继续':'返回',cls:'muted'});
     modal('关卡挑战',text,buttons,{small:true});
@@ -1002,8 +1016,18 @@
    *  · 左下「返回」→ 回到背包（并把背包按最新数量重绘）
    *  · 右下「卖出」→ **卖 1 个**，弹窗不关、数字实时刷新，可以一直点；卖光后按钮禁用
    *  没有滑动条、不选数量、也不会自己退出。 */
+  /** 卖出：与「使用」同一套交互 —— 点「卖出」打开卖出弹窗
+   *（左下「返回」/ 右下「卖出」），在弹窗里点一下卖 1 个、弹窗不关，卖光为止。
+   *  **例外（2026-10 用户口径）**：天使果实（47）/ 恶魔果实（48）卖出一个就自动退回上一界面
+   *（= 关掉弹窗 + 回主菜单，与页面页脚那颗「返回菜单」同一条路），其它道具保持原样。 */
   function sellDialog(id,after) {
-    const S=State.state(),price=State.propSellPrice(id),held0=S.props[id]||0,def=propMap.getValue(id);
+    const S=State.state(),price=State.propSellPrice(id),def=propMap.getValue(id);
+    /* 持有量的唯一读数口：货币类（金杯 40）在货币字段 `S.goldCup` 上，其余在 `S.props` 上，
+     * 统一走 State.bagCountOf（旧版 State 没有它就退回 props）。
+     * ⚠️ 别写成裸的 `bagCountOf(...)` —— classic-ui 里没有这个全局，点「卖出」会在第一行
+     * 直接抛 ReferenceError，**所有道具都卖不掉**（2026-10：敏捷/速度转化丸卖不出去就是这个）。 */
+    const heldOf=(pid)=>State.bagCountOf?State.bagCountOf(pid):((State.state().props||{})[pid]||0);
+    const held0=heldOf(id);
     if(!price||held0<1){toast('背包里没有可卖的道具');return;}
     const name=def?def.name:'道具';
     const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div>'+
@@ -1016,6 +1040,9 @@
       {label:'卖出',cls:'gold',primary:true,close:false,run:()=>{
         const r=State.sellProp(id,1);
         toast(r.msg||'操作完成');
+        /* 天使果实 / 恶魔果实 / 力·敏·速转化丸：卖一个就退出去（这几样通常是「清仓」动作，
+         * 不必留在弹窗里连点）—— 走 SELL_LEAVE_IDS，行为与两种果实完全一致。 */
+        if(r.ok&&SELL_LEAVE_IDS.includes(id)){m.close();home();return;}
         sync();
         if(!r.ok)after&&after();
       }},
@@ -1024,7 +1051,7 @@
       .find((b)=>b.textContent.trim()==='卖出');
     /** 只更新弹窗里的实时数字与按钮状态（不重建弹窗，避免界面跳动）。 */
     function sync(){
-      const now=State.state(),held=now.props[id]||0;
+      const now=State.state(),held=heldOf(id);
       const set=(key,value)=>{const el=$('[data-live="'+key+'"]',m.element);if(el)el.textContent=value;};
       set('sell-held',held);set('sell-gold',now.goldPoint);
       /* 卖光之后只把按钮置灰即可（不再显示提示文案）。 */
@@ -1185,11 +1212,12 @@
    * 【UC12】装备：列表/详情/出售/镶嵌/融合入口
    * ============================================================ */
   function gearImg(g) {
-    return '<img alt="" src="images/classic/icons/gear-'+g.id+'.png">';
+    return '<img alt="" src="images/ui/icons/gear/gear-'+g.id+'.png">';
   }
-  /** 装备详情里的「套装收益」小节：两档阈值 + 当前进度 + 生效标记。
+  /** 装备详情里的「套装收益」小节：套装名 + 已穿件数 + 两档阈值，**逐档标出哪一条已经生效**。
    *  家族按**装备名去掉部位后缀**算（忍者护额/拳套/服/鞋 = 忍者一套），同名跨品质都算同一套；
-   *  数值按所穿该家族装备里**最低**的品质算（整套成色按最差的一件算）。 */
+   *  数值按所穿该家族装备里**最低**的品质算（整套成色按最差的一件算）。
+   *  用户口径 2026-10：装备页上那条常驻的「套装收益」介绍已删掉，**只剩这里**（点开具体装备才说）。 */
   function setBonusBlock(g){
     const info=State.setBonusForGear(g.id,g.quality);
     if(!info)return '';
@@ -1199,12 +1227,6 @@
     const hint=info.count<2?'<span class="small-label">再凑到 2 件同名'+esc(info.family)+'装备即可生效</span>':'';
     return '<br>'+head+hint+'<div class="set-bonus">'+rows+'</div>';
   }
-  /** 装备页顶部的一行「当前生效的套装收益」摘要（没有生效的套装时返回空串）。 */
-  function setBonusSummary(){
-    const list=State.setBonusList().filter(x=>x.active);
-    if(!list.length)return '';
-    return '<div class="gear-set-line">套装收益：'+list.map(x=>'<b>'+esc(x.family)+'</b> '+x.count+'/4（'+esc(x.text.join('、'))+'）').join('　')+'</div>';
-  }
   function openGears(pg) {
     gearPage=typeof pg==='number'?pg:0;
     openStatus();
@@ -1213,7 +1235,10 @@
     const gears=State.gearsInDisplayOrder(),total=Math.max(1,Math.ceil(gears.length/6));gearPage=Math.min(gearPage,total-1);
     const slots=['头部','手部','身体','脚部'];
     const content='<p class="gear-note">相同的附加属性效果不叠加，最高的1条生效！</p><div class="gear-layout"><div class="gear-slots">'+slots.map((name,i)=>{const g=gears.find(x=>x.used&&x.type===i);return '<button class="catalog-cell" '+(g?'data-gear="'+esc(g.key)+'"':'disabled')+'><span class="item-icon">'+(g?gearImg(g):'<span class="gear-empty">'+name+'</span>')+'</span></button>';}).join('')+'</div><div class="gear-list">'+gears.slice(gearPage*6,gearPage*6+6).map(g=>{const starred=State.isGearStarred(g);return '<button class="catalog-cell '+(g.used?'selected':'')+'" data-gear="'+esc(g.key)+'"><span class="item-icon">'+gearImg(g)+(g.used?'<span class="equipped-check">✓</span>':'')+'</span><span class="item-caption q'+g.quality+'">'+(starred?'<span class="gear-name-star" title="已加星标：不会被误融合或误出售">★</span>':'')+esc(g.name)+'</span></button>';}).join('')+(gears.length?'':'<div class="empty-state">还没有装备<br><span class="small-label">挑战关卡获得碎片<br>10个碎片可合成一件装备</span><br>'+btn('去闯关','stages','small gold')+'</div>')+'</div></div>'+(gearPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(gearPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':'');
-    const m=modal('我的装备',content+'<span class="gear-capacity">容量 '+gears.length+'/'+State.gearCapacity()+'　'+(gearPage+1)+'/'+total+'</span>'+setBonusSummary(),[{label:'返回',cls:'gold'}]);
+    /* 用户口径 2026-10：**去掉装备页上的「套装收益」介绍行** ——
+     * 那一段常驻文字既占地方又容易和实际穿着脱节；套装效果改成**点开具体装备**时才说明
+     *（见 setBonusBlock，那里会逐档标出哪些已经生效）。 */
+    const m=modal('我的装备',content+'<span class="gear-capacity">容量 '+gears.length+'/'+State.gearCapacity()+'　'+(gearPage+1)+'/'+total+'</span>',[{label:'返回',cls:'gold'}]);
     const p=m.element;p.classList.add('gear-overlay');$('.classic-modal',p).classList.add('gear-modal');
     const list=$('.gear-list',p),n=gears.slice(gearPage*6,gearPage*6+6).length;
     if(n)list.insertAdjacentHTML('beforeend',Array.from({length:6-n},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join(''));
@@ -1447,7 +1472,7 @@
         btn(tributeLabel, 'claim-tribute', 'small ' + (tribute.claimable ? 'gold' : 'muted')) + '</div>' +
         '<p>' + esc(tributeText) + '</p></div></div>';
     const rewardIcon = (r) => r.kind === 'gold' ? spr('resource_1', 18)
-      : r.kind === 'exp' ? '<img alt="" src="images/classic/new-reference/drop-exp-classic.png">'
+      : r.kind === 'exp' ? '<img alt="" src="images/ui/icons/drop-exp-classic.png">'
         : icon('prop', r.id);
     const rows = quests.map((q) => {
       const pct = Math.round(100 * q.progress / q.need);

@@ -122,14 +122,41 @@ button,input,select{font:inherit}button{touch-action:manipulation}button:focus-v
    组内按钮改回静态定位，否则两个绝对定位的按钮会叠在一起。 */
 .message-card .message-actions{position:absolute;bottom:13px;right:26px;display:flex;gap:10px}
 .message-card .message-actions button{position:static;bottom:auto;right:auto}.social-note{font-size:24px;margin-top:14px;color:#9b835b}.settings-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:27px 30px;padding:18px 30px}
-/* 音量滑块：连续调节，拖到 0 等同静音 */
+/* 音量滑块：连续调节，拖到 0 等同静音。
+   2026-10 用户口径两轮：① **滑条加粗**（原来只给了 input 16px 高、又没关掉原生外观，
+   Chromium 会在渐变底上再画一条原生细轨道 —— 实际看到的就是那条细线）；
+   ② 再修三处观感：滑块圆钮偏下、滑条下方阴影过大、左侧填充漏出轨道。 */
 .setting-slider{display:flex;align-items:center;gap:16px;margin:6px 30px 0;padding:12px 22px;border-radius:26px;background:#ead0a1;border:3px solid #d9bd88}
 .setting-slider .slider-label{font-size:26px;color:#7a5528;font-weight:bold;white-space:nowrap}
-.setting-slider input[type="range"]{flex:1;height:16px;border-radius:10px;
+/* input 只负责尺寸与「关掉原生外观」，**不画任何东西**（否则填充会以未裁切的方角漏在圆角轨道外）。 */
+.setting-slider input[type="range"]{flex:1;height:30px;padding:0;margin:0;border:0;
+  appearance:none;-webkit-appearance:none;background:transparent;cursor:pointer}
+/* 「金色已选 / 浅色未选」两段都画在**轨道**上：圆角一起裁切，左侧填充因此与轨道严格对齐、
+   不会再从轨道上/下沿漏出来。
+   【2026-10 用户口径·第二次修正】填充的 0 点不是轨道左端，而是**左端 + 半个圆钮**：
+   滑条（圆钮）本身有体积，`--fillN`（0~1，由 js 写入）乘的是「轨道宽度 − 一个圆钮直径」，
+   再把起点右移一个圆钮半径 —— 这样 0% 正好贴在圆钮左缘、100% 正好贴在圆钮右缘，与圆钮中心对齐。 */
+.setting-slider{--thumb: 36px}
+.setting-slider input[type="range"]::-webkit-slider-runnable-track{height:30px;border:0;border-radius:15px;
   background-color:#f3e3bd;
   background-image:linear-gradient(90deg,#8a5a22,#e0a12f),linear-gradient(90deg,#f3e3bd,#f8eed2);
-  background-size:var(--fill,100%) 100%,100% 100%;background-repeat:no-repeat;background-position:left center,left center;
-  accent-color:#e0900f;cursor:pointer}
+  background-size:calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--fillN,1)) 100%,100% 100%;
+  background-repeat:no-repeat;background-position:left center,left center;
+  box-shadow:inset 0 0 0 3px #8a5a22,inset 0 2px 0 #fff3c4}
+/* 圆钮：36px 直径、margin-top 手动居中到 30px 轨道（-3px），并且**不再带外阴影**。 */
+.setting-slider input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
+  width:36px;height:36px;margin-top:-3px;border-radius:50%;border:3px solid #8a5a22;cursor:pointer;
+  background:radial-gradient(circle at 36% 30%,#fffbe0,#ffd24a 52%,#e08c10);
+  box-shadow:inset 0 2px 0 #fffef0}
+.setting-slider input[type="range"]::-moz-range-track{height:30px;border:0;border-radius:15px;
+  background-color:#f3e3bd;
+  background-image:linear-gradient(90deg,#8a5a22,#e0a12f),linear-gradient(90deg,#f3e3bd,#f8eed2);
+  background-size:calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--fillN,1)) 100%,100% 100%;
+  background-repeat:no-repeat;background-position:left center,left center;
+  box-shadow:inset 0 0 0 3px #8a5a22,inset 0 2px 0 #fff3c4}
+.setting-slider input[type="range"]::-moz-range-progress{background:transparent}
+.setting-slider input[type="range"]::-moz-range-thumb{width:30px;height:30px;border-radius:50%;border:3px solid #8a5a22;cursor:pointer;
+  background:radial-gradient(circle at 36% 30%,#fffbe0,#ffd24a 52%,#e08c10)}
 .setting-slider .slider-value{min-width:76px;text-align:right;font-size:25px;color:#8a6528;font-weight:bold}.settings-grid .uc-button{font-size:32px;min-height:87px}.system-caption{margin-top:23px;text-align:center;line-height:1.6;font-size:24px;color:#957343}
 /* 道具详情里的「使用数量 / 合成次数」滑动条（第 7 项重做）：
    轨道做成又粗又短的卡通金条（固定 340px，不再拉满整行），滑块是大金圆钮，

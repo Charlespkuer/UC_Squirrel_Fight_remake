@@ -276,8 +276,8 @@
     setStatus('加载背景…');
     // 主界面背景：用原版 main.jpg（868×512，比例与原设计空间一致）。
     // 加载失败时退回自绘村庄，保证离线也能显示。
-    mainBg = await Engine.loadImage('images/main.jpg');
-    if (!mainBg) mainBg = await Engine.loadImage('images/classic/village.svg');
+    mainBg = await Engine.loadImage('images/ui/screens/main.jpg');
+    if (!mainBg) mainBg = await Engine.loadImage('images/ui/screens/village.svg');
     mainBgSoft = !!mainBg && /main\.jpg$/i.test(mainBg.src || '');
     drawLoading(0.25, '正在加载角色素材…');
     setStatus('加载角色素材…');
@@ -584,7 +584,7 @@
       <div class="title-screen">
         <div class="title-logo">松鼠大战</div>
         <div class="title-sub">UC乐园 · 熟悉的松鼠回来了</div>
-        <img class="classic-portrait" src="images/classic/squirrel-classic.png" alt="经典松鼠">
+        <img class="classic-portrait" src="images/ui/characters/squirrel-classic.png" alt="经典松鼠">
         <div class="title-form"><input id="name-input" maxlength="12" aria-label="松鼠昵称" placeholder="给你的松鼠起个名字" value="小松鼠">
         <button id="start-btn" class="uc-button gold">开始游戏</button></div>
         <div class="title-tip">怀旧单机版 · 进度自动保存</div>

@@ -14,7 +14,7 @@
   const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const find = (root, selector) => root.querySelector(selector);
   const image = (src, alt, cls) => '<img class="' + (cls || '') + '" src="' + src + '" alt="' + esc(alt) + '">';
-  const sprite = (id) => image('images/classic/sprites/resource_6-' + id + '.png', '', 'extra-arena-picture');
+  const sprite = (id) => image('images/ui/sprites/resource_6-' + id + '.png', '', 'extra-arena-picture');
   const button = (label, action, cls) => C().btn(label, action, cls || 'small');
   const note = (text) => '<p class="extra-note">' + esc(text) + '</p>';
   function on(root, action, handler) {
@@ -193,7 +193,7 @@
         if (gem) State.save();
         const opponent = won ? run.finalist : run.consolation, title = won ? '\u664b\u7ea7\u51b3\u8d5b' : '\u4e89\u593a\u5b63\u519b';
         arena();   // \u534a\u51b3\u8d5b\u540e\u56de\u5230\u7ade\u6280\u573a\u9875\u505a\u80cc\u666f\uff08\u73a9\u5bb6\u521a\u4ece\u8fd9\u91cc\u62a5\u540d\uff09
-        C().modal(title, '<div class="extra-finalist">' + image('images/classic/squirrel-classic.png', '\u4e0b\u4e00\u573a\u5bf9\u624b') + '<div><h3>' + (won ? '\u534a\u51b3\u8d5b\u83b7\u80dc\uff01' : '\u8fd8\u6709\u5b63\u519b\u8d5b\uff0c\u7ee7\u7eed\u52a0\u6cb9\uff01') + '</h3><p>\u4e0b\u4e00\u573a\u5bf9\u624b\uff1a' + esc(opponent.name) + '<br>\u7b49\u7ea7 ' + opponent.level + '</p></div></div>' + (gem ? note('\u83b7\u5f97 ' + gem.name + ' \u00d71\uff01') : '') + note('\u7b2c\u4e8c\u6218\u65e0\u9700\u518d\u6d88\u8017\u4f53\u529b\uff0c\u5173\u95ed\u9875\u9762\u540e\u4ecd\u53ef\u7ee7\u7eed\u672c\u8f6e\u3002'), [{ label: won ? '\u5f00\u59cb\u51b3\u8d5b' : '\u5f00\u59cb\u5b63\u519b\u8d5b', run: () => fightArena(run) }, { label: '\u7a0d\u540e\u7ee7\u7eed', cls: 'muted', run: arena }]);
+        C().modal(title, '<div class="extra-finalist">' + image('images/ui/characters/squirrel-classic.png', '\u4e0b\u4e00\u573a\u5bf9\u624b') + '<div><h3>' + (won ? '\u534a\u51b3\u8d5b\u83b7\u80dc\uff01' : '\u8fd8\u6709\u5b63\u519b\u8d5b\uff0c\u7ee7\u7eed\u52a0\u6cb9\uff01') + '</h3><p>\u4e0b\u4e00\u573a\u5bf9\u624b\uff1a' + esc(opponent.name) + '<br>\u7b49\u7ea7 ' + opponent.level + '</p></div></div>' + (gem ? note('\u83b7\u5f97 ' + gem.name + ' \u00d71\uff01') : '') + note('\u7b2c\u4e8c\u6218\u65e0\u9700\u518d\u6d88\u8017\u4f53\u529b\uff0c\u5173\u95ed\u9875\u9762\u540e\u4ecd\u53ef\u7ee7\u7eed\u672c\u8f6e\u3002'), [{ label: won ? '\u5f00\u59cb\u51b3\u8d5b' : '\u5f00\u59cb\u5b63\u519b\u8d5b', run: () => fightArena(run) }, { label: '\u7a0d\u540e\u7ee7\u7eed', cls: 'muted', run: arena }]);
         return;
       }
       run.settled = true; arenaRun = null;
@@ -310,7 +310,7 @@
     const goods = []; rankgoodsMap.each((id, item) => goods.push(item));
     const total = Math.ceil(goods.length / 6); pg = Math.max(0, Math.min(pg || 0, total - 1));
     const selected = goods.slice(pg * 6, pg * 6 + 6);
-    const p = C().page('bag', 'shop', '<div class="extra-shop-balance">\u91d1\u676f ' + s.goldCup + '\u3000\u91d1\u677e\u679c ' + s.goldPoint + '\u3000\u79ef\u5206 ' + s.integral + '</div><div class="extra-shop-grid">' + selected.map(item => '<button class="extra-shop-item" data-goods="' + item.id + '">' + (item.type === '2' ? image('images/classic/icons/gear-' + item.goodsId + '.png', item.name) : C().icon('prop', +item.goodsId)) + '<b>' + esc(item.name) + '</b><span>' + item.cup + '\u91d1\u676f + ' + item.gold + '\u91d1\u677e\u679c</span><small>\u79ef\u5206\u9700 ' + item.integral + (Number(item.timesLimit) > 0 ? ' \u00b7 \u6bcf\u5468\u9650\u5151' + item.timesLimit + '\u6b21' + (s.rankPurchases[item.id] ? '\uff08\u672c\u5468\u5df2\u5151\uff09' : '') : '') + '</small></button>').join('') + '</div><div class="extra-pagination">' + button('\u4e0a\u4e00\u9875', 'rank-shop-prev', 'tiny muted') + '<span>' + (pg + 1) + '/' + total + '</span>' + button('\u4e0b\u4e00\u9875', 'rank-shop-next', 'tiny muted') + '</div>', { cls: 'extra-board extra-cup-shop' });
+    const p = C().page('bag', 'shop', '<div class="extra-shop-balance">\u91d1\u676f ' + s.goldCup + '\u3000\u91d1\u677e\u679c ' + s.goldPoint + '\u3000\u79ef\u5206 ' + s.integral + '</div><div class="extra-shop-grid">' + selected.map(item => '<button class="extra-shop-item" data-goods="' + item.id + '">' + (item.type === '2' ? image('images/ui/icons/gear/gear-' + item.goodsId + '.png', item.name) : C().icon('prop', +item.goodsId)) + '<b>' + esc(item.name) + '</b><span>' + item.cup + '\u91d1\u676f + ' + item.gold + '\u91d1\u677e\u679c</span><small>\u79ef\u5206\u9700 ' + item.integral + (Number(item.timesLimit) > 0 ? ' \u00b7 \u6bcf\u5468\u9650\u5151' + item.timesLimit + '\u6b21' + (s.rankPurchases[item.id] ? '\uff08\u672c\u5468\u5df2\u5151\uff09' : '') : '') + '</small></button>').join('') + '</div><div class="extra-pagination">' + button('\u4e0a\u4e00\u9875', 'rank-shop-prev', 'tiny muted') + '<span>' + (pg + 1) + '/' + total + '</span>' + button('\u4e0b\u4e00\u9875', 'rank-shop-next', 'tiny muted') + '</div>', { cls: 'extra-board extra-cup-shop' });
     back(p, rank, '\u8fd4\u56de\u5929\u68af\u8d5b');
     on(p, 'rank-shop-prev', () => rankShop(Math.max(0, pg - 1)));
     on(p, 'rank-shop-next', () => rankShop(Math.min(total - 1, pg + 1)));
@@ -594,7 +594,7 @@
     const card = (cls, art, label, value) => value > 0
       ? '<div class="reward-card ' + cls + '"><span class="reward-icon">' + art + '</span>' +
         '<span class="reward-text">' + label + ' +' + esc(value) + '</span></div>' : '';
-    const cards = card('green', '<img alt="" class="reward-icon-img" src="images/classic/new-reference/drop-exp-classic.png">', '经验', r.total) +
+    const cards = card('green', '<img alt="" class="reward-icon-img" src="images/ui/icons/drop-exp-classic.png">', '经验', r.total) +
       card('gift', C().icon('prop', 8), '金松果', r.gold);
     const detail = rows.length
       ? '<div class="tribute-rows">' + rows.map((x) =>
@@ -667,7 +667,7 @@
       '</div>';
 
     const p = C().page('system', 'village', '<div class="extra-master-layout">' +
-      image('images/classic/characters/master-classic.png', '\u5e08\u7236', 'extra-master-portrait') +
+      image('images/ui/characters/master-classic.png', '\u5e08\u7236', 'extra-master-portrait') +
       '<div class="extra-master-main">' +
       '<div class="master-tabs">' +
         '<button type="button" class="uc-tab' + (masterTab === 'master' ? ' active' : '') + '" data-mtab="master">\u6211\u7684\u5e08\u7236</button>' +
@@ -691,7 +691,7 @@
       const r = State.setMaster(cand);
       if (!r.ok) { alert(r.msg); return; }
       masterCandidates = [];
-      C().modal('\u62dc\u5e08\u6210\u529f', '<div class="extra-finalist">' + image('images/classic/characters/master-classic.png', '\u5e08\u7236') +
+      C().modal('\u62dc\u5e08\u6210\u529f', '<div class="extra-finalist">' + image('images/ui/characters/master-classic.png', '\u5e08\u7236') +
         '<div><h3>\u5e08\u7236\uff1a' + esc(cand.name) + '\uff08' + cand.level + '\u7ea7\uff09</h3>' +
         '<p>' + esc((r.learned && r.learned.msg) || '\u5df2\u5b66\u4f1a\u3010\u5e08\u7236\u9a7e\u5230\u3011') + '</p>' +
         '<p class="extra-master-tip">\u53d1\u52a8\u300c\u5e08\u7236\u9a7e\u5230\u300d\u53ef\u6062\u590d\u5e08\u7236\u7b49\u7ea7 \u00d74 \u7684\u751f\u547d\uff0c\u4e14\u4e0b\u4e00\u6b21\u653b\u51fb\u5fc5\u4e2d\u3002</p></div></div>',

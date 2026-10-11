@@ -8,11 +8,11 @@
 
 | 标题画面 | 主界面 |
 |---|---|
-| ![标题画面](images/screenshots/title.png) | ![主界面](images/screenshots/home.png) |
+| ![标题画面](images/_reference/screenshots/title.png) | ![主界面](images/_reference/screenshots/home.png) |
 
 | 战斗 | 无尽挑战塔 |
 |---|---|
-| ![战斗](images/screenshots/battle.png) | ![无尽挑战塔](images/screenshots/endless.png) |
+| ![战斗](images/_reference/screenshots/battle.png) | ![无尽挑战塔](images/_reference/screenshots/endless.png) |
 
 ## 安装与启动
 
@@ -129,11 +129,11 @@ node scripts/serve.js     # 起本地静态服务器（带存档接口）
 | `scripts/` | **运行入口与本地服务器**（双击启动、存档接口、一键出包都在这） | `index.html` 首页（服务器把它映射成 `/`）、`serve.js` / `serve.py` 静态服务器（带 `/__save` 存档接口与 `/__update` 一键更新接口）、`update-game.js`（一键拉取远端更新的执行体：git pull / GitHub 便携包 / 安装包，零依赖；本机版本读同目录的 `version.json`）、`version.json`（版本标识）、`打包.cmd` / `清缓存.cmd`（一键出包 / 一键回收磁盘，薄壳转给 `tools\build-release.ps1`）、`启动游戏.command`（macOS 双击入口）、`启动游戏.cmd` + `start-game.ps1`（Windows 兜底入口）、`停止游戏.command`、`一键同步.command` / `一键同步.cmd`、`重启同步服务.cmd`、`cleanup-old-layout.*`（一次性整理旧布局）、`sync/` 双机同步本体、`.gitattributes`（本目录的换行符规则：bash 脚本 LF、`.cmd` CRLF） |
 | `js/` | **全部游戏代码**（见下表逐文件说明） | 启动流程、存档、战斗、塔、界面、静态数据 |
 | `css/` | 样式，按模块分文件 | `style.css`（基础）、`classic*.css`（复古界面）、`tower.css`（塔）、`battle-drops.css`、`debug.css` |
-| `images/` | 图片素材 | 背景与场景、UI 图标、角色图集（`images/orig/` 原版图集）、`screenshots/`（README 用的截图） |
+| `images/` | 图片素材（**按用途分三层**） | `ui/`（界面：`icons/<类型>/`、`sprites/`、`numbers/`、`screens/`、`buttons/`、`cards/`、`characters/`、`home/`、`skins/`）、`battle/`（战斗：`bg/` 背景、`fx/` 特效、`outfit/` 穿在身上的六部位外观）、`atlas/`（原版整片图集，按 id 兜底加载）、`_reference/`（**只作对照、运行时不读，打包与上线都会剔除**：图集出处清单、新版官方界面截图裁切、未使用的旧图、README 截图） |
 | `audio/` | 音效与 BGM | 战斗音效、主界面 BGM |
 | `src-tauri/` | **桌面壳与安卓壳**（Rust + Tauri 2，同一个 crate 出 exe 和 apk） | `src/lib.rs`（全部逻辑，按 `cfg(mobile)` 分支）、`src/main.rs`（桌面入口，仅 8 行）、`Cargo.toml`、`tauri.conf.json`、`tauri.android.conf.json`（安卓构建时自动合并）、`icons/`、`app-icon.png`、`gen/android/`（`tauri android init` 生成的安卓工程，**不进仓库**）、`web/` 与 `dist/`（构建产物） |
-| `tools/` | **开发与验证工具**（不参与运行） | 14 个 `test-*.cjs` 主题套件（一条用例对应一条规则；新用例放进主题相符的套件，CI 会枚举整个目录全跑）+ `test-battle.js`（动画/图集）、`check-asset-paths.cjs`（资源路径体检）、`build-release.ps1`（**一键出包**：版本号 +1 → 清旧包 → exe/安装包/APK → 清 5~10 GB 缓存；根目录 `打包.cmd` / `清缓存.cmd` 是它的双击入口）、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK）、`stage-balance.cjs`（关卡数值，被回归调用）、`publish-guide.md` / `tauri-guide.md`（发布与桌面壳指南） |
-| `docs/` | 说明文档（**新增需用户同意**，见 `docs/AGENTS.md`） | [更新记录](docs/更新记录.md)（唯一变更日志，最新在上）、[真化武器与技能数值](docs/真化武器与技能数值.md)（平衡对照表）、[双语与本地化方案](docs/双语与本地化方案.md)（未落地方案） |
+| `tools/` | **开发与验证工具**（不参与运行） | 14 个 `test-*.cjs` 主题套件（一条用例对应一条规则；新用例放进主题相符的套件，CI 会枚举整个目录全跑）+ `test-battle.js`（动画/图集）、`check-asset-paths.cjs`（资源路径体检）、`build-release.ps1`（**一键出包**：版本号 +1 → 清旧包 → exe/安装包/APK → 清 5~10 GB 缓存；`scripts\打包.cmd` / `scripts\清缓存.cmd` 是它的双击入口）、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK）、`stage-balance.cjs`（关卡数值，被回归调用）、`publish-guide.md` / `tauri-guide.md`（发布与桌面壳指南） |
+| `docs/` | 说明文档（**新增需用户同意**，见 `docs/AGENTS.md`） | [更新记录](docs/更新记录.md)（唯一变更日志，最新在上；**原版对比与真化数值的结论也在里面**）、[双语与本地化方案](docs/双语与本地化方案.md)（未落地方案） |
 | `save/` | **运行时的存档目录**（不进仓库） | `progress.json` 正式存档、`backup/` 快照、`server.out.log` / `server.err.log` |
 | `references/` | 原版 APK 与参考素材（**纯参考**：本地保留、不进仓库） | 只作对照/取证；游戏与测试都不读它 |
 | `out/` | AI 超分与开发期对比图的**临时工作区**（本地，不进仓库） | 实验对比图与分析脚本；删掉不影响游戏 |

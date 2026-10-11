@@ -73,7 +73,7 @@ function setup() {
       modals.push(modal); return modal;
     },
     btn: (label, action) => '<button data-action="' + action + '">' + label + '</button>',
-    icon: (kind, id) => '<img src="images/classic/icons/' + kind + '-' + id + '.png">',
+    icon: (kind, id) => '<img src="images/ui/icons/' + kind + '/' + kind + '-' + id + '.png">',
     // 升级奖励面板：这里只做最小渲染，供断言检查文本内容
     upsHtml: (ups) => (ups && ups.length)
       ? '<div class="reward-stack">' + ups.map((u) => '<div class="reward-panel">升到 ' + u.level + ' 级' +

@@ -97,7 +97,7 @@ const FW_RULE_NAME = 'SSDZ Sync';        // Windows 入站放行规则的名字�
  *   · 未匹配任何模式 → 不忽略（与 git 一致）
  *   · 最后命中的模式先生效（negate 后命中即取消忽略）
  *
- * 注意 `**` 的语义：`images/classic/` 下那条 `.bak-upscale/` 忽略规则里的 `**`
+ * 注意 `**` 的语义：`images/` 下那条 `.bak-upscale/` 忽略规则里的 `**`
  * 后面紧跟斜杠时，要能匹配**零层或多层**中间目录，否则 .bak-upscale 会被漏掉。
  * ============================================================ */
 const GITIGNORE_PATH = path.join(ROOT, '.gitignore');

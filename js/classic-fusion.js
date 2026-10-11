@@ -14,7 +14,7 @@
   const costOf = (gear) => (gear ? State.gearCostOf(gear.quality) : 0);
   const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const art = (gear) => '<img alt="" src="images/classic/icons/gear-' + Number(gear.id) + '.png">';
+  const art = (gear) => '<img alt="" src="images/ui/icons/gear/gear-' + Number(gear.id) + '.png">';
 
   /* ============================================================
    * 【FS1】打开融合页与材料校验

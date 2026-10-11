@@ -46,7 +46,9 @@ function setup() {
   for (let i = 1; i <= 18; i++) S.stages[i] = { npcIndex: 3, passed: true };
   c.Tower._debugSetLayer(9);
   assert.ok(c.Tower.startEndlessRun().ok, '应该能开一局无尽塔');
-  c.Tower._debugSetEndlessLayer(20);
+  /* x0 层现在是「觐见魔王」三连战（近卫是狂战松鼠），敌人构成与旧口径不同 ——
+   * 这个套件验的是环境词缀的实战数值，改用 x9 层（普通三侠 + 首领，且不在巡逻层区间）。 */
+  c.Tower._debugSetEndlessLayer(19);
   return c;
 }
 
@@ -78,7 +80,10 @@ test('环境池已并入原段位机制，且“段位机制”这条链路不�
   // 旧接口还在（兼容），但实战里不再自动挂机制
   assert.equal(c.Tower._debugRun('endless').mechs.length, 0, 'run.mechs 应当恒为空');
   const { foe } = nextFoe(c);
-  assert.equal(foe.mech.length, 0, '敌人身上不该再有机制标签：' + JSON.stringify(foe.mech));
+  /* x0 层现在是「觐见魔王」三连战，第一位是狂战松鼠近卫 —— 它带的是**变体自己的**机制（berserk 等），
+      与「段位机制并入环境」这件事无关，所以这里只断言「不再出现旧段位机制」。 */
+    const OLD_MECHS = ['trialMirror', 'trialLifesteal', 'trialDry', 'trialThorns', 'trialShield'];
+    assert.equal(foe.mech.filter((m) => OLD_MECHS.indexOf(m) >= 0).length, 0, '敌人身上不该再有旧段位机制：' + JSON.stringify(foe.mech));
   // 无尽信息里暴露的 mechs 也应为空
   assert.equal(c.Tower.endlessInfo().run.mechs.length, 0, 'endlessInfo().run.mechs 也应为空');
 });
@@ -249,6 +254,66 @@ test('挑战塔的环境不承诺试炼币：贪婪裂隙在塔里改名「厚�
   assert.equal(e.values.coinBonus, undefined, '塔里生效的数值不含试炼币：' + JSON.stringify(e.values));
   assert.ok(e.values.enemyMaxHpMul > 0, '敌方生命上限那一档照常生效');
   assert.ok(!/试炼币/.test(e.text), '塔里的当前环境文案也不提试炼币：' + e.text);
+});
+
+test('100 层循环：层号 → 机制开关的映射每轮严格一致，只有敌人数值续着长', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower;
+  /* 0）用户口径（2026-10）：101-104 层没有环境；随机丢烙印要等到「原来的层数 +100」（132 层）。 */
+  for (const n of [101, 102, 103, 104]) assert.equal(TD.canHaveEnv(n), false, '第 ' + n + ' 层不该有环境');
+  assert.equal(TD.canHaveEnv(105), true, '第 105 层 = 第 2 轮第 5 层 → 照旧抽环境');
+  assert.equal(TD.envChance(105), TD.envChance(5), '105 层的触发概率必须等于 5 层（20%）');
+  assert.equal(TD.envChance(105), 0.2, '实测 ' + TD.envChance(105));
+  for (let n = 101; n <= 131; n++) assert.equal(TD.canBrandLoss(n), false, '第 ' + n + ' 层不该丢烙印');
+  assert.equal(TD.canBrandLoss(132), true, '第 132 层 = 第 2 轮第 32 层 → 开始丢烙印');
+  /* 1）逐层比对：第 N 层 与 第 N+100 层的**全部**按层机制完全一致（第 1~300 层）。 */
+  const cycleLayer = (n) => ((n - 1) % 100) + 1;
+  const modsAt = (n) => JSON.stringify({
+    env: TD.canHaveEnv(n),
+    envForced2: TD.canHaveEnv(n) && cycleLayer(n) >= TD.ENV_TWO_LAYER,
+    envChance: TD.envChance(n),
+    brandLoss: TD.canBrandLoss(n),
+    /* 「交一个增益」的门槛也是**轮内**层号（第 1 轮 20/30/…/100 → 第 2 轮 120/130/…/200）。 */
+    sacrifice: cycleLayer(n) >= 20 && n % 10 === 0 && TD.sacrificeAllowed(n),
+    shopSlots: TD.endlessShopSlots(n),
+    choiceCut: TD.choiceCut(n),
+    noShop: TD.layerNoShop(n),
+    patrol: TD.isPatrolLayer(n, 12345),
+    shopBoundary: n % 5 === 0,
+  });
+  for (let n = 1; n <= 100; n++) {
+    assert.equal(modsAt(n + 100), modsAt(n), '第 ' + n + ' 层与第 ' + (n + 100) + ' 层的机制开关必须完全一致');
+    assert.equal(modsAt(n + 200), modsAt(n), '第 ' + n + ' 层与第 ' + (n + 200) + ' 层同样要一致');
+  }
+  /* 2）真的抽：101~104 层抽不到、105 层起抽得到（与 1~4 / 5 层对照）。 */
+  const hits = (layer, tries) => { let n = 0; for (let i = 0; i < tries; i++) n += T.rollEnvOf(layer).length; return n; };
+  for (const n of [101, 102, 103, 104]) assert.equal(hits(n, 120), 0, '第 ' + n + ' 层不该抽到环境');
+  assert.ok(hits(105, 120) > 0, '第 105 层应当抽得到环境');
+  assert.ok(hits(150, 120) > 0, '第 150 层应当抽得到环境');
+  assert.equal(hits(4, 120), 0, '第 4 层不该抽到环境（第 1 轮口径不变）');
+  assert.ok(hits(5, 120) > 0, '第 5 层应当抽得到环境');
+  /* 3）真的丢烙印：进 132 层丢一条、101 / 131 层不丢（走真实 advanceLayer）。 */
+  const probeLoss = (n) => {
+    T._debugSetEndlessLayer(n - 1);
+    const r = T._debugRun('endless');
+    r.brokenMarks = [{ kind: 'stat', stat: 'power', pct: 0.05, alive: 0, burned: 0.05 }];
+    r.lostMarks = [];
+    T._debugAdvanceLayer();
+    return (T._debugRun('endless').lostMarks || []).length;
+  };
+  assert.equal(probeLoss(32), 1, '进第 32 层丢一条（第 1 轮口径不变）');
+  assert.equal(probeLoss(101), 0, '进第 101 层不该丢');
+  assert.equal(probeLoss(131), 0, '进第 131 层不该丢');
+  assert.equal(probeLoss(132), 1, '进第 132 层应当丢一条');
+  /* 4）唯一例外：敌人数值继续长（不重置）。 */
+  assert.ok(TD.endlessDepthMul(101) > TD.endlessDepthMul(100), '101 层敌人数值仍高于 100 层');
+  assert.ok(TD.endlessDepthMul(201) > TD.endlessDepthMul(200), '201 层同样');
+  /* 5）跨轮进层（200 → 201）时清掉残留环境，给新一轮干净起点。 */
+  T._debugSetEndlessLayer(200);
+  T._debugRun('endless').env = [{ id: 'thorns', left: 5, values: { thornsPct: 0.15 } }];
+  T._debugAdvanceLayer();
+  assert.equal(T._debugRun('endless').layer, 201);
+  assert.equal((T._debugRun('endless').env || []).length, 0, '跨轮时旧环境应当清掉');
 });
 
 (async () => {

@@ -166,6 +166,10 @@
 .foe-portrait img, .foe-portrait canvas { max-width: 100%; max-height: 76px; object-fit: contain; }
 .tower-plan li .tower-plan-no { position: absolute; left: 6px; top: 6px; flex: none; }
 .tower-plan li.elite { border-color: #e08573; background: rgba(255, 236, 230, .95); }
+/* 「巡逻」魔王（德拉莫斯）那一场：用户口径 2026-10 第七十八批 ——
+ * 去掉「替换第 N 场」黄标，改用**淡红色背景**标识它的特殊性（比上面精英台阶那层更实一档 + 红描边）。 */
+.tower-plan li.patrol { border-color: #d9615c; background: #ffdcd6; }
+.tower-plan li.patrol:hover { border-color: #c0392b; background: #ffd2cb; }
 .tower-plan li:focus { outline: none; box-shadow: 0 0 0 3px rgba(139, 82, 184, .35); }
 .tower-plan-no {
   flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%;
@@ -180,6 +184,8 @@
 /* 卡片整体可悬停：加一圈高亮提示「这里有机制可看」 */
 .tower-plan li:hover { border-color: #c9a468; background: #fffdf4; }
 .elite-tag { font-style: normal; font-size: 17px; color: #fff; background: #c05151; border-radius: 10px; padding: 2px 10px; }
+/* 「替换第 N 场」黄标（第六十三批）已在第七十八批按用户口径删掉 —— 魔王那一场改用自己的淡红底
+ *（见上面 `.tower-plan li.patrol`），不再用「它替换了谁」来说明自己。 */
 /* 悬停气泡：挂在 body 上的 fixed 层（js/tower-ui.js 定位），不会被滚动容器裁掉 */
 .tower-tip-float {
   position: fixed; z-index: 9999; display: none; max-width: 620px;
@@ -298,6 +304,27 @@
 .hex-card.heal{border-color:#7fd06a;background:linear-gradient(180deg,#2b4a2a,#172c17);
   box-shadow:0 10px 26px rgba(0,0,0,.5),inset 0 0 0 3px rgba(150,240,130,.22)}
 .hex-card.heal .hex-ribbon,.hex-card.heal .hex-emblem{background:#bdf3a8;color:#1e3d16;text-shadow:none}
+/* 传奇档徽记（用户口径 2026-10 第七十九批）：普通/稀有/史诗都是「色块 + 字形」（● / ◆ / ★），
+ * 传奇档原来只能落到 ● —— 和普通档撞脸，而且是一个光秃秃的黄圆。现在给它一个专属标志：
+ * **金色方框里嵌一颗钻石**。方框 = 这个 span 自己的边框；钻石 = ::before 里旋转 45° 的方块。
+ * 尺寸写死 px（与上面的 46px、以及 n6 的 38px 对齐）：em 会跟着本元素的 font-size 跑，不能用。 */
+.hex-card.r3 .hex-emblem{
+  position:relative;display:flex;align-items:center;justify-content:center;box-sizing:border-box;
+  width:46px;height:46px;border:3px solid #ffd76a;border-radius:7px;
+  background:linear-gradient(180deg,#6a4708,#2b1a00);
+  /* 藏掉 ● / ◆ 字形：**必须把 font-size 归零**，否则那个透明的字形在 flex 行里照样占宽度，
+   * 会把下面的钻石挤成 0 宽（实测 ::before 的 computed width = 0px，框里空空如也）。 */
+  font-size:0;color:transparent;text-shadow:none;
+  box-shadow:0 0 9px #d9a12a88,inset 0 0 7px #ffd76a44;
+}
+.hex-card.r3 .hex-emblem::before{
+  content:'';position:absolute;inset:0;margin:auto;width:19px;height:19px;transform:rotate(45deg);
+  background:linear-gradient(135deg,#fff6cf,#e8ae1c 55%,#a9740a);
+  box-shadow:0 0 6px #ffe9a8aa;
+}
+/* 6 选 1 时卡片整体收窄（上面 .hex-n6 把字号压到 38px），方框与钻石跟着收一档。 */
+.choice-dialog.hex-n6 .hex-card.r3 .hex-emblem{width:38px;height:38px;border-width:2px;border-radius:6px}
+.choice-dialog.hex-n6 .hex-card.r3 .hex-emblem::before{width:15px;height:15px}
 
 /* ---------- 无尽：试炼商店 ---------- */
 .tower-shop { padding: 2px; }
@@ -309,6 +336,16 @@
 }
 .shop-slot.r1 { border-color: #7fa6d8; background: #f6faff; }
 .shop-slot.r2 { border-color: #e0b25a; background: #fffaea; }
+/* 【2026-10 第七十七批】传奇档（r3）以前**没有自己的样式**，摆在货架上和普通档长得一样。
+ * 现在与背包栏里的传奇增益（`.buff-tag.r3`）**同色**：金色描边 + 金色渐变填充 + 内圈高光，
+ * 再给一点外发光，让它在五格里一眼就能认出来。 */
+.shop-slot.r3 {
+  border-color: #d9a12a; background: linear-gradient(#fff6c8, #ffe08a);
+  box-shadow: 0 0 0 2px #f6d98a inset, 0 0 12px #e8b93a55;
+}
+.shop-slot.r3 b { color: #7a4a18; }
+.shop-slot.r3 i { color: #8a6a1a; }
+.shop-slot.r3 em { color: #9a7a2a; }
 .shop-slot b { font-size: 23px; line-height: 1.2; color: #7a4a18; }
 .shop-slot i { font-style: normal; font-size: 17px; color: #9b7b51; }
 .shop-slot span { flex: 1; line-height: 1.45; }
@@ -324,6 +361,11 @@
 .shop-sell-row .slot-free-hint {
   padding: 1px 8px; border-radius: 999px; font-size: 17px; font-style: normal;
   color: #5a4a8a; background: #efeaff; border: 1px solid #cfc2f0;
+}
+/* 水晶铭文附魔（C60，效果 ×1.5）的行内标记：与上面那条同构，用红系配色区分。 */
+.shop-sell-row .crystal-hint {
+  padding: 1px 8px; border-radius: 999px; font-size: 17px; font-style: normal;
+  color: #8e2c22; background: #ffe9e4; border: 1px solid #f0c2b8;
 }
 .tower-shop h4 { margin: 12px 0 8px; font-size: 24px; color: #7a4a18; }
 
@@ -470,6 +512,20 @@
   border: 2px solid #c9a468; border-radius: 12px; background: #fff8e6; padding: 0 10px; color: #7a4a18; }
 .endless-score-box i { font-style: normal; font-size: 15px; color: #a98a5c; font-family: inherit; }
 .endless-score-box b { font-size: 24px; color: #a8641c; }
+/* 【2026-10 用户口径】「敌人成长 ×N」那个倍率框（.endless-scale-box）已从界面上去掉
+ * （局内主界面与无尽开局页都不放），样式一并删除，别再挂回去。 */
+/* 商店「每页几件」的分档说明（1-20 层 5 件 / 21-40 层 4 件 / 41-100 层 3 件，每 100 层重来一轮） */
+.shop-tier { margin: 2px 0 6px; font-size: 17px; color: #7a5a2e; cursor: help; }
+.shop-tier b { font-size: 20px; color: #a8641c; }
+/* 「放弃本局」弹窗里的结算清单：本层应得 + 铸币折现 = 到手（【T9b】previewSettleTickets） */
+ul.settle-calc { list-style: none; margin: 6px 0 2px; padding: 0; font-size: 19px; }
+ul.settle-calc li { display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  padding: 3px 2px; border-bottom: 1px dashed #d9c9a6; }
+ul.settle-calc li span { color: #7a5a2e; }
+ul.settle-calc li b { font-family: Georgia, 'Times New Roman', serif; color: #a8641c; white-space: nowrap; }
+ul.settle-calc li.total { border-bottom: 0; border-top: 2px solid #c9a468; margin-top: 2px; padding-top: 5px; }
+ul.settle-calc li.total span { color: #5c3a12; font-weight: bold; }
+ul.settle-calc li.total b { font-size: 22px; }
 /* 三个药丸槽：等腰三角（上 1 下 2），整体贴右上角 */
 /* 血量：贴标题、放大 */
 .endless-hp { margin: -2px 0 4px; }
@@ -745,6 +801,25 @@
 /* 本轮第 1 项：被「虚空铭文」附魔的永久增益 —— 不占槽，用青色描边区分 */
 .buff-tag.slot-free{border-color:#3f9d9d;box-shadow:0 0 0 2px #bdf0ee inset}
 .buff-tag.slot-free i{color:#1c6f6f}
+/* 【2026-10 第七十三批】铭文附魔的三种外框（用户口径）：
+ *   虚空铭文（不占位）→ 青色；水晶铭文（效果 ×1.5）→ 红色；两条同时 → 一半红一半蓝。
+ * ⚠ 【第七十四批修订】双色外框**不能**用「单个 ::before + z-index:-1 画在元素背后」那套写法：
+ *   父级一旦 `position:relative;z-index:0`，它自己就建了层叠上下文，
+ *   负 z-index 的伪元素是在**父级背景之上**绘制的（CSS 2.1 附录 E 的绘制顺序：
+ *   ① 层叠上下文的背景 → ② 负 z-index 子层 → ③ 内容），
+ *   于是整块标签被渐变**铺满**、文字浮在渐变上，根本不是一圈描边。
+ *   改成两个伪元素各画半圈：::before 左半红、::after 右半青，用 clip-path 各裁一半。
+ *   伪元素比标签大 3px（inset:-3px）正好盖住原来 3px 边框那一圈，圆角也照旧；
+ *   内圈那圈水晶色的高光（inset box-shadow）留在标签自己身上，与「只有水晶」那条一致。 */
+.buff-tag.ench-crystal{border-color:#c0392b;box-shadow:0 0 0 2px #ffdad3 inset}
+.buff-tag.ench-crystal i{color:#8e2c22}
+.buff-tag.ench-both{position:relative;border-color:transparent;box-shadow:0 0 0 2px #ffdad3 inset}
+.buff-tag.ench-both::before,
+.buff-tag.ench-both::after{content:'';position:absolute;inset:-3px;border-radius:16px;
+  border:3px solid;pointer-events:none}
+.buff-tag.ench-both::before{border-color:#c0392b;clip-path:inset(0 50% 0 0)}
+.buff-tag.ench-both::after{border-color:#3f9d9d;clip-path:inset(0 0 0 50%)}
+.buff-tag.ench-both i{color:#7a4a2a}
 
 /* 本轮第 1 项：永久增益替换弹窗的按钮 —— 名字换行、限宽，避免 5 个选项顶出屏幕 */
 /* 本轮第 2 项：商店里已经拥有的可叠加增益 —— 高光边框 + 提示 */
@@ -861,6 +936,8 @@
 .replace-pick .rp-name { grid-area: name; font-size: 22px; font-weight: 700; color: #7a4a18; }
 .replace-pick .rp-meta { grid-area: meta; font-size: 15px; color: #9a7b53; justify-self: end; }
 .replace-pick .rp-free { color: #2f6f8f; font-weight: 700; }
+/* 水晶铭文（C60）那一枚：与 rp-free 同款，红系 —— 替换/收缴列表上也要看得出这条被 ×1.5 过。 */
+.replace-pick .rp-crys { color: #a8352a; font-weight: 700; }
 .replace-pick .rp-desc { grid-area: desc; font-size: 16px; color: #8a6a3a; line-height: 1.35; }
 /* 稀有度用左侧色条区分，不再靠按钮底色堆叠 */
 .replace-pick.r0 { border-left: 7px solid #b9a06a; }
@@ -872,3 +949,49 @@
  * 会以原始像素插在文字前面（用户 2026-10 反馈的「随机奖励贴图没缩放」同一类问题）。
  * 和 .reward-icon / .chip-icon 一个口径：给死尺寸 + contain。 */
 .milestone-reward img{width:64px;height:64px;object-fit:contain;vertical-align:-18px;margin-right:8px}
+
+/* ============================================================
+ * 【U18】剧情展示模式（2026-10 用户口径）
+ * 整屏只留**标题 + 文字 + 右下角「继续」**（塔身照旧在左侧）：
+ *   · 文字**没有文本框**，直接浮在版面上，居中显示（区域＝塔身右侧到屏幕右侧）；
+ *   · 楷体、逐行逐字打出来，字号比初版小一号，行距收紧，长剧情尽量一屏放下、不翻页；
+ *   · 行内支持 **加粗** / *斜体* / {抖}抖动{/抖}（.tower-story-shake）；
+ *   · 不做「第 m/n 行」进度（用户口径：要沉浸感）。
+ * ============================================================ */
+.tower-story { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 4px; }
+.tower-story-text { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
+  justify-content: center; align-items: center; gap: 6px; padding: 4px 16px; text-align: center; }
+.tower-story-line { margin: 0; max-width: 100%; font-family: KaiTi, STKaiti, 'Kaiti SC', 'Kaiti TC', 楷体, 'BiauKai', 'Songti SC', serif;
+  font-size: 27px; line-height: 1.6; color: #40352a; letter-spacing: .05em;
+  text-shadow: 0 1px 0 #fffdf6, 0 0 12px #fffaf0; }
+.tower-story-line.done { color: #6c5f4c; }
+.tower-story-line b { font-weight: 700; color: #5c3a12; }
+.tower-story-line i { font-style: italic; color: #4f4232; }
+.tower-story-shake { display: inline-block; animation: towerStoryShake .16s infinite steps(2, end); }
+@keyframes towerStoryShake {
+  0% { transform: translate(0, 0); } 25% { transform: translate(-1.6px, 1px); }
+  50% { transform: translate(1.6px, -1px); } 75% { transform: translate(-1px, -1.6px); }
+  100% { transform: translate(1px, 1.6px); }
+}
+.tower-story-caret { display: inline-block; width: 3px; height: 26px; margin-left: 4px;
+  background: #8a6a3a; vertical-align: -4px; animation: towerStoryCaret .9s steps(1, end) infinite; }
+@keyframes towerStoryCaret { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+.tower-story-foot { display: flex; align-items: center; justify-content: flex-end; margin: 0 6px 2px 0; }
+.tower-story-foot .uc-button { min-height: 52px; font-size: 27px; padding: 4px 30px; }
+
+/* ============================================================
+ * 【U18】剧情 → 主界面的过渡（2026-10 用户口径：不要硬切）
+ * 剧情文字快速淡出（150ms，JS 里等这段时间再重画主界面），主界面淡入（190ms）。
+ * ============================================================ */
+.tower-story-leaving { animation: towerStoryOut .15s ease-in forwards; }
+@keyframes towerStoryOut { to { opacity: 0; transform: translateY(-8px); } }
+/* ⚠️ 动画只给**中间那一列**（文字 + 其它 UI）：塔身（.tower-visual）不参与，
+ * 否则整页一起淡入时左侧塔 UI 会闪一下（2026-10 用户反馈）。 */
+.tower-page.tower-fade-in .tower-main { animation: towerPageIn .19s ease-out both; }
+@keyframes towerPageIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* 【U18b】「剧情模式 / 挑战模式」开关：与「继续战斗」同一涂层，位置**固定挂在塔的正下方**
+ * （.tower-page 是 relative，所以这里绝对定位到左下角 = 塔身那一列下方；局内也不再挤进按钮行）。 */
+.tower-page > .endless-mode-toggle { position: absolute; left: 8px; bottom: 4px; }
+.tower-page > .endless-mode-toggle .uc-button { min-height: 44px; font-size: 21px; padding: 3px 18px; }
+

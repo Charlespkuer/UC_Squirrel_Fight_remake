@@ -149,11 +149,11 @@ test('需求5：x10 层只有最后一个敌人穿狂战套', () => {
   const c = setup();
   c.Tower._debugSetEndlessLayer(10);
   const run = c.Tower._debugRun('endless');
-  assert.equal(run.plan.length, 5, '第 10 层应当是 5 场');
-  assert.equal(run.plan[4].kind, 'warlord', '最后一场应当是狂战松鼠');
+  /* 第 10 层是**普通**的 x0 层（三侠 ×3 + 首领 + 守关，5 场）——
+   * 「觐见魔王」三连战只在**整百层**（100 / 200 / 300…）触发（用户口径）。 */
   const seen = [];
   const choiceBefore = [];      // 记录「第几场之前」给了场间多选一
-  /* 环境里的「幻影回响」会在战后按概率追加一场 —— 这条测试只数「本层计划内的 5 场」，
+  /* 环境里的「幻影回响」会在战后按概率追加一场 —— 这条测试只数「本层计划内的 3 场」（x0 层现在是觐见魔王三连战），
    * 所以直接关掉环境抽取（比每轮清 env 更可靠：reportBattle 里还会再摇一次）。 */
   run.noEnvRoll = true; run.env = [];
   for (let g = 0; g < 12; g++) {
@@ -200,9 +200,6 @@ test('需求5：x10 层只有最后一个敌人穿狂战套', () => {
   const lastHit = seen[4].wears.filter((id) => berserk.includes(id));
   assert.equal(lastHit.length, 4, '最后一场应当整套狂战：' + JSON.stringify(seen[4].wears));
   assert.equal(seen[4].elite, true, '最后一场应当带精英标记');
-  /* 本轮修 bug：5 场层（10n 层）原来**跳过了「第 4 场前」那一次多选一**
-   *（choiceAfter 被写成 len === 5 ? 4 : 3），玩家反馈「10n 层第四场前没有多选一」。
-   * 现在：所有层都在第 4 场前给一次，5 场层再在塔顶 boss 前多给一次。 */
   assert.deepEqual(choiceBefore, [4, 5],
     '第 10 层应当在第 4 场前与第 5 场前各给一次多选一，实测 ' + JSON.stringify(choiceBefore));
 });
@@ -614,7 +611,10 @@ test('需求9.0：无尽塔首页在「战后待选牌」状态下必须能渲�
    * → run.choices 一有值就 ReferenceError → 整屏渲染不出来，战斗结束回来卡在主界面、
    * 而且本局还没结束（再进无尽提示「本局尚未结束」）。 */
   const openEndless = bodyOf('function openEndless()');
-  const code = openEndless.replace(/\/\*[\s\S]*?\*\//g, ' ');      // 去掉注释再查
+  /* 去掉注释与**字符串字面量**再查：这条查的是「裸 mode 这个标识符」，
+   * 而 `'story-mode'`（剧情/挑战模式开关的 action 名）只是字符串内容，不算引用。 */
+  const code = openEndless.replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
   assert.ok(!/\bmode\b/.test(code),
     'openEndless() 里不该出现裸 mode（它没有这个参数）：' + (code.match(/.{0,40}\bmode\b.{0,40}/) || [''])[0]);
   assert.match(openEndless, /choiceCard\(c, i, 'endless'\)/, '无尽首页的选牌口径应当写死 endless');
@@ -1424,10 +1424,13 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
   /* 本轮新增的可叠层：C54「越战越勇」（2 层，每层每回合 +1.5%）、
    * C59「门庭若市」（3 层，每层每进一次商店 +100 试炼币）。 */
   /* 2026-10 用户口径：以战养战（C11）不能再叠加、登顶者（C12）削弱为 1/3（锁定 1 份）
-   * → 两条都去掉了 stackable，改用 oncePerRun + maxStacks 1。 */
+   * → 两条都去掉了 stackable，改用 oncePerRun + maxStacks 1。
+   * 2026-10 第七十七批：补给（N08）改成可叠层 —— 用户口径「获得后还能继续刷出、次数无限叠加」。 */
   assert.equal(STACKABLE.join(','),
-    'C03,C06,C07,C10,C14,C16,C17,C19,C21,C22,C23,C24,C26,C27,C28,C29,C50,C54,C59',
+    'C03,C06,C07,C10,C14,C16,C17,C19,C21,C22,C23,C24,C26,C27,C28,C29,C50,C54,C59,N08',
     '可叠层增益清单变了：' + STACKABLE.join(','));
+  /* 补给（N08）的「无限叠加」= 叠层上限无穷 → poolFilter 那条「叠满即出池」永远不命中，能一直刷出来。 */
+  assert.equal(TD.stackCap(TD.BUFF_BY_ID.N08), Infinity, '补给（N08）要没有叠层上限');
 
   /* 跑一小段真实流程，取某个累计字段（固定层数，排除推进噪声）。 */
   const measure = (id, stacks, wins, field, fixedLayer) => {
@@ -3290,28 +3293,42 @@ test('需求73：无尽主界面右上角显示「实际退出到手」的抽奖
   assert.equal(T.endlessInfo().run.ticketsIfSettle, TD.endlessTickets(26), '换层后应当跟着变');
   assert.ok(TD.endlessTickets(26) > TD.endlessTickets(6), '更深的层应当更多');
 
-  /* ② 本轮需求：标题下方那行「离场可得 +N 抽奖卷（…）」已经整块去掉 ——
-   * 界面与样式里都不该再有它（右上角那一枚仍然是「实际退出到手」的总数）。 */
+  /* ② 界面口径（2026-10 第八十四批用户口径更新）：
+   *    标题下方那行「离场可得 +N 抽奖卷」早已去掉；**右上角那枚抽奖卷也一并去掉** ——
+   *    局内只留 试炼币 + 铸币，抽奖卷的账挪到玩家真要结算时算（「放弃本局」弹窗）。
+   *    ⚠ 所以这里不再断言界面显示这个数；但**数据出口必须留着**，弹窗要用它。 */
   const ui = readSrc('js', 'tower-ui.js');
   assert.ok(ui.indexOf('endlessLeaveHtml') < 0, 'tower-ui 里不该再有 endlessLeaveHtml');
   assert.ok(ui.indexOf('endless-leave-line') < 0 && ui.indexOf('leave-chip') < 0, '不该再有离场结算那一行的结构');
   const css = readSrc('css', 'tower.css');
   assert.ok(!/\.endless-leave-line|\.leave-inner|\.leave-chip/.test(css), 'CSS 里不该再有离场结算那一行的样式');
-  /* 右上角那枚仍然按 ticketsOnExit 显示（不是仓库持有数） */
-  assert.ok(/run \? exitT : \(S\.props\[CURRENCY_PROP\.ticket\] \|\| 0\)/.test(ui), '右上角仍应显示退出总额');
-  assert.ok(/ticketsOnExit/.test(ui), '右上角仍要读 ticketsOnExit');
+  /* 右上角不再显示抽奖卷：老的「run ? exitT : S.props[...]」写法必须消失，且不得再读 ticketsOnExit
+   * / ticketsIfSettle（只看**代码**，注释里留着说明不算）。 */
+  const uiCode = ui.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  assert.ok(!/CURRENCY_PROP\s*\.\s*ticket/.test(uiCode), '右上角不该再用 CURRENCY_PROP.ticket 拼抽奖卷那一枚');
+  assert.ok(!/ticketsOnExit|ticketsIfSettle/.test(uiCode), '右上角不该再读 ticketsOnExit / ticketsIfSettle');
+  /* ⚠ 文件里有两个 `on(p, 'abandon'`（挑战塔一个、无尽塔一个）—— 要的是**后面那个**。 */
+  const abandonStart = uiCode.lastIndexOf("on(p, 'abandon'");
+  assert.ok(abandonStart >= 0, '应当还能找到「放弃本局」的入口');
+  const abandonBlock = uiCode.slice(abandonStart, abandonStart + 2400);
+  assert.ok(/previewSettleTickets/.test(abandonBlock),
+    '结算的账要挪到「放弃本局」弹窗里算（走 Tower.previewSettleTickets）：' + abandonBlock.slice(0, 200));
+  assert.ok(/结算到手/.test(abandonBlock), '弹窗里要把「结算到手」那一行写出来');
 
-  /* ③ 端到端：放弃本局实际到手的张数 == 右上角显示的那个数 */
+  /* ③ 端到端：放弃本局实际到手的张数 == previewSettleTickets() 算出来的总额 */
   openRun(6);
   T._debugRun('endless').coins = 24;           // 试炼币：不折现
   T._debugRun('endless').retryToken = 3;       // 铸币：1:1 折现
-  const expect = T.endlessInfo().run.ticketsOnExit;
-  assert.equal(expect, TD.endlessTickets(6) + 3, '退出总额应当 = 2 + 3 = 5（24 试炼币不算），实测 ' + expect);
+  const pv = T.previewSettleTickets();
+  assert.equal(pv.layer, 6, '预览要对准当前层');
+  assert.equal(pv.layerTickets, TD.endlessTickets(6), '本层应得 = endlessTickets(当前层)');
+  assert.equal(pv.mintConverted, 3, '3 枚铸币都在折现上限内');
+  assert.equal(pv.total, TD.endlessTickets(6) + 3, '总额应当 = 2 + 3 = 5（24 试炼币不算），实测 ' + pv.total);
   const beforeTickets = Number(S.state().props[50] || 0);
   const ab = T.abandon('endless');
   assert.equal(ab.ok, true, '应当能放弃本局');
-  assert.equal(Number(S.state().props[50] || 0) - beforeTickets, expect,
-    '放弃本局实际到手应当等于界面显示：' + expect + ' vs ' + (Number(S.state().props[50] || 0) - beforeTickets));
+  assert.equal(Number(S.state().props[50] || 0) - beforeTickets, pv.total,
+    '放弃本局实际到手应当等于预览的总额：' + pv.total + ' vs ' + (Number(S.state().props[50] || 0) - beforeTickets));
 });
 test('需求74：所有退出本局的方式收益完全一致（本层应得 + 铸币 1:1 折现；试炼币作废）', () => {
   const c = setup();
@@ -4237,8 +4254,11 @@ test('需求92：商店出售 / 交换列表按「获得先后倒序」排（最
   assert.equal(uses, 2, '试炼商店的出售列表与铸币商店的交换列表都要用它：' + uses);
   assert.ok(!/Tower\.ownedBuffs\('endless'\)\.filter\(\(b\) => b\.kind !== 'instant'\)/.test(uiSrc),
     '不该再有「拿原始顺序」的老写法');
-  assert.ok(/按<b>获得的先后<\/b>排列/.test(uiSrc) && /最新拿到的在最上/.test(uiSrc),
-    '出售区要写明「按获得先后排列、最新拿到的在最上」');
+  /* 【第八十一批 用户口径】那行排序说明文字**已按要求删掉**（排序行为不变，只是不再解释）。
+   * ⚠ 先剥注释：函数上方那段注释里就写着「最新拿到的在最上」，不剥会假红（这坑踩过不止一次）。 */
+  const uiBare = uiSrc.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/按<b>获得的先后<\/b>排列/.test(uiBare) && !/最新拿到的在最上/.test(uiBare),
+    '出售区不该再写排序说明（用户口径：去掉那段文字）');
   assert.ok(/slot-free-hint/.test(uiSrc), '附魔的那几条要有提示标记');
 });
 
@@ -4488,7 +4508,11 @@ test('需求96：动态稀有度权重——个体降权会按比例缩小整档
   const otherGain = (after[0] - before[0]) + (after[1] - before[1]) + (after[2] - before[2]);
   assert.ok(Math.abs(otherGain - (before[3] - after[3])) < 1e-9,
     '从传奇档省下来的概率应当**全部**按比例分给别的档（守恒）：' + otherGain + ' vs ' + (before[3] - after[3]));
-  for (const i of [0, 1, 2]) assert.ok(after[i] > before[i], TD.RARITY_NAME[i] + ' 档应当因为传奇缩水而略升');
+  /* 2026-10（第六十一批）：现在**每一档都有一张铭文**（普通碎裂 / 稀有延续 / 史诗水晶 / 传奇虚空），
+   * 附魔数一涨，四档的「档内平均倍率」都会往下走 —— 谁涨谁跌取决于该档里铭文占多大比重
+   *（实测 3 个附魔：普通 −0.044 / 稀有 +0.081 / 史诗 +0.044 / 传奇 −0.081），
+   * 所以这里只断言「传奇档确实被压小」+ 上面那条守恒，不再逐档断言谁上升。 */
+  assert.ok(after[3] < before[3], '传奇档必须被压小：' + (before[3] * 100).toFixed(3) + '% → ' + (after[3] * 100).toFixed(3) + '%');
   /* ③ 该档只剩 1 件可用时，个体权重也必须继续生效（旧版 list.length===1 直接返回，权重被忽略） */
   const only37 = TD.shopPool.filter((b) => b.id === 'C37');
   setEnch(0);
@@ -4911,7 +4935,8 @@ test('需求104：消费类增益「每栏各记一份」——多个挥金如�
 
   /* ⑤ 审计：没有再出现「速率/步长类多份不缩放」的漏网之鱼 */
   assert.equal(TD.BUFF_BY_ID.C36.mods.shopSpendTiers.join(','), '5,10,15', 'C36 分段 5/10/15 不变');
-  assert.equal(TD.BUFF_BY_ID.C58.mods.shopSpendLimited, 120, 'C58 步长 100 → 120（2026-10 第十四批削弱）');
+  /* 2026-10（第五十九批用户口径）：豪掷千金回调到 100 —— 每消费 100 试炼币给 1 个随机限次增益。 */
+  assert.equal(TD.BUFF_BY_ID.C58.mods.shopSpendLimited, 100, 'C58 步长 = 100');
 });
 
 test('需求105：纯开关类永久增益「有了就不再出现」（unique）——天象之眼 / 风影身法 / 先机预判 / 逢五强化 / 生命源泉', () => {
@@ -5012,7 +5037,9 @@ test('需求107：虚空铭文的降权真的生效（原来份数永远数到 0
   const extreme = mkRun({ permanent: TD.BUFFS.filter((b) => b.rarity === 3 && ['C37', 'C49', 'C14'].indexOf(b.id) < 0)
     .map((b) => ({ id: b.id, stacks: 1 })), fragileGot: { C49: 1 }, pickGot: { C37: 1 }, legendPity: 0 });
   const avail = TD.endlessPool.filter((b) => b.rarity === 3 && T.ownableOf(extreme, b) && T.poolFilterOf(extreme, b));
-  assert.equal(avail.map((b) => b.id).sort().join(','), 'C14,C37,C49,C53', '可用传奇：涅槃 + 虚空铭文 + 终焉烙印 + 淘金烙印');
+  /* 2026-10 第七十二批：淘金烙印（C53）改成**特殊烙印** —— maxStacks: 1，拾取一次即出池（与碎裂无关）；
+      这一局的极端场景里它已经在手，所以不再算「可用」。 */
+    assert.equal(avail.map((b) => b.id).sort().join(','), 'C14,C37,C49', '可用传奇：涅槃 + 虚空铭文 + 终焉烙印（淘金烙印已在手 → 出池）');
   const wC14 = T.buffWeightOf(extreme, TD.BUFF_BY_ID.C14);
   const wC37 = T.buffWeightOf(extreme, TD.BUFF_BY_ID.C37);
   const wC49 = T.buffWeightOf(extreme, TD.BUFF_BY_ID.C49);
@@ -5483,7 +5510,7 @@ test('需求131：狂战套只准出现在 10 的整数层（无尽第 4 场抽�
     T.startEndlessRun();
     const run = T._debugRun('endless');
     run.layer = layer;
-    run.plan[3] = { kind: 'warlord', id: 'warlord', _layer: layer, _salt: run.salt };
+    run.plan[run.plan.length - 1] = { kind: 'warlord', id: 'warlord', _layer: layer, _salt: run.salt };
     const pv = T.preview(layer, run.salt, true);
     assert.equal(pv[3].kind, 'warlord', layer + ' 层第 4 场应当是狂战松鼠');
     assert.notEqual(pv[3].gear, 'berserk',
@@ -5509,7 +5536,7 @@ test('需求131：狂战套只准出现在 10 的整数层（无尽第 4 场抽�
     assert.match(nx.info.name, /狂战松鼠/, layer + ' 层第 5 场必须是塔顶首领');
     assert.equal(berserkCount(nx.foe.wears), 4,
       layer + ' 层塔顶首领应当整套狂战：' + JSON.stringify((nx.foe.wears || []).map((w) => w.id)));
-    assert.equal(T.preview(layer, undefined, false)[4].gear, 'berserk', 'x10 层的预告仍是狂战套');
+    assert.equal(T.preview(layer, undefined, false, 'tower')[4].gear, 'berserk', 'x10 层的预告仍是狂战套（挑战塔口径）');
     const ss2 = S.state(); if (ss2.tower) ss2.tower.run = null;
   }
   /* ③ 真实抽卡：x10 层第 4 场永远不会抽到狂战（狂战套只属于塔顶那一场） */
@@ -5546,11 +5573,11 @@ test('需求132：每 5 层（非 x10）的最后一战改为精英 —— 原�
       const { run, nx } = openBattle(mode, layer, 3);
       const pv = T.preview(layer, mode === 'tower' ? undefined : run.salt, only);
       assert.equal(pv.length, 4, layer + ' 层应当是 4 场');
-      assert.equal(pv[3].elite, true, mode + ' ' + layer + ' 层最后一战应当是精英（原来与普通层没区别）');
-      assert.ok(pv[3].type, '精英仍然带类型标签');
+      assert.equal(pv[pv.length - 1].elite, true, mode + ' ' + layer + ' 层最后一战应当是精英（原来与普通层没区别）');
+      assert.ok(pv[pv.length - 1].type, '精英仍然带类型标签');
       assert.equal(nx.elite, true, mode + ' ' + layer + ' 层实战 elite 标记');
       assert.equal(nx.info.elite, true, '战报的 info.elite 也要一致');
-      assert.equal(pv[3].name, nx.info.name, '预告 = 实战：' + pv[3].name + ' vs ' + nx.info.name);
+      assert.equal(pv[pv.length - 1].name, nx.info.name, '预告 = 实战：' + pv[pv.length - 1].name + ' vs ' + nx.info.name);
     }
     /* ② 非 x5 层：最后一战照旧不是精英（唯一例外是无尽池里随机抽到的狂战松鼠 —— 它本来就是精英） */
     for (const layer of [4, 6, 14, 16, 24, 26, 29]) {
@@ -5560,14 +5587,25 @@ test('需求132：每 5 层（非 x10）的最后一战改为精英 —— 原�
         mode + ' ' + layer + ' 层（非 x5）的精英标记只能来自狂战松鼠：' + nx.entry.kind);
       assert.equal(nx.info.elite, nx.elite, '战报的 info.elite 也要一致');
     }
-    /* ③ x10 层：第 4 场不是精英、第 5 场塔顶才是（一层只留一个精英台阶） */
+    /* ③ x10 层：第 4 场不是精英、第 5 场塔顶才是（一层只留一个精英台阶）。
+     *   注：「觐见魔王」的三连战只在**整百层**（100 / 200…）触发，10/20 层是普通结构。 */
     for (const layer of [10, 20]) {
-      const pv = T.preview(layer, 'x5test', only);
+      const pv = T.preview(layer, 'x5test', only, mode);
       assert.equal(pv.length, 5, layer + ' 层应当是 5 场');
       assert.equal(pv[3].elite, false, layer + ' 层第 4 场不该是精英');
       assert.equal(pv[4].elite, true, layer + ' 层第 5 场（塔顶首领）必须是精英');
       assert.equal(openBattle(mode, layer, 3).nx.elite, false, layer + ' 层第 4 场实战不该是精英');
       assert.equal(openBattle(mode, layer, 4).nx.elite, true, layer + ' 层第 5 场实战必须是精英');
+    }
+    /* ④ 整百层（无尽塔）：三连战 觐见魔王 —— 两名近卫 + 魔王，三场都算精英位。 */
+    if (mode === 'endless') {
+      const pv100 = T.preview(100, 'x5test', true, 'endless');
+      assert.equal(pv100.length, 3, '100 层应当是 3 场（觐见魔王三连战）');
+      assert.equal(pv100[0].elite, true, '近卫 1 是精英位');
+      assert.equal(pv100[1].elite, true, '近卫 2 是精英位');
+      assert.equal(pv100[2].kind, 'patrol', '第三场是魔王');
+      assert.equal(pv100[2].elite, true, '魔王算精英 + 首领');
+      assert.equal(T.preview(10, 'x5test', true, 'endless').length, 5, '10 层仍是普通 5 场');
     }
   }
   /* ④ 精英奖励真的发：x5 层最后一战击败后至少拿到 SCORE.elite */
@@ -5602,7 +5640,7 @@ test('需求133：无尽专属调试 —— 快速爬塔「层数 +1 / -1」与�
   assert.equal(run.idx, 0, '层内序号归零');
   assert.equal(run.phase, null, '不在商店 / 结算阶段');
   assert.equal(run.choices, null, '不残留上一层的选牌');
-  assert.equal(run.plan.length, 5, '第 10 层（x10）应当是 5 场');
+  assert.equal(run.plan.length, 5, '第 10 层（x10）应当是 5 场 —— 觐见魔王只在整百层');
   /* 层数与预告对得上（重建 plan 用的是同一套 salt） */
   assert.equal(T.planInfo('endless').length, run.plan.length, '界面预告与实战 plan 同源');
 

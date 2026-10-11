@@ -155,7 +155,9 @@
     for (const side of wears) for (const wear of side) if (wear) load.add(wear.src);
     for (const layer of region.layers) { if (layer.id) load.add(layer.id); if (layer.fx) load.add(layer.fxSheet || layer.fx); }
     await Engine.loadSheets([...load]);
-    for (const layer of region.layers) if (layer.id && !Engine.has(layer.id)) await Engine.loadSheetFromUrl(layer.id, 'images/' + layer.id + '.png');
+    /* 场景层兜底：清单里没有的整片图集按 id 直接找 `images/atlas/<id>.png`
+     *（2026-10 images 重构后图集统一收在 images/atlas/，以前是 images/<id>.png）。 */
+    for (const layer of region.layers) if (layer.id && !Engine.has(layer.id)) await Engine.loadSheetFromUrl(layer.id, 'images/atlas/' + layer.id + '.png');
 
     const player = Engine.makePlayer(), scenePlayers = [];
     const fighters = sources.map((info, side) => ({ info, side, npc: info.npcType ? npcBase(info.npcType) : null, inst: null, dead: false, wears: wears[side] }));

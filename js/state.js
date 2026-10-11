@@ -2167,6 +2167,28 @@
     const row = (Array.isArray(S.earnHistory) ? S.earnHistory : []).find((d) => object(d) && d.date === date);
     return { exp: row ? Math.max(0, integer(row.exp, 0)) : 0, gold: row ? Math.max(0, integer(row.gold, 0)) : 0 };
   }
+  /** 【2026-10 用户口径】调试台「重置每日与体力计时」专用：把日供的**第二道门**也放开 ——
+   *  日供数额取自 `earnHistory` 的**昨天**那一条，昨天没有记录（新档 / 当天刚开始玩）时
+   *  总量恒为 0，`claimable` 永远是 false，于是「清掉今日已领标记」也白搭（界面仍报领不到）。
+   *  这里在「昨天那条不存在或全 0」时，把今天的收益复制一份当成昨天，让重置真的等价于
+   *  「回到新的一天、日供可以再领一次」。
+   *  · 今天也没有收益（`today.exp/gold` 都是 0）→ 什么都不做（没有东西可结算，不凭空造收益）；
+   *  · 昨天已经有非 0 记录 → 原样保留（不覆盖真实流水）；
+   *  · 只服务调试台，不入正式玩法流程（正式玩法由真实日期推进时自然产生流水）。 */
+  function ensureYesterdayEarnings() {
+    if (!S) return { seeded: false };
+    const y = yesterdayDate(), t = localDate();
+    const mine = earnOn(t);
+    if (!(mine.exp > 0 || mine.gold > 0)) return { seeded: false };
+    const prev = (Array.isArray(S.earnHistory) ? S.earnHistory : []).find((d) => object(d) && d.date === y);
+    const cur = prev ? { exp: Math.max(0, integer(prev.exp, 0)), gold: Math.max(0, integer(prev.gold, 0)) } : null;
+    if (cur && (cur.exp > 0 || cur.gold > 0)) return { seeded: false };
+    if (!Array.isArray(S.earnHistory)) S.earnHistory = [];
+    if (prev) { prev.exp = mine.exp; prev.gold = mine.gold; }
+    else S.earnHistory.push({ date: y, exp: mine.exp, gold: mine.gold });
+    S.earnHistory = S.earnHistory.slice(-EARN_DAYS);
+    return { seeded: true, date: y, exp: mine.exp, gold: mine.gold };
+  }
   /** 给玩家加金松果并计入当日收益流水；opts.count === false 表示这不是「赚到的」。 */
   function addGold(n, opts) {
     n = Math.round(Number(n) || 0);
@@ -3193,7 +3215,7 @@
     upgradeInfo, doUpgrade, upgradeFails, UPGRADE_COIN, UPGRADE_FAIL_BONUS,
     trueAttemptsToday, trueUpgradeCost, isTrueLevel, TRUE_SKILL_MAX_LEVEL, TRUE_UPGRADE_GOLD_PER_U,
     fruitOptions, applyFruitChoice,
-    trackEarn, earnOn, addGold,
+    trackEarn, earnOn, ensureYesterdayEarnings, addGold,
     apprenticeTributeTable,
     TRIBUTE_LEVEL_SUM_FULL,
     undoPoint, undoDepth, hasUpgradableWS,

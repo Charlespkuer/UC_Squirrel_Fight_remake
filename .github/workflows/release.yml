@@ -59,6 +59,9 @@ jobs:
             printf '{\n  "version": "%s",\n  "commit": "%s",\n  "date": "%s",\n  "note": "由 CI 写入（发布便携包时覆盖）"\n}\n' \
               "$TAG" "${GITHUB_SHA:0:7}" "$(date -u +%Y-%m-%d)" > "$out/scripts/version.json"
             chmod +x "$out/scripts/启动游戏.command" "$out/scripts/停止游戏.command" "$out/scripts/一键同步.command" "$out/scripts/serve.py" 2>/dev/null || true
+            # 参考素材不进便携包：images/_reference/ 只作对照（图集出处清单、新版界面截图裁切、
+            # 官方掉落图、未使用的旧图），运行时不读 —— 2026-10 images 重构时从包体里剔出去的。
+            rm -rf "$out/images/_reference"
             # Windows：.cmd 只是 ASCII 外壳（现在住在 scripts\ 里，和 start-game.ps1 同目录，
             # 双击 scripts\启动游戏.cmd 即可；根目录不再放 .cmd），真正的逻辑在 .ps1 里
             # （cmd.exe 读 .cmd 里的 UTF-8 中文会把中文注释当命令，导致服务器起不来），

@@ -309,7 +309,7 @@
 .achieve-summary span i{font-style:normal;font-weight:700;color:#a2731f}
 
 /* ============================================================
- * 主页 EXP 标签改用原版贴图（images/classic/sprites/draw-15.png，即「Exp」字样）
+ * 主页 EXP 标签改用原版贴图（images/ui/sprites/draw-15.png，即「Exp」字样）
  *
  * 原来是用 CSS 描边拼出来的文字「EXP」。原版贴图在本仓库里就有，
  * 换上之后字重/描边/配色与原版一致，也不会因系统字体差异跑版。
@@ -374,11 +374,9 @@
   border:2px solid #cbb98a;border-radius:10px;background:#fffdf5;color:#5c4326}
 
 /* ---------- 套装收益（数值表见 js/gamedata.js【GD6】） ----------
- * 装备页底部一行摘要 + 装备详情里的两档阈值。家族按装备名去掉部位后缀算，
- * 所以「忍者护额/拳套/服/鞋」都算同一套；同名跨品质也拼得起来。 */
-.gear-modal .gear-set-line{position:absolute;left:37px;bottom:80px;right:300px;
-  font-size:22px;line-height:1.35;color:#6d321d}
-.gear-set-line b{color:#9f7125}
+ * 装备页上那条常驻摘要（`.gear-set-line`）已按用户口径**删掉**（2026-10），
+ * 现在只在**装备详情**里说明：套装名 + 已穿件数 + 两档阈值（生效的标绿 ✓）。
+ * 家族按装备名去掉部位后缀算，所以「忍者护额/拳套/服/鞋」都算同一套；同名跨品质也拼得起来。 */
 .gear-detail .set-name{color:#a966b9}
 .set-bonus{display:flex;flex-direction:column;gap:2px;margin-top:4px}
 .set-bonus .set-tier{font-size:24px;color:#8f734e}

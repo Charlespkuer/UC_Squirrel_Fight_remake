@@ -105,6 +105,8 @@ test('卖出道具：默认回收字典价格的一半，无价/占位价的道�
   // 第 3 项：武器/技能卷轴单独定价 2 金松果一张
   assert.equal(S.propSellPrice(22), 2, '武器卷轴 2 金松果一张');
   assert.equal(S.propSellPrice(21), 2, '技能卷轴 2 金松果一张');
+  // 转化丸（10/11/12 力量/敏捷/速度）：字典价 240 → 半价 120，三颗都能卖
+  for (const id of [10, 11, 12]) assert.equal(S.propSellPrice(id), 120, id + ' 转化丸半价 120');
   // 字典里 price 为 0 或占位 1 的（碎片/礼包/天梯碎片/种子/超级药丸）不开放回收
   for (const id of [6, 9, 16, 24, 25, 26, 28, 32, 40, 41, 44, 45, 46, 49, 50, 51]) {
     assert.equal(S.propSellPrice(id), 0, id + ' 不该可卖');
@@ -128,6 +130,119 @@ test('卖出道具：默认回收字典价格的一半，无价/占位价的道�
   s.props[1] = 4; s.goldPoint = 0;
   const small = S.sellProp(1, 4);
   assert.equal(small.gold, 4); assert.equal(s.goldPoint, 4); assert.equal(s.props[1], undefined);
+});
+
+test('背包的卖出弹窗：三种转化丸都能真的卖掉，且卖完立刻退回上一级（同天使/恶魔果实）', () => {
+  const g = game(), S = g.State, s = S.state();
+  /* 把 classic-ui.js 里**真实的 sellDialog** 抠出来，用桩跑一遍。
+   * 2026-10 的 bug：函数里写的是裸的 `bagCountOf(id)`，而 classic-ui 里根本没有这个全局
+   * （真名是 State.bagCountOf），于是点「卖出」第一行就 ReferenceError ——
+   * **所有**道具都卖不掉（玩家看到的是敏捷/速度转化丸卖不出去）。
+   * 桩里**故意不提供** bagCountOf 这类全局，逼它自己通过 State 解析 —— 再写回裸标识符就会红。 */
+  const ui = fs.readFileSync(path.join(root, 'js/classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  const at = ui.indexOf('function sellDialog(');
+  assert.ok(at > 0, 'classic-ui.js 里应该有 sellDialog');
+  const fn = ui.slice(at, ui.indexOf('\n  }', at) + 4);
+  /* 「卖一个就退出去」的名单也从源码里读出来（它在 IIFE 里，没导出）——
+   * 这样断言的是**真实名单**：谁把转化丸从名单里去掉，下面回首页那条就会红。 */
+  const listMatch = ui.match(/const SELL_LEAVE_IDS\s*=\s*\[([^\]]*)\]/);
+  assert.ok(listMatch, 'classic-ui.js 里应该有 SELL_LEAVE_IDS');
+  const SELL_LEAVE_IDS = listMatch[1].split(',').map((x) => Number(x.trim())).filter((n) => Number.isFinite(n));
+  for (const id of [10, 11, 12, 47, 48]) {
+    assert.ok(SELL_LEAVE_IDS.includes(id), id + ' 应当在「卖一个就退出去」的名单里：' + JSON.stringify(SELL_LEAVE_IDS));
+  }
+  const opened = [], left = { closed: 0, home: 0 };
+  const ctx = {
+    State: S, propMap: g.propMap, SELL_LEAVE_IDS,
+    esc: (v) => String(v == null ? '' : v), icon: () => '', toast: () => {}, $: () => null,
+    home: () => { left.home++; },
+    modal: (title, content, buttons) => {
+      opened.push({ title, content, buttons });
+      return { element: { querySelector: () => null, querySelectorAll: () => [] }, close() { left.closed++; } };
+    },
+  };
+  vm.createContext(ctx);
+  const sellDialog = vm.runInContext(fn + '\nsellDialog;', ctx, { filename: 'sellDialog.js' });
+  /* 三种转化丸（120）与天使果实 47（100）走同一条路径：点「卖出」→ 扣 1 个 / 加钱 /
+   * 关掉卖出弹窗 / 退回上一级界面（home()，与两种果实完全一致）。 */
+  for (const [id, gold] of [[10, 120], [11, 120], [12, 120], [47, 100]]) {
+    s.props[id] = 2; s.goldPoint = 0; opened.length = 0; left.closed = 0; left.home = 0;
+    sellDialog(id, () => {});
+    assert.equal(opened.length, 1, id + ' 应当打开卖出弹窗');
+    assert.match(opened[0].title, /卖出道具/);
+    assert.match(opened[0].content, new RegExp('可回收 ' + gold), id + ' 弹窗里要写清回收价');
+    const btn = opened[0].buttons.find((b) => b.label === '卖出');
+    assert.ok(btn && btn.run, id + ' 弹窗里要有「卖出」按钮');
+    btn.run();
+    assert.equal(S.state().props[id], 1, id + ' 卖一个扣一个');
+    assert.equal(S.state().goldPoint, gold, id + ' 卖一个给 ' + gold + ' 金松果');
+    assert.equal(left.closed, 1, id + ' 卖完要关掉卖出弹窗');
+    assert.equal(left.home, 1, id + ' 卖完要立刻退回上一级界面（与天使/恶魔果实同一条路径）');
+  }
+});
+
+test('调试台「重置每日与体力计时」也重置徒弟日供（含「昨天必须有收益流水」那一道门）', () => {
+  const g = game();
+  /* 调试模块要一个够用的 DOM 壳（它初始化时会挂面板与监听）。 */
+  const stubEl = () => ({ innerHTML: '', textContent: '', dataset: {}, style: {}, className: '', value: '', title: '',
+    querySelector: () => stubEl(), querySelectorAll: () => [], appendChild: () => {}, removeChild: () => {},
+    remove: () => {}, addEventListener: () => {}, setAttribute: () => {}, getAttribute: () => null,
+    focus: () => {}, blur: () => {}, closest: () => null, contains: () => false, insertBefore: () => {},
+    classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false } });
+  g.ctx.document = { readyState: 'complete', createElement: () => stubEl(), createTextNode: () => stubEl(),
+    body: stubEl(), head: stubEl(), documentElement: stubEl(), activeElement: null,
+    addEventListener: () => {}, removeEventListener: () => {}, querySelector: () => stubEl(), querySelectorAll: () => [] };
+  /* window === ctx：addEventListener / setTimeout 都要挂在 ctx 上（挂在展开出来的副本上没用）。 */
+  g.ctx.addEventListener = () => {};
+  g.ctx.removeEventListener = () => {};
+  if (typeof g.ctx.setTimeout !== 'function') {
+    g.ctx.setTimeout = () => 0;
+    g.ctx.clearTimeout = () => {};
+  }
+  vm.runInContext(fs.readFileSync(path.join(root, 'js/debug.js'), 'utf8'), g.ctx, { filename: 'js/debug.js' });
+  const reset = g.ctx.Debug.actions().find((a) => a.label === '重置每日与体力计时');
+  assert.ok(reset, '调试台里应当有「重置每日与体力计时」这条工具');
+  assert.ok(/日贡|日供/.test(reset.note), '说明里要提到弟子日供：' + reset.note);
+
+  const S = g.State.state();
+  const today = g.State.localDate();
+  const y = (() => {
+    const [yy, mm, dd] = today.split('-').map(Number);
+    const d = new Date(yy, mm - 1, dd); d.setDate(d.getDate() - 1);
+    const p = (v) => String(v).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  })();
+  S.prentices = [{ name: '小徒', level: 70, since: '2026-01-01', joinedAt: 1, lastExpDate: '', tributeClaimedDate: '' }];
+
+  /* ① 昨天有真实流水：领过一次 → 重置后能再领 */
+  S.earnHistory = [{ date: y, exp: 1000, gold: 500 }];
+  assert.ok(g.State.apprenticeDailyTotal().gold > 0, '先确认能领');
+  g.State.claimApprenticeExp();
+  assert.equal(g.State.apprenticeDailyTotal().gold, 0, '领过了就该是 0');
+  reset.run();
+  assert.ok(g.State.apprenticeDailyTotal().gold > 0, '重置后应当又能领');
+
+  /* ② 昨天**没有**流水（只有今天）：旧的实现到这里就卡住了 ——
+   *    界面报「今日已领取」清掉了，但日供数额取自昨天的流水、恒为 0，于是永远领不到。
+   *    现在重置会把今天的流水补一份当成昨天，让「回到新的一天」这件事真的成立。 */
+  g.State.state().earnHistory = [{ date: today, exp: 800, gold: 400 }];
+  g.State.state().prentices[0].lastExpDate = '';
+  g.State.state().prentices[0].tributeClaimedDate = '';
+  assert.equal(g.State.apprenticeDailyTotal().gold, 0, '昨天没流水 → 现在确实领不到（复现问题现场）');
+  reset.run();
+  const after = g.State.apprenticeDailyTotal();
+  assert.ok(after.exp > 0 && after.gold > 0, '重置后应当能领到（把今天的流水当昨天结算）：' + JSON.stringify(after));
+  const goldBefore = g.State.state().goldPoint;
+  g.State.claimApprenticeExp();
+  assert.ok(g.State.state().goldPoint > goldBefore, '金松果要真的到账');
+
+  /* ③ 今天也没有收益时不凭空造收益（不刷钱） */
+  g.State.state().earnHistory = [];
+  const gold0 = g.State.state().goldPoint;
+  reset.run();
+  assert.equal(g.State.apprenticeDailyTotal().gold, 0, '今天没赚钱就不该凭空出现日供');
+  assert.equal(g.State.state().goldPoint, gold0, '金松果不该被改动');
+  assert.equal((g.State.state().earnHistory || []).length, 0, '不该凭空写入流水');
 });
 
 test('调试用武技接口：获得/改等级/遗忘，等级夹在 1~15 且不重复', () => {
@@ -700,6 +815,13 @@ test('需求146：套装收益 —— 同名 2/4 件两档、按最低品质缩�
   reseed(); const plain = g.Sim.simulate({ ...me, setFx: null }, foe, {}).rounds.length;
   reseed(); const buffed = g.Sim.simulate({ ...me, setFx: { dmgMul: 2 } }, foe, {}).rounds.length;
   assert.ok(buffed < plain, '套装收益的伤害乘区要真的缩短战斗：' + plain + ' → ' + buffed);
+  /* 2026-10 用户口径：装备页上那条常驻的「套装收益：…」介绍行**已删**，
+   * 套装效果只在**点开具体装备**时说明（详情里逐档标出哪一条已生效）。
+   * 这里做源码级断言，避免有人手滑把它加回装备页。 */
+  const src = fs.readFileSync(path.join(root, 'js/classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(!/setBonusSummary/.test(src), '装备页的套装收益摘要函数应当已经删掉');
+  assert.ok(!/gear-set-line/.test(src), '装备页不该再渲染套装收益那一行');
+  assert.ok(/function setBonusBlock\(/.test(src), '装备详情里的套装小节要留着');
 });
 
 test('需求148：「更换装备」页按「穿着中 > 星标 > 获得顺序」展示', () => {
@@ -827,6 +949,46 @@ test('反击后的血量快照与胜负一致，不遗漏最后一击', () => {
   assert.equal(result.rounds.length, 1); assert.equal(result.winner, 1);
 });
 
+test('反击口径：只有近战武器与普攻能触发反击（远程 / 技能 / 已反伤都不行）', () => {
+  /* 2026-10 第八十批用户口径。这里**不锁随机流**：断言的是**结构性**规则 ——
+   * 「某类回合里一次反击都不该出现」（由代码分支决定，与随机无关），
+   * 以及「近战 / 普攻这两类里必须出现过反击」（样本给足 40 场，实测每类都有几百次）。 */
+  const g = game();
+  const isCounter = (r) => r.counterDmg != null || r.counterDodge || r.counterFakeDie;
+  let melee = 0, meleeCounter = 0, ranged = 0, rangedCounter = 0, skill = 0, skillCounter = 0, commonCounter = 0;
+  for (let t = 0; t < 40; t++) {
+    /* 我方带近战木剑(3) + 投掷飞镖(5) + 主动技色诱之术(8)，三类动作都会用上。 */
+    const me = fighter({ power: 80, speed: 80, hp: 4000, weapons: ['3:5', '5:5'], skills: ['8:3'] });
+    const foe = fighter({ power: 20, speed: 20, hp: 60000 });
+    for (const r of g.Sim.simulate(me, foe).rounds) {
+      if (r.attacker !== 0) continue;
+      if (r.action === 'weapon' && r.wtype === '近战') { melee++; if (isCounter(r)) meleeCounter++; }
+      else if (r.action === 'weapon') { ranged++; if (isCounter(r)) rangedCounter++; }
+      else if (r.action === 'skill') { skill++; if (isCounter(r)) skillCounter++; }
+      else if (r.action === 'common' && isCounter(r)) commonCounter++;
+    }
+  }
+  assert.ok(melee > 50 && ranged > 50 && skill > 20,
+    '样本要覆盖三类动作：近战 ' + melee + ' / 远程 ' + ranged + ' / 技能 ' + skill);
+  assert.equal(rangedCounter, 0, '远程武器不该触发反击，实测 ' + rangedCounter);
+  assert.equal(skillCounter, 0, '技能不该触发反击，实测 ' + skillCounter);
+  assert.ok(meleeCounter > 0, '近战武器仍然可以被反击，实测 ' + meleeCounter);
+  assert.ok(commonCounter > 0, '普攻仍然可以被反击，实测 ' + commonCounter);
+  /* 已经反伤过的那一手不再反击：敌方带荆棘，我方每次武器攻击都被反伤回应。 */
+  let thornRounds = 0, thornCounter = 0;
+  for (let t = 0; t < 40; t++) {
+    const me = fighter({ power: 80, speed: 80, hp: 4000, weapons: ['3:5'] });
+    const foe = fighter({ power: 20, speed: 20, hp: 60000, mech: ['thorns'] });
+    for (const r of g.Sim.simulate(me, foe).rounds) {
+      if (r.attacker !== 0 || r.action !== 'weapon') continue;
+      thornRounds++;
+      if (isCounter(r)) thornCounter++;
+    }
+  }
+  assert.ok(thornRounds > 50, '荆棘场景里要有我方武器回合：' + thornRounds);
+  assert.equal(thornCounter, 0, '反伤已经回应过的那一手不再反击，实测 ' + thornCounter);
+});
+
 test('方天画戟在攻击前蓄力，武器升级伤害与原表一致', () => {
   const g = game(); g.math.random = () => 0.5;
   const result = g.Sim.simulate(fighter({ weapons: ['1:1'] }), fighter({ hp: 250 }));
@@ -868,6 +1030,27 @@ test('装备词条改变对应武器伤害与减伤，不只显示说明', () =>
   const geared = g.Sim.simulate({ ...attacker, effects: { 6: 100, 13: 100 } }, defender).rounds[0].dmg;
   const reduced = g.Sim.simulate({ ...attacker, effects: { 6: 100, 13: 100 } }, { ...defender, effects: { 9: 50 } }).rounds[0].dmg;
   assert.equal(geared, plain * 3); assert.equal(reduced, Math.round(geared * 0.5));
+});
+
+test('徒手攻击的权重：基准 50，工具再多也让它的份额不低于 5%', () => {
+  const g = game();
+  /* kindWeights 收的是「候选对象」，权重按 .id 查 —— 与 pickKind 的调用口径一致。 */
+  const cand = (ids) => ids.map((id) => ({ id }));
+  const me = (ids) => fighter({ hp: 10000, usedWeapons: {}, usedSkills: {}, weapons: cand(ids), skills: cand(ids) });
+  /* 徒手基准 = 50（2026-10 用户口径：从 30 提到 50）。 */
+  const bare = g.Sim.kindWeights(me([]), [], []);
+  assert.equal(bare.common, 50);
+  assert.equal(bare.commonShare, 1);
+  /* 一把武器：仍用基准 50，份额远高于保底。 */
+  const one = g.Sim.kindWeights(me([2]), cand([2]), []);
+  assert.equal(one.common, 50);
+  assert.ok(one.commonShare > 0.3, '一把武器时徒手仍占三成以上：' + one.commonShare);
+  /* 工具拉满（17 武器 + 17 技能，各 100 权重）：份额被压到保底 5%，权重被抬到基准之上。 */
+  const ids = Array.from({ length: 17 }, (_, i) => i + 1);
+  const heavy = g.Sim.kindWeights(me(ids), cand(ids), cand(ids));
+  assert.ok(heavy.common > 50, '工具极多时徒手权重被抬到基准之上：' + heavy.common);
+  assert.ok(Math.abs(heavy.commonShare - 0.05) < 1e-9, '保底正好 5%：' + heavy.commonShare);
+  assert.equal(heavy.weapon + heavy.skill + heavy.common, heavy.total);
 });
 
 test('全部原版武器、技能与 NPC 的事件流都能有限结束并维持合法血量', () => {

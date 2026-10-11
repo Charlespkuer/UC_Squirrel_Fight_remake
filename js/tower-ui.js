@@ -140,13 +140,17 @@
       esc(e.name || e.id) +
       '<i>' + (o.compact ? ('剩' + e.left) : ('剩 ' + e.left + ' 场')) + '</i></span>';
   }
-  /** 环境面板：当前生效的全部环境（唯一常驻负面机制）。没有环境时给一句提示。 */
+  /** 环境面板：当前生效的全部环境（唯一常驻负面机制）。没有环境时给一句提示。
+   *  【100 层循环】环境按**轮内层号**开关：每轮都是「第 5 层起可能出现」，
+   *  所以第 101~104 层与第 1~4 层一样没有环境（`canHaveEnv`），105 层起照旧。 */
   function envPanelHtml(run, opts) {
     const o = opts || {};
     const list = (run && run.env) || [];
-    const chips = list.length
-      ? list.map((e) => envChip(e, o)).join('')
-      : '<span class="mech-none">当前没有环境词缀（第 ' + ((window.TowerData && TowerData.ENV_START_LAYER) || 5) + ' 层起可能出现）</span>';
+    /* 【2026-10 用户口径】**没有环境词缀时整块不渲染** —— 以前会挂一行「当前环境」+
+     * 「当前没有环境词缀（每轮第 5 层起可能出现）」的说明，用户不要这条提示：
+     * 没影响就别占版面（有环境时照旧逐条列出）。 */
+    if (!list.length) return '';
+    const chips = list.map((e) => envChip(e, o)).join('');
     return '<div class="tower-rule mech-bar env-bar"><b>' + (o.label || '当前环境') + '</b>' + chips + '</div>';
   }
   function mechTip(info, mechs) {
@@ -176,7 +180,7 @@
   function foePortraitHtml(index, info) {
     if (info.kind === 'hero') {
       const file = CHAR_FILE[info.anim] || 'mantis';
-      return '<span class="foe-portrait"><img alt="" src="images/classic/characters/' + file + '-classic-card.png"></span>';
+      return '<span class="foe-portrait"><img alt="" src="images/ui/characters/' + file + '-classic-card.png"></span>';
     }
     return '<span class="foe-portrait"><canvas width="' + AVATAR_SIZE + '" height="' + AVATAR_SIZE +
       '" data-foe-art="' + index + '" aria-hidden="true"></canvas></span>';
@@ -185,9 +189,9 @@
     const kind = info && info.kind;
     const file = CHAR_FILE[info && info.anim];
     let src = null;
-    if (kind === 'hero') src = file ? 'images/classic/characters/' + file + '-classic-card.png' : null;
+    if (kind === 'hero') src = file ? 'images/ui/characters/' + file + '-classic-card.png' : null;
     else if (kind === 'npc') src = null;
-    else src = 'images/classic/squirrel-classic.png';
+    else src = 'images/ui/characters/squirrel-classic.png';
     if (!src) { canvas.remove(); return; }
     const img = document.createElement('img');
     img.alt = ''; img.src = src;
@@ -201,7 +205,11 @@
     const npc = info.kind === 'npc';
     // 注意要过一遍 Engine.wearsFor：tower-data 给的是装备 id（{id:201}），
     // 引擎画图层时用的是 {src,label}（和战斗里 foe.wears 一样），少了这一步装备不会画出来。
-    const wears = npc ? null : Engine.wearsFor(TowerData.wearsOf(info.gear));
+    // 「巡逻」魔王是例外：它的 info.outfit 已经是 {src,label} 形态（见 tower-data.js 的 PATROL.outfit），
+    // 直接交给 wearsFor 按槽位落位 —— 走 wearsOf(info.gear) 的话 gear 是空的，盔甲画不出来。
+    const wears = npc ? null
+      : info.outfit ? Engine.wearsFor(info.outfit)
+        : Engine.wearsFor(TowerData.wearsOf(info.gear));
     const sheets = npc ? (NPC_SHEETS[info.anim] || null) : SQ_SHEETS;
     const animName = npc ? (NPC_IDLE[info.anim] || 'tl_rest') : 'standby';
     const srcs = (sheets || []).concat((wears || []).map((w) => w && w.src).filter(Boolean));
@@ -242,8 +250,32 @@
    * 【U4】增益面板与货币条 —— buffPanelsHtml / currencyHtml
    * ============================================================ */
   function buffTag(b, stacks) {
-    return '<span class="buff-tag r' + b.rarity + '" title="' + esc(b.desc) + '">' + esc(b.name) +
+    /* 【2026-10 第七十三批】铭文附魔的外框（用户口径）：
+     *   · 虚空铭文（C37，`slotFree`）→ **青色**外框（原有）；
+     *   · 水晶铭文（C60，`enchMul > 1`）→ **红色**外框；
+     *   · 两条同时附魔 → **一半红一半蓝**（`.ench-both`，用 ::before 画双色环）。
+     * 数据来自 buff 报告行（tower.js 的 debugBuffReport 逐条带出 `enchMul` / `slotFree`）。 */
+    const mul = Number(b && b.enchMul) || 1;
+    const free = !!(b && b.slotFree === true);
+    const crys = mul > 1;
+    const marks = [];
+    if (free) marks.push('虚空铭文 · 不占位');
+    if (crys) marks.push('水晶铭文 · 效果 ×' + mul);
+    const tip = String(b.desc || '') + (marks.length ? '（' + marks.join('　') + '）' : '');
+    return '<span class="buff-tag r' + b.rarity + enchCls(b) + '" title="' + esc(tip) + '">' + esc(b.name) +
       '<i>' + SCOPE[b.kind] + '</i>' + (stacks > 1 ? '<em>×' + stacks + '</em>' : '') + '</span>';
+  }
+  /** 铭文附魔的**类名出口**（画 .buff-tag 的地方都必须走这里）：
+   *    虚空铭文（C37，不占位）→ `.slot-free`（青框）；水晶铭文（C60，×1.5）→ `.ench-crystal`（红框）；
+   *    两个都吃 → `.ench-both`（一半红一半蓝）。
+   *  ⚠ 教训：无尽塔**主面板**（`buffPanelsHtml`，玩家一直盯着的那块「永久增益 / 限次增益」）
+   *  原来是**自己拼 class**、只认 `slot-free`，所以水晶的红框在它上面根本不存在 ——
+   *  第七十三批只在「本局构筑」和商店列表两处生效，用户实测「看不到效果」就是这个。
+   *  现在所有渲染器共用这一个出口，新增一种附魔不会再漏掉某一块面板。 */
+  function enchCls(b) {
+    const free = !!(b && b.slotFree === true);
+    const crys = (Number(b && b.enchMul) || 1) > 1;
+    return (free && crys) ? ' ench-both' : (crys ? ' ench-crystal' : (free ? ' slot-free' : ''));
   }
   function ownedBuffsHtml(mode) {
     const list = Tower.ownedBuffs(mode);
@@ -256,7 +288,20 @@
     if (!buff) return b.name;
     const parts = [buff.name + '（' + RARITY[b.rarity] + ' · 永久）', buff.desc];
     parts.push('当前叠层：×' + b.stacks + (b.stacks > 1 ? '（按层数累加）' : ''));
-    const m = buff.mods || {};
+    /* 【第七十四批】本条被铭文附魔时要**写清楚**（否则悬停看到的还是没附魔的数字，
+     * 玩家会以为「附了没效果」）：水晶这一条把下面所有**效果量**乘一次，
+     * 与 tower.js 实际结算用的 `k = 层数 × 全局倍率 × row.enchMul` 同一口径；
+     * 而 `lowHpAt` / `lowHpRegenAt` 是**阈值**（结算里取 max、不乘 k），所以不乘。 */
+    const mul = Number(b.enchMul) || 1;
+    const raw = buff.mods || {};
+    const RAW_KEYS = ['lowHpAt', 'lowHpRegenAt'];
+    const m = (mul === 1) ? raw : Object.keys(raw).reduce((o, k) => {
+      const v = raw[k];
+      o[k] = (typeof v === 'number' && RAW_KEYS.indexOf(k) < 0) ? v * mul : v;
+      return o;
+    }, {});
+    if (b.slotFree === true) parts.push('铭文附魔：虚空铭文 · 不占位');
+    if (mul > 1) parts.push('铭文附魔：水晶铭文 · 这一条本局效果 ×' + mul + '（下列合计已含）');
     if (m.powerMul) parts.push('攻击合计 +' + Math.round(m.powerMul * b.stacks * 100) + '%');
     if (m.maxHpMul) parts.push('生命上限合计 ' + (m.maxHpMul * b.stacks >= 0 ? '+' : '') + Math.round(m.maxHpMul * b.stacks * 100) + '%');
     if (m.critBonus) parts.push('暴击合计 +' + (m.critBonus * b.stacks) + '%');
@@ -311,7 +356,12 @@
       (b.stacks > 1 ? '（可叠 ' + b.stacks + ' 层）' : ''));
     if (m.mustHitAll) parts.push('这一场所有攻击必中');
     if (m.mustHitFirst) parts.push('首次攻击必中');
-    if (m.pickPermanentFree) parts.push('可给一个已有的永久增益附魔免占位');
+    if (m.pickPermanentFree) parts.push('可给一个已有的永久增益附魔免占位（铭文）');
+    if (m.pickPermanentMul) parts.push('可给一个已有的永久增益附魔：这一条效果 ×' + Number(m.pickPermanentMul) + '（铭文）');
+    if (m.pickBrandBreak) parts.push('可从已有的烙印里选一个，让它立刻全部破碎（铭文）');
+    if (m.pickLimitedUses) parts.push('可从已有的限次增益里选一个（烙印除外），剩余场次 +' + Number(m.pickLimitedUses) + '（铭文）');
+    if (m.breakAllBrands) parts.push('立即使持有的所有烙印破碎');
+    if (m.brandGate != null) parts.push('只在未破碎的烙印超过 ' + Number(m.brandGate) + ' 份时才会上架');
     if (m.fragileStat) parts.push('本局永久保留：' + ({ power: '力量', agility: '敏捷', speed: '速度' }[m.fragileStat] || m.fragileStat) +
       ' +' + Math.round((m.fragilePct || 0) * 100) + '%；每场 ' + (m.fragileBreakPct || 5) + '% 损毁');
     if (b.progress) parts.push('当前进度：' + b.progress);
@@ -366,12 +416,15 @@
     const permHtml = perm.length
       ? perm.map((b, i) => {
           const free = b.slotFree === true;
+          const em = enchMark(b);
           const nextFree = i + 1 < perm.length && perm[i + 1].slotFree === true;
           const divider = (free && !nextFree) ? '<span class="buff-sep" aria-hidden="true"></span>' : '';
+          /* `enchCls(b)` 是附魔外框的**唯一出口**（虚空=青框 / 水晶=红框 / 两个都吃=半红半青）。
+           * 这里原来是手拼的、只认 slot-free —— 水晶的红框在主面板上完全不存在。 */
           return '<span class="buff-tag r' + b.rarity + (rowRef(b) === replaceTarget ? ' replacing' : '') +
-            (free ? ' slot-free' : '') + '" data-replace="' + esc(rowRef(b)) +
+            enchCls(b) + '" data-replace="' + esc(rowRef(b)) +
             '" data-tip="' + esc(permTip(b)) + '" title="' + esc(permTip(b)) + '">' +
-            esc(b.name) + '<i>' + (free ? '不占位' : '永久') + '</i>' +
+            esc(b.name) + '<i>' + (free ? '不占位' : '永久') + (em.crys ? ' · ×' + em.mul : '') + '</i>' +
             (b.stacks > 1 ? '<em>×' + b.stacks + '</em>' : '') + '</span>' + divider;
         }).join('')
       : '<span class="buff-empty">还没有永久增益（每层的休整点可以拿）</span>';
@@ -408,7 +461,7 @@
     return '<div class="tower-debuffs"><h4>本层已被削弱（贯穿本层）</h4><div class="debuff-cards">' +
       debuffs.map((d) => {
         const file = CHAR_FILE[d.from] || null;
-        const face = file ? '<img class="debuff-face" alt="" src="images/classic/characters/' + file + '-classic-card.png">' : '';
+        const face = file ? '<img class="debuff-face" alt="" src="images/ui/characters/' + file + '-classic-card.png">' : '';
         return '<div class="debuff-card" style="--hero-color:' + esc(d.color || '#7a4a18') + '">' + face +
           '<span class="debuff-from">' + esc(d.short || d.hero || '大侠') + '</span>' +
           '<b class="debuff-name">' + esc(d.name || '削弱') + '</b>' +
@@ -446,7 +499,7 @@
     if (!TD || !TD.HERO_DEBUFF) return '';
     const chips = ['tl', 'xh', 'xm'].map((k) => TD.HERO_DEBUFF[k]).filter(Boolean).map((d) => {
       const file = CHAR_FILE[d.anim];
-      const face = file ? '<img class="mech-chip-face" alt="" src="images/classic/characters/' + file + '-classic-card.png">' : '';
+      const face = file ? '<img class="mech-chip-face" alt="" src="images/ui/characters/' + file + '-classic-card.png">' : '';
       const tip = d.hero + '「' + d.ult + '」命中后：' + d.name + '\n' + d.desc +
         '\n（只有大招真的打到才会留下；速杀 / 闪避 / 弹反可以规避）';
       return '<span class="mech-chip debuff-chip" data-tip="' + esc(tip) + '" title="' + esc(tip) + '" tabindex="0">' +
@@ -454,11 +507,38 @@
     }).join('');
     return chips ? '<div class="tower-rule mech-bar"><b>三侠大招会留下</b>' + chips + '</div>' : '';
   }
+  /* ---------- 敌人成长倍率（【D2b】，2026-10 用户口径） ----------
+   * 无尽塔的敌人面板 = 属性基数（目标等级，40 层封顶 70 级）× 段位倍率（31 层封顶 ×10）
+   * × 深度倍率（30 层起叠加、**永不封顶**）。
+   * ⚠ 用户口径：这一档**不出现在界面上**（局内主界面与开局页都不放）——
+   *   原来那个「敌人成长 ×N」刻度块（foeScaleChip）已按 2026-10 用户口径删掉；
+   *   倍率的计算与口径在 js/tower-data.js 的 endlessScaleParts / 【D2b】注释里。 */
+  /** 商店「这一页几件」的说明（【100 层循环】，2026-10 用户口径）：
+   *  1-20 层 5 件、21-40 层 4 件、41-100 层 3 件，第 101 层起回到 5 件。
+   *  件数是规则，不写出来玩家会以为是随机变少。`count` 省略时按层算。 */
+  function shopTierHint(layer, count) {
+    if (!window.TowerData || !TowerData.endlessShopSlots) return '';
+    const n = Math.max(1, Math.floor(Number(layer) || 1));
+    const have = Math.max(0, Math.floor(Number(count != null ? count : TowerData.endlessShopSlots(n)) || 0));
+    const cycle = Math.max(1, Math.floor(Number(TowerData.LAYER_CYCLE) || 100));
+    const c = ((n - 1) % cycle) + 1;
+    const band = c <= 20 ? '1-20 层每页 5 件' : c <= 40 ? '21-40 层每页 4 件' : '41-100 层每页 3 件';
+    const nextAt = c <= 20 ? 21 : c <= 40 ? 41 : null;
+    const tail = '；规则每 ' + cycle + ' 层重来一轮（第 ' + (cycle + 1) + ' 层回到每页 5 件）' +
+      (nextAt ? '，第 ' + nextAt + ' 层起每页 ' + (nextAt === 21 ? 4 : 3) + ' 件' : '');
+    const tip = '商店每页件数按层分档：' + band + tail +
+      '。\n无尽塔每 ' + cycle + ' 层重来一轮（第 ' + (cycle + 1) +
+      ' 层回到与第 1 层相同的规则），但敌人的数值继续接着长。';
+    return '<p class="shop-tier" data-tip="' + esc(tip) + '" title="商店每页件数按层分档" tabindex="0">' +
+      '本层商店 · 每页 <b>' + have + '</b> 件（' + band + '）</p>';
+  }
   function syncTickets() {
     if (window.ClassicExtras && ClassicExtras.refreshTickets) { try { ClassicExtras.refreshTickets(); } catch (e) { /* ignore */ } }
     if (window.UI && UI.refreshHeader) { try { UI.refreshHeader(); } catch (e) { /* ignore */ } }
   }
-  const CURRENCY_PROP = { book: 23, ticket: 50 };
+  /* 挑战塔货币条要用的道具 id（挑战书）。抽奖卷（50）不在这里 —— 无尽塔局内不再显示它，
+   * 见 currencyHtml 里 'endless' 分支的说明。 */
+  const CURRENCY_PROP = { book: 23 };
   function currencyHtml(mode) {
     const S = State.state();
     if (mode === 'endless') {
@@ -485,18 +565,11 @@
             (coinLine ? ('\n' + coinLine) : '') 
         });
       }
-      const exitT = run ? Math.max(0, Math.floor(Number(run.ticketsOnExit) || 0)) : 0;
-      const layerT = run ? Math.max(0, Math.floor(Number(run.ticketsIfSettle) || 0)) : 0;
-      const coins = run ? Math.max(0, Math.floor(Number(run.coins) || 0)) : 0;
+      /* 【2026-10 用户口径】这里**不再显示「抽奖卷」**：局内右上角只留 试炼币 + 铸币，
+       * 抽奖卷的账挪到玩家真的要结算的时候算 —— 见「放弃本局」弹窗（abandon 分支）
+       * 与商店 / 结算点的「结算离场」。想看仓库里现有多少张，去「每日幸运抽奖」页。
+       * ⚠ 别把 `endlessInfo` 的 ticketsOnExit / ticketsIfSettle 删掉：弹窗要用它们。 */
       const tokens = run ? Math.max(0, Math.floor(Number(run.retryToken) || 0)) : 0;
-      items.push({
-        name: '抽奖卷',
-        value: run ? exitT : (S.props[CURRENCY_PROP.ticket] || 0),
-        tip: run
-          ? ('现在退出获得 ' + exitT + ' 张 = 本层应得 ' + layerT + ' 张 + 铸币 ' + tokens +
-             ' 枚')
-          : '仓库持有的抽奖卷总数'
-      });
       /* 铸币（原名「重新挑战币」）：无尽塔主界面右上角直接标出**本场拥有多少枚**，
        * 鼠标悬停说明用途（失败时回滚本场 / 退出时 1:1 折成抽奖卷 / 商店售价）。 */
       items.push({
@@ -505,7 +578,8 @@
         tip: run
           ? ('本场拥有 ' + tokens + ' 枚铸币。\n' +
              '· 战斗失败时可花费 1 枚重新挑战\n' +
-             '· 退出本局时剩余的铸币按 1:1 折成抽奖卷')
+             '· 退出本局时剩余的铸币按 1:1 折成抽奖卷（最多折 ' +
+             Math.max(0, Math.floor(Number(TowerData.TICKET_FROM_MINT_CAP) || 0)) + ' 枚）')
           : '铸币：失败时回滚本场再打一次；退出时 1:1 折成抽奖卷'
       });
       return '<div class="tower-currency text-only">' + items.map((it) =>
@@ -517,8 +591,8 @@
      * 以前这里错用了 prop-1.png，而 prop 1 是小体力药剂，于是挑战塔主界面右上角
      * 顶着一个小体力药剂图标（用户 2026-10 反馈）。首页金钱 / 背包 / 融合页都用
      * resource_1-18，这里跟它们统一。 */
-    const items = [{ icon: 'images/classic/icons/prop-23.png', name: '挑战书', value: S.props[CURRENCY_PROP.book] || 0 },
-      { icon: 'images/classic/sprites/resource_1-18.png', name: '金松果', value: S.goldPoint }];
+    const items = [{ icon: 'images/ui/icons/prop/prop-23.png', name: '挑战书', value: S.props[CURRENCY_PROP.book] || 0 },
+      { icon: 'images/ui/sprites/resource_1-18.png', name: '金松果', value: S.goldPoint }];
     return '<div class="tower-currency">' + items.map((it) =>
       '<span class="currency-item" data-live-gold="' + (it.name === '金松果' ? '1' : '') + '">' +
       '<img alt="" src="' + it.icon + '"><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';
@@ -547,11 +621,16 @@
       TowerData.hasTag(b, 'tower') && TowerData.hasTag(b, 'nextBattle'));
   }
   function buffCatalogHtml() {
-    /* 增益集锦 = **无尽塔的全增益展示**：只列带无尽塔标签的条目，
-     * 挑战塔专属（tower-only）一条都不出现；hidden 的（选取型强化）也不列。 */
-    const list = TowerData.BUFFS.filter((b) => TowerData.hasTag(b, 'endless') && !TowerData.hasTag(b, 'hidden'));
+    /* 增益集锦 = **无尽塔的全增益展示**：只列带无尽塔标签的条目，挑战塔专属（tower-only）一条都不出现。
+     * 【2026-10 用户口径】以前是「hidden 一律不列」，于是**虚空铭文（C37）在传奇那一栏缺席**，
+     * 玩家在商店里看得到、集锦里查不到。现在口径改成：
+     *   · `catalog` 标签（选取型强化 C32/C33）→ 照列；
+     *   · `kind: 'inscription'`（铭文 C37/C60）→ 照列；
+     *   · 其余 hidden（彩蛋/特殊获取）仍然不列。 */
+    const list = TowerData.BUFFS.filter((b) => TowerData.hasTag(b, 'endless') &&
+      (!TowerData.hasTag(b, 'hidden') || TowerData.hasTag(b, 'catalog') || b.kind === 'inscription'));
     const byRarity = [0, 1, 2, 3].map((r) => list.filter((b) => b.rarity === r));
-    const kindName = { limited: '限次', permanent: '永久', instant: '即时' };
+    const kindName = { limited: '限次', permanent: '永久', instant: '即时', inscription: '铭文' };
     return '<div class="tower-buffs buff-catalog"><h4>增益集锦 <span class="buff-slot-count">共 ' + list.length + ' 种 · 悬停看效果</span></h4>' +
       byRarity.map((group, r) => group.length
         ? '<div class="catalog-row"><b class="catalog-rarity r' + r + '">' + (RARITY[r] || '') + '</b>' +
@@ -718,6 +797,12 @@
     const notStarted = !!(info.run && info.run.layer === 1 && !(info.run.score > 0) && !(info.run.lastCoinsGained > 0));
     if (info.run) {
       const run = info.run;
+      /* 【U18】剧情优先：这一屏该走剧情模式时，**局内 UI 一个都不渲染**（增益/减益/血量/
+       * 环境/分数/铸币/试炼币/敌人预告全去掉），只留塔身 + 文字 + 右下角「继续」。 */
+      const storyId = pendingStory(run);
+      if (storyId) {
+        main = storyModeHtml(storyBegin(storyId), run.layer);
+      } else {
       const nextLabel = run.choices ? '先选一张增益'
         : run.phase === 'shop' ? (run.mintShop ? '进入铸币商店' : '进入试炼商店')
         : run.phase === 'checkpoint' ? '前往结算点'
@@ -730,7 +815,8 @@
       const clearing = (run.phase === 'shop' || run.phase === 'checkpoint' || run.phase === 'sacrifice') && run.finished && run.finished.layer === run.layer;
       const beatenCount = clearing ? foes.length : Math.max(0, (run.battleNo || 1) - 1);
       const foeRows = foes.map((b, i) =>
-        '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel ' : '') + (i < beatenCount ? 'beaten' : '') +
+        '<li class="' + (b.elite ? 'elite ' : '') + (b.patrol ? 'patrol ' : '') + (b.squirrel ? 'squirrel ' : '') +
+        (i < beatenCount ? 'beaten' : '') +
         '" tabindex="0" data-tip="' + esc(mechTip(b, (run.env || []).map((e) => e.text || e.desc || e.name))) + '">' +
         foePortraitHtml(i, b) +
         '<b>' + esc(b.name) + '</b>' + (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
@@ -754,7 +840,9 @@
        * 「继续战斗」在右下角，「放弃本局」更小、压在它左边偏下。 */
       main = '<div class="endless-run">' +
         /* 右上角：药丸槽 + 试炼币/抽奖卷 + 分数框（横向一行，位置不变）。
-         * 本局还没打完第一场时不放货币条（见 notStarted 的说明），只留分数框。 */
+         * 本局还没打完第一场时不放货币条（见 notStarted 的说明），只留分数框。
+         * 【2026-10 第八十四批】这里原来还挂了一个「敌人成长 ×N」框 —— **用户口径要求去掉**
+         * （主界面右上角保持干净）；倍率只在开打前那一屏保留一份「1 层 = ×1」的刻度说明。 */
         '<div class="endless-topright">' + (notStarted ? '' : currencyHtml('endless')) +
         '<span class="endless-score-box"><i>分数</i><b>' + run.score + '</b></span></div>' +
         '<div class="endless-left">' +
@@ -791,34 +879,60 @@
         '<span class="endless-action-btns">' +
         C().btn('放弃本局', 'abandon', 'muted tiny') +
         C().btn(nextLabel, 'fight', 'gold') + '</span></div>';
+      }
     } else {
       /* 还没开始（没有进行中的对局）：这一屏也**不显示抽奖卷 / 铸币**，
        * 下方那行「现有抽奖卷 X 张」一并去掉 —— 只留「开始冲塔」一个按钮。
        * 想看仓库抽奖卷总数请去「每日幸运抽奖」页（那边的口径就是仓库存量）。 */
       main = '<h2 class="tower-title">无尽模式</h2>' +
         '<div class="tower-stats">历史最高 <b class="gold-text">' + info.best + '</b> 分 · 本周最高 ' + info.weekBest + ' 分 · 最深 ' + info.bestLayer + ' 层</div>' +
+        /* 【2026-10 用户口径】开局页**只留增益图鉴与敌人图鉴**：原来这里还有两块文字 ——
+         * ①「敌人成长 ×N」刻度行（foeScaleChip，第 1 层 ×1 那把刻度）；
+         * ②「每 100 层重来一轮，层号与机制严格对应…」的整段说明。
+         * 两块都删掉了（倍率口径仍写在 tower-data 的【D2b】注释与 endlessScaleParts 里，
+         * 不占开局页版面）。别再往这一屏加规则文字 —— 用户要的就是「buff + 敌人图鉴」。 */
         buffCatalogHtml() + bossCatalogHtml();
       footer = '<div class="tower-actions tower-footer">' +
-        C().btn('开始冲塔', 'fight', 'gold') + '</div>';
+        /* 2026-10 用户口径：这一颗按钮叫「开始攀登」（原来叫「开始冲塔」）。 */
+        C().btn('开始攀登', 'fight', 'gold') + '</div>';
     }
-    const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + '">' + towerVisual(info.run ? info.run.layer : 1, 0, 'endless') +
-      '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';
+    /* 刚播完剧情 → 整页带一个淡入类（【U18】不要硬切）。
+     * ⚠️ 动画**只作用在 .tower-main**（见 CSS）：塔身不参与，否则左侧塔 UI 会跟着闪一下。 */
+    const fadeIn = storyFadeIn;
+    storyFadeIn = false;
+    const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + (fadeIn ? ' tower-fade-in' : '') + '">' +
+      towerVisual(info.run ? info.run.layer : 1, 0, 'endless') +
+      '<div class="tower-main">' + main + '</div>' + (footer || '') +
+      /* 【2026-10 用户口径】剧情 / 挑战模式开关**一直挂在塔的正下方**（绝对定位在页面左下角，
+       * 也就是塔身那一列的下方）—— 不要塞进「放弃本局 / 继续战斗」那一行。 */
+      storyModeButtonHtml() + '</div>';
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
     bindTips(p);
     if (info.run) fillFoeArt(p, Tower.planInfo ? Tower.planInfo('endless') : Tower.preview(info.run.layer, info.run.salt, true));
     back(p, () => C().home());
+    /* 【U18】剧情模式下的「继续」：补完这一行 → 下一行 → 结束（见【U18】）。 */
+    on(p, 'story-next', () => storyAdvance());
+    /* 【U18b】左下角那颗按钮：剧情模式 ↔ 挑战模式，切完立刻重画这一屏。 */
+    on(p, 'story-mode', () => { Tower.setStoryEnabled(!Tower.storyEnabled()); openEndless(); });
     on(p, 'fight', () => {
       if (info.run) {
         if (info.run.choices) { notice('先在下面选一张增益（休整点）。'); return; }
         if (info.run.phase === 'shop') { openShop(); return; }
         if (info.run.phase === 'checkpoint') { openCheckpoint(); return; }
         if (info.run.phase === 'sacrifice') { openPermSacrifice(); return; }
+        /* 「巡逻」收缴（2026-10 第六十二批）：输了必须交出一个最高稀有度的增益才能继续。 */
+        if (info.run.phase === 'patrolToll') { openPatrolToll(); return; }
+        if (info.run.phase === 'patrolDiscard') { openPatrolDiscard(); return; }
         fight('endless');
         return;
       }
       const started = Tower.startEndlessRun();
       if (!started.ok) { notice(started.msg); return; }
-      fight('endless');
+      /* 【2026-10 用户口径】「开始攀登」**先进主界面**（不直接开第一场）：
+       * 给这一局挂上开场剧情 → 这一屏进剧情展示模式；剧情播完回到正常主界面，
+       * 玩家自己按「继续战斗」开打。**挑战模式**下不挂剧情，直接就是主界面。 */
+      if (Tower.storyEnabled()) Tower.setRunStory('endless', 'intro');
+      openEndless();
     });
     p.querySelectorAll('[data-choice]').forEach((el) => {
       el.onclick = () => {
@@ -852,17 +966,29 @@
       openShop();
     });
     on(p, 'abandon', () => {
-      const leftCoins = Math.max(0, Math.floor(Number((info.run || {}).coins) || 0));
-      const leftTokens = Math.max(0, Math.floor(Number((info.run || {}).retryToken) || 0));
+      /* 【2026-10 用户口径】抽奖卷的账只在这里算：局内右上角不再显示它，
+       * 玩家点「放弃本局」时把这一局的结算摊开（本层应得 + 铸币折现 = 到手）。
+       * 数字来自 Tower.previewSettleTickets()（与真正发奖的 settleRunTickets 同一份口径，
+       * 只算不改状态），所以弹窗承诺多少，点下去就是多少。 */
+      const pv = Tower.previewSettleTickets ? Tower.previewSettleTickets() : null;
+      const fmt = (v) => Math.max(0, Math.floor(Number(v) || 0));
+      const lines = pv ? [
+        '<li><span>按第 ' + pv.layer + ' 层应得</span><b class="gold-text">' + fmt(pv.layerTickets) + ' 张</b></li>',
+        pv.mint > 0
+          ? '<li><span>铸币折现（' + fmt(pv.mint) + ' 枚 ×1:1' +
+            (pv.mintForfeited > 0 ? ('，上限 ' + pv.mintCap + ' 枚，超出 ' + fmt(pv.mintForfeited) + ' 枚作废') : '') +
+            '）</span><b class="gold-text">+' + fmt(pv.mintConverted) + ' 张</b></li>'
+          : '',
+        '<li class="total"><span>结算到手</span><b>共 ' + fmt(pv.total) + ' 张抽奖卷</b></li>',
+      ].filter(Boolean).join('') : '';
       modal('放弃本局',
-        '<p>放弃后按当前层应得的抽奖卷结算（分数照常入账）' +
-        (leftTokens > 0 ? '，手上的 <b>' + leftTokens + '</b> 枚铸币会 <b>1:1</b> 折成抽奖卷' : '') +
-        (leftCoins > 0 ? '；本局剩余的 <b>' + leftCoins + '</b> 试炼币<b>不折现</b>，会随本局作废' : '') +
-        '，确定吗？</p>', [
+        '<p>放弃后<b>按当前层结算抽奖卷</b>（分数照常入账）：</p>' +
+        (lines ? '<ul class="settle-calc">' + lines + '</ul>' : '')
+        , [
         { label: '放弃', cls: 'muted', run: () => {
             const res = Tower.abandon('endless');
             syncTickets(); openEndless();
-            /* 结算提示：本层应得的那一份 + 试炼币折现的那一份，分别说清楚。 */
+            /* 结算提示：本层应得的那一份 + 铸币折现的那一份，分别说清楚。 */
             const msgs = [];
             if (res && res.layerTickets > 0) msgs.push('按第 ' + res.layer + ' 层结算：抽奖卷 +' + res.layerTickets);
             if (res && res.retryLeft > 0) msgs.push(res.retryMsg);
@@ -932,6 +1058,12 @@
   }
   function afterBattle(mode, rw) {
     flushAchievements(rw.achievements);      // 「死而复生」这类在战斗结算时算出的成就
+    /* 「巡逻」/「觐见魔王」输了**不走失败结算**（2026-10 第六十五批用户口径）：
+     * 状态机那边已经把它标成 `patrol: true` 并挂上了 `phase = 'patrolToll'`，
+     * 这里必须**先**处理它 —— 否则会掉进下面的 `!rw.win` 分支，弹出失败结算
+     *（用户实测：100 层的魔王战输了直接被结算，只有普通巡逻战不会）。
+     * 也不给「铸币回滚」的选项：按口径，这一场只收「一个最高稀有度的增益」。 */
+    if (rw.patrol) { openPatrolToll(); return; }
     if (!rw.win) {
       if (mode === 'tower') towerDefeat(rw);
       else if (rw.retryable) endlessRetryOffer(rw);
@@ -939,13 +1071,11 @@
       return;
     }
     if (mode === 'endless') {
-      /* 铸币商店（战后 5% 小店）一开出来就**直接进店**：它是限时偶遇，藏在首页按钮后面
-       * 容易被当成普通「继续战斗」而错过；层末那次也一样（rw.mintShop 与 layerComplete 都会带上）。
-       * E01「立即进货」的店仍旧留在首页按钮上（老行为不动）。 */
-      const cont = () => {
-        if (rw.phase === 'shop' && (rw.mintShop || rw.layerComplete)) openShop();
-        else openEndless();
-      };
+      /* 【2026-10 用户口径】打完一场**不再自动进店**（原来「层末商店 / 铸币商店」会直接弹进店里，
+       * 于是第 5 层那次「进店前的商人剧情」要等退出商店才看得到）。
+       * 现在一律先回主界面：剧情该播就播，进店交给首页那颗
+       * 「进入试炼商店 / 进入铸币商店」按钮。 */
+      const cont = () => openEndless();
       /* 时间回廊（E15）：这一场打完就从本层第 1 场重开 —— 必须明确告诉玩家，
        * 否则「怎么又回到第 1 场了」会很懵。 */
       if (rw.layerRestart) {
@@ -980,13 +1110,18 @@
    * ============================================================ */
 
   const RARITY_CLASS = ['r0', 'r1', 'r2', 'r3'];
+  /* 档位徽记（用户口径 2026-10 第七十九批）：普通 ● / 稀有 ◆ / 史诗 ★ / 传奇 ◆。
+   * 原来写的是三元表达式 `rarity === 2 ? '★' : rarity === 1 ? '◆' : '●'` —— **传奇档落进 else 也画 ●**，
+   * 既和普通档撞脸、又只是一个光秃秃的黄圆。现在传奇档有自己的字形，外面还套一圈**金色方框**
+   * （见 css 的 `.hex-card.r3 .hex-emblem`），看起来就是「方框里嵌一颗钻石」。 */
+  const RARITY_EMBLEM = ['●', '◆', '★', '◆'];
   function choiceCard(c, i, mode) {
     const b = TowerData.BUFF_BY_ID[c.id];
     if (!b) return '';
     const towerNext = isTowerNext(b, mode);
     return '<button type="button" class="hex-card ' + RARITY_CLASS[b.rarity] + '" data-choice="' + i + '">' +
       '<span class="hex-ribbon">' + RARITY[b.rarity] + '</span>' +
-      '<span class="hex-emblem">' + (b.rarity === 2 ? '★' : b.rarity === 1 ? '◆' : '●') + '</span>' +
+      '<span class="hex-emblem">' + (RARITY_EMBLEM[b.rarity] || '●') + '</span>' +
       '<b class="hex-name">' + esc(b.name) + '</b>' +
       '<span class="hex-scope">' + (towerNext ? '挑战塔' : SCOPE[b.kind]) +
         (b.kind === 'limited'
@@ -1008,10 +1143,15 @@
         (next.patternDesc ? '<span class="hex-next-pattern">' + esc(next.patternDesc) + '</span>' : '') +
         '</div>'
       : '';
+    const cut = mode === 'endless' && window.TowerData && TowerData.choiceCut ? TowerData.choiceCut(run.layer) : 0;
     const head = '<div class="hex-pick-head"><h2 class="hex-title">整装待发</h2>' +
       '<p class="hex-sub">' + (mode === 'tower'
         ? '第 ' + (run.battleNo || 4) + ' 场之前最后一次整备 —— 选一张带进去。'
-        : '场间休整 —— 选一张带进去。') + '</p>' +
+        : '场间休整 —— 选一张带进去。' +
+          /* 【100 层循环】21-40 层 −1、41-100 层 −2、101 层起回到 3 选 1。
+           * 玩家看到「怎么只有 2 张」时要能看出这是规则，不是池子抽空了。 */
+          (cut > 0 ? '（21-40 层选项 −1、41-100 层选项 −2：本层是 ' + cut + ' 项；第 ' +
+            (Math.floor((Math.max(1, run.layer) - 1) / 100) * 100 + 101) + ' 层起恢复）' : '')) + '</p>' +
       nextHtml +
       /* 选牌弹窗也摊开「当前环境」——只写下一场自己的 mechDesc 会让人完全没准备。 */
       (mode === 'endless' && run.env && run.env.length
@@ -1086,48 +1226,120 @@
   function openPickBuff(pending) {
     const cands = Tower.pickCandidates(pending.kind);
     const isPerm = pending.kind === 'permBuff';
-    const label = isPerm ? '永久增益' : (pending.kind === 'skill' ? '技能' : '武器');
+    const isBrand = pending.kind === 'brandBuff';
+    const isLimited = pending.kind === 'limitedBuff';
+    const label = isPerm ? '永久增益' : isBrand ? '烙印' : isLimited ? '限次增益' : (pending.kind === 'skill' ? '技能' : '武器');
+    /* 这一次附的是哪张铭文 —— 决定文案与「已附魔」标记的口径：
+     *   · 虚空铭文 C37（免占位）：标记是「已附魔（虚空铭文·不占位）」；
+     *   · 水晶铭文 C60（效果 ×1.5）：标记是「已附魔（水晶铭文 ×1.5）」。
+     * 身份优先用发牌时写进 `pending.buffId` 的那张；老档没写时退回 Tower 的共用出口
+     *（`activeInscriptionId` —— 与 pickCandidates / hasPickTargets 同一口径，免得标记和候选错位）。 */
+    const inscriptionId = (isPerm && pending.buffId) || (isPerm ? Tower.activeInscriptionId('permBuff', null, pending) : null) || 'C37';
+    const inscriptionName = (TowerData.BUFF_BY_ID[inscriptionId] || {}).name || '铭文';
+    const inscriptionMul = isPerm ? Number(pending.mul) || 0 : 0;
+    /* 【2026-10 第七十六批】「这一条已经吃过**这张**铭文了吗」必须按**铭文种类**判，
+     * 不能一律看 `slotFree` —— 那是**虚空铭文自己的效果**。原来的写法是「凡是 slotFree 就标已附魔」，
+     * 于是（用户实测）水晶铭文触发的三选一里，标出来的却是被虚空附魔过的那几条，
+     * 而被水晶附魔过的反而没有任何标记。
+     * 判据与 tower.js 的 `applyInscription` / `inscriptionEligible` 同一套：
+     *   · 免占位类（虚空铭文 C37，`mods.pickPermanentFree`）→ 记在行上的 `slotFree`，
+     *     **不写 `enchants`**（重复选同一条本来就是空操作）；
+     *   · 倍率类（水晶铭文 C60，`mods.pickPermanentMul`）→ 记在行上的 `enchants`（铭文 id 数组）。 */
+    const inscDef = TowerData.BUFF_BY_ID[inscriptionId] || {};
+    const inscFreeKind = !!(inscDef.mods && inscDef.mods.pickPermanentFree);
+    /** 这一条身上**已经有哪几张铭文**（用 id 表示；虚空记在 slotFree 上，其余记在 enchants 里）。 */
+    const inscIdsOf = (c) => {
+      const out = [];
+      const ench = (c && Array.isArray(c.enchants)) ? c.enchants : [];
+      if (c && c.slotFree === true && ench.indexOf('C37') < 0) out.push('C37');
+      for (const id of ench) if (id && out.indexOf(id) < 0) out.push(id);
+      return out;
+    };
+    /** 这一条是否已经吃过**这次要附的那张**铭文（吃过了再选没有额外收益）。 */
+    const hasThisInsc = (c) => isPerm && (inscFreeKind
+      ? (c.slotFree === true || inscIdsOf(c).indexOf(inscriptionId) >= 0)
+      : inscIdsOf(c).indexOf(inscriptionId) >= 0);
     if (!cands.length) {
-      notice('你还没有任何' + label + '可选，这次强化先留着（之后拿到' + label + '再自动弹出）。', [{ label: '知道了', cls: 'gold', run: () => openEndless() }]);
+      /* 候选 0 个 —— **必须把 pendingPick 收走**（状态机那边已经尽量不挂它了，这里是第二道防线：
+       * 老存档 / 目标刚被卖掉或碎掉）。不收走的话，每次回到这一屏都会重新弹这个空弹窗，
+       * 玩家点不掉也走不了 = 永久卡死（用户实测）。 */
+      Tower.deferPendingPick();
+      notice('你还没有任何' + label + '可选，这次强化先替你留着（之后拿到' + label + '会自动弹出）。',
+        [{ label: '知道了', cls: 'gold', run: () => openEndless() }]);
       return;
     }
-    /* 「已经被虚空铭文附魔过」的要在三选一里标出来（用户口径）：
-     * 它们已经不再占位，再选一次没有额外收益 —— 标出来玩家才不会白选。 */
+    /* 「已经被附魔过」的要在三选一里标出来（用户口径）：
+     * 它们已经不再占位 / 已经吃过这张铭文，再选一次没有额外收益 —— 标出来玩家才不会白选。 */
     /* 【任务2】逐条判定：同名多栏时，只有被附魔过的那**一条**才算「已附魔」。
      * 候选里带了 uid（见 pickCandidates），点击时把它交给 applyPickBuff。
      * 【2026-10 同名逐条】不再用 run.slotFreeIds 按 id 兜底 —— 那会把新拿到的同名件也标成已附魔。 */
-    const isFree = (c) => !!(c && c.slotFree === true);
-    const doneCount = isPerm ? cands.filter((c) => isFree(c)).length : 0;
+    /* 【2026-10 第七十六批】判据见上面的 hasThisInsc()：**只标这一张铭文附魔过的**，
+     * 别再拿 slotFree 一刀切（那是虚空铭文的效果）。 */
+    const doneCount = isPerm ? cands.filter((c) => hasThisInsc(c)).length : 0;
     /* 按钮只写名字，副标题换行显示（modal 按钮是 esc() 输出，用 \n + white-space:pre-line 换行）。
-     * 特殊技能（小宇宙爆发 / 绝对防御 / 龟甲术）不按 Lv 展示，而是按 pickCandidates 给的 note。 */
+     * 特殊技能（小宇宙爆发 / 绝对防御 / 龟甲术）不按 Lv 展示，而是按 pickCandidates 给的 note。
+     * 【2026-10 第七十八批 用户口径】永久增益那一支要**极简**：已经附魔过的那条只写
+     * 「×N 层 · 已附魔」，不要再跟括号（哪张铭文、什么效果）与「再选没有额外收益」这类解释；
+     * 别的铭文强化过的那条也不再补「另有 …」，保持列表干净。 */
     const buttons = cands.map((c) => {
-      const free = isPerm && isFree(c);
+      const done = hasThisInsc(c);
       return {
         label: c.name + '\n' + (isPerm
-          ? ('×' + (c.stacks || 1) + ' 层' + (free ? ' · 已附魔（不占位）' : ''))
-          : (c.note || ('Lv' + (c.level || 1)))),
-        cls: 'small pick-buff-btn' + (free ? ' pick-done' : (pending.kind === 'skill' ? '' : ' gold')),
+          ? ('×' + (c.stacks || 1) + ' 层' + (done ? ' · 已附魔' : ''))
+          : (isBrand ? ('×' + (c.stacks || 1) + ' 份（未破碎）' + (c.off ? ' · 已关闭' : ''))
+            : (isLimited ? ('剩余 ' + (c.uses || 1) + ' 场 → +' + (Number(pending.addUses) || 5) + (c.off ? ' · 已关闭' : ''))
+              : (c.note || ('Lv' + (c.level || 1)))))),
+        cls: 'small pick-buff-btn' + (done ? ' pick-done' : ((pending.kind === 'skill' || isBrand) ? '' : ' gold')),
         run: () => {
-          /* 永久增益走 uid（精确到那一条栏位）；技能 / 武器仍用 id。 */
-          const r = Tower.applyPickBuff(pending.kind, isPerm && c.uid ? c.uid : c.id);
+          /* 永久增益 / 烙印 / 限次增益都走 uid（精确到那一条栏位）；技能 / 武器仍用 id。 */
+          const byUid = (isPerm || isBrand || isLimited) && c.uid;
+          const r = Tower.applyPickBuff(pending.kind, byUid ? c.uid : c.id);
           if (!r.ok) notice(r.msg || '强化失败。');
           openEndless();
         },
       };
     });
-    modal(isPerm ? '附魔 · 选一个永久增益' : ('三选一 · ' + label + '强化'), '<p>' + esc(isPerm
-      ? '从下面这些里选一个永久增益：**被选中的这一条**不再占用永久增益位（本局有效）。'
-        + '同名的其它栏位一旦已经有一条被附魔，就不会再出现在候选里（同名件里只能附魔一条）。'
-        + (doneCount ? '标着「已附魔」的已经生效过了 —— 再选一次不会多出收益，优先挑没标的。' : '')
-      : (pending.kind === 'skill'
-        ? '从下面三个技能里选一个：主动技的触发概率大幅提升；防御技（绝对防御 / 龟甲术）另按被动触发概率加成；'
-          + '小宇宙爆发则是「战斗开始后第一招必定放它」（本局有效）。'
-        : '从下面三把武器里选一个：它的伤害 +100%（本局有效）。')) + '</p>', buttons, { small: true });
+    const title = isPerm ? (inscriptionMul ? (inscriptionName + ' · 选一个永久增益') : '附魔 · 选一个永久增益')
+      : isBrand ? (inscriptionName + ' · 选一个烙印')
+        : isLimited ? (inscriptionName + ' · 选一个限次增益')
+          : ('三选一 · ' + label + '强化');
+    /* 【2026-10 第七十八批 用户口径】永久增益那一支的说明**大幅精简** ——
+     * 只留一句「选中的这条会怎样」，候选行上的标记自己会说话。 */
+    const body = isPerm
+      ? (inscriptionMul
+        ? '选一个永久增益：被选中的这一条本局效果 ×' + inscriptionMul + '。'
+        : '选一个永久增益：被选中的这一条本局不再占用永久位。')
+        + (doneCount ? '标着「已附魔」的再选没有收益。' : '')
+      : isBrand ? '从下面这些烙印里选一个：它**立刻破碎**（同一烙印有几份就一起破碎；破碎是升级 —— 每份都变成全额并永久保留）。'
+        : isLimited ? '从下面这些限次增益里选一个：它的**剩余场次 +' + (Number(pending.addUses) || 5) +
+          '**（烙印类不参与：它们没有「场次」这个概念）。'
+          : (pending.kind === 'skill'
+            ? '从下面三个技能里选一个：主动技的触发概率大幅提升；防御技（绝对防御 / 龟甲术）另按被动触发概率加成；'
+              + '小宇宙爆发则是「战斗开始后第一招必定放它」（本局有效）。'
+            : '从下面三把武器里选一个：它的伤害 +100%（本局有效）。');
+    modal(title, '<p>' + esc(body) + '</p>', buttons, { small: true });
   }
   /* ============================================================
    * 【U12】永久增益「满了换一个」 —— offerPermanentReplace / offerReplace
    * ============================================================ */
   const RARITY_SHORT = ['普通', '稀有', '史诗', '传奇'];
+  /** 铭文附魔的**行内标记**（与 buffTag 的外框同一套数据口径）：虚空 = 不占位、水晶 = 效果 ×N。
+   *  列表里（替换弹窗 / 出售列表 / 交换列表）原本只给虚空留了一句，水晶那条只画了框、
+   *  在这些「挑一条丢掉」的列表上看不出它被 ×1.5 过 —— 这里补上，两边口径一致。
+   *  ⚠ 位置有约束：`test-fixes-round.cjs` 的「需求38」按两个源码锚点切一段出来单独跑
+   *  （从 RARITY_SHORT 那行切到「每 10 层的里程碑奖励」那行），这个函数得落在这一段里面 ——
+   *  挪到 buffTag 旁边会让那段切片缺依赖，那条用例会直接红。 */
+  function enchMark(b) {
+    const free = !!(b && b.slotFree === true);
+    const mul = Number(b && b.enchMul) || 1;
+    return {
+      free: free, mul: mul, crys: mul > 1,
+      freeHtml: free ? '<b class="rp-free">虚空铭文 · 不占位</b>' : '',
+      crysHtml: mul > 1 ? '<b class="rp-crys">水晶铭文 · 效果 ×' + mul + '</b>' : '',
+      freeHint: free ? '<em class="slot-free-hint">虚空铭文 · 不占位</em>' : '',
+      crysHint: mul > 1 ? '<em class="crystal-hint">水晶铭文 · 效果 ×' + mul + '</em>' : '',
+    };
+  }
   /** 永久增益替换弹窗：onPick(entry) 执行实际替换，onCancel() 返回。 */
   function offerPermanentReplace(opts) {
     const o = opts || {};
@@ -1135,13 +1347,14 @@
     const list = orderPermanent(Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent'));
     if (!list.length) { notice('没有可以拿掉的永久增益。'); if (o.onCancel) o.onCancel(); return null; }
     const rows = list.map((b, i) => {
-      const free = b.slotFree === true;
+      const em = enchMark(b);
       return '<button type="button" class="replace-pick r' + b.rarity + '" data-action="rp' + i + '"' +
         ' title="' + esc(b.name + '：' + (b.desc || '')) + '">' +
         '<span class="rp-name">' + esc(b.name) + '</span>' +
         '<span class="rp-meta">' + (RARITY_SHORT[b.rarity] || '') +
           (b.stacks > 1 ? ' · ×' + b.stacks + ' 层' : '') +
-          (free ? ' · <b class="rp-free">虚空铭文·不占位</b>' : '') + '</span>' +
+          (em.free ? ' · ' + em.freeHtml : '') +
+          (em.crys ? ' · ' + em.crysHtml : '') + '</span>' +
         '<span class="rp-desc">' + esc(b.desc || '') + '</span>' +
         '</button>';
     }).join('');
@@ -1158,6 +1371,110 @@
     }
     return m;
   }
+  /* ============================================================
+   * 【U12b】「巡逻」收缴（2026-10 第六十二批；第七十七批去掉翻页）
+   *   openPatrolToll    —— 挑一个**本局当前在生效的最高稀有度**条目交出去
+   *   openPatrolDiscard —— 交出虚空铭文后永久位溢出，再丢一个
+   * 两个列表都**不再分页**（用户口径：去掉右下角的左右翻页，自然上下滚动即可），
+   * 用与「替换永久增益」同一套 `.replace-pick-list`（自带 max-height + overflow-y:auto）。
+   * ============================================================ */
+  /** 收缴列表的一行。`idx` 是它在整份列表（不分页）里的下标，点击时按 `data-action="pt<idx>"` 回传。 */
+  function patrolRowHtml(c, idx) {
+    /* 附魔状态也要标（与替换弹窗同一套标记）：这是「挑一条交出去」的列表，
+     * 玩家得看得出哪一条被铭文强化过，别把 ×1.5 的那条交掉。 */
+    const em = enchMark(c);
+    /* 三类的副标题不一样：背包里的行 / 只剩已损毁层的烙印 / 已附魔成功的铭文。 */
+    const cat = c.cat === 'insc' ? '铭文'
+      : (c.kind === 'limited' ? '限次' : '永久');
+    const bits = [RARITY_SHORT[c.rarity] || '', cat];
+    if (c.cat === 'insc') {
+      bits.push('已附魔 ' + Math.max(1, Number(c.alive) || 1) + ' 条');
+    } else if (c.cat === 'brand') {
+      bits.push('已损毁 ×' + Math.max(1, Number(c.broken) || 1) + '（交出掉 1 层）');
+    } else {
+      if (c.stacks > 1) bits.push('×' + c.stacks + ' 层' + (Number(c.broken) > 0 ? '（含已损毁 ' + c.broken + '）' : '') + '（只掉 1 层）');
+      if (em.free) bits.push(em.freeHtml);
+      if (em.crys) bits.push(em.crysHtml);
+    }
+    return '<button type="button" class="replace-pick r' + c.rarity + '" data-action="pt' + idx + '"' +
+      ' title="' + esc(c.name + '（' + bits.filter((x) => x && x.indexOf('<') < 0).join('·') + '）') + '">' +
+      '<span class="rp-name">' + esc(c.name) + '</span>' +
+      '<span class="rp-meta">' + bits.join(' · ') + '</span>' +
+      '</button>';
+  }
+  /** 收缴弹窗的列表主体（不分页 —— 整份列表一次画完，靠上下滚动看）。 */
+  function patrolListHtml(list) {
+    return '<div class="replace-pick-list">' + list.map((c, i) => patrolRowHtml(c, i)).join('') + '</div>';
+  }
+  function openPatrolToll() {
+    const info = Tower.endlessInfo();
+    const run = info && info.run;
+    const got = Tower.patrolTollCandidates();
+    if (!got || !got.list.length) {       // 没有可交的（理论上不会）：直接放过
+      Tower.finishPatrolToll();
+      openEndless();
+      return null;
+    }
+    const draw = () => {
+      const body = '<p>巡逻失手 —— 交出一个<b>' + (RARITY_SHORT[got.top] || '') + '</b>增益就能继续：' +
+        '只有<b>本局当前还在生效</b>的最高稀有度那一档能用来抵账，<b>破碎过的烙印</b>（按已损毁层数算）与' +
+        '<b>已经附魔成功的铭文</b>也算（血量、层数、试炼币都不受影响）。</p>' +
+        patrolListHtml(got.list);
+      const m = modal('巡逻 · 上交一个增益', body, [{ label: '稍后再说', cls: 'muted', run: () => openEndless() }], { small: true });
+      if (!m || !m.element) return;
+      const actions = {};
+      got.list.forEach((c, idx) => {
+        actions['pt' + idx] = () => {
+          const r = Tower.payPatrolToll(c.ref);
+          if (!r.ok) { notice(r.msg || '上交失败。'); return; }
+          m.close();
+          if (r.needDiscard) { openPatrolDiscard(); return; }
+          Tower.finishPatrolToll();
+          /* 交出不同东西的效果不一样，提示也分开写，玩家才知道自己到底损失了什么。 */
+          const what = c.cat === 'insc' ? '（随机取消一份附魔）'
+            : (r.broken ? '（已损毁层 -1' + (r.backToPool ? '，并退回增益池' : '') + '）'
+              : (r.removed ? '（整栏交出）' : '（掉 1 层）'));
+          notice('【' + (r.name || '增益') + '】已上交' + what + '，继续巡逻。',
+            [{ label: '继续', cls: 'gold', run: () => openEndless() }]);
+        };
+      });
+      C().bind(m.element, actions);
+    };
+    draw();
+    return run;
+  }
+  function openPatrolDiscard() {
+    const list = orderPermanent(Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent'));
+    if (!list.length) { Tower.finishPatrolToll(); openEndless(); return null; }
+    const draw = () => {
+      const rows = list.map((b, i) => {
+        const em = enchMark(b);
+        return '<button type="button" class="replace-pick r' + b.rarity + '" data-action="pd' + i + '"' +
+          ' title="' + esc(b.name + '：' + (b.desc || '')) + '">' +
+          '<span class="rp-name">' + esc(b.name) + '</span>' +
+          '<span class="rp-meta">' + (RARITY_SHORT[b.rarity] || '') + (b.stacks > 1 ? ' · ×' + b.stacks + ' 层' : '') +
+            (em.free ? ' · ' + em.freeHtml : '') + (em.crys ? ' · ' + em.crysHtml : '') + '</span>' +
+          '<span class="rp-desc">' + esc(b.desc || '') + '</span></button>';
+      }).join('');
+      const m = modal('背包满了 · 丢一个',
+        '<p>虚空铭文被收走了，它的「不占位」也随之失效 —— 永久位装不下了，丢掉一个：</p>' +
+        '<div class="replace-pick-list">' + rows + '</div>', [{ label: '稍后再说', cls: 'muted', run: () => openEndless() }], { small: true });
+      if (!m || !m.element) return;
+      const actions = {};
+      list.forEach((b, i) => {
+        actions['pd' + i] = () => {
+          const r = Tower.debugLoseBuff(b.uid);
+          m.close();
+          Tower.finishPatrolToll();
+          notice('丢掉了【' + b.name + '】' + (r && r.ok ? '' : '（失败）'), [{ label: '继续', cls: 'gold', run: () => openEndless() }]);
+        };
+      });
+      C().bind(m.element, actions);
+    };
+    draw();
+    return null;
+  }
+
   function offerShopReplace(index, buff) {
     offerPermanentReplace({
       prompt: '要买下【' + esc(buff.name) + '】，先拿掉下面哪一个？',
@@ -1245,6 +1562,29 @@
    * 【U14】无尽：试炼币商店 —— openShop
    * ============================================================ */
 
+  /** 商店里「消费型」增益的提示（挥金如土 C36 / 豪掷千金 C58）。
+   *  买货架、买铸币、刷新货架**三条路都是消费**，提示口径必须一致 ——
+   *  2026-10 第八十一批用户反馈「买铸币好像不触发」：机制其实一直在算，只是界面从没说过。 */
+  function shopSpendToast(spend) {
+    if (!spend) return;
+    const got = spend.limited;
+    if (got && got.length) {
+      runToast('豪掷千金：获得「' + got.map((id) => (TowerData.BUFF_BY_ID[id] || {}).name || id).join('」「') + '」');
+    }
+    const gained = spend.gained;
+    if (gained && gained.length) {
+      const mm = (TowerData.BUFF_BY_ID.C36 || {}).mods || {};
+      const add = { power: 0, agility: 0, speed: 0, hp: 0 };
+      for (const k of gained) {
+        if (add[k] === undefined) continue;
+        add[k] += (k === 'hp' ? Number(mm.shopSpendHp) || 5 : Number(mm.shopSpendStat) || 1);
+      }
+      const label = { power: '力量', agility: '敏捷', speed: '速度', hp: '生命上限' };
+      const txt = ['power', 'agility', 'speed', 'hp'].filter((k) => add[k] > 0)
+        .map((k) => label[k] + ' +' + add[k]).join('、');
+      if (txt) runToast('挥金如土：' + txt);
+    }
+  }
   function openShop(revisit) {
     const shop = Tower.shopState();
     if (!shop) { notice('商店还没开张：每通过 5 层开放一次。'); return; }
@@ -1270,11 +1610,14 @@
     const owned = Tower.sellListOf('endless');
     const sellRows = owned.length ? owned.map((b) =>
       '<div class="shop-sell-row' + (b.slotFree ? ' slot-free' : '') + '">' + buffTag(b, b.stacks) +
-      (b.slotFree ? '<em class="slot-free-hint">虚空铭文 · 不占位</em>' : '') +
+      enchMark(b).freeHint + enchMark(b).crysHint +
       C().btn('卖出 +' + b.sellPrice, 'sell' + rowRef(b), 'tiny muted') + '</div>').join('') :
       '<div class="small-label">还没有可出售的增益</div>';
     const content = '<div class="tower-shop">' +
       '<h2 class="tower-title">试炼商店 <span class="shop-coins">试炼币 ' + shop.coins + '</span></h2>' +
+      /* 【100 层循环】这一页几件是**按层分档**的（1-20 层 5 件 / 21-40 层 4 件 / 41-100 层 3 件，
+       * 101 层回到 5 件）—— 写出来玩家才知道「深层商店变小了」是规则不是 bug。 */
+      shopTierHint(shop.layer, shop.slots.length) +
       '<div class="shop-shelf">' + slots + '</div>' +
       '<div class="shop-extra">' +
       '<div class="shop-slot retry' + (shop.retrySold ? ' sold' : '') + '"><b>铸币</b>' +
@@ -1289,9 +1632,10 @@
       '<span>' + (function () {
         /* 传 run：把「时来运转」（E12）的刷新提速反映到期望数字上。 */
         const liveRun = (Tower.endlessInfo() || {}).run || null;
-        const now = TowerData.rerollExpectation(shop.rerollFree ? 0 : shop.rerollNextPrice, liveRun);
+        const shelf = Math.max(1, shop.slots.length);
+        const now = TowerData.rerollExpectation(shop.rerollFree ? 0 : shop.rerollNextPrice, liveRun, shelf);
         const nextPaid = shop.rerollFree ? shop.rerollNextPrice : TowerData.rerollPriceAt(shop.rerollCount + 1);
-        const nxt = TowerData.rerollExpectation(nextPaid, liveRun);
+        const nxt = TowerData.rerollExpectation(nextPaid, liveRun, shelf);
         const f = (v) => (Math.round(v * 100) / 100).toFixed(2);
         const speed = now.tiltRateMul > 1 ? '（时来运转：提速 ×' + now.tiltRateMul + '）' : '';
         /* 稀有度收益在 rerollTiltCap（50）那一档封顶：**价格会一直涨**（70→80→90…），
@@ -1300,17 +1644,16 @@
         const tiltCapped = TowerData.rerollQualityCapped
           ? TowerData.rerollQualityCapped(shop.rerollCount + 1)
           : (cap > 0 && now.tilt >= nxt.tilt - 1e-9);
-        return '越贵越好：本次期望史诗 ' + f(now.epics) + ' 件、传奇 ' + f(now.weights[3] * (TowerData.SHOP.slots || 5)) +
+        return '越贵越好：本次期望史诗 ' + f(now.epics) + ' 件、传奇 ' + f(now.weights[3] * Math.max(1, shop.slots.length)) +
           ' 件' + speed + '；' + ((!shop.rerollFree && tiltCapped)
             ? '已到收益上限，期望不再提高（' + (cap > 0 ? cap + ' 币那一档封顶' : '最高价') + '，但价格还会继续涨）'
             : '下次（' + nextPaid + ' 币）期望史诗 ' + f(nxt.epics) + ' 件') +
-          '。当前拥有与已售出的不会再出现' +
+          '。已售出的不会再出现；**限次增益可以重复刷出**（再拿一份就是场次叠加）' +
           /* 讨价还价（E14）：刷新出的每一页都会重新打折，写清件数免得玩家以为只有第一页。 */
           (shop.halfPerPage > 0 ? '。讨价还价：每次刷新出的新一页同样有 ' + shop.halfPerPage + ' 件对折' : '');
       })() + '</span>' +
       C().btn(shop.rerollFree ? '免费刷新' : shop.rerollNextPrice + ' 币刷新', 'reroll', 'small') + '</div></div>' +
       '<h4>出售增益（回收 40%，限次与永久都可卖）</h4>' +
-      '<p class="small-label">按<b>获得的先后</b>排列：<b>最新拿到的在最上</b>（不用往下拖就能卖）；被虚空铭文附魔（不占位）的排在最后。</p>' +
       '<div class="shop-sell">' + sellRows + '</div>' +
       '</div>';
     const p = C().page('challenge', 'stages', content, {
@@ -1324,24 +1667,26 @@
       const r = Tower.buyShopSlot(i);
       if (r && r.needsReplace) { offerShopReplace(i, r.buff); return; }
       if (!r.ok) { notice(r.msg || '买不了。'); return; }
-      /* 豪掷千金（C58）：消费达标时当场给了一个随机限次增益，提示一下名字。 */
-      const got = r.shopSpend && r.shopSpend.limited;
-      if (got && got.length) {
-        runToast('豪掷千金：获得「' + got.map((id) => (TowerData.BUFF_BY_ID[id] || {}).name || id).join('」「') + '」');
-      }
+      shopSpendToast(r.shopSpend);
       openShop(revisit);
     }));
     on(p, 'retry', () => {
       const r = Tower.buyRetryToken();
       if (!r.ok) notice(r.msg || '买不了。');
-      else notice('已购买铸币（现有 ' + r.left + ' 枚）。失败时可以选择回滚本场再打一次。');
+      else {
+        notice('已购买铸币（现有 ' + r.left + ' 枚）。失败时可以选择回滚本场再打一次。');
+        shopSpendToast(r.shopSpend);
+      }
       openShop(revisit);
     });
     on(p, 'reroll', () => {
       const r = Tower.rerollShop();
       if (!r.ok) notice(r.msg || '刷新失败。');
-      else if (r.paid > 0) notice('已花 ' + r.paid + ' 币刷新，本页期望史诗 ' + (r.expect ? r.expect.epics.toFixed(2) : '?') +
-        ' 件 · 下次 ' + r.nextPrice + ' 币' + (r.nextPrice === r.paid ? '（已到最高价）' : ''));
+      else {
+        if (r.paid > 0) notice('已花 ' + r.paid + ' 币刷新，本页期望史诗 ' + (r.expect ? r.expect.epics.toFixed(2) : '?') +
+          ' 件 · 下次 ' + r.nextPrice + ' 币' + (r.nextPrice === r.paid ? '（已到最高价）' : ''));
+        shopSpendToast(r.shopSpend);
+      }
       openShop(revisit);
     });
     owned.forEach((b) => on(p, 'sell' + rowRef(b), () => { Tower.sellBuff(rowRef(b)); openShop(revisit); }));
@@ -1445,7 +1790,7 @@
     const swapOpen = !!shop.swapAllowed;
     const swapRows = owned.length ? owned.map((b) =>
       '<div class="shop-sell-row' + (b.slotFree ? ' slot-free' : '') + '">' + buffTag(b, b.stacks) +
-      (b.slotFree ? '<em class="slot-free-hint">虚空铭文 · 不占位</em>' : '') +
+      enchMark(b).freeHint + enchMark(b).crysHint +
       (swapOpen ? C().btn('拿它交换', 'mintswap' + rowRef(b), 'tiny')
         : '<em class="mint-locked">已刷新 · 不可交换</em>') + '</div>').join('')
       : '<div class="small-label">还没有可以交换的永久 / 限次增益</div>';
@@ -1458,6 +1803,10 @@
       (shop.byBuff ? '<p class="mint-flash">限次增益「铸币商队」触发的商队' +
         (shop.boundary ? '：它顶掉了这一段的结算商店，送客后照旧前往结算点' : '') + '。</p>' : '') +
       (flash ? '<p class="mint-flash">' + esc(flash) + '</p>' : '') +
+      /* 【100 层循环】铸币商店的货架件数是固定的（整百层又整层不开店），
+       * 这里只说明它与试炼商店的分档不同，免得玩家以为「这家店没变小」是 bug。 */
+      '<p class="shop-tier">铸币商店货架固定 <b>' + Math.max(1, Number((TowerData.MINT_SHOP || {}).shelf) || 5) +
+        '</b> 件（不吃试炼商店的按层分档）</p>' +
       '<div class="shop-shelf">' + slots + '</div>' +
       '<div class="shop-extra">' +
       '<div class="shop-slot reroll' + (shop.rerollFree ? '' : ' sold') + '"><b>刷新货架</b>' +
@@ -1568,7 +1917,250 @@
   }
 
   /* ============================================================
+   * 【U18】剧情展示模式（2026-10 用户口径）
+   *
+   * 「讲一段话」专用的模式：**整屏只留塔身 + 文字 + 右下角「继续」** ——
+   * 局内那一堆 UI（增益 / 减益 / 血量 / 环境 / 分数 / 铸币 / 试炼币 / 敌人预告）全都不渲染。
+   * 文字在屏幕中间**逐行逐字**打出来（打字机），点「继续」：
+   *   正在打字 → 立刻补完这一行；这一行打完了 → 下一行；最后一行 → 剧情结束回正常主界面。
+   *
+   * 加剧情**只加数据**（不用碰渲染）：往 STORY_SCRIPTS 里加一条即可
+   *   { id: { once: true|false, lines: ['第一行', '第二行'] } }
+   *   · once: true  一段只播一次（记在存档 `endless().storySeen` 里，例如第一次进店的商人）；
+   *   · once: false 每次触发都播（例如每次攀登的开场），点几下「继续」就能跳过。
+   * 行内标记（打字机按**可见字符**计数，标记本身不占字符）：
+   *   **加粗**    *斜体*    {抖}这一段会抖{/抖}（也认 {shake}…{/shake}）
+   * 字体在 css/tower.css 的 .tower-story-line 里（楷体族，跨平台回退）。
+   * ============================================================ */
+  const STORY_SCRIPTS = {
+    /* 进塔开场：每次「开始攀登」都播（点「继续」可快速跳过）。 */
+    intro: {
+      once: false,
+      lines: [
+        '你推开无尽之塔{抖}厚重{/抖}的门扉，',
+        '一行古老的文字刻在门楣上：',
+        '「凡欲觐见王者，须先**献出自身**。」',
+        '但你无暇顾及于此，',
+        '挑战在前方接踵而至。',
+      ],
+    },
+    /* 第一次进商店前：只播一次（之后进店直接开店，不再打断节奏）。 */
+    merchant: {
+      once: true,
+      lines: [
+        '转过一处阴暗的拐角，你发现一名披着破旧斗篷的商人正坐在路边。',
+        '他的面前摆满了各式各样的货物。',
+        '*「欢迎，勇敢的登塔者！只要价钱合适，这里总有你需要的东西。」*',
+      ],
+    },
+    /* 第 10 层「第二次遇到商人」：只播一次。 */
+    merchant2: {
+      once: true,
+      lines: [
+        '走廊深处，一盏孤灯微微摇曳。',
+        '面容模糊的男人见你走近，缓缓打开身旁的木箱。',
+        '低沉的嗓音开口道：',
+        '**「有些东西不该出现在这座塔里。」**',
+        '**「不过，既然它们已经在这里了，总得有人卖出去，不是吗？」**',
+      ],
+    },
+    /* 用「立即进货」类增益开店的那一刻（E01 / 铸币版 E16）：每次开店都播。 */
+    restock: {
+      once: false,
+      lines: [
+        '伴随着一阵清脆的铃声，那位熟悉的商人已经站在面前。',
+        '「只要价钱合适，就没有我到不了的地方。」',
+        '*「那么，今天想买些什么？」*',
+      ],
+    },
+  };
+  /** 打字机速度（毫秒/字）。 */
+  const STORY_CHAR_MS = 42;
+  /** 剧情 → 主界面的淡出时长（毫秒）；主界面那半边的淡入由 CSS 的 .tower-fade-in 负责。 */
+  const STORY_FADE_MS = 150;
+  /** 当前正在播的那段剧情：{ id, once, line, chars, lines:[{segs,total}], timer }。 */
+  let storyState = null;
+  /** 刚播完剧情：下一次 openEndless 让整页淡入（而不是硬切）。 */
+  let storyFadeIn = false;
+  function storyScript(id) {
+    const s = STORY_SCRIPTS[id];
+    return s && Array.isArray(s.lines) && s.lines.length ? s : null;
+  }
+  /** 把一行拆成 [{text, bold, italic, shake}]（标记本身不进 text，打字机只数可见字符）。 */
+  function storySegments(line) {
+    const segs = [];
+    const re = /\*\*([^*]+)\*\*|\*([^*]+)\*|\{(shake|抖|抖动)\}([\s\S]*?)\{\/\3\}/g;
+    let last = 0, m;
+    const push = (text, tags) => { if (text) segs.push(Object.assign({ text: text }, tags)); };
+    while ((m = re.exec(line))) {
+      push(line.slice(last, m.index), {});
+      if (m[1] != null) push(m[1], { bold: true });
+      else if (m[2] != null) push(m[2], { italic: true });
+      else push(m[4], { shake: true });
+      last = re.lastIndex;
+    }
+    push(line.slice(last), {});
+    return segs;
+  }
+  /** 按「已打出的字符数」把一行渲染成 HTML（加粗 / 斜体 / 抖动在这里落地）。 */
+  function storyHtml(segs, chars) {
+    let left = Math.max(0, chars), out = '';
+    for (const seg of segs) {
+      if (left <= 0) break;
+      const text = seg.text.slice(0, left);
+      left -= text.length;
+      if (!text) continue;
+      let html = esc(text);
+      if (seg.italic) html = '<i>' + html + '</i>';
+      if (seg.bold) html = '<b>' + html + '</b>';
+      if (seg.shake) html = '<span class="tower-story-shake">' + html + '</span>';
+      out += html;
+    }
+    return out;
+  }
+  /** 这一屏该不该走剧情。优先级：
+   *   ① 状态机 / 点「开始攀登」时挂上的 `run.story`；
+   *   ② 用「立即进货」类增益开的店 → 铃声那段（每次开店都播）；
+   *   ③ 第一次遇到商人（商店阶段 + 还没播过）；
+   *   ④ 第 10 层第二次遇到商人（第一次已经播过、这段还没播过）。
+   *  **挑战模式**（首页左下角那颗按钮）下一律返回 null —— 所有文字剧情都跳过。 */
+  function pendingStory(run) {
+    if (!run) return null;
+    if (!Tower.storyEnabled()) return null;
+    if (run.story) return storyScript(run.story) ? run.story : null;
+    if (run.phase === 'shop') {
+      if (run.shopByBuff && !run.shopStoryShown && storyScript('restock')) return 'restock';
+      const seenFirst = Tower.storySeen('merchant');
+      if (!seenFirst && storyScript('merchant')) return 'merchant';
+      if (seenFirst && !Tower.storySeen('merchant2') && Number(run.layer) >= 10 && storyScript('merchant2')) return 'merchant2';
+    }
+    return null;
+  }
+  function storyStopTimer() {
+    if (storyState && storyState.timer) { clearTimeout(storyState.timer); storyState.timer = null; }
+  }
+  /** 开始播某段（已经在播同一段就保持进度，不重头来）。 */
+  function storyBegin(id) {
+    const script = storyScript(id);
+    if (!script) return null;
+    if (storyState && storyState.id === id) return storyState;
+    storyStopTimer();
+    const lines = script.lines.map((raw) => {
+      const segs = storySegments(String(raw));
+      return { segs: segs, total: segs.reduce((n, s) => n + s.text.length, 0) };
+    });
+    storyState = { id: id, once: !!script.once, line: 0, chars: 0, lines: lines, timer: null };
+    return storyState;
+  }
+  /** 已播出的文字（前面几行整行 + 当前行已打出的部分 + 光标）。 */
+  function storyBodyHtml() {
+    const st = storyState;
+    if (!st) return '';
+    const out = [];
+    for (let i = 0; i < st.line; i++) {
+      out.push('<p class="tower-story-line done">' + storyHtml(st.lines[i].segs, st.lines[i].total) + '</p>');
+    }
+    const cur = st.lines[st.line];
+    out.push('<p class="tower-story-line now">' + storyHtml(cur.segs, st.chars) +
+      '<span class="tower-story-caret" aria-hidden="true"></span></p>');
+    return out.join('');
+  }
+  /** 只重画文字节点（打字机每 tick 调它，不整页重画）。 */
+  function storyPaint() {
+    const st = storyState;
+    if (!st || typeof document === 'undefined' || !document || typeof document.querySelector !== 'function') return;
+    const box = document.querySelector('[data-story-text]');
+    if (!box) return;
+    box.innerHTML = storyBodyHtml();
+  }
+  /** 打字机：打出一个字，然后排下一个 tick。 */
+  function storyTick() {
+    const st = storyState;
+    if (!st) return;
+    const cur = st.lines[st.line];
+    if (!cur) { storyFinish(); return; }
+    st.timer = null;
+    if (st.chars < cur.total) {
+      st.chars += 1;
+      storyPaint();
+      if (st.chars < cur.total) st.timer = setTimeout(storyTick, STORY_CHAR_MS);
+      return;
+    }
+  }
+  /** 点「继续」：补完这一行 → 下一行 → 结束。 */
+  function storyAdvance() {
+    const st = storyState;
+    if (!st) return;
+    const cur = st.lines[st.line];
+    storyStopTimer();
+    if (cur && st.chars < cur.total) {           // ① 还在打字 → 立刻补完这一行
+      st.chars = cur.total;
+      storyPaint();
+      return;
+    }
+    if (st.line + 1 < st.lines.length) {         // ② 下一行
+      st.line += 1;
+      st.chars = 0;
+      storyPaint();
+      st.timer = setTimeout(storyTick, STORY_CHAR_MS);
+      return;
+    }
+    storyFinish();                              // ③ 最后一行 → 剧情结束
+  }
+  /** 剧情播完：记「只播一次」、清掉待播标记，然后**淡出→淡入**切回正常主界面。
+   *  【2026-10 用户口径】不要硬切：文字先快速淡出（~150ms），主界面再淡入（~190ms，见 CSS）。 */
+  function storyFinish() {
+    const st = storyState;
+    storyStopTimer();
+    storyState = null;
+    if (st && st.once) { try { Tower.markStorySeen(st.id); } catch (e) {} }
+    /* 「每次开店都播」的那类：给**这家店**记一笔，免得条件还成立又被重播（见 markShopStoryShown）。 */
+    if (st && !st.once) { try { Tower.markShopStoryShown('endless'); } catch (e) {} }
+    try { Tower.clearRunStory('endless'); } catch (e) {}
+    storyFadeIn = true;                 // 下一次 openEndless 让整页淡入
+    if (typeof document !== 'undefined' && document && typeof document.querySelector === 'function') {
+      const box = document.querySelector('[data-story-text]');
+      if (box && box.classList) box.classList.add('tower-story-leaving');
+    }
+    setTimeout(() => { openEndless(); }, STORY_FADE_MS);
+  }
+  /** 剧情模式的整屏内容：留着**标题**（无尽模式 · 第 x 层），文字**没有边框**地居中打字，
+   *  右下角一个「继续」。左下标「第 m/n 行」按用户口径去掉（要沉浸感）。 */
+  function storyModeHtml(st, layer) {
+    if (!st) return '';
+    const body = '<div class="tower-story">' +
+        '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' +
+          Math.max(1, Math.floor(Number(layer) || 1)) + ' 层</h2></div>' +
+      '<div class="tower-story-text" data-story-text>' + storyBodyHtml() + '</div>' +
+      '<div class="tower-story-foot">' + C().btn('继续', 'story-next', 'gold') + '</div></div>';
+    /* 页面每次重画都重新起一次打字机（已经在跑的不要重排）。 */
+    storyStopTimer();
+    const cur = st.lines[st.line];
+    if (cur && st.chars < cur.total) st.timer = setTimeout(storyTick, STORY_CHAR_MS);
+    else if (cur && st.chars === 0 && cur.total === 0) st.timer = setTimeout(storyTick, STORY_CHAR_MS);
+    return body;
+  }
+
+  /* ============================================================
+   * 【U18b】剧情 / 挑战模式开关（无尽首页左下角那颗按钮，2026-10 用户口径）
+   *   · 剧情模式：所有剧情节点照常播（进塔开场、遇商人的几段…）；
+   *   · 挑战模式：**跳过所有文字剧情**，直接进战斗与商店。
+   * 按钮上写的是**当前**模式（点一下切到另一个），悬停给这个模式的具体说明。
+   * 状态存在存档 `endless().storyOn` 上（默认 true = 剧情模式），见 Tower.storyEnabled。
+   * ============================================================ */
+  const STORY_MODE_TIPS = {
+    on: '剧情模式：\n· 进塔开场、第一次与第二次遇到商人、用「立即进货」开店…这些节点会先播剧情（点「继续」推进，正在打字时点一下会立刻补完这一行）\n· 点这颗按钮切到「挑战模式」，之后不再播任何文字剧情',
+    off: '挑战模式：\n· 跳过所有文字剧情，直接进战斗与商店（进塔不再有开场，遇商人不打断节奏）\n· 已经看过的剧情不会被重新播放，但「立即进货」这类每次都播的剧情也会一并跳过\n· 点这颗按钮切回「剧情模式」',
+  };
+  function storyModeButtonHtml() {
+    const on = !!(window.Tower && Tower.storyEnabled && Tower.storyEnabled());
+    const tip = on ? STORY_MODE_TIPS.on : STORY_MODE_TIPS.off;
+    return '<span class="endless-mode-toggle" data-tip="' + esc(tip) + '" title="' + esc(tip) + '" tabindex="0">' +
+      C().btn(on ? '剧情模式' : '挑战模式', 'story-mode', 'gold') + '</span>';
+  }
+
+  /* ============================================================
    * 【U17】模块导出 —— window.TowerUI
    * ============================================================ */
-  window.TowerUI = { openTower, openEndless, openMintShop, openShop, openPickBuff };
+  window.TowerUI = { openTower, openEndless, openMintShop, openShop, openPickBuff, openPatrolToll, openPatrolDiscard };
 })();

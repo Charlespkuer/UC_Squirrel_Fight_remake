@@ -3,6 +3,15 @@
 # 2026-10 已整体移出仓库（git rm --cached），本地留档、代码不再读它。
 references/
 
+# 原版 H5 客户端的源码副本（本机留档）：只用来重新生成 js/gamedict.js 与查原版实现，
+# 运行时**一行都不读**（tools/test-min-deps.cjs 就守着「入口页不加载 js/orig/」），
+# 所以跟 references/ 一样只留本机。tools/gen-vendor-data.cjs 缺了它会给出明确报错。
+js/orig/
+
+# images/_reference/ —— 原版截图、切图出处档案（manifest）、没采用的散图。
+# 同样只作参考：游戏运行只认 images/ui | images/atlas | images/battle。
+images/_reference/
+
 save/
 
 # 根目录的 macOS / Linux 启动器是**本机私货**：里面的原生版路径、浏览器 profile、

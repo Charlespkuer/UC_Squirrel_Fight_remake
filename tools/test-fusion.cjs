@@ -71,7 +71,7 @@ function setup(ids = [21, 21, 21, 22, 201, 202]) {
         return page;
       },
       btn: (label, action) => '<button data-action="' + action + '">' + label + '</button>',
-      spr: (sheet, label) => '<img src="images/classic/sprites/' + sheet + '-' + label + '.png">',
+      spr: (sheet, label) => '<img src="images/ui/sprites/' + sheet + '-' + label + '.png">',
       toast: (message) => toasts.push(message),
       modal: (title, html, buttons) => modals.push({ title, html, buttons }),
     },

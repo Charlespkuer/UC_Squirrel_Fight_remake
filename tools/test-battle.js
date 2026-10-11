@@ -59,7 +59,9 @@ const sandbox = {
 };
 sandbox.window = sandbox;
 vm.createContext(sandbox);
-for (const file of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'references/orig/assets.js', 'references/orig/asset2.js', 'references/orig/animationStr.js', 'js/engine.js', 'js/battle.js']) vm.runInContext(fs.readFileSync(file, 'utf8'), sandbox, { filename: file });
+/* 原版数据只从仓库里的 js/gamedict.js 读（与 index.html 同一个数据源）；
+ * references/ 只是参考资料，不参与运行，跑回归也不该依赖它。 */
+for (const file of ['js/gamedict.js', 'js/engine.js', 'js/battle.js']) vm.runInContext(fs.readFileSync(file, 'utf8'), sandbox, { filename: file });
 const E = sandbox.Engine, B = sandbox.Battle;
 const instances = [];
 const originalPlay = E.playAnim;

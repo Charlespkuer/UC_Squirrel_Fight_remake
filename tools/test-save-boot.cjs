@@ -253,7 +253,7 @@ function loadGame(gameDir, opts) {
   `, ctx, { filename: 'stubs.js' });
 
   const loadErrors = [];
-  for (const f of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/main.js']) {
+  for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/main.js']) {
     const file = path.join(ROOT, f);
     if (!fs.existsSync(file)) continue;
     try { vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, { filename: f }); }
@@ -463,8 +463,13 @@ record('导入建档时的校验：合法存档放行、脏数据拦下', async 
   const check = vm.runInContext(fnSrc + '\nsaveDataError;', ctx, { filename: 'saveDataError.js' });
 
   assert.equal(check(SAVE_32), '', '真实存档必须放行');
-  assert.equal(check(JSON.parse(fs.readFileSync(path.join(ROOT, 'save', 'progress.json'), 'utf8'))), '',
-    '用户磁盘上那份 32 级存档也必须放行');
+  /* 本机运行时的那份存档（save/ 不进仓库，CI / 新机器上不存在）：有就一并验一遍。
+   * 这里**不能硬读**，否则干净的检出直接 ENOENT —— 「本机绿、CI 红」的典型坑。 */
+  const realSave = path.join(ROOT, 'save', 'progress.json');
+  if (fs.existsSync(realSave)) {
+    assert.equal(check(JSON.parse(fs.readFileSync(realSave, 'utf8'))), '',
+      '用户磁盘上那份 32 级存档也必须放行');
+  }
   assert.ok(check({}), '空对象要拦下');
   assert.ok(check([1, 2]), '数组要拦下');
   assert.ok(check({ name: 'x', level: 5, weapons: [], props: {} }), '缺 skills 要拦下');

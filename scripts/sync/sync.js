@@ -97,8 +97,8 @@ const FW_RULE_NAME = 'SSDZ Sync';        // Windows 入站放行规则的名字�
  *   · 未匹配任何模式 → 不忽略（与 git 一致）
  *   · 最后命中的模式先生效（negate 后命中即取消忽略）
  *
- * 注意 `**` 的语义：`images/classic/**/.bak-upscale/` 里的 `**/` 要能匹配
- * **零层或多层**中间目录，否则 .bak-upscale 会被漏掉。
+ * 注意 `**` 的语义：`images/classic/` 下那条 `.bak-upscale/` 忽略规则里的 `**`
+ * 后面紧跟斜杠时，要能匹配**零层或多层**中间目录，否则 .bak-upscale 会被漏掉。
  * ============================================================ */
 const GITIGNORE_PATH = path.join(ROOT, '.gitignore');
 /** 把 gitignore 的通配模式编译成正则（对「相对仓库根」的路径做整串匹配）。
@@ -128,8 +128,8 @@ function gitignoreGlobRegex(pat, dirOnly) {
    *     因为后面紧跟的就是模式本身（例如 `src-tauri/web` 不会命中 `x/src-tauri/web`…
    *     其实会命中，但那正是「同名目录」的合理语义，本仓库没有这种歧义）。
    *   · 目录模式（尾随 /）：命中目录本身或它下面的任何东西。
-   *   · 为什么不用「名字前缀」匹配：`images/classic/**/.bak-upscale/` 绝不该命中
-   *     `images/classic/sprites/xxx.bak-upscale-yyy/…` 这种「只是前缀像」的目录。 */
+   *   · 为什么不用「名字前缀」匹配：`.bak-upscale/` 那条忽略规则绝不该命中
+   *     `xxx.bak-upscale-yyy/` 这种「只是前缀像」的目录。 */
   const tail = dirOnly ? '(?:/.*)?' : '';
   return new RegExp('(?:^|/)' + rx + tail + '$');
 }
@@ -186,6 +186,12 @@ const DEFAULT_IGNORE = [
   'tools/research/tmp-*.png', 'tools/research/battle-check/',
   // macOS 资源分叉（.gitignore 里只有 .DS_Store，挡不住 ._xxx）
   '._*',
+  // 「没有 .gitignore 也能用」的底线：便携包（release.yml）**不带 .gitignore**，
+  // 解压出来的目录同样不能把存档 save/、依赖 node_modules/、原版归档 references/、
+  // 构建/发布产物 out/ dist/ _site/ 这些整包传给对端。
+  // （上面这些在仓库里由 .gitignore 负责，但同步的游戏目录未必是仓库。）
+  'save/', 'node_modules/', 'references/', 'out/', 'dist/', '_site/', '__pycache__/',
+  'package-lock.json', '.DS_Store', 'Thumbs.db', 'desktop.ini',
 ];
 
 

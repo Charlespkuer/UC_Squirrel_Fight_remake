@@ -33,12 +33,16 @@ jobs:
       - name: 单元与集成测试
         shell: bash
         run: |
-          for t in test-state test-balance test-points test-combat-rules test-buff-tags test-battle-drops \
-                   test-main-battle test-extras test-fusion test-stages test-stage-balance \
-                   test-mint-shop test-sync; do
+          # 直接枚举目录里的套件，不再手写清单：以前手写的清单在测试被删/改名后
+          # 不会跟着变（例如 tools/test-balance.cjs 删了，清单还留着），
+          # 于是三个平台都会「Cannot find module」整条挂掉。
+          # 全部跑完再汇总失败，一次就能看到所有问题。
+          fail=0
+          for t in tools/test-*.cjs; do
             echo "──── $t ────"
-            node "tools/$t.cjs"
+            node "$t" || fail=1
           done
+          exit $fail
 
       # 动画回归需要可选依赖 @napi-rs/canvas（三个平台都有预编译包）；装不上就自动 SKIP
       - name: 动画回归（可选依赖）

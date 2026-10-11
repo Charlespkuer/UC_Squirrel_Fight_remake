@@ -1,12 +1,12 @@
 /* ============================================================
  * gamedict.js — 原版数据字典 / 素材清单 / 动画帧表（**运行时数据，不是参考文件**）
  *
- * 这个文件由 tools/gen-vendor-data.cjs 从原版数据自动生成，不要手改。
- * 原版文件本体在 references/orig/（只作参考，不参与运行）；游戏跑起来只认这里的数据，
- * 所以运行过程中不会再引用 references/ 下的任何文件。
+ * 这里是游戏数据的**唯一来源**：从原版客户端（APK 归档）抽取一次之后就直接提交进仓库，
+ * 运行时只读这一份，不依赖 references/ 下的任何东西。
+ * 数据来源（抽取时）：原版 GameDict.js、assets.js、asset2.js、animationStr.js。
  *
- * 数据来源：references/orig/GameDict.js、assets.js、animationStr.js
- * 重新生成：node tools/gen-vendor-data.cjs
+ * ⚠️ 原版归档与抽取脚本都已不在仓库里（references/ 只作参考、不进仓库），
+ *    所以本文件**不会再被重新生成**，改动请直接改这里，并守住上面「唯一来源」的定位。
  * ============================================================ */
 (function () {
   'use strict';

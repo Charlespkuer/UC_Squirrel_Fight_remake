@@ -68,7 +68,7 @@
 找原版数据时按这个顺序找，命中率最高：
 
 1. **`GameDict.js` 字典** —— `new Map("字段1,字段2,…")` + 逐条 `.put(id, [...])`。
-   新版由 `tools/gen-vendor-data.cjs` 抽成 `js/gamedict.js`，**字段名与条目一一对应**，最好比。
+   新版就是 `js/gamedict.js`（原版数据抽取后的唯一存档，已直接提交进仓库；抽取工具已删除），**字段名与条目一一对应**，最好比。
 2. **`MainMovie.as` 内嵌大数组** —— `var xxxArray = [[...],[...]];` 单行超长。
    常见：`equipsArray`(L19142) / `attachmentArray`(L19143) / `propsArray`(L19137) /
    `giftsArray` / `upgradesArray` / `petsInfo`。**新版 gamedict 里没有的，多半就在这类数组里。**

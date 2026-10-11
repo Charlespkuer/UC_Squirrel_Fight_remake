@@ -33,7 +33,7 @@ function setup() {
     getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) } };
   c.window = c; c.self = c;
   vm.createContext(c);
-  for (const f of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js']) {
+  for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js']) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), c, { filename: f });
   }
   c.State.newGame('增益总览测试');

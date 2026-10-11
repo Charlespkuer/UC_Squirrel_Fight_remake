@@ -36,7 +36,7 @@ function findRoot(start) {
 const ROOT = findRoot(__dirname);
 /* 标签系统完全在 tower-data.js 里（不依赖 state.js / tower.js），所以这里只加载它，
  * 这样负向用例可以任意改源码而不用管其它模块。 */
-const LOAD = ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js'];
+const LOAD = ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js'];
 
 function load(dataPatch) {
   const store = new Map();

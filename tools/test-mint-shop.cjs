@@ -31,7 +31,7 @@ function findRoot(start) {
   return path.resolve(start, '..');
 }
 const ROOT = findRoot(__dirname);
-const LOAD = ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js',
+const LOAD = ['js/gamedict.js', 'js/gamedata.js',
   'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js'];
 
 /** 极简「界面桩」：把 tower-ui.js 的页面与弹窗渲染出来（只记 HTML 与按钮处理器），

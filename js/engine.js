@@ -7,11 +7,11 @@
  *   · 图元标签 "75" 为占位/定位点，永远不绘制
  *   · 标签 > 1000 为武器替身槽（1001-1017 / 1101-1117 / 1201-1217）
  *
- * 数据来源：**js/gamedict.js**（由 tools/gen-vendor-data.cjs 从 references/orig/ 抽取生成）：
- *   · AnimationStr —— 动画帧表（references/orig/animationStr.js）
- *   · imgMap       —— 图集帧表（references/orig/assets.js）
- *   · asstes       —— 图片路径表（references/orig/assets.js）
- * 运行时不会去读 references/ 下的任何文件。
+ * 数据来源：**js/gamedict.js**（游戏数据的唯一来源，已直接提交进仓库）：
+ *   · AnimationStr —— 动画帧表
+ *   · imgMap       —— 图集帧表
+ *   · asstes       —— 图片路径表
+ * 运行时不会去读 references/ 下的任何文件（那些只是参考资料）。
  * ============================================================ */
 
 /* ------------------------------------------------------------

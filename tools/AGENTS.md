@@ -15,13 +15,16 @@
    `out/battle-check/`）。2026-10 曾从 `tools/verification/`（118 张）与 `tools/research/`
    （32 张）清掉 60 MB 这类本地产物 —— 不要往 `tools/` 里再堆 PNG。
 3. **不新增 HTML 探针页**（`*-probe.html` / `*-check.html`）。需要交互式验证时先问用户。
-4. **一个改动最多加一条用例。** 优先放进主题相符**且体积小**的套件；主题只在大套件里时
-   （战斗规则 → `test-combat-rules.cjs`）也只能加一条。**严禁**往 `test-fixes-round.cjs`
-   这类 600 KB+ 的历史文件里追加，也不要为了"顺手"多断言几条。
+4. **一个改动最多加一条用例。** 优先放进主题相符**且体积小**的套件。**严禁**往
+   `test-fixes-round.cjs` 这类 600 KB+ 的历史文件里追加，也不要为了"顺手"多断言几条。
    新建测试文件时目标 < 300 行。
 5. **一条 `test('中文描述', ...)` 对应一条可感知的规则。** 禁止为凑覆盖率写
    "把 40 个字段全断言一遍"式的用例；概率类断言必须用 `randomGame()` 之类的真随机，
    或显式固定随机流，两者在注释里写清楚。
+6. **测试只依赖仓库里的东西。** 游戏数据从 `js/gamedict.js` 读（和 `index.html` 同一个数据源），
+   **不要再去读 `references/`**：那只是本机参考资料、不进仓库，CI 检出后根本没有。
+   CI（`.github/workflows/ci.yml`）会枚举 `tools/test-*.cjs` 全跑一遍，所以本地跑通不等于
+   提交后跑通 —— 新增/改名套件不用改 workflow，但也别让套件依赖本机文件。
 
 ## 新增脚本的门槛（三条都满足才留下）
 
@@ -35,7 +38,7 @@
 |---|---|
 | 构建 | `build-release.ps1`（**一键出包**：版本号 patch +1 → 清上一版旧包 → exe/安装包/APK → 清 `target\` 等 5~10 GB 缓存；`scripts\打包.cmd` / `scripts\清缓存.cmd` 是它的双击入口 —— 双击入口一律放 `scripts\`，根目录不放 `.cmd`，薄壳会自动挑 pwsh/powershell 并把参数原样转进来）、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK） |
 | 回归 | `test-*.cjs`（主题套件）、`test-battle.js`、`check-asset-paths.cjs`（资源引用检查） |
-| 数值 / 数据 | `gen-vendor-data.cjs`、`stage-balance.cjs`、`test-balance.cjs` |
+| 数值 / 数据 | `stage-balance.cjs` |
 | 指南 | `publish-guide.md`、`tauri-guide.md` |
 
 > 文档类内容不要写在这里：改动要点写进 `docs/更新记录.md`（见 `docs/AGENTS.md`）。

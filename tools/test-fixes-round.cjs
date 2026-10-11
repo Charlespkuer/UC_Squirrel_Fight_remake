@@ -39,7 +39,7 @@ function setup() {
     getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) } };
   c.window = c; c.self = c;
   vm.createContext(c);
-  for (const f of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js']) {
+  for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js']) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), c, { filename: f });
   }
   c.State.newGame('本轮回归');
@@ -4701,14 +4701,17 @@ test('需求98：传奇保底（B 方案）——repeatable 不再被 ownable �
     '计数 = 最后一格传奇之后的格数：' + T.legendPityOf(extreme) + ' vs ' + expectPity);
   assert.ok(T.legendPityOf(extreme) <= T.legendPityNeed(), '计数不会超过阈值');
 
-  /* ⑥ 战斗奖励走同一套保底 */
+  /* ⑥ 战斗奖励走同一套保底。注意奖励用的是 `endlessPool`，与商店的 `shopPool` **不是同一个池子**
+   *（只在战斗奖励里出的烙印，例如 C53 淘金烙印，就不在 shopPool 里）—— 期望值必须按各自池子算，
+   *  否则保底恰好摇到 C53 时会随机红（本用例历史上的偶发失败点，实测约 1/3 概率）。 */
+  const availChoices = TD.endlessPool.filter((b) => T.ownableOf(extreme, b) && T.poolFilterOf(extreme, b) && b.rarity === 3);
   extreme.legendPity = T.legendPityNeed();
   const picked = T._debugRollChoices('endless', extreme);
   assert.ok(picked.length >= 3, '一组选项至少 3 个');
   const firstPick = TD.BUFF_BY_ID[picked[0].id];
   assert.equal(firstPick.rarity, 3, '战斗奖励的第一个选项应当是保底传奇，实测 ' + firstPick.id);
-  assert.ok(avail.some((b) => b.id === firstPick.id),
-    '保底只可能给当前可用的传奇：' + firstPick.id + '（可用 ' + avail.map((b) => b.id).join('、') + '）');
+  assert.ok(availChoices.some((b) => b.id === firstPick.id),
+    '保底只可能给当前可用的传奇：' + firstPick.id + '（奖励池可用 ' + availChoices.map((b) => b.id).join('、') + '）');
 });
 
 test('需求102：E01「立即进货」在整层最后一场也必须开店（原来被吞掉）', () => {
@@ -5002,7 +5005,7 @@ test('需求107：虚空铭文的降权真的生效（原来份数永远数到 0
   const extreme = mkRun({ permanent: TD.BUFFS.filter((b) => b.rarity === 3 && ['C37', 'C49', 'C14'].indexOf(b.id) < 0)
     .map((b) => ({ id: b.id, stacks: 1 })), fragileGot: { C49: 1 }, pickGot: { C37: 1 }, legendPity: 0 });
   const avail = TD.endlessPool.filter((b) => b.rarity === 3 && T.ownableOf(extreme, b) && T.poolFilterOf(extreme, b));
-  assert.equal(avail.map((b) => b.id).sort().join(','), 'C14,C37,C49', '可用传奇：涅槃 + 虚空铭文 + 终焉烙印');
+  assert.equal(avail.map((b) => b.id).sort().join(','), 'C14,C37,C49,C53', '可用传奇：涅槃 + 虚空铭文 + 终焉烙印 + 淘金烙印');
   const wC14 = T.buffWeightOf(extreme, TD.BUFF_BY_ID.C14);
   const wC37 = T.buffWeightOf(extreme, TD.BUFF_BY_ID.C37);
   const wC49 = T.buffWeightOf(extreme, TD.BUFF_BY_ID.C49);
@@ -5724,7 +5727,7 @@ test('需求135：无尽塔增益介绍补全 —— 每条都写明「最多叠
   assert.equal(note('C01'), '不叠层：每份占一个新栏位', 'C01 这类普通永久件：同名多份 = 多栏位');
   assert.equal(note('C49'), '可无限叠加', 'C49 终焉烙印：无限叠加（份数越多越难再出）');
   assert.equal(note('C52'), '可无限叠加', 'C52 涌泉烙印：无限叠加');
-  assert.equal(note('C39'), '同名唯一，用尽或损毁后才可能再获得', '易碎烙印：损毁也要写进去');
+  assert.equal(note('C39'), '可无限叠加', 'C39 力量烙印：烙印系列按 unlimitedStacks 无限叠层（损毁是逐份摇的，不是「用尽才再获得」）');
   assert.equal(note('E05'), '同名唯一，用尽后才可能再获得', '限次类：用完才可能再获得');
   assert.equal(note('E16'), '同名唯一，用尽后才可能再获得', 'E16 也一样');
   assert.equal(note('E14'), '可重复获得，效果可累积', 'E14 讨价还价：可重复获得');

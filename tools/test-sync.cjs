@@ -253,7 +253,7 @@ async function ping(port) {
       const upd = require(path.join(ROOT, 'scripts', 'update-game.js'));
       ok('更新永远不覆盖存档 / 同步口令 / 取证与构建产物', upd.ignored('save/progress.json')
         && upd.ignored('scripts/sync/sync.config.json') && upd.ignored('node_modules/pkg/index.js')
-        && upd.ignored('references/orig/x.bin') && upd.ignored('src-tauri/target/x') && upd.ignored('.git/config')
+        && upd.ignored('references/x.bin') && upd.ignored('src-tauri/target/x') && upd.ignored('.git/config')
         && !upd.ignored('js/a.js') && !upd.ignored('scripts/index.html'));
 
       const vroot = path.join(TMP, 'vroot');

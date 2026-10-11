@@ -8,11 +8,11 @@
 
 | 标题画面 | 主界面 |
 |---|---|
-| ![标题画面](images/_reference/screenshots/title.png) | ![主界面](images/_reference/screenshots/home.png) |
+| ![标题画面](docs/screenshots/title.png) | ![主界面](docs/screenshots/home.png) |
 
 | 战斗 | 无尽挑战塔 |
 |---|---|
-| ![战斗](images/_reference/screenshots/battle.png) | ![无尽挑战塔](images/_reference/screenshots/endless.png) |
+| ![战斗](docs/screenshots/battle.png) | ![无尽挑战塔](docs/screenshots/endless.png) |
 
 ## 安装与启动
 

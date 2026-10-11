@@ -91,6 +91,9 @@ function makeRoot(dir, name, port) {
   write(path.join(dir, 'tools/research/keep.cjs'), 'module.exports=1\n');
   write(path.join(dir, '.git/config'), '[core]\n');
   write(path.join(dir, '.DS_Store'), 'junk');
+  // 根目录的启动器是本机私货（不进清单）；scripts/ 里的那份是仓库正式副本，必须照常同步
+  write(path.join(dir, '启动游戏.command'), '#!/bin/bash\necho root\n');
+  write(path.join(dir, 'scripts/启动游戏.command'), '#!/bin/bash\necho scripts\n');
   write(path.join(dir, 'scripts/sync/sync.js'), fs.readFileSync(SYNC_SRC, 'utf8'));
   write(path.join(dir, 'scripts/sync/sync.config.json'), JSON.stringify({ name, port, token: TOKEN, peers: {}, ignore: [] }, null, 2));
 }
@@ -153,6 +156,10 @@ async function ping(port) {
     ok('清单里有正常的源文件', names.includes('scripts/index.html') && names.includes('js/a.js') && names.includes('scripts/sync/sync.js'));
     ok('开发截图不进清单，tools/research 下的脚本照常同步',
       !names.some((p) => /^tools\/(verification|research)\/.*\.(png|jpg)$/.test(p)) && names.includes('tools/research/keep.cjs'));
+    /* 根目录的启动器是本机私货（原生版路径/浏览器 profile/权限位都跟机器绑定）→ 不进清单；
+     * 但**只忽略根目录那一个**，scripts/ 里的正式副本必须照常同步（前导 / 的锚定语义容易写错）。 */
+    ok('根目录启动器不进清单，scripts/ 里的正式副本照常同步',
+      !names.includes('启动游戏.command') && names.includes('scripts/启动游戏.command'));
 
     // ---- 路径穿越与忽略路径一律拒绝 ----
     const bad = ['../A/js/a.js', '..%2f..%2fetc%2fpasswd', '/etc/passwd', 'save/progress.json', 'scripts/sync/sync.config.json'];

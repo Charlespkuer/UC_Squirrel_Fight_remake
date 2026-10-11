@@ -5,6 +5,12 @@ references/
 
 save/
 
+# 根目录的 macOS / Linux 启动器是**本机私货**：里面的原生版路径、浏览器 profile、
+# 权限位都跟这台机器绑定，双机同步（scripts/sync/sync.js）与 push 都不该带上它 ——
+# 仓库里给用户双击的那份在 scripts/启动游戏.command（便携包走的就是它）。
+# 前面的 / 表示只匹配仓库根这一个文件，不会误伤 scripts/ 里的正式副本。
+/启动游戏.command
+
 # 依赖与构建产物（本仓库无构建步骤，这些只在本地/CI 出现）
 node_modules/
 package-lock.json

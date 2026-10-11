@@ -139,8 +139,10 @@ node scripts/serve.js     # 起本地静态服务器（带存档接口）
 | `out/` | AI 超分与开发期对比图的**临时工作区**（本地，不进仓库） | 实验对比图与分析脚本；删掉不影响游戏 |
 | `.github/` | CI 与发布 | `ci.yml`（回归）、`pages.yml`（在线试玩版）、`release.yml`（双平台便携 zip）、`tauri.yml`（桌面/移动安装包） |
 
-根目录只有这五样：`squirrel_fight.exe`（Windows 免安装入口）、`README.md`、`LICENSE`（许可协议）、
-`启动游戏.command`（macOS 双击入口）、`.gitignore`（哪些本地产物不进仓库）。
+根目录只有这四样：`squirrel_fight.exe`（Windows 免安装入口）、`README.md`、`LICENSE`（许可协议）、
+`.gitignore`（哪些本地产物不进仓库）。
+macOS/Linux 的本地启动器 `启动游戏.command` 也在根目录，但它是**本机私货**：不进仓库、不参与双机同步
+（`.gitignore` 里显式忽略，且只忽略根目录这一个文件）——仓库里给用户双击的那份在 `scripts/启动游戏.command`。
 **别的都收进二级目录**：`scripts/version.json`（版本标识，游戏内「游戏更新」拿它和远端 tag 对比）、
 `scripts/打包.cmd` / `scripts/清缓存.cmd`（一键出包 / 一键回收磁盘）—— 根目录不再放 `.cmd`。
 换行符规则放在 `scripts/.gitattributes`（`.gitattributes` 与 `.gitignore` 一样按目录生效，

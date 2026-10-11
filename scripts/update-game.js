@@ -41,6 +41,9 @@ const IGNORE = [
   '.cache/', '.vscode/', 'src-tauri/target/', 'src-tauri/dist/', 'src-tauri/web/',
   'src-tauri/icons/', 'src-tauri/gen/', 'src-tauri/node_modules/',
   'scripts/sync/sync.config.json', 'scripts/sync/.cache.json',
+  // 根目录的 macOS/Linux 启动器是本机私货（.gitignore 也忽略了它）：写死不带 /，
+  // 只精确命中「仓库根的那一个文件」，scripts/启动游戏.command 照常更新。
+  '启动游戏.command',
 ];
 const IGNORE_NAMES = ['.DS_Store', 'Thumbs.db', 'desktop.ini'];
 const IGNORE_EXT = ['.log', '.tmp', '.swp'];

@@ -170,6 +170,12 @@ const DEFAULT_IGNORE = [
   // 前缀 / 表示「只匹配游戏目录的根那一层」，所以不会误伤 scripts/ 里的正式副本。
   '/停止游戏.command', '/一键同步.cmd', '/一键同步.command', '/重启同步服务.cmd',
   '/index.html', '/serve.js', '/serve.py', '/start-game.ps1', '/tools/sync/',
+  // 根目录的 macOS/Linux 启动器是**本机私货**（原生版路径 / 浏览器 profile / 权限位都跟机器绑定），
+  // 两台机器之间搬没有意义。.gitignore 里也忽略了它，但这里**必须再写一次**：
+  // ① 便携包的游戏目录未必带 .gitignore；② sync.js 的 .gitignore 解析对前导 / 不做真锚定
+  // （见 gitignoreGlobRegex 的注释），只写 .gitignore 会连 scripts/启动游戏.command 一起忽略。
+  // 这条走 ruleMatcher 的前导 / 分支 → 精确匹配根目录那一个文件，scripts/ 里的照常同步。
+  '/启动游戏.command',
   // 每台机器各不相同的私货：口令 / 端点 / 运行期状态
   'scripts/sync/sync.config.json', 'tools/sync/.cache.json', 'scripts/sync/.cache.json',
   // 同步服务自己的运行期文件（save/ 已被 .gitignore 忽略，这里是双保险）

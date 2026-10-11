@@ -606,7 +606,6 @@
     C().modal('徒弟日供', '<div class="tribute-claim">' +
         '<div class="reward-panel"><div class="reward-row">' + (cards || '<span class="tribute-none">昨日没有可结算的收益</span>') + '</div></div>' +
         detail +
-        '<p class="extra-master-tip">徒弟额外产出的日供，不扣我自己的收入。</p>' +
       '</div>' + C().upsHtml(r.ups),
       [{ label: '确定', run: done }], { small: true });
     return r;

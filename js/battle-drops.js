@@ -24,6 +24,10 @@
    * 【BD1】规则与掉落池
    * ============================================================ */
   const RULES = Object.freeze({ fps: 15, frames: [30, 180, 340], jitter: 130, lifetime: 31 / 15 * 1000 });
+  /* 蓝色碎片（26）按 GData.BLUE_SHARD_DROP_MUL 小幅降期望（2026-10 用户口径）：
+   * **除了碎片竞技场的名次奖励**（那是它专属的产出表，不在拾取池里），所有掉落都吃这个系数。
+   * 白/绿碎片与其它掉落不动；调系数只改 js/gamedata.js 里那一个常量。 */
+  const BLUE_MUL = (typeof GData !== 'undefined' && Number(GData.BLUE_SHARD_DROP_MUL)) || 1;
   const POOL = [
     { id: 15, name: '经验', count: 5, weight: 30 },
     { id: 8, name: '金松果', count: 2, weight: 25 },
@@ -35,7 +39,7 @@
     { id: 46, name: '恶魔果实种子', count: 1, weight: 1 },
     { id: 24, name: '白色碎片', count: 1, weight: 5 },
     { id: 25, name: '绿色碎片', count: 1, weight: 3 },
-    { id: 26, name: '蓝色碎片', count: 1, weight: 1 },
+    { id: 26, name: '蓝色碎片', count: 1, weight: 1 * BLUE_MUL },
   ];
   /* 天梯赛专属：飘出来的碎片就是天梯碎片（合成转化丸），恶魔果实种子多给一些。
    * 依据 references/new/微信图片_20260924010916_259_2.jpg —— 天梯战里飘的是带「?」的碎片。 */
@@ -46,7 +50,7 @@
     { id: 8, name: '金松果', count: 2, weight: 18 },
     { id: 21, name: '技能卷轴', count: 1, weight: 8 },
     { id: 22, name: '武器卷轴', count: 1, weight: 8 },
-    { id: 26, name: '蓝色碎片', count: 1, weight: 6 },
+    { id: 26, name: '蓝色碎片', count: 1, weight: 6 * BLUE_MUL },
   ];
   const poolFor = (kind) => (kind === 'rank' ? LADDER_POOL : POOL);
   /* ============================================================

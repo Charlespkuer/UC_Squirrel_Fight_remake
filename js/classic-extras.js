@@ -32,6 +32,9 @@
    * 【EX1】竞技场（门票/战斗/结算）
    * ============================================================ */
   const ARENA_EXP = [150, 75, 45, 0];
+  /* 碎片竞技场的名次奖励（冠/亚/季/第四，按 4 人两轮结算）——**专属产出，不受
+   * GData.BLUE_SHARD_DROP_MUL 影响**（2026-10 用户口径：除碎片竞技场外所有蓝色碎片掉落才降期望）。
+   * 它没动，由 tools/test-extras.cjs 的「四名依次 8/6/4/3」用例守着。 */
   const ARENA_FRAGMENT_SHARDS = [8, 6, 4, 3];
   function addProp(id, count) { const s = State.state(); s.props[id] = (s.props[id] || 0) + count; }
   function outcome(win, reward, text, again, label, extra) {
@@ -558,6 +561,56 @@
   let masterCandidates = [], recruitCandidates = [];
   let masterSel = 0, recruitSel = 0, apprenticeSel = 0, recruitBusy = false, recruitOwner = null;
   let masterTab = 'master';
+
+  /* ============================================================
+   * 【EX1b】徒弟日供：领取入口与结算弹窗
+   * 活动页（每日礼包那一屏）与师徒页共用这一条路径 —— 两边按钮都调 claimTribute()，
+   * 所以「领一次」的判定只有 State 一处，界面不会各写一套。
+   * ============================================================ */
+  /** 每个徒弟今天还能领的日供（领取前调用，用来做「这份是谁供的」明细）。 */
+  function tributeRows() {
+    return (State.state().prentices || []).map((p) => {
+      const d = State.apprenticeDailyStatus(p);
+      return { name: p.name, level: p.level, exp: d.exp, gold: d.gold, claimable: d.claimable, claimed: d.claimed };
+    });
+  }
+  /** 活动页那张日供卡要显示的状态：能不能领 / 领过了 / 还没徒弟。 */
+  function tributeStatus() {
+    const rows = tributeRows(), total = State.apprenticeDailyTotal();
+    const claimable = (total.exp > 0 || total.gold > 0);
+    return {
+      rows, exp: total.exp, gold: total.gold, count: rows.length, claimable,
+      claimed: rows.length > 0 && !claimable && rows.every((r) => r.claimed),
+    };
+  }
+  /** 领日供 + 结算弹窗。`after` 在玩家确认后回调（活动页用它重画弹窗，师徒页用它回页）。 */
+  function claimTribute(after) {
+    const done = () => { if (after) after(); };
+    const rows = tributeRows().filter((r) => r.claimable);
+    const r = State.claimApprenticeExp();
+    if (!r.ok) { C().toast(r.msg); done(); return r; }
+    /* 结算面板走升级奖励那一套 reward-card（图标 + 数值），比原来一行大字更好认；
+     * 下面再列一条明细，说明这一份日供分别是哪个徒弟供的。 */
+    const card = (cls, art, label, value) => value > 0
+      ? '<div class="reward-card ' + cls + '"><span class="reward-icon">' + art + '</span>' +
+        '<span class="reward-text">' + label + ' +' + esc(value) + '</span></div>' : '';
+    const cards = card('green', '<img alt="" class="reward-icon-img" src="images/classic/new-reference/drop-exp-classic.png">', '经验', r.total) +
+      card('gift', C().icon('prop', 8), '金松果', r.gold);
+    const detail = rows.length
+      ? '<div class="tribute-rows">' + rows.map((x) =>
+          '<div class="tribute-row"><b class="tribute-name">' + esc(x.name) + '</b>' +
+          '<span class="tribute-level">Lv' + esc(x.level) + '</span>' +
+          '<span class="tribute-gain">经验 +' + esc(x.exp) + '　金松果 +' + esc(x.gold) + '</span></div>').join('') +
+        '<p class="tribute-foot">共 ' + rows.length + ' 位徒弟的昨日日供</p></div>'
+      : '';
+    C().modal('徒弟日供', '<div class="tribute-claim">' +
+        '<div class="reward-panel"><div class="reward-row">' + (cards || '<span class="tribute-none">昨日没有可结算的收益</span>') + '</div></div>' +
+        detail +
+        '<p class="extra-master-tip">徒弟额外产出的日供，不扣我自己的收入。</p>' +
+      '</div>' + C().upsHtml(r.ups),
+      [{ label: '确定', run: done }], { small: true });
+    return r;
+  }
   function master(tab) {
     if(recruitOwner !== State.state()){recruitBusy=false;recruitOwner=State.state();masterCandidates=[];recruitCandidates=[];}
     if (tab === 'master' || tab === 'apprentice') masterTab = tab;
@@ -659,16 +712,7 @@
         } },
          { label: '\u8fd4\u56de', cls: 'muted' }], { small: true });
     });
-    on(p, 'master-claim', () => {
-      const r = State.claimApprenticeExp();
-      if (!r.ok) { C().toast(r.msg); master(); return; }
-      const gain = [];
-      if (r.total > 0) gain.push('+' + r.total + ' \u7ecf\u9a8c');
-      if (r.gold > 0) gain.push('+' + r.gold + ' \u91d1\u677e\u679c');
-      C().modal('\u5f92\u5f1f\u65e5\u8d21', '<div class="extra-result"><strong class="cartoon">' + (gain.join('\u3000') || '\u65e0') + '</strong><p>' + esc(r.msg) + '</p>' +
-        '<p class="extra-master-tip">\u6309\u5f92\u5f1f\u7b49\u7ea7\u4e4b\u548c\u7ed9\u7cfb\u6570\uff0c\u4e58\u4f60\u6628\u65e5\u7684\u603b\u6536\u76ca\uff0c\u662f\u989d\u5916\u4ea7\u51fa\u7684\uff0c\u4e0d\u4f1a\u6263\u4f60\u81ea\u5df1\u7684\u6536\u5165\u3002</p></div>' + C().upsHtml(r.ups),
-        [{ label: '\u786e\u5b9a', run: () => master('apprentice') }], { small: true });
-    });
+    on(p, 'master-claim', () => claimTribute(() => master('apprentice')));
     on(p, 'prentice-leave', () => {
       const a = s.prentices[apprenticeSel];
       if (!a) return;
@@ -861,5 +905,6 @@
    * ============================================================ */
   window.ClassicExtras = {
     payArenaEntry, arena, rank, rankShop: () => rankShop(0), lottery, refreshTickets, master, toplist, vip, lotteryPrizes: prizes,
+    claimTribute, tributeStatus,
     rankFoeLevel, rankFoeExpectLevel };
 })();

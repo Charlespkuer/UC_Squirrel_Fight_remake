@@ -1751,9 +1751,14 @@
   /* 体力药剂（1 = 小、2 = 大）：每天各限购 3 个。 */
   const SHOP_DAILY_ENERGY = [1, 2];
   const SHOP_ENERGY_LIMIT = 3;
+  /* 单独点名的每日限购（覆盖上面的默认值）。2026-10 用户口径：
+   * **勇气徽章（39，碎片竞技场入场券）每天 3 个**（原来落在默认的 5）。
+   * 注意道具行里最后一个字段是 useType，不是购买数量 —— 限购只认这里。 */
+  const SHOP_DAILY_LIMITS = { 39: 3 };
   function shopLimit(id) {
     const key = Number(id), prop = propMap.getValue(key);
     if (!prop) return 0;
+    if (SHOP_DAILY_LIMITS[key] != null) return SHOP_DAILY_LIMITS[key];
     if (SHOP_DAILY_PILLS.includes(key)) return SHOP_PILL_LIMIT;
     if (SHOP_DAILY_ENERGY.includes(key)) return SHOP_ENERGY_LIMIT;
     return [13, 16, 17, 18, 19, 37, 38, 47, 48].includes(key) || /宝箱|魔法袋|礼包|永久/.test(prop.name) ? 1 : 5;
@@ -2832,10 +2837,17 @@
       const base = 24 + Math.floor((stageId - 1) / 6);          // 24 白 / 25 绿 / 26 蓝
       const up = star >= 5 ? 2 : star >= 3 ? 1 : 0;
       const step = Math.min(base + up, 26);                     // 蓝碎片封顶
-      const id = up > 0 && Math.random() >= frag.tierUp ? step : base;
-      const count = GData.stageFragmentCount();
-      S.props[id] = (S.props[id] || 0) + count;
-      drop = { id, count, name: propMap.getValue(id).name };
+      let id = up > 0 && Math.random() >= frag.tierUp ? step : base;
+      /* 蓝色碎片（26）**除碎片竞技场外**所有掉落都小幅降期望（2026-10 用户口径）：
+       *   · 熊猫关（基础就是蓝）：这一次掉落干脆不给，白/绿本来也不在这里出；
+       *   · 仙鹤关靠「越级」拿到蓝的那一支：没中就退回绿色的 base。
+       * 只动「蓝」这一档，螳螂的白/绿基础掉落完全不变。 */
+      if (id === 26 && Math.random() >= Number(GData.BLUE_SHARD_DROP_MUL)) id = base === 26 ? 0 : base;
+      if (id) {
+        const count = GData.stageFragmentCount();
+        S.props[id] = (S.props[id] || 0) + count;
+        drop = { id, count, name: propMap.getValue(id).name };
+      }
     }
     const gold = complete ? stageReward(stageId).gold : 0;
     addGold(gold);

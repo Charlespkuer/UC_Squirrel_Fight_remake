@@ -84,6 +84,11 @@
     const span = Math.max(0, STAGE_FRAGMENT.max - STAGE_FRAGMENT.min);
     return STAGE_FRAGMENT.min + Math.floor((random ? random() : Math.random()) * (span + 1));
   }
+  /* 蓝色碎片（道具 26）掉落系数（2026-10 用户口径）：
+   * **除了碎片竞技场**（它的名次奖励 8/6/4/3 张是专属产出，不动），其它所有会掉蓝色碎片的
+   * 地方都按这个系数小幅降期望 —— 普通战斗拾取池、天梯赛拾取池、常驻挑战关卡掉落、挑战塔过关。
+   * 改这一个数就能整体调松/调紧；白/绿碎片与碎片竞技场的产出都不受影响。 */
+  const BLUE_SHARD_DROP_MUL = 0.85;
   const stageScale = (value, factor) => Math.max(1, Math.round(Number(value) * factor));
 
   /* ===== 关卡强度模型：按「推荐等级」标定 =====
@@ -802,7 +807,7 @@
   window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
     STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
     trueLevel, trueSkillValue, trueSkillRow, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
-    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
+    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, BLUE_SHARD_DROP_MUL, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
     SET_BONUS, SET_BONUS_TIER_MUL, SET_BONUS_GLOBAL_MUL, SET_BONUS_HP_MUL, SET_BONUS_FAMILY_FLOOR,
     SET_BONUS_RAW_KEYS, SET_BONUS_ATTR_KEYS, setBonusTable, setBonusTierMul, setBonusScale, setBonusText };
 })();

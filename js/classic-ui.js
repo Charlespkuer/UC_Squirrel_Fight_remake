@@ -18,11 +18,13 @@
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   /** 原版特权 4：超级松鼠的昵称带尊贵标识。 */
   const vipBadge = () => { try { return State.vipActive() ? '<span class="vip-badge" title="超级松鼠">\u2605</span>' : ''; } catch (e) { return ''; } };
-  /** 「活动」里还有东西没领（每日礼包或每日任务）时给图标加提示动效。 */
+  /** 「活动」里还有东西没领（每日礼包 / 徒弟日供 / 每日任务）时给图标加提示动效。 */
   const dailyAttention = () => {
     try {
       if (!State.dailyStatus().claimed) return true;
-      return State.questClaimable() > 0;
+      if (State.questClaimable() > 0) return true;
+      const t = (window.ClassicExtras && ClassicExtras.tributeStatus) ? ClassicExtras.tributeStatus() : null;
+      return !!(t && t.claimable);
     } catch (e) { return false; }
   };
   const $ = (s, root) => (root || document).querySelector(s);
@@ -1427,8 +1429,23 @@
   function openDaily() {
     const d = State.dailyStatus();
     const quests = State.questStatus();
-    const gift = '<div class="daily-gift"><div class="daily-gift-text"><h3>每日礼包</h3><p>每天回家都有一份小礼物：金松果 ×150、挑战书 ×1</p></div>' +
-      btn(d.claimed ? '今日已领取' : '领取礼包', 'claim-gift', d.claimed ? 'muted' : 'gold') + '</div>';
+    /* 领取区（2026-10 用户口径）：每日礼包与**徒弟日供**并排两张卡 —— 日供以前只能在
+     * 村庄 → 师徒页里领，现在活动页也能领（两边共用 ClassicExtras.claimTribute 一条路径）。
+     * 两张卡都用「卡头（标题 + 领取按钮）+ 一行说明」的结构，高度可控，整个弹窗
+     * （两张卡 + 4 条每日任务 + 底部按钮）一次放得下，不需要滚动/翻页。 */
+    const tribute = (window.ClassicExtras && ClassicExtras.tributeStatus)
+      ? ClassicExtras.tributeStatus()
+      : { rows: [], exp: 0, gold: 0, count: 0, claimable: false, claimed: false };
+    const tributeLabel = !tribute.count ? '去收徒' : tribute.claimable ? '领取' : tribute.claimed ? '今日已领取' : '明日结算';
+    const tributeText = !tribute.count ? '去村庄 →「师徒」收个徒弟（次日开始结算）'
+      : '经验 +' + tribute.exp + ' · 金松果 +' + tribute.gold + ' · ' + tribute.count + ' 个徒弟';
+    const claimRow = '<div class="daily-claim-row">' +
+      '<div class="daily-card"><div class="daily-card-head"><h3>每日礼包</h3>' +
+        btn(d.claimed ? '今日已领取' : '领取', 'claim-gift', 'small ' + (d.claimed ? 'muted' : 'gold')) + '</div>' +
+        '<p>金松果 ×150　挑战书 ×1</p></div>' +
+      '<div class="daily-card tribute"><div class="daily-card-head"><h3>徒弟日供</h3>' +
+        btn(tributeLabel, 'claim-tribute', 'small ' + (tribute.claimable ? 'gold' : 'muted')) + '</div>' +
+        '<p>' + esc(tributeText) + '</p></div></div>';
     const rewardIcon = (r) => r.kind === 'gold' ? spr('resource_1', 18)
       : r.kind === 'exp' ? '<img alt="" src="images/classic/new-reference/drop-exp-classic.png">'
         : icon('prop', r.id);
@@ -1449,12 +1466,18 @@
     const list = '<div class="daily-quests"><h3>每日任务<span class="quest-date">' + esc(State.localDate()) + ' · ' +
       (window.Debug && Debug.enabled('shortDay') ? '调试：12 小时一天，0 点与 12 点刷新' : '每天 0 点刷新') + '</span></h3>' + rows + '</div>';
     // 活动页直接给一个「每日抽奖」入口（关掉活动弹窗再进抽奖页）
-    const m = modal('活动', gift + list, [
+    const m = modal('活动', claimRow + list, [
       { label: '每日抽奖', cls: 'gold', run: () => { if (window.ClassicExtras && ClassicExtras.lottery) ClassicExtras.lottery(); } },
       { label: '返回', cls: 'muted' },
     ]);
     const rerender = () => { m.close(); openDaily(); refreshHome(); refreshHeader(); };
     $('[data-action="claim-gift"]', m.element)?.addEventListener('click', () => { toast(State.claimDaily().msg); rerender(); });
+    /* 日供按钮：没徒弟时它是「去收徒」（直接进师徒页），否则走与师徒页同一条领取路径，
+     * 结算弹窗由 ClassicExtras 渲染（reward-card 面板 + 每个徒弟的份额明细）。 */
+    $('[data-action="claim-tribute"]', m.element)?.addEventListener('click', () => {
+      if (!tribute.count) { m.close(); runAction('master'); return; }
+      if (window.ClassicExtras && ClassicExtras.claimTribute) ClassicExtras.claimTribute(rerender);
+    });
     quests.forEach((q) => {
       const b = $('[data-action="quest' + q.index + '"]', m.element);
       if (b) b.addEventListener('click', () => { toast(State.claimQuest(q.index).msg); rerender(); });

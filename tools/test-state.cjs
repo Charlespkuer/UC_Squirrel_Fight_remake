@@ -552,6 +552,9 @@ test('商店每日限购：四种普通药丸每天 3 颗', () => {
   assert.equal(S.shopLimit(2), 3, '大体力药剂每日 3 个');
   assert.equal(S.shopLimit(23), 5, '挑战书仍是 5 件');
   assert.equal(S.shopLimit(13), 1, '转生果每日 1 件');
+  /* 2026-10 用户口径：勇气徽章（碎片竞技场入场券）每天 3 个（原来落在默认的 5）。 */
+  assert.equal(S.shopLimit(39), 3, '勇气徽章每日 3 个');
+  assert.equal(S.purchaseStatus(39).limit, 3);
   // 超级药丸在字典里 buy=false，不进商店，限购多少都无所谓
   for (const id of [41, 42, 43, 44]) assert.equal(S.purchaseStatus(id).buyable, false, id + ' 不进商店');
 });

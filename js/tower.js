@@ -2371,7 +2371,8 @@
       State.addGold(gold);
       tower().maxLayer = run.layer;
       tower().retry = null;
-      if (Math.random() < GData.stageFragmentChance(6)) {
+      /* 挑战塔过关的蓝色碎片也吃「除碎片竞技场外一律小幅降期望」的系数（2026-10 用户口径）。 */
+      if (Math.random() < GData.stageFragmentChance(6) * Number(GData.BLUE_SHARD_DROP_MUL)) {
         const count = GData.stageFragmentCount();
         const id = 26;                                  // 蓝色碎片
         S().props[id] = (S().props[id] || 0) + count;

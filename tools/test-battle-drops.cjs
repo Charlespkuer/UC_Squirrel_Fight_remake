@@ -165,5 +165,34 @@ test('10 个天梯碎片 + 50 金松果随机合成一个转化丸',()=>{
   assert.equal(g.c.State.composeConvertPill().ok,false,'碎片用完后不能再合');
 });
 
+test('蓝色碎片小幅降期望：除碎片竞技场外都吃同一个系数，白/绿不动',()=>{
+  const g=setup(),mul=g.c.GData.BLUE_SHARD_DROP_MUL;
+  assert.ok(mul>0&&mul<1,'系数应当是「小幅下调」：'+mul);
+  // ① 两个拾取池：只有蓝色碎片（26）按系数缩，白/绿与其它掉落原样
+  const blue=(pool)=>pool.find(p=>p.id===26).weight;
+  assert.equal(blue(g.c.BattleDrops.pool),1*mul,'普通战斗拾取池的蓝碎片权重');
+  assert.equal(blue(g.c.BattleDrops.ladderPool),6*mul,'天梯赛拾取池的蓝碎片权重');
+  assert.equal(g.c.BattleDrops.pool.find(p=>p.id===24).weight,5,'白色碎片不变');
+  assert.equal(g.c.BattleDrops.pool.find(p=>p.id===25).weight,3,'绿色碎片不变');
+  // ② 常驻挑战关卡：熊猫关（基础就是蓝）复摇失败就这次不给；仙鹤关的绿碎片不受影响
+  const seq=(c,values)=>vm.runInContext('Math.random=(function(){const q='+JSON.stringify(values)+';let i=0;'+
+    'return function(){return i<q.length?q[i++]:0.5;};})()',c);
+  const stage=(stageId,values)=>{
+    const s=g.c.State.state();s.level=70;s.props={};
+    for(let i=1;i<=18;i++)s.stages[i]={npcIndex:3,passed:true};
+    s.stageRuns={};s.stageRuns[stageId]={attempt:7,npcIndex:3};
+    seq(g.c,values);
+    const r=g.c.State.finishStageBattle(stageId,7,true,1);
+    return r.drop;
+  };
+  assert.equal(stage(13,[0.1,0.5]).id,26,'熊猫关：蓝碎片复摇命中 → 照常掉');
+  assert.equal(stage(13,[0.1,0.99]),null,'熊猫关：复摇没中 → 这次不掉（基础本来就只有蓝）');
+  assert.equal(stage(7,[0.1,0.99]).id,25,'仙鹤★1：绿碎片掉落完全不受蓝碎片系数影响');
+  // ③ 挑战塔过关的那一处也必须用同一个系数（塔模块在这里不加载，改查源码常量）
+  const src=(f)=>fs.readFileSync(path.join(project,f),'utf8');
+  assert.match(src('js/state.js'),/BLUE_SHARD_DROP_MUL/,'关卡掉落要用共享系数');
+  assert.match(src('js/tower.js'),/BLUE_SHARD_DROP_MUL/,'挑战塔过关要用共享系数');
+});
+
 let failed=0;for(const[name,run]of tests){try{run();console.log('PASS',name);}catch(error){failed++;console.error('FAIL',name,error.stack);}}
 console.log(`${tests.length-failed}/${tests.length} battle-drop tests passed`);process.exitCode=failed?1:0;

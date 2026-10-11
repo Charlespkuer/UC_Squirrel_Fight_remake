@@ -416,6 +416,44 @@
       }).join('') +
       '</div></div>';
   }
+  /* ---------- 挑战塔「开打前」的两块预告（2026-10 用户口径） ----------
+   * 进行中那一屏给的是「当前环境 / 本层已被削弱」（envPanelHtml / debuffPanel）；
+   * 开打前这一屏原来只有规则行里的一句话，玩家看不到具体会遇到什么，所以补这两块：
+   *   · 本层可能的环境：按**挑战塔口径**列池子（不带试炼币那类只对无尽塔成立的收益档）；
+   *   · 三侠大招会留下：每位大侠的大招会给本层留下哪种削弱（速杀可规避）。 */
+  function envPreviewHtml(nextLayer) {
+    const TD = window.TowerData;
+    if (!TD || !TD.envPoolFor) return '';
+    const startLayer = Math.max(1, Number(TD.ENV_START_LAYER) || 5);
+    if (Number(nextLayer) < startLayer) {
+      return '<div class="tower-rule mech-bar env-bar"><b>本层可能的环境</b>' +
+        '<span class="mech-none">第 ' + startLayer + ' 层起可能出现（每层随机、持续 4~8 场）</span></div>';
+    }
+    const pool = TD.envPoolFor('tower');
+    const chips = pool.map((raw) => {
+      /* 按挑战塔口径取名（贪婪裂隙 → 厚甲裂隙），免得名字里承诺一个那边没有的收益。 */
+      const def = TD.envDefFor ? TD.envDefFor(raw, 'tower') : raw;
+      const text = TD.envPreviewText ? TD.envPreviewText(raw, 'tower') : String(def.desc || '');
+      const range = TD.envRangeText ? TD.envRangeText(raw, 'tower') : '';
+      const tip = text + (range ? '\n数值区间：' + range : '');
+      return '<span class="mech-chip env-chip env-bad" data-tip="' + esc(tip) + '" title="' + esc(tip) + '" tabindex="0">' +
+        esc(def.name) + '</span>';
+    }).join('');
+    return '<div class="tower-rule mech-bar env-bar"><b>本层可能的环境</b>' + chips + '</div>';
+  }
+  function heroDebuffPreviewHtml() {
+    const TD = window.TowerData;
+    if (!TD || !TD.HERO_DEBUFF) return '';
+    const chips = ['tl', 'xh', 'xm'].map((k) => TD.HERO_DEBUFF[k]).filter(Boolean).map((d) => {
+      const file = CHAR_FILE[d.anim];
+      const face = file ? '<img class="mech-chip-face" alt="" src="images/classic/characters/' + file + '-classic-card.png">' : '';
+      const tip = d.hero + '「' + d.ult + '」命中后：' + d.name + '\n' + d.desc +
+        '\n（只有大招真的打到才会留下；速杀 / 闪避 / 弹反可以规避）';
+      return '<span class="mech-chip debuff-chip" data-tip="' + esc(tip) + '" title="' + esc(tip) + '" tabindex="0">' +
+        face + esc(d.hero || '大侠') + ' · ' + esc(d.name) + '</span>';
+    }).join('');
+    return chips ? '<div class="tower-rule mech-bar"><b>三侠大招会留下</b>' + chips + '</div>' : '';
+  }
   function syncTickets() {
     if (window.ClassicExtras && ClassicExtras.refreshTickets) { try { ClassicExtras.refreshTickets(); } catch (e) { /* ignore */ } }
     if (window.UI && UI.refreshHeader) { try { UI.refreshHeader(); } catch (e) { /* ignore */ } }
@@ -632,6 +670,8 @@
         '<p class="tower-rule" title="' + esc(heroDebuffTips()) + '">每层 1 张挑战书 · 连战只继承血量 · 对手顺序每层随机 · ' +
         '三侠的大招会留贯穿本层的削弱（速杀可规避）· 第 5 层起层内可能出现环境词缀（同无尽塔）· ' +
         '通关另补 3 场挑战的掉落 · 悬停看机制</p>' +
+        /* 开打前就让人看清「这一层会碰上什么」：环境池（挑战塔口径）+ 三侠大招会留下什么。 */
+        envPreviewHtml(info.nextLayer) + heroDebuffPreviewHtml() +
         '<h4 class="tower-plan-title">本层对手预告</h4>' + planHtml(info.preview);
       footer = '<div class="tower-actions tower-footer">' +
         '<span class="tower-book-count">现有挑战书 ' + info.books + ' 张</span>' +

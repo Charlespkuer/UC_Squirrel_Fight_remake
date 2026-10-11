@@ -25,6 +25,12 @@
    **不要再去读 `references/`**：那只是本机参考资料、不进仓库，CI 检出后根本没有。
    CI（`.github/workflows/ci.yml`）会枚举 `tools/test-*.cjs` 全跑一遍，所以本地跑通不等于
    提交后跑通 —— 新增/改名套件不用改 workflow，但也别让套件依赖本机文件。
+7. **读源码做文本断言时先把 CRLF 归一成 LF。** 抠函数体 / 数出现次数 / 「切行 + `/^...$/`」
+   这类断言一律走 `readFileSync(...).replace(/\r\n/g, '\n')`（`test-fixes-round.cjs` 里的
+   `readSrc()` 就是干这个的）。Git for Windows 默认 `core.autocrlf=true`，Windows 检出会把
+   LF 变成 CRLF，行尾多出来的 `\r` 会让锚定正则全部打空 —— 这是「本机绿、Windows 红」的经典
+   原因（2026-10 `需求71` 就这么挂过一次）。另外清临时目录的 `fs.rmSync` 记得带
+   `maxRetries`：Windows 上刚退出的子进程可能还占着文件。
 
 ## 新增脚本的门槛（三条都满足才留下）
 

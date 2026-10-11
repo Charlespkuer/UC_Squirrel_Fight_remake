@@ -2198,13 +2198,17 @@
     if (room <= 0) return;
     const forced = run.layer >= TD.ENV_TWO_LAYER ? 2 : 0;
     const want = Math.max(0, Math.min(room, forced || (Math.random() < TD.envChance(run.layer) ? 1 : 0)));
+    /* 挑战塔没有试炼币经济：环境池用 envPoolFor('tower')，只对无尽塔成立的收益类环境
+     *（贪婪裂隙那种「给试炼币换敌人变强」的）在那边会退化成纯负面条目，所以池子按模式取；
+     * 摇出来的数值也只摇那个模式下真正生效的键。 */
+    const envMode = run.mode === 'tower' ? 'tower' : 'endless';
     for (let k = 0; k < want; k++) {
-      const pool = TD.ENDLESS_ENV.filter((e) => !list.some((x) => x.id === e.id));
+      const pool = TD.envPoolFor(envMode).filter((e) => !list.some((x) => x.id === e.id));
       if (!pool.length) break;
       const pick = pool[Math.floor(Math.random() * pool.length)];
       const dur = TD.ENV_DUR[0] + Math.floor(Math.random() * (TD.ENV_DUR[1] - TD.ENV_DUR[0] + 1));
       /* 数值在区间内随机摇一次并固定在实例上：同一条环境每次出现强度略有不同。 */
-      list.push({ id: pick.id, left: dur, values: TD.rollEnvMods(pick) });
+      list.push({ id: pick.id, left: dur, values: TD.rollEnvMods(pick, envMode) });
     }
   }
   /** 某条环境在本局的**实际数值**（旧档没有 values 时就地补摇一次）。
@@ -2213,10 +2217,15 @@
     const TD = D();
     const def = TD.ENDLESS_ENV_BY_ID[entry && entry.id];
     if (!def) return {};
-    if (!entry.values || typeof entry.values !== 'object') entry.values = TD.rollEnvMods(def);
+    const envMode = run && run.mode === 'tower' ? 'tower' : 'endless';
+    if (!entry.values || typeof entry.values !== 'object') entry.values = TD.rollEnvMods(def, envMode);
     const mul = 1 + Math.max(0, runModTotal(run, 'envPowerMul'));
     const out = {};
-    for (const [k, v] of Object.entries(entry.values)) out[k] = Number(v) * mul;
+    for (const [k, v] of Object.entries(entry.values)) {
+      /* 挑战塔里「只在无尽塔成立」的收益键直接不给（旧档可能带着它）。 */
+      if (envMode === 'tower' && TD.ENDLESS_REWARD_MOD_KEYS.includes(k)) continue;
+      out[k] = Number(v) * mul;
+    }
     return out;
   }
   /** 本局所有生效环境里，某个键的合计（已含环境强化倍率）。 */
@@ -4546,14 +4555,16 @@
         debuffs: (t.run.debuffs || []).slice(),
         /* 环境词缀：挑战塔与无尽塔共用同一套环境（第 5 层起层内可能出现），
          * 主界面要把它画出来（与无尽塔同一个 envPanelHtml），所以这里必须一起给出，
-         * 并且带上「本层摇到的实际数值」与渲染好的文案。 */
+         * 并且带上「本层摇到的实际数值」与渲染好的文案。
+         * 挑战塔按 'tower' 口径渲染：贪婪裂隙那边显示成「厚甲裂隙」，不带试炼币那一档。 */
         env: (t.run.env || []).map((x) => {
-          const def = D().ENDLESS_ENV_BY_ID[x.id] || { id: x.id, name: x.id, desc: '' };
+          const raw = D().ENDLESS_ENV_BY_ID[x.id] || { id: x.id, name: x.id, desc: '' };
+          const def = D().envDefFor(raw, 'tower');
           const values = envValues(t.run, x);
-          const text = D().envText(def, values);
+          const text = D().envText(raw, values, 'tower');
           return Object.assign({}, def, {
             left: x.left, values: values, text: text.text,
-            rangeText: D().envRangeText(def), mech: !!def.mech,
+            rangeText: D().envRangeText(raw, 'tower'), mech: !!def.mech,
           });
         }),
         lastMaxHp: Math.max(0, Number(t.run.lastMaxHp) || 0),

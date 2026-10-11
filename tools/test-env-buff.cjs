@@ -215,6 +215,42 @@ test('旧档兼容：没有 values 的环境实例会自动补摇一次', () => 
   assert.ok(e.rangeText, '应当带数值区间');
 });
 
+test('挑战塔的环境不承诺试炼币：贪婪裂隙在塔里改名「厚甲裂隙」，只剩敌方生命上限', () => {
+  const c = setup();
+  const TD = c.TowerData;
+  const greed = TD.ENDLESS_ENV_BY_ID.greed;
+  const values = { coinBonus: 0.5, enemyMaxHpMul: 0.15 };
+  // ① 无尽塔照旧：文案提试炼币、数值也真的摇得出来
+  const endlessText = TD.envText(greed, values);
+  assert.match(endlessText.text, /试炼币 \+50%/, '无尽塔照旧显示试炼币加成：' + endlessText.text);
+  assert.ok(TD.rollEnvMods(greed, 'endless').coinBonus > 0, '无尽塔照旧摇出试炼币键');
+  // ② 挑战塔：改名 + 文案与数值都不再有无尽收益那一档
+  const towerDef = TD.envDefFor(greed, 'tower');
+  assert.equal(towerDef.name, '厚甲裂隙', '挑战塔里改名为厚甲裂隙');
+  assert.equal(Object.keys(towerDef.mods).includes('coinBonus'), false, '塔里的 mods 不含 coinBonus');
+  const towerText = TD.envText(greed, values, 'tower');
+  assert.ok(!/试炼币/.test(towerText.text), '塔里的文案不该再提试炼币：' + towerText.text);
+  assert.match(towerText.text, /敌方生命上限 \+15%/);
+  assert.equal(TD.rollEnvMods(greed, 'tower').coinBonus, undefined, '塔里也摇不出试炼币键');
+  assert.equal(TD.envRangeText(greed, 'tower'), '10% ~ 18%', '区间只列真正生效的那一档');
+  assert.match(TD.envPreviewText(greed, 'tower'), /敌方生命上限 10%~18%/, '开打前的预告写区间，不写现摇值');
+  // ③ 抽取池：只剩无尽收益词条的环境进不了塔池；贪婪裂隙改名后仍在池子里
+  const pool = TD.envPoolFor('tower');
+  assert.ok(!pool.some((e) => Object.keys(e.mods || {}).every((k) => TD.ENDLESS_REWARD_MOD_KEYS.includes(k))),
+    '只剩无尽收益词条的环境不该进挑战塔的池子');
+  assert.ok(pool.some((e) => e.id === 'greed'), '贪婪裂隙仍留在塔池里（已改名）');
+  assert.ok(pool.map((e) => TD.envDefFor(e, 'tower').name).includes('厚甲裂隙'));
+  // ④ 塔里实际生效的数值同样剔掉试炼币（连旧档里注入的 values 也算）
+  assert.ok(c.Tower.startTowerRun().ok, '应该能开一层挑战塔');
+  const towerRun = c.Tower._debugRun('tower');
+  towerRun.env = [{ id: 'greed', left: 4, values: values }];
+  const e = c.Tower.towerInfo().run.env[0];
+  assert.equal(e.name, '厚甲裂隙');
+  assert.equal(e.values.coinBonus, undefined, '塔里生效的数值不含试炼币：' + JSON.stringify(e.values));
+  assert.ok(e.values.enemyMaxHpMul > 0, '敌方生命上限那一档照常生效');
+  assert.ok(!/试炼币/.test(e.text), '塔里的当前环境文案也不提试炼币：' + e.text);
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

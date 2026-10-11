@@ -172,7 +172,12 @@
     { id: 'frost', name: '寒霜锁链', bad: true, noReflect: true,
       mods: { enemySpeedMul: [-0.09, -0.05, 'pct'], selfSpeedMul: [-0.19, -0.11, 'pct'] },
       desc: '敌方速度 %enemySpeedMul%，我方速度 %selfSpeedMul%' },
-    { id: 'greed', name: '贪婪裂隙', bad: true, noReflect: true, mods: { coinBonus: [0.35, 0.6, 'pct'], enemyMaxHpMul: [0.10, 0.18, 'pct'] },
+    { id: 'greed', name: '贪婪裂隙', bad: true, noReflect: true,
+      /* 挑战塔（mode === 'tower'）没有试炼币经济：那边显示成「厚甲裂隙」，只保留
+       * 「敌方生命上限 +」这一档 —— 见 envDefFor() / envText(..., 'tower')。
+       * 不改这里的数据：无尽塔照旧吃 %coinBonus%。 */
+      towerName: '厚甲裂隙', towerDesc: '敌方生命上限 %enemyMaxHpMul%',
+      mods: { coinBonus: [0.35, 0.6, 'pct'], enemyMaxHpMul: [0.10, 0.18, 'pct'] },
       desc: '我方试炼币 %coinBonus%，但敌方生命上限 %enemyMaxHpMul%' },
     { id: 'dusk', name: '血色黄昏', bad: false, mods: { bothLifestealPct: [0.10, 0.18, 'pct'] },
       desc: '双方吸血 %bothLifestealPct%' },
@@ -186,6 +191,39 @@
       desc: '三侠战胜利后有 %repeatChance% 概率立刻再战同一场（每场战斗至多触发一次；重复的战斗同样计入叠层）' },
   ]);
   const ENDLESS_ENV_BY_ID = Object.freeze(ENDLESS_ENV.reduce((m, e) => (m[e.id] = e, m), {}));
+  /* ============================================================
+   * 环境词缀的「模式差异」（2026-10 用户口径）
+   *
+   * 挑战塔与无尽塔共用这同一份环境表，但**挑战塔没有试炼币经济**：
+   *   · 只对无尽塔成立的收益类词条（`coinBonus` 之类）在挑战塔里一律剔除 ——
+   *     否则环境会承诺一个拿不到的收益（贪婪裂隙原来在挑战塔里就是这么一句空话）；
+   *   · 宝石/词条被剔光的环境不进挑战塔的抽取池（`envPoolFor('tower')`）；
+   *   · 名字/说明带收益口吻的（贪婪裂隙），在挑战塔用 `towerName`/`towerDesc` 覆盖成
+   *     只描述真实效果的名字（厚甲裂隙）。
+   * 无尽塔完全不受影响：那边照旧显示贪婪裂隙、照旧吃试炼币加成。
+   * ============================================================ */
+  /** 「只在无尽塔成立」的收益类词条键：挑战塔的环境里一律不出现。 */
+  const ENDLESS_REWARD_MOD_KEYS = Object.freeze(['coinBonus']);
+  /** 某个模式下这条环境的定义：挑战塔优先用 towerName / towerDesc 覆盖。 */
+  function envDefFor(def, mode) {
+    if (!def || mode !== 'tower') return def;
+    if (!def.towerName && !def.towerDesc) return def;
+    const out = Object.assign({}, def);
+    if (def.towerName) out.name = def.towerName;
+    if (def.towerDesc) out.desc = def.towerDesc;
+    /* 塔里的 mods 只留真正生效的那几个键（文案与数值都按这份走）。 */
+    out.mods = {};
+    for (const [k, v] of Object.entries(def.mods || {})) {
+      if (ENDLESS_REWARD_MOD_KEYS.includes(k)) continue;
+      out.mods[k] = v;
+    }
+    return out;
+  }
+  /** 该模式可抽取的环境池：剔掉「只剩无尽收益词条」的环境。 */
+  function envPoolFor(mode) {
+    if (mode !== 'tower') return ENDLESS_ENV;
+    return ENDLESS_ENV.filter((e) => Object.keys(e.mods || {}).some((k) => !ENDLESS_REWARD_MOD_KEYS.includes(k)));
+  }
   /** 「幻影回响」在该层的概率区间：下沿固定 17%，上沿随层数从 17% 抬到 23%
    *  （第 1 层 17%，之后每层 +0.5%，第 13 层起封顶 23%）。
    *  这样「17~23%」这个区间本身就是**随层数展开**的，后期更容易触发。 */
@@ -208,10 +246,13 @@
     for (const [key, spec] of Object.entries((def && def.mods) || {})) out[key] = Array.isArray(spec) && spec[2] === 'pct';
     return out;
   }
-  /** 从一条环境的 mods 区间里取一组随机值 → { key: value }（每条环境自己摇一次）。 */
-  function rollEnvMods(def) {
+  /** 从一条环境的 mods 区间里取一组随机值 → { key: value }（每条环境自己摇一次）。
+   *  传 mode（'tower' / 'endless'）就只摇那个模式下真正生效的键 —— 挑战塔不会摇出
+   *  试炼币之类「只在无尽塔成立」的收益键（见 envDefFor）。 */
+  function rollEnvMods(def, mode) {
+    const d = envDefFor(def, mode);
     const out = {};
-    for (const [key, spec] of Object.entries((def && def.mods) || {})) {
+    for (const [key, spec] of Object.entries((d && d.mods) || {})) {
       const [lo, hi] = envRange(spec);
       out[key] = lo + Math.random() * (hi - lo);
     }
@@ -224,29 +265,47 @@
     if (isPct) return (v >= 0 ? '+' : '−') + Math.abs(Math.round(v * 100)) + '%';
     return (v >= 0 ? '+' : '−') + Math.abs(Math.round(v * 10) / 10);
   }
-  /** 把模板里的 %key% 用实际值渲染出来 → { text, values, keys }。 */
-  function envText(def, values) {
-    const v = values || rollEnvMods(def);
+  /** 把模板里的 %key% 用实际值渲染出来 → { text, values, keys }。
+   *  mode === 'tower' 时用挑战塔那套名字/说明（例如贪婪裂隙 → 厚甲裂隙，只写敌方生命上限）。 */
+  function envText(def, values, mode) {
+    const d = envDefFor(def, mode);
+    const v = values || rollEnvMods(d);
     /* 「幻影回响」的数值本身就是概率，直接按摇到的值渲染（不用「区间」写法），
      * 免得和别的环境一样显示成「+17%~+23%」。 */
 
     const keys = [];
-    const text = String(def.desc || '').replace(/%([\w]+)%/g, (_, key) => {
+    const text = String((d && d.desc) || '').replace(/%([\w]+)%/g, (_, key) => {
       if (!keys.includes(key)) keys.push(key);
-      return envValueText(def, key, v);
+      return envValueText(d, key, v);
     });
     return { text: text, values: v, keys: keys };
   }
-  /** 区间预览文字（悬停里说明「这条环境的数值范围」）。 */
-  function envRangeText(def) {
-    const pctKeys = envPctKeys(def);
-    return Object.keys(def.mods || {}).map((key) => {
-      const [lo, hi] = envRange(def.mods[key]);
+  /** 区间预览文字（悬停里说明「这条环境的数值范围」）。mode 决定列哪几档（见 envDefFor）。 */
+  function envRangeText(def, mode) {
+    const d = envDefFor(def, mode);
+    const pctKeys = envPctKeys(d);
+    return Object.keys((d && d.mods) || {}).map((key) => {
+      const [lo, hi] = envRange(d.mods[key]);
       const fmt = pctKeys[key]
         ? (n) => Math.round(n * 100) + '%'
         : (n) => String(Math.round(n * 10) / 10);
       return fmt(lo) + ' ~ ' + fmt(hi);
     }).join('，');
+  }
+  /** **预告**用文案：把模板里的 %key% 换成「区间」而不是现摇一个值
+   *（挑战塔开打前那一屏列的是「本层可能遇到什么」，写一个具体数值会误导）。 */
+  function envPreviewText(def, mode) {
+    const d = envDefFor(def, mode);
+    const pctKeys = envPctKeys(d);
+    return String((d && d.desc) || '').replace(/%([\w]+)%/g, (_, key) => {
+      const spec = (d.mods || {})[key];
+      if (!spec) return '';
+      const [lo, hi] = envRange(spec);
+      const fmt = pctKeys[key]
+        ? (n) => Math.round(n * 100) + '%'
+        : (n) => String(Math.round(n * 10) / 10);
+      return fmt(lo) + '~' + fmt(hi);
+    });
   }
   /* 环境词缀的触发曲线：第 5 层 20%（= 0.14 + 1×0.06），之后每层 +6%，
    * 第 15 层到 80% 封顶（0.14 + 11×0.06 = 0.80）。三个数字抽成常量，调平衡只动这里。
@@ -747,13 +806,13 @@
    *   · 熊猫「压制」：每次命中随机锁一把武器 / 一个技能，本层最多 maxTimes 个。
    * （大招每场只放一次，所以同一位大侠在一层里命中几次，取决于幻影回响 / 时间回廊这类「再打一场」。） */
   const HERO_DEBUFF = Object.freeze({
-    tl: { anim: 'tl', ult: '疾风镰刀舞', kind: 'maxHp', name: '重伤',
+    tl: { anim: 'tl', hero: '螳螂', ult: '疾风镰刀舞', kind: 'maxHp', name: '重伤',
       pctRange: [0.03, 0.06], capPct: 0.15,
       desc: '大招命中：生命上限 −3%~6%（本层累计最多 −15%）' },
-    xh: { anim: 'xh', ult: '仙鹤展翅', kind: 'stat', name: '战吼',
+    xh: { anim: 'xh', hero: '仙鹤', ult: '仙鹤展翅', kind: 'stat', name: '战吼',
       pctRange: [0.05, 0.10], maxTimes: 3,
       desc: '大招命中：随机一项属性 −5%~10%（本层最多 3 次）' },
-    xm: { anim: 'xm', ult: '熊掌震地', kind: 'lock', name: '压制', maxTimes: 2,
+    xm: { anim: 'xm', hero: '熊猫', ult: '熊掌震地', kind: 'lock', name: '压制', maxTimes: 2,
       desc: '大招命中：随机锁住一个武器或技能（本层最多 2 个）' },
   });
 
@@ -1780,6 +1839,7 @@
     endlessLevel, endlessSegment, endlessMult, endlessMechStacks, endlessMechs, ENDLESS_MECH_MAX, endlessTickets,
     GEAR_TIER, gearKeyForLayer, gearTierCap, ENDLESS_BOSS_POOL,
     ENDLESS_ENV, ENDLESS_ENV_BY_ID, envChance, rollEnvMods, envText, envRange, envRangeText, envPctKeys,
+    envPoolFor, envDefFor, ENDLESS_REWARD_MOD_KEYS, envPreviewText,
     ENV_START_LAYER, ENV_TWO_LAYER, ENV_MAX, ENV_DUR, repeatChanceInterval,
     ENV_CHANCE_START, ENV_CHANCE_STEP, ENV_CHANCE_CAP, ENV_CHANCE_CAP_LAYER,
     ENDLESS_MECH_ORDER, ENDLESS_CONSOLATION_LAYER, SCORE, COINS, SHOP, shopPrice,

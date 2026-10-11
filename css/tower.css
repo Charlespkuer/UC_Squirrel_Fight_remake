@@ -684,6 +684,9 @@
 .buff-tag.r3 { background: linear-gradient(#fff6c8, #ffe08a); }
 .hex-card.r3 .hex-ribbon { background: linear-gradient(#ffd76a, #e0a316); color: #5a3c00; }
 .mech-chip.debuff-chip { background: #ffe9e2; border-color: #e0a99c; color: #8a3a30; }
+/* 挑战塔开打前的「三侠大招会留下」胶囊：带一张小头像，和进行中的削弱卡对得上 */
+.mech-chip .mech-chip-face { width: 26px; height: 26px; border-radius: 50%; object-fit: cover;
+  box-shadow: 0 0 0 2px #fff8e4; align-self: center; }
 
 /* 第 1 项：进塔页的增益集锦 + BOSS 一览 */
 .catalog-row { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0; }

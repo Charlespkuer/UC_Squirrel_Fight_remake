@@ -32,6 +32,13 @@ function findRoot(start) {
 }
 const ROOT = findRoot(__dirname);
 
+/** 读仓库里的源码做文本断言：**一律把 CRLF 归一成 LF**。
+ *  Git for Windows 默认 core.autocrlf=true，Windows 上检出后仓库里存的 LF 会变 CRLF，
+ *  行尾多出来的 \r 会让 `/^\s*\}$/` 这类锚定正则全部打空（本文件好几处用「切行 + 锚定正则」
+ *  抠真实函数体，实测在 CRLF 检出下 需求71 直接 'limitBadgeText is not defined'）。
+ *  统一从这里读，文本断言就与平台无关 —— 这正是 Windows CI 红、本机绿的原因。 */
+function readSrc(...parts) { return fs.readFileSync(path.join(ROOT, ...parts), 'utf8').replace(/\r\n/g, '\n'); }
+
 function setup() {
   const store = new Map();
   class CD extends Date { static now() { return new Date(2026, 8, 26, 12).getTime(); } }
@@ -40,7 +47,7 @@ function setup() {
   c.window = c; c.self = c;
   vm.createContext(c);
   for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js']) {
-    vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), c, { filename: f });
+    vm.runInContext(readSrc(f), c, { filename: f });
   }
   c.State.newGame('本轮回归');
   const S = c.State.state();
@@ -263,7 +270,7 @@ test('需求7：商店传奇卡有价格、能买能卖（不再 NaN）', () => 
 });
 
 test('需求8：每日抽奖后抽奖卷数量即时刷新（且不依赖全局 $$）', () => {
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'classic-extras.js'), 'utf8');
+  const src = readSrc('js', 'classic-extras.js');
   // refreshTickets 不能再引用不存在的全局 $$（它只在 classic-ui.js 内部）
   const fnStart = src.indexOf('function refreshTickets()');
   assert.ok(fnStart > 0, '应当有 refreshTickets');
@@ -422,14 +429,14 @@ test('需求9.9：涌泉烙印（C52）真的生效 —— 师父驾到等治疗
   assert.equal(withC52, 18, '涌泉烙印 1 层时应当回 18（16×1.1），实测 ' + withC52);
 
   /* ---- 3) 与其它回血类 buff 的联动：开战回血 / 胜利回血 / 精英回血 / 获得回血 ---- */
-  const towerSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  const towerSrc = readSrc('js', 'tower.js');
   assert.match(towerSrc, /0\.03 \* c11 \* g \* healBonusMul\(run\), refMax\)/, 'C11 胜利回血要吃治疗加成');
   assert.match(towerSrc, /eliteHealAfter \* g \* healBonusMul\(run\)/, 'C13 精英回血要吃治疗加成');
   assert.match(towerSrc, /healOnGainPct\) \* globalMul\(run\) \* healBonusMul\(run\)/, '获得时回血要吃治疗加成');
   assert.match(towerSrc, /agg\.startHealPct \* healBonusMul\(run\)/, '开战回血（C10/C16/C17、N08）要吃治疗加成');
   assert.match(towerSrc, /function healBonusMul\(run\) \{ return 1 \+ fragileHealBonus\(run\); \}/, '治疗加成倍率的定义');
   /* sim 侧：healOf 统一读 fighter.healMul（这就是「师父驾到不生效」的根因） */
-  const simSrc = fs.readFileSync(path.join(ROOT, 'js', 'sim.js'), 'utf8');
+  const simSrc = readSrc('js', 'sim.js');
   assert.match(simSrc, /healMul: Number\.isFinite\(Number\(f\.healMul\)\)/, 'makeCombatant 必须把赛前的治疗倍率读进来');
   assert.match(simSrc, /function healOf\(c, amount\) \{ return Math\.max\(0, Math\.round\(Number\(amount\) \* \(c\.healMul == null \? 1 : c\.healMul\)\)\); \}/,
     '所有治疗都走 healOf（枯泉封疗也是改这个字段）');
@@ -568,7 +575,7 @@ test('需求9.8：店的方向按「怎么开的」走 —— 战后立即进货
    * 用户报过：E01「立即进货」开的店进得去出不来 —— 根因就是这一支只 openEndless()
    * 而没调 Tower.closeShop，phase 还停在 'shop'，首页按钮继续写「进入试炼商店」。 */
   {
-    const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+    const uiSrc = readSrc('js', 'tower-ui.js');
     const at = uiSrc.indexOf("on(p, 'leave'");
     assert.ok(at > 0, '找不到商店页的「离开」按钮');
     const body = uiSrc.slice(at, at + 800);
@@ -590,7 +597,7 @@ test('需求9.8：店的方向按「怎么开的」走 —— 战后立即进货
 test('需求9.0：无尽塔首页在「战后待选牌」状态下必须能渲染（openEndless 里不能有裸 mode）', () => {
   const c = setup();
   const T = c.Tower;
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const src = readSrc('js', 'tower-ui.js');
   const bodyOf = (head) => {
     const at = src.indexOf(head);
     assert.ok(at >= 0, '源码里应当有 ' + head);
@@ -671,7 +678,7 @@ test('需求9.1：玉石俱焚确实生效 —— 战斗内双方血量上限真
 
   /* 战斗回放要消费这个 payload（否则只看到飘字、看不到上限变化）——
    * 把回放里的纯函数抠出来直接跑：血条上限与当前血量都要被压低。 */
-  const battleSrc = fs.readFileSync(path.join(ROOT, 'js', 'battle.js'), 'utf8');
+  const battleSrc = readSrc('js', 'battle.js');
   assert.match(battleSrc, /function applyRoundCaps\(maxHpArr, hpsArr, r\)/, '回放要有 applyRoundCaps');
   assert.match(battleSrc, /上限 ' \+ maxHp\[side\]/, '上限变化时要有飘字提示');
   const fn = (() => {
@@ -763,11 +770,11 @@ test('需求9.3：无尽塔主界面右上角标注「本场战斗获得多少�
   }
 
   /* ---- 界面接线：试炼币那一项要渲染出 +N 的增量，并写进悬停 ---- */
-  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const ui = readSrc('js', 'tower-ui.js');
   assert.match(ui, /delta:\s*gained/, '试炼币项要带上 delta 字段');
   assert.match(ui, /currency-delta/, '要渲染出 .currency-delta 增量元素');
   assert.match(ui, /上一场战斗获得/, '悬停里要说明这是上一场战斗获得的');
-  const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8');
+  const css = readSrc('css', 'tower.css');
   assert.match(css, /\.tower-currency \.currency-delta/, '增量要有自己的样式');
 });
 
@@ -789,7 +796,7 @@ test('需求9.2：玉石俱焚（C57）双塔两套口径 —— 挑战塔「下
   assert.equal(TD.descOf(b), towerDesc, '不传 mode 时沿用默认（挑战塔）文案');
 
   /* ---- 2) 界面判据与角标：抠出真实实现跑一遍 ---- */
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const src = readSrc('js', 'tower-ui.js');
   const grab = (head) => {
     const at = src.indexOf(head);
     assert.ok(at >= 0, '源码里应当有 ' + head);
@@ -818,14 +825,14 @@ test('需求9.2：玉石俱焚（C57）双塔两套口径 —— 挑战塔「下
   assert.match(src, /剩余 ' \+ b\.uses \+ ' 场/, '悬停要写剩余场次');
   /* 面板/商店/集锦都走 descOf */
   assert.match(src, /TowerData\.descOf\(b, 'endless'\)/, '集锦与商店卡片要用无尽口径');
-  const towerSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  const towerSrc = readSrc('js', 'tower.js');
   assert.match(towerSrc, /descOf\(buff, mode\)/, 'ownedBuffs 要按模式取文案');
 });
 
 test('需求9.4：道具卖出 = 「返回 / 卖出」弹窗，点一下卖 1 个、弹窗不关', () => {
   const c = setup();
   const S = c.State;
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
+  const src = readSrc('js', 'classic-ui.js');
   /* ---- 1) 滑动条版本彻底移除 ---- */
   assert.ok(src.indexOf('sell-count') < 0, '不该再有 sell-count 滑块');
   assert.ok(src.indexOf('卖出数量') < 0, '不该再有「卖出数量」标签');
@@ -875,9 +882,9 @@ test('需求9.4：道具卖出 = 「返回 / 卖出」弹窗，点一下卖 1 �
 test('需求9.5：铸币（原名「重新挑战币」）改名彻底 + 无尽塔右上角标出本场数量', () => {
   const c = setup();
   const TD = c.TowerData, T = c.Tower;
-  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
-  const data = fs.readFileSync(path.join(ROOT, 'js', 'tower-data.js'), 'utf8');
-  const core = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  const ui = readSrc('js', 'tower-ui.js');
+  const data = readSrc('js', 'tower-data.js');
+  const core = readSrc('js', 'tower.js');
 
   // 1) 面向玩家的**字符串字面量**里不该再出现旧名字（注释里保留「原名…」的说明不算）
   const literal = /(['"`])(?:(?!\1)[^\n])*?(重新挑战币|重挑币)(?:(?!\1)[^\n])*?\1/;
@@ -1130,7 +1137,7 @@ test('需求23：挑战塔限次类只表达「下一场战斗」，不显示限
   assert.equal((c2.Tower._debugRun('endless').limited || []).find((x) => x.id === 'N01').uses, 2,
     '无尽塔的 N01 仍应是 2 场');
   // UI：塔里的限次胶囊显示「下一场」而不是「剩 N 场」
-  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const ui = readSrc('js', 'tower-ui.js');
   assert.match(ui, /nextBattle/, 'UI 要按 nextBattle 区分展示');
   assert.match(ui, /'下一场'/, '面板胶囊要能显示「下一场」');
   assert.match(ui, /下一场/, '选牌卡面要标「下一场」');
@@ -1276,7 +1283,7 @@ test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => 
 });
 
 test('需求27：弹窗按钮按「主操作靠右、取消/返回靠左」排序', () => {
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
+  const src = readSrc('js', 'classic-ui.js');
   const a = src.indexOf('const btnRank = (b, i) => {');
   assert.ok(a > 0, 'classic-ui.js 里应当有 btnRank');
   const b = src.indexOf('/* 排序会打乱顺序', a);
@@ -1314,7 +1321,7 @@ test('需求27：弹窗按钮按「主操作靠右、取消/返回靠左」排�
 });
 
 test('需求29：挑战塔的「返回」回主界面（含胜利弹窗与塔页面）', () => {
-  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const ui = readSrc('js', 'tower-ui.js');
   // 塔页面自身的返回：不应再回关卡页（原来 UI.runAction('stages')）
   assert.ok(!/back\(p, \(\) => UI\.runAction\('stages'\)\)/.test(ui),
     '塔页面的返回不该再走关卡页');
@@ -1396,7 +1403,7 @@ test('需求35：永久槽位的「占位口径」必须一致（修「7/8 拿�
   assert.ok(!bad.ok, '换掉免占位的增益腾不出槽位，应当拒绝');
 
   /* normalizeRun 再也不允许丢弃永久增益 */
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  const src = readSrc('js', 'tower.js');
   assert.ok(!/cleanBuffs\(run\.permanent\)\.slice\(0, permSlots/.test(src),
     'normalizeRun 不该再按数组长度裁剪永久增益');
   assert.ok(src.indexOf('function repairPermanentSlots') > 0, '应当有只校验不丢弃的 repairPermanentSlots');
@@ -1508,14 +1515,14 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
 
   /* C12 现已改为「固定 +1 力/敏/速」；断言旧口径（winPower 百分比）已彻底移除，
    * 且新字段真的落到 run 上。 */
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  const src = readSrc('js', 'tower.js');
   assert.ok(!/run\.winPower\b/.test(src.replace(/\/\*[\s\S]*?\*\//g, '')),
     'C12 不该再引用旧的 winPower（百分比口径）');
   assert.ok(/run\.winStatPower = Math\.max\(0, Number\(run\.winStatPower\)/.test(src),
     'C12 应当累加 run.winStatPower');
   assert.ok(/me\.agility \+= Math\.max\(0, Number\(run\.winStatAgility\)/.test(src),
     'C12 的敏捷累计应当加到面板属性上');
-  assert.ok(/winStatAfter10: 1/.test(fs.readFileSync(path.join(ROOT, 'js', 'tower-data.js'), 'utf8')),
+  assert.ok(/winStatAfter10: 1/.test(readSrc('js', 'tower-data.js')),
     'C12 的 mods 应当是 winStatAfter10');
 });
 
@@ -1590,7 +1597,7 @@ test('需求37：成长类增益的「面板文字」必须等于「真实累计
     'C06 面板显示必须等于真实累计：面板「' + c06.progress + '」 vs 实际 ' + (c06.value * 100) + '%');
 
   /* 死字段不许再被引用（它曾让 C07 的显示恒为 0） */
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  const src = readSrc('js', 'tower.js');
   assert.ok(!/run\.killMaxHp\b/.test(src.replace(/\/\*[\s\S]*?\*\//g, '')),
     'tower.js 代码里不该再引用死字段 run.killMaxHp');
   assert.ok(!/mods\.killMaxHpCap/.test(src), '不该引用不存在的 mods.killMaxHpCap');
@@ -1599,8 +1606,8 @@ test('需求37：成长类增益的「面板文字」必须等于「真实累计
 });
 
 test('需求38：永久增益替换弹窗改为竖排可滚动列表（不再横排溢出）', () => {
-  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
-  const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8');
+  const ui = readSrc('js', 'tower-ui.js');
+  const css = readSrc('css', 'tower.css');
 
   /* 结构：两个入口共用一个组件，行是竖排列的整行按钮，底部只留「取消」 */
   assert.ok(ui.indexOf('function offerPermanentReplace') > 0, '应当有统一的替换弹窗组件');
@@ -1706,7 +1713,7 @@ test('需求39：反击也算「敌方的一次攻击」——先机预判被反
   }
   assert.equal(seen, 60, '样本应当跑满');
   /* 反向确认：反击触发的归零必须**带上主回合**（否则免疫被悄悄消耗、玩家看不到）。 */
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'sim.js'), 'utf8');
+  const src = readSrc('js', 'sim.js');
   assert.ok(/if \(counter\.firstHitZero\) \{/.test(src),
     '反击的归零标记应当被带进主回合（可见）');
   assert.ok(/r\.firstHitZero = true;/.test(src), '主回合要记下这次归零');
@@ -2768,7 +2775,7 @@ test('需求61：放弃永久增益的弹窗必须能真的选出候选（修「
     '不传参（读真实 run）时应当拿到全部候选：' + JSON.stringify(real.map((x) => x.id)));
 
   /* ② 真跑一遍界面函数：弹窗要列出全部候选，点击要能完成放弃 */
-  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const ui = readSrc('js', 'tower-ui.js');
   const seg = ui.slice(ui.indexOf('  function openPermSacrifice()'), ui.indexOf('  function openCheckpoint()'));
   const ordSeg61 = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  // ---------- 通用小件 ----------'));
   assert.ok(seg.length > 200, '应当截到 openPermSacrifice 的实现');
@@ -2913,7 +2920,7 @@ test('需求64：被虚空铭文附魔的永久增益排在前面，与未附魔
   const raw = T.ownedBuffs('endless').filter((b) => b.kind === 'permanent').map((b) => b.id).join(',');
   assert.equal(raw, 'C29,C27,C22,C07,C12,C48', '前置条件：原始顺序是这个（附魔的混在中间）：' + raw);
 
-  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const ui = readSrc('js', 'tower-ui.js');
   const ordSeg = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  // ---------- 通用小件 ----------'));
   assert.ok(ordSeg.length > 100, '应当截到 orderPermanent 的实现');
 
@@ -3048,7 +3055,7 @@ test('需求67：装备出售界面倒序（新合成/新融合的排最前）',
   const T = c.Tower, S = c.State;
   /* 把 classic-ui.js 里**真实的 openGearSell** 抠出来跑（不复制一份实现），
    * 只桩掉它依赖的渲染/状态接口，检查它给每张卡生成的 data-sell 顺序。 */
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8').split('\n');
+  const src = readSrc('js', 'classic-ui.js').split('\n');
   const a = src.findIndex((l) => l.includes('function openGearSell(pg) {'));
   assert.ok(a >= 0, 'classic-ui.js 里应当有 openGearSell');
   const b = src.findIndex((l, i) => i > a && l.includes('点一件装备'));
@@ -3189,7 +3196,7 @@ test('需求71：限次栏显示「未破碎的烙印叠层」', () => {
   const c = setup();
   const TD = c.TowerData, T = c.Tower, S = c.State;
   /* 把 tower-ui.js 里**真实的 limitBadgeText** 抠出来跑（与面板用的是同一份实现）。 */
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8').split('\n');
+  const src = readSrc('js', 'tower-ui.js').split('\n');
   const a = src.findIndex((l) => l.includes('function limitBadgeText(b) {'));
   assert.ok(a >= 0, 'tower-ui.js 里应当有 limitBadgeText');
   const b = src.findIndex((l, i) => i > a && l.includes('\n') === false && /^\s*\}$/.test(l));
@@ -3285,10 +3292,10 @@ test('需求73：无尽主界面右上角显示「实际退出到手」的抽奖
 
   /* ② 本轮需求：标题下方那行「离场可得 +N 抽奖卷（…）」已经整块去掉 ——
    * 界面与样式里都不该再有它（右上角那一枚仍然是「实际退出到手」的总数）。 */
-  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const ui = readSrc('js', 'tower-ui.js');
   assert.ok(ui.indexOf('endlessLeaveHtml') < 0, 'tower-ui 里不该再有 endlessLeaveHtml');
   assert.ok(ui.indexOf('endless-leave-line') < 0 && ui.indexOf('leave-chip') < 0, '不该再有离场结算那一行的结构');
-  const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8');
+  const css = readSrc('css', 'tower.css');
   assert.ok(!/\.endless-leave-line|\.leave-inner|\.leave-chip/.test(css), 'CSS 里不该再有离场结算那一行的样式');
   /* 右上角那枚仍然按 ticketsOnExit 显示（不是仓库持有数） */
   assert.ok(/run \? exitT : \(S\.props\[CURRENCY_PROP\.ticket\] \|\| 0\)/.test(ui), '右上角仍应显示退出总额');
@@ -3636,7 +3643,7 @@ test('需求85：讨价还价也能被**铸币商店**触发（固定价同样�
   run2.shopHalfPending = -5;
   assert.equal(c2.Tower.shopHalfPendingOf(c2.Tower._debugRun('endless')), 0, '坏值也归一化');
   /* 界面接线：两个商店页都渲染对折标记，无尽首页显示待兑现份数 */
-  const pageSrc = fs.readFileSync(path.join(ROOT, 'js/tower-ui.js'), 'utf8');
+  const pageSrc = readSrc('js/tower-ui.js');
   assert.ok(/half-hint/.test(pageSrc), '商店页要渲染「对折」提示');
   assert.ok(/shopHalfPending/.test(pageSrc), '无尽首页要显示待兑现的份数');
   assert.ok(/halfCount/.test(pageSrc) || /s\.half/.test(pageSrc), '商店页要按 s.half 渲染');
@@ -3780,7 +3787,7 @@ test('需求86：时间回廊（E15）—— 下一场打完后从本层第 1 �
 
   /* F. 界面接线：必须给玩家一个「本层重开了」的说明 */
   {
-    const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+    const uiSrc = readSrc('js', 'tower-ui.js');
     assert.ok(/rw\.layerRestart/.test(uiSrc), '界面要处理 layerRestart');
     assert.ok(/时间回廊/.test(uiSrc), '弹窗标题应当是「时间回廊」');
     const at = uiSrc.indexOf('if (rw.layerRestart)');
@@ -3869,7 +3876,7 @@ test('需求88：讨价还价 —— 商店**每一页刷新**都重新触发（
   const base = TD.mintPrice(TD.BUFF_BY_ID[slot.id]);
   assert.equal(slot.price, Math.floor(base / 2), '对折价仍然按固定价算：' + base + ' → ' + slot.price);
   /* 界面要把「每页都会触发」写出来（否则玩家以为只有第一页） */
-  const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const uiSrc = readSrc('js', 'tower-ui.js');
   assert.ok(/halfPerPage/.test(uiSrc), '两个商店页都要用到 halfPerPage 提示');
   assert.ok(/新一页同样有/.test(uiSrc) || /每次刷新出的新一页/.test(uiSrc), '要写明刷新出的新一页也会触发');
 });
@@ -3990,7 +3997,7 @@ test('需求89：涅槃（C14）「每层 N 次」在真实战斗里也记账（
   assert.equal(fight3(), 0, '1 层涅槃：同一层用掉就没了');
 
   /* 根因守卫：界面必须把战斗结果一起交给状态机（否则上面这些计数永远是 0） */
-  const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const uiSrc = readSrc('js', 'tower-ui.js');
   const at = uiSrc.indexOf('Tower.reportBattle(');
   assert.ok(at > 0, '找不到界面里的 reportBattle 调用');
   const call = uiSrc.slice(at, uiSrc.indexOf(';', at));
@@ -4022,7 +4029,7 @@ test('需求90：铸币商店的「返回」不收摊、「继续战斗」才收
 
   /* 界面接线（真点击在 tools/test-mint-shop.cjs 里，这里守源码口径）：
    * 页脚「返回」只回上一页、店不收摊；主按钮叫「继续战斗」且收摊。 */
-  const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const uiSrc = readSrc('js', 'tower-ui.js');
   const from = uiSrc.indexOf('function openMintShop');
   const to = uiSrc.indexOf('【U15】', from);
   const body = uiSrc.slice(from, to > from ? to : from + 6000);
@@ -4031,7 +4038,7 @@ test('需求90：铸币商店的「返回」不收摊、「继续战斗」才收
   assert.ok(/C\(\)\.btn\('继续战斗', 'mintleave'/.test(body), '主按钮应当改叫「继续战斗」：' + body.slice(0, 200));
   assert.ok(/Tower\.leaveMintShop\(\); openEndless\(\)/.test(body), '「继续战斗」才收摊');
   /* 调试台要有这个按钮（走 Tower._debugSpawnMintShop） */
-  const dbgSrc = fs.readFileSync(path.join(ROOT, 'js', 'debug.js'), 'utf8');
+  const dbgSrc = readSrc('js', 'debug.js');
   assert.ok(/data-mint-shop/.test(dbgSrc), '调试面板要加按钮');
   assert.ok(/_debugSpawnMintShop/.test(dbgSrc), '按钮要接 _debugSpawnMintShop');
   assert.ok(/data-mint-shop[^>]*>铸币商店</.test(dbgSrc), '文案缩减为「铸币商店」');
@@ -4140,9 +4147,9 @@ test('需求91：三侠削弱只「贯穿本层」—— 换层必须清掉（�
   assert.equal(restarted.debuffs.length, 1, '同一层重开不该清掉削弱（贯穿本层）：' + JSON.stringify(restarted.debuffs));
 
   /* ⑥ 界面文案与实现口径一致 + advanceLayer 真的清了（源码口径，防止又被删掉） */
-  const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const uiSrc = readSrc('js', 'tower-ui.js');
   assert.ok(/本层已被削弱/.test(uiSrc), '界面写的是「本层已被削弱」');
-  const towerSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  const towerSrc = readSrc('js', 'tower.js');
   const at = towerSrc.indexOf('function advanceLayer(run, mode) {');
   assert.ok(at > 0, '找不到 advanceLayer');
   const body = towerSrc.slice(at, towerSrc.indexOf('\n  }', at));
@@ -4225,7 +4232,7 @@ test('需求92：商店出售 / 交换列表按「获得先后倒序」排（最
     '补号之后新拿到的排在最上');
 
   /* ⑥ 界面接线：两个商店的「挑自己增益」列表都走 Tower.sellListOf */
-  const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const uiSrc = readSrc('js', 'tower-ui.js');
   const uses = (uiSrc.match(/Tower\.sellListOf\(/g) || []).length;
   assert.equal(uses, 2, '试炼商店的出售列表与铸币商店的交换列表都要用它：' + uses);
   assert.ok(!/Tower\.ownedBuffs\('endless'\)\.filter\(\(b\) => b\.kind !== 'instant'\)/.test(uiSrc),
@@ -4358,7 +4365,7 @@ test('需求94：三侠削弱按「大招实际命中次数」累加，数值浮
 test('需求95：本轮修复——C33 独立通道 / 锁技能生效 / 烙印预览口径 / 环境文案 / 选取类清理 / 削敌上限 / 环境封顶层', () => {
   const c = setup();
   const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  const src = readSrc('js', 'tower.js');
 
   /* ① C33 秘技通神：加成走独立通道 skillBoost，不再写 effects（装备词条/武器槽的编号空间） */
   S.setWS('weapon', 6, 5);
@@ -4517,7 +4524,7 @@ test('需求96：动态稀有度权重——个体降权会按比例缩小整档
   /* ⑥ 抽取口子必须接上动态档位权重：
    *   · 战斗奖励 / 试炼商店 → 走 rollOneCandidate（内部调 dynamicTierWeights，含传奇保底）；
    *   · 铸币商店 → 直接调 dynamicTierWeights。 */
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower.js'), 'utf8');
+  const src = readSrc('js', 'tower.js');
   assert.match(src, /function dynamicTierWeights\(baseTier, run, list\)/, '动态档位权重要有定义');
   assert.match(src, /dynamicTierWeights\(baseTier, run, candidates\)/, 'rollOneCandidate 里要用动态档位权重');
   assert.match(src, /dynamicTierWeights\(baseTier, run, allCands\)/, '铸币商店也要用动态档位权重');
@@ -4549,7 +4556,7 @@ test('需求97：无尽塔 20 层起战斗右下角同时给倍速键与跳过�
   /* ② 布局（2026-10 用户口径）：倍速 / 跳过键**统一用普通战斗跳过键那一档** 190x70；
    * 无尽塔 20 层起两个键在右下**并排**，整块贴住右下角（右边缘 1170−16）。 */
   const c2 = { console }; c2.window = c2; vm.createContext(c2);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', 'battle.js'), 'utf8'), c2, { filename: 'js/battle.js' });
+  vm.runInContext(readSrc('js', 'battle.js'), c2, { filename: 'js/battle.js' });
   const L = c2.Battle._cornerLayout;
   const single = { x: 964, y: 605, w: 190, h: 70 };       // 普通战斗「跳过」那一档尺寸
   const onlySpeed = L(true, false);
@@ -4574,7 +4581,7 @@ test('需求97：无尽塔 20 层起战斗右下角同时给倍速键与跳过�
   assert.equal(both.base.w, single.w * 2 + 8, '整块宽度 = 两键 + 缝');
   assert.ok(sk.y + sk.h <= 690, '不能越出画布');
   /* ③ 接线：tower-ui 必须用这个策略决定 allowSkip（跳过键与倍速键共存） */
-  const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const uiSrc = readSrc('js', 'tower-ui.js');
   assert.match(uiSrc, /const skipAllowed = Tower\.skipPlaybackAllowed\(mode, layerNow\)/,
     'tower-ui 应当用 Tower.skipPlaybackAllowed 决定是否给跳过键');
   assert.match(uiSrc, /allowSkip: skipAllowed, speedToggle: true/,
@@ -5238,7 +5245,7 @@ test('需求117：厚积薄发（C35）的份数计算与显示保留一位小�
 });
 
 test('需求119：武器与技能页面「选中」后仍显示等级而不是名称', () => {
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
+  const src = readSrc('js', 'classic-ui.js');
   assert.ok(!/selected\?esc\(it\.name\)/.test(src), '格子说明不该再在选中时换成武器/技能名字');
   assert.match(src, /item-caption">'\+\(has\?levelLabel\(has\.level\)/,
     '格子说明应当始终是等级（levelLabel）');
@@ -5281,7 +5288,7 @@ test('需求124：同名件的「虚空铭文附魔（不占位）」逐条判�
   const c25Cands = T.pickCandidatesOf('permBuff').filter((x) => x.id === 'C25');
   assert.ok(c25Cands.every((x) => x.uid === uidA), '同名未附魔的那两条不该再进附魔候选');
   /* 界面层：orderPermanent 只按行自己的 slotFree，不再按 id 兜底 */
-  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  const ui = readSrc('js', 'tower-ui.js');
   const ordSeg = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  // ---------- 通用小件 ----------'));
   assert.ok(!/free\.indexOf\(b\.id\)/.test(ordSeg), 'orderPermanent 不该再按 id 兜底：' + ordSeg);
   /* 送掉被附魔的那一条 → 附魔记录要一起清掉，**之后**再拿到同名件也不能沾上附魔。 */
@@ -5622,13 +5629,13 @@ test('需求133：无尽专属调试 —— 快速爬塔「层数 +1 / -1」与�
   assert.match(noMint.msg, /无尽塔对局/, '铸币商店也是同一口径：' + noMint.msg);
 
   /* ④ 界面接线（真点击在 tools/test-mint-shop.cjs 里，这里守源码口径） */
-  const dbgSrc = fs.readFileSync(path.join(ROOT, 'js', 'debug.js'), 'utf8');
+  const dbgSrc = readSrc('js', 'debug.js');
   assert.ok(/data-endless-layer="1"/.test(dbgSrc) && /data-endless-layer="-1"/.test(dbgSrc), '要有层数 +1 / -1 按钮');
   assert.ok(/_debugShiftEndlessLayer/.test(dbgSrc), '层数按钮要接 _debugShiftEndlessLayer');
   assert.ok(/data-shop="1"/.test(dbgSrc) && /_debugSpawnShop/.test(dbgSrc), '要有普通商店按钮并接 _debugSpawnShop');
   assert.ok(/data-mint-shop[^>]*>铸币商店</.test(dbgSrc), '铸币商店按钮文案缩减为「铸币商店」：' + dbgSrc.match(/data-mint-shop[^>]*>[^<]*</));
   assert.ok(/data-shop[^>]*>普通商店</.test(dbgSrc), '普通商店按钮文案写「普通商店」：' + dbgSrc.match(/data-shop[^>]*>[^<]*</));
-  const cssSrc = fs.readFileSync(path.join(ROOT, 'css', 'debug.css'), 'utf8');
+  const cssSrc = readSrc('css', 'debug.css');
   assert.ok(/\.debug-quick\{/.test(cssSrc), '快捷行要有自己的两列布局');
 });
 
@@ -5756,9 +5763,9 @@ test('需求135：无尽塔增益介绍补全 —— 每条都写明「最多叠
 test('需求137：自愿支持作者 —— 系统页入口 / 30 级一次性提示 / 打开系统浏览器', () => {
   const c = setup();
   const S = c.State;
-  const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
-  const mainSrc = fs.readFileSync(path.join(ROOT, 'js', 'main.js'), 'utf8');
-  const rustSrc = fs.readFileSync(path.join(ROOT, 'src-tauri', 'src', 'lib.rs'), 'utf8');
+  const uiSrc = readSrc('js', 'classic-ui.js');
+  const mainSrc = readSrc('js', 'main.js');
+  const rustSrc = readSrc('src-tauri', 'src', 'lib.rs');
 
   /* ① 链接只有一个来源（main.js 的 Main.SUPPORT），并且是爱发电那个地址 */
   assert.match(mainSrc, /url: 'https:\/\/ifdian\.net\/a\/Charlespkuer'/, '支持链接要写死成爱发电地址');
@@ -5778,7 +5785,7 @@ test('需求137：自愿支持作者 —— 系统页入口 / 30 级一次性提
   assert.match(sysBody, /openSupportModal\(\)/, '按钮要打开支持弹窗');
   assert.match(uiSrc, /function supportPanelHtml\(\)/, '要有面板构造器');
   assert.match(uiSrc, /喜欢这个复刻版/, '面板文案');
-  const cssSrc = fs.readFileSync(path.join(ROOT, 'css', 'classic-refine.css'), 'utf8');
+  const cssSrc = readSrc('css', 'classic-refine.css');
   assert.match(cssSrc, /\.support-panel\{/, '面板样式');
   assert.match(cssSrc, /\.support-input\{/, '「复制链接」输入框样式');
 
@@ -5805,7 +5812,7 @@ test('需求137：自愿支持作者 —— 系统页入口 / 30 级一次性提
   S.supportPromptReset();
   assert.equal(S.supportPromptPending(), true, '调试可以把它恢复成待提示');
   assert.equal(S.SUPPORT_LEVEL, 30, '提示等级写在 State 里');
-  assert.match(fs.readFileSync(path.join(ROOT, 'js', 'state.js'), 'utf8'), /if \(S\.level >= SUPPORT_PROMPT_LEVEL\) S\.supportPrompt = true;/,
+  assert.match(readSrc('js', 'state.js'), /if \(S\.level >= SUPPORT_PROMPT_LEVEL\) S\.supportPrompt = true;/,
     'gainExp 里要埋点');
 
   /* ⑤ 真跑一遍 openExternal 的四条分支（把源码切出来在 vm 里跑） */

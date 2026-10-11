@@ -333,7 +333,7 @@ async function ping(port) {
   } finally {
     if (server) server.kill('SIGTERM');
     await sleep(200);
-    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (e) {}
+    try { fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 }); } catch (e) {}
   }
 })().catch((e) => {
   console.error('\n[x] ' + (e && e.stack ? e.stack : e));

@@ -132,26 +132,28 @@ test('卖出道具：默认回收字典价格的一半，无价/占位价的道�
   assert.equal(small.gold, 4); assert.equal(s.goldPoint, 4); assert.equal(s.props[1], undefined);
 });
 
-test('背包的卖出弹窗：三种转化丸都能真的卖掉，且卖完立刻退回上一级（同天使/恶魔果实）', () => {
+test('背包的卖出弹窗：三种转化丸都能真的卖掉，且卖完退回背包（同天使/恶魔果实，不回主界面）', () => {
   const g = game(), S = g.State, s = S.state();
   /* 把 classic-ui.js 里**真实的 sellDialog** 抠出来，用桩跑一遍。
    * 2026-10 的 bug：函数里写的是裸的 `bagCountOf(id)`，而 classic-ui 里根本没有这个全局
    * （真名是 State.bagCountOf），于是点「卖出」第一行就 ReferenceError ——
    * **所有**道具都卖不掉（玩家看到的是敏捷/速度转化丸卖不出去）。
-   * 桩里**故意不提供** bagCountOf 这类全局，逼它自己通过 State 解析 —— 再写回裸标识符就会红。 */
+   * 桩里**故意不提供** bagCountOf 这类全局，逼它自己通过 State 解析 —— 再写回裸标识符就会红。
+   * 2026-10 第二个口径（用户点名的）：这几样卖完要退回**背包**（上一级界面），
+   * 早先误写成 home()（回主界面）—— 玩家观感是「卖一个就被踢出背包回主页」。 */
   const ui = fs.readFileSync(path.join(root, 'js/classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
   const at = ui.indexOf('function sellDialog(');
   assert.ok(at > 0, 'classic-ui.js 里应该有 sellDialog');
   const fn = ui.slice(at, ui.indexOf('\n  }', at) + 4);
   /* 「卖一个就退出去」的名单也从源码里读出来（它在 IIFE 里，没导出）——
-   * 这样断言的是**真实名单**：谁把转化丸从名单里去掉，下面回首页那条就会红。 */
+   * 这样断言的是**真实名单**：谁把转化丸从名单里去掉，下面退回背包那条就会红。 */
   const listMatch = ui.match(/const SELL_LEAVE_IDS\s*=\s*\[([^\]]*)\]/);
   assert.ok(listMatch, 'classic-ui.js 里应该有 SELL_LEAVE_IDS');
   const SELL_LEAVE_IDS = listMatch[1].split(',').map((x) => Number(x.trim())).filter((n) => Number.isFinite(n));
   for (const id of [10, 11, 12, 47, 48]) {
     assert.ok(SELL_LEAVE_IDS.includes(id), id + ' 应当在「卖一个就退出去」的名单里：' + JSON.stringify(SELL_LEAVE_IDS));
   }
-  const opened = [], left = { closed: 0, home: 0 };
+  const opened = [], left = { closed: 0, home: 0, back: 0 };
   const ctx = {
     State: S, propMap: g.propMap, SELL_LEAVE_IDS,
     esc: (v) => String(v == null ? '' : v), icon: () => '', toast: () => {}, $: () => null,
@@ -164,10 +166,10 @@ test('背包的卖出弹窗：三种转化丸都能真的卖掉，且卖完立�
   vm.createContext(ctx);
   const sellDialog = vm.runInContext(fn + '\nsellDialog;', ctx, { filename: 'sellDialog.js' });
   /* 三种转化丸（120）与天使果实 47（100）走同一条路径：点「卖出」→ 扣 1 个 / 加钱 /
-   * 关掉卖出弹窗 / 退回上一级界面（home()，与两种果实完全一致）。 */
+   * 关掉卖出弹窗 / 退回**背包**（调用 after()，也就是背包那条重绘回调）；**不能**调 home()。 */
   for (const [id, gold] of [[10, 120], [11, 120], [12, 120], [47, 100]]) {
-    s.props[id] = 2; s.goldPoint = 0; opened.length = 0; left.closed = 0; left.home = 0;
-    sellDialog(id, () => {});
+    s.props[id] = 2; s.goldPoint = 0; opened.length = 0; left.closed = 0; left.home = 0; left.back = 0;
+    sellDialog(id, () => { left.back++; });
     assert.equal(opened.length, 1, id + ' 应当打开卖出弹窗');
     assert.match(opened[0].title, /卖出道具/);
     assert.match(opened[0].content, new RegExp('可回收 ' + gold), id + ' 弹窗里要写清回收价');
@@ -177,7 +179,8 @@ test('背包的卖出弹窗：三种转化丸都能真的卖掉，且卖完立�
     assert.equal(S.state().props[id], 1, id + ' 卖一个扣一个');
     assert.equal(S.state().goldPoint, gold, id + ' 卖一个给 ' + gold + ' 金松果');
     assert.equal(left.closed, 1, id + ' 卖完要关掉卖出弹窗');
-    assert.equal(left.home, 1, id + ' 卖完要立刻退回上一级界面（与天使/恶魔果实同一条路径）');
+    assert.equal(left.back, 1, id + ' 卖完要退回背包（调用 after() 重绘背包）');
+    assert.equal(left.home, 0, id + ' 卖完**不能**回主界面（home() 是回主页，不是「上一级界面」）');
   }
 });
 

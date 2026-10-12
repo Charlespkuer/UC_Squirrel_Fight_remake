@@ -777,7 +777,8 @@
       footer = '<div class="tower-actions tower-footer">' +
         '<span class="tower-book-count">现有挑战书 ' + info.books + ' 张</span>' +
         /* 【2026-10 用户口径】按钮文案就是「开始挑战」，不再缀「（挑战书×1）」——
-         * 消耗在左边那颗「现有挑战书 N 张」与上面的规则行「每层 1 张挑战书」里都写着。 */
+         * 消耗看左边那颗「现有挑战书 N 张」（再上面那串「每层 1 张挑战书…」的规则介绍
+         * 也按用户口径整段删掉了）。 */
         C().btn('开始挑战', 'fight', 'gold') + '</div>';
     }
     const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + '">' + towerVisual(info.nextLayer, info.maxLayer, 'tower') +

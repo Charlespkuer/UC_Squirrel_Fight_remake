@@ -39,12 +39,23 @@ jobs:
           # 全部跑完再汇总失败，一次就能看到所有问题。
           # 失败时额外打一条 GitHub 注解（::error::）：**哪台机器挂在哪套件**一眼可见，
           # 不用翻几十屏日志（注解也能从 check-runs API 匿名读到，方便远程排查）。
+          # 再把该套件输出的最后 25 行写进 job summary：**具体哪条断言挂了**也能远程读到
+          #（job 日志要 admin 权限，summary 不用 —— 2026-10 就因为只有套件名、没有断言，排查只能靠猜）。
           fail=0
           for t in tools/test-*.cjs; do
             echo "──── $t ────"
-            if ! node "$t"; then
+            if node "$t" > "$RUNNER_TEMP/out.txt" 2>&1; then
+              tail -n 3 "$RUNNER_TEMP/out.txt"
+            else
               fail=1
               echo "::error title=套件失败（${{ matrix.os }}）::$t 未通过"
+              tail -n 25 "$RUNNER_TEMP/out.txt"
+              {
+                echo "### ❌ $t（${{ matrix.os }}）"
+                echo '```'
+                tail -n 25 "$RUNNER_TEMP/out.txt"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
             fi
           done
           exit $fail

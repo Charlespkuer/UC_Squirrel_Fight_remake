@@ -26,13 +26,20 @@ function findRoot(start) {
 }
 const ROOT = findRoot(__dirname);
 
-function setup() {
+function setup(seed) {
   const store = new Map();
   class CD extends Date { static now() { return new Date(2026, 8, 26, 12).getTime(); } }
   const c = { Date: CD, location: { search: '?qa=1' }, console, localStorage: {
     getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) } };
   c.window = c; c.self = c;
   vm.createContext(c);
+  /* 【固定随机流】这一局要抽层、抽间场增益、抽巡逻替换……不固定的话「抽到哪一条」每次都不同，
+   * 断言就会偶发红灯：2026-10 远端 **windows-latest 就红过一次**（同一个提交 ubuntu / macos 都过，
+   * 本机连跑 40 次也不复现）—— 属于典型的「概率性断言没固定随机流」。
+   * 这里换成确定性 LCG：每个用例都从同一个种子开始，走同一条路径。
+   *（`Date` 上面已经固定成 2026-09-26 12:00，两个时间源一起钉死。） */
+  vm.runInContext('(function(){var s=' + (Number(seed) || 20260926) +
+    ';Math.random=function(){s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296;};})()', c);
   for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js', 'js/tower-plot.js']) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), c, { filename: f });
   }
@@ -888,8 +895,9 @@ test('调试台渲染：三块都出来（当前提升 / 已获得过的全部 /
   c.Tower.debugGrantBuff('N01');    // 限次：攻击 +40%，2 场
   c.Tower.debugGrantBuff('E03');    // 一次生效：+120 试炼币
 
-  // 切出 debug.js 里真实的 renderBuffReport 来跑
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'debug.js'), 'utf8');
+  // 切出 debug.js 里真实的 renderBuffReport 来跑（读源码做文本定位前先归一 CRLF：
+  // Git for Windows 检出会把 LF 变成 CRLF，行尾的 \r 会让 '\n  function …' 这类锚定找空 —— 见 tools/AGENTS.md 第 7 条）
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'debug.js'), 'utf8').replace(/\r\n/g, '\n');
   const start = src.indexOf('function renderBuffReport');
   assert.ok(start > 0, 'debug.js 里应该有 renderBuffReport');
   const end = src.indexOf('\n  function isOpen()', start);

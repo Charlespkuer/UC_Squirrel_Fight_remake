@@ -127,28 +127,28 @@
 .gear-modal .gear-note{position:static;text-align:center;font-size:27px;margin-bottom:12px;color:#6d321d}.gear-modal .gear-layout{height:365px;grid-template-columns:38% 62%;gap:5px}.gear-modal .gear-slots{position:relative;display:block}.gear-modal .gear-slots .catalog-cell{position:absolute;width:140px;height:134px}.gear-modal .gear-slots .catalog-cell:nth-child(1){top:0;left:119px}.gear-modal .gear-slots .catalog-cell:nth-child(2){top:122px;left:202px}.gear-modal .gear-slots .catalog-cell:nth-child(3){top:122px;left:35px}.gear-modal .gear-slots .catalog-cell:nth-child(4){top:244px;left:119px}.gear-modal .gear-slots .item-icon{width:133px;height:119px;background:#ede0bd;border-radius:29px;border:3px solid #a88256;box-shadow:inset 0 0 0 3px #fff7dc}
 .gear-modal .gear-list{gap:3px 17px;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)}.gear-modal .gear-list .item-icon{width:147px;height:138px;border-radius:30px}.gear-modal .gear-list .item-caption{font:27px/32px "SimSun","Songti SC","STSong",serif}.gear-modal .gear-capacity{position:absolute;bottom:80px;right:37px;font-size:25px;color:#7b542d}.gear-modal .page-arrow{top:43%;right:2px}.gear-modal .page-arrow.prev{left:350px}
 
-/* 装备详情弹窗的按钮排（`.gear-detail` 是 openGear 独有的，用 :has 认它）。
- * 传说（橙）装会多一颗宝石键，最多 5 个按钮（装备/卸下 + 宝石 + 星标 + 出售 + 返回）；
- * 基础规则 `.modal-buttons .uc-button{min-width:200px}` + `gap:28px` 一排要 1112px，
- * 弹窗里只有 926px —— 整排会从弹窗右边顶出去。
- * **2026-10 用户口径：不许换行，四颗（或五颗）必须排在同一行**，而且宝石键不带「（5金）」。
- * 所以这里放开 min-width、把字号与内边距压一档（一行 926px 放 5 颗 ≈ 每颗 172px，
- * 标签最长 4 个字、最短 2 个字，压一档仍完整可读），并显式 nowrap 保证不换行。
- * 配下面的正文限高：按钮行了永远留在画布（1170×690）里，不会再出现「按钮被裁掉」。 */
-.classic-modal:has(.gear-detail) .modal-buttons,
-.gear-detail-overlay .modal-buttons{flex-wrap:nowrap;gap:16px 14px}
-.classic-modal:has(.gear-detail) .modal-buttons .uc-button,
-.gear-detail-overlay .modal-buttons .uc-button{min-width:0;flex:1 1 0;padding:8px 16px;font-size:30px}
+/* 装备详情弹窗的按钮排。
+ * **2026-10 用户口径：按钮保持游戏里那套固定尺寸（不拉伸、不压字号），一行里放几颗
+ * 只靠间距自适应** —— 基础规则本来就是 `.modal-buttons{display:flex;justify-content:space-evenly}`，
+ * 所以这里既不写 flex:1（那会把按钮拉成等宽、满填充一行），也不改字号 / 内边距。
+ * · 4 颗（普通装备、带星标的橙装：取消星标·返回·卸下·卸下宝石）自然宽 ≈ 828px + 间距，
+ *   弹窗内宽 926px 放得下 → 明确 nowrap，永不换行（多出来的空当由 space-evenly 分配）。
+ * · 5 颗（**不带星标**的橙装会多一颗「星标」）固定尺寸一排要 ≈ 1014px > 926px，物理上放不下
+ *   → 退回换行；配下面的正文限高，换行后按钮依然完整落在画布（1170×690）里，
+ *   不会再出现「第二行被顶出画布、宝石键看不见」。 */
+.classic-modal:has(.gear-detail) .modal-buttons:not(:has(>.uc-button:nth-child(5))),
+.gear-detail-overlay .modal-buttons:not(:has(>.uc-button:nth-child(5))){flex-wrap:nowrap}
 
 /* 装备详情弹窗的正文限高（2026-10 用户反馈：橙装的「镶嵌 / 取下宝石」不见了）。
- * 原因：橙装的详情比普通装备多一颗「镶嵌/卸下宝石（5金）」，再加上「星标」，
- * 按钮排会从一行变两行；而 `.classic-modal` 有 max-height:625px，超出的内容会被顶到
- * 画布（1170×690）下沿之外 —— 宝石那颗正好在第二行，于是「功能消失」。
- * 用 headless Chrome 在 1170×690 下量过（headless 之前的状态）：第一行 top=637、第二行
- * top=716 bottom=780，都在画布外；改成「一行放得下 + 正文限高」之后，四/五颗按钮都排在同一行、落在 122~1048、弹窗 44~645，全部可见。
- * 所以：正文自己滚动，按钮行永远留在可视区。 */
+ * 原因：橙装的详情比普通装备多一颗宝石键，再加上「星标」，按钮排会从一行变两行；
+ * 而 `.classic-modal` 有 max-height:625px，超出的内容会被顶到画布（1170×690）下沿之外
+ * —— 宝石那颗正好在第二行，于是「功能消失」。
+ * 用 headless Chrome 在 1170×690 下量过：修复前第一行 top=637、第二行 top=716 bottom=780（都在画布外）。
+ * 所以：正文自己滚动，按钮排永远留在可视区；排两行时正文再压一档。 */
 .classic-modal:has(.gear-detail)>.modal-body,
 .gear-detail-overlay>.classic-modal>.modal-body{max-height:420px;overflow-y:auto}
+.classic-modal:has(.gear-detail):has(.modal-buttons>.uc-button:nth-child(5))>.modal-body,
+.gear-detail-overlay>.classic-modal:has(.modal-buttons>.uc-button:nth-child(5))>.modal-body{max-height:330px}
 
 /* 自由属性点：升级时必选的分配弹窗（无关闭叉）；点数不在其它地方常驻显示 */
 .classic-modal-overlay.point-dialog>.classic-modal.small-modal{max-height:600px;width:800px}

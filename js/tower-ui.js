@@ -1939,7 +1939,8 @@
       lines: [
         '你推开无尽之塔{抖}厚重{/抖}的门扉，',
         '一行古老的文字刻在门楣上：',
-        '「凡欲觐见王者，须先**献出自身**。」',
+        /* 「献出自身」：又加粗又染红（用户口径 2026-10）—— 嵌套写法见 storySegments。 */
+        '「凡欲觐见王者，须先{红}**献出自身**{/红}。」',
         '但你无暇顾及于此，',
         '挑战在前方接踵而至。',
       ],
@@ -1986,23 +1987,44 @@
     const s = STORY_SCRIPTS[id];
     return s && Array.isArray(s.lines) && s.lines.length ? s : null;
   }
-  /** 把一行拆成 [{text, bold, italic, shake}]（标记本身不进 text，打字机只数可见字符）。 */
+  /** 把一行拆成 [{text, bold, italic, shake, red}]（标记本身不进 text，打字机只数可见字符）。
+   *  支持 **加粗** / *斜体* / {抖}抖动{/抖}（也认 {shake}）/ {红}红色{/红}（也认 {red}），
+   *  并且**可以嵌套**：例如 `{红}**献出自身**{/红}` = 又红又粗。没写收尾标记的当普通文字。 */
   function storySegments(line) {
     const segs = [];
-    const re = /\*\*([^*]+)\*\*|\*([^*]+)\*|\{(shake|抖|抖动)\}([\s\S]*?)\{\/\3\}/g;
-    let last = 0, m;
+    const TAG_KEYS = { shake: 'shake', 抖: 'shake', 抖动: 'shake', red: 'red', 红: 'red' };
     const push = (text, tags) => { if (text) segs.push(Object.assign({ text: text }, tags)); };
-    while ((m = re.exec(line))) {
-      push(line.slice(last, m.index), {});
-      if (m[1] != null) push(m[1], { bold: true });
-      else if (m[2] != null) push(m[2], { italic: true });
-      else push(m[4], { shake: true });
-      last = re.lastIndex;
-    }
-    push(line.slice(last), {});
+    const walk = (text, style) => {
+      const re = /\*\*|\*|\{([A-Za-z\u4e00-\u9fa5]+)\}/g;
+      let m, last = 0;
+      while ((m = re.exec(text))) {
+        let inner = null, after = 0, key = null;
+        if (m[0] === '**' || m[0] === '*') {
+          const close = m[0];
+          const end = text.indexOf(close, re.lastIndex);
+          if (end < 0) continue;                       // 没有收尾 → 当普通文字
+          inner = text.slice(re.lastIndex, end);
+          after = end + close.length;
+          key = m[0] === '**' ? 'bold' : 'italic';
+        } else {
+          key = TAG_KEYS[m[1]];
+          const close = '{/' + m[1] + '}';
+          const end = key ? text.indexOf(close, re.lastIndex) : -1;
+          if (end < 0) continue;
+          inner = text.slice(re.lastIndex, end);
+          after = end + close.length;
+        }
+        push(text.slice(last, m.index), style);
+        walk(inner, Object.assign({}, style, { [key]: true }));
+        last = after;
+        re.lastIndex = after;
+      }
+      push(text.slice(last), style);
+    };
+    walk(String(line == null ? '' : line), {});
     return segs;
   }
-  /** 按「已打出的字符数」把一行渲染成 HTML（加粗 / 斜体 / 抖动在这里落地）。 */
+  /** 按「已打出的字符数」把一行渲染成 HTML（加粗 / 斜体 / 抖动 / 红色在这里落地）。 */
   function storyHtml(segs, chars) {
     let left = Math.max(0, chars), out = '';
     for (const seg of segs) {
@@ -2013,6 +2035,7 @@
       let html = esc(text);
       if (seg.italic) html = '<i>' + html + '</i>';
       if (seg.bold) html = '<b>' + html + '</b>';
+      if (seg.red) html = '<span class="tower-story-red">' + html + '</span>';
       if (seg.shake) html = '<span class="tower-story-shake">' + html + '</span>';
       out += html;
     }

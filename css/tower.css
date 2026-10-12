@@ -967,6 +967,12 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-story-line.done { color: #6c5f4c; }
 .tower-story-line b { font-weight: 700; color: #5c3a12; }
 .tower-story-line i { font-style: italic; color: #4f4232; }
+/* {红}…{/红}：染成朱红 —— 写在 .tower-story-line 之后、并且连里面的 b/i 一起点，
+ * 否则 <b> 自己的褐色（.tower-story-line b）会把继承下来的红盖掉。 */
+.tower-story-line .tower-story-red,
+.tower-story-line .tower-story-red b,
+.tower-story-line .tower-story-red i,
+.tower-story-line.done .tower-story-red { color: #c0281c; }
 .tower-story-shake { display: inline-block; animation: towerStoryShake .16s infinite steps(2, end); }
 @keyframes towerStoryShake {
   0% { transform: translate(0, 0); } 25% { transform: translate(-1.6px, 1px); }

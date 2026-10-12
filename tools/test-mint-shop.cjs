@@ -1857,7 +1857,10 @@ hr('14. 剧情展示模式：开始攀登 → 主界面讲剧情（逐字 / 继�
     flush(200);
     ui.click('story-next');                       // 到第三行
     flush(200);
-    assert.match(typed.html, /<b>/, '第三行应当渲染成加粗：' + typed.html.slice(0, 90));
+    /* 第三行：`{红}**献出自身**{/红}` 要渲染成「红色 + 加粗」的**嵌套**（2026-10 用户口径），
+     * 标记本身一个都不许漏进文字。 */
+    assert.match(typed.html, /<span class="tower-story-red"><b>献出自身<\/b><\/span>/,
+      '「献出自身」应当是红色 + 加粗的嵌套：' + typed.html.slice(0, 120));
     assert.ok(/凡欲觐见王者，须先献出自身。/.test(typed.textContent), '铭文要打出来：' + typed.textContent);
 
     /* ⑥ 一直点到底：五行走完 → 清掉待播剧情、回到正常主界面 */
@@ -1889,6 +1892,7 @@ hr('14. 剧情展示模式：开始攀登 → 主界面讲剧情（逐字 / 继�
     assert.match(ui.last('page').content, /story-next/, '第一次进店前应当先走剧情');
     flush(400);
     assert.ok(/商人/.test(typed.textContent), '商人剧情要真的打出来：' + typed.textContent.slice(0, 24));
+    assert.ok(!/[*{}]/.test(typed.textContent), '斜体/加粗标记不该漏进文字');
     for (let i = 0; i < 20; i++) {
       if (ui.last('page').content.indexOf('story-next') < 0) break;
       ui.click('story-next');

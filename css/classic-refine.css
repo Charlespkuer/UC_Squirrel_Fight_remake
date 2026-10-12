@@ -136,6 +136,16 @@
  * 自动排成 4+1 或 3+2 两行，单排最宽 884px < 926px，既不溢出也统一了风格。 */
 .classic-modal:has(.gear-detail) .modal-buttons{flex-wrap:wrap;gap:16px 24px}
 
+/* 装备详情弹窗的正文限高（2026-10 用户反馈：橙装的「镶嵌 / 取下宝石」不见了）。
+ * 原因：橙装的详情比普通装备多一颗「镶嵌/卸下宝石（5金）」，再加上「星标」，
+ * 按钮排会从一行变两行；而 `.classic-modal` 有 max-height:625px，超出的内容会被顶到
+ * 画布（1170×690）下沿之外 —— 宝石那颗正好在第二行，于是「功能消失」。
+ * 用 headless Chrome 在 1170×690 下量过（headless 之前的状态）：第一行 top=637、第二行
+ * top=716 bottom=780，都在画布外；正文限到 340px 后，四颗按钮落在 468~611，全部可见。
+ * 所以：正文自己滚动，按钮行永远留在可视区。 */
+.classic-modal:has(.gear-detail)>.modal-body,
+.gear-detail-overlay>.classic-modal>.modal-body{max-height:340px;overflow-y:auto}
+
 /* 自由属性点：升级时必选的分配弹窗（无关闭叉）；点数不在其它地方常驻显示 */
 .classic-modal-overlay.point-dialog>.classic-modal.small-modal{max-height:600px;width:800px}
 .classic-modal-overlay.point-dialog>.classic-modal.small-modal>.modal-body{max-height:470px;overflow-y:auto}

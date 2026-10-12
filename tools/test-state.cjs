@@ -184,6 +184,65 @@ test('背包的卖出弹窗：三种转化丸都能真的卖掉，且卖完退�
   }
 });
 
+test('橙装的「镶嵌 / 取下宝石」必须真的出现在详情弹窗里（按钮行不能被挤到画布外）', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.level = 70; s.goldPoint = 100000;
+  /* 用真实融合做一件橙装：三件同部位同品质（紫）→ 传说。
+   * 2026-10 用户报「橙装的镶嵌与取下宝石功能消失了」——代码里其实一直都在，
+   * 是**按钮排被挤出可视区**：橙装详情比普通装备多一颗「镶嵌/卸下宝石（5金）」，
+   * 加上「星标」后按钮从一行变两行，而弹窗 max-height:625px 会把第二行顶到画布
+   * （1170x690）下沿之外（用 headless Chrome 量过：第二行 top=716 bottom=780）。
+   * 所以这条用例同时钉住两件事：①按钮真的生成；②正文有限高，按钮排不会被顶出去。 */
+  const all = [];
+  g.ctx.__gears = all;
+  vm.runInContext('gearMap.each(function (k, v) { __gears.push({ id: Number(v.id), type: Number(v.type) }); })', g.ctx);
+  const byPartQ = new Map();
+  for (const it of all) {
+    const key = it.type + ':' + S.gearPartQuality(it.id);
+    if (!byPartQ.has(key)) byPartQ.set(key, []);
+    byPartQ.get(key).push(it.id);
+  }
+  let orangeKey = null;
+  for (const [key, ids] of byPartQ) {
+    if (!key.endsWith(':3') || ids.length < 3) continue;
+    const keys = ids.slice(0, 3).map((id) => S.addGear(id, S.randomExt(3)).key);
+    const r = S.mergeGears(keys);
+    if (r.ok) { orangeKey = r.gear.key; break; }
+  }
+  assert.ok(orangeKey, '应当能靠三件紫装融合出一件橙装');
+  assert.equal(s.gears.find((x) => x.key === orangeKey).orange, true, '融合产物必须带 orange 标记（否则界面不给宝石按钮）');
+
+  /* 把真实的 openGear 抠出来跑：没宝石时要给「镶嵌宝石」，镶上之后要变「卸下宝石」。 */
+  const ui = fs.readFileSync(path.join(root, 'js/classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  const at = ui.indexOf('function openGear(key)');
+  assert.ok(at > 0, 'classic-ui.js 里应该有 openGear');
+  const fn = ui.slice(at, ui.indexOf('\n  }', at) + 4);
+  const openGear = (key) => {
+    const seen = [];
+    const ctx = {
+      State: S, propMap: g.propMap, esc: (v) => String(v == null ? '' : v), icon: () => '',
+      gearImg: () => '<img>', setBonusBlock: () => '', toast: () => {}, notice: () => {},
+      gearPage: 0, openGears: () => {},
+      modal: (title, content, buttons) => { seen.push({ title, buttons }); return { element: { classList: { add() {} } } }; },
+    };
+    vm.createContext(ctx);
+    const f = vm.runInContext(fn + '\nopenGear;', ctx, { filename: 'openGear.js' });
+    f(key);
+    return (seen[0] || { buttons: [] }).buttons.map((b) => b.label);
+  };
+  const noGem = openGear(orangeKey);
+  assert.ok(noGem.some((l) => l.indexOf('镶嵌宝石') === 0), '橙装详情里必须有「镶嵌宝石」：' + JSON.stringify(noGem));
+  s.props[101] = 1;
+  assert.equal(S.socketGem(orangeKey, 101).ok, true, '镶嵌应当成功');
+  const withGem = openGear(orangeKey);
+  assert.ok(withGem.some((l) => l.indexOf('卸下宝石') === 0), '镶过宝石后详情里必须有「卸下宝石」：' + JSON.stringify(withGem));
+
+  /* ② 版式契约：详情弹窗的正文必须限高（否则第二行按钮会被画布裁掉，功能"消失"）。 */
+  const css = fs.readFileSync(path.join(root, 'css/classic-refine.css'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(css, /\.gear-detail[\s\S]{0,200}?\.modal-body[\s\S]{0,120}?max-height:\s*\d+px/,
+    'classic-refine.css 里必须给装备详情弹窗的正文限高（不然橙装的宝石按钮会被挤到画布外）');
+});
+
 test('调试台「重置每日与体力计时」也重置徒弟日供（含「昨天必须有收益流水」那一道门）', () => {
   const g = game();
   /* 调试模块要一个够用的 DOM 壳（它初始化时会挂面板与监听）。 */

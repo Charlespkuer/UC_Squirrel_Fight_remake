@@ -1322,11 +1322,20 @@ test('需求27：弹窗按钮按「主操作靠右、取消/返回靠左」排�
 
 test('需求29：挑战塔的「返回」回主界面（含胜利弹窗与塔页面）', () => {
   const ui = readSrc('js', 'tower-ui.js');
-  // 塔页面自身的返回：不应再回关卡页（原来 UI.runAction('stages')）
-  assert.ok(!/back\(p, \(\) => UI\.runAction\('stages'\)\)/.test(ui),
-    '塔页面的返回不该再走关卡页');
-  const backs = (ui.match(/back\(p, \(\) => C\(\)\.home\(\)\)/g) || []).length;
-  assert.ok(backs >= 2, '挑战塔与无尽塔两处页面返回都应当回主界面，实测 ' + backs + ' 处');
+  /* 【2026-10 用户口径更新】两处页面返回**不再相同**：
+   *   · 挑战塔（openTower）：仍然回主界面（本用例原来的口径）；
+   *   · 无尽塔（openEndless）：**改回关卡页** —— 无尽塔本来就是关卡页里那颗「无尽塔」入口进来的
+   *     （`[data-action="endless-entry"]` → openTowerEntry('endless')）。
+   * 所以这里不再数「有几处 home」，而是分别钉住两处。 */
+  assert.match(ui, /back\(p, \(\) => C\(\)\.home\(\)\)/, '挑战塔页面的返回仍应回主界面');
+  /* 两处 `back(p, …)` 按文件顺序出现：① 挑战塔 ② 无尽塔 —— 各取后面 300 字判断导航。 */
+  const at = [...ui.matchAll(/back\(p,/g)].map((m) => m.index);
+  assert.ok(at.length >= 2, '应当有两处页面返回（挑战塔 / 无尽塔），实测 ' + at.length + ' 处');
+  const towerBack = ui.slice(at[0], at[0] + 300);
+  const endlessBack = ui.slice(at[1], at[1] + 300);
+  assert.ok(!/runAction\('stages'\)/.test(towerBack), '挑战塔的返回不该走关卡页：' + towerBack.slice(0, 120));
+  assert.match(endlessBack, /runAction\('stages'\)/,
+    '无尽塔页面的返回应当回关卡页（UI.runAction(\'stages\')）：' + endlessBack.slice(0, 160));
 
   // 胜利弹窗的「返回」也要回主界面（抽出 towerClear 用桩跑一遍，直接看导航）
   const a = ui.indexOf('function towerClear(rw)');

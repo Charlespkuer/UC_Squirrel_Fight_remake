@@ -38,6 +38,7 @@ const LOAD = ['js/gamedict.js', 'js/gamedata.js', 'js/battle-drops.js',
  *  用来冒烟跑一遍新商店页面的真实代码路径（不需要浏览器）。 */
 function uiHarness(c) {
   const rendered = [];
+  const nav = [];                    // 记下「回主界面 / 跳关卡页」这类顶层跳转，供用例断言
   const handlers = new Map();
   const el = () => ({
     innerHTML: '', dataset: {}, getContext: null,
@@ -58,13 +59,15 @@ function uiHarness(c) {
       return { element: el(), close: () => {} };
     },
     btn: (label, action, cls) => '<button class="' + (cls || '') + '" data-action="' + action + '">' + label + '</button>',
-    icon: () => '<i></i>', bind: () => {}, home: () => {}, refreshHeader: () => {},
-  } };
+    icon: () => '<i></i>', bind: () => {}, home: () => { nav.push('home'); }, refreshHeader: () => {},
+  },
+  /* 顶层动作分发器（真身挂在 window.UI 上）：`runAction('stages')` = 打开关卡页。 */
+  runAction: (key) => { nav.push(key); } };
   /* 载入真界面模块（和浏览器同一份代码）。 */
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/tower-plot.js'), 'utf8'), c, { filename: 'js/tower-plot.js' });
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/tower-ui.js'), 'utf8'), c, { filename: 'js/tower-ui.js' });
   return {
-    rendered,
+    rendered, nav,
     last: (kind) => rendered.filter((r) => r.kind === kind).pop(),
     click: (action) => {
       const h = handlers.get('[data-action="' + action + '"]');
@@ -2515,6 +2518,26 @@ check('照影之境的拾取卡居中在整个屏幕（不是塔身右侧那半�
   assert.match(rule, /pointer-events:\s*none/, '整屏层自己不吃点击（塔身 / 左下角模式开关照旧）：' + rule);
   assert.match(css, /\.tower-mirror\s+\.mirror-card-wrap\s*\{[^}]*pointer-events:\s*auto/,
     '卡片自己仍要能点（pointer-events:auto）');
+});
+
+/* ============================================================ */
+check('无尽模式的「返回」回到关卡界面（不是主界面）', () => {
+  /* 用户口径 2026-10：无尽塔是从**关卡页**进来的，返回就该回关卡页。
+   * 真身走 `UI.runAction('stages')`（顶层分发器 → openStages），不是 `C().home()`。 */
+  const c = setup(11);
+  const ui = uiHarness(c);
+  c.TowerUI.openEndless();
+  ui.click('home');                       // 就是那颗「返回」
+  assert.deepEqual(ui.nav, ['stages'],
+    '无尽模式的「返回」应当打开关卡页，而不是回主界面：' + JSON.stringify(ui.nav));
+
+  /* 反例保护：桩里没有顶层 runAction 时（老壳 / 别的宿主）也要能退回主界面，不能抛异常。 */
+  const c2 = setup(12);
+  const ui2 = uiHarness(c2);
+  delete c2.UI.runAction;
+  c2.TowerUI.openEndless();
+  ui2.click('home');
+  assert.deepEqual(ui2.nav, ['home'], '拿不到 runAction 时退回主界面，不能抛：' + JSON.stringify(ui2.nav));
 });
 
 /* ============================================================ */

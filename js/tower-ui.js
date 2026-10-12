@@ -1046,7 +1046,16 @@
     if (typeof TowerPlot.afterRender === 'function') TowerPlot.afterRender();
     bindTips(p);
     if (info.run) fillFoeArt(p, Tower.planInfo ? Tower.planInfo('endless') : Tower.preview(info.run.layer, info.run.salt, true));
-    back(p, () => C().home());
+    back(p, () => {
+      /* 【2026-10 用户口径】无尽模式的「返回」回到**关卡界面**（无尽塔本来就是从关卡页进来的），
+       * 不是直接回主界面。`UI.runAction` 是经典壳顶层的动作分发器（`runAction('stages')` = openStages）；
+       * 它只挂在 `window.UI` 上（不在 `UI.classic` 里），测试桩里也可能没有 —— 所以拿不到就退回 home()，
+       * 免得点一下「返回」直接抛异常。 */
+      try {
+        if (typeof UI !== 'undefined' && UI && typeof UI.runAction === 'function') { UI.runAction('stages'); return; }
+      } catch (e) {}
+      C().home();
+    });
     /* 【U18】剧情模式下的「继续」：补完这一行 → 下一行 → 结束。
      * 【U18c】「停留一下」的提示屏（第一次失去烙印）也用同一颗按钮：点它 = 放行 → 进剧情。
      * 具体怎么推进由 tower-plot.js 决定（TowerPlot.next），这里只负责转交。 */

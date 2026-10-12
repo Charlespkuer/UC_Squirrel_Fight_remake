@@ -1,4 +1,4 @@
-# 松鼠大战怀旧复刻版 —— Windows：双机同步菜单（Mac ↔ Windows，走 ZeroTier）
+﻿# 松鼠大战怀旧复刻版 —— Windows：双机同步菜单（Mac ↔ Windows，走 ZeroTier）
 #
 # 这个脚本是 一键同步.cmd 的实际执行部分。分工原因和启动器一样：cmd.exe 读 UTF-8
 # 中文会把中文字节错位、把中文注释当命令，所以 .cmd 只留 ASCII 外壳，中文与逻辑都在这里

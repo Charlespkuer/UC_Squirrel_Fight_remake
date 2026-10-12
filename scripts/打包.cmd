@@ -4,13 +4,17 @@ rem  One-click release build (Windows exe + NSIS setup + Android APK)
 rem  Lives in scripts\ next to the other double-click entries, and is a thin
 rem  ASCII shell over tools\build-release.ps1 (keep it ASCII + CRLF: cmd.exe).
 rem  Default behaviour, in this order:
-rem    1) bump version by ONE patch  (e.g. 0.4.8 -> 0.4.9)
+rem    1) pick the next version: PREFER the version written in the file names that
+rem       already sit in src-tauri\dist (the last build's setup/apk), then +0.0.1
+rem       patch. If dist is empty/missing/unparsable, fall back to
+rem       scripts\version.json patch+1.  (-Version pins it, -NoBump keeps it)
 rem    2) delete last version exe/apk/setup from src-tauri\dist
 rem    3) compile exe (+ installer) and APK
 rem    4) rename artifacts to squirrel_fight_<version>_<abi>.apk etc.
 rem    5) delete build caches (target\ / gradle build\ / web\, usually 5~10 GB)
 rem  Examples:
-rem    double-click this file ......... full release, version auto +1
+rem    double-click this file ......... full release, version auto +0.0.1
+rem    this.cmd -DryRun ............... print version + artifact names, write nothing
 rem    this.cmd -Version 0.5.0 ........ pin an exact version
 rem    this.cmd -SkipApk .............. Windows only (saves ~10 min)
 rem    this.cmd -KeepCache ............ keep caches for a faster next build

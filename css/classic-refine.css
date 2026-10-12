@@ -120,7 +120,10 @@
 .classic-tabs .uc-tab:has(>.classic-button-art){height:83px;min-height:83px}
 .page-footer>.uc-button:has(>.classic-button-art){height:103px;min-width:397px;width:397px}
 .status-buttons .uc-button:has(>.classic-button-art){height:116px;width:280px}
-.gear-overlay{background:#45384da6}.gear-modal{width:1000px;height:598px;max-height:630px;padding:40px 25px 100px;border-radius:62px}.gear-modal .modal-body{height:100%;padding:0;overflow:hidden}.gear-modal .modal-title{font-size:48px}.gear-modal .modal-buttons{position:absolute;bottom:17px;left:0;right:0}.gear-modal .modal-close{display:none}
+.gear-overlay{background:#45384da6}
+/* 装备详情那一行按钮：橙装带宝石时会有「卸下宝石（5金）/ 星标 / 出售 / 返回」4~5 个，
+ * 200px 最小宽 + 28px 间距会超出弹窗宽度 → 允许换行（否则最右边的键会被挤出可视区）。 */
+.gear-detail-overlay .modal-buttons{flex-wrap:wrap;gap:16px 22px}.gear-modal{width:1000px;height:598px;max-height:630px;padding:40px 25px 100px;border-radius:62px}.gear-modal .modal-body{height:100%;padding:0;overflow:hidden}.gear-modal .modal-title{font-size:48px}.gear-modal .modal-buttons{position:absolute;bottom:17px;left:0;right:0}.gear-modal .modal-close{display:none}
 .gear-modal .gear-note{position:static;text-align:center;font-size:27px;margin-bottom:12px;color:#6d321d}.gear-modal .gear-layout{height:365px;grid-template-columns:38% 62%;gap:5px}.gear-modal .gear-slots{position:relative;display:block}.gear-modal .gear-slots .catalog-cell{position:absolute;width:140px;height:134px}.gear-modal .gear-slots .catalog-cell:nth-child(1){top:0;left:119px}.gear-modal .gear-slots .catalog-cell:nth-child(2){top:122px;left:202px}.gear-modal .gear-slots .catalog-cell:nth-child(3){top:122px;left:35px}.gear-modal .gear-slots .catalog-cell:nth-child(4){top:244px;left:119px}.gear-modal .gear-slots .item-icon{width:133px;height:119px;background:#ede0bd;border-radius:29px;border:3px solid #a88256;box-shadow:inset 0 0 0 3px #fff7dc}
 .gear-modal .gear-list{gap:3px 17px;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)}.gear-modal .gear-list .item-icon{width:147px;height:138px;border-radius:30px}.gear-modal .gear-list .item-caption{font:27px/32px "SimSun","Songti SC","STSong",serif}.gear-modal .gear-capacity{position:absolute;bottom:80px;right:37px;font-size:25px;color:#7b542d}.gear-modal .page-arrow{top:43%;right:2px}.gear-modal .page-arrow.prev{left:350px}
 
@@ -306,7 +309,7 @@
 .achieve-summary span i{font-style:normal;font-weight:700;color:#a2731f}
 
 /* ============================================================
- * 主页 EXP 标签改用原版贴图（images/classic/sprites/draw-15.png，即「Exp」字样）
+ * 主页 EXP 标签改用原版贴图（images/ui/sprites/draw-15.png，即「Exp」字样）
  *
  * 原来是用 CSS 描边拼出来的文字「EXP」。原版贴图在本仓库里就有，
  * 换上之后字重/描边/配色与原版一致，也不会因系统字体差异跑版。
@@ -347,6 +350,13 @@
   background:rgba(40,26,14,.92);color:#ffd9a0;border:2px solid #b9945f;border-radius:12px;
   padding:10px 20px;font-size:22px;pointer-events:none;opacity:1;transition:opacity .6s}
 .run-toast.out{opacity:0}
+/* 【U18c】「停留得久一些」的那一条（第一次失去烙印）：字号与内边距放大一档，
+ * 并从下方缓缓升起 —— 一看就知道这条比别的提示更重。JS 侧停留时间也更长（runToast 的 hold）。 */
+.run-toast.hold{font-size:26px;padding:14px 28px;border-color:#e0b46a;
+  box-shadow:0 0 0 3px rgba(224,180,106,.25),0 10px 26px rgba(0,0,0,.35);
+  animation:runToastRise .5s ease-out both}
+@keyframes runToastRise{from{opacity:0;transform:translateX(-50%) translateY(14px)}
+  to{opacity:1;transform:translateX(-50%) translateY(0)}}
 
 /* 永久增益面板：附魔（虚空铭文·不占位）段与未附魔段之间的分界 */
 .buff-sep{display:inline-block;width:2px;height:26px;margin:0 6px;vertical-align:middle;
@@ -371,11 +381,9 @@
   border:2px solid #cbb98a;border-radius:10px;background:#fffdf5;color:#5c4326}
 
 /* ---------- 套装收益（数值表见 js/gamedata.js【GD6】） ----------
- * 装备页底部一行摘要 + 装备详情里的两档阈值。家族按装备名去掉部位后缀算，
- * 所以「忍者护额/拳套/服/鞋」都算同一套；同名跨品质也拼得起来。 */
-.gear-modal .gear-set-line{position:absolute;left:37px;bottom:80px;right:300px;
-  font-size:22px;line-height:1.35;color:#6d321d}
-.gear-set-line b{color:#9f7125}
+ * 装备页上那条常驻摘要（`.gear-set-line`）已按用户口径**删掉**（2026-10），
+ * 现在只在**装备详情**里说明：套装名 + 已穿件数 + 两档阈值（生效的标绿 ✓）。
+ * 家族按装备名去掉部位后缀算，所以「忍者护额/拳套/服/鞋」都算同一套；同名跨品质也拼得起来。 */
 .gear-detail .set-name{color:#a966b9}
 .set-bonus{display:flex;flex-direction:column;gap:2px;margin-top:4px}
 .set-bonus .set-tier{font-size:24px;color:#8f734e}
@@ -389,5 +397,10 @@
         ② 去掉它上面那 17px 的段间距、下边距收到 8px。
    期望值：弹窗内容高 458px = 说明行 42+8 + 网格 365 = 415px，底部还剩 43px 富余。
    ============================================================ */
+/* 2026-10 用户反馈：说明行被弹窗标题「我的装备」压住 13px（实测：标题 47~101、
+ *   说明行 88~124）。这里给说明行加 24px 上边距，把它连同下面的网格一起往下挪 ——
+ *   实测挪完标题 47~101、说明行 109~145（空隙 8px），网格仍装得下（内容 433px < 可用 458px）。
+ *   底部那两行（容量 / 套装收益）与「返回」键是绝对定位在底边的，本来就在网格下方，
+ *   不受这次下移影响、也不会被压住。 */
 .gear-modal .gear-note{position:static;text-align:center;font-size:27px;
-  margin:0 8px 8px;color:#6d321d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  margin:24px 8px 8px;color:#6d321d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

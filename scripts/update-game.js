@@ -41,6 +41,9 @@ const IGNORE = [
   '.cache/', '.vscode/', 'src-tauri/target/', 'src-tauri/dist/', 'src-tauri/web/',
   'src-tauri/icons/', 'src-tauri/gen/', 'src-tauri/node_modules/',
   'scripts/sync/sync.config.json', 'scripts/sync/.cache.json',
+  // 根目录的 macOS/Linux 启动器是本机私货（.gitignore 也忽略了它）：写死不带 /，
+  // 只精确命中「仓库根的那一个文件」，scripts/启动游戏.command 照常更新。
+  '启动游戏.command',
 ];
 const IGNORE_NAMES = ['.DS_Store', 'Thumbs.db', 'desktop.ini'];
 const IGNORE_EXT = ['.log', '.tmp', '.swp'];
@@ -64,9 +67,10 @@ function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return null; }
 }
 
-/** 本机版本：优先 version.json（发布包 / CI 写的），退回 git 短哈希，再退回「未知」。 */
+/** 本机版本：优先 `scripts/version.json`（仓库里与发布包里都在这一层，由 CI / 打包脚本写入），
+ *  退回 git 短哈希，再退回「未知」。 */
 function readVersion(root) {
-  const v = readJson(path.join(root, 'version.json'));
+  const v = readJson(path.join(root, 'scripts', 'version.json'));
   if (v && v.version) return { version: String(v.version), commit: String(v.commit || ''), date: String(v.date || '') };
   const g = git(root, ['rev-parse', '--short', 'HEAD']);
   if (g.ok) return { version: 'dev-' + g.out.trim(), commit: g.out.trim(), date: '' };

@@ -36,7 +36,7 @@ function findRoot(start) {
 const ROOT = findRoot(__dirname);
 /* 标签系统完全在 tower-data.js 里（不依赖 state.js / tower.js），所以这里只加载它，
  * 这样负向用例可以任意改源码而不用管其它模块。 */
-const LOAD = ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js'];
+const LOAD = ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js'];
 
 function load(dataPatch) {
   const store = new Map();
@@ -109,8 +109,8 @@ hr('1. 词表与数据：每条增益都必须显式声明标签');
     /* 注意：TD.BUFFS 是在 vm 里构造的，数组跨 realm，deepStrictEqual 会因原型不同而误报，
      * 所以这里比字符串（与 test-state 的 same() 同一个道理）。 */
     const custom = TD.BUFFS.filter((b) => b.shopWeight != null && b.shopWeight !== 1).map((b) => b.id).sort().join(',');
-    assert.equal(custom, 'C14,C49,E01,E16',
-      '声明了非默认静态权重的应当只有 C14（涅槃 0.5）/ C49（终焉烙印 0.8）/ E01（立即进货 0.5）/ E16（铸币商队 0.5），实测：' + custom);
+    assert.equal(custom, 'C14,C49,E01,E16,E19',
+      '声明了非默认静态权重的应当只有 C14（涅槃 0.5）/ C49（终焉烙印 0.8）/ E01（立即进货 0.5）/ E16（铸币商队 0.5）/ E19（点石成金 0.5，2026-10 第七十二批），实测：' + custom);
   });
 }
 
@@ -145,6 +145,8 @@ hr('2. 四个场所：池子 = 标签推导出的名单（不多不少）');
     const MODS = ['envIgnore', 'envReflect', 'instantCoins', 'coinBoostPct', 'shopDiscount',
       'instantRetry', 'sellValue', 'sellGrowthPerWin', 'shopSpendStep', 'permSlot', 'postBattleShop',
       'postBattleMintShop', 'shopHalf',
+      /* 铭文类（kind: 'inscription'）的两种附魔效果与它们的降权出口（2026-10 第五十九批）。 */
+      'pickPermanentFree', 'pickPermanentMul',
       'weightDivBy', 'weightDivOffset', 'weightDecay', 'limitedDefaultRerollPaid', 'pityWeight'];
     for (const b of TD.towerPool) {
       const bad = Object.keys(b.mods || {}).filter((k) => MODS.indexOf(k) >= 0);
@@ -201,7 +203,7 @@ hr('3.5 冗余清理：数据里不再有 xxxOnly / stackable / unique… 这些
     assert.equal(bad.length, 0, '仍有冗余字段：' + bad.join(', '));
   });
   check('页面代码里也不再读这些字段（只读标签）', () => {
-    for (const f of ['js/tower.js', 'js/tower-ui.js', 'js/tower-data.js']) {
+    for (const f of ['js/tower.js', 'js/tower-plot.js', 'js/tower-ui.js', 'js/tower-data.js']) {
       const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
       for (const k of FORBIDDEN) {
         /* 只允许出现在「禁用清单 / 词表 / 注释」里：代码读取形如 .字段 或 ["字段"] */

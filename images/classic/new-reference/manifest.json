@@ -1,5 +1,5 @@
 {
-  "note": "Reference crops retain the pictured frame and learned/locked/selected state. They have no true-weapon stamp. Do not use a locked crop for a learned item.",
+  "note": "Reference crops retain the pictured frame and learned/locked/selected state. They have no true-weapon stamp. Do not use a locked crop for a learned item. drop-exp-classic.png 自 2026-10 起不再是截图裁切：改为从 references/ssfight 的原版矢量形状渲染（sprite3061 第一帧 = 形状 2015 卡片 + 3060 奖杯，8x 超采样后 LANCZOS 缩到 253x256），旧的糊图留档在 images/_reference/new-ui/drop-exp-classic-blurry-old.png。",
   "assets": {
     "cards/weapon-1-learned.png": {
       "source": "references/new/b8535e5dde7116e5e.webp",

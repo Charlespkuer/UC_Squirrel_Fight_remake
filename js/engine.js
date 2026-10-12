@@ -7,11 +7,11 @@
  *   · 图元标签 "75" 为占位/定位点，永远不绘制
  *   · 标签 > 1000 为武器替身槽（1001-1017 / 1101-1117 / 1201-1217）
  *
- * 数据来源：**js/gamedict.js**（由 tools/gen-vendor-data.cjs 从 references/orig/ 抽取生成）：
- *   · AnimationStr —— 动画帧表（references/orig/animationStr.js）
- *   · imgMap       —— 图集帧表（references/orig/assets.js）
- *   · asstes       —— 图片路径表（references/orig/assets.js）
- * 运行时不会去读 references/ 下的任何文件。
+ * 数据来源：**js/gamedict.js**（游戏数据的唯一来源，已直接提交进仓库）：
+ *   · AnimationStr —— 动画帧表
+ *   · imgMap       —— 图集帧表
+ *   · asstes       —— 图片路径表
+ * 运行时不会去读 references/ 下的任何文件（那些只是参考资料）。
  * ============================================================ */
 
 /* ------------------------------------------------------------
@@ -44,7 +44,32 @@
   // ---------- 帧表工具：兼容 data.js 的两种帧表格式 ----------
   // A 类（assets.js）：["label", x, y, w, h, regX, regY]
   // B 类（asset2.js）：[label, x, y, "a-b"|"all", gridSize]
+  /* ---------- 本仓库**新增**的散图帧表（原版数据里没有的图层） ----------
+   * 原版数据（imgMap）是 `tools/gen-vendor-data.cjs` 从 references/orig 抽出来的**只读**结果，
+   * 我们自己导入的美术不该混进 gamedict.js（那条「gamedict 与生成器一致」的检查会因此更失真），
+   * 所以单独放这张表，`getDef` 查不到原版帧表时兜底用它。
+   *
+   * 行格式在原版 7 列之后**多两个可选列**：`[label, x, y, w, h, regX, regY, dw, dh]`
+   *   · `w/h`   = 源图裁切尺寸（= PNG 全幅）
+   *   · `dw/dh` = **画到屏幕上的尺寸**；省略时等于 w/h（原版所有帧都是这样）。
+   *     留这个口子是给「手上只有小图」的场景：直接在这里写显示尺寸放大即可，不必重新导一遍 PNG
+   *     （手导素材原本就是这么用的，后来按原版尺度重新导了 2x 图，这两个列就空着了）。
+   *     ⚠ 写 dw/dh 时 regX/regY 要按**缩放后**的像素给（drawFrame 拿它当目的地偏移用）。
+   *
+   * 数值怎么定的：橙色图层就是原版集 51（狂战·紫，sprite index 32）那套美术的换色，
+   * 拿 `images/ui/characters/squirrel-berserker-classic.png`（原版立绘）当观感基准量的：
+   * 尺度取原版同级（PNG 直接按 2x 导出，所以这里是 1:1）；
+   * pivot 取「内容包围盒对齐 *_32」的解（*_32 在画布边缘被裁，所以只按内容起点对齐）。 */
+  const EXTRA_DEFS = Object.freeze({
+    Head_113_1: [['0', 0, 0, 449, 355, 93, 164]],
+    HandO_113_1: [['0', 0, 0, 176, 149, 57, 48]],
+    Body_113_1: [['0', 0, 0, 239, 196, 170, 131]],
+    Foot_113_1: [['0', 0, 0, 70, 53, 16, 21]],
+    HandI_113_1: [['0', 0, 0, 134, 130, 39, 57]],
+    Arm_113_1: [['0', 0, 0, 124, 114, 44, 45]],
+  });
   function getDef(id) {
+    if (EXTRA_DEFS[id]) return EXTRA_DEFS[id];
     if (!HAS_IMGMAP) return null;
     try { return imgMap.getValue(id); } catch (e) { return null; }
   }
@@ -60,10 +85,16 @@
     for (const f of list) if (String(f[0]) === want) return f;
     return null;
   }
-  /** 把一条帧记录转成 {sx,sy,sw,sh,regX,regY}；B 类需要图宽来换算网格 */
+  /** 把一条帧记录转成 {sx,sy,sw,sh,regX,regY,dw,dh}；B 类需要图宽来换算网格。
+   *  `dw/dh` 是**显示尺寸**（见 EXTRA_DEFS 的说明），省略时 = sw/sh（原版帧一律如此）。 */
   function normFrame(f, imgW, imgH) {
     const x = +f[1], y = +f[2];
     const dim = f[3], grid = +f[4] || 1;
+    const dst = (fr) => {
+      if (f[7] != null && f[7] !== '') fr.dw = +f[7] || fr.sw;
+      if (f[8] != null && f[8] !== '') fr.dh = +f[8] || fr.sh;
+      return fr;
+    };
     if (typeof dim === 'string') {
       let w, h, regX = 0, regY = 0;
       if (dim === 'all') { w = Math.max(1, Math.floor((imgW - x) / grid)); h = Math.max(1, Math.floor((imgH - y) / grid)); }
@@ -72,9 +103,13 @@
         w = Math.max(1, Math.floor((m[1] - m[0] + 1) * grid));
         h = w;
       }
-      return { sx: x, sy: y, sw: w, sh: h, regX: regX, regY: regY };
+      return dst({ sx: x, sy: y, sw: w, sh: h, regX: regX, regY: regY });
     }
-    return { sx: x, sy: y, sw: +dim || 1, sh: +f[4] || 1, regX: +f[5] || 0, regY: +f[6] || 0 };
+    return dst({ sx: x, sy: y, sw: +dim || 1, sh: +f[4] || 1, regX: +f[5] || 0, regY: +f[6] || 0 });
+  }
+  /** 一帧的显示尺寸（原版帧 = 源尺寸）。 */
+  function frameDst(f) {
+    return { w: f.dw == null ? f.sw : f.dw, h: f.dh == null ? f.sh : f.dh };
   }
 
   /* ============================================================
@@ -92,7 +127,7 @@
     // 装备图标（asset2.js 已给出，这里兜底）
     if (HAS_IMGMAP && Array.isArray(imgMap.keys)) {
       for (const t of ['Arm', 'Body', 'Foot', 'HandI', 'HandO', 'Head']) {
-        for (const key of imgMap.keys) if (String(key).indexOf(t + '_') === 0) SRC_MAP[key] = 'images/equip/' + t + '/' + key + '.png';
+        for (const key of imgMap.keys) if (String(key).indexOf(t + '_') === 0) SRC_MAP[key] = 'images/battle/outfit/' + t + '/' + key + '.png';
       }
     }
   })();
@@ -101,12 +136,12 @@
   const SOURCE_ALIAS = {
     // 原版把首页元素单独切成一个 movieclip（shouyebiao），
     // 它的位图与 resource_1 是同一张，只是帧表不同。
-    shouyebiao: 'images/resource_1.png',
+    shouyebiao: 'images/atlas/resource_1.png',
   };
   function guessSrc(id) {
     if (SRC_MAP[id]) return SRC_MAP[id];
     if (SOURCE_ALIAS[id]) return SOURCE_ALIAS[id];
-    if (/^(Head|HandO|HandI|Body|Arm|Foot)_/.test(id)) return 'images/equip/' + id.split('_')[0] + '/' + id + '.png';
+    if (/^(Head|HandO|HandI|Body|Arm|Foot)_/.test(id)) return 'images/battle/outfit/' + id.split('_')[0] + '/' + id + '.png';
     return null;
   }
 
@@ -319,7 +354,8 @@
       const sp = frameSprite(String(label), opt);
       if (!sp) continue;
       const f = sp.fr;
-      for (const [x, y] of [[0, 0], [f.sw, 0], [0, f.sh], [f.sw, f.sh]]) {
+      const fd = frameDst(f);
+      for (const [x, y] of [[0, 0], [fd.w, 0], [0, fd.h], [fd.w, fd.h]]) {
         const tx = el.tx + (x - f.regX) * el.a + (y - f.regY) * el.c;
         const ty = el.ty + (x - f.regX) * el.b + (y - f.regY) * el.d;
         minX = Math.min(minX, tx); minY = Math.min(minY, ty); maxX = Math.max(maxX, tx); maxY = Math.max(maxY, ty);
@@ -354,6 +390,7 @@
       const sp = frameSprite(label, opt);
       if (!sp) continue;
       const f = sp.fr;
+      const fd = frameDst(f);
       let a = el.a * scale, b = el.b * scale, c = el.c * scale, d = el.d * scale;
       let tx = (el.tx - (f.regX * el.a + f.regY * el.c)) * scale;
       let ty = (el.ty - (f.regX * el.b + f.regY * el.d)) * scale;
@@ -362,7 +399,7 @@
       ctx.save();
       ctx.globalAlpha *= el.alpha * (opt.alpha == null ? 1 : opt.alpha);
       ctx.transform(a, b, c, d, tx, ty);
-      ctx.drawImage(sp.sh.img, f.sx, f.sy, f.sw, f.sh, 0, 0, f.sw, f.sh);
+      ctx.drawImage(sp.sh.img, f.sx, f.sy, f.sw, f.sh, 0, 0, fd.w, fd.h);
       ctx.restore();
       n++;
     }
@@ -382,7 +419,7 @@
     const sh = SHEETS[id];
     if (!sh) return null;
     const f = sh.frames[String(label)];
-    return f ? { w: f.sw, h: f.sh } : null;
+    return f ? frameDst(f) : null;
   }
   function has(id) { const sh = SHEETS[id]; return !!(sh && sh.img && sh.img.naturalWidth); }
 

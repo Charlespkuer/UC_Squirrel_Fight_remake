@@ -253,7 +253,7 @@ function loadGame(gameDir, opts) {
   `, ctx, { filename: 'stubs.js' });
 
   const loadErrors = [];
-  for (const f of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/main.js']) {
+  for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/main.js']) {
     const file = path.join(ROOT, f);
     if (!fs.existsSync(file)) continue;
     try { vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, { filename: f }); }
@@ -310,7 +310,7 @@ record('磁盘 32 级 + 残留 1 级 localStorage → 必须载入 32 级，并�
   const disk = JSON.parse(fs.readFileSync(path.join(game, 'save', 'progress.json'), 'utf8'));
   assert.equal(disk.goldPoint, st.goldPoint, '改动必须写进磁盘存档');
   srv.kill();
-  fs.rmSync(game, { recursive: true, force: true });
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 });
 
 record('服务器比页面晚起来（启动器竞态）→ 自动重连后必须回到磁盘 32 级档', async () => {
@@ -324,7 +324,7 @@ record('服务器比页面晚起来（启动器竞态）→ 自动重连后必�
   const st = g.ctx.State.state();
   assert.equal(st && st.level, 32, '重试成功后内存里也该是磁盘的 32 级档');
   srv.kill();
-  fs.rmSync(game, { recursive: true, force: true });
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 });
 
 record('读不到磁盘存档（服务器不可用）→ 回落但必须留下可见告警', async () => {
@@ -338,7 +338,7 @@ record('读不到磁盘存档（服务器不可用）→ 回落但必须留下�
   assert.match(bannerText, /重试连线/, '告警要给出重试入口');
   const st = g.ctx.State.state();
   assert.equal(st && st.level, 1, '这种极端情况下才允许显示本地兜底档');
-  fs.rmSync(game, { recursive: true, force: true });
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 });
 
 record('页面是 file:// 打开 → 回落但告警指向「请用启动器」', async () => {
@@ -350,7 +350,7 @@ record('页面是 file:// 打开 → 回落但告警指向「请用启动器」'
   const bannerText = textOf(banner);
   assert.match(bannerText, /file:\/\//, '告警要点明 file:// 这个原因');
   assert.match(bannerText, /启动游戏\.command/, '告警要指引用启动器打开');
-  fs.rmSync(game, { recursive: true, force: true });
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 });
 
 record('本地兜底档更新且等级更高 → 必须保留，不许静默删掉', async () => {
@@ -364,7 +364,7 @@ record('本地兜底档更新且等级更高 → 必须保留，不许静默删�
   assert.equal(st && st.level, 32, '界面仍以磁盘存档为准（这是主存档）');
   assert.ok(g.store.has('ssdz_save_v1'), '更新且更强的兜底档必须留着，交给冲突保护处理');
   srv.kill();
-  fs.rmSync(game, { recursive: true, force: true });
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 });
 
 record('服务器仍有水位线防线：1 级空档不许覆盖 32 级存档文件', async () => {
@@ -378,7 +378,7 @@ record('服务器仍有水位线防线：1 级空档不许覆盖 32 级存档文
   const disk = JSON.parse(fs.readFileSync(path.join(game, 'save', 'progress.json'), 'utf8'));
   assert.equal(disk.level, 32, '磁盘存档不能被 1 级空档覆盖');
   srv.kill();
-  fs.rmSync(game, { recursive: true, force: true });
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 });
 
 if (EXTERNAL_GAME) {
@@ -449,7 +449,7 @@ record('导入本地存档的服务器契约：先备份 → force 写回 → me
   assert.equal(JSON.parse(fs.readFileSync(savePath, 'utf8')).level, 40, '脏数据不能改动正式存档');
 
   srv.kill();
-  fs.rmSync(game, { recursive: true, force: true });
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 });
 
 record('导入建档时的校验：合法存档放行、脏数据拦下', async () => {
@@ -463,8 +463,13 @@ record('导入建档时的校验：合法存档放行、脏数据拦下', async 
   const check = vm.runInContext(fnSrc + '\nsaveDataError;', ctx, { filename: 'saveDataError.js' });
 
   assert.equal(check(SAVE_32), '', '真实存档必须放行');
-  assert.equal(check(JSON.parse(fs.readFileSync(path.join(ROOT, 'save', 'progress.json'), 'utf8'))), '',
-    '用户磁盘上那份 32 级存档也必须放行');
+  /* 本机运行时的那份存档（save/ 不进仓库，CI / 新机器上不存在）：有就一并验一遍。
+   * 这里**不能硬读**，否则干净的检出直接 ENOENT —— 「本机绿、CI 红」的典型坑。 */
+  const realSave = path.join(ROOT, 'save', 'progress.json');
+  if (fs.existsSync(realSave)) {
+    assert.equal(check(JSON.parse(fs.readFileSync(realSave, 'utf8'))), '',
+      '用户磁盘上那份 32 级存档也必须放行');
+  }
   assert.ok(check({}), '空对象要拦下');
   assert.ok(check([1, 2]), '数组要拦下');
   assert.ok(check({ name: 'x', level: 5, weapons: [], props: {} }), '缺 skills 要拦下');

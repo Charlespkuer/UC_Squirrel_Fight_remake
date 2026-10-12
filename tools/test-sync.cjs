@@ -91,6 +91,9 @@ function makeRoot(dir, name, port) {
   write(path.join(dir, 'tools/research/keep.cjs'), 'module.exports=1\n');
   write(path.join(dir, '.git/config'), '[core]\n');
   write(path.join(dir, '.DS_Store'), 'junk');
+  // 根目录的启动器是本机私货（不进清单）；scripts/ 里的那份是仓库正式副本，必须照常同步
+  write(path.join(dir, '启动游戏.command'), '#!/bin/bash\necho root\n');
+  write(path.join(dir, 'scripts/启动游戏.command'), '#!/bin/bash\necho scripts\n');
   write(path.join(dir, 'scripts/sync/sync.js'), fs.readFileSync(SYNC_SRC, 'utf8'));
   write(path.join(dir, 'scripts/sync/sync.config.json'), JSON.stringify({ name, port, token: TOKEN, peers: {}, ignore: [] }, null, 2));
 }
@@ -153,6 +156,10 @@ async function ping(port) {
     ok('清单里有正常的源文件', names.includes('scripts/index.html') && names.includes('js/a.js') && names.includes('scripts/sync/sync.js'));
     ok('开发截图不进清单，tools/research 下的脚本照常同步',
       !names.some((p) => /^tools\/(verification|research)\/.*\.(png|jpg)$/.test(p)) && names.includes('tools/research/keep.cjs'));
+    /* 根目录的启动器是本机私货（原生版路径/浏览器 profile/权限位都跟机器绑定）→ 不进清单；
+     * 但**只忽略根目录那一个**，scripts/ 里的正式副本必须照常同步（前导 / 的锚定语义容易写错）。 */
+    ok('根目录启动器不进清单，scripts/ 里的正式副本照常同步',
+      !names.includes('启动游戏.command') && names.includes('scripts/启动游戏.command'));
 
     // ---- 路径穿越与忽略路径一律拒绝 ----
     const bad = ['../A/js/a.js', '..%2f..%2fetc%2fpasswd', '/etc/passwd', 'save/progress.json', 'scripts/sync/sync.config.json'];
@@ -253,12 +260,12 @@ async function ping(port) {
       const upd = require(path.join(ROOT, 'scripts', 'update-game.js'));
       ok('更新永远不覆盖存档 / 同步口令 / 取证与构建产物', upd.ignored('save/progress.json')
         && upd.ignored('scripts/sync/sync.config.json') && upd.ignored('node_modules/pkg/index.js')
-        && upd.ignored('references/orig/x.bin') && upd.ignored('src-tauri/target/x') && upd.ignored('.git/config')
+        && upd.ignored('references/x.bin') && upd.ignored('src-tauri/target/x') && upd.ignored('.git/config')
         && !upd.ignored('js/a.js') && !upd.ignored('scripts/index.html'));
 
       const vroot = path.join(TMP, 'vroot');
-      write(path.join(vroot, 'version.json'), JSON.stringify({ version: '9.9.9', commit: 'abc1234', date: '2026-01-01' }));
-      ok('本机版本取自 version.json', upd.readVersion(vroot).version === '9.9.9');
+      write(path.join(vroot, 'scripts/version.json'), JSON.stringify({ version: '9.9.9', commit: 'abc1234', date: '2026-01-01' }));
+      ok('本机版本取自 scripts/version.json', upd.readVersion(vroot).version === '9.9.9');
 
       /* 造一个「远端便携包」：新版 js/a.js + 新文件 js/new.js + 故意改过的存档与同步口令
        *（这两个必须被忽略，否则一键更新会毁掉玩家的档和两台机器的配对）。 */
@@ -267,7 +274,7 @@ async function ping(port) {
       write(path.join(pkg, 'js/a.js'), 'console.log("new")\n');
       write(path.join(pkg, 'js/new.js'), 'console.log("brand new")\n');
       write(path.join(pkg, 'css/b.css'), 'body{color:red}\n');
-      write(path.join(pkg, 'version.json'), JSON.stringify({ version: '9.9.10' }));
+      write(path.join(pkg, 'scripts/version.json'), JSON.stringify({ version: '9.9.10' }));
       write(path.join(pkg, 'save/progress.json'), '{"name":"远端"}\n');
       write(path.join(pkg, 'scripts/sync/sync.config.json'), '{"token":"远端口令"}\n');
       write(path.join(pkg, 'node_modules/pkg/index.js'), 'module.exports=1\n');
@@ -326,7 +333,7 @@ async function ping(port) {
   } finally {
     if (server) server.kill('SIGTERM');
     await sleep(200);
-    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (e) {}
+    try { fs.rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 }); } catch (e) {}
   }
 })().catch((e) => {
   console.error('\n[x] ' + (e && e.stack ? e.stack : e));

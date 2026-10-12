@@ -2,9 +2,9 @@
 /* ============================================================
  * tools/gen-vendor-data.cjs — 把原版数据抽成游戏自己的 js/gamedict.js
  *
- * 背景：js/orig/ 里的 5 个原版文件以前是**运行时依赖**（scripts/index.html 直接 <script> 引入）。
- * 现在原版文件整包归到 references/orig/（只作参考、不参与运行），游戏运行需要的那部分数据
- * 由这个脚本抽取、生成 js/gamedict.js，之后再也不用碰 references/。
+ * 背景：原版那 5 个文件（GameDict / assets / asset2 / animationStr / Map.min）**只留在本机的
+ * references/orig/**（只作参考、不参与运行；`js/orig/` 那份副本 2026-10 第一百零一批已删除）。
+ * 游戏运行需要的那部分数据由这个脚本抽取、生成 js/gamedict.js，之后再也不用碰 references/。
  *
  * 只抽真正被游戏代码用到的（判断依据：grep 游戏 js/*.js，引用数为 0 的一律不抽）：
  *   · GameDict.js 的 10 个数据字典（武器/技能/道具/装备/套装/强化/NPC/附件/天梯商品/礼包）
@@ -37,14 +37,15 @@ function findRoot(start) {
   return path.resolve(start, '..');
 }
 const ROOT = findRoot(__dirname);
-/* 原版文件优先从 references/orig 读；还没搬的话读 js/orig（迁移期两边都认）。 */
-const ORIG_DIRS = [path.join(ROOT, 'references', 'orig'), path.join(ROOT, 'js', 'orig')];
+/* 【2026-10 第一百零一批】原版文件只认 `references/orig/` 一处 —— `js/orig/`（本机的第二份副本）
+ * 已按用户口径删除，这里不再保留迁移期的回退目录（留着只会让「到底去哪儿找」有两种答案）。
+ * `references/` 整目录不进仓库，所以这个脚本是**非运行时**工具：缺了原版文件就明确报错。 */
+const ORIG_DIR = path.join(ROOT, 'references', 'orig');
 function origFile(name) {
-  for (const dir of ORIG_DIRS) {
-    const f = path.join(dir, name);
-    if (fs.existsSync(f)) return f;
-  }
-  throw new Error('找不到原版文件 ' + name + '（应在 references/orig/ 或 js/orig/）');
+  const f = path.join(ORIG_DIR, name);
+  if (fs.existsSync(f)) return f;
+  throw new Error('找不到原版文件 ' + name + '（应在 references/orig/ —— 那是本机参考资料目录，不进仓库；' +
+    '缺它时不能重新生成 js/gamedict.js，但游戏本身照常跑）');
 }
 
 /** 要迁出的数据字典：全局名 → 一句说明（写进生成文件的注释里）。 */
@@ -144,6 +145,92 @@ function jsString(text) {
   return JSON.stringify(String(text));
 }
 
+/* ---------- 资源目录整理（2026-10）：原版扁平路径 → 新目录 ----------
+ * 原版数据里的图片是一个**扁平目录**（`images/wuqi.png`、`images/effect/skill_6.png`…）。
+ * 2026-10 把 images/ 按用途分成了 images/atlas（图集切片）| images/battle/fx（战斗特效）|
+ * images/battle/bg（战斗背景）| images/ui/numbers（数字）| images/ui/screens（界面图）；
+ * **文件名一个都没改**，只是换了目录 —— 所以这里按「名字 → 属于哪个目录」登记一遍。
+ *
+ * 为什么不让生成器自己去磁盘上找同名文件：那会在重名时（例如 activity.png 在 images/ 下有三份）
+ * 随机挑一个，生成结果不可复现。这张表是**唯一口径**，配合下面的 assertAssetsExist：
+ *   · 表里漏了某个名字 → 生成的路径还是老扁平路径 → 校验直接报错（不会悄悄生成 404）；
+ *   · 表里写错目录     → 目标文件不存在 → 同样报错。
+ * 以后再加原版素材：把名字补进上面那张表，或在新目录里放好同名文件。 */
+const ASSET_DIRS = [
+    ["images/atlas", [
+      "SQ_01.png", "SQ_02.png", "daoju.png", "jinbeidaoju.png",
+      "jineng.png", "resource8.png", "resource_1.png", "resource_10.png",
+      "resource_11.png", "resource_12.png", "resource_13.png", "resource_14.png",
+      "resource_15.png", "resource_16.png", "resource_2.png", "resource_3.png",
+      "resource_4.png", "resource_5.png", "resource_6.png", "resource_7.png",
+      "resource_9.png", "tl.png", "woodman1.png", "woodman2.png",
+      "wuqi.png", "wuqi2.png", "xh1.png", "xh2.png",
+      "xm1.png", "xm2.png"
+    ]],
+    ["images/battle/fx", [
+      "GM_01.png", "GM_02.png", "beatBack.png", "die.png",
+      "effectCommonAttack.png", "hurtRunBack.png", "lightning1.png", "lightning2.png",
+      "lightning3.png", "lightning4.png", "lightning5.png", "main_e1.png",
+      "main_e2.png", "main_e3.png", "runAround.png", "skill_13.png",
+      "skill_14.png", "skill_15.png", "skill_15_d.png", "skill_16_1.png",
+      "skill_16_2.png", "skill_17.png", "skill_18.png", "skill_18_d_1.png",
+      "skill_18_d_2.png", "skill_23.png", "skill_6.png", "skill_7.png",
+      "skill_8.png", "skill_8_d.png", "skill_9.png", "skill_9_d.png",
+      "starter_effect.png", "think.png", "throwEffect.png", "throwweaponAttack.png",
+      "tl_effect.png", "weaponAttack.png", "weaponEffect.png", "win_effect.png",
+      "woodman_effect.png", "xh_effect1.png", "xh_effect2.png", "xm_effect.png"
+    ]],
+    ["images/battle/bg", [
+      "fightBack.png", "fightBg.png", "fightBg_meltRoom_effect.png", "fightBg_meltRoom_front.png",
+      "fightBg_robot_effect.png", "fightBg_robot_front.png", "fightBg_robot_mid.png", "fightBg_wood_1.png",
+      "fightBg_wood_3.png", "fightBg_wood_4.png", "fightBg_wood_effect2.png", "fightBg_wood_effect6.png",
+      "fightFront.png", "fightMid.png"
+    ]],
+    ["images/ui/numbers", [
+      "energyNum.png", "expNum.png", "fightNum_g.png", "fightNum_r.png",
+      "fightNum_y.png", "jingyanshuzi.png", "num_28.png", "num_36.png",
+      "shade.png", "substarate.jpg", "substarate0.png", "tanchutiao.png",
+      "tilishuzi.png"
+    ]],
+    ["images/ui/screens", [
+      "activity.png", "draw.png", "go.png", "loading.png",
+      "loadingN.jpg", "loadingShadow.png", "loadingp.png", "loss.jpg",
+      "main.jpg", "new.png", "openLogo.png", "race_loading.jpg",
+      "shengbai.png", "tudi.png", "win.jpg"
+    ]],
+];
+/** 整目录搬家的**前缀规则**（文件名与子结构都不变）：原版 `images/equip/<部位>/<名>`
+ *  → `images/battle/outfit/<部位>/<名>`。放在基名表之前判，命中就直接换前缀。 */
+const ASSET_DIR_PREFIXES = [
+  ['images/equip/', 'images/battle/outfit/'],
+];
+const ASSET_NAME_DIR = new Map();
+for (const [dir, names] of ASSET_DIRS) {
+  for (const name of names) {
+    if (ASSET_NAME_DIR.has(name)) throw new Error('资源名字被登记了两次：' + name);
+    ASSET_NAME_DIR.set(name, dir);
+  }
+}
+/** 把原版路径换成新目录下的同名文件：原版可能带一级旧子目录（images/effect/x.png），
+ *  也可能就是扁平的（images/x.png）—— 两种都**按文件名**认目录；不在表里的原样返回
+ *  （交给 assertAssetsExist 报错，不会悄悄生成 404）。 */
+function newAssetPath(src) {
+  const p = String(src == null ? '' : src);
+  for (const [from, to] of ASSET_DIR_PREFIXES) if (p.startsWith(from)) return to + p.slice(from.length);
+  const m = /^images\/(?:[^/]+\/)?([^/]+)$/.exec(p);
+  if (!m) return p;
+  const dir = ASSET_NAME_DIR.get(m[1]);
+  return dir ? dir + '/' + m[1] : p;
+}
+/** 生成前校验：清单里出现的 images/ 路径必须真的存在（否则游戏里就是 404）。 */
+function assertAssetsExist(paths) {
+  const missing = Array.from(new Set(paths.filter((p) => /^images\//.test(String(p)) &&
+    !fs.existsSync(path.join(ROOT, String(p))))));
+  if (missing.length) {
+    throw new Error('这些图片路径不存在（补进 ASSET_DIRS 或放好文件）：\n  ' + missing.join('\n  '));
+  }
+}
+
 function build() {
   const ctx = loadOriginals();
   const putTable = parsePutTable(origFile('GameDict.js'));
@@ -212,7 +299,8 @@ function build() {
   const asstes = ctx.asstes;
   if (!Array.isArray(asstes)) throw new Error('原版 assets.js 里没有 asstes 数组');
   out.push('  const asstes = [');
-  out.push(asstes.map((a) => '    { id: ' + jsString(a.id) + ', size: ' + Number(a.size || 0) + ', src: ' + jsString(a.src) + ' }').join(',\n'));
+  assertAssetsExist(asstes.map((a) => newAssetPath(a.src)));
+  out.push(asstes.map((a) => '    { id: ' + jsString(a.id) + ', size: ' + Number(a.size || 0) + ', src: ' + jsString(newAssetPath(a.src)) + ' }').join(',\n'));
   out.push('  ];');
   out.push('');
   out.push('  /* ---------- 原版 asset_* 路径表（三侠/木人/新手/logo）----------');
@@ -223,7 +311,8 @@ function build() {
   if (!assetNames.length) throw new Error('原版 asset2.js 里没找到 asset_* 数组');
   for (const name of assetNames) {
     const list = ctx[name];
-    const rows = list.map((a) => '{ id: ' + JSON.stringify(String(a.id)) + ', size: ' + Number(a.size || 0) + ', src: ' + JSON.stringify(String(a.src)) + ' }');
+    assertAssetsExist(list.map((a) => newAssetPath(a.src)));
+    const rows = list.map((a) => '{ id: ' + JSON.stringify(String(a.id)) + ', size: ' + Number(a.size || 0) + ', src: ' + JSON.stringify(String(newAssetPath(a.src))) + ' }');
     out.push('  const ' + name + ' = [' + (rows.length ? '\n    ' + rows.join(',\n    ') + ',\n  ' : '') + '];');
   }
   out.push('');
@@ -257,8 +346,8 @@ function build() {
 const target = path.join(ROOT, 'js', 'gamedict.js');
 const next = build();
 if (process.argv.includes('--check')) {
-  // references/orig/ 不存在（精简发布包）时没得比，直接跳过
-  const hasOrig = ORIG_DIRS.some((d) => fs.existsSync(path.join(d, 'GameDict.js')));
+  // references/orig/ 不存在（精简发布包 / 别人的机器）时没得比，直接跳过
+  const hasOrig = fs.existsSync(path.join(ORIG_DIR, 'GameDict.js'));
   if (!hasOrig) { console.log('· 跳过：找不到 references/orig/（精简包里没有原版文件，属正常）'); process.exit(0); }
   const cur = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
   if (cur === next) { console.log('✓ js/gamedict.js 是最新的（' + (next.length / 1048576).toFixed(2) + ' MB）'); process.exit(0); }

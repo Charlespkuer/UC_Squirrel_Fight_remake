@@ -70,11 +70,116 @@
     e.bestLayer = Math.max(0, Math.floor(Number(e.bestLayer) || 0));
     if (typeof e.weekKey !== 'string') e.weekKey = '';
     if (typeof e.shieldDate !== 'string') e.shieldDate = '';
+    /* 剧情（【U18】2026-10）：{ 剧情 id: true } = 「这段只播一次的剧情已经播过了」。
+     * 界面靠它决定「进店前那段商人剧情」还要不要走。 */
+    if (!e.storySeen || typeof e.storySeen !== 'object' || Array.isArray(e.storySeen)) e.storySeen = {};
     // 本周最高分：周一重置（与每日统计同一节奏）
     const mon = mondayKey();
     if (e.weekKey !== mon) { e.weekKey = mon; e.weekBest = 0; }
     if (e.run) e.run = normalizeRun(e.run, 'endless');
     return e;
+  }
+  /* ============================================================
+   * 【T13】剧情状态（2026-10 用户口径）—— 只做两件事：
+   *   · 给某一局挂一段「待播放的剧情 id」（`run.story`，随存档走，重载也还在）；
+   *   · 记录「只播一次」的剧情已经播过（`endless().storySeen`）。
+   * 文本、逐字显示与「继续」按钮都在界面侧（js/tower-ui.js 的【U18】）——
+   * 这里只保证状态能存、能查、能清，剧情不掺进 reportBattle 的战斗逻辑。
+   * ============================================================ */
+  /** 给某一局挂一段待播剧情（界面点「开始攀登」，或判断出该播哪段时调）。 */
+  function setRunStory(mode, id) {
+    const box = mode === 'tower' ? tower() : endless();
+    if (!box.run || !id) return null;
+    box.run.story = String(id);
+    /* 【U20b】整百层那两段的**本层进度**（`x00PreNo`：0 = 还没讲王庭 / 1 = 该讲第一近卫 /
+     * 2 = 两段都讲完）就记在「挂上待播」这一刻 ——
+     * 不管从哪条路挂上（进层主动触发 / 开战前的兜底 / 播完一段之后的连播接力）都算讲过了。
+     * 放在这里而不是 `autoPlayStory` 里：连播接力走的是 `storyFinish` → `setRunStory`，
+     * 漏掉它就会出现「王庭刚播完又问出王庭」的死循环。 */
+    const runId = String(id);
+    if (runId === 'layer100') box.run.x00PreNo = Math.max(1, Math.floor(Number(box.run.x00PreNo) || 0));
+    else if (runId === 'x00a') box.run.x00PreNo = Math.max(2, Math.floor(Number(box.run.x00PreNo) || 0));
+    save();
+    return box.run.story;
+  }
+  /** 剧情播完：把待播标记清掉。 */
+  function clearRunStory(mode) {
+    const box = mode === 'tower' ? tower() : endless();
+    if (!box.run) return false;
+    /* 连「延迟一步」那一份一起清（`pendingStoryId` / 停留标记）——
+     * 否则播完提示窗之后还会被反复交接，或者卡在「待播但界面不认」的状态里。 */
+    const had = !!(box.run.story || box.run.pendingStory);
+    delete box.run.story;
+    delete box.run.pendingStory;
+    delete box.run.pendingStoryHold;
+    if (had) save();
+    return had;
+  }
+  /** 这一屏是不是「延迟一步」那份剧情的第一帧：界面上要先让提示窗停留，再播下一屏。
+   *  清掉停留标记（剧情随即开始），但不碰 `pendingStory` —— 它要一直留到剧情播完。 */
+  function clearRunStoryHold() {
+    const run = endless().run;
+    if (!run || !run.pendingStoryHold) return false;
+    delete run.pendingStoryHold;
+    save();
+    return true;
+  }
+  /** 「延迟一步」那一段播完了：把**待播槽**（`pendingStory` / `pendingStoryHold`）清掉，
+   *  但**不动** `run.story` —— 多段连播（整百层那几段）时下一段正好挂在那儿等着。
+   *  ⚠ 这是「第一次失烙印」那条链的收尾：漏掉它，待播槽在界面判定里会一直排在 `run.story`
+   *  前面（`pendingStoryOf` 里它优先级更高），同一段剧情就会反复重播、卡死在剧情屏上 ——
+   *  用户报的「第 100 层第一次烙印破碎的文案不停触发」就是这么来的（连播那一支不清槽）。 */
+  function clearRunStoryPending(mode) {
+    const box = mode === 'tower' ? tower() : endless();
+    const run = box.run;
+    if (!run) return false;
+    const had = !!(run.pendingStory || run.pendingStoryHold);
+    delete run.pendingStory;
+    delete run.pendingStoryHold;
+    if (had) save();
+    return had;
+  }
+  /** 这段「只播一次」的剧情播过了吗。 */
+  function storySeen(id) { return !!(endless().storySeen || {})[id]; }
+  /** 记下「这段只播一次的剧情已经播完」。 */
+  function markStorySeen(id) {
+    if (!id) return false;
+    const e = endless();
+    e.storySeen = Object.assign({}, e.storySeen, { [String(id)]: true });
+    save();
+    return true;
+  }
+  /** 剧情模式开着吗（无尽首页左下角那颗按钮；**挑战模式 = 关**）。
+   *  存档里存的是 `endless().storyOn`，默认 true（剧情模式）。 */
+  function storyEnabled() { return endless().storyOn !== false; }
+  /** 切换剧情 / 挑战模式，返回切换后的状态（true = 剧情模式）。 */
+  function setStoryEnabled(on) {
+    const e = endless();
+    e.storyOn = !!on;
+    save();
+    return storyEnabled();
+  }
+  /** 【U18】「每次开店都播」的那类剧情（立即进货的铃声段）：给**这家店**记一笔「已经播过」，
+   *  免得剧情一播完、条件还成立（phase 仍是 shop）又被重播，卡在原地出不来。
+   *  下一家店是新对象，所以照旧会播。 */
+  function markShopStoryShown(mode) {
+    const box = mode === 'tower' ? tower() : endless();
+    if (!box.run || !box.run.shop) return false;
+    box.run.shop.storyShown = true;
+    save();
+    return true;
+  }
+  /** 【2026-10】随机商人文案：**这家店抽到的是哪一段**要记在店上 ——
+   *  `TowerPlot.pendingStoryOf` 每次重画都会问一遍「这家店该播哪段」，
+   *  每次都重摇的话，界面正在打字的那一段会被换成另一段（打字机永远打不完＝死循环）。
+   *  固定文案（第一次 / 第 10 层）没有这个问题，所以这里只管随机池。
+   *  下一家店是新对象，自然重新抽。 */
+  function setShopStoryPick(id) {
+    const box = endless();
+    if (!box.run || !box.run.shop || !id) return false;
+    box.run.shop.storyPick = String(id);
+    save();
+    return true;
   }
   function mondayKey() {
     const d = new Date();
@@ -172,6 +277,14 @@
         const uid = Math.max(0, Math.floor(Number(b && b.uid) || 0));
         if (uid > 0) out.uid = uid;
         if (b && b.slotFree === true) out.slotFree = true;
+        /* 【铭文 2026-10】铭文记账也必须是**逐条**的，这里是行字段的**唯一白名单** ——
+         * 漏了这两行，每次归一化（normalizeRun 会在每次 endless() 时跑）都会把
+         * 增幅铭文的 ×1.5 和「这张铭文已附过」的记录抹掉：效果看起来像没生效，
+         * 而且同一张铭文还能反复附在同一条上。 */
+        const ench = (b && Array.isArray(b.enchants)) ? b.enchants.filter((v, i, a) => v && a.indexOf(v) === i) : [];
+        if (ench.length) out.enchants = ench.map(String);
+        const emul = Number(b && b.enchMul);
+        if (Number.isFinite(emul) && emul > 0 && emul !== 1) out.enchMul = emul;
         return out;
       }) : []);
     run.layer = layer;
@@ -190,6 +303,27 @@
     run.enemyMaxHpDown = Math.max(0, Math.min(ENEMY_MAXHP_DOWN_CAP, Number(run.enemyMaxHpDown) || 0));
     /* 传奇保底计数（B 方案）：跨场 / 跨层保留，换局从 0 开始。 */
     run.legendPity = Math.max(0, Math.floor(Number(run.legendPity) || 0));
+    /* 【U18c】「巡视」剧情的记账（见 autoPlayStory / TowerPlot.duePatrol）：
+     * `patrolStoryAt` = 本层已经讲过巡视剧情（换层即失效），`patrolMeetNo` = 讲到第几段。
+     * 两个都必须是干净的整数 —— 它们是「一次偶遇只讲一段」的唯一依据，
+     * 坏值会让剧情要么重播、要么整段不播。 */
+    run.patrolMeetNo = Math.max(0, Math.floor(Number(run.patrolMeetNo) || 0));
+    const patrolStoryAt = Math.floor(Number(run.patrolStoryAt) || 0);
+    if (patrolStoryAt > 0) run.patrolStoryAt = patrolStoryAt;
+    else delete run.patrolStoryAt;
+    /* 【U20】整百层「照影之境」的拾取记账：只在**这一层**有效（换层即失效），
+     * 坏值会让拾取屏要么不出现、要么反复出现。 */
+    const mirrorTaken = Math.floor(Number(run.mirrorTaken) || 0);
+    if (mirrorTaken > 0) run.mirrorTaken = mirrorTaken;
+    else delete run.mirrorTaken;
+    /* 【U20b】整百层那套剧情的**本层进度**（`x00PreNo`：0/1/2；`x00stage`：0~4）：
+     * 都是「这一层」的记账，坏值会让王庭那两段要么重播、要么整段不播。 */
+    run.x00PreNo = Math.max(0, Math.min(2, Math.floor(Number(run.x00PreNo) || 0)));
+    run.x00stage = Math.max(0, Math.min(4, Math.floor(Number(run.x00stage) || 0)));
+    /* 【2026-10 用户口径】「玩家按跳过键跳过」的场次是**本层**的记账（换层归零）：
+     * 坏值 / 旧档按 0 算，并且不许超过这一层的场数（不然结算会把每一包都抹掉）。 */
+    run.skippedBattles = Math.max(0, Math.min(Math.max(0, (Array.isArray(run.plan) ? run.plan.length : 0)),
+      Math.floor(Number(run.skippedBattles) || 0)));
     /* 挥金如土（C36）的「已提升次数」：分段涨价的口径，坏值不许为负。
      * 【2026-10】进度已改成「每栏各记一份」，这里把旧档的单计数器迁进第一栏；
      * 之后镜像字段由 syncSpendMirrors 维护（读旧字段的界面 / 探针不受影响）。 */
@@ -258,6 +392,17 @@
         seen[uid] = true;
         row.uid = uid;
         if (uid > run.rowUidSeq) run.rowUidSeq = uid;
+      }
+    })();
+    /* 铭文记账：`enchants`（吃过的铭文 id，去重）与 `enchMul`（增幅铭文累计倍率）。
+     * 老档没有 → 补成空数组 / 1；虚空铭文那条老口径（slotFree）不在这里迁，
+     * 它由上面的 migrateSlotFree 负责，两者互不影响。 */
+    (function ensureInscriptions() {
+      for (const row of (run.permanent || []).concat(run.limited || [])) {
+        if (!row) continue;
+        row.enchants = rowEnchantsOf(row).filter((v, i, a) => v && a.indexOf(v) === i);
+        const m = Number(row.enchMul);
+        row.enchMul = (Number.isFinite(m) && m > 0) ? m : 1;
       }
     })();
     run.pickBuffIds = cleanIds(run.pickBuffIds);
@@ -435,7 +580,17 @@
         run.shop.layer = Math.max(1, Math.floor(Number(run.shop.layer) || Number(run.layer) || 1));
       }
       /* 合法的「等待玩家操作」阶段：出商店 / 结算点 / 20 起每 10 层的放弃永久增益。 */
-      if (run.phase !== 'shop' && run.phase !== 'checkpoint' && run.phase !== 'sacrifice') run.phase = null;
+      /* 【软锁防线】存档里遗留的 `pendingPick` 如果**已经没有可选目标**（目标被卖掉 / 碎掉 /
+     * 版本变更），就地转成「留着等目标」（deferredPicks）—— 否则界面会一直弹一个 0 候选的空弹窗，
+     * 玩家点不掉也走不了（用户实测的卡死就是这么来的）。 */
+    parkStalePendingPick(run);
+    /* 合法的「等着玩家处理」阶段白名单（2026-10 第六十五批）：巡逻的收缴/丢弃也是合法阶段 ——
+     * 漏登记会让 run.phase 在**每次归一化**时被清成 null，界面就再也弹不出收缴面板
+     *（用户实测：100 层魔王战输了直接走失败结算）。
+     * 【U20】整百层的 `mirror`（拾取照影之境 / 等「继续挑战」确认）同样是合法阶段 ——
+     * 漏登记的后果实测过：`layerClear` 里刚挂上就被下一次 `endless()` 清掉，
+     * 拾取屏根本渲染不出来。 */
+    if (['shop', 'checkpoint', 'sacrifice', 'patrolToll', 'patrolDiscard', 'mirror'].indexOf(run.phase) < 0) run.phase = null;
       if (!Array.isArray(run.debuffs)) run.debuffs = [];
       /* 获得顺序号（`at`）：商店的出售 / 交换列表按它**倒序**排（最新的在最上）。
        * 老档没有这个字段 → 按当前表内顺序补号（永久表在前、限次表在后，与旧版显示顺序一致），
@@ -499,10 +654,288 @@
    *    C13 精英杀手生效）。x10 排除，避免一层里叠两个精英台阶。 */
   function isEliteEntry(entry, layer, isLast) {
     if (entry && entry.kind === 'warlord') return true;
+    /* 「巡逻」魔王：**同时算精英 + boss**（用户口径）—— 精英收益与 boss 类 buff 都要吃。 */
+    if (entry && entry.kind === 'patrol') return true;
     const L = Number(layer) || 0;
     return !!isLast && L > 0 && L % 5 === 0 && L % 10 !== 0;
   }
-  function buildPlan(layer, salt, squirrelsOnly) {
+  /** 【U18c】剧情埋点（2026-10 用户口径）—— 状态机只负责「什么时候该播哪一段」，
+   *  文本一律在 js/tower-ui.js 的 STORY_SCRIPTS 里。
+   *
+   *  层号 → 该层**第一场战斗之前**播的那段（只播一次，记在 `endless().storySeen`）：
+   *    20 石门 · 30 黑色纹路 · 40 塔壁纹章 · 90 石壁裂痕 · 95 壁画 · 100 王庭。
+   *  另有几类不走这张表：
+   *    · 巡视（路上偶遇的魔王）→ 开战前 patrolGate / patrolMeet；胜负各有前后三段；
+   *    · 整百层三连战的**段间**（第 1/2/3 场之间）→ `run.x00stage` 记账（见 reportBattle）；
+   *    · 献祭 → 第一次 gate20b/gate20c，之后每次从 offer1~5 里随机；
+   *    · 第一次失去烙印 → `layer31`，跟着**烙印真的碎了**那个事件走（不在层号表里）。 */
+  const LAYER_ENTRY_STORY = {
+    20: 'gate20',
+    30: 'layer30',
+    40: 'layer40',
+    90: 'layer90',
+    95: 'layer95',
+    100: 'layer100',
+  };
+  /** 这一层有入场剧情吗（只按层号；「播过没有」由 pendingStory / storySeen 判）。 */
+  function layerEntryStory(layer) {
+    return LAYER_ENTRY_STORY[Math.floor(Number(layer) || 0)] || null;
+  }
+  /** 每 10 层重复献供时随机播的那几段（用户口径 2026-10：随机选一段展示）。 */
+  const OFFER_STORY_IDS = ['offer1', 'offer2', 'offer3', 'offer4', 'offer5'];
+  /** 给某一层的 plan 打上「入场剧情」标记。
+   *  只挂在**第一场**上：界面在进层那一刻就能看到，玩家点「继续战斗」时正好先播它。
+   *  · `x00` = 整百层三连战：第一场之前要连着播 `layer100` + `x00a` 两段，
+   *    所以这里记的是 `x00stage` 记账起点，具体由 nextBattle / reportBattle 排；
+   *  · 巡逻层：入场剧情挂在**巡逻那一场**上（它可能不是第 1 场）。 */
+  function noteEntryStory(plan, layer) {
+    if (!Array.isArray(plan) || !plan.length) return plan;
+    /* 整百层：「觐见魔王」三连战，第一场之前播王庭那一段（x00stage 记账，见 reportBattle）。 */
+    if (Math.floor(Number(layer) || 0) % 100 === 0 && Number(layer) > 0) {
+      plan[0].entryStory = 'x00stage';
+      return plan;
+    }
+    /* 普通层：本层有入场剧情就挂在第 1 场上；「巡视」那一场另挂（它可能在第 N 场）。 */
+    const first = layerEntryStory(layer);
+    for (const entry of plan) {
+      if (entry && entry.kind === 'patrol' && entry.audience !== 'king') entry.patrolStory = true;
+    }
+    if (first && plan[0]) plan[0].entryStory = first;
+    return plan;
+  }
+  function isBossEntry(entry) {
+    return !!(entry && (entry.kind === 'warlord' || entry.kind === 'patrol' ||
+      entry.kind === 'squirrel' || entry.kind === 'trial'));
+  }
+  /* ---------- 【U18c】剧情推进：entry 标记 → 待播 id / 多段剧情的下一段 ----------
+   * 整百层那五段（layer100 → x00a → x00b → x00c → x00win）用 `run.x00stage` 记账：
+   *   0 = 还没进王庭（第 1 场之前）    1 = 王庭 / 第一近卫这一组已经开播
+   *   2 = 打完第 1 场（等第二近卫）    3 = 打完第 2 场（等三重王命）
+   *   4 = 打完第 3 场（终章）
+   * ⚠ stage 决定「这一段是该在开战前播，还是该在段间播」——
+   *  王庭那两段必须在**第 1 场开打之前**播完（stage 1 之前由 entryStoryFor 提供），
+   *  进了 stage 2 之后就轮到 reportBattle 那一侧接管，开战前不再插话。 */
+  /** 【U18c】进层那一刻的剧情判定**已经搬去 js/tower-plot.js**（`TowerPlot.due`）——
+   *  这里只留两样本文件自己还要用的东西：
+   *    · `noteEntryStory`：给 plan 打标记（「这一层第 1 场之前有剧情」）；
+   *    · `entryStoryFor` / `x00BeforeFirst` / `isX00Plan`：整百层那几段的**段间**推进
+   *    （reportBattle 与界面「还有没有下一段」都要问）。
+   *  ⚠ 别在这里再写一份「按层号该播什么」的判定 —— 那会与 tower-plot 的 due() 各判各的，
+   *  历史上就是这么出现「同一段播两遍」「该播的永远不播」的。 */
+  function isX00Plan(plan) {
+    return !!(Array.isArray(plan) && plan.length && plan[0] && plan[0].entryStory === 'x00stage');
+  }
+  /** 整百层：第 1 场开打之前要播的那一段（王庭 → 第一近卫）。
+   *
+   *  ⚠ 【U20b 用户口径】这两段是**每次到达整百层都讲一遍**的，判据是**这一局这一层的进度**
+   *  （`run.x00PreNo`：0 = 还没讲王庭 / 1 = 该讲第一近卫 / 2 = 两段都讲完），
+   *  **不看**存档里的 `storySeen`：
+   *    · 用户报的 bug：「第 100 层又有概率会吞掉那两段应该在第 1 场战斗前展示的文案」——
+   *      真因就是原来拿 `storySeen('layer100')` 判：只要**以前**（上一局 / 上一次爬到这里）
+   *      看过，第二次爬到 100 层就一段都不播了；调试台挪回 100 层也一样（用户实测的现场）。
+   *    · 整百层本来就是「每 100 层重来一次」的循环事件（照影之境每轮叠一层），
+   *      所以这一套按**每一次到达**重讲；其余按层号的入场剧情（20/30/40/90/95）
+   *      仍是「只播一次」，口径见 docs/剧情触发条件.md。 */
+  function x00BeforeFirst(run) {
+    if (!run) return null;
+    const pre = Math.max(0, Math.floor(Number(run.x00PreNo) || 0));
+    if (pre <= 0) return 'layer100';
+    if (pre === 1) return 'x00a';
+    return null;
+  }
+  /** 这一场（entry 上的标记）现在该播哪段；没有就 null。 */
+  function entryStoryFor(run, entry) {
+    if (!run || !entry) return null;
+    const id = entry.entryStory;
+    if (!id) return null;
+    if (id !== 'x00stage') return storySeen(id) ? null : id;
+    const stage = Math.max(0, Math.floor(Number(run.x00stage) || 0));
+    return stage < 1 ? x00BeforeFirst(run) : null;
+  }
+  /** 多段剧情的下一段（界面播完一段后来问「还有没有」）。
+   *  整百层：王庭 → 第一近卫 → 第二近卫 → 三重王命 → 终章，一段接一段。 */
+  function nextEntryStory(run) {
+    if (!run || !isX00Plan(run.plan)) return null;
+    const stage = Math.max(0, Math.floor(Number(run.x00stage) || 0));
+    /* stage 0/1：王庭这两段连着播（还没开打）。stage 2 起交给 reportBattle 那一侧。
+     * 两段本身该不该播由 `x00BeforeFirst` 按**这一层的进度**判（每次到达整百层都重讲一遍）。 */
+    return stage <= 1 ? x00BeforeFirst(run) : null;
+  }
+  /** 【U18c】**主动触发**：进层（或挪层）之后，把「这一层刚进去就该播的剧情」挂到 `run.story` 上。
+   *  用户口径 2026-10：**到特定层就直接播**，不要等玩家点一次「继续战斗」才播。
+   *
+   *  「该播哪一段」整份判定都在 `js/tower-plot.js`（`TowerPlot.due`）——
+   *  本文件只负责「什么时候问它」与「把答案落到 run 上」，叙事与判定不分家。
+   *  调用点：`advanceLayer`（进新层）、`debugSetEndlessLayer`（调试挪层，用户要求 debug 也照常播）。
+   *  ⚠ 判空要严：`run.story` 已经有待播的、正在战斗（attempt）、有待选增益（choices）时都别插队，
+   *  否则会把玩家卡在剧情屏上（旧版本的「一直触发剧情、进不了战斗」就是这么来的）。 */
+  function autoPlayStory(run) {
+    if (!run) return null;
+    if (typeof window === 'undefined' || !window.TowerPlot || !TowerPlot.due) return null;
+    if (run.story || run.attempt || run.choices) return null;
+    let id = null;
+    try { id = TowerPlot.due(run); } catch (e) { id = null; }
+    if (!id) return null;
+    setRunStory('endless', id);
+    /* 【U18c】「巡视」那几段的记账（判定在 TowerPlot.duePatrol，这里只负责落账）：
+     *   · `patrolStoryAt` = 本层已经讲过巡视剧情（换一层就是新的偶遇）；
+     *   · `patrolMeetNo`  = 讲到第几段了（下一次偶遇接着往下讲，一局之内不重复）。
+     * 记在**挂上待播的这一刻**：故事还没读完也不会再判出第二段 ——
+     * 这正是「一直触发剧情、进不了战斗」那个死循环的反面（用户报的 bug）。
+     * `patrolMeet*` 是 `once:false` 的那一类，播完不会写进存档的 seen 表，
+     * 所以段号**必须**记在 run 上，不能靠 storySeen。 */
+    const patrolMeet = /^patrolMeet(\d*)$/.exec(id);
+    if (id === 'patrolGate' || patrolMeet) {
+      run.patrolStoryAt = Math.max(1, Math.floor(Number(run.layer) || 1));
+      if (patrolMeet) run.patrolMeetNo = Math.max(1, Math.floor(Number(patrolMeet[1]) || 1));
+      save();
+    }
+    if (run.plan && run.plan[0] && run.plan[0].entryStory === 'x00stage') {
+      run.x00stage = Math.max(1, Math.floor(Number(run.x00stage) || 0));
+      /* 两段的进度（`x00PreNo`）由 `setRunStory` 落账（挂上待播就算讲过了），这里不用再记。 */
+      save();
+    }
+    return id;
+  }
+  /** 界面「开战前的最后一道闸」用：**现在不该开打、该先播剧情**吗。
+   *  ⚠ 必须是**无副作用**的纯查询（不建战斗令牌、不改 `run`）——
+   *  早期版本让界面直接调 `nextBattle` 来问，那会建出一枚 attempt 令牌，
+   *  没剧情时又没地方收回，于是「读完剧情再点一次」会被 `run.attempt` 挡住、永远开不了打。
+   *
+   *  两个条件都要看：
+   *    · `TowerPlot.pending(run)` —— **已经在待播**（进层时就挂上了 `run.story`，剧情屏正显示着）；
+   *    · `TowerPlot.due(run)`     —— **现在才轮到**（「巡视」那一场可能不是本层第 1 场，
+   *      进层时还轮不到它，走到这一场才该播）。
+   *  漏掉第一个就会出现「剧情屏上点『继续战斗』直接打起来」——用户实测报过。 */
+  function storyPendingForBattle(mode) {
+    if (mode !== 'endless') return false;
+    const run = endless().run;
+    if (!run || run.attempt || run.choices || run.phase) return false;
+    if (typeof window === 'undefined' || !window.TowerPlot) return false;
+    if (!TowerPlot.script) return false;
+    try {
+      if (TowerPlot.pending(run) && TowerPlot.script(TowerPlot.pending(run))) return true;
+    } catch (e) { /* 忽略：判不出来就当没有 */ }
+    /* pending 里对「延迟一步」那类会先吃掉 hold 标记并返回 null —— 那种情况属于「下一步才播」，
+     * 这里也不能开打，所以下面统一用 due 再问一次。 */
+    /* ⚠ 但**已经播过**（或认不出来）的那一份不能再拦：旧档里残留的待播槽会把
+     * 「继续战斗」永久挡在门外（用户实测过的卡死）。 */
+    if (run.pendingStoryId && TowerPlot.script(run.pendingStoryId) && !storySeen(run.pendingStoryId)) return true;
+    if (run.pendingStoryHold) return true;
+    try { return !!TowerPlot.due(run); } catch (e) { return false; }
+  }
+  /* ---------- 【U18c】「巡视」与「献祭」的剧情节点 ----------
+   * 这两类都不是「按层号」触发，而是跟着**事件**走（战斗胜负 / 清层），所以单独记账。 */
+  /** 这次清层要不要先播「献祭前」那一段（由 reportBattle 在挂 sacrifice 阶段时调）。
+   *  第一次是 `gate20b`（第 20 层那座石门的原话）；之后每 10 层从 `offer1~5` 里随机一段。
+   *
+   *  ⚠【第八十六批修过的坑，别改回去】随机那一段的判据**不能只看 `storySeen('gate20b')`**：
+   *  用户实测「30 层之后的献祭一直在重播 20 层那段」——因为 20 层那次剧情被打断（战斗抢跑、
+   *  切模式、中途退出），`gate20b` 始终没记进 `storySeen`，于是每次献祭都判成「第一次」。
+   *  现在补一道**层号兜底**：只要已经走过第 20 层（轮内层号 > 20），就不再重复第一次那段 ——
+   *  「第一次」只可能在轮内第 20 层发生，这一点是结构上成立的（见 needPermSacrifice）。 */
+  function noteSacrificeStory(run) {
+    if (!run) return null;
+    const firstTime = !storySeen('gate20b') && D().cycleLayer(run.layer) <= 20;
+    if (firstTime) return setRunStory('endless', 'gate20b');
+    const pool = OFFER_STORY_IDS.filter((id) => !!id);
+    const pick = pool[Math.floor(Math.random() * pool.length)] || pool[0];
+    return setRunStory('endless', pick);
+  }
+  /** 献祭**完成**之后那一段（第一次走 gate20c，之后不再打断）。 */
+  function noteSacrificeDoneStory(run) {
+    if (!run || storySeen('gate20c')) return null;
+    return setRunStory('endless', 'gate20c');
+  }
+  /** 第一次被塔夺走烙印那一段（用户口径：**那一天**的「失去烙印」弹窗停久一点，同时触发剧情）。
+   *  ⚠ 埋点是「烙印真的碎了」这个**事件**，不是第 31 层这个层号 —— 所以它不在上面的层号表里。
+   *  顺序也是刻意的：先让「碎掉的烙印失效」那个提示**停留**，再播剧情。所以这里写的是
+   *  `run.pendingStory`（待播，但界面不认为「剧情模式已经开始」→ 不会把提示窗顶掉），
+   *  界面在提示点掉之后由 `endlessInfo().run.pendingStoryId` 接手播它。 */
+  function noteFirstMarkLostStory(run) {
+    if (!run) return null;
+    if (storySeen('layer31')) return null;      // 只触发一次
+    run.pendingStory = 'layer31';
+    run.pendingStoryHold = true;                // 提示窗「停留得久一些」（界面据此加一档停留）
+    save();
+    return run.pendingStory;
+  }
+  /** 「巡视」战斗结算的剧情：胜负各一段，失败还要在「交纳之前」先播一段。
+   *  · 失败：`patrolFailA` 现在挂 → 交纳 → `patrolFailB`（见 payPatrolToll）；
+   *  · 胜利：`patrolWin`（挂在同一个 `run.story` 上，界面会先播剧情再发传奇奖励）。 */
+  function notePatrolResultStory(run, won) {
+    if (!run) return null;
+    /* 失败时记一笔「前半段已经挂过」——`patrolFailB` 用它决定要不要接后半段。
+     * ⚠ **不能**改用 `storySeen('patrolFailA')`：那两段是「每次都播」的（`once:false`），
+     * 播完不会写进存档的 seen 表，用 seen 判的话后半段永远播不出来（实测：巡逻失败只播了
+     * 前半段「交出一件藏品」，魔王接过藏品那一段从来没出现过）。 */
+    if (!won) run.patrolFailStoryAt = Math.max(1, Math.floor(Number(run.layer) || 1));
+    return setRunStory('endless', won ? 'patrolWin' : 'patrolFailA');
+  }
+  /** 巡视失败：**交出藏品之后**那一段（`patrolFailB`）。
+   *  只补在后半段 —— 前半段 `patrolFailA` 已经在失败结算时挂过、玩家也读过了。
+   *  ⚠ 前半段还没挂过时（比如玩家中途关掉页面又回来、直接把增益交了），这里就不硬塞后半段。
+   *  ⚠ 判据是**这一局记的 `patrolFailStoryAt`**，不是 `storySeen('patrolFailA')`：
+   *    那两段是「每次都播」的（`once:false`），永远不会写进 seen 表 —— 用 seen 判的话
+   *    后半段（「魔王接过你的藏品，随手投入黑暗」）**永远播不出来**。 */
+  function notePatrolTollDoneStory(run) {
+    if (!run || !run.patrolFailStoryAt) return null;
+    return setRunStory('endless', 'patrolFailB');
+  }
+  /** 整百层三连战的段间剧情：打完第 1 场 → `x00b`，第 2 场 → `x00c`，第 3 场 → `x00win`。
+   *  【顺序陷阱】`entryStoryFor` 在 `x00stage` 还小于 1 时会把「王庭 / 第一近卫」再顶出来 ——
+   *  所以段间这几段必须先把 stage 推到 ≥ 2，否则界面开下一场时会先播王庭那两段。
+   *  这也是「王庭那两段一定在第 1 场开打之前」的实现方式。
+   *
+   *  ⚠ 【U20b】判据用 **`run.x00stage` 自己**（每一层进入整百层时归零），不再看 `storySeen`：
+   *  那两个/三个段是「每次到达整百层都讲一遍」的（用户口径：第二次爬到 100 层、
+   *  或者从 101 层挪回 100 层，也要能看到这一套），用存档 seen 表判的话它们永远只播一次。 */
+  function noteX00BetweenStory(run) {
+    if (!run || !Array.isArray(run.plan)) return null;
+    const last = run.plan.length - 1;
+    const stage = Math.max(0, Math.floor(Number(run.x00stage) || 0));
+    const justFought = Math.max(0, (Number(run.idx) || 0) - 1);   // reportBattle 在 idx++ 之后调
+    if (justFought === 0 && stage < 2) {
+      run.x00stage = 2;
+      return setRunStory('endless', 'x00b');
+    }
+    if (justFought === 1 && stage < 3) {
+      run.x00stage = 3;
+      return setRunStory('endless', 'x00c');
+    }
+    if (justFought === last && stage < 4) {
+      run.x00stage = 4;
+      return setRunStory('endless', 'x00win');
+    }
+    return null;
+  }
+  /** 造一层的战斗计划。
+   *  `mode`：'endless' 时**整百层**（第 100 / 200 / 300… 层）走「**觐见魔王**」三连战结构，
+   *  'tower' / 省略时保持原样（挑战塔的层结构是另一套，不能动）。 */
+  function buildPlan(layer, salt, squirrelsOnly, mode) {
+    const endlessMode = mode !== 'tower';
+    /* **整百层**（100 / 200 / 300…）：**三连战 · 觐见魔王**（用户口径）——
+     *   第 1、2 场：随机 x10 层首领（狂战松鼠变体）=「魔王近卫」，**没有战斗前后的 buff 奖励**；
+     *   第 3 场：巡逻魔王本体，并**额外持有玩家此前上交过的所有增益**（见 applyPatrolTollToFoe）。
+     * 叙事上：爬到整百层的玩家，走过两名近卫，最终站到魔王面前。
+     * ⚠ 普通的 x0 层（10/20/30…）**不触发**这套结构 —— 那些层照旧是「三侠 ×3 + 首领 + 守关」。 */
+    if (endlessMode && Math.floor(Number(layer) || 0) % 100 === 0 && Number(layer) > 0 && D().PATROL) {
+      const g1 = D().warlordFor(layer, salt);
+      /* 两名近卫必须是**不同**的变体（同一位站两道门太敷衍）—— 撞了就换盐重取。 */
+      let salt2 = (Number(salt) || 0) + 4177, g2 = D().warlordFor(layer, salt2);
+      for (let i = 0; i < 6 && g1 && g2 && g1.name === g2.name; i++) {
+        salt2 += 977;
+        g2 = D().warlordFor(layer, salt2);
+      }
+      return noteEntryStory([
+        { kind: 'warlord', id: 'warlord', _layer: layer, _salt: salt, audience: 'guard', guardNo: 1, noReward: true,
+          guardName: (g1 && g1.name) || '魔王近卫' },
+        { kind: 'warlord', id: 'warlord', _layer: layer, _salt: salt2, audience: 'guard', guardNo: 2, noReward: true,
+          guardName: (g2 && g2.name) || '魔王近卫' },
+        { kind: 'patrol', id: 'patrol', _layer: layer, _salt: salt, x00: true, audience: 'king', replacedIndex: 2,
+          replacedKind: 'boss' },
+      ], layer);
+    }
     /* 三侠顺序按层数随机（`heroOrder`，与日期无关）：同层固定 → 预告 = 实战、重试不变。
      * 削弱跟着「哪一位大侠」走（HERO_DEBUFF[anim]），所以顺序一变，本层要吃的削弱顺序也变，
      * 但三种削弱的组合固定，玩家看预告里的头像就知道等一下会被套上什么。 */
@@ -517,7 +950,24 @@
     plan.push(boss);
     // x10 层第 5 场 = 固定狂战松鼠（松鼠形态 + 全身狂战套 + 精英）
     if (layer % 10 === 0) plan.push({ kind: 'warlord', id: 'warlord', _layer: layer, _salt: salt });
-    return plan;
+    /* 「巡逻」替换（2026-10 第六十二批）：40 层之后、每个 10 层区块挑一层（x0/x5 除外），
+     * 把那一层的**一场三侠/精英位**换成魔王战 —— 被替换的那一场就不再出现。
+     * 选中的位置固定取区块内的第一个「可替换位」（预告与实战同口径）。 */
+    if (D().isPatrolLayer(layer, salt)) {
+      /* 「巡逻」**随机替换掉本层的任意一场**（2026-10 第六十三批用户口径）：
+       *   · 用 (层号, salt) 定一个下标 → 同层固定、换局换点，**进层看预告就知道哪一场被换了**；
+       *   · 三侠位、精英/首领位都可能被换（无尽塔的 4 场里随机挑一场）；
+       *   · 被换掉的那一场**不再出现**（战斗场数不变 —— 这就是「替换」而不是「新加」）。 */
+      const seed = (Math.max(1, Math.floor(Number(layer) || 1)) * 6151 + Math.abs(Math.floor(Number(salt) || 0)) * 3571) % 100003;
+      const at = Math.abs(seed) % plan.length;
+      const victim = plan[at];
+      plan[at] = { kind: 'patrol', id: 'patrol', _layer: layer, _salt: salt,
+        replacedIndex: at, replacedKind: victim && victim.kind, replacedAnim: victim && victim.anim,
+        replacedId: victim && victim.id };
+    }
+    /* 【U18c】剧情埋点：入场剧情挂在第一场（巡逻层挂在巡逻那一场），非 endless 不挂。 */
+    if (!endlessMode) return plan;
+    return noteEntryStory(plan, layer);
   }
   function entryInfo(entry, layer, isLast) {
     const elite = isEliteEntry(entry, layer != null ? layer : entry._layer, isLast);
@@ -526,8 +976,37 @@
       /* 预告必须显示**这一层实际会遇到的**那只变体与**实际穿的套装**（同层固定 → 预告 = 实战）：
        * 非 10 的整数层抽到的狂战松鼠穿的是普通套装，预告里也不能画成狂战套。 */
       const w = D().warlordFor(entry._layer, entry._salt);
+      /* x0 层的两位是「魔王近卫」（觐见魔王的第一、二关，没有 buff 奖励）。 */
+      if (entry.audience === 'guard') {
+        return { name: w.name, squirrel: true, gear: gearKeyOf(entry._layer, w), elite: true,
+          type: '魔王近卫 · 第 ' + (Number(entry.guardNo) || 1) + ' 关', guard: entry.guardNo,
+          mechDesc: '觐见魔王的第一道门 —— 近卫' + (Number(entry.guardNo) || 1) + '：' + (w.mechDesc || '') +
+            '；这一场**没有**战斗前后的增益奖励',
+          patternDesc: w.patternDesc, mechs: w.mech.slice() };
+      }
       return { name: w.name, squirrel: true, gear: gearKeyOf(entry._layer, w), elite: true, type: w.type,
         mechDesc: w.mechDesc, patternDesc: w.patternDesc, mechs: w.mech.slice() };
+    }
+    /* 「巡逻」魔王：预告里也要认它 —— 固定名字、精英+boss 双属性、穿全套橙色狂战甲、
+     * 开战定格玩家面板、全武器全技能真5、输了要上交一个最高稀有度增益。 */
+    if (entry.kind === 'patrol') {
+      /* x00 层那一场是「觐见魔王」（三连战的终点）；其余层是路上偶遇的「巡逻」。
+       * 【2026-10 第七十八批用户口径】不再用「替换第 N 场」黄标说明它从哪来 ——
+       * 那一场就是它自己（**精英 首领**），靠列表里的**淡红色背景**（`.tower-plan li.patrol`）
+       * 标识特殊性；`replacedIndex / replacedKind…` 仍留在 entry 上只作内部记账。 */
+      const isKing = entry.audience === 'king' || entry.x00;
+      /* entryInfo 拿不到 run，用当前对局的实时状态算「它身上挂了几件你交出去的东西」。 */
+      const liveRun = (typeof endless === 'function') ? endless().run : null;
+      const held = (liveRun && Array.isArray(liveRun.patrolTolls)) ? liveRun.patrolTolls.length : 0;
+      return { name: D().patrolName ? D().patrolName(entry._layer) : D().PATROL.name,
+        squirrel: true, patrol: entry, outfit: D().PATROL.outfit.slice(),
+        elite: true, boss: true, type: isKing ? '魔王 · 觐见' : '精英 首领',
+        audience: isKing ? 'king' : null,
+        mechDesc: (isKing
+          ? '觐见魔王 —— 走过两名近卫，你终于站到了它面前。'
+          : '开战时定格你进场那一刻的面板；持有全部武器与技能（真5）；' +
+            '战斗失败时，上交一个本局当前还在生效的最高稀有度增益'),
+        patternDesc: '全部武器 + 全部技能（真5）', mechs: [] };
     }
     if (entry.kind === 'npc') {
       const npc = D().NPC_BY_ID[entry.id];
@@ -550,9 +1029,10 @@
       return Object.assign({ kind: pick.kind }, entryInfo(entry), { layers: layersOf[pick.kind + ':' + pick.id] || [] });
     });
   }
-  /** 入口页预告：当前层的全部对手（与 buildPlan 同源，所以预告 = 实战）。 */
-  function preview(layer, salt, squirrelsOnly) {
-    const plan = buildPlan(layer, salt, squirrelsOnly);
+  /** 入口页预告：当前层的全部对手（与 buildPlan 同源，所以预告 = 实战）。
+   *  `mode` 缺省按无尽塔（x0 层的「觐见魔王」三连战只在无尽塔成立）。 */
+  function preview(layer, salt, squirrelsOnly, mode) {
+    const plan = buildPlan(layer, salt, squirrelsOnly, mode);
     return plan.map((entry, i) => Object.assign({ kind: entry.kind }, entryInfo(entry, layer, i === plan.length - 1)));
   }
   /* ============================================================
@@ -633,8 +1113,8 @@
   }
   /** 生效中的 buff：永久全部生效；限次只在「开关打开且还有次数」时生效。 */
   function eachBuff(run, fn) {
-    for (const b of run.permanent || []) fn(D().BUFF_BY_ID[b.id], b.stacks);
-    for (const b of run.limited || []) { if (b.on === false || !(b.uses > 0)) continue; fn(D().BUFF_BY_ID[b.id], b.stacks); }
+    for (const b of run.permanent || []) fn(D().BUFF_BY_ID[b.id], b.stacks, b);
+    for (const b of run.limited || []) { if (b.on === false || !(b.uses > 0)) continue; fn(D().BUFF_BY_ID[b.id], b.stacks, b); }
   }
   /** 一次生效类增益「到底给了什么」——调试台要把效果写清楚，不能只显示个名字。 */
   function instantDetail(buff) {
@@ -711,7 +1191,7 @@
   function runModTotal(run, key) {
     const g = globalMul(run);
     let sum = 0;
-    eachBuff(run, (buff, stacks) => { const m = buff.mods; if (m && m[key]) sum += m[key] * stacks * g; });
+    eachBuff(run, (buff, stacks, row) => { const m = buff.mods; if (m && m[key]) sum += m[key] * stacks * g * rowEnchMulOf(row); });
     return sum;
   }
   function aggregate(run, foeCtx) {
@@ -734,8 +1214,14 @@
        *   enemyHpDrainPct  每回合开始时对敌人造成其**当前生命** N% 的伤害
        *   openKill         开战即把敌方生命清零（本场直接判胜；不触发敌方死亡豁免） */
       startStatFlat: 0, startMaxHpFlat: 0, enemyHpDrainPct: 0, openKill: 0 };
-    eachBuff(run, (buff, stacks) => {
-      const m = buff.mods, k = stacks * g;
+    /* 同一 id 的「针对特定敌人」伤害加成先按 id 累加（见下面 `dmgMulById` 的用法）：
+     * 同名多栏**相加**、不同增益**相乘**。 */
+    const dmgMulById = new Map();
+    eachBuff(run, (buff, stacks, row) => {
+      /* `k` = 这一条的总倍率：层数 × 增幅水晶的全局倍率 × **本条的铭文倍率**。
+       * 铭文倍率来自「增幅铭文 C60」（`row.enchMul`，可叠乘多张不同铭文）——
+       * 与增幅水晶同一套「乘在效果上」的逻辑，只是作用域是单条而不是全局。 */
+      const m = buff.mods, k = stacks * g * rowEnchMulOf(row);
       if (m.powerMul) agg.powerMul += m.powerMul * k;
       if (m.powerPerEmptySlot) agg.powerMul += m.powerPerEmptySlot * Math.max(0, permSlots(run) - permUsed(run)) * k;
       if (m.powerPerPermBuff) {
@@ -837,10 +1323,16 @@
         agg.reviveStatMul = Math.max(agg.reviveStatMul || 0, Number(m.reviveStatMul) || 0);
         agg.reviveMax = Math.max(agg.reviveMax || 0, Math.max(1, Math.floor(stacks)));
       }
-      if (foeCtx.hero && m.dmgMulType) agg.dmgMul *= 1 + m.dmgMulType * k;       // 猎侠者
-      if (foeCtx.poolNpc && m.dmgMulMech) agg.dmgMul *= 1 + m.dmgMulMech * k;    // 机制破解
-      if (foeCtx.elite && m.dmgMulElite) agg.dmgMul *= 1 + m.dmgMulElite * k;    // 精英杀手
+      if (foeCtx.hero && m.dmgMulType) dmgMulById.set(buff.id, (dmgMulById.get(buff.id) || 0) + m.dmgMulType * k);       // 猎侠者
+      if (foeCtx.poolNpc && m.dmgMulMech) dmgMulById.set(buff.id, (dmgMulById.get(buff.id) || 0) + m.dmgMulMech * k);    // 机制破解
+      if (foeCtx.elite && m.dmgMulElite) dmgMulById.set(buff.id, (dmgMulById.get(buff.id) || 0) + m.dmgMulElite * k);    // 精英杀手
     });
+    /* 针对**特定敌人**的伤害加成（猎侠者 / 机制破解 / 精英杀手）：
+     * 不同的增益之间**相乘**（一只既是侠客又带机制的敌人吃两边的加成），
+     * 但**同名多栏之间要相加** —— 一条 +25%/层 的增益拿到 5 层就该是 +125%（×2.25），
+     * 而不是「每栏各自乘一遍」（3 层 ×2 层 = ×2.625，比描述里的 +25%/层 多出一截）。
+     * 所以先按 id 把同一类加成累加起来，最后再逐类乘进 dmgMul。 */
+    for (const v of dmgMulById.values()) agg.dmgMul *= 1 + v;
     for (const [k, field] of [['power', 'powerMul'], ['agility', 'agilityMul'], ['speed', 'speedMul']]) {
       const v = fragileBonus(run, k).value * g;      // 同样吃「增幅水晶」的全局倍率
       if (v) agg[field] += v;
@@ -1015,7 +1507,7 @@
   function occupiesPermSlot(buff) {
     if (!buff || buff.kind !== 'permanent') return false;
     const m = buff.mods || {};
-    if (m.pickWeaponPct || m.pickSkillPct || m.pickPermanentFree || m.permSlot) return false;
+    if (m.pickWeaponPct || m.pickSkillPct || m.pickPermanentFree || m.pickPermanentMul || m.pickBrandBreak || m.pickLimitedUses || m.permSlot) return false;
     return true;
   }
   /** C48 铜墙铁壁的减伤累计（含上限封顶口径）。 */
@@ -1092,9 +1584,15 @@
   function permUsed(run) {
     const list = (run && run.permanent) || [];
     /* 【2026-10 任务2】逐条数：只有**被附魔的那一条**免占位，
-     * 同名的另一条照样占位（原来按 id 一刀切，会让同名件全部免占位）。 */
+     * 同名的另一条照样占位（原来按 id 一刀切，会让同名件全部免占位）。
+     * 【U20】剧情件（`story` 标签，例：照影之境）**也不占位**：它是整百层白送的剧情奖励，
+     * 不该顶掉玩家的一个构筑位，也不该在永久位满时触发「换掉一个」的流程。 */
     let used = 0;
-    for (const row of list) if (!rowFreeOf(row)) used++;
+    for (const row of list) {
+      const def = D().BUFF_BY_ID[row && row.id];
+      if (def && D().hasTag(def, 'story')) continue;
+      if (!rowFreeOf(row)) used++;
+    }
     return Math.max(0, used);
   }
   function repairPermanentSlots(run, list) {
@@ -1163,14 +1661,18 @@
       name = HERO_NAME[entry.anim]; npcType = entry.anim;
       skills = [{ id: HERO_SKILL[entry.anim], level: Math.max(1, Math.min(15, Math.round(LT / 5))) }];
       mech = extra.slice();
-    } else if (entry.kind === 'squirrel' || entry.kind === 'trial' || entry.kind === 'warlord') {
+    } else if (entry.kind === 'squirrel' || entry.kind === 'trial' || entry.kind === 'warlord' || entry.kind === 'patrol') {
       // 松鼠形态的 boss：同族贴图（**不给 npcType** → 战斗里就用玩家那套松鼠图集并镜像朝左，
       // 走 sim 的 playerLikeAction 分支，所以武器/技能都真的生效，机制在 sim 的
       // 「玩家式 AI」分支里补挂）。每个 boss 都有固定装备（wears）→ 玩家看图就能认人。
       /* 塔顶 boss 从**独立变体池**里按 (salt, 层数) 取：同层固定、换层变化。
        * 池里每只都是狂战套，但武器/技能/技能等级/机制倾向各不相同。 */
-      const sq = entry.kind === 'warlord' ? TD.warlordFor(layer, salt)
-        : entry.kind === 'trial' ? TD.TRIAL_BY_ID[entry.id] : TD.SQUIRREL_BY_ID[entry.id];
+      const sq = entry.kind === 'patrol'
+        ? { name: TD.patrolName ? TD.patrolName(layer) : TD.PATROL.name,
+          bias: { power: 1, agility: 1, speed: 1, hp: 1 }, weapons: [], skills: [],
+          pattern: [], mech: [], mechParams: null, wears: TD.PATROL.outfit.slice(), castable: undefined }
+        : entry.kind === 'warlord' ? TD.warlordFor(layer, salt)
+          : entry.kind === 'trial' ? TD.TRIAL_BY_ID[entry.id] : TD.SQUIRREL_BY_ID[entry.id];
       bias = sq.bias; name = sq.name; npcType = null;
       // 武技等级随目标等级小幅上调，免得高层还在用 8 级菜刀
       const up = Math.max(0, Math.floor((LT - 28) / 12));
@@ -1200,7 +1702,10 @@
     const hero = entry.kind === 'hero';
     const warlord = entry.kind === 'warlord';           // x10 第 5 场
     const powMul = hero ? TD.FOE_HERO_POWER_MUL : warlord ? TD.FOE_WARLORD_POWER_MUL : TD.FOE_TRIAL_POWER_MUL;
-    const heroHp = hpBase * TD.FOE_HP_MUL * TD.FOE_HERO_HP_MUL * M * KM * bias.hp;
+    /* 「金松果还在增长期」（挑战塔第 26 层之前）敌人血量 ×0.9：那几层收益低，难度也放低一档。
+     * 无尽塔不吃这条（towerEarlyHpMul 内部按 mode 分流）。 */
+    const earlyHp = TD.towerEarlyHpMul(layer, mode);
+    const heroHp = hpBase * TD.FOE_HP_MUL * TD.FOE_HERO_HP_MUL * M * KM * bias.hp * earlyHp;
     const hpRatio = hero ? 1 : warlord ? TD.WARLORD_HP_RATIO : TD.bossHpRatio(bias.hp, layer);
     const foe = {
       name, level: LT, npcType,
@@ -1212,6 +1717,29 @@
     };
     // poolNpc = 带专属机制的对手（「机制破解」类 buff 只对它生效）；平庸松鼠没有机制，不算
     const poolNpc = entry.kind === 'npc' || entry.kind === 'warlord' || (entry.kind === 'trial');
+    /* 「巡逻」魔王：数值不按层曲线算 —— **开战时复制玩家**（见 nextBattle 里 adjustMe 的收尾），
+     * 这里先按层给一套托底值（战斗没走到复制时也不至于 0 血），穿全套橙色狂战甲。
+     * 它持有的**全部武器 / 全部技能都是真5（15 级）**。 */
+    if (entry.kind === 'patrol') {
+      const tools = [];
+      const each = (map) => { if (map && map.each) map.each((id) => tools.push(Number(id))); };
+      each(typeof weaponsMap !== 'undefined' ? weaponsMap : (typeof window !== 'undefined' ? window.weaponsMap : null));
+      const wAll = tools.slice();
+      const sAll = [];
+      const smap = (typeof skillsMap !== 'undefined' ? skillsMap : (typeof window !== 'undefined' ? window.skillsMap : null));
+      if (smap && smap.each) smap.each((id) => sAll.push(Number(id)));
+      const lv = Math.max(1, Math.floor(Number(TD.PATROL.toolLevel) || 15));
+      foe.weapons = (wAll.length ? wAll : [1]).map((id) => ({ id, level: lv }));
+      foe.skills = sAll.map((id) => ({ id, level: lv }));
+      foe.wears = (TD.PATROL.outfit || []).slice();
+      foe.patrol = true;
+      /* 整百层那一场（x00「觐见魔王」）名字带前缀「魔王·」，路上偶遇的巡逻不带。 */
+      foe.name = TD.patrolName ? TD.patrolName(layer) : TD.PATROL.name;
+      /* 【2026-10 第七十四批】身上这套橙色狂战甲**真的给性能** —— 不是只有外观。
+       * 这里先落一份（战斗没走到 adjustMe 的复制分支时也成立）；
+       * adjustMe 复制完玩家面板后会再落一次（那一步会把 power 整个覆盖掉，所以必须重落）。 */
+      applyPatrolSet(foe, LT);
+    }
     return { foe, elite, poolNpc };
   }
   function regionOf(entry) {
@@ -1220,6 +1748,9 @@
         : entry.kind === 'trial' ? D().TRIAL_BY_ID[entry.id] : D().SQUIRREL_BY_ID[entry.id];
       return sq && sq.region != null ? sq.region : 0;
     }
+    /* 「巡逻」魔王不是 NPC 表里的条目（它按玩家面板现造）—— 别去查 NPC_BY_ID，按层给一个区域。 */
+    if (entry.kind === 'patrol') return HERO_REGION[D().heroOrder(entry._layer || 1, entry._salt || 0)[0]] != null
+      ? HERO_REGION[D().heroOrder(entry._layer || 1, entry._salt || 0)[0]] : 0;
     const anim = entry.kind === 'hero' ? entry.anim : D().NPC_BY_ID[entry.id].anim;
     return HERO_REGION[anim] != null ? HERO_REGION[anim] : 0;
   }
@@ -1241,7 +1772,7 @@
     }
     const layer = t.maxLayer + 1;
     /* buffVer 必须**建局时就写上**：否则第一次 normalizeRun 会把新加的 T04 当成旧档 T04 搬走。 */
-    t.run = { mode: 'tower', layer, plan: buildPlan(layer), idx: 0, carry: 1, buffVer: D().BUFF_VER,
+    t.run = { mode: 'tower', layer, plan: buildPlan(layer, undefined, false, 'tower'), idx: 0, carry: 1, buffVer: D().BUFF_VER,
       permanent: [], limited: [], buffs: [], debuffs: [], pot: 0, choices: null };
     save();
     return { ok: true, layer };
@@ -1263,6 +1794,14 @@
       /* 新口径标记：fragileBase 存「存在时的全额值」（见 normalizeRun 的语义迁移）。 */
       fragileAliveFull: 1 };
     if (debug('endlessCoin')) run.coins = 9999;
+    /* 【2026-10 用户口径】第一场**之前**也要能正常显示血量。
+     * run.baseMaxHp 原本只在第一场的 adjustMe 里才写（那是唯一知道玩家面板的地方），
+     * 于是开局那一屏（剧情模式之后的主界面）血条只能显示「—」。
+     * 这里先用**与开战时同一份** State.totalStats 落一份基准；
+     * 第一场的 adjustMe 会用同一口径再写一次（值相同，血条不会跳）。
+     * ⚠️ 只写基准、**不写 `run.hpAbs`**：绝对血量计数器在「没写过」时按当前上限算满血
+     * （见 hpAbsOf 的回退），写死一个数反而会把第一场的进场血量钉在旧值上。 */
+    run.baseMaxHp = Math.max(1, Math.round(Number(State.totalStats({ useProps: true }).hp) || 0));
     e.run = run;
     save();
     return { ok: true, layer: 1 };
@@ -1299,6 +1838,13 @@
     if (run.phase) return { ok: false, msg: '请先完成商店与结算。' };
     const entry = run.plan[run.idx];
     const isLastBattle = run.idx === run.plan.length - 1;      // 本层最后一战（x5 的精英台阶在这里）
+    /* 【U18c】开战前的**兜底**：入场剧情现在由 `advanceLayer` 进层时就主动挂上了
+     *（用户口径：到层就直接播，不必点「继续战斗」），所以正常流程走到这里 `run.story` 已经有值。
+     * 这里再问一次是为了两条边路：
+     *   · 「巡视」那一场可能**不是**本层第 1 场 —— 进层时它还没轮到，走到这一场才该播；
+     *   · 读档 / 中断后重进（状态是旧版本存的，`run.story` 可能空着）。
+     * 判定与进层那次共用同一份（`TowerPlot.due`，见 autoPlayStory），不会出现两种口径。 */
+    if (mode === 'endless') autoPlayStory(run);
     const built = buildFoe(mode, run.layer, entry, run.salt, isLastBattle);
     const foeCtx = { hero: entry.kind === 'hero', poolNpc: built.poolNpc, elite: built.elite };
     const agg = aggregate(run, foeCtx);
@@ -1528,6 +2074,55 @@
       if (agg.deathSaves.length) mods.deathSaves = (mods.deathSaves || []).concat(agg.deathSaves);
       for (const [k, v] of Object.entries(envModsMine || {})) if (v) mods[k] = (Number(mods[k]) || 0) + v;
       me.mods = mods;
+      /* ============================================================
+       * 「巡逻」魔王：**开战时照抄玩家的面板**（2026-10 第六十二批 + 第七十七批用户口径）。
+       * 放在 adjustMe 的**最后一步** —— 这时 me 已经把装备、增益、烙印、环境、削弱全算完，
+       * 复制到的就是玩家第一回合开始时的状态。
+       *
+       * 【第七十七批 用户口径】魔王**不实际拥有玩家的增益** —— 只把「进场那一刻的面板定格」：
+       *   · 力 / 敏 / 速 / 血：直接照抄。**各种乘区已经在里面了**（adjustMe 把力量乘区、敏捷乘区、
+       *     速度乘区、生命乘区、终乘烙印、环境加成…全都乘进了 me.power / me.agility / me.speed / me.maxHp），
+       *     所以「复制乘区」不需要再单独做什么 —— 再抄一遍 mods 反而会重复计算；
+       *   · 裸属性 baseStats：一起照抄（真·色诱之术脱光装备后要用它回到裸面板）；
+       *   · 装备词条 effects / 师父等级 masterLevel：属于面板与账号进度，照抄；
+       *   · **不给它 `mods` 包，也不抄 healMul / skillBoost** —— 那三样都是**局内增益**派生的
+       *     （涅槃的 deathSaves、后发制人的 catchUpPct、越战越勇的 roundStatPct、治疗烙印的 healMul、
+       *     秘技通神的 skillBoost…），用户明确要求这些**不在魔王身上生效**。
+       *     （第七十四批原来是把整套 mods 深拷贝过去 = 完全镜像，现已按新口径收回。）
+       *   · 魔王自己那套**橙色狂战甲**照旧走 setFx 独立通道（`applyPatrolSet`）—— 那是它的装备收益。
+       * 行为本身天然一致：魔王没有 npcType、也没有固定出招循环（pattern 为空），
+       * sim 走的就是 `playerLikeAction` —— 与玩家同一套选招逻辑（武器 45% / 技能 35% / 普攻 20%）。
+       * x0 层那一场（entry.x00，即「觐见魔王」）**额外**吃「玩家此前上交过的增益」的快照加成
+       * （见 applyPatrolTollToFoe）—— 用户口径：只有魔王的 boss 战才加这一份。
+       * ============================================================ */
+      if (built.foe && built.foe.patrol) {
+        const foe = built.foe;
+        foe.power = Math.max(1, Math.round(Number(me.power) || 1));
+        foe.agility = Math.max(1, Math.round(Number(me.agility) || 1));
+        foe.speed = Math.max(1, Math.round(Number(me.speed) || 1));
+        foe.hp = Math.max(1, Math.round(Number(me.hp) || 1));
+        foe.maxHp = Math.max(1, Math.round(Number(me.maxHp) || foe.hp));
+        if (me.baseStats) foe.baseStats = Object.assign({}, me.baseStats);
+        if (me.effects) foe.effects = Object.assign({}, me.effects);
+        foe.masterLevel = Math.max(0, Number(me.masterLevel) || 0);
+        /* 魔王的**增益包**要从零开始：它不持有玩家的 buff（第七十七批用户口径），
+         * 只拿自己的那一份 —— 见下面的 applyDemonLordLives（x00 的两件涅槃plus + 两件破碎终焉烙印）。 */
+        delete foe.mods;
+        delete foe.healMul;
+        delete foe.skillBoost;
+        /* 狂战甲的属性部分会被上面那次照抄覆盖掉，所以复制完再落一次（幂等：setFx 是覆盖写）。
+         * 等级用 foe.level（buildFoe 按层算出来的敌人等级）—— 狂战套是 50 级档，
+         * 而「巡逻」只在第 41 层起出现，那时 endlessLevel 已经封顶 70，天然满足。 */
+        applyPatrolSet(foe, foe.level);
+        foe.copiedFromPlayer = { power: foe.power, agility: foe.agility,
+          speed: foe.speed, hp: foe.hp, maxHp: foe.maxHp };
+        if (entry.x00) {
+          applyPatrolTollToFoe(run, foe);
+          /* x00「最后的魔王」的固定持有（两件涅槃plus + 两件破碎终焉烙印）放在**最后**：
+           * 终乘要把前面「面板复制 + 上交增益」的结果一起放大。 */
+          applyDemonLordLives(foe);
+        }
+      }
     };
     run.attempt = mode + '_' + Date.now() + '_' + (++attemptSeq);
     snapshotBattle(run);
@@ -1692,12 +2287,35 @@
     const run = box.run;
     if (!run || run.attempt !== token) return { ok: false };
     delete run.attempt;
+    /* 【2026-10 用户口径】这一场是**玩家按跳过键**跳过的 → 记一笔（本层累计）。
+     * 塔里的战斗关了飘物（collectDrops:false），所以「只收 2/3」的代价改在**层结算**上体现：
+     * 跳过几场就随机抹掉几包（见 settlePrizes）；胜负、分数、掉落池都不受影响。 */
+    if (result && result.skipped) run.skippedBattles = Math.max(0, Math.floor(Number(run.skippedBattles) || 0)) + 1;
     /* 「上一场战斗赚了多少试炼币」：每场先清零 —— 输掉的那一场自然是 0，
      * 赢了再由下面的战利品结算写回真实增量（主界面右上角就标这个数）。 */
     run.lastCoinsGained = 0;
     const entry = run.plan[run.idx];
     const isElite = isEliteEntry(entry, run.layer, run.idx === run.plan.length - 1);   // x10 塔顶 / 每 5 层最后一战
     if (!win) {
+      /* 「巡逻」失败（2026-10 用户口径）：**不走失败结算** ——
+       * 不扣体力/不算失败、血量继承上一场结束后的血量（run.hpAbs 原样保留）、
+       * 本场也不计叠层与试炼币收益；改为进入「收缴」阶段：玩家必须交出一个
+       * **本局最高稀有度**的增益（见 patrolTollCandidates / payPatrolToll）。
+       *
+       * ⚠ **x00 层的「觐见魔王」是例外**（用户口径 2026-10 第六十六批）：那一场输了**照常结算失败** ——
+       * 它是爬塔的终点仪式，不是路上偶遇的巡逻；`entry.x00 === true`（audience === 'king'）时
+       * 直接走到下面的正常失败结算，不给收缴这条路。 */
+      if (entry && entry.kind === 'patrol' && !entry.x00) {
+        run.phase = 'patrolToll';
+        run.patrolTollAt = { layer: run.layer, idx: run.idx };
+        /* 【U18c】巡视失败：**先播这一段**（魔王没有取你性命、要你交出一件藏品），
+         * 播完才轮到「上交一个增益」那个收缴窗 —— 见 tower-ui 的 pendingStory 优先级。 */
+        notePatrolResultStory(run, false);
+        logBuff(run, 'patrol', 'lose', { detail: '巡逻失败：需要上交一个最高稀有度的增益' });
+        save();
+        return { ok: true, win: false, patrol: true, phase: 'patrolToll', entryKind: entry.kind,
+          msg: '巡逻失败：交出一个最高稀有度的增益即可继续（血量与增益层数都保留）' };
+      }
       const fail = mode === 'tower' ? towerFail(run) : endlessFail(run);
       if (fail && fail.retryable) { fail.battleNo = run.idx + 1; fail.battleCount = run.plan.length; }
       return fail;
@@ -1828,7 +2446,16 @@
       const coinsBeforeBattle = Math.max(0, Number(run.coins) || 0);
       const coinBase = D().coinBattleBase(battleLayer);
       const eliteMul = isElite ? Math.max(1, Number(D().COINS.eliteMul) || 3) : 1;
-      run.coins += Math.round(coinBase * coinMul * eliteMul);
+      /* 「巡逻」胜利的试炼币再 ×winCoinMul（默认 5）。 */
+      const patrolMul = (entry.kind === 'patrol') ? Math.max(1, Number(D().PATROL.winCoinMul) || 1) : 1;
+      let coinGain = Math.round(coinBase * coinMul * eliteMul * patrolMul);
+      /* 【2026-10 用户口径】这一场是**玩家按跳过键**跳过的 → 战斗收益只收 2/3：
+       *   · 有飘物的模式（随机战斗 / 竞技场 / 天梯 / 关卡）在飘物那边扣（battle-drops 的 trimOne）；
+       *   · **常驻挑战（无尽塔）**没有飘物，战斗收益就是试炼币 → 在这里按 2/3 结算；
+       *   · **挑战塔**的代价记在层结算上（settlePrizes 按跳过场次扣包），这里**不再扣第二次**
+       *     —— 两个塔各扣一处，加起来都是一场收益的 1/3。 */
+      if (result && result.skipped && mode === 'endless') coinGain = Math.round(coinGain * 2 / 3);
+      run.coins += coinGain;
       /* 界面提示（试炼币那一格的悬停）要写「基础 x × 每个乘区」，所以把本场的账留一份在 run 上。 */
       run.lastCoinBreak = {
         base: coinBase, layer: battleLayer, band: D().coinBattleTierLabel(battleLayer),
@@ -1864,6 +2491,13 @@
      *   · 层号不变，所以不会触发跨层回血，也不会提前进下一层 */
     const echoP = (entry.kind === 'hero') ? echoRepeatChance(run) : 0;
     run.idx++;
+    /* 【U20 修 bug】「本层是不是已经清空」必须在这里**立刻定下来**，别等到下面再用 `run.idx` 判：
+     * `normalizeRun` 每次 `endless()` 都会把 `run.idx` 夹回 `plan.length - 1`（坏档兜底），
+     * 而中间那些逻辑（例：整百层的 `noteX00BetweenStory` → `setRunStory` → `endless()`）正好会调它 ——
+     * 于是 `run.idx >= run.plan.length` 永远不成立，**整百层打完魔王之后卡在第 100 层**：
+     * 层没推进、反复重打魔王，永远进不了 101 层（连「照影之境」那套奖励也没机会发）。
+     * 实测复现：第 100 层三连战打完 `reportBattle` 返回 `layerComplete: false`、`run.idx` 被夹回 2。 */
+    const layerCleared = run.idx >= run.plan.length;
     /* E01 立即进货 / E16 铸币商队 / E15 时间回廊：要在**扣限次之前**取一次 —— 它们的限次
      * 就消耗在这一场，扣完条目会被移除，之后就算不出「本该开一次店 / 本该重开本层」了。 */
     const shopCreditPct = activeShopCredit(run);
@@ -1885,21 +2519,38 @@
       const restartAt = restartLayer(run);
       out.layerRestart = { layer: restartAt, battleNo: battleIdx + 1, battleCount: run.plan.length };
       /* 同一场如果还挂着 E01「立即进货」/ E16「铸币商队」：店**照开**（限次已经扣掉了，
-       * 不开就等于白扣）—— 关掉店之后正好从本层第 1 场继续。铸币商店优先（顶掉试炼商店）。 */
-      if (mintCredit) {
-        openMintShop(run, battleLayer, { noGroup: true, byBuff: true });
-        out.phase = 'shop';
-        out.mintShop = true;
-      } else if (shopCreditPct > 0) {
-        run.shop = makeShop(run, shopCreditPct);
-        run.shop.postBattle = true;
-        run.phase = 'shop';
-        out.phase = 'shop';
-        out.postBattleShop = true;
+       * 不开就等于白扣）—— 关掉店之后正好从本层第 1 场继续。铸币商店优先（顶掉试炼商店）。
+       * 【100 层循环】整百层不开店：这一层连「白扣一次限次」都不成立 —— 限次压根没被用掉。 */
+      if (!D().layerNoShop(run.layer)) {
+        if (mintCredit) {
+          openMintShop(run, battleLayer, { noGroup: true, byBuff: true });
+          out.phase = 'shop';
+          out.mintShop = true;
+        } else if (shopCreditPct > 0) {
+          run.shop = makeShop(run, shopCreditPct);
+          if (run.shop) {
+            run.shop.postBattle = true;
+            run.shop.byBuff = true;      // E01「立即进货」开的店（剧情用：随机商人文案，见 tower-plot）
+            run.phase = 'shop';
+            out.phase = 'shop';
+            out.postBattleShop = true;
+          }
+        }
       }
       save();
       return out;
     }
+    /* 【U18c】整百层「觐见魔王」三连战的**段间**剧情：打完第 1 场 → 第二近卫（x00b）；
+     * 打完第 2 场 → 三重王命（x00c）；打完第 3 场 → 终章（x00win，见 noteX00BetweenStory）。
+     * ⚠ 位置：`run.idx++` 之后、回响/商店那些分支**之前** ——
+     *   · 段间这三场**都不是本层最后一场**（三连战还有下一场要打），
+     *     所以绝不能挂在「run.idx >= plan.length」那个「本层已清空」分支里（那样永远进不去）；
+     *   · 也不能放到回响判定之后 —— 万一这一场触发回响（同一场再打一次），
+     *     剧情会跟着重播一遍。
+     * ⚠ 判据必须看**整个 plan**（`isX00Plan`），不能看 `entry`：
+     *   `entryStory` 只挂在第一场上，第 2、3 场的 entry 上没有这个字段 ——
+     *   按 entry 判的话只有第一场之后挂得上，后面两段永远不触发（实测踩过）。 */
+    if (mode === 'endless' && isX00Plan(run.plan)) noteX00BetweenStory(run);
     /* 回响判定放在限次扣数 / 环境推进 / 烙印判定**之后**：重复的那一场
      * 应当照常消耗一次限次（不然「限次 10 场」会因为回响白打）。
      * 它只在**未通关本层**时才可能发生。 */
@@ -1922,10 +2573,18 @@
      * 这一场如果已经由 E01「立即进货」/ E16「铸币商队」开了店就顺延（一次战斗不开两家店），
      * 而且**不记组号** → 这一组里后面那几场还有机会刷出来。 */
     const mintRoll = (mode === 'endless' && shopCreditPct <= 0 && !mintCredit && !noMintShop) && rollMintShop(run, battleLayer);
-    if (run.idx >= run.plan.length) {
+    if (layerCleared) {
       /* E16「铸币商队」：本场本该开出的普通商店统统由铸币商店顶上 ——
        * x5 层的结算商店交给 layerClear 直接开成「结算去向」的铸币商店（boundary），
        * 非 x5 层则和自然刷出的铸币商店一样，在层推进之后补上。 */
+      /* 【U20 修 bug】本层**最后一场**正好是「巡视」时，它的**剧情**在这里挂 ——
+       * 必须在 `layerClear` **之前**：`layerClear` 里的 `advanceLayer` 会顺手挂新层的入场剧情
+       *（整百层那两段），先挂 patrolWin 才不会被挤掉；整百层那两段会在 patrolWin 播完之后
+       * 由连播接力（`storyFinish` → `nextEntryStoryOf`）接上。
+       * 它的**传奇奖励**则要等 `layerClear` 跑完再发（见下面 —— `advanceLayer` 会清 `run.choices`）。
+       * 与巡逻条目的口径一致：只有**路上偶遇**的巡逻算（整百层那位是「觐见魔王」，走 x00 那一套）。 */
+      const patrolLast = !!(mode === 'endless' && entry && entry.kind === 'patrol' && !entry.x00);
+      if (patrolLast) notePatrolResultStory(run, true);
       const cleared = layerClear(mode, run, out, shopCreditPct, mintCredit);
       if (mintCredit && !run.shop) {
         openMintShop(run, battleLayer, { noGroup: true, byBuff: true });
@@ -1948,40 +2607,73 @@
        *     （`postBattle: true`，关掉后回到新层的战斗流程）。
        *   · x5 层：layerClear 已经开了**结算商店**，并且已经吃到了 E01 的折扣
        *     （`makeShop(run, shopCreditPct)`）→ 不再叠开第二家店，E01 的价值以折扣兑现。
-       *   · 同场挂着 E16 时：铸币商店已经顶上，E01 的那家不再叠开（一次战斗只开一家店）。 */
+       *   · 同场挂着 E16 时：铸币商店已经顶上，E01 的那家不再叠开（一次战斗只开一家店）。
+       * 【U20 修 bug】`makeShop` 可能返回 **null**（整百层「觐见魔王」不开任何商店、
+       * 或者货架候选为空）—— 那时原来会直接 `null.postBattle = true` 抛 TypeError，
+       * 把 `reportBattle` 整个打断（战斗回调里抛错 = 界面停在战斗屏、这一局半死不活）。
+       * 与上面「层中开店」那一支同口径：拿不到店就当没这回事，别把推进弄丢。 */
       if (mode === 'endless' && shopCreditPct > 0 && !mintCredit && !run.shop) {
         run.shop = makeShop(run, shopCreditPct);
-        run.shop.postBattle = true;
-        run.phase = 'shop';
-        out.phase = 'shop';
-        out.postBattleShop = true;
+        if (run.shop) {
+          run.shop.postBattle = true;
+          run.shop.byBuff = true;        // E01「立即进货」开的店
+          run.phase = 'shop';
+          out.phase = 'shop';
+          out.postBattleShop = true;
+        }
+        save();
+      }
+      /* 【U20 修 bug】本层**最后一场**正好是「巡视」时，它的传奇奖励在这里发 ——
+       *  `layerClear` 里的 `advanceLayer` 会把 `run.choices` 清空，所以必须等它跑完
+       * （剧情那一段见上面 `patrolLast`：那个要在 layerClear **之前**挂，否则会被
+       *  新层的入场剧情挤掉）。 */
+      if (patrolLast) {
+        const n = grantPatrolLegendary(run);
+        out.patrolReward = { legendaries: n, coinMul: Math.max(1, Number(D().PATROL.winCoinMul) || 1) };
         save();
       }
       return cleared;
     }
     /* 战后临时小店（层还没打完）：E16「铸币商队」优先 —— 它顶掉 E01 的试炼商店；
-     * 没有 E16 时才轮到 E01「立即进货」，最后才是自然刷出的铸币商店。 */
-    if (mode === 'endless' && mintCredit) {
-      openMintShop(run, battleLayer, { noGroup: true, byBuff: true });
-      out.phase = 'shop';
-      out.mintShop = true;
-    } else if (mode === 'endless' && shopCreditPct > 0) {
-      run.shop = makeShop(run, shopCreditPct);
-      /* 标记「这家店是打完这一场临时开的」——关店后要**回去继续打**，
-       * 而不是去结算点（那是「每 5 层」的商店才有的下一步）。 */
-      run.shop.postBattle = true;
-      run.phase = 'shop';
-      out.phase = 'shop';
-      out.postBattleShop = true;
-    } else if (mintRoll) {
-      /* 铸币商店也是「战后临时小店」，关掉后回去继续打这一层（与 E01 同一去向）。 */
-      openMintShop(run, battleLayer);
-      out.phase = 'shop';
-      out.mintShop = true;
+     * 没有 E16 时才轮到 E01「立即进货」，最后才是自然刷出的铸币商店。
+     * 【100 层循环】整百层（觐见魔王）**一次店都不开**：这一整段直接跳过 ——
+     * 既不挂 phase（否则界面会停在「进入商店」而店里什么都没有），也不折腾限次。 */
+    if (mode === 'endless' && !D().layerNoShop(run.layer)) {
+      if (mintCredit) {
+        openMintShop(run, battleLayer, { noGroup: true, byBuff: true });
+        out.phase = 'shop';
+        out.mintShop = true;
+      } else if (shopCreditPct > 0) {
+        run.shop = makeShop(run, shopCreditPct);
+        /* 标记「这家店是打完这一场临时开的」——关店后要**回去继续打**，
+         * 而不是去结算点（那是「每 5 层」的商店才有的下一步）。 */
+        if (run.shop) {
+          run.shop.postBattle = true;
+          run.shop.byBuff = true;        // E01「立即进货」开的店
+          run.phase = 'shop';
+          out.phase = 'shop';
+          out.postBattleShop = true;
+        }
+      } else if (mintRoll) {
+        /* 铸币商店也是「战后临时小店」，关掉后回去继续打这一层（与 E01 同一去向）。 */
+        openMintShop(run, battleLayer);
+        out.phase = 'shop';
+        out.mintShop = true;
+      }
     }
     const won = run.idx, len = run.plan.length;
     const choiceAfter = 3;
     const extraChoice = len === 5;
+    /* 「巡逻」胜利（2026-10 第六十二批用户口径）：立刻给一次**传奇增益**奖励
+     *（默认三选一，吃抉择扩充；可获得的传奇不够时给几张算几张）。
+     * 【U18c】这一场若是**路上偶遇的巡视**，先挂上「胜者理应得到奖赏」那一段 ——
+     * 界面回主界面时先播剧情，播完才轮到传奇三选一的奖励弹窗（顺序见 tower-ui 的 afterBattle）。
+     * x00 层的「觐见魔王」不算（它走 x00win 那一段，见 noteX00BetweenStory）。 */
+    if (entry.kind === 'patrol') {
+      if (!entry.x00) notePatrolResultStory(run, true);
+      const n = grantPatrolLegendary(run);
+      out.patrolReward = { legendaries: n, coinMul: Math.max(1, Number(D().PATROL.winCoinMul) || 1) };
+    }
     if (won === choiceAfter || (extraChoice && won === 4)) run.choices = rollChoices(mode, run);
     out.achievements = takeAchievementToasts(run);
     out.choices = run.choices;
@@ -2046,16 +2738,38 @@
     save();
     return out;
   }
+  /* ============================================================
+   * 【T9b】结算预览 —— previewSettleTickets
+   *
+   * 「放弃本局」的弹窗要在**动手之前**把这次结算算给玩家看（用户口径 2026-10：
+   * 「抽奖卷在玩家想要结算的时候，在放弃本局的弹出页面中计算」）。
+   * 口径与真正发奖的 settleRunTickets **必须完全一致**，否则弹窗承诺的数字和到手的对不上 ——
+   * 所以两边共用这一个纯函数：它只算不改状态，settleRunTickets 照它的结果记账发奖。
+   * ============================================================ */
+  function previewSettleTickets(run) {
+    const layerTickets = Math.max(0, Math.floor(Number(D().endlessTickets(run && run.layer)) || 0));
+    const mint = Math.max(0, Math.floor(Number(run && run.retryToken) || 0));
+    /* 铸币 → 抽奖卷有上限（默认 10）：超出部分**不再转化**，随本局作废。 */
+    const cap = Math.max(0, Math.floor(Number(D().TICKET_FROM_MINT_CAP) || 0));
+    const mintConverted = Math.min(cap, mint);
+    return {
+      layer: Math.max(1, Math.floor(Number(run && run.layer) || 1)),
+      layerTickets: layerTickets,
+      mint: mint,
+      mintCap: cap,
+      mintConverted: mintConverted,
+      mintForfeited: Math.max(0, mint - mintConverted),
+      coins: Math.max(0, Math.floor(Number(run && run.coins) || 0)),   // 试炼币不折现，只报个数
+      total: layerTickets + mintConverted,
+    };
+  }
   function settleRunTickets(run, out) {
     out = out || {};
-    const layerTickets = Math.max(0, Math.floor(Number(D().endlessTickets(run.layer)) || 0));
-    const coins = Math.max(0, Math.floor(Number(run.coins) || 0));
-    const retryTokens = Math.max(0, Math.floor(Number(run.retryToken) || 0));
-    /* 铸币 → 抽奖卷有上限（默认 10）：超出部分**不再转化**，随本局作废。 */
-    const mintCap = Math.max(0, Math.floor(Number(D().TICKET_FROM_MINT_CAP) || 0));
-    const retryConverted = Math.min(mintCap, retryTokens);
-    const retryForfeited = Math.max(0, retryTokens - retryConverted);
-    const gain = layerTickets + retryConverted;
+    /* 计算与发奖共用同一份口径（见 previewSettleTickets）—— 别再各写一遍。 */
+    const pv = previewSettleTickets(run);
+    const layerTickets = pv.layerTickets, coins = pv.coins, mintCap = pv.mintCap;
+    const retryTokens = pv.mint, retryConverted = pv.mintConverted, retryForfeited = pv.mintForfeited;
+    const gain = pv.total;
     if (gain > 0) S().props[TICKET_PROP] = (S().props[TICKET_PROP] || 0) + gain;
     run.coins = 0;              // 试炼币随本局作废（不折现，只报个数给界面提示）
     run.retryToken = 0;
@@ -2182,9 +2896,17 @@
     /* 调试/测试开关：关掉环境抽取（有些断言只关心「层内计划」，不希望被
      * 「幻影回响」随机追加的那一场干扰）。同时清空当前环境。 */
     if (run.noEnvRoll === true) { list.length = 0; return; }
+    /* 【100 层循环】环境词缀的适用场景只有 1~100 层：第 101 层起重来一轮，
+     * 情况与第 1 层一样 —— **不再抽新的，手上的也一并清掉**。
+     * 清理必须放在「扣剩余场数」之前，否则旧档里挂着的一条会继续掉场数、继续生效。 */
+    if (!TD.envAllowed(run.layer)) { list.length = 0; return; }
     if (run.noEnvGain === true) { if (list.length) return; }
     for (let i = list.length - 1; i >= 0; i--) { list[i].left -= 1; if (list[i].left <= 0) list.splice(i, 1); }
-    if (run.layer < TD.ENV_START_LAYER) return;
+    /* 【100 层循环】门槛一律比**轮内层号**（`canHaveEnv` 内部就是 `cycleLayer >= ENV_START_LAYER`）——
+     * 第 101~104 层与第 1~4 层一样不给环境、105 层照旧抽。
+     * ⚠ 别再写成 `run.layer < TD.ENV_START_LAYER`（绝对层号）：那样 101 层会被当成「早过了第 5 层」，
+     * 而且 `envChance(101)` 会直接顶到 80% 封顶。 */
+    if (!TD.canHaveEnv(run.layer)) return;
     const cap = Math.max(1, Number(TD.ENV_MAX) || 2);
     /* 兜底：旧档 / 调试注入可能已经超过上限，先裁到上限（保留剩余场数多的那几条）。 */
     if (list.length > cap) {
@@ -2193,15 +2915,20 @@
     }
     const room = cap - list.length;
     if (room <= 0) return;
-    const forced = run.layer >= TD.ENV_TWO_LAYER ? 2 : 0;
+    /* 「每场强制补满 2 条」同样是**轮内**门槛（第 15 层起）。 */
+    const forced = TD.cycleLayer(run.layer) >= TD.ENV_TWO_LAYER ? 2 : 0;
     const want = Math.max(0, Math.min(room, forced || (Math.random() < TD.envChance(run.layer) ? 1 : 0)));
+    /* 挑战塔没有试炼币经济：环境池用 envPoolFor('tower')，只对无尽塔成立的收益类环境
+     *（贪婪裂隙那种「给试炼币换敌人变强」的）在那边会退化成纯负面条目，所以池子按模式取；
+     * 摇出来的数值也只摇那个模式下真正生效的键。 */
+    const envMode = run.mode === 'tower' ? 'tower' : 'endless';
     for (let k = 0; k < want; k++) {
-      const pool = TD.ENDLESS_ENV.filter((e) => !list.some((x) => x.id === e.id));
+      const pool = TD.envPoolFor(envMode).filter((e) => !list.some((x) => x.id === e.id));
       if (!pool.length) break;
       const pick = pool[Math.floor(Math.random() * pool.length)];
       const dur = TD.ENV_DUR[0] + Math.floor(Math.random() * (TD.ENV_DUR[1] - TD.ENV_DUR[0] + 1));
       /* 数值在区间内随机摇一次并固定在实例上：同一条环境每次出现强度略有不同。 */
-      list.push({ id: pick.id, left: dur, values: TD.rollEnvMods(pick) });
+      list.push({ id: pick.id, left: dur, values: TD.rollEnvMods(pick, envMode) });
     }
   }
   /** 某条环境在本局的**实际数值**（旧档没有 values 时就地补摇一次）。
@@ -2210,10 +2937,15 @@
     const TD = D();
     const def = TD.ENDLESS_ENV_BY_ID[entry && entry.id];
     if (!def) return {};
-    if (!entry.values || typeof entry.values !== 'object') entry.values = TD.rollEnvMods(def);
+    const envMode = run && run.mode === 'tower' ? 'tower' : 'endless';
+    if (!entry.values || typeof entry.values !== 'object') entry.values = TD.rollEnvMods(def, envMode);
     const mul = 1 + Math.max(0, runModTotal(run, 'envPowerMul'));
     const out = {};
-    for (const [k, v] of Object.entries(entry.values)) out[k] = Number(v) * mul;
+    for (const [k, v] of Object.entries(entry.values)) {
+      /* 挑战塔里「只在无尽塔成立」的收益键直接不给（旧档可能带着它）。 */
+      if (envMode === 'tower' && TD.ENDLESS_REWARD_MOD_KEYS.includes(k)) continue;
+      out[k] = Number(v) * mul;
+    }
     return out;
   }
   /** 本局所有生效环境里，某个键的合计（已含环境强化倍率）。 */
@@ -2368,13 +3100,14 @@
       State.addGold(gold);
       tower().maxLayer = run.layer;
       tower().retry = null;
-      if (Math.random() < GData.stageFragmentChance(6)) {
+      /* 挑战塔过关的蓝色碎片也吃「除碎片竞技场外一律小幅降期望」的系数（2026-10 用户口径）。 */
+      if (Math.random() < GData.stageFragmentChance(6) * Number(GData.BLUE_SHARD_DROP_MUL)) {
         const count = GData.stageFragmentCount();
         const id = 26;                                  // 蓝色碎片
         S().props[id] = (S().props[id] || 0) + count;
         out.drop = { id, count, name: propMap.getValue(id).name };
       }
-      out.prizes = settlePrizes();
+      out.prizes = settlePrizes(run);
       out.gold = gold;
       tower().run = null;
       save();
@@ -2402,6 +3135,27 @@
     }
     out.score = run.score; out.coins = run.coins;
     if (run.layer % 5 === 0) {                           // 每 5 层：商店 → 结算点
+      /* 【100 层循环】整百层（100 / 200 / 300…）**不开商店**（用户口径）：直接推进到下一层，
+       * 于是这一层只有「觐见魔王」三连战，中途不插店。走 advanceLayer 而不是干等 ——
+       * 否则整局会卡在「本层已清空、却没有下一步」。 */
+      if (D().layerNoShop(run.layer)) {
+        /* 【U20】整百层：三连战打赢之后**先固定掉落「照影之境」**（用户口径 2026-10）——
+         * 这里只把对局挂进 `phase = 'mirror'`（本层仍然是「已清空」的样子），
+         * 界面先渲染拾取屏；玩家拾取 + 点「继续挑战」确认之后才由 `enterMirrorWorld`
+         * 推进到下一层。**不再直接 advanceLayer**：那样 101 层会立刻出现在他面前，
+         * 拾取屏和「继续挑战」就没地方站了。 */
+        if (D().isMirrorLayer(run.layer)) {
+          run.phase = 'mirror';
+          delete run.mirrorTaken;                       // 这一次的拾取还没发生
+          out.phase = 'mirror';
+          out.mirror = { layer: run.layer, stacks: mirrorStacks(run) + 1 };
+          save();
+          return out;
+        }
+        advanceLayer(run, 'endless');
+        save();
+        return out;
+      }
       /* E16「铸币商队」：顶掉这次的结算商店 —— 位置与去向都不变（`boundary` 一样要打），
        * 只是货架换成铸币商店（关店后仍按结算商店的去向推进，见 closeMintShop / leaveMintShop）。 */
       if (mintShop) {
@@ -2409,7 +3163,7 @@
         out.mintShop = true;
       } else {
         run.shop = makeShop(run, shopPct);
-        run.shop.boundary = true;                          // 只有这家店关掉之后去结算点
+        if (run.shop) run.shop.boundary = true;            // 只有这家店关掉之后去结算点
       }
       run.phase = 'shop';
       out.phase = 'shop';
@@ -2419,21 +3173,41 @@
     save();
     return out;
   }
-  /** 每层结算补发的「悬浮奖品」：3 场 × 3 个飘物（同一个掉落池）。 */
-  function settlePrizes() {
+  /** 每层结算补发的「悬浮奖品」：3 场 × 3 个飘物（同一个掉落池）。
+   *  【2026-10 用户口径】这一层里有几场是**玩家按跳过键**跳过的，就有几包要**随机抹掉一项**
+   *  （＝那几场只收 2/3；塔里战斗关了飘物，所以代价记在层结算上）。塔的胜负与分数不受影响。 */
+  function settlePrizes(run) {
     const Drops = window.BattleDrops;
     if (!Drops || typeof Drops.plan !== 'function') return { items: [], ups: [] };
     const battles = Math.max(0, Number(D().SETTLE_DROP_BATTLES) || 3);
-    const list = [];
-    for (let i = 0; i < battles; i++) list.push(...Drops.plan());
-    return Drops.grant(list);
+    const skipped = Math.max(0, Math.floor(Number(run && run.skippedBattles) || 0));
+    const list = [], lost = [];
+    for (let i = 0; i < battles; i++) {
+      const pack = Drops.plan();
+      if (i >= skipped || typeof Drops.trimOne !== 'function') { list.push(...pack); continue; }
+      const cut = Drops.trimOne(pack);
+      list.push(...cut.list);
+      if (cut.lost) lost.push({ id: cut.lost.id, name: cut.lost.name, count: cut.lost.count });
+    }
+    const out = Drops.grant(list);
+    if (lost.length) out.lost = lost;
+    return out;
   }
   function advanceLayer(run, mode) {
     run.layer++;
-    run.plan = buildPlan(run.layer, run.salt, true);
+    run.plan = buildPlan(run.layer, run.salt, true, mode);
     run.idx = 0;
     run.choices = null;
     run.restShopUsed = false;
+    /* 「跳过键」的记账是**本层**的（每场跳过扣一包），换层从 0 重算（见 settlePrizes）。 */
+    run.skippedBattles = 0;
+    /* 【U20b】整百层（100 / 200 / 300…）是「每次到达都讲一遍」的：进层就把这一套的进度归零 ——
+     * `x00PreNo` = 王庭 / 第一近卫讲到第几段（0 = 都没讲），`x00stage` = 整百层那五段的段号。
+     * 于是在第 200 层、或者从 101 层挪回 100 层时，「王庭 → 第一近卫」会重新播（用户口径）。 */
+    if (mode === 'endless' && D().isMirrorLayer(run.layer)) {
+      run.x00PreNo = 0;
+      run.x00stage = 0;
+    }
     /* 三侠大招留下的削弱是「**贯穿本层**」的（见 TowerData.HERO_DEBUFF、界面上的
      * 「本层已被削弱（贯穿本层）」）：进新的一层必须清掉。
      * 以前这里没清 → 削弱会一路叠到结算（每层三位大侠各留一条，越走越残），与描述不符。
@@ -2443,6 +3217,37 @@
     layerStartHeal(run, mode);
     const lost = applyBrokenMarkLoss(run);
     if (lost) run.pendingToasts = (run.pendingToasts || []).concat(['碎掉的烙印失效：' + lost.label]).slice(-12);
+    /* 【100 层循环】跨轮进层（第 101 / 201 / 301… 层 = 新一轮第 1 层）：环境词缀换一轮、
+     * 手上的残留就地清掉 —— 与「进新的一层」时清三侠削弱同一个道理（给新一轮一个干净的起点）。
+     * 注意**判据是「轮次切换」而不是「不吃环境」**：环境本身从 ENV_START_LAYER（第 5 层）起
+     * 照旧会抽，101 层只是新一轮的起点、不是终点（用户实测报过「100 层之后环境一直没有」）。
+     * 「每 10 层丢一个无尽增益」不需要清状态：它只在清完层的那一刻判一次（见 needPermSacrifice）。
+     * 整百层（x00）本来就轮不到商店，顺手把可能还挂着的店收掉。 */
+    if (mode === 'endless' && run.layer > D().LAYER_CYCLE && D().layerCycle(run.layer) === 1) {
+      if (Array.isArray(run.env) && run.env.length) run.env = [];
+      if (run.phase === 'sacrifice') run.phase = null;
+      run.pendingToasts = (run.pendingToasts || []).concat([
+        '第 ' + run.layer + ' 层：新一轮开始 —— 商店件数 / 战斗选项 / 环境词缀 / 每 10 层放弃增益' +
+        '都回到与第 1 层相同的节奏（敌人的数值继续从上一轮接着长）。']).slice(-12);
+    }
+    if (mode === 'endless' && D().layerNoShop(run.layer) && run.shop) {
+      run.shop = null;
+      if (run.phase === 'shop') run.phase = null;
+    }
+    /* 整百层（觐见魔王）：进层给一句叙事，让「爬到这里」这件事被说出来（用户口径的叙事味）。 */
+    if (mode === 'endless' && run.layer > 0 && run.layer % D().LAYER_CYCLE === 0) {
+      const held = Array.isArray(run.patrolTolls) ? run.patrolTolls.length : 0;
+      const line = '第 ' + run.layer + ' 层 · 觐见魔王：两名近卫把门，门后是照着你的样子站起来的那一位' +
+        (held ? '（它身上挂着你交出去的 ' + held + ' 件东西）' : '') +
+        '。这一层不开商店。';
+      run.pendingToasts = (run.pendingToasts || []).concat([line]).slice(-12);
+    }
+    /* 【U18c】进层就把该播的剧情挂上（用户口径 2026-10：**到特定层直接触发**，
+     * 不需要玩家先点一次「继续战斗」）。放在最后：层号、plan、环境、toast 都就位了再判。
+     * 判定在 tower-plot（TowerPlot.due）：按层号的入场剧情 + 本层有没有「巡视」那一场。
+     * ⚠ 它不会为空手而归的状态乱挂：`run.story / attempt / choices` 有任何一个非空都不插队，
+     *   所以「已经播过」「正在打」「正在选牌」这些情况一律跳过。 */
+    if (mode === 'endless') autoPlayStory(run);
   }
   /** 手上有没有「开着的」时间回廊（E15，限次 1）—— 必须在 consumeLimited 之前取。 */
   function hasActiveLayerRestart(run) {
@@ -2468,7 +3273,7 @@
    *（后者按「层号×1000 + 层内序号」记账，重开同一层会撞上旧 key，必须清）。 */
   function restartLayer(run) {
     const layer = Math.max(1, Math.floor(Number(run.layer) || 1));
-    run.plan = buildPlan(layer, run.salt, true);
+    run.plan = buildPlan(layer, run.salt, true, 'endless');
     run.idx = 0;
     run.choices = null;
     run.finished = null;
@@ -2483,6 +3288,10 @@
 
   function poolFilter(run, buff) {
     const cap = D().stackCap(buff);
+    /* 【2026-10 第六十一批】「烙印升华」（E20）带 `brandGate`：
+     * **未破碎的烙印份数超过门槛**才允许出现（未达标时整条出池，商店与任何抽取口子都看不到它）。 */
+    if (buff && buff.mods && buff.mods.brandGate != null &&
+      unbrokenBrandCount(run) <= Math.max(0, Math.floor(Number(buff.mods.brandGate) || 0))) return false;
     /* 【任务3】永久增益永远留在池子里（叠满也能再拿，见 addBuff 的开新栏位分支）。 */
     if (permanentRestackable(buff)) return true;
     /* 【任务4】noRestack（涅槃 / 后发制人 / 挥金如土这一组）：**拿满上限后出池**。
@@ -2527,12 +3336,30 @@
     const m = (b && b.mods) || {};
     return FLOW_BUFF_MODS.some((k) => m[k]);
   }
+  /** 【2026-10 第八十一批 用户口径】「同名再获得 = **直接叠加场次**」的限次件。
+   *  判据 = 普通限次增益（没写任何叠层/限量规则的），排除三类：
+   *   · 烙印 / 限量件（unlimitedStacks / maxStacks）：它们的强度靠**层数**算，走各自的老口径；
+   *   · `unique`（一局一次，例：N04 金蝉脱壳、E17 假如我直接赢）：多份没有意义，或会让局势崩掉；
+   *   · **流程类**（isFlowBuff：立即进货 / 铸币商队 / 时间回廊）：再拿一份就是再开一家店 / 再重开一层，
+   *     层内节奏会被打乱 —— 与「延续铭文不能延长立即进货」是同一条用户口径。
+   *  `ownable`（能不能继续刷出来）与 `addBuff`（再获得怎么算）共用这一个判据，别各写一份。 */
+  function usesStackable(b) {
+    if (!b || b.kind !== 'limited') return false;
+    if (b.unlimitedStacks || b.maxStacks) return false;
+    if (D().hasTag(b, 'unique')) return false;
+    if (isFlowBuff(b)) return false;
+    return true;
+  }
   /** 战斗获得的选项目数：基础 3，由「抉择扩充」(C50) 每层 +1，上限 6。
-   *  可叠 3 层 → 三选一 / 四选一 / 五选一 / 六选一。 */
+   *  可叠 3 层 → 三选一 / 四选一 / 五选一 / 六选一。
+   *  【100 层循环】再按层**扣**一档（【D2b】）：21-40 层 −1、41-100 层 −2，
+   *  第 101 层回到 1 层那一档（不扣）。扣完仍留 1 项 —— 一个选项都不给等于吞掉一次奖励，
+   *  那不是「选项变少」而是「奖励消失」。 */
   function choiceSlotsOf(run) {
     const base = 3, cap = 6;
     const extra = Math.max(0, Math.floor(runModTotal(run, 'choiceCount') || 0));
-    return Math.max(base, Math.min(cap, base + extra));
+    const cut = D().choiceCut(run && run.layer);
+    return Math.max(1, Math.min(cap, base + extra - cut));
   }
   function rollChoices(mode, run) {
     const TD = D();
@@ -2572,6 +3399,153 @@
     }
     return picked;
   }
+  /** 「巡逻」胜利的奖励：**传奇增益**的（默认三选一，吃抉择扩充）——
+   *  用户口径：当前可获得的传奇不够时就有几张给几张（不硬凑）。
+   *  返回结构与 rollChoices 一致（`[{type:'buff', id}]`），界面与 pickChoice 无需分支。 */
+  function rollLegendaryChoices(run) {
+    const TD = D();
+    const slots = choiceSlotsOf(run);
+    /* 与 rollChoices 同口径：测试用的 noFlowBuffs 开关（E01 立即进货 / E15 时间回廊这类
+     * 「会改变层内流程」的牌）必须一起排除，否则巡逻奖励会把它们放回来。 */
+    const pool = TD.endlessPool.filter((b) => b.rarity === 3 && ownable(run, b) && poolFilter(run, b) &&
+      !(noFlowBuffs && isFlowBuff(b)));
+    const picked = [], taken = new Set();
+    for (let i = 0; i < slots; i++) {
+      const cands = pool.filter((b) => !taken.has(b.id));
+      if (!cands.length) break;
+      /* 权重口径与商店一致：个体权重 × 稀有度档位权重（传奇之间再按自降权区分）。 */
+      const weights = cands.map((b) => Math.max(0.0001, buffWeightOf(run, b)));
+      const sum = weights.reduce((a, v) => a + v, 0);
+      let roll = Math.random() * sum, hit = cands[0];
+      for (let k = 0; k < cands.length; k++) { roll -= weights[k]; if (roll <= 0) { hit = cands[k]; break; } }
+      taken.add(hit.id);
+      picked.push({ type: 'buff', id: hit.id });
+    }
+    return picked;
+  }
+  /** 巡逻胜利结算：给传奇三选一（写进 run.choices）。 */
+  function grantPatrolLegendary(run) {
+    if (!run) return 0;
+    const picked = rollLegendaryChoices(run);
+    if (!picked.length) return 0;
+    run.choices = picked;
+    run.choicesKind = 'patrolLegendary';
+    return picked.length;
+  }
+  /** 这次「选取型」铭文**现在有没有可选目标** —— 只看数量，**绝不洗牌**
+   *（`pickCandidates` 会 `Math.random()` 洗牌，那会白白消耗随机流，口径见那边的注释）。 */
+  function hasPickTargets(run, kind, inscriptionIdArg) {
+    if (!run) return false;
+    /* 【U20b】武器 / 技能强化（C32 神兵淬炼 / C33 秘技通神）：候选来自玩家自己的武器与技能表
+     *（技能那一路还会补上「绝对防御 / 龟甲术 / 小宇宙爆发」这三个可选取项）——
+     * 一把武器都没有时必须判「没有目标」，否则弹窗无限重开（软锁）。 */
+    if (kind === 'weapon') return (State.myWeapons ? State.myWeapons() : []).length > 0;
+    if (kind === 'skill') {
+      const list = (State.mySkills ? State.mySkills() : []).filter((sk) => sk && pickableSkillId(sk.id));
+      return list.length > 0 || PICKABLE_DEFENSE.concat([PICKABLE_COSMOS]).length > 0;
+    }
+    if (kind === 'brandBuff' || kind === 'limitedBuff') {
+      const wantBrand = kind === 'brandBuff';
+      return (run.limited || []).some((row) => {
+        const def = D().BUFF_BY_ID[row && row.id];
+        if (!row || !def || Math.max(0, Math.floor(Number(row.stacks) || 0)) <= 0) return false;
+        if (isBrandBuff(def) !== wantBrand) return false;
+        /* ⚠ 与 `pickCandidates` 的候选口径**必须一致**：`noExtend`（例：E01 立即进货）
+         * 不进延续铭文的候选 —— 漏了这条就会出现「判定说有目标、界面候选 0 个」，
+         * 弹窗永远关不掉（机器人实测踩到：只剩 E01 时拿到延续铭文 → 弹窗无限重开）。 */
+        if (!wantBrand && def.noExtend) return false;
+        return true;
+      });
+    }
+    if (kind === 'permBuff') {
+      /* 铭文身份：调用方**显式传进来的**优先 —— 发牌那一刻 run.pendingPick 还没挂上，
+       * 只靠待选推断会误判成虚空铭文（C37），于是「同一张铭文不能重复附」这类规则会被绕过。
+       * 没传就退回共用出口（见 activeInscriptionId），保证与候选、界面标记同一口径。 */
+      const inscriptionId = inscriptionIdArg || activeInscriptionId('permBuff', run) || 'C37';
+      return (run.permanent || []).some((row) => {
+        const def = D().BUFF_BY_ID[row && row.id];
+        if (!row || !def || D().hasTag(def, 'hidden')) return false;
+        return inscriptionEligible(row, run, inscriptionId);
+      });
+    }
+    return false;
+  }
+  /** 【软锁修复 2026-10】选取型铭文发到手、但**当前一个可选目标都没有**时：
+   *  以前照样挂 `run.pendingPick` —— 界面于是每次都弹同一个空弹窗（候选 0 个），
+   *  玩家点不掉、也走不了，永久卡死在这一屏（用户实测：没有烙印时拿到碎裂铭文就卡死）。
+   *  现在改成**不挂 pendingPick**，记进 `run.deferredPicks` 先替你留着，
+   *  之后拿到符合条件的目标时自动接上（见 resolveDeferredPicks）。 */
+  function deferPick(run, buff, kind) {
+    const label = kind === 'brandBuff' ? '烙印' : kind === 'limitedBuff' ? '限次增益'
+      : kind === 'weapon' ? '武器' : kind === 'skill' ? '可强化的技能' : '永久增益';
+    const entry = { kind: kind, buffId: buff.id };
+    if (buff.mods && buff.mods.pickLimitedUses) entry.addUses = Math.max(1, Math.floor(Number(buff.mods.pickLimitedUses) || 1));
+    if (buff.mods && buff.mods.pickPermanentMul) entry.mul = Number(buff.mods.pickPermanentMul) || 0;
+    if (buff.mods && buff.mods.pickWeaponPct) entry.pct = Number(buff.mods.pickWeaponPct) || 0;
+    if (buff.mods && buff.mods.pickSkillPct) entry.pct = Number(buff.mods.pickSkillPct) || 0;
+    run.deferredPicks = (Array.isArray(run.deferredPicks) ? run.deferredPicks : [])
+      .filter((x) => !(x && x.buffId === buff.id)).concat([entry]);
+    save();
+    return { ok: true, deferred: true, icon: 'warn',
+      msg: buff.name + '：现在还没有可以挑的目标，先替你留着 —— 之后拿到' + label + '时会自动弹出。' };
+  }
+  /** 拿到新增益后（或回到主界面时）再看一眼：之前「留着」的铭文现在有目标了吗？有就接上 pendingPick。 */
+  function resolveDeferredPicks(runArg) {
+    const run = runArg || endless().run;
+    if (!run || run.pendingPick) return null;
+    const list = Array.isArray(run.deferredPicks) ? run.deferredPicks : [];
+    if (!list.length) return null;
+    for (let i = 0; i < list.length; i++) {
+      const it = list[i];
+      if (!it || !it.kind) continue;
+      /* `hasPickTargets` 判 permBuff 时要读「这次附的是哪张铭文」，所以先把虚拟待选挂上再判。 */
+      if (it.kind === 'permBuff') run.pendingPick = { kind: 'permBuff', buffId: it.buffId, mul: it.mul };
+      if (!hasPickTargets(run, it.kind)) {
+        if (it.kind === 'permBuff') run.pendingPick = null;
+        continue;
+      }
+      if (it.kind === 'permBuff') {
+        run.pendingPick = { kind: 'permBuff', buffId: it.buffId };
+        if (it.mul) run.pendingPick.mul = it.mul;
+      } else if (it.kind === 'brandBuff') {
+        run.pendingPick = { kind: 'brandBuff', buffId: it.buffId };
+      } else if (it.kind === 'weapon' || it.kind === 'skill') {
+        /* 武器 / 技能强化：pct 从增益定义里取回来（见 deferPick 的记账）。 */
+        const def = D().BUFF_BY_ID[it.buffId] || {};
+        const pct = it.kind === 'weapon' ? ((def.mods || {}).pickWeaponPct || it.pct) : ((def.mods || {}).pickSkillPct || it.pct);
+        run.pendingPick = { kind: it.kind, buffId: it.buffId, pct: pct };
+      } else {
+        run.pendingPick = { kind: 'limitedBuff', buffId: it.buffId, addUses: Math.max(1, Math.floor(Number(it.addUses) || 1)) };
+      }
+      run.deferredPicks = list.filter((x, k) => k !== i);
+      save();
+      return run.pendingPick;
+    }
+    return null;
+  }
+  /** 把「已经没有可选目标」的 pendingPick 收进 deferredPicks（**软锁第二道防线**）：
+   *  normalizeRun 每次归一化都会清一遍，界面在候选为 0 时也会再叫一次。
+   *  返回是否真的收走了（界面据此决定要不要提示「先留着」）。 */
+  function parkStalePendingPick(runArg) {
+    const run = runArg || endless().run;
+    if (!run || !run.pendingPick || !run.pendingPick.kind) return false;
+    const kind = run.pendingPick.kind;
+    /* 武器 / 技能强化也在内：没有可强化的目标时同样要收进 deferredPicks（否则弹窗关不掉）。 */
+    if (['permBuff', 'brandBuff', 'limitedBuff', 'weapon', 'skill'].indexOf(kind) < 0) return false;
+    if (hasPickTargets(run, kind)) return false;
+    const def = D().BUFF_BY_ID[run.pendingPick.buffId];
+    if (def) {
+      const entry = { kind: kind, buffId: run.pendingPick.buffId };
+      if (run.pendingPick.mul) entry.mul = run.pendingPick.mul;
+      if (run.pendingPick.addUses) entry.addUses = run.pendingPick.addUses;
+      if (run.pendingPick.pct) entry.pct = run.pendingPick.pct;
+      run.deferredPicks = (Array.isArray(run.deferredPicks) ? run.deferredPicks : [])
+        .filter((x) => !(x && x.buffId === entry.buffId)).concat([entry]);
+    }
+    run.pendingPick = null;
+    save();
+    return true;
+  }
   function ownable(run, buff) {
     /* 即时类不进 permanent / limited，ownedEntry 永远查不到 —— 必须先单独判上限，
      * 否则会在第一行被 `if (!owned) return true` 直接放行
@@ -2580,7 +3554,11 @@
       const got = instantOwnedCount(run, buff.id);
       return got < Math.max(1, Math.floor(buff.maxStacks));
     }
-    /* 【任务3】永久增益不再「拿满就出池」：永远可以再拿（叠满 → 由 addBuff 开新栏位）。 */
+    /* 【任务3】永久增益不再「拿满就出池」：永远可以再拿（叠满 → 由 addBuff 开新栏位，
+     * 新栏位照样能叠到 `maxStacks` —— 用户口径 需求103）。
+     * 需求105 也钉着这条：`stackable` 的（例 C22 闪避精通）**满层之后仍要能再出现**，
+     * 所以这里不能加「叠满即出池」的闸 —— 只有 `unique` / `noRestack` 那两类才出去
+     *（它们由上面的 `permanentRestackable` 拦下，走本函数后面的分支）。 */
     if (permanentRestackable(buff)) return true;
     if (buff.maxStacks && obtainedCountOf(run, buff.id) >= Math.max(1, Math.floor(buff.maxStacks))) return false;
     /* 带 repeatable 标签的**不适用「同名唯一」**：它们的数量由 maxStacks（上面的早返回）
@@ -2591,6 +3569,11 @@
     if (D().hasTag(buff, 'repeatable')) return true;
     const owned = ownedEntry(run, buff.id);
     if (!owned) return true;
+    /* 【2026-10 第八十一批 用户口径】限次类也要「持有还能再拿」：
+     * 再获得 = **直接叠加场次**（见 addBuff 的同名分支），所以这里不能因为「已经有一条」就
+     * 把它踢出池子 —— 否则商店 / 场间三选一 里再也刷不到它，「持有时还能刷新」就成了空话。
+     * 判据统一走 usesStackable()（排除烙印/限量件、unique、流程类）。 */
+    if (usesStackable(buff)) return true;
     /* 可叠层类的上限：优先用该增益自己的 maxStacks（例如 C50 只到 3 层），
      * 没写就用全局 STACK_MAX。叠满即视为「不可再获得」。 */
     if (!D().hasTag(buff, 'stackable')) {
@@ -2796,8 +3779,449 @@
         burned: Math.max(0, Number(def.mods.fragileAddBurned) || 0) });
     }
   }
-  function rollFragileBuffs(run) {
-    const broken = [];
+  /** 烙印判据与「未破碎份数」—— 碎裂铭文（C61）/ 烙印升华（E20）都要用，
+   *  商店门槛（E20 只在未破碎烙印超过 N 份时上架）也读同一个数。
+   *  【2026-10 用户口径】「拥有」只看**还有几份没碎**，**不看开关状态**：
+   *  玩家把一条烙印关掉只是「这场先不用」，它仍然是持有中的未破碎烙印。 */
+  function isBrandBuff(def) { return !!(def && def.mods && def.mods.fragileBreakPct); }
+  function unbrokenBrandCount(run) {
+    let n = 0;
+    for (const row of (run && run.limited) || []) {
+      const def = D().BUFF_BY_ID[row && row.id];
+      if (row && isBrandBuff(def)) n += Math.max(0, Math.floor(Number(row.stacks) || 0));
+    }
+    return n;
+  }
+  /** 让**这一栏**的烙印立刻全部破碎（确定性，不摇概率）—— 碎裂铭文用它。
+   *  与 rollFragileBuffs 的差别只有「不掷骰」：每份都碎，碎完把整栏移除。 */
+  function breakBrandRow(run, row) {
+    const def = D().BUFF_BY_ID[row && row.id];
+    if (!run || !row || !isBrandBuff(def)) return 0;
+    const copies = Math.max(0, Math.floor(Number(row.stacks) || 0));
+    for (let i = 0; i < copies; i++) {
+      breakOneFragileCopy(run, def, row);
+      logBuff(run, row.id, 'break', { uid: row.uid, detail: '碎裂铭文：立刻破碎（升级为全额并永久保留）' });
+    }
+    row.stacks = 0;
+    return copies;
+  }
+  /* ---------- 巡逻收缴（2026-10 第六十二批） ----------
+   * 巡逻失败不结算失败，而是让玩家**交出一个本局最高稀有度的增益**：
+   *   · 候选 = 当前持有的（永久 + 限次、非隐藏）里，**稀有度等于「持有的最高档」**的那些；
+   *   · 交出 = 那一栏 **-1 层**（涅槃有两层只掉一层；终焉烙印只掉一份计数）；
+   *   · 交出虚空铭文（附魔类）：随机让一个**被附魔过的**增益恢复未附魔，
+   *     由此导致的永久位溢出再让玩家丢一个（phase = 'patrolDiscard'）。
+   * 交接记录留在 `run.patrolTolls`（x0 层的魔王会按快照吃这些加成）。 */
+  /* ---------- 巡逻收缴的候选池（2026-10 第七十七批用户口径） ----------
+   * 候选 = **本局中当前在身上可生效的**东西，不止「背包里的 permanent / limited」：
+   *   · 背包里的永久 / 限次增益（含**未破碎**的烙印）；
+   *   · **破碎过的烙印** —— 行已经不在 run.limited 里了，但加成还挂着（明细见 run.brokenMarks）；
+   *   · **已经附魔成功的铭文**（虚空 C37 / 水晶 C60）—— 它们不占栏位、不在那两张表里。
+   * 用户举的三个例子（虚空铭文 / 已破碎的终焉烙印 / 已破碎的淘金烙印）因此都能进候选。 */
+
+  /** 某个烙印 def → 它「损毁明细」的规格：{ kind, stat, per }。
+   *  kind/stat 用来在 run.brokenMarks 里认出属于它的明细；per = 一份明细值多少（旧档 legacy 折算用）。 */
+  function markSpecOf(def) {
+    const m = (def && def.mods) || {};
+    if (m.fragileStat) return { kind: 'stat', stat: m.fragileStat,
+      per: Math.max(0, Number(m.fragileBurnedPct != null ? m.fragileBurnedPct : m.fragilePct) || 0) };
+    if (m.fragileFinalMul) return { kind: 'final', stat: null, per: Math.max(0, Number(m.fragileAddBurned) || 0.5) };
+    if (m.fragileHealAddAlive !== undefined) return { kind: 'heal', stat: null, per: Math.max(0, Number(m.fragileHealAddBurned) || 0) };
+    if (m.fragileCoinAddAlive !== undefined) return { kind: 'coin', stat: null, per: Math.max(0, Number(m.fragileCoinAddBurned) || 0) };
+    return null;
+  }
+  /** 明细 → 它属于哪个烙印（用于「行已经不在了，但加成还挂着」的那一批）。 */
+  function brandDefOfMark(mark) {
+    if (!mark || !mark.kind) return null;
+    for (const b of (D().BUFFS || [])) {
+      const spec = markSpecOf(b);
+      if (!spec || spec.kind !== mark.kind) continue;
+      if (mark.kind === 'stat' && spec.stat !== mark.stat) continue;
+      return b;
+    }
+    return null;
+  }
+  /** 某个烙印现在挂着几层**已损毁**：普通明细一条算一份；旧档 legacy 那条按 per 折算。 */
+  function brokenCopiesOf(run, def) {
+    const spec = markSpecOf(def);
+    if (!spec || !run) return 0;
+    let n = 0;
+    for (const m of (run.brokenMarks || [])) {
+      if (!m || m.kind !== spec.kind) continue;
+      if (spec.kind === 'stat' && m.stat !== spec.stat) continue;
+      if (!m.legacy) { n += 1; continue; }
+      const v = Number(spec.kind === 'stat' ? m.pct : m.burned) || 0;
+      n += spec.per > 0 ? Math.round(v / spec.per) : (v > 0 ? 1 : 0);
+    }
+    return n;
+  }
+  /** 收回**一层已损毁**（巡逻收缴：把这个烙印交出去）—— 与 loseRandomBrokenMark 同一套记账：
+   *  摘掉一条明细 →（终焉烙印另记一份 `fragileMulBurned`）→ rebuildFragileTotals 重算合计。
+   *  ⚠ 合计是**从明细重算**出来的：只改 run.fragileBurned 而不动明细，下一次重建就会把收回的那层加回来。 */
+  function loseOneBrokenCopy(run, def) {
+    const spec = markSpecOf(def);
+    if (!spec || !run) return false;
+    const marks = Array.isArray(run.brokenMarks) ? run.brokenMarks : (run.brokenMarks = []);
+    const hit = (m) => m && m.kind === spec.kind && (spec.kind !== 'stat' || m.stat === spec.stat);
+    let idx = marks.findIndex((m) => hit(m) && !m.legacy);
+    if (idx >= 0) {
+      marks.splice(idx, 1);
+    } else {
+      /* 旧档：只剩一条「不可移除」的 legacy 明细 → 按一份折算，减到 0 才摘掉。 */
+      idx = marks.findIndex(hit);
+      if (idx < 0) return false;
+      const m = marks[idx];
+      const cur = Number(spec.kind === 'stat' ? m.pct : m.burned) || 0;
+      const left = Math.max(0, cur - spec.per);
+      if (left <= 1e-9) marks.splice(idx, 1);
+      else if (spec.kind === 'stat') m.pct = left;
+      else m.burned = left;
+    }
+    if (spec.kind === 'final') run.fragileMulBurned = Math.max(0, Math.floor(Number(run.fragileMulBurned) || 0) - 1);
+    rebuildFragileTotals(run);
+    return true;
+  }
+  /** 把一条增益**退回 buff 池**（用户口径：交出淘金烙印之后它要能再刷出来）。
+   *  可获得性看 `obtainedCountOf = max(在册, fragileGot, pickGot)`，而烙印「本局获得过几份」
+   *  记在只增不减的 `run.fragileGot` 上 —— 所以这里按 1 份退回去。 */
+  function returnBuffToPool(run, id) {
+    if (!run || !id) return false;
+    let changed = false;
+    const refund = (key) => {
+      const t = run[key];
+      const cur = Math.max(0, Math.floor(Number(t && t[id]) || 0));
+      if (cur <= 0) return;
+      run[key] = Object.assign({}, t);
+      if (cur - 1 > 0) run[key][id] = cur - 1; else delete run[key][id];
+      changed = true;
+    };
+    refund('fragileGot');
+    refund('pickGot');
+    return changed;
+  }
+  /** 收缴候选的**原始列表**：本局当前在生效的全部条目（还没按稀有度过滤）。
+   *  每条：{ ref, id, name, rarity, cat: 'row'|'brand'|'insc', def, row, alive, broken, stacks, … }
+   *  · 'row'   = 背包里还有行（alive 层）；'brand' = 行没了、只剩已损毁的加成；'insc' = 已附魔成功的铭文。 */
+  function patrolTollRows(run) {
+    if (!run) return [];
+    const agg = Object.create(null);
+    const touch = (id, def) => (agg[id] || (agg[id] = { id: id, def: def, row: null, alive: 0, broken: 0 }));
+    /* ① 背包里的永久 / 限次（未破碎的烙印也在这里）。 */
+    for (const row of (run.permanent || []).concat(run.limited || [])) {
+      const def = D().BUFF_BY_ID[row && row.id];
+      if (!row || !def) continue;
+      if (D().hasTag(def, 'hidden') || def.kind === 'instant') continue;
+      const stacks = Math.max(0, Math.floor(Number(row.stacks) || 0));
+      if (stacks <= 0) continue;
+      const a = touch(row.id, def);
+      if (!a.row) a.row = row;
+      a.alive += stacks;
+    }
+    /* ② 已损毁的烙印：行已经不在 limited 里了，但加成还挂着（用明细认领，顺带处理旧档 legacy 明细）。 */
+    for (const m of (run.brokenMarks || [])) {
+      const def = brandDefOfMark(m);
+      if (!def || D().hasTag(def, 'hidden')) continue;
+      touch(def.id, def).broken = brokenCopiesOf(run, def);      // 同一条的多份明细只算一次
+    }
+    const out = [];
+    for (const id of Object.keys(agg)) {
+      const a = agg[id];
+      const stacks = a.alive + a.broken;
+      if (stacks <= 0) continue;
+      out.push({ ref: (a.row && a.row.uid != null) ? a.row.uid : ('brand:' + id), id: id,
+        name: a.def.name, rarity: Number(a.def.rarity) || 0, cat: a.alive > 0 ? 'row' : 'brand',
+        def: a.def, row: a.row, alive: a.alive, broken: a.broken, stacks: stacks,
+        slotFree: a.row ? rowFreeOf(a.row) : false, enchMul: a.row ? rowEnchMulOf(a.row) : 1 });
+    }
+    /* ③ 已经附魔成功的铭文：本身不占栏位，所以上面两张表里都没有它。 */
+    const insc = Object.create(null);
+    for (const row of (run.permanent || [])) {
+      if (!row) continue;
+      if (rowFreeOf(row)) insc.C37 = (insc.C37 || 0) + 1;
+      for (const eid of rowEnchantsOf(row)) insc[eid] = (insc[eid] || 0) + 1;
+    }
+    for (const id of Object.keys(insc)) {
+      const def = D().BUFF_BY_ID[id];
+      /* ⚠ 铭文一律可交：它们本来就带 `hidden` 标签（那只是「不进本局构筑面板、不可出售」的意思），
+       * 不能照抄上面那条 hasTag(hidden) 过滤 —— 否则用户要的「交出虚空铭文」根本进不了候选。 */
+      if (!def || def.kind !== 'inscription') continue;
+      out.push({ ref: 'insc:' + id, id: id, name: def.name, rarity: Number(def.rarity) || 0, cat: 'insc',
+        def: def, row: null, alive: insc[id], broken: 0, stacks: insc[id], slotFree: false, enchMul: 1 });
+    }
+    return out;
+  }
+  /** 收缴候选：只给「最高稀有度」那一档（上下翻页由界面负责）。
+   *  参数可省 —— 界面就是不带参数调的（默认取当前无尽塔对局）。 */
+  function patrolTollCandidates(runArg) {
+    const run = runArg || endless().run;
+    if (!run) return { top: -1, list: [] };
+    const rows = patrolTollRows(run);
+    if (!rows.length) return { top: -1, list: [] };
+    const top = rows.reduce((a, x) => Math.max(a, x.rarity), 0);
+    const list = rows.filter((x) => x.rarity === top).map((x) => ({
+      ref: x.ref, id: x.id, name: x.name, rarity: x.rarity, kind: x.def.kind, cat: x.cat,
+      stacks: Math.max(1, x.stacks), alive: x.alive, broken: x.broken,
+      /* 【2026-10 第七十四批】附魔状态也逐条给界面：收缴是「挑一条交出去」的场景，
+       * 玩家得看得出哪一条被铭文强化过（水晶 ×1.5 / 虚空 不占位），别把加成高的那条交掉。 */
+      slotFree: x.slotFree === true, enchMul: x.enchMul,
+    }));
+    return { top: top, list: list };
+  }
+  /** 交出 `ref`（uid 优先）那一栏 —— 只掉一层。
+   *  参数灵活：`payPatrolToll(ref)`（界面口径，默认当前对局）或 `payPatrolToll(run, ref)`。
+   *  `ref` 取候选里的 `ref`：栏位 uid / `brand:<id>`（只剩已损毁层的烙印）/ `insc:<id>`（已附魔的铭文）。 */
+  function payPatrolToll(a, b) {
+    const byRun = !!(a && typeof a === 'object');
+    const run = byRun ? a : endless().run;
+    const ref = byRun ? b : a;
+    if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
+    const all = patrolTollRows(run);
+    const cand = all.find((x) => String(x.ref) === String(ref)) || all.find((x) => x.id === ref);
+    if (!cand) return { ok: false, msg: '找不到这个增益。' };
+    const def = cand.def || {};
+    const stacks = Math.max(1, Math.floor(Number(cand.stacks) || 1));
+    const note = () => {
+      run.patrolTolls = (Array.isArray(run.patrolTolls) ? run.patrolTolls : [])
+        .concat([{ id: cand.id, name: def.name || cand.id, stacks: stacks, rarity: Number(def.rarity) || 0, layer: run.layer }]);
+    };
+    /* ① 铭文（不占栏位）：不按层数掉，改为「随机取消一份附魔」。 */
+    if (cand.cat === 'insc') {
+      note();
+      const free = !!(def.mods && def.mods.pickPermanentFree);
+      let undone = null;
+      if (free) {
+        const enchanted = (run.permanent || []).filter((b) => b && rowFreeOf(b));
+        if (enchanted.length) {
+          undone = enchanted[Math.floor(Math.random() * enchanted.length)];
+          undone.slotFree = false;
+          syncSlotFree(run);
+        }
+      } else {
+        /* 倍率铭文（水晶 C60）：撤掉随机一条上的这张铭文，并把倍率按剩下的铭文重算。 */
+        const marked = (run.permanent || []).filter((b) => b && rowEnchantsOf(b).indexOf(cand.id) >= 0);
+        if (marked.length) {
+          undone = marked[Math.floor(Math.random() * marked.length)];
+          undone.enchants = rowEnchantsOf(undone).filter((x) => x !== cand.id);
+          let mul = 1;
+          for (const eid of undone.enchants) {
+            const ed = D().BUFF_BY_ID[eid] || {};
+            mul *= Math.max(1, Number(ed.mods && ed.mods.pickPermanentMul) || 1);
+          }
+          undone.enchMul = mul;
+        }
+      }
+      logBuff(run, cand.id, 'lose', { detail: '巡逻收缴：随机取消一份附魔（' +
+        (undone ? (D().BUFF_BY_ID[undone.id] || {}).name : '无') + '）' });
+      save();
+      /* 取消「不占位」会让永久位重新占满 —— 溢出时让玩家再丢一个。倍率铭文不影响占位。 */
+      const over = free && permUsed(run) > permSlots(run);
+      if (over) run.phase = 'patrolDiscard';
+      return { ok: true, id: cand.id, name: def.name, undone: undone ? undone.id : null, needDiscard: over };
+    }
+    /* ② 烙印的**已损毁层**优先收回（用户口径：交出终焉烙印 = 层数 -1；交出淘金烙印 = 失去增幅 + 退回池子）。 */
+    if (cand.broken > 0) {
+      note();
+      const done = loseOneBrokenCopy(run, def);
+      if (!done) return { ok: false, msg: '这一份已损毁的烙印已经找不到了。' };
+      /* 「拾取一次即出池」那类（淘金烙印 C53）要能再刷出来：它已经被池子挡住了才退。 */
+      const back = !poolFilter(run, def) ? returnBuffToPool(run, cand.id) : false;
+      logBuff(run, cand.id, 'lose', { detail: '巡逻收缴：已损毁层 -1' + (back ? '（已退回 buff 池）' : '') });
+      save();
+      return { ok: true, id: cand.id, name: def.name, broken: true, backToPool: back,
+        left: Math.max(0, stacks - 1) };
+    }
+    /* ③ 背包里那一栏：只掉一层；掉光了整栏移除（成长按这一栏回收）。 */
+    const row = cand.row;
+    const hit = findRowRef(run, row && row.uid != null ? row.uid : cand.id);
+    if (!row || !hit || !hit.row) return { ok: false, msg: '找不到这个增益。' };
+    note();
+    row.stacks = stacks - 1;
+    let removed = false;
+    if (row.stacks <= 0) {
+      hit.list.splice(hit.list.indexOf(row), 1);
+      removed = true;
+      syncSlotFree(run);
+      resetGrowth(run, row.id, stacks, row);
+      /* 失去之后如果它已经出池了，就让它回到池子里（与已损毁那条同一口径）。 */
+      if (!poolFilter(run, def)) returnBuffToPool(run, cand.id);
+    }
+    logBuff(run, row.id, 'lose', { detail: '巡逻收缴 -1 层' + (removed ? '（已交出整栏）' : '') });
+    /* 【U18c】巡视失败的后半段（魔王接过藏品、随手投入黑暗）—— 挂在「交出之后」，
+     * 界面在收缴窗关掉、回主界面时播它（`run.story` 优先级高于一切）。 */
+    notePatrolTollDoneStory(run);
+    save();
+    return { ok: true, id: row.id, name: def.name, left: Math.max(0, row.stacks || 0), removed: removed };
+  }
+  /** 收缴结束（界面点「继续」）：清掉阶段，**并推进到下一场**。
+   * 【2026-10 第七十八批修 bug】这里原来只清 `phase` / `patrolTollAt`，**层内序号没动** ——
+   * 于是下一次 `nextBattle` 取到的还是**同一场巡逻**，玩家交完 buff 又被扔回这场战斗的开头，
+   * 永远过不去（用户实测「失败献出 buff 后回到巡逻战斗开始」）。
+   * 现在与胜利路径同一套推进：`run.idx + 1`；本层打完就 `layerClear()` —— 它自己会按
+   * x5（开结算商店，走 continueFromShop → advanceLayer）还是非 x5（直接 advanceLayer）处理。
+   * 刻意**不**做胜利路径的另外几件事：不扣限次（输了不给收益，也就不存在「白扣一次」）、
+   * 不摇 6% 烙印磨损、不推进环境场数 —— 这一场是输的，只赔一个增益；血量照旧（run.hpAbs 不动）。 */
+  function finishPatrolToll() {
+    const run = endless().run;
+    if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
+    /* 两种收缴阶段都算数：patrolToll（刚输）/ patrolDiscard（交出虚空铭文后永久位溢出，接着丢）。 */
+    const wasToll = run.phase === 'patrolToll' || run.phase === 'patrolDiscard';
+    run.phase = null;
+    run.patrolTollAt = null;
+    if (!wasToll) { save(); return { ok: true }; }
+    run.idx = Math.max(0, Math.floor(Number(run.idx) || 0)) + 1;
+    const out = { ok: true, patrol: true, advanced: true, battleNo: run.idx + 1 };
+    if (run.idx >= run.plan.length) return layerClear('endless', run, out, 0, false);
+    save();
+    return out;
+  }
+  /** 「巡逻」魔王身上那套**橙色狂战甲**的套装收益（2026-10 第七十四批用户口径）：
+   *  「不只是外壳，要实际拥有狂战套的性能」→ 走**玩家吃套装收益的同一条通道**：
+   *   · 属性部分（力量…）直接加到面板；
+   *   · 战斗修正（暴击率 / 低血终乘 / 低血加攻 / 低血吸血 / 阈值）写进 `foe.setFx`，
+   *     由 sim 的 `setFx()` 读 —— 与玩家穿齐这套时**同一个函数、同一份数值表**，
+   *     所以「魔王吃到的增益和玩家一致」在套装这一路上是结构上成立的，不是抄了一份数字。
+   *  装备 id 取 `GEAR[PATROL.setKey]`（= 玩家能拿到的 50 级传说档狂战套），
+   *  家族「狂战」在 `SET_BONUS_FAMILY_FLOOR` 里有品质下限 4 → 本来就按**橙档**系数算。
+   *  幂等：重复调用只会把同一份修正再写一遍（属性会重复加，所以只在两处「重置面板之后」调）。 */
+  function applyPatrolSet(foe, level) {
+    if (!foe) return null;
+    const ids = (D().wearsOf && D().PATROL && D().PATROL.setKey) ? D().wearsOf(D().PATROL.setKey) : [];
+    if (!ids.length || !State.setBonusEffects) return null;
+    const eff = State.setBonusEffects(ids.map((w) => ({ id: w.id, used: true })), level);
+    const st = eff.stats || {};
+    for (const k of ['power', 'agility', 'speed']) {
+      if (st[k]) foe[k] = Math.max(1, Math.round((Number(foe[k]) || 0) + Number(st[k])));
+    }
+    if (st.hp) {
+      /* 生命上限跟在当前血后面一起抬（与 applyFoeSetBonuses 的加法同口径）。 */
+      const add = Math.max(0, Math.round(Number(st.hp)));
+      foe.hp = Math.max(1, Math.round((Number(foe.hp) || 0) + add));
+      foe.maxHp = Math.max(Number(foe.maxHp) || 0, foe.hp);
+    }
+    const fx = eff.fx || {};
+    if (Object.keys(fx).length) foe.setFx = Object.assign({}, foe.setFx, fx);
+    foe.patrolSet = { family: (D().PATROL && D().PATROL.setKey) || '', stats: st, fx: fx };
+    return eff;
+  }
+  /** x0 层的魔王：额外持有玩家**此前上交过的所有增益**（按上交时的快照生效）。
+   *  · **纯运营类**（试炼币 / 商店 / 出售 / 铸币这些对「一对一面板」没意义的）→ **不生效**（用户口径）；
+   *  · 属性类 → 直接乘到魔王的力/敏/速/生命上；
+   *  · **挥金如土（C36）→ 生效**：玩家此后每在试炼商店消费，魔王按同一套分段吃成长
+   *   （用户口径：「按照离开玩家时候的增益进行生效」→ 用上交时的分段快照，记进 run.patrolShopGift）。 */
+  function applyPatrolTollToFoe(run, foe) {
+    const list = Array.isArray(run && run.patrolTolls) ? run.patrolTolls : [];
+    if (!foe || !list.length) return 0;
+    let n = 0;
+    const names = [];
+    for (const it of list) {
+      const def = D().BUFF_BY_ID[it.id];
+      const m = (def && def.mods) || null;
+      if (!def || !m) continue;
+      const k = Math.max(1, Math.floor(Number(it.stacks) || 1));
+      if (isPureOpsBuff(def)) { names.push(def.name + '（运营类·不生效）'); continue; }
+      /* 挥金如土：登记分段，之后玩家消费就给魔王加属性。 */
+      if (m.shopSpendStep) {
+        run.patrolShopGift = { step: Number(m.shopSpendStep) || 5, stat: Number(m.shopSpendStat) || 1,
+          hp: Number(m.shopSpendHp) || 5 };
+        names.push(def.name + '（生效：你在商店每消费 ' + (Number(m.shopSpendStep) || 5) + ' 试炼币，魔王就长一点）');
+        n++;
+        continue;
+      }
+      if (m.powerMul) foe.power = Math.max(1, Math.round(foe.power * (1 + m.powerMul * k)));
+      if (m.agilityMul) foe.agility = Math.max(1, Math.round(foe.agility * (1 + m.agilityMul * k)));
+      if (m.speedMul) foe.speed = Math.max(1, Math.round(foe.speed * (1 + m.speedMul * k)));
+      if (m.maxHpMul) { foe.hp = Math.max(1, Math.round(foe.hp * (1 + m.maxHpMul * k))); foe.maxHp = foe.hp; }
+      /* ⚠ 暴击 / 减伤这类**只能从 mods 读**（见 sim 的 critChance 与 applyDamage），
+       * 写成 foe.critBonus / foe.takenMul 这种裸字段**根本没人读** —— 2026-10 第八十二批顺手修掉：
+       * 以前玩家把「鹰眼 / 坚守」这类交给魔王，魔王其实一点没吃到。 */
+      foe.mods = foe.mods || {};
+      if (m.critBonus) foe.mods.critBonus = Math.max(0, Number(foe.mods.critBonus) || 0) + m.critBonus * k;
+      if (m.takenMul) foe.mods.takenMul = Math.max(-0.8, Number(foe.mods.takenMul) || 0) + m.takenMul * k;
+      names.push(def.name);
+      n++;
+    }
+    /* 挥金如土在玩家消费时累积的那一份（见 addShopSpend）。 */
+    const gain = run.patrolFoeGain;
+    if (gain) {
+      foe.power = Math.max(1, Math.round(foe.power + (Number(gain.power) || 0)));
+      foe.agility = Math.max(1, Math.round(foe.agility + (Number(gain.agility) || 0)));
+      foe.speed = Math.max(1, Math.round(foe.speed + (Number(gain.speed) || 0)));
+      if (Number(gain.hp) > 0) { foe.hp = Math.max(1, Math.round(foe.hp + Number(gain.hp))); foe.maxHp = foe.hp; }
+      names.push('商店消费成长 +' + [gain.power, gain.agility, gain.speed, gain.hp].map((v) => Number(v) || 0).join('/'));
+    }
+    foe.tollBuffs = names;
+    return n;
+  }
+  /** x00「最后的魔王」额外固定持有的两件**涅槃plus** + 两件**已破碎的终焉烙印**
+   *（2026-10 第八十二批用户口径；只给 x00，寻常巡逻层那只不额外持有）。
+   *
+   *  · 涅槃plus：`deathSaves` 里两条带 `bossLife: true` 的条目 —— 死亡时回满血（100% 生命上限），
+   *    并**当场**生命上限 +20%、受到伤害 −15%；第二件触发时这两项叠加（上限 +40%、减伤 30%）。
+   *    触发逻辑在 sim 的 `consumeDeathSave`（先抬上限、再按 healPct 回血、减伤并进 mods.takenMul）。
+   *    `bossLife` 还有一层作用：**「假如我直接赢」（E17）只吃掉一条命**（见 sim 的 openKill 分支）——
+   *    普通敌人的装死 / 涅槃照旧被 E17 无视，只有魔王的命算数。
+   *    于是它一共 **3 条命**（本体 + 两件涅槃plus）。
+   *  · 两件破碎的终焉烙印：终乘 ×(1 + 0.30×2) = **×1.6** 乘进力/敏/速/生命上限，
+   *    与玩家侧 `fragileFinalMul` 同一套口径（存在 +20%/层、损毁 +30%/层，按层加算）。
+   *    放在**最后**乘：前面的面板复制与「玩家上交过的增益」都算完之后再终乘。 */
+  function applyDemonLordLives(foe) {
+    if (!foe) return null;
+    const P = D().PATROL || {};
+    const lives = Math.max(0, Math.floor(Number(P.bossLives) || 0));
+    const brands = Math.max(0, Math.floor(Number(P.bossBrokenBrands) || 0));
+    const perBrand = Math.max(0, Number(P.bossBrokenFinal) || 0);
+    foe.mods = Object.assign({}, foe.mods || {});
+    /* 命数**直接摆回设计值**（不是无脑追加）：
+     *   · 保证幂等 —— adjustMe 被调两次不会变 4 条命；
+     *   · 也是自愈 —— 万一上一次模拟/别的路径把命吃掉了几条，下一次 adjustMe 会把两条命摆回来；
+     *   · 只保留非 bossLife 的免死条目（例如上交增益带来的），别把别人的命删了。 */
+    if (lives > 0) {
+      const one = () => ({
+        healPct: Math.max(0, Number(P.bossLifeHealPct) || 1),
+        maxHpMul: Math.max(0, Number(P.bossLifeMaxHpMul) || 0),
+        takenMul: Number(P.bossLifeTakenMul) || 0,
+        revive: true, bossLife: true, name: '涅槃+',
+      });
+      const list = [];
+      for (let i = 0; i < lives; i++) list.push(one());
+      const keep = (Array.isArray(foe.mods.deathSaves) ? foe.mods.deathSaves : []).filter((sv) => !(sv && sv.bossLife));
+      foe.mods.deathSaves = list.concat(keep);
+    }
+    const mul = 1 + perBrand * brands;
+    if (mul > 1) {
+      const beforeMax = Math.max(1, Number(foe.maxHp) || 1);
+      const ratio = Math.max(0, Math.min(1, (Number(foe.hp) || 1) / beforeMax));
+      for (const k of ['power', 'agility', 'speed']) foe[k] = Math.max(1, Math.round((Number(foe[k]) || 1) * mul));
+      foe.maxHp = Math.max(1, Math.round(beforeMax * mul));
+      foe.hp = Math.max(1, Math.round(foe.maxHp * ratio));
+      foe.brokenBrandFinalMul = mul;
+    }
+    foe.demonLives = lives + 1;              // 本体 + N 条涅槃plus（界面 / 调试用）
+    return foe;
+  }
+  /** 「纯运营类」增益判据（巡逻魔王持有它们时不生效，用户口径 2026-10 第六十三批）：
+   *  效果**只**落在试炼币 / 商店 / 出售 / 铸币这些「一对一面板」上，对一场战斗没有意义。 */
+  const PATROL_PURE_OPS_MODS = ['instantCoins', 'coinBoostPct', 'shopDiscount', 'sellValue',
+    'sellGrowthPerWin', 'shopEnterCoins', 'instantRetry', 'rerollTiltMul', 'shopHalf',
+    'postBattleShop', 'postBattleMintShop', 'postBattleShopDiscount', 'shopSpendLimited',
+    'limitedDefaultRerollPaid', 'layerRestart', 'coinFragilePct'];
+  function isPureOpsBuff(def) {
+    const keys = Object.keys((def && def.mods) || {});
+    if (!keys.length) return false;
+    return keys.every((k) => PATROL_PURE_OPS_MODS.indexOf(k) >= 0);
+  }
+  /** 让**所有**烙印立刻破碎（烙印升华 E20）；返回碎掉的份数与名字。 */  function breakAllBrands(run) {
+    const names = [];
+    let total = 0;
+    for (const row of (run && run.limited) || []) {
+      if (!isBrandBuff(D().BUFF_BY_ID[row && row.id]) || row.on === false) continue;
+      const n = breakBrandRow(run, row);
+      if (n > 0) { names.push(D().BUFF_BY_ID[row.id].name + '×' + n); total += n; }
+    }
+    if (run && run.limited) run.limited = run.limited.filter((b) => Math.max(0, Math.floor(Number(b.stacks) || 0)) > 0);
+    return { copies: total, names: names };
+  }
+  function rollFragileBuffs(run) {    const broken = [];
     run.limited = (run.limited || []).filter((b) => {
       const def = D().BUFF_BY_ID[b.id];
       const pct = def && def.mods && def.mods.fragileBreakPct;
@@ -2990,6 +4414,29 @@
     return run.rowUidSeq;
   }
   function rowFreeOf(row) { return !!(row && row.slotFree === true); }
+  /* ---------- 铭文附魔（2026-10：铭文独立成 `kind: 'inscription'`） ----------
+   * 一条永久增益可以吃**多个不同**铭文，但**同一张铭文不能重复附在同一条上**：
+   *   · 虚空铭文 C37（`pickPermanentFree`）→ 该条不占永久槽位（沿用旧的 slotFree 字段）；
+   *   · 增幅铭文 C60（`pickPermanentMul: 1.5`）→ 该条的效果 × 倍率（可叠乘）。
+   * 记账统一放 `row.enchants`（铭文 id 数组，去重）与 `row.enchMul`（倍率乘积，缺省 1）。 */
+  function rowEnchantsOf(row) { return (row && Array.isArray(row.enchants)) ? row.enchants : []; }
+  function rowEnchMulOf(row) { const m = Number(row && row.enchMul); return Number.isFinite(m) && m > 0 ? m : 1; }
+  /** 某张铭文能不能附在这一条上（同一条上同一张铭文只能附一次）。 */
+  function rowInscriptionFree(row, inscriptionId) {
+    if (!row) return false;
+    if (!inscriptionId) return true;
+    return rowEnchantsOf(row).indexOf(inscriptionId) < 0;
+  }
+  /** 给一条永久增益附上增幅铭文：记 id、乘倍率。返回被处理的行。 */
+  function markRowInscription(run, row, inscriptionId, mul) {
+    if (!run || !row) return null;
+    const id = String(inscriptionId || '');
+    if (!rowInscriptionFree(row, id)) return null;
+    row.enchants = rowEnchantsOf(row).concat([id]);
+    const m = Number(mul);
+    if (Number.isFinite(m) && m > 0) row.enchMul = rowEnchMulOf(row) * m;
+    return row;
+  }
   /** 把镜像字段同步成「被附魔行的 id 去重」。
    *  【2026-10 同名逐条】镜像**只**由行上的 `slotFree` 派生 —— 不再保留「名下还没有栏位」的
    *  旧 id 登记：那一套会让「失去被附魔的增益」之后 id 仍留在镜像里，玩家再拿到同名件时
@@ -3020,12 +4467,36 @@
     if (rowFreeOf(row)) return true;
     return !(run.permanent || []).some((b) => b && b.id === row.id && rowFreeOf(b));
   }
+  /** 一次附魔选取（pendingPick.kind === 'permBuff'）的合法候选判据 —— 按**铭文种类**分派：
+   *   · 虚空铭文（免占位）：沿用 enchantEligible —— 同名件里只允许一条被它附魔；
+   *     已经被它附过的那一条**仍然可选**（再选一次是空操作，界面会标「已附魔」）→ 老口径不变；
+   *   · 增幅铭文（效果倍率）：同一张铭文不能重复附在同一条上（否则倍率会叠乘），
+   *     同名**别的**栏位不受影响（各吃各的）。 */
+  function inscriptionEligible(row, run, inscriptionId) {
+    const buff = D().BUFF_BY_ID[inscriptionId];
+    const free = !!(buff && buff.mods && buff.mods.pickPermanentFree);
+    if (free) return enchantEligible(row, run);
+    return rowInscriptionFree(row, inscriptionId);
+  }
   /** 附魔（虚空铭文）：**只标记这一条**。返回被标记的行。 */
   function markRowFree(run, row) {
     if (!run || !row) return null;
     row.slotFree = true;
     syncSlotFree(run);
     return row;
+  }
+  /** 铭文附魔的落地：C37 免占位、C60 效果 ×倍率。返回给界面用的摘要。
+   *  · 虚空铭文：只标 `slotFree`（老口径 —— 重复选同一条是空操作，不记 enchants）；
+   *  · 增幅铭文：记 `enchants` + 乘倍率，同一张铭文不能重复附在同一条上。 */
+  function applyInscription(run, row, inscriptionId, mul) {
+    const buff = D().BUFF_BY_ID[inscriptionId];
+    if (buff && buff.mods && buff.mods.pickPermanentFree) {
+      markRowFree(run, row);                     // **只标记这一条**（同名另一条不受影响）
+      return { slotFree: true, enchMul: rowEnchMulOf(row) };
+    }
+    const m = mul != null ? mul : (buff && buff.mods && buff.mods.pickPermanentMul) || 0;
+    if (!markRowInscription(run, row, inscriptionId, m)) return null;
+    return { slotFree: rowFreeOf(row), enchMul: rowEnchMulOf(row), enchants: rowEnchantsOf(row).slice() };
   }
   /** 加一个 buff。永久类要过 5 格上限（满则返回 needsReplace，由界面选一个替换）。 */
   function addBuff(run, id, replaceId) {
@@ -3050,21 +4521,57 @@
       }
       run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]);
       notePickGot(run, buff.id);
-      run.pendingPick = buff.mods.pickWeaponPct
+      const pickKindW = buff.mods.pickWeaponPct ? 'weapon' : 'skill';
+      logBuff(run, id, 'get', { detail: '选取型（待选目标）' });
+      save();
+      /* 【U20b 软锁修复】一把武器（或一个可选取技能）都没有时**不要挂 pendingPick**：
+       * 界面每次都弹同一个 0 候选的空弹窗、点不掉也走不了，玩家永远卡在这一屏
+       *（机器人实测：无武器账号拿到「神兵淬炼」→ 弹窗无限重开）。与铭文那几条同口径：
+       * 先记进 `deferredPicks` 替你留着，之后有目标了自动接上（见 resolveDeferredPicks）。 */
+      if (!hasPickTargets(run, pickKindW)) return deferPick(run, buff, pickKindW);
+      run.pendingPick = pickKindW === 'weapon'
         ? { kind: 'weapon', buffId: buff.id, pct: buff.mods.pickWeaponPct }
         : { kind: 'skill', buffId: buff.id, pct: buff.mods.pickSkillPct };
-      logBuff(run, id, 'get', { detail: '选取型（待选目标）' });
       save();
       return { ok: true, pendingPick: run.pendingPick };
     }
-    if (buff.mods && buff.mods.pickPermanentFree) {
+    /* 铭文类（kind: 'inscription'）：**不占栏位**，只登记「待选一条永久增益」。
+     * 两种铭文共用这一条路径，差别在落地时（见 applyInscription）：
+     *   · C37 虚空铭文（pickPermanentFree）→ 选中的那条不占永久槽位；
+     *   · C60 增幅铭文（pickPermanentMul: 1.5）→ 选中的那条效果 ×1.5。
+     * 两者都要 `notePickGot`：重复获得时按 0.88^n 降权（与终焉烙印同一口径）。 */
+    if (buff.mods && (buff.mods.pickPermanentFree || buff.mods.pickPermanentMul)) {
       if (!D().hasTag(buff, 'repeatable') && (run.pickBuffIds || []).includes(buff.id)) {
         return { ok: false, msg: '这类选取增益一局只能获得一次。' };
       }
       run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]).filter((v, i, a) => a.indexOf(v) === i);
-      notePickGot(run, buff.id);          // 虚空铭文：每次都记一份，降权才有依据（见 pickGotOf）
+      notePickGot(run, buff.id);          // 铭文：每次都记一份，降权才有依据（见 pickGotOf）
+      logBuff(run, id, 'get', { detail: buff.name + '（待选永久增益）' });
+      save();
+      /* 没有可选目标（一条永久增益都没有）→ **不要挂 pendingPick**：挂了界面每次都弹同一个
+       * 空弹窗，玩家永远选不出来 = 卡死。改成「挂着等目标出现」（见 deferPickIfNoTargets）。 */
+      if (!hasPickTargets(run, 'permBuff', buff.id)) return deferPick(run, buff, 'permBuff');
       run.pendingPick = { kind: 'permBuff', buffId: buff.id };
-      logBuff(run, id, 'get', { detail: '虚空铭文（待选永久增益）' });
+      if (buff.mods.pickPermanentMul) run.pendingPick.mul = Number(buff.mods.pickPermanentMul) || 0;
+      return { ok: true, pendingPick: run.pendingPick };
+    }
+    /* 另外两种铭文（2026-10 第六十一批）：都是由玩家三选一挑一条**已有**增益来操作 ——
+     *   · 碎裂铭文 C61（pickBrandBreak）→ 挑一条烙印，让它立刻全部破碎；
+     *   · 延续铭文 C62（pickLimitedUses: N）→ 挑一条限次增益（烙印除外），剩余场次 +N。 */
+    if (buff.mods && (buff.mods.pickBrandBreak || buff.mods.pickLimitedUses)) {
+      if (!D().hasTag(buff, 'repeatable') && (run.pickBuffIds || []).includes(buff.id)) {
+        return { ok: false, msg: '这类选取增益一局只能获得一次。' };
+      }
+      run.pickBuffIds = (run.pickBuffIds || []).concat([buff.id]).filter((v, i, a) => a.indexOf(v) === i);
+      notePickGot(run, buff.id);
+      const pickKind = buff.mods.pickBrandBreak ? 'brandBuff' : 'limitedBuff';
+      logBuff(run, id, 'get', { detail: buff.name + '（待选目标）' });
+      save();
+      /* 同上：没有可选的烙印 / 限次增益时**不挂 pendingPick**（否则弹窗永远关不掉）。 */
+      if (!hasPickTargets(run, pickKind, buff.id)) return deferPick(run, buff, pickKind);
+      run.pendingPick = pickKind === 'brandBuff'
+        ? { kind: 'brandBuff', buffId: buff.id }
+        : { kind: 'limitedBuff', buffId: buff.id, addUses: Math.max(1, Math.floor(Number(buff.mods.pickLimitedUses) || 1)) };
       save();
       return { ok: true, pendingPick: run.pendingPick };
     }
@@ -3090,6 +4597,21 @@
       /* 叠层上限：该增益自己的 maxStacks（可叠层的），否则全局 STACK_MAX。 */
       const cap = D().stackCap(buff);
       restackSlot = owned.stacks >= cap;
+      /* 【2026-10 第八十一批 用户口径】限次类：**同名再获得 = 直接把份数加到场次上**。
+       * 玩家实测：手里有一条限次增益之后，商店 / 场间三选一里还会照常刷出它（池子口径没问题），
+       * 但一买就被这里拒掉「已经叠满了（上限 1 层）」—— 于是「持有时还能刷新」等于白刷。
+       * 判据见 usesStackable()（普通限次件；烙印/限量件、unique、流程类都不走这条路）。
+       * 这条路**只加 uses、不加 stacks、也不开新栏位**，正是用户说的「不需要单独计数」。 */
+      const usesOnly = usesStackable(buff);
+      if (usesOnly && restackSlot) {
+        const addUses = Math.max(1, Math.floor(Number(buff.uses) || 1));
+        owned.uses = Math.max(0, Math.floor(Number(owned.uses) || 0)) + addUses;
+        owned.on = true;
+        applyBuffOnAcquire(run, buff);
+        logBuff(run, id, 'stack', { stacks: owned.stacks, detail: '场次 +' + addUses + '（共 ' + owned.uses + '）' });
+        save();
+        return { ok: true, buff: buff, stacks: owned.stacks, uses: owned.uses, addedUses: addUses };
+      }
       /* 限次类（烙印等）叠满即拒绝，保持老口径。 */
       if (restackSlot && !permanentRestackable(buff)) {
         return { ok: false, msg: '【' + buff.name + '】已经叠满了（上限 ' + cap + ' 层）。' };
@@ -3144,7 +4666,10 @@
     logBuff(run, id, 'get', { detail: restackSlot
       ? '新栏位（原栏位已叠满，继续叠加）'
       : (buff.kind === 'permanent' ? '永久' : (run.mode === 'tower' ? '下一场战斗' : ('限次 ' + towerLimitedUses + ' 场'))) });
-    return { ok: true, buff };
+    /* 刚拿到一条新增益 —— 之前因为「没有可选目标」而留着的选取型铭文，现在也许能接上了。 */
+    const resumed = resolveDeferredPicks(run);
+    if (resumed) save();
+    return { ok: true, buff, resumedPick: resumed || undefined };
   }
   /** 瞬时经济 buff（立即进货 / 立即得试炼币 / 全场五折）。 */
   function applyInstant(run, buff) {
@@ -3178,6 +4703,16 @@
       run.shopHalfPending = Math.max(0, Math.floor(Number(run.shopHalfPending) || 0)) + add;
       out.shopHalfPending = run.shopHalfPending;
     }
+    /* 「烙印升华」E20（2026-10 第六十一批）：立刻把持有的所有烙印破碎
+     *（破碎 = 升级为全额并永久保留）。上架门槛由 poolFilter 的 brandGate 管。 */
+    if (m.breakAllBrands) {
+      const r = breakAllBrands(run);
+      out.brokenBrands = r.copies;
+      out.brokenNames = r.names;
+      out.msg = r.copies > 0
+        ? '所有烙印立刻破碎：' + r.names.join('、') + '（共 ' + r.copies + ' 份，已升级为全额并永久保留）'
+        : '当前没有可破碎的烙印。';
+    }
     if (m.shopDiscount) {
       /* 即时类（E04 steam大促）走这条分支，**不经过 applyBuffOnAcquire** ——
        * 所以折扣比例必须在这里也记一份，否则 makeShop 只能退回默认的 5 折。 */
@@ -3187,10 +4722,13 @@
     }
     if (m.openShop) {
       // 立刻开一次商店：不动 5 层一次的结算点节奏（phase 用完即恢复）
+      // 【100 层循环】整百层不开店：makeShop 会返回 null，这里必须判空再挂标记。
       run.shop = makeShop(run);
-      run.shop.postBattle = true;
-      run.phase = 'shop';
-      out.shop = true;
+      if (run.shop) {
+        run.shop.postBattle = true;
+        run.phase = 'shop';
+        out.shop = true;
+      }
     }
     save();
     return out;
@@ -3240,40 +4778,93 @@
   const ownsSkill = (id) => (S().skills || [])
     .some((sk) => Number(String(sk).split(':')[0]) === Number(id));
   /** 选取型 buff 的三选一候选：从玩家已有的武器/技能里随机挑最多 3 个。 */
+  /** 这一次「附魔三选一」到底是**哪张铭文**触发的 —— 候选、可行性与界面标记共用这一个出口。
+   *  三处曾经各写各的（`hasPickTargets` / `pickCandidates` / 界面的「已附魔」标记），
+   *  一旦哪一处口径不同，「同一张铭文不能重复附在同一条」这类规则或标记就会错位。
+   *  · 优先当前待选（`run.pendingPick`，发牌那一刻写的 buffId；界面可以直接把它传进来）；
+   *  · 没有待选时（「当前没有可选目标」被收进 deferredPicks 了）退回那张**留着等目标**的铭文；
+   *  · 老档 / 老测试什么都没写 → permBuff 按虚空铭文（C37）兜底。
+   *  ⚠ **不要在这里调 `endless()`**：`endless()` 会走 normalizeRun → parkStalePendingPick →
+   *  `hasPickTargets()`，而那一处又要回调本函数 —— 直接无限递归（实测栈溢出）。run 由调用方传。 */
+  function activeInscriptionId(kind, run, pending) {
+    const pend = pending || (run && run.pendingPick) || null;
+    if (pend && pend.kind === kind && pend.buffId) return pend.buffId;
+    const def = (run && Array.isArray(run.deferredPicks) ? run.deferredPicks : [])
+      .find((x) => x && x.kind === kind);
+    if (def && def.buffId) return def.buffId;
+    return kind === 'permBuff' ? 'C37' : null;
+  }
+  /** C33「秘技通神」能选的技能：主动技 + 两种可选取的特殊技能（防御被动 / 小宇宙爆发）。
+   *  模块级（不是 pickCandidates 内部的闭包）：`hasPickTargets('skill')` 要用**同一份**判据。 */
+  function pickableSkillId(id) {
+    const map = (typeof skillsMap !== 'undefined' && skillsMap) ? skillsMap : (window.skillsMap || null);
+    const it = map && map.getValue ? map.getValue(Number(id)) : null;
+    const t = it && it.type ? String(it.type) : '';
+    if (t === '主动') return true;
+    return isPickableDefense(Number(id)) || isPickableCosmos(Number(id));
+  }
   function pickCandidates(kind) {
     const run = endless().run;
     if (!run) return [];
     if (kind === 'permBuff') {
+      /* 这一次要附的是哪张铭文 —— 与可行性检查、界面标记共用同一个出口（见 activeInscriptionId）。 */
+      const inscriptionId = activeInscriptionId('permBuff', run) || 'C37';
       const pool = (run.permanent || [])
-        .map((b) => ({ id: b.id, uid: b.uid, buff: D().BUFF_BY_ID[b.id], stacks: b.stacks || 1, free: rowFreeOf(b) }))
+        .map((b) => ({ id: b.id, uid: b.uid, buff: D().BUFF_BY_ID[b.id], stacks: b.stacks || 1, free: rowFreeOf(b),
+          enchMul: rowEnchMulOf(b), enchants: rowEnchantsOf(b).slice() }))
         .filter((x) => x.buff && !D().hasTag(x.buff, 'hidden'))
-        /* 【用户口径 2026-10】同名的另一条已被附魔 → 这一条（未附魔的）不进候选。 */
-        .filter((x) => enchantEligible((run.permanent || []).find((r) => r && Number(r.uid) === Number(x.uid)), run));
+        /* 合法附魔目标按**铭文种类**判：虚空铭文守「同名件只附魔一条」，增幅铭文只挡「同一张铭文重复附」。
+         * 【用户口径 2026-10】同名的另一条已被附魔 → 这一条（未附魔的）不进候选（虚空铭文口径）。 */
+        .filter((x) => inscriptionEligible((run.permanent || []).find((r) => r && Number(r.uid) === Number(x.uid)), run, inscriptionId));
       for (let i = pool.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
       }
       /* 候选按**栏位**给出（同名多栏各占一个候选），带上 uid 让界面能精确指到那一条；
-       * `slotFree` 也逐条给：同名件里只有被附魔的那一条才算「已附魔（不占位）」。 */
+       * `slotFree` / `enchMul` 也逐条给：同名件里只有被附魔的那一条才算「已附魔」。 */
       return pool.slice(0, 3).map((x) => ({ id: x.id, uid: x.uid, name: x.buff.name, rarity: x.buff.rarity,
-        stacks: x.stacks, slotFree: x.free }));
+        stacks: x.stacks, slotFree: x.free, enchMul: x.enchMul, enchants: x.enchants }));
+    }
+    /* 碎裂铭文（C61）：候选 = 当前**未破碎的烙印**（每栏一个候选）。
+     * 延续铭文（C62）：候选 = 当前**限次增益**（烙印除外，最多 3 个，随机挑）。 */
+    /* 延续 / 碎裂铭文的候选：**只看「还在手里」**（有未用尽的份数），
+     * **不看开关状态**（用户口径 2026-10：「假如我直接赢」被玩家关掉之后，
+     * 延续铭文也必须能选到它 —— 关掉只是「这场先不用」，不代表这条增益不存在）。
+     * 以前这里抄了「生效判定」的 `row.on !== false`，于是被关掉的限次 buff 直接从候选里消失。 */
+    if (kind === 'brandBuff' || kind === 'limitedBuff') {
+      const wantBrand = kind === 'brandBuff';
+      const list = (run.limited || [])
+        .filter((row) => row && Math.max(0, Math.floor(Number(row.stacks) || 0)) > 0)
+        /* 【2026-10 第八十批 用户口径】`noExtend` 的增益**不进延续铭文的候选**（特殊设定）：
+         * 目前只有 E01 立即进货 —— 它是流程类增益（下一场战斗后开店），+5 场等于连开 5 家店。
+         * 碎裂铭文（brandBuff）那一支不受影响（烙印都不带这个标志）。 */
+        .filter((row) => !(D().BUFF_BY_ID[row.id] || {}).noExtend)
+        .filter((row) => {
+          const def = D().BUFF_BY_ID[row.id];
+          if (!def) return false;
+          return wantBrand ? isBrandBuff(def) : !isBrandBuff(def);
+        })
+        .map((row) => ({ uid: row.uid, id: row.id, name: (D().BUFF_BY_ID[row.id] || {}).name || row.id,
+          rarity: (D().BUFF_BY_ID[row.id] || {}).rarity || 0, stacks: Math.max(1, Math.floor(Number(row.stacks) || 1)),
+          uses: Math.max(0, Math.floor(Number(row.uses) || 0)), off: row.on === false }));
+      const pool = list.slice();
+      for (let i = pool.length - 1; i > 0; i--) {           // 洗牌
+        const j = Math.floor(Math.random() * (i + 1));
+        const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+      }
+      return pool.slice(0, 3);
     }
     /* 秘技通神（C33）：只抽**主动技能**，外加两条特殊技能 —— 防御被动（绝对防御/龟甲术）
      * 与小宇宙爆发（14）。前者不进出手池、「提升触发概率」走 sim 的 passiveSkillBoost；
      * 后者的收益是「开战第一招必定放它」（见 applyPickBuff / adjustMe / sim 的 cosmosFirst）。
      * 其余被动/防御类技能（力王附体 / 风驰电掣 / 武器好手 / 装死 / 皮糙肉厚…）
      * 抽到等于白拿一整份传奇增益，所以一律不进候选。
-     * 技能表里的 type 字段是权威口径（'主动' / '被动' / '防御'）。 */
-    const isActiveSkill = (id) => {
-      const map = (typeof skillsMap !== 'undefined' && skillsMap) ? skillsMap : (window.skillsMap || null);
-      const it = map && map.getValue ? map.getValue(Number(id)) : null;
-      const t = it && it.type ? String(it.type) : '';
-      return t === '主动';
-    };
-    const pickableSkill = (id) => isActiveSkill(id) || isPickableDefense(id) || isPickableCosmos(id);
+     * 技能表里的 type 字段是权威口径（'主动' / '被动' / '防御'）。
+     * ⚠ 判据抽到模块级（`pickableSkillId`）：`hasPickTargets('skill')` 必须与这里的候选**同口径**，
+     * 否则又会出现「判定说有目标、界面候选 0 个」的弹窗死循环。 */
     let list;
     if (kind === 'skill') {
-      list = (State.mySkills ? State.mySkills() : []).filter((sk) => sk && pickableSkill(sk.id));
+      list = (State.mySkills ? State.mySkills() : []).filter((sk) => sk && pickableSkillId(sk.id));
       /* 候选里补齐「玩家还没学的特殊技能」——防御技 16/7 与小宇宙爆发 14。
        * 它们按 id 造一层占位，选中后由 applyPickBuff 真正写进技能表。 */
       const have = new Set(list.map((sk) => Number(sk.id)));
@@ -3302,21 +4893,59 @@
   function applyPickBuff(kind, id) {
     const run = endless().run;
     if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
-    const pend = run.pendingPick;
+    /* `pendingPick` 为空时，允许退回「留着等目标」的那一条（deferredPicks）——
+     * 那种情况下候选与拒绝理由仍然要按**那张铭文**的规则算（否则「同一张铭文不能重复附」
+     * 会被当成「没有待选」而不是被明确拒绝）。 */
+    let pend = run.pendingPick;
+    if ((!pend || pend.kind !== kind) && ['permBuff', 'brandBuff', 'limitedBuff'].indexOf(kind) >= 0) {
+      const def = (Array.isArray(run.deferredPicks) ? run.deferredPicks : []).find((x) => x && x.kind === kind);
+      if (def) pend = def;
+    }
     if (!pend || pend.kind !== kind) return { ok: false, msg: '现在没有待选取的强化。' };
     if (kind === 'permBuff') {
       /* `id` 现在既可以是 uid（界面走这条）也可以是增益 id（老调用 / 测试兜底）。 */
       const row = findRow(run, id);
       if (!row) return { ok: false, msg: '你还没有这个永久增益。' };
-      if (!enchantEligible(row, run)) {
-        return { ok: false, msg: '【' + (D().BUFF_BY_ID[row.id] || {}).name +
-          '】已经有一条被虚空铭文附魔了 —— 同名件里只能附魔一条，这一条不行。' };
+      const inscriptionId = pend.buffId || 'C37';
+      if (!inscriptionEligible(row, run, inscriptionId)) {
+        const isFree = !!(D().BUFF_BY_ID[inscriptionId] || {}).mods && !!(D().BUFF_BY_ID[inscriptionId] || {}).mods.pickPermanentFree;
+        return { ok: false, msg: isFree
+          ? '【' + (D().BUFF_BY_ID[row.id] || {}).name + '】已经有一条被虚空铭文附魔了 —— 同名件里只能附魔一条，这一条不行。'
+          : '【' + (D().BUFF_BY_ID[row.id] || {}).name + '】这一条已经吃过这张铭文了 —— 同一张铭文不能重复附在同一条上。' };
       }
-      markRowFree(run, row);                     // **只标记这一条**（同名另一条不受影响）
-      run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId || 'C37']).filter((v, i, a) => a.indexOf(v) === i);
+      const r = applyInscription(run, row, inscriptionId, pend.mul);   // 只作用于这一条
+      run.pickBuffIds = (run.pickBuffIds || []).concat([inscriptionId]).filter((v, i, a) => a.indexOf(v) === i);
       run.pendingPick = null;
       save();
-      return { ok: true, kind, id: row.id, uid: row.uid, slotFree: true };
+      return { ok: true, kind, id: row.id, uid: row.uid, slotFree: rowFreeOf(row), enchMul: rowEnchMulOf(row),
+        inscription: inscriptionId, enchants: (r && r.enchants) || rowEnchantsOf(row) };
+    }
+    /* 碎裂铭文（C61）：把选中的那条烙印**立刻全部破碎**；
+     * 延续铭文（C62）：把选中的那条限次增益的剩余场次 +N（烙印不可选，见 pickCandidates）。 */
+    if (kind === 'brandBuff' || kind === 'limitedBuff') {
+      const row = (run.limited || []).find((b) => b && Number(b.uid) === Number(id)) ||
+        (run.limited || []).find((b) => b && b.id === id);
+      if (!row) return { ok: false, msg: '你还没有这个增益。' };
+      const def = D().BUFF_BY_ID[row.id] || {};
+      if (kind === 'brandBuff') {
+        if (!isBrandBuff(def)) return { ok: false, msg: '只能对烙印使用。' };
+        const n = breakBrandRow(run, row);
+        run.limited = (run.limited || []).filter((b) => Math.max(0, Math.floor(Number(b.stacks) || 0)) > 0);
+        run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId || 'C61']).filter((v, i, a) => a.indexOf(v) === i);
+        run.pendingPick = null;
+        save();
+        return { ok: true, kind, id: row.id, uid: row.uid, broken: n, name: def.name };
+      }
+      if (isBrandBuff(def)) return { ok: false, msg: '烙印类限次增益不能用延续铭文。' };
+      /* 【2026-10 第八十批 用户口径】特殊设定：延续铭文不能取「立即进货」这类流程类增益
+       *（`noExtend`）—— 候选那边已经过滤掉了，这里再挡一道（老存档 / 直接调 API）。 */
+      if (def.noExtend) return { ok: false, msg: '【' + (def.name || row.id) + '】是流程类增益，延续铭文不能延长它。' };
+      const add = Math.max(1, Math.floor(Number(pend.addUses) || 1));
+      row.uses = Math.max(0, Math.floor(Number(row.uses) || 0)) + add;
+      run.pickBuffIds = (run.pickBuffIds || []).concat([pend.buffId || 'C62']).filter((v, i, a) => a.indexOf(v) === i);
+      run.pendingPick = null;
+      save();
+      return { ok: true, kind, id: row.id, uid: row.uid, addUses: add, uses: row.uses, name: def.name };
     }
     const key = kind === 'skill' ? 'skillBoost' : 'weaponBoost';
     run[key] = run[key] || {};
@@ -3366,20 +4995,56 @@
    *  `e01Pct` = 本次「立即进货」带来的折扣（由调用方在扣限次前现算，见 activeShopCredit）。
    *  折扣比例由「哪几张折扣券在生效」决定：即时券走 run.shopDiscount/run.shopDiscountPct
    *  （E04 steam大促 −30% 等），E01 也是 −30%（2026-10 由 −50% 削弱）；两者同时生效
-   *  按用户口径合并成 −65%（3.5 折），不做简单相加。 */
+   *  按用户口径合并成 −65%（3.5 折），不做简单相加。
+   *
+   *  【2026-10 修复】以前只要 `stacks > 0` 就无条件取 `instantPct || 0.5`，并在扣完份数后
+   *  把 `run.shopDiscountPct` **清成 0**。可是「这一家店」未必是 E04 该服务的那一家：
+   *  休整商店（openRestShop）/ 立即开店都是独立入口，它们会**先**把 E04 的份数吃掉。
+   *  于是「立即进货（E01）＋ steam大促（E04）」实际只按 E01 的 −30% 结算（7 折），
+   *  用户报的「没有 3.5 折」就是这么来的（完整分析见 openRestShop）。
+   *  现在改成：
+   *    ① 合并判定把「这一份即时券的比例」也算进去（`pendingInstantPct`）；
+   *    ② 只有**没走合并分支**时才当场扣掉即时券的份数；
+   *       走了合并分支就把它留到收摊（closeShop 按店上的 `combinedCoupon` 清），
+   *       这样休整商店（openRestShop）先开、E01 的店后开也不会把 E04 白白吃掉。
+   *  另外 openRestShop 也必须把 activeShopCredit 传进来 —— 它和「打完这场再开的店」
+   *  是同一个折扣口径，只是入口不同。 */
   function makeShop(run, e01Pct) {
+    /* 【100 层循环】整百层（100 / 200 / 300…）**不开任何商店**（用户口径）：
+     * 那三层是「觐见魔王」三连战，中途插一家店很别扭；x5 层照旧开。
+     * 覆盖所有入口：每 5 层的结算商店、休整商店、E01 立即进货、调试台手开 ——
+     * 一律在这里拦掉，免得某条支路漏判后在 x00 层开出一家店。 */
+    if (D().layerNoShop(run && run.layer)) return null;
+    /* 兜底：上一家「合并折扣店」如果没走 closeShop 就被顶掉（极少数路径，例如同场又开了
+     * 铸币商店），这里补一次收尾，避免那段高于 −30% 的折扣漏给下一家店。 */
+    if (run.shop && run.shop.combinedCoupon === true && run.shop.mint !== true) {
+      run.shopDiscount = Math.max(0, Math.floor(Number(run.shopDiscount) || 0) - 1);
+      if (run.shopDiscount <= 0) run.shopDiscountPct = 0;
+    }
     const enterCoins = grantShopEnterCoins(run);
     const stacks = Math.max(0, Math.floor(Number(run.shopDiscount) || 0));
     const instantPct = Math.max(0, Number(run.shopDiscountPct) || 0);
     const own = Math.max(0, Number(e01Pct) || 0);
-    let discountPct = 0;
+    /* 这一份即时折扣券的比例：优先用它自身记着的 `shopDiscountPct`，
+     * 旧档 / 手改档没有这个字段时才退回「当前生效的那张券」或数据表的 −30%。 */
+    const pendingInstantPct = stacks > 0
+      ? Math.max(instantPct, own || instantPct || D().SHOP_DISCOUNT_E04)
+      : 0;
     /* 两张券同时生效 → 取「合并值」（0.65）与两张券里更强的那张中较大者。
      * 之所以要带上 max(instantPct, own)：将来若出现比 0.65 更强的单张券，也不该被合并值压下去。 */
-    if (own > 0 && stacks > 0) discountPct = Math.max(D().SHOP_DISCOUNT_BOTH, instantPct, own);
+    const merged = own > 0 && stacks > 0;
+    let discountPct = 0;
+    if (merged) discountPct = Math.max(D().SHOP_DISCOUNT_BOTH, instantPct, own);
     else if (own > 0) discountPct = own;
-    else if (stacks > 0) discountPct = instantPct || 0.5;
+    else if (stacks > 0) discountPct = pendingInstantPct;
     const discount = discountPct > 0;
-    if (stacks > 0) {
+    if (merged) {
+      /* 合并成立 → **不在这里吃掉 E04**：把它的份数与比例都留着，
+       * 收摊时由 closeShop 按 `thisShop.combinedCoupon` 统一清
+       *（否则这段高于 −30% 的折扣会漏给下一家店）。 */
+    } else if (own > 0) {
+      /* E01 单独生效：只吃 E01 自己的限次，不动即时券。 */
+    } else if (stacks > 0) {
       run.shopDiscount = stacks - 1;                  // 消耗 1 份即时折扣券
       if (run.shopDiscount <= 0) run.shopDiscountPct = 0;
     }
@@ -3388,6 +5053,9 @@
     const slots = rollShopSlots(run);
     const shop = { layer: run.layer, slots: slots, retrySold: false, rerollFree: true,
       discount, discountPct, rerollCount: 0, rerollPaid: 0,
+      /* 这是一家「合并折扣店」（E04 + E01 同时生效）→ 收摊时要把 E04 那一份券清掉，
+       * 见 closeShop。标记写在店上而不是靠比例反推，避免将来出现更强的单张券时误判。 */
+      combinedCoupon: merged || undefined,
       enterCoins: enterCoins || undefined };
     applyShopHalf(run, slots, shop);
     return shop;
@@ -3402,9 +5070,17 @@
    *  只吃这一部分（见 dynamicTierWeights）：静态 shopWeight 不该让整档永久缩水。
    *  两项来源：
    *   · repeatWeight —— 每多持有一份，再出现概率 ×rw（C52 涌泉烙印 0.3）；
-   *   · weightDivBy   —— **weight = 初始 weight ÷ n**（n ≤ 1 时不降）：
-   *       'enchanted' 本局被虚空铭文附魔过的永久增益数量（C37 虚空铭文）
-   *       'owned'     本局已获得的份数，含碎掉的烙印（C49 终焉烙印）。 */
+   *   · weightDivBy   —— 降权的**计数口径**（配 weightDecay 用，weight ×= decay^n）：
+   *       'enchanted'   被**虚空铭文**附魔过（= 免占位）的永久条数 —— 只有 C37 用；
+   *       'enchantedBy' 被**这张铭文自己**附魔过的永久条数（`row.enchants` 里有它的 id）
+   *                     —— C60 水晶铭文用（2026-10 第八十批修 bug）；
+   *       'owned'       本局已获得的份数，含碎掉的烙印（C49 终焉烙印 / 直接生效的铭文）。
+   *
+   * 【2026-10 第八十批修 bug】`weightDivBy: 'enchanted'` 数的是 `rowFreeOf(row)`（**虚空铭文**的不占位标记），
+   * 但 C60 水晶铭文、C61 碎裂铭文、C62 延续铭文也照着抄了这一行 —— 于是：
+   *   · 水晶铭文附魔了 N 条，它自己的 n 仍然是「被虚空附魔过的条数」（多半是 0）→ **0.88^n 从来没生效过**；
+   *   · 碎裂 / 延续铭文压根不给谁附魔，`n` 永远跟它们自己没关系。
+   * 现在按「谁的账算在谁头上」拆成上面三种口径（计数口径只影响降权，不改效果）。 */
   function buffDynamicPenaltyOf(run, b) {
     if (!run || !b || !b.mods) return 1;
     let m = 1;
@@ -3416,13 +5092,16 @@
       if (owned > 0) m *= Math.pow(rw, owned);
     }
     const divBy = b.mods.weightDivBy;
-    if (divBy === 'enchanted' || divBy === 'owned') {
+    if (divBy === 'enchanted' || divBy === 'enchantedBy' || divBy === 'owned') {
+      const rows = run.permanent || [];
       const n = divBy === 'enchanted'
-        ? (run.permanent || []).filter((row) => rowFreeOf(row)).length
-        : obtainedCountOf(run, b.id);
+        ? rows.filter((row) => rowFreeOf(row)).length
+        : divBy === 'enchantedBy'
+          ? rows.filter((row) => rowEnchantsOf(row).indexOf(b.id) >= 0).length
+          : obtainedCountOf(run, b.id);
       /* weightDecay（0 < v < 1）= **指数降权**：weight ×= v^n —— 与 repeatWeight 同一口径，
-       * 只是计数口径由 weightDivBy 决定（'enchanted' = 本局附魔数，'owned' = 已获得份数）。
-       * C37 虚空铭文用它（2026-10 用户口径「与终焉烙印类似，0.88^n，n 为附魔数」）：
+       * 只是计数口径由 weightDivBy 决定（'enchanted' = 虚空附魔数，'enchantedBy' = 自己附魔数，
+       * 'owned' = 已获得份数）。C37 虚空铭文用它（2026-10 用户口径「与终焉烙印类似，0.88^n，n 为附魔数」）：
        * n=1 → 0.88、n=3 → 0.68，比原来的 ÷(n+1)（0.5 / 0.25）平缓得多。 */
       const decay = Number(b.mods.weightDecay);
       if (decay > 0 && decay < 1) m *= Math.pow(decay, n);
@@ -3553,8 +5232,12 @@
     const pool = D().shopPool || D().endlessPool, slots = [], taken = new Set();
     /* 传 run：把「时来运转」（E12）的刷新加速算进这一页的稀有度倾斜里。 */
     const baseTier = D().rawTierWeights(D().rerollTilt(paid || 0, run), run);
+    /* 货架件数**按层分档**（【D2b】100 层循环）：1-20 层 5 件 → 21-40 层 4 件 →
+     * 41-100 层 3 件 → 第 101 层回到 5 件。挑战塔不走这里（它没有商店）。
+     * 以前这里恒读 D().SHOP.slots（5），所以分档只有改在这里才真正生效。 */
+    const shelf = Math.max(1, Math.floor(Number(D().endlessShopSlots(run && run.layer)) || D().SHOP.slots || 5));
     let pitySlot = -1;
-    for (let i = 0; i < D().SHOP.slots; i++) {
+    for (let i = 0; i < shelf; i++) {
       const candidates = pool.filter((b) => !taken.has(b.id) && ownable(run, b) && poolFilter(run, b));
       if (!candidates.length) break;
       /* 一格抽取：动态档位权重（个体降权缩小整档预算）+ 传奇保底。 */
@@ -3601,6 +5284,9 @@
   function shopState() {
     const run = endless().run;
     if (!run || !run.shop) return null;
+    /* 【100 层循环】整百层（x00）不该有任何店：老档 / 极端路径上如果还挂着一家，
+     * 这里直接当没有 —— 界面就不会画出卖不掉的货架。 */
+    if (D().layerNoShop(run.layer)) return null;
     /* 铸币商店（run.shop.mint）与试炼商店共用这一份快照，界面按 `mint` 分流：
      *   · 铸币商店：`slots[].price` 的单位是**铸币**（按稀有度固定，不吃折扣），另有 swapAllowed；
      *   · 试炼商店：`slots[].price` 的单位是试炼币（含 E01/E04 折扣）。
@@ -3735,6 +5421,23 @@
   function addShopSpend(run, amount, flags) {
     const spend = Math.max(0, Number(amount) || 0);
     if (!(spend > 0)) return null;
+    /* 【巡逻·收缴加成】玩家此前把「挥金如土」交给过巡逻魔王 → 玩家在试炼商店消费时，
+     * **魔王**按同一套分段吃成长（用户口径：按离开玩家时的增益生效）。
+     * 记在 run.patrolFoeGain 上，x0 层那只魔王在复制玩家面板之后再叠这一份。 */
+    if (run && run.patrolShopGift && Number(run.patrolShopGift.step) > 0) {
+      const gift = run.patrolShopGift;
+      run.patrolShopSpend = Math.max(0, Number(run.patrolShopSpend) || 0) + spend;
+      run.patrolFoeGain = Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, run.patrolFoeGain || {});
+      const opts = ['power', 'agility', 'speed', 'hp'];
+      let guard = 0;
+      while (run.patrolShopSpend >= Math.max(1, Number(gift.step) || 5) && guard++ < 100000) {
+        run.patrolShopSpend -= Math.max(1, Number(gift.step) || 5);
+        const key = opts[Math.floor(Math.random() * opts.length)];
+        run.patrolFoeGain[key] += key === 'hp'
+          ? Math.max(0, Number(gift.hp) || 5)
+          : Math.max(0, Number(gift.stat) || 1);
+      }
+    }
     /* 兼容旧调用口径：`assumeOwned` = 「这一笔也要算给 C36」（买 C36 本身时）。 */
     const c36Rows = (run.permanent || []).filter((b) => b && b.id === 'C36');
     const c58Rows = (run.permanent || []).filter((b) => b && b.id === 'C58');
@@ -3846,11 +5549,13 @@
     const price = D().SHOP.retryPrice;
     if (run.coins < price) return { ok: false, msg: '试炼币不足。' };
     run.coins -= price;
-    addShopSpend(run, price);                               // 挥金如土：消费也算
+    /* 挥金如土（C36）/ 豪掷千金（C58）：买铸币同样是「在试炼商店消费」，要把结果交回界面提示
+     *（2026-10 第八十一批：机制一直在算，但界面从没说过，玩家实测「买铸币好像不触发」）。 */
+    const spend = addShopSpend(run, price);
     run.shop.retrySold = true;
     run.retryToken = Math.max(0, Number(run.retryToken) || 0) + 1;
     save();
-    return { ok: true, left: run.retryToken, price };
+    return { ok: true, left: run.retryToken, price: price, shopSpend: spend };
   }
   function rerollShop() {
     const run = endless().run;
@@ -3861,10 +5566,11 @@
     const free = !!shop.rerollFree;
     const raw = D().rerollPriceAt(Number(shop.rerollCount) || 0);
     const price = free ? 0 : shopDiscountApply(run, raw);
+    let spend = null;
     if (!free) {
       if (run.coins < price) return { ok: false, msg: '试炼币不足（本次刷新需要 ' + price + ' 币）。' };
       run.coins -= price;
-      addShopSpend(run, price);
+      spend = addShopSpend(run, price);                     // 刷新也是「在试炼商店消费」
     }
     shop.rerollFree = false;
     shop.rerollCount = (Number(shop.rerollCount) || 0) + 1;
@@ -3873,7 +5579,9 @@
     /* 讨价还价（E14）：**每一页都重新触发** —— 按这家店记下的 halfPerPage 给新货架再打一遍。 */
     applyShopHalfCount(shop.slots, shop.halfPerPage);
     save();
-    return { ok: true, paid: price, expect: D().rerollExpectation(price), nextPrice: D().rerollPriceAt(shop.rerollCount) };
+    /* 期望值按**这一页真实件数**算（第 41 层起货架只有 3 件，不能再按 5 报）。 */
+    return { ok: true, paid: price, expect: D().rerollExpectation(price, run, shop.slots.length),
+      nextPrice: D().rerollPriceAt(shop.rerollCount), shopSpend: spend };
   }
   /** 某一格的实际价格（试炼币）：进店时摇出的原价 → 讨价还价对折（向下取整）→ 店铺折扣。
    *  `slot.half` 由 applyShopHalf 在**进店那一刻**打上，界面据此显示「对折（原价 X）」。 */
@@ -3949,11 +5657,16 @@
     return { ok: false, msg: '本局没有这个增益。' };
   }
   /** 卖出价：默认按「全部栏位的总层数」算；传入 stacks 时按**单个栏位**算。
-   *  【2026-10 同名逐条】传入 `row` 时，C25 的累计加价只算**这一栏自己的** `row.grow.sellBonus`。 */
+   *  【2026-10 同名逐条】传入 `row` 时，C25 的累计加价只算**这一栏自己的** `row.grow.sellBonus`。
+   *  【2026-10 用户口径】回收乘数按**类型**分：限次件 30%（`SHOP.sellBackLimited`），
+   *  永久件维持 40%（`SHOP.sellBack`）—— 限次件是临时收益，按永久件的价回收偏便宜。 */
   function sellPriceOf(run, buff, stacks, row) {
+    const sellBack = buff.kind === 'limited'
+      ? (D().SHOP.sellBackLimited != null ? D().SHOP.sellBackLimited : D().SHOP.sellBack)
+      : D().SHOP.sellBack;
     const base = buff.mods && buff.mods.sellValue
       ? Number(buff.mods.sellValue)
-      : Math.max(1, Math.round(D().shopPrice(buff) * D().SHOP.sellBack));
+      : Math.max(1, Math.round(D().shopPrice(buff) * sellBack));
     const n = Math.max(1, Math.floor(Number(stacks != null ? stacks : stacksOf(run, buff.id)) || 1));
     const bonus = (row && growOf(row, 'sellBonus') > 0) ? growOf(row, 'sellBonus') : Math.max(0, Number(run.sellBonus) || 0);
     const unit = (buff.id === 'C25' && (row ? true : stacksOf(run, 'C25') > 0))
@@ -3987,8 +5700,19 @@
     const run = endless().run;
     if (!run || !run.choices) return { ok: false, msg: '只有休整点（每层第 3 场后）能开休整商店。' };
     if (run.restShopUsed) return { ok: false, msg: '本层的休整商店已经用过了。' };
+    /* 【100 层循环】整百层不开任何商店（见 makeShop 的守卫）——
+     * 判在**扣 restShopUsed 之前**：店没开成就不该把这一层的名额吃掉。 */
+    if (D().layerNoShop(run.layer)) return { ok: false, msg: '整百层（觐见魔王）不开商店。' };
     run.restShopUsed = true;
-    run.shop = makeShop(run);
+    /* 【2026-10 修复】休整商店同样要把「当前开着的立即进货（E01）」的折扣算进去 ——
+     * 它与「打完这场再开的那家店」是**同一个折扣口径**，只是入口不同。
+     * 以前这里不传 e01Pct：于是手上同时有 E04 steam大促 与 E01 时，
+     * 休整商店会先按 E04 的 −30% 结算，**并且把 E04 的份数与比例一起清零**
+     *（makeShop 的 `stacks > 0` 分支）→ 之后 E01 真正开出来的那家店只剩 −30%（7 折），
+     * 用户在「立即进货 ＋ steam大促」下永远看不到 3.5 折。
+     * 传了 e01Pct 之后，这里就会走合并分支（−65%），并且 E04 的份数**不会被这里吃掉**，
+     * 收摊时由 closeShop 统一清。 */
+    run.shop = makeShop(run, activeShopCredit(run));
     run.shop.rest = true;
     run.phase = 'shop';
     save();
@@ -3998,6 +5722,14 @@
     /* 关店只结束「这家店的折扣」，不该把**还没用掉的份数**一起清掉
      * （那是玩家花钱买的，下一家店还要用）。 */
     { const r = endless().run; if (r && r.shop) r.shop.discount = false; }
+    /* 【2026-10 修复】E04 的份数在「合并店」里故意留到最后，这里收摊时必须清干净：
+     * 合并店已经按 −65% 结算过了，再留着就会把这段高折扣漏给下一家店。
+     * 判据用店上的 `combinedCoupon` 标记（别靠 discountPct 反推，将来可能出现更强的单张券）。 */
+    { const r = endless().run;
+      if (r && r.shop && r.shop.combinedCoupon === true) {
+        r.shopDiscount = Math.max(0, Math.floor(Number(r.shopDiscount) || 0) - 1);
+        if (r.shopDiscount <= 0) r.shopDiscountPct = 0;
+      } }
     const run = endless().run;
     if (!run || run.phase !== 'shop') return { ok: false };
     /* 去向按**这家店是怎么开的**决定，而不是按层数：
@@ -4145,6 +5877,9 @@
    *                （见 closeMintShop / leaveMintShop）。 */
   function openMintShop(run, layer, opts) {
     const o = opts || {};
+    /* 【100 层循环】整百层不开任何商店 —— 铸币商店同样让位（debug 手开的也拦住：
+     * 「这一层不开店」在调试台里也该成立，免得测出来的节奏与实战不一致）。 */
+    if (D().layerNoShop(run && run.layer)) return null;
     if (!o.debug && !o.noGroup) run.mintGroup = D().mintGroupOf(layer);
     run.shop = makeMintShop(run, layer);
     if (o.byBuff) run.shop.byBuff = true;
@@ -4221,7 +5956,7 @@
       run.permSlotIds = (run.permSlotIds || []).filter((x) => x !== id);
     }
     /* 选取型（隐藏型已被 swapMintBuff 挡下，这里只是兜底）：清掉附魔登记与待选状态。 */
-    if (m.pickWeaponPct || m.pickSkillPct || m.pickPermanentFree) {
+    if (m.pickWeaponPct || m.pickSkillPct || m.pickPermanentFree || m.pickPermanentMul || m.pickBrandBreak || m.pickLimitedUses) {
       run.pickBuffIds = (run.pickBuffIds || []).filter((x) => x !== id);
       dropPickBoost(run, id);
       if (run.pendingPick && run.pendingPick.buffId === id) run.pendingPick = null;
@@ -4361,6 +6096,13 @@
   function advancePastBoundaryShop(run) {
     if (needPermSacrifice(run.layer) && (run.permanent || []).length) {
       run.phase = 'sacrifice';
+      /* 【U18c】用户口径：「20 层结束、离开商店之后，进行 buff 的献祭**之前**」——
+       * 也就是说这里要先播剧情（石门天平倾斜 → 苍老的声音），播完才弹献祭窗。
+       * 直接把 `run.story` 挂上：界面下一次重画就进剧情模式（`pendingStory` 里 `run.story` 优先级最高），
+       * 所以「一离开商店就弹献祭窗」这件事不会抢在剧情前面 —— 献祭窗由 `phase === 'sacrifice'`
+       * 驱动，而剧情模式那一屏**不渲染任何局内 UI**，自然也不会弹它。
+       * 第一次走 `gate20b`（天平·珍宝），之后每 10 层从 offer1~5 里随机一段。 */
+      noteSacrificeStory(run);
       save();
       return { ok: true, phase: 'sacrifice', layer: run.layer };
     }
@@ -4375,10 +6117,78 @@
     run.shop = null;
     return advancePastBoundaryShop(run);
   }
-  /** 是否需要在「刚清完这一层」时放弃一个永久增益（20 起每 10 层）。 */
+
+  /* ============================================================
+   * 【U20】镜中世界 —— 整百层「觐见魔王」之后固定掉落的「照影之境」
+   *
+   * 用户口径 2026-10：
+   *   ① 打赢第 100 / 200 / 300… 层的魔王 → **固定掉落**这一件（不是随机三选一）；
+   *   ② 拾取时不是「点一下进背包」：卡片留在原位，整屏（卡片之外）先慢慢变纯白，
+   *      再连卡片一起慢慢变纯黑，然后较快地从黑回到游戏界面（动画在界面侧，见 tower-ui）；
+   *   ③ 回到界面时它挂在**永久增益的最前面**、介绍是 `？？？`，右下角是「继续挑战」
+   *      而不是「进入商店」；点它会问「无尽之塔中的魔王已被击败，继续在镜中世界进行挑战吗？」，
+   *      选是才进第 101 层（与层数有关的机制回到第 1 层的样子，敌人数值继续按公式长）；
+   *   ④ 此后每过 100 层再叠一层。
+   * ============================================================ */
+  /** 照影之境当前叠了几层（没有就是 0）。 */
+  function mirrorStacks(run) {
+    const row = ((run && run.permanent) || []).find((b) => b && b.id === D().MIRROR.id);
+    return row ? Math.max(1, Math.floor(Number(row.stacks) || 1)) : 0;
+  }
+  /** 这一局的整百层拾取还没做吗（界面据此渲染拾取屏）。 */
+  function mirrorPickupPending(run) {
+    if (!run || run.phase !== 'mirror') return false;
+    return Math.floor(Number(run.mirrorTaken) || 0) !== Math.floor(Number(run.layer) || 0);
+  }
+  /** 【U20】拾取「照影之境」：第一次新增一行（放在永久表**最前面**），之后每次 +1 层。
+   *  ⚠ 不走 `addBuff`：那一条会走「永久位不够 → 让玩家换掉一个」的流程，
+   *  而这一件是剧情固定获得的、**不占永久位**（见 permUsed 的说明），也不该被替换掉。 */
+  function takeMirrorReward() {
+    const run = endless().run;
+    if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
+    if (run.phase !== 'mirror') return { ok: false, msg: '现在没有可以拾取的东西。' };
+    if (!mirrorPickupPending(run)) return { ok: false, msg: '这一份已经拾取过了。' };
+    const id = D().MIRROR.id;
+    const def = D().BUFF_BY_ID[id];
+    let first = false, row = (run.permanent || []).find((b) => b && b.id === id);
+    if (row) {
+      row.stacks = Math.max(1, Math.floor(Number(row.stacks) || 1)) + 1;
+    } else {
+      first = true;
+      row = { id: id, stacks: 1, at: nextAcqSeq(run), uid: nextUid(run) };
+      /* 插在**最前面**：用户口径「buff 永久增益的最前面就是它」。
+       * 顺序最终由界面的 orderPermanent 决定（story 件永远排最前），这里也按同一口径摆。 */
+      run.permanent = [row].concat(run.permanent || []);
+    }
+    run.mirrorTaken = Math.max(1, Math.floor(Number(run.layer) || 1));
+    logBuff(run, id, 'get', { detail: (def ? def.name : id) + ' 第 ' + row.stacks + ' 层' });
+    save();
+    return { ok: true, id: id, name: def ? def.name : id, stacks: row.stacks, first: first };
+  }
+  /** 【U20】「继续挑战」→ 是：进下一层（第 101 / 201 / 301… 层）。
+   *  与层数有关的机制重置成第 1 层的样子由 `advanceLayer` 自己负责（轮次切换那一段），
+   *  敌人数值继续按公式增长。 */
+  function enterMirrorWorld() {
+    const run = endless().run;
+    if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
+    if (run.phase !== 'mirror') return { ok: false, msg: '现在不在镜中世界的入口。' };
+    if (mirrorPickupPending(run)) return { ok: false, msg: '先把这一件拾取了。' };
+    run.phase = null;
+    delete run.mirrorTaken;
+    advanceLayer(run, 'endless');
+    save();
+    return { ok: true, layer: run.layer, stacks: mirrorStacks(run) };
+  }
+  /** 是否需要在「刚清完这一层」时放弃一个永久增益（**轮内第 20 层起、每 10 层一次**）。
+   *  【100 层循环】门槛一律比**轮内层号**（`cycleLayer`）：第 1 轮 20/30/…/100 层要交，
+   *  第 2 轮则是 120/130/…/200 层（不是 110）；第 3 轮 220/230/… 同理。
+   *  ⚠ `n >= 20` 若不换成轮内层号，第 110 / 210 层（轮内第 10 层）会被误判成「要交增益」——
+   *  这与第 10 层不一致，破坏「层号 → 机制」每轮严格对应的口径（回归用例会抓到）。
+   *  ⚠ 另一个坑：块注释里别写「两个星号 + 加粗 + 紧跟一个斜杠」那种写法 ——
+   *  星号斜杠会**提前关闭注释**，剩下的文字变成代码 → 整份文件语法错误（本行注释踩过一次）。 */
   function needPermSacrifice(layer) {
     const n = Math.max(0, Math.floor(Number(layer) || 0));
-    return n >= 20 && n % 10 === 0;
+    return D().cycleLayer(n) >= 20 && n % 10 === 0 && D().sacrificeAllowed(n);
   }
   /** 本局可被放弃的永久增益（隐藏型本来就不占槽，不算）。 */
   function sacrificeCandidates(run) {
@@ -4416,16 +6226,27 @@
     run.lastSacrifice = { id: id, name: pick.buff.name, layer: run.layer };
     run.phase = null;
     advanceLayer(run, 'endless');
+    /* 【U18c】献祭完成之后那一段（天平恢复平衡、石门开启）—— 只播一次，
+     * 挂在进第 21 层之前；下一次进层不会有别的入场剧情盖掉它（21 层不在层号表里）。 */
+    noteSacrificeDoneStory(run);
     const lost = applyBrokenMarkLoss(run);
     save();
     return { ok: true, sacrificed: log, lostMark: lost, layer: run.layer };
   }
   function applyBrokenMarkLoss(run) {
+    /* 【100 层循环】「30 层之后每 2 层随机丢掉一条烙印」按**轮内层号**判（用户口径 2026-10：
+     * 「随机丢烙印也到原来的层数 +100 层再开始随机丢」）——
+     * 第 1 轮：32 / 34 / … / 100 层；第 2 轮：**132** 起（101~131 层不丢），以此类推。
+     * ⚠ 别再写成绝对层号 `layer > 30 && layer % 2 === 0`：那样 102 / 104… 层就会开始丢，
+     * 与第 1 轮的映射对不上。判据统一走 TowerData.canBrandLoss。 */
+    if (!D().canBrandLoss(run && run.layer)) return null;
     const layer = Math.max(0, Math.floor(Number(run && run.layer) || 0));
-    if (!(layer > 30 && layer % 2 === 0)) return null;
     const lost = loseRandomBrokenMark(run);
     if (!lost) return null;
     run.lostMarks = (run.lostMarks || []).concat([{ layer: layer, label: lost.label }]).slice(-20);
+    /* 【U18c】第一次被塔夺走烙印：挂上 `layer31` 那一段（并让提示窗停留久一点）。
+     * 顺序是「先提示、后剧情」—— pendingStory 不会顶掉提示窗，界面在提示点掉之后再播。 */
+    noteFirstMarkLostStory(run);
     return lost;
   }
   /** 商店里的「结算」：等于结算点离场（抽奖卷入包、分数入账）。 */
@@ -4492,14 +6313,16 @@
         debuffs: (t.run.debuffs || []).slice(),
         /* 环境词缀：挑战塔与无尽塔共用同一套环境（第 5 层起层内可能出现），
          * 主界面要把它画出来（与无尽塔同一个 envPanelHtml），所以这里必须一起给出，
-         * 并且带上「本层摇到的实际数值」与渲染好的文案。 */
+         * 并且带上「本层摇到的实际数值」与渲染好的文案。
+         * 挑战塔按 'tower' 口径渲染：贪婪裂隙那边显示成「厚甲裂隙」，不带试炼币那一档。 */
         env: (t.run.env || []).map((x) => {
-          const def = D().ENDLESS_ENV_BY_ID[x.id] || { id: x.id, name: x.id, desc: '' };
+          const raw = D().ENDLESS_ENV_BY_ID[x.id] || { id: x.id, name: x.id, desc: '' };
+          const def = D().envDefFor(raw, 'tower');
           const values = envValues(t.run, x);
-          const text = D().envText(def, values);
+          const text = D().envText(raw, values, 'tower');
           return Object.assign({}, def, {
             left: x.left, values: values, text: text.text,
-            rangeText: D().envRangeText(def), mech: !!def.mech,
+            rangeText: D().envRangeText(raw, 'tower'), mech: !!def.mech,
           });
         }),
         lastMaxHp: Math.max(0, Number(t.run.lastMaxHp) || 0),
@@ -4514,6 +6337,12 @@
     return { best: e.best, weekBest: e.weekBest, bestLayer: e.bestLayer,
       tickets: S().props[TICKET_PROP] || 0,
       run: e.run ? { layer: e.run.layer, score: e.run.score, coins: e.run.coins, carry: e.run.carry,
+        /* 【U18】待播剧情 id（没有就是 null）—— 界面据此决定要不要进剧情展示模式。
+         * `pendingStoryId` 是**延迟一步**的那类：第一次失去烙印时先让「碎掉的烙印失效」
+         * 提示窗停留一下，提示点掉之后界面再播它（见 noteFirstMarkLostStory）。 */
+        story: e.run.story || null,
+        pendingStoryId: e.run.pendingStory || null,
+        pendingStoryHold: e.run.pendingStoryHold === true,
         /* 上一场战斗赚到的试炼币（主界面右上角标在「试炼币」旁边）+ 那一场的乘区明细。 */
         lastCoinsGained: Math.max(0, Math.floor(Number(e.run.lastCoinsGained) || 0)),
         lastCoinBreak: e.run.lastCoinBreak ? Object.assign({}, e.run.lastCoinBreak,
@@ -4522,6 +6351,11 @@
         coinBase: D().coinBattleBase(e.run.layer),
         coinBand: D().coinBattleTierLabel(e.run.layer),
         battleNo: e.run.idx + 1, battleCount: e.run.plan.length, phase: e.run.phase,
+        /* 【U20】整百层「镜中世界」：拾取屏要不要出（`mirrorPending`）、这一份是不是已经拾取了
+         *（`mirrorTaken`，界面据此把右下角写成「继续挑战」）、照影之境当前叠了几层。 */
+        mirrorPending: mirrorPickupPending(e.run),
+        mirrorTaken: Math.floor(Number(e.run.mirrorTaken) || 0) === Math.floor(Number(e.run.layer) || 0),
+        mirrorStacks: mirrorStacks(e.run),
       debuffs: (e.run.debuffs || []).slice(),
         choices: e.run.choices ? e.run.choices.slice() : null,
         next: e.run.plan[e.run.idx] ? Object.assign({ kind: e.run.plan[e.run.idx].kind }, entryInfo(e.run.plan[e.run.idx], e.run.layer, e.run.idx === e.run.plan.length - 1)) : null,
@@ -4536,6 +6370,16 @@
         restShopUsed: !!e.run.restShopUsed,
         /* 当前这一家在店里等着的店是不是铸币商店（首页的按钮文案要分开写）。 */
         mintShop: !!(e.run.shop && e.run.shop.mint),
+        /* 【U18】这家店是不是「立即进货 / 铸币商队」这类增益开的（剧情要用：铃声那段），
+         * 以及这家店的剧情是不是已经播过（同一家店不再重复打断）。 */
+        shopByBuff: !!(e.run.shop && e.run.shop.byBuff),
+        shopStoryShown: !!(e.run.shop && e.run.shop.storyShown),
+        /* 这家店摇到的随机商人文案（同一次相遇里必须一直用这一段，见 setShopStoryPick）。 */
+        shopStoryPick: (e.run.shop && e.run.shop.storyPick) || null,
+        /* 这一屏是不是真的有**店对象**（`shop.storyShown` 记在它身上）——
+         * tower-plot 的随机商人文案要靠它兜底：没有店就记不上「这家店讲过了」，
+         * 那样同一段会被无限重播（见 pendingStoryOf 第 ③ 条）。 */
+        hasShop: !!e.run.shop,
         /* 讨价还价（E14）：攒着还没兑现的「对折份数」（下一家店每份一件随机商品对折）。 */
         shopHalfPending: Math.max(0, Math.floor(Number(e.run.shopHalfPending) || 0)),
         pendingPick: e.run.pendingPick || null,
@@ -4575,7 +6419,19 @@
         retryToken: Math.max(0, Math.floor(Number(e.run.retryToken) || 0)),
         ticketsIfSettle: D().endlessTickets(e.run.layer),
         ticketsOnExit: D().endlessTickets(e.run.layer)
-          + Math.max(0, Math.floor(Number(e.run.retryToken) || 0)) } : null };
+          + Math.max(0, Math.floor(Number(e.run.retryToken) || 0)),
+        /* 【D2b】当前这一层敌人的**成长倍率**（用户口径 2026-10：要看得见才调得动）：
+         * 段位倍率 × 深度倍率 + 目标等级，三个数各自给出来（界面拼成一行）。
+         * 与 buildFoe 用的是同一批函数，不另立一套口径。 */
+        scale: D().endlessScaleParts(e.run.layer),
+        /* 注：曾有一个 `modsOn`（「这一层还吃不吃环境 / 丢烙印 / 放弃增益」）字段。
+         * 第八十六批起这三条按 100 层一轮走、**恒为成立**，该字段再无判别力，
+         * 已删掉（免得下一个人以为「101 层起不合格」）。 */
+        /* 商店每页件数 / 战斗选项扣减（界面写「本层商店 3 件」这类文案要用）。 */
+        shopSlots: D().endlessShopSlots(e.run.layer),
+        choiceCut: D().choiceCut(e.run.layer),
+        choicesPerBattle: choiceSlotsOf(e.run),
+        noShop: !!D().layerNoShop(e.run.layer) } : null };
   }
   function progressOf(run, id, row) {
     const g = globalMul(run);
@@ -4718,8 +6574,11 @@
     const add = (entry) => {
       const buff = entry && D().BUFF_BY_ID[entry.id];
       /* 查不到定义的条目进不来：normalizeRun 的 cleanBuffs 已经先过滤过一遍
-       * （只有 BUFF_BY_ID 里存在的 id 才会留在 permanent / limited 里）。 */
-      if (!buff || D().hasTag(buff, 'hidden')) return;   // 隐藏型（背包/选取类）不进增益面板
+       * （只有 BUFF_BY_ID 里存在的 id 才会留在 permanent / limited 里）。
+       * 【U20】例外：**剧情件**（`story` 标签，例：照影之境）虽然带 `hidden`
+       *（不可出售、不可献祭、不进随机池），但**必须进增益面板** ——
+       * 用户口径：拾取之后它就挂在「永久增益」的最前面。 */
+      if (!buff || (D().hasTag(buff, 'hidden') && !D().hasTag(buff, 'story'))) return;   // 隐藏型（背包/选取类）不进增益面板
       out.push({ id: buff.id, name: buff.name, desc: D().descOf(buff, mode), rarity: buff.rarity, kind: buff.kind,        scopeName: scopeName[buff.kind], stacks: entry.stacks || 1,
         progress: progressOf(run, buff.id, entry),
         uses: buff.kind === 'limited' ? entry.uses : undefined,
@@ -4730,6 +6589,9 @@
         at: Math.max(0, Math.floor(Number(entry.at) || 0)),
         /* 【任务2】逐条判断：同名件里只有被附魔的那一条显示「不占位」。 */
         slotFree: rowFreeOf(entry), uid: entry.uid,
+        /* 【2026-10 第七十三批】附魔详情也带给界面：水晶铭文（enchMul > 1 → 红色外框）与
+         * 虚空铭文（slotFree → 青色外框）要能分别画、也能同时画（一半红一半蓝）。 */
+        enchMul: rowEnchMulOf(entry), enchants: rowEnchantsOf(entry).slice(),
         sellable: !!run.shop && buff.kind !== 'instant' && !D().hasTag(buff, 'hidden'),
         sellPrice: sellPriceOf(run, buff, entry.stacks || 1, entry) });
     };
@@ -4758,9 +6620,16 @@
     }).map((x) => x.b);
   }
   /** 商店「出售增益 / 免费交换」那一列要用的列表：本局手上的永久 + 限次，按上面的口径排好
-   *  （最新拿到的在最上，虚空铭文附魔的沉到最后）。 */
+   *  （最新拿到的在最上，虚空铭文附魔的沉到最后）。
+   *  【U20】剧情件（照影之境这类 `story` 标签的）**不进这一列**：它不是构筑的一部分，
+   *  是整百层固定发的剧情奖励（`sellBuff` 那边也挡着 hidden，但列表里挂一颗点了没反应的
+   *  「卖出」按钮更糟 —— 所以源头就不要列出来）。 */
   function sellListOf(mode) {
-    return sortForSell(ownedBuffs(mode === 'tower' ? 'tower' : 'endless').filter((b) => b.kind !== 'instant'));
+    return sortForSell(ownedBuffs(mode === 'tower' ? 'tower' : 'endless').filter((b) => {
+      if (b.kind === 'instant') return false;
+      const def = D().BUFF_BY_ID[b.id];
+      return !(def && D().hasTag(def, 'story'));
+    }));
   }
 
   /* ============================================================
@@ -4783,8 +6652,47 @@
     e.run.finished = null;
     /* 挪层 = 换层：三侠削弱是「贯穿本层」的，跟着一起清（与 advanceLayer 同一口径）。 */
     e.run.debuffs = [];
+    /* 【U18c】剧情也要跟着换层 —— 这一步是用户实测报出来的坑：
+     * 上一层的待播剧情若不清掉，会**跟着你跳到任何一层去重播**，
+     * 表现为「同样的文案在第 20 / 30 / 40 层反复出现」。
+     * ⚠ 只清「待播」这一类**本局内**的状态（run 上的 story / pendingStory / x00stage），
+     *   **不动** `endless().storySeen`（跨局「只播一次」的记账）——
+     *   所以跳层不会让已经看过的剧情重播，也不会伪造「已经看过」，
+     *   剧情计数与正常爬塔完全一致。 */
+    clearRunStory('endless');
+    e.run.x00stage = 0;
+    /* 【U20b】整百层那两段的进度也跟着归零：挪到 100 层就**重新讲一遍**王庭 →
+     * 第一近卫（用户口径：调试台挪回来也要看得到，不能因为以前看过就吞掉）。 */
+    e.run.x00PreNo = 0;
+    /* 巡视同理：换一层就是**新的偶遇**（可以再讲一段），但段号 `patrolMeetNo` 留着 ——
+     * 它是「这一局讲到第几段」的进度，跳来跳去不该把它打回去（想从头看用 `_debugResetStory`）。 */
+    delete e.run.patrolStoryAt;
+    /* 【U18c】挪层也照常触发剧情（用户口径：debug 也要能正常用）——
+     * 挪到 20 层就直接播第 20 层那段，跟真爬上去一样。 */
+    autoPlayStory(e.run);
     save();
     return { ok: true, layer };
+  }
+  /** 【U18c】调试台：把剧情进度清空（`endless().storySeen` 全部忘掉）——
+   *  想「像第一次爬塔那样」把剧情从头看一遍时用它。与「挪层」分开，
+   *  因为挪层**不该**影响剧情计数（用户口径 2026-10）。 */
+  function debugResetStory() {
+    const e = endless();
+    const n = Object.keys(e.storySeen || {}).length;
+    e.storySeen = {};
+    if (e.run) {
+      clearRunStory('endless');
+      e.run.x00stage = 0;
+      /* 【U20b】整百层那两段的进度也归零 —— 「清空剧情进度」之后从 100 层再看一遍时，
+       * 王庭 / 第一近卫要能重新播（它们按**每次到达整百层**判，不靠 seen 表）。 */
+      e.run.x00PreNo = 0;
+      /* 巡视的段号也要回到第一段 —— 否则「清空之后从头看一遍」时，
+       * 前面几段偶遇的文案已经跳过、再也补不回来。 */
+      e.run.patrolMeetNo = 0;
+      delete e.run.patrolStoryAt;
+    }
+    save();
+    return { ok: true, cleared: n };
   }
 
   /* ============================================================
@@ -4792,9 +6700,50 @@
    * ============================================================ */
   window.Tower = {
     unlocked, towerInfo, endlessInfo, preview, planInfo, ownedBuffs, bossPool, debugGrantBuff, debugLoseBuff, pickCandidates, applyPickBuff,
+    /* 【U18】剧情状态：挂待播 / 清待播 / 查「只播一次」是否播过 / 记已播 / 剧情模式开关。 */
+    setRunStory, clearRunStory, clearRunStoryHold, clearRunStoryPending, storySeen, markStorySeen, storyEnabled, setStoryEnabled,
+    markShopStoryShown, setShopStoryPick,
+    /* 剧情推进（界面播完一段后来问「还有没有下一段」）：整百层那三连战靠它连着播。 */
+    nextEntryStoryOf: () => nextEntryStory(endless().run),
+    /* 整百层「第 1 场之前」那两段讲到哪一段了（`x00BeforeFirst` 的唯一出口，tower-plot 也用它）。 */
+    x00BeforeFirstOf: () => x00BeforeFirst(endless().run),
+    /* 【U18c】进层 / 挪层时的主动触发（界面在「该播剧情」时也会叫一次，见 fight 的那道闸）。 */
+    autoPlayStory: (mode) => (mode === 'tower' ? null : autoPlayStory(endless().run)),
+    /* 【U18c】开战前的最后一道闸（无副作用查询）：现在该先播剧情吗。
+     * 界面 `fight()` 拿它决定「先播剧情、还是直接开打」。 */
+    storyPendingForBattle: (mode) => storyPendingForBattle(mode),
+    /* 【U20】整百层「镜中世界」：拾取照影之境 / 进第 101 层（界面「继续挑战」用）。 */
+    takeMirrorReward, enterMirrorWorld, mirrorStacks: () => mirrorStacks(endless().run),
+    mirrorPending: () => mirrorPickupPending(endless().run),
+    /* 【100 层循环】「这一层吃不吃某条按层机制」的唯一判据出口（界面 / 调试 / 回归共用，别再各写一份）：
+     * 全部按**轮内层号**判，于是「层号 → 机制开关」的映射每轮严格一致。 */
+    canHaveEnvOf: (layer) => D().canHaveEnv(layer),
+    canBrandLossOf: (layer) => D().canBrandLoss(layer),
+    layerModsOnOf: (layer) => D().layerModsOn(layer),
+    /* 烙印 / 铭文相关的只读查询（界面与回归都要用；poolFilter 已由 poolFilterOf 暴露过一份）。 */
+    isBrandBuff, unbrokenBrandCount, breakAllBrands,
+    /* 这一次附魔三选一是**哪张铭文**触发的（界面据此只标注「被这张附魔过」的增益）。 */
+    activeInscriptionId,
+    /* 巡逻（魔王战）：收缴流程 + 只读查询（界面与回归共用）。 */
+    patrolTollCandidates, payPatrolToll, finishPatrolToll, patrolTollRows,
+    /* 回归/调试用：直接造一只敌人、判断精英位（巡逻要用它验魔王本体）。 */
+    buildFoeOf: (mode, layer, entry, salt, isLast) => buildFoe(mode, layer, entry, salt, isLast),
+    isEliteEntryOf: (entry, layer, isLast) => isEliteEntry(entry, layer, isLast),
+    /* 巡逻收缴的判据与落点（回归用：「纯运营类不生效 / 挥金如土生效」）。 */
+    isPureOpsBuffOf: (def) => isPureOpsBuff(def),
+    /* 选取型铭文的软锁防线（界面在候选为 0 时叫它）+ 回归用。 */
+    deferPendingPick: () => parkStalePendingPick(),
+    hasPickTargetsOf: (run, kind) => hasPickTargets(run || endless().run, kind),
+    resolveDeferredPicksOf: (run) => resolveDeferredPicks(run),
+    applyPatrolTollToFoeOf: (run, foe) => applyPatrolTollToFoe(run, foe),
+    addShopSpendOf: (run, amount) => addShopSpend(run, amount),
     /* 商店出售 / 交换列表的排序（正序获得 + 附魔不占位的排最后）与排好序的列表。 */
     sortForSell, sellListOf,
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,
+    /* 结算预览（只算不改）：放弃本局 / 结算离场的弹窗用它把这一局的账摊开给玩家看。
+     * ⚠ 界面是**不带参数**调的，所以这里必须补上「默认取当前无尽塔对局」——
+     * 直接导出裸函数的话，无参调用会拿到一个空 run（layer 1 / 0 张），弹窗就全错了。 */
+    previewSettleTickets: (run) => previewSettleTickets(run || endless().run),
     pickChoice, toggleLimited, addBuff, applyInstant, openRestShop,
     shopState, buyShopSlot, buyRetryToken, buyShopHeal, rerollShop, sellBuff, closeShop, giveUp, claimShopEnterCoins,
     /* 铸币商店（战后 5% 随机小店）：买一件 / 免费交换一件 / 免费刷新一次 / 直接走人。 */
@@ -4811,6 +6760,17 @@
     /* 只读：摇一页商店货架（不改状态）。测试用它统计各增益的上架概率
      *（例如不死鸟 shopWeight 的效果），界面也可以拿来做「货架预览」。 */
     rollShopSlotsOf: (run, paid) => rollShopSlots(run || endless().run, paid),
+    /* 只读/回归：跑一次「战后环境推进」（不改其它状态），用来核「每 100 层一轮」那条规则 ——
+     * **按层号**跑，不依赖当前对局（101 层 = 新一轮第 1 层不该抽、105 层起照旧抽）。
+     * ⚠ 早期版本写成 `rollEnvAfterBattle(run || endless().run)`：那些调用点传的是普通对象，
+     * 而 endless().run 仍是第 1 层，于是「按层验」永远验不准（实测踩过）。
+     * 传 run 时仍以它为准（兼容旧调用）。 */
+    rollEnvOf: (arg) => {
+      const run = (arg && typeof arg === 'object') ? arg : { layer: Number(arg) || 1 };
+      if (!Array.isArray(run.env)) run.env = [];
+      rollEnvAfterBattle(run);
+      return run.env;
+    },
     /* 只读：某条增益现在还能不能进池（unique / repeatable / maxStacks 口径）。 */
     poolFilterOf: (run, buff) => poolFilter(run || endless().run, buff),
     /* 只读：本条增益当前还能不能获得（叠层上限口径）。 */
@@ -5018,12 +6978,17 @@
       if (!e.run) return { ok: false, msg: '当前没有无尽塔对局（先开始一局）。' };
       const layer = Math.max(1, Math.floor(Number(e.run.layer) || 1));
       e.run.shop = makeShop(e.run, 0);
+      /* 【100 层循环】整百层不开店：makeShop 返回 null，这里要判空（否则直接抛异常）。 */
+      if (!e.run.shop) return { ok: false, msg: '第 ' + layer + ' 层是整百层（觐见魔王），这一层不开商店。', layer, slots: 0 };
       e.run.shop.postBattle = true;
       e.run.phase = 'shop';
       save();
       return { ok: true, layer, slots: (e.run.shop && e.run.shop.slots.length) || 0 };
     },
     _debugSetEndlessLayer(n) { return debugSetEndlessLayer(n); },
+    /* 调试台专属：把剧情进度清空（跨局的「只播一次」记账），用于从头看一遍剧情。
+     * 与挪层分开：「挪层」只清本局的待播剧情，**不动**剧情计数（用户口径 2026-10）。 */
+    _debugResetStory: () => debugResetStory(),
     /* 调试台专属：无尽塔层数 ±1（快速爬塔）。没有对局时先开一局（落在第 1 层）；
      * 最低夹在第 1 层，挪层口径与 _debugSetEndlessLayer 完全一致。 */
     _debugShiftEndlessLayer(delta) {

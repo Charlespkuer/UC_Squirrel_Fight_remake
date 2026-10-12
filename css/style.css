@@ -38,7 +38,7 @@ body.audio-blocked .audio-hint { display: flex; }
 /* ---------- 顶部状态栏 ---------- */
 .topbar { position: absolute; top: 0; left: 0; right: 0; height: 86px; display: flex; justify-content: space-between; align-items: center; padding: 8px 20px; background: linear-gradient(180deg, rgba(40,22,6,.92), rgba(40,22,6,.55)); }
 .tb-left { display: flex; align-items: center; gap: 12px; }
-.tb-avatar { width: 68px; height: 68px; border-radius: 50%; border: 3px solid #ffb32e; background: #fff8e7 url('../images/SQ_01.png') no-repeat; background-size: 340%; background-position: 62% 8%; }
+.tb-avatar { width: 68px; height: 68px; border-radius: 50%; border: 3px solid #ffb32e; background: #fff8e7 url('../images/atlas/SQ_01.png') no-repeat; background-size: 340%; background-position: 62% 8%; }
 .tb-name { font-size: 24px; color: #ffe66d; font-weight: bold; text-shadow: 0 2px 3px #000; }
 .tb-level { color: #7cfc00; font-size: 20px; margin-left: 8px; }
 .tb-reborn { color: #ff9ff3; font-size: 16px; margin-left: 8px; }
@@ -77,7 +77,7 @@ body.audio-blocked .audio-hint { display: flex; }
 .foe-row, .ws-row, .shop-row { display: flex; align-items: center; gap: 14px; background: rgba(0,0,0,.3); border: 2px solid #6b4519; border-radius: 12px; padding: 10px 14px; }
 .foe-row.locked { opacity: .45; }
 .foe-avatar { width: 60px; height: 60px; border-radius: 50%; background: #fff8e7; border: 3px solid #ffb32e; font-size: 34px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.sq-avatar { background-image: url('../images/SQ_01.png'); background-size: 340%; background-position: 62% 8%; }
+.sq-avatar { background-image: url('../images/atlas/SQ_01.png'); background-size: 340%; background-position: 62% 8%; }
 .foe-info, .ws-info, .shop-info { flex: 1; font-size: 19px; }
 .foe-info b, .ws-info b, .shop-info b { color: #ffe66d; font-size: 21px; }
 .foe-stats { display: block; font-size: 15px; color: #bfa87f; margin-top: 3px; }

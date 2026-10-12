@@ -38,7 +38,10 @@ jobs:
           #   tools/（不进便携包）开发与验证
           LAUNCHERS="README.md"
           GAME="css js images audio"
-          SCRIPTS="index.html serve.js serve.py start-game.ps1 启动游戏.command 启动游戏.cmd 停止游戏.command 一键同步.command 一键同步.cmd 重启同步服务.cmd restart-sync.cmd cleanup-old-layout.cmd cleanup-old-layout.ps1"
+          # scripts/ 里要进便携包的白名单：双击入口 + 静态服务器 + **一键更新的执行体**
+          # （update-game.js 由 serve.js 的 /__update 调起，2026-10 修：以前漏了它，
+          #   便携包里点「一键更新」会找不到执行体）
+          SCRIPTS="index.html serve.js serve.py start-game.ps1 update-game.js 启动游戏.command 启动游戏.cmd 停止游戏.command 一键同步.command 一键同步.cmd 重启同步服务.cmd restart-sync.cmd cleanup-old-layout.cmd cleanup-old-layout.ps1"
 
           build() {          # $1 = 包名后缀（mac / win）
             name="squirrel-web-$1"
@@ -51,10 +54,14 @@ jobs:
             (cd scripts && cp -R $SCRIPTS "$out/scripts/")
             # 双机同步本体（零依赖）：入口脚本在 scripts/ 里，逻辑在 scripts/sync/ 里
             cp -R scripts/sync/sync.js scripts/sync/sync-win.ps1 scripts/sync/run-hidden.vbs "$out/scripts/sync/"
-            # 版本标识：更新界面靠 version.json 显示「本机 v?」并与远端 tag 对比
+            # 版本标识：更新界面靠 scripts/version.json 显示「本机 v?」并与远端 tag 对比
+            # （文件住在 scripts/ 里 —— 仓库与发布包同一层级，update-game.js 就按这个路径读）
             printf '{\n  "version": "%s",\n  "commit": "%s",\n  "date": "%s",\n  "note": "由 CI 写入（发布便携包时覆盖）"\n}\n' \
-              "$TAG" "${GITHUB_SHA:0:7}" "$(date -u +%Y-%m-%d)" > "$out/version.json"
+              "$TAG" "${GITHUB_SHA:0:7}" "$(date -u +%Y-%m-%d)" > "$out/scripts/version.json"
             chmod +x "$out/scripts/启动游戏.command" "$out/scripts/停止游戏.command" "$out/scripts/一键同步.command" "$out/scripts/serve.py" 2>/dev/null || true
+            # 参考素材不进便携包：images/_reference/ 只作对照（图集出处清单、新版界面截图裁切、
+            # 官方掉落图、未使用的旧图），运行时不读 —— 2026-10 images 重构时从包体里剔出去的。
+            rm -rf "$out/images/_reference"
             # Windows：.cmd 只是 ASCII 外壳（现在住在 scripts\ 里，和 start-game.ps1 同目录，
             # 双击 scripts\启动游戏.cmd 即可；根目录不再放 .cmd），真正的逻辑在 .ps1 里
             # （cmd.exe 读 .cmd 里的 UTF-8 中文会把中文注释当命令，导致服务器起不来），

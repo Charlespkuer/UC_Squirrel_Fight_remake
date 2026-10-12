@@ -83,11 +83,11 @@
     if (!url) return '<span class="icon-ph"' + (size ? ' style="width:' + size + 'px;height:' + size + 'px"' : '') + '></span>';
     return '<img class="' + (cls || 'icon') + '" src="' + url + '"' + (size ? ' style="width:' + size + 'px;height:' + size + 'px"' : '') + '>';
   }
-  function weaponIcon(id, size) { return imgTag('images/classic/icons/weapon-' + id + '.png', 'icon', size || 56); }
-  function skillIcon(id, size) { return imgTag('images/classic/icons/skill-' + id + '.png', 'icon', size || 56); }
-  function propIcon(id, size) { return imgTag('images/classic/icons/prop-' + id + '.png', 'icon', size || 56); }
+  function weaponIcon(id, size) { return imgTag('images/ui/icons/weapon/weapon-' + id + '.png', 'icon', size || 56); }
+  function skillIcon(id, size) { return imgTag('images/ui/icons/skill/skill-' + id + '.png', 'icon', size || 56); }
+  function propIcon(id, size) { return imgTag('images/ui/icons/prop/prop-' + id + '.png', 'icon', size || 56); }
   function gearIcon(g, size) {
-    return imgTag('images/classic/icons/gear-' + g.id + '.png', 'icon', size || 56);
+    return imgTag('images/ui/icons/gear/gear-' + g.id + '.png', 'icon', size || 56);
   }
   /** 首次打开装备面板时批量加载装备图标，加载完换成 canvas 缩略图（保证缩放质量一致） */
   let equipSheetAsked = false;

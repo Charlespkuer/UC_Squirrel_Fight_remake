@@ -84,6 +84,11 @@
     const span = Math.max(0, STAGE_FRAGMENT.max - STAGE_FRAGMENT.min);
     return STAGE_FRAGMENT.min + Math.floor((random ? random() : Math.random()) * (span + 1));
   }
+  /* 蓝色碎片（道具 26）掉落系数（2026-10 用户口径）：
+   * **除了碎片竞技场**（它的名次奖励 8/6/4/3 张是专属产出，不动），其它所有会掉蓝色碎片的
+   * 地方都按这个系数小幅降期望 —— 普通战斗拾取池、天梯赛拾取池、常驻挑战关卡掉落、挑战塔过关。
+   * 改这一个数就能整体调松/调紧；白/绿碎片与碎片竞技场的产出都不受影响。 */
+  const BLUE_SHARD_DROP_MUL = 0.85;
   const stageScale = (value, factor) => Math.max(1, Math.round(Number(value) * factor));
 
   /* ===== 关卡强度模型：按「推荐等级」标定 =====
@@ -307,7 +312,7 @@
   /* 天梯碎片（本项目新增，id 51）：原版数据里 51~100 是空号。
    * 依据 references/new/微信图片_20260924010916_259_2.jpg：天梯战里会飘出带「?」的金色碎片，
    * 攒够 10 个可以随机合成一个力量/敏捷/速度转化丸；恶魔果实种子也走同一条路。
-   * 图标 images/classic/icons/prop-51.png 由白色碎片改色加「?」得来。
+   * 图标 images/ui/icons/prop/prop-51.png 由白色碎片改色加「?」得来。
    * 同样只在 gamedata 里补行，GameDict.js 保持与 APK 逐字节一致。 */
   const CONVERT_SHARD_ID = 51;
   const CONVERT_SHARD_NAME = '天梯碎片';
@@ -337,6 +342,19 @@
     // 抽奖卷（id 50）：原版字典只有占位说明，无尽挑战塔正式启用后补正式文案。
     [50, '我是抽奖卷',
          '无尽挑战塔·无尽模式的战利品。每日幸运抽奖的免费次数用尽后，优先消耗1张抽奖卷再抽1次。'],
+    /* 【2026-10】js/gamedict.js 改成**按原版数据重新生成**之后（tools/gen-vendor-data.cjs），
+     * 下面四条要还原的文案就搬到这里 —— 字典保持「与 APK 逐字节一致」，玩家看到的仍是本版口径：
+     *   · 24/25 白/绿碎片的合成费用：本版按材料品质分档（白 30 / 绿 40 / 蓝 50，见 state.js），
+     *     原版说明里两条都写 50；
+     *   · 47/48 天使果实 / 恶魔果实的说明：本版用简短版（原版括号里的补充说明不采用）。 */
+    [24, '10个白色碎片可以随机合成一件普通的装备,每次合成需要消耗50金松果。',
+         '10个白色碎片可以随机合成一件普通的装备,每次合成需要消耗30金松果。'],
+    [25, '10个绿色碎片可以随机合成一件优秀的装备,每次合成需要消耗50金松果。',
+         '10个绿色碎片可以随机合成一件优秀的装备,每次合成需要消耗40金松果。'],
+    [47, '可随机获得1个新武器或技能（需保证武、技总数不超过当前可拥有上限数）,若获得已有的武器/技能则使用失败。',
+         '可随机获得1个新武器或技能,若获得已有的武器/技能则使用失败。'],
+    [48, '可随机遗忘1个旧武器或技能（若无法使用天使果实就先使用它吧）。',
+         '可随机遗忘1个旧武器或技能。'],
   ];
   function applyPropRemarkFixes() {
     const map = window.propMap;
@@ -662,7 +680,7 @@
    * 【GD6】套装收益（**本复刻版新增，原版没有**）
    * ============================================================ */
   /* 原版的 gearSetMap.setId 只决定「使用等级 / 售价 / 品质颜色 / 贴图序号」，
-   * 穿满一套**没有任何额外收益**（见 references/orig/GameDict.js 与
+   * 穿满一套**没有任何额外收益**（见原版 GameDict.js 的 gearSetMap 与
    * MainMovie.as 的 getEquips()：gather 属性时逐件相加，从不数同套件数）。
    * 所以这一整套机制是本版自己设计的，目标是：
    *   ① 让「凑齐一套同名的装备」本身成为一条追求线（现在装备只有名字/等级差异）；
@@ -802,7 +820,7 @@
   window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
     STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
     trueLevel, trueSkillValue, trueSkillRow, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
-    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
+    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, BLUE_SHARD_DROP_MUL, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
     SET_BONUS, SET_BONUS_TIER_MUL, SET_BONUS_GLOBAL_MUL, SET_BONUS_HP_MUL, SET_BONUS_FAMILY_FLOOR,
     SET_BONUS_RAW_KEYS, SET_BONUS_ATTR_KEYS, setBonusTable, setBonusTierMul, setBonusScale, setBonusText };
 })();

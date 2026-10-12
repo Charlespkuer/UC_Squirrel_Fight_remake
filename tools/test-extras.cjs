@@ -56,7 +56,7 @@ function setup() {
   };
   c.window = c;
   vm.createContext(c);
-  for (const file of ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/state.js', 'js/sim.js']) {
+  for (const file of ['js/gamedict.js', 'js/gamedata.js', 'js/state.js', 'js/sim.js']) {
     vm.runInContext(fs.readFileSync(path.join(rootDir, file), 'utf8'), c, { filename: file });
   }
   const math = vm.runInContext('Math', c);
@@ -73,7 +73,7 @@ function setup() {
       modals.push(modal); return modal;
     },
     btn: (label, action) => '<button data-action="' + action + '">' + label + '</button>',
-    icon: (kind, id) => '<img src="images/classic/icons/' + kind + '-' + id + '.png">',
+    icon: (kind, id) => '<img src="images/ui/icons/' + kind + '/' + kind + '-' + id + '.png">',
     // 升级奖励面板：这里只做最小渲染，供断言检查文本内容
     upsHtml: (ups) => (ups && ups.length)
       ? '<div class="reward-stack">' + ups.map((u) => '<div class="reward-panel">升到 ' + u.level + ' 级' +
@@ -950,6 +950,39 @@ test('日供系数：经验 5%~15%、金松果 5%~25%，均按等级之和线性
   assert.equal(s.exp, before + 150, '点击领取真的发出 150 经验（三个满级徒弟 = 昨日收益的 15%）');
   assert.equal(g.c.State.claimApprenticeExp().ok, false, '当天只能领一次');
   assertBalanced(g.markup);
+});
+
+test('徒弟日供：活动页入口与师徒页共用一条领取路径，结算面板按徒弟列份额', () => {
+  const g = setup(), s = g.c.State.state();
+  s.level = 20; s.exp = 0; s.goldPoint = 0;
+  g.c.State.addPrentice({ name: '甲徒弟', level: 40 });
+  g.c.State.addPrentice({ name: '乙徒弟', level: 20 });
+  g.c.State.gainExp(1000);
+  g.c.State.addGold(400);
+  g.advance(86400000);
+  /* 活动页那张卡读的就是 tributeStatus()：合计 = 各徒弟可领份额之和 */
+  const before = g.c.ClassicExtras.tributeStatus();
+  assert.equal(before.count, 2);
+  assert.equal(before.claimable, true, '有可领的日供');
+  const rows = before.rows.filter((r) => r.claimable);
+  assert.equal(before.exp, rows.reduce((n, r) => n + r.exp, 0), '合计经验 = 各份额之和');
+  assert.equal(before.gold, rows.reduce((n, r) => n + r.gold, 0), '合计金松果 = 各份额之和');
+  /* 领取：结算面板换成 reward-card + 每个徒弟一行明细 */
+  const exp0 = s.exp;
+  const r = g.c.ClassicExtras.claimTribute();
+  assert.equal(r.ok, true);
+  assert.equal(s.exp, exp0 + r.total, '经验真的发到手上');
+  const modal = g.modals.at(-1);
+  assert.equal(modal.title, '徒弟日供');
+  assert.match(modal.html, /reward-card/, '奖励走 reward-card 面板');
+  assert.match(modal.html, /tribute-row/, '每个徒弟列一行份额');
+  assert.ok(modal.html.includes('甲徒弟') && modal.html.includes('乙徒弟'), '两个徒弟都要列出');
+  assertBalanced(g.markup);
+  /* 领完两边同步：活动页的卡变成「今日已领取」，师徒页的按钮也不再出现 */
+  const after = g.c.ClassicExtras.tributeStatus();
+  assert.equal(after.claimable, false);
+  assert.equal(after.claimed, true, '两个徒弟都领过了');
+  assert.equal(g.c.State.claimApprenticeExp().ok, false, '同一天不会领第二次');
 });
 
 test('日供只认我自己的昨日收益：读档稳定、不重抽，也不减少徒弟经验', () => {

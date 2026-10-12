@@ -183,18 +183,37 @@
         S.quests = null; S.dailyCounters = null;   // 每日任务：进度与领取状态清空，下次打开活动页重抽
         S.masterKickDate = '';                     // 师父今天又能让一名徒弟离开
         S.challengeRefresh = { count: 0, ts: Date.now() };   // 对手刷新费用
-        for (const p of (S.prentices || [])) { p.lastExpDate = ''; p.tributeClaimedDate = ''; }   // 弟子日贡可再领
+        /* ---------- 弟子日贡（2026-10 用户口径：这一条也要一起重置） ----------
+         * 日供有两道门，**两道都要放开**，只清一道会出现「界面显示可领、实际领不到」：
+         *   ① 『今天领过了』—— 记在徒弟身上的 `lastExpDate` / `tributeClaimedDate`（清掉）；
+         *   ② 『昨天有收益可结算』—— 日供的数额取自 `earnHistory` 里**昨天**那一条，
+         *      昨天没记录（新档 / 当天刚玩）时总量恒为 0，`claimable` 永远是 false。
+         *   旧的调试按钮只做了 ①，于是昨天没收益的档重置完还是领不到日贡 —— 看起来就像没重置。
+         * 这里补上 ②：昨天没记录时，把**今天的**收益流水复制一份当成昨天，
+         * 让「重置 = 回到新的一天、日供可以再领一次」这件事真的成立。 */
+        for (const p of (S.prentices || [])) {
+          p.lastExpDate = '';
+          p.tributeClaimedDate = '';
+        }
+        if (State.ensureYesterdayEarnings) State.ensureYesterdayEarnings();
         S.lastEnergyTs = Date.now(); S.energy = S.maxEnergy;
         State.save();
         if (window.UI && UI.refreshHome) UI.refreshHome();
         if (window.UI && UI.refreshHeader) UI.refreshHeader();
-        return '已重置：每日礼包、免费抽奖、天梯次数与限兑、每日任务、弟子日贡、刷新费用、体力计时';
+        return '已重置：每日礼包、免费抽奖、天梯次数与限兑、每日任务、弟子日贡（含「昨日收益」这一道门）、刷新费用、体力计时';
       } },
     { label: '重弹「支持作者」提示', note: '把 30 级那次「自愿支持作者」的一次性提示恢复成待提示：下一次首页刷新或升级奖励处理完之后会再弹一次（正式流程只在升到 30 级时弹一次）',
       run() {
         if (!(State.supportPromptReset && State.supportPromptReset())) return '当前版本没有这个接口';
         if (window.UI && UI.classic && UI.classic.maybeSupportPrompt) UI.classic.maybeSupportPrompt();
         return '已恢复支持作者提示（若首页没有立刻弹出，回一次首页或关掉当前弹窗即可）';
+      } },
+    { label: '清空无尽塔剧情进度', note: '把「这段剧情只播一次」的记账（存档里的 storySeen）全部忘掉，清掉本局待播的那一段，并把「巡视」的段号拨回第一段 —— 想从头把无尽塔剧情再走一遍时用它。⚠「调试台挪层」本身**不会**动剧情进度，两者是分开的',
+      run() {
+        if (!(window.Tower && Tower._debugResetStory)) return '当前版本没有这个接口';
+        const r = Tower._debugResetStory();
+        if (window.UI && UI.refreshHome) UI.refreshHome();
+        return '已清空无尽塔剧情进度（忘掉 ' + (r.cleared || 0) + ' 段「已播过」的记账）';
       } },
   ];
 
@@ -657,7 +676,7 @@
       return;
     }
     const rar = (window.TowerData && TowerData.RARITY_NAME) || ['普通', '稀有', '史诗', '传奇'];
-    const KIND_LABEL = { permanent: '永久', limited: '限次', instant: '立即生效', hidden: '隐藏' };
+    const KIND_LABEL = { permanent: '永久', limited: '限次', instant: '立即生效', inscription: '铭文', hidden: '隐藏' };
     const EVENT_LABEL = { get: '获得', stack: '叠加', instant: '立即生效', expire: '用尽消失', break: '损毁', lose: '失去' };
     const EVENT_CLS = { get: 'get', stack: 'stack', instant: 'instant', expire: 'gone', break: 'broken', lose: 'gone' };
 
@@ -729,5 +748,9 @@
   window.Debug = {
     enabled, get, set, toggle, reset, numberStretch, resetAccount, grantItem, grantWS, forgetWS, MAX_LEVEL,
     open: () => togglePanel(true), close: () => togglePanel(false), togglePanel, state: () => Object.assign({}, state),
+    /* 【DBG5b】一次性工具清单（只读）：面板按它渲染按钮，回归/探针也可以用它直接跑某一条
+     * （`Debug.actions().find((a) => a.label === '重置每日与体力计时').run()`）——
+     * 与真人点按钮走的是**同一份实现**，不会出现「测试绿、点按钮不生效」那种错位。 */
+    actions: () => ACTIONS.map((a) => ({ label: a.label, note: a.note, run: a.run })),
   };
 })();

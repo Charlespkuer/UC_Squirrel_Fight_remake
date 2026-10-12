@@ -284,13 +284,37 @@
         return copy;
       };
       const tw = object(raw.tower) ? raw.tower : {};
-      next.tower = { maxLayer: Math.max(0, integer(tw.maxLayer, 0)), run: runShape(tw.run) };
+      next.tower = {
+        maxLayer: Math.max(0, integer(tw.maxLayer, 0)),
+        /* 「本层失败后免费再战一次」的标记（挑战塔）：以前这里没列它，刷新一次就白丢一次
+         *（玩家视角＝「重进游戏后那次免费重试没了」）。层号与日期都要像存档里其它进度一样留着。 */
+        retry: (object(tw.retry) && Math.floor(Number(tw.retry.layer)) >= 1)
+          ? { layer: Math.floor(Number(tw.retry.layer)), date: typeof tw.retry.date === 'string' ? tw.retry.date : '' }
+          : null,
+        run: runShape(tw.run),
+      };
       const en = object(raw.endless) ? raw.endless : {};
       next.endless = {
         best: Math.max(0, integer(en.best, 0)), weekBest: Math.max(0, integer(en.weekBest, 0)),
         weekKey: typeof en.weekKey === 'string' ? en.weekKey : '',
         bestLayer: Math.max(0, integer(en.bestLayer, 0)),
         shieldDate: typeof en.shieldDate === 'string' ? en.shieldDate : '',
+        /* 【2026-10 第一百零三批 用户报的 bug】**剧情的「只播一次」记账必须跟着存档走**。
+         * 它是**跨局**的账：第一次遇商人 / 第一次失去烙印 / 第一次遇巡视（`patrolGate`）…
+         * 以前这里是一份显式白名单，没列到的字段一律丢掉 —— 于是「无尽塔玩到一半退出游戏再重进」
+         * 之后所有「第一次」的文案都会重播一遍（用户实测：商店 / 烙印 / 巡视全变回第一次的文案）。
+         * ⚠ 以后往 `endless()` 上加字段（尤其是各种「已经播过 / 已经给过」的计数）时，
+         * **记得一起加到这里**，否则它就是「重载即清零」的易失字段。
+         * 形状只做浅校验：保留**所有** id（旧档里可能有现在已删掉的剧情名，留着无害），
+         * 丢掉非布尔的垃圾值。 */
+        storySeen: (() => {
+          const src = object(en.storySeen) ? en.storySeen : {};
+          const out = {};
+          for (const k of Object.keys(src)) if (src[k] === true || src[k] === 1) out[String(k)] = true;
+          return out;
+        })(),
+        /* 剧情 / 挑战模式的开关（默认剧情模式）：同样不能在重载后被打回默认。 */
+        storyOn: en.storyOn !== false,
         run: runShape(en.run),
       };
     }
@@ -859,6 +883,14 @@
     save();
   }
   function state() { return S; }
+  /* ---------- 「战斗操作键」的解锁等级（2026-10 用户口径） ----------
+   * 10 级解锁 2 倍速、20 级解锁跳过 —— 一开始两个都没有。
+   * 挑战塔 / 无尽塔本身要 30 级才开，所以塔里这两个键天然都在
+   *（塔的「跳过」另有一条层数门槛：无尽塔 20 层起，见 Tower.skipPlaybackAllowed）。 */
+  const SPEED_UNLOCK_LEVEL = 10;
+  const SKIP_UNLOCK_LEVEL = 20;
+  function unlockedSpeed() { return !!S && Number(S.level) >= SPEED_UNLOCK_LEVEL; }
+  function unlockedSkip() { return !!S && Number(S.level) >= SKIP_UNLOCK_LEVEL; }
 
   /* ============================================================
    * 【S4】体力（5 分钟回 1 点）
@@ -1311,27 +1343,31 @@
     return { ok: true, success: false, msg: '合成失败，宝石没有变化' };
   }
   /** 镶嵌免费；每件橙装限1颗；附加属性提升幅度随机，拆卸后重新镶嵌可重随。 */
+  /* 镶嵌 / 卸下宝石的金松果费用（2026-10 用户口径：装上与卸下**都要** 5 金松果）。 */
+  const GEM_SOCKET_COST = 5;
   function socketGem(gearKey, gemId) {
     const g = S.gears.find((x) => x.key === gearKey);
     if (!g) return { ok: false, msg: '装备不存在' };
     if (g.orange !== true) return { ok: false, msg: '只有橙色（传说）装备可以镶嵌宝石' };
-    if (g.gem) return { ok: false, msg: '每件装备最多镶嵌 1 颗宝石，请先拆卸原有宝石' };
+    if (g.gem) return { ok: false, msg: '每件装备最多镶嵌 1 颗宝石，请先卸下原有宝石' };
     const lv = gemLevel(gemId);
     if (!lv || !(S.props[gemId] > 0)) return { ok: false, msg: '没有该宝石' };
+    if (S.goldPoint < GEM_SOCKET_COST) return { ok: false, msg: '镶嵌需要 ' + GEM_SOCKET_COST + ' 金松果' };
+    S.goldPoint -= GEM_SOCKET_COST;
     S.props[gemId]--;
     g.gem = { id: Number(gemId), ext: lv * (2 + Math.floor(Math.random() * 3)) };
     save();
-    return { ok: true, msg: propMap.getValue(gemId).name + ' 镶嵌成功：主属性 +' + gemPercent(lv) + '%，附加属性效果 +' + g.gem.ext + '%' };
+    return { ok: true, msg: propMap.getValue(gemId).name + ' 镶嵌成功（−' + GEM_SOCKET_COST + ' 金松果）：主属性 +' + gemPercent(lv) + '%，附加属性效果 +' + g.gem.ext + '%' };
   }
   function unsocketGem(gearKey) {
     const g = S.gears.find((x) => x.key === gearKey);
     if (!g || !g.gem) return { ok: false, msg: '该装备没有镶嵌宝石' };
-    if (S.goldPoint < 5) return { ok: false, msg: '拆卸需要 5 金松果' };
-    S.goldPoint -= 5;
+    if (S.goldPoint < GEM_SOCKET_COST) return { ok: false, msg: '卸下需要 ' + GEM_SOCKET_COST + ' 金松果' };
+    S.goldPoint -= GEM_SOCKET_COST;
     S.props[g.gem.id] = (S.props[g.gem.id] || 0) + 1;
     delete g.gem;
     save();
-    return { ok: true, msg: '拆卸成功，宝石已放回背包' };
+    return { ok: true, msg: '已卸下宝石（−' + GEM_SOCKET_COST + ' 金松果），宝石放回背包' };
   }
 
   /* 装备合成 / 融合的金松果费用：按参与材料的品质分档。
@@ -1739,9 +1775,14 @@
   /* 体力药剂（1 = 小、2 = 大）：每天各限购 3 个。 */
   const SHOP_DAILY_ENERGY = [1, 2];
   const SHOP_ENERGY_LIMIT = 3;
+  /* 单独点名的每日限购（覆盖上面的默认值）。2026-10 用户口径：
+   * **勇气徽章（39，碎片竞技场入场券）每天 3 个**（原来落在默认的 5）。
+   * 注意道具行里最后一个字段是 useType，不是购买数量 —— 限购只认这里。 */
+  const SHOP_DAILY_LIMITS = { 39: 3 };
   function shopLimit(id) {
     const key = Number(id), prop = propMap.getValue(key);
     if (!prop) return 0;
+    if (SHOP_DAILY_LIMITS[key] != null) return SHOP_DAILY_LIMITS[key];
     if (SHOP_DAILY_PILLS.includes(key)) return SHOP_PILL_LIMIT;
     if (SHOP_DAILY_ENERGY.includes(key)) return SHOP_ENERGY_LIMIT;
     return [13, 16, 17, 18, 19, 37, 38, 47, 48].includes(key) || /宝箱|魔法袋|礼包|永久/.test(prop.name) ? 1 : 5;
@@ -2149,6 +2190,28 @@
   function earnOn(date) {
     const row = (Array.isArray(S.earnHistory) ? S.earnHistory : []).find((d) => object(d) && d.date === date);
     return { exp: row ? Math.max(0, integer(row.exp, 0)) : 0, gold: row ? Math.max(0, integer(row.gold, 0)) : 0 };
+  }
+  /** 【2026-10 用户口径】调试台「重置每日与体力计时」专用：把日供的**第二道门**也放开 ——
+   *  日供数额取自 `earnHistory` 的**昨天**那一条，昨天没有记录（新档 / 当天刚开始玩）时
+   *  总量恒为 0，`claimable` 永远是 false，于是「清掉今日已领标记」也白搭（界面仍报领不到）。
+   *  这里在「昨天那条不存在或全 0」时，把今天的收益复制一份当成昨天，让重置真的等价于
+   *  「回到新的一天、日供可以再领一次」。
+   *  · 今天也没有收益（`today.exp/gold` 都是 0）→ 什么都不做（没有东西可结算，不凭空造收益）；
+   *  · 昨天已经有非 0 记录 → 原样保留（不覆盖真实流水）；
+   *  · 只服务调试台，不入正式玩法流程（正式玩法由真实日期推进时自然产生流水）。 */
+  function ensureYesterdayEarnings() {
+    if (!S) return { seeded: false };
+    const y = yesterdayDate(), t = localDate();
+    const mine = earnOn(t);
+    if (!(mine.exp > 0 || mine.gold > 0)) return { seeded: false };
+    const prev = (Array.isArray(S.earnHistory) ? S.earnHistory : []).find((d) => object(d) && d.date === y);
+    const cur = prev ? { exp: Math.max(0, integer(prev.exp, 0)), gold: Math.max(0, integer(prev.gold, 0)) } : null;
+    if (cur && (cur.exp > 0 || cur.gold > 0)) return { seeded: false };
+    if (!Array.isArray(S.earnHistory)) S.earnHistory = [];
+    if (prev) { prev.exp = mine.exp; prev.gold = mine.gold; }
+    else S.earnHistory.push({ date: y, exp: mine.exp, gold: mine.gold });
+    S.earnHistory = S.earnHistory.slice(-EARN_DAYS);
+    return { seeded: true, date: y, exp: mine.exp, gold: mine.gold };
   }
   /** 给玩家加金松果并计入当日收益流水；opts.count === false 表示这不是「赚到的」。 */
   function addGold(n, opts) {
@@ -2615,6 +2678,31 @@
     return foe;
   }
 
+  /* ---------- 对手身上「狂战套」的出现率（2026-10 用户口径，需求164） ----------
+   * 狂战套（set 51，唯一的 **50 级套**）以前**独占「最高档」**：50 级以后
+   * 每件装备有 75% 落进那一档 → 随机对手几乎人人全身狂战。现在改成**整只对手掷一次**：
+   *   · 50 级起：10% +（等级 − 50）× 1%  →  50 级 10%、55 级 15%、60 级 20%、70 级 30%
+   *   · 50 级之前：0（那套本来就要 50 级才解锁，压根不在池子里）
+   * 命中 → 四件都穿狂战（仍然受穿戴率影响）；没命中 → 完全避开狂战，改穿次高档。
+   * 曲线只影响**随机对手**（genAI 这条路：随机挑战 / 天梯 / 竞技场 / 推荐好友）；
+   * 挑战塔的狂战敌人由 tower.js 自己造（x10 层守关），不经过这里。 */
+  const BERSERK_SET_ID = 51;
+  const BERSERK_LEVEL = 50;
+  const BERSERK_CHANCE_AT_50 = 0.10;    // 50 级：**每件装备** 10%（下限，2026-10 用户口径）
+  const BERSERK_CHANCE_AT_70 = 0.50;    // 70 级：**每件装备** 50%（用户口径）
+  const BERSERK_CHANCE_MAX = 0.80;
+  /** 某等级下**每个部位**穿到狂战件的概率（0 = 池子里根本没有这一套）。
+   *  50 级 10% → 70 级 50%，中间按等级线性（每级 +2 个百分点）。 */
+  function berserkChance(level) {
+    const lv = Math.floor(Number(level) || 0);
+    if (lv < BERSERK_LEVEL) return 0;
+    /* 按**整数百分点**算，免得出 0.30000000000000004 这种数（概率要拿去显示与断言） */
+    const span = Math.max(1, MAX_PLAYER_LEVEL - BERSERK_LEVEL);
+    const t = Math.min(1, Math.max(0, (lv - BERSERK_LEVEL) / span));
+    const pct = Math.round(BERSERK_CHANCE_AT_50 * 100 + (BERSERK_CHANCE_AT_70 * 100 - BERSERK_CHANCE_AT_50 * 100) * t);
+    return Math.min(BERSERK_CHANCE_MAX, pct / 100);
+  }
+
   /** 按等级随机穿装备：优先穿当前等级能穿的最好套装（与正常玩家成长一致），偶尔穿低一档的旧装。 */
   function randomAIGears(foeLevel, refLevel) {
     const level = Math.max(1, Math.min(foeLevel, Math.floor(refLevel || foeLevel || 1)));
@@ -2632,21 +2720,40 @@
       if (top && top.level === set.level) top.sets.push(set);
       else tiers.push({ level: set.level, sets: [set] });
     }
+    /* 狂战套**按部位**掷（2026-10 用户口径：70 级每件 50%、50 级下限 10%）：
+     * 每个部位独立判一次，命中就从「狂战那一档」里挑，没命中就从**剔除狂战之后**的档位池里挑
+     *（狂战是最高档唯一的成员，不剔掉的话没命中的部位仍有 75% 落进它，等于白压）。 */
+    const berserkPool = tiers.filter((tier) => tier.sets.some((set) => set.id === BERSERK_SET_ID));
+    const normalPool = tiers.map((tier) => ({ level: tier.level, sets: tier.sets.filter((set) => set.id !== BERSERK_SET_ID) }))
+      .filter((tier) => tier.sets.length);
+    if (!berserkPool.length && !normalPool.length) return [];
+    const pieceChance = berserkChance(level);
     const out = [];
     const usedType = new Set();
     for (let slot = 0; slot < 4; slot++) {
       if (Math.random() > wearChance) continue;
+      const useBerserk = berserkPool.length > 0 && Math.random() < pieceChance;
+      const pool = useBerserk ? berserkPool : normalPool;
+      if (!pool.length) break;
       // 75% 穿最好一档，20% 次一档，5% 随机一档旧装；同部位冲突时重选
       for (let attempt = 0; attempt < 3; attempt++) {
         const roll = Math.random();
-        const tier = roll < 0.75 ? tiers[0]
-          : roll < 0.95 ? tiers[Math.min(1, tiers.length - 1)]
-          : tiers[Math.floor(Math.random() * tiers.length)];
+        const tier = roll < 0.75 ? pool[0]
+          : roll < 0.95 ? pool[Math.min(1, pool.length - 1)]
+          : pool[Math.floor(Math.random() * pool.length)];
         const set = tier.sets[Math.floor(Math.random() * tier.sets.length)];
         const gearsOfSet = [];
         gearMap.each((k, v) => { if (parseInt(v.setId) === set.id) gearsOfSet.push(parseInt(v.id)); });
         if (!gearsOfSet.length) break;
-        const gid = gearsOfSet[Math.floor(Math.random() * gearsOfSet.length)];
+        /* 命中狂战那一档的**这一件一定给狂战件**：狂战套正好 4 件 = 4 个部位、
+         * 而身上最多 4 个部位，所以「取一件没用过的部位」必定取得到 —— 这样
+         *「每个部位 50%」才是真的 50%。若沿用「随机取件 + 同部位不重复」，
+         * 命中率会被重选吃掉约 4 成（实测 60 级 23.7%，口径要 30%），量出来跟标称对不上。 */
+        let gid = null;
+        if (useBerserk) {
+          gid = gearsOfSet.find((id) => { const it = gearInst(id); return it && !usedType.has(it.type); });
+        }
+        if (gid == null) gid = gearsOfSet[Math.floor(Math.random() * gearsOfSet.length)];
         const info = gearInst(gid);
         if (!info || usedType.has(info.type)) continue;   // 同部位不重复穿
         usedType.add(info.type);
@@ -2776,10 +2883,17 @@
       const base = 24 + Math.floor((stageId - 1) / 6);          // 24 白 / 25 绿 / 26 蓝
       const up = star >= 5 ? 2 : star >= 3 ? 1 : 0;
       const step = Math.min(base + up, 26);                     // 蓝碎片封顶
-      const id = up > 0 && Math.random() >= frag.tierUp ? step : base;
-      const count = GData.stageFragmentCount();
-      S.props[id] = (S.props[id] || 0) + count;
-      drop = { id, count, name: propMap.getValue(id).name };
+      let id = up > 0 && Math.random() >= frag.tierUp ? step : base;
+      /* 蓝色碎片（26）**除碎片竞技场外**所有掉落都小幅降期望（2026-10 用户口径）：
+       *   · 熊猫关（基础就是蓝）：这一次掉落干脆不给，白/绿本来也不在这里出；
+       *   · 仙鹤关靠「越级」拿到蓝的那一支：没中就退回绿色的 base。
+       * 只动「蓝」这一档，螳螂的白/绿基础掉落完全不变。 */
+      if (id === 26 && Math.random() >= Number(GData.BLUE_SHARD_DROP_MUL)) id = base === 26 ? 0 : base;
+      if (id) {
+        const count = GData.stageFragmentCount();
+        S.props[id] = (S.props[id] || 0) + count;
+        drop = { id, count, name: propMap.getValue(id).name };
+      }
     }
     const gold = complete ? stageReward(stageId).gold : 0;
     addGold(gold);
@@ -3125,7 +3239,7 @@
     upgradeInfo, doUpgrade, upgradeFails, UPGRADE_COIN, UPGRADE_FAIL_BONUS,
     trueAttemptsToday, trueUpgradeCost, isTrueLevel, TRUE_SKILL_MAX_LEVEL, TRUE_UPGRADE_GOLD_PER_U,
     fruitOptions, applyFruitChoice,
-    trackEarn, earnOn, addGold,
+    trackEarn, earnOn, ensureYesterdayEarnings, addGold,
     apprenticeTributeTable,
     TRIBUTE_LEVEL_SUM_FULL,
     undoPoint, undoDepth, hasUpgradableWS,
@@ -3138,6 +3252,9 @@
     pendingWS, currentWSChoices, chooseWS, chooseWSRandom,
     /* 30 级「自愿支持作者」的一次性提示（落存档，不换任何游戏内好处）。 */
     supportPromptPending, supportPromptTake, supportPromptReset, SUPPORT_LEVEL,
+    SPEED_UNLOCK_LEVEL, SKIP_UNLOCK_LEVEL, unlockedSpeed, unlockedSkip,
+    BERSERK_SET_ID, BERSERK_LEVEL, BERSERK_CHANCE_AT_50, BERSERK_CHANCE_AT_70, berserkChance,
+    GEM_SOCKET_COST,
     gainExp, consumeEnergy, tickPropStates, fightReward, revengeReward, markRevenged, REVENGE_EXP_RATIO, expBoostPct, gainExpWithBoost,
     apprenticeTributeExpRatio, apprenticeTributeGoldRatio, TRIBUTE_EXP_MIN, TRIBUTE_EXP_MAX, TRIBUTE_GOLD_MIN, TRIBUTE_GOLD_MAX,
     // 师徒

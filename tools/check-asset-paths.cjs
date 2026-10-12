@@ -29,16 +29,20 @@ function findRoot(start) {
 
 const ROOT = findRoot(__dirname);
 const SCAN_EXT = ['.html', '.css', '.js', '.json'];
-// 跳过不参与发布的目录：原版归档源码、APK 取证工具与它们的产物、原客户端脚本副本、
-// 以及 Tauri 的暂存目录（src-tauri/web 是 build-tauri-web.cjs 复制出来的构建产物，
-// 其中 references/orig 本来就带一批「引用了但原版没打包」的路径，不该算发布断链）
-// 按「路径结尾」判断，不写死 tools/ 在第几层（放哪都能用）
 /* 跳过不参与发布的目录：
- *   · references/orig / **js/orig** —— 原版归档源码。它们引用的都是**原版客户端自己的**
- *     路径（js/orig/index.js 里的 js/Matrix2D.js、FightStats.js 里的 images/fightBg_seaWorld_*.png …），
- *     本来就没随本仓库发布，算「发布断链」是误报 —— 这也是 CI 之前整条挂掉的根因；
- *   · src-tauri / apk-audit / research/original / out —— 构建产物与本地取证/超分产物。 */
-const SKIP_DIRS = new Set(['node_modules', '.git', 'references/orig', 'js/orig', 'src-tauri', 'apk-audit', 'research/original', 'out']);
+ *   · references/ —— 只作参考的素材（原版归档源码、截图、原 APK）。它引用的都是
+ *     **原版客户端自己的**路径（index.js 里的 js/Matrix2D.js、FightStats.js 里的
+ *     images/fightBg_seaWorld_*.png …），本来就没随本仓库发布，算「发布断链」是误报；
+ *   · src-tauri / apk-audit / research/original / out —— 构建产物与本地取证/超分产物。
+ * 这些目录都不进仓库或不属于发布内容，扫描它们只会产生假警报。
+ * ⚠ `js/orig`（本机另存的原版 H5 源码副本）**2026-10 第一百零一批已整目录删除** ——
+ *   原版源码只留 `references/orig` 一份，所以这里不再为它保留死配置。 */
+const SKIP_DIRS = new Set(['node_modules', '.git', 'references', 'src-tauri', 'apk-audit', 'research/original', 'out']);
+/* 跳过**个别文件**：两份「原 APK 出处记录」（哪张切图是从原版哪张图里切出来的，共 880+ 条）。
+ * 它们的 `source` 记的是**抽取当时**的路径（images/wuqi.png …）；2026-10 资源目录整理之后
+ * 那些图搬到了 images/atlas | ui | battle，这份档案不再逐条跟着改 —— 它是历史记录，不是运行期引用。
+ * （真正的运行期引用都在 js / css / html 里，照旧逐条核对。） */
+const SKIP_FILES = new Set(['images/classic/manifest.json', 'images/classic/new-reference/manifest.json']);
 const ROOTS = 'images|css|js|audio|music|fonts|assets';
 // 引号/括号里的资源路径：以四个已知资源目录开头，允许中文与常见符号
 const REF_RE = new RegExp('["\'(`]((?:' + ROOTS + ')/[A-Za-z0-9_@%\\-./\\u4e00-\\u9fa5]*)', 'g');
@@ -74,7 +78,7 @@ function walk(dir, out) {
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name) || Array.from(SKIP_DIRS).some((s) => rel === s || rel.endsWith('/' + s))) continue;
       walk(full, out);
-    } else if (SCAN_EXT.includes(path.extname(entry.name).toLowerCase())) out.push(rel);
+    } else if (SCAN_EXT.includes(path.extname(entry.name).toLowerCase()) && !SKIP_FILES.has(rel)) out.push(rel);
   }
   return out;
 }

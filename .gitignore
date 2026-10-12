@@ -1,7 +1,21 @@
-# 参考素材（原 APK、参考图、网页存档）不进仓库
+# 参考素材（原 APK、参考图、网页存档、原版源码归档 references/orig）不进仓库。
+# references/orig/*.js 以前是 git add -f 强加进来的，所以 .gitignore 挡不住；
+# 2026-10 已整体移出仓库（git rm --cached），本地留档、代码不再读它。
+# ⚠ 原版源码**只留这一份**：`js/orig/`（第二份副本）2026-10 第一百零一批已整目录删除，
+#   所以 .gitignore 里也不再需要为它留条目（目录都不存在了，留着只会让人以为它还在）。
 references/
 
+# images/_reference/ —— 原版截图、切图出处档案（manifest）、没采用的散图。
+# 同样只作参考：游戏运行只认 images/ui | images/atlas | images/battle。
+images/_reference/
+
 save/
+
+# 根目录的 macOS / Linux 启动器是**本机私货**：里面的原生版路径、浏览器 profile、
+# 权限位都跟这台机器绑定，双机同步（scripts/sync/sync.js）与 push 都不该带上它 ——
+# 仓库里给用户双击的那份在 scripts/启动游戏.command（便携包走的就是它）。
+# 前面的 / 表示只匹配仓库根这一个文件，不会误伤 scripts/ 里的正式副本。
+/启动游戏.command
 
 # 依赖与构建产物（本仓库无构建步骤，这些只在本地/CI 出现）
 node_modules/
@@ -10,7 +24,7 @@ _site/
 dist/
 __pycache__/
 
-# Tauri 桌面版：web/ 由 tools/build-tauri-web.cjs 生成，
+# Tauri 桌面版：web/ 由 tools/build-tauri-app.cjs --web 生成，
 # icons/ 由 `npx tauri icon app-icon.png` 生成，target/ 是 Rust 编译产物
 src-tauri/web/
 src-tauri/icons/

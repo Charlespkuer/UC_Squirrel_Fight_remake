@@ -47,7 +47,9 @@ record('入口页不加载 references/ 里的任何文件', () => {
   const bad = refs.filter((r) => /(^|\/)references\//.test(r));
   assert.equal(bad.length, 0, '入口页不该引用 references/：' + bad.join(', '));
   assert.ok(refs.some((r) => r === 'js/gamedict.js'), '入口页应该加载 js/gamedict.js');
-  assert.ok(!refs.some((r) => /js\/orig\//.test(r)), '入口页不该再加载 js/orig/');
+  /* 【第一百零一批】原版源码副本 `js/orig/` 已整目录删除 —— 入口页当然也不该再提它
+   *（这条断言留着当「别再把它加回运行时」的闸）。 */
+  assert.ok(!refs.some((r) => /js\/orig\//.test(r)), '入口页不该加载 js/orig/（那份副本已删除）');
 });
 
 record('js/*.js 的代码里没有指向 references/ 的运行时读取', () => {
@@ -237,11 +239,12 @@ record('战斗图集与动画：三侠/木人/场景/我方，路径与每一帧
   const needed = [...new Set([].concat(...Object.values(npcSheets), ...Object.values(npcEffects), regionIds))];
 
   /* ① 每个图集都要能定位到图片文件。
-   * 两条合法路径：清单里有（SRC_MAP），或者 battle.js 的兜底 images/<id>.png
-   * （场景图元 fightBg_seaWorld_front 就是原版清单里没有、靠兜底加载的）。 */
-  const pathOf = (id) => E.SRC_MAP[id] || (fs.existsSync(path.join(ROOT, 'images', id + '.png')) ? 'images/' + id + '.png' : '');
+   * 两条合法路径：清单里有（SRC_MAP），或者 battle.js 的兜底 images/atlas/<id>.png
+   * （场景图元 fightBg_seaWorld_front 就是原版清单里没有、靠兜底加载的；
+   *   2026-10 images 重构把整片图集收进了 images/atlas/）。 */
+  const pathOf = (id) => E.SRC_MAP[id] || (fs.existsSync(path.join(ROOT, 'images/atlas', id + '.png')) ? 'images/atlas/' + id + '.png' : '');
   const noPath = needed.filter((id) => !pathOf(id) && !/^(Head|Hand|Body|Arm|Foot)_/.test(id));
-  assert.equal(noPath.length, 0, '这些图集既不在清单里、也没有 images/<id>.png（模型会画不出来）：' + noPath.join(', '));
+  assert.equal(noPath.length, 0, '这些图集既不在清单里、也没有 images/atlas/<id>.png（模型会画不出来）：' + noPath.join(', '));
   // ② 路径指向的文件必须真的存在（避免 manifest 里写了死路径）
   const badFile = needed.filter((id) => {
     const src = pathOf(id);
@@ -317,7 +320,7 @@ record('浏览器侧模块都能加载并挂上全局（battle / tower / tower-u
    * 这里只覆盖「纯逻辑 + 界面模块」——它们正是之前 battle.js 那种加载期引用错误的受害者。 */
   const files = ['js/sim.js', 'js/tower-data.js', 'js/state.js', 'js/tower.js', 'js/battle.js',
     'js/battle-drops.js', 'js/ui.js', 'js/classic-ui.js', 'js/classic-extras.js', 'js/classic-fusion.js',
-    'js/tower-ui.js'];
+    'js/tower-plot.js', 'js/tower-ui.js'];
   const store = new Map();
   const c = {
     console,

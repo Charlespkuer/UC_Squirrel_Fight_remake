@@ -70,8 +70,11 @@
      *   · 全部用过一遍之后工具权重整体掉到 5~30 → 徒手占比自动抬高；
      *   · 只有一个主动技、且已经用过时，它的权重降到二次使用概率，
      *     不会再出现「类型抽中技能 → 只能放它」的强制复用。
-     * 30 ≈ 「1 武器 + 1 技能（各 100 权重）」时徒手约 13%，与旧的固定 12% 接近。 */
-    commonAttackWeight: 30,
+     * 2026-10 用户口径：基准**从 30 提到 50**（徒手更常见），并且加一条**份额保底**：
+     * 工具权重再大，徒手的最终占比也不低于 minCommonShare（5%）——
+     * 需要徒手权重 ≥ 工具权重 × 0.05/0.95 才够，见 commonWeightFor()。 */
+    commonAttackWeight: 50,
+    minCommonShare: 0.05,
     /* 三侠等纯 NPC 分支（没有武器池）的固定档位：30% 技能 / 70% 普攻。 */
     npcSkillChance: 30,
     /* 绝对防御的触发曲线（2026-10 用户口径「中幅提高二次与多次触发」，需求140）：
@@ -116,6 +119,15 @@
   /* ============================================================
    * 【SM2】参战者构建（含塔机制注入字段）
    * ============================================================ */
+  /** 战斗用的 mods 副本（见 makeCombatant 的注释）：只深拷 sim 会改写的 `deathSaves`，
+   *  其余键保持浅拷贝 —— 这样「同一只敌人模拟两次」也不会把命耗光、玩家与魔王的复活也不互相吃。 */
+  function cloneModsForBattle(mods) {
+    const out = Object.assign({}, mods);
+    if (Array.isArray(mods.deathSaves)) {
+      out.deathSaves = mods.deathSaves.map((sv) => (sv && typeof sv === 'object') ? Object.assign({}, sv) : sv);
+    }
+    return out;
+  }
   function makeCombatant(f, side) {
     const stat = (value, fallback) => Number.isFinite(Number(value)) ? Math.max(1, Number(value)) : fallback;
     const skills = {};
@@ -142,7 +154,12 @@
     // 缺少 maxHp（AI/NPC/旧录像）时，把 hp 当作满血，保持既有行为。
     const fullHp = stat(f.maxHp != null ? f.maxHp : f.hp, 1);
     const mech = Array.isArray(f.mech) ? f.mech.slice() : (f.mech ? [f.mech] : []);
-    const mods = f.mods && typeof f.mods === 'object' ? f.mods : null;
+    /* ⚠ `mods` 里的 `deathSaves` 必须**拷一份**：sim 会 `shift()` 掉免死条目，
+     * 共享引用等于把调用方的数据一起吃掉了。后果就是本题：同一只敌人被模拟**第二次**时
+     * 一条命都不剩 —— 「假如我直接赢」（E17）于是又变回一击秒杀（用户实测「魔王还是直接判胜」）。
+     * 顺带也修掉「玩家与魔王的复活次数互相消耗」那个老坑（第七十四批的注释里提过，但只拷了当时的镜像包）。
+     * 只深拷这一处：sim 不写别的 mod 键，整包深拷会白白拖慢每场战斗的构建。 */
+    const mods = f.mods && typeof f.mods === 'object' ? cloneModsForBattle(f.mods) : null;
     return {
       side, name: f.name, level: stat(f.level, 1), npcType: f.npcType || null,
       power: stat(f.power, 1), agility: stat(f.agility, 1), speed: stat(f.speed, 1),
@@ -214,28 +231,41 @@
     if (c.weaponBoostImmune) return true;
     return !!(c.mods && Number(c.mods.reflectImmune) > 0);
   }
+  /** 触发一条免死条目（涅槃 / 涅槃plus / 金蝉脱壳）—— **两个致死判定点共用这一份**：
+   *  `tryDeathSave`（毒 / 反伤 / 开场类致死）与 `applyDamage` 里的致死分支（被打死）。
+   *  两边若各写一份，同一件涅槃在「被打死」和「被毒死」两条路上效果就会不一样。
+   *  顺序：先抬生命上限（涅槃plus 的 +20%），再按 healPct 回血（回的是抬过之后的上限），
+   *  然后记减伤（并进 mods.takenMul，applyDamage 读它）、最后加本场力/敏/速。 */
+  function consumeDeathSave(def, sv, r) {
+    const plusMax = Math.max(0, Number(sv.maxHpMul) || 0);
+    if (plusMax > 0) def.maxHp = Math.max(1, Math.round((Number(def.maxHp) || 1) * (1 + plusMax)));
+    const plusTaken = Number(sv.takenMul) || 0;
+    if (plusTaken) {
+      def.mods.takenMul = Math.max(-0.95, Number(def.mods.takenMul || 0) + plusTaken);
+      if (r) r.reviveTakenMul = def.mods.takenMul;
+    }
+    def.hp = sv.healPct ? Math.max(1, Math.round(def.maxHp * sv.healPct)) : 1;
+    /* 涅槃（原不死鸟）：复活后**本场战斗**力/敏/速提升 —— 直接加到 buffFlat 上，
+     * 与「血性狂暴」等临时加成同一口径（每场战斗的 combatant 是新建的，所以只影响本场）。 */
+    const mul = Math.max(0, Number(sv.statMul) || 0);
+    if (mul > 0) {
+      for (const key of ['power', 'agility', 'speed']) {
+        def.buffFlat[key] = (def.buffFlat[key] || 0) + Math.max(1, Math.round((Number(def[key]) || 0) * mul));
+      }
+    }
+    if (!r) return;
+    r.deathSave = true;
+    r.reviveStatMul = mul > 0 ? mul : undefined;
+    /* 涅槃（复活甲）与金蝉脱壳都是 deathSave，但塔里需要分开数「涅槃用掉几次」
+     *（C14 叠 2 层时每层有 2 次机会）—— 所以复活甲那一条打上显式标记。 */
+    r.revive = sv.revive ? 1 : undefined;
+    r.noteText = (r.noteText ? r.noteText + '·' : '') + (sv.name || (sv.healPct ? '涅槃' : '金蝉脱壳'));
+    r.noteSide = def.side;
+  }
   function tryDeathSave(def, r) {
     if (!def || def.hp > 0) return false;
     if (def.mods && Array.isArray(def.mods.deathSaves) && def.mods.deathSaves.length) {
-      const sv = def.mods.deathSaves.shift();
-      def.hp = sv.healPct ? Math.max(1, Math.round(def.maxHp * sv.healPct)) : 1;
-      /* 涅槃（原不死鸟）：复活后**本场战斗**力/敏/速提升 —— 直接加到 buffFlat 上，
-       * 与「血性狂暴」等临时加成同一口径（每场战斗的 combatant 是新建的，所以只影响本场）。 */
-      const mul = Math.max(0, Number(sv.statMul) || 0);
-      if (mul > 0) {
-        for (const key of ['power', 'agility', 'speed']) {
-          def.buffFlat[key] = (def.buffFlat[key] || 0) + Math.max(1, Math.round((Number(def[key]) || 0) * mul));
-        }
-      }
-      if (r) {
-        r.deathSave = true;
-        r.reviveStatMul = mul > 0 ? mul : undefined;
-        /* 涅槃（复活甲）与金蝉脱壳都是 deathSave，但塔里需要分开数「涅槃用掉几次」
-         *（C14 叠 2 层时每层有 2 次机会）—— 所以复活甲那一条打上显式标记。 */
-        r.revive = sv.revive ? 1 : undefined;
-        r.noteText = (r.noteText ? r.noteText + '·' : '') + (sv.name || (sv.healPct ? '涅槃' : '金蝉脱壳'));
-        r.noteSide = def.side;
-      }
+      consumeDeathSave(def, def.mods.deathSaves.shift(), r);
       return true;
     }
     if (godSave(def)) { def.hp = 1; if (r) r.godSave = true; return true; }
@@ -294,7 +324,8 @@
    * 回合开始类增益（塔 buff，每场战斗重置）
    *
    *   roundStatPct   越战越勇：力/敏/速各按「基础值 × 比例」逐回合累加（可叠层，比例里已含层数）
-   *   catchUpPct     后发制人：有一项落后对手时，把差距最大的那项补上「差距 × 比例」
+   *   catchUpPct     后发制人：有一项落后对手时，把差距最大的那项补上「差距 × 比例」，
+   *                  **同时把对手那一项压下去同样的量**（镜像削弱，2026-10 用户口径）
    *   roundMaxHpMul  玉石俱焚：双方生命上限各乘一次（向下取整），当前血量跟着裁
    *
    * 三者都写在 **buffFlat / maxHp** 上，而每个战斗体是 simulate() 里新建的
@@ -319,8 +350,15 @@
         if (gap > 0 && (!best || gap > best.gap)) best = { key: key, gap: gap };
       }
       if (best) {
-        actor.buffFlat[best.key] = (actor.buffFlat[best.key] || 0) + Math.max(1, Math.round(best.gap * catchPct));
-        if (push) push({ attacker: actor.side, action: 'buff', noteText: '后发制人', noteSide: actor.side });
+        const gain = Math.max(1, Math.round(best.gap * catchPct));
+        actor.buffFlat[best.key] = (actor.buffFlat[best.key] || 0) + gain;
+        /* 需求165：**镜像削弱** —— 我方这一回合补多少，对手那一项就掉多少（只掉这一次的量）。
+         * 写进 foe.buffFlat（负数），与「越战越勇」等走同一个通道；eff 三个出口统一
+         * Math.max(1, …) 兜底，所以不会把对手压成 0 / 负数。
+         * gain ≤ 差距本身（比例 ≤100%），所以对手那一项最多被压回与我方持平。 */
+        if (foe && foe.buffFlat) foe.buffFlat[best.key] = (foe.buffFlat[best.key] || 0) - gain;
+        if (push) push({ attacker: actor.side, action: 'buff', noteText: '后发制人', noteSide: actor.side,
+          aura: { key: best.key, gain: gain, drain: gain, drainSide: foe ? foe.side : null } });
       }
     }
     const hpMul = Number(m.roundMaxHpMul) || 0;
@@ -468,12 +506,20 @@
    *   · 只剩一个主动技时，它用过之后的份额就是它的二次使用概率，
    *     不会因为「类型落在技能上」而被强行复用（修掉旧固定档位的那个副作用）。
    * 抽签仍然只消耗一次 Math.random()，所以既有的随机序列长度不变。 */
+  /* 徒手的实际权重：基准 50；若工具权重太大导致徒手份额不足 minCommonShare（5%），
+   * 就把它抬到「刚好 5%」——份额 = w/(w+tool) ≥ r  ⟺  w ≥ tool × r/(1−r)。 */
+  function commonWeightFor(toolWeight) {
+    const r = Math.max(0, Math.min(0.9, Number(RULES.minCommonShare) || 0));
+    const floor = r > 0 ? (Number(toolWeight) || 0) * (r / (1 - r)) : 0;
+    return Math.max(RULES.commonAttackWeight, floor);
+  }
   function pickKind(att, weapons, actives) {
     let weaponSum = 0;
     for (const w of weapons || []) weaponSum += weaponWeight(att, w.id);
     let skillSum = 0;
     for (const id of actives || []) skillSum += skillWeight(att, id);
-    const total = weaponSum + skillSum + RULES.commonAttackWeight;
+    const commonWeight = commonWeightFor(weaponSum + skillSum);
+    const total = weaponSum + skillSum + commonWeight;
     const roll = Math.random() * total;
     if (roll < weaponSum) return 'weapon';
     if (roll < weaponSum + skillSum) return 'skill';
@@ -484,13 +530,14 @@
     return Math.random() * 100 < RULES.npcSkillChance ? 'skill' : 'common';
   }
 
-  /** 出手类型的三份权重（供测试/调参直接核对，不用统计近似）。 */
+  /** 出手类型的三份权重（武器/技能/徒手）与占比 —— 供测试直接核对
+   * 「持有的武技越多 → 徒手越少」「全部用过一遍 → 徒手变多」「徒手占比不低于 5%」。 */
   function kindWeights(att, weapons, actives) {
     let weapon = 0;
     for (const w of weapons || []) weapon += weaponWeight(att, w.id);
     let skill = 0;
     for (const id of actives || []) skill += skillWeight(att, id);
-    const common = RULES.commonAttackWeight;
+    const common = commonWeightFor(weapon + skill);
     const total = weapon + skill + common;
     return { weapon, skill, common, total, weaponShare: weapon / total, skillShare: skill / total, commonShare: common / total };
   }
@@ -805,19 +852,8 @@
         def.stun = 0;
         immediate = { actor: def, reason: 'fakeDie' };
       } else if (def.hp - dmg <= 0 && def.mods && Array.isArray(def.mods.deathSaves) && def.mods.deathSaves.length) {
-        const sv = def.mods.deathSaves.shift();
-        def.hp = sv.healPct ? Math.max(1, Math.round(def.maxHp * sv.healPct)) : 1;
-        /* 同 tryDeathSave：涅槃复活后本场力/敏/速提升。 */
-        const mul2 = Math.max(0, Number(sv.statMul) || 0);
-        if (mul2 > 0) {
-          for (const key of ['power', 'agility', 'speed']) {
-            def.buffFlat[key] = (def.buffFlat[key] || 0) + Math.max(1, Math.round((Number(def[key]) || 0) * mul2));
-          }
-        }
-        r.deathSave = true;
-        r.reviveStatMul = mul2 > 0 ? mul2 : undefined;
-        r.revive = sv.revive ? 1 : undefined;      // 同 tryDeathSave：区分涅槃与金蝉脱壳
-        r.noteText = sv.name || (sv.healPct ? '涅槃' : '金蝉脱壳'); r.noteSide = def.side;
+        /* 与 tryDeathSave 共用同一份触发逻辑（含涅槃plus 的抬上限 / 减伤）。 */
+        consumeDeathSave(def, def.mods.deathSaves.shift(), r);
       } else if (def.hp - dmg <= 0 && godSave(def)) {
         dmg = Math.max(0, def.hp - 1);
         def.hp = 1;
@@ -1058,12 +1094,14 @@
             r.deathSave = true; r.noteText = rr.noteText; r.noteSide = rr.noteSide;
             /* 涅槃的属性加成标记也要一起带上来，否则界面上看不到「复活后变强」这条提示。 */
             if (rr.reviveStatMul) r.reviveStatMul = rr.reviveStatMul;
+            /* 涅槃plus 的减伤标记同理（战斗日志要看得见「复活后更抗打」）。 */
+            if (rr.reviveTakenMul) r.reviveTakenMul = rr.reviveTakenMul;
           }
           if (rr.crit) r.crit = true;
           if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
         }
         r.dmg = total;
-        maybeCounter(att, def, r, true);
+        maybeCounter(att, def, r, 'skill');      // 技能不触发反击（见 maybeCounter 的口径）
         pushRound(r);
         return;
       }
@@ -1074,13 +1112,23 @@
       if (att.npcType === 'tl' && att.hp < att.maxHp * 0.25) raw = Math.round(raw * 1.3); // 螳螂低血爆发
       if (rhythm) { raw = Math.round(raw * 2.5); r.crit = true; }
       applyDamage(att, def, raw, r, {});
-      maybeCounter(att, def, r, true);
+      maybeCounter(att, def, r, 'common');     // NPC 的普攻可以被反击
       pushRound(r);
     }
 
-    function maybeCounter(att, def, r, canCounter) {
-      // 反击：被打方用普攻反击（对近战/普攻；必中类武器也可被反击，大榔头/死神镰刀除外）
-      if (!canCounter || r.fakeDie || def.hp <= 0 || att.hp <= 0) return;
+    /** 反击的触发口径（2026-10 第八十批 用户口径）：
+     *   · **只有近战武器攻击（'melee'）与普通攻击（'common'）能触发反击**；
+     *   · **远程武器**（'ranged'）、**技能**（'skill'）以及其它非攻击型的伤害手段**都不触发** ——
+     *     技能包括「荆棘反伤 / 绝对防御这类防御反击型技能」：你放防御手段，对方不该反过来打你一下；
+     *   · 这一次交手**已经反伤过**（荆棘反伤 / 绝对防御反噬真的打出了伤害）时同样不再反击：
+     *     反伤本身就是对这一手的回应，不该再叠一次（同一条用户口径的后半句）。
+     *   参数 `trigger` 就是上面那四个字符串（旧代码传的是布尔，现在按语义传，规则集中在这里）。 */
+    function maybeCounter(att, def, r, trigger) {
+      if (trigger !== 'melee' && trigger !== 'common') return;
+      /* 反击：被打方用**普攻**反击。必中类近战武器也可以被反击，大榔头（2）/ 死神镰刀（15）除外
+       *（调用方传 'ranged' 的那一支已经在上面被挡掉了）。 */
+      if (r.fakeDie || def.hp <= 0 || att.hp <= 0) return;
+      if (r.thornsDmg || r.reboundHurt) return;                  // 已经反伤过 —— 不再反击
       let chanceBase = 25;
       if (def.npcType === 'xm') chanceBase = 45;                 // 熊猫善反击
       if (!chance(chanceBase)) return;
@@ -1236,6 +1284,8 @@
             r.deathSave = true; r.noteText = rr.noteText; r.noteSide = rr.noteSide;
             /* 涅槃的属性加成标记也要一起带上来，否则界面上看不到「复活后变强」这条提示。 */
             if (rr.reviveStatMul) r.reviveStatMul = rr.reviveStatMul;
+            /* 涅槃plus 的减伤标记同理（战斗日志要看得见「复活后更抗打」）。 */
+            if (rr.reviveTakenMul) r.reviveTakenMul = rr.reviveTakenMul;
           }
           if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
         }
@@ -1252,8 +1302,8 @@
         }
         if (w.id === 14 && att.hp > 0) { const heal = Math.min(att.maxHp - att.hp, healOf(att, total * (weaponEffect(w, 10, 4, 2) + trueW(w, 'lifesteal')) / 100)); att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
         if (w.id === 17 && att.hp > 0) { const self = Math.round(att.hp * 0.1); att.hp -= self; r.selfBurn = self; tryDeathSave(att, r); }
-        // 反击（大榔头2、死神镰刀15 不可反击）
-        maybeCounter(att, def, r, w.type === '近战' && ![2, 15].includes(w.id));
+        // 反击（大榔头2、死神镰刀15 不可反击；远程武器也不能触发反击 —— 用户口径 2026-10 第八十批）
+        maybeCounter(att, def, r, (w.type === '近战' && ![2, 15].includes(w.id)) ? 'melee' : 'ranged');
         grantFreeTurn();
         pushRound(r);
         att.weaponBoostImmune = false;
@@ -1336,7 +1386,10 @@
           }
         }
         if (freeSkill) { att.usedFreeSkill = true; r.actAgain = true; }
-        maybeCounter(att, def, r, !r.noDmg && !r.dodge);
+        /* 技能**不触发反击**（用户口径 2026-10 第八十批）：以前这里放行 `!r.noDmg && !r.dodge`，
+         * 于是「色诱 / 通灵 / 幸运一击」这些技能打完还能被对方反击，防御反击型技能（绝对防御那类）
+         * 也会反过来挨一下 —— 现在统一按技能口径挡住。 */
+        maybeCounter(att, def, r, 'skill');
         pushRound(r);
         if (r.actAgain && att.hp > 0 && def.hp > 0) {
           if (!immediate) immediate = { actor: att, reason: 'freeAction' };
@@ -1352,7 +1405,7 @@
       let raw = Math.round(effPower(att) * (0.8 + Math.random() * 0.4) * (1 + effect(att, 5) / 100));
       if (chance(critChance(att))) { raw = Math.round(raw * (2 + effect(att, 1) / 100 + critDmgBonus(att))); r.crit = true; }
       applyDamage(att, def, raw, r, {});
-      maybeCounter(att, def, r, true);
+      maybeCounter(att, def, r, 'common');     // 普攻可以被反击
       pushRound(r);
     }
 
@@ -1373,11 +1426,20 @@
      * 口径（用户要求）：「下一场战斗开始时立即使得敌方生命值归零」，所以：
      *   · 固定从**满血**清零，飘字写的是这一场真实被打掉的血量；
      *   · **不走 tryDeathSave** —— 名字就是「直接赢」，敌方的装死 / 涅槃类豁免不触发；
-     *   · 放在主循环之前：血量为 0 时主循环不执行，`winner` 直接判我方胜（见函数末尾结算）。 */
+     *   · 放在主循环之前：血量为 0 时主循环不执行，`winner` 直接判我方胜（见函数末尾结算）。
+     *
+     * 【2026-10 第八十二批 用户口径】唯一的例外是**魔王自己的命**：x00 那只魔王额外持有的
+     * 「涅槃plus」被打上 `bossLife: true`，它**照常吃掉这一下**（只丢一条命），
+     * 于是 E17 不再是一击终结 —— 还得再真正击杀剩下两条命。
+     * 普通敌人的装死 / 涅槃**依旧无效**（这个例外只认 bossLife，不是「所有免死都算」）。 */
     if (A.mods && A.mods.openKill && B.hp > 0) {
       const dmg = Math.max(1, Math.round(B.hp));
+      const saves = (B.mods && Array.isArray(B.mods.deathSaves)) ? B.mods.deathSaves : [];
+      const bossLife = saves.findIndex((sv) => sv && sv.bossLife);
       B.hp = 0;
-      pushRound({ attacker: 0, action: 'dot', dmg, noteText: '假如我直接赢' });
+      const rr = { attacker: 0, action: 'dot', dmg: dmg, noteText: '假如我直接赢', noteSide: 0 };
+      if (bossLife >= 0) consumeDeathSave(B, saves.splice(bossLife, 1)[0], rr);
+      pushRound(rr);
     }
 
     // ---- 主循环：速度行动条 ----
@@ -1498,6 +1560,9 @@
     /* 三个「有效属性」的唯一出口（供测试/调参直接核对：终乘类加成到底乘在哪一层）。
      * 传一个战斗体（至少要 stat/baseStats、buffFlat、debuffs、mods、hp/maxHp）。 */
     effStatsOf: (c) => ({ power: effPower(c), agility: effAgility(c), speed: effSpeed(c) }),
+    /* 回合开始类增益（越战越勇 / 后发制人 / 玉石俱焚）——纯函数，供测试直接核对
+     * 「后发制人补多少、对手就掉多少」。传两个战斗体（见 effStatsOf 的要求）。 */
+    _applyRoundAuras: applyRoundAuras,
     // 各技能「二次及以后」的出手概率（%），供测试与调参直接读
     repeatRateOf, skillUseCountOf,
     /* 出手类型的三份权重（武器/技能/徒手）与占比 —— 供测试直接核对

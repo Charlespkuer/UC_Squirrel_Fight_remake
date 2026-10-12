@@ -1,4 +1,4 @@
-﻿# 松鼠大战怀旧复刻版 —— Windows：双机同步菜单（Mac ↔ Windows，走 ZeroTier）
+# 松鼠大战怀旧复刻版 —— Windows：双机同步菜单（Mac ↔ Windows，走 ZeroTier）
 #
 # 这个脚本是 一键同步.cmd 的实际执行部分。分工原因和启动器一样：cmd.exe 读 UTF-8
 # 中文会把中文字节错位、把中文注释当命令，所以 .cmd 只留 ASCII 外壳，中文与逻辑都在这里
@@ -139,10 +139,11 @@ while ($true) {
   Write-Host '  9) 后台同步服务：启动 / 停止'
   Write-Host '  a) 开机自启：安装 / 取消'
   Write-Host '  c) 自检（连不上先点这个：ZeroTier / 服务 / 防火墙 / 对端）'
+  Write-Host '  d) 删除多余文件（镜像式）：先演练，确认后再真删'
   Write-Host '  0) 一键准备（启动服务 + 放行 Windows 防火墙 + 自检）'
   Write-Host '  q) 退出'
   Write-Host ''
-  $choice = Read-Host '选一个（0-9/a/c/q）'
+  $choice = Read-Host '选一个（0-9/a/c/d/q）'
   switch ($choice) {
     '1' { Write-Host ''; Invoke-Sync @('status') | Out-Null; Pause-Menu }
     '2' { Write-Host ''; Invoke-Sync @('push', '--save') | Out-Null; Pause-Menu }
@@ -181,6 +182,22 @@ while ($true) {
       Pause-Menu
     }
     'c' { Write-Host ''; Invoke-Sync @('doctor') | Out-Null; Pause-Menu }
+    'd' {
+      Write-Host ''
+      Write-Host '  镜像式删除：会把「对端没有、本机却有」的多余文件在本机删掉。'
+      Write-Host '  ! 只删非忽略文件；.gitignore 里的（references/ save/ out/ 等）一律不动。'
+      Write-Host '  ! 删之前请先把本机的改动推过去，否则会连没推的改动一起删掉。'
+      Write-Host ''
+      Write-Host '  1) 先演练（只列不改）'
+      Write-Host '  2) 真删（本机多出来的文件）'
+      $sub = Read-Host '选一个'
+      switch ($sub) {
+        '1' { Write-Host ''; Invoke-Sync @('pull', '--files', '--delete', '--dry') | Out-Null }
+        '2' { Write-Host ''; Invoke-Sync @('pull', '--files', '--delete') | Out-Null }
+        default { Write-Host '已取消。' }
+      }
+      Pause-Menu
+    }
     '0' { Write-Host ''; Invoke-Sync @('prepare') | Out-Null; Pause-Menu }
     'q' { exit 0 }
     'Q' { exit 0 }

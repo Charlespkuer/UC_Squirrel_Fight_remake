@@ -1,4 +1,4 @@
-﻿<#
+<#
   build-apk.ps1 —— 松鼠大战怀旧版 · 安卓 APK 一键构建
 
   为什么需要这个脚本：Tauri 官方的 `tauri android build` 在**这台 Windows 机器**上跑不通，
@@ -82,7 +82,7 @@ if (-not (Test-Path (Join-Path $BuildRoot 'src-tauri\Cargo.toml'))) {
   # 只同步会改的东西：前端、Rust 源码、配置（不整份重拷，省时间）
   foreach ($rel in @('js','css','audio','images','scripts','src-tauri\src','src-tauri\build.rs',
                      'src-tauri\Cargo.toml','src-tauri\tauri.conf.json','src-tauri\tauri.android.conf.json',
-                     'src-tauri\icons','tools\build-tauri-web.cjs')) {
+                     'src-tauri\icons','tools\build-tauri-app.cjs')) {
     $s = Join-Path $SourceRepo $rel; $d = Join-Path $BuildRoot $rel
     if (-not (Test-Path $s)) { continue }
     if (Test-Path $s -PathType Container) { robocopy $s $d /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null }
@@ -97,7 +97,7 @@ if (-not (Test-Path (Join-Path $BuildRoot 'src-tauri\Cargo.toml'))) {
 if (-not $SkipSyncStaging) {
   Say "暂存前端到 src-tauri\web"
   Push-Location $BuildRoot
-  & node (Join-Path $BuildRoot 'tools\build-tauri-web.cjs') | Select-Object -Last 1 | ForEach-Object { Ok $_ }
+  & node (Join-Path $BuildRoot 'tools\build-tauri-app.cjs') --web | Select-Object -Last 1 | ForEach-Object { Ok $_ }
   Pop-Location
 }
 

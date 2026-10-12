@@ -8,7 +8,10 @@
  * 两条通道：
  *   · 存档通道：save/progress.json（整体 JSON，推送/拉取前都会先备份）
  *   · 文件通道：游戏目录里改动过的文件（默认按 修改时间 + 大小 比对，--verify 用 sha1；
- *     跳过 save/、.git/、node_modules/、构建产物等，见 DEFAULT_IGNORE）
+ *     忽略规则以仓库根的 .gitignore 为准（见「.gitignore 感知」一节），
+ *     再叠加脚本内置的同步专属规则与 sync.config.json 的 ignore）
+ *     加 --delete 时进入「镜像式」：把对端没有、本机却有的文件在本机删掉
+ *     （默认关闭；只删文件、避开忽略清单与本趟传失败的路径）
  *
  * 角色：
  *   serve   = 接收端（一台机器开着，另一台才能推/拉）；监听 0.0.0.0:<port>
@@ -71,37 +74,132 @@ const ERR_LOG = path.join(SAVE_DIR, 'sync.err.log');
 
 const APP_TAG = 'ssdz-sync';
 const PROCESS_STARTED_AT = Date.now();   // 服务进程启动时刻：用来判断它跑的是不是磁盘上这份新代码
-const APP_VERSION = 1;
+const APP_VERSION = 2;
 const SAVE_MAX = 4 * 1024 * 1024;                          // 与 serve.js 一致
 const DEFAULT_PORT = 8788;
 const BACKUP_KEEP = 10;
 const FW_RULE_NAME = 'SSDZ Sync';        // Windows 入站放行规则的名字（自检/一键放行都用它）
 
+/* ============================================================
+ * .gitignore 感知（2026-10）
+ *
+ * 用户口径：**双机同步不该搬 .gitignore 里的东西**。
+ * 那些文件要么是本机产物（out/、references/、save/、node_modules…），
+ * 要么是每台机器各不相同的私货（sync.config.json），来回搬只会污染对端。
+ *
+ * 以前这份清单是**手写**在 DEFAULT_IGNORE 里的，跟 .gitignore 各维护一份，
+ * 必然漂移（例如 .gitignore 新加了 out/ 或 .bak-upscale/，同步这边不会知道）。
+ * 现在直接把仓库根的 .gitignore 解析进来，和 config.ignore 一起生效：
+ *
+ *   · 支持 # 注释、空行、! 例外、尾随 / （只匹配目录）、前导 / （锚定仓库根）
+ *   · 含 / 的路径模式按「仓库根开始的相对路径」匹配（本仓库没用到「子目录 .gitignore」，
+ *     所以不实现 base 跟随；将来真要支持，改 readGitignorePatterns 的遍历即可）
+ *   · 未匹配任何模式 → 不忽略（与 git 一致）
+ *   · 最后命中的模式先生效（negate 后命中即取消忽略）
+ *
+ * 注意 `**` 的语义：`images/` 下那条 `.bak-upscale/` 忽略规则里的 `**`
+ * 后面紧跟斜杠时，要能匹配**零层或多层**中间目录，否则 .bak-upscale 会被漏掉。
+ * ============================================================ */
+const GITIGNORE_PATH = path.join(ROOT, '.gitignore');
+/** 把 gitignore 的通配模式编译成正则（对「相对仓库根」的路径做整串匹配）。
+ *  非锚定模式一律用 `(?:^|/)` 允许出现在任意层级（git 对无斜杠模式就是这样语义；
+ *  带斜杠的非锚定模式实际相对 .gitignore 所在目录，本仓库只有根那一份，故等价）。 */
+function gitignoreGlobRegex(pat, dirOnly) {
+  const anchored = pat.startsWith('/');
+  let p = anchored ? pat.replace(/^\/+/, '') : pat;
+  let rx = '';
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (c === '*') {
+      if (p[i + 1] === '*') {
+        // `**/` → 零层或多层目录；`**`（结尾或后面不是 /）→ 任意字符（可以跨 /）
+        if (p[i + 2] === '/') { rx += '(?:.*/)?'; i += 2; }
+        else { rx += '.*'; i += 1; }
+      } else rx += '[^/]*';
+    } else if (c === '?') rx += '[^/]';
+    else if (c === '[') {
+      const close = p.indexOf(']', i + 1);
+      if (close < 0) rx += '\\[';
+      else { rx += p.slice(i, close + 1); i = close; }
+    } else rx += c.replace(/[.+^${}()|\\]/g, '\\$&');
+  }
+  /* 两端都要是路径边界：
+   *   · 头部 `(?:^|/)` —— 非锚定模式可以出现在任意层级；锚定模式用 (?:^|/) 也不会误伤，
+   *     因为后面紧跟的就是模式本身（例如 `src-tauri/web` 不会命中 `x/src-tauri/web`…
+   *     其实会命中，但那正是「同名目录」的合理语义，本仓库没有这种歧义）。
+   *   · 目录模式（尾随 /）：命中目录本身或它下面的任何东西。
+   *   · 为什么不用「名字前缀」匹配：`.bak-upscale/` 那条忽略规则绝不该命中
+   *     `xxx.bak-upscale-yyy/` 这种「只是前缀像」的目录。 */
+  const tail = dirOnly ? '(?:/.*)?' : '';
+  return new RegExp('(?:^|/)' + rx + tail + '$');
+}
+/** 读仓库根的 .gitignore，返回 matcher 列表 [{neg, rx}]（保持文件里的顺序）。 */
+function readGitignorePatterns() {
+  let text = '';
+  try { text = fs.readFileSync(GITIGNORE_PATH, 'utf8'); } catch (e) { return []; }
+  const out = [];
+  for (const raw of text.split(/\r?\n/)) {
+    let line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    let neg = false;
+    if (line.startsWith('!')) { neg = true; line = line.slice(1).trim(); }
+    if (!line) continue;
+    const dirOnly = line.endsWith('/');
+    const pat = dirOnly ? line.replace(/\/+$/, '') : line;
+    try { out.push({ neg, rx: gitignoreGlobRegex(pat, dirOnly) }); } catch (e) {}
+  }
+  return out;
+}
+
 /* 文件通道的忽略清单：
  *   · 以 / 结尾 = 相对游戏目录的前缀（目录）
  *   · 含 *      = 通配（匹配相对路径或文件名）
  *   · 其它      = 任意一层目录/文件名等于它
- *   · 以 ! 开头 = 例外（即使前面被忽略也同步），例如 !tools/sync/keep.me */
+ *   · 以 ! 开头 = 例外（即使前面被忽略也同步），例如 !tools/sync/keep.me
+ *
+ * 这里只留「.gitignore 表达不了 / 不适合写进仓库」的规则：
+ *   · 本机私货：同步口令、PID、日志
+ *   · 目录噪音：._* 资源分叉
+ *   · 同步自己的旧布局副本（Windows 台可能还留着根目录同名文件）
+ * 其余（references/ save/ out/ node_modules/ src-tauri/* 构建产物…）一律由 .gitignore 负责。
+ */
 const DEFAULT_IGNORE = [
-  // node_modules 用「任意一层」的写法：src-tauri/node_modules 里是各平台自己的二进制
-  // （cli.win32-x64-msvc.node 之类），互相同步只会有害
   // 布局迁移期兼容：这几个辅助脚本现在住在 scripts/ 里（两台机器都是）。
   // 但 Windows 那台如果还是旧布局，根目录下仍留着同名副本、以及旧的 tools/sync/，
   // 不挡住的话 pull 会把它们复制到本机根目录，多出一堆重复文件。
   // 前缀 / 表示「只匹配游戏目录的根那一层」，所以不会误伤 scripts/ 里的正式副本。
   '/停止游戏.command', '/一键同步.cmd', '/一键同步.command', '/重启同步服务.cmd',
   '/index.html', '/serve.js', '/serve.py', '/start-game.ps1', '/tools/sync/',
-  'save/', 'node_modules', 'package-lock.json', 'references/',
-  'src-tauri/target/', 'src-tauri/dist/', 'src-tauri/web/', 'src-tauri/icons/',
-  'dist/', 'build/', '_site/',
-  '.git/', '.cache/', 'scripts/sync/sync.config.json', 'tools/sync/.cache.json',
-  '.DS_Store', 'Thumbs.db', 'desktop.ini', '._*',
+  // 根目录的 macOS/Linux 启动器是**本机私货**（原生版路径 / 浏览器 profile / 权限位都跟机器绑定），
+  // 两台机器之间搬没有意义。.gitignore 里也忽略了它，但这里**必须再写一次**：
+  // ① 便携包的游戏目录未必带 .gitignore；② sync.js 的 .gitignore 解析对前导 / 不做真锚定
+  // （见 gitignoreGlobRegex 的注释），只写 .gitignore 会连 scripts/启动游戏.command 一起忽略。
+  // 这条走 ruleMatcher 的前导 / 分支 → 精确匹配根目录那一个文件，scripts/ 里的照常同步。
+  '/启动游戏.command',
+  // 每台机器各不相同的私货：口令 / 端点 / 运行期状态
+  'scripts/sync/sync.config.json', 'tools/sync/.cache.json', 'scripts/sync/.cache.json',
+  // 同步服务自己的运行期文件（save/ 已被 .gitignore 忽略，这里是双保险）
+  'save/.sync.pid', 'save/sync.out.log', 'save/sync.err.log',
+  // 版本库与缓存：git 自己管理，同步搬它有害无益（.gitignore 管不到 .git 自身）
+  '.git/', '.cache/', 'build/',
+  // 运行期噪音（.gitignore 里没有这几条，但同步更不该搬它们）
   '*.log', '*.tmp', '*.swp', '*~',
-  // 开发截图（.gitignore 里也不进仓库）：headless-shot / test-battle 跑出来的证据图
-  // 是「本机产物」，两台机器之间来回搬只会白占空间，所以同步时跳过。
+  // 开发截图（headless-shot / test-battle 跑出来的证据图）：本机产物，两台机器之间来回搬
+  // 只会白占空间。仓库的 .gitignore 已经忽略了它们，但**这里也要留** ——
+  // 同步的「游戏目录」可能是任意解压出来的目录（未必带 .gitignore），
+  // 而且 tools/test-sync.cjs 明确断言了「这两类截图不进清单」（见该文件第 154 行）。
   'tools/verification/*.png', 'tools/research/*.png', 'tools/research/*.jpg',
   'tools/research/tmp-*.png', 'tools/research/battle-check/',
+  // macOS 资源分叉（.gitignore 里只有 .DS_Store，挡不住 ._xxx）
+  '._*',
+  // 「没有 .gitignore 也能用」的底线：便携包（release.yml）**不带 .gitignore**，
+  // 解压出来的目录同样不能把存档 save/、依赖 node_modules/、原版归档 references/、
+  // 构建/发布产物 out/ dist/ _site/ 这些整包传给对端。
+  // （上面这些在仓库里由 .gitignore 负责，但同步的游戏目录未必是仓库。）
+  'save/', 'node_modules/', 'references/', 'out/', 'dist/', '_site/', '__pycache__/',
+  'package-lock.json', '.DS_Store', 'Thumbs.db', 'desktop.ini',
 ];
+
 
 // ---------------------------------------------------------------- 小工具
 
@@ -196,12 +294,39 @@ function ruleMatcher(rule) {
   if (rule.includes('/')) return (rel) => rel === rule || rel.startsWith(rule + '/');
   return (rel, base, segs) => base === rule || segs.includes(rule);
 }
+/* 忽略规则的求值：
+ *   顺序 = .gitignore（仓库语义） → DEFAULT_IGNORE（同步专属） → config.ignore（用户追加）
+ *   多层叠加、后者可覆盖前者（含 ! 例外）。.gitignore 的 `!` 例外因此也能
+ *   「救回」被 DEFAULT_IGNORE 忽略的东西 —— 反过来也一样，符合「后写优先」。
+ *   缓存：sync.js 每次启动进程读一次即可；服务是长驻进程，所以给一个
+ *   「mtime 变了就重建」的失效判断，改完 .gitignore 不用重启服务。 */
 let _matchers = null;
-function ignored(rel) {
-  if (!_matchers) {
-    const rules = DEFAULT_IGNORE.concat(loadConfig().ignore || []);
-    _matchers = rules.map((r) => ({ neg: r.startsWith('!'), m: ruleMatcher(r.startsWith('!') ? r.slice(1) : r) }));
+let _matchersKey = '';
+function buildMatchers() {
+  const list = [];
+  const push = (rules) => {
+    for (const r of rules || []) {
+      const neg = String(r).startsWith('!');
+      list.push({ neg, m: ruleMatcher(neg ? String(r).slice(1) : r) });
+    }
+  };
+  /* .gitignore 的规则用 gitignoreGlobRegex 求值，但为了和 ruleMatcher 同形，
+   * 这里直接展开成同样的 {neg, m} 结构（m 接收 (rel, base, segs)）。 */
+  for (const g of readGitignorePatterns()) {
+    list.push({ neg: g.neg, m: (rel) => g.rx.test(rel) });
   }
+  push(DEFAULT_IGNORE);
+  push(loadConfig().ignore || []);
+  return list;
+}
+function ignored(rel) {
+  /* 缓存键：.gitignore 的 mtime + 当前配置里的 ignore 列表 —— service 是长驻进程，
+   * 改完 .gitignore / sync.config.json 不用重启就能生效。
+   * 只算一次 stat（配置那边 loadConfig() 已经自己按 mtime 缓存了）。 */
+  let gk = 0;
+  try { gk = fs.statSync(GITIGNORE_PATH).mtimeMs; } catch (e) { gk = 0; }
+  const key = gk + '|' + JSON.stringify(loadConfig().ignore || []);
+  if (!_matchers || _matchersKey !== key) { _matchers = buildMatchers(); _matchersKey = key; }
   const segs = rel.split('/');
   const base = segs[segs.length - 1];
   let hit = false;
@@ -913,6 +1038,75 @@ async function collectFilePlan(peer, opts) {
   return plan;
 }
 
+/**
+ * `--delete`：镜像式删除 —— 把「对端有、本机清单里没有」的文件在本机删掉。
+ *
+ * 用户口径（2026-10）：希望同步能删文件。
+ * 默认**不开**：这个功能一旦方向搞反就是不可逆的数据丢失，必须显式 `--delete`。
+ *
+ * 安全边界（每一条都是刻意的）：
+ *   1. 只删**文件**，从不删目录（空目录留着无所谓，省得连 .git 内部结构都动到）；
+ *   2. 只删**本机**的文件（push 时对端的多余文件不碰；pull 时才是本机）；
+ *      反过来，「本机有、对端没有」的文件要同步到对端后由**对端自己**跑 `--delete`
+ *      才能删 —— 本机没有权限直接删对端的文件（服务端故意不提供删除接口）。
+ *   3. 忽略清单里的路径永不删；
+ *   4. 同一次同步里**传失败的文件不删**（`failedPaths`），否则会「传失败 + 删掉」= 真丢数据；
+ *   5. 对端清单为空 / 明显拿不到时直接跳过（避免一次网络抖动把本机文件清空）；
+ *   6. `--dry` 时只列不删。
+ */
+async function deleteExtras(plan, opts, direction, failedPaths) {
+  const extras = direction === 'push' ? plan.onlyRemote : plan.onlyLocal;
+  const who = direction === 'push' ? '对端' : '本机';
+  if (!extras.length) return { ok: true, deleted: 0, skipped: 0, code: 'OK', msg: '没有需要删除的多余文件' };
+  /* 安全闸：对端清单一个文件都没有，却报「本机多出一堆」—— 多半是清单没取到，别删。 */
+  if (direction === 'push' && plan.remote.size === 0) {
+    warn('[!] 对端清单是空的，跳过删除（避免误删；先确认对端服务与口令正常）。');
+    return { ok: false, deleted: 0, skipped: extras.length, code: 'SKIP_EMPTY_MANIFEST',
+      msg: '对端清单为空，已跳过删除' };
+  }
+  const targets = [];
+  let skipped = 0;
+  for (const x of extras) {
+    const p = x.p;
+    if (ignored(p)) { skipped++; continue; }               // 规则 3
+    if (failedPaths && failedPaths.has(p)) { skipped++; continue; }  // 规则 4
+    const abs = path.resolve(ROOT, p);
+    if (!abs.startsWith(ROOT + path.sep)) { skipped++; continue; }   // 越界保护
+    let st = null;
+    try { st = fs.statSync(abs); } catch (e) { skipped++; continue; } // 已经不在了
+    if (!st.isFile()) { skipped++; continue; }             // 规则 1：只删文件
+    targets.push({ p, abs });
+  }
+  if (opts.dry) {
+    for (const t of targets) log('[dry] 会删除 ' + t.p);
+    return { ok: true, deleted: 0, skipped, code: 'OK',
+      msg: '演练：会删除 ' + targets.length + ' 个' + who + '多余的文件' + (skipped ? '（跳过 ' + skipped + '）' : '') };
+  }
+  let deleted = 0, failed = 0;
+  for (const t of targets) {
+    try { fs.unlinkSync(t.abs); deleted++; log('  ✗ 删除 ' + t.p); jobLine('删除 ' + t.p); }
+    catch (e) { failed++; warn('  [!] 删除失败 ' + t.p + '：' + ((e && e.message) || e)); }
+  }
+  /* 顺手清掉因为删文件而空掉的目录（只往上走到游戏根，且目录确实为空才删）。 */
+  const dirs = new Set();
+  for (const t of targets) dirs.add(path.dirname(t.abs));
+  for (const d of dirs) pruneEmptyDirs(d);
+  log(green('[√] 删除 ' + deleted + ' 个' + who + '多余的文件') + (skipped ? '（跳过 ' + skipped + '）' : '') + (failed ? '，失败 ' + failed : ''));
+  return { ok: true, deleted, skipped, failed, code: failed ? 'PARTIAL' : 'OK',
+    msg: '删除 ' + deleted + ' 个' + who + '多余的文件' + (failed ? '，失败 ' + failed : '') };
+}
+/** 从最深的目录往上删空目录，遇到非空 / 到游戏根就停。 */
+function pruneEmptyDirs(dir) {
+  let cur = dir;
+  while (cur.startsWith(ROOT + path.sep)) {
+    let names;
+    try { names = fs.readdirSync(cur); } catch (e) { return; }
+    if (names.length) return;
+    try { fs.rmdirSync(cur); } catch (e) { return; }
+    cur = path.dirname(cur);
+  }
+}
+
 async function filesSync(peer, opts, direction) {
   jobPhase('对比两边文件清单');
   const plan = await collectFilePlan(peer, opts);
@@ -927,9 +1121,13 @@ async function filesSync(peer, opts, direction) {
   else if (fresh) log('其中 ' + fresh + ' 个是' + (direction === 'push' ? '本机新加的' : '对端新加的') + '文件');
   if (opts.dry) {
     for (const c of changes) log('[dry] ' + (direction === 'push' ? '→ ' : '← ') + c.p);
+    if (opts.del) await deleteExtras(plan, opts, direction, null);
     return { ok: true, sent: 0, code: 'OK', msg: '演练：会传 ' + changes.length + ' 个文件（没有真的写）' };
   }
   let done = 0, bytes = 0, failed = 0, refusedByPeer = 0, idx = 0;
+  /* 这一趟里**传输失败**的路径 —— `--delete` 必须避开它们（见 deleteExtras 规则 4），
+   * 否则「本机没有 / 传失败」会被当成「对端多余」而在本机删掉。 */
+  const failedPaths = new Set();
   const CONC = 4;
   async function worker() {
     while (idx < changes.length) {
@@ -964,6 +1162,7 @@ async function filesSync(peer, opts, direction) {
           jobLine('⊘ ' + c.p + '（对端忽略清单拒收）');
         } else {
           failed++;
+          failedPaths.add(c.p);        // --delete 必须避开它（见 deleteExtras 规则 4）
           jobLine('✗ ' + c.p + '：' + em);
           warn('  [!] ' + c.p + ' 失败：' + em);
         }
@@ -972,19 +1171,35 @@ async function filesSync(peer, opts, direction) {
   }
   await Promise.all(Array.from({ length: Math.max(1, Math.min(CONC, changes.length)) }, worker));
   log(green('[√] ' + (direction === 'push' ? '推送' : '拉取') + ' ' + done + '/' + changes.length + ' 个文件（' + (bytes / 1024).toFixed(0) + ' KB）') + (failed ? '，失败 ' + failed + ' 个' : ''));
-  if (direction === 'push' && plan.onlyRemote.length) log('    对端还多出 ' + plan.onlyRemote.length + ' 个本机没有的文件（不会自动删）');
-  if (direction === 'pull' && plan.onlyLocal.length) log('    本机还有 ' + plan.onlyLocal.length + ' 个对端没有的文件（不会自动删）');
+  if (direction === 'push' && plan.onlyRemote.length) log('    对端还多出 ' + plan.onlyRemote.length + ' 个本机没有的文件' + (opts.del ? '（下面按 --delete 处理）' : '（不会自动删，需要时加 --delete）'));
+  if (direction === 'pull' && plan.onlyLocal.length) log('    本机还有 ' + plan.onlyLocal.length + ' 个对端没有的文件' + (opts.del ? '（下面按 --delete 处理）' : '（不会自动删，需要时加 --delete）'));
   if (refusedByPeer) {
     log('    对端按自己的忽略清单拒收了 ' + refusedByPeer + ' 个文件');
     log('    （最常见的原因：对端那台还是旧版本/旧目录布局。在对端跑一次');
     log('      node scripts/sync/sync.js restart，或者双击 scripts/restart-sync.cmd，之后再同步一次就会过去。）');
   }
+  /* --delete：传完之后再删，这样「新文件先落地、再清理对面没有的」顺序最安全。 */
+  let delInfo = null;
+  if (opts.del) {
+    log('');
+    log(cyan('—— 删除' + (direction === 'push' ? '对端' : '本机') + '多余的文件（--delete）——'));
+    jobPhase('删除多余文件');
+    try { delInfo = await deleteExtras(plan, opts, direction, failedPaths); }
+    catch (e) { warn('[!] 删除阶段出错：' + ((e && e.message) || e)); }
+  }
   const verb = direction === 'push' ? '推送' : '拉取';
-  if (!changes.length) return { ok: true, sent: 0, failed: 0, code: 'OK', msg: '两边文件一致，没有需要' + verb + '的' };
+  if (!changes.length) {
+    const dm = delInfo ? '；' + delInfo.msg : '';
+    return { ok: true, sent: 0, failed: 0, deleted: delInfo ? delInfo.deleted : 0,
+      code: delInfo && delInfo.code !== 'OK' ? delInfo.code : 'OK',
+      msg: '两边文件一致，没有需要' + verb + '的' + dm };
+  }
   if (failed && !done) throw syncError('FILES_FAILED', verb + '失败：' + failed + ' 个文件都没成功，多半是对端服务断了或磁盘写不进去。');
-  const extra = (failed ? '，失败 ' + failed + ' 个' : '') + (refusedByPeer ? '，对端忽略 ' + refusedByPeer + ' 个（对端版本较旧）' : '');
+  const extra = (failed ? '，失败 ' + failed + ' 个' : '') + (refusedByPeer ? '，对端忽略 ' + refusedByPeer + ' 个（对端版本较旧）' : '')
+    + (delInfo && delInfo.deleted ? '，删除 ' + delInfo.deleted + ' 个' : '');
   return {
-    ok: true, sent: done, failed, code: failed ? 'PARTIAL' : (refusedByPeer ? 'PARTIAL_PEER_OLD' : 'OK'),
+    ok: true, sent: done, failed, deleted: delInfo ? delInfo.deleted : 0,
+    code: failed ? 'PARTIAL' : (refusedByPeer ? 'PARTIAL_PEER_OLD' : 'OK'),
     msg: verb + ' ' + done + '/' + changes.length + ' 个文件（' + (bytes / 1024).toFixed(0) + ' KB）' + extra,
   };
 }
@@ -1508,6 +1723,7 @@ function parseArgs(argv) {
     else if (a === '--force') opts.force = true;
     else if (a === '--dry') opts.dry = true;
     else if (a === '--verify') opts.verify = true;
+    else if (a === '--delete' || a === '--mirror') opts.del = true;
     else if (a === '--port') opts.port = Number(argv[++i]);
     else if (a === '--peer') opts.peer = argv[++i];
     else if (a === '--interval') opts.interval = Number(argv[++i]);
@@ -1613,7 +1829,12 @@ const HELP = `松鼠大战 · 双机同步（node scripts/sync/sync.js <命令> 
 
 选项：--save 只同步存档 / --files 只同步文件 / --all 两者（默认两者）
       --force 存档比对方旧也覆盖 / --dry 只列计划 / --verify 文件用 sha1 比对
+      --delete 删除「对端没有、本机却有」的多余文件（镜像式；默认不开，先加 --dry 看一遍）
       --peer <名字或IP> / --interval <秒>
+
+忽略规则：以仓库根的 **.gitignore** 为准（自动读取，改完不用重启服务），
+      再叠加脚本内置的同步专属规则与 sync.config.json 里的 ignore。
+      所以 references/、save/、out/、node_modules/、构建产物等都不会被同步。
 
 例子：
   node scripts/sync/sync.js start                     # 本机开接收服务

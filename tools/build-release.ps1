@@ -2,7 +2,7 @@
   build-release.ps1 —— 松鼠大战怀旧版 · 一键出包（Windows exe + 安装包 + 安卓 APK）
 
   一条命令做完六件事：
-    1) 版本号对齐：version.json / src-tauri(Cargo.toml / Cargo.lock / package.json / tauri.conf.json)
+    1) 版本号对齐：scripts\version.json / src-tauri(Cargo.toml / Cargo.lock / package.json / tauri.conf.json)
     2) 删掉 src-tauri\dist 里**上一个版本**的 exe / apk（只删本次不产出的，精确到文件）
     3) 编 Windows 轻壳 exe + NSIS 安装包（真正干活的是 tools\build-tauri-app.cjs）
     4) 编安卓 APK（真正干活的是 tools\build-apk.ps1，中文路径/NDK 那些坑都注释在里面）
@@ -13,17 +13,22 @@
   改名 → 清 10 GB 缓存」这一串每次发版都要手工敲一遍，漏一步就是「装了个旧版本」或者
   「C 盘少 10 GB」。这里把它们串起来，并且**每一步都先体检、失败就停**。
 
-  常用（在仓库根目录跑）：
-    pwsh -File tools\build-release.ps1                              # 自动 0.4.6 → 0.4.7，出全套
-    pwsh -File tools\build-release.ps1 -Version 0.5.0               # 指定版本
-    pwsh -File tools\build-release.ps1 -NoBump                      # 不动版本号，按当前版本出包
-    pwsh -File tools\build-release.ps1 -DryRun                      # 只打印计划，不写任何文件
-    pwsh -File tools\build-release.ps1 -SkipApk                     # 只出 Windows（省 10 分钟）
-    pwsh -File tools\build-release.ps1 -SkipInstaller               # 不出 69 MB 的安装包
-    pwsh -File tools\build-release.ps1 -Name 松鼠大战怀旧版          # 换安装包 / APK 的基名
-    pwsh -File tools\build-release.ps1 -ApkName '{name}-{version}-{abi}.apk'
-    pwsh -File tools\build-release.ps1 -CleanOnly                   # 只清缓存，不打包
-    pwsh -File tools\build-release.ps1 -KeepCache                   # 打完保留缓存（下次编得快）
+  最省事（仓库根目录**双击**，或在命令行里跑）：
+    打包.cmd        # 一键全套：版本号 patch +1 → 清旧包 → exe / 安装包 / APK → 清 5~10 GB 缓存
+    清缓存.cmd      # 一键回收磁盘（等价于下面的 -CleanOnly，不打包也不动 dist 里的产物）
+  这两个 .cmd 只是薄壳：自动挑 pwsh / powershell（本机可能只装了后者），参数原样转给本脚本。
+  用 PowerShell 直接跑也行（没有 pwsh 就换 powershell）：
+    powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-release.ps1          # 自动下一版，出全套
+                                                                                          # 例：0.4.8 → 0.4.9
+    powershell ... -Version 0.5.0        # 指定版本
+    powershell ... -NoBump               # 不动版本号，按当前版本出包
+    powershell ... -DryRun               # 只打印计划，不写任何文件
+    powershell ... -SkipApk              # 只出 Windows（省 10 分钟）
+    powershell ... -SkipInstaller        # 不出 66 MB 的安装包
+    powershell ... -Name 松鼠大战怀旧版   # 换安装包 / APK 的基名
+    powershell ... -ApkName '{name}-{version}-{abi}.apk'
+    powershell ... -CleanOnly            # 只清缓存，不打包
+    powershell ... -KeepCache            # 打完保留缓存（下次编得快）
 
   名称模板占位符：{name} 基名 / {version} 版本号 / {abi} 安卓 ABI / {arch} Windows 架构 / {date} 今天
   默认：{name} = tauri.conf.json 的 productName（squirrel_fight）
@@ -172,14 +177,15 @@ if (-not $CleanOnly) {
 # ============================================================
 Say '版本号'
 
-$verJsonPath = Join-Path $ROOT 'version.json'
+# version.json 住在 scripts/ 里（与 update-game.js 的读取路径一致；发布包里也在这层）。
+$verJsonPath = Join-Path $ROOT 'scripts\version.json'
 $tauriConfPath = Join-Path $TAURI 'tauri.conf.json'
-if (-not (Test-Path $verJsonPath)) { Die "找不到 version.json" }
+if (-not (Test-Path $verJsonPath)) { Die "找不到 scripts\version.json" }
 if (-not (Test-Path $tauriConfPath)) { Die "找不到 tauri.conf.json" }
 
 $verJsonText = Read-Text $verJsonPath
 $tauriConfText = Read-Text $tauriConfPath
-if ($verJsonText -notmatch '"version"\s*:\s*"([^"]+)"') { Die 'version.json 里没找到 version 字段' }
+if ($verJsonText -notmatch '"version"\s*:\s*"([^"]+)"') { Die 'scripts/version.json 里没找到 version 字段' }
 $current = $Matches[1]
 if ($current -notmatch '^\d+\.\d+\.\d+$') { Die "当前版本号格式不对：'$current'" }
 
@@ -200,6 +206,8 @@ if ($CleanOnly) {
 }
 if ($target -notmatch '^\d+\.\d+\.\d+$') { Die "目标版本号格式不对：'$target'（要 x.y.z）" }
 
+$segNext = $target.Split('.')
+$nextVer = "$($segNext[0]).$($segNext[1]).$([int]$segNext[2] + 1)"
 $verChanged = $target -ne $current
 $commit = (& git -C $ROOT rev-parse --short HEAD 2>$null)
 if (-not $commit) { $commit = 'nogit' }
@@ -219,7 +227,7 @@ $versionEdits = @(
 $lockPath = Join-Path $TAURI 'Cargo.lock'
 
 if ($DryRun -or $CleanOnly) {
-  Note "[跳过版本写入] $(if ($CleanOnly) { '-CleanOnly' } else { '-DryRun' })：会改 Cargo.toml / Cargo.lock / src-tauri/package.json / tauri.conf.json / version.json / gen\android\app\tauri.properties 到 $target"
+  Note "[跳过版本写入] $(if ($CleanOnly) { '-CleanOnly' } else { '-DryRun' })：会改 Cargo.toml / Cargo.lock / src-tauri/package.json / tauri.conf.json / scripts\version.json / gen\android\app\tauri.properties 到 $target"
 } else {
   foreach ($e in $versionEdits) {
     if (-not (Test-Path $e.Path)) { Warn "缺文件，跳过：$($e.What)"; continue }
@@ -239,7 +247,7 @@ if ($DryRun -or $CleanOnly) {
   $n = Replace-First $n '("commit"\s*:\s*")[^"]*(")' $commit
   $n = Replace-First $n '("date"\s*:\s*")[^"]*(")' $today
   Write-Utf8NoBom $verJsonPath $n
-  Ok "version.json → $target @ $commit $today"
+  Ok "scripts\version.json → $target @ $commit $today"
 
   # 安卓的版本号还有一处：gen/android/app/tauri.properties（gitignore 掉了，但是
   # build-apk.ps1 同步到 ASCII 副本的**真源**）。versionCode 用 Tauri 的算法
@@ -436,7 +444,7 @@ if (-not $KeepCache) {
   Say '按 -KeepCache 保留打包缓存'
   $afterSize = 0
   foreach ($i in (Get-CacheList)) { $afterSize += $i.Size }
-  Note ("打包后仍留着 $(Fmt-Size $afterSize)；想立刻回收再跑一次：powershell -File tools\build-release.ps1 -CleanOnly")
+  Note ("打包后仍留着 $(Fmt-Size $afterSize)；想立刻回收：双击 清缓存.cmd（或 powershell -File tools\build-release.ps1 -CleanOnly）")
 }
 
 # ============================================================
@@ -454,6 +462,8 @@ Write-Host ''
 Write-Host '   接下来（想发布才做）：' -ForegroundColor DarkGray
 Write-Host "     git add -A; git commit -m `"$target`"" -ForegroundColor DarkGray
 Write-Host "     git tag v$target; git push origin main --tags" -ForegroundColor DarkGray
+Write-Host ''
+Write-Host "   下一次出包：直接双击 打包.cmd（版本会变成 $nextVer）；只回收磁盘双击 清缓存.cmd" -ForegroundColor DarkGray
 Write-Host '   （推 v* 标签会触发 .github/workflows/release.yml 出便携包 Release）' -ForegroundColor DarkGray
 
 # 显式收尾：别让最后一条外部命令的退出码漏成脚本的退出码

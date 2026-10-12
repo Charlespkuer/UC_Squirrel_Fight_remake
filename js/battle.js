@@ -75,9 +75,9 @@
    * 2026-10 用户口径：**所有**倍速 / 跳过键统一用「普通战斗的跳过键」那一档尺寸
    * 190x70（贴住 1170x690 画布右下角，右/下各留 16px）：
    *   · 只有倍速（挑战塔 / 无尽塔 <20 层）→ 单键 190x70；
-   *   · 只有跳过（普通战斗的跳过播放）→ 同样 190x70；
-   *   · 倍速 + 跳过（无尽塔 20 层起）→ **两个 190x70 在右下并排**（中间留 8px 缝），
-   *     整块正好贴住右下角（右边缘 1170−16）。
+   *   · 只有跳过（历史上普通战斗只有跳过）→ 同样 190x70；
+   *   · 倍速 + 跳过（**普通战斗**、以及无尽塔 20 层起）→ **两个 190x70 在右下并排**
+   *     （中间留 8px 缝，**倍速键在跳过键左侧**），整块正好贴住右下角（右边缘 1170−16）。
    * 返回 { rects: { speed, skip }, both, base }，rect 为 null 表示这个键不显示。 */
   function cornerLayout(speedToggle, allowSkip) {
     const single = { x: W - 16 - 190, y: H - 15 - 70, w: 190, h: 70 };   // = { 964, 605, 190, 70 }
@@ -155,7 +155,9 @@
     for (const side of wears) for (const wear of side) if (wear) load.add(wear.src);
     for (const layer of region.layers) { if (layer.id) load.add(layer.id); if (layer.fx) load.add(layer.fxSheet || layer.fx); }
     await Engine.loadSheets([...load]);
-    for (const layer of region.layers) if (layer.id && !Engine.has(layer.id)) await Engine.loadSheetFromUrl(layer.id, 'images/' + layer.id + '.png');
+    /* 场景层兜底：清单里没有的整片图集按 id 直接找 `images/atlas/<id>.png`
+     *（2026-10 images 重构后图集统一收在 images/atlas/，以前是 images/<id>.png）。 */
+    for (const layer of region.layers) if (layer.id && !Engine.has(layer.id)) await Engine.loadSheetFromUrl(layer.id, 'images/atlas/' + layer.id + '.png');
 
     const player = Engine.makePlayer(), scenePlayers = [];
     const fighters = sources.map((info, side) => ({ info, side, npc: info.npcType ? npcBase(info.npcType) : null, inst: null, dead: false, wears: wears[side] }));
@@ -170,14 +172,18 @@
       : [0, 0];
     const maxHp = sources.map((f, side) => Number(f.maxHp) > 0 ? Math.max(hps[side], Math.round(Number(f.maxHp))) : hps[side]);
     const floaters = [], sleepers = new Set();
-    let stopped = false, skipped = false, ending = false, raf = 0, round = 99, countdown = null;
+    let stopped = false, skipped = false, skippedByButton = false, ending = false, raf = 0, round = 99, countdown = null;
     let last = performance.now(), shake = 0, combatStarted = false;
     /* 右下角操作区：绘制与点击区共用同一组矩形。
      * 原版字面坐标 (983,609) 的 164x60 框会把按钮压出血条，所以用 190x70。
-     * 2026-10：无尽塔 30 层起**同时**要倍速键与跳过键 —— 两个都在时把这块横切成两半
-     * （中间留 8px 缝），只有一个时仍占满整块，与旧版逐像素一致。 */
+     * 2026-10：**普通战斗**与「无尽塔 20 层起」都要**同时**有倍速键与跳过键 ——
+     * 两个都在时把这块横切成两半（倍速在左、跳过在右，中间留 8px 缝），
+     * 只有一个时仍占满整块，与旧版逐像素一致。 */
     const speedToggle = !!opts.speedToggle;
     const allowSkip = opts.allowSkip !== false;
+    /* 倍速上限：默认 3（挑战塔 / 无尽塔的 1×→2×→3×）；**普通战斗由 main.js 传 2**，
+     * 于是倍速键在 1×↔2× 之间来回切，不给 3×（2026-10 用户口径）。 */
+    const speedMax = Math.max(1, Math.min(3, Math.floor(Number(opts.speedMax) || 3)));
     let speed = 1;
     const corner = cornerLayout(speedToggle, allowSkip);
     const cornerRects = corner.rects;
@@ -211,17 +217,24 @@
       for (const wake of [...sleepers]) wake();
       sleepers.clear();
     }
-    const controller = { cancel() { stopped = true; clean(); }, skip() { if (!ending && !skipped && !stopped) { skipped = true; if (pickups) pickups.skip(); for (const wake of [...sleepers]) wake(); } }, result };
+    /* `skip(byButton)`：
+     *   · `byButton` = 玩家**按的是右下角「跳过」键** → 2026-10 用户口径：这一场的
+     *     战斗中悬浮奖励只收 2/3（随机抹掉一项，见 battle-drops 的 trimOne）；
+     *   · 不传（程序化收尾 / 自动跳过 / 录像）→ 保持原版口径三份全发。
+     *   战斗胜负与回合流不受影响（结果早由 Sim.simulate 算完，跳过只是不播动画）。 */
+    const controller = { cancel() { stopped = true; clean(); },
+      skip(byButton) { if (!ending && !skipped && !stopped) { skipped = true; if (byButton) skippedByButton = true; if (pickups) pickups.skip(!!byButton); for (const wake of [...sleepers]) wake(); } }, result };
     activeController = controller;
-    /** 右下角「倍速」键：1× → 2× → 3× → 1× 循环。 */
+    /** 右下角「倍速」键：在 1×…speedMax× 之间循环（普通战斗 = 1×↔2×；塔 = 1×→2×→3×）。 */
     function speedAction() {
       if (ending || stopped || !speedButton) return;
-      speed = speed === 1 ? 2 : speed === 2 ? 3 : 1;
+      speed = speed >= speedMax ? 1 : speed + 1;
       speedButton.textContent = speed + '×';
       speedButton.setAttribute('aria-label', '切换战斗速度（当前 ' + speed + '×）');
     }
-    /** 右下角「跳过」键：直接跳到结算（结果早已由模拟器算好，跳过不改变胜负）。 */
-    function skipAction() { controller.skip(); }
+    /** 右下角「跳过」键：直接跳到结算（结果早已由模拟器算好，跳过不改变胜负）。
+     *  按它才会触发「悬浮奖励只收 2/3」（用户口径 2026-10，见 controller.skip 的说明）。 */
+    function skipAction() { controller.skip(true); }
     if (speedButton) speedButton.onclick = speedAction;
     if (skipButton) skipButton.onclick = skipAction;
     function onClick(event) {
@@ -622,6 +635,9 @@
       const hpRound = [...result.rounds].reverse().find((x) => x && Array.isArray(x.hpAfter) && x.hpAfter.length === 2);
       result.hpAfter = hpRound ? [Math.max(0, hpRound.hpAfter[0]), Math.max(0, hpRound.hpAfter[1])] : null;
       const loot = pickups ? pickups.summary() : { items: [], ups: [] };
+      /* 这一场是不是**玩家按跳过键**跳过的 —— 挑战塔 / 无尽塔的战斗没有飘物
+       *（collectDrops:false），它们的奖励按层结算，靠这个标记去扣「只收 2/3」。 */
+      result.skipped = skippedByButton;
       if (loot.items.length) result.pickups = loot.items;
       if (opts.onEnd) opts.onEnd(result.winner, result, loot);
     }

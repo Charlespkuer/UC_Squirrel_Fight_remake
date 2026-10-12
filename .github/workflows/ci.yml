@@ -33,12 +33,29 @@ jobs:
       - name: 单元与集成测试
         shell: bash
         run: |
-          for t in test-state test-balance test-points test-combat-rules test-buff-tags test-battle-drops \
-                   test-main-battle test-extras test-fusion test-stages test-stage-balance \
-                   test-mint-shop test-sync; do
+          # 直接枚举目录里的套件，不再手写清单：以前手写的清单在测试被删/改名后
+          # 不会跟着变（例如 tools/test-balance.cjs 删了，清单还留着），
+          # 于是三个平台都会「Cannot find module」整条挂掉。
+          # 全部跑完再汇总失败，一次就能看到所有问题。
+          # 失败时额外打一条 GitHub 注解（::error::）：**哪台机器挂在哪套件**一眼可见，
+          # 不用翻几十屏日志（注解也能从 check-runs API 匿名读到，方便远程排查）。
+          fail=0
+          for t in tools/test-*.cjs; do
             echo "──── $t ────"
-            node "tools/$t.cjs"
+            if ! node "$t"; then
+              fail=1
+              echo "::error title=套件失败（${{ matrix.os }}）::$t 未通过"
+            fi
           done
+          exit $fail
+
+      # 检出的行尾也要报出来：Git for Windows 默认 core.autocrlf=true，
+      # 一旦检出成 CRLF，「切行 + /^\s*\}$/ 锚定正则」那类文本断言就会全空
+      # （曾经就是 Windows 专属红灯的根因）。
+      - name: 行尾体检
+        shell: bash
+        run: |
+          node -e "const b=require('fs').readFileSync('js/tower-ui.js');console.log('js/tower-ui.js CRLF:', b.includes(Buffer.from('\r\n')))"
 
       # 动画回归需要可选依赖 @napi-rs/canvas（三个平台都有预编译包）；装不上就自动 SKIP
       - name: 动画回归（可选依赖）

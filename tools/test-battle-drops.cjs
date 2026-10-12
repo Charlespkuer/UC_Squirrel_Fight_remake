@@ -24,7 +24,7 @@ function setup() {
   }
   const c={location:{search:'?qa=1'},document:{createElement:element},localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)}};
   c.window=c;vm.createContext(c);
-  for(const file of ['references/orig/Map.min.js','references/orig/GameDict.js','js/gamedata.js','js/state.js','js/battle-drops.js'])vm.runInContext(fs.readFileSync(path.join(project,file),'utf8'),c,{filename:file});
+  for(const file of ['js/gamedict.js','js/gamedata.js','js/state.js','js/battle-drops.js'])vm.runInContext(fs.readFileSync(path.join(project,file),'utf8'),c,{filename:file});
   c.State.newGame('掉落测试');
   const root={appendChild(node){nodes.push(node);}};
   function create(values=[0,0,0,0],withRoot=true,kind){let i=0;return c.BattleDrops.create({root:withRoot?root:undefined,random:()=>values[i++]??0,kind});}
@@ -163,6 +163,65 @@ test('10 个天梯碎片 + 50 金松果随机合成一个转化丸',()=>{
   assert.equal(s.goldPoint,150,'消耗 50 金松果');
   assert.equal(s.props[r.prop],1,'转化丸进背包');
   assert.equal(g.c.State.composeConvertPill().ok,false,'碎片用完后不能再合');
+});
+
+test('蓝色碎片小幅降期望：除碎片竞技场外都吃同一个系数，白/绿不动',()=>{
+  const g=setup(),mul=g.c.GData.BLUE_SHARD_DROP_MUL;
+  assert.ok(mul>0&&mul<1,'系数应当是「小幅下调」：'+mul);
+  // ① 两个拾取池：只有蓝色碎片（26）按系数缩，白/绿与其它掉落原样
+  const blue=(pool)=>pool.find(p=>p.id===26).weight;
+  assert.equal(blue(g.c.BattleDrops.pool),1*mul,'普通战斗拾取池的蓝碎片权重');
+  assert.equal(blue(g.c.BattleDrops.ladderPool),6*mul,'天梯赛拾取池的蓝碎片权重');
+  assert.equal(g.c.BattleDrops.pool.find(p=>p.id===24).weight,5,'白色碎片不变');
+  assert.equal(g.c.BattleDrops.pool.find(p=>p.id===25).weight,3,'绿色碎片不变');
+  // ② 常驻挑战关卡：熊猫关（基础就是蓝）复摇失败就这次不给；仙鹤关的绿碎片不受影响
+  const seq=(c,values)=>vm.runInContext('Math.random=(function(){const q='+JSON.stringify(values)+';let i=0;'+
+    'return function(){return i<q.length?q[i++]:0.5;};})()',c);
+  const stage=(stageId,values)=>{
+    const s=g.c.State.state();s.level=70;s.props={};
+    for(let i=1;i<=18;i++)s.stages[i]={npcIndex:3,passed:true};
+    s.stageRuns={};s.stageRuns[stageId]={attempt:7,npcIndex:3};
+    seq(g.c,values);
+    const r=g.c.State.finishStageBattle(stageId,7,true,1);
+    return r.drop;
+  };
+  assert.equal(stage(13,[0.1,0.5]).id,26,'熊猫关：蓝碎片复摇命中 → 照常掉');
+  assert.equal(stage(13,[0.1,0.99]),null,'熊猫关：复摇没中 → 这次不掉（基础本来就只有蓝）');
+  assert.equal(stage(7,[0.1,0.99]).id,25,'仙鹤★1：绿碎片掉落完全不受蓝碎片系数影响');
+  // ③ 挑战塔过关的那一处也必须用同一个系数（塔模块在这里不加载，改查源码常量）
+  const src=(f)=>fs.readFileSync(path.join(project,f),'utf8');
+  assert.match(src('js/state.js'),/BLUE_SHARD_DROP_MUL/,'关卡掉落要用共享系数');
+  assert.match(src('js/tower.js'),/BLUE_SHARD_DROP_MUL/,'挑战塔过关要用共享系数');
+});
+
+test('按跳过键只收 2/3（随机抹掉一项）；程序化收尾 / 录像仍按原版补齐三份',()=>{
+  /* 用户口径 2026-10：用**跳过键**跳过战斗播放时只能固定收 2/3，
+   * 具体实现＝随机抹掉一包三项里的一项（`skip(true)`）。 */
+  // ① 抹掉哪一项由随机流决定：这里第 5 个随机数 = 0 → 抹掉第 1 项（经验 15，这一包是 [15,8,21]）。
+  const g=setup(),drop=g.create([0,0,.4,.6,0]);
+  drop.skip(true);
+  const sum=drop.summary();
+  same(sum.items.map(x=>x.id),[8,21]);
+  assert.equal(sum.lost&&sum.lost.id,15,'结算要能说出少收了哪一项');
+  assert.equal(g.s().exp,0,'被抹掉的那份经验不发');
+  assert.equal(g.s().goldPoint,102,'剩下两份照常入账');
+  // ② 换个随机数 → 抹掉的是另一项（≈1 → 第 3 项 21），说明确实是「随机一项」。
+  const g2=setup(),drop2=g2.create([0,0,.4,.6,0.999999]);
+  drop2.skip(true);
+  same(drop2.summary().items.map(x=>x.id),[15,8]);
+  assert.equal(drop2.summary().lost.id,21);
+  // ③ 不传 / 传 false ＝ 原版口径（战斗自然收尾、录像回放）：三份全发、lost 为 null。
+  const g3=setup(),plain=g3.create([0,0,.4,.6]);
+  plain.skip();
+  same(plain.summary().items.map(x=>x.id),[15,8,21]);
+  assert.equal(plain.summary().lost,null);
+  const g4=setup(),prog=g4.create([0,0,.4,.6]);
+  prog.skip(false);
+  assert.equal(prog.summary().items.length,3);
+  assert.equal(prog.summary().lost,null);
+  // ④ trimOne 的边界：一项/空清单不会被抹成负数。
+  assert.deepEqual(g4.c.BattleDrops.trimOne([{id:1}]).list,[{id:1}]);
+  assert.equal(g4.c.BattleDrops.trimOne([]).lost,null);
 });
 
 let failed=0;for(const[name,run]of tests){try{run();console.log('PASS',name);}catch(error){failed++;console.error('FAIL',name,error.stack);}}

@@ -23,7 +23,7 @@ function findRoot(start) {
 }
 
 const rootDir = findRoot(__dirname);
-const files = ['references/orig/Map.min.js', 'references/orig/GameDict.js', 'js/gamedata.js', 'js/state.js', 'js/classic-fusion.js'];
+const files = ['js/gamedict.js', 'js/gamedata.js', 'js/state.js', 'js/classic-fusion.js'];
 
 function setup(ids = [21, 21, 21, 22, 201, 202]) {
   const storage = new Map([['ssdz_save_v1', 'untouched']]), modals = [], toasts = [];
@@ -71,7 +71,7 @@ function setup(ids = [21, 21, 21, 22, 201, 202]) {
         return page;
       },
       btn: (label, action) => '<button data-action="' + action + '">' + label + '</button>',
-      spr: (sheet, label) => '<img src="images/classic/sprites/' + sheet + '-' + label + '.png">',
+      spr: (sheet, label) => '<img src="images/ui/sprites/' + sheet + '-' + label + '.png">',
       toast: (message) => toasts.push(message),
       modal: (title, html, buttons) => modals.push({ title, html, buttons }),
     },

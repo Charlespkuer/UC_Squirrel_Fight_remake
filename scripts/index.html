@@ -30,8 +30,8 @@ window.addEventListener('unhandledrejection', function (e) {
   <div id="boot-note">初始化…</div>
 </div>
 <!-- 原版数据（武器/技能/道具字典 + 素材清单 + 动画帧表）：
-     由 tools/gen-vendor-data.cjs 从 references/orig/ 抽取生成，
-     运行时只加载这一份，游戏中不再引用 references/ 下的任何文件 -->
+     游戏数据的唯一来源，已直接提交进仓库，
+     运行时只加载这一份，游戏中不引用 references/ 下的任何文件（那些只是参考资料） -->
 <script src="js/gamedict.js"></script>
 <!-- 复刻版代码 -->
 <script src="js/engine.js"></script>
@@ -48,6 +48,8 @@ window.addEventListener('unhandledrejection', function (e) {
 <script src="js/classic-ui.js"></script>
 <script src="js/classic-extras.js"></script>
 <script src="js/classic-fusion.js"></script>
+<!-- 无尽塔剧情（文本 + 播片机 + 「什么时候该播」）：要在 tower-ui.js 之前 -->
+<script src="js/tower-plot.js"></script>
 <script src="js/tower-ui.js"></script>
 <script src="js/debug.js"></script>
 <script src="js/main.js"></script>

@@ -59,7 +59,7 @@ class Handler(SimpleHTTPRequestHandler):
         meta = save_meta()
         if self.command == "GET":
             if "meta" in query:
-                return self._json(200, {"ok": True, "path": SAVE_FILE, **meta})
+                return self._json(200, {"ok": True, "path": SAVE_FILE, "root": ROOT, **meta})
             if not meta["exists"]:
                 return self._json(200, {"ok": True, "exists": False, "savedAt": 0, "data": None, "path": SAVE_FILE})
             with open(SAVE_FILE, "r", encoding="utf-8") as fh:

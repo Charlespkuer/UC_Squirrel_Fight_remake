@@ -21,6 +21,17 @@
   const find = (root, sel) => root.querySelector(sel);
   function on(root, action, handler) { const el = find(root, '[data-action="' + action + '"]'); if (el) el.onclick = handler; return el; }
   function back(root, handler, label) { const el = on(root, 'home', handler); if (el) el.textContent = label || '返回'; }
+  /** 【2026-10 用户口径】两座塔页面（挑战塔 / 无尽塔）的「返回」都回**上一级界面** = 关卡页
+   *  （挑战塔与无尽塔本来就是关卡页里那两颗入口进来的：`[data-action="tower-entry"]` /
+   *  `[data-action="endless-entry"]`），不是直接回主界面。
+   *  `runAction` 只挂在 `window.UI` 顶层、**不在** `UI.classic` 里，测试桩里也可能没有 ——
+   *  拿不到就退回 `C().home()`，免得点一下「返回」直接抛异常。 */
+  function backToStages() {
+    try {
+      if (typeof UI !== 'undefined' && UI && typeof UI.runAction === 'function') { UI.runAction('stages'); return; }
+    } catch (e) {}
+    C().home();
+  }
   function notice(text, buttons) { modal('提示', '<p>' + esc(text) + '</p>', buttons || [{ label: '知道了' }], { small: true }); }
   /** 隐藏成就的「飘一条提示」：非阻塞、几秒后自己消失，不打断操作。
    *  用 document 判空，保证无 DOM 环境（测试）调用不会炸。 */
@@ -776,7 +787,7 @@
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
     bindTips(p);
     if (!info.run) fillFoeArt(p, info.preview);
-    back(p, () => C().home());
+    back(p, backToStages);
     on(p, 'fight', () => {
       if (info.run) {
         if (info.run.choices) { offerChoice('tower', info.run.choices); return; }
@@ -1046,16 +1057,7 @@
     if (typeof TowerPlot.afterRender === 'function') TowerPlot.afterRender();
     bindTips(p);
     if (info.run) fillFoeArt(p, Tower.planInfo ? Tower.planInfo('endless') : Tower.preview(info.run.layer, info.run.salt, true));
-    back(p, () => {
-      /* 【2026-10 用户口径】无尽模式的「返回」回到**关卡界面**（无尽塔本来就是从关卡页进来的），
-       * 不是直接回主界面。`UI.runAction` 是经典壳顶层的动作分发器（`runAction('stages')` = openStages）；
-       * 它只挂在 `window.UI` 上（不在 `UI.classic` 里），测试桩里也可能没有 —— 所以拿不到就退回 home()，
-       * 免得点一下「返回」直接抛异常。 */
-      try {
-        if (typeof UI !== 'undefined' && UI && typeof UI.runAction === 'function') { UI.runAction('stages'); return; }
-      } catch (e) {}
-      C().home();
-    });
+    back(p, backToStages);
     /* 【U18】剧情模式下的「继续」：补完这一行 → 下一行 → 结束。
      * 【U18c】「停留一下」的提示屏（第一次失去烙印）也用同一颗按钮：点它 = 放行 → 进剧情。
      * 具体怎么推进由 tower-plot.js 决定（TowerPlot.next），这里只负责转交。 */

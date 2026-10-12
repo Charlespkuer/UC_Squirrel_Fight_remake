@@ -2521,15 +2521,17 @@ check('照影之境的拾取卡居中在整个屏幕（不是塔身右侧那半�
 });
 
 /* ============================================================ */
-check('无尽模式的「返回」回到关卡界面（不是主界面）', () => {
-  /* 用户口径 2026-10：无尽塔是从**关卡页**进来的，返回就该回关卡页。
+check('两座塔页面的「返回」都回关卡界面（不是主界面）', () => {
+  /* 用户口径 2026-10：挑战塔 / 无尽塔都是从**关卡页**进来的，返回就该回关卡页。
    * 真身走 `UI.runAction('stages')`（顶层分发器 → openStages），不是 `C().home()`。 */
-  const c = setup(11);
-  const ui = uiHarness(c);
-  c.TowerUI.openEndless();
-  ui.click('home');                       // 就是那颗「返回」
-  assert.deepEqual(ui.nav, ['stages'],
-    '无尽模式的「返回」应当打开关卡页，而不是回主界面：' + JSON.stringify(ui.nav));
+  for (const [seed, open, label] of [[11, (c) => c.TowerUI.openEndless(), '无尽塔'], [13, (c) => c.TowerUI.openTower(), '挑战塔']]) {
+    const c = setup(seed);
+    const ui = uiHarness(c);
+    open(c);
+    ui.click('home');                       // 就是那颗「返回」
+    assert.deepEqual(ui.nav, ['stages'],
+      label + '的「返回」应当打开关卡页，而不是回主界面：' + JSON.stringify(ui.nav));
+  }
 
   /* 反例保护：桩里没有顶层 runAction 时（老壳 / 别的宿主）也要能退回主界面，不能抛异常。 */
   const c2 = setup(12);

@@ -132,11 +132,11 @@ node scripts/serve.js     # 起本地静态服务器（带存档接口）
 | `images/` | 图片素材（**按用途分三层**） | `ui/`（界面：`icons/<类型>/`、`sprites/`、`numbers/`、`screens/`、`buttons/`、`cards/`、`characters/`、`home/`、`skins/`）、`battle/`（战斗：`bg/` 背景、`fx/` 特效、`outfit/` 穿在身上的六部位外观）、`atlas/`（原版整片图集，按 id 兜底加载）、`_reference/`（**只作对照、运行时不读，打包与上线都会剔除**：图集出处清单、新版官方界面截图裁切、未使用的旧图、README 截图） |
 | `audio/` | 音效与 BGM | 战斗音效、主界面 BGM |
 | `src-tauri/` | **桌面壳与安卓壳**（Rust + Tauri 2，同一个 crate 出 exe 和 apk） | `src/lib.rs`（全部逻辑，按 `cfg(mobile)` 分支）、`src/main.rs`（桌面入口，仅 8 行）、`Cargo.toml`、`tauri.conf.json`、`tauri.android.conf.json`（安卓构建时自动合并）、`icons/`、`app-icon.png`、`gen/android/`（`tauri android init` 生成的安卓工程，**不进仓库**）、`web/` 与 `dist/`（构建产物） |
-| `tools/` | **开发与验证工具**（不参与运行） | 14 个 `test-*.cjs` 主题套件（一条用例对应一条规则；新用例放进主题相符的套件，CI 会枚举整个目录全跑）+ `test-battle.js`（动画/图集）、`check-asset-paths.cjs`（资源路径体检）、`build-release.ps1`（**一键出包**：版本号 +1 → 清旧包 → exe/安装包/APK → 清 5~10 GB 缓存；`scripts\打包.cmd` / `scripts\清缓存.cmd` 是它的双击入口）、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK）、`stage-balance.cjs`（关卡数值，被回归调用）、`publish-guide.md` / `tauri-guide.md`（发布与桌面壳指南） |
-| `docs/` | 说明文档（**新增需用户同意**，见 `docs/AGENTS.md`） | [更新记录](docs/更新记录.md)（唯一变更日志，最新在上；**原版对比与真化数值的结论也在里面**）、[双语与本地化方案](docs/双语与本地化方案.md)（未落地方案） |
+| `tools/` | **开发与验证工具**（不参与运行） | 15 个 `test-*.cjs` 主题套件（一条用例对应一条规则；新用例放进主题相符的套件，CI 会枚举整个目录全跑）+ `test-battle.js`（动画/图集）、`check-asset-paths.cjs`（资源路径体检）、**`verify.cjs`**（三个「跑一次几分钟、按需手跑」的验证合在一个入口：`story` 剧情全流程对账机器人 / `layer100` 整百层定向回归 / `stacking` 同名叠加审计，见 [剧情触发条件](docs/剧情触发条件.md)）、`gen-vendor-data.cjs`（从 `references/orig/` 重新生成 `js/gamedict.js`，非运行时）、`build-release.ps1`（**一键出包**：版本号 +1 → 清旧包 → exe/安装包/APK → 清 5~10 GB 缓存；`scripts\打包.cmd` / `scripts\清缓存.cmd` 是它的双击入口）、`build-tauri-app.cjs`（桌面 exe / 安装包 / `--web` 前端快照）、`build-apk.ps1`（安卓 APK）、`stage-balance.cjs`（关卡数值，被回归调用）、`build-guide.md`（发布与桌面壳指南） |
+| `docs/` | 说明文档（**新增需用户同意**，见 `docs/AGENTS.md`） | [更新记录](docs/更新记录.md)（唯一变更日志，最新在上；**原版对比与真化数值的结论也在里面**）、[剧情触发条件](docs/剧情触发条件.md)（无尽塔每条剧情的应当触发条件 + 实测对照，**用户点名要的**）、[双语与本地化方案](docs/双语与本地化方案.md)（未落地方案） |
 | `save/` | **运行时的存档目录**（不进仓库） | `progress.json` 正式存档、`backup/` 快照、`server.out.log` / `server.err.log` |
-| `references/` | 原版 APK 与参考素材（**纯参考**：本地保留、不进仓库） | 只作对照/取证；游戏与测试都不读它 |
-| `out/` | AI 超分与开发期对比图的**临时工作区**（本地，不进仓库） | 实验对比图与分析脚本；删掉不影响游戏 |
+| `references/` | 原版 APK 与参考素材（**纯参考**：本地保留、不进仓库） | 只作对照/取证；游戏与测试都不读它。原版 H5 源码**只留这份**（`references/orig/`）—— `js/orig/` 那份副本 2026-10 已整目录删除，`tools/gen-vendor-data.cjs` 也只认这里 |
+| `out/` | **本地产物 / 临时探针工作区**（本地，不进仓库：`.gitignore` 里整目录忽略） | 只放**跑出来的**东西与一次性脚本：截图、渲染对比图、构建日志、临时探针。**用完即删**——长期要反复跑的回归工具放 `tools/`（见上面的 `verify-*.cjs`），不要在这里养脚本。整个目录删掉不影响游戏、也不影响任何回归 |
 | `.github/` | CI 与发布 | `ci.yml`（回归）、`pages.yml`（在线试玩版）、`release.yml`（双平台便携 zip）、`tauri.yml`（桌面/移动安装包） |
 
 根目录只有这四样：`squirrel_fight.exe`（Windows 免安装入口）、`README.md`、`LICENSE`（许可协议）、
@@ -153,10 +153,15 @@ macOS/Linux 的本地启动器 `启动游戏.command` 也在根目录，但它�
 测试（Node 直接跑，无依赖）：
 
 ```bash
-node tools/test-state.cjs        # 存档与属性
-node tools/test-tower-plan.cjs   # 塔规则
-node tools/test-ui-flow.cjs      # 界面流程
-# ……tools/ 下共十余个套件，全绿为准
+node tools/test-state.cjs         # 存档与属性
+node tools/test-mint-shop.cjs     # 无尽塔商店 / 剧情 / 整百层 / 同名叠加
+node tools/test-env-buff.cjs      # 环境词缀与主线剧情埋点
+# ……tools/ 下共 15 个 test-*.cjs 套件，全绿为准（CI 会枚举整个目录全跑）
+
+node tools/verify.cjs story 4242 5000        # 剧情全流程对账（跑到上千层，逐条核对触发条件）
+node tools/verify.cjs stacking               # 同名叠加审计（叠层 / 上限 / 效果放大）
+node tools/verify.cjs layer100 3             # 整百层「王庭 + 第一近卫」定向回归
+node tools/check-asset-paths.cjs            # 资源路径与大小写体检
 ```
 
 调试面板：游戏内 `Ctrl+Shift+D`（不影响正式存档）。

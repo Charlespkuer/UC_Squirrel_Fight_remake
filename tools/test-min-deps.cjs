@@ -47,7 +47,9 @@ record('入口页不加载 references/ 里的任何文件', () => {
   const bad = refs.filter((r) => /(^|\/)references\//.test(r));
   assert.equal(bad.length, 0, '入口页不该引用 references/：' + bad.join(', '));
   assert.ok(refs.some((r) => r === 'js/gamedict.js'), '入口页应该加载 js/gamedict.js');
-  assert.ok(!refs.some((r) => /js\/orig\//.test(r)), '入口页不该再加载 js/orig/');
+  /* 【第一百零一批】原版源码副本 `js/orig/` 已整目录删除 —— 入口页当然也不该再提它
+   *（这条断言留着当「别再把它加回运行时」的闸）。 */
+  assert.ok(!refs.some((r) => /js\/orig\//.test(r)), '入口页不该加载 js/orig/（那份副本已删除）');
 });
 
 record('js/*.js 的代码里没有指向 references/ 的运行时读取', () => {
@@ -318,7 +320,7 @@ record('浏览器侧模块都能加载并挂上全局（battle / tower / tower-u
    * 这里只覆盖「纯逻辑 + 界面模块」——它们正是之前 battle.js 那种加载期引用错误的受害者。 */
   const files = ['js/sim.js', 'js/tower-data.js', 'js/state.js', 'js/tower.js', 'js/battle.js',
     'js/battle-drops.js', 'js/ui.js', 'js/classic-ui.js', 'js/classic-extras.js', 'js/classic-fusion.js',
-    'js/tower-ui.js'];
+    'js/tower-plot.js', 'js/tower-ui.js'];
   const store = new Map();
   const c = {
     console,

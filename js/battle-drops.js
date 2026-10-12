@@ -33,8 +33,10 @@
     { id: 8, name: '金松果', count: 2, weight: 25 },
     { id: 21, name: '技能卷轴', count: 1, weight: 12 },
     { id: 22, name: '武器卷轴', count: 1, weight: 12 },
-    { id: 1, name: '小体力药剂', count: 1, weight: 5 },
-    { id: 2, name: '大体力药剂', count: 1, weight: 1 },
+    /* 体力药剂（2026-10 用户口径）：在上一版的基础上**再砍一半** —— 小 5 → 2.5、大 1 → 0.5。
+     * 权重可以是小数：`plan()` 只按权重和摇号，不要求整数（改这里就够了，别处不用同步）。 */
+    { id: 1, name: '小体力药剂', count: 1, weight: 2.5 },
+    { id: 2, name: '大体力药剂', count: 1, weight: 0.5 },
     { id: 45, name: '天使果实种子', count: 1, weight: 2 },
     { id: 46, name: '恶魔果实种子', count: 1, weight: 1 },
     { id: 24, name: '白色碎片', count: 1, weight: 5 },
@@ -67,6 +69,24 @@
     });
   }
   /* ============================================================
+   * 【BD2b】「跳过键」的代价（2026-10 用户口径）
+   *
+   *  用跳过键跳过战斗播放时**只能固定收 2/3 的战斗中悬浮奖励** ——
+   *  具体实现就是「随机抹掉其中一项」：一包掉落固定 3 项（见 RULES.frames），
+   *  抹掉 1 项正好剩下 2/3。抹哪一项由随机流决定（与掉落同一个来源，
+   *  所以 QA 固定随机流时结果也固定、可复现）。
+   *  ⚠ 只有**玩家按了跳过键**才吃这个代价；战斗自然打完（还有飘物没来得及捡）
+   *    照旧按原版口径处理（见 create 的 skip / summary）。
+   * ============================================================ */
+  function trimOne(list, random) {
+    const arr = (list || []).slice();
+    if (arr.length < 2) return { list: arr, lost: null };
+    const rnd = random || Math.random;
+    const at = Math.max(0, Math.min(arr.length - 1, Math.floor(rnd() * arr.length)));
+    const lost = arr.splice(at, 1)[0];
+    return { list: arr, lost: lost || null };
+  }
+  /* ============================================================
    * 【BD3】拾取动画与发放
    * ============================================================ */
   function create(options) {
@@ -75,18 +95,19 @@
     let elapsed = 0, next = 0, active = null, closed = false, button = null, notice = null, noticeUntil = 0;
     const root = opts.root;
     function removeButton() { if (button) button.remove(); button = null; active = null; }
-    // 拾取卡图标：经验用经典掉落图，有独立道具图的走 icons/prop/prop-N，其余用原版 draw 图集
+    // 拾取卡图标：有独立道具图的走 icons/prop/prop-N，其余用原版 draw 图集
+    // （经验 id=15 也在 draw 图集里 —— 就是那枚经典「Exp」字，与其它掉落同源）；
+    // icons/drop-exp-classic.png 只留给奖励行 / 奖励卡那些固定尺寸的槽位。
     const ICON_PROPS = [24, 25, 26, 51];
-    const iconSrc = (id) => id === 15 ? 'icons/drop-exp-classic.png'
-      : ICON_PROPS.includes(id) ? 'icons/prop/prop-' + id + '.png'
-        : 'sprites/draw-' + id + '.png';
+    const iconSrc = (id) => ICON_PROPS.includes(id) ? 'icons/prop/prop-' + id + '.png'
+      : 'sprites/draw-' + id + '.png';
     function show(reward) {
       removeButton(); active = reward;
       if (!root) return;
       button = document.createElement('button'); button.type = 'button';
       button.className = 'battle-pickup';
       button.setAttribute('aria-label', '拾取' + reward.name + ' ×' + reward.count);
-      button.innerHTML = '<span class="pickup-card'+(reward.id===15?' classic-exp':'')+'"><img alt="" src="images/ui/' + iconSrc(reward.id) + '"></span><span class="pickup-prompt">请点击</span>';
+      button.innerHTML = '<span class="pickup-card"><img alt="" src="images/ui/' + iconSrc(reward.id) + '"></span><span class="pickup-prompt">请点击</span>';
       button.onclick = () => collect(reward.index);
       root.appendChild(button);
     }
@@ -111,9 +132,14 @@
       return true;
     }
     // Original skip() submits all three planned rewards, including missed cards.
-    function skip() {
+    /* 2026-10 用户口径：`penalize`（玩家按了跳过键）时只收 2/3 —— 随机抹掉一项（见 trimOne）。
+     * 不传 / 传 false（程序化收尾、录像回放）时保持原版口径：三份全发。 */
+    let lostReward = null;
+    function skip(penalize) {
       if (closed) return;
-      for (const drop of drops) award(drop, false);
+      let list = drops;
+      if (penalize) { const cut = trimOne(drops, opts.random); list = cut.list; lostReward = cut.lost; }
+      for (const drop of list) award(drop, false);
       close();
     }
     function tick(dt) {
@@ -124,7 +150,11 @@
       if (next < drops.length && elapsed >= drops[next].at) { const drop = drops[next++]; if (elapsed < drop.at + RULES.lifetime) show(drop); }
     }
     function close() { closed = true; removeButton(); if (notice) notice.remove(); notice = null; }
-    function summary() { return { items: collected.map(item => ({ ...item })), ups: upgrades.slice() }; }
+    /** 结算用：收下的东西 + （按跳过键时）随机抹掉的那一项，界面据此提示玩家少收了什么。 */
+    function summary() {
+      return { items: collected.map(item => ({ ...item })), ups: upgrades.slice(),
+        lost: lostReward ? { id: lostReward.id, name: lostReward.name, count: lostReward.count } : null };
+    }
     return { tick, collect, close, skip, summary };
   }
   /** 一次性发一批掉落（塔的每层结算用）：同一个池、同一套入账规则，但不算「拾取」。
@@ -145,5 +175,5 @@
     State.save();
     return { items, ups, picks };
   }
-  window.BattleDrops = { create, plan, grant, rules: RULES, pool: POOL, ladderPool: LADDER_POOL, poolFor };
+  window.BattleDrops = { create, plan, trimOne, grant, rules: RULES, pool: POOL, ladderPool: LADDER_POOL, poolFor };
 })();

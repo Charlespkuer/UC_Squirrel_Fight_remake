@@ -34,10 +34,10 @@ const SCAN_EXT = ['.html', '.css', '.js', '.json'];
  *     **原版客户端自己的**路径（index.js 里的 js/Matrix2D.js、FightStats.js 里的
  *     images/fightBg_seaWorld_*.png …），本来就没随本仓库发布，算「发布断链」是误报；
  *   · src-tauri / apk-audit / research/original / out —— 构建产物与本地取证/超分产物。
- *   · js/orig —— 本机另存的原版 H5 源码副本（未跟踪、不属于游戏）：它引用的是**原版自己的**
- *     文件（`js/Map.min.js`、`js/GameDict.js`、`js/player.js` …），在本仓库里当然找不到。
- * 这些目录都不进仓库或不属于发布内容，扫描它们只会产生假警报。 */
-const SKIP_DIRS = new Set(['node_modules', '.git', 'references', 'js/orig', 'src-tauri', 'apk-audit', 'research/original', 'out']);
+ * 这些目录都不进仓库或不属于发布内容，扫描它们只会产生假警报。
+ * ⚠ `js/orig`（本机另存的原版 H5 源码副本）**2026-10 第一百零一批已整目录删除** ——
+ *   原版源码只留 `references/orig` 一份，所以这里不再为它保留死配置。 */
+const SKIP_DIRS = new Set(['node_modules', '.git', 'references', 'src-tauri', 'apk-audit', 'research/original', 'out']);
 /* 跳过**个别文件**：两份「原 APK 出处记录」（哪张切图是从原版哪张图里切出来的，共 880+ 条）。
  * 它们的 `source` 记的是**抽取当时**的路径（images/wuqi.png …）；2026-10 资源目录整理之后
  * 那些图搬到了 images/atlas | ui | battle，这份档案不再逐条跟着改 —— 它是历史记录，不是运行期引用。

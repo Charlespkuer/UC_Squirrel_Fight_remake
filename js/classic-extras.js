@@ -337,12 +337,21 @@
    * 【EX3】抽奖
    * ============================================================ */
   const NORMAL_PILLS = [3, 4, 5, 7];
+  /* 高级药丸（2026-10 用户口径）：抽奖里的「随机药丸」有 5% 概率升格成这一档 ——
+   * 与普通药丸一一对应（超级大力/敏捷/速度/经验丸，见 gamedict 41~44）。 */
+  const SUPER_PILLS = [41, 42, 43, 44];
+  const SUPER_PILL_CHANCE = 0.05;
   const prizes = [
     { id: 22, count: 10, label: '\u6b66\u5668\u5377\u8f74 \u00d710' }, { id: 21, count: 10, label: '\u6280\u80fd\u5377\u8f74 \u00d710' },
     { id: 26, count: 3, label: '\u84dd\u8272\u788e\u7247 \u00d73' }, { id: 15, exp: 50, label: '\u7ecf\u9a8c +50' },
     { id: 15, exp: 100, label: '\u7ecf\u9a8c +100' }, { id: 8, gold: 40, label: '\u91d1\u677e\u679c +40' },
-    { id: 23, count: 2, label: '\u6311\u6218\u4e66 \u00d72' }, { id: 2, count: 3, label: '\u5927\u4f53\u529b\u836f\u5242 \u00d73' },
-    { id: 7, pills: 2, label: '\u968f\u673a\u666e\u901a\u836f\u4e38 \u00d72' }, { id: 36, count: 3, label: '\u82f1\u96c4\u5e16 \u00d73' },
+    /* 大体力药剂（2026-10 用户口径）：×4 → ×3（第十六批）→ **×2（本轮回调）**。 */
+    { id: 23, count: 2, label: '\u6311\u6218\u4e66 \u00d72' }, { id: 2, count: 2, label: '\u5927\u4f53\u529b\u836f\u5242 \u00d72' },
+    /* 随机药丸（2026-10 用户口径）：从「随机两枚普通药丸」削弱成**随机一枚**，
+     * 其中 5% 概率抽到**高级药丸**（SUPER_PILL_CHANCE）。
+     * 概率**不写在奖池格子上**（用户口径 2026-10：格子上那句「（5% 高级）」去掉）——
+     * 抽中时结算弹窗会写明拿到了哪一枚（高级那档带「（高级！）」后缀）。 */
+    { id: 7, pills: 1, superChance: SUPER_PILL_CHANCE, label: '\u968f\u673a\u836f\u4e38 \u00d71' }, { id: 36, count: 2, label: '\u82f1\u96c4\u5e16 \u00d72' },
   ];
   let spinning = false, lotteryVersion = 0;
   function refreshLotteryDay() {
@@ -386,25 +395,23 @@
       else if (s.props[TICKET] > 0) { s.props[TICKET]--; if (s.props[TICKET] <= 0) delete s.props[TICKET]; }
       else s.goldPoint -= 20;
       const selected = Math.floor(Math.random() * prizes.length), prize = prizes[selected];
-      // 「随机普通药丸 ×2」：当场从四种普通药丸里抽，相同的合并成 ×2
-      let label = prize.label, icon = prize.id;
+      // 「随机药丸 ×1」：当场抽一枚普通药丸；5% 概率升格成高级药丸（超级大力/敏捷/速度/经验丸）。
+      let label = prize.label, icon = prize.id, superPill = false;
       if (prize.pills) {
-        const merged = Object.create(null);
-        for (let i = 0; i < prize.pills; i++) {
-          const pid = NORMAL_PILLS[Math.floor(Math.random() * NORMAL_PILLS.length)];
-          merged[pid] = (merged[pid] || 0) + 1;
-        }
-        const ids = Object.keys(merged).map(Number);
-        for (const pid of ids) addProp(pid, merged[pid]);
-        label = ids.map((pid) => (propMap.getValue(pid) || { name: pid }).name + ' \u00d7' + merged[pid]).join('\u3001');
-        icon = ids[0];
+        superPill = Math.random() < (Number(prize.superChance) || 0);
+        const table = superPill ? SUPER_PILLS : NORMAL_PILLS;
+        const pid = table[Math.floor(Math.random() * table.length)];
+        addProp(pid, prize.pills);
+        label = (propMap.getValue(pid) || { name: pid }).name + ' \u00d7' + prize.pills +
+          (superPill ? '\uff08\u9ad8\u7ea7\uff01\uff09' : '');
+        icon = pid;
       }
       if (prize.gold) State.addGold(prize.gold);
       if (prize.count) addProp(prize.id, prize.count);
       const ups = prize.exp ? State.gainExp(prize.exp) : [];
       // 每日任务「抽取 {n} 次每日幸运抽奖」：一抽算一次（奖励当场结算，离开动画页也照样计数）
       if (State.bumpDaily) State.bumpDaily('lottery', 1);
-      return { label, icon, selected, ups };
+      return { label, icon, selected, ups, superPill };
     };
 
     const content = '<h2 class="extra-lottery-heading cartoon">\u6bcf\u65e5\u5e78\u8fd0\u62bd\u5956</h2>' +

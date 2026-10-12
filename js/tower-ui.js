@@ -21,6 +21,17 @@
   const find = (root, sel) => root.querySelector(sel);
   function on(root, action, handler) { const el = find(root, '[data-action="' + action + '"]'); if (el) el.onclick = handler; return el; }
   function back(root, handler, label) { const el = on(root, 'home', handler); if (el) el.textContent = label || '返回'; }
+  /** 【2026-10 用户口径】两座塔页面（挑战塔 / 无尽塔）的「返回」都回**上一级界面** = 关卡页
+   *  （挑战塔与无尽塔本来就是关卡页里那两颗入口进来的：`[data-action="tower-entry"]` /
+   *  `[data-action="endless-entry"]`），不是直接回主界面。
+   *  `runAction` 只挂在 `window.UI` 顶层、**不在** `UI.classic` 里，测试桩里也可能没有 ——
+   *  拿不到就退回 `C().home()`，免得点一下「返回」直接抛异常。 */
+  function backToStages() {
+    try {
+      if (typeof UI !== 'undefined' && UI && typeof UI.runAction === 'function') { UI.runAction('stages'); return; }
+    } catch (e) {}
+    C().home();
+  }
   function notice(text, buttons) { modal('提示', '<p>' + esc(text) + '</p>', buttons || [{ label: '知道了' }], { small: true }); }
   /** 隐藏成就的「飘一条提示」：非阻塞、几秒后自己消失，不打断操作。
    *  用 document 判空，保证无 DOM 环境（测试）调用不会炸。 */
@@ -43,14 +54,17 @@
     try { list = Tower.takeRunToasts ? Tower.takeRunToasts() : []; } catch (e) { list = []; }
     for (const t of list) runToast(t);
   }
-  /** 轻量飘字（比成就条更朴素，用于「碎烙印失效」这类过程提示）。 */
-  function runToast(text) {
+  /** 轻量飘字（比成就条更朴素，用于「碎烙印失效」这类过程提示）。
+   *  `hold`：停留更久（用户口径 2026-10：**第一次失去烙印**那一条要停久一点）——
+   *  它紧跟着一段剧情，飘字太快闪过玩家根本来不及看。 */
+  function runToast(text, hold) {
     const el = document.createElement('div');
-    el.className = 'run-toast';
+    el.className = 'run-toast' + (hold ? ' hold' : '');
     el.textContent = String(text || '');
     document.body.appendChild(el);
-    setTimeout(() => { el.classList.add('out'); }, 2400);
-    setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 3200);
+    const stay = hold ? 7000 : 2400;
+    setTimeout(() => { el.classList.add('out'); }, stay);
+    setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, stay + 800);
   }
 
   const RARITY = TowerData.RARITY_NAME || ['普通', '稀有', '史诗', '传奇'];
@@ -59,6 +73,8 @@
    * 所以现在只有这一个常驻负面机制来源。每条环境都带：本局摇出来的实际数值、
    * 渲染好的效果文案、数值区间（悬停可见）。 */
   let replaceTarget = null;
+  /** 【U20】被剧情屏让路的「里程碑奖励」（同一场战斗之后先播剧情，播完再弹它）。 */
+  let pendingMilestone = null;
 
   /* 附魔（不占位）的排前面：判据是**这一条栏位自己的** `slotFree`。
    * 【2026-10 同名逐条】不再用「同名 id 出现过」兜底 —— 那会让新拿到的同名件
@@ -66,8 +82,18 @@
   function orderPermanent(list) {
     const arr = (list || []).slice();
     const isFree = (b) => !!(b && b.slotFree === true);
-    return arr.map((b, i) => ({ b: b, i: i, f: isFree(b) ? 0 : 1 }))
-      .sort((x, y) => (x.f - y.f) || (x.i - y.i))
+    /* 【U20】剧情件（`story` 标签，例：照影之境）**永远排在最前面** ——
+     * 用户口径：拾取之后它就挂在「永久增益」的第一格上。
+     * ⚠ 这里用 `window.TowerData` 而不是裸的 `TowerData`：本函数的源码片段会被单测截出来
+     * 单独跑（见 test-fixes-round.cjs 的「需求64」），那个上下文里没有 TowerData ——
+     * 缺了就当没有剧情件，排序与旧版完全一致。 */
+    const TD = (typeof window !== 'undefined' && window && window.TowerData) ? window.TowerData : null;
+    const isStory = (b) => {
+      const def = (TD && TD.BUFF_BY_ID && b) ? TD.BUFF_BY_ID[b.id] : null;
+      return !!(def && TD.hasTag && TD.hasTag(def, 'story'));
+    };
+    return arr.map((b, i) => ({ b: b, i: i, s: isStory(b) ? 0 : 1, f: isFree(b) ? 0 : 1 }))
+      .sort((x, y) => (x.s - y.s) || (x.f - y.f) || (x.i - y.i))
       .map((x) => x.b);
   }
   /** 【2026-10 同名逐条】行引用：优先 uid（精确到那一条），没有 uid 才退回 id。
@@ -239,13 +265,9 @@
     });
     return Promise.all(list);
   }
-  /** 三侠大招留削弱的具体数值（挂在规则行的悬停气泡上）。 */
-  function heroDebuffTips() {
-    if (!TowerData.HERO_DEBUFF) return '第 4 场是随机 boss；三侠顺序每层随机。';
-    const tips = ['tl', 'xh', 'xm'].map((k) => TowerData.HERO_DEBUFF[k]).filter(Boolean)
-      .map((d) => '· ' + d.name + '：' + d.desc).join('\n');
-    return '三侠的大招会给本层留下削弱（速杀可规避）：\n' + tips + '\n\n第 4 场是随机 boss；悬停任意对手可以看它的机制与出招循环。';
-  }
+  /* 三侠大招留削弱的具体数值由 `heroDebuffPreviewHtml` 的 chips 悬停气泡给出
+   *（原来这里还有一个 `heroDebuffTips()`，只服务挑战塔开局页那串规则介绍的悬停 ——
+   * 规则介绍按 2026-10 用户口径整段删掉后它就没有调用点了，一并删掉）。 */
   /* ============================================================
    * 【U4】增益面板与货币条 —— buffPanelsHtml / currencyHtml
    * ============================================================ */
@@ -744,24 +766,26 @@
       main = '<div class="tower-head"><h2 class="tower-title">挑战塔 · 第 ' + info.nextLayer + ' 层</h2>' +
         '<div class="tower-stats">目标等级 ' + info.level + ' · 强度 ×' + info.mult.toFixed(2) + ' · ' + info.battles + ' 场连战 · 通关金松果 <b class="gold-text">' + info.gold + '</b></div></div>' +
         currencyHtml('tower') +
-        /* 把「三侠削弱」提示并进规则行（右上角多了货币条，版面高度要省下来），
-         * 具体数值仍挂在悬停气泡里，信息不丢。 */
-        '<p class="tower-rule" title="' + esc(heroDebuffTips()) + '">每层 1 张挑战书 · 连战只继承血量 · 对手顺序每层随机 · ' +
-        '三侠的大招会留贯穿本层的削弱（速杀可规避）· 第 5 层起层内可能出现环境词缀（同无尽塔）· ' +
-        '通关另补 3 场挑战的掉落 · 悬停看机制</p>' +
+        /* 【2026-10 用户口径】原来这里还有一串规则介绍（「每层 1 张挑战书 · 连战只继承血量 ·
+         * 对手顺序每层随机 · 三侠大招会留削弱 · 第 5 层起有环境词缀 · 通关另补 3 场掉落」），
+         * 用户要求去掉。信息没丢：挑战书数量在下面那颗「现有挑战书 N 张」、
+         * 环境与三侠削弱各有一块自己的面板/预告、目标等级与连战场数在标题右边的 tower-stats 里。
+         * 别再往这一屏加规则文字。 */
         /* 开打前就让人看清「这一层会碰上什么」：环境池（挑战塔口径）+ 三侠大招会留下什么。 */
         envPreviewHtml(info.nextLayer) + heroDebuffPreviewHtml() +
         '<h4 class="tower-plan-title">本层对手预告</h4>' + planHtml(info.preview);
       footer = '<div class="tower-actions tower-footer">' +
         '<span class="tower-book-count">现有挑战书 ' + info.books + ' 张</span>' +
-        C().btn('开始挑战（挑战书×1）', 'fight', 'gold') + '</div>';
+        /* 【2026-10 用户口径】按钮文案就是「开始挑战」，不再缀「（挑战书×1）」——
+         * 消耗在左边那颗「现有挑战书 N 张」与上面的规则行「每层 1 张挑战书」里都写着。 */
+        C().btn('开始挑战', 'fight', 'gold') + '</div>';
     }
     const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + '">' + towerVisual(info.nextLayer, info.maxLayer, 'tower') +
       '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
     bindTips(p);
     if (!info.run) fillFoeArt(p, info.preview);
-    back(p, () => C().home());
+    back(p, backToStages);
     on(p, 'fight', () => {
       if (info.run) {
         if (info.run.choices) { offerChoice('tower', info.run.choices); return; }
@@ -787,7 +811,109 @@
    * 【U7】无尽页面 —— openEndless
    * ============================================================ */
 
+  /* ============================================================
+   * 【U20】镜中世界 —— 整百层的「照影之境」拾取屏与黑白过场
+   *
+   * 用户口径 2026-10（逐条）：
+   *   · 卡片**尽量居中**在屏幕上；
+   *   · 拾取**不是**「点一下 buff 就消失进背包」：卡片留在原位，
+   *     卡片之外的**整个屏幕慢慢变成纯白**；变成纯白之后，**连卡片一起**慢慢变成纯黑；
+   *     然后以**稍快一点**的速度从黑回到游戏界面（界面侧的动画就在这里，状态在 tower.js）；
+   *   · 回到界面时它已经在「永久增益」的最前面、介绍是 `？？？`，右下角是「继续挑战」。
+   *
+   * 三层结构（顺序就是 z 序）：
+   *   ① `.mirror-veil`  —— 白色遮罩，**在卡片下面**（所以变白时卡片还在）；
+   *   ② `.mirror-card`  —— 卡片本身；
+   *   ③ `.mirror-black-veil` —— 黑色遮罩，挂在 `<body>` 上、**在一切之上**（连卡片一起变黑）；
+   *      最后它自己淡出（比变黑快），露出重画好的主界面。
+   * ⚠ 黑幕挂在 body 上而不是页面里：中间要重画一次主界面（拾取屏 → 主界面），
+   *   挂在页面里会被这次重画一起换掉，过场就断了。
+   * ============================================================ */
+  const MIRROR_WHITE_MS = 1500;      // 卡片之外 → 纯白
+  const MIRROR_BLACK_MS = 1500;      // 连卡片一起 → 纯黑
+  const MIRROR_BACK_MS = 850;        // 黑 → 游戏界面（「较快一点」）
+  let mirrorBlackVeilEl = null;
+  /** 拾取屏的整屏内容：白色遮罩 + 居中的传奇卡片。 */
+  function mirrorPickupHtml(run) {
+    const def = (TowerData.MIRROR && TowerData.BUFF_BY_ID[TowerData.MIRROR.id]) || null;
+    const owned = Math.max(0, Number(run && run.mirrorStacks) || 0);
+    const rarity = def ? (Number(def.rarity) || 0) : 3;
+    return '<div class="tower-mirror" data-mirror-stage>' +
+        '<div class="mirror-veil" aria-hidden="true"></div>' +
+        '<div class="mirror-card-wrap">' +
+          /* ⚠ 卡片必须是 `data-action="mirror-pick"`：界面的点击绑定走 `on(p, 'mirror-pick')`，
+           * 而它按 `[data-action="…"]` 找元素（用 data-mirror-pick 之类的自定义属性会绑不上，
+           * 卡片就成了点不动的死按钮）。 */
+          '<button type="button" class="mirror-card r' + rarity + '" data-action="mirror-pick" ' +
+            'aria-label="拾取' + esc(def ? def.name : '照影之境') + '">' +
+            '<span class="mirror-ribbon r' + rarity + '">' + esc(RARITY[rarity] || '传奇') + '</span>' +
+            '<span class="mirror-emblem" aria-hidden="true"></span>' +
+            '<b class="mirror-name">' + esc(def ? def.name : '照影之境') + '</b>' +
+            '<span class="mirror-flavor">' + esc(def && def.flavor ? def.flavor : '映出一具完美的躯壳') + '</span>' +
+            (owned > 0 ? '<span class="mirror-stacks">已在镜中 ×' + owned + ' → ×' + (owned + 1) + '</span>' : '') +
+            '<span class="mirror-prompt">点击拾取</span>' +
+          '</button>' +
+        '</div></div>';
+  }
+  /** 黑色遮罩（挂在 body 上，跨重画存活）。`on=true` 变黑，`on=false` 淡出并移除。 */
+  function mirrorBlackVeil(on) {
+    if (typeof document === 'undefined' || !document || !document.body) return;
+    if (on) {
+      if (!mirrorBlackVeilEl) {
+        mirrorBlackVeilEl = document.createElement('div');
+        mirrorBlackVeilEl.className = 'mirror-black-veil';
+        document.body.appendChild(mirrorBlackVeilEl);
+      }
+      /* 先以 opacity:0 入 DOM，再在下一帧加 `.on` —— 否则「插入 + 变 1」会被合并成一次，
+       * 玩家看不到「慢慢变黑」这个过程（用户口径要的就是这个渐变）。 */
+      setTimeout(() => { if (mirrorBlackVeilEl && mirrorBlackVeilEl.classList) mirrorBlackVeilEl.classList.add('on'); }, 20);
+      return;
+    }
+    const el = mirrorBlackVeilEl;
+    mirrorBlackVeilEl = null;
+    if (!el) return;
+    if (el.classList) el.classList.add('out');
+    setTimeout(() => { if (el && el.remove) el.remove(); }, MIRROR_BACK_MS + 140);
+  }
+  /** 点卡片拾取：状态先落地（存档按这一刻算），再放三段过场动画。 */
+  function pickMirror() {
+    const res = Tower.takeMirrorReward ? Tower.takeMirrorReward() : { ok: false, msg: '当前版本没有这个接口。' };
+    if (!res || !res.ok) { notice((res && res.msg) || '现在不能拾取。'); openEndless(); return; }
+    const stage = (typeof document !== 'undefined' && document && typeof document.querySelector === 'function')
+      ? document.querySelector('[data-mirror-stage]') : null;    if (stage && stage.classList) stage.classList.add('mirror-white');      // ① 卡片之外 → 纯白
+    setTimeout(() => {
+      mirrorBlackVeil(true);                                               // ② 连卡片一起 → 纯黑
+      setTimeout(() => {
+        openEndless();                                                     // ③ 黑幕之下换回游戏界面
+        mirrorBlackVeil(false);                                            //    黑幕较快地淡出
+        runToast('获得传奇增益「' + (res.name || '照影之境') + '」' + (res.stacks > 1 ? ' ×' + res.stacks : ''));
+      }, MIRROR_BLACK_MS);
+    }, MIRROR_WHITE_MS);
+  }
+  /** 右下角「继续挑战」：问一句要不要进镜中世界（用户口径的那句话）。 */
+  function openMirrorConfirm() {
+    modal('镜中世界',
+      '<div class="mirror-confirm"><p>无尽之塔中的魔王已被击败，继续在镜中世界进行挑战吗？</p>' +
+      '<p class="dim">第 101 层起与层数有关的机制会回到第 1 层的样子，敌人的属性继续按公式增长。</p></div>',
+      [
+        { label: '是', cls: 'gold', run: () => {
+            const r = Tower.enterMirrorWorld ? Tower.enterMirrorWorld() : { ok: false };
+            if (!r || !r.ok) notice((r && r.msg) || '现在还不能进镜中世界。');
+            openEndless();
+          } },
+        { label: '否', cls: 'muted' },
+      ], { small: true });
+  }
+
   function openEndless() {
+    /* 【U18c】到这一屏就**直接触发**该播的剧情（用户口径 2026-10：不要先点一次「继续战斗」）。
+     * `Tower.autoPlayStory` 是「现在该播吗」的唯一判定（判定在 tower-plot 的 `due()`）：
+     * 没剧情时它什么都不做；该播时它把 id 落到 `run.story` 上 —— 所以紧接着取到的 info
+     * 已经带着这一段，这一屏**立刻**就是剧情屏。
+     * ⚠ 必须问在 `endlessInfo()` **之前**（info 是快照，问晚了这一屏还是普通界面）。
+     * 这一条覆盖所有「进到这一屏」的路径：层通关推进、离店 / 结算点继续、读档重进、
+     * 调试挪层，以及「巡视」那一场走到眼前 —— 都不用玩家先点一下。 */
+    try { if (Tower.autoPlayStory) Tower.autoPlayStory('endless'); } catch (e) { /* 判不出来就当没有 */ }
     const info = Tower.endlessInfo();
     let main, footer = null;
     /* 「还没开始」= 本局还在第 1 层、一场都没打完。
@@ -798,21 +924,39 @@
     if (info.run) {
       const run = info.run;
       /* 【U18】剧情优先：这一屏该走剧情模式时，**局内 UI 一个都不渲染**（增益/减益/血量/
-       * 环境/分数/铸币/试炼币/敌人预告全去掉），只留塔身 + 文字 + 右下角「继续」。 */
-      const storyId = pendingStory(run);
+       * 环境/分数/铸币/试炼币/敌人预告全去掉），只留塔身 + 文字 + 右下角「继续」。
+       * 剧情的文本与播片机都在 js/tower-plot.js（window.TowerPlot），这里只负责「把它画进这一屏」。 */
+      const storyId = TowerPlot.pending(run);
       if (storyId) {
-        main = storyModeHtml(storyBegin(storyId), run.layer);
+        main = TowerPlot.modeHtml(TowerPlot.begin(storyId), run.layer);
+      } else if (run.pendingStoryId && run.pendingStoryHold) {
+        /* 【U18c】第一次失去烙印：**先**把「碎掉的烙印失效」这条提示停留一下
+         *（用户口径：这个弹窗要停留得久一些），点掉之后下一屏才进剧情。
+         * 做成整屏而不是自动消失的飘字：「停留多久」由玩家自己掌控，不会被下一屏顶掉。 */
+        const lost = (run.lostMarks && run.lostMarks.length)
+          ? run.lostMarks[run.lostMarks.length - 1].label : '';
+        main = TowerPlot.noticeHtml('烙印失效',
+          '<p class="tower-story-line">碎掉的烙印失效：' + esc(lost || '一道烙印') + '</p>' +
+          '<p class="tower-story-line done">它从你的存在中被抹去了。</p>');
+      } else if (run.mirrorPending) {
+        /* 【U20】整百层「觐见魔王」打完、终章剧情也播完了 → **拾取「照影之境」**这一屏
+         *（用户口径：卡片尽量居中；点它之后卡片留在原位，整屏先白后黑再回到游戏界面）。
+         * 剧情屏的优先级在它上面（刚刚那一段 `storyId`），所以顺序是：终章剧情 → 拾取屏。 */
+        main = mirrorPickupHtml(run);
       } else {
       const nextLabel = run.choices ? '先选一张增益'
         : run.phase === 'shop' ? (run.mintShop ? '进入铸币商店' : '进入试炼商店')
         : run.phase === 'checkpoint' ? '前往结算点'
-        : run.phase === 'sacrifice' ? '放弃一个永久增益' : '继续战斗';
+        : run.phase === 'sacrifice' ? '放弃一个永久增益'
+        /* 【U20】整百层：拾取完照影之境之后，右下角是「继续挑战」（不是「进入商店」——
+         * 整百层本来也不开店），点它才问「要不要进镜中世界」。 */
+        : run.phase === 'mirror' ? '继续挑战' : '继续战斗';
       /* 只认 run.plan（实战真正会打的那一串）。以前这里另算一遍 preview(layer, salt)，
        * 只要重建 plan 时漏了 salt / squirrelsOnly，界面第 4 场的 boss 就和实战不是同一只。 */
       const foes = (Tower.planInfo ? Tower.planInfo('endless') : []).length
         ? Tower.planInfo('endless')
         : Tower.preview(run.layer, run.salt, true);
-      const clearing = (run.phase === 'shop' || run.phase === 'checkpoint' || run.phase === 'sacrifice') && run.finished && run.finished.layer === run.layer;
+      const clearing = (run.phase === 'shop' || run.phase === 'checkpoint' || run.phase === 'sacrifice' || run.phase === 'mirror') && run.finished && run.finished.layer === run.layer;
       const beatenCount = clearing ? foes.length : Math.max(0, (run.battleNo || 1) - 1);
       const foeRows = foes.map((b, i) =>
         '<li class="' + (b.elite ? 'elite ' : '') + (b.patrol ? 'patrol ' : '') + (b.squirrel ? 'squirrel ' : '') +
@@ -898,20 +1042,32 @@
     }
     /* 刚播完剧情 → 整页带一个淡入类（【U18】不要硬切）。
      * ⚠️ 动画**只作用在 .tower-main**（见 CSS）：塔身不参与，否则左侧塔 UI 会跟着闪一下。 */
-    const fadeIn = storyFadeIn;
-    storyFadeIn = false;
+    const fadeIn = TowerPlot.takeFadeIn();
     const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + (fadeIn ? ' tower-fade-in' : '') + '">' +
       towerVisual(info.run ? info.run.layer : 1, 0, 'endless') +
       '<div class="tower-main">' + main + '</div>' + (footer || '') +
       /* 【2026-10 用户口径】剧情 / 挑战模式开关**一直挂在塔的正下方**（绝对定位在页面左下角，
        * 也就是塔身那一列的下方）—— 不要塞进「放弃本局 / 继续战斗」那一行。 */
-      storyModeButtonHtml() + '</div>';
+      TowerPlot.modeButtonHtml() + '</div>';
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
+    /* 【2026-10 用户口径】剧情页文字太长时要能自动下翻：整页重画会把文字区的滚动位置
+     * 归零，而这一屏可能已经打完（没有下一次打字 tick 来带滚动），所以在画完之后同步补一次。 */
+    if (typeof TowerPlot.afterRender === 'function') TowerPlot.afterRender();
     bindTips(p);
     if (info.run) fillFoeArt(p, Tower.planInfo ? Tower.planInfo('endless') : Tower.preview(info.run.layer, info.run.salt, true));
-    back(p, () => C().home());
-    /* 【U18】剧情模式下的「继续」：补完这一行 → 下一行 → 结束（见【U18】）。 */
-    on(p, 'story-next', () => storyAdvance());
+    back(p, backToStages);
+    /* 【2026-10 用户口径】剧情屏**没有「继续」按钮了**：点屏幕任意位置推进
+     *（语义就是 `TowerPlot.next()` —— 正在打字时点一下＝立刻补完这一行，打完了再点＝下一行）。
+     * `TowerPlot.showing()` 同时覆盖「剧情屏」与「停留一下」的提示屏（第一次失去烙印）。
+     * ⚠ 点在按钮 / 带悬停气泡的元素上**不接管**：左下的「剧情/挑战模式」开关与「返回菜单」
+     * 都不该顺手推进剧情（这几颗按钮就是这一屏上仅剩的可点控件）。 */
+    if (TowerPlot.showing()) {
+      p.onclick = (ev) => {
+        const t = ev && ev.target;
+        if (t && typeof t.closest === 'function' && t.closest('button, a, input, select, textarea, [data-tip]')) return;
+        TowerPlot.next();
+      };
+    }
     /* 【U18b】左下角那颗按钮：剧情模式 ↔ 挑战模式，切完立刻重画这一屏。 */
     on(p, 'story-mode', () => { Tower.setStoryEnabled(!Tower.storyEnabled()); openEndless(); });
     on(p, 'fight', () => {
@@ -923,6 +1079,8 @@
         /* 「巡逻」收缴（2026-10 第六十二批）：输了必须交出一个最高稀有度的增益才能继续。 */
         if (info.run.phase === 'patrolToll') { openPatrolToll(); return; }
         if (info.run.phase === 'patrolDiscard') { openPatrolDiscard(); return; }
+        /* 【U20】整百层拾取完照影之境 → 这颗按钮是「继续挑战」：问一句要不要进镜中世界。 */
+        if (info.run.phase === 'mirror') { openMirrorConfirm(); return; }
         fight('endless');
         return;
       }
@@ -955,11 +1113,24 @@
       };
     });
     on(p, 'shop', () => openShop(true));
+    /* 【U20】拾取「照影之境」（整百层那一屏）：点卡片 → 白 → 黑 → 回到游戏界面。 */
+    on(p, 'mirror-pick', () => pickMirror());
     /* 待选取的强化（神兵淬炼/秘技通神）没选完时，回到主界面自动补弹一次 */
     if (info.run && info.run.pendingPick) setTimeout(() => openPickBuff(info.run.pendingPick), 60);
-    flushRunToasts();   // 「碎掉的烙印失效」这类过程提示
-    /* 20 起每 10 层：出商店后必须放弃一个永久增益（不可取消）。 */
-    if (info.run && info.run.phase === 'sacrifice') setTimeout(() => openPermSacrifice(), 60);
+    /* 过程提示（「碎掉的烙印失效」这类）：**剧情屏上不飘** —— 整屏是剧情，
+     * 飘字飘在它后面既看不到又浪费；留到剧情播完回主界面那次重画再飘。
+     * 第一次失去烙印那一条会走 `hold`（停久一点），见 runToast / 【U18c】。 */
+    if (!TowerPlot.showing()) flushRunToasts();
+    /* 20 起每 10 层：出商店后必须放弃一个永久增益（不可取消）。
+     * 【U18c】但**献祭前要先播剧情**（第 20 层那一段：「石门天平倾斜 → 苍老的声音」）——
+     * 剧情屏上不能弹这个窗，否则剧情和弹窗叠在一起。剧情播完回主界面时这里会再跑一次。 */
+    if (info.run && info.run.phase === 'sacrifice' && !TowerPlot.showing()) setTimeout(() => openPermSacrifice(), 60);
+    /* 【U20】被剧情让路的「里程碑奖励」在这里补弹（同一场战斗之后的终章剧情播完才算轮到它）。 */
+    if (pendingMilestone && !TowerPlot.showing()) {
+      const pm = pendingMilestone;
+      pendingMilestone = null;
+      setTimeout(() => milestoneModal(pm.rw, pm.cont), 60);
+    }
     on(p, 'rest-shop', () => {
       const res = Tower.openRestShop();
       if (!res.ok) { notice(res.msg || '现在不能开商店。'); return; }
@@ -1005,7 +1176,28 @@
    * ============================================================ */
 
   function reopen(mode) { if (mode === 'tower') openTower(); else openEndless(); }
+  /** 开战前的最后一道闸：现在该先播剧情 → **不开打**。
+   *
+   *  【为什么必须在这里拦】入场剧情现在由进层时主动挂上（`run.story`），界面这一屏正显示剧情；
+   *  玩家如果直接点「继续战斗」，`fight()` 会一路走下去把战斗开起来 —— 剧情就被跳过了。
+   *  另外「巡视」那一场可能不是本层第 1 场，进层时还轮不到它，得走到那一场才播。
+   *  两种情况都靠 `Tower.storyPendingForBattle`（**纯查询、不建令牌**）判掉，
+   *  然后重画这一屏让剧情接着播；玩家读完再点一次才真开打。
+   *  ⚠ 别改成「调 nextBattle 看看有没有剧情」：那会建出一枚 attempt 令牌，
+   *  没剧情时又没地方收回，第二次点击会被 `run.attempt` 挡住（实测踩过）。 */
+  function pendingStoryBlocksBattle(mode) {
+    let blocked = false;
+    try { blocked = Tower.storyPendingForBattle ? !!Tower.storyPendingForBattle(mode) : false; } catch (e) { blocked = false; }
+    if (!blocked) return false;
+    /* 剧情模式关掉时不该拦人（挑战模式 = 跳过所有文字剧情）。 */
+    if (typeof Tower.storyEnabled === 'function' && !Tower.storyEnabled()) return false;
+    /* 该播还没落的（巡视那一场）在这里补挂上，然后重画这一屏进剧情模式。 */
+    try { Tower.autoPlayStory && Tower.autoPlayStory(mode); } catch (e) { /* 忽略 */ }
+    reopen(mode);
+    return true;
+  }
   function fight(mode) {
+    if (pendingStoryBlocksBattle(mode)) return;
     const nx = Tower.nextBattle(mode);
     if (!nx.ok) { reopen(mode); if (nx.msg) notice(nx.msg); return; }
     flushAchievements(nx.achievements);      // 「超凡入圣」这类在开战时算出的成就
@@ -1087,7 +1279,14 @@
           [{ label: '回到本层开头', cls: 'gold', run: () => openEndless() }], { small: true });
         return;
       }
-      if (rw.milestone) { milestoneModal(rw, cont); return; }
+      if (rw.milestone) {
+        /* 【U20】整十层里程碑与剧情可能**同一场战斗之后**一起触发（例：第 100 层的终章剧情）——
+         * 弹窗盖在剧情屏上会把剧情压住（里程碑那一下点掉之前，玩家一个字都看不到）。
+         * 剧情屏上先记着，等剧情播完回主界面那次重画再弹（见 openEndless 末尾）。 */
+        if (TowerPlot.showing()) pendingMilestone = { rw: rw, cont: cont };
+        else milestoneModal(rw, cont);
+        return;
+      }
       if (rw.repeat) {
         const rp = rw.repeat;
         modal(rp.name || '幻影回响',
@@ -1194,10 +1393,17 @@
       ? '<div class="result-lines">悬浮奖品（3 场挑战的量）：' +
         prizes.map((p) => esc(p.name) + ' ×' + p.count).join('　') + '</div>'
       : '';
+    /* 跳过键的代价（2026-10 用户口径）：跳过的场次在层结算里各随机抹掉一项 —— 明说一句，
+     * 免得玩家以为奖品莫名其妙少了一包（见 tower.js 的 settlePrizes）。 */
+    const lostList = (rw.prizes && rw.prizes.lost) || [];
+    const lostLine = lostList.length
+      ? '<div class="result-lines lost">跳过战斗：随机少收了 ' +
+        lostList.map((p) => esc(p.name) + ' ×' + p.count).join('　') + '</div>'
+      : '';
     modal('层数通关', '<div class="result-box"><div class="result-title win">第 ' + rw.layer + ' 层通关！</div>' +
       '<div class="result-lines">金松果 +' + rw.gold + '</div>' +
       (rw.drop ? '<p>获得 ' + esc(rw.drop.name) + ' ×' + rw.drop.count + '</p>' : '') +
-      prizeLine +
+      prizeLine + lostLine +
       '<p class="small-label">层数 +1，下一层对手更强、松果更多。</p></div>',
       [{ label: '继续爬塔', cls: 'gold', run: openTower }, { label: '返回', run: () => C().home() }], { small: true });
     // 经验/升级提示走和战斗拾取同一套 UI（追加到上面这个弹窗里）
@@ -1416,9 +1622,7 @@
       return null;
     }
     const draw = () => {
-      const body = '<p>巡逻失手 —— 交出一个<b>' + (RARITY_SHORT[got.top] || '') + '</b>增益就能继续：' +
-        '只有<b>本局当前还在生效</b>的最高稀有度那一档能用来抵账，<b>破碎过的烙印</b>（按已损毁层数算）与' +
-        '<b>已经附魔成功的铭文</b>也算（血量、层数、试炼币都不受影响）。</p>' +
+      const body = '<p>巡逻失手 —— 交出一个<b>' + (RARITY_SHORT[got.top] || '') + '</b>增益' +
         patrolListHtml(got.list);
       const m = modal('巡逻 · 上交一个增益', body, [{ label: '稍后再说', cls: 'muted', run: () => openEndless() }], { small: true });
       if (!m || !m.element) return;
@@ -1874,7 +2078,8 @@
         '<span class="sac-desc">' + esc(b.desc || '') + '</span></button>';
     }).join('');
     const p = modal('放弃一个永久增益',
-      '<p class="sac-lead">第 ' + esc(run.layer) + ' 层已通过。作为代价，必须永久放弃<b>一个</b>永久增益' +
+      '<p class="sac-lead">你必须从随身藏品中选出一件，投入贡井。</p>' +
+      '<p class="sac-lead dim">第 ' + esc(run.layer) + ' 层已通过。作为代价，必须永久放弃<b>一个</b>永久增益' +
       '（叠层的会先掉一层）。选中的增益会立刻从本局移除。</p>' +
       '<div class="sac-grid">' + rows + '</div>',
       [], { small: false, cls: 'sac-board' });
@@ -1916,274 +2121,12 @@
             if (window.ClassicExtras && ClassicExtras.lottery) ClassicExtras.lottery(); else UI.runAction('lottery'); } }, { label: '返回', run: () => C().home() }], { small: true });
   }
 
-  /* ============================================================
-   * 【U18】剧情展示模式（2026-10 用户口径）
-   *
-   * 「讲一段话」专用的模式：**整屏只留塔身 + 文字 + 右下角「继续」** ——
-   * 局内那一堆 UI（增益 / 减益 / 血量 / 环境 / 分数 / 铸币 / 试炼币 / 敌人预告）全都不渲染。
-   * 文字在屏幕中间**逐行逐字**打出来（打字机），点「继续」：
-   *   正在打字 → 立刻补完这一行；这一行打完了 → 下一行；最后一行 → 剧情结束回正常主界面。
-   *
-   * 加剧情**只加数据**（不用碰渲染）：往 STORY_SCRIPTS 里加一条即可
-   *   { id: { once: true|false, lines: ['第一行', '第二行'] } }
-   *   · once: true  一段只播一次（记在存档 `endless().storySeen` 里，例如第一次进店的商人）；
-   *   · once: false 每次触发都播（例如每次攀登的开场），点几下「继续」就能跳过。
-   * 行内标记（打字机按**可见字符**计数，标记本身不占字符）：
-   *   **加粗**    *斜体*    {抖}这一段会抖{/抖}（也认 {shake}…{/shake}）
-   * 字体在 css/tower.css 的 .tower-story-line 里（楷体族，跨平台回退）。
-   * ============================================================ */
-  const STORY_SCRIPTS = {
-    /* 进塔开场：每次「开始攀登」都播（点「继续」可快速跳过）。 */
-    intro: {
-      once: false,
-      lines: [
-        '你推开无尽之塔{抖}厚重{/抖}的门扉，',
-        '一行古老的文字刻在门楣上：',
-        /* 「献出自身」：又加粗又染红（用户口径 2026-10）—— 嵌套写法见 storySegments。 */
-        '「凡欲觐见王者，须先{红}**献出自身**{/红}。」',
-        '但你无暇顾及于此，',
-        '挑战在前方接踵而至。',
-      ],
-    },
-    /* 第一次进商店前：只播一次（之后进店直接开店，不再打断节奏）。 */
-    merchant: {
-      once: true,
-      lines: [
-        '转过一处阴暗的拐角，你发现一名披着破旧斗篷的商人正坐在路边。',
-        '他的面前摆满了各式各样的货物。',
-        '*「欢迎，勇敢的登塔者！只要价钱合适，这里总有你需要的东西。」*',
-      ],
-    },
-    /* 第 10 层「第二次遇到商人」：只播一次。 */
-    merchant2: {
-      once: true,
-      lines: [
-        '走廊深处，一盏孤灯微微摇曳。',
-        '面容模糊的男人见你走近，缓缓打开身旁的木箱。',
-        '低沉的嗓音开口道：',
-        '**「有些东西不该出现在这座塔里。」**',
-        '**「不过，既然它们已经在这里了，总得有人卖出去，不是吗？」**',
-      ],
-    },
-    /* 用「立即进货」类增益开店的那一刻（E01 / 铸币版 E16）：每次开店都播。 */
-    restock: {
-      once: false,
-      lines: [
-        '伴随着一阵清脆的铃声，那位熟悉的商人已经站在面前。',
-        '「只要价钱合适，就没有我到不了的地方。」',
-        '*「那么，今天想买些什么？」*',
-      ],
-    },
-  };
-  /** 打字机速度（毫秒/字）。 */
-  const STORY_CHAR_MS = 42;
-  /** 剧情 → 主界面的淡出时长（毫秒）；主界面那半边的淡入由 CSS 的 .tower-fade-in 负责。 */
-  const STORY_FADE_MS = 150;
-  /** 当前正在播的那段剧情：{ id, once, line, chars, lines:[{segs,total}], timer }。 */
-  let storyState = null;
-  /** 刚播完剧情：下一次 openEndless 让整页淡入（而不是硬切）。 */
-  let storyFadeIn = false;
-  function storyScript(id) {
-    const s = STORY_SCRIPTS[id];
-    return s && Array.isArray(s.lines) && s.lines.length ? s : null;
-  }
-  /** 把一行拆成 [{text, bold, italic, shake, red}]（标记本身不进 text，打字机只数可见字符）。
-   *  支持 **加粗** / *斜体* / {抖}抖动{/抖}（也认 {shake}）/ {红}红色{/红}（也认 {red}），
-   *  并且**可以嵌套**：例如 `{红}**献出自身**{/红}` = 又红又粗。没写收尾标记的当普通文字。 */
-  function storySegments(line) {
-    const segs = [];
-    const TAG_KEYS = { shake: 'shake', 抖: 'shake', 抖动: 'shake', red: 'red', 红: 'red' };
-    const push = (text, tags) => { if (text) segs.push(Object.assign({ text: text }, tags)); };
-    const walk = (text, style) => {
-      const re = /\*\*|\*|\{([A-Za-z\u4e00-\u9fa5]+)\}/g;
-      let m, last = 0;
-      while ((m = re.exec(text))) {
-        let inner = null, after = 0, key = null;
-        if (m[0] === '**' || m[0] === '*') {
-          const close = m[0];
-          const end = text.indexOf(close, re.lastIndex);
-          if (end < 0) continue;                       // 没有收尾 → 当普通文字
-          inner = text.slice(re.lastIndex, end);
-          after = end + close.length;
-          key = m[0] === '**' ? 'bold' : 'italic';
-        } else {
-          key = TAG_KEYS[m[1]];
-          const close = '{/' + m[1] + '}';
-          const end = key ? text.indexOf(close, re.lastIndex) : -1;
-          if (end < 0) continue;
-          inner = text.slice(re.lastIndex, end);
-          after = end + close.length;
-        }
-        push(text.slice(last, m.index), style);
-        walk(inner, Object.assign({}, style, { [key]: true }));
-        last = after;
-        re.lastIndex = after;
-      }
-      push(text.slice(last), style);
-    };
-    walk(String(line == null ? '' : line), {});
-    return segs;
-  }
-  /** 按「已打出的字符数」把一行渲染成 HTML（加粗 / 斜体 / 抖动 / 红色在这里落地）。 */
-  function storyHtml(segs, chars) {
-    let left = Math.max(0, chars), out = '';
-    for (const seg of segs) {
-      if (left <= 0) break;
-      const text = seg.text.slice(0, left);
-      left -= text.length;
-      if (!text) continue;
-      let html = esc(text);
-      if (seg.italic) html = '<i>' + html + '</i>';
-      if (seg.bold) html = '<b>' + html + '</b>';
-      if (seg.red) html = '<span class="tower-story-red">' + html + '</span>';
-      if (seg.shake) html = '<span class="tower-story-shake">' + html + '</span>';
-      out += html;
-    }
-    return out;
-  }
-  /** 这一屏该不该走剧情。优先级：
-   *   ① 状态机 / 点「开始攀登」时挂上的 `run.story`；
-   *   ② 用「立即进货」类增益开的店 → 铃声那段（每次开店都播）；
-   *   ③ 第一次遇到商人（商店阶段 + 还没播过）；
-   *   ④ 第 10 层第二次遇到商人（第一次已经播过、这段还没播过）。
-   *  **挑战模式**（首页左下角那颗按钮）下一律返回 null —— 所有文字剧情都跳过。 */
-  function pendingStory(run) {
-    if (!run) return null;
-    if (!Tower.storyEnabled()) return null;
-    if (run.story) return storyScript(run.story) ? run.story : null;
-    if (run.phase === 'shop') {
-      if (run.shopByBuff && !run.shopStoryShown && storyScript('restock')) return 'restock';
-      const seenFirst = Tower.storySeen('merchant');
-      if (!seenFirst && storyScript('merchant')) return 'merchant';
-      if (seenFirst && !Tower.storySeen('merchant2') && Number(run.layer) >= 10 && storyScript('merchant2')) return 'merchant2';
-    }
-    return null;
-  }
-  function storyStopTimer() {
-    if (storyState && storyState.timer) { clearTimeout(storyState.timer); storyState.timer = null; }
-  }
-  /** 开始播某段（已经在播同一段就保持进度，不重头来）。 */
-  function storyBegin(id) {
-    const script = storyScript(id);
-    if (!script) return null;
-    if (storyState && storyState.id === id) return storyState;
-    storyStopTimer();
-    const lines = script.lines.map((raw) => {
-      const segs = storySegments(String(raw));
-      return { segs: segs, total: segs.reduce((n, s) => n + s.text.length, 0) };
-    });
-    storyState = { id: id, once: !!script.once, line: 0, chars: 0, lines: lines, timer: null };
-    return storyState;
-  }
-  /** 已播出的文字（前面几行整行 + 当前行已打出的部分 + 光标）。 */
-  function storyBodyHtml() {
-    const st = storyState;
-    if (!st) return '';
-    const out = [];
-    for (let i = 0; i < st.line; i++) {
-      out.push('<p class="tower-story-line done">' + storyHtml(st.lines[i].segs, st.lines[i].total) + '</p>');
-    }
-    const cur = st.lines[st.line];
-    out.push('<p class="tower-story-line now">' + storyHtml(cur.segs, st.chars) +
-      '<span class="tower-story-caret" aria-hidden="true"></span></p>');
-    return out.join('');
-  }
-  /** 只重画文字节点（打字机每 tick 调它，不整页重画）。 */
-  function storyPaint() {
-    const st = storyState;
-    if (!st || typeof document === 'undefined' || !document || typeof document.querySelector !== 'function') return;
-    const box = document.querySelector('[data-story-text]');
-    if (!box) return;
-    box.innerHTML = storyBodyHtml();
-  }
-  /** 打字机：打出一个字，然后排下一个 tick。 */
-  function storyTick() {
-    const st = storyState;
-    if (!st) return;
-    const cur = st.lines[st.line];
-    if (!cur) { storyFinish(); return; }
-    st.timer = null;
-    if (st.chars < cur.total) {
-      st.chars += 1;
-      storyPaint();
-      if (st.chars < cur.total) st.timer = setTimeout(storyTick, STORY_CHAR_MS);
-      return;
-    }
-  }
-  /** 点「继续」：补完这一行 → 下一行 → 结束。 */
-  function storyAdvance() {
-    const st = storyState;
-    if (!st) return;
-    const cur = st.lines[st.line];
-    storyStopTimer();
-    if (cur && st.chars < cur.total) {           // ① 还在打字 → 立刻补完这一行
-      st.chars = cur.total;
-      storyPaint();
-      return;
-    }
-    if (st.line + 1 < st.lines.length) {         // ② 下一行
-      st.line += 1;
-      st.chars = 0;
-      storyPaint();
-      st.timer = setTimeout(storyTick, STORY_CHAR_MS);
-      return;
-    }
-    storyFinish();                              // ③ 最后一行 → 剧情结束
-  }
-  /** 剧情播完：记「只播一次」、清掉待播标记，然后**淡出→淡入**切回正常主界面。
-   *  【2026-10 用户口径】不要硬切：文字先快速淡出（~150ms），主界面再淡入（~190ms，见 CSS）。 */
-  function storyFinish() {
-    const st = storyState;
-    storyStopTimer();
-    storyState = null;
-    if (st && st.once) { try { Tower.markStorySeen(st.id); } catch (e) {} }
-    /* 「每次开店都播」的那类：给**这家店**记一笔，免得条件还成立又被重播（见 markShopStoryShown）。 */
-    if (st && !st.once) { try { Tower.markShopStoryShown('endless'); } catch (e) {} }
-    try { Tower.clearRunStory('endless'); } catch (e) {}
-    storyFadeIn = true;                 // 下一次 openEndless 让整页淡入
-    if (typeof document !== 'undefined' && document && typeof document.querySelector === 'function') {
-      const box = document.querySelector('[data-story-text]');
-      if (box && box.classList) box.classList.add('tower-story-leaving');
-    }
-    setTimeout(() => { openEndless(); }, STORY_FADE_MS);
-  }
-  /** 剧情模式的整屏内容：留着**标题**（无尽模式 · 第 x 层），文字**没有边框**地居中打字，
-   *  右下角一个「继续」。左下标「第 m/n 行」按用户口径去掉（要沉浸感）。 */
-  function storyModeHtml(st, layer) {
-    if (!st) return '';
-    const body = '<div class="tower-story">' +
-        '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' +
-          Math.max(1, Math.floor(Number(layer) || 1)) + ' 层</h2></div>' +
-      '<div class="tower-story-text" data-story-text>' + storyBodyHtml() + '</div>' +
-      '<div class="tower-story-foot">' + C().btn('继续', 'story-next', 'gold') + '</div></div>';
-    /* 页面每次重画都重新起一次打字机（已经在跑的不要重排）。 */
-    storyStopTimer();
-    const cur = st.lines[st.line];
-    if (cur && st.chars < cur.total) st.timer = setTimeout(storyTick, STORY_CHAR_MS);
-    else if (cur && st.chars === 0 && cur.total === 0) st.timer = setTimeout(storyTick, STORY_CHAR_MS);
-    return body;
-  }
-
-  /* ============================================================
-   * 【U18b】剧情 / 挑战模式开关（无尽首页左下角那颗按钮，2026-10 用户口径）
-   *   · 剧情模式：所有剧情节点照常播（进塔开场、遇商人的几段…）；
-   *   · 挑战模式：**跳过所有文字剧情**，直接进战斗与商店。
-   * 按钮上写的是**当前**模式（点一下切到另一个），悬停给这个模式的具体说明。
-   * 状态存在存档 `endless().storyOn` 上（默认 true = 剧情模式），见 Tower.storyEnabled。
-   * ============================================================ */
-  const STORY_MODE_TIPS = {
-    on: '剧情模式：\n· 进塔开场、第一次与第二次遇到商人、用「立即进货」开店…这些节点会先播剧情（点「继续」推进，正在打字时点一下会立刻补完这一行）\n· 点这颗按钮切到「挑战模式」，之后不再播任何文字剧情',
-    off: '挑战模式：\n· 跳过所有文字剧情，直接进战斗与商店（进塔不再有开场，遇商人不打断节奏）\n· 已经看过的剧情不会被重新播放，但「立即进货」这类每次都播的剧情也会一并跳过\n· 点这颗按钮切回「剧情模式」',
-  };
-  function storyModeButtonHtml() {
-    const on = !!(window.Tower && Tower.storyEnabled && Tower.storyEnabled());
-    const tip = on ? STORY_MODE_TIPS.on : STORY_MODE_TIPS.off;
-    return '<span class="endless-mode-toggle" data-tip="' + esc(tip) + '" title="' + esc(tip) + '" tabindex="0">' +
-      C().btn(on ? '剧情模式' : '挑战模式', 'story-mode', 'gold') + '</span>';
-  }
 
   /* ============================================================
    * 【U17】模块导出 —— window.TowerUI
    * ============================================================ */
   window.TowerUI = { openTower, openEndless, openMintShop, openShop, openPickBuff, openPatrolToll, openPatrolDiscard };
+  /* 【U18】把「剧情播完之后回主界面」这条线接给 tower-plot.js ——
+   * 剧情模块不直接引用 tower-ui（两个文件互不 require），只认这一根线。 */
+  if (window.TowerPlot && TowerPlot.setMainOpener) TowerPlot.setMainOpener(openEndless);
 })();

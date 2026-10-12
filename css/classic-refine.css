@@ -127,14 +127,28 @@
 .gear-modal .gear-note{position:static;text-align:center;font-size:27px;margin-bottom:12px;color:#6d321d}.gear-modal .gear-layout{height:365px;grid-template-columns:38% 62%;gap:5px}.gear-modal .gear-slots{position:relative;display:block}.gear-modal .gear-slots .catalog-cell{position:absolute;width:140px;height:134px}.gear-modal .gear-slots .catalog-cell:nth-child(1){top:0;left:119px}.gear-modal .gear-slots .catalog-cell:nth-child(2){top:122px;left:202px}.gear-modal .gear-slots .catalog-cell:nth-child(3){top:122px;left:35px}.gear-modal .gear-slots .catalog-cell:nth-child(4){top:244px;left:119px}.gear-modal .gear-slots .item-icon{width:133px;height:119px;background:#ede0bd;border-radius:29px;border:3px solid #a88256;box-shadow:inset 0 0 0 3px #fff7dc}
 .gear-modal .gear-list{gap:3px 17px;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)}.gear-modal .gear-list .item-icon{width:147px;height:138px;border-radius:30px}.gear-modal .gear-list .item-caption{font:27px/32px "SimSun","Songti SC","STSong",serif}.gear-modal .gear-capacity{position:absolute;bottom:80px;right:37px;font-size:25px;color:#7b542d}.gear-modal .page-arrow{top:43%;right:2px}.gear-modal .page-arrow.prev{left:350px}
 
-/* 装备详情弹窗的按钮排（`.gear-detail` 是 openGear 独有的，用 :has 认它）。
- * 传说（橙）装会多一个「镶嵌/拆卸宝石」，最多 5 个按钮；基础规则
- * `.modal-buttons .uc-button{min-width:200px}` + `gap:28px` 一排要 1112px，
- * 弹窗里只有 926px —— 整排会从弹窗右边顶出去（用户反馈「一排 5 个按钮超出屏幕」）。
- * 旧修复把按钮整体改小（去掉 min-width、压内边距），代价是按钮比全游戏其它弹窗小一号。
- * 现在恢复标准按钮尺寸，改用**换行**：最坏组合（装备 + 拆卸宝石（5金） + 星标 + 出售 + 返回）
- * 自动排成 4+1 或 3+2 两行，单排最宽 884px < 926px，既不溢出也统一了风格。 */
-.classic-modal:has(.gear-detail) .modal-buttons{flex-wrap:wrap;gap:16px 24px}
+/* 装备详情弹窗的按钮排。
+ * **2026-10 用户口径：按钮保持游戏里那套固定尺寸（不拉伸、不压字号），一行里放几颗
+ * 只靠间距自适应** —— 基础规则本来就是 `.modal-buttons{display:flex;justify-content:space-evenly}`，
+ * 所以这里既不写 flex:1（那会把按钮拉成等宽、满填充一行），也不改字号 / 内边距。
+ * · 4 颗（普通装备、带星标的橙装：取消星标·返回·卸下·卸下宝石）自然宽 ≈ 828px + 间距，
+ *   弹窗内宽 926px 放得下 → 明确 nowrap，永不换行（多出来的空当由 space-evenly 分配）。
+ * · 5 颗（**不带星标**的橙装会多一颗「星标」）固定尺寸一排要 ≈ 1014px > 926px，物理上放不下
+ *   → 退回换行；配下面的正文限高，换行后按钮依然完整落在画布（1170×690）里，
+ *   不会再出现「第二行被顶出画布、宝石键看不见」。 */
+.classic-modal:has(.gear-detail) .modal-buttons:not(:has(>.uc-button:nth-child(5))),
+.gear-detail-overlay .modal-buttons:not(:has(>.uc-button:nth-child(5))){flex-wrap:nowrap}
+
+/* 装备详情弹窗的正文限高（2026-10 用户反馈：橙装的「镶嵌 / 取下宝石」不见了）。
+ * 原因：橙装的详情比普通装备多一颗宝石键，再加上「星标」，按钮排会从一行变两行；
+ * 而 `.classic-modal` 有 max-height:625px，超出的内容会被顶到画布（1170×690）下沿之外
+ * —— 宝石那颗正好在第二行，于是「功能消失」。
+ * 用 headless Chrome 在 1170×690 下量过：修复前第一行 top=637、第二行 top=716 bottom=780（都在画布外）。
+ * 所以：正文自己滚动，按钮排永远留在可视区；排两行时正文再压一档。 */
+.classic-modal:has(.gear-detail)>.modal-body,
+.gear-detail-overlay>.classic-modal>.modal-body{max-height:420px;overflow-y:auto}
+.classic-modal:has(.gear-detail):has(.modal-buttons>.uc-button:nth-child(5))>.modal-body,
+.gear-detail-overlay>.classic-modal:has(.modal-buttons>.uc-button:nth-child(5))>.modal-body{max-height:330px}
 
 /* 自由属性点：升级时必选的分配弹窗（无关闭叉）；点数不在其它地方常驻显示 */
 .classic-modal-overlay.point-dialog>.classic-modal.small-modal{max-height:600px;width:800px}
@@ -350,6 +364,13 @@
   background:rgba(40,26,14,.92);color:#ffd9a0;border:2px solid #b9945f;border-radius:12px;
   padding:10px 20px;font-size:22px;pointer-events:none;opacity:1;transition:opacity .6s}
 .run-toast.out{opacity:0}
+/* 【U18c】「停留得久一些」的那一条（第一次失去烙印）：字号与内边距放大一档，
+ * 并从下方缓缓升起 —— 一看就知道这条比别的提示更重。JS 侧停留时间也更长（runToast 的 hold）。 */
+.run-toast.hold{font-size:26px;padding:14px 28px;border-color:#e0b46a;
+  box-shadow:0 0 0 3px rgba(224,180,106,.25),0 10px 26px rgba(0,0,0,.35);
+  animation:runToastRise .5s ease-out both}
+@keyframes runToastRise{from{opacity:0;transform:translateX(-50%) translateY(14px)}
+  to{opacity:1;transform:translateX(-50%) translateY(0)}}
 
 /* 永久增益面板：附魔（虚空铭文·不占位）段与未附魔段之间的分界 */
 .buff-sep{display:inline-block;width:2px;height:26px;margin:0 6px;vertical-align:middle;

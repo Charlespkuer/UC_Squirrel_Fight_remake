@@ -194,5 +194,48 @@ test('蓝色碎片小幅降期望：除碎片竞技场外都吃同一个系数�
   assert.match(src('js/tower.js'),/BLUE_SHARD_DROP_MUL/,'挑战塔过关要用共享系数');
 });
 
+test('按跳过键只收 2/3（随机抹掉一项）；程序化收尾 / 录像仍按原版补齐三份',()=>{
+  /* 用户口径 2026-10：用**跳过键**跳过战斗播放时只能固定收 2/3，
+   * 具体实现＝随机抹掉一包三项里的一项（`skip(true)`）。 */
+  // ① 抹掉哪一项由随机流决定：这里第 5 个随机数 = 0 → 抹掉第 1 项（经验 15，这一包是 [15,8,21]）。
+  const g=setup(),drop=g.create([0,0,.4,.6,0]);
+  drop.skip(true);
+  const sum=drop.summary();
+  same(sum.items.map(x=>x.id),[8,21]);
+  assert.equal(sum.lost&&sum.lost.id,15,'结算要能说出少收了哪一项');
+  assert.equal(g.s().exp,0,'被抹掉的那份经验不发');
+  assert.equal(g.s().goldPoint,102,'剩下两份照常入账');
+  // ② 换个随机数 → 抹掉的是另一项（≈1 → 第 3 项 21），说明确实是「随机一项」。
+  const g2=setup(),drop2=g2.create([0,0,.4,.6,0.999999]);
+  drop2.skip(true);
+  same(drop2.summary().items.map(x=>x.id),[15,8]);
+  assert.equal(drop2.summary().lost.id,21);
+  // ③ 不传 / 传 false ＝ 原版口径（战斗自然收尾、录像回放）：三份全发、lost 为 null。
+  const g3=setup(),plain=g3.create([0,0,.4,.6]);
+  plain.skip();
+  same(plain.summary().items.map(x=>x.id),[15,8,21]);
+  assert.equal(plain.summary().lost,null);
+  const g4=setup(),prog=g4.create([0,0,.4,.6]);
+  prog.skip(false);
+  assert.equal(prog.summary().items.length,3);
+  assert.equal(prog.summary().lost,null);
+  // ④ trimOne 的边界：一项/空清单不会被抹成负数。
+  assert.deepEqual(g4.c.BattleDrops.trimOne([{id:1}]).list,[{id:1}]);
+  assert.equal(g4.c.BattleDrops.trimOne([]).lost,null);
+});
+
+test('战中大小体力药剂掉率再砍一半：权重 5→2.5 / 1→0.5，且小数权重照常摇号',()=>{
+  /* 2026-10 用户口径「继续中幅减小」：在上一版基础上再减半。权重是相对值
+   * （`plan()` 按权重和摇号），只改这两个数就等于把单卡概率再压一半；
+   * 这里直接钉住权重，顺带确认没顺手动到别的条目（金松果 25 是代表性的一条）。 */
+  const g=setup(),pool=g.c.BattleDrops.pool;
+  assert.equal(pool.find(p=>p.id===1).weight,2.5,'小体力药剂 5 → 2.5');
+  assert.equal(pool.find(p=>p.id===2).weight,0.5,'大体力药剂 1 → 0.5');
+  assert.equal(pool.find(p=>p.id===8).weight,25,'其它条目不动');
+  // 权重可以不是整数：全 0 的随机数落到第一项（经验），≈1 的落到队尾（蓝碎片），一条都不漏。
+  assert.equal(g.c.BattleDrops.plan(()=>0)[0].id,15,'全 0 → 池首');
+  assert.equal(g.c.BattleDrops.plan(()=>0.999999)[0].id,26,'≈1 → 池尾（小数权重不会漏掉最后一项）');
+});
+
 let failed=0;for(const[name,run]of tests){try{run();console.log('PASS',name);}catch(error){failed++;console.error('FAIL',name,error.stack);}}
 console.log(`${tests.length-failed}/${tests.length} battle-drop tests passed`);process.exitCode=failed?1:0;

@@ -46,7 +46,7 @@ function setup() {
     getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) } };
   c.window = c; c.self = c;
   vm.createContext(c);
-  for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js']) {
+  for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js', 'js/tower-plot.js']) {
     vm.runInContext(readSrc(f), c, { filename: f });
   }
   c.State.newGame('本轮回归');
@@ -1320,13 +1320,23 @@ test('需求27：弹窗按钮按「主操作靠右、取消/返回靠左」排�
     '排序后必须仍按原索引生成 data-action，否则点击会错位');
 });
 
-test('需求29：挑战塔的「返回」回主界面（含胜利弹窗与塔页面）', () => {
+test('需求29：两座塔页面的「返回」都回关卡页（上一级界面）；通关弹窗里那颗仍回主界面', () => {
   const ui = readSrc('js', 'tower-ui.js');
-  // 塔页面自身的返回：不应再回关卡页（原来 UI.runAction('stages')）
-  assert.ok(!/back\(p, \(\) => UI\.runAction\('stages'\)\)/.test(ui),
-    '塔页面的返回不该再走关卡页');
-  const backs = (ui.match(/back\(p, \(\) => C\(\)\.home\(\)\)/g) || []).length;
-  assert.ok(backs >= 2, '挑战塔与无尽塔两处页面返回都应当回主界面，实测 ' + backs + ' 处');
+  /* 【2026-10 用户口径】挑战塔与无尽塔都是从**关卡页**里那两颗入口进来的
+   * （`[data-action="tower-entry"]` / `[data-action="endless-entry"]`），
+   * 所以两处页面「返回」都回关卡页；通关 / 失败弹窗里的「返回」是另一个语境
+   *（本局结束了、回主界面），保持原样。 */
+  const at = [...ui.matchAll(/back\(p,/g)].map((m) => m.index);
+  assert.ok(at.length >= 2, '应当有两处页面返回（挑战塔 / 无尽塔），实测 ' + at.length + ' 处');
+  for (const [i, label] of [[0, '挑战塔'], [1, '无尽塔']]) {
+    const seg = ui.slice(at[i], at[i] + 80);
+    assert.match(seg, /back\(p, backToStages\)/, label + '页面的返回应当走 backToStages（= 关卡页）：' + seg);
+  }
+  const h = ui.indexOf('function backToStages()');
+  assert.ok(h > 0, '应当有 backToStages');
+  const helper = ui.slice(h, ui.indexOf('\n  }', h));
+  assert.match(helper, /runAction\('stages'\)/, 'backToStages 要打开关卡页');
+  assert.match(helper, /C\(\)\.home\(\)/, '拿不到 runAction 时要退回主界面（不能抛）');
 
   // 胜利弹窗的「返回」也要回主界面（抽出 towerClear 用桩跑一遍，直接看导航）
   const a = ui.indexOf('function towerClear(rw)');
@@ -2188,6 +2198,9 @@ test('需求49：神兵淬炼 / 秘技通神 视为「立即生效类」，永�
   const fullRun = (choiceIds) => {
     S.newGame('instant' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
+    /* 【U20b】账号得有一把武器：C32「神兵淬炼」的候选是**玩家自己的武器**，
+     * 一把都没有时会走「先替你留着」（deferredPicks）而不是挂 pendingPick（见 ② 的第二段）。 */
+    st.weapons = ['1:5'];
     for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
@@ -2225,6 +2238,17 @@ test('需求49：神兵淬炼 / 秘技通神 视为「立即生效类」，永�
   assert.ok(res.run.pendingPick && res.run.pendingPick.kind === 'weapon',
     '应当立刻登记「待选武器」：' + JSON.stringify(res.run.pendingPick));
   assert.ok((res.run.pickBuffIds || []).indexOf('C32') >= 0, '应当登记「一局一次」以免重复刷到');
+
+  /* ②b 一把武器都没有时：**不挂 pendingPick**（挂了就变成一个 0 候选的弹窗、永远关不掉），
+   *    改成记进 `deferredPicks` 先替你留着 —— 软锁修复 2026-10。 */
+  r = fullRun();
+  S.state().weapons = [];
+  res = buy('C32');
+  assert.ok(res.out.ok, '没有武器时也该买得下（先留着）');
+  assert.ok(!res.run.pendingPick, '没有武器可强化时不该挂 pendingPick：' + JSON.stringify(res.run.pendingPick));
+  assert.ok((res.run.deferredPicks || []).some((x) => x && x.buffId === 'C32'),
+    '应当记进 deferredPicks 等有武器时再接上：' + JSON.stringify(res.run.deferredPicks));
+  S.state().weapons = ['1:5'];                        // 还原，后面的小段继续按「有武器」跑
 
   /* ③ 满槽时买秘技通神：同理，登记「待选技能」 */
   r = fullRun();

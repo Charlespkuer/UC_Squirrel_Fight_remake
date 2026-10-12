@@ -2,9 +2,9 @@
 /* ============================================================
  * tools/gen-vendor-data.cjs — 把原版数据抽成游戏自己的 js/gamedict.js
  *
- * 背景：js/orig/ 里的 5 个原版文件以前是**运行时依赖**（scripts/index.html 直接 <script> 引入）。
- * 现在原版文件整包归到 references/orig/（只作参考、不参与运行），游戏运行需要的那部分数据
- * 由这个脚本抽取、生成 js/gamedict.js，之后再也不用碰 references/。
+ * 背景：原版那 5 个文件（GameDict / assets / asset2 / animationStr / Map.min）**只留在本机的
+ * references/orig/**（只作参考、不参与运行；`js/orig/` 那份副本 2026-10 第一百零一批已删除）。
+ * 游戏运行需要的那部分数据由这个脚本抽取、生成 js/gamedict.js，之后再也不用碰 references/。
  *
  * 只抽真正被游戏代码用到的（判断依据：grep 游戏 js/*.js，引用数为 0 的一律不抽）：
  *   · GameDict.js 的 10 个数据字典（武器/技能/道具/装备/套装/强化/NPC/附件/天梯商品/礼包）
@@ -37,14 +37,15 @@ function findRoot(start) {
   return path.resolve(start, '..');
 }
 const ROOT = findRoot(__dirname);
-/* 原版文件优先从 references/orig 读；还没搬的话读 js/orig（迁移期两边都认）。 */
-const ORIG_DIRS = [path.join(ROOT, 'references', 'orig'), path.join(ROOT, 'js', 'orig')];
+/* 【2026-10 第一百零一批】原版文件只认 `references/orig/` 一处 —— `js/orig/`（本机的第二份副本）
+ * 已按用户口径删除，这里不再保留迁移期的回退目录（留着只会让「到底去哪儿找」有两种答案）。
+ * `references/` 整目录不进仓库，所以这个脚本是**非运行时**工具：缺了原版文件就明确报错。 */
+const ORIG_DIR = path.join(ROOT, 'references', 'orig');
 function origFile(name) {
-  for (const dir of ORIG_DIRS) {
-    const f = path.join(dir, name);
-    if (fs.existsSync(f)) return f;
-  }
-  throw new Error('找不到原版文件 ' + name + '（应在 references/orig/ 或 js/orig/）');
+  const f = path.join(ORIG_DIR, name);
+  if (fs.existsSync(f)) return f;
+  throw new Error('找不到原版文件 ' + name + '（应在 references/orig/ —— 那是本机参考资料目录，不进仓库；' +
+    '缺它时不能重新生成 js/gamedict.js，但游戏本身照常跑）');
 }
 
 /** 要迁出的数据字典：全局名 → 一句说明（写进生成文件的注释里）。 */
@@ -345,8 +346,8 @@ function build() {
 const target = path.join(ROOT, 'js', 'gamedict.js');
 const next = build();
 if (process.argv.includes('--check')) {
-  // references/orig/ 不存在（精简发布包）时没得比，直接跳过
-  const hasOrig = ORIG_DIRS.some((d) => fs.existsSync(path.join(d, 'GameDict.js')));
+  // references/orig/ 不存在（精简发布包 / 别人的机器）时没得比，直接跳过
+  const hasOrig = fs.existsSync(path.join(ORIG_DIR, 'GameDict.js'));
   if (!hasOrig) { console.log('· 跳过：找不到 references/orig/（精简包里没有原版文件，属正常）'); process.exit(0); }
   const cur = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
   if (cur === next) { console.log('✓ js/gamedict.js 是最新的（' + (next.length / 1048576).toFixed(2) + ' MB）'); process.exit(0); }

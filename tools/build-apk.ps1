@@ -82,7 +82,7 @@ if (-not (Test-Path (Join-Path $BuildRoot 'src-tauri\Cargo.toml'))) {
   # 只同步会改的东西：前端、Rust 源码、配置（不整份重拷，省时间）
   foreach ($rel in @('js','css','audio','images','scripts','src-tauri\src','src-tauri\build.rs',
                      'src-tauri\Cargo.toml','src-tauri\tauri.conf.json','src-tauri\tauri.android.conf.json',
-                     'src-tauri\icons','tools\build-tauri-web.cjs')) {
+                     'src-tauri\icons','tools\build-tauri-app.cjs')) {
     $s = Join-Path $SourceRepo $rel; $d = Join-Path $BuildRoot $rel
     if (-not (Test-Path $s)) { continue }
     if (Test-Path $s -PathType Container) { robocopy $s $d /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null }
@@ -97,7 +97,7 @@ if (-not (Test-Path (Join-Path $BuildRoot 'src-tauri\Cargo.toml'))) {
 if (-not $SkipSyncStaging) {
   Say "暂存前端到 src-tauri\web"
   Push-Location $BuildRoot
-  & node (Join-Path $BuildRoot 'tools\build-tauri-web.cjs') | Select-Object -Last 1 | ForEach-Object { Ok $_ }
+  & node (Join-Path $BuildRoot 'tools\build-tauri-app.cjs') --web | Select-Object -Last 1 | ForEach-Object { Ok $_ }
   Pop-Location
 }
 
@@ -132,11 +132,12 @@ $assets = Join-Path $BuildRoot 'src-tauri\gen\android\app\src\main\assets'
 robocopy (Join-Path $BuildRoot 'src-tauri\web') $assets /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
 Ok "前端资源 → assets（$((Get-ChildItem $assets -Recurse -Force -File | Measure-Object).Count) 个文件）"
 
-# ---------- 4b) 安卓图标与清单（仓库里的 gen/android 是"真源"） ----------
+# ---------- 4b) 安卓图标 / 清单 / 版本号（仓库里的 gen/android 是"真源"） ----------
 # 图标用 `cd src-tauri && npx tauri icon app-icon.png` 生成（它会直接写进 gen/android/app/src/main/res）；
 # 清单里有一处手工改动：android:screenOrientation="sensorLandscape"（游戏是 1216×760 横向比例，
 # 锁横屏才不是竖屏中间一条）。这两样都在 gen/android 里，而构建副本的 gen/android 是 init 时生成的，
-# 所以每次构建都要从仓库同步过去——只同步 res 与清单，**绝不动 buildSrc**（那里有 node 路径的补丁）。
+# 所以每次构建都要从仓库同步过去——只同步 res / 清单 / tauri.properties，**绝不动 buildSrc**
+#（那里有 node 路径的补丁）。
 $srcGen = Join-Path $SourceRepo 'src-tauri\gen\android\app\src\main'
 $dstGen = Join-Path $BuildRoot 'src-tauri\gen\android\app\src\main'
 if (Test-Path (Join-Path $srcGen 'res')) {
@@ -146,6 +147,34 @@ if (Test-Path (Join-Path $srcGen 'res')) {
 if (Test-Path (Join-Path $srcGen 'AndroidManifest.xml')) {
   Copy-Item (Join-Path $srcGen 'AndroidManifest.xml') (Join-Path $dstGen 'AndroidManifest.xml') -Force
   Ok "AndroidManifest.xml → 已同步（含锁横屏）"
+}
+# ⚠️ **安卓版本号必须一起同步**（2026-10 用户报「安卓包装不上」的根因）：
+# `tauri.android.versionName / versionCode` 由 build-release.ps1 每次发版 bump，
+# 但它住在 `app\tauri.properties`，既不在上面那份同步目录清单里、也不在 res/清单 里 ——
+# 于是构建副本永远停在**建副本那天**的 versionCode（实测仓库已是 0.4.9/4009，副本还停在 0.4.8/4008）。
+# 后果：打出来的 APK versionCode 比手机上已经装着的**旧** → 安卓直接拒绝安装
+#（「应用未安装」/ INSTALL_FAILED_VERSION_DOWNGRADE），而且游戏里显示的版本号也跟着旧。
+# 写法上不假设目标文件一定存在（首次构建时由 tauri init 生成），缺行就补一行。
+$srcProps = Join-Path $SourceRepo 'src-tauri\gen\android\app\tauri.properties'
+$dstProps = Join-Path $BuildRoot 'src-tauri\gen\android\app\tauri.properties'
+if (Test-Path $srcProps) {
+  $srcText = [System.IO.File]::ReadAllText($srcProps)
+  $ver = ([regex]'(?m)^tauri\.android\.versionName=(.+)$').Match($srcText).Groups[1].Value.Trim()
+  $code = ([regex]'(?m)^tauri\.android\.versionCode=(.+)$').Match($srcText).Groups[1].Value.Trim()
+  if ($ver -and $code) {
+    $dstText = if (Test-Path $dstProps) { [System.IO.File]::ReadAllText($dstProps) } else { '' }
+    if ($dstText -match '(?m)^tauri\.android\.versionName=') {
+      $dstText = $dstText -replace '(?m)^tauri\.android\.versionName=.*$', "tauri.android.versionName=$ver"
+    } else { $dstText = $dstText.TrimEnd() + "`ntauri.android.versionName=$ver`n" }
+    if ($dstText -match '(?m)^tauri\.android\.versionCode=') {
+      $dstText = $dstText -replace '(?m)^tauri\.android\.versionCode=.*$', "tauri.android.versionCode=$code"
+    } else { $dstText = $dstText.TrimEnd() + "`ntauri.android.versionCode=$code`n" }
+    New-Item -ItemType Directory -Force -Path (Split-Path $dstProps -Parent) | Out-Null
+    [System.IO.File]::WriteAllText($dstProps, $dstText, (New-Object System.Text.UTF8Encoding($false)))
+    Ok "安卓版本号 → $ver / versionCode=$code"
+  } else {
+    Write-Host "   ⚠ 没从 tauri.properties 读出安卓版本号，跳过同步" -ForegroundColor Yellow
+  }
 }
 
 # ---------- 5) Gradle 打包 ----------
@@ -180,11 +209,33 @@ Ok "APK：$apkOut（$([math]::Round((Get-Item $apkOut).Length/1MB,1)) MB）"
 Ok "原始产物：$apk"
 
 # ---------- 6) 顺手装到连着的设备（模拟器/真机都行） ----------
+# ⚠️ 以前这里 `adb install` 的输出被 `Select-Object -Last 1` 吞掉、退出码也不看，
+# 于是**装失败也打一个 ✓**（用户看到的就是「打包说好了，手机上说装不上」）。
+# 现在：打印 adb 的真实输出、按退出码/关键字判断，失败就按常见两类给出处方。
 $adb = Join-Path $Sdk 'platform-tools\adb.exe'
 $devices = & $adb devices 2>&1 | Select-String 'device$'
 if ($devices) {
   Say "检测到设备，直接安装并启动"
-  & $adb install -r $apk 2>&1 | Select-Object -Last 1 | ForEach-Object { Ok $_ }
+  $installOut = & $adb install -r $apk 2>&1
+  $installCode = $LASTEXITCODE
+  $installText = ($installOut | Out-String)
+  $installOut | Select-Object -Last 4 | ForEach-Object { Write-Host "   $_" }
+  if ($installCode -ne 0 -or $installText -match 'Failure|failed') {
+    Write-Host "   ✗ 安装失败（adb 退出码 $installCode）" -ForegroundColor Red
+    if ($installText -match 'VERSION_DOWNGRADE') {
+      Write-Host "     原因：这个 APK 的 versionCode 比手机上装着的旧，安卓不允许降级安装。" -ForegroundColor Yellow
+      Write-Host "     处方：确认用的是**最新**的包（本脚本已同步 gen\android 的版本号）；" -ForegroundColor Yellow
+      Write-Host "           确实要降级就先卸载旧版：adb uninstall com.ssdz.classic（会清掉本机存档，先在游戏里导出）。" -ForegroundColor Yellow
+    } elseif ($installText -match 'UPDATE_INCOMPATIBLE|signatures do not match|Signature') {
+      Write-Host "     原因：手机上那个同名应用是**另一把签名**装的（换过调试密钥 / 换过机器）。" -ForegroundColor Yellow
+      Write-Host "     处方：先卸载旧版再装：adb uninstall com.ssdz.classic（同样会清本机存档，先导出）。" -ForegroundColor Yellow
+    } elseif ($installText -match 'INSUFFICIENT_STORAGE') {
+      Write-Host "     原因：手机存储空间不足。" -ForegroundColor Yellow
+    } elseif ($installText -match 'NO_MATCHING_ABIS|INSTALL_FAILED_NO_MATCHING_ABIS') {
+      Write-Host "     原因：这个包不含手机 CPU 架构对应的 .so —— 真机请用 -Abi arm64-v8a 出包。" -ForegroundColor Yellow
+    }
+    throw "APK 安装失败（包本身没问题的话，按上面那条处方处理）"
+  }
   & $adb shell monkey -p com.ssdz.classic -c android.intent.category.LAUNCHER 1 2>&1 | Out-Null
   Ok "已启动 com.ssdz.classic"
 } else {

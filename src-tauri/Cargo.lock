@@ -2832,7 +2832,7 @@ dependencies = [
 
 [[package]]
 name = "ssdz-classic"
-version = "0.4.8"
+version = "0.4.9"
 dependencies = [
  "serde",
  "serde_json",

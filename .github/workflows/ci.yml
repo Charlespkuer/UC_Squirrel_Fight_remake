@@ -30,6 +30,13 @@ jobs:
         shell: bash
         run: node tools/check-asset-paths.cjs
 
+      # 编码体检：.ps1 含中文必须有 UTF-8 BOM（Windows PowerShell 5.1 对无 BOM 的文件按 ANSI 解码，
+      # 中文会乱码、甚至把注释块拆坏导致整脚本解析失败 —— 2026-10 真踩过：打包脚本因此红了 27 个语法错）；
+      # 顺带查所有文本文件是不是合法 UTF-8（以前出过 PowerShell 写回 GBK 把源码写坏的事）。
+      - name: 编码体检
+        shell: bash
+        run: node tools/check-encodings.cjs
+
       - name: 单元与集成测试
         shell: bash
         run: |
@@ -39,12 +46,23 @@ jobs:
           # 全部跑完再汇总失败，一次就能看到所有问题。
           # 失败时额外打一条 GitHub 注解（::error::）：**哪台机器挂在哪套件**一眼可见，
           # 不用翻几十屏日志（注解也能从 check-runs API 匿名读到，方便远程排查）。
+          # 再把该套件输出的最后 25 行写进 job summary：**具体哪条断言挂了**也能远程读到
+          #（job 日志要 admin 权限，summary 不用 —— 2026-10 就因为只有套件名、没有断言，排查只能靠猜）。
           fail=0
           for t in tools/test-*.cjs; do
             echo "──── $t ────"
-            if ! node "$t"; then
+            if node "$t" > "$RUNNER_TEMP/out.txt" 2>&1; then
+              tail -n 3 "$RUNNER_TEMP/out.txt"
+            else
               fail=1
               echo "::error title=套件失败（${{ matrix.os }}）::$t 未通过"
+              tail -n 25 "$RUNNER_TEMP/out.txt"
+              {
+                echo "### ❌ $t（${{ matrix.os }}）"
+                echo '```'
+                tail -n 25 "$RUNNER_TEMP/out.txt"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
             fi
           done
           exit $fail

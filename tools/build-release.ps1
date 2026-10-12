@@ -2,7 +2,11 @@
   build-release.ps1 —— 松鼠大战怀旧版 · 一键出包（Windows exe + 安装包 + 安卓 APK）
 
   一条命令做完六件事：
-    1) 版本号对齐：scripts\version.json / src-tauri(Cargo.toml / Cargo.lock / package.json / tauri.conf.json)
+    1) 版本号对齐：**优先**从 `src-tauri\dist` 里上一版产物的**文件名**读出上一个版本号
+       （它比 scripts\version.json 更贴近现实），再 patch +1（+0.0.1）；读不到（目录空/不存在/
+       名字里没有 x.y.z）才回退成 scripts\version.json patch +1。然后把版本号写进
+       scripts\version.json / src-tauri(Cargo.toml / Cargo.lock / package.json / tauri.conf.json)
+       / 安卓 tauri.properties
     2) 删掉 src-tauri\dist 里**上一个版本**的 exe / apk（只删本次不产出的，精确到文件）
     3) 编 Windows 轻壳 exe + NSIS 安装包（真正干活的是 tools\build-tauri-app.cjs）
     4) 编安卓 APK（真正干活的是 tools\build-apk.ps1，中文路径/NDK 那些坑都注释在里面）
@@ -194,6 +198,37 @@ if (-not $Name) {
 }
 if (-not $Name) { $Name = 'squirrel_fight' }
 
+# ============================================================
+# 【BR1.5】版本号来源：优先读 dist 里「上一次的产物名」
+# ============================================================
+# 【2026-10 用户口径】上一次打出来的 exe / apk **名字里就带着那一版的实际版本号**，
+# 比 `scripts\version.json` 更贴近现实（实测两者会脱节：dist 里已经是 0.5.0，version.json 还停在 0.4.9）。
+# 所以「下一个版本号」优先从 dist 里**即将被删掉的**那些文件名里读出来，再 patch +1（+0.0.1）；
+# 读不到（目录不存在 / 空 / 名字里没有 x.y.z）才回退到原来的 `version.json patch +1`。
+#   认得：`squirrel_fight_0.5.0_x64-setup.exe`、`squirrel-fight-0.5.0-arm64-v8a.apk`
+#         （分隔符 `_` / `-` / `.` 都吃，自定义 -Name / -ExeName / -ApkName 也照样认）
+#   不认得：`ssdz-classic-arm64-v8a-release-20261012.apk`（build-apk.ps1 的原始名，里面只有日期）
+function Get-DistVersionInfo($dir) {
+  $info = [ordered]@{ Version = $null; BaseName = $null; Count = 0 }
+  if (-not $dir -or -not (Test-Path -LiteralPath $dir)) { return $info }
+  $vers = @()
+  foreach ($f in @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue)) {
+    $m = [regex]::Match($f.Name, '^([A-Za-z0-9_.\-]+?)[_.\-](\d+\.\d+\.\d+)[_.\-]')
+    if ($m.Success) {
+      $vers += $m.Groups[2].Value
+      if (-not $info.BaseName) { $info.BaseName = $m.Groups[1].Value }
+    } else {
+      $m2 = [regex]::Match($f.Name, '(\d+\.\d+\.\d+)')
+      if ($m2.Success) { $vers += $m2.Groups[1].Value }
+    }
+  }
+  $info.Count = $vers.Count
+  if ($vers.Count) {
+    $info.Version = @($vers | Sort-Object { [version]$_ } -Descending)[0]
+  }
+  return $info
+}
+
 if ($CleanOnly) {
   $target = $current          # -CleanOnly 只回收磁盘，绝不碰版本号
 } elseif ($Version) {
@@ -201,8 +236,24 @@ if ($CleanOnly) {
 } elseif ($NoBump) {
   $target = $current
 } else {
-  $p = $current.Split('.')
+  # 【版本号基准】dist 旧产物名里的版本 vs version.json，取**较高**的那个再 +0.0.1。
+  # 取较高是为了「dist 还停在旧版」时不会把版本号往回退（退回旧号会覆盖掉已经发布的包）；
+  # dist 领先时（正常情况）就是用户口径的「读 dist 名字 +0.0.1」。
+  $distInfo = Get-DistVersionInfo $DIST
+  $baseVer = $current
+  $baseFrom = 'scripts\version.json'
+  if ($distInfo.Version -and ([version]$distInfo.Version) -gt [version]$baseVer) {
+    $baseVer = $distInfo.Version
+    $baseFrom = 'dist 里的上一版产物名'
+  }
+  $p = $baseVer.Split('.')
   $target = "$($p[0]).$($p[1]).$([int]$p[2] + 1)"
+  if ($distInfo.Version) {
+    Ok "上一个版本号：$($distInfo.Version)（从 dist 里 $($distInfo.Count) 个带版本号的文件名中取最大）"
+  } else {
+    Note 'dist 里没读到带版本号的产物名（目录空 / 不存在 / 名字里没有 x.y.z）→ 版本号回退用 scripts\version.json'
+  }
+  Note "版本号基准：$baseVer（来源：$baseFrom）→ patch +1 = $target"
 }
 if ($target -notmatch '^\d+\.\d+\.\d+$') { Die "目标版本号格式不对：'$target'（要 x.y.z）" }
 
@@ -278,10 +329,25 @@ function Expand-Name($tpl) {
 }
 
 $want = [ordered]@{}
-if (-not $SkipExe) { $want['exe'] = Join-Path $DIST (Expand-Name $ExeName) }
+# 【2026-10 用户口径】轻壳 exe 只放**游戏根目录**（build-tauri-app.cjs 的产出，免安装时双击它开原生窗口）；
+# 只有在显式改了 -ExeName（不再叫 squirrel_fight.exe）时才往 dist 另存一份，免得去动根目录那个入口。
+if (-not $SkipExe -and (Expand-Name $ExeName) -ne 'squirrel_fight.exe') {
+  $want['exe'] = Join-Path $DIST (Expand-Name $ExeName)
+}
 if (-not $SkipInstaller) { $want['setup'] = Join-Path $DIST (Expand-Name $InstallerName) }
 if (-not $SkipApk) { $want['apk'] = Join-Path $DIST (Expand-Name $ApkName) }
 $wantList = @($want.Values)
+
+# 把这一版**将要用到的名字**打出来（-DryRun 时尤其有用：能先看清版本号与文件名对不对）
+if (-not $CleanOnly) {
+  Note '这一版的产物名：'
+  if (-not $SkipExe) {
+    $exeLabel = if ($want.Contains('exe')) { Split-Path -Leaf $want['exe'] } else { 'squirrel_fight.exe（游戏根目录，双击入口）' }
+    Note ('  exe    ：' + $exeLabel)
+  }
+  if (-not $SkipInstaller) { Note ('  安装包 ：' + (Split-Path -Leaf $want['setup'])) }
+  if (-not $SkipApk) { Note ('  安卓包 ：' + (Split-Path -Leaf $want['apk'])) }
+}
 
 if (-not (Test-Path $DIST)) { New-Item -ItemType Directory -Force -Path $DIST | Out-Null }
 $stale = @(Get-ChildItem -LiteralPath $DIST -File -ErrorAction SilentlyContinue |
@@ -373,17 +439,19 @@ if ((-not $SkipExe) -or (-not $SkipInstaller)) {
   if (-not $SkipInstaller) { $exeArgs += '--installer' }
   Invoke-Step '编 Windows 轻壳 exe（+ NSIS 安装包）' $node $exeArgs
 
-  # 轻壳 exe：build-tauri-app.cjs 固定写成 dist\squirrel_fight.exe，按模板改名
+  # 轻壳 exe：build-tauri-app.cjs 只写**游戏根目录**那一份（免安装双击入口，便携包里也用它）。
+  # dist 里不再放同名副本 —— 没有任何流程读它（便携包不收、tauri.yml 发布的是安装包）。
   if (-not $SkipExe) {
-    $built = Join-Path $DIST 'squirrel_fight.exe'
-    if (-not (Test-Path $built)) { Die "没找到轻壳 exe：$built" }
-    $dest = $want['exe']
-    if ($built -ne $dest) {
+    $rootExe = Join-Path $ROOT 'squirrel_fight.exe'
+    if (-not (Test-Path $rootExe)) { Die "没找到轻壳 exe：$rootExe" }
+    if ($want.Contains('exe')) {
+      $dest = $want['exe']
       if (Test-Path $dest) { Remove-Item -LiteralPath $dest -Force }
-      Move-Item -LiteralPath $built -Destination $dest -Force
+      Copy-Item -LiteralPath $rootExe -Destination $dest -Force
+      Ok "exe → $(Split-Path -Leaf $dest)（$(Fmt-Size (Get-Item $dest).Length)）"
+    } else {
+      Ok "exe → 游戏根目录 squirrel_fight.exe（$(Fmt-Size (Get-Item $rootExe).Length)，双击入口）"
     }
-    Ok "exe → $(Split-Path -Leaf $dest)（$(Fmt-Size (Get-Item $dest).Length)）"
-    Note '仓库根目录那份 squirrel_fight.exe 也已同步更新（Windows 双击入口）'
   }
 
   # 安装包：Tauri 的 NSIS 产物名不固定，取 dist 里最新的 *-setup.exe

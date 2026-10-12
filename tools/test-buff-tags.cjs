@@ -203,7 +203,7 @@ hr('3.5 冗余清理：数据里不再有 xxxOnly / stackable / unique… 这些
     assert.equal(bad.length, 0, '仍有冗余字段：' + bad.join(', '));
   });
   check('页面代码里也不再读这些字段（只读标签）', () => {
-    for (const f of ['js/tower.js', 'js/tower-ui.js', 'js/tower-data.js']) {
+    for (const f of ['js/tower.js', 'js/tower-plot.js', 'js/tower-ui.js', 'js/tower-data.js']) {
       const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
       for (const k of FORBIDDEN) {
         /* 只允许出现在「禁用清单 / 词表 / 注释」里：代码读取形如 .字段 或 ["字段"] */

@@ -223,6 +223,13 @@
     const layer = Math.floor(Number(n) || 0);
     return layer > 0 && layer % LAYER_CYCLE === 0;
   }
+  /** 【U20】整百层（100 / 200 / 300…）＝「觐见魔王」那一层：打赢之后**固定掉落「照影之境」**，
+   *  玩家拾取 + 点「继续挑战」确认之后才进下一层（用户口径 2026-10）。
+   *  判据与 `layerNoShop` 同源（整百层本来就不开店），单独写一个名字是为了
+   *  将来「镜中世界」单独调层号时不用翻调用点。 */
+  function isMirrorLayer(n) { return layerNoShop(n); }
+  /** 照影之境：整百层剧情固定奖励那一件（id + 循环长度）。 */
+  const MIRROR = Object.freeze({ id: 'C63', cycle: LAYER_CYCLE });
   /** 这一层还吃不吃「环境词缀 / 随机丢烙印 / 每 10 层丢一个无尽增益」。
    *  这三条都随 **100 层循环**走，判据是**层号在这一轮里的位置**（`layerCycle`），
    *  所以第 101 / 201 / 301… 层与第 1 层完全同规矩。
@@ -372,7 +379,7 @@
     if (Array.isArray(spec)) return [Number(spec[0]), Number(spec[1])];
     return [Number(spec), Number(spec)];
   }
-  /** 这条环境注明了哪些键是「比例」。 */
+  /** 某条环境注明了哪些键是「比例」。 */
   function envPctKeys(def) {
     const out = {};
     for (const [key, spec] of Object.entries((def && def.mods) || {})) out[key] = Array.isArray(spec) && spec[2] === 'pct';
@@ -572,6 +579,10 @@
     every: 10,                // 每 10 层必出一场
     skipMods: [0, 5],         // x0 / x5 层不触发
     name: '德拉莫斯',         // 固定名字（与三侠/精英的命名风格区分开；2026-10 第七十八批由「魔王·蚀影」改名）
+    /* 整百层（100/200/300…）那一场是「**觐见魔王**」三连战的终点 —— 那一战里他的名字带前缀
+     * （用户口径 2026-10：100 层及 100 的整数倍层显示「魔王·德拉莫斯」），**其它地方一律不变**
+     *（路上偶遇的巡逻照样只叫「德拉莫斯」）。取名统一走 patrolName，别在各处拼字符串。 */
+    kingPrefix: '魔王·',
     outfit: PATROL_OUTFIT,
     /* 魔王身上那套狂战甲的**套装收益**按哪个家族算（`State.setBonusEffects` 的入口）。
      * 它就是玩家能拿到的那套 50 级传说档（GEAR.berserk，Set 51「狂战」）——
@@ -596,6 +607,14 @@
     bossBrokenBrands: 2,      // 已破碎的终焉烙印件数
     bossBrokenFinal: 0.30,    // 每件的终乘（两件 → ×1.6）
   });
+  /** 「巡逻 / 觐见魔王」的显示名：**整百层**（100/200/300…）带「魔王·」前缀，其余层不变。
+   *  这三处调用点（预告 entryInfo / 建敌人 buildFoe / 实战 foe.name）共用它，
+   *  免得「预告是一个名字、打起来是另一个名字」。 */
+  function patrolName(layer) {
+    const n = Math.floor(Number(layer) || 0);
+    const base = PATROL.name;
+    return (n > 0 && n % LAYER_CYCLE === 0) ? ((PATROL.kingPrefix || '') + base) : base;
+  }
   /** 某个 10 层区块里「巡逻」落在哪一层 —— 区块内除 x0 / x5 外的层里按 (区块, salt) 定一点。
    *  同层固定（预告 = 实战），换局换点（不然每局都在同一层，太可预测）。
    *  `block` 传的是**轮内区块号**（见 isPatrolLayer），所以第 2 轮的同一区块落点与第 1 轮相同。 */
@@ -1825,6 +1844,24 @@
     { id: 'C38', tags: ['tower', 'endless', 'battle', 'shop', 'unique'], name: '先机预判', rarity: 2, kind: 'permanent',
       desc: '每场战斗敌方对我方的第一次伤害为 0，且我方立刻额外行动一次',
       mods: { firstHitZero: 1, firstHitZeroFreeTurn: 1 } },
+
+    /* ---------- 【U20】照影之境（整百层「觐见魔王」的固定奖励） ----------
+     * 用户口径 2026-10：打赢第 100 / 200 / 300… 层的魔王后**固定掉落**这一件，
+     * 拾取之后挂在「永久增益」的**最前面**，介绍是 `？？？`（效果刻意不明说），
+     * 每过 100 层叠一层。
+     *   · `story` 标签 = 剧情固定获得：**不进任何随机池**（场间选择 / 商店 / 铸币商店 /
+     *     免费交换 / 免费刷新都拿不到它），只能由状态机在整百层发放；
+     *   · `hidden`     = 不可出售、不可献祭、不进「本局构筑」；
+     *   · `catalog`    = 例外：**要进「增益集锦」**（玩家该知道有这么一件传奇）；
+     *   · `flavor`     = 拾取卡上那句「映出一具完美的躯壳」；`desc` 才是进背包后的介绍，
+     *     按用户口径写 `？？？`（`descOf` 对 story 件不再追加叠层说明，免得剧透）。
+     *   · 目前**没有数值效果**（`mods` 留空）：以后要加效果，往 `mods` 里加一个真实生效的键，
+     *     并在 tower.js 的 aggregate 里接上即可 —— 发放/叠层/展示这套管路已经就位。 */
+    { id: 'C63', tags: ['endless', 'story', 'hidden', 'catalog'], name: '照影之境', rarity: 3, kind: 'permanent',
+      unlimitedStacks: true,
+      flavor: '映出一具完美的躯壳',
+      desc: '？？？',
+      mods: {} },
   ]);
   /* ============================================================
    * 【D14】Buff 索引与杂项常量 —— BUFF_BY_ID / 稀有度权重 / 回血比例 / 里程碑
@@ -1950,6 +1987,7 @@
     unique: '同名唯一：拿到后不再进池',
     hidden: '不进「增益集锦」展示（彩蛋/特殊获取）',
     catalog: '即使带 hidden 也要进「增益集锦」展示（铭文、选取型强化这类玩家该知道的特殊获取）',
+    story: '剧情固定获得：只由剧情节点（整百层「觐见魔王」）发放，不进任何随机池 / 商店货架',
     ops: '运营类：经济/运营向（试炼币、商店、铸币、出售、商店消费、永久槽位扩容）',
   });
   /* 池子 ← 需要哪些标签：这里的定义就是「严格池子管理」的规则表。 */
@@ -1958,6 +1996,10 @@
     'T.shop': ['tower', 'shop'],           // 挑战塔商店（塔目前没有商店，保留概念）
     'E.choice': ['endless', 'battle'],     // 无尽塔场间选择（战斗奖励）
     'E.shop': ['shop'],                    // 无尽塔试炼商店
+    /* 剧情固定获得（照影之境）：这个池子**不是抽取来源**，只是给「严格池子管理」一个归属 ——
+     * 有它才能在加载期通过「推不出任何池子就抛错」那道闸，同时保证它不会被任何随机抽奖取到
+     *（随机来源按 E.choice / E.shop 取，它两个都不满足）。 */
+    'E.story': ['endless', 'story'],
   });
   /* 这几个写成 function 声明（会提升）：文件前面的表（TOWER_BATTLE_IDS 等）
    * 也要按标签筛，不能等到这里才可用。 */
@@ -2005,6 +2047,9 @@
   function descOf(buff, mode) {
     if (!buff) return '';
     const base = (mode === 'endless' && buff.descEndless) ? buff.descEndless : buff.desc;
+    /* 【U20】剧情件（照影之境）**不追加叠层说明**：它的介绍按用户口径就是 `？？？`，
+     * 尾巴上挂一句「可无限叠加」等于剧透。叠了多少层在「永久增益」的卡面上照旧显示 `×N`。 */
+    if (hasTag(buff, 'story')) return base;
     const note = stackNote(buff);
     return note ? base + '（' + note + '）' : base;
   }
@@ -2097,7 +2142,9 @@
    *     所以铸币商店的货架与「免费交换」都不给它（试炼商店那边靠没有 shop 标签天然排除）。
    * ops 子池 = 带 `ops` 标签的运营类；传奇档不设「优先运营」限制（见 tower.js 的 rollMintSlots）。 */
   const MINT_EXCLUDE_MODS = ['instantRetry', 'layerRestart'];
-  const mintPool = BUFFS.filter((b) => hasTag(b, 'endless')
+  /* 【U20】铸币商店的货架 / 免费交换也把**剧情件**排除掉：它不是「能买到的增益」，
+   * 只能由整百层的剧情发放（`story` 标签见 BUFF_TAGS）。 */
+  const mintPool = BUFFS.filter((b) => hasTag(b, 'endless') && !hasTag(b, 'story')
     && !MINT_EXCLUDE_MODS.some((k) => Object.prototype.hasOwnProperty.call(b.mods || {}, k)));
   const opsPool = BUFFS.filter((b) => hasTag(b, 'ops'));
   /* ---- 铸币商店的守门 ----
@@ -2139,6 +2186,8 @@
     LAYER_CYCLE, layerCycle, cycleLayer, SHOP_SLOT_TIERS, CHOICE_CUT_TIERS, shopSlotCut, choiceCut,
     endlessShopSlots, layerNoShop, layerModsOn, envAllowed, brandLossAllowed, sacrificeAllowed,
     canHaveEnv, canBrandLoss, BRAND_LOSS_FROM,
+    /* 【U20】整百层「镜中世界」：判据 + 照影之境（剧情固定奖励）的 id / 循环长度。 */
+    isMirrorLayer, MIRROR,
     endlessScaleParts, FOE_STAT_MUL_NOTE,
     buffScore, reviveScoreAt,
     SHOP_PRICE_OFFSET, rollShopPrice,
@@ -2146,7 +2195,7 @@
     TIER_DYNAMIC_WEIGHTS, TIER_AVG_INCLUDES_STATIC, LEGEND_PITY, TICKET_FROM_MINT_CAP,
     shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,
     /* 巡逻（魔王战）：常量 + 两个判据（buildPlan / 预告 / 界面共用）。 */
-    PATROL, patrolLayerInBlock, isPatrolLayer,
+    PATROL, patrolLayerInBlock, isPatrolLayer, patrolName,
     MINT_SHOP, mintLayerOk, mintGroupOf, mintPrice, mintWeights, rollMintRarity, mintChance,
     mintPool, opsPool, MINT_EXCLUDE_MODS,
     BUFF_TAGS, POOL_TAGS, hasTag, tagsOf, buffsWithTag, poolsOf, descOf, stackNote,

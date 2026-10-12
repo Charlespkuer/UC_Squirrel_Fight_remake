@@ -172,7 +172,7 @@
       : [0, 0];
     const maxHp = sources.map((f, side) => Number(f.maxHp) > 0 ? Math.max(hps[side], Math.round(Number(f.maxHp))) : hps[side]);
     const floaters = [], sleepers = new Set();
-    let stopped = false, skipped = false, ending = false, raf = 0, round = 99, countdown = null;
+    let stopped = false, skipped = false, skippedByButton = false, ending = false, raf = 0, round = 99, countdown = null;
     let last = performance.now(), shake = 0, combatStarted = false;
     /* 右下角操作区：绘制与点击区共用同一组矩形。
      * 原版字面坐标 (983,609) 的 164x60 框会把按钮压出血条，所以用 190x70。
@@ -217,7 +217,13 @@
       for (const wake of [...sleepers]) wake();
       sleepers.clear();
     }
-    const controller = { cancel() { stopped = true; clean(); }, skip() { if (!ending && !skipped && !stopped) { skipped = true; if (pickups) pickups.skip(); for (const wake of [...sleepers]) wake(); } }, result };
+    /* `skip(byButton)`：
+     *   · `byButton` = 玩家**按的是右下角「跳过」键** → 2026-10 用户口径：这一场的
+     *     战斗中悬浮奖励只收 2/3（随机抹掉一项，见 battle-drops 的 trimOne）；
+     *   · 不传（程序化收尾 / 自动跳过 / 录像）→ 保持原版口径三份全发。
+     *   战斗胜负与回合流不受影响（结果早由 Sim.simulate 算完，跳过只是不播动画）。 */
+    const controller = { cancel() { stopped = true; clean(); },
+      skip(byButton) { if (!ending && !skipped && !stopped) { skipped = true; if (byButton) skippedByButton = true; if (pickups) pickups.skip(!!byButton); for (const wake of [...sleepers]) wake(); } }, result };
     activeController = controller;
     /** 右下角「倍速」键：在 1×…speedMax× 之间循环（普通战斗 = 1×↔2×；塔 = 1×→2×→3×）。 */
     function speedAction() {
@@ -226,8 +232,9 @@
       speedButton.textContent = speed + '×';
       speedButton.setAttribute('aria-label', '切换战斗速度（当前 ' + speed + '×）');
     }
-    /** 右下角「跳过」键：直接跳到结算（结果早已由模拟器算好，跳过不改变胜负）。 */
-    function skipAction() { controller.skip(); }
+    /** 右下角「跳过」键：直接跳到结算（结果早已由模拟器算好，跳过不改变胜负）。
+     *  按它才会触发「悬浮奖励只收 2/3」（用户口径 2026-10，见 controller.skip 的说明）。 */
+    function skipAction() { controller.skip(true); }
     if (speedButton) speedButton.onclick = speedAction;
     if (skipButton) skipButton.onclick = skipAction;
     function onClick(event) {
@@ -628,6 +635,9 @@
       const hpRound = [...result.rounds].reverse().find((x) => x && Array.isArray(x.hpAfter) && x.hpAfter.length === 2);
       result.hpAfter = hpRound ? [Math.max(0, hpRound.hpAfter[0]), Math.max(0, hpRound.hpAfter[1])] : null;
       const loot = pickups ? pickups.summary() : { items: [], ups: [] };
+      /* 这一场是不是**玩家按跳过键**跳过的 —— 挑战塔 / 无尽塔的战斗没有飘物
+       *（collectDrops:false），它们的奖励按层结算，靠这个标记去扣「只收 2/3」。 */
+      result.skipped = skippedByButton;
       if (loot.items.length) result.pickups = loot.items;
       if (opts.onEnd) opts.onEnd(result.winner, result, loot);
     }

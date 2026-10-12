@@ -36,7 +36,7 @@ function setup() {
     getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) } };
   c.window = c; c.self = c;
   vm.createContext(c);
-  for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js']) {
+  for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js', 'js/tower-plot.js']) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), c, { filename: f });
   }
   c.State.newGame('环境测试');
@@ -314,6 +314,102 @@ test('100 层循环：层号 → 机制开关的映射每轮严格一致，只�
   T._debugAdvanceLayer();
   assert.equal(T._debugRun('endless').layer, 201);
   assert.equal((T._debugRun('endless').env || []).length, 0, '跨轮时旧环境应当清掉');
+});
+
+test('无尽塔主线剧情：层号/事件 → 该播哪一段（埋点与推进）', () => {
+  const c = setup();
+  const TD = c.TowerData, T = c.Tower;
+  /* ① 层号 → 入场剧情：只挂在**第一场**上；这些层之外一处都不挂。 */
+  const planAt = (layer) => { T._debugSetEndlessLayer(layer); return T._debugRun('endless').plan; };
+  const ENTRY = { 20: 'gate20', 30: 'layer30', 40: 'layer40', 90: 'layer90', 95: 'layer95', 100: 'x00stage' };
+  for (const [layer, id] of Object.entries(ENTRY)) {
+    assert.equal(planAt(Number(layer))[0].entryStory, id, '第 ' + layer + ' 层第一场应当挂 ' + id);
+  }
+  for (const layer of [1, 5, 19, 21, 31, 41, 99]) {
+    assert.ok(!planAt(layer)[0].entryStory, '第 ' + layer + ' 层不该有入场剧情');
+  }
+  /* ② 点「继续战斗」= 开战前先把剧情挂上；同一次开战重复调用不会换段。 */
+  T._debugSetEndlessLayer(20);
+  T.nextBattle('endless');
+  assert.equal(T._debugRun('endless').story, 'gate20', '第 20 层第 1 场开战前应当挂 gate20');
+  T.nextBattle('endless');
+  assert.equal(T._debugRun('endless').story, 'gate20', '重复调用不该换段');
+  /* ③ 播过的（storySeen）不再挂 —— 重开一局也不打断。 */
+  T.markStorySeen('gate20');
+  T.clearRunStory('endless');
+  /* ⚠ `nextBattle` 会留下一枚「这一场还没结算」的令牌（真实流程里由战斗回调消耗掉）；
+   * 测试里手工跨过去时必须显式收回，否则后面所有 nextBattle 都会被它挡住。 */
+  delete T._debugRun('endless').attempt;
+  /* ④ 整百层五段：王庭 → 第一近卫 →（段间）第二近卫 → 三重王命 → 终章。 */
+  T._debugSetEndlessLayer(100);
+  T.nextBattle('endless');
+  assert.equal(T._debugRun('endless').story, 'layer100', '第 100 层第 1 场之前先播王庭');
+  T.markStorySeen('layer100');
+  assert.equal(T.nextEntryStoryOf(), 'x00a', '王庭播完接着第一近卫');
+  T.clearRunStory('endless');
+  const winOne = () => {
+    const r = T._debugRun('endless');
+    r.choices = null; r.phase = null;
+    if (r.shop) r.shop = null;
+    delete r.attempt;
+    const nx = T.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '应当能开下一场：' + ((nx && nx.msg) || ''));
+    return T.reportBattle('endless', nx.token, true, 1500, 2000);
+  };
+  winOne();
+  assert.equal(T._debugRun('endless').story, 'x00b', '第 1 场之后应当挂第二近卫');
+  T.markStorySeen('x00b'); T.clearRunStory('endless');
+  winOne();
+  assert.equal(T._debugRun('endless').story, 'x00c', '第 2 场之后应当挂三重王命');
+  T.markStorySeen('x00c'); T.clearRunStory('endless');
+  winOne();
+  assert.equal(T._debugRun('endless').story, 'x00win', '第 3 场之后应当挂终章');
+  /* ⑤ 献祭：离店之后**先挂剧情**再进 sacrifice 阶段（不是先弹窗）。 */
+  T.markStorySeen('x00win'); T.clearRunStory('endless');
+  T._debugSetEndlessLayer(20);
+  T.debugGrantBuff('C06');
+  const run = T._debugRun('endless');
+  run.idx = run.plan.length - 1; run.choices = null; run.phase = null;
+  delete run.attempt;
+  const nx20 = T.nextBattle('endless');
+  T.reportBattle('endless', nx20.token, true, 1500, 2000);
+  assert.equal(T.endlessInfo().run.phase, 'shop', '第 20 层是 x5 → 结算商店');
+  T.markStorySeen('gate20'); T.clearRunStory('endless');
+  T.continueFromShop();
+  assert.equal(T.endlessInfo().run.phase, 'sacrifice', '离店之后进献祭阶段');
+  assert.equal(T.endlessInfo().run.story, 'gate20b', '并且已经挂上「石门天平倾斜」那段（剧情优先于弹窗）');
+  /* ⑥ 献祭完成 → 石门开启那一段；之后的献供从 offer1~5 里随机。 */
+  T.markStorySeen('gate20b');
+  const cands = T.sacrificeCandidatesOf();
+  assert.ok(cands.length, '应当有可献祭的增益');
+  T.sacrificePerm(cands[0].uid != null ? cands[0].uid : cands[0].id);
+  assert.equal(T._debugRun('endless').story, 'gate20c', '献祭完成应当挂 gate20c');
+  T.markStorySeen('gate20c'); T.clearRunStory('endless');
+  const seen = new Set();
+  for (let i = 0; i < 30; i++) {
+    T.debugGrantBuff('C06');
+    T._debugSetEndlessLayer(30);
+    const r = T._debugRun('endless');
+    r.idx = r.plan.length - 1; r.choices = null; r.phase = null;
+    delete r.attempt;
+    const n = T.nextBattle('endless');
+    T.reportBattle('endless', n.token, true, 1500, 2000);
+    T.continueFromShop();
+    const s = T.endlessInfo().run.story;
+    if (s) { seen.add(s); assert.ok(/^offer[1-5]$/.test(s), '只能从 offer1~5 里抽，实测 ' + s); }
+    T.clearRunStory('endless');
+  }
+  assert.ok(seen.size > 1, '重复献供应当随机抽段（实测只出现 ' + [...seen].join(',') + '）');
+  /* ⑦ 第一次失去烙印：先让提示停留（pendingStory + hold），再播剧情；只触发一次。 */
+  T._debugSetEndlessLayer(31);
+  const r31 = T._debugRun('endless');
+  r31.brokenMarks = [{ kind: 'stat', stat: 'power', pct: 0.05, alive: 0, burned: 0.05 }];
+  T._debugAdvanceLayer();                      // 31 → 32（轮内 32、偶数 → 丢烙印）
+  const after = T.endlessInfo().run;
+  assert.equal(after.pendingStoryId, 'layer31', '第一次丢烙印应当交接待播的 layer31');
+  assert.equal(after.pendingStoryHold, true, '并且要求「提示先停留」');
+  assert.equal(after.story, null, '不该直接用 run.story 抢在提示前面');
+  assert.equal((T._debugRun('endless').lostMarks || []).length, 1, '这一层确实丢了一条烙印');
 });
 
 (async () => {

@@ -301,6 +301,16 @@
 .hex-card.r2{border-color:#ffcc4d;background:linear-gradient(180deg,#5b4318,#33240c);
   box-shadow:0 10px 26px rgba(0,0,0,.5),inset 0 0 0 3px rgba(255,220,120,.28),0 0 26px #ffbe2a66}
 .hex-card.r2 .hex-ribbon,.hex-card.r2 .hex-emblem{background:#ffe08a;color:#4a3208;text-shadow:none}
+/* 传奇档卡面（2026-10 用户口径：**传奇 buff 的配色就要是传奇**）。
+ * 原来只写了 `.hex-card.r3 .hex-emblem`（徽记），卡面本身没有 r3 规则 → 掉回最普通的
+ * `.hex-card` 底（暗蓝灰 + 棕框），跟普通档几乎一个样。现在与背包里的 `.buff-tag.r3`
+ * （金描边 + 金渐变）同一套色彩，再加一圈金色辉光。 */
+.hex-card.r3{border-color:#d9a12a;background:linear-gradient(180deg,#5a3d08,#201400);
+  box-shadow:0 12px 30px rgba(0,0,0,.58),inset 0 0 0 3px rgba(255,215,106,.34),0 0 30px #d9a12a66}
+.hex-card.r3 .hex-ribbon{background:linear-gradient(#fff6c8,#e8ae1c);color:#3a2606;text-shadow:none}
+.hex-card.r3 .hex-name{color:#ffe9a8}
+.hex-card.r3 .hex-desc{color:#f2e4c2}
+.hex-card.r3 .hex-scope{color:#d8c39a}
 .hex-card.heal{border-color:#7fd06a;background:linear-gradient(180deg,#2b4a2a,#172c17);
   box-shadow:0 10px 26px rgba(0,0,0,.5),inset 0 0 0 3px rgba(150,240,130,.22)}
 .hex-card.heal .hex-ribbon,.hex-card.heal .hex-emblem{background:#bdf3a8;color:#1e3d16;text-shadow:none}
@@ -960,7 +970,13 @@ ul.settle-calc li.total b { font-size: 22px; }
  * ============================================================ */
 .tower-story { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 4px; }
 .tower-story-text { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
-  justify-content: center; align-items: center; gap: 6px; padding: 4px 16px; text-align: center; }
+  justify-content: flex-start; align-items: center; gap: 6px; padding: 4px 16px; text-align: center; }
+/* 文字装得下时仍然**垂直居中**（上下 auto 外边距自己分配空当），
+ * 装不下时 auto 外边距收成 0 —— 内容从第一行开始排，整页都能滚到
+ *（`justify-content:center` + 溢出会让**开头**那几行滚不上去，这是 flex 的老坑）。
+ * 配合 JS 的 storyScrollToCursor：长剧情页最后一行打出来时会自动往下带。 */
+.tower-story-text > .tower-story-line:first-child { margin-top: auto; }
+.tower-story-text > .tower-story-line:last-child { margin-bottom: auto; }
 .tower-story-line { margin: 0; max-width: 100%; font-family: KaiTi, STKaiti, 'Kaiti SC', 'Kaiti TC', 楷体, 'BiauKai', 'Songti SC', serif;
   font-size: 27px; line-height: 1.6; color: #40352a; letter-spacing: .05em;
   text-shadow: 0 1px 0 #fffdf6, 0 0 12px #fffaf0; }
@@ -973,6 +989,11 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-story-line .tower-story-red b,
 .tower-story-line .tower-story-red i,
 .tower-story-line.done .tower-story-red { color: #c0281c; }
+/* {蓝}…{/蓝}（也认 {blue}）：染成暗青蓝 —— 与红色同一套写法（连里面的 b/i 一起点）。 */
+.tower-story-line .tower-story-blue,
+.tower-story-line .tower-story-blue b,
+.tower-story-line .tower-story-blue i,
+.tower-story-line.done .tower-story-blue { color: #1c5c90; }
 .tower-story-shake { display: inline-block; animation: towerStoryShake .16s infinite steps(2, end); }
 @keyframes towerStoryShake {
   0% { transform: translate(0, 0); } 25% { transform: translate(-1.6px, 1px); }
@@ -982,8 +1003,8 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-story-caret { display: inline-block; width: 3px; height: 26px; margin-left: 4px;
   background: #8a6a3a; vertical-align: -4px; animation: towerStoryCaret .9s steps(1, end) infinite; }
 @keyframes towerStoryCaret { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
-.tower-story-foot { display: flex; align-items: center; justify-content: flex-end; margin: 0 6px 2px 0; }
-.tower-story-foot .uc-button { min-height: 52px; font-size: 27px; padding: 4px 30px; }
+/* 原来这里还有 `.tower-story-foot`（右下角那颗「继续」的容器）——
+ * 2026-10 用户口径把「继续」按钮去掉了（点屏幕任意位置推进），样式一并删。 */
 
 /* ============================================================
  * 【U18】剧情 → 主界面的过渡（2026-10 用户口径：不要硬切）
@@ -1000,4 +1021,62 @@ ul.settle-calc li.total b { font-size: 22px; }
  * （.tower-page 是 relative，所以这里绝对定位到左下角 = 塔身那一列下方；局内也不再挤进按钮行）。 */
 .tower-page > .endless-mode-toggle { position: absolute; left: 8px; bottom: 4px; }
 .tower-page > .endless-mode-toggle .uc-button { min-height: 44px; font-size: 21px; padding: 3px 18px; }
+
+/* ============================================================
+ * 【U20】镜中世界 —— 整百层「照影之境」的拾取屏与黑 / 白过场（用户口径 2026-10）
+ *
+ *   · 卡片**尽量居中**（flex 居中 + 固定视口高度），不跟着局内 UI 走；
+ *   · 点点看：① 卡片之外的整屏慢慢变**纯白**（`.mirror-veil` 在卡片**下面**，
+ *     所以变白的过程中卡片一直看得见）；② 白色满了之后，`.mirror-black-veil`
+ *     （挂在 body 上、z-index 最高）连卡片一起慢慢变**纯黑**；
+ *     ③ 黑幕以**稍快**的速度淡出，露出已经重画好的主界面（时序在 tower-ui.js）。
+ * ============================================================ */
+/* 【2026-10 用户口径】卡片要落在**整个屏幕的正中央**。
+ * `.tower-mirror` 原来只是 `.tower-main`（塔身右侧那一列）里的一个 `position:relative` 块，
+ * 于是「居中」居的是右半边 → 看起来偏右。改成整屏铺开的居中层：
+ *   · `position:fixed; inset:0` —— `#ui` 上有 `transform: scale(--uiscale)`，
+ *     所以这里的 fixed 是相对**整个舞台**（1170×690）而不是某个右列；白幕原本就是这么做的；
+ *   · `pointer-events:none` + 卡片 wrap `auto`：只有卡片吃点击，
+ *     塔身 / 左下角模式开关的点击行为与以前完全一样。 */
+.tower-mirror { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  padding: 12px; pointer-events: none; }
+/* 白幕：盖住整个视口（含塔身与左下角的模式开关），但**在卡片下面**。 */
+.tower-mirror .mirror-veil { position: fixed; inset: 0; background: #fff; opacity: 0;
+  transition: opacity 1500ms linear; z-index: 60; pointer-events: none; }
+.tower-mirror.mirror-white .mirror-veil { opacity: 1; }
+.tower-mirror .mirror-card-wrap { position: relative; z-index: 70; pointer-events: auto; }
+/* 黑幕：连卡片一起吃掉 —— 所以它挂在 body 上、z-index 比什么都高。 */
+.mirror-black-veil { position: fixed; inset: 0; background: #000; opacity: 0;
+  transition: opacity 1500ms linear; z-index: 9998; pointer-events: none; }
+.mirror-black-veil.on { opacity: 1; }
+.mirror-black-veil.out { opacity: 0; transition-duration: 850ms; }
+
+/* 卡片：传奇配色（金框 + 深金渐变 + 金色辉光），与 `.buff-tag.r3` / `.hex-card.r3` 同一套色彩。 */
+.mirror-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px;
+  width: 380px; padding: 44px 30px 26px; border-radius: 28px; cursor: pointer; font-family: inherit;
+  border: 5px solid #d9a12a; color: #ffeec2;
+  background: radial-gradient(120% 90% at 50% 0%, #5a3d08 0%, #2a1a02 62%, #150d00 100%);
+  box-shadow: 0 18px 44px rgba(0,0,0,.6), inset 0 0 0 3px rgba(255,215,106,.34), 0 0 42px rgba(217,161,42,.45);
+  transition: transform .16s, filter .16s, box-shadow .16s; }
+.mirror-card:hover { transform: translateY(-6px) scale(1.02); filter: brightness(1.08); }
+.mirror-card:active { transform: translateY(-1px) scale(.99); }
+.mirror-card .mirror-ribbon { position: absolute; top: -16px; left: 50%; transform: translateX(-50%);
+  padding: 4px 22px; border-radius: 15px; font-size: 21px; font-weight: bold; letter-spacing: 3px;
+  border: 3px solid #2b2113; color: #241a0a; }
+.mirror-card .mirror-ribbon.r3, .mirror-card.r3 .mirror-ribbon { background: linear-gradient(#fff6c8, #e8ae1c); }
+/* 传奇徽记：金色方框里嵌一颗钻石（与 .hex-card.r3 的徽记同一套画法）。 */
+.mirror-card .mirror-emblem { position: relative; display: block; width: 58px; height: 58px; box-sizing: border-box;
+  border: 4px solid #ffd76a; border-radius: 9px; background: linear-gradient(180deg, #6a4708, #2b1a00);
+  box-shadow: 0 0 12px rgba(217,161,42,.6), inset 0 0 9px rgba(255,215,106,.28); }
+.mirror-card .mirror-emblem::before { content: ''; position: absolute; inset: 0; margin: auto; width: 24px; height: 24px;
+  transform: rotate(45deg); background: linear-gradient(135deg, #fff6cf, #e8ae1c 55%, #a9740a);
+  box-shadow: 0 0 8px rgba(255,233,168,.7); }
+.mirror-card .mirror-name { font-size: 38px; line-height: 1.15; letter-spacing: 4px; color: #ffe9a8;
+  text-shadow: 0 3px 0 #000a; }
+.mirror-card .mirror-flavor { font-family: KaiTi, STKaiti, 'Kaiti SC', 楷体, serif; font-size: 24px; color: #e9d9b0; }
+.mirror-card .mirror-stacks { font-size: 20px; color: #ffd76a; }
+.mirror-card .mirror-prompt { margin-top: 6px; font-size: 21px; color: #cbb88c; letter-spacing: 2px;
+  animation: mirrorPromptBlink 1.5s ease-in-out infinite; }
+@keyframes mirrorPromptBlink { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+.mirror-confirm p { margin: 0 0 6px; }
 

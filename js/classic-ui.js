@@ -55,9 +55,11 @@
   let screen = 'home', timer = 0, activePortrait = null, lastRefresh = 0;
   let catalogPage = 0, bagPage = 0, gearPage = 0;
   let selectedProp = 0;
-  /* 卖出后**自动退回上一界面**的道具（2026-10 用户口径）：天使果实(47) / 恶魔果实(48)，
+  /* 卖出后**自动退回上一界面（背包）**的道具（2026-10 用户口径）：天使果实(47) / 恶魔果实(48)，
    * 以及力量/敏捷/速度转化丸（10/11/12，用户口径：和两种果实一样，卖一个就退出去）。
-   * 这几样在背包里通常是「清仓」动作；其余道具保持「点一下卖 1 个、弹窗不关、卖光为止」。 */
+   * 这几样在背包里通常是「清仓」动作；其余道具保持「点一下卖 1 个、弹窗不关、卖光为止」。
+   * ⚠️ 「退回上一级界面」= 回到**背包**（走的和弹窗左下「返回」同一条路：关弹窗 + 重绘背包），
+   * 不是回主界面 —— 早先这里错写成 home()（回主菜单），玩家会觉得「卖一个就被踢出去了」。 */
   const SELL_LEAVE_IDS = [47, 48, 10, 11, 12];
   /* 图集图标的一级子目录：images/ui/icons/<dir>/<kind>-<id>.png（与磁盘结构一一对应）。 */
   const ICON_DIRS = { gear: 'gear', weapon: 'weapon', skill: 'skill', prop: 'prop' };
@@ -305,7 +307,13 @@
     if (!loot || !loot.items.length) return;
     const grouped = Object.create(null);
     loot.items.forEach(item => { if(grouped[item.id])grouped[item.id].count+=item.count;else grouped[item.id]={...item}; });
-    const html='<div class="battle-loot-summary">战斗拾取：'+Object.values(grouped).map(item=>esc(item.name)+' ×'+item.count).join('　')+'</div>'+upsHtml(loot.ups);
+    /* 「跳过键」的代价（2026-10 用户口径）：这一场只收 2/3 —— 随机抹掉的那一项在这里说清楚，
+     * 免得玩家以为掉落莫名其妙少了一份（口径见 battle-drops 的 trimOne）。
+     * 塔的层结算是**一包一包**抹的，所以 `lost` 可能是数组（普通战斗只有一项）。 */
+    const lostList = Array.isArray(loot.lost) ? loot.lost : (loot.lost ? [loot.lost] : []);
+    const lost = lostList.length ? '<div class="battle-loot-summary lost">跳过战斗：随机少收了 ' +
+      lostList.map(x => esc(x.name) + ' ×' + x.count).join('　') + '</div>' : '';
+    const html='<div class="battle-loot-summary">战斗拾取：'+Object.values(grouped).map(item=>esc(item.name)+' ×'+item.count).join('　')+'</div>'+lost+upsHtml(loot.ups);
     const bodies=$$('.classic-modal-overlay .modal-body');
     if (bodies.length) bodies[bodies.length-1].insertAdjacentHTML('beforeend',html);
     else modal('战斗拾取',html,[{label:'确定'}],{small:true});
@@ -1018,8 +1026,9 @@
    *  没有滑动条、不选数量、也不会自己退出。 */
   /** 卖出：与「使用」同一套交互 —— 点「卖出」打开卖出弹窗
    *（左下「返回」/ 右下「卖出」），在弹窗里点一下卖 1 个、弹窗不关，卖光为止。
-   *  **例外（2026-10 用户口径）**：天使果实（47）/ 恶魔果实（48）卖出一个就自动退回上一界面
-   *（= 关掉弹窗 + 回主菜单，与页面页脚那颗「返回菜单」同一条路），其它道具保持原样。 */
+   *  **例外（2026-10 用户口径）**：天使果实（47）/ 恶魔果实（48）/ 力·敏·速转化丸（10/11/12）
+   * 卖出一个就自动退回上一界面 = **背包**（关掉弹窗 + 把背包重绘到最新数量，与左下「返回」同一条路）。
+   * 这里**不能**调 home()：那是回主界面，玩家会觉得「点一下卖出去就被踢出背包了」。其它道具保持原样。 */
   function sellDialog(id,after) {
     const S=State.state(),price=State.propSellPrice(id),def=propMap.getValue(id);
     /* 持有量的唯一读数口：货币类（金杯 40）在货币字段 `S.goldCup` 上，其余在 `S.props` 上，
@@ -1040,9 +1049,9 @@
       {label:'卖出',cls:'gold',primary:true,close:false,run:()=>{
         const r=State.sellProp(id,1);
         toast(r.msg||'操作完成');
-        /* 天使果实 / 恶魔果实 / 力·敏·速转化丸：卖一个就退出去（这几样通常是「清仓」动作，
-         * 不必留在弹窗里连点）—— 走 SELL_LEAVE_IDS，行为与两种果实完全一致。 */
-        if(r.ok&&SELL_LEAVE_IDS.includes(id)){m.close();home();return;}
+        /* 天使果实 / 恶魔果实 / 力·敏·速转化丸：卖一个就退回**背包**（这几样通常是「清仓」动作，
+         * 不必留在弹窗里连点）—— 走 SELL_LEAVE_IDS；返回动作与左下「返回」完全一致（重绘背包、留原页码）。 */
+        if(r.ok&&SELL_LEAVE_IDS.includes(id)){m.close();if(after)after();return;}
         sync();
         if(!r.ok)after&&after();
       }},
@@ -1311,16 +1320,21 @@
   function openGear(key) {
     const g=State.myGears().find(x=>x.key===key);if(!g)return;
     const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+State.gemPercent(g.gem.id-100)+'%，附加 +'+(g.gem.ext)+'%）':'';
-    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+(g.attrBase&&g.attrBase!==g.abilityVal?'（基准 '+g.attrBase+'，本件有浮动）':'')+'<br>附加属性：<br>'+State.extText(g.ext).map(esc).join('<br>')+gemInfo+setBonusBlock(g)+'</div></div>';
+    /* 宝石键的文案不带「（5金）」了（用户口径 2026-10：四个键要排在一行，标签越短越好排），
+     * 费用改在这行小字里说明，免得玩家不知道要花金松果。 */
+    const gemCost=g.orange?'<br><span class="small-label">宝石：镶嵌 / 卸下各 5 金松果</span>':'';
+    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+(g.attrBase&&g.attrBase!==g.abilityVal?'（基准 '+g.attrBase+'，本件有浮动）':'')+'<br>附加属性：<br>'+State.extText(g.ext).map(esc).join('<br>')+gemInfo+gemCost+setBonusBlock(g)+'</div></div>';
     /* 装 / 卸之后列表会重排（穿着 > 星标 > 获得顺序），所以**跟着这一件翻到它新位置所在的那一页**，
      * 否则在后面的页上点「装备」，东西会当场跳到第一页、看不见了。 */
     const buttons=[{label:g.used?'卸下':'装备',run:()=>{const ok=g.used?State.unwear(key):State.wear(key);if(ok===false)toast('等级不足，暂时无法装备');
       const idx=State.gearsInDisplayOrder().findIndex(x=>x.key===key);
       openGears(idx<0?gearPage:Math.floor(idx/6));}}];
     /* 宝石：装上 / 卸下都要 5 金松果（2026-10 用户口径）。只要身上有宝石就一定给「卸下」，
-     * 不再依赖 orange 标记（宝石本来就只可能镶在橙装上，这里只是把它做得更稳、更好找）。 */
-    if(g.gem)buttons.push({label:'卸下宝石（5金）',run:()=>{const r=State.unsocketGem(key);toast(r.msg);openGear(key);}});
-    else if(g.orange)buttons.push({label:'镶嵌宝石（5金）',cls:'gold',run:()=>socketGemDialog(key)});
+     * 不再依赖 orange 标记（宝石本来就只可能镶在橙装上，这里只是把它做得更稳、更好找）。
+     * 按钮文案**不带「（5金）」**（用户口径 2026-10：四个键要排在一行里，标签越短越好排）；
+     * 费用写在详情正文的那行小字与镶嵌弹窗里，花多少钱照样一眼能看到。 */
+    if(g.gem)buttons.push({label:'卸下宝石',run:()=>{const r=State.unsocketGem(key);toast(r.msg);openGear(key);}});
+    else if(g.orange)buttons.push({label:'镶嵌宝石',cls:'gold',run:()=>socketGemDialog(key)});
     /* 星标：防止手滑把好装备卖掉/合掉（融合与出售都会跳过星标装备）。 */
     const starred = State.isGearStarred(g);
     buttons.push({label: starred ? '取消星标' : '星标', cls: starred ? 'gold' : 'muted',
@@ -2221,7 +2235,7 @@
       const lv = id - 100;
       if (lv <= 2) lines.push('45 级起：通关关卡 20% 几率、竞技场（经验/碎片）获胜 15% 几率获得（一级 75% / 二级 25%）');
       if (lv < 7) lines.push('合成：3 个同级 + 10 金松果，成功率 ' + Math.round(State.gemMergeRate(lv) * 100) + '%（失败有 50% 几率一颗材料降 1 级，1级则碎裂）');
-      lines.push('镶嵌：免费镶入橙装（3 件相同紫装融合而来），主属性 +' + State.gemPercent(lv) + '%（沿用原版曲线 5×(n²−n+2)），附加属性效果随机提升，每件限 1 颗；拆卸 5 金松果');
+      lines.push('镶嵌：镶入橙装（3 件相同紫装融合而来），主属性 +' + State.gemPercent(lv) + '%（沿用原版曲线 5×(n²−n+2)），附加属性效果随机提升，每件限 1 颗；镶嵌与卸下各 5 金松果');
     }
     if (!lines.length) lines.push('当前版本暂无产出途径（图鉴预留物品）');
     return lines;

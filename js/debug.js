@@ -24,8 +24,9 @@
   const STORE_KEY = 'ssdz_debug';
   /* 开关的默认值。新增开关要同时加进这里与下面的 TOGGLES；
    * set() 以 TOGGLES 为准，所以这里漏了也不会出现「开关点不动」的老问题
-   * （noTowerCost / endlessCoin 以前就漏在这里，导致那两个开关一直是死的）。 */
-  const defaults = { infiniteEnergy: false, godMode: false, shortDay: false, noUpgradeFail: false, freeUpgrade: false, freeShop: false, noStageCost: false, noTowerCost: false, endlessCoin: false };
+   * （历史上 noTowerCost / endlessCoin 就漏在这里过，那两个开关于是形同虚设；
+   * 2026-10 已按用户口径删掉 —— 见下面 TOGGLES 里的说明）。 */
+  const defaults = { infiniteEnergy: false, godMode: false, shortDay: false, noUpgradeFail: false, freeUpgrade: false, freeShop: false, noStageCost: false, noCoinCost: false };
   const state = Object.assign({}, defaults);
   try {
     const raw = localStorage.getItem(STORE_KEY);
@@ -67,15 +68,16 @@
     },
     {
       key: 'godMode', label: '无敌模式',
-      note: '战斗里玩家最低保留 1 点血，不会被击倒',
+      note: '战斗里玩家的血量只增不减（开战先顶到上限）：吸血、持续伤害、自伤、反伤这些掉血全部不生效，既不会被击倒，也不会在 120 手超时里按血量比例判负',
       on() {},
     },
     { key: 'noUpgradeFail', label: '升级必定成功', note: '武器与技能升级不再失败' },
     { key: 'freeUpgrade', label: '升级无需消耗', note: '升级不扣金松果、不扣武器/技能卷轴，也不受等级限制' },
     { key: 'freeShop', label: '道具免费', note: '商店购买不扣金松果' },
-    { key: 'noStageCost', label: '关卡不耗挑战书', note: '入场与复活都不消耗挑战书' },
-    { key: 'noTowerCost', label: '爬塔不耗挑战书', note: '无尽挑战塔（主塔）进层不消耗挑战书' },
-    { key: 'endlessCoin', label: '无尽试炼币拉满', note: '无尽模式开局自带 9999 试炼币（仅新开的局生效）' },
+    { key: 'noStageCost', label: '关卡不耗挑战书', note: '入场与复活都不消耗挑战书；挑战塔 / 无尽挑战塔的进层也一样不消耗' },
+    /* 2026-10 用户口径：原来这条是「无尽试炼币拉满」（开局送 9999 试炼币，且实测没生效），
+     * 改成「试炼币不消耗」——试炼商店（买 / 刷新 / 买铸币）与铸币商店结账都不扣代币。 */
+    { key: 'noCoinCost', label: '试炼币不消耗', note: '试炼商店（买增益 / 刷新货架 / 买铸币）与铸币商店购买都不扣代币，余额不足也照买' },
   ];
   function set(key, value, session) {
     const def = TOGGLES.find((t) => t.key === key);
@@ -209,6 +211,8 @@
         return '已恢复支持作者提示（若首页没有立刻弹出，回一次首页或关掉当前弹窗即可）';
       } },
   ];
+  /* 2026-10 用户口径：删掉「清空无尽塔剧情进度」这条调试工具（面板上不再提供）。
+   * 底层接口 `Tower._debugResetStory` 保留 —— 无尽塔的剧情回归用例要靠它复位。 */
 
   /** 彻底重置账号：清除武器与技能，回到全新开局。
    *  State.newGame 会重建 NEW_PLAYER（weapons = []、skills = []），

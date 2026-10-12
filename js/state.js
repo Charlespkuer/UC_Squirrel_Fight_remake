@@ -284,13 +284,37 @@
         return copy;
       };
       const tw = object(raw.tower) ? raw.tower : {};
-      next.tower = { maxLayer: Math.max(0, integer(tw.maxLayer, 0)), run: runShape(tw.run) };
+      next.tower = {
+        maxLayer: Math.max(0, integer(tw.maxLayer, 0)),
+        /* 「本层失败后免费再战一次」的标记（挑战塔）：以前这里没列它，刷新一次就白丢一次
+         *（玩家视角＝「重进游戏后那次免费重试没了」）。层号与日期都要像存档里其它进度一样留着。 */
+        retry: (object(tw.retry) && Math.floor(Number(tw.retry.layer)) >= 1)
+          ? { layer: Math.floor(Number(tw.retry.layer)), date: typeof tw.retry.date === 'string' ? tw.retry.date : '' }
+          : null,
+        run: runShape(tw.run),
+      };
       const en = object(raw.endless) ? raw.endless : {};
       next.endless = {
         best: Math.max(0, integer(en.best, 0)), weekBest: Math.max(0, integer(en.weekBest, 0)),
         weekKey: typeof en.weekKey === 'string' ? en.weekKey : '',
         bestLayer: Math.max(0, integer(en.bestLayer, 0)),
         shieldDate: typeof en.shieldDate === 'string' ? en.shieldDate : '',
+        /* 【2026-10 第一百零三批 用户报的 bug】**剧情的「只播一次」记账必须跟着存档走**。
+         * 它是**跨局**的账：第一次遇商人 / 第一次失去烙印 / 第一次遇巡视（`patrolGate`）…
+         * 以前这里是一份显式白名单，没列到的字段一律丢掉 —— 于是「无尽塔玩到一半退出游戏再重进」
+         * 之后所有「第一次」的文案都会重播一遍（用户实测：商店 / 烙印 / 巡视全变回第一次的文案）。
+         * ⚠ 以后往 `endless()` 上加字段（尤其是各种「已经播过 / 已经给过」的计数）时，
+         * **记得一起加到这里**，否则它就是「重载即清零」的易失字段。
+         * 形状只做浅校验：保留**所有** id（旧档里可能有现在已删掉的剧情名，留着无害），
+         * 丢掉非布尔的垃圾值。 */
+        storySeen: (() => {
+          const src = object(en.storySeen) ? en.storySeen : {};
+          const out = {};
+          for (const k of Object.keys(src)) if (src[k] === true || src[k] === 1) out[String(k)] = true;
+          return out;
+        })(),
+        /* 剧情 / 挑战模式的开关（默认剧情模式）：同样不能在重载后被打回默认。 */
+        storyOn: en.storyOn !== false,
         run: runShape(en.run),
       };
     }
@@ -332,6 +356,12 @@
   function debugOn(key) {
     try { return !!(window.Debug && window.Debug.enabled && window.Debug.enabled(key)); } catch (e) { return false; }
   }
+  /* 【2026-10 用户口径】调试开关的唯一出口要**挂到 window** 上：
+   * tower.js 里那句 `typeof debugOn === 'function' && debugOn(flag)` 找的是全局，
+   * 而它以前只是这里的模块内函数 —— 于是挑战塔/无尽塔读调试开关**永远是 false**，
+   * 「无尽试炼币拉满」「爬塔不耗挑战书」这两个开关因此一直是死的（用户实测报的就是这个）。
+   * 挂上之后 bare `debugOn` 在 vm/浏览器里都能解析到它，两个模式里的调试开关才真正生效。 */
+  if (typeof window !== 'undefined') window.debugOn = debugOn;
 
   /* ============================================================
    * 【S2】师徒系统（拜师/收徒/日供）

@@ -104,9 +104,32 @@
    * 所以出招时只从这张表里挑：数据写错的技能会被自动跳过，不会再空过。
    * ============================================================ */
   const ACTIVE_SKILLS = [8, 12, 14, 15, 17, 18, 23];
-  /** 调试开关「无敌模式」：玩家侧不会被击倒，最少保留 1 点血。 */
+  /** 调试开关「无敌模式」：玩家侧不会被击倒。 */
   function godSave(def) {
     try { return !!(def && def.side === 0 && window.Debug && window.Debug.enabled('godMode')); } catch (e) { return false; }
+  }
+  /* 【2026-10 用户口径】「无敌模式」必须名副其实：**玩家血量计数器不受任何掉血影响**。
+   * 以前只在几条主路径上兜到 1 点血，于是枯泉吸血（trialDry）、持续伤害、自伤、反伤这些
+   * 旁路照旧能把血打下去；血量掉到 1 之后，120 手超时会按**血量比例**判负 ——
+   * 玩家实测「开了无敌，在无尽塔里还是被打死」就是这条（塔里连战继承血量，残血进场更容易超时判负）。
+   * 现在给玩家侧装一个「只增不减」的 hp 访问器：任何赋值只要比当前值小就整段丢掉（连 0 也不写进去），
+   * 于是谁也打不动它，超时永远是我方血量比例 ≥ 对方 → `winner` 判我方胜。
+   * 用 WeakSet 记「已经装过」，不往战斗体上挂额外字段。 */
+  const godHpGuarded = new WeakSet();
+  function guardGodHp(def) {
+    if (!def || def.side !== 0 || godHpGuarded.has(def)) return def;
+    godHpGuarded.add(def);
+    let hp = Math.max(1, Math.round(Number(def.hp) || 1));
+    Object.defineProperty(def, 'hp', {
+      configurable: true, enumerable: true,
+      get() { return hp; },
+      set(value) {
+        const next = Math.max(0, Math.round(Number(value) || 0));
+        if (next < hp && godSave(def)) return;    // 掉血一律吃掉（开关中途打开也立刻生效）
+        hp = next;
+      },
+    });
+    return def;
   }
 
   /**
@@ -721,6 +744,10 @@
       masterChance: Number.isFinite(options.masterChance) ? clamp(options.masterChance, 0, 100) : RULES.masterChance,
     };
     const A = makeCombatant(f0, 0), B = makeCombatant(f1, 1);
+    /* 无敌模式（见 guardGodHp）：开战先把玩家血量顶到上限 ——
+     * 塔里连战继承进来的残血不会让它在 120 手超时里按血量比例判负；
+     * 之后血量只增不减，吸血 / 持续伤害 / 自伤 / 反伤 / 开场斩杀全都打不动它。 */
+    if (godSave(A)) { A.hp = A.maxHp; guardGodHp(A); }
     /* 枯泉·涸井（封疗机制）：**从战斗开始就封**，而不是等它第一次出手 ——
      * 否则先手玩家在它出手前打出的吸血 / 回血会整段漏过去（用户报「枯泉没生效」的另一半）。
      * 机制清单以 tower-data 的 `mechSealsHeal` 为准（塔外没有 TowerData 时退回硬编码清单）。 */

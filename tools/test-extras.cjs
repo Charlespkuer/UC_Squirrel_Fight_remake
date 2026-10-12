@@ -696,27 +696,45 @@ test('抽奖离开动画后奖品已保存，重入可继续且旧计时器不�
   g.c.State.load(); assert.equal(g.c.State.state().props[22], 20);
 });
 
-test('抽奖里改成两个随机普通药丸，不再直接发天使果实种子', () => {
+test('抽奖里改成随机一枚药丸，不再直接发天使果实种子', () => {
   const g = setup(), s = g.c.State.state();
   const table = g.c.ClassicExtras.lotteryPrizes;
   assert.equal(table.length, 10);
   assert.ok(table.every((p) => p.id !== 45), '奖池里不再有天使果实种子');
-  /* 2026-10 第十六批：大体力药剂（道具 2）从 ×4 削弱到 ×3 */
+  /* 2026-10：大体力药剂（道具 2）从 ×4 削弱到 ×3（第十六批），本轮回调到 ×2 */
   const big = table.filter((p) => p.id === 2);
   assert.equal(big.length, 1, '奖池里应当只有一个大体力药剂奖位：' + JSON.stringify(big));
-  assert.equal(big[0].count, 3, '大体力药剂 ×3（本轮由 4 削弱到 3），实测 ' + big[0].count);
-  assert.match(big[0].label, /大体力药剂 ×3/, '文案同步：' + big[0].label);
+  assert.equal(big[0].count, 2, '大体力药剂 ×2（本轮回调到 2），实测 ' + big[0].count);
+  assert.match(big[0].label, /大体力药剂 ×2/, '文案同步：' + big[0].label);
+  /* 英雄帖（道具 36）本轮回调到 ×2（第十六批之前是 ×3）。 */
+  const hero = table.filter((p) => p.id === 36);
+  assert.equal(hero.length, 1, '只有一个英雄帖奖位');
+  assert.equal(hero[0].count, 2, '英雄帖 ×2，实测 ' + hero[0].count);
+  assert.match(hero[0].label, /英雄帖 ×2/, '文案同步：' + hero[0].label);
+  /* 随机药丸：从「两枚普通」削弱成**一枚**，但 5% 概率升格成高级药丸（超级大力/敏捷/速度/经验丸）。 */
   const pills = table.filter((p) => p.pills);
-  assert.equal(pills.length, 1, '只有一个「随机普通药丸」奖位');
-  assert.equal(pills[0].pills, 2, '一次给两个药丸');
-  // 0.85 → 选中第 9 项；药丸抽取也用同一个随机数（落到列表最后一个 → 经验丸）
+  assert.equal(pills.length, 1, '只有一个「随机药丸」奖位');
+  assert.equal(pills[0].pills, 1, '一次只给一枚药丸');
+  assert.equal(pills[0].superChance, 0.05, '5% 概率升格成高级药丸');
+  /* 2026-10 用户口径：奖池格子上不写概率（原来那句「（5% 高级）」去掉）——机制还在，只是不公示。 */
+  assert.ok(!/5%|高级/.test(pills[0].label), '奖池格子上的文案不该再写「（5% 高级）」：' + pills[0].label);
+  // 普通那一路：第 1 个随机数 0.85 → 选中第 9 格（随机药丸）；0.85 ≥ 5% 不升格 → 再摇到经验丸(7)。
   g.math.random = () => 0.85;
-  const before = {}; [3, 4, 5, 7].forEach((id) => (before[id] = s.props[id] || 0));
+  const PILL_IDS = [3, 4, 5, 7, 41, 42, 43, 44];
+  const before = {}; PILL_IDS.forEach((id) => (before[id] = s.props[id] || 0));
+  const gained = () => PILL_IDS.reduce((sum, id) => sum + ((s.props[id] || 0) - before[id]), 0);
   g.c.ClassicExtras.lottery(); g.click('lottery-spin'); g.flushTimers();
-  const gained = [3, 4, 5, 7].reduce((sum, id) => sum + ((s.props[id] || 0) - before[id]), 0);
-  assert.equal(gained, 2, '实际到手两个普通药丸');
+  assert.equal(gained(), 1, '实际到手一枚普通药丸');
   assert.equal(s.goldPoint, 100, '这一档不发金松果');
   assert.ok(g.modals.at(-1).html.includes('经验丸'), '结算弹窗显示真实抽到的药丸：' + g.modals.at(-1).html.slice(0, 120));
+  // 高级那一路：0.85 选中奖位 → 0.01 < 5% 升格 → 0.99 抽到高级药丸表最后一个（超级经验丸 44）。
+  s.lotteryFree = 1;
+  const seq = [0.85, 0.01, 0.99];
+  g.math.random = () => (seq.length ? seq.shift() : 0.5);
+  g.click('lottery-spin'); g.flushTimers();
+  assert.equal(gained(), 2, '第二次也是一枚');
+  assert.equal(s.props[44] || 0, before[44] + 1, '5% 那一档给的是高级药丸（超级经验丸）');
+  assert.ok(g.modals.at(-1).html.includes('高级'), '弹窗要标出「高级」：' + g.modals.at(-1).html.slice(0, 160));
 });
 
 test('抽奖旧日期迁移不白送次数，新的一天仅恢复一次免费机会', () => {

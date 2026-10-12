@@ -31,13 +31,14 @@ function findRoot(start) {
   return path.resolve(start, '..');
 }
 const ROOT = findRoot(__dirname);
-const LOAD = ['js/gamedict.js', 'js/gamedata.js',
-  'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js'];
+const LOAD = ['js/gamedict.js', 'js/gamedata.js', 'js/battle-drops.js',
+  'js/tower-data.js', 'js/state.js', 'js/sim.js', 'js/tower.js', 'js/tower-plot.js'];
 
 /** 极简「界面桩」：把 tower-ui.js 的页面与弹窗渲染出来（只记 HTML 与按钮处理器），
  *  用来冒烟跑一遍新商店页面的真实代码路径（不需要浏览器）。 */
 function uiHarness(c) {
   const rendered = [];
+  const nav = [];                    // 记下「回主界面 / 跳关卡页」这类顶层跳转，供用例断言
   const handlers = new Map();
   const el = () => ({
     innerHTML: '', dataset: {}, getContext: null,
@@ -52,20 +53,34 @@ function uiHarness(c) {
   vm.runInContext('setTimeout = function () { return 0; }; clearTimeout = function () {};', c);
   c.document = { createElement: () => el(), body: { appendChild: () => {} }, activeElement: null };
   c.UI = { classic: {
-    page: (group, active, content, opts) => { rendered.push({ kind: 'page', content: content, opts: opts || {} }); return el(); },
+    /* `node` = 这一屏的容器节点本身：剧情屏会往它上面挂「点任意位置继续」的整屏点击处理器。 */
+    page: (group, active, content, opts) => { const node = el(); rendered.push({ kind: 'page', content: content, opts: opts || {}, node: node }); return node; },
     modal: (title, content, buttons) => {
       rendered.push({ kind: 'modal', title: title, content: content, buttons: buttons || [] });
       return { element: el(), close: () => {} };
     },
     btn: (label, action, cls) => '<button class="' + (cls || '') + '" data-action="' + action + '">' + label + '</button>',
-    icon: () => '<i></i>', bind: () => {}, home: () => {}, refreshHeader: () => {},
-  } };
+    icon: () => '<i></i>', bind: () => {}, home: () => { nav.push('home'); }, refreshHeader: () => {},
+  },
+  /* 顶层动作分发器（真身挂在 window.UI 上）：`runAction('stages')` = 打开关卡页。 */
+  runAction: (key) => { nav.push(key); } };
   /* 载入真界面模块（和浏览器同一份代码）。 */
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/tower-plot.js'), 'utf8'), c, { filename: 'js/tower-plot.js' });
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/tower-ui.js'), 'utf8'), c, { filename: 'js/tower-ui.js' });
   return {
-    rendered,
+    rendered, nav,
     last: (kind) => rendered.filter((r) => r.kind === kind).pop(),
     click: (action) => {
+      /* 剧情屏 2026-10 用户口径：右下角的「继续」按钮已经去掉，改成**点屏幕任意位置**推进。
+       * 测试沿用 `click('story-next')` 这个写法，这里把它转成「点一下整屏」——
+       * 走的与真人完全同一条路（容器节点的 onclick），不再依赖那颗按钮存在。 */
+      if (action === 'story-next') {
+        const pg = rendered.filter((r) => r.kind === 'page').pop();
+        assert.ok(pg && pg.node && typeof pg.node.onclick === 'function',
+          '剧情屏应当接管「点任意位置继续」');
+        pg.node.onclick({ target: null });
+        return;
+      }
       const h = handlers.get('[data-action="' + action + '"]');
       assert.ok(h && h.onclick, '界面上应当有可点的「' + action + '」');
       h.onclick();
@@ -1672,6 +1687,21 @@ hr('12. 100 层循环：商店件数与战斗奖励选项按层分档，每 100 
     assert.equal(optsAt(20), 3);
     assert.equal(optsAt(41), 1, '第 41 层只剩 1 个选项（扣 2）');
     assert.equal(optsAt(101), 3, '第 101 层恢复 3 选 1');
+    /* 挑战塔口径（2026-10 用户口径）：这些「100 层循环」的档位与「巡逻/巡视」都是**无尽塔专属** ——
+     * 挑战塔不封顶，但它永远 3 选 1，也不会被巡逻魔王替换掉任何一场。 */
+    assert.ok(T.startTowerRun().ok, '应当能开挑战塔');
+    const towerRun = T._debugRun('tower');
+    towerRun.layer = 41;
+    assert.equal(T.choiceSlotsOf(towerRun), 3, '挑战塔第 41 层也还是 3 选 1');
+    assert.equal(T.choiceSlotsOf(towerRun, 'tower'), 3, '显式传 mode 也拿到同一个值');
+    /* 第 46 层是 salt 0 的巡逻落点：塔的整层预告里不该出现 patrol（无尽塔照旧有）。 */
+    assert.equal(TD.isPatrolLayer(46, 0), true, '第 46 层本来是无尽塔的巡逻层');
+    const towerPlan = T.preview(46, 0, false, 'tower');
+    assert.equal(towerPlan.some((e) => e.kind === 'patrol'), false,
+      '挑战塔不该出现巡视/巡逻：' + JSON.stringify(towerPlan.map((e) => e.kind)));
+    const endlessPlan = T.preview(46, 0, true, 'endless');
+    assert.equal(endlessPlan.some((e) => e.kind === 'patrol'), true,
+      '同一层在无尽塔照旧巡逻：' + JSON.stringify(endlessPlan.map((e) => e.kind)));
   });
 
   check('整百层不开商店：所有开店入口都拦掉，x5 层照旧', () => {
@@ -1821,7 +1851,9 @@ hr('14. 剧情展示模式：开始攀登 → 主界面讲剧情（逐字 / 继�
     assert.ok(run, '应当已经起了一局无尽');
     assert.equal(run.story, 'intro', '这一局应当挂着开场剧情');
     const storyPage = ui.last('page').content;
-    assert.match(storyPage, /data-action="story-next"/, '剧情模式右下角应当是「继续」');
+    assert.match(storyPage, /tower-story/, '剧情模式应当是整屏剧情');
+    /* 2026-10 用户口径：右下角那颗「继续」按钮**已经去掉** —— 点屏幕任意位置推进。 */
+    assert.ok(!/data-action="story-next"/.test(storyPage), '剧情屏不该再有「继续」按钮');
     /* 标题按用户口径**保留**（无尽模式 · 第 x 层），「第 m/n 行」进度不要（要沉浸感） */
     assert.match(storyPage, /无尽模式 · 第 1 层/, '剧情模式要留着标题');
     assert.ok(!/tower-story-step/.test(storyPage), '剧情模式不该有「第 m/n 行」提示');
@@ -1865,7 +1897,7 @@ hr('14. 剧情展示模式：开始攀登 → 主界面讲剧情（逐字 / 继�
 
     /* ⑥ 一直点到底：五行走完 → 清掉待播剧情、回到正常主界面 */
     for (let i = 0; i < 20; i++) {
-      if (ui.last('page').content.indexOf('story-next') < 0) break;
+      if (!/tower-story/.test(ui.last('page').content)) break;
       ui.click('story-next');
       flush(400);          // 每行最多 30 多字，flush 足够把这一行打完
     }
@@ -1873,7 +1905,7 @@ hr('14. 剧情展示模式：开始攀登 → 主界面讲剧情（逐字 / 继�
     assert.equal(c.Tower.storySeen('intro'), false, '开场剧情是「每次都播」，不记 seen');
     const normalPage = ui.last('page').content;
     assert.match(normalPage, /继续战斗/, '剧情结束要回到正常主界面（按钮回到「继续战斗」）');
-    assert.ok(!/story-next/.test(normalPage), '正常界面里不该还有「继续」');
+    assert.ok(!/tower-story/.test(normalPage), '正常界面里不该还有「继续」');
 
     /* ⑥b 第一场**之前**就要能显示血量（用户报「离开剧情模式后血量不显示」）：
      * baseMaxHp 以前只在第一场的 adjustMe 里才写，于是开局血条是「—」。 */
@@ -1889,47 +1921,90 @@ hr('14. 剧情展示模式：开始攀登 → 主界面讲剧情（逐字 / 继�
     c.State.state().endless.storySeen = {};      // 本文件 setup() 默认标了已播，这里清掉再验
     run.phase = 'shop';
     c.TowerUI.openEndless();
-    assert.match(ui.last('page').content, /story-next/, '第一次进店前应当先走剧情');
+    assert.match(ui.last('page').content, /tower-story/, '第一次进店前应当先走剧情');
     flush(400);
-    assert.ok(/商人/.test(typed.textContent), '商人剧情要真的打出来：' + typed.textContent.slice(0, 24));
+    /* 第一段商人剧情的第一行是「转过一处阴暗的拐角，你发现一名披着破旧斗篷的商人正坐在路边。」
+     * —— 打字机只打了 `flush(400)` 这么多字（约 9 个），所以断言要落在**已经打出来的**那截上，
+     * 不能拿整段里的词（例如「商人」两个字在更后面）来判。 */
+    assert.ok(/阴暗的拐角/.test(typed.textContent), '商人剧情要真的打出来：' + typed.textContent.slice(0, 24));
     assert.ok(!/[*{}]/.test(typed.textContent), '斜体/加粗标记不该漏进文字');
     for (let i = 0; i < 20; i++) {
-      if (ui.last('page').content.indexOf('story-next') < 0) break;
+      if (!/tower-story/.test(ui.last('page').content)) break;
       ui.click('story-next');
       flush(400);
     }
     assert.equal(c.Tower.storySeen('merchant'), true, '商人剧情要记「已播」');
     assert.match(ui.last('page').content, /进入试炼商店/, '剧情结束回到正常主界面（商店入口还在）');
     c.TowerUI.openEndless();
-    assert.ok(!/story-next/.test(ui.last('page').content), '第二次进店不该再播同一段剧情');
+    assert.ok(!/tower-story/.test(ui.last('page').content), '第二次进店不该再播同一段剧情');
 
-    /* ⑧ 第 10 层「第二次遇到商人」：第一次已播过、这段没播过才播，播完记 seen */
+    /* ⑧ 第 10 层「第二次遇到商人」：第一次已播过、这段没播过才播，播完记 seen。
+     *    ⚠ 换层必然是**新的一家店**（店要关掉才能开打），所以这里也换一个新的 shop 对象：
+     *    `shop.storyShown` 是「这家店讲过没有」的记账，同一家店不该讲第二段。 */
     run.layer = 10;
+    run.shop = { layer: 10, retrySold: false, rerollFree: true, rerollCount: 0, rerollPaid: 0, slots: [] };
     c.TowerUI.openEndless();
-    assert.match(ui.last('page').content, /story-next/, '第 10 层进店前应当播第二段商人剧情');
+    assert.match(ui.last('page').content, /tower-story/, '第 10 层进店前应当播第二段商人剧情');
     flush(400);
     assert.ok(/孤灯|木箱/.test(typed.textContent), '第二段商人剧情要真的打出来：' + typed.textContent.slice(0, 24));
     for (let i = 0; i < 20; i++) {
-      if (ui.last('page').content.indexOf('story-next') < 0) break;
+      if (!/tower-story/.test(ui.last('page').content)) break;
       ui.click('story-next');
       flush(400);
     }
     assert.equal(c.Tower.storySeen('merchant2'), true, '第二段要记「已播」');
     c.TowerUI.openEndless();
-    assert.ok(!/story-next/.test(ui.last('page').content), '第二段也只播一次');
+    assert.ok(!/tower-story/.test(ui.last('page').content), '同一家店不再讲第二段');
+
+    /* ⑨ 2026-10 用户口径：两段固定对话之外，**每一次**遇到商人 / 触发铸币商店
+     *    都从 6 段随机商人文案里来一段（`merchantA`…`merchantF`），固定文案不受影响。 */
+    const POOL = ['merchantA', 'merchantB', 'merchantC', 'merchantD', 'merchantE', 'merchantF'];
+    const seenPool = new Set();
+    for (let n = 0; n < 6; n++) {
+      run.shop = { layer: 11 + n, retrySold: false, rerollFree: true, rerollCount: 0, rerollPaid: 0, slots: [] };
+      c.TowerUI.openEndless();
+      assert.match(ui.last('page').content, /tower-story/, '每次遇到商人都应当有剧情（第 ' + (n + 1) + ' 次）');
+      const id = c.TowerPlot.state() && c.TowerPlot.state().id;
+      assert.ok(POOL.indexOf(id) >= 0, '应当是 6 段随机商人文案之一，实测 ' + id);
+      seenPool.add(id);
+      for (let i = 0; i < 24; i++) {              // 读完（含打字机）
+        if (!/tower-story/.test(ui.last('page').content)) break;
+        ui.click('story-next');
+        flush(400);
+      }
+      /* 同一家店读完就干净了：再画一次不该又冒出一段（否则就是「一直触发剧情」那种死循环）。 */
+      c.TowerUI.openEndless();
+      assert.ok(!/tower-story/.test(ui.last('page').content), '同一家店只讲一段，读完不再接第二段');
+    }
+    /* 真的在随机：把随机流依次钉成 0 / 0.5 / ≈1，应当依次抽到池子的第 1 / 中 / 末段
+     *（`c.__rand(v)` 是本文件 setup 里的随机流开关；每次都要开一家**新店**才允许再讲一段）。 */
+    const picks = [];
+    for (const r of [0, 0.5, 0.9999]) {
+      c.__rand(r);
+      run.shop = { layer: 30, retrySold: false, rerollFree: true, rerollCount: 0, rerollPaid: 0, slots: [] };
+      picks.push(c.TowerPlot.pending(c.Tower.endlessInfo().run));
+    }
+    assert.deepEqual(picks, ['merchantA', 'merchantD', 'merchantF'],
+      '随机商人文案要按随机流等概率抽（实测 ' + JSON.stringify(picks) + '）');
 
     /* ⑨ 「立即进货」开的店（shop.byBuff）：每次开店都播铃声那段 */
     run.shop = { byBuff: true, slots: [] };
     c.TowerUI.openEndless();
-    assert.match(ui.last('page').content, /story-next/, '立即进店的店应当先播剧情');
+    assert.match(ui.last('page').content, /tower-story/, '立即进店的店应当先播剧情');
+    /* ⑨ （第二处）「立即进货」开的店（shop.byBuff）：同样走随机商人文案那一套（2026-10 用户口径） */
+    run.shop = { byBuff: true, slots: [] };
+    c.TowerUI.openEndless();
+    assert.match(ui.last('page').content, /tower-story/, '立即进店的店应当先播剧情');
     flush(400);
-    assert.ok(/铃声|商人/.test(typed.textContent), '铃声那段要打出来：' + typed.textContent.slice(0, 24));
+    assert.ok(/商人|手推车|货摊/.test(typed.textContent), '随机商人文案要打出来：' + typed.textContent.slice(0, 24));
+    const byBuffId = c.TowerPlot.state() && c.TowerPlot.state().id;
+    assert.ok(POOL.indexOf(byBuffId) >= 0, '「立即进货」的店也走 6 段随机池，实测 ' + byBuffId);
     for (let i = 0; i < 20; i++) {
-      if (ui.last('page').content.indexOf('story-next') < 0) break;
+      if (!/tower-story/.test(ui.last('page').content)) break;
       ui.click('story-next');
       flush(400);
     }
-    assert.equal(c.Tower.storySeen('restock'), false, '铃声那段是「每次都播」，不记 seen');
+    assert.equal(c.Tower.storySeen('restock'), false, '随机商人文案是「每次都播」，不记 seen');
     run.shop = null;
 
     /* ⑩ 淡出 / 淡入：剧情收尾时文字挂上 tower-story-leaving，接着那次主界面带 tower-fade-in */
@@ -1953,19 +2028,654 @@ hr('14. 剧情展示模式：开始攀登 → 主界面讲剧情（逐字 / 继�
     ui.click('fight');
     assert.equal(c.Tower.endlessInfo().run.story, null, '挑战模式下起局不该挂剧情');
     assert.match(ui.last('page').content, /继续战斗/, '挑战模式下点了「开始攀登」直接就是主界面');
-    assert.ok(!/story-next/.test(ui.last('page').content), '挑战模式下没有剧情页');
+    assert.ok(!/tower-story/.test(ui.last('page').content), '挑战模式下没有剧情页');
     const runSrc = c.Tower._debugRun('endless');   // 真状态对象（endlessInfo 给的是拷贝）
     runSrc.phase = 'shop';
     runSrc.shop = { byBuff: true, slots: [] };     // 就算这家店是「立即进货」开的，挑战模式也照样跳过
     c.TowerUI.openEndless();
-    assert.ok(!/story-next/.test(ui.last('page').content), '挑战模式下进店也不播剧情');
+    assert.ok(!/tower-story/.test(ui.last('page').content), '挑战模式下进店也不播剧情');
     assert.match(ui.last('page').content, /进入试炼商店/, '挑战模式直接给商店入口');
     /* 切回剧情模式：这家店的剧情还没播过 → 立刻补播 */
     ui.click('story-mode');
     assert.equal(c.Tower.storyEnabled(), true, '再点一下回到剧情模式');
-    assert.match(ui.last('page').content, /story-next/, '切回剧情模式后该播的剧情要补上');
+    assert.match(ui.last('page').content, /tower-story/, '切回剧情模式后该播的剧情要补上');
+  });
+
+  check('剧情屏：点屏幕任意位置都能继续（不是只能点右下角「继续」）；点按钮上不重复推进', () => {
+    /* 2026-10 用户口径：剧情模式里点别处也要能往下走（正在打字时＝补完这一行）。
+     * 这里直接调容器节点上的整屏处理器，不需要可交互的 DOM。 */
+    const c = setup(1);
+    c.Tower.abandon('endless');
+    c.Tower.setStoryEnabled(true);
+    c.State.state().endless.storySeen = {};
+    const ui = uiHarness(c);
+    c.TowerUI.openEndless();
+    ui.click('fight');                              // 起局 → 挂开场剧情 → 画剧情屏
+    const page = ui.last('page');
+    assert.match(page.content, /tower-story/, '先要有一屏剧情');
+    assert.ok(!/data-action="story-next"/.test(page.content), '「继续」按钮已经去掉（点屏幕任意位置即可）');
+    assert.equal(typeof page.node.onclick, 'function', '剧情屏要在容器上接管「点任意位置继续」');
+    const before = c.TowerPlot.state();
+    assert.ok(before && before.line === 0, '剧情从第 1 行开始');
+    /* 点在按钮 / 悬停气泡上：交给那颗按钮自己处理，整屏不接管。 */
+    page.node.onclick({ target: { closest: () => ({}) } });
+    assert.equal(c.TowerPlot.state().line, 0, '点按钮上不该由整屏再推进一次');
+    assert.equal(c.TowerPlot.state().chars, 0, '也不该顺手补完这一行');
+    /* 点在空白处：等价于点「继续」——这一行没打完就先补完这一行。 */
+    page.node.onclick({ target: null });
+    const after = c.TowerPlot.state();
+    assert.ok(after.chars > 0 || after.line > 0, '点空白处要推进/补完当前行：' + JSON.stringify(after));
+    /* 非剧情屏（正常主界面）不接管点击，免得把别处的点击吃掉。 */
+    c.Tower.clearRunStory('endless');
+    c.TowerUI.openEndless();
+    assert.match(ui.last('page').content, /继续战斗/, '这时应当回到正常主界面');
+    assert.equal(ui.last('page').node.onclick, undefined, '正常界面不挂整屏点击处理器');
   });
 }
+
+/* ============================================================ */
+hr('15. 2026-10 主线剧情修复：入场剧情必须发生在「第 1 场战斗之前」');
+{
+  check('剧情必须在「第 1 场战斗之前」播完：点「继续战斗」先播剧情、**不开打**', () => {
+    const c = setup(20);
+    const T = c.Tower;
+    /* 探针式 Main：只记「有没有真的开打」。 */
+    const battles = [];
+    c.Main = { startBattle: (foe) => { battles.push(foe && foe.name); return Promise.resolve(); }, showHome: () => {} };
+    const ui = uiHarness(c);
+    T.setStoryEnabled(true);               // setup() 默认关掉剧情（= 挑战模式），这一节要看剧情
+    T._debugSetEndlessLayer(20);
+    T._debugRun('endless').story = undefined;
+    c.TowerUI.openEndless();
+    /* 关键一按：这是「第 1 场战斗之前」，应当只把剧情放出来、**不开打**。 */
+    ui.click('fight');
+    assert.equal(battles.length, 0, '剧情还没播就开打 = 顺序错了（实测已开打 ' + battles.join(',') + '）');
+    assert.equal(T._debugRun('endless').story, 'gate20', '应当把 gate20 挂成待播');
+    assert.match(ui.last('page').content, /tower-story/, '这一屏应当是剧情屏（右下角有「继续」）');
+    /* 把这一屏的「继续」点到剧情结束（打字机 + 逐行推进） */
+    for (let i = 0; i < 40; i++) {
+      if (!/tower-story/.test(ui.last('page').content)) break;
+      ui.click('story-next');
+    }
+    assert.equal(c.Tower.storySeen('gate20'), true, '播完要记「已播」，否则会在后面每一层重播');
+    assert.equal(T.endlessInfo().run.story, null, '播完要清掉待播标记');
+    /* 现在才是开打：点「继续战斗」应当真的建出战斗。 */
+    c.TowerUI.openEndless();
+    ui.click('fight');
+    assert.equal(battles.length, 1, '剧情播完之后点「继续战斗」应当开打（实测 ' + battles.length + ' 次）');
+  });
+
+  check('入场剧情：真实爬到第 20 层，那一屏**自己**就是剧情屏（不用点「继续战斗」）', () => {
+    const c = setup(19);
+    const T = c.Tower;
+    const battles = [];
+    c.Main = { startBattle: (foe) => { battles.push(foe && foe.name); return Promise.resolve(); }, showHome: () => {} };
+    const ui = uiHarness(c);
+    T.setStoryEnabled(true);
+    T._debugResetStory();                 // 像第一次爬上来的玩家：所有「只播一次」都还没看过
+    T._debugSetEndlessLayer(19);
+    T.clearRunStory('endless');
+    /* 真实推进：第 19 层剩下的每一场都走 nextBattle / reportBattle（与界面 onEnd 同一条状态机路径）。
+     * 场间选牌直接跳过 —— 这一节只看「进层那一刻剧情有没有自己出来」。 */
+    for (let guard = 0; guard < 12 && T._debugRun('endless').layer === 19; guard++) {
+      T._debugRun('endless').choices = null;
+      const nx = T.nextBattle('endless');
+      assert.ok(nx.ok, '第 19 层应当能取到下一场：' + (nx.msg || ''));
+      T.reportBattle('endless', nx.token, true, 5000, 5000);
+    }
+    assert.equal(T._debugRun('endless').layer, 20, '应当推进到第 20 层');
+    assert.equal(T._debugRun('endless').story, 'gate20', '进层就该把入场剧情挂上，实测 ' + T._debugRun('endless').story);
+    /* ① 进层这一屏**直接**是剧情屏 —— 这里一次「继续战斗」都没点（用户口径）。 */
+    c.TowerUI.openEndless();
+    assert.match(ui.last('page').content, /tower-story/, '这一屏应当已经是剧情屏（右下角「继续」）');
+    assert.ok(!/data-action="fight"/.test(ui.last('page').content), '剧情屏上不该有「继续战斗」');
+    assert.equal(battles.length, 0, '剧情还没播就不该开打');
+    /* ② 待播标记丢了（旧存档 / 中途退出过）也要**自己**补上，而不是等玩家先点一下按钮。 */
+    T.clearRunStory('endless');
+    c.TowerUI.openEndless();
+    assert.equal(T._debugRun('endless').story, 'gate20',
+      '重画这一屏时应当自己把该播的剧情接上，实测 ' + T._debugRun('endless').story);
+    assert.match(ui.last('page').content, /tower-story/, '这一屏仍然应当直接是剧情屏');
+  });
+
+  check('巡视那一场：走到它就直接播剧情（一次偶遇一段），读完点「继续战斗」必定能开打', () => {
+    const c = setup(41);
+    const T = c.Tower;
+    const battles = [];
+    c.Main = { startBattle: (foe) => { battles.push(foe && foe.name); return Promise.resolve(); }, showHome: () => {} };
+    const ui = uiHarness(c);
+    T.setStoryEnabled(true);
+    T._debugResetStory();                 // 连「一局之内的巡视段号」一起归零
+    /** 找一层有「路上巡视」的，并把层内序号挪到那一场（= 玩家打到那一场时的状态）。 */
+    const findPatrol = (from) => {
+      for (let L = from; L <= 260; L++) {
+        T._debugSetEndlessLayer(L);
+        const k = (T._debugRun('endless').plan || []).findIndex((e) => e && e.kind === 'patrol' && !e.x00);
+        if (k >= 0) return { layer: L, idx: k };
+      }
+      return null;
+    };
+    /** 走到那一场并重画这一屏 —— **不点任何按钮**。 */
+    const visit = (hit) => {
+      T._debugSetEndlessLayer(hit.layer);
+      T._debugRun('endless').idx = hit.idx;
+      c.TowerUI.openEndless();
+      return T._debugRun('endless').story;
+    };
+    /* 把这一屏的「继续」一直点到剧情结束：**真读**，绝不手工 markStorySeen ——
+     * 旧版本的坑正是「`once:false` 的巡视段永远记不上 seen」，手工记 seen 会把那个 bug 掩盖掉。 */
+    const readToEnd = () => {
+      let n = 0;
+      while (n++ < 40 && /tower-story/.test(ui.last('page').content)) ui.click('story-next');
+      return n;
+    };
+    const first = findPatrol(41);
+    assert.ok(first, '应当能找到巡逻层');
+    /* ① 到那一场就直接播（用户口径：不要先点一次「继续战斗」）—— 这里一次都没点。 */
+    assert.equal(visit(first), 'patrolGate', '首次偶遇应当是 patrolGate，实测 ' + visit(first));
+    assert.match(ui.last('page').content, /tower-story/, '这一屏应当已经是剧情屏');
+    /* ② 剧情屏上点「继续战斗」不该开打。 */
+    ui.click('fight');
+    assert.equal(battles.length, 0, '巡视之前不该开打');
+    /* ③ 真读完这一段 → 待播清掉（读的是真「继续」）。 */
+    readToEnd();
+    assert.equal(T._debugRun('endless').story, undefined, '读完这一段之后不该还挂着待播');
+    /* ④ 同一局里再偶遇一次：换**下一段**，而且同样不用点。 */
+    const second = findPatrol(first.layer + 1);
+    assert.ok(second, '应当能找到第二层巡逻');
+    const id2 = visit(second);
+    assert.ok(id2 && id2 !== 'patrolGate', '第二次偶遇应当换一段，实测 ' + id2);
+    assert.ok(/^patrolMeet\d*$/.test(String(id2)), '第二次偶遇应当是 patrolMeet 系列，实测 ' + id2);
+    readToEnd();
+    /* ⑤ 段号走完一轮（patrolMeet…patrolMeet8）之后要**从头再来**，不能静默 ——
+     *   长局里「讲完就没了」在观感上就是「巡视剧情被吞掉」（机器人实测：第 163 层之后再没播过）。 */
+    let from = second.layer + 1, cycled = false;
+    for (let i = 0; i < 9 && !cycled; i++) {
+      const hit = findPatrol(from);
+      assert.ok(hit, '应当还能找到巡逻层（第 ' + (i + 1) + ' 次）');
+      from = hit.layer + 1;
+      visit(hit);
+      readToEnd();
+      if (T._debugRun('endless').patrolMeetNo === 1) cycled = true;
+    }
+    assert.ok(cycled, '一轮 8 段讲完之后应当从头再讲（patrolMeetNo 回到 1）');
+    /* ⑤ 点「继续战斗」**必须真的开打** —— 这就是用户报的「一直触发剧情、无法进入战斗」
+     *    的反向验证：判定若停在同一段上，这里会再次变成剧情屏、battles 永远是 0。 */
+    c.TowerUI.openEndless();
+    ui.click('fight');
+    assert.equal(battles.length, 1, '巡视剧情读完之后点「继续战斗」应当开打（实测 ' + battles.length + ' 次）');
+    console.log('      第 ' + first.layer + ' 层巡视（第 ' + (first.idx + 1) + ' 场）：patrolGate → 读完 → 可正常开打；' +
+      ' 第 ' + second.layer + ' 层再遇 → ' + id2);
+  });
+
+  check('献祭文案：第 20 层是「石门」那段；第 30 层起走随机供词（即使 20 层那段没记 seen）', () => {
+    const c = setup(20);
+    const T = c.Tower;
+    T.setStoryEnabled(true);               // setup() 默认关掉剧情，这一节要看剧情
+    const finishLayer = (layer) => {
+      T._debugSetEndlessLayer(layer);
+      T.debugGrantBuff('C06');
+      const run = T._debugRun('endless');
+      run.idx = run.plan.length - 1; run.choices = null; run.phase = null;
+      delete run.attempt; delete run.story;
+      const nx = T.nextBattle('endless');
+      T.reportBattle('endless', nx.token, true, 1500, 2000);
+      T.continueFromShop();
+      return T.endlessInfo().run;
+    };
+    const at20 = finishLayer(20);
+    assert.equal(at20.phase, 'sacrifice', '第 20 层应当进献祭阶段');
+    assert.equal(at20.story, 'gate20b', '第 20 层第一次献祭应当是「石门」那段，实测 ' + at20.story);
+    /* 这一屏画出来时**必须是剧情屏**：界面靠 `TowerPlot.showing()` 判「先播剧情、读完才弹献祭窗」
+     *（`openEndless` 里那句 `phase === 'sacrifice' && !TowerPlot.showing()`）——
+     * 这个标记一旦失效，献祭窗会叠在剧情屏上，剧情被抢跑、seen 也记不上。 */
+    uiHarness(c);
+    c.TowerUI.openEndless();
+    assert.equal(c.TowerPlot.showing(), true, '这一屏正在播剧情，献祭窗应当等它播完');
+    /* 故意**不**记 seen：模拟「上一次剧情被打断」——旧版本就是在这里退化成
+     * 「每次献祭都重播 20 层那段」，现在有轮内层号兜底。 */
+    T.clearRunStory('endless');
+    const at30 = finishLayer(30);
+    assert.equal(at30.phase, 'sacrifice', '第 30 层应当进献祭阶段');
+    assert.ok(/^offer[1-5]$/.test(String(at30.story)), '第 30 层应当走随机供词，实测 ' + at30.story);
+  });
+
+  check('调试台挪层只清本局待播剧情，不动「已播过」的记账', () => {
+    const c = setup(7);
+    const T = c.Tower;
+    T.markStorySeen('gate20');
+    T.markStorySeen('merchant');
+    T._debugSetEndlessLayer(20);
+    const run = T._debugRun('endless');
+    run.story = 'gate20b';
+    run.pendingStory = 'layer31';
+    run.x00stage = 3;
+    const before = Object.keys(c.State.state().endless.storySeen).sort().join(',');
+    T._debugSetEndlessLayer(30);
+    assert.equal(Object.keys(c.State.state().endless.storySeen).sort().join(','), before, '挪层不该改 storySeen');
+    assert.equal(T._debugRun('endless').story, undefined, '待播剧情要跟着换层清掉（否则会跳层重播）');
+    assert.equal(T._debugRun('endless').x00stage, 0, '整百层段号要归零');
+    assert.equal(T.storySeen('gate20'), true, '已看过的仍然算看过');
+    /* 清空剧情进度是另一个接口 */
+    assert.ok(T._debugResetStory().cleared >= 2, '清空接口应当报出忘掉几段');
+    assert.equal(T.storySeen('gate20'), false, '清空之后当没看过');
+  });
+
+  check('魔王名字：整百层「魔王·德拉莫斯」，路上巡逻仍是「德拉莫斯」（预告=实战）', () => {
+    const c = setup(100);
+    const T = c.Tower;
+    const nameAt = (layer, idx) => {
+      T._debugSetEndlessLayer(layer);
+      const run = T._debugRun('endless');
+      run.idx = idx;
+      delete run.attempt; delete run.story;
+      const nx = T.nextBattle('endless');
+      return nx && nx.foe ? nx.foe.name : null;
+    };
+    let patrolLayer = 0, patrolIdx = -1;
+    for (let L = 41; L <= 199 && patrolIdx < 0; L++) {
+      T._debugSetEndlessLayer(L);
+      const k = (T._debugRun('endless').plan || []).findIndex((e) => e && e.kind === 'patrol');
+      if (k >= 0) { patrolLayer = L; patrolIdx = k; }
+    }
+    assert.equal(nameAt(patrolLayer, patrolIdx), '德拉莫斯', '路上巡逻不该带前缀');
+    assert.equal(nameAt(100, 2), '魔王·德拉莫斯', '第 100 层的魔王要带前缀');
+    assert.equal(nameAt(200, 2), '魔王·德拉莫斯', '第 200 层同样');
+    T._debugSetEndlessLayer(100);
+    const king = (T.planInfo('endless') || []).find((x) => x.audience === 'king');
+    assert.ok(king && king.name === '魔王·德拉莫斯', '预告里也要同名，实测 ' + (king && king.name));
+  });
+
+  check('调试面板：删掉「清空无尽塔剧情进度 / 爬塔不耗挑战书 / 无尽试炼币拉满」，改出「试炼币不消耗」', () => {
+    /* 2026-10 用户口径：最后那条工具与两条开关都不要了；「无尽试炼币拉满」改成「试炼币不消耗」。 */
+    const c = setup(7);
+    const { made } = debugHarness(c);
+    const html = made.map((e) => String(e.innerHTML)).join('\n');
+    assert.ok(!html.includes('清空无尽塔剧情进度'), '这条工具要从面板上删掉');
+    assert.ok(!html.includes('爬塔不耗挑战书'), '重复的第二条挑战书开关要删掉');
+    assert.ok(!html.includes('无尽试炼币拉满'), '「无尽试炼币拉满」改成「试炼币不消耗」');
+    assert.ok(html.includes('关卡不耗挑战书'), '第一条挑战书开关保留');
+    assert.ok(html.includes('试炼币不消耗'), '新开关要出现在面板上');
+    /* 只删面板入口：底层接口保留（无尽塔剧情用例靠它复位）。 */
+    assert.equal(typeof c.Tower._debugResetStory, 'function', '清空剧情进度的接口本身要留着');
+  });
+}
+
+/* ============================================================ */
+hr('16. 2026-10 镜中世界：整百层打赢魔王 → 拾取照影之境 → 继续挑战进 101 层');
+{
+  check('整百层：打赢魔王 → 拾取「照影之境」（永久增益最前面、介绍 ？？？、不占位）→「继续挑战」→ 第 101 层，之后每 100 层叠一层', () => {
+    const c = setup(100);
+    const T = c.Tower;
+    const TD = c.TowerData;
+    c.Main = { startBattle: () => Promise.resolve(), showHome: () => {} };
+    const ui = uiHarness(c);
+    T.setStoryEnabled(true);
+    T._debugResetStory();
+    T._debugSetEndlessLayer(100);
+    T.clearRunStory('endless');
+    /* 王庭那几段连播已经有专门的用例（`test-env-buff.cjs`）——这一节只看「终章之后 → 拾取屏」，
+     * 所以先当作看过，免得把几十次点击都花在连播上。 */
+    T.markStorySeen('layer100'); T.markStorySeen('x00a'); T.markStorySeen('x00b'); T.markStorySeen('x00c');
+    /* 数据口径：传奇 + 剧情固定获得（不进任何随机池 / 商店 / 铸币商店）。 */
+    const def = TD.BUFF_BY_ID[TD.MIRROR.id];
+    assert.equal(def.rarity, 3, '照影之境应当是传奇档');
+    assert.equal(def.flavor, '映出一具完美的躯壳', '拾取卡上的那句话');
+    assert.equal(def.desc, '？？？', '进背包之后的介绍');
+    assert.equal(TD.descOf(def, 'endless'), '？？？', '介绍就是 ？？？（不该被追加叠层说明）');
+    assert.ok(TD.hasTag(def, 'story'), '应当是「剧情固定获得」那一类');
+    assert.equal((TD.endlessPool || []).indexOf(def), -1, '不该进无尽塔场间选择池');
+    assert.equal((TD.shopPool || []).indexOf(def), -1, '不该上试炼商店货架');
+    assert.equal((TD.mintPool || []).indexOf(def), -1, '不该上铸币商店货架');
+    /* 打穿三连战：**这一场之后本层必须真的清空**（旧版本 run.idx 被归一化夹回去 →
+     * layerClear 永不执行 → 卡在第 100 层反复打魔王）。 */
+    let last = null;
+    for (let i = 0; i < 3; i++) {
+      T._debugRun('endless').choices = null;
+      const nx = T.nextBattle('endless');
+      assert.ok(nx.ok, '第 100 层应当能开打：' + (nx.msg || ''));
+      last = T.reportBattle('endless', nx.token, true, 5000, 5000);
+    }
+    assert.equal(last.layerComplete, true, '打完第三场必须算「本层通关」（否则永远进不了下一层）');
+    assert.equal(T._debugRun('endless').phase, 'mirror', '整百层通关后应当进「拾取照影之境」阶段');
+    assert.equal(T.mirrorPending(), true, '拾取屏应当等着玩家');
+    assert.equal(T._debugRun('endless').story, 'x00win', '终章剧情先播');
+    /* 界面顺序：终章剧情 → 拾取屏（卡片居中，带那句 flavor）。 */
+    c.TowerUI.openEndless();
+    assert.match(ui.last('page').content, /tower-story/, '先播终章剧情');
+    for (let i = 0; i < 80 && /tower-story/.test(ui.last('page').content); i++) ui.click('story-next');
+    c.TowerUI.openEndless();
+    assert.match(ui.last('page').content, /data-action="mirror-pick"/, '剧情之后应当是拾取屏');
+    assert.match(ui.last('page').content, /映出一具完美的躯壳/, '卡片上要有那句话');
+    assert.match(ui.last('page').content, /传奇/, '卡片要是传奇配色（传奇档文案）');
+    /* 拾取：永久增益最前面 + 介绍 ？？？ + 不占永久位。 */
+    const usedBefore = T.endlessInfo().run.permUsed;
+    ui.click('mirror-pick');
+    const row = T._debugRun('endless').permanent[0];
+    assert.equal(row && row.id, 'C63', '拾取之后应当在永久表第一条，实测 ' + JSON.stringify(row));
+    assert.equal(row.stacks, 1, '第一次是 1 层');
+    assert.equal(T.mirrorStacks(), 1);
+    assert.equal(T.endlessInfo().run.permUsed, usedBefore, '剧情件不占永久位');
+    assert.equal(T.mirrorPending(), false, '拾取之后不该再判出拾取屏');
+    /* 剧情件是「发下来的」，不是构筑的一部分：不能卖、不能被巡逻收走、不进出售列表。 */
+    assert.equal(T.sellListOf('endless').filter((b) => b.id === 'C63').length, 0, '不该出现在出售 / 免费交换列表里');
+    assert.equal(T.patrolTollCandidates().list.filter((x) => x.id === 'C63').length, 0, '不该进巡逻收缴候选');
+    assert.equal(T.sacrificeCandidatesOf().filter((x) => x.id === 'C63').length, 0, '不该进放弃永久增益的候选');
+    /* 回到主界面：右下角是「继续挑战」，面板里排在最前面。 */
+    c.TowerUI.openEndless();
+    assert.match(ui.last('page').content, /继续挑战/, '右下角应当是「继续挑战」');
+    assert.ok(!/进入试炼商店|进入铸币商店/.test(ui.last('page').content), '整百层不该出现「进入商店」');
+    const panel = ui.last('page').content;
+    assert.ok(panel.indexOf('照影之境') > 0, '永久增益面板里要能看到它');
+    assert.ok(panel.indexOf('照影之境') < panel.indexOf('限次增益'), '它要排在「永久增益」那一段的最前面');
+    /* 「继续挑战」→ 确认弹窗 → 是 → 第 101 层（机制回到第 1 层的样子，数值接着长）。 */
+    const scoreBefore = T._debugRun('endless').score;
+    ui.click('fight');
+    const m = ui.modalButton('是');
+    const modalText = JSON.stringify(ui.last('modal').content || '');
+    assert.match(modalText, /无尽之塔中的魔王已被击败，继续在镜中世界进行挑战吗？/, '弹窗要问这一句');
+    m.run();
+    const r101 = T._debugRun('endless');
+    assert.equal(r101.layer, 101, '选「是」之后应当进第 101 层');
+    assert.equal(r101.idx, 0);
+    assert.equal((r101.env || []).length, 0, '101 层与第 1 层同规矩：层内环境从头抽');
+    assert.ok(r101.score >= scoreBefore, '分数继续累计（敌人数值也继续按公式长）');
+    assert.equal(T.mirrorStacks(), 1, '照影之境跟着进下一层');
+    /* 每过 100 层叠一层。 */
+    T._debugSetEndlessLayer(200);
+    T.clearRunStory('endless');
+    T.markStorySeen('x00b'); T.markStorySeen('x00c'); T.markStorySeen('x00win');
+    for (let i = 0; i < 3; i++) {
+      T._debugRun('endless').choices = null;
+      const nx = T.nextBattle('endless');
+      if (!nx.ok) break;
+      T.reportBattle('endless', nx.token, true, 5000, 5000);
+    }
+    assert.equal(T.mirrorPending(), true, '第 200 层同样要出拾取屏');
+    const pick = T.takeMirrorReward();
+    assert.equal(pick.ok, true, '第 200 层应当能再拾取一次');
+    assert.equal(T.mirrorStacks(), 2, '照影之境应当叠到 2 层，实测 ' + T.mirrorStacks());
+    assert.equal(T._debugRun('endless').permanent.length, 1, '叠层不是新增一行');
+  });
+}
+
+/* ============================================================ */
+hr('17. 2026-10 同名叠加：栏位叠满后新栏位继续叠，效果按「总层数」累加（越战越勇 2+2 层）');
+{
+  check('越战越勇（每栏最多 2 层）拿 4 份 → 两栏各 2 层，合起来每回合 +6%（不是只算一栏的 +3%）', () => {
+    const c = setup(30);
+    const T = c.Tower, TD = c.TowerData;
+    const run = T._debugRun('endless');
+    run.permanent = []; run.limited = []; run.permSlots = 0;
+    run.noEnvRoll = true; run.env = [];
+    const rows = (id) => (run.permanent || []).filter((b) => b && b.id === id);
+    /* ① 获得路径（需求103 / 需求105 的口径）：`maxStacks` 是**每栏**的上限，
+     *    叠满之后新开一栏继续叠，而不是「到此为止」——同名条目会并排出现。 */
+    assert.ok(T.debugGrantBuff('C54').ok, '第 1 份');
+    assert.ok(T.debugGrantBuff('C54').ok, '第 2 份');
+    assert.deepEqual(rows('C54').map((b) => b.stacks), [2], '两份额叠在同一栏：×2');
+    assert.ok(T.debugGrantBuff('C54').ok && T.debugGrantBuff('C54').ok, '第 3、4 份应当另开一栏继续叠');
+    assert.deepEqual(rows('C54').map((b) => b.stacks), [2, 2], '应当是两栏各 2 层（不是每栏停在 1 层）');
+    assert.equal(T.obtainedCountOf(run, 'C54'), 4, '合计 4 层');
+    assert.equal(T.ownableOf(run, TD.BUFF_BY_ID.C54), true, '满层之后仍可出现（需求105）');
+    /* ② 效果路径：aggregate 把各栏**按层数**累加 → 4 层 = 每回合 +6%（1 层 +1.5%）。 */
+    run.idx = 0; run.choices = null; run.phase = null; delete run.attempt;
+    const nx = T.nextBattle('endless');
+    const me = { power: 1000, agility: 1000, speed: 1000, hp: 5000, maxHp: 5000,
+      baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], effects: {}, masterLevel: 0 };
+    nx.adjustMe(me);
+    delete run.attempt;
+    assert.ok(Math.abs((me.mods.roundStatPct || 0) - 0.06) < 1e-9,
+      '4 层应当给 6%（1 层 1.5% × 4），实测 ' + JSON.stringify(me.mods.roundStatPct));
+    /* ②b 同一类「针对特定敌人」的伤害加成：同名多栏**相加**（+25%/层 × 5 层 = ×2.25），
+     *    而不是「每栏各自乘一遍」（3 层 × 2 层 = ×2.625）—— 后者会超出描述里的 +25%/层。 */
+    for (const id of ['C03', 'C03', 'C03', 'C03', 'C03']) T.debugGrantBuff(id);
+    assert.equal(T.obtainedCountOf(run, 'C03'), 5, '猎侠者 5 层（3 + 2 两栏）');
+    run.idx = 0; run.choices = null; run.phase = null; delete run.attempt;
+    const nx2 = T.nextBattle('endless');
+    const me2 = { power: 1000, agility: 1000, speed: 1000, hp: 5000, maxHp: 5000,
+      baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], effects: {}, masterLevel: 0 };
+    nx2.adjustMe(me2);
+    delete run.attempt;
+    assert.ok(Math.abs((me2.mods.dmgMul || 1) - 2.25) < 1e-9,
+      '猎侠者 5 层应当是 ×2.25（+125%），实测 ' + JSON.stringify(me2.mods.dmgMul));
+    /* ③ 反例：`unique` / `noRestack` 的那一类才是「有了就不再出现、拿不到第二份」。 */
+    assert.equal(T.debugGrantBuff('C55').ok, true, '后发制人第一份');
+    assert.equal(T.debugGrantBuff('C55').ok, false, '后发制人（noRestack）拿不到第二份');
+    assert.equal(T.ownableOf(run, TD.BUFF_BY_ID.C55), false, '它满层后要从池子里出去');
+  });
+}
+
+/* ============================================================ */
+hr('18. 2026-10 跳过键的代价（塔）：跳过的场次在层结算里各随机抹掉一项');
+{
+  check('挑战塔：按跳过键打过 1 场 → 层结算抹掉一项并写明；没跳过就一件不少', () => {
+    /* 把一层打完（`skipFirst` = 第 1 场按了跳过键），返回层结算结果。 */
+    const clearLayer = (skipFirst) => {
+      const c = setup(30);
+      const T = c.Tower;
+      assert.ok(T.startTowerRun().ok, '应当能开挑战塔');
+      let rw = null;
+      for (let guard = 0; guard < 40; guard++) {
+        const run = T._debugRun('tower');
+        if (!run) break;
+        if (run.phase === 'shop') { T.closeShop(); continue; }
+        if (run.choices) { T.pickChoice('tower', 0); continue; }
+        const nx = T.nextBattle('tower');
+        if (!nx.ok) break;
+        const battleNo = run.idx;
+        rw = T.reportBattle('tower', nx.token, true, 4000, 5000,
+          { rounds: [], hpAfter: [4000, 0], skipped: !!(skipFirst && battleNo === 0) });
+        if (rw && rw.prizes) return rw;
+      }
+      return rw;
+    };
+    /* ① 全程不按跳过：悬浮奖品一件不少，也没有「少收」记录。 */
+    const plain = clearLayer(false);
+    assert.ok(plain && plain.prizes && plain.prizes.items && plain.prizes.items.length,
+      '层结算应当给悬浮奖品：' + JSON.stringify(plain && plain.prizes));
+    assert.equal(plain.prizes.lost, undefined, '没按跳过键就不该有「少收」');
+    const full = plain.prizes.items.reduce((n, it) => n + it.count, 0);
+    /* ② 第 1 场按了跳过键：结算里恰好抹掉一项（数量少那一项，并记下少收的是什么）。 */
+    const skipped = clearLayer(true);
+    assert.ok(skipped && skipped.prizes, '跳过时也要照常层结算');
+    assert.ok(Array.isArray(skipped.prizes.lost) && skipped.prizes.lost.length === 1,
+      '跳过 1 场就要记 1 项「少收」：' + JSON.stringify(skipped.prizes.lost));
+    const fewer = skipped.prizes.items.reduce((n, it) => n + it.count, 0);
+    assert.equal(fewer, full - skipped.prizes.lost[0].count, '正好少掉那一项的数量（其余照发）');
+    /* ③ 记账是**本层**的、而且不许超过这一层的场数：归一化会把坏值（旧档 / 手改）夹回来。 */
+    const c3 = setup(30);
+    assert.ok(c3.Tower.startTowerRun().ok);
+    const r3 = c3.Tower._debugRun('tower');
+    r3.skippedBattles = 5;
+    r3.plan = [r3.plan[0]];                                // 只留一场（用真实条目，别造假数据）
+    r3.idx = 1;
+    c3.Tower.towerInfo();                                  // 访问一次对局 → 走 normalizeRun
+    assert.equal(c3.Tower._debugRun('tower').skippedBattles, 1,
+      '归一化要把「跳过场次」夹在这一层的场数之内：' + c3.Tower._debugRun('tower').skippedBattles);
+    /* ④ 常驻挑战（无尽塔）没有飘物：代价按同一套口径记在**这一场的试炼币**上（只收 2/3）。 */
+    const fightOnce = (skipped) => {
+      const c4 = setup(30);
+      const T4 = c4.Tower;
+      const run4 = T4._debugRun('endless');
+      run4.choices = null; run4.phase = null;
+      const before = Math.max(0, Number(run4.coins) || 0);
+      const nb = T4.nextBattle('endless');
+      const rw = T4.reportBattle('endless', nb.token, true, 4000, 5000,
+        { rounds: [], hpAfter: [4000, 0], skipped: skipped });
+      assert.ok(rw && rw.ok, '这一场应当正常结算');
+      return Math.max(0, Number(T4._debugRun('endless').coins) || 0) - before;
+    };
+    const fullCoins = fightOnce(false), cutCoins = fightOnce(true);
+    assert.ok(fullCoins > 0, '没跳过时应当有试炼币进账：' + fullCoins);
+    assert.equal(cutCoins, Math.round(fullCoins * 2 / 3),
+      '跳过时这一场的试炼币只收 2/3（实测 ' + cutCoins + ' vs ' + fullCoins + '）');
+  });
+}
+
+/* ============================================================ */
+check('剧情页文字太长时会自动往下翻：最后一行打出来必须能看见', () => {
+  /* 用**真实实现**：从 js/tower-plot.js 里抠出 storyScrollToCursor，配一个会算几何的假文字框。
+   * 2026-10 用户口径：一页文字太多时，最后一行打完停在屏幕外 —— 剧情页要能自动下翻。
+   * 注意 storyPaint 是整块重写 innerHTML（浏览器会把滚动位置归零），所以必须**每次重画都带一次**。 */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower-plot.js'), 'utf8').replace(/\r\n/g, '\n');
+  const at = src.indexOf('function storyScrollToCursor');
+  assert.ok(at > 0, 'js/tower-plot.js 里应当有 storyScrollToCursor');
+  let i = src.indexOf('{', at), depth = 0, end = -1;
+  for (; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') { depth -= 1; if (!depth) { end = i + 1; break; } }
+  }
+  assert.ok(end > at, '应当能抠出 storyScrollToCursor 的函数体');
+  const storyScrollToCursor = new Function(src.slice(at, end) + '; return storyScrollToCursor;')();
+
+  /* ① 长页：可视高 300、内容高 900，当前行在 700~740（末尾在屏幕外）
+   *    → 应当滚到 700+40+8-300 = 448 */
+  const long = { scrollTop: 0, clientHeight: 300, scrollHeight: 900,
+    querySelector: (s) => (s === '.tower-story-line.now' ? { offsetTop: 700, offsetHeight: 40 } : null) };
+  storyScrollToCursor(long);
+  assert.equal(long.scrollTop, 448, '当前行底部要带进可视区（实测 ' + long.scrollTop + '）');
+  /* 再调一次不能越滚越远（幂等） */
+  storyScrollToCursor(long);
+  assert.equal(long.scrollTop, 448, '重复调用应当稳定：' + long.scrollTop);
+
+  /* ② 短页（装得下）：不该乱滚 */
+  const short = { scrollTop: 0, clientHeight: 300, scrollHeight: 300,
+    querySelector: () => ({ offsetTop: 100, offsetHeight: 40 }) };
+  storyScrollToCursor(short);
+  assert.equal(short.scrollTop, 0, '文字装得下时不该滚动：' + short.scrollTop);
+
+  /* ③ 到底了也不能越界 */
+  const tall = { scrollTop: 0, clientHeight: 300, scrollHeight: 1200,
+    querySelector: () => ({ offsetTop: 2000, offsetHeight: 40 }) };
+  storyScrollToCursor(tall);
+  assert.equal(tall.scrollTop, 900, '最多只能滚到 scrollHeight-clientHeight：' + tall.scrollTop);
+
+  /* ④ 接线：打字机每次重画后要带一次；整页重画（tower-ui 的 page() 之后）也要补一次 */
+  const paint = src.slice(src.indexOf('function storyPaint'), src.indexOf('function storyTick'));
+  assert.match(paint, /storyScrollToCursor\(box\)/, 'storyPaint 每打一个字都要把当前行带回可视区');
+  assert.match(src, /afterRender:\s*storyAfterRender/, '要把 storyAfterRender 导出成 afterRender（整页重画后补滚动用）');
+  const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(uiSrc, /TowerPlot\.afterRender\(\)/, 'tower-ui 画完 page() 之后要调一次 afterRender');
+
+  /* ⑤ 版式：文字区不能用 justify-content:center（溢出时开头几行滚不上去），
+   *    改用「首尾 auto 外边距」那套居中写法。 */
+  const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8').replace(/\r\n/g, '\n');
+  const box = (css.match(/\.tower-story-text\s*\{[^}]*\}/) || [''])[0];
+  assert.ok(!/justify-content:\s*center/.test(box),
+    '剧情文字区不该用 justify-content:center（文字溢出时开头几行会滚不到）：' + box);
+  assert.match(css, /\.tower-story-text\s*>\s*\.tower-story-line:first-child\s*\{[^}]*margin-top:\s*auto/,
+    '文字装得下时要靠 margin-top:auto 保持垂直居中');
+  assert.match(css, /\.tower-story-text\s*>\s*\.tower-story-line:last-child\s*\{[^}]*margin-bottom:\s*auto/,
+    '文字装得下时要靠 margin-bottom:auto 保持垂直居中');
+});
+
+/* ============================================================ */
+check('照影之境的拾取卡居中在整个屏幕（不是塔身右侧那半屏）', () => {
+  /* 用户口径 2026-10：拿到「照影之境」时卡片要在**整个屏幕正中央**。
+   * 之前 `.tower-mirror` 是 `.tower-main`（塔身右边那一列）里的 position:relative 块，
+   * 于是「居中」居的是右半边 —— headless Chrome 在 1170×690 下量到卡片中心 x=744、舞台中心 573，
+   * 偏右 171px。改成整屏定位层（fixed + inset:0，`#ui` 上有 transform，所以相对的是整个舞台）后偏差 0。 */
+  const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8').replace(/\r\n/g, '\n');
+  const rule = (css.match(/\.tower-mirror\s*\{[^}]*\}/) || [''])[0];
+  assert.match(rule, /position:\s*fixed/, '.tower-mirror 要整屏定位（否则居中的是右半边）：' + rule);
+  assert.match(rule, /inset:\s*0/, '.tower-mirror 要铺满整个舞台：' + rule);
+  assert.ok(!/min-height:\s*62vh/.test(rule), '旧的「半屏 62vh」写法要去掉：' + rule);
+  assert.match(rule, /pointer-events:\s*none/, '整屏层自己不吃点击（塔身 / 左下角模式开关照旧）：' + rule);
+  assert.match(css, /\.tower-mirror\s+\.mirror-card-wrap\s*\{[^}]*pointer-events:\s*auto/,
+    '卡片自己仍要能点（pointer-events:auto）');
+});
+
+/* ============================================================ */
+check('两座塔页面的「返回」都回关卡界面（不是主界面）', () => {
+  /* 用户口径 2026-10：挑战塔 / 无尽塔都是从**关卡页**进来的，返回就该回关卡页。
+   * 真身走 `UI.runAction('stages')`（顶层分发器 → openStages），不是 `C().home()`。 */
+  for (const [seed, open, label] of [[11, (c) => c.TowerUI.openEndless(), '无尽塔'], [13, (c) => c.TowerUI.openTower(), '挑战塔']]) {
+    const c = setup(seed);
+    const ui = uiHarness(c);
+    open(c);
+    ui.click('home');                       // 就是那颗「返回」
+    assert.deepEqual(ui.nav, ['stages'],
+      label + '的「返回」应当打开关卡页，而不是回主界面：' + JSON.stringify(ui.nav));
+  }
+
+  /* 反例保护：桩里没有顶层 runAction 时（老壳 / 别的宿主）也要能退回主界面，不能抛异常。 */
+  const c2 = setup(12);
+  const ui2 = uiHarness(c2);
+  delete c2.UI.runAction;
+  c2.TowerUI.openEndless();
+  ui2.click('home');
+  assert.deepEqual(ui2.nav, ['home'], '拿不到 runAction 时退回主界面，不能抛：' + JSON.stringify(ui2.nav));
+});
+
+/* ============================================================ */
+check('挑战塔的「开始挑战」不再带「（挑战书×1）」', () => {
+  /* 用户口径 2026-10：按钮就写「开始挑战」。消耗没丢 —— 按钮左边那颗「现有挑战书 N 张」还在。
+   * 2026-10 再一条：上面那一串规则介绍（「每层 1 张挑战书 · 连战只继承血量…」）按用户口径整段去掉。 */
+  const c = setup(21);
+  const ui = uiHarness(c);
+  c.TowerUI.openTower();
+  const page = ui.last('page').content;
+  assert.match(page, /data-action="fight"[^>]*>开始挑战</, '按钮文案应当就是「开始挑战」');
+  assert.ok(!/开始挑战（挑战书/.test(page), '不该再带「（挑战书×1）」');
+  assert.match(page, /tower-book-count[^>]*>现有挑战书 \d+ 张</, '张数仍然写在按钮左边');
+  assert.ok(!/每层 1 张挑战书/.test(page), '那一串规则介绍已经去掉');
+});
+
+/* ============================================================ */
+check('调试开关「关卡不耗挑战书」同时管挑战塔进层（原来那条重复的「爬塔不耗挑战书」已删）', () => {
+  const c = setup(30);
+  const T = c.Tower, S = c.State.state();
+  S.props[23] = 0;
+  const denied = T.startTowerRun();
+  assert.equal(denied.ok, false, '没挑战书时开不了挑战塔');
+  assert.equal(denied.needsBook, true, '缺的是挑战书：' + JSON.stringify(denied));
+  debugHarness(c);                                   // 挂上真正的 window.Debug
+  c.window.Debug.set('noStageCost', true);
+  S.props[23] = 0;
+  assert.equal(T.startTowerRun().ok, true, '开着「关卡不耗挑战书」时挑战塔也能开局');
+  assert.equal(S.props[23] || 0, 0, '本来就没有挑战书，也没有被扣');
+  assert.equal(T._debugRun('tower').layer, 1, '照常落在第 1 层');
+});
+
+/* ============================================================ */
+check('调试开关「试炼币不消耗」：试炼商店买 / 刷新 / 买铸币与铸币商店购买都不扣代币（余额 0 也能买）', () => {
+  const c = setup(7);
+  debugHarness(c);                                   // 挂上真正的 window.Debug
+  const T = c.Tower;
+  const run = T._debugRun('endless');
+  /* 对照组：开关没开时，余额 0 的三条路都走不通。 */
+  run.coins = 0; run.retryToken = 0;
+  T._debugSpawnShop();
+  assert.equal(T.buyShopSlot(0).ok, false, '对照：试炼币 0 买不了增益');
+  assert.equal(T.buyRetryToken().ok, false, '对照：试炼币 0 买不了铸币');
+  T._debugSpawnMintShop();
+  assert.equal(T.buyMintSlot(0).ok, false, '对照：铸币 0 买不了货架上的东西');
+  assert.ok(run.shop && run.shop.slots.length, '铸币商店照旧开着');
+  /* 开开关：三条路都照买，余额一分不动。 */
+  c.window.Debug.set('noCoinCost', true);
+  run.coins = 0; run.retryToken = 0;
+  T._debugSpawnShop();
+  const bought = T.buyShopSlot(0);
+  assert.equal(bought.ok, true, '试炼币 0 也能买增益：' + JSON.stringify(bought));
+  assert.equal(run.coins, 0, '买完试炼币还是 0');
+  const token = T.buyRetryToken();
+  assert.equal(token.ok, true, '买铸币也不扣：' + JSON.stringify(token));
+  assert.equal(run.coins, 0, '试炼币仍然是 0');
+  assert.equal(run.retryToken, 1, '铸币照常 +1');
+  /* 首次刷新是免费的（shop.rerollFree / rerollPriceAt(0) = 0），先关掉免费并把计数推高才真的收费。 */
+  run.shop.rerollFree = false;
+  run.shop.rerollCount = 3;
+  const rr = T.rerollShop();
+  assert.equal(rr.ok, true, '刷新货架也不扣：' + JSON.stringify(rr));
+  assert.ok(rr.paid > 0, '这一次刷新确实是收费的那一档：' + rr.paid);
+  assert.equal(run.coins, 0, '刷新之后试炼币还是 0');
+  run.retryToken = 0;
+  T._debugSpawnMintShop();
+  const mint = T.buyMintSlot(0);
+  assert.equal(mint.ok, true, '铸币 0 也能买：' + JSON.stringify(mint));
+  assert.equal(run.retryToken, 0, '铸币没被扣');
+});
 
 /* ============================================================ */
 (async () => {

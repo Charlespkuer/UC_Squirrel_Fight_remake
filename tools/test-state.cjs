@@ -132,26 +132,28 @@ test('卖出道具：默认回收字典价格的一半，无价/占位价的道�
   assert.equal(small.gold, 4); assert.equal(s.goldPoint, 4); assert.equal(s.props[1], undefined);
 });
 
-test('背包的卖出弹窗：三种转化丸都能真的卖掉，且卖完立刻退回上一级（同天使/恶魔果实）', () => {
+test('背包的卖出弹窗：三种转化丸都能真的卖掉，且卖完退回背包（同天使/恶魔果实，不回主界面）', () => {
   const g = game(), S = g.State, s = S.state();
   /* 把 classic-ui.js 里**真实的 sellDialog** 抠出来，用桩跑一遍。
    * 2026-10 的 bug：函数里写的是裸的 `bagCountOf(id)`，而 classic-ui 里根本没有这个全局
    * （真名是 State.bagCountOf），于是点「卖出」第一行就 ReferenceError ——
    * **所有**道具都卖不掉（玩家看到的是敏捷/速度转化丸卖不出去）。
-   * 桩里**故意不提供** bagCountOf 这类全局，逼它自己通过 State 解析 —— 再写回裸标识符就会红。 */
+   * 桩里**故意不提供** bagCountOf 这类全局，逼它自己通过 State 解析 —— 再写回裸标识符就会红。
+   * 2026-10 第二个口径（用户点名的）：这几样卖完要退回**背包**（上一级界面），
+   * 早先误写成 home()（回主界面）—— 玩家观感是「卖一个就被踢出背包回主页」。 */
   const ui = fs.readFileSync(path.join(root, 'js/classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
   const at = ui.indexOf('function sellDialog(');
   assert.ok(at > 0, 'classic-ui.js 里应该有 sellDialog');
   const fn = ui.slice(at, ui.indexOf('\n  }', at) + 4);
   /* 「卖一个就退出去」的名单也从源码里读出来（它在 IIFE 里，没导出）——
-   * 这样断言的是**真实名单**：谁把转化丸从名单里去掉，下面回首页那条就会红。 */
+   * 这样断言的是**真实名单**：谁把转化丸从名单里去掉，下面退回背包那条就会红。 */
   const listMatch = ui.match(/const SELL_LEAVE_IDS\s*=\s*\[([^\]]*)\]/);
   assert.ok(listMatch, 'classic-ui.js 里应该有 SELL_LEAVE_IDS');
   const SELL_LEAVE_IDS = listMatch[1].split(',').map((x) => Number(x.trim())).filter((n) => Number.isFinite(n));
   for (const id of [10, 11, 12, 47, 48]) {
     assert.ok(SELL_LEAVE_IDS.includes(id), id + ' 应当在「卖一个就退出去」的名单里：' + JSON.stringify(SELL_LEAVE_IDS));
   }
-  const opened = [], left = { closed: 0, home: 0 };
+  const opened = [], left = { closed: 0, home: 0, back: 0 };
   const ctx = {
     State: S, propMap: g.propMap, SELL_LEAVE_IDS,
     esc: (v) => String(v == null ? '' : v), icon: () => '', toast: () => {}, $: () => null,
@@ -164,10 +166,10 @@ test('背包的卖出弹窗：三种转化丸都能真的卖掉，且卖完立�
   vm.createContext(ctx);
   const sellDialog = vm.runInContext(fn + '\nsellDialog;', ctx, { filename: 'sellDialog.js' });
   /* 三种转化丸（120）与天使果实 47（100）走同一条路径：点「卖出」→ 扣 1 个 / 加钱 /
-   * 关掉卖出弹窗 / 退回上一级界面（home()，与两种果实完全一致）。 */
+   * 关掉卖出弹窗 / 退回**背包**（调用 after()，也就是背包那条重绘回调）；**不能**调 home()。 */
   for (const [id, gold] of [[10, 120], [11, 120], [12, 120], [47, 100]]) {
-    s.props[id] = 2; s.goldPoint = 0; opened.length = 0; left.closed = 0; left.home = 0;
-    sellDialog(id, () => {});
+    s.props[id] = 2; s.goldPoint = 0; opened.length = 0; left.closed = 0; left.home = 0; left.back = 0;
+    sellDialog(id, () => { left.back++; });
     assert.equal(opened.length, 1, id + ' 应当打开卖出弹窗');
     assert.match(opened[0].title, /卖出道具/);
     assert.match(opened[0].content, new RegExp('可回收 ' + gold), id + ' 弹窗里要写清回收价');
@@ -177,8 +179,76 @@ test('背包的卖出弹窗：三种转化丸都能真的卖掉，且卖完立�
     assert.equal(S.state().props[id], 1, id + ' 卖一个扣一个');
     assert.equal(S.state().goldPoint, gold, id + ' 卖一个给 ' + gold + ' 金松果');
     assert.equal(left.closed, 1, id + ' 卖完要关掉卖出弹窗');
-    assert.equal(left.home, 1, id + ' 卖完要立刻退回上一级界面（与天使/恶魔果实同一条路径）');
+    assert.equal(left.back, 1, id + ' 卖完要退回背包（调用 after() 重绘背包）');
+    assert.equal(left.home, 0, id + ' 卖完**不能**回主界面（home() 是回主页，不是「上一级界面」）');
   }
+});
+
+test('橙装的「镶嵌 / 取下宝石」必须真的出现在详情弹窗里（按钮行不能被挤到画布外）', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.level = 70; s.goldPoint = 100000;
+  /* 用真实融合做一件橙装：三件同部位同品质（紫）→ 传说。
+   * 2026-10 用户报「橙装的镶嵌与取下宝石功能消失了」——代码里其实一直都在，
+   * 是**按钮排被挤出可视区**：橙装详情比普通装备多一颗「镶嵌/卸下宝石（5金）」，
+   * 加上「星标」后按钮从一行变两行，而弹窗 max-height:625px 会把第二行顶到画布
+   * （1170x690）下沿之外（用 headless Chrome 量过：第二行 top=716 bottom=780）。
+   * 所以这条用例同时钉住两件事：①按钮真的生成；②正文有限高，按钮排不会被顶出去。 */
+  const all = [];
+  g.ctx.__gears = all;
+  vm.runInContext('gearMap.each(function (k, v) { __gears.push({ id: Number(v.id), type: Number(v.type) }); })', g.ctx);
+  const byPartQ = new Map();
+  for (const it of all) {
+    const key = it.type + ':' + S.gearPartQuality(it.id);
+    if (!byPartQ.has(key)) byPartQ.set(key, []);
+    byPartQ.get(key).push(it.id);
+  }
+  let orangeKey = null;
+  for (const [key, ids] of byPartQ) {
+    if (!key.endsWith(':3') || ids.length < 3) continue;
+    const keys = ids.slice(0, 3).map((id) => S.addGear(id, S.randomExt(3)).key);
+    const r = S.mergeGears(keys);
+    if (r.ok) { orangeKey = r.gear.key; break; }
+  }
+  assert.ok(orangeKey, '应当能靠三件紫装融合出一件橙装');
+  assert.equal(s.gears.find((x) => x.key === orangeKey).orange, true, '融合产物必须带 orange 标记（否则界面不给宝石按钮）');
+
+  /* 把真实的 openGear 抠出来跑：没宝石时要给「镶嵌宝石」，镶上之后要变「卸下宝石」。 */
+  const ui = fs.readFileSync(path.join(root, 'js/classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  const at = ui.indexOf('function openGear(key)');
+  assert.ok(at > 0, 'classic-ui.js 里应该有 openGear');
+  const fn = ui.slice(at, ui.indexOf('\n  }', at) + 4);
+  const openGear = (key) => {
+    const seen = [];
+    const ctx = {
+      State: S, propMap: g.propMap, esc: (v) => String(v == null ? '' : v), icon: () => '',
+      gearImg: () => '<img>', setBonusBlock: () => '', toast: () => {}, notice: () => {},
+      gearPage: 0, openGears: () => {},
+      modal: (title, content, buttons) => { seen.push({ title, buttons }); return { element: { classList: { add() {} } } }; },
+    };
+    vm.createContext(ctx);
+    const f = vm.runInContext(fn + '\nopenGear;', ctx, { filename: 'openGear.js' });
+    f(key);
+    return (seen[0] || { buttons: [] }).buttons.map((b) => b.label);
+  };
+  const noGem = openGear(orangeKey);
+  assert.ok(noGem.some((l) => l.indexOf('镶嵌宝石') === 0), '橙装详情里必须有「镶嵌宝石」：' + JSON.stringify(noGem));
+  assert.ok(!noGem.some((l) => /（5金）|\(5金\)/.test(l)), '宝石按钮文案不带「（5金）」：' + JSON.stringify(noGem));
+  s.props[101] = 1;
+  assert.equal(S.socketGem(orangeKey, 101).ok, true, '镶嵌应当成功');
+  const withGem = openGear(orangeKey);
+  assert.ok(withGem.some((l) => l.indexOf('卸下宝石') === 0), '镶过宝石后详情里必须有「卸下宝石」：' + JSON.stringify(withGem));
+  assert.ok(!withGem.some((l) => /（5金）|\(5金\)/.test(l)), '宝石按钮文案不带「（5金）」：' + JSON.stringify(withGem));
+
+  /* ② 版式契约：详情弹窗的按钮**保持固定尺寸、只靠间距自适应**（用户口径 2026-10：
+   *    「固定 UI 的长宽比，一行不同数量调整间距就行」），并且正文限高 ——
+   *    两者合起来才能保证宝石按钮不会被画布裁掉。 */
+  const css = fs.readFileSync(path.join(root, 'css/classic-refine.css'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(css, /\.gear-detail[\s\S]{0,400}?\.modal-body[\s\S]{0,200}?max-height:\s*\d+px/,
+    'classic-refine.css 里必须给装备详情弹窗的正文限高（不然按钮会被挤到画布外）');
+  assert.match(css, /\.gear-detail[\s\S]{0,400}?\.modal-buttons[^{}]*\{[^}]*flex-wrap:\s*nowrap/,
+    '装备详情的按钮排要明确 nowrap（用户口径：一行放得下就别换行）');
+  assert.ok(!/\.gear-detail[\s\S]{0,400}?\.modal-buttons[^{}]*\{[^}]*flex:\s*1\s+1\s+0/.test(css),
+    '按钮不能被拉成等宽满填充（要保留游戏那套固定尺寸，只调间距）');
 });
 
 test('调试台「重置每日与体力计时」也重置徒弟日供（含「昨天必须有收益流水」那一道门）', () => {
@@ -325,6 +395,51 @@ test('好友系统：随机 NPC 也能加为好友，重名/满员有提示，�
   assert.equal(S.removeFriend('老友').ok, true);
   assert.equal(S.friendList().length, 0);
   assert.equal(S.removeFriend('老友').ok, false);
+});
+
+test('存档往返：剧情「只播一次」的记账与剧情模式开关必须保留（退出游戏再重进不能变回第一次）', () => {
+  const g = game(), S = g.State;
+  /* 用户 2026-10 报的 bug：无尽塔玩到一半退出游戏再重进后，商人的第一次文案、第一次失去烙印、
+   * 第一次遇巡视全都重播一遍 —— 根因就是 normalizeSave 里那份 endless 白名单没列
+   * `storySeen` / `storyOn`，重载时被整包丢掉。这条用例把「存档往返要留住它们」钉死。 */
+  const run = { layer: 7, plan: [{ kind: 'battle' }], idx: 0 };
+  g.storage.set(S.saveKey, JSON.stringify(Object.assign(JSON.parse(g.storage.get(S.saveKey)), {
+    endless: { best: 10, bestLayer: 7, storySeen: { merchant: true, patrolGate: true, layer31: true, 老剧情名: true }, storyOn: false, run: run },
+  })));
+  S.load();
+  const e = S.state().endless;
+  assert.equal(e.storySeen.merchant, true, '第一次遇商人的记账要留着');
+  assert.equal(e.storySeen.patrolGate, true, '第一次遇巡视的记账要留着');
+  assert.equal(e.storySeen.layer31, true, '第一次失去烙印的记账要留着');
+  assert.equal(e.storySeen['老剧情名'], true, '旧档里已经不存在的剧情名也照留（无害，不该被清洗掉）');
+  assert.equal(S.state().endless.storyOn, false, '挑战模式的开关也要跟着存档走');
+  assert.equal(S.storyEnabled ? S.storyEnabled() : S.state().endless.storyOn !== false, false, '读出来仍然是挑战模式');
+  /* 再存一次：往返之后不许把记账洗掉（以前第一次保存就会把它们写没）。 */
+  S.save();
+  S.load();
+  assert.deepEqual(Object.keys(S.state().endless.storySeen).sort(), ['layer31', 'merchant', 'patrolGate', '老剧情名'],
+    '第二遍存/读之后记账仍在：' + JSON.stringify(S.state().endless.storySeen));
+  /* 形状清洗：坏值（字符串 / 数字 0）不当成「已播过」，也不该留在存档里。 */
+  g.storage.set(S.saveKey, JSON.stringify(Object.assign(JSON.parse(g.storage.get(S.saveKey)), {
+    endless: { storySeen: { a: true, b: 'yes', c: 0, d: 1 }, run: run },
+  })));
+  S.load();
+  assert.deepEqual(Object.keys(S.state().endless.storySeen).sort(), ['a', 'd'],
+    '只认「真」的记账：' + JSON.stringify(S.state().endless.storySeen));
+  /* 挑战塔的「本层免费再战一次」同样不能在重载后丢。 */
+  g.storage.set(S.saveKey, JSON.stringify(Object.assign(JSON.parse(g.storage.get(S.saveKey)), {
+    tower: { maxLayer: 3, retry: { layer: 3, date: '2026-10-12' }, run: run },
+  })));
+  S.load();
+  /* ⚠ 这些对象来自 vm 上下文，原型不同：用 deepEqual 会因原型比较而误报，逐字段比。 */
+  const retry = S.state().tower.retry;
+  assert.equal(retry && retry.layer, 3, '免费重试标记要保留，实测 ' + JSON.stringify(retry));
+  assert.equal(retry && retry.date, '2026-10-12', '免费重试标记的日期也要留着：' + JSON.stringify(retry));
+  g.storage.set(S.saveKey, JSON.stringify(Object.assign(JSON.parse(g.storage.get(S.saveKey)), {
+    tower: { maxLayer: 3, retry: { layer: 0, date: 'x' } },
+  })));
+  S.load();
+  assert.equal(S.state().tower.retry, null, '坏掉的 retry（层号 0）当作没有');
 });
 
 test('每日任务种类够多（16 种挑 4 条），计数器覆盖全部任务', () => {
@@ -1003,6 +1118,27 @@ test('高速行动不会饿死较慢的一方，速度翻倍约行动两倍', ()
   const result = g.Sim.simulate(fighter({ speed: 200, hp: 100000 }), fighter({ speed: 100, hp: 100000 }));
   const counts = [0, 0]; result.rounds.forEach((r) => counts[r.attacker]++);
   assert.equal(counts[0], 80); assert.equal(counts[1], 40);
+});
+
+test('无敌模式：玩家血量只增不减（残血进场也先顶满），超时不会按血量比例判负', () => {
+  /* 2026-10 用户口径：开「无敌模式」后在无尽塔里还会被打死 —— 根因是以前只在几条主路径上
+   * 兜到 1 点血，枯泉吸血 / 持续伤害 / 自伤这些旁路照旧掉血，血量被打到 1 之后
+   * 120 手超时会按**血量比例**判负。现在给玩家侧装「只增不减」的 hp 访问器。 */
+  const g = game();
+  g.math.random = () => 0.5;
+  /* 对照组：没有无敌时，枯泉（trialDry）会把玩家的血一路吸干（塔里还有连战继承的残血）。 */
+  const plain = g.Sim.simulate(fighter({ hp: 30, maxHp: 100, power: 1 }),
+    fighter({ hp: 100000, power: 1, mech: ['trialDry'] }));
+  assert.equal(plain.rounds.some((r) => r.hpAfter[0] < 30), true, '对照组：血量确实会掉');
+  /* 开无敌：残血 30/100 进场 → 先顶到上限，之后任何掉血都不写进计数器。 */
+  g.ctx.Debug = { enabled: (key) => key === 'godMode' };
+  const god = g.Sim.simulate(fighter({ hp: 30, maxHp: 100, power: 1 }),
+    fighter({ hp: 100000, power: 1, mech: ['trialDry'] }));
+  assert.equal(god.maxHp[0], 100, '上限不变');
+  assert.equal(god.rounds.every((r) => r.hpAfter[0] === 100), true,
+    '血量计数器全程保持 100：' + JSON.stringify(god.rounds.map((r) => r.hpAfter[0]).slice(0, 12)));
+  assert.equal(god.rounds.every((r) => r.godSave !== true), true, '不会再走「兜到 1 点血」那条老路');
+  assert.equal(god.winner, 0, '吸不动 + 超时按血量比例也是我方胜');
 });
 
 test('师父驾到使用师父等级，下一次普通攻击保留必中', () => {

@@ -42,9 +42,29 @@
 
 | 类别 | 文件 |
 |---|---|
-| 构建 | `build-release.ps1`（**一键出包**：版本号 patch +1 → 清上一版旧包 → exe/安装包/APK → 清 `target\` 等 5~10 GB 缓存；`scripts\打包.cmd` / `scripts\清缓存.cmd` 是它的双击入口 —— 双击入口一律放 `scripts\`，根目录不放 `.cmd`，薄壳会自动挑 pwsh/powershell 并把参数原样转进来）、`build-tauri-app.cjs`（桌面 exe / 安装包）、`build-tauri-web.cjs`（打包前暂存前端）、`build-apk.ps1`（安卓 APK） |
-| 回归 | `test-*.cjs`（主题套件）、`test-battle.js`、`check-asset-paths.cjs`（资源引用检查） |
-| 数值 / 数据 | `stage-balance.cjs` |
-| 指南 | `publish-guide.md`、`tauri-guide.md` |
+| 构建 | `build-release.ps1`（**一键出包**：版本号 patch +1 → 清上一版旧包 → exe/安装包/APK → 清 `target\` 等 5~10 GB 缓存；`scripts\打包.cmd` / `scripts\清缓存.cmd` 是它的双击入口 —— 双击入口一律放 `scripts\`，根目录不放 `.cmd`，薄壳会自动挑 pwsh/powershell 并把参数原样转进来）、`build-tauri-app.cjs`（桌面 exe / 安装包；`--web` / `--web --check` = 生成 / 校验前端快照 `src-tauri/web`）、`build-apk.ps1`（安卓 APK） |
+| 回归 | `test-*.cjs`（主题套件）、`test-battle.js`、`check-asset-paths.cjs`（资源引用检查）、`check-encodings.cjs`（文本编码 / `.ps1` BOM 体检，CI 也跑） |
+| 全流程对账（**不是** `test-*.cjs`，所以不进 CI：跑一次几分钟，按需手跑） | `verify.cjs` —— 三个验证合在一个入口：`story`（剧情机器人：从第 1 层爬到上千层，逐条核对 `docs/剧情触发条件.md`）、`layer100`（整百层那两段的定向回归：22 种「进层前」局面 × 轮数）、`stacking`（同名叠加审计：叠层 / 上限 / 效果随层数放大） |
+| 数值 / 数据 | `stage-balance.cjs`、`gen-vendor-data.cjs`（从 `references/orig/` 重新生成 `js/gamedict.js`；**非运行时**，缺参考目录时明确报错） |
+| 指南 | `build-guide.md`（构建与发布：上半篇 = 跨平台运行 / GitHub 发布流程，下半篇 = 桌面壳 Tauri 编译） |
+
+> `verify.cjs` 是 2026-10 第一百零一批加的三个验证工具（用户要求「充分测试 + 写应当条件文档并与实测对照」），
+> 第一百零四批**合并成一个入口**（三个原来各带一套一模一样的 vm 引导）；它是**长期要反复跑**的验证工具，
+> 所以按上面的门槛留在 `tools/`；一次性探针仍然写 `out/`、用完即删。
+> 命名故意不带 `test-` 前缀 —— CI 枚举的是 `tools/test-*.cjs`，它跑一轮要几分钟，交给人工按需跑。
+> 同一批还把 `publish-guide.md` + `tauri-guide.md` 合成 `build-guide.md`、
+> 把 `build-tauri-web.cjs` 并进 `build-tauri-app.cjs --web`（9 个文件 → 3 个）。
+
+> ⚠️ **别用 PowerShell 的文本 cmdlet 改源码**：`Get-Content` / `Set-Content` / `Add-Content` 在没有
+> BOM 的文件上会按系统 ANSI（中文机器 = GBK）解码再写回，**中文会被写坏成乱码 / 非法 UTF-8**
+>（2026-10 真踩过两次：一次把 `js/tower-plot.js` 整份写坏、一次把 `js/debug.js` 的注释写坏）。
+> 改文件一律用编辑工具（或 Node 读写 Buffer）；确实要用 PowerShell 复制/删除才用 `Copy-Item` / `Remove-Item`。
+
+> ⚠️ **`.ps1` 含中文就必须带 UTF-8 BOM**（另一回事：文件本身是合法 UTF-8，但 **Windows PowerShell 5.1
+> 对没有 BOM 的 `.ps1` 按 ANSI 解码**，中文变乱码、甚至把注释块/字符串里的引号拆坏 → 整个脚本解析失败）。
+> `打包.cmd` 在没有 pwsh 的机器上正是回退到 5.1，所以这条直接决定出包能不能跑。
+> **编辑工具重写 `.ps1` 时会把 BOM 抹掉**（2026-10 就是这样把 `tools/build-release.ps1` 弄出 27 个语法错的），
+> 改完 `.ps1` 一定复查：`node tools/check-encodings.cjs`（CI 也跑它；它会指出「含中文却没有 UTF-8 BOM」，
+> 并给出补 BOM 的一行命令）。
 
 > 文档类内容不要写在这里：改动要点写进 `docs/更新记录.md`（见 `docs/AGENTS.md`）。

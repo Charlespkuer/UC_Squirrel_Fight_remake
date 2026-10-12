@@ -30,6 +30,13 @@ jobs:
         shell: bash
         run: node tools/check-asset-paths.cjs
 
+      # 编码体检：.ps1 含中文必须有 UTF-8 BOM（Windows PowerShell 5.1 对无 BOM 的文件按 ANSI 解码，
+      # 中文会乱码、甚至把注释块拆坏导致整脚本解析失败 —— 2026-10 真踩过：打包脚本因此红了 27 个语法错）；
+      # 顺带查所有文本文件是不是合法 UTF-8（以前出过 PowerShell 写回 GBK 把源码写坏的事）。
+      - name: 编码体检
+        shell: bash
+        run: node tools/check-encodings.cjs
+
       - name: 单元与集成测试
         shell: bash
         run: |

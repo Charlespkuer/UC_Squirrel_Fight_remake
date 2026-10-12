@@ -1,6 +1,6 @@
 /* 桌面版的构建入口（以「本地尽量轻」为目标）。
  *
- *   node tools/build-tauri-app.cjs            # 编译 → 把 exe 拷到 src-tauri/dist/ 和**游戏根目录**（约 3 MB）
+ *   node tools/build-tauri-app.cjs            # 编译 → 把 exe 放到**游戏根目录**（约 3 MB，Windows 双击入口）
  *   node tools/build-tauri-app.cjs --clean    # 编译 → 拷贝 → cargo clean（删掉 target/，约 2.8 GB）
  *   node tools/build-tauri-app.cjs --installer # 另打一个 NSIS 安装包（临时暂存 web/，打完就删）
  *   node tools/build-tauri-app.cjs --web      # 只生成前端快照 src-tauri/web（打安装包前用）
@@ -9,9 +9,16 @@
  * 为什么要有这个脚本：
  *   Rust 的 target/ 是编译中间产物，动辄 2~3 GB，但**运行完全不需要**它；
  *   真正要留的只有 squirrel_fight.exe（轻壳，几 MB，前端不在里面，
- *   游戏根目录那份就是 Windows 的双击入口；src-tauri/dist/ 里那份是留档，两者同一个文件）
- *   窗口自带迷你服务器，直接读游戏目录里的 index.html / images / audio）。
- *   所以平时用 --clean 构建，磁盘上就只多一个几 MB 的 exe。
+ *   自带迷你服务器、直接读游戏目录里的 index.html / images / audio）。
+ *
+ * 这个 exe 和「安装包」是两条不同的用法，别互相替代：
+ *   · 轻壳 exe（游戏根目录，本脚本的产出）—— **免安装**：双击它就用**原生窗口**读当前游戏目录
+ *     （存档就在旁边 `save/progress.json`；`scripts\启动游戏.cmd` 也是先找它，找不到才退回浏览器）。
+ *     便携包（GitHub 的 squirrel-web-* zip）里默认**不带**它，想用原生窗口就把它丢进游戏根目录。
+ *   · NSIS 安装包（--installer）—— **自带前端**：装到 Program Files 那种只读位置也能单独跑，
+ *     存档退回 %APPDATA%；给别人「下载→安装→双击」时用它。
+ *   【2026-10 瘦身】以前编译完还会往 src-tauri\dist\ 再拷一份同一个 exe 当「留档」——
+ *   没有任何流程读它（便携包不收、tauri.yml 发布的是安装包），纯粹是 3 MB 重复文件，已去掉。
  *
  * 安装包（给别人装的那种）才需要把前端一起带上：那一版用
  * tauri.bundle.conf.json 把 frontendDist 指到临时生成的 web/，打完这个脚本会把 web/ 删掉。
@@ -42,7 +49,6 @@ function findRoot(start) {
 const ROOT = findRoot(__dirname);
 const TAURI = path.join(ROOT, 'src-tauri');
 const DIST = path.join(TAURI, 'dist');
-const APP = path.join(DIST, 'squirrel_fight.exe');
 /** Windows 双击入口：游戏根目录下的同名 exe（和 scripts/、css/ 同级）。 */
 const ROOT_APP = path.join(ROOT, 'squirrel_fight.exe');
 const WEB = path.join(TAURI, 'web');
@@ -228,10 +234,9 @@ if (!fs.existsSync(built)) {
   console.error('[x] 没找到产物：' + built);
   process.exit(1);
 }
-fs.mkdirSync(DIST, { recursive: true });
-fs.copyFileSync(built, APP);
-console.log('✓ 已生成 ' + path.relative(ROOT, APP) + '（' + mb(fs.statSync(APP).size) + '）');
-// 游戏根目录也放一份：那才是 Windows 的双击入口（scripts\启动游戏.cmd 也会先找它）
+/* 【2026-10 用户口径】只放**游戏根目录**这一份（Windows 双击入口，scripts\启动游戏.cmd 先找它）。
+ * 以前还会往 src-tauri\dist\ 再拷一份「留档」，但没有任何流程读它（便携包不收、tauri.yml 发的是
+ * 安装包），纯重复文件 —— 去掉。安装包（--installer）走的是 Tauri 自己的 bundle，不依赖这份。 */
 fs.copyFileSync(built, ROOT_APP);
 console.log('✓ 已更新 ' + path.relative(ROOT, ROOT_APP) + '（' + mb(fs.statSync(ROOT_APP).size) + '，双击入口）');
 
@@ -244,6 +249,7 @@ if (INSTALLER) {
     'build', '--config', 'tauri.bundle.conf.json', '--bundles', process.platform === 'win32' ? 'nsis' : 'dmg,app'], { cwd: TAURI });
   const bundleDir = path.join(TAURI, 'target', 'release', 'bundle');
   if (fs.existsSync(bundleDir)) {
+    fs.mkdirSync(DIST, { recursive: true });
     for (const rel of walk(bundleDir)) {
       const src = path.join(bundleDir, rel);
       const dest = path.join(DIST, path.basename(src));
@@ -273,7 +279,6 @@ if (CLEAN) {
 
 console.log('');
 console.log('桌面版目录现在是：');
-console.log('  ' + path.relative(ROOT, ROOT_APP) + '  ' + mb(fs.statSync(ROOT_APP).size) + '（游戏根目录的双击入口）');
-console.log('  ' + path.relative(ROOT, APP) + '  ' + mb(fs.statSync(APP).size) + '（同一个文件的留档副本）');
-console.log('  双击根目录那个 exe 就会开原生窗口；脚本入口是 scripts\\启动游戏.cmd（兜底）。');
+console.log('  ' + path.relative(ROOT, ROOT_APP) + '  ' + mb(fs.statSync(ROOT_APP).size) + '（游戏根目录的双击入口，就这一份）');
+console.log('  双击它就会开原生窗口（免安装、读当前游戏目录）；脚本入口是 scripts\\启动游戏.cmd。');
 if (!CLEAN) console.log('  想立刻回收编译缓存：node tools/build-tauri-app.cjs --clean（会重新编译一次）');

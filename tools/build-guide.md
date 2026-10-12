@@ -221,8 +221,10 @@ node tools/test-battle.js                 # 动画回归（可选依赖 @napi-rs
 才退回「起服务器 + 浏览器应用窗口」。已经开着一个桌面版时再双击只会提示「已经在运行」。
 
 原生版按这个顺序找：`<游戏根>\squirrel_fight.exe` → `scripts\squirrel_fight.exe` →
-`src-tauri\dist\squirrel_fight.exe` → `src-tauri\target\release\squirrel_fight.exe`
+`src-tauri\target\release\squirrel_fight.exe`
 （macOS 是 `.app` 包或 `src-tauri/dist/squirrel_fight`），加 `--browser` 可强制走浏览器路线。
+> 2026-10 起打包脚本**不再**往 `src-tauri\dist\` 放一份 exe 副本（便携包不收它、发布的是安装包，
+> 纯重复文件）；正式产物就一个：游戏根目录的 `squirrel_fight.exe`。
 
 ```bash
 # macOS / Linux（启动器住在 scripts/ 里）
@@ -331,9 +333,9 @@ src-tauri/
 轻壳读的就是游戏目录里的文件，理论上不会旧；要核对（或排查问题时）可以问它一句：
 
 ```powershell
-# 1) 带调试端口启动
+# 1) 带调试端口启动（正式产物就是游戏根目录这一份）
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'
-src-tauri\dist\squirrel_fight.exe
+.\squirrel_fight.exe
 # 2) 另开终端
 # 需要查运行时状态时，用 Chrome/Edge 的 devtools 协议连 9222 端口自行检查
 # → http://127.0.0.1:1362/index.html | file | save/progress.json

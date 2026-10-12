@@ -278,7 +278,11 @@ function Expand-Name($tpl) {
 }
 
 $want = [ordered]@{}
-if (-not $SkipExe) { $want['exe'] = Join-Path $DIST (Expand-Name $ExeName) }
+# 【2026-10 用户口径】轻壳 exe 只放**游戏根目录**（build-tauri-app.cjs 的产出，免安装时双击它开原生窗口）；
+# 只有在显式改了 -ExeName（不再叫 squirrel_fight.exe）时才往 dist 另存一份，免得去动根目录那个入口。
+if (-not $SkipExe -and (Expand-Name $ExeName) -ne 'squirrel_fight.exe') {
+  $want['exe'] = Join-Path $DIST (Expand-Name $ExeName)
+}
 if (-not $SkipInstaller) { $want['setup'] = Join-Path $DIST (Expand-Name $InstallerName) }
 if (-not $SkipApk) { $want['apk'] = Join-Path $DIST (Expand-Name $ApkName) }
 $wantList = @($want.Values)
@@ -373,17 +377,19 @@ if ((-not $SkipExe) -or (-not $SkipInstaller)) {
   if (-not $SkipInstaller) { $exeArgs += '--installer' }
   Invoke-Step '编 Windows 轻壳 exe（+ NSIS 安装包）' $node $exeArgs
 
-  # 轻壳 exe：build-tauri-app.cjs 固定写成 dist\squirrel_fight.exe，按模板改名
+  # 轻壳 exe：build-tauri-app.cjs 只写**游戏根目录**那一份（免安装双击入口，便携包里也用它）。
+  # dist 里不再放同名副本 —— 没有任何流程读它（便携包不收、tauri.yml 发布的是安装包）。
   if (-not $SkipExe) {
-    $built = Join-Path $DIST 'squirrel_fight.exe'
-    if (-not (Test-Path $built)) { Die "没找到轻壳 exe：$built" }
-    $dest = $want['exe']
-    if ($built -ne $dest) {
+    $rootExe = Join-Path $ROOT 'squirrel_fight.exe'
+    if (-not (Test-Path $rootExe)) { Die "没找到轻壳 exe：$rootExe" }
+    if ($want.Contains('exe')) {
+      $dest = $want['exe']
       if (Test-Path $dest) { Remove-Item -LiteralPath $dest -Force }
-      Move-Item -LiteralPath $built -Destination $dest -Force
+      Copy-Item -LiteralPath $rootExe -Destination $dest -Force
+      Ok "exe → $(Split-Path -Leaf $dest)（$(Fmt-Size (Get-Item $dest).Length)）"
+    } else {
+      Ok "exe → 游戏根目录 squirrel_fight.exe（$(Fmt-Size (Get-Item $rootExe).Length)，双击入口）"
     }
-    Ok "exe → $(Split-Path -Leaf $dest)（$(Fmt-Size (Get-Item $dest).Length)）"
-    Note '仓库根目录那份 squirrel_fight.exe 也已同步更新（Windows 双击入口）'
   }
 
   # 安装包：Tauri 的 NSIS 产物名不固定，取 dist 里最新的 *-setup.exe

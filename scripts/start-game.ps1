@@ -103,18 +103,18 @@ if ($args -contains '--stop') {
 # 服务器供起来，存档也走游戏目录的 save/progress.json，所以和网页版是同一份代码、
 # 同一个存档文件。
 # 名字与位置：**正式入口是游戏根目录的 squirrel_fight.exe**（双击它就直接开原生窗口，
-# 不需要走本脚本）；这里把本脚本同目录与旧的自编译输出目录也列上，纯粹为了兼容
+# 不需要走本脚本）；这里把本脚本同目录与 target/release 也列上，纯粹为了兼容
 # 以前摆放过 / 手动编译出来的产物。旧文件名 ssdz-classic.exe 也继续认（改名前的产物）。
+# 【2026-10】不再列 `src-tauri\dist\squirrel_fight.exe`：打包脚本已不再往 dist 放那份副本
+#（没有任何流程读它，纯粹 3 MB 重复文件），正式产物就在游戏根目录。
 # 原生窗口偶尔会在启动几秒内自己退出（WebView2 初始化被打断，实测大约十次里有一两次），
 # 所以启动后确认一下它还活着；连着三次都不行就自动退回浏览器路线，而不是丢给用户一个空白。
 $desktop = @(
   (Join-Path $root 'squirrel_fight.exe'),
   (Join-Path $here 'squirrel_fight.exe'),
-  (Join-Path $root 'src-tauri\dist\squirrel_fight.exe'),
   (Join-Path $root 'src-tauri\target\release\squirrel_fight.exe'),
   (Join-Path $root 'ssdz-classic.exe'),
   (Join-Path $here 'ssdz-classic.exe'),
-  (Join-Path $root 'src-tauri\dist\ssdz-classic.exe'),
   (Join-Path $root 'src-tauri\target\release\ssdz-classic.exe')
 ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if ((-not $forceBrowser) -and $desktop) {

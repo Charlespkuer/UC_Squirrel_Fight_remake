@@ -2445,6 +2445,63 @@ hr('18. 2026-10 跳过键的代价（塔）：跳过的场次在层结算里各�
 }
 
 /* ============================================================ */
+check('剧情页文字太长时会自动往下翻：最后一行打出来必须能看见', () => {
+  /* 用**真实实现**：从 js/tower-plot.js 里抠出 storyScrollToCursor，配一个会算几何的假文字框。
+   * 2026-10 用户口径：一页文字太多时，最后一行打完停在屏幕外 —— 剧情页要能自动下翻。
+   * 注意 storyPaint 是整块重写 innerHTML（浏览器会把滚动位置归零），所以必须**每次重画都带一次**。 */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'tower-plot.js'), 'utf8').replace(/\r\n/g, '\n');
+  const at = src.indexOf('function storyScrollToCursor');
+  assert.ok(at > 0, 'js/tower-plot.js 里应当有 storyScrollToCursor');
+  let i = src.indexOf('{', at), depth = 0, end = -1;
+  for (; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') { depth -= 1; if (!depth) { end = i + 1; break; } }
+  }
+  assert.ok(end > at, '应当能抠出 storyScrollToCursor 的函数体');
+  const storyScrollToCursor = new Function(src.slice(at, end) + '; return storyScrollToCursor;')();
+
+  /* ① 长页：可视高 300、内容高 900，当前行在 700~740（末尾在屏幕外）
+   *    → 应当滚到 700+40+8-300 = 448 */
+  const long = { scrollTop: 0, clientHeight: 300, scrollHeight: 900,
+    querySelector: (s) => (s === '.tower-story-line.now' ? { offsetTop: 700, offsetHeight: 40 } : null) };
+  storyScrollToCursor(long);
+  assert.equal(long.scrollTop, 448, '当前行底部要带进可视区（实测 ' + long.scrollTop + '）');
+  /* 再调一次不能越滚越远（幂等） */
+  storyScrollToCursor(long);
+  assert.equal(long.scrollTop, 448, '重复调用应当稳定：' + long.scrollTop);
+
+  /* ② 短页（装得下）：不该乱滚 */
+  const short = { scrollTop: 0, clientHeight: 300, scrollHeight: 300,
+    querySelector: () => ({ offsetTop: 100, offsetHeight: 40 }) };
+  storyScrollToCursor(short);
+  assert.equal(short.scrollTop, 0, '文字装得下时不该滚动：' + short.scrollTop);
+
+  /* ③ 到底了也不能越界 */
+  const tall = { scrollTop: 0, clientHeight: 300, scrollHeight: 1200,
+    querySelector: () => ({ offsetTop: 2000, offsetHeight: 40 }) };
+  storyScrollToCursor(tall);
+  assert.equal(tall.scrollTop, 900, '最多只能滚到 scrollHeight-clientHeight：' + tall.scrollTop);
+
+  /* ④ 接线：打字机每次重画后要带一次；整页重画（tower-ui 的 page() 之后）也要补一次 */
+  const paint = src.slice(src.indexOf('function storyPaint'), src.indexOf('function storyTick'));
+  assert.match(paint, /storyScrollToCursor\(box\)/, 'storyPaint 每打一个字都要把当前行带回可视区');
+  assert.match(src, /afterRender:\s*storyAfterRender/, '要把 storyAfterRender 导出成 afterRender（整页重画后补滚动用）');
+  const uiSrc = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(uiSrc, /TowerPlot\.afterRender\(\)/, 'tower-ui 画完 page() 之后要调一次 afterRender');
+
+  /* ⑤ 版式：文字区不能用 justify-content:center（溢出时开头几行滚不上去），
+   *    改用「首尾 auto 外边距」那套居中写法。 */
+  const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8').replace(/\r\n/g, '\n');
+  const box = (css.match(/\.tower-story-text\s*\{[^}]*\}/) || [''])[0];
+  assert.ok(!/justify-content:\s*center/.test(box),
+    '剧情文字区不该用 justify-content:center（文字溢出时开头几行会滚不到）：' + box);
+  assert.match(css, /\.tower-story-text\s*>\s*\.tower-story-line:first-child\s*\{[^}]*margin-top:\s*auto/,
+    '文字装得下时要靠 margin-top:auto 保持垂直居中');
+  assert.match(css, /\.tower-story-text\s*>\s*\.tower-story-line:last-child\s*\{[^}]*margin-bottom:\s*auto/,
+    '文字装得下时要靠 margin-bottom:auto 保持垂直居中');
+});
+
+/* ============================================================ */
 (async () => {
   console.log('\n铸币商店回归：' + pass + ' 通过 / ' + fail + ' 失败');
   process.exit(fail ? 1 : 0);

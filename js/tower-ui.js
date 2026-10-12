@@ -1041,6 +1041,9 @@
        * 也就是塔身那一列的下方）—— 不要塞进「放弃本局 / 继续战斗」那一行。 */
       TowerPlot.modeButtonHtml() + '</div>';
     const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
+    /* 【2026-10 用户口径】剧情页文字太长时要能自动下翻：整页重画会把文字区的滚动位置
+     * 归零，而这一屏可能已经打完（没有下一次打字 tick 来带滚动），所以在画完之后同步补一次。 */
+    if (typeof TowerPlot.afterRender === 'function') TowerPlot.afterRender();
     bindTips(p);
     if (info.run) fillFoeArt(p, Tower.planInfo ? Tower.planInfo('endless') : Tower.preview(info.run.layer, info.run.salt, true));
     back(p, () => C().home());

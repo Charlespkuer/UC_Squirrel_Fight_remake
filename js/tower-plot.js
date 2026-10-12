@@ -571,6 +571,23 @@
       '<span class="tower-story-caret" aria-hidden="true"></span></p>');
     return out.join('');
   }
+  /** 让「正在打的那一行」始终完整露出来 —— 剧情页文字太长时自动往下带（用户口径 2026-10）。
+   *
+   *  为什么必须每次重画都带一次：`storyPaint()` 是**整块重写** `innerHTML`，
+   *  浏览器会把滚动位置归零；不重新带一次，长剧情页的末尾几行就永远停在屏幕外
+   *  （用户实测：最后一行打出来了，但看不见）。
+   *
+   *  只往下带、不动已经能看见的部分：算「当前行底部 + 一点余量」超出可视区多少就滚多少，
+   *  并夹在 `0 ~ scrollHeight-clientHeight` 之间；文字装得下时目标 ≤ 0 → 回到顶部（居中排版由 CSS 负责）。 */
+  function storyScrollToCursor(box) {
+    if (!box || typeof box.scrollTop !== 'number') return;
+    const now = typeof box.querySelector === 'function' ? box.querySelector('.tower-story-line.now') : null;
+    if (!now) return;
+    const bottom = Number(now.offsetTop || 0) + Number(now.offsetHeight || 0) + 8;   // 8 = 给光标留一点呼吸
+    const max = Math.max(0, Number(box.scrollHeight || 0) - Number(box.clientHeight || 0));
+    const want = Math.max(0, Math.min(bottom - Number(box.clientHeight || 0), max));
+    if (box.scrollTop !== want) box.scrollTop = want;
+  }
   /** 只重画文字节点（打字机每 tick 调它，不整页重画）。 */
   function storyPaint() {
     const st = storyState;
@@ -578,6 +595,7 @@
     const box = document.querySelector('[data-story-text]');
     if (!box) return;
     box.innerHTML = storyBodyHtml();
+    storyScrollToCursor(box);
   }
   /** 打字机：打出一个字，然后排下一个 tick。 */
   function storyTick() {
@@ -685,6 +703,16 @@
     if (cur && st.chars < cur.total) st.timer = setTimeout(storyTick, STORY_CHAR_MS);
     else if (cur && st.chars === 0 && cur.total === 0) st.timer = setTimeout(storyTick, STORY_CHAR_MS);
     return body;
+  }
+  /** 整页画完之后补一次「让当前行露出来」——由 tower-ui 在 `C().page(...)` 之后**同步**调用。
+   *  页面重画会把 `[data-story-text]` 整个换掉（滚动位置归零），而这一屏可能已经打完了
+   *  （没有下一次 tick 来带滚动），所以需要这个入口。用同步调用而不是 setTimeout：
+   *  测试里可以把定时器换成可控队列，多插一个定时器会打乱打字机的节奏。 */
+  function storyAfterRender() {
+    try {
+      if (typeof document === 'undefined' || !document || typeof document.querySelector !== 'function') return;
+      storyScrollToCursor(document.querySelector('[data-story-text]'));
+    } catch (e) {}
   }
 
   /* ============================================================
@@ -819,6 +847,8 @@
     modeHtml: storyModeHtml,
     noticeHtml: storyNoticeHtml,
     modeButtonHtml: storyModeButtonHtml,
+    /* 【2026-10】整页画完之后补一次滚动（剧情页长文自动下翻），由 tower-ui 在 page() 之后同步调用。 */
+    afterRender: storyAfterRender,
     /* 与 tower-ui 的接线 */
     setMainOpener: setMainOpener,
     /* 回归/探针用：这一段有几行、每行多少字（不依赖 DOM）。 */

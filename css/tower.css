@@ -970,7 +970,13 @@ ul.settle-calc li.total b { font-size: 22px; }
  * ============================================================ */
 .tower-story { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 4px; }
 .tower-story-text { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
-  justify-content: center; align-items: center; gap: 6px; padding: 4px 16px; text-align: center; }
+  justify-content: flex-start; align-items: center; gap: 6px; padding: 4px 16px; text-align: center; }
+/* 文字装得下时仍然**垂直居中**（上下 auto 外边距自己分配空当），
+ * 装不下时 auto 外边距收成 0 —— 内容从第一行开始排，整页都能滚到
+ *（`justify-content:center` + 溢出会让**开头**那几行滚不上去，这是 flex 的老坑）。
+ * 配合 JS 的 storyScrollToCursor：长剧情页最后一行打出来时会自动往下带。 */
+.tower-story-text > .tower-story-line:first-child { margin-top: auto; }
+.tower-story-text > .tower-story-line:last-child { margin-bottom: auto; }
 .tower-story-line { margin: 0; max-width: 100%; font-family: KaiTi, STKaiti, 'Kaiti SC', 'Kaiti TC', 楷体, 'BiauKai', 'Songti SC', serif;
   font-size: 27px; line-height: 1.6; color: #40352a; letter-spacing: .05em;
   text-shadow: 0 1px 0 #fffdf6, 0 0 12px #fffaf0; }

@@ -2502,6 +2502,22 @@ check('剧情页文字太长时会自动往下翻：最后一行打出来必须�
 });
 
 /* ============================================================ */
+check('照影之境的拾取卡居中在整个屏幕（不是塔身右侧那半屏）', () => {
+  /* 用户口径 2026-10：拿到「照影之境」时卡片要在**整个屏幕正中央**。
+   * 之前 `.tower-mirror` 是 `.tower-main`（塔身右边那一列）里的 position:relative 块，
+   * 于是「居中」居的是右半边 —— headless Chrome 在 1170×690 下量到卡片中心 x=744、舞台中心 573，
+   * 偏右 171px。改成整屏定位层（fixed + inset:0，`#ui` 上有 transform，所以相对的是整个舞台）后偏差 0。 */
+  const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8').replace(/\r\n/g, '\n');
+  const rule = (css.match(/\.tower-mirror\s*\{[^}]*\}/) || [''])[0];
+  assert.match(rule, /position:\s*fixed/, '.tower-mirror 要整屏定位（否则居中的是右半边）：' + rule);
+  assert.match(rule, /inset:\s*0/, '.tower-mirror 要铺满整个舞台：' + rule);
+  assert.ok(!/min-height:\s*62vh/.test(rule), '旧的「半屏 62vh」写法要去掉：' + rule);
+  assert.match(rule, /pointer-events:\s*none/, '整屏层自己不吃点击（塔身 / 左下角模式开关照旧）：' + rule);
+  assert.match(css, /\.tower-mirror\s+\.mirror-card-wrap\s*\{[^}]*pointer-events:\s*auto/,
+    '卡片自己仍要能点（pointer-events:auto）');
+});
+
+/* ============================================================ */
 (async () => {
   console.log('\n铸币商店回归：' + pass + ' 通过 / ' + fail + ' 失败');
   process.exit(fail ? 1 : 0);

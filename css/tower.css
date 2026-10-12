@@ -1031,13 +1031,20 @@ ul.settle-calc li.total b { font-size: 22px; }
  *     （挂在 body 上、z-index 最高）连卡片一起慢慢变**纯黑**；
  *     ③ 黑幕以**稍快**的速度淡出，露出已经重画好的主界面（时序在 tower-ui.js）。
  * ============================================================ */
-.tower-mirror { position: relative; display: flex; align-items: center; justify-content: center;
-  min-height: 62vh; padding: 12px; }
+/* 【2026-10 用户口径】卡片要落在**整个屏幕的正中央**。
+ * `.tower-mirror` 原来只是 `.tower-main`（塔身右侧那一列）里的一个 `position:relative` 块，
+ * 于是「居中」居的是右半边 → 看起来偏右。改成整屏铺开的居中层：
+ *   · `position:fixed; inset:0` —— `#ui` 上有 `transform: scale(--uiscale)`，
+ *     所以这里的 fixed 是相对**整个舞台**（1170×690）而不是某个右列；白幕原本就是这么做的；
+ *   · `pointer-events:none` + 卡片 wrap `auto`：只有卡片吃点击，
+ *     塔身 / 左下角模式开关的点击行为与以前完全一样。 */
+.tower-mirror { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  padding: 12px; pointer-events: none; }
 /* 白幕：盖住整个视口（含塔身与左下角的模式开关），但**在卡片下面**。 */
 .tower-mirror .mirror-veil { position: fixed; inset: 0; background: #fff; opacity: 0;
   transition: opacity 1500ms linear; z-index: 60; pointer-events: none; }
 .tower-mirror.mirror-white .mirror-veil { opacity: 1; }
-.tower-mirror .mirror-card-wrap { position: relative; z-index: 70; }
+.tower-mirror .mirror-card-wrap { position: relative; z-index: 70; pointer-events: auto; }
 /* 黑幕：连卡片一起吃掉 —— 所以它挂在 body 上、z-index 比什么都高。 */
 .mirror-black-veil { position: fixed; inset: 0; background: #000; opacity: 0;
   transition: opacity 1500ms linear; z-index: 9998; pointer-events: none; }

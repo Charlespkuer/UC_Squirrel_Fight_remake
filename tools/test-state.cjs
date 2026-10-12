@@ -232,15 +232,20 @@ test('橙装的「镶嵌 / 取下宝石」必须真的出现在详情弹窗里�
   };
   const noGem = openGear(orangeKey);
   assert.ok(noGem.some((l) => l.indexOf('镶嵌宝石') === 0), '橙装详情里必须有「镶嵌宝石」：' + JSON.stringify(noGem));
+  assert.ok(!noGem.some((l) => /（5金）|\(5金\)/.test(l)), '宝石按钮文案不带「（5金）」：' + JSON.stringify(noGem));
   s.props[101] = 1;
   assert.equal(S.socketGem(orangeKey, 101).ok, true, '镶嵌应当成功');
   const withGem = openGear(orangeKey);
   assert.ok(withGem.some((l) => l.indexOf('卸下宝石') === 0), '镶过宝石后详情里必须有「卸下宝石」：' + JSON.stringify(withGem));
+  assert.ok(!withGem.some((l) => /（5金）|\(5金\)/.test(l)), '宝石按钮文案不带「（5金）」：' + JSON.stringify(withGem));
 
-  /* ② 版式契约：详情弹窗的正文必须限高（否则第二行按钮会被画布裁掉，功能"消失"）。 */
+  /* ② 版式契约：详情弹窗的按钮排必须**不换行**（用户口径：四颗排在一行），
+   *    并且正文限高 —— 两者合起来才能保证宝石按钮不会被画布裁掉。 */
   const css = fs.readFileSync(path.join(root, 'css/classic-refine.css'), 'utf8').replace(/\r\n/g, '\n');
-  assert.match(css, /\.gear-detail[\s\S]{0,200}?\.modal-body[\s\S]{0,120}?max-height:\s*\d+px/,
-    'classic-refine.css 里必须给装备详情弹窗的正文限高（不然橙装的宝石按钮会被挤到画布外）');
+  assert.match(css, /\.gear-detail[\s\S]{0,200}?\.modal-body[\s\S]{0,140}?max-height:\s*\d+px/,
+    'classic-refine.css 里必须给装备详情弹窗的正文限高（不然按钮会被挤到画布外）');
+  assert.match(css, /\.gear-detail[\s\S]{0,200}?\.modal-buttons\{[^}]*flex-wrap:\s*nowrap/,
+    '装备详情的按钮排必须明确 nowrap（用户口径：不许换行，四颗排一行）');
 });
 
 test('调试台「重置每日与体力计时」也重置徒弟日供（含「昨天必须有收益流水」那一道门）', () => {

@@ -1320,16 +1320,21 @@
   function openGear(key) {
     const g=State.myGears().find(x=>x.key===key);if(!g)return;
     const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+State.gemPercent(g.gem.id-100)+'%，附加 +'+(g.gem.ext)+'%）':'';
-    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+(g.attrBase&&g.attrBase!==g.abilityVal?'（基准 '+g.attrBase+'，本件有浮动）':'')+'<br>附加属性：<br>'+State.extText(g.ext).map(esc).join('<br>')+gemInfo+setBonusBlock(g)+'</div></div>';
+    /* 宝石键的文案不带「（5金）」了（用户口径 2026-10：四个键要排在一行，标签越短越好排），
+     * 费用改在这行小字里说明，免得玩家不知道要花金松果。 */
+    const gemCost=g.orange?'<br><span class="small-label">宝石：镶嵌 / 卸下各 5 金松果</span>':'';
+    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+(g.attrBase&&g.attrBase!==g.abilityVal?'（基准 '+g.attrBase+'，本件有浮动）':'')+'<br>附加属性：<br>'+State.extText(g.ext).map(esc).join('<br>')+gemInfo+gemCost+setBonusBlock(g)+'</div></div>';
     /* 装 / 卸之后列表会重排（穿着 > 星标 > 获得顺序），所以**跟着这一件翻到它新位置所在的那一页**，
      * 否则在后面的页上点「装备」，东西会当场跳到第一页、看不见了。 */
     const buttons=[{label:g.used?'卸下':'装备',run:()=>{const ok=g.used?State.unwear(key):State.wear(key);if(ok===false)toast('等级不足，暂时无法装备');
       const idx=State.gearsInDisplayOrder().findIndex(x=>x.key===key);
       openGears(idx<0?gearPage:Math.floor(idx/6));}}];
     /* 宝石：装上 / 卸下都要 5 金松果（2026-10 用户口径）。只要身上有宝石就一定给「卸下」，
-     * 不再依赖 orange 标记（宝石本来就只可能镶在橙装上，这里只是把它做得更稳、更好找）。 */
-    if(g.gem)buttons.push({label:'卸下宝石（5金）',run:()=>{const r=State.unsocketGem(key);toast(r.msg);openGear(key);}});
-    else if(g.orange)buttons.push({label:'镶嵌宝石（5金）',cls:'gold',run:()=>socketGemDialog(key)});
+     * 不再依赖 orange 标记（宝石本来就只可能镶在橙装上，这里只是把它做得更稳、更好找）。
+     * 按钮文案**不带「（5金）」**（用户口径 2026-10：四个键要排在一行里，标签越短越好排）；
+     * 费用写在详情正文的那行小字与镶嵌弹窗里，花多少钱照样一眼能看到。 */
+    if(g.gem)buttons.push({label:'卸下宝石',run:()=>{const r=State.unsocketGem(key);toast(r.msg);openGear(key);}});
+    else if(g.orange)buttons.push({label:'镶嵌宝石',cls:'gold',run:()=>socketGemDialog(key)});
     /* 星标：防止手滑把好装备卖掉/合掉（融合与出售都会跳过星标装备）。 */
     const starred = State.isGearStarred(g);
     buttons.push({label: starred ? '取消星标' : '星标', cls: starred ? 'gold' : 'muted',
@@ -2230,7 +2235,7 @@
       const lv = id - 100;
       if (lv <= 2) lines.push('45 级起：通关关卡 20% 几率、竞技场（经验/碎片）获胜 15% 几率获得（一级 75% / 二级 25%）');
       if (lv < 7) lines.push('合成：3 个同级 + 10 金松果，成功率 ' + Math.round(State.gemMergeRate(lv) * 100) + '%（失败有 50% 几率一颗材料降 1 级，1级则碎裂）');
-      lines.push('镶嵌：免费镶入橙装（3 件相同紫装融合而来），主属性 +' + State.gemPercent(lv) + '%（沿用原版曲线 5×(n²−n+2)），附加属性效果随机提升，每件限 1 颗；拆卸 5 金松果');
+      lines.push('镶嵌：镶入橙装（3 件相同紫装融合而来），主属性 +' + State.gemPercent(lv) + '%（沿用原版曲线 5×(n²−n+2)），附加属性效果随机提升，每件限 1 颗；镶嵌与卸下各 5 金松果');
     }
     if (!lines.length) lines.push('当前版本暂无产出途径（图鉴预留物品）');
     return lines;

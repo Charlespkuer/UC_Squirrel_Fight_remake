@@ -128,23 +128,27 @@
 .gear-modal .gear-list{gap:3px 17px;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)}.gear-modal .gear-list .item-icon{width:147px;height:138px;border-radius:30px}.gear-modal .gear-list .item-caption{font:27px/32px "SimSun","Songti SC","STSong",serif}.gear-modal .gear-capacity{position:absolute;bottom:80px;right:37px;font-size:25px;color:#7b542d}.gear-modal .page-arrow{top:43%;right:2px}.gear-modal .page-arrow.prev{left:350px}
 
 /* 装备详情弹窗的按钮排（`.gear-detail` 是 openGear 独有的，用 :has 认它）。
- * 传说（橙）装会多一个「镶嵌/拆卸宝石」，最多 5 个按钮；基础规则
- * `.modal-buttons .uc-button{min-width:200px}` + `gap:28px` 一排要 1112px，
- * 弹窗里只有 926px —— 整排会从弹窗右边顶出去（用户反馈「一排 5 个按钮超出屏幕」）。
- * 旧修复把按钮整体改小（去掉 min-width、压内边距），代价是按钮比全游戏其它弹窗小一号。
- * 现在恢复标准按钮尺寸，改用**换行**：最坏组合（装备 + 拆卸宝石（5金） + 星标 + 出售 + 返回）
- * 自动排成 4+1 或 3+2 两行，单排最宽 884px < 926px，既不溢出也统一了风格。 */
-.classic-modal:has(.gear-detail) .modal-buttons{flex-wrap:wrap;gap:16px 24px}
+ * 传说（橙）装会多一颗宝石键，最多 5 个按钮（装备/卸下 + 宝石 + 星标 + 出售 + 返回）；
+ * 基础规则 `.modal-buttons .uc-button{min-width:200px}` + `gap:28px` 一排要 1112px，
+ * 弹窗里只有 926px —— 整排会从弹窗右边顶出去。
+ * **2026-10 用户口径：不许换行，四颗（或五颗）必须排在同一行**，而且宝石键不带「（5金）」。
+ * 所以这里放开 min-width、把字号与内边距压一档（一行 926px 放 5 颗 ≈ 每颗 172px，
+ * 标签最长 4 个字、最短 2 个字，压一档仍完整可读），并显式 nowrap 保证不换行。
+ * 配下面的正文限高：按钮行了永远留在画布（1170×690）里，不会再出现「按钮被裁掉」。 */
+.classic-modal:has(.gear-detail) .modal-buttons,
+.gear-detail-overlay .modal-buttons{flex-wrap:nowrap;gap:16px 14px}
+.classic-modal:has(.gear-detail) .modal-buttons .uc-button,
+.gear-detail-overlay .modal-buttons .uc-button{min-width:0;flex:1 1 0;padding:8px 16px;font-size:30px}
 
 /* 装备详情弹窗的正文限高（2026-10 用户反馈：橙装的「镶嵌 / 取下宝石」不见了）。
  * 原因：橙装的详情比普通装备多一颗「镶嵌/卸下宝石（5金）」，再加上「星标」，
  * 按钮排会从一行变两行；而 `.classic-modal` 有 max-height:625px，超出的内容会被顶到
  * 画布（1170×690）下沿之外 —— 宝石那颗正好在第二行，于是「功能消失」。
  * 用 headless Chrome 在 1170×690 下量过（headless 之前的状态）：第一行 top=637、第二行
- * top=716 bottom=780，都在画布外；正文限到 340px 后，四颗按钮落在 468~611，全部可见。
+ * top=716 bottom=780，都在画布外；改成「一行放得下 + 正文限高」之后，四/五颗按钮都排在同一行、落在 122~1048、弹窗 44~645，全部可见。
  * 所以：正文自己滚动，按钮行永远留在可视区。 */
 .classic-modal:has(.gear-detail)>.modal-body,
-.gear-detail-overlay>.classic-modal>.modal-body{max-height:340px;overflow-y:auto}
+.gear-detail-overlay>.classic-modal>.modal-body{max-height:420px;overflow-y:auto}
 
 /* 自由属性点：升级时必选的分配弹窗（无关闭叉）；点数不在其它地方常驻显示 */
 .classic-modal-overlay.point-dialog>.classic-modal.small-modal{max-height:600px;width:800px}

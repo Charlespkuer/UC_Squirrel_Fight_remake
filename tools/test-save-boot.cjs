@@ -448,6 +448,19 @@ record('导入本地存档的服务器契约：先备份 → force 写回 → me
   assert.equal(notSave.status, 400, '数组不是存档对象，必须被拒');
   assert.equal(JSON.parse(fs.readFileSync(savePath, 'utf8')).level, 40, '脏数据不能改动正式存档');
 
+  // ⑥ 双界面存档：当前界面 1 级、另一槽 40 级，水位线必须看两槽最高等级，允许写入
+  const dualLow = Object.assign({}, SAVE_LOCAL_1, {
+    name: '现代新号', level: 1,
+    __dualMode: 'modern', __dualOther: { name: '经典40', level: 40, weapons: [], skills: [], props: {} },
+  });
+  const dualRes = await fetch(`http://127.0.0.1:${port}/__save`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(dualLow),
+  });
+  assert.equal(dualRes.status, 200, '另一界面有 40 级进度时，当前 1 级档不能被水位线误拦');
+  const dualDisk = JSON.parse(fs.readFileSync(savePath, 'utf8'));
+  assert.equal(dualDisk.level, 1, '顶层保存当前界面的 1 级');
+  assert.equal(dualDisk.__dualOther.level, 40, '另一界面 40 级要一起落盘');
+
   srv.kill();
   fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 });

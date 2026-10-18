@@ -151,6 +151,13 @@
   // ---------- 图片加载 ----------
   const cache = Object.create(null);   // src -> {img, ok}
   const pendingImages = Object.create(null);
+  /* 【2026-10 启动提速】单个图片的兜底超时：以前是 12 秒 —— 本地服务器偶发卡住一个请求时，
+   * 首屏那几批图集要等满 12 秒才放行（用户实测「启动有时 10 秒+」）。本地素材正常都在毫秒级，
+   * 4 秒足够判定「这个请求没戏」。 */
+  const IMG_TIMEOUT_MS = 4000;
+  /* 一批图集的兜底：等全部到位，但最多等这么久 —— 没赶上的会在后台继续加载并照旧注册。
+   * 首屏只等「必需素材」那一批（见 js/main.js 的启动流程）。 */
+  const SHEETS_DEADLINE_MS = 5000;
   function loadImage(src) {
     if (!src) return Promise.resolve(null);
     const c = cache[src];
@@ -158,10 +165,11 @@
     if (pendingImages[src]) return pendingImages[src];
     pendingImages[src] = new Promise((resolve) => {
       const img = new Image();
-      let settled = false;
+      let settled = false, timer = 0;
       const finish = (ok) => {
         if (settled) return;
         settled = true;
+        if (timer) clearTimeout(timer);          // 成功/失败都要收掉兜底定时器
         cache[src] = { img: ok ? img : null, ok };
         delete pendingImages[src];
         if (!ok) log('img-fail ' + src);
@@ -171,7 +179,7 @@
       img.onerror = () => finish(false);
       try { img.src = src; } catch (e) { finish(false); }
       // 极端环境下 onload 可能不触发，做个兜底
-      setTimeout(() => finish(false), 12000);
+      timer = setTimeout(() => finish(false), IMG_TIMEOUT_MS);
     });
     return pendingImages[src];
   }
@@ -246,15 +254,20 @@
     indexSheet(sh);
     return sh;
   }
-  /** 加载一批图集（按 id） */
-  function loadSheets(ids) {
+  /** 一批图集：等它们全部到位，但**最多等 `opts.deadlineMs`**（默认 SHEETS_DEADLINE_MS）。
+   *  本地服务器偶发卡住一个请求时，不至于把首屏拖到十几秒；没赶上的图集会在后台继续加载，
+   *  注册完之后照旧能被 `spriteFor` 取到 —— 也就是「晚一点到」而不是「丢了」。
+   *  开打前的 `battle.js` 会自己按 `FX_SHEETS` / 场景层再要一遍，届时会复用还在跑的加载。 */
+  function loadSheets(ids, opts) {
     const jobs = [];
     for (const id of ids) {
       if (!id || SHEETS[id]) continue;
       const src = guessSrc(id);
       jobs.push(loadImage(src).then((img) => (img ? registerSheet(id, img) : null)));
     }
-    return Promise.all(jobs);
+    const all = Promise.all(jobs);
+    const ms = Math.max(0, Number(opts && opts.deadlineMs) || SHEETS_DEADLINE_MS);
+    return Promise.race([all, new Promise((resolve) => setTimeout(resolve, ms))]).then(() => undefined);
   }
   /** 直接按文件路径加载并注册一个图集（原版有些图没有 id 记录） */
   function loadSheetFromUrl(id, url) {

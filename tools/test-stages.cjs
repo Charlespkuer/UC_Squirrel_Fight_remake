@@ -39,6 +39,10 @@ function setup() {
   c.modal = (title, html, buttons) => { const modal = { title, html, buttons }; modals.push(modal); return modal; };
   c.notice = (msg, buttons) => c.modal('提示', c.esc(msg), buttons || [{ label: '确定' }]);
   c.home = () => { c.homeCount = (c.homeCount || 0) + 1; };
+  /* `backToStages()`（本批新增：经典模式下打完一场回原版关卡页）按界面模式分支，
+   * 而这个套件只截了 classic-ui 里的一段来跑，`currentUiMode` 不在片段里 —— 补一个桩。
+   * 这里给 'modern'：与这个套件的既有断言一致（打完仍在复刻的关卡页，而不是回主界面）。 */
+  c.currentUiMode = () => 'modern';
   c.openProp = id => { c.openedProp = id; };
   c.Main = { startBattle: (foe, opts) => { battles.push({ foe, opts }); return Promise.resolve(); } };
   const ui = fs.readFileSync(path.join(root, 'js/classic-ui.js'), 'utf8');
@@ -58,6 +62,22 @@ function setup() {
 }
 const tests = [];
 const test = (name, run) => tests.push([name, run]);
+
+test('36关=6门×6星；19-36是超级大关，每关只有1个敌人', () => {
+  const g = setup(), { GData, State } = g.c;
+  assert.equal(GData.STAGE_TYPES.length, 6);
+  for (let id = 1; id <= 36; id++) {
+    assert.equal(GData.stageTypeOf(id).gate, Math.floor((id - 1) / 6) + 1);
+    assert.equal(GData.stageEnemyCount(id), id <= 18 ? 3 : 1);
+  }
+  const npc = State.npcOf(19, 1);
+  assert.ok(npc && npc.name.startsWith('超级'), '超级关的 NPC 名字');
+  assert.equal(State.npcOf(19, 2), null, '超级关没有第二个敌人');
+  assert.equal(GData.stageNpcExp(19, 1), 100);
+  assert.equal(GData.stageNpcExp(36, 1), 270);
+  assert.equal(GData.isSuperStage(18), false);
+  assert.equal(GData.isSuperStage(19), true);
+});
 
 test('54位关卡NPC全部匹配所属高手和星级，修正原表4星仙鹤误写stageId', () => {
   const g = setup();
@@ -105,20 +125,26 @@ test('常驻挑战关卡的碎片期望比基准略低，挑战塔仍按基准',
   assert.equal(GData.stageFragmentChance(6), GData.STAGE_FRAGMENT.base + 6 * GData.STAGE_FRAGMENT.perStar);
 });
 
-test('10级门槛、18关逐星解锁、跨高手边界全部生效', () => {
+test('10级门槛、36关逐星解锁、跨高手边界全部生效', () => {
   const g = setup(); g.s().level = 9;
   assert.equal(g.c.State.stageAccess(1).ok, false); assert.equal(g.c.State.beginStageBattle(1).ok, false);
   g.s().level = 10;
   assert.equal(g.c.State.stageAccess(1).ok, true);
-  for (let id = 2; id <= 18; id++) assert.equal(g.c.State.stageAccess(id).ok, false);
-  for (const id of [0, 1.5, 19, NaN]) assert.equal(g.c.State.beginStageBattle(id).ok, false);
-  for (let id = 1; id <= 18; id++) {
+  for (let id = 2; id <= 36; id++) assert.equal(g.c.State.stageAccess(id).ok, false);
+  for (const id of [0, 1.5, 37, NaN]) assert.equal(g.c.State.beginStageBattle(id).ok, false);
+  for (let id = 1; id <= 36; id++) {
     assert.equal(g.c.State.stageAccess(id).ok, true, 'Stage ' + id + ': ' + g.c.State.stageAccess(id).msg);
     g.s().props[23] = 1;
-    g.win(id); g.win(id); const reward = g.win(id);
-    assert.equal(reward.complete, true); assert.equal(reward.exp, (18 + ((id - 1) % 6)) * g.c.GData.STAGE_REWARD_MULT); assert.equal(reward.gold, 25 * g.c.GData.STAGE_GOLD_MULT);
+    const battles = g.c.GData.stageEnemyCount(id);
+    let reward = null;
+    for (let i = 0; i < battles; i++) reward = g.win(id);
+    assert.equal(reward.complete, true);
+    const exp = id <= 18 ? (18 + ((id - 1) % 6)) * g.c.GData.STAGE_REWARD_MULT
+      : (100 + (id - 19) * 10) * g.c.GData.STAGE_REWARD_MULT;
+    assert.equal(reward.exp, exp, 'exp of stage ' + id);
+    assert.equal(reward.gold, (id <= 18 ? 25 : 35) * g.c.GData.STAGE_GOLD_MULT);
     assert.equal(g.c.State.highestStageId(), id + 1);
-    if (id < 17) assert.equal(g.c.State.stageAccess(id + 2).ok, false);
+    if (id < 35) assert.equal(g.c.State.stageAccess(id + 2).ok, false);
   }
 });
 

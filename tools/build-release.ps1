@@ -278,13 +278,28 @@ $versionEdits = @(
 $lockPath = Join-Path $TAURI 'Cargo.lock'
 
 if ($DryRun -or $CleanOnly) {
-  Note "[跳过版本写入] $(if ($CleanOnly) { '-CleanOnly' } else { '-DryRun' })：会改 Cargo.toml / Cargo.lock / src-tauri/package.json / tauri.conf.json / scripts\version.json / gen\android\app\tauri.properties 到 $target"
+  Note "[跳过版本写入] $(if ($CleanOnly) { '-CleanOnly' } else { '-DryRun' })：会改 Cargo.toml / Cargo.lock / src-tauri/package.json / src-tauri/package-lock.json / tauri.conf.json / scripts\version.json / gen\android\app\tauri.properties 到 $target"
 } else {
   foreach ($e in $versionEdits) {
     if (-not (Test-Path $e.Path)) { Warn "缺文件，跳过：$($e.What)"; continue }
     $n = Replace-First (Read-Text $e.Path) $e.Regex $target
     if ($null -eq $n) { Warn "$($e.What) 没找到版本字段"; continue }
     Write-Utf8NoBom $e.Path $n; Ok "$($e.What) → $target"
+  }
+  # package-lock.json 的**根包**版本也要跟（npm ci 会校验；以前只改 package.json，
+  # 锁文件在 0.1.3 停了好几个版本）。只替换前两处根版本字段，依赖自己的 version 不动。
+  $pkgLockPath = Join-Path $TAURI 'package-lock.json'
+  if (Test-Path $pkgLockPath) {
+    $lockText = Read-Text $pkgLockPath
+    $lockRe = New-Object System.Text.RegularExpressions.Regex('("version"\s*:\s*")[^"]+(")')
+    if ($lockRe.IsMatch($lockText)) {
+      $n = $lockRe.Replace($lockText, {
+          param($m)
+          return $m.Groups[1].Value + $target + $m.Groups[2].Value
+        }, 2)
+      Write-Utf8NoBom $pkgLockPath $n
+      Ok "package-lock.json(根版本) → $target"
+    } else { Warn 'package-lock.json 没找到 version 字段' }
   }
   if (Test-Path $lockPath) {
     $n = Replace-First (Read-Text $lockPath) '(?m)(name = "ssdz-classic"\r?\nversion = ")[^"]+(")' $target

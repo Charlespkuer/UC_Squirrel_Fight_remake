@@ -75,6 +75,40 @@
   let replaceTarget = null;
   /** 【U20】被剧情屏让路的「里程碑奖励」（同一场战斗之后先播剧情，播完再弹它）。 */
   let pendingMilestone = null;
+  /* 从经典村庄「征战」进来还是从关卡页进来：决定返回目标和顶部外壳。 */
+  let towerOrigin = 'stages';
+  function setTowerOrigin(opts) { if (opts && opts.from) towerOrigin = String(opts.from); }
+  function classicTower() {
+    try { return towerOrigin === 'village' && window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic'; }
+    catch (e) { return false; }
+  }
+  function backToVillageWar() {
+    try {
+      /* 用户口径：点「返回征战」回村庄主界面，不再弹「挑战塔/无尽塔」二选一。 */
+      if (window.UI && UI.runAction) { UI.runAction('village'); return; }
+    } catch (e) {}
+    C().home();
+  }
+  function towerBack() { return classicTower() ? backToVillageWar() : backToStages(); }
+  function classicTowerBar() {
+    let b = '';
+    try { b = C().btn('返回征战', 'home', 'gold'); } catch (e) { b = '<button type="button" class="uc-button gold" data-action="home">返回征战</button>'; }
+    /* 顶部只留返回键；塔名/层数在页面内容里，不再额外压一行标题。 */
+    return '<div class="classic-tower-bar">' + b + '</div>';
+  }
+  /** 经典无尽塔的背景随层数从村庄绿慢慢压到 100 层的暗红。 */
+  function classicTowerBackground(mode, layer) {
+    if (!classicTower() || mode !== 'endless') return null;
+    /* 每 100 层重制：100 层暗红，101 层回到绿色，200 层再暗红。 */
+    const cycle = ((Math.max(1, Number(layer) || 1) - 1) % 100) + 1;
+    const t = Math.max(0, Math.min(1, (cycle - 1) / 99));
+    const mix = (a, b) => Math.round(a + (b - a) * t);
+    return {
+      top: 'rgb(' + mix(76, 67) + ',' + mix(124, 8) + ',' + mix(80, 8) + ')',
+      bottom: 'rgb(' + mix(37, 17) + ',' + mix(69, 3) + ',' + mix(46, 3) + ')',
+      t: t,
+    };
+  }
 
   /* 附魔（不占位）的排前面：判据是**这一条栏位自己的** `slotFree`。
    * 【2026-10 同名逐条】不再用「同名 id 出现过」兜底 —— 那会让新拿到的同名件
@@ -204,12 +238,179 @@
   const NPC_IDLE = { tl: 'tl_rest', xh: 'xh_rest', xm: 'xm_rest' };
   const AVATAR_SIZE = 104;
   function foePortraitHtml(index, info) {
+    /* 经典塔：三侠/机制 NPC 直接用关卡里那张经典立绘卡，松鼠 boss（含巡逻魔王）
+     * 一律复用随机挑战右栏的 7232 + 装备挂点，不再画现代图集 canvas。 */
+    if (classicTower()) {
+      const file = (info.kind === 'hero' || info.kind === 'npc') ? (CHAR_FILE[info.anim] || 'mantis') : null;
+      if (file) return '<span class="foe-portrait"><img alt="" src="images/ui/characters/' + file + '-classic-card.png"></span>';
+      /* 松鼠 boss 直接复用随机挑战右栏那块 7232：同一颗元件、同一套装备挂点
+       * （showFace 口径）。巡逻魔王也走这里 —— 它的黑色狂战套由 tower.js 的
+       * `gear`（181~184 / 容器帧 119）交给 attachClassicGear() 贴上去；
+       * 以前单独走 Engine canvas 才会变成现代图集外观、比例也和三侠卡对不上。 */
+      return '<span class="foe-portrait"><span class="sf-classic-foe" data-classic-foe="' + index + '"></span></span>';
+    }
     if (info.kind === 'hero') {
       const file = CHAR_FILE[info.anim] || 'mantis';
       return '<span class="foe-portrait"><img alt="" src="images/ui/characters/' + file + '-classic-card.png"></span>';
     }
     return '<span class="foe-portrait"><canvas width="' + AVATAR_SIZE + '" height="' + AVATAR_SIZE +
       '" data-foe-art="' + index + '" aria-hidden="true"></canvas></span>';
+  }
+  /* 经典塔松鼠 boss：直接复用随机挑战右栏 7232（frame1）和同一套装备挂点。
+   * 装备数据可以是 tower-data 的 `gear` key（如 fist3，由 wearsOf() 展开），
+   * 也可以是现成数组（巡逻魔王的 `classicGear` = 黑狂战 181~184）。 */
+  let classicGearTables = null;
+  const CLASSIC_FACE_PARTS = [
+    { type: 0, cells: [['mc_head', 0]] },
+    { type: 1, cells: [['mc_fistL', 0], ['mc_fistR', 1]] },
+    { type: 2, cells: [['mc_body', 0], ['mc_handL', 1], ['mc_handR', 1]] },
+    { type: 3, cells: [['mc_footL', 0], ['mc_footR', 0]] },
+  ];
+  async function loadClassicGear() {
+    if (classicGearTables) return classicGearTables;
+    try { await SfRender.loadExtra('tags-challenge.json'); } catch (e) {}
+    try { await SfRender.loadExtra('tags-gear.json'); } catch (e) {}
+    const B = 'images/ssfight/ui/';
+    const j = (f) => fetch(B + f, { cache: 'force-cache' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const [frames, slots] = await Promise.all([j('gear-frames.json'), j('gear-slots.json')]);
+    if (!frames || !slots) return null;
+    const cont = {};
+    for (const c of slots.container || []) cont[c.type] = c.ids;
+    classicGearTables = { frameById: new Map((frames.gear || []).map((g) => [Number(g.id), g.frame])), cont: cont };
+    return classicGearTables;
+  }
+  function classicGearType(g) {
+    const ty = Number(g && g.type);
+    if (Number.isFinite(ty) && ty >= 0 && ty <= 3) return ty;
+    try {
+      if (window.State && State.gearPart) {
+        const t2 = Number(State.gearPart(Number(g && g.id)));
+        if (Number.isFinite(t2) && t2 >= 0 && t2 <= 3) return t2;
+      }
+    } catch (e) {}
+    return NaN;
+  }
+  function classicGearFrame(g) {
+    if (!classicGearTables || !g) return 0;
+    const base = classicGearTables.frameById.get(Number(g.id));
+    if (!base) return 0;
+    /* 与随机挑战 showFace 完全同一口径。 */
+    return base + Math.max(0, (Number(g.ext) || 0) - 1);
+  }
+  function attachClassicGear(bg, info) {
+    if (!bg || !classicGearTables || !info) return 0;
+    const gearList = Array.isArray(info.gear)
+      ? info.gear
+      : (typeof info.gear === 'string' && window.TowerData && TowerData.wearsOf ? TowerData.wearsOf(info.gear) : []);
+    if (!gearList.length) return 0;
+    const byType = new Map();
+    for (const raw of gearList) {
+      const g = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
+      const ty = classicGearType(g);
+      if (Number.isFinite(ty) && !byType.has(ty)) byType.set(ty, g);
+    }
+    let n = 0;
+    for (const row of CLASSIC_FACE_PARTS) {
+      const g = byType.get(row.type);
+      const frame = g ? classicGearFrame(g) : 0;
+      for (const pair of row.cells) {
+        const clip = bg.byName ? bg.byName(pair[0]) : null;
+        if (!clip || !clip.detachAll) continue;
+        clip.detachAll();
+        if (!frame) continue;
+        const sym = classicGearTables.cont[row.type] && classicGearTables.cont[row.type][pair[1]];
+        if (sym && clip.attachChild(sym, frame, 'wear')) n++;
+      }
+    }
+    return n;
+  }
+  async function fillClassicFoeArt(root, preview) {
+    const hosts = root.querySelectorAll('[data-classic-foe]');
+    if (!hosts.length) return;
+    await loadClassicGear();
+    for (const host of hosts) {
+      const info = preview[Number(host.dataset.classicFoe)];
+      if (!info || !host.isConnected) continue;
+      try {
+        const v = await SfRender.mountSymbol(host, '7232', { frame: 1, label: '经典对手' });
+        if (!host.isConnected) { try { v.destroy(); } catch (e) {} continue; }
+        SfUiMain.toolkit.freezeDescendants(v);
+        v.playing = false;
+        attachClassicGear(v, info);
+        /* 只保留松鼠本体：头/身体/手脚/尾巴（ikNode_9）+ 装备挂点的祖先链；
+         * 7232 的奶油底框、影子、花饰、属性条全部隐藏。 */
+        if (info && info.gear) {
+          /* 装备版（黑色/紫色狂战套等）不能只留挂点祖先：7232 的填充/阴影分布在其它根层，
+           * 全隐藏会让铠甲缺一块填色。这里只隐藏奶油底框。 */
+          for (const child of Array.from(v.g.children || [])) {
+            if (!child.querySelector) continue;
+            /* 只隐藏奶油底框 / 地面影子 / 花饰；它们是非松鼠元件，
+             * 不能整层清空，否则紫色狂战的填色层会一起没掉。 */
+            if (child.querySelector('path[d^="M10.35,-52.85"]') ||
+                child.querySelector('path[d^="M-0.15,-9Q"]') ||
+                child.querySelector('path[d^="M-48.65,-50.85"]')) {
+              child.style.display = 'none';
+            }
+          }
+        } else {
+          const parts = ['mc_head', 'mc_body', 'mc_fistL', 'mc_fistR', 'mc_handL', 'mc_handR', 'mc_footL', 'mc_footR', 'ikNode_9'];
+          const keepRoots = new Set();
+          for (const name of parts) {
+            const c = v.byName(name);
+            if (!c || !c.g) continue;
+            let node = c.g;
+            while (node && node.parentNode && node.parentNode !== v.g) node = node.parentNode;
+            if (node && node.parentNode === v.g) keepRoots.add(node);
+          }
+          for (const child of Array.from(v.g.children || [])) {
+            if (String(child.tagName || '').toLowerCase() === 'defs') continue;
+            if (!keepRoots.has(child)) child.style.display = 'none';
+          }
+        }
+        /* 7232 里除了人物，还带战力图标、属性条、背景板等根级元件；只把人物挂点
+         * 的祖先链留下来，其余根级子元素全部隐藏，否则它们会从裁切框下方露出来。 */
+        for (const f of ['power', 'agility', 'speed', 'hp', 'num1', 'num2', 'num3', 'num4', 'num5']) {
+          const c = v.byName(f); if (c && c.g) c.g.style.display = 'none';
+        }
+        for (const t of v.g.querySelectorAll('text')) { try { t.style.display = 'none'; } catch (e) {} }
+        const svg = host.querySelector('svg');
+        if (svg) {
+          /* 人物坐标不是 getBBox() 的局部坐标（父级还有变换）；用屏幕矩阵反算到 SVG
+           * 用户坐标，再取一个**正方形**裁切框并居中，卡片里人物才会居中。 */
+          let bb = null;
+          try {
+            const inv = svg.getScreenCTM().inverse();
+            /* 只量隐藏完非松鼠元件后的直接根层（人物 + 尾巴 + 装备）；
+             * 整棵 v.g 的 bbox 会带舞台空白，不能拿来裁切。 */
+            let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity, n = 0;
+            for (const child of Array.from(v.g.children || [])) {
+              if (String(child.tagName || '').toLowerCase() !== 'g') continue;
+              if (child.style && child.style.display === 'none') continue;
+              const rr = child.getBoundingClientRect();
+              if (!rr.width || !rr.height) continue;
+              const a = new DOMPoint(rr.left, rr.top).matrixTransform(inv);
+              const z = new DOMPoint(rr.right, rr.bottom).matrixTransform(inv);
+              x1 = Math.min(x1, a.x, z.x); y1 = Math.min(y1, a.y, z.y);
+              x2 = Math.max(x2, a.x, z.x); y2 = Math.max(y2, a.y, z.y);
+              n++;
+            }
+            if (n) {
+              const pad = 7;
+              const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+              const side = Math.max(x2 - x1, y2 - y1) * 1.08 + pad * 2;
+              bb = { x: cx - side / 2, y: cy - side / 2, width: side, height: side };
+            }
+          } catch (e) { bb = null; }
+          if (!bb || !bb.width || !bb.height) bb = { x: -35, y: -60, width: 90, height: 90 };
+          svg.setAttribute('viewBox', bb.x + ' ' + bb.y + ' ' + bb.width + ' ' + bb.height);
+          svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+          svg.style.width = '100%'; svg.style.height = '100%';
+        }
+        host.classList.add('ready');
+      } catch (e) {
+        if (window.__errs) window.__errs.push('classic foe art: ' + (e && e.message));
+      }
+    }
   }
   function fallbackPortrait(canvas, info) {
     const kind = info && info.kind;
@@ -231,8 +432,8 @@
     const npc = info.kind === 'npc';
     // 注意要过一遍 Engine.wearsFor：tower-data 给的是装备 id（{id:201}），
     // 引擎画图层时用的是 {src,label}（和战斗里 foe.wears 一样），少了这一步装备不会画出来。
-    // 「巡逻」魔王是例外：它的 info.outfit 已经是 {src,label} 形态（见 tower-data.js 的 PATROL.outfit），
-    // 直接交给 wearsFor 按槽位落位 —— 走 wearsOf(info.gear) 的话 gear 是空的，盔甲画不出来。
+    // 「巡逻」魔王在现代预告里仍优先用 info.outfit（橘色 113 的 {src,label} 图层）；
+    // 经典预告不会走到这里 —— 它走 7232 + gear 181~184 的黑色狂战套（见 foePortraitHtml）。
     const wears = npc ? null
       : info.outfit ? Engine.wearsFor(info.outfit)
         : Engine.wearsFor(TowerData.wearsOf(info.gear));
@@ -609,12 +810,12 @@
         (it.delta ? '<em class="currency-delta">+' + it.delta + '</em>' : '') +
         '<i>' + it.name + '</i></span>').join('') + '</div>';
     }
-    /* 金松果：**它是资源图集 resource_1 的第 18 帧**，不是道具（prop）——
-     * 以前这里错用了 prop-1.png，而 prop 1 是小体力药剂，于是挑战塔主界面右上角
-     * 顶着一个小体力药剂图标（用户 2026-10 反馈）。首页金钱 / 背包 / 融合页都用
-     * resource_1-18，这里跟它们统一。 */
+    /* 金松果：**主界面之外统一用道具页那颗"橡果+金币"**（`images/ui/icons/gold-acorn.png`，
+     * 用户 2026-10 口径：把主界面之外的金松果样式换掉）。
+     * 历史：这里曾错用 prop-1.png（那是小体力药剂），后改成资源图集 resource_1 第 18 帧的单颗橡果；
+     * 现在再统一到道具页那颗 —— 首页（非 ssflight 的经典首页）保留 resource_1-18 不动。 */
     const items = [{ icon: 'images/ui/icons/prop/prop-23.png', name: '挑战书', value: S.props[CURRENCY_PROP.book] || 0 },
-      { icon: 'images/ui/sprites/resource_1-18.png', name: '金松果', value: S.goldPoint }];
+      { icon: 'images/ui/icons/gold-acorn.png', name: '金松果', value: S.goldPoint }];
     return '<div class="tower-currency">' + items.map((it) =>
       '<span class="currency-item" data-live-gold="' + (it.name === '金松果' ? '1' : '') + '">' +
       '<img alt="" src="' + it.icon + '"><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';
@@ -748,7 +949,8 @@
    * 【U6】主塔页面 —— openTower
    * ============================================================ */
 
-  function openTower() {
+  function openTower(opts) {
+    setTowerOrigin(opts);
     const info = Tower.towerInfo();
     let main, footer = null;
     if (info.run) {
@@ -783,10 +985,13 @@
     }
     const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + '">' + towerVisual(info.nextLayer, info.maxLayer, 'tower') +
       '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';
-    const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
+    const ct = classicTower();
+    const p = C().page('challenge', 'stages', content, ct
+      ? { cls: 'tower-board', noTabs: true, noFooter: true, pageClass: 'classic-tower', above: classicTowerBar() }
+      : { cls: 'tower-board' });
     bindTips(p);
-    if (!info.run) fillFoeArt(p, info.preview);
-    back(p, backToStages);
+    if (!info.run) { fillFoeArt(p, info.preview); fillClassicFoeArt(p, info.preview); }
+    back(p, towerBack, ct ? '返回征战' : '返回');
     on(p, 'fight', () => {
       if (info.run) {
         if (info.run.choices) { offerChoice('tower', info.run.choices); return; }
@@ -906,7 +1111,8 @@
       ], { small: true });
   }
 
-  function openEndless() {
+  function openEndless(opts) {
+    setTowerOrigin(opts);
     /* 【U18c】到这一屏就**直接触发**该播的剧情（用户口径 2026-10：不要先点一次「继续战斗」）。
      * `Tower.autoPlayStory` 是「现在该播吗」的唯一判定（判定在 tower-plot 的 `due()`）：
      * 没剧情时它什么都不做；该播时它把 id 落到 `run.story` 上 —— 所以紧接着取到的 info
@@ -1050,13 +1256,17 @@
       /* 【2026-10 用户口径】剧情 / 挑战模式开关**一直挂在塔的正下方**（绝对定位在页面左下角，
        * 也就是塔身那一列的下方）—— 不要塞进「放弃本局 / 继续战斗」那一行。 */
       TowerPlot.modeButtonHtml() + '</div>';
-    const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
+    const ct = classicTower();
+    const p = C().page('challenge', 'stages', content, ct
+      ? { cls: 'tower-board', noTabs: true, noFooter: true, pageClass: 'classic-tower', above: classicTowerBar() }
+      : { cls: 'tower-board' });
     /* 【2026-10 用户口径】剧情页文字太长时要能自动下翻：整页重画会把文字区的滚动位置
      * 归零，而这一屏可能已经打完（没有下一次打字 tick 来带滚动），所以在画完之后同步补一次。 */
     if (typeof TowerPlot.afterRender === 'function') TowerPlot.afterRender();
     bindTips(p);
-    if (info.run) fillFoeArt(p, Tower.planInfo ? Tower.planInfo('endless') : Tower.preview(info.run.layer, info.run.salt, true));
-    back(p, backToStages);
+    if (info.run) { const pv = Tower.planInfo ? Tower.planInfo('endless') : Tower.preview(info.run.layer, info.run.salt, true); fillFoeArt(p, pv); fillClassicFoeArt(p, pv); }
+    back(p, towerBack, ct ? '返回征战' : '返回');
+    if (ct) { const bg = classicTowerBackground('endless', info.run ? info.run.layer : 1); if (bg) { p.style.setProperty('--tower-bg-top', bg.top); p.style.setProperty('--tower-bg-bottom', bg.bottom); } }
     /* 【2026-10 用户口径】剧情屏**没有「继续」按钮了**：点屏幕任意位置推进
      *（语义就是 `TowerPlot.next()` —— 正在打字时点一下＝立刻补完这一行，打完了再点＝下一行）。
      * `TowerPlot.showing()` 同时覆盖「剧情屏」与「停留一下」的提示屏（第一次失去烙印）。
@@ -1223,6 +1433,8 @@
         trial: nx.info && nx.info.mechDesc ? { text: nx.info.mechDesc } : null,
         // 塔里倍速可以到 3×（普通战斗只到 2×，见 main.js 的 startBattle）
         allowSkip: skipAllowed, speedToggle: true, speedMax: 3,
+        /* 经典塔：胜利后不展示原版战果 CG（只影响经典村庄-征战入口）。 */
+        hideVictoryCg: classicTower(),
         // 塔的产出全部由状态机结算（松果/压缩碎片/抽奖卷），关掉战斗飘物，
         // 否则免门票的无尽模式可以无限刷飘物松果与经验。
         collectDrops: false,
@@ -1861,13 +2073,14 @@
       '<h4>出售增益（回收 40%，限次与永久都可卖）</h4>' +
       '<div class="shop-sell">' + sellRows + '</div>' +
       '</div>';
-    const p = C().page('challenge', 'stages', content, {
+    const ct = classicTower();
+    const p = C().page('challenge', 'stages', content, Object.assign({
       cls: 'tower-board',
       left: (!revisit && !shop.rest)
         ? '<span class="footer-left">' + C().btn('结算离场', 'settle', 'small gold') + '</span>' : '',
       right: '<span class="footer-right">' + C().btn(revisit || shop.rest ? '返回' : '继续挑战', 'leave', 'gold') + '</span>',
-    });
-    back(p, () => openEndless());
+    }, ct ? { noTabs: true, pageClass: 'classic-tower', homeLabel: '返回无尽塔' } : {}));
+    back(p, () => openEndless(), '返回无尽塔');
     shop.slots.forEach((s, i) => on(p, 'buy' + i, () => {
       const r = Tower.buyShopSlot(i);
       if (r && r.needsReplace) { offerShopReplace(i, r.buff); return; }
@@ -2033,15 +2246,17 @@
       '</div>';
     /* boundary（E16「铸币商队」顶掉了每 5 层的结算商店）：它站在结算点上，
      * 所以补回试炼商店那一枚「结算离场」；普通铸币商店（层中偶遇）照旧没有。 */
-    const p = C().page('challenge', 'stages', content, { cls: 'tower-board',
+    const ct = classicTower();
+    const p = C().page('challenge', 'stages', content, Object.assign({ cls: 'tower-board',
       left: shop.boundary
         ? '<span class="footer-left">' + C().btn('结算离场', 'settle', 'small gold') + '</span>' : '',
-      right: '<span class="footer-right">' + C().btn('继续战斗', 'mintleave', 'gold') + '</span>' });
+      right: '<span class="footer-right">' + C().btn('继续战斗', 'mintleave', 'gold') + '</span>' },
+    ct ? { noTabs: true, pageClass: 'classic-tower', homeLabel: '返回无尽塔' } : {}));
     bindTips(p);
     /* 页脚「返回」= **只是回上一页，店不收摊**（用户口径）：回到无尽首页后按钮仍写「进入铸币商店」，
      * 想好了再进来买/换/刷新都行。真正让这家店消失的只有三件事：
      * 完成一次购买、完成一次交换、或者点这里的「继续战斗」。 */
-    back(p, () => openEndless());
+    back(p, () => openEndless(), '返回无尽塔');
     if (shop.boundary) bindShopSettle(p);
     shop.slots.forEach((s, i) => on(p, 'mintbuy' + i, () => {
       const r = Tower.buyMintSlot(i);

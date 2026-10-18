@@ -18,6 +18,19 @@
 (function () {
   'use strict';
 
+  /* 开发者开关：false = 经典界面不显示调试按钮/面板，调试开关也不生效；
+   * true  = 经典界面也照常可用。需要时只改这一行。 */
+  const DEBUG_IN_CLASSIC = false;
+
+  /** 当前是不是经典界面。只在浏览器有 UI 时判断；纯状态测试/无 UI 宿主视为允许。 */
+  function classicUiActive() {
+    try {
+      if (window.UI && typeof UI.currentUiMode === 'function') return UI.currentUiMode() === 'classic';
+    } catch (e) {}
+    return false;
+  }
+  function debugAllowed() { return DEBUG_IN_CLASSIC || !classicUiActive(); }
+
   /* ============================================================
    * 【DBG1】开关存取（localStorage 隔离）
    * ============================================================ */
@@ -36,8 +49,8 @@
   const NUMBER_STRETCH = 1.25;
 
   function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {} }
-  function enabled(key) { return state[key] === true; }
-  function get(key) { return state[key]; }
+  function enabled(key) { return debugAllowed() && state[key] === true; }
+  function get(key) { return debugAllowed() ? state[key] : false; }
   function numberStretch() { return NUMBER_STRETCH; }
   // 位图可能比脚本晚加载完成，图就绪后按当前宽度重画一次
   window.addEventListener('load', () => { if (window.UI && UI.renderNumbers) UI.renderNumbers(); });
@@ -80,6 +93,7 @@
     { key: 'noCoinCost', label: '试炼币不消耗', note: '试炼商店（买增益 / 刷新货架 / 买铸币）与铸币商店购买都不扣代币，余额不足也照买' },
   ];
   function set(key, value, session) {
+    if (!debugAllowed()) return false;
     const def = TOGGLES.find((t) => t.key === key);
     if (!def) return false;
     const changed = state[key] !== (value === true);
@@ -223,8 +237,8 @@
     const who = typeof name === 'string' && name.trim() ? name.trim() : (S && S.name) || '小松鼠';
     for (const def of TOGGLES) state[def.key] = false;
     save();
-    try { localStorage.removeItem(State.saveKey); } catch (e) {}
-    try { localStorage.removeItem(State.saveKey + '_backup'); } catch (e) {}
+    /* 不清整条 saveKey：现在这是一份双界面槽位存档，删掉会把另一界面的进度也带走。
+     * 新开局只覆盖当前界面槽位，另一槽由 State.newGame/save 原样保留。 */
     // 默认采用无武技的普通开局；调试时也可指定武器。
     let chosen = null;
     const list = State.weaponList ? State.weaponList() : [];
@@ -234,7 +248,14 @@
       chosen = list.find((w) => w.id === Number(weaponId)) || null;
     }
     State.newGame(who, chosen ? { weaponId: chosen.id, weaponLevel: 1 } : undefined);
-    if (window.UI && UI.refreshHome) UI.refreshHome();
+    /* 新档是 classic，但当前页可能还是旧模式/旧等级的 DOM；只 refreshHome 只会改数字，
+     * 不会重画整页，于是会出现"经典 + 现代混在一起"且引导不启动。直接重进首页。 */
+    try {
+      if (window.Main && Main.showHome) Main.showHome();
+      else if (window.UI && UI.refreshHome) UI.refreshHome();
+    } catch (e) {
+      if (window.UI && UI.refreshHome) UI.refreshHome();
+    }
     return {
       name: who, weapons: State.state().weapons.slice(), skills: State.state().skills.slice(),
       weapon: chosen ? chosen.name : null, random: weaponId === 'random',
@@ -716,8 +737,16 @@
   }
 
   function isOpen() { return !!(panel && panel.classList.contains('open')); }
+  function refreshAvailability() {
+    if (!gear) return false;
+    const ok = debugAllowed();
+    gear.style.display = ok ? '' : 'none';
+    if (!ok) { panel.classList.remove('open'); gear.classList.remove('open'); }
+    return ok;
+  }
   function togglePanel(force) {
     if (!panel) build();
+    if (!debugAllowed()) { refreshAvailability(); return false; }
     const open = force == null ? !isOpen() : force === true;
     panel.classList.toggle('open', open);
     gear.classList.toggle('open', open);
@@ -735,7 +764,7 @@
     }, true);
   }
 
-  function init() { build(); bindKeys(); }
+  function init() { build(); bindKeys(); refreshAvailability(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 
@@ -744,7 +773,8 @@
    * ============================================================ */
   window.Debug = {
     enabled, get, set, toggle, reset, numberStretch, resetAccount, grantItem, grantWS, forgetWS, MAX_LEVEL,
-    open: () => togglePanel(true), close: () => togglePanel(false), togglePanel, state: () => Object.assign({}, state),
+    open: () => togglePanel(true), close: () => togglePanel(false), togglePanel, refresh: refreshAvailability,
+    allowed: debugAllowed, DEBUG_IN_CLASSIC, state: () => Object.assign({}, state),
     /* 【DBG5b】一次性工具清单（只读）：面板按它渲染按钮，回归/探针也可以用它直接跑某一条
      * （`Debug.actions().find((a) => a.label === '重置每日与体力计时').run()`）——
      * 与真人点按钮走的是**同一份实现**，不会出现「测试绿、点按钮不生效」那种错位。 */

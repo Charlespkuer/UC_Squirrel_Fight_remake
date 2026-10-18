@@ -1,0 +1,758 @@
+{
+ "page": "main",
+ "pageRootId": "7039",
+ "source": "tags.json（本目录）",
+ "how": "界面代码用 view.byName(名字) 寻址；名字来自 SWF 放置标签的 na 字段。",
+ "count": 104,
+ "elements": [
+  {
+   "name": "num2",
+   "id": "3529",
+   "depth": 1,
+   "kind": "sprite",
+   "frames": 52
+  },
+  {
+   "name": "vipType",
+   "id": "7030",
+   "depth": 1,
+   "kind": "sprite",
+   "frames": 3
+  },
+  {
+   "name": "prentices",
+   "id": "6982",
+   "depth": 2,
+   "kind": "sprite",
+   "frames": 5,
+   "note": "徒弟栏：第 1/2/3 帧摆 1/2/3 个徒弟，末帧空"
+  },
+  {
+   "name": "ikNode_113",
+   "id": "5188",
+   "depth": 2,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_41",
+   "id": "5188",
+   "depth": 2,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_48",
+   "id": "4950",
+   "depth": 2,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_59",
+   "id": "5188",
+   "depth": 2,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_68",
+   "id": "5188",
+   "depth": 2,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_84",
+   "id": "4950",
+   "depth": 2,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_33",
+   "id": "4950",
+   "depth": 4,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "num3",
+   "id": "3529",
+   "depth": 4,
+   "kind": "sprite",
+   "frames": 52
+  },
+  {
+   "name": "ikNode_12",
+   "id": "4950",
+   "depth": 5,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_21",
+   "id": "4950",
+   "depth": 5,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_111",
+   "id": "4950",
+   "depth": 5,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_39",
+   "id": "4950",
+   "depth": 5,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_49",
+   "id": "5116",
+   "depth": 5,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_57",
+   "id": "4950",
+   "depth": 5,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_66",
+   "id": "4950",
+   "depth": 5,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_85",
+   "id": "5116",
+   "depth": 5,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_29",
+   "id": "4950",
+   "depth": 7,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "num4",
+   "id": "3529",
+   "depth": 7,
+   "kind": "sprite",
+   "frames": 52
+  },
+  {
+   "name": "ikNode_13",
+   "id": "5116",
+   "depth": 8,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_23",
+   "id": "5188",
+   "depth": 8,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_40",
+   "id": "5116",
+   "depth": 8,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_50",
+   "id": "5188",
+   "depth": 8,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_58",
+   "id": "5116",
+   "depth": 8,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_67",
+   "id": "5116",
+   "depth": 8,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_86",
+   "id": "5188",
+   "depth": 8,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_109",
+   "id": "5262",
+   "depth": 9,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_31",
+   "id": "5188",
+   "depth": 10,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "num1",
+   "id": "3529",
+   "depth": 10,
+   "kind": "sprite",
+   "frames": 52,
+   "note": "金松果数字 第 1 位（8 位里最左）"
+  },
+  {
+   "name": "ikNode_14",
+   "id": "5188",
+   "depth": 11,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_19",
+   "id": "5262",
+   "depth": 11,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_112",
+   "id": "5116",
+   "depth": 12,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_37",
+   "id": "5262",
+   "depth": 12,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_46",
+   "id": "5262",
+   "depth": 12,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_55",
+   "id": "5262",
+   "depth": 12,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_64",
+   "id": "5262",
+   "depth": 12,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_82",
+   "id": "5262",
+   "depth": 12,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_32",
+   "id": "5188",
+   "depth": 13,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_10",
+   "id": "5262",
+   "depth": 14,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_20",
+   "id": "6943",
+   "depth": 14,
+   "kind": "sprite",
+   "frames": 102
+  },
+  {
+   "name": "ikNode_110",
+   "id": "6984",
+   "depth": 15,
+   "kind": "sprite",
+   "frames": 4
+  },
+  {
+   "name": "ikNode_38",
+   "id": "6984",
+   "depth": 15,
+   "kind": "sprite",
+   "frames": 4
+  },
+  {
+   "name": "ikNode_47",
+   "id": "6985",
+   "depth": 15,
+   "kind": "sprite",
+   "frames": 12
+  },
+  {
+   "name": "ikNode_56",
+   "id": "6986",
+   "depth": 15,
+   "kind": "sprite",
+   "frames": 19
+  },
+  {
+   "name": "ikNode_65",
+   "id": "6984",
+   "depth": 15,
+   "kind": "sprite",
+   "frames": 4
+  },
+  {
+   "name": "ikNode_83",
+   "id": "6987",
+   "depth": 15,
+   "kind": "sprite",
+   "frames": 22
+  },
+  {
+   "name": "ikNode_27",
+   "id": "5262",
+   "depth": 16,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_11",
+   "id": "6931",
+   "depth": 17,
+   "kind": "sprite",
+   "frames": 86
+  },
+  {
+   "name": "ikNode_28",
+   "id": "6963",
+   "depth": 19,
+   "kind": "sprite",
+   "frames": 148
+  },
+  {
+   "name": "num",
+   "id": "4780",
+   "depth": 19,
+   "kind": "sprite",
+   "frames": 13
+  },
+  {
+   "name": "ikNode_24",
+   "id": "5188",
+   "depth": 25,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_25",
+   "id": "4950",
+   "depth": 28,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_34",
+   "id": "5605",
+   "depth": 30,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_26",
+   "id": "5605",
+   "depth": 31,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_30",
+   "id": "5116",
+   "depth": 33,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_22",
+   "id": "5116",
+   "depth": 34,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_114",
+   "id": "5188",
+   "depth": 37,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_42",
+   "id": "5188",
+   "depth": 37,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_51",
+   "id": "5188",
+   "depth": 37,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_69",
+   "id": "5188",
+   "depth": 37,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_87",
+   "id": "5188",
+   "depth": 37,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_15",
+   "id": "5188",
+   "depth": 38,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_60",
+   "id": "5188",
+   "depth": 39,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_115",
+   "id": "4950",
+   "depth": 40,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_43",
+   "id": "4950",
+   "depth": 40,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_52",
+   "id": "4950",
+   "depth": 40,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_70",
+   "id": "4950",
+   "depth": 40,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_88",
+   "id": "4950",
+   "depth": 40,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_16",
+   "id": "4950",
+   "depth": 41,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_61",
+   "id": "4950",
+   "depth": 42,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_35",
+   "id": "5605",
+   "depth": 43,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_116",
+   "id": "5605",
+   "depth": 43,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_44",
+   "id": "5605",
+   "depth": 43,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_53",
+   "id": "5605",
+   "depth": 43,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_71",
+   "id": "5605",
+   "depth": 43,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_89",
+   "id": "5605",
+   "depth": 43,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_17",
+   "id": "5605",
+   "depth": 44,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "ikNode_62",
+   "id": "5605",
+   "depth": 45,
+   "kind": "sprite",
+   "frames": 2
+  },
+  {
+   "name": "myself",
+   "id": "6988",
+   "depth": 91,
+   "kind": "sprite",
+   "frames": 89,
+   "note": "首页主角松鼠（89 帧循环动画，装备不参与）"
+  },
+  {
+   "name": "button1",
+   "id": "6994",
+   "depth": 157,
+   "kind": "sprite",
+   "frames": 3,
+   "note": "底栏「道具」"
+  },
+  {
+   "name": "button2",
+   "id": "6999",
+   "depth": 167,
+   "kind": "sprite",
+   "frames": 3,
+   "note": "底栏「状态」"
+  },
+  {
+   "name": "button3",
+   "id": "7006",
+   "depth": 181,
+   "kind": "sprite",
+   "frames": 3,
+   "note": "底栏「开始挑战」"
+  },
+  {
+   "name": "button4",
+   "id": "7011",
+   "depth": 193,
+   "kind": "sprite",
+   "frames": 3,
+   "note": "底栏「消息」"
+  },
+  {
+   "name": "button5",
+   "id": "7016",
+   "depth": 200,
+   "kind": "sprite",
+   "frames": 3,
+   "note": "底栏「系统」"
+  },
+  {
+   "name": "newMessage",
+   "id": "3180",
+   "depth": 207,
+   "kind": "sprite",
+   "frames": 3,
+   "note": "新消息红点：第 2 帧 = 隐藏（复刻固定停在隐藏态）"
+  },
+  {
+   "name": "name",
+   "id": "7018",
+   "depth": 216,
+   "kind": "text",
+   "frames": 1,
+   "note": "昵称（唯一的真文本标签 tp11；其余\"字\"都是矢量形状）"
+  },
+  {
+   "name": "level",
+   "id": "4315",
+   "depth": 217,
+   "kind": "sprite",
+   "frames": 2,
+   "note": "等级数字（数字精灵，4 位）"
+  },
+  {
+   "name": "c1",
+   "id": "3414",
+   "depth": 228,
+   "kind": "sprite",
+   "frames": 3,
+   "note": "限时道具角标槽 1（空槽帧 2）"
+  },
+  {
+   "name": "c2",
+   "id": "3414",
+   "depth": 231,
+   "kind": "sprite",
+   "frames": 3
+  },
+  {
+   "name": "c3",
+   "id": "3414",
+   "depth": 234,
+   "kind": "sprite",
+   "frames": 3
+  },
+  {
+   "name": "energyMc",
+   "id": "7022",
+   "depth": 240,
+   "kind": "sprite",
+   "frames": 101,
+   "note": "体力条：101 帧，靠 cD 蒙版逐帧揭开填充"
+  },
+  {
+   "name": "energy",
+   "id": "4315",
+   "depth": 244,
+   "kind": "sprite",
+   "frames": 2,
+   "note": "当前体力数字（3-4 位）"
+  },
+  {
+   "name": "maxEnergy",
+   "id": "4315",
+   "depth": 255,
+   "kind": "sprite",
+   "frames": 2,
+   "note": "体力上限数字"
+  },
+  {
+   "name": "expMc",
+   "id": "4318",
+   "depth": 290,
+   "kind": "sprite",
+   "frames": 101,
+   "note": "经验条：同体力条，cD 蒙版"
+  },
+  {
+   "name": "expNum",
+   "id": "4315",
+   "depth": 296,
+   "kind": "sprite",
+   "frames": 2,
+   "note": "经验百分比数字"
+  },
+  {
+   "name": "point",
+   "id": "7028",
+   "depth": 311,
+   "kind": "sprite",
+   "frames": 3,
+   "note": "经验条右侧的百分比装饰（0% / 100% 时换帧）"
+  },
+  {
+   "name": "num6",
+   "id": "3529",
+   "depth": 314,
+   "kind": "sprite",
+   "frames": 52
+  },
+  {
+   "name": "num7",
+   "id": "3529",
+   "depth": 317,
+   "kind": "sprite",
+   "frames": 52
+  },
+  {
+   "name": "num8",
+   "id": "3529",
+   "depth": 320,
+   "kind": "sprite",
+   "frames": 52,
+   "note": "金松果数字 第 8 位"
+  },
+  {
+   "name": "num5",
+   "id": "3529",
+   "depth": 323,
+   "kind": "sprite",
+   "frames": 52
+  },
+  {
+   "name": "viplevel",
+   "id": "7032",
+   "depth": 326,
+   "kind": "sprite",
+   "frames": 3,
+   "note": "VIP 标：第 2 帧 = 隐藏（复刻没有 VIP）"
+  },
+  {
+   "name": "homeButton",
+   "id": "7038",
+   "depth": 346,
+   "kind": "sprite",
+   "frames": 2,
+   "note": "村庄门（20 级起显示）"
+  }
+ ]
+}

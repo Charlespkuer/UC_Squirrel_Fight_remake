@@ -118,8 +118,10 @@ function setup() {
 const tests = [];
 function test(name, run) { tests.push([name, run]); }
 function enterArena(g, kind) {
-  g.c.State.state().level = Math.max(g.c.State.state().level, kind === 1 ? 20 : 11);
-  g.c.ClassicExtras.arena(); g.click(kind === 1 ? 'arena-fragment' : 'arena-exp'); g.modalClick();
+  g.c.State.state().level = Math.max(g.c.State.state().level, kind === 0 ? 10 : 15);
+  g.c.ClassicExtras.arena();
+  g.click(kind === 1 ? 'arena-fragment' : kind === 2 ? 'arena-pet' : 'arena-exp');
+  g.modalClick();
 }
 function assertBalanced(markup) {
   const voidTags = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
@@ -135,17 +137,19 @@ function assertBalanced(markup) {
   }
 }
 
-test('竞技11/20级门槛在报名确认时再次校验，不扣低等级资源', () => {
+test('竞技10/15级门槛在报名确认时再次校验，不扣低等级资源', () => {
   const g = setup(), s = g.c.State.state();
-  g.c.ClassicExtras.arena(); g.click('arena-exp');
-  assert.match(g.modals.at(-1).html, /11级/); assert.equal(g.battles.length, 0);
-  s.level = 19; g.c.ClassicExtras.arena(); g.click('arena-fragment');
-  assert.match(g.modals.at(-1).html, /20级/); assert.equal(s.energy, 90);
-  s.level = 11; g.c.ClassicExtras.arena(); g.click('arena-exp');
+  s.level = 9; g.c.ClassicExtras.arena(); g.click('arena-exp');
+  assert.match(g.modals.at(-1).html, /10级/); assert.equal(g.battles.length, 0);
+  s.level = 14; g.c.ClassicExtras.arena(); g.click('arena-fragment');
+  assert.match(g.modals.at(-1).html, /15级/); assert.equal(s.energy, 90);
+  g.c.ClassicExtras.arena(); g.click('arena-pet');
+  assert.match(g.modals.at(-1).html, /15级/); assert.equal(s.energy, 90);
+  s.level = 10; g.c.ClassicExtras.arena(); g.click('arena-exp');
   s.level = 1; g.modalClick(); assert.equal(g.battles.length, 0); assert.equal(s.energy, 90);
 });
 
-test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进场必付费', () => {
+test('竞技报名扣费：体力 > 对应券 > 另一张券 > 体力药（与现代版一致）', () => {
   const c = setup();
   const S = c.c.State;
   const s = S.state();
@@ -156,7 +160,7 @@ test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进
     const r = c.c.ClassicExtras.payArenaEntry(s, kind);
     return { r, before, after: { e: s.energy, t: s.props[36], b: s.props[39] } };
   };
-  // 优先级：**体力 > 准入道具 > 喝药**。体力充足时扣体力，道具不动。
+  // 优先级：**体力 > 对应券 > 另一张券（现代版兜底） > 喝药**。体力充足时扣体力，道具不动。
   let x = pay(90, 3, 3, 0);
   assert.ok(x.r.ok && x.r.by === 'energy', '经验场体力充足应当扣体力');
   assert.equal(x.after.e, 60, '经验场体力 90→60，实测 ' + x.after.e);
@@ -180,14 +184,22 @@ test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进
   assert.ok(x.r.ok && x.r.by === 'item' && x.r.itemId === 39, '碎片场体力不足时扣勇气徽章');
   assert.equal(x.after.b, 0, '勇气徽章 1→0');
   assert.equal(x.after.e, 10, '体力不该动');
-  // 碎片场**不能**用英雄帖
+  // 体力不足、对应券没有 → 现代版会兜底用另一张券
   x = pay(10, 3, 0, 1);
-  assert.ok(!x.r.ok, '碎片场不该接受英雄帖');
-  assert.equal(x.after.t, 3, '被拒时英雄帖不该被扣');
-  // 经验场**不能**用勇气徽章
+  assert.ok(x.r.ok && x.r.by === 'item' && x.r.itemId === 36 && x.r.fallback, '碎片场没有徽章时兜底扣英雄帖');
+  assert.equal(x.after.t, 2, '英雄帖 3→2');
+  assert.equal(x.after.b, 0, '徽章本来就没有');
   x = pay(10, 0, 3, 0);
-  assert.ok(!x.r.ok, '经验场不该接受勇气徽章');
-  assert.equal(x.after.b, 3, '被拒时勇气徽章不该被扣');
+  assert.ok(x.r.ok && x.r.by === 'item' && x.r.itemId === 39 && x.r.fallback, '经验场没有英雄帖时兜底扣勇气徽章');
+  assert.equal(x.after.b, 2, '勇气徽章 3→2');
+  assert.equal(x.after.t, 0, '英雄帖本来就没有');
+  // 两张都有 → 先扣本场对应券
+  x = pay(10, 1, 1, 1);
+  assert.ok(x.r.ok && x.r.itemId === 39 && !x.r.fallback, '碎片场先扣勇气徽章');
+  assert.equal(x.after.b, 0, '徽章 1→0'); assert.equal(x.after.t, 1, '英雄帖不该动');
+  x = pay(10, 1, 1, 0);
+  assert.ok(x.r.ok && x.r.itemId === 36 && !x.r.fallback, '经验场先扣英雄帖');
+  assert.equal(x.after.t, 0, '英雄帖 1→0'); assert.equal(x.after.b, 1, '勇气徽章不该动');
   // 弹尽粮绝 → 拒绝且不扣任何东西
   x = pay(0, 0, 0, 0);
   assert.ok(!x.r.ok, '什么都没有时应当拒绝');
@@ -205,8 +217,8 @@ test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进
       assert.equal(changed, 1, '一次报名只该扣一种资源（kind=' + kind + ' dE=' + dE + ' dT=' + dT + ' dB=' + dB + '）');
       if (y.r.by === 'energy') assert.ok(dE === 30, '体力路径应当正好扣 30，实测 ' + dE);
       if (y.r.by === 'item') {
-        assert.ok(y.r.itemId === (kind ? 39 : 36), '道具路径应当扣对应入场券');
-        assert.equal(kind ? dB : dT, 1, '道具路径应当正好扣 1 枚');
+        assert.ok(y.r.itemId === 36 || y.r.itemId === 39, '道具路径只能扣两张入场券之一');
+        assert.equal(y.r.itemId === 36 ? dT : dB, 1, '道具路径应当正好扣 1 枚');
       }
     }
   }
@@ -293,14 +305,21 @@ test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进
     assert.equal(Number(ss.props[39] || 0), 3, '体力够时不该动徽章');
     assert.equal(Number(ss.props[2] || 0), 1, '体力够时不该喝药');
   }
-  // 回归：体力 0 + 无徽章 → 拒绝，且提示「没有勇气徽章」
+  // 现代兜底：体力 0 + 没徽章 + 有英雄帖 → 碎片场也能用英雄帖进场
   {
     const g = setup(), ss = g.c.State.state();
     ss.level = 25; ss.energy = 0; ss.props[1] = 0; ss.props[2] = 0; ss.props[39] = 0; ss.props[36] = 3;
     enterArena(g, 1);
-    assert.equal(g.battles.length, 0, '没有徽章时不该进场');
-    assert.equal(ss.props[36], 3, '英雄帖不该被扣');
-    assert.match(String(g.modals.at(-1).html), /勇气徽章/, '应当提示缺少勇气徽章');
+    assert.equal(g.battles.length, 1, '有英雄帖时碎片场应当能进场（现代版兜底）');
+    assert.equal(ss.props[36], 2, '英雄帖 3→2');
+  }
+  // 两张券都没有 + 没有体力药 → 拒绝，且提示两种券都没有
+  {
+    const g = setup(), ss = g.c.State.state();
+    ss.level = 25; ss.energy = 0; ss.props[1] = 0; ss.props[2] = 0; ss.props[39] = 0; ss.props[36] = 0;
+    enterArena(g, 1);
+    assert.equal(g.battles.length, 0, '两张券都没有时不该进场');
+    assert.match(String(g.modals.at(-1).html), /英雄帖\/勇气徽章/, '应当提示英雄帖/勇气徽章都没有');
   }
   // 源码层面：两段式扣费的旧写法不该再出现
   const src = fs.readFileSync(path.join(rootDir, 'js', 'classic-extras.js'), 'utf8');
@@ -325,6 +344,7 @@ test('竞技战果弹窗：「返回竞技场」在主操作位（最右）', ()
 
 test('竞技两战只付一次报名费用，冠军150经验且不额外赠送金松果', () => {
   const g = setup(), s = g.c.State.state();
+  s.level = 11;
   enterArena(g, 0); assert.equal(s.energy, 60); assert.equal(g.battles.length, 1);
   g.settle(0, 0);
   const modalCount = g.modals.length;
@@ -337,8 +357,20 @@ test('竞技两战只付一次报名费用，冠军150经验且不额外赠送�
   assertBalanced(g.markup);
 });
 
-test('经验竞技冠亚季四名分别150/75/45/0，半决赛落败必须再打季军赛', () => {
-  for (const [semiWin, secondWin, reward, place] of [[0, 0, 150, '冠军'], [0, 1, 75, '亚军'], [1, 0, 45, '季军'], [1, 1, 0, '第四名']]) {
+test('幻兽竞技场：15级、召唤证优先、冠军发40孵化点', () => {
+  const g = setup(), s = g.c.State.state();
+  s.level = 15; s.energy = 0; s.props[36] = 0; s.props[39] = 0; s.props[82] = 1;
+  const hatch0 = s.hatchPoint || 0;
+  enterArena(g, 2);
+  assert.equal(s.props[82], 0, '体力不足时优先扣召唤证');
+  g.settle(0, 0); g.modalClick(); g.settle(1, 0); g.settle(1, 0);
+  assert.equal((s.hatchPoint || 0) - hatch0, 40, '冠军 40 孵化点');
+  assert.match(g.modals.at(-1).html, /孵化点 ×40/);
+  assertBalanced(g.markup);
+});
+
+test('经验竞技冠亚季四名分别150/100/50/30，半决赛落败必须再打季军赛', () => {
+  for (const [semiWin, secondWin, reward, place] of [[0, 0, 150, '冠军'], [0, 1, 100, '亚军'], [1, 0, 50, '季军'], [1, 1, 30, '第四名']]) {
     const g = setup(), s = g.c.State.state(); enterArena(g, 0);
     g.settle(0, semiWin); g.settle(0, semiWin);
     assert.equal(s.exp, 0); assert.equal(g.modals.at(-1).title, semiWin === 0 ? '晋级决赛' : '争夺季军');
@@ -418,7 +450,7 @@ test('竞技保存中断进度，刷新后继续季军赛不再收费且旧回�
   g.battles[1].opts.onError(); g.c.ClassicExtras.arena(); g.click('arena-resume');
   assert.equal(g.battles.length, 3); assert.equal(s.energy, 60);
   g.settle(1, 0); assert.equal(s.exp, 0);
-  g.settle(2, 0); assert.equal(s.exp, 45); assert.equal(s.classicArenaRun, null);
+  g.settle(2, 0); assert.equal(s.exp, 50); assert.equal(s.classicArenaRun, null);
   assertBalanced(g.markup);
 });
 

@@ -34,8 +34,9 @@ src-tauri/node_modules/
 
 # 安卓：gen/android 是 `tauri android init` 生成的 Android 工程（可再生，不进仓库），
 # gen/schemas 是构建时生成的权限 schema。
-# ⚠️ 但那个工程里有两处**必要补丁**（node 路径硬编码、rust 任务改跳过），
-#    重新 init 之后要照 docs/安卓版构建与实测.md 的「生成工程里的两处补丁」再打一次。
+# ⚠️ 但那个工程里有几处**必要补丁**（buildSrc 的 node 路径 +「jniLibs 有 .so 就跳过 Rust」、
+#    AndroidManifest 锁横屏、app/build.gradle.kts 的 v1+v2+v3 签名开关）。重新 init 之后
+#    按 tools/build-apk.ps1 顶部的注释逐条补回；脚本会在构建前验签名开关、构建后用 apksigner 复检。 
 src-tauri/gen/android/
 src-tauri/gen/schemas/
 
@@ -43,6 +44,8 @@ src-tauri/gen/schemas/
 .DS_Store
 Thumbs.db
 desktop.ini
+# 本机 IDE 设置（只有 git.ignoreLimitWarning 这类个人项），不进仓库
+.vscode/
 
 # 开发截图是「跑出来」的产物（战斗回归的渲染图现在写 out/battle-check/，out/ 整目录已忽略），
 # 需要留证据时手动 git add -f

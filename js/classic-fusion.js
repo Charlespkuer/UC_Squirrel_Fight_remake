@@ -119,7 +119,7 @@
       const pips = [0, 1, 2].map((i) => '<i class="' + (i < selected.length ? 'on' : '') + '"></i>').join('');
       board.innerHTML = '<header class="fusion-heading"><h2>装备融合</h2>' +
         '<ol class="fusion-steps"><li class="on"><b>1</b>选择材料</li><li' + (selected.length === 3 ? ' class="on"' : '') + '><b>2</b>融合</li><li><b>3</b>获得装备</li></ol>' +
-        '<span class="fusion-wallet">' + classic.spr('resource_1', 18) + '<span>金松果 <b>' + State.state().goldPoint + '</b></span></span></header>' +
+        '<span class="fusion-wallet">' + classic.goldIcon() + '<span>金松果 <b>' + State.state().goldPoint + '</b></span></span></header>' +
         '<div class="fusion-workbench"><div class="fusion-materials" aria-label="融合材料">' + materials + '</div>' +
         '<span class="fusion-arrow" aria-hidden="true">➜</span><div class="fusion-preview ' + (first ? 'q' + (first.quality + 1) : 'missing') + '"><span class="fusion-frame"><span class="fusion-question">?</span></span><span class="fusion-preview-label">' + (first ? qualities[first.quality + 1] + partLabel(first) : '更高品质') + '</span><span class="fusion-preview-hint">必得 1 件</span></div>' +
         '<div class="fusion-operation"><span class="fusion-cost">' + (first ? '消耗 <b>' + costOf(first) + '</b> 金松果' : '按品质 30 / 40 / 50 / 60') + '</span><button type="button" class="uc-button gold" data-fusion-action="fuse"' + (reason || busy ? ' disabled' : '') + '>开始融合</button><span class="fusion-guarantee">品质提升一级 · 材料会被消耗</span></div></div>' +

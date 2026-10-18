@@ -10,7 +10,7 @@
    `check-asset-paths.cjs`），不要为一次性验证新建 `test-xxx.cjs`，也不要顺手往现有测试里
    多塞几条"顺带断言"。
 2. **一次性脚本不许留在 tools/。** 临时的探测 / 测量 / 对比脚本写到 `out/`（已 gitignore），
-   用完即删。只有「会长期反复使用」的才配留在本目录。
+   用完即删（`out/` 的保留清单与清理步骤见 `out/AGENT.md`）。只有「会长期反复使用」的才配留在本目录。
    **跑图 / 截图产物同理**：渲染图、对比图、审计截图一律写 `out/`（例：战斗回归的渲染图落
    `out/battle-check/`）。2026-10 曾从 `tools/verification/`（118 张）与 `tools/research/`
    （32 张）清掉 60 MB 这类本地产物 —— 不要往 `tools/` 里再堆 PNG。
@@ -40,12 +40,15 @@
 
 ## 现有工具的分类（留档，别随意增删）
 
+经典界面定位：`node tools/ssfight-index.cjs` 默认列当前加载链与 API；`--name info1,expNum` / `--id 4756` 查询已提交的元件与文本索引，`--code routerOf` 给当前代码位置。纯 Node 只读查询，不产生文件、不依赖 `references/`。
+
 | 类别 | 文件 |
 |---|---|
-| 构建 | `build-release.ps1`（**一键出包**：版本号 patch +1 → 清上一版旧包 → exe/安装包/APK → 清 `target\` 等 5~10 GB 缓存；`scripts\打包.cmd` / `scripts\清缓存.cmd` 是它的双击入口 —— 双击入口一律放 `scripts\`，根目录不放 `.cmd`，薄壳会自动挑 pwsh/powershell 并把参数原样转进来）、`build-tauri-app.cjs`（桌面 exe / 安装包；`--web` / `--web --check` = 生成 / 校验前端快照 `src-tauri/web`）、`build-apk.ps1`（安卓 APK） |
+| 构建 | `build-release.ps1`（**一键出包**：版本号 patch +1 → 清上一版旧包 → exe/安装包/APK → 清 `target\` 等 5~10 GB 缓存；`scripts\打包.cmd` / `scripts\清缓存.cmd` 是它的双击入口 —— 双击入口一律放 `scripts\`，根目录不放 `.cmd`，薄壳会自动挑 pwsh/powershell 并把参数原样转进来）、`build-tauri-app.cjs`（桌面 exe / 安装包；`--web` / `--web --check` = 生成 / 校验前端快照 `src-tauri/web`）、`build-apk.ps1`（安卓 APK；出包前对账 APK 内 versionName/versionCode，出包后 apksigner 复检 v1+v2+v3，缺档用 debug 密钥补签） |
 | 回归 | `test-*.cjs`（主题套件）、`test-battle.js`、`check-asset-paths.cjs`（资源引用检查）、`check-encodings.cjs`（文本编码 / `.ps1` BOM 体检，CI 也跑） |
 | 全流程对账（**不是** `test-*.cjs`，所以不进 CI：跑一次几分钟，按需手跑） | `verify.cjs` —— 三个验证合在一个入口：`story`（剧情机器人：从第 1 层爬到上千层，逐条核对 `docs/剧情触发条件.md`）、`layer100`（整百层那两段的定向回归：22 种「进层前」局面 × 轮数）、`stacking`（同名叠加审计：叠层 / 上限 / 效果随层数放大） |
 | 数值 / 数据 | `stage-balance.cjs`、`gen-vendor-data.cjs`（从 `references/orig/` 重新生成 `js/gamedict.js`；**非运行时**，缺参考目录时明确报错） |
+| 经典模式素材 + **索引** | `gen-ssfight-ui.cjs`（从原版整片导出提素材到 `images/ssfight/ui/`；**顺带产出两张索引**：`textfields-index.json` = 每个文本字段的框宽/字号/每行几个全角字，`symbol-index.json` = 具名元件 → 元件号/帧数/出现在宿主第几帧）、`gen-ssfight-textfields.cjs`（文本字段元数据 `textfields.json`，**是上面那张索引的框宽来源**）。改经典界面前先查这两张表、别开浏览器 —— 用法见 `docs/经典模式-优化与取证Skill.md` |
 | 指南 | `build-guide.md`（构建与发布：上半篇 = 跨平台运行 / GitHub 发布流程，下半篇 = 桌面壳 Tauri 编译） |
 
 > `verify.cjs` 是 2026-10 第一百零一批加的三个验证工具（用户要求「充分测试 + 写应当条件文档并与实测对照」），

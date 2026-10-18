@@ -171,8 +171,11 @@
       ? result.startShell.map((v) => Math.max(0, Math.round(Number(v) || 0)))
       : [0, 0];
     const maxHp = sources.map((f, side) => Number(f.maxHp) > 0 ? Math.max(hps[side], Math.round(Number(f.maxHp))) : hps[side]);
+    /* 特殊战斗（训练木桩）自带回合上限；普通战斗保持原有的 99 计数显示。 */
+    const maxRounds = Math.max(0, Math.floor(Number(opts.maxRounds) || 0));
     const floaters = [], sleepers = new Set();
-    let stopped = false, skipped = false, skippedByButton = false, ending = false, raf = 0, round = 99, countdown = null;
+    let stopped = false, skipped = false, skippedByButton = false, ending = false, raf = 0,
+      round = maxRounds > 0 ? Math.max(0, maxRounds - 1) : 99, countdown = null;
     let last = performance.now(), shake = 0, combatStarted = false;
     /* 右下角操作区：绘制与点击区共用同一组矩形。
      * 原版字面坐标 (983,609) 的 164x60 框会把按钮压出血条，所以用 190x70。
@@ -610,7 +613,10 @@
       combatStarted = true;
       for (let i = 0; i < result.rounds.length; i++) {
         if (aborted()) break;
-        round = Math.max(0, 99 - i); await playRound(result.rounds[i]);
+        round = maxRounds > 0
+          ? Math.max(0, maxRounds - i - 1)
+          : Math.max(0, 99 - i);
+        await playRound(result.rounds[i]);
       }
       if (stopped) return;
       ending = true; for (const b of cornerDom) b.remove();
@@ -650,5 +656,9 @@
   window.Battle = {
     /* 内部纯函数（供 tools/*.cjs 直接单测；游戏逻辑不依赖它） */
     _applyRoundCaps: applyRoundCaps, _cornerLayout: cornerLayout,
+    /* 正在播的那一场的控制器（`skip()` / `cancel()`）。给**探针与回归**用：
+     * 一场战斗要按模拟出的回合数逐帧播几十秒，等价性验证只需要"结果 + 结算链路"，
+     * 所以探针要能主动把它跳到结算（与玩家按右下角「跳过」是同一条路径）。 */
+    active: () => activeController,
     run, makeAvatar, REGIONS, weaponLabelFor, isThrowing };
 })();

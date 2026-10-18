@@ -155,200 +155,6 @@
     ctx.restore();
   }
 
-  /** 在 stage 上绘制原版风格首页；返回可点击区域列表 */
-  function drawHomeHud(ctx, W, H) {
-    const S = State.state();
-    if (!S) return [];
-    State.tickEnergy();
-    const stats = State.totalStats();
-    const regions = [];
-    const spr = (id, label, x, y, w, h) => Engine.drawSprite(ctx, id, label, x, y, w, h);
-
-    // ================= 顶部状态栏 =================
-    ctx.save();
-    const g = ctx.createLinearGradient(0, 0, 0, 118);
-    g.addColorStop(0, 'rgba(28,16,6,.96)');
-    g.addColorStop(1, 'rgba(28,16,6,.72)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, 118);
-    ctx.fillStyle = 'rgba(255,179,46,.9)';
-    ctx.fillRect(0, 116, W, 3);
-    ctx.restore();
-
-    // 头像（用原版 standby 第一帧离屏渲染）
-    if (!homeAvatar) homeAvatar = makeHomeAvatar();
-    if (homeAvatar) ctx.drawImage(homeAvatar, 14, 12, 84, 84);
-    ctx.save();
-    ctx.lineWidth = 3; ctx.strokeStyle = '#ffb32e';
-    rr(ctx, 14, 12, 84, 84, 12); ctx.stroke();
-    ctx.restore();
-
-    // 等级徽章
-    spr('shouyebiao', '3', 100, 12, 54, 48);
-    Engine.drawNumber(ctx, 'num_36', String(S.level), 130, 20, { h: 28, align: 'center' });
-    Engine.text(ctx, 'Lv', 104, 56, { size: 14, color: '#ffe9b8', lineWidth: 3 });
-
-    // 名字
-    Engine.text(ctx, S.name, 166, 42, { size: 26, color: '#fff6d8', lineWidth: 6 });
-
-    // 三围
-    const st = [['力量', stats.power], ['敏捷', stats.agility], ['速度', stats.speed]];
-    for (let i = 0; i < 3; i++) {
-      const sx = 166 + i * 104;
-      Engine.text(ctx, st[i][0], sx, 74, { size: 15, color: '#ffd08a', lineWidth: 3 });
-      Engine.drawNumber(ctx, 'num_36', String(st[i][1]), sx + 40, 52, { h: 22 });
-    }
-
-    // 生命 / 体力 / 经验
-    const barX = 500, barW = 400;
-    const maxHp = Math.max(1, stats.hp);
-    bar(ctx, barX, 14, barW, 24, 1, '#ffd25e', '#e8930f');
-    Engine.drawNumber(ctx, 'num_36', String(maxHp), barX + 10, 12, { h: 26 });
-    Engine.text(ctx, '生命', barX + barW - 46, 34, { size: 15, color: '#5a3208', lineWidth: 0 });
-
-    const enPct = S.energy / S.maxEnergy;
-    bar(ctx, barX, 46, barW, 22, enPct, '#a8e05f', '#4f9c17');
-    Engine.drawNumber(ctx, 'tilishuzi', S.energy + '/' + S.maxEnergy, barX + 10, 44, { h: 22 });
-    const cd = State.energyCountdown();
-    if (cd) Engine.text(ctx, cd, barX + barW - 54, 64, { size: 15, color: '#ffe9b8', lineWidth: 3 });
-
-    const expNeed = GData.nextExp(S.level);
-    bar(ctx, barX, 76, barW, 20, S.exp / expNeed, '#9fd8ff', '#2f7fd0');
-    Engine.drawNumber(ctx, 'expNum', S.exp + '/' + expNeed, barX + 10, 74, { h: 20 });
-
-    // 金松果 / 金杯
-    spr('shouyebiao', '11', 918, 8, 60, 60);
-    Engine.drawNumber(ctx, 'num_36', String(S.goldPoint), 984, 20, { h: 28 });
-    spr('shouyebiao', '13', 918, 66, 60, 60);
-    Engine.drawNumber(ctx, 'num_36', String(S.goldCup), 984, 78, { h: 28 });
-
-    // 战绩
-    Engine.text(ctx, '战绩 ' + S.allWins + '胜 ' + S.allFails + '负', 1088, 40, { size: 16, color: '#ffe9b8', align: 'right', lineWidth: 4 });
-    Engine.text(ctx, '体力 ' + S.energy + '/' + S.maxEnergy, 1088, 66, { size: 15, color: '#ffd08a', align: 'right', lineWidth: 3 });
-    Engine.text(ctx, cd || '体力已满', 1088, 90, { size: 14, color: '#ffd08a', align: 'right', lineWidth: 3 });
-
-    // ================= 左下：属性卡 =================
-    panelBg(ctx, 12, 132, 216, 128);
-    Engine.text(ctx, '基础属性', 28, 162, { size: 17, color: '#ffb32e' });
-    Engine.text(ctx, '力量 ' + stats.power, 28, 190, { size: 17, color: '#ffe9c4', lineWidth: 3 });
-    Engine.text(ctx, '敏捷 ' + stats.agility, 28, 214, { size: 17, color: '#ffe9c4', lineWidth: 3 });
-    Engine.text(ctx, '速度 ' + stats.speed, 28, 238, { size: 17, color: '#ffe9c4', lineWidth: 3 });
-
-    // 加成说明
-    const gs = State.myGears().filter((x) => x.used);
-    Engine.text(ctx, gs.length ? ('装备 ' + gs.length + ' 件生效中') : '未穿戴装备', 120, 162, { size: 14, color: '#bfa87f', lineWidth: 3 });
-
-    // ================= 右侧：战斗大按钮 =================
-    regions.push({ id: 'battle', x: 996, y: 272, w: 122, h: 122 });
-    const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 380);
-    ctx.save();
-    ctx.globalAlpha = 0.22 + pulse * 0.30;
-    ctx.beginPath();
-    ctx.arc(1057, 333, 68 + pulse * 6, 0, Math.PI * 2);
-    const rg = ctx.createRadialGradient(1057, 333, 20, 1057, 333, 78);
-    rg.addColorStop(0, 'rgba(255,220,120,.95)');
-    rg.addColorStop(1, 'rgba(255,180,40,0)');
-    ctx.fillStyle = rg;
-    ctx.fill();
-    ctx.restore();
-    spr('resource_16', '3', 996, 272, 122, 122);
-    // ================= 右下：武器 / 技能快捷栏 =================
-    const quick = State.myWeapons().slice(0, 3).map((w) => ({ kind: 'w', id: w.id, lv: w.level }))
-      .concat(State.mySkills().slice(0, 2).map((s) => ({ kind: 's', id: s.id, lv: s.level })));
-    if (quick.length) panelBg(ctx, 872, 450, 288, 178);
-    for (let i = 0; i < quick.length; i++) {
-      const q = quick[i];
-      const qx = 890 + (i % 5) * 56, qy = 470;
-      const cvIcon = gridIconUrl(q.kind === 'w' ? 'wuqi' : 'jineng', q.id - 1);
-      ctx.save();
-      rr(ctx, qx, qy, 52, 52, 10);
-      ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fill();
-      ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,179,46,.8)'; ctx.stroke();
-      if (cvIcon) ctx.drawImage(cvIcon, qx + 3, qy + 3, 46, 46);
-      ctx.restore();
-      Engine.text(ctx, 'Lv' + q.lv, qx + 26, qy + 68, { size: 13, color: '#ffe9b8', align: 'center', lineWidth: 3 });
-    }
-
-    // ================= 底部菜单按钮 =================
-    const MENU = [
-      { key: 'challenge', label: '挑战' },
-      { key: 'stages', label: '关卡' },
-      { key: 'arena', label: '竞技场' },
-      { key: 'rank', label: '天梯赛' },
-      { key: 'weapons', label: '武器' },
-      { key: 'skills', label: '技能' },
-      { key: 'bag', label: '背包' },
-      { key: 'gears', label: '装备' },
-      { key: 'shop', label: '商店' },
-      { key: 'lottery', label: '抽奖' },
-      { key: 'master', label: '师徒' },
-      { key: 'help', label: '帮助' },
-    ];
-    const bw = 88, bh = 56, gap = 5;
-    const totalW = MENU.length * bw + (MENU.length - 1) * gap;
-    const startX = (W - totalW) / 2;
-    const by = H - bh - 10;
-    // 底栏
-    ctx.save();
-    const bg3 = ctx.createLinearGradient(0, by - 8, 0, H);
-    bg3.addColorStop(0, 'rgba(28,16,6,.0)');
-    bg3.addColorStop(.35, 'rgba(28,16,6,.86)');
-    bg3.addColorStop(1, 'rgba(28,16,6,.97)');
-    ctx.fillStyle = bg3;
-    ctx.fillRect(0, by - 8, W, bh + 18);
-    ctx.restore();
-    for (let i = 0; i < MENU.length; i++) {
-      const m = MENU[i];
-      const bx = startX + i * (bw + gap);
-      Engine.drawButton(ctx, bx, by, bw, bh, { sheet: 'shouyebiao', label: '15', text: m.label, size: 19 });
-      regions.push({ id: m.key, x: bx, y: by, w: bw, h: bh });
-    }
-    return regions;
-  }
-
-  /** 主界面左上角头像（离屏渲染 standby 第 3 帧） */
-  let homeAvatar = null;
-  function makeHomeAvatar() {
-    const S = 168, AV = 122;
-    const c = document.createElement('canvas');
-    c.width = c.height = S;
-    const cx = c.getContext('2d');
-    cx.fillStyle = '#f6e2b8'; cx.fillRect(0, 0, S, S);
-    const f = Engine.anim('standby');
-    if (f) {
-      const frame = f[3];
-      const sheets = ['SQ_01', 'SQ_02'];
-      // 计算包围盒（与 battle.makeAvatar 同思路）
-      let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9, n = 0;
-      for (const el of frame) {
-        if (el.label === '75' || +el.label > 1000) continue;
-        const sp = Engine.spriteIn(sheets, el.label);
-        if (!sp) continue;
-        const fr = sp.fr;
-        const tx = el.tx - (fr.regX * el.a + fr.regY * el.c);
-        const ty = el.ty - (fr.regX * el.b + fr.regY * el.d);
-        minX = Math.min(minX, tx); minY = Math.min(minY, ty);
-        maxX = Math.max(maxX, tx + Math.abs(el.a) * fr.sw + Math.abs(el.c) * fr.sh);
-        maxY = Math.max(maxY, ty + Math.abs(el.b) * fr.sw + Math.abs(el.d) * fr.sh);
-        n++;
-      }
-      if (n) {
-        const bw = maxX - minX, bh = maxY - minY;
-        const hw = Math.min(bw, bh) * 0.60;
-        const hx = minX + bw * 0.28, hy = minY + bh * 0.34;
-        const k = AV / hw;
-        cx.save();
-        cx.scale(S / AV, S / AV);
-        Engine.drawFrame(cx, frame, {
-          x: AV / 2 - (hw * k) / 2 - hx * k, y: AV / 2 - (hw * k) / 2 - hy * k,
-          scale: k, sheets: sheets,
-        });
-        cx.restore();
-      }
-    }
-    return c;
-  }
-
   // 主界面快捷栏用的小图标（canvas 对象缓存）
   const gridCanvasCache = Object.create(null);
   function gridIconUrl(sheetId, index) {
@@ -444,7 +250,7 @@
       foes = [];
       for (let i = 0; i < 5; i++) {
         const lv = Math.max(1, S.level + Math.floor(Math.random() * 5) - 2);
-        foes.push(State.genAI(lv));
+        foes.push(State.genAI(lv, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 }));
       }
     }
     function render() {
@@ -616,7 +422,7 @@
       else if ((S.props[36] || 0) > 0) S.props[36]--;
       else S.props[39]--;
       State.save();
-      const ais = [State.genAI(S.level), State.genAI(S.level), State.genAI(S.level)];
+      const ais = [State.genAI(S.level, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 }), State.genAI(S.level, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 }), State.genAI(S.level, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 })];
       p.close();
       toast('你抽到的对手是【' + ais[0].name + '】Lv.' + ais[0].level + '，比赛开始！', 2500);
       setTimeout(() => {
@@ -672,7 +478,7 @@
     const b1 = el('button', 'btn btn-primary', '开始匹配');
     const b2 = el('button', 'btn', '金杯商店');
     b1.onclick = () => {
-      const foe = State.genAI(S.level + Math.floor(Math.random() * 6) - 3);
+      const foe = State.genAI(S.level + Math.floor(Math.random() * 6) - 3, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 });
       p.close();
       S.joinRankCount++;
       State.save();
@@ -836,6 +642,7 @@
   // ---------- 装备 ----------
   function openGears() {
     const S = State.state();
+    if (Number(S.level) < 10) { toast('10级后才能使用装备。多多挑战，升级后再来吧！'); return; }
     const box = el('div');
     const gears = State.myGears();
     const worn = gears.filter((g) => g.used);
@@ -943,6 +750,7 @@
     const resultDiv = el('div', 'lottery-result', '🎁');
     box.appendChild(resultDiv);
     const btn = el('button', 'btn btn-primary btn-wide', '抽 奖');
+    let spinTimer = 0, closed = false;
     btn.onclick = () => {
       if (S.lotteryFree > 0) S.lotteryFree--;
       else {
@@ -951,10 +759,11 @@
       }
       btn.disabled = true;
       let n = 0;
-      const timer = setInterval(() => {
+      spinTimer = setInterval(() => {
+        if (closed) { clearInterval(spinTimer); spinTimer = 0; return; }
         resultDiv.textContent = prizes[Math.floor(Math.random() * prizes.length)].name;
         if (++n > 15) {
-          clearInterval(timer);
+          clearInterval(spinTimer); spinTimer = 0;
           const prize = prizes[Math.floor(Math.random() * prizes.length)];
           prize.run();
           State.save();
@@ -967,7 +776,7 @@
       }, 90);
     };
     box.appendChild(btn);
-    openPanel('🎰 每日抽奖', box);
+    openPanel('🎰 每日抽奖', box, { onClose: () => { closed = true; if (spinTimer) { clearInterval(spinTimer); spinTimer = 0; } } });
   }
 
   /* ============================================================
@@ -1082,7 +891,7 @@
    * 【UI17】导出 window.UI
    * ============================================================ */
   window.UI = {
-    renderHome: renderHome, drawHomeHud: drawHomeHud, hitRegion: hitRegion, runAction: runAction,
+    renderHome: renderHome, hitRegion: hitRegion, runAction: runAction,
     openPanel: openPanel, toast: toast, confirmBox: confirmBox,
     weaponIcon: weaponIcon, skillIcon: skillIcon, propIcon: propIcon, gearIcon: gearIcon,
     frameDataUrl: frameDataUrl, gridDataUrl: gridDataUrl, installFavicon: installFavicon,

@@ -204,6 +204,23 @@ test('对手（genAI）与玩家共用同一套成长预算、四项口径与占
   }
 });
 
+test('随机对手难度系数只放大最终战斗属性，不改成长预算', () => {
+  const g = setup();
+  for (const level of [15, 30, 50, 70]) {
+    for (let i = 0; i < 10; i++) {
+      const foe = g.State.genAI(level, '', { levelJitter: 0, gearSelfLevel: true, gear: false, statScale: 1.08 });
+      const books = [53, 59, 65].filter((lv) => lv <= level).length;
+      assert.equal(foe.baseStats.power + foe.baseStats.agility + foe.baseStats.speed + foe.baseStats.hp / 5,
+        22 + (level - 1) * 4 + books * 4, '成长预算仍按原值');
+      assert.equal(foe.statScale, 1.08);
+      for (const key of ['power', 'agility', 'speed']) {
+        assert.ok(foe[key] >= Math.round(foe.baseStats[key] * 1.08) - 1, '等级 ' + level + ' ' + key);
+      }
+      assert.ok(foe.hp >= Math.round(foe.baseStats.hp * 1.08) - 1, '等级 ' + level + ' hp');
+    }
+  }
+});
+
 let failed = 0;
 for (const [name, run] of tests) {
   try { run(); console.log('PASS', name); }

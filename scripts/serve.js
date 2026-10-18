@@ -32,6 +32,19 @@ const PORT = PORT_ARG === undefined ? 8080 : Number(PORT_ARG);
 function readSaveLevel() {
   try { const d = JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8')); return Number(d && d.level) || 0; } catch (e) { return 0; }
 }
+/** 双界面独立存档：水位线要看两个槽位的最高等级，不能只看顶层当前界面。
+ *  否则「经典 1 级 / 现代 32 级」时，切到经典后写 1 级档会被水位线误判成空档覆盖。 */
+function saveMaxLevel(obj) {
+  if (!obj || typeof obj !== 'object') return 0;
+  let lv = Number(obj.level) || 0;
+  if (obj.__dualOther && typeof obj.__dualOther === 'object') lv = Math.max(lv, Number(obj.__dualOther.level) || 0);
+  if (obj.__dualSaves && typeof obj.__dualSaves === 'object') {
+    for (const slot of Object.values(obj.__dualSaves)) {
+      if (slot && typeof slot === 'object') lv = Math.max(lv, Number(slot.level) || 0);
+    }
+  }
+  return lv;
+}
 function readMinLevel() {
   try { return Number(fs.readFileSync(path.join(SAVE_DIR, '.min-level'), 'utf8')) || 0; } catch (e) { return 0; }
 }
@@ -95,7 +108,7 @@ async function handleSaveApi(req, res, url) {
     const writeMark = (lv) => { try { fs.mkdirSync(SAVE_DIR, { recursive: true }); fs.writeFileSync(MARK, String(lv), 'utf8'); } catch (e) {} };
     if (!force) {
       const mark = readMark();
-      const newLv0 = Number(parsed.level) || 0;
+      const newLv0 = saveMaxLevel(parsed);
       if (mark >= 5 && newLv0 < mark) {
         return json(res, 409, { ok: false, msg: '本机曾达到 ' + mark + ' 级，已拒绝用 ' + newLv0 + ' 级存档覆盖（要重置请用调试面板「彻底重置账号」或 ?force=1）' });
       }
@@ -103,8 +116,8 @@ async function handleSaveApi(req, res, url) {
     if (!force && fs.existsSync(SAVE_FILE)) {
       try {
         const cur = JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8'));
-        const curLv = Number(cur && cur.level) || 0;
-        const newLv = Number(parsed.level) || 0;
+        const curLv = saveMaxLevel(cur);
+        const newLv = saveMaxLevel(parsed);
         const fresh = newLv <= 1 && (!Array.isArray(parsed.weapons) || parsed.weapons.length === 0) &&
           (!Array.isArray(parsed.skills) || parsed.skills.length === 0) && (Number(parsed.goldPoint) || 0) <= 100;
         if (curLv >= 5 && fresh) {
@@ -115,7 +128,7 @@ async function handleSaveApi(req, res, url) {
     try {
       fs.mkdirSync(SAVE_DIR, { recursive: true });
       fs.writeFileSync(SAVE_FILE, JSON.stringify(parsed), 'utf8');
-      writeMark(Math.max(readMark(), Number(parsed.level) || 0));
+      writeMark(Math.max(readMark(), saveMaxLevel(parsed)));
       return json(res, 200, { ok: true, savedAt: saveStat().savedAt });
     } catch (e) { return json(res, 500, { ok: false, msg: '写入存档失败：' + e.message }); }
   }

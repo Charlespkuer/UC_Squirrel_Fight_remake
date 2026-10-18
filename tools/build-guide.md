@@ -98,7 +98,7 @@ git push origin v0.1.3
 
 | 文件 | 内容 |
 | --- | --- |
-| `squirrel-web-mac-v0.1.3.zip` | `README.md`、`css/`、`js/`、`images/`、`audio/`、`启动说明.txt`，启动器在 `scripts/`（`启动游戏.command`、`serve.js` + `serve.py`、`index.html`） |
+| `squirrel-web-mac-v0.1.3.zip` | `README.md`、`css/`、`js/`、`images/`、`audio/`、`启动说明.txt`，启动器在 `scripts/`（`启动游戏.command`、`game-exit-watch.sh`、`serve.js` + `serve.py`、`index.html`） |
 | `squirrel-web-win-v0.1.3.zip` | 同上，`scripts/` 里多一个 `启动游戏.cmd` + `start-game.ps1`（两个文件必须在一起） |
 
 > 启动器都在 `scripts/` 里；两个平台都把 `squirrel_fight.exe` 放到 zip 根目录就会优先走原生窗口。
@@ -168,31 +168,39 @@ runs-on: ${{ matrix.os }}
 `.github/workflows/ci.yml` 在 `ubuntu-latest`、`macos-latest`、`windows-latest` 上并行跑：
 
 ```bash
-node tools/check-asset-paths.cjs          # 资源引用大小写/断链体检
-node tools/test-state.cjs                 # 存档、成长、道具、每日任务…
-node tools/test-balance.cjs               # 数值与规则
-node tools/test-points.cjs                # 升级自由属性点（四项平衡）
-node tools/test-combat-rules.cjs          # 战斗规则
-node tools/test-battle-drops.cjs          # 点击拾取
-node tools/test-main-battle.cjs           # 战斗结算集成
-node tools/test-extras.cjs                # 竞技/天梯/师徒/排行榜/超级松鼠
-node tools/test-fusion.cjs                # 装备融合
-node tools/test-stages.cjs                # 关卡
-node tools/test-stage-balance.cjs         # 关卡难度平衡回归
-node tools/test-battle.js                 # 动画回归（可选依赖 @napi-rs/canvas，缺了自动 SKIP）
+node tools/check-asset-paths.cjs   # 资源引用大小写/断链体检
+node tools/check-encodings.cjs     # 文本编码 + .ps1 BOM 体检
+for t in tools/test-*.cjs; do node "$t" || exit 1; done   # 枚举整个目录，不手写清单
+node tools/test-battle.js          # 动画回归（可选依赖 @napi-rs/canvas，缺了自动 SKIP）
 ```
 
-本地等价命令：`npm test`、`npm run check`、`npm run test:battle`。
+当前套件（2026-10 审计时 16 个）：`test-state`（存档/成长/道具/每日）、`test-mint-shop`
+（无尽塔商店/剧情/整百层/同名叠加）、`test-env-buff`（环境词缀与剧情埋点）、`test-fixes-round`
+（历史战斗与塔规则）、`test-stages` / `test-stage-balance`（关卡与数值平衡）、`test-points`
+（升级属性点）、`test-battle-drops`（点击拾取）、`test-buff-report` / `test-buff-tags`
+（buff 报告与标签）、`test-extras`（竞技/天梯/师徒/排行榜/超级松鼠）、`test-fusion`（装备融合）、
+`test-min-deps`（最小依赖/引导）、`test-save-boot`（存档与启动）、`test-ssfight-render`
+（经典界面渲染与素材契约）、`test-sync`（双机同步）。
+
+本地跑全套（仓库根没有 `package.json`，所以没有 `npm test`）：
+
+```bash
+for t in tools/test-*.cjs; do node "$t" || exit 1; done
+```
 
 ---
 
 ## 六、发布前的自检清单
 
 - [ ] `node tools/check-asset-paths.cjs` 全绿（新增素材后最容易踩：**大小写**）
-- [ ] `npm test` 全绿
+- [ ] `node tools/check-encodings.cjs` 全绿（`.ps1` 含中文必须带 UTF-8 BOM）
+- [ ] `tools/test-*.cjs` 全绿（CI 会枚举整个目录）
 - [ ] `http://127.0.0.1:8080/index.html?test=1` 浏览器自检 21/21、控制台 0 错误
 - [ ] 手机上开一次 Pages 地址（竖屏会被画布缩放，纯静态站也能开，只是操作不便）
-- [ ] 版本号与 `package.json`、git tag 对齐；Release 说明里写清「怎么启动 / 存档怎么搬」
+- [ ] 安卓包三档签名齐全（**v1/v2/v3 都要 true**；`--min-sdk-version 23` 才会校验 v1）：
+      `apksigner verify --min-sdk-version 23 --verbose <apk>` —— `tools/build-apk.ps1` 已内置复检与补签
+- [ ] 版本号与 `package.json` / `tauri.conf.json` / `scripts/version.json`、git tag 对齐；
+      Release 说明里写清「怎么启动 / 存档怎么搬」
 
 ---
 
@@ -203,8 +211,8 @@ node tools/test-battle.js                 # 动画回归（可选依赖 @napi-rs
 
 | 方案 | 产物 | 本地占用 | 前端从哪来 | 用在哪 |
 | --- | --- | --- | --- | --- |
-| **轻壳**（默认） | `src-tauri/dist/squirrel_fight.exe`，**2.86 MB** | exe 一个文件（`target/` 编译缓存可用 `--clean` 回收） | **游戏目录里的 `index.html` / `css` / `js` / `images` / `audio`**：外壳启动时自己起一个迷你 HTTP 服务器供起来 | 本机玩、便携包旁边玩 |
-| **安装包** | `松鼠大战怀旧版_0.1.3_x64-setup.exe`，47 MB | 打完自动删掉临时的 `web/` | 编译进二进制（旁边没有游戏目录也能跑） | 发给别人装 |
+| **轻壳**（默认） | 仓库根目录的 `squirrel_fight.exe`，**约 2.9 MB** | exe 一个文件（`target/` 编译缓存可用 `--clean` 回收） | **游戏目录里的 `index.html` / `css` / `js` / `images` / `audio`**：外壳启动时自己起一个迷你 HTTP 服务器供起来 | 本机玩、便携包旁边玩 |
+| **安装包** | `squirrel_fight_<version>_x64-setup.exe`（约 50~70 MB） | 打完自动删掉临时的 `web/` | 编译进二进制（旁边没有游戏目录也能跑） | 发给别人装 |
 
 轻壳不复制、不嵌入任何前端资源，所以：
 
@@ -222,7 +230,7 @@ node tools/test-battle.js                 # 动画回归（可选依赖 @napi-rs
 
 原生版按这个顺序找：`<游戏根>\squirrel_fight.exe` → `scripts\squirrel_fight.exe` →
 `src-tauri\target\release\squirrel_fight.exe`
-（macOS 是 `.app` 包或 `src-tauri/dist/squirrel_fight`），加 `--browser` 可强制走浏览器路线。
+（macOS 是 `.app` 包；Windows 正式产物只有游戏根目录的 `squirrel_fight.exe`），加 `--browser` 可强制走浏览器路线。
 > 2026-10 起打包脚本**不再**往 `src-tauri\dist\` 放一份 exe 副本（便携包不收它、发布的是安装包，
 > 纯重复文件）；正式产物就一个：游戏根目录的 `squirrel_fight.exe`。
 
@@ -271,7 +279,7 @@ cmd.exe 读 `.cmd` 里的 UTF-8 中文会把中文字节错位、把中文注释
 
 ```bash
 # 一次性：装 Rust（https://rustup.rs）+ 在 src-tauri 里 npm install + npx tauri icon app-icon.png
-node tools/build-tauri-app.cjs            # 编译 → src-tauri/dist/squirrel_fight.exe
+node tools/build-tauri-app.cjs            # 编译 → 仓库根 squirrel_fight.exe
 node tools/build-tauri-app.cjs --clean    # 同上，然后 cargo clean（回收 target/）
 node tools/build-tauri-app.cjs --installer # 另打 NSIS 安装包（临时暂存 web/，打完自动删）
 ```
@@ -287,7 +295,7 @@ node tools/build-tauri-app.cjs --installer # 另打 NSIS 安装包（临时暂�
 | 需要 Node/Python | 不需要（存档由 Rust 写） | 不需要 |
 
 **关于空间**：那 3.4 GB 全在 `src-tauri/target/`，是「编译一次就有、删掉也不影响运行」的缓存；
-真正要留的只有 2.86 MB 的 exe（放在 `src-tauri/dist/`，已进 `.gitignore`）。
+真正要留的只有约 2.9 MB 的 exe（放在**仓库根目录**，是随仓库提交的双击入口）。
 `--clean` 之后重建要重新编译（本机约 1~2 分钟，依赖不用重新下载，因为 `~/.cargo` 里还留着）。
 
 ## D. 存档位置
@@ -351,9 +359,8 @@ $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'
 ## H. 平台差异与注意事项
 
 1. **WebView 引擎不同**：macOS 用系统 WKWebView、Windows 用 WebView2（Chromium）。
-   换成桌面窗口**不会**消除排版差异——`scrollbar-gutter: stable` 那套修复仍然必要
-   （见 `publish-guide.md`）。想要两端像素一致只能用自带 Chromium 的方案（Electron/CEF），
-   代价是包体 120~200 MB。
+   换成桌面窗口**不会**消除排版差异——`scrollbar-gutter: stable` 那套修复仍然必要。
+   想要两端像素一致只能用自带 Chromium 的方案（Electron/CEF），代价是包体 120~200 MB。
 2. **macOS 未签名**：不做签名与公证时首次要「右键 → 打开」；Windows 未签名会有 SmartScreen 提示。
 3. **窗口尺寸**：默认 1216×760（游戏设计尺寸 1170×690）。游戏内部按
    `documentElement.clientWidth/Height` 等比缩放，改窗口大小会自动适配。

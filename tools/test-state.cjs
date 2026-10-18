@@ -397,9 +397,125 @@ test('好友系统：随机 NPC 也能加为好友，重名/满员有提示，�
   assert.equal(S.removeFriend('老友').ok, false);
 });
 
-test('存档往返：剧情「只播一次」的记账与剧情模式开关必须保留（退出游戏再重进不能变回第一次）', () => {
+/* 好友切磋的出手池：`friendFoe` 以前把 weapons / skills 清空，好友只会普攻，
+ * 和随机挑战同一只对手的「武器 / 技能 / 普攻」权重抽取完全不是一回事。 */
+test('好友切磋：武器/技能/装备跟快照一起进战斗，老档好友也要补出出手池', () => {
   const g = game(), S = g.State;
-  /* 用户 2026-10 报的 bug：无尽塔玩到一半退出游戏再重进后，商人的第一次文案、第一次失去烙印、
+  const friend = {
+    name: '切磋陪练', level: 20, power: 30, agility: 30, speed: 30, hp: 300,
+    weapons: ['1:5', '4:3'], skills: ['1:3', '9:2'],
+    gears: [{ id: 201, ext: [] }],
+  };
+  assert.equal(S.addFriend(friend).ok, true);
+  const spar = S.friendFoe(S.friendList()[0]);
+  assert.equal(spar.weapons.join(','), '1:5,4:3', '切磋要带武器池');
+  assert.equal(spar.skills.join(','), '1:3,9:2', '切磋要带技能池');
+  assert.equal(spar.gears.length, 1, '切磋要带装备（经典战斗里还要贴图）');
+  /* 老档好友没有 skills：`friendFoe` 先走 ensureFriendLoadout 就地补，
+   * 补完的出手池必须非空，否则又退回「只会普攻」。 */
+  S.friendList()[0].skills = undefined;
+  const oldSpar = S.friendFoe(S.friendList()[0]);
+  assert.ok(oldSpar.skills.length > 0, '老档好友要补出技能池');
+  assert.ok(oldSpar.weapons.length > 0, '老档好友要补出武器池');
+});
+
+/* 好友留言：原版「查看好友 → 留言」是外链留言板；离线版落存档。
+ * 删除好友时要连留言一起清掉，不能留孤儿数据。 */
+test('好友留言：落存档、只给好友留言、删除好友一起清掉', () => {
+  const g = game(), S = g.State;
+  assert.equal(S.leaveFriendMessage('不存在', '你好').ok, false, '不是好友不能留言');
+  assert.equal(S.addFriend({ name: '留言对象', level: 10, power: 9, agility: 9, speed: 9, hp: 90 }).ok, true);
+  assert.equal(S.leaveFriendMessage('留言对象', '   ').ok, false, '空留言不保存');
+  const r = S.leaveFriendMessage('留言对象', '  你好，切磋吗？  ');
+  assert.equal(r.ok, true);
+  assert.equal(S.friendMessages('留言对象')[0].text, '你好，切磋吗？', '留言正文要 trim');
+  S.save(); S.load();
+  assert.equal(S.friendMessages('留言对象').length, 1, '留言要跟着存档往返');
+  assert.equal(S.removeFriend('留言对象').ok, true);
+  assert.equal(S.friendMessages('留言对象').length, 0, '删除好友要一起清掉留言');
+});
+
+/* 随机对手的「武器 + 技能」总数必须等于该等级的可拥有上限（不是随机个数）；
+ * 高等级还要能随机出橙装与宝石，低等级不能出橙装。 */
+test('随机对手：武技总数跟等级走，高等级能出橙装与宝石', () => {
+  const g = game(), S = g.State;
+  S.state().level = 70; S.save();
+  const high = S.genAI(70, '', { levelJitter: 0 });
+  assert.equal(high.weapons.length + high.skills.length, g.GData.wsLimit(70),
+    '70 级随机对手的武技总数必须是 wsLimit(70)');
+  let orange = 0, gem = 0, gemLevels = [];
+  for (let i = 0; i < 240; i++) {
+    const foe = S.genAI(70, '', { levelJitter: 0 });
+    for (const gear of foe.gears || []) {
+      if (!gear.orange) continue;
+      orange++;
+      if (gear.gem) { gem++; gemLevels.push(S.gemLevel(gear.gem.id)); }
+    }
+  }
+  assert.ok(orange > 0, '70 级随机对手应能出橙装（实得 ' + orange + ' 件）');
+  assert.ok(gem > 0, '橙装上应能随机镶宝石（实得 ' + gem + ' 颗）');
+  assert.ok(gemLevels.every((lv) => lv >= 1 && lv <= 7), '宝石等级夹在 1~7：' + gemLevels.join(','));
+  S.state().level = 10;
+  const low = S.genAI(10, '', { levelJitter: 0 });
+  assert.equal(low.weapons.length + low.skills.length, g.GData.wsLimit(10),
+    '10 级随机对手的武技总数必须是 wsLimit(10)');
+  assert.ok((low.gears || []).every((gear) => !gear.orange), '10 级不能出橙装');
+});
+
+/* 练功木桩：对齐 reference 里 `Stakes` 的口径 —— 木桩不判死亡，战斗按固定回合收尾。
+ * 原版 `maxRounds` 是 60；这里按用户口径固定 10 回合（`DUMMY.rounds`），生命保底 1。 */
+test('练功木桩：固定 10 次出手、生命不会耗尽，伤害照常累计', () => {
+  const g = game(), Sim = g.Sim;
+  const me = {
+    name: '测试松鼠', level: 30, power: 160, agility: 130, speed: 110, hp: 1200, maxHp: 1200,
+    baseStats: { power: 150, agility: 120, speed: 100 },
+    weapons: [{ id: 4, level: 6 }, { id: 8, level: 6 }],
+    skills: [{ id: 12, level: 6 }, { id: 17, level: 6 }], effects: {},
+  };
+  const dummy = {
+    name: '测攻击木头人', level: 1, power: 0, agility: 15, speed: 0, hp: 800, maxHp: 800,
+    baseStats: { power: 0, agility: 15, speed: 0, hp: 800 },
+    weapons: [], skills: [], npcType: 'wood', effects: {},
+    practice: true, practiceRounds: 10,
+  };
+  const r = Sim.simulate(me, dummy);
+  assert.equal(r.rounds.length, 10, '固定 10 次出手就收尾（不会因为 800 血被打空提前结束）');
+  assert.ok(r.rounds.every((x) => x.attacker === 0), '木桩不抢回合：10 次全是玩家出手');
+  assert.ok(r.rounds.every((x) => x.hpAfter[0] === me.hp), '木桩不还手：玩家血量不减');
+  assert.ok(r.rounds.every((x) => x.hpAfter[1] >= 1), '木桩生命至少保留 1，不会进入死亡分支');
+  const dealt = r.rounds.reduce((n, x) => n + (x.attacker === 0 ? (Number(x.dmg) || 0) : 0), 0);
+  assert.ok(dealt > 0, '木桩照常累计伤害：' + dealt);
+  assert.equal(r.winner, 0, '木桩不还手，玩家按血量比例获胜');
+});
+
+/* 经典主界面「消息」上的 new 红点：记账必须落在**存档**里。
+ * 2026-10 用户报"每次打开游戏后消息必有 new" —— 根因是这份记账原来写在 localStorage
+ * （`ssdz_msg_seen`），而桌面壳（Tauri）每次启动的 WebView 都是新数据目录、不保留 localStorage，
+ * 于是红点每次都重新亮一次。这条用例钉两件事：① 存档往返后"看到哪了"不回退；
+ * ② 未来时间戳（会让红点永远不亮）在读档时被夹回当下。 */
+test('消息红点的「看到哪了」落存档：往返不回退，未来时间戳被夹回', () => {
+  const g = game(), S = g.State;
+  S.recordBattle({
+    me: { name: '测试松鼠', level: 5, hp: 100, maxHp: 100, weapons: [], skills: [] },
+    foe: { name: '对手', level: 5, hp: 100, maxHp: 100, weapons: [], skills: [] },
+    result: { winner: 0, rounds: [{ attacker: 0, hpAfter: [90, 0] }], maxHp: [100, 100] },
+  });
+  const newest = g.State.battleHistory()[0].createdAt;
+  assert.ok(newest > 0, '战斗记录应带 createdAt');
+  assert.equal(S.msgSeenAt(), 0, '新档还没看过消息页 → 记账为 0（红点亮着）');
+  assert.equal(S.markMessagesSeen(), newest, '看过一遍 → 记账推到最新一条的时间');
+  assert.equal(JSON.parse(g.storage.get(S.saveKey)).msgSeenAt, newest, '记账必须立刻写进存档');
+  S.load();
+  assert.equal(S.msgSeenAt(), newest, '读档后不回退（否则每次进游戏红点又亮）');
+  g.storage.set(S.saveKey, JSON.stringify(Object.assign(JSON.parse(g.storage.get(S.saveKey)), {
+    msgSeenAt: Date.now() + 99999999,
+  })));
+  S.load();
+  assert.ok(S.msgSeenAt() <= Date.now(), '未来时间戳被夹回当下（否则红点再也不亮）');
+});
+
+test('存档往返：剧情「只播一次」的记账与剧情模式开关必须保留（退出游戏再重进不能变回第一次）', () => {
+  const g = game(), S = g.State;  /* 用户 2026-10 报的 bug：无尽塔玩到一半退出游戏再重进后，商人的第一次文案、第一次失去烙印、
    * 第一次遇巡视全都重播一遍 —— 根因就是 normalizeSave 里那份 endless 白名单没列
    * `storySeen` / `storyOn`，重载时被整包丢掉。这条用例把「存档往返要留住它们」钉死。 */
   const run = { layer: 7, plan: [{ kind: 'battle' }], idx: 0 };
@@ -560,6 +676,26 @@ test('破损字段得到校正，非对象存档被拒绝', () => {
   }
 });
 
+test('连续登录：第2天起递增，第7天多给1本挑战书；断签回第1天', () => {
+  const g = game();
+  const day = 24 * 60 * 60 * 1000;
+  const d1 = g.State.dailyStatus();
+  assert.equal(d1.streak, 1); assert.equal(d1.gold, 150); assert.equal(d1.challengeBooks, 1);
+  assert.equal(g.State.claimDaily().ok, true);
+  for (let n = 2; n <= 7; n++) {
+    g.advance(day);
+    const d = g.State.dailyStatus();
+    assert.equal(d.streak, n, '第 ' + n + ' 天连续');
+    assert.equal(d.gold, 150 + (n - 1) * 20);
+    assert.equal(d.challengeBooks, n === 7 ? 2 : 1);
+    assert.equal(g.State.claimDaily().ok, true);
+  }
+  assert.equal(g.State.state().loginStreak, 7);
+  g.advance(day * 3);                       // 断签三天
+  const d8 = g.State.dailyStatus();
+  assert.equal(d8.streak, 1); assert.equal(d8.gold, 150);
+});
+
 test('每日奖励按照本地日期发放，同日重载后不重复领取', () => {
   const g = game(), s = g.State.state();
   assert.equal(g.State.claimDaily().ok, true);
@@ -568,8 +704,9 @@ test('每日奖励按照本地日期发放，同日重载后不重复领取', ()
   g.State.load(); assert.equal(g.State.claimDaily().ok, false);
   g.advance(6 * 60 * 1000);
   assert.equal(g.State.dailyStatus().claimed, false);
+  const day2Gold = g.State.dailyStatus().gold;   // 连续登录第 2 天：150 + 20
   assert.equal(g.State.claimDaily().ok, true);
-  assert.equal(g.State.state().goldPoint, 400); assert.equal(g.State.state().props[23], 2);
+  assert.equal(g.State.state().goldPoint, 250 + day2Gold); assert.equal(g.State.state().props[23], 2);
 });
 
 test('旧存档首次迁移每日统计日期时保留当日数据，重载不清零', () => {
@@ -878,9 +1015,13 @@ test('购买拒绝负数、小数和无穷数量，合法购买正常扣款', ()
 test('装备穿戴等级、槽位互斥、融合材料和附加属性生效', () => {
   const g = game(), s = g.State.state();
   const one = g.State.addGear(1, [{ id: 28, level: 1 }]);
+  assert.equal(one.useLevel, 10, '白装也按 10 级门槛显示');
   assert.equal(g.State.wear(one.key), false);
+  s.level = 9;
+  assert.equal(g.State.wear(one.key), false, '9 级仍不能穿戴');
+  s.level = 10;
+  assert.equal(g.State.wear(one.key), true, '10 级可以穿戴');
   s.level = 20;
-  assert.equal(g.State.wear(one.key), true);
   const two = g.State.addGear(5);
   assert.equal(g.State.wear(two.key), true);
   assert.equal(g.State.myGears().find((x) => x.key === one.key).used, false);
@@ -896,6 +1037,16 @@ test('装备穿戴等级、槽位互斥、融合材料和附加属性生效', ()
   const result = g.State.mergeGears([one.key, three.key, four.key]);
   assert.equal(result.ok, true); assert.equal(result.gear.quality, 1);
   assert.equal(s.goldPoint, 70);   // 白装融合 30 金松果（按材料品质分档）
+});
+
+test('经典融合：allowMixedParts 放开同部位要求，默认模式仍拦同部位之外的材料', () => {
+  const g = game(), S = g.State;
+  const a = S.addGear(9), b = S.addGear(10), c = S.addGear(11);   // 绿装：头/手/衣服
+  assert.equal(S.gearQuality(a), 1); assert.equal(S.gearQuality(b), 1); assert.equal(S.gearQuality(c), 1);
+  assert.equal(S.mergeGears([a.key, b.key, c.key]).ok, false, '默认仍要三件同部位');
+  const r = S.mergeGears([a.key, b.key, c.key], { allowMixedParts: true });
+  assert.equal(r.ok, true, '经典融合允许不同部位');
+  assert.equal(r.gear.quality, 2, '同品质三件升一档');
 });
 
 test('需求146：套装收益 —— 同名 2/4 件两档、按最低品质缩放，且真的进战斗', () => {
@@ -1390,27 +1541,28 @@ test('每日任务按角色等级抽题：做不了的任务不会出现，升�
   assert.equal(S.questStatus().map((q) => q.key).join(','), keep, '升级不会换掉仍然能做的题');
 });
 
-test('音量/静音/分辨率/全面屏设置写进存档并读得回来', () => {
+test('音量/静音/分辨率/全面屏/界面模式写进存档并读得回来', () => {
   const g = game(), S = g.State, s = S.state();
-  same(s.settings, { volume: 1, muted: false, resolution: 'auto', fullscreen: false });
+  same(s.settings, { volume: 1, muted: false, resolution: 'auto', fullscreen: false, uiMode: 'classic' });
   assert.equal(S.RESOLUTIONS.length, 6, '六档分辨率');
+  assert.equal(S.UIMODES.length, 2, '两档界面模式');
   assert.equal(S.resolutionHeight('auto'), 0);
   assert.equal(S.resolutionHeight('1080'), 1080);
   assert.equal(S.resolutionHeight('4k'), 0, '认不出的档位当自动');
-  S.setSettings({ volume: 0.35, muted: true, resolution: '900', fullscreen: true });
-  same(S.settings(), { volume: 0.35, muted: true, resolution: '900', fullscreen: true });
+  S.setSettings({ volume: 0.35, muted: true, resolution: '900', fullscreen: true, uiMode: 'classic' });
+  same(S.settings(), { volume: 0.35, muted: true, resolution: '900', fullscreen: true, uiMode: 'classic' });
   // 存档往返（浏览器存档模式下 save/load 走 localStorage）
   S.save(); S.load();
-  same(S.state().settings, { volume: 0.35, muted: true, resolution: '900', fullscreen: true });
-  // 坏值一律回落，不让坏档把画面或音量弄坏
-  same(S.normalizeSettings({ volume: 'x', muted: 'yes', resolution: 42, fullscreen: 1 }),
-    { volume: 1, muted: false, resolution: 'auto', fullscreen: false });
-  same(S.normalizeSettings({ volume: 5 }), { volume: 1, muted: false, resolution: 'auto', fullscreen: false });
-  same(S.normalizeSettings(null), { volume: 1, muted: false, resolution: 'auto', fullscreen: false });
+  same(S.state().settings, { volume: 0.35, muted: true, resolution: '900', fullscreen: true, uiMode: 'classic' });
+  // 坏值一律回落，不让坏档把画面或音量弄坏（界面模式认不出时按默认经典）
+  same(S.normalizeSettings({ volume: 'x', muted: 'yes', resolution: 42, fullscreen: 1, uiMode: 'neon' }),
+    { volume: 1, muted: false, resolution: 'auto', fullscreen: false, uiMode: 'classic' });
+  same(S.normalizeSettings({ volume: 5 }), { volume: 1, muted: false, resolution: 'auto', fullscreen: false, uiMode: 'classic' });
+  same(S.normalizeSettings(null), { volume: 1, muted: false, resolution: 'auto', fullscreen: false, uiMode: 'classic' });
   // 旧档（没有 settings 字段）读进来要有默认值
   const legacy = JSON.parse(JSON.stringify(s));
   delete legacy.settings;
-  same(S.normalizeSettings(legacy.settings), { volume: 1, muted: false, resolution: 'auto', fullscreen: false });
+  same(S.normalizeSettings(legacy.settings), { volume: 1, muted: false, resolution: 'auto', fullscreen: false, uiMode: 'classic' });
 });
 
 test('挑战经验只看等级差：等级成长 20 级封顶、单位体力效率略低于竞技场，且每级越来越难', () => {
@@ -1486,6 +1638,37 @@ test('升级礼包：每级给消耗品，逢 5 级与属性书等级再给大�
   assert.ok(delta >= totalAdded, '礼包道具应全部进背包：新增 ' + delta + ' / 礼包 ' + totalAdded);
 });
 
+test('商店：47号需要30级；数量购买按单价×数量扣费', () => {
+  const g = game(), s = g.State.state();
+  s.goldPoint = 100000; s.level = 29;
+  const bad = g.State.buyProp(47, 1);
+  assert.equal(bad.ok, false); assert.equal(bad.levelLocked, true);
+  s.level = 30;
+  const gold0 = s.goldPoint, own0 = s.props[1] || 0;
+  const r = g.State.buyProp(1, 3);
+  assert.equal(r.ok, true, r.msg);
+  assert.equal(s.props[1], own0 + 3);
+  assert.equal(s.goldPoint, gold0 - 3 * Number(g.window.propMap.getValue(1).price));
+});
+
+test('金宝箱/魔法袋：道具已注册，开箱消耗 1 个并落到背包/属性/金松果', () => {
+  const g = game(), s = g.State.state();
+  assert.equal(g.window.propMap.getValue(90).name, '金宝箱');
+  assert.equal(g.window.propMap.getValue(79).name, '魔法袋');
+  s.props[90] = 2; s.props[79] = 1;
+  const gold0 = s.goldPoint, points0 = s.freePoints || 0;
+  const r1 = g.State.openChestProp(90);
+  assert.equal(r1.ok, true);
+  assert.equal(s.props[90], 1);
+  assert.ok(r1.reward && r1.reward.count > 0);
+  assert.ok(s.goldPoint >= gold0 || (s.freePoints || 0) > points0 || s.props[105] > 0 || s.props[106] > 0,
+    '开箱奖励必须真的入账');
+  const r2 = g.State.openChestProp(79);
+  assert.equal(r2.ok, true);
+  assert.equal(s.props[79], 0);
+  assert.equal(g.State.openChestProp(79).ok, false, '没有魔法袋时不能再开');
+});
+
 test('复仇：败绩可标记一次，复仇补偿是赢场经验的一部分且带金松果', () => {
   const g = game();
   const me = fighter({ name: '我' }), foe = fighter({ name: '宿敌', level: 30, hp: 100000, power: 80 });
@@ -1493,6 +1676,11 @@ test('复仇：败绩可标记一次，复仇补偿是赢场经验的一部分�
   const saved = g.State.recordBattle({ me, foe, result, region: 3, kind: 'challenge' });
   assert.ok(saved && saved.id);
   assert.equal(!!g.State.battleHistory()[0].revenged, false, '新记录还没复仇过');
+  const rv0 = g.State.revengeInfo(saved.id);
+  assert.deepEqual([rv0.count, rv0.cost, rv0.cups], [0, 20, 8], '第一次复仇 20 金松果 / 8 金杯');
+  assert.equal(g.State.noteRevenge(saved.id), 1);
+  const rv1 = g.State.revengeInfo(saved.id);
+  assert.deepEqual([rv1.count, rv1.cost, rv1.cups], [1, 40, 13], '第二次复仇涨价');
   assert.equal(g.State.markRevenged('不存在的 id'), false);
   assert.equal(g.State.markRevenged(saved.id), true);
   assert.equal(g.State.markRevenged(saved.id), false, '同一条记录只能算一次');
@@ -1533,8 +1721,9 @@ test('调试开关「12 小时一天」：过了中午算第二天，每日刷�
   g2.advance(12 * 60 * 60 * 1000);                      // → 12:00
   g2.State.refreshDaily();                              // 调试开关 on() 里手动跑的那一步
   const gold0 = g2.State.state().goldPoint;
+  const dailyGold = g2.State.dailyStatus().gold;
   assert.equal(g2.State.claimDaily().ok, true, '12 点应当能再领一次每日礼包');
-  assert.equal(g2.State.state().goldPoint, gold0 + 150);
+  assert.equal(g2.State.state().goldPoint, gold0 + dailyGold, '奖励按连续登录天数递增');
 
   // 弟子日供的「昨天」跟着短日走（否则会结算成两天前）
   const g3 = game();
@@ -1544,6 +1733,144 @@ test('调试开关「12 小时一天」：过了中午算第二天，每日刷�
   assert.equal(g3.State.localDate(), '2026-09-24');
   g3.advance(12 * 60 * 60 * 1000);                      // → 12:55
   assert.equal(g3.State.localDate(), '2026-09-25');
+});
+
+test('双界面存档：经典/现代进度互不覆盖，切换/重载各回各的槽位', () => {
+  const g = game(), S = g.State, storage = g.storage;
+  S.state().name = '经典号';
+  S.state().level = 12;
+  S.save();
+  const r = S.switchMode('modern');
+  assert.equal(r.created, true, '目标界面还没有存档时新建 1 级角色');
+  assert.equal(S.state().level, 1);
+  assert.equal(S.activeUiMode(), 'modern');
+  assert.equal(S.state().settings.uiMode, 'modern');
+  S.state().name = '现代号';
+  S.state().level = 22;
+  S.save();
+  assert.equal(S.switchMode('classic').created, false);
+  assert.equal(S.state().name, '经典号');
+  assert.equal(S.state().level, 12);
+  assert.equal(S.switchMode('modern').created, false);
+  assert.equal(S.state().name, '现代号');
+  assert.equal(S.state().level, 22);
+  const raw = JSON.parse(storage.get(S.saveKey));
+  assert.equal(raw.__dualMode, 'modern');
+  assert.equal(raw.__dualOther.name, '经典号', '另一界面只存在 __dualOther，顶层仍是当前界面');
+  storage.set('ssdz_ui_mode', 'classic');
+  assert.equal(S.load(), true);
+  assert.equal(S.state().name, '经典号');
+  storage.set('ssdz_ui_mode', 'modern');
+  assert.equal(S.load(), true);
+  assert.equal(S.state().name, '现代号');
+});
+
+test('旧单槽存档按 uiMode 认领，另一界面从 1 级开始', () => {
+  const g = game(), S = g.State, storage = g.storage;
+  storage.delete('ssdz_ui_mode');
+  storage.set(S.saveKey, JSON.stringify({ name: '旧现代号', level: 25, settings: { uiMode: 'modern' } }));
+  assert.equal(S.load(), true);
+  assert.equal(S.activeUiMode(), 'modern');
+  assert.equal(S.state().name, '旧现代号');
+  assert.equal(S.switchMode('classic').created, true);
+  assert.equal(S.state().level, 1);
+  assert.equal(S.switchMode('modern').created, false);
+  assert.equal(S.state().name, '旧现代号');
+});
+
+test('村庄建筑：祭坛当日状态、神迹属性点、幻兽升级/孵化/编队/喂养', () => {
+  const g = game(), S = g.State;
+  S.state().goldPoint = 10000;
+  S.save();
+  // 祭坛：一天一次的随机状态
+  const altar = S.building('altar');
+  assert.equal(altar.level, 1);
+  const buff = S.claimBuildingBuff('altar');
+  assert.equal(buff.ok, true);
+  assert.equal(S.claimBuildingBuff('altar').ok, false, '同一天只能领一次');
+  // 祭坛升级（倒计时完成结算）
+  assert.equal(S.upgradeBuilding('altar').ok, true);
+  S.state().buildings.altar.doneAt = g.ctx.Date.now() - 1;
+  S.settleBuildings();
+  assert.equal(S.building('altar').level, 2, '祭坛升级完成');
+  // 神迹升级：完成时发一个随机属性点并记进记录
+  assert.equal(S.upgradeBuilding('miracle').ok, true);
+  S.state().buildings.miracle.doneAt = g.ctx.Date.now() - 1;
+  S.settleBuildings();
+  const rec = S.miracleRecord();
+  assert.equal(S.building('miracle').level, 2);
+  assert.equal(rec.power + rec.agility + rec.speed + rec.hp / 5, 1, '神迹完成时恰好加 1 个属性点');
+  // 幻兽牧场：升级 +200 孵化点、+1 存储格
+  assert.equal(S.state().hatchPoint, 1000);
+  assert.equal(S.upgradeBuilding('beast').ok, true);
+  S.state().buildings.beast.doneAt = g.ctx.Date.now() - 1;
+  S.settleBuildings();
+  assert.equal(S.building('beast').level, 2);
+  assert.equal(S.state().hatchPoint, 1200);
+  assert.equal(S.state().petsCapacity, 7);
+  // 孵化 3 只，编队 1 只，喂养消耗剩下的
+  const h1 = S.hatchPet(); assert.equal(h1.ok, true);
+  const h2 = S.hatchPet(); assert.equal(h2.ok, true);
+  const h3 = S.hatchPet(); assert.equal(h3.ok, true);
+  assert.equal(S.pets().length, 3);
+  assert.equal(S.state().hatchPoint, 600);
+  const t1 = S.setPetTeam([h1.pet.key]);
+  assert.equal(t1.ok, true, t1.msg);
+  const before = S.petByKey(h1.pet.key).level;
+  const fed = S.feedPet(h1.pet.key);
+  assert.equal(fed.ok, true, fed.msg);
+  assert.ok(S.petByKey(h1.pet.key).level >= before);
+  assert.equal(S.pets().length, 1, '两只材料被消耗');
+  assert.equal(S.state().petsTeam.length, 1, '出战幻兽不会被喂掉');
+  // 进化：清空队伍后补两只同星级材料，消耗目标+2 材料换高一星
+  S.setPetTeam([]);
+  const evoBase = S.petByKey(h1.pet.key);
+  for (let i = 0; i < 2; i++) {
+    S.state().pets.push({ key: 'evo' + i, id: evoBase.id, name: evoBase.name, grade: evoBase.grade,
+      maxLevel: evoBase.maxLevel, leadership: evoBase.leadership, skillId: evoBase.skillId,
+      level: 1, exp: 0, nextExp: 100 });
+  }
+  const evo = S.evolvePet(evoBase.key);
+  assert.equal(evo.ok, true, evo.msg);
+  assert.equal(evo.pet.grade, evoBase.grade + 1, '进化后高一星');
+  // 幻兽战斗加成与随机敌人幻兽
+  const team = S.setPetTeam([evo.pet.key]);
+  if (!team.ok) S.setPetTeam([]);
+  const bonus = S.petBattleBonus(S.petTeam());
+  assert.ok(bonus.power + bonus.agility + bonus.speed + bonus.hp > 0, '出战幻兽要给战斗加成');
+  const target = { power: 10, agility: 10, speed: 10, hp: 100, maxHp: 100 };
+  S.applyPetBonuses(target, S.petTeam());
+  assert.ok(target.maxHp >= 100 && target.power >= 10, '战斗面板能落到属性上');
+  const foes = S.randomPetLoadout(50);
+  assert.ok(foes.length >= 1 && foes.length <= 3, '随机敌人 1~3 只幻兽');
+  assert.ok(foes.every((p) => p.level >= 1 && p.name), '随机敌人幻兽有等级和名字');
+});
+
+/* 幻兽加血不能把「只有 hp、没有 maxHp」的 AI 压成 1+bonus 的低血量：
+ * 那会让 Sim 把敌人当前血量夹到几十点，经典血条从满血一帧掉到 0。 */
+test('幻兽加血：没有 maxHp 的对手按当前满血加上限，不能被压成几十点', () => {
+  const g = game(), S = g.State;
+  const target = { power: 10, agility: 10, speed: 10, hp: 700 };
+  S.applyPetBonuses(target, [{ grade: 4, level: 10, skillId: 4 }]);
+  const bonusHp = 4 * 8 + 10 * 4;   // petBattleBonus：grade×8 + level×4
+  assert.equal(target.maxHp, 700 + bonusHp, '上限 = 原满血 + 幻兽加血');
+  assert.equal(target.hp, 700 + bonusHp, '当前血量也要一起加上');
+  const foe = S.genAI(70, '', { levelJitter: 0 });
+  assert.equal(foe.maxHp, foe.hp, '随机对手生成时就要带满血上限');
+});
+
+/* 果实种子合成：原版走「道具合成」页；规则统一收进 State.composeSeed。 */
+test('果实种子合成：10 个种子 + 50 金松果换 1 个果实，材料/金币不足会拒绝', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.props[45] = 10; s.goldPoint = 50;
+  const r = S.composeSeed(45);
+  assert.equal(r.ok, true);
+  assert.equal(s.props[45], 0);
+  assert.equal(s.props[47], 1, '天使果实种子合成天使果实');
+  assert.equal(s.goldPoint, 0);
+  assert.equal(S.composeSeed(45).ok, false, '没有种子时不能合成');
+  s.goldPoint = 50;
+  assert.equal(S.composeSeed(46).ok, false, '没有恶魔果实种子时不能合成');
 });
 
 let failed = 0;

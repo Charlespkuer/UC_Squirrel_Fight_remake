@@ -46,17 +46,24 @@
     return stats;
   }
 
-  // 关卡类型（stageId 1-6 螳螂, 7-12 仙鹤, 13-18 熊猫；每类 6 星）
+  // 关卡类型（1-6 螳螂, 7-12 仙鹤, 13-18 熊猫；19-24/25-30/31-36 = 超级螳螂/仙鹤/熊猫，
+  // 每类 6 星。超级大关照原版 `showhardWin`：每关只有 **1 个敌人**、经验 100 起，不再是三连战。）
   /* ============================================================
    * 【GD2】关卡数值（类型/血量/经验/碎片）
    * ============================================================ */
   const STAGE_TYPES = [
-    { name: '螳螂', desc: '身手敏捷，攻击速度快，当生命过低时会有惊人的爆发力', recommend: '建议10-15级玩家挑战', anim: 'tl', sheets: ['tl', 'tl_effect'] },
-    { name: '仙鹤', desc: '动作优雅，柔中带刚，前期凶猛但不擅长持久战', recommend: '建议15-20级玩家挑战', anim: 'xh', sheets: ['xh1', 'xh2', 'xh_effect1', 'xh_effect2'] },
-    { name: '熊猫', desc: '憨厚可爱，擅长在对手进攻时抓住破绽进行反击', recommend: '建议20-25级玩家挑战', anim: 'xm', sheets: ['xm1', 'xm2', 'xm_effect'] },
+    { name: '螳螂', desc: '身手敏捷，攻击速度快，当生命过低时会有惊人的爆发力', recommend: '建议10-15级玩家挑战', anim: 'tl', sheets: ['tl', 'tl_effect'], gate: 1, enemies: 3 },
+    { name: '仙鹤', desc: '动作优雅，柔中带刚，前期凶猛但不擅长持久战', recommend: '建议15-20级玩家挑战', anim: 'xh', sheets: ['xh1', 'xh2', 'xh_effect1', 'xh_effect2'], gate: 2, enemies: 3 },
+    { name: '熊猫', desc: '憨厚可爱，擅长在对手进攻时抓住破绽进行反击', recommend: '建议20-25级玩家挑战', anim: 'xm', sheets: ['xm1', 'xm2', 'xm_effect'], gate: 3, enemies: 3 },
+    { name: '超级螳螂', desc: '超级螳螂！不要怕，没准儿能打过。', recommend: '建议30-35级玩家挑战', anim: 'tl', sheets: ['tl', 'tl_effect'], gate: 4, enemies: 1, super: true },
+    { name: '超级仙鹤', desc: '超级仙鹤！你觉得够强大就来试试吧。', recommend: '建议35-40级玩家挑战', anim: 'xh', sheets: ['xh1', 'xh2', 'xh_effect1', 'xh_effect2'], gate: 5, enemies: 1, super: true },
+    { name: '超级熊猫', desc: '超级熊猫！能打过就说明你已经是神鼠了！', recommend: '建议40级以上玩家挑战', anim: 'xm', sheets: ['xm1', 'xm2', 'xm_effect'], gate: 6, enemies: 1, super: true },
   ];
-  function stageTypeOf(stageId) { return STAGE_TYPES[Math.floor((stageId - 1) / 6)]; }
+  function stageTypeOf(stageId) { return STAGE_TYPES[Math.max(0, Math.min(STAGE_TYPES.length - 1, Math.floor((stageId - 1) / 6)))]; }
   function stageStar(stageId) { return ((stageId - 1) % 6) + 1; }
+  /** 这一关有几个敌人：普通大关 3 个，超级大关 1 个（原版 `showhardWin` 的两种文案）。 */
+  function stageEnemyCount(stageId) { const t = stageTypeOf(stageId); return t && t.enemies ? t.enemies : 3; }
+  function isSuperStage(stageId) { return !!(stageTypeOf(stageId) && stageTypeOf(stageId).super); }
 
   // 攻略记载的关卡NPC血量与经验：同星级同位置三者一致，差异只在攻击模式。
   // 字典里熊猫4-6星的血量/属性异常膨胀（疑为原数据错误），以此表为准。
@@ -102,10 +109,17 @@
    * 类型系数是用来抵消三种战斗风格的实际强度差（仙鹤开场展翅/前期 1.3 倍、熊猫 45% 反击、
    * 螳螂双击+低血爆发），数值同样由测量得出。 */
   const STAGE_USE_LEVEL_MODEL = true;
-  const STAGE_LEVEL_BAND = Object.freeze([[10, 15], [15, 20], [20, 25]]);
+  const STAGE_LEVEL_BAND = Object.freeze([[10, 15], [15, 20], [20, 25], [30, 35], [35, 40], [40, 45]]);
   const STAGE_ROLE_STAT = Object.freeze([0.70, 0.78, 0.72]);
   const STAGE_ROLE_HP = Object.freeze([0.90, 1.05, 1.20]);
   const STAGE_TYPE_SCALE = Object.freeze({ tl: 1.15, xh: 0.92, xm: 1.02 });
+  /* 超级大关单敌人：三侠的普通类型系数（tl 1.15 / xh 0.92 / xm 1.02）是按三连战调出来的，
+   * 单挑时仙鹤偏弱、熊猫后几星偏强。给超级关单独一套形状系数与血量倍率。
+   * ⚠ 原版 viewer 里的 `Mantis_boss.swf` / `Crane_boss.swf` / `Panda_boss.swf` 与 `Panda3.swf`
+   *    SHA-256 完全相同（都是同一份熊猫动作占位），没有独立的超级三侠战斗矢量可替换；
+   *    所以超级关仍用 tl/xh/xm 的动作图集，只在数值上区分。 */
+  const SUPER_TYPE_SCALE = Object.freeze({ tl: 1.28, xh: 0.98, xm: 1.05 });
+  const SUPER_HP_MUL = Object.freeze({ tl: 1.60, xh: 1.80, xm: 1.60 });
   const STAGE_PLAYER_CURVE = Object.freeze({ statPer: 1.53, statBase: -2.23, hpPer: 13.58, hpBase: -10.44 });
   /* ============================================================
    * 【GD3】真·武器 / 真·技能（终局线）
@@ -161,16 +175,18 @@
   function trueSkillRow(id) { return TRUE_SKILL_5[Number(id)] || null; }
 
   function stageTargetLevel(stageId) {
-    const type = Math.max(0, Math.min(2, Math.floor((Number(stageId) - 1) / 6)));
+    const type = Math.max(0, Math.min(STAGE_TYPES.length - 1, Math.floor((Number(stageId) - 1) / 6)));
     return STAGE_LEVEL_BAND[type][0] + stageStar(stageId) - 1;
   }
   const stagePlayerStat = (level) => STAGE_PLAYER_CURVE.statPer * level + STAGE_PLAYER_CURVE.statBase;
   const stagePlayerHp = (level) => STAGE_PLAYER_CURVE.hpPer * level + STAGE_PLAYER_CURVE.hpBase;
   function stageTypeScale(stageId) {
-    const type = STAGE_TYPES[Math.max(0, Math.min(2, Math.floor((Number(stageId) - 1) / 6)))];
+    const type = STAGE_TYPES[Math.max(0, Math.min(STAGE_TYPES.length - 1, Math.floor((Number(stageId) - 1) / 6)))];
     return (type && STAGE_TYPE_SCALE[type.anim]) || 1;
   }
   const stageRoleIndex = (npcIndex) => Math.max(1, Math.min(3, Math.round(Number(npcIndex) || 1))) - 1;
+  /** 超级大关只有一个敌人，按「大侠」档位算血/三维（普通关按 1/2/3 号位）。 */
+  const stageRoleOf = (stageId, npcIndex) => isSuperStage(stageId) ? 2 : stageRoleIndex(npcIndex);
 
   /* ============================================================
    * 【D5b】常驻挑战的「当日重复惩罚」
@@ -198,7 +214,7 @@
     const st = stageNpcStats(npc);
     const n = Math.max(0, Math.floor(Number(dailyCount) || 0));
     return {
-      name: npc && npc.name, level: 10 + Number(stageId) * 2,
+      name: npc && npc.name, level: stageTargetLevel(stageId) + 5,
       power: challengeDailyScale(st.power, n),
       agility: challengeDailyScale(st.agility, n),
       speed: challengeDailyScale(st.speed, n),
@@ -212,14 +228,22 @@
 
   const STAGE_HP_MUL = 1.18;
   function stageNpcHp(stageId, npcIndex) {
-    const role = stageRoleIndex(npcIndex);
+    const role = stageRoleOf(stageId, npcIndex);
     if (STAGE_USE_LEVEL_MODEL) {
-      return Math.max(1, Math.round(stagePlayerHp(stageTargetLevel(stageId)) * STAGE_ROLE_HP[role] * STAGE_HP_MUL));
+      /* 超级大关：单敌人、按大侠档位再乘类型专属倍率（比普通关的 1/3 连战强度高得多）。 */
+      const bossMul = isSuperStage(stageId) ? (SUPER_HP_MUL[stageTypeOf(stageId).anim] || 1.6) : 1;
+      return Math.max(1, Math.round(stagePlayerHp(stageTargetLevel(stageId)) * STAGE_ROLE_HP[role] * STAGE_HP_MUL * bossMul));
     }
     const row = STAGE_NPC_HP[stageStar(stageId) - 1];
     return row ? stageScale(row[role] || 0, STAGE_DIFFICULTY.hp * STAGE_HP_MUL) : 0;
   }
   function stageNpcExp(stageId, npcIndex) {
+    /* 原版 `showFightWin`：1-3 门 = 16 + 关号×3；4-6 门 = 100 + (关号−19)×10，
+     * 且超级大关只有一个敌人（这里只在 1 号位发，2/3 号位为 0）。 */
+    if (isSuperStage(stageId)) {
+      if (Number(npcIndex) !== 1) return 0;
+      return stageScale(100 + (Number(stageId) - 19) * 10, STAGE_REWARD_MULT);
+    }
     const row = STAGE_NPC_EXP[stageStar(stageId) - 1];
     return row ? stageScale(row[npcIndex - 1] || 0, STAGE_REWARD_MULT) : 0;
   }
@@ -228,8 +252,9 @@
     const raw = npc || {};
     if (STAGE_USE_LEVEL_MODEL) {
       const stageId = Number(raw.stageId) || 1;
-      const role = stageRoleIndex(raw.npcIndex);
-      const power = Math.max(1, Math.round(stagePlayerStat(stageTargetLevel(stageId)) * STAGE_ROLE_STAT[role] * stageTypeScale(stageId)));
+      const role = stageRoleOf(stageId, raw.npcIndex);
+      const typeScale = isSuperStage(stageId) ? (SUPER_TYPE_SCALE[stageTypeOf(stageId).anim] || 1) : stageTypeScale(stageId);
+      const power = Math.max(1, Math.round(stagePlayerStat(stageTargetLevel(stageId)) * STAGE_ROLE_STAT[role] * typeScale));
       // 用字典里（含熊猫 ★4-6 修正表）的比例保留同关三人的相对形状
       const shape = (key) => { const v = Number(raw[key]), p = Number(raw.power); return v > 0 && p > 0 ? v / p : 1; };
       return { power, agility: Math.max(1, Math.round(power * shape('agility'))), speed: Math.max(1, Math.round(power * shape('speed'))) };
@@ -253,6 +278,35 @@
   const AI_TITLES = ['', '', '', '的师傅', ''];
 
   // 新手初始
+  /* 幻兽（原版 `petsInfo`，MainMovie.as:19146）：id / 名字 / 星级 / 等级上限 / 领导力 / 技能。
+   * 数据只做字典；孵化概率、喂养/进化规则在 State 里收口。 */
+  const PETS = [
+    [1, '蛮犀牛', 1, 10, 5, 1], [2, '小红帽', 1, 10, 5, 2], [3, '冰原狼', 1, 10, 5, 3], [4, '水晶波波', 1, 10, 5, 5],
+    [5, '小花仙', 1, 10, 5, 4], [6, '木船河童', 1, 10, 5, 7], [7, '毒蘑菇', 1, 10, 5, 6], [8, '铁桶雪人', 2, 20, 8, 1],
+    [9, '电锯木偶', 2, 20, 8, 2], [10, '沈王爷', 2, 20, 8, 5], [11, '巨舌笼包', 2, 20, 8, 4], [12, '菜婶婶', 2, 20, 8, 7],
+    [13, '僵尸大少', 2, 20, 8, 6], [14, '哈哈小丑', 2, 20, 8, 8], [15, '长角飞龙', 3, 30, 15, 2], [16, '百战鳄鱼', 3, 30, 15, 1],
+    [17, '绿踪仙鹿', 3, 30, 15, 4], [18, '跳神娃娃', 3, 30, 15, 8], [19, '南瓜大亨', 4, 40, 24, 1], [20, '深海幽鲨', 4, 40, 24, 8],
+    [21, '小恶魔', 1, 10, 5, 9], [22, '大嘴恶花', 1, 10, 5, 11], [23, '哈拉兽', 2, 20, 8, 3], [24, '异星人', 2, 20, 8, 9],
+    [25, '哇哇', 2, 20, 8, 11], [26, '铁嘴蜂', 3, 30, 15, 3], [27, '铃音海豚', 3, 30, 15, 5], [28, '招财熊猫', 3, 30, 15, 10],
+    [29, '稻草人', 3, 30, 15, 6], [30, '酷法', 3, 30, 15, 7], [31, '神灯', 4, 40, 24, 3], [32, '仙玲', 4, 40, 24, 10],
+  ].map(([id, name, grade, maxLevel, leadership, skillId]) => ({ id, name, grade, maxLevel, leadership, skillId }));
+  /* 原版 `petsSkills`（只留展示需要的字段）。 */
+  const PET_SKILLS = {
+    1: { name: '奋力一击', remark: '己方行动时30%几率发动，命中后直接减少对手X点血量' },
+    2: { name: '逆向推倒', remark: '装死后发动，命中后直接减少对手X点血量' },
+    3: { name: '狂暴', remark: '血量低于200点时，伤害额外提升X%' },
+    4: { name: '回光术', remark: '装死后回复松鼠血量上限的X%' },
+    5: { name: '凌波微步', remark: '每次闪避时回复X点血量' },
+    6: { name: '三聚氰胺', remark: '行动时有X%几率诅咒对手，使其回血效果减半' },
+    7: { name: '虚弱', remark: '行动时35%几率使对手受到武器攻击时额外承受X%伤害' },
+    8: { name: '整蛊专家', remark: '行动时有X%几率封锁对手一个武器或技能' },
+    9: { name: '打兴奋剂', remark: '行动时有X%几率使下一次攻击必定暴击' },
+    10: { name: '油光满面', remark: '血量低于50%时，每次行动有X%几率移除自身负面效果' },
+    11: { name: '张牙舞爪', remark: '行动时有X%几率使对手的持续负面效果多持续1回合' },
+  };
+  const PET_GRADE_EXP = { 1: 1000, 2: 2000, 3: 5000, 4: 10000, 5: 20000 };
+  const PET_GRADE_COST = { 2: 50, 3: 100, 4: 200, 5: 500 };
+
   const NEW_PLAYER = {
     name: '', level: 1, exp: 0, power: 5, agility: 5, speed: 4, maxHp: 40,
     energy: 90, maxEnergy: 90, goldPoint: 100, goldCup: 0, integral: null,
@@ -266,8 +320,24 @@
     stages: {},                // stageId -> {npcIndex, passed}
     dailyWins: 0, allWins: 0, dailyFails: 0, allFails: 0,
     master: null, prentices: [],
-    lastEnergyTs: 0, reborn: 0, joinRankCount: 0, lotteryDate: '', lotteryFree: 1,
-    woodRecord: 0, dailyClaimDate: '', battles: [], shopPurchaseDate: '', shopPurchases: {},
+    /* 好友留言：{ 好友名: [{text, at}] }（经典「查看好友 → 留言」的本地离线实现）。 */
+    friendMessages: {},
+    lastEnergyTs: 0, reborn: 0, joinRankCount: 0, rankCupClaimWeek: '', lotteryDate: '', lotteryFree: 1,
+    woodRecord: 0, woodCount: 0, woodDamage: 0,
+    dailyClaimDate: '', battles: [], shopPurchaseDate: '', shopPurchases: {},
+    /* 村庄建筑（祭坛 / 神迹 / 幻兽牧场）：`{level, upgrading, doneAt, buffId, buffDate, add, addType}`。
+     * 对齐原版 `buildingInfo`（MainMovie.as:4346 `goHomeLand` 的回包）。 */
+    buildings: {
+      altar: { level: 1, upgrading: false, doneAt: 0, buffId: 0, buffDate: '', add: null, addType: -1 },
+      miracle: { level: 1, upgrading: false, doneAt: 0, buffId: 0, buffDate: '', add: { power: 0, agility: 0, speed: 0, hp: 0 }, addType: -1 },
+      beast: { level: 1, upgrading: false, doneAt: 0, buffId: 0, buffDate: '', add: null, addType: -1 },
+    },
+    /* 幻兽牧场（原版 hatchPoint / petsCapacity / playerPets）。老档没有时给一笔
+     * 可体验的孵化点；幻兽升级会再补 200 点并加存储格。 */
+    hatchPoint: 1000,
+    petsCapacity: 6,
+    pets: [],
+    petsTeam: [],
     /* 常驻挑战的「当日已通关次数」：{date, count}，每日递增惩罚的计数（见 State.challengeDailyCount）。 */
     challengeDaily: null,
     tower: { maxLayer: 0, run: null },                                    // 无尽挑战塔（主塔）
@@ -328,6 +398,27 @@
     return true;
   }
   registerLadderShard();
+
+  /* 原版 Flash 有、但安卓 H5 字典里缺的几件道具。**只在 gamedata 里补行**，
+   * GameDict.js 保持与 APK 逐字节一致。id 50 在本版是「抽奖卷」（无尽塔产出），
+   * 原版 50 是金宝箱 —— 为了不破坏无尽塔存档，金宝箱改用 90，魔法袋用原版 79。 */
+  const EXTRA_PROPS = [
+    ['79', '魔法袋', '使用后有一定几率获得黑色顶级套装——凤凰、圣熊装备碎片！另含其它稀有道具。', '', 'false', '1'],
+    ['82', '召唤证', '在体力不足时，可以使用召唤证参加幻兽竞技。', '10', 'true', '2'],
+    ['90', '金宝箱', '内藏黑色顶级装备、属性点、宝石等物品，具体可点击宝箱查看。', '20', 'false', '5'],
+  ];
+  function registerExtraProps() {
+    const map = window.propMap;
+    if (!map || typeof map.put !== 'function') return 0;
+    let n = 0;
+    for (const row of EXTRA_PROPS) {
+      if (map.getValue(row[0])) continue;
+      map.put(row[0], row.slice());
+      n++;
+    }
+    return n;
+  }
+  registerExtraProps();
 
   /* 原版道具说明里写着经验丸「竞技场中无效」，但本版经验竞技场确实吃经验丸加成
    *（见 js/classic-extras.js 的 gainExpWithBoost 调用与 tools/test-extras.cjs），
@@ -817,10 +908,11 @@
   /* ============================================================
    * 【GD4】导出 window.GData
    * ============================================================ */
-  window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
+  window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, stageEnemyCount, isSuperStage, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
     STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
     trueLevel, trueSkillValue, trueSkillRow, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
     stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, BLUE_SHARD_DROP_MUL, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
+    PETS, PET_SKILLS, PET_GRADE_EXP, PET_GRADE_COST,
     SET_BONUS, SET_BONUS_TIER_MUL, SET_BONUS_GLOBAL_MUL, SET_BONUS_HP_MUL, SET_BONUS_FAMILY_FLOOR,
     SET_BONUS_RAW_KEYS, SET_BONUS_ATTR_KEYS, setBonusTable, setBonusTierMul, setBonusScale, setBonusText };
 })();

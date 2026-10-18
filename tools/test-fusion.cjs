@@ -72,6 +72,7 @@ function setup(ids = [21, 21, 21, 22, 201, 202]) {
       },
       btn: (label, action) => '<button data-action="' + action + '">' + label + '</button>',
       spr: (sheet, label) => '<img src="images/ui/sprites/' + sheet + '-' + label + '.png">',
+      goldIcon: () => '<img src="images/ui/icons/gold-acorn.png">',
       toast: (message) => toasts.push(message),
       modal: (title, html, buttons) => modals.push({ title, html, buttons }),
     },
@@ -246,6 +247,20 @@ test('规则条保持单行且完整说明收在弹窗里', () => {
   }
   /* 装备卡必须照常渲染（这一步是在防「列表被挤没」的老毛病） */
   assert.ok(game.board.innerHTML.includes('data-fusion-gear='), '装备列表要渲染出卡片');
+});
+
+test('融合只有一条共有词条时，仍按品质补满词条槽', () => {
+  const game = setup();
+  const S = game.context.State;
+  const state = S.state();
+  state.level = 60; state.goldPoint = 1000; state.gears = [];
+  const keys = [0, 1, 2].map(() => S.addGear(201, [{ id: 1, level: 1 }]).key);
+  const result = S.mergeGears(keys);
+  assert.equal(result.ok, true);
+  assert.equal(result.gear.quality, 4);
+  assert.equal(result.gear.ext.length, 3, '橙装应有 3 条词条');
+  assert.equal(new Set(result.gear.ext.map((ext) => ext.id)).size, 3, '词条不能重复');
+  assert.ok(result.gear.ext.some((ext) => ext.id === 1), '共有的那条词条要保留');
 });
 
 for (const [name, run] of tests) {

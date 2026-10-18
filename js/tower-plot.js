@@ -394,6 +394,8 @@
   const STORY_FADE_MS = 150;
   /** 当前正在播的那段剧情：{ id, once, line, chars, lines:[{segs,total}], timer }。 */
   let storyState = null;
+  /** 上一次铺到 DOM 的行号：同一行打字时只改 `.now` 这一行，不重解析前面已完成的整段。 */
+  let paintedStoryLine = -1;
   /** 这一屏是不是**正在播剧情**（openEndless 里判：剧情屏上不弹献祭窗、不飘过程提示）。
    *  每次重画 openEndless 都会按 `pendingStory` 重新置位。 */
   let storyShowing = false;
@@ -556,6 +558,7 @@
       return { segs: segs, total: segs.reduce((n, s) => n + s.text.length, 0) };
     });
     storyState = { id: id, once: !!script.once, line: 0, chars: 0, lines: lines, timer: null };
+    paintedStoryLine = -1;
     return storyState;
   }
   /** 已播出的文字（前面几行整行 + 当前行已打出的部分 + 光标）。 */
@@ -594,7 +597,18 @@
     if (!st || typeof document === 'undefined' || !document || typeof document.querySelector !== 'function') return;
     const box = document.querySelector('[data-story-text]');
     if (!box) return;
-    box.innerHTML = storyBodyHtml();
+    /* 同一行只更新当前 `<p>`（打字机每 42ms 一次）；换行/跳行才重铺整段。
+     * 以前每打一个字都 `innerHTML = storyBodyHtml()`，长剧情 O(n²) 且每 tick 丢滚动位置。 */
+    if (paintedStoryLine !== st.line) {
+      box.innerHTML = storyBodyHtml();
+      paintedStoryLine = st.line;
+    } else {
+      const now = typeof box.querySelector === 'function' ? box.querySelector('.tower-story-line.now') : null;
+      const cur = st.lines[st.line];
+      if (now && cur) now.innerHTML = storyHtml(cur.segs, st.chars) +
+        '<span class="tower-story-caret" aria-hidden="true"></span>';
+      else { box.innerHTML = storyBodyHtml(); }
+    }
     storyScrollToCursor(box);
   }
   /** 打字机：打出一个字，然后排下一个 tick。 */
@@ -640,6 +654,7 @@
     const st = storyState;
     storyStopTimer();
     storyState = null;
+    paintedStoryLine = -1;
     if (st && st.once) { try { Tower.markStorySeen(st.id); } catch (e) {} }
     /* 【U20d】店里的商人文案：给**这家店**记一笔「已经讲过了」（`markShopStoryShown`）——
      *   · `once:false` 的随机商人文案（6 段）条件一直成立：不记就会在同一家店里

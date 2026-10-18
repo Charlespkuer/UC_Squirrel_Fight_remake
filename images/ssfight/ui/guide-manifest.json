@@ -1,0 +1,15 @@
+{
+ "generator": "tools/gen-ssfight-ui.cjs --guide",
+ "source": "references/ssfight/ssfight/ssfight/html5/ssfight.html",
+ "sourceBytes": 26436698,
+ "sourceSha256": "c01b24dc33ccbae4e104983d54e14ff41f018458b10dc983f5bb5f3c78b39abb",
+ "roots": {
+  "guide": "3625"
+ },
+ "count": 45,
+ "bitmaps": [],
+ "hd": [],
+ "missingIds": [],
+ "how": "原版 `viewMission()`（MainMovie.as:6814）`attachMovie(\"新手引导\",\"guide\")`， 然后 `guide.gotoAndStop(guideMap[step].mcIndex)`；25 帧对应 mcIndex 1~25。 第 19 帧的 `tipsContent` 有 2 帧（给蛋 / 不给蛋）。 ⚠ 导出符号表的「新手引导」=3628 是错表：3628 只有 1 帧文本「非官方」； 结构反查到真正的 25 帧引导是 3625。",
+ "sha256": "b3cf9e742b6586699c4ff49efa3ee69c7aeae66daa30fca40d2ab43a0e15e16f"
+}

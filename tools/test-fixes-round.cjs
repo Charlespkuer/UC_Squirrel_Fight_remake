@@ -53,7 +53,7 @@ function setup() {
   const S = c.State.state();
   S.level = 70;
   S.props[23] = 30;
-  for (let i = 1; i <= 18; i++) S.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) S.stages[i] = { npcIndex: 3, passed: true };
   c.__seed = (n) => vm.runInContext(
     'Math.random=(function(){let s=' + n + ';return function(){s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296;};})();', c);
   /* 把「会改变层内流程」的两张牌（E01 战后开店 / E15 重开本层）从场间选择里排除 ——
@@ -386,7 +386,7 @@ test('需求9.9：涌泉烙印（C52）真的生效 —— 师父驾到等治疗
   const T = c.Tower, S = c.State, Sim = c.Sim;
   c.State.newGame('c52-heal');
   const st = c.State.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T._debugSetLayer(9);
   assert.ok(T.startEndlessRun().ok);
   T._debugSetEndlessLayer(6);
@@ -443,7 +443,7 @@ test('需求9.9：涌泉烙印（C52）真的生效 —— 师父驾到等治疗
   const freshRun = () => {
     c.State.newGame('c52-cross' + Math.random());
     const st2 = c.State.state(); st2.level = 70; st2.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st2.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st2.stages[i] = { npcIndex: 3, passed: true };
     T._debugSetLayer(9);
     try { if (T._debugRun('endless')) T.abandon('endless'); } catch (e) { /* 忽略 */ }
     assert.ok(T.startEndlessRun().ok);
@@ -498,7 +498,7 @@ test('需求9.8：店的方向按「怎么开的」走 —— 战后立即进货
   const fresh = (layer) => {
     S.newGame('shop-route' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     T._debugSetLayer(9);
     try { if (T._debugRun('endless')) T.abandon('endless'); } catch (e) { /* 忽略 */ }
     assert.ok(T.startEndlessRun().ok, '应当能开一局');
@@ -610,7 +610,7 @@ test('需求9.0：无尽塔首页在「战后待选牌」状态下必须能渲�
   /* 曾经的事故：把 choiceCard 的 mode 参数写成裸 mode，而 openEndless() 作用域里没有 mode
    * → run.choices 一有值就 ReferenceError → 整屏渲染不出来，战斗结束回来卡在主界面、
    * 而且本局还没结束（再进无尽提示「本局尚未结束」）。 */
-  const openEndless = bodyOf('function openEndless()');
+  const openEndless = bodyOf('function openEndless(');
   /* 去掉注释与**字符串字面量**再查：这条查的是「裸 mode 这个标识符」，
    * 而 `'story-mode'`（剧情/挑战模式开关的 action 名）只是字符串内容，不算引用。 */
   const code = openEndless.replace(/\/\*[\s\S]*?\*\//g, ' ')
@@ -628,7 +628,7 @@ test('需求9.0：无尽塔首页在「战后待选牌」状态下必须能渲�
   /* 运行时再确认一次：造出「战后待选牌」的状态，无尽首页能渲染出来 */
   c.State.newGame('endless-choice');
   const st = c.State.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T._debugSetLayer(9);
   try { if (T._debugRun('endless')) T.abandon('endless'); } catch (e) { /* 忽略 */ }
   assert.ok(T.startEndlessRun().ok);
@@ -651,7 +651,7 @@ test('需求9.1：玉石俱焚确实生效 —— 战斗内双方血量上限真
   const TD = c.TowerData, T = c.Tower, S = c.State, Sim = c.Sim;
   c.State.newGame('c57-live');
   const st = c.State.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T._debugSetLayer(9);
   assert.ok(T.startEndlessRun().ok);
   T._debugSetEndlessLayer(6);
@@ -712,7 +712,7 @@ test('需求9.3：无尽塔主界面右上角标注「本场战斗获得多少�
   const TD = c.TowerData, T = c.Tower, S = c.State;
   c.State.newGame('coin-gain');
   const st = c.State.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T._debugSetLayer(9);
   assert.ok(T.startEndlessRun().ok);
   T._debugSetEndlessLayer(3);
@@ -840,7 +840,7 @@ test('需求9.4：道具卖出 = 「返回 / 卖出」弹窗，点一下卖 1 �
   assert.ok(src.indexOf('function sellOne') < 0, '不应该再是「点一下直接卖」的无弹窗版本');
 
   /* ---- 2) 弹窗式交互：入口 → sellDialog → 内部只卖 1 个 ---- */
-  const entryLine = src.split('\n').find((l) => l.indexOf('[data-action="prop-sell"]') >= 0 && l.indexOf('addEventListener') >= 0) || '';
+  const entryLine = src.split('\n').find((l) => l.includes('sell.onclick') && l.includes('sellDialog(selectedProp')) || '';
   assert.ok(entryLine.indexOf('sellDialog(selectedProp') > 0, '背包「卖出 1 个」应当打开卖出弹窗：' + entryLine.trim());
   assert.ok(entryLine.indexOf('openBag(mode,bagPage)') > 0, '关掉弹窗后应当把背包重绘到最新数量');
   assert.match(src, /function sellDialog\(id,\s*after\)/, '应当有 sellDialog');
@@ -1330,8 +1330,11 @@ test('需求29：两座塔页面的「返回」都回关卡页（上一级界面
   assert.ok(at.length >= 2, '应当有两处页面返回（挑战塔 / 无尽塔），实测 ' + at.length + ' 处');
   for (const [i, label] of [[0, '挑战塔'], [1, '无尽塔']]) {
     const seg = ui.slice(at[i], at[i] + 80);
-    assert.match(seg, /back\(p, backToStages\)/, label + '页面的返回应当走 backToStages（= 关卡页）：' + seg);
+    /* 新增：从经典村庄「征战」进来的塔走 towerBack → 回村庄征战；从关卡页进来仍回关卡页。 */
+    assert.match(seg, /back\(p, towerBack/, label + '页面应当走 towerBack：' + seg);
   }
+  assert.match(ui, /function towerBack\(\)[\s\S]{0,200}?backToStages/, 'towerBack 要保留回关卡页的默认路径');
+  assert.match(ui, /towerOrigin === 'village'[\s\S]{0,200}?backToVillageWar/, '村庄来源要回村庄征战');
   const h = ui.indexOf('function backToStages()');
   assert.ok(h > 0, '应当有 backToStages');
   const helper = ui.slice(h, ui.indexOf('\n  }', h));
@@ -1446,7 +1449,7 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
   const measure = (id, stacks, wins, field, fixedLayer) => {
     S.newGame('stack' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     T._debugSetLayer(9); T.startEndlessRun();
     const r = T._debugRun('endless');
     r.permanent = [{ id: id, stacks: stacks }];
@@ -1561,7 +1564,7 @@ test('需求37：成长类增益的「面板文字」必须等于「真实累计
   const grow = (id, stacks, wins, field, layer) => {
     S.newGame('g' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     T._debugSetLayer(9); T.startEndlessRun();
     const r = T._debugRun('endless');
     r.permanent = [{ id: id, stacks: stacks }];
@@ -1663,7 +1666,7 @@ test('需求38：永久增益替换弹窗改为竖排可滚动列表（不再横
     bind: (root, actions) => { binds.push(actions); },
   };
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T._debugSetLayer(9); T.startEndlessRun();
   const r = T._debugRun('endless');
   r.permanent = ['C01', 'C02', 'C04', 'C05', 'C06', 'C10', 'C13', 'C14'].map((id) => ({ id: id, stacks: 1 }));
@@ -1739,7 +1742,7 @@ test('需求42：叠层增益按层数计价 / 仓库钥匙不进商店 / 登顶
   /* ---- ① 可叠加增益卖出按层数计价 ---- */
   S.newGame('sellstack' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T._debugSetLayer(9); T.startEndlessRun();
   let r = T._debugRun('endless');
   r.permanent = [{ id: 'C07', stacks: 3 }, { id: 'C02', stacks: 1 }];
@@ -1799,7 +1802,7 @@ test('需求42：叠层增益按层数计价 / 仓库钥匙不进商店 / 登顶
   const grow = (stacks, layer, wins) => {
     S.newGame('c12' + Math.random());
     const s2 = S.state(); s2.level = 70; s2.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) s2.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) s2.stages[i] = { npcIndex: 3, passed: true };
     T._debugSetLayer(9); T.startEndlessRun();
     const rr = T._debugRun('endless');
     rr.permanent = [{ id: 'C12', stacks: stacks }]; rr.layer = layer;
@@ -1853,7 +1856,7 @@ test('需求43：战斗内专属的上限/战力加成不得在局外生效；�
   const TD = c.TowerData, T = c.Tower, S = c.State;
   S.newGame('outside' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T.startEndlessRun();
   const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
     baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
@@ -1898,7 +1901,7 @@ test('需求45：全局实际血量计数器 —— 被上限压下来的部分�
   const TD = c.TowerData, T = c.Tower, S = c.State;
   S.newGame('counter' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T.startEndlessRun();
   const mk = () => ({ name: 'p', level: 70, power: 200, agility: 120, speed: 120, maxHp: 5000, hp: 5000,
     baseStats: { power: 200, agility: 120, speed: 120 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
@@ -2035,7 +2038,7 @@ test('需求47：空血上限的基准是「当前上限」（含固定值成长
   const cap = (ids, flat, spendHp) => {
     S.newGame('empty' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     T.startEndlessRun();
     for (const id of ids) T.addBuff(T._debugRun('endless'), id);
     const r = T._debugRun('endless');
@@ -2074,7 +2077,7 @@ test('需求47：空血上限的基准是「当前上限」（含固定值成长
   /* ④ 逐场重算：以战养战每胜 +5，空的部分应当随之上浮，而不是钉在获得时的值 */
   S.newGame('perbattle' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T.startEndlessRun();
   T.addBuff(T._debugRun('endless'), 'C46');
   T.addBuff(T._debugRun('endless'), 'C11');        // 以战养战：每胜 +5 上限
@@ -2125,7 +2128,7 @@ test('需求48：吞噬成长 / 以战养战 的累计生命上限在被替换�
   const growThenReplace = (target, battles) => {
     S.newGame('keep' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     T.startEndlessRun();
     T.addBuff(T._debugRun('endless'), target);
     for (let i = 0; i < battles; i++) {
@@ -2201,7 +2204,7 @@ test('需求49：神兵淬炼 / 秘技通神 视为「立即生效类」，永�
     /* 【U20b】账号得有一把武器：C32「神兵淬炼」的候选是**玩家自己的武器**，
      * 一把都没有时会走「先替你留着」（deferredPicks）而不是挂 pendingPick（见 ② 的第二段）。 */
     st.weapons = ['1:5'];
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
     const r = T._debugRun('endless');
@@ -2333,7 +2336,7 @@ test('需求50：N13/N14 的界面口径（无尽塔 10 次限次）+ 寒霜锁�
   const applyFrost = (ids) => {
     S.newGame('frost' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
     const r = T._debugRun('endless');
@@ -2360,7 +2363,7 @@ test('需求50：N13/N14 的界面口径（无尽塔 10 次限次）+ 寒霜锁�
   /* 统计：不死鸟的上架概率应当远低于同档其它传奇 */
   S.newGame('shopprob' + Math.random());
   const st2 = S.state(); st2.level = 70; st2.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st2.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st2.stages[i] = { npcIndex: 3, passed: true };
   try { T.abandon('endless'); } catch (e) {}
   T.startEndlessRun();
   const RUNS = 4000;
@@ -2387,7 +2390,7 @@ test('需求51：天象之眼应当剥夺敌方吃到的正向环境（但不剥
   const scene = (ids, envs) => {
     S.newGame('envshield' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
     const r = T._debugRun('endless');
@@ -2452,7 +2455,7 @@ test('需求53：unique 口径 / 塔顶 boss 变体池 / 幸运一击重复率 /
   /* poolFilter 行为：拥有之后，前两者应当被排除、虚空铭文仍可再出现 */
   S.newGame('uniq' + Math.random());
   const st0 = S.state(); st0.level = 70; st0.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st0.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st0.stages[i] = { npcIndex: 3, passed: true };
   try { T.abandon('endless'); } catch (e) {}
   T.startEndlessRun();
   const r0 = T._debugRun('endless');
@@ -2495,7 +2498,7 @@ test('需求53：unique 口径 / 塔顶 boss 变体池 / 幸运一击重复率 /
   /* 实战：预告名 = 实战名、狂战套、castable 真的被用 */
   S.newGame('warlord' + Math.random());
   const st1 = S.state(); st1.level = 70; st1.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st1.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st1.stages[i] = { npcIndex: 3, passed: true };
   try { T.abandon('endless'); } catch (e) {}
   T.startEndlessRun();
   const r1 = T._debugRun('endless');
@@ -2637,7 +2640,7 @@ test('需求55：装备星标防误合误卖 / 天命所归（传奇即时）/ �
   /* 永久获得会累加到 run 上（本局永久），并且**进 permanent 栏位** */
   S.newGame('c51' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   try { T.abandon('endless'); } catch (e) {}
   T.startEndlessRun();
   const r = T._debugRun('endless');
@@ -2678,7 +2681,7 @@ test('需求58：天象之眼剥夺全部负面环境 / 虚空铭文可重复拾
   const openRun = () => {
     S.newGame('r58' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
     const r = T._debugRun('endless');
@@ -2780,7 +2783,7 @@ test('需求61：放弃永久增益的弹窗必须能真的选出候选（修「
    *    所以任何「用 info.run 当候选来源」的界面代码都会拿到空列表。 */
   S.newGame('r61' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   try { T.abandon('endless'); } catch (e) {}
   T.startEndlessRun();
   const r = T._debugRun('endless');
@@ -2869,7 +2872,7 @@ test('需求63：开局回血类 buff 要吃到局内加生命上限的加成', 
   const openRun = (setup) => {
     S.newGame('r63' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
     const r = T._debugRun('endless');
@@ -2933,7 +2936,7 @@ test('需求64：被虚空铭文附魔的永久增益排在前面，与未附魔
   const openRun = () => {
     S.newGame('r64' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
     const r = T._debugRun('endless');
@@ -3000,7 +3003,7 @@ test('需求65：战斗续航（C16/C17）改成开战第一回合结算，并�
     opts = opts || {};
     S.newGame('r65' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
     const r = T._debugRun('endless');
@@ -3135,7 +3138,7 @@ test('需求69：终焉烙印（C49）碎掉的那一份也要计入「获得过
   const openRun = () => {
     S.newGame('r69' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
     const r = T._debugRun('endless');
@@ -3264,7 +3267,7 @@ test('需求71：限次栏显示「未破碎的烙印叠层」', () => {
   /* 端到端：叠 2 层之后 ownedBuffs 报出的就是未破碎层数 */
   S.newGame('r71' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   try { T.abandon('endless'); } catch (e) {}
   T.startEndlessRun();
   const r = T._debugRun('endless');
@@ -3287,7 +3290,7 @@ test('需求73：无尽主界面右上角显示「实际退出到手」的抽奖
   const openRun = (layer) => {
     S.newGame('r73' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
     if (layer) T._debugSetEndlessLayer(layer);
@@ -3364,7 +3367,7 @@ test('需求74：所有退出本局的方式收益完全一致（本层应得 + 
   const newRun = () => {
     S.newGame('r74' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
     T._debugSetEndlessLayer(LAYER);
@@ -3935,7 +3938,7 @@ test('需求89：涅槃（C14）「每层 N 次」在真实战斗里也记账（
     const c = setup();
     c.State.newGame('c14-' + Math.random());
     const st = c.State.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     c.Tower._debugSetLayer(9); c.Tower.startEndlessRun(); c.Tower._debugSetEndlessLayer(7);
     const run = c.Tower._debugRun('endless');
     run.permanent = [{ id: 'C14', stacks: 2 }];
@@ -3982,7 +3985,7 @@ test('需求89：涅槃（C14）「每层 N 次」在真实战斗里也记账（
   const T2 = c2.Tower, S2 = c2.State;
   S2.newGame('c14b-' + Math.random());
   const st2 = S2.state(); st2.level = 70; st2.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st2.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st2.stages[i] = { npcIndex: 3, passed: true };
   T2._debugSetLayer(9); T2.startEndlessRun(); T2._debugSetEndlessLayer(7);
   const run2 = T2._debugRun('endless');
   run2.permanent = [{ id: 'C14', stacks: 2 }];
@@ -4018,7 +4021,7 @@ test('需求89：涅槃（C14）「每层 N 次」在真实战斗里也记账（
   const c3 = setup();
   c3.State.newGame('c14c');
   const st3 = c3.State.state(); st3.level = 70; st3.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st3.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st3.stages[i] = { npcIndex: 3, passed: true };
   c3.Tower._debugSetLayer(9); c3.Tower.startEndlessRun(); c3.Tower._debugSetEndlessLayer(7);
   const run3 = c3.Tower._debugRun('endless');
   run3.permanent = [{ id: 'C14', stacks: 1 }];
@@ -4074,7 +4077,7 @@ test('需求90：铸币商店的「返回」不收摊、「继续战斗」才收
   const from = uiSrc.indexOf('function openMintShop');
   const to = uiSrc.indexOf('【U15】', from);
   const body = uiSrc.slice(from, to > from ? to : from + 6000);
-  assert.ok(/back\(p, \(\) => openEndless\(\)\)/.test(body), '页脚返回不能关店：' + body.slice(0, 140));
+  assert.ok(/back\(p, \(\) => openEndless\(\), '返回无尽塔'\)/.test(body), '页脚返回不能关店：' + body.slice(0, 140));
   assert.ok(!/back\(p, \(\) => \{ Tower\.leaveMintShop/.test(body), '页脚返回不该再调 leaveMintShop');
   assert.ok(/C\(\)\.btn\('继续战斗', 'mintleave'/.test(body), '主按钮应当改叫「继续战斗」：' + body.slice(0, 200));
   assert.ok(/Tower\.leaveMintShop\(\); openEndless\(\)/.test(body), '「继续战斗」才收摊');
@@ -4095,7 +4098,7 @@ test('需求91：三侠削弱只「贯穿本层」—— 换层必须清掉（�
 
   S.newGame('dbg' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   /* 给玩家一把武器 + 一个技能：熊猫的「压制」是从玩家武技里抽一个来锁的，
    * 池子空了那条削弱就落不下来（测试里先把池子填上，三条削弱才都可能出现）。 */
   st.weapons = ['1:10']; st.skills = ['2:10'];
@@ -4205,7 +4208,7 @@ test('需求92：商店出售 / 交换列表按「获得先后倒序」排（最
   const TD = c.TowerData, T = c.Tower, S = c.State;
   S.newGame('sell' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T._debugSetLayer(9); T.startEndlessRun(); T._debugSetEndlessLayer(9);
   const run = T._debugRun('endless');
   run.permanent = []; run.limited = []; run.slotFreeIds = []; run.acqSeq = 0;
@@ -4258,7 +4261,7 @@ test('需求92：商店出售 / 交换列表按「获得先后倒序」排（最
   const c2 = setup();
   c2.State.newGame('sell-old');
   const st2 = c2.State.state(); st2.level = 70; st2.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st2.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st2.stages[i] = { npcIndex: 3, passed: true };
   c2.Tower._debugSetLayer(9); c2.Tower.startEndlessRun(); c2.Tower._debugSetEndlessLayer(9);
   const run2 = c2.Tower._debugRun('endless');
   run2.permanent = [{ id: 'C02', stacks: 1 }, { id: 'C05', stacks: 1 }];
@@ -4447,7 +4450,7 @@ test('需求95：本轮修复——C33 独立通道 / 锁技能生效 / 烙印�
 
   /* ③ 属性烙印「损毁后」的预览要和 fragileBonus 同口径（C39 是 5% → 8%） */
   S.newGame('r95b'); const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   try { T.abandon('endless'); } catch (e) {}
   T.startEndlessRun();
   const r95 = T._debugRun('endless');
@@ -4775,7 +4778,7 @@ test('需求102：E01「立即进货」在整层最后一场也必须开店（�
   const openLast = (layer) => {
     S.newGame('e01fix' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
     const run = T._debugRun('endless');
@@ -4830,7 +4833,7 @@ test('需求103：叠层与栏位打包 —— 新栏位要「继续叠满」而
   const TD = c.TowerData, T = c.Tower, S = c.State;
   S.newGame('pack' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T.startEndlessRun();
   const run = T._debugRun('endless');
   const reset = (slotFree) => {
@@ -4890,7 +4893,7 @@ test('需求104：消费类增益「每栏各记一份」——多个挥金如�
   const openRun = () => {
     S.newGame('spend' + Math.random());
     const st = S.state(); st.level = 70; st.props[23] = 99999;
-    for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
     try { T.abandon('endless'); } catch (e) {}
     T.startEndlessRun();
     const run = T._debugRun('endless');
@@ -4968,7 +4971,7 @@ test('需求105：纯开关类永久增益「有了就不再出现」（unique�
   const TD = c.TowerData, T = c.Tower, S = c.State;
   S.newGame('uniq' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T.startEndlessRun();
   const run = T._debugRun('endless');
 
@@ -5028,7 +5031,7 @@ test('需求107：虚空铭文的降权真的生效（原来份数永远数到 0
   /* ② 实拿：走真实的 addBuff + applyPickBuff 路径，每附魔一条新增益，权重 1 → 0.88 → 0.88² → 0.88³ */
   S.newGame('c37w' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T.startEndlessRun();
   const run = T._debugRun('endless');
   run.permanent = []; run.limited = []; run.pickBuffIds = []; run.pickGot = {}; run.slotFreeIds = [];
@@ -5096,7 +5099,7 @@ test('需求108：同名永久增益「逐条」身份 —— uid 与附魔只�
   const TD = c.TowerData, T = c.Tower, S = c.State;
   S.newGame('uid' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T.startEndlessRun();
   const run = T._debugRun('endless');
   run.permanent = []; run.limited = []; run.slotFreeIds = []; run.pickBuffIds = [];
@@ -5146,7 +5149,7 @@ test('需求110：虚空铭文不能给「已有同名被附魔」的未附魔�
   const TD = c.TowerData, T = c.Tower, S = c.State;
   S.newGame('ench' + Math.random());
   const st = S.state(); st.level = 70; st.props[23] = 99999;
-  for (let i = 1; i <= 18; i++) st.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) st.stages[i] = { npcIndex: 3, passed: true };
   T.startEndlessRun();
   const run = T._debugRun('endless');
   run.permanent = []; run.limited = []; run.slotFreeIds = []; run.pickBuffIds = [];

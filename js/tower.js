@@ -41,7 +41,7 @@
   const HERO_NAME = { tl: '螳螂大侠', xh: '仙鹤大侠', xm: '熊猫大侠' };
   const HERO_SKILL = { tl: 19, xh: 20, xm: 22 };          // 三侠招牌技能（疾风镰刀舞/仙鹤展翅/熊掌震地）
   const HERO_REGION = { tl: 3, xh: 4, xm: 1 };            // 与关卡战一致
-  const UNLOCK_LEVEL = 30, UNLOCK_STAGES = 18;
+  const UNLOCK_STAGES = 18;
   const TICKET_PROP = 50, BOOK_PROP = 23;
   /* 即时削弱「敌人生命上限 −N%」的唯一上限（E07 挫锐 / E08 卸甲）。
    * 以前登记时夹 0.8、进战斗时夹 0.6，介于两者之间的部分被静默浪费；
@@ -63,7 +63,7 @@
     const s = S();
     if (!s.tower || typeof s.tower !== 'object') s.tower = { maxLayer: 0, run: null };
     s.tower.maxLayer = Math.max(0, Math.floor(Number(s.tower.maxLayer) || 0));
-    if (s.tower.run) s.tower.run = normalizeRun(s.tower.run, 'tower');
+    if (s.tower.run) s.tower.run = normalizeRunCached(s.tower.run, 'tower');
     return s.tower;
   }
   function endless() {
@@ -81,7 +81,7 @@
     // 本周最高分：周一重置（与每日统计同一节奏）
     const mon = mondayKey();
     if (e.weekKey !== mon) { e.weekKey = mon; e.weekBest = 0; }
-    if (e.run) e.run = normalizeRun(e.run, 'endless');
+    if (e.run) e.run = normalizeRunCached(e.run, 'endless');
     return e;
   }
   /* ============================================================
@@ -622,16 +622,27 @@
     }
     return run;
   }
+  /* 归一化缓存：`tower()/endless()` 每次调用都会走一遍整段 normalizeRun（重建 permanent/limited、
+   * 校验每组 buff），开一次塔页要跑 4~6 遍。给 run 打一个版本戳，同一份 run 只归一化一次；
+   * 改档/迁移（读档、写档、切模式）时版本戳不在或不同，仍会完整跑一遍。 */
+  const NORM_VER = 3;
+  function normalizeRunCached(run, mode) {
+    if (!run || typeof run !== 'object') return null;
+    /* 自检 / QA 档不做缓存：用例会直接改 run 再要求重新归一化（和旧行为一致）。 */
+    if (typeof window !== 'undefined' && window.State && window.State.testMode) return normalizeRun(run, mode);
+    if (run.__normVer === NORM_VER) return run;
+    const out = normalizeRun(run, mode);
+    if (out) out.__normVer = NORM_VER;
+    return out;
+  }
 
   /* ============================================================
    * 【T2】解锁条件 —— unlocked
    * ============================================================ */
 
   function unlocked() {
-    const s = S();
-    if (s.level < UNLOCK_LEVEL) return { ok: false, msg: '达到 30 级后解锁挑战塔。' };
     for (let id = 1; id <= UNLOCK_STAGES; id++) {
-      if (!State.stageProgress(id).passed) return { ok: false, msg: '通关挑战模式全部 18 关后解锁挑战塔。' };
+      if (!State.stageProgress(id).passed) return { ok: false, msg: '通关前 ' + UNLOCK_STAGES + ' 关后解锁挑战塔。' };
     }
     return { ok: true };
   }
@@ -995,7 +1006,7 @@
       return { name: w.name, squirrel: true, gear: gearKeyOf(entry._layer, w), elite: true, type: w.type,
         mechDesc: w.mechDesc, patternDesc: w.patternDesc, mechs: w.mech.slice() };
     }
-    /* 「巡逻」魔王：预告里也要认它 —— 固定名字、精英+boss 双属性、穿全套橙色狂战甲、
+    /* 「巡逻」魔王：预告里也要认它 —— 固定名字、精英+boss 双属性、经典界面穿全套黑色狂战套、
      * 开战定格玩家面板、全武器全技能真5、输了要上交一个最高稀有度增益。 */
     if (entry.kind === 'patrol') {
       /* x00 层那一场是「觐见魔王」（三连战的终点）；其余层是路上偶遇的「巡逻」。
@@ -1008,6 +1019,8 @@
       const held = (liveRun && Array.isArray(liveRun.patrolTolls)) ? liveRun.patrolTolls.length : 0;
       return { name: D().patrolName ? D().patrolName(entry._layer) : D().PATROL.name,
         squirrel: true, patrol: entry, outfit: D().PATROL.outfit.slice(),
+        /* 经典预告/经典战斗用 gear id 贴黑色狂战套；现代预告仍走 outfit 的橘色 113 图层。 */
+        gear: (D().PATROL.classicGear || []).slice(),
         elite: true, boss: true, type: isKing ? '魔王 · 觐见' : '精英 首领',
         audience: isKing ? 'king' : null,
         mechDesc: (isKing
@@ -1740,10 +1753,14 @@
       foe.weapons = (wAll.length ? wAll : [1]).map((id) => ({ id, level: lv }));
       foe.skills = sAll.map((id) => ({ id, level: lv }));
       foe.wears = (TD.PATROL.outfit || []).slice();
+      /* 经典战斗（SfFight）只认 `gears` 里的 gear id：`{src}` 的 outfit 是 Engine 图集片名，
+       * `wearsOf()` 会按「有 id 才算装备」把它滤掉 —— 不补这一份，经典战斗里魔王是裸松鼠。
+       * 模型挂点会按容器帧 119 贴出黑色狂战套。 */
+      foe.gears = (TD.PATROL.classicGear || []).map((g) => ({ id: g.id, type: g.type }));
       foe.patrol = true;
       /* 整百层那一场（x00「觐见魔王」）名字带前缀「魔王·」，路上偶遇的巡逻不带。 */
       foe.name = TD.patrolName ? TD.patrolName(layer) : TD.PATROL.name;
-      /* 【2026-10 第七十四批】身上这套橙色狂战甲**真的给性能** —— 不是只有外观。
+      /* 【2026-10 第七十四批】身上这套狂战甲**真的给性能** —— 不是只有外观。
        * 这里先落一份（战斗没走到 adjustMe 的复制分支时也成立）；
        * adjustMe 复制完玩家面板后会再落一次（那一步会把 power 整个覆盖掉，所以必须重落）。 */
       applyPatrolSet(foe, LT);

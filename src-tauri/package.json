@@ -7,8 +7,8 @@
     "app": "node ../tools/build-tauri-app.cjs",
     "app:clean": "node ../tools/build-tauri-app.cjs --clean",
     "installer": "node ../tools/build-tauri-app.cjs --installer",
-    "stage": "node ../tools/build-tauri-web.cjs",
-    "stage:check": "node ../tools/build-tauri-web.cjs --check",
+    "stage": "node ../tools/build-tauri-app.cjs --web",
+    "stage:check": "node ../tools/build-tauri-app.cjs --web --check",
     "dev": "tauri dev",
     "icon": "tauri icon app-icon.png"
   },

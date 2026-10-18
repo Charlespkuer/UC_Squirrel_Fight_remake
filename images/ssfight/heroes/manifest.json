@@ -1,0 +1,6 @@
+{
+ "source": "references/ssfight/viewer/game/FightGame/Panda3.swf",
+ "sourceBytes": 65832,
+ "sourceSha1": "91a709c97d5f9729a9e69c84b1e1be98cb5469ad",
+ "note": "ssfight 原版熊猫动作 SWF（真实素材）。Mantis3/Crane3 在 reference 中是同文件副本，不是独立素材；当前经典战斗先用现代图集填充三侠，本文件保留供后续矢量导出。"
+}

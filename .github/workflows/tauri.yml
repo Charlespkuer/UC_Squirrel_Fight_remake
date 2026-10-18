@@ -7,7 +7,7 @@ name: Build desktop app (Tauri)
 # 推 v* 标签时会顺带把安装包挂到 GitHub Release 上。
 #
 # 本地想自己打：装 Rust（rustup）+ Node，然后
-#   cd src-tauri && npm install && npm run build   # 产物在 src-tauri/target/release/bundle/
+#   node tools/build-tauri-app.cjs --installer   # 产物落 src-tauri/dist/
 # 本机没有 Rust 也没关系：这个工作流在 GitHub 的 macOS/Windows 机器上跑。
 
 on:

@@ -131,3 +131,5 @@
 .vip-plan span{font-size:17px;color:#7b5a2e}
 /* 首页昵称前的尊贵标识（原版特权 4） */
 .home-name .vip-badge{color:#ffd84d;-webkit-text-stroke:2px #8a5f22;paint-order:stroke fill;margin-right:4px}
+/* 四个竞技场卡片（经验/碎片/幻兽/天梯）：2×2，第 4 张不折到 3 列网格外 */
+.extra-arena-cards.four{grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr)}

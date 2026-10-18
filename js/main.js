@@ -27,38 +27,96 @@
   let rafId = null;
   let bgm = null, fightBgm = null;
   let mainBg = null, mainBgSoft = false;
+  /* 经典模式用的首页底图：**2011 原版那 320×196 的扁平村庄底图**（ssfight.swf 内嵌位图）。
+   * 加载的是 4× AI 超分版（1280×784）；原图不是矢量，1x 只作加载兜底 ——
+   * 见 docs/经典模式-可行性.md §3.2 / §8。 */
+  let mainBgSsfight = null;
   const HOME_BG_BLUR = 1.1;
 
   /** 主界面背景：等比铺满 1170×690，可加轻微虚化与淡化作纱。
-   *  原版 main.jpg 细节很密，HUD 与角色压上去会互相抢，所以默认轻微虚化 + 提亮。 */
-  function drawHomeBg(ctx, blur) {
-    if (!mainBg) { ctx.fillStyle = '#3d6b35'; ctx.fillRect(0, 0, W, H); return; }
-    const scale = Math.max(W / mainBg.width, H / mainBg.height);
-    const dw = mainBg.width * scale, dh = mainBg.height * scale;
+   *  现代模式的 main.jpg 细节很密，HUD 与角色压上去会互相抢，所以默认轻微虚化 + 提亮；
+   *  经典模式用原版底图，按「原图锐利」处理（见 homeBgBlur）。
+   *  **静态层缓存**：虚化 + 白纱是纯静态的，以前每帧都在主画布上重做一次 canvas blur；
+   *  现在按「尺寸 + 底图 + 虚化强度」缓存到离屏 canvas，主循环只 `drawImage` 一次。 */
+  let homeBgCache = null, homeBgCacheKey = '';
+  function paintHomeBg(c, bg, blur) {
+    const scale = Math.max(W / bg.width, H / bg.height);
+    const dw = bg.width * scale, dh = bg.height * scale;
     const ox = (W - dw) / 2, oy = (H - dh) / 2;
-    ctx.save();
-    if (blur) ctx.filter = 'blur(' + blur + 'px)';
-    ctx.drawImage(mainBg, ox, oy, dw, dh);
-    if (blur) ctx.filter = 'none';
+    c.save();
+    if (blur) c.filter = 'blur(' + blur + 'px)';
+    c.drawImage(bg, ox, oy, dw, dh);
+    if (blur) c.filter = 'none';
     if (blur) {
       // 淡化作纱：只压很薄一层，底图细节尽量保留
-      ctx.fillStyle = 'rgba(255,250,236,0.09)';
-      ctx.fillRect(0, 0, W, H);
-      const g = ctx.createLinearGradient(0, H * 0.62, 0, H);
+      c.fillStyle = 'rgba(255,250,236,0.09)';
+      c.fillRect(0, 0, W, H);
+      const g = c.createLinearGradient(0, H * 0.62, 0, H);
       g.addColorStop(0, 'rgba(40,60,35,0)');
       g.addColorStop(1, 'rgba(30,48,28,0.11)');
-      ctx.fillStyle = g;
-      ctx.fillRect(0, H * 0.62, W, H * 0.38);
+      c.fillStyle = g;
+      c.fillRect(0, H * 0.62, W, H * 0.38);
     }
-    ctx.restore();
+    c.restore();
+  }
+  function drawHomeBg(ctx, blur) {
+    const bg = homeBgImage();
+    if (!bg) { ctx.fillStyle = '#3d6b35'; ctx.fillRect(0, 0, W, H); return; }
+    if (typeof document !== 'undefined' && document.createElement) {
+      if (!homeBgCache) homeBgCache = document.createElement('canvas');
+      const key = W + 'x' + H + '|' + blur + '|' + (bg.src || '') + '|' + (bg.naturalWidth || 0);
+      if (homeBgCacheKey !== key) {
+        homeBgCache.width = W; homeBgCache.height = H;
+        paintHomeBg(homeBgCache.getContext('2d'), bg, blur);
+        homeBgCacheKey = key;
+      }
+      ctx.drawImage(homeBgCache, 0, 0);
+      return;
+    }
+    paintHomeBg(ctx, bg, blur);
+  }
+  /** 现在是不是「经典」界面模式（读存档；存档还没载入时按当前偏好，默认经典）。 */
+  function uiModeIsClassic() {
+    try {
+      if (!window.State || !State.settings) return true;
+      if (!State.state()) {
+        return window.UI && UI.currentUiMode ? UI.currentUiMode() === 'classic' : true;
+      }
+      return State.settings().uiMode === 'classic';
+    } catch (e) { return true; }
+  }
+  /**
+   * 经典模式下村庄页由**原版导出数据**渲染成 SVG（`js/ssfight/`），canvas 不再画首页场景。
+   * 判据用 DOM 上的 `.ssfight-home`：只有真的挂上了，才放心跳过 canvas 绘制。
+   */
+  function ssfightHomeActive() {
+    return uiModeIsClassic() && !!window.SfUiMain && !!document.querySelector('.ssfight-home');
+  }
+  /**
+   * 首页用哪张底图：
+   *   · 现代模式 = 现在的写实重绘（`main.jpg`，安卓客户端素材）；
+   *   · 经典模式 = **2011 原版那 320×196 的扁平村庄底图**（ssfight.swf 内嵌位图）。
+   * 两张都在启动时预载，所以热切换不用重新加载。
+   */
+  function homeBgImage() {
+    if (uiModeIsClassic() && mainBgSsfight) return mainBgSsfight;
+    return mainBg;
+  }
+  /** 首页背景的虚化强度。**经典模式按原版「原图锐利」处理**（虚化与白纱一起关掉，
+   *  见 docs/经典模式-可行性.md §4.1 #1）；现代模式保持现在的轻微虚化 + 提亮。 */
+  function homeBgBlur() {
+    if (uiModeIsClassic()) return 0;
+    return mainBgSoft ? HOME_BG_BLUR : 0;
   }
   let homeT = 0;
   let muted = localStorage.getItem('ssdz_music_muted') === '1';
   let activeBattle = null;
 
   function fitCanvas() {
-    // Classic menu screenshots use 920:560; APK combat keeps its native 1170:690.
-    const layoutHeight = $('#ui .classic-page') ? W * 560 / 920 : H;
+    // 页面高度由展示层决定：复刻的菜单页是 920:560 → 712.174，战斗/首页 canvas 是 690。
+    // 经典模式的村庄页是原版 320×196 整页 → 716.625（见 UI.layoutHeight）。
+    const layoutHeight = (window.UI && UI.layoutHeight) ? UI.layoutHeight(W, H)
+      : ($('#ui .classic-page') ? W * 560 / 920 : H);
     // 用 documentElement.clientWidth/Height：它们**不含**滚动条占的位置，
     // 而 window.innerWidth/Height 含。Windows 的滚动条占位会让 innerWidth 在
     // 「弹窗出现/消失」时变化，导致整屏缩放跳一下；macOS 的覆盖式滚动条不占位，
@@ -81,12 +139,19 @@
     canvas.style.height = H * sy + 'px';
     const ui = $('#ui');
     ui.style.width = W + 'px';
-    ui.style.height = H + 'px';
+    /* 容器高度必须和 layoutHeight 用**同一个数**：整屏缩放是按 layoutHeight 算的，
+     * 而 #ui 原来恒为 690。经典村庄页是原版 320×196 整页（716.625），装进 690 的盒子后
+     * SVG 只能按高度铺满 → 左右各白给 21px 黑边，外面又因为缩放比不一致再白给上下两条。
+     * 两处都是纯浪费，这里让盒子跟着走（只影响 ssflight 村庄页，其它屏照旧 690）。 */
+    const tightHome = !!(window.SfUiMain && document.querySelector('.ssfight-home'));
+    ui.style.height = (tightHome ? layoutHeight : H) + 'px';
     ui.style.transform = 'scale(' + sx + ',' + sy + ')';
     ui.style.setProperty('--uiscale', Math.min(sx, sy));
     ui.style.fontSize = (16 * Math.min(sx, sy)) + 'px';
     // 位图数字按设计尺寸逐字绘制，缩放变化后需要按新比例重画一次。
     if (window.UI && UI.renderNumbers) UI.renderNumbers();
+    // 标题页是静态的（不再跑 rAF 循环）：窗口尺寸变化时补画一次背景。
+    if (mode === 'title') { try { drawHomeBg(ctx, homeBgBlur()); } catch (e) {} }
   }
   window.addEventListener('resize', fitCanvas);
 
@@ -111,16 +176,26 @@
     } catch (e) {}
     return false;
   }
-  /** 存档载入后把偏好接过来：存档优先，并回写 localStorage 供下次启动（标题画面）用。 */
-  function applyStoredSettings() {
+  /** 存档载入后把偏好接过来：存档优先，并回写 localStorage 供下次启动（标题画面）用。
+   *  **偏好没变就直接返回**：以前每次 `showHome()` 都要写 3 次 localStorage + `fitCanvas`、
+   *  再被 `showHome` 里的第二次 `fitCanvas` 叠一遍；现在只有读档 / 切档 / 改设置才重跑。 */
+  let appliedSettingsSig = '';
+  function applyStoredSettings(force) {
     try {
       if (!window.State || !State.settings || !State.state || !State.state()) return;
       const st = State.settings();
+      const sig = [st.volume, st.muted === true, st.uiMode, st.resolution, st.fullscreen === true].join('|');
+      if (!force && sig === appliedSettingsSig) return;
+      appliedSettingsSig = sig;
       volume = clampVolume(st.volume);
       muted = st.muted === true || volume <= 0;
       localStorage.setItem('ssdz_music_volume', String(volume));
       localStorage.setItem('ssdz_music_muted', muted ? '1' : '0');
       applyVolume();
+      /* 界面模式：存档载入后以存档为准再落一次 <html data-ui-mode>
+       * （classic-ui.js 启动时用的是 localStorage 兜底值）。 */
+      if (window.UI && UI.applyUiMode) UI.applyUiMode(st.uiMode);
+      try { if (window.Debug && Debug.refresh) Debug.refresh(); } catch (e) {}
       fitCanvas();
     } catch (e) {}
   }
@@ -276,20 +351,23 @@
     setStatus('加载背景…');
     // 主界面背景：用原版 main.jpg（868×512，比例与原设计空间一致）。
     // 加载失败时退回自绘村庄，保证离线也能显示。
-    mainBg = await Engine.loadImage('images/ui/screens/main.jpg');
-    if (!mainBg) mainBg = await Engine.loadImage('images/ui/screens/village.svg');
+    /* 两张底图并行拉：主图失败才退 village.svg（退回本身要等主图结果，所以放在 then 里）。 */
+    const [mainImg, ssfImg] = await Promise.all([
+      Engine.loadImage('images/ui/screens/main.jpg').then((img) => img || Engine.loadImage('images/ui/screens/village.svg')),
+      Engine.loadImage('images/ssfight/ui/bitmap/3182_0.hd.jpg'),
+    ]);
+    mainBg = mainImg || null;
     mainBgSoft = !!mainBg && /main\.jpg$/i.test(mainBg.src || '');
+    mainBgSsfight = ssfImg || null;
     drawLoading(0.25, '正在加载角色素材…');
     setStatus('加载角色素材…');
-    await Engine.loadSheets(['SQ_01', 'SQ_02', 'weaponAttack', 'throwweaponAttack', 'main_e1', 'main_e2', 'main_e3',
+    const coreSheets = ['SQ_01', 'SQ_02', 'weaponAttack', 'throwweaponAttack', 'main_e1', 'main_e2', 'main_e3',
       'wuqi', 'wuqi2', 'jineng', 'daoju', 'jinbeidaoju', 'tudi', 'go', 'starter_effect', 'loadingp',
       'fightNum_r', 'fightNum_g', 'fightNum_y', 'tilishuzi', 'energyNum', 'expNum', 'jingyanshuzi', 'num_28', 'num_36',
       'resource_1', 'resource_6', 'resource_13', 'resource_15', 'resource_16', 'resource_3', 'resource_4',
       'resource_5', 'resource_9', 'resource_10', 'resource_11', 'resource_12', 'resource_14', 'resource_2', 'resource_7', 'resource8',
-      'new', 'shengbai', 'tanchutiao', 'loadingShadow', 'substarate', 'substarate0', 'draw', 'activity', 'plus', 'minus']);
-    drawLoading(0.6, '正在加载战斗素材…');
-    setStatus('加载战斗素材…');
-    await Engine.loadSheets(['effectCommonAttack', 'weaponEffect', 'throwEffect', 'win_effect', 'die', 'runAround',
+      'new', 'shengbai', 'tanchutiao', 'loadingShadow', 'substarate', 'substarate0', 'draw', 'activity', 'plus', 'minus'];
+    const battleSheets = ['effectCommonAttack', 'weaponEffect', 'throwEffect', 'win_effect', 'die', 'runAround',
       'hurtRunBack', 'beatBack', 'think', 'hitMe',
       'skill_6', 'skill_7', 'skill_8', 'skill_9', 'skill_13', 'skill_14', 'skill_15', 'skill_16_1', 'skill_16_2',
       'skill_17', 'skill_18', 'skill_23', 'skill_8_d', 'skill_9_d', 'skill_15_d', 'skill_18_d_1', 'skill_18_d_2',
@@ -300,14 +378,25 @@
       'fightBg_robot_mid', 'fightBg_robot_front', 'fightBg_robot_effect',
       'fightBg_meltRoom_front', 'fightBg_meltRoom_effect',
       'fightBg_wood_1', 'fightBg_wood_3', 'fightBg_wood_4', 'fightBg_wood_effect2', 'fightBg_wood_effect6',
-      'fightBg_seaWorld_front', 'fightBg_seaWorld_effect']);
+      'fightBg_seaWorld_front', 'fightBg_seaWorld_effect'];
+    /* 只有「首屏 + 首页」这批必须等；战斗特效那 50 多张图在后台继续拉，
+     * 真开打时 `battle.js` 还会再 await 一次（引擎会复用同一个 in-flight 请求）。
+     * 以前两批串行都 await，首屏要等全部 100+ 张图（2026-10 审计）。 */
+    const battleLoad = Engine.loadSheets(battleSheets).then(() => {
+      Engine.pinSheets(['effectCommonAttack', 'weaponEffect', 'throwEffect', 'win_effect', 'die', 'runAround',
+        'hurtRunBack', 'beatBack', 'think',
+        'skill_6', 'skill_7', 'skill_8', 'skill_8_d', 'skill_9', 'skill_9_d', 'skill_13', 'skill_14', 'skill_15', 'skill_15_d',
+        'skill_16_1', 'skill_16_2', 'skill_17', 'skill_18', 'skill_18_d_1', 'skill_18_d_2', 'skill_23',
+        'tl', 'tl_effect', 'xh1', 'xh2', 'xh_effect1', 'xh_effect2', 'xm1', 'xm2', 'xm_effect',
+        'woodman1', 'woodman2', 'woodman_effect']);
+      return true;
+    }).catch(() => false);
+    await Engine.loadSheets(coreSheets);
+    drawLoading(0.75, '正在加载战斗素材…');
+    setStatus('加载战斗素材…');
     // 角色/特效图集必须优先于场景图集，否则同名标签会被场景图元抢走
-    Engine.pinSheets(['SQ_01', 'SQ_02', 'weaponAttack', 'throwweaponAttack',
-      'effectCommonAttack', 'weaponEffect', 'throwEffect', 'win_effect', 'die', 'runAround', 'hurtRunBack', 'beatBack', 'think',
-      'skill_6', 'skill_7', 'skill_8', 'skill_8_d', 'skill_9', 'skill_9_d', 'skill_13', 'skill_14', 'skill_15', 'skill_15_d',
-      'skill_16_1', 'skill_16_2', 'skill_17', 'skill_18', 'skill_18_d_1', 'skill_18_d_2', 'skill_23',
-      'tl', 'tl_effect', 'xh1', 'xh2', 'xh_effect1', 'xh_effect2', 'xm1', 'xm2', 'xm_effect',
-      'woodman1', 'woodman2', 'woodman_effect']);
+    Engine.pinSheets(['SQ_01', 'SQ_02', 'weaponAttack', 'throwweaponAttack']);
+    try { await Promise.race([battleLoad, new Promise((r) => setTimeout(r, 2500))]); } catch (e) {}
     drawLoading(0.95, '准备完成');
     setStatus('松鼠大战 · 怀旧单机版');
     UI.installFavicon();
@@ -317,7 +406,25 @@
     // 只有读不到文件时才退回浏览器 localStorage，而且必须把原因明明白白摆出来
     // （以前这里是静默回落：一个残留的 1 级浏览器档会让玩家以为存档丢了）。
     let loaded = false;
-    try { loaded = await State.fileLoad(); } catch (e) { loaded = false; }
+    /* 95% 守护：`fileLoad()` 走本地 HTTP/文件通道，若启动器/同步服务在返回页面时卡住，
+     * 这里会永远停在「准备完成」那一条 95% 进度上。等 4 秒仍没结果就先按本地存档进游戏，
+     * 不让玩家卡死在启动屏；迟到的磁盘读如果成功，下次启动会自然接上。 */
+    let loadTimedOut = false;
+    try {
+      const result = await Promise.race([
+        State.fileLoad(),
+        new Promise((resolve) => setTimeout(() => resolve('__timeout__'), 4000)),
+      ]);
+      if (result === '__timeout__') loadTimedOut = true;
+      else loaded = !!result;
+    } catch (e) { loaded = false; }
+    if (loadTimedOut) {
+      setStatus('存档读取超时，先用本地存档进入…');
+      const local = !!(State.hasLocalSave && State.hasLocalSave() && State.load && State.load());
+      if (local) showHome(); else showTitle();
+      if (UI && UI.toast) UI.toast('磁盘存档读取超时，已先用本地存档进入；同步恢复后请重开游戏。');
+      return;
+    }
     const fellBack = !loaded && !!State.hasLocalSave();
     if (loaded || (fellBack && State.load())) showHome();
     else showTitle();
@@ -500,8 +607,17 @@
       ok('sheets-loaded', Object.keys(Engine.SHEETS).length >= 40, Object.keys(Engine.SHEETS).length + ' sheets');
       showHome();
       await new Promise((r) => setTimeout(r, 700));
+      /* 新号默认经典模式：首页是 `SfUiMain.mount()` 异步挂出来的原版 SVG 页，
+       * 没有现代模式的 `.home-menu button` / `__homeRegions`。这里两种模式都认，
+       * 否则 ?test=1 在默认（经典）档下会假红（2026-10 审计实测）。 */
+      for (let i = 0; i < 30 && !document.querySelector('#ui .ssfight-home svg'); i++) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      const classicHome = document.querySelector('#ui .ssfight-home svg');
       const regs = window.__homeRegions || [];
-      ok('home-render', mode === 'home' && regs.length === 5 && document.querySelectorAll('.home-menu button').length === 5, 'regions=' + regs.length);
+      const modernHome = regs.length === 5 && document.querySelectorAll('.home-menu button').length === 5;
+      ok('home-render', mode === 'home' && (!!classicHome || modernHome),
+        classicHome ? 'classic svg' : 'regions=' + regs.length);
       ok('home-canvas', (() => {
         const c = document.getElementById('stage').getContext('2d');
         const d = c.getImageData(0, 0, W, H).data;
@@ -532,11 +648,24 @@
         'weapons=' + JSON.stringify(rebornState.weapons) + ' skills=' + JSON.stringify(rebornState.skills) + ' level=' + rebornState.level);
       rebornState.level = 20; rebornState.weapons = savedWeapons; rebornState.skills = savedSkills;
       const battleDone = new Promise((resolve) => {
-        Main.startBattle(State.genAI(1), { region: 0, onEnd: (w, r) => resolve({ w: w, rounds: r.rounds.length }) });
+        /* `skipChest`：经典模式的原版战斗在战果后会开「四选一宝箱」并**等玩家点**，
+         * 自检没人点 → `onEnd` 永远不回调（2026-10 审计实测卡在这里）。
+         * 冒烟只看战斗能不能跑完，宝箱流程由 ui-fight 自己的用例覆盖。 */
+        Main.startBattle(State.genAI(1), { region: 0, skipChest: true, onEnd: (w, r) => resolve({ w: w, rounds: r.rounds.length }) });
       });
-      await new Promise((r) => setTimeout(r, 2500));
-      document.querySelector('[aria-label="跳过战斗"]')?.click();
-      const res = await Promise.race([battleDone, new Promise((r) => setTimeout(() => r(null), 30000))]);
+      /* 跳过键在经典模式里是 SVG 节点（而且要等 8.7 MB 的 tags-fight 包挂完才出现），
+       * 所以不能只等 2.5 s 点一次；轮询到它出现为止。有 `click` 就点，没有（SVG）
+       * 就派发冒泡 click —— 两种渲染器都能接住。 */
+      for (let i = 0; i < 60; i++) {
+        const skipBtn = document.querySelector('[aria-label="跳过战斗"]');
+        if (skipBtn) {
+          if (typeof skipBtn.click === 'function') skipBtn.click();
+          else skipBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      const res = await Promise.race([battleDone, new Promise((r) => setTimeout(() => r(null), 45000))]);
       ok('battle', !!res, res ? ('winner=' + res.w + ' rounds=' + res.rounds)
         : 'timeout sheets=' + Object.keys(Engine.SHEETS).length + ' errs=' + (window.__errs || []).slice(0, 6).join(';'));
       await new Promise((r) => setTimeout(r, 900));
@@ -545,13 +674,24 @@
       State.state().level = Math.max(30, State.state().level);
       State.state().integral = 1500;
       const keys = ['challenge', 'stages', 'arena', 'rank', 'weapons', 'skills', 'bag', 'gears', 'shop', 'lottery', 'master', 'help'];
+      // 查哪些选择器由展示层给（UI.smokeSelectors）；否则换一套界面实现就没法自检了。
+      const smoke = (window.UI && UI.smokeSelectors) ? UI.smokeSelectors()
+        : { panel: '#ui .panel, #ui .classic-page, #ui .classic-modal', close: '#ui .panel-close' };
       for (const k of keys) {
         try {
           UI.runAction(k);
-          await new Promise((r) => setTimeout(r, 160));
-          const panel = document.querySelector('#ui .panel, #ui .classic-page, #ui .classic-modal');
-          ok('panel:' + k, !!panel && panel.textContent.length > 10);
-          const close = document.querySelector('#ui .panel-close');
+          /* 经典页面是异步挂载的（要拉 1~2 MB 的 tags 包），固定等 160 ms 会假红；
+           * 轮询到面板出现为止（最多 2 s）。SVG 页没有 textContent 时看有没有 svg。 */
+          let panel = null, ready = false;
+          for (let i = 0; i < 50; i++) {
+            panel = document.querySelector(smoke.panel);
+            /* 页面容器可能**先出现、后填内容**（经典挑战页要等 7638 挂完才有字）。
+             * 只看容器存在会在 t=0 假红，所以等到"有字或有 SVG"为止。 */
+            if (panel && (panel.textContent.length > 10 || !!panel.querySelector('svg'))) { ready = true; break; }
+            await new Promise((r) => setTimeout(r, 100));
+          }
+          ok('panel:' + k, ready);
+          const close = document.querySelector(smoke.close);
           if (close) close.click();
           document.querySelectorAll('.classic-modal-overlay').forEach(e => e.remove());
           await new Promise((r) => setTimeout(r, 40));
@@ -589,55 +729,73 @@
         <button id="start-btn" class="uc-button gold">开始游戏</button></div>
         <div class="title-tip">怀旧单机版 · 进度自动保存</div>
       </div>`;
-    let last = performance.now();
-    (function loop(now) {
-      if (mode !== 'title') return;
-      const dt = Math.min(50, now - last); last = now;
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      drawHomeBg(ctx, mainBgSoft ? HOME_BG_BLUR : 0);
-      
-      // 标题画面也放一只待机松鼠，避免"主界面没有松鼠动作"
-      titleT += dt;
-      rafId = requestAnimationFrame(loop);
-    })(performance.now());
+    /* 标题页是**静态**的：以前用 rAF 每帧重画同一张底图（titleT 也没人读），
+     * 纯空转。现在只画一次；窗口 resize 由 fitCanvas 末尾补画。 */
+    drawHomeBg(ctx, homeBgBlur());
     $('#start-btn').onclick = () => {
       const name = $('#name-input').value.trim() || '小松鼠';
       State.newGame(name);
+      /* 新号默认经典界面：把新档里的 uiMode 立刻落到 <html>/localStorage，
+       * 否则标题画面用的是上一次的兜底值，首屏会先闪现代界面。 */
+      try { if (window.UI && UI.applyUiMode) UI.applyUiMode(State.settings().uiMode); } catch (e) {}
       playBgm('main');
       showHome();
     };
     $('#name-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('#start-btn').click(); });
   }
-  let titleT = 0;
 
   /* ============================================================
    * 【MN7】主界面场景（松鼠动作 + HUD）
    * ============================================================ */
   // ---------- 主界面：有松鼠动作的场景 + 原版 HUD ----------
   let homeRegions = [];
-  function showHome() {
+  /** 只启动主界面 **canvas 场景**（背景 + 松鼠 + HUD 循环）：不碰 `#ui`、不碰引导。
+   *  正常回首页走 `showHome()`（先重建 #ui 里的页面，再调这里）；
+   *  `startBattle` 的 `keepScreen` 收尾（随机挑战 / 关卡连战 / 竞技场）也要调它 ——
+   *  那一支的页面 DOM 由调用方自己恢复，但 **canvas 必须从战斗终帧切回主界面场景**：
+   *  现代模式的挑战页背景是透明的（css/classic.css 的 `.classic-page` 只有顶部条带），
+   *  不切的话打完那一眼奖励弹窗下面盖的还是战斗画面（用户 2026-10 报的
+   *  "随机挑战战斗结束、弹奖励的时候背景还是战斗画面，应当是主界面"）。 */
+  function startHomeScene() {
     mode = 'home';
-    applyStoredSettings();
-    UI.renderHome();
-    fitCanvas();
     playBgm('main');
-    buildHomeScene();
+    /* 经典村庄页是 SVG 覆盖层：canvas 这边不画背景/主角/HUD，也就没必要每帧
+     * 更新跑动播放器、做 gears 查询与 bounds 测量（2026-10 审计的首页空转）。 */
+    const classicHome = ssfightHomeActive();
+    if (!classicHome) buildHomeScene();
+    else { mainPlayer = null; homeBgPlayer = null; }
     let last = performance.now();
     cancelAnimationFrame(rafId);
     (function loop(now) {
       if (mode !== 'home') return;
+      if (classicHome || ssfightHomeActive()) {
+        homeRegions = [];
+        window.__homeRegions = homeRegions;
+        rafId = requestAnimationFrame(loop);
+        return;
+      }
       const dt = Math.min(50, now - last); last = now;
       homeT += dt;
       Engine.updatePlayer(mainPlayer, dt);
       if (homeBgPlayer) Engine.updatePlayer(homeBgPlayer, dt);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      drawHomeBg(ctx, mainBgSoft ? HOME_BG_BLUR : 0);
-      
+      /* 现代模式：背景走离屏缓存，只有主角/HUD 每帧更新。 */
+      drawHomeBg(ctx, homeBgBlur());
       if (homeBgPlayer) Engine.drawPlayer(ctx, homeBgPlayer);
       homeRegions = UI.drawHomeHud(ctx, W, H);
       window.__homeRegions = homeRegions;
       rafId = requestAnimationFrame(loop);
     })(performance.now());
+  }
+
+  /** 回首页：重建 `#ui` 里的页面（`renderHome()` 会顺带清掉挑战页等覆盖层）＋启动场景。
+   *  需要"页面别动"的战斗收尾（`keepScreen`）只调 `startHomeScene()`，不要调它。 */
+  function showHome() {
+    applyStoredSettings();
+    UI.renderHome();
+    fitCanvas();
+    startHomeScene();
+    if (window.SfGuide) { try { SfGuide.onHome(); } catch (e) { if (window.__errs) window.__errs.push('SfGuide home: ' + (e && e.message)); } }
   }
 
   // 主界面点击：命中菜单按钮
@@ -668,6 +826,28 @@
   /* ============================================================
    * 【MN8】战斗调度
    * ============================================================ */
+  /** 这一场由谁来播：经典模式 = **原版 fight 帧**（`js/ssfight/ui-fight.js`），
+   *  现代模式 = canvas 播放器（`js/battle.js`）。
+   *  ⚠ `SfFight` 要用的素材包（`tags-fight.json`，8.4 MB）是**按需加载**的；它自己的
+   *    初始加载失败会**向上抛**，这里退回 canvas —— 宁可画面是复刻的，也不能让玩家打不了。 */
+  function battleRenderer() {
+    try {
+      if (window.SfFight && SfFight.ready()
+        && UI.currentUiMode && UI.currentUiMode() === 'classic') return SfFight;
+    } catch (e) {}
+    return Battle;
+  }
+  /** 跑一场：先试当前模式该走的渲染器，抛错就退回 canvas 再跑一次。 */
+  async function runBattle(opts) {
+    const first = battleRenderer();
+    if (first === Battle) return Battle.run(opts);
+    try {
+      return await SfFight.run(opts);
+    } catch (error) {
+      if (window.__errs) window.__errs.push('SfFight: ' + (error && error.message));
+      return Battle.run(opts);
+    }
+  }
   // ---------- 战斗调度 ----------
   async function startBattle(foe, opts) {
     opts = opts || {};
@@ -695,6 +875,16 @@
      * 放在 adjustMe **之后** —— 塔的 buff 走 mods、套装走 setFx，两包互不覆盖；
      * 也不吃塔的「增幅水晶」全局倍率（那是本局增益的倍率，装备收益不该被它放大）。 */
     State.applySetBonuses(me);
+    /* 幻兽出战队伍：先把宠物加成落到玩家面板，再给随机 AI 对手生成 1~3 只幻兽。
+     * 都是“开战前一次性”的数值面板，Sim 不需要知道幻兽的存储细节。 */
+    try {
+      me.pets = State.petTeam ? State.petTeam() : [];
+      if (window.State && State.applyPetBonuses) State.applyPetBonuses(me, me.pets);
+      if (foe && foe.isAI && !Array.isArray(foe.pets) && opts.pets !== false && State.randomPetLoadout) {
+        foe.pets = State.randomPetLoadout(foe.level);
+      }
+      if (foe && Array.isArray(foe.pets) && State.applyPetBonuses) State.applyPetBonuses(foe, foe.pets);
+    } catch (e) { if (window.__errs) window.__errs.push('pet battle: ' + (e && e.message)); }
     mode = 'battle';
     cancelAnimationFrame(rafId);
     $('#ui').innerHTML = '';
@@ -702,7 +892,10 @@
     playBgm('fight');
     if (opts.region != null && foe && foe.region == null) foe.region = opts.region;
     let settled = false;
-    const controller = await Battle.run({
+    /* 这一场走的是不是原版 fight 帧（`SfFight`）。它决定战斗结束后**要不要**再弹复刻那层
+     * 「战斗拾取」收益弹窗 —— 见 `onEnd` 末尾那条口径。 */
+    const classicFight = battleRenderer() === SfFight;
+    const controller = await runBattle({
       canvas, me, foe, region: opts.region, kind: opts.kind, collectDrops: opts.collectDrops !== false,
       /* 右下角操作键：跳过 + 倍速，两个都要**等级解锁**（2026-10 用户口径）——
        * 2 倍速 10 级、跳过 20 级，一开始两个都没有；调用方传 false 仍能单独关掉。
@@ -711,22 +904,58 @@
       allowSkip: opts.allowSkip !== false && State.unlockedSkip(),
       speedToggle: opts.speedToggle !== false && State.unlockedSpeed(),
       speedMax: Number(opts.speedMax) > 0 ? Number(opts.speedMax) : 2,
+      /* 训练木桩等特殊战斗的回合上限（默认 0 = 播放器自己的 60）。只影响 HUD 的剩余
+       * 回合数字；真正的收尾由 Sim 的 practiceRounds 决定（见 js/sim.js）。 */
+      maxRounds: Number(opts.maxRounds) > 0 ? Math.floor(Number(opts.maxRounds)) : 0,
       // 挑战塔 boss 机制：贴一条进战斗画面（opts.trial = {text}）
       trial: opts.trial,
       // 挑战塔：三侠大招留下的本层削弱（画在玩家血条下方）
       debuffs: opts.debuffs,
-      dropRandom: window.QA_FIXTURE && QA_FIXTURE.dropRandom,
-      onEnd: (winner, result, loot) => {
+      dropRandom: (window.QA_FIXTURE && QA_FIXTURE.dropRandom) || opts.dropRandom,
+      /* 挑战页在战果页出现前算经验/金松果（`State.fightReward`），让第一张战果页就能
+       * 写全"经验 + 金松果 + 悬浮物品"；算过的结果由调用方缓存，`onEnd` 不重复发。 */
+      rewardFor: opts.rewardFor,
+      /* 调用方随后会自己摆战果页（原版 `fight` 第 2/3 帧）时，跳过局内那次 1.5 s 的
+       * 战果页，避免同一份"经验 + 金松果"在开宝箱前后各闪一次。 */
+      skipResultPanel: opts.skipResultPanel === true,
+      hideVictoryCg: opts.hideVictoryCg === true,
+      /* 竞技场 / 天梯 / 关卡连战**不发宝箱**（用户 2026-11 口径）：这些是连续挑战，
+       * 奖励走各自的结算；随机挑战仍保留开宝箱。 */
+      skipChest: opts.skipChest === true,
+      onEnd: (winner, result, loot, reward) => {
         if (settled) return;
         settled = true;
         activeBattle = null;
+        /* 切了档：这一场作废，回首页（原行为）。
+         * ⚠ 顺序不能反：`State.state() !== S` 时**绝不能**去调 `opts.onEnd`，
+         * 那个回调写的是旧档的结算。 */
         if (State.state() !== S) { showHome(); return; }
         State.recordBattle({ me, foe, result, region: opts.region != null ? opts.region : foe.region || 0, kind: opts.kind || 'challenge' });
         playBgm('main');
-        // 战斗结束后主界面渲染循环处于暂停态，先恢复它，再弹结果面板
-        showHome();
-        opts.onEnd && opts.onEnd(winner, result);
-        if (UI.classic && UI.classic.pickupResult) UI.classic.pickupResult(loot);
+        /* ⚠ `keepScreen`：经典模式的**连战 / 竞技场**要"打完直接回原来那一页"。
+         * 默认这条 `showHome()` 会先把 `#ui` 换成经典首页（并在 `renderHome()` 里
+         * `SfChallenge.destroy()`），调用方的 `onEnd` 再想回挑战页就晚了 ——
+         * 用户 2026-10 报的"关卡连战间隙会跳回现代界面 / 竞技场开始竞技也跳回现代界面"
+         * 就是这个顺序造成的。传 `keepScreen: true` 时这里不换页，由调用方自己恢复。
+         * ⚠⚠ 但**模式必须自己拨回 `home`**：`mode` 只在 `showHome()` 里被重置，
+         *   而这一支恰恰不调 `showHome()` —— 于是打完一场之后 `mode` 永远停在 `'battle'`，
+         *   下一场 `startBattle` 第一行的 `if (mode === 'battle') return;` 直接**静默返回**：
+         *   关卡连战第二场"点了没反应"（用户 2026-10 报的"无法正常进行连战"）、
+         *   竞技场决赛同样打不起来。
+         * 另外 canvas 也要从战斗终帧切回主界面场景（`startHomeScene()` 一并做掉，语义就是
+         *   "战斗播完了、界面由调用方恢复"）：现代模式的挑战页背景是透明的，只拨 `mode`
+         *   不重画 canvas 的话，打完弹奖励时背景停在战斗画面上（用户 2026-10 报的
+         *   "随机挑战战斗结束、弹奖励的时候背景还是战斗画面，应当是主界面"）。 */
+        if (!opts.keepScreen) showHome();
+        else startHomeScene();
+        opts.onEnd && opts.onEnd(winner, result, loot, reward);
+        /* 「战斗拾取」那层复刻自研的收益弹窗**只留给现代界面**。
+         * 经典模式（原版 fight 帧）里收获是**画在战果页**上的 —— 原版 `showFightResult()`
+         * （MainMovie.as:18703-18840）把这一场的东西填进 `c1/c2/c3` 三格 + `getExp`，
+         * 战斗中飘到的道具另有 `获取道具`(3960) 那张小牌子，**没有**任何"结束后再弹一层"
+         * 的实现（用户 2026-11 口径："收益弹窗的 ui 风格很明显和 ssfight 版本不符"）。
+         * 所以这一档按"原版没有就删掉"处理：不再往原版战果页上盖一层 DOM 弹窗。 */
+        if (!classicFight && UI.classic && UI.classic.pickupResult) UI.classic.pickupResult(loot);
       },
       onError: () => {
         if (settled) return;
@@ -736,6 +965,9 @@
       },
     });
     if (!settled) activeBattle = controller;
+    if (!settled && window.SfGuide) {
+      try { SfGuide.onBattleStart(); } catch (e) { if (window.__errs) window.__errs.push('SfGuide battle: ' + (e && e.message)); }
+    }
   }
 
   async function replayBattle(entry, onEnd) {
@@ -743,7 +975,7 @@
     const owner = State.state();
     let settled = false;
     mode = 'battle'; cancelAnimationFrame(rafId); $('#ui').innerHTML = ''; fitCanvas(); playBgm('fight');
-    const controller = await Battle.run({ canvas, me: entry.me, foe: entry.foe, region: entry.region, result: entry.result, collectDrops: false,
+    const controller = await runBattle({ canvas, me: entry.me, foe: entry.foe, region: entry.region, result: entry.result, collectDrops: false,
       onEnd: () => {
         if (settled) return;
         settled = true; activeBattle = null; showHome();

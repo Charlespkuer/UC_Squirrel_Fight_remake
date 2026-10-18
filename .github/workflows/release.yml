@@ -5,7 +5,7 @@ name: Release portable builds
 #   2. 建一个 GitHub Release 并把 zip 挂上去，别人下载解压即玩
 # 也可以手动触发（Actions → Release portable builds → Run workflow）。
 #
-# 注意：启动脚本不在本文件里现写，而是直接拷贝  下维护的那一份，
+# 注意：启动脚本不在本文件里现写，而是直接拷贝 `scripts/` 下维护的那一份，
 # 免得 workflow 与仓库里的脚本各写一套、越走越偏。
 
 on:
@@ -41,7 +41,7 @@ jobs:
           # scripts/ 里要进便携包的白名单：双击入口 + 静态服务器 + **一键更新的执行体**
           # （update-game.js 由 serve.js 的 /__update 调起，2026-10 修：以前漏了它，
           #   便携包里点「一键更新」会找不到执行体）
-          SCRIPTS="index.html serve.js serve.py start-game.ps1 update-game.js 启动游戏.command 启动游戏.cmd 停止游戏.command 一键同步.command 一键同步.cmd 重启同步服务.cmd restart-sync.cmd cleanup-old-layout.cmd cleanup-old-layout.ps1"
+          SCRIPTS="index.html serve.js serve.py start-game.ps1 update-game.js game-exit-watch.sh 启动游戏.command 启动游戏.cmd 停止游戏.command 一键同步.command 一键同步.cmd 重启同步服务.cmd restart-sync.cmd"
 
           build() {          # $1 = 包名后缀（mac / win）
             name="squirrel-web-$1"
@@ -58,7 +58,7 @@ jobs:
             # （文件住在 scripts/ 里 —— 仓库与发布包同一层级，update-game.js 就按这个路径读）
             printf '{\n  "version": "%s",\n  "commit": "%s",\n  "date": "%s",\n  "note": "由 CI 写入（发布便携包时覆盖）"\n}\n' \
               "$TAG" "${GITHUB_SHA:0:7}" "$(date -u +%Y-%m-%d)" > "$out/scripts/version.json"
-            chmod +x "$out/scripts/启动游戏.command" "$out/scripts/停止游戏.command" "$out/scripts/一键同步.command" "$out/scripts/serve.py" 2>/dev/null || true
+            chmod +x "$out/scripts/启动游戏.command" "$out/scripts/停止游戏.command" "$out/scripts/一键同步.command" "$out/scripts/serve.py" "$out/scripts/game-exit-watch.sh" 2>/dev/null || true
             # 参考素材不进便携包：images/_reference/ 只作对照（图集出处清单、新版界面截图裁切、
             # 官方掉落图、未使用的旧图），运行时不读 —— 2026-10 images 重构时从包体里剔出去的。
             rm -rf "$out/images/_reference"

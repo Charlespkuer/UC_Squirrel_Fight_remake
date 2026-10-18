@@ -136,7 +136,7 @@ function setup(layer) {
   const S = c.State.state();
   S.level = 70;
   S.props[23] = 30;
-  for (let i = 1; i <= 18; i++) S.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) S.stages[i] = { npcIndex: 3, passed: true };
   /* 固定随机：__rand(v) → 每次调用都返回 v（0 = 必中概率 / 必取第一项；0.99 = 必不中）。 */
   c.__rand = (v) => vm.runInContext('(function(){var v=' + Number(v) + ';Math.random=function(){return v;};return true;})()', c);
   /* 固定随机：LCG（用于统计采样；同一 seed 完全可复现）。 */

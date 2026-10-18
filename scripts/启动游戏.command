@@ -16,6 +16,9 @@
 # 双击运行时的行为：**服务器放到后台**（nohup，日志写 save/server.out.log 与
 # save/server.err.log，PID 写 save/.server.pid），本脚本立刻退出，Terminal 窗口自己关掉，
 # 不再像以前那样把一个 bash 永远挂在前台。
+# 关掉游戏窗口之后：游戏专用的 Chrome/Edge 实例会被自动退出；如果 Terminal 没有别的
+# 窗口了，Terminal 本身也会退出——Dock 里不会一直留着 bash / Google 的图标。
+# （只要你还有别的 Terminal 窗口 / 别的 Chrome 窗口，就不动它们。）
 #   想停掉后台服务器：再双击本文件、或者执行  bash scripts/启动游戏.command --stop
 #   想在窗口里看实时日志：加 --foreground（服务器回到前台，窗口不会关）
 #   想保留窗口不自动关闭：设环境变量 SSDZ_KEEP_WINDOW=1
@@ -122,22 +125,68 @@ recover_save_if_needed() {
 }
 if [ "$DO_STOP" != "1" ]; then recover_save_if_needed; fi
 
-# ---- 退出时把这个 Terminal 窗口关掉（只关我们自己这一个）----
-# 双击 .command 时 Terminal 的窗口标题就是脚本名；手工在终端里跑时标题不是它，
-# 所以这里不会误关你正在用的窗口。osascript 不可用/没授权就什么都不做（静默失败）。
+# ---- 退出时把这个 Terminal 窗口关掉，并把空闲的 Terminal 一起退出 ----
+# 为什么不是简单 close 一下：macOS 上 Terminal 关掉最后一个窗口后**应用本身还留在
+# Dock 里**（这就是「关掉游戏后 bash 还亮着」的来源）。所以关完窗口还要判断：
+# 如果 Terminal 已经没有别的窗口了，就 quit 掉它。
+#
+# 做法：本脚本先退出，再让一个 detach 的 osascript 延时动手——
+#  - 只认「我们这个 tty」的那一扇窗口，绝不碰你别的 Terminal 窗口；
+#  - 只处理「一次性窗口」：脚本退出后这个 tty 上已经没有进程了。
+#    手工在终端里 `bash 启动游戏.command` 时，你的交互 shell 还活着，这里什么都不做；
+#  - Terminal 还有别的窗口 → 只尝试关自己这一扇，**绝不 quit**；
+#    只剩自己这一扇 → quit（顺手把 Dock 图标也收掉）。
+# osascript 不可用/没授权就静默跳过。
 close_self_window() {
   [ "${SSDZ_KEEP_WINDOW:-}" = "1" ] && return 0
   [ "$(uname)" = "Darwin" ] || return 0
   [ "${TERM_PROGRAM:-}" = "Apple_Terminal" ] || return 0
   [ -t 0 ] || return 0
   command -v osascript >/dev/null 2>&1 || return 0
-  local title
-  title="${SSDZ_WINDOW_TITLE:-$(basename "$0")}"
-  title="${title%.command}"; title="${title%.sh}"
-  [ -n "$title" ] || return 0
-  nohup osascript -e 'delay 0.5' \
-    -e "tell application \"Terminal\" to close (every window whose name contains \"$title\")" \
-    >/dev/null 2>&1 &
+  local tty_path
+  tty_path="$(tty 2>/dev/null || true)"
+  case "$tty_path" in /dev/*) ;; *) return 0 ;; esac
+  nohup osascript - "$tty_path" <<'APPLESCRIPT' >/dev/null 2>&1 &
+on run argv
+  set targetTTY to item 1 of argv
+  delay 1.2
+  if not (application "Terminal" is running) then return
+  try
+    set ttyShort to do shell script "basename " & quoted form of targetTTY
+  on error
+    return
+  end try
+  tell application "Terminal"
+    if (count of windows) is 0 then
+      quit
+      return
+    end if
+    set targetWindow to missing value
+    repeat with wi from 1 to count of windows
+      set w to window wi
+      try
+        if (count of tabs of w) is 1 and (tty of tab 1 of w) is targetTTY then
+          set targetWindow to w
+          exit repeat
+        end if
+      end try
+    end repeat
+    if targetWindow is missing value then return
+    set stillRunning to "0"
+    try
+      set stillRunning to do shell script "ps -t " & quoted form of ttyShort & " -o pid= 2>/dev/null | wc -l | tr -d ' '"
+    end try
+    if stillRunning is not "0" then return
+    if (count of windows) is 1 then
+      quit
+    else
+      try
+        close targetWindow
+      end try
+    end if
+  end tell
+end run
+APPLESCRIPT
   disown 2>/dev/null || true
   return 0
 }
@@ -225,12 +274,38 @@ if [ "$RESET_PROFILE" = "1" ] && [ -n "$PROFILE_DIR" ] && [ -d "$PROFILE_DIR" ];
   mv "$PROFILE_DIR" "$PROFILE_DIR.bak-$STAMP" 2>/dev/null || rm -rf "$PROFILE_DIR"
 fi
 
+# ---- 关窗收尾：游戏窗口一关，就把游戏专用的浏览器实例退掉 ----
+# Chrome 的 --app 窗口关掉后，浏览器进程仍会留在 Dock（macOS 的默认行为）。
+# 这里在后台留一个零依赖的小脚本（scripts/game-exit-watch.sh）轮询 DevTools，
+# 发现游戏窗口全没了就 kill 掉这个实例（只按 --user-data-dir=<游戏 profile> 认人，
+# 不会碰你平时用的 Chrome / Edge）。
+start_exit_watch() {
+  [ "$(uname)" = "Darwin" ] || return 0
+  [ -n "${PROFILE_DIR:-}" ] || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  local helper="$ROOT/scripts/game-exit-watch.sh"
+  [ -f "$helper" ] || helper="$ROOT/game-exit-watch.sh"
+  [ -f "$helper" ] || return 0
+  mkdir -p "$SAVE_DIR" 2>/dev/null || true
+  nohup bash "$helper" --profile "$PROFILE_DIR" --log "$SAVE_DIR/game-exit.log" \
+    </dev/null >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  return 0
+}
+
 open_app() {
   if [ "$APP_MODE" = "1" ] && [ -n "$BROWSER" ]; then
-    # 应用窗口用独立配置目录（不污染游戏目录，也不和你平常的浏览器混在一起）
-    nohup "$BROWSER" --app="$URL" --window-size=1216,760 --user-data-dir="$PROFILE_DIR" >/dev/null 2>&1 &
+    # 应用窗口用独立配置目录（不污染游戏目录，也不和你平常的浏览器混在一起）。
+    # --remote-debugging-port=0 只给同机后台小脚本判断「窗口何时关」用；实际端口
+    # 写在 profile 目录的 DevToolsActivePort 里（随机端口、只监听 127.0.0.1）。
+    nohup "$BROWSER" --app="$URL" --window-size=1216,760 --user-data-dir="$PROFILE_DIR" \
+      --remote-debugging-port=0 \
+      --no-first-run --no-default-browser-check --disable-background-networking \
+      --disable-component-update --disable-sync >/dev/null 2>&1 &
     disown 2>/dev/null || true
+    start_exit_watch
   elif command -v open >/dev/null 2>&1; then
+    # 用系统默认浏览器打开时不跟踪窗口：那个浏览器里可能还有你的其它标签页，不能替你退出。
     open "$URL"
   elif command -v xdg-open >/dev/null 2>&1; then
     xdg-open "$URL"
@@ -325,8 +400,10 @@ if [ -z "$SERVER_EXE" ]; then
   echo "装一个 Node.js（https://nodejs.org）后重新运行本脚本，就能写进 save/progress.json。"
   # 入口页在 scripts/ 里（新布局），这里用完整路径；以前写死了 $(pwd)/index.html，新布局下根本打不开
   if [ "$APP_MODE" = "1" ] && [ -n "$BROWSER" ]; then
-    nohup "$BROWSER" --app="file://$ENTRY" --window-size=1216,760 --allow-file-access-from-files >/dev/null 2>&1 &
+    nohup "$BROWSER" --app="file://$ENTRY" --window-size=1216,760 --allow-file-access-from-files \
+      --user-data-dir="$PROFILE_DIR" --remote-debugging-port=0 >/dev/null 2>&1 &
     disown 2>/dev/null || true
+    start_exit_watch
   elif command -v open >/dev/null 2>&1; then open "$ENTRY"
   else echo "请手动打开：$ENTRY"; fi
   close_self_window

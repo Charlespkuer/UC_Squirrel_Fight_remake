@@ -76,10 +76,19 @@
   const berserkerPortrait = new Image(); berserkerPortrait.src = 'images/ui/characters/squirrel-berserker-classic.png';
   const ninjaPortrait = new Image(); ninjaPortrait.src = 'images/ui/characters/squirrel-green-outfit.png';
 
+  /** 分页签那一排的键名（点它们 = 换页，动效要**播完再换**，否则玩家看不到反馈）。 */
+  const TAB_KEYS = ['bag', 'shop', 'exchange', 'status', 'weapons', 'skills', 'challenge', 'friends',
+    'arena', 'stages', 'messages', 'chat', 'ranklog', 'revenge', 'toplist', 'system', 'help', 'village', 'vip'];
   function bind(root, actions) {
-    $$('[data-action]', root).forEach(b => b.onclick = () => {
-      const f = actions[b.dataset.action];
-      if (f) f(b);
+    $$('[data-action]', root).forEach(b => {
+      b.onclick = () => {
+        const f = actions[b.dataset.action];
+        if (!f) return;
+        /* ⑩ 点击缩放动效（见 `popTap` 的注释）：页签这类"点完就换页"的键，
+         * 要等这一遍缩放播完再换，否则反馈一闪都没看见。 */
+        if (b.classList && (b.classList.contains('uc-tab') || b.classList.contains('sf-feedback'))) popTap(b, () => f(b));
+        else f(b);
+      };
     });
   }
   function frameUrl(sheet, label) {
@@ -89,8 +98,23 @@
     const url = frameUrl(sheet, label);
     return url ? '<img alt="" class="' + (cls || '') + '" src="' + url + '">' : '';
   }
-  /** 原版贴图标签（只用于显示，点击沿用外层 data-action 元素）。 */
-  function sprLabel(sheet, label, w, h, title) {
+  /* 金松果图标（**主界面之外统一用这一颗**，用户 2026-10 口径）：
+   * 来自原版**道具页**右上角那颗"橡果 + 一堆金币"，从无头渲染图里按轮廓抠成透明 PNG。
+   * 注意与主界面那颗不是同一套画稿 —— 主界面（非 ssflight 的经典首页）用的是资源图集
+   * `resource_1` 第 18 帧的单颗橡果，那是原版首页自己的样式，别混用。 */
+  const GOLD_ICON = 'images/ui/icons/gold-acorn.png';
+  function goldIcon(cls) { return '<img alt="" class="' + (cls || '') + '" src="' + GOLD_ICON + '">'; }
+  /** 价格 = **金松果贴图 + 数字**（用户 2026-10 第一百五十批口径）。
+   *  商店里原本写的是「30 金松果」这种**文字**，与复刻其它地方（顶栏 / 融合页 / 塔）用的
+   *  "图标 + 数字"不是一套；现在统一成后者。`title` 保留一句可读文案给读屏与悬停提示，
+   *  见 `css/classic-refine.css` 的 `.gold-price`。 */
+  function goldPrice(n, title) {
+    const num = Math.max(0, Number(n) || 0);
+    return '<span class="gold-price"' + (title ? ' title="' + esc(title) + '"' : '') +
+      ' role="img" aria-label="' + esc((title ? title + '：' : '') + num + ' 金松果') + '">' +
+      goldIcon('gold-price-art') + '<b>' + num + '</b></span>';
+  }
+  /** 原版贴图标签（只用于显示，点击沿用外层 data-action 元素）。 */  function sprLabel(sheet, label, w, h, title) {
     return '<span class="spr-label' + (title ? ' has-title' : '') + '" style="--sbw:' + w + 'px;--sbh:' + h + 'px"' +
       (title ? ' title="' + esc(title) + '" aria-label="' + esc(title) + '"' : '') + '>' + spr(sheet, label, 'spr-label-art') + '</span>';
   }
@@ -198,6 +222,9 @@
     // 真·武器用的是素材库里的另一套图：images/ui/icons/weapon/weapon-true-<id>.png
     if (kind === 'weapon' && trueForm) return 'images/ui/icons/weapon/weapon-true-' + id + (locked ? '-locked' : '') + '.png';
     if(kind==='weapon' && +id===1 && !locked)return 'images/ui/icons/weapon/weapon-1-classic.png';
+    /* 原版 Flash 有、H5 图集里没有的三件道具：82 从符号 2419 导出；
+     * 79/90 用同风格手绘 SVG 占位（原版没有导出对应的物品图标）。 */
+    if (kind === 'prop' && [79, 82, 90].includes(+id)) return 'images/ui/icons/prop/prop-' + (+id) + '.svg';
     return 'images/ui/icons/' + dir + '/' + kind + '-' + id + (locked ? '-locked' : '') + '.png';
   }
   /** 等级 11~15 = 真1~真5；显示成「真N」，10 级及以下显示 LVn。 */
@@ -321,20 +348,76 @@
   /* ============================================================
    * 【UC4】页面骨架：tabs / page / modal / notice / toast
    * ============================================================ */
+  function closeOriginalResult() { if (window.SfFightResult) SfFightResult.destroy(); }
   function home() { Main.showHome(); }
+  /* 道具和状态页一样：按下反馈由pointerdown负责，click直接更新，不再重播。 */
+  function popTap(el, run, now) {
+    const f = window.SfUiFeedback;
+    if (!f) { if (run) run(); return; }
+    const page = el && el.closest && el.closest('.classic-page');
+    const bag = page && /^(bag|shop|exchange)$/.test(page.dataset.screen);
+    f.tap(el, run, { delay: bag || now ? 0 : 160, exit: !bag && !now, press: !bag });
+  }
+  /** 把一页里所有该有动效的键接上（分页签 / 物品格 / 底栏键）。只在道具相关页调。 */
+  function wirePopTaps(root, opts) {
+    opts = opts || {};
+    const nodes = [];
+    if (opts.tabs) nodes.push(...$$('.classic-tabs .uc-tab', root));
+    if (opts.cells) nodes.push(...$$('.catalog-cell:not(.empty-slot)', root));
+    if (opts.footer) nodes.push(...$$('.page-footer .uc-button', root));
+    if (opts.arrows) nodes.push(...$$('.page-arrow .uc-button', root));
+    nodes.push(...$$('.bag-actions .uc-button', root));
+    const f = window.SfUiFeedback;
+    if (!f) return;
+    for (const n of nodes) {
+      f.bind(n, { selected: () => n.classList.contains('selected') || n.classList.contains('active') });
+    }
+  }
+  /** 系统分组（系统 / 帮助 / 超级松鼠）的公共反馈。
+   *  经典状态页那三颗原版 tab 是「未选中金皮 / 选中绿皮 + 悬停果冻光晕 + 点击回弹」，
+   *  系统页这套是 DOM 画的，所以把同一套交互补在这里：所有可点件都走 SfUiFeedback，
+   *  点击再补一遍 `pick` 回弹（页签本身仍由 popTap 延迟换页，回弹能看见一帧）。
+   *  ⚠ 只在系统分组页调：分页签 / 设置键 / 帮助物品格 / 超级松鼠档位都覆盖，
+   *    但不要把它接到道具页那张已经自己 wirePopTaps 的根上，避免重复挂。 */
+  function wireSystemFeedback(root) {
+    const f = window.SfUiFeedback;
+    if (!f || !root || !root.querySelectorAll) return root;
+    root.classList.add('sf-system-ui');
+    for (const n of $$('.uc-tab, .uc-button, .music-toggle, .help-item, .vip-plan', root)) {
+      f.bind(n, {
+        selected: () => n.classList.contains('active') || n.classList.contains('on') ||
+          !!(n.closest && n.closest('.music-setting.on')),
+      });
+    }
+    if (!root.__sfPickWired) {
+      root.__sfPickWired = true;
+      root.addEventListener('click', (ev) => {
+        /* 滑条自己负责拖动/点轨道，不参与“点一下回弹”，否则拖一半会闪一下。 */
+        if (ev.target && ev.target.closest && ev.target.closest('input')) return;
+        const t = ev.target && ev.target.closest
+          ? ev.target.closest('.uc-tab, .uc-button, .music-toggle, .help-item, .vip-plan') : null;
+        if (!t || !root.contains(t) || t.disabled) return;
+        f.pick(t);
+      }, true);
+    }
+    return root;
+  }
   function tabs(group, active) {
     const sets = {
       status: [['status','状态'],['weapons','武器'],['skills','技能']],
       challenge: [['challenge','随机'],['friends','好友'],['arena','竞技'],['stages','关卡']],
       message: [['messages','消息'],['chat','聊天'],['ranklog','天梯赛'],['revenge','复仇'],['toplist','排行榜']],
       bag: [['bag','背包'],['shop','商店'],['exchange','兑换']],
-      system: [['system','系统'],['help','帮助'],['village','村庄'],['vip','超级松鼠']]
+      system: [['system','系统'],['help','帮助'],['vip','超级松鼠']]
     };
     const labels=sets[group].map(([id,t])=>{
       const art=group==='status'?'<span class="reference-button-label">'+t+'</span><img alt="" class="classic-button-art" src="images/ui/buttons/'+({status:'status',weapons:'weapon',skills:'skill'}[id])+'-'+(id===active?'active':'normal')+'.png">':t;
-      return '<button class="uc-tab '+(id===active?'active':'')+'" data-action="'+id+'" aria-current="'+(id===active?'page':'false')+'">'+art+'</button>';
+      /* 道具页三颗页签：文字仍留给读屏；原版矢量图由 `installBagTabVectors()` 在页面挂上后塞进这个壳。
+       * 在矢量包到达前，按钮走 `.classic-tabs .uc-tab` 的金/绿药丸兜底，不再依赖 tab-*.png。 */
+      const vector=group==='bag'?'<span class="bag-tab-art" aria-hidden="true"></span>':'';
+      return '<button class="uc-tab '+(id===active?'active':'')+'" data-action="'+id+'" aria-current="'+(id===active?'page':'false')+'">'+art+vector+'</button>';
     }).join('');
-    return '<nav class="classic-tabs ' + (sets[group].length > 3 ? 'four' : group==='bag'?'bag-tabs':'') + '" aria-label="游戏分页">' + labels + (group === 'challenge' ? '<span class="tab-energy">体力 ' + State.state().energy + '/' + State.state().maxEnergy + '</span>' : group==='bag'?'<span class="bag-coins">'+spr('resource_1',18)+'<b>'+State.state().goldPoint+'</b></span>':'') + '</nav>';
+    return '<nav class="classic-tabs ' + (sets[group].length > 3 ? 'four' : group==='bag'?'bag-tabs':'') + '" data-group="' + group + '" aria-label="游戏分页">' + labels + (group === 'challenge' ? '<span class="tab-energy">体力 ' + State.state().energy + '/' + State.state().maxEnergy + '</span>' : group==='bag'?'<span class="bag-coins">'+goldIcon()+'<b>'+State.state().goldPoint+'</b></span>':'') + '</nav>';
   }
   /** 页内改过金松果之后刷新顶部标签条右上角的数量（抽奖/道具/任务/每日礼包等原地结算的场景）。 */
   function refreshHeader() {
@@ -344,6 +427,7 @@
     const home = $('.home-money .num u'); if (home) setNum($('.home-money .num'), S.goldPoint);
   }
   function page(group, active, content, opts) {
+    closeOriginalResult();
     opts = opts || {}; screen = active; activePortrait = null;
     /* 重画**同一页**时别把人弹回页首：先记住旧滚动容器的位置，新页面挂上去后再放回去。
      * 「把存档送过去 / 检查更新」这类原地动作会多次重画系统页 ——
@@ -354,9 +438,21 @@
     const keepTop = oldBoard ? oldBoard.scrollTop : 0;
     const keepLeft = oldBoard ? oldBoard.scrollLeft : 0;
     const old = $('#ui .classic-page'); if (old) old.remove();
+    /* ⚠ 主页那一层（`.classic-home`；ssflight 经典模式下的村庄页也是它）是**整屏**的，
+       而且带不透明底色 —— 进二级页时如果只摘掉 `.classic-page`、把它留在 `#ui` 里，
+       它就会整片盖住 canvas 上画的村庄背景，看起来就是"进二级界面背景黑了一块"
+       （用户 2026-10 反馈）。这里把它一起摘掉，背景就还给 canvas 了。 */
+    $$('#ui .classic-home').forEach(e => e.remove());
     $$('.classic-modal-overlay').forEach(e => e.remove());
-    const p = document.createElement('section'); p.className = 'classic-page'; p.dataset.screen = active;
-    p.innerHTML = tabs(group, active) + (opts.above || '') + '<div class="classic-board ' + (opts.cls || '') + '">' + content + '</div><footer class="page-footer">' + (opts.left || '') + btn('返回菜单','home','gold',true) + (opts.right || '') + '</footer>' + (opts.counter ? '<span class="page-counter' + (opts.counterPlace === 'board' ? ' in-board' : '') + '">' + opts.counter + '</span>' : '');
+    const p = document.createElement('section'); p.className = 'classic-page' + (opts.pageClass ? ' ' + opts.pageClass : ''); p.dataset.screen = active;
+    /* 经典二级页自己带底图：不依赖 canvas 是否已经画过首页背景（首次进游戏时 canvas 可能还是黑的）。
+     * 这里用当前模式显式加类，避免 data-ui-mode 在极早期还没落到 <html> 时背景漏黑。 */
+    if (currentUiMode() === 'classic') p.classList.add('classic-bg');
+    /* 经典塔页：不要现代顶部分页横条、不要底部「返回菜单」；由 TowerUI 自己塞一条
+     * 「返回征战」的经典标题栏（`opts.noTabs/noFooter/above`）。 */
+    const head = opts.noTabs ? '' : tabs(group, active);
+    const foot = opts.noFooter ? '' : '<footer class="page-footer">' + (opts.left || '') + btn(opts.homeLabel || '返回菜单','home','gold',true) + (opts.right || '') + '</footer>';
+    p.innerHTML = head + (opts.above || '') + '<div class="classic-board ' + (opts.cls || '') + '">' + content + '</div>' + foot + (opts.counter ? '<span class="page-counter' + (opts.counterPlace === 'board' ? ' in-board' : '') + '">' + opts.counter + '</span>' : '');
     $('#ui').appendChild(p);
     bind(p, Object.assign({}, actions, {home}));
     if(window.Main?.resizeLayout)Main.resizeLayout();
@@ -364,6 +460,7 @@
       const nb = Array.prototype.find.call(p.children, (el) => el && el.classList && el.classList.contains('classic-board'));
       if (nb) { nb.scrollTop = keepTop; nb.scrollLeft = keepLeft; }
     }
+    if (window.SfGuide) { try { SfGuide.onPage(active); } catch (e) {} }
     promptLevelUpChoices();
     return p;
   }
@@ -472,9 +569,29 @@
    * 【UC6】主界面首页（canvas 渲染 + 松鼠画像）
    * ============================================================ */
   function renderHome() {
+    closeOriginalResult();
     screen = 'home'; activePortrait = null;
     const S = State.state();
-    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label" role="img" aria-label="经验" title="经验">' + spr('draw', 15, 'home-exp-art') + '</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/ui/home/activity.png">' + '</button><button class="picture-button" data-action="chat" aria-label="聊天">' + '<img alt="" src="images/ui/home/chat.png">' + '</button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/ui/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
+    /* 【SFR2】经典模式：村庄页**整页由原版导出数据渲染**（js/ssfight/render.js + ui-main.js）。
+     * 原版页面自带顶栏（昵称/等级/体力）、Exp 条、底栏五键与全部图标，
+     * 所以这里不再拼复刻的 DOM 版；canvas 那边也同步不再画背景与 HUD（见 main.js 的 ssfightHomeActive）。 */
+    if (currentUiMode() === 'classic' && window.SfUiMain) {
+      /* 回主界面 = 把上一棵原版页面收干净。`SfUiMain.mount()` 自己会拆自己那一棵，
+       * 但状态页 / 挑战页是**并列**的两棵树（各自带 1s 重刷），必须在这里一起收掉 ——
+       * 不然从二级页回主界面时它们会挂在一棵已经不在页面上的树上继续跑。 */
+      if (window.SfStatus && SfStatus.destroy) { try { SfStatus.destroy(); } catch (e) {} }
+      if (window.SfChallenge && SfChallenge.destroy) { try { SfChallenge.destroy(); } catch (e) {} }
+      if (window.SfVillage && SfVillage.destroy) { try { SfVillage.destroy(); } catch (e) {} }
+      if (window.SfMessage && SfMessage.destroy) { try { SfMessage.destroy(); } catch (e) {} }
+      $('#ui').innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠大战主页"></section>';
+      const box = $('#ui .ssfight-home');
+      if (box) window.SfUiMain.mount(box).catch((e) => { if (window.__errs) window.__errs.push('SfUiMain: ' + e.message); });
+      /* 进主界面就预热道具页三颗页签的矢量包（188 KB）：等玩家点「道具」时多半已就绪，
+       * 首屏会直接走矢量页签，不经过 CSS 药丸兜底。不阻塞主界面挂载。 */
+      void preloadBagTabVectors();
+      return;
+    }
+    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label" role="img" aria-label="经验" title="经验">' + spr('draw', 15, 'home-exp-art') + '</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/ui/home/activity.png">' + '</button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/ui/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
     bind($('.classic-home'),actions);buffSignature='';
     refreshHome();
     renderNumbers();
@@ -549,7 +666,12 @@
     const frames = Engine.anim(name); if(!frames)return;
     const sheets = options.npc ? ({tl:['tl'],xh:['xh1','xh2'],xm:['xm1','xm2']}[options.npc]) : (animate ? (options.sheets || ['SQ_01','SQ_02']) : ['SQ_01','SQ_02']);
     const frame = frames[options.still || !animate ? 0 : Math.floor(timer/90)%frames.length];
-    const bounds = Engine.frameBounds ? Engine.frameBounds(frames[0],{sheets,wears,exclude:['75','20001']}) : {x:60,y:320,w:410,h:340};
+    /* 量包围盒时要排掉「影子/地面效果」这类贴地元素：`54` 是 210×54、位置在脚下方
+     * （y 573~627，而身体只到 571），留着它会把包围盒往下拽 ~56px，
+     * 于是 contain-fit 按高度算出来的缩放白白小一圈（实测角色只有 301 宽而非 ~360）。
+     * `battle.js:302` 对同一批元素用的就是 `['54','75','91']`，这里保持一致。
+     * 只影响「量尺寸」，不影响绘制 —— 下面 drawFrame 没有传 exclude，影子照画。 */
+    const bounds = Engine.frameBounds ? Engine.frameBounds(frames[0],{sheets,wears,exclude:['54','75','20001']}) : {x:60,y:320,w:410,h:340};
     if(!bounds || !bounds.w)return;
     const k=Math.min(box.w/bounds.w,box.h/bounds.h);
     const origin={x:(box.x+(box.w-bounds.w*k)/2)/k-bounds.x,y:(box.y+(box.h-bounds.h*k)/2)/k-bounds.y};
@@ -597,6 +719,26 @@
    * 【UC7】状态页与图鉴
    * ============================================================ */
   function openStatus() {
+    /* 【SFR4】经典模式：状态页**整页由原版导出数据渲染**（js/ssfight/ui-status.js，
+     * 页根元件 = zhuangtai 帧的 7218）。原版这一页自带主角落绘（四个部位精灵 + 玩家
+     * 穿在身上的装备）、Exp 条、今日胜率、战斗场次、力敏速命四维、更换装备 / 装备融合
+     * 与三个 tab —— 与用户在 2026-10 第一百五十批点名的"对齐经典模式的状态界面"逐项对应。
+     * 下面那套 DOM 版留给现代模式（也作为经典模式渲染失败时的兜底）。 */
+    if (currentUiMode() === 'classic' && window.SfStatus && SfStatus.open) {
+      screen = 'status'; activePortrait = null;
+      $('#ui').innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠状态"></section>';
+      const box = $('#ui .ssfight-home');
+      if (box) {
+        SfStatus.open(box).catch((e) => {
+          if (window.__errs) window.__errs.push('SfStatus: ' + (e && e.message));
+          openStatusDom();
+        });
+        return;
+      }
+    }
+    openStatusDom();
+  }
+  function openStatusDom() {
     const S=State.state(),st=State.totalStats(),fights=S.dailyWins+S.dailyFails;
     const p=page('status','status','<canvas class="status-character" width="497" height="341" aria-label="我的松鼠"></canvas><div class="status-right"><div class="status-exp"><span class="home-exp-label">Exp</span><div class="exp-meter"><i style="width:'+Math.min(100,100*S.exp/GData.nextExp(S.level))+'%"></i><span>'+S.exp+'/'+GData.nextExp(S.level)+'</span></div></div><dl class="status-lines"><dt>今日胜率：</dt><dd>'+(fights?Math.round(S.dailyWins/fights*100):0)+'%</dd><dt>战斗场次：</dt><dd>'+(S.allWins+S.allFails)+'</dd></dl><div class="status-buttons">'+btn('更换装备','gears','gold',true)+btn('装备融合','merge','gold')+'</div></div>'+statsHtml(st));
     portrait($('.status-character',p));
@@ -608,6 +750,55 @@
   function allItems(kind) {
     const a=[];(kind==='weapon'?weaponsMap:skillsMap).each((id,v)=>{if(v&&+id>0)a.push({...v,id:+id});});
     return a.sort((a,b)=>a.id-b.id);
+  }
+  /** 【SFR4】给经典模式状态页的武器 / 技能栏用：一页 10 格的清单（不含渲染）。
+   *  返回 `{ items, pages }`，`items` 里每一项都带"有没有 / 几级 / 是否真形态"。 */
+  function catalogInfo(kind, pg) {
+    const own = kind === 'weapon' ? State.myWeapons() : State.mySkills();
+    const items = allItems(kind);
+    const pages = Math.max(1, Math.ceil(items.length / 10));
+    const page = Math.max(0, Math.min(Math.max(0, (pg | 0)), pages - 1));
+    const slice = items.slice(page * 10, page * 10 + 10).map((it) => {
+      const has = own.find((x) => x.id === it.id) || null;
+      return {
+        id: it.id, name: it.name, has: !!has,
+        level: has ? has.level : 0,
+        trueForm: !!has && isTrueGear(has),
+        /* 原版那一格是不是"当前选中的那一项"：**选中**决定卡片用绿底那一帧、
+         * 也决定卡片下方要不要显示名字（见 js/ssfight/ui-status.js 的 paintCell 四档表）。 */
+        selected: !!has && selectedItems[kind] === it.id,
+        label: has ? levelLabel(has.level) : '',
+        /* 【SFR4】原版图标 = 库元件（元件名就是武器/技能名，见 tools/gen-ssfight-ui.cjs 的
+         * `iconRoots()`）。这张表由生成器产出、运行时只读。
+         * ⚠ `locked` 是**另一颗库元件**（名字 + "1"）：原版 `showWeaponSkills`
+         * （MainMovie.as:22050-22057）按 `has` 二选一挂 —— 灰底卡片 + **灰色的名字层**，
+         * 所以"悬停未获得的格子显示灰名字"是原版**自己的第 2 帧**，不是复刻另做的一套。
+         * 缺项（表里 missing 的那几颗）返回 null，调用方退回 PNG 图标。 */
+        icon: wsIconOf(kind, it.id),
+        lockedIcon: wsIconOf(kind, it.id, true),
+      };
+    });
+    return { items: slice, page, pages };
+  }
+  /** 武器 / 技能图标的库元件表（`images/ssfight/ui/weapon-skill-icons.json`）。
+   *  `locked` = 取"未获得"那一档（原版 `<名字>1`，灰卡片 + 灰名字）。 */
+  let wsIcons = null, wsIconsTried = false;
+  function wsIconOf(kind, id, locked) {
+    if (!wsIconsTried) {
+      wsIconsTried = true;
+      /* 同步 XHR：这张表只有几 KB，而且 `catalogInfo` 是同步接口（调用方在渲染循环里）。
+       * 拿不到就返回 null，全部退回 PNG 图标，不影响页面。 */
+      try {
+        const x = new XMLHttpRequest();
+        x.open('GET', 'images/ssfight/ui/weapon-skill-icons.json', false);
+        x.send();
+        if (x.status === 200 || x.status === 0) wsIcons = JSON.parse(x.responseText);
+      } catch (e) { wsIcons = null; }
+    }
+    const row = wsIcons && wsIcons[kind] && wsIcons[kind][id];
+    if (!row) return null;
+    if (locked) return row.locked ? String(row.locked) : String(row.id);
+    return String(row.id);
   }
   function openCatalog(kind,pg) {
     catalogPage=pg||0;
@@ -653,7 +844,7 @@
     const S=State.state();
     // 三个对手在玩家等级附近浮动，并带随机装备；等级差与名字都随机
     const spread=[-1,0,1];
-    opponents=spread.map(i=>State.genAI(Math.max(1,S.level+i),'',{levelJitter:2,minLevel:Math.max(1,S.level-1)}));
+    opponents=spread.map(i=>State.genAI(Math.max(1,S.level+i),'',{levelJitter:2,minLevel:Math.max(1,S.level-1),statScale:State.RANDOM_FOE_SCALE||1.08}));
     selectedOpponent=null;
   }
   // 随机对手也是好友来源：好友页与推荐列表共用这一份候选
@@ -667,6 +858,30 @@
   }
   function challengeRefreshCost(rf) { return rf.count < 5 ? 0 : 1 + Math.floor((rf.count - 5) / 3); }
   function openChallenge(refresh) {
+    /* 【SFR5】经典模式：挑战页**整页由原版导出数据渲染**（js/ssfight/ui-challenge.js，
+     * 页根元件 = tiaozhan 帧的 7638）。原版这一页自带顶栏 4 个 tab（随机 / 我的好友 /
+     * 竞技场 / 关卡）、左列对手行 + 右列拳套卡、右面板力敏速命、关卡的门卡与难度页
+     * （库元件「挑战1」= 4756）—— 与用户 2026-10 点名的"对齐开始挑战内的界面 ui，
+     * 包括上面四个 tab 及其内部 2 级、3 级界面"逐项对应。
+     * 下面那套 DOM 版留给现代模式（也作为经典模式渲染失败时的兜底）。 */
+    if (currentUiMode() === 'classic' && window.SfChallenge && SfChallenge.open) {
+      if (refresh === true && SfChallenge.resetRoster) SfChallenge.resetRoster();
+      screen = 'challenge'; activePortrait = null;
+      $('#ui').innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠挑战"></section>';
+      const box = $('#ui .ssfight-home');
+      if (box) {
+        SfChallenge.open(box).then(() => {
+          if (screen === 'challenge' && window.SfGuide) { try { SfGuide.onPage('challenge'); } catch (e) {} }
+        }).catch((e) => {
+          if (window.__errs) window.__errs.push('SfChallenge: ' + (e && e.message));
+          openChallengeDom(refresh);
+        });
+        return;
+      }
+    }
+    openChallengeDom(refresh);
+  }
+  function openChallengeDom(refresh) {
     if(refresh===true||!opponents.length)genOpponents();
     const rf=challengeRefreshState(),refreshCost=challengeRefreshCost(rf);
     const refreshLabel=refreshCost?'刷新玩家（'+refreshCost+'松果）':(rf.count?'刷新玩家（免费'+(5-rf.count)+'）':'刷新玩家');
@@ -691,14 +906,23 @@
       const foe=opponents[selectedOpponent],S=State.state();
       const beginChallenge = async () => {
         S.challengeRefresh={count:0,ts:Date.now()};State.save();   // 进行挑战后重置刷新费用
+        /* 经验/金松果在**第一张战果页出现前**算好：战果页直接写"经验 + 金松果 + 悬浮物品"，
+         * 开完宝箱就回随机挑战页，不再弹第三张结算。`settle` 自己缓存，SfFight 与 onEnd
+         * 各调一次也只发一次奖励。 */
+        let reward = null;
+        const settle = (winner) => {
+          if (reward) return reward;
+          const win = winner === 0;
+          if (win) { S.dailyWins++; S.allWins++; } else { S.dailyFails++; S.allFails++; }
+          reward = State.fightReward(win, { foeLevel: foe.level });
+          return reward;
+        };
         try {
-          await Main.startBattle(foe,{cost:10,kind:'challenge',useProps:true,onEnd:(winner)=>{
-            const win=winner===0;if(win){S.dailyWins++;S.allWins++;}else{S.dailyFails++;S.allFails++;}
-            const rw=State.fightReward(win,{foeLevel:foe.level});
-            opponents=[];                 // 战果弹窗先压在挑战页上；下一批对手等「确定」时再抽
-            openChallenge();
-            // 「确定」要回到随机挑战页（并换一批新对手），而不是被弹回主界面
-            resultModal(win,rw,'',()=>openChallenge(true));
+          await Main.startBattle(foe,{cost:10,kind:'challenge',useProps:true,keepScreen:true,rewardFor:settle,onEnd:(winner)=>{
+            settle(winner);               // canvas 回退时 SfFight 没机会调 rewardFor
+            opponents=[];                 // 回到随机挑战页时换一批新对手
+            openChallenge(true);
+            if (UI.classic && UI.classic.promptLevelUpChoices) UI.classic.promptLevelUpChoices();
           }});
         } catch (e) {
           /* startBattle 是 async：它内部抛错时不会走 onEnd，战果弹窗也就不会出现。
@@ -728,7 +952,19 @@
       beginChallenge();
     });
   }
-  function resultModal(win,rw,extra,onOk) {
+  function originalFightResult(spec) {
+    if (currentUiMode() !== 'classic' || !window.SfFightResult) return false;
+    SfFightResult.open(spec).catch(error => toast('战果界面加载失败：' + error.message));
+    return true;
+  }
+  /** 普通战果：有经验/金松果/战利品时 `SfFightResult` 挂原版 `fight` 战果页；
+   *  `text` 只作素材缺失时退回 4692 提示框的兜底。 */
+  function resultModal(win,rw,extra,onOk,loot) {
+    if (originalFightResult({ kind: 'result', title: win ? '战斗胜利' : '再接再厉', win,
+      exp: rw.exp, gold: rw.gold || 0, ups: rw.ups, note: extra || '',
+      items: (loot && loot.items) || [],
+      text: '经验 +' + rw.exp + '　金松果 +' + (rw.gold || 0) + '\n' + (extra || '') + '\n' + upsHtml(rw.ups),
+      actions: [{label:'确定',dismiss:true,run:onOk||home},{label:'查看录像',run:()=>openMessages()}] })) return;
     modal('战斗结果','<div class="result-box"><div class="result-title '+(win?'win':'lose')+'">'+(win?'胜 利！':'再接再厉')+'</div><div class="result-lines">经验 +'+rw.exp+'　金松果 +'+(rw.gold||0)+'</div>'+ (extra?'<p>'+esc(extra)+'</p>':'')+upsHtml(rw.ups)+'</div>',[{label:'确定',run:onOk||home},{label:'查看录像',cls:'gold',run:()=>openMessages()}]);
   }
   const NPC_FILE={tl:'mantis',xh:'crane',xm:'panda'};
@@ -755,13 +991,18 @@
   }
   function npcImage(type){return '<img alt="'+esc(type.name)+'" src="images/ui/characters/'+NPC_FILE[type.anim]+'-classic-card.png">';}
   function openStages() {
-    const content='<div class="npc-select">'+GData.STAGE_TYPES.map((t,i)=> (i?'<span class="npc-arrow">➜</span>':'')+'<div class="npc-card">'+npcImage(t)+btn('挑战他','type'+i,stageTypeAvailable(i)?'gold small':'muted small')+'</div>').join('')+'</div><div class="npc-description">10级可挑战盖世五侠。依次通过六种难度，才能挑战下一位高手。每轮连续击败3名敌人，收集装备碎片！</div>'+towerEntryHtml();
+    /* 六扇门（3 普通 + 3 超级）分两行，每行 3 张：一行 6 张会溢出 1170 的版心。 */
+    const row = (from) => '<div class="npc-select">' + GData.STAGE_TYPES.slice(from, from + 3).map((t, i) => {
+      const idx = from + i;
+      return (i ? '<span class="npc-arrow">➜</span>' : '') + '<div class="npc-card">' + npcImage(t) + btn('挑战他', 'type' + idx, stageTypeAvailable(idx) ? 'gold small' : 'muted small') + '</div>';
+    }).join('') + '</div>';
+    const content = row(0) + row(3) + '<div class="npc-description">10级可挑战盖世五侠。依次通过六种难度，才能挑战下一位高手。每轮连续击败3名敌人，收集装备碎片！<br>后三扇门是超级大关：每关只有 1 个敌人，推荐 30 级以上。</div>' + towerEntryHtml();
     const p=page('challenge','stages',content,{cls:'stages-scroll-board'});
-    [0,1,2].forEach(i=>$('[data-action="type'+i+'"]',p).onclick=()=>openDifficulty(i));
+    GData.STAGE_TYPES.forEach((_,i)=>{ const b=$('[data-action="type'+i+'"]',p); if(b) b.onclick=()=>openDifficulty(i); });
     $('[data-action="tower-entry"]',p)?.addEventListener('click',()=>openTowerEntry('tower'));
     $('[data-action="endless-entry"]',p)?.addEventListener('click',()=>openTowerEntry('endless'));
   }
-  /* 无尽挑战塔入口（关卡页下滑可见）：30 级 + 18 关通关解锁。 */
+  /* 无尽挑战塔入口（关卡页下滑可见）：通关前 18 关解锁（与村庄「征战」同一门槛）。 */
   function towerEntryHtml() {
     const lock=window.Tower?Tower.unlocked():{ok:false,msg:'数据加载中…'};
     if(!lock.ok)return '<div class="tower-entries"><div class="tower-entry locked"><b>无尽挑战塔</b><span>'+esc(lock.msg)+'</span></div></div>';
@@ -775,10 +1016,42 @@
     if(!window.Tower||!window.TowerUI)return;
     const lock=Tower.unlocked();
     if(!lock.ok){notice(lock.msg);return;}
-    if(mode==='tower')TowerUI.openTower();else TowerUI.openEndless();
+    if(mode==='tower')TowerUI.openTower({from:'stages'});else TowerUI.openEndless({from:'stages'});
   }
   function stageTypeAvailable(t) {
     return [1,2,3,4,5,6].some(st=>State.stageAccess(t*6+st).ok);
+  }
+  /* 回「关卡」这一层 —— **经典模式下必须回原版渲染的那一页**。
+   * 用户 2026-10 口径："尽量让经典模式的关卡界面中始终遵循经典界面的逻辑，
+   * 不要在挑战途中背景会切换为现代界面，一切优先向 ssfight 看齐。"
+   * 打一场、回一次难度页，以前走的都是复刻自研的 DOM 关卡页（`openDifficulty`），
+   * 于是整块背景从原版 ui 换成现代 ui。这里统一改走 `SfChallenge` 的关卡 tab
+   * （它是原版页元件 7638 的第 3 帧 + 库元件「挑战1」的 5/4 帧），
+   * 只有现代模式（或 ssfight 渲染不可用）才退回 DOM 版。 */
+  function backToStages(t) {
+    if (currentUiMode() === 'classic' && window.SfChallenge && SfChallenge.openAt) {
+      SfChallenge.openAt('gates');
+      UI.runAction('challenge');
+      /* ⚠ `openChallenge()` 会先把 `#ui` 换成新的 `.ssfight-home` —— 战斗期间
+       * `#ui` 是被 `startBattle` 清空的，所以这一步等于"把原版关卡页装回来"。
+       * 之前这一页是**先回首页再回来**（`showHome` 里 `renderHome` 会
+       * `SfChallenge.destroy()`），观感就是"连战间隙闪一下现代界面"。 */
+      if (!classicSsflight()) return;
+      if (Number.isFinite(t)) {
+        /* 直接落到某一扇门的难度页：挂载是异步的，等它挂完再点进去。 */
+        let tries = 0;
+        const tick = () => {
+          if (window.SfChallenge && SfChallenge.view && SfChallenge.view()) {
+            try { SfChallenge.openGateAt(t); } catch (e) {}
+            return;
+          }
+          if (tries++ < 60) setTimeout(tick, 60);
+        };
+        setTimeout(tick, 60);
+      }
+      return;
+    }
+    if (Number.isFinite(t)) openDifficulty(t); else openStages();
   }
   function openDifficulty(t) {
     const type=GData.STAGE_TYPES[t];
@@ -800,20 +1073,29 @@
     const dailyPct=Math.round((GData.challengeDailyMul(dailyCount)-1)*100);
     const dailyHint='<br><span class="small-label">今日已通关 '+dailyCount+' 次常驻挑战：敌人全属性（力/敏/速/血）+'+
       (dailyPct>0?('+'+dailyPct+'%'):'+0%')+'（每通关一整次再 +5%，每日 0/12 点重置）</span>';
-    const text='<div class="mission-guide"><img alt="向导" src="images/ui/characters/master-classic.png"><div>【消耗】：'+cost+'<br>【奖励】：每场经验 '+GData.stageNpcExp(stageId,1)+'/'+GData.stageNpcExp(stageId,2)+'/'+GData.stageNpcExp(stageId,3)+'<br>通关得金松果'+reward.gold+'，每场胜利有几率得碎片<br><span class="small-label">现有挑战书 '+(S.props[23]||0)+' 个</span></div></div><p class="mission-description">连续击败3名敌人，后两场战斗不回满血（继承剩余血量并回复25%）。<br>当前对手：'+esc(npc.name)+'（'+idx+'/3）<br>'+(run?'本轮已复活 '+run.revives+'/2 次。':type.recommend+'。')+dailyHint+'</p>';
+    const text='<div class="mission-guide"><img alt="向导" src="images/ui/characters/master-classic.png"><div>【消耗】：'+cost+'<br>【奖励】：每场经验 '+Array.from({length:GData.stageEnemyCount(stageId)},(_,k)=>GData.stageNpcExp(stageId,k+1)).join('/')+'<br>通关得金松果'+reward.gold+'，每场胜利有几率得碎片<br><span class="small-label">现有挑战书 '+(S.props[23]||0)+' 个</span></div></div><p class="mission-description">'+(GData.isSuperStage(stageId)?'超级大关：本关只有 1 个敌人。':'连续击败3名敌人，后两场战斗不回满血（继承剩余血量并回复25%）。')+'<br>当前对手：'+esc(npc.name)+'（'+idx+'/'+GData.stageEnemyCount(stageId)+'）<br>'+(run?'本轮已复活 '+run.revives+'/2 次。':type.recommend+'。')+dailyHint+'</p>';
     const buttons=exhausted?[{label:'结束本轮',run:()=>stageAbandon(stageId)}]:[{label:run?(run.needsRevive?'复活再战':'继续战斗'):'开始战斗',run:()=>stageFight(stageId)}];
     buttons.push({label:run?'稍后继续':'返回',cls:'muted'});
+    if (typeof originalFightResult === 'function' && originalFightResult({ kind: 'stage', title: '关卡挑战', win: true, text, actions: buttons })) return;
     modal('关卡挑战',text,buttons,{small:true});
   }
   function stageAbandon(stageId) {
+    if (typeof originalFightResult === 'function' && originalFightResult({ kind: 'stage', title: '结束本轮',
+      text: '结束本轮后，下次需1个挑战书从第一名对手重新开始。已通关的记录会保留。',
+      actions: [{label:'结束本轮',run:()=>{State.abandonStageRun(stageId);backToStages(Math.floor((stageId-1)/6));}},
+        {label:'继续本轮',dismiss:true,run:()=>stageConfirm(stageId)}] })) return;
     notice('结束本轮后，下次需1个挑战书从第一名对手重新开始。已通关的记录会保留。',[
-      {label:'结束本轮',run:()=>{State.abandonStageRun(stageId);openDifficulty(Math.floor((stageId-1)/6));}},
+      {label:'结束本轮',run:()=>{State.abandonStageRun(stageId);backToStages(Math.floor((stageId-1)/6));}},
       {label:'继续本轮',cls:'gold',run:()=>stageConfirm(stageId)}
     ]);
   }
+  /** 「现在这一屏是原版渲染的经典页吗」：经典模式 + ssfight 渲染层在场。
+   *  战斗起止"要不要换页"全靠它判断（见 `stageFight` 的 `keepScreen`）。 */
+  function classicSsflight() {
+    return !!(currentUiMode() === 'classic' && window.SfChallenge);
+  }
   function stageFight(stageId) {
-    const started=State.beginStageBattle(stageId);
-    if(!started.ok){notice(started.msg,started.needsBook?[{label:'购买挑战书',run:()=>openProp(23,true)},{label:'返回',cls:'gold',run:()=>stageConfirm(stageId)}]:undefined);return;}
+    const started=State.beginStageBattle(stageId);    if(!started.ok){notice(started.msg,started.needsBook?[{label:'购买挑战书',run:()=>openProp(23,true)},{label:'返回',cls:'gold',run:()=>stageConfirm(stageId)}]:undefined);return;}
     const npc=State.npcOf(stageId,started.npcIndex),type=GData.stageTypeOf(stageId);
     // 连续挑战不回满血：后两场继承上一场剩余血量，并回复25%
     const prevRun=State.stageRun(stageId),carryHp=prevRun&&Number.isFinite(prevRun.carryHp)?Math.min(1,prevRun.carryHp+0.25):undefined;
@@ -822,9 +1104,13 @@
      * 只影响关卡模式；挑战塔 / 无尽塔走各自的敌人构建（tower.js 的 buildFoe），不受影响。 */
     const dailyCount=State.challengeDailyCount?State.challengeDailyCount():0;
     const foe=GData.stageFoe(npc,stageId,type.anim,dailyCount);
-    const backToStage=()=>openDifficulty(Math.floor((stageId-1)/6));
+    const backToStage=()=>backToStages(Math.floor((stageId-1)/6));
     const interrupted=()=>{State.interruptStageBattle(stageId,started.token);backToStage();notice('战斗播放中断，本轮进度已保留。重新进入关卡即可继续。');};
-    try { Promise.resolve(Main.startBattle(foe,{region:type.anim==='tl'?3:type.anim==='xh'?4:1,kind:'stage',useProps:false,hpRatio:carryHp,
+    try { Promise.resolve(Main.startBattle(foe,{region:type.anim==='tl'?3:type.anim==='xh'?4:1,kind:'stage',useProps:false,hpRatio:carryHp,skipChest:true,
+      /* 经典模式下**连战间隙不许回首页**（用户 2026-10 口径："经典模式下完全是经典模式"）：
+       * 打完先回原版关卡页，再弹战果。所以这里让 `startBattle` 跳过它默认那次
+       * `showHome()`，由 `onEnd` 自己把背景恢复成原版关卡页。 */
+      keepScreen: classicSsflight(),
       onError:()=>State.interruptStageBattle(stageId,started.token),
       onEnd:(w,r)=>{
         // 战斗结束后把关卡页放回背景，别让战果弹窗飘在主界面上
@@ -841,14 +1127,19 @@
     })).catch(interrupted); } catch(error) { interrupted(); }
   }
   function stageResult(stageId,npc,idx,rw) {
-    const back=()=>openDifficulty(Math.floor((stageId-1)/6));
-    const reward='<div class="result-lines">经验 +'+rw.exp+(rw.complete?'　通关金松果 +'+rw.gold:'')+'</div>';
+    const back=()=>backToStages(Math.floor((stageId-1)/6));
+    const reward='<div class="result-lines">经验 +'+rw.exp+(rw.complete?'　通关金松果 +'+rw.gold:'')+(rw.chest?'　金宝箱 ×1':'')+'</div>';
+    /* 祭坛「关卡金松果双倍」中了就写一句（原版那套"祭坛发出神秘的光芒"的说法）。 */
+    const goldBuffNote=rw.goldBuff?'<p class="small-label">祭坛神秘光芒加成：本次金松果翻倍（+'+rw.goldBase+'）</p>':'';
     let message,buttons;
     if(rw.complete){
-      message='恭喜通关！三名对手全部击败。';
+      message=GData.isSuperStage(stageId)?'恭喜通关！超级大关的强敌已被击败。':'恭喜通关！三名对手全部击败。';
       buttons=[{label:'继续闯关',run:back},{label:'返回菜单',cls:'muted',run:home}];
     }else if(rw.win){
-      message='已击败'+npc.name+'（'+idx+'/3）。继续挑战不再消耗挑战书，但下一场不会回满血（继承剩余血量并回复25%）。';
+      /* 用户 2026-10 口径："优化挑战界面中『继续挑战』的介绍中的文字排布" ——
+       * 以前是一整段挤在一行里自动折行（长句折在"（继承剩余血量并回复25%）。"中间很难读），
+       * 现在按语义断成三行：战果 / 继续挑战的代价 / 下一场的血量规则。 */
+      message='已击败 '+esc(npc.name)+'（'+idx+'/'+GData.stageEnemyCount(stageId)+'）<br>继续挑战<b>不再消耗挑战书</b><br>下一场不回满血：继承剩余血量并回复 25%';
       // 连战本来就不消耗挑战书，没有必要再确认一次（确认弹窗仍保留在难度页进入时）。
       buttons=[{label:'继续挑战',run:()=>stageFight(stageId)},{label:'稍后继续',cls:'gold',run:back},{label:'结束本轮',cls:'muted',run:()=>stageAbandon(stageId)}];
     }else{
@@ -859,11 +1150,100 @@
     }
     const drop=rw.drop?'<p>获得'+esc(rw.drop.name)+' ×'+rw.drop.count+'</p>':'';
     const gemDrop=rw.gem?'<p>获得'+esc(rw.gem.name)+' ×1</p>':'';
-    modal('关卡战果','<div class="result-box"><div class="result-title '+(rw.win?'win':'lose')+'">'+(rw.win?'胜 利！':'再接再厉')+'</div>'+reward+'<p>'+esc(message)+'</p>'+drop+gemDrop+stageUpsHtml(rw.ups)+'</div>',buttons);
+    /* 有升级：经典战果先挂 7795 升级页，原版页脚那条 stageUpsHtml 不再重复写。 */
+    const levelUpUi = !!(window.SfLevelUp && rw.ups && rw.ups.length);
+    if (typeof originalFightResult === 'function' && originalFightResult({ kind: 'stage', title: rw.win ? '关卡胜利' : '关卡失利', win: rw.win,
+      ups: rw.ups,
+      text: '经验 +' + rw.exp + (rw.complete ? '　通关金松果 +' + rw.gold : '') + '\n' + message + '\n' + drop + gemDrop + goldBuffNote + (levelUpUi ? '' : stageUpsHtml(rw.ups)), actions: buttons })) return;
+    modal('关卡战果','<div class="result-box"><div class="result-title '+(rw.win?'win':'lose')+'">'+(rw.win?'胜 利！':'再接再厉')+'</div>'+reward+'<p>'+esc(message)+'</p>'+drop+gemDrop+goldBuffNote+stageUpsHtml(rw.ups)+'</div>',buttons);
   }
   /* ============================================================
    * 【UC10】背包与道具（含出售/果实三选一）
    * ============================================================ */
+  /* 道具页三颗页签的原版矢量图
+   * ------------------------------------------------------------
+   * 原版道具页 7180 里三颗页签是**矢量精灵**（不是位图）：
+   *   tab = 7150（背包）/ tab1 = 7152（商店）/ tab2 = 7156（兑换）。
+   * 每颗 4 帧：f1 金皮常态、f2 绿色高亮、f3 另一档奶油（原版光标离开页签时用）。
+   * 经典道具页按用户口径「选中要绿」：f1 金皮 / f2 绿皮，选中与悬停都用 f2。
+   * 这里把三颗页签按 f1/f2 各渲染一次，克隆成静态 SVG 模板缓存起来，
+   * 页面挂上后塞进按钮里的 `.bag-tab-art`。克隆不注册 SfRender 视图，所以切页/销毁不用额外收尾。
+   * viewBox = 各页签自己内容包围盒（从原版 mount 后 getBBox 量的，约 63×20.7）；
+   * 三颗按钮是 233×77，与原版 320×196 页面的页签比例一致，直接铺满即可对齐。
+   * 兜底：矢量包还没到时按钮仍走 `.classic-tabs .uc-tab` 的 CSS 金/绿药丸（DOM 文本），
+   * 不再使用 tab-*.png 位图。 */
+  const BAG_TAB_VECTOR = [
+    { key: 'bag', id: '7150', viewBox: '-32.6 -1.2 63.2 20.9' },
+    { key: 'shop', id: '7152', viewBox: '-58.7 -2.1 63.2 20.9' },
+    { key: 'exchange', id: '7156', viewBox: '-32.6 -10.6 63.2 20.9' },
+  ];
+  let bagTabVectorPromise = null;
+  async function buildBagTabVectors() {
+    if (!window.SfRender || !SfRender.loadExtra || !SfRender.mountSymbol) return null;
+    await SfRender.loadExtra('tags-daoju.json');
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;left:-9999px;top:0;width:320px;height:196px;overflow:hidden;pointer-events:none';
+    document.body.appendChild(host);
+    try {
+      const out = {};
+      for (const spec of BAG_TAB_VECTOR) {
+        out[spec.key] = {};
+        for (const frame of [1, 2]) {
+          const cell = document.createElement('div');
+          host.appendChild(cell);
+          const view = await SfRender.mountSymbol(cell, spec.id, {
+            frame, viewBox: spec.viewBox, label: '道具页签',
+          });
+          const svg = view.g.cloneNode(true);
+          svg.setAttribute('class', 'bag-tab-svg');
+          svg.setAttribute('aria-hidden', 'true');
+          out[spec.key][frame] = svg;
+          try { view.destroy(); } catch (e) {}
+          cell.remove();
+        }
+      }
+      return out;
+    } finally { host.remove(); }
+  }
+  function preloadBagTabVectors() {
+    if (!bagTabVectorPromise) {
+      bagTabVectorPromise = buildBagTabVectors().catch((e) => {
+        if (window.__errs) window.__errs.push('bag tab vector: ' + (e && e.message));
+        return null;
+      });
+    }
+    return bagTabVectorPromise;
+  }
+  /** 把缓存的矢量模板装进当前道具页的三颗页签；页面被换掉时旧 SVG 跟着 DOM 一起回收。 */
+  function installBagTabVectors(p) {
+    const nav = p && p.querySelector('.bag-tabs');
+    if (!nav) return;
+    const buttons = [...nav.querySelectorAll('.uc-tab')];
+    if (!buttons.length) return;
+    preloadBagTabVectors().then((art) => {
+      if (!art || !p.isConnected || !nav.isConnected) return;
+      buttons.forEach((btn, i) => {
+        const spec = BAG_TAB_VECTOR[i];
+        const frames = spec && art[spec.key];
+        const host = btn.querySelector('.bag-tab-art');
+        if (!frames || !host) return;
+        const idleFrame = () => (btn.classList.contains('active') ? 2 : 1);
+        const setFrame = (frame) => {
+          const node = frames[frame];
+          if (node) host.replaceChildren(node.cloneNode(true));
+        };
+        setFrame(idleFrame());
+        btn.style.backgroundImage = 'none';
+        btn.classList.add('has-vector-tab');
+        if (!btn.__bagTabVectorWired) {
+          btn.__bagTabVectorWired = true;
+          btn.addEventListener('pointerenter', () => setFrame(2));
+          btn.addEventListener('pointerleave', () => setFrame(idleFrame()));
+        }
+      });
+    });
+  }
+
   function openBag(shop,pg) {
     const exchange=shop==='exchange',mode=shop;shop=shop===true;bagPage=pg||0;
     const S=State.state(),items=[];
@@ -876,29 +1256,101 @@
     const total=Math.max(1,Math.ceil(items.length/6));bagPage=Math.min(bagPage,total-1);
     const shown=items.slice(bagPage*6,bagPage*6+6);
     if(!shown.some(it=>it.id===selectedProp))selectedProp=shown[0]?.id||0;
-    const it=shown.find(it=>it.id===selectedProp),status=shop&&it?State.purchaseStatus(it.id):null;
-    const sellPrice=it&&!shop?State.propSellPrice(it.id):0;
-    // 卖出只在背包的「一级界面」（右侧道具栏，紧挨着 使用/合成）出现：
-    // 商店页不给卖，点开「使用」后的二级弹窗里也没有卖出。
-    const mainLabel=shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看';
-    /* 按钮顺序（需求）：**卖出在左、使用/合成在右** —— 主操作仍然是最醒目的金色按钮。 */
-    const bagActions=it?'<div class="bag-actions">'+
-      (sellPrice&&bagCount(it.id)>0?btn('卖出','prop-sell','small'):'')+
-      btn(mainLabel,'prop-action','small gold')+'</div>':'';
-    const info=it?'<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+it.price+' 金松果<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+bagCount(it.id)+' 个'+(State.isBagCurrencyProp&&State.isBagCurrencyProp(it.id)?'（货币，天梯赛获得；不能卖也不能使用）':sellPrice?'　可回收 '+sellPrice+' 金松果/个':''))+'</div>'+bagActions:'<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
-    const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+bagCount(it.id)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?it.price+' 金松果':bagCount(it.id))+'</span>'+(shop?'<span class="shop-stock">今日 '+State.purchaseStatus(it.id).remaining+'/'+State.shopLimit(it.id)+'</span>':'')+'</button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
+    function detailMarkup(it) {
+      if (!it) return '<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
+      const status=shop?State.purchaseStatus(it.id):null;
+      const sellPrice=!shop?State.propSellPrice(it.id):0;
+      const mainLabel=shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看';
+      /* 卖出仍只在背包一级页，左卖出、右使用/合成；这里只更新选择展示。 */
+      const bagActions='<div class="bag-actions">'+
+        (sellPrice&&bagCount(it.id)>0?btn('卖出','prop-sell','small'):'')+
+        btn(mainLabel,'prop-action','small gold')+'</div>';
+      return '<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+goldPrice(it.price)+'<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+bagCount(it.id)+' 个'+(State.isBagCurrencyProp&&State.isBagCurrencyProp(it.id)?'（货币，天梯赛获得；不能卖也不能使用）':sellPrice?'　可回收 '+goldPrice(sellPrice)+'/个':''))+'</div>'+bagActions;
+    }
+    const info=detailMarkup(shown.find(it=>it.id===selectedProp));
+    const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+bagCount(it.id)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?goldPrice(it.price,esc(it.name)):bagCount(it.id))+'</span></button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
     const bagFooter=shop?{left:btn('每日抽奖','lottery','gold entry-pill'),right:btn('金杯商店','rank-shop','gold entry-pill')}:{};
     const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,Object.assign({cls:'classic-bag-board'+(shop?' shop-board':''),counter:(bagPage+1)+'/'+total},bagFooter));
-    $$('[data-prop]',p).forEach(b=>b.onclick=()=>{selectedProp=+b.dataset.prop;openBag(mode,bagPage);});
-    // 否则兑换页点进详情再返回会掉回背包页。
-    $('[data-action="prop-action"]',p)?.addEventListener('click',()=>openProp(selectedProp,mode));
-    /* 卖出：与「使用」同一套交互 —— 点「卖出」打开卖出弹窗
-     * （左下「返回」/ 右下「卖出」），在弹窗里点一下卖 1 个、弹窗不关，卖光为止。 */
-    $('[data-action="prop-sell"]',p)?.addEventListener('click',()=>sellDialog(selectedProp,()=>openBag(mode,bagPage)));
-    if(status&&!status.remaining)$('[data-action="prop-action"]',p).disabled=true;
+    wirePopTaps(p, { tabs: true, cells: true, footer: true, arrows: true });
+    installBagTabVectors(p);
+    /** 经典合成入口：碎片 / 种子 / 转化丸 / 宝石点「合成」直接进原版 4886 f5，
+     *  不再先弹现代版道具详情弹窗；现代模式仍走 openProp。 */
+    function openPropEntry(id) {
+      const classic = !!(UI.currentUiMode && UI.currentUiMode() === 'classic');
+      if (!shop && classic && window.SfCompose && SfCompose.isComposeProp(id)) {
+        SfCompose.open(id, { onClose: () => openBag(mode, bagPage) });
+        return;
+      }
+      openProp(id, mode);
+    }
+    function wireDetail() {
+      const selected=shown.find(it=>it.id===selectedProp);
+      const status=shop&&selected?State.purchaseStatus(selected.id):null;
+      const use=$('[data-action="prop-action"]',p),sell=$('[data-action="prop-sell"]',p);
+      if (use) {
+        use.disabled=!!(status&&!status.remaining);
+        use.onclick=()=>popTap(use,()=>openPropEntry(selectedProp),true);
+      }
+      if (sell) sell.onclick=()=>popTap(sell,()=>sellDialog(selectedProp,()=>openBag(mode,bagPage)),true);
+      wirePopTaps(p, {});
+    }
+    function selectProp(id) {
+      if (!p.isConnected || !shown.some(it=>it.id===id)) return;
+      selectedProp=id;
+      for (const cell of $$('[data-prop]',p)) {
+        const on=+cell.dataset.prop===id;
+        cell.classList.toggle('selected',on);
+        cell.setAttribute('aria-pressed',String(on));
+        $('.item-icon',cell).innerHTML=icon('prop',+cell.dataset.prop,false,on);
+        if(window.SfUiFeedback)SfUiFeedback.bind(cell,{selected:on});
+      }
+      $('.bag-detail',p).innerHTML=detailMarkup(shown.find(it=>it.id===id));
+      wireDetail();
+    }
+    let clickedProp=null;
+    $$('[data-prop]',p).forEach(b=>{
+      b.onclick=()=>{
+        const id=+b.dataset.prop;
+        const choose=()=>{
+          /* 经典背包/商店：第一下只选中（绿框），同一格再点一下才进详情。
+           * 默认高亮的第一格也要先点一下"确认选中"，第二下才进详情。
+           * 现代模式保持原来的单击选择口径。 */
+          if(currentUiMode()==='classic' && selectedProp===id && clickedProp===id){ openPropEntry(id); return; }
+          selectProp(id);
+          clickedProp=id;
+        };
+        if(window.SfUiFeedback)SfUiFeedback.tap(b,choose,{delay:0,press:false});
+        else choose();
+      };
+    });
+    wireDetail();
     $('[data-action="rank-shop"]',p)?.addEventListener('click',()=>ClassicExtras.rankShop());
-    $('[data-action="prev"]',p)?.addEventListener('click',()=>openBag(mode,bagPage-1));
-    $('[data-action="next"]',p)?.addEventListener('click',()=>openBag(mode,bagPage+1));
+    $('[data-action="prev"]',p)?.addEventListener('click',(e)=>popTap(e.currentTarget,()=>openBag(mode,bagPage-1)));
+    $('[data-action="next"]',p)?.addEventListener('click',(e)=>popTap(e.currentTarget,()=>openBag(mode,bagPage+1)));
+    /* 背包页的 f7 必须在整页 DOM 都挂好后再挂引导（page() 里那一次会被后面的重绘吞掉）。 */
+    if (window.SfGuide) { try { SfGuide.onPage('bag'); } catch (e) {} }
+  }
+  /** 金宝箱 / 魔法袋：原版是「打开金宝箱」(65) → 开奖(66) → 领取(68) 三段弹窗。
+   *  离线版把三段收成一个说明 + 开奖两个弹窗（文案与权重见 State.openChestProp）。 */
+  function openChestDetail(id, shop) {
+    const pet = id === 79;
+    const name = pet ? '魔法袋' : '金宝箱';
+    const body = pet
+      ? '<div class="detail-summary"><span class="item-icon">' + icon('prop', id) + '</span><div><h3 class="detail-name">' + name + '</h3>' +
+        '<div class="detail-description">使用后有一定几率获得稀有道具：召唤证、5/6 级宝石、蓝色碎片、孵化点、属性点或金松果。</div></div></div>'
+      : '<div class="detail-summary"><span class="item-icon">' + icon('prop', id) + '</span><div><h3 class="detail-name">' + name + '</h3>' +
+        '<div class="detail-description">内含黑色顶级装备、属性点、宝石等物品（离线版用高级宝石 / 属性点 / 金松果替代黑装）。</div></div></div>' +
+        '<p class="small-label">可能开出：6 级宝石（极低）、5 级宝石（普通）、8~16 点基础属性、500~1000 金松果。</p>';
+    const m = modal(name, body, [
+      { label: '打开', cls: 'gold', run: () => {
+        const r = State.openChestProp(id);
+        m.close();
+        if (!r.ok) { toast(r.msg); return; }
+        notice(r.msg, [{ label: '确定', run: () => { openBag(!!shop, bagPage); } }]);
+        refreshHeader();
+      } },
+      { label: '取消', cls: 'muted' },
+    ], { small: true });
   }
   /** mode：true=商店（购买）/'exchange'=兑换页/其它=背包（使用·合成）。 */
   function openProp(id,mode) {
@@ -906,6 +1358,7 @@
     const backMode=shop?true:exchange?'exchange':false;   // 返回时回到来的那一页
     const base=propMap.getValue(id),S=State.state();
     if(!base)return;
+    if(id===79||id===90){ openChestDetail(id,shop); return; }
     const isFragment=[24,25,26].includes(id),isConvertShard=id===GData.CONVERT_SHARD_ID,isSeed=[45,46].includes(id),isGem=State.gemLevel(id)>0,canUse=base.useType==='1';
     const status=shop?State.purchaseStatus(id):null;
     // 天使/恶魔果实种子：只提示武技是否已满，不阻止合成 ——
@@ -926,7 +1379,11 @@
     const batchName=isFragment?'装备':isSeed?propMap.getValue(fruitId).name:isConvertShard?'转化丸（随机）':'更高一级宝石';
     // 每种道具当前能不能再来一次（材料/金币/体力上限），用来说明按钮为什么变灰
     const blockReason=()=>{
-      if(shop)return status.remaining?'':'今日已经卖完了，明天再来。';
+      if(shop){
+        if(!status.remaining)return '今日已经卖完了，明天再来。';
+        if(id===47 && Number(State.state().level) < 30) return '需要达到30级后才可购买此道具！';
+        return '';
+      }
       const now=(State.state().props[id]||0);
       if(isPotion)return State.state().energy>=cap?'体力已经满了，无法继续使用。':(now<1?'背包里没有体力药剂了。':'');
       if(isFragment||isSeed||isConvertShard){
@@ -948,22 +1405,13 @@
       (S.energy>S.maxEnergy?'（超出部分不自然回复，仍可用于挑战）':'')+'</p>'):'';
     const batchNote=(isFragment||isSeed||isConvertShard||isGem)?('<p class="small-label">每次合成：'+base.name+' ×'+batchCost+' + 金松果 ×'+batchGold+'　→　'+batchName+'</p>'):'';
     const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-description">'+esc(base.remark||'')+'</div>'+
-      '<div class="small-label">拥有 <b data-live="own">'+(State.bagCountOf?State.bagCountOf(id):(S.props[id]||0))+'</b> 个'+(shop?'　售价 '+base.price+' 金松果<br>每日限购 '+status.limit+' 件，今日剩余 <b data-live="stock">'+status.remaining+'</b> 件':'')+'</div></div></div>'+
+      '<div class="small-label">拥有 <b data-live="own">'+(State.bagCountOf?State.bagCountOf(id):(S.props[id]||0))+'</b> 个'+(shop?'　售价 '+goldPrice(base.price)+'<br>每日限购 '+status.limit+' 件，今日剩余 <b data-live="stock">'+status.remaining+'</b> 件':'')+'</div></div></div>'+
       seedNote+shardNote+potionNote+batchNote+
       (isGem?'<p class="small-label">3 个同级宝石 + 10 金松果合成高一级，成功率 '+Math.round(State.gemMergeRate(State.gemLevel(id))*100)+'%（0.88 的材料等级次方）；失败有 50% 几率一颗材料降 1 级（1级则碎裂）。</p>':'')+
       '<p class="small-label use-preview" data-live="hint" role="status"></p>';
     // 主按钮只在真的有动作时才给；否则会出现「返回」和尾部的「返回」两个按钮
     const label=shop?(status.remaining?'购买':'今日售罄'):isFragment?'合成装备':isConvertShard?'合成转化丸':isSeed?'合成果实':isGem?'合成宝石':id===37?'分配属性':canUse?'使用':'';
-    // 天使/恶魔果实种子：10 个种子 + 50 金松果 → 1 个果实
-    const composeFruit=(seedId)=>{
-      if((S.props[seedId]||0)<10)return{ok:false,msg:'需要 10 个种子'};
-      if(S.goldPoint<50)return{ok:false,msg:'合成需要 50 金松果'};
-      S.props[seedId]-=10;S.goldPoint-=50;
-      const fruit=seedId===45?47:48;
-      S.props[fruit]=Math.min(State.PROP_HARD_CAP,(S.props[fruit]||0)+1);
-      State.save();
-      return{ok:true,msg:'合成成功：'+propMap.getValue(fruit).name};
-    };
+    // 天使/恶魔果实种子：10 个种子 + 50 金松果 → 1 个果实（规则在 State.composeSeed）
     // 只有「大小体力药剂」和「碎片合成」需要连着点，弹窗保持打开；
     // 商店里「非每日限购 1 件」的商品也保持打开（买完原地刷新，可以接着买）。
     const stayOpen=!shop&&(isPotion||isFragment);
@@ -971,11 +1419,19 @@
     const useOne=()=>{
       if(!shop&&!canUse&&!isFragment&&!isConvertShard&&!isSeed&&!isGem)return;
       if(!shop&&id===37){allocateAttributes();return;}
+      /* 经典模式：碎片 / 种子 / 转化丸 / 宝石统一走原版 4886 f5 + 4402 的
+       * 「合成页 → 合成中过场 → 结果页」；现代模式仍走下面的 DOM 弹窗。 */
+      if(!shop&&window.SfCompose&&UI.currentUiMode&&UI.currentUiMode()==='classic'
+          &&(isFragment||isSeed||isConvertShard||isGem)){
+        m.close();
+        SfCompose.open(id,{onClose:()=>openBag(backMode,bagPage)});
+        return;
+      }
       // 注意顺序：宝石要先判断 isGem，否则「使用」类道具（礼包、果实、转生果…）会被当成宝石合成
       const r=shop?State.buyProp(id,1)
         :isPotion?State.useProp(id)
         :isFragment?State.composeGear(id)
-        :isSeed?composeFruit(id)
+        :isSeed?State.composeSeed(id)
         :isConvertShard?State.composeConvertPill()
         :isGem?State.mergeGems(id)
         :State.useProp(id);
@@ -1237,13 +1693,46 @@
     return '<br>'+head+hint+'<div class="set-bonus">'+rows+'</div>';
   }
   function openGears(pg) {
+    const S = State.state();
+    if (!S || Number(S.level) < 10) { notice('10级后才能使用装备。多多挑战，升级后再来吧！'); return; }
+    /* 【SFR7】经典模式：「更换装备」= **原版那一页**（库元件「状态1」= 4673 的第 3 帧）。
+     * 原版 `showEquipsWin()`（MainMovie.as:22088）是 `loadMcs([["状态1","subFrame",…]])` ——
+     * **盖在状态页上面的一层**，不是复刻这套 DOM 弹窗。所以这里先确保状态页挂上，
+     * 再把原版那一层开出来（退出只拆那一层，状态页原样还在）。
+     * 下面那套 DOM 版留给现代模式，也作为经典模式渲染失败时的兜底。 */
+    if (currentUiMode() === 'classic' && window.SfStatus && SfStatus.openGears) {
+      screen = 'status'; activePortrait = null;
+      const ui = $('#ui');
+      if (ui) {
+        ui.innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠状态"></section>';
+        const box = $('#ui .ssfight-home');
+        if (box) {
+          SfStatus.open(box).then(() => SfStatus.openGears()).catch((e) => {
+            if (window.__errs) window.__errs.push('SfStatus gears: ' + (e && e.message));
+            openGearsDom(pg);
+          });
+          return;
+        }
+      }
+    }
+    openGearsDom(pg);
+  }
+  function openGearsDom(pg) {
     gearPage=typeof pg==='number'?pg:0;
     openStatus();
     /* 列表顺序：穿着中 > 星标 > 获得顺序（规则在 state.js 的 gearsInDisplayOrder）。
      * 仍然是**每页 6 件 + 翻页**、格子固定尺寸（用户口径 2026-10：不要自适应格子大小）。 */
     const gears=State.gearsInDisplayOrder(),total=Math.max(1,Math.ceil(gears.length/6));gearPage=Math.min(gearPage,total-1);
+    /* 空的部位格写部位名（原版那一页空格子里也是"头部/身体/手部/脚部"），
+     * 装上之后就换成**装备名 + 品质色**（原版 `setEquipTextColor` 按 quality 改字色）。 */
     const slots=['头部','手部','身体','脚部'];
-    const content='<p class="gear-note">相同的附加属性效果不叠加，最高的1条生效！</p><div class="gear-layout"><div class="gear-slots">'+slots.map((name,i)=>{const g=gears.find(x=>x.used&&x.type===i);return '<button class="catalog-cell" '+(g?'data-gear="'+esc(g.key)+'"':'disabled')+'><span class="item-icon">'+(g?gearImg(g):'<span class="gear-empty">'+name+'</span>')+'</span></button>';}).join('')+'</div><div class="gear-list">'+gears.slice(gearPage*6,gearPage*6+6).map(g=>{const starred=State.isGearStarred(g);return '<button class="catalog-cell '+(g.used?'selected':'')+'" data-gear="'+esc(g.key)+'"><span class="item-icon">'+gearImg(g)+(g.used?'<span class="equipped-check">✓</span>':'')+'</span><span class="item-caption q'+g.quality+'">'+(starred?'<span class="gear-name-star" title="已加星标：不会被误融合或误出售">★</span>':'')+esc(g.name)+'</span></button>';}).join('')+(gears.length?'':'<div class="empty-state">还没有装备<br><span class="small-label">挑战关卡获得碎片<br>10个碎片可合成一件装备</span><br>'+btn('去闯关','stages','small gold')+'</div>')+'</div></div>'+(gearPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(gearPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':'');
+    const slotLabel=(g,fallback)=>g?'<span class="gear-slot-name q'+g.quality+'">'+esc(g.name)+'</span>':'<span class="gear-empty">'+fallback+'</span>';
+    /* 落绘预览：原版这一页左侧是**玩家自己**（`mc_body`/`mc_head`/`mc_hand`/`mc_foot` 四个部位精灵
+     * + 穿在身上的装备），见 `MainMovie_frame50.as:989 showWears()`。
+     * ⚠ 复刻这边**不挂 canvas**：`portrait()` 画的那张落绘是由 `drawHomeHud` 在主界面循环里推的，
+     * 进弹窗后主界面循环已经停了 —— 挂上去只会是一块**空白画布**（实测）。
+     * 所以左侧只保留四个部位格（原版那一页的四格是"穿着中装备的缩略图 + 装备名"）。 */
+    const content='<p class="gear-note">相同的附加属性效果不叠加，最高的1条生效！</p><div class="gear-layout"><div class="gear-slots">'+slots.map((name,i)=>{const g=gears.find(x=>x.used&&x.type===i);return '<button class="catalog-cell" '+(g?'data-gear="'+esc(g.key)+'"':'disabled')+'><span class="item-icon">'+(g?gearImg(g):'')+'</span>'+slotLabel(g,name)+'</button>';}).join('')+'</div><div class="gear-list">'+gears.slice(gearPage*6,gearPage*6+6).map(g=>{const starred=State.isGearStarred(g);return '<button class="catalog-cell '+(g.used?'selected':'')+'" data-gear="'+esc(g.key)+'"><span class="item-icon">'+gearImg(g)+(g.used?'<span class="equipped-check">✓</span>':'')+'</span><span class="item-caption q'+g.quality+'">'+(starred?'<span class="gear-name-star" title="已加星标：不会被误融合或误出售">★</span>':'')+esc(g.name)+'</span></button>';}).join('')+(gears.length?'':'<div class="empty-state">还没有装备<br><span class="small-label">挑战关卡获得碎片<br>10个碎片可合成一件装备</span><br>'+btn('去闯关','stages','small gold')+'</div>')+'</div></div>'+(gearPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(gearPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':'');
     /* 用户口径 2026-10：**去掉装备页上的「套装收益」介绍行** ——
      * 那一段常驻文字既占地方又容易和实际穿着脱节；套装效果改成**点开具体装备**时才说明
      *（见 setBonusBlock，那里会逐档标出哪些已经生效）。 */
@@ -1251,6 +1740,7 @@
     const p=m.element;p.classList.add('gear-overlay');$('.classic-modal',p).classList.add('gear-modal');
     const list=$('.gear-list',p),n=gears.slice(gearPage*6,gearPage*6+6).length;
     if(n)list.insertAdjacentHTML('beforeend',Array.from({length:6-n},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join(''));
+    /* 左侧落绘由主界面循环推，弹窗里推不动（见上面那段注释），所以这里不再挂 canvas。 */
     $$('.gear-slots button',p).forEach((b,i)=>{const g=gears.find(x=>x.used&&x.type===i);b.setAttribute('aria-label',slots[i]+(g?'：'+g.name:'：未装备'));});
     $$('[data-gear]',p).forEach(b=>b.onclick=()=>openGear(b.dataset.gear));
     $('[data-action="prev"]',p)?.addEventListener('click',()=>openGears(gearPage-1));
@@ -1371,6 +1861,32 @@
   }
   function openMessages(tab,pg) {
     tab=typeof tab==='string'?tab:'messages';pg=pg||0;
+    /* 【SFR6】经典模式：消息页**整页由原版导出数据渲染**（js/ssfight/ui-message.js，
+     * 页根元件 = message 帧的 7819）。原版这一页自带顶栏 4 个 tab（消息 / 天梯赛 /
+     * 复仇 / 留言）、一页 2 条记录（胜败印章 + 时间 + 正文 + 查看录像 / 再次挑战）、
+     * 左右翻页与底栏「返回菜单」—— 下面那套 DOM 版留给现代模式（也作为经典模式
+     * 渲染失败时的兜底）。`tab` 透传：'messages' / 'ranklog' / 'revenge' → 原版 1/2/3。
+     * ⚠ `pg` 是 **0 基**（DOM 版口径），原版页码是 1 基 —— 这里 +1 再交给页面。 */
+    if (currentUiMode() === 'classic' && window.SfMessage && SfMessage.open) {
+      screen = 'message'; activePortrait = null;
+      $('#ui').innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠消息"></section>';
+      const box = $('#ui .ssfight-home');
+      if (box) {
+        SfMessage.open(box, tab, pg + 1).then(() => {
+          if (screen === 'message' && window.SfGuide) { try { SfGuide.onPage('message'); } catch (e) {} }
+        }).catch((e) => {
+          if (window.__errs) window.__errs.push('SfMessage: ' + (e && e.message));
+          openMessagesDom(tab,pg);
+        });
+        return;
+      }
+    }
+    openMessagesDom(tab,pg);
+  }
+  function openMessagesDom(tab,pg) {
+    tab=typeof tab==='string'?tab:'messages';pg=pg||0;
+    /* 看过消息页就把经典主界面「消息」上的红点熄掉（SfUiMain 里按战斗记录算出来的）。 */
+    if(window.SfUiMain&&SfUiMain.markMessagesSeen)SfUiMain.markMessagesSeen();
     let list=State.battleHistory?State.battleHistory():[];
     if(tab==='ranklog')list=list.filter(r=>r.kind==='rank');
     if(tab==='revenge')list=list.filter(canRevenge);
@@ -1388,16 +1904,16 @@
         '<span class="message-actions">'+revengeBtn+'<button class="uc-button tiny muted" data-replay="'+esc(r.id)+'">查看录像</button></span></article>';
     }).join('');
     const p=page('message',tab,'<div class="message-list">'+(html||'<div class="empty-state">暂时没有'+(tab==='revenge'?'落败记录':'战斗消息')+'<br><span class="small-label">'+(tab==='revenge'?'普通挑战的败绩会留在这里，之后可以点「再次挑战」找回场子（塔与关卡不计入）。':'开始一场挑战，精彩战斗会保存在这里。')+'</span></div>')+'</div>'+(pg?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(pg<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(pg+1)+'/'+total,counterPlace:'board'});
-    $$('[data-replay]',p).forEach(b=>b.onclick=()=>{const r=list.find(x=>x.id===b.dataset.replay);Main.replayBattle(r,()=>openMessages(tab,pg));});
-    $$('[data-revenge]',p).forEach(b=>b.onclick=()=>{const r=list.find(x=>x.id===b.dataset.revenge);if(r)revengeFight(r,()=>openMessages(tab,pg));});
-    $('[data-action="prev"]',p)?.addEventListener('click',()=>openMessages(tab,pg-1));
-    $('[data-action="next"]',p)?.addEventListener('click',()=>openMessages(tab,pg+1));
+    $$('[data-replay]',p).forEach(b=>b.onclick=()=>{const r=list.find(x=>x.id===b.dataset.replay);Main.replayBattle(r,()=>openMessagesDom(tab,pg));});
+    $$('[data-revenge]',p).forEach(b=>b.onclick=()=>{const r=list.find(x=>x.id===b.dataset.revenge);if(r)revengeFight(r,()=>openMessagesDom(tab,pg));});
+    $('[data-action="prev"]',p)?.addEventListener('click',()=>openMessagesDom(tab,pg-1));
+    $('[data-action="next"]',p)?.addEventListener('click',()=>openMessagesDom(tab,pg+1));
   }
   /** 复仇：拿录像里记下的对手快照再打一场（不消耗体力、不掉飘物，避免变成刷资源入口）。
    *  胜利 → State.revengeReward 发少量经验与金松果，并把这条记录标成「已复仇」。 */
   function revengeFight(record, back) {
     const foe=Object.assign({},record.foe);
-    Main.startBattle(foe,{region:record.region||0,kind:'revenge',useProps:false,collectDrops:false,onEnd:(winner)=>{
+    Main.startBattle(foe,{region:record.region||0,kind:'revenge',useProps:false,collectDrops:false,skipResultPanel:true,onEnd:(winner)=>{
       back();
       const win=winner===0;
       if(!win){modal('复仇失败','<div class="result-box"><div class="result-title lose">又输了</div><p>再来一次吧 —— 复仇不消耗体力，失败也没有额外损失。</p></div>',[{label:'返回',run:back}]);return;}
@@ -1447,7 +1963,7 @@
   function spar(friend){
     const foe=State.friendFoe(friend);
     if(!foe)return;
-    Main.startBattle(foe,{cost:0,kind:'friend',useProps:false,collectDrops:false,region:0,
+    Main.startBattle(foe,{cost:0,kind:'friend',useProps:false,collectDrops:false,skipChest:true,region:0,skipResultPanel:true,
       onError:()=>{openFriends();toast('切磋中断，稍后再来。');},
       onEnd:(winner)=>{
         openFriends();
@@ -1481,11 +1997,11 @@
     const claimRow = '<div class="daily-claim-row">' +
       '<div class="daily-card"><div class="daily-card-head"><h3>每日礼包</h3>' +
         btn(d.claimed ? '今日已领取' : '领取', 'claim-gift', 'small ' + (d.claimed ? 'muted' : 'gold')) + '</div>' +
-        '<p>金松果 ×150　挑战书 ×1</p></div>' +
+        '<p>连续登录 ' + (d.streak || 1) + ' 天　金松果 ×' + d.gold + '　挑战书 ×' + d.challengeBooks + '</p></div>' +
       '<div class="daily-card tribute"><div class="daily-card-head"><h3>徒弟日供</h3>' +
         btn(tributeLabel, 'claim-tribute', 'small ' + (tribute.claimable ? 'gold' : 'muted')) + '</div>' +
         '<p>' + esc(tributeText) + '</p></div></div>';
-    const rewardIcon = (r) => r.kind === 'gold' ? spr('resource_1', 18)
+    const rewardIcon = (r) => r.kind === 'gold' ? goldIcon()
       : r.kind === 'exp' ? '<img alt="" src="images/ui/icons/drop-exp-classic.png">'
         : icon('prop', r.id);
     const rows = quests.map((q) => {
@@ -1538,7 +2054,7 @@
         '　最后载入 ' + State.syncFormatTime(info.lastLoad) + (info.dirty ? '　（有改动正在写入…）' : '') + '</span>';
     }
     const useFile = info.mode === 'file';
-    return '<div class="sync-panel"><div class="sync-head">存档位置：' + state + '</div>' +
+    return '<div class="sync-panel"><h3 class="classic-section-title">存档位置</h3><div class="sync-head">' + state + '</div>' +
       '<div class="sync-actions">' + btn('立即写入存档文件', 'save-write', 'small' + (useFile ? '' : ' muted')) +
       btn('载入存档文件', 'save-load', 'small' + (useFile ? '' : ' muted')) +
       btn('从存档列表导入', 'save-import-list', 'small') + '</div></div>';
@@ -1684,12 +2200,57 @@
    * 跨设备同步（Mac ↔ Windows，走 ZeroTier）
    *
    * 页面上只能读 save/progress.json，读不到整个游戏目录；真正干活的
-   * 是本机的同步服务 tools/sync/sync.js（默认监听 127.0.0.1:8788）。
+   * 是本机的同步服务 scripts/sync/sync.js（默认监听 127.0.0.1:18788；旧默认是 8788，
+   * 但它在 Windows 上落进了系统保留段，非管理员绑不上；sync.js 现在还会**自愈**到
+   * 18788 之后第一个能绑的端口）。
    * 所以这里只是它的一个遥控器：/local/status 看状态，/local/save/{push,pull}
    * 与 /local/files/{push,pull} 让它去和对端说话。服务没开就只提示，不报错。
-   * 端口在 tools/sync/sync.config.json 里可改；改了这里也要跟着改。
+   *
+   * ⚠ 端口不能写死（2026-10 修）：`SYNC_PORTS` 以前只被拿来取 `[0]`，等于只认 18788，
+   *   配置里是别的端口时面板永远说"服务没启动"。现在按顺序探测：
+   *   ① 先读 `scripts/sync/sync.config.json`（同源静态文件，最准；桌面壳里没有 → 跳过）
+   *   ② 再按候选表逐个试（127.0.0.1 上没人听的端口是立刻 ECONNREFUSED，不是等超时）
+   *   ③ 最后以服务自己 `/local/status` 报回来的 `port` 为准。
    * ============================================================ */
-  const SYNC_API = 'http://127.0.0.1:8788';
+  const SYNC_PORTS = [18788, 8788];              // 新默认 + 旧默认
+  for (let i = 1; i <= 9; i++) SYNC_PORTS.push(18788 + i);   // 自愈可能往后挪几位
+  let syncApiBase = 'http://127.0.0.1:' + SYNC_PORTS[0];
+  let syncPortNow = SYNC_PORTS[0];               // 当前正在用的端口（面板上会显示）
+  /** 从同源的 `scripts/sync/sync.config.json` 读端口（最准；读不到返回 0）。
+   *  ⚠ 桌面壳（src-tauri/web）里没有这个文件，那时返回 0，走候选表探测。 */
+  async function syncConfigPort() {
+    try {
+      const r = await fetch('scripts/sync/sync.config.json', { cache: 'no-store' });
+      if (!r.ok) return 0;
+      const j = await r.json();
+      const p = Number(j && j.port);
+      return (p > 0 && p < 65536) ? p : 0;
+    } catch (e) { return 0; }
+  }
+  /** 依次探测候选端口，返回第一个答话的 `/local/status`；一个都不行就抛出最后一个错。 */
+  async function syncProbeAny() {
+    const cands = [];
+    const cfgPort = await syncConfigPort();
+    if (cfgPort) cands.push(cfgPort);
+    for (const p of SYNC_PORTS) if (!cands.includes(p)) cands.push(p);
+    let lastErr = null;
+    for (const port of cands) {
+      syncApiBase = 'http://127.0.0.1:' + port;
+      try {
+        const info = await syncFetch('/local/status', { timeout: 2500 });
+        syncPortNow = port;
+        /* 服务自己报的端口最权威：用户把它改到别处时跟过去（连不上就还用刚探到的）。 */
+        const real = Number(info && info.port);
+        if (real && real !== port && real > 0 && real < 65536) {
+          syncApiBase = 'http://127.0.0.1:' + real;
+          try { const info2 = await syncFetch('/local/status', { timeout: 2500 }); syncPortNow = real; return info2; }
+          catch (e) { syncApiBase = 'http://127.0.0.1:' + port; }
+        }
+        return info;
+      } catch (e) { lastErr = e; }
+    }
+    throw lastErr || new Error('Failed to fetch');
+  }
   const syncState = { checked: false, ok: false, info: null, reason: '', busy: false, job: null, result: null, timer: 0 };
 
   /* ============================================================
@@ -1700,7 +2261,7 @@
     const ctl = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = ctl ? setTimeout(() => ctl.abort(), opts.timeout || 15000) : 0;
     try {
-      const res = await fetch(SYNC_API + pathname, { method: opts.method || 'GET', signal: ctl ? ctl.signal : undefined });
+      const res = await fetch(syncApiBase + pathname, { method: opts.method || 'GET', signal: ctl ? ctl.signal : undefined });
       let body = null;
       try { body = await res.json(); } catch (e) {}
       if (!res.ok) { const err = new Error((body && body.msg) || ('同步服务返回 HTTP ' + res.status)); err.body = body; throw err; }
@@ -1709,15 +2270,17 @@
     } finally { if (timer) clearTimeout(timer); }
   }
   async function syncProbe() {
+    /* 端口探测统一走 `syncProbeAny()`（配置里的端口 → 候选表 → 服务自报的端口）；
+     * 找到哪个，之后的请求就用哪个。 */
     try {
-      const info = await syncFetch('/local/status', { timeout: 2500 });
-      syncState.ok = true; syncState.info = info; syncState.reason = '';
-    } catch (e) {
+      syncState.info = await syncProbeAny();
+      syncState.ok = true; syncState.reason = '';
+    } catch (lastErr) {
       syncState.ok = false; syncState.info = null;
-      const raw = (e && e.name === 'AbortError') ? '同步服务没有响应（超时）' : String((e && e.message) || e);
+      const raw = (lastErr && lastErr.name === 'AbortError') ? '同步服务没有响应（超时）' : String((lastErr && lastErr.message) || lastErr);
       /* 常见两类要分开说：
        *  · 403 → 同步服务拒了本页面的来路（桌面客户端/局域网 IP 打开时会这样）
-       *  · Failed to fetch → 本机同步服务没在跑（或端口不是 8788）
+       *  · Failed to fetch → 本机同步服务没在跑（候选端口都没人应）
        * 两者都在排查「游戏内推不过去、命令行却正常」时最关键。 */
       syncState.reason = /HTTP 403/.test(raw)
         ? raw + '（同步服务只接受来自 127.0.0.1 / localhost / Tauri 桌面壳的页面调用；用局域网 IP 打开游戏就会这样）'
@@ -1735,7 +2298,7 @@
   /** 失败原因 → 人话 + 下一步。面板上最值钱的就是这一段。 */
   function syncAdvice(code, msg) {
     switch (code) {
-      case 'PEER_DOWN': return '对端的同步服务没在跑，或者对端防火墙没放行 8788。到那台机器上双击「一键同步」→「9) 后台同步服务 → 1) 启动」，Windows 上还会弹一次 UAC 放行（或跑一次 prepare）。Mac 上想确认本机是否正常：菜单里选 c) 自检。';
+      case 'PEER_DOWN': return '对端的同步服务没在跑，或者对端防火墙没放行同步端口。到那台机器上双击「一键同步」→「9) 后台同步服务 → 1) 启动」，Windows 上还会弹一次 UAC 放行（或跑一次 prepare）。Mac 上想确认本机是否正常：菜单里选 c) 自检。';
       case 'TOKEN': return '两边口令（token）不一样。把两边 game/tools/sync/sync.config.json 里的 token 改成完全一样；老版本的服务改完要重启一次（Windows 上双击 重启同步服务.cmd）。';
       case 'PEER_NEWER': return '对面那份存档更新，所以没有覆盖它——这是防手滑的保护。确实要用本机这份盖掉对面，点下面的「强制覆盖对面」。';
       case 'LOCAL_NEWER': return '本机这份存档更新，所以没有覆盖自己。确实要用对面那份盖掉本机，点下面的「强制用对面覆盖本机」。';
@@ -1797,7 +2360,7 @@
       state = '<b class="sync-on">检查中…</b>';
     } else if (!syncState.ok) {
       state = '<b class="sync-off">同步服务没启动</b><span class="small-label">' +
-        esc(syncState.reason || '本机 127.0.0.1:8788 上没有同步服务。') +
+        esc(syncState.reason || '本机 127.0.0.1 上没找到同步服务（端口 ' + syncPortNow + ' 没人应）。') +
         '<br>双击游戏目录里的 <code>一键同步.command</code>（Mac）或 <code>一键同步.cmd</code>（Windows），' +
         '选一次「启动后台同步服务」，这里就能一键互传存档。</span>';
     } else if (!peers.length) {
@@ -1806,7 +2369,8 @@
         '。点「扫描对端」，或者在对面的机器上跑一次同步菜单里的「扫描」。</span>';
     } else {
       state = '<b class="sync-on">已连上：' + peers.map((k) => esc(k) + '（' + esc(info.peers[k]) + '）').join('、') +
-        '</b><span class="small-label">本机「' + esc(info.name || '?') + '」　' + saveLine(info.save, '本机存档') + '</span>';
+        '</b><span class="small-label">本机「' + esc(info.name || '?') +
+        '」　端口 ' + esc(String(info.port || syncPortNow)) + '　' + saveLine(info.save, '本机存档') + '</span>';
     }
     let actions = '';
     if (syncState.ok && peers.length) {
@@ -1819,8 +2383,27 @@
       actions = btn('重新检测', 'sync-recheck', 'small');
     }
     const prog = syncProgressHtml();
-    return '<div class="sync-panel"><div class="sync-head">跨设备同步：' + state + '</div>' +
-      '<div class="sync-actions">' + actions + '</div>' +
+    /* 屏蔽标准：**以游戏目录里的 .gitignore 为准**（服务端解析后随 `/local/status` 报回来）。
+     * 用户 2026-10 口径："使用双端对齐工具时读取 .gitignore 作为屏蔽标准，不要再同步 out 等文件夹。"
+     * 这一行就是把那件事**显示出来**：`.gitignore` 读到了几条、out/ 与 save/ 是否真的被挡住、
+     * 源码是否照常同步 —— 玩家不用猜"到底同步了什么"。 */
+    const ig = (syncState.ok && info.ignore) ? info.ignore : null;
+    let ignoreLine = '';
+    if (ig) {
+      const okProbe = ig.sample && ig.sample.out && ig.sample.save && ig.sample.code;
+      const rules = (ig.gitignore && ig.gitignore.rules) ? ig.gitignore.rules : 0;
+      const src = (ig.gitignore && ig.gitignore.path)
+        ? ('按 <code>' + esc(ig.gitignore.path) + '</code> 屏蔽（' + rules + ' 条）')
+        : '没读到 .gitignore，按内置清单屏蔽';
+      ignoreLine = '<div class="sync-ignore' + (okProbe ? '' : ' warn') + '">' +
+        (okProbe ? '✓ ' : '⚠ ') + '屏蔽标准：' + src +
+        '　+ 内置 ' + (ig.builtin | 0) + ' 条' + ((ig.custom | 0) ? (' + 自定义 ' + (ig.custom | 0) + ' 条') : '') +
+        '　·　<code>out/</code>、<code>save/</code> 等本地产物不进同步，源码照常同步' +
+        (okProbe ? '' : '（探针异常：out=' + (ig.sample && ig.sample.out) + ' save=' + (ig.sample && ig.sample.save) + ' code=' + (ig.sample && ig.sample.code) + '）') +
+        '</div>';
+    }
+    return '<div class="sync-panel"><h3 class="classic-section-title">跨设备同步</h3><div class="sync-head">' + state + '</div>' +
+      '<div class="sync-actions">' + actions + '</div>' + ignoreLine +
       '<div class="sync-progress" id="sync-progress"' + (prog ? '' : ' style="display:none"') + '>' + prog + '</div></div>';
   }
   /** 面板上的按钮实际动作。kind 形如 'save' / 'files'，dir 是 'push' / 'pull'。 */
@@ -1868,6 +2451,172 @@
     }
     if (screen === 'system') { openSystem(); } else { paintSyncProgress(); }
     toast(syncState.result.ok ? '同步成功' : (syncState.result.skipped ? '已跳过（对面更新）' : '同步失败，看面板提示'));
+  }
+  /* ============================================================
+   * 【UC16b】同步二级确认（点按钮先「识别」，确认后才动手）
+   *
+   * 2026-10 用户口径：跨设备同步这一区的每个动作（送/取存档、推/拉文件）都要先弹一个
+   * 二级确认界面，并且在**弹窗里就把这一趟会发生什么识别出来**：
+   *   · 存档方向：并排预览两边的等级 / 经验 / 金松果 / 存档时间，标出谁会被覆盖；
+   *   · 文件方向：列出预计会改到的文件与改动量（个数 / 总大小 / 明细）。
+   * 识别用的是同步服务的 /local/save/preview 与 /local/files/preview（只读），
+   * 识别完成前「确认」键禁用；识别失败只给原因、不放行。确认后才调 syncRun 真跑
+   * （真跑时服务会再比对一次，以那次为准）。
+   * 老版本服务没有预览接口（HTTP 404）：文件方向退回 dry=1 拿数量，存档方向退回
+   * 普通确认，并提示「重启一次同步服务」就能看到完整预览。
+   * ============================================================ */
+  const syncAskSize = (n) => {
+    const v = Number(n) || 0;
+    return v >= 1048576 ? (v / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(v / 1024)) + ' KB';
+  };
+  /** 存档预览里的一侧小卡片。cls：keep = 这份会留下，lose = 这份会被覆盖。 */
+  function saveAskCard(label, s, exists, when, cls) {
+    const head = '<div class="ask-card-head">' + esc(label) + '</div>';
+    if (!exists) return '<div class="ask-card ' + cls + '">' + head + '<div class="ask-card-name">还没有存档</div></div>';
+    const lv = s.level == null ? '?' : s.level;
+    const need = Number((window.GData && GData.nextExp) ? GData.nextExp(lv) : 0) || 0;
+    const exp = (Number(s.exp) || 0) + (need ? '/' + need : '');
+    return '<div class="ask-card ' + cls + '">' + head +
+      '<div class="ask-card-name">' + esc(s.name || '小松鼠') + ' <b>' + esc(lv) + '</b> 级</div>' +
+      '<div class="ask-card-line">经验 ' + esc(exp) + '　' + goldIcon('ask-gold') + ' ' + esc(Number(s.gold) || 0) + '</div>' +
+      '<div class="ask-card-line small">存档时间 ' + esc(when || '—') + '</div></div>';
+  }
+  /** 存档方向的预览内容：返回 { html, canGo }。 */
+  function saveAskHtml(d, peer, dir) {
+    const push = dir === 'push';
+    const me = d.local || {}, other = d.remote || {};
+    const mineName = (syncState.info && syncState.info.name) || '这台';
+    const html = '<div class="ask-cards">' +
+      saveAskCard('本机「' + mineName + '」' + (push ? '（保留）' : '（将被覆盖）'), me, d.localExists, fmtWhen(d.localSavedAt), push ? 'keep' : 'lose') +
+      saveAskCard('对面「' + peer + '」' + (push ? '（将被覆盖）' : '（保留）'), other, d.remoteExists, fmtWhen(d.remoteSavedAt), push ? 'lose' : 'keep') +
+      '</div>';
+    let verdict = '', canGo = true;
+    if (push && !d.localExists) {
+      canGo = false;
+      verdict = '<div class="ask-verdict warn">本机还没有存档 —— 先在游戏里玩一下（任意操作都会自动保存），再回来送存档。</div>';
+    } else if (!push && !d.remoteExists) {
+      canGo = false;
+      verdict = '<div class="ask-verdict warn">对面还没有存档，没什么可取的 —— 先把对面的游戏打开玩一下，或者从本机「把存档送过去」。</div>';
+    } else if (push && !d.remoteExists) {
+      verdict = '<div class="ask-verdict">对面还没有存档：这次会把本机这份新建过去。</div>';
+    } else if (d.ahead === (push ? 'b' : 'a')) {
+      const aheadSide = push ? other : me, behindSide = push ? me : other;
+      verdict = '<div class="ask-verdict warn">⚠ ' + (push ? '对面的进度更靠前' : '本机的进度更靠前') +
+        '（' + esc(aheadSide.level == null ? '?' : aheadSide.level) + ' 级 vs ' + esc(behindSide.level == null ? '?' : behindSide.level) +
+        ' 级）—— 确认后会' + (push ? '用本机这份覆盖对面' : '用对面这份覆盖本机') +
+        '，被覆盖的那份会自动备份到它那台的 <code>save/backup/</code>。</div>';
+    } else if (d.ahead === 'same') {
+      verdict = '<div class="ask-verdict ok">两边进度相同' +
+        (push ? '；内容一致时会自动跳过，不会白推一遍。' : '；取回后还是这份进度。') + '</div>';
+    }
+    const foot = '<div class="ask-foot">' + (push
+      ? '只会覆盖对面那台的 <code>save/progress.json</code>（写之前先备份对面旧档），不动游戏文件。'
+      : '只会覆盖本机的 <code>save/progress.json</code>（写之前先备份本机旧档，在 <code>save/backup/</code>），不动游戏文件。') +
+      '确认后立刻开始，页面下方的进度条会显示过程。</div>';
+    return { html: html + verdict + foot, canGo: canGo };
+  }
+  /** 文件方向的预览内容：返回 { html, canGo }。 */
+  function filesAskHtml(d, peer, dir) {
+    const push = dir === 'push';
+    const side = (push ? d.push : d.pull) || { count: 0, bytes: 0, files: [] };
+    const count = Number(side.count) || 0;
+    const verb = push ? '推送' : '拉取';
+    const lead = '<div class="ask-lead">' + (push
+      ? '把本机较新的文件推给「' + esc(peer) + '」：同名文件会被覆盖（只推较新的和本机新增的）。'
+      : '从「' + esc(peer) + '」取回较新的文件：本机同名文件会被覆盖（只取较新的和对端新增的）。') + '</div>';
+    /* 反向多出来的文件：本次不会删（同步只覆盖，不删除）。 */
+    const extraN = push ? (d.onlyRemote || 0) : (d.onlyLocal || 0);
+    const extraLine = extraN
+      ? '<div class="ask-foot">' + (push ? '对面' : '本机') + '还有 ' + extraN + ' 个' +
+        (push ? '本机没有' : '对端没有') + '的文件，本次不会动它们（同步只覆盖，不删文件）。</div>'
+      : '';
+    if (!count) {
+      return { html: lead + '<div class="ask-verdict ok">✓ 两边文件一致 —— 没有需要' + verb + '的改动。</div>' + extraLine, canGo: false };
+    }
+    const fresh = push ? (d.onlyLocal || 0) : (d.onlyRemote || 0);
+    /* 列全部明细（服务端按体积降序、封顶 50 条），列表本身可滚动；
+     * 超过封顶的只在末尾报个数 —— 真跑时每个文件都会进页面下方的进度日志。 */
+    const shown = side.files || [];
+    const more = count - shown.length;
+    const list = '<ul class="ask-files">' + shown.map((f) =>
+      '<li><span class="ask-fpath">' + esc(f.p) + '</span><b>' + syncAskSize(f.s) + '</b></li>').join('') +
+      (more > 0 ? '<li class="ask-more">…另外 ' + more + ' 个文件（上面列的是体积最大的前 ' + shown.length + ' 个）</li>' : '') +
+      '</ul>';
+    const summary = '<div class="ask-count">预计' + verb + ' <b>' + count + '</b> 个文件，共 <b>' + syncAskSize(side.bytes) + '</b>' +
+      (fresh ? '（其中 ' + fresh + ' 个是' + (push ? '本机新增' : '对端新增') + '）' : '') + '：</div>';
+    const foot = '<div class="ask-foot">不会动：<code>save/</code> 存档、本地产物（<code>out/</code>、<code>node_modules/</code> 等，以 ' +
+      '<code>.gitignore</code> 为准）；也不会删除任何文件。</div>' +
+      '<div class="ask-foot">确认后立刻开始（开始时会重新比对一次，以那时的结果为准）；每个文件都会列在页面下方的进度日志里。</div>';
+    return { html: lead + summary + list + extraLine + foot, canGo: true };
+  }
+  /** 四个同步按钮的二级确认入口。kind：'save' / 'files'；dir：'push' / 'pull'；force 只对存档有意义。 */
+  async function syncAsk(kind, dir, force) {
+    if (syncState.busy) { toast('上一次同步还在跑，稍等一下'); return; }
+    const info = syncState.info || {};
+    const peers = Object.keys(info.peers || {});
+    if (!peers.length) { toast('还没找到对端，先点「扫描对端」'); return; }
+    const peer = peers[0];
+    const isSave = kind === 'save';
+    const push = dir === 'push';
+    const title = (isSave ? (push ? '送存档' : '取回存档') : (push ? '推送文件' : '拉取文件')) +
+      (force ? '（强制）' : '') + ' · 确认';
+    const confirmLabel = isSave ? (push ? '确认送出' : '确认取回') : (push ? '确认推送' : '确认拉取');
+    let ready = false;
+    const m = modal(title,
+      '<div class="sync-ask"><div class="sync-ask-wait">正在识别' + (isSave ? '两边的存档进度' : '两边有改动的文件') + '…</div>' +
+      '<div class="small-label">这一步只读不写：看清了再确认。</div></div>',
+      [{ label: '返回', cls: 'muted' }, { label: confirmLabel, cls: 'gold', run: () => { if (ready) syncRun(kind, dir, force); } }]);
+    const body = $('.modal-body', m.element);
+    const okBtn = $$('.modal-buttons button', m.element).find((b) => b.textContent.trim() === confirmLabel);
+    if (okBtn) okBtn.disabled = true;
+    const show = (html, canGo) => {
+      if (body) body.innerHTML = '<div class="sync-ask">' + html + '</div>';
+      ready = !!canGo;
+      if (okBtn) okBtn.disabled = !ready;
+    };
+    const forceNote = force ? '<div class="ask-verdict warn">上一次同步被「对面更新」拦下来了 —— 这次是<b>强制覆盖</b>。</div>' : '';
+    try {
+      if (isSave) {
+        const d = await syncFetch('/local/save/preview?peer=' + encodeURIComponent(peer), { timeout: 30000 });
+        const r = saveAskHtml(d, peer, dir);
+        show(forceNote + r.html, r.canGo);
+      } else {
+        const d = await syncFetch('/local/files/preview?peer=' + encodeURIComponent(peer), { timeout: 120000 });
+        const r = filesAskHtml(d, peer, dir);
+        show(forceNote + r.html, r.canGo);
+      }
+    } catch (e) {
+      const raw = String((e && e.message) || e);
+      if (/没有这个接口|HTTP 404/.test(raw)) {
+        /* 老版本同步服务：没有预览接口。文件方向还能用 dry=1 拿到「会传几个」；
+         * 存档方向只能把覆盖方向说清楚。两边都提示怎么拿到完整预览。 */
+        if (isSave) {
+          const s = info.save || {};
+          const mine = s.exists ? ('本机现在是「' + esc(s.name || '小松鼠') + ' ' + esc(s.level == null ? '?' : s.level) + ' 级」') : '本机还没有存档';
+          show('<div class="ask-lead">当前同步服务是旧版本，拿不到两边的完整预览。</div>' +
+            '<div class="ask-verdict">' + mine + '。' + (push ? '送存档会用它覆盖对面' : '取回存档会用对面这份覆盖本机') +
+            '，被覆盖的那份会自动备份到它那台的 <code>save/backup/</code>。</div>' +
+            '<div class="ask-foot">重启一次同步服务（双击 <code>重启同步服务.cmd</code>）之后再点，就能看到两边等级 / 经验的完整预览。</div>',
+            push ? !!s.exists : true);
+        } else {
+          try {
+            const dry = await syncFetch('/local/files/' + dir + '?dry=1&peer=' + encodeURIComponent(peer), { method: 'POST', timeout: 120000 });
+            const n = Number((dry.job && dry.job.total) || 0);
+            show('<div class="ask-lead">当前同步服务是旧版本，只报改动数量、列不出文件清单。</div>' +
+              '<div class="ask-verdict' + (n ? '' : ' ok') + '">' + (n
+                ? '本次预计会' + (push ? '推送' : '拉取') + ' ' + n + ' 个文件（同名覆盖，不删文件、不动 <code>save/</code>）。'
+                : '✓ 两边文件一致 —— 没有需要' + (push ? '推送' : '拉取') + '的改动。') + '</div>' +
+              '<div class="ask-foot">重启一次同步服务（双击 <code>重启同步服务.cmd</code>）之后再点，就能逐条看到会改哪些文件、改动量多大。</div>',
+              n > 0);
+          } catch (e2) {
+            show('<div class="ask-verdict warn">识别失败：' + esc(String((e2 && e2.message) || e2)) + '</div>', false);
+          }
+        }
+      } else {
+        show('<div class="ask-verdict warn">识别失败：' + esc(raw) + '</div>' +
+          '<div class="ask-foot">没有开始任何同步 —— 按上面的提示处理后再点一次。</div>', false);
+      }
+    }
   }
   /* ============================================================
    * 【UC17】系统设置 / 村庄 / 攻略
@@ -2035,7 +2784,7 @@
     const g = updState.git || {};
     const rel = updState.release || {};
     const peers = Object.keys((syncState.info || {}).peers || {});
-    let head = '游戏更新：<b>本机 ' + (loc.version ? esc(String(loc.version)) : '未检查') + '</b>';
+    let head = '<b>本机 ' + (loc.version ? esc(String(loc.version)) : '未检查') + '</b>';
     if (updState.busy) head += ' <b class="sync-on">' + esc(updState.note || '处理中…') + '</b>';
     else if (updState.note) head += ' <span class="small-label">' + esc(updState.note) + '</span>';
     else if (loc.version) {
@@ -2063,7 +2812,7 @@
       tail = '<div class="sp-hint">更新只覆盖游戏文件、<b>不动存档</b>（动手前还会自动备份一份）；装完 / 拉完刷新页面即可。' +
         (via ? '（走' + via + '就地更新）' : '安装版 / 安卓 / 网页版只能用「打开下载页」。') + '</div>' + updateResultHtml();
     }
-    return '<div class="sync-panel update-panel"><div class="sync-head">' + head + '</div>' +
+    return '<div class="sync-panel update-panel"><h3 class="classic-section-title">游戏更新</h3><div class="sync-head">' + head + '</div>' +
       '<div class="sync-actions">' + actions + '</div>' + tail +
       '<div class="sync-progress" id="update-progress" style="display:none"></div></div>';
   }
@@ -2072,27 +2821,40 @@
     const mute=Main.isMuted&&Main.isMuted();
     const vol=Math.round(100*((Main.volume&&Main.volume())||0));
     const st=(Main.settings&&Main.settings())||{resolution:'auto',fullscreen:false};
-    const slider='<div class="setting-slider" data-slider="volume"><span class="slider-label">音乐音量</span>'+
+    const musicOn=!mute && vol>0;
+    /* 音乐音量：去掉独立的「音乐：开/关」后，把整条滑条改成和设置按钮同一颗金/绿胶囊。
+     * 点胶囊（滑条以外）开关音乐，拖滑条仍可连续调音量 —— 选中（正在响）是绿色。 */
+    const slider='<div class="setting-slider music-setting '+(musicOn?'on':'')+'" data-slider="volume">'+
+      '<button type="button" class="music-toggle" data-action="sound" aria-pressed="'+musicOn+'" title="点击开关音乐；拖动右侧滑条调节音量">'+
+        '<span class="slider-label">音乐音量</span>'+
+        '<b class="slider-value">'+(musicOn?vol+'%':'已静音')+'</b>'+
+      '</button>'+
       '<input type="range" min="0" max="100" step="1" value="'+vol+'" aria-label="音乐音量">'+
-      '<b class="slider-value">'+vol+'%</b></div>';
+      '<span class="music-hint">'+(musicOn?'点击开关':'点击开启')+'</span>'+
+    '</div>';
     const resolutions=State.RESOLUTIONS||[];
     const resShort=(r)=>!r?'自动':r.key==='auto'?'自动':r.label.replace(' × ','×');
     const resIndex=Math.max(0,resolutions.findIndex((r)=>r.key===st.resolution));
     const resNow=resolutions[resIndex]||resolutions[0];
     const sysBtn=(label,action,cls,title)=>'<button type="button" class="uc-button '+(cls||'')+'" data-action="'+action+'"'+
       (title?' title="'+esc(title)+'"':'')+'>'+esc(label)+'</button>';
+    /* 去掉「音乐：开/关」之后，六颗设置键刚好排成两排（3 列 × 2 行）。
+     * 颜色沿用原版口径：未选中/普通动作是金色，已开启（如全面屏）才是绿色。 */
     const grid='<div class="settings-grid system-grid">'+
-      sysBtn(mute?'音乐：关':'音乐：开','sound','','音乐开关')+
       sysBtn('导出存档','export','gold','把当前存档导出成一个 JSON 文件')+
       sysBtn('导入存档','import','gold','从 JSON 文件恢复存档')+
-      sysBtn('更改昵称','rename','','给松鼠换个名字')+
-      sysBtn('分辨率：'+resShort(resNow),'resolution','','点一下换下一档：'+
+      sysBtn('更改昵称','rename','gold','给松鼠换个名字')+
+      sysBtn('分辨率：'+resShort(resNow),'resolution','gold','点一下换下一档：'+
         resolutions.map((r)=>r.label).join(' → ')+'。画面按这一档等比缩放并居中；窗口装不下时自动按窗口缩小，不会溢出。')+
-      sysBtn(st.fullscreen?'全面屏：开':'全面屏：关','fullscreen','','开启后画面铺满整个窗口（不留黑边，窗口比例差得多时会有轻微拉伸），同时尝试进入系统全屏；按 Esc 可退出系统全屏。')+
+      sysBtn(st.fullscreen?'全面屏：开':'全面屏：关','fullscreen','gold'+(st.fullscreen?' on':''),'开启后画面铺满整个窗口（不留黑边，窗口比例差得多时会有轻微拉伸），同时尝试进入系统全屏；按 Esc 可退出系统全屏。')+
+      sysBtn('界面模式：'+uiModeLabel(currentUiMode()),'uimode','gold','点一下换一档：'+
+        uiModeList().map((x)=>x.label).join(' → ')+'。只换界面观感（现代＝现在这套；经典＝参考 2011 原版 Flash 的界面），'+
+        '存档、进度与战斗规则完全不受影响，切换即时生效、不用重开。')+
       '</div>';
-    const p=page('system','system',supportPanelHtml()+grid+slider+saveFilePanel()+syncPanel()+updatePanelHtml());
+    const p=page('system','system',supportPanelHtml()+'<div class="settings-head"><h3 class="classic-section-title">游戏设置</h3>'+slider+'</div>'+grid+saveFilePanel()+syncPanel()+updatePanelHtml());
+    /* 系统页按钮统一走经典反馈：菜单项/设置键/底栏都先弹一下再执行。 */
     $('[data-action="support"]',p).onclick=()=>openSupportModal();
-    $('[data-action="sound"]',p).onclick=()=>{Main.setMuted(!mute);openSystem();};
+    $('[data-action="uimode"]',p).onclick=()=>requestMode(nextUiMode());
     $('[data-action="save-write"]',p).onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};
     $('[data-action="save-load"]',p).onclick=loadSaveDialog;
     /* 从服务器存档列表导入：绕过系统文件选择器（桌面壳里也能用），列表里带等级与时间。 */
@@ -2123,16 +2885,18 @@
     updBtn('update-reload',()=>{try{location.reload();}catch(e){}});
     updBtn('update-page',()=>openSupportLink(UPDATE_PAGE));
     const syncBtn=(action,fn)=>{const b=$('[data-action="'+action+'"]',p);if(b)b.onclick=fn;};
-    syncBtn('sync-save-push',()=>syncRun('save','push'));
-    syncBtn('sync-save-pull',()=>syncRun('save','pull'));
-    syncBtn('sync-files-push',()=>syncRun('files','push'));
-    syncBtn('sync-files-pull',()=>syncRun('files','pull'));
+    /* 四个按钮都先过二级确认（syncAsk）：弹窗里识别完「会改什么」，确认后才真正 syncRun。 */
+    syncBtn('sync-save-push',()=>syncAsk('save','push'));
+    syncBtn('sync-save-pull',()=>syncAsk('save','pull'));
+    syncBtn('sync-files-push',()=>syncAsk('files','push'));
+    syncBtn('sync-files-pull',()=>syncAsk('files','pull'));
     // 进度区里的按钮是每次重绘 innerHTML 生成的，用事件委托挂，避免重绘后失效
     const syncPanelEl=$('.sync-panel',p);
     if(syncPanelEl)syncPanelEl.addEventListener('click',(ev)=>{
       const t=ev.target&&ev.target.closest?ev.target.closest('[data-action="sync-force"]'):null;
       if(!t||!syncState.result)return;
-      syncRun(syncState.result.kind,syncState.result.dir,true);
+      // 强制覆盖也走二级确认：弹窗里会标明「这次是强制」，避免误触
+      syncAsk(syncState.result.kind,syncState.result.dir,true);
     });
     syncBtn('sync-discover',async()=>{
       toast('正在扫描 ZeroTier 网段…');
@@ -2141,20 +2905,38 @@
       if(screen==='system')openSystem();
     });
     syncBtn('sync-recheck',()=>{syncState.checked=false;syncState.ok=false;syncState.info=null;openSystem();});
-    // 音量滑块：拖动即时生效；拖到 0 等同静音，拉回来自动取消静音
-    const range=$('[data-slider="volume"] input',p),value=$('[data-slider="volume"] .slider-value',p);
+    // 音乐：点胶囊开关音乐；滑条仍然拖动连续调节，拖到 0 等同静音、拉回来自动取消静音。
+    const musicRow=$('.music-setting',p), musicToggle=$('.music-toggle',p),
+      value=$('.music-setting .slider-value',p), hint=$('.music-setting .music-hint',p),
+      range=$('.music-setting input',p);
+    const syncMusicState=()=>{
+      const running=!(Main.isMuted&&Main.isMuted()) && ((Main.volume&&Main.volume())||0)>0;
+      const pct=Math.round(100*((Main.volume&&Main.volume())||0));
+      if(musicRow)musicRow.classList.toggle('on',running);
+      if(musicToggle)musicToggle.setAttribute('aria-pressed',String(running));
+      if(value)value.textContent=running?pct+'%':'已静音';
+      if(hint)hint.textContent=running?'点击开关':'点击开启';
+    };
     fillRange(range);
-    range.oninput=()=>{
-      const v=Main.setVolume(Number(range.value)/100);
-      value.textContent=Math.round(100*v)+'%';
-      fillRange(range);
-    };
-    range.onchange=()=>{
-      const v=Math.round(100*((Main.volume&&Main.volume())||0));
-      const on=!(Main.isMuted&&Main.isMuted());
-      $('[data-action="sound"]',p).textContent=on?'音乐：开':'音乐：关';
-      toast('音乐音量 '+v+'%'+(!on?'（已静音）':'')+'（已存进存档）');
-    };
+    if(musicRow)musicRow.addEventListener('click',(ev)=>{
+      if(ev.target&&ev.target.closest&&ev.target.closest('input'))return;
+      Main.setMuted(!(Main.isMuted&&Main.isMuted()));
+      openSystem();
+    });
+    if(range){
+      range.oninput=()=>{
+        const v=Main.setVolume(Number(range.value)/100);
+        if(value)value.textContent=Math.round(100*v)+'%';
+        fillRange(range);
+        syncMusicState();
+      };
+      range.onchange=()=>{
+        const v=Math.round(100*((Main.volume&&Main.volume())||0));
+        const on=!(Main.isMuted&&Main.isMuted());
+        syncMusicState();
+        toast('音乐音量 '+v+'%'+(!on?'（已静音）':'')+'（已存进存档）');
+      };
+    }
     // 分辨率：点一下换下一档（循环），改完立刻生效并写进存档，页面重绘让按钮文字跟上
     const resBtn=$('[data-action="resolution"]',p);
     if(resBtn)resBtn.onclick=()=>{const next=resolutions[(resIndex+1)%resolutions.length];Main.setResolution(next.key);openSystem();};
@@ -2168,6 +2950,7 @@
     $('[data-action="rename"]',p).onclick=()=>{
       const m=modal('更改昵称','<p>给你的松鼠起个名字</p><input id="rename-input" maxlength="12" value="'+esc(State.state().name)+'" style="width:100%;padding:14px;border:3px solid #b39763;border-radius:18px;color:#715231;background:#fffdf1">',[{label:'确定',close:false,run:()=>{const name=$('#rename-input',m.element).value.trim();if(!name){toast('名字不能为空');return;}State.state().name=name;State.save();m.close();refreshHome();}},{label:'返回',cls:'muted'}],{small:true});
     };
+    wireSystemFeedback(p);
   }
   function importSave() {
     void pickJsonFile().then(async (file) => {
@@ -2193,12 +2976,82 @@
       } catch (e) { toast(e.message || '无法读取存档'); }
     });
   }
+  /** 村庄里那几处地点点进去的**去处**。
+   *  【第一百四十七批】当时以为原版那四页提不出来（"在 26MB 导出里连这些名字都搜不到"），
+   *  于是各自路由到复刻里语义最接近的已有页面（祭坛→竞技场 / 幻兽→融合 / 神迹→抽奖 / 征战→关卡）。
+   *  【第一百四十九批】**纠正**：那是**按中文名**搜的，而导出字典只按 **id** 存 ——
+   *  三颗库元件其实完整地躺在整片导出里（「家园弹出」3957 / 「幻兽牧场」4381 / 「征战」3437，
+   *  闭包 0 缺失）。现在经典模式下四个地点**各自进原版那一页**
+   *  （见 js/ssfight/ui-village.js；素材包 tags-homeland / tags-summons / tags-campaign）。
+   *  ⚠ 幻兽与征战那两页的**功能**还没接（复刻没有召唤兽 / 征战令这两套数据），
+   *    页面上会有一条说明；非经典模式仍走下面这几条老路由。 */
+  function openVillageScene(key, fallbackAction) {
+    if (currentUiMode() === 'classic' && window.SfVillage) {
+      $('#ui').innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠村庄·' + key + '"></section>';
+      const box = $('#ui .ssfight-home');
+      if (box) {
+        SfVillage.open(box, key).catch((e) => {
+          if (window.__errs) window.__errs.push('SfVillage(' + key + '): ' + e.message);
+          fallbackAction();
+        });
+        return;
+      }
+    }
+    fallbackAction();
+  }
+  function villageAltar() { openVillageScene('village-altar', () => fallback('arena')); }
+  function villageBeast() { openVillageScene('village-beast', () => openMerge()); }
+  function villageMiracle() { openVillageScene('village-miracle', () => fallback('lottery')); }
+  /* ⑧ 村庄「征战」：原版那一套是**四人组队 + 服务端开房**
+   * 的玩法（界面元件「征战」在导出里没有 spriteId、"四人同时在线"在离线单机里没有对应物），
+   * 复刻不做。
+   * ------------------------------------------------------------
+   * 用户 2026-10 口径（本批）："点开村庄的征战界面时，我希望单独做一个挑战塔与无尽塔的界面，
+   * 不要套用现代 ui 的背景等，就做一个小的弹出界面即可，两个模式的 ui 就用现代版的 ui 即可。"
+   * 所以这里**不再进 `ClassicExtras.campaign()`**（那是一整页现代外壳 + 现代背景，
+   * 点下去整块经典村庄页就被换掉了），改成在**当前经典村庄页上盖一个小弹窗** ——
+   * 用的就是复刻经典 UI 自己那套 `.classic-modal`（战果/提示弹窗同一个），
+   * 底下的村庄页原样留着；两颗键直接调现代版的塔入口
+   * （`TowerUI.openTower()` / `TowerUI.openEndless()`，也就是关卡页那两颗
+   * `[data-action="tower-entry"]` / `[data-action="endless-entry"]` 进去的界面）。
+   * 门槛照现代入口那一份（`Tower.unlocked()`：通关前 18 关），不另立一套。 */
+  function villageWar() {
+    const lock = (window.Tower && Tower.unlocked && window.TowerUI)
+      ? Tower.unlocked() : { ok: false, msg: '挑战塔系统尚未就绪。' };
+    if (!lock.ok) { notice(lock.msg); return; }
+    const ti = (Tower.towerInfo ? Tower.towerInfo() : null) || { maxLayer: 0, nextLayer: 1, gold: 0 };
+    const ei = (Tower.endlessInfo ? Tower.endlessInfo() : null) || { best: 0, bestLayer: 0, tickets: 0 };
+    const body =
+      '<p><b>挑战塔</b>：一层一层往上打，每层三选一的增益，通关发金松果。<br>' +
+      '已通关 ' + (ti.maxLayer | 0) + ' 层 · 下一层 ' + (ti.nextLayer | 0) + '（挑战书 ×1 → 金松果 ' + (ti.gold | 0) + '）</p>' +
+      '<p><b>无尽塔</b>：免门票的无尽模式，越往上敌人越强。<br>' +
+      '最高分 ' + (ei.best | 0) + ' · 最深 ' + (ei.bestLayer | 0) + ' 层（现有抽奖卷 ' + (ei.tickets | 0) + ' 张）</p>' +
+      '<p class="small-label">两座塔都是离线单人玩法，不需要队友。</p>';
+    modal('征战', body, [
+      { label: '挑战塔', run: () => { if (window.TowerUI) TowerUI.openTower({ from: 'village' }); } },
+      { label: '无尽塔', cls: 'gold', run: () => { if (window.TowerUI) TowerUI.openEndless({ from: 'village' }); } },
+    ], { small: true });
+  }
   function openVillage() {
+    /* 经典模式 + ssflight 素材可用时，进**原版真正的村庄页**（根时间轴帧 30 / homeMc 7140）：
+      原版点「村庄」进的就是它 —— 四处地点 + 自己的底栏四键 + 左上角「回家」。
+      素材在 tags-home.json，只有真进来才加载（见 js/ssfight/ui-main.js 的 mountVillage）。
+      ⚠ 先收掉可能开着的**地点场景页**（祭坛/神迹/…）：场景页与村庄页共用同一个 `#ui`，
+      不收的话 `SfVillage.current()` 会一直指着那棵已经被换掉的树。 */
+    if (currentUiMode() === 'classic' && window.SfUiMain && SfUiMain.mountVillage) {
+      if (window.SfVillage) { try { SfVillage.destroy(); } catch (e) {} }
+      $('#ui').innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠村庄"></section>';
+      const box = $('#ui .ssfight-home');
+      if (box) {
+        SfUiMain.mountVillage(box).catch((e) => { if (window.__errs) window.__errs.push('mountVillage: ' + e.message); });
+        return;
+      }
+    }
     // 村庄里的选项统一用金黄色（原先是黄绿混着填的，看着花）
     const p=page('system','village','<div class="settings-grid">'+btn('师徒','master','gold')+btn('竞技场','arena','gold')+btn('天梯赛','rank','gold')+btn('道具商店','shop','gold')+btn('每日抽奖','lottery','gold')+btn('挑战关卡','stages','gold')+'</div><p class="system-caption">欢迎来到松鼠村庄！<br>拜师学艺、收集装备，和松鼠伙伴一起成长。</p>');
   }
   // —— 可获得物品图鉴（系统-帮助）：来源概率从真实数据（掉落池/商店/抽奖）计算 ——
-  const GUIDE_ITEMS = [1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,21,22,23,24,25,26,28,29,30,31,32,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,101,102,103,104,105,106,107];
+  const GUIDE_ITEMS = [1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,21,22,23,24,25,26,28,29,30,31,32,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,79,82,90,101,102,103,104,105,106,107];
   function guideSources(id) {
     const lines = [];
     const pool = (window.BattleDrops && BattleDrops.pool) || [];
@@ -2217,7 +3070,7 @@
       lines.push('每日抽奖：' + mine.map((p) => p.label).join('、') + '，占 ' + mine.length + '/10 格，单次抽中概率 ' + mine.length * 10 + '%，期望 ' + expect.toFixed(1) + ' 个/次（每天免费 1 次，之后 20 金松果/次）');
     }
     if ([24, 25, 26].includes(id)) lines.push('关卡掉落：' + ({ 24: '螳螂关', 25: '仙鹤关', 26: '熊猫关' })[id] + '每场胜利 45%～60%（按星级）概率掉落 1～6 个，期望约 1.6～2.1 个/场；★3-4 有 28% 几率越 1 级、★5-6 越 2 级');
-    if (id === 23) lines.push('每日礼包：每天 1 个（另附 150 金松果）');
+    if (id === 23) lines.push('每日礼包：每天 1 个（连续登录天数越多金松果越多，第 7 天多 1 本挑战书）');
     if (id === 28) lines.push('创建角色时获得 1 个');
     if (id === 29) lines.push('打开「1级礼包」获得');
     if (id === 30) lines.push('打开「5级礼包」获得');
@@ -2231,6 +3084,9 @@
     if (id === 47) lines.push('合成：天使果实种子 ×10 + 50 金松果（背包中合成）');
     if (id === 48) lines.push('合成：恶魔果实种子 ×10 + 50 金松果（背包中合成）');
     if (id === 8) lines.push('挑战胜利：3～7 个/场；通关关卡整轮：25 个；各级礼包中也有');
+    if (id === 79) lines.push('金宝箱：开启后有 6% 几率获得 1 个（超级大关通关也有 5% 几率掉金宝箱）');
+    if (id === 82) lines.push('魔法袋：有几率开出 1～2 个');
+    if (id === 90) lines.push('超级大关（19-36 关）通关：5% 几率获得 1 个；开启后可得宝石/属性点/金松果，另有几率再开出魔法袋');
     if (id >= 101 && id <= 107) {
       const lv = id - 100;
       if (lv <= 2) lines.push('45 级起：通关关卡 20% 几率、竞技场（经验/碎片）获胜 15% 几率获得（一级 75% / 二级 25%）');
@@ -2248,16 +3104,22 @@
   function openHelp() {
     const items = GUIDE_ITEMS.map((id) => '<button type="button" class="help-item" data-guide="' + id + '"><span class="item-icon">' + icon('prop', id) + '</span><span>' + esc(propMap.getValue(id).name) + '</span></button>').join('');
     // 帮助是「系统」分组下的正常页面（以前是弹窗，会挡住底下的界面）
-    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能。在状态页查看和升级。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。每轮消耗1张挑战书，连续击败3名敌人；失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件相同装备可以融合。</p><p><b>竞技场</b>：11级开启经验竞技场、20级开启碎片竞技场，报名一次打完两场。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45级后通关关卡、竞技场获胜有几率获得1-2级宝石；3个同级宝石+10金松果有几率合成高一级（失败可能降级）。3 件相同卓越（紫）装备可在「装备融合」里融为传说（橙）装备；宝石可镶入橙装（每件限1颗），**镶嵌与卸下各花 5 金松果**。融合时凑同名：三件同名 97% 保住原名，两件同名 50% 保名 / 3% 变异狂战 / 47% 变成随机其它装备。</p><p><b>套装收益</b>：同名装备算一套（「忍者护额/拳套/服/鞋」都是忍者套），穿满 <b>2 件 / 4 件</b>各给一档额外收益，4 件档叠加在 2 件档之上；收益按所穿该套里<b>最低品质</b>的那一件算，想拿满就得一整套同品质。代价是要放弃「跨套挑词条」的自由 —— 极品词条与套装收益只能二选一。每套的收益特征跟着名字走（忍者=闪避、骑士=减伤、狂战=低血狂暴……），在装备详情里能看到当前进度与下一档给什么。</p><h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
+    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能。在状态页查看和升级。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。前 18 关每轮消耗1张挑战书、连续击败3名敌人；后 18 关（19-36）是超级三侠，每关只有1名强敌。失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件相同装备可以融合。</p><p><b>竞技场</b>：10级开启经验竞技场，15级开启碎片竞技场与幻兽竞技场；报名一次打完两场。经验场名次奖励 150/100/50/30 经验，碎片场 8/6/4/3 蓝片，幻兽场 40/35/30/25 孵化点。</p><p><b>幻兽</b>：村庄「幻兽牧场」孵化、编队、喂养、进化；孵化消耗 200 孵化点。幻兽竞技场用召唤证报名；召唤证可在道具商店用 10 金松果购买，也能从魔法袋中开出。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45级后通关关卡、竞技场获胜有几率获得1-2级宝石；3个同级宝石+10金松果有几率合成高一级（失败可能降级）。3 件相同卓越（紫）装备可在「装备融合」里融为传说（橙）装备；宝石可镶入橙装（每件限1颗），**镶嵌与卸下各花 5 金松果**。融合时凑同名：三件同名 97% 保住原名，两件同名 50% 保名 / 3% 变异狂战 / 47% 变成随机其它装备。</p><p><b>套装收益</b>：同名装备算一套（「忍者护额/拳套/服/鞋」都是忍者套），穿满 <b>2 件 / 4 件</b>各给一档额外收益，4 件档叠加在 2 件档之上；收益按所穿该套里<b>最低品质</b>的那一件算，想拿满就得一整套同品质。代价是要放弃「跨套挑词条」的自由 —— 极品词条与套装收益只能二选一。每套的收益特征跟着名字走（忍者=闪避、骑士=减伤、狂战=低血狂暴……），在装备详情里能看到当前进度与下一档给什么。</p><h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
     $$('[data-guide]', p).forEach((b) => b.onclick = () => openGuideItem(+b.dataset.guide));
+    wireSystemFeedback(p);
     return p;
   }
   /* ============================================================
    * 【UC18】兜底分发与导出 UI.classic
    * ============================================================ */
   function fallback(key){if(window.ClassicExtras && window.ClassicExtras[key])window.ClassicExtras[key]();else legacy.runAction(key);}
-  const actions={home,exchange:()=>openBag('exchange'),status:openStatus,weapons:()=>openCatalog('weapon'),skills:()=>openCatalog('skill'),challenge:()=>openChallenge(),battle:()=>openChallenge(),stages:openStages,bag:()=>openBag(),shop:()=>openBag(true),gears:()=>openGears(),messages:()=>openMessages(),ranklog:()=>openMessages('ranklog'),revenge:()=>openMessages('revenge'),board:openBoard,chat:openChat,'gear-sell':()=>openGearSell(0),friends:openFriends,daily:openDaily,system:openSystem,village:openVillage,help:openHelp,arena:()=>fallback('arena'),rank:()=>fallback('rank'),lottery:()=>fallback('lottery'),master:()=>fallback('master'),toplist:()=>fallback('toplist'),vip:()=>fallback('vip')};
-  function runAction(key){if(actions[key])actions[key]();}
+  /* ⚠ `merge` 必须在这个总表里：经典（ssfight）状态页的「装备融合」按钮走的是
+   * `UI.runAction('merge')`，而原来只有 `openStatus()` 给**它自己那一页** bind 了 merge
+   * （见上面的 `bind(p,{...actions,merge:openMerge,...})`）—— 从原版渲染的状态页点进来时
+   * `actions['merge']` 是 undefined，于是**点了一点反应都没有**（用户 2026-10 报的
+   * "装备融合没有接入现代界面的装备融合界面"）。 */
+  const actions={home,exchange:()=>openBag('exchange'),status:openStatus,weapons:()=>openCatalog('weapon'),skills:()=>openCatalog('skill'),challenge:()=>openChallenge(),battle:()=>openChallenge(),stages:openStages,bag:()=>openBag(),shop:()=>openBag(true),gears:()=>openGears(),merge:openMerge,messages:()=>openMessages(),ranklog:()=>openMessages('ranklog'),revenge:()=>openMessages('revenge'),board:openBoard,chat:openChat,'gear-sell':()=>openGearSell(0),friends:openFriends,daily:()=>{const S=State.state();if(S&&Number(S.level)<3){toast('3级后开放活动礼包');return;}openDaily();},system:openSystem,village:openVillage,'village-altar':villageAltar,'village-beast':villageBeast,'village-miracle':villageMiracle,'village-war':villageWar,help:openHelp,arena:()=>fallback('arena'),rank:()=>fallback('rank'),lottery:()=>fallback('lottery'),master:()=>fallback('master'),toplist:()=>fallback('toplist'),vip:()=>fallback('vip')};
+  function runAction(key){if(actions[key]){closeOriginalResult();actions[key]();}}
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape'){
       const dialogs=$$('.classic-modal-overlay');
@@ -2265,7 +3127,9 @@
         // 自由属性点弹窗必须选完，Esc 也不放行
         const closeBtn=$('.modal-close',dialogs[dialogs.length-1]);
         if(closeBtn){closeBtn.click();return;}
+        return;
       }
+      if(window.SfFightResult&&SfFightResult.isOpen()){e.preventDefault();SfFightResult.dismiss();return;}
       const panels=$$('.panel-close');if(panels.length){panels[panels.length-1].click();return;}
       if(screen!=='home'&&$('.classic-page')&&!dialogs.length)home();
     }
@@ -2364,15 +3228,136 @@
   function supportPanelHtml() {
     const meta = supportMeta();
     return '<div class="support-panel">' +
-      '<div class="support-panel-text"><b>喜欢这个复刻版？</b>' +
-      '<span>游戏完全免费、没有内购；如果它让你找回了一点当年的感觉，可以自愿支持作者（不影响任何游戏内容）。</span></div>' +
+      '<div class="support-panel-text"><h3 class="classic-section-title">关于复刻版</h3>' +
+      '<span><b>喜欢这个复刻版？</b>游戏完全免费、没有内购；如果它让你找回了一点当年的感觉，可以自愿支持作者（不影响任何游戏内容）。</span></div>' +
       '<button type="button" class="uc-button gold support-btn" data-action="support" title="用系统浏览器打开' +
       esc(meta.label) + '">支持作者</button></div>';
   }
 
+  /* ============================================================
+   * 【UC20】界面模式：现代 / 经典
+   *
+   * 只换「展示层」—— window.UI.classic 由哪一套原语实现提供；
+   * State（存档/进度）、Battle（战斗）、TowerUI（塔）一概不碰，
+   * 所以热切换不需要重载页面。目前两档共用同一套原语（P1 骨架），
+   * 经典展示层与其逐屏取舍见 docs/经典模式-可行性.md 的 §12。
+   * 模式差异落在 <html data-ui-mode="...">；经典界面本体**用原版导出数据渲染**
+   * （素材库 `images/ssfight/ui/`，由 tools/gen-ssfight-ui.cjs 生成），**不用 CSS 模仿**。
+   * ============================================================ */
+  const UI_MODE_LSKEY = 'ssdz_ui_mode';
+  const uiModeList = () => (window.State && State.UIMODES) ||
+    [{ key: 'modern', label: '现代' }, { key: 'classic', label: '经典' }];
+  const uiModeLabel = (m) => (uiModeList().find((x) => x.key === m) || {}).label || m;
+  /** 当前模式：优先读存档；存档还没载入（标题画面）时退回 localStorage。 */
+  function currentUiMode() {
+    try {
+      if (window.State && State.settings && State.state && State.state()) {
+        const m = State.settings().uiMode;
+        if (m) return m;
+      }
+    } catch (e) {}
+    try { return localStorage.getItem(UI_MODE_LSKEY) === 'modern' ? 'modern' : 'classic'; }
+    catch (e) { return 'classic'; }
+  }
+  /** 落到 <html data-ui-mode>（CSS 与调试都能看见），并写 localStorage 作读档前的兜底。 */
+  function applyUiMode(mode) {
+    const m = uiModeList().some((x) => x.key === mode) ? mode : 'classic';
+    try { document.documentElement.setAttribute('data-ui-mode', m); } catch (e) {}
+    try { localStorage.setItem(UI_MODE_LSKEY, m); } catch (e) {}
+    return m;
+  }
+  /** 下一种模式：系统页那颗按钮点一下换一档（和「分辨率」同一套交互）。 */
+  function nextUiMode() {
+    const list = uiModeList();
+    const at = list.findIndex((x) => x.key === currentUiMode());
+    return list[(at + 1 + list.length) % list.length].key;
+  }
+  /**
+   * 切界面模式：两套进度各归各的槽位。确认后保存当前界面，载入目标界面；
+   * 目标界面还没有存档就新建 1 级角色。最后完整重进首页，避免旧页 DOM 混在一起。
+   * 这是**底层**切换；真人入口走 requestMode()，会先弹双存档提示。
+   */
+  function setMode(mode) {
+    const m = uiModeList().some((x) => x.key === mode) ? mode : 'classic';
+    applyUiMode(m);
+    let result = null;
+    try {
+      if (window.State && State.switchMode && State.state && State.state()) result = State.switchMode(m);
+      else if (window.State && State.setSettings && State.state && State.state()) State.setSettings({ uiMode: m });
+    } catch (e) {
+      if (window.__errs) window.__errs.push('switchMode: ' + (e && (e.stack || e.message) || e));
+    }
+    try { if (window.Main && Main.showHome) Main.showHome(); else if (screen === 'home') home(); else openSystem(); } catch (e) {}
+    try { if (window.Debug && Debug.refresh) Debug.refresh(); } catch (e) {}
+    toast(result && result.created
+      ? '已切换到' + uiModeLabel(m) + '界面：该界面还没有存档，已新建 1 级角色'
+      : '已切换到' + uiModeLabel(m) + '界面（独立存档）');
+    return m;
+  }
+  /** 真人点「界面模式」时的确认框：明确告诉玩家两套进度不互通。 */
+  function requestMode(mode) {
+    const m = uiModeList().some((x) => x.key === mode) ? mode : 'classic';
+    if (m === currentUiMode()) return;
+    let has = false;
+    try { has = !!(window.State && State.hasModeSave && State.hasModeSave(m)); } catch (e) {}
+    const label = uiModeLabel(m);
+    const body = '<p>经典界面和现代界面使用<b>两套独立存档</b>，玩家进度不互通。</p>' +
+      '<p>切换后会载入「' + esc(label) + '」界面的独立进度' +
+      (has ? '。' : '；该界面还没有存档，会新建一个 1 级角色。') + '</p>' +
+      '<p class="small-label">当前界面的进度会先保存；以后切回来还能继续。</p>' +
+      (m === 'classic' ? '<p class="small-label"><b>注意：</b>切到经典界面后，调试模式的入口会消失；需要调试请切回现代界面。</p>' : '');
+    modal('切换界面模式', body, [
+      { label: '取消', cls: 'muted' },
+      { label: '切换', cls: 'gold', run: () => setMode(m) },
+    ], { small: true });
+  }
+  /**
+   * 布局高度：菜单页按 920:560 参考比例（= 1170×712.174），战斗/首页场景按 690。
+   * 这条判据原先**硬编码在 main.js 的 fitCanvas 里**；提到展示层之后，
+   * 经典模式可以自己决定用哪套高度，而 main.js 不必知道。
+   */
+  function layoutHeight(W, H) {
+    /* 经典模式的村庄页与**状态页**都是**原版 320×196 的整页**，必须按原版比例给高度：
+     * 若沿用 690，1170×690（比例 1.696）比原版 1.633 宽，slice 会把上下顶栏/底栏裁掉。
+     * 1170 × 196/320 = 716.6 —— 这正是 §2 里"严格等比"的那套。 */
+    if (currentUiMode() === 'classic' && window.SfUiMain) return W * 196 / 320;
+    return $('#ui .classic-page') ? W * 560 / 920 : H;
+  }
+  /**
+   * 自检模式 `?test=1` 的查找选择器：同样交给展示层提供，
+   * 这样换一套界面实现也能被自检覆盖到（原来是写死在 main.js 里的）。
+   */
+  function smokeSelectors() {
+    /* 经典模式二级页的容器有两代：`.ssfight-sub`（挑战/状态/装备等 4756/7638 子页）
+     * 与 `.ssfight-view`（合成/战果/天梯准备页）。少了它们，`?test=1` 会把已经挂出来的
+     * 原版页判成"没打开"（2026-10 审计实测）。`.ssfight-home` 单独不列：村庄首页与
+     * 战斗页都是它，列进来会让"页面没打开"假通过。 */
+    return { panel: '#ui .panel, #ui .classic-page, #ui .classic-modal, #ui .ssfight-sub, #ui .ssfight-view, #ui section[aria-label="松鼠挑战"], #ui section[aria-label="松鼠状态"], #ui section[aria-label="松鼠消息"]', close: '#ui .panel-close' };
+  }
+  /* 启动即落一次模式：此时存档还没载入，用 localStorage 兜底；存档载入后 main.js 会再落一次。 */
+  applyUiMode(currentUiMode());
+
   window.UI={...legacy,renderHome,drawHomeHud,drawActor,runAction,currentScreen:()=>screen,refreshHome,renderNumbers,refreshHeader,
-    classic:{page,modal,btn,bind,icon,spr,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog,openSupportModal,maybeSupportPrompt,supportPanelHtml,copyText,supportMeta,
-      updatePanelHtml,updateCheck,updateAsk,updateRun,updateFetch,updState,UPDATE_PAGE},
+    setMode,currentUiMode,applyUiMode,nextUiMode,UI_MODE_LSKEY,layoutHeight,smokeSelectors,
+    classic:{page,modal,btn,bind,icon,spr,goldIcon,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog,openSupportModal,maybeSupportPrompt,supportPanelHtml,copyText,supportMeta,wireSystemFeedback,
+      /* 【SFR4】经典模式状态页的**武器 / 技能栏**（`js/ssfight/ui-status.js`）要照着复刻这套
+       * 图鉴的数据画格子（原版那两个 tab 的图标是运行时 `attachMovie` 的库元件，素材库里没有），
+       * 所以把"这一页有哪些东西、自己有没有、是不是真形态"与"打开某一项的详情"这两件事导出去。
+       * 详情页用的还是复刻这一套（版式已对照原版截图核过），只是入口改成原版页里的格子。 */
+      catalogInfo, openItem, wsIconOf,
+      /* `catalogItems(kind)` = 该类目的**全部**条目（id / 名字 / 原版矢量图标），
+       * 给"查看别人"那一页用：它要按对手自己的武器/技能清单把格子画出来
+       * （原版 `showWeaponSkills` 只是把数据源换成 `friendInfo`，见 ui-status.js）。 */
+      catalogItems: allItems,
+      /* 「查看对手」那一页（`js/ssfight/ui-challenge.js` 的好友动作菜单）要用字典里的名字： */
+      weaponName:(id)=>{const v=weaponsMap.getValue(Number(id));return v?v.name:('武器'+id);},
+      skillName:(id)=>{const v=skillsMap.getValue(Number(id));return v?v.name:('技能'+id);},
+      gearName:(id)=>{const v=gearMap.getValue(Number(id));return v?v.name:('装备'+id);},
+      updatePanelHtml,updateCheck,updateAsk,updateRun,updateFetch,updState,UPDATE_PAGE,
+      /* 关卡开战 / 结算：经典模式的挑战页（js/ssfight/ui-challenge.js）三级页的
+       * 「开始战斗」直接调这两个，不必再绕一圈 `UI.runAction('stages')`
+       * （那样会先弹复刻自己那张「请选择难度」，与刚点过的原版难度页重复一次）。 */
+      stageFight, stageConfirm, stageTypeAvailable, towerEntryHtml},
     weaponIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('weapon',id)+'">',
     skillIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('skill',id)+'">',
     propIcon:(id,size)=>'<img class="icon" width="'+(size||56)+'" height="'+(size||56)+'" src="'+atlasIcon('prop',id)+'">'};

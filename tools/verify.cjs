@@ -103,7 +103,7 @@ async function runStoryFlow() {
      * 弹窗会一直重开（那是另一个待修的软锁，与剧情无关；这里先给上目标继续爬塔）。 */
     S.weapons = ['1:5', '2:5', '3:5', '4:5'];
     S.skills = ['1:5', '2:5', '3:5', '4:5'];
-    for (let i = 1; i <= 18; i++) S.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) S.stages[i] = { npcIndex: 3, passed: true };
     /* 游戏内随机 = 固定 LCG（同一 seed 完全可复现） */
     vm.runInContext('(function(){var s=' + (seed >>> 0) + ';Math.random=function(){s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296;};})()', c);
     c.Main = { startBattle: () => Promise.resolve(), showHome: () => {} };
@@ -391,7 +391,7 @@ async function runStoryLayer100() {
     const S = c.State.state();
     S.level = 70; S.props[23] = 30;
     S.weapons = ['1:5', '2:5', '3:5']; S.skills = ['1:5', '2:5', '3:5'];
-    for (let i = 1; i <= 18; i++) S.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) S.stages[i] = { npcIndex: 3, passed: true };
     vm.runInContext('(function(){var s=' + (seed >>> 0) + ';Math.random=function(){s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296;};})()', c);
     c.Main = { startBattle: () => Promise.resolve(), showHome: () => {} };
     c.Tower.startEndlessRun();
@@ -587,7 +587,7 @@ async function runBuffStacking() {
     c.State.newGame('叠加审计');
     const S = c.State.state();
     S.level = 70; S.props[23] = 99999; S.weapons = ['1:5']; S.skills = ['1:5'];
-    for (let i = 1; i <= 18; i++) S.stages[i] = { npcIndex: 3, passed: true };
+    for (let i = 1; i <= 36; i++) S.stages[i] = { npcIndex: 3, passed: true };
     vm.runInContext('(function(){var s=4242;Math.random=function(){s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296;};})()', c);
     T.startEndlessRun();
     T.setStoryEnabled(false);

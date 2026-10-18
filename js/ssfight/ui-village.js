@@ -1,0 +1,858 @@
+/* ============================================================================
+ * js/ssfight/ui-village.js —— 原版**村庄里四个地点的场景页**界面代码的等价 JS【SFR3】
+ *
+ * 逐句对着原版 `MainMovie.as` 翻（行号写在每段注释里）：
+ *   · 祭坛 = `showTemple()`            :9814   → 「家园弹出」容器（库元件 3957）**第 1 帧**
+ *   · 神迹 = `showMiracle()`           :9892   → 同一容器的**第 3 帧**
+ *   · 神迹记录 = `showMiracleRecord()` :9928   → 同一容器的**第 4 帧**
+ *   · 幻兽牧场 = `showSummons()`       :10950  → 「幻兽牧场」容器（库元件 4381）第 1 帧
+ *   · 征战 = `showCampaign()`         :12274  → 「征战」容器（库元件 3437）第 1 帧
+ *
+ * 这三颗都是**库元件**（原版 `loadMcs([["家园弹出", "homeLandMc", …]])` 就是
+ * `_root.attachMovie`），不在根时间轴里，所以走 `SfRender.mountSymbol()`；
+ * 素材包见 `tools/gen-ssfight-ui.cjs` 的 SCENES 注释。
+ *
+ * 当前实现范围：
+ *   · 祭坛 / 神迹 / 神迹记录：页面 + 等级角标 + 当日状态领取 + 升级倒计时/完成结算；
+ *     祭坛状态真的改竞技场/关卡双倍判定，神迹完成真的加四维属性点。
+ *   · 幻兽牧场：页面 + 等级角标 + 升级（孵化点/存储格）+ 孵化 + 图鉴列表/翻页 + 详情 +
+ *     编队（领导力限制）+ 喂养 + 进化；数据全部落在 `State`，原版 32 种幻兽/星级/技能表。
+ *   · 征战：页面/左右翻页照原版；征战令与匹配仍不在本次范围。
+ *
+ * 用法：
+ *   await SfVillage.open(container, 'village-altar');   // 也可以直接传页 id 'altar'
+ *   SfVillage.openPage('miracle-record');
+ *   SfVillage.destroy();
+ * ========================================================================== */
+(function () {
+  'use strict';
+
+  /** 复刻侧通用件（测热区 / 动效壳 / 按下闪一遍 / 钉帧 …），全部在 `ui-main.js` 里实现并导出。 */
+  const T = () => (window.SfUiMain && window.SfUiMain.toolkit) || null;
+
+  /** 复刻侧的提示：走经典界面那套 toast，拿不到就退回 console（不能静默什么都不发生）。 */
+  function toast(msg) {
+    try {
+      if (window.UI && UI.classic && UI.classic.toast) { UI.classic.toast(msg); return; }
+    } catch (e) {}
+    try { console.log('[村庄场景] ' + msg); } catch (e) {}
+  }
+
+  /* 建筑升级表（原版 `var buildingUpInfo`，MainMovie.as:19145）现在落在 `js/state.js` 的
+   * `BUILDING_UP_INFO` 里，界面只读 `State.buildingUpInfo(level)` —— 数值不再在界面层抄一份。 */
+
+  /* 复刻侧说明（不是原版文案）：只给仍没接服务器数据的征战页留一句。 */
+  const NOTE = {
+    miracleRecord: '这里显示「神迹当前共为你提升了——」那四行累计值。',
+    warBoss: '原版点 BOSS 是「报名 / 查看对局」（要征战令与匹配服务），复刻还没有这套数据。',
+    warRecord: '原版「战绩」是向服务器要报名与对战记录，复刻还没有这套数据。',
+  };
+
+  /* ============================================================
+   * 页表：地点 → 库元件 + 帧号 + 接线函数
+   * ------------------------------------------------------------
+   * `note` = 复刻侧补在页面底部的一行说明（**不是原版内容**）：进入这一页时出现一会儿就收起，
+   * 点那些"还没接功能"的按钮会再把它叫出来。没接完的页面必须写清楚，免得看着像坏了。
+   * ⚠ 文案**尽量压到一行**：这条说明是盖在弹窗自己的按钮上的（`pointer-events:none`，
+   * 不挡点击，但占视线），能单行就别两行 —— 见 css 里 `.ssfight-note` 的注释。
+   * ========================================================== */
+  const PAGES = {
+    altar: {
+      scene: 'village-altar', bundle: 'tags-homeland.json', symbol: '3957', frame: 1, title: '祭坛',
+      wire: wireAltar,
+      note: '「领取」每天一次，「升级」扣金松果并开始倒计时 —— 都照原版。',
+    },
+    'altar-up': {
+      scene: 'village-altar', bundle: 'tags-homeland.json', symbol: '3957', frame: 5, title: '祭坛 · 升级',
+      wire: wireLandLevelUp, build: 'altar',
+      note: '升级需要金松果，升完要等倒计时；完成时间到了再进村庄就会结算。',
+    },
+    miracle: {
+      scene: 'village-miracle', bundle: 'tags-homeland.json', symbol: '3957', frame: 3, title: '神迹',
+      wire: wireMiracle,
+      note: '每次升级给 1 个随机属性点，「记录」里能看到历年加了多少。',
+    },
+    'miracle-record': {
+      scene: 'village-miracle', bundle: 'tags-homeland.json', symbol: '3957', frame: 4, title: '神迹 · 记录',
+      wire: wireMiracleRecord,
+      note: NOTE.miracleRecord,
+    },
+    'miracle-up': {
+      scene: 'village-miracle', bundle: 'tags-homeland.json', symbol: '3957', frame: 5, title: '神迹 · 升级',
+      wire: wireLandLevelUp, build: 'miracle',
+      note: '升级需要金松果，升完要等倒计时；完成时间到了再进村庄就会结算。',
+    },
+    beast: {
+      scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 1, title: '幻兽牧场',
+      wire: wireBeast,
+      note: '孵化 / 编队 / 喂养 / 进化都已接上存档数据；点格子查看详情。',
+    },
+    'beast-hatch': {
+      scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 2, title: '幻兽牧场 · 孵化',
+      wire: wireBeastHatch,
+      note: '消耗200孵化点随机孵化一只幻兽；星级越高领导力需求越高。',
+    },
+    'beast-team': {
+      scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 4, title: '幻兽牧场 · 编队',
+      wire: wireBeastTeam,
+      note: '勾选最多3只幻兽，领导力总和不能超过牧场等级提供的上限。',
+    },
+    'beast-feed': {
+      scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 6, title: '幻兽牧场 · 喂养',
+      wire: wireBeastFeed,
+      note: '喂养会消耗其它幻兽与金松果，出战队伍里的幻兽不会被消耗。',
+    },
+    'beast-evolve': {
+      scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 7, title: '幻兽牧场 · 进化',
+      wire: wireBeastEvolve,
+      note: '消耗同星级幻兽与金松果，随机进化成高一星幻兽。',
+    },
+    'beast-detail': {
+      scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 3, title: '幻兽 · 详情',
+      wire: wireBeastDetail,
+      note: '查看这只幻兽的等级、经验、领导力与技能。',
+    },
+    'beast-up': {
+      scene: 'village-beast', bundle: ['tags-summons.json', 'tags-homeland.json'], symbol: '3957', frame: 5,
+      title: '幻兽牧场 · 升级', wire: wireLandLevelUp, build: 'beast',
+      note: '幻兽牧场的「升级」原版挂在「家园弹出」的第 5 帧上（`homeLandLevelUp(building)`），复刻照同一条走。',
+    },
+    war: {
+      scene: 'village-war', bundle: 'tags-campaign.json', symbol: '3437', frame: 1, title: '征战',
+      wire: wireWar,
+      note: '页面与左右翻页照原版：「征战令 / 报名 / 战绩」这套数据复刻还没有 —— 下一批接。',
+    },
+  };
+  /** 村庄页那四个地点胶囊的 data-action → 默认页 id（classic-ui 的路由用）。 */
+  const LOCATION_PAGE = {
+    'village-altar': 'altar',
+    'village-miracle': 'miracle',
+    'village-beast': 'beast',
+    'village-war': 'war',
+  };
+
+  let current = null;      // { key, view, container } —— 当前挂载中的场景页
+  let beastPage = 1;       // 幻兽牧场列表页码（1 基）
+  let selectedPetKey = ''; // 当前查看/喂养/进化的幻兽
+  /** 用原版「全身」元件 4280（第 id 帧就是 petsInfo 里那张）画幻兽图。
+   * 它默认按 320×196 舞台坐标摆，图很小；挂载后把 svg 的 viewBox 收缩到这只幻兽
+   * 自己的包围盒，正好铺满卡片/详情头像。 */
+  async function mountPetArt(host, pet) {
+    if (!host || !pet || !window.SfRender || !SfRender.mountSymbol) return false;
+    const seq = (host.__petArtSeq || 0) + 1;
+    host.__petArtSeq = seq;
+    host.innerHTML = '<span class="loading">…</span>';
+    try {
+      const v = await SfRender.mountSymbol(host, '4280', { frame: Math.max(1, Number(pet.id) || 1), label: '幻兽' });
+      if (seq !== host.__petArtSeq || !host.isConnected) { try { v.destroy(); } catch (e) {} return false; }
+      if (window.SfUiMain && SfUiMain.toolkit) SfUiMain.toolkit.freezeDescendants(v);
+      v.playing = false;
+      const svg = host.querySelector('svg');
+      let b = null;
+      try { b = v.g.getBBox(); } catch (e) { b = null; }
+      if (svg && b && b.width > 0 && b.height > 0) {
+        /* 留 1 个舞台单位的边：有些幻兽的描边/尾巴正好压在包围盒边上，不留边会被裁掉。 */
+        const pad = Math.max(0.8, Math.min(2, Math.max(b.width, b.height) * 0.02));
+        svg.setAttribute('viewBox', (b.x - pad) + ' ' + (b.y - pad) + ' ' + (b.width + pad * 2) + ' ' + (b.height + pad * 2));
+        svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        svg.style.width = '100%';
+        svg.style.height = '100%';
+      }
+      host.classList.add('ready');
+      return true;
+    } catch (e) {
+      host.innerHTML = '';
+      if (window.__errs) window.__errs.push('pet art: ' + (e && e.message));
+      return false;
+    }
+  }
+  function clearPetArt(container) {
+    if (!container) return;
+    for (const n of container.querySelectorAll('.ssfight-pet-art')) n.remove();
+  }
+
+  /* ---------- 通用小件 ---------- */
+
+  /** 取直系子元件（名字表由 render.js 按 `na` 建，`byName` 只认当前帧）。 */
+  const clipOf = (host, name) => (host && host.byName ? host.byName(name) : null);
+  /** 换掉某个文本字段（tp11 的放置存的是 `<g type="text">` 元素，不是 MovieClip）。 */
+  function setTextByName(host, name, str) {
+    const t = T();
+    const n = clipOf(host, name);
+    if (t && n) t.setText(n, str);
+    return n;
+  }
+  /** 让元件**停在**某一帧（不自己播）。这些按钮是"状态精灵"，只能停帧不能 play。 */
+  function stopAt(clip, n) {
+    if (!clip || !clip.gotoAndStop) return;
+    try { clip.gotoAndStop(n); } catch (e) {}
+  }
+  /** 换帧会把 `<g>` 的子节点整个重建 —— 动效壳（`.uc-pop`）与里面那块点击区会一起没掉，
+   *  所以每次 `gotoAndStop` 之后都要重包一遍（与 ui-main.js 的 settle 同一件事）。 */
+  function refreshShell(clip) {
+    const t = T();
+    if (!t || !clip || !clip.g) return;
+    t.popWrap(clip);
+    const shell = clip.g.querySelector(':scope > g.uc-pop');
+    if (shell) t.wirePopPress(shell);
+    t.freezeDescendants(clip);          // 换帧重建出来的新子元件也一并交给静态页策略
+  }
+  /** 状态帧只用于按钮两档；按下由路由反馈，click不再叠加回弹或退场。 */
+  function wireClickable(clip, onFire) {
+    const t = T();
+    if (!t || !clip || !clip.g) return;
+    clip.__sceneFire = onFire;
+    if (clip.__sceneWired) return;
+    clip.__sceneWired = true;
+    clip.__sceneHover = false;
+    stopAt(clip, 1);
+    clip.g.style.cursor = 'pointer';
+    clip.g.style.pointerEvents = 'auto';
+    t.measureHitBox(clip);
+    t.popWrap(clip);
+    const shell = clip.g.querySelector(':scope > g.uc-pop');
+    if (shell) t.wirePopPress(shell);
+    if (window.SfUiFeedback) SfUiFeedback.bind(clip.g, {
+      hover: false, shell: () => clip.g.querySelector(':scope > g.uc-pop'),
+    });
+    clip.g.addEventListener('mouseenter', () => { clip.__sceneHover = true; stopAt(clip, 2); refreshShell(clip); });
+    clip.g.addEventListener('mouseleave', () => { clip.__sceneHover = false; stopAt(clip, 1); refreshShell(clip); });
+    clip.g.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const fire = () => {
+        if (clip.__sceneFire) clip.__sceneFire();
+      };
+      if (window.SfUiFeedback) SfUiFeedback.tap(clip.g, fire, { delay: 0, press: false });
+      else fire();
+    });
+  }
+  /** 原版的 `mc.left._visible = false`（不是切禁用帧）—— 照抄成 CSS `visibility`。 */
+  function setVisible(clip, on) {
+    if (clip && clip.g) clip.g.style.visibility = on ? '' : 'hidden';
+  }
+  /** 回村庄页：走 classic-ui 的动作表，与「回家」键同一个出口。
+   *  ⚠ 先 `destroy()` 再跳：不然 `SfVillage.current()` 会一直指着**已经被换掉的那棵树**
+   *  （调试 / 自检读到的是过期状态；`openPage()` 之后的 `destroyView()` 也会去动一个
+   *  已经脱离文档的视图）。 */
+  function backToVillage() {
+    destroy();
+    if (window.UI && UI.runAction) UI.runAction('village');
+  }
+  /** 页面底部那行说明（复刻侧补的，不是原版内容）。用 DOM 盖在 SVG 上：
+   *  与礼包按钮同一个理由 —— 不动原版显示列表，也不跟 SVG 的坐标缩放打架。
+   *  ⚠ **只停一会儿就自动收起**，而且是 `pointer-events:none`（见 CSS）：
+   *  这条说明压在弹窗自己的按钮上，常驻的话既挡视线、又像"原版按钮坏了"；
+   *  自动收起之后，页面就是原版那一页，点那些"还没接"的按钮会再把它叫出来。 */
+  const NOTE_MS = 5000;
+  /** 建筑等级角标：页面里 text1 字段在导出的 3957/4381 里被省略了，原版是
+   *  `setText(text1, "LV"+level)`；这里用 DOM 角标补上等级，不影响原版按钮/文本。 */
+  function showBuildingLevel(container, key, label, style) {
+    if (!container) return null;
+    for (const old of container.querySelectorAll('.ssfight-building-level')) old.remove();
+    const b = building(key);
+    if (!b) return null;
+    const d = document.createElement('div');
+    d.className = 'ssfight-building-level';
+    d.textContent = (label || BUILDING_LABEL[key] || key) + ' Lv' + b.level + (b.upgrading ? ' · 升级中' : '');
+    if (style) d.style.cssText = style;
+    container.appendChild(d);
+    return d;
+  }
+  const BUILDING_LABEL = { altar: '祭坛', miracle: '神迹', beast: '幻兽牧场' };
+
+  function showNote(container, text) {
+    if (!container) return;
+    let n = container.querySelector('.ssfight-note');
+    if (!text) { if (n) n.style.display = 'none'; return; }
+    if (!n) {
+      n = document.createElement('div');
+      n.className = 'ssfight-note';
+      container.appendChild(n);
+    }
+    n.textContent = text;
+    n.style.display = '';
+    n.classList.remove('flash');
+    if (n.__hide) clearTimeout(n.__hide);
+    n.__hide = setTimeout(() => { n.style.display = 'none'; n.__hide = 0; }, NOTE_MS);
+  }
+  /** "这一页还没接"的按钮被点时的统一反馈：跳一句 toast + 把提示条叫回来并闪一下。 */
+  function pendingFlash(msg) {
+    toast(msg);
+    const cur = current;
+    if (cur && cur.container) showNote(cur.container, cur.page.note || '');
+    try {
+      const n = cur && cur.container && cur.container.querySelector('.ssfight-note');
+      if (n) {
+        n.classList.remove('flash');
+        void n.getBoundingClientRect();
+        n.classList.add('flash');
+        if (n.__unflash) clearTimeout(n.__unflash);
+        n.__unflash = setTimeout(() => n.classList.remove('flash'), 900);
+      }
+    } catch (e) {}
+  }
+
+  /** 取当前建筑的快照（`State.building(key)`；没有存档或没这套数据时返回 null）。 */
+  function building(key) {
+    if (!(window.State && State.building)) return null;
+    try { return State.building(key); } catch (e) { return null; }
+  }
+
+  /* ============================================================
+   * ① 祭坛 —— MainMovie.as:9814 `showTemple()`
+   * ------------------------------------------------------------
+   * 原版：
+   *   gotoAndStop(1)                                  // 「家园弹出」第 1 帧
+   *   setText(text1, "LV" + building.level)           // ⚠ 第 1 帧里**没有** text1 这个字段
+   *   setText(text2, 三行双倍几率说明)                 // getBuildingUpInfo(level)
+   *   button1.onFire = gainBuff                       // 领当日随机状态
+   *   button2.onFire = homeLandLevelUp                // 升级
+   *   button3.onFire = 返回村庄
+   *   showTempleBuff(building)                        // setText(text3, "本日特殊状态：…" 或 "")
+   * ========================================================== */
+  function wireAltar(view, page, container) {
+    const t = T();
+    const b = building('altar');
+    showBuildingLevel(container, 'altar', '祭坛', 'right:18px;top:64px');
+    /* text1：原版 `setText(text1, "LV" + building.level)` —— 第 1 帧里**没有**这个字段
+     * （实测 3957 f1 的具名文本只有 text2 / text3），写了也不显示，所以不写。 */
+    /* text2：三行几率说明。原版是 `getBuildingUpInfo(level)` 里那三个百分比拼的（:9827）。 */
+    if (t && b) {
+      const info = State.buildingUpInfo(b.level);
+      t.setText(clipOf(view, 'text2'),
+        '1.参加竞技场时有' + info.expRate + '%几率获得双倍经验奖励\n'
+        + '2.参加竞技场时有' + info.propRate + '%几率获得双倍碎片奖励\n'
+        + '3.挑战关卡时有' + info.goldRate + '%几率获得双倍金松果奖励');
+    }
+    /* text3：当日状态（原版 `showTempleBuff` :9858；没有 buff 就清空）。 */
+    const buffText = b && b.buffId === 1 ? '本日特殊状态：竞技场经验双倍奖励！'
+      : b && b.buffId === 2 ? '本日特殊状态：竞技场碎片双倍奖励！'
+        : b && b.buffId === 3 ? '本日特殊状态：关卡金松果双倍！' : '';
+    setTextByName(view, 'text3', buffText);
+    /* 「领取当日状态」：原版 `gainBuff`（一天一次，服务端判定）。按钮在已经领过时
+     * 原版会 `gotoAndStop(_totalframes)`（隐藏，见 :9882-9886）。 */
+    const claimed = b ? State.buildingBuffClaimed('altar') : false;
+    wireClickable(clipOf(view, 'button1'), () => {
+      const r = State.claimBuildingBuff('altar');
+      toast(r.msg);
+      if (r.ok) openPage('altar');
+    });
+    if (claimed) setVisible(clipOf(view, 'button1'), false);
+    wireClickable(clipOf(view, 'button2'), () => openPage('altar-up'));
+    wireClickable(clipOf(view, 'button3'), backToVillage);
+    showNote(container, PAGES.altar.note);
+  }
+
+  /* ============================================================
+   * 通用「升级确认」页 —— 原版 `homeLandLevelUp(building)`（:10875）
+   * ------------------------------------------------------------
+   * `家园弹出.gotoAndStop(5)` + 写六个字段：
+   *   text1 = 升级金松果 / text11 = "金松果" / text2 = 升级小时 / text22 = "小时"
+   *   text3 = 这一档升级后的收益（祭坛=触发几率；神迹=1 个随机属性点；幻兽=领导力）
+   *   两颗键：button1 = 确认升级（`upgradeBuilding`）、button2 = 返回。
+   * ========================================================== */
+  function buildingOf(page) {
+    const key = page && page.build;
+    if (!key) return null;
+    return building(key);
+  }
+  function wireLandLevelUp(view, page, container) {
+    const t = T();
+    const b = buildingOf(page);
+    if (page && page.build) showBuildingLevel(container, page.build, BUILDING_LABEL[page.build], 'right:18px;top:64px');
+    const key = page.build;
+    const label = (window.State && State.BUILDING_LABEL) ? State.BUILDING_LABEL[key] : key;
+    if (!b) { wireClickable(clipOf(view, 'button2'), backToVillage); return; }
+    const info = State.buildingUpInfo(b.level);
+    const next = State.buildingUpInfo(Math.min(State.BUILDING_MAX_LEVEL, b.level + 1));
+    if (t) {
+      t.setText(clipOf(view, 'text1'), String(info.gold));
+      t.setText(clipOf(view, 'text11'), '金松果');
+      t.setText(clipOf(view, 'text2'), String(info.hour));
+      t.setText(clipOf(view, 'text22'), '小时');
+      /* text3 只有 67.5×30、一行约 5 个汉字（实测 textfields-index 7791），
+       * 原来整句 20+ 字会横向截断。这里改成两行短句；完整说明挪到底部 note。 */
+      const desc = key === 'altar' ? ('触发几率\n→' + next.expRate + '%')
+        : key === 'miracle' ? '随机属性点\n+1'
+          : ('领导力\n→' + ((b.level) * 3 + 7));
+      t.setText(clipOf(view, 'text3'), desc);
+    }
+    wireClickable(clipOf(view, 'button1'), () => {
+      const r = State.upgradeBuilding(key);
+      if (!r.ok) { toast(r.msg); return; }
+      toast(label + '开始升级：' + r.gold + ' 金松果，' + r.hour + ' 小时后完成。');
+      /* 村庄页的牌子/倒计时要跟着变（`refreshVillageBuildings` 是幂等的）。 */
+      if (window.SfUiMain && SfUiMain.refreshVillageBuildings) {
+        try { SfUiMain.refreshVillageBuildings(); } catch (e) {}
+      }
+      openPage(key);
+    });
+    wireClickable(clipOf(view, 'button2'), () => openPage(key));
+    showNote(container, key === 'beast'
+      ? ('升级后松鼠领导力提高至' + ((b.level) * 3 + 7) + '，并再赠送 1 个召唤兽存储格和 200 孵化点。')
+      : page.note);
+  }
+
+  /* ============================================================
+   * ② 神迹 —— MainMovie.as:9892 `showMiracle()`
+   * ------------------------------------------------------------
+   * 原版：gotoAndStop(3)；setText(text1, "LV"+level)（第 3 帧同样没有 text1 字段）；
+   *      button1 = 看记录 → showMiracleRecord；button2 = 升级；button3 = 返回。
+   * 第 3 帧那段说明（"每次升级均可获得1个随机属性点 / （5点生命/1点力量/1点敏捷/1点速度）"）
+   * 是**素材里就有的静态文案**（文本标签 3838，没有实例名），所以不用改。 */
+  function wireMiracle(view, page, container) {
+    showBuildingLevel(container, 'miracle', '神迹', 'right:18px;top:64px');
+    wireClickable(clipOf(view, 'button1'), () => openPage('miracle-record'));
+    wireClickable(clipOf(view, 'button2'), () => openPage('miracle-up'));
+    wireClickable(clipOf(view, 'button3'), backToVillage);
+    showNote(container, PAGES.miracle.note);
+  }
+
+  /* ============================================================
+   * ③ 神迹记录 —— MainMovie.as:9928 `showMiracleRecord(rsp)`
+   * ------------------------------------------------------------
+   * 原版：gotoAndStop(4)；setText(text1, "神迹当前共为你提升了——\n" + 四行累计值)；
+   *      button1 = 回神迹页。四行累计值来自服务端 `miracleRecord.do` 的
+   *      `hpAdd/powerAdd/agilityAdd/speedAdd`，复刻直接读存档里攒下来的那一份。 */
+  function wireMiracleRecord(view, page, container) {
+    showBuildingLevel(container, 'miracle', '神迹', 'right:18px;top:64px');
+    const t = T();
+    const rec = (window.State && State.miracleRecord) ? State.miracleRecord() : { power: 0, agility: 0, speed: 0, hp: 0 };
+    if (t) {
+      t.setText(clipOf(view, 'text1'),
+        '神迹当前共为你提升了——\n' + rec.hp + '点生命\n' + rec.power + '点力量\n' +
+        rec.agility + '点敏捷\n' + rec.speed + '点速度');
+    }
+    wireClickable(clipOf(view, 'button1'), () => openPage('miracle'));
+    showNote(container, PAGES['miracle-record'].note);
+  }
+
+  /* ============================================================
+   * ④ 幻兽牧场 —— MainMovie.as:10950 `showSummons()`（本批只渲染页面）
+   * ------------------------------------------------------------
+   * 原版：gotoAndStop(1)；button1..button5 = 孵化/编队/喂养/进化/返回；levelup = 升级；
+   *      left/right = 翻召唤兽列表；`doShowPlayerPets()` 填 6 个格子 + 孵化点 + 页码。
+   * 复刻按存档里的 `pets` 填格子；没有幻兽时显示空列表提示，左右翻页按页数显示。 */
+  /* ---------- 幻兽牧场：主列表 ---------- */
+  const escH = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function statePets() { return (window.State && State.pets) ? State.pets() : []; }
+  function ensureSelectedPet() {
+    const list = statePets();
+    if (!list.some((p) => p.key === selectedPetKey)) selectedPetKey = list[0] ? list[0].key : '';
+    return list;
+  }
+  function showPetPanel(container, html, onClick) {
+    if (!container) return null;
+    let p = container.querySelector('.ssfight-pet-panel');
+    if (!p) {
+      p = document.createElement('div');
+      p.className = 'ssfight-pet-panel';
+      container.appendChild(p);
+    }
+    p.innerHTML = html;
+    p.onclick = onClick || null;
+    return p;
+  }
+  function petModal(title, html, buttons) {
+    try {
+      if (window.UI && UI.classic && UI.classic.modal) return UI.classic.modal(title, html, buttons, { small: true });
+    } catch (e) {}
+    toast(title + '：' + String(html).replace(/<[^>]+>/g, ' ').slice(0, 120));
+    return null;
+  }
+  function petSelectHtml(selected) {
+    const list = statePets();
+    return '<select id="ssfight-pet-select" style="max-width:100%">' + list.map((p) =>
+      '<option value="' + escH(p.key) + '"' + (p.key === selected ? ' selected' : '') + '>' +
+      escH(p.name) + ' ' + p.grade + '★ Lv' + p.level + '（领导力' + p.leadership + '）</option>').join('') + '</select>';
+  }
+  function openHatchModal() {
+    const st = State.state() || {};
+    petModal('孵化幻兽',
+      '<p>当前孵化点：<b>' + (Number(st.hatchPoint) || 0) + '</b>（每次孵化消耗 <b>200</b> 点）</p>' +
+      '<p>随机获得 1★~4★ 幻兽；星级越高领导力需求越高。</p>',
+      [{ label: '取消', cls: 'muted' }, { label: '孵化', cls: 'gold', run: () => {
+        const r = State.hatchPet();
+        toast(r.ok ? ('孵化成功：' + r.pet.name + '（' + r.pet.grade + '★）') : r.msg);
+        if (r.ok) { selectedPetKey = r.pet.key; openPage('beast'); }
+      } }]);
+  }
+  function openDetailModal(pet) {
+    if (!pet) return toast('还没有幻兽，先去孵化一只吧');
+    const dlg = petModal(pet.name,
+      '<div class="ssfight-pet-detail-head"><div class="ssfight-pet-portrait" id="sf-pet-portrait"></div><div>' +
+      '<p><b>' + escH(pet.name) + '</b>　' + pet.grade + '★　Lv' + pet.level + '/' + pet.maxLevel + '</p>' +
+      '<p>经验：' + pet.exp + '/' + pet.nextExp + '　领导力需求：' + pet.leadership + '</p>' +
+      '<p>技能：<b>' + escH(pet.skillName) + '</b><br>' + escH(pet.skillRemark) + '</p></div></div>' +
+      '<p class="small-label">喂养/进化请用牧场底部的对应按钮。</p>',
+      [{ label: '关闭' }]);
+    if (dlg && dlg.element) mountPetArt(dlg.element.querySelector('#sf-pet-portrait'), pet);
+  }
+  function openTeamModal() {
+    const list = statePets();
+    if (!list.length) return toast('还没有幻兽，先去孵化一只吧');
+    const team = (State.state() || {}).petsTeam || [];
+    const cap = State.petLeadership ? State.petLeadership() : 0;
+    const rows = list.map((p) => '<label style="display:block;margin:2px 0"><input type="checkbox" data-team-key="' + escH(p.key) + '"' +
+      (team.includes(p.key) ? ' checked' : '') + '> ' + escH(p.name) + ' ' + p.grade + '★ Lv' + p.level + '（领导力' + p.leadership + '）</label>').join('');
+    const picked = new Set(team);
+    const dlg = petModal('出战编队',
+      '<p>领导力上限：<b>' + cap + '</b>　最多选择 3 只，领导力总和不能超过上限。</p>' + rows,
+      [{ label: '取消', cls: 'muted' }, { label: '保存', cls: 'gold', run: () => {
+        const keys = [...picked].slice(0, 3);
+        const r = State.setPetTeam(keys);
+        toast(r.ok ? ('编队已保存：领导力 ' + r.need + '/' + r.cap) : r.msg);
+        if (r.ok) openPage('beast');
+      } }]);
+    if (dlg && dlg.element) dlg.element.querySelectorAll('[data-team-key]').forEach((cb) => {
+      cb.onchange = () => { if (cb.checked) picked.add(cb.dataset.teamKey); else picked.delete(cb.dataset.teamKey); };
+    });
+  }
+  function openFeedModal() {
+    const list = statePets();
+    if (!list.length) return toast('还没有幻兽，先去孵化一只吧');
+    let picked = selectedPetKey || list[0].key;
+    const dlg = petModal('喂养幻兽',
+      '<p>选择要喂养的幻兽：</p>' + petSelectHtml(picked) +
+      '<p>系统会自动消耗最多 3 只非出战幻兽，每只 20 金松果；出战幻兽不会被消耗。</p>',
+      [{ label: '取消', cls: 'muted' }, { label: '喂养', cls: 'gold', run: () => {
+        const r = State.feedPet(picked);
+        toast(r.ok ? ('喂养成功：' + r.target.name + ' 获得 ' + r.gained + ' 经验') : r.msg);
+        if (r.ok) openPage('beast');
+      } }]);
+    const sel = dlg && dlg.element ? dlg.element.querySelector('#ssfight-pet-select') : null;
+    if (sel) sel.onchange = () => { picked = sel.value; };
+  }
+  function openEvolveModal() {
+    const list = statePets();
+    if (!list.length) return toast('还没有幻兽，先去孵化一只吧');
+    let picked = selectedPetKey || list[0].key;
+    const dlg = petModal('幻兽进化',
+      '<p>选择要进化的幻兽：</p>' + petSelectHtml(picked) +
+      '<p>消耗目标 + 2 只同星级且不在出战队伍的幻兽 + 金松果，随机进化成高一星幻兽。四星已是最高星级。</p>',
+      [{ label: '取消', cls: 'muted' }, { label: '进化', cls: 'gold', run: () => {
+        const r = State.evolvePet(picked);
+        toast(r.ok ? ('进化成功：' + r.pet.name + '（' + r.pet.grade + '★）') : r.msg);
+        if (r.ok) { selectedPetKey = r.pet.key; openPage('beast'); }
+      } }]);
+    const sel = dlg && dlg.element ? dlg.element.querySelector('#ssfight-pet-select') : null;
+    if (sel) sel.onchange = () => { picked = sel.value; };
+  }
+  function wireBeast(view, page, container) {
+    const t = T();
+    clearPetArt(container);
+    showBuildingLevel(container, 'beast', '幻兽牧场', 'right:18px;top:150px');
+    const list = ensureSelectedPet();
+    const cap = Math.max(1, Number((State.state() || {}).petsCapacity) || 6);
+    const pageCount = Math.max(1, Math.ceil(Math.max(list.length, 1) / 6));
+    beastPage = Math.max(1, Math.min(pageCount, Number(beastPage) || 1));
+    const start = (beastPage - 1) * 6;
+    const beastBadge = container && container.querySelector('.ssfight-building-level');
+    if (beastBadge) beastBadge.textContent = '幻兽牧场 Lv' + ((building('beast') || {}).level || 1) + ' · 格子 ' + list.length + '/' + cap;
+    if (t) {
+      t.setText(clipOf(view, 'text11'), '孵化点：' + (Number((State.state() || {}).hatchPoint) || 0));
+      t.setText(clipOf(view, 'page'), beastPage + '/' + pageCount);
+      t.setText(clipOf(view, 'text12'), list.length ? '' : '还没有召唤兽，快去孵化吧！');
+    }
+    for (let i = 1; i <= 6; i++) {
+      const idx = start + i - 1;
+      const pet = list[idx] || null;
+      const cell = clipOf(view, 'c' + i);
+      const nameNode = clipOf(view, 'text' + i);
+      if (pet) {
+        if (cell) {
+          stopAt(cell, 1);                         // 有 level 文本的是第 1 帧；第 2 帧反而丢了它
+          const lv = t && cell.byName ? cell.byName('level') : null;
+          /* 原版 `level` 文本字段在画稿里和幻兽图重叠（有的帧还会被图盖住一半），
+           * 统一收掉，等级只用右下角 DOM 徽章显示；否则会出现「lv12 + Lv12」两层。 */
+          if (lv) { t.setText(lv, ''); if (lv.g) lv.g.style.display = 'none'; }
+          wireClickable(cell, () => { selectedPetKey = pet.key; openDetailModal(pet); });
+        }
+        if (t) t.setText(nameNode, pet.name);
+        if (cell && cell.g && container) {
+          const hr = container.getBoundingClientRect();
+          const cr = cell.g.getBoundingClientRect();
+          const art = document.createElement('div');
+          art.className = 'ssfight-pet-art';
+          art.style.left = (cr.left - hr.left + cr.width * 0.09) + 'px';
+          art.style.top = (cr.top - hr.top + cr.height * 0.04) + 'px';
+          art.style.width = (cr.width * 0.82) + 'px';
+          art.style.height = (cr.height * 0.68) + 'px';
+          container.appendChild(art);
+          mountPetArt(art, pet).then(() => {
+            if (!art.isConnected) return;
+            const lv = document.createElement('span');
+            lv.className = 'ssfight-pet-level';
+            lv.textContent = 'Lv' + pet.level;
+            art.appendChild(lv);
+          });
+        }
+      } else {
+        if (cell) {
+          stopAt(cell, 1);
+          const lv = t && cell.byName ? cell.byName('level') : null;
+          if (lv) { t.setText(lv, ''); if (lv.g) lv.g.style.display = 'none'; }
+          if (cell.g) cell.g.style.cursor = 'default';
+        }
+        if (t) t.setText(nameNode, '');
+      }
+    }
+    const left = clipOf(view, 'left'), right = clipOf(view, 'right');
+    setVisible(left, beastPage > 1);
+    setVisible(right, beastPage < pageCount);
+    wireClickable(left, () => { if (beastPage > 1) { beastPage--; openPage('beast'); } });
+    wireClickable(right, () => { if (beastPage < pageCount) { beastPage++; openPage('beast'); } });
+    wireClickable(clipOf(view, 'button5'), backToVillage);
+    wireClickable(clipOf(view, 'button1'), openHatchModal);
+    wireClickable(clipOf(view, 'button2'), openTeamModal);
+    wireClickable(clipOf(view, 'button3'), openFeedModal);
+    wireClickable(clipOf(view, 'button4'), openEvolveModal);
+    wireClickable(clipOf(view, 'levelup'), () => openPage('beast-up'));
+    showNote(container, PAGES.beast.note);
+  }
+
+  /* ---------- 孵化 ---------- */
+  function wireBeastHatch(view, page, container) {
+    const t = T();
+    showBuildingLevel(container, 'beast', '幻兽牧场', 'right:18px;top:150px');
+    const st = State.state() || {};
+    if (t) {
+      t.setText(clipOf(view, 'title1'), '孵化');
+      t.setText(clipOf(view, 'title2'), '孵化点：' + (Number(st.hatchPoint) || 0) + '　（每次孵化需要200点）');
+    }
+    wireClickable(clipOf(view, 'button1'), () => {
+      const r = State.hatchPet();
+      toast(r.ok ? ('孵化成功：' + r.pet.name + '（' + r.pet.grade + '★）') : r.msg);
+      if (r.ok) { selectedPetKey = r.pet.key; openPage('beast'); }
+    });
+    showNote(container, '消耗200孵化点随机孵化一只幻兽；星级越高领导力需求越高。');
+  }
+
+  /* ---------- 详情 ---------- */
+  function wireBeastDetail(view, page, container) {
+    const t = T();
+    showBuildingLevel(container, 'beast', '幻兽牧场', 'right:18px;top:150px');
+    const list = ensureSelectedPet();
+    const pet = list.find((p) => p.key === selectedPetKey);
+    if (!pet) { wireClickable(clipOf(view, 'button1'), backBeast); toast('还没有幻兽，先去孵化一只吧'); return; }
+    /* 详情页素材里没有随幻兽绑定的整身图（原版 attachMovie(summons.name) 那套库里没有导出），
+     * 保留原生背景，但把会显示 "lv23 / 名字 / Lv0000" 的占位字段收掉，数据统一放在 DOM 面板，
+     * 避免占位文本和真实数据叠在一起。 */
+    for (const n of ['c1', 'level', 'text2', 'text3', 'text4', 'text5', 'levelMc', 'expText']) {
+      const c = clipOf(view, n); if (c && c.g) c.g.style.visibility = 'hidden';
+    }
+    if (t) t.setText(clipOf(view, 'text1'), pet.name);
+    stopAt(clipOf(view, 'star'), pet.grade);
+    const expMc = clipOf(view, 'expMc');
+    if (expMc) stopAt(expMc, pet.level >= pet.maxLevel ? (expMc.frameCount ? expMc.frameCount() : 1) : Math.min(expMc.frameCount ? expMc.frameCount() : 100, 1 + Math.ceil(pet.exp * 100 / Math.max(1, pet.nextExp))));
+    wireClickable(clipOf(view, 'button1'), backBeast);
+    showPetPanel(container, '<b>' + escH(pet.name) + '</b>　' + pet.grade + '★　Lv' + pet.level + '/' + pet.maxLevel +
+      '　经验 ' + pet.exp + '/' + pet.nextExp + '　领导力需求 ' + pet.leadership +
+      '<br>技能：<b>' + escH(pet.skillName) + '</b>　' + escH(pet.skillRemark) +
+      '<span class="ssfight-pet-actions"><button data-pet-act="feed">喂养</button><button data-pet-act="evolve">进化</button><button data-pet-act="back">返回</button></span>',
+    (e) => {
+      const act = e.target && e.target.dataset && e.target.dataset.petAct;
+      if (act === 'feed') openPage('beast-feed');
+      else if (act === 'evolve') openPage('beast-evolve');
+      else if (act === 'back') backBeast();
+    });
+    showNote(container, '点击下方按钮喂养或进化这只幻兽。');
+  }
+
+  /* ---------- 编队 ---------- */
+  function wireBeastTeam(view, page, container) {
+    const t = T();
+    showBuildingLevel(container, 'beast', '幻兽牧场', 'right:18px;top:150px');
+    const list = statePets();
+    const teamKeys = (State.state() || {}).petsTeam || [];
+    const used = list.filter((p) => teamKeys.includes(p.key)).reduce((n, p) => n + p.leadership, 0);
+    const cap = State.petLeadership ? State.petLeadership() : 0;
+    for (const n of ['text1', 'text2', 'c1', 'c2', 'c3']) { const c = clipOf(view, n); if (c && c.g) c.g.style.visibility = 'hidden'; }
+    const rows = list.length ? list.map((p) =>
+      '<label><input type="checkbox" data-team-key="' + escH(p.key) + '"' + (teamKeys.includes(p.key) ? ' checked' : '') + '> ' +
+      escH(p.name) + ' ' + p.grade + '★ Lv' + p.level + '（领导力' + p.leadership + '）</label>').join('')
+      : '<p>还没有幻兽，先去孵化吧。</p>';
+    showPetPanel(container, '<b>领导力：' + used + '/' + cap + '　选择出战幻兽（最多3只）</b><div class="ssfight-pet-list">' + rows + '</div><button data-team-act="save">保存编队</button><button data-team-act="back">返回</button>',
+      (e) => {
+        const act = e.target && e.target.dataset && e.target.dataset.teamAct;
+        if (act === 'save') {
+          const keys = [...container.querySelectorAll('[data-team-key]:checked')].map((x) => x.dataset.teamKey);
+          const r = State.setPetTeam(keys);
+          toast(r.ok ? ('编队已保存：领导力 ' + r.need + '/' + r.cap) : r.msg);
+          if (r.ok) openPage('beast');
+        } else if (act === 'back') backBeast();
+      });
+    wireClickable(clipOf(view, 'button1'), () => {
+      const r = State.setPetTeam([]);
+      toast(r.ok ? '已清空出战队伍' : r.msg);
+      if (r.ok) openPage('beast-team');
+    });
+    wireClickable(clipOf(view, 'button2'), () => {
+      const keys = [...container.querySelectorAll('[data-team-key]:checked')].map((x) => x.dataset.teamKey);
+      const r = State.setPetTeam(keys);
+      toast(r.ok ? ('编队已保存：领导力 ' + r.need + '/' + r.cap) : r.msg);
+      if (r.ok) openPage('beast');
+    });
+    wireClickable(clipOf(view, 'button3'), backBeast);
+    showNote(container, '勾选最多3只幻兽，领导力总和不能超过牧场等级提供的上限。');
+  }
+
+  /* ---------- 喂养 ---------- */
+  function wireBeastFeed(view, page, container) {
+    const t = T();
+    showBuildingLevel(container, 'beast', '幻兽牧场', 'right:18px;top:150px');
+    const list = ensureSelectedPet();
+    const pet = list.find((p) => p.key === selectedPetKey);
+    if (!pet) { wireClickable(clipOf(view, 'button1'), backBeast); return; }
+    for (const n of ['level', 'expText']) { const c = clipOf(view, n); if (c && c.g) c.g.style.visibility = 'hidden'; }
+    if (t) t.setText(clipOf(view, 'text1'), pet.name);
+    const expMc = clipOf(view, 'expMc');
+    if (expMc) stopAt(expMc, pet.level >= pet.maxLevel ? (expMc.frameCount ? expMc.frameCount() : 1) : Math.min(expMc.frameCount ? expMc.frameCount() : 100, 1 + Math.ceil(pet.exp * 100 / Math.max(1, pet.nextExp))));
+    wireClickable(clipOf(view, 'button1'), () => {
+      const r = State.feedPet(pet.key);
+      toast(r.ok ? ('喂养成功：' + r.target.name + ' 获得' + r.gained + '经验，消耗 ' + r.gold + ' 金松果') : r.msg);
+      if (r.ok) openPage('beast-feed');
+    });
+    showPetPanel(container, '<b>喂养：' + escH(pet.name) + '</b><p>自动消耗最多3只非出战幻兽，每只20金松果；喂养会加经验并自动升级。</p><button data-feed-act="feed">喂养</button><button data-feed-act="back">返回</button>',
+      (e) => {
+        const act = e.target && e.target.dataset && e.target.dataset.feedAct;
+        if (act === 'feed') { const r = State.feedPet(pet.key); toast(r.ok ? ('喂养成功：' + r.target.name + ' +' + r.gained + '经验') : r.msg); if (r.ok) openPage('beast-feed'); }
+        else if (act === 'back') backBeast();
+      });
+    showNote(container, '喂养会消耗背包里其它幻兽换取经验；出战队伍里的幻兽不会被消耗。');
+  }
+
+  /* ---------- 进化 ---------- */
+  function wireBeastEvolve(view, page, container) {
+    const t = T();
+    showBuildingLevel(container, 'beast', '幻兽牧场', 'right:18px;top:150px');
+    const list = ensureSelectedPet();
+    const pet = list.find((p) => p.key === selectedPetKey);
+    if (!pet) { wireClickable(clipOf(view, 'button1'), backBeast); return; }
+    for (const n of ['toSummons', 'level']) { const c = clipOf(view, n); if (c && c.g) c.g.style.visibility = 'hidden'; }
+    if (t) t.setText(clipOf(view, 'text1'), pet.name + '　' + pet.grade + '★');
+    wireClickable(clipOf(view, 'button1'), () => {
+      const r = State.evolvePet(pet.key);
+      toast(r.ok ? ('进化成功：' + r.pet.name + '（' + r.pet.grade + '★）') : r.msg);
+      if (r.ok) { selectedPetKey = r.pet.key; openPage('beast-detail'); }
+    });
+    wireClickable(clipOf(view, 'button2'), backBeast);
+    showPetPanel(container, '<b>进化：' + escH(pet.name) + '（' + pet.grade + '★）</b><p>消耗目标 + 2只同星级且不在出战队伍的幻兽 + 金松果，随机进化成高一星幻兽。</p><button data-evo-act="evolve">进化</button><button data-evo-act="back">返回</button>',
+      (e) => {
+        const act = e.target && e.target.dataset && e.target.dataset.evoAct;
+        if (act === 'evolve') { const r = State.evolvePet(pet.key); toast(r.ok ? ('进化成功：' + r.pet.name + '（' + r.pet.grade + '★）') : r.msg); if (r.ok) { selectedPetKey = r.pet.key; openPage('beast-detail'); } }
+        else if (act === 'back') backBeast();
+      });
+    showNote(container, '进化会消耗同星级幻兽与金松果；四星已是最高星级。');
+  }
+
+  function backBeast() { openPage('beast'); }
+
+  /* ============================================================
+   * ⑤ 征战 —— MainMovie.as:12274 `showCampaign()` / :12291 `showCampaignPage(page)`
+   * ------------------------------------------------------------
+   * 原版：gotoAndStop(1)；newMessage 按"有没有新消息"切 1/2 帧；
+   *      `showCampaignPage(page)`：page 1 → `main_mc.gotoAndStop(1)` + left 隐藏 / right 显示；
+   *                                page 2 → `main_mc.gotoAndStop(2)` + left 显示 / right 隐藏；
+   *      button1 = 战绩（要服务器）；button2 = 返回村庄；main_mc.boss1..boss5 = 报名 / 看对局。
+   * 复刻：**左右翻页是纯 UI，照原版接上**；其余按钮只给说明。 */
+  function wireWar(view, page, container) {
+    const t = T();
+    stopAt(clipOf(view, 'newMessage'), 2);          // 2 = 隐藏（原版没有新消息时就是这个）
+    const main = clipOf(view, 'main_mc');
+    stopAt(main, 1);
+    const left = clipOf(view, 'left');
+    const right = clipOf(view, 'right');
+    const showCampaignPage = (n) => {
+      stopAt(main, n);                              // 原版就是切 main_mc 的帧（两页各一张画稿）
+      setVisible(left, n !== 1);
+      setVisible(right, n === 1);
+      /* 换页会重建 main_mc 的子树 → 页里那 5 个 BOSS 可能是新实例（也可能被复用），
+       * 所以每次换页都重新接一遍线；`wireClickable` 自己是幂等的，复用不会重复挂监听。
+       * ⚠ 这里以前要传一份 `skipBosses`（"BOSS 要响应悬停切帧，别钉它们"）—— 那是
+       *  `pinFrame` 时代的补丁；静态页策略只写 `playing = false`、不碰帧号，
+       *  悬停的 `stopAt` 照常生效，所以例外名单不需要了。 */
+      if (t) t.freezeDescendants(main);
+      if (main) for (let i = 1; i <= 5; i++) wireClickable(clipOf(main, 'boss' + i), () => pendingFlash(NOTE.warBoss));
+    };
+    if (left) { setVisible(left, false); left.playing = false; }
+    if (right) right.playing = false;
+    wireClickable(left, () => showCampaignPage(1));
+    wireClickable(right, () => showCampaignPage(2));
+    wireClickable(clipOf(view, 'button1'), () => pendingFlash(NOTE.warRecord));
+    wireClickable(clipOf(view, 'button2'), backToVillage);
+    showCampaignPage(1);
+    /* ⚠ `wireClickable` 里 `stopAt(clip, 1)` 会把 left/right 也切回第 1 帧，
+     * 但原版用 `_visible` 表示"这一页没有上一页/下一页"，所以重摆一次可见性。 */
+    setVisible(left, false);
+    setVisible(right, true);
+    showNote(container, PAGES.war.note);
+  }
+
+  /* ---------- 挂载与生命周期 ---------- */
+
+  let seq = 0;                       // 防抖：连续点两个地点时，只认最后一次挂载
+  async function openPage(pageId, container) {
+    const id = PAGES[pageId] ? pageId : LOCATION_PAGE[pageId];
+    const page = PAGES[id];
+    if (!page) return false;
+    if (!window.SfRender || !window.SfRender.mountSymbol) throw new Error('SfRender 未加载（缺 js/ssfight/render.js）');
+    const t = T();
+    if (!t) throw new Error('SfUiMain.toolkit 不在（缺 js/ssfight/ui-main.js）');
+    /* 挂载点：调用方给的容器 → 当前场景的容器 → `#ui`（真的从别处直接深链进来时用）。
+     * ⚠ 必须在 `destroyView()` **之前**定下来（那一步会把 `current` 清掉）。 */
+    let host = container || (current && current.container);
+    if (!host) {
+      const ui = document.getElementById('ui');
+      if (ui) {
+        ui.innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠村庄·地点"></section>';
+        host = ui.querySelector('.ssfight-home');
+      }
+    }
+    if (!host) return false;
+    const mine = ++seq;
+    destroyView();
+    await Promise.all((Array.isArray(page.bundle) ? page.bundle : [page.bundle])
+      .map((b) => SfRender.loadExtra(b)));          // 素材包按需拉（祭坛与神迹共用 homeland 那一包）
+    if (mine !== seq || host.isConnected === false) return false;
+    const view = await SfRender.mountSymbol(host, page.symbol, { frame: page.frame, label: page.title });
+    if (mine !== seq || host.isConnected === false) {
+      try { view.destroy(); } catch (e) {}
+      return false;
+    }
+    current = { key: id, page: page, view: view, container: host };
+    /* 这些弹窗页在复刻里是**静态页**（原版靠键盘选中才切某一项的帧）：交给统一的
+     * 「静态页策略」—— 子树里所有多帧元件出生即冻结，换帧重建出来的新实例自动适用，
+     * 一个例外名单都不需要（老写法那份"我要接线的元件不许钉"是 `pinFrame` 时代的补丁，
+     * 那时候冻结会和 `gotoAndStop` 打架；现在冻结只写 `playing = false`，不碰帧号）。 */
+    t.freezeDescendants(view);
+    /* 量一次布局（见 ui-main.js 里同一处的注释：经典整页 320×196，`#ui` 高度在
+     * 716.625 / 690 之间切，不重量就会"屏幕边缘失去填充"）。 */
+    try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
+    try { page.wire(view, page, host); } catch (e) { if (window.__errs) window.__errs.push('village ' + id + ': ' + e.message); }
+    return true;
+  }
+
+  /** 只摘掉当前这棵视图（不动 `current` 之外的任何东西）。 */
+  function destroyView() {
+    if (current && current.view) { try { current.view.destroy(); } catch (e) {} }
+    current = null;
+  }
+  function destroy() {
+    seq++;
+    destroyView();
+  }
+
+  window.SfVillage = {
+    /** 传地点动作名（`village-altar` …）或直接传页 id（`altar` / `miracle-record` …） */
+    open: (container, key) => openPage(key, container),
+    openPage: (id) => openPage(id),
+    destroy: destroy,
+    /** 当前场景（调试与自检用）：只有 key / 元件号 / 帧号，不会把整棵树带出来 */
+    current: () => (current ? { key: current.key, symbol: current.page.symbol, frame: current.page.frame } : null),
+    /** 当前渲染出来的那棵树（`view.byName(名字)` 寻址；探针与自检用） */
+    view: () => (current ? current.view : null),
+    PAGES: PAGES,
+    LOCATION_PAGE: LOCATION_PAGE,
+  };
+})();

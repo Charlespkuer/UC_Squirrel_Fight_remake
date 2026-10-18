@@ -8,7 +8,7 @@
 #   bash 一键同步.command status
 #   bash 一键同步.command save-push  /  save-pull
 #   bash 一键同步.command files-push /  files-pull
-#   bash 一键同步.command discover / start / stop / watch / token / autostart
+#   bash 一键同步.command discover / start / stop / watch / token / port / autostart
 HERE="$(cd "$(dirname "$0")" && pwd)" || exit 1
 # 本文件在 scripts/ 里，游戏根（有 index.html 的那层）是上一层
 ROOT=""
@@ -70,10 +70,11 @@ while true; do
   echo "  9) 后台同步服务：启动 / 停止"
   echo "  a) 开机自启：安装 / 取消"
   echo "  c) 自检（连不上先点这个：ZeroTier / 服务 / 防火墙 / 对端）"
+  echo "  p) 同步端口（两台必须一样；新版默认 18788）"
   echo "  d) 删除多余文件（镜像式）：先演练，确认后再真删"
   echo "  q) 退出"
   echo
-  printf '选一个（1-9/a/c/d/q）：'
+  printf '选一个（1-9/a/c/d/p/q）：'
   read -r choice
   case "$choice" in
     1) run "状态" node "$SYNC" status ;;
@@ -107,6 +108,17 @@ while true; do
       esac
       pause ;;
     c|C) run "自检" node "$SYNC" doctor ;;
+    p|P)
+      echo
+      echo "  同步端口：两台机器必须一样（新版默认 18788，避开 Windows 的保留段 8719-8818）。"
+      node "$SYNC" port
+      echo
+      printf '输入新端口（两台都要改；直接回车不改）：'
+      read -r newport
+      if [ -n "$newport" ]; then
+        node "$SYNC" port "$newport" && node "$SYNC" restart
+      fi
+      pause ;;
     d|D)
       echo
       echo "  镜像式删除：会把「对端没有、本机却有」的多余文件在本机删掉。"

@@ -225,6 +225,11 @@
       buffFlat: { power: 0, agility: 0, speed: 0 },
       // —— 挑战塔扩展状态 ——
       mech, mods,
+      /* 练功木桩（practice）：生命不会耗尽，打完 `practiceRounds` 次出手就收尾。
+       * 口径来自 ssfight 的 `Stakes`：它重写了 `reduceBlood` 但**不调用 checkDead**，
+       * 所以木头人不会死；这里用固定回合 + 保底 1 血复刻这个训练场景。 */
+      practice: !!f.practice,
+      practiceRounds: Math.max(0, Math.floor(Number(f.practiceRounds) || 0)),
       /* 套装收益（装备派生，独立通道；见 gamedata.js【GD6】）。 */
       setFx: f.setFx && typeof f.setFx === 'object' ? Object.assign({}, f.setFx) : null,
       // 机制的可调数值（tower-data.js 里定，题面文本与判定共用一份，避免文案/数值走偏）
@@ -764,6 +769,11 @@
     const startShell = [Math.max(0, A.shell || 0), Math.max(0, B.shell || 0)];
     const rounds = [];
     const MAX_ACTIONS = 120;
+    /* 训练木桩：固定 N 次出手（经典/现代两套播放器都共用这一条），到点就收尾；
+     * 木桩本身不会死，见 applyDamage 的 practice 分支。 */
+    const practice = A.practice ? A : (B.practice ? B : null);
+    const actionCap = practice && practice.practiceRounds > 0
+      ? Math.min(MAX_ACTIONS, practice.practiceRounds) : MAX_ACTIONS;
     let actions = 0;
 
     function pushRound(r) {
@@ -869,8 +879,11 @@
         def.shell -= absorbed; dmg -= absorbed;
         r.shellAbsorb = absorbed;
       }
-      // 装死
-      if (def.hp - dmg <= 0 && def.skills[6] && def.silence <= 0 && !def.usedFakeDie && !opts.ignoreFakeDie) {
+      /* 练功木桩：伤害照常计入 r.dmg（原版 Stakes 用 totalharm 累计原始伤害），
+       * 但生命至少保留 1，永远不走装死 / 复活 / 倒地分支。 */
+      if (def.practice && def.hp - dmg <= 0) {
+        def.hp = 1;
+      } else if (def.hp - dmg <= 0 && def.skills[6] && def.silence <= 0 && !def.usedFakeDie && !opts.ignoreFakeDie) {
         def.usedFakeDie = true;
         dmg = Math.max(0, def.hp - 1);
         def.hp = 1;
@@ -1152,6 +1165,8 @@
      *   参数 `trigger` 就是上面那四个字符串（旧代码传的是布尔，现在按语义传，规则集中在这里）。 */
     function maybeCounter(att, def, r, trigger) {
       if (trigger !== 'melee' && trigger !== 'common') return;
+      /* 练功木桩不还手：原版 `Stakes.attackBack()` 也是空函数，不能凭空反击。 */
+      if (def.practice) return;
       /* 反击：被打方用**普攻**反击。必中类近战武器也可以被反击，大榔头（2）/ 死神镰刀（15）除外
        *（调用方传 'ranged' 的那一支已经在上面被挡掉了）。 */
       if (r.fakeDie || def.hp <= 0 || att.hp <= 0) return;
@@ -1320,9 +1335,12 @@
         // 武器特效
         if (w.id === 3 && att.hp > 0) { att.swordDodge = Math.max(att.swordDodge, weaponEffect(w, 3, 3)); r.dodgeBuff = att.swordDodge; }
         if (def.hp > 0 && !r.fakeDie) {
-          if (w.id === 5) { def.debuffs.agility = Math.max(def.debuffs.agility, weaponEffect(w, 10, 2)); r.debuffText = '敏捷降低！'; }
-          if (w.id === 6) { def.debuffs.speed = Math.max(def.debuffs.speed, weaponEffect(w, 10, 2)); r.debuffText = '速度降低！'; }
-          if (w.id === 8) { def.debuffs.power = Math.max(def.debuffs.power, weaponEffect(w, 10, 1)); r.debuffText = '力量降低！'; }
+          /* `debuffStat` 是给**战斗动画**用的结构化字段（`debuffText` 是给人看的中文）：
+           * 经典战斗要在挨打方头顶飘「力/敏/速下降」那颗原版状态图标（`propty` 第 4/5/6 帧），
+           * 靠中文串匹配太脆，所以这里把"降的是哪一项"显式带出来。 */
+          if (w.id === 5) { def.debuffs.agility = Math.max(def.debuffs.agility, weaponEffect(w, 10, 2)); r.debuffText = '敏捷降低！'; r.debuffStat = 'agility'; }
+          if (w.id === 6) { def.debuffs.speed = Math.max(def.debuffs.speed, weaponEffect(w, 10, 2)); r.debuffText = '速度降低！'; r.debuffStat = 'speed'; }
+          if (w.id === 8) { def.debuffs.power = Math.max(def.debuffs.power, weaponEffect(w, 10, 1)); r.debuffText = '力量降低！'; r.debuffStat = 'power'; }
           if (w.id === 12 && chance(35)) { def.dot = { dmg: weaponEffect(w, 4, 3, 6) + trueW(w, 'dot'), rounds: 4 }; r.dotApplied = true; }
           if (w.id === 13 && chance(weaponEffect(w, 10, 3, 3) + trueW(w, 'stun'))) { def.stun = Math.max(def.stun, 1); r.stunApplied = true; }
           if (w.id === 16 && chance(weaponEffect(w, 10, 4, 4) + trueW(w, 'silence'))) { def.silence = Math.max(def.silence, 4); r.silenceApplied = true; }
@@ -1471,18 +1489,24 @@
 
     // ---- 主循环：速度行动条 ----
     let immediate = null;
-    while (A.hp > 0 && B.hp > 0 && actions < MAX_ACTIONS) {
+    while (A.hp > 0 && B.hp > 0 && actions < actionCap) {
       const followup = immediate;
       let actor = followup && followup.actor;
       immediate = null;
       if (!actor) {
-        // 先结清已满的行动条，避免高速度玩家无限抢占对方行动。
-        if (A.ap < 100 && B.ap < 100) {
-          const elapsed = Math.min((100 - A.ap) / effSpeed(A), (100 - B.ap) / effSpeed(B));
-          A.ap += elapsed * effSpeed(A); B.ap += elapsed * effSpeed(B);
+        /* 练功木桩不还手（原版 `Stakes.attack()` 是空函数）：直接让非木桩一方出手，
+         * 不让木桩靠速度条抢回合；固定回合数就是玩家的出手次数。 */
+        if (practice) {
+          actor = practice === A ? B : A;
+        } else {
+          // 先结清已满的行动条，避免高速度玩家无限抢占对方行动。
+          if (A.ap < 100 && B.ap < 100) {
+            const elapsed = Math.min((100 - A.ap) / effSpeed(A), (100 - B.ap) / effSpeed(B));
+            A.ap += elapsed * effSpeed(A); B.ap += elapsed * effSpeed(B);
+          }
+          actor = A.ap >= B.ap ? A : B;
+          actor.ap -= 100;
         }
-        actor = A.ap >= B.ap ? A : B;
-        actor.ap -= 100;
       }
       actions++;
       actor.turnId = Number(actor.turnId || 0) + 1;

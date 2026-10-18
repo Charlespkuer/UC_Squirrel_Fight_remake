@@ -46,7 +46,7 @@ function setup(seed) {
   c.State.newGame('增益总览测试');
   const S = c.State.state();
   S.level = 70;
-  for (let i = 1; i <= 18; i++) S.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) S.stages[i] = { npcIndex: 3, passed: true };
   return c;
 }
 

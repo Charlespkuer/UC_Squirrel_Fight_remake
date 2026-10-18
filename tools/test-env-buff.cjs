@@ -43,7 +43,7 @@ function setup() {
   const S = c.State.state();
   S.level = 70;
   S.props[23] = 30;
-  for (let i = 1; i <= 18; i++) S.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) S.stages[i] = { npcIndex: 3, passed: true };
   c.Tower._debugSetLayer(9);
   assert.ok(c.Tower.startEndlessRun().ok, '应该能开一局无尽塔');
   /* x0 层现在是「觐见魔王」三连战（近卫是狂战松鼠），敌人构成与旧口径不同 ——

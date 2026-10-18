@@ -179,7 +179,7 @@ test('蓝色碎片小幅降期望：除碎片竞技场外都吃同一个系数�
     'return function(){return i<q.length?q[i++]:0.5;};})()',c);
   const stage=(stageId,values)=>{
     const s=g.c.State.state();s.level=70;s.props={};
-    for(let i=1;i<=18;i++)s.stages[i]={npcIndex:3,passed:true};
+    for(let i=1;i<=36;i++)s.stages[i]={npcIndex:3,passed:true};
     s.stageRuns={};s.stageRuns[stageId]={attempt:7,npcIndex:3};
     seq(g.c,values);
     const r=g.c.State.finishStageBattle(stageId,7,true,1);

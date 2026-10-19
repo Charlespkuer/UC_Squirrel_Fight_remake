@@ -30,7 +30,7 @@
   const $ = (s, root) => (root || document).querySelector(s);
   const $$ = (s, root) => [...(root || document).querySelectorAll(s)];
   /** 滑动条的「已选 / 未选」两段配色：把百分比写进 --fill，CSS 用它切分
-   *  左（金色已选）右（浅色未选）。目前只有音乐音量在用（卖出改成点一下卖 1 个）。 */
+   *  左（金色已选）右（浅色未选）。目前只有音乐音量在用。 */
   const fillRange = (el) => {
     if (!el) return;
     const min = Number(el.min) || 0, max = Number(el.max);
@@ -55,12 +55,6 @@
   let screen = 'home', timer = 0, activePortrait = null, lastRefresh = 0;
   let catalogPage = 0, bagPage = 0, gearPage = 0;
   let selectedProp = 0;
-  /* 卖出后**自动退回上一界面（背包）**的道具（2026-10 用户口径）：天使果实(47) / 恶魔果实(48)，
-   * 以及力量/敏捷/速度转化丸（10/11/12，用户口径：和两种果实一样，卖一个就退出去）。
-   * 这几样在背包里通常是「清仓」动作；其余道具保持「点一下卖 1 个、弹窗不关、卖光为止」。
-   * ⚠️ 「退回上一级界面」= 回到**背包**（走的和弹窗左下「返回」同一条路：关弹窗 + 重绘背包），
-   * 不是回主界面 —— 早先这里错写成 home()（回主菜单），玩家会觉得「卖一个就被踢出去了」。 */
-  const SELL_LEAVE_IDS = [47, 48, 10, 11, 12];
   /* 图集图标的一级子目录：images/ui/icons/<dir>/<kind>-<id>.png（与磁盘结构一一对应）。 */
   const ICON_DIRS = { gear: 'gear', weapon: 'weapon', skill: 'skill', prop: 'prop' };
   const selectedItems = {weapon:0,skill:0};
@@ -366,7 +360,6 @@
     if (opts.cells) nodes.push(...$$('.catalog-cell:not(.empty-slot)', root));
     if (opts.footer) nodes.push(...$$('.page-footer .uc-button', root));
     if (opts.arrows) nodes.push(...$$('.page-arrow .uc-button', root));
-    nodes.push(...$$('.bag-actions .uc-button', root));
     const f = window.SfUiFeedback;
     if (!f) return;
     for (const n of nodes) {
@@ -729,7 +722,10 @@
       $('#ui').innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠状态"></section>';
       const box = $('#ui .ssfight-home');
       if (box) {
-        SfStatus.open(box).catch((e) => {
+        SfStatus.open(box).then(() => {
+          /* 新手引导 f14→f15：状态页挂好了才通知（f15 的两个金环要贴页签）。 */
+          if (window.SfGuide) { try { SfGuide.onPage('status'); } catch (e) {} }
+        }).catch((e) => {
           if (window.__errs) window.__errs.push('SfStatus: ' + (e && e.message));
           openStatusDom();
         });
@@ -1158,7 +1154,7 @@
     modal('关卡战果','<div class="result-box"><div class="result-title '+(rw.win?'win':'lose')+'">'+(rw.win?'胜 利！':'再接再厉')+'</div>'+reward+'<p>'+esc(message)+'</p>'+drop+gemDrop+goldBuffNote+stageUpsHtml(rw.ups)+'</div>',buttons);
   }
   /* ============================================================
-   * 【UC10】背包与道具（含出售/果实三选一）
+   * 【UC10】背包/商店/兑换（点击物品开二级窗；卖出入口已移除）
    * ============================================================ */
   /* 道具页三颗页签的原版矢量图
    * ------------------------------------------------------------
@@ -1251,21 +1247,36 @@
      * 不是 `S.props`，所以这里用 `State.bagCountOf` 读同一个真值来源（2026-10 用户口径）。 */
     const bagCount=(id)=>State.bagCountOf?State.bagCountOf(id):(S.props[id]||0);
     const bagHas=(id)=>bagCount(id)>0;
-    propMap.each((id,v)=>{if(exchange?[24,25,26,45,46,51].includes(+id):shop?v.buy==='true':(bagHas(+id)))items.push({...v,id:+id});});
-    items.sort((a,b)=>a.id-b.id);
-    const total=Math.max(1,Math.ceil(items.length/6));bagPage=Math.min(bagPage,total-1);
+    /* 兑换页两页：第 1 页是原有兑换物，第 2 页全部是宝石合成（每格一种宝石）。 */
+    const EXCHANGE_IDS = [24, 25, 26, 45, 46, 51];
+    const EXCHANGE_GEMS = [101, 102, 103, 104, 105, 106];
+    if (exchange) {
+      bagPage = Math.min(Math.max(0, Number(bagPage) || 0), 1);
+      for (const id of EXCHANGE_IDS.concat(EXCHANGE_GEMS)) {
+        const v = propMap.getValue(id);
+        if (v) items.push({ ...v, id: +id });
+      }
+    } else {
+      propMap.each((id,v)=>{if(shop?v.buy==='true':(bagHas(+id)))items.push({...v,id:+id});});
+      items.sort((a,b)=>a.id-b.id);
+    }
+    const total=exchange?2:Math.max(1,Math.ceil(items.length/6));bagPage=Math.min(bagPage,total-1);
     const shown=items.slice(bagPage*6,bagPage*6+6);
     if(!shown.some(it=>it.id===selectedProp))selectedProp=shown[0]?.id||0;
     function detailMarkup(it) {
       if (!it) return '<h3>背包</h3><div class="bag-description">背包空空的，去商店看看吧！</div>';
       const status=shop?State.purchaseStatus(it.id):null;
-      const sellPrice=!shop?State.propSellPrice(it.id):0;
-      const mainLabel=shop?(status.remaining?'购买':'今日售罄'):([24,25,26,45,46,51].includes(it.id)||State.gemLevel(it.id))?'合成':it.id===37?'分配属性':it.useType==='1'?'使用':'查看';
-      /* 卖出仍只在背包一级页，左卖出、右使用/合成；这里只更新选择展示。 */
-      const bagActions='<div class="bag-actions">'+
-        (sellPrice&&bagCount(it.id)>0?btn('卖出','prop-sell','small'):'')+
-        btn(mainLabel,'prop-action','small gold')+'</div>';
-      return '<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+(shop?'售价 '+goldPrice(it.price)+'<br>今日剩余 '+status.remaining+'/'+status.limit:'拥有 '+bagCount(it.id)+' 个'+(State.isBagCurrencyProp&&State.isBagCurrencyProp(it.id)?'（货币，天梯赛获得；不能卖也不能使用）':sellPrice?'　可回收 '+goldPrice(sellPrice)+'/个':''))+'</div>'+bagActions;
+      const meta=shop
+        ? '售价 '+goldPrice(it.price)+'<br>今日剩余 '+status.remaining+'/'+status.limit
+        : '拥有 '+bagCount(it.id)+' 个'+(State.isBagCurrencyProp&&State.isBagCurrencyProp(it.id)?'（货币，天梯赛获得；不能卖也不能使用）':'');
+      /* 现代模式保留背包售卖；经典模式仍走原版 4886 f1 弹窗（不显示这颗键）。
+       * 一次卖 1 个，避免手滑清仓；卖完重绘背包。 */
+      const sellPrice = !shop && !exchange && currentUiMode() !== 'classic' && State.propSellPrice
+        ? State.propSellPrice(it.id) : 0;
+      const sell = sellPrice > 0 && bagCount(it.id) > 0
+        ? '<button type="button" class="uc-button small gold" data-sell-prop="' + it.id + '">卖出 +' + sellPrice + '</button>'
+        : '';
+      return '<h3>'+esc(it.name)+'</h3><div class="bag-description">'+esc(it.remark||'')+'</div><div class="bag-item-meta">'+meta+'</div>'+sell;
     }
     const info=detailMarkup(shown.find(it=>it.id===selectedProp));
     const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+bagCount(it.id)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?goldPrice(it.price,esc(it.name)):bagCount(it.id))+'</span></button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
@@ -1284,15 +1295,16 @@
       openProp(id, mode);
     }
     function wireDetail() {
-      const selected=shown.find(it=>it.id===selectedProp);
-      const status=shop&&selected?State.purchaseStatus(selected.id):null;
-      const use=$('[data-action="prop-action"]',p),sell=$('[data-action="prop-sell"]',p);
-      if (use) {
-        use.disabled=!!(status&&!status.remaining);
-        use.onclick=()=>popTap(use,()=>openPropEntry(selectedProp),true);
-      }
-      if (sell) sell.onclick=()=>popTap(sell,()=>sellDialog(selectedProp,()=>openBag(mode,bagPage)),true);
       wirePopTaps(p, {});
+      const sell = $('[data-sell-prop]', p);
+      if (sell) {
+        sell.onclick = () => {
+          const id = Number(sell.dataset.sellProp);
+          const r = State.sellProp(id, 1);
+          toast(r.msg);
+          if (r.ok) openBag(mode, bagPage);
+        };
+      }
     }
     function selectProp(id) {
       if (!p.isConnected || !shown.some(it=>it.id===id)) return;
@@ -1307,18 +1319,13 @@
       $('.bag-detail',p).innerHTML=detailMarkup(shown.find(it=>it.id===id));
       wireDetail();
     }
-    let clickedProp=null;
     $$('[data-prop]',p).forEach(b=>{
+      /* 经典背包/商店/兑换：鼠标移到哪一格，哪一格立刻变绿并同步右侧说明；
+       * 单击就直接打开二级窗口（不再需要“第一下选中、第二下打开”）。 */
+      b.addEventListener('pointerenter',()=>selectProp(+b.dataset.prop));
       b.onclick=()=>{
         const id=+b.dataset.prop;
-        const choose=()=>{
-          /* 经典背包/商店：第一下只选中（绿框），同一格再点一下才进详情。
-           * 默认高亮的第一格也要先点一下"确认选中"，第二下才进详情。
-           * 现代模式保持原来的单击选择口径。 */
-          if(currentUiMode()==='classic' && selectedProp===id && clickedProp===id){ openPropEntry(id); return; }
-          selectProp(id);
-          clickedProp=id;
-        };
+        const choose=()=>{ selectProp(id); openPropEntry(id); };
         if(window.SfUiFeedback)SfUiFeedback.tap(b,choose,{delay:0,press:false});
         else choose();
       };
@@ -1352,14 +1359,158 @@
       { label: '取消', cls: 'muted' },
     ], { small: true });
   }
+  /** 经典背包「使用」：原版 4886 f1 弹窗，业务仍走 State.useProp / SfGuide / openBag。
+   *  · 「使用」在右、「取消」在左（与 ssfight 原版相反，用户 2026-10 口径）；
+   *  · 素材挂载失败时回退到原来那套 DOM 详情弹窗，不能因为 UI 包缺失就打不开道具；
+   *  · 大小体力药剂成功后可继续点（原版 stayOpen 口径），其余成功关闭并回背包。 */
+  function openClassicUseProp(id, base, mode, backMode) {
+    let handle = null;
+    let using = false;
+    let stale = false;
+    /** 素材失败时才回退 DOM；用户已经离开背包 / 又被另一个道具弹窗替代时不要回退，
+     *  否则异步回来会把 DOM 弹窗盖到后来进入的页面上（经典页生命周期的老坑）。 */
+    const canFallback = () => {
+      const page = document.querySelector('.classic-page[data-screen="bag"]');
+      return !!(!stale && page && page.isConnected && !(window.SfPropUse && SfPropUse.active())
+        && UI.currentUiMode && UI.currentUiMode() === 'classic');
+    };
+    const fallback = () => { if (canFallback()) openProp(id, mode, { forceDom: true }); };
+    const useOne = () => {
+      if (using || !handle) return;
+      using = true;
+      let r = null;
+      try { r = State.useProp(id); }
+      catch (e) {
+        using = false;
+        if (window.__errs) window.__errs.push('prop use: ' + (e && e.message));
+        toast('使用失败');
+        return;
+      }
+      using = false;
+      if (!r) return;
+      if (!r.ok && r.needsFruitChoice) { handle.close(); fruitChoiceDialog(r); return; }
+      /* 新手引导 f8→f9：成功提示由引导接管（关详情 → 弹「提示」→ 页 9）。 */
+      if (window.SfGuide && SfGuide.onPropUsed && SfGuide.onPropUsed(id, base.name, r, handle)) return;
+      if (!r.ok) { toast(r.msg || '使用失败'); return; }
+      toast(r.msg || (r.gear ? '使用成功：' + r.gear.name : '使用成功'));
+      if (id === 1 || id === 2) {
+        try { handle.sync(); } catch (e) {}
+        try { refreshHeader(); } catch (e) {}
+        return;
+      }
+      handle.close();
+      openBag(backMode, bagPage);
+    };
+    SfPropUse.open(id, {
+      onUse: useOne,
+      onCancel: () => openBag(backMode, bagPage),
+      onStale: () => { stale = true; },
+    }).then((h) => {
+      if (!h) { fallback(); return; }
+      handle = h;
+      /* 原版 doMission(7) 的 seeProp：详情一开出来就告诉引导。 */
+      if (window.SfGuide && SfGuide.onPropDetail) {
+        try { SfGuide.onPropDetail(id, mode); } catch (e) {}
+      }
+    }).catch((e) => {
+      if (window.__errs) window.__errs.push('prop use open: ' + (e && e.message));
+      fallback();
+    });
+  }
+  /** 经典商店购买窗（4886 f2）。素材失败时回退到原来的 DOM 详情，不能让商品点不开。 */
+  function openClassicBuyProp(id, base, mode, backMode) {
+    const pageAtOpen = document.querySelector('.classic-page[data-screen="shop"]');
+    const status = State.purchaseStatus(id);
+    let stale = false;
+    SfPropUse.openBuy(id, {
+      desc: base.remark || '',
+      stock: status.remaining,
+      max: Math.max(1, Math.min(50, status.remaining || 1)),
+      onBuy: (qty, h) => {
+        const r = State.buyProp(id, qty);
+        if (!r.ok) {
+          toast(r.msg);
+          if (h && h.setReason) h.setReason(r.msg);
+          return false;
+        }
+        toast(r.msg);
+        refreshHeader();
+        /* 用户 2026-10 口径：每日可买多件的商品，买一件后**留在购买窗**继续买；
+         * 只有点「取消」才回商店。限购 1 件的商品仍按原逻辑买完关窗。 */
+        const next = State.purchaseStatus(id);
+        if (h && h.sync) h.sync({ stock: next.remaining });
+        if (next.remaining <= 0 && h && h.setReason) h.setReason('今日已经卖完了，明天再来。');
+        return status.limit <= 1;
+      },
+      onClose: () => {
+        if (!stale && pageAtOpen && pageAtOpen.isConnected && pageAtOpen.dataset.screen === 'shop') openBag(true, bagPage);
+      },
+      onStale: () => { stale = true; },
+    }).then((h) => {
+      if (h) {
+        if (window.SfGuide && SfGuide.onPropDetail) {
+          try { SfGuide.onPropDetail(id, mode); } catch (e) {}
+        }
+        return;
+      }
+      /* 素材没挂出来，或玩家已经离开商店：只有还停在原商店页时才回退 DOM。 */
+      if (!stale && pageAtOpen && pageAtOpen.isConnected && pageAtOpen.dataset.screen === 'shop') {
+        openProp(id, mode, { forceDom: true });
+      }
+    }).catch((e) => {
+      if (window.__errs) window.__errs.push('shop buy window: ' + (e && e.message));
+      if (!stale && pageAtOpen && pageAtOpen.isConnected && pageAtOpen.dataset.screen === 'shop') {
+        openProp(id, mode, { forceDom: true });
+      }
+    });
+  }
+  /** 不可使用道具的详情（卷轴/挑战书/英雄帖/勇气徽章/抽奖卷等）：4886 f1 原版窗 + 矢量图标。 */
+  function openClassicInfoProp(id, base, mode, backMode) {
+    const pageAtOpen = document.querySelector('.classic-page');
+    let stale = false;
+    SfPropUse.openInfo(id, {
+      onClose: () => {
+        if (!stale && pageAtOpen && pageAtOpen.isConnected) openBag(backMode, bagPage);
+      },
+    }).then((h) => {
+      if (!h && !stale && pageAtOpen && pageAtOpen.isConnected) openProp(id, mode, { forceDom: true });
+    }).catch((e) => {
+      if (window.__errs) window.__errs.push('prop info window: ' + (e && e.message));
+      if (!stale && pageAtOpen && pageAtOpen.isConnected) openProp(id, mode, { forceDom: true });
+    });
+  }
   /** mode：true=商店（购买）/'exchange'=兑换页/其它=背包（使用·合成）。 */
-  function openProp(id,mode) {
+  function openProp(id,mode,opts) {
+    opts=opts||{};
     const shop=mode===true,exchange=mode==='exchange';
     const backMode=shop?true:exchange?'exchange':false;   // 返回时回到来的那一页
     const base=propMap.getValue(id),S=State.state();
     if(!base)return;
+    /* 经典商店：原版 `showBuyPropWin` 挂的是「道具1」4886 第 2 帧（购买窗），
+     * 不是复刻自绘的 DOM 详情。购买数量由箭头调整，购买/取消走原版两颗键。
+     * 金宝箱/魔法袋在商店里也走这个购买窗；它们在背包里才走开箱说明。 */
+    if(shop && !opts.forceDom && window.SfPropUse && SfPropUse.openBuy
+        && UI.currentUiMode && UI.currentUiMode()==='classic') {
+      openClassicBuyProp(id, base, mode, backMode);
+      return;
+    }
     if(id===79||id===90){ openChestDetail(id,shop); return; }
     const isFragment=[24,25,26].includes(id),isConvertShard=id===GData.CONVERT_SHARD_ID,isSeed=[45,46].includes(id),isGem=State.gemLevel(id)>0,canUse=base.useType==='1';
+    /* 经典背包的 useType 1 道具：改用原版「道具1」4886 f1 的 SVG 弹窗，
+     * 不再画手搓 DOM 详情（商店 / 兑换页保持原样）。素材挂载失败时
+     * `openClassicUseProp` 会以 forceDom 回退到下面这套 DOM 弹窗。 */
+    if (!shop && !exchange && canUse && !opts.forceDom && window.SfPropUse
+        && UI.currentUiMode && UI.currentUiMode() === 'classic') {
+      openClassicUseProp(id, base, mode, backMode);
+      return;
+    }
+    /* 不可使用、也不可合成/镶嵌的道具：原版详情窗（4886 f1）而不是复刻自绘面板。 */
+    const infoOnly = !shop && !canUse && !isFragment && !isSeed && !isConvertShard && !isGem && id !== 37;
+    if (infoOnly && !opts.forceDom && window.SfPropUse && SfPropUse.openInfo
+        && UI.currentUiMode && UI.currentUiMode() === 'classic') {
+      openClassicInfoProp(id, base, mode, backMode);
+      return;
+    }
     const status=shop?State.purchaseStatus(id):null;
     // 天使/恶魔果实种子：只提示武技是否已满，不阻止合成 ——
     // 已满时合成的天使果实仍然可以留着，等有空位再用。
@@ -1436,6 +1587,9 @@
         :isGem?State.mergeGems(id)
         :State.useProp(id);
       if(!r.ok&&r.needsFruitChoice){m.close();fruitChoiceDialog(r);return;}
+      /* 新手引导 f8→f9：原版 useProp 成功会 `showTips(4,0,"使用X成功。")+viewNextMission()`
+       *（:1519），教程期间由引导接管这条提示（f9 的金环贴提示窗的「确定」）。 */
+      if(!shop&&window.SfGuide&&SfGuide.onPropUsed&&SfGuide.onPropUsed(id,base.name,r,m))return;
       toast(r.msg||(r.gear?'合成成功：'+r.gear.name:'操作完成'));
       if(!r.ok)return;
       if(keepOpen){syncLive();return;}
@@ -1445,10 +1599,12 @@
     };
     const buttons=[];
     // 需要连点的（药剂/碎片/商店非限购品）设 close:false，点完不关弹窗。
-    // 注意：卖出只在背包一级界面提供，这个二级弹窗里没有卖出按钮（商店更没有）。
     if(label)buttons.push({label,close:!keepOpen,run:useOne});
     buttons.push({label:'返回',cls:'muted',run:()=>openBag(backMode,bagPage)});
     const m=modal(shop?'道具商店':'道具详情',content,buttons,{small:true});
+    /* 新手引导 f8：详情弹窗一开出来就告诉引导（原版 doMission(7) 的 seeProp）；
+     * 商店 / 兑换页的详情不参与教程。 */
+    if (window.SfGuide && SfGuide.onPropDetail) { try { SfGuide.onPropDetail(id, mode); } catch (e) {} }
     /** 只更新弹窗里的实时数字与按钮状态（不重建弹窗，避免界面跳动）。 */
     function syncLive(){
       const now=State.state();
@@ -1469,63 +1625,9 @@
       const main=$('[data-action="0"]',m.element);
       if(main){main.disabled=!!reason;if(label)main.textContent=label;}
       if(shop&&!status.remaining)main.disabled=true;
-      // 卖光之后「卖出」不能再点
-      const sellBtn=$$('.modal-buttons button',m.element).find(b=>b.textContent.trim()==='卖出');
-      if(sellBtn)sellBtn.disabled=(now.props[id]||0)<1;
       refreshHeader();
     }
     syncLive();
-  }
-  /** 卖出道具：与「使用」同一套交互的弹窗。
-   *  · 左下「返回」→ 回到背包（并把背包按最新数量重绘）
-   *  · 右下「卖出」→ **卖 1 个**，弹窗不关、数字实时刷新，可以一直点；卖光后按钮禁用
-   *  没有滑动条、不选数量、也不会自己退出。 */
-  /** 卖出：与「使用」同一套交互 —— 点「卖出」打开卖出弹窗
-   *（左下「返回」/ 右下「卖出」），在弹窗里点一下卖 1 个、弹窗不关，卖光为止。
-   *  **例外（2026-10 用户口径）**：天使果实（47）/ 恶魔果实（48）/ 力·敏·速转化丸（10/11/12）
-   * 卖出一个就自动退回上一界面 = **背包**（关掉弹窗 + 把背包重绘到最新数量，与左下「返回」同一条路）。
-   * 这里**不能**调 home()：那是回主界面，玩家会觉得「点一下卖出去就被踢出背包了」。其它道具保持原样。 */
-  function sellDialog(id,after) {
-    const S=State.state(),price=State.propSellPrice(id),def=propMap.getValue(id);
-    /* 持有量的唯一读数口：货币类（金杯 40）在货币字段 `S.goldCup` 上，其余在 `S.props` 上，
-     * 统一走 State.bagCountOf（旧版 State 没有它就退回 props）。
-     * ⚠️ 别写成裸的 `bagCountOf(...)` —— classic-ui 里没有这个全局，点「卖出」会在第一行
-     * 直接抛 ReferenceError，**所有道具都卖不掉**（2026-10：敏捷/速度转化丸卖不出去就是这个）。 */
-    const heldOf=(pid)=>State.bagCountOf?State.bagCountOf(pid):((State.state().props||{})[pid]||0);
-    const held0=heldOf(id);
-    if(!price||held0<1){toast('背包里没有可卖的道具');return;}
-    const name=def?def.name:'道具';
-    const content='<div class="detail-summary"><span class="item-icon">'+icon('prop',id)+'</span><div>'+
-      '<h3 class="detail-name">'+esc(name)+'</h3>'+
-      '<div class="detail-description">每个可回收 '+price+' 金松果。</div>'+
-      '<div class="small-label">拥有 <b data-live="sell-held">'+held0+'</b> 个　金松果：<b data-live="sell-gold">'+S.goldPoint+'</b></div>'+
-      '</div></div>';
-    const m=modal('卖出道具',content,[
-      {label:'返回',cls:'muted',run:()=>{m.close();if(after)after();}},
-      {label:'卖出',cls:'gold',primary:true,close:false,run:()=>{
-        const r=State.sellProp(id,1);
-        toast(r.msg||'操作完成');
-        /* 天使果实 / 恶魔果实 / 力·敏·速转化丸：卖一个就退回**背包**（这几样通常是「清仓」动作，
-         * 不必留在弹窗里连点）—— 走 SELL_LEAVE_IDS；返回动作与左下「返回」完全一致（重绘背包、留原页码）。 */
-        if(r.ok&&SELL_LEAVE_IDS.includes(id)){m.close();if(after)after();return;}
-        sync();
-        if(!r.ok)after&&after();
-      }},
-    ],{small:true});
-    const sellBtn=()=>Array.prototype.slice.call(m.element.querySelectorAll('.modal-buttons button'))
-      .find((b)=>b.textContent.trim()==='卖出');
-    /** 只更新弹窗里的实时数字与按钮状态（不重建弹窗，避免界面跳动）。 */
-    function sync(){
-      const now=State.state(),held=heldOf(id);
-      const set=(key,value)=>{const el=$('[data-live="'+key+'"]',m.element);if(el)el.textContent=value;};
-      set('sell-held',held);set('sell-gold',now.goldPoint);
-      /* 卖光之后只把按钮置灰即可（不再显示提示文案）。 */
-      const b=sellBtn();if(b)b.disabled=held<1;
-    }
-    /* 右上角的 × 也能关弹窗 —— 关掉之后同样要把背包刷新到最新数量。 */
-    const closeBtn=$('.modal-close',m.element);
-    if(closeBtn){const prev=closeBtn.onclick;closeBtn.onclick=(e)=>{if(prev)prev.call(closeBtn,e);if(after)after();};}
-    sync();
   }
   /* 天使果实 / 恶魔果实：随机三选一（天使=学会一个，恶魔=遗忘一个）。
    * 候选由 State.fruitOptions 抽好，这里只负责展示与回传选择。 */
@@ -2986,6 +3088,8 @@
    *  ⚠ 幻兽与征战那两页的**功能**还没接（复刻没有召唤兽 / 征战令这两套数据），
    *    页面上会有一条说明；非经典模式仍走下面这几条老路由。 */
   function openVillageScene(key, fallbackAction) {
+    /* 新手引导：点地点就是完成当前村庄步骤（f17/f19/f20/f26 对应的 nowPage），先通知再切页。 */
+    if (window.SfGuide) { try { SfGuide.onPage(key); } catch (e) {} }
     if (currentUiMode() === 'classic' && window.SfVillage) {
       $('#ui').innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠村庄·' + key + '"></section>';
       const box = $('#ui .ssfight-home');
@@ -3070,7 +3174,7 @@
       lines.push('每日抽奖：' + mine.map((p) => p.label).join('、') + '，占 ' + mine.length + '/10 格，单次抽中概率 ' + mine.length * 10 + '%，期望 ' + expect.toFixed(1) + ' 个/次（每天免费 1 次，之后 20 金松果/次）');
     }
     if ([24, 25, 26].includes(id)) lines.push('关卡掉落：' + ({ 24: '螳螂关', 25: '仙鹤关', 26: '熊猫关' })[id] + '每场胜利 45%～60%（按星级）概率掉落 1～6 个，期望约 1.6～2.1 个/场；★3-4 有 28% 几率越 1 级、★5-6 越 2 级');
-    if (id === 23) lines.push('每日礼包：每天 1 个（连续登录天数越多金松果越多，第 7 天多 1 本挑战书）');
+    if (id === 23) lines.push('每日礼包：每天 1 个（连续登录第 1 天 100 金松果，每多一天 +10，150 封顶；第 7 天多 1 本挑战书）');
     if (id === 28) lines.push('创建角色时获得 1 个');
     if (id === 29) lines.push('打开「1级礼包」获得');
     if (id === 30) lines.push('打开「5级礼包」获得');
@@ -3205,7 +3309,7 @@
     const body = '<div class="support-box">' +
       '<p class="support-lead">' + esc(lead) + '</p>' +
       '<p>如果它让你找回了一点当年的感觉，可以<b>自愿</b>请作者喝杯咖啡；' +
-      '不打赏完全不影响游戏内容与平衡，也不解锁任何东西。</p>' +
+      '不打赏完全不影响游戏内容与平衡，也不解锁任何东西。bug反馈与内容讨论请加q群：1128710765</p>' +
       '<p class="support-link">' + esc(meta.label) + '：<span class="support-url">' + esc(meta.url) + '</span></p>' +
       '</div>';
     return modal('支持作者', body, [
@@ -3229,7 +3333,7 @@
     const meta = supportMeta();
     return '<div class="support-panel">' +
       '<div class="support-panel-text"><h3 class="classic-section-title">关于复刻版</h3>' +
-      '<span><b>喜欢这个复刻版？</b>游戏完全免费、没有内购；如果它让你找回了一点当年的感觉，可以自愿支持作者（不影响任何游戏内容）。</span></div>' +
+      '<span><b>喜欢这个复刻版？</b>如果它让你找回了一点当年的感觉，可以自愿支持作者（不影响任何游戏内容）。bug反馈与内容讨论请加q群：1128710765</span></div>' +
       '<button type="button" class="uc-button gold support-btn" data-action="support" title="用系统浏览器打开' +
       esc(meta.label) + '">支持作者</button></div>';
   }
@@ -3304,7 +3408,7 @@
     const body = '<p>经典界面和现代界面使用<b>两套独立存档</b>，玩家进度不互通。</p>' +
       '<p>切换后会载入「' + esc(label) + '」界面的独立进度' +
       (has ? '。' : '；该界面还没有存档，会新建一个 1 级角色。') + '</p>' +
-      '<p class="small-label">当前界面的进度会先保存；以后切回来还能继续。</p>' +
+      '<p class="small-label">当前界面的进度会先保存；以后切回来还能继续。在现代界面中支持使用debug面板。</p>' +
       (m === 'classic' ? '<p class="small-label"><b>注意：</b>切到经典界面后，调试模式的入口会消失；需要调试请切回现代界面。</p>' : '');
     modal('切换界面模式', body, [
       { label: '取消', cls: 'muted' },

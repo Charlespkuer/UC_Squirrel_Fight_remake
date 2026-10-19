@@ -96,18 +96,26 @@
     /* 顶部只留返回键；塔名/层数在页面内容里，不再额外压一行标题。 */
     return '<div class="classic-tower-bar">' + b + '</div>';
   }
-  /** 经典无尽塔的背景随层数从村庄绿慢慢压到 100 层的暗红。 */
+  /** 经典塔页背景：**纯色**。
+   *  · 挑战塔固定村庄绿；
+   *  · 无尽塔随层数从村庄绿慢慢压到 100 层的暗红，每 100 层重制（101 层回绿）。 */
   function classicTowerBackground(mode, layer) {
-    if (!classicTower() || mode !== 'endless') return null;
+    if (!classicTower()) return null;
+    if (mode !== 'endless') return { color: '#4c7c50', t: 0 };
     /* 每 100 层重制：100 层暗红，101 层回到绿色，200 层再暗红。 */
     const cycle = ((Math.max(1, Number(layer) || 1) - 1) % 100) + 1;
     const t = Math.max(0, Math.min(1, (cycle - 1) / 99));
     const mix = (a, b) => Math.round(a + (b - a) * t);
     return {
-      top: 'rgb(' + mix(76, 67) + ',' + mix(124, 8) + ',' + mix(80, 8) + ')',
-      bottom: 'rgb(' + mix(37, 17) + ',' + mix(69, 3) + ',' + mix(46, 3) + ')',
+      color: 'rgb(' + mix(76, 67) + ',' + mix(124, 8) + ',' + mix(80, 8) + ')',
       t: t,
     };
+  }
+  /** 把当前页的背景色写到 `--tower-bg`（CSS 只用这一个变量，别再加渐变端点）。 */
+  function applyClassicTowerBg(p, mode, layer) {
+    if (!p || !p.style) return;
+    const bg = classicTowerBackground(mode, layer);
+    if (bg) p.style.setProperty('--tower-bg', bg.color);
   }
 
   /* 附魔（不占位）的排前面：判据是**这一条栏位自己的** `slotFree`。
@@ -973,9 +981,12 @@
          * 用户要求去掉。信息没丢：挑战书数量在下面那颗「现有挑战书 N 张」、
          * 环境与三侠削弱各有一块自己的面板/预告、目标等级与连战场数在标题右边的 tower-stats 里。
          * 别再往这一屏加规则文字。 */
-        /* 开打前就让人看清「这一层会碰上什么」：环境池（挑战塔口径）+ 三侠大招会留下什么。 */
+        /* 开打前就让人看清「这一层会碰上什么」：环境池（挑战塔口径）+ 三侠大招会留下什么。
+         * 预告用 `horizontal` 变体：经典外壳里它是**横向一排**（用户口径 2026-10-19，
+         * 原来被 classic-refine.css 的经典覆盖压成了 1×4 纵向卡片）；
+         * 卡片本体沿用 tower.css 的默认样式（立绘在上、名字/类型在下），见那边的 `:not(.horizontal)` 排除。 */
         envPreviewHtml(info.nextLayer) + heroDebuffPreviewHtml() +
-        '<h4 class="tower-plan-title">本层对手预告</h4>' + planHtml(info.preview);
+        '<h4 class="tower-plan-title">本层对手预告</h4>' + planHtml(info.preview, ' horizontal');
       footer = '<div class="tower-actions tower-footer">' +
         '<span class="tower-book-count">现有挑战书 ' + info.books + ' 张</span>' +
         /* 【2026-10 用户口径】按钮文案就是「开始挑战」，不再缀「（挑战书×1）」——
@@ -992,6 +1003,8 @@
     bindTips(p);
     if (!info.run) { fillFoeArt(p, info.preview); fillClassicFoeArt(p, info.preview); }
     back(p, towerBack, ct ? '返回征战' : '返回');
+    /* 挑战塔是固定纯色（无尽塔才按层变色）。 */
+    if (ct) applyClassicTowerBg(p, 'tower', info.run ? info.run.layer : info.nextLayer);
     on(p, 'fight', () => {
       if (info.run) {
         if (info.run.choices) { offerChoice('tower', info.run.choices); return; }
@@ -1266,7 +1279,7 @@
     bindTips(p);
     if (info.run) { const pv = Tower.planInfo ? Tower.planInfo('endless') : Tower.preview(info.run.layer, info.run.salt, true); fillFoeArt(p, pv); fillClassicFoeArt(p, pv); }
     back(p, towerBack, ct ? '返回征战' : '返回');
-    if (ct) { const bg = classicTowerBackground('endless', info.run ? info.run.layer : 1); if (bg) { p.style.setProperty('--tower-bg-top', bg.top); p.style.setProperty('--tower-bg-bottom', bg.bottom); } }
+    if (ct) applyClassicTowerBg(p, 'endless', info.run ? info.run.layer : 1);
     /* 【2026-10 用户口径】剧情屏**没有「继续」按钮了**：点屏幕任意位置推进
      *（语义就是 `TowerPlot.next()` —— 正在打字时点一下＝立刻补完这一行，打完了再点＝下一行）。
      * `TowerPlot.showing()` 同时覆盖「剧情屏」与「停留一下」的提示屏（第一次失去烙印）。
@@ -2081,6 +2094,8 @@
       right: '<span class="footer-right">' + C().btn(revisit || shop.rest ? '返回' : '继续挑战', 'leave', 'gold') + '</span>',
     }, ct ? { noTabs: true, pageClass: 'classic-tower', homeLabel: '返回无尽塔' } : {}));
     back(p, () => openEndless(), '返回无尽塔');
+    /* 商店是无尽塔里的二级页：底色调跟着本层走，别在纯色塔页里突然露出村庄底图。 */
+    if (ct) applyClassicTowerBg(p, 'endless', shop.layer);
     shop.slots.forEach((s, i) => on(p, 'buy' + i, () => {
       const r = Tower.buyShopSlot(i);
       if (r && r.needsReplace) { offerShopReplace(i, r.buff); return; }
@@ -2257,6 +2272,7 @@
      * 想好了再进来买/换/刷新都行。真正让这家店消失的只有三件事：
      * 完成一次购买、完成一次交换、或者点这里的「继续战斗」。 */
     back(p, () => openEndless(), '返回无尽塔');
+    if (ct) applyClassicTowerBg(p, 'endless', shop.layer);
     if (shop.boundary) bindShopSettle(p);
     shop.slots.forEach((s, i) => on(p, 'mintbuy' + i, () => {
       const r = Tower.buyMintSlot(i);

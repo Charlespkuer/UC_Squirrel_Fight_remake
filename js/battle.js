@@ -513,6 +513,18 @@
         else await wait(500);
         return;
       }
+      /* 幻兽协战：现代 canvas 播放器没有 32 只幻兽的原版动画，只把数值/技能名飘出来，
+       * 保证 Sim 新增的 `action:'pet'` 不会掉进下面的普攻分支被当成松鼠出手。 */
+      if (r.action === 'pet') {
+        applyHp(r);
+        if (r.dmg) floater(def, '-' + r.dmg, 'y');
+        if (r.healSelf) floater(att, '+' + r.healSelf, 'g');
+        if (r.dodgeHeal) floater(def, '+' + r.dodgeHeal, 'g');
+        if (r.fakeDie) floater(Number(r.fakeDieSide == null ? def : r.fakeDieSide), '装死', 'y');
+        if (r.noteText) floater(att, r.noteText, 'y');
+        await wait(760);
+        return;
+      }
       let name, fx, weaponLabel = null;
       if (f.npc) {
         name = npcAnim(f.npc, r.action === 'skill' ? 'skill' : 'common');
@@ -531,7 +543,7 @@
       function impact() {
         if (didHit || aborted()) return;
         didHit = true; applyHp(r, true, beforeHp);
-        if (r.dodge) { floater(def, '闪避', 'y', true); defending = reaction(def, r); }
+        if (r.dodge) { floater(def, '闪避', 'y', true); if (r.dodgeHeal) floater(def, '+' + r.dodgeHeal, 'g'); defending = reaction(def, r); }
         else if (r.noDmg) {
           if (r.healSelf) floater(att, '+' + r.healSelf, 'g');
           if (r.buffUp) floater(att, '属性提升', 'g');

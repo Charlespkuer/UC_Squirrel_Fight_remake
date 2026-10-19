@@ -546,6 +546,8 @@
     if (p && clip.setSymbol) {
       if (clip.g && clip.g.setAttribute) clip.g.setAttribute('slot', String(clip.tag.id));
       clip.setSymbol(p.symbol, p.frame, 1, 'topleft', '');
+      clip.__gearSlot = true;
+      if (fighter && live && live.strip && live.strip[Number(fighter.side)]) setGearClipHidden(clip, true);
     }
   }
 
@@ -561,9 +563,9 @@
    *   2 = 武器攻击 → 近战第 2 帧 / 投掷第 3 帧
    *   3 = **技能**   → 按 `weaponSkillId` 进 switch（**只有 8/12/13/14/15/17/18/23 这 8 个**）
    *   4 = **幻兽/召唤** → 第 `29 + id` 帧（`attacks.attack.allPets…`）
-   * 复刻**没有引入幻兽**，所以第 4 档一次都不能走 —— 2026-11 用户口径："战斗中我观察到我方大量
-   * 使用了幻兽，这部分我还没有正式引入，说明你的武器和技能调用出了很大的问题"。当时就是把
-   * 所有 `action == 'skill'` 都塞进了第 4 档（`29 + id`），于是每个技能都在放召唤动画。
+   * 第 4 档**只在 `action:'pet'` 时走**（见 `PET_ATTACK_ACTS`）；技能仍走第 3 档。
+   * 2026-11 用户口径："战斗中我观察到我方大量使用了幻兽……说明你的武器和技能调用出了很大的问题"，
+   * 当时就是把所有 `action == 'skill'` 都塞进了第 4 档（`29 + id`），于是每个技能都在放召唤动画。
    * ========================================================== */
   /* 技能 → `attacks` 选择帧 `[普通, 真形态(等级>10)]`（`Squirrel.as` 的 switch 逐条抄）。 */
   const SKILL_ATTACK_FRAME = {
@@ -575,6 +577,28 @@
   function isTrueForm(r) {
     return r.trueForm === true || r.isTrue === true || Number(r.level) > 10;
   }
+  /* ---------- 幻兽协战：原版 `attackType 4` ----------
+   * `Squirrel.attack()` 对第 4 档只做一件事：`mc.attacks.gotoAndStop(29 + weaponSkillId)`
+   * —— 帧号就是 **petsInfo 的幻兽 id**（30..61，共 32 只），每帧里烤好了这只幻兽自己的
+   * 出招动画。`sprite<元件号>.as` 的第 N 帧 `_root.beAttack()` 就是命中帧，逐条抄在下面。 */
+  const PET_ATTACK_ACTS = {
+    1: { sym: 6203, hit: 22 }, 2: { sym: 6207, hit: 19 }, 3: { sym: 6210, hit: 18 }, 4: { sym: 6216, hit: 16 },
+    5: { sym: 6223, hit: 18 }, 6: { sym: 6224, hit: 27 }, 7: { sym: 6225, hit: 23 }, 8: { sym: 6233, hit: 25 },
+    9: { sym: 6236, hit: 22 }, 10: { sym: 6241, hit: 19 }, 11: { sym: 6256, hit: 23 }, 12: { sym: 6261, hit: 21 },
+    13: { sym: 6262, hit: 19 }, 14: { sym: 6265, hit: 16 }, 15: { sym: 6284, hit: 15 }, 16: { sym: 6291, hit: 22 },
+    17: { sym: 6296, hit: 30 }, 18: { sym: 6299, hit: 30 }, 19: { sym: 6302, hit: 17 }, 20: { sym: 6305, hit: 22 },
+    21: { sym: 6312, hit: 22 }, 22: { sym: 6317, hit: 17 }, 23: { sym: 6318, hit: 22 }, 24: { sym: 6324, hit: 21 },
+    25: { sym: 6325, hit: 16 }, 26: { sym: 6326, hit: 22 }, 27: { sym: 6327, hit: 22 }, 28: { sym: 6328, hit: 22 },
+    29: { sym: 6330, hit: 22 }, 30: { sym: 6331, hit: 17 }, 31: { sym: 6332, hit: 22 }, 32: { sym: 6338, hit: 22 },
+  };
+  /** `squirrelAttackConfig` 的 attackType 4 段：幻兽 id → `defenses` 第几帧。
+   *  -1 = 这一只的技能不造成直接命中（回血 / 诅咒 / 自身增益），原版
+   * `MainMovie.as:6392` 会跳过受击方动作，但仍然应用 `attackerHeal`。 */
+  const PET_DEFENSE_FRAME = {
+    1: 11, 2: 12, 3: 13, 4: -1, 5: -1, 6: 16, 7: 17, 8: -1, 9: 18, 10: -1, 11: -1,
+    12: 19, 13: 23, 14: 24, 15: 25, 16: -1, 17: -1, 18: 26, 19: 29, 20: 30,
+    21: -1, 22: 32, 23: -1, 24: -1, 25: 35, 26: -1, 27: -1, 28: -1, 29: 39, 30: 40, 31: -1, 32: -1,
+  };
   /* ---------- 手里的那把武器：`chooseWeapon` / `chooseWeaponGo` / `showWeaponSize` ----------
    * 原版出手动画里**真的握着这一拍用的那把武器**，靠的还是"帧脚本"：
    *   · 近战武器攻击（`5748`）在 `ikNode_98`/`ikNode_116` 上挂了容器 `5735` → 里面是 `5734`
@@ -598,6 +622,11 @@
   const WEAPON_ART_SYMS = new Set([5666, 5670, 5674, 5679, 5686, 5697, 5706, 5724, 5733,
     5753, 5757, 5760, 5763, 5766, 5769, 5772, 5775]);
   function attackPlan(r) {
+    /* 幻兽协战：`attacks` 第 `29 + 幻兽 id` 帧（30..61）。 */
+    if (r.action === 'pet') {
+      const id = Math.max(1, Math.min(32, Number(r.petId) || 0));
+      return { frame: 29 + id, petId: id };
+    }
     if (r.action === 'weapon') return { frame: RANGED.has(Number(r.id)) ? 3 : 2 };
     if (r.action === 'skill') {
       const pair = SKILL_ATTACK_FRAME[Number(r.id)];
@@ -654,11 +683,20 @@
    *  （用户 2026-11："战斗中玩家会使用自己没有的技能"）。现代播放器从一开始就分这一位
    *  （`battle.js` 的 reaction：`r.fakeDieSide == null || Number(r.fakeDieSide) === Number(side)`）。 */
   function defensePlan(r, hasEquip, lvl, side) {
-    if (r.dodge) return { kind: 'dodge' };
+    /* 装死优先于幻兽受击帧：幻兽的直接伤害也能把松鼠打到装死，
+     * 这一拍该演的是「装死」而不是幻兽的普通受击。 */
     const fakeSide = r.fakeDieSide == null ? r.attacker : Number(r.fakeDieSide);
     if (r.fakeDie && (side == null || Number(side) === Number(fakeSide))) {
       return { kind: 'skill', frame: defenseSkillFrame(6, lvl) };
     }
+    /* 幻兽协战：受击帧由 `squirrelAttackConfig` 的 attackType 4 段决定。
+     * -1（回血 / 诅咒 / 自身增益）在原版里不播受击动作，也不扣血 —— 只留一个空档，
+     * 让回放层照常应用 `attackerHeal`。 */
+    if (r.action === 'pet') {
+      const pf = PET_DEFENSE_FRAME[Number(r.petId)];
+      return pf > 0 ? { kind: 'hit', frame: pf, pet: true } : { kind: 'none', pet: true };
+    }
+    if (r.dodge) return { kind: 'dodge' };
     if (r.guiJia) return { kind: 'skill', frame: defenseSkillFrame(7, lvl) };
     if (r.jueDui) return { kind: 'skill', frame: defenseSkillFrame(16, lvl) };
     if (r.action === 'skill') {
@@ -715,6 +753,9 @@
     20: { sym: 6175, guard: 12, hit: 18 },       // 18 吸铁大法 · 真形态
     21: { sym: 6185, guard: 25, hit: 31 },       // 23 幸运一击 · 真形态
   };
+  /* 幻兽帧 30..61 并进同一张表：`attack()` 只读 `hit` / `heal` 两个钩子，
+   * 这样不用在回放主路径里再分一次「这一拍是不是幻兽」。 */
+  for (const [id, acts] of Object.entries(PET_ATTACK_ACTS)) ATTACK_ACTS[29 + Number(id)] = acts;
   /** `defenses`(6427) 选择帧 → 受击动画；`back` = 它自己在第几帧调 `_root.attackBack()`。 */
   const DEFENSE_ACTS = {
     1: { sym: 6347, back: 10 },                  // 普通受击
@@ -726,6 +767,14 @@
     7: { sym: 6393 },                            // 8 色诱之术
     8: { sym: 6395 },                            // 18 吸铁大法
     9: { sym: 6415 },                            // 8 色诱之术（中特效且身上有装备）
+    /* 幻兽协战的受击帧（`squirrelAttackConfig` attackType 4 段；11..40）。
+     * 这些帧里有几帧的子件没有实例名（例如 19 帧是 6424），`beAttack` 会用
+     * `onlyChildClip()` 兜底，不能因为 `byName('defense')` 为空就整段跳过。 */
+    11: { sym: 6416 }, 12: { sym: 6418 }, 13: { sym: 6347 }, 16: { sym: 6421 },
+    17: { sym: 6421 }, 18: { sym: 6347 }, 19: { sym: 6424 }, 22: { sym: 6421 },
+    23: { sym: 6421 }, 24: { sym: 6421 }, 25: { sym: 6347 }, 26: { sym: 6347 },
+    28: { sym: 6421 }, 29: { sym: 6347 }, 30: { sym: 6421 }, 32: { sym: 6425 },
+    35: { sym: 6425 }, 39: { sym: 6421 }, 40: { sym: 6421 },
   };
   /** `defenseSkills`(6512) 选择帧 → 防御技动画（`back` 同上）。 */
   const DEFENSE_SKILL_ACTS = {
@@ -1197,7 +1246,8 @@
         stopAt(sel, plan.frame);
         /* 记下这一次真正拨到的是哪一帧（回归据此钉住"技能走的是 4~21 那一档，
          * 不是幻兽的 29+id"）。 */
-        api.lastAttack = { frame: plan.frame, action: String(r.action), id: Number(r.id) || 0 };
+        api.lastAttack = { frame: plan.frame, action: String(r.action), id: Number(r.id) || 0,
+          petId: Number(r.petId) || 0, petSkillId: Number(r.petSkillId) || 0 };
         const acts = ATTACK_ACTS[plan.frame] || {};
         const h = hooks || {};
         const inner = sel.byName('attack');
@@ -1249,6 +1299,13 @@
         const h = hooks || {};
         const d = defensePlan(r, !!(live && live.plans[side]), api.defenseSkillLevel(r), side);
         const frame = d.frame || 1;
+        /* 真·色诱命中：原版 `dropEquipPlayer` 会把这一侧的装备从身体上摘掉
+         *（`chooseEquipLoader` 在 `checkPlayerWear` 报“脱光”时不再贴装备）。
+         * 这里在命中帧真正卸下视觉；`syncStrip` 负责 4 回合到期后穿回。 */
+        if (r && r.stripApplied && Number(r.specialEffect) === 1) setGearStripped(side, true);
+        /* 幻兽的非伤害技能：原版 `getBeAttackFrame(4, id) == -1` 时直接 return，
+         * 受击方连身体帧都不换。 */
+        if (d.kind === 'none') return;
         if (d.kind === 'dodge') {
           stopAt(mc, 3);
           const sel = mc && mc.byName('dodges');
@@ -1279,7 +1336,11 @@
         const sel = mc && mc.byName('defenses');
         if (sel) {
           stopAt(sel, frame);
-          await playClip(sel.byName('defense'), { onFrame: backHook(DEFENSE_ACTS[frame], h) });
+          /* 幻兽受击帧里有些子件没有 `defense` 这个实例名（例如第 19 帧的 6424），
+           * 原版仍然会把它显示出来并自动播；这里取当前帧的第一颗子 clip 兜底。 */
+          const inner = sel.byName('defense') || onlyChildClip(sel);
+          if (inner) await playClip(inner, { onFrame: backHook(DEFENSE_ACTS[frame], h) });
+          else await wait(320);
         }
       },
       /** `attackBack()`：反击。原版 `6516` 第 5 帧 `_root.beBttackBack()`（结算反伤 + 让出手方
@@ -1346,9 +1407,38 @@
         rec.clip.__dressed = true;
         try {
           rec.clip.setSymbol(p.symbol, p.frame, 1, 'topleft', '');
+          rec.clip.__gearSlot = true;
+          if (live && live.strip && live.strip[side]) setGearClipHidden(rec.clip, true);
         } catch (e) {}
       }
       dressTree(rec.clip, side);
+    }
+  }
+  /** 真·色诱：把一格装备视觉藏起来 / 放回来（只动 `plan.bySlot` 贴出来的装备容器）。 */
+  function setGearClipHidden(clip, on) {
+    const node = clip && (clip.g || clip);
+    if (node && node.style) node.style.display = on ? 'none' : '';
+  }
+  function walkClips(clip, fn) {
+    if (!clip) return;
+    fn(clip);
+    if (!clip.nodes) return;
+    for (const rec of clip.nodes.values()) if (rec.clip) walkClips(rec.clip, fn);
+  }
+  /** 把某一侧的全部装备视觉同步成“穿着 / 被脱光”。 */
+  function setGearStripped(side, on) {
+    if (!live || !live.strip) return;
+    live.strip[side] = !!on;
+    const f = live.fighters[side];
+    if (!f || !f.mc) return;
+    walkClips(f.mc, (clip) => { if (clip.__gearSlot) setGearClipHidden(clip, on); });
+  }
+  /** 每一拍开头按 `stripLeft` 同步一次；本拍刚命中脱装备时留给 `beAttack` 在命中帧卸。 */
+  function syncStrip(rec, r) {
+    if (!r || !Array.isArray(r.stripLeft)) return;
+    for (let i = 0; i < 2; i++) {
+      const on = Number(r.stripLeft[i]) > 0;
+      if (!!rec.strip[i] !== on) setGearStripped(i, on);
     }
   }
 
@@ -1379,17 +1469,65 @@
   /* ============================================================
    * HUD（`showFightInfo` / `showBlood` / `Player.reduceBlood`）
    * ============================================================ */
+  /** 这一场的幻兽队伍（最多 3 只，保持编队顺序）。 */
+  function hudPetList(f) {
+    return (Array.isArray(f && f.pets) ? f.pets : []).filter((p) => p && Number(p.id) > 0).slice(0, 3)
+      .map((p) => ({ id: Number(p.id), name: String(p.name || '幻兽'), grade: Number(p.grade) || 1,
+        level: Number(p.level) || 1, skillId: Number(p.skillId) || 0 }));
+  }
+  /** `showBringPets()`：把原版「全身」4280 的第 `pet.id` 帧缩进 3414 幻兽格（42×42）。
+   * 原版是 `attachMovie(summons.name, "summonsImgMc", 100)` —— 每只幻兽一个导出符号；
+   * 复刻的素材库里等价的整身图就是 4280 的第 id 帧（牧场卡片也用同一颗）。 */
+  function mountPetSlot(slot, pet) {
+    if (!slot || !slot.attachChild) return;
+    /* 同一格重复挂载时先清掉上一张裁剪壳（例如 HUD 被重新 hydrate）。 */
+    try {
+      const old = slot.g && slot.g.querySelectorAll ? slot.g.querySelectorAll('svg[data-pet-art="1"]') : [];
+      for (const n of old) if (n.parentNode) n.parentNode.removeChild(n);
+    } catch (e) {}
+    try { if (slot.detachAll) slot.detachAll(); } catch (e) {}
+    let clip = null;
+    try { clip = slot.attachChild('4280', Math.max(1, Number(pet.id) || 1), 'summonsImgMc'); } catch (e) { clip = null; }
+    if (!clip || !clip.g) { visible(slot, false); return; }
+    clip.playing = false;
+    let box = null;
+    try { box = clip.g.getBBox(); } catch (e) { box = null; }
+    if (!box || !(box.width > 0) || !(box.height > 0)) { visible(slot, false); return; }
+    const pad = Math.max(0.8, Math.min(2, Math.max(box.width, box.height) * 0.02));
+    const host = clip.g.parentNode;
+    if (!host || !document.createElementNS) { visible(slot, false); return; }
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('x', '0'); svg.setAttribute('y', '0');
+    svg.setAttribute('width', '42'); svg.setAttribute('height', '42');
+    svg.setAttribute('viewBox', (box.x - pad) + ' ' + (box.y - pad) + ' ' + (box.width + pad * 2) + ' ' + (box.height + pad * 2));
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    svg.setAttribute('overflow', 'hidden');
+    svg.setAttribute('data-pet-art', '1');
+    host.insertBefore(svg, clip.g);
+    svg.appendChild(clip.g);
+  }
   function showFightInfo(hud, names) {
     const t = T();
     stopAt(hud, HUD_FRAME);
     setText(hud.byName('name1'), names[0]);
     setText(hud.byName('name2'), names[1]);
-    /* 状态格 / 幻兽格（`c1..c3` / `attackerS1..3` / `defenderS1..3`，都是 3414）：
-     * 原版 `showStates` 先把它们全拨到"空帧"、再给**生效中**的那些 `attachMovie` 药丸。
-     * 这一场没有要显示的药丸与幻兽，所以直接**收掉** —— 拨帧不够：导出里那颗的第 2 帧
-     * 画的是黄色空槽（2026-10 实拍：战斗画面左右各两块黄方块），不是"什么都不画"。 */
-    for (let i = 0; i < 3; i++) {
-      for (const n of ['attackerS' + (i + 1), 'defenderS' + (i + 1), 'c' + (i + 1)]) visible(hud.byName(n), false);
+    /* 状态格 `c1..c3`（3414）由 `showStates` 管药丸；这一场还没接药丸，照旧收掉。
+     * 幻兽格 `attackerS1..3` / `defenderS1..3` 按 `showBringPets` 填：
+     * 左侧 1→2→3，右侧 3→2→1（原版对右方传入的顺序就是反的）。 */
+    for (let i = 0; i < 3; i++) visible(hud.byName('c' + (i + 1)), false);
+    const teams = (live && live.petTeams) || [[], []];
+    for (const side of [0, 1]) {
+      const slots = side === 0 ? ['attackerS1', 'attackerS2', 'attackerS3'] : ['defenderS3', 'defenderS2', 'defenderS1'];
+      const pets = teams[side] || [];
+      for (let i = 0; i < 3; i++) {
+        const slot = hud.byName(slots[i]);
+        if (!slot) continue;
+        if (!pets[i]) { visible(slot, false); continue; }
+        visible(slot, true);
+        stopAt(slot, 2);                 // 原版先 `gotoAndStop(2)` 清空槽位
+        mountPetSlot(slot, pets[i]);
+      }
     }
     refreshBlood(hud);
     void t;
@@ -1518,8 +1656,12 @@
 
     const rec = {
       host: host, view: null, fighters: [null, null], plans: [null, null], speeds: 1,
+      /* 真·色诱：这一侧当前是否处于“被脱光装备”的视觉状态。 */
+      strip: [false, false],
       rounds: [], index: 0, round: 0, roundsLeft: 0, floats: [0, 0], hps: [1, 1], maxHp: [1, 1],
       shields: [0, 0], speed: 1, stopped: false, skipped: false, ended: false,
+      /* 双方出战幻兽（HUD 3414 格子与 `showBringPets` 用；空数组 = 这一场不显示）。 */
+      petTeams: [hudPetList(o.me), hudPetList(o.foe)],
       timers: [], rafs: [], sleepers: new Set(), settling: false,
       /* 「跳过」的即时信号：开打前奏（血条滑入 / 3-2-1-GO）不是回合演出，玩家按跳过时
        * 不能等它自己播完 —— `perform` 在每段前奏上都和这个 Promise 赛跑（见 `controller.skip`）。 */
@@ -1536,6 +1678,11 @@
     let pickups = null;
 
     await SfRender.loadExtra('tags-fight.json');
+    /* 幻兽格用的是「全身」4280（`tags-summons.json`，牧场卡片同一颗）。
+     * 只有这一场真的有幻兽才加载，没有幻兽的普通战斗不多付这一份素材。 */
+    if (rec.petTeams.some((list) => list.length)) {
+      try { await SfRender.loadExtra('tags-summons.json'); } catch (e) { /* 缺包就没有立绘，逻辑照走 */ }
+    }
     /* 三侠的现代动作图集（与 `battle.js` 同一份 AnimationStr / atlas）：
      * 只加载这一场真的会出场的体型；最多等 1.2s，没等到就退回 7689 静态稿。 */
     if (window.Engine && Engine.loadSheets) {
@@ -1869,7 +2016,8 @@
     if (!aborted()) await Promise.race([playHudCountdown(rec, aborted), rec.skipSignal]);
     for (let i = 0; i < rec.rounds.length && !aborted(); i++) {
       rec.round = Math.max(0, 99 - i);
-      rec.roundsLeft = Math.max(0, rec.roundsLeft - 1);
+      /* 幻兽协战（`isRound:0`）不占原版 60 手回合数，HUD 的剩余回合不往下掉。 */
+      if (!rec.rounds[i] || Number(rec.rounds[i].isRound) !== 0) rec.roundsLeft = Math.max(0, rec.roundsLeft - 1);
       if (rec.hud) refreshBlood(rec.hud);
       await playRound(rec, rec.rounds[i], aborted);
     }
@@ -1941,6 +2089,9 @@
   async function playRound(rec, r, aborted) {
     if (!r) return;
     rec.curRound = r;
+    /* 先按上一拍的“剩余脱光回合”把装备视觉同步回来；本拍如果是命中脱装备，
+     * 不在这里提前卸，留给 `beAttack` 的命中帧。 */
+    if (!r.stripApplied) syncStrip(rec, r);
     const att = Number(r.attacker) === 1 ? 1 : 0, def = 1 - att;
     /* `attack(round)` 开头会把**两侧都归位**（`attacker.gotoAndStop(1)` / `defender.gotoAndStop(1)`，
      * `MainMovie.as:6353`）—— 归位是"下一拍的开头"，不是"上一拍的结尾"：
@@ -2049,6 +2200,8 @@
       /* 闪开了就没有伤害数字（`Squirrel.beAttack` 的 `defenseType == 1` 那一支只改身体帧）。 */
       if (r.dmg && !r.dodge) floatNumber(def, r.dmg, 'hit');
       if (r.healSelf) floatNumber(att, r.healSelf, 'heal');
+      /* 幻兽·凌波微步：闪避时给**挨打的那一方**回血（`r.dodgeHeal` 由 sim 落在这一拍上）。 */
+      if (r.dodgeHeal) floatNumber(def, r.dodgeHeal, 'heal');
       if (r.lifesteal) floatNumber(att, r.lifesteal, 'heal');
       if (r.reboundHurt) floatNumber(att, r.reboundHurt, 'back');
       if (r.selfBurn) floatNumber(att, r.selfBurn, 'back');
@@ -2548,6 +2701,9 @@
     _npcAnim: (npc, action) => npcAnimName(String(npc || ''), action),
     /* 纯函数（供 tools/*.cjs 直接核对映射规则） */
     _attackFrame: (r) => attackPlan(r).frame,
+    /* 幻兽帧：`29 + petId` 与原版 `squirrelAttackConfig` 的 attackType 4 段。 */
+    _petAttackFrame: (petId) => 29 + Math.max(1, Math.min(32, Number(petId) || 1)),
+    _petDefenseFrame: (petId) => PET_DEFENSE_FRAME[Number(petId)] || -1,
     _defenseKind: (r, hasEquip, lvl, side) => defensePlan(r, hasEquip, lvl, side).kind,
     /* 手里的那把武器（`Squirrel.chooseWeapon` / `chooseWeaponGo` / `showWeaponSize` 三张表）：
      * `_weaponArt` = 这一拍的武器 id 该拨武器容器的第几帧（近战 / 投掷各一套），
@@ -2565,6 +2721,10 @@
     /* 这一拍受击方头顶该飘哪一颗状态图标（`Player.specialEffect` 的 statu 档位）。 */
     _effectStatu: (r) => effectStatu(r),
     WEAPON_ART: Object.freeze({ melee: MELEE_WEAPON_ART, ranged: THROW_WEAPON_ART, size: WEAPON_SIZE_FRAMES }),
+    /* 幻兽协战的全部帧号（回归 / 探针用）：攻击帧 30..61 与受击帧 11..40。 */
+    PET_FRAMES: Object.freeze({
+      attack: PET_ATTACK_ACTS, defense: PET_DEFENSE_FRAME, art: '4280', slot: '3414',
+    }),
     /* 开打倒计时 = 血条 HUD 第 8 帧里那颗原版 `3750`（不是自造元件，见 `playHudCountdown`）。 */
     COUNTDOWN: Object.freeze({ tag: COUNTDOWN_TAG, holder: '7703', holderFrame: HUD_STOP,
       frames: 41, endFrame: COUNTDOWN_END }),

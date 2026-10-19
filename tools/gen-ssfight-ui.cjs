@@ -241,6 +241,57 @@ function lootIconRoots() {
   if (map.missing.length) console.log('    缺：%s', map.missing.join('、'));
   return roots;
 }
+/* ---------- 道具图标：原版 `c1.attachMovie(<道具名>, …)` 的矢量库元件 ----------
+ * `showUsePropWin` / `showBuyPropWin` 的图标位都是**按道具名 attach**，
+ * 静态页面闭包走不到这些库元件；这里按 `propMap` 的名字取 SWF 导出符号，
+ * 再把它们并进 `tags-daoju.json`（背包/商店详情共用）。原版没有导出的几件
+ * 用同风格的库元件借位（抽奖卷→礼包、天梯碎片→金杯、礼包页→礼包…），
+ * 与 `loot-icons.json` 的别名口径一致。 */
+const PROP_ICON_ALIAS = {
+  '天梯碎片': '金杯',
+  '抽奖卷': '礼包',
+  '红包': '礼包',
+  '推荐大礼包': '礼包',
+  '1级礼包': '礼包', '5级礼包': '礼包', '10级礼包': '礼包', '15级礼包': '礼包', '20级礼包': '礼包',
+  '松鼠拳套': '礼包', '转生果': '礼包',
+  '力量永久+1': '属性书', '敏捷永久+1': '属性书', '速度永久+1': '属性书', '生命永久+5': '属性书',
+};
+function propIconRoots() {
+  const sym = swfSymbolIds();
+  const dictSrc = fs.readFileSync(path.join(ROOT, 'js', 'gamedict.js'), 'utf8').replace(/\r\n/g, '\n');
+  const at = dictSrc.indexOf('propMap = createDict');
+  if (at < 0) die('js/gamedict.js 里找不到 propMap');
+  const rest = dictSrc.slice(at);
+  const nxt = rest.slice(1).search(/\n  const \w+ = createDict/);
+  const seg = nxt < 0 ? rest : rest.slice(0, nxt + 1);
+  const rowRe = /\[\s*(-?\d+)\s*,\s*"((?:[^"\\]|\\.)*)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*\]/g;
+  const map = { byId: {}, missing: [] };
+  const roots = [];
+  const seen = new Set();
+  let m;
+  while ((m = rowRe.exec(seg)) !== null) {
+    const id = Number(m[1]);
+    const raw = JSON.parse('"' + m[2] + '"');
+    const sep = JSON.parse('"' + m[3] + '"');
+    const parts = raw.split(sep);
+    const name = (parts.length > 1 ? parts[1] : parts[0]).trim();
+    if (!name) continue;
+    const alias = PROP_ICON_ALIAS[name] || name;
+    const sid = sym.get(alias);
+    if (!sid || sid === 'None') { map.missing.push(id + ':' + name); continue; }
+    map.byId[id] = { name, id: String(sid) };
+    if (alias !== name) map.byId[id].aliasOf = alias;
+    if (!seen.has(String(sid))) { seen.add(String(sid)); roots.push(String(sid)); }
+  }
+  fs.writeFileSync(path.join(OUT, 'prop-icons.json'), JSON.stringify(Object.assign({
+    source: 'references/ssfight/ssfight/ssfight/ssfight.swf（ExportAssets 名字 → 紧邻其前的 DefineSprite）+ js/gamedict.js（propMap）',
+    how: '原版 `c1.attachMovie(<道具名>, "mc", 100)`（showUsePropWin / showBuyPropWin）：库元件名就是道具名；'
+       + '`byId[道具id].id` = 该图标的元件号，供 SfPropUse 以矢量元件挂进 c1。',
+  }, map), null, 1));
+  console.log('  道具图标：%d 颗（缺 %d 颗在 SWF 里找不到）→ prop-icons.json', Object.keys(map.byId).length, map.missing.length);
+  if (map.missing.length) console.log('    缺：%s', map.missing.join('、'));
+  return roots;
+}
 function iconRoots() {
   const sym = swfSymbolIds();
   /* 从 js/gamedict.js 抽 `[id, "原始行", "分隔符"]` 三元组：分隔符是表尾的那个字面量，
@@ -523,7 +574,11 @@ function main() {
      * "素材库里没有元件 N"（状态页第一次生成时就踩了这个）。 */
     const extra = name === 'zhuangtai' ? STATUS_PARTS.concat(STATUS_SUB)
       : name === 'tiaozhan' ? CHALLENGE_PARTS
-        : name === ICON_BUNDLE ? iconRoots() : [];
+        /* 道具页的通用弹窗「道具1」= **4886**（导出符号表把它误记成 4887，那一颗是 45×55
+         * 的小按钮）。背包「使用」用它的第 1 帧，合成页用第 5 帧；两处都从道具页进，
+         * 所以跟 `tags-daoju.json` 一起按需拉取，避免再开一份包。 */
+        : name === 'daoju' ? ['4886'].concat(propIconRoots())
+          : name === ICON_BUNDLE ? iconRoots() : [];
     if (sel.length) parts.push({ file: BUNDLES[name], roots: sel.map((w) => ROOTS[w]).filter(Boolean).concat(extra), pages: sel.slice() });
   }
   if (gearWanted.length) parts.push({ file: 'tags-gear.json', roots: gearWanted.map((w) => ROOTS[w]) });

@@ -34,9 +34,17 @@
     if (kind === 'skill' && id === 13) return false;
     return level >= 50 || !(kind === 'weapon' ? [16, 17] : [23, 24]).includes(id);
   }
+  /** 被动 1~5：1~10 级按原表每级增长；11~15 级按原表“再提高 N”逐真级累加。 */
   function passiveBonus(id, level) {
+    id = Number(id);
     const lv = Math.max(1, Math.min(15, Number(level) || 1));
-    return id === 1 || id === 2 ? 2 * lv : id === 3 ? 2 + lv - 1 : id === 4 ? 5 + 8 * (lv - 1) : 0;
+    const baseLv = Math.min(lv, 10);
+    const extra = trueSkillValue(id, lv);
+    if (id === 1 || id === 2) return 2 * baseLv + extra;
+    if (id === 3) return 1 * baseLv + extra;
+    if (id === 4) return 8 * baseLv + extra;
+    if (id === 5) return 10 + 2 * (baseLv - 1) + extra;
+    return 0;
   }
   function initialStats() {
     // 资料确定总量与生命区间，随机分配权重未留存；采用等概率分配。
@@ -128,30 +136,49 @@
    * 等级口径沿用原表：1~10 是普通，11~15 依次是真1~真5（upgradeMap 第 10~14 行
    * 的成功率 100/8/5/4/3% 正好对上「真1~真5」）。所以真等级 = 等级 − 10。
    *
-   * 真技能的效果**只有真5的端点**有史料（references/new/攻略.md），真1~真4 用
-   * 线性插值取整：真N ≈ 真5 × N / 5。下表每个条目标注了来源：
-   *   [史料] = 攻略写了真5端点；[平衡] = 攻略没有，本项目按同类量级定的取值。
-   * 改数值只动这一张表。 */
+   * 数值直接取 ssfight 原表：
+   *   · 真武器 `harmAdd1` 是**逐真级累计**（convertHarm 的 getTotal）；
+   *   · 真武器 `remark1`（des1）是**固定一次**的追加效果，不是每真级都加；
+   *   · 真技能 `remark1Value` 是每一档的 N；
+   *       - “有 N% 几率” = 当档绝对值（龟甲 / 色诱 / 暴击 / 皮糙 / 野球）；
+   *       - “将再提高 N” = 逐真级累加（力王~武器好手、移形、小宇宙、通灵、
+   *         绝对防御、松果、吸铁、致命反击）。
+   *   这比旧版“只取真5端点 + 线性插值”更贴近原表；原表每一档都有明确值。 */
   const TRUE_SKILL_MAX = 5;
-  const TRUE_SKILL_5 = Object.freeze({
-    7:  { key: 'guiJia',     value: 1.00, src: '史料' },   // 龟甲术：100% 几率可多次使用（多层防御）
-    8:  { key: 'stripGear',  value: 0.56, src: '史料' },   // 色诱之术：56% 几率脱光对手装备，持续 4 回合
-    9:  { key: 'crit4',      value: 0.50, src: '平衡' },   // 暴击：暴击时有 N% 几率打出 4 倍伤害
-    10: { key: 'antiCrit',   value: 0.50, src: '平衡' },   // 皮糙肉厚：额外压制对手 N% 暴击率
-    12: { key: 'doubleHit',  value: 1.00, src: '史料' },   // 野球拳：100% 几率再打一次
-    14: { key: 'cosmos',     value: 0.30, src: '史料' },   // 小宇宙爆发：基础属性 +30%
-    15: { key: 'extraFlat',  value: 18,   src: '用户提供' }, // 通灵召唤：额外 +18 点固定伤害，真级再叠加
-    18: { key: 'disarm',     value: 1.00, src: '史料' },   // 吸铁大法：100% 几率缴械
-    23: { key: 'luckyBase',  value: 137,  src: '史料' },   // 幸运一击：基础伤害 137×N
+  /* 每项：[mode, values]；mode='abs' 当档绝对值，'extra' 逐级累加，'flat' 固定值。 */
+  const TRUE_SKILL_TABLE = Object.freeze({
+    1:  { mode: 'extra', values: [3, 3, 4, 4, 5],     stat: 'power',   text: '将再提高N点力量' },
+    2:  { mode: 'extra', values: [3, 3, 4, 4, 5],     stat: 'agility', text: '将再提高N点敏捷' },
+    3:  { mode: 'extra', values: [2, 2, 3, 3, 4],     stat: 'speed',   text: '将再提高N点速度' },
+    4:  { mode: 'extra', values: [12, 16, 20, 24, 28], stat: 'hp',     text: '将再提高N点生命' },
+    5:  { mode: 'extra', values: [3, 3, 4, 4, 5],     stat: 'weapon',  text: '将再提高N点武器伤害' },
+    7:  { mode: 'abs',   values: [20, 40, 60, 80, 100], key: 'guiJia',  text: '有N%几率可多次使用' },
+    8:  { mode: 'abs',   values: [8, 16, 28, 40, 56],  key: 'stripGear', text: '有N%几率脱光对方装备，持续4回合' },
+    9:  { mode: 'abs',   values: [2, 5, 9, 14, 20],    key: 'crit4',   text: '在暴击发生时，有N%几率产生4倍伤害' },
+    10: { mode: 'abs',   values: [0.5, 1, 2, 3, 5],    key: 'antiCrit', text: '使对手暴击几率减少N%' },
+    11: { mode: 'extra', values: [4, 4, 6, 6, 8],      key: 'dodge',   text: '将再提高N%的闪避率' },
+    12: { mode: 'abs',   values: [20, 40, 60, 80, 100], key: 'doubleHit', text: '有N%几率可多使用一次' },
+    14: { mode: 'extra', values: [2, 3, 4, 5, 6],      key: 'cosmos',  text: '将再提高N%属性值' },
+    15: { mode: 'extra', values: [10, 12, 14, 16, 18], key: 'extraFlat', text: '将再提高N点伤害' },
+    16: { mode: 'extra', values: [5, 6, 7, 8, 9],      key: 'rebound', text: '将再提高N%反弹伤害' },
+    17: { mode: 'extra', values: [6, 8, 10, 12, 14],   key: 'heal',    text: '将再提高N点补血量' },
+    18: { mode: 'extra', values: [6, 8, 10, 12, 18],   key: 'disarm',  text: '收缴对手武器的成功率再提高N%' },
+    23: { mode: 'flat',  value: 10,                   key: 'luckyBase', text: '将再提高10点基础伤害' },
+    24: { mode: 'extra', values: [8, 8, 10, 10, 12],   key: 'counter', text: '将再提高N%反击伤害' },
   });
-  /* 真·武器的额外效果：数值取自原词典 weaponsMap[id].remark1
+  /** 兼容旧读取口：真5端点（绝对项取最后一档，累加项取累计值）。 */
+  const TRUE_SKILL_5 = Object.freeze(Object.keys(TRUE_SKILL_TABLE).reduce((m, k) => {
+    const row = TRUE_SKILL_TABLE[k];
+    m[k] = { key: row.key, value: row.mode === 'abs' ? row.values[4]
+      : row.mode === 'flat' ? row.value
+      : row.values.reduce((a, b) => a + b, 0), src: 'ssfight' };
+    return m;
+  }, {}));
+  /* 真·武器的追加效果：数值取自原词典 weaponsMap[id].remark1
    * （西瓜刀 +5% 连击、流星锤 +3% 扔 3 次、激光剑 +3% 暴击、狼牙棒 +6 持续伤害、
    *   板砖 +3% 打晕、忍者镖 +2% 吸血、沉默之斧 +4% 沉默）。
-   * 只在武器等级 > 10（真形态）时生效——原词典把这几条写在 remark1，就是真武器说明。 */
+   * **固定一次**，只在武器等级 > 10（真形态）时生效；不要乘真级。 */
   const TRUE_WEAPON_BONUS = Object.freeze({
-    /* 1（方天画戟）：真化后**无视装死**（口径同橡皮擦 7 / 吸铁大法 18）。
-     * 这条**不是**原词典 remark1 里的，是 2026-10 用户口径新增（见 docs/更新记录.md 需求138）。 */
-    1: { ignoreFakeDie: 1 },
     4: { combo: 5 }, 10: { triple: 3 }, 11: { crit: 3 },
     12: { dot: 6 }, 13: { stun: 3 }, 14: { lifesteal: 2 }, 16: { silence: 4 },
   });
@@ -166,13 +193,24 @@
   function trueLevel(level) {
     return Math.max(0, Math.min(TRUE_SKILL_MAX, Math.round(Number(level) || 0) - 10));
   }
-  /** 真N 的效果值：真5端点 × N/5（线性插值）。ratio 类返回 0~真5，flat 类按同比例。 */
+  /** 真技能在真N 的效果：abs/flat 返回当档值；extra 返回前 N 档累计值。 */
   function trueSkillValue(id, level) {
-    const row = TRUE_SKILL_5[Number(id)];
-    if (!row) return 0;
-    return row.value * trueLevel(level) / TRUE_SKILL_MAX;
+    const row = TRUE_SKILL_TABLE[Number(id)];
+    const n = trueLevel(level);
+    if (!row || n <= 0) return 0;
+    if (row.mode === 'flat') return row.value;
+    if (row.mode === 'abs') return row.values[n - 1];
+    return row.values.slice(0, n).reduce((a, b) => a + b, 0);
   }
-  function trueSkillRow(id) { return TRUE_SKILL_5[Number(id)] || null; }
+  /** 真技能第 N 档的原始 N（UI/说明用；extra 项不是累计值）。 */
+  function trueSkillStep(id, level) {
+    const row = TRUE_SKILL_TABLE[Number(id)];
+    const n = trueLevel(level);
+    if (!row || n <= 0) return 0;
+    if (row.mode === 'flat') return row.value;
+    return row.values[n - 1];
+  }
+  function trueSkillRow(id) { return TRUE_SKILL_TABLE[Number(id)] || null; }
 
   function stageTargetLevel(stageId) {
     const type = Math.max(0, Math.min(STAGE_TYPES.length - 1, Math.floor((Number(stageId) - 1) / 6)));
@@ -290,7 +328,25 @@
     [25, '哇哇', 2, 20, 8, 11], [26, '铁嘴蜂', 3, 30, 15, 3], [27, '铃音海豚', 3, 30, 15, 5], [28, '招财熊猫', 3, 30, 15, 10],
     [29, '稻草人', 3, 30, 15, 6], [30, '酷法', 3, 30, 15, 7], [31, '神灯', 4, 40, 24, 3], [32, '仙玲', 4, 40, 24, 10],
   ].map(([id, name, grade, maxLevel, leadership, skillId]) => ({ id, name, grade, maxLevel, leadership, skillId }));
-  /* 原版 `petsSkills`（只留展示需要的字段）。 */
+  /* 原版 `petsSkills`（MainMovie.as:19148）逐行抄下来的显示字段。
+   * 数值表（`松鼠数据表.xlsx` 的「幻兽技能」页）最后两列是 **X 的初始值 / 每级成长值**，
+   * 例如奋力一击 24 + 4×（等级−1）、狂暴 12% + 2%×（等级−1）。原版客户端不含服务端结算，
+   * 这里把这两列显式落成数据，Sim 与牧场详情共用同一份，避免两边各写一条公式。 */
+  const PET_SKILL_RULES = {
+    /* id: { serie, kind, base, step, percent, trigger(固定几率；null = 用 X), maxTimes,
+     *       onAction / onFakeDie / passive, hpBelow } */
+    1: { serie: '破坏', kind: 'damage', base: 24, step: 4, percent: false, trigger: 30, maxTimes: 1, onAction: true },
+    2: { serie: '破坏', kind: 'damage', base: 24, step: 4, percent: false, trigger: null, maxTimes: 1, onFakeDie: true },
+    3: { serie: '破坏', kind: 'rage', base: 12, step: 2, percent: true, trigger: null, maxTimes: -1, passive: true },
+    4: { serie: '神圣', kind: 'healPct', base: 10.5, step: 0.5, percent: true, trigger: null, maxTimes: 1, onFakeDie: true },
+    5: { serie: '神圣', kind: 'dodgeHeal', base: 11.5, step: 1.5, percent: false, trigger: null, maxTimes: -1, passive: true },
+    6: { serie: '诅咒', kind: 'healCut', base: 5.5, step: 0.5, percent: true, trigger: null, maxTimes: 1, onAction: true },
+    7: { serie: '诅咒', kind: 'weak', base: 11, step: 1, percent: true, trigger: 35, maxTimes: 1, onAction: true },
+    8: { serie: '诅咒', kind: 'seal', base: 9.5, step: 0.5, percent: true, trigger: null, maxTimes: 1, onAction: true },
+    9: { serie: '破坏', kind: 'nextCrit', base: 5.5, step: 0.5, percent: true, trigger: null, maxTimes: 1, onAction: true },
+    10: { serie: '神圣', kind: 'cleanse', base: 5.5, step: 0.5, percent: true, trigger: null, maxTimes: 1, onAction: true, hpBelow: 0.5 },
+    11: { serie: '诅咒', kind: 'dotPlus', base: 5.5, step: 0.5, percent: true, trigger: null, maxTimes: 1, onAction: true },
+  };
   const PET_SKILLS = {
     1: { name: '奋力一击', remark: '己方行动时30%几率发动，命中后直接减少对手X点血量' },
     2: { name: '逆向推倒', remark: '装死后发动，命中后直接减少对手X点血量' },
@@ -304,6 +360,27 @@
     10: { name: '油光满面', remark: '血量低于50%时，每次行动有X%几率移除自身负面效果' },
     11: { name: '张牙舞爪', remark: '行动时有X%几率使对手的持续负面效果多持续1回合' },
   };
+  for (const [id, rule] of Object.entries(PET_SKILL_RULES)) {
+    if (PET_SKILLS[id]) Object.assign(PET_SKILLS[id], rule);
+  }
+  /** 幻兽技能在当前等级下的 X（伤害点 / 回血点 / 百分比）。 */
+  function petSkillValue(id, level) {
+    const rule = PET_SKILL_RULES[Number(id)];
+    if (!rule) return 0;
+    return rule.base + rule.step * (Math.max(1, Number(level) || 1) - 1);
+  }
+  /** 这一级「行动时」的触发几率（%）：固定值优先，否则就是 X 本身。 */
+  function petSkillTrigger(id, level) {
+    const rule = PET_SKILL_RULES[Number(id)];
+    if (!rule) return 0;
+    return rule.trigger == null ? petSkillValue(id, level) : rule.trigger;
+  }
+  /** 给界面用的合并视图（名字 / 说明 / 当前 X / 当前触发几率）。 */
+  function petSkillInfo(id, level) {
+    const info = PET_SKILLS[Number(id)];
+    if (!info) return null;
+    return Object.assign({ id: Number(id), value: petSkillValue(id, level), trigger: petSkillTrigger(id, level) }, info);
+  }
   const PET_GRADE_EXP = { 1: 1000, 2: 2000, 3: 5000, 4: 10000, 5: 20000 };
   const PET_GRADE_COST = { 2: 50, 3: 100, 4: 200, 5: 500 };
 
@@ -910,9 +987,9 @@
    * ============================================================ */
   window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, stageEnemyCount, isSuperStage, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
     STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
-    trueLevel, trueSkillValue, trueSkillRow, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
+    trueLevel, trueSkillValue, trueSkillStep, trueSkillRow, TRUE_SKILL_TABLE, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
     stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, BLUE_SHARD_DROP_MUL, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
-    PETS, PET_SKILLS, PET_GRADE_EXP, PET_GRADE_COST,
+    PETS, PET_SKILLS, PET_SKILL_RULES, petSkillValue, petSkillTrigger, petSkillInfo, PET_GRADE_EXP, PET_GRADE_COST,
     SET_BONUS, SET_BONUS_TIER_MUL, SET_BONUS_GLOBAL_MUL, SET_BONUS_HP_MUL, SET_BONUS_FAMILY_FLOOR,
     SET_BONUS_RAW_KEYS, SET_BONUS_ATTR_KEYS, setBonusTable, setBonusTierMul, setBonusScale, setBonusText };
 })();

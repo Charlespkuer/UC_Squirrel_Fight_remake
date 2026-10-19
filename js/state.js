@@ -917,10 +917,12 @@
   function petInfo(p) {
     ensurePetTables();
     if (!p) return null;
-    const skill = PET_SKILLS[p.skillId] || { name: '未知技能', remark: '暂无说明' };
+    const skill = (typeof GData !== 'undefined' && GData.petSkillInfo ? GData.petSkillInfo(p.skillId, p.level) : null) ||
+      PET_SKILLS[p.skillId] || { name: '未知技能', remark: '暂无说明' };
     return {
       key: p.key, id: p.id, name: p.name, grade: p.grade, maxLevel: p.maxLevel,
       leadership: p.leadership, skillId: p.skillId, skillName: skill.name, skillRemark: skill.remark,
+      skillValue: skill.value == null ? 0 : skill.value, skillTrigger: skill.trigger == null ? 0 : skill.trigger,
       level: p.level, exp: p.exp, nextExp: p.nextExp, inTeam: (S.petsTeam || []).includes(p.key),
     };
   }
@@ -1604,7 +1606,10 @@
   function energyCountdown() {
     tickEnergy();
     if (S.energy >= S.maxEnergy) return '';
-    const remain = Math.max(0, ENERGY_INTERVAL - (Date.now() - S.lastEnergyTs));
+    /* 与 tickEnergy 用同一个恢复间隔（超级松鼠特权 3 会缩短间隔）；
+     * 旧写法固定按 5 分钟算，VIP 的 1.1~1.5 倍恢复速度下倒计时会偏长。 */
+    const interval = ENERGY_INTERVAL / vipRegenMul();
+    const remain = Math.max(0, interval - (Date.now() - S.lastEnergyTs));
     const m = Math.floor(remain / 60000), s = Math.floor((remain % 60000) / 1000);
     return `${m}:${String(s).padStart(2, '0')}`;
   }
@@ -1716,38 +1721,34 @@
    * 【S6】升级武器/技能（成功率/费用/失败保护）
    * ============================================================ */
   // ---------- 升级武器/技能（upgradeMap: 成功率/费用/卷轴/玩家等级限制） ----------
-  const UPGRADE_COIN = 40;
-  const UPGRADE_FAIL_BONUS = 5;   // 每次失败 +5%
+  /* 原版 `getNeed(level)` 直接读 upgradeMap 的 `coin` / `book`：
+   * 普通升级 50 松果，10→11 那一档 100；真化标准升阶同样走这一行
+   * （`showWeaponSkill3` 的 button3 → `upgradeWeapon(...,3,1)`），不再单独造“真化金价”。
+   * `UPGRADE_COIN` 只留给旧存档/旧调用方兜底，正常路径一律用行内 coin。 */
+  const UPGRADE_COIN = 50;
+  /* 1~9 级（升到 2~10 级）保留旧版“失败涨概率”，按用户口径削弱为**每次 +2%**，
+   * 封顶 100%；10→11 起的真化线不吃这条保底，仍按原表固定成功率。 */
+  const UPGRADE_FAIL_BONUS = 2;
   /* ============================================================
    * 【S7】真·武器 / 真·技能（终局线 11~15 级）
    * ============================================================ */
   /* ---------- 真·武器 / 真·技能（终局线，等级 11~15 = 真1~真5） ----------
-   * 成功率沿用原表 upgradeMap 的第 10~14 行：100% / 8% / 5% / 4% / 3%。
-   * 费用不新引入货币：参考里 U点 的汇率是 10U=50金松果（1U=5金松果），
-   * 所以「当天第 N 次真升级 = 2N U点」直接按汇率折成 10N 金松果（10/20/30…），
-   * 当日 24:00 清零。真升级**不吃失败保底**——终局线就该慢一些。 */
-  const TRUE_UPGRADE_GOLD_PER_U = 5;
+   * 成功率沿用原表 upgradeMap 的第 10~14 行：100% / 8% / 5% / 4% / 3%
+   * （`showWeaponSkill3` → `upgradeWeapon(...,3,1)` 的 standard 路径）。
+   * 费用也走同一张表：coin = 100/50，book = 25；不额外引入 U 点。
+   * 参考里的 U 点升阶是另一条入口（`showWeaponSkill4` → `upgradeWeapon(...,3,2)`），
+   * 本版没有 U 点货币，不把两条路径混在一起。 */
   const TRUE_SKILL_MAX_LEVEL = 15;
   const isTrueLevel = (level) => (Number(level) || 0) >= 10;
-  const trueUpgradeDate = () => localDate();
-  function trueAttemptsToday() {
-    if (!object(S.trueUpgrades) || S.trueUpgrades.date !== trueUpgradeDate()) return 0;
-    return Math.max(0, integer(S.trueUpgrades.count, 0));
-  }
-  /** 今天下一次真升级的金松果价：第 N 次 = 2N U点 × 5 金松果。 */
-  function trueUpgradeCost() { return 2 * (trueAttemptsToday() + 1) * TRUE_UPGRADE_GOLD_PER_U; }
-  function bumpTrueUpgrade() {
-    const date = trueUpgradeDate();
-    if (!object(S.trueUpgrades) || S.trueUpgrades.date !== date) S.trueUpgrades = { date, count: 0 };
-    S.trueUpgrades.count = Math.max(0, integer(S.trueUpgrades.count, 0)) + 1;
-  }
   const upgradeFailKey = (kind, id) => (kind === 'weapon' ? 'w' : 's') + Number(id);
+  /** 旧存档里的失败计数；只在普通 1~9 级升级时使用（真化线不读）。 */
   function upgradeFails(kind, id) {
     const m = object(S) && object(S.upgradeFails) ? S.upgradeFails : {};
     return Math.max(0, integer(m[upgradeFailKey(kind, id)], 0));
   }
-  /** 基础成功率 + 失败累积，封顶 100%。 */
-  const upgradeRate = (baseRate, fails) => Math.min(100, Math.max(0, integer(baseRate, 0)) + Math.max(0, integer(fails, 0)) * UPGRADE_FAIL_BONUS);
+  /** 普通升级：基础成功率 + 每次失败 +2%，封顶 100%。 */
+  const upgradeRate = (baseRate, fails) =>
+    Math.min(100, Math.max(0, integer(baseRate, 0)) + Math.max(0, integer(fails, 0)) * UPGRADE_FAIL_BONUS);
   function upgradeInfo(kind, id) {
     if (kind !== 'weapon' && kind !== 'skill') return null;
     id = Number(id);
@@ -1755,18 +1756,18 @@
     const it = list.find((x) => x.id === id);
     if (!it) return null;
     if (kind === 'skill' && [6, 13].includes(id)) return { max: true, fixed: true, item: it, msg: '该技能不能升级' };
-    if (kind === 'skill' && it.level >= TRUE_SKILL_MAX_LEVEL) return { max: true, item: it, msg: '技能已达到真5上限' };
+    if (it.level >= TRUE_SKILL_MAX_LEVEL) return { max: true, item: it, msg: kind === 'weapon' ? '神器已达到真5上限' : '技能已达到真5上限' };
     const row = upgradeMap.getValue(it.level); // 当前等级对应升级行
     if (!row) return { max: true };
     const baseRate = parseInt(row.rate);
     const isTrue = isTrueLevel(it.level);
-    // 真升级不吃失败保底：概率就是原表的固定值
     const fails = isTrue ? 0 : upgradeFails(kind, id);
     return {
-      max: false, item: it, baseRate, fails, isTrue, rate: upgradeRate(baseRate, fails),
-      coin: isTrue ? trueUpgradeCost() : UPGRADE_COIN,
-      trueAttempt: trueAttemptsToday() + 1,
-      book: parseInt(row.book), levelLimit: parseInt(row.levelLimit),
+      max: false, item: it, baseRate, fails, isTrue,
+      rate: upgradeRate(baseRate, fails),
+      coin: parseInt(row.coin) || UPGRADE_COIN,
+      book: parseInt(row.book) || 0,
+      levelLimit: parseInt(row.levelLimit),
       bookId: kind === 'weapon' ? 22 : 21,
     };
   }
@@ -1784,8 +1785,6 @@
     const ok = debugOn('noUpgradeFail') ? true : Math.random() * 100 < info.rate;
     if (!object(S.upgradeFails)) S.upgradeFails = {};
     const failKey = upgradeFailKey(kind, id);
-    // 真升级每次尝试都记一次「今日第几次」（费用递增），但绝不累积失败保底
-    if (info.isTrue) bumpTrueUpgrade();
     if (ok) {
       bumpDaily('upgrade', 1, true);
       const arr = kind === 'weapon' ? S.weapons : S.skills;
@@ -1795,14 +1794,15 @@
       }
       delete S.upgradeFails[failKey];      // 成功清零，下次回到基础概率
     } else if (!info.isTrue) {
-      S.upgradeFails[failKey] = Math.min(999, info.fails + 1);   // 普通升级：失败累积，下次 +5%
+      S.upgradeFails[failKey] = Math.min(999, info.fails + 1);   // 普通 1~9 级：每次失败 +2%
     }
     save();
     const nextRate = ok ? null : upgradeRate(info.baseRate, info.fails + 1);
     return {
       ok, rate: info.rate, fails: ok ? 0 : info.fails + 1, nextRate, isTrue: !!info.isTrue,
-      msg: ok ? (info.isTrue ? '真化成功！' : '升级成功！')
-        : '升级失败……再接再厉！' + (!info.isTrue && nextRate ? '（下次成功率 ' + nextRate + '%）' : ''),
+      msg: ok ? (info.isTrue ? '升阶成功。' : '升级成功。')
+        : (info.isTrue ? '升阶失败：继续加油吧。'
+          : '升级失败：继续加油吧。' + (nextRate ? '（下次成功率 ' + nextRate + '%）' : '')),
     };
   }
 
@@ -3962,12 +3962,10 @@
     const claimed = S.dailyClaimDate === date;
     const days = Math.max(0, integer(S.loginStreak, 0, 0));
     /* 连续天数：今天已领 → 记的天数；昨天领过 → 今天续上；否则从 1 重新算。
-     * 奖励随天数小幅递增（第 1 天 150，第 7 天 270），第 7 天多给 1 本挑战书；
-     * 原版登录奖励的 `loginReward.days/goldCount` 是服务端下发，离线版用这条可预期的公式。 */
+     * 金松果：第 1 天 100，连续每多一天 +10，封顶 150；第 7 天再多 1 本挑战书。 */
     const streak = claimed ? Math.max(1, days)
       : (S.dailyClaimDate === yesterdayDate() ? Math.max(1, days) + 1 : 1);
-    const step = Math.min(7, streak);
-    return { date, claimed, streak, gold: 150 + (step - 1) * 20, challengeBooks: 1 + (streak % 7 === 0 ? 1 : 0) };
+    return { date, claimed, streak, gold: Math.min(150, 100 + (streak - 1) * 10), challengeBooks: 1 + (streak % 7 === 0 ? 1 : 0) };
   }
 
   /* ============================================================
@@ -3988,7 +3986,6 @@
     { key: 'upgrade',   name: '升级武器或技能 {n} 次',    steps: [1], minLevel: 2 },   // 固定 1 次；全都升不动时整条不出现，见 questPoolFor
     { key: 'use',       name: '使用 {n} 个道具',          steps: [2, 4, 6] },
     { key: 'buy',       name: '在商店购买 {n} 件道具',    steps: [1, 2, 3] },
-    { key: 'sell',      name: '卖出 {n} 个道具',          steps: [1, 2, 3] },
     { key: 'pickup',    name: '拾取 {n} 次战斗掉落',      steps: [1, 2, 3] },
     { key: 'energy',    name: '消耗 {n} 点体力',          steps: [10, 20, 30] },
   ];
@@ -4253,7 +4250,7 @@
     VIP_LEVELS, VIP_LEVEL_EXP, VIP_MAX_LEVEL, VIP_PLANS, VIP_ENERGY_BONUS, vipEnergyCap, VIP_GEAR_BONUS, GEAR_CAPACITY,
     weaponInst, skillInst, myWeapons, mySkills, wsLimit, ownedWSCount,
     upgradeInfo, doUpgrade, upgradeFails, UPGRADE_COIN, UPGRADE_FAIL_BONUS,
-    trueAttemptsToday, trueUpgradeCost, isTrueLevel, TRUE_SKILL_MAX_LEVEL, TRUE_UPGRADE_GOLD_PER_U,
+    isTrueLevel, TRUE_SKILL_MAX_LEVEL,
     fruitOptions, applyFruitChoice,
     trackEarn, earnOn, ensureYesterdayEarnings, addGold,
     apprenticeTributeTable,

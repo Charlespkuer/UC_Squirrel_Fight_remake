@@ -572,7 +572,7 @@
         btn.innerHTML = '升级<br><small>' + info.rate + '% 🌰' + info.coin + ' 卷' + info.book + '</small>';
         btn.onclick = () => {
           const r = State.doUpgrade(kind, it.id);
-          toast(r.msg + (r.rate != null ? ('（成功率' + r.rate + '%）') : ''));
+          toast(r.msg + (r.nextRate == null && r.rate != null ? ('（成功率' + r.rate + '%）') : ''));
           p.close(); openWS(kind);
         };
       }
@@ -628,6 +628,19 @@
           p.close(); openBag();
         };
         row.appendChild(btn);
+      }
+      /* 现代模式保留背包售卖；经典背包改由 4886 f1 弹窗接管，不经过这里。
+       * 一次卖 1 个，避免手滑清仓；卖完重绘列表。 */
+      const modernMode = !(window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic');
+      const sellPrice = modernMode && State.propSellPrice ? State.propSellPrice(id) : 0;
+      if (sellPrice > 0) {
+        const sellBtn = el('button', 'btn', '卖出 +' + sellPrice);
+        sellBtn.onclick = () => {
+          const r = State.sellProp(Number(id), 1);
+          toast(r.msg);
+          if (r.ok) { p.close(); openBag(); }
+        };
+        row.appendChild(sellBtn);
       }
       list.appendChild(row);
     }
@@ -846,7 +859,7 @@
       '<p>本作基于 2012 年 UC 乐园 H5 游戏《松鼠大战》的原始素材与数值表复刻，仅供怀旧学习交流。</p>' +
       '<p><b>体力</b>：每5分钟恢复1点，上限120。挑战对手消耗10点，竞技场30点。</p>' +
       '<p><b>属性</b>：力量决定伤害，敏捷决定闪避，速度决定出手频率，生命即血量。</p>' +
-      '<p><b>武器/技能</b>：战斗中随机使用。升级需要金松果+卷轴，成功率随等级降低。</p>' +
+      '<p><b>武器/技能</b>：战斗中随机使用。升级需要金松果+卷轴，成功率随等级降低；普通1~10级失败后每次提高2%成功率，真化线不保底。</p>' +
       '<p><b>关卡</b>：10级起挑战螳螂→仙鹤→熊猫，需要挑战书，通关可得装备碎片。</p>' +
       '<p><b>装备</b>：10个碎片+金松果合成（白30/绿40/蓝50）；3件同部位同品质装备+金松果融合升品质（白30/绿40/蓝50/紫60）。</p>' +
       '<p><b>转生</b>：使用转生果回到1级，属性成长更高（保留装备）。</p>' +

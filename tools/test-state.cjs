@@ -132,58 +132,6 @@ test('卖出道具：默认回收字典价格的一半，无价/占位价的道�
   assert.equal(small.gold, 4); assert.equal(s.goldPoint, 4); assert.equal(s.props[1], undefined);
 });
 
-test('背包的卖出弹窗：三种转化丸都能真的卖掉，且卖完退回背包（同天使/恶魔果实，不回主界面）', () => {
-  const g = game(), S = g.State, s = S.state();
-  /* 把 classic-ui.js 里**真实的 sellDialog** 抠出来，用桩跑一遍。
-   * 2026-10 的 bug：函数里写的是裸的 `bagCountOf(id)`，而 classic-ui 里根本没有这个全局
-   * （真名是 State.bagCountOf），于是点「卖出」第一行就 ReferenceError ——
-   * **所有**道具都卖不掉（玩家看到的是敏捷/速度转化丸卖不出去）。
-   * 桩里**故意不提供** bagCountOf 这类全局，逼它自己通过 State 解析 —— 再写回裸标识符就会红。
-   * 2026-10 第二个口径（用户点名的）：这几样卖完要退回**背包**（上一级界面），
-   * 早先误写成 home()（回主界面）—— 玩家观感是「卖一个就被踢出背包回主页」。 */
-  const ui = fs.readFileSync(path.join(root, 'js/classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
-  const at = ui.indexOf('function sellDialog(');
-  assert.ok(at > 0, 'classic-ui.js 里应该有 sellDialog');
-  const fn = ui.slice(at, ui.indexOf('\n  }', at) + 4);
-  /* 「卖一个就退出去」的名单也从源码里读出来（它在 IIFE 里，没导出）——
-   * 这样断言的是**真实名单**：谁把转化丸从名单里去掉，下面退回背包那条就会红。 */
-  const listMatch = ui.match(/const SELL_LEAVE_IDS\s*=\s*\[([^\]]*)\]/);
-  assert.ok(listMatch, 'classic-ui.js 里应该有 SELL_LEAVE_IDS');
-  const SELL_LEAVE_IDS = listMatch[1].split(',').map((x) => Number(x.trim())).filter((n) => Number.isFinite(n));
-  for (const id of [10, 11, 12, 47, 48]) {
-    assert.ok(SELL_LEAVE_IDS.includes(id), id + ' 应当在「卖一个就退出去」的名单里：' + JSON.stringify(SELL_LEAVE_IDS));
-  }
-  const opened = [], left = { closed: 0, home: 0, back: 0 };
-  const ctx = {
-    State: S, propMap: g.propMap, SELL_LEAVE_IDS,
-    esc: (v) => String(v == null ? '' : v), icon: () => '', toast: () => {}, $: () => null,
-    home: () => { left.home++; },
-    modal: (title, content, buttons) => {
-      opened.push({ title, content, buttons });
-      return { element: { querySelector: () => null, querySelectorAll: () => [] }, close() { left.closed++; } };
-    },
-  };
-  vm.createContext(ctx);
-  const sellDialog = vm.runInContext(fn + '\nsellDialog;', ctx, { filename: 'sellDialog.js' });
-  /* 三种转化丸（120）与天使果实 47（100）走同一条路径：点「卖出」→ 扣 1 个 / 加钱 /
-   * 关掉卖出弹窗 / 退回**背包**（调用 after()，也就是背包那条重绘回调）；**不能**调 home()。 */
-  for (const [id, gold] of [[10, 120], [11, 120], [12, 120], [47, 100]]) {
-    s.props[id] = 2; s.goldPoint = 0; opened.length = 0; left.closed = 0; left.home = 0; left.back = 0;
-    sellDialog(id, () => { left.back++; });
-    assert.equal(opened.length, 1, id + ' 应当打开卖出弹窗');
-    assert.match(opened[0].title, /卖出道具/);
-    assert.match(opened[0].content, new RegExp('可回收 ' + gold), id + ' 弹窗里要写清回收价');
-    const btn = opened[0].buttons.find((b) => b.label === '卖出');
-    assert.ok(btn && btn.run, id + ' 弹窗里要有「卖出」按钮');
-    btn.run();
-    assert.equal(S.state().props[id], 1, id + ' 卖一个扣一个');
-    assert.equal(S.state().goldPoint, gold, id + ' 卖一个给 ' + gold + ' 金松果');
-    assert.equal(left.closed, 1, id + ' 卖完要关掉卖出弹窗');
-    assert.equal(left.back, 1, id + ' 卖完要退回背包（调用 after() 重绘背包）');
-    assert.equal(left.home, 0, id + ' 卖完**不能**回主界面（home() 是回主页，不是「上一级界面」）');
-  }
-});
-
 test('橙装的「镶嵌 / 取下宝石」必须真的出现在详情弹窗里（按钮行不能被挤到画布外）', () => {
   const g = game(), S = g.State, s = S.state();
   s.level = 70; s.goldPoint = 100000;
@@ -558,11 +506,12 @@ test('存档往返：剧情「只播一次」的记账与剧情模式开关必�
   assert.equal(S.state().tower.retry, null, '坏掉的 retry（层号 0）当作没有');
 });
 
-test('每日任务种类够多（16 种挑 4 条），计数器覆盖全部任务', () => {
+test('每日任务种类够多（15 种挑 4 条，不含卖出），计数器覆盖全部任务', () => {
   const g = game(), S = g.State, s = S.state();
-  assert.equal(S.QUEST_TYPES.length, 16, '16 种任务');
+  assert.equal(S.QUEST_TYPES.length, 15, '15 种任务');
   const keys = S.QUEST_TYPES.map((t) => t.key);
-  assert.equal(new Set(keys).size, 16, 'key 不重复');
+  assert.equal(new Set(keys).size, 15, 'key 不重复');
+  assert.ok(!keys.includes('sell'), '每日任务不再包含卖出');
   const list = S.questStatus();
   assert.equal(list.length, 4, '每天 4 条');
   assert.equal(new Set(list.map((q) => q.key)).size, 4, '同一天不重复抽同一种');
@@ -570,7 +519,7 @@ test('每日任务种类够多（16 种挑 4 条），计数器覆盖全部任�
   for (const q of list) assert.ok(q.need > 0 && q.name && !q.name.includes('{n}'), '任务文案要填好目标：' + q.name);
 });
 
-test('每日任务计数：合成/融合装备、宝石、使用/购买/卖出道具、拾取、天梯/切磋/挑战', () => {
+test('每日任务计数：合成/融合装备、宝石、使用/购买道具、拾取、天梯/切磋/挑战', () => {
   const g = game(), S = g.State, s = S.state();
   S.questStatus();   // 建好当天的计数器
   const c = (key) => s.dailyCounters[key] || 0;
@@ -614,10 +563,6 @@ test('每日任务计数：合成/融合装备、宝石、使用/购买/卖出�
   s.goldPoint = 1000;
   S.buyProp(1, 2);
   assert.equal(c('buy'), 2);
-  // 卖出天使果实 → sell
-  s.props[47] = 3;
-  S.sellProp(47, 2);
-  assert.equal(c('sell'), 2);
   // 战斗类型 → challenge / rank / spar（另加 fight/win）
   const entry = (kind) => ({ me: { name: '我' }, foe: { name: '敌' }, kind, region: 0,
     result: { winner: 0, rounds: [{ attacker: 0, hpAfter: [10, 0] }], maxHp: [40, 40] } });
@@ -676,37 +621,37 @@ test('破损字段得到校正，非对象存档被拒绝', () => {
   }
 });
 
-test('连续登录：第2天起递增，第7天多给1本挑战书；断签回第1天', () => {
+test('连续登录：第1天100，每多一天+10，150封顶；第7天多给1本挑战书，断签回第1天', () => {
   const g = game();
   const day = 24 * 60 * 60 * 1000;
   const d1 = g.State.dailyStatus();
-  assert.equal(d1.streak, 1); assert.equal(d1.gold, 150); assert.equal(d1.challengeBooks, 1);
+  assert.equal(d1.streak, 1); assert.equal(d1.gold, 100); assert.equal(d1.challengeBooks, 1);
   assert.equal(g.State.claimDaily().ok, true);
   for (let n = 2; n <= 7; n++) {
     g.advance(day);
     const d = g.State.dailyStatus();
     assert.equal(d.streak, n, '第 ' + n + ' 天连续');
-    assert.equal(d.gold, 150 + (n - 1) * 20);
+    assert.equal(d.gold, Math.min(150, 100 + (n - 1) * 10));
     assert.equal(d.challengeBooks, n === 7 ? 2 : 1);
     assert.equal(g.State.claimDaily().ok, true);
   }
   assert.equal(g.State.state().loginStreak, 7);
   g.advance(day * 3);                       // 断签三天
   const d8 = g.State.dailyStatus();
-  assert.equal(d8.streak, 1); assert.equal(d8.gold, 150);
+  assert.equal(d8.streak, 1); assert.equal(d8.gold, 100);
 });
 
 test('每日奖励按照本地日期发放，同日重载后不重复领取', () => {
   const g = game(), s = g.State.state();
   assert.equal(g.State.claimDaily().ok, true);
-  assert.equal(s.goldPoint, 250); assert.equal(s.props[23], 1);
+  assert.equal(s.goldPoint, 200); assert.equal(s.props[23], 1);
   assert.equal(g.State.claimDaily().ok, false);
   g.State.load(); assert.equal(g.State.claimDaily().ok, false);
   g.advance(6 * 60 * 1000);
   assert.equal(g.State.dailyStatus().claimed, false);
-  const day2Gold = g.State.dailyStatus().gold;   // 连续登录第 2 天：150 + 20
+  const day2Gold = g.State.dailyStatus().gold;   // 连续登录第 2 天：100 + 10
   assert.equal(g.State.claimDaily().ok, true);
-  assert.equal(g.State.state().goldPoint, 250 + day2Gold); assert.equal(g.State.state().props[23], 2);
+  assert.equal(g.State.state().goldPoint, 200 + day2Gold); assert.equal(g.State.state().props[23], 2);
 });
 
 test('旧存档首次迁移每日统计日期时保留当日数据，重载不清零', () => {
@@ -749,7 +694,7 @@ test('隔日加载会日切；每日礼包领取本身不清除任何统计', ()
   same([next.dailyWins, next.dailyFails, next.joinRankCount], [0, 0, 0]);
   assert.equal(next.dailyStatsDate, g.State.localDate());
   assert.equal(g.State.dailyStatus().claimed, true);
-  assert.equal(next.goldPoint, 250); assert.equal(next.props[23], 1);
+  assert.equal(next.goldPoint, 200); assert.equal(next.props[23], 1);
 });
 
 test('只调整设备 Date.now 时，统计与每日奖励共用同一本地日期', () => {
@@ -784,34 +729,34 @@ test('升级遵循原表等级与资源限制，零卷轴不会产生 NaN', () =
   assert.equal(g.State.doUpgrade('weapon', 1).ok, false);
   s.level = 5;
   assert.equal(g.State.doUpgrade('weapon', '1').ok, true);
-  assert.equal(s.weapons[0], '1:2'); assert.equal(s.goldPoint, 60);   // 第 5 项：一次 40 松果
+  assert.equal(s.weapons[0], '1:2'); assert.equal(s.goldPoint, 50);   // 原表第 1 行 coin = 50
   assert.equal(s.props[22], undefined);
   s.level = 7;
   assert.equal(g.State.doUpgrade('weapon', 1).ok, false);
-  assert.equal(s.goldPoint, 60);
+  assert.equal(s.goldPoint, 50);
   s.props[22] = 7;
   assert.equal(g.State.doUpgrade('weapon', 1).ok, true);
   assert.equal(s.props[22], 0); assert.equal(s.weapons[0], '1:3');
 });
 
-test('升级一次 40 松果；失败后成功率每次 +5%，封顶 100%，成功清零', () => {
-  // 把随机源钉成 1 → 概率判定必定失败，可以确定性地看失败累积
+test('普通1~9级升级一次 50 松果；每次失败 +2%，封顶 100%，成功清零', () => {
+  // 把随机源钉成 1 → 概率判定必定失败
   const g = game(), S = g.State, s = S.state();
   g.math.random = () => 1;
   s.weapons = ['15:9']; s.level = 40; s.goldPoint = 100000; s.props[22] = 9999;
   const rates = [];
   for (let i = 0; i < 5; i++) { rates.push(S.upgradeInfo('weapon', 15).rate); S.doUpgrade('weapon', 15); }
-  assert.deepEqual(rates, [10, 15, 20, 25, 30], '每次失败 +5%');
-  assert.equal(S.upgradeInfo('weapon', 15).coin, 40, '一次 40 松果');
-  for (let i = 0; i < 30; i++) S.doUpgrade('weapon', 15);
-  assert.equal(S.upgradeInfo('weapon', 15).rate, 100, '封顶 100%');
+  assert.deepEqual(rates, [10, 12, 14, 16, 18], '普通升级每次失败 +2%');
+  assert.equal(S.upgradeInfo('weapon', 15).coin, 50, '一次 50 松果');
+  for (let i = 0; i < 50; i++) S.doUpgrade('weapon', 15);
+  assert.equal(S.upgradeInfo('weapon', 15).rate, 100, '失败够多后封顶 100%');
   // 随机源钉成 0 → 必定成功，成功后失败计数清零
   const g2 = game(), S2 = g2.State, s2 = S2.state();
   g2.math.random = () => 0;
   s2.weapons = ['15:9']; s2.level = 40; s2.goldPoint = 100000; s2.props[22] = 9999;
-  assert.equal(S2.upgradeFails('weapon', 15), 0);
   assert.equal(S2.doUpgrade('weapon', 15).fails, 0);
   assert.equal(S2.upgradeFails('weapon', 15), 0, '成功即清零');
+  assert.equal(s2.weapons[0], '15:10');
 });
 
 test('卖出装备按品质给价：白55-60 / 绿60-65 / 蓝65-70 / 紫90-110 / 橙180-220', () => {
@@ -960,7 +905,7 @@ test('超级松鼠特权 8：体力上限在当前等级上限之上 +60，到�
   assert.equal(S.state().maxEnergy, S.energyCapForLevel(50), '到期读档按等级上限');
 });
 
-test('真·武器/真·技能：成功率沿用原表、费用按当日次数递增、24:00 清零、不吃失败保底', () => {
+test('真·武器/真·技能：成功率与费用走原表，真化不保底；普通升级每次失败 +2%', () => {
   const g = game(), S = g.State, s = S.state();
   s.level = 70; s.goldPoint = 1000000; s.props[21] = 9999; s.props[22] = 9999;
   // 真1~真5 的成功率就是原表 upgradeMap 第 10~14 行
@@ -975,26 +920,31 @@ test('真·武器/真·技能：成功率沿用原表、费用按当日次数递
   // 真5 之后到顶
   s.skills = ['12:15'];
   assert.equal(S.upgradeInfo('skill', 12).max, true, '真5 是上限');
-  // 费用：当日第 N 次 = 2N U点 × 5 金松果 = 10/20/30…
-  s.skills = ['12:10']; s.trueUpgrades = { date: S.localDate(), count: 0 };
-  g.math.random = () => 1;                       // 必定失败，纯粹看费用与计数
+  // 标准升阶（showWeaponSkill3 → upgradeWeapon(...,3,1)）：coin/book 与普通升级同一张表
+  s.skills = ['12:10'];
+  g.math.random = () => 1;                       // 必定失败，等级停在 10
   const costs = [];
-  for (let i = 0; i < 5; i++) { costs.push(S.upgradeInfo('skill', 12).coin); S.doUpgrade('skill', 12); }
-  assert.deepEqual(costs, [10, 20, 30, 40, 50], '费用按当日次数递增');
+  for (let i = 0; i < 5; i++) {
+    const info = S.upgradeInfo('skill', 12);
+    costs.push([info.coin, info.book]);
+    S.doUpgrade('skill', 12);
+  }
+  assert.deepEqual(costs, [[100, 25], [100, 25], [100, 25], [100, 25], [100, 25]],
+    '真1 标准升阶：100 松果 + 25 技能卷轴，固定不递增');
   const after = S.upgradeInfo('skill', 12);
-  assert.equal(after.fails, 0, '真升级绝不累积失败保底');
-  assert.equal(after.rate, 100, '真升级的成功率始终是原表值');
-  // 24:00 清零
-  g.advance(86400000);
-  assert.equal(S.trueAttemptsToday(), 0, '换天次数清零');
-  assert.equal(S.upgradeInfo('skill', 12).coin, 10, '次日费用回到第一次');
-  // 普通升级（9→10）仍然是 40 松果、仍然吃失败保底
+  assert.equal(after.fails, 0, '真化线没有失败保底');
+  assert.equal(after.rate, 100, '真1 成功率固定为原表 100%');
+  s.skills = ['12:11'];
+  for (let i = 0; i < 3; i++) S.doUpgrade('skill', 12);
+  assert.equal(S.upgradeInfo('skill', 12).rate, 8, '真2 失败三次仍是 8%：真化线不吃 +2% 保底');
+  // 普通升级（9→10）走第 9 行：50 松果、10% 固定
   s.skills = ['12:9'];
   const normal = S.upgradeInfo('skill', 12);
-  assert.equal(normal.coin, 40);
+  assert.equal(normal.coin, 50);
   assert.equal(normal.isTrue, false);
+  s.props[21] = 9999;
   S.doUpgrade('skill', 12);
-  assert.equal(S.upgradeInfo('skill', 12).rate, 15, '普通升级失败仍然 +5%');
+  assert.equal(S.upgradeInfo('skill', 12).rate, 12, '普通升级失败一次 +2%');
 });
 
 test('每日任务「抽取每日幸运抽奖」最多要求 2 次', () => {
@@ -1199,10 +1149,37 @@ test('不使用药剂的战斗不消耗有效次数，被动技能按原字典�
   const g = game(), s = g.State.state();
   s.skills = ['1:1', '2:2', '3:3', '4:1']; s.propsStates[3] = 20; s.propsStates[7] = 20;
   const stats = g.State.totalStats({ useProps: false });
-  same(stats, { power: s.power + 2, agility: s.agility + 4, speed: s.speed + 4, hp: s.maxHp + 5 });
+  same(stats, { power: s.power + 2, agility: s.agility + 4, speed: s.speed + 3, hp: s.maxHp + 8 });
+  /* 真化被动按原表“再提高 N”逐档累加：力王真5 +39、风驰 +24、身强 +180。 */
+  s.skills = ['1:15', '3:15', '4:15'];
+  const trueStats = g.State.totalStats({ useProps: false });
+  same(trueStats, { power: s.power + 39, agility: s.agility, speed: s.speed + 24, hp: s.maxHp + 180 });
   g.State.fightReward(true, { useProps: false });
   assert.equal(s.propsStates[3], 20); assert.equal(s.propsStates[7], 20);
   g.State.fightReward(true); assert.equal(s.propsStates[3], 19);
+});
+
+test('真化武器/技能数值严格对齐 ssfight 原表（不是真5端点线性插值）', () => {
+  const g = game(), G = g.GData;
+  // “有 N% 几率”类：当档绝对值
+  assert.deepEqual([11, 12, 13, 14, 15].map((lv) => G.trueSkillValue(9, lv)), [2, 5, 9, 14, 20], '暴击 4 倍几率');
+  assert.deepEqual([11, 12, 13, 14, 15].map((lv) => G.trueSkillValue(10, lv)), [0.5, 1, 2, 3, 5], '皮糙减暴击');
+  assert.deepEqual([11, 12, 13, 14, 15].map((lv) => G.trueSkillValue(8, lv)), [8, 16, 28, 40, 56], '色诱脱装备');
+  // “将再提高 N”类：逐真级累加
+  assert.deepEqual([11, 12, 13, 14, 15].map((lv) => G.trueSkillValue(14, lv)), [2, 5, 9, 14, 20], '小宇宙累计 +20%');
+  assert.deepEqual([11, 12, 13, 14, 15].map((lv) => G.trueSkillValue(18, lv)), [6, 14, 24, 36, 54], '吸铁累计 +54%');
+  assert.deepEqual([11, 12, 13, 14, 15].map((lv) => G.trueSkillValue(24, lv)), [8, 16, 26, 36, 48], '致命反击累计 +48%');
+  // 被动：1~10 级基础 + 真化累加
+  assert.equal(G.passiveBonus(1, 15), 39, '力王真5 +39');
+  assert.equal(G.passiveBonus(3, 15), 24, '风驰真5 +24');
+  assert.equal(G.passiveBonus(4, 15), 180, '身强真5 +180');
+  assert.equal(G.passiveBonus(5, 15), 47, '武器好手真5 +47');
+  // 真武器追加效果是固定一次，不是每真级叠加
+  assert.equal(G.trueWeaponBonus({ id: 4, level: 15 }, 'combo'), 5, '西瓜刀真化 +5% 连击');
+  assert.equal(G.trueWeaponBonus({ id: 4, level: 10 }, 'combo'), 0, '普通形态不生效');
+  // 真武器基础伤害按 harmAdd1 逐真级累计
+  const w = g.State.weaponInst('4:15');
+  assert.equal(w.harmLo, 142); assert.equal(w.harmHi, 150, '西瓜刀真5 142-150');
 });
 
 const fighter = (extra) => Object.assign({ name: '松鼠', level: 1, power: 10, agility: 10, speed: 10, hp: 100, weapons: [], skills: [] }, extra);
@@ -1268,7 +1245,7 @@ test('高速行动不会饿死较慢的一方，速度翻倍约行动两倍', ()
   const g = game(); g.math.random = () => 0.8;
   const result = g.Sim.simulate(fighter({ speed: 200, hp: 100000 }), fighter({ speed: 100, hp: 100000 }));
   const counts = [0, 0]; result.rounds.forEach((r) => counts[r.attacker]++);
-  assert.equal(counts[0], 80); assert.equal(counts[1], 40);
+  assert.equal(counts[0], 40); assert.equal(counts[1], 20);
 });
 
 test('无敌模式：玩家血量只增不减（残血进场也先顶满），超时不会按血量比例判负', () => {
@@ -1488,16 +1465,16 @@ test('每日任务按角色等级抽题：做不了的任务不会出现，升�
   const upgradeType = S.QUEST_TYPES.find((t) => t.key === 'upgrade');
   assert.deepEqual(Array.from(upgradeType.steps), [1], '升级任务固定 1 次');
   s.weapons = ['1:1'];
-  assert.equal(count(1), 10, '1 级池子：' + S.questPoolFor(1).map((t) => t.key).join(','));
+  assert.equal(count(1), 9, '1 级池子（已去掉卖出）：' + S.questPoolFor(1).map((t) => t.key).join(','));
   assert.equal(S.hasUpgradableWS(2), false, '2 级时 1 级武器还升不动（需要玩家 5 级）');
-  assert.equal(count(2), 10, '升不动就不该出现升级任务');
-  assert.equal(count(4), 10);
+  assert.equal(count(2), 9, '升不动就不该出现升级任务');
+  assert.equal(count(4), 9);
   assert.equal(S.hasUpgradableWS(5), true, '5 级起 1→2 的等级门槛满足');
-  assert.equal(count(5), 11);
-  assert.equal(count(10), 13);
-  assert.equal(count(11), 14);
-  assert.equal(count(30), 15);
-  assert.equal(count(45), 16, '45 级才是全部 16 种');
+  assert.equal(count(5), 10);
+  assert.equal(count(10), 12);
+  assert.equal(count(11), 13);
+  assert.equal(count(30), 14);
+  assert.equal(count(45), 15, '45 级才是全部 15 种');
   // 全部顶到等级上限之后：池子里没有升级任务，当天已抽到的升级任务也会被换掉
   s.weapons = ['1:15'];
   s.level = 70;
@@ -1787,6 +1764,9 @@ test('村庄建筑：祭坛当日状态、神迹属性点、幻兽升级/孵化/
   assert.equal(altar.level, 1);
   const buff = S.claimBuildingBuff('altar');
   assert.equal(buff.ok, true);
+  const buffKind = buff.buffId === 1 ? 'arenaExp' : buff.buffId === 2 ? 'arenaProp' : 'stageGold';
+  assert.equal(S.activeBuildingBuff(buffKind), true, '祭坛当日状态必须被判为生效');
+  assert.ok(S.buildingDoubleRate('altar', buffKind) > 0, '祭坛等级对应的双倍几率要落实');
   assert.equal(S.claimBuildingBuff('altar').ok, false, '同一天只能领一次');
   // 祭坛升级（倒计时完成结算）
   assert.equal(S.upgradeBuilding('altar').ok, true);
@@ -1857,6 +1837,30 @@ test('幻兽加血：没有 maxHp 的对手按当前满血加上限，不能被�
   assert.equal(target.hp, 700 + bonusHp, '当前血量也要一起加上');
   const foe = S.genAI(70, '', { levelJitter: 0 });
   assert.equal(foe.maxHp, foe.hp, '随机对手生成时就要带满血上限');
+});
+
+/* 幻兽技能真正进 Sim：行动时触发要发一条独立的 `action:'pet'` 回合，
+ * 经典回放据此按 `29 + petId` 播原版动画；`isRound:0` 表示不占 60 手行动上限。 */
+test('幻兽技能进战斗：奋力一击会产出可回放的 pet 回合', () => {
+  const g = game(), Sim = g.Sim;
+  assert.equal(Sim.petSkillValueOf(1, 10), 60, '奋力一击 10 级 = 24 + 4×9');
+  assert.equal(Sim.petSkillTriggerOf(1, 10), 30, '奋力一击固定 30%');
+  const me = { name: '我', level: 30, hp: 5000, maxHp: 5000, power: 80, agility: 80, speed: 90,
+    weapons: [{ id: 15, level: 10 }], skills: [{ id: 8, level: 1 }],
+    pets: [{ id: 1, name: '蛮犀牛', grade: 1, level: 10, skillId: 1 }] };
+  const foe = { name: '木桩', level: 30, hp: 9000, maxHp: 9000, power: 10, agility: 10, speed: 10,
+    weapons: [], skills: [] };
+  let pet = null;
+  for (let i = 0; i < 40 && !pet; i++) {
+    const result = Sim.simulate(me, foe);
+    pet = (result.rounds || []).find((r) => r.action === 'pet');
+  }
+  assert.ok(pet, '40 场里至少要掷中一次 30% 的行动协战');
+  assert.equal(pet.petId, 1);
+  assert.equal(pet.petSkillId, 1);
+  assert.equal(pet.isRound, 0, '幻兽协战不占行动上限');
+  assert.ok(pet.dmg > 0, '奋力一击要真的扣血');
+  assert.ok(Array.isArray(pet.hpAfter) && pet.hpAfter.length === 2, '回合快照要带双方血量');
 });
 
 /* 果实种子合成：原版走「道具合成」页；规则统一收进 State.composeSeed。 */

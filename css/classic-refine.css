@@ -187,7 +187,12 @@
 .rank-claim-reward b{font-size:28px;color:#9a1a06}
 .rank-claim-reward span:last-child{margin-left:auto;font-size:18px;color:#8a6a3a}
 .rank-claim-note{margin:0;font-size:20px;color:#9a1a06}
-.classic-page.classic-tower{background:linear-gradient(var(--tower-bg-top,#4c7c50) 0 100px,var(--tower-bg-bottom,#25452e));transition:background .8s ease}
+/* 经典村庄「征战」进的挑战塔 / 无尽塔：整页**纯色**底（用户口径）。
+   ⚠ 必须带上 `html[data-ui-mode="classic"]` 前缀，否则会被 classic.css 里
+   `html[data-ui-mode="classic"] .classic-page` 的村庄底图（classic-bg）盖掉 —— 之前那版
+   渐变一直没生效就是这个原因。无尽塔的 `--tower-bg` 由 tower-ui 按层写入，挑战塔是固定绿。 */
+html[data-ui-mode="classic"] .classic-page.classic-tower,
+.classic-page.classic-tower{background:var(--tower-bg,#4c7c50);transition:background-color .8s ease}
 .classic-page.classic-tower .classic-board{top:92px;bottom:18px;border-radius:38px;padding:18px 26px;box-shadow:inset 0 0 0 4px #fff8d8,0 4px 0 #142b1a;background:linear-gradient(#fff8e3,#eedcb4)}
 .classic-page.classic-tower:has(.page-footer) .classic-board{bottom:103px}
 .classic-tower-bar{position:absolute;top:10px;left:20px;right:20px;height:66px;display:flex;align-items:center;gap:18px;z-index:5}
@@ -195,13 +200,18 @@
 .classic-tower .tower-page{height:100%;gap:18px}
 .classic-tower .foe-portrait img{width:100%;height:100%;max-height:100%;object-fit:contain}
 .classic-tower .foe-portrait{height:92px;overflow:hidden;border-radius:14px}
-.classic-tower .tower-plan{display:flex!important;flex-direction:column!important;gap:8px;width:100%;align-items:stretch}
-.classic-tower .tower-plan li{display:grid!important;grid-template-columns:92px minmax(0,1fr)!important;grid-template-rows:auto auto auto!important;column-gap:8px;row-gap:2px;align-items:center;align-content:center;justify-content:flex-start;text-align:left;padding:4px 8px}
+/* 挑战塔的「本层对手预告」在经典外壳里是**横向一排**（用户口径 2026-10-19）：
+   4~5 张卡片一字排开，每张 = 立绘在上、名字/类型/精英标在下 —— 卡片本体直接沿用
+   tower.css 的默认 `.tower-plan`（那套本来就是横向卡），下面这组 !important 只描述
+   **纵向列表**（无尽塔的对手列 `.vertical`、进塔页 BOSS 一览 `.boss-grid`），
+   所以用 `:not(.horizontal)` 把挑战塔那一份排除出去（`.horizontal` 由 tower-ui 的 planHtml 挂上）。 */
+.classic-tower .tower-plan:not(.horizontal){display:flex!important;flex-direction:column!important;gap:8px;width:100%;align-items:stretch}
+.classic-tower .tower-plan:not(.horizontal) li{display:grid!important;grid-template-columns:92px minmax(0,1fr)!important;grid-template-rows:auto auto auto!important;column-gap:8px;row-gap:2px;align-items:center;align-content:center;justify-content:flex-start;text-align:left;padding:4px 8px}
 .classic-tower .tower-plan .foe-portrait{grid-column:1!important;grid-row:1 / span 3!important;width:92px!important;height:80px!important;align-self:center;margin:0}
 .classic-tower .tower-plan .foe-portrait:has(.sf-classic-foe){background:rgba(255,248,230,.9)!important;border:2px solid #e2c68f!important;border-radius:12px!important;box-shadow:none!important;overflow:visible!important}
-.classic-tower .tower-plan li > b{grid-column:2!important;grid-row:1!important;justify-self:start!important;max-width:100%;min-width:0;white-space:normal!important;overflow-wrap:anywhere;text-align:left;line-height:1.15;font-size:19px}
-.classic-tower .tower-plan li > .tower-plan-type{grid-column:2!important;grid-row:2!important;justify-self:start!important;max-width:100%;box-sizing:border-box;white-space:normal!important;overflow-wrap:anywhere;text-align:left;line-height:1.2;font-size:16px}
-.classic-tower .tower-plan li > .elite-tag{grid-column:2!important;grid-row:3!important;justify-self:start!important;max-width:100%;box-sizing:border-box;white-space:normal!important;overflow-wrap:anywhere}
+.classic-tower .tower-plan:not(.horizontal) li > b{grid-column:2!important;grid-row:1!important;justify-self:start!important;max-width:100%;min-width:0;white-space:normal!important;overflow-wrap:anywhere;text-align:left;line-height:1.15;font-size:19px}
+.classic-tower .tower-plan:not(.horizontal) li > .tower-plan-type{grid-column:2!important;grid-row:2!important;justify-self:start!important;max-width:100%;box-sizing:border-box;white-space:normal!important;overflow-wrap:anywhere;text-align:left;line-height:1.2;font-size:16px}
+.classic-tower .tower-plan:not(.horizontal) li > .elite-tag{grid-column:2!important;grid-row:3!important;justify-self:start!important;max-width:100%;box-sizing:border-box;white-space:normal!important;overflow-wrap:anywhere}
 .classic-tower .tower-plan li > .tower-plan-no{display:none!important}
 .sf-classic-foe{display:block;width:100%;height:100%;overflow:hidden}
 .sf-classic-foe svg{width:100%!important;height:100%!important;display:block}
@@ -480,6 +490,8 @@
 .bag-grid .catalog-cell{justify-content:flex-start;gap:5px}
 .bag-grid .item-icon{width:174px;height:167px;border:4px solid #774b32;border-radius:34px;box-shadow:inset 0 0 0 5px #fffdf4;background:repeating-conic-gradient(from 15deg at 50% 52%,#f7e9b6 0deg 18deg,#d9c087 18deg 38deg)}
 .bag-grid .selected .item-icon{background:repeating-conic-gradient(from 15deg,#d8f982 0deg 22deg,#a8d23e 22deg 42deg);border-color:#287d00}
+/* 鼠标扫过即选中：悬停光也走绿色，不再用全局的黄色 sf-hover 光。 */
+.bag-grid .catalog-cell.sf-feedback.sf-hover{filter:drop-shadow(0 0 6px rgba(82,150,35,.95)) brightness(1.04)}
 .bag-grid .item-caption{font:36px/44px Georgia,"SimSun","Songti SC","STSong",serif;color:#8e1006}
 .bag-grid .selected .item-caption{color:#4f7c1d;font-weight:bold}
 .bag-grid .item-icon:has(.reference-art){border:0;box-shadow:none;background:none;overflow:hidden}
@@ -999,6 +1011,9 @@
  * 不接管点击，所以整层 pointer-events:none；z-index 压在页面之上、战果/弹窗之下。 */
 #ui>.sf-guide-view{position:absolute;inset:0;z-index:15;pointer-events:none;overflow:hidden}
 .sf-guide-view>svg{display:block;width:100%;height:100%}
+/* 引导要指弹窗（f8/f9「使用」「确定」，弹窗 z-index 30）或升级页（f13「确定」，60）
+ * 里的真按钮：这两步把整层抬到它们上面，不然金环与手指会被压暗层盖住。 */
+#ui>.sf-guide-view.above{z-index:65}
 /* ===== 经典道具合成（ssfight 4886 f5 + 4402）=====
  * 合成页/结果页都是原版库元件，盖在背包之上；只负责压暗底页并让按钮收点击，
  * 版式、文字、图标位全部来自 4886 / 4402，不在 CSS 里重画。 */
@@ -1013,3 +1028,27 @@
 .bag-grid .catalog-cell.selected .item-icon>img{position:relative;z-index:1}
 .bag-grid .catalog-cell.selected .item-icon::after{content:'';position:absolute;inset:0;border-radius:inherit;
   z-index:0;background:rgba(125,190,45,.26);box-shadow:inset 0 0 0 7px rgba(205,255,131,.36);pointer-events:none}
+
+/* ===== 经典背包「道具使用」：ssfight 4886 f1 =====
+ * 原版「道具1」弹窗；版式/文字/按钮全部来自素材，CSS 只负责盖住背包并让整层收点击。
+ * 使用/取消的左右位置由 ui-prop-use.js 在挂载后交换，不在 CSS 里重排。 */
+#ui>section.sf-prop-use-view{position:absolute;inset:0;z-index:40;pointer-events:auto!important;overflow:hidden;
+  /* 与 `.classic-page` 用同一条纵向延伸：背包页按 920:560 补到 712，
+   * 弹窗层不能只铺 690，否则打开/关闭时底图会被拉伸、看起来在漂移。 */
+  top:-11.087px;bottom:-11.087px}
+#ui>section.sf-compose-view{top:-11.087px;bottom:-11.087px}
+.sf-prop-use-view>svg{display:block;width:100%;height:100%}
+.sf-prop-use-view .sf-prop-use-icon{pointer-events:none}
+/* 商店购买键常态：4505 第 3 帧是深灰胶囊，提到「取消」键（3150）那一档浅灰；
+ * hover 仍由素材第 2 帧（绿色）负责，class 只在第 3 帧的胶囊节点上。 */
+.sf-prop-buy-idle{filter:brightness(1.72) sepia(.3) saturate(.9)}
+
+/* ===== 经典主界面体力条悬停提示 =====
+ * 透明热区盖在体力条（energyMc + 当前/上限数字）上；提示用 DOM 气泡画在条下方。
+ * 位置由 ui-main.js 按设计像素写死，外层 --uiscale 不会二次放大。 */
+.ssfight-energy-hover{position:absolute;z-index:8;pointer-events:auto;cursor:help}
+.ssfight-energy-tip{display:none;position:absolute;left:50%;top:calc(100% + 6px);transform:translateX(-50%);
+  white-space:nowrap;padding:4px 12px;border:2px solid #8b5a1c;border-radius:999px;
+  background:#fff7dcf2;color:#5b3510;font:700 13px/1.35 'Microsoft YaHei',sans-serif;
+  box-shadow:0 2px 8px #0004;pointer-events:none;z-index:9}
+.ssfight-energy-hover:hover .ssfight-energy-tip{display:block}

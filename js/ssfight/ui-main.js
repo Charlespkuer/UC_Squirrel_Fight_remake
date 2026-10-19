@@ -668,6 +668,11 @@
     const main = view && view.byName ? view.byName('main') : null;
     if (!main) return false;
     if (!(window.State && State.state && State.state())) return false;
+    /* 经典主界面没有服务端推送，也没有现代首页的 `drawHomeHud` 轮询；
+     * 这里必须主动跑体力结算，否则停在主界面时体力永远不涨（用户 2026-10 报的
+     * "体力永远不恢复"）。1s 一次的定时器会调用本函数，tickEnergy 内部按 5 分钟
+     * 的间隔结算，重复调用是幂等的。 */
+    if (State.tickEnergy) { try { State.tickEnergy(); } catch (e) {} }
     const S = State.state();
     const nextExp = Math.max(1, (window.GData && GData.nextExp) ? GData.nextExp(S.level)
       : (S.nextExp || 1));
@@ -762,7 +767,55 @@
     /* 礼包/活动图标的有奖动效要跟着可领取状态走：领完奖回到主界面就停，不能一直闪。 */
     syncGiftVisibility(view && (view.el || view.g));
     syncGiftAttention(view && (view.el || view.g));
+    updateEnergyTip(view);
     return true;
+  }
+
+  /** 主界面体力条悬停提示：距下次自然恢复 1 点体力还有多久。
+   *  - 热区是一块透明 DOM（SVG 里的体力条在 UI 路由下 pointer-events 被关掉）；
+   *  - 位置用 `stateLayoutProbe` 折回设计像素，外层 `--uiscale` 不会把它放大两次；
+   *  - 文案每秒随 refreshValues 刷新；体力满/超出上限时明确说“不恢复”。 */
+  function updateEnergyTip(view) {
+    const host = view && view.el;
+    const main = view && view.byName ? view.byName('main') : null;
+    if (!host || !main || !host.isConnected) return;
+    let hit = host.querySelector('.ssfight-energy-hover');
+    let tip = hit && hit.querySelector('.ssfight-energy-tip');
+    if (!hit) {
+      hit = document.createElement('div');
+      hit.className = 'ssfight-energy-hover';
+      tip = document.createElement('span');
+      tip.className = 'ssfight-energy-tip';
+      tip.setAttribute('role', 'status');
+      hit.appendChild(tip);
+      host.appendChild(hit);
+    }
+    const nodes = ['energyMc', 'energy', 'maxEnergy']
+      .map((n) => { const c = main.byName(n); return c && (c.g || c); })
+      .filter(Boolean);
+    if (!nodes.length) { hit.style.display = 'none'; return; }
+    const hr = host.getBoundingClientRect();
+    const hs = (stateLayoutProbe(host).scale) || 1;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const n of nodes) {
+      const r = n.getBoundingClientRect();
+      x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top);
+      x1 = Math.max(x1, r.right); y1 = Math.max(y1, r.bottom);
+    }
+    hit.style.display = '';
+    hit.style.left = (((x0 - hr.left) / hs) - 2) + 'px';
+    hit.style.top = (((y0 - hr.top) / hs) - 2) + 'px';
+    hit.style.width = (((x1 - x0) / hs) + 4) + 'px';
+    hit.style.height = (((y1 - y0) / hs) + 4) + 'px';
+    const s = State.state();
+    let text;
+    if (s.energy > s.maxEnergy) text = '体力已超过自然上限（' + s.energy + '/' + s.maxEnergy + '），不会自然恢复';
+    else if (s.energy >= s.maxEnergy) text = '体力已满';
+    else {
+      const cd = State.energyCountdown ? State.energyCountdown() : '';
+      text = cd ? ('距离恢复 1 点体力还有 ' + cd) : '正在恢复体力…';
+    }
+    if (tip.textContent !== text) tip.textContent = text;
   }
 
   /** 把按钮接上复刻版的动作 + **原版 showButton 的悬停选中态**（MainMovie.as:5804-5835：
@@ -1729,6 +1782,10 @@
     /* 建筑等级的结算放在**进村庄**这一刻（原版 `showHomeLand` → `checkUpgraded`，:9507）：
      * 升级完成、神迹发属性点、并把提示弹出来。结算完再重画一次立绘与倒计时。 */
     try { settleVillageBuildings(); } catch (e) { if (window.__errs) window.__errs.push('village buildings: ' + (e && e.message)); }
+    /* 新手引导 f17/f19/f20/f26 都在村庄页（原版 HOME_LAND :9480-9670）。
+     * ⚠ UI.currentScreen() 在村庄页仍是 'home'（openVillage 不改 screen），
+     * 所以这里显式通知一次。 */
+    if (window.SfGuide) { try { SfGuide.onPage('village'); } catch (e) {} }
     return view;
   }
   /** 进村庄时结算"升级完成"（原版 `checkUpgraded` :9763）并把结果告诉玩家。 */

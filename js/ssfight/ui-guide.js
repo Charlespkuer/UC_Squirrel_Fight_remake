@@ -5,16 +5,26 @@
  * `guideMap[nowPage].mcIndex` 切帧；每一帧是一张整屏提示：暗色说明条 +
  * 黄色手指 + 半透明目标按钮示意。这里沿用同一颗 25 帧素材，不另画引导框。
  *
- * 本批接线的是 1~7 帧：第一场战斗 → 自动战斗 → 升级奖励 → 新消息 →
- * 升到 3 级 → 体力消耗/点道具 → 体力药剂。和原版一样，底部按钮按等级解锁：
- * 2 级才有「消息」，3 级才全开（`constructMainMenu`），所以 f4/f6 都等对应等级
- * 到了再在首页出现；8~25 帧（竞技场/祭坛/幻兽/神迹/天梯/征战…）后续补。
+ * 步骤号 = 原版 `nowPage`（guideMap 的键，:19411），frame = 3625 的帧（=`mcIndex`）。
+ * 时间与下一跳照 guideMap / viewMission：
+ *   · 页 2 帧 2.6 秒、页 12 3 秒、页 21/23/24/25 4 秒后自动 doMission；
+ *   · 页 7/8/9/10 由玩家的真实动作推进（开道具详情 → 点「使用」→ 点提示「确定」→
+ *     点背包「返回菜单」），见 doMission(7..10) 与 useProp 成功里的 viewNextMission；
+ *   · 页 11 指首页「开始挑战」，点开挑战页进 12，f12 在原版就是 3 秒自动收尾（next -1）；
+ *   · 页 13 是 5 级白装：原版 showLevelUp 里 `nowPage=13` + viewMission，f13 盖在**升级页**
+ *     的「确定」上（:7160）；点掉进 14（首页「状态」）→ 15（状态页两个页签）→ 22
+ *     （guideMap 15→22，f22 =「赠送你一件白色装备，快去『状态』里找到并穿上它」，
+ *     specailState=1：下次点击就 doMission，:21721）；
+ *   · 页 17/19/20/26 在村庄页，点对应地点推进（HOME_LAND :9529-9622），
+ *     20（神迹）点完先记着，回家时原版置 nowPage=25 → f24（天梯）4 秒自动收；
+ *   · 页 21/23（帧 16）/24（帧 23）都是纯文字帧：4 级 / 10 级 / 15 级，4 秒自动收。
+ * 原版页 16/18 没有任何触发点（guideMap 里孤立），不实现。
  * ========================================================================== */
 (function () {
   'use strict';
   const GUIDE_FILE = 'tags-guide.json';
   const SYMBOL = '3625';
-  /* 帧号 = 原版 `mcIndex`；next = 当前帧播完后自动推进的 nowPage。 */
+  /* next = 当前帧播完后自动推进的 nowPage（99 = 收工）。 */
   const STEPS = {
     1: { frame: 1, ms: 0 },
     2: { frame: 2, ms: 2600, next: 3, stay: false },
@@ -22,8 +32,27 @@
     4: { frame: 4, ms: 4200, next: 5, stay: true },
     5: { frame: 5, ms: 4200, next: 6, stay: true },
     6: { frame: 6, ms: 4200, next: 7, stay: false },
-    7: { frame: 7, ms: 4200, next: 99, stay: false },
+    7: { frame: 7, ms: 0 },                          // 等玩家在第一格道具上点开详情（seeProp）
+    8: { frame: 8, ms: 0, above: true },             // 道具详情弹窗「使用」
+    9: { frame: 9, ms: 0, above: true },             // 「使用X成功。」提示弹窗「确定」
+    10: { frame: 10, ms: 0 },                        // 背包「返回菜单」→ 回主界面
+    11: { frame: 11, ms: 4200, next: 12, stay: false },  // 首页「开始挑战」
+    12: { frame: 12, ms: 3000, next: 99 },           // 挑战页，原版 3 秒自动收
+    13: { frame: 13, ms: 0, above: true },           // 升级页「确定」（5 级白装）
+    14: { frame: 14, ms: 4200, next: 15, stay: false },  // 首页「状态」
+    15: { frame: 15, ms: 0 },                        // 状态页两个页签
+    17: { frame: 17, ms: 0 },                        // 村庄「祭坛」
+    19: { frame: 19, ms: 0 },                        // 村庄「幻兽」
+    20: { frame: 20, ms: 0 },                        // 村庄「神迹」
+    21: { frame: 21, ms: 4000, next: 99 },           // 4 级纯文字
+    22: { frame: 22, ms: 0, clickDismiss: true },    // 状态页：去穿上白装（下次点击收起）
+    23: { frame: 16, ms: 4000, next: 99 },           // 10 级纯文字（guideMap 23 → mcIndex 16）
+    24: { frame: 23, ms: 4000, next: 99 },           // 15 级纯文字
+    25: { frame: 24, ms: 4000, next: 99 },           // 神迹回来：天梯
+    26: { frame: 25, ms: 0 },                        // 村庄「征战」
   };
+  /* 原版等级事件（showLevelUp / showLevelupTips，:7160-7300）→ 步骤号。 */
+  const LEVEL_STEPS = { 4: 21, 5: 13, 10: 23, 15: 24, 20: 17, 25: 19, 30: 20, 35: 26 };
   let current = null;
   let generation = 0;
 
@@ -56,11 +85,32 @@
   function err(e) {
     if (window.__errs) window.__errs.push('SfGuide: ' + (e && (e.stack || e.message) || e));
   }
+  function escText(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
   /* 原版每帧的「目标」是一颗预烘焙的**绿色高亮胶囊**（3589/3590/…），本应叠在
    * 真实按钮上做高亮。但转成 SVG 后它的绿色渐变 + 滤镜没有按原版还原，只剩半透明
    * 黑阴影 —— 用户看到的就是「按钮被蒙了一层黑」。这里把这颗高亮胶囊拿掉，改成
-   * 原位置的**金色描边光环**；真实按钮保持原亮度，黄色手指仍指向它。 */
-  const TARGET_ART = new Set(['3589', '3590', '3591', '3592', '3593', '3595', '3596', '3597', '3598', '3599']);
+   * 跟原位置的**金色描边光环**；真实按钮保持原亮度，黄色手指仍指向它。
+   * 3602/3609 是 f10（背包「返回菜单」）与 f15（状态页页签）的同类胶囊，一并拿掉。 */
+  const TARGET_ART = new Set(['3589', '3590', '3591', '3592', '3593', '3595', '3596', '3597', '3598', '3599', '3602', '3609']);
+  /* 这几步的目标是弹窗/页脚里的**真实 DOM 按钮**，不是素材里预烘焙的位置：
+   * 手与金环都移到真按钮上（7 号已知要左移 16px，见第 44 条用例）。 */
+  const DOM_TARGETS = {
+    7: () => {
+      const page = document.querySelector('.classic-page[data-screen="bag"]');
+      return page && (page.querySelector('.catalog-cell[data-prop="1"] .item-icon') ||
+        page.querySelector('.catalog-cell[data-prop="2"] .item-icon') ||
+        page.querySelector('.catalog-cell[data-prop] .item-icon'));
+    },
+    /* 8：经典背包已换成原版 4886 f1 弹窗，金环贴在那颗「使用」按钮上；
+     * 旧 DOM 选择器留作商店/回退弹窗的兜底。 */
+    8: () => document.querySelector('.sf-prop-use-view [data-prop-use]') ||
+      document.querySelector('.classic-modal-overlay .modal-buttons button[data-action="0"]'),
+    9: () => document.querySelector('.classic-modal-overlay .modal-buttons button[data-action="0"]'),
+    10: () => document.querySelector('.classic-page[data-screen="bag"] footer [data-action="home"]'),
+    13: () => document.querySelector('.sf-levelup-view [depth="20"]'),
+  };
   function highlightTargets(view, stepNo) {
     if (!view || !view.g) return;
     const svg = view.g;
@@ -69,6 +119,7 @@
     const vb = svg.viewBox && svg.viewBox.baseVal;
     if (!sr || !vb || !sr.width || !sr.height) return;
     const nodes = [...svg.querySelectorAll('g[type="sprite"]')].filter((n) => TARGET_ART.has(String(n.getAttribute('sid'))));
+    const rects = nodes.map((n) => { try { return n.getBoundingClientRect(); } catch (e) { return null; } });
     const rings = new Set();
     const toView = (r) => ({
       x: vb.x + (r.left - sr.left) / sr.width * vb.width,
@@ -96,43 +147,48 @@
       ring.setAttribute('pointer-events', 'none');
       (before && before.parentNode ? before.parentNode : svg).insertBefore(ring, before || null);
     };
-
-    /* 背包里的 f7：目标不是 3625 里的固定胶囊，而是**真实的第一格道具**。
-     * 用 DOM 里那颗 .item-icon 的屏幕框重画金环，并把黄色手指挪到道具中心
-     * （原素材的手在 320×196 里是按主界面按钮摆的，直接套到背包会偏上/偏左）。 */
-    if (stepNo === 7) {
-      const page = document.querySelector('.classic-page[data-screen="bag"]');
-      const icon = page && (page.querySelector('.catalog-cell[data-prop="1"] .item-icon') ||
-        page.querySelector('.catalog-cell[data-prop="2"] .item-icon') ||
-        page.querySelector('.catalog-cell[data-prop] .item-icon'));
-      if (icon) {
-        const ir = icon.getBoundingClientRect();
-        const hand = svg.querySelector('g[type="sprite"][sid="3586"]');
-        let before = null;
-        if (hand) {
-          const hr = hand.getBoundingClientRect();
-          const dx = ((ir.left + ir.width / 2) - (hr.left + hr.width / 2)) / sr.width * vb.width;
-          const dy = ((ir.top + ir.height / 2) - hr.bottom) / sr.height * vb.height;
-          const old = hand.getAttribute('transform') || '';
-          hand.setAttribute('transform', 'translate(' + dx.toFixed(2) + ',' + dy.toFixed(2) + ') ' + old);
-          before = hand;
+    const hand = svg.querySelector('g[type="sprite"][sid="3586"]');
+    if (hand && hand.dataset.guideT === undefined) hand.dataset.guideT = hand.getAttribute('transform') || '';
+    const moveHand = (target) => {
+      if (!hand) return null;
+      try {
+        const hr = hand.getBoundingClientRect();
+        const dx = ((target.left + target.width / 2) - (hr.left + hr.width / 2)) / sr.width * vb.width;
+        const dy = ((target.top + target.height / 2) - hr.bottom) / sr.height * vb.height;
+        hand.setAttribute('transform', 'translate(' + dx.toFixed(2) + ',' + dy.toFixed(2) + ') ' + (hand.dataset.guideT || ''));
+        return hand;
+      } catch (e) { return null; }
+    };
+    /* 素材里那颗绿色高亮一律不画（转 SVG 后只剩黑阴影）；真实按钮用金环示意。 */
+    for (const node of nodes) node.style.display = 'none';
+    /* DOM 目标（弹窗按钮 / 升级页确定）是异步挂的：没出现就等一会儿再画，
+     * 最多 ~1.4 秒，之后退回素材原位；8/9 两步没有原位可退，干脆不画。 */
+    let tries = 0;
+    const paint = () => {
+      for (const r of [...svg.querySelectorAll('rect.sf-guide-target')]) r.remove();
+      rings.clear();
+      const domOf = DOM_TARGETS[stepNo];
+      if (domOf) {
+        const el = domOf();
+        if (el && el.isConnected) {
+          const ir = el.getBoundingClientRect();
+          const before = moveHand(ir);
+          addRing(ir, before || nodes[0] || null, stepNo === 7 ? -16 : 0);
+          return;
         }
-        addRing(ir, before || nodes[0] || null, -16);
-        for (const node of nodes) node.style.display = 'none';
-        return;
+        if (tries++ < 12) { setTimeout(paint, 120); return; }
+        if (stepNo === 8 || stepNo === 9) return;
       }
-    }
-
-    for (const node of nodes) {
-      let r = null;
-      try { r = node.getBoundingClientRect(); } catch (e) { r = null; }
-      if (!r || !r.width || !r.height) continue;
-      node.style.display = 'none';
-      /* f3 的目标块在素材里只盖住按钮上沿，硬画一圈会显得错位；这一帧只把暗块拿掉，
-       * 手指仍指向按钮。 */
-      if (stepNo === 3) continue;
-      addRing(r, node);
-    }
+      nodes.forEach((node, i) => {
+        const r = rects[i];
+        if (!r || !r.width || !r.height) return;
+        /* f3 的目标块在素材里只盖住按钮上沿，硬画一圈会显得错位；这一帧只把暗块拿掉，
+         * 手指仍指向按钮。 */
+        if (stepNo === 3) return;
+        addRing(r, node);
+      });
+    };
+    paint();
   }
 
   function freeze(view) {
@@ -147,6 +203,7 @@
     const old = current;
     current = null;
     clearTimeout(old.timer);
+    if (old.dismiss) { try { document.removeEventListener('pointerdown', old.dismiss, true); } catch (e) {} }
     try { if (old.view) old.view.destroy(); } catch (e) {}
     try { if (old.host && old.host.parentNode) old.host.parentNode.removeChild(old.host); } catch (e) {}
   }
@@ -168,6 +225,21 @@
       else hide();
     }, spec.ms);
   }
+  /** 原版 22 号步骤是 specailState=1 的收尾帧（:21721）：下一次按下（isPressedFire）就
+   *  doMission。切页签的那一次点击不算 —— 挂监听推迟一个任务，躲开当前这次事件派发。 */
+  function armClickDismiss(record, stepNo) {
+    setTimeout(() => {
+      if (!current || current !== record || record.step !== stepNo) return;
+      const onDown = () => {
+        document.removeEventListener('pointerdown', onDown, true);
+        if (current !== record || record.step !== stepNo) return;
+        setStep(99);
+        hide();
+      };
+      record.dismiss = onDown;
+      document.addEventListener('pointerdown', onDown, true);
+    }, 80);
+  }
   function show(stepNo, ctx) {
     if (!classic()) { hide(); return; }
     const spec = STEPS[stepNo];
@@ -183,12 +255,12 @@
     const ui = document.getElementById('ui');
     if (!ui) return;
     const host = document.createElement('section');
-    host.className = 'sf-guide-view' + (ctx === 'battle' ? ' battle' : '');
+    host.className = 'sf-guide-view' + (spec.above ? ' above' : '') + (ctx === 'battle' ? ' battle' : '');
     host.setAttribute('aria-hidden', 'true');
     host.dataset.guideStep = String(stepNo);
     ui.appendChild(host);
     const seq = ++generation;
-    current = { seq, host, view: null, timer: 0, step: stepNo, ctx };
+    current = { seq, host, view: null, timer: 0, step: stepNo, ctx, dismiss: null };
     const mine = seq;
     Promise.resolve()
       .then(() => SfRender.load())
@@ -203,6 +275,7 @@
         current.view = view;
         freeze(view);
         highlightTargets(view, spec.frame);
+        if (spec.clickDismiss) armClickDismiss(current, stepNo);
         schedule(current, spec);
       })
       .catch((e) => { err(e); if (current && current.seq === mine) hide(); });
@@ -214,6 +287,12 @@
     if (n === 1) { show(1, 'home'); return; }
     if (n === 2) { setStep(3); show(3, 'home'); return; }
     if (n === 3 || n === 4 || n === 5 || n === 6) { show(n, 'home'); return; }
+    if (n === 10) { setStep(11); show(11, 'home'); return; }   // 从背包「返回菜单」回来
+    if (n === 11 || n === 14) { show(n, 'home'); return; }
+    /* 13：5 级白装。原版是盖在升级页上的（showLevelUp 里 nowPage=13 + viewMission）；
+     * 升级页没起来（素材缺失）时在首页放行到 14，别把流程卡住。 */
+    if (n === 13) { setStep(14); show(14, 'home'); return; }
+    if (n === 21 || n === 23 || n === 24 || n === 25) { show(n, 'home'); return; }
     hide();
   }
   /** 战斗开始时只接第一场：f2「战斗会自动进行」，2.6 秒后推进到 f3。 */
@@ -224,25 +303,97 @@
     if (n === 2) { show(2, 'battle'); return; }
     hide();
   }
-  /** 经典背包页的上下文提示（f7 体力药剂）。f4/f6 都在首页，等底部按钮按等级出现。 */
+  /** 经典背包页的上下文提示（f6→f7 体力药剂 / f8·f10 的兜底重放）。 */
   function onPage(name) {
     if (!classic()) { hide(); return; }
     if (name === 'home') { onHome(); return; }
     const n = step();
-    /* 点中下一处入口就算完成当前一步，不必等 4.2 秒计时：
-     *   f3「升级奖励」→ 开始挑战；f4「新消息」→ 消息；f5「升到 3 级」→ 开始挑战；
-     *   f6「试试道具」→ 道具（背包）。 */
+    /* 点中下一处入口就算完成当前一步，不必等计时：
+     *   f3「升级奖励」→ 开始挑战；f4「新消息」→ 消息；f5「升到 3 级」→ 开始挑战。 */
     if (name === 'challenge' && n === 3) { setStep(4); hide(); return; }
     if (name === 'message' && n === 4) { setStep(5); hide(); return; }
     if (name === 'challenge' && n === 5) { setStep(6); hide(); return; }
-    if (name === 'bag' && n === 6) { setStep(7); show(7, 'bag'); return; }
-    if (name === 'bag' && n === 7) { show(7, 'bag'); return; }
+    /* f11「升到 5 级有惊喜」/ f12：点开挑战页 → 12（f12 原版 3 秒自动收）。 */
+    if (name === 'challenge' && (n === 11 || n === 12)) {
+      if (n === 11) setStep(12);
+      show(12, 'challenge');
+      return;
+    }
+    if (name === 'bag') {
+      if (n === 6) { setStep(7); show(7, 'bag'); return; }
+      /* 8：详情弹窗被关掉后又回背包（重放）；10：「使用成功」提示确定后指「返回菜单」。 */
+      if (n === 7 || n === 8 || n === 10) { show(n, 'bag'); return; }
+      if (n === 9) return;   // 提示还开着：不动
+    }
+    if (name === 'status') {
+      if (n === 14) { setStep(15); show(15, 'status'); return; }
+      if (n === 15 || n === 22) { show(n, 'status'); return; }
+    }
+    if (name === 'village' && (n === 17 || n === 19 || n === 20 || n === 26)) { show(n, 'village'); return; }
+    /* 点对应地点就是完成（guideMap 17/19/20/26 → -1）；只有神迹（20）先记着：
+     * 原版「回家」按钮在 showGuide25 时 nowPage=25 → f24（天梯）。 */
+    if (name === 'village-altar' && n === 17) { setStep(99); hide(); return; }
+    if (name === 'village-beast' && n === 19) { setStep(99); hide(); return; }
+    if (name === 'village-miracle' && n === 20) { setStep(25); hide(); return; }
+    if (name === 'village-war' && n === 26) { setStep(99); hide(); return; }
     hide();
+  }
+  /* 背包里点开道具详情（原版 seeProp，doMission(7)）。商店/兑换页的详情不算。 */
+  function onPropDetail(id, mode) {
+    if (!classic() || mode) return;
+    const n = step();
+    if (n === 7) { setStep(8); show(8, 'bag'); return; }
+    if (n === 8) { show(8, 'bag'); return; }
+    if (n === 9) { setStep(10); show(10, 'bag'); }   // 「使用成功」提示被叉掉：等同确认
+  }
+  /* 点「使用」成功：原版 useProp 成功在 nowPage>0 时走
+   * `showTips(4,0,"使用X成功。")+viewNextMission()`（:1519）→ 页 9。教程期间由引导接管
+   * 这条提示：关掉详情弹窗、弹「提示」小窗（确定后进 10 回背包），f9 的金环就贴在它的
+   * 「确定」上。返回 true = 调用方不要再走原来的 toast/关窗流程。 */
+  function onPropUsed(id, name, r, detail) {
+    if (!classic() || step() !== 8 || !r || !r.ok) return false;
+    if (!(window.UI && UI.classic && UI.classic.modal)) return false;
+    setStep(9);
+    try { if (detail && detail.close) detail.close(); } catch (e) {}
+    UI.classic.modal('提示', '<p>' + escText('使用' + name + '成功。' + (r.msg || '')) + '</p>', [
+      { label: '确定', run: () => { setStep(10); onPage('bag'); } },
+    ], { small: true });
+    show(9, 'bag');
+    return true;
+  }
+  /* 状态页页签：原版 tab1/tab2.onFire 只在 nowPage==15 才 doMission+showStatusTab
+   * （:13721-13760）→ guideMap 15→22。所以切到别的页签 = 完成 15、进 22。 */
+  function onStatusTab(key) {
+    if (!classic()) return;
+    const n = step();
+    if (key === 'status') return;   // 点的就是当前页签：原版要 tab_wz != 2/3 才推进
+    if (n === 15) { setStep(22); show(22, 'status'); return; }
+    if (n === 22) show(22, 'status');
+  }
+  /* 升级页打开（战果页刚挂上时）。原版 showLevelUp：到 5 级 → nowPage=13 → viewMission
+   * 把 f13 盖在升级页上（指「确定」）。其余等级页（21/23/24/17/19/20/26）在回到首页/村庄
+   * 时由 onHome / onPage 显示。 */
+  function onLevelup(ups) {
+    if (!classic() || !ups || !ups.length) return;
+    let max = 0;
+    for (const u of ups) max = Math.max(max, Number(u && u.level) || 0);
+    const page = LEVEL_STEPS[max];
+    if (!page) return;
+    setStep(page);
+    if (page === 13) show(13, 'levelup');
+  }
+  /* 升级页关掉：原版 doMission(13) = gotoAndStop("main") → 页 14（首页「状态」）。 */
+  function onLevelupDone() {
+    if (!classic()) return;
+    if (step() === 13) { setStep(14); hide(); }
   }
   function skip() {
     const t = tutorial();
     if (t) { t.step = 99; try { State.save(); } catch (e) {} }
     hide();
   }
-  window.SfGuide = Object.freeze({ onHome, onBattleStart, onPage, hide, skip, step: () => step() });
+  window.SfGuide = Object.freeze({
+    onHome, onBattleStart, onPage, onPropDetail, onPropUsed, onStatusTab, onLevelup, onLevelupDone,
+    hide, skip, step: () => step(),
+  });
 })();

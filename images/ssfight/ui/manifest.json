@@ -43,7 +43,7 @@
   "campaign": "3437"
  },
  "dictionarySize": 7876,
- "exportedTags": 7313,
+ "exportedTags": 7484,
  "bundles": [
   {
    "file": "tags.json",
@@ -55,7 +55,7 @@
   },
   {
    "file": "tags-daoju.json",
-   "tags": 73
+   "tags": 244
   },
   {
    "file": "tags-status.json",

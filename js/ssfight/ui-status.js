@@ -775,13 +775,16 @@
       }
       return n;
     };
-    set('name', base ? base.name : '');
+    const ownLv = own ? (Number(own.level) || 0) : 0;
+    const trueOwn = ownLv > 10;
+    /* 原版真化详情页把名字写成「真.名字」（showWeaponSkill3 的 setText(name,"真."+name)）。 */
+    const shownName = base ? ((trueOwn ? '真.' : '') + base.name) : '';
+    set('name', shownName);
     /* 等级：原版 `setText(subFrame.levelText, level)`（MainMovie.as:16681 / 16735）——
      * 就是左列「等级」那一格的值。复刻上一批误把它当成"贴图下面那行等级"清空了，
      * 于是整页一个等级都不显示（用户 2026-10 口径："该界面所有的等级都没有正常显示"）。
      * 真形态（11~15 级 = 真1~真5）按 `level - 10` 写，与格子里那行 `LV n`
      * （`writeIconLevel`）**同一把尺子** —— 两处显示同一个数，不会一个写 11 一个写 1。 */
-    const ownLv = own ? (Number(own.level) || 0) : 0;
     set('levelText', String(ownLv > 10 ? ownLv - 10 : ownLv));
     set('type', base && base.type ? base.type : (isW ? '近战' : '被动'));
     /* 伤害那一格三条口径（照原版逐字抄，别自己编）：
@@ -794,18 +797,33 @@
       ? (own ? (own.harmLo + '-' + own.harmHi) : (base && base.harm ? base.harm : ''))
       : '技能';
     setWrapped(view.byName('harm'), harm);
-    /* 介绍：原版这一格**永远写这一项的说明本身**（`setText(subFrame.des, …des)`，:16685 / 16738）——
-     * 武器和技能都一样，连"还没获得"那两档也照写（"还没获得"这件事由右侧 `requirement` 的第 4/5 帧讲）。
-     * 复刻这边只有**武器**多一档：这一页在复刻里同时兼着原版"升阶页"（`showWeaponSkill3`）的活，
-     * 已到真5上限 / 还能再升时给一句升阶预告更实用（技能那一栏照原版走，原版技能页没有升阶文案）。 */
-    if (isW) {
-      setWrapped(view.byName('des'), maxed ? '神器已达最高阶段！'
-        : ('升至下一阶将额外提升' + (base && base.harmAdd ? String(base.harmAdd).replace(/[^\d]/g, '') : '?') + '点基本伤害！'));
-    } else {
-      setWrapped(view.byName('des'), (base && base.remark) ? base.remark : '');
+    /* 介绍：普通档写原表 `des`；真化档按原版 `getDescription` / `getDesSkill`
+     * 写**下一阶**的真化说明（`remark1Value` / `harmAdd1` 逐个取值，不是复刻自编的
+     * 每级 +harmAdd）。到真5 写最高阶段；6/13 这种不可升级技能保持基础说明。 */
+    let desText = base && base.remark ? base.remark : '';
+    if (own && !(up && up.fixed)) {
+      const nextLv = Math.min(15, ownLv + 1);
+      if (ownLv >= 15) {
+        desText = isW ? '神器已达最高阶段！' : '神技已达最高阶段！';
+      } else if (nextLv > 10) {
+        const idx = nextLv - 11;
+        if (isW) {
+          const add = String((base && base.harmAdd1) || '').split('|')[idx] || '';
+          desText = base && base.remark1
+            ? ('升至下一阶将额外' + base.remark1 + '和' + add + '点基本伤害！')
+            : ('升至下一阶将额外提升' + add + '点基本伤害！');
+        } else {
+          const row = window.GData && GData.trueSkillRow ? GData.trueSkillRow(id) : null;
+          if (row && row.text) {
+            const n = window.GData && GData.trueSkillStep ? GData.trueSkillStep(id, nextLv) : '';
+            desText = '升至下一阶' + String(row.text).replace('N', n);
+          }
+        }
+      }
     }
+    setWrapped(view.byName('des'), desText);
     /* 名字那一格也要断：`name`=4542 框宽 73.6（居中），长名字会顶出面板。 */
-    setWrapped(view.byName('name'), base ? base.name : '');
+    setWrapped(view.byName('name'), shownName);
     /* 图标位：挂原版矢量元件（与格子里那 10 颗同一套素材）。
      * ⚠ 原版这里是 `subFrame.c1.attachMovie(名字, "mc", 100, {_x:0,_y:0})`
      *   ——**图标元件自己第 1 帧就带名字层 + 等级位**（卡片 42×42 在左上角），
@@ -875,7 +893,7 @@
         if (!current || !current.detail) return;
         const r = State.doUpgrade(kind, Number(id));
         if (window.UI && UI.toast) UI.toast(r.msg);
-        /* 成功 / 失败都要重画：等级会变，失败时成功率（保底）也会涨。 */
+        /* 成功 / 失败都要重画：等级或成功率档位会变。 */
         destroyItemDetailOnly();
         openItemDetail(kind, id);
         refreshGridSoon();
@@ -1078,15 +1096,33 @@
     const isW = kind === 'weapon';
     const locked = !own;
     const maxed = !!(up && up.max);
-    const lvText = own ? String(own.level) : '0';
+    const ownLv = own ? (Number(own.level) || 0) : 0;
+    const trueOwn = ownLv > 10;
+    const shownName = base ? ((trueOwn ? '真.' : '') + base.name) : '';
+    const lvText = own ? String(trueOwn ? ownLv - 10 : ownLv) : '0';
     const harm = own && isW ? (own.harmLo + '-' + own.harmHi)
-      : (!isW ? String(own ? own.level : 0) : (base && base.harm ? base.harm : ''));
-    /* 说明：原版三种口径（未获得 / 已满阶 / 升阶预告），文案照 `showWeaponSkill3` 的语义。 */
-    const descText = locked ? '尚未获得——升级、开启礼包有机会获得'
-      : maxed ? (isW ? '神器已达最高阶段！' : '神技已达最高阶段！')
-        : (isW
-          ? ('升至下一阶将额外提升' + (base && base.harmAdd ? String(base.harmAdd).replace(/[^\d]/g, '') : '?') + '点基本伤害！')
-          : (base && base.remark ? base.remark : ''));
+      : (isW ? (base && base.harm ? base.harm : '') : '技能');
+    /* 说明：普通档原表 des；真化档按 `getDescription` / `getDesSkill` 写下一阶。 */
+    let descText = locked ? '尚未获得——升级、开启礼包有机会获得'
+      : (base && base.remark ? base.remark : '');
+    if (own && !(up && up.fixed)) {
+      if (ownLv >= 15) descText = isW ? '神器已达最高阶段！' : '神技已达最高阶段！';
+      else if (ownLv + 1 > 10) {
+        const nextLv = ownLv + 1;
+        if (isW) {
+          const add = String((base && base.harmAdd1) || '').split('|')[nextLv - 11] || '';
+          descText = base && base.remark1
+            ? ('升至下一阶将额外' + base.remark1 + '和' + add + '点基本伤害！')
+            : ('升至下一阶将额外提升' + add + '点基本伤害！');
+        } else {
+          const row = window.GData && GData.trueSkillRow ? GData.trueSkillRow(id) : null;
+          if (row && row.text) {
+            const n = window.GData && GData.trueSkillStep ? GData.trueSkillStep(id, nextLv) : '';
+            descText = '升至下一阶' + String(row.text).replace('N', n);
+          }
+        }
+      }
+    }
     const rows = [];
     if (!locked && !maxed && up) {
       rows.push({ label: '金松果', need: up.coin, have: s.goldPoint | 0 });
@@ -1098,7 +1134,7 @@
     dom.innerHTML =
       '<div class="sf-d-panel" style="' + pos(DETAIL.panel) + '"></div>' +
       '<div class="sf-d-tab" style="' + pos(DETAIL.tab) + '">' + (isW ? '武器详情' : '技能详情') + '</div>' +
-      '<div class="sf-d-name' + (locked ? ' locked' : '') + '" style="' + pos(DETAIL.name) + '">' + esc2(base ? base.name : '') + '</div>' +
+      '<div class="sf-d-name' + (locked ? ' locked' : '') + '" style="' + pos(DETAIL.name) + '">' + esc2(shownName) + '</div>' +
       '<div class="sf-d-icon' + (locked ? ' locked' : '') + '" style="' + pos(DETAIL.icon) + '"></div>' +
       '<div class="sf-d-stats" style="' + pos(DETAIL.stat) + '">' +
         statRow('阶段', lvText, m) + statRow(isW ? '伤害' : '等级', harm, m) + statRow('类型', base && base.type ? base.type : '被动', m) +
@@ -1121,7 +1157,7 @@
     if (ok && !maxed && !locked) ok.addEventListener('click', () => {
       const r = State.doUpgrade(kind, Number(id));
       if (window.UI && UI.toast) UI.toast(r.msg);
-      /* 成功 / 失败都要重画：等级会变，失败时成功率（保底）也会涨。 */
+      /* 成功 / 失败都要重画：等级或成功率档位会变。 */
       openItemDetail(kind, id);
       refreshGridSoon();
     });
@@ -1288,6 +1324,11 @@
   /** 切到某个 tab：换页元件帧 + 重画/收掉 DOM 格子。 */
   function setTab(which) {
     if (!current) return;
+    /* 新手引导 f15：切到别的页签才算完成（原版 tab1/tab2.onFire 要 tab_wz != 2/3
+     * 并且 nowPage==15 才 doMission+showStatusTab，再推进到 22）。 */
+    if (which !== current.tab && window.SfGuide && SfGuide.onStatusTab) {
+      try { SfGuide.onStatusTab(which); } catch (e) {}
+    }
     current.tab = which;
     current.gridPage = 0;
     // Switch the root first: some instances survive, others are newly created.
@@ -1692,9 +1733,9 @@
    *   ④ `c1.attachMovie(convertLink(equip), "mc", 100)` = **装备画稿** + `setEquipTextColor(t_name)`
    *      按品质给名字上色 + `stone` = 宝石名。
    *      ⚠ 图标位以前**完全没填**：四格里只有字没有装备图（用户 2026-11 口径："查看装备页面的
-   *      格式与贴图要和 ssfight 对齐"）。这里改成贴"穿在身上"的容器画稿（与「我的装备」那六格
-   *      同一套 `wearInfo` + `fitArtwork`）—— `convertLink` 那批按名字导出的图标元件不在任何包里，
-   *      而容器画稿就是同一件装备的原版美术。 */
+   *      格式与贴图要和 ssfight 对齐"）。现在优先挂 `gearColorId` 查到的**原版预上色整卡符号**
+   *      （与「我的装备」那六格同一套 `convertLink` 口径；`tags-gear-color.json` 在打开这一层前
+   *      已加载）；查不到符号（老包 / 好友装备缺 type/quality）才退回容器画稿 + `fitArtwork`。 */
   function fillFriendGearTabs(view, foe) {
     const t = T();
     if (!view || !foe) return false;
@@ -1771,16 +1812,25 @@
         try { card = slot.g && slot.g.getBBox ? slot.g.getBBox() : null; } catch (e) { card = null; }
         if (g) {
           const part = partOf.has(g) ? partOf.get(g) : Number(g.type);
-          const info = wearInfo(g);
-          const sym = containerIds && containerIds[part] && containerIds[part][0];
-          if (info && sym && slot.attachChild) {
-            const child = slot.attachChild(sym, info.frame, 'wear');
-            if (child) {
-              if (card && card.width > 0 && card.height > 0) {
-                fitArtwork(child, 0.85 * Math.min(card.width, card.height),
-                  card.x + card.width / 2, card.y + card.height / 2);
-              } else {
-                fitArtwork(child, GEAR_CARD_ART, GEAR_CARD_MID, GEAR_CARD_MID);
+          /* 原版这里也是 `attachMovie(convertLink(equip))`：符号是**整张卡**，
+           * 按 1:1 挂在格子 `(0,0)` 上。查不到预上色符号（老包 / 好友装备没 type）
+           * 才退回容器画稿 + fitArtwork。 */
+          const cg = Object.assign({}, g, { type: part, quality: qualityOf(g) });
+          const sid = gearColorId(cg);
+          if (sid && slot.attachChild) {
+            slot.attachChild(String(sid), 1, 'gear');
+          } else {
+            const info = wearInfo(g);
+            const sym = containerIds && containerIds[part] && containerIds[part][0];
+            if (info && sym && slot.attachChild) {
+              const child = slot.attachChild(sym, info.frame, 'wear');
+              if (child) {
+                if (card && card.width > 0 && card.height > 0) {
+                  fitArtwork(child, 0.85 * Math.min(card.width, card.height),
+                    card.x + card.width / 2, card.y + card.height / 2);
+                } else {
+                  fitArtwork(child, GEAR_CARD_ART, GEAR_CARD_MID, GEAR_CARD_MID);
+                }
               }
             }
           }
@@ -1872,11 +1922,14 @@
       });
     };
     /* 返回键换成关卡二级页（4756 f5）的原版 `back`（3911）：它和 4673 不在同一个
-     * 素材包（tags-challenge），先确保那份包在，再由 wireFriendGearsBack attach。 */
+     * 素材包（tags-challenge），先确保那份包在，再由 wireFriendGearsBack attach。
+     * 四格里的装备要走原版 `convertLink` 的预上色符号（整张卡），所以配色表也先拉好；
+     * 拉不到时 `fillFriendGearTabs` 仍退回容器画稿，不会空着。 */
     if (window.SfRender && SfRender.loadExtra) {
-      Promise.resolve().then(() => SfRender.loadExtra('tags-challenge.json'))
-        .catch(() => {})
-        .then(() => { try { go(); } catch (e) { if (window.__errs) window.__errs.push('friendGears go: ' + (e && e.message)); } });
+      Promise.all([
+        SfRender.loadExtra('tags-challenge.json').catch(() => {}),
+        loadGearColorTable().catch(() => {}),
+      ]).then(() => { try { go(); } catch (e) { if (window.__errs) window.__errs.push('friendGears go: ' + (e && e.message)); } });
     } else {
       go();
     }
@@ -2077,9 +2130,11 @@
     for (const t of g.querySelectorAll('text')) t.setAttribute('fill', color);
   }
   /* ============================================================
-   * 装备画稿的落地：**等比缩放到格子里、居中**
+   * **容器画稿**的兜底落地：等比缩放到格子里、居中
    * ------------------------------------------------------------
-   * 原版这一页/这一格的观感是"每格里那件装备一样大、居中，下面压着卡片自带的阴影"
+   * 预上色整卡符号不走这里（原版 1:1 挂；见 `gearArtIn`）。这里只处理
+   * `gearColorId` 查不到符号时退回的通用容器画稿。原版这一页/这一格的观感是
+   * "每格里那件装备一样大、居中，下面压着卡片自带的阴影"
    * （对照 `references/screen/屏幕截图 2026-09-23 161816.png` 与 `…162302.png` 两张原版截图：
    *  六个格子与四个部位格里，靴子/拳套/头盔/铠甲都恰好装进卡片、居中）。
    * 原版的机制是 `constructBpData` → `convertMcToBp(容器)` 渲染成**位图** → `attachBitmap`
@@ -2111,8 +2166,7 @@
   }
   /* 卡片自己有多大（导出实测：格子 `4547`/`3636` 都是 41.3 见方、部位格 `4559`~`4562` 是 34.1 见方，
    * 原点都在卡片左上角）—— 所以"卡片中心"是 20.65 / 17.05。
-   * 画稿占卡片的比例照原版截图量（`references/screen/屏幕截图 2026-09-23 161816.png`：
-   * 六个格子与四个部位格里那件装备都顶到卡片边、约 0.82~0.85 倍边长）。 */
+   * 这两个数只给**容器画稿兜底**用（见 `fitArtwork`）：预上色符号自带卡面，不需要再缩。 */
   const GEAR_CARD = 41.3, GEAR_CARD_ART = 34;
   const GEAR_SLOT_CARD = 34.1, GEAR_SLOT_ART = 29;
   const GEAR_CARD_MID = GEAR_CARD / 2, GEAR_SLOT_MID = GEAR_SLOT_CARD / 2;
@@ -2120,6 +2174,11 @@
    * 原版 `showEquips` / `showWears` / 详情 `c1` 都是 `attachMovie(convertLink(gear))` ——
    * 颜色**画在元件里**，不是拿通用容器再叠染色。复刻以前贴现代界面正面 PNG（紫/橙靠滤镜），
    * 用户 2026-11 口径："不要用现代版 UI，经典版统一调用经典版矢量图"。
+   * ⚠ 这些符号是**整张卡**，不是单纯一件装备的画稿：第一层就是 41×41 见方的卡面
+   * （浅色底 + 金边 + 斜光），里面才是阴影和预上色装备。原版 `showEquips` / 详情 `c1`
+   * 都按 1:1 挂在 `(0,0)` 上，正好盖住格子自己的卡面；`showWears` 只把**部位容器**
+   * 缩到 85%（所以那颗图标实际是 41×0.85≈35）。复刻 2026-11 把符号当成"装备画稿"
+   * 又 `fitArtwork` 缩到 34 / 29，等于在格子卡面上再贴一张小卡（双层卡、装备变小）。
    * `gear-colors.json` 是生成器按原版规则算好的 `byGear[id][品质][强化档] → 元件号`，
    * 这里只查表；查不到（老包 / 缺符号）才退回原来的通用容器画稿。 */
   const GEAR_COLOR_FILE = 'images/ssfight/ui/gear-colors.json';
@@ -2165,20 +2224,45 @@
       ? gearExtMaxLevel(gear) : 0;
     return levels[String(lv)] || levels['0'] || levels['1'] || levels['2'] || levels['3'] || null;
   }
-  /** 把一件装备的画稿放进卡片 / 部位格：优先原版预上色符号，缺符号才退回容器。 */
-  function gearArtIn(cell, gear, box, cx, cy) {
+  /** 把一件装备的**预上色整卡**直接挂到某个格子上（1:1，不 fit）。
+   *  融合结果页（4402 f44 的 `c1`）与「我的装备」是同一颗 `convertLink` 符号；
+   *  供 `ui-compose.js` 复用，查不到符号（老包 / 缺品质）时返回 false 让调用方退回 PNG。 */
+  function paintGearCard(cell, gear) {
+    try {
+      if (!cell || !cell.attachChild || !gear) return false;
+      const g = Object.assign({}, gear);
+      if (g.type == null) g.type = State.gearPart ? State.gearPart(Number(g.id)) : NaN;
+      if (g.quality == null) g.quality = State.gearQuality ? State.gearQuality(gear) : 0;
+      const sid = gearColorId(g);
+      if (!sid) return false;
+      if (cell.detachAll) cell.detachAll();
+      return !!cell.attachChild(String(sid), 1, 'gear');
+    } catch (e) { return false; }
+  }
+  /** 查不到预上色符号时的容器画稿兜底（见 `fitArtwork`）。 */
+  function gearFallbackArt(cell, gear, box, cx, cy) {
+    const info = wearInfo(gear);
+    const sym = containerIds && containerIds[Number(gear.type)] && containerIds[Number(gear.type)][0];
+    if (!info || !sym || !cell || !cell.attachChild) return null;
+    const child = cell.attachChild(sym, info.frame, 'wear');
+    if (child) fitArtwork(child, box, cx, cy);
+    return child;
+  }
+  /** 把一件装备的画稿放进卡片 / 部位格：优先原版预上色符号，缺符号才退回容器。
+   *  预上色符号是**整张卡**，按原版挂法 1:1 挂在 `(0,0)`（`showWears` 的四个格再乘 85%）；
+   *  只有兜底的容器画稿才走 `fitArtwork` 缩进卡片。 */
+  function gearArtIn(cell, gear, box, cx, cy, iconScale) {
     if (!cell || !cell.attachChild || !gear) return null;
     const sid = gearColorId(gear);
     if (sid) {
       const clip = cell.attachChild(String(sid), 1, 'gear');
-      if (clip) { fitArtwork(clip, box, cx, cy); return clip; }
+      if (clip) {
+        const s = Number(iconScale);
+        if (Number.isFinite(s) && s > 0 && s !== 1) clip.setExtraTransform('scale(' + s + ')');
+        return clip;
+      }
     }
-    const info = wearInfo(gear);
-    const sym = containerIds && containerIds[Number(gear.type)] && containerIds[Number(gear.type)][0];
-    if (!info || !sym) return null;
-    const child = cell.attachChild(sym, info.frame, 'wear');
-    if (child) fitArtwork(child, box, cx, cy);
-    return child;
+    return gearFallbackArt(cell, gear, box, cx, cy);
   }
   /** 一个元件在**父级坐标系**里的包围盒。
    *  `getBBox()` 量的是元素自己的用户空间，要乘上它自己的放置矩阵（`__baseMa`）才换算到父级。 */
@@ -2296,7 +2380,8 @@
      * ⚠ 部位格自己只有**一帧**（`buildFrames` 只切出 1 帧：`4558` + `tp:1` + 尾部的 remove），
      * 卡面与「头部/手部/身体/脚部」那几个字都是**同一张 34.1 见方的画稿**烤进去的 ——
      * 所以"穿上之后不显示部位名"只能靠**画稿盖住**（原版也是这个效果：那四格只有装备、
-     * 看不到部位名）。这也是下面 `GEAR_SLOT_ART` 取到 0.85 倍边长的原因。 */
+     * 看不到部位名）。原版 `showWears` 把部位容器 `_xscale = _yscale = 85`，符号随之是
+     * 41×0.85≈35——比 34.1 的格子略大，正好盖住卡面；这里给符号乘同一个 0.85。 */
     const worn = gearWornOf();
     for (const pair of GEAR_DOLL_PARTS) {
       const clip = clipOf(view, pair[0]);
@@ -2304,7 +2389,7 @@
       clip.detachAll();
       const g = worn[pair[1]];
       if (!g) continue;
-      gearArtIn(clip, g, GEAR_SLOT_ART, GEAR_SLOT_MID, GEAR_SLOT_MID);
+      gearArtIn(clip, g, GEAR_SLOT_ART, GEAR_SLOT_MID, GEAR_SLOT_MID, 0.85);
     }
     setTextByName(view, 't_count', '容量' + list.length + '/' + State.gearCapacity());
     /* `left`/`right`：不可翻时原版是 `_visible = false`（不是切禁用帧）。 */
@@ -2393,9 +2478,18 @@
     const ty = Math.max(0, Math.min(3, Number(g.type) || 0));
     /* `b_on`：`isWear == "true"` → 第 2 帧（已穿 → 按下去是"卸下"），否则第 1 帧。 */
     stopAt(clipOf(view, 'b_on'), g.used ? 2 : 1);
-    /* `b1`：橙装（quality > 3）才有宝石键 —— 有宝石停第 2 帧（= 卸下）、没有停第 1 帧（= 镶嵌）；
-     * 非橙装停第 3 帧（原版 `showStone = false`，那一档是灰的）。 */
-    stopAt(clipOf(view, 'b1'), Number(g.quality) > 3 ? (g.gem ? 2 : 1) : 3);
+    /* `b1`：橙装（quality > 3）才有宝石键 —— 有宝石停第 2 帧（= 已镶嵌）、没有停第 1 帧（= 镶嵌）；
+     * 非橙装停第 3 帧（原版 `showStone = false`，那一档是灰的）。
+     * ⚠ 外层 `b1`（4590）的第 2 帧只是**换成另一颗带「已镶嵌」字样的按钮**（内层 4589），
+     * 绿色高亮档在内层按钮自己的第 2 帧（3152 绿底）；只拨外层会得到一张灰/米色的
+     * 「已镶嵌」——用户 2026-10 口径："已镶嵌那个位置选中后要变绿"。 */
+    const b1 = clipOf(view, 'b1');
+    const canGem = Number(g.quality) > 3;
+    stopAt(b1, canGem ? (g.gem ? 2 : 1) : 3);
+    if (canGem && b1 && b1.byName) {
+      const inner = b1.byName('b1');
+      if (inner) stopAt(inner, g.gem ? 2 : 1);
+    }
     const name = clipOf(view, 't_name');
     if (t && name) t.setText(name, gearNameText(g));
     setGearTextColor(name, g.quality);
@@ -2459,10 +2553,19 @@
       hover: 2, press: 2, idle: 1,
       onFire: () => askSellEquipFromDetail(key, backToList),
     });
-    /* 宝石：原版 `showStoneWin()` → 有宝石走拆卸、没有走镶嵌。 */
-    wireClickable(clipOf(view, 'b1'), {
+    /* 宝石：原版 `showStoneWin()` → 有宝石走拆卸、没有走镶嵌。
+     * 外层 `b1` 只负责「镶嵌 / 已镶嵌 / 灰」三档；绿色反馈与点击都挂**当前内层按钮**
+     * （镶嵌 4586 / 已镶嵌 4589），内层第 2 帧才是原版绿底。已镶嵌时 idle 也取第 2 帧，
+     * 所以镶上后那颗键保持绿色（选中态），不是只在鼠标悬停时才绿。 */
+    const b1Outer = clipOf(view, 'b1');
+    const b1Inner = b1Outer && b1Outer.byName ? (b1Outer.byName('b1') || b1Outer) : b1Outer;
+    wireClickable(b1Inner, {
       hover: 2, press: 2,
-      idle: () => { const g = currentGearByKey(key); return Number(g && g.quality) > 3 ? (g.gem ? 2 : 1) : 3; },
+      idle: () => {
+        const g = currentGearByKey(key);
+        if (!g || Number(g.quality) <= 3) return 3;
+        return g.gem ? 2 : 1;
+      },
       onFire: () => { askGemFromDetail(key); },
     });
     wireClickable(clipOf(view, 'b_back'), { hover: 2, onFire: backToList });
@@ -2503,8 +2606,12 @@
       refresh();
       return;
     }
-    const S = S() || {};
-    const gems = [101, 102, 103, 104, 105, 106, 107].filter((id) => (S.props && S.props[id] > 0));
+    /* ⚠ 不能写 `const S = S() || {}`：局部 `S` 会遮住模块里的 `S()`，
+     * 初始化时右侧的 `S()` 落进 TDZ，直接 `ReferenceError: Cannot access 'S' before initialization`
+     * —— 宝石键的点击回调在这里中断，弹窗永远不会出现（2026-10 用户报「镶嵌不上去」）。
+     * 换一个名字；下面的属性读取也跟着改。 */
+    const save = S() || {};
+    const gems = [101, 102, 103, 104, 105, 106, 107].filter((id) => (save.props && save.props[id] > 0));
     if (!gems.length) {
       if (window.UI && UI.toast) UI.toast('背包里没有宝石。45级后通关关卡或在竞技场获胜有几率获得。');
       return;
@@ -2515,7 +2622,7 @@
         const item = window.propMap && propMap.getValue ? propMap.getValue(id) : null;
         return '<button type="button" class="help-item" data-gem="' + id + '"><span class="item-icon">' +
           (window.UI && UI.propIcon ? UI.propIcon(id, 64) : '') + '</span><span>' + esc(item ? item.name : ('宝石' + id)) +
-          ' ×' + S.props[id] + '</span></button>';
+          ' ×' + save.props[id] + '</span></button>';
       }).join('') + '</div>', [{ label: '返回', cls: 'muted' }], { small: true });
     const host = m && m.element;
     if (!host) return;
@@ -2633,6 +2740,9 @@
   async function mountFusionFrame(frame) {
     const host = fusionHost();
     if (!host) return null;
+    /* 融合页的格子和「我的装备」一样挂原版 `convertLink` 预上色符号（整张卡），
+     * 先确保配色表在；拉不到就退回容器画稿。 */
+    try { await loadGearColorTable(); } catch (e) {}
     if (!fusionPage) fusionPage = { host: host, view: null, frame: frame, sel: [], page: 0 };
     else fusionPage.host = host;
     if (fusionPage.view) { try { fusionPage.view.destroy(); } catch (e) {} fusionPage.view = null; }
@@ -2674,13 +2784,22 @@
       if (cell && cell.detachAll) {
         cell.detachAll();
         if (g) {
-          const info = wearInfo(g);
-          const sym = containerIds && containerIds[Number(g.type)] && containerIds[Number(g.type)][0];
-          if (info && sym && cell.attachChild) {
-            /* ⚠ 不能照抄原版的 `c{i}._xscale = 120`：原版 `convertLink()` 给的是**位图化**的
-             * 装备图，而这边挂的是按角色尺度画的**容器画稿**（照抄就是一颗占满全屏的球，
-             * 2026-11 实拍过）。按格子实际尺寸等比缩放并居中。 */
-            fitIntoCard(cell, cell.attachChild(sym, info.frame, 'wear'), back || cell, 0.85, 67);
+          /* 原版 `updataFusionMain()`：`attachMovie(convertLink(装备))` 后把 **c{i} 自己**
+           * 设成 146%（MainMovie.as:8535-8551）。符号是整张卡，所以直接 1:1 挂上再乘 1.46；
+           * 查不到预上色符号才退回容器画稿按格子大小缩放。 */
+          const sid = gearColorId(g);
+          const icon = sid ? cell.attachChild(String(sid), 1, 'gear') : null;
+          if (icon) {
+            icon.setExtraTransform('scale(1.46)');
+          } else {
+            const info = wearInfo(g);
+            const sym = containerIds && containerIds[Number(g.type)] && containerIds[Number(g.type)][0];
+            if (info && sym && cell.attachChild) {
+              /* ⚠ 不能照抄原版的 `c{i}._xscale = 120`：原版 `convertLink()` 给的是**位图化**的
+               * 装备图，而这边挂的是按角色尺度画的**容器画稿**（照抄就是一颗占满全屏的球，
+               * 2026-11 实拍过）。按格子实际尺寸等比缩放并居中。 */
+              fitIntoCard(cell, cell.attachChild(sym, info.frame, 'wear'), back || cell, 0.85, 67);
+            }
           }
         }
       }
@@ -2824,10 +2943,15 @@
         if (card.detachAll) {
           card.detachAll();
           if (g) {
-            const info = wearInfo(g);
-            const sym = containerIds && containerIds[Number(g.type)] && containerIds[Number(g.type)][0];
-            if (info && sym && card.attachChild) {
-              fitIntoCard(card, card.attachChild(sym, info.frame, 'wear'), null, 0.87, GEAR_CARD);
+            /* 原版 `showFusion()`：`c{i}.attachMovie(convertLink(装备))`，1:1 挂在格子里。 */
+            const sid = gearColorId(g);
+            const icon = sid ? card.attachChild(String(sid), 1, 'gear') : null;
+            if (!icon) {
+              const info = wearInfo(g);
+              const sym = containerIds && containerIds[Number(g.type)] && containerIds[Number(g.type)][0];
+              if (info && sym && card.attachChild) {
+                fitIntoCard(card, card.attachChild(sym, info.frame, 'wear'), null, 0.87, GEAR_CARD);
+              }
             }
           }
         }
@@ -3020,6 +3144,10 @@
      *  状态页那颗 `b_change` 走这里；退出只拆这一层，底下的状态页不重建。 */
     openGears: () => { try { return openGearsPage(); } catch (e) {
       if (window.__errs) window.__errs.push('gears page: ' + (e && e.message)); return false; } },
+    /** 融合结果页（`ui-compose.js`）也走 `convertLink` 整卡：先等配色表，
+     *  再按 1:1 画；查不到符号返回 false，调用方退回原来的 PNG。 */
+    ensureGearColors: () => loadGearColorTable(),
+    paintGearCard: (cell, gear) => paintGearCard(cell, gear),
     /** 关掉「更换装备」那一层（调试 / 探针用）。 */
     closeGears: () => { destroyGearPage(); },
     /** 「装备融合」= 原版 4673 第 8/9/13 帧（工作台 / 选材料 / 二次确认），盖在状态页上的一层。 */

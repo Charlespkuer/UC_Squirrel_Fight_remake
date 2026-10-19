@@ -41,7 +41,7 @@
     const ui = document.getElementById('ui');
     if (!ui) return null;
     const host = document.createElement('section');
-    host.className = 'classic-home ssfight-home ssfight-sub ssfight-view sf-compose-view';
+    host.className = 'classic-home ssfight-sub ssfight-view sf-compose-view';
     host.setAttribute('aria-label', '道具合成');
     ui.appendChild(host);
     return host;
@@ -153,6 +153,30 @@
     paintIcon(c1, iconSrc('prop', id));
   }
 
+  /** 用户 2026-10 口径：合成页的「合成 / 取消」左右对调，取消在左、合成在右。
+   *  ⚠ 两颗按钮是**不同元件**（4878 合成 / 4419 取消），画稿原点也不一样，
+   *  不能像使用窗那样只按 `__baseMa` 的 x 差平移（实测会叠在一起）。
+   *  这里按**屏幕包围盒中心**互换，再用各自的 `getScreenCTM().a` 折回局部单位。 */
+  function swapComposeButtons(view) {
+    const compose = clipOf(view, 'b_hc');
+    const cancel = clipOf(view, 'b_back');
+    if (!compose || !cancel || !compose.g || !cancel.g) return false;
+    const cr = compose.g.getBoundingClientRect(), br = cancel.g.getBoundingClientRect();
+    const cCenter = (cr.left + cr.right) / 2, bCenter = (br.left + br.right) / 2;
+    const scaleOf = (clip) => {
+      try {
+        const m = clip.g.getScreenCTM && clip.g.getScreenCTM();
+        const a = m && Math.abs(m.a);
+        return a > 1e-6 ? a : 1;
+      } catch (e) { return 1; }
+    };
+    const dxC = (bCenter - cCenter) / scaleOf(compose);
+    const dxB = (cCenter - bCenter) / scaleOf(cancel);
+    if (compose.setExtraTransform) compose.setExtraTransform('translate(' + dxC.toFixed(3) + ',0)');
+    if (cancel.setExtraTransform) cancel.setExtraTransform('translate(' + dxB.toFixed(3) + ',0)');
+    return true;
+  }
+
   function wirePage(view, rec) {
     wireButton(clipOf(view, 'b_hc'), () => {
       if (rec.busy) return;
@@ -162,8 +186,8 @@
         rec.busy = false;
         showFailure('合成界面出错，请稍后再试。');
       });
-    }, { idle: 2, hover: 2, press: 1 });
-    wireButton(clipOf(view, 'b_back'), close, { idle: 2, hover: 2, press: 1 });
+    }, { idle: 1, hover: 2, press: 1 });
+    wireButton(clipOf(view, 'b_back'), close, { idle: 1, hover: 2, press: 1 });
   }
 
   function composeAction(id) {
@@ -196,7 +220,7 @@
       const quality = State.gearQuality ? State.gearQuality(r.gear) : ((info && info.quality) || 0);
       const extra = State.extText ? (State.extText(r.gear.ext) || []) : [];
       const temp = info ? ('基本属性:' + (info.attrName || '') + '+' + Math.max(0, Math.round(Number(info.abilityVal) || 0))) : '';
-      return { name: name, temp: wrapText(temp), extra: extra.length ? wrapText('附加属性:' + extra.join(' / ')) : '', icon: 'gear', id: r.gear.id, quality: quality };
+      return { name: name, temp: wrapText(temp), extra: extra.length ? wrapText('附加属性:' + extra.join(' / ')) : '', icon: 'gear', id: r.gear.id, gear: r.gear, quality: quality };
     }
     if (kind === 'gem') {
       const gid = id + 1;
@@ -221,7 +245,13 @@
     setText(view, 't_temp', result.temp);
     setText(view, 't_baseOther', result.extra);
     if (result.quality >= 0) setTextColor(view, 't_name', GEAR_QUALITY_COLOR[Math.max(0, Math.min(5, result.quality))]);
-    if (result.icon) paintIcon(c1, iconSrc(result.icon, result.id));
+    /* 装备结果按原版 `showFusionResult()` 挂 `convertLink` 的**整张预上色卡**
+     * （MainMovie.as:19024）；查不到符号（老包 / 缺品质）才退回原来的 PNG。 */
+    let painted = false;
+    if (result.icon === 'gear' && result.gear && window.SfStatus && SfStatus.paintGearCard) {
+      painted = !!SfStatus.paintGearCard(c1, result.gear);
+    }
+    if (!painted && result.icon) paintIcon(c1, iconSrc(result.icon, result.id));
     for (const n of ['button2', 'button3']) {
       const b = clipOf(view, n);
       if (b && b.g) b.g.style.display = 'none';
@@ -242,6 +272,9 @@
     await new Promise((r) => setTimeout(r, COMPOSE_CG_MS));
     if (session !== rec || rec.resultView !== view) return;
     try { view.gotoAndStop(44); } catch (e) {}
+    if (result.icon === 'gear' && window.SfStatus && SfStatus.ensureGearColors) {
+      try { await SfStatus.ensureGearColors(); } catch (e) {}
+    }
     fillResultPage(view, result);
   }
 
@@ -317,6 +350,9 @@
       } else {
         try { view.gotoAndStop(44); } catch (e) {}
       }
+      if (window.SfStatus && SfStatus.ensureGearColors) {
+        try { await SfStatus.ensureGearColors(); } catch (e) {}
+      }
       fillResultPage(view, resultOf({ gear: gear }, 0));
       try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
       return true;
@@ -346,6 +382,8 @@
       if (session !== rec || !host.isConnected) { try { view.destroy(); } catch (e) {} return false; }
       rec.pageView = view;
       fillPage(view, id);
+      /* 取消在左、合成在右（用户 2026-10 口径；碎片/种子/宝石/转化丸共用这一页）。 */
+      swapComposeButtons(view);
       wirePage(view, rec);
       try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
       return true;

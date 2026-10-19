@@ -170,6 +170,38 @@
     if (!container) return;
     for (const n of container.querySelectorAll('.ssfight-pet-art')) n.remove();
   }
+  /** 宿主自身被缩放的倍数（与 ui-status / ui-main 同一个探针做法）。
+   *  `.ssfight-pet-art` 是挂在经典层里的 DOM，写进去的 CSS 像素会再被 `--uiscale`
+   *  乘一次；用屏幕 rect 直接算 left/top/宽高会整体偏右下。 */
+  function layoutScale(host) {
+    if (!host) return 1;
+    if (!host.__petProbe) {
+      const p = document.createElement('div');
+      p.style.cssText = 'position:absolute;left:0;top:0;width:100px;height:0;pointer-events:none;visibility:hidden';
+      host.appendChild(p);
+      host.__petProbe = p;
+    }
+    const w = host.__petProbe.getBoundingClientRect().width;
+    return w ? w / 100 : 1;
+  }
+  /** 收掉幻兽格画稿里自带的 `level` 文本（4276，占位串固定是 "lv23"）。
+   *  ⚠ 它是 tp11 文本 `<g>`，不是 MovieClip：老的 `lv.g.style.display` 对文本节点无效，
+   *  只清文案时换帧重建还会把占位串带回来。这里把整颗文本节点隐藏，并在每次换帧后重做。 */
+  function hidePetLevel(cell) {
+    if (!cell || !cell.g) return;
+    const lv = cell.byName ? cell.byName('level') : null;
+    const node = lv && (lv.g || lv);
+    if (node) {
+      node.style.display = 'none';
+      node.setAttribute('visibility', 'hidden');
+      if (window.SfRender && SfRender.setText && lv.__textBox) SfRender.setText(lv, '');
+    }
+    /* 这个格子里除了 level 没有别的文本；连同未具名/换帧新建的文本一起收掉，杜绝 lv23 漏出。 */
+    for (const t of cell.g.querySelectorAll('g[type="text"]')) {
+      t.style.display = 'none';
+      t.setAttribute('visibility', 'hidden');
+    }
+  }
 
   /* ---------- 通用小件 ---------- */
 
@@ -292,6 +324,44 @@
     } catch (e) {}
   }
 
+  /** 所有幻兽格（4279）画稿自带的 `level` 文本统一收掉。
+   *  二三级页里这些格子不一定叫 c1（喂养页叫 `cc`、进化页叫 `toSummons`），
+   *  按元件号扫一遍最稳；主列表的格子由 `hidePetLevel` 逐格处理。 */
+  function hideAllPetLevels(host) {
+    if (!host || !host.g) return;
+    for (const cell of host.g.querySelectorAll('g[sid="4279"]')) {
+      for (const t of cell.querySelectorAll('g[type="text"]')) {
+        t.style.display = 'none';
+        t.setAttribute('visibility', 'hidden');
+      }
+    }
+  }
+  /** 隐藏一个具名元件：tp11 文本节点没有 `.g`，要按节点本身处理（否则 `lv23` 会漏出）。 */
+  function hideNamedClip(host, name) {
+    const c = clipOf(host, name);
+    const node = c && (c.g || c);
+    if (!node || !node.style) return;
+    node.style.display = 'none';
+    node.style.visibility = 'hidden';
+  }
+  /** 幻兽牧场二三级页的公共清理：4381 的帧差分只移除了部分主列表元件，没移除的
+   * 六个格子（含画稿自带的 "lv23"）、名字、页码和左右箭头会**跨帧留在画面上**。
+   * 这里只收「本帧没有 placedHere 的具名元件」——换帧真正放进来的 c1/c2/c3、按钮、
+   * text1 等会保留；背景/面板没有名字，不会被误伤。 */
+  function hideCarriedOver(host) {
+    if (!host || !host.nodes || !host.frames) return;
+    const frame = host.frames[host.frame] || new Map();
+    for (const [depth, rec] of host.nodes) {
+      if (!rec.na) continue;                       // 只动主列表残留的具名件
+      const p = frame.get(depth);
+      if (p && p.placedHere) continue;             // 本帧自己放的，保留
+      const node = rec.wrap || rec.node;
+      if (node && node.style) {
+        node.style.display = 'none';
+        node.style.visibility = 'hidden';
+      }
+    }
+  }
   /** 取当前建筑的快照（`State.building(key)`；没有存档或没这套数据时返回 null）。 */
   function building(key) {
     if (!(window.State && State.building)) return null;
@@ -324,14 +394,18 @@
         + '2.参加竞技场时有' + info.propRate + '%几率获得双倍碎片奖励\n'
         + '3.挑战关卡时有' + info.goldRate + '%几率获得双倍金松果奖励');
     }
-    /* text3：当日状态（原版 `showTempleBuff` :9858；没有 buff 就清空）。 */
-    const buffText = b && b.buffId === 1 ? '本日特殊状态：竞技场经验双倍奖励！'
-      : b && b.buffId === 2 ? '本日特殊状态：竞技场碎片双倍奖励！'
-        : b && b.buffId === 3 ? '本日特殊状态：关卡金松果双倍！' : '';
+    /* text3：当日状态（原版 `showTempleBuff` :9858；没有 buff 就清空）。
+     * ⚠ 必须连同 `buffDate` 一起判：buffId 是**跨天保留**的存档字段，
+     * 只判 buffId 会把昨天的状态当成今天的显示（`activeBuildingBuff` 那边按日期返回 false，
+     * 于是界面写着"本日特殊状态"、实际却不翻倍 —— 用户 2026-10 报的"祭坛效果没落实"就是这个观感）。
+     * `buildingBuffClaimed()` 已经同时判了 buffId > 0 与 buffDate === 今天。 */
+    const claimed = b ? State.buildingBuffClaimed('altar') : false;
+    const buffText = !claimed ? '' : b.buffId === 1 ? '本日特殊状态：竞技场经验双倍奖励！'
+      : b.buffId === 2 ? '本日特殊状态：竞技场碎片双倍奖励！'
+        : b.buffId === 3 ? '本日特殊状态：关卡金松果双倍！' : '';
     setTextByName(view, 'text3', buffText);
     /* 「领取当日状态」：原版 `gainBuff`（一天一次，服务端判定）。按钮在已经领过时
      * 原版会 `gotoAndStop(_totalframes)`（隐藏，见 :9882-9886）。 */
-    const claimed = b ? State.buildingBuffClaimed('altar') : false;
     wireClickable(clipOf(view, 'button1'), () => {
       const r = State.claimBuildingBuff('altar');
       toast(r.msg);
@@ -541,14 +615,15 @@
   function wireBeast(view, page, container) {
     const t = T();
     clearPetArt(container);
-    showBuildingLevel(container, 'beast', '幻兽牧场', 'right:18px;top:150px');
+    showBuildingLevel(container, 'beast', '幻兽牧场', 'left:18px;top:96px');
     const list = ensureSelectedPet();
     const cap = Math.max(1, Number((State.state() || {}).petsCapacity) || 6);
     const pageCount = Math.max(1, Math.ceil(Math.max(list.length, 1) / 6));
     beastPage = Math.max(1, Math.min(pageCount, Number(beastPage) || 1));
     const start = (beastPage - 1) * 6;
     const beastBadge = container && container.querySelector('.ssfight-building-level');
-    if (beastBadge) beastBadge.textContent = '幻兽牧场 Lv' + ((building('beast') || {}).level || 1) + ' · 格子 ' + list.length + '/' + cap;
+    if (beastBadge) beastBadge.textContent = 'Lv' + ((building('beast') || {}).level || 1) + ' · 格子 ' + list.length + '/' + cap;
+    const hs = layoutScale(container) || 1;
     if (t) {
       t.setText(clipOf(view, 'text11'), '孵化点：' + (Number((State.state() || {}).hatchPoint) || 0));
       t.setText(clipOf(view, 'page'), beastPage + '/' + pageCount);
@@ -562,25 +637,36 @@
       if (pet) {
         if (cell) {
           stopAt(cell, 1);                         // 有 level 文本的是第 1 帧；第 2 帧反而丢了它
-          const lv = t && cell.byName ? cell.byName('level') : null;
-          /* 原版 `level` 文本字段在画稿里和幻兽图重叠（有的帧还会被图盖住一半），
-           * 统一收掉，等级只用右下角 DOM 徽章显示；否则会出现「lv12 + Lv12」两层。 */
-          if (lv) { t.setText(lv, ''); if (lv.g) lv.g.style.display = 'none'; }
+          hidePetLevel(cell);
           wireClickable(cell, () => { selectedPetKey = pet.key; openDetailModal(pet); });
+          /* `wireClickable` 的 hover 会拨帧（2=悬停档，离开时回 1）；第 1 帧重建后
+           * 画稿自带的 "lv23" 又回来了 —— 用户看到的「所有幻兽都显示 lv23」就是悬停过一次
+           * 之后漏出占位串。这里在回来/离开的帧重建之后都再收一次。 */
+          if (cell.g) {
+            cell.g.addEventListener('mouseenter', () => hidePetLevel(cell));
+            cell.g.addEventListener('mouseleave', () => hidePetLevel(cell));
+          }
         }
         if (t) t.setText(nameNode, pet.name);
         if (cell && cell.g && container) {
           const hr = container.getBoundingClientRect();
           const cr = cell.g.getBoundingClientRect();
+          /* 屏幕 rect 先折回宿主的设计像素，再按格子宽高的 82% / 68% 摆。
+           * 以前直接拿屏幕像素写 left/width，外层 `--uiscale` 会再乘一次：
+           * 卡片实测偏右约 23px、宽了 7%，沈王爷/异星人/神灯都被推到卡面右侧。 */
+          const cw = cr.width / hs;
+          const ch = cr.height / hs;
           const art = document.createElement('div');
           art.className = 'ssfight-pet-art';
-          art.style.left = (cr.left - hr.left + cr.width * 0.09) + 'px';
-          art.style.top = (cr.top - hr.top + cr.height * 0.04) + 'px';
-          art.style.width = (cr.width * 0.82) + 'px';
-          art.style.height = (cr.height * 0.68) + 'px';
+          art.style.left = ((cr.left - hr.left) / hs + cw * 0.09) + 'px';
+          art.style.top = ((cr.top - hr.top) / hs + ch * 0.04) + 'px';
+          art.style.width = (cw * 0.82) + 'px';
+          art.style.height = (ch * 0.68) + 'px';
           container.appendChild(art);
           mountPetArt(art, pet).then(() => {
             if (!art.isConnected) return;
+            /* 换帧/重包之后原版 level 文本可能被重建，再收一次。 */
+            hidePetLevel(cell);
             const lv = document.createElement('span');
             lv.className = 'ssfight-pet-level';
             lv.textContent = 'Lv' + pet.level;
@@ -590,8 +676,7 @@
       } else {
         if (cell) {
           stopAt(cell, 1);
-          const lv = t && cell.byName ? cell.byName('level') : null;
-          if (lv) { t.setText(lv, ''); if (lv.g) lv.g.style.display = 'none'; }
+          hidePetLevel(cell);
           if (cell.g) cell.g.style.cursor = 'default';
         }
         if (t) t.setText(nameNode, '');
@@ -614,7 +699,9 @@
   /* ---------- 孵化 ---------- */
   function wireBeastHatch(view, page, container) {
     const t = T();
-    showBuildingLevel(container, 'beast', '幻兽牧场', 'right:18px;top:150px');
+    hideCarriedOver(view);
+    hideAllPetLevels(view);
+    showBuildingLevel(container, 'beast', '幻兽牧场', 'left:18px;top:96px');
     const st = State.state() || {};
     if (t) {
       t.setText(clipOf(view, 'title1'), '孵化');
@@ -631,18 +718,22 @@
   /* ---------- 详情 ---------- */
   function wireBeastDetail(view, page, container) {
     const t = T();
-    showBuildingLevel(container, 'beast', '幻兽牧场', 'right:18px;top:150px');
+    hideCarriedOver(view);
+    hideAllPetLevels(view);
+    showBuildingLevel(container, 'beast', '幻兽牧场', 'left:18px;top:96px');
     const list = ensureSelectedPet();
     const pet = list.find((p) => p.key === selectedPetKey);
     if (!pet) { wireClickable(clipOf(view, 'button1'), backBeast); toast('还没有幻兽，先去孵化一只吧'); return; }
     /* 详情页素材里没有随幻兽绑定的整身图（原版 attachMovie(summons.name) 那套库里没有导出），
      * 保留原生背景，但把会显示 "lv23 / 名字 / Lv0000" 的占位字段收掉，数据统一放在 DOM 面板，
      * 避免占位文本和真实数据叠在一起。 */
-    for (const n of ['c1', 'level', 'text2', 'text3', 'text4', 'text5', 'levelMc', 'expText']) {
-      const c = clipOf(view, n); if (c && c.g) c.g.style.visibility = 'hidden';
-    }
+    for (const n of ['c1', 'level', 'text2', 'text3', 'text4', 'text5', 'expText']) hideNamedClip(view, n);
     if (t) t.setText(clipOf(view, 'text1'), pet.name);
     stopAt(clipOf(view, 'star'), pet.grade);
+    /* 详情页右上角的 `Lv` 是画稿里的静态字，后面那排 `levelMc` 数字精灵（num1..num4）
+     * 原本没填就会停在占位帧；这里写进真实等级，和 DOM 面板的 Lv 保持一致。 */
+    const levelMc = clipOf(view, 'levelMc');
+    if (levelMc && t && t.showNumber) t.showNumber(String(pet.level), levelMc, 0, 0, 'left', 4);
     const expMc = clipOf(view, 'expMc');
     if (expMc) stopAt(expMc, pet.level >= pet.maxLevel ? (expMc.frameCount ? expMc.frameCount() : 1) : Math.min(expMc.frameCount ? expMc.frameCount() : 100, 1 + Math.ceil(pet.exp * 100 / Math.max(1, pet.nextExp))));
     wireClickable(clipOf(view, 'button1'), backBeast);
@@ -662,12 +753,14 @@
   /* ---------- 编队 ---------- */
   function wireBeastTeam(view, page, container) {
     const t = T();
-    showBuildingLevel(container, 'beast', '幻兽牧场', 'right:18px;top:150px');
+    hideCarriedOver(view);
+    hideAllPetLevels(view);
+    showBuildingLevel(container, 'beast', '幻兽牧场', 'left:18px;top:96px');
     const list = statePets();
     const teamKeys = (State.state() || {}).petsTeam || [];
     const used = list.filter((p) => teamKeys.includes(p.key)).reduce((n, p) => n + p.leadership, 0);
     const cap = State.petLeadership ? State.petLeadership() : 0;
-    for (const n of ['text1', 'text2', 'c1', 'c2', 'c3']) { const c = clipOf(view, n); if (c && c.g) c.g.style.visibility = 'hidden'; }
+    for (const n of ['text1', 'text2', 'c1', 'c2', 'c3']) hideNamedClip(view, n);
     const rows = list.length ? list.map((p) =>
       '<label><input type="checkbox" data-team-key="' + escH(p.key) + '"' + (teamKeys.includes(p.key) ? ' checked' : '') + '> ' +
       escH(p.name) + ' ' + p.grade + '★ Lv' + p.level + '（领导力' + p.leadership + '）</label>').join('')
@@ -700,7 +793,9 @@
   /* ---------- 喂养 ---------- */
   function wireBeastFeed(view, page, container) {
     const t = T();
-    showBuildingLevel(container, 'beast', '幻兽牧场', 'right:18px;top:150px');
+    hideCarriedOver(view);
+    hideAllPetLevels(view);
+    showBuildingLevel(container, 'beast', '幻兽牧场', 'left:18px;top:96px');
     const list = ensureSelectedPet();
     const pet = list.find((p) => p.key === selectedPetKey);
     if (!pet) { wireClickable(clipOf(view, 'button1'), backBeast); return; }
@@ -725,7 +820,9 @@
   /* ---------- 进化 ---------- */
   function wireBeastEvolve(view, page, container) {
     const t = T();
-    showBuildingLevel(container, 'beast', '幻兽牧场', 'right:18px;top:150px');
+    hideCarriedOver(view);
+    hideAllPetLevels(view);
+    showBuildingLevel(container, 'beast', '幻兽牧场', 'left:18px;top:96px');
     const list = ensureSelectedPet();
     const pet = list.find((p) => p.key === selectedPetKey);
     if (!pet) { wireClickable(clipOf(view, 'button1'), backBeast); return; }

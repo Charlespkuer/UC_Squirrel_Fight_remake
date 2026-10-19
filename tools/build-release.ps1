@@ -9,7 +9,7 @@
        / 安卓 tauri.properties
     2) 删掉 src-tauri\dist 里**上一个版本**的 exe / apk（只删本次不产出的，精确到文件）
     3) 编 Windows 轻壳 exe + NSIS 安装包（真正干活的是 tools\build-tauri-app.cjs）
-    4) 编安卓 APK（真正干活的是 tools\build-apk.ps1，中文路径/NDK 那些坑都注释在里面）
+    4) 编安卓 APK（真正干活的是 tools\build-apk.ps1：**原地构建**，中文路径/NDK 那些坑都注释在里面）
     5) 产物按名称模板改名，统一落到 src-tauri\dist
     6) 删掉为了打包而生成的缓存（target\ / Gradle build\ / web\ 等，通常 5~10 GB）
 
@@ -69,9 +69,7 @@ param(
   # 本机现成的安卓工具链（换机器时用参数覆盖）
   [string]$Jdk = 'E:\Android\jdk-17.0.20.1+1',
   [string]$Sdk = 'E:\Android\sdk',
-  [string]$NdkVersion = '27.0.12077973',
-  # 安卓必须在**纯 ASCII 路径**下构建（中文路径会让 NDK 的 linker 收到乱码路径）
-  [string]$BuildRoot = 'E:\ssdz-android-build'
+  [string]$NdkVersion = '27.0.12077973'
 )
 
 $ErrorActionPreference = 'Continue'
@@ -164,6 +162,9 @@ if (-not $CleanOnly) {
   if (-not (Test-Path $cli)) { Die "找不到 Tauri CLI：$cli（先在 src-tauri 下 npm install）" }
   if ($needExe -and -not $cargo) { Die '找不到 cargo（https://rustup.rs）' }
   if ($needApk) {
+    # 安卓原地构建要求仓库路径纯 ASCII（NDK 的 clang.cmd 按 GBK 传参，中文路径 linker 必挂；
+    # 2026-10 之前的做法是复制到 E:\ssdz-android-build 构建，现已改为原地——见 build-apk.ps1 第 1 条）
+    if ($ROOT -match '[^\x00-\x7F]') { Die "仓库路径含非 ASCII（$ROOT）：请把仓库移到纯 ASCII 路径后再出包" }
     if (-not (Test-Path (Join-Path $Jdk 'bin\java.exe'))) { Die "找不到 JDK：$Jdk" }
     if (-not (Test-Path $Sdk)) { Die "找不到 Android SDK：$Sdk" }
     $ndk = Join-Path $Sdk "ndk\$NdkVersion"
@@ -315,8 +316,9 @@ if ($DryRun -or $CleanOnly) {
   Write-Utf8NoBom $verJsonPath $n
   Ok "scripts\version.json → $target @ $commit $today"
 
-  # 安卓的版本号还有一处：gen/android/app/tauri.properties（gitignore 掉了，但是
-  # build-apk.ps1 同步到 ASCII 副本的**真源**）。versionCode 用 Tauri 的算法
+  # 安卓的版本号还有一处：gen/android/app/tauri.properties（gitignore 掉了，但它是
+  # 安卓构建直接读的**真源**——2026-10 改为原地构建后就在这棵树上，build-apk.ps1 出包前
+  # 还会对账）。versionCode 用 Tauri 的算法
   # major*1000000 + minor*1000 + patch（0.4.6 → 4006），别只改 versionName。
   $androProps = Join-Path $TAURI 'gen\android\app\tauri.properties'
   if (Test-Path $androProps) {
@@ -388,13 +390,7 @@ $cacheTargets = @(
   (Join-Path $TAURI 'gen\android\app\build'),
   (Join-Path $TAURI 'gen\android\build'),
   (Join-Path $TAURI 'gen\android\.gradle'),
-  (Join-Path $TAURI 'gen\android\app\.cxx'),
-  (Join-Path $BuildRoot 'src-tauri\target'),
-  (Join-Path $BuildRoot 'src-tauri\web'),
-  (Join-Path $BuildRoot 'src-tauri\gen\android\app\build'),
-  (Join-Path $BuildRoot 'src-tauri\gen\android\build'),
-  (Join-Path $BuildRoot 'src-tauri\gen\android\.gradle'),
-  (Join-Path $BuildRoot 'src-tauri\gen\android\app\.cxx')
+  (Join-Path $TAURI 'gen\android\app\.cxx')
 )
 if ($DeepClean) { $cacheTargets += (Join-Path $env:USERPROFILE '.gradle\caches') }
 
@@ -489,7 +485,7 @@ if ((-not $SkipExe) -or (-not $SkipInstaller)) {
 if (-not $SkipApk) {
   $psHost = Get-PsHost
   $apkArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $ROOT 'tools\build-apk.ps1'),
-    '-Abi', $Abi, '-Jdk', $Jdk, '-Sdk', $Sdk, '-BuildRoot', $BuildRoot)
+    '-Abi', $Abi, '-Jdk', $Jdk, '-Sdk', $Sdk)
   if (-not $DebugApk) { $apkArgs += '-Release' }
   Invoke-Step "编安卓 APK（$Abi / $(if ($DebugApk) { 'debug' } else { 'release' })）" $psHost $apkArgs
 

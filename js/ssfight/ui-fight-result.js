@@ -66,9 +66,16 @@
   /** 有升级时先挂原版升级页（7795），关掉后再接现代的武技三选一 / 自由属性点；
    *  没有升级 / 素材没起来时保持原来的“立刻弹现代选择”。 */
   function showLevelUp(options) {
+    /* 新手引导：等级事件（4/5/10/15/20/25/30/35 → nowPage 21/13/23/24/17/19/20/26，
+     * 原版 showLevelUp/showLevelupTips :7160-7300）。第 5 级的 f13 要盖在升级页上，
+     * 所以先通知再挂页（引导自己是异步挂的，加上重试能等到这个页）。 */
+    if (window.SfGuide && SfGuide.onLevelup) { try { SfGuide.onLevelup(options && options.ups); } catch (e) {} }
     if (!hasLevelUp(options)) { promptLevelUpChoices(); return false; }
     try {
-      SfLevelUp.open(options.ups, promptLevelUpChoices);
+      SfLevelUp.open(options.ups, () => {
+        promptLevelUpChoices();
+        if (window.SfGuide && SfGuide.onLevelupDone) { try { SfGuide.onLevelupDone(options.ups); } catch (e) {} }
+      });
       return true;
     } catch (e) {
       if (window.__errs) window.__errs.push('SfFightResult levelup: ' + (e && (e.stack || e.message) || e));

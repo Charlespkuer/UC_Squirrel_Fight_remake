@@ -829,56 +829,6 @@ test('需求9.2：玉石俱焚（C57）双塔两套口径 —— 挑战塔「下
   assert.match(towerSrc, /descOf\(buff, mode\)/, 'ownedBuffs 要按模式取文案');
 });
 
-test('需求9.4：道具卖出 = 「返回 / 卖出」弹窗，点一下卖 1 个、弹窗不关', () => {
-  const c = setup();
-  const S = c.State;
-  const src = readSrc('js', 'classic-ui.js');
-  /* ---- 1) 滑动条版本彻底移除 ---- */
-  assert.ok(src.indexOf('sell-count') < 0, '不该再有 sell-count 滑块');
-  assert.ok(src.indexOf('卖出数量') < 0, '不该再有「卖出数量」标签');
-  assert.ok(src.indexOf('function sellAsk') < 0, '旧的 sellAsk（滑动条选数量后确认）应当删掉');
-  assert.ok(src.indexOf('function sellOne') < 0, '不应该再是「点一下直接卖」的无弹窗版本');
-
-  /* ---- 2) 弹窗式交互：入口 → sellDialog → 内部只卖 1 个 ---- */
-  const entryLine = src.split('\n').find((l) => l.includes('sell.onclick') && l.includes('sellDialog(selectedProp')) || '';
-  assert.ok(entryLine.indexOf('sellDialog(selectedProp') > 0, '背包「卖出 1 个」应当打开卖出弹窗：' + entryLine.trim());
-  assert.ok(entryLine.indexOf('openBag(mode,bagPage)') > 0, '关掉弹窗后应当把背包重绘到最新数量');
-  assert.match(src, /function sellDialog\(id,\s*after\)/, '应当有 sellDialog');
-  const dlg = src.slice(src.indexOf('function sellDialog(id,after)'));
-  assert.ok(dlg.slice(0, 2600).indexOf('State.sellProp(id,1)') > 0, '弹窗里的卖出必须只卖 1 个');
-  /* 两个按钮：返回（muted → 自动排最左）+ 卖出（primary → 自动排最右） */
-  assert.match(dlg.slice(0, 2600), /\{label:'返回',cls:'muted'/, '应当有「返回」按钮（muted → 最左）');
-  assert.match(dlg.slice(0, 2600), /\{label:'卖出',cls:'gold',primary:true,close:false/, '应当有「卖出」按钮（primary → 最右，且点完不关弹窗）');
-  /* 卖光后按钮禁用 + 数字实时刷新 */
-  assert.ok(dlg.slice(0, 2600).indexOf('b.disabled=held<1') > 0, '卖光后应当把卖出按钮禁用');
-  assert.ok(dlg.slice(0, 2600).indexOf("data-live=\"sell-held\"") > 0, '弹窗里应当实时显示剩余数量');
-  /* 背包按钮文案就是「卖出」（不要「卖出 1 个」这种带数量的写法） */
-  assert.ok(src.indexOf("btn('卖出','prop-sell'") > 0, '背包按钮文案应当是「卖出」');
-  assert.ok(src.indexOf('卖出 1 个') < 0, '不该再有「卖出 1 个」的文案');
-  /* 卖出弹窗里不该再有「点「卖出」卖出 1 个，可得…」那行提示 */
-  assert.ok(dlg.slice(0, 2600).indexOf('sell-tip') < 0, '卖出弹窗不该再有那行操作提示');
-  assert.ok(src.indexOf('点「卖出」卖出 1 个') < 0, '那行提示文案应当删干净');
-  /* 使用弹窗里不该再显示「硬上限 999」 */
-  assert.ok(src.indexOf("'　硬上限 '+cap") < 0, '使用弹窗的体力标签不该再拼「硬上限 999」');
-  assert.ok(src.indexOf('　硬上限 ') < 0, '实时刷新的那一处也要去掉');
-
-  /* ---- 3) 模型口径：一次只减 1 个、按回收价进账 ---- */
-  S.newGame('sell-one');
-  const st = S.state();
-  let id = 0, price = 0;
-  for (let i = 1; i <= 60; i++) { const p = S.propSellPrice(i); if (p > 0) { id = i; price = p; break; } }
-  assert.ok(id > 0 && price > 0, '字典里应当有可卖的道具');
-  st.props[id] = 3; st.goldPoint = 100;
-  const r = S.sellProp(id, 1);
-  assert.ok(r.ok, '卖 1 个应当成功：' + (r.msg || ''));
-  assert.equal(r.sold, 1, '一次只卖 1 个');
-  assert.equal(st.props[id], 2, '背包应当剩 2 个');
-  assert.equal(st.goldPoint, 100 + price, '应当按回收价进账：' + price);
-  S.sellProp(id, 1); S.sellProp(id, 1);
-  assert.equal(st.props[id], undefined, '卖光之后不该还留着 0 个的条目');
-  assert.equal(S.sellProp(id, 1).ok, false, '没有库存时应当拒绝');
-});
-
 test('需求9.5：铸币（原名「重新挑战币」）改名彻底 + 无尽塔右上角标出本场数量', () => {
   const c = setup();
   const TD = c.TowerData, T = c.Tower;

@@ -1635,6 +1635,10 @@
     button9: 'village-miracle',    // 神迹（x≈196）
     button10: 'village-war',       // 征战（x≈275）
   };
+  const VILLAGE_LABEL = {
+    'village-altar': '祭坛', 'village-beast': '幻兽牧场',
+    'village-miracle': '神迹', 'village-war': '征战',
+  };
   /* 四处地点的立绘（mc1/mc3/mc4/mc5）：原版 version "c" 的点击目标是**立绘里面那颗 button1**
    * （MainMovie.as:9537/9555/9578/9605/9628），也就是说**点怪物本身就该进地点**。
    * 复刻直接把立绘的包围盒铺成点击区（见下），省得去猜每一帧里 button1 在哪。
@@ -1878,19 +1882,35 @@
       const key = name === 'mc1' ? 'altar' : name === 'mc3' ? 'miracle' : name === 'mc4' ? 'beast' : null;
       return key ? State.building(key) : null;
     };
+    /** 当前等级还没解锁时返回提示；空串 = 已解锁。 */
+    const lockOf = (action) => {
+      if (!(window.State && State.state)) return '';
+      const lv = Math.max(1, Number(State.state().level) || 1);
+      if (action === 'village-war') {
+        const need = Number(State.WAR_UNLOCK_LEVEL) || 35;
+        if (lv < need) return 'Lv' + need + ' 解锁';
+        if (window.Tower && Tower.unlocked) {
+          const u = Tower.unlocked();
+          return u.ok ? '' : (u.msg || '通关前 18 关后解锁');
+        }
+        const passed = State.state().stages || {};
+        for (let id = 1; id <= 18; id++) if (!passed[id] || passed[id].passed !== true) return '通关前 18 关解锁';
+        return '';
+      }
+      const key = action === 'village-altar' ? 'altar' : action === 'village-miracle' ? 'miracle' : action === 'village-beast' ? 'beast' : '';
+      if (!key || !State.buildingUnlocked) return '';
+      return State.buildingUnlocked(key) ? '' : 'Lv' + (State.buildingUnlockLevel(key) || 0) + ' 解锁';
+    };
     const villageFrameOf = (name) => {
       const c = rel(name);
       const last = c && c.frameCount ? c.frameCount() : 1;
-      if (name === 'mc5') {
-        /* 征战与挑战塔共用门槛：通关前 18 关（`Tower.unlocked()`），不再看 35 级。 */
-        if (window.Tower && Tower.unlocked) return Tower.unlocked().ok ? 1 : last;
-        const st = (window.State && State.state) ? State.state() : null;
-        const passed = !!st && (st.stages || {});
-        for (let id = 1; id <= 18; id++) if (!passed[id] || passed[id].passed !== true) return last;
-        return 1;
-      }
+      /* 未解锁：原版 `showUpgrading()` 对 level 0 是 `gotoAndStop(_totalframes)`，
+       * 末帧就是那块“坟墓/空档”外观；不要再停在基础建筑帧上。 */
+      if (name === 'mc5') return lockOf('village-war') ? last : 1;
+      const key = name === 'mc1' ? 'altar' : name === 'mc3' ? 'miracle' : name === 'mc4' ? 'beast' : null;
+      if (!key || lockOf('village-' + key)) return last;
       const b = buildingOf(name);
-      if (!b) return VILLAGE_STATE_FRAME;
+      if (!b) return last;
       const tier = (State.buildingTier ? State.buildingTier(b.level) : Math.ceil(b.level / 5));
       return Math.max(1, Math.min(last, tier));
     };
@@ -1899,7 +1919,7 @@
      *  自带等级牌），mc3/mc4 每帧都有。牌子不在（或只剩空白档）时**保持空白**，
      *  别把素材里的占位 0 露出来 —— 见 `setStaticPolicy` 的 `blankNames` 注释。 */
     const ensureHomeLevelBadge = (v, key, level, clip) => {
-      const host = v && v.el;
+      const host = v && (v.el || (v.root && v.root.parentNode) || (v.g && v.g.parentNode));
       if (!host || !clip || !clip.g) return;
       let badge = host.querySelector('.ssfight-home-level[data-building="' + key + '"]');
       if (!badge) {
@@ -1915,7 +1935,7 @@
       badge.style.top = Math.round(cr.top - hr.top + 22) + 'px';
     };
     const removeHomeLevelBadge = (v, key) => {
-      const host = v && v.el;
+      const host = v && (v.el || (v.root && v.root.parentNode) || (v.g && v.g.parentNode));
       const badge = host && host.querySelector('.ssfight-home-level[data-building="' + key + '"]');
       if (badge) badge.remove();
     };
@@ -1936,13 +1956,13 @@
         let numClip = null;
         for (const rec of (c && c.nodes ? c.nodes.values() : [])) if (rec.na === 'num' && rec.clip) numClip = rec.clip;
         const b = State.building(key);
+        removeHomeLevelBadge(view, key);
         if (!numClip) {
           /* 高等级画稿里 num 图层被导出丢了（mc3/mc4 只有第 1 帧有 num）；给玩家一个
-           * 同位置的 DOM 数字，避免升到 6 级后牌子又空掉。 */
+           * 同位置的 DOM 数字，避免升到 6 级后牌子又空掉。未解锁时不要写等级。 */
           if (b) ensureHomeLevelBadge(view, key, b.level, c);
           continue;
         }
-        removeHomeLevelBadge(view, key);
         if (!b) { blankDigits(numClip); continue; }
         /* 有牌子的那一档才写真实等级。 */
         if (mc === 'mc1' && (State.buildingTier ? State.buildingTier(b.level) : 1) !== 1) { blankDigits(numClip); continue; }
@@ -2066,6 +2086,8 @@
         clip.g.addEventListener('click', (e) => {
           e.stopPropagation();
           pressFlash(clip, idleFrameOf(key), settleVillage);
+          const lock = lockOf(key);
+          if (lock) { if (window.UI && UI.toast) UI.toast((VILLAGE_LABEL[key] || '这里') + '：' + lock); return; }
           if (window.UI && UI.runAction) UI.runAction(key);
         });
       } catch (e) {}
@@ -2095,6 +2117,8 @@
           e.stopPropagation();
           const pill = rel(VILLAGE_PILL_OF[key]);
           if (pill) pressFlash(pill, idleFrameOf(key), settleVillage);
+          const lock = lockOf(key);
+          if (lock) { if (window.UI && UI.toast) UI.toast((VILLAGE_LABEL[key] || '这里') + '：' + lock); return; }
           if (window.UI && UI.runAction) UI.runAction(key);
         });
       } catch (e) {}

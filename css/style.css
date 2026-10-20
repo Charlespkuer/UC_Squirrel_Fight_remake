@@ -84,6 +84,16 @@ body.audio-blocked .audio-hint { display: flex; }
 .ws-lv { color: #7cfc00; }
 .ws-type { background: #8a4b1f; border-radius: 6px; padding: 1px 8px; font-size: 14px; margin-left: 6px; }
 .ws-remark { font-size: 14px; color: #bfa87f; margin-top: 3px; }
+/* 装备融合材料词条：每件装备一行标签，选中后在下方汇总可继承词条。 */
+.gear-ext-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.gear-ext-label { font-size: 13px; color: #d9a441; flex-shrink: 0; }
+.gear-ext-tag { display: inline-block; padding: 1px 8px; border: 1px solid #a9792e; border-radius: 999px; background: rgba(255, 211, 105, .12); color: #ffe6a0; font-size: 13px; line-height: 20px; }
+.gear-ext-none { font-size: 13px; color: #8f7a5c; }
+.fusion-ext-summary { margin: 10px 0 8px; padding: 10px 14px; border: 2px dashed #8a5a24; border-radius: 14px; background: rgba(0, 0, 0, .22); }
+.fusion-ext-head { font-size: 16px; color: #ffe6a0; margin-bottom: 6px; line-height: 1.6; }
+.fusion-ext-head b { font-size: 17px; }
+.fusion-ext-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.fusion-ext-hint { margin-top: 6px; font-size: 13px; color: #bfa87f; line-height: 1.5; }
 .shop-price { color: #ffe66d; font-size: 18px; min-width: 70px; text-align: right; }
 .boss-tag { background: #d63c2a; color: #fff; font-size: 13px; border-radius: 5px; padding: 1px 7px; }
 .icon { flex-shrink: 0; border-radius: 8px; background-color: rgba(255,255,255,.08); }

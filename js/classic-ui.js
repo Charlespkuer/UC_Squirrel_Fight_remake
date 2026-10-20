@@ -55,6 +55,7 @@
   let screen = 'home', timer = 0, activePortrait = null, lastRefresh = 0;
   let catalogPage = 0, bagPage = 0, gearPage = 0;
   let selectedProp = 0;
+  let selectedRankGood = 0;
   /* 图集图标的一级子目录：images/ui/icons/<dir>/<kind>-<id>.png（与磁盘结构一一对应）。 */
   const ICON_DIRS = { gear: 'gear', weapon: 'weapon', skill: 'skill', prop: 'prop' };
   const selectedItems = {weapon:0,skill:0};
@@ -98,6 +99,9 @@
    * `resource_1` 第 18 帧的单颗橡果，那是原版首页自己的样式，别混用。 */
   const GOLD_ICON = 'images/ui/icons/gold-acorn.png';
   function goldIcon(cls) { return '<img alt="" class="' + (cls || '') + '" src="' + GOLD_ICON + '">'; }
+  /** 礼包/奖励里的道具图标：金松果（id 8）统一用**经典**那张金松果，
+   *  其余走经典道具图。现代 330×330 的 prop-8 只留给现代界面。 */
+  function giftIcon(id) { return Number(id) === 8 ? goldIcon() : icon('prop', id); }
   /** 价格 = **金松果贴图 + 数字**（用户 2026-10 第一百五十批口径）。
    *  商店里原本写的是「30 金松果」这种**文字**，与复刻其它地方（顶栏 / 融合页 / 塔）用的
    *  "图标 + 数字"不是一套；现在统一成后者。`title` 保留一句可读文案给读屏与悬停提示，
@@ -311,7 +315,7 @@
           '<span class="reward-text">武器/技能 三选一</span></div>'
         : '';
       const giftCards = (u.gifts || []).map((g) =>
-        '<div class="reward-card gift"><span class="reward-icon">' + icon('prop', g.id) + '</span>' +
+        '<div class="reward-card gift"><span class="reward-icon">' + giftIcon(g.id) + '</span>' +
         '<span class="reward-text">' + esc(g.name) + ' ×' + esc(g.count) + '</span></div>').join('');
       return '<div class="reward-panel">' +
         '<div class="reward-title"><img alt="升级奖励" src="' + frameUrl('resource_10', 3) + '"></div>' +
@@ -329,8 +333,8 @@
     const grouped = Object.create(null);
     loot.items.forEach(item => { if(grouped[item.id])grouped[item.id].count+=item.count;else grouped[item.id]={...item}; });
     /* 「跳过键」的代价（2026-10 用户口径）：这一场只收 2/3 —— 随机抹掉的那一项在这里说清楚，
-     * 免得玩家以为掉落莫名其妙少了一份（口径见 battle-drops 的 trimOne）。
-     * 塔的层结算是**一包一包**抹的，所以 `lost` 可能是数组（普通战斗只有一项）。 */
+     * 免得玩家以为掉落莫名其妙少了一份（普通战斗的口径见 battle-drops 的 skip）。
+     * 塔的层结算是**一包一包**抹的（仍用 trimOne），所以 `lost` 可能是数组。 */
     const lostList = Array.isArray(loot.lost) ? loot.lost : (loot.lost ? [loot.lost] : []);
     const lost = lostList.length ? '<div class="battle-loot-summary lost">跳过战斗：随机少收了 ' +
       lostList.map(x => esc(x.name) + ' ×' + x.count).join('　') + '</div>' : '';
@@ -593,6 +597,13 @@
   function refreshHome() {
     const S = State.state(); if (!S) return;
     const h = $('.classic-home'); if (!h) return;
+    /* 经典模式（ssfight 原版渲染）的 `.classic-home` 里**没有** DOM 版那套
+     * `.home-name` / `.home-level` / 体力槽节点，页面由 `SfUiMain` 自己每秒刷。
+     * 这里必须提前返回：以前会在这里 `$('.home-name',h).textContent = ...` 抛
+     * “Cannot set properties of null”，调用方（尤其调试面板的「遗忘 / 获得武技」）
+     * 在调完 `State` 之后、`renderOwned()` / 提示之前就中断了 —— 表现为点 ×
+     * 状态其实删了，但面板上的条目和提示都不更新，看起来像没删掉。 */
+    if (h.classList && h.classList.contains('ssfight-home')) return;
     State.tickEnergy();
     $('.home-name',h).textContent = S.name;
     setNum($('.home-level .num',h), S.level);
@@ -973,7 +984,7 @@
     if (!ups || !ups.length) return '';
     return '<div class="reward-stack">' + ups.map(function (u) {
       const gifts = (u.gifts || []).map(function (g) {
-        return '<div class="reward-card gift"><span class="reward-icon">' + icon('prop', g.id) + '</span>' +
+        return '<div class="reward-card gift"><span class="reward-icon">' + giftIcon(g.id) + '</span>' +
           '<span class="reward-text">' + esc(g.name) + ' ×' + esc(g.count) + '</span></div>';
       }).join('');
       const rows = (u.reward ? '<div class="reward-card skill"><span class="reward-text">' + esc(u.reward) + '</span></div>' : '')
@@ -1026,6 +1037,18 @@
    * 只有现代模式（或 ssfight 渲染不可用）才退回 DOM 版。 */
   function backToStages(t) {
     if (currentUiMode() === 'classic' && window.SfChallenge && SfChallenge.openAt) {
+      /* 页面还在树上就**直接拨 tab**，不要再 `openChallenge()` 重建整页 ——
+       * 重建会先清空 `#ui`、再异步挂一棵新 SVG，观感就是用户报的"关卡页闪一下"。
+       * 战斗前 `holdPageForBattle()` 摘下来的那一棵由 `onEnd` 原样挂回，走到这里时
+       * `root.isConnected` 已经是 true，直接拨到关卡页即可。 */
+      const live = SfChallenge.view && SfChallenge.view();
+      if (live && live.root && live.root.isConnected) {
+        try {
+          if (Number.isFinite(t)) SfChallenge.openGateAt(t);
+          else SfChallenge.showTab('gates');
+        } catch (e) {}
+        return;
+      }
       SfChallenge.openAt('gates');
       UI.runAction('challenge');
       /* ⚠ `openChallenge()` 会先把 `#ui` 换成新的 `.ssfight-home` —— 战斗期间
@@ -1100,8 +1123,32 @@
      * 只影响关卡模式；挑战塔 / 无尽塔走各自的敌人构建（tower.js 的 buildFoe），不受影响。 */
     const dailyCount=State.challengeDailyCount?State.challengeDailyCount():0;
     const foe=GData.stageFoe(npc,stageId,type.anim,dailyCount);
-    const backToStage=()=>backToStages(Math.floor((stageId-1)/6));
-    const interrupted=()=>{State.interruptStageBattle(stageId,started.token);backToStage();notice('战斗播放中断，本轮进度已保留。重新进入关卡即可继续。');};
+    const gateType=Math.floor((stageId-1)/6);
+    const backToStage=()=>backToStages(gateType);
+    /* 战斗前把原版关卡页从 `#ui` 摘下来（`Main.startBattle` 会整片清空 `#ui`），
+     * 打完原样挂回同一棵 SVG —— 不再 `destroy()` + 重新挂载，那一步就是"闪一下"的来源。
+     * 页面不在场 / 非经典模式时 `holdPageForBattle()` 返回 null，走原来的重挂路径。 */
+    let heldPage=null;
+    try { if (classicSsflight() && window.SfChallenge && SfChallenge.holdPageForBattle) heldPage=SfChallenge.holdPageForBattle(); } catch(e) {}
+    const restoreStage=()=>{
+      if (heldPage && window.SfChallenge && SfChallenge.resumePageAfterBattle) {
+        /* 三级页（难度页 / 出战确认）也一起挂回：`keepSub` 时不走 showTab，
+         * 只用 `refreshGateAt()` 更新星标/文案，避免重新 mount 4756 那一下卡顿。 */
+        const keepSub=!!(heldPage.sub&&heldPage.sub.host);
+        try {
+          if (SfChallenge.resumePageAfterBattle(heldPage,'gates',{keepSub})) {
+            try {
+              if (keepSub && SfChallenge.refreshGateAt) SfChallenge.refreshGateAt(gateType);
+              else SfChallenge.openGateAt(gateType);
+            } catch (e) {}
+            return true;
+          }
+        } catch (e) {}
+      }
+      backToStage();
+      return false;
+    };
+    const interrupted=()=>{State.interruptStageBattle(stageId,started.token);restoreStage();notice('战斗播放中断，本轮进度已保留。重新进入关卡即可继续。');};
     try { Promise.resolve(Main.startBattle(foe,{region:type.anim==='tl'?3:type.anim==='xh'?4:1,kind:'stage',useProps:false,hpRatio:carryHp,skipChest:true,
       /* 经典模式下**连战间隙不许回首页**（用户 2026-10 口径："经典模式下完全是经典模式"）：
        * 打完先回原版关卡页，再弹战果。所以这里让 `startBattle` 跳过它默认那次
@@ -1109,8 +1156,8 @@
       keepScreen: classicSsflight(),
       onError:()=>State.interruptStageBattle(stageId,started.token),
       onEnd:(w,r)=>{
-        // 战斗结束后把关卡页放回背景，别让战果弹窗飘在主界面上
-        backToStage();
+        // 战斗结束后把关卡页放回背景（同一棵 SVG），别让战果弹窗飘在主界面上
+        restoreStage();
         // 连战按剩余血量比例继承；缺字段时退化为 0，绝不能在这里抛错，
         // 否则异常会冒到 Battle 的 onError，把玩家直接丢回主界面且丢掉战果。
         const hp=r&&Array.isArray(r.hpAfter)?r.hpAfter[0]:null,cap=r&&Array.isArray(r.maxHp)?r.maxHp[0]:0;
@@ -1331,7 +1378,7 @@
       };
     });
     wireDetail();
-    $('[data-action="rank-shop"]',p)?.addEventListener('click',()=>ClassicExtras.rankShop());
+    $('[data-action="rank-shop"]',p)?.addEventListener('click',()=>ClassicExtras.rankShop(0,'shop'));
     $('[data-action="prev"]',p)?.addEventListener('click',(e)=>popTap(e.currentTarget,()=>openBag(mode,bagPage-1)));
     $('[data-action="next"]',p)?.addEventListener('click',(e)=>popTap(e.currentTarget,()=>openBag(mode,bagPage+1)));
     /* 背包页的 f7 必须在整页 DOM 都挂好后再挂引导（page() 里那一次会被后面的重绘吞掉）。 */
@@ -1339,6 +1386,181 @@
   }
   /** 金宝箱 / 魔法袋：原版是「打开金宝箱」(65) → 开奖(66) → 领取(68) 三段弹窗。
    *  离线版把三段收成一个说明 + 开奖两个弹窗（文案与权重见 State.openChestProp）。 */
+  /** 收掉金杯商店那一颗原版 3911 的视图（翻页/重绘/返回时调用）。 */
+  function destroyRankShopBack(page) {
+    const view = page && page.__rankBackView;
+    if (page) page.__rankBackView = null;
+    if (view) { try { view.destroy(); } catch (e) {} }
+  }
+  /** 金杯商店的返回键：直接挂「随机挑战 → 查看」那一页用的原版 `3911`
+   *  （4756 f5 的 `back`：金胶囊 + 「返回」，第 1 帧黄 / 第 2 帧绿）。
+   *  位置照原版舞台 `(160.3, 175.5)`；挂载失败才退回普通底栏按钮。 */
+  function mountRankShopBack(page, onBack) {
+    const host = document.createElement('div');
+    host.className = 'rank-shop-back';
+    host.style.visibility = 'hidden';
+    page.appendChild(host);
+    const fallback = () => {
+      if (!page.isConnected || $('.rank-shop-fallback-footer', page)) return;
+      if (host.parentNode) host.remove();
+      const foot = document.createElement('footer');
+      foot.className = 'page-footer rank-shop-fallback-footer';
+      foot.innerHTML = btn('返回', 'rank-shop-fallback', 'gold', true);
+      page.appendChild(foot);
+      const b = $('[data-action="rank-shop-fallback"]', foot);
+      if (b) b.onclick = onBack;
+    };
+    const mount = () => {
+      if (!window.SfRender || !SfRender.mountSymbol) { fallback(); return; }
+      SfRender.mountSymbol(host, '3911', { frame: 1, label: '返回' }).then((view) => {
+        if (!page.isConnected || !view || !view.g) { if (view) { try { view.destroy(); } catch (e) {} } fallback(); return; }
+        let box = null;
+        try { box = view.g.getBBox(); } catch (e) { box = null; }
+        if (!box || !(box.width > 0) || !(box.height > 0)) {
+          try { view.destroy(); } catch (e) {}
+          fallback();
+          return;
+        }
+        /* 3911 的本地画稿不以 (0,0) 为左上角（实测 bbox 约 -54.8,-9.95,107.4×29.45）。
+         * 原版是在 4756 f5 上用 `matrix(1,0,0,1,160.3,175.5)` 挂它 —— 也就是说
+         * **符号原点**落在 (160.3,175.5)，不是包围盒左上角。把 viewBox 收成 bbox 后，
+         * 宿主位置要把 bbox 的负偏移补回去，否则整颗键会往右下跑、还被舞台裁掉。 */
+        view.g.setAttribute('viewBox', box.x + ' ' + box.y + ' ' + box.width + ' ' + box.height);
+        host.style.left = ((160.3 + box.x) / 320 * 100).toFixed(4) + '%';
+        host.style.top = ((175.5 + box.y) / 196 * 100).toFixed(4) + '%';
+        host.style.width = (box.width / 320 * 100).toFixed(4) + '%';
+        host.style.height = (box.height / 196 * 100).toFixed(4) + '%';
+        host.style.visibility = '';
+        page.__rankBackView = view;
+        view.g.style.pointerEvents = 'auto';
+        view.g.style.cursor = 'pointer';
+        view.g.setAttribute('role', 'button');
+        view.g.setAttribute('tabindex', '0');
+        view.g.setAttribute('aria-label', '返回');
+        view.g.style.outline = 'none';
+        const hover = (on) => { try { view.gotoAndStop(on ? 2 : 1); } catch (e) {} };
+        view.g.addEventListener('pointerenter', () => hover(true));
+        view.g.addEventListener('pointerleave', () => hover(false));
+        const fire = (e) => { if (e) { e.preventDefault(); e.stopPropagation(); } onBack(); };
+        view.g.addEventListener('click', fire);
+        view.g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fire(e); });
+      }).catch(() => fallback());
+    };
+    if (window.SfRender && SfRender.loadExtra) {
+      SfRender.loadExtra('tags-challenge.json').catch(() => {}).then(mount);
+    } else {
+      mount();
+    }
+  }
+  /** 金杯商店：**直接复用道具页「商店」的版面与鼠标反馈**（6 格/页、右侧说明、
+   *  左右翻页；格子悬停变绿、点击回弹）。只换商品源与售价（金杯+金松果），
+   *  兑换确认走 `ClassicExtras.rankBuy()`。返回键用原版 3911，`origin` 决定回商店还是天梯菜单。 */
+  function openRankShop(pg, origin) {
+    const CE = window.ClassicExtras;
+    /* 从道具商店底栏进来 → 退出回商店；从天梯菜单进来 → 退出回天梯赛菜单。 */
+    const backTo = origin === 'shop' ? 'shop' : 'ladder';
+    /* 翻页/兑换后重绘会换掉整页 DOM；先收掉上一页的 3911 视图，别让它在播放表里空转。 */
+    destroyRankShopBack(document.querySelector('.rank-shop-page'));
+    if (!CE || !CE.rankGoodsList) { toast('金杯商店数据未就绪'); return; }
+    const goods = CE.rankGoodsList();
+    const total = Math.max(1, Math.ceil(goods.length / 6));
+    const pgNo = Math.max(0, Math.min(Number(pg) || 0, total - 1));
+    const shown = goods.slice(pgNo * 6, pgNo * 6 + 6);
+    if (!shown.some((g) => String(g.id) === String(selectedRankGood))) selectedRankGood = shown[0] ? shown[0].id : 0;
+    const S = State.state();
+    const iconOf = (g, selected) => icon(g.type === '2' ? 'gear' : 'prop', g.goodsId, false, selected);
+    /* 售价按用户口径：数字 + 金杯图 + 数字 + 金松果图，中间不再写「杯/果」或「/」。
+     * 金杯沿用道具 40 的经典图，金松果沿用商店同一颗 `gold-acorn.png`。 */
+    const CUP_ICON = atlasIcon('prop', 40);
+    const priceMarkup = (g, detail) => {
+      const cup = Math.max(0, Number(g.cup) || 0), gold = Math.max(0, Number(g.gold) || 0);
+      const cls = detail ? 'rank-price rank-price-detail' : 'item-caption rank-caption rank-price';
+      return '<span class="' + cls + '" role="img" aria-label="售价 ' + cup + ' 金杯、' + gold + ' 金松果">' +
+        '<span class="rank-price-part"><b>' + cup + '</b><img class="rank-price-art" src="' + CUP_ICON + '" alt=""></span>' +
+        '<span class="rank-price-part"><b>' + gold + '</b><img class="rank-price-art" src="' + GOLD_ICON + '" alt=""></span>' +
+        '</span>';
+    };
+    const limitText = (g) => {
+      const lim = CE.rankLimitInfo ? CE.rankLimitInfo(g) : { account: false, limit: Number(g.timesLimit) || 0, bought: Number((S.rankPurchases || {})[g.id]) || 0 };
+      if (!(lim.limit > 0)) return '不限兑换次数';
+      return (lim.account ? '账号限购 ' : '本周限兑 ') + lim.limit + ' 次（已' + (lim.account ? '购 ' : '兑 ') + lim.bought + '）';
+    };
+    const detailMarkup = (g) => {
+      if (!g) return '<h3>金杯商店</h3><div class="bag-description">本周还没有可兑换的奖励。</div>';
+      return '<h3>' + esc(g.name) + '</h3>' +
+        '<div class="bag-description">' + esc(g.remark || '') + '</div>' +
+        '<div class="bag-item-meta">售价 ' + priceMarkup(g, true) + '<br>' +
+          '积分要求 ' + (Number(g.integral) || 0) + '<br>' +
+          limitText(g) + '</div>' +
+        '<div class="rank-wallet">当前：金杯 ' + (Number(S.goldCup) || 0) + '　金松果 ' + (Number(S.goldPoint) || 0) +
+          '　积分 ' + (Number(S.integral) || 0) + '</div>';
+    };
+    const cells = shown.map((g) => {
+      const on = String(g.id) === String(selectedRankGood);
+      return '<button class="catalog-cell' + (on ? ' selected' : '') + '" data-rank-good="' + g.id + '" aria-label="' +
+        esc(g.name) + '，' + (Number(g.cup) || 0) + ' 金杯 + ' + (Number(g.gold) || 0) + ' 金松果" aria-pressed="' + on + '">' +
+        '<span class="item-icon">' + iconOf(g, on) + '</span>' + priceMarkup(g, false) + '</button>';
+    }).join('') + Array.from({ length: 6 - shown.length }, () =>
+      '<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('');
+    const content = '<div class="bag-layout"><div class="catalog-grid bag-grid">' + cells +
+      '</div><aside class="bag-detail" aria-live="polite">' +
+      detailMarkup(shown.find((g) => String(g.id) === String(selectedRankGood)) || shown[0]) + '</aside></div>' +
+      (pgNo ? '<div class="page-arrow prev">' + btn('‹', 'rank-prev', 'arrow') + '</div>' : '') +
+      (pgNo < total - 1 ? '<div class="page-arrow bag-next">' + btn('›', 'rank-next', 'arrow') + '</div>' : '');
+    const p = page('bag', 'shop', content, {
+      cls: 'classic-bag-board shop-board rank-shop-board',
+      pageClass: 'rank-shop-page',
+      counter: (pgNo + 1) + '/' + total,
+      /* 返回键不用自建底栏：套用「随机挑战 → 查看」那一页的原版 3911（金胶囊 + 返回）。 */
+      noFooter: true,
+    });
+    wirePopTaps(p, { tabs: true, cells: true, arrows: true });
+    installBagTabVectors(p);
+    const leave = () => {
+      destroyRankShopBack(p);
+      if (backTo === 'shop') {
+        try { UI.runAction('shop'); } catch (e) { home(); }
+      } else if (window.SfChallenge && SfChallenge.goArenaPage) {
+        SfChallenge.goArenaPage('menu');
+      } else {
+        home();
+      }
+    };
+    mountRankShopBack(p, leave);
+    const select = (id) => {
+      selectedRankGood = id;
+      const g = shown.find((x) => String(x.id) === String(id));
+      for (const cell of $$('[data-rank-good]', p)) {
+        const on = String(cell.dataset.rankGood) === String(id);
+        /* ⚠ 每一格用**自己的**商品图标；以前这里用了当前选中的 `g`，鼠标扫过一格
+         *  会把整页六格图标都刷成那一件（用户会看到一页全是同一个图标）。 */
+        const own = shown.find((x) => String(x.id) === String(cell.dataset.rankGood));
+        cell.classList.toggle('selected', on);
+        cell.setAttribute('aria-pressed', String(on));
+        $('.item-icon', cell).innerHTML = own ? iconOf(own, on) : '';
+        if (window.SfUiFeedback) SfUiFeedback.bind(cell, { selected: on });
+      }
+      $('.bag-detail', p).innerHTML = detailMarkup(g);
+    };
+    $$('[data-rank-good]', p).forEach((b) => {
+      /* 与商店页同一套：移到哪一格哪一格变绿并同步右侧说明；单击打开兑换确认。 */
+      b.addEventListener('pointerenter', () => select(String(b.dataset.rankGood)));
+      b.onclick = () => {
+        const id = b.dataset.rankGood;
+        const choose = () => {
+          select(String(id));
+          const g = shown.find((x) => String(x.id) === String(id));
+          if (g && CE.rankBuy) CE.rankBuy(g.id, () => { try { openRankShop(pgNo, backTo); } catch (e) {} });
+        };
+        if (window.SfUiFeedback) SfUiFeedback.tap(b, choose, { delay: 0, press: false });
+        else choose();
+      };
+    });
+    wirePopTaps(p, {});
+    $('[data-action="rank-prev"]', p)?.addEventListener('click', (e) => popTap(e.currentTarget, () => openRankShop(pgNo - 1, backTo)));
+    $('[data-action="rank-next"]', p)?.addEventListener('click', (e) => popTap(e.currentTarget, () => openRankShop(pgNo + 1, backTo)));
+    return p;
+  }
   function openChestDetail(id, shop) {
     const pet = id === 79;
     const name = pet ? '魔法袋' : '金宝箱';
@@ -1764,9 +1986,21 @@
     if($('.point-dialog'))return null;
     return freePointDialog();
   }
-  /** 升级奖励的统一入口：先选「三选一」的武器/技能，选完再分配自由属性点。 */
+  /** 升级奖励的统一入口：先处理 30 级支持作者提示，再选「三选一」的武器/技能，
+   *  最后分配自由属性点。支持提示只取一次；关掉它之后再继续后面的升级选择。 */
   function promptLevelUpChoices() {
     if($('.ws-choice-dialog'))return null;
+    /* 任何别的经典弹窗还开着都不要叠新的升级弹窗；关掉后 `modal()` 会再调一次。 */
+    if($('.classic-modal-overlay'))return null;
+    if (State.supportPromptPending && State.supportPromptPending() && maybeSupportPrompt()) {
+      /* 支持作者弹窗是独立的一次性提示：等玩家关掉它，再把升级三选一/加点接上。 */
+      const tick = () => {
+        if ($('.classic-modal-overlay')) { setTimeout(tick, 120); return; }
+        promptLevelUpChoices();
+      };
+      setTimeout(tick, 150);
+      return null;
+    }
     if(typeof State.pendingWS==='function'&&State.pendingWS()>0)return wsChoiceDialog();
     const r = promptFreePoints();
     if (r) return r;
@@ -2015,6 +2249,9 @@
    *  胜利 → State.revengeReward 发少量经验与金松果，并把这条记录标成「已复仇」。 */
   function revengeFight(record, back) {
     const foe=Object.assign({},record.foe);
+    /* 只有天梯赛败绩的复仇才抢金杯（0~1 个）；普通挑战复仇只补经验与金松果。 */
+    const ladder=record.kind==='rank';
+    const cups=ladder&&Math.random()<0.5?1:0;
     Main.startBattle(foe,{region:record.region||0,kind:'revenge',useProps:false,collectDrops:false,skipResultPanel:true,onEnd:(winner)=>{
       back();
       const win=winner===0;
@@ -2024,7 +2261,11 @@
         return;
       }
       const rw=State.revengeReward(foe.level);
-      resultModal(true,rw,'复仇成功：'+esc(foe.name)+' 已被击败，补回少量经验与金松果。',back);
+      const S=State.state();
+      if(cups>0) S.goldCup=Math.max(0,Number(S.goldCup)||0)+cups;
+      State.save();
+      const cupText=ladder?(cups>0?'，抢夺 '+cups+' 个金杯':'，本次没有抢到金杯'):'';
+      resultModal(true,rw,'复仇成功：'+esc(foe.name)+' 已被击败'+cupText+'，补回少量经验与金松果。',back);
     }});
   }
   function openFriends(refresh) {
@@ -2099,7 +2340,10 @@
     const claimRow = '<div class="daily-claim-row">' +
       '<div class="daily-card"><div class="daily-card-head"><h3>每日礼包</h3>' +
         btn(d.claimed ? '今日已领取' : '领取', 'claim-gift', 'small ' + (d.claimed ? 'muted' : 'gold')) + '</div>' +
-        '<p>连续登录 ' + (d.streak || 1) + ' 天　金松果 ×' + d.gold + '　挑战书 ×' + d.challengeBooks + '</p></div>' +
+        '<p class="daily-gift-preview">连续登录 ' + (d.streak || 1) + ' 天' +
+          '<span class="daily-reward">' + goldIcon() + '<b>×' + d.gold + '</b></span>' +
+          (d.extra ? '<span class="daily-reward">' + giftIcon(d.extra.id) + '<b>' + esc(d.extra.name) + ' ×' + d.extra.count + '</b></span>' : '') +
+        '</p></div>' +
       '<div class="daily-card tribute"><div class="daily-card-head"><h3>徒弟日供</h3>' +
         btn(tributeLabel, 'claim-tribute', 'small ' + (tribute.claimable ? 'gold' : 'muted')) + '</div>' +
         '<p>' + esc(tributeText) + '</p></div></div>';
@@ -3045,14 +3289,45 @@
     const fsBtn=$('[data-action="fullscreen"]',p);
     if(fsBtn)fsBtn.setAttribute('data-fullscreen','1');
     if(fsBtn)fsBtn.onclick=()=>{Main.setFullscreen(!Main.settings().fullscreen);openSystem();};
-    $('[data-action="export"]',p).onclick=()=>{
-      const blob=new Blob([JSON.stringify(State.state(),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='松鼠大战存档-'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('存档已导出');
-    };
+    $('[data-action="export"]',p).onclick=exportSaveFile;
     $('[data-action="import"]',p).onclick=importSave;
     $('[data-action="rename"]',p).onclick=()=>{
       const m=modal('更改昵称','<p>给你的松鼠起个名字</p><input id="rename-input" maxlength="12" value="'+esc(State.state().name)+'" style="width:100%;padding:14px;border:3px solid #b39763;border-radius:18px;color:#715231;background:#fffdf1">',[{label:'确定',close:false,run:()=>{const name=$('#rename-input',m.element).value.trim();if(!name){toast('名字不能为空');return;}State.state().name=name;State.save();m.close();refreshHome();}},{label:'返回',cls:'muted'}],{small:true});
     };
     wireSystemFeedback(p);
+  }
+  /** 导出存档。
+   *  - 安卓（Tauri WebView）优先走 Kotlin 注入的 `SSDZAndroid`：
+   *    Android 10+ 直接写系统「下载」目录，避免 WebView 默认落到
+   *    `/data/user/0/com.ssdz.classic/...` 这种玩家打不开的私有路径；
+   *  - Windows / 浏览器 / 桌面壳仍用原来的 Blob 下载（浏览器下载目录）。
+   *  安卓桥失败时退回 Blob，并明确提示“可能落在应用私有目录”，不让导出静默失败。 */
+  function exportSaveFile() {
+    const text = JSON.stringify(State.state(), null, 2);
+    /* 带秒，避免同一天导出第二次时在下载目录里重名；用本地时间，别在午夜附近把日期写错。 */
+    const d = new Date(), two = (n) => String(n).padStart(2, '0');
+    const stamp = d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate()) +
+      '-' + two(d.getHours()) + '-' + two(d.getMinutes()) + '-' + two(d.getSeconds());
+    const fileName = '松鼠大战存档-' + stamp + '.json';
+    const bridge = window.SSDZAndroid;
+    let bridgeError = '';
+    if (bridge && typeof bridge.saveToDownloads === 'function') {
+      try {
+        const raw = bridge.saveToDownloads(fileName, text);
+        const r = JSON.parse(String(raw || '{}'));
+        if (r && r.ok) { toast('存档已导出到 ' + (r.path || '系统下载目录')); return; }
+        bridgeError = (r && r.msg) || '无法写入系统下载目录';
+      } catch (e) {
+        bridgeError = (e && e.message) || String(e);
+      }
+    }
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = fileName; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(bridgeError
+      ? '下载目录写入失败（' + bridgeError + '），已改用浏览器下载；文件可能在应用私有目录。'
+      : '存档已导出');
   }
   function importSave() {
     void pickJsonFile().then(async (file) => {
@@ -3103,9 +3378,25 @@
     }
     fallbackAction();
   }
-  function villageAltar() { openVillageScene('village-altar', () => fallback('arena')); }
-  function villageBeast() { openVillageScene('village-beast', () => openMerge()); }
-  function villageMiracle() { openVillageScene('village-miracle', () => fallback('lottery')); }
+  function villageBuildingLock(key, label) {
+    if (!(window.State && State.buildingUnlocked) || State.buildingUnlocked(key)) return '';
+    return label + '需要达到 ' + (State.buildingUnlockLevel ? State.buildingUnlockLevel(key) : '') + ' 级才能使用。';
+  }
+  function villageAltar() {
+    const lock = villageBuildingLock('altar', '祭坛');
+    if (lock) { notice(lock); return; }
+    openVillageScene('village-altar', () => fallback('arena'));
+  }
+  function villageBeast() {
+    const lock = villageBuildingLock('beast', '幻兽牧场');
+    if (lock) { notice(lock); return; }
+    openVillageScene('village-beast', () => openMerge());
+  }
+  function villageMiracle() {
+    const lock = villageBuildingLock('miracle', '神迹');
+    if (lock) { notice(lock); return; }
+    openVillageScene('village-miracle', () => fallback('lottery'));
+  }
   /* ⑧ 村庄「征战」：原版那一套是**四人组队 + 服务端开房**
    * 的玩法（界面元件「征战」在导出里没有 spriteId、"四人同时在线"在离线单机里没有对应物），
    * 复刻不做。
@@ -3120,6 +3411,9 @@
    * `[data-action="tower-entry"]` / `[data-action="endless-entry"]` 进去的界面）。
    * 门槛照现代入口那一份（`Tower.unlocked()`：通关前 18 关），不另立一套。 */
   function villageWar() {
+    const S = State.state();
+    const levelNeed = Number(State.WAR_UNLOCK_LEVEL) || 35;
+    if (Number(S && S.level) < levelNeed) { notice('征战需要达到 ' + levelNeed + ' 级才能使用。'); return; }
     const lock = (window.Tower && Tower.unlocked && window.TowerUI)
       ? Tower.unlocked() : { ok: false, msg: '挑战塔系统尚未就绪。' };
     if (!lock.ok) { notice(lock.msg); return; }
@@ -3174,7 +3468,7 @@
       lines.push('每日抽奖：' + mine.map((p) => p.label).join('、') + '，占 ' + mine.length + '/10 格，单次抽中概率 ' + mine.length * 10 + '%，期望 ' + expect.toFixed(1) + ' 个/次（每天免费 1 次，之后 20 金松果/次）');
     }
     if ([24, 25, 26].includes(id)) lines.push('关卡掉落：' + ({ 24: '螳螂关', 25: '仙鹤关', 26: '熊猫关' })[id] + '每场胜利 45%～60%（按星级）概率掉落 1～6 个，期望约 1.6～2.1 个/场；★3-4 有 28% 几率越 1 级、★5-6 越 2 级');
-    if (id === 23) lines.push('每日礼包：每天 1 个（连续登录第 1 天 100 金松果，每多一天 +10，150 封顶；第 7 天多 1 本挑战书）');
+    if (id === 23) lines.push('每日礼包：每天 1 个（连续登录第 1 天 100 金松果，每多一天 +10，150 封顶；另在挑战书、英雄帖、勇气徽章、召唤证、三种超级药丸之间按日期轮换 1 个）');
     if (id === 28) lines.push('创建角色时获得 1 个');
     if (id === 29) lines.push('打开「1级礼包」获得');
     if (id === 30) lines.push('打开「5级礼包」获得');
@@ -3448,7 +3742,7 @@
        * 图鉴的数据画格子（原版那两个 tab 的图标是运行时 `attachMovie` 的库元件，素材库里没有），
        * 所以把"这一页有哪些东西、自己有没有、是不是真形态"与"打开某一项的详情"这两件事导出去。
        * 详情页用的还是复刻这一套（版式已对照原版截图核过），只是入口改成原版页里的格子。 */
-      catalogInfo, openItem, wsIconOf,
+      catalogInfo, openItem, wsIconOf, openRankShop,
       /* `catalogItems(kind)` = 该类目的**全部**条目（id / 名字 / 原版矢量图标），
        * 给"查看别人"那一页用：它要按对手自己的武器/技能清单把格子画出来
        * （原版 `showWeaponSkills` 只是把数据源换成 `friendInfo`，见 ui-status.js）。 */

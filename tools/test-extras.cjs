@@ -598,6 +598,32 @@ test('金杯商店跨周：限兑按周重置，未标周次的旧购买计数�
 });
 
 
+test('力敏速血永久丸按账号累计限购 1 次，跨周也不重置', () => {
+  /* 原版 `timesLimit=1` + 服务端 buyCounts：这四件是**账号级**限购，不是每周刷新。
+   * 复刻以前把所有 timesLimit 都当周限，导致每周都能再买一个、属性无限叠。 */
+  const g = setup(), s = g.c.State.state();
+  s.level = 30; s.integral = 2000; s.goldCup = 2000; s.goldPoint = 500;
+  const choose = () => {
+    g.c.ClassicExtras.rankShop();
+    g.click('rank-shop-next');
+    g.page().querySelector('[data-goods="7"]').onclick();
+  };
+  choose(); g.modalClick();
+  assert.equal(s.rankPurchaseTotals[7], 1, '第一次购买记进账号累计账');
+  assert.equal(s.rankPurchases[7], undefined, '永久丸不再记进按周账');
+  assert.equal(s.props[16], 1, '力量永久 +1 进入背包');
+  const cup = s.goldCup;
+  choose(); g.modalClick();
+  assert.match(g.modals.at(-1).html, /账号累计只能兑换 1 次/);
+  assert.equal(s.rankPurchaseTotals[7], 1, '第二次被账号上限拦住');
+  assert.equal(s.goldCup, cup, '被拦住时不扣金杯');
+  g.advance(8 * 86400000);                       // 跨到下一周
+  choose(); g.modalClick();
+  assert.match(g.modals.at(-1).html, /账号累计只能兑换 1 次/);
+  assert.equal(s.rankPurchaseTotals[7], 1, '跨周也不重置');
+  assert.equal(s.props[16], 1);
+});
+
 test('抽奖首抽免费、防双击，付费经验奖扣20并真正升级', () => {
   const g = setup(), s = g.c.State.state(); g.math.random = () => 0;
   g.c.ClassicExtras.lottery(); const first = g.node('lottery-spin').onclick; first(); first();
@@ -802,7 +828,7 @@ test('拜师后自动学会师父驾到，出师花20金松果且角色数据完
   assertBalanced(g.markup);
 });
 
-test('收徒上限随师父等级1/2/3，仅扣10金松果且重复调用不多发徒弟', () => {
+test('收徒上限随师父等级1/2/3，扣10金松果+10体力且重复调用不多发徒弟', () => {
   const g = setup(), s = g.c.State.state();
   assert.equal(g.c.State.apprenticeCap(5), 1);
   assert.equal(g.c.State.apprenticeCap(10), 2);
@@ -811,7 +837,7 @@ test('收徒上限随师父等级1/2/3，仅扣10金松果且重复调用不多�
   s.level = 5;
   g.c.ClassicExtras.master('apprentice');
   const handler = g.node('master-recruit').onclick; handler(); handler();
-  assert.equal(s.energy, 90); assert.equal(s.goldPoint, 90); assert.equal(g.battles.length, 1);
+  assert.equal(s.energy, 80); assert.equal(s.goldPoint, 90); assert.equal(g.battles.length, 1);
   assert.equal(g.battles[0].opts.cost, undefined);
   g.settle(0, 0); g.settle(0, 0);
   assert.equal(s.prentices.length, 1, '重复回调不多发徒弟');
@@ -948,12 +974,15 @@ test('师徒候选等级合理化：不超过满级 70，徒弟不会超过师�
   assertBalanced(g.markup);
 });
 
-test('收徒金松果不足不启动，零体力可以收徒，落败消耗一次药剂状态', () => {
+test('收徒金松果/体力不足不启动；落败消耗一次药剂状态', () => {
   const g = setup(), s = g.c.State.state(); s.energy = 0;s.goldPoint=9;
   g.c.ClassicExtras.master('apprentice'); g.click('master-recruit'); assert.equal(g.battles.length, 0); assert.equal(s.goldPoint,9);
-  s.goldPoint = 10; s.propsStates[3] = 20; g.c.ClassicExtras.master('apprentice'); g.click('master-recruit');
+  s.goldPoint = 10; g.c.ClassicExtras.master('apprentice'); g.click('master-recruit');
+  assert.equal(g.battles.length, 0, '零体力不能开始收徒挑战');
+  assert.equal(s.goldPoint, 10, '零体力时不扣金松果');
+  s.energy = 90; s.propsStates[3] = 20; g.c.ClassicExtras.master('apprentice'); g.click('master-recruit');
   g.settle(0, 1); g.settle(0, 1);
-  assert.equal(s.energy, 0);assert.equal(s.goldPoint,0); assert.equal(s.prentices.length, 0); assert.equal(s.exp, 0); assert.equal(s.propsStates[3], 19);
+  assert.equal(s.energy, 80, '收徒挑战扣 10 体力'); assert.equal(s.goldPoint,0); assert.equal(s.prentices.length, 0); assert.equal(s.exp, 0); assert.equal(s.propsStates[3], 19);
 });
 
 test('日供系数：经验 5%~15%、金松果 5%~25%，均按等级之和线性插值', () => {

@@ -175,13 +175,19 @@
    *  乘一次；用屏幕 rect 直接算 left/top/宽高会整体偏右下。 */
   function layoutScale(host) {
     if (!host) return 1;
-    if (!host.__petProbe) {
-      const p = document.createElement('div');
+    /* ⚠ 缓存探针必须判 `isConnected`：重挂牧场页时 `SfRender.mountSymbol(host, …)` 会把
+     * 旧宿主里的子节点清掉，`host.__petProbe` 还指着一颗已摘掉的节点 ——
+     * `getBoundingClientRect().width` 全是 0，这里退回 1，于是按"未缩放"的设计像素摆幻兽图，
+     * 新孵出的幻兽在画面上偏右偏大；退出再进（新建宿主）才恢复。
+     * 只在探针还连着时复用，否则重建一颗。 */
+    let p = host.__petProbe;
+    if (!p || !p.isConnected) {
+      p = document.createElement('div');
       p.style.cssText = 'position:absolute;left:0;top:0;width:100px;height:0;pointer-events:none;visibility:hidden';
       host.appendChild(p);
       host.__petProbe = p;
     }
-    const w = host.__petProbe.getBoundingClientRect().width;
+    const w = p.getBoundingClientRect().width;
     return w ? w / 100 : 1;
   }
   /** 收掉幻兽格画稿里自带的 `level` 文本（4276，占位串固定是 "lv23"）。
@@ -230,14 +236,19 @@
     t.freezeDescendants(clip);          // 换帧重建出来的新子元件也一并交给静态页策略
   }
   /** 状态帧只用于按钮两档；按下由路由反馈，click不再叠加回弹或退场。 */
-  function wireClickable(clip, onFire) {
+  /** `opts.hover` / `opts.idle`：悬停 / 常态停到哪一帧（默认 2 / 1）。
+   *  翻页箭头 `3156` 的第 2 帧是**空帧**（只有箭头画在第一帧），所以幻兽牧场的
+   *  left/right 必须传 `hover:1` —— 否则鼠标一移上去箭头就“隐形”，正是用户报的那条。 */
+  function wireClickable(clip, onFire, opts) {
     const t = T();
     if (!t || !clip || !clip.g) return;
+    const hoverFrame = (opts && opts.hover != null) ? Number(opts.hover) : 2;
+    const idleFrame = (opts && opts.idle != null) ? Number(opts.idle) : 1;
     clip.__sceneFire = onFire;
     if (clip.__sceneWired) return;
     clip.__sceneWired = true;
     clip.__sceneHover = false;
-    stopAt(clip, 1);
+    stopAt(clip, idleFrame);
     clip.g.style.cursor = 'pointer';
     clip.g.style.pointerEvents = 'auto';
     t.measureHitBox(clip);
@@ -247,8 +258,12 @@
     if (window.SfUiFeedback) SfUiFeedback.bind(clip.g, {
       hover: false, shell: () => clip.g.querySelector(':scope > g.uc-pop'),
     });
-    clip.g.addEventListener('mouseenter', () => { clip.__sceneHover = true; stopAt(clip, 2); refreshShell(clip); });
-    clip.g.addEventListener('mouseleave', () => { clip.__sceneHover = false; stopAt(clip, 1); refreshShell(clip); });
+    clip.g.addEventListener('mouseenter', () => {
+      clip.__sceneHover = true;
+      if (hoverFrame > 0) stopAt(clip, hoverFrame);
+      refreshShell(clip);
+    });
+    clip.g.addEventListener('mouseleave', () => { clip.__sceneHover = false; stopAt(clip, idleFrame); refreshShell(clip); });
     clip.g.addEventListener('click', (e) => {
       e.stopPropagation();
       const fire = () => {
@@ -654,12 +669,14 @@
           /* 屏幕 rect 先折回宿主的设计像素，再按格子宽高的 82% / 68% 摆。
            * 以前直接拿屏幕像素写 left/width，外层 `--uiscale` 会再乘一次：
            * 卡片实测偏右约 23px、宽了 7%，沈王爷/异星人/神灯都被推到卡面右侧。 */
+          /* ⚠ 垂直要"上下各余 16%"居中（0.16 = (1−0.68)/2）：2026-10-19 用户口径
+           * 「幻兽都偏上」—— 原来顶部只留 4%、底部留 28%，六只全部贴着格子上沿。 */
           const cw = cr.width / hs;
           const ch = cr.height / hs;
           const art = document.createElement('div');
           art.className = 'ssfight-pet-art';
           art.style.left = ((cr.left - hr.left) / hs + cw * 0.09) + 'px';
-          art.style.top = ((cr.top - hr.top) / hs + ch * 0.04) + 'px';
+          art.style.top = ((cr.top - hr.top) / hs + ch * 0.16) + 'px';
           art.style.width = (cw * 0.82) + 'px';
           art.style.height = (ch * 0.68) + 'px';
           container.appendChild(art);
@@ -685,8 +702,9 @@
     const left = clipOf(view, 'left'), right = clipOf(view, 'right');
     setVisible(left, beastPage > 1);
     setVisible(right, beastPage < pageCount);
-    wireClickable(left, () => { if (beastPage > 1) { beastPage--; openPage('beast'); } });
-    wireClickable(right, () => { if (beastPage < pageCount) { beastPage++; openPage('beast'); } });
+    /* 3156 的第 2 帧是空帧：悬停必须保持第 1 帧，否则箭头会“消失”。 */
+    wireClickable(left, () => { if (beastPage > 1) { beastPage--; openPage('beast'); } }, { hover: 1 });
+    wireClickable(right, () => { if (beastPage < pageCount) { beastPage++; openPage('beast'); } }, { hover: 1 });
     wireClickable(clipOf(view, 'button5'), backToVillage);
     wireClickable(clipOf(view, 'button1'), openHatchModal);
     wireClickable(clipOf(view, 'button2'), openTeamModal);
@@ -874,8 +892,8 @@
     };
     if (left) { setVisible(left, false); left.playing = false; }
     if (right) right.playing = false;
-    wireClickable(left, () => showCampaignPage(1));
-    wireClickable(right, () => showCampaignPage(2));
+    wireClickable(left, () => showCampaignPage(1), { hover: 1 });
+    wireClickable(right, () => showCampaignPage(2), { hover: 1 });
     wireClickable(clipOf(view, 'button1'), () => pendingFlash(NOTE.warRecord));
     wireClickable(clipOf(view, 'button2'), backToVillage);
     showCampaignPage(1);

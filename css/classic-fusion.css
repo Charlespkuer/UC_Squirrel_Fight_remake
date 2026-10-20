@@ -54,6 +54,16 @@
 
 .fusion-arrow{font-size:44px;color:#eda92c;text-shadow:2px 2px 0 #8e6b32;transform:translateY(-8px)}
 
+/* ---------- 词条（2026-10：融合界面直接看材料/卡片词条） ---------- */
+.fusion-ext-line{display:flex;flex-wrap:wrap;justify-content:center;gap:2px;max-width:100%;margin-top:1px}
+.fusion-ext-tag{display:inline-block;max-width:100%;padding:0 6px;border:1px solid #c7a15c;border-radius:999px;
+  background:#fff8df;color:#8a6428;font-size:13px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fusion-ext-line.compact .fusion-ext-tag{font-size:12px;line-height:16px;padding:0 5px}
+.fusion-ext-none{font-size:12px;line-height:16px;color:#ae966f}
+.fusion-picked-exts{width:100%;margin-top:3px;padding-top:4px;border-top:1px dashed #dcc79d}
+.fusion-picked-exts>b{display:block;font-size:15px;font-weight:normal;color:#8b672f;margin-bottom:3px;text-align:center}
+.fusion-ext-tags{display:flex;flex-wrap:wrap;justify-content:center;gap:3px}
+
 /* 预览：金色虚线格 + 旋转高光 + 「必得 1 件」 */
 .fusion-preview{display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0;width:132px;font-size:22px;line-height:26px;color:#a9762f}
 .fusion-preview .fusion-frame{width:76px;height:76px;border-style:dashed;border-color:#e0a12f;

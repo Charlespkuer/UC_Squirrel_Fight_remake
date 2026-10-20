@@ -118,19 +118,25 @@
    "file": "bitmap/7777_0.png",
    "bytes": 4649,
    "from": "image/png",
-   "firstTag": "7777"
+   "firstTag": "7777",
+   "hd": "bitmap/7777_0.hd.png",
+   "hdRefs": 1
   },
   {
    "file": "bitmap/7775_0.jpg",
    "bytes": 17452,
    "from": "image/jpeg",
-   "firstTag": "7775"
+   "firstTag": "7775",
+   "hd": "bitmap/7775_0.hd.jpg",
+   "hdRefs": 2
   },
   {
    "file": "bitmap/7748_0.jpg",
    "bytes": 16249,
    "from": "image/jpeg",
-   "firstTag": "7748"
+   "firstTag": "7748",
+   "hd": "bitmap/7748_0.hd.jpg",
+   "hdRefs": 2
   },
   {
    "file": "bitmap/7741_0.jpg",
@@ -200,13 +206,17 @@
    "file": "bitmap/6835_0.jpg",
    "bytes": 24344,
    "from": "image/jpeg",
-   "firstTag": "6835"
+   "firstTag": "6835",
+   "hd": "bitmap/6835_0.hd.jpg",
+   "hdRefs": 1
   },
   {
    "file": "bitmap/3770_0.png",
    "bytes": 1582,
    "from": "image/png",
-   "firstTag": "3770"
+   "firstTag": "3770",
+   "hd": "bitmap/3770_0.hd.png",
+   "hdRefs": 1
   },
   {
    "file": "bitmap/7041_0.jpg",

@@ -701,11 +701,6 @@
         applyStatic(clip, p.na);
         node = clip.g;
         node.__clip = clip;
-        /* 新实例出生回调：原版每个挂点精灵都在自己的 frame 1 脚本里"自我声明"该长哪件装备，
-         * 复刻没有 AS，所以改由外面在**实例化这一刻**接管（见 ui-main.js 的穿搭逻辑）。 */
-        if (this.opts && typeof this.opts.onClip === 'function') {
-          try { this.opts.onClip(clip); } catch (e) {}
-        }
       } else if (child.tp === 11) {
         node = textNode(child, this.rootDefs);
       } else {
@@ -735,6 +730,15 @@
       const target = wrap || node;
       if (isMaskDepth(d)) target.setAttribute('visibility', 'hidden');
       this.placeFrameNode(target);
+      /* 新实例出生回调：**必须在节点进文档之后**再调。
+       * 原版每个挂点精灵在自己的 frame 1 脚本里"自我声明"该长哪件装备；复刻没有 AS，
+       * 由外面在这里接管（见 ui-main.js 的穿搭逻辑）。
+       * ⚠ 以前回调放在 `placeFrameNode` 之前，`setSymbol` → `anchorToBBox` 里的
+       * `getBBox()` 量不到（节点还不在文档里），只能等下一帧；装备就会被隐藏一帧
+       * —— 战斗每回合复位身体时，玩家看到的就是"闪一下"（用户 2026-10 口径）。 */
+      if (clip && this.opts && typeof this.opts.onClip === 'function') {
+        try { this.opts.onClip(clip); } catch (e) {}
+      }
       next.set(d, { id: String(p.id), node, clip, wrap, na: p.na || null });
     }
     /* 新帧里不存在的深度：移除（并注销子树）
@@ -880,21 +884,55 @@
    * **必须从这里拼进去**：实例刚建出来时还没进文档，`getBBox()` 拿不到，会安排下一帧重算，
    * 那次重算会**整段重写 `__extra`**；调用方如果在外面 append 偏移，会被这次重算悄悄抹掉
    * （2026-10 就是踩了这个：偏移量看着写对了，实测一点没动）。 */
+  /* 装备容器的包围盒只跟「元件号 + 帧号」有关，量一次就能一直用。
+   * 缓存它之后，战斗里每回合重建身体/挂点时不必再等下一帧量 bbox ——
+   * 否则等 bbox 的那一帧要把装备藏起来，玩家看到的就是每回合闪一下（2026-10 口径）。 */
+  const bboxCache = new Map();
   MovieClip.prototype.anchorToBBox = function (s, mode, tail, retry) {
     const self = this, sc = (s && s !== 1) ? s : 1, md = mode || 'topleft';
     const after = tail ? ' ' + tail : '';
-    this.g.__extra = '';
-    this.applyXform();
-    let b = null;
-    try { b = this.g.getBBox(); } catch (e) { b = null; }
+    /* 【装备/贴图在屏幕上方闪一下】实例刚出生时还没进文档，`getBBox()` 量不到，
+     * 这里会等下一帧再量。那一帧里节点已经用**容器画稿自己的原始坐标**画出来
+     * （装备挂点的局部原点在角色身上，画稿却按另一套坐标铺开），观感就是屏幕上方
+     * 闪一下一件装备/半只小人。等包围盒期间先藏起来，量到（或重试也量不到）再放回。
+     * `__anchorSeq` 防止换符号后旧的 rAF 回调把新内容按旧包围盒摆一次。 */
+    const seq = (this.__anchorSeq = (this.__anchorSeq || 0) + 1);
+    const cacheKey = this.tag ? String(this.tag.id) + '@' + this.frame : '';
+    let b = cacheKey ? bboxCache.get(cacheKey) : null;
+    const restore = () => {
+      if (seq !== this.__anchorSeq || !this.__anchorHidden || !this.g || !this.g.style) return;
+      this.__anchorHidden = false;
+      this.g.style.visibility = this.__anchorPrevVisibility || '';
+    };
+    if (!b) {
+      if (!this.__anchorHidden && this.g && this.g.style) {
+        this.__anchorHidden = true;
+        this.__anchorPrevVisibility = this.g.style.visibility;
+        this.g.style.visibility = 'hidden';
+      }
+      this.g.__extra = '';
+      this.applyXform();
+      try { b = this.g.getBBox(); } catch (e) { b = null; }
+      if (b && b.width && b.height && cacheKey) bboxCache.set(cacheKey, { x: b.x, y: b.y, width: b.width, height: b.height });
+    }
     if (!b || (!b.width && !b.height)) {
-      if (!retry) requestAnimationFrame(() => { try { self.anchorToBBox(sc, md, tail, true); } catch (e) {} });
+      if (!retry && typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => {
+          /* 这一帧里如果已经换了符号 / 重新锚定过，旧回调不能再拿旧包围盒摆一次。 */
+          if (self.__anchorSeq !== seq) return;
+          try { self.anchorToBBox(sc, md, tail, true); } catch (e) {}
+        });
+      } else {
+        /* 重试也量不到（或没有 rAF）：不要把它永久藏住，保持原来的行为。 */
+        restore();
+      }
       return;
     }
     const px = md === 'center' ? b.x + b.width / 2 : md === 'bottom' ? b.x + b.width / 2 : b.x;
     const py = md === 'center' ? b.y + b.height / 2 : md === 'bottom' ? b.y + b.height : b.y;
     this.g.__extra = 'translate(' + (-px * sc) + ',' + (-py * sc) + ') scale(' + sc + ')' + after;
     this.applyXform();
+    restore();
   };
 
   /* ---------- 挂载：根时间轴第 N 帧 → 一棵 SVG ---------- */

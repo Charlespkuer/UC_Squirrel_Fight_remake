@@ -56,35 +56,31 @@
     masterHpRatio: 0.50, masterChance: 35,
     /* 出手时的「二次使用」权重（%）。做法是两层池子：本场没用过的武器/技能优先，
      * 只有这个权重才回头用旧的那把/那个，所以「用过的」实际出场率被明显压低。
-     * 2026-10 用户口径，简化为三档（不再按技能逐个分档）：
-     *   · 武器：用过之后一律 repeatWeapon（30）；
-     *   · 来点松果（17）/ 野球拳（12）：第 1 次用过后 repeatSpecialFirst（15），
-     *     第 2 次及以后 repeatSpecialAgain（5，到底不再下降）；
-     *   · 其余技能：用过之后一律 repeatSkill（20）。
-     * 「刚用过的那一个再 ×LAST_PENALTY(0.3)」对以上三档都生效。 */
-    repeatWeapon: 30,
-    repeatSkill: 20,
-    repeatSpecialFirst: 15, repeatSpecialAgain: 5,
+     * 2026-10 用户新口径（第二百四十九批）：
+     *   · 普通武器：用过之后一律 repeatWeapon（8）；
+     *   · 投掷武器：前两次使用 100，第三次及以后 repeatWeapon（8）；
+     *   · 其余主动技能：第二次及以后一律 repeatSkill（5）；来点松果 17 二次及以后为 1；
+     *   · 不再叠加「上一回合刚用过 ×0.3」的额外惩罚 —— 新表要求权重就是表里的数。 */
+    repeatWeapon: 8,
+    repeatSkill: 5,
+    repeatSpecialFirst: 5, repeatSpecialAgain: 5,
     /* 徒手攻击的基准权重：与武器/技能的候选权重放进同一个池子竞争（不再是固定百分比）。
-     *   · 持有的武器/技能越多 → 工具权重总和越大 → 徒手占比越低；
-     *   · 全部用过一遍之后工具权重整体掉到 5~30 → 徒手占比自动抬高；
-     *   · 只有一个主动技、且已经用过时，它的权重降到二次使用概率，
-     *     不会再出现「类型抽中技能 → 只能放它」的强制复用。
-     * 2026-10 用户口径：基准**从 30 提到 50**（徒手更常见），并且加一条**份额保底**：
-     * 工具权重再大，徒手的最终占比也不低于 minCommonShare（5%）——
-     * 需要徒手权重 ≥ 工具权重 × 0.05/0.95 才够，见 commonWeightFor()。 */
-    commonAttackWeight: 50,
+     * 2026-10 用户新口径：**100**；保留 5% 的份额保底（只在工具权重极大时兜底）。 */
+    commonAttackWeight: 100,
     minCommonShare: 0.05,
     /* 三侠等纯 NPC 分支（没有武器池）的固定档位：30% 技能 / 70% 普攻。 */
     npcSkillChance: 30,
-    /* 绝对防御的触发曲线（2026-10 用户口径「中幅提高二次与多次触发」，需求140）：
-     *   首次 22%，之后 17 / 13 / 10 / 8 / 6 / 6 …（×0.78 慢衰减，地板 6）。
-     *   旧值是 13 / ×0.7 / 地板 2（22/13/9/6/4/3/2…）。
-     *   ★ 投掷类攻击**完全不触发**绝对防御（见 dmgReduce），所以这条曲线只由
-     *   近战 / 徒手 / 技能推进 —— 扔过来的武器不会把计数推上去、不降权。 */
-    jueDuiChance: 22, jueDuiAgain: 17,
-    jueDuiDecay: 0.78, jueDuiMin: 6,
-    shellFirst: 35, shellAgain: 20,
+    /* 绝对防御（16）与龟甲术（7）是**受击自动触发**、不进出手池的被动：
+     * 下表是每次受击的触发概率（%），按技能等级与「本场第几次触发」取。
+     *   绝对防御 1~10 级：首次 20,20.5,…,24.5；之后 0.5
+     *            11~15 级：首次 24.5；第二次 5,10,15,20,24；第三次及以后 0.5
+     *   龟甲术   1~10 级：首次 20,20.5,…,24.5；之后 1
+     *            11~15 级：首次 24.5；第二次 5,10,15,20,24；第三次及以后 1
+     * 投掷类攻击完全不触发绝对防御（见 dmgReduce）。 */
+    jueDuiFirstBase: 20, jueDuiFirstStep: 0.5, jueDuiRepeat: 0.5,
+    jueDuiTrueFirst: 24.5, jueDuiTrueSecond: 5, jueDuiTrueSecondStep: 5, jueDuiTrueSecondMax: 24, jueDuiTrueRepeat: 0.5,
+    shellFirstBase: 20, shellFirstStep: 0.5, shellRepeat: 1,
+    shellTrueFirst: 24.5, shellTrueSecond: 5, shellTrueSecondStep: 5, shellTrueSecondMax: 24, shellTrueRepeat: 1,
     xhSpeedShare: 0.35,
     skillCooldown: 2,
     /* 题面·熔核·炽壳：**每过一回合**叠一层减伤（+10%/层），第 8 回合起封顶 70%。
@@ -250,7 +246,7 @@
       side, name: f.name, level: stat(f.level, 1), npcType: f.npcType || null,
       power: stat(f.power, 1), agility: stat(f.agility, 1), speed: stat(f.speed, 1),
       maxHp: fullHp, hp: Math.max(1, Math.min(stat(f.hp, 1), fullHp)),
-      weapons, skills, usedWeapons: {}, usedSkills: {}, /* 每个技能「本场用过几次」——野球拳（12）的快速衰减要用它。 */
+      weapons, skills, usedWeapons: {}, weaponUseCount: {}, usedSkills: {}, /* 每个技能「本场用过几次」——野球拳（12）的快速衰减要用它。 */
       skillUseCount: {}, lastWeaponId: null, lastSkillId: null,
       /* 完整技能表的稳定顺序（skills 是「id → 等级」的对象，不是数组！）。
        * 原版这里写的是 skills[id] 下标访问，永远取不到东西 —— 所以固定循环的技能
@@ -274,7 +270,7 @@
       baseStats: Object.fromEntries(['power', 'agility', 'speed'].map((key) => [key, stat(f.baseStats?.[key], stat(f[key], 1))])),
       // 战斗内状态
       ap: 0, restNext: false, pendingWeapon: null, stun: 0, silence: 0, disarm: 0, shellCharges: 0,
-      mustHitNext: !!(mods && mods.mustHitFirst), stripTurns: 0, usedFakeDie: false, usedMaster: false, usedShell: false, usedCosmos: false, usedSnack: false, jueDuiCount: 0,
+      mustHitNext: !!(mods && mods.mustHitFirst), stripTurns: 0, usedFakeDie: false, usedMaster: false, shellCount: 0, usedCosmos: false, jueDuiCount: 0,
       // 题面·枯泉：治疗量倍率（0 = 完全封疗）
       /* 治疗量倍率（塔侧赛前写入：涌泉烙印 C52 按层给 +10%/层，损毁层 +20%）。
        * 战斗中被「枯泉」这类机制清零 = 完全封疗。所有治疗都走 healOf()，所以只要这里读进来就全生效。 */
@@ -303,6 +299,11 @@
        * 所以木头人不会死；这里用固定回合 + 保底 1 血复刻这个训练场景。 */
       practice: !!f.practice,
       practiceRounds: Math.max(0, Math.floor(Number(f.practiceRounds) || 0)),
+      /* 本回合已经吃到的练习伤害：一次行动里可能多段命中（流星锤三连等），
+       * 用它把「一回合最多打掉 800」锁住，而不是每段都能打 800。 */
+      practiceDamageThisAction: 0,
+      /* 上一拍扣掉的血，在下一拍开头回满；回血量记在这里交给回放层显示。 */
+      practiceHealPending: 0,
       /* 套装收益（装备派生，独立通道；见 gamedata.js【GD6】）。 */
       setFx: f.setFx && typeof f.setFx === 'object' ? Object.assign({}, f.setFx) : null,
       // 机制的可调数值（tower-data.js 里定，题面文本与判定共用一份，避免文案/数值走偏）
@@ -552,8 +553,6 @@
    * 【SM4】出手权重与武器/技能选取
    * ============================================================ */
   const UNUSED_WEIGHT = 100;
-  /** 刚刚用过的那一个再额外打折，避免连着两回合是同一把/同一个。 */
-  const LAST_PENALTY = 0.3;
 
   function pickWeighted(list, weightOf) {
     let total = 0;
@@ -566,19 +565,19 @@
 
   /**
    * 出手权重（武器/技能共用口径，并导出给测试直接校验）：
-   *   - 本场没用过 → UNUSED_WEIGHT（远高于用过的，所以优先，但不是绝对优先）；
-   *   - 已经用过   → 它的「二次使用权重」（见下面的三档口径）；
-   *   - 上一回合刚用过的那一个再乘 LAST_PENALTY，避免连着重复同一把/同一个。
+   *   - 本场没用过 → UNUSED_WEIGHT（普通武器/技能 100；投掷武器前两次也是 100）；
+   *   - 已经用过   → 它的「二次使用权重」（新表：技能 5 / 普通武器 8 / 投掷第三次起 8）；
+   *   - 2026-10 新表取消了「上一回合刚用过 ×0.3」的额外惩罚，权重就是表里的数。
    */
-  /** 某个技能「已经用过 count 次之后，下一次再放」的权重（%）。2026-10 三档口径：
-   *   · 来点松果（17）/ 野球拳（12）：第 1 次用过后 15，第 2 次及以后 5（到底，不再下降）；
-   *   · 其余技能：一律 20。
+  /** 某个技能「已经用过 count 次之后，下一次再放」的权重（%）。2026-10 新表：
+   *   · 其它主动技能（含野球拳 12）：第二次及以后一律 5；
+   *   · 来点松果 17：二次及以后权重 1（仍要求非满血）。
    *  count = 本场**已经用过**的次数（0 表示还没用过 —— 那时调用方直接用 UNUSED_WEIGHT，不走这里）。
-   *  绝对防御是另一套（jueDuiChanceOf：22/17/13/10/8/6/6 的 ×0.78 慢衰减、地板 6），
-   *  不进出手池；而且投掷类攻击根本不触发它（不挡也不降权）。 */
+   *  绝对防御/龟甲术是另一套（见 jueDuiChanceOf / shellChanceOf），它们不进出手池。 */
   function repeatRateOf(id, count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
-    if (id !== 12 && id !== 17) return RULES.repeatSkill;
+    if (Number(id) === 17) return 1;
+    if (id !== 12) return RULES.repeatSkill;
     return n <= 1 ? RULES.repeatSpecialFirst : RULES.repeatSpecialAgain;
   }
   /** 某个技能本场已经用过几次（玩家与敌人都记在各自的 skillUseCount 上）。 */
@@ -588,28 +587,41 @@
   }
   function skillWeight(att, id) {
     let w = att.usedSkills[id] ? repeatRateOf(id, skillUseCountOf(att, id)) : UNUSED_WEIGHT;
-    if (att.lastSkillId === id) w *= LAST_PENALTY;
     /* 秘技通神（C33）：该技能的触发概率 ×(1+加成)。走独立的 skillBoost 通道，
      * 不再借用 effects（那是装备词条/武器效果槽的编号空间，会造成串味）。 */
     const boost = Number(att.skillBoost && att.skillBoost[id]) || 0;
     if (boost > 0) w *= 1 + boost;
     return w;
   }
-  function weaponWeight(att, id) {
-    let w = att.usedWeapons[id] ? RULES.repeatWeapon : UNUSED_WEIGHT;
-    if (att.lastWeaponId === id) w *= LAST_PENALTY;
-    return w;
+  /** 武器权重：普通武器首次 100、之后 8；投掷武器前两次 100、第三次起 8。
+   *  例外：流星锤（10）与橡皮擦（7）虽是投掷，但第二次起按近战口径 8；
+   *  流星锤一次三连击只算**一次**武器使用（`weaponUseCount` 每次行动只 +1）。
+   *  `w` 可以是武器对象（带 type）或武器 id；id 形式会回到 att.weapons 里找类型。 */
+  function weaponWeight(att, w) {
+    const id = w && typeof w === 'object' ? w.id : w;
+    const weapon = w && typeof w === 'object'
+      ? w
+      : ((att.weapons || []).find((x) => Number(x.id) === Number(id)) || null);
+    const used = !!(att.usedWeapons && att.usedWeapons[id]);
+    const count = att.weaponUseCount && att.weaponUseCount[id] != null
+      ? Math.max(0, Math.floor(Number(att.weaponUseCount[id]) || 0))
+      : (used ? 1 : 0);
+    const specialThrowRepeat = Number(id) === 7 || Number(id) === 10;
+    if (weapon && weapon.type === '投掷' && !specialThrowRepeat) {
+      return count < 2 ? UNUSED_WEIGHT : RULES.repeatWeapon;
+    }
+    return used ? RULES.repeatWeapon : UNUSED_WEIGHT;
   }
 
-  /** 技能选择：按 skillWeight 加权 → 没用过的优先、二次使用被压掉、来点松果最低。 */
+  /** 技能选择：按 skillWeight 加权 → 没用过的优先、二次使用被压掉（来点松果每场一次）。 */
   /* ---------- 出手类型：武器 / 技能 / 徒手（权重竞争，不再是固定百分比） ----------
    * 把两边的**实际候选权重**加总，再和「徒手」权重一起抽一次：
    *   · 候选越多 → 工具总权重越大 → 徒手越少（持有的武技数量直接决定普攻欲望）；
-   *   · 全部用过一遍 → 每个候选的权重掉到二次使用概率（5~25）→ 徒手占比自然抬高；
+   *   · 全部用过一遍 → 技能权重掉到 5、普通武器掉到 8、投掷第三次起 8 → 徒手占比自然抬高；
    *   · 只剩一个主动技时，它用过之后的份额就是它的二次使用概率，
    *     不会因为「类型落在技能上」而被强行复用（修掉旧固定档位的那个副作用）。
    * 抽签仍然只消耗一次 Math.random()，所以既有的随机序列长度不变。 */
-  /* 徒手的实际权重：基准 50；若工具权重太大导致徒手份额不足 minCommonShare（5%），
+  /* 徒手的实际权重：基准 100；若工具权重太大导致徒手份额不足 minCommonShare（5%），
    * 就把它抬到「刚好 5%」——份额 = w/(w+tool) ≥ r  ⟺  w ≥ tool × r/(1−r)。 */
   function commonWeightFor(toolWeight) {
     const r = Math.max(0, Math.min(0.9, Number(RULES.minCommonShare) || 0));
@@ -618,7 +630,7 @@
   }
   function pickKind(att, weapons, actives) {
     let weaponSum = 0;
-    for (const w of weapons || []) weaponSum += weaponWeight(att, w.id);
+    for (const w of weapons || []) weaponSum += weaponWeight(att, w);
     let skillSum = 0;
     for (const id of actives || []) skillSum += skillWeight(att, id);
     const commonWeight = commonWeightFor(weaponSum + skillSum);
@@ -637,7 +649,7 @@
    * 「持有的武技越多 → 徒手越少」「全部用过一遍 → 徒手变多」「徒手占比不低于 5%」。 */
   function kindWeights(att, weapons, actives) {
     let weapon = 0;
-    for (const w of weapons || []) weapon += weaponWeight(att, w.id);
+    for (const w of weapons || []) weapon += weaponWeight(att, w);
     let skill = 0;
     for (const id of actives || []) skill += skillWeight(att, id);
     const common = commonWeightFor(weapon + skill);
@@ -662,19 +674,9 @@
   function pickSkill(att, actives) {
     return pickWeighted(actives, (id) => skillWeight(att, id));
   }
-  /** 野球拳（12）的闸门：**每个战斗单位都遵循**（玩家、固定循环的敌人、玩家式 AI 全都一样）。
-   *  第一次照放；从第二次起，每一次「本回合能不能放它」都按 repeatRateOf(12, 已用次数) 掷一次：
-   *  没抽中就把它排除在可用技能之外 —— 于是有别的技能就让位给别的，没有就改普攻。
-   *  （技能权重那条曲线同时也在 skillWeight 里生效，多技能时它被选中的份额本来就低。） */
-  function yakyuGated(att) {
-    if (!att) return false;
-    const used = skillUseCountOf(att, 12);
-    if (used <= 0) return false;
-    return !chance(repeatRateOf(12, used));
-  }
   /** 武器选择：同一套口径。`pool` 给整蛊专家过滤后的可用武器。 */
   function pickWeapon(att, pool) {
-    return pickWeighted(pool && pool.length ? pool : att.weapons, (w) => weaponWeight(att, w.id));
+    return pickWeighted(pool && pool.length ? pool : att.weapons, (w) => weaponWeight(att, w));
   }
 
   /* ============================================================
@@ -738,23 +740,45 @@
   }
   function jueDuiChanceOf(def, count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
-    const base = n === 0
-      ? RULES.jueDuiChance
-      : Math.max(RULES.jueDuiMin, Math.round(RULES.jueDuiAgain * Math.pow(RULES.jueDuiDecay, n - 1)));
+    const lv = Math.max(1, Math.floor(Number(def && def.skills && def.skills[16]) || 1));
+    let base;
+    if (lv <= 10) {
+      /* 1~10 级：首次 20,20.5,…,24.5；第二次及以后 0.5。 */
+      base = n === 0 ? RULES.jueDuiFirstBase + RULES.jueDuiFirstStep * (lv - 1) : RULES.jueDuiRepeat;
+    } else {
+      const t = Math.max(1, Math.min(5, lv - 10));
+      /* 11~15 级（真1~真5）：首次 24.5；第二次 5/10/15/20/24；第三次及以后 0.5。 */
+      base = n === 0 ? RULES.jueDuiTrueFirst
+        : n === 1 ? Math.min(RULES.jueDuiTrueSecondMax, RULES.jueDuiTrueSecond + RULES.jueDuiTrueSecondStep * (t - 1))
+          : RULES.jueDuiTrueRepeat;
+    }
     const boost = passiveSkillBoost(def, 16);
     const out = base * (1 + boost);
     if (!boost) return out;                                  // 没加成：原样
     return Math.min(out, n === 0 ? BOOSTED_FIRST_CAP : BOOSTED_AGAIN_CAP);
   }
-  /** 龟甲术的单次触发概率（%）：首次 / 二次及以后（二次还带装备与技能等级加成）。 */
-  function shellChanceOf(def, again) {
-    const base = again
-      ? Math.max(RULES.shellAgain + effect(def, 32), trueVal(7, def.skills[7]) * 100)
-      : RULES.shellFirst;
+  /** 龟甲术的单次触发概率（%）：按技能等级与「本场第几次触发」取。
+   *  1~10 级：首次 20,20.5,…,24.5；之后 1。
+   *  11~15 级：首次 24.5；第二次 5,10,15,20,24；第三次及以后 1。
+   *  装备词条 32（龟甲术 N% 几率抵挡 2 次）仍作为**第二次及以后**的平添概率保留。 */
+  function shellChanceOf(def, count) {
+    const n = Math.max(0, Math.floor(Number(count) || 0));
+    const lv = Math.max(1, Math.floor(Number(def && def.skills && def.skills[7]) || 1));
+    let base;
+    if (lv <= 10) {
+      base = n === 0 ? RULES.shellFirstBase + RULES.shellFirstStep * (lv - 1) : RULES.shellRepeat;
+    } else {
+      const t = Math.max(1, Math.min(5, lv - 10));
+      base = n === 0 ? RULES.shellTrueFirst
+        : n === 1 ? Math.min(RULES.shellTrueSecondMax, RULES.shellTrueSecond + RULES.shellTrueSecondStep * (t - 1))
+          : RULES.shellTrueRepeat;
+    }
+    /* 装备 32「龟甲术N%几率抵挡2次」只在二次及以后叠加，首次仍按技能本体。 */
+    const gearBonus = n >= 1 ? Math.max(0, Number(effect(def, 32)) || 0) : 0;
     const boost = passiveSkillBoost(def, 7);
-    const out = base * (1 + boost);
+    const out = (base + gearBonus) * (1 + boost);
     if (!boost) return out;                                  // 没加成：原样
-    return Math.min(out, again ? BOOSTED_AGAIN_CAP : BOOSTED_FIRST_CAP);
+    return Math.min(out, n === 0 ? BOOSTED_FIRST_CAP : BOOSTED_AGAIN_CAP);
   }
   /* ============================================================
    * 【SM6】减伤链（护盾/绝对防御/减伤）
@@ -766,7 +790,7 @@
     out.dmg = Math.round(out.dmg * (1 - clamp(gearReduction, 0, 80) / 100));
     /* 绝对防御是受击自动触发、不进出手池的技能，所以「挡过几次」单独记：
      * 同一场里每挡一次，下一次的触发率就按 jueDuiChanceOf 的曲线往下降
-     *（22 / 17 / 13 / 10 / 8 / 6 / 6 …地板 6；对敌我都生效）。
+     *（1~10 级：首次 20..24.5、之后 0.5；11~15 级：首次 24.5、第二次 5..24、第三次起 0.5）。
      * 旧的布尔 `usedJueDui` 已被这个计数取代（它只够区分「首次/之后」两档）。
      * 2026-10 用户口径（需求140）：**投掷类攻击根本不触发绝对防御** —— 不挡、不反弹，
      * 也**不计入降权计数**（计数只在下面分支里 +1，跳过分支就等于扔过来的武器
@@ -781,12 +805,12 @@
       return out;
     }
     if (def.skills[7] && def.silence <= 0) {
+      const shellCount = Math.max(0, Math.floor(Number(def.shellCount) || 0));
       const canTrigger = def.shellCharges > 0
-        || (!def.usedShell && chance(shellChanceOf(def, false)))
-        || (def.usedShell && chance(shellChanceOf(def, true)));
+        || chance(shellChanceOf(def, shellCount));
       if (canTrigger) {
         if (def.shellCharges > 0) def.shellCharges--;
-        else def.usedShell = true;
+        else def.shellCount = shellCount + 1;
         const pct = clamp(20 + 5 * (def.skills[7] - 1), 0, 100);
         out.guiJia = Math.round(out.dmg * pct / 100);
         out.dmg -= out.guiJia;
@@ -869,6 +893,12 @@
       /* 给经典播放器的换装/卸装表现用：这一拍结束时双方还剩几回合“被脱光”。
        * 0 = 正常穿着；>0 = 装备视觉应卸下。 */
       r.stripLeft = [Math.max(0, Number(A.stripTurns) || 0), Math.max(0, Number(B.stripTurns) || 0)];
+      /* 练习木桩的「本回合已吃伤害」按**一次行动**归零；下一次行动重新从满血 800 起算。 */
+      if (A.practice) A.practiceDamageThisAction = 0;
+      if (B.practice) B.practiceDamageThisAction = 0;
+      /* 上一拍扣掉、这一拍开头补回的血量：挂到本回合事件上供回放层飘字。 */
+      if (A.practiceHealPending) { r.practiceHeal = (Number(r.practiceHeal) || 0) + A.practiceHealPending; A.practiceHealPending = 0; }
+      if (B.practiceHealPending) { r.practiceHeal = (Number(r.practiceHeal) || 0) + B.practiceHealPending; B.practiceHealPending = 0; }
       rounds.push(r);
     }
 
@@ -896,6 +926,20 @@
       target.hp -= dmg;
       tryDeathSave(target, r);
       return dmg;
+    }
+    /** 练习木桩的「一回合最多打掉 800」与「下一拍开头回满」。
+     *  - 同一次行动里可能有多段命中（流星锤三连、野球拳再打一次），累计伤害封顶到最大生命；
+     *  - 这一拍只扣血、不立刻回满；下一拍开头由主循环补满，`practiceHeal` 交给回放层飘字；
+     *  - 返回**实际打掉的血量**，`r.dmg` 与战斗统计都按这个值记，不会出现“显示 1000 伤害、
+     *    但木桩只有 800 血”的账。 */
+    function practiceCapDamage(def, dmg) {
+      if (!def || !def.practice) return dmg;
+      const used = Math.max(0, Math.floor(Number(def.practiceDamageThisAction) || 0));
+      const room = Math.max(0, Math.min(def.hp, def.maxHp - used));
+      const dealt = Math.min(Math.max(0, Math.round(Number(dmg) || 0)), room);
+      def.practiceDamageThisAction = used + dealt;
+      def.hp = Math.max(0, def.hp - dealt);
+      return dealt;
     }
     function applyDamage(att, def, rawDmg, r, opts) {
       opts = opts || {};
@@ -978,9 +1022,9 @@
         r.shellAbsorb = absorbed;
       }
       /* 练功木桩：伤害照常计入 r.dmg（原版 Stakes 用 totalharm 累计原始伤害），
-       * 但生命至少保留 1，永远不走装死 / 复活 / 倒地分支。 */
-      if (def.practice && def.hp - dmg <= 0) {
-        def.hp = 1;
+       * 但每回合封顶 800 并立刻回满，永远不走装死 / 复活 / 倒地分支。 */
+      if (def.practice) {
+        dmg = practiceCapDamage(def, dmg);
       } else if (def.hp - dmg <= 0 && def.skills[6] && def.silence <= 0 && !def.usedFakeDie && !opts.ignoreFakeDie) {
         def.usedFakeDie = true;
         dmg = Math.max(0, def.hp - 1);
@@ -1121,9 +1165,8 @@
     function petDirectDamage(att, def, amount, r) {
       let dmg = Math.max(0, Math.round(Number(amount) || 0));
       if (!def || def.hp <= 0 || dmg <= 0) { r.dmg = 0; return 0; }
-      if (def.practice && def.hp - dmg <= 0) {
-        dmg = Math.max(0, def.hp - 1);
-        def.hp = 1;
+      if (def.practice) {
+        dmg = practiceCapDamage(def, dmg);
       } else if (def.hp - dmg <= 0 && def.skills && def.skills[6] && def.silence <= 0 && !def.usedFakeDie) {
         def.usedFakeDie = true;
         dmg = Math.max(0, def.hp - 1);
@@ -1516,16 +1559,16 @@
        * 后面的 `pickKind` / `pickWeapon` / `nextPatternSkill` 都只看可用池。 */
       const usableWeapons = att.weapons.filter((w) => w && !att.petSealWeapons[w.id]);
       const canWeapon = usableWeapons.length > 0 && att.disarm <= 0;
-      // 来点松果解除「每场一次」：还能用，但下面的选法会把它压到最低的二次使用概率
+      /* 来点松果不再硬性每场一次：二次及以后按 `repeatRateOf` 的 1 权重参与抽取；
+       * 野球拳也没有额外闸门，二次及以后按权重 5 参与抽取。 */
       /* 可用技能从「这个 fighter 实际拥有的技能」里筛（att.skillOrder），
        * 而不是原版玩家那份硬编码的 ACTIVE_SKILLS 表 ——
        * 松鼠/题面用的技能横跨 2~23（元素术鼠是 5/17/20），
        * 用玩家表去筛会把 5 和 20 直接漏掉，于是它一辈子只能放 17（来点松果）。
-       * 排除规则：小宇宙爆发每场一次、来点松果每场一次且满血不放、本回合已用过的不能再用。 */
+       * 排除规则：小宇宙爆发每场一次、来点松果满血不放、本回合已用过的不能再用。 */
       const actives = (att.skillOrder || ACTIVE_SKILLS).filter((id) => att.skills[id] &&
         !att.petSealSkills[id] &&
-        !(id === 14 && att.usedCosmos) && !(id === 17 && att.usedSnack) && !(id === 17 && att.hp >= att.maxHp) &&
-        !(Number(id) === 12 && yakyuGated(att)) &&                    // 野球拳：越用越难（第 3 次到底）
+        !(id === 14 && att.usedCosmos) && !(id === 17 && att.hp >= att.maxHp) &&
         !(att.pattern && att.skillCd && att.skillCd[id] > 0) &&        // 冷却中（只对固定循环的敌人生效）
         !att.turnSkills[id]);
       const canSkill = actives.length > 0 && att.silence <= 0;
@@ -1549,12 +1592,14 @@
 
       if (kind === 'weapon') {
         const prepared = att.pendingWeapon && !att.petSealWeapons[att.pendingWeapon.id] ? att.pendingWeapon : null;
-        // 选武器：本场没用过的优先（并非一定），只有 repeatWeapon% 才回头用旧的那把。
+        // 选武器：新表口径（普通武器用过 8；投掷前两次 100、第三次起 8）。
         let w;
         if (prepared) w = prepared;
         else if (usableWeapons.length > 1 && !att.pattern) w = pickWeapon(att, usableWeapons);
         else w = usableWeapons[0];
         att.usedWeapons[w.id] = true;
+        att.weaponUseCount = att.weaponUseCount || {};
+        att.weaponUseCount[w.id] = Math.max(0, Math.floor(Number(att.weaponUseCount[w.id]) || 0)) + 1;
         att.lastWeaponId = w.id;
         att.pendingWeapon = null;
         if (w.id === 1 && !prepared) {
@@ -1625,7 +1670,7 @@
         // 连击/三扔
         let hits = 1;
         if (w.id === 4 && chance(weaponEffect(w, 10, 2, 5) + trueW(w, 'combo'))) hits = 2;   // 西瓜刀（真级 +5% 连击）
-        if (w.id === 10 && chance(weaponEffect(w, 2, 2, 3) + trueW(w, 'triple'))) hits = 3;   // 流星锤（真级 +3% 三扔）
+        if (w.id === 10 && chance(weaponEffect(w, 2, 2) + trueW(w, 'triple'))) hits = 3;   // 流星锤（2% + 2%/级；真级 +3% 三扔）
         r.hits = hits;
         let total = 0;
         for (let i = 0; i < hits; i++) {
@@ -1733,8 +1778,7 @@
             applyDamage(att, def, raw, r, { ignoreFakeDie: false });
             break;
           }
-          case 17: { // 来点松果：每场战斗限用一次
-            att.usedSnack = true;
+          case 17: { // 来点松果：满血时不会进候选池；二次及以后权重 1
             const heal = Math.min(att.maxHp - att.hp, healOf(att, (20 + 2 * (Math.min(lv, 10) - 1) + trueVal(17, lv)) * Math.max(1, effect(att, 40))));
             att.hp += heal;
             r.healSelf = heal; r.noDmg = true; r.actAgain = true;
@@ -1850,6 +1894,13 @@
       actor.turnSkills = {};
       for (const cdId of Object.keys(actor.skillCd || {})) if (actor.skillCd[cdId] > 0) actor.skillCd[cdId]--;
       const def = actor === A ? B : A;
+      /* 练习木桩：上一拍扣掉的血在**下一拍开头**回满（回放层用 practiceHeal 飘字），
+       * 所以每回合血条都是「先满、再扣、下回合加回来」的可读节奏。 */
+      if (def.practice && def.hp < def.maxHp) {
+        const heal = Math.max(0, def.maxHp - def.hp);
+        def.hp = def.maxHp;
+        def.practiceHealPending = (Number(def.practiceHealPending) || 0) + heal;
+      }
       /* 装死触发的幻兽协战（逆向推倒 / 回光术）先补发，再走这一回合的行动。
        * 它们不占行动次数，也不改变当前出手者。两边都要结算（可能同归于尽/互相反打）。 */
       flushPetReactions(A, B, pushRound);

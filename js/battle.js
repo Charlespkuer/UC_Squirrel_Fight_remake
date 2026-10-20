@@ -143,6 +143,15 @@
   async function run(opts) {
     if (activeController) activeController.cancel();
     const canvas = opts.canvas, ctx = canvas.getContext('2d');
+
+    /* HUD 离屏缓存：名字 / 血条 / 血量 / 回合数 / 护盾 / 削弱 / 题面 / 角落键都是
+     * 每帧重画的静态内容，只有数值变化时才需要重绘；低端设备上反复 strokeText +
+     * createLinearGradient 是局内卡顿的显性来源。这一层只缓存**画面**，按钮热区、
+     * 飘字、倒计时仍然逐帧走。 */
+    const hudCanvas = document.createElement('canvas');
+    hudCanvas.width = W; hudCanvas.height = H;
+    const hudCtx = hudCanvas.getContext('2d');
+    let hudSig = '';
     canvas.width = W; canvas.height = H;
     const result = opts.result || Sim.simulate(opts.me, opts.foe);
     const regionKey = opts.region == null ? (opts.foe.region == null ? 0 : opts.foe.region) : opts.region;
@@ -222,7 +231,7 @@
     }
     /* `skip(byButton)`：
      *   · `byButton` = 玩家**按的是右下角「跳过」键** → 2026-10 用户口径：这一场的
-     *     战斗中悬浮奖励只收 2/3（随机抹掉一项，见 battle-drops 的 trimOne）；
+     *     战斗中悬浮奖励整场只收 2/3（已捡过的先算数，只从还没捡的里补）；
      *   · 不传（程序化收尾 / 自动跳过 / 录像）→ 保持原版口径三份全发。
      *   战斗胜负与回合流不受影响（结果早由 Sim.simulate 算完，跳过只是不播动画）。 */
     const controller = { cancel() { stopped = true; clean(); },
@@ -346,34 +355,42 @@
         Engine.drawPlayer(ctx, scenePlayers[i]);
       });
     }
-    function rounded(x, y, w, h, radius, color) {
-      ctx.beginPath(); ctx.roundRect(x, y, w, h, radius); ctx.fillStyle = color; ctx.fill();
+    function rounded(c, x, y, w, h, radius, color) {
+      c.beginPath(); c.roundRect(x, y, w, h, radius); c.fillStyle = color; c.fill();
     }
     function drawHud() {
+      const sig = [hps[0], hps[1], maxHp[0], maxHp[1], shields[0], shields[1], round, speed, ending, cornerVisible,
+        sources[0] && sources[0].name, sources[1] && sources[1].name,
+        opts.trial && opts.trial.text,
+        (Array.isArray(opts.debuffs) ? opts.debuffs : []).map((d) => [d.text, d.name, d.short, d.hero, d.color].join('~')).join('|')].join('|');
+      if (sig !== hudSig) { hudSig = sig; hudCtx.clearRect(0, 0, W, H); paintHud(hudCtx); }
+      ctx.drawImage(hudCanvas, 0, 0);
+    }
+    function paintHud(c) {
       // references/162442 与 162553：浅色姓名框、金黄色双向血条、居中的剩余回合。
       for (let side = 0; side < 2; side++) {
         const right = side === 1, x = right ? 634 : -20, width = 556, y = 51, height = 61;
         const nx = right ? 724 : 114;
-        rounded(nx, -7, 336, 60, 13, 'rgba(239,239,225,.72)');
-        Engine.text(ctx, sources[side].name || (right ? '对手' : '小松鼠'), nx + 168, 39,
+        rounded(c,nx, -7, 336, 60, 13, 'rgba(239,239,225,.72)');
+        Engine.text(c, sources[side].name || (right ? '对手' : '小松鼠'), nx + 168, 39,
           { size: 32, bold: false, align: 'center', color: '#9f3f17', stroke: false });
-        rounded(x, y, width, height, 31, '#ff6100');
+        rounded(c,x, y, width, height, 31, '#ff6100');
         const pct = Math.max(0, Math.min(1, hps[side] / maxHp[side]));
         /* 护盾按「占上限的比例」画成血条后面的一段 —— 敌方血条是从右往左长的，
          * 所以那一侧的护盾段要贴在血条的**左端**，保持「越靠内越先被打掉」的直觉。 */
         const sp = Math.max(0, Math.min(1, (Number(shields[side]) || 0) / maxHp[side]));
-        ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, width, height, 31); ctx.clip();
+        c.save(); c.beginPath(); c.roundRect(x, y, width, height, 31); c.clip();
         if (sp > 0) {
-          ctx.fillStyle = 'rgba(120,226,255,.95)';
-          ctx.fillRect(right ? x + width * (1 - pct - sp) : x + width * pct, y, width * sp, height);
+          c.fillStyle = 'rgba(120,226,255,.95)';
+          c.fillRect(right ? x + width * (1 - pct - sp) : x + width * pct, y, width * sp, height);
         }
-        const gradient = ctx.createLinearGradient(0, y, 0, y + height); gradient.addColorStop(0, '#ffd323'); gradient.addColorStop(1, '#ffaa0e');
-        ctx.fillStyle = gradient; ctx.fillRect(right ? x + width * (1 - pct) : x, y, width * pct, height); ctx.restore();
-        Engine.text(ctx, Math.round(hps[side]) + '/' + maxHp[side], x + width / 2, y + 42,
+        const gradient = c.createLinearGradient(0, y, 0, y + height); gradient.addColorStop(0, '#ffd323'); gradient.addColorStop(1, '#ffaa0e');
+        c.fillStyle = gradient; c.fillRect(right ? x + width * (1 - pct) : x, y, width * pct, height); c.restore();
+        Engine.text(c, Math.round(hps[side]) + '/' + maxHp[side], x + width / 2, y + 42,
           { size: 36, align: 'center', color: '#fff8d4', bold: false, stroke: false });
         /* 护盾数值写在生命值右边（有护盾才画，避免平时干扰）。 */
         if (shields[side] > 0) {
-          Engine.text(ctx, '＋护盾 ' + Math.round(shields[side]), x + width / 2 + 104, y + 40,
+          Engine.text(c, '＋护盾 ' + Math.round(shields[side]), x + width / 2 + 104, y + 40,
             { size: 24, align: 'left', color: '#8fe8ff' });
         }
       }
@@ -386,39 +403,39 @@
           const whoW = who ? 18 + who.length * 20 : 0;
           const width2 = Math.max(104, whoW + body.length * 21 + 22);
           const color = d.color || '#7e1c16';
-          rounded(dx, 116, width2, 36, 18, 'rgba(30,16,10,.80)');
+          rounded(c,dx, 116, width2, 36, 18, 'rgba(30,16,10,.80)');
           if (whoW) {
-            ctx.save(); ctx.beginPath(); ctx.roundRect(dx, 116, width2, 36, 18); ctx.clip();
-            ctx.fillStyle = color; ctx.fillRect(dx, 116, whoW, 36); ctx.restore();
-            Engine.text(ctx, who, dx + whoW / 2, 142, { size: 19, align: 'center', color: '#fff8d4', stroke: false });
+            c.save(); c.beginPath(); c.roundRect(dx, 116, width2, 36, 18); c.clip();
+            c.fillStyle = color; c.fillRect(dx, 116, whoW, 36); c.restore();
+            Engine.text(c, who, dx + whoW / 2, 142, { size: 19, align: 'center', color: '#fff8d4', stroke: false });
           }
-          ctx.lineWidth = 2; ctx.strokeStyle = color; ctx.beginPath();
-          ctx.roundRect(dx, 116, width2, 36, 18); ctx.stroke();
-          Engine.text(ctx, body, dx + whoW + 11, 142, { size: 22, align: 'left', color: '#ffe6df', stroke: false });
+          c.lineWidth = 2; c.strokeStyle = color; c.beginPath();
+          c.roundRect(dx, 116, width2, 36, 18); c.stroke();
+          Engine.text(c, body, dx + whoW + 11, 142, { size: 22, align: 'left', color: '#ffe6df', stroke: false });
           dx += width2 + 8;
         }
       }
-      Engine.text(ctx, String(Math.max(0, round)).padStart(2, '0'), W / 2, 101,
+      Engine.text(c, String(Math.max(0, round)).padStart(2, '0'), W / 2, 101,
         { size: 63, align: 'center', color: '#fff', strokeColor: '#301314', lineWidth: 6 });
       /* 挑战塔题面：这条规则决定「什么时候该爆发」，进层前预告里读过，战斗里再贴一次备忘 */
       if (opts.trial && opts.trial.text) {
         const label = String(opts.trial.text);
         const bw = Math.min(W - 40, label.length * 21 + 44);
-        rounded(W / 2 - bw / 2, 160, bw, 40, 20, 'rgba(74,32,104,.80)');
-        ctx.lineWidth = 2; ctx.strokeStyle = '#d9b6f5'; ctx.beginPath();
-        ctx.roundRect(W / 2 - bw / 2, 160, bw, 40, 20); ctx.stroke();
-        Engine.text(ctx, label, W / 2, 188, { size: 22, align: 'center', color: '#f4e6ff', stroke: false });
+        rounded(c,W / 2 - bw / 2, 160, bw, 40, 20, 'rgba(74,32,104,.80)');
+        c.lineWidth = 2; c.strokeStyle = '#d9b6f5'; c.beginPath();
+        c.roundRect(W / 2 - bw / 2, 160, bw, 40, 20); c.stroke();
+        Engine.text(c, label, W / 2, 188, { size: 22, align: 'center', color: '#f4e6ff', stroke: false });
       }
       if (!ending && cornerVisible) {
         /* 画一个圆角键：fast = 倍速（蓝色，>1× 时才亮）；否则是跳过（绿色）。 */
         const drawKey = (b, label, fast) => {
-          rounded(b.x, b.y + 5, b.w, b.h, 34, fast ? '#0d2a45' : '#23350a');
-          const g = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
+          rounded(c,b.x, b.y + 5, b.w, b.h, 34, fast ? '#0d2a45' : '#23350a');
+          const g = c.createLinearGradient(0, b.y, 0, b.y + b.h);
           if (fast) { g.addColorStop(0, '#8fd8ff'); g.addColorStop(.4, '#4aa8ee'); g.addColorStop(1, '#1c6fbe'); }
           else { g.addColorStop(0, '#cefa79'); g.addColorStop(.4, '#98df41'); g.addColorStop(1, '#6cac18'); }
-          rounded(b.x, b.y, b.w, b.h, 34, g);
-          ctx.lineWidth = 4; ctx.strokeStyle = fast ? '#123c63' : '#374f11'; ctx.stroke();
-          Engine.text(ctx, label, b.x + b.w / 2, b.y + b.h / 2 + Math.round(cornerFont * 0.36),
+          rounded(c,b.x, b.y, b.w, b.h, 34, g);
+          c.lineWidth = 4; c.strokeStyle = fast ? '#123c63' : '#374f11'; c.stroke();
+          Engine.text(c, label, b.x + b.w / 2, b.y + b.h / 2 + Math.round(cornerFont * 0.36),
             { size: cornerFont, align: 'center', color: '#fff', strokeColor: fast ? '#123c63' : '#432715', lineWidth: 7 });
         };
         if (cornerRects.speed) drawKey(cornerRects.speed, speed + '×', speed > 1);

@@ -6,6 +6,8 @@ HTTP 服务器供起来，窗口打开 `http://127.0.0.1:<随机端口>` —— 
 
 - `src/lib.rs`：迷你服务器 + `/__save`、`/__open`、`/__update`（调 `scripts/update-game.js`；本机没装
   Node 时回 `NO_NODE`，界面自己退到下载页）；`src/main.rs` 只是引导。
+- `android/`：受版本管理的 Kotlin 模板（`MainActivity.kt` + 导出桥 `AndroidExportBridge.kt`）。
+  `tools/build-apk.ps1` 每次出包会把它覆盖进 `gen/android`；导出存档落系统「下载」目录靠这里。
 - 配置：`tauri.conf.json`，平台差异在 `tauri.windows / tauri.android / tauri.bundle` 几个 conf 里。
   `web/`、`icons/`、`target/`、`dist/` 都是生成物 / 产物（见 `.gitignore`），别手改；
   `gen/android` 里的安卓工程是本机手工维护的**真源**（图标 / 锁横屏清单 / 版本号 / 签名方案由

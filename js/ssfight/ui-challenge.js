@@ -56,7 +56,7 @@
    *   f7 = 天梯赛菜单（`button1` 奖励说明 / `button2` 天梯排行 / `button3` 我的排行）
    *   f8 = 天梯榜（`rank1..4` / `inte1..4` / `name1..4` / `myinte` / `myrank` / `type`）
    *   f9 = 奖励说明（`title` / `des` / `name` / `text11..13`/`21..23`/`31..33`） */
-  const ARENA = { rules: 4, join: 5, home: 6, menu: 7, ladder: 8, prize: 9 };
+  const ARENA = { rules: 4, join: 5, home: 6, menu: 7, ladder: 8 };
 
   let current = null;    // { view, host, tab, page, roster, sel, sub }
   /* 随机挑战名单缓存（用户口径：离开随机页再回来不刷新）。
@@ -489,8 +489,10 @@
    * ⚠ 血量口径：真实抓包 `friends.do` 里是 **800**；`exercise.do` 里的 200 是本地 stub
    *   生成器（`_analysis/tools/gen_battle*.py`）伪造的示例，不是原版战斗数据。
    * ⚠ 回合口径：原版 `maxRounds` 是 **60**（全局战斗上限），但 `Stakes.reduceBlood`
-   *   重写后**不调用 checkDead** —— 木桩不会被打死，实际就是「固定回合 + 无限血量」。
-   *   60 回合对练习太长，这里按用户口径固定成 `rounds`（改这一个常量即可切回 60）。
+   *   重写后**不调用 checkDead** —— 木桩不会被打死，实际就是「固定回合 + 每回合回满」。
+   *   2026-10 用户口径：每攻击一回合后血量恢复 100%，同时单回合伤害封顶 800（最大生命），
+   *   所以血条不会再出现「打了半天还是残血/1 血」的误导。60 回合对练习太长，
+   *   这里按用户口径固定成 `rounds`（改这一个常量即可切回 60）。
    * 打完给的是「战斗统计」那一页（手/武/技三段伤害 + 历史最高 + 排名），不是普通战果。
    * ⚠ 原版那一行有 `countObj.count = 10000`（无限次）与 `wearsList = null`（不穿装备）。 */
   const DUMMY = {
@@ -808,7 +810,8 @@
    * 打它走 `fightType = 8`（`flash/exercise.do`，:2871-2884），战斗里挂的是 `Stakes` 木桩类：
    * `attack()` 等七个小节**全是空的** —— 它只站着挨打，所以力量 0 / 速度 0 是**故意**的
    * （打不动你），敏捷 15 让它偶尔闪避；800 血是抓包里的显示值，但 `Stakes` 不判死亡，
-   * 所以实战是「无限生命 + 固定回合」的训练场（回合口径见 `DUMMY.rounds`）。
+   * 所以实战是「每回合回满 800 + 固定回合」的训练场，单回合最多打掉 800
+   *（回合口径见 `DUMMY.rounds`）。
    * 打完给的是「战斗统计」那一页（`getRecord()` :3252 → `showDeadManWin` :18218：
    * 手 / 武 / 技三段伤害 + 历史最高 + 同级排名），**不是**普通战果。
    * 复刻这边 `woodCount` / `woodDamage` 落存档；`woodRecord` 只保留给旧档读取。 */
@@ -820,7 +823,7 @@
       power: DUMMY.power, agility: DUMMY.agility, speed: DUMMY.speed, hp: DUMMY.hp,
       baseStats: { power: DUMMY.power, agility: DUMMY.agility, speed: DUMMY.speed, hp: DUMMY.hp },
       weapons: [], skills: [], gears: [], effects: {},
-      /* Sim 的练习木桩：生命保底 1 点、打到 practiceRounds 次出手就收尾。 */
+      /* Sim 的练习木桩：每回合回满 800、单回合伤害封顶 800，打到 practiceRounds 次出手就收尾。 */
       practice: true, practiceRounds: DUMMY.rounds,
     });
     /* 回**好友**页（原版打完回的是 `tiaozhan` 的当前 tab）。 */
@@ -851,7 +854,7 @@
         const total = dmg;
         const extra = '本次总伤害 ' + total + '　固定 ' + DUMMY.rounds + ' 回合<br>' +
           '历史最高伤害 ' + (Number(s.woodDamage) || 0) + '　累计训练 ' + (Number(s.woodCount) || 0) + ' 次<br>' +
-          '训练木桩生命不会耗尽（原版 Stakes 不判定死亡）';
+          '训练木桩每回合恢复满血（800），单回合最多打掉 800';
         if (window.UI && window.UI.classic && UI.classic.resultModal) {
           UI.classic.resultModal(winner === 0, { exp: 0, gold: 0, ups: [] }, extra, null);
         }
@@ -1071,6 +1074,52 @@
       if (row.x2 && row.box2) put(row, row.box2, row.act2, row.label2, row.d2 != null ? row.d2 : row.d);
     }
     menuSetFrame(sub, layout, lastD);
+    /* 原版只有「收为徒弟 / 加好友」，没有主动拜师按钮（师父是服务端 relation）。
+     * 用户 2026-10 口径：只在**我的好友**页的动作菜单保留「拜师」，放右下角；
+     * 随机挑战页不显示。已经有师父、或对象本身就是师父/徒弟/木人时也不显示。 */
+    host.querySelectorAll('.sf-master-btn').forEach((n) => n.remove());
+    const me = S() || {};
+    const canMaster = current && current.tab === 'friends' && !me.master && foe
+      && foe.kind === 'friend' && !foe.dummy;
+    if (canMaster) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'uc-button gold sf-master-btn';
+      b.textContent = '拜师';
+      b.setAttribute('aria-label', '拜 ' + foe.name + ' 为师');
+      b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); askMaster(foe); });
+      host.appendChild(b);
+    }
+  }
+
+  /** 主动拜师：经典弹窗里确认当前对手的属性，确认后 `State.setMaster`（自动学师父驾到）。 */
+  function askMaster(foe) {
+    const C = window.UI && UI.classic;
+    const s = S() || {};
+    if (s.master) { if (window.UI && UI.toast) UI.toast('你已经有师父了，先出师才能再拜师。'); return; }
+    const go = () => {
+      if (S() !== s) return;
+      if (s.master) { if (window.UI && UI.toast) UI.toast('你已经有师父了。'); return; }
+      const r = State.setMaster(foe);
+      if (window.UI && UI.toast) UI.toast(r.ok ? ('已拜【' + foe.name + '】为师，学会「师父驾到」') : (r.msg || '拜师失败'));
+      if (!r.ok) return;
+      closeSub();
+      showTab(current ? current.tab : 'friends');
+    };
+    const body = '<div class="result-box"><div class="sf-fd-head"><b>' + esc(foe.name) + '</b><span>Lv' + esc(foe.level) + ' · 拜师</span></div>' +
+      '<div class="sf-fd-stats"><span class="sf-fd-stat p"><b>力</b><i>' + esc(foe.power == null ? '-' : foe.power) + '</i></span>' +
+        '<span class="sf-fd-stat a"><b>敏</b><i>' + esc(foe.agility == null ? '-' : foe.agility) + '</i></span>' +
+        '<span class="sf-fd-stat s"><b>速</b><i>' + esc(foe.speed == null ? '-' : foe.speed) + '</i></span>' +
+        '<span class="sf-fd-stat h"><b>命</b><i>' + esc(foe.hp == null ? '-' : foe.hp) + '</i></span></div>' +
+      '<p class="sf-fmenu-note">拜师后自动学会「师父驾到」：战斗中生命不高于 50% 时有概率请师父出场，恢复师父等级 ×4 的生命，并让下一次攻击必中。</p></div>';
+    if (C && C.modal) {
+      C.modal('拜师', body, [
+        { label: '取消', cls: 'muted' },
+        { label: '拜他为师', cls: 'gold', run: go },
+      ], { small: true });
+    } else if (typeof window.confirm === 'function' && window.confirm('拜【' + foe.name + '】为师？')) {
+      go();
+    }
   }
   /* ============================================================
    * 菜单热区的坐标换算：**舞台单位 → 宿主里的设计像素**
@@ -1396,27 +1445,40 @@
    *       经典页这一档以前漏了，照它对齐即可 —— 两边共用 `kind:'friend'` 这一个名字。 */
   /** 战斗期间先把这一页从 `#ui` 摘下来（`Main.startBattle` / `SfFight.run` 都会清空 #ui），
    *  打完再原样挂回去 —— 回来的是**同一棵 SVG**，不再重新挂载，也就没有那一下闪屏。
-   *  ⚠ 只对 `SfChallenge` 自己发起的战斗（随机挑战 / 切磋）用；关卡 / 竞技场仍走各自的页面。 */
+   *  随机挑战 / 切磋 / 关卡连战共用这一套。 */
   function holdPageForBattle() {
     const page = current;
     const host = page && page.host;
     if (!host || !host.parentNode) return null;
-    closeSub();
+    /* ⚠ **不要** `closeSub()`：关卡的三级页（难度页 / 出战确认）如果在这里拆掉，
+     * 战后 `openGate()` 只能重新 mount 一颗 4756 —— 那就是"回到有继续挑战页面时卡一下"。
+     * 连 sub host 一起从 `#ui` 摘下（它原本就盖在主页面上面），战后原样挂回。
+     * `openGate()` 的 `openSub(5)` 会发现 `sub.view` 还在，只做换帧/更新，不重新建树。 */
+    const sub = (page.sub && page.sub.host) ? page.sub : null;
+    if (sub && sub.host.parentNode) sub.host.parentNode.removeChild(sub.host);
     host.parentNode.removeChild(host);
-    return { page: page, host: host };
+    return { page: page, host: host, sub: sub };
   }
-  /** 把战斗前摘下来的挑战页挂回 #ui，并按 `tab` 重画这一页（不重挂 SVG）。 */
-  function resumePageAfterBattle(hold, tab) {
+  /** 把战斗前摘下来的挑战页挂回 #ui，并按 `tab` 重画这一页（不重挂 SVG）。
+   *  `opts.keepSub`：连三级页一起原样挂回、**不**走 `showTab`（它内部会 `closeSub`）；
+   *  调用方随后用 `refreshGateAt()` 只更新三级页的星标/文案。 */
+  function resumePageAfterBattle(hold, tab, opts) {
     if (!hold || !hold.host || !hold.page) return false;
     if (current !== hold.page || current.host !== hold.host) return false;
     const ui = document.getElementById('ui');
     if (ui && !hold.host.isConnected) ui.appendChild(hold.host);
     if (hold.host.isConnected === false) return false;
+    /* 三级页要按原顺序挂回：主页面之后 = 仍然盖在上面。 */
+    if (hold.sub && hold.sub.host && !hold.sub.host.isConnected && ui) ui.appendChild(hold.sub.host);
     hold.page.roster = null;       // 打完回来换一批对手（与原 `backToRandom` 同口径）
     randomCache = null;            // 同上：战斗结束后的随机页要重抽，不吃旧缓存
     hold.page.sel = 0;
     hold.page.page = 1;
     try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
+    if (opts && opts.keepSub && hold.sub && hold.sub.host && hold.sub.host.isConnected) {
+      if (current.sub && current.sub.view) setBaseRouterEnabled(current.host, false);
+      return true;
+    }
     try { showTab(tab || 'random'); } catch (e) {
       if (window.__errs) window.__errs.push('challenge resume: ' + (e && e.message));
       return false;
@@ -1628,6 +1690,72 @@
     showUserPic(view, current.roster[current.sel || 0] || null);
   }
 
+  /** 添加好友页的候选等级：与现代模式「师徒」刷新师父候选完全同一条公式
+   *  （玩家等级 +2~+12，不超过满级），这样“添加好友”和“拜师”看到的是同一档对手。 */
+  function rollAddFriendCandidates() {
+    const s = S() || {};
+    const cap = State.MAX_PLAYER_LEVEL || 70;
+    const base = Math.max(3, Math.min(Number(s.level) || 1, cap));
+    return Array.from({ length: 3 }, () => State.genAI(
+      Math.min(cap, Math.max(2, base + 2 + Math.floor(Math.random() * 11))), '',
+      { levelJitter: 0, gearSelfLevel: true }));
+  }
+  /** 好友页「添加好友」：原版这里弹一个推荐窗口；复刻把它做成一个真正的页面，
+   *  候选等级与「师徒」刷新一致，右下角的「拜师」直接拜当前选中的候选为师。 */
+  function openAddFriendPage() {
+    const C = window.UI && UI.classic;
+    if (!C || !C.modal) { if (window.UI && UI.toast) UI.toast('添加好友界面不可用'); return; }
+    let cands = rollAddFriendCandidates(), selected = 0, added = new Set();
+    const body = () => '<div class="sf-addfriend">' +
+      '<p class="sf-addfriend-tip">推荐好友的等级与「师徒」刷新一致；点一行选中，右下角可以拜他为师。</p>' +
+      '<div class="sf-addfriend-list">' + cands.map((c, i) => {
+        const has = !!(State.friendOf && State.friendOf(c.name) || added.has(c.name));
+        return '<div class="sf-addfriend-row' + (i === selected ? ' active' : '') + '" data-add-i="' + i + '">' +
+          '<span class="sf-addfriend-lv">Lv' + esc(c.level) + '</span>' +
+          '<b class="sf-addfriend-name">' + esc(c.name) + '</b>' +
+          '<span class="sf-addfriend-stats"><i>力 ' + esc(c.power) + '</i><i>敏 ' + esc(c.agility) + '</i><i>速 ' + esc(c.speed) + '</i><i>血 ' + esc(c.hp) + '</i></span>' +
+          '<button type="button" class="uc-button tiny ' + (has ? 'muted' : 'gold') + '" data-add-friend="' + i + '"' + (has ? ' disabled' : '') + '>' + (has ? '已是好友' : '加好友') + '</button>' +
+          '</div>';
+      }).join('') + '</div>' +
+      '<div class="sf-addfriend-foot"><button type="button" class="uc-button tiny" data-add-refresh>换一批</button></div></div>';
+    const m = C.modal('添加好友', body(), [
+      { label: '关闭', cls: 'muted' },
+      { label: '拜师', cls: 'gold', run: () => {
+        const cand = cands[selected];
+        if (!cand) return;
+        if (State.state().master) { if (window.UI && UI.toast) UI.toast('你已经有师父了，先出师才能再拜师。'); return; }
+        m.close();
+        askMaster(cand);
+      } },
+    ], { small: false });
+    const root = m && m.element;
+    if (!root) return;
+    const repaint = () => {
+      const box = root.querySelector('.modal-body');
+      if (box) box.innerHTML = body();
+    };
+    root.addEventListener('click', (e) => {
+      const add = e.target.closest('[data-add-friend]');
+      if (add) {
+        e.preventDefault(); e.stopPropagation();
+        const c = cands[Number(add.dataset.addFriend)];
+        if (!c) return;
+        const r = State.addFriend(c);
+        if (r.ok) { added.add(c.name); if (window.UI && UI.toast) UI.toast(r.msg); }
+        else if (window.UI && UI.toast) UI.toast(r.msg || '添加失败');
+        repaint();
+        return;
+      }
+      if (e.target.closest('[data-add-refresh]')) {
+        e.preventDefault(); e.stopPropagation();
+        cands = rollAddFriendCandidates(); selected = 0; added = new Set(); repaint();
+        return;
+      }
+      const row = e.target.closest('[data-add-i]');
+      if (row) { selected = Number(row.dataset.addI) || 0; repaint(); }
+    });
+  }
+
   /** 我的好友（`showMyFriends` :13204）：页帧 1，一页 4 行 + 左右翻页 + 加好友。 */
   function showFriends() {
     const view = current.view;
@@ -1655,16 +1783,7 @@
     wireClickable(clipOf(view, 'right'), ARROW_SPEC(() => { current.page++; current.sel = 0; showTab('friends', true); }));
     wireClickable(clipOf(view, 'addfriend'), {
       hover: 2,
-      onFire: () => {
-        /* `_loc2.addfriend.onFire = showAddFriend`（:13246）：原版弹"添加好友"窗口。
-         * 复刻的候选来自 `State.rollFriendCandidates`，这里直接把候选逐个加进去。 */
-        const cands = (State.rollFriendCandidates ? State.rollFriendCandidates(3) : []) || [];
-        if (!cands.length) { if (window.UI && UI.toast) UI.toast('暂时没有推荐的好友'); return; }
-        let added = 0, msg = '';
-        for (const c of cands) { const r = State.addFriend(c); if (r.ok) added++; else msg = r.msg; }
-        if (window.UI && UI.toast) UI.toast(added ? ('已添加 ' + added + ' 位推荐好友') : (msg || '没有可添加的好友'));
-        showTab('friends');
-      },
+      onFire: openAddFriendPage,
     });
     if (!all.length) setText(clipOf(view, 'page'), '1/1');
     showUserPic(view, slice[current.sel || 0] || null);
@@ -1798,7 +1917,10 @@
   /** 从外部重新落到竞技场某一子页（`ClassicExtras.arena` / 报名 / 打完一场回来都走它）。
    *  `page` 省略时按当前 `current.arenaPage`。 */
   function goArenaPage(page) {
-    if (page) { arenaPage = page; if (current) current.arenaPage = page; }
+    if (page) {
+      arenaPage = page;
+      if (current) current.arenaPage = page;
+    }
     /* ⚠ 挑战页那一层**可能已经不在 DOM 上了**：`Main.startBattle` 一开打就
      * `$('#ui').innerHTML = ''`（把整棵显示树清掉），`current.view` 于是成了"连着但不在树上"
      * 的孤儿。以前这里只把页码记下来、照样调 `showTab` → `stopAt` 画在孤儿树上，
@@ -1988,11 +2110,21 @@
       setText(clipOf(card, 'name'), String(who.name == null ? '' : who.name));
       setText(clipOf(card, 'level'), String(who.level == null ? '' : who.level));
     }
-    if (!run) { setText(clipOf(view, 'statu'), ''); return; }
-    const phase = run.phase;
-    const next = phase === 'final' ? run.finalist : phase === 'third' ? run.consolation : run.foe;
-    const title = phase === 'final' ? '决赛' : phase === 'third' ? '季军赛' : '半决赛';
-    setText(clipOf(view, 'statu'), (run.matching ? '随机匹配完成 · ' : '') + title + '　对手 Lv' + ((next && next.level) || ''));
+    const statu = clipOf(view, 'statu');
+    if (!statu) return;
+    /* `statu`（7572）是两帧状态精灵：f1 =「匹配对手…」+ 7570 那颗 12 帧省略号动画，
+     * f2 = 匹配完成后的下一步。原版靠 f1 自己播，复刻整页冻结后 7570 停在第 1 帧，
+     * 那个省略号就是死的（用户 2026-10 口径：要和天梯匹配一样播 . .. ...）。
+     * ⚠ 不能用 `setText(statu, …)`：这颗是矢量画稿，没有文本字段，写了也不会显示。 */
+    if (!run) { stopAt(statu, 2); return; }
+    stopAt(statu, run.matching ? 1 : 2);
+    if (run.matching) {
+      /* 只放行 7570 这一颗：整页静态策略继续冻着，省略号按 12 帧循环。
+       * 每次 `stopAt(statu, 1)` 可能重建子元件，所以先设策略、再取当前那颗。 */
+      if (statu.setStaticPolicy) statu.setStaticPolicy({ keepIds: ['7570'] });
+      const dot = [...statu.nodes.values()].find((r) => String(r.id) === '7570');
+      if (dot && dot.clip) { dot.clip.__pinFrame = null; dot.clip.playing = true; }
+    }
   }
   function arenaMatchHtml(run) {
     const phase = run ? run.phase : 'semi';
@@ -2014,7 +2146,6 @@
     if (page === 'menu') return showArenaMenu();
     if (page === 'match') return showArenaMatch();
     if (page === 'ladder') return showArenaLadder();
-    if (page === 'prize') return showArenaPrize();
     /* 首屏（`showRacing0` :15111 → `gotoAndStop(6)`）：`compete`(7583) 1 = 已开启 / 2 = 未开启
      * （原版门槛是 10 级，见 :15120）。 */
     stopAt(view, ARENA.home);
@@ -2078,10 +2209,7 @@
     stopAt(view, ARENA.menu);
     wireClickable(clipOf(view, 'button1'), {
       hover: 0, press: 0, idle: 1,
-      onFire: () => {
-        const CE = window.ClassicExtras;
-        if (CE && CE.rankShop) CE.rankShop(); else arenaGo('ladder');
-      },
+      onFire: () => { const CE = window.ClassicExtras; if (CE && CE.rankShop) CE.rankShop(0, 'ladder'); else arenaGo('ladder'); },
     });
     wireClickable(clipOf(view, 'button2'), {
       hover: 0, press: 0, idle: 1,
@@ -2153,34 +2281,6 @@
     });
     wireClickable(clipOf(view, 'back'), { hover: 0, onFire: () => arenaGo('menu') });
   }
-  /** 奖励说明（帧 9）：原版是服务端下发的三档奖励表；复刻按自己的天梯规则写。
-   *  ⚠ 用户 2026-10 口径："完善领取奖励界面的 ui 排布，领取奖励界面中返回菜单按钮
-   *  也会恶性被隐藏，解决这个问题。"
-   *  真凶是 `des`（右侧面板那块文本字段）**框很小**（舞台 206..301 × 35..117，
-   *  一行约 11 个单位高、一行只放得下 8 个字），原来往里塞了一整段 100+ 字的说明，
-   *  文本字段只按**宽度**裁剪（见 render.js 的 setText），竖向会一路画到屏幕外，
-   *  正好盖住底部那颗「返回菜单」。现在按"能放几行"来写：
-   *  面板可用高度 ≈ 5 行 × 8 字 = 40 字以内，超出的信息挪到左边那三行 `text1x` 上。 */
-  function showArenaPrize() {
-    const view = current.view;
-    stopAt(view, ARENA.prize);
-    setText(clipOf(view, 'title'), '天梯奖励');
-    setText(clipOf(view, 'name'), '金杯商店');
-    const t = T();
-    if (t) t.setText(clipOf(view, 'des'), wrap(
-      '每日最多20场，前10场免费，其后每场5金松果。胜得3金杯，败得1金杯（25%额外3杯）。',
-      8));
-    /* 左列三行：原版按服务器下发的三档写，这里写复刻自己的三档。
-     * ⚠ 这三行的字段也很窄（约 7 个字），写长了会左右被裁 —— 所以是短句。 */
-    const tiers = ['1500分5杯', '2000分10杯', '2500分20杯'];
-    for (let i = 1; i <= 3; i++) setText(clipOf(view, 'text1' + i), tiers[i - 1]);
-    for (let i = 1; i <= 3; i++) setText(clipOf(view, 'text2' + i), '');
-    for (let i = 1; i <= 3; i++) setText(clipOf(view, 'text3' + i), '');
-    setVisible(clipOf(view, 'left'), false);
-    setVisible(clipOf(view, 'right'), false);
-    wireClickable(clipOf(view, 'back'), { hover: 0, onFire: () => arenaGo('menu') });
-  }
-
   /* ============================================================
    * 二级/三级页：库元件「挑战1」= 4756（挂在独立的一层 `<svg>` 上，坐标与主页面同一套舞台系）
    * ========================================================== */
@@ -2325,12 +2425,15 @@
     wireClickable(ok, {
       hover: 0, press: 0, idle: 1,
       onFire: () => {
-        closeSub();
         const c = window.UI && UI.classic;
-        if (exhausted) { if (c && c.stageFight) c.stageFight(id); return; }
-        /* 复刻的关卡开战流程（扣挑战书 / 建对手 / 连战血量继承 / 结算）—— 原版那一段是
-         * `showFightWin` 之后进 "temp" 帧开打，等价物就是它。 */
-        if (c && c.stageFight) { destroy(); c.stageFight(id); return; }
+        /* ⚠ 不要先 `closeSub()` / `destroy()`：`stageFight()` 会把整棵挑战页（连同这颗
+         * 出战确认页）摘下来、打完原样挂回。在这里拆掉就只能战后重建，回来还是会卡一下。
+         * 真正清屏的是 `Main.startBattle` 的 `#ui.innerHTML=''`；页面由
+         * `holdPageForBattle()` 保管。 */
+        if (c && c.stageFight) { c.stageFight(id); return; }
+        /* 没有经典关卡入口（现代/素材缺失）才退回"先拆页再走 UI 路由"。 */
+        closeSub();
+        destroy();
         if (window.UI && UI.runAction) UI.runAction('stages');
       },
     });
@@ -2419,7 +2522,13 @@
     /** 打开挑战页并**直接落到某个 tab**（`open()` 是异步的，挂完再切会落到还没建好的树上）。
      *  关卡战打完之后回到「关卡」用的是它 —— 不然会掉回随机页 / 复刻自研的 DOM 关卡页。 */
     openAt: (k) => { pendingTab = k || 'random'; },
-    /** 竞技场里的子页（`home` / `rules` / `menu` / `ladder` / `prize`）——给回归用例与
+    /** 战斗前把当前挑战页从 `#ui` 摘下来、打完原样挂回去（同一棵 SVG，不重挂）。
+     *  随机页/切磋本来就用；关卡连战也从这里走 —— `Main.startBattle` 会清空 `#ui`，
+     *  不先摘下来的话战后只能重新 `open()` 整页，观感就是关卡页闪一下。
+     *  `resumePageAfterBattle(hold, tab)` 返回 false 时调用方才退回重挂路径。 */
+    holdPageForBattle: holdPageForBattle,
+    resumePageAfterBattle: resumePageAfterBattle,
+    /** 竞技场里的子页（`home` / `rules` / `menu` / `ladder`）——给回归用例与
      *  外部入口用，不用真的去点那几颗按钮。 */
     setArenaPage: (p) => { arenaGo(p || 'home'); },
     /** 外部（`ClassicExtras` 报名 / 打完一场回来）落到竞技场某一子页；
@@ -2435,9 +2544,20 @@
       showTab('gates');
       guard(openGate(n));
     },
+    /** 关卡连战回到**已经挂着的**难度页：只更新三级页的星标/文案，不 `showTab`
+     *  （它内部会 `closeSub()` 把刚挂回的三级页又拆掉）。用于 `holdPageForBattle`
+     *  把整页原样挂回之后的刷新。 */
+    refreshGateAt: (t) => {
+      const n = Math.max(0, Math.min(5, Number(t) || 0));
+      if (!current) { pendingGate = n; return; }
+      current.gatePage = Math.floor(n / 3);
+      current.gateSel = n;
+      guard(openGate(n));
+    },
     resetRoster: () => { randomCache = null; if (current) { current.roster = null; current.sel = 0; current.arenaPage = 'home'; } },
     /** 打开某一行的动作菜单（探针 / 外部入口用；等价于点那一行）。 */
     openFriendMenu: (i) => openFriendMenu(Number(i) || 0),
+    openAddFriendPage,
     /** 「查看装备」（原版 `friendEquipsInfo()`）：状态页上那颗 `b_change` 的 4/5 帧调它。
      *  ⚠ 以前没有这个导出 —— 状态页调 `SfChallenge.showFriendGears` 永远拿到 undefined，
      *  于是点「查看装备」直接兜底回挑战页（用户 2026-10 报的"会闪退"）。 */

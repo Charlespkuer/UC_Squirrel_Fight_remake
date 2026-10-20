@@ -411,8 +411,9 @@ test('随机对手：武技总数跟等级走，高等级能出橙装与宝石',
 });
 
 /* 练功木桩：对齐 reference 里 `Stakes` 的口径 —— 木桩不判死亡，战斗按固定回合收尾。
- * 原版 `maxRounds` 是 60；这里按用户口径固定 10 回合（`DUMMY.rounds`），生命保底 1。 */
-test('练功木桩：固定 10 次出手、生命不会耗尽，伤害照常累计', () => {
+ * 原版 `maxRounds` 是 60；这里按用户口径固定 10 回合（`DUMMY.rounds`），
+ * 2026-10 起每回合回满 800、单回合伤害封顶 800。 */
+test('练功木桩：固定 10 次出手、每回合先扣下回合回满且单回合封顶', () => {
   const g = game(), Sim = g.Sim;
   const me = {
     name: '测试松鼠', level: 30, power: 160, agility: 130, speed: 110, hp: 1200, maxHp: 1200,
@@ -430,7 +431,11 @@ test('练功木桩：固定 10 次出手、生命不会耗尽，伤害照常累�
   assert.equal(r.rounds.length, 10, '固定 10 次出手就收尾（不会因为 800 血被打空提前结束）');
   assert.ok(r.rounds.every((x) => x.attacker === 0), '木桩不抢回合：10 次全是玩家出手');
   assert.ok(r.rounds.every((x) => x.hpAfter[0] === me.hp), '木桩不还手：玩家血量不减');
-  assert.ok(r.rounds.every((x) => x.hpAfter[1] >= 1), '木桩生命至少保留 1，不会进入死亡分支');
+  assert.ok(r.rounds.every((x) => (Number(x.dmg) || 0) <= 800), '单回合最多打掉 800');
+  assert.ok(r.rounds.every((x) => x.hpAfter[1] === 800 - (Number(x.dmg) || 0)),
+    '这一拍血条先扣掉实际伤害，不要立刻回满');
+  assert.ok(r.rounds.slice(1).every((x, i) => Number(x.practiceHeal || 0) === (Number(r.rounds[i].dmg) || 0)),
+    '从第二拍起，开头要把上一拍扣掉的血按同量加回来');
   const dealt = r.rounds.reduce((n, x) => n + (x.attacker === 0 ? (Number(x.dmg) || 0) : 0), 0);
   assert.ok(dealt > 0, '木桩照常累计伤害：' + dealt);
   assert.equal(r.winner, 0, '木桩不还手，玩家按血量比例获胜');
@@ -621,37 +626,53 @@ test('破损字段得到校正，非对象存档被拒绝', () => {
   }
 });
 
-test('连续登录：第1天100，每多一天+10，150封顶；第7天多给1本挑战书，断签回第1天', () => {
+test('连续登录：第1天100，每多一天+10，150封顶；附加奖励按日期在7种道具间轮换，断签回第1天', () => {
   const g = game();
   const day = 24 * 60 * 60 * 1000;
   const d1 = g.State.dailyStatus();
-  assert.equal(d1.streak, 1); assert.equal(d1.gold, 100); assert.equal(d1.challengeBooks, 1);
+  const x1 = g.State.dailyGiftExtra(d1.date);
+  assert.equal(d1.streak, 1); assert.equal(d1.gold, 100);
+  assert.equal(d1.extra.id, x1.id, '每日礼包附加奖励必须与日期轮换表一致');
+  assert.equal(d1.extra.count, 1);
   assert.equal(g.State.claimDaily().ok, true);
+  assert.equal(g.State.state().props[x1.id], 1, '领取后附加道具进背包');
+  const ids = [x1.id];
   for (let n = 2; n <= 7; n++) {
     g.advance(day);
     const d = g.State.dailyStatus();
+    const x = g.State.dailyGiftExtra(d.date);
     assert.equal(d.streak, n, '第 ' + n + ' 天连续');
     assert.equal(d.gold, Math.min(150, 100 + (n - 1) * 10));
-    assert.equal(d.challengeBooks, n === 7 ? 2 : 1);
+    assert.equal(d.extra.id, x.id, '第 ' + n + ' 天的附加奖励要轮换');
+    ids.push(d.extra.id);
     assert.equal(g.State.claimDaily().ok, true);
+    assert.ok(g.State.state().props[x.id] >= 1, '附加道具进背包');
   }
   assert.equal(g.State.state().loginStreak, 7);
   g.advance(day * 3);                       // 断签三天
   const d8 = g.State.dailyStatus();
   assert.equal(d8.streak, 1); assert.equal(d8.gold, 100);
+  assert.equal(d8.extra.id, g.State.dailyGiftExtra(d8.date).id);
+  assert.equal(new Set(ids).size, 7, '连续七天应轮换到七种不同附加道具');
+  assert.deepEqual([...new Set(ids)].sort((a, b) => a - b), [23, 36, 39, 41, 42, 43, 82],
+    '轮换池只能是挑战书/英雄帖/勇气徽章/召唤证/三种超级药丸');
 });
 
 test('每日奖励按照本地日期发放，同日重载后不重复领取', () => {
   const g = game(), s = g.State.state();
+  const first = g.State.dailyStatus();
+  const e1 = first.extra;
   assert.equal(g.State.claimDaily().ok, true);
-  assert.equal(s.goldPoint, 200); assert.equal(s.props[23], 1);
+  assert.equal(s.goldPoint, 200); assert.equal(s.props[e1.id], 1);
   assert.equal(g.State.claimDaily().ok, false);
   g.State.load(); assert.equal(g.State.claimDaily().ok, false);
   g.advance(6 * 60 * 1000);
   assert.equal(g.State.dailyStatus().claimed, false);
-  const day2Gold = g.State.dailyStatus().gold;   // 连续登录第 2 天：100 + 10
+  const second = g.State.dailyStatus();
+  const day2Gold = second.gold;   // 连续登录第 2 天：100 + 10
   assert.equal(g.State.claimDaily().ok, true);
-  assert.equal(g.State.state().goldPoint, 200 + day2Gold); assert.equal(g.State.state().props[23], 2);
+  assert.equal(g.State.state().goldPoint, 200 + day2Gold);
+  assert.equal(g.State.state().props[second.extra.id], 1, '第二天的轮换道具进背包');
 });
 
 test('旧存档首次迁移每日统计日期时保留当日数据，重载不清零', () => {
@@ -694,7 +715,8 @@ test('隔日加载会日切；每日礼包领取本身不清除任何统计', ()
   same([next.dailyWins, next.dailyFails, next.joinRankCount], [0, 0, 0]);
   assert.equal(next.dailyStatsDate, g.State.localDate());
   assert.equal(g.State.dailyStatus().claimed, true);
-  assert.equal(next.goldPoint, 200); assert.equal(next.props[23], 1);
+  const claimedExtra = g.State.dailyGiftExtra(g.State.localDate());
+  assert.equal(next.goldPoint, 200); assert.equal(next.props[claimedExtra.id], 1);
 });
 
 test('只调整设备 Date.now 时，统计与每日奖励共用同一本地日期', () => {
@@ -864,9 +886,9 @@ test('商店每日限购：四种普通药丸每天 3 颗', () => {
   assert.equal(S.shopLimit(2), 3, '大体力药剂每日 3 个');
   assert.equal(S.shopLimit(23), 5, '挑战书仍是 5 件');
   assert.equal(S.shopLimit(13), 1, '转生果每日 1 件');
-  /* 2026-10 用户口径：勇气徽章（碎片竞技场入场券）每天 3 个（原来落在默认的 5）。 */
-  assert.equal(S.shopLimit(39), 3, '勇气徽章每日 3 个');
-  assert.equal(S.purchaseStatus(39).limit, 3);
+  /* 2026-10 用户口径：勇气徽章（碎片竞技场入场券）每天 5 个。 */
+  assert.equal(S.shopLimit(39), 5, '勇气徽章每日 5 个');
+  assert.equal(S.purchaseStatus(39).limit, 5);
   // 超级药丸在字典里 buy=false，不进商店，限购多少都无所谓
   for (const id of [41, 42, 43, 44]) assert.equal(S.purchaseStatus(id).buyable, false, id + ' 不进商店');
 });
@@ -999,9 +1021,44 @@ test('经典融合：allowMixedParts 放开同部位要求，默认模式仍拦�
   assert.equal(r.gear.quality, 2, '同品质三件升一档');
 });
 
+test('融合词条：两件以上材料重合的词条必定继承（跨部位/跨名字）', () => {
+  const g = game(), S = g.State;
+  const mats = [
+    S.addGear(21, [{ id: 1, level: 1 }, { id: 2, level: 1 }]),
+    S.addGear(22, [{ id: 1, level: 2 }]),
+    S.addGear(23, [{ id: 3, level: 1 }]),
+  ];
+  g.math.random = () => 0.9;    // 非必继承槽全部不中，且保名/随机取件不会越界
+  const r = S.mergeGears(mats.map((x) => x.key), { allowMixedParts: true });
+  assert.equal(r.ok, true);
+  const ids = r.gear.ext.map((e) => e.id);
+  assert.ok(ids.includes(1), '词条 1 在两件材料里出现，必须继承；实际 ' + ids.join(','));
+  assert.equal(r.gear.ext.find((e) => e.id === 1).level, 2, '继承时取材料里的最高星级');
+});
+
+test('融合词条每个槽 50% 从材料继承，跨部位/跨名字也生效', () => {
+  const g = game(), S = g.State;
+  assert.equal(S.FUSION_EXT_INHERIT_RATE, 0.5, '每个产物词条槽的继承概率是 50%');
+  /* 蓝装头/手/衣服（id 21/22/23）各带一条不同词条：三件完全不同部位、不同名字。 */
+  const mats = [[1], [2], [3]].map((ids, i) => {
+    const gear = S.addGear([21, 22, 23][i], ids.map((id) => ({ id, level: 1 })));
+    gear.used = false;
+    return gear;
+  });
+  g.math.random = () => 0;      // 每个继承判定都中，且每条都触发 +1 星
+  const r = S.mergeGears(mats.map((x) => x.key), { allowMixedParts: true });
+  assert.equal(r.ok, true);
+  assert.equal(r.gear.ext.length, 2, '紫装产物两个词条槽');
+  same(r.gear.ext.map((e) => e.id), [1, 2]);          // 两个槽分别从两件不同材料继承
+  same(r.gear.ext.map((e) => e.level), [2, 2]);       // 继承后按 50% 概率升 1 星
+  assert.ok(r.gear.ext.every((e) => [1, 2, 3].includes(e.id)), '继承的词条只能来自三件材料');
+});
+
 test('需求146：套装收益 —— 同名 2/4 件两档、按最低品质缩放，且真的进战斗', () => {
   const g = game(), s = g.State.state();
   s.level = 30;
+  /* 套装收益只在现代模式启用；本用例验证机制本身，先切现代。 */
+  g.State.setSettings({ uiMode: 'modern' });
   const wear = (id) => { const it = g.State.addGear(id); assert.equal(g.State.wear(it.key), true, id + ' 可穿戴'); return it; };
   const ninja = () => g.State.setBonusList().find((x) => x.family === '忍者');
   /* 忍者紫（setId 15：护额 57 / 拳套 58 / 服 59 / 鞋 60）——先穿 2 件，只拿到 2 件档 */
@@ -1031,6 +1088,14 @@ test('需求146：套装收益 —— 同名 2/4 件两档、按最低品质缩�
   reseed(); const plain = g.Sim.simulate({ ...me, setFx: null }, foe, {}).rounds.length;
   reseed(); const buffed = g.Sim.simulate({ ...me, setFx: { dmgMul: 2 } }, foe, {}).rounds.length;
   assert.ok(buffed < plain, '套装收益的伤害乘区要真的缩短战斗：' + plain + ' → ' + buffed);
+  /* 经典版装备页没有套装收益介绍入口，因此玩家/AI 在经典模式下整套关闭，避免隐藏生效。 */
+  s.settings.uiMode = 'classic';
+  assert.equal(g.State.setBonusEffects().stats.speed, 0, '经典模式玩家套装属性必须关闭');
+  assert.equal(g.State.totalStats().speed, speedWithShoe, '经典模式套装速度不能再进属性合计');
+  assert.equal(g.State.setBonusList().length, 0, '经典模式不再列套装收益');
+  assert.equal(g.State.setBonusForGear(57, 3), null, '经典模式装备详情不再显示套装小节');
+  assert.equal(g.State.applySetBonuses(me), null, '经典模式玩家战斗修正必须为空');
+  assert.equal(me.setFx, undefined, '经典模式不能给玩家留 setFx');
   /* 2026-10 用户口径：装备页上那条常驻的「套装收益：…」介绍行**已删**，
    * 套装效果只在**点开具体装备**时说明（详情里逐档标出哪一条已生效）。
    * 这里做源码级断言，避免有人手滑把它加回装备页。 */
@@ -1233,7 +1298,7 @@ test('反击口径：只有近战武器与普攻能触发反击（远程 / 技�
 });
 
 test('方天画戟在攻击前蓄力，武器升级伤害与原表一致', () => {
-  const g = game(); g.math.random = () => 0.5;
+  const g = game(); g.math.random = () => 0.3;
   const result = g.Sim.simulate(fighter({ weapons: ['1:1'] }), fighter({ hp: 250 }));
   const mine = result.rounds.filter((r) => r.attacker === 0);
   assert.equal(mine[0].action, 'rest'); assert.equal(mine[1].action, 'weapon');
@@ -1287,7 +1352,7 @@ test('师父驾到使用师父等级，下一次普通攻击保留必中', () =>
 });
 
 test('装备词条改变对应武器伤害与减伤，不只显示说明', () => {
-  const g = game(); g.math.random = () => 0.5;
+  const g = game(); g.math.random = () => 0.3;
   const attacker = fighter({ weapons: ['2:1'], hp: 10000 });
   const defender = fighter({ hp: 10000 });
   const plain = g.Sim.simulate(attacker, defender).rounds[0].dmg;
@@ -1296,25 +1361,62 @@ test('装备词条改变对应武器伤害与减伤，不只显示说明', () =>
   assert.equal(geared, plain * 3); assert.equal(reduced, Math.round(geared * 0.5));
 });
 
-test('徒手攻击的权重：基准 50，工具再多也让它的份额不低于 5%', () => {
+test('徒手攻击的权重：基准 100，工具再多也让它的份额不低于 5%', () => {
   const g = game();
   /* kindWeights 收的是「候选对象」，权重按 .id 查 —— 与 pickKind 的调用口径一致。 */
   const cand = (ids) => ids.map((id) => ({ id }));
   const me = (ids) => fighter({ hp: 10000, usedWeapons: {}, usedSkills: {}, weapons: cand(ids), skills: cand(ids) });
-  /* 徒手基准 = 50（2026-10 用户口径：从 30 提到 50）。 */
+  /* 徒手基准 = 100（2026-10 用户新口径）。 */
   const bare = g.Sim.kindWeights(me([]), [], []);
-  assert.equal(bare.common, 50);
+  assert.equal(bare.common, 100);
   assert.equal(bare.commonShare, 1);
-  /* 一把武器：仍用基准 50，份额远高于保底。 */
+  /* 一把武器：仍用基准 100，份额远高于保底。 */
   const one = g.Sim.kindWeights(me([2]), cand([2]), []);
-  assert.equal(one.common, 50);
+  assert.equal(one.common, 100);
   assert.ok(one.commonShare > 0.3, '一把武器时徒手仍占三成以上：' + one.commonShare);
   /* 工具拉满（17 武器 + 17 技能，各 100 权重）：份额被压到保底 5%，权重被抬到基准之上。 */
   const ids = Array.from({ length: 17 }, (_, i) => i + 1);
   const heavy = g.Sim.kindWeights(me(ids), cand(ids), cand(ids));
-  assert.ok(heavy.common > 50, '工具极多时徒手权重被抬到基准之上：' + heavy.common);
+  assert.ok(heavy.common > 100, '工具极多时徒手权重被抬到基准之上：' + heavy.common);
   assert.ok(Math.abs(heavy.commonShare - 0.05) < 1e-9, '保底正好 5%：' + heavy.commonShare);
   assert.equal(heavy.weapon + heavy.skill + heavy.common, heavy.total);
+});
+
+test('出手权重新表：技能 5 / 普通武器 8 / 投掷前两次 100 / 徒手 100；绝对防御与龟甲术按等级首/次/三次', () => {
+  const g = game(), S = g.Sim;
+  assert.equal(S.rules.repeatSkill, 5);
+  assert.equal(S.rules.repeatWeapon, 8);
+  assert.equal(S.rules.commonAttackWeight, 100);
+  assert.equal(S.repeatRateOf(17, 1), 1, '来点松果二次及以后权重 1');
+  assert.equal(S.actionWeights.skill({ usedSkills: { 15: true }, skillUseCount: { 15: 1 }, effects: {} }, 15), 5);
+  const att = { weapons: [{ id: 1, type: '近战' }, { id: 5, type: '投掷' }, { id: 10, type: '投掷' }, { id: 7, type: '投掷' }], usedWeapons: {}, weaponUseCount: {}, effects: {} };
+  assert.equal(S.actionWeights.weapon(att, att.weapons[0]), 100, '普通武器首次 100');
+  att.usedWeapons[1] = true; att.weaponUseCount[1] = 1;
+  assert.equal(S.actionWeights.weapon(att, att.weapons[0]), 8, '普通武器二次起 8');
+  assert.equal(S.actionWeights.weapon(att, att.weapons[1]), 100, '投掷武器第一次 100');
+  att.usedWeapons[5] = true; att.weaponUseCount[5] = 1;
+  assert.equal(S.actionWeights.weapon(att, att.weapons[1]), 100, '投掷武器第二次仍 100');
+  att.weaponUseCount[5] = 2;
+  assert.equal(S.actionWeights.weapon(att, att.weapons[1]), 8, '投掷武器第三次起 8');
+  /* 流星锤（10）/橡皮擦（7）虽是投掷，第二次起按近战 8；流星锤三连击仍只算一次使用。 */
+  att.usedWeapons[10] = true; att.weaponUseCount[10] = 1;
+  att.usedWeapons[7] = true; att.weaponUseCount[7] = 1;
+  assert.equal(S.actionWeights.weapon(att, att.weapons[2]), 8, '流星锤第二次起 8');
+  assert.equal(S.actionWeights.weapon(att, att.weapons[3]), 8, '橡皮擦第二次起 8');
+  const d16 = (lv, n) => S.jueDuiChanceOf({ skills: { 16: lv }, effects: {}, skillBoost: {} }, n);
+  assert.deepEqual([1, 5, 10].map((lv) => d16(lv, 0)), [20, 22, 24.5]);
+  assert.deepEqual([11, 13, 15].map((lv) => d16(lv, 1)), [5, 15, 24]);
+  assert.equal(d16(10, 1), 0.5); assert.equal(d16(15, 2), 0.5);
+  const s7 = (lv, n) => S.shellChanceOf({ skills: { 7: lv }, effects: {}, skillBoost: {} }, n);
+  assert.deepEqual([1, 5, 10].map((lv) => s7(lv, 0)), [20, 22, 24.5]);
+  assert.deepEqual([11, 13, 15].map((lv) => s7(lv, 1)), [5, 15, 24]);
+  assert.equal(s7(10, 1), 1); assert.equal(s7(15, 2), 1);
+  /* 流星锤三连击：固定随机 0 必中 2% 那一下，一次行动打出 3 段。 */
+  const meteor = fighter({ power: 100, weapons: [{ id: 10, level: 1 }], mods: { mustHitFirst: 1 }, hp: 100000 });
+  const dummy = fighter({ power: 1, agility: 1, speed: 1, hp: 1000000, maxHp: 1000000 });
+  g.math.random = () => 0;
+  const wround = g.Sim.simulate(meteor, dummy).rounds.find((r) => r.attacker === 0 && r.action === 'weapon');
+  assert.equal(wround && wround.hits, 3, '流星锤应当有连续扔 3 次的概率并且一次行动打出 3 段');
 });
 
 test('全部原版武器、技能与 NPC 的事件流都能有限结束并维持合法血量', () => {
@@ -1654,14 +1756,19 @@ test('复仇：败绩可标记一次，复仇补偿是赢场经验的一部分�
   assert.ok(saved && saved.id);
   assert.equal(!!g.State.battleHistory()[0].revenged, false, '新记录还没复仇过');
   const rv0 = g.State.revengeInfo(saved.id);
-  assert.deepEqual([rv0.count, rv0.cost, rv0.cups], [0, 20, 8], '第一次复仇 20 金松果 / 8 金杯');
+  assert.deepEqual([rv0.count, rv0.cost, rv0.cups, rv0.cupsMin], [0, 20, 0, 0], '普通挑战复仇不抢金杯');
+  assert.equal(rv0.ladder, false);
+  /* 只有天梯赛败绩的复仇才有金杯（0~1）。 */
+  const rankSaved = g.State.recordBattle({ me, foe, result, region: 2, kind: 'rank' });
+  const rankRv = g.State.revengeInfo(rankSaved.id);
+  assert.deepEqual([rankRv.cups, rankRv.cupsMin, rankRv.ladder], [1, 0, true], '天梯复仇才有 0~1 金杯');
   assert.equal(g.State.noteRevenge(saved.id), 1);
   const rv1 = g.State.revengeInfo(saved.id);
-  assert.deepEqual([rv1.count, rv1.cost, rv1.cups], [1, 40, 13], '第二次复仇涨价');
+  assert.deepEqual([rv1.count, rv1.cost, rv1.cups, rv1.cupsMin], [1, 40, 0, 0], '普通挑战复仇涨价后也不抢金杯');
   assert.equal(g.State.markRevenged('不存在的 id'), false);
   assert.equal(g.State.markRevenged(saved.id), true);
   assert.equal(g.State.markRevenged(saved.id), false, '同一条记录只能算一次');
-  assert.ok(g.State.battleHistory()[0].revenged > 0, '标记会写进战报并落盘');
+  assert.ok(g.State.battleHistory().find((b) => b.id === saved.id).revenged > 0, '标记会写进战报并落盘');
 
   // 补偿量：低于赢一场（约 1.0× challengeExp），且有少量金松果
   const exp0 = g.State.state().exp, gold0 = g.State.state().goldPoint;
@@ -1757,6 +1864,16 @@ test('旧单槽存档按 uiMode 认领，另一界面从 1 级开始', () => {
 
 test('村庄建筑：祭坛当日状态、神迹属性点、幻兽升级/孵化/编队/喂养', () => {
   const g = game(), S = g.State;
+  /* 最低使用等级：祭坛 1 / 幻兽 25 / 神迹 30；未到等级时建筑不可用。 */
+  S.state().level = 1;
+  assert.equal(S.building('altar').level, 1, '祭坛从村庄开放即可用');
+  assert.equal(S.building('beast'), null, '低级时幻兽牧场不可用');
+  assert.equal(S.building('miracle'), null, '低级时神迹不可用');
+  assert.equal(S.buildingUnlockLevel('altar'), 1);
+  assert.equal(S.buildingUnlockLevel('beast'), 25);
+  assert.equal(S.buildingUnlockLevel('miracle'), 30);
+  assert.equal(S.WAR_UNLOCK_LEVEL, 35);
+  S.state().level = 30;
   S.state().goldPoint = 10000;
   S.save();
   // 祭坛：一天一次的随机状态
@@ -1839,6 +1956,36 @@ test('幻兽加血：没有 maxHp 的对手按当前满血加上限，不能被�
   assert.equal(foe.maxHp, foe.hp, '随机对手生成时就要带满血上限');
 });
 
+/* 随机挑战的预告读 `genAI` 的同一只 foe；幻兽若等 `Main.startBattle` 才抽，
+ * 预告看到的力敏速命就是没加幻兽的旧值，进战斗后凭空变高。 */
+test('随机挑战预告与实战同源：genAI 生成时就抽幻兽并落到面板', () => {
+  const g = game(), S = g.State;
+  const foe = S.genAI(40, '', { levelJitter: 0, statScale: 1.08 });
+  assert.ok(Array.isArray(foe.pets) && foe.pets.length >= 1 && foe.pets.length <= 3,
+    'genAI 生成时就要带 1~3 只幻兽：' + JSON.stringify(foe.pets));
+  assert.equal(foe.__petBonusesApplied, true, '幻兽加成要在生成时落到面板（预览读的就是这份）');
+  const bonus = S.petBattleBonus(foe.pets);
+  assert.ok(foe.petBonus && foe.petBonus.power === bonus.power && foe.petBonus.hp === bonus.hp,
+    '面板要记录已经加过的幻兽加成，供预览/实战共用');
+  const before = { power: foe.power, agility: foe.agility, speed: foe.speed, hp: foe.hp, maxHp: foe.maxHp };
+  S.applyPetBonuses(foe, foe.pets);
+  same({ power: foe.power, agility: foe.agility, speed: foe.speed, hp: foe.hp, maxHp: foe.maxHp }, before);
+  assert.ok(foe.maxHp >= foe.hp && foe.hp > 0, '幻兽加血后仍是合法满血面板');
+});
+
+/* 原版 25 级后才开放幻兽牧场（MainMovie.as:1362 的提示）；随机敌人也不能提前带。 */
+test('随机敌人的幻兽尊重 25 级解锁：24 级 0 只、25 级 1~3 只', () => {
+  const g = game(), S = g.State;
+  assert.equal(S.PET_UNLOCK_LEVEL, 25, '幻兽解锁等级是 25');
+  assert.equal(S.randomPetLoadout(24).length, 0, '24 级及以下不抽幻兽');
+  const low = S.genAI(24, '', { levelJitter: 0 });
+  assert.ok(!Array.isArray(low.pets) || low.pets.length === 0, '低等级随机对手不能带幻兽：' + JSON.stringify(low.pets));
+  assert.ok(!low.petBonus || !Object.values(low.petBonus).some((v) => v > 0), '低等级对手面板不能有幻兽加成');
+  const high = S.genAI(25, '', { levelJitter: 0 });
+  assert.ok(Array.isArray(high.pets) && high.pets.length >= 1 && high.pets.length <= 3,
+    '25 级起随机对手才带 1~3 只幻兽：' + JSON.stringify(high.pets));
+});
+
 /* 幻兽技能真正进 Sim：行动时触发要发一条独立的 `action:'pet'` 回合，
  * 经典回放据此按 `29 + petId` 播原版动画；`isRound:0` 表示不占 60 手行动上限。 */
 test('幻兽技能进战斗：奋力一击会产出可回放的 pet 回合', () => {
@@ -1861,6 +2008,26 @@ test('幻兽技能进战斗：奋力一击会产出可回放的 pet 回合', () 
   assert.equal(pet.isRound, 0, '幻兽协战不占行动上限');
   assert.ok(pet.dmg > 0, '奋力一击要真的扣血');
   assert.ok(Array.isArray(pet.hpAfter) && pet.hpAfter.length === 2, '回合快照要带双方血量');
+});
+
+/* 色诱之术：原版描述「略过对手一回合」= 眩晕，真化才追加脱装。
+ * 玩家常只看到脱装，误以为没有眩晕 —— 这里把 sim 的 stun 事件钉住。 */
+test('色诱之术：命中带眩晕（跳过对手一回合），真化才追加脱装', () => {
+  const g = game(), Sim = g.Sim;
+  const me = { name: '我', level: 50, hp: 5000, maxHp: 5000, power: 50, agility: 50, speed: 10,
+    weapons: [], skills: [{ id: 8, level: 15 }], castable: [8], effects: {} };
+  const foe = { name: '木桩', level: 50, hp: 9999, maxHp: 9999, power: 10, agility: 1, speed: 10,
+    weapons: [], skills: [], effects: {} };
+  let sawStun = false, sawStunnedTurn = false, sawStrip = false;
+  for (let i = 0; i < 20 && !(sawStun && sawStunnedTurn && sawStrip); i++) {
+    const rounds = Sim.simulate(me, foe).rounds || [];
+    if (rounds.some((r) => r.stunApplied)) sawStun = true;
+    if (rounds.some((r) => r.action === 'stunned')) sawStunnedTurn = true;
+    if (rounds.some((r) => r.stripApplied || r.specialEffect === 1)) sawStrip = true;
+  }
+  assert.ok(sawStun, '色诱命中要标 stunApplied（原版「略过对手一回合」）');
+  assert.ok(sawStunnedTurn, '对手下一回合要真的被跳过（action:stunned）');
+  assert.ok(sawStrip, '真·色诱 56% 脱装要在 20 场内掷中');
 });
 
 /* 果实种子合成：原版走「道具合成」页；规则统一收进 State.composeSeed。 */

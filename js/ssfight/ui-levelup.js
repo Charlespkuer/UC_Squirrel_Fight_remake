@@ -85,6 +85,8 @@
   }
   function iconHref(icon) {
     if (!icon || !icon.kind || icon.id == null) return '';
+    /* 礼包里的金松果（id 8）在经典模式统一用经典那张小松果，不用现代 330×330 prop-8。 */
+    if (icon.kind === 'prop' && Number(icon.id) === 8) return 'images/ui/icons/gold-acorn.png';
     return 'images/ui/icons/' + icon.kind + '/' + icon.kind + '-' + icon.id + '.png';
   }
   /** 卡片 c1 槽里放图标：优先用现代道具/武技图集切图，没有贴图的用字徽。 */

@@ -174,6 +174,29 @@
     if (cancel.setExtraTransform) cancel.setExtraTransform('translate(' + (-dx / sb).toFixed(3) + ',0)');
   }
 
+  /** 商店购买窗：挂 4886 第 1 帧（与背包详情窗同一份画稿），再把第 2 帧的
+   *  两颗按钮（d22 购买 4505 / d26 取消 4419，含原版位置与缩放）并进来。
+   *  用户 2026-10 口径：除「取消 / 购买」外，其余排版必须和背包详情完全一致；
+   *  按钮位置/缩放沿用购买窗（f2），左右由 `swapButtons` 对调。
+   *  f1 自带的「使用」(d9) 与「取消」(d13) 不能留，否则会和并入的两颗叠在一起。 */
+  function mergeBuyFrame(view) {
+    if (!view || !view.tag || !SfRender.buildFrames) return false;
+    const all = SfRender.buildFrames(view.tag.Sf);
+    const base = all[0], buy = all[1];
+    if (!base || !buy) return false;
+    const merged = new Map(base);
+    merged.delete(9);
+    merged.delete(13);
+    for (const depth of [22, 26]) {
+      const p = buy.get(depth);
+      if (p) merged.set(depth, p);
+    }
+    view.frames = [merged];
+    view.frame = 0;
+    view.showFrame();
+    return true;
+  }
+
   /** 把一颗按钮水平移到弹窗中心（不可使用道具的详情只留一颗取消键）。 */
   function centerClip(clip, centerX) {
     if (!clip || !clip.g) return;
@@ -187,165 +210,83 @@
     const dx = (Number(centerX) - current) / scale;
     if (clip.setExtraTransform) clip.setExtraTransform('translate(' + dx.toFixed(3) + ',0)');
   }
-  function wireButton(clip, onFire, role) {    if (!clip || !clip.g) return;
+  /** 接一颗原版按钮：默认第 1 帧常态（奶油灰）/ 第 2 帧悬停（绿）。
+   *  `opts.idle` / `opts.hover` 可覆盖（合成页等也复用同一套约定）。 */
+  function wireButton(clip, onFire, role, opts) {
+    if (!clip || !clip.g) return;
+    const idle = opts && opts.idle != null ? opts.idle : 1;
+    const hover = opts && opts.hover != null ? opts.hover : 2;
     clip.g.style.cursor = 'pointer';
     clip.g.style.pointerEvents = 'auto';
     if (role === 'use') {
       clip.g.classList.add('sf-prop-use-btn');
       clip.g.setAttribute('data-prop-use', '1');
+    } else if (role === 'buy') {
+      clip.g.classList.add('sf-prop-buy-btn');
+      clip.g.setAttribute('data-prop-buy', '1');
     } else if (role === 'cancel') {
       clip.g.classList.add('sf-prop-cancel-btn');
       clip.g.setAttribute('data-prop-cancel', '1');
     }
-    stopAt(clip, 1);
+    stopAt(clip, idle);
     const t = T();
     if (t) {
       try { t.measureHitBox(clip); t.popWrap(clip); } catch (e) {}
       const shell = clip.g.querySelector(':scope > g.uc-pop');
       if (shell) { try { t.wirePopPress(shell); } catch (e) {} }
     }
-    clip.g.addEventListener('mouseenter', () => stopAt(clip, 2));
-    clip.g.addEventListener('mouseleave', () => stopAt(clip, 1));
+    clip.g.addEventListener('mouseenter', () => stopAt(clip, hover));
+    clip.g.addEventListener('mouseleave', () => stopAt(clip, idle));
     clip.g.addEventListener('click', (e) => {
       if (e && e.preventDefault) e.preventDefault();
       if (e && e.stopPropagation) e.stopPropagation();
-      stopAt(clip, 1);
+      /* 点完指针仍在按钮上：保持悬停色；真正移开时 mouseleave 再回常态。 */
+      stopAt(clip, hover);
       onFire();
     });
+  }
+
+  /** 道具说明：背包使用窗 / 不可使用道具的详情窗 / 商店购买窗共用同一套排版
+   *  （10px、最多两行、黑色，行高沿用素材烘焙值）。用户 2026-10 口径：
+   *  购买窗除两颗按钮外必须与背包详情逐项一致，所以这里只留一份实现。 */
+  function writeRemark(view, text) {
+    setWrappedField(clipOf(view, 'vipDes'), text == null ? '' : text, 10, 2);
   }
 
   function fill(view, id) {
     const base = propMap.getValue(Number(id));
     if (!base) return;
     setText(view, 'name', base.name);
-    setWrappedField(clipOf(view, 'vipDes'), base.remark || '', 10, 2);
+    writeRemark(view, base.remark);
     const c1 = clipOf(view, 'c1');
     stopAt(c1, 2);
     paintIcon(c1, iconSrc(id));
     void paintVectorIcon(c1, id);
   }
 
-  /* ---------- 商店购买窗：原版 4886 第 2 帧（showBuyPropWin） ----------
-   * 原版字段：c1 图标 / name / reason / count / left / right / button2 购买 / button3 取消。
-   * 版式、按钮全部来自素材；这里只填字、挂图标、接购买。用户 2026-10 口径：
-   * 去掉数量调整条（含左右箭头/计数条）、去掉 UC 会员提示；介绍文字黑色、小字号、按字段宽换行。 */
+  /* ---------- 商店购买窗：4886 第 1 帧版式 + 第 2 帧的两颗按钮 ----------
+   * 用户 2026-10 口径：除「取消 / 购买」两颗按钮外，其余排版必须与背包详情
+   * （4886 f1，同一个元件）完全一致；按钮位置/缩放沿用购买窗 f2 的 4505/4419，
+   * 左右由 `swapButtons` 对调（取消在左、购买在右）。
+   * f2 原版的数量条 / 左右箭头 / UC 会员提示都不进合并帧。 */
   function hideClip(clip) {
     const node = clip && (clip.g || clip);
     if (node && node.style) node.style.display = 'none';
   }
 
-  /** 介绍文字：4886 f2 的 reason 原字段是 196×30、12px 红字且只排一行。
-   * 用户 2026-10 口径：商店购买窗的按钮外排版要和背包使用窗（4886 f1）一致 ——
-   * 所以这里改成 f1 那套「图标居中 / 名字在下 / 说明再往下」的黑字小字号两行，
-   * 不再用 f2 原来的左图标 + 右名字版式。 */
-  function setBuyDescription(clip, text) {
-    if (!clip) return;
-    const box = clip.__textBox && clip.__textBox.box;
-    const width = box ? Math.max(40, box.xmax - box.xmin) : 196;
-    const size = 10;
-    const perLine = Math.max(8, Math.floor(width / (size * 1.08)));
-    const lines = [];
-    for (const para of String(text == null ? '' : text).split(/\r\n|\r|\n/)) {
-      const chars = Array.from(para);
-      if (!chars.length) { lines.push(''); continue; }
-      for (let i = 0; i < chars.length; i += perLine) lines.push(chars.slice(i, i + perLine).join(''));
-    }
-    if (lines.length > 2) {
-      lines.length = 2;
-      lines[1] = Array.from(lines[1]).slice(0, Math.max(1, perLine - 1)).join('') + '…';
-    }
-    if (!SfRender.setText(clip, lines.join('\n'))) return;
-    const texts = Array.from((clip.g || clip).querySelectorAll('text'));
-    const baseY = texts.length ? Number(texts[0].getAttribute('y')) || 0 : 0;
-    texts.forEach((t, i) => {
-      t.setAttribute('fill', '#000000');
-      t.setAttribute('font-size', String(size));
-      t.setAttribute('y', String(Math.round((baseY + i * size * 1.25) * 100) / 100));
-    });
-  }
-
-  /** 商店购买窗的「按钮外」排版：与背包使用窗（4886 f1）一致。
-   *  f2 原版把 c1 放左、name 放右、reason 在下方；这里把三颗内容元件平移到 f1 的坐标：
-   *   c1 139.3,37 / name 112.55,76.2 / reason 与 name 同轴、y=99.25（f1 的 vipDes）。
-   *  ⚠ c1 是 MovieClip（走 setExtraTransform），name/reason 是 tp11 文本 `<g>`（直接改矩阵）。
-   *  `reason` 的 x 不是 f1 vipDes 的 50.15：f2 的 reason 字段比 f1 窄 27px，要让文字中心
-   *  跟名字对齐，x 只能取 64.25（= 50.15 + 14.1 的字段宽差）。 */
-  function applyBackpackLayout(view) {
-    const c1 = clipOf(view, 'c1');
-    if (c1 && c1.setExtraTransform) c1.setExtraTransform('translate(55.2,-13.45)');
-    const name = clipOf(view, 'name');
-    const reason = clipOf(view, 'reason');
-    const moveText = (node, x, y, size) => {
-      const n = node && (node.g || node);
-      if (!n || !n.setAttribute) return;
-      const raw = typeof n.__baseMa === 'string' ? n.__baseMa.split(',').map(Number) : null;
-      const ma = raw && raw.length === 6 && raw.every(Number.isFinite) ? raw.slice() : [1, 0, 0, 1, 0, 0];
-      ma[4] = x; ma[5] = y;
-      n.setAttribute('transform', 'matrix(' + ma.join(',') + ')');
-      for (const t of n.querySelectorAll ? n.querySelectorAll('text') : []) t.setAttribute('font-size', String(size));
-    };
-    moveText(name, 112.55, 76.2, 14);
-    moveText(reason, 64.25, 99.25, 10);
-  }
-
-  /** 购买键常态 = 与「取消」键同款浅灰胶囊；只有 hover 才用素材的绿色帧。
-   *  4505 第 3 帧自带的是深灰胶囊（3828），这里把它的四条 path 直接换成取消键
-   *  （3150）那套奶油灰渐变/棕色描边：两套胶囊的局部包围盒相同，换 fill 后严丝合缝。
-   *  `creamFills` 在打开窗口、取消键还没被 hover 之前读好并缓存；换帧会重建 3828，
-   *  所以每次回到第 3 帧都重刷一遍。 */
-  function paintBuyIdle(buy, creamFills) {
-    if (!buy || !buy.g) return;
-    const cap = buy.g.querySelector(':scope > g.uc-pop > g[depth="1"]') || buy.g.querySelector('g[depth="1"]');
-    if (!cap) return;
-    const paths = cap.querySelectorAll ? [...cap.querySelectorAll('path')] : [];
-    /* 3828 的四条：描边 / 主面 / 底部阴影 / 高光面；3150 的六条里取
-     * 2=棕描边、0=奶油主面、3=黑色投影、1=白色高光。 */
-    const map = [2, 0, 3, 1];
-    if (creamFills && creamFills.length >= 6 && paths.length === 4) {
-      paths.forEach((p, i) => {
-        const f = creamFills[map[i]];
-        if (f) p.setAttribute('fill', f);
-      });
-      cap.classList.remove('sf-prop-buy-idle');
-    } else {
-      cap.classList.add('sf-prop-buy-idle');
-    }
-  }
-
   function fillBuy(view, id, base) {
     setText(view, 'name', base.name);
-    setBuyDescription(clipOf(view, 'reason'), base.remark || '');
-    setText(view, 'count', '1');
+    writeRemark(view, base.remark);
     const c1 = clipOf(view, 'c1');
     stopAt(c1, 2);
     paintIcon(c1, iconSrc(id));
     void paintVectorIcon(c1, id);
   }
 
-  function setVisible(clip, on) {
-    const node = clip && (clip.g || clip);
-    if (node && node.style) node.style.visibility = on ? '' : 'hidden';
-  }
-
-  function wireArrow(clip, onFire) {
-    if (!clip || !clip.g) return;
-    clip.g.style.cursor = 'pointer';
-    clip.g.style.pointerEvents = 'auto';
-    stopAt(clip, 1);
-    clip.g.addEventListener('mouseenter', () => stopAt(clip, 2));
-    clip.g.addEventListener('mouseleave', () => stopAt(clip, 1));
-    clip.g.addEventListener('click', (e) => {
-      if (e && e.preventDefault) e.preventDefault();
-      if (e && e.stopPropagation) e.stopPropagation();
-      stopAt(clip, 1);
-      onFire();
-    });
-  }
-
   /**
    * 打开商店购买窗。`opts`：
-   *   desc / price / stock / max / onBuy(qty, handle) / onClose()
-   * `onBuy` 返回 true 表示购买成功，窗口关闭；返回 false 则保留并显示 `setReason`。
+   *   desc / stock / max / onBuy(qty, handle) / onClose()
+   * `onBuy` 返回 true 表示买完关窗；返回 false 则保留（多件限购继续买）。
    */
   async function openBuy(propId, opts) {
     opts = opts || {};
@@ -379,7 +320,7 @@
         if (session === rec) destroy();
         return null;
       }
-      view = await SfRender.mountSymbol(host, '4886', { frame: 2, label: '购买道具', blank: ['name', 'reason', 'count'] });
+      view = await SfRender.mountSymbol(host, '4886', { frame: 1, label: '购买道具', blank: ['name', 'vipDes'] });
       if (session !== rec || !host.isConnected) {
         if (rec.onStale) { try { rec.onStale(); } catch (e) {} }
         try { view.destroy(); } catch (e) {}
@@ -388,45 +329,42 @@
         return null;
       }
       rec.view = view;
+      /* 用户 2026-10 口径：按钮外必须与背包详情（4886 f1）一致；f2 只借两颗按钮。 */
+      mergeBuyFrame(view);
       fillBuy(view, id, base);
-      /* 用户 2026-10 口径：商店购买窗按钮外的排版与背包使用窗一致（图标居中 / 名字在下 /
-       * 说明再往下）。f2 原版是「左图标 + 右名字」，这里统一平移到 f1 的位置。 */
-      applyBackpackLayout(view);
-      /* 购买数量固定 1：把原版的数量条/左右箭头/中间那颗调整键一起收掉；
-       * UC 会员提示也整颗隐藏（用户 2026-10 口径）。 */
-      hideClip(clipOf(view, 'count'));
-      hideClip(clipOf(view, 'left'));
-      hideClip(clipOf(view, 'right'));
-      hideClip(clipOf(view, 'button1'));
-      hideClip(clipOf(view, 'vipTips'));
       const buy = clipOf(view, 'button2');
       const cancel = clipOf(view, 'button3');
-      /* 取消键此刻还在常态帧 1；先把它的奶油灰胶囊 fill 读下来，
-       * 供购买键第 3 帧（深灰 3828）换成同一套颜色。 */
-      const cancelCap = cancel && cancel.g && cancel.g.querySelector(':scope > g[depth="1"]');
-      const creamFills = cancelCap ? [...cancelCap.querySelectorAll('path')].map((p) => p.getAttribute('fill')) : null;
-      /* 用户口径：商店购买窗与背包使用窗一样，把「购买 / 取消」左右对调。 */
+      /* 用户口径：商店购买窗与背包使用窗一样，取消在左、购买在右。 */
       swapButtons(buy, cancel);
-      const setReason = (text) => setBuyDescription(clipOf(view, 'reason'), text == null ? '' : text);
+      const setReason = (text) => writeRemark(view, text == null ? '' : text);
       const draw = () => {
-        if (buy) {
-          const off = rec.stock <= 0;
-          /* 可用时也先用与取消键同款的浅灰档；hover 时 wireButton 才切到绿色档。 */
-          stopAt(buy, 3);
-          paintBuyIdle(buy, creamFills);
-          if (buy.g) {
-            buy.g.style.pointerEvents = off ? 'none' : 'auto';
-            /* ⚠ 售罄时**不再压透明度**：以前 `opacity:.65` 会把购买键整颗调浅，
-             * 英雄帖/勇气徽章这类每天能买多件的商品买满后看着像"颜色不一样"。
-             * 售罄只用 pointer-events + 介绍文字说明，按钮颜色保持与取消键一致。 */
-            buy.g.style.opacity = '';
+        if (!buy) return;
+        const off = rec.stock <= 0;
+        /* 售罄：把购买键从"点击路由"里摘掉（路由是按包围盒判归属的，只关
+         * `pointer-events` 没用——鼠标扫过仍会派发 mouseenter 变绿）。
+         * ⚠ 售罄时**不压透明度**：以前 `opacity:.65` 会把购买键整颗调浅，
+         * 英雄帖/勇气徽章这类每天能买多件的商品买满后看着像"颜色不一样"。
+         * 售罄只用路由注销 + 介绍文字说明，按钮颜色保持与取消键一致。 */
+        const t = T();
+        if (t && t.unregisterHit && t.registerHit) {
+          if (off && !rec.buyUnregistered) {
+            try { t.unregisterHit(buy); rec.buyUnregistered = true; } catch (e) {}
+          } else if (!off && rec.buyUnregistered) {
+            try { t.registerHit(buy, false); rec.buyUnregistered = false; } catch (e) {}
           }
-          if (off && !rec.soldOutNoted) {
-            rec.soldOutNoted = true;
-            setReason('今日已经卖完了，明天再来。');
-          } else if (!off) {
-            rec.soldOutNoted = false;
-          }
+        }
+        if (buy.g) buy.g.style.opacity = '';
+        if (off) {
+          /* 路由一撤，mouseleave 不会再回来；把购买键拨回常态帧，
+           * 否则点完最后一件时它会停在点击那一刻的悬停绿色。 */
+          stopAt(buy, 1);
+        }
+        if (off && !rec.soldOutNoted) {
+          rec.soldOutNoted = true;
+          setReason('今日已经卖完了，明天再来。');
+        } else if (!off && rec.soldOutNoted) {
+          rec.soldOutNoted = false;
+          setReason(base.remark || '');
         }
       };
       const handle = {
@@ -440,6 +378,8 @@
         get view() { return rec.view; },
         propId: id,
       };
+      /* 购买键：4505 第 1 帧 = 4504（奶油灰 3150，与取消同画稿），第 2 帧才是绿色 3152。
+       * 不再用第 3 帧深灰 + 换 fill 的旧做法。 */
       wireButton(buy, () => {
         if (rec.stock <= 0) return;
         let ok = false;
@@ -448,12 +388,7 @@
         }
         if (ok) closeSession(rec);
         else draw();
-      }, 'use');
-      if (buy && buy.g) {
-        buy.g.addEventListener('mouseleave', () => {
-          if (rec.stock > 0) { stopAt(buy, 3); paintBuyIdle(buy, creamFills); }
-        });
-      }
+      }, 'buy', { idle: 1, hover: 2 });
       wireButton(cancel, () => closeSession(rec), 'cancel');
       draw();
       try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
@@ -499,7 +434,7 @@
    *  卷轴、挑战书、英雄帖、勇气徽章、抽奖卷等走这里；介绍写 vipDes，矢量图标同背包。 */
   function fillInfo(view, id, base) {
     setText(view, 'name', base.name);
-    setWrappedField(clipOf(view, 'vipDes'), base.remark || '', 10, 2);
+    writeRemark(view, base.remark);
     const c1 = clipOf(view, 'c1');
     stopAt(c1, 2);
     paintIcon(c1, iconSrc(id));
@@ -560,7 +495,7 @@
     const base = propMap.getValue(rec.propId);
     if (!base) return;
     setText(rec.view, 'name', base.name);
-    setWrappedField(clipOf(rec.view, 'vipDes'), base.remark || '', 10, 2);
+    writeRemark(rec.view, base.remark);
   }
 
   /**
@@ -641,9 +576,10 @@
     close: close,
     destroy: destroy,
     active: () => !!session,
-    /** 供回归/探针核对：4886 第 1 帧 + 使用/取消交换方向。 */
+    /** 供回归/探针核对：使用/详情挂 f1；购买窗挂 f1 后并入 f2 的两颗按钮。 */
     frame: 1,
-    buyFrame: 2,
+    buyFrame: 1,
+    buyButtonsFrame: 2,
     symbol: '4886',
   });
 })();

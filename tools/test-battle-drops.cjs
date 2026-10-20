@@ -224,6 +224,25 @@ test('按跳过键只收 2/3（随机抹掉一项）；程序化收尾 / 录像�
   assert.equal(g4.c.BattleDrops.trimOne([]).lost,null);
 });
 
+test('先手动拾取再按跳过：只从剩余里补到 2 件，不重复已拾取项、也不额外补两件',()=>{
+  /* 用户口径 2026-10：一场的 3 件掉落是预先固定的；捡了 1 件再跳过时，
+   * 只能在**没捡的**里面补 1 件（整场 2/3），剩下那件随机丢弃。 */
+  const g=setup(),drop=g.create([0,0,.4,.6,.999999]);
+  g.advance(drop,2100);
+  assert.equal(drop.collect(0),true,'先手动拾取经验');
+  assert.equal(g.s().exp,5);
+  drop.skip(true);
+  same(drop.summary().items.map(x=>x.id),[15,8]);
+  assert.equal(drop.summary().items.length,2,'已捡 1 + 补 1，不能变成 3');
+  assert.equal(drop.summary().lost.id,21,'随机丢掉的必须是还没捡的那一件');
+  assert.equal(g.s().goldPoint,102);
+  assert.equal(g.s().props[21],undefined);
+  const saved=JSON.stringify(g.saved());
+  drop.skip(true);
+  assert.equal(JSON.stringify(g.saved()),saved,'重复跳过不再发奖');
+  assert.equal(drop.summary().items.length,2);
+});
+
 test('战中大小体力药剂掉率再砍一半：权重 5→2.5 / 1→0.5，且小数权重照常摇号',()=>{
   /* 2026-10 用户口径「继续中幅减小」：在上一版基础上再减半。权重是相对值
    * （`plan()` 按权重和摇号），只改这两个数就等于把单卡概率再压一半；

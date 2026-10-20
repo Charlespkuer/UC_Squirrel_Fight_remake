@@ -30,6 +30,8 @@
     if (html != null) e.innerHTML = html;
     return e;
   }
+  const escHtml = (value) => String(value == null ? '' : value)
+    .replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   /* ============================================================
    * 【UI2】图标（图集帧 → 小 canvas / dataURL）
@@ -677,12 +679,19 @@
       wornDiv.appendChild(row);
     }
     box.appendChild(wornDiv);
-    box.appendChild(el('div', 'gear-sec-title', '装备背包（' + bag.length + '）— 选中3件相同装备可融合升品质'));
+    box.appendChild(el('div', 'gear-sec-title', '装备背包（' + bag.length + '）— 选中3件同品质装备可融合升品质（部位/名字可不同）'));
     const bagDiv = el('div', 'ws-list');
     const selected = new Set();
+    /** 词条行：和装备名/主属性分开，融合选材料时一眼能看到每件装备带什么。 */
+    const extTags = (g) => {
+      const list = State.extText(g.ext);
+      return '<div class="gear-ext-line"><span class="gear-ext-label">词条</span>' +
+        (list.length ? list.map((x) => '<span class="gear-ext-tag">' + escHtml(x) + '</span>').join('')
+          : '<span class="gear-ext-none">无附加词条</span>') + '</div>';
+    };
     for (const g of bag) {
       const row = el('div', 'ws-row');
-      row.innerHTML = gearIcon(g) + '<div class="ws-info"><b class="' + QUALITY_CLS[Math.min(3, g.quality)] + '">' + g.name + '</b><div class="ws-remark">' + g.attrName + '+' + g.abilityVal + '　需' + g.useLevel + '级　' + State.extText(g.ext).join('，') + '</div></div>';
+      row.innerHTML = gearIcon(g) + '<div class="ws-info"><b class="' + QUALITY_CLS[Math.min(3, g.quality)] + '">' + g.name + '</b><div class="ws-remark">' + g.attrName + '+' + g.abilityVal + '　需' + g.useLevel + '级</div>' + extTags(g) + '</div>';
       const wearBtn = el('button', 'btn btn-primary', '穿戴');
       wearBtn.disabled = S.level < g.useLevel;
       wearBtn.onclick = () => {
@@ -696,15 +705,36 @@
       selBtn.onclick = () => {
         if (selected.has(g.key)) { selected.delete(g.key); selBtn.classList.remove('on'); }
         else { selected.add(g.key); selBtn.classList.add('on'); }
+        refreshSummary();
       };
       row.appendChild(wearBtn); row.appendChild(sellBtn); row.appendChild(selBtn);
       bagDiv.appendChild(row);
     }
     if (!bag.length) bagDiv.appendChild(el('p', 'panel-desc', '没有备用装备。打关卡得碎片，10个碎片可合成装备！'));
     box.appendChild(bagDiv);
+    /* 融合材料词条预览：现代版装备面板本身就是融合入口，选 3 件后在这里
+     * 汇总它们能提供的全部词条，并说明产物每个槽 50% 继承。 */
+    const summary = el('div', 'fusion-ext-summary');
+    function refreshSummary() {
+      const picked = [...selected].map((key) => bag.find((x) => x.key === key)).filter(Boolean);
+      if (!picked.length) {
+        summary.innerHTML = '<div class="fusion-ext-hint">选中装备后，这里会列出它们的全部附加词条；两件以上材料都带的词条必继承，其余每个词条槽 50% 概率继承。</div>';
+        return;
+      }
+      const tags = new Set();
+      picked.forEach((g) => State.extText(g.ext).forEach((x) => tags.add(x)));
+      summary.innerHTML = '<div class="fusion-ext-head">已选 ' + picked.length + '/3：' +
+        picked.map((g) => '<b class="q' + Math.min(3, g.quality) + '">' + escHtml(g.name) + '</b>').join('、') + '</div>' +
+        '<div class="fusion-ext-tags">' + (tags.size
+          ? [...tags].map((x) => '<span class="gear-ext-tag">' + escHtml(x) + '</span>').join('')
+          : '<span class="gear-ext-none">这些装备没有附加词条</span>') + '</div>' +
+        '<div class="fusion-ext-hint">两件以上材料都带的词条必继承；其余词条每个槽 50% 概率继承。</div>';
+    }
+    box.appendChild(summary);
+    refreshSummary();
     const mergeBtn = el('button', 'btn btn-primary btn-wide', '🔥 融合选中的3件装备（50🌰）');
     mergeBtn.onclick = () => {
-      const r = State.mergeGears([...selected]);
+      const r = State.mergeGears([...selected], { allowMixedParts: true });
       if (r.ok) { toast('融合成功：' + r.gear.name + '！'); p.close(); openGears(); }
       else toast(r.msg);
     };
@@ -861,7 +891,7 @@
       '<p><b>属性</b>：力量决定伤害，敏捷决定闪避，速度决定出手频率，生命即血量。</p>' +
       '<p><b>武器/技能</b>：战斗中随机使用。升级需要金松果+卷轴，成功率随等级降低；普通1~10级失败后每次提高2%成功率，真化线不保底。</p>' +
       '<p><b>关卡</b>：10级起挑战螳螂→仙鹤→熊猫，需要挑战书，通关可得装备碎片。</p>' +
-      '<p><b>装备</b>：10个碎片+金松果合成（白30/绿40/蓝50）；3件同部位同品质装备+金松果融合升品质（白30/绿40/蓝50/紫60）。</p>' +
+      '<p><b>装备</b>：10个碎片+金松果合成（白30/绿40/蓝50）；3件同品质装备+金松果融合升品质（部位/名字可不同；白30/绿40/蓝50/紫60）。两件以上材料都带的词条必继承。</p>' +
       '<p><b>转生</b>：使用转生果回到1级，属性成长更高（保留装备）。</p>' +
       '<p><b>存档</b>：自动保存在浏览器本地。</p>';
     const row = el('div', 'btn-row');

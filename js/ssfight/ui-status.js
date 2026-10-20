@@ -705,9 +705,16 @@
    *   f2..f5 = 别的用途（星级之类），这里只用 f1。
    * ⚠ 用户 2026-10 口径⑥："武器与技能详情页与ssfight版本差距甚远" —— 以前整页是复刻自绘的
    *   DOM 面板（`.sf-detail`），现在改成挂原版帧 + 写字段。 */
+  /** 武器特殊效果：原表 `remark` 是「特殊效果,每级增加…」一整句；这里只取特殊效果，
+   *  成长部分由详情页的「升至下一阶…」那行负责，避免同一句写两遍。 */
+  function weaponSpecialText(base) {
+    if (!base || !base.remark) return '';
+    return String(base.remark).replace(/\s*[,，]?\s*(每级|升级)[\s\S]*$/, '').trim();
+  }
   async function buildDetailAsset(host, kind, id, base, own, up, row) {
     const t = T();
     const isW = kind === 'weapon';
+    const weaponSpecial = isW ? weaponSpecialText(base) : '';
     /* ⚠ 武器页与技能页是**同一个元件的两帧**（原版 `showWeaponSkillWin`：
      *   `subFrame.gotoAndStop(1)` 武器 / `gotoAndStop(2)` 技能，MainMovie.as:16678 / 16731）。
      *   两帧各自的标题（`武器详情` / `技能详情`）、图标位（`c1` = **3636** 武器 / **4547** 技能）
@@ -779,7 +786,6 @@
     const trueOwn = ownLv > 10;
     /* 原版真化详情页把名字写成「真.名字」（showWeaponSkill3 的 setText(name,"真."+name)）。 */
     const shownName = base ? ((trueOwn ? '真.' : '') + base.name) : '';
-    set('name', shownName);
     /* 等级：原版 `setText(subFrame.levelText, level)`（MainMovie.as:16681 / 16735）——
      * 就是左列「等级」那一格的值。复刻上一批误把它当成"贴图下面那行等级"清空了，
      * 于是整页一个等级都不显示（用户 2026-10 口径："该界面所有的等级都没有正常显示"）。
@@ -804,7 +810,7 @@
     if (own && !(up && up.fixed)) {
       const nextLv = Math.min(15, ownLv + 1);
       if (ownLv >= 15) {
-        desText = isW ? '神器已达最高阶段！' : '神技已达最高阶段！';
+        desText = isW ? ('神器已达最高阶段！' + (weaponSpecial ? '\n特殊效果：' + weaponSpecial : '')) : '神技已达最高阶段！';
       } else if (nextLv > 10) {
         const idx = nextLv - 11;
         if (isW) {
@@ -812,6 +818,7 @@
           desText = base && base.remark1
             ? ('升至下一阶将额外' + base.remark1 + '和' + add + '点基本伤害！')
             : ('升至下一阶将额外提升' + add + '点基本伤害！');
+          if (weaponSpecial) desText += '\n特殊效果：' + weaponSpecial;
         } else {
           const row = window.GData && GData.trueSkillRow ? GData.trueSkillRow(id) : null;
           if (row && row.text) {
@@ -822,8 +829,8 @@
       }
     }
     setWrapped(view.byName('des'), desText);
-    /* 名字那一格也要断：`name`=4542 框宽 73.6（居中），长名字会顶出面板。 */
-    setWrapped(view.byName('name'), shownName);
+    /* 名字固定单行（真化名字见 `setDetailName` 的注释），不能按 5 字容量硬断行。 */
+    setDetailName(view.byName('name'), shownName);
     /* 图标位：挂原版矢量元件（与格子里那 10 颗同一套素材）。
      * ⚠ 原版这里是 `subFrame.c1.attachMovie(名字, "mc", 100, {_x:0,_y:0})`
      *   ——**图标元件自己第 1 帧就带名字层 + 等级位**（卡片 42×42 在左上角），
@@ -866,52 +873,40 @@
      *   f1 = `button1`(3644 返回) + `button2`(4537 / 4551 升级…)；f2 = 只有返回；
      *   f3 = 返回(绿) + 升级(深灰)。
      * 而两颗子键自己各是 3 帧：**1 = 米白（常态）/ 2 = 绿（可用）/ 3 = 深灰（不可用）**。
-     * 原版的做法是 `buttonsMc.gotoAndStop(3)`（不可升级档）或 `gotoAndStop(1)`
-     *   （`showLeveupInfo` 的最后一行，可升级档）—— 但 f1 里那两颗子键**出生在自己的
-     *   第 1 帧（米白）**，Flash 的按钮靠鼠标悬停才切到绿帧，复刻没有这套语义，
-     *   于是"升级"那颗**永远是灰的**（用户 2026-10 口径："升级武器&升级技能的图标一直是灰色的"）。
-     * 现在按能不能升级**直接拨子键的帧**（这才是参考截图里真正的两档外观）：
-     *   可升级 → 升级键 f2（绿）；不可升级 → f3（深灰）。返回键一律 f2（绿）——
-     *   参照截图 `references/screen` 的技能详情页就是"返回绿 + 升级深灰"。
+     * 2026-10-19 用户口径：「返回」和「升级武器 / 升级技能」**默认是灰的（常态帧），
+     *   鼠标悬停在上面才显示绿色** —— 与状态页格子 / 首页按钮同一套操：`wireClickable`
+     *   的 `idle/hover` 拨子键帧，悬停缩放与按下回弹由 `.uc-pop` 壳（`refreshShell`）负责。
+     * 不可升级 / 满级那一档维持 f3 深灰、不可点（悬停也不拨帧）。
      * ⚠ 父帧**必须停 f1**：只有 f1 里才有具名的 `button1` / `button2`（f2/f3 是匿名画稿），
      *   换到那两帧就再也取不到这两颗键、点击接线全断。 */
     const bm = view.byName('buttonsMc');
     if (bm) stopAt(bm, 1);
     const backBtn = bm && clipOf(bm, 'button1');
     const okBtn = bm && clipOf(bm, 'button2');
-    stopAt(backBtn, 2);                                   // 返回：绿（可用）
-    stopAt(okBtn, (locked || maxed) ? 3 : 2);             // 升级：可升级=绿 / 否则=深灰
+    wireClickable(backBtn, {
+      idle: 1, hover: 2,
+      onFire: () => { if (current && current.detail) closeItemDetail(); },
+    });
     /* ⚠ 每一处都要判 `current && current.detail`：详情页是异步挂的，玩家可能在
-     *   挂载/setText 的间隙就点了「返回」，这时 `current.detail` 已经没了 ——
+     *   挂载/setText 的间隙就点了「升级」，这时 `current.detail` 已经没了 ——
      *   不判就会抛在 `onFire` 里，把点击变成静默失败（实测"点升级/返回没反应"）。 */
     if (okBtn && !locked && !maxed) {
-      okBtn.g.style.cursor = 'pointer';
-      okBtn.g.style.pointerEvents = 'auto';
-      t.measureHitBox(okBtn);
-      t.addHitArea(okBtn);
-      okBtn.g.addEventListener('click', () => {
-        if (!current || !current.detail) return;
-        const r = State.doUpgrade(kind, Number(id));
-        if (window.UI && UI.toast) UI.toast(r.msg);
-        /* 成功 / 失败都要重画：等级或成功率档位会变。 */
-        destroyItemDetailOnly();
-        openItemDetail(kind, id);
-        refreshGridSoon();
+      wireClickable(okBtn, {
+        idle: 1, hover: 2,
+        onFire: () => {
+          if (!current || !current.detail) return;
+          const r = State.doUpgrade(kind, Number(id));
+          if (window.UI && UI.toast) UI.toast(r.msg);
+          /* 成功 / 失败都要重画：等级或成功率档位会变。 */
+          destroyItemDetailOnly();
+          openItemDetail(kind, id);
+          refreshGridSoon();
+        },
       });
-    }
-    if (backBtn) {
-      backBtn.g.style.cursor = 'pointer';
-      backBtn.g.style.pointerEvents = 'auto';
-      /* ⚠ 两颗键都必须**显式铺一遍热区**（`measureHitBox` + `addHitArea`）：
-       *  这一页是 `SfRender.mountSymbol()` 直接挂的，主页面那套 `wireButtons` 不会跑，
-       *  少了这一步「升级武器」那颗在点击路由里根本不在册（实测：路由表里只有 `button1`），
-       *  点上去没有任何反应 —— 用户口径里的"返回按键与升级按键的作用相反"有一半就是这个叠加出来的。 */
-      t.measureHitBox(backBtn);
-      t.addHitArea(backBtn);
-      backBtn.g.addEventListener('click', () => { if (current && current.detail) closeItemDetail(); });
     }
     /* 锁定 / 满级那一档只有"返回"（`button1`）：别留一颗点了没反应的灰键在路由里。 */
     if (okBtn && (locked || maxed)) {
+      stopAt(okBtn, 3);
       okBtn.g.style.cursor = 'default';
       okBtn.g.style.pointerEvents = 'none';
     }
@@ -1055,6 +1050,29 @@
     t.setText(node || clip, wrapped);
     return clip;
   }
+  /** 详情页名字固定单行。
+   *  `name`=4542 框宽 75.6、13 号字，`wrapToField` 按 `floor(75.6/13)=5` 算容量；
+   *  真化名字是「真.」+ 4 个全角字 = 5.55 字宽（实际 72.15），明明放得下，
+   *  却被硬断成「真.死神镰 / 刀」两行（用户 2026-10 报的「真·死神镰刀最后一个字换行」）。
+   *  这里单行写；只有真的超过框宽才按字宽缩一点字号，不裁字、不换行。 */
+  function setDetailName(clip, text) {
+    const t = T();
+    const tb = textBoxOf(clip);
+    if (!tb || !t) return null;
+    const src = String(text == null ? '' : text);
+    t.setText(tb, src);
+    const meta = tb.__textBox && tb.__textBox.meta;
+    const bd = meta && meta.bd;
+    if (!bd) return clip;
+    const W = bd[1] - bd[0] - (Number(meta.lm) || 0) - (Number(meta.rm) || 0);
+    const units = [...src].reduce((n, ch) => n + (ch.charCodeAt(0) < 0x2E80 ? 0.55 : 1), 0);
+    const fh = Number(meta.fh) || 13;
+    if (W > 8 && units > 0 && units * fh > W * 0.98) {
+      const size = Math.max(9, Math.floor((W * 0.98 / units) * 10) / 10);
+      for (const el of (tb.g || tb).querySelectorAll('text')) el.setAttribute('font-size', size);
+    }
+    return clip;
+  }
   /** 在一个（可能是壳的）元件里找到真正的文本容器：自己有 `__textBox` 就用自己，
    *  否则往下（广度优先）找第一个有的。 */
   function textBoxOf(clip, depth) {
@@ -1094,6 +1112,7 @@
     dom.style.setProperty('--u', m.s(1).toFixed(3) + 'px');
     const s = (S() || {});
     const isW = kind === 'weapon';
+    const weaponSpecial = isW ? weaponSpecialText(base) : '';
     const locked = !own;
     const maxed = !!(up && up.max);
     const ownLv = own ? (Number(own.level) || 0) : 0;
@@ -1106,7 +1125,7 @@
     let descText = locked ? '尚未获得——升级、开启礼包有机会获得'
       : (base && base.remark ? base.remark : '');
     if (own && !(up && up.fixed)) {
-      if (ownLv >= 15) descText = isW ? '神器已达最高阶段！' : '神技已达最高阶段！';
+      if (ownLv >= 15) descText = isW ? ('神器已达最高阶段！' + (weaponSpecial ? '\n特殊效果：' + weaponSpecial : '')) : '神技已达最高阶段！';
       else if (ownLv + 1 > 10) {
         const nextLv = ownLv + 1;
         if (isW) {
@@ -1114,6 +1133,7 @@
           descText = base && base.remark1
             ? ('升至下一阶将额外' + base.remark1 + '和' + add + '点基本伤害！')
             : ('升至下一阶将额外提升' + add + '点基本伤害！');
+          if (weaponSpecial) descText += '\n特殊效果：' + weaponSpecial;
         } else {
           const row = window.GData && GData.trueSkillRow ? GData.trueSkillRow(id) : null;
           if (row && row.text) {
@@ -2875,12 +2895,16 @@
     const view = await mountFusionOverlay(host, '3157', '装备融合帮助');
     if (!view) return;
     const C = window.UI && UI.classic;
+    const extInherit = Math.round((Number(State.FUSION_EXT_INHERIT_RATE) || 0) * 100);
+    const extUpgrade = Math.round((Number(State.FUSION_EXT_UPGRADE_RATE) || 0) * 100);
     const words = [
       '选 3 件同品质的未穿戴装备，融合成 1 件更高品质的装备。',
       '费用按材料品质：白 ' + fusionCostOf(0) + ' / 绿 ' + fusionCostOf(1) + ' / 蓝 ' + fusionCostOf(2) +
         ' / 紫 ' + fusionCostOf(3) + ' 金松果。',
       '已穿戴的装备、已加星标的装备、以及传说（橙色）装备都不能作为材料。',
       '3 件同品质的紫装可以融成一件传说装备；融合成功率 100%。',
+      '部位和名字可以完全不同。产物的每个词条都有 ' + extInherit + '% 概率从三件材料的词条里继承；' +
+        '继承到的词条取材料里的最高星级，另有 ' + extUpgrade + '% 概率再升 1 星（最高 3 星）。',
     ];
     fusionHelpPage = 0;
     const pager = (list) => {

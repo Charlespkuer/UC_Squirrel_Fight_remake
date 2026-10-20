@@ -94,6 +94,19 @@ if (-not $SkipSyncStaging) {
   Pop-Location
 }
 
+# ---------- 2b) Android 导出桥（Kotlin）覆盖进生成工程 ----------
+# `src-tauri/android/` 是**受版本管理**的模板；`gen/android` 是本机生成目录（gitignore）。
+# MainActivity 要加 `SSDZAndroid` 的 JavascriptInterface，导出存档才能落到系统「下载」
+# 目录，而不是 WebView 默认的应用私有目录。重新 `tauri android init` 后由这里补回。
+$androidTpl = Join-Path $SourceRepo 'src-tauri\android'
+$androidDst = Join-Path $SourceRepo 'src-tauri\gen\android\app\src\main\java\com\ssdz\classic'
+if ((Test-Path $androidTpl) -and (Test-Path $androidDst)) {
+  Get-ChildItem $androidTpl -Filter '*.kt' -File | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $androidDst $_.Name) -Force
+  }
+  Ok "Android 导出桥模板 → gen\android（MainActivity / AndroidExportBridge）"
+}
+
 # ---------- 3) 编译 Rust（每个 ABI 都要单独的 .so） ----------
 # 用 `tauri android build` 来做这一步，因为只有它会把 NDK 的 CC/AR/linker 等
 # 交叉编译环境准备齐（裸 cargo build 会报 "linker cc not found"）。

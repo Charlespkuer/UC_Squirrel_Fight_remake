@@ -71,9 +71,10 @@
   /* ============================================================
    * 【BD2b】「跳过键」的代价（2026-10 用户口径）
    *
-   *  用跳过键跳过战斗播放时**只能固定收 2/3 的战斗中悬浮奖励** ——
-   *  具体实现就是「随机抹掉其中一项」：一包掉落固定 3 项（见 RULES.frames），
-   *  抹掉 1 项正好剩下 2/3。抹哪一项由随机流决定（与掉落同一个来源，
+   *  用跳过键跳过战斗播放时**整场最多收 2/3 的战斗中悬浮奖励** ——
+   *  一包掉落固定 3 项（见 RULES.frames）。已经手动捡过的先算数，跳过时只从
+   *  **还没捡的**里补到 2 件，再随机丢掉 1 件；所以「捡 1 再跳过」= 2 件，
+   *  不会把已捡的再算一遍、也不会补成 3 件。丢哪一项由随机流决定（与掉落同一个来源，
    *  所以 QA 固定随机流时结果也固定、可复现）。
    *  ⚠ 只有**玩家按了跳过键**才吃这个代价；战斗自然打完（还有飘物没来得及捡）
    *    照旧按原版口径处理（见 create 的 skip / summary）。
@@ -132,14 +133,34 @@
       return true;
     }
     // Original skip() submits all three planned rewards, including missed cards.
-    /* 2026-10 用户口径：`penalize`（玩家按了跳过键）时只收 2/3 —— 随机抹掉一项（见 trimOne）。
-     * 不传 / 传 false（程序化收尾、录像回放）时保持原版口径：三份全发。 */
+    /* 2026-10 用户口径：`penalize`（玩家按了跳过键）时整场只收 2/3，且只从还没捡的里补。
+     * 不传 / 传 false（程序化收尾、录像回放）时保持原版口径：三份全发。
+     * `trimOne` 仍是塔的「每场跳过随机抹一包」的公共件，不要删。 */
     let lostReward = null;
+    /* 跳过结算（2026-10 用户口径）：
+     *  - 这一场的 3 件漂浮奖励在 `create()` 时已经固定好，跳过后**不重新摇**；
+     *  - 玩家已经手动捡过的先记账；跳过时只从**还没捡的**里补，整场最多收 2 件；
+     *    → 捡了 1 件再跳过只补 1 件（不会把已捡的再算一次，也不会变成 3 件）；
+     *    → 直接跳过（0 件）补 2 件、随机丢 1 件；
+     *    → 捡了 2 件再跳过不再补，只把剩下那件丢掉；
+     *  - 不传 `penalize`（程序化收尾 / 录像）仍是原版口径：剩下几件全发。 */
     function skip(penalize) {
       if (closed) return;
-      let list = drops;
-      if (penalize) { const cut = trimOne(drops, opts.random); list = cut.list; lostReward = cut.lost; }
-      for (const drop of list) award(drop, false);
+      const remaining = drops.filter((drop) => !awarded.has(drop.index));
+      if (!penalize) {
+        for (const drop of remaining) award(drop, false);
+        close();
+        return;
+      }
+      /* 已收件数 + 本次补发件数不超过 2（3 件里的 2/3）。
+       * 只从「还没捡的」里随机挑**一项丢掉**，其余按原顺序补发 —— 这样不会打乱
+       * 战果页的拾取顺序，也只消耗一个随机数（与旧测试的固定随机流兼容）。 */
+      const target = Math.max(0, Math.min(remaining.length, 2 - collected.length));
+      const dropIndex = remaining.length > target
+        ? Math.floor((opts.random ? opts.random() : Math.random()) * remaining.length)
+        : -1;
+      lostReward = dropIndex >= 0 ? remaining[Math.min(dropIndex, remaining.length - 1)] : null;
+      for (const drop of remaining) if (drop !== lostReward) award(drop, false);
       close();
     }
     function tick(dt) {

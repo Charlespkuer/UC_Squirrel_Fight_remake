@@ -128,6 +128,12 @@
     return { ok: true, already: false, rank, cups: 50, goldCup: s.goldCup, msg: '恭喜进入前100名，成功获得50个金杯奖励！' };
   }
 
+  /** 竞技场战果落点：挑战页 7638 第 4 帧（有「开始竞技」的那一页），不是第 6 帧首屏。
+   *  用户 2026-10 口径：竞技胜利后要回到有开始竞技的页面，而不是竞技场主界面。 */
+  function arenaRules() {
+    if (window.SfChallenge && SfChallenge.goArenaPage) { SfChallenge.goArenaPage('rules'); return; }
+    arena();
+  }
   /** 「报名参赛」——经典模式竞技场那一页的「开始比赛」走的就是它（见 ui-challenge 的
    *  `showArenaRules`）。原版那一下是 `joinArena.do` 开房 → 服务端回 `showRacing2` 落赛事页；
    * 复刻没有服务端，所以在这里**本地抽三个对手 + 定赛事局面**，再交给 `fightArena` 打第一场。
@@ -389,8 +395,8 @@
        * 现在：`arena()`（= `SfChallenge.goArenaPage('home')`）先把背板画好，弹窗再压上去；
        * `outcome()` 的"返回 / 继续"两键也都落到首屏。
        * ⚠ `arenaMatchPage()` **不要再调**：它是"回赛事页"，正是要避开的那一屏。 */
-      arena();   // 战果弹窗放回**竞技场首屏**（开始竞技那一页）上，不飘在主界面、也不停在空赛事页
-      const backHome = () => arena();
+      arenaRules();   // 战果弹窗放回**有「开始竞技」的规则页**（7638 第 4 帧），不回竞技场首屏
+      const backHome = () => arenaRules();
       outcome(winner === 0, { exp, gold: 0, ups, hatch }, '获得' + ['冠军', '亚军', '季军', '第四名'][position] + '！' + (hatch ? '孵化点 ×' + hatch + '。' : (shards ? '蓝色碎片 ×' + shards + (exp ? '、经验 ' + exp + boostNote : '') + '。' : '奖励' + exp + '经验' + boostNote + '。')) + (gem ? '获得 ' + gem.name + ' ×1！' : '') + buffTail, backHome, '返回竞技场');
     } }).catch(interrupted);
   }
@@ -419,6 +425,13 @@
   }
   function refreshRankShopDay() {
     const s = State.state(), week = rankWeekKey();
+    if (!s.rankPurchaseTotals || typeof s.rankPurchaseTotals !== 'object' || Array.isArray(s.rankPurchaseTotals)) s.rankPurchaseTotals = {};
+    /* 旧档没有账号累计账：把本周已经买过的永久属性丸搬进累计账，至少不会因为改版
+     * 让已经买过的人再白拿一个（更早的周次没有记录，无法回溯）。 */
+    for (const id of RANK_ACCOUNT_LIMIT_GOODS) {
+      const old = Math.max(0, Math.floor(Number(s.rankPurchases && s.rankPurchases[id]) || 0));
+      if (old > 0) s.rankPurchaseTotals[id] = Math.max(old, Math.floor(Number(s.rankPurchaseTotals[id]) || 0));
+    }
     if (s.rankPurchaseWeek === week && s.rankPurchases && typeof s.rankPurchases === 'object' && !Array.isArray(s.rankPurchases)) return;
     // 旧档只有按天标记（rankPurchaseDay）：换成按周后第一次打开清空即可
     s.rankPurchases = {};
@@ -426,7 +439,26 @@
     if (s.rankPurchaseDay !== undefined) delete s.rankPurchaseDay;
     State.save();
   }
+  /* 力/敏/速/血永久丸（goods id 7~10）：原版 `timesLimit` 是 **1**，且是账号级限购；
+   * 复刻以前把所有 timesLimit 都当“每周限兑”，于是每周都能再买一个，属性会无限叠。
+   * 这四件改用 `rankPurchaseTotals`（不随周重置），上限就是字典里的 timesLimit（1）。 */
+  const RANK_ACCOUNT_LIMIT_GOODS = Object.freeze([7, 8, 9, 10]);
+  function rankLimitInfo(goods) {
+    const item = goods || {};
+    const s = State.state() || {};
+    const id = String(item.id);
+    const account = RANK_ACCOUNT_LIMIT_GOODS.includes(Number(item.id));
+    const limit = Math.max(0, Math.floor(Number(item.timesLimit) || 0));
+    const bag = account ? (s.rankPurchaseTotals || {}) : (s.rankPurchases || {});
+    const bought = Math.max(0, Math.floor(Number(bag[id]) || 0));
+    return { account, limit, bought, remaining: limit > 0 ? Math.max(0, limit - bought) : Infinity };
+  }
   function rank() {
+    /* 经典模式的天梯页由挑战页原版帧负责，不再落回复刻自研的 DOM 天梯页。 */
+    if (window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic' && window.SfChallenge && SfChallenge.goArenaPage) {
+      SfChallenge.goArenaPage('ladder');
+      return;
+    }
     const s = State.state(); State.tickEnergy();
     if (rankAttempt && rankAttempt.owner !== s) rankAttempt = null;
     if (s.level < 30) {
@@ -569,14 +601,85 @@
       } }).catch(interrupted);
     }
   }
-  function rankShop(pg) {
+  /** 经典金杯商店的数据出口：先把"按周"限兑刷新一次，再返回全部商品。
+   *  版面交给 `ui-challenge.js` 的原版 7638 第 9 帧（3 件/页，照 `showGoodsShop`），
+   *  这里不再画页、也不复制价格/积分/周限。 */
+  function rankGoodsList() {
+    refreshRankShopDay();
+    const goods = [];
+    rankgoodsMap.each((id, item) => goods.push(item));
+    return goods;
+  }
+  /** 经典金杯商店的兑换确认：原版 `buyGoodsWin` 的等价物（经典弹窗 + 扣金杯/金松果）。
+   *  成功后回调 `onDone`，让商店页重画余额与"本周已兑"状态。 */
+  function rankBuy(goodsId, onDone) {
+    const s = State.state();
+    if (!s) return;
+    if (s.level < 30) { alert('天梯商店需要达到30级。'); return; }
+    refreshRankShopDay();
+    const item = rankgoodsMap.getValue(String(goodsId)) || rankgoodsMap.getValue(Number(goodsId));
+    if (!item) return;
+    const needCup = Number(item.cup) || 0, needGold = Number(item.gold) || 0, needIntegral = Number(item.integral) || 0;
+    const lim = rankLimitInfo(item);
+    if (Number(s.integral) < needIntegral) { alert('天梯积分尚未达到兑换要求。'); return; }
+    if (Number(s.goldCup) < needCup || Number(s.goldPoint) < needGold) { alert('金杯或金松果不足。'); return; }
+    if (lim.limit > 0 && lim.bought >= lim.limit) {
+      alert(lim.account
+        ? '该奖励每个账号累计只能兑换 ' + lim.limit + ' 次，已经兑换完了。'
+        : '该奖励本周的兑换次数已用完，下周一重置后可再兑换。');
+      return;
+    }
+    const icon = item.type === '2' ? C().icon('gear', +item.goodsId) : C().icon('prop', +item.goodsId);
+    let redeemed = false;
+    C().modal('金杯兑换',
+      '<div class="classic-rank-buy"><span class="item-icon">' + icon + '</span><div>' +
+        '<p><b>' + esc(item.name) + '</b></p>' +
+        '<p>' + esc(item.remark || '') + '</p>' +
+        '<p>需要：<span class="rank-price rank-price-detail"><span class="rank-price-part"><b>' + needCup + '</b>' + C().icon('prop', 40) + '</span><span class="rank-price-part"><b>' + needGold + '</b>' + C().goldIcon() + '</span></span></p>' +
+        '<p class="small-label">积分要求 ' + needIntegral +
+          (lim.limit > 0 ? ' · ' + (lim.account ? '账号限购 ' : '每周限兑 ') + lim.limit + ' 次（已购 ' + lim.bought + '）' : '') + '</p>' +
+      '</div></div>',
+      [{ label: '返回', cls: 'muted' }, { label: '确认兑换', cls: 'gold', run: () => {
+        if (redeemed || State.state() !== s) return;
+        refreshRankShopDay();
+        const lim2 = rankLimitInfo(item);
+        if (lim2.limit > 0 && lim2.bought >= lim2.limit) {
+          alert(lim2.account ? '该奖励每个账号累计只能兑换 ' + lim2.limit + ' 次，已经兑换完了。' : '该奖励本周的兑换次数已用完。');
+          return;
+        }
+        if (Number(s.goldCup) < needCup || Number(s.goldPoint) < needGold) { alert('金杯或金松果不足。'); return; }
+        redeemed = true;
+        s.goldCup -= needCup; s.goldPoint -= needGold;
+        if (item.type === '2') State.addGear(+item.goodsId, State.randomExt(2));
+        else addProp(+item.goodsId, +item.count);
+        const bag = lim2.account ? s.rankPurchaseTotals : s.rankPurchases;
+        bag[item.id] = (bag[item.id] || 0) + 1;
+        State.save();
+        C().toast('兑换成功：' + item.name);
+        if (typeof onDone === 'function') onDone();
+      } }], { small: true });
+  }
+  function rankShop(pg, origin) {
+    /* 经典模式：直接复用道具页「商店」的版面（6 格/页、右侧说明、翻页、悬停变绿），
+     * 只把商品源/售价换成金杯+金松果。`origin` 决定退出回哪一页：
+     *   'shop'   = 从道具商店底栏进来 → 回商店；
+     *   'ladder' = 从天梯菜单进来 → 回天梯菜单（缺省）。 */
+    if (window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic'
+        && UI.classic && UI.classic.openRankShop) {
+      UI.classic.openRankShop(pg || 0, origin || 'ladder');
+      return;
+    }
     const s = State.state();
     if (s.level < 30) { alert('\u5929\u68af\u5546\u5e97\u9700\u8981\u8fbe\u523030\u7ea7\u3002'); return; }
     refreshRankShopDay();
     const goods = []; rankgoodsMap.each((id, item) => goods.push(item));
     const total = Math.ceil(goods.length / 6); pg = Math.max(0, Math.min(pg || 0, total - 1));
     const selected = goods.slice(pg * 6, pg * 6 + 6);
-    const p = C().page('bag', 'shop', '<div class="extra-shop-balance">\u91d1\u676f ' + s.goldCup + '\u3000\u91d1\u677e\u679c ' + s.goldPoint + '\u3000\u79ef\u5206 ' + s.integral + '</div><div class="extra-shop-grid">' + selected.map(item => '<button class="extra-shop-item" data-goods="' + item.id + '">' + (item.type === '2' ? image('images/ui/icons/gear/gear-' + item.goodsId + '.png', item.name) : C().icon('prop', +item.goodsId)) + '<b>' + esc(item.name) + '</b><span>' + item.cup + '\u91d1\u676f + ' + item.gold + '\u91d1\u677e\u679c</span><small>\u79ef\u5206\u9700 ' + item.integral + (Number(item.timesLimit) > 0 ? ' \u00b7 \u6bcf\u5468\u9650\u5151' + item.timesLimit + '\u6b21' + (s.rankPurchases[item.id] ? '\uff08\u672c\u5468\u5df2\u5151\uff09' : '') : '') + '</small></button>').join('') + '</div><div class="extra-pagination">' + button('\u4e0a\u4e00\u9875', 'rank-shop-prev', 'tiny muted') + '<span>' + (pg + 1) + '/' + total + '</span>' + button('\u4e0b\u4e00\u9875', 'rank-shop-next', 'tiny muted') + '</div>', { cls: 'extra-board extra-cup-shop' });
+    const limitOf = (item) => {
+      const lim = rankLimitInfo(item);
+      return lim.limit > 0 ? (lim.account ? '账号限购 ' : '每周限兑 ') + lim.limit + ' 次（已' + (lim.account ? '购 ' : '兑 ') + lim.bought + '）' : '';
+    };
+    const p = C().page('bag', 'shop', '<div class="extra-shop-balance">\u91d1\u676f ' + s.goldCup + '\u3000\u91d1\u677e\u679c ' + s.goldPoint + '\u3000\u79ef\u5206 ' + s.integral + '</div><div class="extra-shop-grid">' + selected.map(item => '<button class="extra-shop-item" data-goods="' + item.id + '">' + (item.type === '2' ? image('images/ui/icons/gear/gear-' + item.goodsId + '.png', item.name) : C().icon('prop', +item.goodsId)) + '<b>' + esc(item.name) + '</b><span>' + item.cup + '\u91d1\u676f + ' + item.gold + '\u91d1\u677e\u679c</span><small>\u79ef\u5206\u9700 ' + item.integral + (limitOf(item) ? ' \u00b7 ' + limitOf(item) : '') + '</small></button>').join('') + '</div><div class="extra-pagination">' + button('\u4e0a\u4e00\u9875', 'rank-shop-prev', 'tiny muted') + '<span>' + (pg + 1) + '/' + total + '</span>' + button('\u4e0b\u4e00\u9875', 'rank-shop-next', 'tiny muted') + '</div>', { cls: 'extra-board extra-cup-shop' });
     back(p, rank, '\u8fd4\u56de\u5929\u68af\u8d5b');
     on(p, 'rank-shop-prev', () => rankShop(Math.max(0, pg - 1)));
     on(p, 'rank-shop-next', () => rankShop(Math.min(total - 1, pg + 1)));
@@ -588,12 +691,16 @@
         refreshRankShopDay();
         if (s.integral < +item.integral) { alert('\u5929\u68af\u79ef\u5206\u5c1a\u672a\u8fbe\u5230\u5151\u6362\u8981\u6c42\u3002'); return; }
         if (s.goldCup < +item.cup || s.goldPoint < +item.gold) { alert('\u91d1\u676f\u6216\u91d1\u677e\u679c\u4e0d\u8db3\u3002'); return; }
-        const bought = s.rankPurchases;
-        if (+item.timesLimit > 0 && (bought[item.id] || 0) >= +item.timesLimit) { alert('\u8be5\u5956\u52b1\u672c\u5468\u7684\u5151\u6362\u6b21\u6570\u5df2\u7528\u5b8c\uff0c\u4e0b\u5468\u4e00\u91cd\u7f6e\u540e\u53ef\u518d\u5151\u6362\u3002'); return; }
+        const lim = rankLimitInfo(item);
+        if (lim.limit > 0 && lim.bought >= lim.limit) {
+          alert(lim.account ? '\u8be5\u5956\u52b1\u6bcf\u4e2a\u8d26\u53f7\u7d2f\u8ba1\u53ea\u80fd\u5151\u6362 ' + lim.limit + ' \u6b21\uff0c\u5df2\u7ecf\u5151\u6362\u5b8c\u4e86\u3002' : '\u8be5\u5956\u52b1\u672c\u5468\u7684\u5151\u6362\u6b21\u6570\u5df2\u7528\u5b8c\uff0c\u4e0b\u5468\u4e00\u91cd\u7f6e\u540e\u53ef\u518d\u5151\u6362\u3002');
+          return;
+        }
         redeemed = true;
         s.goldCup -= +item.cup; s.goldPoint -= +item.gold;
         if (item.type === '2') State.addGear(+item.goodsId, State.randomExt(2)); else addProp(+item.goodsId, +item.count);
-        bought[item.id] = (bought[item.id] || 0) + 1; State.save(); C().toast('\u5151\u6362\u6210\u529f\uff1a' + item.name); rankShop(pg);
+        const bag = lim.account ? s.rankPurchaseTotals : s.rankPurchases;
+        bag[item.id] = (bag[item.id] || 0) + 1; State.save(); C().toast('\u5151\u6362\u6210\u529f\uff1a' + item.name); rankShop(pg);
       } }, { label: '\u8fd4\u56de', cls: 'muted' }], { small: true });
     });
   }
@@ -868,7 +975,7 @@
       ? '<div class="reward-card ' + cls + '"><span class="reward-icon">' + art + '</span>' +
         '<span class="reward-text">' + label + ' +' + esc(value) + '</span></div>' : '';
     const cards = card('green', '<img alt="" class="reward-icon-img" src="images/ui/icons/drop-exp-classic.png">', '经验', r.total) +
-      card('gift', C().icon('prop', 8), '金松果', r.gold);
+      card('gift', C().goldIcon ? C().goldIcon() : C().icon('prop', 8), '金松果', r.gold);
     const detail = rows.length
       ? '<div class="tribute-rows">' + rows.map((x) =>
           '<div class="tribute-row"><b class="tribute-name">' + esc(x.name) + '</b>' +
@@ -1178,7 +1285,7 @@
    * 【EX7】导出 window.ClassicExtras
    * ============================================================ */
   window.ClassicExtras = {
-    payArenaEntry, arena, startArenaCompete, chooseArena, startRankFlow, rank, rankShop: () => rankShop(0), rankMatch, lottery, refreshTickets, master, toplist, vip, lotteryPrizes: prizes,
+    payArenaEntry, arena, startArenaCompete, chooseArena, startRankFlow, rank, rankShop: (pg, origin) => rankShop(pg || 0, origin), rankGoodsList, rankBuy, rankLimitInfo, rankMatch, lottery, refreshTickets, master, toplist, vip, lotteryPrizes: prizes,
     claimTribute, tributeStatus,
     /* 竞技场赛事页（`js/ssfight/ui-challenge.js` 的 `match` 子页）要用这两个：
      * 当前这轮的赛事快照，以及"打下一场"的入口。 */

@@ -141,7 +141,8 @@ test('需求3：元素术鼠 只放真实存在的技能，且来点松果同回
   }
   assert.equal(backToBack, 0, '同回合内不该连续触发松果（实测 ' + backToBack + ' 次）');
   assert.ok(snack > 0, '松果应当偶尔出现');
-  assert.ok(snack <= 200 * 1, '松果每场最多一次（实测 ' + snack + ' 次 / 200 场）');
+  /* 2026-10 用户口径：二次及以后权重改为 1，不再限制「每场最多一次」；
+   * 仍必须满足「同回合不背靠背」。 */
   assert.ok(fist > 0, '野球拳（12）应当真的放出来（实测 ' + fist + ' 次）');
 });
 
@@ -1177,6 +1178,10 @@ test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => 
   const simOf = (mods) => c.Sim.simulate(mk2(mods), JSON.parse(JSON.stringify(foe2)));
 
   // ① 前 N 次使用武器必须拿到「再行动一次」的标记，而且只能有 N 次
+  /* 新权重表下「徒手 100 / 普通武器首次 100、之后 8」；这里要验证的是**武器次数**，
+   * 用固定低随机数强制每次都抽到武器（否则普通武器用过后只有 8 权重，样本里可能凑不满 N 次）。 */
+  const oldRandom = vm.runInContext('Math.random', c);
+  c.__rand(0.01);
   for (const [n, id] of [[3, 'M02'], [1, 'T08']]) {
     const free = simOf({ weaponFreeUses: n }).rounds
       .filter((r) => r.attacker === 0 && r.action === 'weapon' && r.actAgain).length;
@@ -1215,6 +1220,8 @@ test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => 
   }
   assert.equal(simOf({}).rounds.filter((r) => r.attacker === 0 && r.action === 'weapon' && r.weaponBoost != null).length,
     0, '没有该 buff 时不该出现强化标记');
+  c.__oldRandom = oldRandom;
+  vm.runInContext('Math.random = __oldRandom;', c);
 
   // ③ 金蝉脱壳（N04）：首次致死改成「按 30% 上限复活」，而且提示要用自己的名字
   {
@@ -2476,12 +2483,13 @@ test('需求53：unique 口径 / 塔顶 boss 变体池 / 幸运一击重复率 /
   assert.ok(jueDui > 0, '绝对防御应当真的触发，实测 ' + jueDui + '/30');
   assert.ok(usedCastable > 0, 'boss 放出的技能应当都来自 castable，实测 ' + usedCastable + '/30');
 
-  /* ③ 2026-10 三档口径：其余技能（含幸运一击 23）用过之后一律 20 */
+  /* ③ 2026-10 新表：其余技能（含幸运一击 23）第二次及以后一律 5 */
   const rate = (id) => Sim.repeatRateOf(id, 1);
   const rules = Sim.rules;
-  assert.equal(rate(23), rules.repeatSkill, '幸运一击用过之后 = 20：' + rate(23));
-  assert.equal(rate(15), rules.repeatSkill, '通灵召唤用过之后 = 20：' + rate(15));
-  assert.ok(rate(23) > Sim.repeatRateOf(17, 1), '但仍应高于 / 等于最低档的来点松果（15 → 5）');
+  assert.equal(rate(23), rules.repeatSkill, '幸运一击用过之后 = 5：' + rate(23));
+  assert.equal(rate(15), rules.repeatSkill, '通灵召唤用过之后 = 5：' + rate(15));
+  assert.equal(rate(17), 1, '来点松果二次及以后权重 1：' + rate(17));
+  assert.equal(rate(12), 5, '野球拳第二次起也统一为 5：' + rate(12));
 
   /* ④ 反噬豁免（免疫一切反伤）+ 减伤成长 */
   const n15 = TD.BUFF_BY_ID.N15;

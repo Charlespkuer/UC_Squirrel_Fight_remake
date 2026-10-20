@@ -329,14 +329,20 @@
    *  `specialEffect` 已经 `gotoAndStop` 定住那一档，再让它自己播就会左右翻面闪；
    *  装备容器同理）。真正"该自己播"的嵌套元件会在**出生那一刻**继承 `__keepAnim`
    *  并保持 `playing = true`（`render.js` 的 `showFrame`），不需要这里动手。 */
-  function startNestedAnim(clip, self, inGear, deep) {
+  /* 动作片断里**显式 stop 在第 1 帧**的特效（5785 = 色诱之术那张脸/特效），
+   * 只能按原版停在第一帧，不能被“重启动画”顺手放走。 */
+  const EXPLICIT_STOP_IN_ACTION = new Set(['5785']);
+  function startNestedAnim(clip, self, inGear, deep, force) {
     if (!clip) return;
     const g = clip.g;
+    const tagId = clip.tag && String(clip.tag.id);
+    if (tagId && EXPLICIT_STOP_IN_ACTION.has(tagId)) return;   // 整棵子树保持原版停帧
     const gear = !!inGear || clip.__pinFrame != null
       || !!(g && g.getAttribute && g.getAttribute('slot'));
     if (!gear) {
       clip.__keepAnim = true;
-      if (self && clip.frames && clip.frames.length > 1 && !clip.__playLock && !clip.playing) {
+      if (self && clip.frames && clip.frames.length > 1 && !clip.__playLock
+          && (force || !clip.playing)) {
         try { clip.gotoAndPlay(1); } catch (e) {}
       }
     }
@@ -345,9 +351,9 @@
      * 其他情况只把 `self` 给这一颗，子树一律"只放行不拨帧"（见上面的注释）。 */
     const nextSelf = deep === true;
     for (const rec of clip.nodes ? clip.nodes.values() : []) {
-      if (rec && rec.clip) startNestedAnim(rec.clip, nextSelf, gear, deep);
+      if (rec && rec.clip) startNestedAnim(rec.clip, nextSelf, gear, deep, force);
     }
-    for (const c of clip.__attached || []) startNestedAnim(c, nextSelf, gear, deep);
+    for (const c of clip.__attached || []) startNestedAnim(c, nextSelf, gear, deep, force);
   }
   /** `playClip` / `play` 用：只放行子树（外面自己会从第 2 帧开始播）。 */
   function allowNestedAnim(clip) { startNestedAnim(clip, false, false); }
@@ -369,7 +375,12 @@
   function playClip(clip, opts) {
     const o = opts || {};
     if (!clip || !clip.gotoAndPlay || !clip.frameCount || !live) return Promise.resolve();
-    allowNestedAnim(clip);
+    /* `deep`：这一条是**角色动作**（攻击 / 受击 / 闪避 / 归位 / 胜利姿势），
+     * 片断里的表情、眼睛、身体嵌套层要按原版从第 1 帧重新播；否则它们可能停在上一拍
+     * `playClip` 停住的帧上 —— 经典战斗里“思考方天画戟时眼睛没了”“多次色诱后脸部贴图
+     * 叠着上一张”就是这一类。HUD / statu / 宝箱这些非角色动作不传 deep。 */
+    if (o.deep) startNestedAnim(clip, true, false, true, true);
+    else allowNestedAnim(clip);
     const last = clip.frameCount() - 1;
     /* 缺省停帧 = **最后一个有内容的帧**（见 `lastContentFrame`），显式 `stop` 优先。 */
     const endIdx = Math.max(0, Math.min(last, lastContentFrame(clip) - 1));
@@ -1238,6 +1249,7 @@
       async attack(r, hooks) {
         const sel = mc && mc.byName('attacks');
         if (!sel) return;
+        visible(sel, true);
         const plan = attackPlan(r);
         /* 出手前先记下"这一拍用的是哪把武器"：武器容器是在**拨帧那一刻**建出来的
          * （`stopAt` → `showFrame()` → 建子件 → `onClip`），所以必须写在它前面。 */
@@ -1250,9 +1262,13 @@
           petId: Number(r.petId) || 0, petSkillId: Number(r.petSkillId) || 0 };
         const acts = ATTACK_ACTS[plan.frame] || {};
         const h = hooks || {};
-        const inner = sel.byName('attack');
+        /* `attacks` 选择器换帧后，子件有时不是具名 `attack`（导出里少数帧只有一颗
+         * 未命名的动作 child）。以前这里拿到 null 就直接静默返回 —— 表现正是“玩家原地
+         * 站着、没有跑过去攻击”。退回当前帧唯一子件，保证普攻/武器至少播一条动作。 */
+        const inner = sel.byName('attack') || onlyChildClip(sel);
+        if (!inner) return;
         await playClip(inner, {
-          onFrame: (n) => {
+          deep: true, onFrame: (n) => {
             if (acts.guard && n >= acts.guard && h.guard) h.guard();
             if (acts.heal && n >= acts.heal && h.heal) h.heal();
             if (acts.hit && n >= acts.hit && h.hit) h.hit();
@@ -1269,11 +1285,19 @@
           const inner = sel && sel.byName ? sel.byName(kid) : null;
           return inner ? { frame: inner.frame + 1, frames: inner.frameCount ? inner.frameCount() : 0 } : null;
         };
+        let box = null, atkBox = null;
+        try {
+          const b = mc && mc.g ? mc.g.getBBox() : null;
+          if (b) box = { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) };
+          const a = mc && mc.byName('attacks');
+          const ab = a && a.g ? a.g.getBBox() : null;
+          if (ab) atkBox = { x: Math.round(ab.x), y: Math.round(ab.y), w: Math.round(ab.width), h: Math.round(ab.height) };
+        } catch (e) {}
         return { hasMc: !!mc, hasAttacks: !!(mc && mc.byName('attacks')),
           frame: mc ? mc.frame : null, frames: mc && mc.frameCount ? mc.frameCount() : 0,
           atk: innerOf('attacks', 'attack'),
           def: innerOf('defenses', 'defense') || innerOf('dodges', 'dodge') || innerOf('defenseSkills', 'deSkill'),
-          lastAttack: api.lastAttack || null };
+          box, atkBox, lastAttack: api.lastAttack || null };
       },
       /** `useSkillDefense()`：防御技起手（`Squirrel.useSkillDefense`）。
        *  原版是**出手动画**在第 3~25 帧回调的，所以挨打之前盾就举起来了。
@@ -1311,7 +1335,7 @@
           const sel = mc && mc.byName('dodges');
           if (sel) {
             stopAt(sel, 1);
-            await playClip(sel.byName('dodge'), { onFrame: backHook(DODGE_ACTS, h) });
+            await playClip(sel.byName('dodge'), { deep: true, onFrame: backHook(DODGE_ACTS, h) });
           }
           return;
         }
@@ -1328,7 +1352,7 @@
           const sel = mc && mc.byName('defenseSkills');
           if (sel) {
             stopAt(sel, frame);
-            await playClip(sel.byName('deSkill'), { onFrame: backHook(DEFENSE_SKILL_ACTS[frame], h) });
+            await playClip(sel.byName('deSkill'), { deep: true, onFrame: backHook(DEFENSE_SKILL_ACTS[frame], h) });
           }
           return;
         }
@@ -1339,7 +1363,7 @@
           /* 幻兽受击帧里有些子件没有 `defense` 这个实例名（例如第 19 帧的 6424），
            * 原版仍然会把它显示出来并自动播；这里取当前帧的第一颗子 clip 兜底。 */
           const inner = sel.byName('defense') || onlyChildClip(sel);
-          if (inner) await playClip(inner, { onFrame: backHook(DEFENSE_ACTS[frame], h) });
+          if (inner) await playClip(inner, { deep: true, onFrame: backHook(DEFENSE_ACTS[frame], h) });
           else await wait(320);
         }
       },
@@ -1354,7 +1378,7 @@
         stopAt(sel, 1);
         const inner = sel.byName('attackback');
         if (!inner) { back(); return; }
-        await playClip(inner, { onFrame: (n) => { if (n >= ATTACKBACK_ACTS.hit) back(); } });
+        await playClip(inner, { deep: true, onFrame: (n) => { if (n >= ATTACKBACK_ACTS.hit) back(); } });
       },
       /** `comeBack(type)`：被反击击退之后归位（`type` 决定播哪一档，见 `COMEBACK_ACTS`）。 */
       async comeBack(type) {
@@ -1364,7 +1388,7 @@
         const sel = mc && mc.byName('comeBacks');
         if (sel) {
           stopAt(sel, f);
-          await playClip(sel.byName('comeBack'));
+          await playClip(sel.byName('comeBack'), { deep: true });
         }
       },
       /** `dead(distance)`：倒地。原版 `6366` 播到第 19 帧 `stop(); _root.die()` ——
@@ -1375,18 +1399,36 @@
         const sel = mc && mc.byName('defenses');
         if (sel) {
           stopAt(sel, distance === 1 ? 5 : 4);
-          await playClip(sel.byName('defense'));
+          await playClip(sel.byName('defense'), { deep: true });
         }
       },
       /** `congratulate()`：胜利姿势（`6530` 第 32 帧 `congratulation = 2` → 切战果页）。 */
       async congratulate() {
         stopAt(mc, 7);
         const sel = mc && mc.byName('winPoses');
-        if (sel) { stopAt(sel, 1); await playClip(sel.byName('winPose')); }
+        if (sel) { stopAt(sel, 1); await playClip(sel.byName('winPose'), { deep: true }); }
       },
       isDead: () => isDead,
       /** 归位到待机姿势：`mc.gotoAndStop(1)` + **让待机呼吸动画转起来**（见 `startIdlePose`）。 */
-      idle() { stopAt(mc, 1); startIdlePose(mc); },
+      idle() {
+        stopAt(mc, 1);
+        /* 色诱之术 5843 的末段带着「道场」场景，它挂在 `attacks` 选择器里；
+         * 只把身体拨回第 1 帧并不会把 `attacks` 的当前子件清掉，于是技能播完后
+         * 场景可能残留在下一拍下面（多次色诱后尤其明显）。
+         *
+         * ⚠⚠ 这里**不能**把 `attacks` 整层 `visibility:hidden` —— 战斗身体第 1 帧
+         * （`6532` → `attacks` `6339` → `5630`）里画的就是待机松鼠本人：
+         * 隐藏出手层 = 把角色整个画没（用户 2026-10 报的"我方与敌方都会时不时消失身影"）。
+         * 正确做法是**把出手层复位到干净的第 1 帧**：`6339` 第 1 帧 = 普攻 `5630`，
+         * `5630` 第 1 帧 = 待机姿势 `5616`，复位后 `startIdlePose` 再让呼吸转起来。 */
+        const atk = mc && mc.byName('attacks');
+        if (atk) {
+          stopAt(atk, 1);
+          const inner = atk.byName('attack');
+          if (inner) stopAt(inner, 1);
+        }
+        startIdlePose(mc);
+      },
     };
     /* 实例 → 格斗者：`onClip` 靠这条链认"这一拍是谁在出手"（手里的武器）。
      * 挂在**持有者与主角本体**上：两处都会成为新建子件的祖先。 */
@@ -1532,6 +1574,32 @@
     refreshBlood(hud);
     void t;
   }
+  /** 护盾值挂在血条上方：经典 HUD 的 `bloodbar` 本身没有护盾图层，
+   *  挑战塔「坚韧壁垒 / 石像鬼磐岩」的 `shellAfter` 以前只在内部记账，玩家看到的
+   *  是“打中了却没掉血”。这里补一颗蓝色「护盾 N」小牌，盾归零自动隐藏。 */
+  function refreshShieldBadge(rec, side, bar) {
+    if (!rec || !rec.host) return;
+    if (!rec.shieldBadges) rec.shieldBadges = [null, null];
+    let badge = rec.shieldBadges[side];
+    if (!badge || !badge.isConnected) {
+      badge = document.createElement('div');
+      badge.className = 'sf-shield-badge';
+      badge.setAttribute('aria-live', 'polite');
+      rec.host.appendChild(badge);
+      rec.shieldBadges[side] = badge;
+    }
+    const value = Math.max(0, Math.round(Number(rec.shields && rec.shields[side]) || 0));
+    const node = bar && (bar.g || bar);
+    if (!value || !node || !node.getBoundingClientRect) { badge.style.display = 'none'; return; }
+    const r = node.getBoundingClientRect(), h = rec.host.getBoundingClientRect();
+    if (!r.width && !r.height) { badge.style.display = 'none'; return; }
+    badge.textContent = '盾 ' + value;
+    /* 贴在血条数字正下方：不盖名字、不盖血量数字、也不和中间的回合数抢位置。 */
+    badge.style.left = (r.left - h.left + r.width / 2) + 'px';
+    badge.style.top = (r.bottom - h.top + 1) + 'px';
+    badge.style.transform = 'translate(-50%,0)';
+    badge.style.display = 'block';
+  }
   function refreshBlood(hud) {
     const t = T();
     if (!live || !hud) return;
@@ -1544,6 +1612,9 @@
       stopAt(bar, Math.max(1, Math.min(BLOOD_BAR_FRAMES, Math.floor((total - left) * 100 / total) || 1)));
       const txt = hud.byName('bloodtext' + (i + 1));
       if (txt) setText(txt, left + '/' + total + ' ');
+      /* 用血条上的数字框当锚点：`bloodbar` 那两个元件在素材里是整条轨道，
+       * 直接取中心会落到屏幕中间（实测护盾牌会压到回合数旁边）。 */
+      refreshShieldBadge(live, i, txt || bar);
     }
     if (t) t.showNumber(Math.max(0, live.roundsLeft), hud, 0, 0, 'right', 2);
   }
@@ -2107,6 +2178,21 @@
       const f = rec.fighters[side];
       if (f) f.idle();
     }
+    /* 练功木桩：上一拍扣掉的血在**下一拍开头**回满。Sim 把这次回血记在
+     * `r.practiceHeal`，这里先补血条再演这一拍，所以玩家看得到“先扣、下回合加回来”。 */
+    if (r.practiceHeal > 0) {
+      const f = rec.fighters[def];
+      if (f) {
+        const total = Math.max(1, f.blood.totalBlood || rec.maxHp[def] || 1);
+        const left = Math.min(total, Math.max(0, Number(f.blood.leftBlood) || 0) + Number(r.practiceHeal));
+        f.blood.leftBlood = left;
+        rec.hps[def] = left;
+        floatNumber(def, r.practiceHeal, 'heal');
+        if (rec.hud) refreshBlood(rec.hud);
+        await wait(260);
+        if (aborted()) return;
+      }
+    }
     if (r.action === 'dot' || r.action === 'buff' || r.action === 'regen' || r.action === 'rest' || r.action === 'stunned') {
       applyHp(rec, r);
       if (r.dmg) floatNumber(r.selfDot ? att : def, r.dmg, 'dot');
@@ -2247,9 +2333,8 @@
     if (aborted()) return;
     applyHp(rec, r);
     /* 收招后先把还活着的人拨回待机呼吸，再走那 170ms 空档 —— 照现代播放器
-     * `battle.js` 每回合收尾的 `returnHome + idle(def)`。以前要等**下一拍开头**才
-     * `idle()`，于是空档里还停在受击/出手的末帧，下一拍一拨就瞬移一下，连看几拍
-     * 就是"不丝滑"。装死的那一位保持姿势（它这一拍的戏就是装死），等下一拍再起身。 */
+     * `battle.js` 每回合收尾的 `returnHome + idle(def)`。装死的那一位保持姿势
+     * （它这一拍的戏就是装死），等下一拍再起身。 */
     const fakeSide = r.fakeDie ? Number(r.fakeDieSide == null ? def : r.fakeDieSide) : -1;
     if (!attacker.isDead() && att !== fakeSide) attacker.idle();
     if (!defender.isDead() && def !== fakeSide) defender.idle();
@@ -2685,6 +2770,7 @@
       weapon: live.fighters.map((f) => (f && f.weaponNow) ? { id: f.weaponNow.id, level: f.weaponNow.level } : null),
       /* `plans` / `dressed`：穿搭计划有没有建出来、格斗者身上到底贴上了几个挂点。
        * 这两项是"装备没穿上"这类问题的第一手证据（2026-11 用户口径：战斗中双方都是无装备）。 */
+      shields: live.shields.slice(),
       plans: live.plans.map((p) => (p ? { slots: p.bySlot.size, holders: p.holders.size } : null)),
       dressed: live.fighters.map((f) => (f && f.mc ? countDressed(f.mc) : 0)),
       fighters: live.fighters.map((f) => (f ? Object.assign({ hp: f.blood.leftBlood }, f.debug()) : null)) } : null),

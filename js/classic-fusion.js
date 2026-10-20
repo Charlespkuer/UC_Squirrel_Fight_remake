@@ -37,15 +37,21 @@
      * mergeGears 本来就会拒绝星标装备，但那是点「开始融合」之后才报错；
      * 这里在**可选材料**这一层就先剔掉，免得白选一场。 */
     const isStarred = (gear) => State.isGearStarred(gear);
+    /** 词条标签：融合页的卡片/材料槽直接显示，不再只藏在 title/aria 里。 */
+    const extTags = (gear, compact) => {
+      const list = gear ? State.extText(gear.ext) : [];
+      return '<div class="fusion-ext-line' + (compact ? ' compact' : '') + '">' +
+        (list.length ? list.map((x) => '<span class="fusion-ext-tag">' + esc(x) + '</span>').join('')
+          : '<span class="fusion-ext-none">无词条</span>') + '</div>';
+    };
     function validation(gears) {
-      if (selected.length !== 3) return '请选择 3 件同部位的未穿戴装备';
+      if (selected.length !== 3) return '请选择 3 件同品质的未穿戴装备';
       if (new Set(selected).size !== 3) return '同一件装备只能放入一次';
       const materials = selected.map((key) => gears.find((gear) => gear.key === key));
       if (materials.some((gear) => !gear)) return '材料已发生变化，请重新选择';
       if (materials.some((gear) => gear.used)) return '已穿戴的装备不能作为融合材料';
       if (materials.some(isStarred)) return '有装备已加星标（防误合），先取消星标再融合';
       if (materials.some((gear) => gear.quality >= 4)) return '传说装备已是最高品质';
-      if (materials.some((gear) => partOf(gear) !== partOf(materials[0]))) return '需要 3 件同部位的装备';
       if (materials.some((gear) => gear.quality !== materials[0].quality)) return '需要 3 件同品质的装备';
       const cost = State.gearCostOf(materials[0].quality);
       if (State.state().goldPoint < cost) return '金松果不足，还需要 ' + (cost - State.state().goldPoint) + ' 个';
@@ -92,14 +98,15 @@
           '" data-fusion-slot="' + index + '" aria-label="' + esc(gear ? '移除材料 ' + (index + 1) + '：' + gear.name : '材料 ' + (index + 1) + '，请在下方选择装备') + '"' + (gear ? '' : ' disabled') + '>' +
           '<span class="fusion-frame">' + (gear ? art(gear) + '<span class="fusion-remove" aria-hidden="true">×</span>' : '<span class="fusion-add" aria-hidden="true">+</span>') +
           '<span class="fusion-slot-number" aria-hidden="true">' + (index + 1) + '</span></span>' +
-          '<span class="fusion-material-name">' + (gear ? esc(gear.name) : '放入装备') + '</span></button>';
+          '<span class="fusion-material-name">' + (gear ? esc(gear.name) : '放入装备') + '</span>' +
+          (gear ? extTags(gear, true) : '') + '</button>';
       }).join('');
       const cards = inventory.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE).map((gear) => {
         const chosen = selected.includes(gear.key);
         const starred = isStarred(gear);
         const unavailable = gear.used ? '已穿戴' : gear.quality >= 4 ? '最高品质'
           : starred ? '已加星标'
-          : first && (partOf(gear) !== partOf(first) || gear.quality !== first.quality) ? '需同部位同品质'
+          : first && gear.quality !== first.quality ? '需同品质'
           : selected.length === 3 && !chosen ? '材料已放满' : '';
         const sameGroup = groups[groupKey(gear)] || 0;
         const caption = chosen ? '材料 ' + (selected.indexOf(gear.key) + 1)
@@ -114,19 +121,28 @@
           '<span class="fusion-card-state">' + esc(caption) + '</span></span>' +
           /* ★ 放在 .fusion-frame 外面：frame 是 overflow:hidden，放里面会被裁掉。 */
           (starred ? '<span class="gear-star" title="已加星标：不会参与融合">★</span>' : '') +
-          '<span class="fusion-gear-name">' + esc(gear.name) + '</span></button>';
+          '<span class="fusion-gear-name">' + esc(gear.name) + '</span>' + extTags(gear) + '</button>';
       }).join('');
       const pips = [0, 1, 2].map((i) => '<i class="' + (i < selected.length ? 'on' : '') + '"></i>').join('');
+      /* 已选材料能提供的词条并集：不重复列出同名效果，玩家融合前就能看到候选池。 */
+      const pickedTags = new Set();
+      selected.map((key) => gears.find((g) => g.key === key)).filter(Boolean)
+        .forEach((g) => State.extText(g.ext).forEach((x) => pickedTags.add(x)));
+      const pickedHtml = selected.length
+        ? '<div class="fusion-picked-exts"><b>可继承词条</b><div class="fusion-ext-tags">' +
+            ([...pickedTags].map((x) => '<span class="fusion-ext-tag">' + esc(x) + '</span>').join('') ||
+              '<span class="fusion-ext-none">所选材料没有词条</span>') + '</div></div>'
+        : '';
       board.innerHTML = '<header class="fusion-heading"><h2>装备融合</h2>' +
         '<ol class="fusion-steps"><li class="on"><b>1</b>选择材料</li><li' + (selected.length === 3 ? ' class="on"' : '') + '><b>2</b>融合</li><li><b>3</b>获得装备</li></ol>' +
         '<span class="fusion-wallet">' + classic.goldIcon() + '<span>金松果 <b>' + State.state().goldPoint + '</b></span></span></header>' +
         '<div class="fusion-workbench"><div class="fusion-materials" aria-label="融合材料">' + materials + '</div>' +
         '<span class="fusion-arrow" aria-hidden="true">➜</span><div class="fusion-preview ' + (first ? 'q' + (first.quality + 1) : 'missing') + '"><span class="fusion-frame"><span class="fusion-question">?</span></span><span class="fusion-preview-label">' + (first ? qualities[first.quality + 1] + partLabel(first) : '更高品质') + '</span><span class="fusion-preview-hint">必得 1 件</span></div>' +
-        '<div class="fusion-operation"><span class="fusion-cost">' + (first ? '消耗 <b>' + costOf(first) + '</b> 金松果' : '按品质 30 / 40 / 50 / 60') + '</span><button type="button" class="uc-button gold" data-fusion-action="fuse"' + (reason || busy ? ' disabled' : '') + '>开始融合</button><span class="fusion-guarantee">品质提升一级 · 材料会被消耗</span></div></div>' +
+        '<div class="fusion-operation"><span class="fusion-cost">' + (first ? '消耗 <b>' + costOf(first) + '</b> 金松果' : '按品质 30 / 40 / 50 / 60') + '</span><button type="button" class="uc-button gold" data-fusion-action="fuse"' + (reason || busy ? ' disabled' : '') + '>开始融合</button><span class="fusion-guarantee">品质提升一级 · 材料会被消耗</span>' + pickedHtml + '</div></div>' +
         /* 规则条只留一行（flex + nowrap + 省略号），细节全部收进「详细规则」弹窗 ——
          * 之前把整段说明塞在这里，<br> 会被 flex 拆成一堆竖条，还会把下面的装备列表挤没。 */
         '<p class="fusion-rules"><b>规则</b>' +
-        '<span class="fusion-rules-text">3 件<em>同部位、同品质</em>装备 → 1 件<em>品质高一级</em>；凑同名可保名，小概率变异狂战</span>' +
+        '<span class="fusion-rules-text">3 件<em>同品质</em>装备（部位/名字可不同）→ 1 件<em>品质高一级</em>；重合词条必继承，其余各 50%</span>' +
         '<button type="button" class="uc-button tiny muted" data-fusion-action="rules">详细规则</button></p>' +
         '<div class="fusion-inventory-panel"><div class="fusion-inventory-heading"><h3>选择装备<span class="fusion-pips" aria-label="已放入 ' + selected.length + ' / 3">' + pips + '</span><span class="fusion-count">已放入 ' + selected.length + '/3</span></h3>' + (starredInBag ? '<span class="fusion-starred-note" title="已加星标的装备受保护，不会参与融合；要拿它当材料请先去装备详情取消星标">★ 已加星标 ' + starredInBag + ' 件 · 不参与融合</span>' : '') + '<button type="button" class="uc-button tiny muted" data-fusion-action="clear"' + (selected.length ? '' : ' disabled') + '>清空材料</button><div class="fusion-pagination"><button type="button" class="uc-button tiny" data-fusion-action="previous" aria-label="上一页装备"' + (pageIndex === 0 ? ' disabled' : '') + '><i class="chev chev-l" aria-hidden="true"></i></button><span>' + (pageIndex + 1) + ' / ' + pages + '</span><button type="button" class="uc-button tiny" data-fusion-action="next" aria-label="下一页装备"' + (pageIndex + 1 >= pages ? ' disabled' : '') + '><i class="chev chev-r" aria-hidden="true"></i></button></div></div>' +
         '<div class="fusion-inventory">' + (cards || '<div class="fusion-empty">还没有可以选择的装备。<br><span>收集装备碎片，可在道具中合成装备。</span></div>') + '</div></div>' +
@@ -172,15 +188,17 @@
       /* 「随机其它」= 100% − 变异 − 保名（两件同名是 47%，三件同名是 0）。 */
       const other = (k) => pct(Math.max(0, 1 - (Number(State.FUSION_MUTANT_RATE[k]) || 0) - (Number(State.FUSION_SAME_NAME_RATE[k]) || 0)));
       classic.modal('融合规则', '<div class="fusion-help">' +
-        '<p><b>材料</b>3 件同部位、同品质、未穿戴、未加星标（★）的装备，会被消耗。</p>' +
+        '<p><b>材料</b>3 件同品质、未穿戴、未加星标（★）的装备，会被消耗；部位和名字可以完全不同。</p>' +
         '<p><b>费用</b>白 ' + State.gearCostOf(0) + ' · 绿 ' + State.gearCostOf(1) +
         ' · 蓝 ' + State.gearCostOf(2) + ' · 紫 ' + State.gearCostOf(3) + ' 金松果（按材料品质）。</p>' +
         '<p><b>产物</b>该部位、品质高一级的 1 件；3 紫 → 传说橙（可镶嵌宝石）。</p>' +
         '<p><b>名称</b>三件同名 ' + same(3) + ' 保名 / ' + mut(3) + ' <em>变异狂战</em>；' +
         '两件同名 ' + same(2) + ' 保名 / ' + mut(2) + ' <em>变异狂战</em> / ' + other(2) + ' 随机其它装备；' +
         '三件全不同名则完全随机。品质太低（没有狂战件）时不掷变异，那部分并入随机。</p>' +
-        '<p><b>词条</b>≥2 件共有的保留（取最高星），各 ' + pct(State.FUSION_EXT_UPGRADE_RATE) +
-        ' 升 1 星（上限 3）；无共有则随机。</p>' +
+        '<p><b>词条</b>同一个词条只要在两件以上材料里出现，产物<b>必定继承</b>（不同部位、不同名字也算）；' +
+        '其余每个词条槽有 ' + pct(State.FUSION_EXT_INHERIT_RATE || 0.5) +
+        ' 概率从材料词条里继承，取最高星；继承后另有 ' +
+        pct(State.FUSION_EXT_UPGRADE_RATE) + ' 升 1 星（上限 3），没掷中则随机。</p>' +
         '</div>', [{ label: '知道了', cls: 'gold' }]);
     }
 
@@ -195,7 +213,7 @@
       const previousCost = State.gearCostOf(previousQuality);
       busy = true;
       let result;
-      try { result = State.mergeGears(selected.slice()); }
+      try { result = State.mergeGears(selected.slice(), { allowMixedParts: true }); }
       finally { busy = false; }
       if (!result.ok) { render(); classic.toast(result.msg); return; }
       selected = []; pageIndex = 0; render();

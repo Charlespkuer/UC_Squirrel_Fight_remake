@@ -400,6 +400,9 @@
     /* 好友留言：{ 好友名: [{text, at}] }（经典「查看好友 → 留言」的本地离线实现）。 */
     friendMessages: {},
     lastEnergyTs: 0, reborn: 0, joinRankCount: 0, rankCupClaimWeek: '', lotteryDate: '', lotteryFree: 1,
+    /* 天梯商店的限购：`rankPurchases` 按周重置（普通商品），`rankPurchaseTotals` 是
+     * **账号累计**（力/敏/速/血永久丸，原版每个账号只能买 1 个，见 classic-extras）。 */
+    rankPurchases: {}, rankPurchaseTotals: {}, rankPurchaseWeek: '',
     woodRecord: 0, woodCount: 0, woodDamage: 0,
     dailyClaimDate: '', battles: [], shopPurchaseDate: '', shopPurchases: {},
     /* 村庄建筑（祭坛 / 神迹 / 幻兽牧场）：`{level, upgrading, doneAt, buffId, buffDate, add, addType}`。

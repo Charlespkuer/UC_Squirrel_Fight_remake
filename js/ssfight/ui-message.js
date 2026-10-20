@@ -324,7 +324,11 @@
   function startRevenge(record) {
     if (!record || !(window.Main && Main.startBattle)) { toast('战斗模块未加载'); return; }
     if (record.revenged) { toast('这条败绩已经复仇过了。'); return; }
-    const info = State.revengeInfo ? State.revengeInfo(record.id) : { cost: 20, cups: 8, count: 0 };
+    const info = State.revengeInfo ? State.revengeInfo(record.id) : { cost: 20, cups: 0, cupsMin: 0, ladder: false, count: 0 };
+    /* 只有天梯赛败绩的复仇才抢金杯，且为 0~1 个；普通挑战/竞技场复仇不参与金杯结算。
+     * 确认与结算共用同一次掷点，避免文案和实际结果对不上。 */
+    const ladder = !!(info.ladder || record.kind === 'rank');
+    const cupRoll = ladder && Math.random() < 0.5 ? 1 : 0;
     const modal = (window.UI && UI.classic && UI.classic.modal) || null;
     const resultModal = (window.UI && UI.classic && UI.classic.resultModal) || null;
     const S = State.state();
@@ -336,8 +340,8 @@
       if (State.state() !== S) return;
       if (S.goldPoint < info.cost) { toast('金松果不足，复仇取消。'); return; }
       State.addGold(-info.cost);
-      const count = State.noteRevenge(record.id);        // 第 n 次复仇 → n 已经 +1
-      const cups = Math.max(0, Number(count) || 1) * 5 + 3;
+      State.noteRevenge(record.id);                      // 第 n 次复仇 → n 已经 +1
+      const cups = cupRoll;
       const spot = current ? { tab: current.tab, page: current.page } : null;
       const foe = Object.assign({}, record.foe || {});
       Main.startBattle(foe, {
@@ -352,17 +356,26 @@
             if (modal) modal('复仇成功', '<div class="result-box"><div class="result-title win">胜 利！</div><p>这条败绩之前已经复仇过了，本次不再重复发补偿。</p></div>', [{ label: '返回' }]);
             return;
           }
-          S.goldCup = Math.max(0, Number(S.goldCup) || 0) + cups;
+          if (cups > 0) S.goldCup = Math.max(0, Number(S.goldCup) || 0) + cups;
           const rw = State.revengeReward(foe.level);
           State.save();
-          if (resultModal) resultModal(true, rw, '复仇成功：' + (foe.name || '对手') + ' 已被击败，抢夺 ' + cups + ' 个金杯，补回少量经验与金松果。', () => {});
+          const cupText = ladder
+            ? (cups > 0 ? '，抢夺 ' + cups + ' 个金杯' : '，本次没有抢到金杯')
+            : '';
+          if (resultModal) resultModal(true, rw, '复仇成功：' + (foe.name || '对手') + ' 已被击败' + cupText + '，补回少量经验与金松果。', () => {});
         },
       });
     };
     /* 原版 `alertRevenge`（MainMovie.as:14526）：先弹「二次确认」，写清费用与金杯，
      * 确认后才扣金松果并开打。以前复刻直接开战：不确认、不扣费、不抢金杯。 */
     if (modal) {
-      modal('复仇确认', '<div class="result-box"><p>复仇需要 <b>' + info.cost + '</b> 个金松果，胜利后抢夺 <b>' + info.cups + '</b> 个金杯，确定复仇吗？</p><p class="small-label">当前金松果：' + S.goldPoint + '　金杯：' + (S.goldCup || 0) + '</p></div>',
+      const reward = ladder
+        ? '，胜利后抢夺 <b>0~1</b> 个金杯（本场随机：<b>' + cupRoll + '</b> 个）'
+        : '，胜利后补回少量经验与金松果';
+      const wallet = ladder
+        ? '当前金松果：' + S.goldPoint + '　金杯：' + (S.goldCup || 0)
+        : '当前金松果：' + S.goldPoint;
+      modal('复仇确认', '<div class="result-box"><p>复仇需要 <b>' + info.cost + '</b> 个金松果' + reward + '，确定复仇吗？</p><p class="small-label">' + wallet + '</p></div>',
         [{ label: '确定复仇', cls: 'gold', run: go }, { label: '取消', cls: 'muted' }]);
     } else {
       go();

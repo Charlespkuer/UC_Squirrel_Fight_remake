@@ -1564,12 +1564,32 @@
   function openChestDetail(id, shop) {
     const pet = id === 79;
     const name = pet ? '魔法袋' : '金宝箱';
+    /* 概率与 State.rollChestReward 一一对应；改权重时两处一起改。 */
+    const magicOdds = [
+      '6 级宝石：3%（1 颗）',
+      '5 级宝石：15%（1 颗）',
+      '蓝色碎片：15%（5~10 个）',
+      '召唤证：17%（1~2 个）',
+      '基础属性点：20%（6 / 8 / 10 点，各 1/3）',
+      '金松果：15%（300 / 350 / 400 / 450 / 500）',
+      '孵化点：15%（100 点）',
+    ];
+    const goldOdds = [
+      '6 级宝石：4%（1 颗）',
+      '5 级宝石：24%（10% 开出 2 颗，14% 开出 1 颗）',
+      '基础属性点：49%（8 点 10%、10 点 12%、12 点 12%、16 点 15%）',
+      '魔法袋：6%（1 个）',
+      '金松果：17%（500 / 750 / 1000）',
+    ];
+    const oddsHtml = (rows) => '<p class="small-label">打开后随机获得其中一种：</p><p class="small-label">' +
+      rows.map((row) => '· ' + row).join('<br>') + '</p>';
     const body = pet
       ? '<div class="detail-summary"><span class="item-icon">' + icon('prop', id) + '</span><div><h3 class="detail-name">' + name + '</h3>' +
-        '<div class="detail-description">使用后有一定几率获得稀有道具：召唤证、5/6 级宝石、蓝色碎片、孵化点、属性点或金松果。</div></div></div>'
+        '<div class="detail-description">使用后有一定几率获得稀有道具：召唤证、5/6 级宝石、蓝色碎片、孵化点、属性点或金松果。</div></div></div>' +
+        oddsHtml(magicOdds)
       : '<div class="detail-summary"><span class="item-icon">' + icon('prop', id) + '</span><div><h3 class="detail-name">' + name + '</h3>' +
         '<div class="detail-description">内含黑色顶级装备、属性点、宝石等物品（离线版用高级宝石 / 属性点 / 金松果替代黑装）。</div></div></div>' +
-        '<p class="small-label">可能开出：6 级宝石（极低）、5 级宝石（普通）、8~16 点基础属性、500~1000 金松果。</p>';
+        oddsHtml(goldOdds);
     const m = modal(name, body, [
       { label: '打开', cls: 'gold', run: () => {
         const r = State.openChestProp(id);
@@ -1611,6 +1631,9 @@
       using = false;
       if (!r) return;
       if (!r.ok && r.needsFruitChoice) { handle.close(); fruitChoiceDialog(r); return; }
+      /* 属性书不是普通「使用」：State.useProp(37) 需要 8 点分配参数，直接调用只会得到
+       * needsAllocation。经典背包的 4886 使用窗必须把玩家接到分配弹窗，否则点了没反应。 */
+      if (!r.ok && r.needsAllocation) { handle.close(); allocateAttributes(); return; }
       /* 新手引导 f8→f9：成功提示由引导接管（关详情 → 弹「提示」→ 页 9）。 */
       if (window.SfGuide && SfGuide.onPropUsed && SfGuide.onPropUsed(id, base.name, r, handle)) return;
       if (!r.ok) { toast(r.msg || '使用失败'); return; }
@@ -3482,9 +3505,15 @@
     if (id === 47) lines.push('合成：天使果实种子 ×10 + 50 金松果（背包中合成）');
     if (id === 48) lines.push('合成：恶魔果实种子 ×10 + 50 金松果（背包中合成）');
     if (id === 8) lines.push('挑战胜利：3～7 个/场；通关关卡整轮：25 个；各级礼包中也有');
-    if (id === 79) lines.push('金宝箱：开启后有 6% 几率获得 1 个（超级大关通关也有 5% 几率掉金宝箱）');
+    if (id === 79) {
+      lines.push('金宝箱：开启后有 6% 几率获得 1 个（超级大关通关也有 5% 几率掉金宝箱）');
+      lines.push('打开魔法袋（各档互斥）：6级宝石 3%、5级宝石 15%、蓝色碎片 15%（5~10）、召唤证 17%（1~2）、基础属性点 20%（6/8/10）、金松果 15%（300~500）、孵化点 15%（100）');
+    }
     if (id === 82) lines.push('魔法袋：有几率开出 1～2 个');
-    if (id === 90) lines.push('超级大关（19-36 关）通关：5% 几率获得 1 个；开启后可得宝石/属性点/金松果，另有几率再开出魔法袋');
+    if (id === 90) {
+      lines.push('超级大关（19-36 关）通关：5% 几率获得 1 个');
+      lines.push('打开金宝箱（各档互斥）：6级宝石 4%、5级宝石 24%（10% 两颗 / 14% 一颗）、基础属性点 49%（8/10/12/16 点）、魔法袋 6%、金松果 17%（500/750/1000）');
+    }
     if (id >= 101 && id <= 107) {
       const lv = id - 100;
       if (lv <= 2) lines.push('45 级起：通关关卡 20% 几率、竞技场（经验/碎片）获胜 15% 几率获得（一级 75% / 二级 25%）');

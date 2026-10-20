@@ -129,11 +129,11 @@ test('三件不同名的同部位同品质装备可以融合，产物仍是该�
   assert.ok(game.modals[0].html.includes('（头巾）'), '成功弹窗写明部位：' + game.modals[0].html.slice(-160));
 });
 
-test('同部位但品质不同 / 不同部位都不能混入', () => {
+test('同部位但品质不同不能混入；不同部位可以混入（经典/现代统一）', () => {
   const game = setup([21, 201, 22]);   // 21 头巾品质2、201 头巾品质3、22 手套品质2
   game.click('gear', game.gears[0].key);
   assert.equal(game.get('gear', game.gears[1].key).disabled, true, '品质不同不能混入');
-  assert.equal(game.get('gear', game.gears[2].key).disabled, true, '部位不同不能混入');
+  assert.equal(game.get('gear', game.gears[2].key).disabled, false, '不同部位可以混入');
 });
 
 /* 排序要按「同部位 + 同品质」成组（不再优先同名）：能凑齐三件的组排最前，同名但不搭的靠后 */
@@ -151,7 +151,7 @@ test('装备按同部位同品质成组排序，凑得齐三件的排最前', ()
 test('重复选择会移除材料，支持槽位移除和清空，错ID及最高品质不能混入', () => {
   const game = setup([21, 21, 21, 22, 201]), first = game.gears[0], second = game.gears[1];
   game.click('gear', first.key);
-  assert.equal(game.get('gear', game.gears[3].key).disabled, true);
+  assert.equal(game.get('gear', game.gears[3].key).disabled, false, '不同部位现在可以混入');
   game.click('gear', second.key);
   game.click('gear', first.key);
   assert.ok(game.board.innerHTML.includes('已放入 1/3'));

@@ -20,7 +20,7 @@
 
   /* 开发者开关：false = 经典界面不显示调试按钮/面板，调试开关也不生效；
    * true  = 经典界面也照常可用。需要时只改这一行。 */
-  const DEBUG_IN_CLASSIC = true;
+  const DEBUG_IN_CLASSIC = false;
 
   /** 当前是不是经典界面。只在浏览器有 UI 时判断；纯状态测试/无 UI 宿主视为允许。 */
   function classicUiActive() {

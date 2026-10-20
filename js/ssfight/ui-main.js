@@ -617,32 +617,42 @@
       const px = m[4] + m[0] * sx + m[2] * sy;                  // → 父级坐标
       const py = m[5] + m[1] * sx + m[3] * sy;
       const p = toScreen(clip.parent, px, py);                  // → 屏幕坐标（槽左上角）
-      const slotSide = STATE_SLOT * k * localScale(clip.parent) * localScale(clip) * hostScale;
+      /* k 已经是「SVG 用户单位 → 屏幕像素」，所以 slotSide 本身就是屏幕像素；
+       * 不要再乘 hostScale（那是 CSS→屏幕的缩放）。多乘一次会让药丸再缩小 0.55 倍。 */
+      const slotSide = STATE_SLOT * k * localScale(clip.parent) * localScale(clip);
       if (!(slotSide > 0)) { el.style.display = 'none'; return; }
       /* 药丸块比原版那个格子小一档，**居中**盖在槽上（原版 `attachMovie` 的落点也是槽的原点，
        * 只是原版药丸自带留白；这里按包围盒对齐，看起来更稳）。
        * 都在屏幕像素里换算，最后统一走 `fix()` 折回设计像素，与 `--uiscale` 抵消。 */
       const side = slotSide * STATE_CHIP_RATIO;
+      /* `side` 是**屏幕像素**目标；写进 DOM 的 width/height/--icon/--u 都是 CSS px，
+       * 还要再被宿主自身的 `--uiscale` 乘一次。以前只对 left/top 做了 fix，宽高没除，
+       * 安卓上宿主缩放约 0.55 时药丸会被缩成约 17px（用户报的“药丸过小”）。
+       * 这里把三档尺寸统一折回设计像素，桌面 hostScale=1 时结果不变。 */
+      const sideCss = fix(side);
       const cx = p.x + slotSide / 2, cy = p.y + slotSide / 2;
       el.style.display = '';
       el.style.left = fix(cx - hostRect.left - side / 2) + 'px';
       el.style.top = fix(cy - hostRect.top - side / 2) + 'px';
-      el.style.width = side + 'px';
-      el.style.height = side + 'px';
+      el.style.width = sideCss + 'px';
+      el.style.height = sideCss + 'px';
       /* 图标按 STATE_ICON_RATIO 缩一档（＝现代版 `.home-buff` 的 48/58）。
        * 块本身走 DOM 而不去拨 SVG 的帧：`refreshValues` 每秒都把 c1/c2/c3 拨回空帧。
        * `--u` 是"现代版 58px 那块"的换算单位（= 块边长 / 58）：CSS 里所有尺寸都写在
        * `.home-buff` 的原值 × `--u`，于是换窗口尺寸时配方不变、观感一致。 */
-      const icon = side * STATE_ICON_RATIO;
+      const icon = sideCss * STATE_ICON_RATIO;
       el.style.setProperty('--icon', icon.toFixed(3) + 'px');
-      el.style.setProperty('--u', (side / 58).toFixed(4) + 'px');
+      el.style.setProperty('--u', (sideCss / 58).toFixed(4) + 'px');
     });
   }
   /** 量宿主自身被缩放的倍数（挂一个 100px 的探针进去量，量完就摘）。
    *  用探针而不是逐层找 `transform`：`#ui` 与 `.ssfight-home` 都可能带缩放，
    *  而且窗口适配时值会变，直接量"1 CSS px 画出来是多少屏幕 px"最不容易走样。 */
   function stateLayoutProbe(host) {
-    if (!host.__probe) {
+    /* renderStateIcons() 重建 innerHTML 时会把探针一起清掉；只检查 `host.__probe` 是否存在
+     * 会把「已经 detach 的旧探针」继续拿来量，宽度永远是 0 → hostScale 回退成 1，
+     * 安卓上药丸又缩回 17px。必须确认它仍然挂在当前 host 下。 */
+    if (!host.__probe || host.__probe.parentNode !== host) {
       const p = document.createElement('div');
       p.style.cssText = 'position:absolute;left:0;top:0;width:100px;height:0;pointer-events:none;visibility:hidden';
       host.appendChild(p);

@@ -561,6 +561,13 @@
     if (!State.fileLoadedThisBoot() && !((State.fileInfo() || {}).lastWrite || 0)) showSaveWarning();
     return false;
   }
+  /* 部分国产 ROM 的 WebView 会把 Tauri 的全局对象晚十几秒才注入。桥一到就再试一次读写，
+   * 不要因为启动时那 7 次重试已经跑完就永远停在“浏览器兜底存档”。 */
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('ssdz-save-transport-ready', function () {
+      if (!State.fileLoadedThisBoot() && !((State.fileInfo() || {}).lastWrite || 0)) retryFileSave();
+    });
+  }
 
   /* ============================================================
    * 【MN4】战斗观察模式（?test=2）

@@ -1400,6 +1400,9 @@
      *   · 还没有文件 → 把内存里的当前进度写出第一份，避免“第一次玩完退出就没了”。
      * 这里不能直接 fileLoad：玩家可能已经在本地档上操作，读文件顶掉会丢进度。 */
     if (saveTransport) {
+      /* 通知 Main：迟到的原生桥也值得再走一次 fileProbe/fileLoad。
+       * 否则启动早期桥没到时已经回落到 localStorage，retryFileSave 的 7 次重试也早跑完了。 */
+      try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ssdz-save-transport-ready')); } catch (e) {}
       setTimeout(() => {
         if (!saveTransport) return;
         void fileProbe().then((ok) => {

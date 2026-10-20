@@ -44,29 +44,47 @@
     return;
   }
 
+  /** Tauri v2 的全局 API 有两种形态：`withGlobalTauri` 的 `__TAURI__.core.invoke`，
+   *  以及内核始终会放的 `__TAURI_INTERNALS__.invoke`。部分国产 ROM / 旧 WebView 上
+   *  前者可能没有注入或晚到，但后者可用 —— 不能只看 `__TAURI__` 就判定“不是原生环境”。 */
+  function findInvoke() {
+    var T = window.__TAURI__, I = window.__TAURI_INTERNALS__;
+    if (T && T.core && typeof T.core.invoke === 'function') return T.core.invoke.bind(T.core);
+    if (I && typeof I.invoke === 'function') return I.invoke.bind(I);
+    return null;
+  }
+  var started = false;
+  function tryStart(label) {
+    if (started) return true;
+    var invoke = findInvoke();
+    if (!invoke) return false;
+    started = true;
+    diag('TAURI 就绪' + (label ? '（' + label + '）' : ''));
+    start(invoke);
+    return true;
+  }
   var T = window.__TAURI__;
-  diag('url=' + location.href + ' TAURI=' + (T ? Object.keys(T).join('|') : 'null'));
+  diag('url=' + location.href + ' TAURI=' + (T ? Object.keys(T).join('|') : 'null') +
+    ' INTERNALS=' + (window.__TAURI_INTERNALS__ ? 'yes' : 'no'));
 
-  if (!T || !T.core || typeof T.core.invoke !== 'function') {
-    // 移动端异步注入：轮询等它几秒（桌面端第一次就能命中，等于没有额外开销）
+  if (!tryStart('立即')) {
+    // 移动端/部分 ROM 异步注入：轮询等它（最多 20 秒；期间切前台也会再试）
     var tries = 0;
     var timer = setInterval(function () {
       tries++;
-      var A = window.__TAURI__;
-      if (A && A.core && typeof A.core.invoke === 'function') {
+      if (tryStart('轮询 ' + (tries * 100) + 'ms')) { clearInterval(timer); return; }
+      if (tries >= 200) {                // 200 × 100ms = 20 秒后放弃
         clearInterval(timer);
-        diag('TAURI 就绪，等了 ' + (tries * 100) + 'ms');
-        start(A.core.invoke);
-      } else if (tries >= 40) {          // 40 × 100ms = 4 秒后放弃
-        clearInterval(timer);
-        diag('4 秒内没等到 window.__TAURI__（' + (A ? Object.keys(A).join('|') : 'null') + '）');
+        diag('20 秒内没等到 Tauri invoke（TAURI/INTERNALS 都没有）');
       }
     }, 100);
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') tryStart('回到前台');
+      });
+    }
     return;
   }
-
-  diag('TAURI 立即可用');
-  start(T.core.invoke);
 
   function start(invoke) {
     // 标记：这个环境是 Tauri 外壳（桌面安装版 / 移动端），存档走原生命令。

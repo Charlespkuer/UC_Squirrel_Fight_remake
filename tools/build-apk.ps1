@@ -136,6 +136,18 @@ Ok "libssdz_classic_lib.so → jniLibs\$Abi"
 $assets = Join-Path $SourceRepo 'src-tauri\gen\android\app\src\main\assets'
 robocopy (Join-Path $SourceRepo 'src-tauri\web') $assets /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
 Ok "前端资源 → assets（$((Get-ChildItem $assets -Recurse -Force -File | Measure-Object).Count) 个文件）"
+# 防止「源码已改、APK 里还是旧快照」：至少核对调试开关这一颗最容易被用户直接看到的标记。
+$debugSrc = Join-Path $SourceRepo 'js\debug.js'
+$debugAsset = Join-Path $assets 'js\debug.js'
+if ((Test-Path $debugSrc) -and (Test-Path $debugAsset)) {
+  $pat = 'const DEBUG_IN_CLASSIC = (true|false);'
+  $srcFlag = ([regex]::Match((Get-Content -LiteralPath $debugSrc -Raw), $pat)).Groups[1].Value
+  $assetFlag = ([regex]::Match((Get-Content -LiteralPath $debugAsset -Raw), $pat)).Groups[1].Value
+  if ($srcFlag -and $assetFlag -and ($srcFlag -ne $assetFlag)) {
+    throw "前端快照与源码不一致：js/debug.js=$srcFlag，assets/js/debug.js=$assetFlag。请去掉 -SkipSyncStaging 重新暂存后再出包。"
+  }
+  Ok "前端快照校验：DEBUG_IN_CLASSIC=$assetFlag"
+}
 
 # ---------- 4b) 安卓工程体检（本机真源就在 src-tauri\gen\android，原地构建直接用） ----------
 # 这些"本机真源"都在 gen/android（.gitignore 忽略、不进仓库）：图标 res/ 由

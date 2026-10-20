@@ -139,16 +139,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function ping(port) {
   try { const r = await get('127.0.0.1', port, '/api/ping'); return r.status === 200; } catch (e) { return false; }
 }
+/** 让系统分配一个临时端口：GitHub Windows runner 会保留 19000 附近的端口段，
+ * 固定扫描 19000..19500 会全部 EACCES，测试在 Windows CI 上直接“找不到空闲端口”。 */
+async function freePort(exclude) {
+  for (let i = 0; i < 10; i++) {
+    const s = http.createServer();
+    await new Promise((resolve, reject) => {
+      s.once('error', reject);
+      s.listen(0, '127.0.0.1', resolve);
+    });
+    const p = s.address().port;
+    await new Promise((resolve) => s.close(resolve));
+    if (p !== exclude) return p;
+  }
+  throw new Error('找不到空闲端口');
+}
 
 (async () => {
-  // 找一个能用的端口（本机同时可能在跑真的同步服务，所以别写死）
-  for (let p = 19000; p < 19500 && !PORT; p++) {
-    const s = http.createServer();
-    const free = await new Promise((res) => { s.once('error', () => res(false)); s.listen(p, '127.0.0.1', () => res(true)); });
-    s.close();
-    if (free) PORT = p;
-  }
-  assert.ok(PORT, '找不到空闲端口');
+  PORT = await freePort();
 
   makeRoot(A, 'A-mac', PORT);
   makeRoot(B, 'B-win', PORT);
@@ -266,13 +274,7 @@ async function ping(port) {
      * A 再起一个服务实例（换个监听端口）代表「游戏页面所在那台」的服务；配置里的端口仍是
      * 两端共用的 PORT，所以预览的目标就是 B。 */
     {
-      let PORT_A = 0;
-      for (let p = 19501; p < 19600 && !PORT_A; p++) {
-        const s = http.createServer();
-        const free = await new Promise((res) => { s.once('error', () => res(false)); s.listen(p, '127.0.0.1', () => res(true)); });
-        s.close();
-        if (free) PORT_A = p;
-      }
+      const PORT_A = await freePort(PORT);
       const aSrv = spawn(process.execPath, [path.join(A, 'scripts', 'sync', 'sync.js'), 'serve', '--port', String(PORT_A)], { cwd: A, stdio: 'ignore' });
       try {
         let upA = false;

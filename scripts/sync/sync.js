@@ -49,6 +49,11 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { spawn, execFile, execFileSync } = require('child_process');
+// Optional in old portable bundles; authenticated peers can build iOS only on macOS.
+const { createIosBuildService } = (() => {
+  const file = path.join(__dirname, 'ios-build.cjs');
+  return fs.existsSync(file) ? require(file) : { createIosBuildService: () => null };
+})();
 
 // ---------------------------------------------------------------- 常量与路径
 
@@ -1420,6 +1425,7 @@ function runUpdateHelper(args) {
 }
 
 function createServer() {
+  const iosBuild = createIosBuildService({ root: ROOT });
   return http.createServer(async (req, res) => {
     let url;
     try { url = new URL(req.url, 'http://127.0.0.1'); } catch (e) { return sendJson(res, 400, { ok: false, msg: 'bad url' }); }
@@ -1443,9 +1449,11 @@ function createServer() {
         });
       }
       try {
+        // This service accepts source snapshots and fixed iOS build operations, never shell commands.
+        if (iosBuild && p.startsWith('/api/ios-build/') && await iosBuild.handle(req, res, url)) return;
         if (p === '/api/status') {
           const s = readSaveInfo();
-          return sendJson(res, 200, { ok: true, app: APP_TAG, version: APP_VERSION, name: cfg.name || localHostname(), root: ROOT, saveAt: s.savedAt, saveSize: s.size, exists: s.exists, tokenId: tokenId(cfg.token), ignore: ignoreSummary() });
+          return sendJson(res, 200, { ok: true, app: APP_TAG, version: APP_VERSION, name: cfg.name || localHostname(), root: ROOT, saveAt: s.savedAt, saveSize: s.size, exists: s.exists, tokenId: tokenId(cfg.token), ignore: ignoreSummary(), iosBuild: iosBuild ? iosBuild.capabilities() : null });
         }
         if (p === '/api/save/meta') { const s = readSaveInfo(); return sendJson(res, 200, { ok: true, exists: s.exists, savedAt: s.savedAt, saveTime: saveTimeOf(s), size: s.size, name: s.name, level: s.level }); }
         if (p === '/api/save' && req.method === 'GET') {

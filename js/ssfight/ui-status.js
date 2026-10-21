@@ -1580,7 +1580,7 @@
     try { r = clip.g.getBoundingClientRect(); h = host.getBoundingClientRect(); } catch (e) { return; }
     if (!r || !h || !r.width || !h.width) return;
     const badge = document.createElement('span');
-    badge.className = 'sf-gear-lock';
+    badge.className = 'sf-gear-lock sf-clickthrough';
     badge.textContent = '10级开启';
     badge.style.left = (r.left - h.left + r.width / 2) + 'px';
     badge.style.top = (r.top - h.top + r.height / 2) + 'px';
@@ -2316,6 +2316,13 @@
     const rec = view.nodes && view.nodes.get(GEAR_CELL_DEPTHS[i]);
     return (rec && rec.clip) || null;
   }
+  /* 「刚拿到的装备」焦点：融合产物是**追加**到 S.gears 末尾的，而这一页按
+   * 「穿着中 > 星标 > 获得顺序」排、每页只有 6 格、每次打开都从第 1 页开始 ——
+   * 于是玩家融合完再从状态页进「更换装备」时，新装备其实躺在**最后一页**，
+   * 屏幕上根本看不到，反馈就是「融合完找不到装备了」。
+   * 这里记一个待聚焦的 key：下次打开这一页直接翻到它所在的那一页并高亮那一格。 */
+  let pendingGearFocus = null;
+
   function gearPageHost() {
     if (gearPage && gearPage.host && gearPage.host.isConnected) return gearPage.host;
     const ui = document.getElementById('ui');
@@ -2330,6 +2337,8 @@
   function destroyGearPage() {
     const rec = gearPage;
     gearPage = null;
+    /* 高亮只服务「刚打开这一页」的那一眼，关掉就清掉（待聚焦标记也一并清）。 */
+    pendingGearFocus = null;
     if (!rec) return;
     if (rec.view) { try { rec.view.destroy(); } catch (e) {} }
     if (rec.host && rec.host.parentNode) rec.host.parentNode.removeChild(rec.host);
@@ -2378,6 +2387,10 @@
       const cell = gearCell(i);
       const label = clipOf(view, 't_' + (i + 1));
       const icon = clipOf(view, 'icon' + (i + 1));
+      /* 刚融合出来的那一格：金色呼吸描边（CSS `.sf-gear-new`），一眼能找到。 */
+      if (cell && cell.g && cell.g.classList) {
+        cell.g.classList.toggle('sf-gear-new', !!(gearPage.highlight && g && String(g.key) === String(gearPage.highlight)));
+      }
       /* `icon{i}`：第 1 帧 = 已穿戴的小勾 / 第 2 帧 = 空（`showEquips` 先把 6 格全拨到 2）。 */
       stopAt(icon, g && g.used ? 1 : 2);
       if (t && label) t.setText(label, g ? gearNameLines(gearNameText(g)) : '');
@@ -2662,10 +2675,40 @@
     if (current.detail) destroyItemDetailOnly();
     if (!gearPage) gearPage = { host: null, view: null, page: 0, detail: null };
     gearPage.page = 0;
+    gearPage.highlight = null;
+    /* 有「刚拿到的装备」就直接翻到它所在页 + 高亮：融合产物追加在背包末尾，
+     * 每次从第 1 页打开的话玩家在屏幕上根本看不到它（「融合完找不到装备」）。 */
+    if (pendingGearFocus) {
+      const list = gearListOf();
+      const at = list.findIndex((g) => String(g.key) === String(pendingGearFocus));
+      if (at >= 0) {
+        gearPage.page = Math.floor(at / GEAR_PAGE_SIZE);
+        gearPage.highlight = String(pendingGearFocus);
+      }
+      pendingGearFocus = null;
+    }
     const view = await mountGearFrame(GEAR_FRAME_LIST);
     if (!view) return false;
     renderGearPage();
     return true;
+  }
+  /** 记下「刚拿到的装备」，下一次打开「更换装备」直接落到它那一页并高亮。
+   *  返回 { page, pages }（页号从 1 开始，给提示文案用）；找不到返回 null。 */
+  function focusGear(key) {
+    if (key == null || key === '') return null;
+    const list = gearListOf();
+    const at = list.findIndex((g) => String(g.key) === String(key));
+    if (at < 0) return null;
+    pendingGearFocus = String(key);
+    const pages = Math.max(1, Math.ceil(list.length / GEAR_PAGE_SIZE));
+    const page = Math.floor(at / GEAR_PAGE_SIZE) + 1;
+    /* 这一页已经开着（例如在详情里又合了一件）：当场翻过去，不用等下次打开。 */
+    if (gearPage && gearPage.view) {
+      gearPage.page = page - 1;
+      gearPage.highlight = String(key);
+      renderGearPage();
+    }
+    return { page: page, pages: pages };
   }
 
   /* ============================================================
@@ -2781,7 +2824,8 @@
    *  在"可选"这一层就先剔掉，免得白选一场再报错）。 */
   function fusionMaterials() {
     try {
-      return State.gearsInDisplayOrder().filter((g) => !g.used && !g.orange && Number(g.quality) < 4
+      return State.gearsInDisplayOrder().filter((g) => !g.used && !g.orange
+        && (Number(g.quality) < 4 || Number(g.quality) === 5)
         && !(State.isGearStarred && State.isGearStarred(g)));
     } catch (e) { return []; }
   }
@@ -3088,7 +3132,7 @@
     const q = picked.length ? Number(picked[0].quality) : 0;
     const cost = fusionCostOf(q);
     setTextByName(view, 't_tips', '融合即将开始，\n本次需要' + cost + '个金松果。');
-    setTextByName(view, 'goal', (['普通', '优秀', '杰出', '卓越', '传说'][Math.min(4, q + 1)] || '') + '装备　');
+    setTextByName(view, 'goal', (['普通', '优秀', '杰出', '卓越', '传说', '黑色'][Math.min(5, q + 1)] || '') + '装备　');
     const back = () => { void mountFusionFrame(FUSION_FRAME.work).then(() => { fillFusionWork(fusionPage && fusionPage.view); wireFusionWork(fusionPage && fusionPage.view); }); };
     wireClickable(clipOf(view, 'b_back'), { hover: 2, onFire: back });
     wireClickable(clipOf(view, 'b_ok'), {
@@ -3106,13 +3150,22 @@
             fillFusionWork(fusionPage && fusionPage.view);
             wireFusionWork(fusionPage && fusionPage.view);
           });
+          /* 关掉结果页时再提示「装备去哪了」：产物追加在背包末尾，而「更换装备」每页只有
+           * 6 格、每次从第 1 页打开 —— 只回工作台不给去处，玩家就会以为装备没了。
+           * 这里顺手记下焦点：下次打开「更换装备」会直接翻到它那一页并高亮。 */
+          const afterResult = () => {
+            const focus = focusGear(r.gear && r.gear.key);
+            if (focus && window.UI && UI.toast) {
+              UI.toast('【' + gearNameText(r.gear) + '】已放入装备背包（更换装备 第 ' + focus.page + '/' + focus.pages + ' 页）');
+            }
+            return backToWork();
+          };
           if (window.SfCompose && SfCompose.showGearResult) {
-            return SfCompose.showGearResult(r.gear, { onClose: backToWork, playCg: true }).then((ok) => {
-              if (!ok) return backToWork();
+            return SfCompose.showGearResult(r.gear, { onClose: afterResult, playCg: true }).then((ok) => {
+              if (!ok) return afterResult();
             });
           }
-          if (window.UI && UI.toast) UI.toast('融合成功！');
-          return backToWork();
+          return afterResult();
         }
         if (window.UI && UI.toast) UI.toast(r.msg);
         back();
@@ -3174,6 +3227,9 @@
     paintGearCard: (cell, gear) => paintGearCard(cell, gear),
     /** 关掉「更换装备」那一层（调试 / 探针用）。 */
     closeGears: () => { destroyGearPage(); },
+    /** 「刚拿到的装备」：下一次打开「更换装备」直接翻到它那一页并高亮（融合产物用）。
+     *  返回 { page, pages }（页号从 1 开始）或 null。 */
+    focusGear: (key) => { try { return focusGear(key); } catch (e) { return null; } },
     /** 「装备融合」= 原版 4673 第 8/9/13 帧（工作台 / 选材料 / 二次确认），盖在状态页上的一层。 */
     openFusion: () => { try { return openFusionPage(); } catch (e) {
       if (window.__errs) window.__errs.push('fusion page: ' + (e && e.message)); return false; } },
@@ -3219,6 +3275,7 @@
         if (c) texts[n] = String(c.textContent == null ? '' : c.textContent);
       }
       return { page: page, pages: pages, cells: cells, doll: doll, texts: texts,
+        highlight: gearPage.highlight || null,
         detail: gearPage.detail, frame: (gearPage.view.frame | 0) + 1 };
     },
     destroy: destroy,

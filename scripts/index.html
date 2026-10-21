@@ -2,8 +2,19 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>松鼠大战 · 怀旧单机复刻版</title>
+<style>
+/* iOS WKWebView（Tauri App / iPhone、iPad）：禁用双击缩放、长按菜单和点按灰块。
+   只在支持 -webkit-touch-callout 的 WebKit 上生效，桌面浏览器/桌面壳不受影响。 */
+@supports (-webkit-touch-callout: none) {
+  html, body { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
+  body { -webkit-touch-callout: none; }
+  /* 只给真正需要防双击缩放的控件加，不再压在 html/body 上：
+     iOS 15 的 WKWebView 在 body 上声明 touch-action 时，部分版本会吞掉点击合成。 */
+  button, input { touch-action: manipulation; }
+}
+</style>
 <link rel="stylesheet" href="css/style.css">
 <link rel="stylesheet" href="css/classic.css">
 <link rel="stylesheet" href="css/classic-extras.css">
@@ -91,5 +102,7 @@ window.addEventListener('unhandledrejection', function (e) {
 <script src="js/tower-ui.js"></script>
 <script src="js/debug.js"></script>
 <script src="js/main.js"></script>
+<!-- iOS 15 WKWebView 轻点不合成 click 时的兜底；正常设备不会重复触发。 -->
+<script src="js/touch-fallback.js"></script>
 </body>
 </html>

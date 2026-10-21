@@ -54,6 +54,7 @@ button,input,select{font:inherit}button{touch-action:manipulation}button:focus-v
 .guide-detail p{font-size:24px;margin:8px 0}
 .guide-detail ul{font-size:22px;line-height:1.55;padding-left:26px;margin:4px 0;color:#7d5d39}
 .q4{color:#e8842c}
+.q5{color:#3b2f46;text-shadow:0 0 1px #d9c7a2}
 .gem-pick{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0}
 .gem-pick .help-item{flex:1 1 30%}
 /* 金松果数量：整个「图标 + 数字」共用同一个深棕胶囊背景（参考图样式） */
@@ -297,8 +298,30 @@ html[data-ui-mode="classic"] .classic-page,
 .quest-row.claimed .quest-chip{opacity:.62}
 .quest-state{text-align:center;color:#6f9c39}
 .quest-state.muted{color:#a2906f}
-.uc-button,.uc-tab{-webkit-text-stroke:3px #6a4a2a;text-shadow:0 3px #6a4a2a;letter-spacing:1px}
-.uc-button.small{-webkit-text-stroke:2px #6a4a2a}.uc-button.tiny{-webkit-text-stroke:1.5px #6a4a2a}
+/* 按钮描边沿用文件顶部的 1.7px / 1.2px / 1.0px 三档。
+ * 这里以前又叠了一层 3px / 2px / 1.5px：桌面 Chrome 有 paint-order 还能保住字芯，
+ * 安卓 WebView 对 HTML 文本的 paint-order 支持不一致，描边会直接盖住笔画，
+ * 小字号按钮尤其明显（用户 2026-10 的安卓截图）。不要再把这几档加倍。
+ *
+ * 安卓 WebView 的计算值里 `paint-order: stroke fill` 会只剩 `stroke`，描边压住字芯；
+ * 用八向 text-shadow 替代描边：阴影永远在字形外面，不会吃掉笔画。
+ * `js/main.js` 在 UA 含 Android 时给 <html> 加 `is-android`。 */
+html.is-android .uc-button,html.is-android .uc-tab{
+  --uc-outline:1.5px;
+  -webkit-text-stroke:0;
+  text-shadow:
+    var(--uc-outline) 0 0 #5d3f21,
+    calc(var(--uc-outline) * -1) 0 0 #5d3f21,
+    0 var(--uc-outline) 0 #5d3f21,
+    0 calc(var(--uc-outline) * -1) 0 #5d3f21,
+    var(--uc-outline) var(--uc-outline) 0 #5d3f21,
+    calc(var(--uc-outline) * -1) var(--uc-outline) 0 #5d3f21,
+    var(--uc-outline) calc(var(--uc-outline) * -1) 0 #5d3f21,
+    calc(var(--uc-outline) * -1) calc(var(--uc-outline) * -1) 0 #5d3f21,
+    0 2px 0 #5d3f21;
+}
+html.is-android .uc-button.small{--uc-outline:1.1px}
+html.is-android .uc-button.tiny{--uc-outline:0.85px}
 .classic-tabs .uc-tab{font-size:48px}.classic-tabs.four .uc-tab{font-size:39px}
 .home-menu .uc-button{font-size:47px}.home-name{font-size:38px}
 .mission-guide>img{object-fit:contain;flex-shrink:0}
@@ -404,3 +427,14 @@ html[data-ui-mode="classic"] .classic-page,
 /* 天使种子：标出武器/技能是否已满 */
 .small-label .ws-full{color:#c0392b}
 .small-label .ws-ok{color:#4a8a24}
+
+/* 「更换装备」里**刚融合出来的那一件**：金色呼吸描边。
+   融合产物追加在背包末尾，而这一页每页 6 格、每次从第 1 页打开 —— 只回工作台不给去处，
+   玩家就会以为「融合完装备没了」（见 docs/更新记录.md 本批）。焦点页与高亮由
+   js/ssfight/ui-status.js 的 focusGear() / pendingGearFocus 负责，这里只管观感。 */
+.sf-gear-new{animation:sf-gear-new-pulse 1.15s ease-in-out infinite}
+@keyframes sf-gear-new-pulse{
+  0%,100%{filter:drop-shadow(0 0 2px #ffe066)}
+  50%{filter:drop-shadow(0 0 6px #ffc107) drop-shadow(0 0 11px #ff9800)}
+}
+@media (prefers-reduced-motion:reduce){.sf-gear-new{animation:none;filter:drop-shadow(0 0 5px #ffb300)}}

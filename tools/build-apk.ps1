@@ -107,6 +107,28 @@ if ((Test-Path $androidTpl) -and (Test-Path $androidDst)) {
   Ok "Android 导出桥模板 → gen\android（MainActivity / AndroidExportBridge）"
 }
 
+# ---------- 2c) Android 9 及以下的存储权限（写公共下载目录用） ----------
+# gen/android 的 AndroidManifest.xml 是本机真源（gitignore 忽略），重新 `tauri android init`
+# 之后容易漏。这里幂等补一行：API ≤ 28 要把手动/自动导出的存档写进系统「下载」，必须先申请
+# WRITE_EXTERNAL_STORAGE；Android 10+ 走 MediaStore 不需要权限，所以加 maxSdkVersion=28。
+$manifestPath = Join-Path $SourceRepo 'src-tauri\gen\android\app\src\main\AndroidManifest.xml'
+if (Test-Path $manifestPath) {
+  $manifestText = [System.IO.File]::ReadAllText($manifestPath)
+  if ($manifestText -notmatch 'WRITE_EXTERNAL_STORAGE') {
+    $anchor = '<uses-permission android:name="android.permission.INTERNET" />'
+    if ($manifestText.Contains($anchor)) {
+      $perm = '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />'
+      $manifestText = $manifestText.Replace($anchor, $anchor + [Environment]::NewLine + '    ' + $perm)
+      [System.IO.File]::WriteAllText($manifestPath, $manifestText, (New-Object System.Text.UTF8Encoding($false)))
+      Ok 'AndroidManifest 补上 WRITE_EXTERNAL_STORAGE（maxSdkVersion=28）'
+    } else {
+      Write-Host '   ⚠ AndroidManifest 里没找到 INTERNET 权限行，跳过存储权限补丁' -ForegroundColor Yellow
+    }
+  } else {
+    Ok '存储权限体检：AndroidManifest 已有 WRITE_EXTERNAL_STORAGE'
+  }
+}
+
 # ---------- 3) 编译 Rust（每个 ABI 都要单独的 .so） ----------
 # 用 `tauri android build` 来做这一步，因为只有它会把 NDK 的 CC/AR/linker 等
 # 交叉编译环境准备齐（裸 cargo build 会报 "linker cc not found"）。

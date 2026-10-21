@@ -36,9 +36,17 @@ src-tauri/node_modules/
 # gen/schemas 是构建时生成的权限 schema。
 # ⚠️ 但那个工程里有几处**必要补丁**（buildSrc 的 node 路径 +「jniLibs 有 .so 就跳过 Rust」、
 #    AndroidManifest 锁横屏、app/build.gradle.kts 的 v1+v2+v3 签名开关）。重新 init 之后
-#    按 tools/build-apk.ps1 顶部的注释逐条补回；脚本会在构建前验签名开关、构建后用 apksigner 复检。 
+#    按 tools/build-apk.ps1 顶部的注释逐条补回；脚本会在构建前验签名开关、构建后用 apksigner 复检。
 src-tauri/gen/android/
 src-tauri/gen/schemas/
+# iOS：gen/apple 由 `tauri ios init` 生成（可再生）；横屏/显示名等差异放在
+# tauri.ios.conf.json + Info.ios.plist，构建脚本会在 init 后自动补设备族等工程级设置。
+src-tauri/gen/apple/
+
+# 签名证书 / 描述文件 / 密码：本机签名私货，**绝不进仓库、也不同步**
+src-tauri/10月20日企业证书/
+*.p12
+*.mobileprovision
 
 # macOS / Windows 的目录噪音
 .DS_Store

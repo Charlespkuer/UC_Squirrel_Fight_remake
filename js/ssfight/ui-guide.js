@@ -95,7 +95,7 @@
    * 3602/3609 是 f10（背包「返回菜单」）与 f15（状态页页签）的同类胶囊，一并拿掉。 */
   const TARGET_ART = new Set(['3589', '3590', '3591', '3592', '3593', '3595', '3596', '3597', '3598', '3599', '3602', '3609']);
   /* 这几步的目标是弹窗/页脚里的**真实 DOM 按钮**，不是素材里预烘焙的位置：
-   * 手与金环都移到真按钮上（7 号已知要左移 16px，见第 44 条用例）。 */
+   * 手与金环都移到真按钮上。 */
   const DOM_TARGETS = {
     7: () => {
       const page = document.querySelector('.classic-page[data-screen="bag"]');
@@ -111,25 +111,74 @@
     10: () => document.querySelector('.classic-page[data-screen="bag"] footer [data-action="home"]'),
     13: () => document.querySelector('.sf-levelup-view [depth="20"]'),
   };
+  /* 首页底部菜单：原版实例名 → 真实按钮。引导帧里的手指是**烘焙位置**，桌面窗口比例
+   * 刚好对上时看不出问题；安卓的 guide 层会被压成 641×378（viewBox 320×196，x 方向有
+   * ~12px letterbox），烘焙位置与真实按钮会错开。这里按实例名把手指/金环钉到真实按钮上。 */
+  const HOME_TARGETS = {
+    1: ['7006', 'challenge'],   // 开始挑战
+    3: ['7006', 'challenge'],   // 升级奖励（引导帧文案是“升级后有机会获得武器技能”）
+    4: ['7011', 'messages'],    // 新消息
+    5: ['7006', 'challenge'],   // 升到 3 级
+    6: ['6994', 'bag'],         // 道具
+    11: ['7006', 'challenge'],  // 开始挑战
+    14: ['6999', 'status'],     // 状态
+  };
+  /** 首页真实按钮的屏幕矩形：SVG 主界面按原版实例名找，DOM 主界面按 data-action 找。 */
+  function homeTargetRect(stepNo) {
+    const spec = HOME_TARGETS[stepNo];
+    if (!spec) return null;
+    try {
+      const page = document.querySelector('.ssfight-home') || document;
+      const svg = page.querySelector('svg');
+      /* 首页菜单的实例名在导出 SVG 里是 `sid`（不是 `name`）；两种都兜一下。 */
+      const g = (svg && (svg.querySelector('g[sid="' + spec[0] + '"]') || svg.querySelector('g[name="' + spec[0] + '"]'))) ||
+        document.querySelector('g[sid="' + spec[0] + '"]') ||
+        document.querySelector('g[name="' + spec[0] + '"]');
+      if (g) {
+        const r = g.getBoundingClientRect();
+        if (r.width > 4 && r.height > 4) return r;
+      }
+      const btn = document.querySelector('button[data-action="' + spec[1] + '"]');
+      if (btn) {
+        const r = btn.getBoundingClientRect();
+        if (r.width > 4 && r.height > 4) return r;
+      }
+    } catch (e) {}
+    return null;
+  }
   function highlightTargets(view, stepNo) {
     if (!view || !view.g) return;
     const svg = view.g;
-    let sr = null;
-    try { sr = svg.getBoundingClientRect(); } catch (e) { sr = null; }
+    const box = svg.getBoundingClientRect();
     const vb = svg.viewBox && svg.viewBox.baseVal;
-    if (!sr || !vb || !sr.width || !sr.height) return;
+    if (!box || !vb || !box.width || !box.height || !vb.width || !vb.height) return;
+    /* 屏幕坐标 → SVG 用户坐标**不能只信 getScreenCTM**：WebKit 209220 在 iOS 15.5/15.6
+     * 仍复现 —— getScreenCTM 不含祖先 CSS transform 的 scale（#ui 自己有 scale，
+     * SVG 又按 height:100% 缩放），于是手指/金环被画到旁边、按钮的屏幕热区也跟着判错。
+     * 这里用「SVG 屏幕矩形 + viewBox + preserveAspectRatio」反算，结果与
+     * getBoundingClientRect 同一套坐标；桌面/安卓的 letterbox 也照样覆盖。 */
+    const par = String(svg.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+    const slice = /\bslice\b/.test(par);
+    const scale = slice ? Math.max(box.width / vb.width, box.height / vb.height)
+      : Math.min(box.width / vb.width, box.height / vb.height);
+    if (!(scale > 0)) return;
+    const ax = /xMin/.test(par) ? 0 : /xMax/.test(par) ? 1 : 0.5;
+    const ay = /YMin/.test(par) ? 0 : /YMax/.test(par) ? 1 : 0.5;
+    const x0 = box.left + (box.width - vb.width * scale) * ax - vb.x * scale;
+    const y0 = box.top + (box.height - vb.height * scale) * ay - vb.y * scale;
+    const toPoint = (sx, sy) => ({ x: (sx - x0) / scale, y: (sy - y0) / scale });
+    const toRect = (r) => {
+      const p1 = toPoint(r.left, r.top);
+      const p2 = toPoint(r.left + r.width, r.top + r.height);
+      return { x: p1.x, y: p1.y, w: p2.x - p1.x, h: p2.y - p1.y };
+    };
     const nodes = [...svg.querySelectorAll('g[type="sprite"]')].filter((n) => TARGET_ART.has(String(n.getAttribute('sid'))));
     const rects = nodes.map((n) => { try { return n.getBoundingClientRect(); } catch (e) { return null; } });
     const rings = new Set();
-    const toView = (r) => ({
-      x: vb.x + (r.left - sr.left) / sr.width * vb.width,
-      y: vb.y + (r.top - sr.top) / sr.height * vb.height,
-      w: r.width / sr.width * vb.width,
-      h: r.height / sr.height * vb.height,
-    });
-    const addRing = (r, before, dxScreen) => {
-      const box = toView(r);
-      if (dxScreen) box.x += dxScreen / sr.width * vb.width;
+    const addRing = (r, dxScreen) => {
+      const shifted = dxScreen ? { left: r.left + dxScreen, top: r.top, width: r.width, height: r.height } : r;
+      const box = toRect(shifted);
+      if (!box) return;
       const key = [Math.round(box.x), Math.round(box.y), Math.round(box.w), Math.round(box.h)].join(',');
       if (rings.has(key)) return;
       rings.add(key);
@@ -145,16 +194,29 @@
       ring.setAttribute('stroke', '#ffe45c');
       ring.setAttribute('stroke-width', '1.6');
       ring.setAttribute('pointer-events', 'none');
-      (before && before.parentNode ? before.parentNode : svg).insertBefore(ring, before || null);
+      /* 金环固定在 SVG 根上：guide 的子组可能带自己的 transform，塞进去会被二次变换。 */
+      if (hand && hand.parentNode === svg) svg.insertBefore(ring, hand);
+      else svg.appendChild(ring);
     };
     const hand = svg.querySelector('g[type="sprite"][sid="3586"]');
     if (hand && hand.dataset.guideT === undefined) hand.dataset.guideT = hand.getAttribute('transform') || '';
     const moveHand = (target) => {
       if (!hand) return null;
       try {
+        /* 手指在素材里就是 SVG 根的直接子节点（不是带自己 transform 的子组），
+         * 所以直接用根坐标算位移；不再经过 hand.parentNode.getScreenCTM()。 */
         const hr = hand.getBoundingClientRect();
-        const dx = ((target.left + target.width / 2) - (hr.left + hr.width / 2)) / sr.width * vb.width;
-        const dy = ((target.top + target.height / 2) - hr.bottom) / sr.height * vb.height;
+        const a = toPoint(hr.left, hr.top);
+        const b = toPoint(hr.right, hr.bottom);
+        const c = toPoint(target.left + target.width / 2, target.top + target.height / 2);
+        const addX = c.x - (a.x + b.x) / 2;
+        const addY = c.y - b.y;
+        /* 手指可能已经因为窗口 resize 被移动过一次：在**已累计的位移**上再加本次差值，
+         * 不能拿本次差值直接覆盖旧 translate（否则第二次重算会跳回半个原位）。 */
+        const dx = (Number(hand.dataset.guideDx) || 0) + addX;
+        const dy = (Number(hand.dataset.guideDy) || 0) + addY;
+        hand.dataset.guideDx = String(dx);
+        hand.dataset.guideDy = String(dy);
         hand.setAttribute('transform', 'translate(' + dx.toFixed(2) + ',' + dy.toFixed(2) + ') ' + (hand.dataset.guideT || ''));
         return hand;
       } catch (e) { return null; }
@@ -172,20 +234,29 @@
         const el = domOf();
         if (el && el.isConnected) {
           const ir = el.getBoundingClientRect();
-          const before = moveHand(ir);
-          addRing(ir, before || nodes[0] || null, stepNo === 7 ? -16 : 0);
+          moveHand(ir);
+          addRing(ir, 0);
           return;
         }
         if (tries++ < 12) { setTimeout(paint, 120); return; }
         if (stepNo === 8 || stepNo === 9) return;
       }
+      /* 首页：把烘焙手指/金环钉到真实菜单按钮（安卓 letterbox 下烘焙位置会歪）。
+       * 引导常常比首页 SVG 先挂上（尤其安卓），按钮还没出来就等一会儿再量。 */
+      const homeRect = homeTargetRect(stepNo);
+      if (homeRect) {
+        moveHand(homeRect);
+        addRing(homeRect, 0);
+        return;
+      }
+      if (HOME_TARGETS[stepNo] && tries++ < 12) { setTimeout(paint, 120); return; }
       nodes.forEach((node, i) => {
         const r = rects[i];
         if (!r || !r.width || !r.height) return;
         /* f3 的目标块在素材里只盖住按钮上沿，硬画一圈会显得错位；这一帧只把暗块拿掉，
          * 手指仍指向按钮。 */
         if (stepNo === 3) return;
-        addRing(r, node);
+        addRing(r, 0);
       });
     };
     paint();
@@ -203,7 +274,15 @@
     const old = current;
     current = null;
     clearTimeout(old.timer);
-    if (old.dismiss) { try { document.removeEventListener('pointerdown', old.dismiss, true); } catch (e) {} }
+    clearTimeout(old.reflowTimer);
+    if (old.reflow) {
+      try { window.removeEventListener('resize', old.reflow); } catch (e) {}
+      try { if (window.visualViewport) window.visualViewport.removeEventListener('resize', old.reflow); } catch (e) {}
+    }
+    if (old.dismiss) {
+      try { document.removeEventListener('pointerdown', old.dismiss, true); } catch (e) {}
+      try { document.removeEventListener('touchstart', old.dismiss, true); } catch (e) {}
+    }
     try { if (old.view) old.view.destroy(); } catch (e) {}
     try { if (old.host && old.host.parentNode) old.host.parentNode.removeChild(old.host); } catch (e) {}
   }
@@ -231,13 +310,17 @@
     setTimeout(() => {
       if (!current || current !== record || record.step !== stepNo) return;
       const onDown = () => {
-        document.removeEventListener('pointerdown', onDown, true);
+        try { document.removeEventListener('pointerdown', onDown, true); } catch (e) {}
+        try { document.removeEventListener('touchstart', onDown, true); } catch (e) {}
         if (current !== record || record.step !== stepNo) return;
         setStep(99);
         hide();
       };
       record.dismiss = onDown;
       document.addEventListener('pointerdown', onDown, true);
+      /* iOS 15 的 WKWebView 可能只在 SVG 上派发 touch 事件、不派发 pointerdown；
+       * 22 号步骤是“下一次轻点收起”，只挂 pointerdown 会一直收不掉。 */
+      document.addEventListener('touchstart', onDown, { capture: true, passive: true });
     }, 80);
   }
   function show(stepNo, ctx) {
@@ -255,7 +338,10 @@
     const ui = document.getElementById('ui');
     if (!ui) return;
     const host = document.createElement('section');
-    host.className = 'sf-guide-view' + (spec.above ? ' above' : '') + (ctx === 'battle' ? ' battle' : '');
+    /* `sf-clickthrough`：整层只负责“讲”，不能吃掉目标按钮的轻点。不能只靠父级的
+     * `pointer-events:none` 继承进 SVG —— iOS 15 的 WKWebView 在这条继承上不可靠，
+     * 手指/金环压住「开始挑战」时按钮就点不动了（见 classic-refine.css 的同名规则）。 */
+    host.className = 'sf-guide-view sf-clickthrough stage' + (spec.above ? ' above' : '') + (ctx === 'battle' ? ' battle' : '');
     host.setAttribute('aria-hidden', 'true');
     host.dataset.guideStep = String(stepNo);
     ui.appendChild(host);
@@ -275,6 +361,19 @@
         current.view = view;
         freeze(view);
         highlightTargets(view, spec.frame);
+        /* 安卓切横屏 / 状态栏隐藏 / 地址栏伸缩都会改视口，guide 的尺寸也跟着变；
+         * 不重算的话手指和金环会停在旧屏幕位置（看起来就是“歪着指别处”）。 */
+        const reflow = () => {
+          if (!current || current.seq !== mine || !current.view) return;
+          clearTimeout(current.reflowTimer);
+          current.reflowTimer = setTimeout(() => {
+            if (!current || current.seq !== mine || !current.view) return;
+            try { highlightTargets(current.view, spec.frame); } catch (e) { err(e); }
+          }, 120);
+        };
+        current.reflow = reflow;
+        try { window.addEventListener('resize', reflow); } catch (e) {}
+        try { if (window.visualViewport) window.visualViewport.addEventListener('resize', reflow); } catch (e) {}
         if (spec.clickDismiss) armClickDismiss(current, stepNo);
         schedule(current, spec);
       })

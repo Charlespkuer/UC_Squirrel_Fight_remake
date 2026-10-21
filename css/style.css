@@ -98,6 +98,7 @@ body.audio-blocked .audio-hint { display: flex; }
 .boss-tag { background: #d63c2a; color: #fff; font-size: 13px; border-radius: 5px; padding: 1px 7px; }
 .icon { flex-shrink: 0; border-radius: 8px; background-color: rgba(255,255,255,.08); }
 .q0 { color: #eee; } .q1 { color: #7cfc00; } .q2 { color: #40c4ff; } .q3 { color: #e040fb; }
+.q4 { color: #ff9800; } .q5 { color: #c9c9d6; }
 .gear-sec-title { font-size: 20px; color: #ffb32e; margin: 14px 0 8px; font-weight: bold; }
 
 /* ---------- 关卡 ---------- */

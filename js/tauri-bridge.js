@@ -38,6 +38,36 @@
     } catch (e) {}
   }
 
+  /* ============================================================
+   * 原生桥没接上时的**可见诊断**（iQOO/vivo 这类国产 ROM 的专项取证）
+   *
+   * 用户口径（2026-10）："iQOO 手机上安卓包读不到本体，只能走保底路径，而且保底路径下
+   * 大量图像无法显示"。外壳这边能确定的是：页面来自 `tauri.localhost` 却没拿到
+   * `__TAURI__/__TAURI_INTERNALS__` 的 invoke —— 于是存档只能退回浏览器兜底。
+   * 但**图像为什么缺**在桌面上复现不出来，必须拿到真机的一组事实：
+   *   · WebView 内核版本（老内核缺 structuredClone / :has 之类会直接报错）
+   *   · 页面 URL / 协议（是不是被 ROM 的"网页加速"改写）
+   *   · 图片加载失败的数量与前几张的路径（判断是整站 404 还是个别文件）
+   *   · 首个 JS 报错
+   * 这里把这几项摊在页面上（不挡住游戏，可关闭），并有 `window.__ssdzDiag()` 供 adb 取值。
+   * ============================================================ */
+  var diagShown = false;
+  /* 图片/脚本加载失败采集：capture 阶段拿 error 事件（这些 error 不冒泡）。
+   * 只记路径与数量，够判断"整站 404"还是"个别文件"。 */
+  try {
+    window.__ssdzFailedImages = { list: [] };
+    window.addEventListener('error', function (ev) {
+      var t = ev && ev.target;
+      if (!t || !t.tagName) return;
+      var tag = String(t.tagName).toUpperCase();
+      if (tag !== 'IMG' && tag !== 'SCRIPT' && tag !== 'LINK') return;
+      var src = t.src || t.href || '';
+      var list = window.__ssdzFailedImages.list;
+      if (list.length < 40) list.push(tag.toLowerCase() + ':' + String(src).replace(location.origin, '').slice(0, 80));
+    }, true);
+  } catch (e) {}
+  try { window.__ssdzDiag = function (why) { return diagInfo(why); }; } catch (e) {}
+
   if (viaOwnServer) {
     // 轻壳 / 手动起的本地服务器：用 /__save，和网页版同一条路
     diag('走本地服务器 /__save');
@@ -76,6 +106,7 @@
       if (tries >= 200) {                // 200 × 100ms = 20 秒后放弃
         clearInterval(timer);
         diag('20 秒内没等到 Tauri invoke（TAURI/INTERNALS 都没有）');
+        showBridgeDiag();
       }
     }, 100);
     if (typeof document !== 'undefined' && document.addEventListener) {
@@ -85,6 +116,82 @@
     }
     return;
   }
+
+  /* ============================================================
+   * 原生桥没接上时的**可见诊断**（iQOO/vivo 这类国产 ROM 的专项取证）
+   *
+   * 用户口径（2026-10）："iQOO 手机上安卓包读不到本体，只能走保底路径，而且保底路径下
+   * 大量图像无法显示"。石壳这边能确定的是：页面来自 `tauri.localhost` 却没拿到
+   * `__TAURI__/__TAURI_INTERNALS__` 的 invoke —— 于是存档只能退回浏览器兜底。
+   * 但**图像为什么缺**在桌面上复现不出来，必须拿到真机的一组事实：
+   *   · WebView 内核版本（老内核缺 structuredClone / :has 之类会直接报错）
+   *   · 页面 URL / 协议（是不是被 ROM 的"网页加速"改写）
+   *   · 图片加载失败的数量与前几张的路径（判断是整站 404 还是个别文件）
+   *   · 首个 JS 报错
+   * 这里把这几项摊在页面上（不挡住游戏，可关闭），并有 `window.__ssdzDiag()` 供 adb 取值。
+   * ============================================================ */
+  var diagShown = false;
+  function imageFailStats() {
+    var list = (window.__ssdzFailedImages && window.__ssdzFailedImages.list) || [];
+    return { count: list.length, first: list.slice(0, 6) };
+  }
+  function diagInfo(reason) {
+    var ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+    var m = /Chrome\/(\d+)/.exec(ua);
+    return {
+      reason: reason || '桥接未就绪',
+      url: String(location.href),
+      protocol: String(location.protocol),
+      host: String(location.hostname),
+      webview: m ? Number(m[1]) : 0,
+      ua: ua,
+      tauri: !!window.__TAURI__,
+      internals: !!window.__TAURI_INTERNALS__,
+      images: imageFailStats(),
+      errors: (window.__errs || []).slice(-5),
+    };
+  }
+  /** 只有「页面来自外壳资源协议」时才提示桥没就绪：普通网页版本来就没有原生桥。 */
+  function isTauriPage() {
+    try {
+      var h = String(location.hostname || '');
+      return h === 'tauri.localhost' || String(location.protocol || '') === 'tauri:';
+    } catch (e) { return false; }
+  }
+  function showBridgeDiag() {
+    if (diagShown || !isTauriPage() || typeof document === 'undefined' || !document.body) return;
+    diagShown = true;
+    var info = diagInfo();
+    var el = document.createElement('div');
+    el.id = 'ssdz-bridge-diag';
+    el.setAttribute('role', 'alert');
+    el.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99999;max-width:min(560px,92vw);' +
+      'background:#fff8e1;color:#4a3413;border:3px solid #b98a3c;border-radius:14px;padding:10px 12px;' +
+      'font:12px/1.5 "Microsoft YaHei",sans-serif;box-shadow:0 4px 14px #0006';
+    var img = info.images;
+    el.innerHTML = '<b>原生存档桥没有就绪</b><br>' +
+      '这局会先用「浏览器兜底存档」（重开可能丢进度）。请把这整段截图反馈：<br>' +
+      '<span style="font-family:monospace;font-size:11px">' +
+      'URL=' + info.protocol + '//' + info.host + ' · WebView=' + (info.webview || '?') +
+      ' · TAURI=' + info.tauri + ' · INTERNALS=' + info.internals +
+      ' · 图片失败=' + img.count + (img.first.length ? '（' + img.first.join(' , ') + '）' : '') +
+      (info.errors.length ? '<br>首个报错：' + String(info.errors[0]).slice(0, 160) : '') +
+      '</span><br><button type="button" id="ssdz-diag-copy" style="margin-top:6px">复制诊断</button> ' +
+      '<button type="button" id="ssdz-diag-close">关闭</button>';
+    document.body.appendChild(el);
+    var close = el.querySelector('#ssdz-diag-close');
+    if (close) close.onclick = function () { el.remove(); };
+    var copy = el.querySelector('#ssdz-diag-copy');
+    if (copy) copy.onclick = function () {
+      var text = JSON.stringify(info);
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text);
+        else { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+      } catch (e) {}
+    };
+  }
+  /* 图片加载失败采集：capture 阶段拿 error 事件（img/script 的 error 不冒泡）。
+   * 只记路径与数量，够判断"整站 404"还是"个别文件"。 */
 
   function start(invoke) {
     // 标记：这个环境是 Tauri 外壳（桌面安装版 / 移动端），存档走原生命令。

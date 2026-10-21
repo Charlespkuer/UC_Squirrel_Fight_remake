@@ -66,6 +66,7 @@
       out.push({ label: clipText('代选' + char + '+' + statGain(key), 5), icon: { badge: char } });
     }
     if (up.wsChoice) out.push({ label: '三选一', icon: { badge: '选' } });
+    if (up.chest) out.push({ label: '金宝箱×' + up.chest, icon: { kind: 'prop', id: 90 } });
     (up.gifts || []).forEach((g) => {
       out.push({ label: giftLabel(g), icon: { kind: 'prop', id: g.id } });
     });

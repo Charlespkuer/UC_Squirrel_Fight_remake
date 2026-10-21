@@ -83,7 +83,10 @@
   }
   function imgTag(url, cls, size) {
     if (!url) return '<span class="icon-ph"' + (size ? ' style="width:' + size + 'px;height:' + size + 'px"' : '') + '></span>';
-    return '<img class="' + (cls || 'icon') + '" src="' + url + '"' + (size ? ' style="width:' + size + 'px;height:' + size + 'px"' : '') + '>';
+    /* 图标文件缺失时别把浏览器的「破图」标记摊在卡片上：隐藏掉，只留底色和名字。
+     * 黑色装备（品质 5）还有一部分 id 没导出 PNG 图标，破图会让玩家以为装备没了。 */
+    return '<img class="' + (cls || 'icon') + '" src="' + url + '"' + (size ? ' style="width:' + size + 'px;height:' + size + 'px"' : '') +
+      ' onerror="this.style.visibility=\'hidden\'">';
   }
   function weaponIcon(id, size) { return imgTag('images/ui/icons/weapon/weapon-' + id + '.png', 'icon', size || 56); }
   function skillIcon(id, size) { return imgTag('images/ui/icons/skill/skill-' + id + '.png', 'icon', size || 56); }
@@ -597,6 +600,7 @@
     for (const id of Object.keys(S.props)) {
       const num = S.props[id];
       if (!num) continue;
+      if (State.blackGearEnabled && !State.blackGearEnabled() && State.BLACK_PROP_IDS.includes(Number(id))) continue;
       const p0 = propMap.getValue(id);
       if (!p0) continue;
       has = true;
@@ -605,12 +609,19 @@
       if (p0.useType === '1') {
         const btn = el('button', 'btn btn-primary', '使用');
         btn.onclick = () => {
-          const r = State.useProp(id);
+          let r = State.useProp(id);
+          /* 现代界面没有经典版的黑卡/黑装选择弹窗：这里随机替玩家选一个，至少不会卡住。
+           * 经典模式走 classic-ui 的 blackCardDialog / blackGearBoxDialog（可选凤凰/圣熊与部位）。 */
+          if (!r.ok && r.needsBlackChoice) r = State.useProp(80, 'random');
+          else if (!r.ok && r.needsBlackGearChoice && r.options && r.options.length) {
+            const pick = r.options[Math.floor(Math.random() * r.options.length)];
+            r = State.useProp(89, String(pick.id));
+          }
           toast(r.msg);
           if (r.ok) { p.close(); openBag(); }
         };
         row.appendChild(btn);
-      } else if (['24', '25', '26'].indexOf(String(id)) >= 0) {
+      } else if (['24', '25', '26', '77', '78'].indexOf(String(id)) >= 0) {
         const btn = el('button', 'btn btn-primary', '合成装备');
         btn.onclick = () => {
           const r = State.composeGear(parseInt(id));

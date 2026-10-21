@@ -213,8 +213,11 @@ function loadGame(gameDir, opts) {
       removeItem: (k) => { store.delete(k); removed.push(k); },
     },
     location: {
-      protocol: opts.fileProtocol ? 'file:' : 'http:', search: opts.search || '',
-      hostname: '127.0.0.1', get port() { return String(getPort()); }, get href() { return `http://127.0.0.1:${getPort()}/`; },
+      protocol: opts.tauri ? 'tauri:' : (opts.fileProtocol ? 'file:' : 'http:'),
+      search: opts.search || '',
+      hostname: opts.tauri ? 'tauri.localhost' : '127.0.0.1',
+      get port() { return opts.tauri ? '' : String(getPort()); },
+      get href() { return opts.tauri ? 'tauri://localhost/' : `http://127.0.0.1:${getPort()}/`; },
       reload: () => pages.push('reload'),
     },
     document: dom.document,
@@ -242,7 +245,7 @@ function loadGame(gameDir, opts) {
     UI.toast = function (m) { (window.__toasts = window.__toasts || []).push(String(m)); };
     window.Engine = window.Engine || {};
     Engine.loadImage = function () { return Promise.resolve(null); };
-    Engine.loadSheets = function () { return Promise.resolve(); };
+    Engine.loadSheets = function () { return ${opts.slowLoad ? 'new Promise(function (r) { setTimeout(r, 2000); })' : 'Promise.resolve()'}; };
     Engine.pinSheets = function () {};
     Engine.SHEETS = {}; Engine.makePlayer = function () { return { list: [] }; };
     Engine.updatePlayer = function () {}; Engine.drawPlayer = function () {};
@@ -267,7 +270,13 @@ function loadGame(gameDir, opts) {
     dom.fire('DOMContentLoaded');
     for (const fn of windowListeners['DOMContentLoaded'] || []) fn({});
   } catch (e) { bootError = e; }
-  return { ctx, store, removed, dom, pages, bootError, loadErrors };
+  return {
+    ctx, store, removed, dom, pages, bootError, loadErrors,
+    /** 触发 window 上的事件（桩 DOM 不会自己派发；安卓桥接就绪事件测试用）。 */
+    dispatchWindow(name, detail) {
+      for (const fn of windowListeners[name] || []) fn({ type: name, detail });
+    },
+  };
 }
 
 /** 递归取元素文本（桩 DOM 的 innerHTML 是原样字符串，这里统一用 textContent 递归）。 */
@@ -313,6 +322,24 @@ record('磁盘 32 级 + 残留 1 级 localStorage → 必须载入 32 级，并�
   fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 });
 
+record('启动中桥接就绪事件 → 不许把页面刷成 reload 循环（安卓每次启动都会发）', async () => {
+  const game = makeGameCopy();
+  const srv = startServer(game);
+  await srv.ready;
+  /* 素材加载放慢：模拟安卓第一次进游戏要拉几秒图集。旧代码在这个窗口里收到
+   * ssdz-save-transport-ready 就会 retryFileSave → 读档成功 → reload；新页面又在素材
+   * 加载阶段收到同一个事件 → 每 0.8 秒刷一次，启动进度永远停在 25%（模拟器实测）。 */
+  const g = loadGame(game, { port: () => PORT, slowLoad: true });
+  g.dispatchWindow('ssdz-save-transport-ready');
+  await sleep(1200);
+  assert.equal(g.pages.filter((p) => p === 'reload').length, 0,
+    '启动中的桥接就绪事件不该触发 reload');
+  const st = g.ctx.State.state();
+  assert.equal(st && st.level, 32, '素材加载完仍要载入磁盘 32 级档');
+  srv.kill();
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+});
+
 record('服务器比页面晚起来（启动器竞态）→ 自动重连后必须回到磁盘 32 级档', async () => {
   const game = makeGameCopy();
   // 页面先开、服务器晚一步才监听；和游戏里的等待一样按比例压缩，保持「竞态」的相对时间不变
@@ -351,6 +378,56 @@ record('页面是 file:// 打开 → 回落但告警指向「请用启动器」'
   assert.match(bannerText, /file:\/\//, '告警要点明 file:// 这个原因');
   assert.match(bannerText, /启动游戏\.command/, '告警要指引用启动器打开');
   fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+});
+
+record('磁盘档是半截 JSON + 本机镜像可用 → 用镜像补写成可解析档，不挂红横幅', async () => {
+  const game = makeGameCopy();
+  const savePath = path.join(game, 'save', 'progress.json');
+  fs.writeFileSync(savePath, '{"level":32,"name":"Charles",');   // 模拟写到一半被中断
+  const srv = startServer(game);
+  const port = await srv.ready;
+  const g = loadGame(game, { localSave: SAVE_32, port: () => PORT });
+  await sleep(1200);
+  const banner = g.dom.document.body.querySelector('#save-warning');
+  assert.equal(banner, null, '镜像可用且补写成功时不该挂红横幅');
+  const disk = JSON.parse(fs.readFileSync(savePath, 'utf8'));
+  assert.equal(disk.level, 32, '补写后的正式存档必须是可解析的 32 级档');
+  srv.kill();
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+});
+
+record('Tauri 安装版桥还没就绪 → 不能挂“浏览器兜底存档”横幅', () => {
+  /* macOS 安装版的 __TAURI__ 是异步注入的：桥还没到时页面里没有 saveTransport，
+   * fetch('/__save') 在 tauri://localhost 上必然失败。这不是存档坏了，
+   * 等桥接的 20 秒诊断；先挂红横幅会让玩家以为自动保存坏了（用户 2026-10 报的 Mac）。
+   * 用源码契约钉住：showSaveWarning 必须先判 Tauri 页面 + 还没装通道。 */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(src, /function isTauriPage\(\)/);
+  assert.match(src, /isTauriPage\(\) && !info\.hasTransport/,
+    'Tauri 页面在没有 saveTransport 时不能挂浏览器兜底横幅');
+});
+
+record('存档写成功事件 → 立刻收起“还没有存档文件 / 兜底存档”横幅', async () => {
+  const game = makeGameCopy();
+  const g = loadGame(game, { localSave: SAVE_LOCAL_1, noServer: true });
+  await sleep(1500);
+  assert.ok(g.dom.document.body.querySelector('#save-warning'), '先要有横幅');
+  g.dispatchWindow('ssdz-save-written');
+  assert.equal(g.dom.document.body.querySelector('#save-warning'), null,
+    '任意一次写盘成功都该把横幅收起，不能让首启那条一直挂着');
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+});
+
+record('存档写盘必须是原子写（serve.js / serve.py / Tauri 三端一致）', () => {
+  const nodeSrc = fs.readFileSync(path.join(ROOT, 'scripts', 'serve.js'), 'utf8');
+  const pySrc = fs.readFileSync(path.join(ROOT, 'scripts', 'serve.py'), 'utf8');
+  const rsSrc = fs.readFileSync(path.join(ROOT, 'src-tauri', 'src', 'lib.rs'), 'utf8');
+  assert.ok(/writeFileSync\(tmp/.test(nodeSrc) && /renameSync\(tmp, SAVE_FILE\)/.test(nodeSrc),
+    'serve.js 要先写 .tmp 再 rename，不能直接覆盖 progress.json');
+  assert.ok(/os\.replace\(tmp, SAVE_FILE\)/.test(pySrc),
+    'serve.py 要先写临时文件再 os.replace');
+  assert.ok(/fn write_save_atomic/.test(rsSrc) && /fs::rename\(&tmp, path\)/.test(rsSrc),
+    'Tauri 的 /__save 与 save_write 也要走原子 rename');
 });
 
 record('本地兜底档更新且等级更高 → 必须保留，不许静默删掉', async () => {
@@ -489,6 +566,18 @@ record('导入建档时的校验：合法存档放行、脏数据拦下', async 
   assert.ok(check({ name: '', level: 5, weapons: [], skills: [], props: {} }), '空名字要拦下');
   assert.ok(check({ name: 'x', level: 'abc', weapons: [], skills: [], props: {} }), '等级不是数字要拦下');
   assert.ok(check({ name: 'x', level: 5, weapons: [], skills: [], props: [] }), 'props 是数组要拦下');
+});
+
+record('桌面导出存档：安装版走 export_save 命令，便携轻壳走 /__export', async () => {
+  const rust = fs.readFileSync(path.join(ROOT, 'src-tauri', 'src', 'lib.rs'), 'utf8').replace(/\r\n/g, '\n');
+  const cu = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/fn export_save\(file_name: String, data: String\)/.test(rust),
+    '安装版必须注册 export_save 命令');
+  assert.ok(/path == "\/__export"/.test(rust) && /dirs::download_dir\(\)/.test(rust),
+    '便携轻壳必须有 /__export 且写系统下载目录（dirs::download_dir）');
+  assert.ok(/async function nativeSave\(/.test(cu) &&
+    /invoke\('export_save', \{ fileName, data: text \}\)/.test(cu),
+    '前端要优先调 export_save，失败再退回 Blob');
 });
 
 (async () => {

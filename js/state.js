@@ -36,7 +36,14 @@
   const PROP_HARD_CAP = 9999;
   /* 这三个编号在原版里是货币/经验值（挂进背包也用不掉），存档里出现就直接忽略。 */
   const CURRENCY_PROP_IDS = [8, 15, 40];
-  const MAX_PLAYER_LEVEL = 70;
+  /* 黑装只在经典界面保留；现代界面按用户 2026-10 口径**整体删除**：
+   * 黑装 / 黑卡 / 黑碎片 / 自选箱都不进现代背包、不掉落、不出现于帮助图鉴。
+   * 经典槽位不动（那边有原版矢量分层外观）。 */
+  const BLACK_PROP_IDS = Object.freeze([77, 78, 80, 89]);
+  /* 原版 `MainMovie.as:19620` 的 `var maxLevel = 90`：1~70 级每级 +3 属性 +5 生命，
+   * 71~90 级原版只发金宝箱；本版为了保留升级手感，71~90 继续每级成长，
+   * 同时每级仍发 1 个金宝箱，并把单箱上限从 16 点压到 12 点（见 rollChestReward）。 */
+  const MAX_PLAYER_LEVEL = 90;
   /* 随机挑战/竞技场/天梯的对手难度系数（成长预算同曲线，这里补 AI 不会"挑点"的差距）。 */
   const RANDOM_FOE_SCALE = 1.08;
   const FREE_POINT_RANDOM = 2;
@@ -99,6 +106,25 @@
     }).filter(Boolean);
   }
 
+  /** 存档里的「已开出、待领取」金宝箱结果：只收合法的五类奖励；坏数据直接丢掉。 */
+  function normalizeChestPending(raw) {
+    if (!object(raw) || Number(raw.propId) !== 90) return null;
+    const reward = object(raw.reward) ? raw.reward : null;
+    if (!reward || !['prop', 'points', 'gold', 'hatch', 'gear'].includes(String(reward.kind))) return null;
+    const count = Math.min(1000000, integer(reward.count, 0));
+    if (!(count > 0)) return null;
+    const out = {
+      propId: 90,
+      reward: { kind: String(reward.kind), count, name: String(reward.name || '') },
+      lotteryCount: Math.min(CHEST_REOPEN_MAX, Math.max(0, integer(raw.lotteryCount, 0))),
+    };
+    if (out.reward.kind === 'prop' || out.reward.kind === 'gear') {
+      out.reward.id = integer(reward.id, 0);
+      if (!(out.reward.kind === 'prop' ? propMap.getValue(out.reward.id) : gearMap.getValue(out.reward.id))) return null;
+    }
+    return out;
+  }
+
   function normalizeSave(raw) {
     const next = Object.assign(clone(GData.NEW_PLAYER), raw);
     /* 收徒挑战中断时退回的体力；在 energy 归一化之前就要有初值（见下方 refund 块）。 */
@@ -110,7 +136,18 @@
     for (const key of ['exp', 'energy', 'goldPoint', 'goldCup', 'dailyWins', 'allWins', 'dailyFails', 'allFails', 'reborn', 'joinRankCount', 'lotteryFree', 'woodRecord', 'woodCount', 'woodDamage', 'freePoints']) {
       next[key] = integer(next[key], GData.NEW_PLAYER[key]);
     }
-    // 体力上限由等级直接决定（满级 180），再叠上超级松鼠的增量；旧档的旧曲线超额值在这里被收回。
+    next.chestPending = normalizeChestPending(raw.chestPending);
+    next.levelChests = Math.min(MAX_PLAYER_LEVEL - 70, Math.max(0, integer(raw.levelChests, 0)));
+    next.blackCardsWeek = (() => {
+      const src = object(raw.blackCardsWeek) ? raw.blackCardsWeek : {};
+      return {
+        week: typeof src.week === 'string' ? src.week : '',
+        count: Math.max(0, Math.min(3, integer(src.count, 0))),
+      };
+    })();
+    next.blackTowerLayer = Math.max(0, integer(raw.blackTowerLayer, 0));
+    next.blackBox100 = raw.blackBox100 === true;
+    // 体力上限由等级直接决定（满级 90 级 = 200），再叠上超级松鼠的增量；旧档的旧曲线超额值在这里被收回。
     {
       const v = object(raw.vip) ? raw.vip : {};
       // 体力上限的 +60 只在「读档时 VIP 仍在有效期」才给；capApplied 另有含义
@@ -436,7 +473,7 @@
         run: runShape(en.run),
       };
     }
-    return next;
+    return stripModernBlackContent(next);
   }
 
   /** 存档里的本机偏好；缺字段/坏值一律回落到默认值。 */
@@ -503,6 +540,29 @@
   }
   function slotMode() { return validSaveMode(saveMode) ? saveMode : DEFAULT_SAVE_SLOT; }
   function otherMode(mode) { return mode === 'modern' ? 'classic' : 'modern'; }
+  /** 黑装内容是否可用：现代界面整体关闭，经典界面保持原样。 */
+  function blackGearEnabled() { return slotMode() === 'classic'; }
+  function isBlackGearId(id) {
+    const gi = gearInst(Number(id));
+    return !!gi && Number(gi.quality) === 5;
+  }
+  function isBlackPropId(id) { return BLACK_PROP_IDS.includes(Number(id)); }
+  /** 现代槽位里的黑装残留一律清掉：装备、碎片/黑卡/自选箱、黑卡计数、待领取的黑装宝箱。 */
+  function stripModernBlackContent(slot) {
+    if (!slot || !object(slot) || !object(slot.settings) || slot.settings.uiMode !== 'modern') return slot;
+    slot.gears = (Array.isArray(slot.gears) ? slot.gears : []).filter((g) => !isBlackGearId(g && g.id));
+    if (object(slot.props)) for (const id of BLACK_PROP_IDS) delete slot.props[id];
+    slot.blackCardsWeek = { week: '', count: 0 };
+    slot.blackTowerLayer = 0;
+    slot.blackBox100 = false;
+    if (slot.chestPending && object(slot.chestPending.reward)) {
+      const rw = slot.chestPending.reward;
+      if ((rw.kind === 'prop' && isBlackPropId(rw.id)) || (rw.kind === 'gear' && isBlackGearId(rw.id))) {
+        slot.chestPending = null;
+      }
+    }
+    return slot;
+  }
   function stripDualFields(raw) {
     const out = Object.assign({}, object(raw) ? raw : {});
     delete out.__dualMode;
@@ -589,7 +649,11 @@
   function adoptPayload(raw) {
     if (!object(raw)) return false;
     const dual = applyDualPayload(raw);
-    return dual === null ? applyLegacyPayload(raw) : dual;
+    const ok = dual === null ? applyLegacyPayload(raw) : dual;
+    /* 上次开箱开出来、还没点「确定领取」就关掉游戏的那一包：进游戏时直接入账，
+     * 避免「箱子已经消耗、奖励却永远拿不到」。 */
+    settlePendingChest();
+    return ok;
   }
   /** 当前界面 + 另一界面两份进度一起序列化；顶层仍是当前进度的原始字段，
    *  旧工具/同步脚本读 name/level/savedAt 不受影响。 */
@@ -630,6 +694,7 @@
       writeUiModePref(m);
       S.settings = normalizeSettings(S.settings);
       S.settings.uiMode = m;
+      settlePendingChest({ save: false });
       save();
       try { if (window.UI && UI.applyUiMode) UI.applyUiMode(m); } catch (e) {}
       return { ok: true, mode: m, changed: true, created: false };
@@ -1160,11 +1225,11 @@
    *
    * 系数乘的是**我自己昨天**赚到的总经验与金松果（earnOn(昨天)），次日领取。
    * 多个徒弟按各自等级占「等级之和」的份额分这份贡品，合计正好是 ratio × 昨日收益。
-   * Σ = 210 对应 3 个满级（70 级）徒弟。
+   * Σ = 270 对应 3 个满级（90 级）徒弟。
    * ============================================================ */
   const TRIBUTE_EXP_MIN = 0.05, TRIBUTE_EXP_MAX = 0.15;      // 经验：前一天的 5% ~ 15%
   const TRIBUTE_GOLD_MIN = 0.05, TRIBUTE_GOLD_MAX = 0.25;    // 金松果：前一天的 5% ~ 25%
-  const TRIBUTE_LEVEL_SUM_FULL = 210;        // 3 个满级徒弟：3 × 70
+  const TRIBUTE_LEVEL_SUM_FULL = 270;        // 3 个满级徒弟：3 × 90
   function apprenticeLevelSum(list) {
     return (Array.isArray(list) ? list : []).reduce((sum, p) => sum + Math.max(1, integer(p && p.level, 1)), 0);
   }
@@ -1318,11 +1383,13 @@
       if (!S) return false;
       clampProps();
       S.savedAt = Date.now();
-      if (storageMode() === 'file') { fileState.dirty = true; scheduleFileWrite(); return true; }
+      if (storageMode() === 'file' || saveTransport) {
+        writeMirror();
+        fileState.dirty = true;
+        scheduleFileWrite();
+        return true;
+      }
       localStorage.setItem(SAVE_KEY, JSON.stringify(savePayload()));
-      /* 安卓/桌面安装包的桥接是异步就绪的：fileProbe 还没回来时先写 localStorage
-       * 兜底，同时标记 dirty；桥一到或切后台就能把这份进度补写进 progress.json。 */
-      if (saveTransport) { fileState.dirty = true; scheduleFileWrite(); }
       return true;
     } catch (e) { return false; }
   }
@@ -1358,6 +1425,8 @@
   const LEGACY_KEY = SAVE_KEY;                       // 旧的 localStorage 存档键
   const fileState = { available: false, transportReady: false, checked: false, code: 0, fileAt: 0, fileExists: false, lastProbe: 0, error: '', reason: '', lastWrite: 0, lastLoad: 0, lastRead: 0, lastReadErr: '', conflict: false, dirty: false, freshLocal: false, path: 'save/progress.json' };
   let fileTimer = 0;
+  /* ssdz-save-transport-ready 只广播一次（安卓桥接会被装两次，见 setSaveTransport）。 */
+  let transportAnnounced = false;
   /* 存档读写通道：默认走本地服务器的 /__save；宿主（Tauri 等）可以替换成自己的实现。
    * transport = { label, path?, probe(), read(), write(json) }，全部返回 Promise。 */
   let saveTransport = null;
@@ -1371,7 +1440,7 @@
   /** 当前进度存在哪里：'file'（save/progress.json）或 'local'（浏览器兜底）。 */
   function storageMode() { return !testMode && fileState.available ? 'file' : 'local'; }
   function forgetLegacy() {
-    try { localStorage.removeItem(LEGACY_KEY); localStorage.removeItem(LEGACY_KEY + '_sync'); } catch (e) {}
+    try { localStorage.removeItem(LEGACY_KEY); localStorage.removeItem(LEGACY_KEY + '_sync'); localStorage.removeItem(LEGACY_KEY + '_base'); } catch (e) {}
   }
   /** 浏览器兜底档是不是「更新且等级不低于文件里这份」——换机器/双机同步后本机没跟上时，
    * 它就是玩家真正的最新进度，不能当成残留垃圾悄悄删掉（交给 fileWrite 的冲突保护处理）。 */
@@ -1388,6 +1457,34 @@
     forgetLegacy();
     return true;
   }
+  /** **同步镜像**：文件存档模式下，除防抖写盘之外再在 localStorage 存一份当前进度。
+   *
+   *  为什么需要它：安卓上最后一次写盘走的是
+   *  `MainActivity.onPause → evaluateJavascript → __ssdzFlushSave → invoke('save_write')`，
+   *  整条链是异步的，进程被系统回收时可能只跑了一半 —— 玩家看到的就是
+   *  「有时候退出会存档，有时候不会」。localStorage 是同步写，随进程一起持久化。
+   *
+   *  它同时带一个 base 标记（写这份镜像时**文件当时的 mtime**）：下次启动只有 base 与
+   *  文件当前 mtime 相等，才能断定「文件在那之后没被别人改过，镜像就是丢掉的那一次进度」，
+   *  才允许用它恢复（见 main.js boot）；文件被同步服务/另一台机器/导入换过时 base 对不上，
+   *  一律以文件为准。文件写成功后 forgetLegacyIfRedundant() 会把它删掉 ——
+   *  于是「镜像还在」正好等于「上一次存档还没确认落到文件里」。
+   *
+   *  ⚠ 不覆盖「更强」的旧兜底档（例如同步服务留下的高等级本机档）：那种要留着给玩家
+   *  手动导入，直接覆盖就是静默删档（对应 tools/test-save-boot.cjs 的那条用例）。 */
+  function writeMirror() {
+    try {
+      if (typeof localStorage === 'undefined' || !S) return false;
+      /* 只有「旧兜底档**等级更高**」时才让路：那种档是另一台机器/同步服务留下的，
+       * 要留给玩家手动导入。同级（正常连点几下）照写，否则文件一直写失败时镜像会停旧。 */
+      const old = localSaveMeta();
+      const fileAt = Number(fileState.fileAt) || 0;
+      if (old && old.savedAt > fileAt + 1000 && old.level > (Number(S.level) || 1)) return false;
+      localStorage.setItem(SAVE_KEY, JSON.stringify(savePayload()));
+      localStorage.setItem(SAVE_KEY + '_base', String(fileAt));
+      return true;
+    } catch (e) { return false; }
+  }
   /** 宿主替换存档通道（Tauri 里用 Rust 端命令读写文件）。 */
   function setSaveTransport(t) {
     saveTransport = t && typeof t.probe === 'function' ? t : null;
@@ -1401,8 +1498,13 @@
      * 这里不能直接 fileLoad：玩家可能已经在本地档上操作，读文件顶掉会丢进度。 */
     if (saveTransport) {
       /* 通知 Main：迟到的原生桥也值得再走一次 fileProbe/fileLoad。
-       * 否则启动早期桥没到时已经回落到 localStorage，retryFileSave 的 7 次重试也早跑完了。 */
-      try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ssdz-save-transport-ready')); } catch (e) {}
+       * **只通知一次**：安卓的 tauri-bridge 会在 DOMContentLoaded 与 window load 各问一次
+       * save_path，同一个通道可能被装两次；每次都发事件会让 Main 反复走
+       * 「读档成功 → location.reload()」，模拟器上实测就是启动页每 0.8 秒刷一次。 */
+      if (!transportAnnounced) {
+        transportAnnounced = true;
+        try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ssdz-save-transport-ready')); } catch (e) {}
+      }
       setTimeout(() => {
         if (!saveTransport) return;
         void fileProbe().then((ok) => {
@@ -1417,14 +1519,21 @@
   function hasLocalSave() {
     try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
   }
-  /** 浏览器兜底档的等级与时间戳（判断「文件里的是不是那份该用的档」时用）。 */
+  /** 浏览器兜底档的等级与时间戳（判断「文件里的是不是那份该用的档」时用）。
+   *  `base` = 写这份镜像时文件当时的 mtime（见 save()）；启动恢复用它判断镜像是否可用。 */
   function localSaveMeta() {
     try {
       const raw = localStorage.getItem(SAVE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (!object(parsed)) return null;
-      return { level: Math.max(1, integer(parsed.level, 1, 1)), savedAt: Number(parsed.savedAt) || 0 };
+      const baseRaw = localStorage.getItem(SAVE_KEY + '_base');
+      const base = baseRaw == null || baseRaw === '' ? null : Number(baseRaw);
+      return {
+        level: Math.max(1, integer(parsed.level, 1, 1)),
+        savedAt: Number(parsed.savedAt) || 0,
+        base: Number.isFinite(base) ? base : null,
+      };
     } catch (e) { return null; }
   }
   /** 探一次存档通道在不在，并把「为什么不可用」记下来给界面显示。
@@ -1577,6 +1686,13 @@
       fileState.freshLocal = false;
       // 刚写进去的就是当前进度；浏览器兜底档只在「更新且不低于当前等级」时才留着
       forgetLegacyIfRedundant(fileState.fileAt);
+      /* 写成功 → 通知界面收起“浏览器兜底存档 / 还没有存档文件”横幅。
+       * 首次运行那条绿色横幅原来只能等下一次重试或刷新才消失。 */
+      try {
+        if (typeof window !== 'undefined' && window.dispatchEvent && typeof CustomEvent === 'function') {
+          window.dispatchEvent(new CustomEvent('ssdz-save-written'));
+        }
+      } catch (e) {}
       return { ok: true, msg: '已写入 ' + fileState.path, fileAt: fileState.fileAt };
     } catch (e) {
       fileState.error = String((e && e.message) || e);
@@ -1591,11 +1707,15 @@
       mode: storageMode(), available: fileState.available, checked: fileState.checked,
       transportReady: fileState.transportReady,
       conflict: fileState.conflict, fileAt: fileState.fileAt, localAt: (S && S.savedAt) || 0,
+      fileExists: !!fileState.fileExists,
       code: fileState.code,
       lastWrite: fileState.lastWrite, lastLoad: fileState.lastLoad,
       lastRead: fileState.lastRead, lastReadErr: fileState.lastReadErr,
       error: fileState.error,
       dirty: fileState.dirty, path: fileState.path, reason: fileState.reason,
+      /* 宿主通道（Tauri 安装版 / 移动端）有没有装上。`transportReady` 是“探过且能用”，
+       * 这里要区分“桥还没注入”和“桥在了但 save_meta 失败”—— 前者不该弹存档告警。 */
+      hasTransport: !!saveTransport,
     };
   }
   function fileLoadedThisBoot() { return fileState.lastRead > 0; }
@@ -1609,7 +1729,12 @@
   function flushFileWrite() {
     rememberUiMode();
     if (fileTimer) { clearTimeout(fileTimer); fileTimer = 0; }
-    if (!S || !fileState.dirty) return;
+    if (!S) return;
+    /* 先把同步镜像写掉：这一步不依赖 WebView 的异步桥（安卓上 onPause 之后的
+     * evaluateJavascript / invoke 都可能被系统打断），进程即使随后被回收，
+     * 下一次启动也能从镜像恢复（见 main.js boot 里 base 那一段）。 */
+    if (storageMode() === 'file' || saveTransport) writeMirror();
+    if (!fileState.dirty) return;
     if (storageMode() !== 'file' && !saveTransport) return;
     /* 文件存在但这次启动还没读进来时不要覆盖（例如桥接晚到、玩家刚进标题就切后台）。 */
     if (saveTransport && !fileState.lastRead && fileState.fileAt > 0) return;
@@ -1623,6 +1748,11 @@
           fileState.lastWrite = Date.now();
           if (out && out.savedAt) fileState.fileAt = Number(out.savedAt) || fileState.fileAt;
           fileState.dirty = false;
+          try {
+            if (typeof window !== 'undefined' && window.dispatchEvent && typeof CustomEvent === 'function') {
+              window.dispatchEvent(new CustomEvent('ssdz-save-written'));
+            }
+          } catch (e) {}
         }).catch((e) => { fileState.error = String((e && e.message) || e); });
         return;
       }
@@ -1961,12 +2091,13 @@
       if (g.orange === true) { out.orange = true; out.quality = 4; }   // 传说（橙）为实例级品质
       if (g.gem && gemLevel(g.gem.id)) out.gem = { id: Number(g.gem.id), ext: g.gem.ext };
       return out;
-    }).filter(Boolean);
+    }).filter(Boolean).filter((g) => blackGearEnabled() || Number(g.quality) !== 5);
   }
   // 穿戴位: 0头巾 1手套 2衣服 3鞋
   function wear(gearKey) {
     const g = S.gears.find((x) => x.key === gearKey);
     if (!g) return false;
+    if (!blackGearEnabled() && isBlackGearId(g.id)) return false;
     const gi = gearInst(g.id);
     if (!gi || S.level < gi.useLevel) return false;
     for (const o of S.gears) if (o.used && gearInst(o.id) && gearInst(o.id).type === gi.type) o.used = false;
@@ -1977,9 +2108,9 @@
     if (g) { g.used = false; save(); }
   }
   /* 卖出装备的金松果：按品质分档、在区间内随机。
-   * 白 55-60 / 绿 60-65 / 蓝 65-70 / 紫 90-110 / 橙 180-220（橙是实例级传说品质）。
+   * 白 55-60 / 绿 60-65 / 蓝 65-70 / 紫 90-110 / 橙 180-220 / 黑 500-700（原版黑装 price 1400，按半价收）。
    * 紫/橙两档由 70-75 / 75-80 上调，拉开与蓝装的差距。 */
-  const GEAR_SELL_RANGE = Object.freeze([[55, 60], [60, 65], [65, 70], [90, 110], [180, 220]]);
+  const GEAR_SELL_RANGE = Object.freeze([[55, 60], [60, 65], [65, 70], [90, 110], [180, 220], [500, 700]]);
   const gearSellRange = (quality) => GEAR_SELL_RANGE[Math.max(0, Math.min(GEAR_SELL_RANGE.length - 1, integer(quality, 0)))] || GEAR_SELL_RANGE[0];
   const gearSellPrice = (quality) => { const [lo, hi] = gearSellRange(quality); return lo + Math.floor(Math.random() * (hi - lo + 1)); };
   /** 品质需要按实例算：橙装是写在实例上的 quality=4。 */
@@ -2160,14 +2291,46 @@
   }
 
   /* 装备合成 / 融合的金松果费用：按参与材料的品质分档。
-   * 白 30 / 绿 40 / 蓝 50 / 紫 60 / 橙 70 / 黑 80（黑装暂未开放，先把位子留出来）。 */
-  const GEAR_COST_BY_QUALITY = Object.freeze([30, 40, 50, 60, 70, 80]);
+   * 白 30 / 绿 40 / 蓝 50 / 紫 60 / 橙 200 / 黑 1000。
+   * 橙 200 对齐原版 composeType=2/3 的 200 金松果；黑 1000 是本版黑碎片合成的价格。 */
+  const GEAR_COST_BY_QUALITY = Object.freeze([30, 40, 50, 60, 200, 1000]);
   const gearCostOf = (quality) => GEAR_COST_BY_QUALITY[
     Math.max(0, Math.min(GEAR_COST_BY_QUALITY.length - 1, integer(quality, 0)))] || GEAR_COST_BY_QUALITY[0];
 
   // 碎片合成: 24白/25绿/26蓝 ×10 + 金松果（白30/绿40/蓝50）→ 随机装备
   function composeGear(propId) {
     propId = Number(propId);
+    const blackSet = (typeof GData !== 'undefined' && GData.BLACK_SHARD_SET) ? Number(GData.BLACK_SHARD_SET[propId]) : 0;
+    if (blackSet) {
+      if (!blackGearEnabled()) return { ok: false, msg: '现代界面没有黑装内容' };
+      if ((S.props[propId] || 0) < 10) return { ok: false, msg: '碎片不足10个！' };
+      const cost = gearCostOf(5);
+      if (S.goldPoint < cost) return { ok: false, msg: '金松果不足' + cost + '！' };
+      const ids = [];
+      gearMap.each((k, v) => { if (Number(v.setId) === blackSet) ids.push(Number(v.id)); });
+      if (ids.length !== 4) return { ok: false, msg: '黑装数据不完整' };
+      /* 防重复保底：随机到已拥有部位、且这一套还没集齐时重摇最多 2 次；
+       * 仍重复就直接从缺的部位里挑。已集齐后允许重复（用于融合洗附加属性）。 */
+      const typeOf = (id) => Number((gearMap.getValue(id) || {}).type);
+      const owned = new Set((S.gears || []).filter((g) => ids.includes(Number(g.id))).map((g) => typeOf(g.id)));
+      let gid = ids[Math.floor(Math.random() * ids.length)];
+      if (owned.size < 4) {
+        for (let tries = 0; tries < 2 && owned.has(typeOf(gid)); tries++) {
+          gid = ids[Math.floor(Math.random() * ids.length)];
+        }
+        if (owned.has(typeOf(gid))) {
+          const missing = ids.filter((id) => !owned.has(typeOf(id)));
+          if (missing.length) gid = missing[Math.floor(Math.random() * missing.length)];
+        }
+      }
+      S.props[propId] -= 10;
+      if (S.props[propId] <= 0) delete S.props[propId];
+      S.goldPoint -= cost;
+      const g = addGear(gid, randomExtForQuality(5));
+      bumpDaily('merge', 1, true);   // 每日任务：合成或融合 N 次装备
+      save();
+      return { ok: true, gear: g };
+    }
     if (![24, 25, 26].includes(propId)) return { ok: false, msg: '请选择装备碎片' };
     if ((S.props[propId] || 0) < 10) return { ok: false, msg: '碎片不足10个！' };
     const quality = { 24: 0, 25: 1, 26: 2 }[propId];
@@ -2383,6 +2546,8 @@
   const FUSION_SAME_NAME_RATE = { 2: 0.50, 3: 0.97 };
   const FUSION_MUTANT_RATE = { 2: 0.03, 3: 0.03 };
   const FUSION_MUTANT_SET = 51;
+  /* 橙装融合出黑装时，原版 helpWords 里的「深海/机器猫/怒战/狂战」变异池。 */
+  const FUSION_BLACK_MUTANT_SETS = Object.freeze([67, 68, 69, 70]);
   /* ② 词条继承（2026-10 用户口径）：**跨部位、跨名字也生效**。
    *    · 只要同一个词条在 ≥2 件材料里出现，产物**必定**继承它（优先占用词条槽）；
    *    · 其余词条槽仍各自 50% 概率从三件材料的全部词条里抽一条；
@@ -2393,7 +2558,7 @@
   const FUSION_EXT_INHERIT_RATE = 0.5;
   const FUSION_EXT_UPGRADE_RATE = 0.5;
   const FUSION_EXT_MAX_LEVEL = 3;
-  /* 产物品质 → 词条槽位数（绿 0 / 蓝 1 / 紫 2 / 橙 3）。 */
+  /* 产物品质 → 词条槽位数（绿 0 / 蓝 1 / 紫 2 / 橙 3 / 黑 3；黑沿用橙的条数）。 */
   const FUSION_EXT_SLOTS = { 1: 0, 2: 1, 3: 2, 4: 3 };
   const fusionSlots = (quality) => FUSION_EXT_SLOTS[Math.max(0, Math.min(4, integer(quality, 0)))] || 0;
   /** 按目标品质随机生成词条（蓝 1 条 ≤2 星、紫/橙 2~3 条 ≤3 星）。 */
@@ -2468,7 +2633,8 @@
     const same = dup >= 2 ? names[0] : (names[1] === names[2] ? names[1] : null);
     if (same) {
       const hit = pool.filter((id) => gearName(id) === same);
-      const mutants = pool.filter((id) => gearSetOf(id) === FUSION_MUTANT_SET);
+      const mutantSets = targetQuality === 5 ? FUSION_BLACK_MUTANT_SETS : [FUSION_MUTANT_SET];
+      const mutants = pool.filter((id) => mutantSets.includes(gearSetOf(id)));
       const others = pool.filter((id) => gearName(id) !== same);
       const key = dup === 3 ? 3 : 2;
       /* 只有目标品质确实有狂战件时才掷变异，否则那 3% 归到「随机其它」。 */
@@ -2482,6 +2648,22 @@
     }
     return { id: pick(pool), mutant: false };
   }
+  /** 黑装融合的目标：3 件黑装 → 同部位黑装。
+   *  · 97% 留在同一家族（凤凰→凤凰 / 圣熊→圣熊），其中 3% 变异到另一套黑装
+   *    （对应原版 helpWords「融合黑装时有较低几率出现深海/机器猫/怒战/狂战」）；
+   *  · 品质 5 的池子由 gamedata 的 registerBlackGear 补出来的 46/47/67~72 组成。 */
+  function pickBlackMergeTarget(gs, part) {
+    const pool = gearIdsOf(part, 5);
+    if (!pool.length) return null;
+    const pick = (list) => list[Math.floor(Math.random() * list.length)];
+    const family = gearSetFamily(gs[0].id);
+    const same = pool.filter((id) => gearSetFamily(id) === family);
+    const others = pool.filter((id) => gearSetFamily(id) !== family);
+    const roll = Math.random();
+    if (others.length && roll < 0.03) return { id: pick(others), mutant: true };
+    if (same.length && roll < 0.73) return { id: pick(same), mutant: false };
+    return { id: pick(pool), mutant: false };
+  }
   /** 三件同品质装备融合成一件更高品质装备。
    *  默认仍要求同部位（旧规则/现代模式）；经典融合页传 `allowMixedParts:true`
    *  去掉同部位需求，结果部位沿用第一件材料（品质仍必须一致）。 */
@@ -2489,21 +2671,48 @@
     if (!Array.isArray(keys) || keys.length !== 3 || new Set(keys).size !== 3) return { ok: false, msg: '请选择三件不同的装备' };
     const gs = keys.map((k) => S.gears.find((x) => x.key === k)).filter(Boolean);
     if (gs.length !== 3) return { ok: false, msg: '装备不存在' };
+    if (!blackGearEnabled() && gs.some((g) => isBlackGearId(g.id))) return { ok: false, msg: '现代界面没有黑装内容' };
     if (gs.some((g) => g.used)) return { ok: false, msg: '不能融合已穿戴的装备' };
     /* 星标装备受保护：不参与融合（防止误合成）。 */
     if (gs.some((g) => g.starred === true)) {
       return { ok: false, msg: '有装备已加星标（防误合），先取消星标再融合' };
     }
-    if (gs.some((g) => g.orange)) return { ok: false, msg: '传说装备已是最高品质' };
-    const part = gearPart(gs[0].id), q = gearPartQuality(gs[0].id);
+    const part = gearPart(gs[0].id), q = gearQuality(gs[0]);
     if (part < 0) return { ok: false, msg: '装备数据异常' };
     const samePart = gs.every((g) => gearPart(g.id) === part);
     if (!samePart && !(opts && opts.allowMixedParts)) return { ok: false, msg: '需要三件同部位的装备' };
-    if (gs.some((g) => gearPartQuality(g.id) !== q)) return { ok: false, msg: '需要三件同品质的装备' };
+    if (gs.some((g) => gearQuality(g) !== q)) return { ok: false, msg: '需要三件同品质的装备' };
     const partName = ['头巾', '手套', '衣服', '鞋子'][part] || '装备';
     const cost = gearCostOf(q);
     if (S.goldPoint < cost) return { ok: false, msg: '融合费用不足（需要 ' + cost + ' 金松果）' };
-    if (q >= 3) {
+    if (q >= 5) {
+      /* 3 件黑装 → 同部位黑装（洗 3 条附加），20% 额外返 1 张黑色卡片。
+       * 黑装只能从碎片/宝箱/自选箱获得，不能由橙装融合出来。 */
+      const target = pickBlackMergeTarget(gs, part);
+      if (target == null) return { ok: false, msg: '这个部位还没有可融合的黑装' + partName + '。' };
+      S.goldPoint -= cost;
+      S.gears = S.gears.filter((g) => !keys.includes(g.key));
+      const made = addGear(target.id, mergeExt(gs, 5));
+      const card = Math.random() < 0.2 ? 1 : 0;
+      if (card) S.props[80] = (S.props[80] || 0) + card;
+      bumpDaily('merge', 1, true);   // 每日任务：合成或融合 N 次装备
+      save();
+      return { ok: true, gear: Object.assign(made || {}, { quality: 5, mutant: target.mutant }), card };
+    }
+    /* 3 件橙装 → 1 件黑装（原版 composeType=3：材料 quality 4、产物「黑色装备」）。
+     * 现代界面已删除黑装内容，橙装仍是现代融合链的顶端，直接拒绝。 */
+    if (q === 4) {
+      if (!blackGearEnabled()) return { ok: false, msg: '现代界面没有黑装内容' };
+      const target = pickMergeTarget(gs, part, 5);
+      if (target == null) return { ok: false, msg: '这个部位还没有可合成的黑色' + partName + '。' };
+      S.goldPoint -= cost;
+      S.gears = S.gears.filter((g) => !keys.includes(g.key));
+      const made = addGear(target.id, mergeExt(gs, 5));
+      bumpDaily('merge', 1, true);   // 每日任务：合成或融合 N 次装备
+      save();
+      return { ok: true, gear: Object.assign(made || {}, { quality: 5, mutant: target.mutant }), card: 0 };
+    }
+    if (q === 3) {
       // 3 件同部位紫装 → 该部位一件橙装（传说）
       const target = pickMergeTarget(gs, part, 3);
       if (target == null) return { ok: false, msg: '这个部位还没有可合成的传说' + partName + '。' };
@@ -2556,6 +2765,7 @@
     }).filter(Boolean);
   }
   function addGear(id, ext, attr) {
+    if (!blackGearEnabled() && isBlackGearId(id)) return null;
     const rolled = attr == null ? rollGearAttr(id) : (integer(attr, 0, 0) || rollGearAttr(id));
     const info = gearInst(id, ext, rolled);
     if (!info) return null;
@@ -2571,6 +2781,7 @@
     const effects = {};
     for (const gear of S.gears) {
       if (!gear.used) continue;
+      if (!blackGearEnabled() && isBlackGearId(gear.id)) continue;
       const info = gearInst(gear.id, gear.ext, gear.attr);
       if (!info || S.level < info.useLevel) continue;
       for (const ext of normalizeExt(gear.ext)) {
@@ -2591,6 +2802,7 @@
     let power = S.power, agility = S.agility, speed = S.speed, hp = S.maxHp;
     for (const g of S.gears) {
       if (!g.used) continue;
+      if (!blackGearEnabled() && isBlackGearId(g.id)) continue;
       const gi = gearInst(g.id, g.ext, g.attr);
       if (!gi || S.level < gi.useLevel) continue;
       let val = gi.abilityVal;
@@ -2687,54 +2899,267 @@
   }
   /* ---------- 金宝箱 / 魔法袋（原版 Flash 的两件开箱道具）----------
    * 原版客户端只负责「展示奖品 + 播放动画」，真正的奖品由服务端 `chest.do` 下发；
-   * 离线版在这里落一张等价的权重表。黑色凤凰/圣熊套装在本版没有对应装备数据，
-   * 用「高级宝石 / 属性点 / 金松果」替代（见文档里的“离线范围”说明）。 */
+   * 离线版在这里落一张等价的权重表。
+   *
+   * 金宝箱（90）对齐 ssfight 的 `openBox` 奖池：6/8/10/12 点基础属性 + 5/6 级宝石，
+   * 以及「黑凤凰/黑圣熊/黑狂战/黑怒战」——黑装在本版未开放，用金松果替代。
+   * **单箱最高 12 点**（原版 16 点）：因为本版 71~90 级每级仍给 4 点成长（多 80 点），
+   * 20 箱 ×12 = 240，正好与原版 20×16 = 320 减去这 80 点相等，90 级总账仍是 651。
+   * 原版单箱可重开 500 次（`reopenMaxCount`，MainMovie.as:19528），金松果逐档上涨；
+   * 这里同样实现，开出的结果先挂在 `S.chestPending`，点「确定领取」才入账。
+   *
+   * 魔法袋（79）按原版天梯商店回收（积分1300/金杯2000/金松果200，账号限 1），
+   * 且**不出属性点**：原版说明只承诺黑凤凰/黑圣熊碎片与其它稀有道具，
+   * 离线版没有黑装，用宝石/碎片/召唤证/金松果/孵化点替代。 */
+  const CHEST_REOPEN_MAX = 500;
+  /** 原版 `getReOpenCount`（MainMovie.as:9221）：每 3 次一档，50 / 75 / 100 / 150 … */
+  function chestReopenCost(count) {
+    count = Math.max(0, Math.floor(Number(count) || 0));
+    if (count >= CHEST_REOPEN_MAX) return 0;
+    const k = Math.floor(count / 3);
+    if (k === 0) return 50;
+    if (k === 1) return 75;
+    return 100 + (k - 2) * 50;
+  }
+  /** 金宝箱的「完整黑装」档：按原版权重 凤凰/圣熊 极低、黑狂战 低、黑怒战 普通。 */
+  function rollBlackChestGear() {
+    const roll = Math.random();
+    let setId;
+    if (roll < 0.10) setId = Math.random() < 0.5 ? 71 : 72;
+    else if (roll < 0.40) setId = 46;   // 黑狂战
+    else setId = 47;                    // 黑怒战
+    const ids = [];
+    gearMap.each((k, v) => { if (Number(v.setId) === setId) ids.push(Number(v.id)); });
+    if (!ids.length) return null;
+    const id = ids[Math.floor(Math.random() * ids.length)];
+    const def = gearMap.getValue(id);
+    return { kind: 'gear', id, count: 1, name: def ? def.name : '黑装' };
+  }
+  /** 只摇奖、不入账：重开要能丢掉上一份结果，所以奖励在 confirm 时才落袋。
+   *  `gold` = 首次开箱；`gold-reopen` = 花金松果重开。
+   *  **完整黑装只在首开出**（2%）；重开池把这一档折成黑色卡片，避免用金松果把 20 个金宝箱
+   *  逐个刷成完整黑装、绕开挑战塔/无尽塔的产出节奏。 */
   function rollChestReward(kind) {
     const r = Math.random();
-    const give = (id, count) => {
+    const prop = (id, count) => {
       const p = propMap.getValue(id);
-      S.props[id] = (S.props[id] || 0) + count;
       return { kind: 'prop', id, count, name: p ? p.name : '道具' };
     };
-    if (kind === 'gold') {
-      if (r < 0.04) return give(106, 1);                 // 6级宝石
-      if (r < 0.28) return give(105, r < 0.14 ? 2 : 1);  // 5级宝石
-      if (r < 0.43) { S.freePoints = (S.freePoints || 0) + 16; return { kind: 'points', count: 16, name: '基础属性点' }; }
-      if (r < 0.55) { S.freePoints = (S.freePoints || 0) + 12; return { kind: 'points', count: 12, name: '基础属性点' }; }
-      if (r < 0.67) { S.freePoints = (S.freePoints || 0) + 10; return { kind: 'points', count: 10, name: '基础属性点' }; }
-      if (r < 0.77) { S.freePoints = (S.freePoints || 0) + 8; return { kind: 'points', count: 8, name: '基础属性点' }; }
-      if (r < 0.83) return give(79, 1);                 // 魔法袋（原版活动道具，这里给金宝箱一条循环）
-      const n = 500 + Math.floor(Math.random() * 3) * 250;
-      addGold(n);
-      return { kind: 'gold', count: n, name: '金松果' };
+    if (kind === 'gold' || kind === 'gold-reopen') {
+      /* 现代界面没有黑卡/完整黑装：原来那 10% 折进金松果，属性点档位与总概率不变。 */
+      if (!blackGearEnabled()) {
+        if (r < 0.04) return prop(106, 1);
+        if (r < 0.14) return prop(105, 2);
+        if (r < 0.26) return prop(105, 1);
+        if (r < 0.51) return { kind: 'gold', count: 500 + Math.floor(Math.random() * 3) * 250, name: '金松果' };
+        if (r < 0.54) return { kind: 'points', count: 12, name: '基础属性点' };
+        if (r < 0.62) return { kind: 'points', count: 10, name: '基础属性点' };
+        if (r < 0.76) return { kind: 'points', count: 8, name: '基础属性点' };
+        return { kind: 'points', count: 6, name: '基础属性点' };
+      }
+      /* 4% 6级 / 22% 5级 / 15% 金松果 / 8% 黑卡 / 2% 完整黑装（仅首开）/ 49% 属性点。 */
+      if (r < 0.04) return prop(106, 1);
+      if (r < 0.14) return prop(105, 2);
+      if (r < 0.26) return prop(105, 1);
+      if (r < 0.41) return { kind: 'gold', count: 500 + Math.floor(Math.random() * 3) * 250, name: '金松果' };
+      if (r < 0.49) return prop(80, 1);
+      if (r < 0.51) return kind === 'gold' ? (rollBlackChestGear() || prop(80, 1)) : prop(80, 1);
+      if (r < 0.54) return { kind: 'points', count: 12, name: '基础属性点' };
+      if (r < 0.62) return { kind: 'points', count: 10, name: '基础属性点' };
+      if (r < 0.76) return { kind: 'points', count: 8, name: '基础属性点' };
+      return { kind: 'points', count: 6, name: '基础属性点' };
     }
-    // 魔法袋：稀有道具 + 孵化点 / 召唤证 / 高级宝石
-    if (r < 0.03) return give(106, 1);
-    if (r < 0.18) return give(105, 1);
-    if (r < 0.33) return give(26, 5 + Math.floor(Math.random() * 6));
-    if (r < 0.50) return give(82, 1 + Math.floor(Math.random() * 2));
-    if (r < 0.70) { const add = 6 + Math.floor(Math.random() * 3) * 2; S.freePoints = (S.freePoints || 0) + add; return { kind: 'points', count: add, name: '基础属性点' }; }
-    if (r < 0.85) { const n = 300 + Math.floor(Math.random() * 5) * 50; addGold(n); return { kind: 'gold', count: n, name: '金松果' }; }
-    S.hatchPoint = (S.hatchPoint || 0) + 100;
+    // 魔法袋：稀有道具 + 孵化点 / 召唤证 / 高级宝石（没有属性点）
+    if (r < 0.03) return prop(106, 1);
+    if (r < 0.18) return prop(105, 1);
+    if (r < 0.33) return prop(26, 5 + Math.floor(Math.random() * 6));
+    if (r < 0.50) return prop(82, 1 + Math.floor(Math.random() * 2));
+    if (r < 0.75) return { kind: 'gold', count: 300 + Math.floor(Math.random() * 5) * 50, name: '金松果' };
     return { kind: 'hatch', count: 100, name: '孵化点' };
   }
+  /** 把一份已经确定的开箱奖励真正入账（点「确定领取」/ 读档自动结算时调用）。 */
+  function grantChestReward(reward) {
+    if (!reward || !(Number(reward.count) > 0)) return false;
+    if (reward.kind === 'prop') {
+      const id = Number(reward.id);
+      if (!propMap.getValue(id)) return false;
+      S.props[id] = (S.props[id] || 0) + Number(reward.count);
+    } else if (reward.kind === 'points') {
+      S.freePoints = pendingPoints() + Number(reward.count);
+    } else if (reward.kind === 'gold') {
+      addGold(Number(reward.count));
+    } else if (reward.kind === 'hatch') {
+      S.hatchPoint = (S.hatchPoint || 0) + Number(reward.count);
+    } else if (reward.kind === 'gear') {
+      if (!blackGearEnabled() && isBlackGearId(reward.id)) return false;
+      if (!addGear(Number(reward.id), randomExtForQuality(5))) return false;
+    } else return false;
+    return true;
+  }
+  /** 当前「已开出、待领取」的金宝箱结果（没有则 null）。 */
+  function chestState() { return S && S.chestPending ? clone(S.chestPending) : null; }
+  /** 开一个金宝箱：消耗 1 个，结果挂在 `S.chestPending`（可重开，确认才入账）。 */
+  function beginChest(id) {
+    id = Number(id) || 90;
+    if (id !== 90) return { ok: false, msg: '只有金宝箱可以重开' };
+    if (S.chestPending) return { ok: false, msg: '还有未领取的开箱结果，请先领取' };
+    if ((S.props[90] || 0) <= 0) return { ok: false, msg: '没有金宝箱' };
+    S.props[90]--;
+    if (S.props[90] <= 0) delete S.props[90];
+    S.chestPending = { propId: 90, reward: rollChestReward('gold'), lotteryCount: 0 };
+    save();
+    return { ok: true, pending: chestState(), msg: '打开金宝箱：' + S.chestPending.reward.name + ' ×' + S.chestPending.reward.count };
+  }
+  /** 确认领取当前金宝箱结果。 */
+  function confirmChest() {
+    const p = S.chestPending;
+    if (!p) return { ok: false, msg: '没有待领取的开箱结果' };
+    const reward = p.reward;
+    if (!grantChestReward(reward)) return { ok: false, msg: '开箱奖励无效' };
+    delete S.chestPending;
+    save();
+    return { ok: true, reward, msg: '领取' + reward.name + ' ×' + reward.count };
+  }
+  /** 进游戏时把上次「已开出、没点领取」的结果直接入账，避免箱子消耗了奖励却丢掉。 */
+  function settlePendingChest(opts) {
+    if (!S || !S.chestPending) return false;
+    const ok = grantChestReward(S.chestPending.reward);
+    delete S.chestPending;
+    if (!(opts && opts.save === false)) save();
+    return ok;
+  }
+  /** 花金松果重开：丢掉当前结果、重新摇一份；箱子本身不再消耗。 */
+  function reopenChest() {
+    const p = S.chestPending;
+    if (!p) return { ok: false, msg: '没有可以重开的金宝箱' };
+    if (p.lotteryCount >= CHEST_REOPEN_MAX) return { ok: false, msg: '重开已达' + CHEST_REOPEN_MAX + '次上限' };
+    const cost = chestReopenCost(p.lotteryCount);
+    if (S.goldPoint < cost) return { ok: false, msg: '金松果不足，重开需要' + cost + '金松果' };
+    S.goldPoint -= cost;
+    p.lotteryCount += 1;
+    p.reward = rollChestReward('gold-reopen');
+    save();
+    return { ok: true, cost, pending: chestState(), msg: '重开：' + p.reward.name + ' ×' + p.reward.count };
+  }
+  /** 一次性开完（调试 / 旧调用 / 测试用）：开 + 立刻领取。 */
   function openChestProp(id) {
     id = Number(id);
-    if (![79, 90].includes(id)) return { ok: false, msg: '不是可开启的宝箱' };
-    if ((S.props[id] || 0) <= 0) return { ok: false, msg: '没有该道具' };
-    S.props[id]--;
-    const reward = rollChestReward(id === 90 ? 'gold' : 'magic');
-    save();
-    return { ok: true, id, reward, msg: '打开' + (id === 90 ? '金宝箱' : '魔法袋') + '：' + reward.name + ' ×' + reward.count };
+    if (id === 79) {
+      if ((S.props[79] || 0) <= 0) return { ok: false, msg: '没有该道具' };
+      S.props[79]--;
+      if (S.props[79] <= 0) delete S.props[79];
+      const reward = rollChestReward('magic');
+      grantChestReward(reward);
+      /* 原版魔法袋会掉黑凤凰/黑圣熊碎片；经典界面统一折成 1 张黑色卡片
+       *（账号限 1 个魔法袋）。现代界面没有黑装，额外黑卡一并去掉。 */
+      const card = blackGearEnabled() ? 1 : 0;
+      if (card) S.props[80] = (S.props[80] || 0) + card;
+      save();
+      return {
+        ok: true, id, reward, card,
+        msg: '打开魔法袋：' + reward.name + ' ×' + reward.count + (card ? '；额外获得黑色卡片 ×1' : ''),
+      };
+    }
+    if (id !== 90) return { ok: false, msg: '不是可开启的宝箱' };
+    if (S.chestPending) return { ok: false, msg: '还有未领取的开箱结果，请先领取' };
+    const begin = beginChest(90);
+    if (!begin.ok) return begin;
+    return confirmChest();
   }
 
+
+  /** 黑色卡片（80）的两个可选套装：凤凰 71 / 圣熊 72。 */
+  function blackCardOptions() {
+    if (!blackGearEnabled()) return [];
+    return [
+      { setId: 71, name: '凤凰', shardId: 77 },
+      { setId: 72, name: '圣熊', shardId: 78 },
+    ];
+  }
+  /** 只结算奖励，不消耗卡片（消耗统一由 useProp 末尾处理）。 */
+  function applyBlackCard(setId) {
+    if (!blackGearEnabled()) return { ok: false, msg: '现代界面没有黑装内容' };
+    const set = Number(setId);
+    if (![71, 72].includes(set)) return { ok: false, msg: '请选择凤凰或圣熊' };
+    const shardId = set === 71 ? 77 : 78;
+    const shards = Math.random() < 0.7 ? 1 : 2;
+    const roll = Math.random();
+    /* 2026-10 用户口径：黑卡金松果收益再砍到 10% —— 50 / 100 / 200。 */
+    const gold = roll < 0.5 ? 50 : roll < 0.85 ? 100 : 200;
+    S.props[shardId] = (S.props[shardId] || 0) + shards;
+    addGold(gold);
+    const def = propMap.getValue(shardId);
+    return {
+      ok: true, setId: set, shardId, shards, gold,
+      msg: '打开黑色卡片：' + (def ? def.name : '黑装碎片') + ' ×' + shards + '，金松果 +' + gold,
+    };
+  }
+  /** 黑装自选箱（89）的候选：凤凰/圣熊各 4 个部位。 */
+  function blackGearBoxOptions() {
+    if (!blackGearEnabled()) return [];
+    const out = [];
+    for (const setId of [71, 72]) {
+      gearMap.each((k, v) => {
+        if (Number(v.setId) !== setId) return;
+        out.push({ id: Number(v.id), name: v.name, type: Number(v.type), setId });
+      });
+    }
+    return out.sort((a, b) => (a.setId - b.setId) || (a.type - b.type));
+  }
+  /** 自选一件黑装（89），随机 3 条附加属性。 */
+  function applyBlackGearBox(gearId) {
+    if (!blackGearEnabled()) return { ok: false, msg: '现代界面没有黑装内容' };
+    const id = Number(gearId);
+    const hit = blackGearBoxOptions().find((o) => o.id === id);
+    if (!hit) return { ok: false, msg: '请选择一件凤凰或圣熊装备' };
+    const g = addGear(id, randomExtForQuality(5));
+    if (!g) return { ok: false, msg: '黑装数据缺失' };
+    return { ok: true, gear: g, msg: '获得' + g.name };
+  }
+
+  /* ---------- 无尽塔黑卡周限（每周一 00:00 重置，最多 3 张） ---------- */
+  const ENDLESS_BLACK_CARD_CAP = 3;
+  /** 本周周一的本地日期键（与天梯商店的按周刷新同一口径）。 */
+  function blackCardWeekKey() {
+    const d = new Date(Date.now());
+    const day = (d.getDay() + 6) % 7;   // 周一 = 0
+    d.setDate(d.getDate() - day);
+    return dateKey(d);
+  }
+  function syncBlackCardsWeek() {
+    const week = blackCardWeekKey();
+    if (!object(S.blackCardsWeek)) S.blackCardsWeek = { week, count: 0 };
+    if (S.blackCardsWeek.week !== week) S.blackCardsWeek = { week, count: 0 };
+    S.blackCardsWeek.count = Math.max(0, Math.min(ENDLESS_BLACK_CARD_CAP, integer(S.blackCardsWeek.count, 0)));
+    return S.blackCardsWeek;
+  }
+  function endlessBlackCardLeft() {
+    syncBlackCardsWeek();
+    return Math.max(0, ENDLESS_BLACK_CARD_CAP - S.blackCardsWeek.count);
+  }
+  /** 无尽塔层结算发黑卡：返回 { gain, left, cap }，到周限就 gain=0。 */
+  function grantEndlessBlackCard(n) {
+    if (!blackGearEnabled()) return { gain: 0, left: 0, cap: ENDLESS_BLACK_CARD_CAP, week: blackCardWeekKey() };
+    syncBlackCardsWeek();
+    const left = endlessBlackCardLeft();
+    const gain = Math.min(left, Math.max(0, Math.floor(Number(n) || 0)));
+    if (gain > 0) {
+      S.blackCardsWeek.count += gain;
+      S.props[80] = (S.props[80] || 0) + gain;
+      save();
+    }
+    return { gain, left: left - gain, cap: ENDLESS_BLACK_CARD_CAP, week: S.blackCardsWeek.week };
+  }
 
   function useProp(id, param) {
     id = parseInt(id);
-    if ((S.props[id] || 0) <= 0) return { ok: false, msg: '没有该道具' };
+    if (!blackGearEnabled() && isBlackPropId(id)) return { ok: false, msg: '现代界面没有黑装内容' };
     const p = propMap.getValue(id);
     if (!p) return { ok: false, msg: '没有该道具' };
+    /* 宝箱先走自己的入口：金宝箱可能「箱子已消耗、结果待领取」（S.chestPending），
+     * 这时背包里数量是 0，不能按普通道具直接判成「没有该道具」。 */
     if (id === 79 || id === 90) return openChestProp(id);
+    if ((S.props[id] || 0) <= 0) return { ok: false, msg: '没有该道具' };
     let msg = '使用成功';
     switch (id) {
       case 1: case 2: {
@@ -2763,6 +3188,13 @@
       case 13: { // 转生果
         if (S.level >= 50) return { ok: false, msg: '达到50级后不能转生' };
         S.level = 1; S.exp = 0; Object.assign(S, GData.initialStats());
+        /* 自由属性点必须一起清掉：转生可以在 50 级以下反复用，若把没点完的自由点留下，
+         * 每轮 1→49 级都会再发一遍，等于无限属性。神迹的建筑记录不随转生消失，
+         * 那 29 点要按记录重新加回去（否则会凭空少一截）。
+         * 金宝箱已发数量 `levelChests` 同样不重置 —— 71~90 每级 1 个是账号累计上限。 */
+        S.freePoints = 0; S.pointUndo = [];
+        const mir = miracleRecord();
+        S.power += mir.power; S.agility += mir.agility; S.speed += mir.speed; S.maxHp += mir.hp;
         S.weapons = []; S.skills = []; S.reborn++;
         for (const gear of S.gears) gear.used = false;
         msg = '转生成功！回到1级，装备保留';
@@ -2807,6 +3239,27 @@
           else { S.props[pid] = (S.props[pid] || 0) + num; const pp = propMap.getValue(pid); got.push((pp ? pp.name : pid) + 'x' + num); }
         }
         msg = '获得：' + got.join('、');
+        break;
+      }
+      case 80: { // 黑色卡片：选凤凰/圣熊 → 1~2 碎片 + 50/100/200 金松果
+        const raw = String(param == null ? '' : param);
+        let set = 0;
+        if (raw === 'random') set = Math.random() < 0.5 ? 71 : 72;
+        else if (raw === '71' || raw === '72') set = Number(raw);
+        if (!set) return { ok: false, needsBlackChoice: true, options: blackCardOptions(), msg: '请选择凤凰或圣熊' };
+        const card = applyBlackCard(set);
+        if (!card.ok) return card;
+        msg = card.msg;
+        break;
+      }
+      case 89: { // 黑装自选箱：任选 1 件凤凰/圣熊（4 部位）
+        const raw = String(param == null ? '' : param);
+        if (!/^\d+$/.test(raw)) {
+          return { ok: false, needsBlackGearChoice: true, options: blackGearBoxOptions(), msg: '请选择一件黑装' };
+        }
+        const box = applyBlackGearBox(Number(raw));
+        if (!box.ok) return box;
+        msg = box.msg;
         break;
       }
       default:
@@ -3149,31 +3602,41 @@
       /* 到 30 级：埋一个一次性的「自愿支持作者」提示（界面在升级奖励处理完之后才弹，
        * 不会打断三选一 / 属性点流程；见 classic-ui 的 maybeSupportPrompt）。 */
       if (S.level >= SUPPORT_PROMPT_LEVEL) S.supportPrompt = true;
-      const bookLevel = GData.ATTRIBUTE_BOOK_LEVELS.includes(S.level);
-      const growth = { power: 0, agility: 0, speed: 0, hp: bookLevel ? 0 : 5 };
-      if (bookLevel) S.props[37] = (S.props[37] || 0) + 1;
-      else for (let point = 0; point < FREE_POINT_RANDOM; point++) {
+      /* 1~90 级统一成长：每级 2 点随机 + 1 点自选（合计 3 属性）+ 5 生命。
+       * 原版 `MainMovie.as:19620` 的 maxLevel = 90；71~90 级原版只发 1 个金宝箱、
+       * 不再加属性（`showReward` 在 level > 70 时提前 return）。本版保留这 20 级的成长手感，
+       * 代价是金宝箱单箱上限从 16 点压到 12 点 —— 20×12 = 240，正好等于
+       * 「原版 20×16 = 320」减去多出来的 20×4 = 80 点成长。总账仍是 651。 */
+      const growth = { power: 0, agility: 0, speed: 0, hp: 5 };
+      for (let point = 0; point < FREE_POINT_RANDOM; point++) {
         const attr = ['power', 'agility', 'speed', 'hp'][Math.floor(Math.random() * 4)];
         growth[attr] += attr === 'hp' ? 5 : 1;
       }
       const { power: pw, agility: ag, speed: sp, hp } = growth;
       S.power += pw; S.agility += ag; S.speed += sp; S.maxHp += hp;
-      // 第 3 点由玩家在升级弹窗里自选（力/敏/速/生命）；某一项占比过低时
+      // 第 3 点由玩家在升级弹窗里自选（力/敏/速/生命）；某一项占比过低时由系统代选
       let freePoint = 0, autoPoint = null;
-      if (!bookLevel) {
-        const forced = forcedStat();
-        if (forced) { grantPoint(forced); autoPoint = forced; }
-        else { S.freePoints = pendingPoints() + 1; freePoint = 1; }
+      const forced = forcedStat();
+      if (forced) { grantPoint(forced); autoPoint = forced; }
+      else { S.freePoints = pendingPoints() + 1; freePoint = 1; }
+      /* 71~90 级：每级 1 个金宝箱（与原版一致；原版在这一段不再给属性，本版仍给 4 点，
+       * 所以箱子点数被压到 12 点/箱，见 rollChestReward）。
+       * `levelChests` 是**账号累计**上限 20：转生回到 1 级再升上来不会重复发，
+       * 否则「20 箱 ×12 点」可以被转生无限刷穿 651。 */
+      const chestCap = MAX_PLAYER_LEVEL - 70;
+      const chest = S.level > 70 && integer(S.levelChests, 0) < chestCap ? 1 : 0;
+      if (chest) {
+        S.props[90] = (S.props[90] || 0) + chest;
+        S.levelChests = integer(S.levelChests, 0) + chest;
       }
-      // 体力上限按等级重算（2~3 级每级 +3、4~20 每级 +2、21~70 每级 +1，69 级 179、满级 180）
+      // 体力上限按等级重算（2~3 级每级 +3、4~20 每级 +2、21~90 每级 +1，满级 200）
       S.maxEnergy = Math.max(S.maxEnergy, energyCapForLevel(S.level));
       // 升级奖励：到指定等级时给一组「三选一」候选，玩家在弹窗里选一个
       // （wsChoices 为空表示池子已满/没有可学的，就不发奖励）
-      const gained = null;
       const choices = GData.WS_LEVELS.includes(S.level) ? wsChoices(3) : [];
       if (choices.length) S.wsPicks.push(choices);
       if (S.level === 5 && !S.reborn) addGold(50);
-      // 升级礼包：卷轴 / 药剂 / 丹药，逢 5 级与属性书等级再加一份大礼包
+      // 升级礼包：卷轴 / 药剂 / 丹药，逢 5 级再加一份大礼包
       const gifts = (GData.levelGift ? GData.levelGift(S.level) : []).map((g) => {
         const item = propMap.getValue(g.id);
         S.props[g.id] = (S.props[g.id] || 0) + g.count;
@@ -3181,11 +3644,12 @@
       });
       ups.push({
         level: S.level, power: pw, agility: ag, speed: sp, hp,
-        reward: gained ? gained.name : null,
-        rewardId: gained ? gained.id : null,
-        rewardKind: gained ? gained.kind : null,
+        reward: null,
+        rewardId: null,
+        rewardKind: null,
         wsChoice: choices.length,
-        attributeBook: bookLevel,
+        attributeBook: false,
+        chest,
         freePoint,
         autoPoint,
         autoPointName: autoPoint ? STAT_NAMES[autoPoint] : null,
@@ -3618,18 +4082,13 @@
     level = integer(level, 1, 1);
     const jitter = Number.isFinite(opts.levelJitter) ? Math.max(0, Math.floor(opts.levelJitter)) : 2;
     const rolled = jitter ? integer(level + Math.floor(Math.random() * (2 * jitter + 1)) - jitter, 1, 1) : level;
-    // 满级 70：挑战/天梯/竞技场都在玩家等级上下浮动，玩家接近满级时浮上去就会冒出 71 级以上的对手，
+    // 满级 90：挑战/天梯/竞技场都在玩家等级上下浮动，玩家接近满级时浮上去就会冒出 91 级以上的对手，
     // 所以在出口处统一夹一次（所有对手生成都走这里）。
     const finalLevel = Math.min(MAX_PLAYER_LEVEL, Math.max(integer(opts.minLevel, 1, 1), rolled));
     const name = (opts.name ? String(opts.name) : randomAIName()) + (nameSuffix || '');
     // 离线对手遵循相同的基础成长预算，避免用旧高成长公式压过新建玩家。
     const base = GData.initialStats();
     for (let lv = 2; lv <= finalLevel; lv++) {
-      const bookLevel = GData.ATTRIBUTE_BOOK_LEVELS.includes(lv);
-      if (bookLevel) {
-        for (let point = 0; point < 8; point++) base[STAT_KEYS[Math.floor(Math.random() * 3)]] += 1;
-        continue;
-      }
       base.maxHp += 5;
       // 与玩家共用同一套点位预算：2 点随机（1/4 概率 +5 生命）+ 1 点自由点。
       // 对手不弹窗，自由点默认在四项里随机挑；占比过低时一律优先补
@@ -4031,13 +4490,10 @@
     addGold(gold * (goldBuff ? 2 : 1));
     // 45级起通关有几率获得1-2级宝石
     const gem = complete ? rollGemDrop(20) : null;
-    /* 超级大关通关额外 5% 掉一个金宝箱（金宝箱本身是原版活动道具；给超级关一个稳定获取口，
-     * 帮助页会把它写成「超级大关通关 5%」）。 */
-    let chest = null;
-    if (complete && GData.isSuperStage && GData.isSuperStage(stageId) && Math.random() < 0.05) {
-      S.props[90] = (S.props[90] || 0) + 1;
-      chest = { id: 90, count: 1, name: '金宝箱' };
-    }
+    /* 金宝箱不再从超级关循环掉落：原版只在 71~90 级每级发 1 个（且可重开 500 次），
+     * 这里同样只保留升级产出，否则「总属性点」会重新变成无上限。
+     * 返回值里的 `chest` 字段保留给界面/回归读（现在恒为 null）。 */
+    const chest = null;
     const ups = gainExp(fightExp);
     save();
     return { ok: true, win: true, complete, drop, gem, chest, ups, run: stageRun(stageId), exp: fightExp,
@@ -4430,12 +4886,16 @@
     TRIBUTE_LEVEL_SUM_FULL,
     undoPoint, undoDepth, hasUpgradableWS,
     gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, extText, randomExt,
+    blackGearEnabled, isBlackGearId, BLACK_PROP_IDS,
     gearBaseAttr, rollGearAttr, gearCostOf, GEAR_ATTR_JITTER,
     FUSION_SAME_NAME_RATE, FUSION_MUTANT_RATE, FUSION_MUTANT_SET, FUSION_EXT_UPGRADE_RATE,
     FUSION_EXT_INHERIT_RATE, FUSION_EXT_SLOTS,
     toggleGearStar, isGearStarred, gearsInDisplayOrder,
     gemLevel, gemPercent, gemMergeRate, rollGemDrop, mergeGems, socketGem, unsocketGem,
     totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, openChestProp, gainRandomWS, wsChoices, wsInfo,
+    chestState, beginChest, confirmChest, reopenChest, chestReopenCost, CHEST_REOPEN_MAX, settlePendingChest,
+    blackCardOptions, applyBlackCard, blackGearBoxOptions, applyBlackGearBox,
+    ENDLESS_BLACK_CARD_CAP, blackCardWeekKey, syncBlackCardsWeek, endlessBlackCardLeft, grantEndlessBlackCard,
     pendingWS, currentWSChoices, chooseWS, chooseWSRandom,
     /* 30 级「自愿支持作者」的一次性提示（落存档，不换任何游戏内好处）。 */
     supportPromptPending, supportPromptTake, supportPromptReset, SUPPORT_LEVEL,

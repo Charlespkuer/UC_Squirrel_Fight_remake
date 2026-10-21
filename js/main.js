@@ -13,6 +13,15 @@
 (function () {
   'use strict';
 
+  /* 安卓 WebView 对 HTML `paint-order: stroke fill` 只认第一个值（计算值会退化成
+   * `stroke`），描边会盖在字芯上；`css/classic.css` 里的 `html.is-android` 分支改用
+   * 八向 text-shadow 描边。这里尽早打标记，避免首屏按钮先按桌面规则画一遍。 */
+  try {
+    if (window.navigator && /Android/i.test(window.navigator.userAgent || '')) {
+      document.documentElement.classList.add('is-android');
+    }
+  } catch (e) {}
+
   /* ============================================================
    * 【MN1】启动与画布（尺寸适配/输入）
    * ============================================================ */
@@ -253,6 +262,9 @@
   }
 
   function playBgm(which) {
+    /* 已经切到后台（安卓按 Home / 浏览器切标签页）时不许再起播：
+     * 任何一个界面动作都可能顺手调 playBgm，而后台播放正是玩家投诉的那件事。 */
+    if (bgSuspended) return;
     if (muted || volume <= 0) { if (bgm) bgm.pause(); if (fightBgm) fightBgm.pause(); return; }
     try {
       let audio;
@@ -276,6 +288,42 @@
   }
   /** 自动播放被拦下时在页面上提示「点一下开启音乐」；能播了就收起提示。 */
   let audioBlocked = false;
+  /* ============================================================
+   * 切后台冻结：音乐 + 游戏进度
+   *
+   * 安卓 WebView 的 <audio> **不会**跟着应用生命周期走：实测（API 35 模拟器，
+   * 见 docs/更新记录.md 2026-10 本批）按 Home 之后 AudioPlaybackConfiguration
+   * 仍然是 state:started，`document.hidden` 已经为 true，但没有任何人去 pause 它 ——
+   * 于是玩家听到「音乐一直在后台响，除非彻底杀掉这个后台」。
+   *
+   * 三条路都汇到这两个函数：
+   *   · 页面自己收到 visibilitychange（实测安卓 WebView 会发，且只发一次）；
+   *   · 安卓壳 MainActivity.onPause / onResume 显式调 `__ssdzEnterBackground` / `__ssdzEnterForeground`；
+   *   · 桌面浏览器切标签页（同一套 visibilitychange）。
+   * 回到前台时**接着原来的位置继续放**（play() 就是 resume，不是重头开始）。
+   * ============================================================ */
+  let bgSuspended = false;
+  function enterBackground() {
+    if (bgSuspended) return;
+    bgSuspended = true;
+    try { if (bgm) bgm.pause(); } catch (e) {}
+    try { if (fightBgm) fightBgm.pause(); } catch (e) {}
+  }
+  function enterForeground() {
+    if (!bgSuspended) return;
+    bgSuspended = false;
+    playBgm(mode === 'battle' ? 'fight' : 'main');
+  }
+  try {
+    window.__ssdzEnterBackground = enterBackground;
+    window.__ssdzEnterForeground = enterForeground;
+    window.__ssdzIsBackgrounded = () => bgSuspended;
+    if (document.addEventListener) {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') enterBackground(); else enterForeground();
+      });
+    }
+  } catch (e) {}
   function setAudioBlocked(on) {
     if (audioBlocked === !!on) return;
     audioBlocked = !!on;
@@ -422,24 +470,81 @@
       setStatus('存档读取超时，先用本地存档进入…');
       const local = !!(State.hasLocalSave && State.hasLocalSave() && State.load && State.load());
       if (local) showHome(); else showTitle();
-      if (UI && UI.toast) UI.toast('磁盘存档读取超时，已先用本地存档进入；同步恢复后请重开游戏。');
+      if (UI && UI.toast) UI.toast('磁盘存档读取超时，已先用本地存档进入；连上之后会自动重载。');
+      /* 超时**不能**等于放弃：安卓上 Tauri 的 save_* 命令是异步 IPC，桥接慢的时候
+       * 一次 fileLoad 就可能超过这 4 秒。以前这里直接 return，既不挂横幅也不重试 ——
+       * 于是整局都跑在浏览器兜底档上，退出时自然「没存上」。现在照样进重试循环。
+       * 已经有本机镜像可玩时先不挂红横幅：macOS 上桥接晚到很常见，重试成功后会自动重载；
+       * 真连不上再由 retryFileSave 在末尾挂出来。 */
+      if (!local) showSaveWarning();
+      retryFileSave();
+      bootDone = true;
       return;
     }
     const fellBack = !loaded && !!State.hasLocalSave();
-    if (loaded || (fellBack && State.load())) showHome();
+    const fellBackLoaded = fellBack && State.load();
+    if (loaded || fellBackLoaded) showHome();
     else showTitle();
     if (loaded) {
-      // 正式存档读进来了：顺手把浏览器里残留的那份兜底档清掉，
-      // 免得它以后又被当成存档用（这也是一劳永逸治好旧 profile 的那一步）。
-      // 例外：那份兜底档既更新、等级又不低于文件（换机器/双机同步后本机没跟上）
-      // 就先留着，写文件时 fileWrite() 的冲突保护会提示玩家，别在这里悄悄删掉。
+      /* 正式存档读进来了，但**本机浏览器镜像比文件还新**：说明上一次退出时那次文件写入
+       * 没落盘（安卓切后台 → 异步 IPC 被系统回收打断，是这台设备上最常见的一种）。
+       * 镜像就是上一次真正的进度，先用它，再立刻补写回文件；
+       * 这比「以文件为准」把最后一段进度丢掉要正确得多。
+       * 顺序很重要：先比时间，再看等级不低于文件里的那份，最后才 load() 覆盖内存状态。 */
       const local = State.localSaveMeta ? State.localSaveMeta() : null;
       const fileAt = (State.fileInfo() || {}).fileAt || 0;
-      const keepLocal = !!local && local.savedAt > fileAt + 1000 && local.level >= ((State.state() || {}).level || 1);
-      if (!keepLocal) {
-        try { localStorage.removeItem(State.saveKey); localStorage.removeItem(State.saveKey + '_sync'); } catch (e) {}
-      } else if (UI && UI.toast) {
-        UI.toast('浏览器里还有一份更新的存档，已先保留；要换用它请到「系统 → 导入存档」');
+      const fileLevel = ((State.state() || {}).level) || 1;
+      /* 只有「镜像里记的文件 mtime == 文件当前 mtime」才认：说明文件在那次写失败之后
+       * 没被任何人改过（包括同步服务/另一台机器/手动导入），镜像就是丢了的那一次进度。
+       * base 对不上 → 文件是权威，镜像留给「系统 → 导入存档」处理，绝不自动覆盖。
+       * 这样既救回安卓上丢掉的写盘，也不会在双机同步时用本机档盖掉对端。 */
+      const mirrorNewer = !!local && local.base != null && Number(local.base) === Number(fileAt)
+        && local.savedAt > fileAt + 1500;
+      const recovered = mirrorNewer && local.level >= fileLevel && !!(State.load && State.load());
+      if (recovered) {
+        if (UI && UI.toast) UI.toast('已用本机最后一次自动存档恢复进度（上一次写文件没完成）');
+        Promise.resolve(State.fileWriteNow && State.fileWriteNow()).catch(() => {});
+      } else if (!!local && local.savedAt > fileAt + 1000 && local.level >= fileLevel) {
+        /* 镜像更新、来源不明（base 对不上）：一律留着，交给冲突保护，
+         * 别当成残留垃圾删掉。 */
+        if (UI && UI.toast) UI.toast('浏览器里还有一份更新的存档，已先保留；要换用它请到「系统 → 导入存档」');
+      } else {
+        try {
+          localStorage.removeItem(State.saveKey);
+          localStorage.removeItem(State.saveKey + '_sync');
+          localStorage.removeItem(State.saveKey + '_base');
+        } catch (e) {}
+      }
+    } else if (fellBackLoaded) {
+      /* 文件不在/读不出来，但本机镜像可用：先把进度还给他，别一进来就挂“没自动保存”
+       * 的红横幅；后台重试读文件，读到了再 reload（或这次存档写成功后自己收起横幅）。 */
+      if (UI && UI.toast) UI.toast('磁盘存档暂时读不到，已先用本机自动存档进入；正在重试…');
+      /* 镜像里记的文件 mtime 与当前文件对得上（或文件根本不存在）时，可以安全补写；
+       * 对不上就不碰文件，免得拿旧镜像盖掉同步服务/另一台机器的新档。 */
+      const meta = State.localSaveMeta ? State.localSaveMeta() : null;
+      const info = (State.fileInfo && State.fileInfo()) || {};
+      const baseOk = !!meta && meta.base != null && Number(meta.base) === Number(info.fileAt);
+      /* 文件在但解析失败（典型：上次写盘被中断留下的半截 JSON）也允许补写：
+       * 尽量先把坏档备份到 save/backup/，再把本机镜像写回去，至少让自动存档重新转起来。 */
+      const corrupt = !!info.fileExists && /JSON|Unexpected|Syntax|parse|解析/i.test(String(info.lastReadErr || ''));
+      const canRepair = !!info.available && (baseOk || info.fileExists === false || corrupt);
+      if (canRepair && State.fileWriteNow) {
+        const retryAfter = () => { showSaveWarning(); retryFileSave(); };
+        const repair = () => Promise.resolve(State.fileWriteNow()).then((r) => {
+          if (r && r.ok) { hideSaveWarning(); return; }
+          retryAfter();
+        }).catch(retryAfter);
+        if (corrupt && !baseOk && !isTauriPage()) {
+          /* 备份是尽力而为：最多等 1.5 秒，别让坏档/慢磁盘把自动存档晾着。 */
+          Promise.race([
+            fetch('__save/backup', { method: 'POST', cache: 'no-store' }).catch(() => null),
+            new Promise((resolve) => setTimeout(resolve, 1500)),
+          ]).then(repair);
+        } else {
+          repair();
+        }
+      } else {
+        retryFileSave();
       }
     } else {
       // 没读到磁盘存档：立刻把原因摆出来，同时后台重试（服务器晚一步起来也能自己恢复）
@@ -450,6 +555,7 @@
     if (window.UI && UI.renderNumbers) UI.renderNumbers();
     if (/[?&]test=1(?:&|$)/.test(location.search)) runSelfTest();
     if (/[?&]test=2(?:&|$)/.test(location.search)) runBattleLoop();
+    bootDone = true;
   }
 
   /* ============================================================
@@ -467,11 +573,27 @@
   let pageHiddenAt = 0;
   let saveBanner = null;
 
+  /** 当前页面是不是原生外壳（Tauri 安装版 / 移动端）的资源协议。 */
+  function isTauriPage() {
+    try {
+      return location.protocol === 'tauri:' || location.hostname === 'tauri.localhost';
+    } catch (e) { return false; }
+  }
+
   /** 顶部告警横幅：一直挂着，直到成功连上磁盘存档（或玩家自己关掉）。 */
   function showSaveWarning() {
     if (saveBanner) return saveBanner;
     const info = (State.fileInfo && State.fileInfo()) || {};
     const inFile = location.protocol === 'file:';
+    /* Tauri 安装版的 `__TAURI__` 是**异步注入**的：桥还没到时页面里没有 saveTransport，
+     * `fetch('/__save')` 在 tauri://localhost 上必然失败——这不是存档坏了，不能挂红横幅。
+     * 等 tauri-bridge 的 20 秒诊断；桥一到会发 ssdz-save-transport-ready，重新读档/重载。 */
+    if (isTauriPage() && !info.hasTransport) return null;
+    /* 原生外壳（桌面安装版 / iOS / Android）：首次运行还没有存档文件是正常的，
+     * 路径是应用私有目录（iOS 上是 .../Application Support/com.ssdz.classic/save/progress.json），
+     * 没必要把内部路径和「重试连线」挂给玩家看；第一笔存档写成功后文件自然会出现。
+     * 轻壳模式（http://127.0.0.1:<端口>）不会设这个标记，仍然保留原来的提示。 */
+    if (info.transportReady && !inFile && window.__SSDZ_TAURI_APP__) return null;
     const noApi = Number(info.code) === 404 || /404/.test(String(info.reason || ''));
     let how, color;
     if (info.transportReady && !inFile) {
@@ -526,6 +648,11 @@
     return el;
   }
   function hideSaveWarning() { if (saveBanner) { saveBanner.remove(); saveBanner = null; } }
+  /* 任意一次存档写成功都收起横幅：首次运行那条“还没有存档文件”原来只能等下一次
+   * 重试/刷新才消失，玩家会一直以为没在自动保存。 */
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('ssdz-save-written', hideSaveWarning);
+  }
   function esc(text) {
     return String(text == null ? '' : text).replace(/[&<>"']/g, (ch) => (
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -561,10 +688,23 @@
     if (!State.fileLoadedThisBoot() && !((State.fileInfo() || {}).lastWrite || 0)) showSaveWarning();
     return false;
   }
+  /* 启动还没走完（还在拉素材/还没读档）时，桥接就绪只把存档**读进内存**，
+   * 绝不 reload：安卓上 tauri-bridge 会在 DOMContentLoaded 与 window load 各问一次
+   * `save_path`，于是 ssdz-save-transport-ready 可能连发两次；旧代码每次都走
+   * retryFileSave → 读档成功 → location.reload()，新页面又在素材加载阶段收到同一个事件……
+   * 实测（模拟器）会变成每 0.8 秒刷一次、启动进度永远停在 25%。 */
+  let bootDone = false;
+  async function preloadFileSave() {
+    try {
+      if (!(await State.fileProbe())) return false;
+      return !!(await State.fileLoad());
+    } catch (e) { return false; }
+  }
   /* 部分国产 ROM 的 WebView 会把 Tauri 的全局对象晚十几秒才注入。桥一到就再试一次读写，
    * 不要因为启动时那 7 次重试已经跑完就永远停在“浏览器兜底存档”。 */
   if (typeof window !== 'undefined' && window.addEventListener) {
     window.addEventListener('ssdz-save-transport-ready', function () {
+      if (!bootDone) { void preloadFileSave(); return; }
       if (!State.fileLoadedThisBoot() && !((State.fileInfo() || {}).lastWrite || 0)) retryFileSave();
     });
   }
@@ -816,16 +956,21 @@
   });
 
   /** 主界面场景：原版 mainWalk1 循环跑动（88 帧，含翻滚与拖影）。
-   *  帧推进交给 Engine 播放器，绘制在 UI.drawHomeHud 的主角盒子里完成。 */
+   *  帧推进交给 Engine 播放器，绘制在 UI.drawHomeHud 的主角盒子里完成。
+   *  **播放速度**：原版导出按 22fps 播（一循环 ≈4 秒），实测现代首页里松鼠跑得太赶
+   *  （2026-10 用户口径「往返走的动画播慢一点」），降到 14fps（一循环 ≈6.3 秒）。
+   *  位移是烘进每帧的偏移量，所以帧慢了、走动也一起慢，不需要另改位置。
+   *  需要临时调回快/更慢：`Main.setHomeFps(帧率)`（调试入口）。 */
+  const HOME_WALK_FPS = 14;
   function buildHomeScene() {
     mainPlayer = Engine.makePlayer();
     homeBgPlayer = null;
     homeT = 0;
     const SQ = ['SQ_01', 'SQ_02'];
     const walkName = ['mainWalk1', 'mainWalk2', 'mainWalk3'].find((n) => Engine.hasAnim(n)) || 'standby';
-    homeWalk = Engine.playAnim(mainPlayer, walkName, { loop: true, fps: 22, layer: 2, sheets: SQ });
+    homeWalk = Engine.playAnim(mainPlayer, walkName, { loop: true, fps: HOME_WALK_FPS, layer: 2, sheets: SQ });
     if (Engine.hasAnim(walkName + '_e')) {
-      Engine.playAnim(mainPlayer, walkName + '_e', { loop: true, fps: 22, layer: 4, sheets: ['main_e1'] });
+      Engine.playAnim(mainPlayer, walkName + '_e', { loop: true, fps: HOME_WALK_FPS, layer: 4, sheets: ['main_e1'] });
     }
   }
   let homeBgPlayer = null, homeWalk = null;
@@ -955,14 +1100,26 @@
          *   "随机挑战战斗结束、弹奖励的时候背景还是战斗画面，应当是主界面"）。 */
         if (!opts.keepScreen) showHome();
         else startHomeScene();
-        opts.onEnd && opts.onEnd(winner, result, loot, reward);
+        /* 现代 canvas 播放器不认 `rewardFor`（经典 SfFight 才在战果页出现前自己算）。
+         * 这里在**确认还是同一个存档**之后再补算一次，交给调用方和收益弹窗：
+         * 既让现代随机挑战的结算能写出经验/金松果，又不会在战斗中途切档时把奖励
+         * 发给新档（`State.fightReward` 读写的是当前全局存档）。`settle` 自己缓存，
+         * 调用方 `onEnd` 再调一次也只是取回同一份。
+         * 经典渲染器已经把 reward 传进来了，不能重复算 —— 有的 `rewardFor` 不缓存。 */
+        let finalReward = reward;
+        if (!classicFight && finalReward == null && typeof opts.rewardFor === 'function') {
+          try { finalReward = opts.rewardFor(winner); } catch (e) {
+            if (window.__errs) window.__errs.push('battle rewardFor: ' + (e && (e.stack || e.message) || e));
+          }
+        }
+        opts.onEnd && opts.onEnd(winner, result, loot, finalReward);
         /* 「战斗拾取」那层复刻自研的收益弹窗**只留给现代界面**。
          * 经典模式（原版 fight 帧）里收获是**画在战果页**上的 —— 原版 `showFightResult()`
          * （MainMovie.as:18703-18840）把这一场的东西填进 `c1/c2/c3` 三格 + `getExp`，
          * 战斗中飘到的道具另有 `获取道具`(3960) 那张小牌子，**没有**任何"结束后再弹一层"
          * 的实现（用户 2026-11 口径："收益弹窗的 ui 风格很明显和 ssfight 版本不符"）。
          * 所以这一档按"原版没有就删掉"处理：不再往原版战果页上盖一层 DOM 弹窗。 */
-        if (!classicFight && UI.classic && UI.classic.pickupResult) UI.classic.pickupResult(loot);
+        if (!classicFight && UI.classic && UI.classic.pickupResult) UI.classic.pickupResult(loot, finalReward, winner);
       },
       onError: () => {
         if (settled) return;

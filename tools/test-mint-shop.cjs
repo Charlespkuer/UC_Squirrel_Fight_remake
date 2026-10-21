@@ -1733,6 +1733,72 @@ hr('12. 100 层循环：商店件数与战斗奖励选项按层分档，每 100 
     assert.ok(!/每 100 层重来一轮/.test(html), '开局页不该再有 100 层说明段');
     assert.ok(/增益集锦/.test(html), '开局页要保留增益图鉴');
     assert.ok(/BOSS 一览/.test(html), '开局页要保留敌人图鉴');
+    const expected = c.TowerData.ENDLESS_BOSS_POOL.filter((p) => p.kind !== 'warlord').length
+      + c.TowerData.WARLORD_POOL.length + 1;
+    assert.equal((html.match(/class="boss-rarity/g) || []).length, expected,
+      'BOSS 一览只列无尽塔 ' + expected + ' 个候选，每张带装备稀有度');
+    for (const w of c.TowerData.WARLORD_POOL) {
+      assert.ok(html.includes(w.name), '图鉴应包含狂战松鼠变体：' + w.name);
+    }
+    const king = (c.TowerData.PATROL.kingPrefix || '') + c.TowerData.PATROL.name;
+    assert.ok(html.includes(king), '图鉴应包含魔王：' + king);
+    assert.ok(/？？？/.test(html), '魔王机制用 ？？？ 隐藏');
+  });
+
+  check('无尽塔 boss 稀有度按轮内层数倾斜：低层偏低、高层偏高、51 层起无最低档', () => {
+    const c = setup(1);
+    const TD = c.TowerData;
+    const tierOf = (e) => {
+      if (e.kind === 'warlord') return 4;
+      const def = e.kind === 'trial' ? TD.TRIAL_BY_ID[e.id] : TD.SQUIRREL_BY_ID[e.id];
+      return TD.GEAR_TIER[def.gear];
+    };
+    let low = 0, high = 0;
+    for (let salt = 0; salt < 500; salt++) {
+      const t = tierOf(TD.bossFor(10, 'r' + salt, true));
+      if (t <= 1) low++;
+      if (t >= 3) high++;
+    }
+    assert.ok(low > high, '第 10 层低稀有度应更多：低 ' + low + ' / 高 ' + high);
+    low = 0; high = 0;
+    for (let salt = 0; salt < 500; salt++) {
+      const t = tierOf(TD.bossFor(90, 'r' + salt, true));
+      if (t <= 1) low++;
+      if (t >= 3) high++;
+    }
+    assert.ok(high > low, '第 90 层高稀有度应更多：低 ' + low + ' / 高 ' + high);
+    for (let salt = 0; salt < 500; salt++) {
+      assert.notEqual(tierOf(TD.bossFor(60, 'r' + salt, true)), 0, '轮内 51 层起不再抽最低装备档');
+    }
+    assert.equal(TD.endlessBossWeights(10)[0], 1, '前 10 层普通装正常权重');
+    assert.equal(TD.endlessBossWeights(15)[0], 0.15, '11~20 层普通装只剩小权重');
+    assert.equal(TD.endlessBossWeights(21)[0], 0, '21 层起普通装归零');
+  });
+
+  check('无尽塔新增普通装 / 传说装松鼠的层数门槛', () => {
+    const c = setup(1);
+    const TD = c.TowerData;
+    const normalIds = TD.SQUIRRELS.filter((s) => TD.GEAR_TIER[s.gear] === 0 && !s.legendary).map((s) => s.id);
+    const legendIds = TD.SQUIRRELS.filter((s) => s.legendary).map((s) => s.id);
+    assert.equal(normalIds.length, 3, '普通装松鼠共 3 只');
+    assert.equal(legendIds.length, 4, '新增传说装松鼠 4 只');
+    const countAt = (layer, ids) => {
+      let n = 0;
+      for (let salt = 0; salt < 600; salt++) {
+        if (ids.includes(TD.bossFor(layer, 'n' + salt, true).id)) n++;
+      }
+      return n;
+    };
+    assert.ok(countAt(5, normalIds) > 0, '前 10 层会出现普通装松鼠');
+    assert.ok(countAt(15, normalIds) > 0, '11~20 层小概率出现普通装松鼠');
+    assert.equal(countAt(21, normalIds), 0, '21 层起普通装松鼠不再出现');
+    assert.equal(countAt(49, legendIds), 0, '传说装松鼠 50 层前不出现');
+    assert.ok(countAt(60, legendIds) > 0, '50~99 层会概率出现传说装松鼠');
+    assert.equal(countAt(100, legendIds), 0, '100 层起传说装松鼠不出现');
+    assert.equal(TD.legendaryChance(49), 0, '49 层传说概率为 0');
+    assert.ok(TD.legendaryChance(50) >= 0.10, '50 层传说概率 10% 起');
+    assert.ok(TD.legendaryChance(99) > TD.legendaryChance(50), '越深传说概率越高');
+    assert.equal(TD.legendaryChance(100), 0, '100 层传说概率归零');
   });
 }
 
@@ -2675,6 +2741,39 @@ check('调试开关「试炼币不消耗」：试炼商店买 / 刷新 / 买铸�
   const mint = T.buyMintSlot(0);
   assert.equal(mint.ok, true, '铸币 0 也能买：' + JSON.stringify(mint));
   assert.equal(run.retryToken, 0, '铸币没被扣');
+});
+
+check('黑装：挑战塔 10/25 层黑卡与 100 层自选箱', () => {
+  const c = setup(1);
+  const T = c.Tower;
+  assert.deepEqual([5, 9, 10, 20, 25, 50, 75, 100].map(T.towerBlackCards),
+    [0, 0, 1, 1, 1, 2, 1, 2], '每 10 层 1 张、每 25 层再 +1；100 层另有自选箱');
+});
+
+check('黑装：无尽塔每累计 50 层 1 张黑卡', () => {
+  const c = setup(1);
+  const T = c.Tower;
+  assert.deepEqual([10, 20, 40, 49, 50, 100, 150].map(T.endlessBlackCardLayer),
+    [false, false, false, false, true, true, true], '50/100/150 层各 1 张，其他层不发');
+});
+
+check('黑装：挑战塔旧进度补发黑卡与 100 层自选箱（不重复发）', () => {
+  const c = setup(1), S = c.State.state(), T = c.Tower;
+  S.tower.maxLayer = 150;
+  S.blackTowerLayer = 0;
+  S.blackBox100 = false;
+  S.props[80] = 0; S.props[89] = 0;
+  const expected = Array.from({ length: 150 }, (_, i) => T.towerBlackCards(i + 1))
+    .reduce((a, b) => a + b, 0);
+  const r = T.settleBlackTowerRewards();
+  assert.equal(r.cards, expected, '150 层共 ' + expected + ' 张');
+  assert.equal(S.props[80], expected);
+  assert.equal(S.props[89], 1, '100 层自选箱补发 1 个');
+  assert.equal(S.blackTowerLayer, 150);
+  const again = T.settleBlackTowerRewards();
+  assert.equal(again.cards, 0, '第二次不重复发卡');
+  assert.equal(again.box, 0, '第二次不重复发自选箱');
+  assert.equal(S.props[80], expected);
 });
 
 /* ============================================================ */

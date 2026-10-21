@@ -1,6 +1,6 @@
 [package]
 name = "ssdz-classic"
-version = "1.0.2"
+version = "1.0.3"
 description = "松鼠大战 怀旧复刻版 —— 轻量桌面窗口（自带迷你文件服务器，直接用游戏目录里的前端）"
 authors = ["ssdz-classic"]
 edition = "2021"
@@ -32,6 +32,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", default-features = false, features = ["wry", "common-controls-v6", "compression"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 桌面导出存档：找系统「下载」目录（Windows 的 Known Folder，兼容 OneDrive 重定向）。
+dirs = "6"
 
 [profile.release]
 codegen-units = 1

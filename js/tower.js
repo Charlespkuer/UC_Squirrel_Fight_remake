@@ -956,7 +956,7 @@
      * 削弱跟着「哪一位大侠」走（HERO_DEBUFF[anim]），所以顺序一变，本层要吃的削弱顺序也变，
      * 但三种削弱的组合固定，玩家看预告里的头像就知道等一下会被套上什么。 */
     const plan = D().heroOrder(layer, salt).map((anim) => ({ kind: 'hero', anim }));
-    // 第 4 场 = 随机 boss（挑战塔 27 选 1；无尽塔 18 选 1，含「狂战松鼠」精英）
+    // 第 4 场 = 随机 boss（挑战塔均匀抽；无尽塔按轮内层数 × 装备档位加权，51 层起无最低档）
     const boss = bossEntry(layer, salt, squirrelsOnly);
     /* 池子里抽到狂战松鼠时，把本层的 layer/salt 挂在 entry 上：
      * 变体（无双/铁壁/血怒/霜狱/无常）由 warlordFor(layer, salt) 决定，
@@ -1037,18 +1037,50 @@
     return { name: sq.name, squirrel: true, gear: sq.gear, elite: elite, type: sq.type,
       mechDesc: sq.mechDesc || '', patternDesc: sq.patternDesc || '', mechs: (sq.mech || []).slice() };
   }
+  /** 进塔页的 BOSS 图鉴：**无尽塔真正会出现的候选**（挑战塔的 NPC 不进来）——
+   *  第 4 场随机池 + 10 层守关的 5 个狂战松鼠变体 + 整百层的魔王；
+   *  每张带「装备稀有度」标签；魔王只写名字，其余全部按用户口径显示「？？？」。
+   *  **排布口径（2026-10 用户口径）**：按卡片上标的「装备稀有度」从低到高
+   *  （普通 → 优秀 → 杰出 → 卓越 → 传说）依次排下来，魔王固定压在最末一位 ——
+   *  这样图鉴本身就是一条稀有度阶梯，玩家不用逐张点开比较。
+   *  同一稀有度里保留「当天稳定洗牌」的相对顺序（换一天看起来不重样），
+   *  但不跨档打乱：排序只在同 tier 内生效，洗牌结果只是同档内的先后。 */
   function bossPool() {
     const TD = D();
-    const layersOf = Object.create(null);
-    for (let layer = 1; layer <= 30; layer++) {
-      const e = TD.bossFor(layer);
-      const key = e.kind + ':' + e.id;
-      (layersOf[key] = layersOf[key] || []).push(layer);
-    }
-    return (TD.BOSS_POOL || []).map((pick) => {
+    const list = [];
+    for (const pick of (TD.ENDLESS_BOSS_POOL || [])) {
+      if (pick.kind === 'warlord') continue;   // 用下面 WARLORD_POOL 的 5 个具名变体替换
       const entry = { kind: pick.kind, id: pick.id };
-      return Object.assign({ kind: pick.kind }, entryInfo(entry), { layers: layersOf[pick.kind + ':' + pick.id] || [] });
+      const tier = TD.bossGearTier ? TD.bossGearTier(pick) : 2;
+      list.push(Object.assign({ kind: pick.kind, tier, rarity: (TD.BOSS_GEAR_RARITY || [])[tier] || '' }, entryInfo(entry)));
+    }
+    for (const w of (TD.WARLORD_POOL || [])) {
+      list.push({
+        kind: 'warlord', id: 'warlord', name: w.name, type: w.type, elite: true, squirrel: true,
+        tier: 4, rarity: (TD.BOSS_GEAR_RARITY || [])[4] || '传说',
+        mechDesc: w.mechDesc, patternDesc: w.patternDesc, mechs: (w.mech || []).slice(),
+      });
+    }
+    const kingName = ((TD.PATROL && TD.PATROL.kingPrefix) || '') + ((TD.PATROL && TD.PATROL.name) || '魔王');
+    list.push({
+      /* 魔王卡在 UI 上要显示成「？？？」，但 `hidden` 是增益标签名、已列为禁止的冗余字段
+       * （tools/test-buff-tags.cjs 会扫页面代码），所以这里用 `secret` 标「剧透封锁」。 */
+      kind: 'patrol', id: 'patrol', name: kingName, type: '？？？', tier: null, rarity: '',
+      secret: true, king: true, mechDesc: '？？？', patternDesc: '？？？', mechs: [],
     });
+    let seed = 0x9e3779b9;
+    const seedText = (typeof State !== 'undefined' && State.localDate) ? State.localDate() : 'endless';
+    for (let i = 0; i < seedText.length; i++) seed = Math.imul(seed ^ seedText.charCodeAt(i), 16777619) >>> 0;
+    for (let i = list.length - 1; i > 0; i--) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      const j = seed % (i + 1);
+      const tmp = list[i]; list[i] = list[j]; list[j] = tmp;
+    }
+    /* 洗牌之后再按稀有度稳定排序（Array#sort 是稳定排序）：
+     * 档位之间严格递增，档位内部保持上面洗出来的当天顺序；魔王（tier 为 null）永远最后。 */
+    const tierOf = (b) => (b.tier == null ? Number.MAX_SAFE_INTEGER : Number(b.tier));
+    list.sort((a, b) => tierOf(a) - tierOf(b));
+    return list;
   }
   /** 入口页预告：当前层的全部对手（与 buildPlan 同源，所以预告 = 实战）。
    *  `mode` 缺省按无尽塔（x0 层的「觐见魔王」三连战只在无尽塔成立）。 */
@@ -1789,6 +1821,7 @@
     if (!lock.ok) return lock;
     const t = tower();
     if (t.run) return { ok: false, msg: '本层挑战尚未结束。' };
+    settleBlackTowerRewards();   // 旧档：先把已爬层的黑卡/100 层自选箱补发掉
     const s = S();
     /* 调试开关「关卡不耗挑战书」同时管挑战塔进层（2026-10 用户口径：
      * 原来那条「爬塔不耗挑战书」是重复的第二条开关，已删）。 */
@@ -2141,7 +2174,7 @@
         delete foe.skillBoost;
         /* 狂战甲的属性部分会被上面那次照抄覆盖掉，所以复制完再落一次（幂等：setFx 是覆盖写）。
          * 等级用 foe.level（buildFoe 按层算出来的敌人等级）—— 狂战套是 50 级档，
-         * 而「巡逻」只在第 41 层起出现，那时 endlessLevel 已经封顶 70，天然满足。 */
+         * 而「巡逻」只在第 41 层起出现，那时 endlessLevel 已经封顶 90，天然满足。 */
         applyPatrolSet(foe, foe.level);
         foe.copiedFromPlayer = { power: foe.power, agility: foe.agility,
           speed: foe.speed, hp: foe.hp, maxHp: foe.maxHp };
@@ -3121,6 +3154,38 @@
    * 【T12】层通关与推进 —— layerClear / advanceLayer
    * ============================================================ */
 
+  /* 挑战塔黑卡（一次性）：每 10 层 1 张，每 25 层再 +1 张；第 100 层首通另有黑装自选箱。 */
+  function towerBlackCards(layer) {
+    layer = Math.max(1, Math.floor(Number(layer) || 1));
+    let n = 0;
+    if (layer % 10 === 0) n += 1;
+    if (layer % 25 === 0) n += 1;
+    return n;
+  }
+  /** 无尽塔黑卡：每累计 50 层 1 张（50/100/150…），周限由 State 管。 */
+  function endlessBlackCardLayer(layer) {
+    layer = Math.max(1, Math.floor(Number(layer) || 1));
+    return layer % 50 === 0;
+  }
+  /** 旧档补发：挑战塔在本功能上线前已经爬过的层，按里程碑一次性补齐。
+   *  `blackTowerLayer` 是已发到第几层的高水位；`blackBox100` 记 100 层自选箱。 */
+  function settleBlackTowerRewards() {
+    const t = tower();
+    const s = S();
+    /* 现代界面已整体删除黑装内容：不补发、不记账。 */
+    if (!State.blackGearEnabled()) return { cards: 0, box: 0 };
+    const paid = Math.max(0, Math.min(t.maxLayer, Math.floor(Number(s.blackTowerLayer) || 0)));
+    let cards = 0;
+    for (let layer = paid + 1; layer <= t.maxLayer; layer++) cards += towerBlackCards(layer);
+    let box = 0;
+    if (t.maxLayer >= 100 && !s.blackBox100) { box = 1; s.blackBox100 = true; }
+    if (cards) s.props[80] = (s.props[80] || 0) + cards;
+    if (box) s.props[89] = (s.props[89] || 0) + box;
+    s.blackTowerLayer = t.maxLayer;
+    if (cards || box) save();
+    return { cards, box };
+  }
+
   function layerClear(mode, run, out, shopPct, mintShop) {
     out.layerComplete = true;
     out.layer = run.layer;
@@ -3140,6 +3205,21 @@
       }
       out.prizes = settlePrizes(run);
       out.gold = gold;
+      /* 黑装：挑战塔一次性里程碑（每 10 层 1 张、每 25 层再 +1；100 层首通给自选箱）。
+       * 现代界面已整体删除黑装内容，只保留塔本身的其它奖励。 */
+      if (State.blackGearEnabled()) {
+        const blackCards = towerBlackCards(run.layer);
+        if (blackCards) {
+          S().props[80] = (S().props[80] || 0) + blackCards;
+          out.black = { cards: blackCards };
+        }
+        S().blackTowerLayer = Math.max(Number(S().blackTowerLayer) || 0, run.layer);
+        if (run.layer === 100) {
+          S().props[89] = (S().props[89] || 0) + 1;
+          S().blackBox100 = true;
+          out.blackBox = 1;
+        }
+      }
       tower().run = null;
       save();
       return out;
@@ -3165,6 +3245,11 @@
       out.milestone = reward;
     }
     out.score = run.score; out.coins = run.coins;
+    /* 黑装：无尽塔**每累计 50 层** 1 张黑卡，周限 3 张（周一重置）。
+     * 现代界面已整体删除黑装内容，不再发卡。 */
+    if (State.blackGearEnabled() && endlessBlackCardLayer(run.layer)) {
+      out.black = State.grantEndlessBlackCard(1);
+    }
     if (run.layer % 5 === 0) {                           // 每 5 层：商店 → 结算点
       /* 【100 层循环】整百层（100 / 200 / 300…）**不开商店**（用户口径）：直接推进到下一层，
        * 于是这一层只有「觐见魔王」三连战，中途不插店。走 advanceLayer 而不是干等 ——
@@ -6342,6 +6427,7 @@
    * ============================================================ */
 
   function towerInfo() {
+    settleBlackTowerRewards();   // 旧档补发：挑战塔黑卡高水位 + 100 层自选箱
     const t = tower(), s = S();
     const layer = t.maxLayer + 1;
     return { maxLayer: t.maxLayer, nextLayer: layer, books: s.props[BOOK_PROP] || 0,
@@ -6781,6 +6867,7 @@
     /* 商店出售 / 交换列表的排序（正序获得 + 附魔不占位的排最后）与排好序的列表。 */
     sortForSell, sellListOf,
     startTowerRun, startEndlessRun, nextBattle, reportBattle, interruptBattle, abandon,
+    towerBlackCards, settleBlackTowerRewards, endlessBlackCardLayer,
     /* 结算预览（只算不改）：放弃本局 / 结算离场的弹窗用它把这一局的账摊开给玩家看。
      * ⚠ 界面是**不带参数**调的，所以这里必须补上「默认取当前无尽塔对局」——
      * 直接导出裸函数的话，无参调用会拿到一个空 run（layer 1 / 0 张），弹窗就全错了。 */

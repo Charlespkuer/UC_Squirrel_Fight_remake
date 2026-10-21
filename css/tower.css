@@ -779,13 +779,23 @@ ul.settle-calc li.total b { font-size: 22px; }
 /* 进塔页底部给「开始冲塔」按钮留出空间（增益集锦最后一行不再被压住） */
 .tower-page.has-footer .tower-main { padding-bottom: 92px; }
 
-/* BOSS 一览：不占头像位，改成紧凑文字卡（一排 3 个，名字一行） */
-.boss-catalog .boss-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.boss-grid li { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; gap: 0 8px;
-  padding: 4px 10px; align-items: center; }
-.boss-grid li b { grid-column: 1; grid-row: 1; font-size: 19px; white-space: nowrap; }
-.boss-grid .tower-plan-type { grid-column: 2; grid-row: 1; justify-self: end; }
-.boss-grid .boss-layers { grid-column: 1 / -1; grid-row: 2; font-size: 14px; color: #8a6a3a; }
+/* BOSS 一览：不占头像位，紧凑文字卡（一排 6 个；名字独占一行，第二行类型 + 装备稀有度） */
+.boss-catalog .boss-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
+.boss-grid li { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto;
+  gap: 0; padding: 2px 6px; align-items: center; min-width: 0; }
+.boss-grid li b { grid-column: 1; grid-row: 1; min-width: 0; font-size: 16px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.boss-grid .tower-plan-type { grid-column: 1; grid-row: 2; justify-self: start; max-width: 56%; font-size: 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.boss-grid .boss-rarity { grid-column: 1; grid-row: 2; justify-self: end; font-size: 12px; line-height: 1.35;
+  padding: 0 6px; border-radius: 7px; color: #fff8e4; background: #8b704d; }
+.boss-grid .boss-rarity.r1 { background: #719a33; }
+.boss-grid .boss-rarity.r2 { background: #389ec0; }
+.boss-grid .boss-rarity.r3 { background: #a966b9; }
+.boss-grid .boss-rarity.r4 { background: #e8842c; }
+.boss-grid .boss-rarity.hidden { background: #5f5142; letter-spacing: 1px; }
+.boss-grid li.king { border-color: #c0392b; background: #fff0e8; }
+.boss-grid li.king b { color: #8a2f2f; }
 .boss-grid .foe-portrait { display: none; }
 /* 竞技场报名页的自动喝药说明 */
 .extra-arena-hint { margin-top: 6px; padding: 4px 10px; border-radius: 12px; background: #eef7e2; border: 2px solid #b7d096; color: #3f6a1f; font-size: 17px; }

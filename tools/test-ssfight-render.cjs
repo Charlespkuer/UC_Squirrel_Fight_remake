@@ -392,6 +392,12 @@ const { buildFrames } = SfRender;
     'anchorToBBox 等包围盒期间要先隐藏，避免装备在屏幕上方闪一下');
   assert.ok(/bboxCache/.test(anchor) && /cacheKey/.test(anchor),
     '装备包围盒要按「元件号@帧号」缓存：每回合重建挂点时不能再等一帧、把装备藏一下');
+  /* 战斗角色是 `attachChild(7689/6532)` 再逐层 `showFrame` 建出来的：挂点出生在
+   * 同一个同步任务里、`isConnected=false`，`getBBox()` 量为 0。只排 rAF 的话，
+   * 隐藏标签页（rAF 被节流/暂停）永远补不上锚点 —— 身体装备就会停在左上偏一个包围盒原点的位置
+   * （用户 2026-10 报的"战斗中的身体装备贴图完全没有合身"）。必须先用 microtask 同步补量。 */
+  assert.ok(/isConnected === false[\s\S]{0,400}?Promise\.resolve\(\)\.then/.test(anchor),
+    '挂点在同步构建中（isConnected=false）要先用 microtask 补量包围盒，不能只依赖 rAF');
   const show = rd.slice(rd.indexOf('MovieClip.prototype.showFrame'), rd.indexOf('MovieClip.prototype.tagFor'));
   assert.ok(/this\.placeFrameNode\(target\);[\s\S]{0,700}?onClip\(clip\)/.test(show),
     'onClip 必须在节点进文档后调用，否则 setSymbol 里的 getBBox 仍会量不到');
@@ -528,6 +534,12 @@ const { buildFrames } = SfRender;
   assert.ok(/case REL\.prentice: return 3;/.test(mc), '徒弟走 case 3（帧 6..9，relation 1 → actionType 3）');
   assert.ok(/case REL\.master: return 2;/.test(mc), '师父走 case 2（帧 20..24，relation 2 → actionType 2）');
   assert.ok(/default: return 1;/.test(mc), '好友（默认档）走 case 1（帧 1..4）');
+  /* 随机页的对手在原版是**陌生人**：`getFriends("random")` 把每条都强制成 `relation = 3`
+   * （MainMovie.as:2633-2636），于是菜单走 case 5 的原版画稿（帧 11..14，第四颗「加好友」）。
+   * 复刻的 genAI 卡片没有 `kind`，旧写法落到默认好友档 → 菜单画的是「收为徒弟」（用户 2026-10 报的）。 */
+  const relFn = ch.slice(ch.indexOf('const relOf ='), ch.indexOf('/** `s1..s4`'));
+  assert.ok(/current\.tab === 'random'\) return REL\.stranger;/.test(relFn),
+    '随机页的对手要按原版当陌生人（case 5 画稿的第四颗才是「加好友」）');
   assert.ok(!/const MENU_BASE = \{/.test(ch),
     '不许退回"起点帧号当键"的 MENU_BASE 老写法（木人那一档会选不中 → 菜单变成陌生人）');
   /* 每档的 base 必须与 myDraw 的偏移一致：1 / 20 / 6 / 15 / 11 / 26。 */
@@ -558,8 +570,15 @@ const { buildFrames } = SfRender;
    *  但鼠标移开那个选项的时候，挑战ta又会亮，直接固定最后一个悬停的对象亮就行。"
    * 所以 `mouseleave` 里不再有 `menuSetFrame`，改成留住 `lastD`。 */
   const sf = ch.slice(ch.indexOf('async function showFriendMenu('), ch.indexOf('function menuMap('));
-  assert.ok(/menuSetFrame\(sub, layout, lastD\);/.test(sf),
+  assert.ok(/setFrame\(lastD\);/.test(sf),
     '菜单打开时要先拨到"第 1 行被选中"那一帧（原版 seeFriend 进来 jiantou_WZ_Y2 = 1）');
+  /* 随机页的陌生人档面板底下有 uid 留白：改用好友档紧凑面板，只换第四颗字形。 */
+  assert.ok(/let compactRandom = c === 5 && page\.tab === 'random';/.test(sf) &&
+    /MENU_LAYOUT\[1\]/.test(sf) && /paintAddFriendGlyph\(sub\)/.test(sf) &&
+    /data-sf-addfriend-glyph/.test(ch) &&
+    /data-sf-addfriend-hide/.test(ch) &&
+    /querySelectorAll\('\[data-sf-addfriend-hide\]'\)/.test(ch),
+    '随机页菜单要用好友档紧凑面板 + 原版「加好友」字形；重复拨帧要先复原上一次再重贴');
   /* 原版没有主动拜师按钮（师父由服务端 relation 下发），经典好友菜单补一颗。 */
   assert.ok(/sf-master-btn/.test(sf) && /function askMaster\(foe\)/.test(ch),
     '经典好友动作菜单要提供主动拜师入口');
@@ -605,6 +624,22 @@ const { buildFrames } = SfRender;
   assert.ok(/if \(!opts\.keepScreen\) showHome\(\);\s*\n\s*else startHomeScene\(\);/.test(end),
     'keepScreen（连战 / 竞技场 / 随机挑战）收尾必须 `else startHomeScene()`：不换 #ui 里的页面，' +
     '但 mode 拨回 home、canvas 切回主界面场景');
+  assert.ok(/UI\.classic\.pickupResult\(loot, finalReward, winner\)/.test(end),
+    '现代界面的收益弹窗要把 reward（经验 / 金松果 / 升级）和胜负一起交给 pickupResult，不能只写漂浮物');
+  assert.ok(/!classicFight && finalReward == null && typeof opts\.rewardFor === 'function'/.test(end)
+    && end.indexOf('if (State.state() !== S)') < end.indexOf('finalReward = opts.rewardFor(winner)'),
+    '现代 canvas 战斗要在确认仍是同一个存档之后补算 rewardFor，避免战斗中切档把奖励发给新档');
+  const cuEnd = fs.readFileSync(path.join(ROOT, 'js/classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/战斗奖励：经验 \+/.test(cuEnd) && /战斗拾取：/.test(cuEnd),
+    'pickupResult 要同时写「战斗奖励」和「战斗拾取」两包收益');
+  assert.ok(/battle-outcome/.test(cuEnd) && /胜 利！/.test(cuEnd) && /战 败…/.test(cuEnd),
+    'pickupResult 要写胜利/失败大字，且升级弹窗已开着时也能插到最上面');
+  /* 关卡战果弹窗自己已经写了「胜 利！」：`pickupResult` 只补收益，不能再插第二个大字。
+   * 同时 stageResult 的 message 是内部拼的 HTML（含 <br>/<b>），不能再被 esc 成可见标签。 */
+  const stageFn = cuEnd.slice(cuEnd.indexOf('function stageResult('), cuEnd.indexOf('function ', cuEnd.indexOf('function stageResult(') + 10));
+  assert.ok(/if \(outcome && !body\.querySelector\('\.result-title'\)\)/.test(cuEnd) &&
+    /result-title battle-outcome/.test(stageFn) && /'<p>'\+message\+'<\/p>'/.test(stageFn),
+    '关卡战果只保留一个胜利大字，且说明里的 <br>/<b> 要按 HTML 排版，不能再叠第二个大字');
   const i = mn.indexOf('function startHomeScene()');
   const scene = mn.slice(i, mn.indexOf('function showHome() {', i));
   assert.ok(/mode = 'home';/.test(scene) && /cancelAnimationFrame\(rafId\)/.test(scene) && /requestAnimationFrame\(loop\)/.test(scene),
@@ -728,7 +763,10 @@ async function checkClassicViewLifecycle() {
       return { x, y, width: Math.max(...boxes.map(b => b.x + b.width)) - x,
         height: Math.max(...boxes.map(b => b.y + b.height)) - y };
     }
-    getBoundingClientRect() { return { x: 0, y: 0, left: 0, top: 0, width: 320, height: 196 }; }
+    getBoundingClientRect() {
+      if (this.__rect) return this.__rect;
+      return { x: 0, y: 0, left: 0, top: 0, width: 320, height: 196 };
+    }
     getScreenCTM() { return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }; }
   }
   const body = new Node('body'), timers = new Map(), timeouts = new Set(); let timerSeq = 0;
@@ -753,6 +791,7 @@ async function checkClassicViewLifecycle() {
   const svg = body.appendChild(new Node('svg'));
   const routed = (id, x, w, parent) => {
     const g = svg.appendChild(new Node('g'));
+    g.__rect = { x, y: 0, left: x, top: 0, width: w, height: 100, right: x + w, bottom: 100 };
     return { tag: { id }, parent, g, __hitBox: { x, y: 0, w, h: 100 } };
   };
   const parent = routed('parent', 0, 100), child = routed('child', 10, 10, parent), next = routed('next', 200, 100);
@@ -762,6 +801,37 @@ async function checkClassicViewLifecycle() {
   assert.equal(router.hit(260, 50).clip, next, '接管后新注册的按钮必须能被命中');
   parent.g.style.pointerEvents = 'auto'; toolkit.registerHit(parent);
   assert.equal(parent.g.style.pointerEvents, 'none', '每次注册都关闭原生事件，不能因已有路由项而早返漏设');
+
+  /* iOS 15：有的 WKWebView 只合成 click、不派发 pointerdown/up（Safari 在 SVG 上的
+   * 既有行为）。路由不能因为 down 为空就把轻点丢掉 —— 否则标题页（DOM）能点、
+   * 经典界面的「开始挑战」等 SVG 按钮全都没反应。鼠标仍必须按下/抬起落在同一颗上。 */
+  env.ontouchstart = null;
+  let touchClicks = 0;
+  parent.g.addEventListener('click', () => { touchClicks += 1; });
+  svg.dispatchEvent({ type: 'click', clientX: 60, clientY: 50, detail: 1 });
+  assert.equal(touchClicks, 1, '触摸设备上没有 pointerdown 的原生 click 也要按触点放行');
+  delete env.ontouchstart;
+  svg.dispatchEvent({ type: 'click', clientX: 60, clientY: 50, detail: 1 });
+  assert.equal(touchClicks, 1, '非触摸设备仍保留“按下目标一致”校验，不能放宽鼠标拖拽');
+
+  /* iOS 15 的 WebKit 209220：getScreenCTM 不含祖先 CSS transform 的 scale。
+   * 路由/引导改成 getBoundingClientRect + viewBox 后，CTM 再怎么错也不能影响命中。 */
+  const wrongCTM = () => ({ a: 3.65, b: 0, c: 0, d: 3.65, e: 0, f: 34 });
+  svg.getScreenCTM = wrongCTM;
+  for (const e of router.list) e.clip.g.getScreenCTM = wrongCTM;
+  assert.equal(router.hit(60, 50).clip, parent, 'getScreenCTM 漏掉祖先 scale 时仍要按屏幕矩形命中');
+  assert.equal(router.hit(260, 50).clip, next, 'CTM 错误时右侧按钮也必须命中');
+
+  /* 装饰层必须显式把整棵 SVG 子树设为 pointer-events:none（iOS 15 不保证继承），
+   * 否则引导的手指/金环会压住「开始挑战」。 */
+  const cssSrc = fs.readFileSync(path.join(ROOT, 'css/classic-refine.css'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(cssSrc, /\.sf-clickthrough\s*,\s*\.sf-clickthrough \*\s*\{[^}]*pointer-events:none!important/,
+    'click-through 装饰层必须连后代一起关掉命中');
+  const guideSrc = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-guide.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(guideSrc, /sf-guide-view sf-clickthrough/, '新手引导层必须标记为 click-through');
+  assert.ok(!/svg\.getScreenCTM/.test(guideSrc), '引导定位不能再走 getScreenCTM（iOS 15 会漏掉祖先 CSS scale）');
+  const villageSrc = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-village.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(villageSrc, /ssfight-pet-art sf-clickthrough/, '幻兽立绘等装饰 SVG 层也必须标记为 click-through');
 
   // 用真实两帧格子换帧，壳保持稳定；附件始终位于时间轴卡底之上。
   await render.loadExtra('tags-status.json');
@@ -1273,6 +1343,13 @@ async function checkClassicFight() {
     '伤害数字模板要按飘字所在的那一侧选，不能按加血/扣血选');
   assert.ok(/Math\.floor\(Math\.random\(\) \* 30\)/.test(uf) && !/Math\.random\(\) \* 60/.test(uf),
     '飘字抖动照 showBlood：只有横向 random(30)，没有纵向 random(60)');
+  /* ②b⁗⁗ 幸运一击的多球分裂（`MainMovie.as:15710 boom()` / `sprite6122` 第 31 帧）：
+   *   sim 按协议第 15 字段发 `boomCount`，战斗层按它复制球元件、每 100ms 亮一个并分段飘字。
+   *   以前两处都没有 —— 伤害一次飘完、没有多出来的球（第 257 批自标的功能缺口）。 */
+  const simCase23 = fs.readFileSync(path.join(ROOT, 'js', 'sim.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/r\.boomCount = mult;/.test(simCase23) && /function boomSplit\(rec, attacker, r, side, acts, aborted\)/.test(uf) &&
+    /boomSplit\(rec, attacker, r, def, acts, aborted\)/.test(uf) && /\}, i \* 100\);/.test(uf),
+    '幸运一击要按 boomCount 走原版 boom() 的多球分裂（每 100ms 一个球 + 分段飘字）');
   assert.equal(JSON.stringify(SfFight._floatKind('heal')), JSON.stringify({ frame: 1, symbol: 2, font: 3 }),
     '回血：加号字形 + 第三套字');
   assert.equal(JSON.stringify(SfFight._floatKind('back')), JSON.stringify({ frame: 2, symbol: 1, font: 2 }),
@@ -1699,6 +1776,20 @@ function checkBalanceAndRewardContracts() {
   const uf = read('js/ssfight/ui-fight.js');
   assert.ok(/orangeFrameById/.test(uf) && /orange && t\.orangeFrameById/.test(uf),
     '战斗内玩家/对手的橙装也要走 q4 橙稿帧');
+  /* 身体装备（gearBody / gearArm）只能走 `setSymbol(..., 'topleft')` 的包围盒锚点。
+   * `mirrorInPlace` 写的是 `translate(2cx) scale(-1,1)`，会把这份锚点整段覆盖掉，
+   * 贴图整体左上偏一个包围盒原点 —— 用户 2026-10 报的"战斗里身体装备完全没合身、
+   * 旁边多出一段手臂"就是这条。朝向由敌方整棵 7689 的父级镜像负责，不再二次翻转。 */
+  assert.ok(/clip\.setSymbol\(p\.symbol, p\.frame, 1, 'topleft', ''\)/.test(uf)
+    && !/if \(p\.type === 2\) mirrorInPlace\(clip\)/.test(uf),
+    '战斗里身体装备不能再二次镜像：会覆盖 setSymbol 的 topleft 锚点，贴图整体偏移');
+  /* 手臂甲（gearArm 2008）原版在两只手臂骨上各贴一条；战斗里挂点整体在身体上层，
+   * 远侧那条会从躯干旁露出一截，看起来像身体装备附带了一条手臂（敌方镜像后尤其明显）。
+   * `markArmGear` 按同一动作里的手臂骨深度只保留近侧（深度最小）一条。 */
+  assert.ok(/function markArmGear\(clip, retry\)/.test(uf)
+    && /String\(p\.symbol\) === '2008'\) markArmGear/.test(uf)
+    && /c\.__gearFar/.test(uf) && /__armGear/.test(uf),
+    '战斗里手臂甲只贴近侧一条：远侧那条要从视觉上隐藏，不能留下“多出来的一条手臂”');
   assert.ok(/rec\.pickups && !rec\.o\.skipChest/.test(uf),
     'skipChest 时不能进开宝箱（竞技场/天梯/关卡连战）');
   assert.ok(/function mountChestConfirm\(chest, finish\)/.test(uf)
@@ -1749,8 +1840,16 @@ function checkHeroAtlasFilling() {
     && /function makeNpcFighter\([\s\S]{0,500}?npcAtlasReady\(npcType\)/.test(uf),
     '三侠优先走现代图集，图集没到时才退回 7689 静态稿');
   assert.ok(/Engine\.drawFrame\(ctx, frame, \{ sheets: NPC_SHEETS\[npcType\] \}\)/.test(uf)
-    && /foreignObject/.test(uf) && /canvas\.width = 1170; canvas\.height = 690;/.test(uf),
-    '现代 1170×690 动画画进透明画布，再铺到经典 320×196 舞台');
+    && /canvas\.width = 1170; canvas\.height = 690;/.test(uf)
+    && /host\.appendChild\(canvas\)/.test(uf) && /function layoutCanvas\(\)/.test(uf)
+    && /canvas\.width \/ 1170, 0, 0, canvas\.height \/ 690/.test(uf)
+    && !/createElementNS\(NS, 'foreignObject'\)/.test(uf),
+    '现代 1170×690 动画要画进叠在 HTML 宿主上的普通 canvas；不能再用 foreignObject + canvas（WebKit 合成层会丢缩放/位移）');
+  assert.ok(/function makeBattleTopLayer\(/.test(uf) && /topLayer\.appendChild\(sk\.g\)/.test(uf)
+    && /z-index:3/.test(uf),
+    '跳过键要移到图集 canvas 之上的覆盖 SVG 里，保持原版层序/画稿/热区');
+  assert.ok(!/foreignObject/.test(read('js/battle.js')),
+    '现代战斗播放器是普通 #stage canvas，不能引入 foreignObject（iOS WebKit 合成层会丢缩放/位移）');
   assert.ok(/NPC_HIT_FRAME\[name\]/.test(uf) && /npcEffectName\(npcType, key\)/.test(uf)
     && /Engine\.loadSheets\(\[\.\.\.new Set\(ids\)\]\)/.test(uf),
     '命中帧、攻击特效与图集加载都接现代播放器的表');
@@ -1953,7 +2052,7 @@ function checkClassicSystemStyle() {
   assert.match(sysBody, /wireSystemFeedback\(p\)/, '系统页接公共选中/点击反馈');
   assert.match(ui, /function wireSystemFeedback\(root\)[\s\S]{0,900}?f\.bind\(n[\s\S]{0,900}?f\.pick\(t\)/,
     '系统分组页要绑定悬停/按下并补点击回弹');
-  assert.match(ui, /function openHelp\(\)[\s\S]{0,1800}?wireSystemFeedback\(p\)/, '帮助页同步反馈');
+  assert.match(ui, /function openHelp\(\)[\s\S]{0,2400}?wireSystemFeedback\(p\)/, '帮助页同步反馈');
   assert.match(extras, /C\(\)\.wireSystemFeedback\(p\)/, '超级松鼠页同步反馈');
   assert.match(css, /\.classic-tabs\[data-group="system"\] \.uc-tab\{font-size:48px\}/,
     '系统 / 帮助 / 超级松鼠的页签字号略微缩小');
@@ -2125,8 +2224,8 @@ function checkBagDetailClicks() {
     !/clickedProp/.test(cu) && !/prop-sell/.test(cu) && !/可回收/.test(cu) &&
     /currentUiMode\(\) !== 'classic'/.test(cu) && /data-sell-prop/.test(cu) &&
     /State\.sellProp\(id, 1\)/.test(cu) &&
-    /addRing\(ir, before \|\| nodes\[0\] \|\| null, stepNo === 7 \? -16 : 0\);/.test(g),
-    '经典背包/商店要鼠标移入即绿色选中、单击直接开二级窗；经典不显示卖出，现代背包保留卖出；f7 金环仍左移'
+    /addRing\(ir, 0\);/.test(g),
+    '经典背包/商店要鼠标移入即绿色选中、单击直接开二级窗；经典不显示卖出，现代背包保留卖出；f7 金环按真实道具中心（不再按屏幕像素硬左移）'
   );
 }
 
@@ -2154,6 +2253,15 @@ function checkGuideLateSteps() {
     /SfGuide\.onLevelupDone\(options\.ups\)/.test(fr) &&
     /#ui>\.sf-guide-view\.above\{z-index:65\}/.test(css),
     '引导 8~26 要接背包详情/使用/提示、升级页「确定」、状态页页签与村庄四地点，并按等级事件推进'
+  );
+  /* 安卓 guide 层的 letterbox：手指/金环必须用 getScreenCTM 反算，并钉到真实首页按钮。 */
+  assert.ok(
+    /const HOME_TARGETS = \{/.test(g) &&
+    /function homeTargetRect\(stepNo\)/.test(g) &&
+    /getScreenCTM\(\)/.test(g) &&
+    /const reflow = \(\) =>/.test(g) &&
+    /window\.addEventListener\('resize', reflow\)/.test(g),
+    '安卓引导的手指/金环要按 getScreenCTM 换算并钉到真实按钮，窗口变化要重算'
   );
 }
 
@@ -2297,10 +2405,10 @@ function checkMessageRankAndTowerCg() {
     /const parts = \['mc_head'[^;]*'ikNode_9'\]/.test(tw) && /keepRoots/.test(tw) &&
     /info && info\.gear/.test(tw) && /M-0\.15,-9Q/.test(tw) && /M-48\.65,-50\.85/.test(tw) &&
     /planHtml\(info\.preview, ' horizontal'\)/.test(tw) &&
-    /classic-tower \.tower-plan:not\(\.horizontal\)\{display:flex!important;flex-direction:column!important/.test(css) &&
+    /classic-tower \.tower-plan:not\(\.horizontal\):not\(\.boss-grid\)\{display:flex!important;flex-direction:column!important/.test(css) &&
     /classic-tower \.tower-plan \.foe-portrait:has\(\.sf-classic-foe\)\{[^}]*background:rgba\(255,248,230,\.9\)!important[^}]*border:2px solid #e2c68f!important/.test(css) &&
-    /classic-tower \.tower-plan:not\(\.horizontal\) li\{display:grid!important;grid-template-columns:92px minmax/.test(css) &&
-    /classic-tower \.tower-plan:not\(\.horizontal\) li > \.tower-plan-type\{[^}]*max-width:100%/.test(css) && /white-space:normal!important/.test(css) &&
+    /classic-tower \.tower-plan:not\(\.horizontal\):not\(\.boss-grid\) li\{display:grid!important;grid-template-columns:92px minmax/.test(css) &&
+    /classic-tower \.tower-plan:not\(\.horizontal\):not\(\.boss-grid\) li > \.tower-plan-type\{[^}]*max-width:100%/.test(css) && /white-space:normal!important/.test(css) &&
     /function wireRowHover\(/.test(msg) && /addEventListener\('mousemove'/.test(msg) && /setRow\(n, inside\)/.test(msg) &&
     /function claimRankCup\(/.test(ce) && /rankCupClaimWeek/.test(st) && /claimRankCup/.test(ch) && /rank-claim/.test(ch) &&
     /hideVictoryCg/.test(ff) && /hideVictoryCg: opts\.hideVictoryCg/.test(mn) && /hideVictoryCg: classicTower\(\)/.test(tw),
@@ -2333,7 +2441,10 @@ function checkClassicComposeFlow() {
     /function openPropEntry\(id\)[\s\S]{0,500}?SfCompose\.open\(id/.test(cu) &&
     /const choose=\(\)=>\{ selectProp\(id\); openPropEntry\(id\); \}/.test(cu) &&
     /if \(!shop && classic && window\.SfCompose/.test(cu) &&
-    /SfCompose\.showGearResult\(r\.gear, \{ onClose: backToWork, playCg: true \}\)/.test(st) &&
+    /* 融合结果页关闭后要**记下新装备的焦点页**（经典「更换装备」6 格/页，产物在最后一页），
+     * 再回工作台 —— 所以 onClose 走 afterResult 而不是直接 backToWork。 */
+    /SfCompose\.showGearResult\(r\.gear, \{ onClose: afterResult, playCg: true \}\)/.test(st) &&
+    /function focusGear\(key\)/.test(st) &&
     /opts\.playCg/.test(compose) && /frame: playCg \? 1 : 44/.test(compose) && !/playFusing/.test(st) &&
     /融合即将开始，\\n本次需要/.test(st) &&
     /function wrapFusionHelp/.test(st) &&

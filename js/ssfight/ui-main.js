@@ -546,6 +546,26 @@
     const vb = String(svg.getAttribute('viewBox') || '0 0 320 196').split(/\s+/).map(Number);
     return (vb[2] && r.width) ? r.width / vb[2] : 0;
   }
+  /** SVG 用户坐标 → 屏幕坐标：用 SVG 的实测矩形 + viewBox + preserveAspectRatio 反算。
+   *  ⚠ 不走 getScreenCTM：iOS 15 的 WebKit 209220 会漏掉祖先 `#ui` 的 CSS scale，
+   *  算出来的药丸/角标位置会整体缩到左上角。 */
+  function userToClient(svg, x, y) {
+    try {
+      const r = svg.getBoundingClientRect();
+      const vb = svg.viewBox && svg.viewBox.baseVal;
+      if (!r || !vb || !r.width || !r.height || !vb.width || !vb.height) return null;
+      const par = String(svg.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+      const scale = /\bslice\b/.test(par) ? Math.max(r.width / vb.width, r.height / vb.height)
+        : Math.min(r.width / vb.width, r.height / vb.height);
+      if (!(scale > 0)) return null;
+      const ax = /xMin/.test(par) ? 0 : /xMax/.test(par) ? 1 : 0.5;
+      const ay = /YMin/.test(par) ? 0 : /YMax/.test(par) ? 1 : 0.5;
+      return {
+        x: r.left + (r.width - vb.width * scale) * ax + (x - vb.x) * scale,
+        y: r.top + (r.height - vb.height * scale) * ay + (y - vb.y) * scale,
+      };
+    } catch (e) { return null; }
+  }
   function stateIconsHost(container) {
     if (!container) return null;
     let host = container.querySelector('.ssfight-states');
@@ -616,7 +636,9 @@
       const sx = sx0(clip), sy = sy0(clip);                     // 画稿原点在本层坐标里（导出数据就是 0）
       const px = m[4] + m[0] * sx + m[2] * sy;                  // → 父级坐标
       const py = m[5] + m[1] * sx + m[3] * sy;
-      const p = toScreen(clip.parent, px, py);                  // → 屏幕坐标（槽左上角）
+      /* c1/c2/c3 的父级是 `main`（base 矩阵是单位矩阵），px/py 就是舞台用户坐标；
+       * 走 userToClient 避开 iOS 15 漏掉 #ui scale 的 getScreenCTM。 */
+      const p = (clip.parent === main && userToClient(view.root, px, py)) || toScreen(clip.parent, px, py);
       /* k 已经是「SVG 用户单位 → 屏幕像素」，所以 slotSide 本身就是屏幕像素；
        * 不要再乘 hostScale（那是 CSS→屏幕的缩放）。多乘一次会让药丸再缩小 0.55 倍。 */
       const slotSide = STATE_SLOT * k * localScale(clip.parent) * localScale(clip);
@@ -1119,6 +1141,15 @@
    *   `.uc-pop.sf-hover`（与 `:hover` 同款声明）承担；按下回弹仍由 `.pressed` 承担。
    * ========================================================== */
   const ROUTER_KEY = '__sfRouter';
+  /** 触摸设备判定（只用于放行“没有 pointerdown 的原生 click”这一条 iOS 兜底）。
+   *  桌面鼠标仍走原来的“按下/抬起必须落在同一个元件上”的校验，避免拖拽误触。 */
+  function touchCapable() {
+    try {
+      return ('ontouchstart' in window) ||
+        ((window.navigator && window.navigator.maxTouchPoints) || 0) > 0 ||
+        !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    } catch (e) { return false; }
+  }
   /** 两个包围盒求并集（`{x,y,w,h}`） */
   function unionBox(a, b) {
     if (!a) return b ? { x: b.x, y: b.y, w: b.w, h: b.h } : null;
@@ -1153,6 +1184,44 @@
     if (svg[ROUTER_KEY]) return svg[ROUTER_KEY];
     const list = [];
     const r = { svg: svg, list: list, hovered: null, downOn: null };
+    /** 元件在**屏幕坐标**里的框：直接问浏览器，不再经 `getScreenCTM()` 换算。
+     *  WebKit 209220（iOS 15.5/15.6 仍复现）：getScreenCTM 漏掉祖先 CSS transform 的
+     *  scale，`#ui` 的缩放不会被算进去；热区一旦用 CTM 算，看着在按钮上、判定却在
+     *  别处，表现就是“体力条（DOM）能点、开始挑战（SVG）点不动”。
+     *  `useHit` = 量透明热区（底栏五键的固定选择面积）；否则先暂时藏掉热区，
+     *  只量画稿本身，避免把上次铺的热区越量越大。 */
+    const screenBox = (clip, useHit) => {
+      try {
+        const hit = clip.__hitArea;
+        if (useHit && hit && hit.getBoundingClientRect) {
+          const r = hit.getBoundingClientRect();
+          if (r && r.width > 0 && r.height > 0) return { x: r.left, y: r.top, w: r.width, h: r.height };
+        }
+        const old = hit && hit.style ? hit.style.display : null;
+        if (hit && hit.style) hit.style.display = 'none';
+        let r = null;
+        try { r = clip.g.getBoundingClientRect(); } finally {
+          if (hit && hit.style) hit.style.display = old;
+        }
+        if (r && r.width > 0 && r.height > 0) return { x: r.left, y: r.top, w: r.width, h: r.height };
+      } catch (e) {}
+      return null;
+    };
+    /** 指针直接落在某个已登记元件的**画面像素**上：用浏览器的命中测试找归属。
+     *  比“按包围盒猜”更准，也不依赖 CTM；透明热区/空白处再由下面的盒子逻辑兜底。 */
+    const domPick = (cx, cy) => {
+      if (typeof document === 'undefined' || !document.elementFromPoint) return null;
+      let el = null;
+      try { el = document.elementFromPoint(cx, cy); } catch (e) { return null; }
+      if (!el || !(el === svg || svg.contains(el))) return null;
+      for (let n = el; n && n.nodeType === 1; n = n.parentNode) {
+        for (const e of list) {
+          if (e.clip && e.clip.g === n && e.clip.g.isConnected !== false) return e;
+        }
+        if (n === svg) break;
+      }
+      return null;
+    };
     /** 按当前布局刷新每个元件的"内容框 / 热区"（屏幕坐标）。每次指针事件都刷 —— 元件数很少，
      *  而窗口缩放、翻页、换帧都会让旧的盒子失效，缓存反而容易出错。 */
     const refresh = () => {
@@ -1172,19 +1241,18 @@
               (n.getAttribute && n.getAttribute('visibility') === 'hidden')) { hidden = true; break; }
         }
         if (hidden) { e.content = e.pad = null; continue; }
-        /* **固定选择面积**（底栏五键）：内容框与热区都用它，不用 pad。
-         * 于是"面积外"就是真的选不中，五块之间也没有重叠可以抢。 */
-        const fx = e.clip.__fixedHit;
-        if (fx) {
-          e.content = boxToClient(e.clip, { x: fx.x, y: fx.y, w: fx.w, h: fx.h });
+        /* **固定选择面积**（底栏五键）：量那块透明热区本身；它已经按"相邻中点"切好，
+         * 不用 pad，五块之间也没有重叠可以抢。 */
+        if (e.clip.__fixedHit) {
+          e.content = screenBox(e.clip, true);
           e.pad = null;
           continue;
         }
-        const box = contentBox(e.clip, e.animate);
-        e.content = boxToClient(e.clip, box);
+        const box = screenBox(e.clip, false);
+        e.content = box;
         if (box) {
-          const px = Math.max(box.w * HIT_PAD, HIT_PAD_MIN), py = Math.max(box.h * HIT_PAD, HIT_PAD_MIN);
-          e.pad = boxToClient(e.clip, { x: box.x - px, y: box.y - py, w: box.w + px * 2, h: box.h + py * 2 });
+          const px = Math.max(box.w * HIT_PAD, HIT_PAD_MIN * 2), py = Math.max(box.h * HIT_PAD, HIT_PAD_MIN * 2);
+          e.pad = { x: box.x - px, y: box.y - py, w: box.w + px * 2, h: box.h + py * 2 };
         } else e.pad = null;
       }
     };
@@ -1200,6 +1268,10 @@
         if (!e.clip.__fixedHit) continue;
         if (inBox(e.content, cx, cy)) return e;
       }
+      /* 浏览器实际命中的画面像素优先：它不受 CTM 换算误差影响，也能正确处理
+       * “大立绘后面藏着小按钮”这种遮挡关系。 */
+      const dom = domPick(cx, cy);
+      if (dom) return dom;
       let best = null, bestArea = Infinity;
       for (const e of list) {
         if (!e.clip.g || e.clip.g.isConnected === false) continue;
@@ -1294,12 +1366,22 @@
     };
     svg.addEventListener('pointerup', release);
     svg.addEventListener('click', (ev) => {
+      /* touch-fallback 直接点在按钮 <g> 上时已经走过按钮自己的监听，别再来一次。 */
+      if (ev.__sfSynth) return;
       r.move(ev.clientX, ev.clientY);
       const e = r.hovered;
       const down = r.releasedOn || r.downOn;
       r.downOn = null;
       r.releasedOn = null;
-      if (!e || (ev.detail > 0 && (r.cancelled || down !== e))) return;
+      if (!e) return;
+      /* ⚠ iOS 15 的 WKWebView 有一类“只合成 click、不派发 pointerdown/up”的轻点
+       * （Safari 在 SVG 上的既有行为，见 touch-fallback 的注释）。这时 down 为空，
+       * 旧代码会把它当成“按下目标不一致”直接丢掉 —— 表现就是 DOM 按钮（标题页、
+       * 体力条）正常，而经典界面的 SVG 按钮（开始挑战 / 道具 / 状态…）全都没反应。
+       * 触点已经由上面的 `r.move()` 重新命中到 e，所以在触摸设备上按坐标放行；
+       * 鼠标拖拽仍保留 down === e 的校验（down 非空且不一致时下面照样 return）。 */
+      const touchClickWithoutDown = ev.detail > 0 && !down && !r.cancelled && touchCapable();
+      if (ev.detail > 0 && !touchClickWithoutDown && (r.cancelled || down !== e)) return;
       fire(e, 'click', { clientX: ev.clientX, clientY: ev.clientY, button: 0, detail: 1 });
     });
     svg[ROUTER_KEY] = r;
@@ -1934,7 +2016,7 @@
       let badge = host.querySelector('.ssfight-home-level[data-building="' + key + '"]');
       if (!badge) {
         badge = document.createElement('div');
-        badge.className = 'ssfight-home-level';
+        badge.className = 'ssfight-home-level sf-clickthrough';
         badge.setAttribute('data-building', key);
         host.appendChild(badge);
       }

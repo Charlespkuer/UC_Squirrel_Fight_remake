@@ -1307,6 +1307,8 @@ test('需求29：两座塔页面的「返回」都回关卡页（上一级界面
   const ctx = vm.createContext({
     modal: (t, html, buttons) => { calls.push({ t: t, buttons: buttons || [] }); return { close() {}, element: null }; },
     C: () => ({ home: () => calls.push({ nav: 'home' }) }),
+    /* towerClear 在「层数通关」里要判黑装开关；最小桩跑真实函数时补上。 */
+    State: { blackGearEnabled: () => false },
     esc: (v) => String(v), UI: { classic: { pickupResult: () => {} } },
     openTower: () => calls.push({ nav: 'tower' }),
   });
@@ -5926,7 +5928,7 @@ test('需求137：自愿支持作者 —— 系统页入口 / 30 级一次性提
             assert.match(rustSrc, /if path == "\/__open"/, '内置服务器要加 /__open 路由');
             assert.match(rustSrc, /fn open_api\(query: &str, out: &mut TcpStream\)/, '要有 /__open 的处理函数');
             assert.match(rustSrc, /fn open_external\(url: String\) -> Result<\(\), String>/, '要有 open_external 命令');
-            assert.match(rustSrc, /generate_handler!\[save_path, save_meta, save_read, save_write, open_external\]/,
+            assert.match(rustSrc, /generate_handler!\[save_path, save_meta, save_read, save_write, (?:export_save, )?open_external\]/,
               '命令要注册进 invoke_handler');
             assert.match(rustSrc, /fn spawn_opener\(url: &str\)/, '要有跨平台的系统打开器');
             assert.match(rustSrc, /android\.intent\.action\.VIEW/, '安卓走 Intent');

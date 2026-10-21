@@ -78,10 +78,19 @@
    * 不用再编一个"练功"关系值。
    * ========================================================== */
   const REL = { friend: 0, prentice: 1, master: 2, stranger: 3, dummy: 4 };
-  const relOf = (foe) => (foe && foe.dummy ? REL.dummy
-    : foe && foe.kind === 'master' ? REL.master
-      : foe && foe.kind === 'prentice' ? REL.prentice
-        : REL.friend);
+  const relOf = (foe) => {
+    if (foe && foe.dummy) return REL.dummy;
+    /* 随机页的对手在原版一律是**陌生人**：服务端 `getFriends("random")` 把每一条
+     * 都强制写成 `relation = 3`（MainMovie.as:2633-2636），于是 `seeFriend()` 翻成
+     * `actionType = 5`，菜单第四颗就是「加好友」。
+     * 复刻的随机对手是 `State.genAI` 现抽的（没有 `kind`），旧写法落到默认好友档，
+     * 菜单就拨到了好友画稿（帧 1..4，第四颗是「收为徒弟」）—— 用户 2026-10 报的就是它。
+     * 按"当前站在哪一页"补回原版关系：随机页 = 陌生人；好友页才看 `kind`。 */
+    if (current && current.tab === 'random') return REL.stranger;
+    if (foe && foe.kind === 'master') return REL.master;
+    if (foe && foe.kind === 'prentice') return REL.prentice;
+    return REL.friend;
+  };
   /** `s1..s4` 关系标志停哪一帧（原版 `doShowFriends` :13366-13385）。
    *  ⚠ **木人走第 3 帧**（= 原版那一档的「邀请」话术）：原版把 `relation == 4` 与
    *   0 / 3 / null 并列 `gotoAndStop(3)`，木人**没有**自己的专用标志帧
@@ -870,10 +879,12 @@
    * 自己的界面一样查看敌人的具体状态页面、获得的武器技能及其等级，并可以查看其装备。"
    *
    * 原版就是 `seeFriend()` → `showActionWin()`（:23381，挂库元件「挑战1」= 4756 的**第 1 帧**，
-   * 四颗键：挑战Ta! / 返回 / 查看 / 收为徒弟）。复刻照这一页的外观做（首键绿、其余米色圆角条），
-   * 只是第四颗改叫「加好友」——复刻的"陌生人"对应的是加好友，不是收徒（收徒在师徒页里）。
-   * 菜单与"查看"都是**整页 DOM**：这一页没有对应的可复用原版帧（4756 f1 的四颗键里
-   * 只有两颗带名字，另外两颗在导出里连名字都没有），硬接会点不动。
+   * `subframe` 按 relation 拨帧）：好友（relation 0）那一档第四颗是「收为徒弟」，
+   * 陌生人（relation 3）那一档第四颗才是「加好友」。随机页的对手在原版**一律是陌生人**
+   * （`getFriends("random")` 强制 `relation = 3`），复刻以前把它们落到默认好友档 → 菜单
+   * 显示成「收为徒弟」。现在 `relOf` 按当前 tab 补回原版关系（随机页 = 陌生人）；
+   * 但陌生人档的面板底部有 uid 留白，所以随机页改用好友档的紧凑面板，只把第四颗
+   * 字形换成原版「加好友」（见 `captureAddFriendGlyph`）。
    * ========================================================== */
   const ROW_NAMES = ['f1', 'f2', 'f3', 'f4'];
   /* ============================================================
@@ -895,8 +906,8 @@
    * 原版是键盘驱动（上下选、Fire 确认），复刻换成鼠标：**每行一块透明热区**，
    * 悬停就把 `subframe` 拨到"那一行被选中"的帧（于是绿高亮跟着鼠标走），点下去执行。
    * 行落点由实测（无头 Chrome 探针，量 `subframe` 各帧里那几颗画稿的舞台矩形）量出：
-   * 菜单面板在舞台 79.25..240.75 × 29..167；行高 23.9，3 行版首行中心 y=53.3、
-   * 4 行版首行中心 y=53.3 / 82.1 / 110.9 / 139.8。
+   * 菜单面板宽 79.25..240.75（好友 / 徒弟档 y 29..167；陌生人档更高，见下表）；
+   * 行高 23.9，3 行版首行中心 y=53.3、4 行版首行中心 y=53.3 / 82.1 / 110.9 / 139.8。
    * ========================================================== */
   /* ============================================================
    * 菜单行的落点（**舞台单位**）
@@ -914,7 +925,8 @@
    * `box` = `[x0, y0, x1, y1]`（DOM 热区就铺在这一块上）。
    * ========================================================== */
   const MENU_LAYOUT = {
-    /* case 1（actionType 1）：关系 0 好友（4 项：挑战 / 返回 / 查看 / 收为徒弟） */
+    /* case 1（actionType 1）：关系 0 好友（4 项：挑战 / 返回 / 查看 / 收为徒弟）。
+     * 随机页也借用这一档的紧凑面板（第四颗字形换成「加好友」，见 `captureAddFriendGlyph`）。 */
     1: { base: 1, rows: [
       { d: 0, box: [88.4, 41.9, 231.8, 65.8], act: 'fight', key: 'fight', label: '挑战Ta！' },
       { d: 1, box: [88.4, 70.2, 231.8, 94.1], act: 'back', key: 'back', label: '返回' },
@@ -945,7 +957,7 @@
     ] },
     /* case 5（actionType 5）：关系 3 陌生人（4 项，面板更高：x 80.5..241.8 / y 17.5..180.6），
      * 帧 11..14。这一档的菜单里原版还有一行 `uid`（`showActionWin` :23386-23389 写 "UID:…"），
-     * 复刻没有服务端 uid，不写。 */
+     * 复刻没有服务端 uid，不写；底部因此空一块 —— 随机页改用 case 1 面板 + 这里的「加好友」字形。 */
     5: { base: 11, rows: [
       { d: 0, box: [88.4, 31.9, 231.8, 55.8], act: 'fight', key: 'fight', label: '挑战Ta！' },
       { d: 1, box: [88.4, 61.6, 231.8, 85.5], act: 'back', key: 'back', label: '返回' },
@@ -1036,10 +1048,32 @@
     resetHits(view.g.ownerSVGElement);
     page.sub.menu = true;
     const rel = relOf(foe);
-    /* `MENU_CASE` 是原版 `myDraw` 的 case 号；`MENU_LAYOUT` 的键就是它（见上面两张表的注释）。 */
+    /* `MENU_CASE` 是原版 `myDraw` 的 case 号；`MENU_LAYOUT` 的键就是它（见上面两张表的注释）。
+     * 随机页的 `relOf` 是陌生人 → case 5，那条画稿的第四颗本来就写着「加好友」，
+     * 但它的面板比好友档高一截（底下是原版的 uid 行，复刻没有 uid → 一片留白）。
+     * 用户 2026-10 口径："这个界面下部的留白太多了，参考好友中这个二级界面的格式调整。"
+     * 所以随机页仍用好友档的**紧凑面板 / 行位**，只把第四颗字形换成原版「加好友」
+     * （`captureAddFriendGlyph` / `paintAddFriendGlyph`）。 */
     const c = MENU_CASE(rel);
-    const layout = MENU_LAYOUT[c] || MENU_LAYOUT[3];
     const sub = clipOf(view, 'subframe');
+    let compactRandom = c === 5 && page.tab === 'random';
+    let layout = MENU_LAYOUT[c] || MENU_LAYOUT[3];
+    if (compactRandom) {
+      const glyph = captureAddFriendGlyph(sub);
+      if (glyph && glyph.length) {
+        const fr = MENU_LAYOUT[1];
+        layout = Object.assign({}, fr, {
+          rows: fr.rows.map((row, i) => (i === 3 ? Object.assign({}, row, { label: '加好友' }) : row)),
+        });
+      } else {
+        /* 抄不到字形就退回陌生人档（至少文案是对的，只是面板高一点）。 */
+        compactRandom = false;
+      }
+    }
+    const setFrame = (d) => {
+      menuSetFrame(sub, layout, d);
+      if (compactRandom) paintAddFriendGlyph(sub);
+    };
     /* 行热区铺在**DOM 层**（不动原版显示列表）：悬停就把 `subframe` 拨到"那一行被选中"的帧
      * —— 原版绿高亮跟着键盘光标走，这里跟着鼠标走；点下去执行。
      * ⚠ 菜单一出生就**先拨到第 1 行被选中**的那一帧：原版进来时 `jiantou_WZ_Y2 = 1`
@@ -1064,7 +1098,7 @@
       b.style.top = mp.y(box[1]) + 'px';
       b.style.width = mp.s(box[2] - box[0]) + 'px';
       b.style.height = mp.s(box[3] - box[1]) + 'px';
-      b.addEventListener('mouseenter', () => { lastD = d; menuSetFrame(sub, layout, d); });
+      b.addEventListener('mouseenter', () => { lastD = d; setFrame(d); });
       /* 移开**不归位**：留住最后悬停那一行（见上面那段注释）。 */
       b.addEventListener('click', (e) => { e.stopPropagation(); menuFire(act, foe, rowIndex); });
       host.appendChild(b);
@@ -1073,7 +1107,7 @@
       put(row, row.box, row.act, row.label, row.d);
       if (row.x2 && row.box2) put(row, row.box2, row.act2, row.label2, row.d2 != null ? row.d2 : row.d);
     }
-    menuSetFrame(sub, layout, lastD);
+    setFrame(lastD);
     /* 原版只有「收为徒弟 / 加好友」，没有主动拜师按钮（师父是服务端 relation）。
      * 用户 2026-10 口径：只在**我的好友**页的动作菜单保留「拜师」，放右下角；
      * 随机挑战页不显示。已经有师父、或对象本身就是师父/徒弟/木人时也不显示。 */
@@ -1157,6 +1191,70 @@
     const n = sub.frameCount ? sub.frameCount() : 29;
     const off = Math.max(0, Number(d) || 0);
     try { sub.gotoAndStop(Math.max(1, Math.min(n, layout.base + off))); } catch (e) {}
+  }
+  /* ============================================================
+   * 随机页第四颗：「好友档紧凑面板」+「陌生人档的原版加好友字形」
+   * ------------------------------------------------------------
+   * 陌生人档（case 5，帧 11..14）的面板比好友档高 25 个舞台单位：多出来的部分
+   * 在原版是 `subframe.uid` 那一行（`showActionWin` :23386-23389 写 "UID:…"），
+   * 复刻没有服务端 uid → 底下空出一大块。用户 2026-10 口径：
+   *   "这个界面下部的留白太多了，参考好友中这个二级界面的格式进行调整。"
+   * 所以随机页仍用好友档（case 1：帧 1..4，四行等距、没有 uid 行）的面板与行位，
+   * 只把第四颗「收为徒弟」的字形换成陌生人档第四颗那份原版「加好友」字形。
+   * 两档的字形都是**扁平填充的 path**（没有渐变引用），外层组 transform 都是 identity，
+   * 且都在 `subframe` 的同一套局部坐标里 —— 直接克隆 path 不会错位、也不会丢材质。
+   * 行底板 / 绿高亮都比字形高（23.9 / 22.55 vs 15 左右），所以按高度就能挑出字形。
+   * ========================================================== */
+  let addFriendGlyph = null;
+  /** 第四行那颗字的 path（`getBBox()` 的局部坐标：y≈79、高 15 左右）。 */
+  function fourthRowGlyphPaths(sub) {
+    const out = [];
+    if (!sub || !sub.g || !sub.g.querySelectorAll) return out;
+    for (const p of sub.g.querySelectorAll('path')) {
+      let b = null;
+      try { b = p.getBBox(); } catch (e) { b = null; }
+      if (b && b.y >= 75 && b.y <= 85 && b.height >= 14 && b.height <= 17) out.push(p);
+    }
+    return out;
+  }
+  /** 从陌生人档抄一份「加好友」字形（帧 14；帧 11..14 的字形相同，只有绿高亮在动），
+   *  抄完回到原帧（同步操作，不会落屏）。 */
+  function captureAddFriendGlyph(sub) {
+    if (addFriendGlyph && addFriendGlyph.length) return addFriendGlyph;
+    if (!sub || !sub.gotoAndStop) return null;
+    const back = (sub.frame || 0) + 1;
+    try {
+      sub.gotoAndStop(14);
+      addFriendGlyph = fourthRowGlyphPaths(sub).map((p) => p.cloneNode(true));
+    } catch (e) { addFriendGlyph = null; }
+    try { sub.gotoAndStop(back); } catch (e) {}
+    return addFriendGlyph;
+  }
+  /** 每次拨帧后重贴：好友档画稿自带「收为徒弟」，先藏掉再把「加好友」贴到同一层。
+   *  ⚠ 必须**先复原上一次**再重新找原字形：真实点击打开菜单后，指针落在菜单首行上会再
+   *    触发一次同帧 `setFrame`；`showFrame` 复用同一批 path（`display:none` 不会被洗掉），
+   *    第二次如果量不到被藏起来的原字形，就会"只删克隆、不补新字"，第四行直接空白
+   *    （用户 2026-10 报的"点最上面一行敌人时加好友异常隐形"）。 */
+  function paintAddFriendGlyph(sub) {
+    if (!addFriendGlyph || !addFriendGlyph.length || !sub || !sub.g) return false;
+    for (const n of sub.g.querySelectorAll('[data-sf-addfriend-glyph]')) n.remove();
+    for (const n of sub.g.querySelectorAll('[data-sf-addfriend-hide]')) {
+      n.style.display = '';
+      n.removeAttribute('data-sf-addfriend-hide');
+    }
+    const cur = fourthRowGlyphPaths(sub);
+    if (!cur.length) return false;
+    const parent = cur[0].parentNode;
+    for (const p of cur) {
+      p.style.display = 'none';
+      p.setAttribute('data-sf-addfriend-hide', '1');
+    }
+    for (const p of addFriendGlyph) {
+      const n = p.cloneNode(true);
+      n.setAttribute('data-sf-addfriend-glyph', '1');
+      parent.appendChild(n);
+    }
+    return true;
   }
   /* ============================================================
    * 收徒挑战（原版 `showGetStuWin` / `getStudent`）
@@ -1694,7 +1792,7 @@
    *  （玩家等级 +2~+12，不超过满级），这样“添加好友”和“拜师”看到的是同一档对手。 */
   function rollAddFriendCandidates() {
     const s = S() || {};
-    const cap = State.MAX_PLAYER_LEVEL || 70;
+    const cap = State.MAX_PLAYER_LEVEL || 90;
     const base = Math.max(3, Math.min(Number(s.level) || 1, cap));
     return Array.from({ length: 3 }, () => State.genAI(
       Math.min(cap, Math.max(2, base + 2 + Math.floor(Math.random() * 11))), '',
@@ -2237,7 +2335,7 @@
     const s = S() || {};
     stopAt(view, ARENA.ladder);
     stopAt(clipOf(view, 'type'), 2);
-    const cap = (State.MAX_PLAYER_LEVEL || 70);
+    const cap = (State.MAX_PLAYER_LEVEL || 90);
     const mine = Math.max(0, Math.round(Number(s.integral) || 0));
     const entries = [];
     for (let n = 0; n < 4; n++) {

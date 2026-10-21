@@ -45,6 +45,7 @@
       if (u.reward) text += '，获得「' + u.reward + '」';
       if (u.wsChoice) text += '，武器/技能三选一';
       if (u.attributeBook) text += '，属性书 ×1';
+      if (u.chest) text += '，金宝箱 ×' + u.chest;
       const gifts = (u.gifts || []).map((g) => g.name + '×' + g.count).join('、');
       if (gifts) text += '，' + gifts;
       if (u.autoPoint) text += '，系统代选了 1 点属性';

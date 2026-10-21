@@ -14,20 +14,35 @@
 (function () {
   'use strict';
 
-  // references/new/reference.md 的逐级经验表。51级以后缺史料，沿用每级+250的离线补足。
+  /* `references/ssfight/unpacked/06-游戏数据/松鼠数据表.全量.md` 的「经验表」：
+   * 1~50 级与旧表逐值相同；51~70 级原来缺史料、按每级 +250 补，现按原表补齐
+   * （51 级 9500 … 70 级 38580）。71~90 级原表没有：按 70 级后的同一条曲线
+   * （每级 ×1.08，取整到 10）外推，正好接上 `maxLevel = 90`（MainMovie.as:19620）。 */
   /* ============================================================
    * 【GD1】经验表与学习限制
    * ============================================================ */
   const EXP_TABLE = [0, 20, 60, 140, 220, 310, 400, 490, 580, 680, 850, 1020, 1140, 1270, 1400,
     1530, 1660, 1790, 1930, 2070, 2220, 2360, 2510, 2660, 2810, 2960, 3110, 3270, 3430, 3590,
     3750, 3910, 4080, 4240, 4410, 4580, 4750, 4920, 5100, 5270, 5450, 5630, 5810, 5990, 6170,
-    6350, 6530, 6720, 6900, 7090, 7280];
+    6350, 6530, 6720, 6900, 7090, 7280,
+    /* 51~70：原版「经验表」逐行抄录 */
+    9500, 10180, 10910, 11700, 12560, 13490, 14490, 15570, 16740, 18010,
+    19390, 20890, 22510, 24270, 26180, 28260, 30520, 32980, 35660, 38580,
+    /* 71~90：同曲线外推（×1.08/级，取整到 10） */
+    41670, 45000, 48600, 52490, 56690, 61230, 66130, 71420, 77130, 83300,
+    89960, 97160, 104930, 113320, 122390, 132180, 142750, 154170, 166500, 179820];
   function nextExp(level) {
     if (level < EXP_TABLE.length) return EXP_TABLE[level];
-    return EXP_TABLE[EXP_TABLE.length - 1] + (level - EXP_TABLE.length + 1) * 250;
+    /* 90 级是硬上限，走不到这里；给旧工具/异常等级留一条同曲线兜底。 */
+    let v = EXP_TABLE[EXP_TABLE.length - 1];
+    for (let lv = EXP_TABLE.length; lv <= level; lv++) v = Math.round(v * 1.08 / 10) * 10;
+    return v;
   }
   const WS_LEVELS = [2, 3, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23, 26, 29, 32, 35, 38, 41, 44, 47, 50, 56, 62, 68];
-  const ATTRIBUTE_BOOK_LEVELS = [53, 59, 65];
+  /* 53/59/65 级发属性书是旧离线版的自创（原版服务端升级回包没有这三个道具；
+   * 原版 1~90 级每级都是「+3 属性 +5 生命」）。为把 90 级总获取额对齐到 651，
+   * 这里不再替换成长；已有属性书仍可按道具说明使用（8 点）。 */
+  const ATTRIBUTE_BOOK_LEVELS = [];
   function wsLimit(level) { return WS_LEVELS.filter(lv => lv <= level).length; }
   function canLearn(kind, id, level) {
     id = Number(id);
@@ -403,6 +418,18 @@
     /* 天梯商店的限购：`rankPurchases` 按周重置（普通商品），`rankPurchaseTotals` 是
      * **账号累计**（力/敏/速/血永久丸，原版每个账号只能买 1 个，见 classic-extras）。 */
     rankPurchases: {}, rankPurchaseTotals: {}, rankPurchaseWeek: '',
+    /* 金宝箱「已开出、还没点确定领取」的那一包（重开就换掉它，领取才入账）。
+     * 关掉游戏再进会自动入账，不会把已经开出的奖励弄丢；见 state.js 的 settlePendingChest。 */
+    chestPending: null,
+    /* 71~90 级升级金宝箱的**账号累计**已发数量：上限 20（每级 1 个）。
+     * 转生回到 1 级再升上来不会重复发，否则「20 箱 ×12 点」可以被转生无限刷。 */
+    levelChests: 0,
+    /* 无尽塔黑色卡片的周限：`{week:'YYYY-MM-DD', count:0}`，每周一重置，最多 3 张。
+     * 挑战塔的黑卡是一次性里程碑，不记在这里。 */
+    blackCardsWeek: { week: '', count: 0 },
+    /* 挑战塔黑卡的一次性账：`blackTowerLayer` = 已经发到第几层（旧档补发用），
+     * `blackBox100` = 100 层自选箱是否已经发过。 */
+    blackTowerLayer: 0, blackBox100: false,
     woodRecord: 0, woodCount: 0, woodDamage: 0,
     dailyClaimDate: '', battles: [], shopPurchaseDate: '', shopPurchases: {},
     /* 村庄建筑（祭坛 / 神迹 / 幻兽牧场）：`{level, upgrading, doneAt, buffId, buffDate, add, addType}`。
@@ -428,7 +455,7 @@
   const ARENA_TITLES = ['经验场', '碎片场'];
 
   /* 升级礼包：以前只有属性成长 + 随机武技，逢 5 级多给一份卷轴/药剂。
-   * 普通等级随机给 1~2 个消耗品，每逢 5 级和属性书等级再给一份大礼包。 */
+   * 普通等级随机给 1~2 个消耗品，每逢 5 级再给一份大礼包。 */
   const LEVEL_GIFT_SMALL = [21, 22, 1, 2, 3, 4, 5, 7];              // 卷轴 / 药剂 / 丹药 / 经验丸
   const LEVEL_GIFT_BIG = { 23: 2, 21: 3, 22: 3, 2: 2 };             // 挑战书 + 卷轴 + 大体力药剂
   const LEVEL_GIFT_RARE = [44, 3, 4, 5, 7];                          // 大礼包额外再抽一个
@@ -481,11 +508,19 @@
 
   /* 原版 Flash 有、但安卓 H5 字典里缺的几件道具。**只在 gamedata 里补行**，
    * GameDict.js 保持与 APK 逐字节一致。id 50 在本版是「抽奖卷」（无尽塔产出），
-   * 原版 50 是金宝箱 —— 为了不破坏无尽塔存档，金宝箱改用 90，魔法袋用原版 79。 */
+   * 原版 50 是金宝箱 —— 为了不破坏无尽塔存档，金宝箱改用 90，魔法袋用原版 79。
+   * 金宝箱单箱上限 12 点：原版 71~90 级每级只发 1 箱、单箱最高 16 点；
+   * 本版 71~90 级继续每级 +4 点成长（多出 80 点），所以把 20 箱从 16 点压到 12 点
+   * （20×12 = 240，与「原版 20×16 = 320」减去 80 点成长差后的 240 完全相等）。
+   * 魔法袋按原版天梯商店回收，且不再出属性点（原版说明只承诺黑装碎片与其它稀有道具）。 */
   const EXTRA_PROPS = [
-    ['79', '魔法袋', '打开后随机获得一种：6级宝石3%、5级宝石15%、蓝色碎片15%（5~10个）、召唤证17%（1~2个）、基础属性点20%（6/8/10点）、金松果15%（300~500）、孵化点15%（100）。', '', 'false', '1'],
+    ['77', '黑凤凰碎片', '10个碎片可以合成1件黑色凤凰装备（顶级黑色套装）。挑战塔、无尽塔的黑色卡片、魔法袋、金宝箱与黑装融合都有几率获得。', '', 'false', '3'],
+    ['78', '黑圣熊碎片', '10个碎片可以合成1件黑色圣熊装备（顶级黑色套装）。挑战塔、无尽塔的黑色卡片、魔法袋、金宝箱与黑装融合都有几率获得。', '', 'false', '3'],
+    ['79', '魔法袋', '打开后随机获得一种：6级宝石3%、5级宝石15%、蓝色碎片15%（5~10个）、召唤证17%（1~2个）、金松果25%（300~500）、孵化点25%（100）；并额外获得黑色卡片×1。原版另有黑凤凰/黑圣熊碎片，离线版由黑色卡片承接。', '', 'false', '1'],
+    ['80', '黑色卡片', '打开后选择凤凰或圣熊：获得对应碎片1~2个，并额外获得50/100/200金松果。挑战塔、无尽塔（每累计50层1张，周限3）、魔法袋、金宝箱与黑装融合都有几率获得。', '', 'false', '1'],
     ['82', '召唤证', '在体力不足时，可以使用召唤证参加幻兽竞技。', '10', 'true', '2'],
-    ['90', '金宝箱', '打开后随机获得一种：6级宝石4%、5级宝石24%（10%两颗/14%一颗）、基础属性点49%（8/10/12/16点）、魔法袋6%、金松果17%（500/750/1000）。', '20', 'false', '5'],
+    ['89', '黑装自选箱', '打开后可以任选1件黑色凤凰或黑色圣熊装备（头/拳/衣/鞋）。挑战塔第100层首通获得。', '', 'false', '1'],
+    ['90', '金宝箱', '打开后随机获得一种：6级宝石4%、5级宝石22%（10%两颗/12%一颗）、基础属性点49%（6/8/10/12点）、金松果15%（500/750/1000）、黑色卡片8%、完整黑装2%（仅首开）。可花金松果重开，最多500次，单箱最高12点；重开不出完整黑装。', '20', 'false', '5'],
   ];
   function registerExtraProps() {
     const map = window.propMap;
@@ -499,6 +534,25 @@
     return n;
   }
   registerExtraProps();
+
+  /* 原版天梯商店有「魔法袋」（`松鼠数据表` 其他商店：积分1300 / 金杯2000 / 金松果200）。
+   * 安卓 H5 的 GameDict 只有 14 条、没有这一件，所以同样只在 gamedata 里补一行，
+   * 不改已提交的 `js/gamedict.js`。限购按账号累计 1 次（与永久属性丸同一套账）。 */
+  const EXTRA_RANK_GOODS = [
+    ['19', '19,魔法袋,79,1,2000,200,1300,1,1,使用后有一定几率获得稀有道具。', ','],
+  ];
+  function registerRankGoods() {
+    const map = window.rankgoodsMap;
+    if (!map || typeof map.put !== 'function') return 0;
+    let n = 0;
+    for (const row of EXTRA_RANK_GOODS) {
+      if (map.getValue(row[0])) continue;
+      map.put(row[0], row[1].split(row[2]));
+      n++;
+    }
+    return n;
+  }
+  registerRankGoods();
 
   /* 原版道具说明里写着经验丸「竞技场中无效」，但本版经验竞技场确实吃经验丸加成
    *（见 js/classic-extras.js 的 gainExpWithBoost 调用与 tools/test-extras.cjs），
@@ -847,6 +901,49 @@
   const GEAR_BASE_ATTR = {};
   for (const row of GEAR_BASE) GEAR_BASE_ATTR[row[0]] = row[5];
 
+  /* 黑装：`GEAR_BASE` 里 46/47/67~72 共 8 套、32 件的数据是全的，但 APK 的
+   * `gearMap` 只有 128 件（1~124 / 201~204）、`gearSetMap` 只有 32 套 —— 所以
+   * `addGear(281)` 现在会返回 null。这里在运行期补行，**不改已提交的 gamedict.js**：
+   *   · gearSetMap：品质 5、使用等级 60（原版 `showFusion` 写「橙装50，黑装60级」）、
+   *     组号/序号取原版 equipsArray（46=21 / 47=22 / 67=19 / 68=20 / 69=23 / 70=24 / 71=25 / 72=26）；
+   *   · gearMap：abilities 按部位填（头=敏 / 手=力 / 衣=血 / 鞋=速），与 GEAR_BASE 逐值一致。
+   * 只补 quality=5 的行；橙装 205~208 等仍走「实例级 orange」的旧路径。 */
+  const BLACK_GEAR_SETS = Object.freeze([
+    Object.freeze({ id: 46, group: 21, index: 33 }),
+    Object.freeze({ id: 47, group: 22, index: 34 }),
+    Object.freeze({ id: 67, group: 19, index: 35 }),
+    Object.freeze({ id: 68, group: 20, index: 36 }),
+    Object.freeze({ id: 69, group: 23, index: 37 }),
+    Object.freeze({ id: 70, group: 24, index: 38 }),
+    Object.freeze({ id: 71, group: 25, index: 39 }),
+    Object.freeze({ id: 72, group: 26, index: 40 }),
+  ]);
+  const BLACK_SHARD_SET = Object.freeze({ 77: 71, 78: 72 });
+  const BLACK_CARD_ID = 80;
+  const BLACK_BOX_ID = 89;
+  function registerBlackGear() {
+    const gmap = window.gearMap, smap = window.gearSetMap;
+    if (!gmap || !smap || typeof gmap.put !== 'function' || typeof smap.put !== 'function') return 0;
+    let n = 0;
+    for (const set of BLACK_GEAR_SETS) {
+      if (smap.getValue(String(set.id))) continue;
+      smap.put(String(set.id), [String(set.id), '5', String(set.group), '60', '1400', '1400', String(set.index)]);
+      n++;
+    }
+    for (const row of GEAR_BASE) {
+      const [id, setId, quality, type, name, base] = row;
+      if (Number(quality) !== 5) continue;
+      if (!BLACK_GEAR_SETS.some((set) => set.id === Number(setId))) continue;
+      if (gmap.getValue(String(id))) continue;
+      const abilities = [0, 0, 0, 0];
+      abilities[Number(type)] = Number(base);
+      gmap.put(String(id), [String(id), abilities.join(','), String(type), name, String(setId)]);
+      n++;
+    }
+    return n;
+  }
+  registerBlackGear();
+
   /* ============================================================
    * 【GD6】套装收益（**本复刻版新增，原版没有**）
    * ============================================================ */
@@ -991,7 +1088,7 @@
   window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, stageEnemyCount, isSuperStage, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
     STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
     trueLevel, trueSkillValue, trueSkillStep, trueSkillRow, TRUE_SKILL_TABLE, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
-    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, BLUE_SHARD_DROP_MUL, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
+    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, BLUE_SHARD_DROP_MUL, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, BLACK_GEAR_SETS, BLACK_SHARD_SET, BLACK_CARD_ID, BLACK_BOX_ID, registerBlackGear, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, EXTRA_RANK_GOODS, registerRankGoods, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
     PETS, PET_SKILLS, PET_SKILL_RULES, petSkillValue, petSkillTrigger, petSkillInfo, PET_GRADE_EXP, PET_GRADE_COST,
     SET_BONUS, SET_BONUS_TIER_MUL, SET_BONUS_GLOBAL_MUL, SET_BONUS_HP_MUL, SET_BONUS_FAMILY_FLOOR,
     SET_BONUS_RAW_KEYS, SET_BONUS_ATTR_KEYS, setBonusTable, setBonusTierMul, setBonusScale, setBonusText };

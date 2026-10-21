@@ -1800,6 +1800,10 @@
             const mult = R(1, 6);
             const raw = (15 + 8 * (lv - 1) + trueVal(23, lv)) * mult;
             r.multiple = mult;
+            /* 原版协议第 15 字段 `boomCount` = 这一拍分裂成几个球（`MainMovie.as:17983`
+             * `_loc1.boomCount = _loc2[15]`，`sprite6122` 第 31 帧 `_root.boom(ball, count)`）。
+             * 幸运一击的伤害就是"打 mult 下"，所以球数 = mult；经典战斗层按它做多球分裂演出。 */
+            r.boomCount = mult;
             applyDamage(att, def, raw, r, {});
             break;
           }

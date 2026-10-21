@@ -558,6 +558,18 @@
       if (clip.g && clip.g.setAttribute) clip.g.setAttribute('slot', String(clip.tag.id));
       clip.setSymbol(p.symbol, p.frame, 1, 'topleft', '');
       clip.__gearSlot = true;
+      /* 手臂甲（2008）只保留近侧一条：见 markArmGear 的注释。 */
+      if (String(p.symbol) === '2008') markArmGear(clip);
+      /* ⚠ 身体装备（`gearBody` / `gearArm`，type 2）**不能**在战斗层再 `mirrorInPlace` 一次。
+       * 依据（2026-10 逐项核对）：
+       *  · 容器画稿和角色**同向**：村庄 `myself` 穿的是同一套 B 容器、同一个 `topleft` 锚点，
+       *    不翻转就合身；敌方那一侧整棵 `7689` 本来就是 `scaleX<0`，由父级统一镜像。
+       *  · `mirrorInPlace` 是给"带字特效"做**绕包围盒中心**原地翻转的，它只写
+       *    `translate(2cx) scale(-1,1)`，会把 `setSymbol(..., 'topleft')` 刚算好的
+       *    `translate(-bbox.x,-bbox.y)` 整段覆盖掉 —— 贴图整体左上偏一个包围盒原点
+       *    （身体服实测偏 28.8×22.4 个局部单位，约 63×49 屏幕像素），看起来"完全没合身"，
+       *    偏上去的那截袖子/肩甲还像"身体旁边多了一段手臂"（用户 2026-10 口径）。
+       * 所以这里保持 `setSymbol` 的 `topleft` 锚点，只让父级负责朝向。 */
       if (fighter && live && live.strip && live.strip[Number(fighter.side)]) setGearClipHidden(clip, true);
     }
   }
@@ -867,8 +879,9 @@
    * **现代播放器同一套 `AnimationStr` 图集**把熊猫 / 螳螂 / 仙鹤补齐。
    * 松鼠本体仍走原来的 `7689` 矢量动画；这里只替换 NPC 那一侧。
    *
-   * 实现：把现代 1170×690 动画画进一层透明 canvas，再作为 `<foreignObject>`
-   * 铺在经典 320×196 舞台上。动作名、命中帧、特效与 `battle.js` 对齐：
+   * 实现：把现代 1170×690 动画画进一层透明 canvas，再把它与经典 320×196 舞台
+   * **同区域叠放**（HTML canvas，见下方 WebKit foreignObject 说明）。
+   * 动作名、命中帧、特效与 `battle.js` 对齐：
    *   · 待机 `_rest` / 普攻 `_common_attack` / 技能 `_skill_attack`
    *   · 受击 `_hitMe` / 闪避 `_runAround` / 反击 `_beatBack`
    *   · 归位 `_runBack` / 倒地 `_die` / 胜利 `_win`
@@ -904,24 +917,82 @@
     return Engine.hasAnim(npcAnimName(npc, 'idle')) && Engine.hasAnim(npcAnimName(npc, 'common'));
   }
 
-  /** 现代图集版：透明 canvas 铺在经典舞台上，按现代 1170×690 坐标画三侠。 */
+  /** 把一层 HTML/SVG 覆盖物铺到经典舞台 SVG 的显示区域上（两者都在 `#ui` 的设计坐标里）。
+   *  `clientWidth / rect.width` 把屏幕像素折回设计单位，所以 `#ui` 的整体缩放、
+   *  窗口 resize、甚至舞台在宿主里居中留边都不会让覆盖物和舞台错位。
+   *  返回舞台在设计坐标里的尺寸；量不到（隐藏 / 还没布局）时返回 null。 */
+  function layoutStageOverlay(el, root, host) {
+    if (!el || !root || !host) return null;
+    const svg = root.ownerSVGElement || root;
+    if (!svg || !svg.getBoundingClientRect) return null;
+    const hr = host.getBoundingClientRect(), sr = svg.getBoundingClientRect();
+    if (!(hr.width > 0) || !(sr.width > 0)) return null;
+    const k = (host.clientWidth || hr.width) / hr.width;
+    const left = (sr.left - hr.left) * k, top = (sr.top - hr.top) * k;
+    const width = sr.width * k, height = sr.height * k;
+    const sig = [left, top, width, height].map((n) => Math.round(n * 100) / 100).join('|');
+    if (el.__sfStageSig !== sig) {
+      el.__sfStageSig = sig;
+      el.style.left = left + 'px';
+      el.style.top = top + 'px';
+      el.style.width = width + 'px';
+      el.style.height = height + 'px';
+    }
+    return { left: left, top: top, width: width, height: height };
+  }
+
+  /** 战斗最上层的一层空 SVG：目前只放「跳过」按钮。
+   *  三侠的现代图集画布是 HTML canvas（见 `makeAtlasNpcFighter`），按 DOM 顺序会盖住
+   *  原本后挂的 SVG「跳过」按钮。把跳过键移到这层 SVG 里，既保留原版按钮的矢量画稿、
+   *  悬停/按下反馈和点击热区，又让它继续压在 NPC 上面。 */
+  function makeBattleTopLayer(rec, root) {
+    if (!rec || !rec.host || !root || !window.document || !document.createElementNS) return null;
+    const NS = 'http://www.w3.org/2000/svg';
+    const main = root.ownerSVGElement || root;
+    const top = document.createElementNS(NS, 'svg');
+    top.setAttribute('viewBox', (main && main.getAttribute && main.getAttribute('viewBox')) || '0 0 320 196');
+    top.setAttribute('preserveAspectRatio', (main && main.getAttribute && main.getAttribute('preserveAspectRatio')) || 'xMidYMid meet');
+    top.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;' +
+      'z-index:3;overflow:visible;';
+    rec.host.appendChild(top);
+    const relayout = () => layoutStageOverlay(top, root, rec.host);
+    relayout();
+    if (window.addEventListener) window.addEventListener('resize', relayout);
+    let ro = null;
+    if (window.ResizeObserver) {
+      try { ro = new ResizeObserver(relayout); ro.observe(main); ro.observe(rec.host); } catch (e) { ro = null; }
+    }
+    rec.topLayer = top;
+    rec.topLayerRelayout = relayout;
+    rec.topLayerRO = ro;
+    return top;
+  }
+
+  /** 现代图集版：透明 canvas 铺在经典舞台上，按现代 1170×690 坐标画三侠。
+   *
+   *  ⚠ **不要把 canvas 放进 `<foreignObject>`**。WebKit / iOS 有一条 17 年未修的
+   *  合成层 bug（bugs.webkit.org 23113，原 83189「Canvas inside SVG(foreignObject)
+   *  positioning error」）：canvas 一旦因为尺寸或祖先 transform 进入独立合成层，
+   *  foreignObject 的缩放/位移就**不再作用到 canvas 内容**上 —— 画面里表现为
+   *  「三侠位置和大小突然变了」（用户 2026-10 的 iOS 经典模式反馈）。
+   *  现代模式的主战斗画布是普通 `<canvas>`，不走 foreignObject，所以没有这个问题；
+   *  这里改成把 canvas 直接挂在经典战斗的 HTML 宿主上、与舞台 SVG 同尺寸叠放。
+   *  普通 HTML canvas 的 CSS 缩放 iOS 支持得很好，也不会触发那条 foreignObject bug。
+   *  坐标仍按现代 1170×690 画，绘制前把 canvas 的变换设成「舞台显示尺寸 / 1170×690」。
+   */
   function makeAtlasNpcFighter(side, holder, info, npcType) {
     const view = live && live.view;
     const root = view && (view.g || view);
-    if (!root || !window.document || !document.createElementNS) return null;
-    const NS = 'http://www.w3.org/2000/svg';
-    const fo = document.createElementNS(NS, 'foreignObject');
-    fo.setAttribute('x', '0'); fo.setAttribute('y', '0');
-    fo.setAttribute('width', '320'); fo.setAttribute('height', '196');
-    fo.setAttribute('pointer-events', 'none');
-    fo.setAttribute('aria-hidden', 'true');
-    fo.style.overflow = 'hidden';
+    const host = live && live.host;
+    if (!root || !host || !window.document || !document.createElement) return null;
     const canvas = document.createElement('canvas');
+    canvas.className = 'sf-npc-atlas-layer';
+    canvas.setAttribute('aria-hidden', 'true');
     canvas.width = 1170; canvas.height = 690;
-    canvas.style.width = '100%'; canvas.style.height = '100%'; canvas.style.display = 'block';
-    fo.appendChild(canvas);
-    root.appendChild(fo);
-    if (holder) holder.__npcFo = fo;
+    canvas.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;display:block;' +
+      'pointer-events:none;z-index:1;';
+    host.appendChild(canvas);
+    if (holder) holder.__npcLayer = canvas;
     const ctx = canvas.getContext('2d');
     /* 原版 7689 的静态稿收掉：现在由这块画布负责这一侧的全部动作。 */
     if (holder && holder.g) holder.g.style.visibility = 'hidden';
@@ -931,6 +1002,16 @@
     const effects = [];
     const now = () => (window.performance && performance.now ? performance.now() : Date.now());
 
+    function layoutCanvas() {
+      const rec = live;
+      if (!rec || !rec.host || !canvas.parentNode) return false;
+      const box = layoutStageOverlay(canvas, root, rec.host);
+      if (!box) return false;
+      const bw = Math.max(1, Math.round(box.width)), bh = Math.max(1, Math.round(box.height));
+      if (canvas.width !== bw) canvas.width = bw;
+      if (canvas.height !== bh) canvas.height = bh;
+      return true;
+    }
     function schedule() {
       const rec = live;
       if (!rec || rafId) return;
@@ -944,7 +1025,12 @@
       rec.rafs.push(id);
     }
     function stopRaf() { if (rafId) { caf(rafId); if (live) { const i = live.rafs.indexOf(rafId); if (i >= 0) live.rafs.splice(i, 1); } rafId = 0; } }
-    function clear() { try { ctx.clearRect(0, 0, 1170, 690); } catch (e) {} }
+    function clear() {
+      try {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      } catch (e) {}
+    }
     function drawEffect(eff, at) {
       const raw = Math.floor(at / NPC_FRAME_MS);
       if (raw >= eff.frames.length) return false;
@@ -952,7 +1038,11 @@
       return true;
     }
     function draw() {
+      if (!layoutCanvas()) return;
       clear();
+      /* 现代 1170×690 → 这块舞台画布。x/y 各自按实际显示尺寸缩放，与之前
+       * foreignObject 里 canvas 的拉伸比例一致（经典舞台是 320×196）。 */
+      ctx.setTransform(canvas.width / 1170, 0, 0, canvas.height / 690, 0, 0);
       const frame = anim && anim.frames && anim.frames[anim.idx];
       if (frame) { try { Engine.drawFrame(ctx, frame, { sheets: NPC_SHEETS[npcType] }); } catch (e) {} }
       const t = now();
@@ -1067,8 +1157,8 @@
         if (anim && anim.finish) anim.finish();
         anim = null;
         clear();
-        if (holder) holder.__npcFo = null;
-        if (fo.parentNode) fo.parentNode.removeChild(fo);
+        if (holder) holder.__npcLayer = null;
+        if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
       },
       debug: () => ({
         hasMc: true, hasAttacks: false, npc: npcType,
@@ -1172,9 +1262,9 @@
         if (atlas) return atlas;
       } catch (e) {
         if (window.__errs) window.__errs.push('[SfFight] npc atlas: ' + (e && e.message));
-        if (holder && holder.__npcFo) {
-          try { holder.__npcFo.parentNode && holder.__npcFo.parentNode.removeChild(holder.__npcFo); } catch (e2) {}
-          holder.__npcFo = null;
+        if (holder && holder.__npcLayer) {
+          try { holder.__npcLayer.parentNode && holder.__npcLayer.parentNode.removeChild(holder.__npcLayer); } catch (e2) {}
+          holder.__npcLayer = null;
         }
         if (holder && holder.g) holder.g.style.visibility = '';
       }
@@ -1450,16 +1540,82 @@
         try {
           rec.clip.setSymbol(p.symbol, p.frame, 1, 'topleft', '');
           rec.clip.__gearSlot = true;
+          if (String(p.symbol) === '2008') markArmGear(rec.clip);
           if (live && live.strip && live.strip[side]) setGearClipHidden(rec.clip, true);
         } catch (e) {}
       }
       dressTree(rec.clip, side);
     }
   }
-  /** 真·色诱：把一格装备视觉藏起来 / 放回来（只动 `plan.bySlot` 贴出来的装备容器）。 */
+  /** 真·色诱：把一格装备视觉藏起来 / 放回来（只动 `plan.bySlot` 贴出来的装备容器）。
+   *  `__gearFar` = 远侧手臂甲（见 markArmGear）：除非玩家自己点了“先这样玩”，否则一直藏。 */
   function setGearClipHidden(clip, on) {
-    const node = clip && (clip.g || clip);
-    if (node && node.style) node.style.display = on ? 'none' : '';
+    if (!clip) return;
+    clip.__gearHidden = !!on;
+    const node = clip.g || clip;
+    if (node && node.style) node.style.display = (clip.__gearHidden || clip.__gearFar === true) ? 'none' : '';
+  }
+  /** 离挂点最近的 `6532`（松鼠本体）：一次身体动作里两只手臂都在它下面。 */
+  function heroRootOf(clip) {
+    for (let c = clip; c; c = c.parent) if (c.tag && String(c.tag.id) === '6532') return c;
+    return null;
+  }
+  /** 手臂挂点的“前后”由原版放置深度决定：近侧手臂在低深度（2/3），远侧在 40+。
+   *  `5616`（待机）/ `5630`（普攻）/ `6347`（受击）逐帧核过：两条 `4950` 手臂骨
+   *  永远是“低深度先摆、高深度后摆”。 */
+  function armBoneDepth(clip) {
+    for (let c = clip && clip.parent; c; c = c.parent) {
+      if (c.tag && String(c.tag.id) === '4950') {
+        const d = c.g && c.g.getAttribute ? Number(c.g.getAttribute('depth')) : NaN;
+        return Number.isFinite(d) ? d : null;
+      }
+    }
+    return null;
+  }
+  /** 手臂甲（`gearArm` 2008）**只贴近侧那条手臂**。
+   *
+   *  原版 `getEquipBpData(this, 2, 1)` 会在两只手臂的挂点上都贴同一张 2008（一条袖子）：
+   *  · 近侧那条在身体前面，和拳套/手套对得上；
+   *  · 远侧那条被身体挡住、只从躯干旁边露出一截袖子 —— 敌方整棵 `7689` 镜像后，
+   *    这一截正好露在身体另一侧，看起来就是“身体装备附带了一条多余的手臂”
+   *    （用户 2026-10 复核：我方已好，敌方仍有）。
+   *  复刻里没有原版那种“被身体自然遮住”的深度关系（挂点整体在身体上层），所以
+   *  这里按同一动作里两条手臂骨的深度，**只保留深度最小（最靠前）的一条**。
+   *  单手臂动作 / 量不到深度时照常显示。 */
+  function markArmGear(clip, retry) {
+    const hero = heroRootOf(clip);
+    if (!hero) return;
+    if (!hero.__armGear) hero.__armGear = new Set();
+    const set = hero.__armGear;
+    set.add(clip);
+    /* 旧动作里被换掉的挂点已经断开：直接清掉，别让它们把“还有节点没入文档”一直判成 true
+     * （否则 microtask 会无限重排，整页卡死）。 */
+    for (const c of [...set]) {
+      if (c !== clip && (!c.g || c.g.isConnected === false)) set.delete(c);
+    }
+    if (!clip.g || clip.g.isConnected === false) {
+      /* 初始建树是在同一个同步任务里完成的：先等 buildFighter / showFrame 结束，
+       * 整棵树入文档后再量深度。只补一次；仍断开就放弃（旧挂点已经没用了）。 */
+      if (!retry) {
+        Promise.resolve().then(() => {
+          try { markArmGear(clip, true); } catch (e) {}
+        });
+      }
+      return;
+    }
+    let min = Infinity;
+    for (const c of [...set]) {
+      if (!c.g || c.g.isConnected === false) { set.delete(c); continue; }
+      const d = armBoneDepth(c);
+      c.__armDepth = d;
+      if (d != null && d < min) min = d;
+    }
+    for (const c of set) {
+      const far = min !== Infinity && c.__armDepth != null && c.__armDepth > min;
+      if (c.__gearFar === far) continue;
+      c.__gearFar = far;
+      setGearClipHidden(c, c.__gearHidden === true);
+    }
   }
   function walkClips(clip, fn) {
     if (!clip) return;
@@ -1682,6 +1838,62 @@
     }
   }
 
+  /** `boom(mc, num)`（`MainMovie.as:15710`）：幸运一击的**多球分裂**。
+   *
+   *  原版链路（`sprite6122` / `sprite6185` 第 31 帧脚本 → `_root.beAttack(); _root.boom(ball, count)`）：
+   *    · `count = currentRound.boomCount`（协议第 15 字段；`sprite7850` 的 `mc.attacks.attack.count`）；
+   *    · 总伤害先扣**余数**：`floor(harm/num)*(num-1)` 个球各分一份，第一个数字拿 `harm - 份额*(num-1)`；
+   *    · 其余 `num-1` 个球是**复制出来的球元件**：`duplicateMc` 每次随机 `_x ±(10..59)`、`_y ±(0..59)`，
+   *      出生时隐藏；之后**每 100ms** 亮一个、`gotoAndPlay(2)`、并扣它那一份血；
+   *    · 队列空了才 `attackEnd = true`（这一拍结束）。
+   *  复刻这边总伤害已经在 `applyHp()` 里一次性结算（同一份数值），这里只补**演出与分段飘字**：
+   *  第一下按余数飘、剩下每 100ms 亮一个球 + 飘一份，观感与原版一致。
+   *  ⚠ 原来这里根本不做分裂：伤害一次飘完、也没有多出来的球（第 257 批自标的「功能缺口」）。 */
+  /* 多球分裂的抖动范围（原版 `duplicateMc`：`_x ± (random(50)+10)`、`_y ± random(60)`）。 */
+  const BOOM_BALL_JITTER = { xMin: 10, xSpan: 50, ySpan: 60 };
+  function boomSplit(rec, attacker, r, side, acts, aborted) {
+    const view = rec && rec.view;
+    const total = Math.max(0, Math.round(Math.abs(Number(r.dmg) || 0)));
+    const n = Math.max(2, Math.min(8, Math.round(Number(r.boomCount) || 0)));
+    if (!total) return false;
+    const share = Math.floor(total / n);
+    const first = total - share * (n - 1);
+    /* 第一下就是"已经打到身上的那一次"：数字换成余数（原版 `defender.reduceBlood(_loc7, 1)`）。 */
+    floatNumber(side, first, 'hit');
+    const sel = attacker && attacker.attacks ? attacker.attacks() : null;
+    const ball = sel && sel.byName ? sel.byName('attack') : null;
+    if (!view || !sel || !sel.attachChild) return true;
+    const symId = acts && acts.sym ? String(acts.sym) : '';
+    const base = (ball && ball.g && ball.g.__baseMa) ? String(ball.g.__baseMa) : '';
+    const balls = [];
+    for (let i = 1; i < n; i++) {
+      const timer = setTimeout(() => {
+        if (aborted()) return;
+        const dx = (Math.random() < 0.5 ? -1 : 1) * (BOOM_BALL_JITTER.xMin + Math.floor(Math.random() * BOOM_BALL_JITTER.xSpan));
+        const dy = (Math.random() < 0.5 ? -1 : 1) * Math.floor(Math.random() * BOOM_BALL_JITTER.ySpan);
+        let clip = null;
+        if (symId) clip = sel.attachChild(symId, 1, 'boom');
+        if (!clip) clip = ball;                        // 兜底：拿不到球元件就不画额外球，只飘数字
+        if (clip && clip !== ball) {
+          clip.setExtraTransform((base ? 'matrix(' + base + ') ' : '') + 'translate(' + dx + ',' + dy + ')');
+          visible(clip, false);
+          if (clip.g) clip.g.style.visibility = 'hidden';
+          balls.push(clip);
+          visible(clip, true);
+          play(clip, 2);
+        }
+        if (share > 0) floatNumber(side, share, 'hit');
+      }, i * 100);
+      if (rec.timers) rec.timers.push(timer);
+    }
+    /* 分裂完把复制出来的球收掉（原版它们随父容器一起被下一拍清掉）。 */
+    const cleanup = setTimeout(() => {
+      for (const c of balls) { try { if (c.destroy) c.destroy(); } catch (e) {} }
+    }, n * 100 + 600);
+    if (rec.timers) rec.timers.push(cleanup);
+    return true;
+  }
+
   /* ============================================================
    * 主流程
    * ============================================================ */
@@ -1693,6 +1905,8 @@
     for (const wake of [...rec.sleepers]) wake();
     rec.sleepers.clear();
     if (rec.pickups) { try { rec.pickups.close(); } catch (e) {} }
+    if (rec.topLayerRelayout && window.removeEventListener) window.removeEventListener('resize', rec.topLayerRelayout);
+    if (rec.topLayerRO) { try { rec.topLayerRO.disconnect(); } catch (e) {} }
     if (rec.skipButton) rec.skipButton.remove();
     if (rec.speedButton) rec.speedButton.remove();
     if (rec.host && rec.host.parentNode) rec.host.parentNode.removeChild(rec.host);
@@ -1875,6 +2089,9 @@
      * 舞台右下角）；倍速是复刻自己加的功能，原版没有，所以放到**左下角**不挡那颗跳过。 */
     addSpeedKey(rec, o);
     if (o.allowSkip !== false && (!window.State || !State.unlockedSkip || State.unlockedSkip())) {
+      /* 图集层是 HTML canvas，会盖住主 SVG 里后挂的跳过键；把跳过键移到战斗最上层
+       * 的 SVG 覆盖层里（见 `makeBattleTopLayer`），保持原版层序。 */
+      const topLayer = makeBattleTopLayer(rec, view.g || view);
       const sk = view.attachChild(SYM.skip, 1, 'skip');
       if (sk && sk.g) {
         /* 原版 `showSkip()` 是 `attachMovie("跳过","skipmc",100,{_x:0,_y:0})`（不缩放），
@@ -1929,6 +2146,9 @@
         };
         sk.g.addEventListener('click', fireSkip);
         if (window.SfUiFeedback) SfUiFeedback.bind(sk.g, { shell: shell });
+        /* 移到最上层覆盖 SVG：图集 canvas 是 HTML 层，按 DOM 顺序会盖住主 SVG 里的跳过键。
+         * 跳过键的画稿/transform/defs 都是自带的，换 SVG 后仍按同一套舞台坐标渲染。 */
+        if (topLayer) topLayer.appendChild(sk.g);
         rec.skipSprite = sk;
       }
     }
@@ -2284,7 +2504,12 @@
       if (!guarded) guarded = defender.useSkillDefense(r);
       applyHp(rec, r);
       /* 闪开了就没有伤害数字（`Squirrel.beAttack` 的 `defenseType == 1` 那一支只改身体帧）。 */
-      if (r.dmg && !r.dodge) floatNumber(def, r.dmg, 'hit');
+      if (r.dmg && !r.dodge) {
+        /* 幸运一击：`boomCount > 1` 走原版 `boom()` 的多球分裂（分段飘字 + 复制球）。 */
+        if (!(Number(r.boomCount) > 1 && boomSplit(rec, attacker, r, def, acts, aborted))) {
+          floatNumber(def, r.dmg, 'hit');
+        }
+      }
       if (r.healSelf) floatNumber(att, r.healSelf, 'heal');
       /* 幻兽·凌波微步：闪避时给**挨打的那一方**回血（`r.dodgeHeal` 由 sim 落在这一拍上）。 */
       if (r.dodgeHeal) floatNumber(def, r.dodgeHeal, 'heal');

@@ -30,6 +30,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(not(mobile))]
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -254,6 +255,29 @@ fn file_meta(path: &Path) -> (bool, u64, u64) {
     }
 }
 
+/// 存档**原子写**：先写同目录 `.tmp` 再 rename 覆盖。
+/// macOS / APFS 上窗口被关掉、进程被杀或系统休眠时，直接 fs::write 可能留下半截 JSON；
+/// 下次启动解析失败就会退回浏览器兜底档（用户 2026-10 报的 Mac“有时候打开显示存档没有自动保存”）。
+/// rename 在同一文件系统内是原子的：要么旧档完整，要么新档完整。
+fn write_save_atomic(path: &Path, text: &str) -> std::io::Result<()> {
+    static TMP_SEQ: AtomicUsize = AtomicUsize::new(0);
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    /* 每次用不同临时名：轻壳的迷你服务器是每连接一个线程，两个 POST 同时到达时
+     * 不能互相覆盖 tmp 文件。 */
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_extension(format!("json.tmp.{}.{seq}", std::process::id()));
+    fs::write(&tmp, text)?;
+    match fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
 #[cfg(not(mobile))]
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
@@ -362,7 +386,7 @@ fn save_api(method: &str, query: &str, body: &[u8], ctx: &Ctx, out: &mut TcpStre
             if let Some(dir) = ctx.save.parent() {
                 let _ = fs::create_dir_all(dir);
             }
-            match fs::write(&ctx.save, text) {
+            match write_save_atomic(&ctx.save, text) {
                 Ok(_) => {
                     let (_, saved_at, _) = file_meta(&ctx.save);
                     respond_json(out, 200, &format!("{{\"ok\":true,\"savedAt\":{saved_at}}}"))
@@ -374,8 +398,86 @@ fn save_api(method: &str, query: &str, body: &[u8], ctx: &Ctx, out: &mut TcpStre
     }
 }
 
-/// 用系统默认浏览器打开一个 http(s) 链接。
-///   桌面：Windows `cmd /C start`／macOS `open`／Linux `xdg-open`
+/// 把存档写到系统「下载」目录（桌面导出 / 便携轻壳的 `/__export` 共用）。
+/// Windows 用 Known Folder（`dirs`），兼容 OneDrive 重定向；macOS/Linux 走 `$HOME/Downloads`。
+#[cfg(not(mobile))]
+fn export_to_downloads(file_name: &str, data: &str) -> Result<serde_json::Value, String> {
+    if data.len() > SAVE_MAX {
+        return Err("存档太大（超过 4 MB）".into());
+    }
+    serde_json::from_str::<serde_json::Value>(data).map_err(|_| "存档不是合法 JSON".to_string())?;
+    let dir = dirs::download_dir().ok_or_else(|| "找不到系统下载目录".to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| format!("创建下载目录失败：{e}"))?;
+    let name = sanitize_export_name(file_name);
+    let mut path = dir.join(&name);
+    if path.exists() {
+        let stem = Path::new(&name)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "松鼠大战存档".to_string());
+        let ext = Path::new(&name)
+            .extension()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "json".to_string());
+        for i in 1..1000 {
+            path = dir.join(format!("{stem} ({i}).{ext}"));
+            if !path.exists() {
+                break;
+            }
+        }
+    }
+    fs::write(&path, data).map_err(|e| format!("写入下载目录失败：{e}"))?;
+    Ok(serde_json::json!({ "ok": true, "path": path.to_string_lossy() }))
+}
+
+#[cfg(not(mobile))]
+fn sanitize_export_name(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| if "\\/:*?\"<>|".contains(c) || c.is_control() { '_' } else { c })
+        .collect();
+    let base = cleaned.trim();
+    let mut name = if base.is_empty() { "松鼠大战存档".to_string() } else { base.to_string() };
+    if !name.to_lowercase().ends_with(".json") {
+        name.push_str(".json");
+    }
+    if name.chars().count() > 120 {
+        let cut: String = name.chars().take(116).collect();
+        name = cut + ".json";
+    }
+    name
+}
+
+#[cfg(not(mobile))]
+fn query_param(query: &str, key: &str) -> Option<String> {
+    query.split('&').find_map(|kv| {
+        let (k, v) = kv.split_once('=')?;
+        if percent_decode(k) == key {
+            Some(percent_decode(v))
+        } else {
+            None
+        }
+    })
+}
+
+/// `/__export?name=…`：轻壳模式（页面来自 127.0.0.1，IPC 会被 ACL 拒）的桌面导出入口。
+#[cfg(not(mobile))]
+fn export_api(method: &str, query: &str, body: &[u8], out: &mut TcpStream) -> std::io::Result<()> {
+    if method != "POST" {
+        return respond_json(out, 405, &json_err("只支持 POST"));
+    }
+    let name = query_param(query, "name").unwrap_or_else(|| "松鼠大战存档.json".to_string());
+    let text = match std::str::from_utf8(body) {
+        Ok(t) => t,
+        Err(_) => return respond_json(out, 400, &json_err("存档不是合法 UTF-8")),
+    };
+    match export_to_downloads(&name, text) {
+        Ok(v) => respond_json(out, 200, &v.to_string()),
+        Err(msg) => respond_json(out, 500, &json_err(&msg)),
+    }
+}
+
+/// 用系统默认浏览器打开一个 http(s) 链接。///   桌面：Windows `cmd /C start`／macOS `open`／Linux `xdg-open`
 ///   安卓：`am start -a android.intent.action.VIEW`（部分机型 SELinux 可能拦住 → 前端会退回「复制链接」）
 /// 链接先做白名单校验（只允许 http(s)、只允许可见 ASCII、禁掉 shell 元字符），
 /// 免得把一个带 `&` / `"` 的字符串交给 shell 解析。
@@ -545,6 +647,11 @@ fn handle_request(method: &str, target: &str, body: &[u8], ctx: &Ctx, out: &mut 
         update_api(query, method == "POST", ctx, out)?;
         return Ok(false);
     }
+    /* 桌面「导出存档」：轻壳模式页面来自 127.0.0.1，调不了 Tauri IPC，走普通 HTTP 落下载目录。 */
+    if path == "/__export" {
+        export_api(method, query, body, out)?;
+        return Ok(false);
+    }
     if method != "GET" && method != "HEAD" {
         respond(out, 405, "text/plain; charset=utf-8", "只支持 GET / HEAD".as_bytes())?;
         return Ok(false);
@@ -694,9 +801,24 @@ fn save_write(state: tauri::State<SaveState>, data: String) -> Result<serde_json
     if let Some(dir) = state.file.parent() {
         let _ = fs::create_dir_all(dir);
     }
-    fs::write(&state.file, &data).map_err(|e| format!("写存档失败：{e}"))?;
+    write_save_atomic(&state.file, &data).map_err(|e| format!("写存档失败：{e}"))?;
     let (_, saved_at, _) = file_meta(&state.file);
     Ok(serde_json::json!({ "ok": true, "savedAt": saved_at, "path": state.file.to_string_lossy() }))
+}
+
+/// 命令：`export_save` —— 安装版（页面在 tauri.localhost）把存档写到系统「下载」目录。
+/// 轻壳 / 安卓各有自己的通道（`/__export` / `SSDZAndroid`），这里只负责桌面安装版。
+#[tauri::command]
+fn export_save(file_name: String, data: String) -> Result<serde_json::Value, String> {
+    #[cfg(mobile)]
+    {
+        let _ = (file_name, data);
+        Err("移动端请使用系统下载目录桥".into())
+    }
+    #[cfg(not(mobile))]
+    {
+        export_to_downloads(&file_name, &data)
+    }
 }
 
 // ---------------------------------------------------------------- 入口
@@ -711,7 +833,7 @@ const TITLE: &str = "松鼠大战 · 怀旧复刻版";
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![save_path, save_meta, save_read, save_write, open_external])
+        .invoke_handler(tauri::generate_handler![save_path, save_meta, save_read, save_write, export_save, open_external])
         .setup(|app| {
             let handle = app.handle().clone();
 

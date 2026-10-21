@@ -456,16 +456,22 @@ echo "要停掉它：双击 scripts/停止游戏.command，或者  bash scripts/
 # 免得出现「窗口开了、但游戏读不到存档」这种最难排查的静默状态。
 save_check_warn() {
   local body
-  body="$(curl -fs -m 3 "${URL}__save" 2>/dev/null | head -c 200 || true)"
-  if printf '%s' "$body" | grep -q '"ok":true'; then
-    echo "存档接口自检：正常（游戏会读写 save/progress.json）"
-    # 顺手看看是不是「旧代码的服务器」还在跑：新版有这个备份接口，旧版没有。
-    # 旧服务器不算致命，但导入存档时不能自动备份旧档，所以提示一下重启。
-    if command -v curl >/dev/null 2>&1 && ! curl -fs -m 2 -o /dev/null "${URL}__save/backup" 2>/dev/null; then
-      echo "[!] 现在这个服务器是旧版本（没有备份接口）。建议：先 双击 停止游戏.command，再双击本文件重启一次。"
+  # 只取 meta（几十字节），不把整份 progress.json 拉过来；页面刚开始加载素材时
+  # 第一次请求偶尔会排在静态文件后面，给 5 次短重试再判定失败（避免假告警）。
+  local i
+  for i in 1 2 3 4 5; do
+    body="$(curl -fs -m 2 "${URL}__save?meta=1" 2>/dev/null | head -c 200 || true)"
+    if printf '%s' "$body" | grep -q '"ok":true'; then
+      echo "存档接口自检：正常（游戏会读写 save/progress.json）"
+      # 顺手看看是不是「旧代码的服务器」还在跑：新版有这个备份接口，旧版没有。
+      # 旧服务器不算致命，但导入存档时不能自动备份旧档，所以提示一下重启。
+      if command -v curl >/dev/null 2>&1 && ! curl -fs -m 2 -o /dev/null "${URL}__save/backup" 2>/dev/null; then
+        echo "[!] 现在这个服务器是旧版本（没有备份接口）。建议：先 双击 停止游戏.command，再双击本文件重启一次。"
+      fi
+      return 0
     fi
-    return 0
-  fi
+    sleep 0.4
+  done
   echo "[!] 存档接口自检没通过：游戏窗口可能退回浏览器兜底存档。"
   echo "    服务器日志：save/server.err.log"
   osascript -e "display dialog \"游戏窗口开了，但存档接口自检没通过 —— 窗口里可能会显示浏览器里的旧档（例如 1 级）。\n\n请把这个提示告诉维护者，并附上 save/server.err.log。\" buttons {\"知道了\"} default button 1 with title \"松鼠大战 · 存档自检\"" >/dev/null 2>&1 || true

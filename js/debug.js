@@ -110,8 +110,8 @@
     return state;
   }
 
-  // 一键升级目标等级：与游戏满级一致（State.MAX_PLAYER_LEVEL = 70）
-  const MAX_LEVEL = 70;
+  // 一键升级目标等级：与游戏满级一致（State.MAX_PLAYER_LEVEL = 90）
+  const MAX_LEVEL = (window.State && State.MAX_PLAYER_LEVEL) || 90;
   /* ============================================================
    * 【DBG3】一次性工具（重置/发放/遗忘）
    * ============================================================ */
@@ -123,7 +123,7 @@
         const from = S.level;
         if (from >= MAX_LEVEL) return '已经是 ' + MAX_LEVEL + ' 级或更高（调试上限 ' + MAX_LEVEL + '）';
         const gain = { power: 0, agility: 0, speed: 0, hp: 0 };
-        let levels = 0, gifts = 0, books = 0, picks = 0;
+        let levels = 0, gifts = 0, books = 0, picks = 0, chests = 0;
         // 每次只喂「当前等级升下一级」所需的经验，走完整的 gainExp 流程
         for (let guard = 0; S.level < MAX_LEVEL && guard < 200; guard++) {
           const ups = State.gainExp(GData.nextExp(S.level));
@@ -133,6 +133,7 @@
             gain.power += u.power; gain.agility += u.agility; gain.speed += u.speed; gain.hp += u.hp;
             gifts += (u.gifts || []).length;
             if (u.attributeBook) books++;
+            if (u.chest) chests += u.chest;
             if (u.wsChoice) picks++;
           }
         }
@@ -142,6 +143,7 @@
         if (window.UI && UI.classic && UI.classic.promptLevelUpChoices) UI.classic.promptLevelUpChoices();
         return '等级 ' + from + ' → ' + S.level + '（' + levels + ' 级）：力量+' + gain.power + ' 敏捷+' + gain.agility +
           ' 速度+' + gain.speed + ' 生命+' + gain.hp + '，升级礼包 ' + gifts + ' 件' + (books ? '、属性书 ' + books + ' 本' : '') +
+          (chests ? '、金宝箱 ' + chests + ' 个' : '') +
           (picks ? '，武器/技能三选一 ' + picks + ' 组' : '，没有新的武技可选') +
           (S.freePoints ? '，本次分配弹窗里还有 ' + S.freePoints + ' 点没点完' : '');
       } },
@@ -436,6 +438,72 @@
    * ============================================================ */
   // ---------- 面板 ----------
   let panel = null, gear = null, drag = null;
+  /* 玩家手动拖过面板之后就不再让面板跟内屏走（按钮始终跟随）。 */
+  let panelPinned = false;
+  let layoutBound = false;
+
+  /** 游戏**内屏**的可见包围盒：经典/现代界面都是 `#ui`（1150×690 设计空间）经
+   *  `Main.resizeLayout()` 等比缩放后的那个矩形。窗口比例和舞台不一致时，窗口四周会留黑边，
+   *  `position:fixed` 贴的是**外框**（窗口），会掉进黑边里；这里改成按内屏的矩形定位。
+   *  `#ui` 还没挂上（启动最早的一瞬间）时退回窗口尺寸。 */
+  function stageRect() {
+    let r = null;
+    try {
+      const ui = document.getElementById('ui');
+      r = ui && ui.getBoundingClientRect ? ui.getBoundingClientRect() : null;
+    } catch (e) { r = null; }
+    if (r && r.width > 120 && r.height > 90) return r;
+    const de = document.documentElement || {};
+    const vw = Math.max(1, de.clientWidth || window.innerWidth || 1);
+    const vh = Math.max(1, de.clientHeight || window.innerHeight || 1);
+    return { left: 0, top: 0, right: vw, bottom: vh, width: vw, height: vh, windowFallback: true };
+  }
+  /** 把入口按钮（以及没被拖过的面板）贴到内屏的右上角。
+   *  尺寸用 getBoundingClientRect 量：按钮本身是 fixed + 不缩放，所以这里只需要平移。 */
+  function layoutDebugUi() {
+    if (!gear) return;
+    const r = stageRect();
+    const margin = 6;
+    /* 按钮隐藏时 offsetWidth 是 0，用一个够用的兜底宽度（实测约 58×34）。 */
+    const gw = Math.max(28, gear.offsetWidth || 58);
+    const gh = Math.max(20, gear.offsetHeight || 34);
+    const gearLeft = Math.max(r.left + 2, r.right - margin - gw);
+    const gearTop = Math.max(r.top + 2, r.top + margin);
+    gear.style.right = 'auto';
+    gear.style.left = Math.round(gearLeft) + 'px';
+    gear.style.top = Math.round(gearTop) + 'px';
+    if (!panel) return;
+    const room = Math.max(160, r.bottom - (gearTop + gh + 8) - 8);
+    /* 面板高度也按内屏算（内联样式优先于 CSS 里的 100vh 兜底），别让它伸到黑边/状态栏外面。 */
+    panel.style.maxHeight = Math.round(room) + 'px';
+    if (panelPinned) return;          // 玩家拖过就留在原地，别再拽回来
+    const pw = Math.max(240, Math.min(panel.offsetWidth || 396, r.width - 16));
+    panel.style.right = 'auto';
+    panel.style.left = Math.round(Math.max(r.left + 8, gearLeft + gw - pw)) + 'px';
+    panel.style.top = Math.round(gearTop + gh + 8) + 'px';
+  }
+  /** 内屏尺寸会变的三条路：窗口 resize / 转屏；`Main.resizeLayout()` 改 `#ui` 的 transform；
+   *  切界面模式重建 `#ui`。前两条直接监听，第三条用 MutationObserver 盯 style/class。 */
+  function bindLayout() {
+    if (layoutBound) return;
+    layoutBound = true;
+    try { window.addEventListener('resize', layoutDebugUi); } catch (e) {}
+    try { window.addEventListener('orientationchange', () => setTimeout(layoutDebugUi, 120)); } catch (e) {}
+    try {
+      if (window.visualViewport) window.visualViewport.addEventListener('resize', layoutDebugUi);
+    } catch (e) {}
+    try {
+      if (document.addEventListener) {
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') layoutDebugUi(); });
+      }
+    } catch (e) {}
+    try {
+      const ui = document.getElementById('ui');
+      if (ui && typeof MutationObserver === 'function') {
+        new MutationObserver(layoutDebugUi).observe(ui, { attributes: true, attributeFilter: ['style', 'class'] });
+      }
+    } catch (e) {}
+  }
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -596,24 +664,30 @@
       mark();
     };
 
-    // 拖动标题栏移动面板
+    // 拖动标题栏移动面板（拖过之后就不再自动贴内屏；边界仍按内屏算，免得拖到黑边里找不回来）
     const head = panel.querySelector('.debug-head');
     head.onpointerdown = (e) => {
       if (e.target.closest('button')) return;
       const r = panel.getBoundingClientRect();
       drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+      panelPinned = true;
       head.setPointerCapture(e.pointerId);
     };
     head.onpointermove = (e) => {
       if (!drag) return;
-      const x = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, e.clientX - drag.dx));
-      const y = Math.max(0, Math.min(window.innerHeight - 40, e.clientY - drag.dy));
+      const stage = stageRect();
+      const maxX = Math.max(stage.left, stage.right - panel.offsetWidth);
+      const maxY = Math.max(stage.top, stage.bottom - 40);
+      const x = Math.max(stage.left, Math.min(maxX, e.clientX - drag.dx));
+      const y = Math.max(stage.top, Math.min(maxY, e.clientY - drag.dy));
       panel.style.left = x + 'px'; panel.style.top = y + 'px';
       panel.style.right = 'auto';
     };
     head.onpointerup = (e) => { drag = null; try { head.releasePointerCapture(e.pointerId); } catch (err) {} };
 
     mark();
+    bindLayout();
+    layoutDebugUi();
     // 启动时只还原面板显示；已保存的开关由游戏本身按标记生效，
   }
 
@@ -742,6 +816,8 @@
     const ok = debugAllowed();
     gear.style.display = ok ? '' : 'none';
     if (!ok) { panel.classList.remove('open'); gear.classList.remove('open'); }
+    /* display 一变，按钮的可见宽高也跟着变（隐藏时量不到），重新贴一次内屏。 */
+    if (ok) layoutDebugUi();
     return ok;
   }
   function togglePanel(force) {
@@ -750,7 +826,7 @@
     const open = force == null ? !isOpen() : force === true;
     panel.classList.toggle('open', open);
     gear.classList.toggle('open', open);
-    if (open) mark();
+    if (open) { mark(); layoutDebugUi(); }
     return open;
   }
 
@@ -775,6 +851,8 @@
     enabled, get, set, toggle, reset, numberStretch, resetAccount, grantItem, grantWS, forgetWS, MAX_LEVEL,
     open: () => togglePanel(true), close: () => togglePanel(false), togglePanel, refresh: refreshAvailability,
     allowed: debugAllowed, DEBUG_IN_CLASSIC, state: () => Object.assign({}, state),
+    /* 按内屏重新贴一次入口按钮/面板（窗口尺寸、分辨率档位、界面模式变化后都可以手动叫一次）。 */
+    layout: layoutDebugUi, stageRect,
     /* 【DBG5b】一次性工具清单（只读）：面板按它渲染按钮，回归/探针也可以用它直接跑某一条
      * （`Debug.actions().find((a) => a.label === '重置每日与体力计时').run()`）——
      * 与真人点按钮走的是**同一份实现**，不会出现「测试绿、点按钮不生效」那种错位。 */

@@ -127,10 +127,20 @@ async function handleSaveApi(req, res, url) {
     }
     try {
       fs.mkdirSync(SAVE_DIR, { recursive: true });
-      fs.writeFileSync(SAVE_FILE, JSON.stringify(parsed), 'utf8');
+      /* **原子写**：先写同目录的临时文件再 rename 覆盖。
+       * macOS / APFS 上游戏窗口被关掉、进程被杀、或系统休眠时，直接 writeFileSync
+       * 可能留下半截 JSON；下次启动 fileLoad 解析失败，页面就会挂出「浏览器兜底存档」
+       * 横幅（用户 2026-10 报的 Mac“有时候打开显示存档没有自动保存”）。
+       * rename 是原子的：要么旧文件完整，要么新文件完整，不会出现半截档。 */
+      const tmp = SAVE_FILE + '.tmp.' + process.pid;
+      fs.writeFileSync(tmp, JSON.stringify(parsed), 'utf8');
+      fs.renameSync(tmp, SAVE_FILE);
       writeMark(Math.max(readMark(), saveMaxLevel(parsed)));
       return json(res, 200, { ok: true, savedAt: saveStat().savedAt });
-    } catch (e) { return json(res, 500, { ok: false, msg: '写入存档失败：' + e.message }); }
+    } catch (e) {
+      try { fs.unlinkSync(SAVE_FILE + '.tmp.' + process.pid); } catch (_) {}
+      return json(res, 500, { ok: false, msg: '写入存档失败：' + e.message });
+    }
   }
   return json(res, 405, { ok: false, msg: '只支持 GET / POST' });
 }

@@ -383,11 +383,23 @@
         for (const t of v.g.querySelectorAll('text')) { try { t.style.display = 'none'; } catch (e) {} }
         const svg = host.querySelector('svg');
         if (svg) {
-          /* 人物坐标不是 getBBox() 的局部坐标（父级还有变换）；用屏幕矩阵反算到 SVG
-           * 用户坐标，再取一个**正方形**裁切框并居中，卡片里人物才会居中。 */
+          /* 人物坐标不是 getBBox() 的局部坐标（父级还有变换）；用屏幕矩形反算到 SVG
+           * 用户坐标，再取一个**正方形**裁切框并居中，卡片里人物才会居中。
+           * ⚠ 不用 getScreenCTM：iOS 15 会漏掉祖先 CSS transform 的 scale（WebKit 209220），
+           * 卡片会被裁到偏位/过小。 */
           let bb = null;
           try {
-            const inv = svg.getScreenCTM().inverse();
+            const sr = svg.getBoundingClientRect();
+            const vb = svg.viewBox && svg.viewBox.baseVal;
+            if (!sr || !vb || !sr.width || !sr.height || !vb.width || !vb.height) throw new Error('no rect');
+            const par = String(svg.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+            const scale = /slice/.test(par) ? Math.max(sr.width / vb.width, sr.height / vb.height)
+              : Math.min(sr.width / vb.width, sr.height / vb.height);
+            const ax = /xMin/.test(par) ? 0 : /xMax/.test(par) ? 1 : 0.5;
+            const ay = /YMin/.test(par) ? 0 : /YMax/.test(par) ? 1 : 0.5;
+            const x0 = sr.left + (sr.width - vb.width * scale) * ax - vb.x * scale;
+            const y0 = sr.top + (sr.height - vb.height * scale) * ay - vb.y * scale;
+            const toUser = (sx, sy) => ({ x: (sx - x0) / scale, y: (sy - y0) / scale });
             /* 只量隐藏完非松鼠元件后的直接根层（人物 + 尾巴 + 装备）；
              * 整棵 v.g 的 bbox 会带舞台空白，不能拿来裁切。 */
             let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity, n = 0;
@@ -396,8 +408,8 @@
               if (child.style && child.style.display === 'none') continue;
               const rr = child.getBoundingClientRect();
               if (!rr.width || !rr.height) continue;
-              const a = new DOMPoint(rr.left, rr.top).matrixTransform(inv);
-              const z = new DOMPoint(rr.right, rr.bottom).matrixTransform(inv);
+              const a = toUser(rr.left, rr.top);
+              const z = toUser(rr.right, rr.bottom);
               x1 = Math.min(x1, a.x, z.x); y1 = Math.min(y1, a.y, z.y);
               x2 = Math.max(x2, a.x, z.x); y2 = Math.max(y2, a.y, z.y);
               n++;
@@ -905,13 +917,21 @@
   function bossCatalogHtml() {
     const pool = Tower.bossPool ? Tower.bossPool() : [];
     if (!pool.length) return '';
-    return '<div class="tower-buffs boss-catalog"><h4>BOSS 一览 <span class="buff-slot-count">' + pool.length + ' 个 · 第 4 场随机池</span></h4>' +
-      '<ol class="tower-plan boss-grid">' + pool.map((b, i) =>
-        '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel' : '') + '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
-        '<b>' + esc(b.name) + '</b>' +
-        (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
-        (b.layers && b.layers.length ? '<span class="boss-layers">第 ' + b.layers.join(' / ') + ' 层</span>' : '') +
-        '</li>').join('') + '</ol></div>';
+    return '<div class="tower-buffs boss-catalog"><h4>BOSS 一览 <span class="buff-slot-count">' + pool.length +
+      ' 个 · 第 4 场 / 10 层守关 / 整百层魔王</span></h4>' +
+      '<ol class="tower-plan boss-grid">' + pool.map((b, i) => {
+        const tier = b.tier == null ? null : b.tier;
+        /* 魔王卡（`secret`）= 三处全 ？？？，不剧透类型/稀有度/机制。 */
+        const secret = !!b.secret;
+        const tip = secret ? '？？？' : ((b.rarity ? '装备稀有度：' + b.rarity + '。' : '') + mechTip(b));
+        const rarity = secret ? '？？？' : ((b.rarity || '') + '装备');
+        return '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel ' : '') + (b.king ? 'king ' : '') +
+          (tier == null ? '' : 'tier-' + tier) + '" tabindex="0" data-tip="' + esc(tip) + '">' +
+          '<b>' + esc(b.name) + '</b>' +
+          (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
+          '<span class="boss-rarity' + (secret ? ' hidden' : ' r' + tier) + '">' + esc(rarity) + '</span>' +
+          '</li>';
+      }).join('') + '</ol></div>';
   }
   /** 左侧塔身：当前层附近的一段楼层，自上而下。
    *
@@ -1626,10 +1646,13 @@
       ? '<div class="result-lines lost">跳过战斗：随机少收了 ' +
         lostList.map((p) => esc(p.name) + ' ×' + p.count).join('　') + '</div>'
       : '';
+    const blackLine = !State.blackGearEnabled() ? '' : ((rw.black && rw.black.cards)
+      ? '<div class="result-lines">黑装：黑色卡片 ×' + rw.black.cards + (rw.blackBox ? '、黑装自选箱 ×' + rw.blackBox : '') + '</div>'
+      : (rw.blackBox ? '<div class="result-lines">黑装：黑装自选箱 ×' + rw.blackBox + '</div>' : ''));
     modal('层数通关', '<div class="result-box"><div class="result-title win">第 ' + rw.layer + ' 层通关！</div>' +
       '<div class="result-lines">金松果 +' + rw.gold + '</div>' +
       (rw.drop ? '<p>获得 ' + esc(rw.drop.name) + ' ×' + rw.drop.count + '</p>' : '') +
-      prizeLine + lostLine +
+      prizeLine + lostLine + blackLine +
       '<p class="small-label">层数 +1，下一层对手更强、松果更多。</p></div>',
       [{ label: '继续爬塔', cls: 'gold', run: openTower }, { label: '返回', run: () => C().home() }], { small: true });
     // 经验/升级提示走和战斗拾取同一套 UI（追加到上面这个弹窗里）
@@ -1933,9 +1956,15 @@
   function milestoneModal(rw, next) {
     const m = rw.milestone;
     const icon = C().icon ? C().icon('prop', m.propId) : '';
+    const blackLine = (!State.blackGearEnabled() || !rw.black)
+      ? ''
+      : (rw.black.gain
+        ? '<div class="result-lines">黑装：黑色卡片 ×' + rw.black.gain + '（本周剩 ' + rw.black.left + '/' + rw.black.cap + '）</div>'
+        : '<div class="result-lines">黑装：本周黑色卡片已达上限（' + rw.black.cap + '/' + rw.black.cap + '）</div>');
     modal('第 ' + rw.layer + ' 层 · 里程碑奖励', '<div class="result-box"><div class="result-title win">再进一步</div>' +
       '<p>你爬到了第 ' + rw.layer + ' 层，结算奖励随机抽取：</p>' +
       '<p class="milestone-reward">' + icon + '<b>' + esc(m.name) + '</b> ×' + m.count + '</p>' +
+      blackLine +
       '<div class="result-lines">已放入背包（每 10 层一次）</div></div>',
       [{ label: '继续', cls: 'gold', run: next }], { small: true });
   }
@@ -2338,7 +2367,7 @@
         '（本层应得 ' + info.ticketsNow +
         (info.retryToken ? ' + 铸币 ' + info.retryToken + ' 枚 1:1 折现' : '') + '），本局结束（分数入账）</span></div>' +
       '<div class="checkpoint-option"><b>继续挑战</b><span>撑到第 ' + info.nextCheckpoint + ' 层本层应得升到 <b class="gold-text">' + info.ticketsNext + '</b> 张（试炼币照常折现）；中途失败也按同一口径结算</span></div>' +
-      '<p class="small-label">本局分数 ' + info.score + ' · 试炼币 ' + info.coins + '（不折现，随本局作废）</p></div>',
+      '<p class="small-label">本局分数 ' + info.score + ' · 试炼币 ' + info.coins + '</p></div>',
       [
         { label: '结算离场', cls: 'gold', run: () => { const r = Tower.settleEndless(); if (r.ok) settleResult(r); else openEndless(); } },
         { label: '继续挑战', run: () => { Tower.continueEndless(); fight('endless'); } },

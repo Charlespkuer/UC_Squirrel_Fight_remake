@@ -105,7 +105,7 @@
   function claimRankCup() {
     const s = State.state();
     if (s.integral == null) s.integral = 1500;
-    const cap = State.MAX_PLAYER_LEVEL || 70;
+    const cap = State.MAX_PLAYER_LEVEL || 90;
     const mine = Math.max(0, Math.round(Number(s.integral) || 0));
     const entries = [];
     for (let n = 0; n < 4; n++) {
@@ -131,7 +131,11 @@
   /** 竞技场战果落点：挑战页 7638 第 4 帧（有「开始竞技」的那一页），不是第 6 帧首屏。
    *  用户 2026-10 口径：竞技胜利后要回到有开始竞技的页面，而不是竞技场主界面。 */
   function arenaRules() {
-    if (window.SfChallenge && SfChallenge.goArenaPage) { SfChallenge.goArenaPage('rules'); return; }
+    /* 只有经典界面才把这一页交回原版挑战页；现代界面的竞技场是下面这套 DOM 页，
+     * 以前无条件走 SfChallenge 会把玩家带到「挑战」页（用户 2026-10 报的“竞技打不开”）。 */
+    if (UI.currentUiMode && UI.currentUiMode() === 'classic' && window.SfChallenge && SfChallenge.goArenaPage) {
+      SfChallenge.goArenaPage('rules'); return;
+    }
     arena();
   }
   /** 「报名参赛」——经典模式竞技场那一页的「开始比赛」走的就是它（见 ui-challenge 的
@@ -178,14 +182,17 @@
     /* 【经典模式】这一页由**原版竞技场帧**渲染（挑战页 7638 的第 6 帧 + `compete` 两颗键），
      * 所以这里只把界面交回给挑战页 —— 用户 2026-10 口径："竞技场开始竞技会跳回现代界面，
      * 经典模式下完全是经典模式。" 报名/开打的流程仍走本文件（原版那套要服务端）。 */
-    if (window.SfChallenge && SfChallenge.goArenaPage) { SfChallenge.goArenaPage('home'); return; }
+    if (UI.currentUiMode && UI.currentUiMode() === 'classic' && window.SfChallenge && SfChallenge.goArenaPage) {
+      SfChallenge.goArenaPage('home'); return;
+    }
     State.tickEnergy();
     const s = State.state(), run = activeArenaRun();
+    /* 现代竞技页只保留一排三种：经验场 / 碎片场 / 天梯。
+     * 幻兽竞技场和螳螂大侠等场外立绘不再出现；三张卡各自保留原版金杯/宝石杯/天梯 UI 图片。 */
     const cards = [
       { art: 28, name: '\u7ecf\u9a8c\u7ade\u6280\u573a', text: '10\u7ea7\u5f00\u542f\uff0c\u51a0\u519b150\uff0f\u4e9a\u519b100\uff0f\u5b63\u519b50\uff0f\u6bbf\u519b30\u7ecf\u9a8c', action: 'arena-exp' },
       { art: 29, name: '\u788e\u7247\u7ade\u6280\u573a', text: '15\u7ea7\u5f00\u542f\uff0c\u56db\u540d\u4f9d\u6b21\u83b7\u5f978\uff0f6\uff0f4\uff0f3\u84dd\u8272\u788e\u7247', action: 'arena-fragment' },
-      { art: 30, name: '\u5e7b\u517d\u7ade\u6280\u573a', text: '15\u7ea7\u5f00\u542f\uff0c\u56db\u540d\u4f9d\u6b21\u83b7\u5f9740\uff0f35\uff0f30\uff0f25\u5b75\u5316\u70b9', action: 'arena-pet' },
-      { art: 31, name: '\u5929\u68af\u8d5b', text: '30\u7ea7\u5f00\u542f\uff0c\u8d62\u79ef\u5206\u3001\u4e89\u91d1\u676f', action: 'arena-rank' },
+      { art: 30, name: '\u5929\u68af\u8d5b', text: '30\u7ea7\u5f00\u542f\uff0c\u8d62\u79ef\u5206\u3001\u4e89\u91d1\u676f', action: 'arena-rank' },
     ];
     const resume = run ? '<div class="extra-resume">\u4f60\u5df2\u62a5\u540d\uff0c\u65e0\u9700\u518d\u6b21\u6d88\u8017\u4f53\u529b\u3002' + button(run.phase === 'final' ? '\u7ee7\u7eed\u51b3\u8d5b' : run.phase === 'third' ? '\u7ee7\u7eed\u5b63\u519b\u8d5b' : '\u7ee7\u7eed\u6bd4\u8d5b', 'arena-resume', 'tiny gold') + '</div>' : '';
     let potionHint = '';
@@ -197,10 +204,9 @@
         ? '<div class="extra-arena-hint">' + esc('体力不足 30：报名时会自动使用「') + propMap.getValue(useId).name + esc('」补足体力（不需要手动操作）。') + '</div>'
         : '<div class="extra-arena-hint warn">' + esc('体力不足 30：先用本场入场券（经验场英雄帖 / 碎片场勇气徽章，缺了用另一张），最后才喝体力药。') + '</div>';
     }
-    const p = C().page('challenge', 'arena', '<div class="extra-arena-cards four">' + cards.map(card => '<article>' + sprite(card.art) + '<h2>' + card.name + '</h2><p>' + card.text + '</p>' + button(card.action === 'arena-rank' ? '\u8fdb\u5165\u5929\u68af' : '\u53c2\u52a0\u6bd4\u8d5b', card.action, 'small gold') + '</article>').join('') + '</div><div class="extra-arena-cost">4\u4eba\u4e24\u8f6e\u6bd4\u8d5b\uff1a\u534a\u51b3\u8d5b\u80dc\u8005\u4e89\u51a0\u519b\uff0c\u8d25\u8005\u4e89\u5b63\u519b\u3002<br>\u62a5\u540d\u6d88\u801730\u4f53\u529b\uff0c\u4f53\u529b\u4e0d\u8db3\u53ef\u4f7f\u7528\u82f1\u96c4\u5e16\u6216\u52c7\u6c14\u5fbd\u7ae0\u3002<br>\u4f53\u529b ' + s.energy + '/' + s.maxEnergy + '\u3000\u82f1\u96c4\u5e16 ' + (s.props[36] || 0) + '\u3000\u52c7\u6c14\u5fbd\u7ae0 ' + (s.props[39] || 0) + '\u3000\u53ec\u5524\u8bc1 ' + (s.props[82] || 0) + '</div>' + resume, { cls: 'extra-board arena-extra-board' });
+    const p = C().page('challenge', 'arena', '<div class="extra-arena-cards">' + cards.map(card => '<article>' + sprite(card.art) + '<h2>' + card.name + '</h2><p>' + card.text + '</p>' + button(card.action === 'arena-rank' ? '\u8fdb\u5165\u5929\u68af' : '\u53c2\u52a0\u6bd4\u8d5b', card.action, 'small gold') + '</article>').join('') + '</div><div class="extra-arena-cost">经验场 / 碎片场：4\u4eba\u4e24\u8f6e\u6bd4\u8d5b\uff0c\u534a\u51b3\u8d5b\u80dc\u8005\u4e89\u51a0\u519b\u3001\u8d25\u8005\u4e89\u5b63\u519b\u3002<br>\u62a5\u540d\u6d88\u801730\u4f53\u529b\uff0c\u4f53\u529b\u4e0d\u8db3\u53ef\u4f7f\u7528\u82f1\u96c4\u5e16\u6216\u52c7\u6c14\u5fbd\u7ae0\u3002<br>\u4f53\u529b ' + s.energy + '/' + s.maxEnergy + '\u3000\u82f1\u96c4\u5e16 ' + (s.props[36] || 0) + '\u3000\u52c7\u6c14\u5fbd\u7ae0 ' + (s.props[39] || 0) + '</div>' + resume, { cls: 'extra-board arena-extra-board' });
     on(p, 'arena-exp', () => confirmArena(0));
     on(p, 'arena-fragment', () => confirmArena(1));
-    on(p, 'arena-pet', () => confirmArena(2));
     on(p, 'arena-rank', rank);
     on(p, 'arena-resume', () => resumeArena(activeArenaRun()));
   }
@@ -407,14 +413,14 @@
    * ============================================================ */
   const RANK_LEVEL_BASE = 30, RANK_INTEGRAL_BASE = 1500, RANK_INTEGRAL_PER_LEVEL = 25, RANK_LEVEL_SPREAD = 4;
   function rankFoeLevel(integral, cap) {
-    const top = Math.max(1, Math.min(State.MAX_PLAYER_LEVEL || 70, Number(cap) || 70));
+    const top = Math.max(1, Math.min(State.MAX_PLAYER_LEVEL || 90, Number(cap) || 90));
     const expect = RANK_LEVEL_BASE + Math.max(0, (Number(integral) || 0) - RANK_INTEGRAL_BASE) / RANK_INTEGRAL_PER_LEVEL;
     const jitter = (Math.random() * 2 - 1) * RANK_LEVEL_SPREAD;
     return Math.max(1, Math.min(top, Math.round(expect + jitter)));
   }
   /** 只算期望值（给界面提示/测试用，不带随机）。 */
   function rankFoeExpectLevel(integral, cap) {
-    const top = Math.max(1, Math.min(State.MAX_PLAYER_LEVEL || 70, Number(cap) || 70));
+    const top = Math.max(1, Math.min(State.MAX_PLAYER_LEVEL || 90, Number(cap) || 90));
     return Math.max(1, Math.min(top, Math.round(
       RANK_LEVEL_BASE + Math.max(0, (Number(integral) || 0) - RANK_INTEGRAL_BASE) / RANK_INTEGRAL_PER_LEVEL)));
   }
@@ -441,8 +447,10 @@
   }
   /* 力/敏/速/血永久丸（goods id 7~10）：原版 `timesLimit` 是 **1**，且是账号级限购；
    * 复刻以前把所有 timesLimit 都当“每周限兑”，于是每周都能再买一个，属性会无限叠。
-   * 这四件改用 `rankPurchaseTotals`（不随周重置），上限就是字典里的 timesLimit（1）。 */
-  const RANK_ACCOUNT_LIMIT_GOODS = Object.freeze([7, 8, 9, 10]);
+   * 这四件改用 `rankPurchaseTotals`（不随周重置），上限就是字典里的 timesLimit（1）。
+   * 魔法袋（goods id 19）同样是账号限 1：原版天梯商店卖它，离线版补回这一行
+   * （见 gamedata 的 EXTRA_RANK_GOODS），也走同一本账号累计账。 */
+  const RANK_ACCOUNT_LIMIT_GOODS = Object.freeze([7, 8, 9, 10, 19]);
   function rankLimitInfo(goods) {
     const item = goods || {};
     const s = State.state() || {};
@@ -467,7 +475,7 @@
     if (s.integral == null) { s.integral = 1500; State.save(); }
     refreshRankShopDay();
     // 天梯赛 30 级才开，榜上对手也都是够级的（顺带显示等级，免得看起来像「不满 30 级也有积分」）
-    const cap = State.MAX_PLAYER_LEVEL || 70;
+    const cap = State.MAX_PLAYER_LEVEL || 90;
     const entries = [0, 1, 2, 3, 4, 5].map((n) => ({
       name: GData.AI_NAMES[n * 4], points: 1350 + n * 83, level: Math.min(cap, 34 + n * 6),
     }));
@@ -727,6 +735,8 @@
     { id: 7, pills: 1, superChance: SUPER_PILL_CHANCE, label: '\u968f\u673a\u836f\u4e38 \u00d71' }, { id: 36, count: 2, label: '\u82f1\u96c4\u5e16 \u00d72' },
   ];
   let spinning = false, lotteryVersion = 0;
+  /** 经典抽奖统一图标：金松果（8）用经典道具页那颗金松果，不再用现代 prop-8。 */
+  const lotteryIcon = (id) => (Number(id) === 8 && C().goldIcon) ? C().goldIcon() : C().icon('prop', id);
   function refreshLotteryDay() {
     const s = State.state(), today = State.localDate(), legacyToday = new Date(Date.now()).toDateString();
     if (s.lotteryDate === today) return;
@@ -790,7 +800,7 @@
     const content = '<h2 class="extra-lottery-heading cartoon">\u6bcf\u65e5\u5e78\u8fd0\u62bd\u5956</h2>' +
       '<div class="lottery-ticket-corner">\u62bd\u5956\u5377 <b data-lottery-ticket>' + (s.props[TICKET] || 0) + '</b> \u5f20</div>' +
       '<div class="extra-lottery-prizes">' +
-      prizes.map((prize, i) => '<div class="extra-prize" data-prize="' + i + '">' + C().icon('prop', prize.id) + '<span>' + prize.label + '</span></div>').join('') +
+      prizes.map((prize, i) => '<div class="extra-prize" data-prize="' + i + '">' + lotteryIcon(prize.id) + '<span>' + prize.label + '</span></div>').join('') +
       '</div>' +
       '<div class="extra-lottery-footer"><div><b data-lottery-status>\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21</b></div>' +
       '<div class="lottery-buttons">' +
@@ -835,7 +845,7 @@
       State.save();
       animateThen(20 + got.selected, () => {
         afterDraw();
-        C().modal('\u83b7\u5f97\u5956\u52b1', '<div class="extra-lottery-win">' + C().icon('prop', got.icon) + '<strong>' + got.label + '</strong></div>' + C().upsHtml(got.ups), [{ label: '\u786e\u5b9a' }], { small: true });
+        C().modal('\u83b7\u5f97\u5956\u52b1', '<div class="extra-lottery-win">' + lotteryIcon(got.icon) + '<strong>' + got.label + '</strong></div>' + C().upsHtml(got.ups), [{ label: '\u786e\u5b9a' }], { small: true });
       });
     });
     spin.disabled = spinning;
@@ -855,7 +865,7 @@
       State.save();
       animateThen(24, () => {
         afterDraw();
-        const cells = got.map((g) => '<div class="extra-prize won">' + C().icon('prop', g.icon) +
+        const cells = got.map((g) => '<div class="extra-prize won">' + lotteryIcon(g.icon) +
           '<span>' + g.label + '</span></div>').join('');
         const ups = [];
         for (const g of got) if (g.ups && g.ups.length) ups.push.apply(ups, g.ups);
@@ -878,7 +888,7 @@
   /** \u5e08\u7236\u5019\u9009\u4eba\uff1a\u7b49\u7ea7\u5728\u73a9\u5bb6\u7b49\u7ea7\u4e0a\u65b9\u6709\u8f83\u5927\u968f\u673a\u8303\u56f4\uff08\u4e0d\u8d85\u8fc7\u6ee1\u7ea7\uff09\uff0c\u5e76\u5e26\u5b8c\u6574\u5c5e\u6027/\u6b66\u5668/\u6280\u80fd\u3002 */
   function rollMasterCandidates() {
     const s = State.state();
-    const cap = State.MAX_PLAYER_LEVEL || 70;
+    const cap = State.MAX_PLAYER_LEVEL || 90;
     const base = Math.max(3, Math.min(s.level, cap));
     return Array.from({ length: MASTER_CANDIDATE_COUNT }, () => {
       // \u5e08\u7236\u901a\u5e38\u6bd4\u5f92\u5f1f\u5f3a\uff1a+2 ~ +12 \u7ea7\uff0c\u4f46\u4e0d\u4f1a\u8d85\u8fc7\u6ee1\u7ea7
@@ -889,7 +899,7 @@
   /** \u53ef\u6536\u670d\u5f92\u5f1f\u5019\u9009\u4eba\uff1a\u7b49\u7ea7\u63a5\u8fd1\u73a9\u5bb6\uff08\u4e0d\u8d85\u8fc7\u6ee1\u7ea7\uff09\uff0c\u5e26\u5b8c\u6574\u5c5e\u6027\u4fbf\u4e8e\u67e5\u770b\u540e\u518d\u51b3\u5b9a\u3002 */
   function rollRecruitCandidates() {
     const s = State.state();
-    const cap = State.MAX_PLAYER_LEVEL || 70;
+    const cap = State.MAX_PLAYER_LEVEL || 90;
     return Array.from({ length: RECRUIT_CANDIDATE_COUNT }, () => {
       const base = Math.max(1, s.level + (Math.random() < 0.5 ? -2 : 0));
       const foe = State.genAI(base, '', { levelJitter: 2, gearSelfLevel: true });
@@ -1164,7 +1174,7 @@
     if (toplistCache[key]) return toplistCache[key];
     const rnd = mulberry(seed);
     const ladderTab = toplistTab !== 'level';
-    const cap = State.MAX_PLAYER_LEVEL || 70;
+    const cap = State.MAX_PLAYER_LEVEL || 90;
     const rows = [];
     for (let i = 0; i < 14; i++) {
       // 天梯榜上只会有够级的松鼠，所以看金杯/积分时对手一律按 30 级起算

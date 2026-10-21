@@ -74,6 +74,7 @@ function setup() {
     },
     btn: (label, action) => '<button data-action="' + action + '">' + label + '</button>',
     icon: (kind, id) => '<img src="images/ui/icons/' + kind + '/' + kind + '-' + id + '.png">',
+    goldIcon: () => '<img src="images/ui/icons/gold-acorn.png">',
     // 升级奖励面板：这里只做最小渲染，供断言检查文本内容
     upsHtml: (ups) => (ups && ups.length)
       ? '<div class="reward-stack">' + ups.map((u) => '<div class="reward-panel">升到 ' + u.level + ' 级' +
@@ -119,8 +120,15 @@ const tests = [];
 function test(name, run) { tests.push([name, run]); }
 function enterArena(g, kind) {
   g.c.State.state().level = Math.max(g.c.State.state().level, kind === 0 ? 10 : 15);
+  /* 现代竞技页只留经验/碎片/天梯；幻兽场的机制回归直接走 startArenaCompete(2)，
+   * 不再依赖已被撤掉的 arena-pet 按钮。 */
+  if (kind === 2) {
+    g.c.ClassicExtras.startArenaCompete(2);
+    g.modalClick();
+    return;
+  }
   g.c.ClassicExtras.arena();
-  g.click(kind === 1 ? 'arena-fragment' : kind === 2 ? 'arena-pet' : 'arena-exp');
+  g.click(kind === 1 ? 'arena-fragment' : 'arena-exp');
   g.modalClick();
 }
 function assertBalanced(markup) {
@@ -143,7 +151,7 @@ test('竞技10/15级门槛在报名确认时再次校验，不扣低等级资源
   assert.match(g.modals.at(-1).html, /10级/); assert.equal(g.battles.length, 0);
   s.level = 14; g.c.ClassicExtras.arena(); g.click('arena-fragment');
   assert.match(g.modals.at(-1).html, /15级/); assert.equal(s.energy, 90);
-  g.c.ClassicExtras.arena(); g.click('arena-pet');
+  g.c.ClassicExtras.startArenaCompete(2);
   assert.match(g.modals.at(-1).html, /15级/); assert.equal(s.energy, 90);
   s.level = 10; g.c.ClassicExtras.arena(); g.click('arena-exp');
   s.level = 1; g.modalClick(); assert.equal(g.battles.length, 0); assert.equal(s.energy, 90);
@@ -499,14 +507,15 @@ test('天梯胜利夺杯为明确离线概率，失败不会夺杯', () => {
   g.c.ClassicExtras.rank(); g.click('rank-fight'); g.settle(1, 1); assert.equal(s.goldCup, 7);
 });
 
-test('第 2 项：天梯匹配等级只跟积分挂钩，70 级封顶', () => {
+test('第 2 项：天梯匹配等级只跟积分挂钩，90 级封顶', () => {
   const g = setup(), s = g.c.State.state(); s.level = 30; s.joinRankCount = 0;
   const E = g.c.ClassicExtras.rankFoeExpectLevel;
   assert.equal(E(1500), 30, '1500 分（初始分）从 30 级档起步');
   assert.equal(E(1750), 40, '每 +25 分 +1 级');
-  assert.equal(E(2500), 70, '2500 分到顶');
-  assert.equal(E(99999), 70, '封顶 70 级');
-  // 匹配到的实际等级围绕期望值抖动，且绝不超过 70
+  assert.equal(E(2500), 70, '2500 分到 70 级');
+  assert.equal(E(3000), 90, '3000 分到满级 90');
+  assert.equal(E(99999), 90, '封顶 90 级');
+  // 匹配到的实际等级围绕期望值抖动，且绝不超过 90
   g.math.random = () => 0.5;
   assert.equal(g.c.ClassicExtras.rankFoeLevel(1750), 40, '随机取中值时正好等于期望');
   const levels = [];
@@ -514,14 +523,14 @@ test('第 2 项：天梯匹配等级只跟积分挂钩，70 级封顶', () => {
     g.math.random = () => (i % 20) / 20;
     const lv = g.c.ClassicExtras.rankFoeLevel(99999);
     levels.push(lv);
-    assert.ok(lv <= 70 && lv >= 1, '等级在 1~70 内：' + lv);
+    assert.ok(lv <= 90 && lv >= 1, '等级在 1~90 内：' + lv);
   }
-  assert.ok(Math.max(...levels) > 66 && Math.min(...levels) >= 66, '高杯时整体贴近满级：' + levels.slice(0, 5).join(','));
+  assert.ok(Math.max(...levels) > 86 && Math.min(...levels) >= 86, '高积分时整体贴近满级：' + levels.slice(0, 5).join(','));
   // 实战：匹配到的对手 level 就是这条曲线给的等级（不再贴玩家等级）
   s.level = 30; s.goldCup = 0; s.goldPoint = 100; s.integral = 2600;
   g.math.random = () => 0.5;
   g.c.ClassicExtras.rank(); g.click('rank-fight');
-  assert.equal(g.battles.at(-1).foe.level, 70, '高积分 + 30 级玩家也会匹配到满级对手');
+  assert.equal(g.battles.at(-1).foe.level, 74, '2600 分 + 30 级玩家按积分匹配 74 级对手');
   // 金杯多寡不再影响匹配（花金杯不会让对手变软）
   g.settle(0, 0);                                    // 收掉上一场，否则 rankAttempt 未清、按钮禁用
   s.integral = 1500; s.goldCup = 5000;
@@ -644,6 +653,9 @@ test('每日抽奖：右上角抽奖卷角标 + 删掉底部说明 + 连抽 10 �
   const html = g.markup.at(-1)[1];
   /* ① 右上角标注仓库抽奖卷数量（refreshTickets 就地刷新用的就是 [data-lottery-ticket]） */
   assert.ok(/lottery-ticket-corner/.test(html), '要有右上角角标：' + html.slice(0, 200));
+  /* 金松果奖格用经典统一贴图 gold-acorn，不再走现代 prop-8。 */
+  assert.ok(/images\/ui\/icons\/gold-acorn\.png/.test(html), '抽奖金松果要用经典金松果图');
+  assert.ok(!/prop\/prop-8\.png/.test(html), '抽奖页不该再出现现代 prop-8');
   assert.ok(/lottery-ticket-corner[\s\S]*?data-lottery-ticket/.test(html), '角标里要带抽奖卷数量节点');
   assert.ok(/data-lottery-ticket>3</.test(html), '角标应当显示仓库里的 3 张：' + html.slice(0, 260));
   /* ② 底部那两句说明（「每天免费一次，之后…」「当前金松果：」）已经删掉 */
@@ -722,24 +734,45 @@ test('每条每日任务都有计数来源（防止再出现「抽奖任务不�
   assert.equal(g.c.State.questStatus()[0].done, true, '抽满 2 次后任务可领取');
 });
 
-test('对手等级封顶：随机挑战/擂台再抖也不会冒出 70 级以上的 NPC', () => {
+test('对手等级封顶：随机挑战/擂台再抖也不会冒出 90 级以上的 NPC', () => {
   const g = setup();
   const seen = new Set();
   for (let i = 0; i < 60; i++) {
     for (const asked of [70, 74, 90]) {
       const foe = g.c.State.genAI(asked, '', { levelJitter: 3 });
       seen.add(foe.level);
-      assert.ok(foe.level <= 70, 'genAI(' + asked + ') 生成了 ' + foe.level + ' 级');
+      assert.ok(foe.level <= 90, 'genAI(' + asked + ') 生成了 ' + foe.level + ' 级');
       assert.ok(foe.level >= 1, 'genAI(' + asked + ') 等级不能低于 1');
     }
   }
-  assert.ok(seen.has(70), '满级附近的对手应该真的能生成 70 级（不是全被压到很低）：' + [...seen].sort((a, b) => a - b).join(','));
+  assert.ok(seen.has(90), '满级附近的对手应该真的能生成 90 级（不是全被压到很低）：' + [...seen].sort((a, b) => a - b).join(','));
   // 满级玩家在挑战/擂台里按 ±3 浮动，夹过之后不越界
-  const s = g.c.State.state(); s.level = 70;
+  const s = g.c.State.state(); s.level = 90;
   for (let i = 0; i < 40; i++) {
     const foe = g.c.State.genAI(Math.max(1, s.level + Math.floor(g.math.random() * 6) - 3));
-    assert.ok(foe.level <= 70, '满级玩家的对手是 ' + foe.level + ' 级');
+    assert.ok(foe.level <= 90, '满级玩家的对手是 ' + foe.level + ' 级');
   }
+});
+
+test('魔法袋回到天梯商店：1300 积分 + 2000 金杯 + 200 金松果，账号限 1 次', () => {
+  const g = setup(), s = g.c.State.state();
+  s.level = 30; s.integral = 1300; s.goldCup = 2000; s.goldPoint = 200;
+  const goods = g.c.ClassicExtras.rankGoodsList().find((x) => String(x.id) === '19');
+  assert.ok(goods, '天梯商店要补回原版的魔法袋（goods id 19）');
+  assert.deepEqual([goods.goodsId, goods.cup, goods.gold, goods.integral], ['79', '2000', '200', '1300']);
+  const lim = g.c.ClassicExtras.rankLimitInfo(goods);
+  assert.equal(lim.account, true, '账号级限购');
+  assert.equal(lim.limit, 1);
+  g.c.ClassicExtras.rankShop(2);                     // 15 件 / 6 件一页 → 第 3 页
+  g.page().querySelector('[data-goods="19"]').onclick();
+  g.modalClick();
+  assert.equal(s.props[79], 1, '兑换到 1 个魔法袋');
+  assert.equal(s.goldCup, 0); assert.equal(s.goldPoint, 0);
+  assert.equal(s.rankPurchaseTotals[19], 1, '记进账号累计账');
+  s.goldCup = 2000; s.goldPoint = 200;
+  g.c.ClassicExtras.rankShop(2); g.page().querySelector('[data-goods="19"]').onclick(); g.modalClick();
+  assert.match(g.modals.at(-1).html, /账号累计只能兑换 1 次/);
+  assert.equal(s.props[79], 1, '第二次被账号上限拦住');
 });
 
 test('抽奖离开动画后奖品已保存，重入可继续且旧计时器不会重发奖励', () => {
@@ -950,25 +983,25 @@ test('刷新师父/徒弟会换人且范围合理，候选人都带可查看的�
   assert.equal([...g.page().html.matchAll(/data-recruit="\d+"/g)].length, 3, '给 3 位徒弟候选');  assertBalanced(g.markup);
 });
 
-test('师徒候选等级合理化：不超过满级 70，徒弟不会超过师父', () => {
+test('师徒候选等级合理化：不超过满级 90，徒弟不会超过师父', () => {
   const g = setup(), s = g.c.State.state();
-  s.level = 70;
+  s.level = 90;
   g.c.ClassicExtras.master('master');
   let masterLevels = [...g.page().html.matchAll(/data-master="\d+"[\s\S]*?candidate-level">等级 (\d+)/g)].map((m) => Number(m[1]));
   assert.equal(masterLevels.length, 3);
-  assert.ok(masterLevels.every((lv) => lv <= 70), '70 级时师父候选不超过满级：' + masterLevels.join(','));
+  assert.ok(masterLevels.every((lv) => lv <= 90), '90 级时师父候选不超过满级：' + masterLevels.join(','));
   // 换一批再看，多次随机都不能超过满级
   for (let i = 0; i < 6; i++) {
     g.click('master-refresh');
     masterLevels = [...g.page().html.matchAll(/data-master="\d+"[\s\S]*?candidate-level">等级 (\d+)/g)].map((m) => Number(m[1]));
-    assert.ok(masterLevels.every((lv) => lv >= 1 && lv <= 70), '师父等级 1~70：' + masterLevels.join(','));
+    assert.ok(masterLevels.every((lv) => lv >= 1 && lv <= 90), '师父等级 1~90：' + masterLevels.join(','));
   }
   g.c.ClassicExtras.master('apprentice');
   for (let i = 0; i < 6; i++) {
     g.click('recruit-refresh');
     const recruitLevels = [...g.page().html.matchAll(/data-recruit="\d+"[\s\S]*?candidate-level">等级 (\d+)/g)].map((m) => Number(m[1]));
     assert.equal(recruitLevels.length, 3);
-    assert.ok(recruitLevels.every((lv) => lv >= 1 && lv <= 70), '徒弟等级 1~70：' + recruitLevels.join(','));
+    assert.ok(recruitLevels.every((lv) => lv >= 1 && lv <= 90), '徒弟等级 1~90：' + recruitLevels.join(','));
     assert.ok(recruitLevels.every((lv) => lv <= s.level + 1), '徒弟不会比师父强太多：' + recruitLevels.join(','));
   }
   assertBalanced(g.markup);
@@ -997,25 +1030,25 @@ test('日供系数：经验 5%~15%、金松果 5%~25%，均按等级之和线性
   assert.ok(Math.abs(RE(0) - 0.05) < 1e-9, '没徒弟也是经验 5%：' + RE(0));
   assert.ok(Math.abs(RG(0) - 0.05) < 1e-9, '没徒弟也是金松果 5%：' + RG(0));
   assert.ok(Math.abs(RE(1) - 0.05) < 0.01, '一个 1 级徒弟 ≈ 5% 保底：' + RE(1));
-  // 上限：三个满级（Σ=210）正好到顶
-  assert.ok(Math.abs(RE(210) - 0.15) < 1e-9, 'Σ=210 经验正好 15%：' + RE(210));
-  assert.ok(Math.abs(RG(210) - 0.25) < 1e-9, 'Σ=210 金松果正好 25%：' + RG(210));
+  // 上限：三个满级（Σ=270）正好到顶
+  assert.ok(Math.abs(RE(270) - 0.15) < 1e-9, 'Σ=270 经验正好 15%：' + RE(270));
+  assert.ok(Math.abs(RG(270) - 0.25) < 1e-9, 'Σ=270 金松果正好 25%：' + RG(270));
   assert.equal(RE(999), 0.15, '经验封顶 15%');
   assert.equal(RG(999), 0.25, '金松果封顶 25%');
   // 线性：等距的等级之和给出等距的系数
-  assert.ok(Math.abs((RE(40) - RE(20)) - (RE(200) - RE(180))) < 1e-9, '经验线性递增');
-  assert.ok(Math.abs((RG(40) - RG(20)) - (RG(200) - RG(180))) < 1e-9, '金松果线性递增');
+  assert.ok(Math.abs((RE(40) - RE(20)) - (RE(260) - RE(240))) < 1e-9, '经验线性递增');
+  assert.ok(Math.abs((RG(40) - RG(20)) - (RG(260) - RG(240))) < 1e-9, '金松果线性递增');
   // 金松果那条始终不低于经验那条（区间更宽）
-  for (const sum of [0, 50, 105, 160, 210]) {
+  for (const sum of [0, 50, 135, 200, 270]) {
     assert.ok(RG(sum) >= RE(sum) - 1e-9, '金松果系数不该低于经验：Σ=' + sum + ' ' + RG(sum) + ' vs ' + RE(sum));
   }
 
   // 三个满级徒弟：合计正好是我昨日收益的 15%（经验）/ 25%（金松果）
   const s = g.c.State.state();
   s.level = 20; s.exp = 0; s.goldPoint = 0;
-  g.c.State.addPrentice({ name: '满级甲', level: 70 });
-  g.c.State.addPrentice({ name: '满级乙', level: 70 });
-  g.c.State.addPrentice({ name: '满级丙', level: 70 });
+  g.c.State.addPrentice({ name: '满级甲', level: 90 });
+  g.c.State.addPrentice({ name: '满级乙', level: 90 });
+  g.c.State.addPrentice({ name: '满级丙', level: 90 });
   g.c.State.gainExp(1000);
   g.c.State.addGold(400);
   g.advance(86400000);

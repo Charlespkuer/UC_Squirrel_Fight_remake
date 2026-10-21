@@ -141,6 +141,10 @@
 .sf-feedback.picked{animation:sf-feedback-pick .46s cubic-bezier(.34,1.5,.5,1)}
 .sf-feedback.sf-leaving{opacity:.88}
 .sf-feedback:focus-visible{outline:3px solid #ffe27a;outline-offset:3px}
+/* DOM 弹窗的确定键是程序化 focus：WebKit 会按全局 `button:focus-visible` 画一圈系统蓝框，
+ * 在奶油色弹窗上很跳。统一换成与 `.sf-feedback` 同档的暖金焦点环，键盘仍能看见焦点。 */
+.classic-modal .uc-button:focus-visible,
+.classic-modal .modal-close:focus-visible{outline:3px solid #ffe27a;outline-offset:3px}
 .uc-tab:not(.sf-feedback):hover,.catalog-cell:not(.sf-feedback):hover{transform:scale(1.035);filter:drop-shadow(0 0 4px rgba(255,226,122,.9)) brightness(1.04)}
 @keyframes sf-feedback-press{0%,100%{transform:scale(var(--sf-current-scale))}45%{transform:scale(.962)}}
 @keyframes sf-feedback-pick{0%{transform:scale(1)}35%{transform:scale(1.13)}64%{transform:scale(.985)}100%{transform:scale(var(--sf-current-scale))}}
@@ -204,15 +208,17 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 /* 挑战塔的「本层对手预告」在经典外壳里是**横向一排**（用户口径 2026-10-19）：
    4~5 张卡片一字排开，每张 = 立绘在上、名字/类型/精英标在下 —— 卡片本体直接沿用
    tower.css 的默认 `.tower-plan`（那套本来就是横向卡），下面这组 !important 只描述
-   **纵向列表**（无尽塔的对手列 `.vertical`、进塔页 BOSS 一览 `.boss-grid`），
-   所以用 `:not(.horizontal)` 把挑战塔那一份排除出去（`.horizontal` 由 tower-ui 的 planHtml 挂上）。 */
-.classic-tower .tower-plan:not(.horizontal){display:flex!important;flex-direction:column!important;gap:8px;width:100%;align-items:stretch}
-.classic-tower .tower-plan:not(.horizontal) li{display:grid!important;grid-template-columns:92px minmax(0,1fr)!important;grid-template-rows:auto auto auto!important;column-gap:8px;row-gap:2px;align-items:center;align-content:center;justify-content:flex-start;text-align:left;padding:4px 8px}
+   **纵向列表**（无尽塔的对手列 `.vertical`），所以用 `:not(.horizontal)` 把挑战塔那一份排除出去
+   （`.horizontal` 由 tower-ui 的 planHtml 挂上）。
+   ⚠ 进塔页的「BOSS 一览」`.boss-grid` 是**六列网格**，不是纵向列表；这里必须一起排除，
+   否则它的 `flex-direction:column !important` 会把每张 boss 卡压成一行一个（2026-10 用户截图）。 */
+.classic-tower .tower-plan:not(.horizontal):not(.boss-grid){display:flex!important;flex-direction:column!important;gap:8px;width:100%;align-items:stretch}
+.classic-tower .tower-plan:not(.horizontal):not(.boss-grid) li{display:grid!important;grid-template-columns:92px minmax(0,1fr)!important;grid-template-rows:auto auto auto!important;column-gap:8px;row-gap:2px;align-items:center;align-content:center;justify-content:flex-start;text-align:left;padding:4px 8px}
 .classic-tower .tower-plan .foe-portrait{grid-column:1!important;grid-row:1 / span 3!important;width:92px!important;height:80px!important;align-self:center;margin:0}
 .classic-tower .tower-plan .foe-portrait:has(.sf-classic-foe){background:rgba(255,248,230,.9)!important;border:2px solid #e2c68f!important;border-radius:12px!important;box-shadow:none!important;overflow:visible!important}
-.classic-tower .tower-plan:not(.horizontal) li > b{grid-column:2!important;grid-row:1!important;justify-self:start!important;max-width:100%;min-width:0;white-space:normal!important;overflow-wrap:anywhere;text-align:left;line-height:1.15;font-size:19px}
-.classic-tower .tower-plan:not(.horizontal) li > .tower-plan-type{grid-column:2!important;grid-row:2!important;justify-self:start!important;max-width:100%;box-sizing:border-box;white-space:normal!important;overflow-wrap:anywhere;text-align:left;line-height:1.2;font-size:16px}
-.classic-tower .tower-plan:not(.horizontal) li > .elite-tag{grid-column:2!important;grid-row:3!important;justify-self:start!important;max-width:100%;box-sizing:border-box;white-space:normal!important;overflow-wrap:anywhere}
+.classic-tower .tower-plan:not(.horizontal):not(.boss-grid) li > b{grid-column:2!important;grid-row:1!important;justify-self:start!important;max-width:100%;min-width:0;white-space:normal!important;overflow-wrap:anywhere;text-align:left;line-height:1.15;font-size:19px}
+.classic-tower .tower-plan:not(.horizontal):not(.boss-grid) li > .tower-plan-type{grid-column:2!important;grid-row:2!important;justify-self:start!important;max-width:100%;box-sizing:border-box;white-space:normal!important;overflow-wrap:anywhere;text-align:left;line-height:1.2;font-size:16px}
+.classic-tower .tower-plan:not(.horizontal):not(.boss-grid) li > .elite-tag{grid-column:2!important;grid-row:3!important;justify-self:start!important;max-width:100%;box-sizing:border-box;white-space:normal!important;overflow-wrap:anywhere}
 .classic-tower .tower-plan li > .tower-plan-no{display:none!important}
 .sf-classic-foe{display:block;width:100%;height:100%;overflow:hidden}
 .sf-classic-foe svg{width:100%!important;height:100%!important;display:block}
@@ -585,13 +591,17 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 /* 装备详情那一行按钮：橙装带宝石时会有「卸下宝石（5金）/ 星标 / 出售 / 返回」4~5 个，
  * 200px 最小宽 + 28px 间距会超出弹窗宽度 → 允许换行（否则最右边的键会被挤出可视区）。 */
 .gear-detail-overlay .modal-buttons{flex-wrap:wrap;gap:16px 22px}.gear-modal{width:1000px;height:598px;max-height:630px;padding:40px 25px 100px;border-radius:62px}.gear-modal .modal-body{height:100%;padding:0;overflow:hidden}.gear-modal .modal-title{font-size:48px}.gear-modal .modal-buttons{position:absolute;bottom:17px;left:0;right:0}.gear-modal .modal-close{display:none}
-.gear-modal .gear-note{position:static;text-align:center;font-size:27px;margin-bottom:6px;color:#6d321d}.gear-modal .gear-layout{height:365px;grid-template-columns:38% 62%;gap:5px}.gear-modal .gear-slots{display:grid;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr);gap:8px 10px;padding:0 6px}.gear-modal .gear-slots .catalog-cell{width:100%;height:100%;justify-content:center;gap:4px}.gear-modal .gear-slots .item-icon{width:133px;height:119px;background:#ede0bd;border-radius:29px;border:3px solid #a88256;box-shadow:inset 0 0 0 3px #fff7dc}
+.gear-modal .gear-note{position:static;text-align:center;font-size:27px;margin-bottom:6px;color:#6d321d}.gear-modal .gear-layout{height:365px;grid-template-columns:38% 62%;gap:5px}/* 左侧四格按经典「状态1」第 3 帧的身体轮廓排：头在上、身体在左、手在中间、脚在下；
+   不再是现代版 2×2 方阵（用户 2026-10 口径：排布要类似经典模式）。 */
+.gear-modal .gear-slots{position:relative;display:block;height:365px;padding:0}.gear-modal .gear-slots .catalog-cell{position:absolute;width:122px;height:120px;min-height:0;justify-content:center;gap:2px}.gear-modal .gear-slots .catalog-cell:nth-child(1){left:calc(50% - 61px);top:0}.gear-modal .gear-slots .catalog-cell:nth-child(2){left:calc(72% - 61px);top:122px}.gear-modal .gear-slots .catalog-cell:nth-child(3){left:calc(28% - 61px);top:122px}.gear-modal .gear-slots .catalog-cell:nth-child(4){left:calc(50% - 61px);top:245px}.gear-modal .gear-slots .item-icon{width:133px;height:119px;background:#ede0bd;border-radius:29px;border:3px solid #a88256;box-shadow:inset 0 0 0 3px #fff7dc}
 .gear-modal .gear-list{gap:3px 17px;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)}.gear-modal .gear-list .item-icon{width:147px;height:138px;border-radius:30px}.gear-modal .gear-list .item-caption{font:27px/32px "SimSun","Songti SC","STSong",serif}.gear-modal .gear-capacity{position:absolute;bottom:80px;right:37px;font-size:25px;color:#7b542d}.gear-modal .page-arrow{top:43%;right:2px}.gear-modal .page-arrow.prev{left:350px}
 /* 「我的装备」左侧 = **落绘 + 四个部位格**（原版 `MainMovie_frame50.as:989 showWears()`：
  * `[mc_head, mc_hand, mc_body, mc_foot]` 四个部位精灵 + 穿在身上的装备；空格子里写部位名）。
  * 原来这里只有四个空灰格，玩家看不到自己穿成什么样，也看不出哪一格是哪个部位。 */
-.gear-modal .gear-slots .item-icon{width:104px;height:98px}
-.gear-modal .gear-slots .gear-empty{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font:26px/1 "SimSun","Songti SC","STSong",serif;color:#a58a5f}
+.gear-modal .gear-slots .item-icon{width:96px;height:90px;flex:0 0 auto}
+/* 空格子不许把图标框挤扁：图标固定高度，文字占剩余高度；以前 `.gear-empty{height:100%}`
+   会把同一 flex 列里的 `.item-icon` 从 90px 压到 60 多像素（用户 2026-10 报的“框缩起来”）。 */
+.gear-modal .gear-slots .gear-empty{display:flex;align-items:center;justify-content:center;width:100%;flex:1;min-height:0;font:26px/1 "SimSun","Songti SC","STSong",serif;color:#a58a5f}
 .gear-modal .gear-slots .gear-slot-name{font:25px/29px "SimSun","Songti SC","STSong",serif;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* 装备详情弹窗的按钮排。
@@ -1011,7 +1021,21 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
  * 原版是整页提示层：暗色说明条 + 黄色手指 + 半透明目标示意。它只负责“讲”，
  * 不接管点击，所以整层 pointer-events:none；z-index 压在页面之上、战果/弹窗之下。 */
 #ui>.sf-guide-view{position:absolute;inset:0;z-index:15;pointer-events:none;overflow:hidden}
+/* ⚠ 只给父层写 pointer-events:none 在 iOS 15 的 WKWebView 上不够可靠：它不一定把
+ *   none 继承进 SVG 子树。引导的黄色手指与金环正好压在「开始挑战」上，真机上就变成
+ *   “体力条（DOM）有反应、开始挑战（SVG）点不动”。引导层与同类“只负责展示、必须
+ *   让点击穿透”的层统一加 `.sf-clickthrough`，把**整棵子树**显式关掉 —— 不依赖继承，
+ *   也不改布局。 */
+#ui>.sf-guide-view,
+#ui>.sf-guide-view *,
+.sf-clickthrough,
+.sf-clickthrough *{pointer-events:none!important}
 .sf-guide-view>svg{display:block;width:100%;height:100%}
+/* guide 层与首页 SVG 用**同一套尺寸规则**：首页是 height:100% + width:auto + 居中，
+ * 引导如果强行 width:100%;height:100%，在窗口比例不是 320:196 时两棵树会各自
+ * letterbox 到不同位置，整张说明框/手指就会偏。stage 让两者算出来的框一致。 */
+#ui>.sf-guide-view.stage{display:flex;align-items:center;justify-content:center}
+#ui>.sf-guide-view.stage>svg{width:auto;max-width:100%;height:100%}
 /* 引导要指弹窗（f8/f9「使用」「确定」，弹窗 z-index 30）或升级页（f13「确定」，60）
  * 里的真按钮：这两步把整层抬到它们上面，不然金环与手指会被压暗层盖住。 */
 #ui>.sf-guide-view.above{z-index:65}

@@ -282,9 +282,9 @@ test('调试用武技接口：获得/改等级/遗忘，等级夹在 1~15 且不
   assert.equal(S.setSkill(9999, 1).ok, false);
 });
 
-test('满级 70 级：经验不再升级，69 级 179、满级 180 体力上限', () => {
+test('满级 90 级：经验不再升级，69 级 179、70 级 180、满级 200 体力上限', () => {
   const g = game(), S = g.State, s = S.state();
-  assert.equal(S.MAX_PLAYER_LEVEL, 70);
+  assert.equal(S.MAX_PLAYER_LEVEL, 90);
   assert.equal(S.energyCapForLevel(1), 90);
   assert.equal(S.energyCapForLevel(2), 93);
   assert.equal(S.energyCapForLevel(10), 110);
@@ -292,22 +292,29 @@ test('满级 70 级：经验不再升级，69 级 179、满级 180 体力上限'
   assert.equal(S.energyCapForLevel(30), 140);
   assert.equal(S.energyCapForLevel(69), 179);
   assert.equal(S.energyCapForLevel(70), 180);
+  assert.equal(S.energyCapForLevel(90), 200);
+  // 经验表：51~70 接 ssfight 原表，71~90 同曲线外推
+  assert.equal(g.GData.nextExp(50), 7280);
+  assert.equal(g.GData.nextExp(70), 38580);
+  assert.equal(g.GData.nextExp(89), 166500);
+  assert.equal(g.GData.nextExp(90), 179820);
   // 低等级段确实比以前低（旧曲线 10 级 117 / 20 级 137）
   assert.ok(S.energyCapForLevel(10) < 117 && S.energyCapForLevel(20) < 137, '低等级体力上限下调');
   // 一路喂经验到满级后不再升级
   s.exp = 0; S.gainExp(1e9);
-  assert.equal(s.level, 70, '满级封顶');
-  assert.equal(s.maxEnergy, 180, '满级体力上限 180');
+  assert.equal(s.level, 90, '满级封顶');
+  assert.equal(s.maxEnergy, 200, '满级体力上限 200');
+  assert.equal(s.props[90], 20, '71~90 共 20 个金宝箱');
   S.save(); S.load();
-  assert.equal(S.state().level, 70); assert.equal(S.state().maxEnergy, 180);
-  // 旧档（旧成长曲线算出的更高上限）读档时被收回；超过 70 级的等级也压回 70
+  assert.equal(S.state().level, 90); assert.equal(S.state().maxEnergy, 200);
+  // 旧档（旧成长曲线算出的更高上限）读档时被收回；超过 90 级的等级也压回 90
   g.storage.set(S.saveKey, JSON.stringify({ level: 70, maxEnergy: 999, props: {} }));
   S.load();
   assert.equal(S.state().maxEnergy, 180);
   g.storage.set(S.saveKey, JSON.stringify({ level: 99, maxEnergy: 300, props: {} }));
   S.load();
-  assert.equal(S.state().level, 70);
-  assert.equal(S.state().maxEnergy, 180);
+  assert.equal(S.state().level, 90);
+  assert.equal(S.state().maxEnergy, 200);
 });
 
 test('好友系统：随机 NPC 也能加为好友，重名/满员有提示，删除与存档往返正常', () => {
@@ -781,9 +788,9 @@ test('普通1~9级升级一次 50 松果；每次失败 +2%，封顶 100%，成�
   assert.equal(s2.weapons[0], '15:10');
 });
 
-test('卖出装备按品质给价：白55-60 / 绿60-65 / 蓝65-70 / 紫90-110 / 橙180-220', () => {
+test('卖出装备按品质给价：白55-60 / 绿60-65 / 蓝65-70 / 紫90-110 / 橙180-220 / 黑500-700', () => {
   const g = game(), S = g.State;
-  const expect = [[55, 60], [60, 65], [65, 70], [90, 110], [180, 220]];
+  const expect = [[55, 60], [60, 65], [65, 70], [90, 110], [180, 220], [500, 700]];
   expect.forEach(([lo, hi], q) => {
     assert.deepEqual(Array.from(S.gearSellRange(q)), [lo, hi], '品质 ' + q + ' 区间');
     for (let i = 0; i < 60; i++) {
@@ -791,8 +798,166 @@ test('卖出装备按品质给价：白55-60 / 绿60-65 / 蓝65-70 / 紫90-110 /
       assert.ok(v >= lo && v <= hi, '品质 ' + q + ' 出价 ' + v + ' 应落在 ' + lo + '~' + hi);
     }
   });
-  assert.deepEqual(Array.from(S.gearSellRange(9)), [180, 220], '越界品质夹到最高档');
+  assert.deepEqual(Array.from(S.gearSellRange(9)), [500, 700], '越界品质夹到最高档');
   assert.deepEqual(Array.from(S.gearSellRange(-3)), [55, 60], '负品质夹到最低档');
+});
+
+test('黑装注册：281~288 可实例化，品质 5 / 使用等级 60 / 主属性按部位', () => {
+  const g = game(), S = g.State;
+  for (let id = 281; id <= 288; id++) {
+    const gi = S.gearInst(id);
+    assert.ok(gi, '黑装 ' + id + ' 应该有 gearMap/gearSetMap 行');
+    assert.equal(gi.quality, 5, '黑装品质');
+    assert.equal(gi.useLevel, 60, '黑装使用等级');
+  }
+  assert.equal(S.gearInst(281).abilityVal, 70, '凤凰头盔 +70 敏');
+  assert.equal(S.gearInst(282).abilityVal, 70, '凤凰拳甲 +70 力');
+  assert.equal(S.gearInst(283).abilityVal, 490, '凤凰铠甲 +490 生命');
+  assert.equal(S.gearInst(284).abilityVal, 70, '凤凰短靴 +70 速');
+  const made = S.addGear(281);
+  assert.ok(made && made.quality === 5 && made.useLevel === 60, '黑装可以真的入包');
+});
+
+test('现代界面删除黑装内容：不可获得/合成/开卡，读档清理；经典界面保留', () => {
+  const g = game(), S = g.State;
+  S.newGame('现代黑装', { uiMode: 'modern' });
+  assert.equal(S.blackGearEnabled(), false);
+  assert.equal(S.addGear(281), null, '现代界面不能获得黑装');
+  const s = S.state();
+  s.level = 90; s.goldPoint = 5000; s.props[77] = 10; s.props[80] = 1; s.props[89] = 1;
+  assert.equal(S.composeGear(77).ok, false, '现代界面不能合成黑装');
+  assert.equal(S.useProp(80, '71').ok, false, '现代界面不能开黑卡');
+  assert.equal(S.useProp(89, '281').ok, false, '现代界面不能开黑装自选箱');
+  assert.equal(S.blackCardOptions().length, 0);
+  assert.equal(S.blackGearBoxOptions().length, 0);
+  const before = JSON.stringify(S.totalStats());
+  s.gears.push({ id: 281, used: true, key: 'bk', ext: [], attr: 70 });
+  assert.equal(S.myGears().some((x) => x.id === 281), false, '现代界面的黑装不进装备列表');
+  assert.equal(JSON.stringify(S.totalStats()), before, '现代界面的黑装不计属性');
+  S.save(); S.load();
+  assert.equal(S.state().gears.some((x) => x.id === 281), false, '读档时清掉现代槽位的黑装');
+  assert.equal(S.state().props[80], undefined, '读档时清掉黑卡');
+
+  S.newGame('经典黑装', { uiMode: 'classic' });
+  assert.equal(S.blackGearEnabled(), true);
+  assert.ok(S.addGear(281), '经典界面仍能获得黑装');
+  assert.equal(S.blackCardOptions().length, 2);
+  assert.equal(S.blackGearBoxOptions().length, 8);
+});
+
+test('黑装碎片合成：10 碎片 + 1000 金，四件优先给缺失部位', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.goldPoint = 5000; s.props[77] = 40;
+  const made = [];
+  for (let i = 0; i < 4; i++) {
+    const r = S.composeGear(77);
+    assert.equal(r.ok, true, r.msg);
+    made.push(r.gear);
+  }
+  assert.equal(new Set(made.map((x) => x.type)).size, 4, '四件部位不重复：' + made.map((x) => x.name).join(','));
+  assert.equal(s.props[77], undefined, '40 个碎片刚好用完');
+  assert.equal(s.goldPoint, 1000, '4 件 ×1000 金');
+});
+
+test('黑色卡片 / 黑装自选箱：选完才消耗，开出碎片/金松果/指定黑装', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.props[80] = 1; s.props[89] = 1; s.goldPoint = 0;
+  const need = S.useProp(80);
+  assert.equal(need.ok, false); assert.equal(need.needsBlackChoice, true);
+  assert.equal(s.props[80], 1, '没选之前不消耗卡片');
+  const card = S.useProp(80, '71');
+  assert.equal(card.ok, true, card.msg);
+  assert.ok(s.props[77] >= 1 && s.props[77] <= 2, '凤凰碎片 1~2 个');
+  assert.ok(s.goldPoint >= 50 && s.goldPoint <= 200, '黑卡另给 50~200 金');
+  assert.ok(!(s.props[80] > 0), '选完消耗卡片');
+  const boxNeed = S.useProp(89);
+  assert.equal(boxNeed.ok, false); assert.equal(boxNeed.needsBlackGearChoice, true);
+  assert.equal(s.props[89], 1);
+  const box = S.useProp(89, '285');
+  assert.equal(box.ok, true, box.msg);
+  assert.ok(s.gears.some((x) => x.id === 285), '自选圣熊头盔进包');
+  assert.ok(!(s.props[89] > 0), '选完消耗自选箱');
+});
+
+test('黑装融合：3 件黑装 → 1 件同部位黑装，20% 返 1 张黑卡', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.goldPoint = 5000;
+  g.math.random = () => 0.1;
+  const a = S.addGear(281), b = S.addGear(281), c = S.addGear(281);
+  const r = S.mergeGears([a.key, b.key, c.key], { allowMixedParts: true });
+  assert.equal(r.ok, true, r.msg);
+  assert.equal(r.gear.quality, 5, '产物仍是黑装');
+  assert.equal(r.gear.setId, 71, '留在凤凰套');
+  assert.equal(r.card, 1, '20% 判定命中');
+  assert.ok((s.props[80] || 0) >= 1, '黑色卡片真的入包');
+  assert.equal(s.goldPoint, 4000, '黑装融合 1000 金');
+});
+
+test('橙装融合：3 件橙装 → 1 件黑装（原版 composeType=3）；现代界面拒绝', () => {
+  const g = game(), S = g.State;
+  S.newGame('橙合黑', { uiMode: 'classic' });
+  const s = S.state(); s.level = 60; s.goldPoint = 5000;
+  const mats = [0, 1, 2].map(() => {
+    const item = S.addGear(203);
+    s.gears.find((x) => x.key === item.key).orange = true;
+    return item;
+  });
+  const r = S.mergeGears([mats[0].key, mats[1].key, mats[2].key], { allowMixedParts: true });
+  assert.equal(r.ok, true, r.msg);
+  assert.equal(r.gear.quality, 5, '3 橙装应融合出黑装');
+  assert.equal(s.goldPoint, 4800, '橙装融合 200 金松果');
+  assert.equal(s.gears.some((x) => x.orange), false, '橙装材料被消耗');
+
+  S.newGame('现代橙合黑', { uiMode: 'modern' });
+  const s2 = S.state(); s2.level = 60; s2.goldPoint = 5000;
+  const mats2 = [0, 1, 2].map(() => {
+    const item = S.addGear(203);
+    s2.gears.find((x) => x.key === item.key).orange = true;
+    return item;
+  });
+  const denied = S.mergeGears([mats2[0].key, mats2[1].key, mats2[2].key], { allowMixedParts: true });
+  assert.equal(denied.ok, false, '现代界面没有黑装，橙装不能继续融合');
+  assert.equal(s2.gears.filter((x) => x.orange).length, 3, '拒绝时材料不被消耗');
+});
+
+test('黑装宝箱档：金宝箱 8% 黑卡 / 2% 完整黑装，魔法袋必得 1 黑卡', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.props[90] = 2; s.props[79] = 1;
+  g.math.random = () => 0.45;                        // 金宝箱 [0.41,0.49) = 黑卡
+  let r = S.openChestProp(90);
+  assert.equal(r.reward.kind, 'prop'); assert.equal(r.reward.id, 80);
+  assert.equal(s.props[80], 1, '8% 黑卡档入包');
+  g.math.random = () => 0.50;                        // [0.49,0.51) = 完整黑装
+  r = S.openChestProp(90);
+  assert.equal(r.reward.kind, 'gear', '2% 完整黑装档');
+  const blackIds = [181, 182, 183, 184, 185, 186, 187, 188, 281, 282, 283, 284, 285, 286, 287, 288];
+  assert.ok(s.gears.some((x) => blackIds.includes(x.id)), '完整黑装真的进装备栏');
+  g.math.random = () => 0.5;
+  r = S.openChestProp(79);
+  assert.equal(r.card, 1, '魔法袋额外给 1 张黑卡');
+  assert.equal(s.props[80], 2, '黑卡累计');
+  /* 金宝箱重开不再出完整黑装：同一随机点（0.50）首开是黑装，重开折成黑卡。 */
+  s.props[90] = 1; s.goldPoint = 10000;
+  g.math.random = () => 0.50;
+  const opened = S.beginChest(90);
+  assert.equal(opened.pending.reward.kind, 'gear', '首开 2% 档仍是完整黑装');
+  g.math.random = () => 0.50;
+  const again = S.reopenChest();
+  assert.equal(again.pending.reward.kind, 'prop', '重开不出完整黑装');
+  assert.equal(again.pending.reward.id, 80, '重开折成黑色卡片');
+  assert.equal(S.confirmChest().ok, true);
+});
+
+test('无尽塔黑卡周限：每周最多 3 张，周一重置', () => {
+  const g = game(), S = g.State, s = S.state();
+  assert.equal(S.grantEndlessBlackCard(1).gain, 1);
+  assert.equal(S.grantEndlessBlackCard(1).gain, 1);
+  assert.equal(S.grantEndlessBlackCard(1).gain, 1);
+  assert.equal(S.grantEndlessBlackCard(1).gain, 0, '第 4 张被周限拦住');
+  assert.equal(s.props[80], 3);
+  g.advance(7 * 86400000);
+  assert.equal(S.grantEndlessBlackCard(1).gain, 1, '下一周重置后可再拿');
+  assert.equal(s.props[80], 4);
 });
 
 test('天使/恶魔果实改成随机三选一，选完才消耗', () => {
@@ -1691,7 +1856,7 @@ test('挑战经验只看等级差：等级成长 20 级封顶、单位体力效�
   assert.ok(S.challengeExp(20, 20) < 27 + 20 * 1.2, '20 级同级应低于旧公式，实际 ' + S.challengeExp(20, 20));
 });
 
-test('升级礼包：每级给消耗品，逢 5 级与属性书等级再给大礼包，并真的进背包', () => {
+test('升级礼包：每级给消耗品，逢 5 级再给大礼包，并真的进背包', () => {
   const g = game(), S = g.State, s = S.state();
   const before = JSON.parse(JSON.stringify(s.props));
   // 逐级升到 6 级，收集每次升级的礼包
@@ -1735,17 +1900,43 @@ test('金宝箱/魔法袋：道具已注册，开箱消耗 1 个并落到背包/
   assert.equal(g.window.propMap.getValue(90).name, '金宝箱');
   assert.equal(g.window.propMap.getValue(79).name, '魔法袋');
   s.props[90] = 2; s.props[79] = 1;
-  const gold0 = s.goldPoint, points0 = s.freePoints || 0;
+  const before = { gold: s.goldPoint, free: s.freePoints || 0, hatch: s.hatchPoint || 0, g105: s.props[105] || 0, g106: s.props[106] || 0 };
   const r1 = g.State.openChestProp(90);
   assert.equal(r1.ok, true);
   assert.equal(s.props[90], 1);
   assert.ok(r1.reward && r1.reward.count > 0);
-  assert.ok(s.goldPoint >= gold0 || (s.freePoints || 0) > points0 || s.props[105] > 0 || s.props[106] > 0,
-    '开箱奖励必须真的入账');
+  assert.ok(s.goldPoint > before.gold || (s.freePoints || 0) > before.free || (s.hatchPoint || 0) > before.hatch
+    || (s.props[105] || 0) > before.g105 || (s.props[106] || 0) > before.g106, '开箱奖励必须真的入账');
   const r2 = g.State.openChestProp(79);
   assert.equal(r2.ok, true);
-  assert.equal(s.props[79], 0);
+  assert.ok(!(s.props[79] > 0), '魔法袋消耗完');
   assert.equal(g.State.openChestProp(79).ok, false, '没有魔法袋时不能再开');
+});
+
+test('金宝箱重开：金松果逐档上涨、重开不消耗箱子、500 次封顶、确认才入账', () => {
+  const g = game(), s = g.State.state();
+  s.props[90] = 1; s.goldPoint = 1000000;
+  const b = g.State.beginChest(90);
+  assert.equal(b.ok, true);
+  assert.ok(!(s.props[90] > 0), '开箱消耗 1 个金宝箱');
+  assert.equal(g.State.chestState().lotteryCount, 0);
+  assert.deepEqual([0, 3, 6, 9, 12, 499, 500].map(g.State.chestReopenCost), [50, 75, 100, 150, 200, 8300, 0]);
+  const r = g.State.reopenChest();
+  assert.equal(r.ok, true); assert.equal(r.cost, 50);
+  assert.equal(s.goldPoint, 1000000 - 50);
+  assert.equal(g.State.chestState().lotteryCount, 1);
+  assert.ok(!(s.props[90] > 0), '重开不再消耗金宝箱');
+  s.goldPoint = 10000000;
+  for (let i = 1; i < 500; i++) assert.equal(g.State.reopenChest().ok, true, '第 ' + (i + 1) + ' 次重开');
+  assert.equal(g.State.chestState().lotteryCount, 500);
+  assert.equal(g.State.reopenChest().ok, false, '500 次后不能再重开');
+  const c = g.State.confirmChest();
+  assert.equal(c.ok, true);
+  assert.equal(g.State.chestState(), null);
+  // 待领取结果落存档：读档会自动入账，不会把箱子消耗掉却丢掉奖励
+  s.props[90] = 1; g.State.beginChest(90); g.State.save();
+  g.State.load();
+  assert.equal(g.State.chestState(), null, '读档自动结算待领取结果');
 });
 
 test('复仇：败绩可标记一次，复仇补偿是赢场经验的一部分且带金松果', () => {

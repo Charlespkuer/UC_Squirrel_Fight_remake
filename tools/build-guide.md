@@ -369,7 +369,83 @@ $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'
 5. **轻壳需要游戏目录**：把 `squirrel_fight.exe` 单独拷到别处、旁边没有 `index.html` 时，
    窗口会显示「没找到游戏目录」的提示页；想发给别人就用 `--installer` 打的安装包。
 
-## I. 前端要改吗
+## I. iOS（iPhone/iPad 未签名 IPA）
+
+Windows 双击 `scripts\打包.cmd` 会在本机完成 exe / 安装包 / APK 后，自动调用已配对的
+Mac，顺序生成下面两种 IPA，并下载到 **Windows 的 `src-tauri\dist`**。版本沿用本轮
+Windows 的升版结果，Mac 不再单独升版。Mac 不在线或工具链检查失败时会在升版前停止；
+加 `-SkipIos` 可跳过，`-IosVariant modern` / `legacy` 可只出其中一种，`-IosPeer mac`
+对应现有 `scripts/sync/sync.config.json` 的 peer 名称。
+
+首次接入：将新版 `scripts/sync/sync.js`、`scripts/sync/ios-build.cjs` 同步到 Mac 后，
+在 **Mac 游戏目录**运行一次 `node scripts/sync/sync.js restart`。后续不需要 SSH，直接复用
+现有同步口令。可在 Windows 单独运行：
+
+```powershell
+node tools/build-ios-remote.cjs --check    # 只检查 Mac 连接和 iOS 工具链
+node tools/build-ios-remote.cjs            # 当前版本的两种 IPA，不升版，不编 Windows / Android
+node tools/build-ios-remote.cjs --dry-run  # 只看源码与产物计划，不联网、不写文件
+```
+
+远程构建使用 Windows 本轮源码的隔离快照，按内容增量传输；不改 Mac 的开发目录、存档、
+同步配置，也不传 Windows 的 `node_modules` / `target` / Apple 工程。快照复用 Mac 的
+Node 依赖及专用构建缓存。只有远程构建成功、版本和下载完整性检查通过后才替换同名 IPA；
+旧版 IPA 保留。`-CleanOnly` 不连接 Mac，Windows 的清缓存步骤也不清 Mac 缓存。
+
+> 产物：
+> - `src-tauri/dist/squirrel_fight_<version>_ios_unsigned.ipa`：**iOS 26/27**（带 UIScene）；
+> - `src-tauri/dist/squirrel_fight_<version>_ios_legacy_unsigned.ipa`：**iOS 15~25**（传统生命周期，不声明 UIScene）。
+>
+> 两个包都是 **未签名**，用 Sideloadly / AltStore / 爱思助手 自己的 Apple ID 自签；免费账号 7 天有效，不需要开发者账号。
+
+一次性依赖（macOS）：
+
+- Xcode（App Store 安装，打开一次同意协议）；
+- Rust：`rustup target add aarch64-apple-ios` + `rustup component add llvm-tools`
+  （Xcode 27 的 swift-rs 需要 `llvm-objcopy`，缺了会在链接 `libtauri` 时报 `_log_stdout` 等符号未定义）；
+- `brew install xcodegen cocoapods`；`cd src-tauri && npm install`。
+
+出包：
+
+```bash
+node tools/build-ios.cjs --check   # 只检查环境
+node tools/build-ios.cjs           # iOS 26/27（带 UIScene）
+node tools/build-ios.cjs --legacy  # iOS 15~25（传统生命周期）
+node tools/build-ios.cjs --clean   # 先删 gen/apple/build 再打
+```
+
+**为什么要两个包**：iOS 26+ 强制 UIScene，没声明 `UIApplicationSceneManifest` 会启动即崩；
+而 tao 0.35 的 scene 启动路径在 iOS 15 上存在兼容问题（tao 0.37 才修），15.6.1 + TrollStore
+的反馈就是“装好后一打开就闪退”。`--legacy` 会删掉 UIScene 声明，让 iOS 15 走传统
+AppDelegate 生命周期；两个包的前端与二进制完全相同，只有 Info.plist 这一处差异。
+
+脚本做的事：
+
+1. `tools/build-tauri-app.cjs --web` 生成 `src-tauri/web`（134 MB：css/js/images/audio + 首页）；
+2. `tauri icon app-icon.png --ios-color '#FFF3DC'`（iOS 图标不能透明）；
+3. 首次 `tauri ios init`，之后补 `gen/apple/project.yml`：仅横屏、中文显示名、隐藏状态栏/Home 条、
+   `TARGETED_DEVICE_FAMILY=1,2`；默认加 `UIApplicationSceneManifest`（`SupportsMultipleScenes=true`），
+   `--legacy` 时删掉它；
+4. `objectVersion 77 → 55`（CocoaPods 1.11 的 xcodeproj 只认到 55）、删掉 Podfile 里不存在的 macOS target、`pod install`；
+5. `tauri ios build --no-sign --archive-only`，从 `.xcarchive/Products/Applications` 取 `.app`，封成
+   `Payload/squirrel_fight.app` 的 zip（`zip -qry`）。
+
+注意：
+
+- 设备包是 **arm64 真机包**，不能直接装到模拟器；模拟器要 `--target aarch64-sim` 另外构建，
+  且 Apple Silicon 上必须补 ad-hoc 签名（`codesign --force --deep --sign - <app>`），否则启动即被杀。
+- 本机 Xcode 27 的组件目录只提供 iOS 27.1 runtime，**没有 iOS 15.6 runtime**，因此 legacy 包
+  无法在本地模拟器复现/验证；必须用 iOS 15.6 真机实测。若仍闪退，取
+  `设置 → 隐私与安全性 → 分析与改进 → 分析数据` 里的 `squirrel_fight-*.ips` 再定位。
+- iOS 15 出现“能打开但触屏无反应”：已内置 `js/touch-fallback.js`（420ms 内没等到原生 click 才在
+  触点补发 `detail=0` click，兼容 SVG 路由），且 `touch-action` 只保留在 button/input。若仍完全无反应，
+  先让用户点昵称输入框看是否弹键盘；不弹说明原生触摸没进 WKWebView，必须取 `.ips` / Console 日志。
+- 存档在应用私有目录：`<container>/Library/Application Support/com.ssdz.classic/save/progress.json`；
+  系统页的 JSON 导出/导入仍可用。
+- 这是 WebView 套壳；以后要上 App Store 需按 Guideline 4.2 补原生功能/内容，并准备无 alpha 的
+  App Store 图标与隐私清单。未签名 IPA 只适合 sideload 分发。
+
+## J. 前端要改吗
 
 不用改渲染，只有存档通道是「可插拔」的：
 

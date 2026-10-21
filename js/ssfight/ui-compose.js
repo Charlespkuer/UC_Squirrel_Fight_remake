@@ -124,7 +124,7 @@
   }
 
   function isComposeProp(id) {
-    return [24, 25, 26, 45, 46].includes(id) || id === (window.GData && GData.CONVERT_SHARD_ID) || !!(window.State && State.gemLevel(id));
+    return [24, 25, 26, 45, 46, 77, 78].includes(id) || id === (window.GData && GData.CONVERT_SHARD_ID) || !!(window.State && State.gemLevel(id));
   }
 
   function costText(id) {
@@ -133,8 +133,8 @@
       return '合成成功率:' + Math.round(State.gemMergeRate(lv) * 100) + '%\n合成费用:10金松果\n合成条件:\n3个同级宝石';
     }
     const base = propMap.getValue(id);
-    const isFragment = [24, 25, 26].includes(id);
-    const gold = isFragment ? (State.gearCostOf ? State.gearCostOf({ 24: 0, 25: 1, 26: 2 }[id]) : 50) : 50;
+    const isFragment = [24, 25, 26, 77, 78].includes(id);
+    const gold = isFragment ? (State.gearCostOf ? State.gearCostOf({ 24: 0, 25: 1, 26: 2, 77: 5, 78: 5 }[id]) : 50) : 50;
     return '每次合成消耗\n' + gold + '个金松果。\n合成条件:\n10个' + (base ? base.name : '材料');
   }
 
@@ -156,7 +156,8 @@
   /** 用户 2026-10 口径：合成页的「合成 / 取消」左右对调，取消在左、合成在右。
    *  ⚠ 两颗按钮是**不同元件**（4878 合成 / 4419 取消），画稿原点也不一样，
    *  不能像使用窗那样只按 `__baseMa` 的 x 差平移（实测会叠在一起）。
-   *  这里按**屏幕包围盒中心**互换，再用各自的 `getScreenCTM().a` 折回局部单位。 */
+   *  这里按**屏幕包围盒中心**互换，再用各自的「屏幕矩形 ÷ 本地包围盒」折回局部单位
+   *  （不用 getScreenCTM：iOS 15 会漏掉祖先 CSS transform 的 scale，WebKit 209220）。 */
   function swapComposeButtons(view) {
     const compose = clipOf(view, 'b_hc');
     const cancel = clipOf(view, 'b_back');
@@ -165,9 +166,12 @@
     const cCenter = (cr.left + cr.right) / 2, bCenter = (br.left + br.right) / 2;
     const scaleOf = (clip) => {
       try {
-        const m = clip.g.getScreenCTM && clip.g.getScreenCTM();
-        const a = m && Math.abs(m.a);
-        return a > 1e-6 ? a : 1;
+        /* 屏幕矩形 ÷ 本地包围盒 = 含所有祖先 CSS transform 的总比例。
+         * iOS 15 的 getScreenCTM 漏掉祖先 scale（WebKit 209220），不能再拿 m.a 折回。 */
+        const rr = clip.g.getBoundingClientRect();
+        const bb = clip.g.getBBox();
+        const s = bb && bb.width ? rr.width / bb.width : (bb && bb.height ? rr.height / bb.height : 0);
+        return s > 1e-6 ? s : 1;
       } catch (e) { return 1; }
     };
     const dxC = (bCenter - cCenter) / scaleOf(compose);
@@ -191,7 +195,7 @@
   }
 
   function composeAction(id) {
-    if ([24, 25, 26].includes(id)) return State.composeGear(id);
+    if ([24, 25, 26, 77, 78].includes(id)) return State.composeGear(id);
     if ([45, 46].includes(id)) return State.composeSeed(id);
     if (id === (window.GData && GData.CONVERT_SHARD_ID)) return State.composeConvertPill();
     if (State.gemLevel(id)) return State.mergeGems(id);

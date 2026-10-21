@@ -916,6 +916,21 @@
       if (b && b.width && b.height && cacheKey) bboxCache.set(cacheKey, { x: b.x, y: b.y, width: b.width, height: b.height });
     }
     if (!b || (!b.width && !b.height)) {
+      /* 子树还在**同一个同步任务**里构建：`showFrame()` 先 `new MovieClip` + `showFrame()`、
+       * 之后才 `placeFrameNode()` 把它放进父节点，所以挂点 / 装备容器出生那一刻
+       * `isConnected === false`，`getBBox()` 恒为 0。战斗角色本体（`attachChild` 挂 7689 /
+       * 6532，再逐层建动作片断）正是这条路径 —— 只靠下面的 rAF 补锚点在**隐藏标签页**
+       * （rAF 被节流/暂停）永远不会执行，身体装备就停在没锚点的位置（用户 2026-10 口径：
+       * "战斗中的身体装备贴图完全没有合身"）。
+       * 先排一个 microtask：同步构建结束后整棵树已经入文档，再量一次就能**同拍**补上锚点；
+       * rAF 那条保留给"布局还没算完"的情况。 */
+      if (!retry && this.g && this.g.isConnected === false && typeof Promise !== 'undefined') {
+        Promise.resolve().then(() => {
+          if (self.__anchorSeq !== seq) return;
+          try { self.anchorToBBox(sc, md, tail, true); } catch (e) {}
+        });
+        return;
+      }
       if (!retry && typeof requestAnimationFrame === 'function') {
         requestAnimationFrame(() => {
           /* 这一帧里如果已经换了符号 / 重新锚定过，旧回调不能再拿旧包围盒摆一次。 */

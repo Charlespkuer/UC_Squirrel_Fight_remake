@@ -299,7 +299,7 @@
     const b = building(key);
     if (!b) return null;
     const d = document.createElement('div');
-    d.className = 'ssfight-building-level';
+    d.className = 'ssfight-building-level sf-clickthrough';
     d.textContent = (label || BUILDING_LABEL[key] || key) + ' Lv' + b.level + (b.upgrading ? ' · 升级中' : '');
     if (style) d.style.cssText = style;
     container.appendChild(d);
@@ -313,7 +313,7 @@
     if (!text) { if (n) n.style.display = 'none'; return; }
     if (!n) {
       n = document.createElement('div');
-      n.className = 'ssfight-note';
+      n.className = 'ssfight-note sf-clickthrough';
       container.appendChild(n);
     }
     n.textContent = text;
@@ -674,7 +674,7 @@
           const cw = cr.width / hs;
           const ch = cr.height / hs;
           const art = document.createElement('div');
-          art.className = 'ssfight-pet-art';
+          art.className = 'ssfight-pet-art sf-clickthrough';
           art.style.left = ((cr.left - hr.left) / hs + cw * 0.09) + 'px';
           art.style.top = ((cr.top - hr.top) / hs + ch * 0.16) + 'px';
           art.style.width = (cw * 0.82) + 'px';
@@ -685,7 +685,7 @@
             /* 换帧/重包之后原版 level 文本可能被重建，再收一次。 */
             hidePetLevel(cell);
             const lv = document.createElement('span');
-            lv.className = 'ssfight-pet-level';
+            lv.className = 'ssfight-pet-level sf-clickthrough';
             lv.textContent = 'Lv' + pet.level;
             art.appendChild(lv);
           });

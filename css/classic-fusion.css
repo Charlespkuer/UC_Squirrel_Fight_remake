@@ -131,6 +131,7 @@
 .fusion-quality-tag.q2{background:#4f88a3}
 .fusion-quality-tag.q3{background:#8d63a3}
 .fusion-quality-tag.q4{background:#e8842c}
+.fusion-quality-tag.q5{background:#3b2f46}
 .fusion-card-state{position:absolute;bottom:0;left:0;right:0;padding:1px 0;background:#f2e7c9e6;font-size:16px;
   line-height:21px;color:#8d6b38;text-align:center}
 .fusion-gear.selected{box-shadow:inset 0 0 0 3px #fffdf3,0 0 0 3px #8ec155,0 3px 0 #6fa034}
@@ -165,6 +166,7 @@
 .fusion-material.q2 .fusion-frame,.fusion-success-item.q2 .fusion-frame{border-color:#5b91a8;box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #9fbcc7}
 .fusion-material.q3 .fusion-frame,.fusion-success-item.q3 .fusion-frame{border-color:#9771a8;box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #bfa4c9}
 .fusion-material.q4 .fusion-frame,.fusion-success-item.q4 .fusion-frame,.fusion-preview.q4 .fusion-frame{border-color:#e8842c;box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #e8bd8a}
+.fusion-material.q5 .fusion-frame,.fusion-success-item.q5 .fusion-frame,.fusion-preview.q5 .fusion-frame{border-color:#3b2f46;box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #8d7f96}
 
 /* ---------- 融合成功弹窗 ---------- */
 .fusion-success{display:flex;align-items:center;gap:46px;padding:24px 42px 9px}

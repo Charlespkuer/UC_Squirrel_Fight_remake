@@ -889,6 +889,14 @@
         if (c.pendingNote) { r.noteText = (r.noteText ? r.noteText + '·' : '') + c.pendingNote; c.pendingNote = null; }
       }
       r.hpAfter = [Math.max(0, A.hp), Math.max(0, B.hp)];
+      /* 调试用实时三维：只有调用方显式要才落快照，避免每场战斗都多存对象。
+       * 快照取**这一拍结算之后**的有效值（含降低属性/增益），现代战斗的调试层直接读它。 */
+      if (options.collectStats) {
+        r.effStats = [
+          { power: effPower(A), agility: effAgility(A), speed: effSpeed(A) },
+          { power: effPower(B), agility: effAgility(B), speed: effSpeed(B) },
+        ];
+      }
       r.shellAfter = [Math.max(0, A.shell || 0), Math.max(0, B.shell || 0)];
       /* 给经典播放器的换装/卸装表现用：这一拍结束时双方还剩几回合“被脱光”。
        * 0 = 正常穿着；>0 = 装备视觉应卸下。 */

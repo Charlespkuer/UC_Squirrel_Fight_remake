@@ -1486,7 +1486,7 @@
     const view = current && current.view;
     if (!view) return;
     /* 原版按**等级**决定停哪一帧（`MainMovie.as:13931-13974`）：
-     *   · `b_change`(7199)：`level > 9`  → 第 1 帧（已开启）；否则第 2 帧（灰底 + "5级开启"）
+     *   · `b_change`(7199)：`level >= 5`  → 第 1 帧（已开启）；否则第 2 帧（灰底 + "5级开启"）
      *   · `b_fusion`(7207)：`level > 19` → 第 1 帧（已开启）；否则第 2 帧（灰底 + "20级开启"）
      * **第 2 帧不是悬停高亮，而是"还没开启"那一档** —— 复刻原来把它当 hover 帧用，
      * 于是鼠标一移上去就切出那层灰底（用户 2026-10 报的"会触发另一层 x 级开启的灰色 ui 层，
@@ -1534,14 +1534,14 @@
      * 「装备融合」暂时仍走复刻的 DOM 二级页，所以那一颗保持"先收掉本页"的老写法。 */
     wireClickable(clipOf(view, 'b_change'), {
       hover: 0, press: 0,
-      idle: () => (lv() >= 10 ? 1 : 2),
+      idle: () => (lv() >= 5 ? 1 : 2),
       onFire: () => {
-        if (lv() >= 10) {
+        if (lv() >= 5) {
           const p = openGearsPage();
           if (p && typeof p.catch === 'function') p.catch((e) => { if (window.__errs) window.__errs.push('gears page: ' + (e && e.message)); });
           return;
         }
-        if (window.UI && UI.toast) UI.toast('你还没有达到10级，不能使用装备哦。多多挑战，多多使用道具，努力升级吧！');
+        if (window.UI && UI.toast) UI.toast('你还没有达到5级，不能使用装备哦。多多挑战，多多使用道具，努力升级吧！');
       },
     });
     wireClickable(clipOf(view, 'b_fusion'), {
@@ -1563,28 +1563,6 @@
       hover: 2,
       onFire: () => { destroy(); if (window.UI && UI.runAction) UI.runAction('home'); },
     });
-    addGearLockBadge(view, lv);
-  }
-  /** 原版 b_change 第 2 帧的「5级开启」是烘焙矢量字，不能改字符串；
-   *  门槛提到 10 级后盖一块等价样式的小标签，避免锁着的时候还显示 5。 */
-  function addGearLockBadge(view, lv) {
-    if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return;
-    if (friendView()) return;
-    const host = document.querySelector('#ui .ssfight-home');
-    if (!host) return;
-    for (const n of host.querySelectorAll('.sf-gear-lock')) n.remove();
-    if (typeof lv === 'function' ? lv() >= 10 : Number(lv) >= 10) return;
-    const clip = clipOf(view, 'b_change');
-    if (!clip || !clip.g) return;
-    let r = null, h = null;
-    try { r = clip.g.getBoundingClientRect(); h = host.getBoundingClientRect(); } catch (e) { return; }
-    if (!r || !h || !r.width || !h.width) return;
-    const badge = document.createElement('span');
-    badge.className = 'sf-gear-lock sf-clickthrough';
-    badge.textContent = '10级开启';
-    badge.style.left = (r.left - h.left + r.width / 2) + 'px';
-    badge.style.top = (r.top - h.top + r.height / 2) + 'px';
-    host.appendChild(badge);
   }
   /* ============================================================
    * 接线：三个 tab + 翻页箭头 + 两颗功能键 + 返回
@@ -2317,7 +2295,7 @@
     return (rec && rec.clip) || null;
   }
   /* 「刚拿到的装备」焦点：融合产物是**追加**到 S.gears 末尾的，而这一页按
-   * 「穿着中 > 星标 > 获得顺序」排、每页只有 6 格、每次打开都从第 1 页开始 ——
+   * 「穿着中 > 获得顺序」排、每页只有 6 格、每次打开都从第 1 页开始 ——
    * 于是玩家融合完再从状态页进「更换装备」时，新装备其实躺在**最后一页**，
    * 屏幕上根本看不到，反馈就是「融合完找不到装备了」。
    * 这里记一个待聚焦的 key：下次打开这一页直接翻到它所在的那一页并高亮那一格。 */
@@ -2608,10 +2586,6 @@
     const C = window.UI && UI.classic;
     const g = currentGearByKey(key);
     if (!g) { backToList(); return; }
-    if (State.isGearStarred && State.isGearStarred(g)) {
-      if (window.UI && UI.toast) UI.toast('【' + gearNameText(g) + '】已加星标，不会被误出售或误融合。');
-      return;
-    }
     const range = State.gearSellRange(Number(g.quality) || 0);
     const after = () => { void mountGearFrame(GEAR_FRAME_LIST).then(() => renderGearPage()); };
     if (!C || !C.modal) { State.sellGear(key); after(); return; }
@@ -2671,6 +2645,8 @@
   /** 打开「更换装备」这一页（原版 `showEquipsWin()`）。 */
   async function openGearsPage() {
     if (!current || !current.view) return false;
+    /* 5 级换装：先把随机白装发进背包，再挂页；教程沿用原版 13→14→15→22，不另盖层。 */
+    if (window.SfGuide && SfGuide.onGears) { try { SfGuide.onGears(); } catch (e) { if (window.__errs) window.__errs.push('guide gears: ' + (e && e.message)); } }
     /* 先收掉可能开着的武器 / 技能详情层，避免两层叠在一起。 */
     if (current.detail) destroyItemDetailOnly();
     if (!gearPage) gearPage = { host: null, view: null, page: 0, detail: null };
@@ -2820,13 +2796,14 @@
     try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
     return view;
   }
-  /** 材料清单：未穿戴、非传说、未加星标（与 `State.mergeGears` 的拒绝条件一致，
-   *  在"可选"这一层就先剔掉，免得白选一场再报错）。 */
+  /** 材料清单：未穿戴即可（经典模式没有星标；橙装也可以继续融合成黑装）。
+   *  品质高的排前面（黑/橙优先），同品质内仍按获得顺序；否则 50 多件橙装会被
+   *  每页 2 件的翻页埋到最后，玩家根本找不到。 */
   function fusionMaterials() {
     try {
-      return State.gearsInDisplayOrder().filter((g) => !g.used && !g.orange
-        && (Number(g.quality) < 4 || Number(g.quality) === 5)
-        && !(State.isGearStarred && State.isGearStarred(g)));
+      return State.gearsInDisplayOrder()
+        .filter((g) => !g.used)
+        .sort((a, b) => Number(b.quality) - Number(a.quality));
     } catch (e) { return []; }
   }
   function fusionSelected() {
@@ -2836,8 +2813,36 @@
     return fusionPage.sel;
   }
   /* ---------- 工作台（第 8 帧，`updataFusionMain`） ---------- */
+  /* 4673 f8 的「请先放入3件蓝色的装备」是拆成逐字 <text> 的画稿。
+   * 融合规则早已放开到任意同品质（橙装还能合黑），把这一行改成通用提示。 */
+  function rewriteFusionPrompt(view) {
+    const root = view && (view.g || view);
+    if (!root || !root.querySelectorAll) return;
+    const prompt = [...root.querySelectorAll('g')].find((g) => {
+      const txt = String(g.textContent || '').replace(/\s+/g, '');
+      return txt.indexOf('请先放入') >= 0 && txt.indexOf('装备') >= 0;
+    });
+    if (!prompt) return;
+    const glyphs = [...prompt.querySelectorAll('text')];
+    if (!glyphs.length) return;
+    const first = glyphs[0];
+    const keep = {};
+    for (const a of ['font-family', 'font-size', 'font-weight', 'fill', 'letter-spacing', 'text-anchor']) {
+      const v = first.getAttribute(a);
+      if (v != null) keep[a] = v;
+    }
+    for (const g of glyphs) g.remove();
+    const n = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    n.setAttribute('x', '0');
+    n.setAttribute('y', '14');
+    for (const [a, v] of Object.entries(keep)) n.setAttribute(a, v);
+    n.textContent = '请先放入3件同品质装备';
+    prompt.appendChild(n);
+  }
+
   function fillFusionWork(view) {
     if (!view || !fusionPage) return;
+    rewriteFusionPrompt(view);
     const all = fusionMaterials();
     const sel = fusionSelected();
     const picked = sel.map((k) => all.find((g) => g.key === k)).filter(Boolean);
@@ -2944,9 +2949,9 @@
     const words = [
       '选 3 件同品质的未穿戴装备，融合成 1 件更高品质的装备。',
       '费用按材料品质：白 ' + fusionCostOf(0) + ' / 绿 ' + fusionCostOf(1) + ' / 蓝 ' + fusionCostOf(2) +
-        ' / 紫 ' + fusionCostOf(3) + ' 金松果。',
-      '已穿戴的装备、已加星标的装备、以及传说（橙色）装备都不能作为材料。',
-      '3 件同品质的紫装可以融成一件传说装备；融合成功率 100%。',
+        ' / 紫 ' + fusionCostOf(3) + ' / 橙 ' + fusionCostOf(4) + ' 金松果。',
+      '已穿戴的装备不能作为材料；部位和名字可以完全不同。',
+      '3 件同品质的紫装可以融成一件传说装备；3 件橙色装备可以融成一件黑色装备；融合成功率 100%。',
       '部位和名字可以完全不同。产物的每个词条都有 ' + extInherit + '% 概率从三件材料的词条里继承；' +
         '继承到的词条取材料里的最高星级，另有 ' + extUpgrade + '% 概率再升 1 星（最高 3 星）。',
     ];
@@ -3139,7 +3144,8 @@
       hover: 2, press: 2,
       onFire: () => {
         const keys = fusionSelected().slice();
-        /* 结算规则走 `State`（费用、同品质、星标与传说的拒绝都在那边；经典页不再要求同部位）。 */
+        /* 结算规则走 `State`（费用、同品质、穿戴都在那边；经典页不再要求同部位，
+         * 也没有星标；橙装可以继续融合成黑装）。 */
         const r = State.mergeGears(keys, { allowMixedParts: true });
         if (r.ok) {
           /* 不叠加 3763「融合中」：直接播 4402「合成中」整段 CG（与道具合成同一颗），

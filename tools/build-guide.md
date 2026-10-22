@@ -397,6 +397,13 @@ Node 依赖及专用构建缓存。只有远程构建成功、版本和下载完
 > - `src-tauri/dist/squirrel_fight_<version>_ios_legacy_unsigned.ipa`：**iOS 15~25**（传统生命周期，不声明 UIScene）。
 >
 > 两个包都是 **未签名**，用 Sideloadly / AltStore / 爱思助手 自己的 Apple ID 自签；免费账号 7 天有效，不需要开发者账号。
+>
+> ⚠ **换包更新必须沿用同一 bundle ID / 同一签名身份**。未签名或 TrollStore 安装的是
+> `com.ssdz.classic`；用企业描述文件签名时 Info.plist 会被改成描述文件里的 App ID
+> （当前是 `jp.co.rakuten-sec.iSPEED...`）。两者对 iOS 是**两个不同的 App**，存档容器互不相通：
+> 在两者之间来回装，会各自看到一份「初始档 / 有进度档」，看起来就是存档横跳。更新时要么一直用
+> 同一签名包（并递增 `CFBundleVersion`），要么一直用同一 TrollStore/自签身份；确实要换身份，
+> 先在「系统 → 导出存档」备份，再在新包里导入。
 
 一次性依赖（macOS）：
 

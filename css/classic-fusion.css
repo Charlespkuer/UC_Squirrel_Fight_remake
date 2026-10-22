@@ -143,15 +143,6 @@
 .fusion-empty{grid-column:1/-1;align-self:center;text-align:center;font-size:25px;line-height:1.6;color:#9b835b}
 .fusion-empty span{font-size:21px}
 
-/* 星标装备在融合页的呈现：星标 = 「别把我合掉」的保护标记，所以卡片直接置灰禁用，
- * 右上角挂 ★，状态栏写明「已加星标」，材料区顶上也给一句总数。
- * 注意 .fusion-frame 是 overflow:hidden，★ 必须挂在 frame 外面（.fusion-gear 是
- * position:relative），否则会被裁掉。 */
-.fusion-starred-note{font-size:19px;color:#b8860b;white-space:nowrap}
-.fusion-gear .gear-star{left:auto;right:3px;top:3px;font-size:22px}
-.fusion-gear.starred .fusion-frame{border-color:#ffd323}
-.fusion-gear.starred .fusion-card-state{background:#f7ecc9f2;color:#a8842a}
-
 /* ---------- 状态条 ---------- */
 .fusion-status{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:9px;margin:0 auto;
   padding:4px 22px;border-radius:20px;background:#f6ecd2;font-size:19px;line-height:24px;color:#9c7c4b;

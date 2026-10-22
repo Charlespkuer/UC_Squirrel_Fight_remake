@@ -182,6 +182,12 @@
     if (!Array.isArray(list)) return [];
     return list.filter((g) => g && typeof g === 'object' && g.id != null && g.src == null);
   }
+  /** 手臂甲（`gearArm` 2008）槽位超差补偿：规则与主界面共用
+   *  `SfUiMain.toolkit.gearSlotTail`（狂战/深海那 7 帧的袖口会飘到脸侧，见那边的审计注释）。 */
+  function gearSlotTail(clip, p) {
+    const t = T();
+    return (t && t.gearSlotTail) ? t.gearSlotTail(clip, p && p.symbol) : '';
+  }
   /* ---------- 三侠 / 木人：原版 `7689` 的第 2/3/4/5 帧就是现成的原版矢量模型 ----------
    * 原版 `loadPlayer`（MainMovie.as:17186）按 `chooseWz` 把 `player2` 拨到 2/3/4，再往
    * `player2.playerMc` 里 `attachMovie("螳螂"/"仙鹤"/"熊猫")`。那一颗外部 SWF 不在仓库的
@@ -357,6 +363,10 @@
   }
   /** `playClip` / `play` 用：只放行子树（外面自己会从第 2 帧开始播）。 */
   function allowNestedAnim(clip) { startNestedAnim(clip, false, false); }
+  /* 脸部保留原版深度：5615 眼白必须低于头装；6062 思考眼睛由动态蒙版裁剪。
+   * 原 SWF/Ruffle 逐帧对照 5843/6127 的睁眼、闭眼与侧脸后，确认不能按固定
+   * depth 50/55 重排：那里会换成整张眼皮、眼影、眼线或爱心，重排会改变表情轮廓。
+   * 蒙版与颜色变换的继承/撤销由显示层处理，不能通过把眼白抬到脸皮上方补偿。 */
   /** 一条时间轴里**最后一个有内容的帧**（1 基）。很多动作元件在收招后拖了几条空帧
    *  （实测：闪避 `6432` 第 8~11 帧、`6524` 末两帧），停在那几条空帧上等于**把角色画没了** ——
    *  表现就是"闪避 / 受击演完人消失一下再出现"（用户 2026-11 口径："敌方 UI 一直闪"）。 */
@@ -556,10 +566,8 @@
     const p = plan.bySlot.get(String(clip.tag.id));
     if (p && clip.setSymbol) {
       if (clip.g && clip.g.setAttribute) clip.g.setAttribute('slot', String(clip.tag.id));
-      clip.setSymbol(p.symbol, p.frame, 1, 'topleft', '');
+      clip.setSymbol(p.symbol, p.frame, 1, 'topleft', gearSlotTail(clip, p));
       clip.__gearSlot = true;
-      /* 手臂甲（2008）只保留近侧一条：见 markArmGear 的注释。 */
-      if (String(p.symbol) === '2008') markArmGear(clip);
       /* ⚠ 身体装备（`gearBody` / `gearArm`，type 2）**不能**在战斗层再 `mirrorInPlace` 一次。
        * 依据（2026-10 逐项核对）：
        *  · 容器画稿和角色**同向**：村庄 `myself` 穿的是同一套 B 容器、同一个 `topleft` 锚点，
@@ -918,18 +926,49 @@
   }
 
   /** 把一层 HTML/SVG 覆盖物铺到经典舞台 SVG 的显示区域上（两者都在 `#ui` 的设计坐标里）。
-   *  `clientWidth / rect.width` 把屏幕像素折回设计单位，所以 `#ui` 的整体缩放、
-   *  窗口 resize、甚至舞台在宿主里居中留边都不会让覆盖物和舞台错位。
-   *  返回舞台在设计坐标里的尺寸；量不到（隐藏 / 还没布局）时返回 null。 */
+   *
+   *  **优先按设计坐标定位**：`offsetLeft/offsetTop` + `clientWidth/clientHeight` 都是
+   *  `#ui` 缩放前的值，`SfRender.svgScreenMap()` 给出的 `content` 也是设计单位。
+   *  这样完全不需要把屏幕矩形除回来，也不会被 iOS 15 的 `getScreenCTM` 209220 或
+   *  「全面屏」下 `sx !== sy` 的非等比 `#ui` 缩放带偏。
+   *
+   *  以前这里用 `host.clientWidth / hostRect.width` 一个比例折回设计坐标：等比缩放时
+   *  恰好正确，**全面屏时 x/y 比例不同**，三侠图集 canvas 的高度会被算成
+   *  `stageHeight * sy / sx`（iPhone 横屏约 75%），并被顶到舞台顶部 —— 用户看到的
+   *  「三侠定位与缩放大幅改变」。现在直接取舞台内容的设计高度，不再换算。
+   *
+   *  返回舞台内容在设计坐标里的尺寸；量不到（隐藏 / 还没布局）时返回 null。 */
   function layoutStageOverlay(el, root, host) {
     if (!el || !root || !host) return null;
     const svg = root.ownerSVGElement || root;
-    if (!svg || !svg.getBoundingClientRect) return null;
+    const vb = svg && svg.viewBox && svg.viewBox.baseVal;
+    if (!svg || !vb || !(vb.width > 0) || !(vb.height > 0) || !svg.getBoundingClientRect) return null;
     const hr = host.getBoundingClientRect(), sr = svg.getBoundingClientRect();
-    if (!(hr.width > 0) || !(sr.width > 0)) return null;
-    const k = (host.clientWidth || hr.width) / hr.width;
-    const left = (sr.left - hr.left) * k, top = (sr.top - hr.top) * k;
-    const width = sr.width * k, height = sr.height * k;
+    if (!(hr.width > 0) || !(hr.height > 0) || !(sr.width > 0) || !(sr.height > 0)) return null;
+    /* 屏幕 → 设计单位：x、y 分别用宿主自己的布局尺寸折算。`host` 是普通 div，
+     * clientWidth/Height 在 WKWebView 上可靠；不能再用一个 k 同时除两轴
+     *（全面屏时 sx !== sy，三侠层会纵向缩成 75% 并顶到舞台顶部）。 */
+    if (!(host.clientWidth > 0) || !(host.clientHeight > 0)) return null;
+    const kx = host.clientWidth / hr.width;
+    const ky = host.clientHeight / hr.height;
+    const dw = sr.width * kx;                 // SVG 在设计坐标里的宽
+    const dh = sr.height * ky;                // SVG 在设计坐标里的高
+    const par = String(svg.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+    const ax = /xMin/.test(par) ? 0 : /xMax/.test(par) ? 1 : 0.5;
+    const ay = /YMin/.test(par) ? 0 : /YMax/.test(par) ? 1 : 0.5;
+    let offX = 0, offY = 0, contentW, contentH;
+    if (/\bnone\b/.test(par)) {
+      contentW = dw; contentH = dh;
+    } else {
+      const s = /\bslice\b/.test(par) ? Math.max(dw / vb.width, dh / vb.height)
+        : Math.min(dw / vb.width, dh / vb.height);
+      contentW = vb.width * s; contentH = vb.height * s;
+      offX = (dw - contentW) * ax;
+      offY = (dh - contentH) * ay;
+    }
+    const left = (sr.left - hr.left) * kx + offX;
+    const top = (sr.top - hr.top) * ky + offY;
+    const width = contentW, height = contentH;
     const sig = [left, top, width, height].map((n) => Math.round(n * 100) / 100).join('|');
     if (el.__sfStageSig !== sig) {
       el.__sfStageSig = sig;
@@ -981,6 +1020,7 @@
    *  坐标仍按现代 1170×690 画，绘制前把 canvas 的变换设成「舞台显示尺寸 / 1170×690」。
    */
   function makeAtlasNpcFighter(side, holder, info, npcType) {
+    const battle = live;
     const view = live && live.view;
     const root = view && (view.g || view);
     const host = live && live.host;
@@ -999,22 +1039,40 @@
     let isDead = false;
     let anim = null;
     let rafId = 0;
+    let disposed = false;
+    let layoutDirty = true, layoutReady = false, layoutRetryAt = 0, nextLayoutCheck = 0;
+    let paintDirty = true, paintedFrame = null;
+    let resizeObserver = null, layoutObserver = null;
     const effects = [];
     const now = () => (window.performance && performance.now ? performance.now() : Date.now());
 
-    function layoutCanvas() {
-      const rec = live;
-      if (!rec || !rec.host || !canvas.parentNode) return false;
+    function layoutCanvas(stamp) {
+      const rec = battle;
+      if (disposed || live !== rec || !rec || !rec.host || !canvas.parentNode) return false;
+      /* 舞台没有逐 rAF 移动；尺寸/布局变化时再量。旧 WebView 无 ResizeObserver 时
+       * 每 250ms 兜底一次，隐藏后初次布局失败也会重试，不能把零尺寸永久缓存。 */
+      if (!layoutDirty && (resizeObserver || stamp < nextLayoutCheck)) return layoutReady;
+      if (stamp < layoutRetryAt) return layoutReady;
       const box = layoutStageOverlay(canvas, root, rec.host);
-      if (!box) return false;
+      if (!box) {
+        layoutReady = false;
+        layoutRetryAt = stamp + 100;
+        return false;
+      }
+      layoutDirty = false; layoutReady = true; layoutRetryAt = 0;
+      nextLayoutCheck = stamp + 250;
       const bw = Math.max(1, Math.round(box.width)), bh = Math.max(1, Math.round(box.height));
-      if (canvas.width !== bw) canvas.width = bw;
-      if (canvas.height !== bh) canvas.height = bh;
+      if (canvas.width !== bw) { canvas.width = bw; paintDirty = true; }
+      if (canvas.height !== bh) { canvas.height = bh; paintDirty = true; }
       return true;
     }
+    function invalidateLayout() {
+      layoutDirty = true; layoutRetryAt = 0;
+      schedule();
+    }
     function schedule() {
-      const rec = live;
-      if (!rec || rafId) return;
+      const rec = battle;
+      if (disposed || live !== rec || !rec || rafId) return;
       const id = raf((stamp) => {
         const at = rec.rafs.indexOf(id);
         if (at >= 0) rec.rafs.splice(at, 1);
@@ -1031,24 +1089,30 @@
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       } catch (e) {}
     }
-    function drawEffect(eff, at) {
-      const raw = Math.floor(at / NPC_FRAME_MS);
-      if (raw >= eff.frames.length) return false;
-      try { Engine.drawFrame(ctx, eff.frames[raw], { sheets: eff.sheets }); } catch (e) {}
-      return true;
-    }
-    function draw() {
-      if (!layoutCanvas()) return;
+    function draw(stamp) {
+      const t = stamp == null ? now() : stamp;
+      if (!layoutCanvas(t)) return;
+      const frame = anim && anim.frames && anim.frames[anim.idx];
+      if (frame !== paintedFrame) paintDirty = true;
+      /* 保留 rAF 节拍和命中回调，只省掉相同 20fps 素材帧的清屏/重画。
+       * 特效有独立的帧和寿命；即使角色帧不变，特效切帧/结束也必须刷新。 */
+      for (let i = effects.length - 1; i >= 0; i--) {
+        const eff = effects[i];
+        const idx = Math.floor((t - eff.start) * Math.max(1, battle.speed || 1) / NPC_FRAME_MS);
+        if (idx >= eff.frames.length) { effects.splice(i, 1); paintDirty = true; }
+        else if (idx !== eff.idx) { eff.idx = idx; paintDirty = true; }
+      }
+      if (!paintDirty) return;
       clear();
       /* 现代 1170×690 → 这块舞台画布。x/y 各自按实际显示尺寸缩放，与之前
        * foreignObject 里 canvas 的拉伸比例一致（经典舞台是 320×196）。 */
       ctx.setTransform(canvas.width / 1170, 0, 0, canvas.height / 690, 0, 0);
-      const frame = anim && anim.frames && anim.frames[anim.idx];
       if (frame) { try { Engine.drawFrame(ctx, frame, { sheets: NPC_SHEETS[npcType] }); } catch (e) {} }
-      const t = now();
       for (let i = effects.length - 1; i >= 0; i--) {
-        if (!drawEffect(effects[i], (t - effects[i].start) * Math.max(1, live ? live.speed : 1))) effects.splice(i, 1);
+        const eff = effects[i];
+        try { Engine.drawFrame(ctx, eff.frames[eff.idx], { sheets: eff.sheets }); } catch (e) {}
       }
+      paintedFrame = frame; paintDirty = false;
     }
     function finishAnim() {
       const a = anim;
@@ -1056,9 +1120,9 @@
       if (a && a.finish) a.finish();
     }
     function tick(stamp) {
-      if (!live || live.stopped) { finishAnim(); return; }
+      if (disposed || live !== battle || !live || live.stopped) { finishAnim(); return; }
       const a = anim;
-      if (!a) { draw(); return; }
+      if (!a) { draw(stamp); if (effects.length || !layoutReady) schedule(); return; }
       const at = (stamp - a.start) * Math.max(1, live.speed || 1);
       const raw = Math.floor(at / NPC_FRAME_MS);
       let idx = Math.min(a.frames.length - 1, Math.max(0, raw));
@@ -1067,13 +1131,13 @@
         a.idx = idx;
         if (a.onFrame) { try { a.onFrame(idx + 1); } catch (e) {} }
       }
-      draw();
+      draw(stamp);
       if (!a.loop && raw >= a.frames.length) { finishAnim(); return; }
       schedule();
     }
     function play(name, opts) {
       const o = opts || {};
-      if (!live || live.stopped) return Promise.resolve();
+      if (disposed || live !== battle || !live || live.stopped) return Promise.resolve();
       const frames = window.Engine && Engine.anim ? Engine.anim(name) : null;
       if (!frames || !frames.length) return Promise.resolve();
       if (rafId) stopRaf();
@@ -1097,6 +1161,34 @@
       if (!frames || !frames.length) return;
       effects.push({ frames: frames, start: now(), sheets: NPC_EFFECT_SHEETS[npcType] || [] });
     }
+    if (window.addEventListener) window.addEventListener('resize', invalidateLayout);
+    if (window.ResizeObserver) {
+      try {
+        resizeObserver = new ResizeObserver(invalidateLayout);
+        resizeObserver.observe(root.ownerSVGElement || root);
+        resizeObserver.observe(host);
+      } catch (e) { if (resizeObserver) resizeObserver.disconnect(); resizeObserver = null; }
+    }
+    if (window.MutationObserver) {
+      try {
+        layoutObserver = new MutationObserver(invalidateLayout);
+        layoutObserver.observe(root.ownerSVGElement || root, {
+          attributes: true, attributeFilter: ['viewBox', 'preserveAspectRatio', 'width', 'height', 'style', 'class'],
+        });
+        for (const el of [host, host.parentNode]) if (el) layoutObserver.observe(el, {
+          attributes: true, attributeFilter: ['style', 'class'],
+        });
+      } catch (e) { if (layoutObserver) layoutObserver.disconnect(); layoutObserver = null; }
+    }
+    function disposeLayout() {
+      disposed = true;
+      if (window.removeEventListener) window.removeEventListener('resize', invalidateLayout);
+      if (resizeObserver) resizeObserver.disconnect();
+      if (layoutObserver) layoutObserver.disconnect();
+      if (battle.atlasCleanups) battle.atlasCleanups.delete(disposeLayout);
+    }
+    if (!battle.atlasCleanups) battle.atlasCleanups = new Set();
+    battle.atlasCleanups.add(disposeLayout);
     const api = {
       side: side, holder: holder, mc: holder && holder.__hero, statu: null, info: info, npc: npcType,
       blood: { totalBlood: 1, leftBlood: 1, finalBlood: 1 },
@@ -1153,6 +1245,7 @@
       },
       useSkillDefense() { return false; },
       hide() {
+        disposeLayout();
         stopRaf();
         if (anim && anim.finish) anim.finish();
         anim = null;
@@ -1538,84 +1631,18 @@
       if (p && !rec.clip.__dressed) {
         rec.clip.__dressed = true;
         try {
-          rec.clip.setSymbol(p.symbol, p.frame, 1, 'topleft', '');
+          rec.clip.setSymbol(p.symbol, p.frame, 1, 'topleft', gearSlotTail(rec.clip, p));
           rec.clip.__gearSlot = true;
-          if (String(p.symbol) === '2008') markArmGear(rec.clip);
           if (live && live.strip && live.strip[side]) setGearClipHidden(rec.clip, true);
         } catch (e) {}
       }
       dressTree(rec.clip, side);
     }
   }
-  /** 真·色诱：把一格装备视觉藏起来 / 放回来（只动 `plan.bySlot` 贴出来的装备容器）。
-   *  `__gearFar` = 远侧手臂甲（见 markArmGear）：除非玩家自己点了“先这样玩”，否则一直藏。 */
+  /** 真·色诱：把一格装备视觉藏起来 / 放回来（只动 `plan.bySlot` 贴出来的装备容器）。 */
   function setGearClipHidden(clip, on) {
-    if (!clip) return;
-    clip.__gearHidden = !!on;
-    const node = clip.g || clip;
-    if (node && node.style) node.style.display = (clip.__gearHidden || clip.__gearFar === true) ? 'none' : '';
-  }
-  /** 离挂点最近的 `6532`（松鼠本体）：一次身体动作里两只手臂都在它下面。 */
-  function heroRootOf(clip) {
-    for (let c = clip; c; c = c.parent) if (c.tag && String(c.tag.id) === '6532') return c;
-    return null;
-  }
-  /** 手臂挂点的“前后”由原版放置深度决定：近侧手臂在低深度（2/3），远侧在 40+。
-   *  `5616`（待机）/ `5630`（普攻）/ `6347`（受击）逐帧核过：两条 `4950` 手臂骨
-   *  永远是“低深度先摆、高深度后摆”。 */
-  function armBoneDepth(clip) {
-    for (let c = clip && clip.parent; c; c = c.parent) {
-      if (c.tag && String(c.tag.id) === '4950') {
-        const d = c.g && c.g.getAttribute ? Number(c.g.getAttribute('depth')) : NaN;
-        return Number.isFinite(d) ? d : null;
-      }
-    }
-    return null;
-  }
-  /** 手臂甲（`gearArm` 2008）**只贴近侧那条手臂**。
-   *
-   *  原版 `getEquipBpData(this, 2, 1)` 会在两只手臂的挂点上都贴同一张 2008（一条袖子）：
-   *  · 近侧那条在身体前面，和拳套/手套对得上；
-   *  · 远侧那条被身体挡住、只从躯干旁边露出一截袖子 —— 敌方整棵 `7689` 镜像后，
-   *    这一截正好露在身体另一侧，看起来就是“身体装备附带了一条多余的手臂”
-   *    （用户 2026-10 复核：我方已好，敌方仍有）。
-   *  复刻里没有原版那种“被身体自然遮住”的深度关系（挂点整体在身体上层），所以
-   *  这里按同一动作里两条手臂骨的深度，**只保留深度最小（最靠前）的一条**。
-   *  单手臂动作 / 量不到深度时照常显示。 */
-  function markArmGear(clip, retry) {
-    const hero = heroRootOf(clip);
-    if (!hero) return;
-    if (!hero.__armGear) hero.__armGear = new Set();
-    const set = hero.__armGear;
-    set.add(clip);
-    /* 旧动作里被换掉的挂点已经断开：直接清掉，别让它们把“还有节点没入文档”一直判成 true
-     * （否则 microtask 会无限重排，整页卡死）。 */
-    for (const c of [...set]) {
-      if (c !== clip && (!c.g || c.g.isConnected === false)) set.delete(c);
-    }
-    if (!clip.g || clip.g.isConnected === false) {
-      /* 初始建树是在同一个同步任务里完成的：先等 buildFighter / showFrame 结束，
-       * 整棵树入文档后再量深度。只补一次；仍断开就放弃（旧挂点已经没用了）。 */
-      if (!retry) {
-        Promise.resolve().then(() => {
-          try { markArmGear(clip, true); } catch (e) {}
-        });
-      }
-      return;
-    }
-    let min = Infinity;
-    for (const c of [...set]) {
-      if (!c.g || c.g.isConnected === false) { set.delete(c); continue; }
-      const d = armBoneDepth(c);
-      c.__armDepth = d;
-      if (d != null && d < min) min = d;
-    }
-    for (const c of set) {
-      const far = min !== Infinity && c.__armDepth != null && c.__armDepth > min;
-      if (c.__gearFar === far) continue;
-      c.__gearFar = far;
-      setGearClipHidden(c, c.__gearHidden === true);
-    }
+    const node = clip && (clip.g || clip);
+    if (node && node.style) node.style.display = on ? 'none' : '';
   }
   function walkClips(clip, fn) {
     if (!clip) return;
@@ -1902,6 +1929,7 @@
     if (!rec) return;
     for (const id of rec.timers) clearTimeout(id);
     for (const id of rec.rafs) caf(id);
+    if (rec.atlasCleanups) for (const dispose of [...rec.atlasCleanups]) dispose();
     for (const wake of [...rec.sleepers]) wake();
     rec.sleepers.clear();
     if (rec.pickups) { try { rec.pickups.close(); } catch (e) {} }

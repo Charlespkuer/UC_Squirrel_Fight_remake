@@ -301,3 +301,5 @@ console.log('  模式：' + (LEGACY ? 'iOS 15~25 传统生命周期（无 UIScen
 console.log('');
 console.log('安装：iOS 15~25 用 legacy 包；iOS 26/27 用默认包。用 Sideloadly / AltStore / 爱思助手 选对应 IPA，用自己的 Apple ID 自签。');
 console.log('      免费 Apple ID 的签名 7 天有效，到期重签；不需要开发者账号。');
+console.log('⚠ 更新必须沿用同一签名身份/bundle ID：企业签名的 App ID 与未签名/TrollStore 的 com.ssdz.classic');
+console.log('  是两个不同的 iOS App，存档容器不互通；来回换身份会看起来像「存档在初始档/有进度档之间横跳」。');

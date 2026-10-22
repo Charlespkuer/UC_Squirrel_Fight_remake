@@ -375,8 +375,15 @@
       const wallet = ladder
         ? '当前金松果：' + S.goldPoint + '　金杯：' + (S.goldCup || 0)
         : '当前金松果：' + S.goldPoint;
-      modal('复仇确认', '<div class="result-box"><p>复仇需要 <b>' + info.cost + '</b> 个金松果' + reward + '，确定复仇吗？</p><p class="small-label">' + wallet + '</p></div>',
-        [{ label: '确定复仇', cls: 'gold', run: go }, { label: '取消', cls: 'muted' }]);
+      if (window.SfChallenge && SfChallenge.openOriginalConfirm && current) {
+        const plainReward = ladder ? '，胜利后抢夺0~1个金杯' : '，胜利后补回少量经验与金松果';
+        SfChallenge.openOriginalConfirm({ owner: current.host, label: '复仇确认',
+          text: '复仇需要' + info.cost + '个金松果' + plainReward + '，确定复仇吗？\n' + wallet,
+          accept: go }).catch(e => { toast('确认界面加载失败，请重试。'); if (window.__errs) window.__errs.push(String(e)); });
+      } else {
+        modal('复仇确认', '<div class="result-box"><p>复仇需要 <b>' + info.cost + '</b> 个金松果' + reward + '，确定复仇吗？</p><p class="small-label">' + wallet + '</p></div>',
+          [{ label: '确定复仇', cls: 'gold', run: go }, { label: '取消', cls: 'muted' }]);
+      }
     } else {
       go();
     }
@@ -642,6 +649,7 @@
 
   /** 只拆自己这棵树（**不动 `seq`**）：`open()` 每次重挂前调它，UI 侧也拿它当"关掉这一页"。 */
   function destroyView() {
+    if (current && window.SfChallenge && SfChallenge.closeOriginalDialog) SfChallenge.closeOriginalDialog(current.host);
     if (current && current.view) { try { current.view.destroy(); } catch (e) {} }
     current = null;
   }

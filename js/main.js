@@ -174,6 +174,7 @@
       muted: localStorage.getItem('ssdz_music_muted') === '1',
       resolution: 'auto',
       fullscreen: false,
+      hideStatusBar: true,
     };
   }
   /** 把偏好写回存档：换浏览器/换机器（含双机同步）后设置还在。 */
@@ -185,6 +186,26 @@
     } catch (e) {}
     return false;
   }
+  /** 安卓沉浸模式：只调原生壳；桌面/浏览器没有 SSDZAndroid 桥就当无操作。
+   *  原生桥可能比设置晚注入，所以启动、切回前台、改设置都重新调一次。 */
+  function applySystemBars() {
+    let hide = true;
+    try { hide = settingsSnapshot().hideStatusBar !== false; } catch (e) {}
+    try {
+      const bridge = window.SSDZAndroid;
+      if (bridge && typeof bridge.setSystemBarsHidden === 'function') {
+        bridge.setSystemBarsHidden(hide ? '1' : '0');
+      }
+    } catch (e) {}
+    return hide;
+  }
+  /** 设置页的「状态栏」开关。 */
+  function setHideStatusBar(on) {
+    persistSettings({ hideStatusBar: on !== false });
+    applySystemBars();
+    setTimeout(fitCanvas, 0);
+    return on !== false;
+  }
   /** 存档载入后把偏好接过来：存档优先，并回写 localStorage 供下次启动（标题画面）用。
    *  **偏好没变就直接返回**：以前每次 `showHome()` 都要写 3 次 localStorage + `fitCanvas`、
    *  再被 `showHome` 里的第二次 `fitCanvas` 叠一遍；现在只有读档 / 切档 / 改设置才重跑。 */
@@ -193,7 +214,8 @@
     try {
       if (!window.State || !State.settings || !State.state || !State.state()) return;
       const st = State.settings();
-      const sig = [st.volume, st.muted === true, st.uiMode, st.resolution, st.fullscreen === true].join('|');
+      applySystemBars();
+      const sig = [st.volume, st.muted === true, st.uiMode, st.resolution, st.fullscreen === true, st.hideStatusBar !== false].join('|');
       if (!force && sig === appliedSettingsSig) return;
       appliedSettingsSig = sig;
       volume = clampVolume(st.volume);
@@ -312,6 +334,7 @@
   function enterForeground() {
     if (!bgSuspended) return;
     bgSuspended = false;
+    applySystemBars();          // 回前台时原生壳可能重建过系统栏状态，重新落一次
     playBgm(mode === 'battle' ? 'fight' : 'main');
   }
   try {
@@ -473,17 +496,24 @@
       if (UI && UI.toast) UI.toast('磁盘存档读取超时，已先用本地存档进入；连上之后会自动重载。');
       /* 超时**不能**等于放弃：安卓上 Tauri 的 save_* 命令是异步 IPC，桥接慢的时候
        * 一次 fileLoad 就可能超过这 4 秒。以前这里直接 return，既不挂横幅也不重试 ——
-       * 于是整局都跑在浏览器兜底档上，退出时自然「没存上」。现在照样进重试循环。
-       * 已经有本机镜像可玩时先不挂红横幅：macOS 上桥接晚到很常见，重试成功后会自动重载；
-       * 真连不上再由 retryFileSave 在末尾挂出来。 */
-      if (!local) showSaveWarning();
+       * 于是整局都跑在浏览器兜底档上，退出时自然「没存上」。现在照样进重试循环。 */
+      showSaveWarning();
       retryFileSave();
       bootDone = true;
       return;
     }
-    const fellBack = !loaded && !!State.hasLocalSave();
-    const fellBackLoaded = fellBack && State.load();
-    if (loaded || fellBackLoaded) showHome();
+    /* 浏览器兜底档只在「磁盘上确实没有更高进度」时才允许顶上来。
+     * 以前只看 `hasLocalSave()`：iOS 换包/桥接迟到时，浏览器里残留的 1 级档会把
+     * 磁盘上几十级的正式档顶掉一次，下一次启动又读回文件 —— 玩家看到的就是
+     * 「初始存档与有进度的存档横跳」。现在磁盘档的等级更高时直接不回落。 */
+    const bootInfo = State.fileInfo ? (State.fileInfo() || {}) : {};
+    const bootLocal = State.localSaveMeta ? State.localSaveMeta() : null;
+    const bootLevel = Number(bootInfo.fileLevel) || 0;
+    const localSafe = !!bootLocal && (!bootInfo.fileExists
+      || bootLocal.level > bootLevel
+      || (bootLocal.level === bootLevel && bootLocal.savedAt > (Number(bootInfo.fileAt) || 0) + 1000));
+    const fellBack = !loaded && localSafe && !!State.hasLocalSave();
+    if (loaded || (fellBack && State.load())) showHome();
     else showTitle();
     if (loaded) {
       /* 正式存档读进来了，但**本机浏览器镜像比文件还新**：说明上一次退出时那次文件写入
@@ -515,37 +545,6 @@
           localStorage.removeItem(State.saveKey + '_base');
         } catch (e) {}
       }
-    } else if (fellBackLoaded) {
-      /* 文件不在/读不出来，但本机镜像可用：先把进度还给他，别一进来就挂“没自动保存”
-       * 的红横幅；后台重试读文件，读到了再 reload（或这次存档写成功后自己收起横幅）。 */
-      if (UI && UI.toast) UI.toast('磁盘存档暂时读不到，已先用本机自动存档进入；正在重试…');
-      /* 镜像里记的文件 mtime 与当前文件对得上（或文件根本不存在）时，可以安全补写；
-       * 对不上就不碰文件，免得拿旧镜像盖掉同步服务/另一台机器的新档。 */
-      const meta = State.localSaveMeta ? State.localSaveMeta() : null;
-      const info = (State.fileInfo && State.fileInfo()) || {};
-      const baseOk = !!meta && meta.base != null && Number(meta.base) === Number(info.fileAt);
-      /* 文件在但解析失败（典型：上次写盘被中断留下的半截 JSON）也允许补写：
-       * 尽量先把坏档备份到 save/backup/，再把本机镜像写回去，至少让自动存档重新转起来。 */
-      const corrupt = !!info.fileExists && /JSON|Unexpected|Syntax|parse|解析/i.test(String(info.lastReadErr || ''));
-      const canRepair = !!info.available && (baseOk || info.fileExists === false || corrupt);
-      if (canRepair && State.fileWriteNow) {
-        const retryAfter = () => { showSaveWarning(); retryFileSave(); };
-        const repair = () => Promise.resolve(State.fileWriteNow()).then((r) => {
-          if (r && r.ok) { hideSaveWarning(); return; }
-          retryAfter();
-        }).catch(retryAfter);
-        if (corrupt && !baseOk && !isTauriPage()) {
-          /* 备份是尽力而为：最多等 1.5 秒，别让坏档/慢磁盘把自动存档晾着。 */
-          Promise.race([
-            fetch('__save/backup', { method: 'POST', cache: 'no-store' }).catch(() => null),
-            new Promise((resolve) => setTimeout(resolve, 1500)),
-          ]).then(repair);
-        } else {
-          repair();
-        }
-      } else {
-        retryFileSave();
-      }
     } else {
       // 没读到磁盘存档：立刻把原因摆出来，同时后台重试（服务器晚一步起来也能自己恢复）
       showSaveWarning();
@@ -573,22 +572,11 @@
   let pageHiddenAt = 0;
   let saveBanner = null;
 
-  /** 当前页面是不是原生外壳（Tauri 安装版 / 移动端）的资源协议。 */
-  function isTauriPage() {
-    try {
-      return location.protocol === 'tauri:' || location.hostname === 'tauri.localhost';
-    } catch (e) { return false; }
-  }
-
   /** 顶部告警横幅：一直挂着，直到成功连上磁盘存档（或玩家自己关掉）。 */
   function showSaveWarning() {
     if (saveBanner) return saveBanner;
     const info = (State.fileInfo && State.fileInfo()) || {};
     const inFile = location.protocol === 'file:';
-    /* Tauri 安装版的 `__TAURI__` 是**异步注入**的：桥还没到时页面里没有 saveTransport，
-     * `fetch('/__save')` 在 tauri://localhost 上必然失败——这不是存档坏了，不能挂红横幅。
-     * 等 tauri-bridge 的 20 秒诊断；桥一到会发 ssdz-save-transport-ready，重新读档/重载。 */
-    if (isTauriPage() && !info.hasTransport) return null;
     /* 原生外壳（桌面安装版 / iOS / Android）：首次运行还没有存档文件是正常的，
      * 路径是应用私有目录（iOS 上是 .../Application Support/com.ssdz.classic/save/progress.json），
      * 没必要把内部路径和「重试连线」挂给玩家看；第一笔存档写成功后文件自然会出现。
@@ -648,11 +636,6 @@
     return el;
   }
   function hideSaveWarning() { if (saveBanner) { saveBanner.remove(); saveBanner = null; } }
-  /* 任意一次存档写成功都收起横幅：首次运行那条“还没有存档文件”原来只能等下一次
-   * 重试/刷新才消失，玩家会一直以为没在自动保存。 */
-  if (typeof window !== 'undefined' && window.addEventListener) {
-    window.addEventListener('ssdz-save-written', hideSaveWarning);
-  }
   function esc(text) {
     return String(text == null ? '' : text).replace(/[&<>"']/g, (ch) => (
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -918,7 +901,8 @@
       if (classicHome || ssfightHomeActive()) {
         homeRegions = [];
         window.__homeRegions = homeRegions;
-        rafId = requestAnimationFrame(loop);
+        // The SVG renderer owns this scene. Mode changes and battle returns restart this function.
+        rafId = 0;
         return;
       }
       const dt = Math.min(50, now - last); last = now;
@@ -1242,7 +1226,8 @@
    * ============================================================ */
   window.Main = { showHome, showTitle, startBattle, replayBattle, resizeLayout:fitCanvas, setMuted, isMuted: () => muted,
     volume: volumeValue, setVolume, homePlayer: () => mainPlayer, setHomeFps, W, H,
-    settings: settingsSnapshot, setResolution, setFullscreen, isFullscreen: () => !!document.fullscreenElement,
+    settings: settingsSnapshot, setResolution, setFullscreen, setHideStatusBar, applySystemBars,
+    isFullscreen: () => !!document.fullscreenElement,
     /* 自愿支持作者：链接与「打开系统浏览器」的统一出口（界面只调这两个）。 */
     SUPPORT, openExternal, openSupport };
 

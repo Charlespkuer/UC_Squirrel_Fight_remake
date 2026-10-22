@@ -2327,7 +2327,7 @@ hr('15. 2026-10 主线剧情修复：入场剧情必须发生在「第 1 场战�
     assert.equal(T.storySeen('gate20'), false, '清空之后当没看过');
   });
 
-  check('魔王名字：整百层「魔王·德拉莫斯」，路上巡逻仍是「德拉莫斯」（预告=实战）', () => {
+  check('魔王名字：整百层「魔王·镜」，路上巡逻仍是「镜」（预告=实战）', () => {
     const c = setup(100);
     const T = c.Tower;
     const nameAt = (layer, idx) => {
@@ -2344,12 +2344,12 @@ hr('15. 2026-10 主线剧情修复：入场剧情必须发生在「第 1 场战�
       const k = (T._debugRun('endless').plan || []).findIndex((e) => e && e.kind === 'patrol');
       if (k >= 0) { patrolLayer = L; patrolIdx = k; }
     }
-    assert.equal(nameAt(patrolLayer, patrolIdx), '德拉莫斯', '路上巡逻不该带前缀');
-    assert.equal(nameAt(100, 2), '魔王·德拉莫斯', '第 100 层的魔王要带前缀');
-    assert.equal(nameAt(200, 2), '魔王·德拉莫斯', '第 200 层同样');
+    assert.equal(nameAt(patrolLayer, patrolIdx), '镜', '路上巡逻不该带前缀');
+    assert.equal(nameAt(100, 2), '魔王·镜', '第 100 层的魔王要带前缀');
+    assert.equal(nameAt(200, 2), '魔王·镜', '第 200 层同样');
     T._debugSetEndlessLayer(100);
     const king = (T.planInfo('endless') || []).find((x) => x.audience === 'king');
-    assert.ok(king && king.name === '魔王·德拉莫斯', '预告里也要同名，实测 ' + (king && king.name));
+    assert.ok(king && king.name === '魔王·镜', '预告里也要同名，实测 ' + (king && king.name));
   });
 
   check('调试面板：删掉「清空无尽塔剧情进度 / 爬塔不耗挑战书 / 无尽试炼币拉满」，改出「试炼币不消耗」', () => {
@@ -2743,11 +2743,11 @@ check('调试开关「试炼币不消耗」：试炼商店买 / 刷新 / 买铸�
   assert.equal(run.retryToken, 0, '铸币没被扣');
 });
 
-check('黑装：挑战塔 10/25 层黑卡与 100 层自选箱', () => {
+check('黑装：挑战塔 20/50 层黑卡与 100 层自选箱', () => {
   const c = setup(1);
   const T = c.Tower;
   assert.deepEqual([5, 9, 10, 20, 25, 50, 75, 100].map(T.towerBlackCards),
-    [0, 0, 1, 1, 1, 2, 1, 2], '每 10 层 1 张、每 25 层再 +1；100 层另有自选箱');
+    [0, 0, 0, 1, 0, 1, 0, 0], '每 20 层 1 张、每 50 层再 +1；100 层只给自选箱、不发卡');
 });
 
 check('黑装：无尽塔每累计 50 层 1 张黑卡', () => {

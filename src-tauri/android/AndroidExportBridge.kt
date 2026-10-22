@@ -15,6 +15,9 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import org.json.JSONObject
 import java.io.File
 
@@ -55,6 +58,29 @@ class AndroidExportBridge(
     @JavascriptInterface
     fun saveAutoBackup(content: String): String =
         runSave(AUTO_FILE_NAME, content, replace = true)
+
+    /** 安卓沉浸模式：设置里的「状态栏」开关。隐藏/显示顶部状态栏，不碰底部导航栏。
+     *  JS 侧：`window.SSDZAndroid.setSystemBarsHidden('1'|'0')`。 */
+    @JavascriptInterface
+    fun setSystemBarsHidden(hidden: String): String {
+        val hide = hidden == "1" || hidden.equals("true", ignoreCase = true)
+        activity.runOnUiThread {
+            try {
+                val window = activity.window
+                val controller = WindowCompat.getInsetsController(window, window.decorView)
+                if (hide) {
+                    controller.hide(WindowInsetsCompat.Type.statusBars())
+                    controller.systemBarsBehavior =
+                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                } else {
+                    controller.show(WindowInsetsCompat.Type.statusBars())
+                }
+            } catch (_: Exception) {
+                // 个别 ROM 的 insets controller 可能抛异常；不影响游戏本体。
+            }
+        }
+        return JSONObject().put("ok", true).put("hidden", hide).toString()
+    }
 
     /** 老系统（API ≤ 28）申请写公共下载目录的权限；授权结果通过 JS 回调送回。 */
     @JavascriptInterface

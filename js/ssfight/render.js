@@ -118,7 +118,8 @@
   function shapeNode(rootDefs, tag) {
     const g = el('g', { type: 'shape' });
     for (const seg of tag.pt || []) {
-      const path = el('path', { d: seg.da });
+      // Flash segments without a fill style are not painted; SVG defaults to black.
+      const path = el('path', { d: seg.da, fill: 'none' });
       if (seg.fi !== undefined) {
         const f = (tag.Fs || [])[seg.fi];
         if (f) {
@@ -201,6 +202,80 @@
     }
     return out.length ? out : [{ tx: '', h: null }];
   }
+  /* ---------- 自动换行（`setText(..., { wrap: true })`） ----------
+   * SVG `<text>` 不会按字段框宽自动折行；`setText` 只认显式 \r/\n。技能说明这类
+   * 单行长文案会被横向裁掉（详情页的「技能：…」就是）。这里按文本框的 `bd` 宽度拆行，
+   * 优先用 canvas 真实测量；量不到时退回「全角 1em / ASCII 0.56em」的估算。
+   * 只在调用方显式要 wrap 时生效，不改变其他页面现有的换行语义。 */
+  const NO_LINE_START = /[，。！？；：、）》】”’…·]/;
+  let measureCanvas = null;
+  let measureCanvasTried = false;
+  function measureContext() {
+    if (measureCanvasTried) return measureCanvas;
+    measureCanvasTried = true;
+    try {
+      if (typeof document === 'undefined' || !document.createElement) return null;
+      const c = document.createElement('canvas');
+      measureCanvas = c && c.getContext ? c.getContext('2d') : null;
+    } catch (e) { measureCanvas = null; }
+    return measureCanvas;
+  }
+  function charWidth(ch, em) {
+    if (ch === ' ') return em * 0.34;
+    return /[\x20-\x7e]/.test(ch) ? em * 0.56 : em;
+  }
+  function measureTextWidth(text, em, fd) {
+    const ctx = measureContext();
+    if (ctx) {
+      try {
+        ctx.font = em + 'px ' + fontFamily(fd);
+        const w = ctx.measureText(String(text)).width;
+        if (w > 0) return w;
+      } catch (e) { /* 退回估算 */ }
+    }
+    let w = 0;
+    for (const ch of String(text)) w += charWidth(ch, em);
+    return w;
+  }
+  /** 拆成「不会从标点开头」的最小片段：ASCII 数字/单词成组，中文标点贴在前一个片段后。 */
+  function wrapTokens(text) {
+    const tokens = [];
+    let ascii = '';
+    const flush = () => { if (ascii) { tokens.push(ascii); ascii = ''; } };
+    for (const ch of String(text)) {
+      if (/[A-Za-z0-9.%+\-]/.test(ch)) { ascii += ch; continue; }
+      flush();
+      if (NO_LINE_START.test(ch) && tokens.length) tokens[tokens.length - 1] += ch;
+      else tokens.push(ch);
+    }
+    flush();
+    return tokens;
+  }
+  function wrapParagraph(text, maxWidth, em, fd) {
+    const tokens = wrapTokens(text);
+    const lines = [];
+    let line = '';
+    for (const token of tokens) {
+      if (!line) { line = token; continue; }
+      if (measureTextWidth(line + token, em, fd) <= maxWidth) { line += token; continue; }
+      lines.push(line);
+      line = token;
+    }
+    if (line) lines.push(line);
+    return lines.length ? lines : [''];
+  }
+  /** 把一段文案按文本框宽度拆成多行（保留显式换行）；节点没有字段元数据时原样返回。 */
+  function wrapText(node, str) {
+    const b = node && node.__textBox;
+    const meta = b && b.meta;
+    const text = String(str == null ? '' : str);
+    if (!b || b.perRun || !meta || !meta.bd) return text;
+    const width = Math.max(24, (meta.bd[1] - meta.bd[0]) - (meta.lm || 0) - (meta.rm || 0) - 1);
+    const em = (b.lines[0] && b.lines[0].h) || meta.fh || 12;
+    return text.split(/\r\n|\r|\n/)
+      .flatMap((p) => (p ? wrapParagraph(p, width, em, meta.fd) : ['']))
+      .join('\n');
+  }
   /** 按 `g.__textBox` 重新生成 `<text>` 子节点（`setText` 换文案时也走这里）。
    *  ⚠ 生成出来的 `<text>` 一律塞进一层**没有 transform 的内层 `<g>`** 里，并把
    *  「字段框宽度的水平裁剪」挂在那层上 —— Flash 的 EditText 本来就会把超出字段框的字裁掉，
@@ -227,6 +302,10 @@
   function drawLines(g) {
     const b = g.__textBox;
     if (!b) return;
+    // Numeric/status polling often repeats the same text. Keep glyphs and their clip path intact.
+    const signature = JSON.stringify([b.lines, b.perRun, b.x, b.anchor, b.base, b.step,
+      b.tag && b.tag.tf, b.meta && b.meta.fh, b.box]);
+    if (b.renderSignature === signature && b.renderHost && b.renderHost.parentNode === g) return;
     while (g.firstChild) g.removeChild(g.firstChild);
     const host = el('g');
     b.lines.forEach((L, i) => {
@@ -268,6 +347,8 @@
       host.setAttribute('clip-path', 'url(#' + g.__clipId + ')');
     }
     g.appendChild(host);
+    b.renderSignature = signature;
+    b.renderHost = host;
   }
   /** tp 11 文本 → <g type="text">（原版界面里"玩家名字在这里"就是这种占位文本） */
   function textNode(tag, rootDefs) {
@@ -307,11 +388,12 @@
   }
   /** 换掉一个文本容器的内容（`SfRender.setText`）。
    *  `str` 里的换行会**真的断行** —— 界面代码拼多行文案（祭坛三行几率、神迹记录…）全靠它。
+   *  `opts.wrap = true` 时再按当前字段框宽自动折行（详情页的长技能说明用）。
    *  返回 false = 这个节点不是文本容器（调用方自己兜底），true = 换好了。 */
-  function setText(node, str) {
+  function setText(node, str, opts) {
     if (!node || !node.__textBox) return false;
     const b = node.__textBox;
-    const text = String(str == null ? '' : str);
+    const text = (opts && opts.wrap) ? wrapText(node, str) : String(str == null ? '' : str);
     const h0 = (b.lines[0] && b.lines[0].h) || null;
     if (b.perRun) {
       /* 逐字定位的字段（"正在等待队友…"那种一个字一个 rs）：只写第一个 rs，其余清空 ——
@@ -347,7 +429,8 @@
     return id;
   }
   function cxFilter(rootDefs, id, c) {
-    const f = el('filter', { id, x: '-20%', y: '-20%', width: '140%', height: '140%' });
+    const f = el('filter', { id, x: '-20%', y: '-20%', width: '140%', height: '140%',
+      'color-interpolation-filters': 'sRGB' });
     const ct = el('feComponentTransfer');
     f.appendChild(ct);
     const map = [['R', 'Rm', 'Ra'], ['G', 'Gm', 'Ga'], ['B', 'Bm', 'Ba'], ['A', 'Am', 'Aa']];
@@ -395,6 +478,9 @@
       if (p.id === undefined) continue;
       const prev = cur.get(p.d);
       const merged = Object.assign({}, prev || {}, p);
+      /* 导出器以 opacity 表示显式 ColorTransform；RGB 为恒等时省略 cx。
+       * 只有矩阵更新时仍继承颜色，显式重置颜色时则不能留下上一帧的灰化滤镜。 */
+      if (p.opacity !== undefined && p.cx === undefined) delete merged.cx;
       if (p.ma === undefined && prev && prev.ma !== undefined) merged.ma = prev.ma;
       if (p.rp === undefined) delete merged.rp;
       delete merged.placedHere;
@@ -438,9 +524,12 @@
     if (ticker) clearInterval(ticker);
     const ms = Math.max(16, 1000 / (fps || 14));
     ticker = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       tickCount++;
       for (const view of [...views]) {
-        if (!view.root || !view.root.isConnected) { views.delete(view); continue; }
+        if (!view.root || !view.root.isConnected) {
+          view.live.clear(); views.delete(view); continue;
+        }
         for (const c of [...view.live]) {
           /* 被"钉住"的实例（装备持有者）：帧号由外面指定，不自己走。
            * 不钉住的话它会自由播放，每帧放出一个不同的挂点，装备就会在角色身上乱跳。 */
@@ -454,6 +543,7 @@
           try { c.showFrame(); } catch (e) {}
         }
       }
+      if (!views.size) stopTicker();
     }, ms);
   }
   function stopTicker() {
@@ -635,6 +725,28 @@
     const frameAdvanced = this.__shownFrame !== this.frame;
     this.names.clear();
     const depths = [...frame.keys()].sort((a, b) => a - b);
+    /* Most animation steps only change matrices. Moving every reused node to the end of its
+     * parent would still invalidate the SVG display list. Skip moves only when the complete
+     * depth order already matches, including the boundary before runtime attachments. */
+    let keepOrder = depths.length === this.nodes.size;
+    const ordered = [];
+    if (keepOrder) {
+      for (const d of depths) {
+        const p = frame.get(d), old = this.nodes.get(d);
+        if (!old || old.id !== String(p.id) || (frameAdvanced && p.rp && p.placedHere)) { keepOrder = false; break; }
+        ordered.push(old.wrap || old.node);
+      }
+    }
+    if (keepOrder) {
+      const host = this.getContentHost(), nodes = new Set(ordered);
+      const attached = new Set((this.__attached || []).map(c => c.g));
+      let at = 0, pastAttachment = false;
+      for (const node of host.childNodes) {
+        if (attached.has(node)) pastAttachment = true;
+        if (nodes.has(node) && (pastAttachment || node !== ordered[at++])) { keepOrder = false; break; }
+      }
+      if (at !== ordered.length) keepOrder = false;
+    }
     /* 裁剪深度（SWF `cD`）：带 cD 的放置是**蒙版**，遮住「比自己深、且不超过 cD」的兄弟节点，
      * 而它自己**不参与绘制**（Flash 里蒙版形状只是一条裁剪轮廓）。
      * 村庄页只有两处 —— 体力条的填充（7022 d1→cD 3）与经验条的填充（4318 同理），
@@ -659,21 +771,38 @@
       if (prev && prev.id === String(p.id) && !replace) {
         prev.node.__baseMa = p.ma || null;
         applyNodeXform(prev.node);
-        if (p.opacity !== undefined) prev.node.setAttribute('opacity', p.opacity);
-        else prev.node.removeAttribute('opacity');
+        updateAttribute(prev.node, 'opacity', p.opacity);
         const cxReuse = cxOf(p);
-        if (!cxReuse) prev.node.removeAttribute('filter');
-        else prev.node.setAttribute('filter', 'url(#' + cxFilterFor(this.rootDefs, this.tag.id, d, cxReuse) + ')');
-        /* 蒙版**每帧都要跟着走**：蒙版形状就是靠改自己的矩阵来"揭开"填充的
-         * （体力/经验条：第 N 帧蒙版右移 N×0.95）。实例复用的分支原来直接 continue，
-         * 于是 clipPath 永远停在第 1 帧的几何上 —— 表现就是填充只露出最左边一小截。 */
+        updateAttribute(prev.node, 'filter', cxReuse ? 'url(#' + cxFilterFor(this.rootDefs, this.tag.id, d, cxReuse) + ')' : null);
+        /* 蒙版可以在后续帧出现、撤销或改变覆盖深度，不能只更新已有 wrapper。
+         * 保留眼珠等子实例的播放头，但按当前显示列表重新绑定裁剪关系。 */
+        updateAttribute(prev.node, 'clip-depth', p.cD);
+        const oldTarget = prev.wrap || prev.node;
         const mReuse = maskOf(d);
-        if (mReuse && prev.wrap) {
-          const cpId = this.clipFor(mReuse);
-          if (cpId) prev.wrap.setAttribute('clip-path', 'url(#' + cpId + ')');
+        const cpId = mReuse && this.clipFor(mReuse);
+        if (cpId) {
+          if (!prev.wrap) {
+            prev.wrap = el('g');
+            if (prev.node.parentNode) prev.node.parentNode.insertBefore(prev.wrap, prev.node);
+            prev.wrap.appendChild(prev.node);
+          }
+          updateAttribute(prev.wrap, 'clip-from', mReuse.d);
+          updateAttribute(prev.wrap, 'clip-path', 'url(#' + cpId + ')');
+        } else if (prev.wrap) {
+          const wrap = prev.wrap;
+          if (wrap.parentNode) wrap.parentNode.insertBefore(prev.node, wrap);
+          else wrap.removeChild(prev.node);
+          if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+          prev.wrap = null;
         }
+        const target = prev.wrap || prev.node;
+        const isMask = isMaskDepth(d);
+        if (prev.isMask && oldTarget !== target) updateAttribute(oldTarget, 'visibility', null);
+        if (isMask) updateAttribute(target, 'visibility', 'hidden');
+        else if (prev.isMask) updateAttribute(target, 'visibility', null);
+        prev.isMask = isMask;
         if (p.na) this.names.set(p.na, prev.clip || prev.node);
-        this.placeFrameNode(prev.wrap || prev.node);
+        if (!keepOrder) this.placeFrameNode(prev.wrap || prev.node);
         next.set(d, prev);
         continue;
       }
@@ -739,7 +868,7 @@
       if (clip && this.opts && typeof this.opts.onClip === 'function') {
         try { this.opts.onClip(clip); } catch (e) {}
       }
-      next.set(d, { id: String(p.id), node, clip, wrap, na: p.na || null });
+      next.set(d, { id: String(p.id), node, clip, wrap, isMask: isMaskDepth(d), na: p.na || null });
     }
     /* 新帧里不存在的深度：移除（并注销子树）
      * ⚠ 与上面"替换"那一支同理：按**自己的实际父节点**摘。`popWrap()` 的 `<g class="uc-pop">`
@@ -753,6 +882,11 @@
     }
     this.nodes = next;
     this.__shownFrame = this.frame;
+    /* 页面可选的帧后处理；素材自身的深度和蒙版由上面的显示列表维护。
+     * 回调异常不能中断整棵动画树。 */
+    if (typeof this.__frameFix === 'function') {
+      try { this.__frameFix(this); } catch (e) {}
+    }
     return this;
   };
   MovieClip.prototype.tagFor = function (id) {
@@ -798,10 +932,15 @@
     return this;
   };
   /** 把「原版矩阵 + 复刻侧附加段」合成写回某个节点。形状与精灵通用。 */
+  function updateAttribute(node, name, value) {
+    const next = value == null || value === '' ? null : String(value);
+    if (node.getAttribute(name) === next) return;
+    if (next === null) node.removeAttribute(name);
+    else node.setAttribute(name, next);
+  }
   function applyNodeXform(node) {
     const t = ((node.__baseMa ? 'matrix(' + node.__baseMa + ')' : '') + ' ' + (node.__extra || '')).trim();
-    if (t) node.setAttribute('transform', t);
-    else node.removeAttribute('transform');
+    updateAttribute(node, 'transform', t);
   }
   MovieClip.prototype.applyXform = function () { applyNodeXform(this.g); };
   /** 给**本实例某个深度上的子节点**（含形状）挂一段附加变换。 */
@@ -964,6 +1103,70 @@
     rootHost.appendChild(svg);
     return svg;
   }
+  /** 把一块 `<svg>` 的「屏幕坐标 ↔ 用户坐标」关系算出来。
+   *
+   *  为什么不用 `getScreenCTM()`：WebKit 209220（iOS 15.5/15.6 仍复现）的 CTM 不含
+   *  祖先 CSS transform 的 scale，本作 `#ui` 用 `transform: scale(sx,sy)` 适配窗口，
+   *  直接乘 CTM 会把覆盖物画到旁边 / 尺寸缩小。
+   *
+   *  也**不能假设 sx === sy**：系统设置「全面屏」时 `fitCanvas()` 让两轴各自铺满窗口
+   *  （见 main.js），iPhone 横屏下 x、y 比例能差 30% 以上。以前这里只用
+   *  `rect.width / viewBox.width` 一个比例，金环/手指/三侠图集层在全面屏下会横向拉宽、
+   *  纵向压扁，看起来就是「位置和大小突然变了」。
+   *
+   *  返回的 `toUser()` / `toClient()` 对两轴分别换算；`content` 是 viewBox 内容在
+   *  **设计单位**（未乘 `#ui`）里的矩形，供 HTML 覆盖层直接按设计坐标定位。
+   *  量不到（隐藏 / 尚未布局）时返回 null。 */
+  function svgScreenMap(svg) {
+    if (!svg || !svg.getBoundingClientRect || !svg.viewBox) return null;
+    let box;
+    try { box = svg.getBoundingClientRect(); } catch (e) { return null; }
+    const vb = svg.viewBox.baseVal;
+    if (!box || !(box.width > 0) || !(box.height > 0) || !vb || !(vb.width > 0) || !(vb.height > 0)) return null;
+    /* 需要的是 **CSS 布局尺寸**（不含 #ui transform），用它把屏幕像素折回设计像素。
+     * 优先读 computed style：`width:auto;height:100%` 在 WebKit 上会解析成实际 px，
+     * 而且**不会**像 SVG 的 clientWidth/clientHeight 那样在个别 WKWebView 版本里
+     * 退回 viewBox 尺寸/0。clientWidth 只作兜底，最后才退回屏幕矩形。 */
+    let cw = 0, ch = 0;
+    try {
+      if (typeof getComputedStyle === 'function') {
+        const cs = getComputedStyle(svg);
+        cw = parseFloat(cs && cs.width) || 0;
+        ch = parseFloat(cs && cs.height) || 0;
+      }
+    } catch (e) { /* 无样式环境（单测）走兜底 */ }
+    if (!(cw > 0) || !(ch > 0)) { cw = Number(svg.clientWidth) || 0; ch = Number(svg.clientHeight) || 0; }
+    if (!(cw > 0) || !(ch > 0)) { cw = box.width; ch = box.height; }
+    if (!(cw > 0) || !(ch > 0)) return null;
+    const kx = box.width / cw, ky = box.height / ch;
+    const par = String(svg.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+    const ax = /xMin/.test(par) ? 0 : /xMax/.test(par) ? 1 : 0.5;
+    const ay = /YMin/.test(par) ? 0 : /YMax/.test(par) ? 1 : 0.5;
+    let offX = 0, offY = 0, mx, my;
+    if (/\bnone\b/.test(par)) {
+      mx = cw / vb.width; my = ch / vb.height;
+    } else {
+      const s = /\bslice\b/.test(par)
+        ? Math.max(cw / vb.width, ch / vb.height)
+        : Math.min(cw / vb.width, ch / vb.height);
+      const cwScaled = vb.width * s, chScaled = vb.height * s;
+      offX = (cw - cwScaled) * ax;
+      offY = (ch - chScaled) * ay;
+      mx = my = s;
+    }
+    const scaleX = mx * kx, scaleY = my * ky;
+    const x0 = box.left + offX * kx - vb.x * scaleX;
+    const y0 = box.top + offY * ky - vb.y * scaleY;
+    return {
+      svg: svg, box: box, viewBox: { x: vb.x, y: vb.y, width: vb.width, height: vb.height },
+      scaleX: scaleX, scaleY: scaleY, x0: x0, y0: y0,
+      /* viewBox 内容在**设计单位**里的矩形（相对 svg 元素左上角）。 */
+      content: { x: offX, y: offY, width: vb.width * mx, height: vb.height * my },
+      toUser: (sx, sy) => ({ x: (sx - x0) / scaleX, y: (sy - y0) / scaleY }),
+      toClient: (ux, uy) => ({ x: x0 + ux * scaleX, y: y0 + uy * scaleY }),
+    };
+  }
+
   /** 建一棵挂在 `root`（一个 `<svg>`）上的时间轴：共用 mount / mountSymbol 的收尾。
    *  `framesOverride` 给根时间轴用（它的帧快照在 `timeline.frames` 里已经切好了）。 */
   function buildView(root, tag, tl, o, frame, framesOverride) {
@@ -1082,8 +1285,11 @@
 
   window.SfRender = {
     load, loaded, loadExtra, mount, mountSymbol, buildFrames, stopTicker,
-    /** 换掉一个文本容器的内容（**会真的按换行断行**；见 setText 的注释）。返回是否认出来了。 */
+    /** 换掉一个文本容器的内容（**会真的按换行断行**；`opts.wrap=true` 时按字段框宽自动折行）。返回是否认出来了。 */
     setText,
+    /** 屏幕坐标 ↔ SVG 用户坐标（两轴分别换算；全面屏/`#ui` 非等比缩放也正确）。
+     *  页面覆盖物（引导金环、三侠图集层）用它，避免 iOS 15 的 `getScreenCTM` 209220。 */
+    svgScreenMap,
     BASE,
     /** 素材库是否已就绪（页面里可以先探测再决定要不要走经典模式） */
     tags: () => (bundle ? bundle.tags : null),

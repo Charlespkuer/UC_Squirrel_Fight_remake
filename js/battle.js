@@ -66,6 +66,8 @@
   const SKILL_DEFEND = { 8: ['skill_8_1', 'effect_skill_8_defend'], 12: ['skill_9_1', 'effect_skill_9_1'],
     15: ['skill_15_1', 'effect_skill_15_defend'], 18: ['skill_18_2', 'effect_skill_18_defend_2'] };
   let activeController = null;
+  /* 每场战斗的序号：旧战斗延迟释放画布时用它判断“画布是否已经被下一场接管”。 */
+  let runSeq = 0;
 
   /* ============================================================
    * 【BT2】NPC 头像与动画名映射
@@ -142,6 +144,7 @@
 
   async function run(opts) {
     if (activeController) activeController.cancel();
+    const runId = ++runSeq;
     const canvas = opts.canvas, ctx = canvas.getContext('2d');
 
     /* HUD 离屏缓存：名字 / 血条 / 血量 / 回合数 / 护盾 / 削弱 / 题面 / 角落键都是
@@ -153,10 +156,16 @@
     const hudCtx = hudCanvas.getContext('2d');
     let hudSig = '';
     canvas.width = W; canvas.height = H;
-    const result = opts.result || Sim.simulate(opts.me, opts.foe);
+    /* 调试台「战斗三维显示」：开战前记下开关，Sim 才会为每一拍附带有效三维快照。
+     * 只加两个小对象/拍，关掉时完全不产生这份数据。 */
+    const debugBattleStats = !!(window.Debug && Debug.enabled && Debug.enabled('battleStats'));
+    const result = opts.result || Sim.simulate(opts.me, opts.foe, { collectStats: debugBattleStats });
     const regionKey = opts.region == null ? (opts.foe.region == null ? 0 : opts.foe.region) : opts.region;
     const region = REGIONS[regionKey] || REGIONS[0];
     const sources = [opts.me, opts.foe];
+    let liveStats = debugBattleStats
+      ? sources.map((f) => ({ power: Math.max(1, Number(f.power) || 1), agility: Math.max(1, Number(f.agility) || 1), speed: Math.max(1, Number(f.speed) || 1) }))
+      : null;
     const wears = sources.map((f) => Engine.wearsFor(f.wears || f.gears));
     const load = new Set([...SQ, 'resource_12', 'resource_2', 'go', 'fightNum_r', 'fightNum_y', 'fightNum_g']);
     for (const f of sources) if (f.npcType) for (const id of [...(NPC_SHEETS[f.npcType] || []), ...(NPC_EFFECTS[f.npcType] || [])]) load.add(id);
@@ -223,9 +232,24 @@
     const skipButton = addCornerButton(cornerRects.skip, '跳过', '跳过战斗');
     function clean() {
       cancelAnimationFrame(raf); for (const b of cornerDom) b.remove();
+      if (document.removeEventListener) document.removeEventListener('visibilitychange', onVisibility);
       if (pickups) pickups.close();
       if (canvas.onclick === onClick) canvas.onclick = previousClick;
       canvas.style.cursor = '';
+      /* 安卓低内存：一场打完/取消后把两块大画布缩到 1×1，别等 GC 或下一次进战斗。
+       * 延迟一拍再缩：结算/战果页可能还要读最后一帧画面；若这一拍里已经有新战斗接管了
+       * 同一块 canvas，就不要再缩（否则新战斗会被缩成 1×1）。 */
+      const shrinkCanvas = () => {
+        if (runId !== runSeq) return;
+        if (activeController && activeController !== controller) return;
+        try {
+          /* 主画布可能被 `keepScreen` 收尾直接拿去画主界面（随机挑战 / 连战），
+           * 只有已经不在 DOM 里时才缩；HUD 离屏画布不会被主界面复用，总是释放。 */
+          if (!canvas.isConnected) { canvas.width = 1; canvas.height = 1; }
+          hudCanvas.width = 1; hudCanvas.height = 1;
+        } catch (e) {}
+      };
+      if (typeof setTimeout === 'function') setTimeout(shrinkCanvas, 0); else shrinkCanvas();
       for (const wake of [...sleepers]) wake();
       sleepers.clear();
     }
@@ -360,6 +384,7 @@
     }
     function drawHud() {
       const sig = [hps[0], hps[1], maxHp[0], maxHp[1], shields[0], shields[1], round, speed, ending, cornerVisible,
+        debugBattleStats ? (liveStats ? liveStats.map((s) => [s.power, s.agility, s.speed].join(',')).join('|') : '') : '',
         sources[0] && sources[0].name, sources[1] && sources[1].name,
         opts.trial && opts.trial.text,
         (Array.isArray(opts.debuffs) ? opts.debuffs : []).map((d) => [d.text, d.name, d.short, d.hero, d.color].join('~')).join('|')].join('|');
@@ -426,6 +451,22 @@
         c.roundRect(W / 2 - bw / 2, 160, bw, 40, 20); c.stroke();
         Engine.text(c, label, W / 2, 188, { size: 22, align: 'center', color: '#f4e6ff', stroke: false });
       }
+      /* 调试三维：放在题面下方，两个独立小条，实时读 Sim 每拍结算后的有效值。 */
+      if (debugBattleStats && liveStats) {
+        for (let side = 0; side < 2; side++) {
+          const s = liveStats[side] || { power: 1, agility: 1, speed: 1 };
+          const bw = Math.min(560, Math.max(430, String(s.power).length * 13 + String(s.agility).length * 13 + String(s.speed).length * 13 + 190));
+          const x = side === 0 ? 18 : W - 18 - bw;
+          const y = 214;
+          rounded(c, x, y, bw, 42, 18, side === 0 ? 'rgba(26,43,22,.82)' : 'rgba(48,20,16,.82)');
+          c.lineWidth = 2; c.strokeStyle = side === 0 ? '#9fd36a' : '#e8a06a'; c.beginPath();
+          c.roundRect(x, y, bw, 42, 18); c.stroke();
+          Engine.text(c, side === 0 ? '我方' : '敌方', x + 14, y + 29,
+            { size: 21, align: 'left', color: side === 0 ? '#d8ff9c' : '#ffd0a8', stroke: false });
+          Engine.text(c, '力 ' + s.power + '　敏 ' + s.agility + '　速 ' + s.speed, x + 72, y + 29,
+            { size: 22, align: 'left', color: '#fff8d4', stroke: false });
+        }
+      }
       if (!ending && cornerVisible) {
         /* 画一个圆角键：fast = 倍速（蓝色，>1× 时才亮）；否则是跳过（绿色）。 */
         const drawKey = (b, label, fast) => {
@@ -468,6 +509,19 @@
       }
       raf = requestAnimationFrame(render);
     }
+    /* 安卓切后台/内存回收时 rAF 会自己停；但某些 WebView 会在不可见时继续派发少数帧，
+     * 回来时又用一个很旧的时间戳补一帧。显式取消并在回前台时重置 `last`，避免敌人
+     * 动画在后台被推着走、回前台后瞬移/重复归位。 */
+    function onVisibility() {
+      if (document.hidden) {
+        if (raf) { cancelAnimationFrame(raf); raf = 0; }
+        return;
+      }
+      if (stopped || raf) return;
+      last = performance.now();
+      raf = requestAnimationFrame(render);
+    }
+    if (document.addEventListener) document.addEventListener('visibilitychange', onVisibility);
 
     async function reaction(side, r) {
       const f = fighters[side];
@@ -499,6 +553,7 @@
       idle(side);
     }
     async function playRound(r) {
+      if (debugBattleStats && Array.isArray(r.effStats)) liveStats = r.effStats;
       const att = r.attacker, def = 1 - att, f = fighters[att];
       const beforeHp = hps.slice();
       const beforeMax = maxHp.slice();
@@ -524,7 +579,12 @@
         await wait(420); return;
       }
       if (r.action === 'rest' || r.action === 'stunned') {
-        applyHp(r); floater(att, r.action === 'rest' ? '休息' : '眩晕', 'y');
+        applyHp(r);
+        /* 方天画戟的蓄力回合（preparingWeapon=1）只让玩家看思考气泡，不再飘「休息」。
+         * 敌人没有 commonThink 动作，飘字就是头上莫名其妙闪一段文字（用户 2026-10 口径）；
+         * 普通休息/眩晕仍保留提示。 */
+        if (r.action === 'stunned') floater(att, '眩晕', 'y');
+        else if (!(Number(r.preparingWeapon) > 0)) floater(att, '休息', 'y');
         // 思考气泡里画的是方天画戟，只有蓄力方天画戟的休息回合才能播放；眩晕回合只飘字
         if (r.preparingWeapon === 1 && !f.npc) { effect('effect_skill_11', att); await action(att, 'commonThink'); idle(att); }
         else await wait(500);

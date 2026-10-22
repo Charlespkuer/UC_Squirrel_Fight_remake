@@ -186,6 +186,9 @@ function save(name) { fs.mkdirSync('out/battle-check', { recursive: true }); fs.
   const overkillHud = drawnText.slice(counterStart).map((entry) => entry.text);
   assert(overkillHud.includes('42/100') && overkillHud.includes('0/100'), 'overkill counter shows actual HP before and after its hit');
   assert(!overkillHud.includes('61/100'), 'overkill damage cannot temporarily restore the attacker HP');
+  const battleSrc = fs.readFileSync('js/battle.js', 'utf8');
+  assert(!/r\.action === 'rest' \? '休息'/.test(battleSrc) && /preparingWeapon\) > 0/.test(battleSrc),
+    '方天画戟蓄力回合不再在敌人头顶飘「休息」文字');
   assert.equal(errors.length, 0, errors.join('\n'));
   console.log('Battle regression checks passed; original-atlas renders: out/battle-check');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -148,6 +148,78 @@
     if (existing) { resumeArena(existing); return; }
     confirmArena(kind || 0);
   }
+  /** 竞技场选择弹窗的关闭键：用背包道具详情里那颗原版「取消」键（4419）。
+   *  4419 是原版按钮自己的自然比例，米色常态 / 第 2 帧绿色悬停，文字也足够大，
+   *  不需要再把 3911 拉成窄高比例。挂载失败才退回金色文字键（仅兜底）。 */
+  function mountArenaCancel(m, onCancel) {
+    const footer = find(m.element, '.modal-buttons');
+    if (!footer) return;
+    const host = document.createElement('div');
+    host.className = 'arena-original-back';
+    host.style.visibility = 'hidden';
+    footer.appendChild(host);
+    const fallback = () => {
+      if (!footer.isConnected) return;
+      if (host.parentNode) host.remove();
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'uc-button gold'; b.textContent = '取消';
+      b.onclick = onCancel; footer.appendChild(b);
+    };
+    const mount = () => {
+      if (!window.SfRender || !SfRender.mountSymbol) { fallback(); return; }
+      SfRender.mountSymbol(host, '4419', { frame: 1, label: '取消' }).then((view) => {
+        if (!footer.isConnected || !view || !view.g) {
+          if (view) { try { view.destroy(); } catch (e) {} }
+          fallback();
+          return;
+        }
+        let box = null;
+        try { box = view.g.getBBox(); } catch (e) { box = null; }
+        if (!box || !(box.width > 0) || !(box.height > 0)) {
+          try { view.destroy(); } catch (e) {}
+          fallback();
+          return;
+        }
+        view.g.setAttribute('viewBox', box.x + ' ' + box.y + ' ' + box.width + ' ' + box.height);
+        view.g.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        view.g.style.width = '100%'; view.g.style.height = '100%';
+        view.g.style.pointerEvents = 'auto'; view.g.style.cursor = 'pointer';
+        view.g.style.outline = 'none';
+        view.g.setAttribute('role', 'button');
+        view.g.setAttribute('tabindex', '0');
+        view.g.setAttribute('aria-label', '取消');
+        /* 取消键按自身 bbox 的自然比例定高：宽 200，高按原画算，避免再出现横向拉伸。 */
+        host.style.width = '200px';
+        host.style.height = Math.max(58, Math.round(200 * box.height / box.width * 100) / 100) + 'px';
+        host.style.visibility = '';
+        const hover = (on) => {
+          try { view.gotoAndStop(on ? 2 : 1); } catch (e) {}
+        };
+        const pressed = (on) => host.classList.toggle('pressed', !!on);
+        view.g.addEventListener('pointerenter', () => hover(true));
+        view.g.addEventListener('pointerleave', () => { hover(false); pressed(false); });
+        view.g.addEventListener('pointerdown', (e) => {
+          if (e.button != null && e.button !== 0) return;
+          pressed(true);
+          try { view.g.setPointerCapture(e.pointerId); } catch (err) {}
+        });
+        view.g.addEventListener('pointerup', () => pressed(false));
+        view.g.addEventListener('pointercancel', () => pressed(false));
+        const fire = (e) => {
+          if (e) { e.preventDefault(); e.stopPropagation(); }
+          pressed(false);
+          onCancel();
+        };
+        view.g.addEventListener('click', fire);
+        view.g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fire(e); });
+      }).catch(fallback);
+    };
+    if (window.SfRender && SfRender.loadExtra) {
+      SfRender.loadExtra('tags-social-dialog.json').catch(() => {}).then(mount);
+    } else {
+      mount();
+    }
+  }
   /** 「开始竞技」后的小选择弹窗：左英雄帖（经验场）/ 右勇气徽章（碎片场）。
    *  两张图都是游戏内道具图集，弹窗壳走经典 `.classic-modal`，不另造现代页面。
    *  原版素材里没有独立的「经验竞技场 / 碎片竞技场」文字元件（只有祭坛说明里连写），
@@ -168,8 +240,9 @@
         '<span class="item-icon">' + icon(82) + '<span class="item-count">×' + count(82) + '</span></span>' +
       '</button>' +
       '</div>';
-    const m = C().modal('竞技场', html + '<p class="small-label" style="text-align:center;margin-top:10px">召唤证：道具商店 10 金松果/个，或开启魔法袋获得；体力不足 30 时自动使用。</p>', [{ label: '返回', cls: 'muted' }], { small: true });
+    const m = C().modal('竞技场', html + '<p class="small-label" style="text-align:center;margin-top:10px">召唤证：道具商店 10 金松果/个，或开启魔法袋获得；体力不足 30 时自动使用。</p>', [], { small: true });
     m.element.classList.add('arena-pick-dialog');
+    mountArenaCancel(m, m.close);
     m.element.querySelectorAll('[data-arena-kind]').forEach((btn) => {
       btn.onclick = () => {
         if (!btn.isConnected) return;
@@ -269,7 +342,23 @@
     if (existing) { fightArena(existing); return; }
     if (!arenaAccess(kind)) return;
     const owner = State.state();
-    C().modal('\u7ade\u6280\u573a\u62a5\u540d', '<p>' + (kind === 0 ? '\u7ecf\u9a8c\u7ade\u6280\u573a' : kind === 1 ? '\u788e\u7247\u7ade\u6280\u573a' : '\u5e7b\u517d\u7ade\u6280\u573a') + '\uff1a\u534a\u51b3\u8d5b\u80dc\u8005\u8fdb\u5165\u51b3\u8d5b\uff0c\u8d25\u8005\u8fdb\u884c\u5b63\u519b\u8d5b\u3002</p><p>\u62a5\u540d\u4e00\u6b21\u6d88\u801730\u4f53\u529b\uff0c\u7b2c\u4e8c\u6218\u4e0d\u518d\u6263\u9664\u3002\u4f53\u529b\u4e0d\u8db3\u65f6\u4f7f\u75281\u5f20\u82f1\u96c4\u5e16/\u52c7\u6c14\u5fbd\u7ae0/\u53ec\u5524\u8bc1\u3002</p>' + note('\u79bb\u7ebf\u5bf9\u624b\u7531\u672c\u5730\u751f\u6210\u3002\u7ade\u6280\u573a\u4e0d\u4f7f\u7528\u6311\u6218\u836f\u5242\u6548\u679c\u3002'), [{ label: '\u62a5\u540d\u53c2\u8d5b', run: () => {
+    // Original showJoinCheckWin uses the confirmation library symbol; payment
+    // and opponent selection still run through the existing actions below.
+    const showConfirm = (title, html, actions, options) => {
+      if (UI.currentUiMode && UI.currentUiMode() === 'classic' && window.SfChallenge && SfChallenge.openOriginalConfirm) {
+        const ticket = kind === 0 ? '英雄帖' : kind === 1 ? '勇气徽章' : '召唤证';
+        const text = (kind === 0 ? '经验竞技场' : kind === 1 ? '碎片竞技场' : '幻兽竞技场') + '\n' +
+          '报名消耗30体力，两轮比赛只扣一次。体力不足时使用入场券（' + ticket + '），最后自动补充体力药。\n是否报名参赛？';
+        /* 2026-10 用户口径：竞技场报名确认的「确定 / 取消」左右对调，两键悬停变绿，
+         * 并把两键的间距再拉开一点。只对这条报名确认传 swapButtons / extraGap，
+         * 好友/收徒等其他 4421 确认框保持原版键位与间距。 */
+        SfChallenge.openOriginalConfirm({ label: title, text, accept: actions[0].run, swapButtons: true, extraGap: 20 })
+          .catch(() => showHint('报名确认界面加载失败，请重试。'));
+        return;
+      }
+      return C().modal(title, html, actions, options);
+    };
+    showConfirm('\u7ade\u6280\u573a\u62a5\u540d', '<p>' + (kind === 0 ? '\u7ecf\u9a8c\u7ade\u6280\u573a' : kind === 1 ? '\u788e\u7247\u7ade\u6280\u573a' : '\u5e7b\u517d\u7ade\u6280\u573a') + '\uff1a\u534a\u51b3\u8d5b\u80dc\u8005\u8fdb\u5165\u51b3\u8d5b\uff0c\u8d25\u8005\u8fdb\u884c\u5b63\u519b\u8d5b\u3002</p><p>\u62a5\u540d\u4e00\u6b21\u6d88\u801730\u4f53\u529b\uff0c\u7b2c\u4e8c\u6218\u4e0d\u518d\u6263\u9664\u3002\u4f53\u529b\u4e0d\u8db3\u65f6\u4f7f\u75281\u5f20\u82f1\u96c4\u5e16/\u52c7\u6c14\u5fbd\u7ae0/\u53ec\u5524\u8bc1\u3002</p>' + note('\u79bb\u7ebf\u5bf9\u624b\u7531\u672c\u5730\u751f\u6210\u3002\u7ade\u6280\u573a\u4e0d\u4f7f\u7528\u6311\u6218\u836f\u5242\u6548\u679c\u3002'), [{ label: '\u62a5\u540d\u53c2\u8d5b', run: () => {
       if (State.state() !== owner || activeArenaRun() || !arenaAccess(kind)) return;
       const s = owner;
       State.tickEnergy();

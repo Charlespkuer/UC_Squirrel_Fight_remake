@@ -48,7 +48,16 @@ function saveMaxLevel(obj) {
 function readMinLevel() {
   try { return Number(fs.readFileSync(path.join(SAVE_DIR, '.min-level'), 'utf8')) || 0; } catch (e) { return 0; }
 }
-
+/** 是不是「刚建的新档」：1 级、没打过胜仗、没通关、也不是转生。
+ *  ⚠ 转生果会把等级降回 1（reborn>0），那是合法存档，不能被当成空档拦下。 */
+function isFreshSave(obj) {
+  if (!obj || typeof obj !== 'object') return false;
+  if (saveMaxLevel(obj) > 1) return false;
+  if (Number(obj.reborn) > 0) return false;
+  if (Number(obj.allWins) > 0) return false;
+  if (obj.stages && typeof obj.stages === 'object' && Object.keys(obj.stages).length) return false;
+  return true;
+}
 /* ---------- /__save：存档文件读写（本地备份 / 自建同步服务的接口层） ---------- */
 const NO_SAVE = process.argv.includes('--no-save');
 const SAVE_DIR = path.join(ROOT, 'save');
@@ -84,8 +93,16 @@ async function handleSaveApi(req, res, url) {
     const st = saveStat();
     /* meta 里带上**自己的游戏目录**：启动器据此判断「端口上那个服务器还是不是这个文件夹的」——
      * 文件夹被改名/移动之后，旧服务器仍然占着端口，但它的根目录已经失效（页面全 404）。 */
-    if (url.searchParams.get('meta')) return json(res, 200, { ok: true, root: ROOT, exists: st.exists,
-      savedAt: st.savedAt, size: st.size, level: readSaveLevel(), minLevel: readMinLevel() });
+    if (url.searchParams.get('meta')) {
+      let maxLevel = readSaveLevel(), reborn = 0;
+      try {
+        const cur = JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8'));
+        maxLevel = saveMaxLevel(cur);
+        reborn = Number(cur.reborn) || 0;
+      } catch (e) {}
+      return json(res, 200, { ok: true, root: ROOT, exists: st.exists,
+        savedAt: st.savedAt, size: st.size, level: readSaveLevel(), maxLevel, reborn, minLevel: readMinLevel() });
+    }
     if (!st.exists) return json(res, 200, { ok: true, exists: false, savedAt: 0, data: null });
     try { return json(res, 200, { ok: true, exists: true, savedAt: st.savedAt, data: fs.readFileSync(SAVE_FILE, 'utf8') }); }
     catch (e) { return json(res, 500, { ok: false, msg: '读取存档失败：' + e.message }); }
@@ -99,48 +116,31 @@ async function handleSaveApi(req, res, url) {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return json(res, 400, { ok: false, msg: '存档必须是对象' });
     /* 防呆：拒绝用「全新空档」覆盖磁盘上已有的正式存档。
      * 触发场景：浏览器里那份 1 级空档在自动保存时把几十级的存档盖掉（已经发生过两次）。
-     * 需要真的重置时，用 ?force=1（调试面板的「彻底重置账号」会带）。 */
+     * 需要真的重置时，用 ?force=1（调试面板的「彻底重置账号」会带）。
+     * ⚠ 不能用「等级比水位线低」一刀切：转生果会把等级合法地降回 1（reborn>0）。
+     * 只拦「全新 1 级档」，且要求磁盘上确实已有进度。 */
     const force = url.searchParams.get('force') === '1';
-    /* 历史最高等级水位线：一旦写过 32 级，就再也不会被任何「1 级空档」覆盖
-     * （连浏览器兜底档那种顽固状态也挡得住），除非显式 force=1。 */
     const MARK = path.join(SAVE_DIR, '.min-level');
     const readMark = () => { try { return Number(fs.readFileSync(MARK, 'utf8')) || 0; } catch (e) { return 0; } };
     const writeMark = (lv) => { try { fs.mkdirSync(SAVE_DIR, { recursive: true }); fs.writeFileSync(MARK, String(lv), 'utf8'); } catch (e) {} };
-    if (!force) {
-      const mark = readMark();
-      const newLv0 = saveMaxLevel(parsed);
-      if (mark >= 5 && newLv0 < mark) {
-        return json(res, 409, { ok: false, msg: '本机曾达到 ' + mark + ' 级，已拒绝用 ' + newLv0 + ' 级存档覆盖（要重置请用调试面板「彻底重置账号」或 ?force=1）' });
-      }
-    }
     if (!force && fs.existsSync(SAVE_FILE)) {
       try {
         const cur = JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8'));
-        const curLv = saveMaxLevel(cur);
-        const newLv = saveMaxLevel(parsed);
-        const fresh = newLv <= 1 && (!Array.isArray(parsed.weapons) || parsed.weapons.length === 0) &&
-          (!Array.isArray(parsed.skills) || parsed.skills.length === 0) && (Number(parsed.goldPoint) || 0) <= 100;
-        if (curLv >= 5 && fresh) {
-          return json(res, 409, { ok: false, msg: '磁盘上已有 ' + curLv + ' 级存档，已拒绝用全新的 1 级空档覆盖（如确需重置：调试面板「彻底重置账号」，或加 ?force=1）' });
+        const curLv = saveMaxLevel(cur), newLv = saveMaxLevel(parsed);
+        const curReborn = Number(cur.reborn) || 0, newReborn = Number(parsed.reborn) || 0;
+        /* 新档比磁盘档低，默认是旧兜底档/初始档回来了；唯一合法的降级是转生（reborn 增加）。 */
+        if (newLv < curLv && newReborn <= curReborn) {
+          const what = isFreshSave(parsed) ? '全新的 1 级空档' : (newLv + ' 级旧档');
+          return json(res, 409, { ok: false, msg: '磁盘上已有 ' + curLv + ' 级存档，已拒绝用' + what + '覆盖（如确需重置：调试面板「彻底重置账号」，或加 ?force=1）' });
         }
-      } catch (e) { /* 旧存档读不出来就不拦，照常写 */ }
+      } catch (e) { /* 旧存档读不出来就不拦，照常写（主文件仍保留，交给导入/备份） */ }
     }
     try {
       fs.mkdirSync(SAVE_DIR, { recursive: true });
-      /* **原子写**：先写同目录的临时文件再 rename 覆盖。
-       * macOS / APFS 上游戏窗口被关掉、进程被杀、或系统休眠时，直接 writeFileSync
-       * 可能留下半截 JSON；下次启动 fileLoad 解析失败，页面就会挂出「浏览器兜底存档」
-       * 横幅（用户 2026-10 报的 Mac“有时候打开显示存档没有自动保存”）。
-       * rename 是原子的：要么旧文件完整，要么新文件完整，不会出现半截档。 */
-      const tmp = SAVE_FILE + '.tmp.' + process.pid;
-      fs.writeFileSync(tmp, JSON.stringify(parsed), 'utf8');
-      fs.renameSync(tmp, SAVE_FILE);
+      fs.writeFileSync(SAVE_FILE, JSON.stringify(parsed), 'utf8');
       writeMark(Math.max(readMark(), saveMaxLevel(parsed)));
-      return json(res, 200, { ok: true, savedAt: saveStat().savedAt });
-    } catch (e) {
-      try { fs.unlinkSync(SAVE_FILE + '.tmp.' + process.pid); } catch (_) {}
-      return json(res, 500, { ok: false, msg: '写入存档失败：' + e.message });
-    }
+      return json(res, 200, { ok: true, savedAt: saveStat().savedAt, maxLevel: saveMaxLevel(parsed) });
+    } catch (e) { return json(res, 500, { ok: false, msg: '写入存档失败：' + e.message }); }
   }
   return json(res, 405, { ok: false, msg: '只支持 GET / POST' });
 }

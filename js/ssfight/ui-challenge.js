@@ -64,6 +64,26 @@
    * 新档 / 读档（`State.state()` 换对象）后自动作废。手动「刷新玩家」/ 打完一场仍会清空。 */
   let randomCache = null; // { state, roster }
   let seq = 0;
+  /* 刷新玩家：不扣金松果，最多 10 次；随机挑战开始或超过 10 分钟重置。 */
+  const REFRESH_LIMIT = 10;
+  const REFRESH_WINDOW = 10 * 60 * 1000;
+  let refreshTimer = 0;
+  function clearRefreshTimer() {
+    if (refreshTimer) { clearTimeout(refreshTimer); refreshTimer = 0; }
+  }
+  function refreshState() {
+    const s = S(), now = Date.now();
+    let rf = (s && s.challengeRefresh) || {};
+    if (!Number.isFinite(rf.count) || !Number.isFinite(rf.ts) || now - rf.ts > REFRESH_WINDOW) {
+      rf = { count: 0, ts: now };
+      if (s) s.challengeRefresh = rf;
+    }
+    rf.count = Math.max(0, Math.min(REFRESH_LIMIT, Number(rf.count) || 0));
+    return rf;
+  }
+  function refreshRemaining(rf) {
+    return Math.max(0, REFRESH_LIMIT - Math.max(0, Number(rf && rf.count) || 0));
+  }
 
   /* ============================================================
    * 关系（原版服务端下发的 `relation`）→ 两套帧号
@@ -557,7 +577,7 @@
     const tb = clip && clip.__textBox;
     if (!tb || !tb.meta || !tb.meta.bd) return null;
     if (charWCache.has(clip)) return charWCache.get(clip);
-    let w = 1, font = '';
+    let w = 1, font = '', fontSize = 12;
     try {
       /* 字体/字号**从画出来的那个 `<text>` 上读**（`getComputedStyle` 会把
        * `font-family:"SimHei",…` 解析成最终列表），这样量出来的宽度与渲染完全一致；
@@ -565,12 +585,12 @@
       const t = clip.g && clip.g.querySelector ? clip.g.querySelector('text') : null;
       if (t && window.getComputedStyle) {
         const cs = getComputedStyle(t);
-        const size = parseFloat(cs.fontSize) || 12;
-        font = (cs.fontFamily || 'SimHei') + ' ' + size + 'px';
+        fontSize = parseFloat(cs.fontSize) || 12;
+        font = fontSize + 'px ' + (cs.fontFamily || 'SimHei');
       }
       if (!font) {
-        const h = (tb.lines[0] && tb.lines[0].h) || tb.meta.fh || 12;
-        font = 'SimHei,"Microsoft YaHei",sans-serif ' + h + 'px';
+        fontSize = (tb.lines[0] && tb.lines[0].h) || tb.meta.fh || 12;
+        font = fontSize + 'px SimHei,"Microsoft YaHei",sans-serif';
       }
       if (!measureCtx) {
         const cv = document.createElement('canvas');
@@ -578,8 +598,7 @@
       }
       if (measureCtx) {
         measureCtx.font = font;
-        const size = parseFloat(font.replace(/^.*?([\d.]+)px$/, '$1')) || 12;
-        w = measureCtx.measureText('国').width / size;
+        w = measureCtx.measureText('国').width / fontSize;
       }
     } catch (e) { /* 量不到就用 1（= 全角）退回老行为 */ }
     if (!(w > 0.2 && w < 3)) w = 1;
@@ -598,7 +617,9 @@
     const W = fieldWidth(clip);
     const u = charUnit(clip);
     if (!W || !u) return wrap(text, 12);              // 量不到就退回老口径
-    const per = Math.max(4, Math.floor(W / u));
+    const tb = clip.__textBox;
+    const fontSize = (tb.lines[0] && tb.lines[0].h) || tb.meta.fh || 12;
+    const per = Math.max(4, Math.floor(W / (u * fontSize)));
     const out = [];
     for (const para of String(text == null ? '' : text).split('\n')) {
       let line = '', wid = 0;
@@ -1464,29 +1485,64 @@
     const bk = host.querySelector('[data-m="back"]');
     if (bk) bk.addEventListener('click', () => openFriendMenu(Number(current && current.sel) || 0));
   }
-  /** 木人的「查看记录」：原版是 `getRecord()` → 「战斗统计」页（手/武/技三段伤害 + 历史最高）。
-   *  那一颗库元件（`战斗统计`）还没提取，所以先用说明面板画我们真记下来的那两项。 */
+  /** 原版 getRecord → 战斗统计 3535。旧单机档只记录总伤害，不能
+   * 把未保存的手 / 武 / 技分项伪装成零，亦不虚构服务端排名。 */
   function openDummyRecord(foe) {
-    const host = menuHost();
-    if (!host) return;
+    if (!current) return;
     const s = S() || {};
     const n = Number(s.woodCount) || 0, best = Number(s.woodDamage) || 0;
-    const C = window.UI && UI.classic;
-    if (C && C.woodRecordModal) { C.woodRecordModal({ rounds: DUMMY.rounds, count: n, damage: best }, () => {}); return; }
-    host.querySelectorAll('.sf-mrow').forEach((n2) => n2.remove());
-    host.innerHTML =
-      '<div class="sf-fdetail">' +
-        '<div class="sf-fd-head"><b>测攻击木头人</b><span>战斗统计</span></div>' +
-        '<div class="sf-fd-stats">' +
-          '<span class="sf-fd-stat p"><b>训练回合</b><i>固定 ' + DUMMY.rounds + ' 回合</i></span>' +
-          '<span class="sf-fd-stat h"><b>累计训练</b><i>' + n + ' 次</i></span>' +
-          '<span class="sf-fd-stat s"><b>最高伤害</b><i>' + best + '</i></span>' +
-        '</div>' +
-        '<p class="sf-fmenu-note">敲木桩不计经验、不掉东西、不消耗体力与挑战书；<br>固定 ' + DUMMY.rounds + ' 回合、生命不会耗尽（原版 Stakes 不判定死亡），总伤害就是你的记录。</p>' +
-        '<button type="button" class="sf-fmenu-btn" data-m="back">返回</button>' +
-      '</div>';
-    const bk = host.querySelector('[data-m="back"]');
-    if (bk) bk.addEventListener('click', () => openFriendMenu(Number(current && current.sel) || 0));
+    guard(openOriginalDialog('3535', { owner: current.host, label: '个人记录', paint(view, close) {
+      stopAt(clipOf(view, 'title'), 2);
+      for (const key of ['text1', 'text2', 'text3']) setText(clipOf(view, key), '未记录');
+      for (let i = 1; i <= 4; i++) stopAt(clipOf(view, 'newRecord' + i), 3);
+      if (best < 100000) {
+        T().showNumber(best, view, 0, 0, 'left', 5);
+      } else {
+        // The original art has only five digit slots. Measure that exact region
+        // in SVG coordinates, then fit the complete value instead of truncating.
+        T().showNumber(88888, view, 0, 0, 'left', 5);
+        const digits = Array.from({ length: 5 }, (_, i) => clipOf(view, 'num' + (i + 1)));
+        const svg = view.g.ownerSVGElement || view.g;
+        const points = [];
+        const inverse = view.g.getCTM().inverse();
+        for (const digit of digits) {
+          const box = digit.g.getBBox(), transform = inverse.multiply(digit.g.getCTM());
+          for (const [x, y] of [[box.x, box.y], [box.x + box.width, box.y + box.height]]) {
+            const point = svg.createSVGPoint(); point.x = x; point.y = y;
+            points.push(point.matrixTransform(transform));
+          }
+          digit.g.style.visibility = 'hidden';
+        }
+        const left = Math.min(...points.map(p => p.x)), right = Math.max(...points.map(p => p.x));
+        const top = Math.min(...points.map(p => p.y)), bottom = Math.max(...points.map(p => p.y));
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        const size = bottom - top;
+        for (const [key, value] of Object.entries({ x: (left + right) / 2, y: (top + bottom) / 2,
+          'text-anchor': 'middle', 'dominant-baseline': 'central', 'font-size': size,
+          'font-family': '"Arial Rounded MT Bold", "Trebuchet MS", Arial, sans-serif', 'font-weight': '900',
+          fill: '#fffaf0', stroke: '#55290e', 'stroke-width': 1.5, 'paint-order': 'stroke fill',
+          'stroke-linejoin': 'round', 'data-dummy-damage': String(best) })) text.setAttribute(key, value);
+        text.textContent = String(best);
+        view.g.appendChild(text);
+        const width = text.getComputedTextLength();
+        if (width > right - left - 3) text.setAttribute('font-size', size * (right - left - 3) / width);
+      }
+      setText(clipOf(view, 'text4'), fitText(clipOf(view, 'text4'),
+        '历史最高总伤害 ' + best + '；训练 ' + n + ' 次\n旧记录未保存分项；离线模式不参与排名'));
+      // The exported mobile layout has an unnamed Back button (3152 + 3190).
+      const back = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      back.setAttribute('data-name', 'recordBack');
+      for (const rec of view.nodes.values()) {
+        if (['3152', '3190'].includes(String(rec.id)) && rec.node) back.appendChild(rec.node);
+      }
+      view.g.appendChild(back);
+      const hit = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      const bounds = back.getBBox();
+      for (const [key, value] of Object.entries({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, fill: 'transparent', 'pointer-events': 'all' })) hit.setAttribute(key, value);
+      back.appendChild(hit); back.style.cursor = 'pointer';
+      back.addEventListener('click', e => { e.stopPropagation(); close(); });
+      if (window.SfUiFeedback) SfUiFeedback.bind(back);
+    } }));
     void foe;
   }
   /** 「查看装备」—— 由**状态页**上的那一颗（`b_change` 第 4/5 帧，原版 `friendEquipsInfo()`
@@ -1591,6 +1647,13 @@
       if (window.UI && UI.toast) UI.toast('体力不足（需要 10 点），每 5 分钟恢复 1 点，也可以使用体力药剂');
       return;
     }
+    /* 每次随机挑战开始都把「刷新玩家」次数归零（与 classic-ui 的 DOM 路径同一口径）：
+     * 打完一个随机敌人就重新获得 10 次刷新。 */
+    if (!friend) {
+      clearRefreshTimer();
+      s.challengeRefresh = { count: 0, ts: Date.now() };
+      try { State.save(); } catch (e) {}
+    }
     /* 经验/金松果在**第一张战果页出现前**算好：战果页直接写"经验 + 金松果 + 悬浮物品"，
      * 开完宝箱就回随机挑战页，不再弹第三张结算。`settle` 自己缓存，SfFight 与 onEnd
      * 各调一次也只发一次奖励。 */
@@ -1655,6 +1718,7 @@
 
   function showTab(key, keepPage) {
     if (!current) return;
+    clearRefreshTimer();
     const view = current.view;
     /* 随机页回到上次选中的那一行（名单缓存还在时）；其它 tab 仍从头开始。 */
     current.sel = (key === 'random' && randomCache && randomCache.state === S())
@@ -1742,6 +1806,7 @@
   function showRandom() {
     const view = current.view;
     const s = S();
+    clearRefreshTimer();
     /* 名单缓存和 `current.roster` 分开：`current.roster` 是各 tab 共用的，好友页会把它
      * 换成好友名单；随机页如果每次都重抽，离开挑战页再回来就换了一批（用户口径不要）。
      * 只有手动刷新 / 打完一场 / 换档才清空 randomCache。 */
@@ -1762,26 +1827,47 @@
     const vip4 = clipOf(view, 'vip4');
     if (vip4) { stopAt(vip4, 1); setVisible(vip4, false); }
     const refresh = clipOf(view, 'f4');                    // 7273：刷新按钮
+    const rf = refreshState();
+    const left = refreshRemaining(rf);
+    const exhausted = left <= 0;
     if (refresh && refresh.byName) {
       setText(refresh.byName('friendname'), '刷新玩家');
       setText(refresh.byName('flevel'), '');
     }
+    if (refresh && refresh.g) {
+      refresh.g.style.opacity = exhausted ? '0.42' : '';
+      refresh.g.setAttribute('aria-disabled', exhausted ? 'true' : 'false');
+    }
     wireClickable(refresh, {
-      hover: 0, press: 0, idle: 1,
+      hover: 2, press: 2, idle: 1,
       onFire: () => {
-        const s = S();
-        const rf = (s && s.challengeRefresh) || {};
-        const count = Number(rf.count) || 0;
-        const cost = count < 5 ? 0 : 1 + Math.floor((count - 5) / 3);
-        if (cost && Number(s.goldPoint) < cost) { if (window.UI && UI.toast) UI.toast('金松果不足，无法进行刷新'); return; }
-        if (cost) s.goldPoint -= cost;
-        s.challengeRefresh = { count: count + 1, ts: Date.now() };
+        const sNow = S();
+        const rfNow = refreshState();
+        if (refreshRemaining(rfNow) <= 0) {
+          if (window.UI && UI.toast) UI.toast('刷新次数已用完：挑战一个随机敌人或等待10分钟后再刷新');
+          return;
+        }
+        sNow.challengeRefresh = { count: rfNow.count + 1, ts: Date.now() };
         try { State.save(); } catch (e) {}
         /* 手动刷新：作废缓存，下一次 showRandom 重抽。 */
         randomCache = null;
         showTab('random');
       },
     });
+    if (refresh && refresh.g) {
+      refresh.g.style.cursor = exhausted ? 'not-allowed' : 'pointer';
+      refresh.g.style.pointerEvents = exhausted ? 'none' : 'auto';
+      refresh.g.style.outline = 'none';
+      refresh.g.style.webkitTapHighlightColor = 'transparent';
+    }
+    /* 次数用完后自动等窗口结束再重绘，不必让玩家手动重进页面。 */
+    if (exhausted) {
+      const wait = Math.max(1000, REFRESH_WINDOW - (Date.now() - rf.ts) + 50);
+      refreshTimer = setTimeout(() => {
+        refreshTimer = 0;
+        if (current && current.tab === 'random' && !current.sub) showTab('random');
+      }, wait);
+    }
     setText(clipOf(view, 'page'), '1/1');
     setVisible(clipOf(view, 'left'), false);
     setVisible(clipOf(view, 'right'), false);
@@ -1805,12 +1891,12 @@
     if (!C || !C.modal) { if (window.UI && UI.toast) UI.toast('添加好友界面不可用'); return; }
     let cands = rollAddFriendCandidates(), selected = 0, added = new Set();
     const body = () => '<div class="sf-addfriend">' +
-      '<p class="sf-addfriend-tip">推荐好友的等级与「师徒」刷新一致；点一行选中，右下角可以拜他为师。</p>' +
+      '<p class="sf-addfriend-tip">选中一位推荐好友，可添加好友或在右下角拜师。</p>' +
       '<div class="sf-addfriend-list">' + cands.map((c, i) => {
         const has = !!(State.friendOf && State.friendOf(c.name) || added.has(c.name));
         return '<div class="sf-addfriend-row' + (i === selected ? ' active' : '') + '" data-add-i="' + i + '">' +
-          '<span class="sf-addfriend-lv">Lv' + esc(c.level) + '</span>' +
-          '<b class="sf-addfriend-name">' + esc(c.name) + '</b>' +
+          '<span class="sf-addfriend-identity"><span class="sf-addfriend-lv">Lv.' + esc(c.level) + '</span>' +
+          '<b class="sf-addfriend-name">' + esc(c.name) + '</b></span>' +
           '<span class="sf-addfriend-stats"><i>力 ' + esc(c.power) + '</i><i>敏 ' + esc(c.agility) + '</i><i>速 ' + esc(c.speed) + '</i><i>血 ' + esc(c.hp) + '</i></span>' +
           '<button type="button" class="uc-button tiny ' + (has ? 'muted' : 'gold') + '" data-add-friend="' + i + '"' + (has ? ' disabled' : '') + '>' + (has ? '已是好友' : '加好友') + '</button>' +
           '</div>';
@@ -1828,6 +1914,7 @@
     ], { small: false });
     const root = m && m.element;
     if (!root) return;
+    root.classList.add('sf-addfriend-dialog');
     const repaint = () => {
       const box = root.querySelector('.modal-body');
       if (box) box.innerHTML = body();
@@ -2273,14 +2360,23 @@
   function showArenaRules() {
     const view = current.view;
     stopAt(view, ARENA.rules);
-    /* 说明按真实框宽断行，写清两场名次奖励与门槛；选择弹窗只放两个道具图标。 */
+    /* 说明按真实框宽断行，写清两场名次奖励与门槛；选择弹窗只放两个道具图标。
+     * ⚠ 这一块是右侧圆角面板里唯一的正文（字段框 215 宽、行距 13.8、字号 12）。
+     *   面板内框约 210×119（x 93.3~303 / y 36.4~155.9）：9 行会把最后一行挤到面板下方的白卡上，
+     *   每行写到 18 个全角字还会顶出面板右弧。所以文案压到 **≤16.5 个全角字宽 / 7 行**：
+     *   · 标题行用「、」分隔三类奖励并去掉斜杠两侧的空格，不再把「点」挤成孤字；
+     *   · 报名行收成「体力不足用入场券」，不再把「券」挤到下一行；
+     *   · 正文起点 x 从 3 调到 7：左侧留出约 8 个舞台单位，最宽的 16 字行右侧也还剩约 9 个。 */
     const desc = clipOf(view, 'desc');
     if (desc) setText(desc, fitText(desc,
-      '经验场：冠150/亚100/季50/殿30经验\n' +
-      '碎片场：冠8/亚6/季4/四3蓝片\n' +
-      '幻兽场：冠40/亚35/季30/四25孵化点\n' +
-      '报名30体力；缺体力用英雄帖/勇气徽章/召唤证\n' +
-      '经验10级/其它15级；药剂自动补足'));
+      '【名次奖励】经验、蓝碎片、孵化点\n' +
+      '冠军　150 / 8 / 40\n亚军　100 / 6 / 35\n' +
+      '季军　 50 / 4 / 30\n殿军　 30 / 3 / 25\n' +
+      '【报名】30体力，体力不足用入场券\n' +
+      '经验场10级；碎片场/幻兽场15级'));
+    // 面板左沿 93.3、文本框左沿 92；x=7 让正文离圆角约 8 个单位，右侧仍留得下 16 字行。
+    const descNode = desc && (desc.g || desc);
+    if (descNode) for (const text of descNode.querySelectorAll('text')) text.setAttribute('x', '7');
     const start = clipOf(view, 'startCompete');
     wireClickable(start, {
       hover: 0, press: 0, idle: 1,
@@ -2382,6 +2478,77 @@
   /* ============================================================
    * 二级/三级页：库元件「挑战1」= 4756（挂在独立的一层 `<svg>` 上，坐标与主页面同一套舞台系）
    * ========================================================== */
+  // Shared original library dialogs. They keep the owning page and its state
+  // intact; closing never navigates or rebuilds the background page.
+  let originalDialog = null;
+  function closeOriginalDialog(owner, expected) {
+    const dialog = originalDialog;
+    if (!dialog || (owner && dialog.owner !== owner) || (expected && dialog !== expected)) return false;
+    originalDialog = null;
+    if (dialog.view) dialog.view.destroy();
+    dialog.host.remove();
+    if (dialog.owner && dialog.owner.isConnected) {
+      dialog.owner.style.pointerEvents = dialog.pointerEvents;
+      setBaseRouterEnabled(dialog.owner, true);
+    }
+    return true;
+  }
+  async function openOriginalDialog(symbol, options) {
+    options = options || {};
+    closeOriginalDialog();
+    const owner = options.owner || (current && current.host);
+    const ui = document.getElementById('ui');
+    if (!owner || !owner.isConnected || !ui) return null;
+    const host = document.createElement('section');
+    host.className = 'classic-home ssfight-home ssfight-sub sf-original-dialog';
+    host.setAttribute('aria-label', options.label || '确认');
+    host.setAttribute('role', 'dialog'); host.setAttribute('aria-modal', 'true');
+    ui.appendChild(host);
+    const dialog = { host, owner, view: null, pointerEvents: owner.style.pointerEvents };
+    originalDialog = dialog;
+    owner.style.pointerEvents = 'none'; setBaseRouterEnabled(owner, false);
+    try {
+      await SfRender.loadExtra('tags-social-dialog.json');
+      if (originalDialog !== dialog || !owner.isConnected) { closeOriginalDialog(owner, dialog); return null; }
+      const view = await SfRender.mountSymbol(host, symbol, { frame: 1, label: options.label || '确认' });
+      if (originalDialog !== dialog || !owner.isConnected) { view.destroy(); closeOriginalDialog(owner, dialog); return null; }
+      dialog.view = view;
+      T().freezeDescendants(view);
+      hideSubBackdrop(view);
+      options.paint(view, () => closeOriginalDialog(owner, dialog));
+      return view;
+    } catch (e) { closeOriginalDialog(owner, dialog); throw e; }
+  }
+  function openOriginalConfirm(options) {
+    options = options || {};
+    return openOriginalDialog('4421', { owner: options.owner, label: options.label || '确认', paint(view, close) {
+      setText(clipOf(view, 'info'), fitText(clipOf(view, 'info'), options.text || ''));
+      const ok = clipOf(view, 'button1');
+      const cancel = clipOf(view, 'button2');
+      /* 竞技场报名确认：原版 4421 是「确定在左、取消在右」，用户要求调换。
+       * 只交换两个按钮的 x 位置（y / 缩放不动），点击语义仍绑在 button1=确定 / button2=取消；
+       * 必须在 wireClickable 之前换，热区才会按新位置量。其他确认框不传 swapButtons，保持原版。
+       * `options.extraGap` 再把这组键向左右各推开一半（舞台单位），只用于用户点名的报名确认。 */
+      if (options.swapButtons && ok && cancel && ok.g && cancel.g) {
+        const ma = (clip) => {
+          const p = String((clip && clip.g && clip.g.__baseMa) || '').split(',').map(Number);
+          return p.length === 6 && p.every((v) => Number.isFinite(v)) ? p : null;
+        };
+        const a = ma(ok), b = ma(cancel);
+        if (a && b) {
+          const dx = b[4] - a[4];
+          const sa = Math.abs(a[0]) || 1, sb = Math.abs(b[0]) || 1;
+          const halfGap = Math.max(0, Number(options.extraGap) || 0) / 2;
+          if (ok.setExtraTransform) ok.setExtraTransform('translate(' + ((dx + halfGap) / sa).toFixed(3) + ',0)');
+          if (cancel.setExtraTransform) cancel.setExtraTransform('translate(' + ((-dx - halfGap) / sb).toFixed(3) + ',0)');
+        }
+      }
+      /* 4399/4419 的第 2 帧是绿色悬停态（第 1 帧米色常态）；鼠标移上去变绿、移开还原。 */
+      const buttonSpec = { idle: 1, hover: 2, press: 2 };
+      wireClickable(ok, Object.assign({}, buttonSpec, { onFire: () => { if (close() && options.accept) options.accept(); } }));
+      wireClickable(cancel, Object.assign({}, buttonSpec, { onFire: close }));
+    } });
+  }
   function subHost() {
     if (!current) return null;
     if (current.sub && current.sub.host && current.sub.host.isConnected) return current.sub.host;
@@ -2447,6 +2614,7 @@
   }
   function closeSub() {
     closeArenaHint();
+    if (current) closeOriginalDialog(current.host);
     /* 收二级页的同时**恢复底页那根点击路由**（`openSub` / `showFriendMenu` 里停用的那一根）：
      * 不恢复的话退回一级页之后整页对鼠标没反应。放在 `current.sub = null` 之前取 host。 */
     if (current && current.host) setBaseRouterEnabled(current.host, true);
@@ -2604,6 +2772,7 @@
     return true;
   }
   function destroyView() {
+    clearRefreshTimer();
     if (current) {
       closeSub();
       if (current.view) { try { current.view.destroy(); } catch (e) {} }
@@ -2656,6 +2825,9 @@
     /** 打开某一行的动作菜单（探针 / 外部入口用；等价于点那一行）。 */
     openFriendMenu: (i) => openFriendMenu(Number(i) || 0),
     openAddFriendPage,
+    openOriginalConfirm,
+    closeOriginalDialog,
+    openDummyRecord,
     /** 「查看装备」（原版 `friendEquipsInfo()`）：状态页上那颗 `b_change` 的 4/5 帧调它。
      *  ⚠ 以前没有这个导出 —— 状态页调 `SfChallenge.showFriendGears` 永远拿到 undefined，
      *  于是点「查看装备」直接兜底回挑战页（用户 2026-10 报的"会闪退"）。 */

@@ -166,7 +166,7 @@
 .foe-portrait img, .foe-portrait canvas { max-width: 100%; max-height: 76px; object-fit: contain; }
 .tower-plan li .tower-plan-no { position: absolute; left: 6px; top: 6px; flex: none; }
 .tower-plan li.elite { border-color: #e08573; background: rgba(255, 236, 230, .95); }
-/* 「巡逻」魔王（德拉莫斯）那一场：用户口径 2026-10 第七十八批 ——
+/* 「巡逻」魔王（镜）那一场：用户口径 2026-10 第七十八批 ——
  * 去掉「替换第 N 场」黄标，改用**淡红色背景**标识它的特殊性（比上面精英台阶那层更实一档 + 红描边）。 */
 .tower-plan li.patrol { border-color: #d9615c; background: #ffdcd6; }
 .tower-plan li.patrol:hover { border-color: #c0392b; background: #ffd2cb; }

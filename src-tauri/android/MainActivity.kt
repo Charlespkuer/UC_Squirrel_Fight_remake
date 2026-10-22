@@ -1,5 +1,6 @@
 package com.ssdz.classic
 
+import android.content.ComponentCallbacks2
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -107,6 +108,16 @@ class MainActivity : TauriActivity() {
   override fun onDestroy() {
     ui.removeCallbacksAndMessages(null)
     super.onDestroy()
+  }
+
+  /** 系统内存吃紧时先让 WebView 释放自己的原生缓存；游戏 JS 的素材表/画布不在
+   *  `freeMemory()` 里，所以不会把正在播的战斗数据清掉。只在「运行中低内存」及更紧的
+   * 档位调用，避免刚进后台就打断最后那次存档 IPC。 */
+  override fun onTrimMemory(level: Int) {
+    super.onTrimMemory(level)
+    if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+      try { gameWebView?.freeMemory() } catch (_: Exception) {}
+    }
   }
 
   /**

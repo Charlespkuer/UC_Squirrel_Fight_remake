@@ -231,6 +231,13 @@
       if (gemLv) entry.gem = { id: 100 + gemLv, ext: Math.max(1, Math.min(99, integer(g.gem.ext, 1, 1))) };
       return entry;
     });
+    /* 5 级换装教程的一次性白装。新档显式 false；旧档没有字段时按「已经升过 5 级 / 已有装备 /
+     * 旧引导里已经记过 gearsGift」迁移，防止每次打开游戏都把教程奖励重发一遍。 */
+    if (raw.starterGearGiven === true) next.starterGearGiven = true;
+    else if (raw.starterGearGiven === false) next.starterGearGiven = false;
+    else next.starterGearGiven = Number(next.level) > 5
+      || (Array.isArray(next.gears) && next.gears.length > 0)
+      || !!(raw.tutorial && raw.tutorial.gearsGift === true);
     next.stages = object(next.stages) ? next.stages : {};
     // 升级「三选一」还没选的组：只保留合法的 {kind,id}，并且不能是已经拥有的
     {
@@ -485,6 +492,9 @@
       muted: st.muted === true,
       resolution: RESOLUTION_KEYS.includes(String(st.resolution)) ? String(st.resolution) : 'auto',
       fullscreen: st.fullscreen === true,
+      /* 安卓沉浸模式：默认隐藏状态栏（桌面/网页没有这个开关的实际效果）；
+       * 显式关闭过才保持 false。旧档没有这个字段时按 true 迁移，解决状态栏常驻。 */
+      hideStatusBar: st.hideStatusBar !== false,
       uiMode: UIMODE_KEYS.includes(String(st.uiMode)) ? String(st.uiMode) : 'classic',
     };
   }
@@ -607,8 +617,26 @@
     let mode = readUiModePref();
     if (!validSaveMode(mode)) mode = dual.topMode;
     if (!validSaveMode(mode)) mode = DEFAULT_SAVE_SLOT;
-    const target = dual.slots[mode];
-    const other = dual.slots[otherMode(mode)] || null;
+    let target = dual.slots[mode];
+    let other = dual.slots[otherMode(mode)] || null;
+    /* 当前界面槽位不见了、另一界面还有档：**直接载入另一槽**，不要停在标题页。
+     * 旧行为是 S=null（显示标题/新开局），玩家会看到「初始存档」；下一次启动
+     * localStorage 里的界面偏好若恢复，又载入另一槽的进度 —— 这就是用户说的
+     * 「在初始存档与有进度的存档之间横跳」。只有两槽都没有档时才返回 false。 */
+    if (!target && other) {
+      mode = otherMode(mode);
+      target = other;
+      other = null;
+    } else if (target && other && isFreshPayload(target) && !isFreshPayload(other)) {
+      /* 当前槽是 1 级空档、另一槽却是有进度的档：优先把进度救出来。
+       * 旧版把 1 级档写回顶层、把有进度的档挤到 __dualOther 后，玩家每次启动
+       * 看到的是「初始存档」；下一次界面偏好变化又可能读回另一槽 —— 横跳。
+       * 只在当前槽确实是空档时换，玩家真在新号上打过一场（allWins/stages）就不动。 */
+      const oldTarget = target;
+      mode = otherMode(mode);
+      target = other;
+      other = oldTarget;
+    }
     saveMode = mode;
     writeUiModePref(mode);
     otherSlot = other;
@@ -637,14 +665,16 @@
     }
     saveMode = pref;
     writeUiModePref(pref);
-    if (pref === legacyMode) {
-      otherSlot = null;
-      S = legacy;
-      return true;
-    }
-    S = null;
-    otherSlot = legacy;
-    return false;
+    /* 旧版单槽存档只有这一份进度，**不能**因为 localStorage 里的界面偏好与它
+     * 当初写下的 uiMode 不一致，就把它塞进 otherSlot、让当前界面变成标题/新开局。
+     * 换包更新后 localStorage 可能丢失或与旧档不一致，旧行为会让玩家看到 1 级新档，
+     * 下一次启动又按旧档的 uiMode 读回进度 —— 正是「初始档与有进度档横跳」。
+     * 单槽档直接作为当前界面的进度载入，界面观感按当前偏好走。 */
+    saveMode = pref;
+    legacy.settings.uiMode = pref;
+    otherSlot = null;
+    S = legacy;
+    return true;
   }
   function adoptPayload(raw) {
     if (!object(raw)) return false;
@@ -1034,10 +1064,18 @@
     if (!p) return null;
     const skill = (typeof GData !== 'undefined' && GData.petSkillInfo ? GData.petSkillInfo(p.skillId, p.level) : null) ||
       PET_SKILLS[p.skillId] || { name: '未知技能', remark: '暂无说明' };
+    /* 详情页的「下一级」提示：原版 `doShowSummonsDeTail` 用 `getSkillLevelupRemark(id, level+1)`
+     * 把 levelupRemark 里的 X 换成**下一级**的数值。这里把下一级数值一起交给界面，
+     * 避免页面自己再按 base/step 算一遍（公式只在 GData 留一份）。 */
+    const nextLevel = Math.min(Math.max(1, integer(p.maxLevel, 50, 1)), Math.max(1, integer(p.level, 1, 1) + 1));
+    const nextSkill = (typeof GData !== 'undefined' && GData.petSkillInfo)
+      ? GData.petSkillInfo(p.skillId, nextLevel) : null;
     return {
       key: p.key, id: p.id, name: p.name, grade: p.grade, maxLevel: p.maxLevel,
       leadership: p.leadership, skillId: p.skillId, skillName: skill.name, skillRemark: skill.remark,
       skillValue: skill.value == null ? 0 : skill.value, skillTrigger: skill.trigger == null ? 0 : skill.trigger,
+      skillLevelupRemark: skill.levelupRemark || '',
+      skillNextValue: nextSkill && nextSkill.value != null ? nextSkill.value : (skill.value == null ? 0 : skill.value),
       level: p.level, exp: p.exp, nextExp: p.nextExp, inTeam: (S.petsTeam || []).includes(p.key),
     };
   }
@@ -1116,13 +1154,27 @@
     save();
     return { ok: true, target: petInfo(target), gained: gain, levels, gold, materials: mats.map((p) => p.name) };
   }
-  /** 进化：消耗目标 + 2 只同星级非出战幻兽 + 金松果，变成高一星的随机幻兽。 */
-  function evolvePet(targetKey) {
+  /** 进化：消耗目标 + 2 只同星级非出战幻兽 + 金松果，变成高一星的随机幻兽。
+   *  `materialKeys` 给了就按玩家选的 2 只结算（界面「自由选择」走这条）；
+   *  不给 / 不是数组时保留旧的「自动取前两只」行为，供老调用与存档脚本兼容。 */
+  function evolvePet(targetKey, materialKeys) {
     const target = petByKey(targetKey);
     if (!target) return { ok: false, msg: '找不到要进化的幻兽' };
     if (target.grade >= 4) return { ok: false, msg: '四星幻兽已经是最高星级' };
     const nextGrade = target.grade + 1;
-    const mats = (S.pets || []).filter((p) => p.key !== target.key && p.grade === target.grade && !(S.petsTeam || []).includes(p.key)).slice(0, 2);
+    let mats;
+    if (Array.isArray(materialKeys)) {
+      const keys = [...new Set((materialKeys || []).map(String).filter((k) => k && k !== target.key))];
+      if (keys.length !== 2) return { ok: false, msg: '进化需要选择 2 只同星级材料幻兽' };
+      mats = keys.map(petByKey);
+      if (mats.some((p) => !p)) return { ok: false, msg: '选择的材料幻兽不存在' };
+      if (mats.some((p) => p.grade !== target.grade)) return { ok: false, msg: '材料幻兽需要与目标同星级' };
+      if (mats.some((p) => (S.petsTeam || []).includes(p.key))) {
+        return { ok: false, msg: '出战队伍里的幻兽不能作为材料' };
+      }
+    } else {
+      mats = (S.pets || []).filter((p) => p.key !== target.key && p.grade === target.grade && !(S.petsTeam || []).includes(p.key)).slice(0, 2);
+    }
     if (mats.length < 2) return { ok: false, msg: '进化需要 2 只同星级、且不在出战队伍里的幻兽' };
     const cost = PET_GRADE_COST[nextGrade] || 200;
     if (integer(S.goldPoint, 0) < cost) return { ok: false, msg: '金松果不足（需要 ' + cost + ' 个）' };
@@ -1423,8 +1475,37 @@
    * ============================================================ */
   const SAVE_URL = '__save';
   const LEGACY_KEY = SAVE_KEY;                       // 旧的 localStorage 存档键
-  const fileState = { available: false, transportReady: false, checked: false, code: 0, fileAt: 0, fileExists: false, lastProbe: 0, error: '', reason: '', lastWrite: 0, lastLoad: 0, lastRead: 0, lastReadErr: '', conflict: false, dirty: false, freshLocal: false, path: 'save/progress.json' };
+  const fileState = { available: false, transportReady: false, checked: false, code: 0, fileAt: 0, fileExists: false, fileLevel: 0, fileReborn: 0, fileBackup: false, lastProbe: 0, error: '', reason: '', lastWrite: 0, lastLoad: 0, lastRead: 0, lastReadErr: '', conflict: false, dirty: false, freshLocal: false, forceWrite: false, path: 'save/progress.json' };
   let fileTimer = 0;
+  /** 一份存档里的最高等级（双槽取两槽最大；服务端水位线用同一套口径）。 */
+  function payloadMaxLevel(obj) {
+    if (!object(obj)) return 0;
+    let lv = Math.max(0, integer(obj.level, 0, 0));
+    if (object(obj.__dualOther)) lv = Math.max(lv, Math.max(0, integer(obj.__dualOther.level, 0, 0)));
+    if (object(obj.__dualSaves)) {
+      for (const slot of Object.values(obj.__dualSaves)) {
+        if (object(slot)) lv = Math.max(lv, Math.max(0, integer(slot.level, 0, 0)));
+      }
+    }
+    return lv;
+  }
+  /** 转生次数：等级合法降回 1 的唯一凭证（转生果 `reborn++`）。 */
+  function payloadReborn(obj) {
+    if (!object(obj)) return 0;
+    return Math.max(0, integer(obj.reborn, 0, 0));
+  }
+  /** 这是不是「刚建的新档」——只有 1 级、没打过一场、没通关过、也不是转生。
+   *  用它挡住「浏览器里的 1 级空档覆盖磁盘上几十级的正式存档」。
+   *  ⚠ 不能只看等级：转生果会把等级降回 1（`reborn > 0`），那是合法存档；
+   *  打过任意一场（`allWins > 0`）或通关过（`stages` 非空）的 1 级档也不是空档。 */
+  function isFreshPayload(obj) {
+    if (!object(obj)) return false;
+    if (payloadMaxLevel(obj) > 1) return false;
+    if (Math.max(0, integer(obj.reborn, 0, 0)) > 0) return false;
+    if (Math.max(0, integer(obj.allWins, 0, 0)) > 0) return false;
+    if (object(obj.stages) && Object.keys(obj.stages).length) return false;
+    return true;
+  }
   /* ssdz-save-transport-ready 只广播一次（安卓桥接会被装两次，见 setSaveTransport）。 */
   let transportAnnounced = false;
   /* 存档读写通道：默认走本地服务器的 /__save；宿主（Tauri 等）可以替换成自己的实现。
@@ -1550,6 +1631,10 @@
         // 手机上第一次运行就是后者，不该弹红色报错横幅。
         fileState.transportReady = !!meta.ok;
         fileState.fileAt = Number(meta.savedAt) || 0;
+        fileState.fileExists = meta.exists === true || fileState.fileAt > 0;
+        fileState.fileLevel = Math.max(0, integer(meta.maxLevel != null ? meta.maxLevel : meta.level, 0, 0));
+        fileState.fileReborn = Math.max(0, integer(meta.reborn, 0, 0));
+        fileState.fileBackup = !!meta.backup;
         fileState.reason = fileState.available ? '' : (meta.msg || '存档通道不可用');
         fileState.error = '';
       } catch (e) {
@@ -1579,6 +1664,10 @@
       const info = await res.json();
       fileState.available = !!info.ok;
       fileState.fileAt = Number(info.savedAt) || 0;
+      fileState.fileExists = info.exists === true || fileState.fileAt > 0;
+      fileState.fileLevel = Math.max(0, integer(info.maxLevel != null ? info.maxLevel : info.level, 0, 0));
+      fileState.fileReborn = Math.max(0, integer(info.reborn, 0, 0));
+      fileState.fileBackup = !!info.backup;
       fileState.reason = fileState.available ? '' : (info.msg || '服务器关闭了存档写入（--no-save？）');
       fileState.error = '';
       if (info.path) fileState.path = info.path;
@@ -1602,9 +1691,14 @@
     try {
       const info = saveTransport ? await saveTransport.read() : await (await fetch(SAVE_URL, { cache: 'no-store' })).json();
       fileState.fileAt = Number(info.savedAt) || 0;
+      fileState.fileLevel = Math.max(fileState.fileLevel, Math.max(0, integer(info.maxLevel, 0, 0)));
+      fileState.fileReborn = Math.max(fileState.fileReborn, Math.max(0, integer(info.reborn, 0, 0)));
+      fileState.fileBackup = !!info.backup || !!info.recoveredFrom;
       if (info.exists && info.data) {
         const parsed = typeof info.data === 'string' ? JSON.parse(info.data) : info.data;
         if (!object(parsed)) throw new Error('存档内容不是对象');
+        fileState.fileLevel = Math.max(fileState.fileLevel, payloadMaxLevel(parsed));
+        fileState.fileReborn = Math.max(fileState.fileReborn, payloadReborn(parsed));
         const loaded = adoptPayload(parsed);
         fileState.lastLoad = Date.now();
         fileState.lastRead = fileState.fileAt || Date.now();
@@ -1646,53 +1740,82 @@
   async function probeMeta(force) {
     const now = Date.now();
     if (!force && fileState.lastProbe && now - fileState.lastProbe < 1200) {
-      return { savedAt: fileState.fileAt, exists: fileState.fileExists };
+      return { savedAt: fileState.fileAt, exists: fileState.fileExists, maxLevel: fileState.fileLevel, reborn: fileState.fileReborn, backup: fileState.fileBackup };
     }
     const meta = saveTransport ? await saveTransport.probe()
       : await (await fetch(SAVE_URL + '?meta=1', { cache: 'no-store' })).json();
     fileState.lastProbe = now;
     fileState.fileAt = Number(meta.savedAt) || fileState.fileAt;
     fileState.fileExists = meta.exists === true || fileState.fileAt > 0;
+    fileState.fileLevel = Math.max(fileState.fileLevel, Math.max(0, integer(meta.maxLevel != null ? meta.maxLevel : meta.level, 0, 0)));
+    fileState.fileReborn = Math.max(fileState.fileReborn, Math.max(0, integer(meta.reborn, 0, 0)));
+    fileState.fileBackup = !!meta.backup;
     return meta;
   }
-  /** 把当前进度写进 save/progress.json（force=true 时不检查「文件是否更新」）。 */
+  /** 把当前进度写进 save/progress.json（force=true 时不检查「文件是否更新」）。
+   *
+   *  **防「1 级空档覆盖正式存档」**：iOS 换包/桥接迟到时，启动可能先走浏览器兜底档，
+   *  随后一次自动保存就会把磁盘上几十级的存档写成 1 级。以前只有 HTTP 服务端有拦截，
+   *  iOS 的 `save_write` 没有 —— 这就是「存档在初始档与有进度的档之间横跳」的来源之一。
+   *  现在 JS 先按 meta 里的最高等级拦一次，宿主的 save_write 还会再拦一次。
+   *  `fileState.forceWrite`（只有调试面板「彻底重置账号」会设）是唯一允许主动降级的路径。 */
   async function fileWrite(force) {
     if (testMode) return { ok: false, msg: '自检档不写正式存档' };
     if (!fileState.available) await fileProbe();
     if (!fileState.available) return { ok: false, msg: '存档写入不可用：' + (fileState.reason || '未知原因') };
+    const allowFreshOverwrite = fileState.forceWrite === true;
+    fileState.forceWrite = false;   // 只放行紧接着的这一次（重置/导入），不长期打开
     try {
-      const meta = await probeMeta(!!force);
+      const meta = await probeMeta(!!force || allowFreshOverwrite);
       const fileAt = Number(meta.savedAt) || 0;
       const localAt = (S && S.savedAt) || 0;
+      const payload = savePayload();
+      const body = JSON.stringify(payload);
+      const incomingMax = payloadMaxLevel(payload);
+      const fileLevel = Math.max(fileState.fileLevel, Math.max(0, integer(meta.maxLevel != null ? meta.maxLevel : meta.level, 0, 0)));
+      /* **本次启动还没读过文件**（iOS 原生桥晚到最常见）：磁盘上又已经是正式进度时，
+       * 先别写。否则页面按兜底档/旧状态跑出来的存档会盖掉还没读进来的正式档。 */
+      if (!allowFreshOverwrite && !fileState.lastRead && fileState.fileExists && fileLevel >= 5) {
+        fileState.conflict = true;
+        return { ok: false, conflict: true, msg: '本次启动还没有成功读取磁盘存档，已暂缓写入（避免覆盖正式进度）' };
+      }
       // 存档文件里已有别的进度（新浏览器 / 换了机器第一次打开）：不覆盖，先让玩家决定
-      if (meta.exists && fileState.freshLocal && fileAt > 0) {
+      if (!allowFreshOverwrite && meta.exists && fileState.freshLocal && fileAt > 0) {
         fileState.conflict = true; fileState.fileAt = fileAt;
         return { ok: false, conflict: true, msg: '存档文件里已有进度（' + fmtTime(fileAt) + '），没有覆盖' };
       }
-      if (!force && fileAt > localAt + 1000) {
+      /* 新档比磁盘档低 = 多半是旧兜底档/初始档回来了，拒绝覆盖。
+       * 唯一合法的降级是转生果（reborn 增加）；1 级档玩到 2 级再写回去同样会被这里拦住。
+       * 真正的重置/导入走 `forceWrite`（只由调试面板或导入流程设置）。 */
+      const incomingReborn = payloadReborn(payload);
+      if (!allowFreshOverwrite && incomingMax < fileLevel && incomingReborn <= fileState.fileReborn) {
+        fileState.conflict = true;
+        const what = isFreshPayload(payload) ? '全新的 1 级空档' : (incomingMax + ' 级旧档');
+        return { ok: false, conflict: true, msg: '存档文件里已有 ' + fileLevel + ' 级进度，已拒绝用' + what + '覆盖' };
+      }
+      if (!force && !allowFreshOverwrite && fileAt > localAt + 1000) {
         fileState.conflict = true; fileState.fileAt = fileAt;
         return { ok: false, conflict: true, msg: '存档文件更新（' + fmtTime(fileAt) + '），已跳过写入' };
       }
-      const body = JSON.stringify(savePayload());
-      const out = saveTransport ? await saveTransport.write(body)
-        : await (await fetch(SAVE_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body })).json();
+      const out = saveTransport ? await saveTransport.write(body, { force: allowFreshOverwrite })
+        : await (await fetch(SAVE_URL + (allowFreshOverwrite ? '?force=1' : ''), { method: 'POST', headers: { 'content-type': 'application/json' }, body })).json();
       if (!out.ok) throw new Error(out.msg || '写入失败');
       fileState.fileAt = Number(out.savedAt) || Date.now();
       fileState.fileExists = true;
       fileState.lastProbe = Date.now();
       fileState.lastWrite = Date.now();
+      /* 这一份就是刚写进去的内容，等价于“本次启动已经确认过文件”。 */
+      if (!fileState.lastRead) fileState.lastRead = fileState.fileAt;
       fileState.conflict = false;
       fileState.dirty = false;
       fileState.freshLocal = false;
+      /* 写成功 = 磁盘上现在就是这份档，等级/转生次数都以它为准确值。
+       * 不能保留旧的 40 级水位：转生后合法回到 1 级，下一笔 2 级存档会
+       * 因为「2 < 40 且 reborn 没变」被自己的水位线误拦。 */
+      fileState.fileLevel = incomingMax;
+      fileState.fileReborn = incomingReborn;
       // 刚写进去的就是当前进度；浏览器兜底档只在「更新且不低于当前等级」时才留着
       forgetLegacyIfRedundant(fileState.fileAt);
-      /* 写成功 → 通知界面收起“浏览器兜底存档 / 还没有存档文件”横幅。
-       * 首次运行那条绿色横幅原来只能等下一次重试或刷新才消失。 */
-      try {
-        if (typeof window !== 'undefined' && window.dispatchEvent && typeof CustomEvent === 'function') {
-          window.dispatchEvent(new CustomEvent('ssdz-save-written'));
-        }
-      } catch (e) {}
       return { ok: true, msg: '已写入 ' + fileState.path, fileAt: fileState.fileAt };
     } catch (e) {
       fileState.error = String((e && e.message) || e);
@@ -1702,20 +1825,37 @@
   /** 界面上「立即写入」按钮用：立刻写，不受防抖影响。 */
   function fileWriteNow() { return fileWrite(true); }
   /** 存档文件的信息（系统页显示用）。 */
+  /** 安卓/桌面安装版的 Tauri 存档通道是否存在。导入存档必须走它，
+   *  不能 fetch('/__save') —— tauri.localhost 没有那个 HTTP 接口。 */
+  function hasFileTransport() { return !!saveTransport; }
+  /** 读当前磁盘存档原文（给“导入前备份”用）；没有通道返回 null。 */
+  async function readFileRaw() {
+    if (!saveTransport) return null;
+    try { const info = await saveTransport.read(); return info && info.data ? String(info.data) : null; }
+    catch (e) { return null; }
+  }
+  /** 用导入的 JSON 原文覆盖正式存档（安装版/安卓走原生通道，带备份由调用方做）。 */
+  async function importFileRaw(raw) {
+    if (!saveTransport) return { ok: false, msg: '没有可用的存档通道' };
+    try {
+      const out = await saveTransport.write(String(raw), { force: true });
+      if (!out || out.ok === false) return { ok: false, msg: (out && out.msg) || '写入存档失败' };
+      return { ok: true, savedAt: Number(out.savedAt) || 0 };
+    } catch (e) {
+      return { ok: false, msg: (e && e.message) || String(e) };
+    }
+  }
   function fileInfo() {
     return {
       mode: storageMode(), available: fileState.available, checked: fileState.checked,
       transportReady: fileState.transportReady,
       conflict: fileState.conflict, fileAt: fileState.fileAt, localAt: (S && S.savedAt) || 0,
-      fileExists: !!fileState.fileExists,
+      fileLevel: fileState.fileLevel, fileReborn: fileState.fileReborn, fileBackup: fileState.fileBackup, fileExists: fileState.fileExists,
       code: fileState.code,
       lastWrite: fileState.lastWrite, lastLoad: fileState.lastLoad,
       lastRead: fileState.lastRead, lastReadErr: fileState.lastReadErr,
       error: fileState.error,
       dirty: fileState.dirty, path: fileState.path, reason: fileState.reason,
-      /* 宿主通道（Tauri 安装版 / 移动端）有没有装上。`transportReady` 是“探过且能用”，
-       * 这里要区分“桥还没注入”和“桥在了但 save_meta 失败”—— 前者不该弹存档告警。 */
-      hasTransport: !!saveTransport,
     };
   }
   function fileLoadedThisBoot() { return fileState.lastRead > 0; }
@@ -1748,11 +1888,6 @@
           fileState.lastWrite = Date.now();
           if (out && out.savedAt) fileState.fileAt = Number(out.savedAt) || fileState.fileAt;
           fileState.dirty = false;
-          try {
-            if (typeof window !== 'undefined' && window.dispatchEvent && typeof CustomEvent === 'function') {
-              window.dispatchEvent(new CustomEvent('ssdz-save-written'));
-            }
-          } catch (e) {}
         }).catch((e) => { fileState.error = String((e && e.message) || e); });
         return;
       }
@@ -1779,11 +1914,16 @@
     writeUiModePref(mode);
     /* 新角色：如果另一界面已经有进度，这一份要和它一起写进文件，不能当成"全新文件"挡住写入。 */
     fileState.freshLocal = !otherSlot;
+    /* 只有调试面板「彻底重置账号」这种**玩家二次确认过**的重置才允许主动把正式档降回 1 级；
+     * 其它路径（启动回落、切界面、桥接迟到）一律走 fileWrite 的 1 级空档保护。 */
+    fileState.forceWrite = !!(opts && opts.force);
     S = clone(GData.NEW_PLAYER);
     Object.assign(S, GData.initialStats());
     S.stageRuns = {};
     S.friends = [];
     S.name = typeof name === 'string' && name.trim() ? name.trim().slice(0, 20) : '小松鼠';
+    S.newbieStartDate = localDate();   // 新号前三天每日礼包额外福利
+    S.debugClockOffset = 0;            // 调试「快进24小时」按槽位独立
     S.lastEnergyTs = Date.now();
     S.dailyStatsDate = localDate();
     S.props = { 1: 3, 2: 2, 28: 1 }; // 送1级礼包
@@ -1932,6 +2072,7 @@
     if (at < 0) return { ok: false, msg: '还没有这个' + (kind === 'skill' ? '技能' : '武器') };
     const def = (kind === 'skill' ? skillsMap : weaponsMap).getValue(Number(id));
     arr.splice(at, 1);
+    if (typeof debugForgetWS === 'function') debugForgetWS(kind, id);
     save();
     return { ok: true, kind, id: Number(id), name: def ? def.name : String(id), total: ownedWSCount(), limit: wsLimit() };
   }
@@ -2073,12 +2214,12 @@
     const abilityVal = rolled > 0 ? rolled : base;
     const attrName = ['敏捷', '力量', '生命', '速度'][type];
     const quality = parseInt(set ? set.quality : 0); // 0白1绿2蓝3紫
-    /* 穿戴装备的最低门槛统一为 10 级（ssfight 状态页 b_change 的 10 级门槛）；
-     * 高品质装备原有的 25/30/50/60 使用等级继续保留，所以这里取 max，而不是一律压成 10。 */
+    /* 穿戴装备的最低门槛统一为 5 级（2026-10 用户把「更换装备」从 10 级下调到 5 级；
+     * 新手 5 级教程送的白装必须能当场穿上）；高品质装备原有的 25/30/50/60 使用等级继续保留。 */
     const setLevel = parseInt(set ? set.level : 1);
     return {
       id: parseInt(id), name: g.name, type, attrName, abilityVal, attrBase: base, quality,
-      useLevel: Math.max(10, Number.isFinite(setLevel) ? setLevel : 10),
+      useLevel: quality === 0 ? 5 : Math.max(5, Number.isFinite(setLevel) ? setLevel : 5),
       price: parseInt(set ? set.price : 10),
       setId: parseInt(g.setId), ext: normalizeExt(ext),
     };
@@ -2115,8 +2256,11 @@
   const gearSellPrice = (quality) => { const [lo, hi] = gearSellRange(quality); return lo + Math.floor(Math.random() * (hi - lo + 1)); };
   /** 品质需要按实例算：橙装是写在实例上的 quality=4。 */
   function gearQuality(gear) { return gear && gear.orange === true ? 4 : (gearInst(gear.id) || {}).quality || 0; }
+  /** 星标只属于现代界面；经典界面**完全没有星标**（连旧档里的 starred 也一律忽略）。 */
+  function starEnabled() { return slotMode() !== 'classic'; }
   /** 切换星标：标上之后不会被误融合 / 误出售。 */
   function toggleGearStar(gearKey) {
+    if (!starEnabled()) return { ok: false, starred: false, msg: '经典模式没有星标' };
     const g = S.gears.find((x) => x.key === gearKey);
     if (!g) return { ok: false, msg: '装备不存在' };
     g.starred = g.starred !== true;
@@ -2125,7 +2269,7 @@
       msg: g.starred ? '已加星标：不会被误融合或误出售' : '已取消星标' };
   }
   function isGearStarred(gear) {
-    if (!gear) return false;
+    if (!starEnabled() || !gear) return false;
     if (gear.starred === true) return true;
     const key = gear.key;
     if (!key) return false;
@@ -2135,18 +2279,15 @@
   function sellGear(gearKey) {
     const i = S.gears.findIndex((x) => x.key === gearKey);
     if (i < 0) return 0;
-    /* 星标装备不参与出售（返回 0，界面据此提示）。 */
-    if (S.gears[i].starred === true) return 0;
+    /* 星标装备不参与出售（返回 0，界面据此提示）；经典模式 isGearStarred 恒 false。 */
+    if (isGearStarred(S.gears[i])) return 0;
     const gold = gearSellPrice(gearQuality(S.gears[i]));
     S.gears.splice(i, 1);
     addGold(gold); save();
     return gold;
   }
-  /* 「更换装备」页的展示顺序（用户口径 2026-10）：**穿着中 > 星标 > 获得顺序**。
-   *   · 第 1 档：当前穿在身上的（含「穿着 + 星标」，它仍然属于第 1 档）；
-   *   · 第 2 档：加了星标的（防误合/误卖的收藏品，玩家要找它们）；
-   *   · 第 3 档：其余按**获得时间**（`S.gears` 的先后，也就是入包顺序）排。
-   * 用显式下标做稳定排序，所以同一档里永远是「先拿到的在前」。 */
+  /* 「更换装备」页的展示顺序：**穿着中 > 星标（仅现代） > 获得顺序**。
+   * 经典模式星标已整体移除，等价于「穿着中 > 获得顺序」。 */
   function gearsInDisplayOrder(list) {
     const src = Array.isArray(list) ? list : myGears();
     return src
@@ -2348,7 +2489,7 @@
     save();
     return { ok: true, gear: g };
   }
-  // 融合: 3件同部位同品质 → 高一级品质
+  // 融合: 3件同品质（部位可不同）→ 高一级品质
   function gearPart(id) {
     const def = gearMap.getValue(id);
     return def ? Number(def.type) : -1;
@@ -2664,23 +2805,20 @@
     if (same.length && roll < 0.73) return { id: pick(same), mutant: false };
     return { id: pick(pool), mutant: false };
   }
-  /** 三件同品质装备融合成一件更高品质装备。
-   *  默认仍要求同部位（旧规则/现代模式）；经典融合页传 `allowMixedParts:true`
-   *  去掉同部位需求，结果部位沿用第一件材料（品质仍必须一致）。 */
+  /** 两种界面统一：三件同品质装备融合，部位和名字均可不同。
+   *  产物部位沿用第一件材料；保留 opts 参数以兼容旧界面的调用。 */
   function mergeGears(keys, opts) {
     if (!Array.isArray(keys) || keys.length !== 3 || new Set(keys).size !== 3) return { ok: false, msg: '请选择三件不同的装备' };
     const gs = keys.map((k) => S.gears.find((x) => x.key === k)).filter(Boolean);
     if (gs.length !== 3) return { ok: false, msg: '装备不存在' };
     if (!blackGearEnabled() && gs.some((g) => isBlackGearId(g.id))) return { ok: false, msg: '现代界面没有黑装内容' };
     if (gs.some((g) => g.used)) return { ok: false, msg: '不能融合已穿戴的装备' };
-    /* 星标装备受保护：不参与融合（防止误合成）。 */
-    if (gs.some((g) => g.starred === true)) {
+    /* 星标装备受保护：不参与融合（防止误合成）；经典模式没有星标。 */
+    if (gs.some((g) => isGearStarred(g))) {
       return { ok: false, msg: '有装备已加星标（防误合），先取消星标再融合' };
     }
     const part = gearPart(gs[0].id), q = gearQuality(gs[0]);
     if (part < 0) return { ok: false, msg: '装备数据异常' };
-    const samePart = gs.every((g) => gearPart(g.id) === part);
-    if (!samePart && !(opts && opts.allowMixedParts)) return { ok: false, msg: '需要三件同部位的装备' };
     if (gs.some((g) => gearQuality(g) !== q)) return { ok: false, msg: '需要三件同品质的装备' };
     const partName = ['头巾', '手套', '衣服', '鞋子'][part] || '装备';
     const cost = gearCostOf(q);
@@ -2713,7 +2851,7 @@
       return { ok: true, gear: Object.assign(made || {}, { quality: 5, mutant: target.mutant }), card: 0 };
     }
     if (q === 3) {
-      // 3 件同部位紫装 → 该部位一件橙装（传说）
+      // 3 件紫装 → 第一件材料部位的一件橙装（传说）
       const target = pickMergeTarget(gs, part, 3);
       if (target == null) return { ok: false, msg: '这个部位还没有可合成的传说' + partName + '。' };
       S.goldPoint -= cost;
@@ -2774,6 +2912,24 @@
     S.gears.push({ id: info.id, used: false, key, ext: info.ext, attr: rolled });
     save();
     return Object.assign(info, { key, used: false });
+  }
+  /** 5 级更换装备教程的随机白装：只从 5 级可穿的白色装备里抽一件。
+   *  必须落存档（`starterGearGiven`）：不然每次重开游戏第一次进换装页都会再送一件。 */
+  function grantStarterGear() {
+    if (!S || S.starterGearGiven === true) return null;
+    const ids = [];
+    gearMap.each((k, v) => {
+      const id = parseInt(k, 10);
+      const gi = gearInst(id);
+      if (gi && Number(gi.quality) === 0 && Number(gi.useLevel) <= 5) ids.push(id);
+    });
+    if (!ids.length) return null;
+    const id = ids[Math.floor(Math.random() * ids.length)];
+    const gear = addGear(id, randomExtForQuality(0));
+    if (!gear) return null;
+    S.starterGearGiven = true;
+    save();
+    return gear;
   }
 
   // 原装备界面规则：同种附加能力不叠加，只取最高一条。
@@ -3117,8 +3273,8 @@
     return { ok: true, gear: g, msg: '获得' + g.name };
   }
 
-  /* ---------- 无尽塔黑卡周限（每周一 00:00 重置，最多 3 张） ---------- */
-  const ENDLESS_BLACK_CARD_CAP = 3;
+  /* ---------- 无尽塔黑卡周限（每周一 00:00 重置，最多 10 张） ---------- */
+  const ENDLESS_BLACK_CARD_CAP = 10;
   /** 本周周一的本地日期键（与天梯商店的按周刷新同一口径）。 */
   function blackCardWeekKey() {
     const d = new Date(Date.now());
@@ -3363,6 +3519,7 @@
       if (S.weapons.length + S.skills.length <= 1) return { ok: false, msg: '至少要留下一个武器或技能' };
       const info = wsInfo((kind === 'weapon' ? 'w' : 's') + targetId);
       arr.splice(idx, 1);
+      if (typeof debugForgetWS === 'function') debugForgetWS(kind, targetId);
       S.props[id]--; if (S.props[id] <= 0) delete S.props[id];
       bumpDaily('use', 1, true);
       save();
@@ -4069,6 +4226,194 @@
     return (name + title).slice(0, 12);
   }
 
+  /* ---------- 随机对手的总属性上下限（2026-10 用户口径） ----------
+   * 总属性 = 力量 + 敏捷 + 速度 + 生命/5（生命 5 点折算 1 点，和升级成长/测试同一口径）。
+   *   · 下限：正常成长到该等级的玩家总属性。取关卡数值模型里的玩家基准曲线
+   *     `stagePlayerStat/Hp`（三围 + 生命），它是由实测玩家均值标定的；
+   *     低等级曲线会低于初始 22 点，所以再和 `22 + 4×(等级−1)` 取大。
+   *   · 上限：同一等级一个**可达到的**高配玩家总属性：满成长 + 永久来源（金宝箱/神迹/天梯丸）
+   *     + 四件当前等级可穿的最好主属性装备（+10% 主属性浮动、按等级可用的最高宝石）
+   *     + 四个被动技能当前可升到的最高等级。不含可无限重复购买的属性道具/幻兽，
+   *     因此它是一个保守的“理论上限”，敌人不会超过真正的最深养成。
+   * 两个上下限都随等级单调增长；随机对手在生成完成后按总属性夹到 [下限, 上限]。 */
+  const FOE_TOTAL_HP_DIV = 5;
+  const FOE_TOTAL_CACHE = new Map();
+
+  /** 随机对手的总属性（生命按 5 点折算成 1 点）。 */
+  function foeTotalStats(foe) {
+    if (!foe) return 0;
+    return (Number(foe.power) || 0) + (Number(foe.agility) || 0)
+      + (Number(foe.speed) || 0) + (Number(foe.hp) || 0) / FOE_TOTAL_HP_DIV;
+  }
+  /** 现代随机战斗的「查看对手」：把 foe 上的武技/装备原始字段翻成可读详情。
+   *  classic 的查看页有自己的原版素材；现代界面直接渲染这份数据，两者共用同一份真值。 */
+  function foeLoadout(foe) {
+    if (!foe) return null;
+    const parseWS = (entry) => {
+      let id = 0, level = 1;
+      if (typeof entry === 'string') {
+        const p = entry.split(/[:,]/);
+        id = Number(p[0]) || 0;
+        level = Math.max(1, Number(p[1]) || 1);
+      } else if (entry && typeof entry === 'object') {
+        id = Number(entry.id) || 0;
+        level = Math.max(1, Number(entry.level) || 1);
+      }
+      return { id, level };
+    };
+    const weapons = ((foe.weapons) || []).map((entry) => {
+      const w = parseWS(entry);
+      const def = weaponsMap.getValue(w.id);
+      return { id: w.id, level: w.level, name: def ? def.name : ('武器#' + w.id), type: def ? def.type : '' };
+    });
+    const skills = ((foe.skills) || []).map((entry) => {
+      const s = parseWS(entry);
+      const def = skillsMap.getValue(s.id);
+      return { id: s.id, level: s.level, name: def ? def.name : ('技能#' + s.id), type: def ? def.type : '' };
+    });
+    const gears = ((foe.gears) || []).map((g) => {
+      const info = gearInst(g.id, g.ext, g.attr);
+      if (!info) return null;
+      const set = gearSetMap.getValue(info.setId);
+      const gemLv = g.gem && gemLevel(g.gem.id);
+      const rawQuality = Number(g.quality != null ? g.quality : info.quality);
+      return {
+        id: info.id, name: info.name, type: info.type,
+        part: ['头巾', '手套', '衣服', '鞋子'][info.type] || '装备',
+        quality: g.orange === true ? 4 : (Number.isFinite(rawQuality) ? rawQuality : 0),
+        orange: g.orange === true,
+        setName: set ? set.name : '',
+        attrName: info.attrName, abilityVal: info.abilityVal,
+        ext: extText(g.ext),
+        gem: gemLv ? { level: gemLv, percent: gemPercent(gemLv), ext: Number(g.gem.ext) || 0 } : null,
+      };
+    }).filter(Boolean);
+    return {
+      name: foe.name || '', level: Number(foe.level) || 1,
+      stats: {
+        power: Number(foe.power) || 0, agility: Number(foe.agility) || 0,
+        speed: Number(foe.speed) || 0, hp: Number(foe.hp) || 0, maxHp: Number(foe.maxHp) || Number(foe.hp) || 0,
+      },
+      weapons, skills, gears,
+      pets: Array.isArray(foe.pets) ? foe.pets.map((p) => ({ name: p.name, grade: p.grade, level: p.level, skillId: p.skillId })) : [],
+    };
+  }
+  /** 当前等级下武器/技能能升到的最高等级（原版强化表的 levelLimit ≤ 等级）。 */
+  function aiToolMaxLevel(level) {
+    const lv = Math.max(1, Math.floor(Number(level) || 0));
+    let hi = 1;
+    while (hi < 15 && Number(upgradeMap.getValue(hi).levelLimit) <= lv) hi++;
+    return hi;
+  }
+  /** 正常成长到该等级的玩家总属性（关卡模型的玩家基准曲线，低等级兜底为初始 22 点）。 */
+  function playerNormalTotal(level) {
+    const lv = Math.max(1, Math.min(MAX_PLAYER_LEVEL, Math.floor(Number(level) || 1)));
+    const growth = 22 + (lv - 1) * 4;
+    const curve = 3 * GData.stagePlayerStat(lv) + GData.stagePlayerHp(lv) / FOE_TOTAL_HP_DIV;
+    return Math.ceil(Math.max(growth, curve));
+  }
+  /** 该等级可达到的高配玩家总属性（保守上限；不含无限属性道具/幻兽）。 */
+  function playerMaxTotal(level) {
+    const lv = Math.max(1, Math.min(MAX_PLAYER_LEVEL, Math.floor(Number(level) || 1)));
+    const growth = 22 + (lv - 1) * 4;
+    /* 永久来源：71~90 每级 1 个金宝箱（单箱最高 12 点）、神迹满级 29 点、天梯永久丸 4 点。 */
+    const permanent = Math.max(0, Math.min(20, lv - 70)) * 12
+      + (lv >= 25 ? 29 : 0) + (lv >= 30 ? 4 : 0);
+    /* 被动技能：1 力 / 2 敏 / 3 速 / 4 血，按当前可升到的最高档。 */
+    const toolMax = aiToolMaxLevel(lv);
+    let passive = 0;
+    for (const id of [1, 2, 3, 4]) passive += Math.max(0, Number(GData.passiveBonus(id, toolMax)) || 0);
+    /* 四件当前等级可穿的最好主属性装备；宝石按 45 级解锁后每 6 级一档（45→1 … 81→7）。 */
+    const gemMax = lv >= 45 ? Math.min(7, 1 + Math.floor((lv - 45) / 6)) : 0;
+    const gemMul = gemMax ? 1 + gemPercent(gemMax) / 100 : 1;
+    const best = [0, 0, 0, 0];
+    for (const row of (GData.GEAR_BASE || [])) {
+      const baseAttr = Number(row && row[5]) || 0;
+      if (!(baseAttr > 0)) continue;
+      const info = gearInst(row[0], [], Math.ceil(baseAttr * 1.1));   // 主属性 +10% 上限
+      if (!info || Number(info.useLevel) > lv) continue;
+      const type = Number(info.type);
+      if (!(type >= 0 && type < 4)) continue;
+      const val = Math.round((Number(info.abilityVal) || 0) * gemMul);
+      if (val > best[type]) best[type] = val;
+    }
+    const gear = best.reduce((sum, val) => sum + val, 0);
+    return Math.ceil(growth + permanent + passive + gear);
+  }
+  /** 某一等级的玩家总属性上下限（每级只算一次；装备/被动扫描不跟每次 genAI 走）。 */
+  function playerTotalBounds(level) {
+    const lv = Math.max(1, Math.min(MAX_PLAYER_LEVEL, Math.floor(Number(level) || 1)));
+    let hit = FOE_TOTAL_CACHE.get(lv);
+    if (hit) return hit;
+    const normal = playerNormalTotal(lv);
+    const max = Math.max(normal, playerMaxTotal(lv));
+    hit = { level: lv, normal: normal, max: max };
+    FOE_TOTAL_CACHE.set(lv, hit);
+    return hit;
+  }
+  /** 给对手补总属性点：力/敏/速各 1 点，生命 5 点，轮换着加，保持形状。 */
+  function addFoeTotalPoints(foe, points) {
+    let n = Math.max(0, Math.ceil(Number(points) || 0));
+    const order = ['power', 'agility', 'speed', 'hp'];
+    let i = 0;
+    while (n-- > 0) {
+      const key = order[i++ % order.length];
+      if (key === 'hp') foe.hp += 5;
+      else foe[key] += 1;
+    }
+    foe.maxHp = foe.hp;
+  }
+  /** 从对手身上扣总属性点：优先扣大的项，任何一项都不低于 1（生命不低于 5）。 */
+  function removeFoeTotalPoints(foe, points) {
+    let n = Math.max(0, Math.ceil(Number(points) || 0));
+    const order = ['power', 'agility', 'speed', 'hp'];
+    let guard = 0;
+    while (n > 0 && guard++ < 10000) {
+      order.sort((a, b) => (Number(foe[b]) || 0) - (Number(foe[a]) || 0));
+      let done = false;
+      for (const key of order) {
+        if (key === 'hp') {
+          if ((Number(foe.hp) || 0) > 5) { foe.hp -= 5; done = true; break; }
+        } else if ((Number(foe[key]) || 0) > 1) {
+          foe[key] -= 1;
+          done = true;
+          break;
+        }
+      }
+      if (!done) break;
+      n--;
+    }
+    foe.maxHp = foe.hp;
+  }
+  /** 把对手总属性缩放到目标值；`limit='min'` 只补不扣，`limit='max'` 只扣不补。 */
+  function scaleFoeToTotal(foe, target, limit) {
+    const want = Math.max(4, Math.round(Number(target) || 0));
+    const before = foeTotalStats(foe);
+    if (!(before > 0)) return;
+    const factor = want / before;
+    for (const key of ['power', 'agility', 'speed']) {
+      foe[key] = Math.max(1, Math.round((Number(foe[key]) || 1) * factor));
+    }
+    foe.hp = Math.max(5, Math.round((Number(foe.hp) || 5) * factor));
+    foe.maxHp = foe.hp;
+    const total = foeTotalStats(foe);
+    if (limit === 'max') {
+      if (total > want + 1e-9) removeFoeTotalPoints(foe, total - want);
+    } else if (total < want - 1e-9) {
+      addFoeTotalPoints(foe, want - total);
+    }
+  }
+  /** 生成出口统一夹总属性：低于正常玩家总属性就抬上来，高于高配玩家上限就压下去。 */
+  function applyFoeTotalBounds(foe) {    if (!foe) return foe;
+    const level = Math.max(1, Math.min(MAX_PLAYER_LEVEL, Math.floor(Number(foe.level) || 1)));
+    const bounds = playerTotalBounds(level);
+    const total = foeTotalStats(foe);
+    if (total < bounds.normal - 1e-9) scaleFoeToTotal(foe, bounds.normal, 'min');
+    else if (total > bounds.max + 1e-9) scaleFoeToTotal(foe, bounds.max, 'max');
+    foe.maxHp = Math.max(1, Math.round(Number(foe.hp) || 1));
+    return foe;
+  }
+
   /**
    * 生成一个对手。
    * opts.levelJitter：在 level 上下浮动的等级范围（默认 ±2）
@@ -4076,6 +4421,7 @@
    * opts.gear：是否按等级随机穿戴装备（默认按玩家等级判断）
    * opts.gearSelfLevel：按对手自身等级装备（默认 false，用玩家等级判断解锁）
    * opts.name：直接指定名字
+   * opts.bounds === false：跳过总属性上下限夹取（只给调试/精确测量用）
    */
   function genAI(level, nameSuffix, opts) {
     opts = opts || {};
@@ -4114,7 +4460,13 @@
     const weapons = [], skills = [];
     /* 武器/技能**总数 = GData.wsLimit(finalLevel)**（跟着敌人等级走，不是随机个数）；
      * 只有「分到武器还是技能」和「各自几级」是随机的。一个池抽空时从另一个池补，
-     * 保证总池够时正好 nWS 个。 */
+     * 保证总池够时正好 nWS 个。
+     * 等级是 **[下限, 上限] 之间均匀随机**（2026-10 用户口径「中高等级随机敌人增强」）：
+     *   · 上限 = 强化表里 levelLimit ≤ 等级的最大档 —— 武器与技能**同一条线**都到 15 级。
+     *     以前技能封在 10 级（那批还没有真化线），现在满级对手也能随机出真技能，
+     *     与玩家可选的 11~15（真1~真5）一致，sim/tower 本来就认 11~15；
+     *   · 下限 = `aiToolMinLevel(finalLevel)`（90 级最低真1、50 级最低 6 级，见函数注释），
+     *     夹到最后 `Math.min(lo, hi)`，所以 6/13 这类不能升级的技能仍是 1 级。 */
     for (let i = 0; i < nWS; i++) {
       const wantWeapon = Math.random() < 0.55;
       let pool = wantWeapon ? wsPool : skPool;
@@ -4122,10 +4474,10 @@
       const chooseWeapon = pool === wsPool;
       if (!pool.length) break;
       const id = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
-      let hi = 1;
-      while (hi < (chooseWeapon ? 15 : 10) && Number(upgradeMap.getValue(hi).levelLimit) <= finalLevel) hi++;
+      let hi = aiToolMaxLevel(finalLevel);
       if (!chooseWeapon && [6, 13].includes(id)) hi = 1;
-      (chooseWeapon ? weapons : skills).push(id + ':' + (1 + Math.floor(Math.random() * hi)));
+      const lo = Math.min(aiToolMinLevel(finalLevel), hi);
+      (chooseWeapon ? weapons : skills).push(id + ':' + (lo + Math.floor(Math.random() * (hi - lo + 1))));
     }
     const foe = {
       name, level: finalLevel, power: base.power, agility: base.agility, speed: base.speed,
@@ -4192,15 +4544,21 @@
         applyPetBonuses(foe, foe.pets);
       } catch (e) { if (window.__errs) window.__errs.push('genAI pets: ' + (e && e.message)); }
     }
+    /* 最后再夹总属性：幻兽加成也算进对手面板，避免加完幻兽后又跌破正常玩家下限。
+     * `opts.bounds === false` 只给需要精确裸数值的调试/测量调用留出口；随机对手默认走。 */
+    if (opts.bounds !== false) applyFoeTotalBounds(foe);
     return foe;
   }
 
-  /* ---------- 对手身上「狂战套」的出现率（2026-10 用户口径，需求164） ----------
+  /* ---------- 对手身上「狂战套」的概率（需求164/166，**只剩现代模式在用**） ----------
    * 狂战套（set 51，唯一的 **50 级套**）以前**独占「最高档」**：50 级以后
-   * 每件装备有 75% 落进那一档 → 随机对手几乎人人全身狂战。现在改成**整只对手掷一次**：
-   *   · 50 级起：10% +（等级 − 50）× 1%  →  50 级 10%、55 级 15%、60 级 20%、70 级 30%
+   * 每件装备有 75% 落进那一档 → 随机对手几乎人人全身狂战。改成**每个部位**掷一次：
+   *   · 50 级起：10% +（等级 − 50）× 1%  →  50 级 10%、55 级 15%、70 级 30%
    *   · 50 级之前：0（那套本来就要 50 级才解锁，压根不在池子里）
-   * 命中 → 四件都穿狂战（仍然受穿戴率影响）；没命中 → 完全避开狂战，改穿次高档。
+   * 命中 → 该件穿狂战；没命中 → 该件完全避开狂战，从次高档里挑。
+   * **经典模式不再用这条曲线**（2026-10 用户口径）：黑装（60 级 8 套）加入档位池后
+   * 狂战已经不一定是「最强的一套」，而且经典普通 AI 本来就整套关闭套装收益 ——
+   * 所以经典改为**均匀分布**（见 `randomAIGears`），这组常量只服务现代模式。
    * 曲线只影响**随机对手**（genAI 这条路：随机挑战 / 天梯 / 竞技场 / 推荐好友）；
    * 挑战塔的狂战敌人由 tower.js 自己造（x10 层守关），不经过这里。 */
   const BERSERK_SET_ID = 51;
@@ -4218,6 +4576,35 @@
     const t = Math.min(1, Math.max(0, (lv - BERSERK_LEVEL) / span));
     const pct = Math.round(BERSERK_CHANCE_AT_50 * 100 + (BERSERK_CHANCE_AT_70 * 100 - BERSERK_CHANCE_AT_50 * 100) * t);
     return Math.min(BERSERK_CHANCE_MAX, pct / 100);
+  }
+
+  /* ---------- 随机对手武器/技能的**等级下限**（2026-10 用户口径） ----------
+   * 随机对手等级越高，火力的武器 / 技能档位就越不许压得太低：
+   *   · **90 级（满级）→ 最低 真1（11 级）**；
+   *   · **50 级 → 最低 6 级**；
+   *   · 中间按等级线性插值：`Math.floor((等级 − 2) / 8)`（两级锚点 50→6 / 90→11 正线穿过），
+   *     40 级 4、30 级 3、18 级 2、10 级以内 1 —— 低等级不受影响；
+   *   · 封到 **11 止**：真1 就是它的最低点，不再随等级继续顶高。
+   * 真正的夹取在 genAI 里做（`Math.min(lo, hi)`），所以 6/13 不能升级的技能仍是 1 级。 */
+  const AI_TOOL_MIN_TRUE_LEVEL = 11;    // 满级对手至少持一把 真1 武器（11 级）
+  function aiToolMinLevel(level) {
+    const lv = Math.max(1, Math.floor(Number(level) || 0));
+    return Math.max(1, Math.min(AI_TOOL_MIN_TRUE_LEVEL, Math.floor((lv - 2) / 8)));
+  }
+
+  /* ---------- 随机对手装备的**档位下限 / 全套门槛**（2026-10 用户口径） ----------
+   * ① **档位下限**（按套装使用等级）：等级越高，池里越不出现远古低档装——
+   *   · 60 级起 ≥ 25 档：池里只剩 25 档紫装、50 级狂战、60 级黑装（再往下就没有 60 级该穿的了）；
+   *   · 40 级起 ≥ 20 档：至少紫色档（蓝色及以下不再出现）；
+   *   · 40 级以下维持原来的全档池（低级别的过渡装本来就该占满）。
+   * ② **全套门槛**（AI_FULL_GEAR_LEVEL）：≥ 40 级的随机对手必定四件全穿，
+   *   不再受 40 级以下那条 0.5+等级/40 的穿戴率影响（两项是同批用户口径）。 */
+  const AI_FULL_GEAR_LEVEL = 40;
+  function aiGearMinLevel(level) {
+    const lv = Math.max(1, Math.floor(Number(level) || 0));
+    if (lv >= 60) return 25;
+    if (lv >= 40) return 20;
+    return 0;
   }
 
   /* ---------- 随机对手的橙装 / 宝石期望 ----------
@@ -4250,77 +4637,101 @@
     return Math.max(1, Math.min(7, base + jitter));
   }
 
-  /** 按等级随机穿装备：优先穿当前等级能穿的最好套装（与正常玩家成长一致），偶尔穿低一档的旧装。 */
+  /** 按等级随机穿装备（2026-10 用户口径，「中高等级随机敌人增强」批）：
+   *  · **档位下限**：池里只留 `aiGearMinLevel(gearLevel)` 以上的套装（两个模式都生效）；
+   *  · **全套装备**：对手等级 ≥ AI_FULL_GEAR_LEVEL 时必定四件全穿
+   *    （更低等级维持 0.5+等级/40 的穿戴率，同部位不重复照旧）；
+   *  · **经典模式不再单独掷狂战**：黑装年代狂战不一定是「最强的一套」，经典普通 AI
+   *    又整套关闭套装收益 —— 50 级起（原本狂战曲线生效的范围）改为**池里逐套均等抽样**；
+   *  · 现代模式维持旧分布：档位 75/20/5 + 狂战按部位单独掷（需求166 曲线不动）。
+   *  橙装 / 宝石仍然只掷**紫装档（quality 3）** —— 注释一直是这个口径，
+   *  以前 `quality >= 3` 会把 60 级黑装也刷成实例橙、在品质口径里被记成 4（黑装反而降档）。 */
   function randomAIGears(foeLevel, refLevel) {
     const level = Math.max(1, Math.min(foeLevel, Math.floor(refLevel || foeLevel || 1)));
+    const minSetLevel = aiGearMinLevel(level);
     const sets = [];
     gearSetMap.each((id, set) => {
-      if (set && Number(set.level) <= level) sets.push({ id: Number(id), level: Number(set.level), quality: parseInt(set.quality) || 0 });
+      const lv = Number(set && set.level);
+      if (set && Number.isFinite(lv) && lv <= level && lv >= minSetLevel) {
+        sets.push({ id: Number(id), level: lv, quality: parseInt(set.quality) || 0 });
+      }
     });
     if (!sets.length) return [];
-    // 正常玩家闯关到10级后基本穿满当前套装，对手的穿戴率不能差太多
-    const wearChance = Math.min(0.95, 0.5 + level / 40);
-    // 套装按等级从高到低分档；低等级套装的加成远小于高档，不能等概率随机
-    const tiers = [];
-    for (const set of sets.slice().sort((a, b) => b.level - a.level)) {
-      const top = tiers[tiers.length - 1];
-      if (top && top.level === set.level) top.sets.push(set);
-      else tiers.push({ level: set.level, sets: [set] });
+    // 正常玩家闯关到10级后基本穿满当前套装，对手的穿戴率不能差太多；
+    // 40 级起按用户口径**必定四件全穿**（它吃对手等级，不吃引用等级）。
+    const alwaysFull = Math.max(1, Math.floor(Number(foeLevel) || 0)) >= AI_FULL_GEAR_LEVEL;
+    const wearChance = alwaysFull ? 1 : Math.min(0.95, 0.5 + level / 40);
+    /* 经典 ≥50 级（狂战曲线原本生效的范围）改均匀分布；其它情况维持档位抽样 */
+    const classicUniform = slotMode() === 'classic' && level >= BERSERK_LEVEL;
+    let tiers = null, berserkPool = null, normalPool = null, pieceChance = 0;
+    if (!classicUniform) {
+      // 套装按等级从高到低分档；低等级套装的加成远小于高档，不能等概率随机
+      tiers = [];
+      for (const set of sets.slice().sort((a, b) => b.level - a.level)) {
+        const top = tiers[tiers.length - 1];
+        if (top && top.level === set.level) top.sets.push(set);
+        else tiers.push({ level: set.level, sets: [set] });
+      }
+      /* 狂战套**按部位**掷（需求166：70 级每件 50%、50 级下限 10%）：
+       * 每个部位独立判一次，命中就从「狂战那一档」里挑，没命中就从**剔除狂战之后**的档位池里挑
+       *（狂战是最高档唯一的成员，不剔掉的话没命中的部位仍有 75% 落进它，等于白压）。 */
+      berserkPool = tiers.filter((tier) => tier.sets.some((set) => set.id === BERSERK_SET_ID));
+      normalPool = tiers.map((tier) => ({ level: tier.level, sets: tier.sets.filter((set) => set.id !== BERSERK_SET_ID) }))
+        .filter((tier) => tier.sets.length);
+      if (!berserkPool.length && !normalPool.length) return [];
+      pieceChance = berserkChance(level);
     }
-    /* 狂战套**按部位**掷（2026-10 用户口径：70 级每件 50%、50 级下限 10%）：
-     * 每个部位独立判一次，命中就从「狂战那一档」里挑，没命中就从**剔除狂战之后**的档位池里挑
-     *（狂战是最高档唯一的成员，不剔掉的话没命中的部位仍有 75% 落进它，等于白压）。 */
-    const berserkPool = tiers.filter((tier) => tier.sets.some((set) => set.id === BERSERK_SET_ID));
-    const normalPool = tiers.map((tier) => ({ level: tier.level, sets: tier.sets.filter((set) => set.id !== BERSERK_SET_ID) }))
-      .filter((tier) => tier.sets.length);
-    if (!berserkPool.length && !normalPool.length) return [];
-    const pieceChance = berserkChance(level);
     const out = [];
     const usedType = new Set();
     for (let slot = 0; slot < 4; slot++) {
       if (Math.random() > wearChance) continue;
-      const useBerserk = berserkPool.length > 0 && Math.random() < pieceChance;
-      const pool = useBerserk ? berserkPool : normalPool;
-      if (!pool.length) break;
-      // 75% 穿最好一档，20% 次一档，5% 随机一档旧装；同部位冲突时重选
-      for (let attempt = 0; attempt < 3; attempt++) {
+      let tier = null;
+      if (classicUniform) {
+        /* 均匀分布：池里**每一套**等概率（狂战只是其中之一，不再有单独概率） */
+        const picked = sets[Math.floor(Math.random() * sets.length)];
+        tier = { level: picked.level, sets: [picked] };
+      } else {
+        const useBerserk = berserkPool.length > 0 && Math.random() < pieceChance;
+        const pool = useBerserk ? berserkPool : normalPool;
+        if (!pool.length) break;                       // 两边池都空只在极端空池才发生，直接收工
+        // 75% 穿最好一档，20% 次一档，5% 随机一档旧装；同部位冲突时重选
         const roll = Math.random();
-        const tier = roll < 0.75 ? pool[0]
+        tier = roll < 0.75 ? pool[0]
           : roll < 0.95 ? pool[Math.min(1, pool.length - 1)]
           : pool[Math.floor(Math.random() * pool.length)];
-        const set = tier.sets[Math.floor(Math.random() * tier.sets.length)];
-        const gearsOfSet = [];
-        gearMap.each((k, v) => { if (parseInt(v.setId) === set.id) gearsOfSet.push(parseInt(v.id)); });
-        if (!gearsOfSet.length) break;
-        /* 命中狂战那一档的**这一件一定给狂战件**：狂战套正好 4 件 = 4 个部位、
-         * 而身上最多 4 个部位，所以「取一件没用过的部位」必定取得到 —— 这样
-         *「每个部位 50%」才是真的 50%。若沿用「随机取件 + 同部位不重复」，
-         * 命中率会被重选吃掉约 4 成（实测 60 级 23.7%，口径要 30%），量出来跟标称对不上。 */
-        let gid = null;
-        if (useBerserk) {
-          gid = gearsOfSet.find((id) => { const it = gearInst(id); return it && !usedType.has(it.type); });
-        }
-        if (gid == null) gid = gearsOfSet[Math.floor(Math.random() * gearsOfSet.length)];
-        const info = gearInst(gid);
-        if (!info || usedType.has(info.type)) continue;   // 同部位不重复穿
-        usedType.add(info.type);
-        // 原版白绿无词条，蓝装1条且最多2星，紫装2条且最多3星。
-        const extSlots = fusionSlots(info.quality);
-        const ext = extSlots ? randomExt(extSlots, info.quality >= 3 ? 3 : 2) : [];
-        const piece = { id: gid, used: true, ext, attr: rollGearAttr(gid) };   // 主属性同样 ±10% 浮动
-        /* 橙装 / 宝石：只对紫装档掷；橙装是**实例级** quality=4（不是换高 id），
-         * 所以经典战斗的 q4 帧、套装收益、宝石的主属性/词条加成都会照玩家那一套生效。 */
-        const ref = Math.max(1, Math.floor(Number(refLevel) || level));
-        if (Number(info.quality) >= 3 && Math.random() < aiOrangeChance(ref)) {
-          piece.orange = true;
-          if (Math.random() < aiGemChance(ref)) {
-            const lv = aiGemLevel(ref);
-            if (lv) piece.gem = { id: 100 + lv, ext: lv * (2 + Math.floor(Math.random() * 3)) };
-          }
-        }
-        out.push(piece);
-        break;
       }
+      const set = tier.sets[Math.floor(Math.random() * tier.sets.length)];
+      const gearsOfSet = [];
+      gearMap.each((k, v) => { if (parseInt(v.setId) === set.id) gearsOfSet.push(parseInt(v.id)); });
+      if (!gearsOfSet.length) break;
+      /* 这一件**一定落在还没穿过的部位**：直接在没用过的部位里挑（每套正好 4 件 = 4 部位，
+       * 必挑得到）。以前的「随机取件 + 同部位不重复重选」有 3 次全撞墙的旁路，
+       * 40 级以上按口径必须四件齐，这里就不再留空。 */
+      const candidates = gearsOfSet.filter((id) => {
+        const it = gearInst(id);
+        return it && !usedType.has(it.type);
+      });
+      if (!candidates.length) break;
+      const gid = candidates[Math.floor(Math.random() * candidates.length)];
+      const info = gearInst(gid);
+      if (!info) continue;
+      usedType.add(info.type);
+      // 原版白绿无词条，蓝装1条且最多2星，紫装2条且最多3星。
+      const extSlots = fusionSlots(info.quality);
+      const ext = extSlots ? randomExt(extSlots, info.quality >= 3 ? 3 : 2) : [];
+      const piece = { id: gid, used: true, ext, attr: rollGearAttr(gid) };   // 主属性同样 ±10% 浮动
+      /* 橙装 / 宝石：只对**紫装档（quality 3）**掷；橙装是**实例级** quality=4（不是换高 id）。
+       * 60 级黑装（quality 5）本来就是更高的一档，不再叠实例橙（叠了会被 `gearQuality`
+       * 记成 4，黑装反而在品质口径里降档 —— 注释口径一直是紫装）。 */
+      const ref = Math.max(1, Math.floor(Number(refLevel) || level));
+      if (info.quality === 3 && Math.random() < aiOrangeChance(ref)) {
+        piece.orange = true;
+        if (Math.random() < aiGemChance(ref)) {
+          const lv = aiGemLevel(ref);
+          if (lv) piece.gem = { id: 100 + lv, ext: lv * (2 + Math.floor(Math.random() * 3)) };
+        }
+      }
+      out.push(piece);
     }
     return out;
   }
@@ -4592,8 +5003,23 @@
       : (S.dailyClaimDate === yesterdayDate() ? Math.max(1, days) + 1 : 1);
     const extra = dailyGiftExtra(date);
     return { date, claimed, streak, gold: Math.min(150, 100 + (streak - 1) * 10), extra,
+      newbie: newbieGift(date),
       /* 兼容旧界面/旧调用：只有轮到挑战书时才是 1。 */
       challengeBooks: extra.id === 23 ? extra.count : 0 };
+  }
+  /** 新号前三天（按建号本地日期算）的每日礼包附加福利：3 个大体力药剂 + 150 金松果。
+   *  老档没有 `newbieStartDate`，一律不补，避免把老玩家当新号。 */
+  function newbieGift(date) {
+    const src = validLocalDate(date) ? String(date) : localDate();
+    const start = validLocalDate(S.newbieStartDate) ? String(S.newbieStartDate) : '';
+    if (!start) return null;
+    const toDay = (s) => {
+      const [y, m, d] = String(s).split('-').map(Number);
+      return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+    };
+    const day = toDay(src) - toDay(start) + 1;
+    if (day < 1 || day > 3) return null;
+    return { day, gold: 150, propId: 2, count: 3, name: '新手福利' };
   }
 
   /* ============================================================
@@ -4818,11 +5244,20 @@
     const extra = daily.extra || dailyGiftExtra(daily.date);
     addGold(daily.gold);
     S.props[extra.id] = (S.props[extra.id] || 0) + extra.count;
+    const newbie = daily.newbie || null;
+    if (newbie) {
+      addGold(newbie.gold);
+      S.props[newbie.propId] = (S.props[newbie.propId] || 0) + newbie.count;
+    }
     S.loginStreak = daily.streak;
     S.dailyClaimDate = daily.date;
     save();
-    return { ok: true, msg: '连续登录 ' + daily.streak + ' 天：金松果 +' + daily.gold + '，' + extra.name + ' +' + extra.count,
-      gold: daily.gold, extra, challengeBooks: extra.id === 23 ? extra.count : 0, streak: daily.streak, date: daily.date };
+    const newbieMsg = newbie
+      ? '，新手福利：大体力药剂 +' + newbie.count + '、金松果 +' + newbie.gold
+      : '';
+    return { ok: true, msg: '连续登录 ' + daily.streak + ' 天：金松果 +' + daily.gold + '，' + extra.name + ' +' + extra.count + newbieMsg,
+      gold: daily.gold + (newbie ? newbie.gold : 0), extra, newbie,
+      challengeBooks: extra.id === 23 ? extra.count : 0, streak: daily.streak, date: daily.date };
   }
 
   function validBattle(entry) {
@@ -4867,13 +5302,280 @@
   }
 
   /* ============================================================
+   * 【S22b】调试所得账本（可追溯 + 只回收调试部分）
+   *
+   * 用户口径（2026-10）：debug 发的东西要留下索引；系统页要能一次性取消所有
+   * 通过 debug 得到的物品，同时尽量不碰玩家自己打出来的东西。
+   *
+   * 做法是「第一次发放时记基线」而不是「每次操作记剩余」：
+   *   · 某道具第一次被调试发放时，记下当时**已经拥有**的数量 `before`，
+   *     之后累计 `granted`；回收量 = min(granted, 当前 - before)。
+   *     玩家花掉/用掉一部分时，最多只会少回收，不会倒扣到基线以下。
+   *   · 武器/技能记「第一次调试前的等级」：原来没有 → 回收时删除；
+   *     原来有 → 只把等级还原到 before（玩家后来自己升得更高则不动）。
+   *   · 装备按**实例 key**记：只删调试时新生成的那几件，玩家原有的 key 不动。
+   *   · 等级/经验/属性只进历史索引，不自动回退（会破坏升级链、已选武技与天赋）。
+   * ============================================================ */
+  const DEBUG_LEDGER_MAX_HISTORY = 200;
+  function debugLedgerEnsure() {
+    if (!S) return null;
+    if (!object(S.debugLedger)) {
+      S.debugLedger = { v: 1, createdAt: Date.now(), props: {}, gold: null, goldCup: null, exp: null, weapons: {}, skills: {}, gears: [], history: [] };
+    }
+    const L = S.debugLedger;
+    if (!object(L.props)) L.props = {};
+    if (!object(L.weapons)) L.weapons = {};
+    if (!object(L.skills)) L.skills = {};
+    if (!Array.isArray(L.gears)) L.gears = [];
+    if (!Array.isArray(L.history)) L.history = [];
+    if (!Number.isFinite(Number(L.createdAt))) L.createdAt = Date.now();
+    return L;
+  }
+  /** 当前武器/技能列表 → {id: level}，给快照与回收判断共用。 */
+  function debugLevelMap(list) {
+    const out = {};
+    for (const entry of Array.isArray(list) ? list : []) {
+      const [id, lv] = String(entry).split(':').map(Number);
+      if (Number.isFinite(id) && id > 0) out[id] = Math.max(0, Number(lv) || 0);
+    }
+    return out;
+  }
+  function debugLevelOf(list, id) {
+    for (const entry of Array.isArray(list) ? list : []) {
+      const [wid, lv] = String(entry).split(':').map(Number);
+      if (wid === Number(id)) return Math.max(0, Number(lv) || 0);
+    }
+    return 0;
+  }
+  /** 调试操作前的快照：只取会被发放/改动的字段，不深拷录像等大对象。 */
+  function debugSnapshot() {
+    if (!S) return null;
+    return {
+      props: Object.assign({}, S.props),
+      goldPoint: Number(S.goldPoint) || 0,
+      goldCup: Number(S.goldCup) || 0,
+      exp: Number(S.exp) || 0,
+      level: Number(S.level) || 1,
+      power: Number(S.power) || 0, agility: Number(S.agility) || 0,
+      speed: Number(S.speed) || 0, maxHp: Number(S.maxHp) || 0,
+      weapons: debugLevelMap(S.weapons), skills: debugLevelMap(S.skills),
+      gearKeys: (Array.isArray(S.gears) ? S.gears : []).map((g) => String(g.key)),
+      wsPicks: Array.isArray(S.wsPicks) ? S.wsPicks.length : 0,
+    };
+  }
+  function debugPushHistory(L, label, changes) {
+    if (!L || !object(changes)) return;
+    const entry = { at: Date.now(), label: String(label || '调试') };
+    for (const key of ['props', 'weapons', 'skills', 'gears', 'gold', 'goldCup', 'exp', 'level', 'stats', 'picks', 'cleared']) {
+      const v = changes[key];
+      if (v == null) continue;
+      if (Array.isArray(v) && !v.length) continue;
+      if (object(v) && !Array.isArray(v) && !Object.keys(v).length) continue;
+      if (typeof v === 'number' && !v) continue;
+      entry[key] = v;
+    }
+    if (Object.keys(entry).length <= 2) return;
+    L.history.push(entry);
+    if (L.history.length > DEBUG_LEDGER_MAX_HISTORY) L.history.splice(0, L.history.length - DEBUG_LEDGER_MAX_HISTORY);
+  }
+  /** 记录「操作前快照 → 操作后」的净增量。debug.js 在所有发放按钮外面包一层。 */
+  function debugRecordDiff(before, label) {
+    if (!before || !S) return null;
+    const L = debugLedgerEnsure();
+    if (!L) return null;
+    const changes = {};
+    const propChanges = {};
+    for (const id of Object.keys(S.props || {})) {
+      const now = Number(S.props[id]) || 0, was = Number(before.props[id]) || 0;
+      if (now <= was) continue;
+      const delta = now - was;
+      let e = L.props[id];
+      if (!object(e)) e = L.props[id] = { before: was, granted: 0 };
+      if (!Number.isFinite(Number(e.before))) e.before = was;
+      e.granted = Math.max(0, Number(e.granted) || 0) + delta;
+      propChanges[id] = delta;
+    }
+    if (Object.keys(propChanges).length) changes.props = propChanges;
+
+    const cur = (key, name) => {
+      const now = Number(S[key]) || 0, was = Number(before[key]) || 0;
+      if (now <= was) return;
+      const delta = now - was;
+      let e = L[name];
+      if (!object(e)) e = L[name] = { before: was, granted: 0 };
+      if (!Number.isFinite(Number(e.before))) e.before = was;
+      e.granted = Math.max(0, Number(e.granted) || 0) + delta;
+      changes[name] = delta;
+    };
+    cur('goldPoint', 'gold');
+    cur('goldCup', 'goldCup');
+
+    const levelGain = Math.max(0, (Number(S.level) || 1) - (Number(before.level) || 1));
+    const expGain = levelGain ? 0 : Math.max(0, (Number(S.exp) || 0) - (Number(before.exp) || 0));
+    const stats = {
+      power: Math.max(0, (Number(S.power) || 0) - (Number(before.power) || 0)),
+      agility: Math.max(0, (Number(S.agility) || 0) - (Number(before.agility) || 0)),
+      speed: Math.max(0, (Number(S.speed) || 0) - (Number(before.speed) || 0)),
+      maxHp: Math.max(0, (Number(S.maxHp) || 0) - (Number(before.maxHp) || 0)),
+    };
+    const hasStats = Object.values(stats).some((n) => n > 0);
+    if (levelGain || expGain || hasStats) {
+      let e = L.exp;
+      if (!object(e)) e = L.exp = { beforeLevel: Number(before.level) || 1, beforeExp: Number(before.exp) || 0, grantedExp: 0, levels: 0, stats: { power: 0, agility: 0, speed: 0, maxHp: 0 } };
+      if (!object(e.stats)) e.stats = { power: 0, agility: 0, speed: 0, maxHp: 0 };
+      e.levels = Math.max(0, Number(e.levels) || 0) + levelGain;
+      e.grantedExp = Math.max(0, Number(e.grantedExp) || 0) + expGain;
+      for (const k of Object.keys(stats)) e.stats[k] = Math.max(0, Number(e.stats[k]) || 0) + stats[k];
+      if (levelGain) changes.level = levelGain;
+      if (expGain) changes.exp = expGain;
+      if (hasStats) changes.stats = stats;
+    }
+
+    const diffList = (list, beforeMap, target, keyName) => {
+      const out = {};
+      for (const id of Object.keys(debugLevelMap(list))) {
+        const now = debugLevelOf(list, id), was = Number(beforeMap[id]) || 0;
+        if (now <= was) continue;
+        let e = target[id];
+        if (!object(e)) e = target[id] = { before: was, granted: 0 };
+        if (!Number.isFinite(Number(e.before))) e.before = was;
+        e.granted = Math.max(Number(e.granted) || 0, now);
+        out[id] = now;
+      }
+      if (Object.keys(out).length) changes[keyName] = out;
+      return out;
+    };
+    diffList(S.weapons, before.weapons, L.weapons, 'weapons');
+    diffList(S.skills, before.skills, L.skills, 'skills');
+
+    const gearChanges = [];
+    const beforeGears = new Set(Array.isArray(before.gearKeys) ? before.gearKeys : []);
+    for (const g of (Array.isArray(S.gears) ? S.gears : [])) {
+      const key = String(g.key);
+      if (!key || beforeGears.has(key)) continue;
+      if (!L.gears.includes(key)) L.gears.push(key);
+      gearChanges.push(key);
+    }
+    if (gearChanges.length) changes.gears = gearChanges;
+
+    const pickGain = Math.max(0, (Array.isArray(S.wsPicks) ? S.wsPicks.length : 0) - (Number(before.wsPicks) || 0));
+    if (pickGain) changes.picks = pickGain;
+
+    if (!Object.keys(changes).length) return null;
+    debugPushHistory(L, label, changes);
+    save();
+    return changes;
+  }
+  /** 玩家主动遗忘武技：把账本里同名记录去掉，避免之后它被重新学会时被误判成调试所得。 */
+  function debugForgetWS(kind, id) {
+    if (!S || !object(S.debugLedger)) return;
+    const map = kind === 'skill' ? S.debugLedger.skills : S.debugLedger.weapons;
+    if (object(map)) delete map[Number(id)];
+    save();
+  }
+  /** 账本摘要：给系统页/清理弹窗用。entries 是**当前还能回收**的条目。 */
+  function debugLedgerSummary() {
+    const L = S && object(S.debugLedger) ? S.debugLedger : null;
+    if (!L) return { hasData: false, entries: [], history: [], removable: 0 };
+    const entries = [];
+    const addProp = (id, e, kind, name) => {
+      const now = kind === 'gold' ? Number(S.goldPoint) || 0 : kind === 'goldCup' ? Number(S.goldCup) || 0 : Number(S.props[id]) || 0;
+      const before = Math.max(0, Number(e && e.before) || 0);
+      const granted = Math.max(0, Number(e && e.granted) || 0);
+      const remove = Math.min(granted, Math.max(0, now - before));
+      if (remove > 0) entries.push({ kind, id, name, remove, before, granted, current: now });
+    };
+    for (const id of Object.keys(L.props || {})) {
+      const def = propMap.getValue(Number(id));
+      addProp(id, L.props[id], 'prop', def ? def.name : ('道具#' + id));
+    }
+    if (object(L.gold)) addProp(8, L.gold, 'gold', '金松果');
+    if (object(L.goldCup)) addProp(40, L.goldCup, 'goldCup', '金杯');
+    const addWS = (map, kind) => {
+      for (const id of Object.keys(map || {})) {
+        const e = map[id];
+        const list = kind === 'weapon' ? S.weapons : S.skills;
+        const now = debugLevelOf(list, id);
+        if (!now) continue;
+        const before = Math.max(0, Number(e && e.before) || 0);
+        const granted = Math.max(0, Number(e && e.granted) || 0);
+        if (now > before && now <= granted) {
+          const def = (kind === 'weapon' ? weaponsMap : skillsMap).getValue(Number(id));
+          entries.push({ kind, id: Number(id), name: def ? def.name : (kind + '#' + id),
+            mode: before > 0 ? 'restore' : 'remove', before, granted, current: now });
+        }
+      }
+    };
+    addWS(L.weapons, 'weapon');
+    addWS(L.skills, 'skill');
+    const gearKeys = new Set((Array.isArray(S.gears) ? S.gears : []).map((g) => String(g.key)));
+    for (const key of (Array.isArray(L.gears) ? L.gears : [])) {
+      if (!gearKeys.has(String(key))) continue;
+      const g = (Array.isArray(S.gears) ? S.gears : []).find((x) => String(x.key) === String(key));
+      const def = g && gearMap.getValue(g.id);
+      entries.push({ kind: 'gear', key: String(key), name: def ? def.name : '装备', remove: 1 });
+    }
+    const exp = object(L.exp) ? {
+      levels: Math.max(0, Number(L.exp.levels) || 0),
+      grantedExp: Math.max(0, Number(L.exp.grantedExp) || 0),
+      stats: object(L.exp.stats) ? L.exp.stats : null,
+    } : null;
+    const history = (Array.isArray(L.history) ? L.history : []).slice(-20);
+    return { hasData: entries.length > 0 || history.length > 0, entries, history, removable: entries.length, exp, createdAt: Number(L.createdAt) || 0 };
+  }
+  /**
+   * 回收所有还能定位到的调试所得。
+   * 等级/经验/属性不回退；已经花掉/融合掉/卖掉的调试物品无法找回，也不倒扣。
+   */
+  function clearDebugGains() {
+    if (!S) return { ok: false, msg: '还没有存档' };
+    const sum = debugLedgerSummary();
+    if (!sum.entries.length) return { ok: false, msg: '没有可回收的调试所得', summary: sum };
+    const removed = [];
+    for (const e of sum.entries) {
+      if (e.kind === 'prop') {
+        const left = Math.max(0, (Number(S.props[e.id]) || 0) - e.remove);
+        if (left > 0) S.props[e.id] = left; else delete S.props[e.id];
+        removed.push(e.name + '×' + e.remove);
+      } else if (e.kind === 'gold') {
+        S.goldPoint = Math.max(0, (Number(S.goldPoint) || 0) - e.remove);
+        removed.push('金松果×' + e.remove);
+      } else if (e.kind === 'goldCup') {
+        S.goldCup = Math.max(0, (Number(S.goldCup) || 0) - e.remove);
+        removed.push('金杯×' + e.remove);
+      } else if (e.kind === 'weapon' || e.kind === 'skill') {
+        const list = e.kind === 'weapon' ? S.weapons : S.skills;
+        const at = list.findIndex((x) => Number(String(x).split(':')[0]) === Number(e.id));
+        if (at >= 0) {
+          if (e.mode === 'remove') list.splice(at, 1);
+          else list[at] = Number(e.id) + ':' + e.before;
+          removed.push(e.name + (e.mode === 'remove' ? '（移除）' : '（还原到 Lv' + e.before + '）'));
+        }
+      } else if (e.kind === 'gear') {
+        const beforeLen = (Array.isArray(S.gears) ? S.gears : []).length;
+        S.gears = (Array.isArray(S.gears) ? S.gears : []).filter((g) => String(g.key) !== String(e.key));
+        if (S.gears.length !== beforeLen) removed.push(e.name + '（装备）');
+      }
+    }
+    const L = debugLedgerEnsure();
+    L.props = {}; L.gold = null; L.goldCup = null; L.exp = null;
+    L.weapons = {}; L.skills = {}; L.gears = []; L.clearedAt = Date.now();
+    L.history.push({ at: Date.now(), label: '清理调试所得', cleared: removed.length });
+    if (L.history.length > DEBUG_LEDGER_MAX_HISTORY) L.history.splice(0, L.history.length - DEBUG_LEDGER_MAX_HISTORY);
+    save();
+    return { ok: true, removed, summary: debugLedgerSummary(), msg: '已清理 ' + removed.length + ' 项调试所得' };
+  }
+
+  /* ============================================================
    * 【S23】导出 window.State
    * ============================================================ */
   window.State = {
     saveKey: SAVE_KEY, uiModeKey: UI_MODE_KEY, testMode: !!testMode, rememberUiMode,
     save, load, newGame, state, switchMode, activeUiMode, hasModeSave, tickEnergy, energyCountdown,
-    fileProbe, fileLoad, fileWrite, fileWriteNow, fileInfo, storageMode, flushFileWrite, setSaveTransport, syncFormatTime: fmtTime, markLocalFresh: () => { fileState.freshLocal = true; },
+    fileProbe, fileLoad, fileWrite, fileWriteNow, fileInfo, storageMode, flushFileWrite, setSaveTransport, hasFileTransport, readFileRaw, importFileRaw, syncFormatTime: fmtTime, markLocalFresh: () => { fileState.freshLocal = true; },
     hasLocalSave, localSaveMeta, fileLoadedThisBoot,
+    /* 调试所得账本：快照/记录/摘要/回收（系统页「调试所得」与 debug.js 用）。 */
+    debugSnapshot, debugRecordDiff, debugForgetWS, debugLedgerSummary, clearDebugGains,
     vipActive, vipLevel, vipUntil, vipDaysLeft, vipRegenMul, vipPassiveExpCap, vipExpNeed,
     vipRow, buyVip, grantVip, tickVipDaily, gearCapacity, syncVipEnergyCap,
     VIP_LEVELS, VIP_LEVEL_EXP, VIP_MAX_LEVEL, VIP_PLANS, VIP_ENERGY_BONUS, vipEnergyCap, VIP_GEAR_BONUS, GEAR_CAPACITY,
@@ -4885,7 +5587,7 @@
     apprenticeTributeTable,
     TRIBUTE_LEVEL_SUM_FULL,
     undoPoint, undoDepth, hasUpgradableWS,
-    gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, extText, randomExt,
+    gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, grantStarterGear, extText, randomExt,
     blackGearEnabled, isBlackGearId, BLACK_PROP_IDS,
     gearBaseAttr, rollGearAttr, gearCostOf, GEAR_ATTR_JITTER,
     FUSION_SAME_NAME_RATE, FUSION_MUTANT_RATE, FUSION_MUTANT_SET, FUSION_EXT_UPGRADE_RATE,
@@ -4901,6 +5603,8 @@
     supportPromptPending, supportPromptTake, supportPromptReset, SUPPORT_LEVEL,
     SPEED_UNLOCK_LEVEL, SKIP_UNLOCK_LEVEL, unlockedSpeed, unlockedSkip,
     BERSERK_SET_ID, BERSERK_LEVEL, BERSERK_CHANCE_AT_50, BERSERK_CHANCE_AT_70, berserkChance,
+    AI_FULL_GEAR_LEVEL, aiToolMinLevel, aiToolMaxLevel, aiGearMinLevel,
+    playerNormalTotal, playerMaxTotal, playerTotalBounds, foeTotalStats, applyFoeTotalBounds, foeLoadout,
     GEM_SOCKET_COST,
     gainExp, consumeEnergy, tickPropStates, fightReward, revengeReward, markRevenged, revengeInfo, noteRevenge, REVENGE_EXP_RATIO, expBoostPct, gainExpWithBoost,
     apprenticeTributeExpRatio, apprenticeTributeGoldRatio, TRIBUTE_EXP_MIN, TRIBUTE_EXP_MAX, TRIBUTE_GOLD_MIN, TRIBUTE_GOLD_MAX,

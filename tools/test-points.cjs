@@ -208,6 +208,47 @@ test('对手（genAI）与玩家共用同一套成长预算、四项口径与占
   }
 });
 
+test('随机敌人总属性夹在正常玩家与高配上限之间，且期望随等级增长', () => {
+  const g = setup();
+  let prevLo = -1, prevHi = -1;
+  for (let level = 1; level <= 90; level++) {
+    const lo = g.State.playerNormalTotal(level);
+    const hi = g.State.playerMaxTotal(level);
+    assert.ok(lo > 0 && hi > lo, level + ' 级上下限必须有效：' + lo + ' / ' + hi);
+    assert.ok(lo >= prevLo, level + ' 级正常玩家下限倒退了');
+    assert.ok(hi >= prevHi, level + ' 级高配上限倒退了');
+    prevLo = lo;
+    prevHi = hi;
+  }
+  const levels = [10, 20, 30, 40, 50, 60, 70, 90];
+  let prevAvg = -1;
+  for (const level of levels) {
+    const lo = g.State.playerNormalTotal(level);
+    const hi = g.State.playerMaxTotal(level);
+    let sum = 0;
+    for (let i = 0; i < 40; i++) {
+      const foe = g.State.genAI(level, '', { levelJitter: 0, gearSelfLevel: true });
+      const total = g.State.foeTotalStats(foe);
+      assert.ok(total >= lo - 1e-6, level + ' 级总属性低于正常玩家：' + total + ' < ' + lo);
+      assert.ok(total <= hi + 1e-6, level + ' 级总属性超过高配上限：' + total + ' > ' + hi);
+      assert.equal(foe.hp, foe.maxHp, level + ' 级随机敌人必须满血生成');
+      sum += total;
+    }
+    const avg = sum / 40;
+    assert.ok(avg > prevAvg, level + ' 级总属性期望没有随等级增长：' + avg + ' <= ' + prevAvg);
+    prevAvg = avg;
+  }
+  /* 上下限夹取本身也要能从极端值拉回来，不能只靠自然生成恰好落在区间里。 */
+  const low = { level: 90, power: 1, agility: 1, speed: 1, hp: 5, maxHp: 5 };
+  g.State.applyFoeTotalBounds(low);
+  assert.ok(g.State.foeTotalStats(low) >= g.State.playerNormalTotal(90), '极低属性要被抬到正常玩家下限');
+  assert.equal(low.hp, low.maxHp, '抬升后生命上限同步');
+  const high = { level: 90, power: 99999, agility: 99999, speed: 99999, hp: 999999, maxHp: 999999 };
+  g.State.applyFoeTotalBounds(high);
+  assert.ok(g.State.foeTotalStats(high) <= g.State.playerMaxTotal(90), '极高属性要被压到高配上限');
+  assert.equal(high.hp, high.maxHp, '压低后生命上限同步');
+});
+
 test('随机对手难度系数只放大最终战斗属性，不改成长预算', () => {
   const g = setup();
   for (const level of [15, 30, 50, 70, 90]) {

@@ -1506,7 +1506,30 @@ function guideBundle() {
     hdApplied.length ? '（HD 覆盖 ' + hdApplied.length + '）' : '');
 }
 
-if (process.argv.includes('--gear-colors')) gearColorBundle();
+/* Source-faithful confirmation and personal dummy-record dialogs. Keep this
+ * incremental: no page, equipment or global index is regenerated. */
+function socialDialogBundle() {
+  const names = swfSymbolIds();
+  const roots = { confirm: names.get('二次确认'), woodRecord: names.get('战斗统计') };
+  if (Object.values(roots).some(id => !id)) die('原版确认 / 战斗统计元件不存在');
+  const { data } = readMovie();
+  const byId = new Map(data.tg.map(tag => [String(tag.id), tag]));
+  const { tags: rawTags, missing } = closure(byId, Object.values(roots));
+  if (missing.length) die('确认 / 战斗统计素材闭包缺失：' + missing.join(', '));
+  const tags = rawTags.map(prune).sort((a, b) => Number(a.id) - Number(b.id));
+  const stats = { bitmaps: [] };
+  extractBitmaps(tags, stats);
+  fs.writeFileSync(path.join(OUT, 'tags-social-dialog.json'), JSON.stringify(tags));
+  fs.writeFileSync(path.join(OUT, 'social-dialog-manifest.json'), JSON.stringify({
+    generator: 'tools/gen-ssfight-ui.cjs --social-dialog', roots, count: tags.length,
+    source: 'MainMovie.as: alertRevenge / showJoinCheckWin / showDeadManWin',
+    bitmaps: stats.bitmaps, missingIds: missing,
+  }, null, 1));
+  console.log('tags-social-dialog.json: %d tags; existing page bundles untouched', tags.length);
+}
+
+if (process.argv.includes('--social-dialog')) socialDialogBundle();
+else if (process.argv.includes('--gear-colors')) gearColorBundle();
 else if (process.argv.includes('--fight-result')) fightResultBundle();
 else if (process.argv.includes('--fight')) fightBundle();
 else if (process.argv.includes('--fusion')) fusionBundle();

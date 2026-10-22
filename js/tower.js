@@ -187,7 +187,7 @@
     return true;
   }
   function mondayKey() {
-    const d = new Date();
+    const d = new Date(Date.now());
     d.setDate(d.getDate() - (d.getDay() + 6) % 7);
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
@@ -3154,12 +3154,13 @@
    * 【T12】层通关与推进 —— layerClear / advanceLayer
    * ============================================================ */
 
-  /* 挑战塔黑卡（一次性）：每 10 层 1 张，每 25 层再 +1 张；第 100 层首通另有黑装自选箱。 */
+  /* 挑战塔黑卡（一次性）：每 20 层 1 张、每 50 层再 +1 张；第 100 层首通改为给黑装自选箱（不再发卡）。 */
   function towerBlackCards(layer) {
     layer = Math.max(1, Math.floor(Number(layer) || 1));
+    if (layer % 100 === 0) return 0;       // 整百层：自选箱，不叠黑卡
     let n = 0;
-    if (layer % 10 === 0) n += 1;
-    if (layer % 25 === 0) n += 1;
+    if (layer % 20 === 0) n += 1;
+    if (layer % 50 === 0) n += 1;
     return n;
   }
   /** 无尽塔黑卡：每累计 50 层 1 张（50/100/150…），周限由 State 管。 */
@@ -3205,7 +3206,7 @@
       }
       out.prizes = settlePrizes(run);
       out.gold = gold;
-      /* 黑装：挑战塔一次性里程碑（每 10 层 1 张、每 25 层再 +1；100 层首通给自选箱）。
+      /* 黑装：挑战塔一次性里程碑（每 20 层 1 张、每 50 层再 +1；100 层首通给自选箱）。
        * 现代界面已整体删除黑装内容，只保留塔本身的其它奖励。 */
       if (State.blackGearEnabled()) {
         const blackCards = towerBlackCards(run.layer);
@@ -3245,7 +3246,7 @@
       out.milestone = reward;
     }
     out.score = run.score; out.coins = run.coins;
-    /* 黑装：无尽塔**每累计 50 层** 1 张黑卡，周限 3 张（周一重置）。
+    /* 黑装：无尽塔**每累计 50 层** 1 张黑卡，周限 10 张（周一重置）。
      * 现代界面已整体删除黑装内容，不再发卡。 */
     if (State.blackGearEnabled() && endlessBlackCardLayer(run.layer)) {
       out.black = State.grantEndlessBlackCard(1);

@@ -247,6 +247,40 @@
    * 【UI6】挑战（PVP vs AI）
    * ============================================================ */
   // ---------- 挑战（PVP vs AI） ----------
+  /** 现代随机战斗的「查看」：武技等级、装备主属性/附加词条/宝石、幻兽。 */
+  function showEnemyLoadout(foe) {
+    const d = State.foeLoadout ? State.foeLoadout(foe) : null;
+    if (!d) { toast('对手数据还没准备好'); return; }
+    const box = el('div');
+    const stat = d.stats;
+    const part = '<p class="panel-desc"><b>' + escHtml(d.name || '对手') + ' Lv.' + d.level + '</b>　力量 ' +
+      stat.power + '　敏捷 ' + stat.agility + '　速度 ' + stat.speed + '　生命 ' + stat.hp + '/' + stat.maxHp + '</p>';
+    const weaponRows = d.weapons.length
+      ? d.weapons.map((w) => '<div class="ws-row"><div class="ws-info"><b>' + escHtml(w.name) + '</b> <span class="ws-type">' +
+        escHtml(w.type || '武器') + '</span><span class="ws-lv">Lv.' + w.level + '</span></div></div>').join('')
+      : '<p class="panel-desc">没有武器</p>';
+    const skillRows = d.skills.length
+      ? d.skills.map((s) => '<div class="ws-row"><div class="ws-info"><b>' + escHtml(s.name) + '</b> <span class="ws-lv">Lv.' +
+        s.level + '</span></div></div>').join('')
+      : '<p class="panel-desc">没有技能</p>';
+    const gearRows = d.gears.length
+      ? d.gears.map((g) => {
+        const ext = g.ext && g.ext.length ? '　' + escHtml(g.ext.join('，')) : '';
+        const gem = g.gem ? '　宝石 Lv.' + g.gem.level + '（+' + g.gem.percent + '%）' : '';
+        return '<div class="ws-row"><div class="ws-info"><b>' + escHtml(g.part + '·' + g.name) + '</b> <span class="ws-lv">' +
+          escHtml(g.attrName) + '+' + g.abilityVal + '</span>' +
+          '<div class="ws-remark">' + escHtml(g.setName || '散件') + ext + gem + '</div></div></div>';
+      }).join('')
+      : '<p class="panel-desc">没有装备</p>';
+    const petRows = d.pets && d.pets.length
+      ? '<p class="panel-desc">幻兽：' + d.pets.map((p) => escHtml((p.name || '幻兽') + ' Lv.' + (p.level || 1))).join('，') + '</p>'
+      : '';
+    box.innerHTML = part +
+      '<h4>武器（具体等级）</h4>' + weaponRows +
+      '<h4>技能（具体等级）</h4>' + skillRows +
+      '<h4>装备加成</h4>' + gearRows + petRows;
+    openPanel('对手详情', box);
+  }
   function openChallenge() {
     const S = State.state();
     const box = el('div');
@@ -282,6 +316,9 @@
             },
           });
         };
+        const view = el('button', 'btn', '查看');
+        view.onclick = () => showEnemyLoadout(f);
+        row.appendChild(view);
         row.appendChild(btn);
         list.appendChild(row);
       });
@@ -668,7 +705,7 @@
   // ---------- 装备 ----------
   function openGears() {
     const S = State.state();
-    if (Number(S.level) < 10) { toast('10级后才能使用装备。多多挑战，升级后再来吧！'); return; }
+    if (Number(S.level) < 5) { toast('5级后才能使用装备。多多挑战，升级后再来吧！'); return; }
     const box = el('div');
     const gears = State.myGears();
     const worn = gears.filter((g) => g.used);
@@ -785,7 +822,7 @@
   // ---------- 抽奖 ----------
   function openLottery() {
     const S = State.state();
-    const today = new Date().toDateString();
+    const today = new Date(Date.now()).toDateString();
     if (S.lotteryDate !== today) { S.lotteryDate = today; S.lotteryFree = 1; State.save(); }
     const box = el('div', 'lottery-box');
     const prizes = [

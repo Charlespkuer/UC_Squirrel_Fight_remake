@@ -89,9 +89,9 @@
    *  ⚠ 换行必须交给显示层（`SfRender.setText`）：SVG 的 `<text>` **不会**把 `\r`/`\n` 当断行，
    *  自己写 `textContent` 的话多行文案会连成一行冲出字段框（祭坛那三行双倍几率就是这么坏的）。
    *  显示层认出来了就结束；认不出来（不是文本容器）才退回原来的写法。 */
-  function setText(node, str) {
+  function setText(node, str, opts) {
     if (!node) return;
-    if (window.SfRender && SfRender.setText && SfRender.setText(node, str)) return;
+    if (window.SfRender && SfRender.setText && SfRender.setText(node, str, opts)) return;
     /* 兜底：一个文本标签可能带**多个 `<text>` 子节点**（多个 rs 段），要全改 ——
      * 只改第一个的话，剩下的还在显示原版占位串（实测就是这样漏出"玩家名字在这里"）。 */
     const list = node.querySelectorAll ? node.querySelectorAll('text') : null;
@@ -244,6 +244,33 @@
     if (byId) return byId;
     const o = GEAR_OFFSET[type] || [0, 0];
     return (o[0] || o[1]) ? o : null;
+  }
+  /* ---------- 手臂甲（`gearArm` 2008）的槽位修正 ----------
+   * 主界面/战斗穿装备走「挂点 → 容器」：容器画稿的 bbox 左上角对齐挂点原点
+   * （`anchorToBBox('topleft')`，见 render.js）。绝大多数衣服帧的持有者槽位矩阵
+   * 刚好等于 `手臂B` 画稿的 bbox（-3.76,-2.25），两层平移互相抵消，袖口落在手臂上。
+   * 但狂战 / 深海这几帧的槽位矩阵是 -34.9,-29.55 / -22.5,-13.5 这一档大偏移
+   * （原版给大肩甲留的落点），补偿后袖口会飘到脸侧，看起来像"脸上多出一只手臂"
+   *（用户 2026-10 报的狂战铠甲）。
+   * 修法：槽位矩阵与 `手臂B` bbox 的平移差超过容差时把差补回去，让袖口回到所有衣服
+   * 共用的手臂落点；差在容差内（正常帧）一字不加，不动既有观感。
+   * 72 件衣服逐帧静态审计（2026-10）：68 件有手臂槽位，只有狂战 203/207/183/267 与深海
+   * 191/275/199 共 7 帧超差；其余 61 帧都在 ±2 内（另 4 帧没有手臂槽位）。
+   * ⚠ 必须作为 `setSymbol` 的 `tail` 传入：在外面 append 会被 anchorToBBox 的重算抹掉。 */
+  const ARM_GEAR_SYMBOL = '2008';
+  const ARM_GEAR_BBOX = { x: -3.76, y: -2.25 };
+  const ARM_GEAR_TOLERANCE = 8;
+  function gearSlotTail(clip, symbol) {
+    if (String(symbol) !== ARM_GEAR_SYMBOL) return '';
+    const ma = String((clip && clip.g && clip.g.__baseMa) || '').split(',').map(Number);
+    if (ma.length < 6 || !Number.isFinite(ma[4]) || !Number.isFinite(ma[5])) return '';
+    /* 只修正纯平移的槽位；带旋转/缩放的矩阵没有实测样本，保守跳过。 */
+    if (Math.abs(ma[0] - 1) > 1e-3 || Math.abs(ma[1]) > 1e-3 ||
+        Math.abs(ma[2]) > 1e-3 || Math.abs(ma[3] - 1) > 1e-3) return '';
+    const dx = ARM_GEAR_BBOX.x - ma[4];
+    const dy = ARM_GEAR_BBOX.y - ma[5];
+    if (Math.abs(dx) <= ARM_GEAR_TOLERANCE && Math.abs(dy) <= ARM_GEAR_TOLERANCE) return '';
+    return 'translate(' + dx.toFixed(3) + ',' + dy.toFixed(3) + ')';
   }
   /** `mode: 'attach'` —— 把 6 个容器**直接挂到 myself 自己身上**（原版 chooseEquipLoader 的写法），
    * 每个部位一个子 clip，帧号照旧。挂完不动 `render.js` 的帧机制（手动挂的子节点不进 nodes 表）。 */
@@ -546,11 +573,16 @@
     const vb = String(svg.getAttribute('viewBox') || '0 0 320 196').split(/\s+/).map(Number);
     return (vb[2] && r.width) ? r.width / vb[2] : 0;
   }
-  /** SVG 用户坐标 → 屏幕坐标：用 SVG 的实测矩形 + viewBox + preserveAspectRatio 反算。
+  /** SVG 用户坐标 → 屏幕坐标：用 SVG 的实测矩形 + clientWidth/Height + viewBox +
+   *  preserveAspectRatio 两轴分别反算。
    *  ⚠ 不走 getScreenCTM：iOS 15 的 WebKit 209220 会漏掉祖先 `#ui` 的 CSS scale，
-   *  算出来的药丸/角标位置会整体缩到左上角。 */
+   *  算出来的药丸/角标位置会整体缩到左上角。
+   *  ⚠ 也**不能假设 x/y 缩放相同**：全面屏下 `#ui` 的 `sx !== sy`，只用一个比例
+   *  会让药丸/角标左右对、上下错。`svgScreenMap()` 是显示层的同一套换算。 */
   function userToClient(svg, x, y) {
     try {
+      const map = (window.SfRender && SfRender.svgScreenMap) ? SfRender.svgScreenMap(svg) : null;
+      if (map) return map.toClient(x, y);
       const r = svg.getBoundingClientRect();
       const vb = svg.viewBox && svg.viewBox.baseVal;
       if (!r || !vb || !r.width || !r.height || !vb.width || !vb.height) return null;
@@ -1598,8 +1630,11 @@
            * 传别的会掉进 topleft 分支。所以这里显式转成 null（= 不做包围盒平移）。 */
           const anchor = (!go.anchor || go.anchor === 'none') ? null : go.anchor;
           /* 偏移交给 setSymbol 一起拼（见 render.js 的 anchorToBBox 注释：在外面 append 会被重算抹掉） */
-          clip.setSymbol(p.symbol, p.frame, go.scale, anchor,
-            off ? ('translate(' + off[0] + ',' + off[1] + ')') : '');
+          const tail = [
+            off ? ('translate(' + off[0] + ',' + off[1] + ')') : '',
+            gearSlotTail(clip, p.symbol),
+          ].filter(Boolean).join(' ');
+          clip.setSymbol(p.symbol, p.frame, go.scale, anchor, tail);
           liftBone(clip);          // 画序：把挂点所在的骨头提到 myself 子列表末尾（见上面注释）
         }
       } : null,
@@ -1896,7 +1931,7 @@
         const add = ['1点力量！', '1点敏捷！', '1点速度！', '5点生命！'][d.addType] || '1个属性点！';
         return '神迹升级完成啦，它为你提高了' + add;
       }
-      return '幻兽牧场升级完成啦，松鼠的领导力增加了，并获得了200孵化点。！';
+      return '幻兽牧场升级完成啦，松鼠的领导力增加了，并获得了1个存储格和200孵化点！';
     });
     lines.forEach((t) => { try { if (window.UI && UI.toast) UI.toast(t); } catch (e) {} });
     void names;
@@ -2236,6 +2271,8 @@
      * 所以把这一小组 DOM 侧的通用件导出，别在第二个文件里再抄一遍。
      * ⚠ 只导出"与具体页面无关"的通用件：页面逻辑一律留在各自的文件里。 */
     toolkit: {
+      /** 手臂甲（`gearArm` 2008）槽位超差时的补偿段（主界面 / 战斗共用；见上面审计注释） */
+      gearSlotTail,
       /** 量包围盒（缓存到 `__hitBox`；用常态帧，免得悬停时热区忽大忽小） */
       measureHitBox,
       /** 按包围盒铺一块透明点击区；`animate` = 按**所有帧的并集**铺（多帧状态精灵用）。

@@ -2543,7 +2543,7 @@ test('需求55：装备星标防误合误卖 / 天命所归（传奇即时）/ �
   const TD = c.TowerData, T = c.Tower, S = c.State;
 
   /* ① 装备星标：加了星的装备不能被卖掉 / 融合掉 */
-  S.newGame('star' + Math.random());
+  S.newGame('star' + Math.random(), { uiMode: 'modern' });
   S.state().level = 70;
   S.addGear(1); S.addGear(2); S.addGear(3);
   const gears = S.myGears();

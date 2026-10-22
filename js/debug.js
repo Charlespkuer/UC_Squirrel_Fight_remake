@@ -22,6 +22,22 @@
    * true  = 经典界面也照常可用。需要时只改这一行。 */
   const DEBUG_IN_CLASSIC = false;
 
+  /* 【快进 24 小时】把「当前存档」的调试时钟偏移加到 Date.now 上。
+   * 偏移存在各自槽位的 `debugClockOffset` 里：经典/现代两套存档互不影响；
+   * 切换界面后 `State.state()` 变了，这里读到的就是另一套的偏移。
+   * 只改 Date.now（游戏内日期都从它派生），不碰系统时间。 */
+  const nativeDateNow = Date.now.bind(Date);
+  function debugClockOffset() {
+    try {
+      const S = window.State && State.state ? State.state() : null;
+      return Math.max(0, Number(S && S.debugClockOffset) || 0);
+    } catch (e) { return 0; }
+  }
+  if (!Date.__ssdzDebugClock) {
+    Date.now = () => nativeDateNow() + debugClockOffset();
+    Date.__ssdzDebugClock = true;
+  }
+
   /** 当前是不是经典界面。只在浏览器有 UI 时判断；纯状态测试/无 UI 宿主视为允许。 */
   function classicUiActive() {
     try {
@@ -39,7 +55,7 @@
    * set() 以 TOGGLES 为准，所以这里漏了也不会出现「开关点不动」的老问题
    * （历史上 noTowerCost / endlessCoin 就漏在这里过，那两个开关于是形同虚设；
    * 2026-10 已按用户口径删掉 —— 见下面 TOGGLES 里的说明）。 */
-  const defaults = { infiniteEnergy: false, godMode: false, shortDay: false, noUpgradeFail: false, freeUpgrade: false, freeShop: false, noStageCost: false, noCoinCost: false };
+  const defaults = { infiniteEnergy: false, godMode: false, shortDay: false, noUpgradeFail: false, freeUpgrade: false, freeShop: false, noStageCost: false, noCoinCost: false, battleStats: false };
   const state = Object.assign({}, defaults);
   try {
     const raw = localStorage.getItem(STORE_KEY);
@@ -83,6 +99,10 @@
       key: 'godMode', label: '无敌模式',
       note: '战斗里玩家的血量只增不减（开战先顶到上限）：吸血、持续伤害、自伤、反伤这些掉血全部不生效，既不会被击倒，也不会在 120 手超时里按血量比例判负',
       on() {},
+    },
+    {
+      key: 'battleStats', label: '战斗三维显示',
+      note: '现代战斗左上/右上实时显示双方有效力量、敏捷、速度（含装备、增益与「敏捷/速度/力量降低」）；只影响显示，不改战斗数值',
     },
     { key: 'noUpgradeFail', label: '升级必定成功', note: '武器与技能升级不再失败' },
     { key: 'freeUpgrade', label: '升级无需消耗', note: '升级不扣金松果、不扣武器/技能卷轴，也不受等级限制' },
@@ -187,38 +207,20 @@
         State.save();
         return '18 个关卡已标记通关';
       } },
-    { label: '重置每日与体力计时', note: '把每日礼包、免费抽奖、天梯今日场次与金杯商店限兑、每日任务进度、弟子日贡、对手刷新费用、体力计时都当成「新的一天」',
+    { label: '快进24小时', note: '只把当前界面（经典/现代各自独立）的游戏时间前进 24 小时：每日礼包、免费抽奖、天梯今日场次与金杯商店限兑、每日任务、弟子日贡、对手刷新费用、体力恢复都按新的一天结算；另一个界面的存档与时间不动。体力会回满，可连续刷关卡/挑战，升级更快',
       run() {
         const S = State.state();
-        const today = State.localDate();
-        S.dailyClaimDate = '';                     // 每日礼包可以再领
-        // 直接标记今天已同步，别再走 syncDailyStats 的「旧档没有日期」分支（那条分支会保留旧计数）
-        S.dailyStatsDate = today;
-        S.dailyWins = 0; S.dailyFails = 0;
-        S.joinRankCount = 0;                       // 天梯赛今日已参赛场次
-        S.rankPurchaseWeek = ''; S.rankPurchases = {};
-        S.lotteryDate = today; S.lotteryFree = 1;  // 每日免费抽奖
-        S.quests = null; S.dailyCounters = null;   // 每日任务：进度与领取状态清空，下次打开活动页重抽
-        S.masterKickDate = '';                     // 师父今天又能让一名徒弟离开
-        S.challengeRefresh = { count: 0, ts: Date.now() };   // 对手刷新费用
-        /* ---------- 弟子日贡（2026-10 用户口径：这一条也要一起重置） ----------
-         * 日供有两道门，**两道都要放开**，只清一道会出现「界面显示可领、实际领不到」：
-         *   ① 『今天领过了』—— 记在徒弟身上的 `lastExpDate` / `tributeClaimedDate`（清掉）；
-         *   ② 『昨天有收益可结算』—— 日供的数额取自 `earnHistory` 里**昨天**那一条，
-         *      昨天没记录（新档 / 当天刚玩）时总量恒为 0，`claimable` 永远是 false。
-         *   旧的调试按钮只做了 ①，于是昨天没收益的档重置完还是领不到日贡 —— 看起来就像没重置。
-         * 这里补上 ②：昨天没记录时，把**今天的**收益流水复制一份当成昨天，
-         * 让「重置 = 回到新的一天、日供可以再领一次」这件事真的成立。 */
-        for (const p of (S.prentices || [])) {
-          p.lastExpDate = '';
-          p.tributeClaimedDate = '';
-        }
-        if (State.ensureYesterdayEarnings) State.ensureYesterdayEarnings();
-        S.lastEnergyTs = Date.now(); S.energy = S.maxEnergy;
+        if (!S) return '当前没有存档';
+        const before = Math.max(0, Number(S.debugClockOffset) || 0);
+        S.debugClockOffset = before + 24 * 60 * 60 * 1000;
+        S.energy = S.maxEnergy;
+        S.lastEnergyTs = Date.now();
+        try { if (State.refreshDaily) State.refreshDaily(); } catch (e) {}
+        try { if (State.tickEnergy) State.tickEnergy(); } catch (e) {}
         State.save();
         if (window.UI && UI.refreshHome) UI.refreshHome();
         if (window.UI && UI.refreshHeader) UI.refreshHeader();
-        return '已重置：每日礼包、免费抽奖、天梯次数与限兑、每日任务、弟子日贡（含「昨日收益」这一道门）、刷新费用、体力计时';
+        return '当前界面已快进24小时：每日/周重置、体力恢复与弟子日供都按新一天结算（另一个界面不受影响）';
       } },
     { label: '重弹「支持作者」提示', note: '把 30 级那次「自愿支持作者」的一次性提示恢复成待提示：下一次首页刷新或升级奖励处理完之后会再弹一次（正式流程只在升到 30 级时弹一次）',
       run() {
@@ -249,7 +251,7 @@
     } else if (Number.isSafeInteger(Number(weaponId)) && Number(weaponId) > 0) {
       chosen = list.find((w) => w.id === Number(weaponId)) || null;
     }
-    State.newGame(who, chosen ? { weaponId: chosen.id, weaponLevel: 1 } : undefined);
+    State.newGame(who, Object.assign({ force: true }, chosen ? { weaponId: chosen.id, weaponLevel: 1 } : {}));
     /* 新档是 classic，但当前页可能还是旧模式/旧等级的 DOM；只 refreshHome 只会改数字，
      * 不会重画整页，于是会出现"经典 + 现代混在一起"且引导不启动。直接重进首页。 */
     try {
@@ -393,6 +395,17 @@
     renderOwned();
     refreshEndlessPage();
     return '铸币 +' + r.amount + '（现有 ' + r.total + ' 枚）';
+  }
+
+  /* 调试所得账本的外壳：操作前快照 → 执行 → 记录净增量。
+   * 所有「直接发东西」的按钮都从这里走，系统页才能按索引只回收调试部分。
+   * 不包裹「遗忘」「重置每日」这类**减少/不改变物品**的操作。 */
+  function traceDebug(label, fn) {
+    let before = null;
+    try { before = (window.State && State.debugSnapshot) ? State.debugSnapshot() : null; } catch (e) {}
+    const out = fn();
+    try { if (before && window.State && State.debugRecordDiff) State.debugRecordDiff(before, label); } catch (e) {}
+    return out;
   }
 
   /* 8 金松果 / 15 经验 / 40 金杯在原版里就是货币或经验值，不是背包道具：
@@ -590,13 +603,17 @@
       const b = e.target.closest('[data-act]');
       if (!b) return;
       const a = ACTIONS[Number(b.dataset.act)];
-      if (a) msg(a.run());
+      if (a) msg(traceDebug('调试：' + a.label, () => a.run()));
     };
     // 快速获取物品：选道具 + 数量后点「获取」，回车同样生效
     const grantBtn = panel.querySelector('[data-item-grant]');
     const grantSelect = panel.querySelector('[data-item-select]');
     const grantCount = panel.querySelector('[data-item-count]');
-    const doGrant = () => msg(grantItem(Number(grantSelect.value), Number(grantCount.value)));
+    const doGrant = () => {
+      const id = Number(grantSelect.value);
+      const def = propMap.getValue(id);
+      msg(traceDebug('调试：获取 ' + ((def && def.name) || ('道具#' + id)), () => grantItem(id, Number(grantCount.value))));
+    };
     grantBtn.onclick = doGrant;
     grantCount.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); doGrant(); } };
     grantSelect.onchange = () => {
@@ -606,8 +623,13 @@
     // 武器/技能：选表 + 等级后获得（回车同样生效），已有武技后面的 × 直接遗忘
     for (const btn of panel.querySelectorAll('[data-ws-learn]')) {
       const kind = btn.dataset.wsLearn;
-      btn.onclick = () => msg(grantWS(kind, panel.querySelector('[data-ws-select="' + kind + '"]').value,
-        panel.querySelector('[data-ws-level="' + kind + '"]').value));
+      btn.onclick = () => {
+        const id = Number(panel.querySelector('[data-ws-select="' + kind + '"]').value);
+        const level = Number(panel.querySelector('[data-ws-level="' + kind + '"]').value);
+        const def = (kind === 'skill' ? State.skillList() : State.weaponList()).find((x) => Number(x.id) === id);
+        msg(traceDebug('调试：获得' + (kind === 'skill' ? '技能 ' : '武器 ') + ((def && def.name) || id),
+          () => grantWS(kind, id, level)));
+      };
       const levelInput = panel.querySelector('[data-ws-level="' + kind + '"]');
       levelInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); btn.click(); } };
     }
@@ -848,14 +870,26 @@
    * 【DBG5】导出 window.Debug
    * ============================================================ */
   window.Debug = {
-    enabled, get, set, toggle, reset, numberStretch, resetAccount, grantItem, grantWS, forgetWS, MAX_LEVEL,
+    enabled, get, set, toggle, reset, numberStretch, resetAccount, forgetWS, MAX_LEVEL,
+    /* 控制台/探针直接调这两个入口时也要落到调试所得账本里。 */
+    grantItem: (id, count) => {
+      const def = propMap.getValue(Number(id));
+      return traceDebug('调试：获取 ' + ((def && def.name) || ('道具#' + id)), () => grantItem(id, count));
+    },
+    grantWS: (kind, id, level) => {
+      const def = (kind === 'skill' ? State.skillList() : State.weaponList()).find((x) => Number(x.id) === Number(id));
+      return traceDebug('调试：获得' + (kind === 'skill' ? '技能 ' : '武器 ') + ((def && def.name) || id),
+        () => grantWS(kind, id, level));
+    },
     open: () => togglePanel(true), close: () => togglePanel(false), togglePanel, refresh: refreshAvailability,
     allowed: debugAllowed, DEBUG_IN_CLASSIC, state: () => Object.assign({}, state),
     /* 按内屏重新贴一次入口按钮/面板（窗口尺寸、分辨率档位、界面模式变化后都可以手动叫一次）。 */
     layout: layoutDebugUi, stageRect,
     /* 【DBG5b】一次性工具清单（只读）：面板按它渲染按钮，回归/探针也可以用它直接跑某一条
-     * （`Debug.actions().find((a) => a.label === '重置每日与体力计时').run()`）——
-     * 与真人点按钮走的是**同一份实现**，不会出现「测试绿、点按钮不生效」那种错位。 */
-    actions: () => ACTIONS.map((a) => ({ label: a.label, note: a.note, run: a.run })),
+     * （`Debug.actions().find((a) => a.label === '快进24小时').run()`）——
+     * 与真人点按钮走的是**同一份实现**，不会出现「测试绿、点按钮不生效」那种错位。
+     * 这里包一层账本记录，控制台直接跑也会留下索引。 */
+    actions: () => ACTIONS.map((a) => ({ label: a.label, note: a.note,
+      run: () => traceDebug('调试：' + a.label, () => a.run()) })),
   };
 })();

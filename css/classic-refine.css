@@ -166,7 +166,6 @@
      `left:50%;transform:translateX(-50%)` —— 绝对定位元素在 `left` 给定、`right:auto` 时，
      shrink-to-fit 的可用宽度只有"容器宽 − left"（也就是**半个容器**），文案稍长就被压成两行
      （实测 45 字那条被压在 533 设计像素里换行）。改成左右都锚 0 之后 max-width 才真正生效。 */
-.sf-gear-lock{position:absolute;z-index:8;transform:translate(-50%,-50%);padding:2px 8px;border:2px solid #c79a56;border-radius:9px;background:#4b3a25;color:#ffd86b;font:700 13px/1.35 "Microsoft YaHei","PingFang SC",sans-serif;white-space:nowrap;pointer-events:none;box-shadow:0 2px 3px #1c100a99;text-shadow:0 1px 0 #2a180b}
 .ssfight-home-level{position:absolute;z-index:5;pointer-events:none;min-width:1.2em;text-align:center;color:#fff;font:900 30px/1 'Microsoft YaHei',sans-serif;text-shadow:-2px -2px 0 #6b3e0d,2px -2px 0 #6b3e0d,-2px 2px 0 #6b3e0d,2px 2px 0 #6b3e0d,0 3px 0 #3d2208}
 
 .ssfight-pet-art{position:absolute;z-index:2;pointer-events:none;overflow:hidden;display:flex;align-items:center;justify-content:center}
@@ -731,6 +730,122 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
    所以这里只要保证网格是 3 列；原来的 setting-group / setting-choice 一并去掉。 */
 .settings-grid.system-grid{grid-template-columns:repeat(3,1fr)}
 .settings-grid.system-grid .uc-button{font-size:28px}
+/* 界面模式单独成卡：两套界面是两套独立存档，属于会改变整个游戏观感与进度的大动作，
+   不跟导出/分辨率这些工具键挤在 3×2 网格里。卡片用米金底板，右侧留一颗大号金键。 */
+.settings-mode-card{position:relative;z-index:1;display:flex;align-items:center;gap:24px;
+  margin:0 30px 20px;padding:16px 22px 16px 26px;border:4px solid #a97b35;border-radius:28px;
+  background:linear-gradient(135deg,#fffbe6,#f2ddb0);box-shadow:inset 0 0 0 3px #fffdf1,0 4px 0 #b78a3e33}
+.settings-mode-copy{display:flex;flex-direction:column;gap:3px;flex:1 1 auto;min-width:0}
+.settings-mode-kicker{font-size:20px;letter-spacing:3px;color:#8b672f;font-weight:bold}
+.settings-mode-name{font-size:34px;line-height:1.15;color:#6d431d}
+.settings-mode-note{font-size:19px;line-height:1.35;color:#8f734e}
+.settings-mode-btn{flex:0 0 auto;min-width:250px;min-height:70px;font-size:28px;gap:4px}
+.settings-mode-arrow{font-size:36px;line-height:1;margin-left:8px}
+/* 调试所得入口单独一行，不占六颗常规设置键的 3×2 网格。 */
+.settings-debug-row{display:flex;justify-content:flex-end;margin:-2px 0 10px}
+.settings-debug-row .uc-button{font-size:24px;min-height:44px;padding:4px 18px}
+/* 刷新玩家次数用完后：保持灰色、压暗并给出禁用光标；到 10 分钟窗口结束会自动重绘恢复。 */
+.classic-page .uc-button.is-exhausted{opacity:.7;filter:grayscale(.45);cursor:not-allowed}
+/* 刷新玩家（未达上限）：悬停变绿、按下有颜色/位移动反馈；鼠标点完不画系统黑焦点框。 */
+.challenge-note .uc-button.refresh-btn{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.challenge-note .uc-button.refresh-btn:focus,
+.challenge-note .uc-button.refresh-btn:focus-visible{outline:none}
+.challenge-note .uc-button.refresh-btn:not(.is-exhausted):hover{
+  background:linear-gradient(#d2f497,#9bdf50 54%,#82c13c);
+  border-color:#416727;
+  box-shadow:inset 0 3px #eaffb2,inset 0 -3px #6aa132,0 2px 2px #40552680;
+  filter:brightness(1.04)}
+.challenge-note .uc-button.refresh-btn:not(.is-exhausted):active{
+  background:linear-gradient(#bde887,#8bcd45 54%,#6dab31)!important;
+  filter:brightness(.98)}
+/* 随机挑战底部操作区：刷新 / 加好友 / 查看 / 挑战他统一加大，底部一整条排开，
+   手机上不再挤成右下角一颗小按钮。 */
+.challenge-note.challenge-footer{left:36px;right:36px;bottom:16px;width:auto;justify-content:space-between;
+  align-items:flex-end;gap:16px}
+.challenge-refresh{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.challenge-hint{flex:0 0 auto;text-align:left;font-size:20px;line-height:1.35;color:#a37b45;white-space:nowrap}
+.challenge-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex:0 1 auto;flex-wrap:wrap;margin-left:auto;align-self:flex-end}
+.challenge-footer .uc-button{min-height:70px;padding:7px 22px;font-size:34px;flex:0 0 auto}
+.challenge-refresh .uc-button{font-size:32px}
+.challenge-preview .mini-stats{position:relative;top:-12px}
+@media (max-width:900px){
+  .challenge-list{width:54%;gap:8px;padding-top:4px}
+  .challenger{height:66px;font-size:32px;padding:2px 10px}
+  .foe-level{min-width:52px;font-size:34px}
+  .challenge-preview{width:330px;height:340px;right:14px}
+  .challenge-preview canvas{width:330px;height:246px}
+  .challenge-preview .mini-stats{top:-10px}
+  .challenge-preview .mini-stats .stat-pill{font-size:25px;height:42px}
+  .challenge-preview .mini-stats .stat-pill b{font-size:19px;width:32px;height:32px}
+  .challenge-note.challenge-footer{left:12px;right:12px;bottom:12px;gap:8px}
+  .challenge-refresh{gap:2px}
+  .challenge-hint{display:block;font-size:22px;line-height:1.25;white-space:normal}
+  .challenge-actions{gap:7px;flex-wrap:nowrap}
+  .challenge-footer .uc-button{min-height:90px;padding:8px 14px;font-size:38px}
+  .challenge-refresh .uc-button{font-size:34px}
+}
+
+/* ---------- 现代随机挑战「查看」面板 ----------
+   原来的 ws-row 是给武器/技能列表用的紧凑行，塞进详情弹窗后像一堆后台表格。
+   这里单独做一层米色卡片：顶部对手信息 + 四维，下面武器/技能两列、装备两列，
+   等级统一用低饱和的橄榄金，不再用 style.css 里那颗 #7cfc00 的荧光绿。 */
+.classic-page~.classic-modal-overlay.foe-detail-overlay>.classic-modal.foe-detail-modal{width:960px;min-height:0;max-height:668px}
+.classic-page~.classic-modal-overlay.foe-detail-overlay>.classic-modal.foe-detail-modal>.modal-body{max-height:512px;padding:2px 8px 0}
+.foe-detail-overlay .classic-modal.foe-detail-modal{width:960px;min-height:0;max-height:668px}
+.foe-detail-overlay .foe-detail-modal>.modal-body{max-height:512px;padding:2px 8px 0}
+.foe-detail{font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;color:#6f512f}
+.fd-hero{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 18px;
+  border:2px solid #d6bc8a;border-radius:22px;background:linear-gradient(135deg,#f8efd8,#ecdcb8);
+  box-shadow:inset 0 0 0 3px #fffaf0}
+.fd-kicker{display:block;font-size:16px;letter-spacing:3px;color:#9a7c4c;font-weight:bold}
+.fd-name{margin:3px 0 0;font-size:36px;line-height:1.1;color:#6f4b24}
+.fd-level{flex:0 0 auto;padding:7px 16px;border-radius:18px;background:#7b6a4e;color:#fff8e8;
+  font-size:24px;font-weight:bold;box-shadow:inset 0 0 0 2px #9b896a;text-shadow:0 1px #5f4e35}
+.fd-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0 16px}
+.fd-stat{display:flex;align-items:baseline;gap:8px;padding:7px 12px;border:2px solid #e2d1ad;
+  border-radius:16px;background:#fbf4e2}
+.fd-stat span{font-size:17px;color:#9a7c4c}
+.fd-stat b{margin-left:auto;font-size:24px;color:#6d4a26}
+.fd-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.fd-section{padding:13px 14px 12px;border:2px solid #ddc79c;border-radius:18px;background:#fdf7e8}
+.fd-section h4{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 9px;
+  font-size:22px;color:#805a2b}
+.fd-section h4 span{display:inline-flex;align-items:center;gap:8px}
+.fd-section h4 span:before{content:"";width:7px;height:22px;border-radius:5px;background:#b9975b}
+.fd-section h4 i{min-width:30px;padding:1px 8px;border-radius:12px;background:#efe2c5;color:#90734d;
+  font-size:16px;font-style:normal;font-weight:normal;text-align:center}
+.fd-list{display:flex;flex-direction:column;gap:7px}
+.fd-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 11px;
+  border:1px solid #e4d3b0;border-radius:14px;background:#fffaf0}
+.fd-item-main{display:flex;align-items:center;gap:8px;min-width:0}
+.fd-item-main b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:22px;color:#704b26}
+.fd-tag{flex:0 0 auto;padding:1px 8px;border:1px solid #e0cda9;border-radius:10px;background:#f3e7ce;
+  color:#8c6e4e;font-size:14px;line-height:1.5}
+.fd-lv{flex:0 0 auto;padding:2px 9px;border:1px solid #d8cba7;border-radius:11px;background:#f4efdd;
+  color:#7f7a4b;font-size:17px;font-weight:bold;line-height:1.45}
+.fd-empty{min-height:38px;display:flex;align-items:center;justify-content:center;border:1px dashed #ddcbaa;
+  border-radius:14px;color:#a38e69;font-size:18px;background:#fffdf6}
+.fd-gear-section{margin-top:16px}
+.fd-gear-list{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.fd-gear{padding:10px 12px;border:1px solid #e4d3b0;border-radius:14px;background:#fffaf0}
+.fd-gear-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fd-gear-head b{font-size:21px;color:#704b26}
+.fd-attr{margin-left:auto;color:#8a6528;font-size:17px;font-weight:bold}
+.fd-quality{flex:0 0 auto;padding:0 7px;border-radius:9px;background:#efe4cb;color:#8a7554;
+  font-size:14px;line-height:1.6}
+.fd-quality.q1{background:#e6eddc;color:#60744c}
+.fd-quality.q2{background:#e1eaf0;color:#547184}
+.fd-quality.q3{background:#ebe4f0;color:#71628a}
+.fd-quality.q4{background:#f1e3cf;color:#9a6a3f}
+.fd-quality.q5{background:#e8e4de;color:#615b52}
+.fd-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.fd-chip{padding:1px 8px;border:1px solid #e5d5b6;border-radius:10px;background:#f7efdc;
+  color:#7d6544;font-size:15px;line-height:1.6}
+.fd-gem{border-color:#d5ddc4;background:#eef2e6;color:#667351}
+.fd-pets{display:flex;align-items:center;gap:10px;margin-top:12px;padding:9px 12px;
+  border:1px solid #e0cda9;border-radius:14px;background:#fbf4e2}
+.fd-pets-label{flex:0 0 auto;font-size:18px;color:#8b6b42;font-weight:bold}
+.fd-pets .fd-chips{margin-top:0}
 
 /* ---------- 系统分组（系统 / 帮助 / 超级松鼠）的选中与点击口径 ----------
    · 页签：未选中金皮、选中绿皮（沿用原版 status/weapons/skills 那三颗的配色）；
@@ -902,16 +1017,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
   flex:none;
 }
 
-/* 装备星标（防误合 / 误卖） */
-.gear-star{
-  position:absolute;top:-6px;left:-6px;font-size:18px;line-height:1;color:#ffd323;
-  text-shadow:0 0 3px #000,0 0 6px #b8860b;pointer-events:none;
-}
-/* 「更换装备」页的星标：标在**装备名字前面**，不压在装备图上（用户口径 2026-10） */
-.gear-name-star{color:#ffd323;text-shadow:0 1px 1px #6b4a00,0 0 2px #000;margin-right:2px}
-.gear-sell-card.starred{border-color:#ffd323;box-shadow:0 0 6px rgba(255,211,35,.55)}
 .gear-sell-card .item-icon{position:relative}
-.star-text{color:#ffd323}
 
 /* 20 起每 10 层：放弃一个永久增益 */
 .sac-board .sac-lead{font-size:22px;line-height:1.6;margin-bottom:10px}
@@ -994,6 +1100,15 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .arena-pick-btn:hover .item-icon{transform:translateY(-3px) scale(1.04);box-shadow:inset 0 0 0 5px white,0 4px 3px #3c401b55}
 .arena-pick-btn:active .item-icon{transform:scale(.97)}
 .arena-pick-btn .item-count{z-index:2;font-size:22px;bottom:0;right:4px;padding:0 5px;border-radius:10px;background:#4b2d1999;line-height:26px}
+/* 取消键用背包道具详情的原版 4419（米色常态 / 第 2 帧绿色悬停），不再画灰色文字键。
+   用户口径：悬停抬起变亮，按下有回弹触感。 */
+.arena-pick-dialog .modal-buttons{justify-content:center;margin-top:14px;min-height:88px}
+.arena-original-back{width:200px;height:72px;display:flex;align-items:center;justify-content:center;
+  transform-origin:center;transition:transform .12s cubic-bezier(.34,1.4,.64,1),filter .12s;
+  will-change:transform;touch-action:manipulation}
+.arena-original-back:hover{transform:translateY(-2px) scale(1.025);filter:brightness(1.05) drop-shadow(0 2px 2px #6b4a2433)}
+.arena-original-back.pressed{transform:translateY(1px) scale(.97);filter:brightness(.98)}
+.arena-original-back>svg{display:block;width:100%;height:100%;overflow:visible}
 
 /* 天梯「战斗准备中」：原版 3464（双方名字 / 排名 / 积分 + VS），按 320×196 舞台居中。 */
 .sf-rank-prep{position:absolute;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;background:rgba(22,22,22,.2);pointer-events:auto}

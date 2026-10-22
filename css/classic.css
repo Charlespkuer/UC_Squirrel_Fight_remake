@@ -334,17 +334,20 @@ html.is-android .uc-button.tiny{--uc-outline:0.85px}
    "状态页点开详情再切回来整页闪一下空白"（用户 2026-10 报的两个 bug 都出自这条）。 */
 #ui:has(.classic-page) .classic-home:not(.ssfight-view){display:none}
 /* 好友 →「添加好友」页面：候选等级与师徒刷新一致，右下角由弹窗页脚提供「拜师」。 */
-.sf-addfriend{min-width:620px;max-width:760px}
-.sf-addfriend-tip{color:#7a5528;font-size:17px;line-height:1.5;margin:0 0 10px}
-.sf-addfriend-list{display:flex;flex-direction:column;gap:7px}
-.sf-addfriend-row{display:grid;grid-template-columns:70px minmax(0,1fr) 220px 120px;align-items:center;gap:8px;
-  padding:8px 14px;border-radius:18px;background:#f7efd7;box-shadow:inset 0 0 0 2px #fffdf3;cursor:pointer}
-.sf-addfriend-row.active{background:#fff5c9;box-shadow:inset 0 0 0 3px #e2b84f}
-.sf-addfriend-lv{font-weight:800;color:#8a5b1d;font-size:18px}
-.sf-addfriend-name{font-size:19px;color:#442511;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sf-addfriend-stats{display:flex;gap:8px;color:#7d5a2c;font-size:14px;font-style:normal}
-.sf-addfriend-stats i{font-style:normal}
-.sf-addfriend-foot{display:flex;justify-content:flex-start;margin-top:10px}
+.sf-addfriend{width:100%;max-width:900px;margin:0 auto}
+.sf-addfriend-dialog .modal-body .sf-addfriend-tip{color:#7a5528;font-size:21px;line-height:1.5;margin:2px 5px 16px}
+.sf-addfriend-list{display:flex;flex-direction:column;gap:12px}
+.sf-addfriend-row{display:grid;grid-template-columns:minmax(0,1fr) 145px;grid-template-areas:"identity add" "stats add";align-items:center;gap:8px 18px;
+  padding:15px 20px;border:2px solid #dbc59c;border-radius:19px;background:#f7efd7;cursor:pointer}
+.sf-addfriend-row.active{background:#fff5d4;border-color:#b59249;box-shadow:inset 4px 0 #ae8541}
+.sf-addfriend-identity{grid-area:identity;display:flex;align-items:center;gap:14px;min-width:0}
+.sf-addfriend-lv{flex-shrink:0;min-width:62px;font-weight:800;color:#8a5b1d;font-size:21px}
+.sf-addfriend-name{font-size:25px;color:#442511;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sf-addfriend-row [data-add-friend]{grid-area:add;min-width:0;font-size:22px;padding:6px 12px}
+.sf-addfriend-stats{grid-area:stats;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;color:#7d5a2c;font-size:18px;font-style:normal}
+.sf-addfriend-stats i{font-style:normal;white-space:nowrap}
+.sf-addfriend-foot{display:flex;justify-content:flex-start;margin:14px 4px 0}
+.sf-addfriend-dialog .modal-buttons{margin-top:18px}
 /* 经典好友动作菜单右下角的「拜师」入口（原版只有收徒/加好友，没有主动拜师）。 */
 .sf-master-btn{position:absolute;right:24px;bottom:16px;z-index:6;
   min-width:126px;font-size:23px;padding:3px 18px}

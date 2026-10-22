@@ -88,7 +88,7 @@
       note: '孵化 / 编队 / 喂养 / 进化都已接上存档数据；点格子查看详情。',
     },
     'beast-hatch': {
-      scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 2, title: '幻兽牧场 · 孵化',
+      scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 8, title: '幻兽牧场 · 孵化',
       wire: wireBeastHatch,
       note: '消耗200孵化点随机孵化一只幻兽；星级越高领导力需求越高。',
     },
@@ -98,19 +98,27 @@
       note: '勾选最多3只幻兽，领导力总和不能超过牧场等级提供的上限。',
     },
     'beast-feed': {
-      scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 6, title: '幻兽牧场 · 喂养',
+      scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 5, title: '幻兽牧场 · 喂养',
       wire: wireBeastFeed,
       note: '喂养会消耗其它幻兽与金松果，出战队伍里的幻兽不会被消耗。',
     },
     'beast-evolve': {
       scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 7, title: '幻兽牧场 · 进化',
       wire: wireBeastEvolve,
-      note: '消耗同星级幻兽与金松果，随机进化成高一星幻兽。',
+      note: '点格子自由选择目标与两只同星级材料；出战幻兽不能当材料，随机进化成高一星幻兽。',
     },
     'beast-detail': {
       scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 3, title: '幻兽 · 详情',
       wire: wireBeastDetail,
       note: '查看这只幻兽的等级、经验、领导力与技能。',
+    },
+    'beast-choose': {
+      scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 2,
+      title: '幻兽选择', wire: wireBeastChoose,
+    },
+    'beast-hatched': {
+      scene: 'village-beast', bundle: 'tags-summons.json', symbol: '4381', frame: 9,
+      title: '孵化结果', wire: wireBeastHatched,
     },
     'beast-up': {
       scene: 'village-beast', bundle: ['tags-summons.json', 'tags-homeland.json'], symbol: '3957', frame: 5,
@@ -134,6 +142,12 @@
   let current = null;      // { key, view, container } —— 当前挂载中的场景页
   let beastPage = 1;       // 幻兽牧场列表页码（1 基）
   let selectedPetKey = ''; // 当前查看/喂养/进化的幻兽
+  let petChooser = null;
+  let teamDraft = [];
+  let feedDraft = [];
+  /** 进化页的 3 个选择格：`[目标, 材料1, 材料2]`，空串 = 还没选。
+   *  原版这一页是「配方固定材料」，复刻改成玩家自己挑 3 只同星级幻兽。 */
+  let evolveDraft = ['', '', ''];
   /** 用原版「全身」元件 4280（第 id 帧就是 petsInfo 里那张）画幻兽图。
    * 它默认按 320×196 舞台坐标摆，图很小；挂载后把 svg 的 viewBox 收缩到这只幻兽
    * 自己的包围盒，正好铺满卡片/详情头像。 */
@@ -141,10 +155,13 @@
     if (!host || !pet || !window.SfRender || !SfRender.mountSymbol) return false;
     const seq = (host.__petArtSeq || 0) + 1;
     host.__petArtSeq = seq;
+    if (host.__petArtView) host.__petArtView.destroy();
+    host.__petArtView = null;
     host.innerHTML = '<span class="loading">…</span>';
     try {
       const v = await SfRender.mountSymbol(host, '4280', { frame: Math.max(1, Number(pet.id) || 1), label: '幻兽' });
       if (seq !== host.__petArtSeq || !host.isConnected) { try { v.destroy(); } catch (e) {} return false; }
+      host.__petArtView = v;
       if (window.SfUiMain && SfUiMain.toolkit) SfUiMain.toolkit.freezeDescendants(v);
       v.playing = false;
       const svg = host.querySelector('svg');
@@ -168,7 +185,11 @@
   }
   function clearPetArt(container) {
     if (!container) return;
-    for (const n of container.querySelectorAll('.ssfight-pet-art')) n.remove();
+    for (const n of container.querySelectorAll('.ssfight-pet-art')) {
+      n.__petArtSeq = (n.__petArtSeq || 0) + 1;
+      if (n.__petArtView) n.__petArtView.destroy();
+      n.remove();
+    }
   }
   /** 宿主自身被缩放的倍数（与 ui-status / ui-main 同一个探针做法）。
    *  `.ssfight-pet-art` 是挂在经典层里的 DOM，写进去的 CSS 像素会再被 `--uiscale`
@@ -213,12 +234,23 @@
 
   /** 取直系子元件（名字表由 render.js 按 `na` 建，`byName` 只认当前帧）。 */
   const clipOf = (host, name) => (host && host.byName ? host.byName(name) : null);
-  /** 换掉某个文本字段（tp11 的放置存的是 `<g type="text">` 元素，不是 MovieClip）。 */
-  function setTextByName(host, name, str) {
+  /** 换掉某个文本字段（tp11 的放置存的是 `<g type="text">` 元素，不是 MovieClip）。
+   *  `opts.wrap` 透传给显示层：按字段框宽自动折行（详情页的长技能说明）。 */
+  function setTextByName(host, name, str, opts) {
     const t = T();
     const n = clipOf(host, name);
-    if (t && n) t.setText(n, str);
+    if (t && n) t.setText(n, str, opts);
     return n;
+  }
+  /** 幻兽技能数值的显示格式：整数不带小数点，半档（10.5 这类）保留一位。 */
+  function skillValueText(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '0';
+    return Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
+  }
+  /** 把技能说明里的 X 换成该等级的实际值（原版 `getSkillRemark` 的同一件事）。 */
+  function fillSkillValue(text, value) {
+    return String(text == null ? '' : text).replace(/X/g, skillValueText(value));
   }
   /** 让元件**停在**某一帧（不自己播）。这些按钮是"状态精灵"，只能停帧不能 play。 */
   function stopAt(clip, n) {
@@ -351,32 +383,6 @@
       }
     }
   }
-  /** 隐藏一个具名元件：tp11 文本节点没有 `.g`，要按节点本身处理（否则 `lv23` 会漏出）。 */
-  function hideNamedClip(host, name) {
-    const c = clipOf(host, name);
-    const node = c && (c.g || c);
-    if (!node || !node.style) return;
-    node.style.display = 'none';
-    node.style.visibility = 'hidden';
-  }
-  /** 幻兽牧场二三级页的公共清理：4381 的帧差分只移除了部分主列表元件，没移除的
-   * 六个格子（含画稿自带的 "lv23"）、名字、页码和左右箭头会**跨帧留在画面上**。
-   * 这里只收「本帧没有 placedHere 的具名元件」——换帧真正放进来的 c1/c2/c3、按钮、
-   * text1 等会保留；背景/面板没有名字，不会被误伤。 */
-  function hideCarriedOver(host) {
-    if (!host || !host.nodes || !host.frames) return;
-    const frame = host.frames[host.frame] || new Map();
-    for (const [depth, rec] of host.nodes) {
-      if (!rec.na) continue;                       // 只动主列表残留的具名件
-      const p = frame.get(depth);
-      if (p && p.placedHere) continue;             // 本帧自己放的，保留
-      const node = rec.wrap || rec.node;
-      if (node && node.style) {
-        node.style.display = 'none';
-        node.style.visibility = 'hidden';
-      }
-    }
-  }
   /** 取当前建筑的快照（`State.building(key)`；没有存档或没这套数据时返回 null）。 */
   function building(key) {
     if (!(window.State && State.building)) return null;
@@ -454,16 +460,24 @@
     if (!b) { wireClickable(clipOf(view, 'button2'), backToVillage); return; }
     const info = State.buildingUpInfo(b.level);
     const next = State.buildingUpInfo(Math.min(State.BUILDING_MAX_LEVEL, b.level + 1));
+    const atMax = b.level >= State.BUILDING_MAX_LEVEL;
+    /* 幻兽牧场的三项收益都要写出来：领导力、存储格、孵化点。
+     * 原来的 text3 只写领导力，玩家在「升级」页看不到另外两项。 */
+    const st = State.state() || {};
+    const capNow = Math.max(1, Number(st.petsCapacity) || 6);
+    const leadNow = State.petLeadership ? State.petLeadership() : (b.level * 3 + 7);
+    const leadNext = b.level * 3 + 7;
     if (t) {
-      t.setText(clipOf(view, 'text1'), String(info.gold));
-      t.setText(clipOf(view, 'text11'), '金松果');
-      t.setText(clipOf(view, 'text2'), String(info.hour));
-      t.setText(clipOf(view, 'text22'), '小时');
-      /* text3 只有 67.5×30、一行约 5 个汉字（实测 textfields-index 7791），
-       * 原来整句 20+ 字会横向截断。这里改成两行短句；完整说明挪到底部 note。 */
-      const desc = key === 'altar' ? ('触发几率\n→' + next.expRate + '%')
-        : key === 'miracle' ? '随机属性点\n+1'
-          : ('领导力\n→' + ((b.level) * 3 + 7));
+      t.setText(clipOf(view, 'text1'), atMax ? '—' : String(info.gold));
+      t.setText(clipOf(view, 'text11'), atMax ? '' : '金松果');
+      t.setText(clipOf(view, 'text2'), atMax ? '—' : String(info.hour));
+      t.setText(clipOf(view, 'text22'), atMax ? '' : '小时');
+      /* text3 是 3957 f5 的字段（3845，约 207×35，12 号字）：短行 + 显式换行，
+       * 纵向不裁切，两行正好落在「升到下一级需要」与底部按钮之间。 */
+      const desc = atMax ? '已达最高等级'
+        : key === 'altar' ? ('三项双倍几率 ' + info.expRate + '%→' + next.expRate + '%')
+          : key === 'miracle' ? '随机属性点 +1'
+            : ('升级后领导力 ' + leadNow + '→' + leadNext + '\n存储格 ' + capNow + '→' + (capNow + 1) + '　孵化点 +200');
       t.setText(clipOf(view, 'text3'), desc);
     }
     wireClickable(clipOf(view, 'button1'), () => {
@@ -478,7 +492,8 @@
     });
     wireClickable(clipOf(view, 'button2'), () => openPage(key));
     showNote(container, key === 'beast'
-      ? ('升级后松鼠领导力提高至' + ((b.level) * 3 + 7) + '，并再赠送 1 个召唤兽存储格和 200 孵化点。')
+      ? (atMax ? '幻兽牧场已达最高等级。'
+        : ('升级后领导力 ' + leadNow + '→' + leadNext + '，存储格 +1，孵化点 +200。'))
       : page.note);
   }
 
@@ -523,109 +538,128 @@
    *      left/right = 翻召唤兽列表；`doShowPlayerPets()` 填 6 个格子 + 孵化点 + 页码。
    * 复刻按存档里的 `pets` 填格子；没有幻兽时显示空列表提示，左右翻页按页数显示。 */
   /* ---------- 幻兽牧场：主列表 ---------- */
-  const escH = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   function statePets() { return (window.State && State.pets) ? State.pets() : []; }
   function ensureSelectedPet() {
     const list = statePets();
     if (!list.some((p) => p.key === selectedPetKey)) selectedPetKey = list[0] ? list[0].key : '';
     return list;
   }
-  function showPetPanel(container, html, onClick) {
-    if (!container) return null;
-    let p = container.querySelector('.ssfight-pet-panel');
-    if (!p) {
-      p = document.createElement('div');
-      p.className = 'ssfight-pet-panel';
-      container.appendChild(p);
-    }
-    p.innerHTML = html;
-    p.onclick = onClick || null;
-    return p;
+  function openHatch() {
+    return openPage('beast-hatch');
   }
-  function petModal(title, html, buttons) {
-    try {
-      if (window.UI && UI.classic && UI.classic.modal) return UI.classic.modal(title, html, buttons, { small: true });
-    } catch (e) {}
-    toast(title + '：' + String(html).replace(/<[^>]+>/g, ' ').slice(0, 120));
-    return null;
-  }
-  function petSelectHtml(selected) {
-    const list = statePets();
-    return '<select id="ssfight-pet-select" style="max-width:100%">' + list.map((p) =>
-      '<option value="' + escH(p.key) + '"' + (p.key === selected ? ' selected' : '') + '>' +
-      escH(p.name) + ' ' + p.grade + '★ Lv' + p.level + '（领导力' + p.leadership + '）</option>').join('') + '</select>';
-  }
-  function openHatchModal() {
-    const st = State.state() || {};
-    petModal('孵化幻兽',
-      '<p>当前孵化点：<b>' + (Number(st.hatchPoint) || 0) + '</b>（每次孵化消耗 <b>200</b> 点）</p>' +
-      '<p>随机获得 1★~4★ 幻兽；星级越高领导力需求越高。</p>',
-      [{ label: '取消', cls: 'muted' }, { label: '孵化', cls: 'gold', run: () => {
-        const r = State.hatchPet();
-        toast(r.ok ? ('孵化成功：' + r.pet.name + '（' + r.pet.grade + '★）') : r.msg);
-        if (r.ok) { selectedPetKey = r.pet.key; openPage('beast'); }
-      } }]);
-  }
-  function openDetailModal(pet) {
+  function openPetDetail(pet) {
     if (!pet) return toast('还没有幻兽，先去孵化一只吧');
-    const dlg = petModal(pet.name,
-      '<div class="ssfight-pet-detail-head"><div class="ssfight-pet-portrait" id="sf-pet-portrait"></div><div>' +
-      '<p><b>' + escH(pet.name) + '</b>　' + pet.grade + '★　Lv' + pet.level + '/' + pet.maxLevel + '</p>' +
-      '<p>经验：' + pet.exp + '/' + pet.nextExp + '　领导力需求：' + pet.leadership + '</p>' +
-      '<p>技能：<b>' + escH(pet.skillName) + '</b><br>' + escH(pet.skillRemark) + '</p></div></div>' +
-      '<p class="small-label">喂养/进化请用牧场底部的对应按钮。</p>',
-      [{ label: '关闭' }]);
-    if (dlg && dlg.element) mountPetArt(dlg.element.querySelector('#sf-pet-portrait'), pet);
+    selectedPetKey = pet.key;
+    return openPage('beast-detail');
   }
-  function openTeamModal() {
+  function openTeam() {
+    teamDraft = ((State.state() || {}).petsTeam || []).slice(0, 3);
+    return openPage('beast-team');
+  }
+  function openFeed() {
     const list = statePets();
     if (!list.length) return toast('还没有幻兽，先去孵化一只吧');
-    const team = (State.state() || {}).petsTeam || [];
-    const cap = State.petLeadership ? State.petLeadership() : 0;
-    const rows = list.map((p) => '<label style="display:block;margin:2px 0"><input type="checkbox" data-team-key="' + escH(p.key) + '"' +
-      (team.includes(p.key) ? ' checked' : '') + '> ' + escH(p.name) + ' ' + p.grade + '★ Lv' + p.level + '（领导力' + p.leadership + '）</label>').join('');
-    const picked = new Set(team);
-    const dlg = petModal('出战编队',
-      '<p>领导力上限：<b>' + cap + '</b>　最多选择 3 只，领导力总和不能超过上限。</p>' + rows,
-      [{ label: '取消', cls: 'muted' }, { label: '保存', cls: 'gold', run: () => {
-        const keys = [...picked].slice(0, 3);
-        const r = State.setPetTeam(keys);
-        toast(r.ok ? ('编队已保存：领导力 ' + r.need + '/' + r.cap) : r.msg);
-        if (r.ok) openPage('beast');
-      } }]);
-    if (dlg && dlg.element) dlg.element.querySelectorAll('[data-team-key]').forEach((cb) => {
-      cb.onchange = () => { if (cb.checked) picked.add(cb.dataset.teamKey); else picked.delete(cb.dataset.teamKey); };
+    choosePet('请选择要喂养的召唤兽', list, (pet) => {
+      selectedPetKey = pet.key;
+      feedDraft = [];
+      openPage('beast-feed');
+    }, backBeast);
+  }
+  /** 把进化草稿里失效 / 重复 / 跨星级 / 出战的项清掉，返回规范化的 3 格。 */
+  function normalizeEvolveDraft() {
+    if (!Array.isArray(evolveDraft)) evolveDraft = ['', '', ''];
+    const list = statePets();
+    const byKey = new Map(list.map((p) => [p.key, p]));
+    const team = new Set((State.state() || {}).petsTeam || []);
+    const out = ['', '', ''];
+    const seen = new Set();
+    for (let i = 0; i < 3; i++) {
+      const key = String(evolveDraft[i] || '');
+      const pet = byKey.get(key);
+      if (!pet || seen.has(key)) continue;
+      /* 目标可以在出战队伍里（进化后由 State 把新幻兽补回队伍）；材料不能出战。 */
+      if (i > 0 && (team.has(key) || (out[0] && pet.grade !== byKey.get(out[0]).grade))) continue;
+      out[i] = key;
+      seen.add(key);
+    }
+    /* 第 1 格是目标；目标没选时，后两格不单独保留。 */
+    if (!out[0]) out[1] = out[2] = '';
+    evolveDraft = out;
+    return out;
+  }
+  /** 进化页不再先弹一次「选一只」：直接进合成页，3 个格子都可以自己点。 */
+  function openEvolve() {
+    const list = statePets();
+    if (!list.length) return toast('还没有幻兽，先去孵化一只吧');
+    normalizeEvolveDraft();
+    return openPage('beast-evolve');
+  }
+
+  /** 原版 f2 是共用选择页，不是孵化页。选择只留在本次页面草稿，确认后才调用 State。 */
+  function choosePet(title, list, choose, back, hint) {
+    petChooser = { title, list, choose, back, hint: hint || '', page: 1 };
+    return openPage('beast-choose');
+  }
+  /** 时间轴会合法复用上一帧的 c1 等元件，不能按 placedHere 一律隐藏。 */
+  function preparePetPage(view, names) {
+    const keep = new Set(names.split(' '));
+    for (const rec of view.nodes.values()) {
+      if (!rec.na) continue;
+      const node = rec.wrap || rec.node;
+      if (node && node.style) {
+        node.style.display = keep.has(rec.na) ? '' : 'none';
+        node.style.visibility = keep.has(rec.na) ? '' : 'hidden';
+      }
+    }
+    hideAllPetLevels(view);
+  }
+  /** 图像仍用原版 4280；覆盖在原版格内，不另画一套卡片或按钮。 */
+  function paintPetCell(view, name, pet, container, onFire) {
+    const cell = clipOf(view, name);
+    if (!cell || !cell.g) return;
+    stopAt(cell, 1);
+    hidePetLevel(cell);
+    if (onFire) wireClickable(cell, onFire, { idle: 1, hover: 1 });
+    if (!pet) return;
+    const hr = container.getBoundingClientRect(), cr = cell.g.getBoundingClientRect();
+    const scale = layoutScale(container) || 1;
+    const art = document.createElement('div');
+    art.className = 'ssfight-pet-art sf-clickthrough';
+    art.style.cssText = 'left:' + ((cr.left - hr.left + cr.width * 0.09) / scale) + 'px;top:' +
+      ((cr.top - hr.top + cr.height * 0.16) / scale) + 'px;width:' + (cr.width * 0.82 / scale) +
+      'px;height:' + (cr.height * 0.68 / scale) + 'px';
+    container.appendChild(art);
+    mountPetArt(art, pet).then((ok) => {
+      if (!ok || !art.isConnected) return;
+      const lv = document.createElement('span');
+      lv.className = 'ssfight-pet-level sf-clickthrough';
+      lv.textContent = 'Lv' + pet.level;
+      art.appendChild(lv);
     });
   }
-  function openFeedModal() {
-    const list = statePets();
-    if (!list.length) return toast('还没有幻兽，先去孵化一只吧');
-    let picked = selectedPetKey || list[0].key;
-    const dlg = petModal('喂养幻兽',
-      '<p>选择要喂养的幻兽：</p>' + petSelectHtml(picked) +
-      '<p>系统会自动消耗最多 3 只非出战幻兽，每只 20 金松果；出战幻兽不会被消耗。</p>',
-      [{ label: '取消', cls: 'muted' }, { label: '喂养', cls: 'gold', run: () => {
-        const r = State.feedPet(picked);
-        toast(r.ok ? ('喂养成功：' + r.target.name + ' 获得 ' + r.gained + ' 经验') : r.msg);
-        if (r.ok) openPage('beast');
-      } }]);
-    const sel = dlg && dlg.element ? dlg.element.querySelector('#ssfight-pet-select') : null;
-    if (sel) sel.onchange = () => { picked = sel.value; };
-  }
-  function openEvolveModal() {
-    const list = statePets();
-    if (!list.length) return toast('还没有幻兽，先去孵化一只吧');
-    let picked = selectedPetKey || list[0].key;
-    const dlg = petModal('幻兽进化',
-      '<p>选择要进化的幻兽：</p>' + petSelectHtml(picked) +
-      '<p>消耗目标 + 2 只同星级且不在出战队伍的幻兽 + 金松果，随机进化成高一星幻兽。四星已是最高星级。</p>',
-      [{ label: '取消', cls: 'muted' }, { label: '进化', cls: 'gold', run: () => {
-        const r = State.evolvePet(picked);
-        toast(r.ok ? ('进化成功：' + r.pet.name + '（' + r.pet.grade + '★）') : r.msg);
-        if (r.ok) { selectedPetKey = r.pet.key; openPage('beast'); }
-      } }]);
-    const sel = dlg && dlg.element ? dlg.element.querySelector('#ssfight-pet-select') : null;
-    if (sel) sel.onchange = () => { picked = sel.value; };
+  function wireBeastChoose(view, page, container) {
+    preparePetPage(view, 'title1 title2 c1 c2 c3 c4 c5 c6 text1 text2 text3 text4 text5 text6 left right page button1');
+    const picker = petChooser;
+    if (!picker) { wireClickable(clipOf(view, 'button1'), backBeast); return; }
+    const pages = Math.max(1, Math.ceil(picker.list.length / 6));
+    picker.page = Math.max(1, Math.min(pages, picker.page));
+    setTextByName(view, 'title1', picker.title);
+    // title2 与第二排名称共用底部空间；有列表时保持原版空串，不叠放说明。
+    setTextByName(view, 'title2', picker.list.length ? '' : '没有可选择的召唤兽');
+    if (picker.hint) view.g.setAttribute('aria-description', picker.hint);
+    setTextByName(view, 'page', picker.page + '/' + pages);
+    for (let i = 1; i <= 6; i++) {
+      const pet = picker.list[(picker.page - 1) * 6 + i - 1];
+      setTextByName(view, 'text' + i, pet ? pet.name : '');
+      if (pet) paintPetCell(view, 'c' + i, pet, container, () => picker.choose(pet));
+      else setVisible(clipOf(view, 'c' + i), false);
+    }
+    const left = clipOf(view, 'left'), right = clipOf(view, 'right');
+    wireClickable(left, () => { if (picker.page > 1) { picker.page--; openPage('beast-choose'); } }, { hover: 1 });
+    wireClickable(right, () => { if (picker.page < pages) { picker.page++; openPage('beast-choose'); } }, { hover: 1 });
+    setVisible(left, picker.page > 1);
+    setVisible(right, picker.page < pages);
+    wireClickable(clipOf(view, 'button1'), picker.back || backBeast);
   }
   function wireBeast(view, page, container) {
     const t = T();
@@ -633,7 +667,10 @@
     showBuildingLevel(container, 'beast', '幻兽牧场', 'left:18px;top:96px');
     const list = ensureSelectedPet();
     const cap = Math.max(1, Number((State.state() || {}).petsCapacity) || 6);
-    const pageCount = Math.max(1, Math.ceil(Math.max(list.length, 1) / 6));
+    /* 格子数按「牧场容量」算，不按已有幻兽数算：空位也要画出来。
+     * 老存档若已有超出容量的幻兽，仍按实际数量补足，避免把已有幻兽藏掉。 */
+    const slotCount = Math.max(cap, list.length);
+    const pageCount = Math.max(1, Math.ceil(slotCount / 6));
     beastPage = Math.max(1, Math.min(pageCount, Number(beastPage) || 1));
     const start = (beastPage - 1) * 6;
     const beastBadge = container && container.querySelector('.ssfight-building-level');
@@ -646,14 +683,27 @@
     }
     for (let i = 1; i <= 6; i++) {
       const idx = start + i - 1;
-      const pet = list[idx] || null;
+      const inRange = idx < slotCount;
+      const pet = inRange ? (list[idx] || null) : null;
       const cell = clipOf(view, 'c' + i);
       const nameNode = clipOf(view, 'text' + i);
+      if (!inRange) {
+        /* 最后一页没被容量填满的那几格：整格不显示（原版 `gotoAndStop(6)` 的等价做法）。 */
+        setVisible(cell, false);
+        if (cell) {
+          stopAt(cell, 1);
+          hidePetLevel(cell);
+          if (cell.g) cell.g.style.cursor = 'default';
+        }
+        if (t) t.setText(nameNode, '');
+        continue;
+      }
+      setVisible(cell, true);
       if (pet) {
         if (cell) {
           stopAt(cell, 1);                         // 有 level 文本的是第 1 帧；第 2 帧反而丢了它
           hidePetLevel(cell);
-          wireClickable(cell, () => { selectedPetKey = pet.key; openDetailModal(pet); });
+          wireClickable(cell, () => { selectedPetKey = pet.key; openPetDetail(pet); });
           /* `wireClickable` 的 hover 会拨帧（2=悬停档，离开时回 1）；第 1 帧重建后
            * 画稿自带的 "lv23" 又回来了 —— 用户看到的「所有幻兽都显示 lv23」就是悬停过一次
            * 之后漏出占位串。这里在回来/离开的帧重建之后都再收一次。 */
@@ -706,47 +756,56 @@
     wireClickable(left, () => { if (beastPage > 1) { beastPage--; openPage('beast'); } }, { hover: 1 });
     wireClickable(right, () => { if (beastPage < pageCount) { beastPage++; openPage('beast'); } }, { hover: 1 });
     wireClickable(clipOf(view, 'button5'), backToVillage);
-    wireClickable(clipOf(view, 'button1'), openHatchModal);
-    wireClickable(clipOf(view, 'button2'), openTeamModal);
-    wireClickable(clipOf(view, 'button3'), openFeedModal);
-    wireClickable(clipOf(view, 'button4'), openEvolveModal);
+    wireClickable(clipOf(view, 'button1'), openHatch);
+    wireClickable(clipOf(view, 'button2'), openTeam);
+    wireClickable(clipOf(view, 'button3'), openFeed);
+    wireClickable(clipOf(view, 'button4'), openEvolve);
     wireClickable(clipOf(view, 'levelup'), () => openPage('beast-up'));
     showNote(container, PAGES.beast.note);
   }
 
   /* ---------- 孵化 ---------- */
   function wireBeastHatch(view, page, container) {
-    const t = T();
-    hideCarriedOver(view);
-    hideAllPetLevels(view);
-    showBuildingLevel(container, 'beast', '幻兽牧场', 'left:18px;top:96px');
-    const st = State.state() || {};
-    if (t) {
-      t.setText(clipOf(view, 'title1'), '孵化');
-      t.setText(clipOf(view, 'title2'), '孵化点：' + (Number(st.hatchPoint) || 0) + '　（每次孵化需要200点）');
-    }
+    preparePetPage(view, 'textMc egg button1 button2');
+    setTextByName(clipOf(view, 'textMc'), 'text1', '孵化点：' + (Number((State.state() || {}).hatchPoint) || 0));
     wireClickable(clipOf(view, 'button1'), () => {
       const r = State.hatchPet();
       toast(r.ok ? ('孵化成功：' + r.pet.name + '（' + r.pet.grade + '★）') : r.msg);
-      if (r.ok) { selectedPetKey = r.pet.key; openPage('beast'); }
+      if (r.ok) { selectedPetKey = r.pet.key; openPage('beast-hatched'); }
     });
-    showNote(container, '消耗200孵化点随机孵化一只幻兽；星级越高领导力需求越高。');
+    wireClickable(clipOf(view, 'button2'), backBeast);
+  }
+  function wireBeastHatched(view, page, container) {
+    preparePetPage(view, 'text1 text2 c1 star button1');
+    const pet = ensureSelectedPet().find((p) => p.key === selectedPetKey);
+    if (pet) {
+      setTextByName(view, 'text1', '恭喜你获得' + pet.grade + '星召唤兽');
+      setTextByName(view, 'text2', pet.name);
+      stopAt(clipOf(view, 'star'), pet.grade);
+      paintPetCell(view, 'c1', pet, container);
+    }
+    wireClickable(clipOf(view, 'button1'), () => openPage('beast-hatch'));
   }
 
   /* ---------- 详情 ---------- */
   function wireBeastDetail(view, page, container) {
     const t = T();
-    hideCarriedOver(view);
-    hideAllPetLevels(view);
-    showBuildingLevel(container, 'beast', '幻兽牧场', 'left:18px;top:96px');
+    preparePetPage(view, 'c1 star text1 text2 text3 text4 text5 levelMc expMc expText button1');
     const list = ensureSelectedPet();
     const pet = list.find((p) => p.key === selectedPetKey);
     if (!pet) { wireClickable(clipOf(view, 'button1'), backBeast); toast('还没有幻兽，先去孵化一只吧'); return; }
-    /* 详情页素材里没有随幻兽绑定的整身图（原版 attachMovie(summons.name) 那套库里没有导出），
-     * 保留原生背景，但把会显示 "lv23 / 名字 / Lv0000" 的占位字段收掉，数据统一放在 DOM 面板，
-     * 避免占位文本和真实数据叠在一起。 */
-    for (const n of ['c1', 'level', 'text2', 'text3', 'text4', 'text5', 'expText']) hideNamedClip(view, n);
-    if (t) t.setText(clipOf(view, 'text1'), pet.name);
+    setTextByName(view, 'text1', pet.name);
+    setTextByName(view, 'text2', '领导力需求：' + pet.leadership);
+    setTextByName(view, 'text3', '（上限' + pet.maxLevel + '）');
+    /* 原版 `doShowSummonsDeTail`：技能说明里的 X 要换成**当前等级**的实际值；
+     * 下一级提示也把 X 换成下一级的数值。技能说明单行太长，交给显示层按字段宽折行。 */
+    const skillNow = fillSkillValue(pet.skillRemark, pet.skillValue);
+    const skillNext = pet.skillLevelupRemark ? fillSkillValue(pet.skillLevelupRemark, pet.skillNextValue) : '';
+    setTextByName(view, 'text4', '技能：' + pet.skillName + '\n' + skillNow, { wrap: true });
+    setTextByName(view, 'text5', pet.level >= pet.maxLevel ? '已达到最高等级'
+      : (skillNext ? '下一级：' + skillNext : '喂养召唤兽可获得经验并升级'));
+    setTextByName(view, 'expText', pet.level >= pet.maxLevel ? '' : pet.exp + '/' + pet.nextExp);
+    paintPetCell(view, 'c1', pet, container);
     stopAt(clipOf(view, 'star'), pet.grade);
     /* 详情页右上角的 `Lv` 是画稿里的静态字，后面那排 `levelMc` 数字精灵（num1..num4）
      * 原本没填就会停在占位帧；这里写进真实等级，和 DOM 面板的 Lv 保持一致。 */
@@ -755,110 +814,142 @@
     const expMc = clipOf(view, 'expMc');
     if (expMc) stopAt(expMc, pet.level >= pet.maxLevel ? (expMc.frameCount ? expMc.frameCount() : 1) : Math.min(expMc.frameCount ? expMc.frameCount() : 100, 1 + Math.ceil(pet.exp * 100 / Math.max(1, pet.nextExp))));
     wireClickable(clipOf(view, 'button1'), backBeast);
-    showPetPanel(container, '<b>' + escH(pet.name) + '</b>　' + pet.grade + '★　Lv' + pet.level + '/' + pet.maxLevel +
-      '　经验 ' + pet.exp + '/' + pet.nextExp + '　领导力需求 ' + pet.leadership +
-      '<br>技能：<b>' + escH(pet.skillName) + '</b>　' + escH(pet.skillRemark) +
-      '<span class="ssfight-pet-actions"><button data-pet-act="feed">喂养</button><button data-pet-act="evolve">进化</button><button data-pet-act="back">返回</button></span>',
-    (e) => {
-      const act = e.target && e.target.dataset && e.target.dataset.petAct;
-      if (act === 'feed') openPage('beast-feed');
-      else if (act === 'evolve') openPage('beast-evolve');
-      else if (act === 'back') backBeast();
-    });
-    showNote(container, '点击下方按钮喂养或进化这只幻兽。');
   }
 
   /* ---------- 编队 ---------- */
   function wireBeastTeam(view, page, container) {
-    const t = T();
-    hideCarriedOver(view);
-    hideAllPetLevels(view);
-    showBuildingLevel(container, 'beast', '幻兽牧场', 'left:18px;top:96px');
+    preparePetPage(view, 'text1 c1 c2 c3 button1 button2 button3');
     const list = statePets();
-    const teamKeys = (State.state() || {}).petsTeam || [];
-    const used = list.filter((p) => teamKeys.includes(p.key)).reduce((n, p) => n + p.leadership, 0);
+    const used = list.filter((p) => teamDraft.includes(p.key)).reduce((n, p) => n + p.leadership, 0);
     const cap = State.petLeadership ? State.petLeadership() : 0;
-    for (const n of ['text1', 'text2', 'c1', 'c2', 'c3']) hideNamedClip(view, n);
-    const rows = list.length ? list.map((p) =>
-      '<label><input type="checkbox" data-team-key="' + escH(p.key) + '"' + (teamKeys.includes(p.key) ? ' checked' : '') + '> ' +
-      escH(p.name) + ' ' + p.grade + '★ Lv' + p.level + '（领导力' + p.leadership + '）</label>').join('')
-      : '<p>还没有幻兽，先去孵化吧。</p>';
-    showPetPanel(container, '<b>领导力：' + used + '/' + cap + '　选择出战幻兽（最多3只）</b><div class="ssfight-pet-list">' + rows + '</div><button data-team-act="save">保存编队</button><button data-team-act="back">返回</button>',
-      (e) => {
-        const act = e.target && e.target.dataset && e.target.dataset.teamAct;
-        if (act === 'save') {
-          const keys = [...container.querySelectorAll('[data-team-key]:checked')].map((x) => x.dataset.teamKey);
-          const r = State.setPetTeam(keys);
-          toast(r.ok ? ('编队已保存：领导力 ' + r.need + '/' + r.cap) : r.msg);
-          if (r.ok) openPage('beast');
-        } else if (act === 'back') backBeast();
+    // 4381 f4 两个同名 text1：上方是领导力，底部是静态小贴士，分别填入。
+    for (const rec of view.nodes.values()) if (rec.na === 'text1') {
+      const node = rec.node;
+      if (T()) T().setText(node, String(rec.id) === '4321' ? ('领导力：' + used + '/' + cap) : '小贴士：出阵幻兽将在战斗中使用特技协助你！');
+    }
+    for (let i = 0; i < 3; i++) {
+      const pet = list.find((p) => p.key === teamDraft[i]);
+      paintPetCell(view, 'c' + (i + 1), pet, container, () => {
+        const choices = list.filter((p) => !teamDraft.includes(p.key) || p.key === teamDraft[i]);
+        choosePet('请选择出阵召唤兽', choices, (picked) => {
+          const next = teamDraft.slice(); next[i] = picked.key;
+          const need = list.filter((p) => next.includes(p.key)).reduce((n, p) => n + p.leadership, 0);
+          if (need > cap) { toast('领导力不足（需要 ' + need + ' / 当前 ' + cap + '）'); return; }
+          teamDraft = next;
+          openPage('beast-team');
+        }, () => openPage('beast-team'), '点击格子选择；清空按钮可重新编队');
       });
+    }
     wireClickable(clipOf(view, 'button1'), () => {
-      const r = State.setPetTeam([]);
-      toast(r.ok ? '已清空出战队伍' : r.msg);
-      if (r.ok) openPage('beast-team');
+      teamDraft = [];
+      openPage('beast-team');
     });
     wireClickable(clipOf(view, 'button2'), () => {
-      const keys = [...container.querySelectorAll('[data-team-key]:checked')].map((x) => x.dataset.teamKey);
-      const r = State.setPetTeam(keys);
+      const r = State.setPetTeam(teamDraft.filter(Boolean));
       toast(r.ok ? ('编队已保存：领导力 ' + r.need + '/' + r.cap) : r.msg);
       if (r.ok) openPage('beast');
     });
     wireClickable(clipOf(view, 'button3'), backBeast);
-    showNote(container, '勾选最多3只幻兽，领导力总和不能超过牧场等级提供的上限。');
   }
 
   /* ---------- 喂养 ---------- */
   function wireBeastFeed(view, page, container) {
-    const t = T();
-    hideCarriedOver(view);
-    hideAllPetLevels(view);
-    showBuildingLevel(container, 'beast', '幻兽牧场', 'left:18px;top:96px');
+    preparePetPage(view, 'cc c1 c2 c3 text1 button1 button2');
     const list = ensureSelectedPet();
     const pet = list.find((p) => p.key === selectedPetKey);
-    if (!pet) { wireClickable(clipOf(view, 'button1'), backBeast); return; }
-    for (const n of ['level', 'expText']) { const c = clipOf(view, n); if (c && c.g) c.g.style.visibility = 'hidden'; }
-    if (t) t.setText(clipOf(view, 'text1'), pet.name);
-    const expMc = clipOf(view, 'expMc');
-    if (expMc) stopAt(expMc, pet.level >= pet.maxLevel ? (expMc.frameCount ? expMc.frameCount() : 1) : Math.min(expMc.frameCount ? expMc.frameCount() : 100, 1 + Math.ceil(pet.exp * 100 / Math.max(1, pet.nextExp))));
-    wireClickable(clipOf(view, 'button1'), () => {
-      const r = State.feedPet(pet.key);
-      toast(r.ok ? ('喂养成功：' + r.target.name + ' 获得' + r.gained + '经验，消耗 ' + r.gold + ' 金松果') : r.msg);
-      if (r.ok) openPage('beast-feed');
+    if (!pet) { wireClickable(clipOf(view, 'button2'), backBeast); return; }
+    const team = (State.state() || {}).petsTeam || [];
+    feedDraft = feedDraft.filter((k) => k !== pet.key && !team.includes(k) && list.some((p) => p.key === k));
+    const materials = feedDraft.map((k) => list.find((p) => p.key === k)).filter(Boolean);
+    setTextByName(view, 'text1', materials.length ? ('已选食材：' + materials.length + '/3　确认后按实际材料结算') : '请选择食材（最多3只，出阵幻兽不会被消耗）');
+    paintPetCell(view, 'cc', pet, container);
+    for (let i = 0; i < 3; i++) paintPetCell(view, 'c' + (i + 1), materials[i], container, () => {
+      const choices = list.filter((p) => p.key !== pet.key && !team.includes(p.key) && (!feedDraft.includes(p.key) || p.key === feedDraft[i]));
+      choosePet('食材选择', choices, (picked) => {
+        feedDraft[i] = picked.key;
+        feedDraft = feedDraft.filter(Boolean);
+        openPage('beast-feed');
+      }, () => openPage('beast-feed'), '喂养会消耗所选幻兽，费用和经验按实际材料结算');
     });
-    showPetPanel(container, '<b>喂养：' + escH(pet.name) + '</b><p>自动消耗最多3只非出战幻兽，每只20金松果；喂养会加经验并自动升级。</p><button data-feed-act="feed">喂养</button><button data-feed-act="back">返回</button>',
-      (e) => {
-        const act = e.target && e.target.dataset && e.target.dataset.feedAct;
-        if (act === 'feed') { const r = State.feedPet(pet.key); toast(r.ok ? ('喂养成功：' + r.target.name + ' +' + r.gained + '经验') : r.msg); if (r.ok) openPage('beast-feed'); }
-        else if (act === 'back') backBeast();
-      });
-    showNote(container, '喂养会消耗背包里其它幻兽换取经验；出战队伍里的幻兽不会被消耗。');
+    wireClickable(clipOf(view, 'button1'), () => {
+      if (!feedDraft.length) { toast('当前还没有选择食材'); return; }
+      const r = State.feedPet(pet.key, feedDraft);
+      toast(r.ok ? ('喂养成功：' + r.target.name + ' 获得' + r.gained + '经验，消耗 ' + r.gold + ' 金松果') : r.msg);
+      if (r.ok) { feedDraft = []; openPage('beast-detail'); }
+    });
+    wireClickable(clipOf(view, 'button2'), backBeast);
   }
 
   /* ---------- 进化 ---------- */
+  /** 点进化页的某一格：第 1 格是目标，后两格是同星级材料。选完只刷新本页，确认才结算。 */
+  function chooseEvolveSlot(index) {
+    const slots = normalizeEvolveDraft();
+    const list = statePets();
+    const byKey = new Map(list.map((p) => [p.key, p]));
+    const team = new Set((State.state() || {}).petsTeam || []);
+    const target = byKey.get(slots[0]);
+    if (index > 0 && !target) { toast('请先选择第 1 格的目标幻兽'); return; }
+    const used = new Set(slots.filter((k, i) => i !== index && k));
+    /* 第 1 格是目标：出战中的幻兽也可以当目标（进化后会留在队伍里）；
+     * 后两格是材料，出战幻兽不能当材料。 */
+    let choices = index === 0 ? list.slice() : list.filter((p) => !team.has(p.key));
+    if (index > 0) {
+      choices = choices.filter((p) => p.key !== target.key && !used.has(p.key) && p.grade === target.grade);
+    }
+    if (!choices.length) {
+      toast(index > 0 ? '没有同星级的可用材料（出战幻兽不能当材料）' : '没有可合成的幻兽');
+      return;
+    }
+    choosePet(index === 0 ? '选择进化目标' : '选择同星级材料', choices, (picked) => {
+      if (index === 0) {
+        evolveDraft[0] = picked.key;
+        /* 换目标后把星级不再匹配/重复的材料清掉，避免点确认时才报错。 */
+        for (let i = 1; i < 3; i++) {
+          const p = byKey.get(evolveDraft[i]);
+          if (!p || p.grade !== picked.grade || evolveDraft[i] === picked.key) evolveDraft[i] = '';
+        }
+      } else {
+        evolveDraft[index] = picked.key;
+      }
+      openPage('beast-evolve');
+    }, () => openPage('beast-evolve'), index === 0
+      ? '第1格是进化目标；后两格要选同星级材料'
+      : '材料必须与目标同星级，出战幻兽不能当材料');
+  }
   function wireBeastEvolve(view, page, container) {
-    const t = T();
-    hideCarriedOver(view);
-    hideAllPetLevels(view);
-    showBuildingLevel(container, 'beast', '幻兽牧场', 'left:18px;top:96px');
-    const list = ensureSelectedPet();
-    const pet = list.find((p) => p.key === selectedPetKey);
-    if (!pet) { wireClickable(clipOf(view, 'button1'), backBeast); return; }
-    for (const n of ['toSummons', 'level']) { const c = clipOf(view, n); if (c && c.g) c.g.style.visibility = 'hidden'; }
-    if (t) t.setText(clipOf(view, 'text1'), pet.name + '　' + pet.grade + '★');
+    preparePetPage(view, 'text1 toSummons formulas button1 button3');
+    const list = statePets();
+    if (!list.length) { wireClickable(clipOf(view, 'button3'), backBeast); return; }
+    normalizeEvolveDraft();
+    const byKey = new Map(list.map((p) => [p.key, p]));
+    const slots = evolveDraft.slice(0, 3);
+    const pets = slots.map((k) => byKey.get(k) || null);
+    const target = pets[0];
+    const picked = pets.filter(Boolean).length;
+    const cost = (target && window.GData && GData.PET_GRADE_COST && GData.PET_GRADE_COST[target.grade + 1]) || 200;
+    const desc = !target ? '点击格子选择3只同星级幻兽\n第1格目标，后两格材料'
+      : target.grade >= 4 ? '四星幻兽已是最高星级'
+        : picked < 3 ? ('还需选 ' + (3 - picked) + ' 只同星级幻兽\n第1格目标，后两格材料')
+          : ('本次进化将花费' + cost + '金松果\n产物：随机' + (target.grade + 1) + '星幻兽');
+    setTextByName(view, 'text1', desc);
+    const formulas = clipOf(view, 'formulas');
+    stopAt(formulas, 3);
+    for (let i = 0; i < 3; i++) paintPetCell(formulas, 'c' + (i + 1), pets[i], container, () => chooseEvolveSlot(i));
+    const output = clipOf(view, 'toSummons');
+    stopAt(output, 1);
+    hidePetLevel(output);
     wireClickable(clipOf(view, 'button1'), () => {
-      const r = State.evolvePet(pet.key);
+      const current = normalizeEvolveDraft();
+      if (!current[0] || !current[1] || !current[2]) { toast('请先选满3只同星级幻兽'); return; }
+      const r = State.evolvePet(current[0], current.slice(1));
       toast(r.ok ? ('进化成功：' + r.pet.name + '（' + r.pet.grade + '★）') : r.msg);
-      if (r.ok) { selectedPetKey = r.pet.key; openPage('beast-detail'); }
+      if (r.ok) {
+        evolveDraft = ['', '', ''];
+        selectedPetKey = r.pet.key;
+        openPage('beast-detail');
+      }
     });
-    wireClickable(clipOf(view, 'button2'), backBeast);
-    showPetPanel(container, '<b>进化：' + escH(pet.name) + '（' + pet.grade + '★）</b><p>消耗目标 + 2只同星级且不在出战队伍的幻兽 + 金松果，随机进化成高一星幻兽。</p><button data-evo-act="evolve">进化</button><button data-evo-act="back">返回</button>',
-      (e) => {
-        const act = e.target && e.target.dataset && e.target.dataset.evoAct;
-        if (act === 'evolve') { const r = State.evolvePet(pet.key); toast(r.ok ? ('进化成功：' + r.pet.name + '（' + r.pet.grade + '★）') : r.msg); if (r.ok) { selectedPetKey = r.pet.key; openPage('beast-detail'); } }
-        else if (act === 'back') backBeast();
-      });
-    showNote(container, '进化会消耗同星级幻兽与金松果；四星已是最高星级。');
+    wireClickable(clipOf(view, 'button3'), backBeast);
   }
 
   function backBeast() { openPage('beast'); }
@@ -950,6 +1041,11 @@
 
   /** 只摘掉当前这棵视图（不动 `current` 之外的任何东西）。 */
   function destroyView() {
+    if (current && current.container) {
+      clearPetArt(current.container);
+      const note = current.container.querySelector('.ssfight-note');
+      if (note && note.__hide) clearTimeout(note.__hide);
+    }
     if (current && current.view) { try { current.view.destroy(); } catch (e) {} }
     current = null;
   }

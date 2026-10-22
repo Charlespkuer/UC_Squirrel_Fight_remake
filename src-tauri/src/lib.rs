@@ -30,7 +30,6 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(not(mobile))]
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -255,29 +254,6 @@ fn file_meta(path: &Path) -> (bool, u64, u64) {
     }
 }
 
-/// 存档**原子写**：先写同目录 `.tmp` 再 rename 覆盖。
-/// macOS / APFS 上窗口被关掉、进程被杀或系统休眠时，直接 fs::write 可能留下半截 JSON；
-/// 下次启动解析失败就会退回浏览器兜底档（用户 2026-10 报的 Mac“有时候打开显示存档没有自动保存”）。
-/// rename 在同一文件系统内是原子的：要么旧档完整，要么新档完整。
-fn write_save_atomic(path: &Path, text: &str) -> std::io::Result<()> {
-    static TMP_SEQ: AtomicUsize = AtomicUsize::new(0);
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    /* 每次用不同临时名：轻壳的迷你服务器是每连接一个线程，两个 POST 同时到达时
-     * 不能互相覆盖 tmp 文件。 */
-    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    let tmp = path.with_extension(format!("json.tmp.{}.{seq}", std::process::id()));
-    fs::write(&tmp, text)?;
-    match fs::rename(&tmp, path) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            let _ = fs::remove_file(&tmp);
-            Err(e)
-        }
-    }
-}
-
 #[cfg(not(mobile))]
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
@@ -386,7 +362,7 @@ fn save_api(method: &str, query: &str, body: &[u8], ctx: &Ctx, out: &mut TcpStre
             if let Some(dir) = ctx.save.parent() {
                 let _ = fs::create_dir_all(dir);
             }
-            match write_save_atomic(&ctx.save, text) {
+            match fs::write(&ctx.save, text) {
                 Ok(_) => {
                     let (_, saved_at, _) = file_meta(&ctx.save);
                     respond_json(out, 200, &format!("{{\"ok\":true,\"savedAt\":{saved_at}}}"))
@@ -771,6 +747,170 @@ struct SaveState {
     file: PathBuf,
 }
 
+/* ---------- 存档盘面：主文件 + 上一次的备份 + 等级水位线 ----------
+ * iOS 换包更新时最怕的不是某一次写盘失败，而是**错误的档被当成最新档**：
+ * 启动早期原生桥还没就绪 → 页面先拿浏览器里的 1 级兜底档进游戏 → 桥接一到，
+ * 一次自动保存就把磁盘上几十级的 progress.json 写成 1 级；下一次启动又读回旧文件 ——
+ * 玩家看到的就是「初始存档与有进度的存档横跳」。
+ *
+ * 这里把落盘做成三道保险：
+ *   1. **原子写**：先写同目录临时文件、fsync，再 rename 覆盖主文件。进程被杀只会留下
+ *      临时文件，主文件要么是旧版、要么是新版，不会变成半截 JSON。
+ *   2. **上一版备份** progress.bak.json：每次覆盖前把当前有效主文件复制过去；
+ *      主文件损坏/丢失时 save_read 自动读备份并把它修回主文件。
+ *   3. **1 级空档保护**：主文件（或备份）里已有进度时，拒绝写入一份「全新 1 级档」；
+ *      只有调试面板「彻底重置账号」显式带 force=true 才放行。转生档 reborn>0 不算空档。 */
+fn save_bak_path(file: &Path) -> PathBuf {
+    file.with_file_name("progress.bak.json")
+}
+
+fn save_mark_path(file: &Path) -> PathBuf {
+    file.with_file_name(".min-level")
+}
+
+fn read_json_file(path: &Path) -> Option<(String, serde_json::Value)> {
+    let text = fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&text).ok()?;
+    if !value.is_object() {
+        return None;
+    }
+    Some((text, value))
+}
+
+/** 一份存档里的最高等级（双槽取两槽最大；与 scripts/serve.js 的 saveMaxLevel 同口径）。 */
+fn save_max_level(value: &serde_json::Value) -> u64 {
+    let one = |v: &serde_json::Value| v.get("level").and_then(|x| x.as_u64()).unwrap_or(0);
+    let mut level = one(value);
+    if let Some(other) = value.get("__dualOther") {
+        level = level.max(one(other));
+    }
+    if let Some(slots) = value.get("__dualSaves").and_then(|x| x.as_object()) {
+        for slot in slots.values() {
+            level = level.max(one(slot));
+        }
+    }
+    level
+}
+
+/** 是不是「刚建的新档」：只有 1 级、没打过胜仗、没通关过、也不是转生。
+ *  ⚠ 不能只看等级：转生果会把等级降回 1（reborn>0），那是合法存档。 */
+fn save_is_fresh(value: &serde_json::Value) -> bool {
+    if save_max_level(value) > 1 {
+        return false;
+    }
+    if save_reborn(value) > 0 {
+        return false;
+    }
+    if value.get("allWins").and_then(|x| x.as_u64()).unwrap_or(0) > 0 {
+        return false;
+    }
+    if let Some(stages) = value.get("stages").and_then(|x| x.as_object()) {
+        if !stages.is_empty() {
+            return false;
+        }
+    }
+    true
+}
+
+fn save_reborn(value: &serde_json::Value) -> u64 {
+    value.get("reborn").and_then(|x| x.as_u64()).unwrap_or(0)
+}
+
+fn save_has_progress(value: &serde_json::Value) -> bool {
+    if save_max_level(value) >= 5 {
+        return true;
+    }
+    if value.get("allWins").and_then(|x| x.as_u64()).unwrap_or(0) > 0 {
+        return true;
+    }
+    value.get("stages").and_then(|x| x.as_object()).map(|s| !s.is_empty()).unwrap_or(false)
+}
+
+/** 写主文件前的唯一一道「能不能覆盖」判断（命令与单测共用）。 */
+fn guard_save_write(current: Option<&serde_json::Value>, incoming: &serde_json::Value, force: bool) -> Result<(), String> {
+    if force {
+        return Ok(());
+    }
+    if let Some(cur) = current {
+        let cur_level = save_max_level(cur);
+        let new_level = save_max_level(incoming);
+        /* 只要新档比磁盘档低，就默认是「旧兜底档/初始档回来了」。
+         * 唯一合法的降级是转生果：`reborn` 会 +1；调试面板的重置走 force。 */
+        if new_level < cur_level && save_reborn(incoming) <= save_reborn(cur) {
+            let what = if save_is_fresh(incoming) {
+                "全新的 1 级空档".to_string()
+            } else {
+                format!("{} 级旧档", new_level)
+            };
+            return Err(format!(
+                "存档文件里已有 {} 级进度，已拒绝用{}覆盖（确需重置请在调试面板「彻底重置账号」）",
+                cur_level, what
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn read_min_level(file: &Path) -> u64 {
+    fs::read_to_string(save_mark_path(file))
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
+fn write_min_level(file: &Path, level: u64) {
+    let _ = fs::write(save_mark_path(file), level.to_string());
+}
+
+/** 临时文件 + fsync + rename：主文件永远是一份完整 JSON。 */
+fn write_file_atomic(path: &Path, data: &str) -> std::io::Result<()> {
+    let dir = path.parent().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "存档路径没有父目录"))?;
+    fs::create_dir_all(dir)?;
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("progress.json");
+    let tmp = dir.join(format!(".{name}.{}.{}.tmp", std::process::id(), now_ms()));
+    {
+        use std::io::Write as _;
+        let mut file = fs::File::create(&tmp)?;
+        file.write_all(data.as_bytes())?;
+        file.sync_all()?;
+    }
+    #[cfg(windows)]
+    {
+        // Windows 的 rename 不能覆盖已存在文件；先删旧文件。iOS/Unix 走原子 rename。
+        let _ = fs::remove_file(path);
+    }
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    #[cfg(unix)]
+    {
+        if let Ok(dir_handle) = fs::File::open(dir) {
+            let _ = dir_handle.sync_all();
+        }
+    }
+    Ok(())
+}
+
+fn backup_save_file(file: &Path, valid: bool) {
+    if valid {
+        let bak = save_bak_path(file);
+        /* **不要用更低的档覆盖更高的备份**：主文件若已经被旧版 1 级档覆盖过，
+         * 备份里的几十级进度是最后一次找回进度的机会；玩家从 1 级再升到 2 级时
+         * 不能把这份备份冲掉。只有主文件等级追平/超过备份时才滚动备份。
+         * （显式 force 重置会在写完后单独把备份同步成新档。） */
+        let main_level = read_json_file(file).map(|(_, v)| save_max_level(&v)).unwrap_or(0);
+        let bak_level = read_json_file(&bak).map(|(_, v)| save_max_level(&v)).unwrap_or(0);
+        if bak_level > main_level {
+            return;
+        }
+        let _ = fs::copy(file, bak);
+    } else {
+        /* 主文件读不出来也不能直接丢：留一份 progress.corrupt.json 供人工恢复。 */
+        let _ = fs::copy(file, file.with_file_name("progress.corrupt.json"));
+    }
+}
+
 #[tauri::command]
 fn save_path(state: tauri::State<SaveState>) -> String {
     state.file.to_string_lossy().to_string()
@@ -778,32 +918,139 @@ fn save_path(state: tauri::State<SaveState>) -> String {
 
 #[tauri::command]
 fn save_meta(state: tauri::State<SaveState>) -> serde_json::Value {
-    let (exists, saved_at, size) = file_meta(&state.file);
-    serde_json::json!({ "ok": true, "exists": exists, "savedAt": saved_at, "size": size, "path": state.file.to_string_lossy() })
+    let (main_exists, main_at, size) = file_meta(&state.file);
+    let (bak_exists, bak_at, _) = file_meta(&save_bak_path(&state.file));
+    let main = read_json_file(&state.file);
+    let bak = read_json_file(&save_bak_path(&state.file));
+    let level = main.as_ref().map(|(_, v)| save_max_level(v))
+        .or_else(|| bak.as_ref().map(|(_, v)| save_max_level(v)))
+        .unwrap_or(0);
+    let reborn = main.as_ref().map(|(_, v)| save_reborn(v)).unwrap_or(0)
+        .max(bak.as_ref().map(|(_, v)| save_reborn(v)).unwrap_or(0));
+    serde_json::json!({
+        "ok": true,
+        "exists": main_exists || bak_exists,
+        "savedAt": main_at.max(bak_at),
+        "size": size,
+        "path": state.file.to_string_lossy(),
+        "reborn": reborn,
+        "maxLevel": level,
+        "minLevel": read_min_level(&state.file),
+        "backup": bak_exists,
+        "corrupt": main_exists && main.is_none(),
+        "recovered": main.is_none() && bak.is_some(),
+    })
+}
+
+fn save_read_at(main_path: &Path) -> Result<serde_json::Value, String> {
+    let bak_path = save_bak_path(main_path);
+    let (main_exists, main_at, _) = file_meta(main_path);
+    let (bak_exists, bak_at, _) = file_meta(&bak_path);
+    let main = read_json_file(main_path);
+    let bak = read_json_file(&bak_path);
+    /* 两边都有效时不要无脑信主文件：主文件可能已经被旧版 1 级空档覆盖过，
+     * 而备份里还留着几十级进度。正常情况下选等级更高的一份；转生档是例外 ——
+     * 转生后等级合法地回到 1，但 reborn 会比备份大，这时必须信主文件，
+     * 不能被备份里的「前前世」进度救回去。 */
+    let pick_backup = match (main.as_ref(), bak.as_ref()) {
+        (Some((_, m)), Some((_, b))) => save_reborn(m) <= save_reborn(b) && save_max_level(b) > save_max_level(m),
+        _ => false,
+    };
+    let (text, value, saved_at, from_backup) = if pick_backup {
+        let (t, v) = bak.unwrap();
+        (t, v, bak_at, true)
+    } else {
+        match (main, bak) {
+            (Some((t, v)), _) => (t, v, main_at, false),
+            (None, Some((t, v))) => (t, v, bak_at, true),
+            (None, None) if main_exists => {
+                return Err("存档文件损坏，且没有可用的 progress.bak.json；请到「系统 → 导入存档」恢复".into());
+            }
+            (None, None) => {
+                return Ok(serde_json::json!({
+                    "ok": true, "exists": false, "savedAt": 0, "data": null,
+                    "path": main_path.to_string_lossy(), "maxLevel": 0, "backup": false,
+                }));
+            }
+        }
+    };
+    let saved_at = if from_backup {
+        /* 备份可用：立刻把它修回主文件，下一次读写就走正常路径。
+         * 返回修复后的主文件 mtime：玩家端会把这个值当作 `S.savedAt`，
+         * 如果还返回备份的旧 mtime，下一次自动保存会误判「文件更新」而跳过。 */
+        let _ = write_file_atomic(main_path, &text);
+        file_meta(main_path).1
+    } else {
+        saved_at
+    };
+    Ok(serde_json::json!({
+        "ok": true,
+        "exists": true,
+        "savedAt": saved_at,
+        "data": text,
+        "path": main_path.to_string_lossy(),
+        "maxLevel": save_max_level(&value),
+        "reborn": save_reborn(&value),
+        "backup": bak_exists,
+        "recoveredFrom": if from_backup { "backup" } else { "" },
+    }))
+}
+
+fn save_write_at(main_path: &Path, data: &str, force: bool) -> Result<serde_json::Value, String> {
+    if data.len() > SAVE_MAX {
+        return Err("存档太大（超过 4 MB）".into());
+    }
+    let incoming = serde_json::from_str::<serde_json::Value>(data)
+        .map_err(|_| "存档不是合法 JSON".to_string())?;
+    if !incoming.is_object() || incoming.is_array() {
+        return Err("存档必须是 JSON 对象".into());
+    }
+    let bak_path = save_bak_path(main_path);
+    let main = read_json_file(main_path);
+    let bak = read_json_file(&bak_path);
+    /* 主文件损坏时用备份里的等级判断「是不是已有进度」，别让 1 级空档把备份也盖掉。
+     * 两边都能读时取等级更高的那份做保护：万一主文件已经被旧版 1 级档覆盖过，
+     * 备份里的几十级进度仍能拦住第二次覆盖。 */
+    let current = match (main.as_ref(), bak.as_ref()) {
+        (Some((_, a)), Some((_, b))) => Some(if save_max_level(b) > save_max_level(a) { b } else { a }),
+        (Some((_, a)), None) => Some(a),
+        (None, Some((_, b))) => Some(b),
+        (None, None) => None,
+    };
+    guard_save_write(current, &incoming, force)?;
+
+    let main_exists = main_path.exists();
+    if force {
+        /* 显式重置：先把旧备份拿掉。否则「主文件已写成 1 级、复制备份前进程被杀」
+         * 会让下一次 save_read 又从旧备份把 40 级救回来，重置看起来没生效。
+         * 主文件本身在原子写完成前仍是旧档，不会丢；写完后同步新备份。 */
+        let _ = fs::remove_file(&bak_path);
+    } else if main_exists {
+        backup_save_file(main_path, main.is_some());
+    }
+    write_file_atomic(main_path, data).map_err(|e| format!("写存档失败：{e}"))?;
+    if force {
+        /* 玩家明确重置/导入：备份也同步成新档，避免旧的高等级备份继续挡住后续新档。 */
+        let _ = fs::copy(main_path, &bak_path);
+    }
+    let level = save_max_level(&incoming);
+    let mark = read_min_level(main_path);
+    write_min_level(main_path, mark.max(level));
+    let (_, saved_at, _) = file_meta(main_path);
+    Ok(serde_json::json!({
+        "ok": true, "savedAt": saved_at, "path": main_path.to_string_lossy(),
+        "maxLevel": level, "minLevel": mark.max(level), "backup": bak_path.exists(),
+    }))
 }
 
 #[tauri::command]
 fn save_read(state: tauri::State<SaveState>) -> Result<serde_json::Value, String> {
-    let (exists, saved_at, _) = file_meta(&state.file);
-    if !exists {
-        return Ok(serde_json::json!({ "ok": true, "exists": false, "savedAt": 0, "data": null, "path": state.file.to_string_lossy() }));
-    }
-    let text = fs::read_to_string(&state.file).map_err(|e| format!("读存档失败：{e}"))?;
-    Ok(serde_json::json!({ "ok": true, "exists": true, "savedAt": saved_at, "data": text, "path": state.file.to_string_lossy() }))
+    save_read_at(&state.file)
 }
 
 #[tauri::command]
-fn save_write(state: tauri::State<SaveState>, data: String) -> Result<serde_json::Value, String> {
-    if data.len() > SAVE_MAX {
-        return Err("存档太大（超过 4 MB）".into());
-    }
-    serde_json::from_str::<serde_json::Value>(&data).map_err(|_| "存档不是合法 JSON".to_string())?;
-    if let Some(dir) = state.file.parent() {
-        let _ = fs::create_dir_all(dir);
-    }
-    write_save_atomic(&state.file, &data).map_err(|e| format!("写存档失败：{e}"))?;
-    let (_, saved_at, _) = file_meta(&state.file);
-    Ok(serde_json::json!({ "ok": true, "savedAt": saved_at, "path": state.file.to_string_lossy() }))
+fn save_write(state: tauri::State<SaveState>, data: String, force: Option<bool>) -> Result<serde_json::Value, String> {
+    save_write_at(&state.file, &data, force.unwrap_or(false))
 }
 
 /// 命令：`export_save` —— 安装版（页面在 tauri.localhost）把存档写到系统「下载」目录。
@@ -876,6 +1123,115 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("运行 Tauri 应用失败");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn fresh_one_level_cannot_overwrite_progress() {
+        let cur = json!({
+            "level": 32, "allWins": 120, "stages": {"1": {"pass": true}},
+            "weapons": ["15:11"], "skills": ["11:6"]
+        });
+        let fresh = json!({
+            "level": 1, "reborn": 0, "allWins": 0, "stages": {},
+            "weapons": [], "skills": [], "props": {"1": 3, "2": 2}
+        });
+        assert!(save_is_fresh(&fresh));
+        assert!(save_has_progress(&cur));
+        assert!(guard_save_write(Some(&cur), &fresh, false).is_err(), "1 级空档不能覆盖 32 级正式档");
+        let lv2 = json!({"level": 2, "reborn": 0, "allWins": 1});
+        assert!(guard_save_write(Some(&cur), &lv2, false).is_err(), "2 级旧档同样不能覆盖 32 级正式档");
+        assert!(guard_save_write(Some(&cur), &fresh, true).is_ok(), "调试面板显式 force 才允许重置");
+    }
+
+    #[test]
+    fn rebirth_is_a_legal_level_one_save() {
+        let cur = json!({"level": 40, "allWins": 300, "stages": {"30": {"pass": true}}});
+        let reborn = json!({"level": 1, "reborn": 1, "allWins": 300, "stages": {"30": {"pass": true}}});
+        assert!(!save_is_fresh(&reborn), "转生档 reborn>0 不是新档");
+        assert!(guard_save_write(Some(&cur), &reborn, false).is_ok(), "转生降回 1 级必须能存");
+    }
+
+    #[test]
+    fn dual_slot_max_level_matches_server() {
+        let v = json!({
+            "level": 1, "settings": {"uiMode": "modern"},
+            "__dualOther": {"level": 42, "settings": {"uiMode": "classic"}}
+        });
+        assert_eq!(save_max_level(&v), 42);
+        let old = json!({ "level": 42, "__dualSaves": {"classic": {"level": 31}, "modern": {"level": 9}} });
+        assert_eq!(save_max_level(&old), 42);
+    }
+
+    #[test]
+    fn save_write_guards_and_read_recovers_backup() {
+        let dir = std::env::temp_dir().join(format!("ssdz-save-guard-{}", now_ms()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("progress.json");
+        let progressed = r#"{"level":32,"name":"老号","allWins":120,"stages":{"1":{"pass":true}}}"#;
+        let fresh = r#"{"level":1,"name":"新号","reborn":0,"allWins":0,"stages":{}}"#;
+        save_write_at(&file, progressed, false).unwrap();
+        save_write_at(&file, progressed, false).unwrap();   // 第二次写才产生 progress.bak.json
+        assert!(save_write_at(&file, fresh, false).is_err(), "默认不许 1 级空档覆盖 32 级");
+        assert_eq!(read_json_file(&file).unwrap().1["level"], 32, "主文件必须原样保留");
+        assert_eq!(read_json_file(&save_bak_path(&file)).unwrap().1["level"], 32, "备份也要是老档");
+        /* 主文件万一已经掉到 1 级、玩家又升到 2 级，备份也不能被这次低等级写盘冲掉。
+         * 这里直接写主文件（绕过 save_write 的降级拦截），再走备份滚动逻辑。 */
+        fs::write(&file, r#"{"level":2,"name":"老号","allWins":1}"#).unwrap();
+        backup_save_file(&file, true);
+        assert_eq!(read_json_file(&save_bak_path(&file)).unwrap().1["level"], 32,
+            "更低的当前档不能覆盖更高等级的备份");
+
+        /* 模拟写盘过程中主文件损坏：save_read 应该从 progress.bak.json 恢复并修回主文件。 */
+        fs::write(&file, "{broken").unwrap();
+        let recovered = save_read_at(&file).unwrap();
+        assert_eq!(recovered["recoveredFrom"], "backup");
+        assert_eq!(recovered["maxLevel"], 32);
+        assert_eq!(read_json_file(&file).unwrap().1["level"], 32, "主文件要被备份修回");
+        assert!(save_write_at(&file, fresh, true).is_ok(), "玩家显式重置才允许写 1 级");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_prefers_backup_when_main_was_clobbered_by_fresh_save() {
+        let dir = std::env::temp_dir().join(format!("ssdz-save-recover-{}", now_ms()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("progress.json");
+        let progressed = r#"{"level":32,"name":"老号","allWins":120,"stages":{"1":{"pass":true}}}"#;
+        let fresh = r#"{"level":1,"name":"新号","reborn":0,"allWins":0,"stages":{}}"#;
+        save_write_at(&file, progressed, false).unwrap();
+        save_write_at(&file, progressed, false).unwrap();   // 产生 32 级备份
+        fs::write(&file, fresh).unwrap();                   // 模拟旧版把主文件写成 1 级空档
+        let rec = save_read_at(&file).unwrap();
+        assert_eq!(rec["maxLevel"], 32, "主文件是空档时要读回备份里的 32 级");
+        assert_eq!(rec["recoveredFrom"], "backup");
+        assert_eq!(read_json_file(&file).unwrap().1["level"], 32, "备份要修回主文件");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn atomic_write_and_backup_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("ssdz-save-test-{}", now_ms()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("progress.json");
+        let old = "{\"level\":32}";
+        let new = "{\"level\":33}";
+        write_file_atomic(&file, old).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), old);
+        backup_save_file(&file, true);
+        write_file_atomic(&file, new).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), new);
+        assert_eq!(fs::read_to_string(save_bak_path(&file)).unwrap(), old);
+        assert_eq!(read_json_file(&file).unwrap().1["level"], 33);
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
 
 // lib 被当作可执行目标编译时（`cargo build` 的默认行为）需要一个 main；

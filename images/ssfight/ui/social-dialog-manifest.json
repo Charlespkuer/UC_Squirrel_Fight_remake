@@ -1,0 +1,11 @@
+{
+ "generator": "tools/gen-ssfight-ui.cjs --social-dialog",
+ "roots": {
+  "confirm": "4421",
+  "woodRecord": "3535"
+ },
+ "count": 81,
+ "source": "MainMovie.as: alertRevenge / showJoinCheckWin / showDeadManWin",
+ "bitmaps": [],
+ "missingIds": []
+}

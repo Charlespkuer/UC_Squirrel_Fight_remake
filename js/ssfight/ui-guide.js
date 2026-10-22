@@ -18,7 +18,8 @@
  *   · 页 17/19/20/26 在村庄页，点对应地点推进（HOME_LAND :9529-9622），
  *     20（神迹）点完先记着，回家时原版置 nowPage=25 → f24（天梯）4 秒自动收；
  *   · 页 21/23（帧 16）/24（帧 23）都是纯文字帧：4 级 / 10 级 / 15 级，4 秒自动收。
- * 原版页 16/18 没有任何触发点（guideMap 里孤立），不实现。
+ * 原版页 16/18 没有任何触发点（guideMap 里孤立）；f16 是竞技场文案，已经在 10 级
+ * step23 复用；f18 是 23 级「酒馆/pub」文案，本复刻没有酒馆界面，不接这一帧。
  * ========================================================================== */
 (function () {
   'use strict';
@@ -149,24 +150,15 @@
   function highlightTargets(view, stepNo) {
     if (!view || !view.g) return;
     const svg = view.g;
-    const box = svg.getBoundingClientRect();
-    const vb = svg.viewBox && svg.viewBox.baseVal;
-    if (!box || !vb || !box.width || !box.height || !vb.width || !vb.height) return;
     /* 屏幕坐标 → SVG 用户坐标**不能只信 getScreenCTM**：WebKit 209220 在 iOS 15.5/15.6
-     * 仍复现 —— getScreenCTM 不含祖先 CSS transform 的 scale（#ui 自己有 scale，
-     * SVG 又按 height:100% 缩放），于是手指/金环被画到旁边、按钮的屏幕热区也跟着判错。
-     * 这里用「SVG 屏幕矩形 + viewBox + preserveAspectRatio」反算，结果与
-     * getBoundingClientRect 同一套坐标；桌面/安卓的 letterbox 也照样覆盖。 */
-    const par = String(svg.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
-    const slice = /\bslice\b/.test(par);
-    const scale = slice ? Math.max(box.width / vb.width, box.height / vb.height)
-      : Math.min(box.width / vb.width, box.height / vb.height);
-    if (!(scale > 0)) return;
-    const ax = /xMin/.test(par) ? 0 : /xMax/.test(par) ? 1 : 0.5;
-    const ay = /YMin/.test(par) ? 0 : /YMax/.test(par) ? 1 : 0.5;
-    const x0 = box.left + (box.width - vb.width * scale) * ax - vb.x * scale;
-    const y0 = box.top + (box.height - vb.height * scale) * ay - vb.y * scale;
-    const toPoint = (sx, sy) => ({ x: (sx - x0) / scale, y: (sy - y0) / scale });
+     * 仍复现 —— getScreenCTM 不含祖先 CSS transform 的 scale（#ui 自己有 scale），
+     * 于是手指/金环被画到旁边。`SfRender.svgScreenMap()` 用「SVG 实测矩形 +
+     * clientWidth/Height + viewBox + preserveAspectRatio」两轴分别反算：
+     * 等比缩放时和旧算法一致；「全面屏」下 #ui 的 sx !== sy 时也不会把金环
+     * 横向拉宽/纵向压扁（引导框「大小又不对」就是这一档）。 */
+    const map = (window.SfRender && SfRender.svgScreenMap) ? SfRender.svgScreenMap(svg) : null;
+    if (!map) return;
+    const toPoint = map.toUser;
     const toRect = (r) => {
       const p1 = toPoint(r.left, r.top);
       const p2 = toPoint(r.left + r.width, r.top + r.height);
@@ -362,6 +354,7 @@
         freeze(view);
         highlightTargets(view, spec.frame);
         /* 安卓切横屏 / 状态栏隐藏 / 地址栏伸缩都会改视口，guide 的尺寸也跟着变；
+        /* 安卓切横屏 / 状态栏隐藏 / 地址栏伸缩都会改视口，guide 的尺寸也跟着变；
          * 不重算的话手指和金环会停在旧屏幕位置（看起来就是“歪着指别处”）。 */
         const reflow = () => {
           if (!current || current.seq !== mine || !current.view) return;
@@ -437,6 +430,23 @@
     if (name === 'village-war' && n === 26) { setStep(99); hide(); return; }
     hide();
   }
+  /* 5 级换装：进页面时随机发一件白装（用户 2026-10 口径），教程本身仍用原版
+   * 3625 的 13→14→15→22 流程；这里不再另造介绍页。 */
+  function onGears() {
+    if (!classic()) return;
+    const t = tutorial();
+    const S = state();
+    if (!t || !S || Number(S.level) < 5) return;
+    if (step() < 13) return;   // 先走完 5 级升级页，别抢在 f13 前面
+    /* 一次性标记在 State 里（`starterGearGiven`，随存档走）；`t.gearsGift` 只作旧档兼容。 */
+    if (S.starterGearGiven || t.gearsGift) return;
+    let gear = null;
+    try { gear = State.grantStarterGear && State.grantStarterGear(); } catch (e) { err(e); }
+    if (gear) {
+      t.gearsGift = true;      // 旧字段保留一份，给旧版本/旧档迁移识别
+      if (window.UI && UI.toast) UI.toast('新手福利：获得【' + gear.name + '】，已放入装备背包');
+    }
+  }
   /* 背包里点开道具详情（原版 seeProp，doMission(7)）。商店/兑换页的详情不算。 */
   function onPropDetail(id, mode) {
     if (!classic() || mode) return;
@@ -493,6 +503,7 @@
   }
   window.SfGuide = Object.freeze({
     onHome, onBattleStart, onPage, onPropDetail, onPropUsed, onStatusTab, onLevelup, onLevelupDone,
+    onGears,
     hide, skip, step: () => step(),
   });
 })();

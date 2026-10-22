@@ -81,7 +81,7 @@ body.audio-blocked .audio-hint { display: flex; }
 .foe-info, .ws-info, .shop-info { flex: 1; font-size: 19px; }
 .foe-info b, .ws-info b, .shop-info b { color: #ffe66d; font-size: 21px; }
 .foe-stats { display: block; font-size: 15px; color: #bfa87f; margin-top: 3px; }
-.ws-lv { color: #7cfc00; }
+.ws-lv { color: #c9c58d; }
 .ws-type { background: #8a4b1f; border-radius: 6px; padding: 1px 8px; font-size: 14px; margin-left: 6px; }
 .ws-remark { font-size: 14px; color: #bfa87f; margin-top: 3px; }
 /* 装备融合材料词条：每件装备一行标签，选中后在下方汇总可继承词条。 */

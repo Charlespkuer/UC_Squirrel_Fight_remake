@@ -226,11 +226,19 @@
             return {
               ok: meta && meta.ok !== false, exists: !!(meta && meta.exists),
               savedAt: Number(meta && meta.savedAt) || 0, path: pathText || (meta && meta.path),
+              maxLevel: Number(meta && meta.maxLevel) || 0, minLevel: Number(meta && meta.minLevel) || 0,
+              reborn: Number(meta && meta.reborn) || 0,
+              backup: !!(meta && meta.backup), corrupt: !!(meta && meta.corrupt),
             };
           }, function (e) { trace('save_meta 失败', String(e)); throw e; });
         },
         read: function () { return invoke('save_read').then(function (r) { return trace('save_read', r); }); },
-        write: function (text) { return invoke('save_write', { data: text }).then(function (r) { return trace('save_write', r); }); },
+        /* 第二参数 `opts.force` 只由调试面板「彻底重置账号」传 true；Rust 端的
+         * save_write 会拒绝用全新 1 级档覆盖已有进度，必须显式放行。 */
+        write: function (text, opts) {
+          return invoke('save_write', { data: text, force: !!(opts && opts.force) })
+            .then(function (r) { return trace('save_write', r); });
+        },
       };
     }
 

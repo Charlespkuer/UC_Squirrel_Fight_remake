@@ -38,10 +38,6 @@
     const PART_NAME = ['头巾', '手套', '衣服', '鞋子'];
     const partOf = (gear) => (gear ? State.gearPart(gear.id) : -1);
     const partLabel = (gear) => PART_NAME[partOf(gear)] || '装备';
-    /* 星标 = 「别把我合掉/卖掉」的保护标记（State.toggleGearStar）。
-     * mergeGears 本来就会拒绝星标装备，但那是点「开始融合」之后才报错；
-     * 这里在**可选材料**这一层就先剔掉，免得白选一场。 */
-    const isStarred = (gear) => State.isGearStarred(gear);
     /** 词条标签：融合页的卡片/材料槽直接显示，不再只藏在 title/aria 里。 */
     const extTags = (gear, compact) => {
       const list = gear ? State.extText(gear.ext) : [];
@@ -55,7 +51,6 @@
       const materials = selected.map((key) => gears.find((gear) => gear.key === key));
       if (materials.some((gear) => !gear)) return '材料已发生变化，请重新选择';
       if (materials.some((gear) => gear.used)) return '已穿戴的装备不能作为融合材料';
-      if (materials.some(isStarred)) return '有装备已加星标（防误合），先取消星标再融合';
       if (materials.some(cannotMerge)) return modernMode() ? '现代界面已删除黑装，橙装不能再融合' : '该装备不能作为融合材料';
       if (materials.some((gear) => gear.quality !== materials[0].quality)) return '需要 3 件同品质的装备';
       const cost = State.gearCostOf(materials[0].quality);
@@ -70,23 +65,17 @@
       if (!page.isConnected) return;
       const gears = State.myGears();
       // Another game action may have removed or equipped a selected instance.
-      selected = selected.filter((key) => gears.some((gear) => gear.key === key && !gear.used && !cannotMerge(gear) && !isStarred(gear)));
+      selected = selected.filter((key) => gears.some((gear) => gear.key === key && !gear.used && !cannotMerge(gear)));
       const first = gears.find((gear) => gear.key === selected[0]);
       // The original dictionary installs its own window.Map implementation.
       const groups = Object.create(null);
       gears.forEach((gear) => {
-        if (gear.used || cannotMerge(gear) || isStarred(gear)) return;
-        const key = State.gearPart(gear.id) + ':' + gear.quality;
+        if (gear.used || cannotMerge(gear)) return;
+        const key = String(gear.quality);
         groups[key] = (groups[key] || 0) + 1;
       });
-      const groupKey = (gear) => State.gearPart(gear.id) + ':' + gear.quality;
-      /* 包里有多少件「本来能当材料、但被星标保护起来」的装备 —— 用来在材料区给一句明示，
-       * 否则用户只会看到几张灰掉的卡片，不知道是为什么。 */
-      const starredInBag = gears.filter((gear) => !gear.used && !cannotMerge(gear) && isStarred(gear)).length;
-      /* 星标装备也排到最后：它当不了材料，排前面等于在推荐用户去点它。
-       * 「同组 N 件」的计数同样排除了星标件（见上面的 groups），否则会出现
-       * 「同组 3 件」却有一件根本放不进去的误导。 */
-      const unusable = (gear) => gear.used || cannotMerge(gear) || isStarred(gear);
+      const groupKey = (gear) => String(gear.quality);
+      const unusable = (gear) => gear.used || cannotMerge(gear);
       const inventory = gears.slice().sort((a, b) =>
         Number(unusable(a)) - Number(unusable(b)) ||
         (groups[groupKey(b)] || 0) - (groups[groupKey(a)] || 0) ||
@@ -108,30 +97,25 @@
       }).join('');
       const cards = inventory.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE).map((gear) => {
         const chosen = selected.includes(gear.key);
-        const starred = isStarred(gear);
         const unavailable = gear.used ? '已穿戴' : cannotMerge(gear) ? '最高品质'
-          : starred ? '已加星标'
           : first && gear.quality !== first.quality ? '需同品质'
           : selected.length === 3 && !chosen ? '材料已放满' : '';
         const sameGroup = groups[groupKey(gear)] || 0;
         const caption = chosen ? '材料 ' + (selected.indexOf(gear.key) + 1)
-          : unavailable || (sameGroup >= 3 ? '同组 ' + sameGroup + ' 件' : '可放入');
+          : unavailable || (sameGroup >= 3 ? '同品质 ' + sameGroup + ' 件' : '可放入');
         const effects = State.extText(gear.ext).join('，');
-        const detail = gear.name + '，' + qualities[gear.quality] + '，' + gear.attrName + ' +' + gear.abilityVal + (effects ? '，' + effects : '') +
-          (starred ? '（已加星标，不参与融合；想拿它当材料请先去装备详情取消星标）' : '');
-        return '<button type="button" class="fusion-gear q' + gear.quality + (chosen ? ' selected' : '') + (starred ? ' starred' : '') +
+        const detail = gear.name + '，' + qualities[gear.quality] + '，' + gear.attrName + ' +' + gear.abilityVal + (effects ? '，' + effects : '');
+        return '<button type="button" class="fusion-gear q' + gear.quality + (chosen ? ' selected' : '') +
           '" data-fusion-gear="' + esc(gear.key) + '" aria-pressed="' + chosen + '" aria-label="' + esc(detail + '，' + (chosen ? '已放入，点击移除' : unavailable || '点击放入')) + '" title="' + esc(detail) + '"' + (unavailable && !chosen ? ' disabled' : '') + '>' +
           '<span class="fusion-frame">' + art(gear) +
           '<span class="fusion-quality-tag q' + gear.quality + '">' + qualities[gear.quality] + '</span>' +
           '<span class="fusion-card-state">' + esc(caption) + '</span></span>' +
-          /* ★ 放在 .fusion-frame 外面：frame 是 overflow:hidden，放里面会被裁掉。 */
-          (starred ? '<span class="gear-star" title="已加星标：不会参与融合">★</span>' : '') +
           '<span class="fusion-gear-name">' + esc(gear.name) + '</span>' + extTags(gear) + '</button>';
       }).join('');
       const pips = [0, 1, 2].map((i) => '<i class="' + (i < selected.length ? 'on' : '') + '"></i>').join('');
       const nextQuality = first ? (first.quality >= 5 ? 5 : first.quality + 1) : 0;
       const previewLabel = first ? (first.quality >= 5 ? '黑装洗练' : (qualities[nextQuality] || '') + partLabel(first)) : '更高品质';
-      const previewHint = first && first.quality >= 5 ? '同部位 1 件' : '必得 1 件';
+      const previewHint = first ? '产物部位随首件材料' : '必得 1 件';
       const guaranteeText = first && first.quality >= 5 ? '同部位黑装洗练 · 材料会被消耗' : '品质提升一级 · 材料会被消耗';
       /* 已选材料能提供的词条并集：不重复列出同名效果，玩家融合前就能看到候选池。 */
       const pickedTags = new Set();
@@ -153,7 +137,7 @@
         '<p class="fusion-rules"><b>规则</b>' +
         '<span class="fusion-rules-text">3 件<em>同品质</em>装备（部位/名字可不同）→ 1 件<em>品质高一级</em>；重合词条必继承，其余各 50%</span>' +
         '<button type="button" class="uc-button tiny muted" data-fusion-action="rules">详细规则</button></p>' +
-        '<div class="fusion-inventory-panel"><div class="fusion-inventory-heading"><h3>选择装备<span class="fusion-pips" aria-label="已放入 ' + selected.length + ' / 3">' + pips + '</span><span class="fusion-count">已放入 ' + selected.length + '/3</span></h3>' + (starredInBag ? '<span class="fusion-starred-note" title="已加星标的装备受保护，不会参与融合；要拿它当材料请先去装备详情取消星标">★ 已加星标 ' + starredInBag + ' 件 · 不参与融合</span>' : '') + '<button type="button" class="uc-button tiny muted" data-fusion-action="clear"' + (selected.length ? '' : ' disabled') + '>清空材料</button><div class="fusion-pagination"><button type="button" class="uc-button tiny" data-fusion-action="previous" aria-label="上一页装备"' + (pageIndex === 0 ? ' disabled' : '') + '><i class="chev chev-l" aria-hidden="true"></i></button><span>' + (pageIndex + 1) + ' / ' + pages + '</span><button type="button" class="uc-button tiny" data-fusion-action="next" aria-label="下一页装备"' + (pageIndex + 1 >= pages ? ' disabled' : '') + '><i class="chev chev-r" aria-hidden="true"></i></button></div></div>' +
+        '<div class="fusion-inventory-panel"><div class="fusion-inventory-heading"><h3>选择装备<span class="fusion-pips" aria-label="已放入 ' + selected.length + ' / 3">' + pips + '</span><span class="fusion-count">已放入 ' + selected.length + '/3</span></h3><button type="button" class="uc-button tiny muted" data-fusion-action="clear"' + (selected.length ? '' : ' disabled') + '>清空材料</button><div class="fusion-pagination"><button type="button" class="uc-button tiny" data-fusion-action="previous" aria-label="上一页装备"' + (pageIndex === 0 ? ' disabled' : '') + '><i class="chev chev-l" aria-hidden="true"></i></button><span>' + (pageIndex + 1) + ' / ' + pages + '</span><button type="button" class="uc-button tiny" data-fusion-action="next" aria-label="下一页装备"' + (pageIndex + 1 >= pages ? ' disabled' : '') + '><i class="chev chev-r" aria-hidden="true"></i></button></div></div>' +
         '<div class="fusion-inventory">' + (cards || '<div class="fusion-empty">还没有可以选择的装备。<br><span>收集装备碎片，可在道具中合成装备。</span></div>') + '</div></div>' +
         '<p class="fusion-status' + (!reason ? ' ready' : '') + '" role="status" aria-live="polite"><i aria-hidden="true">' + (reason ? '!' : '✓') + '</i>' + esc(reason || '材料已齐全，可以融合！') + '</p>';
 
@@ -164,11 +148,16 @@
         button.onclick = () => {
           const key = button.dataset.fusionGear;
           const current = State.myGears(), gear = current.find((item) => item.key === key);
-          if (!gear || gear.used || cannotMerge(gear) || isStarred(gear)) return;
+          if (!gear || gear.used || cannotMerge(gear)) return;
           if (selected.includes(key)) selected = selected.filter((item) => item !== key);
           else {
             const material = current.find((item) => item.key === selected[0]);
-            if (selected.length >= 3 || material && (partOf(material) !== partOf(gear) || material.quality !== gear.quality)) return;
+            /* 只要求**同品质**：经典融合页传 `allowMixedParts:true`，规则条与
+             * `mergeGears` 都允许部位/名字不同；结果部位沿用第一件材料。
+             * 旧版这里还拦了 `partOf(material) !== partOf(gear)`，于是三件橙装
+             * 只要部位不同，第二/三件怎么点都进不去（用户 2026-10「橙装无法选中 /
+             * 合不出黑装」）。 */
+            if (selected.length >= 3 || material && material.quality !== gear.quality) return;
             selected.push(key);
           }
           render({ key });
@@ -197,10 +186,10 @@
       /* 「随机其它」= 100% − 变异 − 保名（两件同名是 47%，三件同名是 0）。 */
       const other = (k) => pct(Math.max(0, 1 - (Number(State.FUSION_MUTANT_RATE[k]) || 0) - (Number(State.FUSION_SAME_NAME_RATE[k]) || 0)));
       classic.modal('融合规则', '<div class="fusion-help">' +
-        '<p><b>材料</b>3 件同品质、未穿戴、未加星标（★）的装备，会被消耗；部位和名字可以完全不同。</p>' +
+        '<p><b>材料</b>3 件同品质、未穿戴的装备，会被消耗；部位和名字可以完全不同。</p>' +
         '<p><b>费用</b>白 ' + State.gearCostOf(0) + ' · 绿 ' + State.gearCostOf(1) +
         ' · 蓝 ' + State.gearCostOf(2) + ' · 紫 ' + State.gearCostOf(3) + ' · 橙 ' + State.gearCostOf(4) + ' 金松果（按材料品质）。</p>' +
-        '<p><b>产物</b>该部位、品质高一级的 1 件；3 紫 → 传说橙（可镶嵌宝石）；' +
+        '<p><b>产物</b>部位随第一件材料、品质高一级的 1 件；3 紫 → 传说橙（可镶嵌宝石）；' +
         (modernMode() ? '现代界面已删除黑装，橙装不能再融合。' : '3 橙 → 黑色装备（原版 composeType=3，材料就是橙装）。') + '</p>' +
         '<p><b>名称</b>三件同名 ' + same(3) + ' 保名 / ' + mut(3) + ' <em>变异</em>；' +
         '两件同名 ' + same(2) + ' 保名 / ' + mut(2) + ' <em>变异</em> / ' + other(2) + ' 随机其它装备；' +

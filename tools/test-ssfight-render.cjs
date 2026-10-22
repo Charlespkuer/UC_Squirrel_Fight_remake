@@ -2086,6 +2086,9 @@ function checkClassicSystemStyle() {
   for (const title of ['关于复刻版', '游戏设置', '存档位置', '跨设备同步', '游戏更新']) {
     assert.ok(ui.includes('classic-section-title">' + title), '系统页缺少分区标题：' + title);
   }
+  assert.ok(/support-version/.test(ui) && /data-game-version/.test(ui) &&
+    /scripts\/version\.json/.test(ui),
+    '关于复刻版右侧要显示当前版本号，并支持从 scripts/version.json 刷新');
   assert.ok(/\.classic-section-title\{[\s\S]{0,400}?background:linear-gradient\(#7b4d2c,#5d351c\)/.test(css)
     && /border:4px solid #f4e3ba/.test(css),
     '分区标题保留棕色圆牌 + 米色描边');

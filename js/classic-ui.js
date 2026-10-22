@@ -4175,10 +4175,42 @@
     return true;
   }
   /** 系统页最上方那一块：自愿支持作者。 */
+  const VERSION_FALLBACK = '1.0.4';
+  let gameVersion = String((typeof window !== 'undefined' && window.__SSDZ_VERSION) || VERSION_FALLBACK);
+  let versionRequested = false;
+  function versionLabel(v) {
+    const s = String(v == null ? '' : v).trim().replace(/^v/i, '');
+    return s ? 'v' + s : 'v' + VERSION_FALLBACK;
+  }
+  function syncVersionLabels() {
+    try {
+      document.querySelectorAll('[data-game-version]').forEach((el) => {
+        el.textContent = versionLabel(gameVersion);
+      });
+    } catch (e) {}
+  }
+  /** 运行时读 scripts/version.json：发布包的版本号由构建脚本写在这个文件里。
+   *  直接双击 file:// 打开时 fetch 可能被浏览器拦，保留构建时的 fallback。 */
+  function loadGameVersion() {
+    if (versionRequested) return;
+    versionRequested = true;
+    try {
+      if (typeof fetch !== 'function') return;
+      fetch('scripts/version.json', { cache: 'no-store' })
+        .then((r) => r.ok ? r.json() : null)
+        .then((j) => {
+          if (j && j.version) { gameVersion = String(j.version); syncVersionLabels(); }
+        })
+        .catch(() => {});
+    } catch (e) {}
+  }
   function supportPanelHtml() {
     const meta = supportMeta();
+    const ver = versionLabel(gameVersion);
+    loadGameVersion();
     return '<div class="support-panel">' +
-      '<div class="support-panel-text"><h3 class="classic-section-title">关于复刻版</h3>' +
+      '<div class="support-panel-text"><div class="support-head"><h3 class="classic-section-title">关于复刻版</h3>' +
+      '<span class="support-version" data-game-version="1" title="当前版本">' + esc(ver) + '</span></div>' +
       '<span><b>喜欢这个复刻版？</b>如果它让你找回了一点当年的感觉，可以自愿支持作者（不影响任何游戏内容）。bug反馈与内容讨论请加q群：1128710765</span></div>' +
       '<button type="button" class="uc-button gold support-btn" data-action="support" title="用系统浏览器打开' +
       esc(meta.label) + '">支持作者</button></div>';

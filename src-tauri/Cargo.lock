@@ -2832,7 +2832,7 @@ dependencies = [
 
 [[package]]
 name = "ssdz-classic"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "dirs",
  "serde",

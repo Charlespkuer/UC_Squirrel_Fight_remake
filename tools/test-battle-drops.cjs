@@ -135,24 +135,28 @@ test('无DOM仍可按时领取与跳过，暂停和非法dt不提前结算',()=>
   g.advance(drop,1900);assert.equal(drop.collect(0),true);drop.skip();assert.equal(g.s().goldPoint,106);assert.equal(g.nodes.length,0);
 });
 
-test('天梯战用专属掉落表：飘出来的是天梯碎片与恶魔果实种子',()=>{
+test('天梯战用专属掉落表：飘出来的是属性碎片与恶魔果实种子',()=>{
   const g=setup();
-  // 全 0 的随机源必中每条掉落的第一项：天梯表第一条就是天梯碎片（id 51）
+  // 全 0 的随机源必中每条掉落的第一项：天梯表第一条就是属性碎片（id 51）
   const drop=g.create([0,0,0,0],true,'rank');
-  g.advance(drop,2100);assert.equal(drop.collect(0),true);
-  assert.equal(g.s().props[51],1,'点一下拿到天梯碎片');
+  g.advance(drop,2100);
+  const card=g.live('button')[0];
+  assert.match(card.innerHTML,/请点确定/,'天梯拾取卡文案是「请点确定」');
+  assert.match(card.className,/rank/,'天梯拾取卡用 rank 尺寸');
+  assert.equal(drop.collect(0),true);
+  assert.equal(g.s().props[51],1,'点一下拿到属性碎片');
   drop.skip();assert.equal(g.s().props[51],3,'跳过会补领剩下两帧（都是碎片）');
   const afterRank=g.s().props[51];
-  // 普通战斗不会掉天梯碎片
+  // 普通战斗不会掉属性碎片
   const plain=g.create([0,0,0,0],true,'challenge');
   g.advance(plain,2100);plain.collect(0);plain.skip();
-  assert.equal(g.s().props[51],afterRank,'普通战斗不掉天梯碎片');
+  assert.equal(g.s().props[51],afterRank,'普通战斗不掉属性碎片');
   assert.equal(g.c.BattleDrops.poolFor('rank').some(p=>p.id===51),true);
   assert.equal(g.c.BattleDrops.poolFor().some(p=>p.id===51),false);
   assert.equal(g.c.BattleDrops.poolFor('rank').some(p=>p.id===46),true,'天梯也掉恶魔果实种子');
 });
 
-test('10 个天梯碎片 + 50 金松果随机合成一个转化丸',()=>{
+test('10 个属性碎片 + 50 金松果随机合成一个转化丸',()=>{
   const g=setup(),s=g.s();
   assert.equal(g.c.State.composeConvertPill().ok,false,'碎片不够不能合成');
   s.props[51]=10;s.goldPoint=200;

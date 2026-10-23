@@ -32,18 +32,18 @@
   "levelup": "7795",
   "message": "7819",
   "system": "7847",
-  "gearHead": "1919",
-  "gearFistOut": "1915",
-  "gearFistIn": "2014",
-  "gearBody": "1909",
-  "gearArm": "2008",
-  "gearShoe": "1912",
+  "gearHead": "1918",
+  "gearFistOut": "1914",
+  "gearFistIn": "2013",
+  "gearBody": "1908",
+  "gearArm": "2007",
+  "gearShoe": "1910",
   "homeland": "3957",
   "summons": "4381",
   "campaign": "3437"
  },
  "dictionarySize": 7876,
- "exportedTags": 7484,
+ "exportedTags": 7733,
  "bundles": [
   {
    "file": "tags.json",
@@ -87,7 +87,7 @@
   },
   {
    "file": "tags-gear.json",
-   "tags": 1224
+   "tags": 1473
   }
  ],
  "frameLabels": {

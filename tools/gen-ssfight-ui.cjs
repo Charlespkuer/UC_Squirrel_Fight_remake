@@ -48,11 +48,18 @@ const PAGES = {
  * 穿装备 = `container.gotoAndStop(frame)`（MainMovie.as:6608 constructBpData / :6737 chooseEquipLoader）。
  * 村庄主角身上的挂点跑的是 `getEquipBpData` → 用的是带 **B** 后缀的那一套容器，
  * 所以这 6 个就是"全部装备素材"的入口（各自的闭包会把对应 187 个部件一起带出来）。
- * id 取自导出符号表：头B/外拳套B/内拳套B/衣服B/手臂B/鞋子B。
+ * id 按 swfSymbolIds() 从 SWF 导出名核对；旧 TSV 把名字配给后一个精灵，
+ * 会误取非 B 容器，手臂甚至误取成单帧普通袖口，不能用那张表。
  * 顺序 = 原版 type 序号：0 头 / 1 拳套(外·内) / 2 衣服·手臂 / 3 鞋子。 */
 const GEAR = {
+  gearHead: '1918', gearFistOut: '1914', gearFistIn: '2013',
+  gearBody: '1908', gearArm: '2007', gearShoe: '1910',
+};
+/* showFace / chooseEquipLoader 的 attachMovie 分支使用无 B 容器；它们的局部
+ * 原点与位图化的 B 容器不同，不能把战斗容器直接贴到状态页的人物挂点。 */
+const PORTRAIT_GEAR = {
   gearHead: '1919', gearFistOut: '1915', gearFistIn: '2014',
-  gearBody: '1909', gearArm: '2008', gearShoe: '1912',
+  gearBody: '1909', gearArm: '2010', gearShoe: '1912',
 };
 /* ---------- 村庄四个地点的「场景页」= 原版运行时 attachMovie 的库元件 ----------
  * 第一百四十七批当时判"提不出来"，理由是"在 26MB 导出里连这些名字都搜不到" ——
@@ -202,10 +209,10 @@ function swfSymbolIds() {
 const LOOT_BUNDLE = 'looticons';
 /** 掉落池里有、但原版 SWF 里**没有同名导出**的那几件 → 借一件原版美术顶上。
  *  2026-11 用户口径："开宝箱时开出来的东西总会有一两个物品显示不出来"：
- *  天梯赛（`LADDER_POOL`）的主产出「天梯碎片」是复刻自己加的产出，原版没有这个导出名，
- *  于是那一格永远画不出东西（同一场掉两份就两格空）。天梯赛在原版里的图标就是「金杯」，
- *  借它画 —— 掉的是碎片、图标是天梯金杯，至少**看得见是什么**。 */
-const LOOT_ALIAS = { '天梯碎片': '金杯' };
+ *  天梯赛（`LADDER_POOL`）的主产出「属性碎片」在复刻里沿用 id 51 的黄色三角图标，
+ *  原版 SWF 的 2977「属性碎片」是奖章画稿，与三角掉落卡不是同一套；这里继续借「金杯」
+ *  作为**经典战果页**的占位图标，避免那一格空白。 */
+const LOOT_ALIAS = { '属性碎片': '金杯' };
 function lootIconRoots() {
   const sym = swfSymbolIds();
   const src = fs.readFileSync(path.join(ROOT, 'js', 'battle-drops.js'), 'utf8').replace(/\r\n/g, '\n');
@@ -245,10 +252,10 @@ function lootIconRoots() {
  * `showUsePropWin` / `showBuyPropWin` 的图标位都是**按道具名 attach**，
  * 静态页面闭包走不到这些库元件；这里按 `propMap` 的名字取 SWF 导出符号，
  * 再把它们并进 `tags-daoju.json`（背包/商店详情共用）。原版没有导出的几件
- * 用同风格的库元件借位（抽奖卷→礼包、天梯碎片→金杯、礼包页→礼包…），
+ * 用同风格的库元件借位（抽奖卷→礼包、属性碎片→金杯、礼包页→礼包…），
  * 与 `loot-icons.json` 的别名口径一致。 */
 const PROP_ICON_ALIAS = {
-  '天梯碎片': '金杯',
+  '属性碎片': '金杯',
   '抽奖卷': '礼包',
   '红包': '礼包',
   '推荐大礼包': '礼包',
@@ -351,6 +358,89 @@ function iconRoots() {
 const ROOTS = Object.assign({ [ICON_BUNDLE]: '' }, PAGES, GEAR, SCENES);
 
 function die(msg) { console.error('✗ ' + msg); process.exit(1); }
+
+/** Read original SWF placement matrices before the HTML exporter rounds them to two decimals. */
+function readSwfPlacementMatrices(input) {
+  const signature = input.toString('ascii', 0, 3);
+  const b = signature === 'CWS'
+    ? Buffer.concat([Buffer.from('FWS'), input.subarray(3, 8), zlib.inflateSync(input.subarray(8))])
+    : input;
+  if (signature !== 'FWS' && signature !== 'CWS') throw new Error('Unsupported SWF signature: ' + signature);
+  class Bits {
+    constructor(byte) { this.bit = byte * 8; }
+    u(n) { let v = 0; for (let i = 0; i < n; i++, this.bit++) v = v * 2 + ((b[this.bit >> 3] >> (7 - (this.bit & 7))) & 1); return v; }
+    s(n) { if (!n) return 0; const v = this.u(n); return v >= Math.pow(2, n - 1) ? v - Math.pow(2, n) : v; }
+    end() { return Math.ceil(this.bit / 8); }
+  }
+  function matrix(byte) {
+    const r = new Bits(byte); let a = 1, d = 1, skew0 = 0, skew1 = 0;
+    if (r.u(1)) { const n = r.u(5); a = r.s(n) / 65536; d = r.s(n) / 65536; }
+    if (r.u(1)) { const n = r.u(5); skew0 = r.s(n) / 65536; skew1 = r.s(n) / 65536; }
+    const n = r.u(5), tx = r.s(n) / 20, ty = r.s(n) / 20;
+    return { ma: [a, skew0, skew1, d, tx, ty].join(','), end: r.end() };
+  }
+  function cstringEnd(p, end) { while (p < end && b[p] !== 0) p++; return p + 1; }
+  const bySprite = new Map();
+  function scan(start, end, spriteId) {
+    let p = start, frame = 1;
+    const rows = [];
+    while (p + 2 <= end) {
+      const h = b.readUInt16LE(p); p += 2;
+      const code = h >> 6; let len = h & 63;
+      if (len === 63) { if (p + 4 > end) throw new Error('Truncated SWF tag'); len = b.readUInt32LE(p); p += 4; }
+      const stop = p + len;
+      if (stop > end) throw new Error('SWF tag outside parent: ' + code);
+      if (code === 0) break;
+      if (code === 1) frame++;
+      else if (code === 39) scan(p + 4, stop, b.readUInt16LE(p));
+      else if (code === 4 || code === 26 || code === 70 || code === 94) {
+        let q = p, id, depth, hasMatrix = false;
+        if (code === 4) {
+          id = b.readUInt16LE(q); depth = b.readUInt16LE(q + 2); q += 4; hasMatrix = true;
+        } else {
+          const flags = b[q++], flags2 = (code === 70 || code === 94) ? b[q++] : 0;
+          depth = b.readUInt16LE(q); q += 2;
+          // PlaceObject3: class name precedes CharacterID when specified or when placing an image class.
+          if ((flags2 & 8) || ((flags2 & 16) && (flags & 2))) q = cstringEnd(q, stop);
+          if (flags & 2) { id = b.readUInt16LE(q); q += 2; }
+          hasMatrix = !!(flags & 4);
+        }
+        if (hasMatrix) rows.push({ frame, depth, id: id == null ? null : String(id), ma: matrix(q).ma });
+      }
+      p = stop;
+    }
+    bySprite.set(String(spriteId), rows);
+  }
+  const rect = new Bits(8), n = rect.u(5); rect.u(n * 4);
+  scan(rect.end() + 4, b.length, 'root');
+  return bySprite;
+}
+/** Restore matching existing placements only; no invented placements or changed depths. */
+function restoreSwfPlacementMatrices(tags, bySprite) {
+  let restored = 0, unchanged = 0, unmatched = 0;
+  for (const tag of tags || []) {
+    if (!Array.isArray(tag.Sf)) continue;
+    const source = bySprite.get(String(tag.id)); if (!source) continue;
+    const keyed = new Map();
+    for (const row of source) {
+      const key = row.frame + ':' + row.depth;
+      if (!keyed.has(key)) keyed.set(key, []);
+      keyed.get(key).push(row);
+    }
+    let frame = 1;
+    for (const p of tag.Sf) {
+      if (p.tp === 1) { frame++; continue; }
+      if (!p.ma || p.d == null) continue;
+      const candidates = keyed.get(frame + ':' + p.d) || [];
+      const ix = candidates.findIndex(row => row.id === null || p.id == null || row.id === String(p.id));
+      if (ix < 0) { unmatched++; continue; }
+      const row = candidates.splice(ix, 1)[0];
+      if (p.ma === row.ma) unchanged++;
+      else { p.ma = row.ma; restored++; }
+    }
+  }
+  return {restored, unchanged, unmatched};
+}
 
 /* ---------- 1. 读整片导出，抠出 `var data = {...}` ---------- */
 function readMovie() {
@@ -512,7 +602,7 @@ function main() {
    *   漏掉哪一份，`tools/test-ssfight-render.cjs` 那条"包里都列出来了"的断言就会红。 */
   const DEFAULT = ['main', 'homeLand', 'daoju', 'zhuangtai', 'tiaozhan', 'message', ICON_BUNDLE]
     .concat(Object.keys(GEAR), Object.keys(SCENES));
-  const wanted = args.includes('--all') ? Object.keys(ROOTS) : (args.length ? args : DEFAULT);
+  const wanted = args.includes('--all') ? Object.keys(ROOTS) : (args.includes('--gear') ? Object.keys(GEAR) : (args.length ? args : DEFAULT));
   for (const w of wanted) if (!(w in ROOTS)) die('不认识的名字：' + w + '（可选：' + Object.keys(ROOTS).join(' / ') + '）');
 
   const { data, sha, bytes } = readMovie();
@@ -565,10 +655,20 @@ function main() {
   };
   const pageWanted = wanted.filter((w) => PAGES[w] && !BUNDLES[w]);
   const gearWanted = wanted.filter((w) => GEAR[w]);
+  const gearOnly = gearWanted.length > 0 && wanted.every((w) => GEAR[w]);
+  if (gearWanted.length) {
+    const names = swfSymbolIds();
+    const links = ['头B', '外拳套B', '内拳套B', '衣服B', '手臂B', '鞋子B'];
+    Object.keys(GEAR).forEach((name, i) => {
+      if (names.get(links[i]) !== GEAR[name]) die('装备容器与 SWF 导出名不符：' + name);
+      if (names.get(links[i].slice(0, -1)) !== PORTRAIT_GEAR[name]) die('立绘装备容器与 SWF 导出名不符：' + name);
+    });
+  }
   const parts = [];
   if (pageWanted.length) parts.push({ file: 'tags.json', roots: pageWanted.map((w) => ROOTS[w]) });
   for (const name of Object.keys(BUNDLES)) {
     const sel = wanted.filter((w) => w === name);
+    if (!sel.length) continue;
     /* ⚠ 页包也要把**页根元件自己**放进闭包：`closure()` 是从 id 出发往下走的，
      * 而 `mountSymbol(id)` 要的正是那个根元件。少了它，运行时会报
      * "素材库里没有元件 N"（状态页第一次生成时就踩了这个）。 */
@@ -581,7 +681,7 @@ function main() {
           : name === ICON_BUNDLE ? iconRoots() : [];
     if (sel.length) parts.push({ file: BUNDLES[name], roots: sel.map((w) => ROOTS[w]).filter(Boolean).concat(extra), pages: sel.slice() });
   }
-  if (gearWanted.length) parts.push({ file: 'tags-gear.json', roots: gearWanted.map((w) => ROOTS[w]) });
+  if (gearWanted.length) parts.push({ file: 'tags-gear.json', roots: gearWanted.flatMap((w) => [ROOTS[w], PORTRAIT_GEAR[w]]) });
 
   const missing = [];
   const perPart = parts.map((p) => {
@@ -589,6 +689,14 @@ function main() {
     r.missing.forEach((m) => missing.push(m));
     return { file: p.file, tags: r.tags.map(prune) };
   });
+  /* 只恢复装备闭包的 SWF MATRIX，其他页面保持既有导出内容。HTML 的两位
+   * 小数会把怒战角的大坐标填充与独立描线拉开数像素，不能靠挪某一层来补。 */
+  const gearPart = perPart.find((p) => p.file === 'tags-gear.json');
+  if (gearPart) {
+    const stats = restoreSwfPlacementMatrices(gearPart.tags, readSwfPlacementMatrices(fs.readFileSync(SWF)));
+    if (stats.unmatched) die('装备矩阵未能匹配原 SWF：' + stats.unmatched);
+    console.log('  装备原精度矩阵：恢复 %d 处', stats.restored);
+  }
   if (missing.length) {
     console.warn('  ⚠ 有 %d 个被引用但字典里不存在的 id：%s', missing.length, missing.slice(0, 10).join(', '));
   }
@@ -681,7 +789,7 @@ function main() {
   perPart.filter((p) => p.file !== 'tags.json')
     .forEach((p) => fs.writeFileSync(path.join(OUT, p.file), JSON.stringify(p.tags)));
   const tlFile = path.join(OUT, 'timeline.json');
-  fs.writeFileSync(tlFile, JSON.stringify({
+  if (!gearOnly) fs.writeFileSync(tlFile, JSON.stringify({
     Fw: data.Fw, Fh: data.Fh, Fr: data.Fr, Bg: data.Bg, Fc: data.Fc, Ft: data.Ft,
     frameCount: tl.frameCount, labels: tl.labels, frames: tl.frames,
   }));
@@ -856,7 +964,7 @@ function main() {
     }
     if (Object.keys(names).length) symIndex[bundleName] = { bundle: file, count: Object.keys(names).length, names: names };
   }
-  if (Object.keys(symIndex).length) {
+  if (!gearOnly && Object.keys(symIndex).length) {
     fs.writeFileSync(path.join(OUT, 'symbol-index.json'), JSON.stringify({
       generator: 'tools/gen-ssfight-ui.cjs',
       how: 'view.byName(名字) 的寻址面：名字 → 元件号 / 类型 / 帧数 / 出现在宿主第几帧。'
@@ -926,7 +1034,7 @@ function main() {
        * 原版由装备帧号驱动持有者的帧号；复刻必须照做，否则持有者自由播放、每帧换一个挂点，
        * 装备就会在角色身上乱跳（用户反映的"脚部剧烈抖动"就是这么来的）。 */
       const parentOf = new Map();
-      for (const t of tags) for (const p of t.Sf || []) {
+      for (const t of data.tg) for (const p of t.Sf || []) {
         if (p.tp !== 26) continue;
         const k = String(p.id);
         if (!parentOf.has(k)) parentOf.set(k, String(t.id));
@@ -943,9 +1051,12 @@ function main() {
         source: 'references/ssfight/ssfight/ssfight/resource/动作/sprite<N>_frame1.as（扫描 getEquipBpData(this,type,which)）',
         how: '挂点精灵本身是空壳；实例化时按 (type,which) 贴 CONTAINER[type][which] 容器并 gotoAndStop(frame)。',
         holderHow: '每个部位的挂点由"持有者"精灵按帧放出（持有者 189 帧、每帧一个挂点）。'
-          + '必须先 gotoAndStop(装备帧号) 把持有者钉在那一帧，挂点才会是正确的那一个；'
+          + '必须先 gotoAndStop(装备帧号 + 1) 把持有者钉在那一帧，挂点才会是正确的那一个；'
           + '让持有者自由播放会让装备在角色身上乱跳。',
         container: CONTAINER.map((row, i) => ({ type: i, part: PART[i], symbols: row, ids: row.map((n) => GEAR[n]) })),
+        portraitContainer: CONTAINER.map((row, i) => ({ type: i, part: PART[i],
+          symbols: row.map((n) => ({ gearHead: '头', gearFistOut: '外拳套', gearFistIn: '内拳套', gearBody: '衣服', gearArm: '手臂', gearShoe: '鞋子' })[n]),
+          ids: row.map((n) => PORTRAIT_GEAR[n]) })),
         holders: Object.values(holders).sort((a, b) => Number(a.id) - Number(b.id)),
         scannedFiles: scanned, count: ids.length,
         slots: ids.map((id) => ({
@@ -961,6 +1072,25 @@ function main() {
     }
   }
 
+  if (gearOnly) {
+    const manifestFile = path.join(OUT, 'manifest.json');
+    if (fs.existsSync(manifestFile)) {
+      const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+      manifest.pageRootIds = Object.assign({}, manifest.pageRootIds,
+        Object.fromEntries(gearWanted.map((name) => [name, GEAR[name]])));
+      const bundles = manifest.bundles || [];
+      for (const part of perPart) {
+        const entry = bundles.find((item) => item.file === part.file);
+        if (entry) entry.tags = part.tags.length;
+        else bundles.push({ file: part.file, tags: part.tags.length });
+      }
+      manifest.bundles = bundles;
+      manifest.exportedTags = bundles.reduce((sum, item) => sum + item.tags, 0);
+      fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 1));
+    }
+    console.log('装备增量导出完成；清单只合并装备条目，页面、时间轴和公共索引保持原样。');
+    return;
+  }
   fs.writeFileSync(path.join(OUT, 'manifest.json'), JSON.stringify({
     generator: 'tools/gen-ssfight-ui.cjs',
     source: path.relative(ROOT, SRC).split(path.sep).join('/'),
@@ -1179,6 +1309,60 @@ function fightBundle() {
 }
 
 /* ==========================================================================
+ * `--campaign-boss`：征战（副本）的动物 boss 素材 →
+ *   `images/ssfight/ui/tags-campaign-boss.json`
+ * --------------------------------------------------------------------------
+ * 原版 `MainMovie.as:6224` 的 `fightType == 12` 是 `player2.gotoAndStop(6)` +
+ * `attachMovie("副本角色所有", "playerMc", 100)`，`campaignNpcs.mcFrame` 拨到动物形态。
+ * 这一颗**没有 ExportAssets 名字**，所以 `swf_symbols.tsv` 把它记成 `None`；但整片导出
+ * `html5/ssfight.html` 的完整字典里它是 `DefineSprite 6833`：
+ *   · 6833 第 1~4 帧 = 已开放的狡兔 / 狼王 / 妖狐 / 猿将；
+ *   · 第 5 帧 = 豹王（原版 `checkIsCampaigning` 明确「豹王暂未开放」，所以不接入）；
+ *   · 第 6/7 帧 = 蜥蜴兵 / 野猪兵（小怪，同样不进 boss 池）。
+ * 每个动物模型都有自己的 attacks / defenses / dodges / attackbacks / winPoses，
+ * 部分还有 comeBacks —— 与原版 `Animals.as` 的动作选择一一对应。
+ *
+ * 只写这一份包；与 `tags-fight.json` 重叠的 id 不再重复写入（战斗包先加载，按先到先得），
+ * 所以不会因为同一颗形状的位图别名不同而改坏既有战斗包。
+ * ========================================================================== */
+function campaignBossBundle() {
+  const roots = { campaignBoss: '6833' };
+  const { data, sha, bytes } = readMovie();
+  const byId = new Map(data.tg.map((t) => [String(t.id), t]));
+  const { tags: rawTags, missing } = closure(byId, Object.values(roots));
+  if (missing.length) die('征战 boss 闭包缺失：' + missing.slice(0, 12).join(', '));
+  const fightFile = path.join(OUT, 'tags-fight.json');
+  const existing = fs.existsSync(fightFile) ? JSON.parse(fs.readFileSync(fightFile, 'utf8')) : [];
+  const inFight = new Set(existing.map((t) => String(t.id)));
+  /* 6833 自己与六只动物模型必须是新标签；共享的动作/形状由 tags-fight 提供。 */
+  for (const id of ['6833', '6598', '6635', '6684', '6709', '6772', '6832']) {
+    if (!byId.has(id)) die('征战 boss 模型缺失：' + id);
+  }
+  const tags = rawTags.map(prune)
+    .filter((t) => !inFight.has(String(t.id)))
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  const stats = { bitmaps: [] };
+  extractBitmaps(tags, stats);
+  const outFile = path.join(OUT, 'tags-campaign-boss.json');
+  fs.writeFileSync(outFile, JSON.stringify(tags));
+  fs.writeFileSync(path.join(OUT, 'campaign-boss-manifest.json'), JSON.stringify({
+    generator: 'tools/gen-ssfight-ui.cjs --campaign-boss',
+    source: path.relative(ROOT, SRC).split(path.sep).join('/'), sourceBytes: bytes, sourceSha256: sha,
+    roots, count: tags.length, bitmaps: stats.bitmaps, missingIds: missing,
+    sharedWithFight: [...inFight].filter((id) => rawTags.some((t) => String(t.id) === id)).length,
+    frames: {
+      '6833': '副本角色所有（1 狡兔 / 2 狼王 / 3 妖狐 / 4 猿将 / 5 豹王锁定 / 6 蜥蜴 / 7 野猪）',
+    },
+    how: 'SfFight.loadExtra("tags-campaign-boss.json") 后，buildFighter 把 6833 挂到 playerMc，'
+      + ' 按 foe.campaign.mcFrame 拨动物形态；动作仍走 Animals.as 的 attacks/defenses/...。',
+    sha256: crypto.createHash('sha256').update(fs.readFileSync(outFile)).digest('hex'),
+  }, null, 1));
+  console.log('tags-campaign-boss.json: %d tags（%s）· 与 tags-fight 共享 %d 个已加载 id',
+    tags.length, (fs.statSync(outFile).size / 1048576).toFixed(2) + ' MB',
+    [...inFight].filter((id) => rawTags.some((t) => String(t.id) === id)).length);
+}
+
+/* ==========================================================================
  * `--fusion`：只产出「装备融合」那几颗**还没进任何包**的库元件 →
  *   `images/ssfight/ui/tags-fusion.json`
  * --------------------------------------------------------------------------
@@ -1364,6 +1548,20 @@ function gearColorCandidates(g, quality, level) {
 }
 function gearColorBundle() {
   const names = swfSymbolIds();
+  /* 原 SWF 有「怒战头盔橙1 」这样的尾空格导出名。只在精确名字未命中时
+   * 接受唯一的去空格匹配，不能把基础档误当缺件而借用强化 2 档。 */
+  const trimmedNames = new Map();
+  for (const [name, id] of names) {
+    const key = name.trim();
+    if (!trimmedNames.has(key)) trimmedNames.set(key, new Set());
+    trimmedNames.get(key).add(id);
+  }
+  const symbolId = (candidate) => {
+    if (names.has(candidate)) return names.get(candidate);
+    const matches = trimmedNames.get(candidate);
+    if (matches && matches.size > 1) die('装备导出名去空格后不唯一：' + candidate);
+    return matches && [...matches][0];
+  };
   const framesFile = path.join(OUT, 'gear-frames.json');
   if (!fs.existsSync(framesFile)) die('缺少 ' + framesFile + '（先跑一次默认生成器）');
   const gearRows = JSON.parse(fs.readFileSync(framesFile, 'utf8')).gear;
@@ -1382,7 +1580,7 @@ function gearColorBundle() {
       for (const lv of wantLevels) {
         let hit = null;
         for (const candidate of gearColorCandidates(g, q, lv)) {
-          const sid = names.get(candidate);
+          const sid = symbolId(candidate);
           if (sid && sid !== 'None') { hit = { name: candidate, id: String(sid) }; break; }
         }
         if (hit) { levels[lv] = Number(hit.id); if (!roots.has(hit.id)) roots.set(hit.id, hit.name); }
@@ -1397,9 +1595,15 @@ function gearColorBundle() {
   if (clos.missing.length) console.warn('  ⚠ 有 %d 个被引用但字典里不存在的 id：%s',
     clos.missing.length, clos.missing.slice(0, 10).join(', '));
   const tags = clos.tags.map(prune).sort((a, b) => Number(a.id) - Number(b.id));
+  /* 卡片父层与人物画稿同样保留原 SWF 精度；只校正 tags-gear 的共享子层
+   * 仍会让卡片特有的父层/画稿使用旧的两位矩阵。 */
+  const placements = readSwfPlacementMatrices(fs.readFileSync(SWF));
+  const placementStats = restoreSwfPlacementMatrices(tags, placements);
+  if (placementStats.unmatched) die('预上色装备矩阵未能匹配原 SWF：' + placementStats.unmatched);
   const stats = { bitmaps: [] };
   extractBitmaps(tags, stats);
-  /* 与既有包重叠的 id 必须内容一致（`loadExtra` 先到先得）。 */
+  /* 两份装备包是 loadExtra 的高精度定义来源，同 id 必须完全一致。
+   * 页面包的共享元件只允许 MATRIX 恢复精度，不能夹带美术或结构变化。 */
   const canonical = (value, key) => {
     if (Array.isArray(value)) { if (key === 'Fs' || key === 'rs' || key === 'Sf') return value.map((v) => canonical(v)); return value; }
     if (value && typeof value === 'object') {
@@ -1410,13 +1614,16 @@ function gearColorBundle() {
     return value;
   };
   const shared = new Map();
-  for (const f of fs.readdirSync(OUT).filter((n) => /^tags.*\.json$/.test(n) && n !== 'tags-gear-color.json')) {
+  const sharedFiles = fs.readdirSync(OUT).filter((n) => /^tags.*\.json$/.test(n) && n !== 'tags-gear-color.json')
+    .sort((a, b) => a === 'tags-gear.json' ? -1 : b === 'tags-gear.json' ? 1 : a.localeCompare(b));
+  for (const f of sharedFiles) {
     for (const t of JSON.parse(fs.readFileSync(path.join(OUT, f), 'utf8'))) if (!shared.has(String(t.id))) shared.set(String(t.id), f);
   }
   for (const t of tags) {
     const where = shared.get(String(t.id));
     if (!where) continue;
     const other = JSON.parse(fs.readFileSync(path.join(OUT, where), 'utf8')).find((x) => String(x.id) === String(t.id));
+    if (where !== 'tags-gear.json') restoreSwfPlacementMatrices([other], placements);
     if (JSON.stringify(canonical(other)) !== JSON.stringify(canonical(t))) die('预上色装备与现有包同ID内容冲突：' + where + ' / ' + t.id);
   }
   const outFile = path.join(OUT, 'tags-gear-color.json');
@@ -1531,6 +1738,7 @@ function socialDialogBundle() {
 if (process.argv.includes('--social-dialog')) socialDialogBundle();
 else if (process.argv.includes('--gear-colors')) gearColorBundle();
 else if (process.argv.includes('--fight-result')) fightResultBundle();
+else if (process.argv.includes('--campaign-boss')) campaignBossBundle();
 else if (process.argv.includes('--fight')) fightBundle();
 else if (process.argv.includes('--fusion')) fusionBundle();
 else if (process.argv.includes('--compose')) composeBundle();

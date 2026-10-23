@@ -266,6 +266,12 @@
   function stageFoe(npc, stageId, anim, dailyCount) {
     const st = stageNpcStats(npc);
     const n = Math.max(0, Math.floor(Number(dailyCount) || 0));
+    /* 超级三侠（19~36 关）= 原版 `loadPlayer` 的 `chooseWz` 4/5/6，本来走
+     * `Mantis_boss.swf` / `Crane_boss.swf` / `Panda_boss.swf`。参考资料里这三个
+     * 外部 SWF 全是 404（viewer 里只有 Panda3 的占位副本），所以没有原版变异战斗
+     * 图集可挂；把 `mutant` 传给播放器，由 `Engine` 按经典精英立绘的配色做换色皮。
+     * 普通三侠不带这个标记，继续用原版 `tl/xh/xm` 图集与动作。 */
+    const mutant = isSuperStage(stageId);
     return {
       name: npc && npc.name, level: stageTargetLevel(stageId) + 5,
       power: challengeDailyScale(st.power, n),
@@ -276,19 +282,25 @@
       skills: String((npc && npc.skills) || '').split('|').filter(Boolean)
         .map((s) => { const q = s.split(':'); return { id: +q[0], level: +q[1] }; }),
       npcType: anim,
+      mutant: mutant,
     };
   }
 
   const STAGE_HP_MUL = 1.18;
+  /* 「常驻三侠」额外增强：1~18 关的徒弟先上阵等于多一条命，这里把普通关的
+   * 三侠三维/血量再抬 12%，超级大关（19~36 变异三侠）不受这条影响。 */
+  const STAGE_REGULAR_MUL = 1.06;
+  const stageRegularMul = (stageId) => isSuperStage(stageId) ? 1 : STAGE_REGULAR_MUL;
   function stageNpcHp(stageId, npcIndex) {
     const role = stageRoleOf(stageId, npcIndex);
+    const regular = stageRegularMul(stageId);
     if (STAGE_USE_LEVEL_MODEL) {
       /* 超级大关：单敌人、按大侠档位再乘类型专属倍率（比普通关的 1/3 连战强度高得多）。 */
       const bossMul = isSuperStage(stageId) ? (SUPER_HP_MUL[stageTypeOf(stageId).anim] || 1.6) : 1;
-      return Math.max(1, Math.round(stagePlayerHp(stageTargetLevel(stageId)) * STAGE_ROLE_HP[role] * STAGE_HP_MUL * bossMul));
+      return Math.max(1, Math.round(stagePlayerHp(stageTargetLevel(stageId)) * STAGE_ROLE_HP[role] * STAGE_HP_MUL * bossMul * regular));
     }
     const row = STAGE_NPC_HP[stageStar(stageId) - 1];
-    return row ? stageScale(row[role] || 0, STAGE_DIFFICULTY.hp * STAGE_HP_MUL) : 0;
+    return row ? stageScale(row[role] || 0, STAGE_DIFFICULTY.hp * STAGE_HP_MUL * regular) : 0;
   }
   function stageNpcExp(stageId, npcIndex) {
     /* 原版 `showFightWin`：1-3 门 = 16 + 关号×3；4-6 门 = 100 + (关号−19)×10，
@@ -307,7 +319,7 @@
       const stageId = Number(raw.stageId) || 1;
       const role = stageRoleOf(stageId, raw.npcIndex);
       const typeScale = isSuperStage(stageId) ? (SUPER_TYPE_SCALE[stageTypeOf(stageId).anim] || 1) : stageTypeScale(stageId);
-      const power = Math.max(1, Math.round(stagePlayerStat(stageTargetLevel(stageId)) * STAGE_ROLE_STAT[role] * typeScale));
+      const power = Math.max(1, Math.round(stagePlayerStat(stageTargetLevel(stageId)) * STAGE_ROLE_STAT[role] * typeScale * stageRegularMul(stageId)));
       // 用字典里（含熊猫 ★4-6 修正表）的比例保留同关三人的相对形状
       const shape = (key) => { const v = Number(raw[key]), p = Number(raw.power); return v > 0 && p > 0 ? v / p : 1; };
       return { power, agility: Math.max(1, Math.round(power * shape('agility'))), speed: Math.max(1, Math.round(power * shape('speed'))) };
@@ -316,10 +328,11 @@
     // 明显是原数据错误），这里按 ★1-3 的增长斜率修正；血量仍走攻略表。
     const fix = STAGE_NPC_STAT_FIX[Number(raw.stageId)] && STAGE_NPC_STAT_FIX[Number(raw.stageId)][Number(raw.npcIndex) - 1];
     const base = fix || raw;
+    const regular = stageRegularMul(raw.stageId);
     return {
-      power: stageScale(base.power, STAGE_DIFFICULTY.power),
-      agility: stageScale(base.agility, STAGE_DIFFICULTY.agility),
-      speed: stageScale(base.speed, STAGE_DIFFICULTY.speed),
+      power: stageScale(base.power, STAGE_DIFFICULTY.power * regular),
+      agility: stageScale(base.agility, STAGE_DIFFICULTY.agility * regular),
+      speed: stageScale(base.speed, STAGE_DIFFICULTY.speed * regular),
     };
   }
 
@@ -489,21 +502,22 @@
     return rows ? rows.map(([pid, count]) => ({ id: pid, count })) : null;
   }
 
-  /* 天梯碎片（本项目新增，id 51）：原版数据里 51~100 是空号。
-   * 依据 references/new/微信图片_20260924010916_259_2.jpg：天梯战里会飘出带「?」的金色碎片，
-   * 攒够 10 个可以随机合成一个力量/敏捷/速度转化丸；恶魔果实种子也走同一条路。
-   * 图标 images/ui/icons/prop/prop-51.png 由白色碎片改色加「?」得来。
-   * 同样只在 gamedata 里补行，GameDict.js 保持与 APK 逐字节一致。 */
+  /* 属性碎片（原版 id 66；复刻沿用 id 51 这个已占用的存档槽，避免旧档迁移）。
+   * 原版 `propsArray` 的 66 是「10 个属性碎片合出随机属性永久丸」，但用户 2026-10 口径
+   * 明确**不要属性永久增加**，改为随机合成 10/11/12 的力量/敏捷/速度转化丸
+   *（10 个 + 50 金松果）。天梯赛战斗里会飘出这块黄色三角「?」碎片。
+   * 图标 images/ui/icons/prop/prop-51.png 按 references/new/微信图片_20260924010916_259_2.jpg
+   * 的黄色三角 + 「?」重画；同样只在 gamedata 里补行，GameDict.js 保持与 APK 逐字节一致。 */
   const CONVERT_SHARD_ID = 51;
-  const CONVERT_SHARD_NAME = '天梯碎片';
+  const CONVERT_SHARD_NAME = '属性碎片';
   const CONVERT_SHARD_COST = 10;
   const CONVERT_FRUIT_ID = 46;         // 恶魔果实种子：天梯同样能掉
-  const CONVERT_PILLS = [10, 11, 12];  // 力量/敏捷/速度转化丸
+  const CONVERT_PILLS = [10, 11, 12];  // 力量/敏捷/速度转化丸（不是永久丸）
   function registerLadderShard() {
     const map = window.propMap;
     if (!map || typeof map.put !== 'function' || map.getValue(CONVERT_SHARD_ID)) return false;
     map.put(String(CONVERT_SHARD_ID), [String(CONVERT_SHARD_ID), CONVERT_SHARD_NAME,
-      CONVERT_SHARD_COST + '个' + CONVERT_SHARD_NAME + '可以随机合成1个力量/敏捷/速度转化丸。每次合成需要50个金松果。天梯赛里点飘出来的碎片可以获得。',
+      CONVERT_SHARD_COST + '个' + CONVERT_SHARD_NAME + '可以随机合成1个力量/敏捷/速度转化丸。每次合成需要50个金松果。',
       '', 'false', '2']);
     return true;
   }
@@ -520,7 +534,7 @@
     ['77', '黑凤凰碎片', '10个碎片可以合成1件黑色凤凰装备（顶级黑色套装）。挑战塔、无尽塔的黑色卡片、魔法袋、金宝箱与黑装融合都有几率获得。', '', 'false', '3'],
     ['78', '黑圣熊碎片', '10个碎片可以合成1件黑色圣熊装备（顶级黑色套装）。挑战塔、无尽塔的黑色卡片、魔法袋、金宝箱与黑装融合都有几率获得。', '', 'false', '3'],
     ['79', '魔法袋', '打开后随机获得一种：6级宝石3%、5级宝石15%、蓝色碎片15%（5~10个）、召唤证17%（1~2个）、金松果25%（300~500）、孵化点25%（100）；并额外获得黑色卡片×1。原版另有黑凤凰/黑圣熊碎片，离线版由黑色卡片承接。', '', 'false', '1'],
-    ['80', '黑色卡片', '打开后选择凤凰或圣熊：获得对应碎片1~2个，并额外获得50/100/200金松果。挑战塔（每20/50层1张）、无尽塔（每累计50层1张，周限10）、魔法袋、金宝箱与黑装融合都有几率获得。', '', 'false', '1'],
+    ['80', '黑色卡片', '打开后选择凤凰或圣熊：获得对应碎片1~2个，并额外获得100/200/400金松果。挑战塔（每20/50层1张）、无尽塔（每累计50层1张，周限10）、魔法袋、金宝箱与黑装融合都有几率获得。', '', 'false', '1'],
     ['82', '召唤证', '在体力不足时，可以使用召唤证参加幻兽竞技。', '10', 'true', '2'],
     ['89', '黑装自选箱', '打开后可以任选1件黑色凤凰或黑色圣熊装备（头/拳/衣/鞋）。挑战塔第100层首通获得。', '', 'false', '1'],
     ['90', '金宝箱', '打开后随机获得一种：6级宝石4%、5级宝石22%（10%两颗/12%一颗）、基础属性点49%（6/8/10/12点）、金松果15%（500/750/1000）、黑色卡片8%、完整黑装2%（仅首开）。可花金松果重开，最多500次，单箱最高12点；重开不出完整黑装。', '20', 'false', '5'],
@@ -910,7 +924,7 @@
    *   · gearSetMap：品质 5、使用等级 60（原版 `showFusion` 写「橙装50，黑装60级」）、
    *     组号/序号取原版 equipsArray（46=21 / 47=22 / 67=19 / 68=20 / 69=23 / 70=24 / 71=25 / 72=26）；
    *   · gearMap：abilities 按部位填（头=敏 / 手=力 / 衣=血 / 鞋=速），与 GEAR_BASE 逐值一致。
-   * 只补 quality=5 的行；橙装 205~208 等仍走「实例级 orange」的旧路径。 */
+   * quality=5 的黑装在这里补；quality=4 的橙装由下面 registerOrangeGear() 按原版 288 行补齐。 */
   const BLACK_GEAR_SETS = Object.freeze([
     Object.freeze({ id: 46, group: 21, index: 33 }),
     Object.freeze({ id: 47, group: 22, index: 34 }),
@@ -946,6 +960,38 @@
     return n;
   }
   registerBlackGear();
+
+  /* 橙装 q4：APK 的 gearMap/gearSetMap 同样只有紫装档，原版 equipsArray 里的 125~180 /
+   * 197~212 / 205~208 这 64 件 q4 数据没有进 map。以前用「紫装 id + orange 标记」模拟，
+   * 结果橙装实际吃的是紫装基础值（狂战 25/175，而原版橙装是 45/315）。这里按原版表补齐
+   * q4 的 set/gear 行，让 `addGear(205)` / 融合产物都拿到原版 q4 属性。
+   * set.index 沿用同家族紫装的原画索引（狂战橙=32，黑=33），保证立绘仍走原版橙稿。 */
+  const ORANGE_GEAR_SET_INDEX = Object.freeze({
+    32: 6, 33: 7, 34: 8, 35: 9, 36: 10, 37: 11, 38: 12,
+    39: 20, 40: 21, 41: 22, 42: 23, 43: 24, 44: 25,
+    45: 34, 50: 37, 52: 32, 53: 38,
+  });
+  function registerOrangeGear() {
+    const gmap = window.gearMap, smap = window.gearSetMap;
+    if (!gmap || !smap || typeof gmap.put !== 'function' || typeof smap.put !== 'function') return 0;
+    let n = 0;
+    for (const row of GEAR_BASE) {
+      const [id, setId, quality, type, name, base] = row;
+      if (Number(quality) !== 4) continue;
+      if (!smap.getValue(String(setId))) {
+        const index = ORANGE_GEAR_SET_INDEX[Number(setId)] || Number(setId);
+        smap.put(String(setId), [String(setId), '4', String(setId), '50', '0', '550', String(index)]);
+        n++;
+      }
+      if (gmap.getValue(String(id))) continue;
+      const abilities = [0, 0, 0, 0];
+      abilities[Number(type)] = Number(base);
+      gmap.put(String(id), [String(id), abilities.join(','), String(type), name, String(setId)]);
+      n++;
+    }
+    return n;
+  }
+  registerOrangeGear();
 
   /* ============================================================
    * 【GD6】套装收益（**本复刻版新增，原版没有**）
@@ -1089,7 +1135,7 @@
    * 【GD4】导出 window.GData
    * ============================================================ */
   window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, stageEnemyCount, isSuperStage, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
-    STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
+    STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_REGULAR_MUL, SUPER_HP_MUL, SUPER_TYPE_SCALE, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
     trueLevel, trueSkillValue, trueSkillStep, trueSkillRow, TRUE_SKILL_TABLE, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
     stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, BLUE_SHARD_DROP_MUL, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, BLACK_GEAR_SETS, BLACK_SHARD_SET, BLACK_CARD_ID, BLACK_BOX_ID, registerBlackGear, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, EXTRA_RANK_GOODS, registerRankGoods, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
     PETS, PET_SKILLS, PET_SKILL_RULES, petSkillValue, petSkillTrigger, petSkillInfo, PET_GRADE_EXP, PET_GRADE_COST,

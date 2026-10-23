@@ -14,7 +14,8 @@
  *   主塔强度系数 M(n)  = (1+0.03⌊(m−1)/5⌋)(1+0.04⌊(m−1)/10⌋), m=min(n,30)
  *   主塔单层松果 G(n)  = min(50, 25+(n−1))，再 ×1.5（x5）/×2（x10）（见【D1】）
  *   无尽段系数   B(s)  = min(10, 1.5^(s−1)), s=⌈n/5⌉
- *   无尽深度曲线 K(n)  = 1（n≤30）；1.07^min(n−30,20) × 1.0555^max(0,n−50)（见【D2】）
+ *   无尽轮内曲线 K(r)  = 1（r≤30）；1.07^min(r−30,20) × 1.0555^max(0,r−50)（见【D2】）
+ *   无尽跨轮基础 F(100c+r) = F(r) × (0.70 × F(100)/F(1))^c，属性/生命分别归一（见【D2b】）
  *   抽奖卷       T(s)  = s（s≤2）；2+2(s−2)（s≥3）——10 层前每档 +1、之后每档 +2
  * ============================================================ */
 (function () {
@@ -28,12 +29,12 @@
    *   · 段位倍率 towerMult：第 30 层起封顶（1.15 × 1.08 = ×1.242）
    *   · 通关金松果 towerGold：第 34 层起封顶 88
    * 再叠加**不随层数成长**的两项：套装档位 gearTierCap 第 20 层起封顶 3（紫装），
-   * 以及 buildFoe 里挑战塔的深度曲线恒为 1（`KM = 1`，只有无尽塔吃 endlessDepthMul）。
+   * 以及 buildFoe 里挑战塔的深度曲线恒为 1（`KM = 1`，只有无尽塔吃轮内 endlessDepthMul）。
    * 也就是说第 30 层之后，挑战塔只会换 boss 变体 / 套装外观，数值不再变强 ——
    * 想核对这条口径跑 `tools/test-fixes-round.cjs` 的 `需求136`。
    *
-   * 对照：**无尽塔不封顶** —— endlessMult 在 31 层封顶 ×10、endlessLevel 在 56 层封顶 90 级，
-   * 但 30 层之后另有一条无上限的 depth 曲线（endlessDepthMul，31~50 层 7%/层、51 层起 5.55%/层）。
+   * 对照：**无尽塔不封顶** —— 每轮沿用前 100 层的等级、段位与深度增长；
+   * 新一轮的完整属性/生命基础为上一轮末尾的 70%，之后按同一轮内相对曲线增长（见【D2b】）。
    * ============================================================ */
 
   const TOWER_LEVEL_CAP = 90;        // 目标等级上限（= 玩家满级 90）
@@ -100,10 +101,10 @@
    *
    * 这条曲线**独立于那两条封顶**，只在 30 层之后叠加，分两段（保留「段内速率恒定」的干净手感）：
    *   31~50 层：每层 +7.00%（ENDLESS_DEEP_RATE1，这段是用户认可的「1~50 层增幅」）
-   *   51 层起 ：每层 +5.55%（ENDLESS_DEEP_RATE2，**2026-10 用户口径：后面放缓**）
+   *   51~100 层：每层 +5.55%（ENDLESS_DEEP_RATE2，**2026-10 用户口径：后面放缓**）
    * 于是 5 层环比从「50 层前 ×1.403、50 层后 ×1.539」变成「×1.403 → ×1.310」，
    * 后段虽然仍在指数增长，但收敛得多：100 层从 ×287.7 落到 ×57.6（≈ 原来的 1/5）。
-   * ⚠ 1~50 层的数值**一个字节都没动**（用户明确要求前面保持原样），只有 51 层起的斜率变了。
+   * ⚠ 1~100 层保持原曲线；101 层起不沿绝对层号外推，而由【D2b】继承完整基础并重走轮内曲线。
    * ============================================================ */
   const ENDLESS_DEEP_LAYER = 30;
   const ENDLESS_DEEP_RATE1 = 0.07;
@@ -113,16 +114,13 @@
    *  与 ENDLESS_DEEP_LAYER 无关 —— 那个是敌人深度曲线，不要混用。 */
   const ENDLESS_SKIP_LAYER = 20;
   /**
-   * 30 层之后的敌方深度倍率（≤30 层恒为 1，不影响既有平衡）。
-   *   · 30 层 ×1.00    40 层 ×1.97    50 层 ×3.87   ← 这三档与旧口径完全一致
-   *   · 60 层 ×6.55    70 层 ×11.09   80 层 ×18.76
-   *   · 90 层 ×31.75   100 层 ×57.66  150 层 ×819   200 层 ×1.19 万
-   * 对应「5 层环比」：50 层前 ×1.403，50 层后 ×1.310。
-   * 量级里程碑：×1 千 → 156 层｜×1 万 → 200 层｜×10 万 → 244 层｜×100 万 → 287 层。
-   * （旧口径同样位置是 115 / 142 / 168 / 195 层 —— 现在明显缓下来了。）
+   * 轮内第 30 层之后的敌方深度倍率（轮内≤30 层恒为 1）。
+   * 第 1~100 层保留原值；第 101/201 层的 KM 回到 1，但完整基础另由 endlessScaleParts 继承。
+   * 此函数只表示轮内深度这一乘区，不能单独用它比较跨轮敌人强弱。
+   * 对应「5 层环比」：轮内 50 层前 ×1.403，50 层后 ×1.310。
    */
   function endlessDepthMul(n) {
-    const layer = Math.max(0, Number(n) || 0);
+    const layer = cycleLayer(n);
     const d = Math.max(0, layer - ENDLESS_DEEP_LAYER);
     const seg1 = Math.min(d, ENDLESS_DEEP_SPLIT);
     const seg2 = Math.max(0, d - ENDLESS_DEEP_SPLIT);
@@ -153,8 +151,9 @@
    * 【D2b】100 层循环（2026-10 用户口径）—— 「第 101 层回到像第 1 层一样」
    *
    * 无尽塔**没有终点**：整百层（100/200/300…）的「觐见魔王」打赢之后照旧往 101 / 201 层走，
-   * 敌人的数值继续继承上一轮的结尾继续长（见 endlessDepthMul，它本来就不封顶）。
-   * 变的只是**规则**，而这里有两类规则、行为并不一样，别混：
+   * 敌人每轮的起点取上一轮末尾完整基础的 ENDLESS_CYCLE_DISCOUNT（当前可调初值 70%），
+   * 随后按第 1~100 层同一相对曲线继续增长；属性和生命各自归一，见 endlessScaleParts。
+   * 规则另按下面几类处理：
    *
    * ① 按层分档的**数值档位**：每 100 层重来一轮（`layerCycle` 取模，永久循环）
    *    · 商店每页件数：1-20 层 5 件 → 21-40 层 4 件 → 41-100 层 3 件 → 101 层回到 5 件
@@ -172,11 +171,13 @@
    * ③ 整百层（x00）**不开任何商店**：那三层是「觐见魔王」三连战，中途插一家店很别扭；
    *    x5 层（105/110…）照旧开 —— `layerNoShop`。
    *
-   * ⚠ 只有上面这些**规则**会被重置；**敌人成长倍率不受影响**
-   *   （101 层的敌人 ≥ 100 层的敌人，这是用户明确要的「数值继续继承」）。
-   * 口径全部收在这一节里，改平衡只动这几个常量。
+   * 敌人基础曲线也按百层重开：101 = 100 层完整基础 × 折扣，201 = 200 层完整基础 × 折扣。
+   * 完整基础包含目标等级基数、段位 M、深度 KM；不能只重置后两项，也不能再次叠乘首层基数。
+   * 三侠/试炼的角色系数、bias、精英乘区在完整基础之外照旧计算；bossHpRatio 的轮内缓升单独归一。
+   * 巡逻/魔王镜仍按玩家复制机制；70% 是可调初值，并非已经过数值平衡验证。
    * ============================================================ */
   const LAYER_CYCLE = 100;
+  const ENDLESS_CYCLE_DISCOUNT = 0.70;  // 新一轮首层 / 上一轮末层的完整基础；属性、生命统一可调
   /** 商店每页件数：1-20 层 5 / 21-40 层 4 / 41-100 层 3。 */
   const SHOP_SLOT_TIERS = Object.freeze([
     Object.freeze({ max: 20, slots: 5 }),
@@ -262,21 +263,29 @@
     const c = cycleLayer(n);
     return brandLossAllowed(n) && c > BRAND_LOSS_FROM && c % 2 === 0;
   }
-  /* ---------- 敌人成长倍率的三个乘区（`endlessScaleParts`） ----------
-   * 无尽塔的敌人面板 = 三个乘区的积（见 tower.js 的 buildFoe）：
-   *   属性基数（目标等级 endlessLevel，56 层封顶 90 级）
-   *   × 段位倍率 M（endlessMult，31 层封顶 ×10）
-   *   × 深度倍率 KM（endlessDepthMul，30 层之后才叠加、**永不封顶**）
-   * 这里把三个数摊开成一份读数，塔侧（buildFoe / 结算）直接用它。
-   * 【2026-10 用户口径】**界面不再展示倍率**（开局页与局内主界面都不放），
-   * 所以这个函数只服务数值计算，不要为了显示再挂回界面上。 */
+  /* ---------- 完整敌人基础曲线（`endlessScaleParts`） ----------
+   * 令 r = 轮内层号、c = 已完成轮数；首轮基础 F(r) = 等级基数 × 段位 M(r) × 深度 KM(r)。
+   * 等级基数使用 GData.stagePlayerStat / stagePlayerHp（与 buildFoe 同源），属性与生命分别计算：
+   *   F(100c+r) = F(r) × (ENDLESS_CYCLE_DISCOUNT × F(100) / F(1))^c。
+   * 因此 F(101)/F(100) 正好为折扣，轮内 F(150)/F(101) 与 F(50)/F(1) 相同；不额外叠乘首层基数。
+   * statBase / hpBase 已含跨轮继承，buildFoe 仅再乘 mult × depth；statCurve / hpCurve 是这三项的积。
+   * power / stats 保留旧读数口径，并计入跨轮继承；角色系数、bias、精英等仍在 buildFoe 外乘。
+   * 巡逻/魔王镜复制玩家面板，不套普通敌人曲线；挑战塔继续使用自己的封顶公式。
+   * 【2026-10 用户口径】界面不再展示倍率；此出口只服务数值计算与回归核对。 */
   const FOE_STAT_MUL_NOTE = '敏捷 / 速度档';   // 力量另有更低的系数（FOE_POWER_MUL / FOE_*_POWER_MUL）
   function endlessScaleParts(n) {
     const layer = Math.max(1, Math.floor(Number(n) || 1));
-    const level = endlessLevel(layer), mult = endlessMult(layer), depth = endlessDepthMul(layer);
-    return { layer: layer, level: level, mult: mult, depth: depth,
-      power: Math.max(1, Math.round(FOE_POWER_MUL * mult * depth)),
-      stats: Math.max(1, Math.round(FOE_STAT_MUL * mult * depth)) };
+    const cycle = cycleLayer(layer), round = Math.floor((layer - 1) / LAYER_CYCLE);
+    const level = endlessLevel(cycle), mult = endlessMult(cycle), depth = endlessDepthMul(cycle);
+    const firstLevel = endlessLevel(1), lastLevel = endlessLevel(LAYER_CYCLE);
+    const endMult = endlessMult(LAYER_CYCLE) * endlessDepthMul(LAYER_CYCLE);
+    const carryStat = Math.pow(ENDLESS_CYCLE_DISCOUNT * GData.stagePlayerStat(lastLevel) * endMult / GData.stagePlayerStat(firstLevel), round);
+    const carryHp = Math.pow(ENDLESS_CYCLE_DISCOUNT * GData.stagePlayerHp(lastLevel) * endMult / GData.stagePlayerHp(firstLevel), round);
+    const statBase = GData.stagePlayerStat(level) * carryStat, hpBase = GData.stagePlayerHp(level) * carryHp;
+    return { layer, cycle, round, level, mult, depth, carryStat, carryHp, statBase, hpBase,
+      statCurve: statBase * mult * depth, hpCurve: hpBase * mult * depth,
+      power: Math.max(1, Math.round(FOE_POWER_MUL * carryStat * mult * depth)),
+      stats: Math.max(1, Math.round(FOE_STAT_MUL * carryStat * mult * depth)) };
   }
   /* ============================================================
    * 环境词缀（无尽塔唯一的常驻负面机制）
@@ -649,6 +658,10 @@
   /* 结算离场时「铸币 → 抽奖卷」的兑换上限（用户口径 2026-10）：
    * 最多 10 枚铸币按 1:1 换成抽奖卷，**超出的部分不再转化**（铸币本身随本局作废）。 */
   const TICKET_FROM_MINT_CAP = 10;
+  /* 整百层「觐见魔王」真正打赢后，选择**就此离场**的额外抽奖卷。
+   * 用户口径 2026-10：给玩家一个在 100×n 层收手的理由；继续挑战则不领取这一份
+   *（进入 101/201… 后 canSettleEndlessVictory 不再成立）。 */
+  const ENDLESS_X00_BONUS_TICKETS = 10;
   const SHOP_PRICE_OFFSET = 3;
   function rollShopPrice(base) {
     const b = Math.max(1, Number(base) || 1);
@@ -844,8 +857,11 @@
   function legendOwnedCount(run) {
     if (!run) return 0;
     const ids = new Set();
-    for (const b of run.permanent || []) if (b && b.id) ids.add(b.id);
-    for (const b of run.limited || []) if (b && b.id) ids.add(b.id);
+    /* 剧情件（照影之境）不是构筑的一部分，不能因为它 rarity=3 就把商店传奇权重压下去：
+     * 第 101/201… 层的货架权重必须与第 1 层一致（用户口径 2026-10）。 */
+    const story = (id) => { const def = BUFF_BY_ID[id]; return !!(def && hasTag(def, 'story')); };
+    for (const b of run.permanent || []) if (b && b.id && !story(b.id)) ids.add(b.id);
+    for (const b of run.limited || []) if (b && b.id && !story(b.id)) ids.add(b.id);
     for (const id of run.permSlotIds || []) ids.add(id);
     for (const id of run.pickBuffIds || []) ids.add(id);
     for (const row of run.instantIds || []) if (row && row.id) ids.add(row.id);
@@ -999,6 +1015,13 @@
     const depth = Math.min(0.06, 0.03 + 0.004 * Math.max(1, Number(layer) || 1));  // 层数缓升，20 层封顶
     return Math.max(BOSS_HP_MIN, Math.min(BOSS_HP_MAX, 1.06 + tank + depth));
   }
+  /** 普通 boss 的轮内血量缓升也按首末层归一，保证同模板跨轮首层准确承接上一轮末层折扣。 */
+  function endlessBossHpRatio(biasHp, n) {
+    const layer = Math.max(1, Math.floor(Number(n) || 1));
+    const round = Math.floor((layer - 1) / LAYER_CYCLE);
+    const carry = Math.pow(bossHpRatio(biasHp, LAYER_CYCLE) / bossHpRatio(biasHp, 1), round);
+    return bossHpRatio(biasHp, cycleLayer(layer)) * carry;
+  }
   /* 三侠的「输出」压一档：三侠的攻击基准是 STAGE_TYPE_SCALE（螳螂 1.15／仙鹤 0.92／熊猫 1.02）
    * × FOE_POWER_MUL，本来就比 boss 高；现在血量和 boss 差不多，输出必须压下来，
    * 否则前三场又变成「把人打残的血墙」。boss 的输出高一大档（FOE_TRIAL_POWER_MUL），
@@ -1009,6 +1032,13 @@
   const FOE_TRIAL_POWER_MUL = 1.45;
   /* x10 第 5 场的狂战松鼠：血量走 WARLORD_HP_RATIO，力量再压一点点（它还吃精英 ×1.2 的伤害）。 */
   const FOE_WARLORD_POWER_MUL = 0.85;
+  /* x0 的征战动物 boss：它是 x0 最后一战，必须**明确强于倒数第二战的随机狂战松鼠**。
+   * 倒数第二战也是精英（×1.2），所以这里直接比力量倍率与血量倍率：
+   *   狂战松鼠：0.85 力量 / 1.20 血；动物 boss：1.45 力量 / 1.10 血。
+   * 再叠动物模板自身的力量 bias 与血量 bias：血线比前一位精英更低，但攻击明显更高，
+   * 打起来更短、更痛——按用户口径「降血、提攻」，不再做拖时间的血墙。 */
+  const FOE_CAMPAIGN_POWER_MUL = 1.45;
+  const CAMPAIGN_HP_RATIO = 1.10;
 
   /* ============================================================
    * 【D6】NPC 池（10 个，8 类机制） —— NPCS / NPC_BY_ID
@@ -1439,6 +1469,69 @@
   }
   /* 兼容旧调用点：默认（不带层数）就是第一只。 */
   const WARLORD = WARLORD_POOL[0];
+
+  /* ============================================================
+   * 【D11b】征战（副本）动物 boss —— CAMPAIGN_BOSSES / campaignBossFor
+   * ------------------------------------------------------------
+   * 原版 `MainMovie.as:19152` 的 bossConfig 有 5 条，但 `checkIsCampaigning`
+   * 明确写着「豹王暂未开放」；campaignNpcs 也只有狡兔/狼王/妖狐/猿将四个 boss。
+   * 这里只接**原版已开放**的四只，豹王不伪造。
+   *
+   * 原版战斗是服务端下发 `combats`（四人组队），离线塔战没有这一层；因此这里保留
+   * 原版 boss 的形态、名字、等级和动物模型，出招交给复刻的玩家式 Sim（与狂战松鼠
+   * 同一套武器/技能数据）。数值上用更高的力量/生命倍率，保证它压在倒数第二战的
+   * 狂战松鼠之上（见 FOE_CAMPAIGN_POWER_MUL / CAMPAIGN_HP_RATIO）。
+   * ============================================================ */
+  const CAMPAIGN_BOSSES = Object.freeze([
+    { id: 'campaign_hare', bossId: 1, mcFrame: 1, name: '暗御狡兔', bigName: '狡兔', level: 35,
+      type: '征战首领 · 狡兔', region: 0,
+      bias: { power: 1.20, agility: 1.12, speed: 1.18, hp: 1.20 },
+      weapons: [{ id: 8, level: 10 }],
+      skills: [{ id: 2, level: 10 }, { id: 11, level: 10 }, { id: 23, level: 10 }],
+      castable: [23], pattern: ['weapon', 'skill', 'weapon', 'common'], mech: ['berserk', 'freeze'],
+      patternDesc: '狡兔三窟：菜刀 → 幸运一击 → 菜刀 → 普攻（高速、高闪避）',
+      mechDesc: '原版征战副本首领「暗御狡兔」：敏捷与速度极高，靠闪避与幸运一击打爆发；' +
+        '塔内追加狂战血性与寒冰禁锢（每第 3 次行动前冻结玩家 1 回合）。' },
+    { id: 'campaign_wolf', bossId: 2, mcFrame: 2, name: '暗御狼王', bigName: '狼王', level: 40,
+      type: '征战首领 · 狼王', region: 0,
+      bias: { power: 3.00, agility: 1.00, speed: 1.00, hp: 1.30 },
+      weapons: [{ id: 12, level: 11 }],
+      skills: [{ id: 9, level: 11 }, { id: 10, level: 11 }, { id: 24, level: 11 }, { id: 14, level: 10 }],
+      castable: [14], pattern: ['weapon', 'skill', 'weapon', 'common'], mech: ['berserk', 'freeze'],
+      patternDesc: '狼王扑杀：狼牙棒 → 小宇宙爆发 → 狼牙棒 → 普攻（高力量）',
+      mechDesc: '原版征战副本首领「暗御狼王」：力量最高，暴击与反击都很硬；' +
+        '塔内追加狂战血性与寒冰禁锢（每第 3 次行动前冻结玩家 1 回合）。' },
+    { id: 'campaign_fox', bossId: 3, mcFrame: 3, name: '暗御妖狐', bigName: '妖狐', level: 50,
+      type: '征战首领 · 妖狐', region: 0,
+      bias: { power: 1.20, agility: 1.05, speed: 1.05, hp: 0.65 },
+      weapons: [{ id: 7, level: 12 }],
+      skills: [{ id: 8, level: 12 }, { id: 15, level: 12 }, { id: 6, level: 10 }, { id: 16, level: 10 }],
+      castable: [8, 15], pattern: ['skill', 'weapon', 'skill', 'common'], mech: ['berserk'],
+      patternDesc: '妖狐魅影：色诱之术 → 毒龙胆 → 通灵召唤 → 普攻（控制与消耗）',
+      mechDesc: '原版征战副本首领「暗御妖狐」：色诱与通灵交替，擅长拖慢并消耗对手；' +
+        '塔内追加狂战血性（生命首次低于 50% 时攻击力翻倍）。' },
+    { id: 'campaign_ape', bossId: 4, mcFrame: 4, name: '暗御猿将', bigName: '猿将', level: 60,
+      type: '征战首领 · 猿将', region: 0,
+      bias: { power: 0.90, agility: 1.00, speed: 1.00, hp: 0.80 },
+      weapons: [{ id: 2, level: 12 }],
+      skills: [{ id: 14, level: 12 }, { id: 16, level: 10 }, { id: 5, level: 10 }, { id: 10, level: 10 }],
+      castable: [14], pattern: ['weapon', 'skill', 'common', 'skill'], mech: ['berserk'],
+      patternDesc: '猿将重击：狼牙棒 → 小宇宙爆发 → 普攻 → 小宇宙爆发（高生命、高减伤）',
+      mechDesc: '原版征战副本首领「暗御猿将」：四只已开放首领中最厚、最重的一只；' +
+        '塔内追加狂战血性（生命首次低于 50% 时攻击力翻倍）。' },
+  ]);
+  const CAMPAIGN_BOSS_BY_ID = Object.fromEntries(CAMPAIGN_BOSSES.map((b) => [b.id, b]));
+  /* 90 层先放最高的猿将，往下依次妖狐/狼王/狡兔；50/40/30/20/10 再循环一遍。
+   * 四只都是原版已开放 boss；原版锁定的豹王不进来。 */
+  /* 只有 60/70/80/90 这四层接入；10~50 保持原来的「随机 boss + 塔顶狂战松鼠」结构。
+   * 90 猿将 → 80 妖狐 → 70 狼王 → 60 狡兔，正好按原版等级从高到低排。 */
+  const CAMPAIGN_BOSS_ORDER = ['campaign_ape', 'campaign_fox', 'campaign_wolf', 'campaign_hare'];
+  function campaignBossFor(layer) {
+    const L = Math.max(1, Math.floor(Number(layer) || 1));
+    if (L !== 60 && L !== 70 && L !== 80 && L !== 90) return null;
+    const idx = Math.floor((90 - L) / 10);
+    return CAMPAIGN_BOSS_BY_ID[CAMPAIGN_BOSS_ORDER[idx]] || null;
+  }
 
   /* ============================================================
    * 【D12】随机 boss 池与三侠顺序 —— bossFor / heroOrder
@@ -2009,8 +2102,13 @@
      *   · `catalog`    = 例外：**要进「增益集锦」**（玩家该知道有这么一件传奇）；
      *   · `flavor`     = 拾取卡上那句「映出一具完美的躯壳」；`desc` 才是进背包后的介绍，
      *     按用户口径写 `？？？`（`descOf` 对 story 件不再追加叠层说明，免得剧透）。
-     *   · 目前**没有数值效果**（`mods` 留空）：以后要加效果，往 `mods` 里加一个真实生效的键，
-     *     并在 tower.js 的 aggregate 里接上即可 —— 发放/叠层/展示这套管路已经就位。 */
+     *   · 进入下一轮时，tower.js 把**静态**四维与静态战斗属性封为 run.mirrorSnapshot，
+     *     清除旧构筑；快照在本轮增益之前生效，不占位、不保留旧成长/经济引擎。
+     *     后发制人 / 战斗续航 / 低血 / 回合成长 / 天命所归 / 增幅水晶等**纯局内触发**不吸收；
+     *     神兵淬炼 / 秘技通神（C32/C33）是选取型单次武装强化，同样**不吸收**，随旧构筑消失。
+     *     减伤按伤害倍率乘算（不会叠到 100%）。下轮再吸收时累积此前封存与新构筑，
+     *     并以前一层照影之境结算后的值作为白值，但不重复吸收人物的装备/等级基础。
+     *     `mods` 留空以免重复叠加。 */
     { id: 'C63', tags: ['endless', 'story', 'hidden', 'catalog'], name: '照影之境', rarity: 3, kind: 'permanent',
       unlimitedStacks: true,
       flavor: '映出一具完美的躯壳',
@@ -2334,11 +2432,12 @@
     ENDLESS_MECH_ORDER, ENDLESS_CONSOLATION_LAYER, SCORE, COINS, SHOP, shopPrice,
     COIN_BATTLE_TIERS, coinBattleTier, coinBattleBase, coinBattleTierLabel, coinBattleTableText,
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
-    FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, bossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,
+    FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, FOE_CAMPAIGN_POWER_MUL, CAMPAIGN_HP_RATIO,
+    bossHpRatio, endlessBossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,
     ENDLESS_LAYER_HEAL_PCT, MILESTONE_EVERY, MILESTONE_BOOK_COUNT, rollMilestone, PERMANENT_SLOTS,
     endlessDepthMul, ENDLESS_DEEP_LAYER, ENDLESS_SKIP_LAYER,
     /* 【D2b】100 层循环：「第 101 层回到像第 1 层一样」的那组规则 + 敌人成长倍率口径。 */
-    LAYER_CYCLE, layerCycle, cycleLayer, SHOP_SLOT_TIERS, CHOICE_CUT_TIERS, shopSlotCut, choiceCut,
+    LAYER_CYCLE, ENDLESS_CYCLE_DISCOUNT, layerCycle, cycleLayer, SHOP_SLOT_TIERS, CHOICE_CUT_TIERS, shopSlotCut, choiceCut,
     endlessShopSlots, layerNoShop, layerModsOn, envAllowed, brandLossAllowed, sacrificeAllowed,
     canHaveEnv, canBrandLoss, BRAND_LOSS_FROM,
     /* 【U20】整百层「镜中世界」：判据 + 照影之境（剧情固定奖励）的 id / 循环长度。 */
@@ -2347,7 +2446,7 @@
     buffScore, reviveScoreAt,
     SHOP_PRICE_OFFSET, rollShopPrice,
     rerollPriceAt, rerollPriceCapped, rerollQualityCapped, mechSealsHeal, HEAL_SEAL_MECHS, rerollTilt, tiltRateMul, rawTierWeights, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,
-    TIER_DYNAMIC_WEIGHTS, TIER_AVG_INCLUDES_STATIC, LEGEND_PITY, TICKET_FROM_MINT_CAP,
+    TIER_DYNAMIC_WEIGHTS, TIER_AVG_INCLUDES_STATIC, LEGEND_PITY, TICKET_FROM_MINT_CAP, ENDLESS_X00_BONUS_TICKETS,
     shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,
     /* 巡逻（魔王战）：常量 + 两个判据（buildPlan / 预告 / 界面共用）。 */
     PATROL, patrolLayerInBlock, isPatrolLayer, patrolName,
@@ -2358,7 +2457,9 @@
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,
-    GEAR, wearsOf, WARLORD, WARLORD_POOL, warlordFor, BOSS_POOL, bossFor, heroOrder, ENDLESS_ONLY_MODS, poolRoster, ROSTERS,
+    GEAR, wearsOf, WARLORD, WARLORD_POOL, warlordFor,
+    CAMPAIGN_BOSSES, CAMPAIGN_BOSS_BY_ID, campaignBossFor,
+    BOSS_POOL, bossFor, heroOrder, ENDLESS_ONLY_MODS, poolRoster, ROSTERS,
     TOWER_BATTLE_IDS,
     BUFFS, BUFF_BY_ID, FIXED_HEAL_PCT, AUTO_HEAL_PCT, STACK_MAX, stackCap, LEGACY_BUFF_IDS, BUFF_VER,
     SHOP_DISCOUNT_E04, SHOP_DISCOUNT_E01, SHOP_DISCOUNT_BOTH,

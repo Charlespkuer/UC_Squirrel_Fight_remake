@@ -42,9 +42,10 @@
     { type: 2, cells: [['mc_body', 0], ['mc_handL', 1], ['mc_handR', 1]] },
     { type: 3, cells: [['mc_footL', 0], ['mc_footR', 0]] },
   ];
-  /* 容器符号 id：从 `gear-slots.json` 的 `container` 表读（与村庄页同一份来源，
-   * 不在这里写死 —— 生成器改了表这里就跟着变）。 */
+  /* showFace 直接 attachMovie 非 B 容器；主页/战斗的 B 容器先转成位图，原点不同。
+   * 两组都从 gear-slots.json 读，卡片回退画稿继续使用 B 表。 */
   let containerIds = null;
+  let portraitContainerIds = null;
 
   /* ---------- 经验数字的落点微调（用户 2026-10 口径："exp 中的数字偏下了，稍微往上一点"）----------
    * `expNum`（7182）是文本字段，落点由 render.js 的字段框公式算；这里在它自己的局部坐标里
@@ -186,7 +187,7 @@
    * 立绘：把玩家**穿在身上的装备**贴到部位容器上（原版 `showFace` 的等价物）
    * ========================================================== */
   function dressParts(view, byType) {
-    if (!view || !containerIds) return 0;
+    if (!view || !portraitContainerIds) return 0;
     let n = 0;
     for (const row of FACE_PARTS) {
       const gear = byType[row.type];
@@ -196,7 +197,7 @@
         if (!clip || !clip.detachAll) continue;
         clip.detachAll();
         if (!info) continue;
-        const sym = containerIds[row.type] && containerIds[row.type][pair[1]];
+        const sym = portraitContainerIds[row.type] && portraitContainerIds[row.type][pair[1]];
         if (!sym) continue;
         if (clip.attachChild(sym, info.frame, 'wear')) n++;
       }
@@ -206,7 +207,7 @@
   /** 读 `gear-frames.json`（id→帧号）与 `gear-slots.json`（部位→容器符号）两张表。
    *  `showFace` 只做 `attachMovie(容器) + gotoAndStop(frame)`，**不动缩放** —— 照抄。 */
   let frameTable = null;
-  /** 橙装（实例级 quality 4）对应的**原版 q4 画稿帧**：同部位同名字的 q4 套。
+  /** 橙装（q4 id 或旧实例 orange）对应的**原版 q4 画稿帧**：同部位同名字的 q4 套。
    *  `狂战头盔` q3 = frame 71（紫）、q4 = frame 113（橙）—— 直接沿用原版橙稿，
    *  不再拿紫稿硬填成"橙装也是紫的"（用户 2026-11 口径）。 */
   let orangeFrameTable = null;
@@ -234,7 +235,7 @@
     return { frame: frame, orange: !!orange };
   }
   async function loadFrameTable() {
-    if (frameTable && containerIds) return frameTable;
+    if (frameTable && containerIds && portraitContainerIds) return frameTable;
     const B = 'images/ssfight/ui/';
     const j = (f) => fetch(B + f, { cache: 'force-cache' }).then((x) => (x.ok ? x.json() : null)).catch(() => null);
     const [r, slots] = await Promise.all([j('gear-frames.json'), j('gear-slots.json')]);
@@ -253,6 +254,10 @@
     if (slots && !containerIds) {
       containerIds = {};
       for (const c of slots.container || []) containerIds[c.type] = c.ids;
+    }
+    if (slots && !portraitContainerIds) {
+      portraitContainerIds = {};
+      for (const c of slots.portraitContainer || []) portraitContainerIds[c.type] = c.ids;
     }
     return frameTable;
   }
@@ -2471,6 +2476,8 @@
    * 复刻这边两页都只占满整屏，所以直接**换这一层的时间轴**，返回时再挂回第 3 帧 —— 观感一致，
    * 也省掉"两层各自维护播放表"的复杂度。 */
   const GEAR_GEM_COST_NOTE = '宝石：镶嵌 / 卸下各 5 金松果';
+  /** 橙装 / 黑装都可镶嵌；旧的最小 State 桩没有 canSocketGem 时退回 quality>3。 */
+  const canSocketGear = (gear) => (State.canSocketGem ? State.canSocketGem(gear) : Number(gear && gear.quality) > 3);
   function currentGearByKey(key) {
     try { return (State.myGears() || []).find((g) => String(g.key) === String(key)) || null; } catch (e) { return null; }
   }
@@ -2489,13 +2496,13 @@
     const ty = Math.max(0, Math.min(3, Number(g.type) || 0));
     /* `b_on`：`isWear == "true"` → 第 2 帧（已穿 → 按下去是"卸下"），否则第 1 帧。 */
     stopAt(clipOf(view, 'b_on'), g.used ? 2 : 1);
-    /* `b1`：橙装（quality > 3）才有宝石键 —— 有宝石停第 2 帧（= 已镶嵌）、没有停第 1 帧（= 镶嵌）；
+    /* `b1`：橙装 / 黑装（quality > 3）才有宝石键 —— 有宝石停第 2 帧（= 已镶嵌）、没有停第 1 帧（= 镶嵌）；
      * 非橙装停第 3 帧（原版 `showStone = false`，那一档是灰的）。
      * ⚠ 外层 `b1`（4590）的第 2 帧只是**换成另一颗带「已镶嵌」字样的按钮**（内层 4589），
      * 绿色高亮档在内层按钮自己的第 2 帧（3152 绿底）；只拨外层会得到一张灰/米色的
      * 「已镶嵌」——用户 2026-10 口径："已镶嵌那个位置选中后要变绿"。 */
     const b1 = clipOf(view, 'b1');
-    const canGem = Number(g.quality) > 3;
+    const canGem = canSocketGear(g);
     stopAt(b1, canGem ? (g.gem ? 2 : 1) : 3);
     if (canGem && b1 && b1.byName) {
       const inner = b1.byName('b1');
@@ -2603,8 +2610,8 @@
     const g = currentGearByKey(key);
     if (!g) return;
     const refresh = () => { if (gearPage && gearPage.view) { fillGearDetail(gearPage.view, currentGearByKey(key) || g); wireGearDetail(gearPage.view, key); } };
-    if (Number(g.quality) <= 3) {
-      if (window.UI && UI.toast) UI.toast('只有传说（橙色）装备才能镶嵌宝石。');
+    if (!canSocketGear(g)) {
+      if (window.UI && UI.toast) UI.toast('只有传说（橙色）或黑色装备才能镶嵌宝石。');
       return;
     }
     if (g.gem) {
@@ -2705,6 +2712,7 @@
    *   所以这里**版式照原版、规则与文案走 `State`**，件数上限仍是 3 件。
    * ========================================================== */
   const FUSION_FRAME = { work: 8, pick: 9, confirm: 13 };
+  const FUSION_QUALITY_NAMES = ['普通', '优秀', '杰出', '卓越', '传说', '黑色'];
   const FUSION_PICK_PER_PAGE = 2;
   let fusionPage = null;    // { host, view, frame, sel: [key], page }
   function fusionCostOf(q) {
@@ -2815,14 +2823,17 @@
   /* ---------- 工作台（第 8 帧，`updataFusionMain`） ---------- */
   /* 4673 f8 的「请先放入3件蓝色的装备」是拆成逐字 <text> 的画稿。
    * 融合规则早已放开到任意同品质（橙装还能合黑），把这一行改成通用提示。 */
-  function rewriteFusionPrompt(view) {
+  function rewriteFusionPrompt(view, text) {
     const root = view && (view.g || view);
     if (!root || !root.querySelectorAll) return;
-    const prompt = [...root.querySelectorAll('g')].find((g) => {
+    /* 第一次按原画稿文字找；改过之后原文字已经不在了，用自己打的标记认。
+     * 否则第二次调用（换材料 / 同套提示切换）会找不到这一组、提示永远停在第一句。 */
+    const prompt = root.querySelector('g[data-fusion-prompt="1"]') || [...root.querySelectorAll('g')].find((g) => {
       const txt = String(g.textContent || '').replace(/\s+/g, '');
       return txt.indexOf('请先放入') >= 0 && txt.indexOf('装备') >= 0;
     });
     if (!prompt) return;
+    prompt.setAttribute('data-fusion-prompt', '1');
     const glyphs = [...prompt.querySelectorAll('text')];
     if (!glyphs.length) return;
     const first = glyphs[0];
@@ -2836,16 +2847,18 @@
     n.setAttribute('x', '0');
     n.setAttribute('y', '14');
     for (const [a, v] of Object.entries(keep)) n.setAttribute(a, v);
-    n.textContent = '请先放入3件同品质装备';
+    n.textContent = text || '请先放入3件同品质装备';
     prompt.appendChild(n);
   }
 
   function fillFusionWork(view) {
     if (!view || !fusionPage) return;
-    rewriteFusionPrompt(view);
     const all = fusionMaterials();
     const sel = fusionSelected();
     const picked = sel.map((k) => all.find((g) => g.key === k)).filter(Boolean);
+    /* 三件同套且该套有下一品质档时，工作台直接写“同套必得：狂战/怒战…”。 */
+    const sameSet = picked.length === 3 && State.fusionFamilyInfo ? State.fusionFamilyInfo(picked) : null;
+    rewriteFusionPrompt(view, sameSet ? '同套必得：' + sameSet.family : '');
     for (let i = 0; i < 3; i++) {
       const cell = clipOf(view, 'c' + (i + 1));
       const back = clipOf(view, 'cBack' + (i + 1));
@@ -2952,6 +2965,7 @@
         ' / 紫 ' + fusionCostOf(3) + ' / 橙 ' + fusionCostOf(4) + ' 金松果。',
       '已穿戴的装备不能作为材料；部位和名字可以完全不同。',
       '3 件同品质的紫装可以融成一件传说装备；3 件橙色装备可以融成一件黑色装备；融合成功率 100%。',
+      '三件材料同属一套（如狂战头盔/拳甲/铠甲）且该套有下一品质档时，产物必定是同套装的下一品质、首件材料部位；该套没有下一品质档（早期白/绿套）或材料跨套时按随机规则。品质 5 的黑装已是最高档，三件黑装仍按同部位洗练。',
       '部位和名字可以完全不同。产物的每个词条都有 ' + extInherit + '% 概率从三件材料的词条里继承；' +
         '继承到的词条取材料里的最高星级，另有 ' + extUpgrade + '% 概率再升 1 星（最高 3 星）。',
     ];
@@ -3137,7 +3151,11 @@
     const q = picked.length ? Number(picked[0].quality) : 0;
     const cost = fusionCostOf(q);
     setTextByName(view, 't_tips', '融合即将开始，\n本次需要' + cost + '个金松果。');
-    setTextByName(view, 'goal', (['普通', '优秀', '杰出', '卓越', '传说', '黑色'][Math.min(5, q + 1)] || '') + '装备　');
+    const sameSet = picked.length === 3 && State.fusionFamilyInfo ? State.fusionFamilyInfo(picked) : null;
+    const exact = sameSet && State.gearInst ? State.gearInst(sameSet.id) : null;
+    setTextByName(view, 'goal', sameSet
+      ? (FUSION_QUALITY_NAMES[Math.min(5, sameSet.quality)] || '') + (exact && exact.name ? exact.name : sameSet.family) + '　'
+      : (FUSION_QUALITY_NAMES[Math.min(5, q + 1)] || '') + '装备　');
     const back = () => { void mountFusionFrame(FUSION_FRAME.work).then(() => { fillFusionWork(fusionPage && fusionPage.view); wireFusionWork(fusionPage && fusionPage.view); }); };
     wireClickable(clipOf(view, 'b_back'), { hover: 2, onFire: back });
     wireClickable(clipOf(view, 'b_ok'), {

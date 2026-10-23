@@ -973,9 +973,12 @@
     } catch (e) {}
     return Battle;
   }
-  /** 跑一场：先试当前模式该走的渲染器，抛错就退回 canvas 再跑一次。 */
+  /** 跑一场：先试当前模式该走的渲染器，抛错就退回 canvas 再跑一次。
+   *  征战动物 boss 在现代模式也借用 SfFight：它们只有经典 6833 矢量素材，
+   *  现代 canvas 没有对应图集；`classicFight` 由 startBattle 按 `foe.campaign` 置位。 */
   async function runBattle(opts) {
-    const first = battleRenderer();
+    const first = opts && opts.classicFight && window.SfFight && SfFight.ready()
+      ? SfFight : battleRenderer();
     if (first === Battle) return Battle.run(opts);
     try {
       return await SfFight.run(opts);
@@ -990,32 +993,44 @@
     if (mode === 'battle') return;
     const S = State.state();
     if (opts.cost && !State.consumeEnergy(opts.cost)) { UI.toast('体力不足，无法开始战斗'); return; }
-    const stats = State.totalStats({ useProps: opts.useProps !== false });
-    const maxHp = Math.max(1, Math.round(stats.hp));
+    /* 关卡「徒弟先上阵」：调用方传 `fighter` 时，这一场直接使用徒弟快照作为玩家侧，
+     * 不再套玩家自己的装备/套装/幻兽乘区（那些属于师父，不能偷偷帮徒弟加面板）。 */
+    const useFighter = !!(opts.fighter && typeof opts.fighter === 'object');
+    const stats = useFighter ? null : State.totalStats({ useProps: opts.useProps !== false });
     // hpRatio 是关卡连战的入场血量比例：hp 按比例继承，maxHp 仍是不变的上限。
     const startRatio = opts.hpRatio == null ? 1 : Math.min(1, Math.max(0.01, Number(opts.hpRatio) || 0));
-    const me = {
-      name: S.name, level: S.level,
-      power: stats.power, agility: stats.agility, speed: stats.speed,
-      hp: Math.max(1, Math.round(maxHp * startRatio)), maxHp,
-      baseStats: { power: S.power, agility: S.agility, speed: S.speed },
-      weapons: State.myWeapons().map((w) => ({ id: w.id, level: w.level, harmLo: w.harmLo, harmHi: w.harmHi })),
-      skills: State.mySkills().map((s) => ({ id: s.id, level: s.level })),
-      npcType: opts.myNpcType || null,
-      wears: Engine.wearsFor(State.myGears().filter(g => g.used)),
-      effects: State.equipmentEffects(), masterLevel: S.master ? S.master.level : 0,
-    };
-    // 挑战塔等玩法在构建完玩家面板后注入本场的 buff 修正（属性乘区/护盾/吸血等）。
-    if (typeof opts.adjustMe === 'function') opts.adjustMe(me);
-    /* 套装收益：属性部分已经在 totalStats 里加过，这里只落战斗修正（fighter.setFx）。
-     * 放在 adjustMe **之后** —— 塔的 buff 走 mods、套装走 setFx，两包互不覆盖；
-     * 也不吃塔的「增幅水晶」全局倍率（那是本局增益的倍率，装备收益不该被它放大）。 */
-    State.applySetBonuses(me);
-    /* 幻兽出战队伍：先把宠物加成落到玩家面板，再给随机 AI 对手生成 1~3 只幻兽。
-     * 都是“开战前一次性”的数值面板，Sim 不需要知道幻兽的存储细节。 */
+    const me = useFighter ? Object.assign({}, opts.fighter) : (() => {
+      const maxHp = Math.max(1, Math.round(stats.hp));
+      return {
+        name: S.name, level: S.level,
+        power: stats.power, agility: stats.agility, speed: stats.speed,
+        hp: Math.max(1, Math.round(maxHp * startRatio)), maxHp,
+        baseStats: { power: S.power, agility: S.agility, speed: S.speed },
+        weapons: State.myWeapons().map((w) => ({ id: w.id, level: w.level, harmLo: w.harmLo, harmHi: w.harmHi })),
+        skills: State.mySkills().map((s) => ({ id: s.id, level: s.level })),
+        npcType: opts.myNpcType || null,
+        wears: Engine.wearsFor(State.myGears().filter(g => g.used)),
+        effects: State.equipmentEffects(), masterLevel: S.master ? S.master.level : 0,
+      };
+    })();
+    if (useFighter) {
+      me.maxHp = Math.max(1, Math.round(Number(me.maxHp || me.hp) || 1));
+      me.hp = Math.max(1, Math.round(Math.min(me.maxHp, Number(me.hp) || me.maxHp) * startRatio));
+    } else {
+      // 挑战塔等玩法在构建完玩家面板后注入本场的 buff 修正（属性乘区/护盾/吸血等）。
+      if (typeof opts.adjustMe === 'function') opts.adjustMe(me);
+      /* 套装收益：属性部分已经在 totalStats 里加过，这里只落战斗修正（fighter.setFx）。
+       * 放在 adjustMe **之后** —— 塔的 buff 走 mods、套装走 setFx，两包互不覆盖；
+       * 也不吃塔的「增幅水晶」全局倍率（那是本局增益的倍率，装备收益不该被它放大）。 */
+      State.applySetBonuses(me);
+      /* 幻兽出战队伍：先把宠物加成落到玩家面板，再给随机 AI 对手生成 1~3 只幻兽。
+       * 都是“开战前一次性”的数值面板，Sim 不需要知道幻兽的存储细节。 */
+      try {
+        me.pets = State.petTeam ? State.petTeam() : [];
+        if (window.State && State.applyPetBonuses) State.applyPetBonuses(me, me.pets);
+      } catch (e) { if (window.__errs) window.__errs.push('pet battle: ' + (e && e.message)); }
+    }
     try {
-      me.pets = State.petTeam ? State.petTeam() : [];
-      if (window.State && State.applyPetBonuses) State.applyPetBonuses(me, me.pets);
       if (foe && foe.isAI && !Array.isArray(foe.pets) && opts.pets !== false && State.randomPetLoadout) {
         foe.pets = State.randomPetLoadout(foe.level);
       }
@@ -1030,14 +1045,18 @@
     let settled = false;
     /* 这一场走的是不是原版 fight 帧（`SfFight`）。它决定战斗结束后**要不要**再弹复刻那层
      * 「战斗拾取」收益弹窗 —— 见 `onEnd` 末尾那条口径。 */
-    const classicFight = battleRenderer() === SfFight;
+    const campaignClassic = !!(foe && foe.campaign && window.SfFight && SfFight.ready());
+    const classicFight = campaignClassic || battleRenderer() === SfFight;
     const controller = await runBattle({
+      classicFight: campaignClassic,
       canvas, me, foe, region: opts.region, kind: opts.kind, collectDrops: opts.collectDrops !== false,
       /* 右下角操作键：跳过 + 倍速，两个都要**等级解锁**（2026-10 用户口径）——
-       * 2 倍速 10 级、跳过 20 级，一开始两个都没有；调用方传 false 仍能单独关掉。
+       * 2 倍速 10 级；跳过按超级松鼠页：VIP 10 级 / 非 VIP 20 级。系统页还能单独
+       * 关掉跳过键的**显示**（`showSkip`），关闭后这里连按钮都不给。
+       * 调用方传 false 仍能单独关掉（例如无尽塔 20 层以下）。
        * 挑战塔 / 无尽塔本身要 30 级才开，所以塔里天然都有（塔的跳过另有「20 层起」的层数门槛）。
        * 普通战斗的倍速上限是 2×（不给 3×），塔自己传 speedMax: 3 才拿得到 3×。 */
-      allowSkip: opts.allowSkip !== false && State.unlockedSkip(),
+      allowSkip: opts.allowSkip !== false && (State.skipButtonEnabled ? State.skipButtonEnabled() : State.unlockedSkip()),
       speedToggle: opts.speedToggle !== false && State.unlockedSpeed(),
       speedMax: Number(opts.speedMax) > 0 ? Number(opts.speedMax) : 2,
       /* 训练木桩等特殊战斗的回合上限（默认 0 = 播放器自己的 60）。只影响 HUD 的剩余
@@ -1102,8 +1121,13 @@
          * （MainMovie.as:18703-18840）把这一场的东西填进 `c1/c2/c3` 三格 + `getExp`，
          * 战斗中飘到的道具另有 `获取道具`(3960) 那张小牌子，**没有**任何"结束后再弹一层"
          * 的实现（用户 2026-11 口径："收益弹窗的 ui 风格很明显和 ssfight 版本不符"）。
-         * 所以这一档按"原版没有就删掉"处理：不再往原版战果页上盖一层 DOM 弹窗。 */
-        if (!classicFight && UI.classic && UI.classic.pickupResult) UI.classic.pickupResult(loot, finalReward, winner);
+         * 所以这一档按"原版没有就删掉"处理：不再往原版战果页上盖一层 DOM 弹窗。
+         * ⚠ 两座塔（挑战塔 / 无尽塔）也不走这里：塔的产出全部由
+         * `Tower.reportBattle` 结算，塔页自己负责「战斗胜利 / 层数通关 / 选增益 / 里程碑」，
+         * 战斗结束**不能再叠一层空的「战斗拾取」**（`collectDrops:false` 时它只有
+         * 「胜利！」和一个确定键；用户 2026-10 报的就是无尽塔胜利后这个空弹窗）。 */
+        const towerFight = opts.kind === 'tower' || opts.kind === 'endless';
+        if (!classicFight && !towerFight && UI.classic && UI.classic.pickupResult) UI.classic.pickupResult(loot, finalReward, winner);
       },
       onError: () => {
         if (settled) return;
@@ -1124,6 +1148,8 @@
     let settled = false;
     mode = 'battle'; cancelAnimationFrame(rafId); $('#ui').innerHTML = ''; fitCanvas(); playBgm('fight');
     const controller = await runBattle({ canvas, me: entry.me, foe: entry.foe, region: entry.region, result: entry.result, collectDrops: false,
+      /* 录像回放同样遵守系统页的「跳过按钮」开关与等级/VIP 解锁，不在这里另开一套。 */
+      allowSkip: State.skipButtonEnabled ? State.skipButtonEnabled() : true,
       onEnd: () => {
         if (settled) return;
         settled = true; activeBattle = null; showHome();

@@ -206,7 +206,7 @@
   function spriteIn(ids, label) {
     for (const id of ids) {
       const sh = SHEETS[id];
-      if (!sh || !sh.img || !sh.img.naturalWidth) continue;
+      if (!sh || !sh.img || !(sh.img.naturalWidth || sh.img.width)) continue;
       const fr = sh.frames[label];
       if (fr) return { sh: sh, fr: fr };
     }
@@ -275,6 +275,162 @@
     return loadImage(url).then((img) => (img ? registerSheet(id, img) : null));
   }
   function sheet(id) { return SHEETS[id] || null; }
+
+  /* ---------- 变异三侠的换色图集（2026-10） ----------
+   * 原版把三侠的战斗动画放在外部 `FightGame/{Mantis,Crane,Panda}3.swf`，超级关再用
+   * `*_boss.swf`；参考资料里只抓回了 `Panda3.swf`，`*_boss.swf` 全部 404（viewer 里
+   * 那 6 个占位文件都是同一份 Panda3）。所以「变异三侠」没有可用的原版战斗贴图，
+   * 能取到的只有经典关卡页 `style`(4738) 第 4~6 帧的精英立绘配色。
+   * 这里按精英立绘的配色把普通三侠图集做一层运行时换色：螳螂绿→青、仙鹤去蓝压暗、
+   * 熊猫黑白→紫红。只影响 NPC 那几层，不改动提交进仓库的 PNG；以后拿到真正的
+   * `*_boss.swf` 时，把 `mutantSheets()` 换成对应图集即可，其它接线不用动。 */
+  const MUTANT_BASE_SHEETS = Object.freeze({
+    tl: ['tl'], xh: ['xh1', 'xh2'], xm: ['xm1', 'xm2'],
+  });
+  const mutantPending = Object.create(null);
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2;
+    const d = max - min;
+    if (!d) return [0, 0, l];
+    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    let h;
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    return [h * 60, s, l];
+  }
+  function hslToRgb(h, s, l) {
+    h = ((h % 360) + 360) % 360;
+    const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; }
+    else if (h < 120) { r = x; g = c; }
+    else if (h < 180) { g = c; b = x; }
+    else if (h < 240) { g = x; b = c; }
+    else if (h < 300) { r = x; b = c; }
+    else { r = c; b = x; }
+    return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+  }
+  /** 在一条 [位置, r, g, b] 渐变上取色（用于熊猫/仙鹤的亮度映射）。 */
+  function gradientAt(t, stops) {
+    for (let i = 0; i < stops.length - 1; i++) {
+      const a = stops[i], z = stops[i + 1];
+      if (t <= z[0] || i === stops.length - 2) {
+        const k = clamp01((t - a[0]) / Math.max(1e-6, z[0] - a[0]));
+        return [a[1] + (z[1] - a[1]) * k, a[2] + (z[2] - a[2]) * k, a[3] + (z[3] - a[3]) * k];
+      }
+    }
+    const last = stops[stops.length - 1];
+    return [last[1], last[2], last[3]];
+  }
+  /* 精英立绘取色（`style` 4738 第 4~6 帧）：
+   *   tl = 青蓝身躯 + 紫刃；xh = 灰黑羽 + 橙喙；xm = **红色身躯** + 紫黑斑/紫帽。
+   * 熊猫最容易跑偏：普通图集是暖白毛 + 黑斑 + 棕帽，不能把整张图的中间调
+   * 都压成蓝紫；这里只把**棕帽**识别出来染紫，其它亮度一律走红色渐变。 */
+  function mutantPixel(mode, r, g, b) {
+    const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    if (mode === 'xm') {
+      /* 红系主渐变（用户 2026-10 口径：上一版太亮太正红，改偏**酒红**）：
+       * #36121c（黑斑）→ #922e3a（中调）→ #de726e（白毛高光）。
+       * 比上一版整体压暗、带一点紫调，但保留红身；不再用荧光珊瑚红。 */
+      const red = gradientAt(lum, [
+        [0.00, 54, 18, 28], [0.20, 104, 32, 44], [0.45, 146, 46, 58],
+        [0.70, 178, 64, 74], [0.88, 202, 86, 92], [1.00, 222, 114, 112],
+      ]);
+      /* 只有棕帽/棕饰（低亮度、带一点黄棕饱和度）才混紫；白毛/黑斑不碰紫。 */
+      let [h, s, l] = rgbToHsl(r, g, b);
+      if (s > 0.28 && h >= 15 && h <= 55 && l < 0.58) {
+        const purple = gradientAt(lum, [
+          [0.00, 64, 40, 72], [0.45, 118, 78, 124], [0.75, 154, 108, 156], [1.00, 186, 138, 184],
+        ]);
+        return [red[0] * 0.30 + purple[0] * 0.70, red[1] * 0.30 + purple[1] * 0.70, red[2] * 0.30 + purple[2] * 0.70];
+      }
+      return red;
+    }
+    if (mode === 'xh') {
+      /* 仙鹤：灰黑羽 + 橙喙。白羽按亮度映射到 #adadad 一带，蓝脖子也被拉成灰色；
+       * 黄喙/红冠保留暖色，棕帽单独走灰棕。 */
+      const gray = gradientAt(lum, [
+        [0.00, 30, 30, 30], [0.35, 80, 78, 76], [0.65, 125, 123, 121],
+        [0.85, 160, 160, 160], [1.00, 172, 172, 172],
+      ]);
+      let [h, s, l] = rgbToHsl(r, g, b);
+      /* 只有高饱和的黄喙和红冠算暖色；棕帽（s≈0.3~0.4）走下面的灰棕档。 */
+      const warm = s > 0.50 && ((h >= 10 && h <= 55) || h < 10 || h > 345);
+      if (warm) {
+        return gradientAt(lum, [
+          [0.00, 100, 45, 30], [0.50, 160, 95, 55], [1.00, 185, 115, 70],
+        ]);
+      }
+      if (s > 0.12 && s <= 0.50 && h >= 15 && h <= 55) {
+        return gradientAt(lum, [
+          [0.00, 45, 38, 34], [0.50, 140, 127, 112], [1.00, 170, 160, 145],
+        ]);
+      }
+      return gray;
+    }
+    let [h, s, l] = rgbToHsl(r, g, b);
+    if (mode === 'tl') {
+      /* 绿色系整体搬到青蓝（65°~175° → 190°~210°）；紫色刀刃固定在 285°。 */
+      if (s > 0.12 && h >= 65 && h <= 175) h = 190 + (h - 65) / 110 * 20;
+      else if (s > 0.10 && h >= 270 && h <= 335) h = 285;
+      s = clamp01(s * 1.08);
+    }
+    return hslToRgb(h, s, l);
+  }
+  /** 把一张已加载图集按原帧表复制成新 id 的换色画布。 */
+  function tintSheet(srcId, dstId, mode) {
+    const src = SHEETS[srcId];
+    const img = src && src.img;
+    if (!img || !img.width || !img.height || typeof document === 'undefined' || !document.createElement) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width; canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.drawImage(img, 0, 0);
+    let pixels;
+    try { pixels = ctx.getImageData(0, 0, canvas.width, canvas.height); } catch (e) { return null; }
+    const d = pixels.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (!d[i + 3]) continue;
+      const out = mutantPixel(mode, d[i], d[i + 1], d[i + 2]);
+      d[i] = out[0]; d[i + 1] = out[1]; d[i + 2] = out[2];
+    }
+    ctx.putImageData(pixels, 0, 0);
+    const sh = { id: dstId, img: canvas, w: canvas.width, h: canvas.height, def: src.def, frames: Object.assign({}, src.frames) };
+    SHEETS[dstId] = sh;
+    return sh;
+  }
+  /** 确保某一档变异三侠的换色图集已就绪（只做一次；失败时静默回退普通图集）。 */
+  function ensureMutantSheets(kind) {
+    const bases = MUTANT_BASE_SHEETS[kind];
+    if (!bases) return Promise.resolve(false);
+    if (mutantPending[kind]) return mutantPending[kind];
+    /* 直接等**每一张源图**真正就绪再换色：`loadSheets()` 有 5s 截止线，
+     * 到点没下来时 `SHEETS[id]` 还不存在，换色会拿到空图（第一次进战斗
+     * 就永远退回普通皮）。这里走 `loadImage()`（同一份 cache），图到了才 tint。 */
+    const jobs = bases.map((id) => {
+      if (SHEETS[id]) return Promise.resolve();
+      const src = guessSrc(id);
+      if (!src) return Promise.resolve();
+      return loadImage(src).then((img) => { if (img) registerSheet(id, img); });
+    });
+    mutantPending[kind] = Promise.all(jobs).then(() => {
+      for (const id of bases) if (!SHEETS[id + '_mut']) tintSheet(id, id + '_mut', kind);
+      const ok = bases.every((id) => !!SHEETS[id + '_mut']);
+      if (!ok) delete mutantPending[kind];      // 允许下一场再试（例如画布被系统回收）
+      return ok;
+    }).catch(() => { delete mutantPending[kind]; return false; });
+    return mutantPending[kind];
+  }
+  /** 这一档的绘制图集：换色版已就绪就用它，否则退回普通版。 */
+  function mutantSheets(kind) {
+    const bases = MUTANT_BASE_SHEETS[kind];
+    if (!bases) return null;
+    return bases.map((id) => (SHEETS[id + '_mut'] ? id + '_mut' : id));
+  }
 
   /* ============================================================
    * 【EN6】动画数据
@@ -422,7 +578,7 @@
   /** 静态图元（按标签取图集帧）绘制到 (dx,dy)，dw/dh 为显示尺寸 */
   function drawSprite(ctx, id, label, dx, dy, dw, dh) {
     const sh = SHEETS[id];
-    if (!sh || !sh.img || !sh.img.naturalWidth) return false;
+    if (!sh || !sh.img || !(sh.img.naturalWidth || sh.img.width)) return false;
     const f = sh.frames[String(label)] || sh.frames[String(label).toUpperCase()];
     if (!f) return false;
     ctx.drawImage(sh.img, f.sx, f.sy, f.sw, f.sh, dx, dy, dw == null ? f.sw : dw, dh == null ? f.sh : dh);
@@ -434,7 +590,7 @@
     const f = sh.frames[String(label)];
     return f ? frameDst(f) : null;
   }
-  function has(id) { const sh = SHEETS[id]; return !!(sh && sh.img && sh.img.naturalWidth); }
+  function has(id) { const sh = SHEETS[id]; return !!(sh && sh.img && (sh.img.naturalWidth || sh.img.width)); }
 
   /* ============================================================
    * 【EN8】动画播放器
@@ -666,6 +822,7 @@
     getDef: getDef, frameList: frameList, frameAt: frameAt,
     loadImage: loadImage, loadUrl: loadUrl, loadSheets: loadSheets, loadSheetFromUrl: loadSheetFromUrl,
     sheet: sheet, spriteFor: spriteFor, spriteIn: spriteIn, pinSheets: pinSheets, frameSize: frameSize, has: has,
+    ensureMutantSheets: ensureMutantSheets, mutantSheets: mutantSheets,
     anim: anim, hasAnim: hasAnim, animNames: animNames,
     drawFrame: drawFrame, drawSprite: drawSprite,
     frameBounds: frameBounds, wearsFor: wearsFor, loadWears: loadWears,

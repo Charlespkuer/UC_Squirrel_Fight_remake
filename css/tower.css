@@ -189,6 +189,7 @@
 /* 悬停气泡：挂在 body 上的 fixed 层（js/tower-ui.js 定位），不会被滚动容器裁掉 */
 .tower-tip-float {
   position: fixed; z-index: 9999; display: none; max-width: 620px;
+  max-height: calc(100vh - 96px); overflow: auto;
   background: rgba(38, 24, 12, .96); color: #ffeccd; border: 2px solid #c9a468;
   border-radius: 14px; padding: 12px 16px; font-size: 20px; line-height: 1.45;
   white-space: pre-line; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); pointer-events: none;
@@ -797,6 +798,15 @@ ul.settle-calc li.total b { font-size: 22px; }
 .boss-grid li.king { border-color: #c0392b; background: #fff0e8; }
 .boss-grid li.king b { color: #8a2f2f; }
 .boss-grid .foe-portrait { display: none; }
+
+/* BOSS 一览里的分组简介（三侠 → 首领 → 四雄 → 魔王）。
+ * 所有分组共用首领池的 6 列紧凑卡尺寸，不再给三侠/四雄/魔王单独加宽；
+ * 三侠 / 四雄卡面不放机制文字，具体机制统一走悬停说明。 */
+.boss-group { margin: 2px 0 8px; }
+.boss-group-title { display: block; margin: 6px 0 4px; font-size: 17px; color: #7a4a18; }
+.boss-group-title i { font-style: normal; font-size: 14px; color: #8a6a3a; margin-left: 8px; }
+.boss-grid li.hero { border-color: #9dbb77; background: rgba(246, 251, 238, .95); }
+.boss-grid li.campaign { border-color: #d79a63; background: rgba(255, 246, 236, .95); }
 /* 竞技场报名页的自动喝药说明 */
 .extra-arena-hint { margin-top: 6px; padding: 4px 10px; border-radius: 12px; background: #eef7e2; border: 2px solid #b7d096; color: #3f6a1f; font-size: 17px; }
 .extra-arena-hint.warn { background: #fdeee8; border-color: #e0a99c; color: #8a3a30; }
@@ -1089,4 +1099,237 @@ ul.settle-calc li.total b { font-size: 22px; }
   animation: mirrorPromptBlink 1.5s ease-in-out infinite; }
 @keyframes mirrorPromptBlink { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
 .mirror-confirm p { margin: 0 0 6px; }
+
+/* ============================================================
+ * 无尽塔 · 本局战报
+ * 只接管结算页右列；塔身与其它塔页继续使用原有样式。
+ * 长战报整列滚动，底部操作保留在可见范围内。
+ * ============================================================ */
+.endless-summary-page > .tower-main {
+  height: 100%; max-height: 100%; min-height: 0; box-sizing: border-box;
+  padding: 2px 4px 2px 0; overflow-x: hidden; overflow-y: auto;
+  overscroll-behavior: contain; scrollbar-gutter: stable; scroll-padding-bottom: 72px;
+  scrollbar-width: thin; scrollbar-color: #c4aa76 #f2e7ca;
+  container-type: inline-size; container-name: endless-summary;
+}
+.endless-summary-page > .tower-main::-webkit-scrollbar { width: 7px; }
+.endless-summary-page > .tower-main::-webkit-scrollbar-track { background: #f2e7ca; border-radius: 8px; }
+.endless-summary-page > .tower-main::-webkit-scrollbar-thumb { background: #c4aa76; border-radius: 8px; }
+.endless-summary {
+  --summary-accent: #a46b20;
+  --summary-rule: #dfc99e;
+  display: flex; flex-direction: column; min-height: 100%; box-sizing: border-box;
+  padding: 14px 18px 0; border: 1px solid var(--summary-rule); border-radius: 22px;
+  background: linear-gradient(155deg, #fffdf4, #faf1dc); color: #654b30;
+  box-shadow: inset 0 1px 0 #fffef9;
+}
+.endless-summary[data-outcome="lose"] { --summary-accent: #94604e; }
+.endless-summary .summary-heading {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px; row-gap: 3px; padding-bottom: 12px;
+}
+.endless-summary .summary-kicker {
+  grid-column: 1; color: #987a4c; font-size: 13px; line-height: 1.4;
+  font-weight: 700; letter-spacing: 2px;
+}
+.endless-summary .summary-ending {
+  grid-column: 1; margin: 0; color: var(--summary-accent);
+  font-size: 34px; line-height: 1.15; font-weight: 800; letter-spacing: 3px;
+}
+.endless-summary .summary-subtitle {
+  grid-column: 1; margin: 3px 0 0; color: #8c7352; font-size: 16px; line-height: 1.45;
+}
+.endless-summary .summary-mode {
+  grid-column: 2; grid-row: 1 / span 2; align-self: start; margin-top: 2px;
+  padding: 3px 10px; border: 1px solid #d7c4a0; border-radius: 20px;
+  background: #f7efdd; color: #88704e; font-size: 13px; line-height: 1.5; white-space: nowrap;
+}
+.endless-summary .summary-score {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "label value" "note value"; align-items: center; gap: 3px 16px;
+  padding: 9px 16px; border: 1px solid #dcb96b; border-radius: 15px;
+  background: linear-gradient(100deg, #f8e9bc, #fff6dc 65%, #fbefca);
+  box-shadow: inset 0 1px 0 #fffdf1;
+}
+.endless-summary .summary-score > span {
+  grid-area: label; align-self: end; font-size: 16px; font-weight: 700; color: #815d28;
+}
+.endless-summary .summary-score > strong {
+  grid-area: value; color: #9e6517; font-family: Georgia, 'Times New Roman', serif;
+  font-size: 43px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums;
+  letter-spacing: -1px; overflow-wrap: anywhere;
+}
+.endless-summary .summary-score > small {
+  grid-area: note; align-self: start; color: #9c8054; font-size: 12px; line-height: 1.4;
+}
+.endless-summary .summary-body { flex: 1 0 auto; min-width: 0; }
+.endless-summary .summary-buff-totals,
+.endless-summary .summary-notes { color: #9b8059; font-size: 12px; line-height: 1.5; }
+.endless-summary .summary-buff-totals { margin: 6px 0 0; }
+.endless-summary .summary-notes { margin-top: 12px; }
+.endless-summary .summary-notes p { margin: 3px 0; }
+.endless-summary .summary-section { min-width: 0; margin-top: 14px; }
+.endless-summary .summary-section-heading {
+  display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap;
+  gap: 3px 10px; margin: 0 0 7px; color: #77502a; font-size: 18px; line-height: 1.35;
+  font-weight: 700;
+}
+.endless-summary .summary-section-heading > small,
+.endless-summary .summary-section > small {
+  color: #9b8059; font-size: 12px; font-weight: 400; letter-spacing: 0;
+}
+.endless-summary .summary-buffs {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(166px, 1fr)); gap: 5px 7px;
+  list-style: none; margin: 0; padding: 0;
+}
+.endless-summary .summary-buff {
+  --summary-rarity: #b09b73;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name count" "kind count"; align-items: center; gap: 1px 6px;
+  min-width: 0; padding: 5px 9px 5px 10px; border: 1px solid #e5d5b6;
+  border-left: 3px solid var(--summary-rarity); border-radius: 9px; background: #fffaf0;
+}
+.endless-summary .summary-buff.q0,
+.endless-summary .summary-buff[data-rarity="0"] { --summary-rarity: #aa9b7c; }
+.endless-summary .summary-buff.q1,
+.endless-summary .summary-buff[data-rarity="1"] { --summary-rarity: #7f9fbd; }
+.endless-summary .summary-buff.q2,
+.endless-summary .summary-buff[data-rarity="2"] { --summary-rarity: #a780bd; }
+.endless-summary .summary-buff.q3,
+.endless-summary .summary-buff[data-rarity="3"] { --summary-rarity: #c49a3c; background: #fff7e2; }
+.endless-summary .summary-buff-name {
+  grid-area: name; min-width: 0; color: #6c5133; font-size: 16px; line-height: 1.25;
+  font-weight: 700; overflow-wrap: anywhere;
+}
+.endless-summary .summary-buff-kind {
+  grid-area: kind; color: #a18a68; font-size: 11px; line-height: 1.3;
+}
+.endless-summary .summary-buff-count {
+  grid-area: count; color: #9a7542; font-size: 15px; font-weight: 700;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.endless-summary .summary-stats {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0;
+  border: 1px solid #e1cfac; border-radius: 12px; overflow: hidden; background: #fbf4e4;
+}
+.endless-summary .summary-stat {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline;
+  gap: 2px 8px; min-width: 0; padding: 8px 12px;
+}
+.endless-summary .summary-stat:nth-child(n + 4) { border-top: 1px solid #e9dabe; }
+.endless-summary .summary-stat:not(:nth-child(3n)) { border-right: 1px solid #e9dabe; }
+.endless-summary .summary-stat > span { color: #8f7551; font-size: 13px; line-height: 1.4; }
+.endless-summary .summary-stat > strong {
+  color: #79542d; font-size: 22px; font-weight: 700; line-height: 1.15;
+  font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+.endless-summary .summary-stat > small {
+  grid-column: 1 / -1; color: #a18b6a; font-size: 11px; line-height: 1.35;
+}
+.endless-summary .summary-achievements {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 18px;
+  list-style: none; margin: 0; padding: 0;
+}
+.endless-summary .summary-achievement {
+  position: relative; min-width: 0; padding: 5px 0 6px 17px;
+  border-bottom: 1px solid #eadbc0; color: #84642e; font-size: 15px; line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.endless-summary .summary-achievement::before {
+  content: ''; position: absolute; top: 12px; left: 2px; width: 6px; height: 6px;
+  border: 1px solid #b78b3b; background: #e9cd89; transform: rotate(45deg);
+}
+.endless-summary .summary-achievement > strong,
+.endless-summary .summary-achievement > b { font-weight: 700; color: #84642e; }
+.endless-summary .summary-achievement > small,
+.endless-summary .summary-achievement > span {
+  display: block; color: #a08a69; font-size: 12px; line-height: 1.4;
+}
+.endless-summary .summary-empty {
+  margin: 0; padding: 9px 12px; border: 1px dashed #ddcbaa; border-radius: 10px;
+  color: #a18b68; font-size: 14px; line-height: 1.5; background: #fcf6e8;
+}
+.endless-summary .summary-actions {
+  position: sticky; bottom: -2px; z-index: 2; display: flex; align-items: center;
+  justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin: 14px -18px 0; padding: 10px 18px 9px;
+  border-top: 1px solid #e1cfac; border-radius: 0 0 21px 21px;
+  background: #faf1dc; box-shadow: 0 -5px 12px #faf1dc;
+}
+.endless-summary .summary-actions .uc-button {
+  min-height: 42px; padding: 4px 21px; font-size: 24px; letter-spacing: 1px;
+  border-width: 2px; -webkit-text-stroke-width: 1px;
+}
+.endless-summary .summary-actions .uc-button:focus-visible {
+  outline: 3px solid #9e783d; outline-offset: 3px;
+}
+@container endless-summary (max-width: 600px) {
+  .endless-summary { padding: 12px 12px 0; border-radius: 17px; }
+  .endless-summary .summary-ending { font-size: 29px; letter-spacing: 2px; }
+  .endless-summary .summary-subtitle { font-size: 14px; }
+  .endless-summary .summary-buffs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .endless-summary .summary-stat { padding: 7px 8px; grid-template-columns: 1fr; gap: 1px; }
+  .endless-summary .summary-stat > strong { font-size: 21px; }
+  .endless-summary .summary-actions { margin-inline: -12px; padding-inline: 12px; border-radius: 0 0 16px 16px; }
+}
+@container endless-summary (max-width: 360px) {
+  .endless-summary .summary-heading { column-gap: 6px; }
+  .endless-summary .summary-ending { font-size: 25px; }
+  .endless-summary .summary-mode { font-size: 11px; padding-inline: 7px; }
+  .endless-summary .summary-score { padding-inline: 10px; gap: 3px 8px; }
+  .endless-summary .summary-score > strong { font-size: 35px; }
+  .endless-summary .summary-buffs { grid-template-columns: minmax(0, 1fr); }
+  .endless-summary .summary-achievements { grid-template-columns: minmax(0, 1fr); }
+  .endless-summary .summary-actions .uc-button { font-size: 20px; padding-inline: 14px; }
+}
+
+/* 无尽塔主界面：货币/分数是固定顶栏，必须压在可滚动的对手预览之上。
+ * 以前对手列在 DOM 后面，滚动时立绘会盖住试炼币 / 铸币 / 分数。 */
+.tower-page .endless-topright {
+  z-index: 40;
+  /* 滚动时对手立绘会从下面经过；给货币/分数一块浅底，避免文字和立绘叠在一起看不清。 */
+  background: rgba(255, 248, 230, .94);
+  border: 1px solid #e2c68f;
+  border-radius: 12px;
+  padding: 2px 8px;
+}
+.tower-page .endless-topright .tower-currency,
+.tower-page .endless-topright .endless-score-box { position: relative; z-index: 1; }
+.tower-page .endless-foes { position: relative; z-index: 1; }
+/* 给第 5 个对手留出滚到底的空间（底部固定按钮会占掉一截）。 */
+.classic-tower .tower-main {
+  min-height: 0;
+  max-height: 100%;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: 118px;
+}
+.classic-tower .endless-run { padding-bottom: 18px; }
+.classic-tower .endless-foes { margin-bottom: 14px; }
+/* 无尽塔底部继续按钮固定在视口上，给滚动内容额外留一段空白，最后一只 boss
+ * 才能被拖到按钮上方看清；顺手把按钮抬到敌人介绍气泡之上。 */
+.tower-page.endless-page .tower-main { padding-bottom: 190px; }
+.endless-page .endless-actions { z-index: 60; }
+
+/* 60/70/80/90 层的最后一战是「四雄」之一，整列有 **5 张**对手卡。
+ * 右下角的「继续战斗 / 放弃本局」是固定定位的，按 4 张卡的尺寸排，第 5 张正好
+ * 落在按钮底下：四雄头像被「继续战斗」盖住，按钮也点不到（用户 2026-10 报的
+ * 「四雄完全没有对齐头像与战斗内ui」）。5 张时才切到这一档：
+ *   · 第一张从右上角货币条下方起排（货币条是绝对定位，卡片不能顶到它里面）；
+ *   · 立绘收一档、名字/类型行距收紧，5 行总高留出右下角按钮的位置；
+ *   · 4 张及以下的层完全不受影响。
+ * `endless-page` 同时把动作条的 z-index 抬到敌人列之上（见上一条），
+ * 窄高窗口里需要滚动时，按钮也不会被最后一张卡挡住。 */
+.endless-page .endless-foes.foes-many { margin-top: 50px; }
+.endless-page .endless-foes.foes-many .tower-plan.vertical { gap: 3px; }
+.endless-page .endless-foes.foes-many .tower-plan.vertical li {
+  padding: 0 8px; gap: 0 8px; row-gap: 2px; border-width: 2px;
+}
+.endless-page .endless-foes.foes-many .tower-plan.vertical li > b { font-size: 19px; }
+.endless-page .endless-foes.foes-many .tower-plan.vertical .tower-plan-type { font-size: 13px; padding: 0 5px; }
+.endless-page .endless-foes.foes-many .tower-plan.vertical .elite-tag { font-size: 13px; }
+.endless-page .endless-foes.foes-many .tower-plan.vertical .foe-portrait { width: 84px; height: 66px; }
+.endless-page .endless-foes.foes-many .tower-plan.vertical .foe-portrait img,
+.endless-page .endless-foes.foes-many .tower-plan.vertical .foe-portrait canvas {
+  height: 62px; max-height: 62px; max-width: 80px;
+}
+.endless-page .endless-foes.foes-many .tower-plan.vertical .foe-portrait svg { width: 100%; height: 100%; }
 

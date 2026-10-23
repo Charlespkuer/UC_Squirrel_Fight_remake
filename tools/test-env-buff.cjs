@@ -256,7 +256,7 @@ test('挑战塔的环境不承诺试炼币：贪婪裂隙在塔里改名「厚�
   assert.ok(!/试炼币/.test(e.text), '塔里的当前环境文案也不提试炼币：' + e.text);
 });
 
-test('100 层循环：层号 → 机制开关的映射每轮严格一致，只有敌人数值续着长', () => {
+test('100 层循环：机制开关每轮一致，敌人完整基础在轮首承接上一轮末尾折扣', () => {
   const c = setup();
   const TD = c.TowerData, T = c.Tower;
   /* 0）用户口径（2026-10）：101-104 层没有环境；随机丢烙印要等到「原来的层数 +100」（132 层）。 */
@@ -305,9 +305,16 @@ test('100 层循环：层号 → 机制开关的映射每轮严格一致，只�
   assert.equal(probeLoss(101), 0, '进第 101 层不该丢');
   assert.equal(probeLoss(131), 0, '进第 131 层不该丢');
   assert.equal(probeLoss(132), 1, '进第 132 层应当丢一条');
-  /* 4）唯一例外：敌人数值继续长（不重置）。 */
-  assert.ok(TD.endlessDepthMul(101) > TD.endlessDepthMul(100), '101 层敌人数值仍高于 100 层');
-  assert.ok(TD.endlessDepthMul(201) > TD.endlessDepthMul(200), '201 层同样');
+  /* 4）完整基础承接上一轮末尾折扣；不能拿已重置的单项 KM 代表敌人面板。 */
+  const close = (actual, wanted, label) => assert.ok(Math.abs(actual / wanted - 1) < 1e-12, label);
+  for (const start of [101, 201]) {
+    const prev = TD.endlessScaleParts(start - 1), next = TD.endlessScaleParts(start);
+    for (const field of ['statCurve', 'hpCurve']) {
+      close(next[field], prev[field] * TD.ENDLESS_CYCLE_DISCOUNT, start + ' 层的 ' + field + ' 应承接折扣');
+    }
+    const bossHp = (n) => TD.endlessScaleParts(n).hpCurve * TD.endlessBossHpRatio(1, n);
+    close(bossHp(start), bossHp(start - 1) * TD.ENDLESS_CYCLE_DISCOUNT, '普通 boss 血量也应准确承接折扣');
+  }
   /* 5）跨轮进层（200 → 201）时清掉残留环境，给新一轮干净起点。 */
   T._debugSetEndlessLayer(200);
   T._debugRun('endless').env = [{ id: 'thorns', left: 5, values: { thornsPct: 0.15 } }];

@@ -90,23 +90,76 @@ test('54位关卡NPC全部匹配所属高手和星级，修正原表4星仙鹤�
   assert.equal(g.c.State.npcOf(4, 1).id, '109'); assert.equal(g.c.State.npcOf(10, 1).id, '127');
 });
 
-test('常驻挑战关卡三种敌人 6 难度血量整体上调 15%~20%', () => {
+test('关卡带徒弟：徒弟先上阵，战败后师父免费接手同一名对手', () => {
+  const g = setup(), State = g.c.State, s = g.s();
+  const row = { name: '小徒', level: 10, power: 18, agility: 16, speed: 15, hp: 220, weapons: ['1:1'], skills: ['1:1'], gears: [] };
+  const added = State.addPrentice(row);
+  assert.equal(added.ok, true, added.msg);
+  const books = s.props[23];
+  const first = State.beginStageBattle(1);
+  assert.equal(first.ok, true, first.msg);
+  assert.equal(first.role, 'prentice', '有徒弟时第一场由徒弟上阵');
+  assert.equal(first.prentice, '小徒');
+  assert.equal(s.props[23], books - 1, '第一场照常消耗挑战书');
+  const fighter = State.stagePrenticeFighter();
+  assert.ok(fighter && fighter.name === '小徒' && fighter.isPrentice === true, '徒弟快照能作为玩家侧战斗面板');
+  assert.equal(fighter.power, 18); assert.equal(fighter.hp, 220);
+  assert.ok(Array.isArray(fighter.wears) && fighter.weapons.length === 1 && fighter.skills.length >= 1);
+  // 徒弟战败：不扣复活、不扣第二本书，只标记师父接手。
+  assert.equal(State.stagePrenticeLost(1, first.token), true);
+  const booksAfterLoss = s.props[23];
+  const second = State.beginStageBattle(1);
+  assert.equal(second.ok, true, second.msg);
+  assert.equal(second.role, 'master', '徒弟败后由师父接手');
+  assert.equal(second.npcIndex, first.npcIndex, '师父仍打同一名对手');
+  assert.equal(s.props[23], booksAfterLoss, '师父接手不消耗挑战书');
+  const rw = State.finishStageBattle(1, second.token, true);
+  assert.equal(rw.ok, true); assert.equal(rw.win, true);
+  assert.equal(s.props[23], booksAfterLoss, '打赢后也不会补扣挑战书');
+});
+test('徒弟赢下第一场后，下一场仍由徒弟先上阵', () => {
+  const g = setup(), State = g.c.State;
+  State.addPrentice({ name: '小徒', level: 10, power: 18, agility: 16, speed: 15, hp: 220, weapons: ['1:1'], skills: ['1:1'], gears: [] });
+  const first = State.beginStageBattle(1);
+  assert.equal(first.role, 'prentice');
+  const win = State.finishStageBattle(1, first.token, true);
+  assert.equal(win.ok, true); assert.equal(win.complete, false);
+  const next = State.beginStageBattle(1);
+  assert.equal(next.role, 'prentice', '徒弟赢了就继续由徒弟打下一名对手');
+  assert.equal(next.npcIndex, 2);
+});
+test('没有徒弟时关卡仍由师父上阵', () => {
+  const g = setup(), State = g.c.State;
+  const first = State.beginStageBattle(1);
+  assert.equal(first.role, 'master');
+  assert.equal(State.stagePrenticeFighter(), null);
+});
+
+test('常驻三侠在徒弟先上阵机制后再增强 6%', () => {
   const { c } = setup();
   const { GData } = c;
   assert.ok(GData.STAGE_HP_MUL >= 1.15 && GData.STAGE_HP_MUL <= 1.20,
-    '血量系数应落在 +15%~+20%：' + GData.STAGE_HP_MUL);
+    '基础血量系数应落在 +15%~+20%：' + GData.STAGE_HP_MUL);
+  assert.equal(GData.STAGE_REGULAR_MUL, 1.06, '常驻三侠额外增强 6%');
+  const expect = GData.STAGE_HP_MUL * GData.STAGE_REGULAR_MUL;
   const seen = [];
   for (let id = 1; id <= 18; id++) {
     const base = GData.stagePlayerHp(GData.stageTargetLevel(id));
     for (let role = 0; role < 3; role++) {
       const raw = base * GData.STAGE_ROLE_HP[role];
       const lift = GData.stageNpcHp(id, role + 1) / raw;
-      assert.ok(lift >= 1.15 && lift <= 1.21,
-        id + ' 关第 ' + (role + 1) + ' 个敌人只上调了 ' + ((lift - 1) * 100).toFixed(1) + '%');
+      assert.ok(lift >= expect - 0.01 && lift <= expect + 0.01,
+        id + ' 关第 ' + (role + 1) + ' 个敌人倍率 ' + lift.toFixed(3) + '，应为 ' + expect.toFixed(3));
       seen.push(lift);
     }
   }
   assert.equal(seen.length, 54, '18 关 × 3 个敌人 = 54 个 NPC 全部覆盖');
+  // 超级大关不吃这条 12%：19 关仍是原来的 SUPER_HP_MUL 口径（单 Boss 用第 3 个血量档）。
+  const bossRole = GData.stageEnemyCount(19) === 1 ? 2 : 0;
+  const bossBase = GData.stagePlayerHp(GData.stageTargetLevel(19)) * GData.STAGE_ROLE_HP[bossRole];
+  const boss = GData.stageNpcHp(19, 1) / bossBase;
+  assert.ok(Math.abs(boss - GData.STAGE_HP_MUL * (GData.SUPER_HP_MUL[GData.stageTypeOf(19).anim] || 1.6)) < 0.01,
+    '超级大关不应叠加常驻三侠的 12%：' + boss.toFixed(3));
 });
 
 test('常驻挑战关卡的碎片期望比基准略低，挑战塔仍按基准', () => {
@@ -268,11 +321,34 @@ test('UI三战与稍后继续完整连通，只付1书且重复战后回调被�
   g.click('star1'); assert.match(g.modals.at(-1).html, /（1\/3）/); assert.doesNotMatch(g.modals.at(-1).html, /data-action="npc/);
 });
 
+test('UI徒弟先上阵：战败弹窗「师父上阵」免费接手同一名对手', () => {
+  const g = setup(), State = g.c.State, s = g.s();
+  s.level = 10; s.props[23] = 2;
+  State.addPrentice({ name: '小徒', level: 10, power: 18, agility: 16, speed: 15, hp: 220, weapons: ['1:1'], skills: ['1:1'], gears: [] });
+  g.c.stageConfirm(1);
+  g.modalClick('开始战斗');
+  const first = g.battles[0];
+  assert.ok(first.opts.fighter && first.opts.fighter.name === '小徒', '第一场把徒弟面板交给 Main.startBattle');
+  assert.equal(first.opts.fighter.isPrentice, true);
+  const books = s.props[23];
+  first.opts.onEnd(1);
+  const popup = g.modals.at(-1);
+  assert.equal(popup.title, '徒弟战败');
+  assert.match(popup.html, /徒弟无能，打不过它！该师父您亲自上阵了！/);
+  assert.equal(State.stageRun(1).masterOnly, true, '徒弟败后标记师父接手');
+  g.modalClick('师父上阵');
+  assert.equal(g.battles.length, 2);
+  assert.equal(g.battles[1].opts.fighter, undefined, '师父上阵走玩家自己的面板');
+  assert.equal(s.props[23], books, '师父接手不扣挑战书');
+  g.settle(1, true);
+  assert.ok(State.stageProgress(1).npcIndex >= 2, '师父打赢后正常推进');
+});
+
 test('UI失败复活、结束确认、购买挑战书与错误重试都有出口', () => {
   const g = setup(); g.s().props[23] = 1;
   g.c.stageConfirm(1); g.modalClick('开始战斗'); g.settle(0, false);
   g.modalClick('复活再战'); assert.match(g.modals.at(-1).html, /复活需1个挑战书/);
-  g.modalClick('复活再战'); g.modalClick('购买挑战书'); assert.equal(g.c.openedProp, 23);
+  g.modalClick('复活再战'); g.modalClick('购买'); assert.equal(g.c.openedProp, 23);
   g.s().props[23] = 2;
   for (let i = 1; i <= 2; i++) { g.c.stageConfirm(1); g.modalClick('复活再战'); g.settle(i, false); }
   assert.equal(g.modals.at(-1).buttons.some(button => button.label === '复活再战'), false);

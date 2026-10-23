@@ -2,8 +2,8 @@
    标题字体曾用本地下载的站酷快乐体（@font-face UCClassic），小字号下发虚，已弃用；
    现在统一回落到系统字体。 */
 :root{--ink:#674624;--cream:#fff8de;--sand:#e9c38f;--edge:#926635;--green:#64b927}
-html,body{background:#203a27;font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB","SimHei",sans-serif}
-#app{overflow:hidden;background:radial-gradient(ellipse at center,#456c39,#13251c)}
+html,body{background:#000;font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB","SimHei",sans-serif}
+#app{overflow:hidden;background:#000}
 #ui{width:1170px;height:690px;flex-shrink:0;transform-origin:center center;font-size:26px!important}
 #boot-note{display:none}
 button,input,select{font:inherit}button{touch-action:manipulation}button:focus-visible{outline:4px solid #2d96e4;outline-offset:3px}

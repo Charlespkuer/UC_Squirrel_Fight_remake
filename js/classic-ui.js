@@ -351,7 +351,11 @@
       ...((reward && Array.isArray(reward.ups)) ? reward.ups : [])];
     const exp = Math.max(0, Math.round(Number(reward && reward.exp) || 0));
     const gold = Math.max(0, Math.round(Number(reward && reward.gold) || 0));
-    if (!items.length && !ups.length && !reward && winner !== 0 && winner !== 1) return;
+    /* 没有任何收益时**不弹空窗**：以前这里只挡了「无收益且没有胜负」，
+     * 于是塔战这种 `collectDrops:false`、又没有 `rewardFor` 的战斗会留下一个只有
+     * 「胜 利！」和「确定」的「战斗拾取」（用户 2026-10 截图）。胜负大字是收益弹窗的
+     * 抬头，不是弹窗存在的理由；真正需要单独报胜负的地方各自有专门的弹窗。 */
+    if (!items.length && !ups.length && !reward) return;
     const grouped = Object.create(null);
     items.forEach(item => { if(grouped[item.id])grouped[item.id].count+=item.count;else grouped[item.id]={...item}; });
     /* 「跳过键」的代价（2026-10 用户口径）：这一场只收 2/3 —— 随机抹掉的那一项在这里说清楚，
@@ -577,23 +581,24 @@
   /** 一行：等级徽章、名字、时间、大小、载入按钮 */
   function saveListRow(it, index) {
     const kind = it.kind || (String(it.rel).indexOf('backup') >= 0 ? 'backup' : 'backup');
-    const sub = ssdzWhenText(it.at, Date.now()) + ' · ' + ssdzSizeText(it.size);
+    const sub = ssdzWhenText(it.at, Date.now()) + ' · ' + ssdzSizeText(it.size) +
+      (it.file ? ' · ' + it.file : '');
     return '<div class="save-row' + (kind === 'current' ? ' current' : '') + '">' +
       '<span class="save-level">' + Math.max(0, Number(it.level) || 0) + '<i>级</i></span>' +
       '<span class="save-name">' + esc(String(it.name || '（无名）')) +
       (kind === 'current' ? '<em>当前</em>' : '') + '</span>' +
-      '<span class="save-sub">' + esc(sub) + '</span>' +
+      '<span class="save-sub" title="' + esc(sub) + '">' + esc(sub) + '</span>' +
       '<button type="button" class="uc-button small" data-save-row="' + index + '">载入</button>' +
       '</div>';
   }
   /** 存档列表弹窗：返回 { close, element }，data-save-row 用 saveRowIndex 里的下标取回对应存档。 */
-  function saveListDialog(list, onPick) {
+  function saveListDialog(list, onPick, tip) {
     const rows = list.map((it, i) => saveListRow(it, i)).join('');
     const total = list.length;
     const body = '<div class="save-list" role="list">' + rows + '</div>' +
-      '<p class="save-list-tip">共 ' + total + ' 份（含 save/backup/ 快照）。' +
-      '载入会先把当前进度备份到 save/backup/，再整档换过去。</p>';
-    const m = modal('从存档列表导入', body, [{ label: '返回', cls: 'muted' }]);   // 大弹窗：列表要占满高度
+      '<p class="save-list-tip">' + esc(tip || ('共 ' + total + ' 份（含 save/backup/ 快照）。' +
+        '载入会先把当前进度备份到 save/backup/，再整档换过去。')) + '</p>';
+    const m = modal('存档列表', body, [{ label: '返回', cls: 'muted' }]);   // 大弹窗：列表要占满高度
     m.element.classList.add('save-list-dialog');
     const buttons = m.element.querySelectorAll('[data-save-row]');
     for (const btn of buttons) {
@@ -808,7 +813,7 @@
     portrait($('.status-character',p));
     $('.page-footer',p).insertAdjacentHTML('beforeend',
       '<button class="status-sell-link" data-action="gear-sell" aria-label="装备出售：按品质回收背包里的装备"><span class="status-sell-icon" aria-hidden="true"><i class="status-sell-glyph">$</i></span><span class="status-sell-text">装备出售</span></button>' +
-      '<button class="status-fusion-link" data-action="merge" aria-label="装备融合：三件相同装备合成更高品质"><span class="status-fusion-icon" aria-hidden="true"><i class="status-fusion-glyph">⚒</i></span><span class="status-fusion-text">装备融合</span></button>');
+      '<button class="status-fusion-link" data-action="merge" aria-label="装备融合：三件同品质装备合成更高品质"><span class="status-fusion-icon" aria-hidden="true"><i class="status-fusion-glyph">⚒</i></span><span class="status-fusion-text">装备融合</span></button>');
     bind(p,{...actions,merge:openMerge,home});
   }
   function allItems(kind) {
@@ -961,7 +966,7 @@
     const lv = (n) => '<span class="fd-lv">Lv.' + (Number(n) || 1) + '</span>';
     const empty = (text) => '<div class="fd-empty">' + esc(text) + '</div>';
     const qualityName = (g) => {
-      if (g.orange) return '橙';
+      if (g.orange || Number(g.quality) === 4) return '橙';
       return ['白', '绿', '蓝', '紫', '黑'][Number(g.quality) || 0] || '装';
     };
     const weapons = d.weapons.length
@@ -1100,7 +1105,7 @@
         }
         const potionName = (propMap.getValue(useId) || {}).name || '体力药剂';
         notice('体力不足（当前 ' + S.energy + '/' + S.maxEnergy + '）：自动使用「' + potionName + '」补足体力并挑战？',
-          [{label:'使用并挑战',cls:'gold',run:()=>{
+          [{label:'使用挑战',cls:'gold',run:()=>{
             const potion = State.autoEnergyPotion ? State.autoEnergyPotion(10) : { ok:false };
             if(!(potion.ok && S.energy>=10)){
               notice('药剂没能补足体力，请稍后再试。',[{label:'返回',cls:'gold'}]);return;
@@ -1254,7 +1259,11 @@
     const dailyPct=Math.round((GData.challengeDailyMul(dailyCount)-1)*100);
     const dailyHint='<br><span class="small-label">今日已通关 '+dailyCount+' 次常驻挑战：敌人全属性（力/敏/速/血）+'+
       (dailyPct>0?('+'+dailyPct+'%'):'+0%')+'（每通关一整次再 +5%，每日 0/12 点重置）</span>';
-    const text='<div class="mission-guide"><img alt="向导" src="images/ui/characters/master-classic.png"><div>【消耗】：'+cost+'<br>【奖励】：每场经验 '+Array.from({length:GData.stageEnemyCount(stageId)},(_,k)=>GData.stageNpcExp(stageId,k+1)).join('/')+'<br>通关得金松果'+reward.gold+'，每场胜利有几率得碎片<br><span class="small-label">现有挑战书 '+(S.props[23]||0)+' 个</span></div></div><p class="mission-description">'+(GData.isSuperStage(stageId)?'超级大关：本关只有 1 个敌人。':'连续击败3名敌人，后两场战斗不回满血（继承剩余血量并回复25%）。')+'<br>当前对手：'+esc(npc.name)+'（'+idx+'/'+GData.stageEnemyCount(stageId)+'）<br>'+(run?'本轮已复活 '+run.revives+'/2 次。':type.recommend+'。')+dailyHint+'</p>';
+    const stagePrentice = !(run && (run.masterOnly || run.needsRevive)) ? State.stagePrentice() : null;
+    const prenticeHint = stagePrentice
+      ? '<br><span class="small-label">出战：徒弟「' + esc(stagePrentice.name) + '」先上阵；徒弟失败后师父再上阵（不消耗挑战书，也不占用复活次数）。</span>'
+      : (run && run.masterOnly ? '<br><span class="small-label">本轮由师父上阵（徒弟已败下阵）。</span>' : '');
+    const text='<div class="mission-guide"><img alt="向导" src="images/ui/characters/master-classic.png"><div>【消耗】：'+cost+'<br>【奖励】：每场经验 '+Array.from({length:GData.stageEnemyCount(stageId)},(_,k)=>GData.stageNpcExp(stageId,k+1)).join('/')+'<br>通关得金松果'+reward.gold+'，每场胜利有几率得碎片<br><span class="small-label">现有挑战书 '+(S.props[23]||0)+' 个</span></div></div><p class="mission-description">'+(GData.isSuperStage(stageId)?'超级大关：本关只有 1 个敌人。':'连续击败3名敌人，后两场战斗不回满血（继承剩余血量并回复25%）。')+'<br>当前对手：'+esc(npc.name)+'（'+idx+'/'+GData.stageEnemyCount(stageId)+'）<br>'+(run?'本轮已复活 '+run.revives+'/2 次。':type.recommend+'。')+prenticeHint+dailyHint+'</p>';
     const buttons=exhausted?[{label:'结束本轮',run:()=>stageAbandon(stageId)}]:[{label:run?(run.needsRevive?'复活再战':'继续战斗'):'开始战斗',run:()=>stageFight(stageId)}];
     buttons.push({label:run?'稍后继续':'返回',cls:'muted'});
     if (typeof originalFightResult === 'function' && originalFightResult({ kind: 'stage', title: '关卡挑战', win: true, text, actions: buttons })) return;
@@ -1276,8 +1285,12 @@
     return !!(currentUiMode() === 'classic' && window.SfChallenge);
   }
   function stageFight(stageId) {
-    const started=State.beginStageBattle(stageId);    if(!started.ok){notice(started.msg,started.needsBook?[{label:'购买挑战书',run:()=>openProp(23,true)},{label:'返回',cls:'gold',run:()=>stageConfirm(stageId)}]:undefined);return;}
+    const started=State.beginStageBattle(stageId);    if(!started.ok){notice(started.msg,started.needsBook?[{label:'购买',run:()=>openProp(23,true)},{label:'返回',cls:'gold',run:()=>stageConfirm(stageId)}]:undefined);return;}
     const npc=State.npcOf(stageId,started.npcIndex),type=GData.stageTypeOf(stageId);
+    /* 原版 `fightType == 6` 的关卡战斗：徒弟先上阵；徒弟失败后 state 7 再让师父接手。
+     * 这里把徒弟快照作为 `fighter` 交给 Main.startBattle，战败时不结算、不扣复活。 */
+    const prenticeFighter = started.role === 'prentice' ? State.stagePrenticeFighter() : null;
+    const prenticeRole = !!(started.role === 'prentice' && prenticeFighter);
     // 连续挑战不回满血：后两场继承上一场剩余血量，并回复25%
     const prevRun=State.stageRun(stageId),carryHp=prevRun&&Number.isFinite(prevRun.carryHp)?Math.min(1,prevRun.carryHp+0.25):undefined;
     /* 对手：三维走关卡难度系数（GData.stageNpcStats），血量已在 npcOf 里按攻略表算好；
@@ -1311,7 +1324,7 @@
       return false;
     };
     const interrupted=()=>{State.interruptStageBattle(stageId,started.token);restoreStage();notice('战斗播放中断，本轮进度已保留。重新进入关卡即可继续。');};
-    try { Promise.resolve(Main.startBattle(foe,{region:type.anim==='tl'?3:type.anim==='xh'?4:1,kind:'stage',useProps:false,hpRatio:carryHp,skipChest:true,
+    try { Promise.resolve(Main.startBattle(foe,{region:type.anim==='tl'?3:type.anim==='xh'?4:1,kind:'stage',useProps:false,hpRatio:carryHp,skipChest:true,fighter:prenticeFighter||undefined,
       /* 经典模式下**连战间隙不许回首页**（用户 2026-10 口径："经典模式下完全是经典模式"）：
        * 打完先回原版关卡页，再弹战果。所以这里让 `startBattle` 跳过它默认那次
        * `showHome()`，由 `onEnd` 自己把背景恢复成原版关卡页。 */
@@ -1320,6 +1333,13 @@
       onEnd:(w,r)=>{
         // 战斗结束后把关卡页放回背景（同一棵 SVG），别让战果弹窗飘在主界面上
         restoreStage();
+        /* 徒弟战败：原版 showFightStatus → state 7 → doFight，师父免费接手同一名对手。
+         * 不调用 finishStageBattle（那会给本轮记一次复活），只清 attempt + masterOnly。 */
+        if (prenticeRole && w !== 0) {
+          const ok = State.stagePrenticeLost(stageId, started.token);
+          if (ok) stagePrenticeDefeat(stageId, npc, started.npcIndex, started.prentice);
+          return;
+        }
         // 连战按剩余血量比例继承；缺字段时退化为 0，绝不能在这里抛错，
         // 否则异常会冒到 Battle 的 onError，把玩家直接丢回主界面且丢掉战果。
         const hp=r&&Array.isArray(r.hpAfter)?r.hpAfter[0]:null,cap=r&&Array.isArray(r.maxHp)?r.maxHp[0]:0;
@@ -1330,6 +1350,22 @@
         stageResult(stageId,npc,started.npcIndex,rw);
       }
     })).catch(interrupted); } catch(error) { interrupted(); }
+  }
+  /** 徒弟战败弹窗：台词照原版 `showFightStatus`（MainMovie.as:15688），
+   *  「师父上阵」走原版 state 7 → doFight：同一名对手、免费、不占复活次数。 */
+  function stagePrenticeDefeat(stageId, npc, idx, prenticeName) {
+    const back = () => backToStages(Math.floor((stageId - 1) / 6));
+    const buttons = [
+      { label: '师父上阵', cls: 'gold', run: () => stageFight(stageId) },
+      { label: '稍后继续', run: back },
+    ];
+    const text = '<b>徒弟无能，打不过它！该师父您亲自上阵了！</b>' +
+      '<br><span class="small-label">徒弟「' + esc(prenticeName || (State.stagePrentice() || {}).name || '徒弟') +
+      '」已败下阵；师父接手同一名对手，不消耗挑战书，也不占用本轮复活次数。</span>';
+    if (typeof originalFightResult === 'function' && originalFightResult({
+      kind: 'stage', title: '徒弟战败', win: false, text, actions: buttons,
+    })) return;
+    modal('徒弟战败', '<div class="result-box"><div class="result-title battle-outcome lose">徒弟战败</div><p>' + text + '</p></div>', buttons);
   }
   function stageResult(stageId,npc,idx,rw) {
     const back=()=>backToStages(Math.floor((stageId-1)/6));
@@ -1807,7 +1843,7 @@
             if (!r.ok) { toast(r.msg); return; }
             show();
           } }, { label: '取消', cls: 'muted' }]
-          : [{ label: '知道了', cls: 'gold' }];
+          : [{ label: '确定', cls: 'gold' }];
         modal(name, '<div class="detail-summary"><span class="item-icon">' + icon('prop', 90) + '</span><div><h3 class="detail-name">' + name + '</h3>' +
           '<div class="detail-description">' + (State.blackGearEnabled()
             ? '内含基础属性点与高级宝石；原版的黑凤凰/黑圣熊装备在本版未开放，用金松果替代。'
@@ -1825,7 +1861,7 @@
         notice(r.msg, [{ label: '确定', run: () => { openBag(!!shop, bagPage); } }]);
         refreshHeader();
       } }];
-      if (!reopened) actions.push({ label: '重开（' + cost + ' 金松果）', run: () => {
+      if (!reopened) actions.push({ label: '重开', run: () => {
         const r = State.reopenChest();
         if (!r.ok) { toast(r.msg); return; }
         show();
@@ -2001,8 +2037,8 @@
     // 不占武器/技能上限位；旧写法直接加 S.skills.length 会在学了师父驾到后提前显示「已满」。
     const wsNow=State.ownedWSCount?State.ownedWSCount():S.weapons.length+S.skills.length,wsMax=State.wsLimit(),wsFull=wsNow>=wsMax;
     const seedNote=isSeed?('<p class="small-label">武器/技能：<b class="'+(wsFull?'ws-full':'ws-ok')+'">'+wsNow+'/'+wsMax+(wsFull?'（已满，果实仍可合成，等有空位时再使用）':'（未满，可继续获得）')+'</b></p>'):'';
-    const shardNote=isConvertShard?('<p class="small-label">当前 <b>'+(S.props[id]||0)+'</b>/'+GData.CONVERT_SHARD_COST+' 个　天梯赛里点飘出来的碎片获得</p>'):'';
-    // 碎片、果实种子、天梯碎片与宝石：每次合成消耗固定材料与金松果。
+    const shardNote=isConvertShard?('<p class="small-label">当前 <b>'+(S.props[id]||0)+'</b>/'+GData.CONVERT_SHARD_COST+' 个　天梯赛战斗里点飘出来的三角碎片获得</p>'):'';
+    // 碎片、果实种子、属性碎片与宝石：每次合成消耗固定材料与金松果。
     // 所有道具都只有「使用/合成」一次一个动作：点完不关弹窗、不换界面，可以继续点。
     const isPotion=!shop&&(id===1||id===2);
     const held=S.props[id]||0,cap=State.energyHardCap();
@@ -2145,7 +2181,7 @@
   /** 黑色卡片：选凤凰/圣熊，选完才消耗卡片。 */
   function blackCardDialog(r) {
     const opts = (r && r.options) || [];
-    const body = '<div class="ws-choice-box"><p class="free-point-tip">打开黑色卡片：选择凤凰或圣熊，获得对应碎片 1~2 个，并额外获得 50/100/200 金松果。</p>' +
+    const body = '<div class="ws-choice-box"><p class="free-point-tip">打开黑色卡片：选择凤凰或圣熊，获得对应碎片 1~2 个，并额外获得 100/200/400 金松果。</p>' +
       '<div class="ws-choice-row' + (opts.length < 3 ? ' few' : '') + '">' +
       opts.map((o) => '<button type="button" class="ws-choice" data-black-set="' + o.setId + '">' +
         '<span class="item-icon">' + icon('prop', o.shardId) + '</span>' +
@@ -2206,7 +2242,7 @@
       (State.pendingWS() > 1 ? '还有 ' + (State.pendingWS() - 1) + ' 组在后面等着' : '只有这一组') + '）。</p>' +
       '<div class="ws-choice-row' + (list.length < 3 ? ' few' : '') + '">' + list.map(card).join('') + '</div></div>';
     const m = modal('选择武器或技能', body, [
-      { label: State.pendingWS() > 1 ? '手气不错（全部随机）' : '随便来一个', cls: 'muted', close: false, run: () => { State.chooseWSRandom(); refresh(); } },
+      { label: State.pendingWS() > 1 ? '全部随机' : '随便来一个', cls: 'muted', close: false, run: () => { State.chooseWSRandom(); refresh(); } },
     ], { small: true, locked: true });
     m.element.classList.add('ws-choice-dialog');
     const refresh = () => {
@@ -2253,7 +2289,7 @@
       '<p class="allocation-remaining" data-live="point-left" role="status">剩余 0 点</p></div>';
     const m=modal('分配自由属性点',body,[
       {label:'平均分配',cls:'muted',close:false,run:()=>{State.allocateEvenly();refresh();}},
-      {label:'撤回上一次',cls:'muted',close:false,run:()=>{const r=State.undoPoint();if(r.ok)toast(r.msg);refresh();}},
+      {label:'撤回',cls:'muted',close:false,run:()=>{const r=State.undoPoint();if(r.ok)toast(r.msg);refresh();}},
       {label:'确定',cls:'gold',close:false,run:()=>{if(State.pendingPoints()<=0)m.close();}},
     ],{small:true,locked:true});
     m.element.classList.add('point-dialog');
@@ -2434,10 +2470,11 @@
   }
   function openGear(key) {
     const g=State.myGears().find(x=>x.key===key);if(!g)return;
+    const socketable=State.canSocketGem(g);
     const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+State.gemPercent(g.gem.id-100)+'%，附加 +'+(g.gem.ext)+'%）':'';
     /* 宝石键的文案不带「（5金）」了（用户口径 2026-10：四个键要排在一行，标签越短越好排），
      * 费用改在这行小字里说明，免得玩家不知道要花金松果。 */
-    const gemCost=g.orange?'<br><span class="small-label">宝石：镶嵌 / 卸下各 5 金松果</span>':'';
+    const gemCost=socketable?'<br><span class="small-label">宝石：镶嵌 / 卸下各 5 金松果</span>':'';
     const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说','黑色'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+(g.attrBase&&g.attrBase!==g.abilityVal?'（基准 '+g.attrBase+'，本件有浮动）':'')+'<br>附加属性：<br>'+State.extText(g.ext).map(esc).join('<br>')+gemInfo+gemCost+setBonusBlock(g)+'</div></div>';
     /* 装 / 卸之后列表会重排（穿着 > 获得顺序），所以**跟着这一件翻到它新位置所在的那一页**，
      * 否则在后面的页上点「装备」，东西会当场跳到第一页、看不见了。 */
@@ -2445,11 +2482,11 @@
       const idx=State.gearsInDisplayOrder().findIndex(x=>x.key===key);
       openGears(idx<0?gearPage:Math.floor(idx/6));}}];
     /* 宝石：装上 / 卸下都要 5 金松果（2026-10 用户口径）。只要身上有宝石就一定给「卸下」，
-     * 不再依赖 orange 标记（宝石本来就只可能镶在橙装上，这里只是把它做得更稳、更好找）。
+     * 不再依赖 orange 标记（橙色与黑色装备都可镶嵌，这里只是把它做得更稳、更好找）。
      * 按钮文案**不带「（5金）」**（用户口径 2026-10：四个键要排在一行里，标签越短越好排）；
      * 费用写在详情正文的那行小字与镶嵌弹窗里，花多少钱照样一眼能看到。 */
     if(g.gem)buttons.push({label:'卸下宝石',run:()=>{const r=State.unsocketGem(key);toast(r.msg);openGear(key);}});
-    else if(g.orange)buttons.push({label:'镶嵌宝石',cls:'gold',run:()=>socketGemDialog(key)});
+    else if(socketable)buttons.push({label:'镶嵌宝石',cls:'gold',run:()=>socketGemDialog(key)});
     buttons.push({label:'出售',cls:'muted',run:()=>notice('确定以 '+(State.gearSellRange(State.gearQuality(g))[0])+'~'+(State.gearSellRange(State.gearQuality(g))[1])+' 金松果出售【'+g.name+'】吗？',[{label:'出售',run:()=>{const got=State.sellGear(key);toast('卖出【'+g.name+'】，获得 '+got+' 金松果');openGears(gearPage);}},{label:'返回',cls:'muted'}])});
     buttons.push({label:'返回',cls:'muted'});
     const md=modal('我的装备', content, buttons);
@@ -2461,7 +2498,7 @@
   function socketGemDialog(key) {
     const S=State.state();
     const gems=[101,102,103,104,105,106,107].filter(id=>(S.props[id]||0)>0);
-    if(!gems.length){notice('背包里没有宝石。45级后通关关卡或在竞技场获胜有几率获得。',[{label:'知道了'}]);return;}
+    if(!gems.length){notice('背包里没有宝石。45级后通关关卡或在竞技场获胜有几率获得。',[{label:'返回'}]);return;}
     modal('选择宝石','<div class="gem-pick">'+gems.map(id=>'<button type="button" class="help-item" data-gem="'+id+'"><span class="item-icon">'+icon('prop',id)+'</span><span>'+esc(propMap.getValue(id).name)+' ×'+S.props[id]+'</span></button>').join('')+'</div><p class="small-label">镶嵌 5 金松果（卸下同样 5 金）；附加属性提升幅度随机，可先卸下再镶嵌来重随。</p>',[{label:'返回',cls:'muted'}],{small:true});
     const overlays=$$('.classic-modal-overlay'),m=overlays[overlays.length-1];
     $$('[data-gem]',m).forEach(b=>b.onclick=()=>{const r=State.socketGem(key,+b.dataset.gem);toast(r.msg);if(r.ok){m.remove();openGear(key);}});
@@ -2677,16 +2714,19 @@
         esc(info.reason || '没有本地服务器，进度暂存在这个浏览器的 localStorage。') +
         '<br>用启动器或 <code>node serve.js</code> 打开游戏，进度就会写进 <code>save/progress.json</code>。</span>';
     } else if (info.conflict) {
-      state = '<b class="sync-warn">文件里的进度更新（' + State.syncFormatTime(info.fileAt) + '）</b><span class="small-label">点「载入存档文件」把它取过来（不会静默覆盖）</span>';
+      state = '<b class="sync-warn">文件里的进度更新（' + State.syncFormatTime(info.fileAt) + '）</b><span class="small-label">点「载入存档」把它取过来（不会静默覆盖）</span>';
     } else {
       state = '<b class="sync-on">' + esc(info.path || 'save/progress.json') + '</b><span class="small-label">最后写入 ' + State.syncFormatTime(info.lastWrite) +
         '　最后载入 ' + State.syncFormatTime(info.lastLoad) + (info.dirty ? '　（有改动正在写入…）' : '') + '</span>';
     }
     const useFile = info.mode === 'file';
+    /* 用户 2026-10 口径：这一栏不要缩写成「写入 / 载入 / 列表」，
+     * 固定用完整标签「写入存档 / 载入存档 / 存档列表」。`.sync-actions` 是 flex-wrap，
+     * 窄屏会自然换行。 */
     return '<div class="sync-panel"><h3 class="classic-section-title">存档位置</h3><div class="sync-head">' + state + '</div>' +
-      '<div class="sync-actions">' + btn('立即写入存档文件', 'save-write', 'small' + (useFile ? '' : ' muted')) +
-      btn('载入存档文件', 'save-load', 'small' + (useFile ? '' : ' muted')) +
-      btn('从存档列表导入', 'save-import-list', 'small') + '</div></div>';
+      '<div class="sync-actions">' + btn('写入存档', 'save-write', 'small' + (useFile ? '' : ' muted')) +
+      btn('载入存档', 'save-load', 'small' + (useFile ? '' : ' muted')) +
+      btn('存档列表', 'save-import-list', 'small') + '</div></div>';
   }
   /** 选一个本地 .json 文件；返回 Promise<File|null>（null = 用户取消）。
    *  macOS 的 WKWebView / Safari（原生轻壳、安装包模式）只认**已经挂在文档里**的
@@ -2746,13 +2786,13 @@
     const useFile = info.mode === 'file';
     const buttons = [];
     if (useFile) {
-      buttons.push({ label: '用存档文件覆盖', run: async () => {
+      buttons.push({ label: '覆盖', run: async () => {
         const r = await State.fileLoad();
         toast(r ? '已载入存档文件' : '载入失败');
         if (r) { refreshHome(); openSystem(); }
       } });
     }
-    buttons.push({ label: '选择本地文件…', cls: useFile ? 'muted' : '', run: () => importSave() });
+    buttons.push({ label: '选文件', cls: useFile ? 'muted' : '', run: () => importSave() });
     buttons.push({ label: '取消', cls: 'muted' });
     const msg = useFile
       ? '用文件里的存档覆盖本机进度？本机当前等级 ' + State.state().level + ' 级，文件里的存档时间 ' +
@@ -2789,63 +2829,137 @@
     if (wasSystem) openSystem();
     toast('已导入【' + name + '】' + level + ' 级' + (backup ? '，旧档备份在 ' + backup : ''));
   }
-  /** 把一份存档 JSON 写进正式存档：文件模式先备份再强制写回，兜底模式写 localStorage。 */
+  /** 当前页面是不是跑在 Tauri 安装壳里（桌面安装版 / 安卓 / iOS）。
+   *  这些环境没有 `/__save` HTTP 接口，存档只能走原生命令；页面若因为桥接晚到
+   *  退回了 localStorage，导入绝不能跟着写 localStorage —— 那会「提示成功」，
+   *  下次启动却仍读磁盘上的旧档。 */
+  function inTauriShell() {
+    try {
+      const host = String((location && location.hostname) || '').toLowerCase();
+      const proto = String((location && location.protocol) || '');
+      return host === 'tauri.localhost' || proto === 'tauri:' || !!window.__SSDZ_TAURI_APP__;
+    } catch (e) { return false; }
+  }
+  /** 导入失败时把内存与落盘都恢复成导入前的样子。返回是否恢复成功。 */
+  async function restoreImportedSave(raw, info) {
+    if (!raw) return false;
+    /* 先把内存恢复掉：即使后面的落盘回滚失败，界面也不会停在「导入了半份」的新档上。 */
+    try { if (State.restorePayload) State.restorePayload(raw); } catch (e) {}
+    try {
+      if (State.hasFileTransport && State.hasFileTransport()) {
+        const w = await State.importFileRaw(raw);
+        if (!w.ok) return false;
+        return await State.fileLoad();
+      }
+      if (info && info.mode === 'file') {
+        const w = await fetch('/__save?force=1', { method: 'POST', headers: { 'content-type': 'application/json' }, body: raw });
+        const wj = await w.json().catch(() => ({}));
+        if (!w.ok || wj.ok === false) return false;
+        return await State.fileLoad();
+      }
+      localStorage.setItem(State.saveKey, raw);
+      return State.load();
+    } catch (e) {
+      try { State.restorePayload && State.restorePayload(raw); } catch (e2) {}
+      return false;
+    }
+  }
+  /** 把一份存档 JSON 写进正式存档：文件模式先备份再强制写回，兜底模式写 localStorage。
+   *
+   *  ⚠ 成功提示必须建立在「写进去 → 重新读回来 → 当前槽位确实换了」三步都成功之上。
+   *  旧实现先 `fetch('/__save?force=1')`：iOS/安卓安装包里页面在 `tauri.localhost`，
+   *  这个地址没有 `/__save` 接口，fetch 往往拿回 `index.html`（HTTP 200），`w.json()` 失败后
+   *  `wj` 变成空对象，`w.ok` 仍是 true —— 于是提示「已导入」，实际文件一点没动。
+   *  现在：原生存档通道优先；写后必须用 `State.verifyImport` 核对真正载入的槽位；
+   *  任何一步失败都回滚旧档并抛错，绝不显示成功。 */
   async function applyImportedSave(raw, data) {
+    const beforeRaw = State.exportPayload ? State.exportPayload() : '';
+    const prepared = State.prepareImport ? State.prepareImport(raw) : null;
+    if (!prepared || !prepared.ok) throw new Error((prepared && prepared.msg) || '存档格式不对');
     let info = State.fileInfo ? State.fileInfo() : {};
+    const fail = async (message) => {
+      await restoreImportedSave(beforeRaw, info);
+      throw new Error(message);
+    };
     if (info.mode !== 'file' && State.fileProbe) {
       try {
         if (await State.fileProbe()) info = State.fileInfo ? State.fileInfo() : info;
       } catch (e) { /* 探针失败就照旧走兜底模式 */ }
     }
+    /* 原生壳里桥接可能晚一拍才装好：再等最多 1 秒，避免把导入写进浏览器兜底档。 */
+    if (inTauriShell() && !(State.hasFileTransport && State.hasFileTransport())) {
+      for (let i = 0; i < 4; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        try { await State.fileProbe(); } catch (e) {}
+        if (State.hasFileTransport && State.hasFileTransport()) break;
+      }
+      info = State.fileInfo ? State.fileInfo() : info;
+    }
     if (State.storageMode && State.storageMode() === 'file') info = Object.assign({}, info, { mode: 'file' });
-    if (info.mode === 'file') {
-      /* Tauri 安装版 / 安卓：页面是 tauri.localhost，没有 /__save HTTP 接口，
-       * 必须走原生 save_read/save_write 通道；否则 fetch 会拿回 index.html，
-       * 解析 JSON 失败（安卓实测）。 */
-      if (State.hasFileTransport && State.hasFileTransport()) {
+    const native = !!(State.hasFileTransport && State.hasFileTransport());
+    if (info.mode === 'file' || native) {
+      /* Tauri 安装版 / 安卓 / iOS：必须走原生 save_read/save_write 通道；
+       * 没有通道时宁可报错也不能静默写 localStorage。 */
+      if (native) {
         let backup = '';
+        let oldRaw = '';
+        try { oldRaw = (await State.readFileRaw()) || ''; } catch (e) {}
         try {
-          const old = await State.readFileRaw();
-          if (old) {
+          if (oldRaw) {
             const name = '松鼠大战存档-导入前备份-' + Date.now() + '.json';
-            const b = bridgeSave(name, old);
+            const b = bridgeSave(name, oldRaw);
             if (b.status === 'ok') backup = b.path;
             else {
-              const nb = await nativeSave(name, old);
-              if (nb.status === 'ok') backup = nb.path;
+              const nb = await nativeSave(name, oldRaw);
+              if (nb.status === 'ok') backup = nb.display || nb.path;
             }
           }
         } catch (e) { /* 备份失败不拦导入 */ }
-        const w = await State.importFileRaw(raw);
-        if (!w.ok) throw new Error(w.msg || '写回存档文件失败');
+        const w = await State.importFileRaw(prepared.payload);
+        if (!w.ok) await fail(w.msg || '写回存档文件失败');
         const ok = await State.fileLoad();
-        if (!ok) throw new Error('存档文件写进去了，但重新读取失败 —— 刷新一下页面就能看到导入的档');
-        afterSaveImport(data.name, data.level, backup);
+        if (!ok) await fail('存档文件写进去了，但重新读取失败 —— 刷新一下页面就能看到导入的档');
+        if (State.verifyImport && !State.verifyImport(prepared)) {
+          await fail('写入后核对失败：读回来的不是刚导入的存档，已恢复旧档');
+        }
+        const now = State.state() || {};
+        afterSaveImport(now.name || prepared.name, now.level || prepared.level, backup);
         return true;
       }
-      // 先留快照：显式导入会覆盖当前进度（服务器把旧档放进 save/backup/）
+      if (inTauriShell()) {
+        await fail('原生存档通道还没就绪，请重开游戏后再导入（已保留原进度）');
+      }
+      // 轻壳 / 本地服务器：先留快照，再带 force=1 写规范化后的正文
       let backup = '';
       try {
         const b = await fetch('/__save/backup', { method: 'POST', cache: 'no-store' });
         const bj = await b.json();
         if (bj && bj.ok && bj.backup) backup = bj.backup;
       } catch (e) { /* 备份失败也允许继续，下面会提示 */ }
-      // 显式导入 = 玩家确认过，所以带 force=1（否则会被水位线拦下）
-      const w = await fetch('/__save?force=1', { method: 'POST', headers: { 'content-type': 'application/json' }, body: raw });
+      const w = await fetch('/__save?force=1', { method: 'POST', headers: { 'content-type': 'application/json' }, body: prepared.payload });
       const wj = await w.json().catch(() => ({}));
-      if (!w.ok || wj.ok === false) throw new Error(wj.msg || ('写回存档文件失败（HTTP ' + w.status + '）'));
+      if (!w.ok || wj.ok === false) await fail(wj.msg || ('写回存档文件失败（HTTP ' + w.status + '）'));
       const ok = await State.fileLoad();
-      if (!ok) throw new Error('存档文件写进去了，但重新读取失败 —— 刷新一下页面就能看到导入的档');
-      afterSaveImport(data.name, data.level, backup);
+      if (!ok) await fail('存档文件写进去了，但重新读取失败 —— 刷新一下页面就能看到导入的档');
+      if (State.verifyImport && !State.verifyImport(prepared)) {
+        await fail('写入后核对失败：读回来的不是刚导入的存档，已恢复旧档');
+      }
+      const now = State.state() || {};
+      afterSaveImport(now.name || prepared.name, now.level || prepared.level, backup);
       return true;
+    }
+    if (inTauriShell()) {
+      await fail('原生存档通道不可用，已保留原进度；请重开游戏后再导入');
     }
     const old = localStorage.getItem(State.saveKey);
     try {
       if (old) localStorage.setItem(State.saveKey + '_backup', old);
-      localStorage.setItem(State.saveKey, raw);
+      localStorage.setItem(State.saveKey, prepared.payload);
       if (!State.load()) throw new Error('读取存档失败');
+      if (State.verifyImport && !State.verifyImport(prepared)) throw new Error('写入后核对失败：读回来的不是刚导入的存档');
       State.save();
-      afterSaveImport(data.name, data.level, '');
+      const now = State.state() || {};
+      afterSaveImport(now.name || prepared.name, now.level || prepared.level, '');
       return true;
     } catch (e) {
       if (old) localStorage.setItem(State.saveKey, old);
@@ -3033,8 +3147,8 @@
     let actions = '';
     if (syncState.ok && peers.length) {
       const dis = syncState.busy ? ' muted' : '';
-      actions = btn('把存档送过去', 'sync-save-push', 'small gold' + dis) + btn('取回对面存档', 'sync-save-pull', 'small gold' + dis) +
-        btn('推改动的文件', 'sync-files-push', 'small' + dis) + btn('拉改动的文件', 'sync-files-pull', 'small' + dis);
+      actions = btn('推送存档', 'sync-save-push', 'small gold' + dis) + btn('拉取存档', 'sync-save-pull', 'small gold' + dis) +
+        btn('推送文件', 'sync-files-push', 'small' + dis) + btn('拉取文件', 'sync-files-pull', 'small' + dis);
     } else if (syncState.ok) {
       actions = btn('扫描对端', 'sync-discover', 'small') + btn('重新检测', 'sync-recheck', 'small muted');
     } else {
@@ -3424,7 +3538,7 @@
     if (r.ok === false) {
       return '<div class="sp-head"><b class="sync-off">更新没成功</b></div><div class="sp-hint">' +
         esc(r.msg || r.code || '未知原因') + '</div>' +
-        '<div class="sp-actions">' + btn('打开下载页', 'update-page', 'small gold') + '</div>';
+        '<div class="sp-actions">' + btn('下载页', 'update-page', 'small gold') + '</div>';
     }
     const done = r.mode === 'release' && r.kind && r.kind !== 'zip';
     const head = done ? '已下载并打开安装包' : '更新完成';
@@ -3434,7 +3548,7 @@
         (r.files ? '覆盖 ' + r.files + ' 个文件' : '') + (r.bytes ? '（' + sizeText(r.bytes) + '）' : '') +
         (r.msg ? esc(String(r.msg)) : '') + '　<b>请刷新页面</b>（轻壳 / 便携版刷新即生效）。';
     return '<div class="sp-head"><b class="sync-on">' + head + '</b></div><div class="sp-hint">' + detail + '</div>' +
-      '<div class="sp-actions">' + btn('立即刷新', 'update-reload', 'small gold') + btn('打开下载页', 'update-page', 'small') + '</div>';
+      '<div class="sp-actions">' + btn('立即刷新', 'update-reload', 'small gold') + btn('下载页', 'update-page', 'small') + '</div>';
   }
   /** 系统页里的「游戏更新」面板。 */
   function updatePanelHtml() {
@@ -3456,10 +3570,10 @@
     const dis = updState.busy ? ' muted' : '';
     let actions = btn(updState.local || updState.sync || updState.git ? '重新检查' : '检查更新', 'update-check', 'small' + dis);
     if (!updState.pending) {
-      if (syncState.ok && peers.length) actions += btn('从另一台电脑更新', 'update-source-sync', 'small gold' + dis);
-      if (rel.ok) actions += btn('从 GitHub 更新' + (rel.kind === 'zip' ? '（就地覆盖）' : '（下载安装包）'), 'update-source-release', 'small gold' + dis);
+      if (syncState.ok && peers.length) actions += btn('远程更新', 'update-source-sync', 'small gold' + dis);
+      if (rel.ok) actions += btn('在线更新', 'update-source-release', 'small gold' + dis);
       if (g.isRepo) actions += btn('用 git 拉取', 'update-source-git', 'small gold' + dis);
-      actions += btn('打开下载页', 'update-page', 'small');
+      actions += btn('下载页', 'update-page', 'small');
     }
     let tail = '';
     if (updState.pending) {
@@ -3541,7 +3655,7 @@
       '<p class="small-label">还没有调试发放记录。</p>';
     const buttons = [{ label: '返回', cls: 'muted' }];
     if (window.Debug && Debug.reset) buttons.push({
-      label: '关闭所有调试开关', cls: 'muted',
+      label: '关闭调试', cls: 'muted',
       run: () => {
         Debug.reset();
         if (UI && UI.toast) UI.toast('已关闭所有调试开关（物品不会因此变化）');
@@ -3549,7 +3663,7 @@
       },
     });
     if (sum.entries.length) buttons.push({
-      label: '清理全部调试所得', cls: 'gold', close: false,
+      label: '清理调试', cls: 'gold', close: false,
       run: () => {
         modal('确认清理调试所得', '<p>将移除上面列出的 ' + sum.entries.length + ' 项调试所得；<b>不可撤销</b>。</p>' +
           '<p class="small-label">等级/经验/属性不回退；你自己原有的物品按基线保留。</p>', [
@@ -3574,7 +3688,7 @@
      * 点胶囊（滑条以外）开关音乐，拖滑条仍可连续调音量 —— 选中（正在响）是绿色。 */
     const slider='<div class="setting-slider music-setting '+(musicOn?'on':'')+'" data-slider="volume">'+
       '<button type="button" class="music-toggle" data-action="sound" aria-pressed="'+musicOn+'" title="点击开关音乐；拖动右侧滑条调节音量">'+
-        '<span class="slider-label">音乐音量</span>'+
+        '<span class="slider-label">音乐</span>'+
         '<b class="slider-value">'+(musicOn?vol+'%':'已静音')+'</b>'+
       '</button>'+
       '<input type="range" min="0" max="100" step="1" value="'+vol+'" aria-label="音乐音量">'+
@@ -3584,17 +3698,19 @@
     const resShort=(r)=>!r?'自动':r.key==='auto'?'自动':r.label.replace(' × ','×');
     const resIndex=Math.max(0,resolutions.findIndex((r)=>r.key===st.resolution));
     const resNow=resolutions[resIndex]||resolutions[0];
-    const sysBtn=(label,action,cls,title)=>'<button type="button" class="uc-button '+(cls||'')+'" data-action="'+action+'"'+
-      (title?' title="'+esc(title)+'"':'')+'>'+esc(label)+'</button>';
-    /* 去掉「音乐：开/关」之后，六颗设置键刚好排成两排（3 列 × 2 行）。
+    const sysBtn=(label,action,cls,title,badge)=>'<button type="button" class="uc-button '+(cls||'')+'" data-action="'+action+'"'+
+      (title?' title="'+esc(title)+'"':'')+'>'+esc(label)+
+      (badge?'<span class="btn-badge" aria-hidden="true">'+esc(badge)+'</span>':'')+'</button>';
+    /* 6 颗常规设置键 + 跳过显示 + 调试面板 = 8 颗，排成两排（4 列 × 2 行）。
      * 颜色沿用原版口径：未选中/普通动作是金色，已开启（如全面屏）才是绿色。
      * ⚠ 「调试所得」**始终显示**：没有账本时也要能看到入口并读到「为什么没有」，
      *   不能因为索引为空就把整个选项藏掉（用户 2026-10 反馈系统页看不到重置调试）。 */
     const dbgSum = State.debugLedgerSummary ? State.debugLedgerSummary() : null;
-    const dbgBtn = sysBtn('调试所得' + (dbgSum && dbgSum.removable ? '（' + dbgSum.removable + '）' : ''), 'debug-ledger', 'gold',
-      '查看调试面板发放过的物品索引，并只回收还能定位到的调试部分；自己打出来的物品按基线保留');
+    const dbgBtn = sysBtn('调试面板', 'debug-ledger', 'gold',
+      '查看调试面板发放过的物品索引，并只回收还能定位到的调试部分；自己打出来的物品按基线保留',
+      (dbgSum && dbgSum.removable) ? String(dbgSum.removable) : '');
     /* 界面模式单独摘成一张卡：两套界面是两套独立存档，属于会改变整个游戏观感与进度的
-     * 大动作，不能和导出/分辨率这些工具键混在 3×2 网格里。卡片同时写清「当前模式」
+     * 大动作，不能和导出/分辨率这些工具键混在 4×2 网格里。卡片同时写清「当前模式」
      * 和「下一步切到哪个」，避免玩家只看到一行字不知道点下去会发生什么。 */
     const modeNow = uiModeLabel(currentUiMode());
     const modeNext = uiModeLabel(nextUiMode());
@@ -3605,22 +3721,30 @@
         '<span class="settings-mode-note">经典 / 现代两套界面使用独立存档，切换即时生效；' +
           '会载入「' + esc(modeNext) + '」界面的进度。</span>' +
       '</div>' +
-      '<button type="button" class="uc-button gold settings-mode-btn" data-action="uimode" title="切换到' + esc(modeNext) + '">' +
-        '切换到' + esc(modeNext) + '<span class="settings-mode-arrow" aria-hidden="true">›</span>' +
+      '<button type="button" class="uc-button gold settings-mode-btn" data-action="uimode" title="切换到' + esc(modeNext) + '界面">' +
+        '切到' + esc(modeNext) + '<span class="settings-mode-arrow" aria-hidden="true">›</span>' +
       '</button>' +
     '</section>';
-    /* 移走界面模式后，六颗常规设置键刚好排成两排（3 列 × 2 行）。 */
+    /* 移走界面模式后，8 颗设置键排成 4×2：第一排存档/昵称/跳过，第二排画面/调试。 */
+    const showSkip = st.showSkip !== false;
+    const skipTitle = '当前：' + (showSkip ? '开' : '关') +
+      '。关闭后战斗右下角不再显示「跳过」键；跳过解锁条件仍按超级松鼠页：VIP ' +
+      (State.VIP_SKIP_UNLOCK_LEVEL || 10) + ' 级、非 VIP ' + (State.SKIP_UNLOCK_LEVEL || 20) + ' 级。';
     const grid='<div class="settings-grid system-grid">'+
-      sysBtn('导出存档','export','gold','把当前存档导出成一个 JSON 文件（切后台/每 5 分钟还会自动更新 Download/松鼠大战-自动存档.json）')+
-      sysBtn('导入存档','import','gold','从 JSON 文件恢复存档')+
-      sysBtn('更改昵称','rename','gold','给松鼠换个名字')+
-      sysBtn('分辨率：'+resShort(resNow),'resolution','gold','点一下换下一档：'+
-        resolutions.map((r)=>r.label).join(' → ')+'。画面按这一档等比缩放并居中；窗口装不下时自动按窗口缩小，不会溢出。')+
-      sysBtn(st.fullscreen?'全面屏：开':'全面屏：关','fullscreen','gold'+(st.fullscreen?' on':''),'开启后画面铺满整个窗口（不留黑边，窗口比例差得多时会有轻微拉伸），同时尝试进入系统全屏；按 Esc 可退出系统全屏。')+
-      sysBtn(st.hideStatusBar !== false ? '状态栏：隐藏' : '状态栏：显示','statusbar','gold'+(st.hideStatusBar !== false?' on':''),'安卓沉浸模式：隐藏手机顶部状态栏，游戏画面更完整；桌面/网页没有系统状态栏，这个开关无副作用。')+
+      sysBtn('存档导出','export','gold','把当前存档导出成一个 JSON 文件。iOS 在「文件」App → 我的 iPhone/iPad → 松鼠大战；桌面写系统下载目录。')+
+      sysBtn('存档导入','import','gold','从 JSON 文件恢复存档。iOS 用「存档列表」选 App 里的导出，或粘贴存档文本。')+
+      sysBtn('修改昵称','rename','gold','给松鼠换个名字')+
+      sysBtn('跳过按钮','skip-display','gold'+(showSkip?' on':''), skipTitle, showSkip?'开':'关')+
+      sysBtn('分辨率','resolution','gold','当前：'+resShort(resNow)+'。点一下换下一档：'+
+        resolutions.map((r)=>r.label).join(' → ')+'。画面按这一档等比缩放并居中；窗口装不下时自动按窗口缩小，不会溢出。',
+        resShort(resNow))+
+      sysBtn('全面屏','fullscreen','gold'+(st.fullscreen?' on':''),'当前：'+(st.fullscreen?'开':'关')+'。开启后画面铺满整个窗口（不留黑边，窗口比例差得多时会有轻微拉伸），同时尝试进入系统全屏；按 Esc 可退出系统全屏。',
+        st.fullscreen?'开':'关')+
+      sysBtn('状态栏','statusbar','gold'+(st.hideStatusBar !== false?' on':''),'当前：'+(st.hideStatusBar !== false?'隐藏':'显示')+'。安卓沉浸模式：隐藏手机顶部状态栏，游戏画面更完整；桌面/网页没有系统状态栏，这个开关无副作用。',
+        st.hideStatusBar !== false?'隐藏':'显示')+
+      dbgBtn+
       '</div>';
-    const dbgRow = dbgBtn ? '<div class="settings-debug-row">'+dbgBtn+'</div>' : '';
-    const p=page('system','system',supportPanelHtml()+'<div class="settings-head"><h3 class="classic-section-title">游戏设置</h3>'+slider+'</div>'+modeCard+grid+dbgRow+saveFilePanel()+syncPanel()+updatePanelHtml());
+    const p=page('system','system',supportPanelHtml()+'<div class="settings-head"><h3 class="classic-section-title">游戏设置</h3>'+slider+'</div>'+modeCard+grid+saveFilePanel()+syncPanel()+updatePanelHtml());
     /* 系统页按钮统一走经典反馈：菜单项/设置键/底栏都先弹一下再执行。 */
     $('[data-action="support"]',p).onclick=()=>openSupportModal();
     $('[data-action="uimode"]',p).onclick=()=>requestMode(nextUiMode());
@@ -3628,6 +3752,12 @@
     if(dbgLedgerBtn)dbgLedgerBtn.onclick=openDebugLedger;
     $('[data-action="save-write"]',p).onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};
     $('[data-action="save-load"]',p).onclick=loadSaveDialog;
+    /* 系统页开关：只控制战斗里跳过键的显示；等级/VIP 解锁条件不变。 */
+    $('[data-action="skip-display"]',p).onclick=()=>{
+      const cur = State.settings().showSkip !== false;
+      State.setSettings({showSkip: !cur});
+      openSystem();
+    };
     /* 从服务器存档列表导入：绕过系统文件选择器（桌面壳里也能用），列表里带等级与时间。 */
     $('[data-action="save-import-list"]',p).onclick=async()=>{
       let list=[];
@@ -3719,7 +3849,7 @@
     $('[data-action="export"]',p).onclick=exportSaveFile;
     $('[data-action="import"]',p).onclick=importSave;
     $('[data-action="rename"]',p).onclick=()=>{
-      const m=modal('更改昵称','<p>给你的松鼠起个名字</p><input id="rename-input" maxlength="12" value="'+esc(State.state().name)+'" style="width:100%;padding:14px;border:3px solid #b39763;border-radius:18px;color:#715231;background:#fffdf1">',[{label:'确定',close:false,run:()=>{const name=$('#rename-input',m.element).value.trim();if(!name){toast('名字不能为空');return;}State.state().name=name;State.save();m.close();refreshHome();}},{label:'返回',cls:'muted'}],{small:true});
+      const m=modal('修改昵称','<p>给你的松鼠起个名字</p><input id="rename-input" maxlength="12" value="'+esc(State.state().name)+'" style="width:100%;padding:14px;border:3px solid #b39763;border-radius:18px;color:#715231;background:#fffdf1">',[{label:'确定',close:false,run:()=>{const name=$('#rename-input',m.element).value.trim();if(!name){toast('名字不能为空');return;}State.state().name=name;State.save();m.close();refreshHome();}},{label:'返回',cls:'muted'}],{small:true});
     };
     wireSystemFeedback(p);
   }
@@ -3729,6 +3859,47 @@
    *    避免 WebView 默认落到 `/data/user/0/com.ssdz.classic/...` 这种玩家打不开的私有路径；
    *  - Windows / 浏览器 / 桌面壳仍用原来的 Blob 下载（浏览器下载目录）。
    *  安卓桥失败时退回 Blob，并明确提示“可能落在应用私有目录”，不让导出静默失败。 */
+  /** 当前是不是 iOS / iPadOS（Tauri WKWebView）。iPadOS 13+ 的 UA 可能伪装成 Macintosh，
+   *  用 `maxTouchPoints > 1` 兜住；只用于选择导出/导入的文案与兜底路径，不参与存档规则。 */
+  function iosClient() {
+    try {
+      const ua = String((typeof navigator !== 'undefined' && navigator.userAgent) || '');
+      if (/iPhone|iPad|iPod/i.test(ua)) return true;
+      return String(navigator.platform || '') === 'MacIntel' && Number(navigator.maxTouchPoints) > 1;
+    } catch (e) { return false; }
+  }
+  /** 复制大段文本（存档 JSON 可能几百 KB）：Clipboard API 失败时退回
+   *  「textarea + execCommand」；支持 iOS WKWebView 的旧实现。返回 Promise<boolean>。 */
+  function copySaveText(text) {
+    const fallback = () => {
+      try {
+        const el = document.createElement('textarea');
+        el.value = text; el.setAttribute('readonly', 'readonly');
+        el.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;';
+        document.body.appendChild(el); el.select(); el.setSelectionRange(0, el.value.length);
+        const ok = document.execCommand('copy');
+        el.remove();
+        return !!ok;
+      } catch (e) { return false; }
+    };
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        return navigator.clipboard.writeText(text).then(() => true, fallback);
+      }
+    } catch (e) { /* 落回 execCommand */ }
+    return Promise.resolve(fallback());
+  }
+  /** iOS 分享面板：把存档作为 .json 分享到「文件」/隔空投送/其它 App。
+   *  不支持（旧 WKWebView / 非安全上下文）时返回 false，由调用方给复制兜底。 */
+  async function shareSaveFile(fileName, text) {
+    try {
+      if (!navigator.share || typeof File !== 'function') return false;
+      const file = new File([text], fileName, { type: 'application/json' });
+      if (navigator.canShare && !navigator.canShare({ files: [file] })) return false;
+      await navigator.share({ files: [file], title: '松鼠大战存档' });
+      return true;
+    } catch (e) { return false; }
+  }
   function exportFileName() {
     /* 带秒，避免同一天导出第二次时在下载目录里重名；用本地时间，别在午夜附近把日期写错。 */
     const d = new Date(Date.now()), two = (n) => String(n).padStart(2, '0');
@@ -3752,17 +3923,37 @@
       return { status: 'error', msg: (e && e.message) || String(e) };
     }
   }
+  /** 当前环境可用的 Tauri invoke（没有就返回 null）。
+   *  iOS 的导入/导出都只认原生命令：WKWebView 在 iOS 16~24 上不会弹文件选择器，
+   *  `tauri.localhost` 也没有 `/__save`、`/__export` 这些 HTTP 接口。 */
+  function nativeInvoke() {
+    const internals = window.__TAURI_INTERNALS__;
+    const T = window.__TAURI__;
+    return (internals && typeof internals.invoke === 'function')
+      ? internals.invoke.bind(internals)
+      : (T && T.core && typeof T.core.invoke === 'function' ? T.core.invoke.bind(T.core) : null);
+  }
   /** 桌面壳导出：安装版走 Tauri 命令 `export_save`，便携轻壳走本地服务器 `/__export`。
    *  浏览器（没有 Tauri 内建对象）返回 missing，交给原来的 Blob 下载。 */
   async function nativeSave(fileName, text) {
     const host = String((location && location.hostname) || '').toLowerCase();
     const port = String((location && location.port) || '');
     const ownServer = (host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]') && !!port;
-    const internals = window.__TAURI_INTERNALS__;
-    const T = window.__TAURI__;
-    const invoke = (internals && typeof internals.invoke === 'function')
-      ? internals.invoke.bind(internals)
-      : (T && T.core && typeof T.core.invoke === 'function' ? T.core.invoke.bind(T.core) : null);
+    const invoke = nativeInvoke();
+    /* iOS 只有原生命令这一条路：`tauri.localhost` 没有 /__export，WKWebView 的
+     * `<a download>` 也不可靠。放在 ownServer 判断之前，避免测试/开发用 127.0.0.1
+     * 打开时误走轻壳的 HTTP 导出。 */
+    if (iosClient()) {
+      if (!invoke) return { status: 'missing' };
+      try {
+        const r = await invoke('export_save', { fileName, data: text });
+        if (r && r.ok) return { status: 'ok', path: r.path || 'App 的 Documents 目录',
+          display: r.display || '', name: r.name || fileName };
+        return { status: 'error', msg: (r && r.msg) || '写入「文件」App 失败' };
+      } catch (e) {
+        return { status: 'error', msg: (e && e.message) || String(e) };
+      }
+    }
     if (ownServer) {
       /* 轻壳：页面来自 127.0.0.1，Tauri IPC 会被 ACL 拒；只有 Tauri 内建对象存在时才走
        * /__export（普通浏览器 + serve.js 没有这个接口，仍然用 Blob）。 */
@@ -3782,7 +3973,8 @@
     if (invoke) {
       try {
         const r = await invoke('export_save', { fileName, data: text });
-        if (r && r.ok) return { status: 'ok', path: r.path || '系统下载目录' };
+        if (r && r.ok) return { status: 'ok', path: r.path || '系统下载目录',
+          display: r.display || '', name: r.name || fileName };
         return { status: 'error', msg: (r && r.msg) || '写入下载目录失败' };
       } catch (e) {
         return { status: 'error', msg: (e && e.message) || String(e) };
@@ -3790,8 +3982,46 @@
     }
     return { status: 'missing' };
   }
-  /** 桥不可用/失败时的兜底：浏览器 Blob 下载，并把原因说清楚。 */
+  /** iOS 的导出完成提示：给出「文件」App 里的准确位置，并保留分享/复制两条转存路径。 */
+  function showIOSExportDone(result, fileName, text) {
+    const where = result.display || ('「文件」App → 我的 iPhone/iPad → 松鼠大战 → ' + (result.name || fileName));
+    modal('存档已导出', '<p style="white-space:pre-line">' +
+      esc('存档已导出到：\n' + where + '\n\n导入时点「导入」→「存档列表」，在里面选这份 .json。') +
+      '</p>', [
+      { label: '分享', run: () => {
+        void shareSaveFile(fileName, text).then((ok) => {
+          if (!ok) toast('当前环境不支持系统分享，可以改用「复制」');
+        });
+      } },
+      { label: '复制', run: () => {
+        void copySaveText(text).then((ok) => toast(ok ? '存档全文已复制' : '复制失败，请手动选中复制'));
+      } },
+      { label: '确定', cls: 'gold' },
+    ], { small: true });
+  }
+  /** iOS 导出失败 / 没有原生通道时的兜底：不依赖 `<a download>`（WKWebView 经常没反应），
+   *  改为系统分享 + 复制全文。 */
+  function showIOSExportFallback(fileName, text, result) {
+    const why = result && result.status === 'error' && result.msg
+      ? '写入「文件」App 失败：' + result.msg
+      : '当前环境没有可用的「文件」App 导出接口。';
+    modal('导出存档', '<p style="white-space:pre-line">' +
+      esc(why + '\n\n可以改用下面的方式转存，再在新设备上点「导入」→「粘贴」。') +
+      '</p>', [
+      { label: '分享', run: () => {
+        void shareSaveFile(fileName, text).then((ok) => {
+          if (!ok) toast('当前环境不支持系统分享，可以改用「复制」');
+        });
+      } },
+      { label: '复制', run: () => {
+        void copySaveText(text).then((ok) => toast(ok ? '存档全文已复制' : '复制失败，请手动选中复制'));
+      } },
+      { label: '关闭', cls: 'muted' },
+    ], { small: true });
+  }
+  /** 桥不可用/失败时的兜底：桌面/浏览器仍用 Blob 下载；iOS 不赌 `<a download>`。 */
   function exportFallback(fileName, text, result) {
+    if (iosClient()) { showIOSExportFallback(fileName, text, result); return; }
     const blob = new Blob([text], { type: 'application/json' });
     const url = URL.createObjectURL(blob), a = document.createElement('a');
     a.href = url; a.download = fileName; a.click();
@@ -3822,7 +4052,11 @@
       return;
     }
     const native = await nativeSave(fileName, text);
-    if (native.status === 'ok') { toast('存档已导出到 ' + native.path); return; }
+    if (native.status === 'ok') {
+      if (iosClient()) showIOSExportDone(native, fileName, text);
+      else toast('存档已导出到 ' + (native.display || native.path));
+      return;
+    }
     exportFallback(fileName, text, native.status === 'error' ? native : android);
   }
   /** 自动存档导出：把当前进度写一份**固定文件名**的副本到系统下载目录（覆盖上一份）。
@@ -3853,30 +4087,134 @@
     });
     setInterval(() => { try { autoExportSave(); } catch (e) {} }, 5 * 60 * 1000);
   } catch (e) {}
+  /** iOS：不经过 WKWebView 的文件选择器，直接列出 App「文件」里的导出存档。
+   *  原因：wry 只在 macOS 实现 `runOpenPanelWithParameters`，iOS 16~24 的
+   *  `<input type=file>` 点下去没有系统面板，玩家会以为按钮坏了。导出本来就写在
+   *  App 的 Documents（「文件」App → 我的 iPhone/iPad → 松鼠大战），原生读回来即可。 */
+  async function openIOSExportList() {
+    const invoke = nativeInvoke();
+    if (!invoke) { toast('原生存档接口还没就绪，请稍后再试'); return; }
+    let r = null;
+    try { r = await invoke('list_save_files'); }
+    catch (e) {
+      notice('读取导出列表失败：' + ((e && e.message) || e) + '\n\n可以改用「粘贴」导入。',
+        [{ label: '粘贴', cls: 'gold', run: () => importSaveFromPaste() },
+          { label: '返回', cls: 'muted' }]);
+      return;
+    }
+    const files = (r && Array.isArray(r.files)) ? r.files : [];
+    if (!files.length) {
+      notice('「文件」App 里还没有导出存档。\n\n请先在系统页点「导出」；也可以返回用「粘贴」导入。',
+        [{ label: '粘贴', cls: 'gold', run: () => importSaveFromPaste() },
+          { label: '返回', cls: 'muted' }]);
+      return;
+    }
+    saveListDialog(files.map((f) => ({
+      name: String(f.player || f.name || '无名'),
+      level: Number(f.level) || 0,
+      at: Number(f.modified) || 0,
+      size: Number(f.size) || 0,
+      file: String(f.name || ''),
+      valid: f.valid !== false,
+    })), async (it) => {
+      try {
+        const rr = await invoke('read_save_file', { name: it.file });
+        if (!rr || rr.ok === false) throw new Error((rr && rr.msg) || '读取存档失败');
+        askImportSave(String(rr.data == null ? '' : rr.data), '文件');
+      } catch (e) { toast((e && e.message) || '读取存档失败'); }
+    }, '共 ' + files.length + ' 份导出存档。导入前会先把当前进度导出到「文件」App 作为备份。');
+  }
+  /** 导入入口：iOS 用原生导出列表 / 粘贴；其它平台用文件选择器 / 粘贴。 */
   function importSave() {
+    const ios = iosClient();
+    const info = State.fileInfo ? State.fileInfo() : {};
+    const hasNative = !!nativeInvoke();
+    const shell = inTauriShell();
+    const body = '<p>从导出的 .json 文件恢复进度。</p>' +
+      (ios && hasNative
+        ? '<p class="small-label">iOS：点「存档列表」选 App 导出的存档（「文件」App → 我的 iPhone/iPad → 松鼠大战），' +
+          '或者用「粘贴」。</p>'
+        : (ios && shell
+          ? '<p class="small-label">iOS 安装包的存档接口还没就绪。请稍后重试，或先用「粘贴」导入。</p>'
+          : (info && info.path ? '<p class="small-label">当前正式存档：' + esc(info.path) + '</p>' : '') +
+            '<p class="small-label">文件选择器打不开时，用「粘贴」。</p>'));
+    const buttons = [];
+    if (ios && hasNative) buttons.push({ label: '存档列表', cls: 'gold', run: () => openIOSExportList() });
+    else if (!ios || !shell) buttons.push({ label: '选文件', cls: 'gold', run: () => pickAndImportSave() });
+    buttons.push({ label: '粘贴', cls: (ios && !hasNative) ? 'gold' : '', run: () => importSaveFromPaste() });
+    buttons.push({ label: '取消', cls: 'muted' });
+    modal('导入存档', body, buttons, { small: true });
+  }
+  /** 选本地 .json 并走统一校验；取消选择时什么都不做。 */
+  function pickAndImportSave() {
     void pickJsonFile().then(async (file) => {
       if (!file) return;                       // 用户取消
       try {
         if (file.size > 8 * 1024 * 1024) throw new Error('存档文件过大（上限 8 MB）');
         const raw = await readFileText(file);
-        let data;
-        try { data = JSON.parse(raw); } catch (e) { throw new Error('这个文件不是合法的 JSON'); }
-        const bad = saveDataError(data);
-        if (bad) throw new Error(bad + '，不是有效的松鼠大战存档');
-        const info = State.fileInfo ? State.fileInfo() : {};
-        const nowLevel = (State.state() || {}).level;
-        const where = info.mode === 'file'
-          ? '会覆盖磁盘上的正式存档 ' + (info.path || 'save/progress.json') + '（旧档先自动备份到 save/backup/）'
-          : '会覆盖这个浏览器里的兜底存档（旧档先留在 localStorage 备份键里）';
-        notice('导入【' + data.name + '】' + data.level + ' 级的存档？\n\n' + where +
-          (nowLevel ? '。当前进度：' + nowLevel + ' 级。' : '。'),
-          [{ label: '导入', run: async () => {
-            try { await applyImportedSave(raw, data); }
-            catch (e) { toast(e.message || '导入失败'); }
-          } }, { label: '取消', cls: 'muted' }]);
+        askImportSave(raw, '文件');
       } catch (e) { toast(e.message || '无法读取存档'); }
     });
   }
+  /** 校验一份导入原文并弹确认。文件和粘贴两条入口共用，避免两份规则漂移。
+   *  校验失败抛错，由调用方 toast。 */
+  function askImportSave(raw, source) {
+    let data;
+    try { data = JSON.parse(String(raw || '').replace(/^\uFEFF/, '')); } catch (e) { throw new Error('这个文件不是合法的 JSON'); }
+    const bad = saveDataError(data);
+    if (bad) throw new Error(bad + '，不是有效的松鼠大战存档');
+    const info = State.fileInfo ? State.fileInfo() : {};
+    const nowLevel = (State.state() || {}).level;
+    const ios = iosClient();
+    const where = info.mode === 'file'
+      ? (ios
+        ? '会覆盖 App 的正式存档（旧档会先导出到「文件」App → 我的 iPhone/iPad → 松鼠大战）'
+        : '会覆盖磁盘上的正式存档 ' + (info.path || 'save/progress.json') + '（旧档先自动备份到 save/backup/）')
+      : '会覆盖这个浏览器里的兜底存档（旧档先留在 localStorage 备份键里）';
+    notice('导入【' + data.name + '】' + data.level + ' 级的存档？\n\n' + where +
+      (nowLevel ? '。当前进度：' + nowLevel + ' 级。' : '。') +
+      (source === '粘贴' ? '\n\n来源：粘贴的存档文本。' : ''),
+      [{ label: '导入', run: async () => {
+        try { await applyImportedSave(raw, data); }
+        catch (e) { toast(e.message || '导入失败'); }
+      } }, { label: '取消', cls: 'muted' }]);
+  }
+  /** iOS 兜底：直接粘贴存档 JSON。WKWebView 的文件选择器失灵时仍能恢复进度。 */
+  function importSaveFromPaste() {
+    const m = modal('粘贴文本',
+      '<p class="small-label">把导出的存档 JSON 全文粘贴到下面（以 <b>{</b> 开头）。</p>' +
+      '<textarea id="save-paste-input" spellcheck="false" autocomplete="off" ' +
+      'style="width:100%;height:190px;box-sizing:border-box;resize:vertical;border:3px solid #b39763;' +
+      'border-radius:16px;background:#fffdf1;color:#715231;font:18px/1.5 ui-monospace,Menlo,monospace;padding:12px" ' +
+      'aria-label="存档 JSON 文本"></textarea>',
+      [
+        { label: '粘贴', close: false, run: async () => {
+          try {
+            if (!navigator.clipboard || typeof navigator.clipboard.readText !== 'function') {
+              throw new Error('当前环境不支持读取剪贴板');
+            }
+            const text = await navigator.clipboard.readText();
+            const ta = m.element.querySelector('#save-paste-input');
+            if (!text) { toast('剪贴板是空的'); return; }
+            if (ta) ta.value = text;
+            toast('已从剪贴板粘贴');
+          } catch (e) { toast('无法读取剪贴板，请长按输入框手动粘贴'); }
+        } },
+        { label: '导入', close: false, run: () => {
+          try {
+            const ta = m.element.querySelector('#save-paste-input');
+            const raw = String((ta && ta.value) || '').trim();
+            if (!raw) { toast('请先粘贴存档文本'); return; }
+            askImportSave(raw, '粘贴');
+            m.close();
+          } catch (e) { toast(e.message || '存档格式不对'); }
+        } },
+        { label: '取消', cls: 'muted' },
+      ], { small: true });
+    m.element.classList.add('save-paste-dialog');
+    setTimeout(() => { try { const ta = m.element.querySelector('#save-paste-input'); if (ta) ta.focus(); } catch (e) {} }, 0);
+  }
+
   /** 村庄里那几处地点点进去的**去处**。
    *  【第一百四十七批】当时以为原版那四页提不出来（"在 26MB 导出里连这些名字都搜不到"），
    *  于是各自路由到复刻里语义最接近的已有页面（祭坛→竞技场 / 幻兽→融合 / 神迹→抽奖 / 征战→关卡）。
@@ -3891,6 +4229,9 @@
     if (window.SfGuide) { try { SfGuide.onPage(key); } catch (e) {} }
     if (currentUiMode() === 'classic' && window.SfVillage) {
       $('#ui').innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠村庄·' + key + '"></section>';
+      /* 从塔页（#ui 按 690 高）回来时，这里必须重新按原版 320×196 量一次；
+       * 否则地点页的 SVG 只按高度铺满，左右会各空一条。 */
+      if (window.Main?.resizeLayout) Main.resizeLayout();
       const box = $('#ui .ssfight-home');
       if (box) {
         SfVillage.open(box, key).catch((e) => {
@@ -3963,6 +4304,9 @@
     if (currentUiMode() === 'classic' && window.SfUiMain && SfUiMain.mountVillage) {
       if (window.SfVillage) { try { SfVillage.destroy(); } catch (e) {} }
       $('#ui').innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠村庄"></section>';
+      /* 同 openVillageScene：从塔页回来时先把 #ui 的高度切回村庄页，
+       * 再异步挂 SVG；不然村庄立绘会按 690 高算宽度，左右出现黑边。 */
+      if (window.Main?.resizeLayout) Main.resizeLayout();
       const box = $('#ui .ssfight-home');
       if (box) {
         SfUiMain.mountVillage(box).catch((e) => { if (window.__errs) window.__errs.push('mountVillage: ' + e.message); });
@@ -3973,7 +4317,7 @@
     const p=page('system','village','<div class="settings-grid">'+btn('师徒','master','gold')+btn('竞技场','arena','gold')+btn('天梯赛','rank','gold')+btn('道具商店','shop','gold')+btn('每日抽奖','lottery','gold')+btn('挑战关卡','stages','gold')+'</div><p class="system-caption">欢迎来到松鼠村庄！<br>拜师学艺、收集装备，和松鼠伙伴一起成长。</p>');
   }
   // —— 可获得物品图鉴（系统-帮助）：来源概率从真实数据（掉落池/商店/抽奖）计算 ——
-  const GUIDE_ITEMS = [1,2,3,4,5,7,8,10,11,12,13,15,16,17,18,19,21,22,23,24,25,26,28,29,30,31,32,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,77,78,79,80,82,89,90,101,102,103,104,105,106,107];
+  const GUIDE_ITEMS = [1,2,3,4,5,7,8,10,11,12,13,15,16,17,18,19,21,22,23,24,25,26,28,29,30,31,32,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,77,78,79,80,82,89,90,101,102,103,104,105,106,107];
   function guideSources(id) {
     const lines = [];
     if (!State.blackGearEnabled() && State.BLACK_PROP_IDS.includes(Number(id))) return lines;
@@ -3983,6 +4327,13 @@
     if (drop) {
       const per = drop.weight / total;
       lines.push('战斗拾取：每张拾取卡 ' + (per * 100).toFixed(1) + '%，每场战斗 3 张卡，期望 ' + (per * 3 * drop.count).toFixed(2) + (id === 15 ? ' 点/场' : ' 个/场'));
+    }
+    const ladderPool = (window.BattleDrops && BattleDrops.ladderPool) || [];
+    const ladderTotal = ladderPool.reduce((n, p) => n + p.weight, 0);
+    const ladderDrop = ladderPool.find((p) => p.id === id);
+    if (ladderDrop) {
+      const per = ladderDrop.weight / ladderTotal;
+      lines.push('天梯赛拾取：每张拾取卡 ' + (per * 100).toFixed(1) + '%，每场 3 张卡，期望 ' + (per * 3 * ladderDrop.count).toFixed(2) + ' 个/场（战斗里点飘出来的碎片）');
     }
     const prop = propMap.getValue(id);
     if (prop && prop.buy === 'true') lines.push('道具商店：' + parseInt(prop.price) + ' 金松果/个，每日限购 ' + State.shopLimit(id) + ' 个');
@@ -4004,6 +4355,7 @@
     if ([16, 17, 18, 19].includes(id)) lines.push('金杯商店（每天开放）：500 金杯 + 100 金松果，积分需 1500，账号限兑 1 次（不随周重置）');
     if ([21, 22].includes(id)) lines.push('金杯商店（每天开放）：100 金杯 + 100 金松果兑换 100 个，积分需 1200，每周限兑 1 次（每周一重置）');
     if (id === 40) lines.push('天梯赛：胜利 +3 杯、落败 +1 杯，获胜有 25% 概率额外夺得 3 杯');
+    if (id === 51) lines.push('合成：属性碎片 ×10 + 50 金松果 → 随机 1 个力量/敏捷/速度转化丸');
     if (id === 47) lines.push('合成：天使果实种子 ×10 + 50 金松果（背包中合成）');
     if (id === 48) lines.push('合成：恶魔果实种子 ×10 + 50 金松果（背包中合成）');
     if (id === 8) lines.push('挑战胜利：3～7 个/场；通关关卡整轮：25 个；各级礼包中也有');
@@ -4020,7 +4372,7 @@
       lines.push('挑战塔：每 20 层 1 张、每 50 层再 +1 张（一次性）；第 100 层首通改为黑装自选箱（不发卡）');
       lines.push('无尽塔：每累计 50 层 1 张，每周最多 10 张（周一重置）');
       lines.push('金宝箱：8% 开出 1 张；魔法袋：必得 1 张；黑装融合：20% 返 1 张');
-      lines.push('打开：选择凤凰/圣熊，获得对应碎片 1~2 个 + 50/100/200 金松果');
+      lines.push('打开：选择凤凰/圣熊，获得对应碎片 1~2 个 + 100/200/400 金松果');
     }
     if (id === 82) lines.push('魔法袋：有几率开出 1～2 个');
     if (id === 89) lines.push('挑战塔第 100 层首通获得 1 个；打开后任选 1 件黑色凤凰/圣熊装备');
@@ -4035,7 +4387,7 @@
       const lv = id - 100;
       if (lv <= 2) lines.push('45 级起：通关关卡 20% 几率、竞技场（经验/碎片）获胜 15% 几率获得（一级 75% / 二级 25%）');
       if (lv < 7) lines.push('合成：3 个同级 + 10 金松果，成功率 ' + Math.round(State.gemMergeRate(lv) * 100) + '%（失败有 50% 几率一颗材料降 1 级，1级则碎裂）');
-      lines.push('镶嵌：镶入橙装（3 件相同紫装融合而来），主属性 +' + State.gemPercent(lv) + '%（沿用原版曲线 5×(n²−n+2)），附加属性效果随机提升，每件限 1 颗；镶嵌与卸下各 5 金松果');
+      lines.push('镶嵌：镶入橙色（3 件相同紫装融合而来）或黑色装备，主属性 +' + State.gemPercent(lv) + '%（沿用原版曲线 5×(n²−n+2)），附加属性效果随机提升，每件限 1 颗；镶嵌与卸下各 5 金松果');
     }
     if (!lines.length) lines.push('当前版本暂无产出途径（图鉴预留物品）');
     return lines;
@@ -4054,7 +4406,7 @@
       ? '<p><b>黑装</b>：3 件橙装在「装备融合」里可合成 1 件黑装；黑凤凰/黑圣熊也可用 10 个碎片 + 1000 金松果合成。黑色卡片来自挑战塔 20/50 层（第 100 层给黑装自选箱）、无尽塔每累计 50 层（周限 10）、金宝箱、魔法袋和黑装融合；3 件黑装可继续融合洗词条，使用等级 60。</p>'
       : '';
     // 帮助是「系统」分组下的正常页面（以前是弹窗，会挡住底下的界面）
-    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能；71 级起每升 1 级还会获得 1 个金宝箱（最高 90 级）。在状态页查看和升级。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。前 18 关每轮消耗1张挑战书、连续击败3名敌人；后 18 关（19-36）是超级三侠，每关只有1名强敌。失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件同品质装备可以融合。</p><p><b>竞技场</b>：10级开启经验竞技场，15级开启碎片竞技场与幻兽竞技场；报名一次打完两场。经验场名次奖励 150/100/50/30 经验，碎片场 8/6/4/3 蓝片，幻兽场 40/35/30/25 孵化点。</p><p><b>幻兽</b>：村庄「幻兽牧场」孵化、编队、喂养、进化；孵化消耗 200 孵化点。幻兽竞技场用召唤证报名；召唤证可在道具商店用 10 金松果购买，也能从魔法袋中开出。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45 级后通关关卡或竞技场获胜有几率获得 1~2 级宝石；3 个同级宝石 + 10 金松果可合成高一级（可能失败降级）。宝石可镶入橙装，每件 1 颗，镶嵌/卸下各 5 金松果。</p><p><b>套装收益（仅现代界面）</b>：同名装备 2/4 件各一档加成，按该套最低品质计算；经典界面没有套装收益。</p><p><b>挑战塔</b>：通关前 18 关后解锁。逐层挑战，通关得金松果与碎片；第 20/50 层里程碑发黑卡，第 100 层给黑装自选箱。</p><p><b>无尽塔</b>：没有层数上限，每 100 层一轮。战斗得试炼币，可在试炼商店/铸币商店买增益；每累计 50 层 1 张黑卡，每周最多 10 张。</p>' + blackHelp + '<h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
+    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能；71 级起每升 1 级还会获得 1 个金宝箱（最高 90 级）。在状态页查看和升级。永久属性点（力/敏/速/生命，生命 5 点算 1 点）总上限 <b>651</b>；旧档、属性书和调试也不能突破，装备/被动/药丸另算。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。前 18 关每轮消耗1张挑战书、连续击败3名敌人；后 18 关（19-36）是超级三侠，每关只有1名强敌。失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件同品质装备可以融合（3件同套且有下一品质档时必得该套）。带徒弟挑战时徒弟会先上阵；徒弟战败后师父免费接手同一名对手（不消耗挑战书、也不占用复活次数）。</p><p><b>竞技场</b>：10级开启经验竞技场，15级开启碎片竞技场与幻兽竞技场；报名一次打完两场。经验场名次奖励 150/100/50/30 经验，碎片场 8/6/4/3 蓝片，幻兽场 40/35/30/25 孵化点。</p><p><b>幻兽</b>：村庄「幻兽牧场」孵化、编队、喂养、进化；孵化消耗 200 孵化点。幻兽竞技场用召唤证报名；召唤证可在道具商店用 10 金松果购买，也能从魔法袋中开出。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。天梯赛战斗里会飘出黄色三角的「属性碎片」，点碎片拾取；10 个属性碎片 + 50 金松果可在背包合成 1 个随机力量/敏捷/速度转化丸。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；iOS 的导出文件在「文件」App → 我的 iPhone/iPad → 松鼠大战，导入时也可以直接粘贴存档文本；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45 级后通关关卡或竞技场获胜有几率获得 1~2 级宝石；3 个同级宝石 + 10 金松果可合成高一级（可能失败降级）。宝石可镶入橙色或黑色装备，每件 1 颗，镶嵌/卸下各 5 金松果。</p><p><b>套装收益（仅现代界面）</b>：同名装备 2/4 件各一档加成，按该套最低品质计算；经典界面没有套装收益。</p><p><b>挑战塔</b>：通关前 18 关后解锁。逐层挑战，通关得金松果与碎片；第 20/50 层里程碑发黑卡，第 100 层给黑装自选箱。</p><p><b>无尽塔</b>：没有层数上限，每 100 层一轮。战斗得试炼币，可在试炼商店/铸币商店买增益；每累计 50 层 1 张黑卡，每周最多 10 张。</p>' + blackHelp + '<h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
     $$('[data-guide]', p).forEach((b) => b.onclick = () => openGuideItem(+b.dataset.guide));
     wireSystemFeedback(p);
     return p;
@@ -4137,7 +4489,7 @@
       '在浏览器地址栏粘贴打开即可：</p><p><input class="support-input" readonly value="' + esc(url) +
       '" aria-label="支持作者链接"></p></div>',
       [{ label: '复制链接', cls: 'gold', close: false, run: () => copyText(url) },
-        { label: '知道了', cls: 'muted' }], { small: true });
+        { label: '返回', cls: 'muted' }], { small: true });
     const input = $('.support-input', box.element);
     if (input) { input.focus(); input.select(); }
     return box;
@@ -4159,7 +4511,7 @@
       '<p class="support-link">' + esc(meta.label) + '：<span class="support-url">' + esc(meta.url) + '</span></p>' +
       '</div>';
     return modal('支持作者', body, [
-      { label: '用浏览器打开' + meta.label, cls: 'gold', run: () => openSupportLink(meta.url) },
+      { label: '打开链接', cls: 'gold', run: () => openSupportLink(meta.url) },
       { label: '以后再说', cls: 'muted' },
     ], { small: true });
   }
@@ -4288,10 +4640,16 @@
       (has ? '。' : '；该界面还没有存档，会新建一个 1 级角色。') + '</p>' +
       '<p class="small-label">当前界面的进度会先保存；以后切回来还能继续。在现代界面中支持使用debug面板。</p>' +
       (m === 'classic' ? '<p class="small-label"><b>注意：</b>切到经典界面后，调试模式的入口会消失；需要调试请切回现代界面。</p>' : '');
-    modal('切换界面模式', body, [
+    const dlg = modal('切换界面模式', body, [
       { label: '取消', cls: 'muted' },
       { label: '切换', cls: 'gold', run: () => setMode(m) },
     ], { small: true });
+    /* 这一张的「取消 / 切换」两颗键单独放大、并抬离卡片下沿（用户 2026-10 口径：
+     * "取消和切换键按钮太小了太靠下，调大往上移动一点"）。加一个自己的 class 而不是改
+     * `.modal-buttons` 公共样式 —— 别的确认框不需要跟着变。
+     * ⚠ 双机同步会按文件覆盖：这段和 `css/classic-refine.css` 的 `.mode-switch-dialog`
+     *   必须成对存在，缺一边就退回小按钮 / 贴边（2026-10 已被覆盖过两次）。 */
+    if (dlg && dlg.element && dlg.element.classList) dlg.element.classList.add('mode-switch-dialog');
   }
   /**
    * 布局高度：菜单页按 920:560 参考比例（= 1170×712.174），战斗/首页场景按 690。
@@ -4327,6 +4685,10 @@
        * 所以把"这一页有哪些东西、自己有没有、是不是真形态"与"打开某一项的详情"这两件事导出去。
        * 详情页用的还是复刻这一套（版式已对照原版截图核过），只是入口改成原版页里的格子。 */
       catalogInfo, openItem, wsIconOf, openRankShop,
+      /* 经典页签矢量 & 原版 3911 返回键：抽奖页与金杯商店共用，避免再手搓一套。
+       * `installBagTabVectors` 把「背包 / 商店 / 兑换」换成原版矢量；`mountClassicBack`
+       * 在页面底部挂「随机挑战 → 查看」那颗金胶囊返回键（失败时自动退回普通底栏按钮）。 */
+      installBagTabVectors, wirePopTaps, mountClassicBack: mountRankShopBack, destroyClassicBack: destroyRankShopBack,
       /* `catalogItems(kind)` = 该类目的**全部**条目（id / 名字 / 原版矢量图标），
        * 给"查看别人"那一页用：它要按对手自己的武器/技能清单把格子画出来
        * （原版 `showWeaponSkills` 只是把数据源换成 `friendInfo`，见 ui-status.js）。 */

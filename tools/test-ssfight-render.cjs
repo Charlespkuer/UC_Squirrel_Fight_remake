@@ -644,6 +644,9 @@ const { buildFrames } = SfRender;
     '但 mode 拨回 home、canvas 切回主界面场景');
   assert.ok(/UI\.classic\.pickupResult\(loot, finalReward, winner\)/.test(end),
     '现代界面的收益弹窗要把 reward（经验 / 金松果 / 升级）和胜负一起交给 pickupResult，不能只写漂浮物');
+  assert.ok(/const towerFight = opts\.kind === 'tower' \|\| opts\.kind === 'endless'/.test(end)
+    && /!classicFight && !towerFight && UI\.classic && UI\.classic\.pickupResult/.test(end),
+    '两座塔的产出由 Tower.reportBattle 结算，战斗结束不能再叠「战斗拾取」空弹窗');
   assert.ok(/!classicFight && finalReward == null && typeof opts\.rewardFor === 'function'/.test(end)
     && end.indexOf('if (State.state() !== S)') < end.indexOf('finalReward = opts.rewardFor(winner)'),
     '现代 canvas 战斗要在确认仍是同一个存档之后补算 rewardFor，避免战斗中切档把奖励发给新档');
@@ -652,6 +655,8 @@ const { buildFrames } = SfRender;
     'pickupResult 要同时写「战斗奖励」和「战斗拾取」两包收益');
   assert.ok(/battle-outcome/.test(cuEnd) && /胜 利！/.test(cuEnd) && /战 败…/.test(cuEnd),
     'pickupResult 要写胜利/失败大字，且升级弹窗已开着时也能插到最上面');
+  assert.ok(/if \(!items\.length && !ups\.length && !reward\) return;/.test(cuEnd),
+    '没有任何拾取物 / 升级 / 战斗奖励时不能弹只有「胜利」的「战斗拾取」空窗');
   const i = mn.indexOf('function startHomeScene()');
   const scene = mn.slice(i, mn.indexOf('function showHome() {', i));
   assert.ok(/mode = 'home';/.test(scene) && /cancelAnimationFrame\(rafId\)/.test(scene) && /requestAnimationFrame\(loop\)/.test(scene),
@@ -901,10 +906,10 @@ async function checkClassicViewLifecycle() {
   assert.equal(view.byName('expNum').textContent, '7/100', '经验也必须同步恢复真值');
   assert.deepEqual(env.__errs, [], '真实挂载和接线不能靠吞异常通过');
   /* 装备画稿是灰阶 + 放置上的 `cx` 颜色变换（`p.cx` 直接就是 Rm/Ra/...，没有 `p.cx.cx` 这一层）。
-   * 以前只认 `p.cx.cx`，彩色套装全被画成黑白；这里用狂战头盔 1919 第 71 帧钉住这条路径。 */
+   * 以前只认 `p.cx.cx`，彩色套装全被画成黑白；这里用狂战头盔 B 容器 1918 第 71 帧钉住这条路径。 */
   await render.loadExtra('tags-gear.json');
   const gearHost = body.appendChild(new Node('section'));
-  const gearView = await render.mountSymbol(gearHost, '1919', { frame: 71, policy: {} });
+  const gearView = await render.mountSymbol(gearHost, '1918', { frame: 71, policy: {} });
   assert.ok(gearView.root.querySelector('filter'), '装备放置上的 cx 必须落成 SVG filter（否则彩色套装变黑白）');
   assert.ok(gearView.root.querySelectorAll('[filter]').length > 0, '带 cx 的放置节点要真的挂上 filter');
   gearView.destroy(); gearHost.remove();
@@ -1290,6 +1295,11 @@ async function checkClassicFight() {
     && /stopAt\(atk, 1\);/.test(idleBody) && /stopAt\(inner, 1\);/.test(idleBody)
     && !/visible\(atk, false\)/.test(idleBody) && /visible\(sel, true\)/.test(uf),
     '角色动作要重启嵌套表情/眼睛层，待机时把出手层复位到第 1 帧（不能整层隐藏：待机本体就画在里面）');
+  assert.ok(/function freezeNestedAnim\(/.test(uf)
+    && /if \(o\.deep\) freezeNestedAnim\(clip\);/.test(uf)
+    && /const end = lastContentFrame\(child\)/.test(uf)
+    && /stopAt\(child, end\)/.test(uf),
+    '角色动作结束要冻结嵌套表情/眼睛在最后一个有内容的帧（倒地哭脸不能继续循环切换）');
   assert.ok(/holder\.__hero = hero \|\| null;/.test(uf), 'buildFighter 必须把挂上去的主角本体留在 holder 上');
   assert.ok(/const mc = \(holder && holder\.__hero\)/.test(uf), 'makeFighter 必须优先用回传的主角本体');
   const simSrc = fs.readFileSync(path.join(ROOT, 'js/sim.js'), 'utf8').replace(/\r\n/g, '\n');
@@ -1329,8 +1339,8 @@ async function checkClassicFight() {
   for (const [k, acts] of [['dodge', SfFight.ACTS.dodge], ['attackBack', SfFight.ACTS.attackBack]]
     .concat(Object.entries(SfFight.ACTS.comeBack)))
     assert.ok(byId.has(String(acts.sym)), k + ' 的动画元件 ' + acts.sym + ' 要在 tags-fight.json 里');
-  assert.ok(/if \(clip\.frame >= stopIdx\) \{ stopAt\(clip, stopIdx \+ 1\); resolve\(\); return; \}/.test(uf),
-    '动作片断播到停止帧必须停住 —— 不停的话节拍器会把同一个动作再循环一遍');
+  assert.ok(/if \(clip\.frame >= stopIdx\) \{[\s\S]{0,160}?stopAt\(clip, stopIdx \+ 1\);[\s\S]{0,120}?resolve\(\);\s*return;\s*\}/.test(uf),
+    '动作片断播到停止帧必须停住，并在 deep 动作结束时冻结嵌套表情 —— 不停的话节拍器会把同一个动作再循环一遍');
   assert.ok(/playClip\(inner, \{\n\s*(?:deep: true, )?onFrame: \(n\) => \{\n\s*if \(acts\.guard/.test(uf),
     '出手动画要按帧脚本在起手/命中帧回调，而不是固定延时');
   /* ②b⁗⁗ 防御技（绝对防御 16 / 龟甲术 7）**在命中那一刻才起手**（2026-11 第一百七十六批）：
@@ -1466,13 +1476,13 @@ async function checkClassicFight() {
     '放行嵌套动画时要**跳过装备**（挂点被 pinFrame 钉住、容器带 slot 记号），否则装备会乱跳');
   assert.ok(/const IDLE_POSE_SYM = '5616';/.test(uf)
     && idleAt >= 0 && /stopAt\(mc, 1\);/.test(idleBody)
-    && /if \(f && f\.mc && !f\.npc\) startIdlePose\(f\.mc\);/.test(uf),
+    && /if \(f && f\.mc && !f\.npc(?: && !f\.campaign)?\) startIdlePose\(f\.mc\);/.test(uf),
     '待机（含开打倒计时那几秒）要让 5616 转起来 —— 三侠的待机由图集动画自己起');
   /* ②b¹⁰ **开宝箱 / 战果页那一格必须画得出东西**（2026-11 第一百七十八批）：用户口径
    *   "战斗结束后开启宝箱时，开出来的东西显示时，总会有一两个物品显示不出来"。
    *   那一格是原版的 `mc.c1.attachMovie(<道具名>, "mc", 100)`（MainMovie.as:18691/18804）——
    *   **库元件名就是道具名**，所以掉落池里每一件都得在 SWF 里有同名导出，否则那一格永远是空的。
-   *   实拍：天梯赛的主产出「天梯碎片」原版没有这个导出名（同一场掉两份就两格空），
+   *   实拍：天梯赛的主产出「属性碎片」原版没有同名导出（同一场掉两份就两格空），
    *   现在按 `LOOT_ALIAS` 借「金杯」画（天梯赛在原版里的图标就是金杯）。 */
   const lootMap = JSON.parse(fs.readFileSync(path.join(ROOT, 'images/ssfight/ui/loot-icons.json'), 'utf8'));
   const dropSrc = fs.readFileSync(path.join(ROOT, 'js/battle-drops.js'), 'utf8').replace(/\r\n/g, '\n');
@@ -1484,7 +1494,7 @@ async function checkClassicFight() {
   assert.equal(noIcon.length, 0, '这些掉落没有图标：' + noIcon.map((p) => p.id + ':' + p.name).join('、'));
   const ladder = lootMap.byId[51];
   assert.ok(ladder && ladder.aliasOf === '金杯' && byId.has(ladder.id),
-    '天梯碎片借「金杯」的元件 3061，且该元件要在 tags-fight.json 里');
+    '属性碎片借「金杯」的元件 3061，且该元件要在 tags-fight.json 里');
   /* ②b⁶ 「没有出手动画」的那几拍不能一眨眼就过去（2026-11 第一百七十五批，用户口径
    *   "在一些情况下两次攻击之间的间隔还是有问题"）：节拍照现代播放器
    *   （`battle.js`：dot 400 / buff 320 / regen 420），眩晕那一拍换原版「晕击」图标 + 700ms。 */
@@ -1503,7 +1513,7 @@ async function checkClassicFight() {
     '奖品图要挂进 k 子元件的 c1 槽，不能挂在 k1..k4 外壳上');
   assert.ok(/if \(cnt\) setText\(cnt, 'X' \+ n\);/.test(uf), '数量写 count 文本框（不是位图数字）');
   assert.ok(/for \(const b of boards\) if \(b\) playClip\(b, \{ stop: 5 \}\);/.test(uf) &&
-    /opening\.push\(playClip\(inner, \{ stop: 10 \}\)\)/.test(uf) && /await Promise\.all\(opening\)/.test(uf),
+    /opening\.push\(playClip\(inner, \{ stop: 10 \}\)\)/.test(uf) && /Promise\.all\(opening\)/.test(uf),
     '开箱时四块 b 要显式停在第 5 帧（第 4 帧是炸开的棕色碎片），k 停在第 10 帧');
   /* ②c 战利品图标（战果页三格 / 开宝箱四格里的道具图）：映射表里的每一颗都必须**真的在包里**，
    *   否则 `attachChild` 静默返回 null、格子里永远空着（实拍就是两块空白黄格）。 */
@@ -1535,6 +1545,23 @@ async function checkClassicFight() {
   /* ②e 开宝箱那两步都要**等玩家**（选箱子 / 翻奖后的确定），且都要有回归入口。 */
   assert.ok(/pickChest: \(i\) =>/.test(uf) && /confirmChest: \(\) =>/.test(uf),
     '开宝箱的"选箱子"与"确定"都要留出入口，否则回归与探针走不到那一步');
+  /* ②e² 选箱热区必须挂在不随 k1..k4 换帧重建的独立层上（2026-10 修「iOS 点第二个
+   *   及以后箱子没反应」）：原实现把 mouseenter/click 直接挂在 7767 的 <g> 上，
+   *   iOS 轻点先合成 mouseenter，回调里 `paint()` 又把触点下的子元件换掉，
+   *   WKWebView 可能不再补发 click —— 只有左数第一个（本来就是选中帧、不重建）能点。
+   *   现在独立层用 `svgScreenMap` 折坐标，并在 pointerup / touchend / click 三条路上提交；
+   *   开箱动画再加 2.5s 上限，rAF 被 WKWebView 压住时也能照常揭晓。 */
+  assert.ok(/function mountChestHitLayer\(view, keys, handlers\)/.test(uf),
+    '选箱要有独立热区层 mountChestHitLayer（不能把事件绑在会换帧的 k 上）');
+  assert.ok(/SfRender\.svgScreenMap/.test(uf) && /class', 'sf-chest-hits'/.test(uf),
+    '热区层要挂到视图 svg 根并用 svgScreenMap 折回 viewBox 坐标');
+  assert.ok(/addEventListener\('pointerup'/.test(uf) && /addEventListener\('touchend'/.test(uf)
+    && /addEventListener\('click'/.test(uf),
+    '选箱必须同时接受 pointerup / touchend / click（iOS 可能不补发 click）');
+  assert.ok(!/k\.g\.addEventListener\('mouseenter'/.test(uf),
+    '不能把 mouseenter 绑在会重建的 k 子元件上（iOS 点击会丢）');
+  assert.ok(/Promise\.race\(\[\s*Promise\.all\(opening\)/.test(uf) && /wait\(2500\)/.test(uf),
+    '开箱动画要有 2.5s 上限，rAF 不派发时不能永远等 Promise.all');
   /* ③ 接线：经典模式用 SfFight，且加载顺序在 main.js 之前。 */
   const mainSrc = fs.readFileSync(path.join(ROOT, 'js/main.js'), 'utf8').replace(/\r\n/g, '\n');
   assert.ok(/UI\.currentUiMode && UI\.currentUiMode\(\) === 'classic'/.test(mainSrc),
@@ -1792,7 +1819,7 @@ function checkBalanceAndRewardContracts() {
    * `mirrorInPlace` 写的是 `translate(2cx) scale(-1,1)`，会把这份锚点整段覆盖掉，
    * 贴图整体左上偏一个包围盒原点 —— 用户 2026-10 报的"战斗里身体装备完全没合身、
    * 旁边多出一段手臂"就是这条。朝向由敌方整棵 7689 的父级镜像负责，不再二次翻转。 */
-  assert.ok(/clip\.setSymbol\(p\.symbol, p\.frame, 1, 'topleft', gearSlotTail\(clip, p\)\)/.test(uf)
+  assert.ok(/clip\.setSymbol\(p\.symbol, p\.frame, 1, 'topleft'\)/.test(uf)
     && !/if \(p\.type === 2\) mirrorInPlace\(clip\)/.test(uf),
     '战斗里身体装备不能再二次镜像：会覆盖 setSymbol 的 topleft 锚点，贴图整体偏移');
   assert.ok(/rec\.pickups && !rec\.o\.skipChest/.test(uf),
@@ -1856,12 +1883,14 @@ function checkHeroAtlasFilling() {
   assert.ok(/function makeAtlasNpcFighter\(/.test(uf) && /function makeStaticNpcFighter\(/.test(uf)
     && /function makeNpcFighter\([\s\S]{0,500}?npcAtlasReady\(npcType\)/.test(uf),
     '三侠优先走现代图集，图集没到时才退回 7689 静态稿');
-  assert.ok(/Engine\.drawFrame\(ctx, frame, \{ sheets: NPC_SHEETS\[npcType\] \}\)/.test(uf)
+  assert.ok(/Engine\.drawFrame\(ctx, frame, \{ sheets: (?:NPC_SHEETS\[npcType\]|bodySheets) \}\)/.test(uf)
     && /canvas\.width = 1170; canvas\.height = 690;/.test(uf)
     && /host\.appendChild\(canvas\)/.test(uf) && /function layoutCanvas\([^)]*\)/.test(uf)
     && /canvas\.width \/ 1170, 0, 0, canvas\.height \/ 690/.test(uf)
     && !/createElementNS\(NS, 'foreignObject'\)/.test(uf),
     '现代 1170×690 动画要画进叠在 HTML 宿主上的普通 canvas；不能再用 foreignObject + canvas（WebKit 合成层会丢缩放/位移）');
+  assert.ok(/mutant && Engine\.mutantSheets/.test(uf) && /ensureMutantSheets\(kind\)/.test(uf),
+    '超级三侠（变异三侠）在经典战斗里也走换色图集，普通三侠仍用原版图集');
   /* 2026-10 用户口径：iOS 15.6.1 经典模式挑战三侠时「定位与缩放大幅改变」。
    * 根因是全面屏下 #ui 的 sx !== sy，覆盖层却只用一个屏幕/设计比例折算。 */
   assert.ok(/host\.clientHeight > 0/.test(uf) && /const ky = host\.clientHeight \/ hr\.height/.test(uf)
@@ -1876,6 +1905,17 @@ function checkHeroAtlasFilling() {
   assert.ok(/function makeBattleTopLayer\(/.test(uf) && /topLayer\.appendChild\(sk\.g\)/.test(uf)
     && /z-index:3/.test(uf),
     '跳过键要移到图集 canvas 之上的覆盖 SVG 里，保持原版层序/画稿/热区');
+  /* 三侠 canvas 是 HTML 层：底图必须拆到它下面、主 SVG 抬到它上面，否则 NPC 会盖住
+   * 伤害数字 / 状态图标 / 技能特效。只隐藏静态身体，不能把 holder 整棵（含 statu）藏掉。 */
+  assert.ok(/function makeBattleBackLayer\(/.test(uf)
+    && /makeBattleBackLayer\(battle, root\)/.test(uf)
+    && /layer\.appendChild\(node\)/.test(uf)
+    && /main\.style\.zIndex = '2'/.test(uf)
+    && /z-index:0/.test(uf)
+    && /z-index:1/.test(uf)
+    && /const staticBody = holder\.__hero/.test(uf)
+    && !/if \(holder && holder\.g\) holder\.g\.style\.visibility = 'hidden'/.test(uf),
+    '三侠图集层要拆成「底图 < canvas < 主 SVG < 顶部覆盖」；只隐藏静态身体，状态图标/特效留在主 SVG');
   assert.ok(!/foreignObject/.test(read('js/battle.js')),
     '现代战斗播放器是普通 #stage canvas，不能引入 foreignObject（iOS WebKit 合成层会丢缩放/位移）');
   assert.ok(/NPC_HIT_FRAME\[name\]/.test(uf) && /npcEffectName\(npcType, key\)/.test(uf)
@@ -2098,8 +2138,8 @@ function checkClassicSystemStyle() {
   const sysAt = ui.indexOf('function openSystem()');
   const sysBody = ui.slice(sysAt, ui.indexOf('function importSave()', sysAt));
   assert.ok(sysAt > 0 && sysBody.length > 0, '找不到系统页实现');
-  assert.equal((sysBody.match(/sysBtn\(/g) || []).length, 7,
-    '游戏设置应为 6 颗常规键 + 1 颗有调试账本时才出现的「调试所得」键；界面模式单独成卡');
+  assert.equal((sysBody.match(/sysBtn\(/g) || []).length, 8,
+    '游戏设置应为 8 颗键（存档导出/导入/修改昵称/跳过按钮 + 分辨率/全面屏/状态栏/调试面板），界面模式单独成卡');
   assert.ok(/settings-mode-card/.test(sysBody) && /data-action="uimode"/.test(sysBody) &&
     /当前：' \+ esc\(modeNow\)/.test(sysBody),
     '界面模式要单独成卡，并显示当前模式与切换目标');
@@ -2111,8 +2151,10 @@ function checkClassicSystemStyle() {
     '等级徽标不能再用荧光绿 #7cfc00');
   assert.ok(!/sysBtn\(mute\?/.test(sysBody), '不再有独立的「音乐：开/关」按钮');
   assert.ok(/function openDebugLedger\(\)/.test(ui) && /State\.clearDebugGains/.test(ui) &&
-    /debug-ledger/.test(sysBody) && /settings-debug-row/.test(sysBody),
-    '系统页要有「调试所得」索引入口：只回收调试部分并保留可追溯历史');
+    /debug-ledger/.test(sysBody) && /data-action="skip-display"/.test(sysBody),
+    '系统页要有「调试面板」与「跳过按钮」两个开关入口：调试只回收调试部分并保留可追溯历史');
+  assert.match(css, /\.settings-grid\.system-grid\{grid-template-columns:repeat\(4,1fr\)\}/,
+    '系统设置 8 颗键排成两排 4 个');
   assert.match(sysBody, /class="settings-head"><h3 class="classic-section-title">游戏设置<\/h3>'\+slider\+'<\/div>'\+modeCard\+grid/,
     '音乐音量与游戏设置标题同排，按钮网格保持两排');
   assert.match(sysBody, /music-setting[\s\S]{0,800}?music-toggle/, '音乐音量改成设置键同款胶囊 + 开关热区');
@@ -2128,6 +2170,13 @@ function checkClassicSystemStyle() {
   assert.match(css, /\.sf-system-ui \.uc-button\.on\{[\s\S]{0,180}?#d2f497/, '选中的系统按钮是绿色');
   assert.match(css, /\.setting-slider\.music-setting\.on\{[\s\S]{0,180}?#d2f497/, '音乐开启时胶囊转绿');
   assert.match(css, /\.sf-system-ui \.help-item\{[\s\S]{0,120}?#fff9df/, '帮助物品格同步未选中黄色');
+  /* 「切换界面模式」确认框：取消 / 切换两颗键放大，并从卡片下沿抬起来
+   * （用户 2026-10 口径："取消和切换键按钮太小了太靠下，调大往上移动一点"）。
+   * ⚠ JS 的 class 与这里的 CSS 必须成对存在（双机同步已覆盖过两次）。 */
+  assert.ok(/classList\.add\('mode-switch-dialog'\)/.test(ui) &&
+    /\.classic-modal-overlay\.mode-switch-dialog>\.classic-modal\.small-modal\{[^}]*max-height:560px/.test(css) &&
+    /\.classic-modal-overlay\.mode-switch-dialog>\.classic-modal\.small-modal>\.modal-buttons \.uc-button\{[^}]*min-height:86px[^}]*font-size:44px/.test(css),
+    '切换界面模式的两颗键要放大（44px / 86px）并留出下边距，不再贴着卡片下沿');
 }
 
 /* ---------- 38. 查看敌人：灰武器/技能、返回不刷新、查看装备文字收紧 ---------- */
@@ -2291,8 +2340,9 @@ function checkHelpContent() {
     !ids.includes(6) && !ids.includes(9) &&
     help && !help.includes('**') && !help.includes('composeType') &&
     /套装收益（仅现代界面）/.test(help) && /挑战塔<\/b>/.test(help) && /无尽塔<\/b>/.test(help) &&
-    /宝石<\/b>：45 级后/.test(help),
-    '帮助页要删掉绿松果/松鼠拳套，宝石/套装/黑装精简，并补挑战塔/无尽塔介绍'
+    /宝石<\/b>：45 级后/.test(help) &&
+    ids.includes(51) && /属性碎片/.test(cu) && /10 个属性碎片/.test(cu),
+    '帮助页要删掉绿松果/松鼠拳套，宝石/套装/黑装精简，并补挑战塔/无尽塔与属性碎片介绍'
   );
 }
 
@@ -2477,6 +2527,7 @@ function checkClassicTowerShell() {
   const vil = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-village.js'), 'utf8').replace(/\r\n/g, '\n');
   const tw = fs.readFileSync(path.join(ROOT, 'js/tower-ui.js'), 'utf8').replace(/\r\n/g, '\n');
   const cu = fs.readFileSync(path.join(ROOT, 'js/classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  const main = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-main.js'), 'utf8').replace(/\r\n/g, '\n');
   const ff = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-fight.js'), 'utf8').replace(/\r\n/g, '\n');
   const ce = fs.readFileSync(path.join(ROOT, 'js/classic-extras.js'), 'utf8').replace(/\r\n/g, '\n');
   const ch = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-challenge.js'), 'utf8').replace(/\r\n/g, '\n');
@@ -2500,6 +2551,11 @@ function checkClassicTowerShell() {
     /if \(run && run\.matching\) return;/.test(ch) &&
     /if \(classic && !run\.busy && !run\.settled && arenaMatchPage\(\)\)/.test(ce),
     '幻兽左上信息不能被裁掉；经典征战塔不能带现代菜单条，并要用经典外壳/返回村庄征战；竞技赛事页展示 3 秒后自动进战斗'
+  );
+  assert.ok(
+    /async function mountVillage\(container\)[\s\S]{0,1400}?Main\.resizeLayout\(\)/.test(main) &&
+    /classic-home ssfight-home" aria-label="松鼠村庄"[\s\S]{0,380}?Main\.resizeLayout\(\)/.test(cu),
+    '从塔页回到村庄时要重新按 320×196 量 #ui 高度，否则村庄 SVG 只按 690 高铺满，左右会留空'
   );
 }
 
@@ -2542,13 +2598,14 @@ function checkMessageRankAndTowerCg() {
     /info && info\.gear/.test(tw) && /M-0\.15,-9Q/.test(tw) && /M-48\.65,-50\.85/.test(tw) &&
     /planHtml\(info\.preview, ' horizontal'\)/.test(tw) &&
     /classic-tower \.tower-plan:not\(\.horizontal\):not\(\.boss-grid\)\{display:flex!important;flex-direction:column!important/.test(css) &&
-    /classic-tower \.tower-plan \.foe-portrait:has\(\.sf-classic-foe\)\{[^}]*background:rgba\(255,248,230,\.9\)!important[^}]*border:2px solid #e2c68f!important/.test(css) &&
+    /classic-tower \.tower-plan \.foe-portrait:has\(\.sf-classic-foe\)[^{]*\{[^}]*background:rgba\(255,248,230,\.9\)!important[^}]*border:2px solid #e2c68f!important/.test(css) &&
     /classic-tower \.tower-plan:not\(\.horizontal\):not\(\.boss-grid\) li\{display:grid!important;grid-template-columns:92px minmax/.test(css) &&
     /classic-tower \.tower-plan:not\(\.horizontal\):not\(\.boss-grid\) li > \.tower-plan-type\{[^}]*max-width:100%/.test(css) && /white-space:normal!important/.test(css) &&
     /function wireRowHover\(/.test(msg) && /addEventListener\('mousemove'/.test(msg) && /setRow\(n, inside\)/.test(msg) &&
     /function claimRankCup\(/.test(ce) && /rankCupClaimWeek/.test(st) && /claimRankCup/.test(ch) && /rank-claim/.test(ch) &&
-    /hideVictoryCg/.test(ff) && /hideVictoryCg: opts\.hideVictoryCg/.test(mn) && /hideVictoryCg: classicTower\(\)/.test(tw),
-    '消息两条都要整行悬停反馈；天梯领取奖励要按原版发50金杯；经典塔胜利不要战果 CG'
+    /hideVictoryCg/.test(ff) && /hideVictoryCg: opts\.hideVictoryCg/.test(mn) &&
+    /hideVictoryCg: mode === 'endless' \|\| classicTower\(\)/.test(tw),
+    '消息两条都要整行悬停反馈；天梯领取奖励要按原版发50金杯；无尽塔胜利后不弹战果 CG（挑战塔仅经典村庄入口藏）'
   );
 }
 
@@ -2688,6 +2745,17 @@ function checkBagTabVectorSelection() {
       .every((n) => !fs.existsSync(path.join(ROOT, 'images/ui/icons/' + n + '.png'))),
     '经典道具页的背包/商店/兑换要用原版 7150/7152/7156 矢量页签（f1 金/f2 绿，选中用 f2），不再引用 tab-*.png'
   );
+  /* 每日幸运抽奖也要复用道具页的页签矢量与原版 3911 返回键，不再手搓「返回道具」底栏。 */
+  const ce = fs.readFileSync(path.join(ROOT, 'js/classic-extras.js'), 'utf8').replace(/\r\n/g, '\n');
+  const lotterySrc = ce.slice(ce.indexOf('function lottery()'), ce.indexOf('/* ====', ce.indexOf('function lottery()')));
+  assert.ok(/installBagTabVectors\(p\)/.test(lotterySrc)
+    && /wirePopTaps\(p, \{ tabs: true \}\)/.test(lotterySrc)
+    && /mountClassicBack\(p, leaveLottery\)/.test(lotterySrc)
+    && /noFooter: true/.test(lotterySrc)
+    && !/返回道具/.test(lotterySrc),
+    '每日幸运抽奖顶部页签走原版矢量与经典反馈、底部返回键走 3911，不再自建「返回道具」');
+  assert.ok(/installBagTabVectors, wirePopTaps, mountClassicBack: mountRankShopBack, destroyClassicBack: destroyRankShopBack/.test(cu),
+    '经典 UI 要导出页签矢量、页签反馈与原版 3911 返回键的公共入口');
 }
 
 /* ---------- 背包/商店/兑换选中格：绿色遮罩必须在道具图下方 ---------- */
@@ -2698,28 +2766,6 @@ function checkBagSelectedLayer() {
     /\.bag-grid \.catalog-cell\.selected \.item-icon::after\{[^}]*z-index:0[^}]*background:rgba\(125,190,45,\.26\)/.test(css),
     '选中道具时绿色遮罩必须在道具图下方（img z-index:1 / ::after z-index:0），不能把道具本身的颜色压绿'
   );
-}
-
-/* ---------- 手臂甲槽位超差补偿（狂战 / 深海那 7 帧） ----------
- * 用户 2026-10 口径：主界面动画与战斗里穿狂战铠甲时，脸侧多出一只手臂。
- * 根因是持有者槽位矩阵（-34.9,-29.55）远大于 `手臂B` 画稿 bbox（-3.76,-2.25），
- * `anchorToBBox('topleft')` 抵消不掉这层大偏移，袖口就飘到脸侧。
- * 工具层只在超差时补差额，正常帧必须返回空串（不能改既有观感）。 */
-function checkArmGearTail() {
-  const env = { console };
-  env.window = env;
-  env.document = { createElementNS: () => ({ setAttribute() {}, appendChild() {}, addEventListener() {} }) };
-  env.setInterval = () => 0; env.clearInterval = () => {};
-  env.setTimeout = () => 0; env.clearTimeout = () => {};
-  vm.createContext(env);
-  vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-main.js'), 'utf8'), env);
-  const tail = env.SfUiMain && env.SfUiMain.toolkit && env.SfUiMain.toolkit.gearSlotTail;
-  assert.equal(typeof tail, 'function', 'toolkit 要导出 gearSlotTail（主界面与战斗共用）');
-  const t = (ma, sym) => tail({ g: { __baseMa: ma } }, sym == null ? '2008' : sym);
-  assert.equal(t('1,0,0,1,-34.9,-29.55'), 'translate(31.140,27.300)', '狂战铠甲槽位超差要补回手臂落点');
-  assert.equal(t('1,0,0,1,-22.5,-13.5'), 'translate(18.740,11.250)', '深海服槽位超差同样要补');
-  assert.equal(t('1,0,0,1,-2.65,-1.8'), '', '正常帧不许加补偿（不能改既有观感）');
-  assert.equal(t('1,0,0,1,-34.9,-29.55', '1909'), '', '只修手臂甲 2008，身体/头/拳套/鞋不动');
 }
 
 /* ---------- 战斗脸部：保持原始表情深度，思考虹膜正确继承动态蒙版 ---------- */
@@ -2757,7 +2803,13 @@ async function checkEyeLayerOrder({ env, Node, body }) {
         if (frame === 11) assert.equal(view.nodes.get(47).node.getAttribute('filter'), null,
           '真色诱恢复正常肤色时不能保留前一张画稿的颜色滤镜');
         const filters = [...view.root.querySelectorAll('filter')];
-        if (frame >= 8) assert.ok(filters.length > 0, '真色诱必须实际覆盖颜色变换定义');
+        const filterNodes = [...view.root.querySelectorAll('[filter]')];
+        /* 纯色颜色变换现在直接烘焙进 fill/stroke（不再生成 filter）；渐变/位图仍走 filter。
+         * 两种都算"实际覆盖了颜色变换定义"。 */
+        const baked = [...view.root.querySelectorAll('[data-sf-baked]')];
+        const hasCx = [...view.frames[frame - 1]].some(([, p]) => p.cx);
+        if (hasCx) assert.ok(filterNodes.length + baked.length > 0,
+          '真色诱必须实际覆盖颜色变换定义（frame ' + frame + ' filters=' + filterNodes.length + ' baked=' + baked.length + '）');
         for (const filter of filters) {
           assert.equal(filter.getAttribute('color-interpolation-filters'), 'sRGB',
             'Flash 的颜色乘加必须在 sRGB 中计算，不能把发色和脸部变灰');
@@ -2845,10 +2897,46 @@ async function checkStableFrameRefresh({ env, Node, body }) {
   }
 }
 
+/* ---------- 经典战斗：纯色 cx 直接烘焙、伤害数字模板显式隐藏 ---------- */
+async function checkFightColorBake(fixture) {
+  const { env, Node, body } = fixture;
+  const shape = 'runtime-bake-shape', parent = 'runtime-bake-parent';
+  const tags = [
+    { id: shape, tp: 2, pt: [{ da: 'M0 0H20V20H0Z', fi: 0 }], Fs: [{ c: 'rgb(100,150,200)', tp: 1 }] },
+    { id: parent, tp: 39, Sf: [
+      { tp: 26, d: 1, id: shape, cx: { Rm: 128, Gm: 128, Bm: 128 } }, { tp: 1 },
+      /* 导出器用 opacity 表示"显式重置 ColorTransform"（见 render.js 的 buildFrames）。 */
+      { tp: 26, d: 1, id: shape, opacity: 1 }, { tp: 1 },
+    ] },
+  ];
+  const fetch = env.fetch;
+  env.fetch = async url => String(url).endsWith('runtime-bake-test.json')
+    ? { ok: true, json: async () => tags } : fetch(url);
+  try { await env.SfRender.loadExtra('runtime-bake-test.json'); }
+  finally { env.fetch = fetch; }
+  const host = body.appendChild(new Node('section'));
+  const view = await env.SfRender.mountSymbol(host, parent, { policy: {} });
+  try {
+    const path = view.root.querySelector('path');
+    /* 公式与 feFuncX linear 一致：slope = 128/256 = 0.5，intercept = 0。 */
+    assert.equal(path.getAttribute('fill'), 'rgb(50,75,100)', '纯色 cx 必须烘到 fill，不再走滤镜');
+    assert.equal(path.getAttribute('data-sf-baked'), '1');
+    assert.equal(view.root.querySelector('filter'), null, '可烘焙的颜色变换不能再建 SVG filter');
+    view.gotoAndStop(2);
+    assert.equal(path.getAttribute('fill'), 'rgb(100,150,200)', 'cx 撤销后必须还原原稿颜色');
+    assert.equal(path.getAttribute('data-sf-baked'), null);
+  } finally { view.destroy(); host.remove(); }
+  const fightSrc = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-fight.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(fightSrc, /if \(c\) visible\(c, false\);/, '伤害数字模板必须显式隐藏，不能只靠停在空帧');
+  assert.match(fightSrc, /const applyNumber = \(\) => \{[\s\S]*?playClip\(bloodMc, \{ onFrame/,
+    '伤害数字要在 bloodMc 起播后的前几帧重取当前 num，避免换帧回到 0000');
+}
+
 (async () => {
   const fixture = await checkClassicViewLifecycle();
   await checkDynamicMaskReuse(fixture);
   await checkStableFrameRefresh(fixture);
+  await checkFightColorBake(fixture);
   await checkConcurrentAssetLoad();
   checkSharedFeedbackLifecycle();
   await checkFightResults(fixture);
@@ -2860,7 +2948,6 @@ async function checkStableFrameRefresh({ env, Node, body }) {
   checkClassicMainEnergy();
   checkBagTabVectorSelection();
   checkBagSelectedLayer();
-  checkArmGearTail();
   await checkEyeLayerOrder(fixture);
   checkClassicRankFlow();
   checkGearColorParity();

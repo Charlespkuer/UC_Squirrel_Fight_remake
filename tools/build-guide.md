@@ -395,8 +395,20 @@ Node 依赖及专用构建缓存。只有远程构建成功、版本和下载完
 > 产物：
 > - `src-tauri/dist/squirrel_fight_<version>_ios_unsigned.ipa`：**iOS 26/27**（带 UIScene）；
 > - `src-tauri/dist/squirrel_fight_<version>_ios_legacy_unsigned.ipa`：**iOS 15~25**（传统生命周期，不声明 UIScene）。
+> - 需要签名时：`*_ios_signed.ipa`（iOS 26+）与 `*_ios_legacy_signed.ipa`（iOS 16–25）；两者 Bundle ID 相同，
+>   但只能按系统版本装对应的那个 —— iOS 26+ 装 legacy 会启动闪退。
 >
-> 两个包都是 **未签名**，用 Sideloadly / AltStore / 爱思助手 自己的 Apple ID 自签；免费账号 7 天有效，不需要开发者账号。
+> 需要企业签名时再跑 `node tools/sign-ios.cjs`（默认签当前版本的 legacy 未签名包）：
+> - `src-tauri/dist/squirrel_fight_<version>_ios_legacy_signed.ipa`：同一份 iOS 15~25 前端与二进制，
+>   Info.plist 的 `CFBundleIdentifier` 改成描述文件 App ID，`embedded.mobileprovision` + entitlements 齐全。
+>
+> 未签名包用 Sideloadly / AltStore / 爱思助手 自己的 Apple ID 自签；免费账号 7 天有效，不需要开发者账号。
+>
+> **存档导出 / 导入（iOS）**：游戏内「系统 → 导出存档」把 JSON 写到 App 沙盒的 `Documents/`；
+> `Info.ios.plist` 的 `UIFileSharingEnabled` + `LSSupportsOpeningDocumentsInPlace` 会让它在
+> 「文件」App → 我的 iPhone/iPad → 松鼠大战 里可见。导入点「系统 → 导入存档」：
+> 可以选「选择文件（文件 App）…」，也可以走「粘贴存档文本…」兜底（WKWebView 文件选择器失灵时用）。
+> 导出成功弹窗还会给「分享到其它 App」「复制存档文本」，方便换机 / 传给别人。
 >
 > ⚠ **换包更新必须沿用同一 bundle ID / 同一签名身份**。未签名或 TrollStore 安装的是
 > `com.ssdz.classic`；用企业描述文件签名时 Info.plist 会被改成描述文件里的 App ID
@@ -419,6 +431,10 @@ node tools/build-ios.cjs --check   # 只检查环境
 node tools/build-ios.cjs           # iOS 26/27（带 UIScene）
 node tools/build-ios.cjs --legacy  # iOS 15~25（传统生命周期）
 node tools/build-ios.cjs --clean   # 先删 gen/apple/build 再打
+node tools/build-ios.cjs --clean --build 105   # 需要覆盖同版本旧包时显式抬高 CFBundleVersion
+node tools/sign-ios.cjs            # 把当前版本的 legacy 未签名包签成 *_legacy_signed.ipa
+node tools/sign-ios.cjs --input src-tauri/dist/squirrel_fight_<version>_ios_unsigned.ipa \
+  --output src-tauri/dist/squirrel_fight_<version>_ios_signed.ipa   # iOS 26+ 的 scene 签名包
 ```
 
 **为什么要两个包**：iOS 26+ 强制 UIScene，没声明 `UIApplicationSceneManifest` 会启动即崩；
@@ -434,8 +450,10 @@ AppDelegate 生命周期；两个包的前端与二进制完全相同，只有 I
    `TARGETED_DEVICE_FAMILY=1,2`；默认加 `UIApplicationSceneManifest`（`SupportsMultipleScenes=true`），
    `--legacy` 时删掉它；
 4. `objectVersion 77 → 55`（CocoaPods 1.11 的 xcodeproj 只认到 55）、删掉 Podfile 里不存在的 macOS target、`pod install`；
-5. `tauri ios build --no-sign --archive-only`，从 `.xcarchive/Products/Applications` 取 `.app`，封成
-   `Payload/squirrel_fight.app` 的 zip（`zip -qry`）。
+5. `tauri ios build --no-sign --archive-only`，从 `.xcarchive/Products/Applications` 取 `.app`；
+   归档后强制写 `CFBundleShortVersionString=<version>`、`CFBundleVersion=<版本号去点>`（1.0.4 → 104），
+   再封成 `Payload/squirrel_fight.app` 的 zip（`zip -qry`）。Tauri 自带的 `--build-number` 会把数字拼到
+   主版本上（1.104），不要用它。
 
 注意：
 

@@ -49,7 +49,19 @@ const TAURI = path.join(ROOT, 'src-tauri');
 const GEN = path.join(TAURI, 'gen', 'apple');
 const DIST = path.join(TAURI, 'dist');
 const CLI = path.join(TAURI, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
+/* 版本只有一个来源：`src-tauri/tauri.conf.json`。工程文件是生成物，里面的
+ * `CFBundleShortVersionString` 可能是旧的（实测 1.0.4 时仍是 1.0.2），必须在
+ * `xcodegen generate` 之前同步回来，否则打出来的包名是 1.0.4、包内版本却是旧值。 */
+const VERSION = JSON.parse(fs.readFileSync(path.join(TAURI, 'tauri.conf.json'), 'utf8')).version || '0.0.0';
 const ARGS = process.argv.slice(2);
+/* `--build 105`：iOS 26+ 修复包要覆盖 iOS 27 上已装的同版本 104 时，必须有一个更高的
+ * CFBundleVersion（manifest 的 bundle-version 也同步用它）。默认仍由版本号去点得到。 */
+const BUILD_OVERRIDE = (() => {
+  const i = ARGS.indexOf('--build');
+  const v = i >= 0 ? String(ARGS[i + 1] || '') : '';
+  return /^\d+(?:\.\d+){0,2}$/.test(v) ? v : '';
+})();
+const BUILD_NUMBER = BUILD_OVERRIDE || String(VERSION.split('.').map((n) => String(Math.max(0, parseInt(n, 10) || 0))).join('')) || '1';
 const CHECK_ONLY = ARGS.includes('--check');
 const CLEAN = ARGS.includes('--clean');
 const LEGACY = ARGS.includes('--legacy');
@@ -138,6 +150,9 @@ function patchProjectYml() {
     '$1          - UIInterfaceOrientationLandscapeLeft\n          - UIInterfaceOrientationLandscapeRight\n'
   );
 
+  text = text.replace(/CFBundleShortVersionString: [^\n]*/g, 'CFBundleShortVersionString: ' + VERSION);
+  text = text.replace(/CFBundleVersion: [^\n]*/g, 'CFBundleVersion: "' + BUILD_NUMBER + '"');
+
   if (!/CFBundleDisplayName:/.test(text)) {
     text = text.replace(/(        CFBundleVersion: [^\n]*\n)/, [
       '$1',
@@ -195,6 +210,21 @@ function patchProjectYml() {
     fs.writeFileSync(file, text);
     ok('project.yml：横屏 / 中文名 / iPhone+iPad 已补丁');
   }
+
+  /* 启动页默认是 systemBackgroundColor（白色）：冷启动/退出动画时四边会先闪一圈白，
+   * iOS 用户看到的「白边」有一部分就是它。工程文件是生成物，每次 build 都补成黑底。 */
+  const launch = path.join(GEN, 'LaunchScreen.storyboard');
+  if (fs.existsSync(launch)) {
+    let screen = fs.readFileSync(launch, 'utf8');
+    const black = '<color key="backgroundColor" red="0" green="0" blue="0" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>';
+    const next = screen
+      .replace(/<color key="backgroundColor" systemColor="systemBackgroundColor"\s*\/>/, black)
+      .replace(/<color key="backgroundColor"[^>]*\/>/, black);
+    if (next !== screen) {
+      fs.writeFileSync(launch, next);
+      ok('LaunchScreen.storyboard：黑底');
+    }
+  }
   run('xcodegen', ['generate'], { cwd: GEN });
 }
 
@@ -241,6 +271,8 @@ if (CLEAN) {
 }
 info('开始归档（' + (LEGACY ? 'legacy / iOS 15~25，无 UIScene' : 'scene / iOS 26+，带 UIScene') +
   '；未签名；Rust + 134 MB 前端资源，首次约 5–10 分钟）');
+/* ⚠ 不要用 `tauri ios build --build-number`：它把数字拼到主版本上（1.0.4 + 104 → 1.104），
+ * 不是 CFBundleVersion。构建号统一在归档后写 Info.plist（见下面的 `plutil -replace`）。 */
 run(process.execPath, [CLI, 'ios', 'build', '--no-sign', '--archive-only', '--ci'], { cwd: TAURI });
 
 /* ---------- 4. 找 .app 并封 IPA ---------- */
@@ -257,13 +289,18 @@ if (!apps.length) fail('归档里没有 .app：' + appsDir);
 const app = path.join(appsDir, apps[0]);
 
 const conf = JSON.parse(fs.readFileSync(path.join(TAURI, 'tauri.conf.json'), 'utf8'));
-const version = conf.version || '0.0.0';
+const version = VERSION || conf.version || '0.0.0';
 const out = path.join(DIST, 'squirrel_fight_' + version +
   (LEGACY ? '_ios_legacy_unsigned.ipa' : '_ios_unsigned.ipa'));
 fs.mkdirSync(DIST, { recursive: true });
 
 /* 校验关键 plist 字段，防止补丁没生效 */
 const plist = path.join(app, 'Info.plist');
+/* Tauri 会按 `tauri.ios.conf.json` 的 bundleVersion 把 CFBundleVersion 写回 1；归档后
+ * 统一改成「版本号去点」（1.0.4 → 104），保证签发/安装能看出比上一版新。 */
+run('plutil', ['-replace', 'CFBundleShortVersionString', '-string', version, plist], { stdio: 'ignore' });
+run('plutil', ['-replace', 'CFBundleVersion', '-string', BUILD_NUMBER, plist], { stdio: 'ignore' });
+ok('Info.plist：CFBundleShortVersionString=' + version + '，CFBundleVersion=' + BUILD_NUMBER);
 const plistGet = (key, fmt) => capture('plutil', ['-extract', key, fmt || 'raw', '-o', '-', plist]);
 const bundleId = plistGet('CFBundleIdentifier').out.trim();
 const minOs = plistGet('MinimumOSVersion').out.trim();
@@ -272,7 +309,18 @@ const orient = plistGet('UISupportedInterfaceOrientations', 'json').out.trim();
 const sceneInfo = plistGet('UIApplicationSceneManifest', 'json');
 const scene = sceneInfo.out.trim();
 const display = plistGet('CFBundleDisplayName').out.trim();
+const shortVersion = plistGet('CFBundleShortVersionString').out.trim();
+const buildNumber = plistGet('CFBundleVersion').out.trim();
 if (bundleId !== 'com.ssdz.classic') fail('CFBundleIdentifier 不对：' + bundleId);
+if (shortVersion !== version) fail('包内版本号不是 ' + version + '：' + shortVersion + '（工程文件没同步？）');
+if (buildNumber !== BUILD_NUMBER) fail('包内构建号不是 ' + BUILD_NUMBER + '：' + buildNumber);
+/* 存档导出依赖 Documents 在「文件」App 可见：少任何一个键，玩家点导出就找不到文件。 */
+const fileSharing = plistGet('UIFileSharingEnabled').out.trim();
+const openInPlace = plistGet('LSSupportsOpeningDocumentsInPlace').out.trim();
+if (fileSharing !== 'true' || openInPlace !== 'true') {
+  fail('Info.plist 缺少文件 App 共享声明（UIFileSharingEnabled=' + fileSharing +
+    '，LSSupportsOpeningDocumentsInPlace=' + openInPlace + '）');
+}
 if (families !== '[1,2]') fail('UIDeviceFamily 不是 iPhone+iPad：' + families);
 if (orient.indexOf('Portrait') >= 0 || orient.indexOf('Landscape') < 0) fail('屏幕方向不是仅横屏：' + orient);
 if (LEGACY) {

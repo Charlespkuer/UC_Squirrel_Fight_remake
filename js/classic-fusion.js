@@ -115,12 +115,16 @@
       const pips = [0, 1, 2].map((i) => '<i class="' + (i < selected.length ? 'on' : '') + '"></i>').join('');
       const nextQuality = first ? (first.quality >= 5 ? 5 : first.quality + 1) : 0;
       const previewLabel = first ? (first.quality >= 5 ? '黑装洗练' : (qualities[nextQuality] || '') + partLabel(first)) : '更高品质';
-      const previewHint = first ? '产物部位随首件材料' : '必得 1 件';
-      const guaranteeText = first && first.quality >= 5 ? '同部位黑装洗练 · 材料会被消耗' : '品质提升一级 · 材料会被消耗';
+      /* 三件同套（且该套有下一品质档）时，产物是确定的：提示里直接写出来。
+       * `fusionFamilyInfo` 与实际 `mergeGears` 共用 State 的同一份判定。 */
+      const pickedGears = selected.map((key) => gears.find((g) => g.key === key)).filter(Boolean);
+      const sameSet = pickedGears.length === 3 && State.fusionFamilyInfo ? State.fusionFamilyInfo(pickedGears) : null;
+      const previewHint = sameSet ? '同套必得：' + sameSet.family : (first ? '产物部位随首件材料' : '必得 1 件');
+      const guaranteeText = sameSet ? '同套必得该套 · 品质提升一级'
+        : first && first.quality >= 5 ? '同部位黑装洗练 · 材料会被消耗' : '品质提升一级 · 材料会被消耗';
       /* 已选材料能提供的词条并集：不重复列出同名效果，玩家融合前就能看到候选池。 */
       const pickedTags = new Set();
-      selected.map((key) => gears.find((g) => g.key === key)).filter(Boolean)
-        .forEach((g) => State.extText(g.ext).forEach((x) => pickedTags.add(x)));
+      pickedGears.forEach((g) => State.extText(g.ext).forEach((x) => pickedTags.add(x)));
       const pickedHtml = selected.length
         ? '<div class="fusion-picked-exts"><b>可继承词条</b><div class="fusion-ext-tags">' +
             ([...pickedTags].map((x) => '<span class="fusion-ext-tag">' + esc(x) + '</span>').join('') ||
@@ -135,7 +139,7 @@
         /* 规则条只留一行（flex + nowrap + 省略号），细节全部收进「详细规则」弹窗 ——
          * 之前把整段说明塞在这里，<br> 会被 flex 拆成一堆竖条，还会把下面的装备列表挤没。 */
         '<p class="fusion-rules"><b>规则</b>' +
-        '<span class="fusion-rules-text">3 件<em>同品质</em>装备（部位/名字可不同）→ 1 件<em>品质高一级</em>；重合词条必继承，其余各 50%</span>' +
+        '<span class="fusion-rules-text">3 件<em>同品质</em>装备（部位/名字可不同）→ 品质高一级；3 件同套且有下一品质档 → 必得该套；重合词条必继承。</span>' +
         '<button type="button" class="uc-button tiny muted" data-fusion-action="rules">详细规则</button></p>' +
         '<div class="fusion-inventory-panel"><div class="fusion-inventory-heading"><h3>选择装备<span class="fusion-pips" aria-label="已放入 ' + selected.length + ' / 3">' + pips + '</span><span class="fusion-count">已放入 ' + selected.length + '/3</span></h3><button type="button" class="uc-button tiny muted" data-fusion-action="clear"' + (selected.length ? '' : ' disabled') + '>清空材料</button><div class="fusion-pagination"><button type="button" class="uc-button tiny" data-fusion-action="previous" aria-label="上一页装备"' + (pageIndex === 0 ? ' disabled' : '') + '><i class="chev chev-l" aria-hidden="true"></i></button><span>' + (pageIndex + 1) + ' / ' + pages + '</span><button type="button" class="uc-button tiny" data-fusion-action="next" aria-label="下一页装备"' + (pageIndex + 1 >= pages ? ' disabled' : '') + '><i class="chev chev-r" aria-hidden="true"></i></button></div></div>' +
         '<div class="fusion-inventory">' + (cards || '<div class="fusion-empty">还没有可以选择的装备。<br><span>收集装备碎片，可在道具中合成装备。</span></div>') + '</div></div>' +
@@ -191,6 +195,7 @@
         ' · 蓝 ' + State.gearCostOf(2) + ' · 紫 ' + State.gearCostOf(3) + ' · 橙 ' + State.gearCostOf(4) + ' 金松果（按材料品质）。</p>' +
         '<p><b>产物</b>部位随第一件材料、品质高一级的 1 件；3 紫 → 传说橙（可镶嵌宝石）；' +
         (modernMode() ? '现代界面已删除黑装，橙装不能再融合。' : '3 橙 → 黑色装备（原版 composeType=3，材料就是橙装）。') + '</p>' +
+        '<p><b>同套保底</b>三件材料同属一套（如狂战头盔/拳甲/铠甲）且该套有下一品质档时，产物必定是同套装的下一品质、首件材料部位；同套黑装 46/67、47/68 取 id 最小件。该套没有下一品质档（早期白/绿套）或材料跨套时按下面这条随机规则；品质 5 的黑装已是最高档，三件黑装仍按同部位洗练（97% 同家族）。</p>' +
         '<p><b>名称</b>三件同名 ' + same(3) + ' 保名 / ' + mut(3) + ' <em>变异</em>；' +
         '两件同名 ' + same(2) + ' 保名 / ' + mut(2) + ' <em>变异</em> / ' + other(2) + ' 随机其它装备；' +
         '三件全不同名则完全随机。橙→黑时变异池是深海/机器猫/怒战/狂战；品质太低（没有对应变异件）时不掷变异，那部分并入随机。</p>' +

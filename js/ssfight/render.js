@@ -51,10 +51,15 @@
       const r = await fetch(BASE + file, { cache: 'force-cache' });
       if (!r || !r.ok) throw new Error('素材包缺失：' + file);
       const list = await r.json();
+      const exactGear = file === 'tags-gear.json' || file === 'tags-gear-color.json';
       for (const t of list) {
         const k = String(t.id);
-        if (!b.hash.has(k)) b.hash.set(k, t);
+        /* 两套装备包都从原 SWF 恢复 MATRIX 精度，共享标签在生成时校验一致。
+         * 覆盖页面里同 id 的旧舍入稿；其余包不能因切页顺序把精度降回去。 */
+        if (exactGear || !b.hash.has(k)) b.hash.set(k, t);
       }
+      // 已量过的父容器可能依赖刚校准的子元件，下一次挂载须重新量真实边界。
+      if (exactGear) bboxCache.clear();
       if (!b.extra) b.extra = new Set();
       b.extra.add(file);
       return b;
@@ -393,6 +398,9 @@
   function setText(node, str, opts) {
     if (!node || !node.__textBox) return false;
     const b = node.__textBox;
+    /* `noClip`：战斗 HUD 的血量数字框只有 59 单位宽，六位数以上的生命会被字段框裁掉。
+     * 只对明确要求放开的字段生效（`refreshBlood`），其它界面仍按原版 EditText 裁切。 */
+    if (opts && opts.noClip) { b.box = null; b.renderSignature = null; }
     const text = (opts && opts.wrap) ? wrapText(node, str) : String(str == null ? '' : str);
     const h0 = (b.lines[0] && b.lines[0].h) || null;
     if (b.perRun) {
@@ -442,6 +450,132 @@
     }
     rootDefs.appendChild(f);
     return id;
+  }
+
+  /* ---------- 颜色变换：能直接改画的就不要再走 SVG 滤镜 ----------
+   * 原版把 ColorTransform 导成 placement.cx；以前一律做成 <filter> +
+   * feComponentTransfer。带装备的经典战斗里这种滤镜能到 100+ 个（狂战/黑装把
+   * 同一套灰稿按部位染色）：每个滤镜都是一次离屏合成，在 Android WebView 上
+   * 既拖帧，也会在部分 GPU 上把整棵子树画丢、画黑。这里把**纯色**填充/描边
+   * 直接做同样的线性变换（公式与 cxFilter 完全一致：
+   *   out = clamp(c.Rm / 256 * v + c.Ra)），把滤镜省掉；
+   * 渐变 / 图案 / 位图 / 嵌套滤镜仍保留原滤镜，避免改变它们的观感。 */
+  /* 只烘焙不透明 rgb：rgba 的 alpha 不在 feFuncRGB 里，烘焙会把它变成不透明。 */
+  const COLOR_RGB = /^rgb\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)$/i;
+  const COLOR_HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+  function parseSolidColor(v) {
+    const s = String(v || '').trim();
+    if (!s) return null;
+    let m = COLOR_RGB.exec(s);
+    if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
+    m = COLOR_HEX.exec(s);
+    if (m) {
+      const h = m[1].length === 3 ? m[1].split('').map((x) => x + x).join('') : m[1];
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+    }
+    return null;
+  }
+  /** 与 `cxFilter` 的 feFuncX 线性档同一公式。 */
+  function cxChannel(c, mk, ak, value) {
+    const slope = c[mk] === undefined ? 1 : Number(c[mk]) / 256;
+    const intercept = c[ak] === undefined ? 0 : Number(c[ak]);
+    return Math.max(0, Math.min(255, Math.round(slope * value + intercept)));
+  }
+  /** 这个 cx 是否只改 RGB、且 alpha 恒等（否则还是交给滤镜处理整组合成）。 */
+  function cxRgbOnly(c) {
+    if (!c) return false;
+    const am = c.Am === undefined ? 256 : Number(c.Am);
+    const aa = c.Aa === undefined ? 0 : Number(c.Aa);
+    return am === 256 && aa === 0;
+  }
+  const PAINT_TAGS = { path: 1, rect: 1, circle: 1, ellipse: 1, polygon: 1, polyline: 1, text: 1 };
+  /** 深度遍历元素（不用逗号选择器：最小 DOM 回归只认单选择器）。 */
+  function walkElements(node, fn) {
+    for (const c of node.childNodes || []) {
+      if (!c || c.nodeType !== 1) continue;
+      fn(c);
+      walkElements(c, fn);
+    }
+  }
+  function colorPaintList(node) {
+    if (!node || !node.childNodes) return null;
+    /* 子树里还有滤镜、或已经有**别的节点**烘焙过的 cx（嵌套颜色变换）：
+     * 父级再烘会覆盖子级的合成结果，这一档仍交给 SVG 滤镜。 */
+    let blocked = false;
+    walkElements(node, (p) => {
+      if (blocked) return;
+      if (p.getAttribute('filter') != null) { blocked = true; return; }
+      if (p.__sfBakedBy && p.__sfBakedBy !== node) { blocked = true; return; }
+      /* 子树里还有会自己换帧的 MovieClip：它换帧后新画稿不会经过父级的烘焙，
+       * 这一档必须保留父级 filter（滤镜作用在整棵子树上，换帧也跟得上）。 */
+      if (p.__clip && p.__clip.frames && p.__clip.frames.length > 1) { blocked = true; return; }
+      if (!PAINT_TAGS[String(p.tagName || '').toLowerCase()]) return;
+      for (const attr of ['fill', 'stroke']) {
+        const raw = p.getAttribute(attr);
+        if (raw == null || raw === 'none') continue;
+        if (/^url\(/i.test(raw)) { blocked = true; return; }  // 渐变 / 图案 / 位图
+        if (/^(inherit|currentColor|context-fill|context-stroke)$/i.test(raw)) { blocked = true; return; }
+        if (!parseSolidColor((p.__sfBasePaint && p.__sfBasePaint[attr]) || raw)) { blocked = true; return; }
+      }
+    });
+    if (blocked) return null;
+    const paints = [];
+    walkElements(node, (p) => {
+      if (!PAINT_TAGS[String(p.tagName || '').toLowerCase()]) return;
+      for (const attr of ['fill', 'stroke']) {
+        const raw = p.getAttribute(attr);
+        if (raw == null || raw === 'none') continue;
+        const base = (p.__sfBasePaint && p.__sfBasePaint[attr]) || raw;
+        paints.push({ el: p, attr: attr, base: base, rgb: parseSolidColor(base) });
+      }
+    });
+    return paints;
+  }
+  /** 把 cx 烘到纯色填充/描边上。成功返回 true（不要再挂 filter）；失败返回 false。 */
+  function bakeColorTransform(node, c) {
+    if (!cxRgbOnly(c)) return false;
+    const paints = colorPaintList(node);
+    if (!paints || !paints.length) return false;
+    for (const p of paints) {
+      if (!p.el.__sfBasePaint) p.el.__sfBasePaint = {};
+      p.el.__sfBasePaint[p.attr] = p.base;
+      p.el.__sfBakedBy = node;
+      p.el.setAttribute('data-sf-baked', '1');
+      p.el.setAttribute(p.attr, 'rgb(' + cxChannel(c, 'Rm', 'Ra', p.rgb[0]) + ','
+        + cxChannel(c, 'Gm', 'Ga', p.rgb[1]) + ',' + cxChannel(c, 'Bm', 'Ba', p.rgb[2]) + ')');
+    }
+    return true;
+  }
+  /** 去掉 cx 时把**本节点**烘焙过的颜色还原成原稿（不动子级自己烘的色）。 */
+  function restoreColorTransform(node) {
+    if (!node || !node.childNodes) return;
+    walkElements(node, (p) => {
+      if (p.__sfBakedBy !== node) return;
+      const b = p.__sfBasePaint;
+      if (b) for (const k of Object.keys(b)) p.setAttribute(k, b[k]);
+      p.__sfBasePaint = null;
+      p.__sfBakedBy = null;
+      p.removeAttribute('data-sf-baked');
+    });
+  }
+  /** 给某个节点应用一档 cx：优先烘焙；渐变/位图/alpha 仍走 SVG 滤镜。 */
+  function applyCx(node, c, rootDefs, tagId, depth) {
+    if (!node) return;
+    if (!c) {
+      /* 只有真烘过才遍历子树；绝大多数没有 cx 的节点每帧都走这里，不能退化成 O(N²)。 */
+      if (node.__sfBaked) { restoreColorTransform(node); node.__sfBaked = false; }
+      updateAttribute(node, 'filter', null);
+      return;
+    }
+    if (bakeColorTransform(node, c)) {
+      node.__sfBaked = true;
+      updateAttribute(node, 'filter', null);
+      return;
+    }
+    /* 烘不了（渐变/位图/嵌套滤镜）：先把本节点上一帧烘过的纯色还原，再挂滤镜，
+     * 否则滤镜会把已经乘过一次的颜色再乘一次。 */
+    if (node.__sfBaked) { restoreColorTransform(node); node.__sfBaked = false; }
+    updateAttribute(node, 'filter', 'url(#' + cxFilterFor(rootDefs, tagId, depth, c) + ')');
   }
 
   /* ---------- 帧构建：SWF 标签流 → 每帧「层级 → 放置」快照 ---------- */
@@ -542,6 +676,10 @@
           c.frame = (c.frame + 1) % c.frames.length;
           try { c.showFrame(); } catch (e) {}
         }
+        /* 每拍结束后的视图钩子：页面用它把"必须压在角色上面的装备骨"重新提到末尾
+         * （换帧会按深度重排 `myself` 的子节点，`liftBone()` 只做一次会被后续放置顶掉）。
+         * 只有主页注册了这个钩子，战斗/状态页不设，开销为零。 */
+        if (typeof view.onTick === 'function') { try { view.onTick(); } catch (e) {} }
       }
       if (!views.size) stopTicker();
     }, ms);
@@ -772,8 +910,7 @@
         prev.node.__baseMa = p.ma || null;
         applyNodeXform(prev.node);
         updateAttribute(prev.node, 'opacity', p.opacity);
-        const cxReuse = cxOf(p);
-        updateAttribute(prev.node, 'filter', cxReuse ? 'url(#' + cxFilterFor(this.rootDefs, this.tag.id, d, cxReuse) + ')' : null);
+        applyCx(prev.node, cxOf(p), this.rootDefs, this.tag.id, d);
         /* 蒙版可以在后续帧出现、撤销或改变覆盖深度，不能只更新已有 wrapper。
          * 保留眼珠等子实例的播放头，但按当前显示列表重新绑定裁剪关系。 */
         updateAttribute(prev.node, 'clip-depth', p.cD);
@@ -839,8 +976,7 @@
       node.__baseMa = p.ma || null;
       applyNodeXform(node);
       if (p.opacity !== undefined) node.setAttribute('opacity', p.opacity);
-      const cxNew = cxOf(p);
-      if (cxNew) node.setAttribute('filter', 'url(#' + cxFilterFor(this.rootDefs, this.tag.id, d, cxNew) + ')');
+      applyCx(node, cxOf(p), this.rootDefs, this.tag.id, d);
       if (p.cD !== undefined) node.setAttribute('clip-depth', p.cD);
       if (p.na) this.names.set(p.na, clip || node);
       /* 被蒙版罩住的兄弟：套一层带 clip-path 的 <g>（wrapper 不带 transform，

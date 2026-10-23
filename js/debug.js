@@ -19,7 +19,9 @@
   'use strict';
 
   /* 开发者开关：false = 经典界面不显示调试按钮/面板，调试开关也不生效；
-   * true  = 经典界面也照常可用。需要时只改这一行。 */
+   * true  = 经典界面也照常可用。需要时只改这一行。
+   * ⚠ 提交前必须保持 false：`test-ssfight-render` 的 checkDualSaveAndDebugGate 按这条断言
+   *   （经典界面默认隐藏调试入口，只保留这个源码开关）。本地调试临时改 true 别一起提交。 */
   const DEBUG_IN_CLASSIC = false;
 
   /* 【快进 24 小时】把「当前存档」的调试时钟偏移加到 Date.now 上。
@@ -167,7 +169,7 @@
           (picks ? '，武器/技能三选一 ' + picks + ' 组' : '，没有新的武技可选') +
           (S.freePoints ? '，本次分配弹窗里还有 ' + S.freePoints + ' 点没点完' : '');
       } },
-    { label: '一键升级（升1级）', note: '按正常升级结算一次经验，属性成长、升级礼包与武器/技能三选一照常；到 ' + MAX_LEVEL + ' 级就停下',
+    { label: '一键升级', note: '按正常升级结算一次经验，属性成长、升级礼包与武器/技能三选一照常；到 ' + MAX_LEVEL + ' 级就停下',
       run() {
         const S = State.state();
         if (S.level >= MAX_LEVEL) return '已经是 ' + MAX_LEVEL + ' 级或更高（调试上限 ' + MAX_LEVEL + '）';
@@ -189,19 +191,25 @@
     { label: '全道具 +10', run() {
         const S = State.state();
         let n = 0;
-        // 金松果/金杯/经验不是背包道具，跳过（要加它们用上面的「快速获取物品」）
-        propMap.each((id) => { if (+id > 0 && !CURRENCY_PROPS[+id]) { S.props[id] = (S.props[id] || 0) + 10; n++; } });
+        // 金松果/金杯/经验不是背包道具，跳过（要加它们用上面的「快速获取物品」）；
+        // 松鼠拳套 / 绿松果在本版没有产出与使用逻辑，也不发。
+        propMap.each((id) => {
+          if (+id > 0 && !CURRENCY_PROPS[+id] && !UNUSED_PROPS.has(+id)) {
+            S.props[id] = (S.props[id] || 0) + 10;
+            n++;
+          }
+        });
         State.save(); UI.refreshHome();
-        return n + ' 种道具各 +10（货币与经验已跳过）';
+        return n + ' 种道具各 +10（货币、经验与 2 件游戏内没有的道具已跳过）';
       } },
-    { label: '全部武器技能满级', run() {
+    { label: '武技满级', run() {
         const S = State.state();
         S.weapons = S.weapons.map((w) => w.split(':')[0] + ':15');
         S.skills = S.skills.map((s) => s.split(':')[0] + ':15');
         State.save();
         return '已有武器与技能已满级';
       } },
-    { label: '解锁全部关卡', run() {
+    { label: '解锁关卡', run() {
         const S = State.state();
         for (let id = 1; id <= 18; id++) S.stages[id] = { npcIndex: 3, passed: true };
         State.save();
@@ -222,7 +230,7 @@
         if (window.UI && UI.refreshHeader) UI.refreshHeader();
         return '当前界面已快进24小时：每日/周重置、体力恢复与弟子日供都按新一天结算（另一个界面不受影响）';
       } },
-    { label: '重弹「支持作者」提示', note: '把 30 级那次「自愿支持作者」的一次性提示恢复成待提示：下一次首页刷新或升级奖励处理完之后会再弹一次（正式流程只在升到 30 级时弹一次）',
+    { label: '重弹提示', note: '把 30 级那次「自愿支持作者」的一次性提示恢复成待提示：下一次首页刷新或升级奖励处理完之后会再弹一次（正式流程只在升到 30 级时弹一次）',
       run() {
         if (!(State.supportPromptReset && State.supportPromptReset())) return '当前版本没有这个接口';
         if (window.UI && UI.classic && UI.classic.maybeSupportPrompt) UI.classic.maybeSupportPrompt();
@@ -279,7 +287,9 @@
   /** 快速获取物品用的道具下拉：字典里的全部道具；金松果/金杯/经验标注成货币。 */
   function itemOptions() {
     const rows = [];
-    propMap.each((id, v) => { if (+id > 0) rows.push({ id: +id, name: v.name }); });
+    propMap.each((id, v) => {
+      if (+id > 0 && !UNUSED_PROPS.has(+id)) rows.push({ id: +id, name: v.name });
+    });
     rows.sort((a, b) => a.id - b.id);
     return rows.map((r) => {
       const tag = CURRENCY_PROPS[r.id] === 'gold' ? '（货币·金松果）' : CURRENCY_PROPS[r.id] === 'goldCup' ? '（货币·金杯）' : CURRENCY_PROPS[r.id] === 'exp' ? '（经验值）' : '';
@@ -411,6 +421,11 @@
   /* 8 金松果 / 15 经验 / 40 金杯在原版里就是货币或经验值，不是背包道具：
    * 挂进背包只是个用不掉的死物（useType 0/3），所以取物时直接加到对应字段上。 */
   const CURRENCY_PROPS = { 8: 'gold', 40: 'goldCup', 15: 'exp' };
+  /* 原始 GameDict 里有两行，但本版游戏内既没有产出途径、也没有使用逻辑：
+   *   6 松鼠拳套（被挑战经验 +40%）
+   *   9 绿松果（双倍金松果掉落）
+   * 调试「快速获取物品」的下拉与「全道具 +10」都不再列/发，避免发一堆用不掉的死物。 */
+  const UNUSED_PROPS = new Set([6, 9]);
   /** 直接往背包里加道具（调试用，不扣任何货币），并刷新首页/背包。
    *  仍然遵守 9999 的单件上限；金松果/金杯/经验走各自的货币字段。 */
   function grantItem(id, count) {
@@ -418,6 +433,7 @@
     if (!S) return '还没有存档，先开始游戏';
     const n = Math.max(1, Math.min(999, Math.round(Number(count) || 1)));
     const key = Number(id);
+    if (UNUSED_PROPS.has(key)) return '这件道具在游戏内没有产出与用途，调试添加已跳过';
     const def = propMap.getValue(key);
     if (!def) return '道具表里没有编号 ' + id;
     const currency = CURRENCY_PROPS[key];
@@ -534,7 +550,8 @@
       '<label class="debug-grant-row"><select data-item-select aria-label="选择要获取的道具">' + itemOptions() + '</select>' +
       '<input type="number" data-item-count min="1" max="999" step="1" value="10" inputmode="numeric" aria-label="获取数量">' +
       '<button type="button" class="uc-button tiny" data-item-grant="1">获取</button></label>' +
-      '<p class="debug-grant-note">直接进背包、不扣金松果；碎片、果实种子、天梯碎片等全部道具都在下拉里。</p></div>' +
+      '<p class="debug-grant-note">直接进背包、不扣金松果；碎片、果实种子、属性碎片等全部道具都在下拉里。</p>' +
+      '<p class="debug-grant-note">永久属性点硬上限 <b>651</b>（含调试）：到顶后属性丸/属性书会拒绝使用；直接改存档也会在保存、读档和战斗前收口。</p></div>' +
       '<div class="debug-grant debug-ws">' +
       '<span class="debug-grant-title">武技：快速获得 / 遗忘</span>' +
       '<label class="debug-grant-row debug-ws-row"><span class="debug-ws-tag">武器</span>' +
@@ -575,9 +592,9 @@
       '<div class="debug-actions">' +
       ACTIONS.map((a, i) => '<button type="button" class="uc-button tiny" data-act="' + i + '" title="' + esc(a.note || a.label) + '">' + esc(a.label) + '</button>').join('') +
       '</div><div class="debug-danger"><label class="debug-weapon"><span>开局武器</span><select data-weapon-select aria-label="彻底重置后的开局武器">' + weaponOptions('default') + '</select></label>' +
-      '<button type="button" class="debug-reset-account" data-reset-account="1">彻底重置账号</button>' +
+      '<button type="button" class="debug-reset-account" data-reset-account="1">彻底重置</button>' +
       '<span>清空存档回到全新开局：等级、属性、道具、装备、关卡进度，以及 1 级后随机领悟的武器与技能全部清掉。开局武器可先用上面的下拉选择（默认沿用原版的方天画戟）。</span></div>' +
-      '<p class="debug-foot">开关保存在 <b>ssdz_debug</b>，不写进正式存档。<button type="button" class="debug-link" data-reset="1">全部关闭并清除</button></p>' +
+      '<p class="debug-foot">开关保存在 <b>ssdz_debug</b>，不写进正式存档。<button type="button" class="debug-link" data-reset="1">全部关闭</button></p>' +
       '<output class="debug-msg" aria-live="polite"></output></div>';
 
     gear = document.createElement('button');
@@ -664,15 +681,15 @@
       const pickedName = picked === 'default' ? '原版初始武器'
         : picked === 'random' ? '随机一把' : (panel.querySelector('[data-weapon-select]').selectedOptions[0].textContent);
       // 两步确认，避免误点清掉进度
-      msg('再次点击「彻底重置账号」确认：清空 ' + who + ' 的全部进度与随机获得的武器/技能，开局武器「' + pickedName + '」');
+      msg('再次点击「彻底重置」确认：清空 ' + who + ' 的全部进度与随机获得的武器/技能，开局武器「' + pickedName + '」');
       const btn = panel.querySelector('[data-reset-account]');
       if (btn.dataset.armed !== '1') {
         btn.dataset.armed = '1';
         btn.textContent = '确认彻底重置？';
-        setTimeout(() => { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = '彻底重置账号'; } }, 4000);
+        setTimeout(() => { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = '彻底重置'; } }, 4000);
         return;
       }
-      btn.dataset.armed = ''; btn.textContent = '彻底重置账号';
+      btn.dataset.armed = ''; btn.textContent = '彻底重置';
       const r = resetAccount(who, picked === 'default' ? undefined : picked);
       for (const input of panel.querySelectorAll('input[type="checkbox"]')) input.checked = false;
       mark();

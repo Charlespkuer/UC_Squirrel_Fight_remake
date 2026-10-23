@@ -636,6 +636,46 @@ record('导入建档时的校验：合法存档放行、脏数据拦下', async 
   assert.ok(check({ name: 'x', level: 5, weapons: [], skills: [], props: [] }), 'props 是数组要拦下');
 });
 
+record('导入存档：先载入内存、写后核对，失败能回滚', () => {
+  /* 直接跑真实的 js/state.js：导入不再只是「把原文塞进存储」，
+   * 而是先在内存里按双槽规则载入、生成规范化正文，写盘后再核对当前槽位。
+   * 这一步锁住「提示成功、实际还是旧档」的假成功。 */
+  const storage = new Map();
+  const ctx = {
+    localStorage: {
+      getItem: (k) => storage.get(k) ?? null,
+      setItem: (k, v) => storage.set(k, String(v)),
+      removeItem: (k) => storage.delete(k),
+    },
+    console, Date, Math, setTimeout, clearTimeout,
+  };
+  ctx.window = ctx;
+  vm.createContext(ctx);
+  for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/state.js']) {
+    vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
+  }
+  const S = ctx.State;
+  S.newGame('旧档玩家');
+  S.state().level = 12;
+  S.save();
+  const before = S.exportPayload();
+  const imported = JSON.parse(before);
+  imported.name = '导入测试';
+  imported.level = 40;
+  imported.exp = 1234;
+  const prep = S.prepareImport(JSON.stringify(imported));
+  assert.ok(prep.ok, '合法存档要能准备导入：' + (prep && prep.msg));
+  assert.equal(S.state().name, '导入测试', '导入后内存里应是新档');
+  assert.equal(S.state().level, 40, '导入后内存等级应是 40');
+  assert.ok(S.verifyImport(prep), '写后核对：名字和等级必须与载入的一致');
+  assert.equal(JSON.parse(prep.payload).level, 40, '写盘正文应是规范化后的 40 级档');
+  const bad = S.prepareImport('{bad json');
+  assert.equal(bad.ok, false, '坏 JSON 必须拒绝');
+  assert.equal(S.state().level, 40, '坏 JSON 不能改内存');
+  assert.ok(S.restorePayload(before), '回滚快照要能重新载入');
+  assert.equal(S.state().level, 12, '回滚后应回到旧档');
+});
+
 record('安卓导入：文件选择器不能只认 application/json', () => {
   /* 微信/QQ/部分 OEM 文件管理器把导出的 .json 标成 text/plain 或 application/octet-stream；
    * `<input accept>` 只写 .json,application/json 时这些文件在选择器里不显示，表现就是
@@ -651,13 +691,44 @@ record('安卓导入：文件选择器不能只认 application/json', () => {
 record('桌面导出存档：安装版走 export_save 命令，便携轻壳走 /__export', async () => {
   const rust = fs.readFileSync(path.join(ROOT, 'src-tauri', 'src', 'lib.rs'), 'utf8').replace(/\r\n/g, '\n');
   const cu = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
-  assert.ok(/fn export_save\(file_name: String, data: String\)/.test(rust),
-    '安装版必须注册 export_save 命令');
+  assert.ok(/fn export_save\(app: tauri::AppHandle, file_name: String, data: String\)/.test(rust),
+    '安装版必须注册 export_save 命令（iOS 还要拿到 AppHandle 定位 Documents）');
   assert.ok(/path == "\/__export"/.test(rust) && /dirs::download_dir\(\)/.test(rust),
     '便携轻壳必须有 /__export 且写系统下载目录（dirs::download_dir）');
   assert.ok(/async function nativeSave\(/.test(cu) &&
     /invoke\('export_save', \{ fileName, data: text \}\)/.test(cu),
     '前端要优先调 export_save，失败再退回 Blob');
+});
+
+record('iOS 导出存档：Documents / 文件 App / 粘贴兜底', () => {
+  /* iOS 不能像桌面那样写系统「下载」目录，也不能赌 WKWebView 的 `<a download>`。
+   * 约定：Rust 把存档写进 App 的 Documents，Info.plist 打开文件共享；
+   * 前端给出「文件」App 路径，并在失败时提供系统分享 / 复制全文；
+   * 导入除文件选择器外，还必须有粘贴文本的保底入口。 */
+  const rust = fs.readFileSync(path.join(ROOT, 'src-tauri', 'src', 'lib.rs'), 'utf8').replace(/\r\n/g, '\n');
+  const cu = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  const plist = fs.readFileSync(path.join(ROOT, 'src-tauri', 'Info.ios.plist'), 'utf8');
+  assert.ok(/fn export_to_documents\(app: &tauri::AppHandle/.test(rust) &&
+    /document_dir\(\)/.test(rust) && /\"display\": format!\(\"「文件」App/.test(rust),
+    'iOS 导出要写 App 的 Documents，并返回「文件」App 的可读路径');
+  assert.ok(/<key>UIFileSharingEnabled<\/key>\s*<true\/>/.test(plist) &&
+    /<key>LSSupportsOpeningDocumentsInPlace<\/key>\s*<true\/>/.test(plist),
+    'Info.ios.plist 要让 Documents 在「文件」App 可见');
+  assert.ok(/function iosClient\(/.test(cu) && /function showIOSExportDone\(/.test(cu) &&
+    /function shareSaveFile\(/.test(cu) && /function copySaveText\(/.test(cu) &&
+    /function importSaveFromPaste\(/.test(cu),
+    '前端要有 iOS 导出提示 / 分享 / 复制，以及粘贴导入兜底');
+  /* iOS 16~24 的 WKWebView 没有系统文件选择面板（wry 只在 macOS 实现 runOpenPanel）。
+   * 导入必须能原生列出 App 的 Documents 并读回，不能只靠 <input type=file>。 */
+  assert.ok(/fn list_save_files\(/.test(rust) && /fn read_save_file\(/.test(rust) &&
+    /fn safe_import_name\(/.test(rust) && /document_dir\(\)/.test(rust),
+    'iOS 导入要有原生 list_save_files / read_save_file，并限制在 Documents 内的 .json');
+  assert.ok(/function openIOSExportList\(/.test(cu) && /invoke\('list_save_files'\)/.test(cu) &&
+    /invoke\('read_save_file', \{ name: it\.file \}\)/.test(cu),
+    'iOS 导入页要能列出并读取 App 导出的存档');
+  assert.ok(/State\.prepareImport/.test(cu) && /State\.verifyImport/.test(cu) &&
+    /restoreImportedSave\(beforeRaw, info\)/.test(cu),
+    '导入必须先载入内存、写后核对，并在失败时回滚旧档（不能假成功）');
 });
 
 (async () => {

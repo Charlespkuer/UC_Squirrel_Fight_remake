@@ -26,7 +26,7 @@
     const element = on(root, 'home', handler);
     if (element) element.textContent = label || '\u8fd4\u56de';
   }
-  function alert(text) { C().modal('\u63d0\u793a', '<p>' + esc(text) + '</p>', [{ label: '\u77e5\u9053\u4e86' }], { small: true }); }
+  function alert(text) { C().modal('\u63d0\u793a', '<p>' + esc(text) + '</p>', [{ label: '\u786e\u5b9a' }], { small: true }); }
 
   /* ============================================================
    * 【EX0】村庄「征战」→ 挑战塔 / 无尽塔 二选一
@@ -559,7 +559,7 @@
     const s = State.state(); State.tickEnergy();
     if (rankAttempt && rankAttempt.owner !== s) rankAttempt = null;
     if (s.level < 30) {
-      C().modal('\u5929\u68af\u8d5b', '<div class="extra-finalist">' + sprite(30) + '<div><h3>30\u7ea7\u5f00\u542f\u5929\u68af\u8d5b</h3><p>\u5f53\u524d\u7b49\u7ea7\uff1a' + s.level + '<br>\u5148\u53bb\u6311\u6218\u79ef\u7d2f\u7ecf\u9a8c\u5427\uff01</p></div></div>', [{ label: '\u53bb\u6311\u6218', run: () => UI.runAction('challenge') }, { label: '\u8fd4\u56de\u7ade\u6280\u573a', cls: 'muted', run: arena }]); return;
+      C().modal('\u5929\u68af\u8d5b', '<div class="extra-finalist">' + sprite(30) + '<div><h3>30\u7ea7\u5f00\u542f\u5929\u68af\u8d5b</h3><p>\u5f53\u524d\u7b49\u7ea7\uff1a' + s.level + '<br>\u5148\u53bb\u6311\u6218\u79ef\u7d2f\u7ecf\u9a8c\u5427\uff01</p></div></div>', [{ label: '\u53bb\u6311\u6218', run: () => UI.runAction('challenge') }, { label: '\u8fd4\u56de', cls: 'muted', run: arena }]); return;
     }
     if (s.integral == null) { s.integral = 1500; State.save(); }
     refreshRankShopDay();
@@ -570,7 +570,7 @@
     }));
     entries.push({ name: s.name, points: s.integral, level: s.level, mine: true }); entries.sort((a, b) => b.points - a.points);
     const p = C().page('challenge', 'arena', '<div class="extra-rank-layout"><div class="extra-rank-self">' + sprite(30) + '<h2>\u5929\u68af\u8d5b</h2><div class="extra-score">\u79ef\u5206 <b>' + s.integral + '</b></div><div class="extra-score">\u91d1\u676f <b>' + s.goldCup + '</b></div><div class="extra-score">\u5339\u914d\u6863\u4f4d <b>Lv' + rankFoeExpectLevel(s.integral) + '</b></div><p>\u4eca\u65e5\u5df2\u53c2\u8d5b ' + s.joinRankCount + ' / 20 \u573a<br>' + (s.joinRankCount >= 20 ? '\u4eca\u65e5\u53c2\u8d5b\u6b21\u6570\u5df2\u7528\u5b8c' : s.joinRankCount < 10 ? '\u672c\u6b21\u514d\u8d39\uff0c\u524d10\u573a\u514d\u8d39' : '\u672c\u6b21\u6d88\u80175\u91d1\u677e\u679c') + '</p>' + button('\u5f00\u59cb\u5339\u914d', 'rank-fight', 'small gold') + button('\u91d1\u676f\u5546\u5e97', 'rank-shop', 'small') + '</div><div class="extra-rank-list"><h3>\u672c\u5730\u6a21\u62df\u6392\u884c\u699c</h3>' + entries.map((entry, i) => '<div class="extra-rank-row ' + (entry.mine ? 'mine' : '') + '"><span>' + (i + 1) + '</span><b>' + esc(entry.name) + (entry.mine ? '\uff08\u4f60\uff09' : '') + ' Lv' + (entry.level || 1) + '</b><strong>' + entry.points + '</strong></div>').join('') + note('\u5929\u68af\u8d5b\u6bcf\u5929\u90fd\u53ef\u4ee5\u8fdb\u884c\uff1b\u91d1\u676f\u5546\u5e97\u6bcf\u5929\u5f00\u653e\u3002\u6bcf\u65e5\u6700\u591a20\u573a\uff0c\u524d10\u573a\u514d\u8d39\uff0c\u5176\u540e\u6bcf\u573a5\u91d1\u677e\u679c\u3002\u80dc\u5229\u5f973\u676f\uff0c\u843d\u8d25\u5f971\u676f\u3002\u79ef\u5206\u4e0e\u593a\u676f\u4e3a\u79bb\u7ebf\u6a21\u62df\uff1b\u83b7\u80dc\u670925%\u673a\u4f1a\u989d\u5916\u593a\u5f973\u676f\u3002\u5339\u914d\u5bf9\u624b\u7684\u7b49\u7ea7\u53ea\u8ddf\u79ef\u5206\u6302\u94a9\uff081500 \u5206\u5bf9\u5e94 30 \u7ea7\u6863\u3001\u6bcf +25 \u5206 +1 \u7ea7\u3001\u4e0a\u9650 70 \u7ea7\uff09\uff0c\u79ef\u5206\u4e0d\u4f1a\u88ab\u82b1\u6389\uff0c\u6240\u4ee5\u6863\u4f4d\u53ea\u4f1a\u8ddf\u7740\u6218\u7ee9\u8d70\u3002') + '</div></div>', { cls: 'extra-board rank-extra-board' });
-    back(p, arena, '\u8fd4\u56de\u7ade\u6280\u573a');
+    back(p, arena, '\u8fd4\u56de');
     on(p, 'rank-shop', () => rankShop(0));
     const match = on(p, 'rank-fight', () => {
       if (!p.isConnected || State.state() !== s || rankAttempt) return;
@@ -823,7 +823,7 @@
      * 抽中时结算弹窗会写明拿到了哪一枚（高级那档带「（高级！）」后缀）。 */
     { id: 7, pills: 1, superChance: SUPER_PILL_CHANCE, label: '\u968f\u673a\u836f\u4e38 \u00d71' }, { id: 36, count: 2, label: '\u82f1\u96c4\u5e16 \u00d72' },
   ];
-  let spinning = false, lotteryVersion = 0;
+  let spinning = false, lotteryVersion = 0, lotteryBackPage = null;
   /** 经典抽奖统一图标：金松果（8）用经典道具页那颗金松果，不再用现代 prop-8。 */
   const lotteryIcon = (id) => (Number(id) === 8 && C().goldIcon) ? C().goldIcon() : C().icon('prop', id);
   function refreshLotteryDay() {
@@ -851,6 +851,11 @@
     // dismiss that animation; its pending timer must not lock the new controls.
     const version = ++lotteryVersion;
     spinning = false;
+    /* 上次打开时挂在页面上的原版 3911 返回键视图：重开前先收掉，别让它在播放表里空转。 */
+    if (lotteryBackPage && C().destroyClassicBack) {
+      try { C().destroyClassicBack(lotteryBackPage); } catch (e) {}
+    }
+    lotteryBackPage = null;
     refreshLotteryDay();
     const s = State.state();
     const TICKET = 50;
@@ -894,8 +899,27 @@
       '<div class="extra-lottery-footer"><div><b data-lottery-status>\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21</b></div>' +
       '<div class="lottery-buttons">' +
       button(spinLabel(), 'lottery-spin', 'gold') + button('\u8fde\u62bd 10 \u6b21', 'lottery-spin10', 'gold') + '</div></div>';
-    const p = C().page('bag', 'bag', content, { cls: 'extra-board lottery-extra-board' });
-    back(p, () => UI.runAction('bag'), '\u8fd4\u56de\u9053\u5177');
+    /* 顶部「背包 / 商店 / 兑换」用道具页同一套原版页签矢量；底部不再自建手绘底栏，
+     * 改挂「随机挑战 → 查看」那一页的原版 3911 返回键（与金杯商店共用同一份实现）。 */
+    const p = C().page('bag', 'bag', content, { cls: 'extra-board lottery-extra-board', noFooter: true });
+    lotteryBackPage = p;
+    if (C().installBagTabVectors) C().installBagTabVectors(p);
+    if (C().wirePopTaps) C().wirePopTaps(p, { tabs: true });
+    const leaveLottery = () => {
+      if (C().destroyClassicBack) { try { C().destroyClassicBack(p); } catch (e) {} }
+      lotteryBackPage = null;
+      UI.runAction('bag');
+    };
+    if (C().mountClassicBack) C().mountClassicBack(p, leaveLottery);
+    /* 从顶部页签切走时也收掉 3911 的视图（否则旧页面被移除后它还在播放表里）。 */
+    if (p.addEventListener) {
+      p.addEventListener('click', (ev) => {
+        const hit = ev.target && ev.target.closest ? ev.target.closest('.classic-tabs .uc-tab') : null;
+        if (!hit) return;
+        if (C().destroyClassicBack) { try { C().destroyClassicBack(p); } catch (e) {} }
+        lotteryBackPage = null;
+      }, true);
+    }
 
     /* 抽奖动画：依次点亮奖品格；结束后回调（单抽 / 连抽共用）。 */
     const animateThen = (steps, done) => {
@@ -1149,8 +1173,8 @@
       image('images/ui/characters/master-classic.png', '\u5e08\u7236', 'extra-master-portrait') +
       '<div class="extra-master-main">' +
       '<div class="master-tabs">' +
-        '<button type="button" class="uc-tab' + (masterTab === 'master' ? ' active' : '') + '" data-mtab="master">\u6211\u7684\u5e08\u7236</button>' +
-        '<button type="button" class="uc-tab' + (masterTab === 'apprentice' ? ' active' : '') + '" data-mtab="apprentice">\u6211\u7684\u5f92\u5f1f\uff08' + s.prentices.length + '/' + cap + '\uff09</button>' +
+        '<button type="button" class="uc-tab' + (masterTab === 'master' ? ' active' : '') + '" data-mtab="master">\u5e08\u7236</button>' +
+        '<button type="button" class="uc-tab' + (masterTab === 'apprentice' ? ' active' : '') + '" data-mtab="apprentice">\u5f92\u5f1f</button>' +
       '</div>' +
       '<div class="master-panel">' + (masterTab === 'apprentice' ? apprenticeBlock : masterBlock) + '</div>' +
       note('\u5e08\u5f92\u5173\u7cfb\u4fdd\u5b58\u4e8e\u672c\u5730\uff1b\u5e08\u7236\u4e0e\u5f92\u5f1f\u5747\u7531\u672c\u5730\u968f\u673a\u751f\u6210\u3002') + '</div></div>',
@@ -1174,7 +1198,7 @@
         '<div><h3>\u5e08\u7236\uff1a' + esc(cand.name) + '\uff08' + cand.level + '\u7ea7\uff09</h3>' +
         '<p>' + esc((r.learned && r.learned.msg) || '\u5df2\u5b66\u4f1a\u3010\u5e08\u7236\u9a7e\u5230\u3011') + '</p>' +
         '<p class="extra-master-tip">\u53d1\u52a8\u300c\u5e08\u7236\u9a7e\u5230\u300d\u53ef\u6062\u590d\u5e08\u7236\u7b49\u7ea7 \u00d74 \u7684\u751f\u547d\uff0c\u4e14\u4e0b\u4e00\u6b21\u653b\u51fb\u5fc5\u4e2d\u3002</p></div></div>',
-        [{ label: '\u53bb\u770b\u770b\u5e08\u7236', run: () => master('master') }, { label: '\u8fd4\u56de', cls: 'muted', run: () => master('master') }]);
+        [{ label: '\u770b\u5e08\u7236', run: () => master('master') }, { label: '\u8fd4\u56de', cls: 'muted', run: () => master('master') }]);
     });
     on(p, 'master-leave', () => {
       if(!p.isConnected || State.state()!==s || !s.master)return;
@@ -1183,7 +1207,7 @@
       let left=false;
       if (s.goldPoint < cost) { alert('\u9000\u5e08\u95e8\u9700\u8981 ' + cost + ' \u91d1\u677e\u679c\uff0c\u73b0\u5728\u53ea\u6709 ' + s.goldPoint + '\u3002'); return; }
       C().modal('\u51fa\u5e08', '<p>\u786e\u5b9a\u79bb\u5f00\u3010' + esc(s.master.name) + '\u3011\u7684\u5e08\u95e8\u5417\uff1f\u9700\u8981\u82b1\u8d39 ' + cost + ' \u91d1\u677e\u679c\uff0c\u4e4b\u540e\u53ef\u4ee5\u91cd\u65b0\u62dc\u5e08\u3002</p>',
-        [{ label: '\u786e\u8ba4\u51fa\u5e08\uff08-' + cost + '\uff09', run: () => {
+        [{ label: '\u786e\u8ba4\u51fa\u5e08', run: () => {
           if(left || State.state()!==s || s.master!==leavingMaster)return;
           if(s.goldPoint<cost){alert('\u91d1\u677e\u679c\u4e0d\u8db320\uff0c\u65e0\u6cd5\u51fa\u5e08\u3002');return;}
           left=true;s.goldPoint-=cost;State.clearMaster();State.save();C().toast('\u5df2\u79bb\u5f00\u5e08\u95e8');master();
@@ -1200,7 +1224,7 @@
         canKick
           ? [{ label: '\u786e\u8ba4', run: () => { const r = State.kickPrentice(a.name); C().toast(r.msg); apprenticeSel = 0; master('apprentice'); } },
              { label: '\u8fd4\u56de', cls: 'muted' }]
-          : [{ label: '\u77e5\u9053\u4e86', cls: 'muted' }], { small: true });
+          : [{ label: '\u786e\u5b9a', cls: 'muted' }], { small: true });
     });
     on(p, 'master-recruit', () => {
       if (recruitBusy || !p.isConnected || State.state()!==s) return;

@@ -9,7 +9,8 @@
         "label": "main",
         "url": "index.html",
         "title": "松鼠大战 · 怀旧复刻版",
-        "resizable": false
+        "resizable": false,
+        "backgroundColor": "#000000"
       }
     ]
   },

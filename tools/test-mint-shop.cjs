@@ -1743,6 +1743,17 @@ hr('12. 100 层循环：商店件数与战斗奖励选项按层分档，每 100 
     const king = (c.TowerData.PATROL.kingPrefix || '') + c.TowerData.PATROL.name;
     assert.ok(html.includes(king), '图鉴应包含魔王：' + king);
     assert.ok(/？？？/.test(html), '魔王机制用 ？？？ 隐藏');
+    /* 敌人图鉴的顺序（用户 2026-10 口径）：三侠 → 首领 → 四雄 → 魔王。
+     * 三侠 / 四雄卡面不直接写攻击模式，机制统一放在 data-tip 悬停说明里。 */
+    const atHero = html.indexOf('boss-group-title">三侠');
+    const atPool = html.indexOf('boss-group-title">首领<');
+    const atCampaign = html.indexOf('boss-group-title">四雄');
+    const atDemon = html.indexOf('boss-group-title">魔王');
+    assert.ok(atHero >= 0 && atHero < atPool && atPool < atCampaign && atCampaign < atDemon,
+      'BOSS 一览顺序要是 三侠 → 首领 → 四雄 → 魔王');
+    assert.ok(!/boss-intro/.test(html), '三侠 / 四雄卡片不直接写攻击模式，机制只放在悬停说明');
+    const demonHtml = html.slice(atDemon);
+    assert.ok(/data-tip="？？？"/.test(demonHtml), '魔王悬停内容全部 ？？？，不写介绍');
   });
 
   check('无尽塔 boss 稀有度按轮内层数倾斜：低层偏低、高层偏高、51 层起无最低档', () => {
@@ -1858,7 +1869,44 @@ hr('13. 2026-10 用户口径：抽奖卷只在结算时算（放弃本局弹窗�
     assert.equal(after - before, pv.total, '实发必须等于预览：' + pv.total + ' vs ' + (after - before));
   });
 
-  check('深度曲线：1~50 层不变，第 51 层起每层 +5.55%（100 层约为旧值的 1/5）', () => {
+  check('结算战报保留整局收入与已失去增益，重载查看不重复发奖', () => {
+    const c = setup(5), T = c.Tower;
+    const ui = uiHarness(c);
+    /* 两次各触发三次免死：档位30→45，实际成就收入只有30+15。 */
+    for (let i = 0; i < 2; i++) {
+      const nx = T.nextBattle('endless');
+      T.reportBattle('endless', nx.token, true, 1500, 2000,
+        { rounds: Array.from({ length: 3 }, () => ({ deathSave: true })) });
+    }
+    T.debugGrantBuff('C01');
+    /* 超过调试流水的 100 条上限，结算仍须保留最早获得而后卖掉的增益。 */
+    for (let i = 0; i < 105; i++) T.debugGrantBuff('E02');
+    T._debugSpawnShop();
+    const sale = T.sellBuff('C01');
+    assert.ok(sale.ok && T.buyRetryToken().ok, '出售与消费走正式商店 API');
+    const pv = T.previewEndlessSummary(), balance = T._debugRun('endless').coins;
+    assert.equal(pv.achievements.reduce((sum, a) => sum + a.earnedPoints, 0), 45, '战报成就分相加使用实际增量');
+    assert.equal(pv.trialCoinsEarned, balance + c.TowerData.SHOP.retryPrice, '累计收入不能被消费扣低');
+    assert.equal(pv.mintEarned, 1, '购买的铸币属于本局收入');
+    assert.equal(pv.buffs.find((b) => b.id === 'C01').count, 1, '已卖掉的最早增益仍在战报里');
+    assert.equal(pv.buffs.find((b) => b.id === 'E02').count, 105, '即时增益次数不随调试流水截断');
+    const before = c.State.state().props[50] || 0;
+    c.TowerUI.openEndless(); ui.click('abandon'); ui.modalButton('放弃').run();
+    const out = { summary: T.endlessInfo().lastSummary };
+    assert.equal(ui.rendered[ui.rendered.length - 1].kind, 'page', '确认离场后用完整战报页承接');
+    assert.match(ui.last('page').content, /endless-summary.*data-outcome="lose"/, '普通离场展示失败结局');
+    assert.equal(out.summary.trialCoinsLeft, balance, '清空余额前捕获结算快照');
+    assert.equal(c.State.state().props[50] - before, out.summary.tickets, '预览与实发走同一口径');
+    assert.ok(c.State.load(), '结算后能正常读回存档');
+    assert.equal(JSON.stringify(T.endlessInfo().lastSummary), JSON.stringify(out.summary), '最后战报随存档保留');
+    const paid = c.State.state().props[50];
+    c.TowerUI.openEndless(); ui.click('last-summary');
+    assert.match(ui.last('page').content, /无尽塔本局战报/, '大厅能重新打开上局完整战报');
+    T.endlessInfo(); T.previewEndlessSummary(); T.abandon('endless');
+    assert.equal(c.State.state().props[50], paid, '重复查看或重复结算不会重发抽奖卷');
+  });
+
+  check('深度曲线：首轮不变，百层后折扣继承末值并重走首轮相对增长', () => {
     const c = setup(7);
     const KM = c.TowerData.endlessDepthMul;
     /* 1~50 层与旧口径逐层一致（用户要求「1~30／1~50 层的增幅别动」） */
@@ -1875,8 +1923,18 @@ hr('13. 2026-10 用户口径：抽奖卷只在结算时算（放弃本局弹窗�
     const old100 = Math.pow(1.07, 20) * Math.pow(1.09, 50);
     const ratio = KM(100) / old100;
     assert.ok(ratio > 0.18 && ratio < 0.21, '100 层应当是旧值的 1/5 左右，实测 ' + (ratio * 100).toFixed(1) + '%');
-    /* 仍然是「越深越强」的单调曲线（无尽塔不封顶） */
-    assert.ok(KM(101) > KM(100) && KM(150) > KM(101) && KM(200) > KM(150), '深层仍要单调变强');
+    const parts = c.TowerData.endlessScaleParts;
+    const discount = c.TowerData.ENDLESS_CYCLE_DISCOUNT;
+    for (const key of ['statCurve', 'hpCurve']) {
+      for (const end of [100, 200]) {
+        assert.ok(Math.abs(parts(end + 1)[key] / parts(end)[key] - discount) < 1e-12, key + '换轮应折扣继承');
+      }
+      for (let local = 1; local <= 100; local++) {
+        assert.ok(Math.abs(parts(100 + local)[key] / parts(101)[key] - parts(local)[key] / parts(1)[key]) < 1e-8,
+          key + '第 ' + local + ' 层应重复首轮相对增长');
+      }
+    }
+    assert.equal(KM(101), KM(1), '深度分量随轮内层数重置，完整基础独立继承');
     assert.ok(Math.abs(c.TowerData.endlessScaleParts(120).depth - KM(120)) < 1e-12, '界面出口与曲线同源');
   });
 }
@@ -2385,6 +2443,7 @@ hr('16. 2026-10 镜中世界：整百层打赢魔王 → 拾取照影之境 → 
     T.markStorySeen('layer100'); T.markStorySeen('x00a'); T.markStorySeen('x00b'); T.markStorySeen('x00c');
     /* 数据口径：传奇 + 剧情固定获得（不进任何随机池 / 商店 / 铸币商店）。 */
     const def = TD.BUFF_BY_ID[TD.MIRROR.id];
+    assert.equal(TD.ENDLESS_X00_BONUS_TICKETS, 10, '整百层收手奖励的默认值');
     assert.equal(def.rarity, 3, '照影之境应当是传奇档');
     assert.equal(def.flavor, '映出一具完美的躯壳', '拾取卡上的那句话');
     assert.equal(def.desc, '？？？', '进背包之后的介绍');
@@ -2423,33 +2482,40 @@ hr('16. 2026-10 镜中世界：整百层打赢魔王 → 拾取照影之境 → 
     assert.equal(T.mirrorStacks(), 1);
     assert.equal(T.endlessInfo().run.permUsed, usedBefore, '剧情件不占永久位');
     assert.equal(T.mirrorPending(), false, '拾取之后不该再判出拾取屏');
+    /* 整百层胜利后「就此收手」的额外奖励：预览与实际发奖同口径。 */
+    const pvWin = T.previewSettleTickets();
+    assert.equal(pvWin.bonusTickets, 10, '100 层胜利后离场额外 10 张抽奖卷');
+    assert.equal(pvWin.total, pvWin.layerTickets + pvWin.mintConverted + 10,
+      '预览总额 = 层数奖励 + 铸币折券 + 百层胜利奖励');
     /* 剧情件是「发下来的」，不是构筑的一部分：不能卖、不能被巡逻收走、不进出售列表。 */
     assert.equal(T.sellListOf('endless').filter((b) => b.id === 'C63').length, 0, '不该出现在出售 / 免费交换列表里');
     assert.equal(T.patrolTollCandidates().list.filter((x) => x.id === 'C63').length, 0, '不该进巡逻收缴候选');
     assert.equal(T.sacrificeCandidatesOf().filter((x) => x.id === 'C63').length, 0, '不该进放弃永久增益的候选');
-    /* 回到主界面：右下角是「继续挑战」，面板里排在最前面。 */
+    /* 拾取后展示本次百层胜利战报；照影之境保留在已获得记录中。 */
     c.TowerUI.openEndless();
     assert.match(ui.last('page').content, /继续挑战/, '右下角应当是「继续挑战」');
     assert.ok(!/进入试炼商店|进入铸币商店/.test(ui.last('page').content), '整百层不该出现「进入商店」');
     const panel = ui.last('page').content;
-    assert.ok(panel.indexOf('照影之境') > 0, '永久增益面板里要能看到它');
-    assert.ok(panel.indexOf('照影之境') < panel.indexOf('限次增益'), '它要排在「永久增益」那一段的最前面');
+    assert.match(panel, /endless-summary.*data-outcome="win"/, '本次百层真正胜利应当展示胜利战报');
+    assert.ok(panel.indexOf('照影之境') > 0, '胜利战报里要保留刚获得的照影之境');
+    assert.match(panel, /百层胜利额外 10 张/, '战报要写明整百层收手的 10 张额外抽奖卷');
     /* 「继续挑战」→ 确认弹窗 → 是 → 第 101 层（机制回到第 1 层的样子，数值接着长）。 */
     const scoreBefore = T._debugRun('endless').score;
-    ui.click('fight');
-    const m = ui.modalButton('是');
+    ui.click('summary-continue');
+    const m = ui.modalButton('进入');
     const modalText = JSON.stringify(ui.last('modal').content || '');
     assert.match(modalText, /无尽之塔中的魔王已被击败，继续在镜中世界进行挑战吗？/, '弹窗要问这一句');
     m.run();
     const r101 = T._debugRun('endless');
-    assert.equal(r101.layer, 101, '选「是」之后应当进第 101 层');
+    assert.equal(r101.layer, 101, '选「进入」之后应当进第 101 层');
     assert.equal(r101.idx, 0);
     assert.equal((r101.env || []).length, 0, '101 层与第 1 层同规矩：层内环境从头抽');
     assert.ok(r101.score >= scoreBefore, '分数继续累计（敌人数值也继续按公式长）');
     assert.equal(T.mirrorStacks(), 1, '照影之境跟着进下一层');
-    /* 每过 100 层叠一层。 */
+    assert.equal(T.previewSettleTickets().bonusTickets, 0, '进入 101 层后不再有百层收手奖励');
+    /* 每过 100 层叠一层；关闭剧情的挑战模式同样能从胜利战报领取离场。 */
+    T.setStoryEnabled(false);
     T._debugSetEndlessLayer(200);
-    T.clearRunStory('endless');
     T.markStorySeen('x00b'); T.markStorySeen('x00c'); T.markStorySeen('x00win');
     for (let i = 0; i < 3; i++) {
       T._debugRun('endless').choices = null;
@@ -2458,10 +2524,192 @@ hr('16. 2026-10 镜中世界：整百层打赢魔王 → 拾取照影之境 → 
       T.reportBattle('endless', nx.token, true, 5000, 5000);
     }
     assert.equal(T.mirrorPending(), true, '第 200 层同样要出拾取屏');
+    assert.equal(T.settleEndlessVictory().ok, false, '挑战模式也必须先拾取镜面奖励');
     const pick = T.takeMirrorReward();
     assert.equal(pick.ok, true, '第 200 层应当能再拾取一次');
     assert.equal(T.mirrorStacks(), 2, '照影之境应当叠到 2 层，实测 ' + T.mirrorStacks());
     assert.equal(T._debugRun('endless').permanent.length, 1, '叠层不是新增一行');
+    assert.equal(T._debugRun('endless').story, 'x00win', '挑战模式下仍可能留有被跳过的终章标记');
+    const ticketsBefore = c.State.state().props[50] || 0;
+    c.TowerUI.openEndless(); ui.click('summary-settle');
+    assert.equal(T.endlessInfo().run, null, '不手动清剧情也能从胜利战报领取并结束本局');
+    assert.match(ui.last('page').content, /endless-summary.*data-outcome="win"/, '领取后保留已结算的胜利战报');
+    const lastSummary = T.endlessInfo().lastSummary;
+    assert.equal(lastSummary.bonusTickets, 10, '第 200 层收手也发百层奖励');
+    assert.equal((c.State.state().props[50] || 0) - ticketsBefore, lastSummary.tickets, '10 张百层奖励已实际入包');
+  });
+
+  check('进入镜中世界封存首回合战斗属性，旧构筑重新入池且整局战报继续累计', () => {
+    const c = setup(100), T = c.Tower, TD = c.TowerData;
+    for (let i = 0; i < 3; i++) winOne(c);
+    for (const id of ['C26', 'C54', 'C15', 'C55', 'E05', 'E04', 'C30', 'C31', 'C17', 'C17', 'C20', 'C18', 'C51']) {
+      assert.ok(T.debugGrantBuff(id).ok, '可准备跨轮构筑：' + id);
+    }
+    let run = T._debugRun('endless');
+    run.env = []; run.noEnvRoll = true; run.debuffs = [];
+    const entryHp = Math.round(T.endlessInfo().run.curMaxHp * 0.3);
+    run.hpAbs = entryHp; run.carry = 0.3;
+    assert.ok(T.takeMirrorReward().ok);
+    run.phase = 'mirror'; run.idx = run.plan.length; run.mirrorTaken = 100;
+    const raw = c.State.totalStats({ useProps: false });
+    const makeMe = () => ({ power: raw.power, agility: raw.agility, speed: raw.speed,
+      hp: raw.hp, maxHp: raw.hp, baseStats: { power: c.State.state().power,
+        agility: c.State.state().agility, speed: c.State.state().speed }, weapons: [], skills: [], effects: {} });
+    /* 只封存静态数值：蛮力 +20% 本身；越战越勇 / 后发制人 / 战斗续航 / 狂怒 /
+     * 增幅水晶（纯局内倍率）/ 天命所归都不进入快照。 */
+    const staticPower = Math.max(1, Math.round(raw.power * 1.2));
+    const staticLifesteal = 0.15;
+    const history = JSON.stringify(run.runStats), wallet = run.coins;
+    assert.ok(T.enterMirrorWorld().ok);
+    run = T._debugRun('endless');
+    const snap = run.mirrorSnapshot;
+    assert.equal(snap.source.firstRound, true);
+    assert.equal(snap.source.power, staticPower, '只封蛮力 +20%，不封增幅水晶 / 回合成长');
+    assert.equal(snap.source.agility, raw.agility, '后发制人 / 狂怒不能折进敏捷');
+    assert.equal(snap.source.maxHp, raw.hp, '战斗续航 / 空血上限不能折进生命上限');
+    assert.ok(Math.abs(Number(snap.combat.lifestealPct) - staticLifesteal) < 1e-9, '静态吸血照常封存');
+    assert.equal(run.rarityBoost, 0, '天命所归不保留');
+    assert.equal(ids(run.permanent), 'C63'); assert.equal(run.limited.length, 0);
+    assert.equal(T.obtainedCountOf(run, 'C55'), 0);
+    assert.equal(T.ownableOf(run, TD.BUFF_BY_ID.C55), true, '同名唯一旧牌重新入池');
+    assert.equal(T.ownableOf(run, TD.BUFF_BY_ID.E04), true, '本轮一次的运营牌重新入池');
+    assert.equal(run.coins, wallet, '已赚余额保留'); assert.equal(run.shopDiscount, 0); assert.equal(run.permSlots, 0);
+    assert.equal(T.retryBattle().ok, false, '旧战前快照不能跨镜回滚');
+    assert.equal(JSON.stringify(run.runStats), history, '清构筑保留所有累计与收入');
+    const frozen = JSON.stringify(snap);
+    assert.equal(T.enterMirrorWorld().ok, false, '同一入口只吸收一次');
+    c.State.save(); assert.ok(c.State.load());
+    run = T._debugRun('endless');
+    assert.equal(JSON.stringify(run.mirrorSnapshot), frozen, '快照往返存档不重复吸收');
+    const next = T.nextBattle('endless'), carried = makeMe(); next.adjustMe(carried);
+    assert.equal(carried.power, staticPower);
+    assert.equal(carried.mods.roundStatPct || 0, 0, '旧回合成长不再运行');
+    assert.equal(carried.mods.catchUpPct || 0, 0, '旧对手依赖成长不再运行');
+    assert.equal(carried.mods.lowHpAgilityMul || 0, 0, '狂怒不能被误冻成永久敏捷');
+    assert.ok(Math.abs(Number(carried.mods.lifestealPct) - staticLifesteal) < 1e-9, '永久战斗吸血保留当时已增幅的数值');
+    T.interruptBattle('endless', next.token);
+    const changed = makeMe(); changed.power += 50;
+    const afterGear = T.nextBattle('endless'); afterGear.adjustMe(changed);
+    assert.equal(changed.power, Math.max(1, Math.round((raw.power + 50) * snap.stats.power.mul + snap.stats.power.flat)),
+      '外部基础改变后只应用已吸收倍率与固定增量');
+    T.interruptBattle('endless', afterGear.token);
+    assert.ok(T.debugGrantBuff('C15').ok);
+    const newCrystal = T.nextBattle('endless'), afterCrystal = makeMe(); newCrystal.adjustMe(afterCrystal);
+    assert.ok(Math.abs(Number(afterCrystal.mods.lifestealPct) - staticLifesteal) < 1e-9, '新水晶不会再次放大镜内旧吸血');
+  });
+
+  check('照影之境只吸收数值加成：C32/C33 与逢五强化不进入快照，101 层商店权重与第 1 层一致', () => {
+    const c = setup(100), T = c.Tower;
+    /* 先真的拿到神兵淬炼 / 秘技通神 / 逢五强化：前两者是选取型单次武装强化，
+     * 后者只在 5 的倍数层生效。进入 101 层后它们都必须从快照里消失。 */
+    c.State.setWS('weapon', 1, 1);
+    c.State.setWS('skill', 8, 1);
+    assert.ok(T.debugGrantBuff('C32').ok);
+    assert.ok(T.applyPickBuff('weapon', 1).ok);
+    assert.ok(T.debugGrantBuff('C33').ok);
+    assert.ok(T.applyPickBuff('skill', 8).ok);
+    assert.ok(T.debugGrantBuff('C09').ok);
+    let run = T._debugRun('endless');
+    assert.equal(run.weaponBoost[1], 1, 'C32 先记录武器强化');
+    assert.ok(Number(run.skillBoost[8]) > 0, 'C33 先记录技能强化');
+    run.noEnvRoll = true; run.env = []; run.debuffs = [];
+    const raw = c.State.totalStats({ useProps: false });
+    run.phase = 'mirror'; delete run.mirrorTaken;
+    assert.ok(T.takeMirrorReward().ok);
+    run.phase = 'mirror'; run.mirrorTaken = 100; run.idx = run.plan.length; run.choices = null; delete run.attempt;
+    assert.ok(T.enterMirrorWorld().ok);
+    run = T._debugRun('endless');
+    const snap = run.mirrorSnapshot;
+    assert.equal(snap.source.power, Math.max(1, Math.round(raw.power)), 'C32 的武器强化不能折进力量');
+    assert.equal(snap.source.agility, Math.max(1, Math.round(raw.agility)), 'C33 不能改变四维');
+    assert.equal(snap.source.speed, Math.max(1, Math.round(raw.speed)));
+    assert.equal(snap.source.maxHp, Math.max(1, Math.round(raw.hp)), 'C09 的逢五强化不能折进生命上限');
+    assert.equal(JSON.stringify(run.weaponBoost), '{}', '进入镜中世界后武器选取强化消失');
+    assert.equal(JSON.stringify(run.skillBoost), '{}', '进入镜中世界后技能选取强化消失');
+    assert.equal(JSON.stringify(run.pickBuffIds), '[]');
+    /* 商店权重：第 101 层与第 1 层在同一随机种子下必须逐件抽出同一货架。 */
+    const fresh = setup(1);
+    const freshRun = fresh.Tower._debugRun('endless');
+    for (let seed = 1; seed <= 20; seed++) {
+      c.__seed(seed * 104729);
+      fresh.__seed(seed * 104729);
+      const a = JSON.parse(JSON.stringify(run));
+      const b = JSON.parse(JSON.stringify(freshRun));
+      assert.equal(JSON.stringify(c.Tower.rollShopSlotsOf(a, 0).map((s) => s.id)),
+        JSON.stringify(fresh.Tower.rollShopSlotsOf(b, 0).map((s) => s.id)),
+        '第 101 层与第 1 层第 ' + seed + ' 个随机序列');
+    }
+  });
+
+  check('照影之境之后的加算/乘算增益依次结算，第二个照影之境以第一个结算后的值为白值', () => {
+    const c = setup(100), T = c.Tower;
+    const freezeAt = (layer) => {
+      let run = T._debugRun('endless');
+      run.noEnvRoll = true; run.env = []; run.debuffs = [];
+      run.phase = 'mirror'; delete run.mirrorTaken;
+      assert.ok(T.takeMirrorReward().ok);
+      run = T._debugRun('endless');
+      run.phase = 'mirror'; run.mirrorTaken = layer; run.idx = run.plan.length; run.choices = null; delete run.attempt;
+      assert.ok(T.enterMirrorWorld().ok);
+      return T._debugRun('endless');
+    };
+    const nextMe = () => {
+      const raw = c.State.totalStats({ useProps: false });
+      const nx = T.nextBattle('endless');
+      const me = { power: raw.power, agility: raw.agility, speed: raw.speed, hp: raw.hp, maxHp: raw.hp,
+        baseStats: { power: c.State.state().power, agility: c.State.state().agility, speed: c.State.state().speed },
+        weapons: [], skills: [], effects: {} };
+      nx.adjustMe(me);
+      T.interruptBattle('endless', nx.token);
+      return me;
+    };
+    const raw = c.State.totalStats({ useProps: false });
+    assert.ok(T.debugGrantBuff('C26').ok);
+    let run = freezeAt(100);
+    const first = run.mirrorSnapshot;
+    const firstPower = Math.max(1, Math.round(raw.power * 1.2));
+    assert.equal(first.source.power, firstPower, '首轮蛮力 +20% 已封存');
+    /* 101 层之后拿到第二张蛮力与增幅水晶：先镜面结算，再按 (1+0.2×1.4) 结算。 */
+    assert.ok(T.debugGrantBuff('C26').ok);
+    assert.ok(T.debugGrantBuff('C15').ok);
+    const after101Power = Math.max(1, Math.round(firstPower * (1 + 0.2 * 1.4)));
+    assert.equal(nextMe().power, after101Power, '新加算/乘算增益在照影之境之后结算');
+    /* 第 200 层再吸收：第二层以第一层结算后的值为白值；增幅水晶是纯局内倍率，
+     * 只影响 101 层当场战斗，不进入第二层快照。 */
+    T._debugSetEndlessLayer(200);
+    assert.ok(T.debugGrantBuff('C27').ok);
+    run = freezeAt(200);
+    const second = run.mirrorSnapshot;
+    /* 第二层以第一层结算后的力量为白值；但增幅水晶是纯局内倍率，不进入第二层快照，
+     * 所以这里只剩新蛮力的 +20%，而不是 101 层战斗中的 +28%。 */
+    const secondPower = Math.max(1, Math.round(firstPower * 1.2));
+    assert.equal(second.source.power, secondPower, '第二层照影以第一层结算后的力量为白值');
+    assert.equal(second.source.agility, Math.max(1, Math.round(raw.agility * 1.2)),
+      '第二层照影在第一个之后结算敏捷 +20%（不含增幅水晶）');
+    const at201 = nextMe();
+    assert.equal(at201.power, secondPower);
+    assert.equal(at201.agility, second.source.agility);
+    assert.equal(T.mirrorStacks(), 2);
+    assert.equal(run.permanent.length, 1);
+  });
+
+  check('减伤按乘算叠加：两条 −60% 是 −84%，不是加算到 −120% / 100% 减伤', () => {
+    const c = setup(7), T = c.Tower;
+    const run = T._debugRun('endless');
+    run.permanent = [];
+    run.limited = [
+      { id: 'N14', stacks: 1, uses: 10, on: true, uid: 1 },
+      { id: 'N14', stacks: 1, uses: 10, on: true, uid: 2 },
+    ];
+    run.choices = null; run.phase = null; delete run.attempt;
+    const nx = T.nextBattle('endless');
+    const me = { power: 1000, agility: 1000, speed: 1000, hp: 5000, maxHp: 5000,
+      baseStats: { power: 100, agility: 100, speed: 100 }, weapons: [], skills: [], effects: {} };
+    nx.adjustMe(me);
+    const want = (1 - 0.6) * (1 - 0.6) - 1;      // −0.84
+    assert.ok(Math.abs(Number(me.mods.lowHpTakenMul) - want) < 1e-9,
+      '两条 60% 减伤应当乘算成 −84%，实测 ' + me.mods.lowHpTakenMul);
+    T.interruptBattle('endless', nx.token);
   });
 }
 

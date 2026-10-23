@@ -330,8 +330,10 @@
     const [frames, slots] = await Promise.all([j('gear-frames.json'), j('gear-slots.json')]);
     if (!frames || !slots) return null;
     const cont = {};
-    for (const c of slots.container || []) cont[c.type] = c.ids;
-    /* 橙装是实例级 `orange:true`，底层仍是紫装 id；橙稿帧按「同部位同名字的 q4 帧」查，
+    /* showFace 的 mc_head/mc_hand 等挂点使用非 B 立绘容器；B 容器服务战斗骨骼，
+     * 注册原点不同，不能共用。缺失立绘表时不拿战斗稿补位。 */
+    for (const c of slots.portraitContainer || []) cont[c.type] = c.ids;
+    /* 橙装现在有原版 q4 id；旧档的实例 `orange:true` 仍兼容。橙稿帧按同部位同名字的 q4 帧查，
      * 与状态页 / 战斗 `planSide` 同一条规则。 */
     const keyOf = (g) => Number(g.type) + '|' + String(g.name || '');
     const q4 = new Map();
@@ -356,8 +358,14 @@
         ? ((orange && gearTables.orangeFrameById && gearTables.orangeFrameById.get(Number(g.id))) ||
            gearTables.frameById.get(Number(g.id)))
         : 0;
-      /* 强化等级的帧号加成：原版 `showFace` 里 `_loc5 += (max(addr1Lv..)-1)`。 */
-      const frame = base ? base + Math.max(0, (Number(g.ext) || 0) - 1) : 0;
+      /* 与状态页同源：附加属性是数组，只对头/拳套应用最大强化档；
+       * 衣服/鞋子跨档会变成另一套画稿，不能一起加偏移。 */
+      const raw = g && g.ext;
+      const extMax = Math.max(0, Math.min(3, Array.isArray(raw)
+        ? raw.reduce((m, e) => Math.max(m, Number(e && e.level) || 0), 0)
+        : Number(raw) || 0));
+      const addr = (row.type === 0 || row.type === 1) && extMax > 0 ? extMax - 1 : 0;
+      const frame = base ? base + addr : 0;
       for (const pair of row.cells) {
         const clip = bg.byName ? bg.byName(pair[0]) : null;
         if (!clip || !clip.detachAll) continue;
@@ -519,8 +527,8 @@
    *   生成器（`_analysis/tools/gen_battle*.py`）伪造的示例，不是原版战斗数据。
    * ⚠ 回合口径：原版 `maxRounds` 是 **60**（全局战斗上限），但 `Stakes.reduceBlood`
    *   重写后**不调用 checkDead** —— 木桩不会被打死，实际就是「固定回合 + 每回合回满」。
-   *   2026-10 用户口径：每攻击一回合后血量恢复 100%，同时单回合伤害封顶 800（最大生命），
-   *   所以血条不会再出现「打了半天还是残血/1 血」的误导。60 回合对练习太长，
+   *   2026-10 用户口径：每攻击一回合后血量恢复 100%；生命最低保留 1，伤害照真实数值记录，
+   *   下一回合先回满，再显示本回合扣血。60 回合对练习太长，
    *   这里按用户口径固定成 `rounds`（改这一个常量即可切回 60）。
    * 打完给的是「战斗统计」那一页（手/武/技三段伤害 + 历史最高 + 排名），不是普通战果。
    * ⚠ 原版那一行有 `countObj.count = 10000`（无限次）与 `wearsList = null`（不穿装备）。 */
@@ -840,11 +848,11 @@
    * 打它走 `fightType = 8`（`flash/exercise.do`，:2871-2884），战斗里挂的是 `Stakes` 木桩类：
    * `attack()` 等七个小节**全是空的** —— 它只站着挨打，所以力量 0 / 速度 0 是**故意**的
    * （打不动你），敏捷 15 让它偶尔闪避；800 血是抓包里的显示值，但 `Stakes` 不判死亡，
-   * 所以实战是「每回合回满 800 + 固定回合」的训练场，单回合最多打掉 800
+   * 所以实战是「每回合回满 800 + 固定回合」的训练场，生命最低保留 1，真实伤害照记
    *（回合口径见 `DUMMY.rounds`）。
    * 打完给的是「战斗统计」那一页（`getRecord()` :3252 → `showDeadManWin` :18218：
    * 手 / 武 / 技三段伤害 + 历史最高 + 同级排名），**不是**普通战果。
-   * 复刻这边 `woodCount` / `woodDamage` 落存档；`woodRecord` 只保留给旧档读取。 */
+   * `State.recordWoodBattle` 保存总伤害与三类分项最佳；`woodRecord` 只保留给旧档读取。 */
   function startDummyFight(foe) {
     const s = S();
     if (!s || !window.Main || !Main.startBattle) return;
@@ -853,7 +861,7 @@
       power: DUMMY.power, agility: DUMMY.agility, speed: DUMMY.speed, hp: DUMMY.hp,
       baseStats: { power: DUMMY.power, agility: DUMMY.agility, speed: DUMMY.speed, hp: DUMMY.hp },
       weapons: [], skills: [], gears: [], effects: {},
-      /* Sim 的练习木桩：每回合回满 800、单回合伤害封顶 800，打到 practiceRounds 次出手就收尾。 */
+      /* 每回合回满 800；生命锁 1，但伤害不封顶。固定 practiceRounds 次出手收尾。 */
       practice: true, practiceRounds: DUMMY.rounds,
     });
     /* 回**好友**页（原版打完回的是 `tiaozhan` 的当前 tab）。 */
@@ -868,23 +876,15 @@
       /* 经典/现代两套播放器的剩余回合数都按这一场自己的上限显示（默认 60）。 */
       maxRounds: DUMMY.rounds,
       onEnd: (winner, result) => {
-        const rounds = (result && Array.isArray(result.rounds)) ? result.rounds.length : 0;
-        /* 总伤害 = 自己打出去的那几段之和（原版 `totalharm` 就是木桩类累加出来的）。 */
-        let dmg = 0;
-        for (const r of ((result && result.rounds) || [])) {
-          if (r && r.attacker === 0 && Number(r.dmg) > 0) dmg += Number(r.dmg);
-        }
-        s.woodCount = (Number(s.woodCount) || 0) + 1;
-        if (dmg > (Number(s.woodDamage) || 0)) s.woodDamage = dmg;
-        try { State.save(); } catch (e) {}
+        const record = State.recordWoodBattle(result);
+        if (!record) { back(); return; }
         destroy();
         back();
-        /* 对齐原版的「战斗统计」：本次三段伤害 + 历史最高 + 排名那一页。
-         * 那一颗库元件（`战斗统计`）还没提取，所以先用复刻自己的战果弹窗画这些数。 */
-        const total = dmg;
-        const extra = '本次总伤害 ' + total + '　固定 ' + DUMMY.rounds + ' 回合<br>' +
-          '历史最高伤害 ' + (Number(s.woodDamage) || 0) + '　累计训练 ' + (Number(s.woodCount) || 0) + ' 次<br>' +
-          '训练木桩每回合恢复满血（800），单回合最多打掉 800';
+        const extra = '本次总伤害 ' + record.current.total + '　固定 ' + DUMMY.rounds + ' 回合<br>' +
+          '武器伤害 ' + record.current.weaponDamage + '　技能伤害 ' + record.current.skillDamage +
+          '　徒手伤害 ' + record.current.handDamage + '<br>' +
+          '历史最高伤害 ' + record.totalBest + '　累计训练 ' + record.count + ' 次<br>' +
+          '木桩每回合恢复满血（800），生命最低为 1，伤害按实际数值记录';
         if (window.UI && window.UI.classic && UI.classic.resultModal) {
           UI.classic.resultModal(winner === 0, { exp: 0, gold: 0, ups: [] }, extra, null);
         }
@@ -1461,7 +1461,7 @@
     const gears = (foe.gears || []).map((g) => {
       const gid = Number(g && g.id != null ? g.id : g);
       const ty = Number(g && g.type != null ? g.type : (State.gearPart ? State.gearPart(g.id) : -1));
-      const orange = !!(g && g.orange === true);
+      const orange = !!(g && (g.orange === true || Number(g.quality) === 4));
       const gemLv = g && g.gem && State.gemLevel ? State.gemLevel(g.gem.id) : 0;
       const extra = [gearNames[ty] || '', orange ? '橙装' : '', gemLv ? '宝石 Lv' + gemLv : '']
         .filter(Boolean).join(' · ');
@@ -1485,15 +1485,18 @@
     const bk = host.querySelector('[data-m="back"]');
     if (bk) bk.addEventListener('click', () => openFriendMenu(Number(current && current.sel) || 0));
   }
-  /** 原版 getRecord → 战斗统计 3535。旧单机档只记录总伤害，不能
-   * 把未保存的手 / 武 / 技分项伪装成零，亦不虚构服务端排名。 */
+  /** 原版 MainMovie.as:18221..18223 的顺序：武器、技能、徒手。
+   * 分项最佳独立保存；旧档没有分项时保留「未记录」，不虚构排名。 */
   function openDummyRecord(foe) {
     if (!current) return;
     const s = S() || {};
     const n = Number(s.woodCount) || 0, best = Number(s.woodDamage) || 0;
     guard(openOriginalDialog('3535', { owner: current.host, label: '个人记录', paint(view, close) {
       stopAt(clipOf(view, 'title'), 2);
-      for (const key of ['text1', 'text2', 'text3']) setText(clipOf(view, key), '未记录');
+      for (const [i, key] of ['weaponDamage', 'skillDamage', 'handDamage'].entries()) {
+        const value = s.woodBest && Number(s.woodBest[key]);
+        setText(clipOf(view, 'text' + (i + 1)), value == null ? '未记录' : String(value || 0));
+      }
       for (let i = 1; i <= 4; i++) stopAt(clipOf(view, 'newRecord' + i), 3);
       if (best < 100000) {
         T().showNumber(best, view, 0, 0, 'left', 5);
@@ -1528,7 +1531,7 @@
         if (width > right - left - 3) text.setAttribute('font-size', size * (right - left - 3) / width);
       }
       setText(clipOf(view, 'text4'), fitText(clipOf(view, 'text4'),
-        '历史最高总伤害 ' + best + '；训练 ' + n + ' 次\n旧记录未保存分项；离线模式不参与排名'));
+        '最高总伤害 ' + best + '；训练 ' + n + ' 次\n三项为各场分项最佳，可能来自不同场次'));
       // The exported mobile layout has an unnamed Back button (3152 + 3190).
       const back = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       back.setAttribute('data-name', 'recordBack');
@@ -2197,7 +2200,7 @@
       SfFightResult.open({ kind: 'arena', title, neutral: phase === 'semi', win: phase === 'semi' ? null : phase !== 'third', player: S(), foe,
         text: '本轮进度已保留。开始下一场比赛不再扣除体力。',
         actions: [{ label: '开始' + title, run: () => { destroy(); ClassicExtras.fightArena(run); } },
-          { label: '返回竞技场', run: () => arenaGo('home') }],
+          { label: '返回', run: () => arenaGo('home') }],
       }).catch(error => { if (window.UI && UI.toast) UI.toast(error.message); });
       return;
     }
@@ -2320,7 +2323,7 @@
       (foe ? '<span>对手 ' + esc(foe.name) + '　Lv' + esc(foe.level) + '</span>' : '') +
       '<span>本场不再扣体力</span>' +
       '<button type="button" class="sf-mbtn main" data-m="fight">' + (run && run.matching ? '进入' : '开始') + esc(title) + '</button>' +
-      '<button type="button" class="sf-mbtn" data-m="back">返回竞技场</button>' +
+      '<button type="button" class="sf-mbtn" data-m="back">返回</button>' +
       '</div>';
   }
   function showArena() {

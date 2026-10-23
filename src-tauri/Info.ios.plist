@@ -40,6 +40,14 @@
   <!-- 不声明 UIApplicationSupportsIndirectInputEvents：游戏只依赖直接触摸/指针事件，
        iOS 15 + TrollStore 下先排除这个「间接输入」开关的干扰。 -->
 
+  <!-- 存档导出 / 导入：把 App 沙盒的 Documents 暴露到「文件」App，
+       玩家可以在「我的 iPhone/iPad → 松鼠大战」里看到导出的 .json；
+       LSSupportsOpeningDocumentsInPlace 允许直接在「文件」里打开/覆盖这些文件。 -->
+  <key>UIFileSharingEnabled</key>
+  <true/>
+  <key>LSSupportsOpeningDocumentsInPlace</key>
+  <true/>
+
   <!-- 纯单机、无加密网络通信；免得以后走 App Store 时被问出口合规。 -->
   <key>ITSAppUsesNonExemptEncryption</key>
   <false/>

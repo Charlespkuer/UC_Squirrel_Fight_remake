@@ -177,22 +177,7 @@
   const MY_SELF_ID = '6988';        // 村庄主角 myself 的精灵 id
   let slotPlan = null;              // Map<挂点精灵id, {symbol, frame}>
 
-  /* ---------------------------------------------------------------------------
-   * ⚠ 主界面穿装备：**机制已实现并跑通，但锚点还没对上，所以默认关**。
-   *
-   * 已经对的部分：挂点表（690 个）、容器素材、id→帧号表全部正确，容器也确实
-   * attach 到了主角自己身上（已排除徒弟误穿 —— 原版 chooseEquipLoader:6759 /
-   * getEquipBpData:6793 都先判 targetPath 里是不是 myself）。
-   *
-   * 还没对的部分：**贴上去的大小/位置不对**（实测：拳套勉强落在胸口，头饰明显偏大并偏到
-   * 角色左上方）。原因是原版不是直接把容器挂上去，而是 `convertMcToBp(容器)` 先**渲染成位图**
-   * 再 `attachBitmap`（MainMovie.as:6643-6646），位图的锚点规则决定了最终落点 ——
-   * 而 `convertMcToBp` **在反编译出来的 4551 个 .as 里根本没有定义**（只在 :6646 被调用），
-   * 锚点语义无法从源码还原，只能拿原版截图逐部位拟合。
-   *
-   * 想自己看现状/继续调：URL 加 `?dress=1`，或
-   *   localStorage.setItem('ssdz_classic_dress','1')
-   * ------------------------------------------------------------------------- */
+  /* 默认穿戴；dress=0 / 本地调试开关可以暂时隐藏装备。 */
   const DRESS_ENABLED = (() => {
     try {
       if (/[?&]dress=0\b/.test(location.search)) return false;
@@ -200,24 +185,10 @@
     } catch (e) {}
     return true;
   })();
-  /* 装备画稿的落地参数（实测标定，见 docs 更新记录）：
-   *  · scale —— 挂点处的累计缩放实测 0.575，与主角本体 0.580 几乎相同；
-   *    而容器画稿按这个比例画出来比角色**大近一倍**，说明 B 套是"2 倍稿"，
-   *    原版走位图化时被缩回去了。这里就是那个缩回系数。
-   *  · anchorBBox —— 位图以自身包围盒左上角为锚点。
-   * 允许 window.__gear 覆盖（调试/探针用）。 */
-  /* 装备画稿的落地参数（2026-10 按原版 `chooseEquipLoader` / `constructBpData` / `getEquipBpData`
-   * 三条链路重新核过，见 docs 更新记录 第一百四十四批）：
-   *  · mode 'slot' —— 走"挂点精灵"这条路：持有者精灵按**装备帧号**放出对应挂点，
-   *    挂点是 myself 的 ikNode 子元件，所以跟着骨骼走。
-   *  · anchor 保留 **'topleft'**：`convertMcToBp` 在反编译源码里**没有定义**（只在 :6646 被调用），
-   *    锚点语义无法从源码还原，只能实测标定 —— 上一批标定的就是"位图以自身包围盒左上角为锚点"。
-   *    ⚠ 本批试过按"容器原点对齐挂点原点"（anchor:'none'）落地，实测整件装备被抬高约 **58 个舞台
-   *    单位**（容器画稿相对自身原点是按负坐标画的），反而更差，**已回退**。
-   *    真正没对上的是**挂点取错了帧**：原版 chooseEquipLoader:6767 是 `frameIndex + 1`，
-   *    复刻漏了这个 +1（见 `planWears` 里那段注释）—— 等于穿了**上一件装备的挂点**。
-   *  · scale 1 —— 挂点处累计缩放实测 0.575（= 主角本体的 0.580），画稿本身就是这个尺度，不要再缩。
-   * 允许 window.__gear 覆盖（调试 / 探针用）。 */
+  /* 原版 c 版穿戴链路：B 容器在装备帧上生成位图，持有者停在 frame + 1，
+   * 挂点按位图左上角接图。这里保留 1:1、topleft 和原挂点矩阵。
+   * 容器号由 SWF 导出名核对，不能用错位的旧 TSV，更不能把大护肩换成普通袖口。
+   * window.__gear 仅供本机取证覆盖。 */
   function gearOpts() {
     const o = { scale: 1, anchor: 'topleft', mode: 'slot', odx: null, ody: 0 };
     try {
@@ -244,33 +215,6 @@
     if (byId) return byId;
     const o = GEAR_OFFSET[type] || [0, 0];
     return (o[0] || o[1]) ? o : null;
-  }
-  /* ---------- 手臂甲（`gearArm` 2008）的槽位修正 ----------
-   * 主界面/战斗穿装备走「挂点 → 容器」：容器画稿的 bbox 左上角对齐挂点原点
-   * （`anchorToBBox('topleft')`，见 render.js）。绝大多数衣服帧的持有者槽位矩阵
-   * 刚好等于 `手臂B` 画稿的 bbox（-3.76,-2.25），两层平移互相抵消，袖口落在手臂上。
-   * 但狂战 / 深海这几帧的槽位矩阵是 -34.9,-29.55 / -22.5,-13.5 这一档大偏移
-   * （原版给大肩甲留的落点），补偿后袖口会飘到脸侧，看起来像"脸上多出一只手臂"
-   *（用户 2026-10 报的狂战铠甲）。
-   * 修法：槽位矩阵与 `手臂B` bbox 的平移差超过容差时把差补回去，让袖口回到所有衣服
-   * 共用的手臂落点；差在容差内（正常帧）一字不加，不动既有观感。
-   * 72 件衣服逐帧静态审计（2026-10）：68 件有手臂槽位，只有狂战 203/207/183/267 与深海
-   * 191/275/199 共 7 帧超差；其余 61 帧都在 ±2 内（另 4 帧没有手臂槽位）。
-   * ⚠ 必须作为 `setSymbol` 的 `tail` 传入：在外面 append 会被 anchorToBBox 的重算抹掉。 */
-  const ARM_GEAR_SYMBOL = '2008';
-  const ARM_GEAR_BBOX = { x: -3.76, y: -2.25 };
-  const ARM_GEAR_TOLERANCE = 8;
-  function gearSlotTail(clip, symbol) {
-    if (String(symbol) !== ARM_GEAR_SYMBOL) return '';
-    const ma = String((clip && clip.g && clip.g.__baseMa) || '').split(',').map(Number);
-    if (ma.length < 6 || !Number.isFinite(ma[4]) || !Number.isFinite(ma[5])) return '';
-    /* 只修正纯平移的槽位；带旋转/缩放的矩阵没有实测样本，保守跳过。 */
-    if (Math.abs(ma[0] - 1) > 1e-3 || Math.abs(ma[1]) > 1e-3 ||
-        Math.abs(ma[2]) > 1e-3 || Math.abs(ma[3] - 1) > 1e-3) return '';
-    const dx = ARM_GEAR_BBOX.x - ma[4];
-    const dy = ARM_GEAR_BBOX.y - ma[5];
-    if (Math.abs(dx) <= ARM_GEAR_TOLERANCE && Math.abs(dy) <= ARM_GEAR_TOLERANCE) return '';
-    return 'translate(' + dx.toFixed(3) + ',' + dy.toFixed(3) + ')';
   }
   /** `mode: 'attach'` —— 把 6 个容器**直接挂到 myself 自己身上**（原版 chooseEquipLoader 的写法），
    * 每个部位一个子 clip，帧号照旧。挂完不动 `render.js` 的帧机制（手动挂的子节点不进 nodes 表）。 */
@@ -391,28 +335,6 @@
     for (let c = clip; c; c = c.parent) if (c.tag && String(c.tag.id) === MY_SELF_ID) return true;
     return false;
   }
-  /** 从挂点实例往上找"myself 的**直接子元件**"——也就是那根 ikNode 骨头。 */
-  function rootBone(clip) {
-    let c = clip;
-    while (c && c.parent && !(c.parent.tag && String(c.parent.tag.id) === MY_SELF_ID)) c = c.parent;
-    return (c && c.parent && c.parent.tag && String(c.parent.tag.id) === MY_SELF_ID) ? c : null;
-  }
-  /* ============================================================
-   * 画序修正（用户 2026-10 口径："衣服没对齐"）
-   * ------------------------------------------------------------
-   * `myself` 的直接子元件里，ikNode（挂点挂在上面的那根骨头）排在 d2~d43，
-   * 而身体/拳套这些形状是**更晚的深度**画的 —— 于是挂上去的装备被压在身体下面
-   * （单开衣服时只看得见脖子旁一小条黑边）。
-   * 修法：把**整根骨头**挪到 `myself` 子列表的末尾。骨头的变换不变、每帧照旧由父级写，
-   * 所以动画完全不受影响，只是它（连同挂在它下面的装备）改到最上层绘制。
-   * ========================================================== */
-  function liftBone(clip) {
-    const bone = rootBone(clip);
-    if (!bone || !bone.parent || !bone.g || !bone.parent.g) return false;
-    if (bone.g.nextSibling) bone.parent.g.appendChild(bone.g);   // 已在末尾就不折腾
-    return true;
-  }
-
   /* ============================================================
    * 顶栏两处微调（用户 2026-10 口径）
    * 数值不是拍脑袋：全部由无头探针量出「舞台坐标包围盒」再解出来的（见 docs 更新记录）。
@@ -1630,12 +1552,10 @@
            * 传别的会掉进 topleft 分支。所以这里显式转成 null（= 不做包围盒平移）。 */
           const anchor = (!go.anchor || go.anchor === 'none') ? null : go.anchor;
           /* 偏移交给 setSymbol 一起拼（见 render.js 的 anchorToBBox 注释：在外面 append 会被重算抹掉） */
-          const tail = [
-            off ? ('translate(' + off[0] + ',' + off[1] + ')') : '',
-            gearSlotTail(clip, p.symbol),
-          ].filter(Boolean).join(' ');
+          const tail = off ? ('translate(' + off[0] + ',' + off[1] + ')') : '';
           clip.setSymbol(p.symbol, p.frame, go.scale, anchor, tail);
-          liftBone(clip);          // 画序：把挂点所在的骨头提到 myself 子列表末尾（见上面注释）
+          /* 挂点留在原版骨骼的深度。骨头还带着裸臂/拳头，整体提升会改掉前后手顺序；
+           * 换帧重建时再从旧实例集合提顶，还会让护肩在两种层序之间跳。 */
         }
       } : null,
     });
@@ -1906,6 +1826,9 @@
     if (mine !== viewSeq || container.isConnected === false) return null;
     const view = await SfRender.mount(container, { frame: 30 });
     if (mine !== viewSeq || container.isConnected === false) { view.destroy(); return null; }
+    /* 与 mount() 同一条：村庄页是 320×196 整页，#ui 的高度必须按它重算。
+     * 从塔页（690）返回村庄时如果不量，SVG 只按高度铺满，左右就会各空一条。 */
+    try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
     /* ⚠ 这里**不调** refreshValues：那是主菜单页（`main` 7039）的数值刷新，
      * 村庄页的根子元件叫 `homeMc`（7140），调了只会立刻 return false。 */
     current = view;                 // 村庄页也是一次"挂载中的视图"（调试/自检按 currentView 取）
@@ -2045,22 +1968,6 @@
      *  ⚠ 只在**牌子真的存在**的那一档写：mc1 的 `num` 只在第 1 帧里（其余 5 档的建筑画稿
      *  自带等级牌），mc3/mc4 每帧都有。牌子不在（或只剩空白档）时**保持空白**，
      *  别把素材里的占位 0 露出来 —— 见 `setStaticPolicy` 的 `blankNames` 注释。 */
-    const ensureHomeLevelBadge = (v, key, level, clip) => {
-      const host = v && (v.el || (v.root && v.root.parentNode) || (v.g && v.g.parentNode));
-      if (!host || !clip || !clip.g) return;
-      let badge = host.querySelector('.ssfight-home-level[data-building="' + key + '"]');
-      if (!badge) {
-        badge = document.createElement('div');
-        badge.className = 'ssfight-home-level sf-clickthrough';
-        badge.setAttribute('data-building', key);
-        host.appendChild(badge);
-      }
-      const hr = host.getBoundingClientRect();
-      const cr = clip.g.getBoundingClientRect();
-      badge.textContent = String(level);
-      badge.style.left = Math.round(cr.right - hr.left - 74) + 'px';
-      badge.style.top = Math.round(cr.top - hr.top + 22) + 'px';
-    };
     const removeHomeLevelBadge = (v, key) => {
       const host = v && (v.el || (v.root && v.root.parentNode) || (v.g && v.g.parentNode));
       const badge = host && host.querySelector('.ssfight-home-level[data-building="' + key + '"]');
@@ -2085,9 +1992,11 @@
         const b = State.building(key);
         removeHomeLevelBadge(view, key);
         if (!numClip) {
-          /* 高等级画稿里 num 图层被导出丢了（mc3/mc4 只有第 1 帧有 num）；给玩家一个
-           * 同位置的 DOM 数字，避免升到 6 级后牌子又空掉。未解锁时不要写等级。 */
-          if (b) ensureHomeLevelBadge(view, key, b.level, c);
+          /* 高等级画稿里 num 图层被导出丢了（mc3/mc4 只有第 1 帧有 num）。
+           * ⚠ 不要再补一个 DOM 数字：`getBoundingClientRect()` 返回的是屏幕坐标，
+           *   但 CSS 的 left/top 写在 #ui 的设计坐标里；iOS / 全面屏缩放后会把
+           *   「1」/「15」飘到神迹或祭坛图标上方（用户 2026-10 反馈）。
+           *   原版画稿的牌子本身带等级，这里保持空白即可。 */
           continue;
         }
         if (!b) { blankDigits(numClip); continue; }
@@ -2271,8 +2180,6 @@
      * 所以把这一小组 DOM 侧的通用件导出，别在第二个文件里再抄一遍。
      * ⚠ 只导出"与具体页面无关"的通用件：页面逻辑一律留在各自的文件里。 */
     toolkit: {
-      /** 手臂甲（`gearArm` 2008）槽位超差时的补偿段（主界面 / 战斗共用；见上面审计注释） */
-      gearSlotTail,
       /** 量包围盒（缓存到 `__hitBox`；用常态帧，免得悬停时热区忽大忽小） */
       measureHitBox,
       /** 按包围盒铺一块透明点击区；`animate` = 按**所有帧的并集**铺（多帧状态精灵用）。

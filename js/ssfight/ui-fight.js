@@ -182,12 +182,6 @@
     if (!Array.isArray(list)) return [];
     return list.filter((g) => g && typeof g === 'object' && g.id != null && g.src == null);
   }
-  /** 手臂甲（`gearArm` 2008）槽位超差补偿：规则与主界面共用
-   *  `SfUiMain.toolkit.gearSlotTail`（狂战/深海那 7 帧的袖口会飘到脸侧，见那边的审计注释）。 */
-  function gearSlotTail(clip, p) {
-    const t = T();
-    return (t && t.gearSlotTail) ? t.gearSlotTail(clip, p && p.symbol) : '';
-  }
   /* ---------- 三侠 / 木人：原版 `7689` 的第 2/3/4/5 帧就是现成的原版矢量模型 ----------
    * 原版 `loadPlayer`（MainMovie.as:17186）按 `chooseWz` 把 `player2` 拨到 2/3/4，再往
    * `player2.playerMc` 里 `attachMovie("螳螂"/"仙鹤"/"熊猫")`。那一颗外部 SWF 不在仓库的
@@ -200,6 +194,9 @@
   const NPC_NAME = { tl: '螳螂', xh: '仙鹤', xm: '熊猫', wood: '木人' };
   /** 对手的 `npcType` → 三侠档；挑战塔的 `tw_*` 按体型映射（与 `battle.js` 同一张表）。 */
   function npcTypeOf(foe) {
+    /* 征战动物 boss：`foe.campaign` 是 tower.js 给的 6833 形态描述；它不是三侠图集，
+     * 也不走 makeStaticNpcFighter，SfFight 用专门的 buildFighter 分支挂 6833。 */
+    if (foe && foe.campaign) return 'campaign';
     const raw = String((foe && foe.npcType) || '').toLowerCase();
     if (!raw) return null;
     if (NPC_FRAME[raw]) return raw;
@@ -270,9 +267,9 @@
     allowNestedAnim(clip);
     try { clip.gotoAndPlay(n || 2); } catch (e) {}
   }
-  function setText(node, str) {
+  function setText(node, str, opts) {
     const t = T();
-    if (t && node) { t.setText(node, str); return; }
+    if (t && node) { t.setText(node, str, opts); return; }
     if (node && node.textContent !== undefined) node.textContent = str == null ? '' : String(str);
   }
   function visible(clip, on) {
@@ -363,6 +360,34 @@
   }
   /** `playClip` / `play` 用：只放行子树（外面自己会从第 2 帧开始播）。 */
   function allowNestedAnim(clip) { startNestedAnim(clip, false, false); }
+  /** 角色动作播完后把嵌套表情/眼睛停在**最后一个有内容的帧**。
+   *
+   *  这些表情层在原版里多数没有脚本、会自己循环；`deep` 一开始把它们全部放行之后，
+   *  父动作停在倒地/胜利的最后一帧，子表情却还在转。倒地后角色会留很久，
+   *  最明显的就是「哭脸表情一帧一帧切换」，而且 Android 的低帧率/节拍会让它更显眼。
+   *  这里只停**嵌套子件**（父件已经由 `playClip` 停在停止帧），装备/钉帧件照旧跳过；
+   *  下一拍动作会重新 `startNestedAnim(deep)`，不会把后续动画冻死。 */
+  function freezeNestedAnim(clip, inGear) {
+    if (!clip) return;
+    const g = clip.g;
+    const tagId = clip.tag && String(clip.tag.id);
+    if (tagId && EXPLICIT_STOP_IN_ACTION.has(tagId)) return;
+    const gear = !!inGear || clip.__pinFrame != null
+      || !!(g && g.getAttribute && g.getAttribute('slot'));
+    const children = [];
+    for (const rec of clip.nodes ? clip.nodes.values() : []) if (rec && rec.clip) children.push(rec.clip);
+    for (const c of clip.__attached || []) if (c) children.push(c);
+    for (const child of children) {
+      const cg = child.g;
+      const childGear = gear || child.__pinFrame != null
+        || !!(cg && cg.getAttribute && cg.getAttribute('slot'));
+      if (!childGear) {
+        const end = lastContentFrame(child);
+        if (end > 0) stopAt(child, end);
+      }
+      freezeNestedAnim(child, childGear);
+    }
+  }
   /* 脸部保留原版深度：5615 眼白必须低于头装；6062 思考眼睛由动态蒙版裁剪。
    * 原 SWF/Ruffle 逐帧对照 5843/6127 的睁眼、闭眼与侧脸后，确认不能按固定
    * depth 50/55 重排：那里会换成整张眼皮、眼影、眼线或爱心，重排会改变表情轮廓。
@@ -405,7 +430,12 @@
         const n = clip.frame + 1;
         if (n !== seen && n > seen) { for (let k = seen + 1; k <= n; k++) fire(k); }
         seen = n;
-        if (clip.frame >= stopIdx) { stopAt(clip, stopIdx + 1); resolve(); return; }
+        if (clip.frame >= stopIdx) {
+          stopAt(clip, stopIdx + 1);
+          if (o.deep) freezeNestedAnim(clip);
+          resolve();
+          return;
+        }
         arm(tick);
       };
       arm(tick);
@@ -420,11 +450,48 @@
    *  **挂在 7639 这颗"身体槽"里面**，而 7639 的第 2 帧会把第 1 帧那批 `ikNode_*` 摘掉
    *  （`gotoAndStop(2)`）。`attachChild` 不会写进 `byName` 表，所以主角本体**必须由这里回传**，
    *  不能回头再 `slot.byName('playerMc')` 取（那样永远是 null，动作全都不播 —— 2026-10 实拍发现的）。 */
-  function buildFighter(view, side, wears, npcType) {
+  function buildFighter(view, side, wears, npcType, campaign, mutant) {
     const plan = planSide(wears);
     const holder = view.attachChild(SYM.fighter, 1, 'player' + (side + 1));
     if (!holder) return null;
     holder.setExtraTransform('matrix(' + SIDE_MATRIX[side] + ')');
+    /* 征战（副本）动物 boss：`player2.gotoAndStop(6)` + `attachMovie("副本角色所有")`。
+     * 原版是 6833 的 `mcFrame` 拨到动物形态，再取它的 `playerMc` 作为 action 宿主；
+     * 这里同样把 6833 挂到 7689 的 playerMc 槽位，`makeFighter` 拿到的是里面的动物模型。 */
+    if (campaign) {
+      /* 原版 `player2.gotoAndStop(6)` 才是征战体型槽；frame1 是松鼠，直接挂 6833 会把
+       * 动物按松鼠槽的局部坐标放大到两倍。 */
+      stopAt(holder, 6);
+      /* 7689 第 6 帧的 `playerMc` 槽是 **7688**（2 帧）：
+       *   · 第 1 帧 = 一整套**拼好的静态动物**（19 颗零件，姿态就是狡兔）；
+       *   · 第 2 帧 = 空帧（全部 remove）。
+       * 原版 `MainMovie.as:6237` 挂完 6833 立刻 `player2.playerMc.gotoAndStop(2)` ——
+       * 就是为了把这只静态动物收掉。复刻以前停在第 1 帧，于是那只**狡兔永远留在敌人位置**：
+       * 狡兔战里和真模型叠成重影、狼王 / 妖狐 / 猿将战里多出一只狡兔
+       * （用户 2026-10 口径："猿将战中敌人位置还有一个狡兔"）。 */
+      const slot = holder.byName('playerMc');
+      if (slot) {
+        stopAt(slot, 2);
+        /* 二次挂载（同一槽位重进）时兜底：先清掉上一次的运行时子件。 */
+        if (slot.detachAll) { try { slot.detachAll(); } catch (e) {} }
+        const set = slot.attachChild('6833', 1, 'playerMc');
+        const frame = Math.max(1, Math.min(7, Number(campaign.mcFrame) || 1));
+        if (set) {
+          stopAt(set, frame);
+          const model = set.byName('playerMc');
+          if (model) {
+            holder.__hero = model;
+            holder.__campaign = campaign;
+            live.plans[side] = null;
+            holderPlan.set(holder, null);
+            return holder;
+          }
+        }
+      }
+      /* 模型缺失时也停在这条分支：绝不能掉进下面的三侠分支，否则 campaign 会被当成
+       * `npcType` 去查 NPC_FRAME，最后变成一只静态木人。 */
+      return holder;
+    }
     /* 三侠 / 木人：原版 `player2.gotoAndStop(2/3/4/5)` + 往 `playerMc` 挂模型。
      * 这里直接用 7689 对应帧里**已经烤好的原版矢量稿**（见 NPC_FRAME 的注释）。 */
     if (npcType) {
@@ -432,6 +499,7 @@
       stopAt(holder, frame);
       const model = holder.byName('playerMc') || null;
       holder.__npc = npcType;
+      holder.__mutant = !!mutant;
       holder.__hero = model || null;
       if (model) prepareNpcModel(model);
       live.plans[side] = null;
@@ -566,7 +634,7 @@
     const p = plan.bySlot.get(String(clip.tag.id));
     if (p && clip.setSymbol) {
       if (clip.g && clip.g.setAttribute) clip.g.setAttribute('slot', String(clip.tag.id));
-      clip.setSymbol(p.symbol, p.frame, 1, 'topleft', gearSlotTail(clip, p));
+      clip.setSymbol(p.symbol, p.frame, 1, 'topleft');
       clip.__gearSlot = true;
       /* ⚠ 身体装备（`gearBody` / `gearArm`，type 2）**不能**在战斗层再 `mirrorInPlace` 一次。
        * 依据（2026-10 逐项核对）：
@@ -1007,7 +1075,50 @@
     return top;
   }
 
-  /** 现代图集版：透明 canvas 铺在经典舞台上，按现代 1170×690 坐标画三侠。
+  /** 战斗底色层：把原版 `backGround` 从主 SVG 挪到 canvas **下面**。
+   *
+   *  三侠图集是普通 HTML canvas，天然压在主 SVG 之上；不拆层时，NPC 身上的伤害数字、
+   *  状态图标、技能特效全在主 SVG 里，会被整块 canvas 挡住。现在层序是：
+   *    底图 SVG（z-index 0） < NPC canvas（z-index 1） < 主 SVG（z-index 2，角色/特效/HUD）
+   *     < 顶部覆盖 SVG（z-index 3，跳过键）
+   *  主 SVG 里的 SVG 特效因此重新压在 NPC 上面；NPC 的静态身体只隐藏 `holder.__hero`，
+   *  `statu` 等 SVG 状态图标仍留在主 SVG 里正常显示。 */
+  function makeBattleBackLayer(rec, root) {
+    if (!rec || !rec.host || !root || !window.document || !document.createElementNS) return null;
+    if (rec.bgLayer) return rec.bgLayer;
+    const view = rec.view;
+    const bg = view && view.byName ? view.byName('backGround') : null;
+    const node = bg && (bg.g || bg);
+    const main = root.ownerSVGElement || root;
+    if (!node || !main) return null;
+    const NS = 'http://www.w3.org/2000/svg';
+    const layer = document.createElementNS(NS, 'svg');
+    layer.setAttribute('class', 'sf-battle-bg-layer');
+    layer.setAttribute('viewBox', (main && main.getAttribute && main.getAttribute('viewBox')) || '0 0 320 196');
+    layer.setAttribute('preserveAspectRatio', (main && main.getAttribute && main.getAttribute('preserveAspectRatio')) || 'xMidYMid meet');
+    layer.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;' +
+      'z-index:0;overflow:visible;';
+    if (main.parentNode) main.parentNode.insertBefore(layer, main);
+    else rec.host.appendChild(layer);
+    /* 主 SVG 必须压回 canvas 上面；只把底图挪走，角色、状态图标、飘字和特效都留在主 SVG。 */
+    main.style.position = 'relative';
+    main.style.zIndex = '2';
+    layer.appendChild(node);
+    const relayout = () => layoutStageOverlay(layer, root, rec.host);
+    relayout();
+    if (window.addEventListener) window.addEventListener('resize', relayout);
+    let ro = null;
+    if (window.ResizeObserver) {
+      try { ro = new ResizeObserver(relayout); ro.observe(main); ro.observe(rec.host); } catch (e) { ro = null; }
+    }
+    rec.bgLayer = layer;
+    rec.bgLayerRelayout = relayout;
+    rec.bgLayerRO = ro;
+    return layer;
+  }
+
+  /** 现代图集版：透明 canvas 铺在**底图与主 SVG 之间**，按现代 1170×690 坐标画三侠。
+   *  层序由 `makeBattleBackLayer()` 拆开：底图 < canvas < 主 SVG（状态/飘字/特效）< 顶部覆盖。
    *
    *  ⚠ **不要把 canvas 放进 `<foreignObject>`**。WebKit / iOS 有一条 17 年未修的
    *  合成层 bug（bugs.webkit.org 23113，原 83189「Canvas inside SVG(foreignObject)
@@ -1019,12 +1130,14 @@
    *  普通 HTML canvas 的 CSS 缩放 iOS 支持得很好，也不会触发那条 foreignObject bug。
    *  坐标仍按现代 1170×690 画，绘制前把 canvas 的变换设成「舞台显示尺寸 / 1170×690」。
    */
-  function makeAtlasNpcFighter(side, holder, info, npcType) {
+  function makeAtlasNpcFighter(side, holder, info, npcType, mutant) {
     const battle = live;
     const view = live && live.view;
     const root = view && (view.g || view);
     const host = live && live.host;
     if (!root || !host || !window.document || !document.createElement) return null;
+    /* 先把底图拆到 canvas 下方；主 SVG 留在 canvas 上方，特效/状态图标/飘字才不会被 NPC 挡住。 */
+    makeBattleBackLayer(battle, root);
     const canvas = document.createElement('canvas');
     canvas.className = 'sf-npc-atlas-layer';
     canvas.setAttribute('aria-hidden', 'true');
@@ -1034,8 +1147,13 @@
     host.appendChild(canvas);
     if (holder) holder.__npcLayer = canvas;
     const ctx = canvas.getContext('2d');
-    /* 原版 7689 的静态稿收掉：现在由这块画布负责这一侧的全部动作。 */
-    if (holder && holder.g) holder.g.style.visibility = 'hidden';
+    /* 只收掉原版 7689 的**静态身体**：`holder` 里的 `statu`（状态图标）等 SVG 必须留着，
+     * 否则它们会跟着整棵 holder 一起被隐藏，NPC 头顶的眩晕/减益图标就永远不出现。 */
+    if (holder) {
+      const staticBody = holder.__hero;
+      if (staticBody && staticBody.g) staticBody.g.style.visibility = 'hidden';
+      else if (holder.g) holder.g.style.visibility = 'hidden';
+    }
     let isDead = false;
     let anim = null;
     let rafId = 0;
@@ -1044,6 +1162,8 @@
     let paintDirty = true, paintedFrame = null;
     let resizeObserver = null, layoutObserver = null;
     const effects = [];
+    /* 变异三侠：换色图集已就绪时用它；没有就退回普通图集（原版 *_boss.swf 不在参考资料里）。 */
+    const bodySheets = mutant && Engine.mutantSheets ? (Engine.mutantSheets(npcType) || NPC_SHEETS[npcType]) : NPC_SHEETS[npcType];
     const now = () => (window.performance && performance.now ? performance.now() : Date.now());
 
     function layoutCanvas(stamp) {
@@ -1107,7 +1227,7 @@
       /* 现代 1170×690 → 这块舞台画布。x/y 各自按实际显示尺寸缩放，与之前
        * foreignObject 里 canvas 的拉伸比例一致（经典舞台是 320×196）。 */
       ctx.setTransform(canvas.width / 1170, 0, 0, canvas.height / 690, 0, 0);
-      if (frame) { try { Engine.drawFrame(ctx, frame, { sheets: NPC_SHEETS[npcType] }); } catch (e) {} }
+      if (frame) { try { Engine.drawFrame(ctx, frame, { sheets: bodySheets }); } catch (e) {} }
       for (let i = effects.length - 1; i >= 0; i--) {
         const eff = effects[i];
         try { Engine.drawFrame(ctx, eff.frames[eff.idx], { sheets: eff.sheets }); } catch (e) {}
@@ -1348,10 +1468,10 @@
     return api;
   }
 
-  function makeNpcFighter(side, holder, info, npcType) {
+  function makeNpcFighter(side, holder, info, npcType, mutant) {
     if (npcAtlasReady(npcType)) {
       try {
-        const atlas = makeAtlasNpcFighter(side, holder, info, npcType);
+        const atlas = makeAtlasNpcFighter(side, holder, info, npcType, mutant);
         if (atlas) return atlas;
       } catch (e) {
         if (window.__errs) window.__errs.push('[SfFight] npc atlas: ' + (e && e.message));
@@ -1365,7 +1485,7 @@
     return makeStaticNpcFighter(side, holder, info, npcType);
   }
   function makeFighter(side, holder, info) {
-    if (holder && holder.__npc) return makeNpcFighter(side, holder, info, holder.__npc);
+    if (holder && holder.__npc) return makeNpcFighter(side, holder, info, holder.__npc, !!holder.__mutant);
     const slot = holder && holder.byName('playerMc');
     /* 主角本体是 `buildFighter` 当场挂上去并回传的（`attachChild` 不进 `byName` 表，
      * 而 7639 第 2 帧已经把第 1 帧那批挂点摘掉了 —— 见 `buildFighter` 的注释）。 */
@@ -1376,8 +1496,10 @@
      * 而 `dead()` 里再写 `api.dead = true` 会把方法本身换成 `true`（第二次调用直接 TypeError）。
      * 对外仍然暴露 `isDead()`。 */
     let isDead = false;
+    const campaign = !!(holder && holder.__campaign);
     const api = {
       side: side, holder: holder, mc: mc, statu: statu, info: info,
+      campaign: campaign,
       blood: { totalBlood: 1, leftBlood: 1, finalBlood: 1 },
       statuCode: 0,
       /** 这一拍手里握着的那把武器（`{id, level}`）：出手动画里的武器容器靠它拨帧
@@ -1433,6 +1555,29 @@
         const sel = mc && mc.byName('attacks');
         if (!sel) return;
         visible(sel, true);
+        /* 原版 `Animals.as:13-35` 的出手选择只有 1/2/3 三档，逐条抄：
+         *   attackType 1（普攻）→ `attacks` 第 1 帧
+         *   attackType 2（武器）→ **也是第 1 帧**（普攻/武器共用一条动作，以前这里错拨到第 2 帧）
+         *   attackType 3（技能）→ 第 2 帧
+         *   attackType 4（幻兽）→ 第 3 帧
+         * 不是松鼠那套几十帧的技能表；命中帧也没有逐技能帧脚本，
+         * 按动作条的一半触发 hooks.hit 即可（Sim 的伤害早已单独结算）。 */
+        if (campaign) {
+          if (api.stopBreath) api.stopBreath();
+          const h = hooks || {};
+          const frame = (r && r.action === 'skill') ? 2
+            : (r && r.action === 'pet') ? 3 : 1;
+          stopAt(sel, frame);
+          api.weaponNow = null;
+          api.lastAttack = { frame: frame, action: String(r && r.action), id: Number(r && r.id) || 0,
+            petId: Number(r && r.petId) || 0, petSkillId: Number(r && r.petSkillId) || 0 };
+          const inner = sel.byName('attack') || onlyChildClip(sel);
+          if (!inner) return;
+          const total = inner.frameCount ? inner.frameCount() : 10;
+          const hitAt = Math.max(1, Math.floor(total * 0.45));
+          await playClip(inner, { deep: true, onFrame: (n) => { if (n >= hitAt && h.hit) h.hit(); } });
+          return;
+        }
         const plan = attackPlan(r);
         /* 出手前先记下"这一拍用的是哪把武器"：武器容器是在**拨帧那一刻**建出来的
          * （`stopAt` → `showFrame()` → 建子件 → `onClip`），所以必须写在它前面。 */
@@ -1484,8 +1629,12 @@
       },
       /** `useSkillDefense()`：防御技起手（`Squirrel.useSkillDefense`）。
        *  原版是**出手动画**在第 3~25 帧回调的，所以挨打之前盾就举起来了。
-       *  返回 false = 这一拍不是防御技（`defenseType != 2`），什么都没做。 */
+       *  返回 false = 这一拍不是防御技（`defenseType != 2`），什么都没做。
+       *  ⚠ 征战动物 boss 走 `Animals.useSkillDefense()` —— **空函数**（`Animals.as:56`），
+       *  而且动物模型第 4 帧是空帧（没有 `defenseSkills` 层）。这里必须先返回 false，
+       *  不能先 `stopAt(mc, 4)`：那一下会把整只动物画没（只剩背景），下一拍 `idle()` 才回来。 */
       useSkillDefense(r) {
+        if (campaign) return false;
         const d = defensePlan(r, !!(live && live.plans[side]), api.defenseSkillLevel(r), side);
         if (d.kind !== 'skill') return false;
         stopAt(mc, 4);
@@ -1503,6 +1652,7 @@
        *  恒为 null，于是这两种反应**一次都没播出来**，只把姿势切成定格的第 1 帧。
        *  `hooks.guarded` = 防御技已经由 `useSkillDefense()` 起手过（不要再从头播一遍）。 */
       async beAttack(r, hooks) {
+        if (api.stopBreath) api.stopBreath();
         const h = hooks || {};
         const d = defensePlan(r, !!(live && live.plans[side]), api.defenseSkillLevel(r), side);
         const frame = d.frame || 1;
@@ -1523,6 +1673,19 @@
           return;
         }
         if (d.kind === 'skill') {
+          /* 征战动物没有 `defenseSkills` 层（见 `useSkillDefense` 的注释）：照松鼠那套拨到
+           * 第 4 帧 = 空帧，敌人整只消失。改播普通受击（`defenses` 第 1 帧）——
+           * 绝对防御 / 龟甲术 / 装死 挡下的伤害本来就已经是 0，观感上是"硬吃了一下"。 */
+          if (campaign) {
+            stopAt(mc, 2);
+            const hitSel = mc && mc.byName('defenses');
+            if (hitSel) {
+              stopAt(hitSel, 1);
+              const inner = hitSel.byName('defense') || onlyChildClip(hitSel);
+              if (inner) await playClip(inner, { deep: true, onFrame: backHook(DEFENSE_ACTS[1], h) });
+            }
+            return;
+          }
           if (h.guarded) {
             /* 已经起手了：动画**不重播**，只把"反击 / 归位"那一帧接上，并等它演完
              * （原版 `defenseEnd` 也是等到那一条 `attackBack()` 才放行的）。 */
@@ -1542,11 +1705,16 @@
         stopAt(mc, 2);
         const sel = mc && mc.byName('defenses');
         if (sel) {
-          stopAt(sel, frame);
+          /* 动物模型的 `defenses` **只有 2 帧**（f1 正常受击 / f2 倒地），而松鼠那张表里
+           * 幻兽受击是 11~40、技能受击是 2~9 —— 照抄过去会被钳到第 2 帧 = **倒地姿势**
+           *（普攻/技能/幻兽打中动物 boss 时它突然"躺下"）。`Animals.beAttack` 对
+           * defenseType 0 恒 `defenses.gotoAndStop(1)`，这里按同一口径。 */
+          const hitFrame = campaign ? 1 : frame;
+          stopAt(sel, hitFrame);
           /* 幻兽受击帧里有些子件没有 `defense` 这个实例名（例如第 19 帧的 6424），
            * 原版仍然会把它显示出来并自动播；这里取当前帧的第一颗子 clip 兜底。 */
           const inner = sel.byName('defense') || onlyChildClip(sel);
-          if (inner) await playClip(inner, { deep: true, onFrame: backHook(DEFENSE_ACTS[frame], h) });
+          if (inner) await playClip(inner, { deep: true, onFrame: backHook(DEFENSE_ACTS[hitFrame], h) });
           else await wait(320);
         }
       },
@@ -1563,10 +1731,17 @@
         if (!inner) { back(); return; }
         await playClip(inner, { deep: true, onFrame: (n) => { if (n >= ATTACKBACK_ACTS.hit) back(); } });
       },
-      /** `comeBack(type)`：被反击击退之后归位（`type` 决定播哪一档，见 `COMEBACK_ACTS`）。 */
+      /** `comeBack(type)`：被反击击退之后归位（`type` 决定播哪一档，见 `COMEBACK_ACTS`）。
+       *  ⚠ 原版 `Animals.comeBack`（`Animals.as:101-122`）第一句就是
+       *  `getWeaponSkillType()`，而 `Player.getWeaponSkillType`（:184-202）对
+       *  **暗御狡兔（174/179/181）与暗御妖狐（180）恒返回 0** → 直接 return，
+       *  **根本不换身体帧**。它们的模型第 6 帧本来就是空帧（没有 `comeBacks` 层）——
+       *  照松鼠那套 `mc.gotoAndStop(6)` 就会把敌人当场画没，下一拍 `idle()` 才回来
+       *  （实拍：狡兔每次普攻后消失约 0.8s）。狼王 / 猿将 第 6 帧有 `comeBacks`，照旧演。 */
       async comeBack(type) {
         const f = Math.max(1, Math.min(3, (Number(type) || 0) + 1));
         if (!COMEBACK_ACTS[f]) return;
+        if (campaign && !campaignHasLayer(mc, 'comeBacks')) return;
         stopAt(mc, 6);
         const sel = mc && mc.byName('comeBacks');
         if (sel) {
@@ -1578,12 +1753,20 @@
        *  `die()` 才是"死"，它随即让胜利方起手（见 `perform` 的收尾）。 */
       async dead(distance) {
         isDead = true;
+        if (api.stopBreath) api.stopBreath();
         stopAt(mc, 2);
         const sel = mc && mc.byName('defenses');
-        if (sel) {
-          stopAt(sel, distance === 1 ? 5 : 4);
-          await playClip(sel.byName('defense'), { deep: true });
+        if (!sel) return;
+        /* 动物 boss 的受击/倒地帧按 `Animals.as`：受击 `defenses` 第 1 帧，
+         * 倒地第 2/3 帧（distance==1 时第 3 帧），没有松鼠那套 4/5 帧。 */
+        if (campaign) {
+          stopAt(sel, distance === 1 ? 3 : 2);
+          const inner = sel.byName('defense') || onlyChildClip(sel);
+          if (inner) await playClip(inner, { deep: true });
+          return;
         }
+        stopAt(sel, distance === 1 ? 5 : 4);
+        await playClip(sel.byName('defense'), { deep: true });
       },
       /** `congratulate()`：胜利姿势（`6530` 第 32 帧 `congratulation = 2` → 切战果页）。 */
       async congratulate() {
@@ -1592,7 +1775,8 @@
         if (sel) { stopAt(sel, 1); await playClip(sel.byName('winPose'), { deep: true }); }
       },
       isDead: () => isDead,
-      /** 归位到待机姿势：`mc.gotoAndStop(1)` + **让待机呼吸动画转起来**（见 `startIdlePose`）。 */
+      /** 归位到待机姿势：`mc.gotoAndStop(1)` + **让待机呼吸动画转起来**（见 `startIdlePose`）。
+       *  征战动物走自己那颗原版待机片断（见 `startCampaignIdle`）：321GO 与每拍之间都在呼吸。 */
       idle() {
         stopAt(mc, 1);
         /* 色诱之术 5843 的末段带着「道场」场景，它挂在 `attacks` 选择器里；
@@ -1611,6 +1795,8 @@
           if (inner) stopAt(inner, 1);
         }
         startIdlePose(mc);
+        /* 动物模型里没有 5616：第 1 帧那颗 `attack` 的 depth 1 子片断才是它的呼吸。 */
+        if (campaign) startCampaignIdle(api);
       },
     };
     /* 实例 → 格斗者：`onClip` 靠这条链认"这一拍是谁在出手"（手里的武器）。
@@ -1631,7 +1817,7 @@
       if (p && !rec.clip.__dressed) {
         rec.clip.__dressed = true;
         try {
-          rec.clip.setSymbol(p.symbol, p.frame, 1, 'topleft', gearSlotTail(rec.clip, p));
+          rec.clip.setSymbol(p.symbol, p.frame, 1, 'topleft');
           rec.clip.__gearSlot = true;
           if (live && live.strip && live.strip[side]) setGearClipHidden(rec.clip, true);
         } catch (e) {}
@@ -1676,6 +1862,67 @@
    *  这里显式让它转起来（`gotoAndPlay` = 节拍器自己回卷 = 无限循环）；
    *  换帧重建时这个实例会被换掉，不用手动收，`idle()` 每拍开头再叫一次。 */
   const IDLE_POSE_SYM = '5616';
+  /* ---------- 征战动物 boss 的"层"与待机呼吸 ----------
+   * 动物模型（6833 那一帧里挂的 `playerMc`）是 7 帧的角色本体，层名与松鼠那套不完全一样：
+   *   f1 `attacks` / f2 `defenses` / f3 `dodges` / f4 **空帧** /
+   *   f5 `attackbacks` / f6 `comeBacks`（**只有狼王 6635、猿将 6709 有**）/ f7 `winPoses`
+   * —— 与 `Animals.as` 的 `mc.gotoAndStop(2|3|5|6|7)` 逐条对得上（狡兔 6598 / 妖狐 6684
+   * 的第 6 帧是空的，对应 `getWeaponSkillType()==0`，见 `comeBack` 的注释）。 */
+  /** 这只模型**有没有**某一层（例：`comeBacks`）。
+   *  ⚠ 不能用 `mc.byName(name)` 判断：`byName` 只反映**当前帧**，而"这一层存不存在"要在
+   *  别的帧上问（`comeBack` 就是在第 1 帧问第 6 帧的事）。 */
+  function campaignHasLayer(mc, name) {
+    if (!mc || !mc.frames) return false;
+    for (const fr of mc.frames) {
+      for (const p of fr.values()) if (p && p.na === name) return true;
+    }
+    return false;
+  }
+  /** 待机呼吸片断（原版无脚本 → 一直循环）：`6533` 狡兔 / `6603` 狼王 / `6636` 妖狐 / `6685` 猿将。
+   *  它们嵌在**每只动物出手动画的第 1 帧**里（6540/6604/6639/6686 的第 1 帧唯一那颗 depth 1
+   *  子 clip，`sprite6533.as` 等四颗脚本都不存在，逐颗核过）。`idle()` 复位到第 1 帧之后，
+   *  从 `attacks.attack` 的 depth 1 取到的就是它。 */
+  function campaignIdleClip(f) {
+    const mc = f && f.mc;
+    const sel = mc && mc.byName ? mc.byName('attacks') : null;
+    const atk = sel && sel.byName ? sel.byName('attack') : null;
+    const rec = atk && atk.nodes ? atk.nodes.get(1) : null;
+    const clip = rec && rec.clip;
+    return (clip && clip.frames && clip.frames.length > 1) ? clip : null;
+  }
+  /** 让动物待机呼吸转起来（`playClip` 的 `deep` 那条路：连子树一起放行）。
+   *  出手 / 受击 / 倒地会换掉 `attacks` 那一层，呼吸片断随之销毁，不用手动收。 */
+  function startCampaignIdle(f) {
+    const clip = campaignIdleClip(f);
+    if (!clip) return false;
+    startNestedAnim(clip, true, false, true);
+    return true;
+  }
+  /** 兜底用的"假呼吸"：模型缺待机片断时（素材包不全）才用。
+   *  ⚠ 幅度只有舞台宽的 1/300，肉眼几乎看不出来 —— 321GO 期间"敌人是纯静态"就是因为它
+   *  以前被当成主表现（用户 2026-10 口径）。正常情况走 `startCampaignIdle` 的原版片断。 */
+  function startCampaignBreath(rec, f) {
+    if (!rec || !f || !f.campaign || !f.mc || !f.mc.setExtraTransform) return null;
+    if (campaignIdleClip(f)) return null;
+    let tick = 0, stopped = false;
+    const apply = () => {
+      if (stopped || rec.stopped || !f.mc || !f.mc.g || f.mc.g.isConnected === false) return;
+      const dy = Math.sin(tick) * 1.1;
+      tick += 0.45;
+      try { f.mc.setExtraTransform('translate(0,' + dy.toFixed(2) + ')'); } catch (e) {}
+    };
+    apply();
+    const timer = setInterval(apply, 90);
+    rec.timers.push(timer);
+    f.stopBreath = () => {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(timer);
+      try { f.mc.setExtraTransform(''); } catch (e) {}
+    };
+    return f.stopBreath;
+  }
+
   function startIdlePose(mc) {
     if (!mc) return false;
     if (String(mc.tag && mc.tag.id) === IDLE_POSE_SYM) {
@@ -1794,7 +2041,9 @@
       const bar = hud.byName('bloodbar' + (i + 1));
       stopAt(bar, Math.max(1, Math.min(BLOOD_BAR_FRAMES, Math.floor((total - left) * 100 / total) || 1)));
       const txt = hud.byName('bloodtext' + (i + 1));
-      if (txt) setText(txt, left + '/' + total + ' ');
+      /* 血量数字不按原版 59 单位字段框裁切：高层/高 buff 的生命会超过六位，
+       * 裁掉后看起来像“数字被血条边界挡住”。只放开这两条字段。 */
+      if (txt) setText(txt, left + '/' + total + ' ', { noClip: true });
       /* 用血条上的数字框当锚点：`bloodbar` 那两个元件在素材里是整条轨道，
        * 直接取中心会落到屏幕中间（实测护盾牌会压到回合数旁边）。 */
       refreshShieldBadge(live, i, txt || bar);
@@ -1831,6 +2080,8 @@
     heal: { frame: 1, symbol: 2, font: 3 },
     /* 反伤 / 反击 / 自伤走 `reduceBlood(…, 4|5)` 那一档 → 模板第 2 帧、仍是"减"的字形。 */
     back: { frame: 2, symbol: 1, font: 2 },
+    /* 暴击（原版 `Player.reduceBlood` 的 `currentRound.isBerserk == 1`）：
+     * `addOrReduce` 第 3 帧就是「暴击」字样（4842 第 3 帧 / 形状 4841），数字用 font 4。 */
     berserk: { frame: 1, symbol: 3, font: 4 },
   };
   function floatNumber(side, value, kind) {
@@ -1848,16 +2099,23 @@
     clip.setExtraTransform('matrix(' + base[0] + ',0,0,' + base[0] + ',' + (base[1] + jx) + ',' + (base[2] + stack * 20) + ')');
     const bloodMc = clip.byName('bloodMc');
     if (bloodMc) {
-      const num = bloodMc.byName('num');
-      if (num) {
+      const t = T();
+      /* 每次都从 `bloodMc` 的**当前帧**重取 `num` / `addOrReduce`。
+       * `playClip` 从第 2 帧起播，途中 `bloodMc` 会重建/复用 `num`；只在创建时
+       * 写一次，换帧后数字精灵可能回到默认的「0000」（用户 2026-11 报的
+       * "伤害贴图错误"）。前 3 帧各补写一次，之后数字已经稳定。 */
+      const applyNumber = () => {
+        const bm = clip.byName('bloodMc');
+        const num = bm && bm.byName('num');
+        if (!num) return;
         stopAt(num, mag > 20 ? 3 : mag > 10 ? 2 : 1);
         stopAt(num.byName('addOrReduce'), spec.symbol);
-        const t = T();
         const digits = num.byName('num');
         if (t && digits) t.showNumber(mag, digits, spec.font, 0, 0);
-      }
+      };
+      applyNumber();
       /* 播完（末帧透明度已经是 0）把这一颗收掉，并让同侧的叠层计数落回去。 */
-      playClip(bloodMc).then(() => {
+      playClip(bloodMc, { onFrame: (n) => { if (n <= 3) applyNumber(); } }).then(() => {
         if (clip.destroy) clip.destroy();
         else if (clip.g && clip.g.parentNode) clip.g.parentNode.removeChild(clip.g);
         if (live) live.floats[side] = Math.max(0, (live.floats[side] || 1) - 1);
@@ -1886,7 +2144,7 @@
     const share = Math.floor(total / n);
     const first = total - share * (n - 1);
     /* 第一下就是"已经打到身上的那一次"：数字换成余数（原版 `defender.reduceBlood(_loc7, 1)`）。 */
-    floatNumber(side, first, 'hit');
+    floatNumber(side, first, r.crit ? 'berserk' : 'hit');
     const sel = attacker && attacker.attacks ? attacker.attacks() : null;
     const ball = sel && sel.byName ? sel.byName('attack') : null;
     if (!view || !sel || !sel.attachChild) return true;
@@ -1909,7 +2167,7 @@
           visible(clip, true);
           play(clip, 2);
         }
-        if (share > 0) floatNumber(side, share, 'hit');
+        if (share > 0) floatNumber(side, share, r.crit ? 'berserk' : 'hit');
       }, i * 100);
       if (rec.timers) rec.timers.push(timer);
     }
@@ -1935,6 +2193,8 @@
     if (rec.pickups) { try { rec.pickups.close(); } catch (e) {} }
     if (rec.topLayerRelayout && window.removeEventListener) window.removeEventListener('resize', rec.topLayerRelayout);
     if (rec.topLayerRO) { try { rec.topLayerRO.disconnect(); } catch (e) {} }
+    if (rec.bgLayerRelayout && window.removeEventListener) window.removeEventListener('resize', rec.bgLayerRelayout);
+    if (rec.bgLayerRO) { try { rec.bgLayerRO.disconnect(); } catch (e) {} }
     if (rec.skipButton) rec.skipButton.remove();
     if (rec.speedButton) rec.speedButton.remove();
     if (rec.host && rec.host.parentNode) rec.host.parentNode.removeChild(rec.host);
@@ -1991,6 +2251,12 @@
     let pickups = null;
 
     await SfRender.loadExtra('tags-fight.json');
+    /* 征战动物 boss 的 6833 模型单独成包：只有这一场真的遇到 campaign 才加载，
+     * 普通随机战 / 塔战不多付这 3 MB。 */
+    if (o.foe && o.foe.campaign) {
+      try { await SfRender.loadExtra('tags-campaign-boss.json'); }
+      catch (e) { /* 缺包就退回松鼠外观，战斗逻辑照走 */ }
+    }
     /* 幻兽格用的是「全身」4280（`tags-summons.json`，牧场卡片同一颗）。
      * 只有这一场真的有幻兽才加载，没有幻兽的普通战斗不多付这一份素材。 */
     if (rec.petTeams.some((list) => list.length)) {
@@ -2013,6 +2279,12 @@
             new Promise((resolve) => setTimeout(resolve, 1200)),
           ]);
         } catch (e) { /* 图集没到就退回静态稿 */ }
+        /* 变异三侠的换色图集在普通图集之后生成；失败时 makeAtlasNpcFighter 会退回普通版。 */
+        for (const src of [o.me, o.foe]) {
+          if (!src || !src.mutant) continue;
+          const kind = npcTypeOf(src);
+          if (kind && NPC_SHEETS[kind]) { try { await Engine.ensureMutantSheets(kind); } catch (e) {} }
+        }
       }
     }
     try { await loadGearTables(); } catch (e) { /* 没表就不穿装备 */ }
@@ -2066,6 +2338,11 @@
       for (const n of ['leftBlood', 'rightBlood']) {
         const c = sub.byName(n);
         if (c && c.frameCount) stopAt(c, c.frameCount());
+        /* 模板只用来读落点矩阵；真正的飘字是 `floatNumber` 现挂的副本。
+         * 模板本身必须藏掉：它停在空档帧只是"看不见"，一旦因为换帧/节拍把它
+         * 重新实例化到第 1 帧，就会露出默认的「- 0000」（用户 2026-11 报的
+         * "伤害贴图错误"）。`visible(false)` 是显式兜底，不再赌帧号。 */
+        if (c) visible(c, false);
       }
       rec.fightSub = sub;
     }
@@ -2090,14 +2367,18 @@
     stopAt(winWords, winWords && winWords.frameCount ? winWords.frameCount() : 6);
     for (let i = 0; i < 2; i++) {
       const npc = npcTypeOf(sources[i]);
-      rec.fighters[i] = makeFighter(i, buildFighter(view, i, wearsOf(i, sources[i]), npc), {
+      const campaign = sources[i] && sources[i].campaign ? sources[i].campaign : null;
+      rec.fighters[i] = makeFighter(i, buildFighter(view, i, wearsOf(i, sources[i]), npc, campaign, !!(sources[i] && sources[i].mutant)), {
         name: names[i], maxHp: rec.maxHp[i], skills: skillsOf(i, sources[i]),
       });
       const f = rec.fighters[i];
       if (f) { f.blood.totalBlood = rec.maxHp[i]; f.blood.leftBlood = rec.hps[i]; f.blood.finalBlood = rec.hps[i]; }
       /* 开打倒计时那几秒里，两个人就该在**待机呼吸**（原版 `5616` 是一直循环的），
-       * 不能像木头一样杵着 —— 见 `startIdlePose`。NPC 的呼吸由图集动画自己起。 */
-      if (f && f.mc && !f.npc) startIdlePose(f.mc);
+       * 不能像木头一样杵着 —— 见 `startIdlePose`。NPC 的呼吸由图集动画自己起。
+       * 征战动物没有 5616：它的待机片断嵌在出手动画第 1 帧里（见 `startCampaignIdle`），
+       * 建树那一刻就已经在第 1 帧上，这里直接让它转起来；素材缺帧才退回假浮动。 */
+      if (f && f.mc && !f.npc && !f.campaign) startIdlePose(f.mc);
+      if (f && f.campaign && !startCampaignIdle(f)) startCampaignBreath(rec, f);
     }
     if (hud) {
       /* 原版是 `fightPrelude()` → `fight.blood.gotoAndPlay(2)`；血条元件自己的帧脚本
@@ -2116,7 +2397,11 @@
      * `_root.attachMovie("跳过","skipmc",100,{_x:0,_y:0})`，画稿自带原版位置——
      * 舞台右下角）；倍速是复刻自己加的功能，原版没有，所以放到**左下角**不挡那颗跳过。 */
     addSpeedKey(rec, o);
-    if (o.allowSkip !== false && (!window.State || !State.unlockedSkip || State.unlockedSkip())) {
+    /* 跳过键显示：系统页 `showSkip` 关闭时 `State.skipButtonEnabled()` 为 false；
+     * 老测试桩没有这个入口时退回 `unlockedSkip()`。 */
+    const skipEnabled = !window.State || !State.unlockedSkip
+      || (State.skipButtonEnabled ? State.skipButtonEnabled() : State.unlockedSkip());
+    if (o.allowSkip !== false && skipEnabled) {
       /* 图集层是 HTML canvas，会盖住主 SVG 里后挂的跳过键；把跳过键移到战斗最上层
        * 的 SVG 覆盖层里（见 `makeBattleTopLayer`），保持原版层序。 */
       const topLayer = makeBattleTopLayer(rec, view.g || view);
@@ -2126,8 +2411,8 @@
          * 但那一颗在导出的 h 版里比"c 版原版截图"里那颗**宽约 11%**
          *（2026-11 用户口径："跳过键太大了"；把两张图的右下角裁出来等比对齐量过：
          * 原版占舞台宽 21.9%，复刻 24.4%，高度两边都是 16%）。
-         * 这里按**自己的中心**缩 0.9（不是按原点缩，否则整颗会往左上跑）。 */
-        sk.setExtraTransform('translate(271.5,172.5) scale(0.9) translate(-271.5,-172.5)');
+         * 这里按**自己的中心**缩 0.8（不是按原点缩，否则整颗会往左上跑）。 */
+        sk.setExtraTransform('translate(271.5,172.5) scale(0.8) translate(-271.5,-172.5)');
         /* 反馈壳与经典界面其它按钮同一套（`.sf-feedback`：悬停暖色光晕 + 1.035 缩放、
          * 按下回弹）。⚠ 壳**只包画稿**：`sk.g` 上的 transform 是原版落点，给 g 加
          * CSS transform 会把定位矩阵顶掉、整颗键从右下角跑掉。 */
@@ -2535,7 +2820,7 @@
       if (r.dmg && !r.dodge) {
         /* 幸运一击：`boomCount > 1` 走原版 `boom()` 的多球分裂（分段飘字 + 复制球）。 */
         if (!(Number(r.boomCount) > 1 && boomSplit(rec, attacker, r, def, acts, aborted))) {
-          floatNumber(def, r.dmg, 'hit');
+          floatNumber(def, r.dmg, r.crit ? 'berserk' : 'hit');
         }
       }
       if (r.healSelf) floatNumber(att, r.healSelf, 'heal');
@@ -2766,6 +3051,129 @@
    *     奖品分配照原版：**先 `lotArray.shift()` 取第一件给选中的那一格**，其余按格子顺序
    *     依次取剩下的 —— 所以"选哪一格"只决定谁拿第一件，不会选空。
    *   · **收尾（state 5）**：按一下 fire → `setState(2)`（复刻这边等价于点任意位置 / 超时）。 */
+  /** 宝箱四选一的**稳定热区层**（2026-10 修复 iOS 点第二个及以后箱子没反应）。
+   *
+   * 原实现把 `mouseenter` / `click` 直接挂在四颗 `k`(7767) 的 `<g>` 上。iOS 的轻点会先合成
+   * `mouseenter`（相当于一次悬停），而那个回调里 `paint()` 会立刻 `gotoAndStop` 重建这颗
+   * `k` 的子元件 —— 触点下的 DOM 在事件派发中途被换掉，WKWebView 有时就不再补发 click：
+   * 画面停在“选择一个宝箱”，看起来就是卡死。左数第一个箱子本来就是选中帧（`paint()` 是
+   * 空操作、不重建 DOM），所以只有它不是第一个时才触发。
+   *
+   * 现在把热区画在一层**不随宝箱换帧重建**的透明 `<rect>` 上（挂在视图 `<svg>` 根、压在
+   * 所有画稿之上），悬停/按下/抬起/click 都只和这层打交道；`pointerup` 与 `touchend` 都
+   * 能直接提交选择，不再依赖 iOS 是否补发 click。热区坐标用 `SfRender.svgScreenMap()` 从
+   * 屏幕坐标折回 viewBox（它已经处理了全面屏 x/y 缩放不一致，不能用 `getScreenCTM`）。
+   * 选完（或视图销毁）整层移除，不会挡住后面的“确定”键。 */
+  function mountChestHitLayer(view, keys, handlers) {
+    const svg = view && (view.g || view.el);
+    if (!svg || !svg.ownerDocument || typeof svg.appendChild !== 'function') return null;
+    const NS = 'http://www.w3.org/2000/svg';
+    let map = null;
+    try { map = window.SfRender && SfRender.svgScreenMap ? SfRender.svgScreenMap(svg) : null; } catch (e) { map = null; }
+    let box = null;
+    try { box = svg.viewBox && svg.viewBox.baseVal; } catch (e) { box = null; }
+    if (!box || !(box.width > 0) || !(box.height > 0)) box = { x: 0, y: 0, width: 320, height: 196 };
+    const toUser = (cx, cy) => {
+      if (map && map.toUser) return map.toUser(cx, cy);
+      const r = svg.getBoundingClientRect();
+      const s = Math.min(r.width / box.width, r.height / box.height) || 1;
+      const ox = r.left + (r.width - box.width * s) / 2;
+      const oy = r.top + (r.height - box.height * s) / 2;
+      return { x: box.x + (cx - ox) / s, y: box.y + (cy - oy) / s };
+    };
+    const layer = document.createElementNS(NS, 'g');
+    layer.setAttribute('class', 'sf-chest-hits');
+    /* `getBoundingClientRect()` 在个别 iOS 首帧还没布局时会返回 0；这里按 7771 第 1 帧
+     * 四颗 k 的固定放置矩阵（x = 160 + [-98.3,-32.4,33.4,99.25]，0.49 缩放）留一张
+     * 兜底表。它只在量不到的时候用，不改变正常布局。 */
+    const FALLBACK = [
+      { x: 28.85, y: 75.78, w: 65.69, h: 87.87 },
+      { x: 94.75, y: 75.78, w: 65.69, h: 75.10 },
+      { x: 160.55, y: 75.78, w: 65.69, h: 75.10 },
+      { x: 226.40, y: 75.78, w: 65.69, h: 75.10 },
+    ];
+    const hits = [];
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      if (!k || !k.g) continue;
+      let r = null;
+      try { r = k.g.getBoundingClientRect(); } catch (e) { r = null; }
+      let x = 0, y = 0, w = 0, h = 0;
+      if (r && r.width > 0 && r.height > 0) {
+        const a = toUser(r.left, r.top), b = toUser(r.right, r.bottom);
+        x = Math.min(a.x, b.x) - 3; y = Math.min(a.y, b.y) - 3;
+        w = Math.abs(b.x - a.x) + 6; h = Math.abs(b.y - a.y) + 6;
+      }
+      if (w <= 2 || h <= 2) {
+        const f = FALLBACK[i];
+        x = f.x; y = f.y; w = f.w; h = f.h;
+      }
+      const hit = document.createElementNS(NS, 'rect');
+      hit.setAttribute('x', x.toFixed(2));
+      hit.setAttribute('y', y.toFixed(2));
+      hit.setAttribute('width', w.toFixed(2));
+      hit.setAttribute('height', h.toFixed(2));
+      hit.setAttribute('fill', 'transparent');
+      hit.setAttribute('pointer-events', 'all');
+      hit.setAttribute('role', 'button');
+      hit.setAttribute('tabindex', '0');
+      hit.setAttribute('aria-label', '选择第' + (i + 1) + '个宝箱');
+      hit.style.cursor = 'pointer';
+      hit.style.outline = 'none';
+      hit.style.webkitTapHighlightColor = 'transparent';
+      layer.appendChild(hit);
+      hits.push({ hit: hit, index: i });
+    }
+    if (!hits.length) return null;
+    svg.appendChild(layer);
+    let down = null, touch = null;
+    const pick = (i, event) => {
+      if (event) {
+        if (event.stopPropagation) event.stopPropagation();
+        if (event.cancelable && event.type !== 'keydown') { try { event.preventDefault(); } catch (e) {} }
+      }
+      if (handlers && typeof handlers.pick === 'function') handlers.pick(i);
+    };
+    for (const { hit, index } of hits) {
+      hit.addEventListener('pointerenter', () => {
+        if (handlers && typeof handlers.hover === 'function') handlers.hover(index);
+      });
+      hit.addEventListener('pointerdown', (event) => {
+        if (event.button != null && event.button !== 0) return;
+        down = { id: event.pointerId, x: event.clientX, y: event.clientY, t: Date.now() };
+      });
+      hit.addEventListener('pointerup', (event) => {
+        if (!down) return;
+        if (down.id != null && event.pointerId != null && down.id !== event.pointerId) return;
+        const dx = event.clientX - down.x, dy = event.clientY - down.y;
+        const moved = Math.sqrt(dx * dx + dy * dy), dt = Date.now() - down.t;
+        down = null;
+        if (moved <= 14 && dt <= 900) pick(index, event);
+      });
+      hit.addEventListener('pointercancel', () => { down = null; });
+      hit.addEventListener('touchstart', (event) => {
+        const t = event.changedTouches && event.changedTouches[0];
+        if (t) touch = { x: t.clientX, y: t.clientY, t: Date.now() };
+      }, { passive: true });
+      hit.addEventListener('touchend', (event) => {
+        const t = event.changedTouches && event.changedTouches[0];
+        if (!t || !touch) return;
+        const dx = t.clientX - touch.x, dy = t.clientY - touch.y;
+        const moved = Math.sqrt(dx * dx + dy * dy), dt = Date.now() - touch.t;
+        touch = null;
+        if (moved <= 14 && dt <= 900) pick(index, event);
+      }, { passive: false });
+      hit.addEventListener('touchcancel', () => { touch = null; });
+      hit.addEventListener('click', (event) => pick(index, event));
+      hit.addEventListener('keydown', (event) => {
+        if (!event.repeat && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); pick(index, event); }
+      });
+    }
+    return {
+      remove: () => { if (layer.parentNode) layer.parentNode.removeChild(layer); },
+    };
+  }
+
   async function openChest(rec, loot) {
     const view = rec.view;
     if (!view) return;
@@ -2803,15 +3211,18 @@
      * 提前置位会让探针在"还不能点"的那 260ms 里点到空气（第一次跑就是这么挂的）。 */
     rec.phase = 'chest';
     const picked = await new Promise((resolve) => {
-      let done = false;
-      const finish = (i) => { if (done) return; done = true; resolve(Math.max(0, Math.min(3, Number(i) || 0))); };
-      keys.forEach((k, i) => {
-        if (!k || !k.g) return;
-        k.g.style.cursor = 'pointer';
-        k.g.style.pointerEvents = 'auto';
-        /* 悬停就把"选中"挪过去（等价原版的方向键 + 每拍 `showButton`）。 */
-        k.g.addEventListener('mouseenter', () => { if (!done) { sel = i; paint(); } });
-        k.g.addEventListener('click', (e) => { if (e && e.stopPropagation) e.stopPropagation(); finish(i); });
+      let done = false, layer = null;
+      const finish = (i) => {
+        if (done) return;
+        done = true;
+        if (layer) layer.remove();
+        resolve(Math.max(0, Math.min(3, Number(i) || 0)));
+      };
+      /* 热区挂在不随 k1..k4 换帧重建的独立层上（见 mountChestHitLayer 的注释）。
+       * 悬停只挪选中帧；真正提交同时接 pointerup / touchend / click，任何一条先到都算数。 */
+      layer = mountChestHitLayer(view, keys, {
+        hover: (i) => { if (!done && i !== sel) { sel = i; paint(); } },
+        pick: (i) => finish(i),
       });
       rec.chestPick = finish;
     });
@@ -2833,10 +3244,26 @@
       return inner;
     });
     /* 选中的那颗 `7765` 停在第 10 帧时，帧脚本就是 `_root.showLottery2()` —— 四颗一样长，
-     * 所以等它们全部停住即可。 */
-    if (opening.length) await Promise.all(opening);
-    else await wait(900);
+     * 所以等它们全部停住即可。
+     * ⚠ 兜底：`playClip` 靠 rAF 观察帧号；iOS WKWebView 在触摸/合成层切换时可能长时间
+     *   不派发 rAF，`Promise.all` 就永远不 resolve（玩家看到的是选完箱子后停住）。这里给它
+     *   一个 2.5s 上限，超时后显式把四颗 k 停到第 10 帧（奖品槽那一帧），照常揭晓。 */
+    let opened = true;
+    if (opening.length) {
+      opened = await Promise.race([
+        Promise.all(opening).then(() => true),
+        wait(2500).then(() => false),
+      ]);
+    } else {
+      await wait(900);
+    }
     if (rec.stopped) return;
+    if (!opened) {
+      for (let i = 0; i < keys.length; i++) {
+        const inner = keys[i] && keys[i].byName ? keys[i].byName('k') : null;
+        if (inner && inner.frameCount) stopAt(inner, Math.min(10, inner.frameCount()));
+      }
+    }
 
     /* ---- `showLottery2()`：翻奖 ----
      * ⚠ 原版这四格的内容是服务端 `flash/lottery.do` 下发的 `fightResult.lotArray`

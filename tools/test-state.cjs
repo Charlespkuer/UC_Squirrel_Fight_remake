@@ -110,7 +110,7 @@ test('卖出道具：默认回收字典价格的一半，无价/占位价的道�
   assert.equal(S.propSellPrice(21), 2, '技能卷轴 2 金松果一张');
   // 转化丸（10/11/12 力量/敏捷/速度）：字典价 240 → 半价 120，三颗都能卖
   for (const id of [10, 11, 12]) assert.equal(S.propSellPrice(id), 120, id + ' 转化丸半价 120');
-  // 字典里 price 为 0 或占位 1 的（碎片/礼包/天梯碎片/种子/超级药丸）不开放回收
+  // 字典里 price 为 0 或占位 1 的（碎片/礼包/属性碎片/种子/超级药丸）不开放回收
   for (const id of [6, 9, 16, 24, 25, 26, 28, 32, 40, 41, 44, 45, 46, 49, 50, 51]) {
     assert.equal(S.propSellPrice(id), 0, id + ' 不该可卖');
   }
@@ -161,7 +161,11 @@ test('橙装的「镶嵌 / 取下宝石」必须真的出现在详情弹窗里�
     if (r.ok) { orangeKey = r.gear.key; break; }
   }
   assert.ok(orangeKey, '应当能靠三件紫装融合出一件橙装');
-  assert.equal(s.gears.find((x) => x.key === orangeKey).orange, true, '融合产物必须带 orange 标记（否则界面不给宝石按钮）');
+  {
+    const raw = s.gears.find((x) => x.key === orangeKey);
+    assert.equal(S.gearInst(raw.id).quality, 4, '融合产物要落到原版 q4 橙装 id，不能再用紫装 id + orange 标记');
+    assert.equal(raw.orange, undefined, 'q4 橙装不再需要实例级 orange 标记');
+  }
 
   /* 把真实的 openGear 抠出来跑：没宝石时要给「镶嵌宝石」，镶上之后要变「卸下宝石」。 */
   const ui = fs.readFileSync(path.join(root, 'js/classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
@@ -452,14 +456,15 @@ test('随机对手：武技总数跟等级走，高等级能出橙装与宝石',
 
 /* 练功木桩：对齐 reference 里 `Stakes` 的口径 —— 木桩不判死亡，战斗按固定回合收尾。
  * 原版 `maxRounds` 是 60；这里按用户口径固定 10 回合（`DUMMY.rounds`），
- * 2026-10 起每回合回满 800、单回合伤害封顶 800。 */
-test('练功木桩：固定 10 次出手、每回合先扣下回合回满且单回合封顶', () => {
+ * 木桩只锁生命；本例固定随机流为 0.1，使流星锤三连触发，并用显式出招顺序验证真实事件。 */
+test('练功木桩：10 次训练锁血但保留 800+ 伤害，分项纪录取真实出手并跨读档保存', () => {
   const g = game(), Sim = g.Sim;
+  g.math.random = () => 0.1;
   const me = {
-    name: '测试松鼠', level: 30, power: 160, agility: 130, speed: 110, hp: 1200, maxHp: 1200,
-    baseStats: { power: 150, agility: 120, speed: 100 },
-    weapons: [{ id: 4, level: 6 }, { id: 8, level: 6 }],
-    skills: [{ id: 12, level: 6 }, { id: 17, level: 6 }], effects: {},
+    name: '测试松鼠', level: 30, power: 10000, agility: 130, speed: 110, hp: 1200, maxHp: 1200,
+    baseStats: { power: 10000, agility: 130, speed: 110 },
+    weapons: [{ id: 10, level: 15 }], skills: [{ id: 12, level: 6 }], effects: {},
+    pattern: ['common', 'weapon', 'skill'],
   };
   const dummy = {
     name: '测攻击木头人', level: 1, power: 0, agility: 15, speed: 0, hp: 800, maxHp: 800,
@@ -471,14 +476,32 @@ test('练功木桩：固定 10 次出手、每回合先扣下回合回满且单�
   assert.equal(r.rounds.length, 10, '固定 10 次出手就收尾（不会因为 800 血被打空提前结束）');
   assert.ok(r.rounds.every((x) => x.attacker === 0), '木桩不抢回合：10 次全是玩家出手');
   assert.ok(r.rounds.every((x) => x.hpAfter[0] === me.hp), '木桩不还手：玩家血量不减');
-  assert.ok(r.rounds.every((x) => (Number(x.dmg) || 0) <= 800), '单回合最多打掉 800');
-  assert.ok(r.rounds.every((x) => x.hpAfter[1] === 800 - (Number(x.dmg) || 0)),
-    '这一拍血条先扣掉实际伤害，不要立刻回满');
-  assert.ok(r.rounds.slice(1).every((x, i) => Number(x.practiceHeal || 0) === (Number(r.rounds[i].dmg) || 0)),
-    '从第二拍起，开头要把上一拍扣掉的血按同量加回来');
+  const heavy = r.rounds.find((x) => x.action === 'common' && x.dmg > 800);
+  assert.ok(heavy, '真实普攻事件必须保留 800+ 伤害，不能显示或统计成 799');
+  assert.equal(heavy.hpAfter[1], 1, '伤害超过生命时，木桩锁在 1 血继续训练');
+  const multi = r.rounds.find((x) => x.action === 'weapon' && x.hits === 3);
+  assert.ok(multi && multi.dmg > 2400, '真实三连事件的三段均须完整累计，不能按木桩生命截伤害');
+  assert.ok(r.rounds.every((x) => x.hpAfter[1] === Math.max(1, 800 - (Number(x.dmg) || 0))),
+    '这一拍先扣血到最低 1，不能立刻回满或把 r.dmg 改成扣血量');
+  assert.ok(r.rounds.slice(1).every((x, i) => Number(x.practiceHeal || 0) === 800 - r.rounds[i].hpAfter[1]),
+    '从第二拍起，只恢复上一拍实际失去的生命');
   const dealt = r.rounds.reduce((n, x) => n + (x.attacker === 0 ? (Number(x.dmg) || 0) : 0), 0);
   assert.ok(dealt > 0, '木桩照常累计伤害：' + dealt);
   assert.equal(r.winner, 0, '木桩不还手，玩家按血量比例获胜');
+  const record = g.State.recordWoodBattle(r);
+  assert.equal(record.current.total, dealt);
+  for (const [action, key] of [['common', 'handDamage'], ['weapon', 'weaponDamage'], ['skill', 'skillDamage']]) {
+    const sum = r.rounds.filter((x) => x.action === action).reduce((n, x) => n + (x.dmg || 0), 0);
+    assert.ok(sum > 0, action + ' 必须来自本场实际出手');
+    assert.equal(record.best[key], sum);
+  }
+  const handOnly = g.Sim.simulate({ ...me, power: 20000, pattern: ['common'] }, dummy);
+  g.State.recordWoodBattle(handOnly);
+  g.State.load();
+  assert.ok(g.State.state().woodBest.handDamage > record.best.handDamage);
+  assert.equal(g.State.state().woodBest.weaponDamage, record.best.weaponDamage, '不同场次独立保留分项最佳');
+  assert.equal(g.State.state().woodBest.skillDamage, record.best.skillDamage);
+  assert.equal(g.State.state().woodCount, 2);
 });
 
 /* 经典主界面「消息」上的 new 红点：记账必须落在**存档**里。
@@ -875,6 +898,64 @@ test('黑装注册：281~288 可实例化，品质 5 / 使用等级 60 / 主属�
   assert.ok(made && made.quality === 5 && made.useLevel === 60, '黑装可以真的入包');
 });
 
+test('黑装支持镶嵌/卸下宝石：扣 5 金、主属性生效、卸下返还', () => {
+  const g = game(), S = g.State;
+  S.newGame('黑装宝石', { uiMode: 'classic' });
+  const s = S.state();
+  s.level = 90; s.goldPoint = 1000; s.props[103] = 1;
+  const gear = S.addGear(281);
+  assert.ok(gear, '黑装能入包');
+  assert.equal(S.canSocketGem(gear), true, '黑装应被判定为可镶嵌');
+  assert.equal(S.wear(gear.key), true, '黑装能穿戴');
+  const before = S.totalStats().agility;
+  const r = S.socketGem(gear.key, 103);
+  assert.equal(r.ok, true, '黑装镶嵌应成功：' + r.msg);
+  assert.equal(s.goldPoint, 995, '镶嵌扣 5 金松果');
+  assert.equal(s.props[103], 0, '镶嵌消耗 1 颗三级宝石');
+  assert.ok(s.gears.find((x) => x.key === gear.key).gem, '黑装实例上要写入 gem');
+  assert.ok(S.totalStats().agility > before, '宝石主属性加成要进入总属性');
+  const un = S.unsocketGem(gear.key);
+  assert.equal(un.ok, true, '黑装卸下宝石应成功：' + un.msg);
+  assert.equal(s.goldPoint, 990, '卸下再扣 5 金松果');
+  assert.equal(s.props[103], 1, '卸下后宝石回到背包');
+  assert.equal(s.gears.find((x) => x.key === gear.key).gem, undefined, '卸下后不再有 gem');
+});
+
+test('橙装 q4 使用原版初始属性：狂战 205-208 = 45/45/315/45，融合不再拿紫装底子', () => {
+  const g = game(), S = g.State;
+  S.newGame('橙装属性', { uiMode: 'classic' });
+  const s = S.state();
+  s.level = 90; s.goldPoint = 10000;
+  const h = S.addGear(205), p = S.addGear(206), b = S.addGear(207), f = S.addGear(208);
+  for (const [item, val] of [[h, 45], [p, 45], [b, 315], [f, 45]]) {
+    assert.equal(item.quality, 4, '橙装应为 quality 4');
+    assert.equal(item.abilityVal, val, '橙装主属性要取原版 q4 值，不能是紫装底子');
+    assert.equal(item.useLevel, 50, '橙装使用等级 50');
+  }
+  assert.equal(S.gearInst(205).abilityVal, 45, 'gearInst(205) 也要是 q4 值');
+  /* 三件紫狂战头 → 橙狂战头：目标应是 q4 id 205，不是 201 + orange 标记 */
+  const mats = [S.addGear(201), S.addGear(201), S.addGear(201)];
+  g.math.random = () => 0.5;   // 不触发 3% 变异，走同名保名
+  const r = S.mergeGears(mats.map((x) => x.key));
+  assert.equal(r.ok, true, r.msg);
+  assert.equal(r.gear.quality, 4, '紫→橙产物品质 4');
+  assert.equal(r.gear.id, 205, '三件狂战头应合成 q4 狂战头 205');
+  assert.equal(r.gear.abilityVal, 45, '产物主属性取 q4 的 45');
+  assert.equal(s.gears.find((x) => x.key === r.gear.key).orange, undefined, 'q4 橙装不再用实例 orange 标记');
+  /* 旧档迁移：紫 id + orange:true + 旧紫属性 → q4 id + q4 基准值 */
+  s.gears.push({ id: 201, key: 'legacyOrange', used: false, ext: [], attr: 25, orange: true });
+  S.save();
+  const raw = JSON.parse(g.storage.get(S.saveKey));
+  const legacy = raw.gears.find((x) => x.key === 'legacyOrange');
+  legacy.orange = true; legacy.attr = 25;
+  g.storage.set(S.saveKey, JSON.stringify(raw));
+  assert.equal(S.load(), true);
+  const migrated = S.state().gears.find((x) => x.key === 'legacyOrange');
+  assert.equal(migrated.id, 205, '旧橙装迁移到同部位同名的 q4 id');
+  assert.equal(migrated.attr, 45, '旧橙装迁移后主属性改为 q4 基准值');
+  assert.equal(migrated.orange, undefined, '迁移后去掉实例 orange 标记');
+});
+
 test('现代界面删除黑装内容：不可获得/合成/开卡，读档清理；经典界面保留', () => {
   const g = game(), S = g.State;
   S.newGame('现代黑装', { uiMode: 'modern' });
@@ -925,7 +1006,7 @@ test('黑色卡片 / 黑装自选箱：选完才消耗，开出碎片/金松果/
   const card = S.useProp(80, '71');
   assert.equal(card.ok, true, card.msg);
   assert.ok(s.props[77] >= 1 && s.props[77] <= 2, '凤凰碎片 1~2 个');
-  assert.ok(s.goldPoint >= 50 && s.goldPoint <= 200, '黑卡另给 50~200 金');
+  assert.ok(s.goldPoint >= 100 && s.goldPoint <= 400, '黑卡另给 100~400 金');
   assert.ok(!(s.props[80] > 0), '选完消耗卡片');
   const boxNeed = S.useProp(89);
   assert.equal(boxNeed.ok, false); assert.equal(boxNeed.needsBlackGearChoice, true);
@@ -954,11 +1035,7 @@ test('橙装融合：3 件橙装 → 1 件黑装（原版 composeType=3）；现
   const g = game(), S = g.State;
   S.newGame('橙合黑', { uiMode: 'classic' });
   const s = S.state(); s.level = 60; s.goldPoint = 5000;
-  const mats = [0, 1, 2].map(() => {
-    const item = S.addGear(203);
-    s.gears.find((x) => x.key === item.key).orange = true;
-    return item;
-  });
+  const mats = [0, 1, 2].map(() => S.addGear(205));
   const r = S.mergeGears([mats[0].key, mats[1].key, mats[2].key], { allowMixedParts: true });
   assert.equal(r.ok, true, r.msg);
   assert.equal(r.gear.quality, 5, '3 橙装应融合出黑装');
@@ -967,14 +1044,10 @@ test('橙装融合：3 件橙装 → 1 件黑装（原版 composeType=3）；现
 
   S.newGame('现代橙合黑', { uiMode: 'modern' });
   const s2 = S.state(); s2.level = 60; s2.goldPoint = 5000;
-  const mats2 = [0, 1, 2].map(() => {
-    const item = S.addGear(203);
-    s2.gears.find((x) => x.key === item.key).orange = true;
-    return item;
-  });
+  const mats2 = [0, 1, 2].map(() => S.addGear(205));
   const denied = S.mergeGears([mats2[0].key, mats2[1].key, mats2[2].key], { allowMixedParts: true });
   assert.equal(denied.ok, false, '现代界面没有黑装，橙装不能继续融合');
-  assert.equal(s2.gears.filter((x) => x.orange).length, 3, '拒绝时材料不被消耗');
+  assert.equal(s2.gears.filter((x) => Number(x.id) === 205).length, 3, '拒绝时材料不被消耗');
 });
 
 test('黑装宝箱档：金宝箱 8% 黑卡 / 2% 完整黑装，魔法袋必得 1 黑卡', () => {
@@ -1697,6 +1770,34 @@ test('战报保存独立快照，重载可回放，最多保留最新 50 条', (
   assert.equal(history.length, 50); assert.equal(history[0].foe.name, '53'); assert.equal(history[49].foe.name, '4');
   assert.equal(history[0].result.rounds.length > 0, true);
   history[0].foe.name = '外部修改'; assert.equal(g.State.battleHistory()[0].foe.name, '53');
+  const oversized = Array.from({ length: 58 }, (_, i) => ({ ...saved, id: 'old-' + i,
+    foe: { ...saved.foe, name: i < 50 ? '保留-' + i : '已删除的旧录像' } }));
+  // 导出/写盘本身也要收口：不依赖 recordBattle，不能只在消息列表上截显示。
+  g.State.state().battles = oversized.slice();
+  assert.equal(JSON.parse(g.State.exportPayload()).battles.length, 50);
+  assert.equal(g.State.state().battles.length, 50);
+  const base = JSON.parse(g.State.exportPayload());
+  const old = { ...base, level: 10, battles: oversized, __dualMode: 'classic',
+    __dualOther: { ...base, level: 10, settings: { ...base.settings, uiMode: 'modern' }, battles: oversized } };
+  const before = JSON.stringify(old);
+  g.storage.set(g.State.saveKey, before);
+  g.State.load();
+  const after = g.storage.get(g.State.saveKey), disk = JSON.parse(after);
+  assert.equal(disk.battles.length, 50);
+  assert.equal(disk.__dualOther.battles.length, 50, '未激活的另一槽也必须从存档删掉超额录像');
+  assert.ok(after.length < before.length);
+  assert.ok(!after.includes('已删除的旧录像'), '同日读旧档后主动回写，删除的数据不再占存档');
+  g.State.switchMode('modern');
+  g.State.recordBattle({ me: fighter(), foe: fighter({ name: '现代新战报' }), result: saved.result });
+  assert.equal(g.State.battleHistory().length, 50);
+  assert.equal(g.State.battleHistory()[0].foe.name, '现代新战报');
+  const legacy = { ...old, __dualOther: undefined, __dualSaves: { modern: old.__dualOther } };
+  g.storage.set(g.State.saveKey, JSON.stringify(legacy));
+  g.State.load();
+  const migrated = JSON.parse(g.storage.get(g.State.saveKey));
+  assert.equal(migrated.battles.length, 50);
+  assert.equal(migrated.__dualOther.battles.length, 50);
+  assert.ok(!('__dualSaves' in migrated), '旧双槽格式回写后不再留下重复录像数组');
 });
 
 test('经验丸说明不再声称竞技场无效，其它限制仍保留', () => {
@@ -1866,28 +1967,47 @@ test('每日任务按角色等级抽题：做不了的任务不会出现，升�
   assert.equal(S.questStatus().map((q) => q.key).join(','), keep, '升级不会换掉仍然能做的题');
 });
 
-test('音量/静音/分辨率/全面屏/状态栏/界面模式写进存档并读得回来', () => {
+test('音量/静音/分辨率/全面屏/状态栏/跳过显示/界面模式写进存档并读得回来', () => {
   const g = game(), S = g.State, s = S.state();
-  same(s.settings, { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, uiMode: 'classic' });
+  same(s.settings, { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, showSkip: true, uiMode: 'classic' });
   assert.equal(S.RESOLUTIONS.length, 6, '六档分辨率');
   assert.equal(S.UIMODES.length, 2, '两档界面模式');
   assert.equal(S.resolutionHeight('auto'), 0);
   assert.equal(S.resolutionHeight('1080'), 1080);
   assert.equal(S.resolutionHeight('4k'), 0, '认不出的档位当自动');
   S.setSettings({ volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false, uiMode: 'classic' });
-  same(S.settings(), { volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false, uiMode: 'classic' });
+  same(S.settings(), { volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false, showSkip: true, uiMode: 'classic' });
   // 存档往返（浏览器存档模式下 save/load 走 localStorage）
   S.save(); S.load();
-  same(S.state().settings, { volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false, uiMode: 'classic' });
+  same(S.state().settings, { volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false, showSkip: true, uiMode: 'classic' });
   // 坏值一律回落，不让坏档把画面或音量弄坏（界面模式认不出时按默认经典）
   same(S.normalizeSettings({ volume: 'x', muted: 'yes', resolution: 42, fullscreen: 1, uiMode: 'neon' }),
-    { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, uiMode: 'classic' });
-  same(S.normalizeSettings({ volume: 5 }), { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, uiMode: 'classic' });
-  same(S.normalizeSettings(null), { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, uiMode: 'classic' });
+    { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, showSkip: true, uiMode: 'classic' });
+  same(S.normalizeSettings({ volume: 5 }), { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, showSkip: true, uiMode: 'classic' });
+  same(S.normalizeSettings(null), { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, showSkip: true, uiMode: 'classic' });
   // 旧档（没有 settings 字段）读进来要有默认值
   const legacy = JSON.parse(JSON.stringify(s));
   delete legacy.settings;
-  same(S.normalizeSettings(legacy.settings), { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, uiMode: 'classic' });
+  same(S.normalizeSettings(legacy.settings), { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, showSkip: true, uiMode: 'classic' });
+});
+
+test('跳过键：超级松鼠 10 级解锁、非 VIP 20 级；系统页开关可隐藏', () => {
+  const g = game(), S = g.State, s = S.state();
+  const day = 24 * 60 * 60 * 1000;
+  s.level = 10;
+  s.vip = { level: 1, exp: 0, until: 0, capAdded: 0, capApplied: false, lastDaily: '' };
+  assert.equal(S.unlockedSkip(), false, '10 级非 VIP 还不解锁');
+  s.vip.until = Date.now() + day;
+  assert.equal(S.unlockedSkip(), true, '超级松鼠 10 级解锁跳过');
+  assert.equal(S.skipButtonEnabled(), true, '默认显示跳过键');
+  S.setSettings({ showSkip: false });
+  assert.equal(S.skipButtonEnabled(), false, '系统页关闭后不显示跳过键');
+  S.setSettings({ showSkip: true });
+  s.vip.until = 0;
+  s.level = 19;
+  assert.equal(S.unlockedSkip(), false, '非 VIP 19 级未解锁');
+  s.level = 20;
+  assert.equal(S.unlockedSkip(), true, '非 VIP 20 级解锁');
 });
 
 test('挑战经验只看等级差：等级成长 20 级封顶、单位体力效率略低于竞技场，且每级越来越难', () => {

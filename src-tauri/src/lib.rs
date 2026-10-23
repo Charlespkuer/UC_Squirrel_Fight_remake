@@ -374,24 +374,24 @@ fn save_api(method: &str, query: &str, body: &[u8], ctx: &Ctx, out: &mut TcpStre
     }
 }
 
-/// 把存档写到系统「下载」目录（桌面导出 / 便携轻壳的 `/__export` 共用）。
-/// Windows 用 Known Folder（`dirs`），兼容 OneDrive 重定向；macOS/Linux 走 `$HOME/Downloads`。
-#[cfg(not(mobile))]
-fn export_to_downloads(file_name: &str, data: &str) -> Result<serde_json::Value, String> {
+/// 导出前统一校验：体积上限 + 必须是合法 JSON 对象。桌面 / iOS 共用。
+fn validate_export_data(data: &str) -> Result<(), String> {
     if data.len() > SAVE_MAX {
         return Err("存档太大（超过 4 MB）".into());
     }
     serde_json::from_str::<serde_json::Value>(data).map_err(|_| "存档不是合法 JSON".to_string())?;
-    let dir = dirs::download_dir().ok_or_else(|| "找不到系统下载目录".to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| format!("创建下载目录失败：{e}"))?;
-    let name = sanitize_export_name(file_name);
-    let mut path = dir.join(&name);
+    Ok(())
+}
+
+/// 同名文件不覆盖：`松鼠大战存档.json` 已存在时依次尝试 `(1)`、`(2)` …
+fn unique_export_path(dir: &Path, name: &str) -> PathBuf {
+    let mut path = dir.join(name);
     if path.exists() {
-        let stem = Path::new(&name)
+        let stem = Path::new(name)
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "松鼠大战存档".to_string());
-        let ext = Path::new(&name)
+        let ext = Path::new(name)
             .extension()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "json".to_string());
@@ -402,11 +402,10 @@ fn export_to_downloads(file_name: &str, data: &str) -> Result<serde_json::Value,
             }
         }
     }
-    fs::write(&path, data).map_err(|e| format!("写入下载目录失败：{e}"))?;
-    Ok(serde_json::json!({ "ok": true, "path": path.to_string_lossy() }))
+    path
 }
 
-#[cfg(not(mobile))]
+/// 文件名清洗：去掉路径分隔符 / 控制字符，保证永远不会写出目标目录。
 fn sanitize_export_name(raw: &str) -> String {
     let cleaned: String = raw
         .chars()
@@ -422,6 +421,45 @@ fn sanitize_export_name(raw: &str) -> String {
         name = cut + ".json";
     }
     name
+}
+
+/// 把存档写到系统「下载」目录（桌面导出 / 便携轻壳的 `/__export` 共用）。
+/// Windows 用 Known Folder（`dirs`），兼容 OneDrive 重定向；macOS/Linux 走 `$HOME/Downloads`。
+#[cfg(not(mobile))]
+fn export_to_downloads(file_name: &str, data: &str) -> Result<serde_json::Value, String> {
+    validate_export_data(data)?;
+    let dir = dirs::download_dir().ok_or_else(|| "找不到系统下载目录".to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| format!("创建下载目录失败：{e}"))?;
+    let path = unique_export_path(&dir, &sanitize_export_name(file_name));
+    fs::write(&path, data).map_err(|e| format!("写入下载目录失败：{e}"))?;
+    Ok(serde_json::json!({ "ok": true, "path": path.to_string_lossy() }))
+}
+
+/// iOS 导出：写进 App 沙盒的 `Documents/`。Info.ios.plist 已声明
+/// `UIFileSharingEnabled` + `LSSupportsOpeningDocumentsInPlace`，这个目录会出现在
+/// 「文件」App → 我的 iPhone/iPad → 松鼠大战；玩家可以从这里再点「导入存档」选回来，
+/// 也可以用「文件」App 拷到 iCloud / 另一台设备。
+#[cfg(target_os = "ios")]
+fn export_to_documents(app: &tauri::AppHandle, file_name: &str, data: &str) -> Result<serde_json::Value, String> {
+    validate_export_data(data)?;
+    let dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("找不到 App 的 Documents 目录：{e}"))?;
+    fs::create_dir_all(&dir).map_err(|e| format!("创建 Documents 目录失败：{e}"))?;
+    let name = sanitize_export_name(file_name);
+    let path = unique_export_path(&dir, &name);
+    fs::write(&path, data).map_err(|e| format!("写入 Documents 失败：{e}"))?;
+    let saved = path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or(name);
+    Ok(serde_json::json!({
+        "ok": true,
+        "path": path.to_string_lossy(),
+        "name": saved,
+        "display": format!("「文件」App → 我的 iPhone/iPad → 松鼠大战 → {saved}"),
+    }))
 }
 
 #[cfg(not(mobile))]
@@ -453,7 +491,8 @@ fn export_api(method: &str, query: &str, body: &[u8], out: &mut TcpStream) -> st
     }
 }
 
-/// 用系统默认浏览器打开一个 http(s) 链接。///   桌面：Windows `cmd /C start`／macOS `open`／Linux `xdg-open`
+/// 用系统默认浏览器打开一个 http(s) 链接。
+///   桌面：Windows `cmd /C start`／macOS `open`／Linux `xdg-open`
 ///   安卓：`am start -a android.intent.action.VIEW`（部分机型 SELinux 可能拦住 → 前端会退回「复制链接」）
 /// 链接先做白名单校验（只允许 http(s)、只允许可见 ASCII、禁掉 shell 元字符），
 /// 免得把一个带 `&` / `"` 的字符串交给 shell 解析。
@@ -1030,6 +1069,13 @@ fn save_write_at(main_path: &Path, data: &str, force: bool) -> Result<serde_json
     }
     write_file_atomic(main_path, data).map_err(|e| format!("写存档失败：{e}"))?;
     if force {
+        /* 导入/重置：**写完立刻读回核对**，别让「提示成功、文件没变」再发生一次。
+         * 普通自动保存不额外读 700 KB；导入是一次性动作，多读一遍值得。 */
+        match fs::read_to_string(main_path) {
+            Ok(written) if written == data => {}
+            Ok(_) => return Err("写入后核对失败：文件内容和要导入的存档不一致".into()),
+            Err(e) => return Err(format!("写入后核对失败：{e}")),
+        }
         /* 玩家明确重置/导入：备份也同步成新档，避免旧的高等级备份继续挡住后续新档。 */
         let _ = fs::copy(main_path, &bak_path);
     }
@@ -1053,17 +1099,137 @@ fn save_write(state: tauri::State<SaveState>, data: String, force: Option<bool>)
     save_write_at(&state.file, &data, force.unwrap_or(false))
 }
 
-/// 命令：`export_save` —— 安装版（页面在 tauri.localhost）把存档写到系统「下载」目录。
-/// 轻壳 / 安卓各有自己的通道（`/__export` / `SSDZAndroid`），这里只负责桌面安装版。
+/// 导入列表只列 App 自己 `Documents/` 里的 `.json`：iOS 的 WKWebView **没有实现**
+/// `runOpenPanelWithParameters`（wry 只在 macOS 实现了文件选择面板），页面里的
+/// `<input type=file>` 在 iOS 16~24 上点不开。导入改用「原生列目录 + 读取」，
+/// 不依赖系统文件选择器，也不申请任何额外权限。
+#[cfg(target_os = "ios")]
+fn safe_import_name(raw: &str) -> Result<&str, String> {
+    let name = raw.trim();
+    if name.is_empty() || name.chars().count() > 180 {
+        return Err("存档文件名不合法".into());
+    }
+    if name.contains('/') || name.contains('\\') || name.contains('\0') || name == "." || name == ".." {
+        return Err("存档文件名不合法".into());
+    }
+    if Path::new(name).file_name().and_then(|s| s.to_str()) != Some(name) {
+        return Err("存档文件名不合法".into());
+    }
+    if !name.to_ascii_lowercase().ends_with(".json") {
+        return Err("只能读取 .json 存档".into());
+    }
+    Ok(name)
+}
+
+#[cfg(target_os = "ios")]
+fn documents_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("找不到 App 的 Documents 目录：{e}"))?;
+    fs::create_dir_all(&dir).map_err(|e| format!("创建 Documents 目录失败：{e}"))?;
+    Ok(dir)
+}
+
+/// 命令：`list_save_files` —— iOS 导入页列出 Documents 里导出的存档。
+/// 每项带解析出的角色名/等级，玩家不用靠一长串时间戳文件名猜哪份是目标档。
 #[tauri::command]
-fn export_save(file_name: String, data: String) -> Result<serde_json::Value, String> {
-    #[cfg(mobile)]
+fn list_save_files(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "ios")]
     {
-        let _ = (file_name, data);
+        let dir = documents_dir(&app)?;
+        let mut files = Vec::new();
+        let entries = fs::read_dir(&dir).map_err(|e| format!("读取 Documents 失败：{e}"))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = match path.file_name().and_then(|s| s.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            if !name.to_ascii_lowercase().ends_with(".json") {
+                continue;
+            }
+            let (_, modified, size) = file_meta(&path);
+            let parsed = read_json_file(&path);
+            let (player, level, reborn) = match parsed.as_ref() {
+                Some((_, v)) => (
+                    v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    save_max_level(v),
+                    save_reborn(v),
+                ),
+                None => (String::new(), 0, 0),
+            };
+            files.push(serde_json::json!({
+                "name": name,
+                "size": size,
+                "modified": modified,
+                "player": player,
+                "level": level,
+                "reborn": reborn,
+                "valid": parsed.is_some(),
+            }));
+        }
+        files.sort_by(|a, b| {
+            b.get("modified").and_then(|x| x.as_u64()).unwrap_or(0)
+                .cmp(&a.get("modified").and_then(|x| x.as_u64()).unwrap_or(0))
+        });
+        Ok(serde_json::json!({ "ok": true, "dir": dir.to_string_lossy(), "files": files }))
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = app;
+        Err("这个平台没有「文件」App 导出列表，请用「选择文件」导入".into())
+    }
+}
+
+/// 命令：`read_save_file` —— 按 `list_save_files` 返回的文件名读取原文。
+#[tauri::command]
+fn read_save_file(app: tauri::AppHandle, name: String) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "ios")]
+    {
+        let safe = safe_import_name(&name)?;
+        let dir = documents_dir(&app)?;
+        let path = dir.join(safe);
+        if !path.is_file() {
+            return Err("找不到这份导出存档".into());
+        }
+        let (_, modified, size) = file_meta(&path);
+        if size > SAVE_MAX as u64 {
+            return Err("存档太大（超过 4 MB）".into());
+        }
+        let data = fs::read_to_string(&path).map_err(|e| format!("读取存档失败：{e}"))?;
+        Ok(serde_json::json!({
+            "ok": true, "name": safe, "data": data, "size": size,
+            "modified": modified, "path": path.to_string_lossy(),
+        }))
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = (app, name);
+        Err("这个平台没有「文件」App 导出列表".into())
+    }
+}
+
+/// 命令：`export_save` —— 安装版 / iOS（页面在 tauri.localhost / tauri://）导出存档。
+/// 桌面写系统「下载」目录；iOS 写 App 的 Documents（「文件」App 可见）；
+/// Android 仍走 Kotlin 的 `SSDZAndroid` 桥（本命令在 Android 上返回明确错误）。
+#[tauri::command]
+fn export_save(app: tauri::AppHandle, file_name: String, data: String) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "ios")]
+    {
+        export_to_documents(&app, &file_name, &data)
+    }
+    #[cfg(all(mobile, not(target_os = "ios")))]
+    {
+        let _ = (&app, file_name, data);
         Err("移动端请使用系统下载目录桥".into())
     }
     #[cfg(not(mobile))]
     {
+        let _ = &app;
         export_to_downloads(&file_name, &data)
     }
 }
@@ -1080,7 +1246,7 @@ const TITLE: &str = "松鼠大战 · 怀旧复刻版";
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![save_path, save_meta, save_read, save_write, export_save, open_external])
+        .invoke_handler(tauri::generate_handler![save_path, save_meta, save_read, save_write, export_save, list_save_files, read_save_file, open_external])
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -1165,6 +1331,20 @@ mod tests {
         assert_eq!(save_max_level(&v), 42);
         let old = json!({ "level": 42, "__dualSaves": {"classic": {"level": 31}, "modern": {"level": 9}} });
         assert_eq!(save_max_level(&old), 42);
+    }
+
+    #[test]
+    fn export_names_are_sanitized_and_never_overwrite() {
+        assert_eq!(sanitize_export_name("松鼠大战存档"), "松鼠大战存档.json");
+        assert_eq!(sanitize_export_name("a/b:c"), "a_b_c.json");
+        assert_eq!(sanitize_export_name("  "), "松鼠大战存档.json");
+        let dir = std::env::temp_dir().join(format!("ssdz-export-{}-{}", std::process::id(), now_ms()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("save.json"), "{}").unwrap();
+        let p = unique_export_path(&dir, "save.json");
+        assert_eq!(p.file_name().unwrap().to_string_lossy(), "save (1).json");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

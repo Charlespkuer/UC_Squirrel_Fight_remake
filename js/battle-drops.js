@@ -43,10 +43,11 @@
     { id: 25, name: '绿色碎片', count: 1, weight: 3 },
     { id: 26, name: '蓝色碎片', count: 1, weight: 1 * BLUE_MUL },
   ];
-  /* 天梯赛专属：飘出来的碎片就是天梯碎片（合成转化丸），恶魔果实种子多给一些。
-   * 依据 references/new/微信图片_20260924010916_259_2.jpg —— 天梯战里飘的是带「?」的碎片。 */
+  /* 天梯赛专属：飘出来的是原版「属性碎片」（黄色三角 + ?），恶魔果实种子多给一些。
+   * 依据 references/new/微信图片_20260924010916_259_2.jpg：天梯战里飘的是黄色三角碎片，
+   * 卡片文案是「请点确定」而不是普通战斗的「请点击」。 */
   const LADDER_POOL = [
-    { id: 51, name: '天梯碎片', count: 1, weight: 34 },
+    { id: 51, name: '属性碎片', count: 1, weight: 34 },
     { id: 46, name: '恶魔果实种子', count: 1, weight: 10 },
     { id: 15, name: '经验', count: 5, weight: 22 },
     { id: 8, name: '金松果', count: 2, weight: 18 },
@@ -105,10 +106,11 @@
     function show(reward) {
       removeButton(); active = reward;
       if (!root) return;
+      const ladder = opts.kind === 'rank';
       button = document.createElement('button'); button.type = 'button';
-      button.className = 'battle-pickup';
+      button.className = 'battle-pickup' + (ladder ? ' rank' : '');
       button.setAttribute('aria-label', '拾取' + reward.name + ' ×' + reward.count);
-      button.innerHTML = '<span class="pickup-card"><img alt="" src="images/ui/' + iconSrc(reward.id) + '"></span><span class="pickup-prompt">请点击</span>';
+      button.innerHTML = '<span class="pickup-card"><img alt="" src="images/ui/' + iconSrc(reward.id) + '"></span><span class="pickup-prompt">' + (ladder ? '请点确定' : '请点击') + '</span>';
       button.onclick = () => collect(reward.index);
       root.appendChild(button);
     }

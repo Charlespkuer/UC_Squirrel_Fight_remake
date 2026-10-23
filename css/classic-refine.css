@@ -145,6 +145,17 @@
  * 在奶油色弹窗上很跳。统一换成与 `.sf-feedback` 同档的暖金焦点环，键盘仍能看见焦点。 */
 .classic-modal .uc-button:focus-visible,
 .classic-modal .modal-close:focus-visible{outline:3px solid #ffe27a;outline-offset:3px}
+/* 按钮文案规范（docs/界面按钮文案规范.md）：动作标签最多 4 个汉字，状态值放到单独的
+ * 小徽章里。弹窗按钮不再用 min-width:200px 硬撑：3 个长标签在 755px 弹窗里会互相压住，
+ * 现在允许换行，并把最小宽度降下来，短标签优先保持一行。 */
+.modal-buttons{flex-wrap:wrap}
+.modal-buttons .uc-button{min-width:140px;max-width:100%;padding-left:24px;padding-right:24px}
+.uc-button .btn-badge{display:inline-flex;align-items:center;justify-content:center;
+  margin-left:8px;padding:0 8px;min-width:22px;height:26px;border-radius:13px;
+  background:#5b3a1d;color:#fff6cf;font-size:17px;line-height:1;letter-spacing:0;
+  -webkit-text-stroke:0;text-shadow:none;vertical-align:middle}
+.settings-grid.system-grid .uc-button .btn-badge{height:24px;font-size:16px}
+@media (max-width:900px){.modal-buttons .uc-button{min-width:120px;font-size:30px;padding-left:16px;padding-right:16px}}
 .uc-tab:not(.sf-feedback):hover,.catalog-cell:not(.sf-feedback):hover{transform:scale(1.035);filter:drop-shadow(0 0 4px rgba(255,226,122,.9)) brightness(1.04)}
 @keyframes sf-feedback-press{0%,100%{transform:scale(var(--sf-current-scale))}45%{transform:scale(.962)}}
 @keyframes sf-feedback-pick{0%{transform:scale(1)}35%{transform:scale(1.13)}64%{transform:scale(.985)}100%{transform:scale(var(--sf-current-scale))}}
@@ -166,7 +177,6 @@
      `left:50%;transform:translateX(-50%)` —— 绝对定位元素在 `left` 给定、`right:auto` 时，
      shrink-to-fit 的可用宽度只有"容器宽 − left"（也就是**半个容器**），文案稍长就被压成两行
      （实测 45 字那条被压在 533 设计像素里换行）。改成左右都锚 0 之后 max-width 才真正生效。 */
-.ssfight-home-level{position:absolute;z-index:5;pointer-events:none;min-width:1.2em;text-align:center;color:#fff;font:900 30px/1 'Microsoft YaHei',sans-serif;text-shadow:-2px -2px 0 #6b3e0d,2px -2px 0 #6b3e0d,-2px 2px 0 #6b3e0d,2px 2px 0 #6b3e0d,0 3px 0 #3d2208}
 
 .ssfight-pet-art{position:absolute;z-index:2;pointer-events:none;overflow:hidden;display:flex;align-items:center;justify-content:center}
 .ssfight-pet-art svg{width:100%!important;height:100%!important;max-width:100%;max-height:100%}
@@ -215,12 +225,25 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .classic-tower .tower-plan:not(.horizontal):not(.boss-grid) li{display:grid!important;grid-template-columns:92px minmax(0,1fr)!important;grid-template-rows:auto auto auto!important;column-gap:8px;row-gap:2px;align-items:center;align-content:center;justify-content:flex-start;text-align:left;padding:4px 8px}
 .classic-tower .tower-plan .foe-portrait{grid-column:1!important;grid-row:1 / span 3!important;width:92px!important;height:80px!important;align-self:center;margin:0}
 .classic-tower .tower-plan .foe-portrait:has(.sf-classic-foe){background:rgba(255,248,230,.9)!important;border:2px solid #e2c68f!important;border-radius:12px!important;box-shadow:none!important;overflow:visible!important}
+/* 征战动物 boss 的小立绘（6833）走同一张卡：奶油底 + 米色描边，和松鼠 boss 的 7232 卡一致。 */
+.classic-tower .tower-plan .foe-portrait:has(.sf-classic-campaign){background:rgba(255,248,230,.9)!important;border:2px solid #e2c68f!important;border-radius:12px!important;box-shadow:none!important;overflow:visible!important}
 .classic-tower .tower-plan:not(.horizontal):not(.boss-grid) li > b{grid-column:2!important;grid-row:1!important;justify-self:start!important;max-width:100%;min-width:0;white-space:normal!important;overflow-wrap:anywhere;text-align:left;line-height:1.15;font-size:19px}
 .classic-tower .tower-plan:not(.horizontal):not(.boss-grid) li > .tower-plan-type{grid-column:2!important;grid-row:2!important;justify-self:start!important;max-width:100%;box-sizing:border-box;white-space:normal!important;overflow-wrap:anywhere;text-align:left;line-height:1.2;font-size:16px}
 .classic-tower .tower-plan:not(.horizontal):not(.boss-grid) li > .elite-tag{grid-column:2!important;grid-row:3!important;justify-self:start!important;max-width:100%;box-sizing:border-box;white-space:normal!important;overflow-wrap:anywhere}
+
+/* 60/70/80/90 层的最后一战是四雄，整列有 5 张对手卡；经典外壳的卡片比现代高一档，
+ * 第 5 张会落到右下角「继续战斗」按钮底下（头像与按钮互相盖住）。5 张时单独收紧：
+ * 立绘 92×80 → 80×68、内边距与行距收一档，其余层不受影响。 */
+.classic-tower .endless-foes.foes-many .tower-plan:not(.horizontal):not(.boss-grid) li{grid-template-columns:80px minmax(0,1fr)!important;padding:2px 8px!important;row-gap:1px!important}
+.classic-tower .endless-foes.foes-many .tower-plan .foe-portrait{width:80px!important;height:68px!important}
+.classic-tower .endless-foes.foes-many .tower-plan:not(.horizontal):not(.boss-grid) li > b{font-size:18px}
+.classic-tower .endless-foes.foes-many .tower-plan:not(.horizontal):not(.boss-grid) li > .tower-plan-type{font-size:14px}
+.classic-tower .endless-foes.foes-many .tower-plan:not(.horizontal):not(.boss-grid) li > .elite-tag{font-size:12px}
 .classic-tower .tower-plan li > .tower-plan-no{display:none!important}
 .sf-classic-foe{display:block;width:100%;height:100%;overflow:hidden}
 .sf-classic-foe svg{width:100%!important;height:100%!important;display:block}
+.sf-classic-campaign{display:block;width:100%;height:100%;overflow:hidden}
+.sf-classic-campaign svg{width:100%!important;height:100%!important;display:block}
 .ssfight-building-level{position:absolute;z-index:6;pointer-events:none;padding:4px 12px;border:2px solid #8b5a1c;border-radius:999px;background:linear-gradient(#fff4c8,#f3c85f);color:#6b3e0d;font:700 16px/1.2 'Microsoft YaHei',sans-serif;text-shadow:0 1px 0 #fff8d8;box-shadow:0 2px 0 #8b5a1c;white-space:nowrap}
 .ssfight-note{position:absolute;left:0;right:0;bottom:4px;margin:0 auto;width:fit-content;z-index:4;
   max-width:min(1120px,96%);box-sizing:border-box;padding:5px 16px;border-radius:20px;
@@ -626,6 +649,17 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .classic-modal:has(.gear-detail):has(.modal-buttons>.uc-button:nth-child(5))>.modal-body,
 .gear-detail-overlay>.classic-modal:has(.modal-buttons>.uc-button:nth-child(5))>.modal-body{max-height:330px}
 
+/* 「切换界面模式」确认框：取消 / 切换两颗键放大，并从卡片下沿抬起来。
+ * 原来 small-modal 的 max-height(466) 比内容矮，按钮被顶到卡片下边框上（看着又小又靠下），
+ * 用户 2026-10 口径："取消和切换键按钮太小了太靠下，调大往上移动一点"。
+ * 这里给卡片留出内容高度（560 > 55+360+16+86+4+32），body 不再挤压按钮；
+ * 用 overlay 自己的 class 限定，别的确认框不受影响。 */
+.classic-modal-overlay.mode-switch-dialog>.classic-modal.small-modal{max-height:560px;padding-bottom:32px}
+.classic-modal-overlay.mode-switch-dialog>.classic-modal.small-modal>.modal-body{max-height:360px}
+.classic-modal-overlay.mode-switch-dialog>.classic-modal.small-modal>.modal-buttons{margin-top:16px;margin-bottom:4px}
+.classic-modal-overlay.mode-switch-dialog>.classic-modal.small-modal>.modal-buttons .uc-button{
+  min-width:210px;min-height:86px;padding:12px 44px;font-size:44px}
+
 /* 自由属性点：升级时必选的分配弹窗（无关闭叉）；点数不在其它地方常驻显示 */
 .classic-modal-overlay.point-dialog>.classic-modal.small-modal{max-height:600px;width:800px}
 .classic-modal-overlay.point-dialog>.classic-modal.small-modal>.modal-body{max-height:470px;overflow-y:auto}
@@ -726,12 +760,12 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .sync-ask .ask-foot{margin-top:10px;font-size:17px;line-height:1.6;color:#8a6a3c}
 
 /* ---------- 系统页：分辨率 / 全面屏（画面设置） ----------
-   第 3 项：分辨率与全面屏收进了按钮网格，和音乐/导出/导入/昵称拼成两排 6 个，
-   所以这里只要保证网格是 3 列；原来的 setting-group / setting-choice 一并去掉。 */
-.settings-grid.system-grid{grid-template-columns:repeat(3,1fr)}
+   存档 / 昵称 / 跳过 + 画面 / 状态栏 / 调试，共 8 颗，排成两排 4 个；
+   原来的 setting-group / setting-choice 一并去掉。 */
+.settings-grid.system-grid{grid-template-columns:repeat(4,1fr)}
 .settings-grid.system-grid .uc-button{font-size:28px}
 /* 界面模式单独成卡：两套界面是两套独立存档，属于会改变整个游戏观感与进度的大动作，
-   不跟导出/分辨率这些工具键挤在 3×2 网格里。卡片用米金底板，右侧留一颗大号金键。 */
+   不跟导出/分辨率这些工具键挤在 4×2 网格里。卡片用米金底板，右侧留一颗大号金键。 */
 .settings-mode-card{position:relative;z-index:1;display:flex;align-items:center;gap:24px;
   margin:0 30px 20px;padding:16px 22px 16px 26px;border:4px solid #a97b35;border-radius:28px;
   background:linear-gradient(135deg,#fffbe6,#f2ddb0);box-shadow:inset 0 0 0 3px #fffdf1,0 4px 0 #b78a3e33}
@@ -741,9 +775,6 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .settings-mode-note{font-size:19px;line-height:1.35;color:#8f734e}
 .settings-mode-btn{flex:0 0 auto;min-width:250px;min-height:70px;font-size:28px;gap:4px}
 .settings-mode-arrow{font-size:36px;line-height:1;margin-left:8px}
-/* 调试所得入口单独一行，不占六颗常规设置键的 3×2 网格。 */
-.settings-debug-row{display:flex;justify-content:flex-end;margin:-2px 0 10px}
-.settings-debug-row .uc-button{font-size:24px;min-height:44px;padding:4px 18px}
 /* 刷新玩家次数用完后：保持灰色、压暗并给出禁用光标；到 10 分钟窗口结束会自动重绘恢复。 */
 .classic-page .uc-button.is-exhausted{opacity:.7;filter:grayscale(.45);cursor:not-allowed}
 /* 刷新玩家（未达上限）：悬停变绿、按下有颜色/位移动反馈；鼠标点完不画系统黑焦点框。 */
@@ -865,7 +896,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .sf-system-ui .help-item:hover{background:linear-gradient(#f2fbdd,#dcf0b6);border-color:#9bc75f}
 
 /* 音乐音量：去掉独立的「音乐：开/关」后，把音量条和「游戏设置」标题放在同一行，
-   样式做成和设置按钮同一颗金/绿胶囊；下面仍是 3 列 × 2 行的六颗设置键。
+   样式做成和设置按钮同一颗金/绿胶囊；下面仍是 4 列 × 2 行的八颗设置键。
    点胶囊（滑条以外）开关音乐；拖滑条仍连续调节。正在响 = 选中态 = 绿色。 */
 .settings-head{display:flex;align-items:center;gap:18px;margin:0 30px 10px;min-height:56px}
 .settings-head>.classic-section-title{margin:0}
@@ -955,7 +986,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .classic-modal-overlay.save-list-dialog>.classic-modal.small-modal>.modal-body{max-height:432px;padding:0 6px}
 .classic-modal-overlay.save-list-dialog>.classic-modal.small-modal>.modal-buttons{margin-top:14px}
 .save-list{display:flex;flex-direction:column;gap:7px;padding:2px 4px 6px}
-.save-row{display:grid;grid-template-columns:74px minmax(0,1fr) 150px 92px;align-items:center;gap:10px;
+.save-row{display:grid;grid-template-columns:74px minmax(0,1fr) minmax(120px,240px) 92px;align-items:center;gap:10px;
   background:#fffdf3;border:3px solid #d9c391;border-radius:20px;padding:7px 12px;min-height:52px}
 .save-row.current{border-color:#c2a25e;box-shadow:inset 0 0 0 2px #fff3c4}
 .save-level{display:inline-flex;align-items:baseline;justify-content:center;gap:2px;background:#8a6a3c;color:#fff8e4;

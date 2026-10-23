@@ -173,12 +173,27 @@
     for (const side of wears) for (const wear of side) if (wear) load.add(wear.src);
     for (const layer of region.layers) { if (layer.id) load.add(layer.id); if (layer.fx) load.add(layer.fxSheet || layer.fx); }
     await Engine.loadSheets([...load]);
+    /* 超级三侠（变异三侠）：原版 `*_boss.swf` 不在参考资料里，按经典精英立绘的
+     * 配色给普通图集做一层运行时换色；普通三侠不触发，仍是原版图集。 */
+    for (const f of sources) {
+      if (!f || !f.mutant) continue;
+      const kind = f.npcType ? npcBase(f.npcType) : null;
+      if (kind) { try { await Engine.ensureMutantSheets(kind); } catch (e) {} }
+    }
+    /* 暴击图标：原版 `4842`（addOrReduce）第 3 帧的「暴击」字样，由 `showBlood`
+     * 在 `symbol == 0`（isBerserk）时挂出；主 canvas 这里用它 + 黄色伤害数字。 */
+    let critBadge = null;
+    try { critBadge = await Engine.loadSheetFromUrl('critBadge', 'images/battle/fx/crit.png'); } catch (e) {}
     /* 场景层兜底：清单里没有的整片图集按 id 直接找 `images/atlas/<id>.png`
      *（2026-10 images 重构后图集统一收在 images/atlas/，以前是 images/<id>.png）。 */
     for (const layer of region.layers) if (layer.id && !Engine.has(layer.id)) await Engine.loadSheetFromUrl(layer.id, 'images/atlas/' + layer.id + '.png');
 
     const player = Engine.makePlayer(), scenePlayers = [];
-    const fighters = sources.map((info, side) => ({ info, side, npc: info.npcType ? npcBase(info.npcType) : null, inst: null, dead: false, wears: wears[side] }));
+    const fighters = sources.map((info, side) => ({ info, side, npc: info.npcType ? npcBase(info.npcType) : null,
+      mutant: !!(info && info.mutant), inst: null, dead: false, wears: wears[side] }));
+    /* 变异三侠用换色图集；引擎还没换好时自动退回普通图集。 */
+    const sheetsFor = (f) => !f.npc ? SQ
+      : (f.mutant && Engine.mutantSheets ? (Engine.mutantSheets(f.npc) || NPC_SHEETS[f.npc]) : NPC_SHEETS[f.npc]);
     // maxHp 必须用真实上限：关卡连战时 me.hp 只是按比例继承的当前血量，
     // 拿它当上限会让血条显示成满血，并让模拟按错误的上限计算。
     const hpOf = (f) => Math.max(1, Math.round(Number(f.hp) || 1));
@@ -302,7 +317,7 @@
     function play(side, name, options) {
       const f = fighters[side], o = options || {};
       const inst = Engine.playAnim(player, name, Object.assign({ fps: FPS, holdLast: true,
-        sheets: f.npc ? NPC_SHEETS[f.npc] : SQ, mirror: mirrorFor(side), wears: f.npc ? null : f.wears,
+        sheets: f.npc ? sheetsFor(f) : SQ, mirror: mirrorFor(side), wears: f.npc ? null : f.wears,
         exclude: f.npc === 'xm' ? ['91'] : null, layer: side + 1 }, o));
       if (inst) { inst.side = side; f.inst = inst; }
       return inst;
@@ -340,10 +355,17 @@
       }
       return { x: side ? 875 : 295, y: 260 };
     }
-    function floater(side, text, color, big) {
+    function floater(side, text, color, big, crit) {
       const p = point(side);
       const count = floaters.filter((f) => f.side === side && f.age < 250).length;
-      floaters.push({ side, text: String(text), color: color || 'r', big: !!big, x: p.x, y: p.y - count * 43, age: 0 });
+      floaters.push({ side, text: String(text), color: color || 'r', big: !!big, crit: !!crit,
+        x: p.x, y: p.y - count * 43, age: 0 });
+    }
+    /** 伤害飘字：暴击走 4842 第 3 帧图标 + 黄色数字，普通伤害仍是红色「-N」。
+     *  幻兽协战（pet）也能暴击（打兴奋剂），所以统一从这里出。 */
+    function damageFloater(side, dmg, crit) {
+      if (crit) { floater(side, String(dmg), 'y', true, true); shake = Math.max(shake, 12); }
+      else floater(side, '-' + dmg, 'r');
     }
     function applyHp(r, counterPending, before) {
       if (Array.isArray(r.shellAfter) && r.shellAfter.length === 2) {
@@ -498,7 +520,19 @@
         const rise = Math.min(55, f.age * .05), scale = 1 + Math.sin(Math.min(1, f.age / 200) * Math.PI) * .2;
         ctx.save(); ctx.globalAlpha = Math.min(1, (1100 - f.age) / 450);
         const h = (f.big ? 62 : 48) * scale;
-        if (/^[+-]?\d+$/.test(f.text) && Engine.drawNumber(ctx, 'fightNum_' + f.color, f.text, f.x, f.y - rise, { align: 'center', h })) {}
+        const badge = f.crit && critBadge && critBadge.img;
+        if (badge) {
+          /* 暴击：左边 4842 第 3 帧的「暴击」字样，右边黄色数字，整体居中；
+           * 与 `4843` 里 `addOrReduce`（x≈0）和 `num`（x≈29）的并排关系一致。 */
+          const numW = Engine.measureNumber('fightNum_' + f.color, f.text, h) || h * 0.6;
+          const badgeH = h * 0.74;
+          const badgeW = badgeH * (badge.width / Math.max(1, badge.height));
+          const gap = h * 0.10;
+          const left = f.x - (badgeW + gap + numW) / 2;
+          ctx.drawImage(badge, left, f.y - rise + (h - badgeH) * 0.55, badgeW, badgeH);
+          Engine.drawNumber(ctx, 'fightNum_' + f.color, f.text, left + badgeW + gap + numW / 2, f.y - rise, { align: 'center', h });
+        }
+        else if (/^[+-]?\d+$/.test(f.text) && Engine.drawNumber(ctx, 'fightNum_' + f.color, f.text, f.x, f.y - rise, { align: 'center', h })) {}
         else Engine.text(ctx, f.text, f.x, f.y - rise + 35, { align: 'center', size: f.big ? 40 : 30, color: f.color === 'g' ? '#a8fa54' : '#ffe147', strokeColor: '#6a240b', lineWidth: 6 });
         ctx.restore();
       }
@@ -594,7 +628,7 @@
        * 保证 Sim 新增的 `action:'pet'` 不会掉进下面的普攻分支被当成松鼠出手。 */
       if (r.action === 'pet') {
         applyHp(r);
-        if (r.dmg) floater(def, '-' + r.dmg, 'y');
+        if (r.dmg) damageFloater(def, r.dmg, !!r.crit);
         if (r.healSelf) floater(att, '+' + r.healSelf, 'g');
         if (r.dodgeHeal) floater(def, '+' + r.dodgeHeal, 'g');
         if (r.fakeDie) floater(Number(r.fakeDieSide == null ? def : r.fakeDieSide), '装死', 'y');
@@ -627,8 +661,9 @@
         }
         else {
           defending = reaction(def, r);
-          if (r.dmg) floater(def, '-' + r.dmg, r.crit ? 'y' : 'r', !!r.crit);
-          if (r.crit) { floater(def, '暴击', 'y', true); shake = 12; }
+          /* 原版 `showBlood()`：暴击时 `addOrReduce` 停在**第 3 帧（暴击字样）**，
+           * 数字换成 **font 4** 的黄色档；不再单独飘一行「暴击」。 */
+          if (r.dmg) damageFloater(def, r.dmg, !!r.crit);
           if (r.hits > 1 || r.multiHit > 1) floater(def, (r.hits || r.multiHit) + '连击', 'y');
           if (r.fakeDie) {
             /* 普通受击 → 挨打的那位装死；被反伤 → **出手的那位**装死（需求143）。 */

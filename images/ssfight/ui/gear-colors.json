@@ -3,8 +3,8 @@
  "source": "references/ssfight/ssfight/ssfight/html5/ssfight.html",
  "sourceBytes": 26436698,
  "sourceSha256": "c01b24dc33ccbae4e104983d54e14ff41f018458b10dc983f5bb5f3c78b39abb",
- "count": 417,
- "tags": 1686,
+ "count": 418,
+ "tags": 1688,
  "bitmaps": 0,
  "missingGear": [],
  "how": "原版 `convertLink(equip)`（MainMovie.as:16114）拼出的库元件名 → SWF 导出符号 id；`byGear[装备id][品质][强化档]` = 元件号。品质 0白/1绿/2蓝/3紫/4橙/5黑；头/手套在品质>1时拼 max(强化等级)（1~3，已做回退）。运行时 attachChild(id, 1) 即可。",
@@ -3051,8 +3051,8 @@
   },
   "177": {
    "4": {
-    "0": 1417,
-    "1": 1417,
+    "0": 1419,
+    "1": 1419,
     "2": 1417,
     "3": 1413
    },

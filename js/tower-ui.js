@@ -171,8 +171,19 @@
     tipEl.textContent = text;
     tipEl.style.display = 'block';
     const r = anchor.getBoundingClientRect(), t = tipEl.getBoundingClientRect();
+    /* 气泡默认挂在行下方；但无尽塔右下角固定着「继续战斗 / 放弃本局」两颗键，
+     * 最后几行的气泡展开时会整块压住按钮。这里把下边界收在 `.endless-actions` 上沿，
+     * 放不下就翻到上方（同一套判据，只是提前了上限）。 */
+    let bottomLimit = window.innerHeight - 8;
+    try {
+      const actions = document.querySelector('.endless-actions');
+      if (actions) {
+        const ar = actions.getBoundingClientRect();
+        if (ar.height > 0 && ar.top > 0) bottomLimit = Math.min(bottomLimit, ar.top - 8);
+      }
+    } catch (e) { /* 没有那一栏就按窗口算 */ }
     let top = r.bottom + 8;
-    if (top + t.height > window.innerHeight - 8) top = Math.max(8, r.top - t.height - 8);
+    if (top + t.height > bottomLimit) top = Math.max(8, r.top - t.height - 8);
     const left = Math.max(8, Math.min(r.left, window.innerWidth - t.width - 8));
     tipEl.style.left = Math.round(left) + 'px';
     tipEl.style.top = Math.round(top) + 'px';
@@ -246,6 +257,12 @@
   const NPC_IDLE = { tl: 'tl_rest', xh: 'xh_rest', xm: 'xm_rest' };
   const AVATAR_SIZE = 104;
   function foePortraitHtml(index, info) {
+    /* 征战动物 boss：现代模式也借经典 6833 素材（用户明确允许）；否则现代 canvas
+     * 没有对应的动物图集，只会画成松鼠 / 空白。 */
+    if (info.kind === 'campaign') {
+      return '<span class="foe-portrait"><span class="sf-classic-campaign" data-campaign-foe="' +
+        index + '"></span></span>';
+    }
     /* 经典塔：三侠/机制 NPC 直接用关卡里那张经典立绘卡，松鼠 boss（含巡逻魔王）
      * 一律复用随机挑战右栏的 7232 + 装备挂点，不再画现代图集 canvas。 */
     if (classicTower()) {
@@ -432,6 +449,88 @@
       }
     }
   }
+  /** 经典塔里原版征战动物 boss 的小立绘：6833 按 mcFrame 拨到动物形态，裁成头像尺寸。
+   *  ⚠ 与 `fillClassicFoeArt` 同一套套路（挂载 → 冻结 → 只留角色根层 → 用屏幕矩形反算
+   *  viewBox 居中），区别只是元件是 6833、要保留的角色是它里面的 `playerMc` 动物模型。 */
+  async function fillClassicCampaignArt(root, preview) {
+    const hosts = root.querySelectorAll('[data-campaign-foe]');
+    if (!hosts.length) return;
+    try {
+      await SfRender.loadExtra('tags-fight.json');
+      await SfRender.loadExtra('tags-campaign-boss.json');
+    } catch (e) {
+      if (window.__errs) window.__errs.push('classic campaign art load: ' + (e && e.message));
+      return;
+    }
+    for (const host of hosts) {
+      const info = preview[Number(host.dataset.campaignFoe)];
+      if (!info || !host.isConnected) continue;
+      try {
+        const v = await SfRender.mountSymbol(host, '6833', {
+          frame: Math.max(1, Math.min(7, Number(info.mcFrame) || 1)), label: '征战首领',
+        });
+        if (!host.isConnected) { try { v.destroy(); } catch (e) {} continue; }
+        SfUiMain.toolkit.freezeDescendants(v);
+        v.playing = false;
+        const model = v.byName('playerMc');
+        /* 只保留动物模型所在的根级子树；6833 的其它层级是给战斗帧用的空白/辅助件。 */
+        const keep = new Set();
+        if (model && model.g) {
+          let node = model.g;
+          while (node && node.parentNode && node.parentNode !== v.g) node = node.parentNode;
+          if (node && node.parentNode === v.g) keep.add(node);
+        }
+        for (const child of Array.from(v.g.children || [])) {
+          if (String(child.tagName || '').toLowerCase() === 'defs') continue;
+          if (keep.size && !keep.has(child)) child.style.display = 'none';
+        }
+        const svg = host.querySelector('svg');
+        if (svg) {
+          /* 同 `fillClassicFoeArt`：人物坐标要按屏幕矩形反算到 SVG 用户坐标，
+           * 不能直接信 `getBBox()`（父级还有变换）。这里取模型自己的方形包围盒。 */
+          let bb = null;
+          try {
+            const sr = svg.getBoundingClientRect();
+            const vb = svg.viewBox && svg.viewBox.baseVal;
+            if (!sr || !vb || !sr.width || !sr.height || !vb.width || !vb.height) throw new Error('no rect');
+            const par = String(svg.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+            const scale = /slice/.test(par) ? Math.max(sr.width / vb.width, sr.height / vb.height)
+              : Math.min(sr.width / vb.width, sr.height / vb.height);
+            const ax = /xMin/.test(par) ? 0 : /xMax/.test(par) ? 1 : 0.5;
+            const ay = /YMin/.test(par) ? 0 : /YMax/.test(par) ? 1 : 0.5;
+            const x0 = sr.left + (sr.width - vb.width * scale) * ax - vb.x * scale;
+            const y0 = sr.top + (sr.height - vb.height * scale) * ay - vb.y * scale;
+            const toUser = (sx, sy) => ({ x: (sx - x0) / scale, y: (sy - y0) / scale });
+            let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity, n = 0;
+            for (const child of Array.from(v.g.children || [])) {
+              if (String(child.tagName || '').toLowerCase() !== 'g') continue;
+              if (child.style && child.style.display === 'none') continue;
+              const rr = child.getBoundingClientRect();
+              if (!rr.width || !rr.height) continue;
+              const a = toUser(rr.left, rr.top);
+              const z = toUser(rr.right, rr.bottom);
+              x1 = Math.min(x1, a.x, z.x); y1 = Math.min(y1, a.y, z.y);
+              x2 = Math.max(x2, a.x, z.x); y2 = Math.max(y2, a.y, z.y);
+              n++;
+            }
+            if (n) {
+              const pad = 7;
+              const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+              const side = Math.max(x2 - x1, y2 - y1) * 1.08 + pad * 2;
+              bb = { x: cx - side / 2, y: cy - side / 2, width: side, height: side };
+            }
+          } catch (e) { bb = null; }
+          if (!bb || !bb.width || !bb.height) bb = { x: -35, y: -60, width: 90, height: 90 };
+          svg.setAttribute('viewBox', bb.x + ' ' + bb.y + ' ' + bb.width + ' ' + bb.height);
+          svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+          svg.style.width = '100%'; svg.style.height = '100%';
+        }
+        host.classList.add('ready');
+      } catch (e) {
+        if (window.__errs) window.__errs.push('classic campaign art: ' + (e && e.message));
+      }
+    }
+  }
   function fallbackPortrait(canvas, info) {
     const kind = info && info.kind;
     const file = CHAR_FILE[info && info.anim];
@@ -526,11 +625,36 @@
     return '<div class="tower-buffs"><h4>本局构筑</h4><div class="buff-tags">' +
       list.map((b) => buffTag(b, b.stacks)).join('') + '</div></div>';
   }
-  function permTip(b) {
+  function permTip(b, mirrorSnapshot) {
     const buff = TowerData.BUFF_BY_ID[b.id];
     if (!buff) return b.name;
     const parts = [buff.name + '（' + RARITY[b.rarity] + ' · 永久）', buff.desc];
-    parts.push('当前叠层：×' + b.stacks + (b.stacks > 1 ? '（按层数累加）' : ''));
+    if (b.id === TowerData.MIRROR.id && mirrorSnapshot && mirrorSnapshot.source) {
+      const s = mirrorSnapshot.source;
+      parts.push('已封存至第 ' + mirrorSnapshot.absorbedThrough + ' 层的首回合属性');
+      parts.push('攻击 ' + Math.round(s.power) + ' · 敏捷 ' + Math.round(s.agility) + ' · 速度 ' + Math.round(s.speed));
+      parts.push('生命上限 ' + Math.round(s.maxHp) + '（封存时数值；后续装备变化仍生效）');
+      const c = mirrorSnapshot.combat || {};
+      const pct = (n) => String(Math.round(n * 10000) / 100) + '%';
+      const combat = [];
+      if (c.critBonus) combat.push('暴击 +' + c.critBonus + '%');
+      if (c.critDmgBonus) combat.push('暴伤 +' + c.critDmgBonus + '%');
+      if (c.dodgeBonus) combat.push('闪避 +' + c.dodgeBonus + '%');
+      if (c.dodgeMul) combat.push('闪避倍率加成 ' + pct(c.dodgeMul));
+      if (c.takenMul) combat.push('受伤修正 ' + pct(c.takenMul));
+      if (c.lifestealPct) combat.push('吸血 ' + pct(c.lifestealPct));
+      if (c.regenPct) combat.push('每回合回复 ' + pct(c.regenPct));
+      if (c.shellPct) combat.push('开战护盾 ' + pct(c.shellPct));
+      if (c.thornsPct) combat.push('反伤 ' + pct(c.thornsPct));
+      if (c.dmgMul) combat.push('伤害 ×' + c.dmgMul);
+      if (c.healMul) combat.push('治疗 ×' + c.healMul);
+      if (c.reflectImmune) combat.push('反伤免疫');
+      if (c.mustHitAll) combat.push('攻击必中');
+      if (combat.length) parts.push('封存战斗加成：' + combat.join(' · '));
+      parts.push('不占永久位；旧增益的成长、限次及经济效果不再触发');
+    }
+    parts.push(b.id === TowerData.MIRROR.id ? '镜界印记：×' + b.stacks
+      : '当前叠层：×' + b.stacks + (b.stacks > 1 ? '（按层数累加）' : ''));
     /* 【第七十四批】本条被铭文附魔时要**写清楚**（否则悬停看到的还是没附魔的数字，
      * 玩家会以为「附了没效果」）：水晶这一条把下面所有**效果量**乘一次，
      * 与 tower.js 实际结算用的 `k = 层数 × 全局倍率 × row.enchMul` 同一口径；
@@ -610,7 +734,8 @@
     if (b.progress) parts.push('当前进度：' + b.progress);
     if (buff.mods && buff.mods.shopDiscount) parts.push('下个商店 ' + Math.round((1 - buff.mods.shopDiscount) * 100) / 10 + ' 折');
     if (buff.mods && buff.mods.postBattleShop) parts.push('下一场战斗后开一次商店');
-    parts.push(replaceTarget === rowRef(b) ? '（当前已选为要拿掉的那个，点一下取消）' : '点一下选它作为要拿掉的那个永久增益');
+    parts.push(TowerData.hasTag(buff, 'story') ? '剧情藏品，不可替换、出售或献祭'
+      : replaceTarget === rowRef(b) ? '（当前已选为要拿掉的那个，点一下取消）' : '点一下选它作为要拿掉的那个永久增益');
     return parts.join('\n');
   }
   /** 限次增益的悬停说明：效果 + 剩余场次 + 当前开关状态。 */
@@ -660,13 +785,15 @@
       ? perm.map((b, i) => {
           const free = b.slotFree === true;
           const em = enchMark(b);
+          const tip = permTip(b, run.mirrorSnapshot);
+          const canReplace = !TowerData.hasTag(TowerData.BUFF_BY_ID[b.id], 'story');
           const nextFree = i + 1 < perm.length && perm[i + 1].slotFree === true;
           const divider = (free && !nextFree) ? '<span class="buff-sep" aria-hidden="true"></span>' : '';
           /* `enchCls(b)` 是附魔外框的**唯一出口**（虚空=青框 / 水晶=红框 / 两个都吃=半红半青）。
            * 这里原来是手拼的、只认 slot-free —— 水晶的红框在主面板上完全不存在。 */
           return '<span class="buff-tag r' + b.rarity + (rowRef(b) === replaceTarget ? ' replacing' : '') +
-            enchCls(b) + '" data-replace="' + esc(rowRef(b)) +
-            '" data-tip="' + esc(permTip(b)) + '" title="' + esc(permTip(b)) + '">' +
+            enchCls(b) + '"' + (canReplace ? ' data-replace="' + esc(rowRef(b)) + '"' : '') +
+            ' data-tip="' + esc(tip) + '" title="' + esc(tip) + '">' +
             esc(b.name) + '<i>' + (free ? '不占位' : '永久') + (em.crys ? ' · ×' + em.mul : '') + '</i>' +
             (b.stacks > 1 ? '<em>×' + b.stacks + '</em>' : '') + '</span>' + divider;
         }).join('')
@@ -914,24 +1041,97 @@
     };
     run();
   }
+  /* ---------- 敌人图鉴的两组简介：三侠 / 征战首领 ----------
+   * 用户 2026-10 口径：BOSS 一览里要先把**每层都会遇到的三侠**与 **x0 层的征战动物首领**
+   * 介绍清楚，再列首领池；顺序固定为「三侠 → 征战首领 → 首领池」。
+   * 文案全部来自 `TowerData`（`HERO_DEBUFF` / `CAMPAIGN_BOSSES` / `campaignBossFor`），
+   * 这里只负责排版 —— 别在界面里另抄一份机制说明。 */
+  const HERO_ORDER = ['tl', 'xh', 'xm'];
+  /** 三侠：卡片只放名字 / 出场位置；大招与贯穿削弱全部收进悬停说明。
+   *  用户 2026-10 口径：图鉴里不要直接写攻击模式，与其它 boss 卡一样悬停才看机制。 */
+  function heroCatalogHtml() {
+    const HD = TowerData.HERO_DEBUFF;
+    if (!HD) return '';
+    const keys = HERO_ORDER.filter((k) => HD[k]);
+    if (!keys.length) return '';
+    return '<div class="boss-group"><b class="boss-group-title">三侠' +
+      '<i>每层第 1~3 场 · 顺序随机</i></b>' +
+      '<ol class="tower-plan boss-grid">' + keys.map((k) => {
+        const h = HD[k];
+        const tip = h.hero + ' · 大招「' + h.ult + '」（' + h.name + '）\n' + h.desc;
+        return '<li class="hero" tabindex="0" data-tip="' + esc(tip) + '">' +
+          '<b>' + esc(h.hero) + '</b>' +
+          '<span class="tower-plan-type">第 1~3 场</span></li>';
+      }).join('') + '</ol></div>';
+  }
+  /** 四雄（征战动物首领）：层号由 `campaignBossFor` 反查；卡面只保留层数 / 等级，
+   *  出招循环与机制全部收进悬停说明（用户 2026-10 口径）。 */
+  function campaignCatalogHtml() {
+    const list = TowerData.CAMPAIGN_BOSSES;
+    if (!Array.isArray(list) || !list.length) return '';
+    const layerOf = {};
+    for (let L = 10; L <= 990; L += 10) {
+      const b = TowerData.campaignBossFor ? TowerData.campaignBossFor(L) : null;
+      if (b && layerOf[b.id] == null) layerOf[b.id] = L;
+    }
+    const layers = Object.values(layerOf).sort((a, b) => a - b);
+    const rows = list.map((b) => {
+      const L = layerOf[b.id] || 0;
+      const tip = [b.name + (L ? ' · 第 ' + L + ' 层（Lv' + b.level + '）' : ''),
+        b.patternDesc || '', b.mechDesc || ''].filter(Boolean).join('\n');
+      return '<li class="campaign" tabindex="0" data-tip="' + esc(tip) + '">' +
+        '<b>' + esc(b.bigName || b.name) + '</b>' +
+        '<span class="tower-plan-type">' + esc((L ? '第 ' + L + ' 层' : '征战首领') + ' · Lv' + b.level) + '</span></li>';
+    }).join('');
+    return '<div class="boss-group"><b class="boss-group-title">四雄' +
+      '<i>' + (layers.length ? '征战副本 · 第 ' + layers.join(' / ') + ' 层最后一战' : '征战副本首领') + '</i></b>' +
+      '<ol class="tower-plan boss-grid">' + rows + '</ol></div>';
+  }
+  /** 魔王：从首领里单独拆出来的一类。分组标题只写「魔王」，卡面只显示魔王/？？？；
+   *  用户 2026-10 口径：悬停也全是「？？？」，不给出现位置/机制说明。 */
+  function demonCatalogHtml(king) {
+    if (!king) return '';
+    return '<div class="boss-group"><b class="boss-group-title">魔王</b>' +
+      '<ol class="tower-plan boss-grid">' +
+      '<li class="patrol king" tabindex="0" data-tip="？？？">' +
+      '<b>' + esc(king.name) + '</b>' +
+      '<span class="tower-plan-type">魔王</span>' +
+      '<span class="boss-rarity hidden">？？？</span>' +
+      '</li></ol></div>';
+  }
   function bossCatalogHtml() {
     const pool = Tower.bossPool ? Tower.bossPool() : [];
-    if (!pool.length) return '';
-    return '<div class="tower-buffs boss-catalog"><h4>BOSS 一览 <span class="buff-slot-count">' + pool.length +
-      ' 个 · 第 4 场 / 10 层守关 / 整百层魔王</span></h4>' +
-      '<ol class="tower-plan boss-grid">' + pool.map((b, i) => {
-        const tier = b.tier == null ? null : b.tier;
-        /* 魔王卡（`secret`）= 三处全 ？？？，不剧透类型/稀有度/机制。 */
-        const secret = !!b.secret;
-        const tip = secret ? '？？？' : ((b.rarity ? '装备稀有度：' + b.rarity + '。' : '') + mechTip(b));
-        const rarity = secret ? '？？？' : ((b.rarity || '') + '装备');
-        return '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel ' : '') + (b.king ? 'king ' : '') +
-          (tier == null ? '' : 'tier-' + tier) + '" tabindex="0" data-tip="' + esc(tip) + '">' +
-          '<b>' + esc(b.name) + '</b>' +
-          (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
-          '<span class="boss-rarity' + (secret ? ' hidden' : ' r' + tier) + '">' + esc(rarity) + '</span>' +
-          '</li>';
-      }).join('') + '</ol></div>';
+    /* 魔王单开一组：从首领池里摘出去，保留「？？？」防剧透，但不再跟普通首领混排。 */
+    const king = pool.find((b) => b && b.king) || null;
+    const rest = pool.filter((b) => b && !b.king);
+    const heroes = heroCatalogHtml();
+    const campaigns = campaignCatalogHtml();
+    const demon = demonCatalogHtml(king);
+    if (!rest.length && !heroes && !campaigns && !demon) return '';
+    const HD = TowerData.HERO_DEBUFF || {};
+    const counts = [];
+    if (heroes) counts.push('三侠 ' + HERO_ORDER.filter((k) => HD[k]).length);
+    if (rest.length) counts.push('首领 ' + rest.length);
+    if (campaigns) counts.push('四雄 ' + (TowerData.CAMPAIGN_BOSSES || []).length);
+    if (demon) counts.push('魔王 1');
+    return '<div class="tower-buffs boss-catalog"><h4>BOSS 一览 <span class="buff-slot-count">' +
+      counts.join(' · ') + '</span></h4>' + heroes +
+      (rest.length
+        ? '<b class="boss-group-title">首领<i>第 4 场 / 10 层守关</i></b>' +
+          '<ol class="tower-plan boss-grid">' + rest.map((b, i) => {
+            const tier = b.tier == null ? null : b.tier;
+            /* 普通首领池不再有魔王；保留下面的 secret 分支只是防御未来数据。 */
+            const secret = !!b.secret;
+            const tip = secret ? '？？？' : ((b.rarity ? '装备稀有度：' + b.rarity + '。' : '') + mechTip(b));
+            const rarity = secret ? '？？？' : ((b.rarity || '') + '装备');
+            return '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel ' : '') + (b.king ? 'king ' : '') +
+              (tier == null ? '' : 'tier-' + tier) + '" tabindex="0" data-tip="' + esc(tip) + '">' +
+              '<b>' + esc(b.name) + '</b>' +
+              (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
+              '<span class="boss-rarity' + (secret ? ' hidden' : ' r' + tier) + '">' + esc(rarity) + '</span>' +
+              '</li>';
+          }).join('') + '</ol>'
+        : '') + campaigns + demon + '</div>';
   }
   /** 左侧塔身：当前层附近的一段楼层，自上而下。
    *
@@ -1033,7 +1233,7 @@
       }
       const started = Tower.startTowerRun();
       if (!started.ok) {
-        notice(started.msg, started.needsBook ? [{ label: '去商店买挑战书', run: () => UI.runAction('shop') }, { label: '返回', cls: 'gold' }] : undefined);
+        notice(started.msg, started.needsBook ? [{ label: '买挑战书', run: () => UI.runAction('shop') }, { label: '返回', cls: 'gold' }] : undefined);
         return;
       }
       fight('tower');
@@ -1131,16 +1331,22 @@
   }
   /** 右下角「继续挑战」：问一句要不要进镜中世界（用户口径的那句话）。 */
   function openMirrorConfirm() {
+    const carryPct = Math.round(TowerData.ENDLESS_CYCLE_DISCOUNT * 100);
     modal('镜中世界',
       '<div class="mirror-confirm"><p>无尽之塔中的魔王已被击败，继续在镜中世界进行挑战吗？</p>' +
-      '<p class="dim">第 101 层起与层数有关的机制会回到第 1 层的样子，敌人的属性继续按公式增长。</p></div>',
+      '<p>本轮只封存静态四维与暴击、吸血、减伤等数值，成为不占位的永久基础。</p>' +
+      '<p class="dim">后发制人、战斗续航、天命所归等纯局内触发不保留；旧构筑清空，成长、限次、经济与武器/技能选取强化停止，原增益重新入池；已有货币与累计战报保留。</p>' +
+      '<p class="dim">新一轮敌人的基础属性降至上一轮末值的 ' + carryPct + '%，再按第 1—100 层的相对曲线成长。层内规则与构筑从头开始。</p></div>',
       [
-        { label: '是', cls: 'gold', run: () => {
+        /* 按钮文案按 `docs/界面按钮文案规范.md`：动作标签 2~3 个汉字 —— 原来的「是 / 否」
+         * 只有一个字，`test-button-labels` 会直接判违规（也是 `test-mint-shop` 期望「进入」的那颗）。 */
+        { label: '进入', cls: 'gold', run: () => {
             const r = Tower.enterMirrorWorld ? Tower.enterMirrorWorld() : { ok: false };
             if (!r || !r.ok) notice((r && r.msg) || '现在还不能进镜中世界。');
+            else replaceTarget = null;
             openEndless();
           } },
-        { label: '否', cls: 'muted' },
+        { label: '取消', cls: 'muted' },
       ], { small: true });
   }
 
@@ -1156,6 +1362,13 @@
     try { if (Tower.autoPlayStory) Tower.autoPlayStory('endless'); } catch (e) { /* 判不出来就当没有 */ }
     const info = Tower.endlessInfo();
     let main, footer = null;
+    /* 这一屏有没有「右下角固定动作条」（继续战斗 / 放弃本局）：
+     * 剧情屏、拾取屏没有，不能给它们加底部留白。 */
+    let runBoard = false;
+    /* 对手数：60/70/80/90 层的第 5 场是四雄，整列会有 5 张卡；
+     * 5 张时右下角动作条会压住最后一张（四雄头像被「继续战斗」盖住），
+     * 页面要进入压缩布局，见 CSS 的 .foes-many。 */
+    let foeCount = 0;
     /* 「还没开始」= 本局还在第 1 层、一场都没打完。
      * 这一屏**不显示抽奖卷 / 铸币**：currencyHtml 在「有对局」时显示的是**本局应得**的张数
      * （ticketsOnExit），玩家会误以为是自己仓库里的存量；所以干脆整块不渲染。
@@ -1183,6 +1396,9 @@
          *（用户口径：卡片尽量居中；点它之后卡片留在原位，整屏先白后黑再回到游戏界面）。
          * 剧情屏的优先级在它上面（刚刚那一段 `storyId`），所以顺序是：终章剧情 → 拾取屏。 */
         main = mirrorPickupHtml(run);
+      } else if (run.phase === 'mirror' && !pendingMilestone &&
+        Tower.canSettleEndlessVictory && Tower.canSettleEndlessVictory()) {
+        return openEndlessSummary(Tower.previewEndlessSummary('win'));
       } else {
       const nextLabel = run.choices ? '先选一张增益'
         : run.phase === 'shop' ? (run.mintShop ? '进入铸币商店' : '进入试炼商店')
@@ -1198,6 +1414,7 @@
         : Tower.preview(run.layer, run.salt, true);
       const clearing = (run.phase === 'shop' || run.phase === 'checkpoint' || run.phase === 'sacrifice' || run.phase === 'mirror') && run.finished && run.finished.layer === run.layer;
       const beatenCount = clearing ? foes.length : Math.max(0, (run.battleNo || 1) - 1);
+      foeCount = foes.length;
       const foeRows = foes.map((b, i) =>
         '<li class="' + (b.elite ? 'elite ' : '') + (b.patrol ? 'patrol ' : '') + (b.squirrel ? 'squirrel ' : '') +
         (i < beatenCount ? 'beaten' : '') +
@@ -1222,6 +1439,7 @@
       /* 顶栏：标题 → 试炼币/抽奖卷 → 分数框 → 右边缘的三个药丸槽（等腰三角摆放）。
        * 血量紧贴标题下方（分数已经挪进顶栏，所以这里整体上提），字号与血条都放大一档；
        * 「继续战斗」在右下角，「放弃本局」更小、压在它左边偏下。 */
+      runBoard = true;
       main = '<div class="endless-run">' +
         /* 右上角：药丸槽 + 试炼币/抽奖卷 + 分数框（横向一行，位置不变）。
          * 本局还没打完第一场时不放货币条（见 notStarted 的说明），只留分数框。
@@ -1257,7 +1475,7 @@
                 esc(d.short || d.hero || '大侠') + esc(d.name || '削弱') + '<i>本层</i></span>').join('') + '</div>'
             : '') +
         choicesHtml + buffPanelsHtml('endless') + '</div>' +
-        '<div class="endless-foes">' +
+        '<div class="endless-foes' + (foeCount >= 5 ? ' foes-many' : '') + '">' +
         '<ol class="tower-plan vertical">' + foeRows + '</ol></div></div>' +
         '<div class="endless-actions tower-actions">' +
         '<span class="endless-action-btns">' +
@@ -1278,12 +1496,14 @@
         buffCatalogHtml() + bossCatalogHtml();
       footer = '<div class="tower-actions tower-footer">' +
         /* 2026-10 用户口径：这一颗按钮叫「开始攀登」（原来叫「开始冲塔」）。 */
+        (info.lastSummary ? C().btn('上局战报', 'last-summary', 'muted') : '') +
         C().btn('开始攀登', 'fight', 'gold') + '</div>';
     }
     /* 刚播完剧情 → 整页带一个淡入类（【U18】不要硬切）。
      * ⚠️ 动画**只作用在 .tower-main**（见 CSS）：塔身不参与，否则左侧塔 UI 会跟着闪一下。 */
     const fadeIn = TowerPlot.takeFadeIn();
-    const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + (fadeIn ? ' tower-fade-in' : '') + '">' +
+    const content = '<div class="tower-page' + (runBoard ? ' endless-page' : '') +
+      (footer ? ' has-footer' : '') + (fadeIn ? ' tower-fade-in' : '') + '">' +
       towerVisual(info.run ? info.run.layer : 1, 0, 'endless') +
       '<div class="tower-main">' + main + '</div>' + (footer || '') +
       /* 【2026-10 用户口径】剧情 / 挑战模式开关**一直挂在塔的正下方**（绝对定位在页面左下角，
@@ -1297,7 +1517,7 @@
      * 归零，而这一屏可能已经打完（没有下一次打字 tick 来带滚动），所以在画完之后同步补一次。 */
     if (typeof TowerPlot.afterRender === 'function') TowerPlot.afterRender();
     bindTips(p);
-    if (info.run) { const pv = Tower.planInfo ? Tower.planInfo('endless') : Tower.preview(info.run.layer, info.run.salt, true); fillFoeArt(p, pv); fillClassicFoeArt(p, pv); }
+    if (info.run) { const pv = Tower.planInfo ? Tower.planInfo('endless') : Tower.preview(info.run.layer, info.run.salt, true); fillFoeArt(p, pv); fillClassicFoeArt(p, pv); fillClassicCampaignArt(p, pv); }
     back(p, towerBack, ct ? '返回征战' : '返回');
     if (ct) applyClassicTowerBg(p, 'endless', info.run ? info.run.layer : 1);
     /* 【2026-10 用户口径】剧情屏**没有「继续」按钮了**：点屏幕任意位置推进
@@ -1314,6 +1534,7 @@
     }
     /* 【U18b】左下角那颗按钮：剧情模式 ↔ 挑战模式，切完立刻重画这一屏。 */
     on(p, 'story-mode', () => { Tower.setStoryEnabled(!Tower.storyEnabled()); openEndless(); });
+    on(p, 'last-summary', () => openEndlessSummary(info.lastSummary));
     on(p, 'fight', () => {
       if (info.run) {
         if (info.run.choices) { notice('先在下面选一张增益（休整点）。'); return; }
@@ -1328,13 +1549,7 @@
         fight('endless');
         return;
       }
-      const started = Tower.startEndlessRun();
-      if (!started.ok) { notice(started.msg); return; }
-      /* 【2026-10 用户口径】「开始攀登」**先进主界面**（不直接开第一场）：
-       * 给这一局挂上开场剧情 → 这一屏进剧情展示模式；剧情播完回到正常主界面，
-       * 玩家自己按「继续战斗」开打。**挑战模式**下不挂剧情，直接就是主界面。 */
-      if (Tower.storyEnabled()) Tower.setRunStory('endless', 'intro');
-      openEndless();
+      beginEndlessRun();
     });
     p.querySelectorAll('[data-choice]').forEach((el) => {
       el.onclick = () => {
@@ -1402,17 +1617,19 @@
         , [
         { label: '放弃', cls: 'muted', run: () => {
             const res = Tower.abandon('endless');
-            syncTickets(); openEndless();
-            /* 结算提示：本层应得的那一份 + 铸币折现的那一份，分别说清楚。 */
-            const msgs = [];
-            if (res && res.layerTickets > 0) msgs.push('按第 ' + res.layer + ' 层结算：抽奖卷 +' + res.layerTickets);
-            if (res && res.retryLeft > 0) msgs.push(res.retryMsg);
-            if (msgs.length) msgs.push('本局共 +' + res.tickets + ' 张');
-            if (msgs.length) runToast(msgs.join('；'));
+            if (!res || !res.ok) { notice('当前无法结算，请先完成正在进行的战斗。'); return; }
+            settleResult(res);
           } },
         { label: '继续冲塔', cls: 'gold' },
       ], { small: true });
     });
+  }
+
+  function beginEndlessRun() {
+    const started = Tower.startEndlessRun();
+    if (!started.ok) { notice(started.msg); return; }
+    if (Tower.storyEnabled()) Tower.setRunStory('endless', 'intro');
+    openEndless();
   }
 
   /* ============================================================
@@ -1466,8 +1683,12 @@
         trial: nx.info && nx.info.mechDesc ? { text: nx.info.mechDesc } : null,
         // 塔里倍速可以到 3×（普通战斗只到 2×，见 main.js 的 startBattle）
         allowSkip: skipAllowed, speedToggle: true, speedMax: 3,
-        /* 经典塔：胜利后不展示原版战果 CG（只影响经典村庄-征战入口）。 */
-        hideVictoryCg: classicTower(),
+        /* 经典塔：胜利后不展示原版战果 CG。
+         * 挑战塔保持原口径（只有经典村庄-征战入口藏，关卡页入口仍给原版战果页）；
+         * **无尽塔不管从哪进都不要** —— 打完一场直接回塔页，不要那张全屏胜利图
+         *（用户 2026-10 口径：「去掉无尽塔中战斗胜利后的那个胜利弹窗」）。
+         * 注意 `hideVictoryCg` 只影响**胜利**：失败面板照旧（见 SfFight 的 `perform`）。 */
+        hideVictoryCg: mode === 'endless' || classicTower(),
         // 塔的产出全部由状态机结算（松果/压缩碎片/抽奖卷），关掉战斗飘物，
         // 否则免门票的无尽模式可以无限刷飘物松果与经验。
         collectDrops: false,
@@ -1522,7 +1743,7 @@
           '<p>本层重新开始 —— 回到第 <b>1</b> 场再打一遍。</p>' +
           '<p class="dim">手上的增益、试炼币、分数与血量都<b>原样保留</b>，敌人的数值也不会提升' +
           '（第 ' + lr.layer + ' 层 · 第 ' + lr.battleNo + '/' + lr.battleCount + ' 场的收益照常入账）。</p></div>',
-          [{ label: '回到本层开头', cls: 'gold', run: () => openEndless() }], { small: true });
+          [{ label: '回到开头', cls: 'gold', run: () => openEndless() }], { small: true });
         return;
       }
       if (rw.milestone) {
@@ -1975,7 +2196,7 @@
       '<p class="gold-text">消耗 1 枚铸币，回滚到本场开始前（血量 / 试炼币 / 分数 / 增益次数全部还原），再打一次。</p>' +
       '<div class="result-lines">现有铸币 <b>' + (rw.retryLeft || 0) + '</b> 枚 · 本局分数 ' + rw.score +
       ' · 选「放弃本局」也一样按当前层应得 + 试炼币折现结算</div></div>',
-      [{ label: '用 1 枚重新挑战', cls: 'gold', run: () => {
+      [{ label: '重新挑战', cls: 'gold', run: () => {
           const r = Tower.retryBattle();
           if (!r.ok) { notice(r.msg || '回滚失败。'); endlessDefeat(rw); return; }
           reopen('endless');
@@ -1986,35 +2207,8 @@
           endlessDefeat(out);
         } }], { small: true });
   }
-  /** 本局隐藏成就汇总（结算/失败弹窗用）。没有成就就返回空串。 */
-  function achieveSummaryHtml() {
-    const info = Tower.endlessInfo();
-    const list = (info && info.run && info.run.achievements) || [];
-    if (!list.length) return '';
-    const total = list.reduce((a, x) => a + (Number(x.points) || 0), 0);
-    return '<div class="achieve-summary"><b>本局隐藏成就 ' + list.length + ' 个 · 合计 +' + total + ' 分</b>' +
-      list.map((x) => '<span>' + esc(x.name) + '<i>+' + (Number(x.points) || 0) + '</i></span>').join('') + '</div>';
-  }
-  /** 退出结算的明细文案（本层应得 + 试炼币 1:1 折现）——三条退出路径统一口径。 */
-  function settleBreakdownHtml(r) {
-    const layerT = Math.max(0, Math.floor(Number(r && r.layerTickets) || 0));
-    const coins = Math.max(0, Math.floor(Number(r && r.forfeitCoins) || 0));
-    const tokens = Math.max(0, Math.floor(Number(r && r.retryLeft) || 0));
-    const total = Math.max(0, Math.floor(Number(r && r.tickets) || 0));
-    if (!coins && !tokens) return '';
-    return '<p class="small-label">明细：本层应得 ' + layerT + ' 张' +
-      (tokens ? ' + 剩余 ' + tokens + ' 枚铸币 1:1 折现 ' + tokens + ' 张' : '') +
-      ' = <b>' + total + '</b> 张' +
-      (coins ? '（剩余 ' + coins + ' 试炼币不折现，随本局作废）' : '') + '</p>';
-  }
   function endlessDefeat(rw) {
-    modal('挑战失败', '<div class="result-box"><div class="result-title lose">倒在了第 ' + rw.layer + ' 层</div>' +
-      '<div class="result-lines">本局分数 ' + rw.score + '（历史最高 ' + rw.best + '）</div>' +
-      '<p class="gold-text">按当前进度结算：抽奖卷 +' + (rw.tickets || 0) + '（第 ' + rw.layer + ' 层应得）</p>' +
-      settleBreakdownHtml(rw) +
-      (rw.shield ? '<p class="gold-text">保底奖励：本局到达过 15 层，赠送 1 次免费抽奖（每日限 1 次）！</p>' : '') +
-      achieveSummaryHtml() + '</div>',
-      [{ label: '再来一局', cls: 'gold', run: openEndless }, { label: '返回', run: () => C().home() }], { small: true });
+    settleResult(rw);
   }
 
   /* ============================================================
@@ -2121,8 +2315,8 @@
       left: (!revisit && !shop.rest)
         ? '<span class="footer-left">' + C().btn('结算离场', 'settle', 'small gold') + '</span>' : '',
       right: '<span class="footer-right">' + C().btn(revisit || shop.rest ? '返回' : '继续挑战', 'leave', 'gold') + '</span>',
-    }, ct ? { noTabs: true, pageClass: 'classic-tower', homeLabel: '返回无尽塔' } : {}));
-    back(p, () => openEndless(), '返回无尽塔');
+    }, ct ? { noTabs: true, pageClass: 'classic-tower', homeLabel: '返回' } : {}));
+    back(p, () => openEndless(), '返回');
     /* 商店是无尽塔里的二级页：底色调跟着本层走，别在纯色塔页里突然露出村庄底图。 */
     if (ct) applyClassicTowerBg(p, 'endless', shop.layer);
     shop.slots.forEach((s, i) => on(p, 'buy' + i, () => {
@@ -2177,11 +2371,7 @@
     on(p, 'settle', () => {
       const out = Tower.settleFromShop();
       if (!out || !out.ok) { notice('现在还不能结算。'); return; }
-      modal('本局结算', '<div class="result-box"><div class="result-title win">见好就收</div>' +
-        '<p>抽奖卷 +<b class="gold-text">' + (out.tickets || 0) + '</b>（第 ' + out.layer + ' 层）</p>' +
-        settleBreakdownHtml(out) +
-        '<div class="result-lines">分数 ' + out.score + ' 已入账 · 历史最高 ' + out.best + '</div></div>',
-        [{ label: '返回无尽塔', cls: 'gold', run: () => openEndless() }], { small: true });
+      settleResult(out);
     });
   }
 
@@ -2295,12 +2485,12 @@
       left: shop.boundary
         ? '<span class="footer-left">' + C().btn('结算离场', 'settle', 'small gold') + '</span>' : '',
       right: '<span class="footer-right">' + C().btn('继续战斗', 'mintleave', 'gold') + '</span>' },
-    ct ? { noTabs: true, pageClass: 'classic-tower', homeLabel: '返回无尽塔' } : {}));
+    ct ? { noTabs: true, pageClass: 'classic-tower', homeLabel: '返回' } : {}));
     bindTips(p);
     /* 页脚「返回」= **只是回上一页，店不收摊**（用户口径）：回到无尽首页后按钮仍写「进入铸币商店」，
      * 想好了再进来买/换/刷新都行。真正让这家店消失的只有三件事：
      * 完成一次购买、完成一次交换、或者点这里的「继续战斗」。 */
-    back(p, () => openEndless(), '返回无尽塔');
+    back(p, () => openEndless(), '返回');
     if (ct) applyClassicTowerBg(p, 'endless', shop.layer);
     if (shop.boundary) bindShopSettle(p);
     shop.slots.forEach((s, i) => on(p, 'mintbuy' + i, () => {
@@ -2374,12 +2564,115 @@
       ], { locked: true });
   }
   function settleResult(r) {
-    modal('结算完成', '<div class="result-box"><div class="result-title win">满载而归！</div>' +
-      '<div class="result-lines">抽奖卷 +' + r.tickets + '　本局分数 ' + r.score + '</div>' +
-      settleBreakdownHtml(r) +
-      '<p class="small-label">抽奖卷可在「每日幸运抽奖」里抵扣抽奖次数（免费次数用完后优先消耗）。</p></div>',
-      [{ label: '再来一局', cls: 'gold', run: openEndless }, { label: '去抽奖', run: () => { syncTickets();
-            if (window.ClassicExtras && ClassicExtras.lottery) ClassicExtras.lottery(); else UI.runAction('lottery'); } }, { label: '返回', run: () => C().home() }], { small: true });
+    syncTickets();
+    const summary = r && r.summary || Tower.endlessInfo().lastSummary;
+    if (summary) openEndlessSummary(summary);
+    else openEndless();
+  }
+
+  /** 战报只读取状态机的快照；打开、滚动和重看都不重新结算奖励。 */
+  function summaryNumber(value) {
+    if (value == null || !Number.isFinite(Number(value))) return '—';
+    return Math.max(0, Math.floor(Number(value))).toLocaleString('zh-CN');
+  }
+  function summaryStat(label, value, note) {
+    return '<div class="summary-stat"><span>' + esc(label) + '</span><strong>' + summaryNumber(value) +
+      '</strong>' + (note ? '<small>' + esc(note) + '</small>' : '') + '</div>';
+  }
+  function openEndlessSummary(summary) {
+    if (!summary) { openEndless(); return; }
+    hideTip();
+    const victory = summary.outcome === 'win';
+    const settled = summary.settled === true;
+    const layer = Math.max(1, Number(summary.layer) || 1);
+    const buffs = Array.isArray(summary.buffs) ? summary.buffs : [];
+    const achievements = Array.isArray(summary.achievements) ? summary.achievements : [];
+    const kinds = { permanent: '永久', limited: '限次', instant: '即时' };
+    const totals = { permanent: 0, limited: 0, instant: 0 };
+    for (const buff of buffs) if (totals[buff.kind] !== undefined) totals[buff.kind] += Math.max(0, Number(buff.count) || 0);
+    const buffTotals = Object.keys(kinds).filter(k => totals[k] > 0)
+      .map(k => kinds[k] + ' ' + summaryNumber(totals[k]) + ' 份').join(' · ');
+    const mode = summary.uiMode === 'classic' ? '经典界面' : summary.uiMode === 'modern' ? '现代界面' : '界面未记录';
+    const subtitle = victory
+      ? ('第 ' + layer + ' 层魔王已击败' + (settled ? ' · 本局已结算' : ' · 新的镜界仍在前方'))
+      : ('征途止于第 ' + layer + ' 层 · ' + (summary.reason === 'defeat' ? '战斗失利' : '离场结算'));
+    const buffRows = buffs.map(buff => {
+      const def = TowerData.BUFF_BY_ID[buff.id];
+      const desc = def ? TowerData.descOf(def, 'endless') : '';
+      const rarity = Math.max(0, Math.min(3, Number(buff.rarity) || 0));
+      return '<li class="summary-buff" data-rarity="' + rarity + '"' +
+        (desc ? ' tabindex="0" data-tip="' + esc(desc) + '"' : '') + '>' +
+        '<span class="summary-buff-name">' + esc(buff.name || (def && def.name) || buff.id) + '</span>' +
+        '<span class="summary-buff-kind">' + esc((RARITY[rarity] || '') + ' · ' + (kinds[buff.kind] || '特殊')) + '</span>' +
+        '<b class="summary-buff-count">×' + summaryNumber(buff.count) + '</b></li>';
+    }).join('');
+    const earnedAchievementPoints = item => item.earnedPoints != null ? Number(item.earnedPoints)
+      : String(item.key || '').startsWith('revive:') ? null : Number(item.points);
+    const achievementRows = achievements.map(item => {
+      const points = earnedAchievementPoints(item);
+      return '<li class="summary-achievement"><b>' + esc(item.name) + '</b><span>' +
+        (points == null ? '计分档位 ' + summaryNumber(item.points) : '+' + summaryNumber(points)) + ' 分' +
+        (item.layer ? ' · 第 ' + summaryNumber(item.layer) + ' 层' : '') + '</span></li>';
+    }).join('');
+    const allAchievementPointsKnown = achievements.every(item => earnedAchievementPoints(item) != null);
+    const achievementPoints = achievements.reduce((total, item) => total + (earnedAchievementPoints(item) || 0), 0);
+    const rewardNote = '层数奖励 ' + summaryNumber(summary.layerTickets) + ' 张' +
+      (summary.bonusTickets > 0 ? ' · 百层胜利额外 ' + summaryNumber(summary.bonusTickets) + ' 张' : '') +
+      (summary.mintConverted > 0 ? ' · 铸币折券 ' + summaryNumber(summary.mintConverted) + ' 张' : '');
+    const notes = [
+      settled ? '抽奖卷已放入背包，可用于每日幸运抽奖。' : '继续挑战将保留本局进度；离场时一次领取奖励。',
+      summary.bonusTickets > 0 ? '在整百层胜利后选择离场，额外获得 ' + summaryNumber(summary.bonusTickets) + ' 张抽奖卷；继续挑战则不领取。' : '',
+      summary.mintForfeited > 0 ? '铸币折券上限 ' + summaryNumber(summary.mintTicketCap) + ' 枚，超出 ' + summaryNumber(summary.mintForfeited) + ' 枚不再折券。' : '',
+      summary.trialCoinsLeft > 0 && settled ? '离场剩余 ' + summaryNumber(summary.trialCoinsLeft) + ' 枚试炼币随本局结束，不折券。' : '',
+      summary.freeDraws > 0 ? '保底奖励：另获 ' + summaryNumber(summary.freeDraws) + ' 次免费抽奖。' : '',
+      summary.complete === false ? '本局开始于战报记录启用之前，未记录的累计项显示为「—」，增益仅列出可确认的记录。' : '',
+    ].filter(Boolean).map(note => '<p>' + esc(note) + '</p>').join('');
+    const actions = settled
+      ? C().btn('返回', 'summary-lobby', 'muted') + C().btn('去抽奖', 'summary-lottery', '') + C().btn('再次攀登', 'summary-restart', 'gold')
+      : C().btn('领奖离场', 'summary-settle', 'muted') + C().btn('继续挑战', 'summary-continue', 'gold');
+    const report = '<article class="endless-summary" data-outcome="' + (victory ? 'win' : 'lose') + '" aria-label="无尽塔本局战报">' +
+      '<header class="summary-heading"><span class="summary-kicker">无尽之塔 · ' + (victory ? '胜利结局' : '未竟结局') + '</span>' +
+      '<h2 class="summary-ending">' + (victory ? '破晓登临' : '星火未熄') + '</h2>' +
+      '<p class="summary-subtitle">' + esc(subtitle) + '</p><span class="summary-mode">' + mode + '</span></header>' +
+      '<div class="summary-score"><span>本局总分</span><strong>' + summaryNumber(summary.score) + '</strong>' +
+      '<small>' + (settled ? '本次攀登的最终得分' : '截至本次百层胜利的累计得分') + '</small></div>' +
+      '<div class="summary-body"><section class="summary-section"><h3 class="summary-section-heading">增益足迹<small>' +
+      (summary.complete === false ? '已记录 ' : '共 ') + summaryNumber(buffs.length) + ' 种 · ' + summaryNumber(summary.buffCount) + ' 份</small></h3>' +
+      (buffRows ? '<ul class="summary-buffs">' + buffRows + '</ul>' : '<p class="summary-empty">' +
+        (summary.complete === false ? '旧局未保留可确认的增益记录。' : '本局尚未获得增益。') + '</p>') +
+      (buffTotals ? '<p class="summary-buff-totals">' + esc(buffTotals) + ' · 包含已用尽、售出及献祭的增益</p>' : '') + '</section>' +
+      '<section class="summary-section"><h3 class="summary-section-heading">攀登战绩</h3><div class="summary-stats">' +
+      summaryStat('击败敌人', summary.enemiesDefeated, '本局胜利场次') +
+      summaryStat('通关层数', summary.layersCleared, '实际完成层数') +
+      summaryStat('最深抵达', Math.max(layer, Number(summary.bestLayer) || 0), '层') +
+      summaryStat('累计铸币', summary.mintEarned, '累计获得，含已使用') +
+      summaryStat('累计试炼币', summary.trialCoinsEarned, '累计获得，含已使用') +
+      summaryStat(settled ? '获得抽奖卷' : '离场可得抽奖卷', summary.tickets, rewardNote) + '</div></section>' +
+      '<section class="summary-section"><h3 class="summary-section-heading">隐藏成就<small>' + summaryNumber(achievements.length) +
+      ' 项' + (achievements.length && allAchievementPointsKnown ? ' · +' + summaryNumber(achievementPoints) + ' 分' : '') + '</small></h3>' +
+      (achievementRows ? '<ul class="summary-achievements">' + achievementRows + '</ul>' : '<p class="summary-empty">本局暂无已记录的隐藏成就。</p>') +
+      '</section><div class="summary-notes">' + notes + '</div></div><footer class="summary-actions">' + actions + '</footer></article>';
+    const ct = classicTower();
+    const content = '<div class="tower-page endless-summary-page">' + towerVisual(layer, 0, 'endless') +
+      '<div class="tower-main">' + report + '</div></div>';
+    const p = C().page('challenge', 'stages', content, ct
+      ? { cls: 'tower-board', noTabs: true, noFooter: true, pageClass: 'classic-tower', above: classicTowerBar() }
+      : { cls: 'tower-board' });
+    if (ct) applyClassicTowerBg(p, 'endless', layer);
+    back(p, towerBack, ct ? '返回征战' : '返回');
+    bindTips(p);
+    on(p, 'summary-lobby', () => openEndless());
+    on(p, 'summary-restart', beginEndlessRun);
+    on(p, 'summary-lottery', () => {
+      syncTickets();
+      if (window.ClassicExtras && ClassicExtras.lottery) ClassicExtras.lottery(); else UI.runAction('lottery');
+    });
+    on(p, 'summary-continue', openMirrorConfirm);
+    on(p, 'summary-settle', () => {
+      const out = Tower.settleEndlessVictory();
+      if (!out || !out.ok) { notice(out && out.msg || '现在还不能领取奖励。'); return; }
+      settleResult(out);
+    });
   }
 
 

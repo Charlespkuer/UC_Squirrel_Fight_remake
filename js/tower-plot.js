@@ -213,6 +213,44 @@
       ],
     },
 
+    /* —— 60/70/80/90 的征战动物 boss（挂在最后一战之前）—— */
+    boss60: {
+      once: true,
+      lines: [
+        '石门内传来细碎的抓挠声。',
+        '一只披着暗色甲胄的兔影从石柱后探出头。',
+        '「狡兔三窟……你以为追到这里，就算找到我了？」',
+        '它的长耳轻轻一抖，四周的岔路同时亮起红光。',
+      ],
+    },
+    boss70: {
+      once: true,
+      lines: [
+        '一声狼嚎震得塔壁上的灰尘簌簌落下。',
+        '铁链拖地，暗御狼王从阴影里走出。',
+        '「能走到这里，你的骨头应该很硬。」',
+        '它压低身形，獠牙间漏出白气。',
+      ],
+    },
+    boss80: {
+      once: true,
+      lines: [
+        '空气里浮起淡紫色的狐火。',
+        '妖狐倚在断裂的栏杆上，尾巴轻轻扫过地面。',
+        '「别紧张，我只是想看看……你的心是不是也这么硬。」',
+        '狐火在她身后聚成一只巨大的眼睛。',
+      ],
+    },
+    boss90: {
+      once: true,
+      lines: [
+        '石柱尽头传来沉重的脚步声。',
+        '暗御猿将把巨斧往地上一顿，整层塔都震了一下。',
+        '「王座之前，只剩我这一关。」',
+        '它抬起覆满旧伤的手臂，挡住了向上的路。',
+      ],
+    },
+
     /* —— 巡视（路上偶遇的魔王）—— */
     patrolGate: {
       once: true,
@@ -778,6 +816,22 @@
     try { return Tower.x00BeforeFirstOf ? Tower.x00BeforeFirstOf() : null; } catch (e) { return null; }
   }
 
+  /** 60/70/80/90 的征战 boss：**只在轮到第 5 场时**播它的开场。
+   *  这四段是 `once:true`，靠存档 seen 表各播一次；不会在进层那一刻抢在三侠前面，
+   *  也不会在打完 boss / 清层之后补播。 */
+  function dueCampaignBoss(run) {
+    if (!run || !Tower.storyEnabled()) return null;
+    const idx = Math.max(0, Math.floor(Number(run.idx) || 0));
+    if (idx !== 4) return null;
+    const plan = Array.isArray(run.plan) ? run.plan : [];
+    const entry = plan[4];
+    if (!entry || entry.kind !== 'campaign') return null;
+    const layer = Math.max(1, Math.floor(Number(run.layer) || 1));
+    const id = 'boss' + layer;
+    if (Tower.storySeen(id)) return null;
+    return storyScript(id) ? id : null;
+  }
+
   /** 这一层里「巡视」那一场之前要播的（首次 `patrolGate`，之后每次偶遇一段 `patrolMeetN`）。
    *
    *  ⚠ 三条硬约束 —— 旧版本在这里踩出了用户报的「一直触发剧情、进不了战斗」：
@@ -829,6 +883,8 @@
     if (run.finished && Math.floor(Number(run.finished.layer) || 0) === Math.floor(Number(run.layer) || 0)) return null;
     const entry = dueEntry(run);
     if (entry) return entry;
+    const boss = dueCampaignBoss(run);
+    if (boss) return boss;
     return duePatrol(run);
   }
 

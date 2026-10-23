@@ -321,6 +321,9 @@
     const mirrorTaken = Math.floor(Number(run.mirrorTaken) || 0);
     if (mirrorTaken > 0) run.mirrorTaken = mirrorTaken;
     else delete run.mirrorTaken;
+    const cleanMirror = cleanMirrorSnapshot(run.mirrorSnapshot);
+    if (cleanMirror) run.mirrorSnapshot = cleanMirror;
+    else delete run.mirrorSnapshot;
     /* 【U20b】整百层那套剧情的**本层进度**（`x00PreNo`：0/1/2；`x00stage`：0~4）：
      * 都是「这一层」的记账，坏值会让王庭那两段要么重播、要么整段不播。 */
     run.x00PreNo = Math.max(0, Math.min(2, Math.floor(Number(run.x00PreNo) || 0)));
@@ -620,12 +623,13 @@
         run.debuffs = run.debuffs.filter((d) => d && typeof d === 'object');
       }
     }
+    if (mode === 'endless') ensureRunStats(run);
     return run;
   }
   /* 归一化缓存：`tower()/endless()` 每次调用都会走一遍整段 normalizeRun（重建 permanent/limited、
    * 校验每组 buff），开一次塔页要跑 4~6 遍。给 run 打一个版本戳，同一份 run 只归一化一次；
    * 改档/迁移（读档、写档、切模式）时版本戳不在或不同，仍会完整跑一遍。 */
-  const NORM_VER = 3;
+  const NORM_VER = 4;
   function normalizeRunCached(run, mode) {
     if (!run || typeof run !== 'object') return null;
     /* 自检 / QA 档不做缓存：用例会直接改 run 再要求重新归一化（和旧行为一致）。 */
@@ -670,6 +674,8 @@
    *    C13 精英杀手生效）。x10 排除，避免一层里叠两个精英台阶。 */
   function isEliteEntry(entry, layer, isLast) {
     if (entry && entry.kind === 'warlord') return true;
+    /* 征战动物 boss：x0 的最后一战，和狂战松鼠一样吃精英 ×1.2 / 精英收益。 */
+    if (entry && entry.kind === 'campaign') return true;
     /* 「巡逻」魔王：**同时算精英 + boss**（用户口径）—— 精英收益与 boss 类 buff 都要吃。 */
     if (entry && entry.kind === 'patrol') return true;
     const L = Number(layer) || 0;
@@ -720,7 +726,7 @@
     return plan;
   }
   function isBossEntry(entry) {
-    return !!(entry && (entry.kind === 'warlord' || entry.kind === 'patrol' ||
+    return !!(entry && (entry.kind === 'warlord' || entry.kind === 'campaign' || entry.kind === 'patrol' ||
       entry.kind === 'squirrel' || entry.kind === 'trial'));
   }
   /* ---------- 【U18c】剧情推进：entry 标记 → 待播 id / 多段剧情的下一段 ----------
@@ -956,16 +962,24 @@
      * 削弱跟着「哪一位大侠」走（HERO_DEBUFF[anim]），所以顺序一变，本层要吃的削弱顺序也变，
      * 但三种削弱的组合固定，玩家看预告里的头像就知道等一下会被套上什么。 */
     const plan = D().heroOrder(layer, salt).map((anim) => ({ kind: 'hero', anim }));
-    // 第 4 场 = 随机 boss（挑战塔均匀抽；无尽塔按轮内层数 × 装备档位加权，51 层起无最低档）
-    const boss = bossEntry(layer, salt, squirrelsOnly);
-    /* 池子里抽到狂战松鼠时，把本层的 layer/salt 挂在 entry 上：
-     * 变体（无双/铁壁/血怒/霜狱/无常）由 warlordFor(layer, salt) 决定，
-     * entryInfo / regionOf 都读 entry._layer / _salt —— 不挂就会退回第一只，
-     * 于是「预告」与「实战」不是同一只（见 planInfo 的一致性要求）。 */
-    if (boss && boss.kind === 'warlord') { boss._layer = layer; boss._salt = salt; }
-    plan.push(boss);
-    // x10 层第 5 场 = 固定狂战松鼠（松鼠形态 + 全身狂战套 + 精英）
-    if (layer % 10 === 0) plan.push({ kind: 'warlord', id: 'warlord', _layer: layer, _salt: salt });
+    /* 60/70/80/90 改成「倒数第二战随机狂战松鼠 + 最后一战征战动物 boss」；
+     * 10~50 仍保持原来的「随机 boss + 塔顶狂战松鼠」，100 层走上面的整百王庭分支。 */
+    const campaign = endlessMode ? D().campaignBossFor(layer) : null;
+    if (campaign) {
+      plan.push({ kind: 'warlord', id: 'warlord', _layer: layer, _salt: salt });
+      plan.push({ kind: 'campaign', id: campaign.id, _layer: layer, _salt: salt });
+    } else {
+      // 第 4 场 = 随机 boss（挑战塔均匀抽；无尽塔按轮内层数 × 装备档位加权，51 层起无最低档）
+      const boss = bossEntry(layer, salt, squirrelsOnly);
+      /* 池子里抽到狂战松鼠时，把本层的 layer/salt 挂在 entry 上：
+       * 变体（无双/铁壁/血怒/霜狱/无常）由 warlordFor(layer, salt) 决定，
+       * entryInfo / regionOf 都读 entry._layer / _salt —— 不挂就会退回第一只，
+       * 于是「预告」与「实战」不是同一只（见 planInfo 的一致性要求）。 */
+      if (boss && boss.kind === 'warlord') { boss._layer = layer; boss._salt = salt; }
+      plan.push(boss);
+      // x10 层第 5 场 = 固定狂战松鼠（松鼠形态 + 全身狂战套 + 精英）
+      if (layer % 10 === 0) plan.push({ kind: 'warlord', id: 'warlord', _layer: layer, _salt: salt });
+    }
     /* 「巡逻」替换（2026-10 第六十二批）：40 层之后、每个 10 层区块挑一层（x0/x5 除外），
      * 把那一层的**一场三侠/精英位**换成魔王战 —— 被替换的那一场就不再出现。
      * 选中的位置固定取区块内的第一个「可替换位」（预告与实战同口径）。
@@ -991,6 +1005,12 @@
   function entryInfo(entry, layer, isLast) {
     const elite = isEliteEntry(entry, layer != null ? layer : entry._layer, isLast);
     if (entry.kind === 'hero') return { name: HERO_NAME[entry.anim], anim: entry.anim, type: '三侠位', mechDesc: '', elite: false };
+    if (entry.kind === 'campaign') {
+      const b = D().CAMPAIGN_BOSS_BY_ID[entry.id] || {};
+      return { id: entry.id, name: b.name || '征战首领', anim: 'campaign', campaign: true, mcFrame: b.mcFrame || 1,
+        type: b.type || '征战首领', mechDesc: b.mechDesc || '', patternDesc: b.patternDesc || '',
+        elite: true, mechs: (b.mech || []).slice() };
+    }
     if (entry.kind === 'warlord') {
       /* 预告必须显示**这一层实际会遇到的**那只变体与**实际穿的套装**（同层固定 → 预告 = 实战）：
        * 非 10 的整数层抽到的狂战松鼠穿的是普通套装，预告里也不能画成狂战套。 */
@@ -1195,9 +1215,100 @@
   const BUFF_LOG_MAX = 100;
   function logBuff(run, id, event, extra) {
     if (!run || !id) return;
+    /* 调试流水会截断；结算账本独立保留整局每一次获得，失去或消耗不会扣回。 */
+    if (run.mode === 'endless' && ['get', 'stack', 'instant'].includes(event) && D().BUFF_BY_ID[id]) {
+      const stats = ensureRunStats(run);
+      stats.buffs[id] = Math.max(0, Number(stats.buffs[id]) || 0) + 1;
+    }
     const list = Array.isArray(run.buffLog) ? run.buffLog : (run.buffLog = []);
     list.push(Object.assign({ id: String(id), event: String(event), layer: Math.max(1, Number(run.layer) || 1) }, extra || {}));
     if (list.length > BUFF_LOG_MAX) list.splice(0, list.length - BUFF_LOG_MAX);
+  }
+  /** 本局结算账本随 run 保存，也随已有战前快照一起回滚；不从余额倒算收入。 */
+  function createRunStats(run, complete) {
+    const stats = { version: 1, id: String(run.salt || ('legacy:' + Date.now())), complete: complete === true,
+      enemiesDefeated: 0, layersCleared: 0, trialCoinsEarned: 0, mintEarned: 0,
+      buffs: {}, achievements: [], victoryLayer: 0 };
+    if (complete) return stats;
+    /* 旧局只能保留有证据的下界：当前背包与已截断流水取较大值，绝不补造整局历史。 */
+    const owned = {}, logged = {};
+    const atLeast = (id, n) => {
+      if (D().BUFF_BY_ID[id]) stats.buffs[id] = Math.max(Number(stats.buffs[id]) || 0, Math.max(0, Number(n) || 0));
+    };
+    for (const row of (run.permanent || []).concat(run.limited || [], run.buffs || [])) {
+      if (row && D().BUFF_BY_ID[row.id]) owned[row.id] = (owned[row.id] || 0) + Math.max(1, Math.floor(Number(row.stacks) || 1));
+    }
+    for (const row of run.buffLog || []) {
+      if (row && ['get', 'stack', 'instant'].includes(row.event)) logged[row.id] = (logged[row.id] || 0) + 1;
+    }
+    for (const id of Object.keys(owned)) atLeast(id, owned[id]);
+    for (const id of Object.keys(logged)) atLeast(id, logged[id]);
+    for (const row of run.instantIds || []) if (row) atLeast(row.id, row.count);
+    for (const key of ['fragileGot', 'pickGot']) {
+      for (const id of Object.keys(run[key] || {})) atLeast(id, run[key][id]);
+    }
+    for (const id of (run.permSlotIds || []).concat(run.pickBuffIds || [])) atLeast(id, 1);
+    stats.achievements = cloneRun(run.achievements || []);
+    return stats;
+  }
+  function ensureRunStats(run) {
+    if (!run.runStats || run.runStats.version !== 1 || !run.runStats.buffs ||
+        !Array.isArray(run.runStats.achievements)) run.runStats = createRunStats(run, false);
+    return run.runStats;
+  }
+  function noteRunIncome(run, currency, amount) {
+    if (!run || run.mode !== 'endless') return;
+    const n = Math.max(0, Number(amount) || 0);
+    if (!n) return;
+    const stats = ensureRunStats(run);
+    stats[currency] = Math.max(0, Number(stats[currency]) || 0) + n;
+  }
+  /** 胜利只属于本次真正打赢整百层最终战；曾经打赢、失败后放行或调试挪层都不算。 */
+  function canSettleEndlessVictory(run) {
+    run = run || endless().run;
+    if (!run || run.attempt || run.phase !== 'mirror' || Number(run.layer) % 100 !== 0 ||
+        !isX00Plan(run.plan) || Number(run.idx) < run.plan.length - 1) return false;
+    const last = run.plan[run.plan.length - 1];
+    return !!(last && last.x00 && last.audience === 'king' && run.finished &&
+      Number(run.finished.layer) === Number(run.layer) && Number(run.finished.count) === run.plan.length && run.runStats &&
+      Number(run.runStats.victoryLayer) === Number(run.layer));
+  }
+  function buildEndlessSummary(run, outcome, reason) {
+    if (!run) return null;
+    const stats = run.runStats || createRunStats(run, false), pv = previewSettleTickets(run);
+    const complete = stats.complete === true;
+    const buffs = Object.keys(stats.buffs).map((id) => {
+      const def = D().BUFF_BY_ID[id];
+      return def ? { id, name: def.name, rarity: def.rarity, kind: def.kind,
+        count: Math.max(0, Math.floor(Number(stats.buffs[id]) || 0)) } : null;
+    }).filter((b) => b && b.count > 0);
+    const metric = (key) => complete ? Math.max(0, Math.floor(Number(stats[key]) || 0)) : null;
+    return { version: 1, id: stats.id, outcome: outcome === 'win' && canSettleEndlessVictory(run) ? 'win' : 'lose',
+      reason: reason || 'abandon', settled: false, complete,
+      incompleteFields: complete ? [] : ['enemiesDefeated', 'layersCleared', 'trialCoinsEarned', 'mintEarned', 'buffs', 'achievements'],
+      score: Math.max(0, Math.floor(Number(run.score) || 0)), layer: pv.layer,
+      bestLayer: Math.max(0, Math.floor(Number(run.bestLayer) || 0)),
+      enemiesDefeated: metric('enemiesDefeated'), layersCleared: metric('layersCleared'),
+      trialCoinsEarned: metric('trialCoinsEarned'), mintEarned: metric('mintEarned'),
+      trialCoinsLeft: pv.coins, mintLeft: pv.mint, tickets: pv.total, layerTickets: pv.layerTickets,
+      bonusTickets: pv.bonusTickets,
+      mintConverted: pv.mintConverted, mintForfeited: pv.mintForfeited, mintTicketCap: pv.mintCap,
+      freeDraws: 0,
+      uiMode: S().settings && S().settings.uiMode === 'modern' ? 'modern' : 'classic',
+      buffs, buffCount: buffs.reduce((sum, b) => sum + b.count, 0),
+      achievements: cloneRun(stats.achievements) };
+  }
+  /** 只读战报预览：展示、切页或重复打开不会发放抽奖卷。 */
+  function previewEndlessSummary(outcome) {
+    const run = endless().run;
+    return buildEndlessSummary(run, outcome, outcome === 'win' && canSettleEndlessVictory(run) ? 'victory' : 'abandon');
+  }
+  function finishEndlessSummary(out) {
+    out.summary.settled = true;
+    out.summary.endedAt = Date.now();
+    out.summary.freeDraws = out.shield ? 1 : 0;
+    /* 返回给界面的对象与持久快照隔离，界面绘制不能改坏存档。 */
+    endless().lastSummary = cloneRun(out.summary);
   }
   /** E01「立即进货」当前实际生效的折扣比例（0 = 没有生效的）。
    *  **必须按「条目现在是不是开着」现算**：原来拿到时把效果写进 run.postBattleShop /
@@ -1246,6 +1357,15 @@
     let sum = 0;
     eachBuff(run, (buff, stacks, row) => { const m = buff.mods; if (m && m[key]) sum += m[key] * stacks * g * rowEnchMulOf(row); });
     return sum;
+  }
+  /** 把两条「受到伤害修正」乘在一起：每条都是伤害倍率 (1 + v)，合并后仍是一个倍率。
+   *  旧写法直接相加，多个减伤叠到 −100% 就等于免疫；乘算后有限条来源不可能到 −100%。
+   *  v 为负数 = 减伤，正数 = 增伤；-0.99 只是防止浮点/极端数据真的归零。 */
+  function combineTakenMul(base, extra) {
+    const a = Number(base) || 0, b = Number(extra) || 0;
+    if (!a) return b;
+    if (!b) return a;
+    return Math.max(-0.99, (1 + a) * (1 + b) - 1);
   }
   function aggregate(run, foeCtx) {
     const g = globalMul(run);
@@ -1296,7 +1416,7 @@
       if (m.critBonus) agg.critBonus += m.critBonus * k;
       if (m.critDmgBonus) agg.critDmgBonus += m.critDmgBonus * k;
       if (m.dodgeBonus) agg.dodgeBonus += m.dodgeBonus * k;
-      if (m.takenMul) agg.takenMul += m.takenMul * k;
+      if (m.takenMul) agg.takenMul = combineTakenMul(agg.takenMul, m.takenMul * k);
       if (m.regenPct) agg.regenPct += m.regenPct * k;
       if (m.lifestealPct) agg.lifestealPct += m.lifestealPct * k;
       if (m.shellPct) agg.shellPct += m.shellPct * k;
@@ -1340,7 +1460,7 @@
       /* 空血上限：只抬高上限、不回血（与 maxHpMul 那条「回复等量」的语义相反）。 */
       if (m.emptyMaxHpMul) agg.emptyMaxHpMul += m.emptyMaxHpMul * k;
       /* 低血 combo 的减伤 / 吸血 / 每回合回血（都读同一个 lowHpAt 阈值）。 */
-      if (m.lowHpTakenMul) agg.lowHpTakenMul += m.lowHpTakenMul * k;
+      if (m.lowHpTakenMul) agg.lowHpTakenMul = combineTakenMul(agg.lowHpTakenMul, m.lowHpTakenMul * k);
       if (m.lowHpLifestealPct) agg.lowHpLifestealPct += m.lowHpLifestealPct * k;
       if (m.lowHpRegenPct) {
         agg.lowHpRegenPct += m.lowHpRegenPct * k;
@@ -1547,7 +1667,11 @@
   }
   /** 「涌泉烙印」（C52）的治疗加成倍率：**增益/技能造成的治疗**都要乘上它。
    *  注意不作用于「规则回血」（层间结算回血、自动回血、药丸）——那些不是增益给的。 */
-  function healBonusMul(run) { return 1 + fragileHealBonus(run); }
+  function healBonusMul(run) {
+    const saved = run && run.mode === 'endless' && run.mirrorSnapshot && run.mirrorSnapshot.combat;
+    const inherited = saved && Number.isFinite(Number(saved.healMul)) ? Number(saved.healMul) - 1 : 0;
+    return Math.max(0, 1 + fragileHealBonus(run) + inherited);
+  }
   /** 非战斗期间按「最大生命的百分比」回血：换算成绝对值后累加（自动受上限约束）。 */
   function healAbs(run, pct, refMaxHp) {
     const p = Math.max(0, Number(pct) || 0);
@@ -1664,7 +1788,8 @@
     const winMaxHp = winMaxHpOf(run);
     const flat = Math.max(0, Number(run.winHpFlat) || 0) +
       (run.spendGain ? Math.max(0, Number(run.spendGain.hp) || 0) : 0);
-    return Math.max(1, Math.round(base * (1 + stickyHp + winMaxHp)) + flat);
+    const mirrored = mirrorStatValue(run, 'maxHp', base);
+    return Math.max(1, Math.round(mirrored * (1 + stickyHp + winMaxHp)) + flat);
   }
   /** 当前血量（绝对口径）：hpAbs 裁到当前上限。 */
   function currentHp(run) {
@@ -1695,25 +1820,42 @@
 
   function buildFoe(mode, layer, entry, salt, isLast) {
     const TD = D();
-    const LT = mode === 'tower' ? TD.towerLevel(layer) : TD.endlessLevel(layer);
-    const M = mode === 'tower' ? TD.towerMult(layer) : TD.endlessMult(layer);
-    /* 30 层之后的深度曲线（见 tower-data.js 的 endlessDepthMul）：
-     * 血量与属性一起放大，让「过了 30 层」真的越来越吃练度与对策。
-     * ≤30 层时恒为 1，既有平衡不受影响。 */
+    const scale = mode === 'endless' && TD.endlessScaleParts ? TD.endlessScaleParts(layer) : null;
+    const LT = mode === 'tower' ? TD.towerLevel(layer) : scale ? scale.level : TD.endlessLevel(layer);
+    const M = mode === 'tower' ? TD.towerMult(layer) : scale ? scale.mult : TD.endlessMult(layer);
+    /* 无尽的轮内深度曲线与跨轮基础分开：scale.statBase/hpBase 已继承上一轮末值的70%，
+     * 再外乘本轮 mult/depth，完整复用第1~100层曲线；挑战塔仍使用原始等级与倍率。 */
     const KM = mode === 'tower' ? 1
-      : (TD.endlessDepthMul ? TD.endlessDepthMul(layer) : 1);
-    const statBase = GData.stagePlayerStat(LT), hpBase = GData.stagePlayerHp(LT);
+      : scale ? scale.depth : (TD.endlessDepthMul ? TD.endlessDepthMul(layer) : 1);
+    const statBase = scale ? scale.statBase : GData.stagePlayerStat(LT);
+    const hpBase = scale ? scale.hpBase : GData.stagePlayerHp(LT);
     // 无尽段机制叠加：所有怪物按固定顺序追加机制
     const extra = [];
     const elite = isEliteEntry(entry, layer, isLast);       // x10 第 5 场首领 / 每 5 层的最后一战（×1.2）
     let name, bias, npcType, skills = [], weapons = [], pattern = null, mech;
-    let mechParams = null, wears = null, castable = undefined;
+    let mechParams = null, wears = null, castable = undefined, campaign = null;
     if (entry.kind === 'hero') {
       const scale = (GData.STAGE_TYPE_SCALE && GData.STAGE_TYPE_SCALE[entry.anim]) || 1;
       bias = { power: scale, agility: scale, speed: scale, hp: 1 };
       name = HERO_NAME[entry.anim]; npcType = entry.anim;
       skills = [{ id: HERO_SKILL[entry.anim], level: Math.max(1, Math.min(15, Math.round(LT / 5))) }];
       mech = extra.slice();
+    } else if (entry.kind === 'campaign') {
+      /* 原版征战动物 boss：没有 npcType（Sim 走玩家式出手，武器/技能才真的生效），
+       * 只把 6833 / mcFrame 交给 SfFight 去挂动物模型。 */
+      const cb = TD.CAMPAIGN_BOSS_BY_ID[entry.id] || TD.CAMPAIGN_BOSSES[0];
+      const up = Math.max(0, Math.floor((LT - 28) / 12));
+      bias = cb.bias; name = cb.name; npcType = null;
+      weapons = cb.weapons.map((w) => ({ id: w.id, level: Math.max(1, Math.min(15, w.level + up)) }));
+      skills = cb.skills.map((k) => ({ id: k.id, level: Math.max(1, Math.min(15, k.level + up)) }));
+      pattern = cb.pattern.slice();
+      castable = Array.isArray(cb.castable) ? cb.castable.slice() : undefined;
+      wears = null;
+      /* 狂战血性是塔内给动物 boss 的最后一战机制（不是原版征战机制）；与四层环境词缀叠加。 */
+      mech = (cb.mech || []).slice();
+      for (const m of extra) if (!mech.includes(m)) mech.push(m);
+      campaign = { id: cb.id, bossId: cb.bossId, mcFrame: cb.mcFrame,
+        bigName: cb.bigName, level: cb.level };
     } else if (entry.kind === 'squirrel' || entry.kind === 'trial' || entry.kind === 'warlord' || entry.kind === 'patrol') {
       // 松鼠形态的 boss：同族贴图（**不给 npcType** → 战斗里就用玩家那套松鼠图集并镜像朝左，
       // 走 sim 的 playerLikeAction 分支，所以武器/技能都真的生效，机制在 sim 的
@@ -1754,12 +1896,15 @@
     const stat = (b, mul) => Math.max(1, Math.round(statBase * (mul || TD.FOE_STAT_MUL) * M * KM * b * eliteMul));
     const hero = entry.kind === 'hero';
     const warlord = entry.kind === 'warlord';           // x10 第 5 场
-    const powMul = hero ? TD.FOE_HERO_POWER_MUL : warlord ? TD.FOE_WARLORD_POWER_MUL : TD.FOE_TRIAL_POWER_MUL;
+    const powMul = hero ? TD.FOE_HERO_POWER_MUL
+      : warlord ? TD.FOE_WARLORD_POWER_MUL
+        : campaign ? TD.FOE_CAMPAIGN_POWER_MUL : TD.FOE_TRIAL_POWER_MUL;
     /* 「金松果还在增长期」（挑战塔第 26 层之前）敌人血量 ×0.9：那几层收益低，难度也放低一档。
      * 无尽塔不吃这条（towerEarlyHpMul 内部按 mode 分流）。 */
     const earlyHp = TD.towerEarlyHpMul(layer, mode);
     const heroHp = hpBase * TD.FOE_HP_MUL * TD.FOE_HERO_HP_MUL * M * KM * bias.hp * earlyHp;
-    const hpRatio = hero ? 1 : warlord ? TD.WARLORD_HP_RATIO : TD.bossHpRatio(bias.hp, layer);
+    const hpRatio = hero ? 1 : campaign ? TD.CAMPAIGN_HP_RATIO : warlord ? TD.WARLORD_HP_RATIO
+      : mode === 'endless' && TD.endlessBossHpRatio ? TD.endlessBossHpRatio(bias.hp, layer) : TD.bossHpRatio(bias.hp, layer);
     const foe = {
       name, level: LT, npcType,
       power: stat(bias.power, TD.FOE_POWER_MUL * powMul),
@@ -1769,7 +1914,8 @@
       castable,
     };
     // poolNpc = 带专属机制的对手（「机制破解」类 buff 只对它生效）；平庸松鼠没有机制，不算
-    const poolNpc = entry.kind === 'npc' || entry.kind === 'warlord' || (entry.kind === 'trial');
+    const poolNpc = entry.kind === 'npc' || entry.kind === 'warlord' || entry.kind === 'campaign' || (entry.kind === 'trial');
+    if (campaign) { foe.campaign = campaign; foe.bossKind = 'campaign'; }
     /* 「巡逻」魔王：数值不按层曲线算 —— **开战时复制玩家**（见 nextBattle 里 adjustMe 的收尾），
      * 这里先按层给一套托底值（战斗没走到复制时也不至于 0 血），穿全套橙色狂战甲。
      * 它持有的**全部武器 / 全部技能都是真5（15 级）**。 */
@@ -1800,6 +1946,10 @@
     return { foe, elite, poolNpc };
   }
   function regionOf(entry) {
+    if (entry.kind === 'campaign') {
+      const b = D().CAMPAIGN_BOSS_BY_ID[entry.id];
+      return b && b.region != null ? b.region : 0;
+    }
     if (entry.kind === 'squirrel' || entry.kind === 'trial' || entry.kind === 'warlord') {
       const sq = entry.kind === 'warlord' ? D().warlordFor(entry._layer, entry._salt)
         : entry.kind === 'trial' ? D().TRIAL_BY_ID[entry.id] : D().SQUIRREL_BY_ID[entry.id];
@@ -1853,6 +2003,7 @@
       deathSaves: 0, reviveCount: 0, reviveTierPaid: 0,
       /* 新口径标记：fragileBase 存「存在时的全额值」（见 normalizeRun 的语义迁移）。 */
       fragileAliveFull: 1 };
+    run.runStats = createRunStats(run, true);
     /* 原来这里有一句 `if (debug('endlessCoin')) run.coins = 9999;`（「无尽试炼币拉满」）——
      * 2026-10 用户口径：该开关实测没作用，已改成「试炼币不消耗」（见 freeCoinSpend），
      * 开局送币这一句随之删掉。 */
@@ -1863,7 +2014,7 @@
      * 第一场的 adjustMe 会用同一口径再写一次（值相同，血条不会跳）。
      * ⚠️ 只写基准、**不写 `run.hpAbs`**：绝对血量计数器在「没写过」时按当前上限算满血
      * （见 hpAbsOf 的回退），写死一个数反而会把第一场的进场血量钉在旧值上。 */
-    run.baseMaxHp = Math.max(1, Math.round(Number(State.totalStats({ useProps: true }).hp) || 0));
+    run.baseMaxHp = Math.max(1, Math.round(Number(State.totalStats({ useProps: false }).hp) || 0));
     e.run = run;
     save();
     return { ok: true, layer: 1 };
@@ -1892,8 +2043,9 @@
     return snap;
   }
   /** 取下一场战斗；返回可直接交给 Main.startBattle 的 foe / hpRatio / adjustMe。 */
-  function nextBattle(mode) {
-    const run = mode === 'tower' ? tower().run : endless().run;
+  function nextBattle(mode, previewRun) {
+    /* 镜面只读构建：调用方提供独立克隆，不替换存档对局，也不建立战斗/成就/回滚记录。 */
+    const run = previewRun || (mode === 'tower' ? tower().run : endless().run);
     if (!run) return { ok: false, msg: '没有进行中的挑战。' };
     if (run.attempt) return { ok: false, msg: '这场战斗尚未结束。' };
     if (run.choices) return { ok: false, msg: '请先完成场间选择。' };
@@ -1906,12 +2058,12 @@
      *   · 「巡视」那一场可能**不是**本层第 1 场 —— 进层时它还没轮到，走到这一场才该播；
      *   · 读档 / 中断后重进（状态是旧版本存的，`run.story` 可能空着）。
      * 判定与进层那次共用同一份（`TowerPlot.due`，见 autoPlayStory），不会出现两种口径。 */
-    if (mode === 'endless') autoPlayStory(run);
+    if (mode === 'endless' && !previewRun) autoPlayStory(run);
     const built = buildFoe(mode, run.layer, entry, run.salt, isLastBattle);
     const foeCtx = { hero: entry.kind === 'hero', poolNpc: built.poolNpc, elite: built.elite };
     const agg = aggregate(run, foeCtx);
     /* 隐藏成就「超凡入圣」：本场聚合出来的 buff 加成（不含装备/等级）跨过阈值就记一次。 */
-    checkStatAchievements(run, agg);
+    if (!previewRun) checkStatAchievements(run, agg);
     /* M01 威慑（本场 buff 的聚合值）+ 即时削弱 E11「挫锋」（记录在 run.enemyPowerDown 上）：
      * 两者相加后一起压敌人力量，上限 80%（别把敌人打成 0 攻击）。 */
     const foePowerDown = Math.max(0, Math.min(0.8,
@@ -1923,8 +2075,15 @@
     /* 「开局回血」类（补给 N08 等）放在 adjustMe **内部**执行 ——
      * 它要按「本场实际的最大生命」回血，而那个值只有在 adjustMe 里算完才有
      *（run.baseMaxHp 也是在那里写的）。详见下面的 pendingStartHealPct。 */
+    const mirrorFrame = {};
     const adjustMe = (me) => {
+      const external = { power: me.power, agility: me.agility, speed: me.speed, maxHp: me.maxHp };
       run.baseMaxHp = Math.max(1, Number(me.maxHp) || 0);
+      applyMirrorStats(run, me);
+      const inherited = mirrorStatsOf(run);
+      const frame = mirrorFrame.stats = {};
+      for (const key of MIRROR_STAT_KEYS) frame[key] = Object.assign({}, inherited[key]);
+      mirrorFrame.external = external;
       // 本层削弱（三侠大招留下的）：生命上限 / 属性 / 锁武技
       const debuffs = Array.isArray(run.debuffs) ? run.debuffs : [];
       const dMaxHp = debuffs.filter((d) => d.kind === 'maxHp').reduce((a, d) => a * (1 - (Number(d.pct) || 0)), 1);
@@ -2006,7 +2165,9 @@
           return sid !== Number(d.id);
         });
       }
+      const beforeEnvSpeed = me.speed;
       applyEnvToMe(run, me);
+      const envSpeedMul = me.speed / Math.max(1, beforeEnvSpeed);
       const envModsMine = Object.assign({}, me.mods || {});
       /* ============================================================
        * 终乘烙印（C49「终焉烙印」）：**所有加算 / 成长都算完之后**再乘一遍。
@@ -2083,7 +2244,7 @@
       if (agg.firstHitZeroFreeTurn) mods.firstHitZeroFreeTurn = 1;
       /* 减伤成长：与本场其它减伤一起并进 takenMul（负值 = 减伤）。 */
       const grownTaken = winTakenMulOf(run);
-      if (grownTaken > 0) mods.takenMul = (Number(mods.takenMul) || 0) - Math.min(agg.winTakenMulCap || grownTaken, grownTaken);
+      if (grownTaken > 0) mods.takenMul = combineTakenMul(mods.takenMul, -Math.min(agg.winTakenMulCap || grownTaken, grownTaken));
       if (agg.reflectImmune) mods.reflectImmune = agg.reflectImmune;
       /* 治疗烙印：sim 的 healOf() 读的是 fighter 顶层的 **healMul**（不是 me.mods 里的字段），
        * 所以这里要把面板字段一起写上。 */
@@ -2134,8 +2295,22 @@
         }
       }
       if (agg.deathSaves.length) mods.deathSaves = (mods.deathSaves || []).concat(agg.deathSaves);
-      for (const [k, v] of Object.entries(envModsMine || {})) if (v) mods[k] = (Number(mods[k]) || 0) + v;
+      for (const [k, v] of Object.entries(envModsMine || {})) {
+        if (!v) continue;
+        if (k === 'takenMul' || k === 'lowHpTakenMul') mods[k] = combineTakenMul(mods[k], v);
+        else mods[k] = (Number(mods[k]) || 0) + v;
+      }
       me.mods = mods;
+      applyMirrorCombat(run, me);
+      /* 仿射链只记局内倍率与固定增量；舍入差额归固定项，人物基础永远不作为增量累加。 */
+      const factors = { power: (1 + powerMul) * dPower * weaponMul * finalMul,
+        agility: dAgi * (1 + agg.agilityMul) * finalMul,
+        speed: dSpd * (1 + agg.speedMul) * envSpeedMul * finalMul,
+        maxHp: (1 + maxHpMul + stickyHp + winMaxHp) * dMaxHp * (1 + emptyPct) * finalMul };
+      for (const key of MIRROR_STAT_KEYS) {
+        frame[key].mul *= factors[key];
+        frame[key].flat = Number(me[key]) - Number(external[key]) * frame[key].mul;
+      }
       /* ============================================================
        * 「巡逻」魔王：**开战时照抄玩家的面板**（2026-10 第六十二批 + 第七十七批用户口径）。
        * 放在 adjustMe 的**最后一步** —— 这时 me 已经把装备、增益、烙印、环境、削弱全算完，
@@ -2186,6 +2361,7 @@
         }
       }
     };
+    if (previewRun) return { ok: true, foe: built.foe, adjustMe, mirrorFrame };
     run.attempt = mode + '_' + Date.now() + '_' + (++attemptSeq);
     snapshotBattle(run);
     save();
@@ -2426,10 +2602,9 @@
           run.reviveTierPaid = tier;
           run.reviveCount = (Number(run.reviveCount) || 0) + 1;
           addScore(run, gained, '隐藏成就·死而复生（累计 ' + run.deathSaves + ' 次）');
-          /* 成就上标「这一档总共值多少」（不是本次边际增量），这样展示在结算页
-           * 可以直接相加得到成就总收益：30 + 45 + 60 + 90 = 225。 */
+          /* 原成就提示保留档位面值；结算账本另记本次实际补发的分数，不能把档位面值相加。 */
           const item = markAchievement(run, 'revive:' + run.reviveCount,
-            '死而复生 · 累计 ' + run.deathSaves + ' 次', tier);
+            '死而复生 · 累计 ' + run.deathSaves + ' 次', tier, gained);
           out.achievement = item || null;
           out.reviveScore = gained;
         }
@@ -2444,6 +2619,8 @@
       out.potGold = run.pot;
     } else {
       const g = globalMul(run);
+      const stats = ensureRunStats(run);
+      stats.enemiesDefeated = Math.max(0, Number(stats.enemiesDefeated) || 0) + 1;
       addScore(run, D().SCORE.battle, '战斗胜利');
       /* 试炼币的三个乘区**分开算**（界面提示要逐个写出来）：战利品（E05/E06/E07）/
        * 淘金烙印（C53，含损毁档）/ 贪婪裂隙（环境，按实例摇出来的值）。 */
@@ -2518,6 +2695,7 @@
        *     —— 两个塔各扣一处，加起来都是一场收益的 1/3。 */
       if (result && result.skipped && mode === 'endless') coinGain = Math.round(coinGain * 2 / 3);
       run.coins += coinGain;
+      noteRunIncome(run, 'trialCoinsEarned', coinGain);
       /* 界面提示（试炼币那一格的悬停）要写「基础 x × 每个乘区」，所以把本场的账留一份在 run 上。 */
       run.lastCoinBreak = {
         base: coinBase, layer: battleLayer, band: D().coinBattleTierLabel(battleLayer),
@@ -2787,6 +2965,7 @@
     const e = endless();
     out = out || { ok: true, win: false, layer: run.layer, score: run.score, bestLayer: run.bestLayer };
     out.win = false;
+    out.summary = buildEndlessSummary(run, 'lose', 'defeat');
     settleRunTickets(run, out);
     out.shield = false;
     out.settled = true;
@@ -2798,6 +2977,7 @@
       S().lotteryFree = (S().lotteryFree || 0) + 1;
       out.shield = true;
     }
+    finishEndlessSummary(out);
     e.run = null;
     save();
     return out;
@@ -2816,6 +2996,10 @@
     /* 铸币 → 抽奖卷有上限（默认 10）：超出部分**不再转化**，随本局作废。 */
     const cap = Math.max(0, Math.floor(Number(D().TICKET_FROM_MINT_CAP) || 0));
     const mintConverted = Math.min(cap, mint);
+    /* 整百层胜利后的「就此收手」奖励：只在 x00 胜利、还没进 101 时成立。
+     * 继续挑战后 canSettleEndlessVictory 变假，所以这笔奖励天然不会跟到下一轮。 */
+    const bonusTickets = canSettleEndlessVictory(run)
+      ? Math.max(0, Math.floor(Number(D().ENDLESS_X00_BONUS_TICKETS) || 0)) : 0;
     return {
       layer: Math.max(1, Math.floor(Number(run && run.layer) || 1)),
       layerTickets: layerTickets,
@@ -2824,7 +3008,8 @@
       mintConverted: mintConverted,
       mintForfeited: Math.max(0, mint - mintConverted),
       coins: Math.max(0, Math.floor(Number(run && run.coins) || 0)),   // 试炼币不折现，只报个数
-      total: layerTickets + mintConverted,
+      bonusTickets: bonusTickets,
+      total: layerTickets + mintConverted + bonusTickets,
     };
   }
   function settleRunTickets(run, out) {
@@ -2839,6 +3024,7 @@
     run.retryToken = 0;
     run.retrySnap = null;
     out.layerTickets = layerTickets;
+    out.bonusTickets = pv.bonusTickets;
     out.retryLeft = retryTokens;
     out.forfeitCoins = coins;
     out.tickets = gain;
@@ -2888,13 +3074,16 @@
    * 同时每次触发都能得分。
    * 顺带推进「待界面显示」的队列（成就提示在 explore 的所有路径上统一取出）。
    */
-  function markAchievement(run, key, name, points) {
+  function markAchievement(run, key, name, points, earnedPoints) {
     if (!run) return null;
     run.achievements = Array.isArray(run.achievements) ? run.achievements : (run.achievements = []);
     if (run.achievements.some((a) => a.key === key)) return null;
     const item = { key: key, name: name, points: Math.max(0, Math.round(Number(points) || 0)),
       layer: Math.max(1, Number(run.layer) || 1) };
+    const history = run.mode === 'endless' ? ensureRunStats(run).achievements : null;
     run.achievements.push(item);
+    if (history && !history.some((a) => a.key === key)) history.push(Object.assign({}, item, {
+      earnedPoints: earnedPoints == null ? item.points : Math.max(0, Math.round(Number(earnedPoints) || 0)) }));
     if (run.achievements.length > 40) run.achievements.splice(0, run.achievements.length - 40);
     run.pendingToasts = Array.isArray(run.pendingToasts) ? run.pendingToasts : (run.pendingToasts = []);
     run.pendingToasts.push(item);
@@ -3227,8 +3416,13 @@
     }
     // —— 无尽 ——
     const g = globalMul(run);
+    const stats = ensureRunStats(run);
+    stats.layersCleared = Math.max(0, Number(stats.layersCleared) || 0) + 1;
+    /* 收缴放行同样能调用 layerClear，只有真实胜利回调才签发本层的胜利资格。 */
+    stats.victoryLayer = out.win === true && isX00Plan(run.plan) && run.layer % 100 === 0 ? run.layer : 0;
     addScore(run, D().SCORE.layer, '通过第 ' + run.layer + ' 层');
     run.coins += D().COINS.layer;
+    noteRunIncome(run, 'trialCoinsEarned', D().COINS.layer);
     run.bestLayer = Math.max(run.bestLayer, run.layer);
     /* 生命源泉（C04）改成「每层第一场战斗开战回满」——由 aggregate 的 layerFirstHealPct
      * 在战斗准备阶段结算（见 adjustMe 的 startHealPct），这里不再按层回血。 */
@@ -3345,7 +3539,7 @@
       if (run.phase === 'sacrifice') run.phase = null;
       run.pendingToasts = (run.pendingToasts || []).concat([
         '第 ' + run.layer + ' 层：新一轮开始 —— 商店件数 / 战斗选项 / 环境词缀 / 每 10 层放弃增益' +
-        '都回到与第 1 层相同的节奏（敌人的数值继续从上一轮接着长）。']).slice(-12);
+        '都回到与第 1 层相同的节奏；旧构筑已封存，敌人以本轮基准重新成长。']).slice(-12);
     }
     if (mode === 'endless' && D().layerNoShop(run.layer) && run.shop) {
       run.shop = null;
@@ -4259,7 +4453,7 @@
        * 以前玩家把「鹰眼 / 坚守」这类交给魔王，魔王其实一点没吃到。 */
       foe.mods = foe.mods || {};
       if (m.critBonus) foe.mods.critBonus = Math.max(0, Number(foe.mods.critBonus) || 0) + m.critBonus * k;
-      if (m.takenMul) foe.mods.takenMul = Math.max(-0.8, Number(foe.mods.takenMul) || 0) + m.takenMul * k;
+      if (m.takenMul) foe.mods.takenMul = combineTakenMul(foe.mods.takenMul, m.takenMul * k);
       names.push(def.name);
       n++;
     }
@@ -4804,7 +4998,11 @@
     }
     const m = buff.mods || {};
     const out = { ok: true, buff, instant: true };
-    if (m.instantCoins) { run.coins = Math.max(0, (run.coins || 0) + m.instantCoins); out.coins = m.instantCoins; }
+    if (m.instantCoins) {
+      run.coins = Math.max(0, (run.coins || 0) + m.instantCoins);
+      noteRunIncome(run, 'trialCoinsEarned', m.instantCoins);
+      out.coins = m.instantCoins;
+    }
     /* 即时削弱 —— 累加到本局全局，下一场 buildFoe 起对所有敌人生效。
      * E07/E08 削生命上限（enemyMaxHpDown）、E11「挫锋」削攻击力（enemyPowerDown）。 */
     if (m.enemyMaxHpDown) {
@@ -4817,6 +5015,7 @@
     }
     if (m.instantRetry) {
       run.retryToken = Math.max(0, Number(run.retryToken) || 0) + Number(m.instantRetry);
+      noteRunIncome(run, 'mintEarned', m.instantRetry);
       out.retryToken = run.retryToken;
     }
     /* 讨价还价（E14）：即时类，但效果留到**下一次进店**才兑现 —— 份数记在 run 上（可叠加）。
@@ -5111,7 +5310,10 @@
     const enterStacks = stacksOf(run, 'C59');
     if (!(enterStacks > 0)) return 0;
     const enterCoins = Math.max(0, Math.round(Number(D().BUFF_BY_ID.C59.mods.shopEnterCoins) || 100) * enterStacks);
-    if (enterCoins > 0) run.coins = Math.max(0, Number(run.coins) || 0) + enterCoins;
+    if (enterCoins > 0) {
+      run.coins = Math.max(0, Number(run.coins) || 0) + enterCoins;
+      noteRunIncome(run, 'trialCoinsEarned', enterCoins);
+    }
     return enterCoins;
   }
   /** 开一次商店。
@@ -5677,6 +5879,7 @@
     const spend = addShopSpend(run, price);
     run.shop.retrySold = true;
     run.retryToken = Math.max(0, Number(run.retryToken) || 0) + 1;
+    noteRunIncome(run, 'mintEarned', 1);
     save();
     return { ok: true, left: run.retryToken, price: price, shopSpend: spend };
   }
@@ -5814,6 +6017,7 @@
     resetGrowth(run, id, stacks, row);
     syncSlotFree(run);
     run.coins += gain;
+    noteRunIncome(run, 'trialCoinsEarned', gain);
     logBuff(run, id, 'lose', { detail: '商店卖出 ' + (stacks > 1 ? ('×' + stacks + ' 层 ') : '') + '+' + gain + ' 试炼币' });
     save();
     return { ok: true, gain, id, uid: row.uid };
@@ -6207,8 +6411,25 @@
     const e = endless(), run = e.run;
     if (!run || run.phase !== 'checkpoint') return { ok: false };
     const out = { ok: true, score: run.score, layer: run.layer };
+    out.summary = buildEndlessSummary(run, 'lose', 'checkpoint');
     settleRunTickets(run, out);          // 与放弃本局 / 失败结算同一条结算
     settleScore(run, out);
+    finishEndlessSummary(out);
+    e.run = null;
+    save();
+    return out;
+  }
+  /** 整百层最终战胜利后主动离场；沿用同一发奖 API，只在真正结束本局时入包。 */
+  function settleEndlessVictory() {
+    const e = endless(), run = e.run;
+    /* 挑战模式不播放剧情，终章的存量标记不应挡住已经完成拾取的胜利离场。 */
+    if (!canSettleEndlessVictory(run) || (storyEnabled() && (run.story || run.pendingStory)) ||
+        mirrorPickupPending(run)) return { ok: false };
+    const out = { ok: true, win: true, score: run.score, layer: run.layer };
+    out.summary = buildEndlessSummary(run, 'win', 'victory');
+    settleRunTickets(run, out);
+    settleScore(run, out);
+    finishEndlessSummary(out);
     e.run = null;
     save();
     return out;
@@ -6250,9 +6471,179 @@
    *      再连卡片一起慢慢变纯黑，然后较快地从黑回到游戏界面（动画在界面侧，见 tower-ui）；
    *   ③ 回到界面时它挂在**永久增益的最前面**、介绍是 `？？？`，右下角是「继续挑战」
    *      而不是「进入商店」；点它会问「无尽之塔中的魔王已被击败，继续在镜中世界进行挑战吗？」，
-   *      选是才进第 101 层（与层数有关的机制回到第 1 层的样子，敌人数值继续按公式长）；
+   *      选是才进第 101 层（与层数有关的机制回到第 1 层的样子，敌人以本轮末基础的70%为新起点，重走第1~100层成长曲线）；
    *   ④ 此后每过 100 层再叠一层。
    * ============================================================ */
+  /* 照影持有四维变换与首轮静态战斗属性，不持有旧增益、运营效果或可再触发的限次机制。 */
+  const MIRROR_STAT_KEYS = ['power', 'agility', 'speed', 'maxHp'];
+  const MIRROR_COMBAT_KEYS = ['critBonus', 'critDmgBonus', 'dodgeBonus', 'dodgeMul', 'takenMul',
+    'regenPct', 'lifestealPct', 'shellPct', 'thornsPct', 'reflectImmune', 'mustHitAll'];
+  function cleanMirrorCombat(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    const out = {};
+    for (const key of MIRROR_COMBAT_KEYS) {
+      if (value[key] == null) continue;
+      const v = Number(value && value[key]);
+      if (Number.isFinite(v) && v) out[key] = v;
+    }
+    for (const key of ['dmgMul', 'healMul']) {
+      if (value[key] == null) continue;
+      const v = Number(value && value[key]);
+      if (Number.isFinite(v) && (key === 'healMul' ? v >= 0 : v > 0) && v !== 1) out[key] = v;
+    }
+    return out;
+  }
+  function applyMirrorCombat(run, me) {
+    if (!run || run.mode !== 'endless') return;
+    const saved = run.mirrorSnapshot && run.mirrorSnapshot.combat;
+    if (!saved) return;
+    const combat = cleanMirrorCombat(saved), mods = me.mods || (me.mods = {});
+    for (const key of MIRROR_COMBAT_KEYS) {
+      if (!combat[key]) continue;
+      if (key === 'reflectImmune' || key === 'mustHitAll') mods[key] = Math.max(Number(mods[key]) || 0, combat[key]);
+      /* 减伤不是「点数相加」而是伤害倍率相乘：镜内旧减伤 × 本轮新减伤，永远碰不到 100%。 */
+      else if (key === 'takenMul') mods[key] = combineTakenMul(mods[key], combat[key]);
+      else mods[key] = (Number(mods[key]) || 0) + combat[key];
+    }
+    if (combat.dmgMul != null) mods.dmgMul = (mods.dmgMul == null ? 1 : Number(mods.dmgMul)) * combat.dmgMul;
+    if (mods.thornsPct) mods.thornsPct = Math.min(0.6, mods.thornsPct);
+    if (combat.healMul != null) me.healMul = Math.max(0, (me.healMul == null ? 1 : Number(me.healMul)) + combat.healMul - 1);
+  }
+  /** 照影只收**静态**战斗属性：低血、回合、开场、胜负成长这些纯局内条件一律不参与。 */
+  function mirrorCombatAtFirstRound(actor) {
+    const combat = cleanMirrorCombat(actor.mods || {});
+    if (actor.healMul != null) combat.healMul = Number(actor.healMul);
+    return cleanMirrorCombat(combat);
+  }
+  /* 【照影·纯局内排除表】带这些 mod 的增益不进入快照。
+   * 它们要么按回合/战斗/胜负成长，要么只在低血/开场/条件成立时生效，要么是运营/经济/稀有度、
+   * 选取型单次武装强化 —— 用户口径 2026-10：后发制人、战斗续航、天命所归等都不触发。 */
+  const MIRROR_INRUN_MODS = Object.freeze([
+    'catchUpPct', 'roundStatPct', 'roundMaxHpMul',
+    'startHealPct', 'layerFirstHealPct', 'startStatFlat', 'startMaxHpFlat', 'emptyMaxHpMul',
+    'enemyHpDrainPct', 'firstDodge', 'firstHitZero', 'firstHitZeroFreeTurn', 'firstSkillFree', 'mustHitFirst',
+    'openStrikePct', 'openKill',
+    'winMaxHpPct', 'winMaxHpCap', 'winMaxHpFlat', 'winStatAfter10', 'winTakenMulPct', 'winTakenMulCap',
+    'killPowerPct', 'killPowerCap', 'eliteHealAfter', 'eliteMaxHpAfter',
+    'lowHpAt', 'lowHpPowerMul', 'lowHpAgilityMul', 'lowHpSpeedMul', 'lowHpFinalMul', 'lowHpTakenMul',
+    'lowHpLifestealPct', 'lowHpRegenPct', 'lowHpRegenAt',
+    'dmgMulType', 'dmgMulMech', 'dmgMulElite',
+    'revivePct', 'reviveStatMul', 'reviveFirstPct',
+    'x10Boost',
+    'rarityBoost', 'commonMul', 'epicMul', 'legendMul',
+    'globalMul',
+    'coinBoostPct', 'fragileCoinAddAlive', 'fragileCoinAddBurned',
+    'shopDiscount', 'shopHalf', 'postBattleShop', 'postBattleShopDiscount', 'postBattleMintShop',
+    'shopEnterCoins', 'shopSpendHp', 'shopSpendLimited', 'shopSpendStat', 'shopSpendStep',
+    'shopSpendTierSize', 'shopSpendTiers',
+    'sellValue', 'sellGrowthPerWin', 'instantCoins', 'instantRetry', 'layerRestart',
+    'rerollTiltMul', 'limitedDefaultRerollPaid',
+    'pickWeaponPct', 'pickSkillPct',
+    'powerPerEmptySlot', 'powerPerPermBuff', 'powerPerPermBuffEnchantedWeight',
+    'openerPowerMul', 'fatiguePowerMul', 'openerRounds', 'weaponFreeUses', 'weaponBoostUses',
+    'weaponBoostPowerMul', 'weaponBoostMustHit', 'weaponBoostReflectImmune', 'weaponBoostFatigueMul',
+    'dodgeMul',
+  ]);
+  /** 这条增益有没有纯局内 mod；没有才允许进入照影取样。 */
+  function mirrorAbsorbableBuff(id) {
+    const def = D().BUFF_BY_ID[id];
+    if (!def) return false;
+    const m = def.mods || {};
+    return !MIRROR_INRUN_MODS.some((key) => m[key] != null);
+  }
+  /** 照影取样用克隆：剔除纯局内增益、清零成长/运营字段，避免它们通过 adjustMe 混进快照。 */
+  function mirrorProbeRun(run) {
+    const probe = cloneRun(run);
+    probe.phase = null; probe.choices = null; delete probe.attempt;
+    probe.idx = Math.max(0, (probe.plan || []).length - 1);
+    const keep = (row) => !!(row && mirrorAbsorbableBuff(row.id));
+    probe.permanent = (probe.permanent || []).filter(keep);
+    probe.limited = (probe.limited || []).filter(keep);
+    probe.buffs = (probe.buffs || []).filter(keep);
+    /* 神兵淬炼 / 秘技通神：选取型单次武装强化，不吸收。 */
+    probe.weaponBoost = {}; probe.skillBoost = {};
+    for (const key of ['killPower', 'bonusPower', 'winMaxHp', 'winHpFlat', 'winStatPower', 'winStatAgility',
+      'winStatSpeed', 'winTakenMul', 'rarityBoost', 'fragileCoinBase', 'enemyMaxHpDown', 'enemyPowerDown',
+      'shopSpend', 'shopSpendProcs', 'shopSpendLimited', 'shopDiscount', 'shopDiscountPct', 'shopHalfPending']) {
+      probe[key] = 0;
+    }
+    delete probe.spendGain;
+    probe.fragileCoinBurned = [];
+    probe.env = []; probe.debuffs = [];
+    return probe;
+  }
+  function cleanMirrorSnapshot(value) {
+    if (!value || value.version !== 1 || !value.stats) return null;
+    const through = Math.max(0, Math.floor(Number(value.absorbedThrough) || 0));
+    if (!through || through % 100) return null;
+    const stats = {};
+    for (const key of MIRROR_STAT_KEYS) {
+      const part = value.stats[key], mul = Number(part && part.mul), flat = Number(part && part.flat);
+      if (!Number.isFinite(mul) || mul <= 0 || !Number.isFinite(flat)) return null;
+      stats[key] = { mul, flat };
+    }
+    const source = { layer: through, firstRound: true };
+    for (const key of MIRROR_STAT_KEYS) source[key] = Math.max(1, Number(value.source && value.source[key]) || 1);
+    return { version: 1, absorbedThrough: through, stats, source, combat: cleanMirrorCombat(value.combat) };
+  }
+  function mirrorStatsOf(run) {
+    const snap = run && run.mode === 'endless' && cleanMirrorSnapshot(run.mirrorSnapshot);
+    const stats = {};
+    for (const key of MIRROR_STAT_KEYS) stats[key] = snap ? snap.stats[key] : { mul: 1, flat: 0 };
+    return stats;
+  }
+  function mirrorStatValue(run, key, value) {
+    const part = mirrorStatsOf(run)[key];
+    return Math.max(1, Math.round(Number(value) * part.mul + part.flat));
+  }
+  function applyMirrorStats(run, me) {
+    if (!run || run.mode !== 'endless' || !run.mirrorSnapshot) return;
+    const ratio = clamp01(Number(me.hp) / Math.max(1, Number(me.maxHp) || 1));
+    for (const key of MIRROR_STAT_KEYS) me[key] = mirrorStatValue(run, key, me[key]);
+    me.hp = Math.max(1, Math.round(me.maxHp * ratio));
+  }
+  /** 按静态数值取样：只跑 adjustMe，不跑首轮光环 / 幻兽 / 低血条件；所有写入仅落在独立克隆。 */
+  function freezeMirrorSnapshot(run) {
+    const layer = Math.max(1, Math.floor(Number(run.layer) || 1));
+    const prior = cleanMirrorSnapshot(run.mirrorSnapshot);
+    if (prior && prior.absorbedThrough >= layer) return prior;
+    const probe = mirrorProbeRun(run);
+    const prepared = nextBattle('endless', probe);
+    if (!prepared.ok) return null;
+    const st = State.totalStats({ useProps: false }), account = S();
+    const cap = Math.max(1, Math.round(Number(st.hp) || 1));
+    const liveHp = currentHp(run), ratio = liveHp.maxHp > 0 ? clamp01(liveHp.hp / liveHp.maxHp) : clamp01(run.carry);
+    const me = { power: st.power, agility: st.agility, speed: st.speed, maxHp: cap, hp: Math.max(1, Math.round(cap * ratio)),
+      baseStats: { power: account.power, agility: account.agility, speed: account.speed },
+      weapons: [], skills: [], effects: State.equipmentEffects ? State.equipmentEffects() : {} };
+    /* 只跑 adjustMe：不再跑 Sim 的首轮光环/幻兽，也不做低血条件取样。
+     * 于是后发制人、战斗续航、开场固定值这些纯局内效果不会改变快照。 */
+    prepared.adjustMe(me);
+    if (!prepared.mirrorFrame || !prepared.mirrorFrame.stats) return null;
+    const stats = {};
+    for (const key of MIRROR_STAT_KEYS) stats[key] = Object.assign({}, prepared.mirrorFrame.stats[key]);
+    const source = { layer: layer, firstRound: true, power: me.power, agility: me.agility, speed: me.speed, maxHp: me.maxHp };
+    return cleanMirrorSnapshot({ version: 1, absorbedThrough: layer, stats,
+      source: source, combat: mirrorCombatAtFirstRound(me) });
+  }
+  function clearMirrorBuild(run, mirror) {
+    for (const row of (run.permanent || []).concat(run.limited || [])) {
+      if (row.id !== D().MIRROR.id) logBuff(run, row.id, 'lose', { stacks: row.stacks || 1, detail: '封存进照影之境' });
+    }
+    run.permanent = [mirror]; run.limited = []; run.buffs = [];
+    for (const key of ['killPower', 'bonusPower', 'hpBonus', 'winMaxHp', 'winHpFlat', 'winStatPower', 'winStatAgility',
+      'winStatSpeed', 'winTakenMul', 'sellBonus', 'shopSpend', 'shopSpendProcs', 'shopSpendLimited', 'permSlots',
+      'fragileMulBase', 'fragileMulBurned', 'fragileHealBase', 'fragileCoinBase', 'rarityBoost', 'enemyMaxHpDown',
+      'enemyPowerDown', 'shopDiscount', 'shopDiscountPct', 'shopHalfPending', 'legendPity']) run[key] = 0;
+    for (const key of ['fragileGot', 'pickGot', 'fragileSeeds', 'weaponBoost', 'skillBoost']) run[key] = {};
+    for (const key of ['fragileBase', 'fragileBurned']) run[key] = { power: 0, agility: 0, speed: 0 };
+    for (const key of ['instantIds', 'pickBuffIds', 'permSlotIds', 'slotFreeIds', 'deferredPicks', 'fragileHealBurned',
+      'fragileCoinBurned', 'brokenMarks', 'patrolTolls', 'env', 'debuffs']) run[key] = [];
+    for (const key of ['spendGain', 'pendingPick', 'patrolShopGift', 'patrolShopSpend', 'patrolFoeGain', 'retrySnap',
+      'shop', 'choices', 'choicesKind', 'lastSacrifice', 'pendingAfterShop']) delete run[key];
+    /* 试炼币与铸币(retryToken)是已赚到的余额；只清旧战前快照，不抹钱包。 */
+    run.mintGroup = -1; run.envCoinMul = 1; run.reviveUsed = 0; run.reviveLayer = 0;
+  }
   /** 照影之境当前叠了几层（没有就是 0）。 */
   function mirrorStacks(run) {
     const row = ((run && run.permanent) || []).find((b) => b && b.id === D().MIRROR.id);
@@ -6290,12 +6681,27 @@
   }
   /** 【U20】「继续挑战」→ 是：进下一层（第 101 / 201 / 301… 层）。
    *  与层数有关的机制重置成第 1 层的样子由 `advanceLayer` 自己负责（轮次切换那一段），
-   *  敌人数值继续按公式增长。 */
+   *  敌人以本轮末基础的70%为新起点，重走第1~100层成长曲线。 */
   function enterMirrorWorld() {
     const run = endless().run;
     if (!run) return { ok: false, msg: '当前没有无尽塔对局。' };
     if (run.phase !== 'mirror') return { ok: false, msg: '现在不在镜中世界的入口。' };
     if (mirrorPickupPending(run)) return { ok: false, msg: '先把这一件拾取了。' };
+    const through = Math.max(1, Math.floor(Number(run.layer) || 1));
+    const old = cleanMirrorSnapshot(run.mirrorSnapshot);
+    if (!old || old.absorbedThrough < through) {
+      const hp = currentHp(run), ratio = hp.maxHp > 0 ? clamp01(hp.hp / hp.maxHp) : clamp01(run.carry);
+      const snapshot = freezeMirrorSnapshot(run);
+      if (!snapshot) return { ok: false, msg: '未能封存本轮首回合属性，请重试。' };
+      const mirror = (run.permanent || []).find((row) => row.id === D().MIRROR.id);
+      if (!mirror) return { ok: false, msg: '先把这一件拾取了。' };
+      run.mirrorSnapshot = snapshot;
+      clearMirrorBuild(run, mirror);
+      run.baseMaxHp = Math.max(1, Math.round(Number(State.totalStats({ useProps: false }).hp) || 1));
+      const cap = currentMaxHp(run);
+      run.hpAbs = Math.max(1, Math.round(cap * ratio)); run.carry = ratio;
+      run.lastMaxHp = cap; run.refMaxHp = cap; run.lastHp = run.hpAbs;
+    }
     run.phase = null;
     delete run.mirrorTaken;
     advanceLayer(run, 'endless');
@@ -6416,8 +6822,10 @@
     const run = endless().run;
     if (!run || run.attempt) return { ok: false };
     const out = { ok: true, score: run.score, layer: run.layer };
+    out.summary = buildEndlessSummary(run, 'lose', 'abandon');
     settleScore(run, out);
     settleRunTickets(run, out);
+    finishEndlessSummary(out);
     endless().run = null;
     save();
     return out;
@@ -6462,7 +6870,11 @@
   }
   function endlessInfo() {
     const e = endless();
+    /* 整百层胜利、尚未进 101 时的收手奖励；继续挑战后自动消失。 */
+    const victoryBonus = e.run && canSettleEndlessVictory(e.run)
+      ? Math.max(0, Math.floor(Number(D().ENDLESS_X00_BONUS_TICKETS) || 0)) : 0;
     return { best: e.best, weekBest: e.weekBest, bestLayer: e.bestLayer,
+      lastSummary: e.lastSummary ? cloneRun(e.lastSummary) : null,
       tickets: S().props[TICKET_PROP] || 0,
       run: e.run ? { layer: e.run.layer, score: e.run.score, coins: e.run.coins, carry: e.run.carry,
         /* 【U18】待播剧情 id（没有就是 null）—— 界面据此决定要不要进剧情展示模式。
@@ -6484,6 +6896,7 @@
         mirrorPending: mirrorPickupPending(e.run),
         mirrorTaken: Math.floor(Number(e.run.mirrorTaken) || 0) === Math.floor(Number(e.run.layer) || 0),
         mirrorStacks: mirrorStacks(e.run),
+        mirrorSnapshot: cleanMirrorSnapshot(e.run.mirrorSnapshot),
       debuffs: (e.run.debuffs || []).slice(),
         choices: e.run.choices ? e.run.choices.slice() : null,
         next: e.run.plan[e.run.idx] ? Object.assign({ kind: e.run.plan[e.run.idx].kind }, entryInfo(e.run.plan[e.run.idx], e.run.layer, e.run.idx === e.run.plan.length - 1)) : null,
@@ -6538,15 +6951,18 @@
         spendGain: Object.assign({ power: 0, agility: 0, speed: 0, hp: 0 }, e.run.spendGain || {}),
         permCap: permSlots(e.run),
         finished: e.run.finished || null,
+        victoryReady: canSettleEndlessVictory(e.run),
+        victoryBonusTickets: victoryBonus,
         /* 无尽主界面右上角显示用的三个数（口径与 settleRunTickets 完全一致）：
          *   · ticketsIfSettle —— 只算「本层应得」那一份（5 层一个档位）
          *   · retryToken      —— 手上的**铸币**（游戏内文案叫「铸币」，字段名沿用 retryToken
          *                        以免旧档迁移；失败后回滚本场再打一次；结算时 1:1 折券）
          *   · ticketsOnExit   —— 现在退出**实际到手**的总额 = 本层应得 + 铸币折现
+         *                        + 整百层胜利收手奖励（仅 x00 胜利、未进 101 时）
          *                        （剩余试炼币不折现，随本局作废） */
         retryToken: Math.max(0, Math.floor(Number(e.run.retryToken) || 0)),
-        ticketsIfSettle: D().endlessTickets(e.run.layer),
-        ticketsOnExit: D().endlessTickets(e.run.layer)
+        ticketsIfSettle: D().endlessTickets(e.run.layer) + victoryBonus,
+        ticketsOnExit: D().endlessTickets(e.run.layer) + victoryBonus
           + Math.max(0, Math.floor(Number(e.run.retryToken) || 0)),
         /* 【D2b】当前这一层敌人的**成长倍率**（用户口径 2026-10：要看得见才调得动）：
          * 段位倍率 × 深度倍率 + 目标等级，三个数各自给出来（界面拼成一行）。
@@ -7025,7 +7441,8 @@
     /* 只读：本局全局倍率（增幅水晶 C15 的 globalMul^层数）。
      * 成长类增益的增量与上限都要乘它，暴露出来便于界面/测试用同一口径核算。 */
     globalMulOf: (run) => globalMul(run || endless().run),
-    checkpointInfo, settleEndless, continueEndless, continueFromShop, settleFromShop,
+    checkpointInfo, settleEndless, settleEndlessVictory, canSettleEndlessVictory, previewEndlessSummary,
+    continueEndless, continueFromShop, settleFromShop,
     /* 调试台：一次拿到「收集到的全部增益 + 获取/消失流水 + 当前实际提升」。
      * collected 含一次生效类与已损毁/用尽/失去的（从流水里回捞）。 */
     debugBuffReport(mode) {
@@ -7136,6 +7553,7 @@
       if (!e.run) return { ok: false, msg: '当前没有无尽塔对局（先开始一局）。' };
       const amount = Math.max(1, Math.min(1000000, Math.round(Number(n) || 0)));
       e.run.coins = Math.max(0, Number(e.run.coins) || 0) + amount;
+      noteRunIncome(e.run, 'trialCoinsEarned', amount);
       save();
       return { ok: true, amount, total: e.run.coins, layer: e.run.layer };
     },
@@ -7146,6 +7564,7 @@
       if (!e.run) return { ok: false, msg: '当前没有无尽塔对局（先开始一局）。' };
       const amount = Math.max(1, Math.min(100000, Math.round(Number(n) || 0)));
       e.run.retryToken = Math.max(0, Number(e.run.retryToken) || 0) + amount;
+      noteRunIncome(e.run, 'mintEarned', amount);
       save();
       return { ok: true, amount, total: e.run.retryToken, layer: e.run.layer };
     },

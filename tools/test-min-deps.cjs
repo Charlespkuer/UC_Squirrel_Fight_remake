@@ -131,7 +131,7 @@ record('存档列表弹窗：一列紧凑可滚动，不再横排按钮溢出屏
   assert.match(html, /^<div class="save-row current">/, '当前存档那行要有 current 标记');
   assert.match(html, /class="save-level">32<i>级<\/i>/, '等级要单独成徽章');
   assert.match(html, /<span class="save-name">Charles<em>当前<\/em><\/span>/, '名字单独一格，当前档要标注');
-  assert.match(html, /<span class="save-sub">今天 15:20 · 156 KB<\/span>/, '时间与大小放次要行');
+  assert.match(html, /<span class="save-sub"[^>]*>今天 15:20 · 156 KB<\/span>/, '时间与大小放次要行');
   assert.match(html, /data-save-row="0"[^>]*>载入<\/button>/, '每行一个「载入」按钮');
   assert.ok(!/【32级/.test(html), '不该再出现「【32级 …】」这种长按钮文案');
 
@@ -309,6 +309,16 @@ record('js/gamedict.js 与 references/orig/ 的抽取结果一致（可重生成
   if (!fs.existsSync(orig)) { console.log('    （跳过：这是精简包，没有 references/orig/）'); return; }
   const r = spawnSync(process.execPath, [path.join(ROOT, 'tools', 'gen-vendor-data.cjs'), '--check'], { encoding: 'utf8' });
   assert.equal(r.status, 0, 'gamedict.js 不是最新的：\n' + (r.stderr || r.stdout));
+});
+
+record('调试添加跳过游戏内没有的松鼠拳套/绿松果', () => {
+  /* 原始 GameDict 有 6 松鼠拳套 / 9 绿松果，但本版既没有产出途径也没有 useProp 分支；
+   * 调试面板的「快速获取物品」与「全道具 +10」都不该再发这两件死物。 */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'debug.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(src, /const UNUSED_PROPS = new Set\(\[6, 9\]\)/, '6/9 要集中在一个排除表里');
+  assert.match(src, /if \(\+id > 0 && !UNUSED_PROPS\.has\(\+id\)\) rows\.push/, '道具下拉要跳过 6/9');
+  assert.match(src, /!CURRENCY_PROPS\[\+id\] && !UNUSED_PROPS\.has\(\+id\)/, '全道具 +10 也要跳过 6/9');
+  assert.match(src, /if \(UNUSED_PROPS\.has\(key\)\) return '这件道具在游戏内没有产出与用途/, '直接调 grantItem 也要拒绝');
 });
 
 /* 每个「浏览器侧模块」都必须能在最小环境下**加载成功**并挂上自己的全局。

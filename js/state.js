@@ -28,6 +28,7 @@
    * 槽位选择存在 localStorage 的 ssdz_ui_mode（界面切换时由 UI 写入）。 */
   const UI_MODE_KEY = 'ssdz_ui_mode';
   const SAVE_SLOTS = ['modern', 'classic'];
+  const BATTLE_HISTORY_LIMIT = 50;
   const DEFAULT_SAVE_SLOT = 'classic';
   const ENERGY_INTERVAL = 5 * 60 * 1000;
   const ENERGY_HARD_CAP = 999;
@@ -55,6 +56,12 @@
   const STAT_NAMES = { power: '力量', agility: '敏捷', speed: '速度', hp: '生命' };
   const STAT_FIELDS = { power: 'power', agility: 'agility', speed: 'speed', hp: 'maxHp' };
   const STAT_GAIN = { power: 1, agility: 1, speed: 1, hp: 5 };
+  /* **永久属性点硬上限 651**（ssfight 90 级总账）：
+   *   22（初始）+ 89×4（1~90 每级成长）+ 20×12（71~90 金宝箱）+ 29（神迹）+ 4（天梯永久丸）= 651。
+   * 只收口 `S.power / agility / speed / maxHp` 与未分配的 `S.freePoints`；
+   * 装备主属性、被动技能、套装、药丸状态、幻兽是对战斗面板的外部加成，不占这 651 点预算。
+   * 它必须**高于所有正常产出**（包括旧属性书/转生记录），但任何来源——含调试——都不能越过。 */
+  const STAT_HARD_CAP = 651;
   /* 四项平衡的份额口径：生命按 HP_PER_STAT 点折算成 1 点属性。
    * 自然成长到 15 级时三项约 14.6、生命约 145，折算后四项刚好各占约 25%，
    * 所以「平均份额」= 25%，门槛取它的八成（20%）：某一项被压到平均的
@@ -136,6 +143,7 @@
     for (const key of ['exp', 'energy', 'goldPoint', 'goldCup', 'dailyWins', 'allWins', 'dailyFails', 'allFails', 'reborn', 'joinRankCount', 'lotteryFree', 'woodRecord', 'woodCount', 'woodDamage', 'freePoints']) {
       next[key] = integer(next[key], GData.NEW_PLAYER[key]);
     }
+    next.woodBest = normalizeWoodBest(raw.woodBest);
     next.chestPending = normalizeChestPending(raw.chestPending);
     next.levelChests = Math.min(MAX_PLAYER_LEVEL - 70, Math.max(0, integer(raw.levelChests, 0)));
     next.blackCardsWeek = (() => {
@@ -214,7 +222,9 @@
       }
     }
     const usedSlots = new Set(), gearKeys = new Set();
-    next.gears = (Array.isArray(next.gears) ? next.gears : []).filter((g) => object(g) && gearMap.getValue(g.id)).map((g, index) => {
+    next.gears = (Array.isArray(next.gears) ? next.gears : [])
+      .map((g) => migrateLegacyOrangeGear(g))
+      .filter((g) => object(g) && gearMap.getValue(g.id)).map((g, index) => {
       const info = gearInst(g.id);
       let key = typeof g.key === 'string' && g.key ? g.key : 'legacy_' + index;
       if (gearKeys.has(key)) key += '_' + index;
@@ -270,7 +280,7 @@
       const run = savedRuns[id];
       if (!npcOf(Number(id), 1) || !object(run)) continue;
       // A page reload interrupts playback, but never charges the entry/revival twice.
-      next.stageRuns[id] = { npcIndex: Math.min(3, integer(run.npcIndex, 1, 1)), revives: Math.min(2, integer(run.revives, 0)), needsRevive: run.needsRevive === true };
+      next.stageRuns[id] = { npcIndex: Math.min(3, integer(run.npcIndex, 1, 1)), revives: Math.min(2, integer(run.revives, 0)), needsRevive: run.needsRevive === true, masterOnly: run.masterOnly === true, masterFree: run.masterFree === true };
       if (Number.isFinite(Number(run.carryHp))) next.stageRuns[id].carryHp = Math.max(0, Math.min(1, Number(run.carryHp)));
     }
     for (const id of Object.keys(next.stages)) {
@@ -306,6 +316,8 @@
         speed: integer(p.speed, 0, 0), hp: integer(p.hp, 0, 0),
         weapons: Array.isArray(p.weapons) ? p.weapons.slice(0, 20) : [],
         skills: Array.isArray(p.skills) ? p.skills.slice(0, 20) : [],
+        /* 收徒时存下的装备快照：关卡「徒弟先上阵」要用它给徒弟穿装备。 */
+        gears: normalizeFoeGears(p.gears),
         since: validLocalDate(p.since) ? p.since : localDate(),
         joinedAt: Number(p.joinedAt) > 0 ? Number(p.joinedAt) : localDateTime(validLocalDate(p.since) ? p.since : localDate(), 0, 0),
         lastExpDate: typeof p.lastExpDate === 'string' ? p.lastExpDate : '',
@@ -380,7 +392,7 @@
         lastDaily: typeof v.lastDaily === 'string' ? v.lastDaily : '',
       };
     }
-    next.battles = (Array.isArray(next.battles) ? next.battles : []).filter(validBattle).slice(0, 50);
+    next.battles = normalizeBattleHistory(next.battles);
     /* 「消息」上的红点（new）记账：**必须落存档**（用户 2026-10 口径）。
      * 经典主界面的红点判据是"消息列表里最新一条的时间戳 > 上次看过消息页的时间点"。
      * 这个"看到哪了"原本写在 localStorage（`ssdz_msg_seen`）—— 桌面壳（Tauri）的
@@ -477,9 +489,13 @@
         })(),
         /* 剧情 / 挑战模式的开关（默认剧情模式）：同样不能在重载后被打回默认。 */
         storyOn: en.storyOn !== false,
+        // 最近一局战报只展示既有结算，重载后不能丢失，也不能再次发奖。
+        lastSummary: object(en.lastSummary) && en.lastSummary.version === 1
+          ? Object.assign({}, en.lastSummary) : null,
         run: runShape(en.run),
       };
     }
+    clampPermanentStats(next);
     return stripModernBlackContent(next);
   }
 
@@ -495,6 +511,8 @@
       /* 安卓沉浸模式：默认隐藏状态栏（桌面/网页没有这个开关的实际效果）；
        * 显式关闭过才保持 false。旧档没有这个字段时按 true 迁移，解决状态栏常驻。 */
       hideStatusBar: st.hideStatusBar !== false,
+      /* 跳过键显示开关：默认开；关闭只隐藏战斗中的跳过键，不改变等级/VIP 解锁条件。 */
+      showSkip: st.showSkip !== false,
       uiMode: UIMODE_KEYS.includes(String(st.uiMode)) ? String(st.uiMode) : 'classic',
     };
   }
@@ -557,6 +575,13 @@
     return !!gi && Number(gi.quality) === 5;
   }
   function isBlackPropId(id) { return BLACK_PROP_IDS.includes(Number(id)); }
+  /** 可镶嵌宝石的装备：橙色（q4 或旧实例 orange）与黑色（q5）各限 1 颗。 */
+  function canSocketGem(gear) {
+    if (!gear) return false;
+    /* 原始存档实例只有 id/orange，没有 quality；必须经 gearQuality 把 q4/q5 也从 gearMap 读出来。 */
+    const q = gearQuality(gear);
+    return gear.orange === true || q === 4 || q === 5 || isBlackGearId(gear.id);
+  }
   /** 现代槽位里的黑装残留一律清掉：装备、碎片/黑卡/自选箱、黑卡计数、待领取的黑装宝箱。 */
   function stripModernBlackContent(slot) {
     if (!slot || !object(slot) || !object(slot.settings) || slot.settings.uiMode !== 'modern') return slot;
@@ -676,19 +701,25 @@
     S = legacy;
     return true;
   }
-  function adoptPayload(raw) {
+  function adoptPayload(raw, opts) {
     if (!object(raw)) return false;
     const dual = applyDualPayload(raw);
     const ok = dual === null ? applyLegacyPayload(raw) : dual;
     /* 上次开箱开出来、还没点「确定领取」就关掉游戏的那一包：进游戏时直接入账，
-     * 避免「箱子已经消耗、奖励却永远拿不到」。 */
-    settlePendingChest();
+     * 避免「箱子已经消耗、奖励却永远拿不到」。
+     * 导入路径会先 `deferSettle` —— 等校验/写盘都成功后由文件载入统一结算，
+     * 避免一份还没写进去的档先把奖励发进旧档。 */
+    if (!(opts && opts.deferSettle)) settlePendingChest();
     return ok;
   }
   /** 当前界面 + 另一界面两份进度一起序列化；顶层仍是当前进度的原始字段，
    *  旧工具/同步脚本读 name/level/savedAt 不受影响。 */
   function savePayload() {
     if (!S) return S;
+    clampPermanentStats();
+    // 所有写盘/镜像/导出都走这里；直接修改状态及未激活的另一槽也不能绕过上限。
+    trimBattleHistory(S);
+    if (otherSlot) trimBattleHistory(otherSlot);
     const mode = rememberUiMode();
     S.settings = normalizeSettings(S.settings);
     S.settings.uiMode = mode;
@@ -703,6 +734,103 @@
       out.__dualOther = otherSlot;
     }
     return out;
+  }
+  /** 当前进度的**完整**双槽快照（字符串）。导入失败时用它把内存恢复原样，
+   *  不依赖磁盘/浏览器里那份是否已经被写到一半。 */
+  function exportPayload() {
+    try { return S ? JSON.stringify(savePayload()) : ''; } catch (e) { return ''; }
+  }
+  /** 把之前导出的快照重新载入内存。只做校验与解析，不写盘。 */
+  function restorePayload(raw) {
+    try {
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return adoptPayload(parsed);
+    } catch (e) { return false; }
+  }
+  /** 导入前把一份存档载入内存并生成**规范化后的**待写盘正文。
+   *  返回的 `name/level` 是实际载入的槽位（双槽档不一定是顶层），
+   *  调用方必须用它做成功提示与写后核对，不能拿原始 JSON 的顶层字段冒充。
+   *  失败时不改内存；成功后若写盘失败，调用方用 `restorePayload` 回滚。 */
+  function prepareImport(raw) {
+    let parsed;
+    try {
+      /* iOS/Windows 上手工转存的文件可能带 UTF-8 BOM；JSON.parse 不认。 */
+      const text = typeof raw === 'string' ? raw.replace(/^\uFEFF/, '') : raw;
+      parsed = typeof text === 'string' ? JSON.parse(text) : text;
+    } catch (e) { return { ok: false, msg: '这个文件不是合法的 JSON' }; }
+    if (!object(parsed) || Array.isArray(parsed)) return { ok: false, msg: '这不是一个存档对象' };
+    const before = { S, otherSlot, saveMode };
+    const beforePref = readUiModePref();
+    const rollback = () => {
+      S = before.S; otherSlot = before.otherSlot; saveMode = before.saveMode;
+      try {
+        if (beforePref) writeUiModePref(beforePref);
+        else localStorage.removeItem(UI_MODE_KEY);
+      } catch (e) {}
+    };
+    try {
+      const loaded = adoptPayload(parsed, { deferSettle: true });
+      if (!loaded) {
+        rollback();
+        return { ok: false, msg: '存档里没有当前界面可载入的进度' };
+      }
+      /* 待领取的金宝箱奖励在读档时结算；导入也一样，先结清再写，避免文件里永远留着
+       * 一份「箱子已消耗、奖励未领取」的中间态。 */
+      settlePendingChest({ save: false });
+      S.savedAt = Date.now();
+      const name = String(S.name || '小松鼠');
+      const level = Math.max(1, Number(S.level) || 1);
+      const mode = slotMode();
+      let payload = '';
+      try { payload = JSON.stringify(savePayload()); } catch (e) { payload = ''; }
+      if (!payload) {
+        rollback();
+        return { ok: false, msg: '无法生成要写入的存档' };
+      }
+      return { ok: true, name, level, mode, payload };
+    } catch (e) {
+      rollback();
+      return { ok: false, msg: '导入存档时出错：' + String((e && e.message) || e) };
+    }
+  }
+  /** 把一份存档里**不会随时间/读档顺序变化**的进度字段抽成指纹。
+   *  用于写盘后核对「读回来的就是刚导入的那份」；刻意排除 savedAt、体力回复时间戳等。 */
+  function importFingerprint(raw) {
+    let v;
+    try { v = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { return ''; }
+    if (!object(v)) return '';
+    const arr = (x) => (Array.isArray(x) ? x.slice() : []);
+    const sortedProps = (x) => {
+      const out = {};
+      if (object(x)) for (const key of Object.keys(x).sort()) out[key] = x[key];
+      return out;
+    };
+    const slot = (x) => ({
+      name: String(x.name || ''), level: Number(x.level) || 1,
+      exp: Number(x.exp) || 0, reborn: Number(x.reborn) || 0, allWins: Number(x.allWins) || 0,
+      power: Number(x.power) || 0, agility: Number(x.agility) || 0,
+      speed: Number(x.speed) || 0, maxHp: Number(x.maxHp) || 0,
+      energy: Number(x.energy) || 0, maxEnergy: Number(x.maxEnergy) || 0,
+      goldPoint: Number(x.goldPoint) || 0, goldCup: Number(x.goldCup) || 0, integral: Number(x.integral) || 0,
+      weapons: arr(x.weapons), skills: arr(x.skills), props: sortedProps(x.props),
+      stages: sortedProps(x.stages),
+      gears: arr(x.gears).map((g) => [Number(g && g.id) || 0, String((g && g.key) || ''),
+        !!(g && g.used), Number(g && g.attr) || 0, arr(g && g.ext), g && g.gem ? [g.gem.id, g.gem.ext] : null]),
+      uiMode: object(x.settings) ? String(x.settings.uiMode || '') : '',
+    });
+    return JSON.stringify({
+      slot: slot(v),
+      other: object(v.__dualOther) ? slot(v.__dualOther) : null,
+    });
+  }
+  /** 写盘后核对：真正读回来的当前槽位必须和 `prepareImport` 载入的是同一份。
+   *  比的是稳定进度指纹（名字/等级/经验/四维/货币/武技/道具/关卡/装备/双槽），
+   *  不是原始字节 —— 读档本身会刷新 savedAt 之类的时间戳。 */
+  function verifyImport(prepared) {
+    if (!prepared || !S) return false;
+    const want = importFingerprint(prepared.payload);
+    if (!want) return false;
+    return want === importFingerprint(savePayload());
   }
   /** 切换界面槽位：保存当前进度，载入另一界面；没有另一界面时新建 1 级角色。 */
   function switchMode(mode) {
@@ -1434,6 +1562,7 @@
     try {
       if (!S) return false;
       clampProps();
+      clampPermanentStats();
       S.savedAt = Date.now();
       if (storageMode() === 'file' || saveTransport) {
         writeMirror();
@@ -1454,6 +1583,7 @@
         if (!object(parsed)) return false;
         if (!adoptPayload(parsed)) return false;
         syncDailyStats();
+        if (battlePayloadNeedsTrim(parsed)) save();
         return true;
       }
     } catch (e) {}
@@ -1719,6 +1849,8 @@
         // 但「更新且更强」的那份要留着（见 localSaveWorthKeeping）。
         forgetLegacyIfRedundant(fileState.fileAt);
         fileState.conflict = false;
+        // 同一天读旧档时 dailyStats 不会触发保存，仍要主动把超额录像从磁盘移除。
+        if (battlePayloadNeedsTrim(parsed)) save();
         return true;
       }
       // 文件还不存在：把浏览器里的老档迁进来（只做一次）
@@ -1838,8 +1970,19 @@
   async function importFileRaw(raw) {
     if (!saveTransport) return { ok: false, msg: '没有可用的存档通道' };
     try {
-      const out = await saveTransport.write(String(raw), { force: true });
-      if (!out || out.ok === false) return { ok: false, msg: (out && out.msg) || '写入存档失败' };
+      let body = String(raw);
+      const parsed = JSON.parse(body.replace(/^\uFEFF/, ''));
+      if (battlePayloadNeedsTrim(parsed)) {
+        for (const slot of [parsed, parsed.__dualOther,
+          ...SAVE_SLOTS.map((mode) => object(parsed.__dualSaves) && parsed.__dualSaves[mode])]) {
+          if (object(slot)) trimBattleHistory(slot);
+        }
+        body = JSON.stringify(parsed);
+      }
+      const out = await saveTransport.write(body, { force: true });
+      /* 必须**明确**拿到 ok:true。iOS 的旧问题就是命令返回了空对象/非预期结果，
+       * `out.ok === false` 放过了它，随后读回旧档还报「导入成功」。 */
+      if (!out || out.ok !== true) return { ok: false, msg: (out && out.msg) || '原生存档通道没有确认写入成功' };
       return { ok: true, savedAt: Number(out.savedAt) || 0 };
     } catch (e) {
       return { ok: false, msg: (e && e.message) || String(e) };
@@ -1941,13 +2084,23 @@
   }
   function state() { return S; }
   /* ---------- 「战斗操作键」的解锁等级（2026-10 用户口径） ----------
-   * 10 级解锁 2 倍速、20 级解锁跳过 —— 一开始两个都没有。
-   * 挑战塔 / 无尽塔本身要 30 级才开，所以塔里这两个键天然都在
-   *（塔的「跳过」另有一条层数门槛：无尽塔 20 层起，见 Tower.skipPlaybackAllowed）。 */
+   * 10 级解锁 2 倍速；跳过按超级松鼠页的描述：**开通超级松鼠后 10 级**即可，
+   * 非 VIP 仍是 20 级（不再一刀切 20）。挑战塔 / 无尽塔本身要 30 级才开，
+   * 塔的「跳过」另有一条层数门槛：无尽塔 20 层起，见 Tower.skipPlaybackAllowed。 */
   const SPEED_UNLOCK_LEVEL = 10;
   const SKIP_UNLOCK_LEVEL = 20;
+  const VIP_SKIP_UNLOCK_LEVEL = 10;
   function unlockedSpeed() { return !!S && Number(S.level) >= SPEED_UNLOCK_LEVEL; }
-  function unlockedSkip() { return !!S && Number(S.level) >= SKIP_UNLOCK_LEVEL; }
+  function unlockedSkip() {
+    if (!S) return false;
+    const lv = Number(S.level) || 0;
+    return lv >= (vipActive() ? VIP_SKIP_UNLOCK_LEVEL : SKIP_UNLOCK_LEVEL);
+  }
+  /** 战斗里到底显不显示跳过键：等级/VIP 已解锁 **且** 系统页的显示开关没关。 */
+  function skipButtonEnabled() {
+    if (!S) return false;
+    return settings().showSkip !== false && unlockedSkip();
+  }
 
   /* ============================================================
    * 【S4】体力（5 分钟回 1 点）
@@ -2184,6 +2337,29 @@
       id: Number(e.id), level: Math.min(3, integer(e.level, 1, 1)),
     }));
   }
+  /** 旧橙装是「紫装 id + orange:true」的实例级模拟；107 起 q4 行已按原版补齐。
+   *  读档时把旧橙装的 id 换成同部位同名的 q4 id，并把主属性改回原版 q4 基准值。
+   *  必须在 gearMap 过滤前执行，否则 q4 id 还不在 map 里会被丢掉。 */
+  let orangeGearLookupCache = null;
+  function orangeGearLookup() {
+    if (orangeGearLookupCache) return orangeGearLookupCache;
+    orangeGearLookupCache = new Map();
+    try {
+      gearMap.each((k, v) => {
+        const set = gearSetMap.getValue(v.setId);
+        if (set && Number(set.quality) === 4) orangeGearLookupCache.set(String(v.name) + '|' + Number(v.type), Number(k));
+      });
+    } catch (e) {}
+    return orangeGearLookupCache;
+  }
+  function migrateLegacyOrangeGear(g) {
+    if (!object(g) || g.orange !== true) return g;
+    const old = gearInst(g.id);
+    if (!old) return g;
+    const target = orangeGearLookup().get(String(old.name) + '|' + Number(old.type));
+    if (!target) return g;
+    return Object.assign({}, g, { id: target, attr: gearBaseAttr(target), orange: undefined });
+  }
   /** 装备主属性点的**基准值**：优先取原版 Flash 装备独立属性点表（gamedata.js 的
    *  【GD5】GData.GEAR_BASE_ATTR，288 条），退回 gearMap.abilities 里该部位那一位
    *  —— 两者对本版已有的 128 件逐条一致，所以取不到也不会算出不同的数。 */
@@ -2201,6 +2377,9 @@
   function rollGearAttr(id) {
     const base = gearBaseAttr(id);
     if (!base) return 0;
+    /* 经典模式对齐原版 equipsArray：装备主属性是固定值，不掷 ±10%。
+     * 现代模式保留旧手感（±10% 浮动），两套存档互不影响。 */
+    if (slotMode() === 'classic') return base;
     const factor = 1 - GEAR_ATTR_JITTER + Math.random() * GEAR_ATTR_JITTER * 2;
     return Math.max(1, Math.round(base * factor));
   }
@@ -2229,7 +2408,7 @@
       const info = gearInst(g.id, g.ext, g.attr);
       if (!info) return null;
       const out = Object.assign(info, { used: g.used, key: g.key });
-      if (g.orange === true) { out.orange = true; out.quality = 4; }   // 传说（橙）为实例级品质
+      if (g.orange === true) { out.orange = true; out.quality = 4; }   // 兼容旧档的实例级橙标记
       if (g.gem && gemLevel(g.gem.id)) out.gem = { id: Number(g.gem.id), ext: g.gem.ext };
       return out;
     }).filter(Boolean).filter((g) => blackGearEnabled() || Number(g.quality) !== 5);
@@ -2297,7 +2476,7 @@
   }
   /* 背包里可以直接卖的道具（装备走 sellGear）：默认按**字典价格的一半**回收
    * （向下取整），所以商店里买得到的、以及字典里标了价的材料都能卖。
-   * 字典里 price 为 0 或占位 1 的道具（兑换用的卷轴、碎片、礼包、天梯碎片、
+   * 字典里 price 为 0 或占位 1 的道具（兑换用的卷轴、碎片、礼包、属性碎片、
    * 超级药丸、果实种子这类「不可购买」的物品）不开放回收；
    * PROP_SELL_OVERRIDES 留作个别道具单独定价的例外表。 */
   const PROP_SELL_OVERRIDES = Object.freeze({
@@ -2366,7 +2545,7 @@
    * ============================================================ */
   // ---------- 宝石（45级开启） ----------
   function gemLevel(id) { id = Number(id); return id >= 101 && id <= 107 ? id - 100 : 0; }
-  /* 橙装镶嵌宝石的主属性加成：沿用原版数值。
+  /* 橙色/黑色装备镶嵌宝石的主属性加成：沿用原版数值。
    * 原版 MainMovie.as:45-54 getPercentById：5*(n²-n+2)，n = 宝石等级（1..7）
    * → 10 / 20 / 40 / 70 / 110 / 160 / 220 %。 */
   function gemPercent(lv) { lv = integer(lv, 0, 0); return lv > 0 ? 5 * (lv * lv - lv + 2) : 0; }
@@ -2403,13 +2582,13 @@
     save();
     return { ok: true, success: false, msg: '合成失败，宝石没有变化' };
   }
-  /** 镶嵌免费；每件橙装限1颗；附加属性提升幅度随机，拆卸后重新镶嵌可重随。 */
+  /** 镶嵌免费；每件橙色或黑色装备限 1 颗；附加属性提升幅度随机，拆卸后重新镶嵌可重随。 */
   /* 镶嵌 / 卸下宝石的金松果费用（2026-10 用户口径：装上与卸下**都要** 5 金松果）。 */
   const GEM_SOCKET_COST = 5;
   function socketGem(gearKey, gemId) {
     const g = S.gears.find((x) => x.key === gearKey);
     if (!g) return { ok: false, msg: '装备不存在' };
-    if (g.orange !== true) return { ok: false, msg: '只有橙色（传说）装备可以镶嵌宝石' };
+    if (!canSocketGem(g)) return { ok: false, msg: '只有橙色（传说）或黑色装备可以镶嵌宝石' };
     if (g.gem) return { ok: false, msg: '每件装备最多镶嵌 1 颗宝石，请先卸下原有宝石' };
     const lv = gemLevel(gemId);
     if (!lv || !(S.props[gemId] > 0)) return { ok: false, msg: '没有该宝石' };
@@ -2687,6 +2866,8 @@
   const FUSION_SAME_NAME_RATE = { 2: 0.50, 3: 0.97 };
   const FUSION_MUTANT_RATE = { 2: 0.03, 3: 0.03 };
   const FUSION_MUTANT_SET = 51;
+  /* 紫→橙变异的目标是橙色狂战（set 52，ids 205-208）；紫→橙时 51 是紫狂战，不能用。 */
+  const FUSION_ORANGE_MUTANT_SET = 52;
   /* 橙装融合出黑装时，原版 helpWords 里的「深海/机器猫/怒战/狂战」变异池。 */
   const FUSION_BLACK_MUTANT_SETS = Object.freeze([67, 68, 69, 70]);
   /* ② 词条继承（2026-10 用户口径）：**跨部位、跨名字也生效**。
@@ -2764,6 +2945,7 @@
    *   · 三件全不同名 → 完全随机（不掷变异）
    *  判定顺序 = 先掷变异、再掷保名，剩下的走随机其它；这样三段的概率就是字面值。
    *  若该名字在目标品质不存在（例如斗斗/挑斗白装没有绿装），退回完全随机。
+   *  ⚠ 三件同套的保底在 `familyUpgradeTarget` 里**先**处理；这里只服务跨套 / 无下一档的情况。
    *  返回 { id, mutant }：mutant 为 true 表示这次是狂战变异。 */
   function pickMergeTarget(gs, part, targetQuality) {
     const pool = gearIdsOf(part, targetQuality);
@@ -2774,7 +2956,8 @@
     const same = dup >= 2 ? names[0] : (names[1] === names[2] ? names[1] : null);
     if (same) {
       const hit = pool.filter((id) => gearName(id) === same);
-      const mutantSets = targetQuality === 5 ? FUSION_BLACK_MUTANT_SETS : [FUSION_MUTANT_SET];
+      const mutantSets = targetQuality === 5 ? FUSION_BLACK_MUTANT_SETS
+        : targetQuality === 4 ? [FUSION_ORANGE_MUTANT_SET] : [FUSION_MUTANT_SET];
       const mutants = pool.filter((id) => mutantSets.includes(gearSetOf(id)));
       const others = pool.filter((id) => gearName(id) !== same);
       const key = dup === 3 ? 3 : 2;
@@ -2789,6 +2972,66 @@
     }
     return { id: pick(pool), mutant: false };
   }
+  /* 「同套装」判定（融合保底用）：取该 setId 下四件装备名去掉部位后缀后的公共前缀。
+   * 不能直接用 `gearSetFamily(单件)`：它按单件名去后缀，"机器猫头 / 机器猫拳" 会各自成族，
+   * 而它们和 机器猫服 / 鞋 是同一套。这里只服务融合，不改套装收益的家族口径。 */
+  const FUSION_PART_SUFFIXES = ['头巾', '头饰', '头盔', '护额', '拳套', '拳甲', '手套', '铠甲', '短靴', '服', '鞋', '头', '拳'];
+  const FUSION_SET_FAMILY = new Map();
+  function stripFusionPart(name) {
+    let s = String(name == null ? '' : name);
+    for (const suffix of FUSION_PART_SUFFIXES) {
+      if (s.length > suffix.length && s.slice(-suffix.length) === suffix) return s.slice(0, -suffix.length);
+    }
+    return s;
+  }
+  /** 套装 id → 家族前缀（同套四件的公共前缀）。空串 = 数据不完整，保底不生效。 */
+  function fusionSetFamily(setId) {
+    const key = Number(setId);
+    if (!Number.isFinite(key)) return '';
+    if (FUSION_SET_FAMILY.has(key)) return FUSION_SET_FAMILY.get(key);
+    const names = [];
+    gearMap.each((k, v) => { if (Number(v.setId) === key) names.push(stripFusionPart(v.name)); });
+    let family = names[0] || '';
+    for (const name of names.slice(1)) {
+      while (family && name.indexOf(family) !== 0) family = family.slice(0, -1);
+    }
+    FUSION_SET_FAMILY.set(key, family);
+    return family;
+  }
+  /** 三件同套装的融合目标：下一品质、**首件材料部位**、同一套装家族。
+   *  · 三件材料必须同属一个套装家族（狂战头盔/拳甲/铠甲 = 狂战；黑装 46/67 也算同一套）；
+   *  · 目标品质没有该家族（早期白/绿套没有下一档）时返回 null，调用方回退到原有随机规则；
+   *  · 同一家族在目标品质有多套数据（狂战 46/67、怒战 47/68）时取 id 最小件，避免随机抖动。 */
+  function familyUpgradeTarget(gs, part, targetQuality) {
+    if (!Array.isArray(gs) || gs.length !== 3) return null;
+    const families = gs.map((g) => {
+      const def = gearMap.getValue(g && g.id);
+      return def ? fusionSetFamily(def.setId) : '';
+    });
+    if (!families[0] || families.some((f) => f !== families[0])) return null;
+    const pool = gearIdsOf(part, targetQuality).filter((id) => {
+      const def = gearMap.getValue(id);
+      return def && fusionSetFamily(def.setId) === families[0];
+    });
+    if (!pool.length) return null;
+    return { id: Math.min.apply(null, pool), mutant: false, family: families[0] };
+  }
+  /** 融合页提示用：三件材料同套且下一品质存在该家族时返回目标信息，否则 null。
+   *  参数用 `State.myGears()` 的装备对象（id/quality/orange 足够）。 */
+  function fusionFamilyInfo(gears) {
+    if (!Array.isArray(gears) || gears.length !== 3) return null;
+    const first = gears[0];
+    if (!first || !Number.isFinite(Number(first.id))) return null;
+    const quality = gearQuality(first);
+    if (!(quality >= 0 && quality < 5)) return null;
+    if (gears.some((g) => gearQuality(g) !== quality)) return null;   // 只有同品质材料才提示保底
+    const part = gearPart(first.id);
+    if (part < 0) return null;
+    const target = familyUpgradeTarget(gears, part, quality + 1);
+    if (!target) return null;
+    return { id: target.id, family: target.family, part: part, quality: quality + 1 };
+  }
+
   /** 黑装融合的目标：3 件黑装 → 同部位黑装。
    *  · 97% 留在同一家族（凤凰→凤凰 / 圣熊→圣熊），其中 3% 变异到另一套黑装
    *    （对应原版 helpWords「融合黑装时有较低几率出现深海/机器猫/怒战/狂战」）；
@@ -2806,7 +3049,8 @@
     return { id: pick(pool), mutant: false };
   }
   /** 两种界面统一：三件同品质装备融合，部位和名字均可不同。
-   *  产物部位沿用第一件材料；保留 opts 参数以兼容旧界面的调用。 */
+   *  产物部位沿用第一件材料；**三件同套且下一品质有该套时**必得该套（`familyUpgradeTarget`），
+   *  其余情况（跨套 / 早期套没有下一档）走原来的同名与变异随机。保留 opts 参数以兼容旧界面。 */
   function mergeGears(keys, opts) {
     if (!Array.isArray(keys) || keys.length !== 3 || new Set(keys).size !== 3) return { ok: false, msg: '请选择三件不同的装备' };
     const gs = keys.map((k) => S.gears.find((x) => x.key === k)).filter(Boolean);
@@ -2841,7 +3085,8 @@
      * 现代界面已删除黑装内容，橙装仍是现代融合链的顶端，直接拒绝。 */
     if (q === 4) {
       if (!blackGearEnabled()) return { ok: false, msg: '现代界面没有黑装内容' };
-      const target = pickMergeTarget(gs, part, 5);
+      /* 三件同套 → 必定是同套黑装（下一品质）；没有该套黑装时退回原随机规则。 */
+      const target = familyUpgradeTarget(gs, part, 5) || pickMergeTarget(gs, part, 5);
       if (target == null) return { ok: false, msg: '这个部位还没有可合成的黑色' + partName + '。' };
       S.goldPoint -= cost;
       S.gears = S.gears.filter((g) => !keys.includes(g.key));
@@ -2851,18 +3096,19 @@
       return { ok: true, gear: Object.assign(made || {}, { quality: 5, mutant: target.mutant }), card: 0 };
     }
     if (q === 3) {
-      // 3 件紫装 → 第一件材料部位的一件橙装（传说）
-      const target = pickMergeTarget(gs, part, 3);
+      // 3 件紫装 → 第一件材料部位的一件**原版 q4 橙装**（205-208 / 125-180 等）
+      /* 三件同套 → 必定是同套橙装（下一品质）；没有该套橙装时退回原随机规则。 */
+      const target = familyUpgradeTarget(gs, part, 4) || pickMergeTarget(gs, part, 4);
       if (target == null) return { ok: false, msg: '这个部位还没有可合成的传说' + partName + '。' };
       S.goldPoint -= cost;
       S.gears = S.gears.filter((g) => !keys.includes(g.key));
       const made = addGear(target.id, mergeExt(gs, 4));
-      const inst = made && S.gears.find((x) => x.key === made.key);
-      if (inst) { inst.orange = true; save(); }
       bumpDaily('merge', 1, true);   // 每日任务：合成或融合 N 次装备
-      return { ok: true, gear: Object.assign(made || {}, { orange: true, quality: 4, mutant: target.mutant }) };
+      save();
+      return { ok: true, gear: Object.assign(made || {}, { quality: 4, mutant: target.mutant }) };
     }
-    const target = pickMergeTarget(gs, part, q + 1);
+    /* 三件同套 → 必定是同套下一品质；没有该套下一档时退回原随机规则。 */
+    const target = familyUpgradeTarget(gs, part, q + 1) || pickMergeTarget(gs, part, q + 1);
     if (target == null) return { ok: false, msg: '这个部位还没有更高品质的' + partName + '。' };
     S.goldPoint -= cost;
     S.gears = S.gears.filter((g) => !keys.includes(g.key));
@@ -2942,7 +3188,7 @@
       if (!info || S.level < info.useLevel) continue;
       for (const ext of normalizeExt(gear.ext)) {
         const values = attachmentMap.getValue(ext.id).ability.split(',').map(Number);
-        const boost = gear.gem ? 1 + gear.gem.ext / 100 : 1;   // 橙装宝石提升附加属性效果
+        const boost = gear.gem ? 1 + gear.gem.ext / 100 : 1;   // 橙色/黑色装备宝石提升附加属性效果
         effects[ext.id] = Math.max(effects[ext.id] || 0, Math.round(values[ext.level - 1] * boost));
       }
     }
@@ -2953,8 +3199,68 @@
    * 【S10】属性合计（基础+装备+药剂）
    * ============================================================ */
   // ---------- 属性合计（基础+装备+药剂状态） ----------
+  /** 永久属性点合计：力/敏/速各 1 点，生命 5 点折算 1 点（与升级成长、test-points 同一口径）。 */
+  function permanentStatTotal(source) {
+    const s = object(source) ? source : S;
+    if (!s) return 0;
+    const num = (v) => Math.max(0, Number(v) || 0);
+    return num(s.power) + num(s.agility) + num(s.speed) + num(s.maxHp) / 5;
+  }
+  /** 还差多少才到 651 硬上限（永远 >= 0）。 */
+  function statCapRoom(source) {
+    return Math.max(0, STAT_HARD_CAP - permanentStatTotal(source));
+  }
+  /** 把永久属性点/待分配点收口到 651。**所有写盘与读档路径都必须经过这里**：
+   *  调试面板/控制台直接改 `S.power`、旧档里的超额数据、转生后重新加的神迹点，
+   *  只要保存或重载就会被拉回上限。返回本次被收掉的点数（含待分配点）。
+   *  超出时优先从数值最大的那一项扣（生命按 5 点=1 点折算），四项都保底 1 点/5 血。 */
+  function clampPermanentStats(source) {
+    const s = object(source) ? source : S;
+    if (!s) return 0;
+    let power = Math.max(1, integer(s.power, 1, 1));
+    let agility = Math.max(1, integer(s.agility, 1, 1));
+    let speed = Math.max(1, integer(s.speed, 1, 1));
+    let hp = Math.max(5, integer(s.maxHp, 5, 5));
+    /* 生命按 5 点一格收口；旧档/调试写入的零头不参与上限计算。 */
+    let hpPoints = Math.floor(hp / 5);
+    const used = () => power + agility + speed + hpPoints;
+    let excess = used() - STAT_HARD_CAP;
+    let removed = 0;
+    let guard = 0;
+    while (excess > 0 && guard++ < 4096) {
+      const pools = [
+        { key: 'power', get: () => power, set: (v) => { power = v; } },
+        { key: 'agility', get: () => agility, set: (v) => { agility = v; } },
+        { key: 'speed', get: () => speed, set: (v) => { speed = v; } },
+        { key: 'hp', get: () => hpPoints, set: (v) => { hpPoints = v; } },
+      ].sort((a, b) => b.get() - a.get());
+      let progressed = false;
+      for (const pool of pools) {
+        const take = Math.min(excess, Math.max(0, pool.get() - 1));
+        if (take <= 0) continue;
+        pool.set(pool.get() - take);
+        excess -= take;
+        removed += take;
+        progressed = true;
+        if (excess <= 0) break;
+      }
+      if (!progressed) break;
+    }
+    s.power = power; s.agility = agility; s.speed = speed; s.maxHp = hpPoints * 5;
+    if (Number(s.hp) > s.maxHp) s.hp = s.maxHp;
+    const room = Math.max(0, STAT_HARD_CAP - used());
+    const free = Math.max(0, integer(s.freePoints, 0));
+    if (free > room) {
+      s.freePoints = Math.floor(room);
+      removed += free - Math.floor(room);
+    } else s.freePoints = free;
+    return removed;
+  }
   function totalStats(opts) {
     opts = opts || {};
+    /* 读战斗面板前也收口一次：控制台/调试如果绕过 save() 直接改了基础四维，
+     * 这里仍不会让一场战斗带着 651 以上的永久属性点开打。 */
+    clampPermanentStats();
     let power = S.power, agility = S.agility, speed = S.speed, hp = S.maxHp;
     for (const g of S.gears) {
       if (!g.used) continue;
@@ -2962,7 +3268,7 @@
       const gi = gearInst(g.id, g.ext, g.attr);
       if (!gi || S.level < gi.useLevel) continue;
       let val = gi.abilityVal;
-      if (g.gem) val = Math.round(val * (1 + gemPercent(gemLevel(g.gem.id)) / 100));   // 橙装宝石提升主属性（原版曲线）
+      if (g.gem) val = Math.round(val * (1 + gemPercent(gemLevel(g.gem.id)) / 100));   // 橙色/黑色装备宝石提升主属性（原版曲线）
       if (gi.type === 0) agility += val;
       else if (gi.type === 1) power += val;
       else if (gi.type === 2) hp += val;
@@ -3141,7 +3447,10 @@
       if (!propMap.getValue(id)) return false;
       S.props[id] = (S.props[id] || 0) + Number(reward.count);
     } else if (reward.kind === 'points') {
-      S.freePoints = pendingPoints() + Number(reward.count);
+      /* 651 硬上限：只把还有空间的部分放进待分配，超出部分直接丢弃。
+       * 正常 90 级总账正好 651，最后一只箱子仍有 12 点空间；只有调试/旧档超额时才会走到这里。 */
+      const room = Math.max(0, Math.floor(statCapRoom()));
+      S.freePoints = pendingPoints() + Math.min(room, Math.max(0, Math.floor(Number(reward.count) || 0)));
     } else if (reward.kind === 'gold') {
       addGold(Number(reward.count));
     } else if (reward.kind === 'hatch') {
@@ -3171,10 +3480,14 @@
     const p = S.chestPending;
     if (!p) return { ok: false, msg: '没有待领取的开箱结果' };
     const reward = p.reward;
+    const roomBefore = reward.kind === 'points' ? Math.max(0, Math.floor(statCapRoom())) : null;
     if (!grantChestReward(reward)) return { ok: false, msg: '开箱奖励无效' };
     delete S.chestPending;
     save();
-    return { ok: true, reward, msg: '领取' + reward.name + ' ×' + reward.count };
+    const capped = roomBefore != null && roomBefore < Number(reward.count);
+    return { ok: true, reward,
+      msg: '领取' + reward.name + ' ×' + reward.count +
+        (capped ? '（属性点已达硬上限 ' + STAT_HARD_CAP + '，超出部分未入账）' : '') };
   }
   /** 进游戏时把上次「已开出、没点领取」的结果直接入账，避免箱子消耗了奖励却丢掉。 */
   function settlePendingChest(opts) {
@@ -3240,8 +3553,8 @@
     const shardId = set === 71 ? 77 : 78;
     const shards = Math.random() < 0.7 ? 1 : 2;
     const roll = Math.random();
-    /* 2026-10 用户口径：黑卡金松果收益再砍到 10% —— 50 / 100 / 200。 */
-    const gold = roll < 0.5 ? 50 : roll < 0.85 ? 100 : 200;
+    /* 2026-10 用户口径：黑卡金松果期望翻倍（原 50/100/200 → 100/200/400）。 */
+    const gold = roll < 0.5 ? 100 : roll < 0.85 ? 200 : 400;
     S.props[shardId] = (S.props[shardId] || 0) + shards;
     addGold(gold);
     const def = propMap.getValue(shardId);
@@ -3316,6 +3629,14 @@
      * 这时背包里数量是 0，不能按普通道具直接判成「没有该道具」。 */
     if (id === 79 || id === 90) return openChestProp(id);
     if ((S.props[id] || 0) <= 0) return { ok: false, msg: '没有该道具' };
+    /* 永久属性类道具：先看 651 硬上限，避免「道具已经扣了、点却没加上」。
+     * 转化丸（10~12）只搬运三项之间的点数，不增加总额，不受此限。 */
+    if (id >= 16 && id <= 19 && Math.floor(statCapRoom()) < 1) {
+      return { ok: false, msg: '永久属性点已达硬上限 ' + STAT_HARD_CAP + ' 点' };
+    }
+    if (id === 37 && Math.floor(statCapRoom()) < 8) {
+      return { ok: false, msg: '属性书需要 8 点空间，当前只剩 ' + Math.floor(statCapRoom()) + ' 点（硬上限 ' + STAT_HARD_CAP + '）' };
+    }
     let msg = '使用成功';
     switch (id) {
       case 1: case 2: {
@@ -3397,7 +3718,7 @@
         msg = '获得：' + got.join('、');
         break;
       }
-      case 80: { // 黑色卡片：选凤凰/圣熊 → 1~2 碎片 + 50/100/200 金松果
+      case 80: { // 黑色卡片：选凤凰/圣熊 → 1~2 碎片 + 100/200/400 金松果
         const raw = String(param == null ? '' : param);
         let set = 0;
         if (raw === 'random') set = Math.random() < 0.5 ? 71 : 72;
@@ -3623,8 +3944,10 @@
   }
   /** 把一点加到某一项上（生命一点 = 5 点血）。 */
   function grantPoint(target) {
+    if (!S || !STAT_KEYS.includes(target)) return false;
+    if (Math.floor(statCapRoom()) < 1) return false; // 651 点硬上限
     S[STAT_FIELDS[target]] += STAT_GAIN[target];
-    return target;
+    return true;
   }
   /** 还没分配的自由属性点：升级时就该选掉，这里只是「弹窗还没点完」的计数。 */
   function pendingPoints() { return Math.max(0, integer(S && S.freePoints, 0)); }
@@ -3638,7 +3961,7 @@
     if (!STAT_KEYS.includes(attr)) return { ok: false, msg: '自由属性点只能加到力量、敏捷、速度或生命' };
     const forced = forcedStat();
     const target = forced || attr;
-    grantPoint(target);
+    if (!grantPoint(target)) return { ok: false, msg: '永久属性点已达硬上限 ' + STAT_HARD_CAP + ' 点' };
     S.freePoints = pendingPoints() - 1;
     // 记下这一次到底加到了哪一项，供「撤回」原样退回去（含系统代选的那一下）
     if (!Array.isArray(S.pointUndo)) S.pointUndo = [];
@@ -3774,8 +4097,11 @@
       // 第 3 点由玩家在升级弹窗里自选（力/敏/速/生命）；某一项占比过低时由系统代选
       let freePoint = 0, autoPoint = null;
       const forced = forcedStat();
-      if (forced) { grantPoint(forced); autoPoint = forced; }
-      else { S.freePoints = pendingPoints() + 1; freePoint = 1; }
+      const pointRoom = Math.floor(statCapRoom());
+      if (forced && pointRoom >= 1) { grantPoint(forced); autoPoint = forced; }
+      else if (pointRoom >= 1) { S.freePoints = pendingPoints() + 1; freePoint = 1; }
+      /* pointRoom < 1：已经顶到 651 硬上限（正常升级不会出现，只有调试/旧档超额时才会），
+       * 这一点不再发放，不能让 freePoints 越过上限。 */
       /* 71~90 级：每级 1 个金宝箱（与原版一致；原版在这一段不再给属性，本版仍给 4 点，
        * 所以箱子点数被压到 12 点/箱，见 rollChestReward）。
        * `levelChests` 是**账号累计**上限 20：转生回到 1 级再升上来不会重复发，
@@ -3865,8 +4191,8 @@
     return { ok: true, msg: '合成成功：' + (item ? item.name : '果实'), propId: fruit, name: item ? item.name : '果实' };
   }
 
-  /** 天梯碎片合成：10 个天梯碎片 + 50 金松果 → 随机一个力量/敏捷/速度转化丸。
-   *  依据 references/new/微信图片_20260924010916_259_2.jpg：天梯战飘出的碎片就是这个用途。 */
+  /** 属性碎片合成：10 个属性碎片 + 50 金松果 → 随机一个力量/敏捷/速度转化丸。
+   *  用户 2026-10 口径：不要属性永久增加，所以不走原版 66 的 16~19 永久丸。 */
   function composeConvertPill() {
     const need = GData.CONVERT_SHARD_COST, id = GData.CONVERT_SHARD_ID;
     if ((S.props[id] || 0) < need) return { ok: false, msg: '需要 ' + need + ' 个' + GData.CONVERT_SHARD_NAME };
@@ -3875,7 +4201,7 @@
     S.goldPoint -= 50;
     const pills = GData.CONVERT_PILLS;
     const got = pills[Math.floor(Math.random() * pills.length)];
-    S.props[got] = (S.props[got] || 0) + 1;
+    S.props[got] = Math.min(PROP_HARD_CAP, (S.props[got] || 0) + 1);
     save();
     const item = propMap.getValue(got);
     return { ok: true, msg: '合成成功：' + (item ? item.name : '转化丸'), prop: got, name: item ? item.name : '转化丸' };
@@ -4652,7 +4978,9 @@
     const sets = [];
     gearSetMap.each((id, set) => {
       const lv = Number(set && set.level);
-      if (set && Number.isFinite(lv) && lv <= level && lv >= minSetLevel) {
+      /* 橙装 q4 只给玩家融合链 / 明确的掉落使用；随机 AI 继续走原来的紫装档 +
+       * 实例橙色规则，避免把 q4 直接塞进 AI 池后整体难度无声上涨。 */
+      if (set && Number.isFinite(lv) && lv <= level && lv >= minSetLevel && Number(set.quality) < 4) {
         sets.push({ id: Number(id), level: lv, quality: parseInt(set.quality) || 0 });
       }
     });
@@ -4807,6 +5135,38 @@
     const gold = (GData.isSuperStage && GData.isSuperStage(stageId) ? 35 : 25) * (GData.STAGE_GOLD_MULT || 1);
     return { exp, gold };
   }
+  /** 关卡连战里「先上阵」的徒弟：原版 `fightType == 6` 时服务端把左方设成徒弟，
+   *  徒弟战败后再走一次 `stage.do` 由师父接手（`showFightStatus` → state 7 → doFight）。
+   *  离线版取第一个徒弟；没有徒弟就直接师父上阵。 */
+  function stagePrentice() {
+    return Array.isArray(S.prentices) && S.prentices.length ? S.prentices[0] : null;
+  }
+  /** 把徒弟快照变成可交给 `Main.startBattle({ fighter })` 的玩家侧面板。
+   *  三维/武器/技能沿用收徒时保存的快照；装备补 `wears` 供经典战斗立绘使用。 */
+  function stagePrenticeFighter() {
+    const row = stagePrentice();
+    if (!row) return null;
+    const full = (typeof ensureFriendLoadout === 'function' ? ensureFriendLoadout(row) : row) || row;
+    const level = Math.max(1, Math.min(MAX_PLAYER_LEVEL, integer(full.level, 1, 1)));
+    let power = Number(full.power) || 0, agility = Number(full.agility) || 0;
+    let speed = Number(full.speed) || 0, hp = Number(full.hp) || 0;
+    if (!power || !agility || !speed || !hp) {
+      const roll = genAI(level, '', { levelJitter: 0, gearSelfLevel: true });
+      power = power || roll.power; agility = agility || roll.agility;
+      speed = speed || roll.speed; hp = hp || roll.hp;
+    }
+    const weapons = (full.weapons || []).map((w) => typeof w === 'string' ? weaponInst(w) : w).filter(Boolean);
+    const skills = (full.skills || []).map((v) => typeof v === 'string' ? skillInst(v) : v).filter(Boolean);
+    let wears = [null, null, null, null, null, null];
+    try { wears = Engine.wearsFor(normalizeFoeGears(full.gears || [])); } catch (e) {}
+    return {
+      name: full.name, level, power, agility, speed, hp: Math.max(1, Math.round(hp)), maxHp: Math.max(1, Math.round(hp)),
+      baseStats: { power, agility, speed, hp },
+      weapons, skills, wears,
+      effects: {}, masterLevel: S.level,
+      isPrentice: true,
+    };
+  }
   let stageAttemptSeq = 0;
   function beginStageBattle(stageId) {
     stageId = Number(stageId);
@@ -4821,16 +5181,30 @@
       if (!(S.props[23] > 0)) return { ok: false, needsBook: true, msg: '挑战书不足，快去商店中购买吧！' };
       S.props[23]--;
     }
-    if (!run) run = S.stageRuns[stageId] = { npcIndex: 1, revives: 0, needsRevive: false };
-    else if (run.needsRevive) { run.revives++; run.needsRevive = false; }
+    let reviving = false;
+    if (!run) run = S.stageRuns[stageId] = { npcIndex: 1, revives: 0, needsRevive: false, masterOnly: false };
+    else if (run.needsRevive) { reviving = true; run.revives++; run.needsRevive = false; }
+    /* 徒弟先上阵：只在「还没输过」且不是复活局时用；徒弟输过（masterOnly）后整轮都由师父接手。 */
+    const prentice = !run.masterOnly && !reviving ? stagePrentice() : null;
     run.attempt = 'stage_' + Date.now() + '_' + (++stageAttemptSeq);
     save();
-    return { ok: true, npcIndex: run.npcIndex, token: run.attempt };
+    return { ok: true, npcIndex: run.npcIndex, token: run.attempt,
+      role: prentice ? 'prentice' : 'master', prentice: prentice ? prentice.name : null };
   }
   function interruptStageBattle(stageId, token) {
     const run = S.stageRuns && S.stageRuns[stageId];
     if (!run || run.attempt !== token) return false;
     delete run.attempt;
+    save();
+    return true;
+  }
+  /** 徒弟战败：不扣复活、不结束本轮，只把那一个 attempt 收掉并标记「师父接手」。 */
+  function stagePrenticeLost(stageId, token) {
+    const run = S.stageRuns && S.stageRuns[stageId];
+    if (!run || run.attempt !== token) return false;
+    delete run.attempt;
+    run.masterOnly = true;
+    delete run.carryHp;
     save();
     return true;
   }
@@ -5268,24 +5642,67 @@
         && Array.isArray(round.hpAfter) && round.hpAfter.length === 2 && round.hpAfter.every((hp) => Number.isFinite(hp) && hp >= 0))
       && (entry.result.winner === 0 || entry.result.winner === 1);
   }
+  function normalizeBattleHistory(list) {
+    return (Array.isArray(list) ? list : []).filter(validBattle).slice(0, BATTLE_HISTORY_LIMIT);
+  }
+  function trimBattleHistory(slot) {
+    if (!Array.isArray(slot.battles)) slot.battles = [];
+    else if (slot.battles.length > BATTLE_HISTORY_LIMIT) slot.battles.splice(BATTLE_HISTORY_LIMIT);
+    return slot.battles;
+  }
+  function battlePayloadNeedsTrim(raw) {
+    if (!object(raw)) return false;
+    const slots = [raw, raw.__dualOther];
+    if (object(raw.__dualSaves)) for (const mode of SAVE_SLOTS) slots.push(raw.__dualSaves[mode]);
+    return slots.some((slot) => object(slot) && Array.isArray(slot.battles) && slot.battles.length > BATTLE_HISTORY_LIMIT);
+  }
+  function normalizeWoodBest(raw) {
+    if (!object(raw)) return null; // 旧档没有分项，不能从总伤害猜出三类。
+    return {
+      handDamage: integer(raw.handDamage, 0),
+      weaponDamage: integer(raw.weaponDamage, 0),
+      skillDamage: integer(raw.skillDamage, 0),
+    };
+  }
+  /** MainMovie.as:getRecord / showDeadManWin：徒手、武器、技能三个本场累计值。
+   * 本地分别保存各类单场最佳；它们可能来自不同场，不拿它们的和冒充最高总伤害。 */
+  function recordWoodBattle(result) {
+    if (!S || !result || !Array.isArray(result.rounds) || !result.rounds.length) return null;
+    const current = { handDamage: 0, weaponDamage: 0, skillDamage: 0, total: 0 };
+    const types = { common: 'handDamage', weapon: 'weaponDamage', skill: 'skillDamage' };
+    for (const round of result.rounds) {
+      if (!round || round.attacker !== 0 || round.selfDot) continue;
+      const damage = integer(round.dmg, 0);
+      current.total += damage;
+      if (types[round.action]) current[types[round.action]] += damage;
+    }
+    const best = normalizeWoodBest(S.woodBest) || { handDamage: 0, weaponDamage: 0, skillDamage: 0 };
+    for (const key of Object.keys(best)) best[key] = Math.max(best[key], current[key]);
+    S.woodBest = best;
+    S.woodCount = integer(S.woodCount, 0) + 1;
+    S.woodDamage = Math.max(integer(S.woodDamage, 0), current.total);
+    save();
+    return { current, best: clone(best), totalBest: S.woodDamage, count: S.woodCount };
+  }
   let battleKeySeq = 1;
   function recordBattle(entry) {
     if (!validBattle(entry)) return null;
     let snapshot;
     try { snapshot = clone(entry); } catch (e) { return null; }
-    do { snapshot.id = 'b' + Date.now() + '_' + battleKeySeq++; } while ((S.battles || []).some((battle) => battle.id === snapshot.id));
+    const history = trimBattleHistory(S);
+    do { snapshot.id = 'b' + Date.now() + '_' + battleKeySeq++; } while (history.some((battle) => battle && battle.id === snapshot.id));
     snapshot.createdAt = Date.now();
     snapshot.kind = typeof snapshot.kind === 'string' ? snapshot.kind : '挑战';
     snapshot.region = integer(snapshot.region, 0);
     snapshot.winner = snapshot.result.winner;
-    S.battles = [snapshot].concat(S.battles || []).slice(0, 50);
+    S.battles = [snapshot].concat(history).slice(0, BATTLE_HISTORY_LIMIT);
     bumpBattleDaily(snapshot.winner === 0, snapshot.kind);
     save();
     /* 不再 clone 第二遍：`snapshot` 已写进 S.battles，返回值只给调用方读/展示；
      * 以前这里多深拷一份 360 KB 的录像，是战斗结束卡顿的一部分（2026-10 审计）。 */
     return snapshot;
   }
-  function battleHistory() { return clone(S.battles || []); }
+  function battleHistory() { return clone(S ? trimBattleHistory(S) : []); }
   /* 「消息」红点的两个出口（经典主界面 `SfUiMain.hasNewMessages` 用）：
    *   msgSeenAt()        —— 上次看过消息页的时间戳（0 = 从没看过）
    *   markMessagesSeen() —— 把"看到哪了"推到**当前最新一条消息的时间**并存盘
@@ -5572,7 +5989,7 @@
   window.State = {
     saveKey: SAVE_KEY, uiModeKey: UI_MODE_KEY, testMode: !!testMode, rememberUiMode,
     save, load, newGame, state, switchMode, activeUiMode, hasModeSave, tickEnergy, energyCountdown,
-    fileProbe, fileLoad, fileWrite, fileWriteNow, fileInfo, storageMode, flushFileWrite, setSaveTransport, hasFileTransport, readFileRaw, importFileRaw, syncFormatTime: fmtTime, markLocalFresh: () => { fileState.freshLocal = true; },
+    fileProbe, fileLoad, fileWrite, fileWriteNow, fileInfo, storageMode, flushFileWrite, setSaveTransport, hasFileTransport, readFileRaw, importFileRaw, exportPayload, restorePayload, prepareImport, verifyImport, importFingerprint, syncFormatTime: fmtTime, markLocalFresh: () => { fileState.freshLocal = true; },
     hasLocalSave, localSaveMeta, fileLoadedThisBoot,
     /* 调试所得账本：快照/记录/摘要/回收（系统页「调试所得」与 debug.js 用）。 */
     debugSnapshot, debugRecordDiff, debugForgetWS, debugLedgerSummary, clearDebugGains,
@@ -5590,10 +6007,10 @@
     gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, grantStarterGear, extText, randomExt,
     blackGearEnabled, isBlackGearId, BLACK_PROP_IDS,
     gearBaseAttr, rollGearAttr, gearCostOf, GEAR_ATTR_JITTER,
-    FUSION_SAME_NAME_RATE, FUSION_MUTANT_RATE, FUSION_MUTANT_SET, FUSION_EXT_UPGRADE_RATE,
+    FUSION_SAME_NAME_RATE, FUSION_MUTANT_RATE, FUSION_MUTANT_SET, FUSION_ORANGE_MUTANT_SET, FUSION_EXT_UPGRADE_RATE,
     FUSION_EXT_INHERIT_RATE, FUSION_EXT_SLOTS,
     toggleGearStar, isGearStarred, gearsInDisplayOrder,
-    gemLevel, gemPercent, gemMergeRate, rollGemDrop, mergeGems, socketGem, unsocketGem,
+    gemLevel, gemPercent, gemMergeRate, rollGemDrop, mergeGems, socketGem, unsocketGem, canSocketGem,
     totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, openChestProp, gainRandomWS, wsChoices, wsInfo,
     chestState, beginChest, confirmChest, reopenChest, chestReopenCost, CHEST_REOPEN_MAX, settlePendingChest,
     blackCardOptions, applyBlackCard, blackGearBoxOptions, applyBlackGearBox,
@@ -5601,7 +6018,7 @@
     pendingWS, currentWSChoices, chooseWS, chooseWSRandom,
     /* 30 级「自愿支持作者」的一次性提示（落存档，不换任何游戏内好处）。 */
     supportPromptPending, supportPromptTake, supportPromptReset, SUPPORT_LEVEL,
-    SPEED_UNLOCK_LEVEL, SKIP_UNLOCK_LEVEL, unlockedSpeed, unlockedSkip,
+    SPEED_UNLOCK_LEVEL, SKIP_UNLOCK_LEVEL, VIP_SKIP_UNLOCK_LEVEL, unlockedSpeed, unlockedSkip, skipButtonEnabled,
     BERSERK_SET_ID, BERSERK_LEVEL, BERSERK_CHANCE_AT_50, BERSERK_CHANCE_AT_70, berserkChance,
     AI_FULL_GEAR_LEVEL, aiToolMinLevel, aiToolMaxLevel, aiGearMinLevel,
     playerNormalTotal, playerMaxTotal, playerTotalBounds, foeTotalStats, applyFoeTotalBounds, foeLoadout,
@@ -5618,15 +6035,15 @@
     buildingDoubleRate, miracleRecord, normalizeFoeGears,
     petLeadership, PET_UNLOCK_LEVEL, pets, petByKey, petTeam, hatchPet, setPetTeam, feedPet, evolvePet, petBattleBonus, applyPetBonuses, randomPetLoadout, PETS, PET_SKILLS,
     gearPart, gearPartQuality, gearIdsOf, autoEnergyPotion,
-    gearSetFamily, setPieceCounts, setBonusOf, setBonusEffects, setBonusList, setBonusForGear,
+    gearSetFamily, fusionFamilyInfo, setPieceCounts, setBonusOf, setBonusEffects, setBonusList, setBonusForGear,
     applySetBonuses, applyFoeSetBonuses,
     apprenticeDailyExp, apprenticeDailyGold, apprenticeDailyTotal, apprenticeDailyStatus,
     apprenticeLevelSum, apprenticeTributeRatio, claimApprenticeExp, canKickToday, kickPrentice,
     beginRecruitChallenge, finishRecruitChallenge, cancelRecruitChallenge,
     MASTER_SKILL_ID, MASTER_SKILL_NAME,
     genAI, RANDOM_FOE_SCALE, stageProgress, setStageProgress, npcOf, highestStageId, stageRun, stageAccess, stageReward,
-    beginStageBattle, finishStageBattle, interruptStageBattle, abandonStageRun,
-    localDate, dailyStatus, dailyGiftExtra, challengeDailyCount, noteChallengeClear, refreshDaily: syncDailyStats, claimDaily, recordBattle, battleHistory,
+    beginStageBattle, finishStageBattle, interruptStageBattle, abandonStageRun, stagePrentice, stagePrenticeFighter, stagePrenticeLost,
+    localDate, dailyStatus, dailyGiftExtra, challengeDailyCount, noteChallengeClear, refreshDaily: syncDailyStats, claimDaily, recordBattle, battleHistory, recordWoodBattle,
     /* 「消息」红点的记账（落存档，见 normalizeSave 里 msgSeenAt 那段注释）。 */
     msgSeenAt, markMessagesSeen,
     questStatus, questClaimable, claimQuest, bumpDaily, QUEST_TYPES, QUEST_EXTRA_POOL, QUEST_GOLD, QUEST_EXP,
@@ -5642,6 +6059,7 @@
     MAX_PLAYER_LEVEL, energyCapForLevel,
     statShares, forcedStat, lowestStat, pendingPoints, allocatePoint, allocateEvenly,
     STAT_SHARE_MIN, STAT_KEYS, STAT_NAMES, STAT_GAIN, HP_PER_STAT, FREE_POINT_RANDOM,
+    STAT_HARD_CAP, permanentStatTotal, statCapRoom, clampPermanentStats,
     CHALLENGE_EXP_BASE, CHALLENGE_EXP_PER_LEVEL, CHALLENGE_EXP_CAP_LEVEL, EXP_DIFF_STEP, EXP_DIFF_TIGHTEN,
     CHALLENGE_DIFF_RANGE, ARENA_CHAMPION_EXP, ARENA_ENERGY_COST, ARENA_EXP_PER_ENERGY,
   };

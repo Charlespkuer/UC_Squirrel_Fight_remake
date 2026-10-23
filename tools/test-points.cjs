@@ -293,6 +293,45 @@ test('71~90 金宝箱按账号累计 20 个：转生/读档都不会重复发', 
   assert.ok(!(s.props[90] > 0), '发满 20 个后重新升到 90 不再发金宝箱');
 });
 
+test('永久属性点 651 硬上限：正常可到顶，调试/旧档/属性道具都不能突破', () => {
+  const g = setup(), s = g.s();
+  assert.equal(g.State.STAT_HARD_CAP, 651, '硬上限常量');
+  /* 直接模拟调试/控制台把四维写成天文数字：save 必须收口。 */
+  s.power = 9999; s.agility = 9999; s.speed = 9999; s.maxHp = 99999; s.hp = 99999;
+  s.freePoints = 999;
+  g.State.save();
+  assert.equal(g.State.permanentStatTotal(), 651, '收口后正好 651');
+  assert.equal(s.freePoints, 0, '待分配点也不能超出上限');
+  assert.equal(s.maxHp % 5, 0, '生命按 5 点一格保存');
+  assert.ok(s.hp <= s.maxHp, '当前生命不能高于上限');
+  /* 顶到上限后，永久属性道具拒绝使用且不扣道具（调试无限发也没用）。 */
+  s.props[16] = 2;
+  assert.equal(g.State.useProp(16).ok, false);
+  assert.equal(s.props[16], 2, '被上限拦下时不消耗道具');
+  s.props[37] = 1;
+  assert.equal(g.State.useProp(37, { power: 8, agility: 0, speed: 0 }).ok, false);
+  assert.equal(s.props[37], 1, '属性书也不消耗');
+  assert.equal(s.freePoints, 0);
+  /* 留 1 点空间时，普通永久丸正好补到 651；再吃一颗被拒。 */
+  s.power = 640; s.agility = 1; s.speed = 1; s.maxHp = 40;
+  assert.equal(g.State.permanentStatTotal(), 650);
+  s.props[16] = 2;
+  assert.equal(g.State.useProp(16).ok, true);
+  assert.equal(g.State.permanentStatTotal(), 651);
+  assert.equal(g.State.useProp(16).ok, false, '第二颗不能越过 651');
+  assert.equal(s.props[16], 1, '第二颗保留');
+  /* 属性转化丸只搬运点数、不增加总额：到顶后必须照常可用，不能被硬上限误伤。 */
+  s.power = 300; s.agility = 200; s.speed = 140; s.maxHp = 55; s.hp = 55; s.freePoints = 0;
+  assert.equal(g.State.permanentStatTotal(), 651);
+  s.props[10] = 1;
+  const conv = g.State.useProp(10, 'agility');
+  assert.equal(conv.ok, true, '到顶后力量转化丸仍可使用');
+  assert.equal(s.power, 299, '力量 -1');
+  assert.equal(s.agility, 201, '敏捷 +1');
+  assert.equal(g.State.permanentStatTotal(), 651, '转化后总额不变，仍是 651');
+  assert.equal(s.props[10], undefined, '转化丸正常消耗');
+});
+
 let failed = 0;
 for (const [name, run] of tests) {
   try { run(); console.log('PASS', name); }

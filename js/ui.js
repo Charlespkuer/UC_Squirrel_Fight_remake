@@ -217,8 +217,8 @@
     const box = el('div');
     box.appendChild(el('p', 'confirm-text', msg));
     const row = el('div', 'btn-row');
-    const yes = el('button', 'btn btn-primary', '确 定');
-    const no = el('button', 'btn', '取 消');
+    const yes = el('button', 'btn btn-primary', '确定');
+    const no = el('button', 'btn', '取消');
     yes.onclick = () => { p.close(); onYes && onYes(); };
     no.onclick = () => p.close();
     row.appendChild(yes); row.appendChild(no);
@@ -323,7 +323,7 @@
         list.appendChild(row);
       });
       box.appendChild(list);
-      const refresh = el('button', 'btn', '🔄 换一批');
+      const refresh = el('button', 'btn', '换一批');
       refresh.onclick = () => { genFoes(); render(); };
       box.appendChild(refresh);
     }
@@ -340,7 +340,7 @@
       box.appendChild(el('div', 'levelup-line', '🎉 升级到 <b>' + up.level + '</b> 级！力量+' + up.power + ' 敏捷+' + up.agility + ' 速度+' + up.speed + ' 生命+' + up.hp + (up.reward ? '，学会【' + up.reward + '】' : '')));
     }
     const row = el('div', 'btn-row');
-    const ok = el('button', 'btn btn-primary', '确 定');
+    const ok = el('button', 'btn btn-primary', '确定');
     ok.onclick = () => { p.close(); Main.showHome(); };
     row.appendChild(ok);
     box.appendChild(row);
@@ -394,18 +394,46 @@
         '<span class="foe-stats">生命' + npc.hp + ' 力量' + GData.stageNpcStats(npc).power + ' 敏捷' + GData.stageNpcStats(npc).agility + ' 速度' + GData.stageNpcStats(npc).speed + '</span></div>';
       const btn = el('button', 'btn btn-primary', prog.passed ? '重打' : (idx < prog.npcIndex ? '重打' : '挑战'));
       btn.disabled = locked;
-      btn.onclick = () => {
-        if ((S.props[23] || 0) < 1) { toast('需要挑战书！可在商店购买'); return; }
-        S.props[23]--; State.save();
+      /* 原版关卡（fightType 6）的徒弟先上阵：第一场把徒弟快照交给 Main.startBattle；
+       * 徒弟失败后弹「徒弟无能…」并由师父免费接手同一名对手；徒弟赢了继续由徒弟打。 */
+      const runState = () => (State.stageRuns && State.stageRuns[stageId]) || null;
+      const startFight = (asMaster) => {
+        const r = runState();
+        const prentice = !asMaster ? State.stagePrentice() : null;
+        const fighter = prentice ? State.stagePrenticeFighter() : null;
+        const master = asMaster || !prentice || !fighter;
+        /* 师父第一次接手（由徒弟战败触发）免费；之后的师父战斗照现代关卡原样扣书。 */
+        const freeMaster = !!(master && r && r.masterFree);
+        if (!freeMaster) {
+          if ((S.props[23] || 0) < 1) { toast('需要挑战书！可在商店购买'); return; }
+          S.props[23]--;
+        }
+        if (master && r) { r.masterFree = false; }
+        State.save();
         p.close();
-        /* 常驻挑战的「当日重复惩罚」与 classic-ui 的 stageFight 共用 GData.stageFoe
-         *（今天每多赢一场关卡战斗，敌全属性再 +5%）；塔/无尽的敌人不读它。 */
-        const dailyCount = State.challengeDailyCount ? State.challengeDailyCount() : 0;
-        const foe = GData.stageFoe(npc, stageId, type.anim, dailyCount);
+        const foe = GData.stageFoe(npc, stageId, type.anim, State.challengeDailyCount ? State.challengeDailyCount() : 0);
         Main.startBattle(foe, {
           cost: 0, useProps: false, region: type.anim === 'tl' ? 3 : type.anim === 'xh' ? 4 : 1,
+          fighter: fighter || undefined,
           onEnd: (winner) => {
             const win = winner === 0;
+            if (!master && !win) {
+              /* 徒弟战败：不结算、不扣复活；标记师父接手后弹原版台词。 */
+              State.stageRuns = State.stageRuns || {};
+              const rr = State.stageRuns[stageId] || (State.stageRuns[stageId] = { npcIndex: idx, revives: 0, needsRevive: false });
+              rr.masterOnly = true; rr.masterFree = true; State.save();
+              const box = el('div', 'result-box');
+              box.innerHTML = '<div class="result-title lose">徒弟战败</div><p><b>徒弟无能，打不过它！该师父您亲自上阵了！</b></p>' +
+                '<p class="small-label">徒弟「' + escHtml(prentice.name) + '」已败下阵；师父接手同一名对手，不消耗挑战书，也不占用复活次数。</p>';
+              const row2 = el('div', 'btn-row');
+              const go = el('button', 'btn btn-primary', '师父上阵');
+              const later = el('button', 'btn', '稍后继续');
+              row2.appendChild(go); row2.appendChild(later); box.appendChild(row2);
+              const pop = openPanel('徒弟战败', box);
+              go.onclick = () => { pop.close(); startFight(true); };
+              later.onclick = () => pop.close();
+              return;
+            }
             if (win) {
               const prog2 = State.stageProgress(stageId);
               let extra = '';
@@ -425,13 +453,25 @@
                 fragTxt = '<div>获得 ' + propMap.getValue(fragId).name + ' x' + n + '</div>';
               }
               const ups = State.gainExp(exp);
+              if (prog2.passed) {
+                if (State.stageRuns) delete State.stageRuns[stageId];
+              } else {
+                const rr = State.stageRuns && State.stageRuns[stageId];
+                if (rr) { rr.masterOnly = master; rr.masterFree = false; }
+              }
               State.save();
               showResult(true, foe, { exp: exp, gold: gold, ups: ups }, extra + fragTxt);
             } else {
+              const rr = State.stageRuns && State.stageRuns[stageId];
+              if (rr) { rr.masterOnly = true; rr.masterFree = false; State.save(); }
               showResult(false, foe, { exp: 0, gold: 0, ups: [] }, '<div>提升等级、强化武器技能或穿戴装备后再来。</div>');
             }
           },
         });
+      };
+      btn.onclick = () => {
+        const r = runState();
+        startFight(!!(r && r.masterOnly));
       };
       row.appendChild(btn);
       box.appendChild(row);
@@ -448,8 +488,8 @@
     const box = el('div');
     box.appendChild(el('p', 'panel-desc', '4 只松鼠淘汰赛！经验场每局消耗 30 体力（可用英雄帖），冠军 150 经验；碎片场冠军得蓝色碎片。'));
     const row = el('div', 'btn-row');
-    const b1 = el('button', 'btn btn-primary', '经验竞技场 (30⚡)');
-    const b2 = el('button', 'btn btn-primary', '碎片场 (30⚡)');
+    const b1 = el('button', 'btn btn-primary', '经验场');
+    const b2 = el('button', 'btn btn-primary', '碎片场');
     b1.onclick = () => joinArena(0);
     b2.onclick = () => joinArena(1);
     row.appendChild(b1); row.appendChild(b2);
@@ -684,7 +724,7 @@
       const modernMode = !(window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic');
       const sellPrice = modernMode && State.propSellPrice ? State.propSellPrice(id) : 0;
       if (sellPrice > 0) {
-        const sellBtn = el('button', 'btn', '卖出 +' + sellPrice);
+        const sellBtn = el('button', 'btn', '卖出');
         sellBtn.onclick = () => {
           const r = State.sellProp(Number(id), 1);
           toast(r.msg);
@@ -727,7 +767,7 @@
       wornDiv.appendChild(row);
     }
     box.appendChild(wornDiv);
-    box.appendChild(el('div', 'gear-sec-title', '装备背包（' + bag.length + '）— 选中3件同品质装备可融合升品质（部位/名字可不同）'));
+    box.appendChild(el('div', 'gear-sec-title', '装备背包（' + bag.length + '）— 选中3件同品质装备可融合升品质（部位/名字可不同；3件同套且有下一品质档时必得该套）'));
     const bagDiv = el('div', 'ws-list');
     const selected = new Set();
     /** 词条行：和装备名/主属性分开，融合选材料时一眼能看到每件装备带什么。 */
@@ -747,7 +787,7 @@
         p.close(); openGears();
       };
       const sellRange = State.gearSellRange(State.gearQuality(g));
-      const sellBtn = el('button', 'btn', '卖' + sellRange[0] + '-' + sellRange[1] + '🌰');
+      const sellBtn = el('button', 'btn', '卖出');
       sellBtn.onclick = () => { State.sellGear(g.key); toast('已卖出'); p.close(); openGears(); };
       const selBtn = el('button', 'btn btn-sel', '选择');
       selBtn.onclick = () => {
@@ -771,8 +811,10 @@
       }
       const tags = new Set();
       picked.forEach((g) => State.extText(g.ext).forEach((x) => tags.add(x)));
+      const sameSet = picked.length === 3 && State.fusionFamilyInfo ? State.fusionFamilyInfo(picked) : null;
       summary.innerHTML = '<div class="fusion-ext-head">已选 ' + picked.length + '/3：' +
         picked.map((g) => '<b class="q' + Math.min(3, g.quality) + '">' + escHtml(g.name) + '</b>').join('、') + '</div>' +
+        (sameSet ? '<div class="fusion-ext-hint">三件同套（' + escHtml(sameSet.family) + '）：必得下一品质同套装的同部位装备。</div>' : '') +
         '<div class="fusion-ext-tags">' + (tags.size
           ? [...tags].map((x) => '<span class="gear-ext-tag">' + escHtml(x) + '</span>').join('')
           : '<span class="gear-ext-none">这些装备没有附加词条</span>') + '</div>' +
@@ -780,13 +822,15 @@
     }
     box.appendChild(summary);
     refreshSummary();
-    const mergeBtn = el('button', 'btn btn-primary btn-wide', '🔥 融合选中的3件装备（50🌰）');
+    const mergeBtn = el('button', 'btn btn-primary btn-wide', '融合装备');
     mergeBtn.onclick = () => {
       const r = State.mergeGears([...selected], { allowMixedParts: true });
       if (r.ok) { toast('融合成功：' + r.gear.name + '！'); p.close(); openGears(); }
       else toast(r.msg);
     };
+    mergeBtn.title = '融合消耗金松果（按材料品质）';
     box.appendChild(mergeBtn);
+    box.appendChild(el('p', 'panel-desc', '融合消耗金松果（按材料品质）。'));
     const p = openPanel('🛡️ 装备', box);
   }
 
@@ -840,7 +884,7 @@
     box.appendChild(el('p', 'panel-desc', '每天免费抽奖 1 次，之后每次 20 金松果。今日免费次数：' + S.lotteryFree));
     const resultDiv = el('div', 'lottery-result', '🎁');
     box.appendChild(resultDiv);
-    const btn = el('button', 'btn btn-primary btn-wide', '抽 奖');
+    const btn = el('button', 'btn btn-primary btn-wide', '抽奖');
     let spinTimer = 0, closed = false;
     btn.onclick = () => {
       if (S.lotteryFree > 0) S.lotteryFree--;
@@ -879,7 +923,7 @@
     const box = el('div');
     if (S.master) {
       box.appendChild(el('p', 'panel-desc', '你的师傅：<b>' + S.master.name + '</b> Lv.' + S.master.level + '（战斗中有概率触发"师父驾到"加血）'));
-      const b = el('button', 'btn', '出师（脱离师门）');
+      const b = el('button', 'btn', '出师');
       b.onclick = () => { S.master = null; State.save(); p.close(); openMaster(); };
       box.appendChild(b);
     } else {
@@ -902,7 +946,7 @@
       pl.appendChild(el('div', 'foe-row', '<div class="foe-info"><b>' + t.name + '</b> Lv.' + t.level + '</div>'));
     });
     if (S.prentices.length < 3) {
-      const btn = el('button', 'btn btn-primary', '收徒（打败一个对手）');
+      const btn = el('button', 'btn btn-primary', '收徒');
       btn.onclick = () => {
         const foe = State.genAI(Math.max(1, S.level - 2));
         p.close();
@@ -938,12 +982,12 @@
       '<p><b>体力</b>：每5分钟恢复1点，上限120。挑战对手消耗10点，竞技场30点。</p>' +
       '<p><b>属性</b>：力量决定伤害，敏捷决定闪避，速度决定出手频率，生命即血量。</p>' +
       '<p><b>武器/技能</b>：战斗中随机使用。升级需要金松果+卷轴，成功率随等级降低；普通1~10级失败后每次提高2%成功率，真化线不保底。</p>' +
-      '<p><b>关卡</b>：10级起挑战螳螂→仙鹤→熊猫，需要挑战书，通关可得装备碎片。</p>' +
-      '<p><b>装备</b>：10个碎片+金松果合成（白30/绿40/蓝50）；3件同品质装备+金松果融合升品质（部位/名字可不同；白30/绿40/蓝50/紫60）。两件以上材料都带的词条必继承。</p>' +
+      '<p><b>关卡</b>：10级起挑战螳螂→仙鹤→熊猫，需要挑战书，通关可得装备碎片。带徒弟时徒弟先上阵，徒弟战败后师父免费接手同一名对手（不耗挑战书/复活次数）。</p>' +
+      '<p><b>装备</b>：10个碎片+金松果合成（白30/绿40/蓝50）；3件同品质装备+金松果融合升品质（部位/名字可不同；白30/绿40/蓝50/紫60）。3件同套且有下一品质档时必得该套；两件以上材料都带的词条必继承。</p>' +
       '<p><b>转生</b>：使用转生果回到1级，属性成长更高（保留装备）。</p>' +
       '<p><b>存档</b>：自动保存在浏览器本地。</p>';
     const row = el('div', 'btn-row');
-    const reset = el('button', 'btn btn-danger', '删除存档重开');
+    const reset = el('button', 'btn btn-danger', '删档重开');
     reset.onclick = () => {
       confirmBox('确定要删除存档重新开始吗？此操作不可恢复！', () => {
         localStorage.removeItem('ssdz_save_v1');

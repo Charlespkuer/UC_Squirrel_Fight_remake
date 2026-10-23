@@ -174,7 +174,7 @@ test('原版融合页的材料清单包含橙装，且提示不再写死「蓝�
   const materials = src.slice(src.indexOf('function fusionMaterials()'), src.indexOf('function fusionSelected()'));
   assert.ok(materials.includes('.filter((g) => !g.used)'), '原版融合材料只按未穿戴过滤：' + materials);
   assert.ok(!/!g\.orange/.test(materials), '不能再把橙装从材料里剔掉');
-  assert.match(src, /function rewriteFusionPrompt\(view\)/, '原版「请先放入3件蓝色的装备」要改成通用提示');
+  assert.match(src, /function rewriteFusionPrompt\(view, text\)/, '原版「请先放入3件蓝色的装备」要改成可随同套状态更新的通用提示');
 });
 
 /* 推荐材料按品质计数，跨部位的三件也是一个可融合组。 */
@@ -300,6 +300,38 @@ test('融合只有一条共有词条时，仍按品质补满词条槽', () => {
   assert.equal(result.gear.ext.length, 3, '橙装应有 3 条词条');
   assert.equal(new Set(result.gear.ext.map((ext) => ext.id)).size, 3, '词条不能重复');
   assert.ok(result.gear.ext.some((ext) => ext.id === 1), '共有的那条词条要保留');
+});
+
+test('三件同套装融合必定得到该套下一品质同部位', () => {
+  const game = setup([201, 202, 203, 177, 178, 179], { gold: 1000 });
+  const S = game.context.State;
+  vm.runInContext('globalThis.__oldRandom = Math.random; Math.random = () => 0', game.context);
+  try {
+    /* 旧规则在三件不同名时完全随机，固定 0 会挑到别的套装；同套保底必须无视它。 */
+    const purple = game.gears.slice(0, 3).map((g) => g.key);
+    const orange = S.mergeGears(purple);
+    assert.equal(orange.ok, true, orange.msg || '紫装融合应成功');
+    assert.equal(orange.gear.id, 205, '3 件狂战紫装 → 狂战橙头盔');
+    assert.equal(S.gearSetFamily(orange.gear.id), '狂战');
+    assert.equal(S.gearPart(orange.gear.id), 0);
+    assert.equal(orange.gear.quality, 4);
+
+    const orangeFury = game.gears.slice(3, 6).map((g) => g.key);
+    const black = S.mergeGears(orangeFury);
+    assert.equal(black.ok, true, black.msg || '橙装融合应成功');
+    assert.equal(black.gear.id, 185, '3 件怒战橙装 → 怒战黑头盔（同套取 id 最小件）');
+    assert.equal(S.gearSetFamily(black.gear.id), '怒战');
+    assert.equal(S.gearPart(black.gear.id), 0);
+    assert.equal(black.gear.quality, 5);
+
+    /* 机器猫的「头 / 拳」是裸后缀，按单件名去后缀会拆成两族；融合认套必须按 setId 的公共前缀。 */
+    const cat = setup([209, 210, 211], { gold: 1000 });
+    const catInfo = cat.context.State.fusionFamilyInfo(cat.gears);
+    assert.equal(catInfo && catInfo.family, '机器猫', '机器猫头/拳/服要认成同一套');
+    assert.equal(catInfo && catInfo.quality, 5, '机器猫橙装同套保底到黑装');
+  } finally {
+    vm.runInContext('Math.random = globalThis.__oldRandom; delete globalThis.__oldRandom', game.context);
+  }
 });
 
 for (const [name, run] of tests) {

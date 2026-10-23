@@ -299,9 +299,6 @@
        * 所以木头人不会死；这里用固定回合 + 保底 1 血复刻这个训练场景。 */
       practice: !!f.practice,
       practiceRounds: Math.max(0, Math.floor(Number(f.practiceRounds) || 0)),
-      /* 本回合已经吃到的练习伤害：一次行动里可能多段命中（流星锤三连等），
-       * 用它把「一回合最多打掉 800」锁住，而不是每段都能打 800。 */
-      practiceDamageThisAction: 0,
       /* 上一拍扣掉的血，在下一拍开头回满；回血量记在这里交给回放层显示。 */
       practiceHealPending: 0,
       /* 套装收益（装备派生，独立通道；见 gamedata.js【GD6】）。 */
@@ -343,7 +340,9 @@
     if (plusMax > 0) def.maxHp = Math.max(1, Math.round((Number(def.maxHp) || 1) * (1 + plusMax)));
     const plusTaken = Number(sv.takenMul) || 0;
     if (plusTaken) {
-      def.mods.takenMul = Math.max(-0.95, Number(def.mods.takenMul || 0) + plusTaken);
+      /* 减伤按伤害倍率相乘，不把两条减伤直接相加（否则 60% + 60% 会变成 100% 免疫）。 */
+      const oldTaken = Number(def.mods.takenMul) || 0;
+      def.mods.takenMul = Math.max(-0.95, (1 + oldTaken) * (1 + plusTaken) - 1);
       if (r) r.reviveTakenMul = def.mods.takenMul;
     }
     def.hp = sv.healPct ? Math.max(1, Math.round(def.maxHp * sv.healPct)) : 1;
@@ -901,9 +900,6 @@
       /* 给经典播放器的换装/卸装表现用：这一拍结束时双方还剩几回合“被脱光”。
        * 0 = 正常穿着；>0 = 装备视觉应卸下。 */
       r.stripLeft = [Math.max(0, Number(A.stripTurns) || 0), Math.max(0, Number(B.stripTurns) || 0)];
-      /* 练习木桩的「本回合已吃伤害」按**一次行动**归零；下一次行动重新从满血 800 起算。 */
-      if (A.practice) A.practiceDamageThisAction = 0;
-      if (B.practice) B.practiceDamageThisAction = 0;
       /* 上一拍扣掉、这一拍开头补回的血量：挂到本回合事件上供回放层飘字。 */
       if (A.practiceHealPending) { r.practiceHeal = (Number(r.practiceHeal) || 0) + A.practiceHealPending; A.practiceHealPending = 0; }
       if (B.practiceHealPending) { r.practiceHeal = (Number(r.practiceHeal) || 0) + B.practiceHealPending; B.practiceHealPending = 0; }
@@ -935,19 +931,12 @@
       tryDeathSave(target, r);
       return dmg;
     }
-    /** 练习木桩的「一回合最多打掉 800」与「下一拍开头回满」。
-     *  - 同一次行动里可能有多段命中（流星锤三连、野球拳再打一次），累计伤害封顶到最大生命；
-     *  - 这一拍只扣血、不立刻回满；下一拍开头由主循环补满，`practiceHeal` 交给回放层飘字；
-     *  - 返回**实际打掉的血量**，`r.dmg` 与战斗统计都按这个值记，不会出现“显示 1000 伤害、
-     *    但木桩只有 800 血”的账。 */
-    function practiceCapDamage(def, dmg) {
+    /** 木桩只锁生命，伤害事件保留完整数值（Stakes.reduceBlood 直接累计 harm）。
+     * 单次或多段打出 800+ 仍逐段计伤；血条最低 1，下一拍开头只回实际失去的血。 */
+    function practiceHurt(def, dmg) {
       if (!def || !def.practice) return dmg;
-      const used = Math.max(0, Math.floor(Number(def.practiceDamageThisAction) || 0));
-      const room = Math.max(0, Math.min(def.hp, def.maxHp - used));
-      const dealt = Math.min(Math.max(0, Math.round(Number(dmg) || 0)), room);
-      def.practiceDamageThisAction = used + dealt;
-      def.hp = Math.max(0, def.hp - dealt);
-      return dealt;
+      def.hp = Math.max(1, def.hp - dmg);
+      return dmg;
     }
     function applyDamage(att, def, rawDmg, r, opts) {
       opts = opts || {};
@@ -1029,10 +1018,9 @@
         def.shell -= absorbed; dmg -= absorbed;
         r.shellAbsorb = absorbed;
       }
-      /* 练功木桩：伤害照常计入 r.dmg（原版 Stakes 用 totalharm 累计原始伤害），
-       * 但每回合封顶 800 并立刻回满，永远不走装死 / 复活 / 倒地分支。 */
+      /* 木桩的血量保护不能截掉测得的伤害，亦不走装死 / 复活 / 倒地分支。 */
       if (def.practice) {
-        dmg = practiceCapDamage(def, dmg);
+        dmg = practiceHurt(def, dmg);
       } else if (def.hp - dmg <= 0 && def.skills[6] && def.silence <= 0 && !def.usedFakeDie && !opts.ignoreFakeDie) {
         def.usedFakeDie = true;
         dmg = Math.max(0, def.hp - 1);
@@ -1174,7 +1162,7 @@
       let dmg = Math.max(0, Math.round(Number(amount) || 0));
       if (!def || def.hp <= 0 || dmg <= 0) { r.dmg = 0; return 0; }
       if (def.practice) {
-        dmg = practiceCapDamage(def, dmg);
+        dmg = practiceHurt(def, dmg);
       } else if (def.hp - dmg <= 0 && def.skills && def.skills[6] && def.silence <= 0 && !def.usedFakeDie) {
         def.usedFakeDie = true;
         dmg = Math.max(0, def.hp - 1);

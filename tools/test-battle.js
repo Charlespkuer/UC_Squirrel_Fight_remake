@@ -189,6 +189,8 @@ function save(name) { fs.mkdirSync('out/battle-check', { recursive: true }); fs.
   const battleSrc = fs.readFileSync('js/battle.js', 'utf8');
   assert(!/r\.action === 'rest' \? '休息'/.test(battleSrc) && /preparingWeapon\) > 0/.test(battleSrc),
     '方天画戟蓄力回合不再在敌人头顶飘「休息」文字');
+  assert(/f\.crit && critBadge/.test(battleSrc) && !/floater\(def, '暴击'/.test(battleSrc),
+    '暴击改用 4842 第 3 帧图标 + 伤害数字，不再单独飘「暴击」文字');
   assert.equal(errors.length, 0, errors.join('\n'));
   console.log('Battle regression checks passed; original-atlas renders: out/battle-check');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

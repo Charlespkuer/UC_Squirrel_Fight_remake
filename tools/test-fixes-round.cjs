@@ -190,7 +190,7 @@ test('需求5：x10 层只有最后一个敌人穿狂战套', () => {
   /* 修 bug 回归：三选一的触发点原来写成 `won === 3 || (won === 4 && len === 5)`，
    * `won === 3` 没看 len —— 5 场层会在打完第 4 场后挂上 choices，
    * 下一轮直接结算层完成，**第 5 场的塔顶 boss 被整个跳过**。
-   * 所以这里必须确认第 5 场真的是狂战松鼠（而不是提前结束）。 */
+   * 10~50 层保持原结构：第 4 场随机 boss，第 5 场塔顶狂战松鼠。 */
   assert.equal(seen[4].name.indexOf('狂战松鼠'), 0, '第 5 场必须是塔顶 boss，实测 ' + seen[4].name);
   assert.equal(seen[4].elite, true, '塔顶 boss 应当是精英');
   const berserk = [201, 202, 203, 204];
@@ -200,7 +200,6 @@ test('需求5：x10 层只有最后一个敌人穿狂战套', () => {
   }
   const lastHit = seen[4].wears.filter((id) => berserk.includes(id));
   assert.equal(lastHit.length, 4, '最后一场应当整套狂战：' + JSON.stringify(seen[4].wears));
-  assert.equal(seen[4].elite, true, '最后一场应当带精英标记');
   assert.deepEqual(choiceBefore, [4, 5],
     '第 10 层应当在第 4 场前与第 5 场前各给一次多选一，实测 ' + JSON.stringify(choiceBefore));
 });
@@ -432,7 +431,7 @@ test('需求9.9：涌泉烙印（C52）真的生效 —— 师父驾到等治疗
   assert.match(towerSrc, /eliteHealAfter \* g \* healBonusMul\(run\)/, 'C13 精英回血要吃治疗加成');
   assert.match(towerSrc, /healOnGainPct\) \* globalMul\(run\) \* healBonusMul\(run\)/, '获得时回血要吃治疗加成');
   assert.match(towerSrc, /agg\.startHealPct \* healBonusMul\(run\)/, '开战回血（C10/C16/C17、N08）要吃治疗加成');
-  assert.match(towerSrc, /function healBonusMul\(run\) \{ return 1 \+ fragileHealBonus\(run\); \}/, '治疗加成倍率的定义');
+  assert.match(towerSrc, /function healBonusMul\(run\) \{[\s\S]*?return Math\.max\(0, 1 \+ fragileHealBonus\(run\) \+ inherited\);/, '治疗加成倍率的定义（含照影封存的静态治疗加成）');
   /* sim 侧：healOf 统一读 fighter.healMul（这就是「师父驾到不生效」的根因） */
   const simSrc = readSrc('js', 'sim.js');
   assert.match(simSrc, /healMul: Number\.isFinite\(Number\(f\.healMul\)\)/, 'makeCombatant 必须把赛前的治疗倍率读进来');
@@ -4037,7 +4036,7 @@ test('需求90：铸币商店的「返回」不收摊、「继续战斗」才收
   const from = uiSrc.indexOf('function openMintShop');
   const to = uiSrc.indexOf('【U15】', from);
   const body = uiSrc.slice(from, to > from ? to : from + 6000);
-  assert.ok(/back\(p, \(\) => openEndless\(\), '返回无尽塔'\)/.test(body), '页脚返回不能关店：' + body.slice(0, 140));
+  assert.ok(/back\(p, \(\) => openEndless\(\), '返回'\)/.test(body), '页脚返回不能关店：' + body.slice(0, 140));
   assert.ok(!/back\(p, \(\) => \{ Tower\.leaveMintShop/.test(body), '页脚返回不该再调 leaveMintShop');
   assert.ok(/C\(\)\.btn\('继续战斗', 'mintleave'/.test(body), '主按钮应当改叫「继续战斗」：' + body.slice(0, 200));
   assert.ok(/Tower\.leaveMintShop\(\); openEndless\(\)/.test(body), '「继续战斗」才收摊');
@@ -5574,7 +5573,7 @@ test('需求132：每 5 层（非 x10）的最后一战改为精英 —— 原�
         mode + ' ' + layer + ' 层（非 x5）的精英标记只能来自狂战松鼠：' + nx.entry.kind);
       assert.equal(nx.info.elite, nx.elite, '战报的 info.elite 也要一致');
     }
-    /* ③ x10 层：第 4 场不是精英、第 5 场塔顶才是（一层只留一个精英台阶）。
+    /* ③ x10 层：第 4 场是随机狂战松鼠（精英）、第 5 场是征战动物 boss（精英）。
      *   注：「觐见魔王」的三连战只在**整百层**（100 / 200…）触发，10/20 层是普通结构。 */
     for (const layer of [10, 20]) {
       const pv = T.preview(layer, 'x5test', only, mode);
@@ -5928,7 +5927,7 @@ test('需求137：自愿支持作者 —— 系统页入口 / 30 级一次性提
             assert.match(rustSrc, /if path == "\/__open"/, '内置服务器要加 /__open 路由');
             assert.match(rustSrc, /fn open_api\(query: &str, out: &mut TcpStream\)/, '要有 /__open 的处理函数');
             assert.match(rustSrc, /fn open_external\(url: String\) -> Result<\(\), String>/, '要有 open_external 命令');
-            assert.match(rustSrc, /generate_handler!\[save_path, save_meta, save_read, save_write, (?:export_save, )?open_external\]/,
+            assert.match(rustSrc, /generate_handler!\[[^\]]*open_external\]/,
               '命令要注册进 invoke_handler');
             assert.match(rustSrc, /fn spawn_opener\(url: &str\)/, '要有跨平台的系统打开器');
             assert.match(rustSrc, /android\.intent\.action\.VIEW/, '安卓走 Intent');

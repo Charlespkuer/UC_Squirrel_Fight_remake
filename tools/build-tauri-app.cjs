@@ -67,6 +67,10 @@ const WEB_CHECK = args.includes('--check');
  * ============================================================ */
 const WEB_OUT = path.join(TAURI, 'web');
 const WEB_ITEMS = ['css', 'js', 'images', 'audio'];
+/* 版本号文件也要进快照：安装包 / APK 里运行时 `fetch('scripts/version.json')` 读的就是它。
+ * 只放 css/js/images/audio 的话，APK 里的「关于复刻版」会一直显示 js/classic-ui.js 里
+ * 写死的 VERSION_FALLBACK（用户 2026-10 回报：安卓玩家看到的还是 1.0.4）。 */
+const WEB_VERSION_FILE = 'scripts/version.json';
 const WEB_STAMP = path.join(WEB_OUT, 'BUILD.txt');
 
 /** 快照要**所有**文件（不能用文件末尾那个 walk：它只认 exe/msi/dmg 这类产物）。 */
@@ -83,7 +87,7 @@ function webFingerprint() {
   const hash = crypto.createHash('sha256');
   let files = 0;
   let bytes = 0;
-  for (const item of WEB_ITEMS.concat(['scripts/index.html'])) {
+  for (const item of WEB_ITEMS.concat(['scripts/index.html', WEB_VERSION_FILE])) {
     const src = path.join(ROOT, item);
     if (!fs.existsSync(src)) continue;
     if (fs.statSync(src).isDirectory()) {
@@ -98,7 +102,8 @@ function webFingerprint() {
       const size = fs.statSync(src).size;
       files++;
       bytes += size;
-      if (/\.(html|css|js)$/i.test(item)) hash.update(item).update(fs.readFileSync(src));
+      /* 版本号也要算进指纹：只改版本、不改前端时，`--check` 也得判「快照过期」。 */
+      if (/\.(html|css|js)$/i.test(item) || item === WEB_VERSION_FILE) hash.update(item).update(fs.readFileSync(src));
     }
   }
   return { hash: hash.digest('hex').slice(0, 16), files, bytes };
@@ -140,6 +145,37 @@ function buildWebSnapshot(checkOnly) {
     console.log('首页：' + path.relative(ROOT, entry).replace(/\\/g, '/') + ' → web/index.html');
   } else {
     console.warn('警告：找不到 index.html（根目录或 scripts/），安装包里会没有首页');
+  }
+  /* 版本号必须**跟着快照进安装包 / APK**（用户 2026-10 回报：安卓玩家「关于复刻版」还是 1.0.4）：
+   * 内嵌快照以前只有 css/js/images/audio + index.html，运行时 `fetch('scripts/version.json')`
+   * 在 tauri.localhost 下 404，于是退到 js/classic-ui.js 里写死的 VERSION_FALLBACK。
+   * 这里两件事一起做：
+   *   ① 复制 scripts/version.json → web/scripts/version.json（运行时 fetch 能读到）；
+   *   ② 往 web/index.html 注入 `window.__SSDZ_VERSION`（classic-ui 的第一优先级，
+   *      断网 / file:// / 被 CSP 拦住 fetch 时也显示正确版本）。 */
+  let snapshotVersion = '';
+  try {
+    const vf = path.join(ROOT, WEB_VERSION_FILE);
+    if (fs.existsSync(vf)) {
+      const vj = JSON.parse(fs.readFileSync(vf, 'utf8'));
+      snapshotVersion = String((vj && vj.version) || '');
+      fs.mkdirSync(path.join(WEB_OUT, 'scripts'), { recursive: true });
+      fs.copyFileSync(vf, path.join(WEB_OUT, WEB_VERSION_FILE));
+    }
+  } catch (e) {
+    console.warn('警告：读不到 scripts/version.json（安装包内版本号会退回 VERSION_FALLBACK）：' + e.message);
+  }
+  if (snapshotVersion) {
+    const webIndex = path.join(WEB_OUT, 'index.html');
+    if (fs.existsSync(webIndex)) {
+      let html = fs.readFileSync(webIndex, 'utf8');
+      if (html.indexOf('__SSDZ_VERSION') < 0) {
+        const tag = '<script>window.__SSDZ_VERSION=' + JSON.stringify(snapshotVersion) + ';</script>';
+        html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + tag) : tag + html;
+        fs.writeFileSync(webIndex, html, 'utf8');
+      }
+    }
+    console.log('版本号：' + snapshotVersion + '（注入 index.html 的 __SSDZ_VERSION + 复制 scripts/version.json）');
   }
   for (const item of WEB_ITEMS) {
     const src = path.join(ROOT, item);

@@ -387,6 +387,23 @@ record('浏览器侧模块都能加载并挂上全局（battle / tower / tower-u
   }
 });
 
+/* 用户 2026-10 回报：安卓玩家「关于复刻版」还是 1.0.4，开发端却是 1.0.5。
+ * 根因是安装包 / APK 的内嵌前端快照只有 css/js/images/audio + index.html：
+ * 运行时 fetch('scripts/version.json') 在 tauri.localhost 下 404，于是退回
+ * js/classic-ui.js 里写死的 VERSION_FALLBACK。这条钉住「快照必须把版本号带进去」。 */
+record('安装包 / APK 必须把版本号带进去（注入 __SSDZ_VERSION + 复制 scripts/version.json）', () => {
+  const build = fs.readFileSync(path.join(ROOT, 'tools', 'build-tauri-app.cjs'), 'utf8');
+  assert.match(build, /const WEB_VERSION_FILE = 'scripts\/version\.json'/,
+    '前端快照要显式认识 scripts/version.json');
+  assert.match(build, /fs\.copyFileSync\(vf, path\.join\(WEB_OUT, WEB_VERSION_FILE\)\)/,
+    '快照里要复制 scripts/version.json（运行时 fetch 读它）');
+  assert.match(build, /window\.__SSDZ_VERSION/,
+    'index.html 要注入 __SSDZ_VERSION（fetch 被拦 / file:// 时也能显示正确版本）');
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
+  assert.match(ui, /window\.__SSDZ_VERSION/,
+    'classic-ui 要优先读注入的版本号，而不是只看 VERSION_FALLBACK');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of results) {

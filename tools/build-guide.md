@@ -530,52 +530,6 @@ openssl ocsp -issuer /tmp/wwdr.pem -cert /tmp/leaf.pem \
 但换 Team 后是否保留要以一台真机实测为准；不放心就先让玩家导出/救援存档再升级。
 公开分发不要再依赖企业证书：网页版 / PWA、TestFlight 或 App Store 才是可持续路径。
 
-### 网页版 / PWA（2026-10）
-
-企业证书吊销后的免签名分发路线。游戏本来就是静态网页，Web/PWA 只是把它原样部署到 HTTPS 站点，再加一层可安装/离线壳。
-
-```bash
-node tools/build-web.cjs                 # 输出 dist-web/
-node tools/build-web.cjs --out _site     # GitHub Pages 工作流用
-python3 -m http.server 8123 --directory dist-web   # 本地静态预览（没有 /__save，正好测 web mode）
-```
-
-它做的事：
-
-- `scripts/index.html` → 站点根 `index.html`，注入 `manifest.webmanifest`、`apple-touch-icon`、`theme-color`、`apple-mobile-web-app-*`、`window.__SSDZ_WEB_MODE__=true` 和 `js/pwa.js`；
-- 复制 `css/ js/ images/ audio/`（跳过 `images/_reference`、`.DS_Store`）；
-- 复制 `web-pwa/manifest.webmanifest`、`web-pwa/sw.js`、`web-pwa/icons/`；
-- 把实际的核心文件清单和构建版本注入 `sw.js`（`__CORE_ASSETS__` / `__SW_VERSION__`）；
-- 复制 `scripts/version.json`。
-
-部署：
-
-- **GitHub Pages**：主仓 public 时，Settings → Pages → Source 选 **GitHub Actions**；`.github/workflows/pages.yml` 会跑 `node tools/build-web.cjs --out _site` 并上传。主仓 Pages 没启用时工作流会跳过 deploy。
-- **Cloudflare Pages / 国内 OSS+CDN**：构建命令 `node tools/build-web.cjs`，输出目录 `dist-web`；必须 HTTPS。
-- **origin 一旦发给玩家就不要换**：localStorage 按协议+域名+端口隔离，换 GitHub Pages 地址/加自定义域名/改仓库名都会丢旧存档；要换只能让玩家导出再导入。
-- **GitHub Pages 项目站点共享 origin**：`charlespkuer.github.io` 下所有项目共用 localStorage/CacheStorage；不要在同一账号下再开一个测试路径跑同一游戏，否则存档会串（测试用 localhost 或独立域名）。Service Worker 的 activate 只清 `ssdz-*` 缓存，避免误删同 origin 其它项目的 PWA 缓存。
-
-存档与安装：
-
-- 网页版存档是 `localStorage['ssdz_save_v1']`，不是 `save/progress.json`；旧企业版玩家先取救援 JSON，再在「系统 → 导入存档」导入。
-- Safari 标签页和主屏幕 Web App 的存储是**两个容器**；先「添加到主屏幕」再导入，或先导出再切换。iOS 17.2+ 只复制 Cookie，不复制 localStorage。
-- 主屏幕 Web App 的脚本存储豁免 ITP 的 7 天上限；Safari 标签页仍受 7 天清理影响。两者都建议定期「存档导出」。
-- iOS 安装：Safari → 分享 → 添加到主屏幕；iOS 26 保持「Open as Web App」开启。PWA 不是 App Store 应用，不需要审核/证书，但没有 App Store 分发。
-- PWA 缓存：首页、JS、CSS、图标预缓存；图片/音频运行时缓存。断网能启动到标题页/已缓存场景，没看过的战斗素材仍需网络；不做 100+ MB 全量预缓存。
-
-Web mode 补丁（`js/main.js` / `js/classic-ui.js`）：
-
-- 静态托管没有 `/__save` 是正常模式；`isStaticWebMode()` 会抑制「请用启动器」的错误横幅，并跳过 7 次重连。
-- 系统页「存档位置」改成「浏览器 localStorage（网页版）」，隐藏文件模式才用的写入/载入/服务器列表按钮，并隐藏同步/更新面板。
-- 如果以后改这两处，先在 `python3 -m http.server` 的静态站点里确认首屏没有橙色告警、系统页文案是网页版。
-
-验证（2026-10 实测）：
-
-- `node tools/build-web.cjs` 通过；`dist-web` 约 135 MB（图片占大头，首屏经典档约 11 MB）。
-- Chrome 无头加载：标题页正常、`#save-warning` 不存在；`UI.runAction('system')` 后系统页出现「浏览器 localStorage（网页版）」，没有 `save-write`/`save-load`/`save-import-list`。
-- Service Worker：注册 active、`clients.claim` 后 controller 存在；`ssdz-core-*` 49 个预缓存、`ssdz-runtime-*` 56 个运行时条目；DevTools 离线 reload 仍能回到首页并读到 localStorage 存档。
-- 真机还需要确认：iPhone Safari 的首屏视觉、添加到主屏幕后的独立窗口、状态栏/刘海安全区、横屏、导入文件选择器（Safari/PWA 各一次）。
-
 ## J. 前端要改吗
 
 不用改渲染，只有存档通道是「可插拔」的：

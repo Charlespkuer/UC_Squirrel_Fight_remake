@@ -22,7 +22,6 @@ node_modules/
 package-lock.json
 _site/
 dist/
-dist-web/
 __pycache__/
 
 # Tauri 桌面版：web/ 由 tools/build-tauri-app.cjs --web 生成，

@@ -600,24 +600,9 @@
   let pageHiddenAt = 0;
   let saveBanner = null;
 
-  /** 网页版/PWA：静态托管没有 /__save 是正常模式，不是“本地服务器没开”。
-   *  pwa.js 会在网页构建里设 __SSDZ_WEB_MODE__；非 Tauri 的 http(s) 站点也按网页版处理。 */
-  function isStaticWebMode() {
-    if (window.__SSDZ_WEB_MODE__) return true;
-    try {
-      if (location.protocol !== 'http:' && location.protocol !== 'https:') return false;
-      const host = String(location.hostname || '').toLowerCase();
-      if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') return false;
-      if (host === 'tauri.localhost') return false;
-      return true;
-    } catch (e) { return false; }
-  }
-
   /** 顶部告警横幅：一直挂着，直到成功连上磁盘存档（或玩家自己关掉）。 */
   function showSaveWarning() {
     if (saveBanner) return saveBanner;
-    // 网页版用 localStorage 是设计内的存档方式；系统页会说明，不挂“服务器没开”的错误横幅。
-    if (isStaticWebMode()) return null;
     const info = (State.fileInfo && State.fileInfo()) || {};
     const inFile = location.protocol === 'file:';
     /* 原生外壳（桌面安装版 / iOS / Android）：首次运行还没有存档文件是正常的，
@@ -696,8 +681,6 @@
   }
 
   async function retryFileSave() {
-    // 网页版没有 /__save，重试 7 次只会白等；直接按 localStorage 模式运行。
-    if (isStaticWebMode()) { hideSaveWarning(); return false; }
     if (State.fileLoadedThisBoot()) { hideSaveWarning(); return true; }
     // 首次运行没有存档文件：只要第一笔存档写成功，这条横幅就该消失
     if (((State.fileInfo() || {}).lastWrite || 0) > 0) { hideSaveWarning(); return true; }

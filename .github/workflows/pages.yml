@@ -25,21 +25,22 @@ jobs:
       pages_configured: ${{ steps.configure_pages.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
 
-      # 只发布游戏运行需要的东西：index.html + css/js/images/audio + PWA 资源。
+      # 只发布游戏运行需要的东西：index.html + css/js/images/audio。
       # references/（含原 APK）与 tools/（开发工具、截图证据）不进站点，省流量也避免版权问题。
       # serve.js / serve.py / 启动器是给「下载到本地玩」用的，静态站点上不需要（Pages 上存档退到 localStorage）。
-      - name: 组装站点目录（Web/PWA）
+      - name: 组装站点目录
         run: |
-          # 统一由 tools/build-web.cjs 生成：
-          #   · 复制 scripts/index.html 到站点根，并注入 manifest / apple-touch-icon / web mode；
-          #   · 复制 css/js/images/audio（自动跳过 images/_reference）；
-          #   · 复制 manifest.webmanifest / sw.js / icons，并把核心文件清单注入 sw.js；
-          #   · 复制 scripts/version.json。
-          node tools/build-web.cjs --out _site
+          mkdir -p _site
+          # 首页在 scripts/ 里，但站点根还是放 index.html —— 页面里的
+          # css/、js/ 这些相对引用是相对 URL 根解析的，所以一个引用都不用改
+          cp scripts/index.html _site/
+          cp -R css js images audio _site/
+          # 参考素材不上线：images/_reference/ 运行时不读（图集出处清单、新版界面截图裁切、未使用旧图）
+          rm -rf _site/images/_reference
+          # 版本标识：源文件在 scripts/version.json，站点根仍放一份（URL 不变）
+          [ -f scripts/version.json ] && cp scripts/version.json _site/ || true
+          # 游戏本体没有任何构建步骤，原样发布即可
           du -sh _site
           find _site -maxdepth 1 -mindepth 1 | sort
 

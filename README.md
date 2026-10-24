@@ -29,17 +29,10 @@
 **③ 安卓 APK**。
 > 存档全部留在本地，不上传任何服务器。
 
-### ① 在线试玩 / iOS PWA（不安装）
+### ① 在线试玩（不安装）
 
-浏览器打开 GitHub Pages 地址即可（仓库 Settings → Pages → Source 选 “GitHub Actions”，推 main 自动部署）。
-
-- 桌面 / 安卓浏览器：直接玩；存档在浏览器 localStorage。
-- iPhone / iPad：Safari 打开 → 分享 → **添加到主屏幕**；iOS 26 添加时保持「Open as Web App」开启。
-  主屏幕 Web App 和 Safari 标签页的存储是**两个容器**：先添加到主屏幕再导入存档；先玩过 Safari 的话，先「导出存档」再切过去。
-  Safari 标签页受 ITP 7 天清理影响，主屏幕 Web App 豁免；两者都建议定期「系统 → 存档导出」。
-- 网页版构建：`node tools/build-web.cjs`（默认 `dist-web/`；Pages 工作流用 `--out _site`）；
-  PWA 资源在 `web-pwa/`，`sw.js` 的核心清单在构建时注入。
-- 网页版没有 `/__save`，存档落到 `localStorage['ssdz_save_v1']`；旧企业版/救援 JSON 从「系统 → 导入存档」导入。
+浏览器打开 GitHub Pages 地址即可（仓库 Settings → Pages 选 “GitHub Actions”，推 main 自动部署）。
+存档落在浏览器 localStorage，换浏览器或清缓存会丢，适合先试玩。
 
 ### ② Windows
 

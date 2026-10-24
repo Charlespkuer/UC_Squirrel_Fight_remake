@@ -2707,16 +2707,9 @@
   /** 系统页里的「存档位置」一块：显示进度到底存在哪儿，并提供手动写入/载入。 */
   function saveFilePanel() {
     const info = State.fileInfo ? State.fileInfo() : { mode: 'local', available: false, checked: false };
-    const webMode = !!window.__SSDZ_WEB_MODE__;
-    if (!webMode && !info.checked) { void State.fileProbe().then(() => { if (screen === 'system') openSystem(); }); }
+    if (!info.checked) { void State.fileProbe().then(() => { if (screen === 'system') openSystem(); }); }
     let state;
-    if (webMode) {
-      /* 网页版/PWA：localStorage 就是正式存档，不是“没连上服务器”的兜底。
-       * Safari 标签页和主屏幕 Web App 的存储还是两个容器，所以文案要提醒导出备份。 */
-      state = '<b class="sync-on">浏览器 localStorage（网页版）</b><span class="small-label">' +
-        '进度保存在当前浏览器/主屏幕应用里；换浏览器、清缓存或换网址会丢。' +
-        '建议定期用上面的「存档导出」备份到「文件」/iCloud。</span>';
-    } else if (info.mode !== 'file') {
+    if (info.mode !== 'file') {
       state = '<b class="sync-off">浏览器里（兜底）</b><span class="small-label">' +
         esc(info.reason || '没有本地服务器，进度暂存在这个浏览器的 localStorage。') +
         '<br>用启动器或 <code>node serve.js</code> 打开游戏，进度就会写进 <code>save/progress.json</code>。</span>';
@@ -2727,15 +2720,13 @@
         '　最后载入 ' + State.syncFormatTime(info.lastLoad) + (info.dirty ? '　（有改动正在写入…）' : '') + '</span>';
     }
     const useFile = info.mode === 'file';
-    const actions = webMode ? '' :
-      '<div class="sync-actions">' + btn('写入存档', 'save-write', 'small' + (useFile ? '' : ' muted')) +
-      btn('载入存档', 'save-load', 'small' + (useFile ? '' : ' muted')) +
-      btn('存档列表', 'save-import-list', 'small') + '</div>';
     /* 用户 2026-10 口径：这一栏不要缩写成「写入 / 载入 / 列表」，
      * 固定用完整标签「写入存档 / 载入存档 / 存档列表」。`.sync-actions` 是 flex-wrap，
      * 窄屏会自然换行。 */
     return '<div class="sync-panel"><h3 class="classic-section-title">存档位置</h3><div class="sync-head">' + state + '</div>' +
-      actions + '</div>';
+      '<div class="sync-actions">' + btn('写入存档', 'save-write', 'small' + (useFile ? '' : ' muted')) +
+      btn('载入存档', 'save-load', 'small' + (useFile ? '' : ' muted')) +
+      btn('存档列表', 'save-import-list', 'small') + '</div></div>';
   }
   /** 选一个本地 .json 文件；返回 Promise<File|null>（null = 用户取消）。
    *  macOS 的 WKWebView / Safari（原生轻壳、安装包模式）只认**已经挂在文档里**的
@@ -2890,7 +2881,7 @@
       await restoreImportedSave(beforeRaw, info);
       throw new Error(message);
     };
-    if (!window.__SSDZ_WEB_MODE__ && info.mode !== 'file' && State.fileProbe) {
+    if (info.mode !== 'file' && State.fileProbe) {
       try {
         if (await State.fileProbe()) info = State.fileInfo ? State.fileInfo() : info;
       } catch (e) { /* 探针失败就照旧走兜底模式 */ }
@@ -3753,17 +3744,14 @@
         st.hideStatusBar !== false?'隐藏':'显示')+
       dbgBtn+
       '</div>';
-    const webMode = !!window.__SSDZ_WEB_MODE__;
-    const p=page('system','system',supportPanelHtml()+'<div class="settings-head"><h3 class="classic-section-title">游戏设置</h3>'+slider+'</div>'+modeCard+grid+saveFilePanel()+(webMode?'':syncPanel())+(webMode?'':updatePanelHtml()));
+    const p=page('system','system',supportPanelHtml()+'<div class="settings-head"><h3 class="classic-section-title">游戏设置</h3>'+slider+'</div>'+modeCard+grid+saveFilePanel()+syncPanel()+updatePanelHtml());
     /* 系统页按钮统一走经典反馈：菜单项/设置键/底栏都先弹一下再执行。 */
     $('[data-action="support"]',p).onclick=()=>openSupportModal();
     $('[data-action="uimode"]',p).onclick=()=>requestMode(nextUiMode());
     const dbgLedgerBtn=$('[data-action="debug-ledger"]',p);
     if(dbgLedgerBtn)dbgLedgerBtn.onclick=openDebugLedger;
-    const saveWriteBtn=$('[data-action="save-write"]',p);
-    if(saveWriteBtn)saveWriteBtn.onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};
-    const saveLoadBtn=$('[data-action="save-load"]',p);
-    if(saveLoadBtn)saveLoadBtn.onclick=loadSaveDialog;
+    $('[data-action="save-write"]',p).onclick=async()=>{const r=await State.fileWriteNow();toast(r.msg||(r.ok?'已写入':'写入失败'));openSystem();};
+    $('[data-action="save-load"]',p).onclick=loadSaveDialog;
     /* 系统页开关：只控制战斗里跳过键的显示；等级/VIP 解锁条件不变。 */
     $('[data-action="skip-display"]',p).onclick=()=>{
       const cur = State.settings().showSkip !== false;
@@ -3771,8 +3759,7 @@
       openSystem();
     };
     /* 从服务器存档列表导入：绕过系统文件选择器（桌面壳里也能用），列表里带等级与时间。 */
-    const saveListBtn=$('[data-action="save-import-list"]',p);
-    if(saveListBtn)saveListBtn.onclick=async()=>{
+    $('[data-action="save-import-list"]',p).onclick=async()=>{
       let list=[];
       try{const r=await fetch('/__saves',{cache:'no-store'});const j=await r.json();list=(j&&j.saves)||[];}
       catch(e){toast('读不到存档列表：本地服务器没开？');return;}
@@ -4140,21 +4127,17 @@
   /** 导入入口：iOS 用原生导出列表 / 粘贴；其它平台用文件选择器 / 粘贴。 */
   function importSave() {
     const ios = iosClient();
-    const webMode = !!window.__SSDZ_WEB_MODE__;
     const info = State.fileInfo ? State.fileInfo() : {};
     const hasNative = !!nativeInvoke();
     const shell = inTauriShell();
     const body = '<p>从导出的 .json 文件恢复进度。</p>' +
-      (webMode
-        ? '<p class="small-label">网页版：点「选文件」从「文件」App 选救援/导出的 .json；' +
-          '也可以「粘贴」存档文本。导入会覆盖这个浏览器里的当前档。</p>'
-        : (ios && hasNative
-          ? '<p class="small-label">iOS：点「存档列表」选 App 导出的存档（「文件」App → 我的 iPhone/iPad → 松鼠大战），' +
-            '或者用「粘贴」。</p>'
-          : (ios && shell
-            ? '<p class="small-label">iOS 安装包的存档接口还没就绪。请稍后重试，或先用「粘贴」导入。</p>'
-            : (info && info.path ? '<p class="small-label">当前正式存档：' + esc(info.path) + '</p>' : '') +
-              '<p class="small-label">文件选择器打不开时，用「粘贴」。</p>')));
+      (ios && hasNative
+        ? '<p class="small-label">iOS：点「存档列表」选 App 导出的存档（「文件」App → 我的 iPhone/iPad → 松鼠大战），' +
+          '或者用「粘贴」。</p>'
+        : (ios && shell
+          ? '<p class="small-label">iOS 安装包的存档接口还没就绪。请稍后重试，或先用「粘贴」导入。</p>'
+          : (info && info.path ? '<p class="small-label">当前正式存档：' + esc(info.path) + '</p>' : '') +
+            '<p class="small-label">文件选择器打不开时，用「粘贴」。</p>'));
     const buttons = [];
     if (ios && hasNative) buttons.push({ label: '存档列表', cls: 'gold', run: () => openIOSExportList() });
     else if (!ios || !shell) buttons.push({ label: '选文件', cls: 'gold', run: () => pickAndImportSave() });
@@ -4183,14 +4166,11 @@
     const info = State.fileInfo ? State.fileInfo() : {};
     const nowLevel = (State.state() || {}).level;
     const ios = iosClient();
-    const webMode = !!window.__SSDZ_WEB_MODE__;
-    const where = webMode
-      ? '会覆盖这个浏览器/主屏幕应用里的当前存档（旧档先留在 localStorage 备份键里）'
-      : (info.mode === 'file'
-        ? (ios
-          ? '会覆盖 App 的正式存档（旧档会先导出到「文件」App → 我的 iPhone/iPad → 松鼠大战）'
-          : '会覆盖磁盘上的正式存档 ' + (info.path || 'save/progress.json') + '（旧档先自动备份到 save/backup/）')
-        : '会覆盖这个浏览器里的兜底存档（旧档先留在 localStorage 备份键里）');
+    const where = info.mode === 'file'
+      ? (ios
+        ? '会覆盖 App 的正式存档（旧档会先导出到「文件」App → 我的 iPhone/iPad → 松鼠大战）'
+        : '会覆盖磁盘上的正式存档 ' + (info.path || 'save/progress.json') + '（旧档先自动备份到 save/backup/）')
+      : '会覆盖这个浏览器里的兜底存档（旧档先留在 localStorage 备份键里）';
     notice('导入【' + data.name + '】' + data.level + ' 级的存档？\n\n' + where +
       (nowLevel ? '。当前进度：' + nowLevel + ' 级。' : '。') +
       (source === '粘贴' ? '\n\n来源：粘贴的存档文本。' : ''),
@@ -4310,13 +4290,10 @@
       '<p><b>无尽塔</b>：免门票的无尽模式，越往上敌人越强。<br>' +
       '最高分 ' + (ei.best | 0) + ' · 最深 ' + (ei.bestLayer | 0) + ' 层（现有抽奖卷 ' + (ei.tickets | 0) + ' 张）</p>' +
       '<p class="small-label">两座塔都是离线单人玩法，不需要队友。</p>';
-    const m = modal('征战', body, [
+    modal('征战', body, [
       { label: '挑战塔', run: () => { if (window.TowerUI) TowerUI.openTower({ from: 'village' }); } },
       { label: '无尽塔', cls: 'gold', run: () => { if (window.TowerUI) TowerUI.openEndless({ from: 'village' }); } },
     ], { small: true });
-    /* 用户口径：这两颗是这一屏唯一的去路，做得比普通弹窗按钮大一档
-     *（宽度/高度/字号都在 classic-refine.css 的 `.campaign-dialog` 里）。 */
-    if (m && m.element) m.element.classList.add('campaign-dialog');
   }
   function openVillage() {
     /* 经典模式 + ssflight 素材可用时，进**原版真正的村庄页**（根时间轴帧 30 / homeMc 7140）：

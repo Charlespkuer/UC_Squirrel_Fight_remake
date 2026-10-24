@@ -43,7 +43,7 @@ function setup() {
   const S = c.State.state();
   S.level = 70;
   S.props[23] = 30;
-  for (let i = 1; i <= 18; i++) S.stages[i] = { npcIndex: 3, passed: true };
+  for (let i = 1; i <= 36; i++) S.stages[i] = { npcIndex: 3, passed: true };
   c.Tower._debugSetLayer(9);
   assert.ok(c.Tower.startEndlessRun().ok, '应该能开一局无尽塔');
   /* x0 层现在是「觐见魔王」三连战（近卫是狂战松鼠），敌人构成与旧口径不同 ——
@@ -151,6 +151,29 @@ test('界面渲染：每条环境胶囊都带 data-tip（悬停可看）', () =>
   assert.equal(raw, 1, '除了包装函数内部，不该再有裸的 C().modal 调用（否则里面的提示绑不上）');
 });
 
+test('成就提示与过程飘字分队列：旧档里的成就对象不会再显示 [object Object]', () => {
+  const c = setup();
+  const run = c.Tower._debugRun('endless');
+  run.pendingToasts = ['碎掉的烙印失效：测试', { key: 'legacy:1', name: '超凡入圣 · 攻击 +50%', points: 20, layer: run.layer }];
+  run.pendingAchievements = [{ key: 'fresh:1', name: '死而复生 · 累计 3 次', points: 10, layer: run.layer }];
+  /* 过程飘字只收字符串；旧档混进来的成就对象要被挪去成就队列，不能交给 runToast()。 */
+  assert.deepEqual(Array.from(c.Tower.takeRunToasts()), ['碎掉的烙印失效：测试'], '过程飘字只能返回字符串');
+  assert.deepEqual(Array.from(c.Tower.takeAchievementToasts(), (x) => x.name),
+    ['死而复生 · 累计 3 次', '超凡入圣 · 攻击 +50%'], '新旧成就都要从对象队列取出');
+  assert.equal(run.pendingToasts.length, 0);
+  assert.equal(run.pendingAchievements.length, 0);
+  /* 无尽页打开时要同时冲两条队列：成就条在上、过程飘字在下。 */
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  assert.match(ui, /function flushPendingAchievements\(\)[\s\S]{0,300}flushAchievements\(list\)/,
+    '待显示成就要交给 flushAchievements（内部走 achievementToast）');
+  assert.match(ui, /function flushAchievements\(list\)[\s\S]{0,120}achievementToast\(it\)/,
+    'flushAchievements 必须逐条走 achievementToast');
+  assert.match(ui, /flushRunToasts\(\); flushPendingAchievements\(\)/,
+    'openEndless 要同时冲刷过程飘字与待显示成就');
+  assert.match(ui, /typeof t === 'object'[\s\S]{0,80}achievementToast\(t\)/,
+    '过程飘字队列若漏进对象，也要兜底成成就条而不是 [object Object]');
+});
+
 test('每条环境都真的作用到战斗里（逐条实战验证）', () => {
   const c = setup();
 
@@ -256,7 +279,7 @@ test('挑战塔的环境不承诺试炼币：贪婪裂隙在塔里改名「厚�
   assert.ok(!/试炼币/.test(e.text), '塔里的当前环境文案也不提试炼币：' + e.text);
 });
 
-test('100 层循环：层号 → 机制开关的映射每轮严格一致，只有敌人数值续着长', () => {
+test('100 层循环：机制开关每轮一致，敌人完整基础在轮首承接上一轮末尾折扣', () => {
   const c = setup();
   const TD = c.TowerData, T = c.Tower;
   /* 0）用户口径（2026-10）：101-104 层没有环境；随机丢烙印要等到「原来的层数 +100」（132 层）。 */
@@ -305,9 +328,16 @@ test('100 层循环：层号 → 机制开关的映射每轮严格一致，只�
   assert.equal(probeLoss(101), 0, '进第 101 层不该丢');
   assert.equal(probeLoss(131), 0, '进第 131 层不该丢');
   assert.equal(probeLoss(132), 1, '进第 132 层应当丢一条');
-  /* 4）唯一例外：敌人数值继续长（不重置）。 */
-  assert.ok(TD.endlessDepthMul(101) > TD.endlessDepthMul(100), '101 层敌人数值仍高于 100 层');
-  assert.ok(TD.endlessDepthMul(201) > TD.endlessDepthMul(200), '201 层同样');
+  /* 4）完整基础承接上一轮末尾折扣；不能拿已重置的单项 KM 代表敌人面板。 */
+  const close = (actual, wanted, label) => assert.ok(Math.abs(actual / wanted - 1) < 1e-12, label);
+  for (const start of [101, 201]) {
+    const prev = TD.endlessScaleParts(start - 1), next = TD.endlessScaleParts(start);
+    for (const field of ['statCurve', 'hpCurve']) {
+      close(next[field], prev[field] * TD.ENDLESS_CYCLE_DISCOUNT, start + ' 层的 ' + field + ' 应承接折扣');
+    }
+    const bossHp = (n) => TD.endlessScaleParts(n).hpCurve * TD.endlessBossHpRatio(1, n);
+    close(bossHp(start), bossHp(start - 1) * TD.ENDLESS_CYCLE_DISCOUNT, '普通 boss 血量也应准确承接折扣');
+  }
   /* 5）跨轮进层（200 → 201）时清掉残留环境，给新一轮干净起点。 */
   T._debugSetEndlessLayer(200);
   T._debugRun('endless').env = [{ id: 'thorns', left: 5, values: { thornsPct: 0.15 } }];

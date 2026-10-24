@@ -1,0 +1,6959 @@
+{
+ "generator": "tools/gen-ssfight-ui.cjs",
+ "how": "view.byName(名字) 的寻址面：名字 → 元件号 / 类型 / 帧数 / 出现在宿主第几帧。改界面前先在这里查，比 grep 700 KB~1.8 MB 的 tags-*.json 快得多。",
+ "bundles": {
+  "status": {
+   "bundle": "tags-status.json",
+   "count": 130,
+   "names": {
+    "requirement": {
+     "id": "3670",
+     "kind": "sprite",
+     "frames": 7,
+     "inFrames": [
+      1
+     ],
+     "owner": "4673"
+    },
+    "c1": {
+     "id": "3636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7218"
+    },
+    "buttonsMc": {
+     "id": "4553",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "4673"
+    },
+    "des": {
+     "id": "4655",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "name": {
+     "id": "4881",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ],
+     "owner": "4886"
+    },
+    "harm": {
+     "id": "4543",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "4673"
+    },
+    "levelText": {
+     "id": "4544",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "4673"
+    },
+    "type": {
+     "id": "4582",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "owner": "4673"
+    },
+    "t_count": {
+     "id": "4556",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "mc_body": {
+     "id": "5262",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "mc_head": {
+     "id": "7208",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "mc_hand": {
+     "id": "4561",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "mc_foot": {
+     "id": "4562",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "c2": {
+     "id": "3636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7218"
+    },
+    "c3": {
+     "id": "3636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7218"
+    },
+    "c4": {
+     "id": "3636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7218"
+    },
+    "c5": {
+     "id": "3636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7218"
+    },
+    "c6": {
+     "id": "3636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7218"
+    },
+    "left": {
+     "id": "3156",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7218"
+    },
+    "right": {
+     "id": "3156",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7218"
+    },
+    "back": {
+     "id": "3362",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "icon1": {
+     "id": "4563",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "icon2": {
+     "id": "4563",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "icon3": {
+     "id": "4563",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "icon4": {
+     "id": "4563",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "icon5": {
+     "id": "4563",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "icon6": {
+     "id": "4563",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "t_1": {
+     "id": "4564",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "t_4": {
+     "id": "4565",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "t_3": {
+     "id": "4566",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "t_2": {
+     "id": "4567",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "t_5": {
+     "id": "4568",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "t_6": {
+     "id": "4569",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4673"
+    },
+    "t_name": {
+     "id": "4601",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "4605"
+    },
+    "b_back": {
+     "id": "4419",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "owner": "4886"
+    },
+    "b_sell": {
+     "id": "4401",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "owner": "4673"
+    },
+    "b_on": {
+     "id": "4577",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "4578"
+    },
+    "level": {
+     "id": "3664",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "3670"
+    },
+    "base": {
+     "id": "4580",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "owner": "4673"
+    },
+    "baseOther": {
+     "id": "4658",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "b1": {
+     "id": "4589",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "4590"
+    },
+    "baseOtherExtra": {
+     "id": "4591",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "owner": "4673"
+    },
+    "baseExtra": {
+     "id": "4592",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "owner": "4673"
+    },
+    "price": {
+     "id": "4597",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6
+     ],
+     "owner": "4673"
+    },
+    "button2": {
+     "id": "4885",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ],
+     "owner": "4886"
+    },
+    "button1": {
+     "id": "3153",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ],
+     "owner": "4886"
+    },
+    "mc_tab2": {
+     "id": "4605",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7
+     ],
+     "owner": "4673"
+    },
+    "mc_tab1": {
+     "id": "4605",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7
+     ],
+     "owner": "4673"
+    },
+    "mc_tab4": {
+     "id": "4605",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7
+     ],
+     "owner": "4673"
+    },
+    "mc_tab3": {
+     "id": "4605",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7
+     ],
+     "owner": "4673"
+    },
+    "cBack1": {
+     "id": "4608",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8
+     ],
+     "owner": "4673"
+    },
+    "cBack2": {
+     "id": "4610",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8
+     ],
+     "owner": "4673"
+    },
+    "cBack3": {
+     "id": "4612",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8
+     ],
+     "owner": "4673"
+    },
+    "b_choose": {
+     "id": "4616",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8
+     ],
+     "owner": "4673"
+    },
+    "b_fusion": {
+     "id": "7206",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7207"
+    },
+    "b_help": {
+     "id": "4621",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8
+     ],
+     "owner": "4673"
+    },
+    "mc_tips": {
+     "id": "4628",
+     "kind": "sprite",
+     "frames": 6,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8
+     ],
+     "owner": "4673"
+    },
+    "mergeCost": {
+     "id": "4636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8
+     ],
+     "owner": "4673"
+    },
+    "t_base2": {
+     "id": "4638",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "t_addr1": {
+     "id": "4639",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "t_addr2": {
+     "id": "4640",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "mc_1": {
+     "id": "4644",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "4645"
+    },
+    "mc_2": {
+     "id": "4645",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "require": {
+     "id": "4647",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "t_name1": {
+     "id": "4648",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "t_base1": {
+     "id": "4649",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "t_name2": {
+     "id": "4650",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "cs1": {
+     "id": "4652",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "cs2": {
+     "id": "4652",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "risedMc": {
+     "id": "4662",
+     "kind": "sprite",
+     "frames": 12,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "t_tips": {
+     "id": "4686",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      3,
+      4,
+      6
+     ],
+     "owner": "4692"
+    },
+    "b_ok": {
+     "id": "3852",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "goal": {
+     "id": "4672",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9
+     ],
+     "owner": "4673"
+    },
+    "cost": {
+     "id": "4879",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "owner": "4886"
+    },
+    "t_base": {
+     "id": "4600",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "4605"
+    },
+    "t_addr": {
+     "id": "4602",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "4605"
+    },
+    "stone": {
+     "id": "4603",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "4605"
+    },
+    "current1": {
+     "id": "3658",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "3670"
+    },
+    "need1": {
+     "id": "3659",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "3670"
+    },
+    "need2": {
+     "id": "3661",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "3670"
+    },
+    "current2": {
+     "id": "3662",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "3670"
+    },
+    "rate": {
+     "id": "3663",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "3670"
+    },
+    "info": {
+     "id": "4681",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "4682"
+    },
+    "bg": {
+     "id": "4682",
+     "kind": "sprite",
+     "frames": 17,
+     "inFrames": [
+      1,
+      3
+     ],
+     "owner": "4692"
+    },
+    "text1": {
+     "id": "4882",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ],
+     "owner": "4886"
+    },
+    "size1": {
+     "id": "4680",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "4682"
+    },
+    "vipDes": {
+     "id": "4850",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "4886"
+    },
+    "reason": {
+     "id": "4853",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "4886"
+    },
+    "count": {
+     "id": "4854",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "4886"
+    },
+    "button3": {
+     "id": "4862",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4886"
+    },
+    "vipTips": {
+     "id": "4857",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "4886"
+    },
+    "activity2_1": {
+     "id": "4860",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4886"
+    },
+    "activity2_2": {
+     "id": "4860",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4886"
+    },
+    "activity2_3": {
+     "id": "4860",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4886"
+    },
+    "text2": {
+     "id": "4883",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ],
+     "owner": "4886"
+    },
+    "text3": {
+     "id": "4866",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4886"
+    },
+    "button4": {
+     "id": "3644",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "owner": "4886"
+    },
+    "text0": {
+     "id": "4872",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "owner": "4886"
+    },
+    "b_hc": {
+     "id": "4878",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "owner": "4886"
+    },
+    "agility": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "hp": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "power": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "expMc": {
+     "id": "4318",
+     "kind": "sprite",
+     "frames": 101,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "expNum": {
+     "id": "7182",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "speed": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "winRate": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "fightTimes1": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "fightTimes2": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "b_change": {
+     "id": "7193",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      4
+     ],
+     "owner": "7199"
+    },
+    "mc_footR": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "mc_handR": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "ikNode_9": {
+     "id": "5785",
+     "kind": "sprite",
+     "frames": 12,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "mc_fistR": {
+     "id": "5116",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "mc_footL": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "mc_handL": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "mc_fistL": {
+     "id": "5605",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "tab": {
+     "id": "7210",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "tab1": {
+     "id": "7212",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "tab2": {
+     "id": "7215",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7218"
+    },
+    "page": {
+     "id": "7217",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7218"
+    },
+    "c10": {
+     "id": "3636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7218"
+    },
+    "c9": {
+     "id": "3636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7218"
+    },
+    "c8": {
+     "id": "3636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7218"
+    },
+    "c7": {
+     "id": "3636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7218"
+    },
+    "del_friend": {
+     "id": "7195",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      4,
+      5
+     ],
+     "owner": "7199"
+    },
+    "leaveMsg": {
+     "id": "7198",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      4,
+      5
+     ],
+     "owner": "7199"
+    },
+    "num2": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "4315"
+    },
+    "num3": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "4315"
+    },
+    "num4": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "4315"
+    },
+    "num1": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "4315"
+    }
+   }
+  },
+  "challenge": {
+   "bundle": "tags-challenge.json",
+   "count": 126,
+   "names": {
+    "subframe": {
+     "id": "4723",
+     "kind": "sprite",
+     "frames": 30,
+     "inFrames": [
+      1
+     ],
+     "owner": "4756"
+    },
+    "button1": {
+     "id": "4748",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7555"
+    },
+    "button2": {
+     "id": "4748",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7555"
+    },
+    "info2": {
+     "id": "4727",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      4
+     ],
+     "owner": "4756"
+    },
+    "info1": {
+     "id": "4730",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      4
+     ],
+     "owner": "4756"
+    },
+    "style": {
+     "id": "4738",
+     "kind": "sprite",
+     "frames": 7,
+     "inFrames": [
+      1,
+      2,
+      4,
+      5
+     ],
+     "owner": "4756"
+    },
+    "button3": {
+     "id": "4748",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7555"
+    },
+    "button4": {
+     "id": "4748",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      4,
+      5
+     ],
+     "owner": "4756"
+    },
+    "button5": {
+     "id": "4748",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      4,
+      5
+     ],
+     "owner": "4756"
+    },
+    "button6": {
+     "id": "4748",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      4,
+      5
+     ],
+     "owner": "4756"
+    },
+    "back": {
+     "id": "3362",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7638"
+    },
+    "button": {
+     "id": "4747",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4748"
+    },
+    "rightBg": {
+     "id": "7232",
+     "kind": "sprite",
+     "frames": 7,
+     "inFrames": [
+      1
+     ],
+     "owner": "7638"
+    },
+    "f3": {
+     "id": "7237",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7638"
+    },
+    "s3": {
+     "id": "7251",
+     "kind": "sprite",
+     "frames": 7,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7638"
+    },
+    "f1": {
+     "id": "7237",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7638"
+    },
+    "f2": {
+     "id": "7237",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7638"
+    },
+    "f4": {
+     "id": "7273",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7638"
+    },
+    "s1": {
+     "id": "7251",
+     "kind": "sprite",
+     "frames": 7,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7638"
+    },
+    "s2": {
+     "id": "7251",
+     "kind": "sprite",
+     "frames": 7,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7638"
+    },
+    "s4": {
+     "id": "7251",
+     "kind": "sprite",
+     "frames": 7,
+     "inFrames": [
+      1
+     ],
+     "owner": "7638"
+    },
+    "left": {
+     "id": "3156",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "right": {
+     "id": "3156",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "vip4": {
+     "id": "7252",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7638"
+    },
+    "vip3": {
+     "id": "7252",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7638"
+    },
+    "vip2": {
+     "id": "7252",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7638"
+    },
+    "vip1": {
+     "id": "7252",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7638"
+    },
+    "energyMc": {
+     "id": "7022",
+     "kind": "sprite",
+     "frames": 101,
+     "inFrames": [
+      1
+     ],
+     "owner": "7638"
+    },
+    "energy": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7638"
+    },
+    "maxEnergy": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7638"
+    },
+    "page": {
+     "id": "7274",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7638"
+    },
+    "tab2": {
+     "id": "7260",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7562"
+    },
+    "tab1": {
+     "id": "7264",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7562"
+    },
+    "tab": {
+     "id": "7266",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "owner": "7562"
+    },
+    "tab3": {
+     "id": "7257",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "owner": "7562"
+    },
+    "addfriend": {
+     "id": "7269",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7638"
+    },
+    "fubenSub": {
+     "id": "7555",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7638"
+    },
+    "desc": {
+     "id": "7276",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7555"
+    },
+    "startCompete": {
+     "id": "7561",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "owner": "7638"
+    },
+    "tiaozhanTap": {
+     "id": "7562",
+     "kind": "sprite",
+     "frames": 5,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "owner": "7638"
+    },
+    "join1": {
+     "id": "3385",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "owner": "7638"
+    },
+    "join3": {
+     "id": "3385",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "owner": "7638"
+    },
+    "join2": {
+     "id": "3385",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "owner": "7638"
+    },
+    "join4": {
+     "id": "3385",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "owner": "7638"
+    },
+    "statu": {
+     "id": "7572",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "owner": "7638"
+    },
+    "compete": {
+     "id": "7583",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ],
+     "owner": "7638"
+    },
+    "rank1": {
+     "id": "7599",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "rank2": {
+     "id": "7600",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "rank3": {
+     "id": "7601",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "rank4": {
+     "id": "7602",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "inte1": {
+     "id": "7603",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "inte2": {
+     "id": "7604",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "inte3": {
+     "id": "7605",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "inte4": {
+     "id": "7606",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "name1": {
+     "id": "7607",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "name2": {
+     "id": "7608",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "name3": {
+     "id": "7609",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "name4": {
+     "id": "7610",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "myinte": {
+     "id": "7615",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "myrank": {
+     "id": "7616",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "type": {
+     "id": "7623",
+     "kind": "sprite",
+     "frames": 7,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "c1": {
+     "id": "3636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "c3": {
+     "id": "3636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "c2": {
+     "id": "3636",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "des": {
+     "id": "7625",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "name": {
+     "id": "3383",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      3
+     ],
+     "owner": "3385"
+    },
+    "title": {
+     "id": "7628",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "text21": {
+     "id": "7629",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "text22": {
+     "id": "7630",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "text23": {
+     "id": "7631",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "text11": {
+     "id": "7632",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "text12": {
+     "id": "7633",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "text13": {
+     "id": "7634",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "text31": {
+     "id": "7635",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "text32": {
+     "id": "7636",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "text33": {
+     "id": "7637",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "owner": "7638"
+    },
+    "aType": {
+     "id": "7580",
+     "kind": "sprite",
+     "frames": 5,
+     "inFrames": [
+      1
+     ],
+     "owner": "7583"
+    },
+    "level": {
+     "id": "3384",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      3
+     ],
+     "owner": "3385"
+    },
+    "cup": {
+     "id": "3380",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "3385"
+    },
+    "rate": {
+     "id": "3377",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "3380"
+    },
+    "bg1": {
+     "id": "7549",
+     "kind": "sprite",
+     "frames": 14,
+     "inFrames": [
+      1
+     ],
+     "owner": "7555"
+    },
+    "bg2": {
+     "id": "7549",
+     "kind": "sprite",
+     "frames": 14,
+     "inFrames": [
+      1
+     ],
+     "owner": "7555"
+    },
+    "bg3": {
+     "id": "7549",
+     "kind": "sprite",
+     "frames": 14,
+     "inFrames": [
+      1
+     ],
+     "owner": "7555"
+    },
+    "left_btn": {
+     "id": "3156",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7555"
+    },
+    "right_btn": {
+     "id": "3156",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7555"
+    },
+    "newYearMc": {
+     "id": "7551",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7555"
+    },
+    "ikNode_1219": {
+     "id": "7290",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1225": {
+     "id": "7294",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1227": {
+     "id": "7294",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1228": {
+     "id": "7302",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1226": {
+     "id": "7302",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1218": {
+     "id": "7309",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1217": {
+     "id": "7313",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1212": {
+     "id": "7319",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1216": {
+     "id": "7290",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1215": {
+     "id": "7309",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1214": {
+     "id": "7313",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1221": {
+     "id": "7294",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1223": {
+     "id": "7294",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1220": {
+     "id": "7332",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1222": {
+     "id": "7339",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "ikNode_1224": {
+     "id": "7339",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      7
+     ],
+     "owner": "7549"
+    },
+    "num": {
+     "id": "4780",
+     "kind": "sprite",
+     "frames": 13,
+     "inFrames": [
+      1
+     ],
+     "owner": "7252"
+    },
+    "fist": {
+     "id": "7250",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      4,
+      5
+     ],
+     "owner": "7251"
+    },
+    "fist1": {
+     "id": "7241",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7243"
+    },
+    "levelButton": {
+     "id": "3713",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7237"
+    },
+    "friendname": {
+     "id": "7234",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7237"
+    },
+    "flevel": {
+     "id": "7235",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7237"
+    },
+    "num2": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "num3": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "num4": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "num1": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "hp": {
+     "id": "7220",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "agility": {
+     "id": "7221",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "speed": {
+     "id": "7222",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "power": {
+     "id": "7223",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "mc_footR": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "mc_handR": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "ikNode_9": {
+     "id": "5785",
+     "kind": "sprite",
+     "frames": 12,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "mc_body": {
+     "id": "5262",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "mc_fistR": {
+     "id": "5116",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "mc_footL": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "mc_head": {
+     "id": "7208",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "mc_handL": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "mc_fistL": {
+     "id": "5605",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    },
+    "num5": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "7232"
+    }
+   }
+  },
+  "homeLand": {
+   "bundle": "tags-home.json",
+   "count": 15,
+   "names": {
+    "mc3": {
+     "id": "7093",
+     "kind": "sprite",
+     "frames": 8,
+     "inFrames": [
+      1
+     ],
+     "owner": "7140"
+    },
+    "mc1": {
+     "id": "7100",
+     "kind": "sprite",
+     "frames": 7,
+     "inFrames": [
+      1
+     ],
+     "owner": "7140"
+    },
+    "mc4": {
+     "id": "7109",
+     "kind": "sprite",
+     "frames": 8,
+     "inFrames": [
+      1
+     ],
+     "owner": "7140"
+    },
+    "mc5": {
+     "id": "7116",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7140"
+    },
+    "num1": {
+     "id": "4780",
+     "kind": "sprite",
+     "frames": 13,
+     "inFrames": [
+      1
+     ],
+     "owner": "7059"
+    },
+    "button8": {
+     "id": "7122",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7140"
+    },
+    "button9": {
+     "id": "7126",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7140"
+    },
+    "button6": {
+     "id": "7129",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7140"
+    },
+    "button10": {
+     "id": "7133",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7140"
+    },
+    "mainButton": {
+     "id": "7136",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7140"
+    },
+    "time3": {
+     "id": "7137",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7140"
+    },
+    "time1": {
+     "id": "7138",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7140"
+    },
+    "time4": {
+     "id": "7139",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7140"
+    },
+    "num2": {
+     "id": "4780",
+     "kind": "sprite",
+     "frames": 13,
+     "inFrames": [
+      1
+     ],
+     "owner": "7059"
+    },
+    "num": {
+     "id": "7059",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7093"
+    }
+   }
+  },
+  "daoju": {
+   "bundle": "tags-daoju.json",
+   "count": 35,
+   "names": {
+    "page": {
+     "id": "7142",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "des": {
+     "id": "7144",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "name": {
+     "id": "7145",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "lymoney": {
+     "id": "7146",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "tab": {
+     "id": "7150",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "tab1": {
+     "id": "7152",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "tab2": {
+     "id": "7156",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "c1": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "c2": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "c3": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "c4": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "c5": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "c6": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "text1": {
+     "id": "7163",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7180"
+    },
+    "back": {
+     "id": "3362",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "left": {
+     "id": "3156",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "right": {
+     "id": "3156",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7180"
+    },
+    "text2": {
+     "id": "7164",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7180"
+    },
+    "text3": {
+     "id": "7165",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7180"
+    },
+    "text4": {
+     "id": "7166",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7180"
+    },
+    "text5": {
+     "id": "7167",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7180"
+    },
+    "text6": {
+     "id": "7168",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7180"
+    },
+    "mon1": {
+     "id": "3867",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7180"
+    },
+    "mon2": {
+     "id": "3867",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7180"
+    },
+    "mon3": {
+     "id": "3867",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7180"
+    },
+    "mon4": {
+     "id": "3867",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7180"
+    },
+    "mon5": {
+     "id": "3867",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7180"
+    },
+    "mon6": {
+     "id": "3867",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7180"
+    },
+    "button4": {
+     "id": "7172",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7180"
+    },
+    "button2": {
+     "id": "7177",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7180"
+    },
+    "button1": {
+     "id": "4431",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7180"
+    },
+    "button5": {
+     "id": "3554",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7180"
+    },
+    "text0": {
+     "id": "7179",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7180"
+    },
+    "activity1": {
+     "id": "4496",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7180"
+    },
+    "activity2": {
+     "id": "4860",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7180"
+    }
+   }
+  },
+  "message": {
+   "bundle": "tags-message.json",
+   "count": 27,
+   "names": {
+    "back1": {
+     "id": "3393",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "back2": {
+     "id": "3393",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "text11": {
+     "id": "7796",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "back": {
+     "id": "3362",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "left": {
+     "id": "3156",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "right": {
+     "id": "3156",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "text22": {
+     "id": "7797",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "tab": {
+     "id": "7801",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "tab1": {
+     "id": "7805",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "tab2": {
+     "id": "7807",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "tab3": {
+     "id": "7809",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "text2": {
+     "id": "7810",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "b2": {
+     "id": "4821",
+     "kind": "sprite",
+     "frames": 5,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "b1": {
+     "id": "4821",
+     "kind": "sprite",
+     "frames": 5,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "button1": {
+     "id": "7813",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "button2": {
+     "id": "7816",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "a1": {
+     "id": "4833",
+     "kind": "sprite",
+     "frames": 5,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "a2": {
+     "id": "4833",
+     "kind": "sprite",
+     "frames": 5,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "page": {
+     "id": "7817",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "text1": {
+     "id": "7818",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "win1": {
+     "id": "3407",
+     "kind": "sprite",
+     "frames": 9,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "win2": {
+     "id": "3407",
+     "kind": "sprite",
+     "frames": 9,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "revengeNew": {
+     "id": "3180",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "leaveNew": {
+     "id": "3180",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "qualifyNew": {
+     "id": "3180",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7819"
+    },
+    "a": {
+     "id": "4832",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4833"
+    },
+    "b": {
+     "id": "4820",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "4821"
+    }
+   }
+  },
+  "main": {
+   "bundle": "tags.json",
+   "count": 268,
+   "names": {
+    "menu": {
+     "id": "7824",
+     "kind": "sprite",
+     "frames": 5,
+     "inFrames": [
+      1
+     ],
+     "owner": "7847"
+    },
+    "help": {
+     "id": "7828",
+     "kind": "sprite",
+     "frames": 10,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7847"
+    },
+    "helpContent": {
+     "id": "7846",
+     "kind": "sprite",
+     "frames": 9,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7847"
+    },
+    "level": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "c1": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "fourProperties": {
+     "id": "7794",
+     "kind": "sprite",
+     "frames": 7,
+     "inFrames": [
+      1,
+      30
+     ],
+     "owner": "7795"
+    },
+    "p1": {
+     "id": "7778",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7794"
+    },
+    "text1": {
+     "id": "7793",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ],
+     "owner": "7794"
+    },
+    "p2": {
+     "id": "7778",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7794"
+    },
+    "text2": {
+     "id": "7790",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "owner": "7794"
+    },
+    "p3": {
+     "id": "7778",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "owner": "7794"
+    },
+    "text3": {
+     "id": "7791",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "owner": "7794"
+    },
+    "p4": {
+     "id": "7778",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "owner": "7794"
+    },
+    "text4": {
+     "id": "7792",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2,
+      3,
+      4,
+      5
+     ],
+     "owner": "7794"
+    },
+    "num2": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "num3": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "num4": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "num1": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "backGround": {
+     "id": "7692",
+     "kind": "sprite",
+     "frames": 6,
+     "inFrames": [
+      1
+     ],
+     "owner": "7772"
+    },
+    "blood": {
+     "id": "7703",
+     "kind": "sprite",
+     "frames": 9,
+     "inFrames": [
+      1
+     ],
+     "owner": "7772"
+    },
+    "winWords": {
+     "id": "7717",
+     "kind": "sprite",
+     "frames": 6,
+     "inFrames": [
+      1
+     ],
+     "owner": "7772"
+    },
+    "backgd": {
+     "id": "7722",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7772"
+    },
+    "prizeBackg": {
+     "id": "7725",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7772"
+    },
+    "maxlevel": {
+     "id": "7730",
+     "kind": "sprite",
+     "frames": 5,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7772"
+    },
+    "shoutu": {
+     "id": "7747",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7772"
+    },
+    "getExp": {
+     "id": "7744",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      2,
+      3
+     ],
+     "owner": "7772"
+    },
+    "num": {
+     "id": "4780",
+     "kind": "sprite",
+     "frames": 13,
+     "inFrames": [
+      1
+     ],
+     "owner": "7032"
+    },
+    "c2": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "c3": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "openChest": {
+     "id": "7771",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      2,
+      3,
+      5
+     ],
+     "owner": "7772"
+    },
+    "k1": {
+     "id": "7767",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7771"
+    },
+    "b1": {
+     "id": "7769",
+     "kind": "sprite",
+     "frames": 6,
+     "inFrames": [
+      1
+     ],
+     "owner": "7771"
+    },
+    "k2": {
+     "id": "7767",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7771"
+    },
+    "b2": {
+     "id": "7769",
+     "kind": "sprite",
+     "frames": 6,
+     "inFrames": [
+      1
+     ],
+     "owner": "7771"
+    },
+    "k3": {
+     "id": "7767",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7771"
+    },
+    "b3": {
+     "id": "7769",
+     "kind": "sprite",
+     "frames": 6,
+     "inFrames": [
+      1
+     ],
+     "owner": "7771"
+    },
+    "k4": {
+     "id": "7767",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7771"
+    },
+    "b4": {
+     "id": "7769",
+     "kind": "sprite",
+     "frames": 6,
+     "inFrames": [
+      1
+     ],
+     "owner": "7771"
+    },
+    "text0": {
+     "id": "7770",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7771"
+    },
+    "k": {
+     "id": "7765",
+     "kind": "sprite",
+     "frames": 11,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7767"
+    },
+    "count": {
+     "id": "7766",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7767"
+    },
+    "addOrReduce": {
+     "id": "4842",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1
+     ],
+     "owner": "4843"
+    },
+    "exp": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7739"
+    },
+    "inte": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      2
+     ],
+     "owner": "7739"
+    },
+    "bloodbar1": {
+     "id": "7697",
+     "kind": "sprite",
+     "frames": 102,
+     "inFrames": [
+      1
+     ],
+     "owner": "7703"
+    },
+    "bloodbar2": {
+     "id": "7697",
+     "kind": "sprite",
+     "frames": 102,
+     "inFrames": [
+      1
+     ],
+     "owner": "7703"
+    },
+    "name1": {
+     "id": "7699",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      8
+     ],
+     "owner": "7703"
+    },
+    "name2": {
+     "id": "7700",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      8
+     ],
+     "owner": "7703"
+    },
+    "attackerS1": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      8
+     ],
+     "owner": "7703"
+    },
+    "attackerS2": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      8
+     ],
+     "owner": "7703"
+    },
+    "attackerS3": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      8
+     ],
+     "owner": "7703"
+    },
+    "defenderS1": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      8
+     ],
+     "owner": "7703"
+    },
+    "defenderS2": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      8
+     ],
+     "owner": "7703"
+    },
+    "defenderS3": {
+     "id": "3414",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1,
+      8
+     ],
+     "owner": "7703"
+    },
+    "bloodtext2": {
+     "id": "7701",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      8
+     ],
+     "owner": "7703"
+    },
+    "bloodtext1": {
+     "id": "7702",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1,
+      8
+     ],
+     "owner": "7703"
+    },
+    "time": {
+     "id": "3750",
+     "kind": "sprite",
+     "frames": 42,
+     "inFrames": [
+      1,
+      8
+     ],
+     "owner": "7703"
+    },
+    "prentices": {
+     "id": "6982",
+     "kind": "sprite",
+     "frames": 5,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "myself": {
+     "id": "6988",
+     "kind": "sprite",
+     "frames": 89,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "button1": {
+     "id": "6994",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "button2": {
+     "id": "6999",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "button3": {
+     "id": "7006",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "button4": {
+     "id": "7011",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "button5": {
+     "id": "7016",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "newMessage": {
+     "id": "3180",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "name": {
+     "id": "7018",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "energyMc": {
+     "id": "7022",
+     "kind": "sprite",
+     "frames": 101,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "energy": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "maxEnergy": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "expMc": {
+     "id": "4318",
+     "kind": "sprite",
+     "frames": 101,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "expNum": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "point": {
+     "id": "7028",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "num6": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "num7": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "num8": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "num5": {
+     "id": "3529",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "viplevel": {
+     "id": "7032",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "homeButton": {
+     "id": "7038",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "7039"
+    },
+    "vipType": {
+     "id": "7030",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "7032"
+    },
+    "ikNode_32": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6981"
+    },
+    "ikNode_30": {
+     "id": "5116",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6981"
+    },
+    "ikNode_31": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6981"
+    },
+    "ikNode_28": {
+     "id": "6963",
+     "kind": "sprite",
+     "frames": 148,
+     "inFrames": [
+      1
+     ],
+     "owner": "6981"
+    },
+    "ikNode_29": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6981"
+    },
+    "ikNode_33": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6981"
+    },
+    "ikNode_34": {
+     "id": "5605",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6981"
+    },
+    "ikNode_35": {
+     "id": "5605",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18
+     ],
+     "owner": "6988"
+    },
+    "ikNode_23": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6961"
+    },
+    "ikNode_21": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6961"
+    },
+    "ikNode_19": {
+     "id": "5262",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6961"
+    },
+    "ikNode_22": {
+     "id": "5116",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6961"
+    },
+    "ikNode_20": {
+     "id": "6943",
+     "kind": "sprite",
+     "frames": 102,
+     "inFrames": [
+      1
+     ],
+     "owner": "6961"
+    },
+    "ikNode_24": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6961"
+    },
+    "ikNode_25": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6961"
+    },
+    "ikNode_26": {
+     "id": "5605",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6961"
+    },
+    "ikNode_113": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17
+     ],
+     "owner": "6988"
+    },
+    "ikNode_111": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17
+     ],
+     "owner": "6988"
+    },
+    "ikNode_109": {
+     "id": "5262",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17
+     ],
+     "owner": "6988"
+    },
+    "ikNode_112": {
+     "id": "5116",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17
+     ],
+     "owner": "6988"
+    },
+    "ikNode_110": {
+     "id": "6984",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      15,
+      17
+     ],
+     "owner": "6988"
+    },
+    "ikNode_114": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17
+     ],
+     "owner": "6988"
+    },
+    "ikNode_115": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17
+     ],
+     "owner": "6988"
+    },
+    "ikNode_116": {
+     "id": "5605",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17
+     ],
+     "owner": "6988"
+    },
+    "ikNode_41": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32
+     ],
+     "owner": "6988"
+    },
+    "ikNode_39": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32
+     ],
+     "owner": "6988"
+    },
+    "ikNode_40": {
+     "id": "5116",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32
+     ],
+     "owner": "6988"
+    },
+    "ikNode_37": {
+     "id": "5262",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32
+     ],
+     "owner": "6988"
+    },
+    "ikNode_38": {
+     "id": "6984",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32
+     ],
+     "owner": "6988"
+    },
+    "ikNode_42": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32
+     ],
+     "owner": "6988"
+    },
+    "ikNode_43": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32
+     ],
+     "owner": "6988"
+    },
+    "ikNode_44": {
+     "id": "5605",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32
+     ],
+     "owner": "6988"
+    },
+    "ikNode_48": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35
+     ],
+     "owner": "6988"
+    },
+    "ikNode_49": {
+     "id": "5116",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35
+     ],
+     "owner": "6988"
+    },
+    "ikNode_50": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35
+     ],
+     "owner": "6988"
+    },
+    "ikNode_46": {
+     "id": "5262",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35
+     ],
+     "owner": "6988"
+    },
+    "ikNode_47": {
+     "id": "6985",
+     "kind": "sprite",
+     "frames": 12,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35
+     ],
+     "owner": "6988"
+    },
+    "ikNode_51": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35
+     ],
+     "owner": "6988"
+    },
+    "ikNode_52": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35
+     ],
+     "owner": "6988"
+    },
+    "ikNode_53": {
+     "id": "5605",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35
+     ],
+     "owner": "6988"
+    },
+    "ikNode_59": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47,
+      54
+     ],
+     "owner": "6988"
+    },
+    "ikNode_57": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47
+     ],
+     "owner": "6988"
+    },
+    "ikNode_58": {
+     "id": "5116",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47
+     ],
+     "owner": "6988"
+    },
+    "ikNode_55": {
+     "id": "5262",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47
+     ],
+     "owner": "6988"
+    },
+    "ikNode_56": {
+     "id": "6986",
+     "kind": "sprite",
+     "frames": 19,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47
+     ],
+     "owner": "6988"
+    },
+    "ikNode_60": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47
+     ],
+     "owner": "6988"
+    },
+    "ikNode_61": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47
+     ],
+     "owner": "6988"
+    },
+    "ikNode_62": {
+     "id": "5605",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47
+     ],
+     "owner": "6988"
+    },
+    "ikNode_68": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47,
+      54
+     ],
+     "owner": "6988"
+    },
+    "ikNode_66": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47,
+      54
+     ],
+     "owner": "6988"
+    },
+    "ikNode_67": {
+     "id": "5116",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47,
+      54
+     ],
+     "owner": "6988"
+    },
+    "ikNode_64": {
+     "id": "5262",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47,
+      54
+     ],
+     "owner": "6988"
+    },
+    "ikNode_65": {
+     "id": "6984",
+     "kind": "sprite",
+     "frames": 4,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47,
+      54
+     ],
+     "owner": "6988"
+    },
+    "ikNode_69": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47,
+      54
+     ],
+     "owner": "6988"
+    },
+    "ikNode_70": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47,
+      54
+     ],
+     "owner": "6988"
+    },
+    "ikNode_71": {
+     "id": "5605",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47,
+      54
+     ],
+     "owner": "6988"
+    },
+    "ikNode_84": {
+     "id": "6905",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_85": {
+     "id": "6906",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_86": {
+     "id": "6907",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_82": {
+     "id": "6908",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_83": {
+     "id": "6987",
+     "kind": "sprite",
+     "frames": 22,
+     "inFrames": [
+      1,
+      15,
+      17,
+      18,
+      32,
+      35,
+      47,
+      54
+     ],
+     "owner": "6988"
+    },
+    "ikNode_87": {
+     "id": "6907",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_88": {
+     "id": "6905",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_89": {
+     "id": "6909",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_27": {
+     "id": "5262",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6981"
+    },
+    "ikNode_12": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6941"
+    },
+    "ikNode_13": {
+     "id": "5116",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6941"
+    },
+    "ikNode_14": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6941"
+    },
+    "ikNode_10": {
+     "id": "5262",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6941"
+    },
+    "ikNode_11": {
+     "id": "6931",
+     "kind": "sprite",
+     "frames": 86,
+     "inFrames": [
+      1
+     ],
+     "owner": "6941"
+    },
+    "ikNode_15": {
+     "id": "5188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6941"
+    },
+    "ikNode_16": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6941"
+    },
+    "ikNode_17": {
+     "id": "5605",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6941"
+    },
+    "ikNode_246": {
+     "id": "6867",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_247": {
+     "id": "6868",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_248": {
+     "id": "6869",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_244": {
+     "id": "6870",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_249": {
+     "id": "6869",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_245": {
+     "id": "6871",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_250": {
+     "id": "6867",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_251": {
+     "id": "6872",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_461": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52
+     ],
+     "owner": "6926"
+    },
+    "ikNode_462": {
+     "id": "6873",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52
+     ],
+     "owner": "6926"
+    },
+    "ikNode_463": {
+     "id": "6874",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52
+     ],
+     "owner": "6926"
+    },
+    "ikNode_459": {
+     "id": "6875",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52
+     ],
+     "owner": "6926"
+    },
+    "ikNode_464": {
+     "id": "6874",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52
+     ],
+     "owner": "6926"
+    },
+    "ikNode_460": {
+     "id": "6877",
+     "kind": "sprite",
+     "frames": 52,
+     "inFrames": [
+      42,
+      52
+     ],
+     "owner": "6926"
+    },
+    "ikNode_465": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52
+     ],
+     "owner": "6926"
+    },
+    "ikNode_466": {
+     "id": "6876",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52
+     ],
+     "owner": "6926"
+    },
+    "ikNode_434": {
+     "id": "6867",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56
+     ],
+     "owner": "6926"
+    },
+    "ikNode_435": {
+     "id": "6868",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56
+     ],
+     "owner": "6926"
+    },
+    "ikNode_436": {
+     "id": "6869",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56
+     ],
+     "owner": "6926"
+    },
+    "ikNode_432": {
+     "id": "6870",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56
+     ],
+     "owner": "6926"
+    },
+    "ikNode_433": {
+     "id": "6878",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56
+     ],
+     "owner": "6926"
+    },
+    "ikNode_437": {
+     "id": "6869",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56
+     ],
+     "owner": "6926"
+    },
+    "ikNode_438": {
+     "id": "6867",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56
+     ],
+     "owner": "6926"
+    },
+    "ikNode_439": {
+     "id": "6872",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56
+     ],
+     "owner": "6926"
+    },
+    "ikNode_398": {
+     "id": "6882",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_399": {
+     "id": "6883",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_400": {
+     "id": "6884",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_396": {
+     "id": "6885",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_401": {
+     "id": "6884",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_397": {
+     "id": "6886",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_402": {
+     "id": "6882",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_403": {
+     "id": "6887",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_291": {
+     "id": "6889",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_292": {
+     "id": "6890",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_293": {
+     "id": "6891",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_289": {
+     "id": "6892",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_290": {
+     "id": "6893",
+     "kind": "sprite",
+     "frames": 35,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_294": {
+     "id": "6891",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_295": {
+     "id": "6889",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_296": {
+     "id": "6894",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59
+     ],
+     "owner": "6926"
+    },
+    "ikNode_309": {
+     "id": "6898",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_310": {
+     "id": "6899",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_311": {
+     "id": "6900",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_307": {
+     "id": "6901",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_312": {
+     "id": "6900",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_308": {
+     "id": "6902",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_313": {
+     "id": "6898",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_314": {
+     "id": "6903",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73
+     ],
+     "owner": "6926"
+    },
+    "ikNode_425": {
+     "id": "4950",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81
+     ],
+     "owner": "6926"
+    },
+    "ikNode_426": {
+     "id": "6906",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81
+     ],
+     "owner": "6926"
+    },
+    "ikNode_427": {
+     "id": "6907",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81
+     ],
+     "owner": "6926"
+    },
+    "ikNode_423": {
+     "id": "6908",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81
+     ],
+     "owner": "6926"
+    },
+    "ikNode_428": {
+     "id": "6907",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81
+     ],
+     "owner": "6926"
+    },
+    "ikNode_424": {
+     "id": "6910",
+     "kind": "sprite",
+     "frames": 26,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81
+     ],
+     "owner": "6926"
+    },
+    "ikNode_429": {
+     "id": "6905",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81
+     ],
+     "owner": "6926"
+    },
+    "ikNode_430": {
+     "id": "6909",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81
+     ],
+     "owner": "6926"
+    },
+    "ikNode_470": {
+     "id": "6867",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84
+     ],
+     "owner": "6926"
+    },
+    "ikNode_471": {
+     "id": "6899",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84
+     ],
+     "owner": "6926"
+    },
+    "ikNode_472": {
+     "id": "6900",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84
+     ],
+     "owner": "6926"
+    },
+    "ikNode_468": {
+     "id": "6901",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84
+     ],
+     "owner": "6926"
+    },
+    "ikNode_469": {
+     "id": "6911",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84
+     ],
+     "owner": "6926"
+    },
+    "ikNode_473": {
+     "id": "6900",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84
+     ],
+     "owner": "6926"
+    },
+    "ikNode_474": {
+     "id": "6898",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84
+     ],
+     "owner": "6926"
+    },
+    "ikNode_475": {
+     "id": "6903",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84
+     ],
+     "owner": "6926"
+    },
+    "ikNode_327": {
+     "id": "6914",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_328": {
+     "id": "6915",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_329": {
+     "id": "6916",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_325": {
+     "id": "6917",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_326": {
+     "id": "6918",
+     "kind": "sprite",
+     "frames": 17,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_330": {
+     "id": "6916",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_331": {
+     "id": "6914",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_332": {
+     "id": "6920",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_380": {
+     "id": "6867",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_381": {
+     "id": "6868",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_382": {
+     "id": "6869",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_378": {
+     "id": "6870",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_379": {
+     "id": "6921",
+     "kind": "sprite",
+     "frames": 11,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_383": {
+     "id": "6869",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_384": {
+     "id": "6867",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_385": {
+     "id": "6872",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_372": {
+     "id": "6867",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_373": {
+     "id": "6868",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_374": {
+     "id": "6869",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_370": {
+     "id": "6870",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_376": {
+     "id": "6867",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_377": {
+     "id": "6872",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_371": {
+     "id": "6922",
+     "kind": "sprite",
+     "frames": 7,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_375": {
+     "id": "6869",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_336": {
+     "id": "6914",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_337": {
+     "id": "6915",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_338": {
+     "id": "6916",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_334": {
+     "id": "6917",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_335": {
+     "id": "6918",
+     "kind": "sprite",
+     "frames": 17,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_339": {
+     "id": "6916",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_340": {
+     "id": "6914",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_341": {
+     "id": "6920",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_345": {
+     "id": "6914",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_346": {
+     "id": "6915",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_347": {
+     "id": "6917",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_343": {
+     "id": "6917",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_348": {
+     "id": "6916",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_344": {
+     "id": "6918",
+     "kind": "sprite",
+     "frames": 17,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_349": {
+     "id": "6914",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_350": {
+     "id": "6920",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_354": {
+     "id": "6867",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_355": {
+     "id": "6868",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_356": {
+     "id": "6869",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_352": {
+     "id": "6870",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_353": {
+     "id": "6925",
+     "kind": "sprite",
+     "frames": 12,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_357": {
+     "id": "6869",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_358": {
+     "id": "6867",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "ikNode_359": {
+     "id": "6872",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      42,
+      52,
+      56,
+      59,
+      73,
+      81,
+      84,
+      89
+     ],
+     "owner": "6926"
+    },
+    "progressBar": {
+     "id": "6837",
+     "kind": "sprite",
+     "frames": 20,
+     "inFrames": [
+      1
+     ],
+     "owner": "6843"
+    },
+    "jinduNum": {
+     "id": "4315",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "6843"
+    },
+    "refreash": {
+     "id": "6842",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [
+      1
+     ],
+     "owner": "6843"
+    },
+    "reasonText": {
+     "id": "6841",
+     "kind": "text",
+     "frames": 1,
+     "inFrames": [
+      1
+     ],
+     "owner": "6842"
+    }
+   }
+  },
+  "gear": {
+   "bundle": "tags-gear.json",
+   "count": 1,
+   "names": {
+    "ikNode_1": {
+     "id": "1188",
+     "kind": "sprite",
+     "frames": 2,
+     "inFrames": [
+      1
+     ],
+     "owner": "1195"
+    }
+   }
+  }
+ }
+}

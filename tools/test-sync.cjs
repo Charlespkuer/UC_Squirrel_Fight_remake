@@ -96,6 +96,24 @@ function makeRoot(dir, name, port) {
   write(path.join(dir, 'scripts/启动游戏.command'), '#!/bin/bash\necho scripts\n');
   write(path.join(dir, 'scripts/sync/sync.js'), fs.readFileSync(SYNC_SRC, 'utf8'));
   write(path.join(dir, 'scripts/sync/sync.config.json'), JSON.stringify({ name, port, token: TOKEN, peers: {}, ignore: [] }, null, 2));
+  /* ⚠ **必须有一份 .gitignore**：同步的屏蔽标准就是它（`sync.js` 的「.gitignore 感知」）。
+   * 以前这里不写，于是"读 .gitignore"那条路**从来没被测到过** —— 前导 `/` 没锚定
+   * （`/启动游戏.command` 把 `scripts/启动游戏.command` 一起忽略）这个 bug 就藏在盲区里。
+   * 内容照仓库那份的**语义**精简：任意层级的目录名、前导 / 锚定、`**` 跨层、`!` 例外。 */
+  write(path.join(dir, '.gitignore'),
+    '# 本地产物\nout/\nreferences/\nimages/_reference/\nsave/\nnode_modules/\n__pycache__/\n' +
+    '# 本机私货：只锚定游戏根那一个文件（前导 /）\n/启动游戏.command\n' +
+    '# 固定相对路径与 ** 跨层\nsrc-tauri/target/\nimages/classic/**/.bak-upscale/\n' +
+    '# 例外（! 后写优先）：`*.tmp` 命中内置清单，这一条必须能把它救回来\n*.tmp\n!tools/research/keep.tmp\n');
+  // .gitignore 里被屏蔽、但同步必须照常搬的东西（既要挡、也要验证不误伤）
+  write(path.join(dir, 'out/junk.bin'), 'junk\n');
+  /* git 的规矩：**父目录被排除时，里面的 ! 例外救不回来**（`gitignore(5)` 明写）——
+   * 所以这里故意在 out/ 下写一个被 `!` 点名的文件，断言它仍然不进清单。 */
+  write(path.join(dir, 'out/keep.me'), 'keep\n');
+  write(path.join(dir, 'images/_reference/shot.png'), 'png\n');
+  write(path.join(dir, 'images/classic/foo/.bak-upscale/big.png'), 'png\n');
+  write(path.join(dir, 'src-tauri/target/debug/x'), 'bin\n');
+  write(path.join(dir, 'tools/research/keep.tmp'), 'tmp\n');
 }
 function run(dir, args, expectFail) {
   const exe = path.join(dir, 'scripts', 'sync', 'sync.js');
@@ -121,16 +139,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function ping(port) {
   try { const r = await get('127.0.0.1', port, '/api/ping'); return r.status === 200; } catch (e) { return false; }
 }
+/** 让系统分配一个临时端口：GitHub Windows runner 会保留 19000 附近的端口段，
+ * 固定扫描 19000..19500 会全部 EACCES，测试在 Windows CI 上直接“找不到空闲端口”。 */
+async function freePort(exclude) {
+  for (let i = 0; i < 10; i++) {
+    const s = http.createServer();
+    await new Promise((resolve, reject) => {
+      s.once('error', reject);
+      s.listen(0, '127.0.0.1', resolve);
+    });
+    const p = s.address().port;
+    await new Promise((resolve) => s.close(resolve));
+    if (p !== exclude) return p;
+  }
+  throw new Error('找不到空闲端口');
+}
 
 (async () => {
-  // 找一个能用的端口（本机同时可能在跑真的同步服务，所以别写死）
-  for (let p = 19000; p < 19500 && !PORT; p++) {
-    const s = http.createServer();
-    const free = await new Promise((res) => { s.once('error', () => res(false)); s.listen(p, '127.0.0.1', () => res(true)); });
-    s.close();
-    if (free) PORT = p;
-  }
-  assert.ok(PORT, '找不到空闲端口');
+  PORT = await freePort();
 
   makeRoot(A, 'A-mac', PORT);
   makeRoot(B, 'B-win', PORT);
@@ -157,9 +183,28 @@ async function ping(port) {
     ok('开发截图不进清单，tools/research 下的脚本照常同步',
       !names.some((p) => /^tools\/(verification|research)\/.*\.(png|jpg)$/.test(p)) && names.includes('tools/research/keep.cjs'));
     /* 根目录的启动器是本机私货（原生版路径/浏览器 profile/权限位都跟机器绑定）→ 不进清单；
-     * 但**只忽略根目录那一个**，scripts/ 里的正式副本必须照常同步（前导 / 的锚定语义容易写错）。 */
+     * 但**只忽略根目录那一个**，scripts/ 里的正式副本必须照常同步（前导 / 的锚定语义容易写错）。
+     * ⚠ 这一条同时守着 `gitignoreGlobRegex` 的锚定：`.gitignore` 里写的是 `/启动游戏.command`，
+     *   没锚定的话 `scripts/启动游戏.command` 会被一起吃掉（2026-10-16 修的就是这个）。 */
     ok('根目录启动器不进清单，scripts/ 里的正式副本照常同步',
       !names.includes('启动游戏.command') && names.includes('scripts/启动游戏.command'));
+
+    /* ---- 屏蔽标准 = 游戏目录里的 .gitignore（见 makeRoot 里写的那份）----
+     * 用户 2026-10 口径："使用双端对齐工具时读取 .gitignore 作为屏蔽标准，不要再同步 out 等文件夹。" */
+    const st = JSON.parse((await get('127.0.0.1', PORT, '/local/status')).body);
+    ok('/local/status 报出屏蔽标准（.gitignore 条数 + 探针）',
+      !!(st.ignore && st.ignore.gitignore && st.ignore.gitignore.path === '.gitignore'
+        && st.ignore.gitignore.rules >= 8 && st.ignore.sample && st.ignore.sample.out === true
+        && st.ignore.sample.save === true && st.ignore.sample.code === true));
+    ok('.gitignore 里的本地产物不进清单（out/ references/ images/_reference/ src-tauri/target/ **/.bak-upscale/）',
+      !names.some((p) => /^out\//.test(p) || /^references\//.test(p) || /^images\/_reference\//.test(p)
+        || /^src-tauri\/target\//.test(p) || /\.bak-upscale\//.test(p)));
+    ok('.gitignore 的 `!` 例外压得住内置清单（tools/research/keep.tmp 照常同步）',
+      names.includes('tools/research/keep.tmp'));
+    ok('父目录被排除时 `!` 救不回来（out/keep.me 仍不进清单，与 git 语义一致）',
+      !names.includes('out/keep.me'));
+    ok('被 .gitignore 挡住的路径，对端直接读不到（/api/file 拒绝）',
+      (await get('127.0.0.1', PORT, '/api/file?path=' + encodeURIComponent('out/junk.bin'), { 'x-ssdz-token': TOKEN })).status !== 200);
 
     // ---- 路径穿越与忽略路径一律拒绝 ----
     const bad = ['../A/js/a.js', '..%2f..%2fetc%2fpasswd', '/etc/passwd', 'save/progress.json', 'scripts/sync/sync.config.json'];
@@ -223,6 +268,35 @@ async function ping(port) {
     };
     putSave(A, { name: 'Alice', level: 10, savedAt: T_ALICE, weapons: [], skills: [], props: {} });
     putSave(B, { name: 'Bob', level: 42, savedAt: T_BOB, weapons: [], skills: [], props: {} });
+
+    /* ---- 二级确认的预览：/local/{save,files}/preview 只读比对，不写任何东西 ----
+     * 游戏页面点「送/取存档」「推/拉文件」时先调这两个接口，把这一趟「会改什么」摆出来。
+     * A 再起一个服务实例（换个监听端口）代表「游戏页面所在那台」的服务；配置里的端口仍是
+     * 两端共用的 PORT，所以预览的目标就是 B。 */
+    {
+      const PORT_A = await freePort(PORT);
+      const aSrv = spawn(process.execPath, [path.join(A, 'scripts', 'sync', 'sync.js'), 'serve', '--port', String(PORT_A)], { cwd: A, stdio: 'ignore' });
+      try {
+        let upA = false;
+        for (let i = 0; i < 40 && !upA; i++) { await sleep(200); upA = await ping(PORT_A); }
+        ok('A 的同步服务能起来（预览用）', upA);
+        write(path.join(A, 'js/preview-new.js'), 'console.log("preview")\n');
+        const pv = JSON.parse((await get('127.0.0.1', PORT_A, '/local/files/preview?peer=127.0.0.1')).body);
+        const sv = JSON.parse((await get('127.0.0.1', PORT_A, '/local/save/preview?peer=127.0.0.1')).body);
+        const pn = fs.statSync(path.join(A, 'js/preview-new.js')).size;
+        ok('二级确认预览：报出会改的文件/字节数与两边等级经验，且只读不写',
+          pv.ok === true && pv.push.count === 1 && pv.pull.count === 0 && pv.push.bytes === pn
+          && pv.push.files.some((f) => f.p === 'js/preview-new.js' && f.s === pn)
+          && !fs.existsSync(path.join(B, 'js/preview-new.js'))
+          && sv.ok === true && sv.localExists === true && sv.remoteExists === true
+          && sv.local.name === 'Alice' && sv.local.level === 10 && sv.remote.name === 'Bob' && sv.remote.level === 42
+          && sv.ahead === 'b' && sv.localSavedAt === T_ALICE && sv.remoteSavedAt === T_BOB);
+      } finally {
+        aSrv.kill('SIGTERM');
+        await sleep(300);
+      }
+    }
+
     out = run(A, ['push', '127.0.0.1', '--save']);
     ok('对面进度更靠前时照样推（不再被时间判断挡下）', /已把存档送到/.test(out));
     ok('并且提醒了对面的进度更靠前', /更靠前/.test(out));
@@ -321,12 +395,28 @@ async function ping(port) {
         /updatePanelHtml/.test(uiSrc) && /update-source-sync/.test(uiSrc) && /update-source-release/.test(uiSrc)
         && /update-source-git/.test(uiSrc) && /update-page/.test(uiSrc));
       ok('同步服务的拉取接口支持 dry 预览', /dry: url\.searchParams\.get\('dry'\) === '1'/.test(syncSrc));
+      /* 长驻服务不能复用全局 keep-alive socket：ZeroTier 换地址 / 对端休眠后，
+       * 池里的死连接会让游戏内「推文件」的预览直接 EHOSTUNREACH，而 CLI 每次新进程正常。 */
+      ok('长驻同步服务不复用 keep-alive socket', /agent:\s*false/.test(syncSrc));
       /* 旧客户端（没重编的 exe / 旧服务器进程）没有同源 /__update —— 界面必须回退到
        * 本机同步服务新增的更新通道，否则用户就只能看到「本机不支持」。 */
       ok('旧客户端也能更新：同步服务带 /local/update 通道，界面会回退过去',
         /'\/local\/update\/check'/.test(syncSrc) && /'\/local\/update\/run'/.test(syncSrc)
         && /runUpdateHelper/.test(syncSrc) && /\/local\/update\/check/.test(uiSrc) && /channel === 'sync'/.test(uiSrc)
         && /syncPanel\(\)\+updatePanelHtml\(\)/.test(uiSrc));
+
+      /* 2026-10 用户报「一键同步 / 重启同步服务 点了没反应，终端还有乱码」：
+       * ① 乱码 = 控制台代码页还是 936，node 的 UTF-8 中文被当 ANSI 解 → 两个 .cmd 入口先 `chcp 65001`；
+       * ② 没反应 = 老配置里存的 8788 落在 Windows 保留段 8719-8818（Hyper-V 预留）→ 绑不上，
+       *    服务永远起不来 → sync.js 起服务前先 `ensureBindablePort()` 自愈换端口，
+       *    界面那边也不能再写死端口（`SYNC_PORTS` 以前只被取 `[0]`，等于只认 18788）。 */
+      const cmdLaunchers = ['一键同步.cmd', '重启同步服务.cmd']
+        .map((f) => fs.readFileSync(path.join(ROOT, 'scripts', f), 'utf8').replace(/\r\n/g, '\n'));
+      ok('两个同步入口：控制台先切 UTF-8，服务起不来时按 Windows 保留段自愈端口，界面跟着探测',
+        cmdLaunchers.every((s) => /^chcp 65001 >nul/m.test(s))
+        && /async function ensureBindablePort/.test(syncSrc) && /await ensureBindablePort\(/.test(syncSrc)
+        && /function windowsPortExcluded/.test(syncSrc) && /function ensureUtf8Console/.test(syncSrc)
+        && /await syncProbeAny\(\)/.test(uiSrc) && /for \(const p of SYNC_PORTS\)/.test(uiSrc));
     }
 
     console.log('\n双机同步回归通过：' + passed + ' 项');

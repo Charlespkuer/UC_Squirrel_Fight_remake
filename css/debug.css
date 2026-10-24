@@ -1,6 +1,9 @@
 /* 调试面板（Ctrl+Shift+D）。面板本身不参与游戏逻辑，样式也单独放，
    不需要时删掉 js/debug.js、css/debug.css 和 index.html 里对应的两行即可。
-   入口按钮固定在窗口右上角，避开首页状态栏里的名字与数值。 */
+   入口按钮**贴内屏**（1160×690 舞台，见 js/debug.js 的 layoutDebugUi）：left/top 由
+   JS 按 `#ui` 的实际包围盒算出来写进 style，所以下面给的 right/top 只是没跑 JS 时的兜底。
+   以前写死 `right:6px;top:6px` 是贴**外框**（浏览器窗口）的：窗口比例和舞台不一致时，
+   按钮会掉在舞台外面的黑边里，甚至压到安卓的状态栏/挖孔上。 */
 .debug-gear{position:fixed;right:6px;top:6px;z-index:9000;border:3px solid #654f2e;border-radius:22px;
   background:linear-gradient(#fff3a8,#ffc942 55%,#ec9a12);color:#5a3c1c;font:700 14px/1 "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;
   padding:7px 12px;cursor:pointer;box-shadow:inset 0 2px #fffbd0,0 2px 3px #0006}

@@ -1,0 +1,289 @@
+{
+ "generator": "tools/gen-ssfight-ui.cjs --fight-result",
+ "roots": {
+  "arenaContinue": "3822",
+  "rankContinue": "3776",
+  "stageContinue": "4839",
+  "notice": "4692",
+  "action": "3801"
+ },
+ "count": 105,
+ "sources": [
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite3822.html",
+   "bytes": 55132,
+   "sha256": "725172c033300c62f628a3b73b1f500d90a5b8e07ae252a3ddc3a0298f576e32"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite3783.html",
+   "bytes": 16565,
+   "sha256": "ff8b5f5adb30e4602731246b83d56d80b67889b18a45d0e9e4c9a5baa0ed9d0e"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite3801.html",
+   "bytes": 2279,
+   "sha256": "f8d8c4b6a1aad077435178be39b506b6252923076081463f1a9543e2ea22ddcd"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite3644.html",
+   "bytes": 9046,
+   "sha256": "491c20ee24dfdc4f5405d9b4d5207e9a0cee9efa8f2bd9d08e098557bcbe55e8"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite3821.html",
+   "bytes": 68713,
+   "sha256": "be3e7ea18186776961181f911a8bf024c1f1aa352e1c4af6e973c036bd7e5eb8"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite3776.html",
+   "bytes": 2812,
+   "sha256": "884ec1cda974d9b664a67c1af28fe698cae3ae9ab29b146b4f4d920fb39f82db"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite3700.html",
+   "bytes": 12457,
+   "sha256": "b38bc889958db833f127864abb5ae281f3d9691e8057ee55e45e899816d8310b"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite3775.html",
+   "bytes": 12105,
+   "sha256": "76c15dc2ad672d81899efd2d569f1d9d618033073a83ea5e8da965502b94b6ae"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite4839.html",
+   "bytes": 3423,
+   "sha256": "3b7858d3c3cb7b303bcd4ed132112bd2fbd72a6f1e024dfd4ab4ee39eb570954"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite4838.html",
+   "bytes": 36265,
+   "sha256": "08566cb89b061b8126f2d0ad63894c91d392ba2abe64aff960541a5bc0c81c3d"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite4410.html",
+   "bytes": 12355,
+   "sha256": "221b8277330e57338ace3e0de408a33236851cfb2414b1221bd724dceb3c5ad8"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite4412.html",
+   "bytes": 17197,
+   "sha256": "a64cbdd382939f726acdf065d2713c51b3c26ba3dae368c56f9420ad039ee85f"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite4692.html",
+   "bytes": 50294,
+   "sha256": "03e3a3500b934425d7a904144f51b9e2ee5363306306948d9b51db1e6e0371f9"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite4675.html",
+   "bytes": 5975,
+   "sha256": "b1459458d68381c69957cf1c69adf6fe8e50858976122a79abfd6baa47e01a71"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite4682.html",
+   "bytes": 1341,
+   "sha256": "0ec29411d4fa3c87087d7f2cd709a96a68d988bd0d6a850eaa49b32cba7747a5"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite4680.html",
+   "bytes": 3517,
+   "sha256": "190020ee3a1313f1b481312bfcd9590b106f872c09dda4d864f0cb286dccf6e0"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite3414.html",
+   "bytes": 1201,
+   "sha256": "a20acf8018a720a709f6b8e93bf1270a8225fdcd85ce3bfdbb28152fde8e6dba"
+  },
+  {
+   "path": "references/ssfight/ssfight/ssfight/resource/Sprite/sprite3156.html",
+   "bytes": 2652,
+   "sha256": "937b30f7bbee18e5cc51e98ec7f3fceb6c358c698f909d0697969f9340e306a4"
+  }
+ ],
+ "sharedTags": [
+  {
+   "file": "tags-campaign.json",
+   "ids": [
+    "3414",
+    "2443",
+    "3410",
+    "3408",
+    "3156",
+    "3155",
+    "3154",
+    "3372",
+    "3370",
+    "3368",
+    "3366",
+    "3365",
+    "3152",
+    "3150",
+    "3190"
+   ],
+   "sha256": "6f1012daa6c413ed1ed5078e44a654ea5fcaf78c4d24fd8813228c7c65904f2c"
+  },
+  {
+   "file": "tags-challenge.json",
+   "ids": [
+    "3828",
+    "3152",
+    "3150",
+    "3644",
+    "3190",
+    "3643",
+    "3156",
+    "3155",
+    "3154",
+    "3372",
+    "3370",
+    "3368",
+    "3366",
+    "3365",
+    "3789"
+   ],
+   "sha256": "f1b82581c7178297f2d79e75eaa77929ae1439d7923b9a0569f9370d81aa7e80"
+  },
+  {
+   "file": "tags-daoju.json",
+   "ids": [
+    "3152",
+    "3150",
+    "3414",
+    "2443",
+    "3156",
+    "3155",
+    "3154"
+   ],
+   "sha256": "bd600f951b5011ff6f146850cfaf105ddb79b572378b625889927ec19e652aca"
+  },
+  {
+   "file": "tags-fight.json",
+   "ids": [
+    "2443",
+    "3150",
+    "3152",
+    "3190",
+    "3366",
+    "3414",
+    "3696",
+    "3698",
+    "3789",
+    "3828",
+    "4409",
+    "4410",
+    "4411",
+    "4412",
+    "4835",
+    "4836",
+    "4837",
+    "4838",
+    "4839"
+   ],
+   "sha256": "7a9b098a7b4e0b6f25cf5d398845c8048132b3290d972bcb0df6388dd952abc1"
+  },
+  {
+   "file": "tags-homeland.json",
+   "ids": [
+    "3152",
+    "3150",
+    "3370",
+    "3790",
+    "3368",
+    "3789",
+    "3366",
+    "3365",
+    "3788",
+    "3156",
+    "3155",
+    "3154",
+    "3644",
+    "3190",
+    "3643",
+    "3828"
+   ],
+   "sha256": "3a2d30b967652ff0e55e9d3d6eb1cf189f8ed00d138ace878b958842ac77f242"
+  },
+  {
+   "file": "tags-message.json",
+   "ids": [
+    "3410",
+    "3408",
+    "3152",
+    "3156",
+    "3155",
+    "3154"
+   ],
+   "sha256": "0fa8642cef37300b1a8792eaa11c52ec69dbd9acb231b8af34d8442924bc1efb"
+  },
+  {
+   "file": "tags-status.json",
+   "ids": [
+    "3152",
+    "3150",
+    "3644",
+    "3190",
+    "3643",
+    "4669",
+    "4596",
+    "3156",
+    "3155",
+    "3154",
+    "3828",
+    "4692",
+    "4691",
+    "3043",
+    "4690",
+    "4689",
+    "4688",
+    "4687",
+    "4404",
+    "4686",
+    "3414",
+    "2443",
+    "4685",
+    "4684",
+    "3732",
+    "4683",
+    "4682",
+    "4680",
+    "4679",
+    "4678",
+    "4677",
+    "4681",
+    "4676",
+    "4675",
+    "4674",
+    "3366",
+    "3789"
+   ],
+   "sha256": "64f67ff74df0d7292a2db955046685de14c866bb26c4c7d7df9847ecb74a52ae"
+  },
+  {
+   "file": "tags-summons.json",
+   "ids": [
+    "3152",
+    "3190",
+    "3150",
+    "2443",
+    "3414",
+    "3644",
+    "3643",
+    "3156",
+    "3155",
+    "3154"
+   ],
+   "sha256": "62d816bb3b321e484b1055818e3b37ba2676818eb4a54f0da003f5f148bd4d20"
+  },
+  {
+   "file": "tags.json",
+   "ids": [
+    "3414",
+    "2443",
+    "3366",
+    "3789"
+   ],
+   "sha256": "dad52ffdd4bed44dc8a79cf82d28fbe65e6f4c079f361792f0696933a11710e0"
+  }
+ ],
+ "sha256": "6bed9211ac7a2d68ef30f84da20bd80b5a001e1ee151af23f009ed1e3ca916d6"
+}

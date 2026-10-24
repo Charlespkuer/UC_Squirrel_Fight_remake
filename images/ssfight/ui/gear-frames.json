@@ -1,0 +1,2605 @@
+{
+ "source": "references/ssfight/ssfight/ssfight/resource/动作/MainMovie.as（内嵌 equipsArray）",
+ "how": "穿装备 = 对应容器精灵（头B/外拳套B/内拳套B/衣服B/手臂B/鞋子B）.gotoAndStop(frame)；有镶嵌加成时 frame += (max(addr1Lv,addr2Lv,addr3Lv) - 1)（MainMovie.as:6608 constructBpData）。",
+ "container": {
+  "0": "gearHead/头B",
+  "1": "gearFistOut+gearFistIn/外拳套B·内拳套B",
+  "2": "gearBody+gearArm/衣服B·手臂B",
+  "3": "gearShoe/鞋子B"
+ },
+ "count": 288,
+ "gear": [
+  {
+   "id": 1,
+   "type": 0,
+   "part": "头",
+   "name": "斗斗头巾",
+   "frame": 1,
+   "setId": 1,
+   "quality": 0
+  },
+  {
+   "id": 2,
+   "type": 1,
+   "part": "拳套",
+   "name": "斗斗手套",
+   "frame": 1,
+   "setId": 1,
+   "quality": 0
+  },
+  {
+   "id": 3,
+   "type": 2,
+   "part": "衣服",
+   "name": "斗斗服",
+   "frame": 1,
+   "setId": 1,
+   "quality": 0
+  },
+  {
+   "id": 4,
+   "type": 3,
+   "part": "鞋子",
+   "name": "斗斗鞋",
+   "frame": 1,
+   "setId": 1,
+   "quality": 0
+  },
+  {
+   "id": 5,
+   "type": 0,
+   "part": "头",
+   "name": "挑斗头巾",
+   "frame": 2,
+   "setId": 2,
+   "quality": 0
+  },
+  {
+   "id": 6,
+   "type": 1,
+   "part": "拳套",
+   "name": "挑斗手套",
+   "frame": 2,
+   "setId": 2,
+   "quality": 0
+  },
+  {
+   "id": 7,
+   "type": 2,
+   "part": "衣服",
+   "name": "挑斗服",
+   "frame": 2,
+   "setId": 2,
+   "quality": 0
+  },
+  {
+   "id": 8,
+   "type": 3,
+   "part": "鞋子",
+   "name": "挑斗鞋",
+   "frame": 2,
+   "setId": 2,
+   "quality": 0
+  },
+  {
+   "id": 9,
+   "type": 0,
+   "part": "头",
+   "name": "格斗头巾",
+   "frame": 3,
+   "setId": 3,
+   "quality": 1
+  },
+  {
+   "id": 10,
+   "type": 1,
+   "part": "拳套",
+   "name": "格斗手套",
+   "frame": 3,
+   "setId": 3,
+   "quality": 1
+  },
+  {
+   "id": 11,
+   "type": 2,
+   "part": "衣服",
+   "name": "格斗服",
+   "frame": 3,
+   "setId": 3,
+   "quality": 1
+  },
+  {
+   "id": 12,
+   "type": 3,
+   "part": "鞋子",
+   "name": "格斗鞋",
+   "frame": 3,
+   "setId": 3,
+   "quality": 1
+  },
+  {
+   "id": 13,
+   "type": 0,
+   "part": "头",
+   "name": "拳斗头巾",
+   "frame": 4,
+   "setId": 4,
+   "quality": 1
+  },
+  {
+   "id": 14,
+   "type": 1,
+   "part": "拳套",
+   "name": "拳斗手套",
+   "frame": 4,
+   "setId": 4,
+   "quality": 1
+  },
+  {
+   "id": 15,
+   "type": 2,
+   "part": "衣服",
+   "name": "拳斗服",
+   "frame": 4,
+   "setId": 4,
+   "quality": 1
+  },
+  {
+   "id": 16,
+   "type": 3,
+   "part": "鞋子",
+   "name": "拳斗鞋",
+   "frame": 4,
+   "setId": 4,
+   "quality": 1
+  },
+  {
+   "id": 17,
+   "type": 0,
+   "part": "头",
+   "name": "忍者护额",
+   "frame": 5,
+   "setId": 5,
+   "quality": 1
+  },
+  {
+   "id": 18,
+   "type": 1,
+   "part": "拳套",
+   "name": "忍者拳套",
+   "frame": 5,
+   "setId": 5,
+   "quality": 1
+  },
+  {
+   "id": 19,
+   "type": 2,
+   "part": "衣服",
+   "name": "忍者服",
+   "frame": 5,
+   "setId": 5,
+   "quality": 1
+  },
+  {
+   "id": 20,
+   "type": 3,
+   "part": "鞋子",
+   "name": "忍者鞋",
+   "frame": 5,
+   "setId": 5,
+   "quality": 1
+  },
+  {
+   "id": 21,
+   "type": 0,
+   "part": "头",
+   "name": "格斗头巾",
+   "frame": 6,
+   "setId": 6,
+   "quality": 2
+  },
+  {
+   "id": 22,
+   "type": 1,
+   "part": "拳套",
+   "name": "格斗手套",
+   "frame": 6,
+   "setId": 6,
+   "quality": 2
+  },
+  {
+   "id": 23,
+   "type": 2,
+   "part": "衣服",
+   "name": "格斗服",
+   "frame": 6,
+   "setId": 6,
+   "quality": 2
+  },
+  {
+   "id": 24,
+   "type": 3,
+   "part": "鞋子",
+   "name": "格斗鞋",
+   "frame": 6,
+   "setId": 6,
+   "quality": 2
+  },
+  {
+   "id": 25,
+   "type": 0,
+   "part": "头",
+   "name": "拳斗头巾",
+   "frame": 8,
+   "setId": 7,
+   "quality": 2
+  },
+  {
+   "id": 26,
+   "type": 1,
+   "part": "拳套",
+   "name": "拳斗手套",
+   "frame": 8,
+   "setId": 7,
+   "quality": 2
+  },
+  {
+   "id": 27,
+   "type": 2,
+   "part": "衣服",
+   "name": "拳斗服",
+   "frame": 8,
+   "setId": 7,
+   "quality": 2
+  },
+  {
+   "id": 28,
+   "type": 3,
+   "part": "鞋子",
+   "name": "拳斗鞋",
+   "frame": 8,
+   "setId": 7,
+   "quality": 2
+  },
+  {
+   "id": 29,
+   "type": 0,
+   "part": "头",
+   "name": "忍者护额",
+   "frame": 10,
+   "setId": 8,
+   "quality": 2
+  },
+  {
+   "id": 30,
+   "type": 1,
+   "part": "拳套",
+   "name": "忍者拳套",
+   "frame": 10,
+   "setId": 8,
+   "quality": 2
+  },
+  {
+   "id": 31,
+   "type": 2,
+   "part": "衣服",
+   "name": "忍者服",
+   "frame": 10,
+   "setId": 8,
+   "quality": 2
+  },
+  {
+   "id": 32,
+   "type": 3,
+   "part": "鞋子",
+   "name": "忍者鞋",
+   "frame": 10,
+   "setId": 8,
+   "quality": 2
+  },
+  {
+   "id": 33,
+   "type": 0,
+   "part": "头",
+   "name": "螳螂头饰",
+   "frame": 12,
+   "setId": 9,
+   "quality": 2
+  },
+  {
+   "id": 34,
+   "type": 1,
+   "part": "拳套",
+   "name": "螳螂手套",
+   "frame": 12,
+   "setId": 9,
+   "quality": 2
+  },
+  {
+   "id": 35,
+   "type": 2,
+   "part": "衣服",
+   "name": "螳螂服",
+   "frame": 12,
+   "setId": 9,
+   "quality": 2
+  },
+  {
+   "id": 36,
+   "type": 3,
+   "part": "鞋子",
+   "name": "螳螂鞋",
+   "frame": 12,
+   "setId": 9,
+   "quality": 2
+  },
+  {
+   "id": 37,
+   "type": 0,
+   "part": "头",
+   "name": "仙鹤头饰",
+   "frame": 14,
+   "setId": 10,
+   "quality": 2
+  },
+  {
+   "id": 38,
+   "type": 1,
+   "part": "拳套",
+   "name": "仙鹤拳套",
+   "frame": 14,
+   "setId": 10,
+   "quality": 2
+  },
+  {
+   "id": 39,
+   "type": 2,
+   "part": "衣服",
+   "name": "仙鹤服",
+   "frame": 14,
+   "setId": 10,
+   "quality": 2
+  },
+  {
+   "id": 40,
+   "type": 3,
+   "part": "鞋子",
+   "name": "仙鹤鞋",
+   "frame": 14,
+   "setId": 10,
+   "quality": 2
+  },
+  {
+   "id": 41,
+   "type": 0,
+   "part": "头",
+   "name": "熊猫头饰",
+   "frame": 16,
+   "setId": 11,
+   "quality": 2
+  },
+  {
+   "id": 42,
+   "type": 1,
+   "part": "拳套",
+   "name": "熊猫拳套",
+   "frame": 16,
+   "setId": 11,
+   "quality": 2
+  },
+  {
+   "id": 43,
+   "type": 2,
+   "part": "衣服",
+   "name": "熊猫服",
+   "frame": 16,
+   "setId": 11,
+   "quality": 2
+  },
+  {
+   "id": 44,
+   "type": 3,
+   "part": "鞋子",
+   "name": "熊猫鞋",
+   "frame": 16,
+   "setId": 11,
+   "quality": 2
+  },
+  {
+   "id": 45,
+   "type": 0,
+   "part": "头",
+   "name": "浣熊头饰",
+   "frame": 18,
+   "setId": 12,
+   "quality": 2
+  },
+  {
+   "id": 46,
+   "type": 1,
+   "part": "拳套",
+   "name": "浣熊拳套",
+   "frame": 18,
+   "setId": 12,
+   "quality": 2
+  },
+  {
+   "id": 47,
+   "type": 2,
+   "part": "衣服",
+   "name": "浣熊服",
+   "frame": 18,
+   "setId": 12,
+   "quality": 2
+  },
+  {
+   "id": 48,
+   "type": 3,
+   "part": "鞋子",
+   "name": "浣熊鞋",
+   "frame": 18,
+   "setId": 12,
+   "quality": 2
+  },
+  {
+   "id": 77,
+   "type": 0,
+   "part": "头",
+   "name": "骑士头盔",
+   "frame": 20,
+   "setId": 20,
+   "quality": 2
+  },
+  {
+   "id": 78,
+   "type": 1,
+   "part": "拳套",
+   "name": "骑士手套",
+   "frame": 20,
+   "setId": 20,
+   "quality": 2
+  },
+  {
+   "id": 79,
+   "type": 2,
+   "part": "衣服",
+   "name": "骑士服",
+   "frame": 20,
+   "setId": 20,
+   "quality": 2
+  },
+  {
+   "id": 80,
+   "type": 3,
+   "part": "鞋子",
+   "name": "骑士鞋",
+   "frame": 20,
+   "setId": 20,
+   "quality": 2
+  },
+  {
+   "id": 81,
+   "type": 0,
+   "part": "头",
+   "name": "维京头盔",
+   "frame": 22,
+   "setId": 21,
+   "quality": 2
+  },
+  {
+   "id": 82,
+   "type": 1,
+   "part": "拳套",
+   "name": "维京拳套",
+   "frame": 22,
+   "setId": 21,
+   "quality": 2
+  },
+  {
+   "id": 83,
+   "type": 2,
+   "part": "衣服",
+   "name": "维京服",
+   "frame": 22,
+   "setId": 21,
+   "quality": 2
+  },
+  {
+   "id": 84,
+   "type": 3,
+   "part": "鞋子",
+   "name": "维京鞋",
+   "frame": 22,
+   "setId": 21,
+   "quality": 2
+  },
+  {
+   "id": 85,
+   "type": 0,
+   "part": "头",
+   "name": "犀牛头盔",
+   "frame": 24,
+   "setId": 22,
+   "quality": 2
+  },
+  {
+   "id": 86,
+   "type": 1,
+   "part": "拳套",
+   "name": "犀牛拳套",
+   "frame": 24,
+   "setId": 22,
+   "quality": 2
+  },
+  {
+   "id": 87,
+   "type": 2,
+   "part": "衣服",
+   "name": "犀牛服",
+   "frame": 24,
+   "setId": 22,
+   "quality": 2
+  },
+  {
+   "id": 88,
+   "type": 3,
+   "part": "鞋子",
+   "name": "犀牛鞋",
+   "frame": 24,
+   "setId": 22,
+   "quality": 2
+  },
+  {
+   "id": 89,
+   "type": 0,
+   "part": "头",
+   "name": "幕府头盔",
+   "frame": 26,
+   "setId": 23,
+   "quality": 2
+  },
+  {
+   "id": 90,
+   "type": 1,
+   "part": "拳套",
+   "name": "幕府拳套",
+   "frame": 26,
+   "setId": 23,
+   "quality": 2
+  },
+  {
+   "id": 91,
+   "type": 2,
+   "part": "衣服",
+   "name": "幕府服",
+   "frame": 26,
+   "setId": 23,
+   "quality": 2
+  },
+  {
+   "id": 92,
+   "type": 3,
+   "part": "鞋子",
+   "name": "幕府鞋",
+   "frame": 26,
+   "setId": 23,
+   "quality": 2
+  },
+  {
+   "id": 93,
+   "type": 0,
+   "part": "头",
+   "name": "勇者头盔",
+   "frame": 28,
+   "setId": 24,
+   "quality": 2
+  },
+  {
+   "id": 94,
+   "type": 1,
+   "part": "拳套",
+   "name": "勇者拳套",
+   "frame": 28,
+   "setId": 24,
+   "quality": 2
+  },
+  {
+   "id": 95,
+   "type": 2,
+   "part": "衣服",
+   "name": "勇者服",
+   "frame": 28,
+   "setId": 24,
+   "quality": 2
+  },
+  {
+   "id": 96,
+   "type": 3,
+   "part": "鞋子",
+   "name": "勇者鞋",
+   "frame": 28,
+   "setId": 24,
+   "quality": 2
+  },
+  {
+   "id": 97,
+   "type": 0,
+   "part": "头",
+   "name": "诅咒头盔",
+   "frame": 30,
+   "setId": 25,
+   "quality": 2
+  },
+  {
+   "id": 98,
+   "type": 1,
+   "part": "拳套",
+   "name": "诅咒拳套",
+   "frame": 30,
+   "setId": 25,
+   "quality": 2
+  },
+  {
+   "id": 99,
+   "type": 2,
+   "part": "衣服",
+   "name": "诅咒服",
+   "frame": 30,
+   "setId": 25,
+   "quality": 2
+  },
+  {
+   "id": 100,
+   "type": 3,
+   "part": "鞋子",
+   "name": "诅咒鞋",
+   "frame": 30,
+   "setId": 25,
+   "quality": 2
+  },
+  {
+   "id": 49,
+   "type": 0,
+   "part": "头",
+   "name": "格斗头巾",
+   "frame": 32,
+   "setId": 13,
+   "quality": 3
+  },
+  {
+   "id": 50,
+   "type": 1,
+   "part": "拳套",
+   "name": "格斗手套",
+   "frame": 32,
+   "setId": 13,
+   "quality": 3
+  },
+  {
+   "id": 51,
+   "type": 2,
+   "part": "衣服",
+   "name": "格斗服",
+   "frame": 32,
+   "setId": 13,
+   "quality": 3
+  },
+  {
+   "id": 52,
+   "type": 3,
+   "part": "鞋子",
+   "name": "格斗鞋",
+   "frame": 32,
+   "setId": 13,
+   "quality": 3
+  },
+  {
+   "id": 53,
+   "type": 0,
+   "part": "头",
+   "name": "拳斗头巾",
+   "frame": 35,
+   "setId": 14,
+   "quality": 3
+  },
+  {
+   "id": 54,
+   "type": 1,
+   "part": "拳套",
+   "name": "拳斗手套",
+   "frame": 35,
+   "setId": 14,
+   "quality": 3
+  },
+  {
+   "id": 55,
+   "type": 2,
+   "part": "衣服",
+   "name": "拳斗服",
+   "frame": 35,
+   "setId": 14,
+   "quality": 3
+  },
+  {
+   "id": 56,
+   "type": 3,
+   "part": "鞋子",
+   "name": "拳斗鞋",
+   "frame": 35,
+   "setId": 14,
+   "quality": 3
+  },
+  {
+   "id": 57,
+   "type": 0,
+   "part": "头",
+   "name": "忍者护额",
+   "frame": 38,
+   "setId": 15,
+   "quality": 3
+  },
+  {
+   "id": 58,
+   "type": 1,
+   "part": "拳套",
+   "name": "忍者拳套",
+   "frame": 38,
+   "setId": 15,
+   "quality": 3
+  },
+  {
+   "id": 59,
+   "type": 2,
+   "part": "衣服",
+   "name": "忍者服",
+   "frame": 38,
+   "setId": 15,
+   "quality": 3
+  },
+  {
+   "id": 60,
+   "type": 3,
+   "part": "鞋子",
+   "name": "忍者鞋",
+   "frame": 38,
+   "setId": 15,
+   "quality": 3
+  },
+  {
+   "id": 61,
+   "type": 0,
+   "part": "头",
+   "name": "螳螂头饰",
+   "frame": 41,
+   "setId": 16,
+   "quality": 3
+  },
+  {
+   "id": 62,
+   "type": 1,
+   "part": "拳套",
+   "name": "螳螂手套",
+   "frame": 41,
+   "setId": 16,
+   "quality": 3
+  },
+  {
+   "id": 63,
+   "type": 2,
+   "part": "衣服",
+   "name": "螳螂服",
+   "frame": 41,
+   "setId": 16,
+   "quality": 3
+  },
+  {
+   "id": 64,
+   "type": 3,
+   "part": "鞋子",
+   "name": "螳螂鞋",
+   "frame": 41,
+   "setId": 16,
+   "quality": 3
+  },
+  {
+   "id": 65,
+   "type": 0,
+   "part": "头",
+   "name": "仙鹤头饰",
+   "frame": 44,
+   "setId": 17,
+   "quality": 3
+  },
+  {
+   "id": 66,
+   "type": 1,
+   "part": "拳套",
+   "name": "仙鹤拳套",
+   "frame": 44,
+   "setId": 17,
+   "quality": 3
+  },
+  {
+   "id": 67,
+   "type": 2,
+   "part": "衣服",
+   "name": "仙鹤服",
+   "frame": 44,
+   "setId": 17,
+   "quality": 3
+  },
+  {
+   "id": 68,
+   "type": 3,
+   "part": "鞋子",
+   "name": "仙鹤鞋",
+   "frame": 44,
+   "setId": 17,
+   "quality": 3
+  },
+  {
+   "id": 69,
+   "type": 0,
+   "part": "头",
+   "name": "熊猫头饰",
+   "frame": 47,
+   "setId": 18,
+   "quality": 3
+  },
+  {
+   "id": 70,
+   "type": 1,
+   "part": "拳套",
+   "name": "熊猫拳套",
+   "frame": 47,
+   "setId": 18,
+   "quality": 3
+  },
+  {
+   "id": 71,
+   "type": 2,
+   "part": "衣服",
+   "name": "熊猫服",
+   "frame": 47,
+   "setId": 18,
+   "quality": 3
+  },
+  {
+   "id": 72,
+   "type": 3,
+   "part": "鞋子",
+   "name": "熊猫鞋",
+   "frame": 47,
+   "setId": 18,
+   "quality": 3
+  },
+  {
+   "id": 73,
+   "type": 0,
+   "part": "头",
+   "name": "浣熊头饰",
+   "frame": 50,
+   "setId": 19,
+   "quality": 3
+  },
+  {
+   "id": 74,
+   "type": 1,
+   "part": "拳套",
+   "name": "浣熊拳套",
+   "frame": 50,
+   "setId": 19,
+   "quality": 3
+  },
+  {
+   "id": 75,
+   "type": 2,
+   "part": "衣服",
+   "name": "浣熊服",
+   "frame": 50,
+   "setId": 19,
+   "quality": 3
+  },
+  {
+   "id": 76,
+   "type": 3,
+   "part": "鞋子",
+   "name": "浣熊鞋",
+   "frame": 50,
+   "setId": 19,
+   "quality": 3
+  },
+  {
+   "id": 101,
+   "type": 0,
+   "part": "头",
+   "name": "骑士头盔",
+   "frame": 53,
+   "setId": 26,
+   "quality": 3
+  },
+  {
+   "id": 102,
+   "type": 1,
+   "part": "拳套",
+   "name": "骑士手套",
+   "frame": 53,
+   "setId": 26,
+   "quality": 3
+  },
+  {
+   "id": 103,
+   "type": 2,
+   "part": "衣服",
+   "name": "骑士服",
+   "frame": 53,
+   "setId": 26,
+   "quality": 3
+  },
+  {
+   "id": 104,
+   "type": 3,
+   "part": "鞋子",
+   "name": "骑士鞋",
+   "frame": 53,
+   "setId": 26,
+   "quality": 3
+  },
+  {
+   "id": 105,
+   "type": 0,
+   "part": "头",
+   "name": "维京头盔",
+   "frame": 56,
+   "setId": 27,
+   "quality": 3
+  },
+  {
+   "id": 106,
+   "type": 1,
+   "part": "拳套",
+   "name": "维京拳套",
+   "frame": 56,
+   "setId": 27,
+   "quality": 3
+  },
+  {
+   "id": 107,
+   "type": 2,
+   "part": "衣服",
+   "name": "维京服",
+   "frame": 56,
+   "setId": 27,
+   "quality": 3
+  },
+  {
+   "id": 108,
+   "type": 3,
+   "part": "鞋子",
+   "name": "维京鞋",
+   "frame": 56,
+   "setId": 27,
+   "quality": 3
+  },
+  {
+   "id": 109,
+   "type": 0,
+   "part": "头",
+   "name": "犀牛头盔",
+   "frame": 59,
+   "setId": 28,
+   "quality": 3
+  },
+  {
+   "id": 110,
+   "type": 1,
+   "part": "拳套",
+   "name": "犀牛拳套",
+   "frame": 59,
+   "setId": 28,
+   "quality": 3
+  },
+  {
+   "id": 111,
+   "type": 2,
+   "part": "衣服",
+   "name": "犀牛服",
+   "frame": 59,
+   "setId": 28,
+   "quality": 3
+  },
+  {
+   "id": 112,
+   "type": 3,
+   "part": "鞋子",
+   "name": "犀牛鞋",
+   "frame": 59,
+   "setId": 28,
+   "quality": 3
+  },
+  {
+   "id": 113,
+   "type": 0,
+   "part": "头",
+   "name": "幕府头盔",
+   "frame": 62,
+   "setId": 29,
+   "quality": 3
+  },
+  {
+   "id": 114,
+   "type": 1,
+   "part": "拳套",
+   "name": "幕府拳套",
+   "frame": 62,
+   "setId": 29,
+   "quality": 3
+  },
+  {
+   "id": 115,
+   "type": 2,
+   "part": "衣服",
+   "name": "幕府服",
+   "frame": 62,
+   "setId": 29,
+   "quality": 3
+  },
+  {
+   "id": 116,
+   "type": 3,
+   "part": "鞋子",
+   "name": "幕府鞋",
+   "frame": 62,
+   "setId": 29,
+   "quality": 3
+  },
+  {
+   "id": 117,
+   "type": 0,
+   "part": "头",
+   "name": "勇者头盔",
+   "frame": 65,
+   "setId": 30,
+   "quality": 3
+  },
+  {
+   "id": 118,
+   "type": 1,
+   "part": "拳套",
+   "name": "勇者拳套",
+   "frame": 65,
+   "setId": 30,
+   "quality": 3
+  },
+  {
+   "id": 119,
+   "type": 2,
+   "part": "衣服",
+   "name": "勇者服",
+   "frame": 65,
+   "setId": 30,
+   "quality": 3
+  },
+  {
+   "id": 120,
+   "type": 3,
+   "part": "鞋子",
+   "name": "勇者鞋",
+   "frame": 65,
+   "setId": 30,
+   "quality": 3
+  },
+  {
+   "id": 121,
+   "type": 0,
+   "part": "头",
+   "name": "诅咒头盔",
+   "frame": 68,
+   "setId": 31,
+   "quality": 3
+  },
+  {
+   "id": 122,
+   "type": 1,
+   "part": "拳套",
+   "name": "诅咒拳套",
+   "frame": 68,
+   "setId": 31,
+   "quality": 3
+  },
+  {
+   "id": 123,
+   "type": 2,
+   "part": "衣服",
+   "name": "诅咒服",
+   "frame": 68,
+   "setId": 31,
+   "quality": 3
+  },
+  {
+   "id": 124,
+   "type": 3,
+   "part": "鞋子",
+   "name": "诅咒鞋",
+   "frame": 68,
+   "setId": 31,
+   "quality": 3
+  },
+  {
+   "id": 201,
+   "type": 0,
+   "part": "头",
+   "name": "狂战头盔",
+   "frame": 71,
+   "setId": 51,
+   "quality": 3
+  },
+  {
+   "id": 202,
+   "type": 1,
+   "part": "拳套",
+   "name": "狂战拳甲",
+   "frame": 71,
+   "setId": 51,
+   "quality": 3
+  },
+  {
+   "id": 203,
+   "type": 2,
+   "part": "衣服",
+   "name": "狂战铠甲",
+   "frame": 71,
+   "setId": 51,
+   "quality": 3
+  },
+  {
+   "id": 204,
+   "type": 3,
+   "part": "鞋子",
+   "name": "狂战短靴",
+   "frame": 71,
+   "setId": 51,
+   "quality": 3
+  },
+  {
+   "id": 125,
+   "type": 0,
+   "part": "头",
+   "name": "格斗头巾",
+   "frame": 74,
+   "setId": 32,
+   "quality": 4
+  },
+  {
+   "id": 126,
+   "type": 1,
+   "part": "拳套",
+   "name": "格斗手套",
+   "frame": 74,
+   "setId": 32,
+   "quality": 4
+  },
+  {
+   "id": 127,
+   "type": 2,
+   "part": "衣服",
+   "name": "格斗服",
+   "frame": 74,
+   "setId": 32,
+   "quality": 4
+  },
+  {
+   "id": 128,
+   "type": 3,
+   "part": "鞋子",
+   "name": "格斗鞋",
+   "frame": 74,
+   "setId": 32,
+   "quality": 4
+  },
+  {
+   "id": 129,
+   "type": 0,
+   "part": "头",
+   "name": "拳斗头巾",
+   "frame": 77,
+   "setId": 33,
+   "quality": 4
+  },
+  {
+   "id": 130,
+   "type": 1,
+   "part": "拳套",
+   "name": "拳斗手套",
+   "frame": 77,
+   "setId": 33,
+   "quality": 4
+  },
+  {
+   "id": 131,
+   "type": 2,
+   "part": "衣服",
+   "name": "拳斗服",
+   "frame": 77,
+   "setId": 33,
+   "quality": 4
+  },
+  {
+   "id": 132,
+   "type": 3,
+   "part": "鞋子",
+   "name": "拳斗鞋",
+   "frame": 77,
+   "setId": 33,
+   "quality": 4
+  },
+  {
+   "id": 133,
+   "type": 0,
+   "part": "头",
+   "name": "忍者护额",
+   "frame": 80,
+   "setId": 34,
+   "quality": 4
+  },
+  {
+   "id": 134,
+   "type": 1,
+   "part": "拳套",
+   "name": "忍者拳套",
+   "frame": 80,
+   "setId": 34,
+   "quality": 4
+  },
+  {
+   "id": 135,
+   "type": 2,
+   "part": "衣服",
+   "name": "忍者服",
+   "frame": 80,
+   "setId": 34,
+   "quality": 4
+  },
+  {
+   "id": 136,
+   "type": 3,
+   "part": "鞋子",
+   "name": "忍者鞋",
+   "frame": 80,
+   "setId": 34,
+   "quality": 4
+  },
+  {
+   "id": 137,
+   "type": 0,
+   "part": "头",
+   "name": "螳螂头饰",
+   "frame": 83,
+   "setId": 35,
+   "quality": 4
+  },
+  {
+   "id": 138,
+   "type": 1,
+   "part": "拳套",
+   "name": "螳螂手套",
+   "frame": 83,
+   "setId": 35,
+   "quality": 4
+  },
+  {
+   "id": 139,
+   "type": 2,
+   "part": "衣服",
+   "name": "螳螂服",
+   "frame": 83,
+   "setId": 35,
+   "quality": 4
+  },
+  {
+   "id": 140,
+   "type": 3,
+   "part": "鞋子",
+   "name": "螳螂鞋",
+   "frame": 83,
+   "setId": 35,
+   "quality": 4
+  },
+  {
+   "id": 141,
+   "type": 0,
+   "part": "头",
+   "name": "仙鹤头饰",
+   "frame": 86,
+   "setId": 36,
+   "quality": 4
+  },
+  {
+   "id": 142,
+   "type": 1,
+   "part": "拳套",
+   "name": "仙鹤拳套",
+   "frame": 86,
+   "setId": 36,
+   "quality": 4
+  },
+  {
+   "id": 143,
+   "type": 2,
+   "part": "衣服",
+   "name": "仙鹤服",
+   "frame": 86,
+   "setId": 36,
+   "quality": 4
+  },
+  {
+   "id": 144,
+   "type": 3,
+   "part": "鞋子",
+   "name": "仙鹤鞋",
+   "frame": 86,
+   "setId": 36,
+   "quality": 4
+  },
+  {
+   "id": 145,
+   "type": 0,
+   "part": "头",
+   "name": "熊猫头饰",
+   "frame": 89,
+   "setId": 37,
+   "quality": 4
+  },
+  {
+   "id": 146,
+   "type": 1,
+   "part": "拳套",
+   "name": "熊猫拳套",
+   "frame": 89,
+   "setId": 37,
+   "quality": 4
+  },
+  {
+   "id": 147,
+   "type": 2,
+   "part": "衣服",
+   "name": "熊猫服",
+   "frame": 89,
+   "setId": 37,
+   "quality": 4
+  },
+  {
+   "id": 148,
+   "type": 3,
+   "part": "鞋子",
+   "name": "熊猫鞋",
+   "frame": 89,
+   "setId": 37,
+   "quality": 4
+  },
+  {
+   "id": 149,
+   "type": 0,
+   "part": "头",
+   "name": "浣熊头饰",
+   "frame": 92,
+   "setId": 38,
+   "quality": 4
+  },
+  {
+   "id": 150,
+   "type": 1,
+   "part": "拳套",
+   "name": "浣熊拳套",
+   "frame": 92,
+   "setId": 38,
+   "quality": 4
+  },
+  {
+   "id": 151,
+   "type": 2,
+   "part": "衣服",
+   "name": "浣熊服",
+   "frame": 92,
+   "setId": 38,
+   "quality": 4
+  },
+  {
+   "id": 152,
+   "type": 3,
+   "part": "鞋子",
+   "name": "浣熊鞋",
+   "frame": 92,
+   "setId": 38,
+   "quality": 4
+  },
+  {
+   "id": 153,
+   "type": 0,
+   "part": "头",
+   "name": "骑士头盔",
+   "frame": 95,
+   "setId": 39,
+   "quality": 4
+  },
+  {
+   "id": 154,
+   "type": 1,
+   "part": "拳套",
+   "name": "骑士手套",
+   "frame": 95,
+   "setId": 39,
+   "quality": 4
+  },
+  {
+   "id": 155,
+   "type": 2,
+   "part": "衣服",
+   "name": "骑士服",
+   "frame": 95,
+   "setId": 39,
+   "quality": 4
+  },
+  {
+   "id": 156,
+   "type": 3,
+   "part": "鞋子",
+   "name": "骑士鞋",
+   "frame": 95,
+   "setId": 39,
+   "quality": 4
+  },
+  {
+   "id": 157,
+   "type": 0,
+   "part": "头",
+   "name": "维京头盔",
+   "frame": 98,
+   "setId": 40,
+   "quality": 4
+  },
+  {
+   "id": 158,
+   "type": 1,
+   "part": "拳套",
+   "name": "维京拳套",
+   "frame": 98,
+   "setId": 40,
+   "quality": 4
+  },
+  {
+   "id": 159,
+   "type": 2,
+   "part": "衣服",
+   "name": "维京服",
+   "frame": 98,
+   "setId": 40,
+   "quality": 4
+  },
+  {
+   "id": 160,
+   "type": 3,
+   "part": "鞋子",
+   "name": "维京鞋",
+   "frame": 98,
+   "setId": 40,
+   "quality": 4
+  },
+  {
+   "id": 161,
+   "type": 0,
+   "part": "头",
+   "name": "犀牛头盔",
+   "frame": 101,
+   "setId": 41,
+   "quality": 4
+  },
+  {
+   "id": 162,
+   "type": 1,
+   "part": "拳套",
+   "name": "犀牛拳套",
+   "frame": 101,
+   "setId": 41,
+   "quality": 4
+  },
+  {
+   "id": 163,
+   "type": 2,
+   "part": "衣服",
+   "name": "犀牛服",
+   "frame": 101,
+   "setId": 41,
+   "quality": 4
+  },
+  {
+   "id": 164,
+   "type": 3,
+   "part": "鞋子",
+   "name": "犀牛鞋",
+   "frame": 101,
+   "setId": 41,
+   "quality": 4
+  },
+  {
+   "id": 165,
+   "type": 0,
+   "part": "头",
+   "name": "幕府头盔",
+   "frame": 104,
+   "setId": 42,
+   "quality": 4
+  },
+  {
+   "id": 166,
+   "type": 1,
+   "part": "拳套",
+   "name": "幕府拳套",
+   "frame": 104,
+   "setId": 42,
+   "quality": 4
+  },
+  {
+   "id": 167,
+   "type": 2,
+   "part": "衣服",
+   "name": "幕府服",
+   "frame": 104,
+   "setId": 42,
+   "quality": 4
+  },
+  {
+   "id": 168,
+   "type": 3,
+   "part": "鞋子",
+   "name": "幕府鞋",
+   "frame": 104,
+   "setId": 42,
+   "quality": 4
+  },
+  {
+   "id": 169,
+   "type": 0,
+   "part": "头",
+   "name": "勇者头盔",
+   "frame": 107,
+   "setId": 43,
+   "quality": 4
+  },
+  {
+   "id": 170,
+   "type": 1,
+   "part": "拳套",
+   "name": "勇者拳套",
+   "frame": 107,
+   "setId": 43,
+   "quality": 4
+  },
+  {
+   "id": 171,
+   "type": 2,
+   "part": "衣服",
+   "name": "勇者服",
+   "frame": 107,
+   "setId": 43,
+   "quality": 4
+  },
+  {
+   "id": 172,
+   "type": 3,
+   "part": "鞋子",
+   "name": "勇者鞋",
+   "frame": 107,
+   "setId": 43,
+   "quality": 4
+  },
+  {
+   "id": 173,
+   "type": 0,
+   "part": "头",
+   "name": "诅咒头盔",
+   "frame": 110,
+   "setId": 44,
+   "quality": 4
+  },
+  {
+   "id": 174,
+   "type": 1,
+   "part": "拳套",
+   "name": "诅咒拳套",
+   "frame": 110,
+   "setId": 44,
+   "quality": 4
+  },
+  {
+   "id": 175,
+   "type": 2,
+   "part": "衣服",
+   "name": "诅咒服",
+   "frame": 110,
+   "setId": 44,
+   "quality": 4
+  },
+  {
+   "id": 176,
+   "type": 3,
+   "part": "鞋子",
+   "name": "诅咒鞋",
+   "frame": 110,
+   "setId": 44,
+   "quality": 4
+  },
+  {
+   "id": 205,
+   "type": 0,
+   "part": "头",
+   "name": "狂战头盔",
+   "frame": 113,
+   "setId": 52,
+   "quality": 4
+  },
+  {
+   "id": 206,
+   "type": 1,
+   "part": "拳套",
+   "name": "狂战拳甲",
+   "frame": 113,
+   "setId": 52,
+   "quality": 4
+  },
+  {
+   "id": 207,
+   "type": 2,
+   "part": "衣服",
+   "name": "狂战铠甲",
+   "frame": 113,
+   "setId": 52,
+   "quality": 4
+  },
+  {
+   "id": 208,
+   "type": 3,
+   "part": "鞋子",
+   "name": "狂战短靴",
+   "frame": 113,
+   "setId": 52,
+   "quality": 4
+  },
+  {
+   "id": 177,
+   "type": 0,
+   "part": "头",
+   "name": "怒战头盔",
+   "frame": 116,
+   "setId": 45,
+   "quality": 4
+  },
+  {
+   "id": 178,
+   "type": 1,
+   "part": "拳套",
+   "name": "怒战拳甲",
+   "frame": 116,
+   "setId": 45,
+   "quality": 4
+  },
+  {
+   "id": 179,
+   "type": 2,
+   "part": "衣服",
+   "name": "怒战铠甲",
+   "frame": 116,
+   "setId": 45,
+   "quality": 4
+  },
+  {
+   "id": 180,
+   "type": 3,
+   "part": "鞋子",
+   "name": "怒战短靴",
+   "frame": 116,
+   "setId": 45,
+   "quality": 4
+  },
+  {
+   "id": 181,
+   "type": 0,
+   "part": "头",
+   "name": "狂战头盔",
+   "frame": 119,
+   "setId": 46,
+   "quality": 5
+  },
+  {
+   "id": 182,
+   "type": 1,
+   "part": "拳套",
+   "name": "狂战拳甲",
+   "frame": 119,
+   "setId": 46,
+   "quality": 5
+  },
+  {
+   "id": 183,
+   "type": 2,
+   "part": "衣服",
+   "name": "狂战铠甲",
+   "frame": 119,
+   "setId": 46,
+   "quality": 5
+  },
+  {
+   "id": 184,
+   "type": 3,
+   "part": "鞋子",
+   "name": "狂战短靴",
+   "frame": 119,
+   "setId": 46,
+   "quality": 5
+  },
+  {
+   "id": 185,
+   "type": 0,
+   "part": "头",
+   "name": "怒战头盔",
+   "frame": 122,
+   "setId": 47,
+   "quality": 5
+  },
+  {
+   "id": 186,
+   "type": 1,
+   "part": "拳套",
+   "name": "怒战拳甲",
+   "frame": 122,
+   "setId": 47,
+   "quality": 5
+  },
+  {
+   "id": 187,
+   "type": 2,
+   "part": "衣服",
+   "name": "怒战铠甲",
+   "frame": 122,
+   "setId": 47,
+   "quality": 5
+  },
+  {
+   "id": 188,
+   "type": 3,
+   "part": "鞋子",
+   "name": "怒战短靴",
+   "frame": 122,
+   "setId": 47,
+   "quality": 5
+  },
+  {
+   "id": 213,
+   "type": 0,
+   "part": "头",
+   "name": "格斗头巾",
+   "frame": 125,
+   "setId": 54,
+   "quality": 5
+  },
+  {
+   "id": 214,
+   "type": 1,
+   "part": "拳套",
+   "name": "格斗手套",
+   "frame": 125,
+   "setId": 54,
+   "quality": 5
+  },
+  {
+   "id": 215,
+   "type": 2,
+   "part": "衣服",
+   "name": "格斗服",
+   "frame": 125,
+   "setId": 54,
+   "quality": 5
+  },
+  {
+   "id": 216,
+   "type": 3,
+   "part": "鞋子",
+   "name": "格斗鞋",
+   "frame": 125,
+   "setId": 54,
+   "quality": 5
+  },
+  {
+   "id": 217,
+   "type": 0,
+   "part": "头",
+   "name": "拳斗头巾",
+   "frame": 128,
+   "setId": 55,
+   "quality": 5
+  },
+  {
+   "id": 218,
+   "type": 1,
+   "part": "拳套",
+   "name": "拳斗手套",
+   "frame": 128,
+   "setId": 55,
+   "quality": 5
+  },
+  {
+   "id": 219,
+   "type": 2,
+   "part": "衣服",
+   "name": "拳斗服",
+   "frame": 128,
+   "setId": 55,
+   "quality": 5
+  },
+  {
+   "id": 220,
+   "type": 3,
+   "part": "鞋子",
+   "name": "拳斗鞋",
+   "frame": 128,
+   "setId": 55,
+   "quality": 5
+  },
+  {
+   "id": 221,
+   "type": 0,
+   "part": "头",
+   "name": "忍者护额",
+   "frame": 131,
+   "setId": 56,
+   "quality": 5
+  },
+  {
+   "id": 222,
+   "type": 1,
+   "part": "拳套",
+   "name": "忍者拳套",
+   "frame": 131,
+   "setId": 56,
+   "quality": 5
+  },
+  {
+   "id": 223,
+   "type": 2,
+   "part": "衣服",
+   "name": "忍者服",
+   "frame": 131,
+   "setId": 56,
+   "quality": 5
+  },
+  {
+   "id": 224,
+   "type": 3,
+   "part": "鞋子",
+   "name": "忍者鞋",
+   "frame": 131,
+   "setId": 56,
+   "quality": 5
+  },
+  {
+   "id": 225,
+   "type": 0,
+   "part": "头",
+   "name": "螳螂头饰",
+   "frame": 134,
+   "setId": 57,
+   "quality": 5
+  },
+  {
+   "id": 226,
+   "type": 1,
+   "part": "拳套",
+   "name": "螳螂手套",
+   "frame": 134,
+   "setId": 57,
+   "quality": 5
+  },
+  {
+   "id": 227,
+   "type": 2,
+   "part": "衣服",
+   "name": "螳螂服",
+   "frame": 134,
+   "setId": 57,
+   "quality": 5
+  },
+  {
+   "id": 228,
+   "type": 3,
+   "part": "鞋子",
+   "name": "螳螂鞋",
+   "frame": 134,
+   "setId": 57,
+   "quality": 5
+  },
+  {
+   "id": 229,
+   "type": 0,
+   "part": "头",
+   "name": "仙鹤头饰",
+   "frame": 137,
+   "setId": 58,
+   "quality": 5
+  },
+  {
+   "id": 230,
+   "type": 1,
+   "part": "拳套",
+   "name": "仙鹤拳套",
+   "frame": 137,
+   "setId": 58,
+   "quality": 5
+  },
+  {
+   "id": 231,
+   "type": 2,
+   "part": "衣服",
+   "name": "仙鹤服",
+   "frame": 137,
+   "setId": 58,
+   "quality": 5
+  },
+  {
+   "id": 232,
+   "type": 3,
+   "part": "鞋子",
+   "name": "仙鹤鞋",
+   "frame": 137,
+   "setId": 58,
+   "quality": 5
+  },
+  {
+   "id": 233,
+   "type": 0,
+   "part": "头",
+   "name": "熊猫头饰",
+   "frame": 140,
+   "setId": 59,
+   "quality": 5
+  },
+  {
+   "id": 234,
+   "type": 1,
+   "part": "拳套",
+   "name": "熊猫拳套",
+   "frame": 140,
+   "setId": 59,
+   "quality": 5
+  },
+  {
+   "id": 235,
+   "type": 2,
+   "part": "衣服",
+   "name": "熊猫服",
+   "frame": 140,
+   "setId": 59,
+   "quality": 5
+  },
+  {
+   "id": 236,
+   "type": 3,
+   "part": "鞋子",
+   "name": "熊猫鞋",
+   "frame": 140,
+   "setId": 59,
+   "quality": 5
+  },
+  {
+   "id": 237,
+   "type": 0,
+   "part": "头",
+   "name": "浣熊头饰",
+   "frame": 143,
+   "setId": 60,
+   "quality": 5
+  },
+  {
+   "id": 238,
+   "type": 1,
+   "part": "拳套",
+   "name": "浣熊拳套",
+   "frame": 143,
+   "setId": 60,
+   "quality": 5
+  },
+  {
+   "id": 239,
+   "type": 2,
+   "part": "衣服",
+   "name": "浣熊服",
+   "frame": 143,
+   "setId": 60,
+   "quality": 5
+  },
+  {
+   "id": 240,
+   "type": 3,
+   "part": "鞋子",
+   "name": "浣熊鞋",
+   "frame": 143,
+   "setId": 60,
+   "quality": 5
+  },
+  {
+   "id": 241,
+   "type": 0,
+   "part": "头",
+   "name": "骑士头盔",
+   "frame": 146,
+   "setId": 61,
+   "quality": 5
+  },
+  {
+   "id": 242,
+   "type": 1,
+   "part": "拳套",
+   "name": "骑士手套",
+   "frame": 146,
+   "setId": 61,
+   "quality": 5
+  },
+  {
+   "id": 243,
+   "type": 2,
+   "part": "衣服",
+   "name": "骑士服",
+   "frame": 146,
+   "setId": 61,
+   "quality": 5
+  },
+  {
+   "id": 244,
+   "type": 3,
+   "part": "鞋子",
+   "name": "骑士鞋",
+   "frame": 146,
+   "setId": 61,
+   "quality": 5
+  },
+  {
+   "id": 245,
+   "type": 0,
+   "part": "头",
+   "name": "维京头盔",
+   "frame": 149,
+   "setId": 62,
+   "quality": 5
+  },
+  {
+   "id": 246,
+   "type": 1,
+   "part": "拳套",
+   "name": "维京拳套",
+   "frame": 149,
+   "setId": 62,
+   "quality": 5
+  },
+  {
+   "id": 247,
+   "type": 2,
+   "part": "衣服",
+   "name": "维京服",
+   "frame": 149,
+   "setId": 62,
+   "quality": 5
+  },
+  {
+   "id": 248,
+   "type": 3,
+   "part": "鞋子",
+   "name": "维京鞋",
+   "frame": 149,
+   "setId": 62,
+   "quality": 5
+  },
+  {
+   "id": 249,
+   "type": 0,
+   "part": "头",
+   "name": "犀牛头盔",
+   "frame": 152,
+   "setId": 63,
+   "quality": 5
+  },
+  {
+   "id": 250,
+   "type": 1,
+   "part": "拳套",
+   "name": "犀牛拳套",
+   "frame": 152,
+   "setId": 63,
+   "quality": 5
+  },
+  {
+   "id": 251,
+   "type": 2,
+   "part": "衣服",
+   "name": "犀牛服",
+   "frame": 152,
+   "setId": 63,
+   "quality": 5
+  },
+  {
+   "id": 252,
+   "type": 3,
+   "part": "鞋子",
+   "name": "犀牛鞋",
+   "frame": 152,
+   "setId": 63,
+   "quality": 5
+  },
+  {
+   "id": 253,
+   "type": 0,
+   "part": "头",
+   "name": "幕府头盔",
+   "frame": 155,
+   "setId": 64,
+   "quality": 5
+  },
+  {
+   "id": 254,
+   "type": 1,
+   "part": "拳套",
+   "name": "幕府拳套",
+   "frame": 155,
+   "setId": 64,
+   "quality": 5
+  },
+  {
+   "id": 255,
+   "type": 2,
+   "part": "衣服",
+   "name": "幕府服",
+   "frame": 155,
+   "setId": 64,
+   "quality": 5
+  },
+  {
+   "id": 256,
+   "type": 3,
+   "part": "鞋子",
+   "name": "幕府鞋",
+   "frame": 155,
+   "setId": 64,
+   "quality": 5
+  },
+  {
+   "id": 257,
+   "type": 0,
+   "part": "头",
+   "name": "勇者头盔",
+   "frame": 158,
+   "setId": 65,
+   "quality": 5
+  },
+  {
+   "id": 258,
+   "type": 1,
+   "part": "拳套",
+   "name": "勇者拳套",
+   "frame": 158,
+   "setId": 65,
+   "quality": 5
+  },
+  {
+   "id": 259,
+   "type": 2,
+   "part": "衣服",
+   "name": "勇者服",
+   "frame": 158,
+   "setId": 65,
+   "quality": 5
+  },
+  {
+   "id": 260,
+   "type": 3,
+   "part": "鞋子",
+   "name": "勇者鞋",
+   "frame": 158,
+   "setId": 65,
+   "quality": 5
+  },
+  {
+   "id": 261,
+   "type": 0,
+   "part": "头",
+   "name": "诅咒头盔",
+   "frame": 161,
+   "setId": 66,
+   "quality": 5
+  },
+  {
+   "id": 262,
+   "type": 1,
+   "part": "拳套",
+   "name": "诅咒拳套",
+   "frame": 161,
+   "setId": 66,
+   "quality": 5
+  },
+  {
+   "id": 263,
+   "type": 2,
+   "part": "衣服",
+   "name": "诅咒服",
+   "frame": 161,
+   "setId": 66,
+   "quality": 5
+  },
+  {
+   "id": 264,
+   "type": 3,
+   "part": "鞋子",
+   "name": "诅咒鞋",
+   "frame": 161,
+   "setId": 66,
+   "quality": 5
+  },
+  {
+   "id": 193,
+   "type": 0,
+   "part": "头",
+   "name": "机器猫头",
+   "frame": 164,
+   "setId": 49,
+   "quality": 3
+  },
+  {
+   "id": 194,
+   "type": 1,
+   "part": "拳套",
+   "name": "机器猫拳",
+   "frame": 164,
+   "setId": 49,
+   "quality": 3
+  },
+  {
+   "id": 195,
+   "type": 2,
+   "part": "衣服",
+   "name": "机器猫服",
+   "frame": 164,
+   "setId": 49,
+   "quality": 3
+  },
+  {
+   "id": 196,
+   "type": 3,
+   "part": "鞋子",
+   "name": "机器猫鞋",
+   "frame": 164,
+   "setId": 49,
+   "quality": 3
+  },
+  {
+   "id": 189,
+   "type": 0,
+   "part": "头",
+   "name": "深海头饰",
+   "frame": 167,
+   "setId": 48,
+   "quality": 3
+  },
+  {
+   "id": 190,
+   "type": 1,
+   "part": "拳套",
+   "name": "深海拳套",
+   "frame": 167,
+   "setId": 48,
+   "quality": 3
+  },
+  {
+   "id": 191,
+   "type": 2,
+   "part": "衣服",
+   "name": "深海服",
+   "frame": 167,
+   "setId": 48,
+   "quality": 3
+  },
+  {
+   "id": 192,
+   "type": 3,
+   "part": "鞋子",
+   "name": "深海鞋",
+   "frame": 167,
+   "setId": 48,
+   "quality": 3
+  },
+  {
+   "id": 277,
+   "type": 0,
+   "part": "头",
+   "name": "机器猫头",
+   "frame": 170,
+   "setId": 70,
+   "quality": 5
+  },
+  {
+   "id": 278,
+   "type": 1,
+   "part": "拳套",
+   "name": "机器猫拳",
+   "frame": 170,
+   "setId": 70,
+   "quality": 5
+  },
+  {
+   "id": 279,
+   "type": 2,
+   "part": "衣服",
+   "name": "机器猫服",
+   "frame": 170,
+   "setId": 70,
+   "quality": 5
+  },
+  {
+   "id": 280,
+   "type": 3,
+   "part": "鞋子",
+   "name": "机器猫鞋",
+   "frame": 170,
+   "setId": 70,
+   "quality": 5
+  },
+  {
+   "id": 273,
+   "type": 0,
+   "part": "头",
+   "name": "深海头饰",
+   "frame": 173,
+   "setId": 69,
+   "quality": 5
+  },
+  {
+   "id": 274,
+   "type": 1,
+   "part": "拳套",
+   "name": "深海拳套",
+   "frame": 173,
+   "setId": 69,
+   "quality": 5
+  },
+  {
+   "id": 275,
+   "type": 2,
+   "part": "衣服",
+   "name": "深海服",
+   "frame": 173,
+   "setId": 69,
+   "quality": 5
+  },
+  {
+   "id": 276,
+   "type": 3,
+   "part": "鞋子",
+   "name": "深海鞋",
+   "frame": 173,
+   "setId": 69,
+   "quality": 5
+  },
+  {
+   "id": 285,
+   "type": 0,
+   "part": "头",
+   "name": "圣熊头盔",
+   "frame": 176,
+   "setId": 72,
+   "quality": 5
+  },
+  {
+   "id": 286,
+   "type": 1,
+   "part": "拳套",
+   "name": "圣熊拳甲",
+   "frame": 176,
+   "setId": 72,
+   "quality": 5
+  },
+  {
+   "id": 287,
+   "type": 2,
+   "part": "衣服",
+   "name": "圣熊铠甲",
+   "frame": 176,
+   "setId": 72,
+   "quality": 5
+  },
+  {
+   "id": 288,
+   "type": 3,
+   "part": "鞋子",
+   "name": "圣熊短靴",
+   "frame": 176,
+   "setId": 72,
+   "quality": 5
+  },
+  {
+   "id": 281,
+   "type": 0,
+   "part": "头",
+   "name": "凤凰头盔",
+   "frame": 179,
+   "setId": 71,
+   "quality": 5
+  },
+  {
+   "id": 282,
+   "type": 1,
+   "part": "拳套",
+   "name": "凤凰拳甲",
+   "frame": 179,
+   "setId": 71,
+   "quality": 5
+  },
+  {
+   "id": 283,
+   "type": 2,
+   "part": "衣服",
+   "name": "凤凰铠甲",
+   "frame": 179,
+   "setId": 71,
+   "quality": 5
+  },
+  {
+   "id": 284,
+   "type": 3,
+   "part": "鞋子",
+   "name": "凤凰短靴",
+   "frame": 179,
+   "setId": 71,
+   "quality": 5
+  },
+  {
+   "id": 209,
+   "type": 0,
+   "part": "头",
+   "name": "机器猫头",
+   "frame": 182,
+   "setId": 53,
+   "quality": 4
+  },
+  {
+   "id": 210,
+   "type": 1,
+   "part": "拳套",
+   "name": "机器猫拳",
+   "frame": 182,
+   "setId": 53,
+   "quality": 4
+  },
+  {
+   "id": 211,
+   "type": 2,
+   "part": "衣服",
+   "name": "机器猫服",
+   "frame": 182,
+   "setId": 53,
+   "quality": 4
+  },
+  {
+   "id": 212,
+   "type": 3,
+   "part": "鞋子",
+   "name": "机器猫鞋",
+   "frame": 182,
+   "setId": 53,
+   "quality": 4
+  },
+  {
+   "id": 197,
+   "type": 0,
+   "part": "头",
+   "name": "深海头饰",
+   "frame": 185,
+   "setId": 50,
+   "quality": 4
+  },
+  {
+   "id": 198,
+   "type": 1,
+   "part": "拳套",
+   "name": "深海拳套",
+   "frame": 185,
+   "setId": 50,
+   "quality": 4
+  },
+  {
+   "id": 199,
+   "type": 2,
+   "part": "衣服",
+   "name": "深海服",
+   "frame": 185,
+   "setId": 50,
+   "quality": 4
+  },
+  {
+   "id": 200,
+   "type": 3,
+   "part": "鞋子",
+   "name": "深海鞋",
+   "frame": 185,
+   "setId": 50,
+   "quality": 4
+  },
+  {
+   "id": 265,
+   "type": 0,
+   "part": "头",
+   "name": "狂战头盔",
+   "frame": 119,
+   "setId": 67,
+   "quality": 5
+  },
+  {
+   "id": 266,
+   "type": 1,
+   "part": "拳套",
+   "name": "狂战拳甲",
+   "frame": 119,
+   "setId": 67,
+   "quality": 5
+  },
+  {
+   "id": 267,
+   "type": 2,
+   "part": "衣服",
+   "name": "狂战铠甲",
+   "frame": 119,
+   "setId": 67,
+   "quality": 5
+  },
+  {
+   "id": 268,
+   "type": 3,
+   "part": "鞋子",
+   "name": "狂战短靴",
+   "frame": 119,
+   "setId": 67,
+   "quality": 5
+  },
+  {
+   "id": 269,
+   "type": 0,
+   "part": "头",
+   "name": "怒战头盔",
+   "frame": 122,
+   "setId": 68,
+   "quality": 5
+  },
+  {
+   "id": 270,
+   "type": 1,
+   "part": "拳套",
+   "name": "怒战拳甲",
+   "frame": 122,
+   "setId": 68,
+   "quality": 5
+  },
+  {
+   "id": 271,
+   "type": 2,
+   "part": "衣服",
+   "name": "怒战铠甲",
+   "frame": 122,
+   "setId": 68,
+   "quality": 5
+  },
+  {
+   "id": 272,
+   "type": 3,
+   "part": "鞋子",
+   "name": "怒战短靴",
+   "frame": 122,
+   "setId": 68,
+   "quality": 5
+  }
+ ]
+}

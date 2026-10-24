@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  iOS 专用：由 tauri.ios.conf.json 的 bundle.iOS.infoPlist 合并进生成工程的 Info.plist。
+  · 只支持横屏（iPhone / iPad 都是），并强制全屏，避免 iPad 分屏把 1170×690 的界面压扁；
+  · 隐藏状态栏和 Home 指示条，把整块屏幕留给游戏画面；
+  · 显示名用中文，可执行文件名/包名仍保持 squirrel_fight / com.ssdz.classic。
+  改这里不需要重新 tauri ios init，直接重新构建即可（Tauri 每次构建都会合并）。
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key>
+  <string>松鼠大战</string>
+
+  <key>UISupportedInterfaceOrientations</key>
+  <array>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+  </array>
+  <key>UISupportedInterfaceOrientations~ipad</key>
+  <array>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+  </array>
+
+  <key>UIRequiresFullScreen</key>
+  <true/>
+  <key>UIStatusBarHidden</key>
+  <true/>
+  <key>UIViewControllerBasedStatusBarAppearance</key>
+  <false/>
+  <key>UIStatusBarStyle</key>
+  <string>UIStatusBarStyleLightContent</string>
+  <key>UIHomeIndicatorAutoHidden</key>
+  <true/>
+
+  <!-- UIScene 生命周期（iOS 26+ 必需）由 tools/build-ios.cjs 在 gen/apple/project.yml 里生成。
+       这里不要声明：--legacy 包要完全走 iOS 15 的传统 AppDelegate 生命周期。 -->
+
+  <!-- 不声明 UIApplicationSupportsIndirectInputEvents：游戏只依赖直接触摸/指针事件，
+       iOS 15 + TrollStore 下先排除这个「间接输入」开关的干扰。 -->
+
+  <!-- 存档导出 / 导入：把 App 沙盒的 Documents 暴露到「文件」App，
+       玩家可以在「我的 iPhone/iPad → 松鼠大战」里看到导出的 .json；
+       LSSupportsOpeningDocumentsInPlace 允许直接在「文件」里打开/覆盖这些文件。 -->
+  <key>UIFileSharingEnabled</key>
+  <true/>
+  <key>LSSupportsOpeningDocumentsInPlace</key>
+  <true/>
+
+  <!-- 纯单机、无加密网络通信；免得以后走 App Store 时被问出口合规。 -->
+  <key>ITSAppUsesNonExemptEncryption</key>
+  <false/>
+</dict>
+</plist>

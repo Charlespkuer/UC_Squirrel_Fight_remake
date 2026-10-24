@@ -98,7 +98,7 @@ git push origin v0.1.3
 
 | 文件 | 内容 |
 | --- | --- |
-| `squirrel-web-mac-v0.1.3.zip` | `README.md`、`css/`、`js/`、`images/`、`audio/`、`启动说明.txt`，启动器在 `scripts/`（`启动游戏.command`、`serve.js` + `serve.py`、`index.html`） |
+| `squirrel-web-mac-v0.1.3.zip` | `README.md`、`css/`、`js/`、`images/`、`audio/`、`启动说明.txt`，启动器在 `scripts/`（`启动游戏.command`、`game-exit-watch.sh`、`serve.js` + `serve.py`、`index.html`） |
 | `squirrel-web-win-v0.1.3.zip` | 同上，`scripts/` 里多一个 `启动游戏.cmd` + `start-game.ps1`（两个文件必须在一起） |
 
 > 启动器都在 `scripts/` 里；两个平台都把 `squirrel_fight.exe` 放到 zip 根目录就会优先走原生窗口。
@@ -168,31 +168,39 @@ runs-on: ${{ matrix.os }}
 `.github/workflows/ci.yml` 在 `ubuntu-latest`、`macos-latest`、`windows-latest` 上并行跑：
 
 ```bash
-node tools/check-asset-paths.cjs          # 资源引用大小写/断链体检
-node tools/test-state.cjs                 # 存档、成长、道具、每日任务…
-node tools/test-balance.cjs               # 数值与规则
-node tools/test-points.cjs                # 升级自由属性点（四项平衡）
-node tools/test-combat-rules.cjs          # 战斗规则
-node tools/test-battle-drops.cjs          # 点击拾取
-node tools/test-main-battle.cjs           # 战斗结算集成
-node tools/test-extras.cjs                # 竞技/天梯/师徒/排行榜/超级松鼠
-node tools/test-fusion.cjs                # 装备融合
-node tools/test-stages.cjs                # 关卡
-node tools/test-stage-balance.cjs         # 关卡难度平衡回归
-node tools/test-battle.js                 # 动画回归（可选依赖 @napi-rs/canvas，缺了自动 SKIP）
+node tools/check-asset-paths.cjs   # 资源引用大小写/断链体检
+node tools/check-encodings.cjs     # 文本编码 + .ps1 BOM 体检
+for t in tools/test-*.cjs; do node "$t" || exit 1; done   # 枚举整个目录，不手写清单
+node tools/test-battle.js          # 动画回归（可选依赖 @napi-rs/canvas，缺了自动 SKIP）
 ```
 
-本地等价命令：`npm test`、`npm run check`、`npm run test:battle`。
+当前套件（2026-10 审计时 16 个）：`test-state`（存档/成长/道具/每日）、`test-mint-shop`
+（无尽塔商店/剧情/整百层/同名叠加）、`test-env-buff`（环境词缀与剧情埋点）、`test-fixes-round`
+（历史战斗与塔规则）、`test-stages` / `test-stage-balance`（关卡与数值平衡）、`test-points`
+（升级属性点）、`test-battle-drops`（点击拾取）、`test-buff-report` / `test-buff-tags`
+（buff 报告与标签）、`test-extras`（竞技/天梯/师徒/排行榜/超级松鼠）、`test-fusion`（装备融合）、
+`test-min-deps`（最小依赖/引导）、`test-save-boot`（存档与启动）、`test-ssfight-render`
+（经典界面渲染与素材契约）、`test-sync`（双机同步）。
+
+本地跑全套（仓库根没有 `package.json`，所以没有 `npm test`）：
+
+```bash
+for t in tools/test-*.cjs; do node "$t" || exit 1; done
+```
 
 ---
 
 ## 六、发布前的自检清单
 
 - [ ] `node tools/check-asset-paths.cjs` 全绿（新增素材后最容易踩：**大小写**）
-- [ ] `npm test` 全绿
+- [ ] `node tools/check-encodings.cjs` 全绿（`.ps1` 含中文必须带 UTF-8 BOM）
+- [ ] `tools/test-*.cjs` 全绿（CI 会枚举整个目录）
 - [ ] `http://127.0.0.1:8080/index.html?test=1` 浏览器自检 21/21、控制台 0 错误
 - [ ] 手机上开一次 Pages 地址（竖屏会被画布缩放，纯静态站也能开，只是操作不便）
-- [ ] 版本号与 `package.json`、git tag 对齐；Release 说明里写清「怎么启动 / 存档怎么搬」
+- [ ] 安卓包三档签名齐全（**v1/v2/v3 都要 true**；`--min-sdk-version 23` 才会校验 v1）：
+      `apksigner verify --min-sdk-version 23 --verbose <apk>` —— `tools/build-apk.ps1` 已内置复检与补签
+- [ ] 版本号与 `package.json` / `tauri.conf.json` / `scripts/version.json`、git tag 对齐；
+      Release 说明里写清「怎么启动 / 存档怎么搬」
 
 ---
 
@@ -203,8 +211,8 @@ node tools/test-battle.js                 # 动画回归（可选依赖 @napi-rs
 
 | 方案 | 产物 | 本地占用 | 前端从哪来 | 用在哪 |
 | --- | --- | --- | --- | --- |
-| **轻壳**（默认） | `src-tauri/dist/squirrel_fight.exe`，**2.86 MB** | exe 一个文件（`target/` 编译缓存可用 `--clean` 回收） | **游戏目录里的 `index.html` / `css` / `js` / `images` / `audio`**：外壳启动时自己起一个迷你 HTTP 服务器供起来 | 本机玩、便携包旁边玩 |
-| **安装包** | `松鼠大战怀旧版_0.1.3_x64-setup.exe`，47 MB | 打完自动删掉临时的 `web/` | 编译进二进制（旁边没有游戏目录也能跑） | 发给别人装 |
+| **轻壳**（默认） | 仓库根目录的 `squirrel_fight.exe`，**约 2.9 MB** | exe 一个文件（`target/` 编译缓存可用 `--clean` 回收） | **游戏目录里的 `index.html` / `css` / `js` / `images` / `audio`**：外壳启动时自己起一个迷你 HTTP 服务器供起来 | 本机玩、便携包旁边玩 |
+| **安装包** | `squirrel_fight_<version>_x64-setup.exe`（约 50~70 MB） | 打完自动删掉临时的 `web/` | 编译进二进制（旁边没有游戏目录也能跑） | 发给别人装 |
 
 轻壳不复制、不嵌入任何前端资源，所以：
 
@@ -222,7 +230,7 @@ node tools/test-battle.js                 # 动画回归（可选依赖 @napi-rs
 
 原生版按这个顺序找：`<游戏根>\squirrel_fight.exe` → `scripts\squirrel_fight.exe` →
 `src-tauri\target\release\squirrel_fight.exe`
-（macOS 是 `.app` 包或 `src-tauri/dist/squirrel_fight`），加 `--browser` 可强制走浏览器路线。
+（macOS 是 `.app` 包；Windows 正式产物只有游戏根目录的 `squirrel_fight.exe`），加 `--browser` 可强制走浏览器路线。
 > 2026-10 起打包脚本**不再**往 `src-tauri\dist\` 放一份 exe 副本（便携包不收它、发布的是安装包，
 > 纯重复文件）；正式产物就一个：游戏根目录的 `squirrel_fight.exe`。
 
@@ -271,7 +279,7 @@ cmd.exe 读 `.cmd` 里的 UTF-8 中文会把中文字节错位、把中文注释
 
 ```bash
 # 一次性：装 Rust（https://rustup.rs）+ 在 src-tauri 里 npm install + npx tauri icon app-icon.png
-node tools/build-tauri-app.cjs            # 编译 → src-tauri/dist/squirrel_fight.exe
+node tools/build-tauri-app.cjs            # 编译 → 仓库根 squirrel_fight.exe
 node tools/build-tauri-app.cjs --clean    # 同上，然后 cargo clean（回收 target/）
 node tools/build-tauri-app.cjs --installer # 另打 NSIS 安装包（临时暂存 web/，打完自动删）
 ```
@@ -287,7 +295,7 @@ node tools/build-tauri-app.cjs --installer # 另打 NSIS 安装包（临时暂�
 | 需要 Node/Python | 不需要（存档由 Rust 写） | 不需要 |
 
 **关于空间**：那 3.4 GB 全在 `src-tauri/target/`，是「编译一次就有、删掉也不影响运行」的缓存；
-真正要留的只有 2.86 MB 的 exe（放在 `src-tauri/dist/`，已进 `.gitignore`）。
+真正要留的只有约 2.9 MB 的 exe（放在**仓库根目录**，是随仓库提交的双击入口）。
 `--clean` 之后重建要重新编译（本机约 1~2 分钟，依赖不用重新下载，因为 `~/.cargo` 里还留着）。
 
 ## D. 存档位置
@@ -351,9 +359,8 @@ $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'
 ## H. 平台差异与注意事项
 
 1. **WebView 引擎不同**：macOS 用系统 WKWebView、Windows 用 WebView2（Chromium）。
-   换成桌面窗口**不会**消除排版差异——`scrollbar-gutter: stable` 那套修复仍然必要
-   （见 `publish-guide.md`）。想要两端像素一致只能用自带 Chromium 的方案（Electron/CEF），
-   代价是包体 120~200 MB。
+   换成桌面窗口**不会**消除排版差异——`scrollbar-gutter: stable` 那套修复仍然必要。
+   想要两端像素一致只能用自带 Chromium 的方案（Electron/CEF），代价是包体 120~200 MB。
 2. **macOS 未签名**：不做签名与公证时首次要「右键 → 打开」；Windows 未签名会有 SmartScreen 提示。
 3. **窗口尺寸**：默认 1216×760（游戏设计尺寸 1170×690）。游戏内部按
    `documentElement.clientWidth/Height` 等比缩放，改窗口大小会自动适配。
@@ -362,7 +369,214 @@ $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'
 5. **轻壳需要游戏目录**：把 `squirrel_fight.exe` 单独拷到别处、旁边没有 `index.html` 时，
    窗口会显示「没找到游戏目录」的提示页；想发给别人就用 `--installer` 打的安装包。
 
-## I. 前端要改吗
+## I. iOS（iPhone/iPad 未签名 IPA）
+
+Windows 双击 `scripts\打包.cmd` 会在本机完成 exe / 安装包 / APK 后，自动调用已配对的
+Mac，顺序生成下面两种 IPA，并下载到 **Windows 的 `src-tauri\dist`**。版本沿用本轮
+Windows 的升版结果，Mac 不再单独升版。Mac 不在线或工具链检查失败时会在升版前停止；
+加 `-SkipIos` 可跳过，`-IosVariant modern` / `legacy` 可只出其中一种，`-IosPeer mac`
+对应现有 `scripts/sync/sync.config.json` 的 peer 名称。
+
+首次接入：将新版 `scripts/sync/sync.js`、`scripts/sync/ios-build.cjs` 同步到 Mac 后，
+在 **Mac 游戏目录**运行一次 `node scripts/sync/sync.js restart`。后续不需要 SSH，直接复用
+现有同步口令。可在 Windows 单独运行：
+
+```powershell
+node tools/build-ios-remote.cjs --check    # 只检查 Mac 连接和 iOS 工具链
+node tools/build-ios-remote.cjs            # 当前版本的两种 IPA，不升版，不编 Windows / Android
+node tools/build-ios-remote.cjs --dry-run  # 只看源码与产物计划，不联网、不写文件
+```
+
+远程构建使用 Windows 本轮源码的隔离快照，按内容增量传输；不改 Mac 的开发目录、存档、
+同步配置，也不传 Windows 的 `node_modules` / `target` / Apple 工程。快照复用 Mac 的
+Node 依赖及专用构建缓存。只有远程构建成功、版本和下载完整性检查通过后才替换同名 IPA；
+旧版 IPA 保留。`-CleanOnly` 不连接 Mac，Windows 的清缓存步骤也不清 Mac 缓存。
+
+> 产物：
+> - `src-tauri/dist/squirrel_fight_<version>_ios_unsigned.ipa`：**iOS 26/27**（带 UIScene）；
+> - `src-tauri/dist/squirrel_fight_<version>_ios_legacy_unsigned.ipa`：**iOS 15~25**（传统生命周期，不声明 UIScene）。
+> - 需要签名时：`*_ios_signed.ipa`（iOS 26+）与 `*_ios_legacy_signed.ipa`（iOS 16–25）；两者 Bundle ID 相同，
+>   但只能按系统版本装对应的那个 —— iOS 26+ 装 legacy 会启动闪退。
+>
+> 需要企业签名时再跑 `node tools/sign-ios.cjs`（默认签当前版本的 legacy 未签名包）：
+> - `src-tauri/dist/squirrel_fight_<version>_ios_legacy_signed.ipa`：同一份 iOS 15~25 前端与二进制，
+>   Info.plist 的 `CFBundleIdentifier` 改成描述文件 App ID，`embedded.mobileprovision` + entitlements 齐全。
+>
+> 未签名包用 Sideloadly / AltStore / 爱思助手 自己的 Apple ID 自签；免费账号 7 天有效，不需要开发者账号。
+>
+> **存档导出 / 导入（iOS）**：游戏内「系统 → 导出存档」把 JSON 写到 App 沙盒的 `Documents/`；
+> `Info.ios.plist` 的 `UIFileSharingEnabled` + `LSSupportsOpeningDocumentsInPlace` 会让它在
+> 「文件」App → 我的 iPhone/iPad → 松鼠大战 里可见。导入点「系统 → 导入存档」：
+> 可以选「选择文件（文件 App）…」，也可以走「粘贴存档文本…」兜底（WKWebView 文件选择器失灵时用）。
+> 导出成功弹窗还会给「分享到其它 App」「复制存档文本」，方便换机 / 传给别人。
+>
+> ⚠ **换包更新必须沿用同一 bundle ID / 同一签名身份**。未签名或 TrollStore 安装的是
+> `com.ssdz.classic`；用企业描述文件签名时 Info.plist 会被改成描述文件里的 App ID
+> （当前是 `jp.co.rakuten-sec.iSPEED...`）。两者对 iOS 是**两个不同的 App**，存档容器互不相通：
+> 在两者之间来回装，会各自看到一份「初始档 / 有进度档」，看起来就是存档横跳。更新时要么一直用
+> 同一签名包（并递增 `CFBundleVersion`），要么一直用同一 TrollStore/自签身份；确实要换身份，
+> 先在「系统 → 导出存档」备份，再在新包里导入。
+
+一次性依赖（macOS）：
+
+- Xcode（App Store 安装，打开一次同意协议）；
+- Rust：`rustup target add aarch64-apple-ios` + `rustup component add llvm-tools`
+  （Xcode 27 的 swift-rs 需要 `llvm-objcopy`，缺了会在链接 `libtauri` 时报 `_log_stdout` 等符号未定义）；
+- `brew install xcodegen cocoapods`；`cd src-tauri && npm install`。
+
+出包：
+
+Mac 上日常发版可以用一键命令（会自动 patch 版本、构建两种包、企业签名，并把 `dist` 里除两个签名包外的 `.ipa` 全部删掉）：
+
+```bash
+bash scripts/一键打包IPA.command             # 双击也可以
+bash scripts/一键打包IPA.command --dry-run   # 先看目标版本 / 构建号 / 产物，不构建
+bash scripts/一键打包IPA.command --version 1.0.6
+bash scripts/一键打包IPA.command --no-bump
+```
+
+它产出（每个版本只保留这两个签名包）：
+
+- `squirrel_fight_<version>_ios_signed.ipa`：iOS 25–26（modern / UIScene）；
+- `squirrel_fight_<version>_ios_legacy_signed.ipa`：iOS 16–24（legacy）。
+
+构建号默认取 `dist` 里现有 IPA 的最大 `CFBundleVersion` + 1（最低 110），避免 iOS 因 build 号没有递增而拒绝覆盖安装；可用 `--build N` 指定。构建或签名失败会回滚版本文件并保留旧包，只有两个新包都验签通过后才清理旧 `.ipa`。
+
+手动分步：
+
+```bash
+node tools/build-ios.cjs --check   # 只检查环境
+node tools/build-ios.cjs           # iOS 26/27（带 UIScene）
+node tools/build-ios.cjs --legacy  # iOS 15~25（传统生命周期）
+node tools/build-ios.cjs --clean   # 先删 gen/apple/build 再打
+node tools/build-ios.cjs --clean --build 105   # 需要覆盖同版本旧包时显式抬高 CFBundleVersion
+node tools/sign-ios.cjs            # 把当前版本的 legacy 未签名包签成 *_legacy_signed.ipa
+node tools/sign-ios.cjs --input src-tauri/dist/squirrel_fight_<version>_ios_unsigned.ipa \
+  --output src-tauri/dist/squirrel_fight_<version>_ios_signed.ipa   # iOS 26+ 的 scene 签名包
+```
+
+**为什么要两个包**：iOS 26+ 强制 UIScene，没声明 `UIApplicationSceneManifest` 会启动即崩；
+而 tao 0.35 的 scene 启动路径在 iOS 15 上存在兼容问题（tao 0.37 才修），15.6.1 + TrollStore
+的反馈就是“装好后一打开就闪退”。`--legacy` 会删掉 UIScene 声明，让 iOS 15 走传统
+AppDelegate 生命周期；两个包的前端与二进制完全相同，只有 Info.plist 这一处差异。
+
+脚本做的事：
+
+1. `tools/build-tauri-app.cjs --web` 生成 `src-tauri/web`（134 MB：css/js/images/audio + 首页）；
+2. `tauri icon app-icon.png --ios-color '#FFF3DC'`（iOS 图标不能透明）；
+3. 首次 `tauri ios init`，之后补 `gen/apple/project.yml`：仅横屏、中文显示名、隐藏状态栏/Home 条、
+   `TARGETED_DEVICE_FAMILY=1,2`；默认加 `UIApplicationSceneManifest`（`SupportsMultipleScenes=true`），
+   `--legacy` 时删掉它；
+4. `objectVersion 77 → 55`（CocoaPods 1.11 的 xcodeproj 只认到 55）、删掉 Podfile 里不存在的 macOS target、`pod install`；
+5. `tauri ios build --no-sign --archive-only`，从 `.xcarchive/Products/Applications` 取 `.app`；
+   归档后强制写 `CFBundleShortVersionString=<version>`、`CFBundleVersion=<版本号去点>`（1.0.4 → 104），
+   再封成 `Payload/squirrel_fight.app` 的 zip（`zip -qry`）。Tauri 自带的 `--build-number` 会把数字拼到
+   主版本上（1.104），不要用它。
+
+注意：
+
+- 设备包是 **arm64 真机包**，不能直接装到模拟器；模拟器要 `--target aarch64-sim` 另外构建，
+  且 Apple Silicon 上必须补 ad-hoc 签名（`codesign --force --deep --sign - <app>`），否则启动即被杀。
+- 本机 Xcode 27 的组件目录只提供 iOS 27.1 runtime，**没有 iOS 15.6 runtime**，因此 legacy 包
+  无法在本地模拟器复现/验证；必须用 iOS 15.6 真机实测。若仍闪退，取
+  `设置 → 隐私与安全性 → 分析与改进 → 分析数据` 里的 `squirrel_fight-*.ips` 再定位。
+- iOS 15 出现“能打开但触屏无反应”：已内置 `js/touch-fallback.js`（420ms 内没等到原生 click 才在
+  触点补发 `detail=0` click，兼容 SVG 路由），且 `touch-action` 只保留在 button/input。若仍完全无反应，
+  先让用户点昵称输入框看是否弹键盘；不弹说明原生触摸没进 WKWebView，必须取 `.ips` / Console 日志。
+- 存档在应用私有目录：`<container>/Library/Application Support/com.ssdz.classic/save/progress.json`；
+  系统页的 JSON 导出/导入仍可用。
+- 这是 WebView 套壳；以后要上 App Store 需按 Guideline 4.2 补原生功能/内容，并准备无 alpha 的
+  App Store 图标与隐私清单。未签名 IPA 只适合 sideload 分发。
+
+### 企业证书被吊销 / 存档救援（2026-10-23 实例）
+
+`src-tauri/10月20日企业证书` 这张 RAKUTEN 证书在 **2026-10-23 16:05 UTC 被 Apple 置为
+revoked（certificateHold）**。本地与 GitHub 上的 1.0.5 签名包 `codesign --verify --deep --strict`
+都通过、SHA-256 逐字节一致，但 iOS 仍然拒绝安装/启动 —— 问题不在打包，在证书状态。
+描述文件本身也会在 **2026-11-05** 到期，所以即使 Apple 解除 hold，也只剩几天。
+
+签名前先查 OCSP（`tools/sign-ios.cjs` 已内置，吊销会直接退出；`--no-ocsp` 只用于离线排障）：
+
+```bash
+openssl pkcs12 -in "src-tauri/10月20日企业证书/先导入.p12" -passin 'pass:…' \
+  -nokeys -clcerts -legacy > /tmp/leaf.pem
+openssl x509 -inform der -in /Applications/Xcode.app/Contents/SharedFrameworks/AssetRuntime/DVTFoundation.framework/Versions/A/Resources/AppleWWDRCA-2030.cer -out /tmp/wwdr.pem
+openssl ocsp -issuer /tmp/wwdr.pem -cert /tmp/leaf.pem \
+  -url http://ocsp.apple.com/ocsp03-wwdrg301 -resp_text -noverify
+```
+
+**旧版存档还在手机上**：企业版 App 的数据容器是
+`<container>/Library/Application Support/com.ssdz.classic/save/progress.json`，
+旁边还有 `progress.bak.json`；证书吊销不会删除容器。玩家**不要删除 App**（删除会删容器）。
+取出方式：
+
+- Xcode → Devices and Simulators → Installed Apps → Download Container，得到 `.xcappdata`；
+- 或命令行（设备要开开发者模式、解锁、已配对）：
+  ```bash
+  xcrun devicectl list devices
+  xcrun devicectl device copy from --device <UDID> \
+    --domain-type appDataContainer \
+    --domain-identifier jp.co.rakuten-sec.iSPEED.Pushnotification.widgetapp.widgetkitextension \
+    --source . --destination ~/Downloads/松鼠大战容器
+  ```
+- 或 Finder/iTunes 本地备份（不要加密）+ 安装仓库里的
+  `rescue/ios-save-rescue.cjs`（`--container` / `--backup` / `--file`；默认输出推荐档 + 报告）。
+- 取出 `.json` 后放进新版本的 `Documents/`（「文件」App 可见），游戏里「系统 → 导入存档 → 存档列表」导入。
+
+**换新证书时想自动保留旧存档**：新描述文件必须是通配符（`*`）或明确包含旧 Bundle ID，
+用 `node tools/sign-ios.cjs --profile <新.mobileprovision> --p12 <新.p12> --identity "…" \
+--bundle-id jp.co.rakuten-sec.iSPEED.Pushnotification.widgetapp.widgetkitextension` 重签，
+递增 `CFBundleVersion`，覆盖安装到旧 App 上。同 Bundle ID 覆盖安装通常保留数据容器，
+但换 Team 后是否保留要以一台真机实测为准；不放心就先让玩家导出/救援存档再升级。
+公开分发不要再依赖企业证书：网页版 / PWA、TestFlight 或 App Store 才是可持续路径。
+
+### 网页版 / PWA（2026-10）
+
+企业证书吊销后的免签名分发路线。游戏本来就是静态网页，Web/PWA 只是把它原样部署到 HTTPS 站点，再加一层可安装/离线壳。
+
+```bash
+node tools/build-web.cjs                 # 输出 dist-web/
+node tools/build-web.cjs --out _site     # GitHub Pages 工作流用
+python3 -m http.server 8123 --directory dist-web   # 本地静态预览（没有 /__save，正好测 web mode）
+```
+
+它做的事：
+
+- `scripts/index.html` → 站点根 `index.html`，注入 `manifest.webmanifest`、`apple-touch-icon`、`theme-color`、`apple-mobile-web-app-*`、`window.__SSDZ_WEB_MODE__=true` 和 `js/pwa.js`；
+- 复制 `css/ js/ images/ audio/`（跳过 `images/_reference`、`.DS_Store`）；
+- 复制 `web-pwa/manifest.webmanifest`、`web-pwa/sw.js`、`web-pwa/icons/`；
+- 把实际的核心文件清单和构建版本注入 `sw.js`（`__CORE_ASSETS__` / `__SW_VERSION__`）；
+- 复制 `scripts/version.json`。
+
+部署：
+
+- **GitHub Pages**：主仓 public 时，Settings → Pages → Source 选 **GitHub Actions**；`.github/workflows/pages.yml` 会跑 `node tools/build-web.cjs --out _site` 并上传。主仓 Pages 没启用时工作流会跳过 deploy。
+- **Cloudflare Pages / 国内 OSS+CDN**：构建命令 `node tools/build-web.cjs`，输出目录 `dist-web`；必须 HTTPS。
+- **origin 一旦发给玩家就不要换**：localStorage 按协议+域名+端口隔离，换 GitHub Pages 地址/加自定义域名/改仓库名都会丢旧存档；要换只能让玩家导出再导入。
+- **GitHub Pages 项目站点共享 origin**：`charlespkuer.github.io` 下所有项目共用 localStorage/CacheStorage；不要在同一账号下再开一个测试路径跑同一游戏，否则存档会串（测试用 localhost 或独立域名）。Service Worker 的 activate 只清 `ssdz-*` 缓存，避免误删同 origin 其它项目的 PWA 缓存。
+
+存档与安装：
+
+- 网页版存档是 `localStorage['ssdz_save_v1']`，不是 `save/progress.json`；旧企业版玩家先取救援 JSON，再在「系统 → 导入存档」导入。
+- Safari 标签页和主屏幕 Web App 的存储是**两个容器**；先「添加到主屏幕」再导入，或先导出再切换。iOS 17.2+ 只复制 Cookie，不复制 localStorage。
+- 主屏幕 Web App 的脚本存储豁免 ITP 的 7 天上限；Safari 标签页仍受 7 天清理影响。两者都建议定期「存档导出」。
+- iOS 安装：Safari → 分享 → 添加到主屏幕；iOS 26 保持「Open as Web App」开启。PWA 不是 App Store 应用，不需要审核/证书，但没有 App Store 分发。
+- PWA 缓存：首页、JS、CSS、图标预缓存；图片/音频运行时缓存。断网能启动到标题页/已缓存场景，没看过的战斗素材仍需网络；不做 100+ MB 全量预缓存。
+
+Web mode 补丁（`js/main.js` / `js/classic-ui.js`）：
+
+- 静态托管没有 `/__save` 是正常模式；`isStaticWebMode()` 会抑制「请用启动器」的错误横幅，并跳过 7 次重连。
+- 系统页「存档位置」改成「浏览器 localStorage（网页版）」，隐藏文件模式才用的写入/载入/服务器列表按钮，并隐藏同步/更新面板。
+- 如果以后改这两处，先在 `python3 -m http.server` 的静态站点里确认首屏没有橙色告警、系统页文案是网页版。
+
+验证（2026-10 实测）：
+
+- `node tools/build-web.cjs` 通过；`dist-web` 约 135 MB（图片占大头，首屏经典档约 11 MB）。
+- Chrome 无头加载：标题页正常、`#save-warning` 不存在；`UI.runAction('system')` 后系统页出现「浏览器 localStorage（网页版）」，没有 `save-write`/`save-load`/`save-import-list`。
+- Service Worker：注册 active、`clients.claim` 后 controller 存在；`ssdz-core-*` 49 个预缓存、`ssdz-runtime-*` 56 个运行时条目；DevTools 离线 reload 仍能回到首页并读到 localStorage 存档。
+- 真机还需要确认：iPhone Safari 的首屏视觉、添加到主屏幕后的独立窗口、状态栏/刘海安全区、横屏、导入文件选择器（Safari/PWA 各一次）。
+
+## J. 前端要改吗
 
 不用改渲染，只有存档通道是「可插拔」的：
 

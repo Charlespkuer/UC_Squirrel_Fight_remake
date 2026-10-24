@@ -52,7 +52,18 @@
   function flushRunToasts() {
     let list = [];
     try { list = Tower.takeRunToasts ? Tower.takeRunToasts() : []; } catch (e) { list = []; }
-    for (const t of list) runToast(t);
+    for (const t of list) {
+      /* 双保险：状态层已把成就对象分到 pendingAchievements；万一老档/外部调用漏进来，
+       * 也走成就条，绝不让 `[object Object]` 出现在过程飘字里。 */
+      if (t && typeof t === 'object') achievementToast(t);
+      else runToast(t);
+    }
+  }
+  /** 取走待显示的隐藏成就（对象，带 name/points）并走成就条。 */
+  function flushPendingAchievements() {
+    let list = [];
+    try { list = Tower.takeAchievementToasts ? Tower.takeAchievementToasts() : []; } catch (e) { list = []; }
+    flushAchievements(list);
   }
   /** 轻量飘字（比成就条更朴素，用于「碎烙印失效」这类过程提示）。
    *  `hold`：停留更久（用户口径 2026-10：**第一次失去烙印**那一条要停久一点）——
@@ -75,6 +86,58 @@
   let replaceTarget = null;
   /** 【U20】被剧情屏让路的「里程碑奖励」（同一场战斗之后先播剧情，播完再弹它）。 */
   let pendingMilestone = null;
+  /** 勇者准备 / 回看的「更换装备」层（挂在 body 上，不跟 #ui 的等比缩放一起缩小）。 */
+  let heroGearPickerEl = null;
+  /* 从经典村庄「征战」进来还是从关卡页进来：决定返回目标和顶部外壳。 */
+  let towerOrigin = 'stages';
+  function setTowerOrigin(opts) { if (opts && opts.from) towerOrigin = String(opts.from); }
+  function classicTower() {
+    try { return towerOrigin === 'village' && window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic'; }
+    catch (e) { return false; }
+  }
+  function backToVillageWar() {
+    try {
+      /* 用户口径：点「返回征战」回村庄主界面，不再弹「挑战塔/无尽塔」二选一。 */
+      if (window.UI && UI.runAction) { UI.runAction('village'); return; }
+    } catch (e) {}
+    C().home();
+  }
+  function towerBack() { return classicTower() ? backToVillageWar() : backToStages(); }
+  function classicTowerBar() {
+    let b = '';
+    try { b = C().btn('返回征战', 'home', 'gold'); } catch (e) { b = '<button type="button" class="uc-button gold" data-action="home">返回征战</button>'; }
+    /* 顶部只留返回键；塔名/层数在页面内容里，不再额外压一行标题。 */
+    return '<div class="classic-tower-bar">' + b + '</div>';
+  }
+  /** 勇者模式的准备 / 状态页是否走经典原版状态页（7218）。
+   *  只有经典界面模式 + `ui-status.js` 已加载时成立；现代模式继续用下面那套 DOM 准备页。 */
+  function classicHeroUi() {
+    try {
+      return !!(window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic' &&
+        window.SfStatus && typeof SfStatus.openHero === 'function');
+    } catch (e) { return false; }
+  }
+  /** 经典塔页背景：**纯色**。
+   *  · 挑战塔固定村庄绿；
+   *  · 无尽塔随层数从村庄绿慢慢压到 100 层的暗红，每 100 层重制（101 层回绿）。 */
+  function classicTowerBackground(mode, layer) {
+    if (!classicTower()) return null;
+    if (mode !== 'endless') return { color: '#4c7c50', t: 0 };
+    /* 每 100 层重制：100 层暗红，101 层回到绿色，200 层再暗红。 */
+    const cycle = ((Math.max(1, Number(layer) || 1) - 1) % 100) + 1;
+    const t = Math.max(0, Math.min(1, (cycle - 1) / 99));
+    const mix = (a, b) => Math.round(a + (b - a) * t);
+    return {
+      color: 'rgb(' + mix(76, 67) + ',' + mix(124, 8) + ',' + mix(80, 8) + ')',
+      t: t,
+    };
+  }
+  /** 把当前页的背景色写到 `--tower-bg`（CSS 只用这一个变量，别再加渐变端点）。 */
+  function applyClassicTowerBg(p, mode, layer) {
+    if (!p || !p.style) return;
+    const bg = classicTowerBackground(mode, layer);
+    if (bg) p.style.setProperty('--tower-bg', bg.color);
+  }
 
   /* 附魔（不占位）的排前面：判据是**这一条栏位自己的** `slotFree`。
    * 【2026-10 同名逐条】不再用「同名 id 出现过」兜底 —— 那会让新拿到的同名件
@@ -129,8 +192,19 @@
     tipEl.textContent = text;
     tipEl.style.display = 'block';
     const r = anchor.getBoundingClientRect(), t = tipEl.getBoundingClientRect();
+    /* 气泡默认挂在行下方；但无尽塔右下角固定着「继续战斗 / 放弃本局」两颗键，
+     * 最后几行的气泡展开时会整块压住按钮。这里把下边界收在 `.endless-actions` 上沿，
+     * 放不下就翻到上方（同一套判据，只是提前了上限）。 */
+    let bottomLimit = window.innerHeight - 8;
+    try {
+      const actions = document.querySelector('.endless-actions');
+      if (actions) {
+        const ar = actions.getBoundingClientRect();
+        if (ar.height > 0 && ar.top > 0) bottomLimit = Math.min(bottomLimit, ar.top - 8);
+      }
+    } catch (e) { /* 没有那一栏就按窗口算 */ }
     let top = r.bottom + 8;
-    if (top + t.height > window.innerHeight - 8) top = Math.max(8, r.top - t.height - 8);
+    if (top + t.height > bottomLimit) top = Math.max(8, r.top - t.height - 8);
     const left = Math.max(8, Math.min(r.left, window.innerWidth - t.width - 8));
     tipEl.style.left = Math.round(left) + 'px';
     tipEl.style.top = Math.round(top) + 'px';
@@ -204,12 +278,293 @@
   const NPC_IDLE = { tl: 'tl_rest', xh: 'xh_rest', xm: 'xm_rest' };
   const AVATAR_SIZE = 104;
   function foePortraitHtml(index, info) {
+    /* 征战动物 boss：现代模式也借经典 6833 素材（用户明确允许）；否则现代 canvas
+     * 没有对应的动物图集，只会画成松鼠 / 空白。 */
+    if (info.kind === 'campaign') {
+      return '<span class="foe-portrait"><span class="sf-classic-campaign" data-campaign-foe="' +
+        index + '"></span></span>';
+    }
+    /* 经典塔：三侠/机制 NPC 直接用关卡里那张经典立绘卡，松鼠 boss（含巡逻魔王）
+     * 一律复用随机挑战右栏的 7232 + 装备挂点，不再画现代图集 canvas。 */
+    if (classicTower()) {
+      const file = (info.kind === 'hero' || info.kind === 'npc') ? (CHAR_FILE[info.anim] || 'mantis') : null;
+      if (file) return '<span class="foe-portrait"><img alt="" src="images/ui/characters/' + file + '-classic-card.png"></span>';
+      /* 松鼠 boss 直接复用随机挑战右栏那块 7232：同一颗元件、同一套装备挂点
+       * （showFace 口径）。巡逻魔王也走这里 —— 它的黑色狂战套由 tower.js 的
+       * `gear`（181~184 / 容器帧 119）交给 attachClassicGear() 贴上去；
+       * 以前单独走 Engine canvas 才会变成现代图集外观、比例也和三侠卡对不上。 */
+      return '<span class="foe-portrait"><span class="sf-classic-foe" data-classic-foe="' + index + '"></span></span>';
+    }
     if (info.kind === 'hero') {
       const file = CHAR_FILE[info.anim] || 'mantis';
       return '<span class="foe-portrait"><img alt="" src="images/ui/characters/' + file + '-classic-card.png"></span>';
     }
     return '<span class="foe-portrait"><canvas width="' + AVATAR_SIZE + '" height="' + AVATAR_SIZE +
       '" data-foe-art="' + index + '" aria-hidden="true"></canvas></span>';
+  }
+  /* 经典塔松鼠 boss：直接复用随机挑战右栏 7232（frame1）和同一套装备挂点。
+   * 装备数据可以是 tower-data 的 `gear` key（如 fist3，由 wearsOf() 展开），
+   * 也可以是现成数组（巡逻魔王的 `classicGear` = 黑狂战 181~184）。 */
+  let classicGearTables = null;
+  const CLASSIC_FACE_PARTS = [
+    { type: 0, cells: [['mc_head', 0]] },
+    { type: 1, cells: [['mc_fistL', 0], ['mc_fistR', 1]] },
+    { type: 2, cells: [['mc_body', 0], ['mc_handL', 1], ['mc_handR', 1]] },
+    { type: 3, cells: [['mc_footL', 0], ['mc_footR', 0]] },
+  ];
+  async function loadClassicGear() {
+    if (classicGearTables) return classicGearTables;
+    try { await SfRender.loadExtra('tags-challenge.json'); } catch (e) {}
+    try { await SfRender.loadExtra('tags-gear.json'); } catch (e) {}
+    const B = 'images/ssfight/ui/';
+    const j = (f) => fetch(B + f, { cache: 'force-cache' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const [frames, slots] = await Promise.all([j('gear-frames.json'), j('gear-slots.json')]);
+    if (!frames || !slots) return null;
+    const cont = {};
+    /* 7232 的 mc_head / mc_fistL… 是 `showFace()` 的原版挂点：原版这里 attachMovie 的是
+     * **非 B 立绘容器**（portraitContainer）。B 容器（container）是战斗骨骼用的位图化版本，
+     * 注册原点不同 —— 贴到这些挂点上会把整套装备整体推偏（无尽塔预告松鼠装备错位就是这个）。
+     * 与随机挑战 `showFace` / 状态页 `dressParts` 取同一张表。 */
+    for (const c of slots.portraitContainer || []) cont[c.type] = c.ids;
+    classicGearTables = { frameById: new Map((frames.gear || []).map((g) => [Number(g.id), g.frame])), cont: cont };
+    return classicGearTables;
+  }
+  function classicGearType(g) {
+    const ty = Number(g && g.type);
+    if (Number.isFinite(ty) && ty >= 0 && ty <= 3) return ty;
+    try {
+      if (window.State && State.gearPart) {
+        const t2 = Number(State.gearPart(Number(g && g.id)));
+        if (Number.isFinite(t2) && t2 >= 0 && t2 <= 3) return t2;
+      }
+    } catch (e) {}
+    return NaN;
+  }
+  function classicGearFrame(g) {
+    if (!classicGearTables || !g) return 0;
+    const base = classicGearTables.frameById.get(Number(g.id));
+    if (!base) return 0;
+    /* 与随机挑战 showFace 完全同一口径。 */
+    return base + Math.max(0, (Number(g.ext) || 0) - 1);
+  }
+  function attachClassicGear(bg, info) {
+    if (!bg || !classicGearTables || !info) return 0;
+    const gearList = Array.isArray(info.gear)
+      ? info.gear
+      : (typeof info.gear === 'string' && window.TowerData && TowerData.wearsOf ? TowerData.wearsOf(info.gear) : []);
+    if (!gearList.length) return 0;
+    const byType = new Map();
+    for (const raw of gearList) {
+      const g = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
+      const ty = classicGearType(g);
+      if (Number.isFinite(ty) && !byType.has(ty)) byType.set(ty, g);
+    }
+    let n = 0;
+    for (const row of CLASSIC_FACE_PARTS) {
+      const g = byType.get(row.type);
+      const frame = g ? classicGearFrame(g) : 0;
+      for (const pair of row.cells) {
+        const clip = bg.byName ? bg.byName(pair[0]) : null;
+        if (!clip || !clip.detachAll) continue;
+        clip.detachAll();
+        if (!frame) continue;
+        const sym = classicGearTables.cont[row.type] && classicGearTables.cont[row.type][pair[1]];
+        if (sym && clip.attachChild(sym, frame, 'wear')) n++;
+      }
+    }
+    return n;
+  }
+  /** 把 7232 的松鼠本体（含装备）挂到 host 上，并裁成只含人物的方图。
+   *  `info.gear` 支持 tower-data 的套装 key / 现成数组；空数组 = 不穿装备。
+   *  返回 SfRender view（挂载失败会抛）；调用方负责 catch。 */
+  async function mountClassicSquirrel(host, info, opts) {
+    const o = opts || {};
+    await loadClassicGear();
+    const v = await SfRender.mountSymbol(host, '7232', { frame: 1, label: o.label || '经典对手' });
+    if (!host.isConnected) { try { v.destroy(); } catch (e) {} return null; }
+    SfUiMain.toolkit.freezeDescendants(v);
+    v.playing = false;
+    attachClassicGear(v, info);
+    /* 只保留松鼠本体：头/身体/手脚/尾巴（ikNode_9）+ 装备挂点的祖先链；
+     * 7232 的奶油底框、影子、花饰、属性条全部隐藏。 */
+    const hasGear = !!(info && info.gear && (Array.isArray(info.gear) ? info.gear.length > 0 : true));
+    if (hasGear) {
+      /* 装备版（黑色/紫色狂战套等）不能只留挂点祖先：7232 的填充/阴影分布在其它根层，
+       * 全隐藏会让铠甲缺一块填色。这里只隐藏奶油底框。 */
+      for (const child of Array.from(v.g.children || [])) {
+        if (!child.querySelector) continue;
+        /* 只隐藏奶油底框 / 地面影子 / 花饰；它们是非松鼠元件，
+         * 不能整层清空，否则紫色狂战的填色层会一起没掉。 */
+        if (child.querySelector('path[d^="M10.35,-52.85"]') ||
+            child.querySelector('path[d^="M-0.15,-9Q"]') ||
+            child.querySelector('path[d^="M-48.65,-50.85"]')) {
+          child.style.display = 'none';
+        }
+      }
+    } else {
+      const parts = ['mc_head', 'mc_body', 'mc_fistL', 'mc_fistR', 'mc_handL', 'mc_handR', 'mc_footL', 'mc_footR', 'ikNode_9'];
+      const keepRoots = new Set();
+      for (const name of parts) {
+        const c = v.byName(name);
+        if (!c || !c.g) continue;
+        let node = c.g;
+        while (node && node.parentNode && node.parentNode !== v.g) node = node.parentNode;
+        if (node && node.parentNode === v.g) keepRoots.add(node);
+      }
+      for (const child of Array.from(v.g.children || [])) {
+        if (String(child.tagName || '').toLowerCase() === 'defs') continue;
+        if (!keepRoots.has(child)) child.style.display = 'none';
+      }
+    }
+    /* 7232 里除了人物，还带战力图标、属性条、背景板等根级元件；只把人物挂点
+     * 的祖先链留下来，其余根级子元素全部隐藏，否则它们会从裁切框下方露出来。 */
+    for (const f of ['power', 'agility', 'speed', 'hp', 'num1', 'num2', 'num3', 'num4', 'num5']) {
+      const c = v.byName(f); if (c && c.g) c.g.style.display = 'none';
+    }
+    for (const t of v.g.querySelectorAll('text')) { try { t.style.display = 'none'; } catch (e) {} }
+    const svg = host.querySelector('svg');
+    if (svg) {
+      /* 人物坐标不是 getBBox() 的局部坐标（父级还有变换）；用屏幕矩形反算到 SVG
+       * 用户坐标，再取一个**正方形**裁切框并居中，卡片里人物才会居中。
+       * ⚠ 不用 getScreenCTM：iOS 15 会漏掉祖先 CSS transform 的 scale（WebKit 209220），
+       * 卡片会被裁到偏位/过小。 */
+      let bb = null;
+      try {
+        const sr = svg.getBoundingClientRect();
+        const vb = svg.viewBox && svg.viewBox.baseVal;
+        if (!sr || !vb || !sr.width || !sr.height || !vb.width || !vb.height) throw new Error('no rect');
+        const par = String(svg.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+        const scale = /slice/.test(par) ? Math.max(sr.width / vb.width, sr.height / vb.height)
+          : Math.min(sr.width / vb.width, sr.height / vb.height);
+        const ax = /xMin/.test(par) ? 0 : /xMax/.test(par) ? 1 : 0.5;
+        const ay = /YMin/.test(par) ? 0 : /YMax/.test(par) ? 1 : 0.5;
+        const x0 = sr.left + (sr.width - vb.width * scale) * ax - vb.x * scale;
+        const y0 = sr.top + (sr.height - vb.height * scale) * ay - vb.y * scale;
+        const toUser = (sx, sy) => ({ x: (sx - x0) / scale, y: (sy - y0) / scale });
+        /* 只量隐藏完非松鼠元件后的直接根层（人物 + 尾巴 + 装备）；
+         * 整棵 v.g 的 bbox 会带舞台空白，不能拿来裁切。 */
+        let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity, n = 0;
+        for (const child of Array.from(v.g.children || [])) {
+          if (String(child.tagName || '').toLowerCase() !== 'g') continue;
+          if (child.style && child.style.display === 'none') continue;
+          const rr = child.getBoundingClientRect();
+          if (!rr.width || !rr.height) continue;
+          const a = toUser(rr.left, rr.top);
+          const z = toUser(rr.right, rr.bottom);
+          x1 = Math.min(x1, a.x, z.x); y1 = Math.min(y1, a.y, z.y);
+          x2 = Math.max(x2, a.x, z.x); y2 = Math.max(y2, a.y, z.y);
+          n++;
+        }
+        if (n) {
+          const pad = Number.isFinite(Number(o.pad)) ? Number(o.pad) : 7;
+          const zoom = Number.isFinite(Number(o.zoom)) ? Number(o.zoom) : 1.08;
+          const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+          const side = Math.max(x2 - x1, y2 - y1) * zoom + pad * 2;
+          bb = { x: cx - side / 2, y: cy - side / 2, width: side, height: side };
+        }
+      } catch (e) { bb = null; }
+      if (!bb || !bb.width || !bb.height) bb = { x: -35, y: -60, width: 90, height: 90 };
+      svg.setAttribute('viewBox', bb.x + ' ' + bb.y + ' ' + bb.width + ' ' + bb.height);
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      svg.style.width = '100%'; svg.style.height = '100%';
+    }
+    host.classList.add('ready');
+    return v;
+  }
+  async function fillClassicFoeArt(root, preview) {
+    const hosts = root.querySelectorAll('[data-classic-foe]');
+    if (!hosts.length) return;
+    for (const host of hosts) {
+      const info = preview[Number(host.dataset.classicFoe)];
+      if (!info || !host.isConnected) continue;
+      try {
+        await mountClassicSquirrel(host, info, { label: '经典对手' });
+      } catch (e) {
+        if (window.__errs) window.__errs.push('classic foe art: ' + (e && e.message));
+      }
+    }
+  }
+  /** 经典塔里原版征战动物 boss 的小立绘：6833 按 mcFrame 拨到动物形态，裁成头像尺寸。
+   *  ⚠ 与 `fillClassicFoeArt` 同一套套路（挂载 → 冻结 → 只留角色根层 → 用屏幕矩形反算
+   *  viewBox 居中），区别只是元件是 6833、要保留的角色是它里面的 `playerMc` 动物模型。 */
+  async function fillClassicCampaignArt(root, preview) {
+    const hosts = root.querySelectorAll('[data-campaign-foe]');
+    if (!hosts.length) return;
+    try {
+      await SfRender.loadExtra('tags-fight.json');
+      await SfRender.loadExtra('tags-campaign-boss.json');
+    } catch (e) {
+      if (window.__errs) window.__errs.push('classic campaign art load: ' + (e && e.message));
+      return;
+    }
+    for (const host of hosts) {
+      const info = preview[Number(host.dataset.campaignFoe)];
+      if (!info || !host.isConnected) continue;
+      try {
+        const v = await SfRender.mountSymbol(host, '6833', {
+          frame: Math.max(1, Math.min(7, Number(info.mcFrame) || 1)), label: '征战首领',
+        });
+        if (!host.isConnected) { try { v.destroy(); } catch (e) {} continue; }
+        SfUiMain.toolkit.freezeDescendants(v);
+        v.playing = false;
+        const model = v.byName('playerMc');
+        /* 只保留动物模型所在的根级子树；6833 的其它层级是给战斗帧用的空白/辅助件。 */
+        const keep = new Set();
+        if (model && model.g) {
+          let node = model.g;
+          while (node && node.parentNode && node.parentNode !== v.g) node = node.parentNode;
+          if (node && node.parentNode === v.g) keep.add(node);
+        }
+        for (const child of Array.from(v.g.children || [])) {
+          if (String(child.tagName || '').toLowerCase() === 'defs') continue;
+          if (keep.size && !keep.has(child)) child.style.display = 'none';
+        }
+        const svg = host.querySelector('svg');
+        if (svg) {
+          /* 同 `fillClassicFoeArt`：人物坐标要按屏幕矩形反算到 SVG 用户坐标，
+           * 不能直接信 `getBBox()`（父级还有变换）。这里取模型自己的方形包围盒。 */
+          let bb = null;
+          try {
+            const sr = svg.getBoundingClientRect();
+            const vb = svg.viewBox && svg.viewBox.baseVal;
+            if (!sr || !vb || !sr.width || !sr.height || !vb.width || !vb.height) throw new Error('no rect');
+            const par = String(svg.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+            const scale = /slice/.test(par) ? Math.max(sr.width / vb.width, sr.height / vb.height)
+              : Math.min(sr.width / vb.width, sr.height / vb.height);
+            const ax = /xMin/.test(par) ? 0 : /xMax/.test(par) ? 1 : 0.5;
+            const ay = /YMin/.test(par) ? 0 : /YMax/.test(par) ? 1 : 0.5;
+            const x0 = sr.left + (sr.width - vb.width * scale) * ax - vb.x * scale;
+            const y0 = sr.top + (sr.height - vb.height * scale) * ay - vb.y * scale;
+            const toUser = (sx, sy) => ({ x: (sx - x0) / scale, y: (sy - y0) / scale });
+            let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity, n = 0;
+            for (const child of Array.from(v.g.children || [])) {
+              if (String(child.tagName || '').toLowerCase() !== 'g') continue;
+              if (child.style && child.style.display === 'none') continue;
+              const rr = child.getBoundingClientRect();
+              if (!rr.width || !rr.height) continue;
+              const a = toUser(rr.left, rr.top);
+              const z = toUser(rr.right, rr.bottom);
+              x1 = Math.min(x1, a.x, z.x); y1 = Math.min(y1, a.y, z.y);
+              x2 = Math.max(x2, a.x, z.x); y2 = Math.max(y2, a.y, z.y);
+              n++;
+            }
+            if (n) {
+              const pad = 7;
+              const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+              const side = Math.max(x2 - x1, y2 - y1) * 1.08 + pad * 2;
+              bb = { x: cx - side / 2, y: cy - side / 2, width: side, height: side };
+            }
+          } catch (e) { bb = null; }
+          if (!bb || !bb.width || !bb.height) bb = { x: -35, y: -60, width: 90, height: 90 };
+          svg.setAttribute('viewBox', bb.x + ' ' + bb.y + ' ' + bb.width + ' ' + bb.height);
+          svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+          svg.style.width = '100%'; svg.style.height = '100%';
+        }
+        host.classList.add('ready');
+      } catch (e) {
+        if (window.__errs) window.__errs.push('classic campaign art: ' + (e && e.message));
+      }
+    }
   }
   function fallbackPortrait(canvas, info) {
     const kind = info && info.kind;
@@ -231,8 +586,8 @@
     const npc = info.kind === 'npc';
     // 注意要过一遍 Engine.wearsFor：tower-data 给的是装备 id（{id:201}），
     // 引擎画图层时用的是 {src,label}（和战斗里 foe.wears 一样），少了这一步装备不会画出来。
-    // 「巡逻」魔王是例外：它的 info.outfit 已经是 {src,label} 形态（见 tower-data.js 的 PATROL.outfit），
-    // 直接交给 wearsFor 按槽位落位 —— 走 wearsOf(info.gear) 的话 gear 是空的，盔甲画不出来。
+    // 「巡逻」魔王在现代预告里仍优先用 info.outfit（橘色 113 的 {src,label} 图层）；
+    // 经典预告不会走到这里 —— 它走 7232 + gear 181~184 的黑色狂战套（见 foePortraitHtml）。
     const wears = npc ? null
       : info.outfit ? Engine.wearsFor(info.outfit)
         : Engine.wearsFor(TowerData.wearsOf(info.gear));
@@ -305,11 +660,36 @@
     return '<div class="tower-buffs"><h4>本局构筑</h4><div class="buff-tags">' +
       list.map((b) => buffTag(b, b.stacks)).join('') + '</div></div>';
   }
-  function permTip(b) {
+  function permTip(b, mirrorSnapshot) {
     const buff = TowerData.BUFF_BY_ID[b.id];
     if (!buff) return b.name;
     const parts = [buff.name + '（' + RARITY[b.rarity] + ' · 永久）', buff.desc];
-    parts.push('当前叠层：×' + b.stacks + (b.stacks > 1 ? '（按层数累加）' : ''));
+    if (b.id === TowerData.MIRROR.id && mirrorSnapshot && mirrorSnapshot.source) {
+      const s = mirrorSnapshot.source;
+      parts.push('已封存至第 ' + mirrorSnapshot.absorbedThrough + ' 层的首回合属性');
+      parts.push('攻击 ' + Math.round(s.power) + ' · 敏捷 ' + Math.round(s.agility) + ' · 速度 ' + Math.round(s.speed));
+      parts.push('生命上限 ' + Math.round(s.maxHp) + '（封存时数值；后续装备变化仍生效）');
+      const c = mirrorSnapshot.combat || {};
+      const pct = (n) => String(Math.round(n * 10000) / 100) + '%';
+      const combat = [];
+      if (c.critBonus) combat.push('暴击 +' + c.critBonus + '%');
+      if (c.critDmgBonus) combat.push('暴伤 +' + c.critDmgBonus + '%');
+      if (c.dodgeBonus) combat.push('闪避 +' + c.dodgeBonus + '%');
+      if (c.dodgeMul) combat.push('闪避倍率加成 ' + pct(c.dodgeMul));
+      if (c.takenMul) combat.push('受伤修正 ' + pct(c.takenMul));
+      if (c.lifestealPct) combat.push('吸血 ' + pct(c.lifestealPct));
+      if (c.regenPct) combat.push('每回合回复 ' + pct(c.regenPct));
+      if (c.shellPct) combat.push('开战护盾 ' + pct(c.shellPct));
+      if (c.thornsPct) combat.push('反伤 ' + pct(c.thornsPct));
+      if (c.dmgMul) combat.push('伤害 ×' + c.dmgMul);
+      if (c.healMul) combat.push('治疗 ×' + c.healMul);
+      if (c.reflectImmune) combat.push('反伤免疫');
+      if (c.mustHitAll) combat.push('攻击必中');
+      if (combat.length) parts.push('封存战斗加成：' + combat.join(' · '));
+      parts.push('不占永久位；旧增益的成长、限次及经济效果不再触发');
+    }
+    parts.push(b.id === TowerData.MIRROR.id ? '镜界印记：×' + b.stacks
+      : '当前叠层：×' + b.stacks + (b.stacks > 1 ? '（按层数累加）' : ''));
     /* 【第七十四批】本条被铭文附魔时要**写清楚**（否则悬停看到的还是没附魔的数字，
      * 玩家会以为「附了没效果」）：水晶这一条把下面所有**效果量**乘一次，
      * 与 tower.js 实际结算用的 `k = 层数 × 全局倍率 × row.enchMul` 同一口径；
@@ -389,7 +769,8 @@
     if (b.progress) parts.push('当前进度：' + b.progress);
     if (buff.mods && buff.mods.shopDiscount) parts.push('下个商店 ' + Math.round((1 - buff.mods.shopDiscount) * 100) / 10 + ' 折');
     if (buff.mods && buff.mods.postBattleShop) parts.push('下一场战斗后开一次商店');
-    parts.push(replaceTarget === rowRef(b) ? '（当前已选为要拿掉的那个，点一下取消）' : '点一下选它作为要拿掉的那个永久增益');
+    parts.push(TowerData.hasTag(buff, 'story') ? '剧情藏品，不可替换、出售或献祭'
+      : replaceTarget === rowRef(b) ? '（当前已选为要拿掉的那个，点一下取消）' : '点一下选它作为要拿掉的那个永久增益');
     return parts.join('\n');
   }
   /** 限次增益的悬停说明：效果 + 剩余场次 + 当前开关状态。 */
@@ -439,13 +820,15 @@
       ? perm.map((b, i) => {
           const free = b.slotFree === true;
           const em = enchMark(b);
+          const tip = permTip(b, run.mirrorSnapshot);
+          const canReplace = !TowerData.hasTag(TowerData.BUFF_BY_ID[b.id], 'story');
           const nextFree = i + 1 < perm.length && perm[i + 1].slotFree === true;
           const divider = (free && !nextFree) ? '<span class="buff-sep" aria-hidden="true"></span>' : '';
           /* `enchCls(b)` 是附魔外框的**唯一出口**（虚空=青框 / 水晶=红框 / 两个都吃=半红半青）。
            * 这里原来是手拼的、只认 slot-free —— 水晶的红框在主面板上完全不存在。 */
           return '<span class="buff-tag r' + b.rarity + (rowRef(b) === replaceTarget ? ' replacing' : '') +
-            enchCls(b) + '" data-replace="' + esc(rowRef(b)) +
-            '" data-tip="' + esc(permTip(b)) + '" title="' + esc(permTip(b)) + '">' +
+            enchCls(b) + '"' + (canReplace ? ' data-replace="' + esc(rowRef(b)) + '"' : '') +
+            ' data-tip="' + esc(tip) + '" title="' + esc(tip) + '">' +
             esc(b.name) + '<i>' + (free ? '不占位' : '永久') + (em.crys ? ' · ×' + em.mul : '') + '</i>' +
             (b.stacks > 1 ? '<em>×' + b.stacks + '</em>' : '') + '</span>' + divider;
         }).join('')
@@ -609,12 +992,12 @@
         (it.delta ? '<em class="currency-delta">+' + it.delta + '</em>' : '') +
         '<i>' + it.name + '</i></span>').join('') + '</div>';
     }
-    /* 金松果：**它是资源图集 resource_1 的第 18 帧**，不是道具（prop）——
-     * 以前这里错用了 prop-1.png，而 prop 1 是小体力药剂，于是挑战塔主界面右上角
-     * 顶着一个小体力药剂图标（用户 2026-10 反馈）。首页金钱 / 背包 / 融合页都用
-     * resource_1-18，这里跟它们统一。 */
+    /* 金松果：**主界面之外统一用道具页那颗"橡果+金币"**（`images/ui/icons/gold-acorn.png`，
+     * 用户 2026-10 口径：把主界面之外的金松果样式换掉）。
+     * 历史：这里曾错用 prop-1.png（那是小体力药剂），后改成资源图集 resource_1 第 18 帧的单颗橡果；
+     * 现在再统一到道具页那颗 —— 首页（非 ssflight 的经典首页）保留 resource_1-18 不动。 */
     const items = [{ icon: 'images/ui/icons/prop/prop-23.png', name: '挑战书', value: S.props[CURRENCY_PROP.book] || 0 },
-      { icon: 'images/ui/sprites/resource_1-18.png', name: '金松果', value: S.goldPoint }];
+      { icon: 'images/ui/icons/gold-acorn.png', name: '金松果', value: S.goldPoint }];
     return '<div class="tower-currency">' + items.map((it) =>
       '<span class="currency-item" data-live-gold="' + (it.name === '金松果' ? '1' : '') + '">' +
       '<img alt="" src="' + it.icon + '"><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';
@@ -693,16 +1076,97 @@
     };
     run();
   }
+  /* ---------- 敌人图鉴的两组简介：三侠 / 征战首领 ----------
+   * 用户 2026-10 口径：BOSS 一览里要先把**每层都会遇到的三侠**与 **x0 层的征战动物首领**
+   * 介绍清楚，再列首领池；顺序固定为「三侠 → 征战首领 → 首领池」。
+   * 文案全部来自 `TowerData`（`HERO_DEBUFF` / `CAMPAIGN_BOSSES` / `campaignBossFor`），
+   * 这里只负责排版 —— 别在界面里另抄一份机制说明。 */
+  const HERO_ORDER = ['tl', 'xh', 'xm'];
+  /** 三侠：卡片只放名字 / 出场位置；大招与贯穿削弱全部收进悬停说明。
+   *  用户 2026-10 口径：图鉴里不要直接写攻击模式，与其它 boss 卡一样悬停才看机制。 */
+  function heroCatalogHtml() {
+    const HD = TowerData.HERO_DEBUFF;
+    if (!HD) return '';
+    const keys = HERO_ORDER.filter((k) => HD[k]);
+    if (!keys.length) return '';
+    return '<div class="boss-group"><b class="boss-group-title">三侠' +
+      '<i>每层第 1~3 场 · 顺序随机</i></b>' +
+      '<ol class="tower-plan boss-grid">' + keys.map((k) => {
+        const h = HD[k];
+        const tip = h.hero + ' · 大招「' + h.ult + '」（' + h.name + '）\n' + h.desc;
+        return '<li class="hero" tabindex="0" data-tip="' + esc(tip) + '">' +
+          '<b>' + esc(h.hero) + '</b>' +
+          '<span class="tower-plan-type">第 1~3 场</span></li>';
+      }).join('') + '</ol></div>';
+  }
+  /** 四雄（征战动物首领）：层号由 `campaignBossFor` 反查；卡面只保留层数 / 等级，
+   *  出招循环与机制全部收进悬停说明（用户 2026-10 口径）。 */
+  function campaignCatalogHtml() {
+    const list = TowerData.CAMPAIGN_BOSSES;
+    if (!Array.isArray(list) || !list.length) return '';
+    const layerOf = {};
+    for (let L = 10; L <= 990; L += 10) {
+      const b = TowerData.campaignBossFor ? TowerData.campaignBossFor(L) : null;
+      if (b && layerOf[b.id] == null) layerOf[b.id] = L;
+    }
+    const layers = Object.values(layerOf).sort((a, b) => a - b);
+    const rows = list.map((b) => {
+      const L = layerOf[b.id] || 0;
+      const tip = [b.name + (L ? ' · 第 ' + L + ' 层（Lv' + b.level + '）' : ''),
+        b.patternDesc || '', b.mechDesc || ''].filter(Boolean).join('\n');
+      return '<li class="campaign" tabindex="0" data-tip="' + esc(tip) + '">' +
+        '<b>' + esc(b.bigName || b.name) + '</b>' +
+        '<span class="tower-plan-type">' + esc((L ? '第 ' + L + ' 层' : '征战首领') + ' · Lv' + b.level) + '</span></li>';
+    }).join('');
+    return '<div class="boss-group"><b class="boss-group-title">四雄' +
+      '<i>' + (layers.length ? '征战副本 · 第 ' + layers.join(' / ') + ' 层最后一战' : '征战副本首领') + '</i></b>' +
+      '<ol class="tower-plan boss-grid">' + rows + '</ol></div>';
+  }
+  /** 魔王：从首领里单独拆出来的一类。分组标题只写「魔王」，卡面只显示魔王/？？？；
+   *  用户 2026-10 口径：悬停也全是「？？？」，不给出现位置/机制说明。 */
+  function demonCatalogHtml(king) {
+    if (!king) return '';
+    return '<div class="boss-group"><b class="boss-group-title">魔王</b>' +
+      '<ol class="tower-plan boss-grid">' +
+      '<li class="patrol king" tabindex="0" data-tip="？？？">' +
+      '<b>' + esc(king.name) + '</b>' +
+      '<span class="tower-plan-type">魔王</span>' +
+      '<span class="boss-rarity hidden">？？？</span>' +
+      '</li></ol></div>';
+  }
   function bossCatalogHtml() {
     const pool = Tower.bossPool ? Tower.bossPool() : [];
-    if (!pool.length) return '';
-    return '<div class="tower-buffs boss-catalog"><h4>BOSS 一览 <span class="buff-slot-count">' + pool.length + ' 个 · 第 4 场随机池</span></h4>' +
-      '<ol class="tower-plan boss-grid">' + pool.map((b, i) =>
-        '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel' : '') + '" tabindex="0" data-tip="' + esc(mechTip(b)) + '">' +
-        '<b>' + esc(b.name) + '</b>' +
-        (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
-        (b.layers && b.layers.length ? '<span class="boss-layers">第 ' + b.layers.join(' / ') + ' 层</span>' : '') +
-        '</li>').join('') + '</ol></div>';
+    /* 魔王单开一组：从首领池里摘出去，保留「？？？」防剧透，但不再跟普通首领混排。 */
+    const king = pool.find((b) => b && b.king) || null;
+    const rest = pool.filter((b) => b && !b.king);
+    const heroes = heroCatalogHtml();
+    const campaigns = campaignCatalogHtml();
+    const demon = demonCatalogHtml(king);
+    if (!rest.length && !heroes && !campaigns && !demon) return '';
+    const HD = TowerData.HERO_DEBUFF || {};
+    const counts = [];
+    if (heroes) counts.push('三侠 ' + HERO_ORDER.filter((k) => HD[k]).length);
+    if (rest.length) counts.push('首领 ' + rest.length);
+    if (campaigns) counts.push('四雄 ' + (TowerData.CAMPAIGN_BOSSES || []).length);
+    if (demon) counts.push('魔王 1');
+    return '<div class="tower-buffs boss-catalog"><h4>BOSS 一览 <span class="buff-slot-count">' +
+      counts.join(' · ') + '</span></h4>' + heroes +
+      (rest.length
+        ? '<b class="boss-group-title">首领<i>第 4 场 / 10 层守关</i></b>' +
+          '<ol class="tower-plan boss-grid">' + rest.map((b, i) => {
+            const tier = b.tier == null ? null : b.tier;
+            /* 普通首领池不再有魔王；保留下面的 secret 分支只是防御未来数据。 */
+            const secret = !!b.secret;
+            const tip = secret ? '？？？' : ((b.rarity ? '装备稀有度：' + b.rarity + '。' : '') + mechTip(b));
+            const rarity = secret ? '？？？' : ((b.rarity || '') + '装备');
+            return '<li class="' + (b.elite ? 'elite ' : '') + (b.squirrel ? 'squirrel ' : '') + (b.king ? 'king ' : '') +
+              (tier == null ? '' : 'tier-' + tier) + '" tabindex="0" data-tip="' + esc(tip) + '">' +
+              '<b>' + esc(b.name) + '</b>' +
+              (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
+              '<span class="boss-rarity' + (secret ? ' hidden' : ' r' + tier) + '">' + esc(rarity) + '</span>' +
+              '</li>';
+          }).join('') + '</ol>'
+        : '') + campaigns + demon + '</div>';
   }
   /** 左侧塔身：当前层附近的一段楼层，自上而下。
    *
@@ -748,7 +1212,8 @@
    * 【U6】主塔页面 —— openTower
    * ============================================================ */
 
-  function openTower() {
+  function openTower(opts) {
+    setTowerOrigin(opts);
     const info = Tower.towerInfo();
     let main, footer = null;
     if (info.run) {
@@ -771,9 +1236,12 @@
          * 用户要求去掉。信息没丢：挑战书数量在下面那颗「现有挑战书 N 张」、
          * 环境与三侠削弱各有一块自己的面板/预告、目标等级与连战场数在标题右边的 tower-stats 里。
          * 别再往这一屏加规则文字。 */
-        /* 开打前就让人看清「这一层会碰上什么」：环境池（挑战塔口径）+ 三侠大招会留下什么。 */
+        /* 开打前就让人看清「这一层会碰上什么」：环境池（挑战塔口径）+ 三侠大招会留下什么。
+         * 预告用 `horizontal` 变体：经典外壳里它是**横向一排**（用户口径 2026-10-19，
+         * 原来被 classic-refine.css 的经典覆盖压成了 1×4 纵向卡片）；
+         * 卡片本体沿用 tower.css 的默认样式（立绘在上、名字/类型在下），见那边的 `:not(.horizontal)` 排除。 */
         envPreviewHtml(info.nextLayer) + heroDebuffPreviewHtml() +
-        '<h4 class="tower-plan-title">本层对手预告</h4>' + planHtml(info.preview);
+        '<h4 class="tower-plan-title">本层对手预告</h4>' + planHtml(info.preview, ' horizontal');
       footer = '<div class="tower-actions tower-footer">' +
         '<span class="tower-book-count">现有挑战书 ' + info.books + ' 张</span>' +
         /* 【2026-10 用户口径】按钮文案就是「开始挑战」，不再缀「（挑战书×1）」——
@@ -783,10 +1251,15 @@
     }
     const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + '">' + towerVisual(info.nextLayer, info.maxLayer, 'tower') +
       '<div class="tower-main">' + main + '</div>' + (footer || '') + '</div>';
-    const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
+    const ct = classicTower();
+    const p = C().page('challenge', 'stages', content, ct
+      ? { cls: 'tower-board', noTabs: true, noFooter: true, pageClass: 'classic-tower', above: classicTowerBar() }
+      : { cls: 'tower-board' });
     bindTips(p);
-    if (!info.run) fillFoeArt(p, info.preview);
-    back(p, backToStages);
+    if (!info.run) { fillFoeArt(p, info.preview); fillClassicFoeArt(p, info.preview); }
+    back(p, towerBack, ct ? '返回征战' : '返回');
+    /* 挑战塔是固定纯色（无尽塔才按层变色）。 */
+    if (ct) applyClassicTowerBg(p, 'tower', info.run ? info.run.layer : info.nextLayer);
     on(p, 'fight', () => {
       if (info.run) {
         if (info.run.choices) { offerChoice('tower', info.run.choices); return; }
@@ -795,7 +1268,7 @@
       }
       const started = Tower.startTowerRun();
       if (!started.ok) {
-        notice(started.msg, started.needsBook ? [{ label: '去商店买挑战书', run: () => UI.runAction('shop') }, { label: '返回', cls: 'gold' }] : undefined);
+        notice(started.msg, started.needsBook ? [{ label: '买挑战书', run: () => UI.runAction('shop') }, { label: '返回', cls: 'gold' }] : undefined);
         return;
       }
       fight('tower');
@@ -811,6 +1284,742 @@
   /* ============================================================
    * 【U7】无尽页面 —— openEndless
    * ============================================================ */
+
+  let heroSetupDraft = null;
+  /** 四维规则：正常从 TowerHero 取；最小测试桩没装 TowerHero 时用同一份数值兜底。 */
+  function heroStatRules() {
+    try {
+      if (window.TowerHero && typeof TowerHero.statRules === 'function') return TowerHero.statRules();
+    } catch (e) { /* 测试桩 */ }
+    return { floor: 55, cap: 85, total: 195, poolMax: 30,
+      initial: { power: 65, agility: 65, speed: 65 } };
+  }
+  function heroAdjustStat(draft, key, dir) {
+    if (window.TowerHero && typeof TowerHero.adjustStat === 'function') {
+      return TowerHero.adjustStat(draft.stats, draft.statPool, key, dir);
+    }
+    return { ok: false, msg: '属性调整暂不可用。' };
+  }
+  /** 准备页草稿：武技 / 外观 / 四维分配 / 可分配池。旧草稿缺字段时补默认值。 */
+  function ensureHeroSetupDraft() {
+    const initial = (window.TowerHero && TowerHero.initialStats) ? TowerHero.initialStats()
+      : { power: 65, agility: 65, speed: 65 };
+    if (!heroSetupDraft) heroSetupDraft = { picks: [], appearance: [0, 0, 0, 0], stats: initial, statPool: 0 };
+    const draft = heroSetupDraft;
+    if (!Array.isArray(draft.picks)) draft.picks = [];
+    if (!Array.isArray(draft.appearance)) draft.appearance = [0, 0, 0, 0];
+    while (draft.appearance.length < 4) draft.appearance.push(0);
+    const rules = heroStatRules();
+    const keys = ['power', 'agility', 'speed'];
+    const src = (draft.stats && typeof draft.stats === 'object') ? draft.stats : initial;
+    const values = {};
+    let sum = 0, valid = true;
+    for (const key of keys) {
+      const n = Math.floor(Number(src[key]));
+      if (!Number.isFinite(n) || n < rules.floor || n > rules.cap) { valid = false; break; }
+      values[key] = n; sum += n;
+    }
+    if (!valid || !rules || sum > rules.total || sum < rules.total - rules.poolMax) {
+      draft.stats = initial;
+      draft.statPool = 0;
+    } else {
+      draft.stats = values;
+      draft.statPool = Math.max(0, Math.min(rules.poolMax, rules.total - sum));
+    }
+    return draft;
+  }
+  /* 无尽塔开局页选择的剧本：'default' = 常规无尽塔；'hero' = 英雄剧本。
+   * 只影响「开始攀登」这一颗键的分流；选择本身不落存档（下次进页面回到默认剧本）。 */
+  let endlessScript = 'default';
+  /** 开局页右下的剧本选择：一颗可展开的按钮 + 两张剧本卡。
+   *  `data-script` 由 openEndless 里的事件绑定统一处理（选中后重画这一屏）。 */
+  function scriptPickerHtml() {
+    const hero = endlessScript === 'hero';
+    const option = (key, label, desc) => '<button type="button" class="script-option' +
+      (key === endlessScript ? ' is-active' : '') + '" role="option" aria-selected="' +
+      (key === endlessScript ? 'true' : 'false') + '" data-script="' + key + '">' +
+      '<b>' + label + '</b><small>' + desc + '</small></button>';
+    return '<div class="endless-script-picker" data-script-picker>' +
+      '<button type="button" class="uc-button hero-entry script-trigger" data-action="script-toggle"' +
+      ' aria-haspopup="listbox" aria-expanded="false">' +
+      '<span data-script-label>' + (hero ? '英雄剧本' : '默认剧本') + '</span>' +
+      '<span class="script-caret" aria-hidden="true">▾</span></button>' +
+      '<div class="script-menu" role="listbox" aria-label="选择剧本" hidden>' +
+      option('default', '默认剧本', '常规无尽塔') +
+      option('hero', '英雄剧本', '开局调四维 · 局内成长') +
+      '</div></div>';
+  }
+  const HERO_PARTS = ['头部', '拳套', '衣服', '鞋子'];
+  const HERO_QUALITY = ['白', '绿', '蓝', '紫', '橙', '黑'];
+  function heroCatalog() {
+    return window.TowerHero && typeof TowerHero.catalog === 'function' ? TowerHero.catalog() : [];
+  }
+  function heroGrowthText(value) {
+    if (typeof value === 'string') return value;
+    return value && (value.label || value.msg || value.text) || '';
+  }
+  function heroLevelText(level) {
+    const lv = Math.max(1, Math.round(Number(level) || 1));
+    return lv > 10 ? '真' + (lv - 10) + '级' : 'Lv.' + lv;
+  }
+  function heroWsIcon(kind, id, size) {
+    try {
+      const n = Number(size) || 44;
+      if (window.UI && typeof UI.weaponIcon === 'function' && kind === 'weapon') return UI.weaponIcon(Number(id), n);
+      if (window.UI && typeof UI.skillIcon === 'function' && kind === 'skill') return UI.skillIcon(Number(id), n);
+    } catch (e) { /* 素材入口没挂上也别让整页挂掉 */ }
+    return '';
+  }
+  function heroGearIcon(id, size) {
+    const n = Number(size) || 48;
+    return '<img alt="" loading="lazy" width="' + n + '" height="' + n +
+      '" src="images/ui/icons/gear/gear-' + Number(id) + '.png" ' +
+      'onerror="this.style.display=\'none\';this.parentNode.classList.add(\'missing\')">';
+  }
+  const HERO_PART_CHAR = ['头', '拳', '衣', '鞋'];
+  function heroGearName(id) {
+    try { return C().gearName(Number(id)); } catch (e) { return '装备' + Number(id); }
+  }
+  /** 外观 id / 运行中 hero.appearance → 7232 穿衣链路认识的 `{id,type,ext}`。 */
+  function heroGearForPaint(appearance) {
+    return (Array.isArray(appearance) ? appearance : []).map((raw) => {
+      const item = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
+      const id = Number(item.id);
+      if (!(id > 0)) return null;
+      const type = Number.isFinite(Number(item.type)) ? Number(item.type)
+        : (window.State && State.gearPart ? State.gearPart(id) : NaN);
+      if (!Number.isFinite(type)) return null;
+      return { id: id, type: type, ext: Array.isArray(item.ext) ? item.ext : [] };
+    }).filter(Boolean);
+  }
+  /** 外观（id 数组或 run.hero.appearance 对象数组）→ 四个部位各一件的 id 数组。
+   *  装备选择层只认这个形状：`[头, 拳, 衣, 鞋]`，0 = 没穿。 */
+  function heroAppearanceSlots(appearance) {
+    const slots = [0, 0, 0, 0];
+    for (const raw of (Array.isArray(appearance) ? appearance : [])) {
+      const item = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
+      const id = Number(item.id);
+      if (!(id > 0)) continue;
+      const type = Number.isFinite(Number(item.type)) ? Number(item.type)
+        : (window.State && State.gearPart ? State.gearPart(id) : NaN);
+      if (Number.isInteger(type) && type >= 0 && type <= 3 && !slots[type]) slots[type] = id;
+    }
+    return slots;
+  }
+  /** 准备页的数值预览：固定生命 + 玩家调过的力/敏/速 + 已点亮技能的被动，装备永远 0 加成。 */
+  function heroDraftStats(picks, stats) {
+    const base = (window.TowerHero && TowerHero.CONFIG && TowerHero.CONFIG.base) ||
+      { power: 65, agility: 65, speed: 65, maxHp: 800 };
+    const chosen = (stats && typeof stats === 'object') ? stats : {};
+    const pick = (key) => {
+      const n = Number(chosen[key]);
+      return Number.isFinite(n) ? n : base[key];
+    };
+    const out = { power: pick('power'), agility: pick('agility'), speed: pick('speed'), maxHp: base.maxHp };
+    const level = Math.max(1, Number(window.TowerHero && TowerHero.CONFIG && TowerHero.CONFIG.startLevel) || 5);
+    for (const it of (Array.isArray(picks) ? picks : [])) {
+      if (!it || it.kind !== 'skill') continue;
+      const key = { 1: 'power', 2: 'agility', 3: 'speed', 4: 'maxHp' }[Number(it.id)];
+      if (key && window.GData && typeof GData.passiveBonus === 'function') {
+        out[key] += Number(GData.passiveBonus(Number(it.id), level)) || 0;
+      }
+    }
+    return out;
+  }
+  function heroStatsHtml(stats) {
+    const rows = [['力量', 'power'], ['敏捷', 'agility'], ['速度', 'speed'], ['生命', 'maxHp']];
+    return '<div class="hero-demo-stats">' + rows.map(([label, key]) =>
+      '<div><span>' + label + '</span><b>' + esc(Math.max(0, Math.round(Number(stats && stats[key]) || 0))) + '</b></div>').join('') + '</div>';
+  }
+  /** 现代准备页的四维编辑版：力/敏/速带上下键，生命固定；下面显示可分配池。 */
+  function heroDraftStatsHtml(stats, draft) {
+    const rules = heroStatRules();
+    const pool = Math.max(0, Number(draft && draft.statPool) || 0);
+    const rows = [['力量', 'power'], ['敏捷', 'agility'], ['速度', 'speed'], ['生命', 'maxHp']];
+    return '<div class="hero-demo-stats is-editable">' + rows.map(([label, key]) => {
+      const value = Math.max(0, Math.round(Number(stats && stats[key]) || 0));
+      if (key === 'maxHp') return '<div class="hero-stat-cell"><span>' + label + '</span><b>' + value + '</b></div>';
+      const base = Number(draft && draft.stats && draft.stats[key]) || 0;
+      const up = pool > 0 && base < rules.cap;
+      const down = base > rules.floor;
+      return '<div class="hero-stat-cell" data-hero-stat="' + key + '"><span>' + label + '</span><b>' + value + '</b>' +
+        '<span class="hero-stat-arrows">' +
+          '<button type="button" class="hero-stat-step" data-stat-step="' + key + ':up" aria-label="' + label + '加1"' + (up ? '' : ' disabled') + '>▲</button>' +
+          '<button type="button" class="hero-stat-step" data-stat-step="' + key + ':down" aria-label="' + label + '减1"' + (down ? '' : ' disabled') + '>▼</button>' +
+        '</span></div>';
+    }).join('') + '</div>' +
+      '<p class="hero-stat-pool" data-hero-stat-pool>可分配 <b>' + pool + '</b> 点</p>';
+  }
+  /** 运行中英雄 → 查看状态用的“对手”快照（四维 + 武技 + 外观）。 */
+  function heroFoeOf(hero) {
+    if (!hero) return null;
+    const fighter = window.TowerHero && TowerHero.fighter ? TowerHero.fighter(hero) : null;
+    const base = (window.TowerHero && TowerHero.CONFIG && TowerHero.CONFIG.base) ||
+      { power: 65, agility: 65, speed: 65, maxHp: 800 };
+    const stats = fighter || base;
+    return {
+      name: '勇者', level: 1,
+      power: Number(stats.power) || 0, agility: Number(stats.agility) || 0,
+      speed: Number(stats.speed) || 0, hp: Number(stats.maxHp || stats.hp) || 0,
+      maxHp: Number(stats.maxHp || stats.hp) || 0,
+      gears: heroGearForPaint(hero.appearance),
+      weapons: Array.isArray(hero.weapons) ? hero.weapons.slice() : [],
+      skills: Array.isArray(hero.skills) ? hero.skills.slice() : [],
+    };
+  }
+  /** 全部装备按**稀有度 → 套装 → 部位**分组（外观 0 加成，只用于换装）。 */
+  function heroGearCatalog() {
+    const rows = [];
+    if (!window.gearMap || typeof gearMap.each !== 'function' || !window.State || !State.gearInst) return [];
+    gearMap.each((key, row) => {
+      const id = Number(row && row.id != null ? row.id : key);
+      const gear = State.gearInst(id);
+      if (!gear || !Number.isInteger(Number(gear.type))) return;
+      rows.push({ id: id, name: gear.name || '', type: Number(gear.type),
+        quality: Math.max(0, Math.min(5, Number(gear.quality) || 0)), setId: Number(gear.setId) || 0,
+        family: (State.gearSetFamily ? State.gearSetFamily(id) : '') || ('套装 ' + (Number(gear.setId) || 0)) });
+    });
+    rows.sort((a, b) => (b.quality - a.quality) || (a.setId - b.setId) || (a.type - b.type) || (a.id - b.id));
+    const groups = [];
+    for (const item of rows) {
+      let group = groups[groups.length - 1];
+      if (!group || group.quality !== item.quality) {
+        group = { quality: item.quality, label: HERO_QUALITY[item.quality] || '特殊', sets: [] };
+        groups.push(group);
+      }
+      let set = group.sets[group.sets.length - 1];
+      if (!set || set.setId !== item.setId) {
+        set = { setId: item.setId, family: item.family, items: [] };
+        group.sets.push(set);
+      }
+      set.items.push(item);
+    }
+    /* 黑/橙两档里有同名套装（狂战/怒战各有两套不同 setId）：同组重名时补套号，
+     * 否则玩家只看到两个一模一样的「狂战」标题，分不清是哪一套。 */
+    for (const group of groups) {
+      const seen = new Map();
+      for (const set of group.sets) seen.set(set.family, (seen.get(set.family) || 0) + 1);
+      for (const set of group.sets) {
+        if (seen.get(set.family) > 1) set.label = set.family + ' · 套' + set.setId;
+      }
+    }
+    return groups;
+  }
+  /** 全部装备的分组网格（准备页的「更换装备」与爬塔中的装备选择层共用这一份）。
+   *  `slots` = `[头,拳,衣,鞋]` 的 id 数组；每个部位只高亮当前那一件。
+   *  ⚠ 所有卡片都写「0 加成」：勇者模式的外观件不参与数值，别在这里接属性。 */
+  function heroGearGroupsHtml(slots, groups) {
+    const list = groups || heroGearCatalog();
+    if (!list.length) return '<p class="hero-status-empty">装备字典还没有加载。</p>';
+    const at = (part) => Number(Array.isArray(slots) ? slots[part] : 0) || 0;
+    return list.map((group) =>
+      '<section class="hero-gear-rarity q' + group.quality + '"><h4>' + esc(group.label) + '装' +
+        '<span>' + group.sets.length + ' 套</span></h4>' +
+        group.sets.map((set) => '<div class="hero-gear-set"><h5>' + esc(set.label || set.family) + '</h5>' +
+          '<div class="hero-gear-parts">' + set.items.map((item) =>
+            '<button type="button" class="hero-gear-item' +
+              (at(item.type) === Number(item.id) ? ' is-equipped' : '') +
+              '" data-hero-gear="' + item.id + '" data-gear-part="' + item.type + '" ' +
+              'title="' + esc(item.name + ' · ' + (HERO_QUALITY[item.quality] || '') + '装 · ' + (HERO_PARTS[item.type] || '') + ' · 仅外观') + '">' +
+              '<span class="hero-gear-icon" data-part="' + esc(HERO_PART_CHAR[item.type] || '装') + '">' + heroGearIcon(item.id, 48) + '</span>' +
+              '<b>' + esc(item.name) + '</b><i>' + esc(HERO_PARTS[item.type] || '') + '</i>' +
+              '<span class="hero-gear-zero">0 加成</span></button>').join('') + '</div></div>').join('') +
+      '</section>').join('');
+  }
+  /** 全部装备按「稀有度 → 套装 → 部位」摊平（给经典「更换装备」页的 6 格分页用）。 */
+  function heroAllGear() {
+    const out = [];
+    for (const group of heroGearCatalog()) {
+      for (const set of group.sets) {
+        for (const item of set.items) out.push(Object.assign({}, item));
+      }
+    }
+    return out;
+  }
+  /** 把勇者穿好外观的 7232 画进 host；同一个 host 的旧图会先销毁。 */
+  async function paintHeroArt(host, appearance, opts) {
+    if (!host) return null;
+    const token = (host.__heroArtSeq = (Number(host.__heroArtSeq) || 0) + 1);
+    const old = host.__heroView;
+    host.__heroView = null;
+    if (old) { try { old.destroy(); } catch (e) {} }
+    host.classList.remove('ready');
+    host.innerHTML = '';
+    try {
+      const v = await mountClassicSquirrel(host, { gear: heroGearForPaint(appearance) },
+        Object.assign({ label: '勇者' }, opts || {}));
+      if (!v) return null;
+      if (host.__heroArtSeq !== token || host.isConnected === false) { try { v.destroy(); } catch (e) {} return null; }
+      host.__heroView = v;
+      return v;
+    } catch (e) {
+      if (window.__errs) window.__errs.push('hero art: ' + (e && e.message));
+      return null;
+    }
+  }
+  /** 主界面左下「剧情模式」右边那颗小全身照（只在英雄模式出现）。 */
+  function heroPortraitButtonHtml(run) {
+    if (!run || run.ruleset !== 'hero' || !run.hero) return '';
+    return '<button type="button" class="endless-hero-portrait" data-action="hero-status" ' +
+      'title="查看勇者状态" aria-label="查看勇者状态">' +
+      '<span class="endless-hero-portrait-art" data-hero-portrait="small" aria-hidden="true"></span>' +
+      '<b>勇者</b></button>';
+  }
+  function heroLoadoutRows(hero) {
+    const lines = { weapon: [], skill: [] };
+    for (const kind of ['weapon', 'skill']) {
+      const list = Array.isArray(hero[kind === 'weapon' ? 'weapons' : 'skills']) ? hero[kind === 'weapon' ? 'weapons' : 'skills'] : [];
+      for (const raw of list) {
+        const parts = String(raw).split(':'), id = Number(parts[0]), level = Math.max(1, Number(parts[1]) || 1);
+        const inst = kind === 'weapon'
+          ? (State.weaponInst ? State.weaponInst(id) : null) : (State.skillInst ? State.skillInst(id) : null);
+        lines[kind].push('<li><span class="hero-status-ws-icon">' + heroWsIcon(kind, id, 36) + '</span>' +
+          '<b>' + esc((inst && inst.name) || ((kind === 'weapon' ? '武器 ' : '技能 ') + id)) + '</b>' +
+          '<em>' + esc(heroLevelText(level)) + '</em></li>');
+      }
+    }
+    return lines;
+  }
+  function heroStatusHtml(hero, run) {
+    const foe = heroFoeOf(hero) || {};
+    const lines = heroLoadoutRows(hero);
+    const paintGears = heroGearForPaint(hero.appearance);
+    const gearRows = HERO_PARTS.map((label, part) => {
+      const g = paintGears.find((x) => Number(x && x.type) === part);
+      return '<span class="hero-status-gear-slot"><i>' + label + '</i>' +
+        '<b>' + esc(g ? heroGearName(g.id) : '未穿戴') + '</b><em>0 加成</em></span>';
+    }).join('');
+    const hp = run && Number(run.curMaxHp) > 0
+      ? '<span class="hero-status-hp">当前血量 ' + Math.max(0, Math.round(Number(run.curHp) || 0)) +
+        ' / ' + Math.max(1, Math.round(Number(run.curMaxHp) || 1)) + '</span>' : '';
+    const log = (Array.isArray(hero.log) ? hero.log : []).slice(-4).reverse().map(heroGrowthText).filter(Boolean);
+    const list = (kind, title, empty) => '<section class="hero-status-loadout"><h4>' + title + ' <span>' +
+      lines[kind].length + '</span></h4>' + (lines[kind].length
+        ? '<ul' + (lines[kind].length > 4 ? ' class="is-many"' : '') + '>' + lines[kind].join('') + '</ul>'
+        : '<p class="hero-status-empty">' + empty + '</p>') + '</section>';
+    return '<div class="hero-status-card">' +
+      '<div class="hero-status-side"><div class="hero-status-portrait"><span data-hero-status-art aria-hidden="true"></span></div>' +
+      '<div class="hero-status-name">勇者</div>' + hp + '</div>' +
+      '<div class="hero-status-main">' + heroStatsHtml(foe) +
+      '<p class="hero-base-note">四维在开局时分配，局内不再变化；不继承账号、套装或幻兽加成，外观装备只改变造型、属性 0 加成。</p>' +
+      '<div class="hero-status-gears">' + gearRows + '</div>' +
+      '<div class="hero-status-loadouts">' + list('weapon', '武器', '空手') + list('skill', '技能', '尚未学习') + '</div>' +
+      '<section class="hero-status-log"><h4>成长记录</h4>' + (log.length
+        ? '<ol>' + log.map((text) => '<li>' + esc(text) + '</li>').join('') + '</ol>'
+        : '<p class="hero-status-empty">每场胜利后获得一次英雄成长。</p>') + '</section>' +
+      '</div></div>';
+  }
+  /** 爬塔中点击勇者小全身照：经典模式直接打开随机挑战「查看敌人」那张原版状态页
+   *  （状态 / 武器 / 技能三个页签），现代模式仍用下面那套弹窗。 */
+  function openHeroStatus() {
+    const info = Tower.endlessInfo();
+    const run = info && info.run;
+    if (!run || run.ruleset !== 'hero' || !run.hero) { notice('当前不是英雄模式。'); return; }
+    if (classicHeroUi()) { openHeroStatusClassic(); return; }
+    openHeroStatusDom();
+  }
+  function openHeroStatusDom() {
+    const info = Tower.endlessInfo();
+    const run = info && info.run;
+    if (!run || run.ruleset !== 'hero' || !run.hero) { notice('当前不是英雄模式。'); return; }
+    const hero = run.hero;
+    const m = modal('勇者 · 状态', heroStatusHtml(hero, run), [{ label: '返回', cls: 'gold' }]);
+    if (m && m.element) {
+      m.element.classList.add('hero-status-modal');
+      paintHeroArt(find(m.element, '[data-hero-status-art]'), hero.appearance, { label: '勇者', pad: 8 });
+    }
+  }
+  /** 经典状态页的勇者版：只读武技、可换外观装备（`Tower.setHeroAppearance` 落盘）。 */
+  function openHeroStatusClassic() {
+    const info = Tower.endlessInfo();
+    const run = info && info.run;
+    if (!run || run.ruleset !== 'hero' || !run.hero) { notice('当前不是英雄模式。'); return; }
+    const fighter = window.TowerHero && TowerHero.fighter ? TowerHero.fighter(run.hero) : null;
+    const hero = {
+      mode: 'run',
+      stats: fighter || { power: 65, agility: 65, speed: 65, maxHp: 800 },
+      appearance: (run.hero.appearance || []).map((g) => Object.assign({}, g)),
+      weapons: (run.hero.weapons || []).slice(),
+      skills: (run.hero.skills || []).slice(),
+      wins: Math.max(0, Number(run.hero.wins) || 0),
+      /* 经典「更换装备」页的数据源：全部 228 件，按稀有度 → 套装 → 部位；数值由 ui-status 清零。 */
+      gearList: heroAllGear(),
+      onEquip: (next) => {
+        const res = window.Tower && Tower.setHeroAppearance ? Tower.setHeroAppearance(next) : null;
+        if (!res || !res.ok) { notice((res && res.msg) || '外观保存失败。'); return null; }
+        return (res.appearance || []).map((g) => Object.assign({}, g));
+      },
+      onGears: () => {
+        openHeroGearPicker({
+          slots: heroAppearanceSlots(hero.appearance),
+          onChange: (next) => {
+            const res = window.Tower && Tower.setHeroAppearance
+              ? Tower.setHeroAppearance(next.filter((id) => id > 0).map((id) => ({ id: id, ext: [] }))) : null;
+            if (!res || !res.ok) { notice((res && res.msg) || '外观保存失败。'); return; }
+            hero.appearance = (res.appearance || []).map((g) => Object.assign({}, g));
+            if (SfStatus.refresh) SfStatus.refresh();
+          },
+        });
+      },
+      onBack: () => { closeHeroGearPicker(); try { SfStatus.destroy(); } catch (e) {} openEndless(); },
+    };
+    closeHeroGearPicker();
+    const p = SfStatus.openHero(hero, { overlay: true, label: '勇者' });
+    if (p && typeof p.then === 'function') {
+      p.then((ok) => { if (!ok) openHeroStatusDom(); }).catch((e) => {
+        if (window.__errs) window.__errs.push('hero status classic: ' + (e && e.message));
+        openHeroStatusDom();
+      });
+    }
+  }
+  /** 拆掉勇者外观选择层（状态页被关掉 / 开局 / 重开时都要清）。 */
+  function closeHeroGearPicker() {
+    const el = heroGearPickerEl;
+    heroGearPickerEl = null;
+    if (el && typeof el.__close === 'function') el.__close();
+    else if (el && el.parentNode) el.parentNode.removeChild(el);
+    /* 兜底：万一外部导航把状态页整个换掉，层里那份引用已经找不到，按标记清一次。 */
+    document.querySelectorAll('[data-hero-gear-picker]').forEach((node) => node.remove());
+  }
+  /** 勇者模式的外观装备选择层：全部装备按稀有度 → 套装 → 部位排；全部 0 加成。
+   *  ⚠ 挂到 `document.body`、用 `position:fixed`：状态页宿主在 `#ui` 里，
+   *    移动端 `#ui` 会按 390/1170 ≈ 1/3 等比缩放；挂在宿主里整层会跟着缩成一小块。 */
+  function openHeroGearPicker(opts) {
+    const o = opts || {};
+    closeHeroGearPicker();
+    const groups = heroGearCatalog();
+    const slots = (Array.isArray(o.slots) ? o.slots.slice(0, 4) : [0, 0, 0, 0]).map(Number);
+    while (slots.length < 4) slots.push(0);
+    const el = document.createElement('div');
+    el.className = 'hero-gear-picker';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-label', '更换装备');
+    el.innerHTML = '<div class="hero-gear-picker-panel">' +
+      '<header class="hero-gear-picker-head"><div><h3>更换装备</h3>' +
+        '<p>全部装备按稀有度 → 套装 → 部位排列；每件都是 <b>0 加成</b>，只改变外观。</p></div>' +
+        '<span class="hero-gear-picker-total">共 ' +
+          groups.reduce((n, g) => n + g.sets.reduce((m, s) => m + s.items.length, 0), 0) + ' 件</span></header>' +
+      '<div class="hero-gear-picker-slots" data-hero-gear-slots></div>' +
+      '<div class="hero-gear-picker-scroll">' + heroGearGroupsHtml(slots, groups) + '</div>' +
+      '<footer class="hero-gear-picker-foot"><span>点一下穿上，再点一下脱下；同一部位只保留一件。</span>' +
+        '<button type="button" class="hero-gear-picker-back" data-hero-gear-close>返回</button></footer>' +
+      '</div>';
+    el.setAttribute('data-hero-gear-picker', '');
+    document.body.appendChild(el);
+    heroGearPickerEl = el;
+    const slotsHost = el.querySelector('[data-hero-gear-slots]');
+    const paintSlots = () => {
+      if (!slotsHost) return;
+      slotsHost.innerHTML = HERO_PARTS.map((label, part) => {
+        const id = Number(slots[part]) || 0;
+        return '<span class="hero-gear-slot"><i>' + esc(label) + '</i><b>' +
+          esc(id > 0 ? heroGearName(id) : '未穿戴') + '</b><em>0 加成</em></span>';
+      }).join('');
+    };
+    const sync = () => {
+      el.querySelectorAll('[data-hero-gear]').forEach((btn) => {
+        const part = Number(btn.dataset.gearPart);
+        btn.classList.toggle('is-equipped', Number(slots[part]) === Number(btn.dataset.heroGear));
+      });
+      paintSlots();
+    };
+    el.querySelectorAll('[data-hero-gear]').forEach((btn) => {
+      btn.onclick = () => {
+        const id = Number(btn.dataset.heroGear), part = Number(btn.dataset.gearPart);
+        if (!Number.isInteger(part) || part < 0 || part > 3) return;
+        slots[part] = Number(slots[part]) === id ? 0 : id;
+        sync();
+        if (o.onChange) o.onChange(slots.slice());
+      };
+    });
+    const onKey = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); close(); } };
+    const close = () => {
+      if (el.parentNode) el.parentNode.removeChild(el);
+      if (heroGearPickerEl === el) heroGearPickerEl = null;
+      document.removeEventListener('keydown', onKey, true);
+      if (o.onClose) o.onClose();
+    };
+    el.__close = close;
+    document.addEventListener('keydown', onKey, true);
+    el.addEventListener('click', (ev) => { if (ev.target === el) close(); });
+    const back = el.querySelector('[data-hero-gear-close]');
+    if (back) back.onclick = close;
+    paintSlots();
+    const first = el.querySelector('[data-hero-gear]');
+    if (first && first.focus) { try { first.focus({ preventScroll: true }); } catch (e) { first.focus(); } }
+    return el;
+  }
+  /** 勇者准备页（经典模式）：直接用 7218 状态页，数据源换成本局草稿。
+   *  「武器 / 技能」两页点亮 3 个；「状态」页的「更换装备」开外观选择层，
+   *  原「装备融合」那一位换成「开始挑战」。 */
+  function openHeroSetupClassic(opts) {
+    const draft = heroSetupDraft;
+    const hero = {
+      mode: 'setup',
+      stats: () => heroDraftStats(draft.picks, draft.stats),
+      picks: draft.picks.map((it) => Object.assign({}, it)),
+      appearance: draft.appearance.slice(),
+      wins: 0,
+      /* 四维分配：状态页的力/敏/速上下键读这一份，调整后只改草稿，开局时交给 TowerHero.create。 */
+      statState: () => ({
+        values: Object.assign({}, draft.stats),
+        pool: Math.max(0, Number(draft.statPool) || 0),
+        rules: heroStatRules(),
+      }),
+      adjustStat: (key, dir) => {
+        const out = heroAdjustStat(draft, key, dir);
+        if (!out.ok) { if (window.UI && UI.toast) UI.toast(out.msg); return out; }
+        draft.stats = out.values;
+        draft.statPool = out.pool;
+        return out;
+      },
+      /* 经典「更换装备」页的数据源：全部 228 件，按稀有度 → 套装 → 部位；数值由 ui-status 清零。 */
+      gearList: heroAllGear(),
+      onEquip: (next) => {
+        const slots = [0, 0, 0, 0];
+        for (const g of (Array.isArray(next) ? next : [])) {
+          const type = Number(g && g.type);
+          if (Number.isInteger(type) && type >= 0 && type <= 3) slots[type] = Number(g.id) || 0;
+        }
+        draft.appearance = slots;
+        return next;
+      },
+      onPicks: (list) => { draft.picks = list.map((it) => ({ kind: it.kind, id: Number(it.id) })); },
+      onGears: () => {
+        openHeroGearPicker({
+          slots: draft.appearance.slice(),
+          onChange: (next) => {
+            draft.appearance = next.slice();
+            /* 状态页里的 `hero.appearance` 是开局时拷的一份快照；装备层改的是草稿，
+             * 必须同步回这一份，否则关掉选择层后立绘还是旧外观。 */
+            hero.appearance = next.slice();
+            if (SfStatus.refresh) SfStatus.refresh();
+          },
+        });
+      },
+      onStart: () => startHeroRunFromSetup(),
+      onBack: () => { closeHeroGearPicker(); try { SfStatus.destroy(); } catch (e) {} openEndless(); },
+    };
+    closeHeroGearPicker();
+    const p = SfStatus.openHero(hero, { overlay: false, label: '勇者准备' });
+    if (p && typeof p.then === 'function') {
+      p.then((ok) => {
+        if (!ok) { openHeroSetupDom(opts); return; }
+      }).catch((e) => {
+        if (window.__errs) window.__errs.push('hero setup classic: ' + (e && e.message));
+        openHeroSetupDom(opts);
+      });
+    }
+  }
+  /** 准备页的「开始挑战」：3 个武技齐了才真正开局；失败时回到准备页。 */
+  function startHeroRunFromSetup() {
+    const draft = heroSetupDraft;
+    if (!draft || draft.picks.length !== 3) { notice('请点亮 3 个起始武技。'); return; }
+    const pool = Math.max(0, Number(draft.statPool) || 0);
+    if (pool > 0) { notice('还有 ' + pool + ' 点可分配，先把力/敏/速分配完再加入。'); return; }
+    const options = { ruleset: 'hero', hero: {
+      picks: draft.picks.map((item) => Object.assign({}, item)),
+      appearance: draft.appearance.filter((id) => id > 0).map((id) => ({ id: id, ext: [] })),
+      stats: Object.assign({}, draft.stats),
+    } };
+    closeHeroGearPicker();
+    try { if (window.SfStatus && SfStatus.destroy) SfStatus.destroy(); } catch (e) {}
+    if (beginEndlessRun(options)) heroSetupDraft = null;
+    else setTimeout(() => { if (!Tower.endlessInfo().run) openHeroSetup(); }, 30);
+  }
+  function openHeroSetup(opts) {
+    setTowerOrigin(opts);
+    /* 从开局页的剧本选择 / 战报「再次攀登」进来都算英雄剧本：返回开局页时选择器保持这一档。 */
+    endlessScript = 'hero';
+    if (Tower.endlessInfo().run) { openEndless(); return; }
+    if (!window.TowerHero || !TowerHero.CONFIG) { notice('英雄模式尚未加载，请刷新后重试。'); return; }
+    ensureHeroSetupDraft();
+    if (classicHeroUi()) { openHeroSetupClassic(opts); return; }
+    openHeroSetupDom(opts);
+  }
+  function openHeroSetupDom(opts) {
+    setTowerOrigin(opts);
+    if (Tower.endlessInfo().run) { openEndless(); return; }
+    if (!window.TowerHero || !TowerHero.CONFIG) { notice('英雄模式尚未加载，请刷新后重试。'); return; }
+    const config = TowerHero.CONFIG, catalog = heroCatalog();
+    const count = Math.max(1, Number(config.initialCount) || 3), level = Math.max(1, Number(config.startLevel) || 5);
+    const draft = ensureHeroSetupDraft();
+    const selected = new Set(draft.picks.map((item) => item.kind + ':' + item.id));
+
+    const skillCards = catalog.map((item) => {
+      const key = item.kind + ':' + item.id, picked = selected.has(key);
+      return '<button type="button" class="hero-skill-card' + (picked ? ' is-lit' : '') + '" ' +
+        'data-hero-pick="' + esc(key) + '" data-hero-kind="' + esc(item.kind) + '" ' +
+        'aria-pressed="' + (picked ? 'true' : 'false') + '">' +
+        '<span class="hero-skill-icon">' + heroWsIcon(item.kind, item.id, 44) + '</span>' +
+        '<span class="hero-skill-info"><b>' + esc(item.name) + '</b><i>' + esc(item.desc || '') + '</i></span>' +
+        '<em>' + (item.kind === 'weapon' ? '武器' : '技能') + ' · Lv.' + level + '</em>' +
+        '<span class="hero-skill-lit" aria-hidden="true">✓</span></button>';
+    }).join('');
+
+    const gearHtml = heroGearGroupsHtml(draft.appearance);
+
+    const main = '<div class="hero-demo-heading"><span class="hero-demo-badge">英雄剧本</span>' +
+      '<h2 class="tower-title">塑造本局英雄</h2>' +
+      '<p>点亮 3 个起始武技；外观装备可在「更换装备」里自由挑，只改变造型。</p>' +
+      '<span class="hero-pick-limit" data-hero-count aria-live="polite">已点亮 0 / ' + count + '</span></div>' +
+      '<div class="hero-setup-sheet">' +
+        '<section class="hero-setup-portrait-panel">' +
+          '<div class="hero-setup-portrait-frame"><span class="hero-setup-portrait-art" data-hero-setup-art aria-hidden="true"></span></div>' +
+          '<div class="hero-setup-portrait-name">勇者</div>' +
+          '<div data-hero-preview-stats>' + heroDraftStatsHtml(heroDraftStats(draft.picks, draft.stats), draft) + '</div>' +
+          '<p class="hero-base-note">开局前可调整力敏速（20% 下限）；装备只改变外观，属性 0 加成。被动技能与塔内增益另计。</p>' +
+        '</section>' +
+        '<section class="hero-setup-workbench">' +
+          '<div class="hero-setup-tabs" role="tablist" aria-label="英雄准备">' +
+            '<button type="button" class="is-active" data-hero-tab="skills" role="tab" aria-selected="true">武技</button>' +
+            '<button type="button" data-hero-tab="gear" role="tab" aria-selected="false">更换装备</button>' +
+          '</div>' +
+          '<div class="hero-setup-tabpane" data-hero-pane="skills">' +
+            '<div class="hero-pick-filters" role="group" aria-label="武技类别">' +
+              '<button type="button" class="is-active" data-hero-filter="all">全部</button>' +
+              '<button type="button" data-hero-filter="weapon">武器</button>' +
+              '<button type="button" data-hero-filter="skill">技能</button>' +
+              '<span class="hero-setup-hint">点一下点亮，再点一下变暗；正好 3 个即可出发。</span></div>' +
+            '<div class="hero-skill-grid">' + skillCards + '</div>' +
+          '</div>' +
+          '<div class="hero-setup-tabpane" data-hero-pane="gear" hidden>' +
+            '<p class="hero-setup-hint">全部装备按稀有度、套装、部位排序；点部位替换，再点一次脱下。所有外观属性 0 加成。</p>' +
+            '<div class="hero-gear-scroll">' + gearHtml + '</div>' +
+          '</div>' +
+        '</section>' +
+      '</div>' +
+      '<div class="hero-setup-actions"><span data-hero-start-note>还需点亮 ' + count + ' 个武技</span>' +
+        C().btn('开始挑战', 'hero-start', 'gold') + '</div>';
+    const ct = classicTower();
+    const content = '<div class="tower-page hero-setup-page">' +
+      '<div class="tower-main hero-setup">' + main + '</div></div>';
+    const pageOpts = { cls: 'tower-board', pageClass: 'hero-setup-page', homeLabel: '返回' };
+    if (ct) Object.assign(pageOpts, { noTabs: true, pageClass: 'classic-tower hero-setup-page', above: classicTowerBar() });
+    const p = C().page('challenge', 'stages', content, pageOpts);
+    /* 用户 2026-10-24 口径：底部返回键加回来，右上角的小 × 去掉。 */
+    back(p, () => openEndless(), '返回');
+    if (ct) applyClassicTowerBg(p, 'endless', 1);
+    const syncEquipped = () => p.querySelectorAll('[data-hero-gear]').forEach((btn) => {
+      btn.classList.toggle('is-equipped', Number(draft.appearance[Number(btn.dataset.gearPart)]) === Number(btn.dataset.heroGear));
+    });
+    const bindStatSteps = (host) => {
+      if (!host || typeof host.querySelectorAll !== 'function') return;
+      host.querySelectorAll('[data-stat-step]').forEach((btn) => {
+        btn.onclick = () => {
+          const parts = String(btn.dataset.statStep || '').split(':');
+          const out = heroAdjustStat(draft, parts[0], parts[1]);
+          if (!out.ok) { if (window.UI && UI.toast) UI.toast(out.msg); return; }
+          draft.stats = out.values;
+          draft.statPool = out.pool;
+          update();
+        };
+      });
+    };
+    const update = () => {
+      const full = selected.size === count;
+      const counter = find(p, '[data-hero-count]');
+      const start = find(p, '[data-action="hero-start"]');
+      const note = find(p, '[data-hero-start-note]');
+      const pool = Math.max(0, Number(draft.statPool) || 0);
+      if (counter) counter.textContent = '已点亮 ' + selected.size + ' / ' + count;
+      if (start) start.disabled = !full;
+      if (note) note.textContent = !full ? ('还需点亮 ' + Math.max(0, count - selected.size) + ' 个武技')
+        : (pool > 0 ? ('还有 ' + pool + ' 点可分配') : ('已点亮 ' + count + ' 个武技，准备出发'));
+      p.querySelectorAll('[data-hero-pick]').forEach((btn) => {
+        const on = selected.has(btn.dataset.heroPick);
+        btn.classList.toggle('is-lit', on);
+        btn.classList.toggle('is-locked', !on && full);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      const statsHost = find(p, '[data-hero-preview-stats]');
+      if (statsHost) {
+        statsHost.innerHTML = heroDraftStatsHtml(heroDraftStats(draft.picks, draft.stats), draft);
+        bindStatSteps(statsHost);
+      }
+    };
+    p.querySelectorAll('[data-hero-pick]').forEach((btn) => {
+      btn.onclick = () => {
+        const key = btn.dataset.heroPick;
+        if (selected.has(key)) selected.delete(key);
+        else if (selected.size < count) selected.add(key);
+        else {
+          const note = find(p, '[data-hero-start-note]');
+          if (note) note.textContent = '已点亮 ' + count + ' 个武技；先点暗一个再换。';
+          return;
+        }
+        draft.picks = catalog.filter((item) => selected.has(item.kind + ':' + item.id))
+          .map((item) => ({ kind: item.kind, id: Number(item.id) }));
+        update();
+      };
+    });
+    p.querySelectorAll('[data-hero-filter]').forEach((button) => {
+      button.onclick = () => {
+        const filter = button.dataset.heroFilter;
+        p.querySelectorAll('[data-hero-pick]').forEach((card) => {
+          card.hidden = filter !== 'all' && card.dataset.heroKind !== filter;
+        });
+        p.querySelectorAll('[data-hero-filter]').forEach((item) => item.classList.toggle('is-active', item === button));
+      };
+    });
+    p.querySelectorAll('[data-hero-tab]').forEach((button) => {
+      button.onclick = () => {
+        const tab = button.dataset.heroTab;
+        p.querySelectorAll('[data-hero-tab]').forEach((item) => {
+          const on = item === button;
+          item.classList.toggle('is-active', on);
+          item.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        p.querySelectorAll('[data-hero-pane]').forEach((pane) => { pane.hidden = pane.dataset.heroPane !== tab; });
+      };
+    });
+    p.querySelectorAll('[data-hero-gear]').forEach((btn) => {
+      btn.onclick = () => {
+        const id = Number(btn.dataset.heroGear), part = Number(btn.dataset.gearPart);
+        if (!Number.isInteger(part) || part < 0 || part > 3) return;
+        draft.appearance[part] = Number(draft.appearance[part]) === id ? 0 : id;
+        syncEquipped();
+        paintHeroArt(find(p, '[data-hero-setup-art]'), draft.appearance, { label: '勇者', pad: 6, zoom: 1.06 });
+      };
+    });
+    on(p, 'hero-start', () => {
+      if (draft.picks.length !== count) { notice('请点亮 ' + count + ' 个起始武技。'); return; }
+      const pool = Math.max(0, Number(draft.statPool) || 0);
+      if (pool > 0) { notice('还有 ' + pool + ' 点可分配，先把力/敏/速分配完再加入。'); return; }
+      const options = { ruleset: 'hero', hero: { picks: draft.picks.map((item) => Object.assign({}, item)),
+        appearance: draft.appearance.filter((id) => id > 0).map((id) => ({ id, ext: [] })),
+        stats: Object.assign({}, draft.stats) } };
+      if (beginEndlessRun(options)) heroSetupDraft = null;
+    });
+    update();
+    paintHeroArt(find(p, '[data-hero-setup-art]'), draft.appearance, { label: '勇者', pad: 6, zoom: 1.06 });
+  }
+  function openHeroEvent(event, info) {
+    const run = info && info.run, layer = run ? run.layer : 1;
+    const main = '<section class="hero-event-card"><span class="hero-demo-badge">英雄际遇</span><h2>' + esc(event.title) + '</h2>' +
+      '<p>' + esc(event.text) + '</p><div class="hero-event-choices">' + (event.choices || []).map((choice, index) =>
+        '<button type="button" class="hero-event-choice" data-hero-event-choice="' + index + '"><b>' + esc(choice.label) + '</b>' +
+        '<span>' + esc(choice.desc || '') + '</span></button>').join('') + '</div></section>';
+    const ct = classicTower();
+    const content = '<div class="tower-page hero-event-page">' + towerVisual(layer, 0, 'endless') + '<div class="tower-main">' + main + '</div></div>';
+    const p = C().page('challenge', 'stages', content, ct
+      ? { cls: 'tower-board', noTabs: true, noFooter: true, pageClass: 'classic-tower', above: classicTowerBar() }
+      : { cls: 'tower-board' });
+    back(p, towerBack, ct ? '返回征战' : '返回');
+    if (ct) applyClassicTowerBg(p, 'endless', layer);
+    p.querySelectorAll('[data-hero-event-choice]').forEach(button => {
+      button.onclick = () => {
+        const choice = (event.choices || [])[Number(button.dataset.heroEventChoice)];
+        if (!choice) return;
+        const out = Tower.resolveHeroEvent(choice.id);
+        if (!out || !out.ok) { notice(out && out.msg || '当前无法作出选择。'); return; }
+        openEndless();
+        const text = heroGrowthText(out);
+        if (text) runToast(text);
+      };
+    });
+  }
 
   /* ============================================================
    * 【U20】镜中世界 —— 整百层的「照影之境」拾取屏与黑白过场
@@ -893,20 +2102,29 @@
   }
   /** 右下角「继续挑战」：问一句要不要进镜中世界（用户口径的那句话）。 */
   function openMirrorConfirm() {
+    const carryPct = Math.round(TowerData.ENDLESS_CYCLE_DISCOUNT * 100);
     modal('镜中世界',
       '<div class="mirror-confirm"><p>无尽之塔中的魔王已被击败，继续在镜中世界进行挑战吗？</p>' +
-      '<p class="dim">第 101 层起与层数有关的机制会回到第 1 层的样子，敌人的属性继续按公式增长。</p></div>',
+      '<p>本轮只封存静态四维与暴击、吸血、减伤等数值，成为不占位的永久基础。</p>' +
+      '<p class="dim">后发制人、战斗续航、天命所归等纯局内触发不保留；旧构筑清空，成长、限次、经济与武器/技能选取强化停止，原增益重新入池；已有货币与累计战报保留。</p>' +
+      '<p class="dim">新一轮敌人的基础属性降至上一轮末值的 ' + carryPct + '%，再按第 1—100 层的相对曲线成长。层内规则与构筑从头开始。</p></div>',
       [
-        { label: '是', cls: 'gold', run: () => {
+        /* 按钮文案按 `docs/界面按钮文案规范.md`：动作标签 2~3 个汉字 —— 原来的「是 / 否」
+         * 只有一个字，`test-button-labels` 会直接判违规（也是 `test-mint-shop` 期望「进入」的那颗）。 */
+        { label: '进入', cls: 'gold', run: () => {
             const r = Tower.enterMirrorWorld ? Tower.enterMirrorWorld() : { ok: false };
             if (!r || !r.ok) notice((r && r.msg) || '现在还不能进镜中世界。');
+            else replaceTarget = null;
             openEndless();
           } },
-        { label: '否', cls: 'muted' },
+        { label: '取消', cls: 'muted' },
       ], { small: true });
   }
 
-  function openEndless() {
+  function openEndless(opts) {
+    setTowerOrigin(opts);
+    const heroEvent = typeof Tower.heroEventInfo === 'function' ? Tower.heroEventInfo() : null;
+    if (heroEvent) { openHeroEvent(heroEvent, Tower.endlessInfo()); return; }
     /* 【U18c】到这一屏就**直接触发**该播的剧情（用户口径 2026-10：不要先点一次「继续战斗」）。
      * `Tower.autoPlayStory` 是「现在该播吗」的唯一判定（判定在 tower-plot 的 `due()`）：
      * 没剧情时它什么都不做；该播时它把 id 落到 `run.story` 上 —— 所以紧接着取到的 info
@@ -917,6 +2135,13 @@
     try { if (Tower.autoPlayStory) Tower.autoPlayStory('endless'); } catch (e) { /* 判不出来就当没有 */ }
     const info = Tower.endlessInfo();
     let main, footer = null;
+    /* 这一屏有没有「右下角固定动作条」（继续战斗 / 放弃本局）：
+     * 剧情屏、拾取屏没有，不能给它们加底部留白。 */
+    let runBoard = false;
+    /* 对手数：60/70/80/90 层的第 5 场是四雄，整列会有 5 张卡；
+     * 5 张时右下角动作条会压住最后一张（四雄头像被「继续战斗」盖住），
+     * 页面要进入压缩布局，见 CSS 的 .foes-many。 */
+    let foeCount = 0;
     /* 「还没开始」= 本局还在第 1 层、一场都没打完。
      * 这一屏**不显示抽奖卷 / 铸币**：currencyHtml 在「有对局」时显示的是**本局应得**的张数
      * （ticketsOnExit），玩家会误以为是自己仓库里的存量；所以干脆整块不渲染。
@@ -944,6 +2169,9 @@
          *（用户口径：卡片尽量居中；点它之后卡片留在原位，整屏先白后黑再回到游戏界面）。
          * 剧情屏的优先级在它上面（刚刚那一段 `storyId`），所以顺序是：终章剧情 → 拾取屏。 */
         main = mirrorPickupHtml(run);
+      } else if (run.phase === 'mirror' && !pendingMilestone &&
+        Tower.canSettleEndlessVictory && Tower.canSettleEndlessVictory()) {
+        return openEndlessSummary(Tower.previewEndlessSummary('win'));
       } else {
       const nextLabel = run.choices ? '先选一张增益'
         : run.phase === 'shop' ? (run.mintShop ? '进入铸币商店' : '进入试炼商店')
@@ -959,6 +2187,7 @@
         : Tower.preview(run.layer, run.salt, true);
       const clearing = (run.phase === 'shop' || run.phase === 'checkpoint' || run.phase === 'sacrifice' || run.phase === 'mirror') && run.finished && run.finished.layer === run.layer;
       const beatenCount = clearing ? foes.length : Math.max(0, (run.battleNo || 1) - 1);
+      foeCount = foes.length;
       const foeRows = foes.map((b, i) =>
         '<li class="' + (b.elite ? 'elite ' : '') + (b.patrol ? 'patrol ' : '') + (b.squirrel ? 'squirrel ' : '') +
         (i < beatenCount ? 'beaten' : '') +
@@ -983,6 +2212,7 @@
       /* 顶栏：标题 → 试炼币/抽奖卷 → 分数框 → 右边缘的三个药丸槽（等腰三角摆放）。
        * 血量紧贴标题下方（分数已经挪进顶栏，所以这里整体上提），字号与血条都放大一档；
        * 「继续战斗」在右下角，「放弃本局」更小、压在它左边偏下。 */
+      runBoard = true;
       main = '<div class="endless-run">' +
         /* 右上角：药丸槽 + 试炼币/抽奖卷 + 分数框（横向一行，位置不变）。
          * 本局还没打完第一场时不放货币条（见 notStarted 的说明），只留分数框。
@@ -991,7 +2221,7 @@
         '<div class="endless-topright">' + (notStarted ? '' : currencyHtml('endless')) +
         '<span class="endless-score-box"><i>分数</i><b>' + run.score + '</b></span></div>' +
         '<div class="endless-left">' +
-        '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' + run.layer + ' 层' +
+        '<div class="endless-title-row"><h2 class="tower-title">' + (run.ruleset === 'hero' ? '英雄剧本' : '无尽塔') + ' · 第 ' + run.layer + ' 层</h2>' +
         '</div>' +
         carryBar(run.curHp, run.curMaxHp, '血量', 'endless-hp', hpTip(run)) +
         /* 环境词缀（唯一常驻负面机制）：
@@ -1018,7 +2248,7 @@
                 esc(d.short || d.hero || '大侠') + esc(d.name || '削弱') + '<i>本层</i></span>').join('') + '</div>'
             : '') +
         choicesHtml + buffPanelsHtml('endless') + '</div>' +
-        '<div class="endless-foes">' +
+        '<div class="endless-foes' + (foeCount >= 5 ? ' foes-many' : '') + '">' +
         '<ol class="tower-plan vertical">' + foeRows + '</ol></div></div>' +
         '<div class="endless-actions tower-actions">' +
         '<span class="endless-action-btns">' +
@@ -1029,7 +2259,7 @@
       /* 还没开始（没有进行中的对局）：这一屏也**不显示抽奖卷 / 铸币**，
        * 下方那行「现有抽奖卷 X 张」一并去掉 —— 只留「开始冲塔」一个按钮。
        * 想看仓库抽奖卷总数请去「每日幸运抽奖」页（那边的口径就是仓库存量）。 */
-      main = '<h2 class="tower-title">无尽模式</h2>' +
+      main = '<h2 class="tower-title">无尽塔</h2>' +
         '<div class="tower-stats">历史最高 <b class="gold-text">' + info.best + '</b> 分 · 本周最高 ' + info.weekBest + ' 分 · 最深 ' + info.bestLayer + ' 层</div>' +
         /* 【2026-10 用户口径】开局页**只留增益图鉴与敌人图鉴**：原来这里还有两块文字 ——
          * ①「敌人成长 ×N」刻度行（foeScaleChip，第 1 层 ×1 那把刻度）；
@@ -1038,25 +2268,40 @@
          * 不占开局页版面）。别再往这一屏加规则文字 —— 用户要的就是「buff + 敌人图鉴」。 */
         buffCatalogHtml() + bossCatalogHtml();
       footer = '<div class="tower-actions tower-footer">' +
-        /* 2026-10 用户口径：这一颗按钮叫「开始攀登」（原来叫「开始冲塔」）。 */
+        /* 2026-10 用户口径：这一颗按钮叫「开始攀登」（原来叫「开始冲塔」）。
+         * 左边的剧本选择决定它开哪一局：默认剧本 = 常规无尽塔；英雄剧本 = 英雄准备页。 */
+        (info.lastSummary ? C().btn('上局战报', 'last-summary', 'muted') : '') +
+        scriptPickerHtml() +
         C().btn('开始攀登', 'fight', 'gold') + '</div>';
     }
     /* 刚播完剧情 → 整页带一个淡入类（【U18】不要硬切）。
      * ⚠️ 动画**只作用在 .tower-main**（见 CSS）：塔身不参与，否则左侧塔 UI 会跟着闪一下。 */
     const fadeIn = TowerPlot.takeFadeIn();
-    const content = '<div class="tower-page' + (footer ? ' has-footer' : '') + (fadeIn ? ' tower-fade-in' : '') + '">' +
+    const content = '<div class="tower-page' + (runBoard ? ' endless-page' : '') +
+      (footer ? ' has-footer' : '') + (fadeIn ? ' tower-fade-in' : '') + '">' +
       towerVisual(info.run ? info.run.layer : 1, 0, 'endless') +
       '<div class="tower-main">' + main + '</div>' + (footer || '') +
       /* 【2026-10 用户口径】剧情 / 挑战模式开关**一直挂在塔的正下方**（绝对定位在页面左下角，
-       * 也就是塔身那一列的下方）—— 不要塞进「放弃本局 / 继续战斗」那一行。 */
-      TowerPlot.modeButtonHtml() + '</div>';
-    const p = C().page('challenge', 'stages', content, { cls: 'tower-board' });
+       * 也就是塔身那一列的下方）—— 不要塞进「放弃本局 / 继续战斗」那一行。
+       * 英雄模式在它右边再挂一颗小全身照：点开看勇者状态，替代原来那块「本局英雄」信息窗。 */
+      TowerPlot.modeButtonHtml() + heroPortraitButtonHtml(info.run) + '</div>';
+    const ct = classicTower();
+    const p = C().page('challenge', 'stages', content, ct
+      ? { cls: 'tower-board', noTabs: true, noFooter: true, pageClass: 'classic-tower', above: classicTowerBar() }
+      : { cls: 'tower-board' });
     /* 【2026-10 用户口径】剧情页文字太长时要能自动下翻：整页重画会把文字区的滚动位置
      * 归零，而这一屏可能已经打完（没有下一次打字 tick 来带滚动），所以在画完之后同步补一次。 */
     if (typeof TowerPlot.afterRender === 'function') TowerPlot.afterRender();
     bindTips(p);
-    if (info.run) fillFoeArt(p, Tower.planInfo ? Tower.planInfo('endless') : Tower.preview(info.run.layer, info.run.salt, true));
-    back(p, backToStages);
+    if (info.run) {
+      const pv = Tower.planInfo ? Tower.planInfo('endless') : Tower.preview(info.run.layer, info.run.salt, true);
+      fillFoeArt(p, pv); fillClassicFoeArt(p, pv); fillClassicCampaignArt(p, pv);
+      if (info.run.ruleset === 'hero' && info.run.hero) {
+        paintHeroArt(find(p, '[data-hero-portrait]'), info.run.hero.appearance, { label: '勇者', pad: 5, zoom: 1.04 });
+      }
+    }
+    back(p, towerBack, ct ? '返回征战' : '返回');
+    if (ct) applyClassicTowerBg(p, 'endless', info.run ? info.run.layer : 1);
     /* 【2026-10 用户口径】剧情屏**没有「继续」按钮了**：点屏幕任意位置推进
      *（语义就是 `TowerPlot.next()` —— 正在打字时点一下＝立刻补完这一行，打完了再点＝下一行）。
      * `TowerPlot.showing()` 同时覆盖「剧情屏」与「停留一下」的提示屏（第一次失去烙印）。
@@ -1071,6 +2316,31 @@
     }
     /* 【U18b】左下角那颗按钮：剧情模式 ↔ 挑战模式，切完立刻重画这一屏。 */
     on(p, 'story-mode', () => { Tower.setStoryEnabled(!Tower.storyEnabled()); openEndless(); });
+    on(p, 'hero-status', () => openHeroStatus());
+    on(p, 'last-summary', () => openEndlessSummary(info.lastSummary));
+    /* 剧本选择：展开/收起；选中哪一档只重画这一屏，「开始攀登」再按它分流。
+     * 这里全部做能力判断 —— 无头回归里的页面桩没有 querySelectorAll / hidden。 */
+    const scriptPicker = p.querySelector ? p.querySelector('[data-script-picker]') : null;
+    if (scriptPicker && scriptPicker.querySelector) {
+      const trigger = scriptPicker.querySelector('[data-action="script-toggle"]');
+      const menu = scriptPicker.querySelector('.script-menu');
+      if (trigger && menu) {
+        trigger.onclick = (ev) => {
+          if (ev && ev.stopPropagation) ev.stopPropagation();
+          const open = menu.hidden !== false;
+          menu.hidden = !open;
+          trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        };
+      }
+      const options = scriptPicker.querySelectorAll ? scriptPicker.querySelectorAll('[data-script]') : [];
+      options.forEach((el) => {
+        el.onclick = (ev) => {
+          if (ev && ev.stopPropagation) ev.stopPropagation();
+          endlessScript = el.getAttribute('data-script') === 'hero' ? 'hero' : 'default';
+          openEndless();
+        };
+      });
+    }
     on(p, 'fight', () => {
       if (info.run) {
         if (info.run.choices) { notice('先在下面选一张增益（休整点）。'); return; }
@@ -1085,13 +2355,10 @@
         fight('endless');
         return;
       }
-      const started = Tower.startEndlessRun();
-      if (!started.ok) { notice(started.msg); return; }
-      /* 【2026-10 用户口径】「开始攀登」**先进主界面**（不直接开第一场）：
-       * 给这一局挂上开场剧情 → 这一屏进剧情展示模式；剧情播完回到正常主界面，
-       * 玩家自己按「继续战斗」开打。**挑战模式**下不挂剧情，直接就是主界面。 */
-      if (Tower.storyEnabled()) Tower.setRunStory('endless', 'intro');
-      openEndless();
+      /* 剧本分流（2026-10 用户口径）：默认剧本直接开常规无尽塔；
+       * 英雄剧本先过「勇者准备」页，点那里的「开始挑战」才真正开局。 */
+      if (endlessScript === 'hero') { openHeroSetup(); return; }
+      beginEndlessRun();
     });
     p.querySelectorAll('[data-choice]').forEach((el) => {
       el.onclick = () => {
@@ -1120,8 +2387,10 @@
     if (info.run && info.run.pendingPick) setTimeout(() => openPickBuff(info.run.pendingPick), 60);
     /* 过程提示（「碎掉的烙印失效」这类）：**剧情屏上不飘** —— 整屏是剧情，
      * 飘字飘在它后面既看不到又浪费；留到剧情播完回主界面那次重画再飘。
-     * 第一次失去烙印那一条会走 `hold`（停久一点），见 runToast / 【U18c】。 */
-    if (!TowerPlot.showing()) flushRunToasts();
+     * 第一次失去烙印那一条会走 `hold`（停久一点），见 runToast / 【U18c】。
+     * 成就提示是另一条队列（对象 → 顶部成就条）；先冲过程飘字，它会顺手把旧档里
+     * 混在 pendingToasts 的成就对象迁到成就队列，紧接着的 flushPendingAchievements 再取走。 */
+    if (!TowerPlot.showing()) { flushRunToasts(); flushPendingAchievements(); }
     /* 20 起每 10 层：出商店后必须放弃一个永久增益（不可取消）。
      * 【U18c】但**献祭前要先播剧情**（第 20 层那一段：「石门天平倾斜 → 苍老的声音」）——
      * 剧情屏上不能弹这个窗，否则剧情和弹窗叠在一起。剧情播完回主界面时这里会再跑一次。 */
@@ -1159,17 +2428,22 @@
         , [
         { label: '放弃', cls: 'muted', run: () => {
             const res = Tower.abandon('endless');
-            syncTickets(); openEndless();
-            /* 结算提示：本层应得的那一份 + 铸币折现的那一份，分别说清楚。 */
-            const msgs = [];
-            if (res && res.layerTickets > 0) msgs.push('按第 ' + res.layer + ' 层结算：抽奖卷 +' + res.layerTickets);
-            if (res && res.retryLeft > 0) msgs.push(res.retryMsg);
-            if (msgs.length) msgs.push('本局共 +' + res.tickets + ' 张');
-            if (msgs.length) runToast(msgs.join('；'));
+            if (!res || !res.ok) { notice('当前无法结算，请先完成正在进行的战斗。'); return; }
+            settleResult(res);
           } },
         { label: '继续冲塔', cls: 'gold' },
       ], { small: true });
     });
+  }
+
+  function beginEndlessRun(opts) {
+    const options = opts && opts.ruleset === 'hero' ? opts : null;
+    if (!options) endlessScript = 'default';
+    const started = options ? Tower.startEndlessRun(options) : Tower.startEndlessRun();
+    if (!started.ok) { notice(started.msg); return false; }
+    if (Tower.storyEnabled()) Tower.setRunStory('endless', 'intro');
+    openEndless();
+    return true;
   }
 
   /* ============================================================
@@ -1217,12 +2491,19 @@
     const skipAllowed = Tower.skipPlaybackAllowed(mode, layerNow);
     try {
       Promise.resolve(Main.startBattle(nx.foe, {
-        region: nx.region, kind: mode, useProps: false, hpRatio: nx.hpRatio, adjustMe: nx.adjustMe,
+        region: nx.region, kind: mode, useProps: false,
+        ...(nx.fighter ? { fighter: nx.fighter, hpRatio: 1 } : { hpRatio: nx.hpRatio, adjustMe: nx.adjustMe }),
         debuffs: nx.debuffs || [],
         // boss 机制：贴一条在战斗画面里（进层预告 / 选 buff 页都读过，这里是备忘）
         trial: nx.info && nx.info.mechDesc ? { text: nx.info.mechDesc } : null,
         // 塔里倍速可以到 3×（普通战斗只到 2×，见 main.js 的 startBattle）
         allowSkip: skipAllowed, speedToggle: true, speedMax: 3,
+        /* 经典塔：胜利后不展示原版战果 CG。
+         * 挑战塔保持原口径（只有经典村庄-征战入口藏，关卡页入口仍给原版战果页）；
+         * **无尽塔不管从哪进都不要** —— 打完一场直接回塔页，不要那张全屏胜利图
+         *（用户 2026-10 口径：「去掉无尽塔中战斗胜利后的那个胜利弹窗」）。
+         * 注意 `hideVictoryCg` 只影响**胜利**：失败面板照旧（见 SfFight 的 `perform`）。 */
+        hideVictoryCg: mode === 'endless' || classicTower(),
         // 塔的产出全部由状态机结算（松果/压缩碎片/抽奖卷），关掉战斗飘物，
         // 否则免门票的无尽模式可以无限刷飘物松果与经验。
         collectDrops: false,
@@ -1251,6 +2532,8 @@
   }
   function afterBattle(mode, rw) {
     flushAchievements(rw.achievements);      // 「死而复生」这类在战斗结算时算出的成就
+    const growthText = heroGrowthText(rw.heroGrowth);
+    if (growthText) runToast(growthText);
     /* 「巡逻」/「觐见魔王」输了**不走失败结算**（2026-10 第六十五批用户口径）：
      * 状态机那边已经把它标成 `patrol: true` 并挂上了 `phase = 'patrolToll'`，
      * 这里必须**先**处理它 —— 否则会掉进下面的 `!rw.win` 分支，弹出失败结算
@@ -1277,7 +2560,7 @@
           '<p>本层重新开始 —— 回到第 <b>1</b> 场再打一遍。</p>' +
           '<p class="dim">手上的增益、试炼币、分数与血量都<b>原样保留</b>，敌人的数值也不会提升' +
           '（第 ' + lr.layer + ' 层 · 第 ' + lr.battleNo + '/' + lr.battleCount + ' 场的收益照常入账）。</p></div>',
-          [{ label: '回到本层开头', cls: 'gold', run: () => openEndless() }], { small: true });
+          [{ label: '回到开头', cls: 'gold', run: () => openEndless() }], { small: true });
         return;
       }
       if (rw.milestone) {
@@ -1401,10 +2684,13 @@
       ? '<div class="result-lines lost">跳过战斗：随机少收了 ' +
         lostList.map((p) => esc(p.name) + ' ×' + p.count).join('　') + '</div>'
       : '';
+    const blackLine = !State.blackGearEnabled() ? '' : ((rw.black && rw.black.cards)
+      ? '<div class="result-lines">黑装：黑色卡片 ×' + rw.black.cards + (rw.blackBox ? '、黑装自选箱 ×' + rw.blackBox : '') + '</div>'
+      : (rw.blackBox ? '<div class="result-lines">黑装：黑装自选箱 ×' + rw.blackBox + '</div>' : ''));
     modal('层数通关', '<div class="result-box"><div class="result-title win">第 ' + rw.layer + ' 层通关！</div>' +
       '<div class="result-lines">金松果 +' + rw.gold + '</div>' +
       (rw.drop ? '<p>获得 ' + esc(rw.drop.name) + ' ×' + rw.drop.count + '</p>' : '') +
-      prizeLine + lostLine +
+      prizeLine + lostLine + blackLine +
       '<p class="small-label">层数 +1，下一层对手更强、松果更多。</p></div>',
       [{ label: '继续爬塔', cls: 'gold', run: openTower }, { label: '返回', run: () => C().home() }], { small: true });
     // 经验/升级提示走和战斗拾取同一套 UI（追加到上面这个弹窗里）
@@ -1708,9 +2994,15 @@
   function milestoneModal(rw, next) {
     const m = rw.milestone;
     const icon = C().icon ? C().icon('prop', m.propId) : '';
+    const blackLine = (!State.blackGearEnabled() || !rw.black)
+      ? ''
+      : (rw.black.gain
+        ? '<div class="result-lines">黑装：黑色卡片 ×' + rw.black.gain + '（本周剩 ' + rw.black.left + '/' + rw.black.cap + '）</div>'
+        : '<div class="result-lines">黑装：本周黑色卡片已达上限（' + rw.black.cap + '/' + rw.black.cap + '）</div>');
     modal('第 ' + rw.layer + ' 层 · 里程碑奖励', '<div class="result-box"><div class="result-title win">再进一步</div>' +
       '<p>你爬到了第 ' + rw.layer + ' 层，结算奖励随机抽取：</p>' +
       '<p class="milestone-reward">' + icon + '<b>' + esc(m.name) + '</b> ×' + m.count + '</p>' +
+      blackLine +
       '<div class="result-lines">已放入背包（每 10 层一次）</div></div>',
       [{ label: '继续', cls: 'gold', run: next }], { small: true });
   }
@@ -1721,7 +3013,7 @@
       '<p class="gold-text">消耗 1 枚铸币，回滚到本场开始前（血量 / 试炼币 / 分数 / 增益次数全部还原），再打一次。</p>' +
       '<div class="result-lines">现有铸币 <b>' + (rw.retryLeft || 0) + '</b> 枚 · 本局分数 ' + rw.score +
       ' · 选「放弃本局」也一样按当前层应得 + 试炼币折现结算</div></div>',
-      [{ label: '用 1 枚重新挑战', cls: 'gold', run: () => {
+      [{ label: '重新挑战', cls: 'gold', run: () => {
           const r = Tower.retryBattle();
           if (!r.ok) { notice(r.msg || '回滚失败。'); endlessDefeat(rw); return; }
           reopen('endless');
@@ -1732,35 +3024,8 @@
           endlessDefeat(out);
         } }], { small: true });
   }
-  /** 本局隐藏成就汇总（结算/失败弹窗用）。没有成就就返回空串。 */
-  function achieveSummaryHtml() {
-    const info = Tower.endlessInfo();
-    const list = (info && info.run && info.run.achievements) || [];
-    if (!list.length) return '';
-    const total = list.reduce((a, x) => a + (Number(x.points) || 0), 0);
-    return '<div class="achieve-summary"><b>本局隐藏成就 ' + list.length + ' 个 · 合计 +' + total + ' 分</b>' +
-      list.map((x) => '<span>' + esc(x.name) + '<i>+' + (Number(x.points) || 0) + '</i></span>').join('') + '</div>';
-  }
-  /** 退出结算的明细文案（本层应得 + 试炼币 1:1 折现）——三条退出路径统一口径。 */
-  function settleBreakdownHtml(r) {
-    const layerT = Math.max(0, Math.floor(Number(r && r.layerTickets) || 0));
-    const coins = Math.max(0, Math.floor(Number(r && r.forfeitCoins) || 0));
-    const tokens = Math.max(0, Math.floor(Number(r && r.retryLeft) || 0));
-    const total = Math.max(0, Math.floor(Number(r && r.tickets) || 0));
-    if (!coins && !tokens) return '';
-    return '<p class="small-label">明细：本层应得 ' + layerT + ' 张' +
-      (tokens ? ' + 剩余 ' + tokens + ' 枚铸币 1:1 折现 ' + tokens + ' 张' : '') +
-      ' = <b>' + total + '</b> 张' +
-      (coins ? '（剩余 ' + coins + ' 试炼币不折现，随本局作废）' : '') + '</p>';
-  }
   function endlessDefeat(rw) {
-    modal('挑战失败', '<div class="result-box"><div class="result-title lose">倒在了第 ' + rw.layer + ' 层</div>' +
-      '<div class="result-lines">本局分数 ' + rw.score + '（历史最高 ' + rw.best + '）</div>' +
-      '<p class="gold-text">按当前进度结算：抽奖卷 +' + (rw.tickets || 0) + '（第 ' + rw.layer + ' 层应得）</p>' +
-      settleBreakdownHtml(rw) +
-      (rw.shield ? '<p class="gold-text">保底奖励：本局到达过 15 层，赠送 1 次免费抽奖（每日限 1 次）！</p>' : '') +
-      achieveSummaryHtml() + '</div>',
-      [{ label: '再来一局', cls: 'gold', run: openEndless }, { label: '返回', run: () => C().home() }], { small: true });
+    settleResult(rw);
   }
 
   /* ============================================================
@@ -1861,13 +3126,16 @@
       '<h4>出售增益（回收 40%，限次与永久都可卖）</h4>' +
       '<div class="shop-sell">' + sellRows + '</div>' +
       '</div>';
-    const p = C().page('challenge', 'stages', content, {
+    const ct = classicTower();
+    const p = C().page('challenge', 'stages', content, Object.assign({
       cls: 'tower-board',
       left: (!revisit && !shop.rest)
         ? '<span class="footer-left">' + C().btn('结算离场', 'settle', 'small gold') + '</span>' : '',
       right: '<span class="footer-right">' + C().btn(revisit || shop.rest ? '返回' : '继续挑战', 'leave', 'gold') + '</span>',
-    });
-    back(p, () => openEndless());
+    }, ct ? { noTabs: true, pageClass: 'classic-tower', homeLabel: '返回' } : {}));
+    back(p, () => openEndless(), '返回');
+    /* 商店是无尽塔里的二级页：底色调跟着本层走，别在纯色塔页里突然露出村庄底图。 */
+    if (ct) applyClassicTowerBg(p, 'endless', shop.layer);
     shop.slots.forEach((s, i) => on(p, 'buy' + i, () => {
       const r = Tower.buyShopSlot(i);
       if (r && r.needsReplace) { offerShopReplace(i, r.buff); return; }
@@ -1920,11 +3188,7 @@
     on(p, 'settle', () => {
       const out = Tower.settleFromShop();
       if (!out || !out.ok) { notice('现在还不能结算。'); return; }
-      modal('本局结算', '<div class="result-box"><div class="result-title win">见好就收</div>' +
-        '<p>抽奖卷 +<b class="gold-text">' + (out.tickets || 0) + '</b>（第 ' + out.layer + ' 层）</p>' +
-        settleBreakdownHtml(out) +
-        '<div class="result-lines">分数 ' + out.score + ' 已入账 · 历史最高 ' + out.best + '</div></div>',
-        [{ label: '返回无尽塔', cls: 'gold', run: () => openEndless() }], { small: true });
+      settleResult(out);
     });
   }
 
@@ -2033,15 +3297,18 @@
       '</div>';
     /* boundary（E16「铸币商队」顶掉了每 5 层的结算商店）：它站在结算点上，
      * 所以补回试炼商店那一枚「结算离场」；普通铸币商店（层中偶遇）照旧没有。 */
-    const p = C().page('challenge', 'stages', content, { cls: 'tower-board',
+    const ct = classicTower();
+    const p = C().page('challenge', 'stages', content, Object.assign({ cls: 'tower-board',
       left: shop.boundary
         ? '<span class="footer-left">' + C().btn('结算离场', 'settle', 'small gold') + '</span>' : '',
-      right: '<span class="footer-right">' + C().btn('继续战斗', 'mintleave', 'gold') + '</span>' });
+      right: '<span class="footer-right">' + C().btn('继续战斗', 'mintleave', 'gold') + '</span>' },
+    ct ? { noTabs: true, pageClass: 'classic-tower', homeLabel: '返回' } : {}));
     bindTips(p);
     /* 页脚「返回」= **只是回上一页，店不收摊**（用户口径）：回到无尽首页后按钮仍写「进入铸币商店」，
      * 想好了再进来买/换/刷新都行。真正让这家店消失的只有三件事：
      * 完成一次购买、完成一次交换、或者点这里的「继续战斗」。 */
-    back(p, () => openEndless());
+    back(p, () => openEndless(), '返回');
+    if (ct) applyClassicTowerBg(p, 'endless', shop.layer);
     if (shop.boundary) bindShopSettle(p);
     shop.slots.forEach((s, i) => on(p, 'mintbuy' + i, () => {
       const r = Tower.buyMintSlot(i);
@@ -2107,26 +3374,130 @@
         '（本层应得 ' + info.ticketsNow +
         (info.retryToken ? ' + 铸币 ' + info.retryToken + ' 枚 1:1 折现' : '') + '），本局结束（分数入账）</span></div>' +
       '<div class="checkpoint-option"><b>继续挑战</b><span>撑到第 ' + info.nextCheckpoint + ' 层本层应得升到 <b class="gold-text">' + info.ticketsNext + '</b> 张（试炼币照常折现）；中途失败也按同一口径结算</span></div>' +
-      '<p class="small-label">本局分数 ' + info.score + ' · 试炼币 ' + info.coins + '（不折现，随本局作废）</p></div>',
+      '<p class="small-label">本局分数 ' + info.score + ' · 试炼币 ' + info.coins + '</p></div>',
       [
         { label: '结算离场', cls: 'gold', run: () => { const r = Tower.settleEndless(); if (r.ok) settleResult(r); else openEndless(); } },
         { label: '继续挑战', run: () => { Tower.continueEndless(); fight('endless'); } },
       ], { locked: true });
   }
   function settleResult(r) {
-    modal('结算完成', '<div class="result-box"><div class="result-title win">满载而归！</div>' +
-      '<div class="result-lines">抽奖卷 +' + r.tickets + '　本局分数 ' + r.score + '</div>' +
-      settleBreakdownHtml(r) +
-      '<p class="small-label">抽奖卷可在「每日幸运抽奖」里抵扣抽奖次数（免费次数用完后优先消耗）。</p></div>',
-      [{ label: '再来一局', cls: 'gold', run: openEndless }, { label: '去抽奖', run: () => { syncTickets();
-            if (window.ClassicExtras && ClassicExtras.lottery) ClassicExtras.lottery(); else UI.runAction('lottery'); } }, { label: '返回', run: () => C().home() }], { small: true });
+    syncTickets();
+    const summary = r && r.summary || Tower.endlessInfo().lastSummary;
+    if (summary) openEndlessSummary(summary);
+    else openEndless();
+  }
+
+  /** 战报只读取状态机的快照；打开、滚动和重看都不重新结算奖励。 */
+  function summaryNumber(value) {
+    if (value == null || !Number.isFinite(Number(value))) return '—';
+    return Math.max(0, Math.floor(Number(value))).toLocaleString('zh-CN');
+  }
+  function summaryStat(label, value, note) {
+    return '<div class="summary-stat"><span>' + esc(label) + '</span><strong>' + summaryNumber(value) +
+      '</strong>' + (note ? '<small>' + esc(note) + '</small>' : '') + '</div>';
+  }
+  function openEndlessSummary(summary) {
+    if (!summary) { openEndless(); return; }
+    hideTip();
+    const victory = summary.outcome === 'win';
+    const settled = summary.settled === true;
+    const layer = Math.max(1, Number(summary.layer) || 1);
+    const buffs = Array.isArray(summary.buffs) ? summary.buffs : [];
+    const achievements = Array.isArray(summary.achievements) ? summary.achievements : [];
+    const kinds = { permanent: '永久', limited: '限次', instant: '即时' };
+    const totals = { permanent: 0, limited: 0, instant: 0 };
+    for (const buff of buffs) if (totals[buff.kind] !== undefined) totals[buff.kind] += Math.max(0, Number(buff.count) || 0);
+    const buffTotals = Object.keys(kinds).filter(k => totals[k] > 0)
+      .map(k => kinds[k] + ' ' + summaryNumber(totals[k]) + ' 份').join(' · ');
+    const mode = summary.uiMode === 'classic' ? '经典界面' : summary.uiMode === 'modern' ? '现代界面' : '界面未记录';
+    const subtitle = victory
+      ? ('第 ' + layer + ' 层魔王已击败' + (settled ? ' · 本局已结算' : ' · 新的镜界仍在前方'))
+      : ('征途止于第 ' + layer + ' 层 · ' + (summary.reason === 'defeat' ? '战斗失利' : '离场结算'));
+    const buffRows = buffs.map(buff => {
+      const def = TowerData.BUFF_BY_ID[buff.id];
+      const desc = def ? TowerData.descOf(def, 'endless') : '';
+      const rarity = Math.max(0, Math.min(3, Number(buff.rarity) || 0));
+      return '<li class="summary-buff" data-rarity="' + rarity + '"' +
+        (desc ? ' tabindex="0" data-tip="' + esc(desc) + '"' : '') + '>' +
+        '<span class="summary-buff-name">' + esc(buff.name || (def && def.name) || buff.id) + '</span>' +
+        '<span class="summary-buff-kind">' + esc((RARITY[rarity] || '') + ' · ' + (kinds[buff.kind] || '特殊')) + '</span>' +
+        '<b class="summary-buff-count">×' + summaryNumber(buff.count) + '</b></li>';
+    }).join('');
+    const earnedAchievementPoints = item => item.earnedPoints != null ? Number(item.earnedPoints)
+      : String(item.key || '').startsWith('revive:') ? null : Number(item.points);
+    const achievementRows = achievements.map(item => {
+      const points = earnedAchievementPoints(item);
+      return '<li class="summary-achievement"><b>' + esc(item.name) + '</b><span>' +
+        (points == null ? '计分档位 ' + summaryNumber(item.points) : '+' + summaryNumber(points)) + ' 分' +
+        (item.layer ? ' · 第 ' + summaryNumber(item.layer) + ' 层' : '') + '</span></li>';
+    }).join('');
+    const allAchievementPointsKnown = achievements.every(item => earnedAchievementPoints(item) != null);
+    const achievementPoints = achievements.reduce((total, item) => total + (earnedAchievementPoints(item) || 0), 0);
+    const rewardNote = '层数奖励 ' + summaryNumber(summary.layerTickets) + ' 张' +
+      (summary.bonusTickets > 0 ? ' · 百层胜利额外 ' + summaryNumber(summary.bonusTickets) + ' 张' : '') +
+      (summary.mintConverted > 0 ? ' · 铸币折券 ' + summaryNumber(summary.mintConverted) + ' 张' : '');
+    const notes = [
+      settled ? '抽奖卷已放入背包，可用于每日幸运抽奖。' : '继续挑战将保留本局进度；离场时一次领取奖励。',
+      summary.bonusTickets > 0 ? '在整百层胜利后选择离场，额外获得 ' + summaryNumber(summary.bonusTickets) + ' 张抽奖卷；继续挑战则不领取。' : '',
+      summary.mintForfeited > 0 ? '铸币折券上限 ' + summaryNumber(summary.mintTicketCap) + ' 枚，超出 ' + summaryNumber(summary.mintForfeited) + ' 枚不再折券。' : '',
+      summary.trialCoinsLeft > 0 && settled ? '离场剩余 ' + summaryNumber(summary.trialCoinsLeft) + ' 枚试炼币随本局结束，不折券。' : '',
+      summary.freeDraws > 0 ? '保底奖励：另获 ' + summaryNumber(summary.freeDraws) + ' 次免费抽奖。' : '',
+      summary.complete === false ? '本局开始于战报记录启用之前，未记录的累计项显示为「—」，增益仅列出可确认的记录。' : '',
+    ].filter(Boolean).map(note => '<p>' + esc(note) + '</p>').join('');
+    const actions = settled
+      ? C().btn('返回', 'summary-lobby', 'muted') + C().btn('去抽奖', 'summary-lottery', '') + C().btn('再次攀登', 'summary-restart', 'gold')
+      : C().btn('领奖离场', 'summary-settle', 'muted') + C().btn('继续挑战', 'summary-continue', 'gold');
+    const report = '<article class="endless-summary" data-outcome="' + (victory ? 'win' : 'lose') + '" aria-label="无尽塔本局战报">' +
+      '<header class="summary-heading"><span class="summary-kicker">无尽之塔 · ' + (victory ? '胜利结局' : '未竟结局') + '</span>' +
+      '<h2 class="summary-ending">' + (victory ? '破晓登临' : '星火未熄') + '</h2>' +
+      '<p class="summary-subtitle">' + esc(subtitle) + '</p><span class="summary-mode">' +
+      (summary.ruleset === 'hero' ? '英雄剧本 · ' : '') + mode + '</span></header>' +
+      '<div class="summary-score"><span>本局总分</span><strong>' + summaryNumber(summary.score) + '</strong>' +
+      '<small>' + (settled ? '本次攀登的最终得分' : '截至本次百层胜利的累计得分') + '</small></div>' +
+      '<div class="summary-body"><section class="summary-section"><h3 class="summary-section-heading">增益足迹<small>' +
+      (summary.complete === false ? '已记录 ' : '共 ') + summaryNumber(buffs.length) + ' 种 · ' + summaryNumber(summary.buffCount) + ' 份</small></h3>' +
+      (buffRows ? '<ul class="summary-buffs">' + buffRows + '</ul>' : '<p class="summary-empty">' +
+        (summary.complete === false ? '旧局未保留可确认的增益记录。' : '本局尚未获得增益。') + '</p>') +
+      (buffTotals ? '<p class="summary-buff-totals">' + esc(buffTotals) + ' · 包含已用尽、售出及献祭的增益</p>' : '') + '</section>' +
+      '<section class="summary-section"><h3 class="summary-section-heading">攀登战绩</h3><div class="summary-stats">' +
+      summaryStat('击败敌人', summary.enemiesDefeated, '本局胜利场次') +
+      summaryStat('通关层数', summary.layersCleared, '实际完成层数') +
+      summaryStat('最深抵达', Math.max(layer, Number(summary.bestLayer) || 0), '层') +
+      summaryStat('累计铸币', summary.mintEarned, '累计获得，含已使用') +
+      summaryStat('累计试炼币', summary.trialCoinsEarned, '累计获得，含已使用') +
+      summaryStat(settled ? '获得抽奖卷' : '离场可得抽奖卷', summary.tickets, rewardNote) + '</div></section>' +
+      '<section class="summary-section"><h3 class="summary-section-heading">隐藏成就<small>' + summaryNumber(achievements.length) +
+      ' 项' + (achievements.length && allAchievementPointsKnown ? ' · +' + summaryNumber(achievementPoints) + ' 分' : '') + '</small></h3>' +
+      (achievementRows ? '<ul class="summary-achievements">' + achievementRows + '</ul>' : '<p class="summary-empty">本局暂无已记录的隐藏成就。</p>') +
+      '</section><div class="summary-notes">' + notes + '</div></div><footer class="summary-actions">' + actions + '</footer></article>';
+    const ct = classicTower();
+    const content = '<div class="tower-page endless-summary-page">' + towerVisual(layer, 0, 'endless') +
+      '<div class="tower-main">' + report + '</div></div>';
+    const p = C().page('challenge', 'stages', content, ct
+      ? { cls: 'tower-board', noTabs: true, noFooter: true, pageClass: 'classic-tower', above: classicTowerBar() }
+      : { cls: 'tower-board' });
+    if (ct) applyClassicTowerBg(p, 'endless', layer);
+    back(p, towerBack, ct ? '返回征战' : '返回');
+    bindTips(p);
+    on(p, 'summary-lobby', () => openEndless());
+    on(p, 'summary-restart', () => summary.ruleset === 'hero' ? openHeroSetup() : beginEndlessRun());
+    on(p, 'summary-lottery', () => {
+      syncTickets();
+      if (window.ClassicExtras && ClassicExtras.lottery) ClassicExtras.lottery(); else UI.runAction('lottery');
+    });
+    on(p, 'summary-continue', openMirrorConfirm);
+    on(p, 'summary-settle', () => {
+      const out = Tower.settleEndlessVictory();
+      if (!out || !out.ok) { notice(out && out.msg || '现在还不能领取奖励。'); return; }
+      settleResult(out);
+    });
   }
 
 
   /* ============================================================
    * 【U17】模块导出 —— window.TowerUI
    * ============================================================ */
-  window.TowerUI = { openTower, openEndless, openMintShop, openShop, openPickBuff, openPatrolToll, openPatrolDiscard };
+  window.TowerUI = { openTower, openEndless, openHeroSetup, openHeroStatus, openMintShop, openShop, openPickBuff, openPatrolToll, openPatrolDiscard };
   /* 【U18】把「剧情播完之后回主界面」这条线接给 tower-plot.js ——
    * 剧情模块不直接引用 tower-ui（两个文件互不 require），只认这一根线。 */
   if (window.TowerPlot && TowerPlot.setMainOpener) TowerPlot.setMainOpener(openEndless);

@@ -56,35 +56,31 @@
     masterHpRatio: 0.50, masterChance: 35,
     /* 出手时的「二次使用」权重（%）。做法是两层池子：本场没用过的武器/技能优先，
      * 只有这个权重才回头用旧的那把/那个，所以「用过的」实际出场率被明显压低。
-     * 2026-10 用户口径，简化为三档（不再按技能逐个分档）：
-     *   · 武器：用过之后一律 repeatWeapon（30）；
-     *   · 来点松果（17）/ 野球拳（12）：第 1 次用过后 repeatSpecialFirst（15），
-     *     第 2 次及以后 repeatSpecialAgain（5，到底不再下降）；
-     *   · 其余技能：用过之后一律 repeatSkill（20）。
-     * 「刚用过的那一个再 ×LAST_PENALTY(0.3)」对以上三档都生效。 */
-    repeatWeapon: 30,
-    repeatSkill: 20,
-    repeatSpecialFirst: 15, repeatSpecialAgain: 5,
+     * 2026-10 用户新口径（第二百四十九批）：
+     *   · 普通武器：用过之后一律 repeatWeapon（8）；
+     *   · 投掷武器：前两次使用 100，第三次及以后 repeatWeapon（8）；
+     *   · 其余主动技能：第二次及以后一律 repeatSkill（5）；来点松果 17 二次及以后为 1；
+     *   · 不再叠加「上一回合刚用过 ×0.3」的额外惩罚 —— 新表要求权重就是表里的数。 */
+    repeatWeapon: 8,
+    repeatSkill: 5,
+    repeatSpecialFirst: 5, repeatSpecialAgain: 5,
     /* 徒手攻击的基准权重：与武器/技能的候选权重放进同一个池子竞争（不再是固定百分比）。
-     *   · 持有的武器/技能越多 → 工具权重总和越大 → 徒手占比越低；
-     *   · 全部用过一遍之后工具权重整体掉到 5~30 → 徒手占比自动抬高；
-     *   · 只有一个主动技、且已经用过时，它的权重降到二次使用概率，
-     *     不会再出现「类型抽中技能 → 只能放它」的强制复用。
-     * 2026-10 用户口径：基准**从 30 提到 50**（徒手更常见），并且加一条**份额保底**：
-     * 工具权重再大，徒手的最终占比也不低于 minCommonShare（5%）——
-     * 需要徒手权重 ≥ 工具权重 × 0.05/0.95 才够，见 commonWeightFor()。 */
-    commonAttackWeight: 50,
+     * 2026-10 用户新口径：**100**；保留 5% 的份额保底（只在工具权重极大时兜底）。 */
+    commonAttackWeight: 100,
     minCommonShare: 0.05,
     /* 三侠等纯 NPC 分支（没有武器池）的固定档位：30% 技能 / 70% 普攻。 */
     npcSkillChance: 30,
-    /* 绝对防御的触发曲线（2026-10 用户口径「中幅提高二次与多次触发」，需求140）：
-     *   首次 22%，之后 17 / 13 / 10 / 8 / 6 / 6 …（×0.78 慢衰减，地板 6）。
-     *   旧值是 13 / ×0.7 / 地板 2（22/13/9/6/4/3/2…）。
-     *   ★ 投掷类攻击**完全不触发**绝对防御（见 dmgReduce），所以这条曲线只由
-     *   近战 / 徒手 / 技能推进 —— 扔过来的武器不会把计数推上去、不降权。 */
-    jueDuiChance: 22, jueDuiAgain: 17,
-    jueDuiDecay: 0.78, jueDuiMin: 6,
-    shellFirst: 35, shellAgain: 20,
+    /* 绝对防御（16）与龟甲术（7）是**受击自动触发**、不进出手池的被动：
+     * 下表是每次受击的触发概率（%），按技能等级与「本场第几次触发」取。
+     *   绝对防御 1~10 级：首次 20,20.5,…,24.5；之后 0.5
+     *            11~15 级：首次 24.5；第二次 5,10,15,20,24；第三次及以后 0.5
+     *   龟甲术   1~10 级：首次 20,20.5,…,24.5；之后 1
+     *            11~15 级：首次 24.5；第二次 5,10,15,20,24；第三次及以后 1
+     * 投掷类攻击完全不触发绝对防御（见 dmgReduce）。 */
+    jueDuiFirstBase: 20, jueDuiFirstStep: 0.5, jueDuiRepeat: 0.5,
+    jueDuiTrueFirst: 24.5, jueDuiTrueSecond: 5, jueDuiTrueSecondStep: 5, jueDuiTrueSecondMax: 24, jueDuiTrueRepeat: 0.5,
+    shellFirstBase: 20, shellFirstStep: 0.5, shellRepeat: 1,
+    shellTrueFirst: 24.5, shellTrueSecond: 5, shellTrueSecondStep: 5, shellTrueSecondMax: 24, shellTrueRepeat: 1,
     xhSpeedShare: 0.35,
     skillCooldown: 2,
     /* 题面·熔核·炽壳：**每过一回合**叠一层减伤（+10%/层），第 8 回合起封顶 70%。
@@ -104,13 +100,66 @@
    * 所以出招时只从这张表里挑：数据写错的技能会被自动跳过，不会再空过。
    * ============================================================ */
   const ACTIVE_SKILLS = [8, 12, 14, 15, 17, 18, 23];
+  /* ============================================================
+   * 幻兽（原版 `petsInfo` / `petsSkills`，见 MainMovie.as:19146-19148）
+   * ------------------------------------------------------------
+   * 原版客服端只负责**播**服务端下发的 `attackType 4` 回合（`Squirrel.attack` 的
+   * `attacks.gotoAndStop(29 + weaponSkillId)`），真正的触发与数值在服务端。
+   * 这里按已提交的 `petsSkills` 文案与「幻兽技能」表的 X 初始值 / 每级成长值重建：
+   *   · 行动时触发：1 / 6 / 7 / 8 / 9 / 10 / 11；
+   *   · 装死后触发：2 / 4；
+   *   · 被动：3（低血增伤）/ 5（闪避回血）。
+   * 每只幻兽的 `maxTimes` = 1 表示**一场一次**，-1 表示可反复（只有 3 / 5 两个被动）。
+   * 触发成功后统一发一条 `action:'pet'` 的独立回合，交回放层按 `29 + petId` 播原版动画；
+   * 它不占 60 手行动上限（`isRound:0`），与原版 `attackPetIds` 的「协战」语义一致。
+   * ============================================================ */
+  const PET_INFO_BY_ID = (() => {
+    const map = new Map();
+    const list = (window.GData && Array.isArray(GData.PETS)) ? GData.PETS : [];
+    for (const p of list) map.set(Number(p.id), p);
+    return map;
+  })();
+  const petRule = (skillId) => {
+    const rules = window.GData && GData.PET_SKILL_RULES;
+    return (rules && rules[Number(skillId)]) || null;
+  };
+  const petValue = (skillId, level) => {
+    if (window.GData && GData.petSkillValue) return GData.petSkillValue(skillId, level);
+    const r = petRule(skillId);
+    return r ? r.base + r.step * (Math.max(1, Number(level) || 1) - 1) : 0;
+  };
+  const petTrigger = (skillId, level) => {
+    if (window.GData && GData.petSkillTrigger) return GData.petSkillTrigger(skillId, level);
+    const r = petRule(skillId);
+    return r ? (r.trigger == null ? petValue(skillId, level) : r.trigger) : 0;
+  };
+  /** 把调用方给的幻兽列表（State.petTeam / randomPetLoadout）收成 sim 只认的字段。 */
+  function normalizePetTeam(list) {
+    const out = [];
+    for (let i = 0; i < (Array.isArray(list) ? list.length : 0) && out.length < 3; i++) {
+      const p = list[i];
+      if (!p || typeof p !== 'object') continue;
+      const info = PET_INFO_BY_ID.get(Number(p.id)) || {};
+      const skillId = Number(p.skillId) || Number(info.skillId) || 0;
+      if (!skillId) continue;
+      out.push({
+        slot: out.length, id: Number(p.id) || Number(info.id) || 0,
+        name: String(p.name || info.name || '幻兽'),
+        grade: Math.max(1, Number(p.grade) || Number(info.grade) || 1),
+        level: Math.max(1, Number(p.level) || 1),
+        skillId,
+      });
+    }
+    return out;
+  }
+
   /** 调试开关「无敌模式」：玩家侧不会被击倒。 */
   function godSave(def) {
     try { return !!(def && def.side === 0 && window.Debug && window.Debug.enabled('godMode')); } catch (e) { return false; }
   }
   /* 【2026-10 用户口径】「无敌模式」必须名副其实：**玩家血量计数器不受任何掉血影响**。
    * 以前只在几条主路径上兜到 1 点血，于是枯泉吸血（trialDry）、持续伤害、自伤、反伤这些
-   * 旁路照旧能把血打下去；血量掉到 1 之后，120 手超时会按**血量比例**判负 ——
+   * 旁路照旧能把血打下去；血量掉到 1 之后，60 手超时会按**血量比例**判负 ——
    * 玩家实测「开了无敌，在无尽塔里还是被打死」就是这条（塔里连战继承血量，残血进场更容易超时判负）。
    * 现在给玩家侧装一个「只增不减」的 hp 访问器：任何赋值只要比当前值小就整段丢掉（连 0 也不写进去），
    * 于是谁也打不动它，超时永远是我方血量比例 ≥ 对方 → `winner` 判我方胜。
@@ -183,11 +232,21 @@
      * 顺带也修掉「玩家与魔王的复活次数互相消耗」那个老坑（第七十四批的注释里提过，但只拷了当时的镜像包）。
      * 只深拷这一处：sim 不写别的 mod 键，整包深拷会白白拖慢每场战斗的构建。 */
     const mods = f.mods && typeof f.mods === 'object' ? cloneModsForBattle(f.mods) : null;
+    /* 幻兽：面板加成已由 State.applyPetBonuses 落到力/敏/速/血上，这里只接技能。
+     * 3 / 5 是常驻被动，先在这里折成两个只读数值；其余技能由主循环按回合触发。 */
+    const pets = normalizePetTeam(f.pets);
+    let petRagePct = 0, petDodgeHeal = 0;
+    for (const p of pets) {
+      const rule = petRule(p.skillId);
+      if (!rule) continue;
+      if (rule.kind === 'rage') petRagePct = Math.max(petRagePct, petValue(p.skillId, p.level));
+      else if (rule.kind === 'dodgeHeal') petDodgeHeal += petValue(p.skillId, p.level);
+    }
     return {
       side, name: f.name, level: stat(f.level, 1), npcType: f.npcType || null,
       power: stat(f.power, 1), agility: stat(f.agility, 1), speed: stat(f.speed, 1),
       maxHp: fullHp, hp: Math.max(1, Math.min(stat(f.hp, 1), fullHp)),
-      weapons, skills, usedWeapons: {}, usedSkills: {}, /* 每个技能「本场用过几次」——野球拳（12）的快速衰减要用它。 */
+      weapons, skills, usedWeapons: {}, weaponUseCount: {}, usedSkills: {}, /* 每个技能「本场用过几次」——野球拳（12）的快速衰减要用它。 */
       skillUseCount: {}, lastWeaponId: null, lastSkillId: null,
       /* 完整技能表的稳定顺序（skills 是「id → 等级」的对象，不是数组！）。
        * 原版这里写的是 skills[id] 下标访问，永远取不到东西 —— 所以固定循环的技能
@@ -211,11 +270,21 @@
       baseStats: Object.fromEntries(['power', 'agility', 'speed'].map((key) => [key, stat(f.baseStats?.[key], stat(f[key], 1))])),
       // 战斗内状态
       ap: 0, restNext: false, pendingWeapon: null, stun: 0, silence: 0, disarm: 0, shellCharges: 0,
-      mustHitNext: !!(mods && mods.mustHitFirst), stripTurns: 0, usedFakeDie: false, usedMaster: false, usedShell: false, usedCosmos: false, usedSnack: false, jueDuiCount: 0,
+      mustHitNext: !!(mods && mods.mustHitFirst), stripTurns: 0, usedFakeDie: false, usedMaster: false, shellCount: 0, usedCosmos: false, jueDuiCount: 0,
       // 题面·枯泉：治疗量倍率（0 = 完全封疗）
       /* 治疗量倍率（塔侧赛前写入：涌泉烙印 C52 按层给 +10%/层，损毁层 +20%）。
        * 战斗中被「枯泉」这类机制清零 = 完全封疗。所有治疗都走 healOf()，所以只要这里读进来就全生效。 */
       healMul: Number.isFinite(Number(f.healMul)) && Number(f.healMul) >= 0 ? Number(f.healMul) : 1,
+      /* 幻兽（见本文件 ACTIVE_SKILLS 下面的说明）。`petUsed` 按队伍槽位记「一场一次」；
+       * `petSeal*` 是**对手**的整蛊专家封住的武器/技能；`petWeakPct` 是**自己**中的虚弱
+       * （受到武器攻击额外承受的百分比）；`petDotPlus` / `petHealCut` 是中了张牙舞爪 /
+       * 三聚氰胺之后的持续标记；`petNextCrit` 是打兴奋剂给的下一次必暴。 */
+      pets, petRagePct, petDodgeHeal, petUsed: {},
+      petWeakPct: 0, petDotPlus: false, petHealCut: false, petNextCrit: false,
+      petSealWeapons: {}, petSealSkills: {},
+      /* 装死之后要补发的幻兽协战（逆向推倒 / 回光术），在下一次循环开头结算。 */
+      petAfterFakeDie: false,
+      healMulBase: Number.isFinite(Number(f.healMul)) && Number(f.healMul) >= 0 ? Number(f.healMul) : 1,
       /* 秘技通神（C33）的「该技能触发概率 +N%」专用通道：{ 技能id: 比例 }。
        * 与 effects 分开，避免和装备词条/武器效果槽的编号撞车。 */
       skillBoost: f.skillBoost && typeof f.skillBoost === 'object' ? Object.assign({}, f.skillBoost) : {},
@@ -225,6 +294,13 @@
       buffFlat: { power: 0, agility: 0, speed: 0 },
       // —— 挑战塔扩展状态 ——
       mech, mods,
+      /* 练功木桩（practice）：生命不会耗尽，打完 `practiceRounds` 次出手就收尾。
+       * 口径来自 ssfight 的 `Stakes`：它重写了 `reduceBlood` 但**不调用 checkDead**，
+       * 所以木头人不会死；这里用固定回合 + 保底 1 血复刻这个训练场景。 */
+      practice: !!f.practice,
+      practiceRounds: Math.max(0, Math.floor(Number(f.practiceRounds) || 0)),
+      /* 上一拍扣掉的血，在下一拍开头回满；回血量记在这里交给回放层显示。 */
+      practiceHealPending: 0,
       /* 套装收益（装备派生，独立通道；见 gamedata.js【GD6】）。 */
       setFx: f.setFx && typeof f.setFx === 'object' ? Object.assign({}, f.setFx) : null,
       // 机制的可调数值（tower-data.js 里定，题面文本与判定共用一份，避免文案/数值走偏）
@@ -264,7 +340,9 @@
     if (plusMax > 0) def.maxHp = Math.max(1, Math.round((Number(def.maxHp) || 1) * (1 + plusMax)));
     const plusTaken = Number(sv.takenMul) || 0;
     if (plusTaken) {
-      def.mods.takenMul = Math.max(-0.95, Number(def.mods.takenMul || 0) + plusTaken);
+      /* 减伤按伤害倍率相乘，不把两条减伤直接相加（否则 60% + 60% 会变成 100% 免疫）。 */
+      const oldTaken = Number(def.mods.takenMul) || 0;
+      def.mods.takenMul = Math.max(-0.95, (1 + oldTaken) * (1 + plusTaken) - 1);
       if (r) r.reviveTakenMul = def.mods.takenMul;
     }
     def.hp = sv.healPct ? Math.max(1, Math.round(def.maxHp * sv.healPct)) : 1;
@@ -460,8 +538,10 @@
   const trueW = (w, key) => (window.GData && GData.trueWeaponBonus ? GData.trueWeaponBonus(w, key) : 0);
   // 沉默之斧保留四项基础属性技，抑制其余主动、被动及防御技能。
   function skill(c, id) { return c.silence > 0 && id > 4 ? 0 : c.skills[id] || 0; }
-  function weaponEffect(w, base, perLevel, perTrueLevel) {
-    return base + perLevel * (Math.min(w.level, 10) - 1) + (perTrueLevel || 0) * Math.max(0, w.level - 10);
+  /** 武器基础效果：1~10 级按每级增长；真化部分的追加效果由 `trueW()` **固定一次**叠加，
+   *  不再把 `des1` 当成“每真级 +N”（旧写法会重复计入，真5 明显超表）。 */
+  function weaponEffect(w, base, perLevel) {
+    return base + perLevel * (Math.min(w.level, 10) - 1);
   }
   /** 塔 buff 的暴击伤害加成（比例）＋ 套装收益的暴击伤害。 */
   function critDmgBonus(att) { return ((att.mods && Number(att.mods.critDmgBonus) || 0) + setFx(att, 'critDmgBonus')) / 100; }
@@ -472,8 +552,6 @@
    * 【SM4】出手权重与武器/技能选取
    * ============================================================ */
   const UNUSED_WEIGHT = 100;
-  /** 刚刚用过的那一个再额外打折，避免连着两回合是同一把/同一个。 */
-  const LAST_PENALTY = 0.3;
 
   function pickWeighted(list, weightOf) {
     let total = 0;
@@ -486,19 +564,19 @@
 
   /**
    * 出手权重（武器/技能共用口径，并导出给测试直接校验）：
-   *   - 本场没用过 → UNUSED_WEIGHT（远高于用过的，所以优先，但不是绝对优先）；
-   *   - 已经用过   → 它的「二次使用权重」（见下面的三档口径）；
-   *   - 上一回合刚用过的那一个再乘 LAST_PENALTY，避免连着重复同一把/同一个。
+   *   - 本场没用过 → UNUSED_WEIGHT（普通武器/技能 100；投掷武器前两次也是 100）；
+   *   - 已经用过   → 它的「二次使用权重」（新表：技能 5 / 普通武器 8 / 投掷第三次起 8）；
+   *   - 2026-10 新表取消了「上一回合刚用过 ×0.3」的额外惩罚，权重就是表里的数。
    */
-  /** 某个技能「已经用过 count 次之后，下一次再放」的权重（%）。2026-10 三档口径：
-   *   · 来点松果（17）/ 野球拳（12）：第 1 次用过后 15，第 2 次及以后 5（到底，不再下降）；
-   *   · 其余技能：一律 20。
+  /** 某个技能「已经用过 count 次之后，下一次再放」的权重（%）。2026-10 新表：
+   *   · 其它主动技能（含野球拳 12）：第二次及以后一律 5；
+   *   · 来点松果 17：二次及以后权重 1（仍要求非满血）。
    *  count = 本场**已经用过**的次数（0 表示还没用过 —— 那时调用方直接用 UNUSED_WEIGHT，不走这里）。
-   *  绝对防御是另一套（jueDuiChanceOf：22/17/13/10/8/6/6 的 ×0.78 慢衰减、地板 6），
-   *  不进出手池；而且投掷类攻击根本不触发它（不挡也不降权）。 */
+   *  绝对防御/龟甲术是另一套（见 jueDuiChanceOf / shellChanceOf），它们不进出手池。 */
   function repeatRateOf(id, count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
-    if (id !== 12 && id !== 17) return RULES.repeatSkill;
+    if (Number(id) === 17) return 1;
+    if (id !== 12) return RULES.repeatSkill;
     return n <= 1 ? RULES.repeatSpecialFirst : RULES.repeatSpecialAgain;
   }
   /** 某个技能本场已经用过几次（玩家与敌人都记在各自的 skillUseCount 上）。 */
@@ -508,28 +586,41 @@
   }
   function skillWeight(att, id) {
     let w = att.usedSkills[id] ? repeatRateOf(id, skillUseCountOf(att, id)) : UNUSED_WEIGHT;
-    if (att.lastSkillId === id) w *= LAST_PENALTY;
     /* 秘技通神（C33）：该技能的触发概率 ×(1+加成)。走独立的 skillBoost 通道，
      * 不再借用 effects（那是装备词条/武器效果槽的编号空间，会造成串味）。 */
     const boost = Number(att.skillBoost && att.skillBoost[id]) || 0;
     if (boost > 0) w *= 1 + boost;
     return w;
   }
-  function weaponWeight(att, id) {
-    let w = att.usedWeapons[id] ? RULES.repeatWeapon : UNUSED_WEIGHT;
-    if (att.lastWeaponId === id) w *= LAST_PENALTY;
-    return w;
+  /** 武器权重：普通武器首次 100、之后 8；投掷武器前两次 100、第三次起 8。
+   *  例外：流星锤（10）与橡皮擦（7）虽是投掷，但第二次起按近战口径 8；
+   *  流星锤一次三连击只算**一次**武器使用（`weaponUseCount` 每次行动只 +1）。
+   *  `w` 可以是武器对象（带 type）或武器 id；id 形式会回到 att.weapons 里找类型。 */
+  function weaponWeight(att, w) {
+    const id = w && typeof w === 'object' ? w.id : w;
+    const weapon = w && typeof w === 'object'
+      ? w
+      : ((att.weapons || []).find((x) => Number(x.id) === Number(id)) || null);
+    const used = !!(att.usedWeapons && att.usedWeapons[id]);
+    const count = att.weaponUseCount && att.weaponUseCount[id] != null
+      ? Math.max(0, Math.floor(Number(att.weaponUseCount[id]) || 0))
+      : (used ? 1 : 0);
+    const specialThrowRepeat = Number(id) === 7 || Number(id) === 10;
+    if (weapon && weapon.type === '投掷' && !specialThrowRepeat) {
+      return count < 2 ? UNUSED_WEIGHT : RULES.repeatWeapon;
+    }
+    return used ? RULES.repeatWeapon : UNUSED_WEIGHT;
   }
 
-  /** 技能选择：按 skillWeight 加权 → 没用过的优先、二次使用被压掉、来点松果最低。 */
+  /** 技能选择：按 skillWeight 加权 → 没用过的优先、二次使用被压掉（来点松果每场一次）。 */
   /* ---------- 出手类型：武器 / 技能 / 徒手（权重竞争，不再是固定百分比） ----------
    * 把两边的**实际候选权重**加总，再和「徒手」权重一起抽一次：
    *   · 候选越多 → 工具总权重越大 → 徒手越少（持有的武技数量直接决定普攻欲望）；
-   *   · 全部用过一遍 → 每个候选的权重掉到二次使用概率（5~25）→ 徒手占比自然抬高；
+   *   · 全部用过一遍 → 技能权重掉到 5、普通武器掉到 8、投掷第三次起 8 → 徒手占比自然抬高；
    *   · 只剩一个主动技时，它用过之后的份额就是它的二次使用概率，
    *     不会因为「类型落在技能上」而被强行复用（修掉旧固定档位的那个副作用）。
    * 抽签仍然只消耗一次 Math.random()，所以既有的随机序列长度不变。 */
-  /* 徒手的实际权重：基准 50；若工具权重太大导致徒手份额不足 minCommonShare（5%），
+  /* 徒手的实际权重：基准 100；若工具权重太大导致徒手份额不足 minCommonShare（5%），
    * 就把它抬到「刚好 5%」——份额 = w/(w+tool) ≥ r  ⟺  w ≥ tool × r/(1−r)。 */
   function commonWeightFor(toolWeight) {
     const r = Math.max(0, Math.min(0.9, Number(RULES.minCommonShare) || 0));
@@ -538,7 +629,7 @@
   }
   function pickKind(att, weapons, actives) {
     let weaponSum = 0;
-    for (const w of weapons || []) weaponSum += weaponWeight(att, w.id);
+    for (const w of weapons || []) weaponSum += weaponWeight(att, w);
     let skillSum = 0;
     for (const id of actives || []) skillSum += skillWeight(att, id);
     const commonWeight = commonWeightFor(weaponSum + skillSum);
@@ -557,7 +648,7 @@
    * 「持有的武技越多 → 徒手越少」「全部用过一遍 → 徒手变多」「徒手占比不低于 5%」。 */
   function kindWeights(att, weapons, actives) {
     let weapon = 0;
-    for (const w of weapons || []) weapon += weaponWeight(att, w.id);
+    for (const w of weapons || []) weapon += weaponWeight(att, w);
     let skill = 0;
     for (const id of actives || []) skill += skillWeight(att, id);
     const common = commonWeightFor(weapon + skill);
@@ -582,19 +673,9 @@
   function pickSkill(att, actives) {
     return pickWeighted(actives, (id) => skillWeight(att, id));
   }
-  /** 野球拳（12）的闸门：**每个战斗单位都遵循**（玩家、固定循环的敌人、玩家式 AI 全都一样）。
-   *  第一次照放；从第二次起，每一次「本回合能不能放它」都按 repeatRateOf(12, 已用次数) 掷一次：
-   *  没抽中就把它排除在可用技能之外 —— 于是有别的技能就让位给别的，没有就改普攻。
-   *  （技能权重那条曲线同时也在 skillWeight 里生效，多技能时它被选中的份额本来就低。） */
-  function yakyuGated(att) {
-    if (!att) return false;
-    const used = skillUseCountOf(att, 12);
-    if (used <= 0) return false;
-    return !chance(repeatRateOf(12, used));
-  }
-  /** 武器选择：同一套口径。 */
-  function pickWeapon(att) {
-    return pickWeighted(att.weapons, (w) => weaponWeight(att, w.id));
+  /** 武器选择：同一套口径。`pool` 给整蛊专家过滤后的可用武器。 */
+  function pickWeapon(att, pool) {
+    return pickWeighted(pool && pool.length ? pool : att.weapons, (w) => weaponWeight(att, w));
   }
 
   /* ============================================================
@@ -605,7 +686,9 @@
     const wMust = att.mustHitNext;
     if (wMust) return 0;
     let d = 6 + 26 * effAgility(def) / (effAgility(def) + effAgility(att) * 1.2 + 40);
-    const shift = skill(def, 11) ? (5 + 2 * (skill(def, 11) - 1)) * (1 + effect(def, 35) / 100) : 0;
+    const shift = skill(def, 11)
+      ? (5 + 2 * (Math.min(skill(def, 11), 10) - 1) + trueVal(11, skill(def, 11))) * (1 + effect(def, 35) / 100)
+      : 0;
     // PPT问答：木剑、移形、流星锤均相对提升天生闪避率。
     d *= 1 + (shift + def.swordDodge + def.meteorDodge) / 100;
     if (def.mods && def.mods.dodgeBonus) d += Number(def.mods.dodgeBonus);   // 塔 buff「凌波微步」（加算）
@@ -656,23 +739,45 @@
   }
   function jueDuiChanceOf(def, count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
-    const base = n === 0
-      ? RULES.jueDuiChance
-      : Math.max(RULES.jueDuiMin, Math.round(RULES.jueDuiAgain * Math.pow(RULES.jueDuiDecay, n - 1)));
+    const lv = Math.max(1, Math.floor(Number(def && def.skills && def.skills[16]) || 1));
+    let base;
+    if (lv <= 10) {
+      /* 1~10 级：首次 20,20.5,…,24.5；第二次及以后 0.5。 */
+      base = n === 0 ? RULES.jueDuiFirstBase + RULES.jueDuiFirstStep * (lv - 1) : RULES.jueDuiRepeat;
+    } else {
+      const t = Math.max(1, Math.min(5, lv - 10));
+      /* 11~15 级（真1~真5）：首次 24.5；第二次 5/10/15/20/24；第三次及以后 0.5。 */
+      base = n === 0 ? RULES.jueDuiTrueFirst
+        : n === 1 ? Math.min(RULES.jueDuiTrueSecondMax, RULES.jueDuiTrueSecond + RULES.jueDuiTrueSecondStep * (t - 1))
+          : RULES.jueDuiTrueRepeat;
+    }
     const boost = passiveSkillBoost(def, 16);
     const out = base * (1 + boost);
     if (!boost) return out;                                  // 没加成：原样
     return Math.min(out, n === 0 ? BOOSTED_FIRST_CAP : BOOSTED_AGAIN_CAP);
   }
-  /** 龟甲术的单次触发概率（%）：首次 / 二次及以后（二次还带装备与技能等级加成）。 */
-  function shellChanceOf(def, again) {
-    const base = again
-      ? RULES.shellAgain + effect(def, 32) + trueVal(7, def.skills[7]) * 100
-      : RULES.shellFirst;
+  /** 龟甲术的单次触发概率（%）：按技能等级与「本场第几次触发」取。
+   *  1~10 级：首次 20,20.5,…,24.5；之后 1。
+   *  11~15 级：首次 24.5；第二次 5,10,15,20,24；第三次及以后 1。
+   *  装备词条 32（龟甲术 N% 几率抵挡 2 次）仍作为**第二次及以后**的平添概率保留。 */
+  function shellChanceOf(def, count) {
+    const n = Math.max(0, Math.floor(Number(count) || 0));
+    const lv = Math.max(1, Math.floor(Number(def && def.skills && def.skills[7]) || 1));
+    let base;
+    if (lv <= 10) {
+      base = n === 0 ? RULES.shellFirstBase + RULES.shellFirstStep * (lv - 1) : RULES.shellRepeat;
+    } else {
+      const t = Math.max(1, Math.min(5, lv - 10));
+      base = n === 0 ? RULES.shellTrueFirst
+        : n === 1 ? Math.min(RULES.shellTrueSecondMax, RULES.shellTrueSecond + RULES.shellTrueSecondStep * (t - 1))
+          : RULES.shellTrueRepeat;
+    }
+    /* 装备 32「龟甲术N%几率抵挡2次」只在二次及以后叠加，首次仍按技能本体。 */
+    const gearBonus = n >= 1 ? Math.max(0, Number(effect(def, 32)) || 0) : 0;
     const boost = passiveSkillBoost(def, 7);
-    const out = base * (1 + boost);
+    const out = (base + gearBonus) * (1 + boost);
     if (!boost) return out;                                  // 没加成：原样
-    return Math.min(out, again ? BOOSTED_AGAIN_CAP : BOOSTED_FIRST_CAP);
+    return Math.min(out, n === 0 ? BOOSTED_FIRST_CAP : BOOSTED_AGAIN_CAP);
   }
   /* ============================================================
    * 【SM6】减伤链（护盾/绝对防御/减伤）
@@ -684,7 +789,7 @@
     out.dmg = Math.round(out.dmg * (1 - clamp(gearReduction, 0, 80) / 100));
     /* 绝对防御是受击自动触发、不进出手池的技能，所以「挡过几次」单独记：
      * 同一场里每挡一次，下一次的触发率就按 jueDuiChanceOf 的曲线往下降
-     *（22 / 17 / 13 / 10 / 8 / 6 / 6 …地板 6；对敌我都生效）。
+     *（1~10 级：首次 20..24.5、之后 0.5；11~15 级：首次 24.5、第二次 5..24、第三次起 0.5）。
      * 旧的布尔 `usedJueDui` 已被这个计数取代（它只够区分「首次/之后」两档）。
      * 2026-10 用户口径（需求140）：**投掷类攻击根本不触发绝对防御** —— 不挡、不反弹，
      * 也**不计入降权计数**（计数只在下面分支里 +1，跳过分支就等于扔过来的武器
@@ -692,20 +797,20 @@
     if (def.skills[16] && def.silence <= 0 && opts.weaponType !== '投掷'
         && chance(jueDuiChanceOf(def, def.jueDuiCount || 0))) {
       def.jueDuiCount = Math.max(0, Math.floor(Number(def.jueDuiCount) || 0)) + 1;
-      const pct = 40 + 4 * (def.skills[16] - 1);
+      const pct = 40 + 4 * (Math.min(def.skills[16], 10) - 1) + trueVal(16, def.skills[16]);
       out.jueDui = out.dmg;
       out.rebound = Math.round(out.dmg * pct / 100);
       out.dmg = 0;
       return out;
     }
     if (def.skills[7] && def.silence <= 0) {
+      const shellCount = Math.max(0, Math.floor(Number(def.shellCount) || 0));
       const canTrigger = def.shellCharges > 0
-        || (!def.usedShell && chance(shellChanceOf(def, false)))
-        || (def.usedShell && chance(shellChanceOf(def, true)));
+        || chance(shellChanceOf(def, shellCount));
       if (canTrigger) {
         if (def.shellCharges > 0) def.shellCharges--;
-        else def.usedShell = true;
-        const pct = clamp(20 + 5 * (def.skills[7] - 1), 0, 80);
+        else def.shellCount = shellCount + 1;
+        const pct = clamp(20 + 5 * (def.skills[7] - 1), 0, 100);
         out.guiJia = Math.round(out.dmg * pct / 100);
         out.dmg -= out.guiJia;
       }
@@ -745,7 +850,7 @@
     };
     const A = makeCombatant(f0, 0), B = makeCombatant(f1, 1);
     /* 无敌模式（见 guardGodHp）：开战先把玩家血量顶到上限 ——
-     * 塔里连战继承进来的残血不会让它在 120 手超时里按血量比例判负；
+     * 塔里连战继承进来的残血不会让它在 60 手超时里按血量比例判负；
      * 之后血量只增不减，吸血 / 持续伤害 / 自伤 / 反伤 / 开场斩杀全都打不动它。 */
     if (godSave(A)) { A.hp = A.maxHp; guardGodHp(A); }
     /* 枯泉·涸井（封疗机制）：**从战斗开始就封**，而不是等它第一次出手 ——
@@ -763,7 +868,14 @@
      * 战斗一开始就要能把护盾画出来，不能等第一次挨打。 */
     const startShell = [Math.max(0, A.shell || 0), Math.max(0, B.shell || 0)];
     const rounds = [];
-    const MAX_ACTIONS = 120;
+    /* 原版战斗上限 60（`combat maxRounds=60`，数据表也写「战斗回合数设置上限为60」）。
+     * 这里的 rounds 是**一次出手**，与原版日志的一条记录同口径。 */
+    const MAX_ACTIONS = 60;
+    /* 训练木桩：固定 N 次出手（经典/现代两套播放器都共用这一条），到点就收尾；
+     * 木桩本身不会死，见 applyDamage 的 practice 分支。 */
+    const practice = A.practice ? A : (B.practice ? B : null);
+    const actionCap = practice && practice.practiceRounds > 0
+      ? Math.min(MAX_ACTIONS, practice.practiceRounds) : MAX_ACTIONS;
     let actions = 0;
 
     function pushRound(r) {
@@ -776,7 +888,21 @@
         if (c.pendingNote) { r.noteText = (r.noteText ? r.noteText + '·' : '') + c.pendingNote; c.pendingNote = null; }
       }
       r.hpAfter = [Math.max(0, A.hp), Math.max(0, B.hp)];
+      /* 调试用实时三维：只有调用方显式要才落快照，避免每场战斗都多存对象。
+       * 快照取**这一拍结算之后**的有效值（含降低属性/增益），现代战斗的调试层直接读它。 */
+      if (options.collectStats) {
+        r.effStats = [
+          { power: effPower(A), agility: effAgility(A), speed: effSpeed(A) },
+          { power: effPower(B), agility: effAgility(B), speed: effSpeed(B) },
+        ];
+      }
       r.shellAfter = [Math.max(0, A.shell || 0), Math.max(0, B.shell || 0)];
+      /* 给经典播放器的换装/卸装表现用：这一拍结束时双方还剩几回合“被脱光”。
+       * 0 = 正常穿着；>0 = 装备视觉应卸下。 */
+      r.stripLeft = [Math.max(0, Number(A.stripTurns) || 0), Math.max(0, Number(B.stripTurns) || 0)];
+      /* 上一拍扣掉、这一拍开头补回的血量：挂到本回合事件上供回放层飘字。 */
+      if (A.practiceHealPending) { r.practiceHeal = (Number(r.practiceHeal) || 0) + A.practiceHealPending; A.practiceHealPending = 0; }
+      if (B.practiceHealPending) { r.practiceHeal = (Number(r.practiceHeal) || 0) + B.practiceHealPending; B.practiceHealPending = 0; }
       rounds.push(r);
     }
 
@@ -797,11 +923,19 @@
         r.fakeDie = true;
         r.fakeDieSide = target.side;
         r.fakeDieReflect = true;
+        queueFakeDiePets(target);
         if (!immediate) immediate = { actor: target, reason: 'fakeDie' };
         return dmg;
       }
       target.hp -= dmg;
       tryDeathSave(target, r);
+      return dmg;
+    }
+    /** 木桩只锁生命，伤害事件保留完整数值（Stakes.reduceBlood 直接累计 harm）。
+     * 单次或多段打出 800+ 仍逐段计伤；血条最低 1，下一拍开头只回实际失去的血。 */
+    function practiceHurt(def, dmg) {
+      if (!def || !def.practice) return dmg;
+      def.hp = Math.max(1, def.hp - dmg);
       return dmg;
     }
     function applyDamage(att, def, rawDmg, r, opts) {
@@ -810,13 +944,28 @@
       if (att.mods && att.mods.dmgMul) rawDmg = Math.round(rawDmg * Number(att.mods.dmgMul));   // 塔 buff 伤害乘区（猎侠者/机制破解/精英杀手等，tower.js 按对手预算好）
       const setDmgMul = 1 + setFx(att, 'dmgMul');                                                 // 套装收益的伤害乘区（挑斗/维京/诅咒套）
       if (setDmgMul !== 1) rawDmg = Math.round(rawDmg * setDmgMul);
+      /* 幻兽·狂暴：血量低于 200 时伤害额外 +X%（原版描述里的固定门槛）。 */
+      if (petRageActive(att) && rawDmg > 0) {
+        rawDmg = Math.round(rawDmg * (1 + att.petRagePct / 100));
+        r.petRage = att.petRagePct;
+      }
+      /* 幻兽·虚弱：中了诅咒的一方受到**武器**攻击时额外承受 X%。 */
+      if (action === 'weapon' && def.petWeakPct > 0 && rawDmg > 0) {
+        rawDmg = Math.round(rawDmg * (1 + def.petWeakPct / 100));
+        r.petWeak = def.petWeakPct;
+      }
       if (action === 'skill') {
         rawDmg = Math.round(rawDmg * (1 + effect(att, 8) / 100));
-        /* 真·皮糙肉厚：额外压制对手的暴击率（真5 压 50%）。
-         * 真·暴击：暴击发生时有机会把倍率从 2 倍抬到 4 倍（真5 50%）。 */
+        /* 真·皮糙肉厚：额外压制对手的暴击率（真1~真5 = 0.5/1/2/3/5%）。
+         * 真·暴击：暴击发生时有机会把倍率抬到 4 倍（真1~真5 = 2/5/9/14/20%）。 */
         const antiCrit = trueVal(10, def.skills[10]);
         const cc = critChance(att) * (1 - antiCrit);
-        if (chance(cc)) {
+        /* 幻兽·打兴奋剂：下一次攻击必定暴击（技能这一支也吃）。 */
+        if (att.petNextCrit) {
+          att.petNextCrit = false;
+          r.crit = true; r.petCrit = true;
+          rawDmg = Math.round(rawDmg * (2 + effect(att, 4) / 100 + critDmgBonus(att)));
+        } else if (chance(cc)) {
           const quad = trueVal(9, att.skills[9]) * 100;
           const mul = (quad > 0 && chance(quad)) ? 4 : 2;
           if (mul === 4) r.crit4 = true;
@@ -845,7 +994,7 @@
       if (dmg > 0 && def.mods && Number(def.mods.firstDodge) > 0 && !def.mods.firstDodgeUsed) {
         def.mods.firstDodgeUsed = true;
         dmg = 0;
-        r.dodge = true;
+        markDodge(r, def);
         r.noteText = (r.noteText ? r.noteText + '·' : '') + '风影身法'; r.noteSide = def.side;
       }
       if (dmg > 0 && def.mods && def.mods.firstHitZero && !def.mods.firstHitZeroUsed) {
@@ -869,14 +1018,17 @@
         def.shell -= absorbed; dmg -= absorbed;
         r.shellAbsorb = absorbed;
       }
-      // 装死
-      if (def.hp - dmg <= 0 && def.skills[6] && def.silence <= 0 && !def.usedFakeDie && !opts.ignoreFakeDie) {
+      /* 木桩的血量保护不能截掉测得的伤害，亦不走装死 / 复活 / 倒地分支。 */
+      if (def.practice) {
+        dmg = practiceHurt(def, dmg);
+      } else if (def.hp - dmg <= 0 && def.skills[6] && def.silence <= 0 && !def.usedFakeDie && !opts.ignoreFakeDie) {
         def.usedFakeDie = true;
         dmg = Math.max(0, def.hp - 1);
         def.hp = 1;
         r.fakeDie = true;
         r.fakeDieSide = def.side;
         def.stun = 0;
+        queueFakeDiePets(def);
         immediate = { actor: def, reason: 'fakeDie' };
       } else if (def.hp - dmg <= 0 && def.mods && Array.isArray(def.mods.deathSaves) && def.mods.deathSaves.length) {
         /* 与 tryDeathSave 共用同一份触发逻辑（含涅槃plus 的抬上限 / 减伤）。 */
@@ -962,6 +1114,208 @@
       return dmg;
     }
 
+    /* ============================================================
+     * 幻兽协战（原版 attackType 4）
+     * ------------------------------------------------------------
+     * 回放层认 `action:'pet'` + `petId`，按 `attacks` 第 `29 + petId` 帧播原版
+     * 幻兽动作；`isRound:0` 表示不占 60 手行动上限。技能效果在这里结算，
+     * 事件字段只负责告诉播放器「谁、哪只、命中/回血多少」。
+     * ============================================================ */
+    /** 幻兽·狂暴：原版描述写死「血量低于 200 点」——不是比例。 */
+    function petRageActive(c) {
+      return !!(c && Number(c.petRagePct) > 0 && c.hp > 0 && c.hp < 200);
+    }
+    /** 装死之后要补发的协战（技能 2/4）。只在真的还能出手时排队。 */
+    function queueFakeDiePets(c) {
+      if (!c || c.hp <= 0 || c.petAfterFakeDie) return;
+      for (const p of c.pets || []) {
+        if (c.petUsed[p.slot]) continue;
+        const rule = petRule(p.skillId);
+        if (rule && rule.onFakeDie) { c.petAfterFakeDie = true; return; }
+      }
+    }
+    function petSkillName(id) {
+      const info = window.GData && GData.PET_SKILLS && GData.PET_SKILLS[Number(id)];
+      return (info && info.name) || '幻兽技能';
+    }
+    function petSealCandidates(target) {
+      const out = [];
+      for (const w of target.weapons || []) {
+        if (!w || target.petSealWeapons[w.id]) continue;
+        out.push({ kind: 'weapon', id: Number(w.id), name: String(w.name || ('武器' + w.id)) });
+      }
+      /* 优先只封「这个战斗体真的会拿出来用」的技能：玩家的 skillOrder 已经筛过主动技，
+       * 避免整蛊专家随机封到力王附体这类被动、看起来完全没生效。 */
+      const usableSkills = new Set((target.skillOrder || []).map(Number));
+      for (const id of Object.keys(target.skills || {})) {
+        const sid = Number(id);
+        if (!sid || target.petSealSkills[sid]) continue;
+        if (usableSkills.size && !usableSkills.has(sid)) continue;
+        let name = '技能' + sid;
+        try { const d = skillsMap.getValue(sid); if (d && d.name) name = d.name; } catch (e) {}
+        out.push({ kind: 'skill', id: sid, name });
+      }
+      return out;
+    }
+    /** 幻兽的「直接减血」：不吃减伤/护盾/暴击，但仍走装死与复活甲同一条致死保护链。 */
+    function petDirectDamage(att, def, amount, r) {
+      let dmg = Math.max(0, Math.round(Number(amount) || 0));
+      if (!def || def.hp <= 0 || dmg <= 0) { r.dmg = 0; return 0; }
+      if (def.practice) {
+        dmg = practiceHurt(def, dmg);
+      } else if (def.hp - dmg <= 0 && def.skills && def.skills[6] && def.silence <= 0 && !def.usedFakeDie) {
+        def.usedFakeDie = true;
+        dmg = Math.max(0, def.hp - 1);
+        def.hp = 1;
+        def.stun = 0;
+        r.fakeDie = true;
+        r.fakeDieSide = def.side;
+        queueFakeDiePets(def);
+        if (!immediate) immediate = { actor: def, reason: 'fakeDie' };
+      } else {
+        def.hp = Math.max(0, def.hp - dmg);
+        if (def.hp <= 0) tryDeathSave(def, r);
+      }
+      r.dmg = (r.dmg || 0) + dmg;
+      return dmg;
+    }
+    function petHeal(att, amount, r) {
+      if (!att || att.hp <= 0) return 0;
+      const heal = Math.min(att.maxHp - att.hp, healOf(att, amount));
+      if (heal > 0) att.hp += heal;
+      r.healSelf = (r.healSelf || 0) + heal;
+      return heal;
+    }
+    /** 幻兽·凌波微步：每次闪避回 X 点血（可叠加多只）。 */
+    function petOnDodge(def, r) {
+      if (!def || !(def.petDodgeHeal > 0) || def.hp <= 0 || def.hp >= def.maxHp) return 0;
+      const heal = Math.min(def.maxHp - def.hp, healOf(def, def.petDodgeHeal));
+      if (heal > 0) {
+        def.hp += heal;
+        r.dodgeHeal = (r.dodgeHeal || 0) + heal;
+        r.dodgeHealPet = '凌波微步';
+      }
+      return heal;
+    }
+    /** 所有「闪避」分支统一在这里落标记 + 幻兽回血，别在各处只写 `r.dodge = true`。 */
+    function markDodge(r, def) {
+      r.dodge = true;
+      petOnDodge(def, r);
+    }
+    /** 幻兽·油光满面：移除自身所有可清除的负面状态。 */
+    function petCleanse(c, r) {
+      if (!c) return false;
+      const had = !!(c.debuffs.power || c.debuffs.agility || c.debuffs.speed || c.dot ||
+        c.stun > 0 || c.silence > 0 || c.disarm > 0 || c.stripTurns > 0 ||
+        c.petWeakPct > 0 || c.petDotPlus || c.petHealCut ||
+        Object.keys(c.petSealWeapons || {}).length || Object.keys(c.petSealSkills || {}).length);
+      c.debuffs.power = 0; c.debuffs.agility = 0; c.debuffs.speed = 0;
+      c.dot = null; c.stun = 0; c.silence = 0; c.disarm = 0; c.stripTurns = 0;
+      c.petWeakPct = 0; c.petDotPlus = false;
+      c.petSealWeapons = {}; c.petSealSkills = {};
+      if (c.petHealCut) { c.healMul = Math.min(c.healMulBase, c.healMul * 2); c.petHealCut = false; }
+      if (had) r.petCleanse = true;
+      return had;
+    }
+    /** 幻兽·张牙舞爪：对手新中的持续负面效果 +1 回合。 */
+    function petDotRounds(target, rounds) {
+      return Math.max(1, Number(rounds) || 1) + (target && target.petDotPlus ? 1 : 0);
+    }
+    function petRoundBase(actor, pet, rule) {
+      return {
+        attacker: actor.side, action: 'pet', isRound: 0,
+        petId: pet.id, petSlot: pet.slot, petName: pet.name, petGrade: pet.grade, petLevel: pet.level,
+        petSkillId: pet.skillId, petSkillName: petSkillName(pet.skillId), petKind: rule.kind,
+        noteText: pet.name + '·' + petSkillName(pet.skillId), noteSide: actor.side,
+        attackPetIds: String(pet.id),
+      };
+    }
+    /** 行动时的协战：每回合最多一只幻兽出手。
+     *  先把所有满足条件的幻兽各掷一次（概率互不影响），再从成功者里随机挑一只 ——
+     *  这样队伍里靠后的幻兽不会被前一只的低概率技能长期“卡住”。 */
+    function petAssist(actor, target, pushRound) {
+      if (!actor || !target || !actor.pets.length || actor.hp <= 0 || target.hp <= 0) return false;
+      const ready = [];
+      for (const pet of actor.pets) {
+        if (actor.petUsed[pet.slot]) continue;
+        const rule = petRule(pet.skillId);
+        if (!rule || !rule.onAction) continue;
+        if (rule.hpBelow && actor.hp >= actor.maxHp * rule.hpBelow) continue;
+        const value = petValue(pet.skillId, pet.level);
+        if (rule.kind === 'healCut' && (target.petHealCut || target.healMul <= 0)) continue;
+        if (rule.kind === 'weak' && target.petWeakPct >= value) continue;
+        if (rule.kind === 'seal' && !petSealCandidates(target).length) continue;
+        if (rule.kind === 'nextCrit' && actor.petNextCrit) continue;
+        if (rule.kind === 'dotPlus' && target.petDotPlus) continue;
+        if (rule.kind === 'cleanse' && !(actor.debuffs.power || actor.debuffs.agility || actor.debuffs.speed ||
+          actor.dot || actor.stun > 0 || actor.silence > 0 || actor.disarm > 0 || actor.stripTurns > 0 ||
+          actor.petWeakPct > 0 || actor.petDotPlus || actor.petHealCut ||
+          Object.keys(actor.petSealWeapons || {}).length || Object.keys(actor.petSealSkills || {}).length)) continue;
+        if (!chance(petTrigger(pet.skillId, pet.level))) continue;
+        ready.push({ pet, rule, value });
+      }
+      if (!ready.length) return false;
+      const chosen = ready.length === 1 ? ready[0] : ready[Math.floor(Math.random() * ready.length)];
+      const { pet, rule, value } = chosen;
+      actor.petUsed[pet.slot] = true;
+      const r = petRoundBase(actor, pet, rule);
+      if (rule.kind === 'damage') {
+        petDirectDamage(actor, target, value, r);
+      } else if (rule.kind === 'healCut') {
+        target.petHealCut = true;
+        target.healMul = Math.max(0, target.healMul * 0.5);
+        r.petHealCut = 1;
+      } else if (rule.kind === 'weak') {
+        target.petWeakPct = Math.max(target.petWeakPct, value);
+        r.petWeakPct = target.petWeakPct;
+      } else if (rule.kind === 'seal') {
+        const pick = pickOne(petSealCandidates(target));
+        if (pick.kind === 'weapon') {
+          target.petSealWeapons[pick.id] = true;
+          if (target.pendingWeapon && Number(target.pendingWeapon.id) === pick.id) target.pendingWeapon = null;
+        } else {
+          target.petSealSkills[pick.id] = true;
+        }
+        r.petSeal = pick;
+      } else if (rule.kind === 'nextCrit') {
+        actor.petNextCrit = true;
+        r.petNextCrit = true;
+      } else if (rule.kind === 'cleanse') {
+        petCleanse(actor, r);
+      } else if (rule.kind === 'dotPlus') {
+        target.petDotPlus = true;
+        r.petDotPlus = true;
+        if (target.dot) target.dot.rounds = Math.max(target.dot.rounds, petDotRounds(target, target.dot.rounds));
+        if (target.stun > 0) target.stun += 1;
+        if (target.silence > 0) target.silence += 1;
+        if (target.disarm > 0) target.disarm += 1;
+        if (target.stripTurns > 0) target.stripTurns += 1;
+      }
+      pushRound(r);
+      /* 这一下把对手打进装死时，先让对手的逆向推倒/回光术结算完，再走本回合的主行动；
+       * 否则主行动可能直接把 1 血的对手补刀，那两只「装死后发动」的幻兽永远轮不到。 */
+      if (target.petAfterFakeDie) flushPetReactions(target, actor, pushRound);
+      return true;
+    }
+    /** 装死之后补发逆向推倒 / 回光术；可以多只同时触发（各自一场一次）。 */
+    function flushPetReactions(owner, foe, pushRound) {
+      if (!owner || !owner.petAfterFakeDie || owner.hp <= 0) return false;
+      owner.petAfterFakeDie = false;
+      for (const pet of owner.pets) {
+        if (owner.petUsed[pet.slot]) continue;
+        const rule = petRule(pet.skillId);
+        if (!rule || !rule.onFakeDie) continue;
+        owner.petUsed[pet.slot] = true;
+        const r = petRoundBase(owner, pet, rule);
+        const value = petValue(pet.skillId, pet.level);
+        if (rule.kind === 'damage') petDirectDamage(owner, foe, value, r);
+        else if (rule.kind === 'healPct') petHeal(owner, owner.maxHp * value / 100, r);
+        pushRound(r);
+        if (owner.hp <= 0 || foe.hp <= 0) return true;
+      }
+      return false;
+    }
+
     /** NPC 大招（每场一次）：螳螂低血乱舞、仙鹤开场展翅、熊猫低血震地。 */
     function npcUlt(att, def) {
       const r = { attacker: att.side, action: 'skill', npcSkill: true, ult: true };
@@ -969,7 +1323,7 @@
         // 疾风镰刀舞：生命低于20%时孤注一掷的四连击（门槛与伤害都下调过：
         // 原版 35% / 每击 0.55 倍，实战里几乎每场都放且总伤达 2.2 倍力量）
         r.ultName = '疾风镰刀舞'; r.multiHit = 4;
-        if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
+        if (chance(dodgeChance(att, def))) { markDodge(r, def); pushRound(r); return; }
         let total = 0;
         for (let i = 0; i < 4; i++) {
           const rr = { dmg: 0 };
@@ -987,14 +1341,14 @@
         /* 只有力量全额 + 速度的 xhSpeedShare（见 RULES 注释：敌人速度约是力量的 2.3 倍，
          * 直接 (力量+速度) 等于白送一整条速度）。 */
         const raw = Math.round((effPower(att) + effSpeed(att) * RULES.xhSpeedShare) * 1.35);
-        if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
+        if (chance(dodgeChance(att, def))) { markDodge(r, def); pushRound(r); return; }
         applyDamage(att, def, raw, r, { action: 'skill' });
         pushRound(r); return;
       }
       // 熊掌震地：生命低于40%时的重击，震晕对手一回合
       r.ultName = '熊掌震地';
       const raw = Math.round(effPower(att) * 2.2);
-      if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
+      if (chance(dodgeChance(att, def))) { markDodge(r, def); pushRound(r); return; }
       applyDamage(att, def, raw, r, { action: 'skill' });
       if (def.hp > 0 && !r.fakeDie) { def.stun = Math.max(def.stun, 1); r.stunApplied = true; }
       pushRound(r);
@@ -1091,20 +1445,22 @@
         att.usedUlt = true; npcUlt(att, def); return;
       }
       // NPC：70% 普攻，30% 技能（三侠没有武器池，走它自己的固定档位）
-      const useSkill = Object.keys(att.skills).length > 0 && pickNpcKind() === 'skill';
+      const skillIds = Object.keys(att.skills).map(Number).filter((id) => id && !att.petSealSkills[id]);
+      const useSkill = skillIds.length > 0 && pickNpcKind() === 'skill';
       const r = { attacker: att.side, action: 'common', npcSkill: false };
       if (useSkill) {
         r.action = 'skill'; r.npcSkill = true;
-        const sid = parseInt(Object.keys(att.skills)[0]);
+        const sid = skillIds[0];
         const lv = att.skills[sid];
         let raw;
         if (att.npcType === 'tl') { raw = Math.round(effPower(att) * (0.6 + Math.random() * 0.3)); r.multiHit = 2; } // 螳螂双击
         else if (att.npcType === 'xh') { raw = Math.round((effPower(att) + effSpeed(att) * RULES.xhSpeedShare) * (0.9 + lv * 0.1)); }
         else { raw = Math.round(effPower(att) * (1.3 + lv * 0.1)); } // 熊猫重击
         if (att.npcType === 'xh' && att.npcActs <= 3) raw = Math.round(raw * 1.3); // 仙鹤前期凶猛
-        if (rhythm) { raw = Math.round(raw * 2.5); r.crit = true; }
+        if (att.petNextCrit) { att.petNextCrit = false; raw = Math.round(raw * 2.5); r.crit = true; r.petCrit = true; }
+        else if (rhythm) { raw = Math.round(raw * 2.5); r.crit = true; }
         // 命中
-        if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
+        if (chance(dodgeChance(att, def))) { markDodge(r, def); pushRound(r); return; }
         let total = 0;
         const hits = r.multiHit || 1;
         for (let i = 0; i < hits; i++) {
@@ -1133,11 +1489,12 @@
         return;
       }
       // 普攻
-      if (chance(dodgeChance(att, def))) { r.dodge = true; pushRound(r); return; }
+      if (chance(dodgeChance(att, def))) { markDodge(r, def); pushRound(r); return; }
       let raw = Math.round(effPower(att) * (0.8 + Math.random() * 0.4));
       if (att.npcType === 'xh' && att.npcActs <= 3) raw = Math.round(raw * 1.3); // 仙鹤前期凶猛
       if (att.npcType === 'tl' && att.hp < att.maxHp * 0.25) raw = Math.round(raw * 1.3); // 螳螂低血爆发
-      if (rhythm) { raw = Math.round(raw * 2.5); r.crit = true; }
+      if (att.petNextCrit) { att.petNextCrit = false; raw = Math.round(raw * 2.5); r.crit = true; r.petCrit = true; }
+      else if (rhythm) { raw = Math.round(raw * 2.5); r.crit = true; }
       applyDamage(att, def, raw, r, {});
       maybeCounter(att, def, r, 'common');     // NPC 的普攻可以被反击
       pushRound(r);
@@ -1152,16 +1509,18 @@
      *   参数 `trigger` 就是上面那四个字符串（旧代码传的是布尔，现在按语义传，规则集中在这里）。 */
     function maybeCounter(att, def, r, trigger) {
       if (trigger !== 'melee' && trigger !== 'common') return;
-      /* 反击：被打方用**普攻**反击。必中类近战武器也可以被反击，大榔头（2）/ 死神镰刀（15）除外
-       *（调用方传 'ranged' 的那一支已经在上面被挡掉了）。 */
+      /* 练功木桩不还手：原版 `Stakes.attackBack()` 也是空函数，不能凭空反击。 */
+      if (def.practice) return;
+      /* 反击：被打方用**普攻**反击。必中类近战武器也可以被反击，只有大榔头（2）的说明
+       * 明确写“不会被反击”；死神镰刀（15）只是必中，仍可被反击。 */
       if (r.fakeDie || def.hp <= 0 || att.hp <= 0) return;
       if (r.thornsDmg || r.reboundHurt) return;                  // 已经反伤过 —— 不再反击
       let chanceBase = 25;
       if (def.npcType === 'xm') chanceBase = 45;                 // 熊猫善反击
       if (!chance(chanceBase)) return;
       let raw = Math.round(effPower(def) * (0.6 + Math.random() * 0.4) * (1 + effect(def, 5) / 100));
-      if (skill(def, 24)) raw = Math.round(raw * (1.5 + 0.06 * (skill(def, 24) - 1))); // 致命反击
-      if (chance(dodgeChance(def, att) * 0.5)) { r.counterDodge = true; return; }
+      if (skill(def, 24)) raw = Math.round(raw * (1 + 0.5 + 0.06 * (Math.min(skill(def, 24), 10) - 1) + trueVal(24, skill(def, 24)) / 100)); // 致命反击
+      if (chance(dodgeChance(def, att) * 0.5)) { r.counterDodge = true; petOnDodge(def, r); return; }
       const counter = { action: 'common' };
       applyDamage(def, att, raw, counter, {});
       r.counterDmg = counter.dmg;
@@ -1192,16 +1551,20 @@
         return;
       }
       // 行动选择：武器 45% / 技能 35% / 普攻 20%
-      const canWeapon = att.weapons.length > 0 && att.disarm <= 0;
-      // 来点松果解除「每场一次」：还能用，但下面的选法会把它压到最低的二次使用概率
+      /* 幻兽·整蛊专家：被封住的武器/技能整场不能再用。这里先过滤，
+       * 后面的 `pickKind` / `pickWeapon` / `nextPatternSkill` 都只看可用池。 */
+      const usableWeapons = att.weapons.filter((w) => w && !att.petSealWeapons[w.id]);
+      const canWeapon = usableWeapons.length > 0 && att.disarm <= 0;
+      /* 来点松果不再硬性每场一次：二次及以后按 `repeatRateOf` 的 1 权重参与抽取；
+       * 野球拳也没有额外闸门，二次及以后按权重 5 参与抽取。 */
       /* 可用技能从「这个 fighter 实际拥有的技能」里筛（att.skillOrder），
        * 而不是原版玩家那份硬编码的 ACTIVE_SKILLS 表 ——
        * 松鼠/题面用的技能横跨 2~23（元素术鼠是 5/17/20），
        * 用玩家表去筛会把 5 和 20 直接漏掉，于是它一辈子只能放 17（来点松果）。
-       * 排除规则：小宇宙爆发每场一次、来点松果每场一次且满血不放、本回合已用过的不能再用。 */
+       * 排除规则：小宇宙爆发每场一次、来点松果满血不放、本回合已用过的不能再用。 */
       const actives = (att.skillOrder || ACTIVE_SKILLS).filter((id) => att.skills[id] &&
-        !(id === 14 && att.usedCosmos) && !(id === 17 && att.usedSnack) && !(id === 17 && att.hp >= att.maxHp) &&
-        !(Number(id) === 12 && yakyuGated(att)) &&                    // 野球拳：越用越难（第 3 次到底）
+        !att.petSealSkills[id] &&
+        !(id === 14 && att.usedCosmos) && !(id === 17 && att.hp >= att.maxHp) &&
         !(att.pattern && att.skillCd && att.skillCd[id] > 0) &&        // 冷却中（只对固定循环的敌人生效）
         !att.turnSkills[id]);
       const canSkill = actives.length > 0 && att.silence <= 0;
@@ -1219,18 +1582,20 @@
         else if (want === 'skill' && !canSkill) kind = canWeapon ? 'weapon' : 'common';
         else kind = (want === 'weapon' || want === 'skill') ? want : 'common';
       } else {
-        kind = pickKind(att, canWeapon ? att.weapons : [], canSkill ? actives : []);
+        kind = pickKind(att, canWeapon ? usableWeapons : [], canSkill ? actives : []);
       }
-      if (att.pendingWeapon && canWeapon) kind = 'weapon';
+      if (att.pendingWeapon && canWeapon && !att.petSealWeapons[att.pendingWeapon.id]) kind = 'weapon';
 
       if (kind === 'weapon') {
-        const prepared = att.pendingWeapon;
-        // 选武器：本场没用过的优先（并非一定），只有 repeatWeapon% 才回头用旧的那把。
+        const prepared = att.pendingWeapon && !att.petSealWeapons[att.pendingWeapon.id] ? att.pendingWeapon : null;
+        // 选武器：新表口径（普通武器用过 8；投掷前两次 100、第三次起 8）。
         let w;
         if (prepared) w = prepared;
-        else if (att.weapons.length > 1 && !att.pattern) w = pickWeapon(att);
-        else w = att.weapons[0];
+        else if (usableWeapons.length > 1 && !att.pattern) w = pickWeapon(att, usableWeapons);
+        else w = usableWeapons[0];
         att.usedWeapons[w.id] = true;
+        att.weaponUseCount = att.weaponUseCount || {};
+        att.weaponUseCount[w.id] = Math.max(0, Math.floor(Number(att.weaponUseCount[w.id]) || 0)) + 1;
         att.lastWeaponId = w.id;
         att.pendingWeapon = null;
         if (w.id === 1 && !prepared) {
@@ -1259,7 +1624,7 @@
         let raw = R(w.lo, w.hi);
         raw = Math.round(raw * (1 + effPower(att) / 120));       // 力量加成
         // 武器好手是额外固定伤害，不随被菜刀削弱的力量一起下降。
-        if (skill(att, 5)) raw += (10 + 2 * (skill(att, 5) - 1)) * (1 + effect(att, 31) / 100);
+        if (skill(att, 5)) raw += GData.passiveBonus(5, skill(att, 5)) * (1 + effect(att, 31) / 100);
         raw = Math.round(raw * (1 + (effect(att, w.type === '投掷' ? 7 : 6) + (w.id <= 15 ? effect(att, w.id + 11) : 0)) / 100));
         // 闪亮登场：强化期内的那几次武器，攻击再 +N%
         if (boosted) {
@@ -1276,21 +1641,32 @@
         if (w.id === 10) def.meteorDodge = 20;
         let dodgePct = dodgeChance(att, def);
         if (!mustHit && chance(dodgePct)) {
-          r.dodge = true;
+          markDodge(r, def);
           grantFreeTurn();
           pushRound(r);
           att.weaponBoostImmune = false;
           if (r.actAgain && att.hp > 0 && def.hp > 0 && !immediate) immediate = { actor: att, reason: 'freeAction' };
           return;
         }
-        // 暴击
-        let cc = critChance(att);
+        // 暴击（真·皮糙肉厚同样压制武器暴击率）
+        const antiCrit = trueVal(10, def.skills[10]);
+        let cc = critChance(att) * (1 - antiCrit);
         if (w.id === 11) cc += weaponEffect(w, 20, 2, 3) + trueW(w, 'crit');   // 激光剑（真级 +3% 暴击）
-        if (chance(cc)) { raw = Math.round(raw * (2 + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att))); r.crit = true; }
+        if (att.petNextCrit) {
+          att.petNextCrit = false;
+          let mult = 2 + (Math.random() < 0.5 ? 0 : 1) + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att);
+          raw = Math.round(raw * mult); r.crit = true; r.petCrit = true;
+        } else if (chance(cc)) {
+          /* 原版暴击：2~3 倍；真·暴击再按 2/5/9/14/20% 判一次 4 倍。 */
+          let mult = 2 + (Math.random() < 0.5 ? 0 : 1) + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att);
+          const quad = trueVal(9, att.skills[9]) * 100;
+          if (quad > 0 && chance(quad)) { mult = 4 + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att); r.crit4 = true; }
+          raw = Math.round(raw * mult); r.crit = true;
+        }
         // 连击/三扔
         let hits = 1;
         if (w.id === 4 && chance(weaponEffect(w, 10, 2, 5) + trueW(w, 'combo'))) hits = 2;   // 西瓜刀（真级 +5% 连击）
-        if (w.id === 10 && chance(weaponEffect(w, 2, 2, 3) + trueW(w, 'triple'))) hits = 3;   // 流星锤（真级 +3% 三扔）
+        if (w.id === 10 && chance(weaponEffect(w, 2, 2) + trueW(w, 'triple'))) hits = 3;   // 流星锤（2% + 2%/级；真级 +3% 三扔）
         r.hits = hits;
         let total = 0;
         for (let i = 0; i < hits; i++) {
@@ -1320,17 +1696,20 @@
         // 武器特效
         if (w.id === 3 && att.hp > 0) { att.swordDodge = Math.max(att.swordDodge, weaponEffect(w, 3, 3)); r.dodgeBuff = att.swordDodge; }
         if (def.hp > 0 && !r.fakeDie) {
-          if (w.id === 5) { def.debuffs.agility = Math.max(def.debuffs.agility, weaponEffect(w, 10, 2)); r.debuffText = '敏捷降低！'; }
-          if (w.id === 6) { def.debuffs.speed = Math.max(def.debuffs.speed, weaponEffect(w, 10, 2)); r.debuffText = '速度降低！'; }
-          if (w.id === 8) { def.debuffs.power = Math.max(def.debuffs.power, weaponEffect(w, 10, 1)); r.debuffText = '力量降低！'; }
-          if (w.id === 12 && chance(35)) { def.dot = { dmg: weaponEffect(w, 4, 3, 6) + trueW(w, 'dot'), rounds: 4 }; r.dotApplied = true; }
-          if (w.id === 13 && chance(weaponEffect(w, 10, 3, 3) + trueW(w, 'stun'))) { def.stun = Math.max(def.stun, 1); r.stunApplied = true; }
-          if (w.id === 16 && chance(weaponEffect(w, 10, 4, 4) + trueW(w, 'silence'))) { def.silence = Math.max(def.silence, 4); r.silenceApplied = true; }
+          /* `debuffStat` 是给**战斗动画**用的结构化字段（`debuffText` 是给人看的中文）：
+           * 经典战斗要在挨打方头顶飘「力/敏/速下降」那颗原版状态图标（`propty` 第 4/5/6 帧），
+           * 靠中文串匹配太脆，所以这里把"降的是哪一项"显式带出来。 */
+          if (w.id === 5) { def.debuffs.agility = Math.max(def.debuffs.agility, weaponEffect(w, 10, 2)); r.debuffText = '敏捷降低！'; r.debuffStat = 'agility'; }
+          if (w.id === 6) { def.debuffs.speed = Math.max(def.debuffs.speed, weaponEffect(w, 10, 2)); r.debuffText = '速度降低！'; r.debuffStat = 'speed'; }
+          if (w.id === 8) { def.debuffs.power = Math.max(def.debuffs.power, weaponEffect(w, 10, 1)); r.debuffText = '力量降低！'; r.debuffStat = 'power'; }
+          if (w.id === 12 && chance(35)) { def.dot = { dmg: weaponEffect(w, 4, 3, 6) + trueW(w, 'dot'), rounds: petDotRounds(def, 4) }; r.dotApplied = true; }
+          if (w.id === 13 && chance(weaponEffect(w, 10, 3, 3) + trueW(w, 'stun'))) { def.stun = Math.max(def.stun, petDotRounds(def, 1)); r.stunApplied = true; }
+          if (w.id === 16 && chance(weaponEffect(w, 10, 4, 4) + trueW(w, 'silence'))) { def.silence = Math.max(def.silence, petDotRounds(def, 4)); r.silenceApplied = true; }
         }
         if (w.id === 14 && att.hp > 0) { const heal = Math.min(att.maxHp - att.hp, healOf(att, total * (weaponEffect(w, 10, 4, 2) + trueW(w, 'lifesteal')) / 100)); att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
         if (w.id === 17 && att.hp > 0) { const self = Math.round(att.hp * 0.1); att.hp -= self; r.selfBurn = self; tryDeathSave(att, r); }
-        // 反击（大榔头2、死神镰刀15 不可反击；远程武器也不能触发反击 —— 用户口径 2026-10 第八十批）
-        maybeCounter(att, def, r, (w.type === '近战' && ![2, 15].includes(w.id)) ? 'melee' : 'ranged');
+        // 反击（只有大榔头 2 的说明写“不会被反击”；死神镰刀 15 只是必中，仍可被反击）
+        maybeCounter(att, def, r, (w.type === '近战' && w.id !== 2) ? 'melee' : 'ranged');
         grantFreeTurn();
         pushRound(r);
         att.weaponBoostImmune = false;
@@ -1358,18 +1737,22 @@
         switch (sid) {
           case 8: { // 色诱之术（真级：有机会脱光对手装备，持续 4 回合）
             const raw = Math.round((R(15, 25) + 7 * (lv - 1)) * (1 + effect(att, 33) / 100));
-            if (chance(dodgeChance(att, def))) { att.mustHitNext = false; r.dodge = true; break; }
+            if (chance(dodgeChance(att, def))) { att.mustHitNext = false; markDodge(r, def); break; }
             applyDamage(att, def, raw, r, {});
             if (def.hp > 0 && !r.fakeDie) {
-              def.stun = Math.max(def.stun, 1); r.stunApplied = true;
+              def.stun = Math.max(def.stun, petDotRounds(def, 1)); r.stunApplied = true;
               const stripPct = trueVal(8, lv) * 100;
-              if (stripPct > 0 && chance(stripPct)) { def.stripTurns = 4; r.stripApplied = Math.round(stripPct); }
+              if (stripPct > 0 && chance(stripPct)) {
+                def.stripTurns = petDotRounds(def, 4);
+                r.stripApplied = Math.round(stripPct);
+                r.specialEffect = 1;          // 原版日志字段：中了脱装备特效
+              }
             }
             break;
           }
           case 12: { // 野球拳（真级：有几率再打一次）
             const raw = Math.round((effPower(att) + effSpeed(att)) * (1.2 + 0.15 * (lv - 1)));
-            if (chance(dodgeChance(att, def) * 0.7)) { att.mustHitNext = false; r.dodge = true; break; }
+            if (chance(dodgeChance(att, def) * 0.7)) { att.mustHitNext = false; markDodge(r, def); break; }
             applyDamage(att, def, raw, r, {});
             const doublePct = trueVal(12, lv) * 100;
             if (doublePct > 0 && def.hp > 0 && att.hp > 0 && chance(doublePct)) { r.actAgain = true; r.doubleHit = true; }
@@ -1377,37 +1760,46 @@
           }
           case 14: { // 小宇宙爆发
             att.usedCosmos = true;
+            const cosmosPct = (Math.min(lv, 10) + trueVal(14, lv)) / 100;
             for (const [key, id] of [['power', 36], ['agility', 37], ['speed', 38]]) {
-              att.buffFlat[key] = Math.max(1, att.baseStats[key] * Math.max(lv / 100, trueVal(14, lv))) + effect(att, id);
+              att.buffFlat[key] = Math.max(1, att.baseStats[key] * cosmosPct) + effect(att, id);
             }
             r.buffUp = true; r.noDmg = true; r.actAgain = true;
             r.statBonus = { ...att.buffFlat };
             break;
           }
           case 15: { // 通灵召唤
-            const raw = Math.round(def.hp * (35 + 2 * (lv - 1)) / 100) + 7 + effect(att, 39) + trueVal(15, lv);
-            if (chance(dodgeChance(att, def))) { att.mustHitNext = false; r.dodge = true; break; }
+            const raw = Math.round(def.hp * (35 + 2 * (Math.min(lv, 10) - 1)) / 100) + 7 + effect(att, 39) + trueVal(15, lv);
+            if (chance(dodgeChance(att, def))) { att.mustHitNext = false; markDodge(r, def); break; }
             applyDamage(att, def, raw, r, { ignoreFakeDie: false });
             break;
           }
-          case 17: { // 来点松果：每场战斗限用一次
-            att.usedSnack = true;
-            const heal = Math.min(att.maxHp - att.hp, healOf(att, (20 + 2 * (lv - 1)) * Math.max(1, effect(att, 40))));
+          case 17: { // 来点松果：满血时不会进候选池；二次及以后权重 1
+            const heal = Math.min(att.maxHp - att.hp, healOf(att, (20 + 2 * (Math.min(lv, 10) - 1) + trueVal(17, lv)) * Math.max(1, effect(att, 40))));
             att.hp += heal;
             r.healSelf = heal; r.noDmg = true; r.actAgain = true;
             break;
           }
           case 18: { // 吸铁大法
-            const raw = Math.round((R(5, 20) + 4 * (lv - 1)) * (1 + effect(att, 41) / 100));
-            if (chance(dodgeChance(att, def))) { att.mustHitNext = false; r.dodge = true; break; }
+            const raw = Math.round((R(5, 20) + 4 * (Math.min(lv, 10) - 1)) * (1 + effect(att, 41) / 100));
+            if (chance(dodgeChance(att, def))) { att.mustHitNext = false; markDodge(r, def); break; }
             applyDamage(att, def, raw, r, { ignoreFakeDie: true });
-            if (chance(Math.max(10 + 4 * (lv - 1), trueVal(18, lv) * 100))) { def.disarm = Math.max(def.disarm, 4); r.disarmApplied = true; }
+            const disarmPct = 10 + 4 * (Math.min(lv, 10) - 1) + trueVal(18, lv);
+            if (chance(disarmPct)) {
+              def.disarm = Math.max(def.disarm, petDotRounds(def, 4));
+              r.disarmApplied = true;
+              r.specialEffect = 1;          // 原版日志字段：中了缴械特效
+            }
             break;
           }
           case 23: { // 幸运一击
             const mult = R(1, 6);
-            const raw = Math.max(15 + 8 * (lv - 1), trueVal(23, lv)) * mult;
+            const raw = (15 + 8 * (lv - 1) + trueVal(23, lv)) * mult;
             r.multiple = mult;
+            /* 原版协议第 15 字段 `boomCount` = 这一拍分裂成几个球（`MainMovie.as:17983`
+             * `_loc1.boomCount = _loc2[15]`，`sprite6122` 第 31 帧 `_root.boom(ball, count)`）。
+             * 幸运一击的伤害就是"打 mult 下"，所以球数 = mult；经典战斗层按它做多球分裂演出。 */
+            r.boomCount = mult;
             applyDamage(att, def, raw, r, {});
             break;
           }
@@ -1428,9 +1820,15 @@
       r.action = 'common';
       const dodge = chance(dodgeChance(att, def));
       att.mustHitNext = false;
-      if (dodge) { r.dodge = true; pushRound(r); return; }
+      if (dodge) { markDodge(r, def); pushRound(r); return; }
       let raw = Math.round(effPower(att) * (0.8 + Math.random() * 0.4) * (1 + effect(att, 5) / 100));
-      if (chance(critChance(att))) { raw = Math.round(raw * (2 + effect(att, 1) / 100 + critDmgBonus(att))); r.crit = true; }
+      if (att.petNextCrit) {
+        att.petNextCrit = false;
+        raw = Math.round(raw * (2 + Math.random() + effect(att, 1) / 100 + critDmgBonus(att)));
+        r.crit = true; r.petCrit = true;
+      } else if (chance(critChance(att))) {
+        raw = Math.round(raw * (2 + effect(att, 1) / 100 + critDmgBonus(att))); r.crit = true;
+      }
       applyDamage(att, def, raw, r, {});
       maybeCounter(att, def, r, 'common');     // 普攻可以被反击
       pushRound(r);
@@ -1471,18 +1869,24 @@
 
     // ---- 主循环：速度行动条 ----
     let immediate = null;
-    while (A.hp > 0 && B.hp > 0 && actions < MAX_ACTIONS) {
+    while (A.hp > 0 && B.hp > 0 && actions < actionCap) {
       const followup = immediate;
       let actor = followup && followup.actor;
       immediate = null;
       if (!actor) {
-        // 先结清已满的行动条，避免高速度玩家无限抢占对方行动。
-        if (A.ap < 100 && B.ap < 100) {
-          const elapsed = Math.min((100 - A.ap) / effSpeed(A), (100 - B.ap) / effSpeed(B));
-          A.ap += elapsed * effSpeed(A); B.ap += elapsed * effSpeed(B);
+        /* 练功木桩不还手（原版 `Stakes.attack()` 是空函数）：直接让非木桩一方出手，
+         * 不让木桩靠速度条抢回合；固定回合数就是玩家的出手次数。 */
+        if (practice) {
+          actor = practice === A ? B : A;
+        } else {
+          // 先结清已满的行动条，避免高速度玩家无限抢占对方行动。
+          if (A.ap < 100 && B.ap < 100) {
+            const elapsed = Math.min((100 - A.ap) / effSpeed(A), (100 - B.ap) / effSpeed(B));
+            A.ap += elapsed * effSpeed(A); B.ap += elapsed * effSpeed(B);
+          }
+          actor = A.ap >= B.ap ? A : B;
+          actor.ap -= 100;
         }
-        actor = A.ap >= B.ap ? A : B;
-        actor.ap -= 100;
       }
       actions++;
       actor.turnId = Number(actor.turnId || 0) + 1;
@@ -1490,6 +1894,18 @@
       actor.turnSkills = {};
       for (const cdId of Object.keys(actor.skillCd || {})) if (actor.skillCd[cdId] > 0) actor.skillCd[cdId]--;
       const def = actor === A ? B : A;
+      /* 练习木桩：上一拍扣掉的血在**下一拍开头**回满（回放层用 practiceHeal 飘字），
+       * 所以每回合血条都是「先满、再扣、下回合加回来」的可读节奏。 */
+      if (def.practice && def.hp < def.maxHp) {
+        const heal = Math.max(0, def.maxHp - def.hp);
+        def.hp = def.maxHp;
+        def.practiceHealPending = (Number(def.practiceHealPending) || 0) + heal;
+      }
+      /* 装死触发的幻兽协战（逆向推倒 / 回光术）先补发，再走这一回合的行动。
+       * 它们不占行动次数，也不改变当前出手者。两边都要结算（可能同归于尽/互相反打）。 */
+      flushPetReactions(A, B, pushRound);
+      flushPetReactions(B, A, pushRound);
+      if (A.hp <= 0 || B.hp <= 0) break;
       /* 回合开始类增益（越战越勇 / 后发制人 / 玉石俱焚）：每场战斗结束自动清零。 */
       applyRoundAuras(actor, def, pushRound);
       /* 塔 buff「血蚀印记」（N17）：每回合开始时对敌人造成其**当前生命** N% 的伤害。
@@ -1546,6 +1962,16 @@
       if (actor.restNext) { actor.restNext = false; pushRound({ attacker: actor.side, action: 'rest' }); if (!followup) tickRestrictions(actor); continue; }
       if (actor.stun > 0) { actor.stun--; pushRound({ attacker: actor.side, action: 'stunned' }); if (!followup) tickRestrictions(actor); continue; }
 
+      /* 幻兽协战：原版「己方行动时」的触发。每回合最多一只、不占行动次数；
+       * 触发后照常走玩家/NPC 本回合的出手（动画上是「幻兽先出手，松鼠再出手」）。 */
+      if (petAssist(actor, def, pushRound)) {
+        if (A.hp <= 0 || B.hp <= 0) {
+          if (A.hp <= 0 && godSave(A)) A.hp = 1;
+          if (B.hp <= 0 && godSave(B)) B.hp = 1;
+          if (A.hp <= 0 || B.hp <= 0) break;
+        }
+      }
+
       if (actor.npcType) { npcAction(actor, def); npcMechAfter(actor, def); }
       else {
         // 挑战塔的题面对手也是「玩家式」AI（无 npcType），机制要在这里补挂：
@@ -1568,6 +1994,10 @@
       if (B.hp <= 0 && godSave(B)) B.hp = 1;
     }
 
+    /* 60 手上限刚好卡在装死那一拍时，装死触发的幻兽协战仍要补发（可能改变胜负）。 */
+    flushPetReactions(A, B, pushRound);
+    flushPetReactions(B, A, pushRound);
+
     let winner;
     if (A.hp <= 0 && B.hp <= 0) winner = 0;
     else if (B.hp <= 0) winner = 0;
@@ -1582,6 +2012,8 @@
    * ============================================================ */
   window.Sim = {
     simulate, rules: RULES,
+    /* 幻兽技能数值 / 触发几率的唯一出口（State 的牧场详情也读 GData 同一份）。 */
+    petSkillValueOf: petValue, petSkillTriggerOf: petTrigger,
     // 供 tools/test-combat-rules.cjs 直接校验出手权重（不用统计近似）
     actionWeights: { skill: skillWeight, weapon: weaponWeight },
     /* 三个「有效属性」的唯一出口（供测试/调参直接核对：终乘类加成到底乘在哪一层）。

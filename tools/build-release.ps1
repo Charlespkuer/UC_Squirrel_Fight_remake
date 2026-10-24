@@ -1,5 +1,5 @@
 ﻿<#
-  build-release.ps1 —— 松鼠大战怀旧版 · 一键出包（Windows exe + 安装包 + 安卓 APK）
+  build-release.ps1 —— 松鼠大战怀旧版 · 一键出包（Windows + 安卓 + Mac 远程 iOS）
 
   一条命令做完六件事：
     1) 版本号对齐：**优先**从 `src-tauri\dist` 里上一版产物的**文件名**读出上一个版本号
@@ -9,8 +9,8 @@
        / 安卓 tauri.properties
     2) 删掉 src-tauri\dist 里**上一个版本**的 exe / apk（只删本次不产出的，精确到文件）
     3) 编 Windows 轻壳 exe + NSIS 安装包（真正干活的是 tools\build-tauri-app.cjs）
-    4) 编安卓 APK（真正干活的是 tools\build-apk.ps1，中文路径/NDK 那些坑都注释在里面）
-    5) 产物按名称模板改名，统一落到 src-tauri\dist
+    4) 编安卓 APK（真正干活的是 tools\build-apk.ps1：**原地构建**，中文路径/NDK 那些坑都注释在里面）
+    5) 把本轮源码快照送到 Mac，顺序编现代 / legacy 未签名 IPA 并回传 src-tauri\dist
     6) 删掉为了打包而生成的缓存（target\ / Gradle build\ / web\ 等，通常 5~10 GB）
 
   为什么要有这个脚本：上面三件事各自都有专门的脚本，但「先对齐版本 → 清旧包 → 出包 →
@@ -18,7 +18,7 @@
   「C 盘少 10 GB」。这里把它们串起来，并且**每一步都先体检、失败就停**。
 
   最省事（仓库根目录**双击**，或在命令行里跑）：
-    打包.cmd        # 一键全套：版本号 patch +1 → 清旧包 → exe / 安装包 / APK → 清 5~10 GB 缓存
+    打包.cmd        # 一键全套：版本号 patch +1 → exe / 安装包 / APK / IPA → 清 Windows 缓存
     清缓存.cmd      # 一键回收磁盘（等价于下面的 -CleanOnly，不打包也不动 dist 里的产物）
   这两个 .cmd 只是薄壳：自动挑 pwsh / powershell（本机可能只装了后者），参数原样转给本脚本。
   用 PowerShell 直接跑也行（没有 pwsh 就换 powershell）：
@@ -27,7 +27,9 @@
     powershell ... -Version 0.5.0        # 指定版本
     powershell ... -NoBump               # 不动版本号，按当前版本出包
     powershell ... -DryRun               # 只打印计划，不写任何文件
-    powershell ... -SkipApk              # 只出 Windows（省 10 分钟）
+    powershell ... -SkipApk -SkipIos      # 只出 Windows
+    powershell ... -SkipIos              # Mac 不在线时，只打本机 Windows / 安卓
+    powershell ... -IosVariant legacy    # 只打 iOS 15~25；默认 both 出两种 IPA
     powershell ... -SkipInstaller        # 不出 66 MB 的安装包
     powershell ... -Name 松鼠大战怀旧版   # 换安装包 / APK 的基名
     powershell ... -ApkName '{name}-{version}-{abi}.apk'
@@ -59,6 +61,11 @@ param(
   [switch]$SkipExe,
   [switch]$SkipInstaller,
   [switch]$SkipApk,
+  [switch]$SkipIos,
+  # 复用双机同步的 peer / token，不需要 SSH；现代版和旧系统版在 Mac 上顺序构建。
+  [string]$IosPeer = 'mac',
+  [ValidateSet('both', 'modern', 'legacy')]
+  [string]$IosVariant = 'both',
   [switch]$KeepCache,
   [switch]$NoBump,
   [switch]$CleanOnly,
@@ -69,9 +76,7 @@ param(
   # 本机现成的安卓工具链（换机器时用参数覆盖）
   [string]$Jdk = 'E:\Android\jdk-17.0.20.1+1',
   [string]$Sdk = 'E:\Android\sdk',
-  [string]$NdkVersion = '27.0.12077973',
-  # 安卓必须在**纯 ASCII 路径**下构建（中文路径会让 NDK 的 linker 收到乱码路径）
-  [string]$BuildRoot = 'E:\ssdz-android-build'
+  [string]$NdkVersion = '27.0.12077973'
 )
 
 $ErrorActionPreference = 'Continue'
@@ -79,7 +84,7 @@ $ErrorActionPreference = 'Continue'
 # 会把它当致命错误掐死脚本。所以下面每一步都自己检查 $LASTEXITCODE / Test-Path。
 
 # -CleanOnly = 只回收磁盘：不打包、不动版本号、**也不删 dist 里现有的产物**
-if ($CleanOnly) { $SkipExe = $true; $SkipInstaller = $true; $SkipApk = $true }
+if ($CleanOnly) { $SkipExe = $true; $SkipInstaller = $true; $SkipApk = $true; $SkipIos = $true }
 
 # ============================================================
 # 【BR0】小工具
@@ -158,12 +163,17 @@ $cli = Join-Path $TAURI 'node_modules\@tauri-apps\cli\tauri.js'
 
 $needExe = (-not $SkipExe) -or (-not $SkipInstaller)
 $needApk = (-not $SkipApk) -and (-not $CleanOnly)
+$needIos = (-not $SkipIos) -and (-not $CleanOnly)
+$iosHelper = Join-Path $ROOT 'tools\build-ios-remote.cjs'
 
 if (-not $CleanOnly) {
   if (-not $node) { Die '找不到 node（https://nodejs.org）' }
-  if (-not (Test-Path $cli)) { Die "找不到 Tauri CLI：$cli（先在 src-tauri 下 npm install）" }
+  if (($needExe -or $needApk) -and -not (Test-Path $cli)) { Die "找不到 Tauri CLI：$cli（先在 src-tauri 下 npm install）" }
   if ($needExe -and -not $cargo) { Die '找不到 cargo（https://rustup.rs）' }
   if ($needApk) {
+    # 安卓原地构建要求仓库路径纯 ASCII（NDK 的 clang.cmd 按 GBK 传参，中文路径 linker 必挂；
+    # 2026-10 之前的做法是复制到 E:\ssdz-android-build 构建，现已改为原地——见 build-apk.ps1 第 1 条）
+    if ($ROOT -match '[^\x00-\x7F]') { Die "仓库路径含非 ASCII（$ROOT）：请把仓库移到纯 ASCII 路径后再出包" }
     if (-not (Test-Path (Join-Path $Jdk 'bin\java.exe'))) { Die "找不到 JDK：$Jdk" }
     if (-not (Test-Path $Sdk)) { Die "找不到 Android SDK：$Sdk" }
     $ndk = Join-Path $Sdk "ndk\$NdkVersion"
@@ -174,6 +184,16 @@ if (-not $CleanOnly) {
   Ok "node $(& node -v)"
   if ($cargo) { Ok "cargo $((& $cargo --version) -replace '^cargo ')" }
   if ($needApk) { Ok "JDK / SDK / NDK 就位（ABI=$Abi）" }
+  if ($needIos) {
+    if (-not (Test-Path $iosHelper)) { Die "找不到远程 iOS 构建器：$iosHelper" }
+    if ($DryRun) {
+      Note "[DryRun] 将检查 Mac（peer=$IosPeer）并构建 $IosVariant IPA；本次不连接 Mac"
+    } else {
+      # 升版、删除旧包和长时间本机构建之前先检查，Mac 不可用时保留现有版本与产物。
+      & $node $iosHelper --check --peer $IosPeer
+      if ($LASTEXITCODE -ne 0) { Die 'Mac iOS 环境未就绪；按上方提示处理，或加 -SkipIos 仅打本机包' }
+    }
+  }
 }
 
 # ============================================================
@@ -278,13 +298,28 @@ $versionEdits = @(
 $lockPath = Join-Path $TAURI 'Cargo.lock'
 
 if ($DryRun -or $CleanOnly) {
-  Note "[跳过版本写入] $(if ($CleanOnly) { '-CleanOnly' } else { '-DryRun' })：会改 Cargo.toml / Cargo.lock / src-tauri/package.json / tauri.conf.json / scripts\version.json / gen\android\app\tauri.properties 到 $target"
+  Note "[跳过版本写入] $(if ($CleanOnly) { '-CleanOnly' } else { '-DryRun' })：会改 Cargo.toml / Cargo.lock / src-tauri/package.json / src-tauri/package-lock.json / tauri.conf.json / scripts\version.json / gen\android\app\tauri.properties 到 $target"
 } else {
   foreach ($e in $versionEdits) {
     if (-not (Test-Path $e.Path)) { Warn "缺文件，跳过：$($e.What)"; continue }
     $n = Replace-First (Read-Text $e.Path) $e.Regex $target
     if ($null -eq $n) { Warn "$($e.What) 没找到版本字段"; continue }
     Write-Utf8NoBom $e.Path $n; Ok "$($e.What) → $target"
+  }
+  # package-lock.json 的**根包**版本也要跟（npm ci 会校验；以前只改 package.json，
+  # 锁文件在 0.1.3 停了好几个版本）。只替换前两处根版本字段，依赖自己的 version 不动。
+  $pkgLockPath = Join-Path $TAURI 'package-lock.json'
+  if (Test-Path $pkgLockPath) {
+    $lockText = Read-Text $pkgLockPath
+    $lockRe = New-Object System.Text.RegularExpressions.Regex('("version"\s*:\s*")[^"]+(")')
+    if ($lockRe.IsMatch($lockText)) {
+      $n = $lockRe.Replace($lockText, {
+          param($m)
+          return $m.Groups[1].Value + $target + $m.Groups[2].Value
+        }, 2)
+      Write-Utf8NoBom $pkgLockPath $n
+      Ok "package-lock.json(根版本) → $target"
+    } else { Warn 'package-lock.json 没找到 version 字段' }
   }
   if (Test-Path $lockPath) {
     $n = Replace-First (Read-Text $lockPath) '(?m)(name = "ssdz-classic"\r?\nversion = ")[^"]+(")' $target
@@ -300,8 +335,9 @@ if ($DryRun -or $CleanOnly) {
   Write-Utf8NoBom $verJsonPath $n
   Ok "scripts\version.json → $target @ $commit $today"
 
-  # 安卓的版本号还有一处：gen/android/app/tauri.properties（gitignore 掉了，但是
-  # build-apk.ps1 同步到 ASCII 副本的**真源**）。versionCode 用 Tauri 的算法
+  # 安卓的版本号还有一处：gen/android/app/tauri.properties（gitignore 掉了，但它是
+  # 安卓构建直接读的**真源**——2026-10 改为原地构建后就在这棵树上，build-apk.ps1 出包前
+  # 还会对账）。versionCode 用 Tauri 的算法
   # major*1000000 + minor*1000 + patch（0.4.6 → 4006），别只改 versionName。
   $androProps = Join-Path $TAURI 'gen\android\app\tauri.properties'
   if (Test-Path $androProps) {
@@ -336,6 +372,10 @@ if (-not $SkipExe -and (Expand-Name $ExeName) -ne 'squirrel_fight.exe') {
 }
 if (-not $SkipInstaller) { $want['setup'] = Join-Path $DIST (Expand-Name $InstallerName) }
 if (-not $SkipApk) { $want['apk'] = Join-Path $DIST (Expand-Name $ApkName) }
+if ($needIos) {
+  if ($IosVariant -in 'both', 'modern') { $want['ios'] = Join-Path $DIST "squirrel_fight_${target}_ios_unsigned.ipa" }
+  if ($IosVariant -in 'both', 'legacy') { $want['iosLegacy'] = Join-Path $DIST "squirrel_fight_${target}_ios_legacy_unsigned.ipa" }
+}
 $wantList = @($want.Values)
 
 # 把这一版**将要用到的名字**打出来（-DryRun 时尤其有用：能先看清版本号与文件名对不对）
@@ -347,9 +387,12 @@ if (-not $CleanOnly) {
   }
   if (-not $SkipInstaller) { Note ('  安装包 ：' + (Split-Path -Leaf $want['setup'])) }
   if (-not $SkipApk) { Note ('  安卓包 ：' + (Split-Path -Leaf $want['apk'])) }
+  foreach ($k in @('ios', 'iosLegacy')) {
+    if ($want.Contains($k)) { Note ('  iOS 包 ：' + (Split-Path -Leaf $want[$k])) }
+  }
 }
 
-if (-not (Test-Path $DIST)) { New-Item -ItemType Directory -Force -Path $DIST | Out-Null }
+if (-not $DryRun -and -not (Test-Path $DIST)) { New-Item -ItemType Directory -Force -Path $DIST | Out-Null }
 $stale = @(Get-ChildItem -LiteralPath $DIST -File -ErrorAction SilentlyContinue |
   Where-Object { $_.Extension -in '.exe', '.apk' -and ($wantList -notcontains $_.FullName) })
 if ($CleanOnly) { $stale = @() }   # -CleanOnly 一律不动 dist（否则会把现有产物当旧包删掉）
@@ -373,13 +416,7 @@ $cacheTargets = @(
   (Join-Path $TAURI 'gen\android\app\build'),
   (Join-Path $TAURI 'gen\android\build'),
   (Join-Path $TAURI 'gen\android\.gradle'),
-  (Join-Path $TAURI 'gen\android\app\.cxx'),
-  (Join-Path $BuildRoot 'src-tauri\target'),
-  (Join-Path $BuildRoot 'src-tauri\web'),
-  (Join-Path $BuildRoot 'src-tauri\gen\android\app\build'),
-  (Join-Path $BuildRoot 'src-tauri\gen\android\build'),
-  (Join-Path $BuildRoot 'src-tauri\gen\android\.gradle'),
-  (Join-Path $BuildRoot 'src-tauri\gen\android\app\.cxx')
+  (Join-Path $TAURI 'gen\android\app\.cxx')
 )
 if ($DeepClean) { $cacheTargets += (Join-Path $env:USERPROFILE '.gradle\caches') }
 
@@ -409,7 +446,7 @@ if (-not $CleanOnly) {
 if ($DryRun) {
   Say '[DryRun] 结束'
   Note '没有写任何文件。确认无误就去掉 -DryRun 真跑。'
-  Note ("预计耗时：exe 3~10 分钟（冷编译更久），APK 5~15 分钟")
+  Note ("预计耗时：exe 3~10 分钟（冷编译更久），APK 5~15 分钟；IPA 取决于 Mac 的 Xcode / Rust 缓存")
   exit 0
 }
 
@@ -474,7 +511,7 @@ if ((-not $SkipExe) -or (-not $SkipInstaller)) {
 if (-not $SkipApk) {
   $psHost = Get-PsHost
   $apkArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $ROOT 'tools\build-apk.ps1'),
-    '-Abi', $Abi, '-Jdk', $Jdk, '-Sdk', $Sdk, '-BuildRoot', $BuildRoot)
+    '-Abi', $Abi, '-Jdk', $Jdk, '-Sdk', $Sdk)
   if (-not $DebugApk) { $apkArgs += '-Release' }
   Invoke-Step "编安卓 APK（$Abi / $(if ($DebugApk) { 'debug' } else { 'release' })）" $psHost $apkArgs
 
@@ -491,7 +528,21 @@ if (-not $SkipApk) {
 }
 
 # ============================================================
-# 【BR7】清缓存
+# 【BR7】Mac 远程 iOS：本轮源码、同一版本、两种 IPA 顺序构建并回传
+# ============================================================
+if ($needIos) {
+  Invoke-Step "Mac iOS 打包并回传（$IosPeer / $IosVariant）" $node @($iosHelper,
+    '--peer', $IosPeer, '--variant', $IosVariant, '--version', $target)
+  foreach ($k in @('ios', 'iosLegacy')) {
+    if ($want.Contains($k)) {
+      if (-not (Test-Path -LiteralPath $want[$k])) { Die "缺少本轮 IPA：$($want[$k])" }
+      Ok "IPA → $(Split-Path -Leaf $want[$k])（$(Fmt-Size (Get-Item -LiteralPath $want[$k]).Length)）"
+    }
+  }
+}
+
+# ============================================================
+# 【BR8】清 Windows 缓存；Mac 隔离构建缓存保留，供下次复用
 # ============================================================
 $freed = 0
 if (-not $KeepCache) {
@@ -516,7 +567,7 @@ if (-not $KeepCache) {
 }
 
 # ============================================================
-# 【BR8】汇总
+# 【BR9】汇总
 # ============================================================
 Say "完成（总用时 $([int]((Get-Date) - $START).TotalMinutes) 分 $([int](((Get-Date) - $START).TotalSeconds) % 60) 秒）"
 Write-Host "   src-tauri\dist 现在有：" -ForegroundColor Cyan

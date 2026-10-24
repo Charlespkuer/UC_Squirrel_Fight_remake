@@ -13,6 +13,7 @@
 import json
 import os
 import sys
+import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -77,8 +78,13 @@ class Handler(SimpleHTTPRequestHandler):
             if not isinstance(parsed, dict):
                 return self._json(400, {"ok": False, "msg": "存档必须是对象"})
             os.makedirs(SAVE_DIR, exist_ok=True)
-            with open(SAVE_FILE, "w", encoding="utf-8") as fh:
+            # 原子写：临时文件 + os.replace。macOS 上进程被关掉时不会留下半截 JSON
+            #（直接 open(SAVE_FILE,'w') 写一半会触发下次启动的“浏览器兜底存档”横幅）。
+            # 线程服务器可能并发写，临时名带进程 / 线程号，避免互相覆盖。
+            tmp = "%s.tmp.%d.%d" % (SAVE_FILE, os.getpid(), threading.get_ident())
+            with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(parsed, fh, ensure_ascii=False)
+            os.replace(tmp, SAVE_FILE)
             return self._json(200, {"ok": True, "savedAt": save_meta()["savedAt"], "path": SAVE_FILE})
         return self._json(405, {"ok": False, "msg": "只支持 GET / POST"})
 

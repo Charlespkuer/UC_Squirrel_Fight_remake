@@ -62,15 +62,15 @@ const SAVE_LOCAL_1 = {
 };
 
 /** 把 js/ 和 scripts/index.html + serve.js 拷进临时目录（素材用软链，省时间）。 */
-function makeGameCopy() {
+function makeGameCopy(save, minLevel) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ssdz-boot-'));
   for (const d of ['js', 'css']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
   fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'save'), { recursive: true });
   fs.copyFileSync(path.join(ROOT, 'scripts', 'index.html'), path.join(dir, 'scripts', 'index.html'));
   fs.copyFileSync(path.join(ROOT, 'scripts', 'serve.js'), path.join(dir, 'scripts', 'serve.js'));
-  fs.writeFileSync(path.join(dir, 'save', 'progress.json'), JSON.stringify(SAVE_32));
-  fs.writeFileSync(path.join(dir, 'save', '.min-level'), '32');
+  fs.writeFileSync(path.join(dir, 'save', 'progress.json'), JSON.stringify(save || SAVE_32));
+  fs.writeFileSync(path.join(dir, 'save', '.min-level'), String(minLevel == null ? 32 : minLevel));
   return dir;
 }
 
@@ -184,6 +184,8 @@ function loadGame(gameDir, opts) {
   const getPort = typeof opts.port === 'function' ? opts.port : () => (Number(opts.port) || PORT);
   const store = new Map();
   if (opts.localSave) store.set('ssdz_save_v1', JSON.stringify(opts.localSave));
+  if (opts.localBase != null) store.set('ssdz_save_v1_base', String(opts.localBase));
+  if (opts.uiMode) store.set('ssdz_ui_mode', String(opts.uiMode));
   const removed = [];
   const dom = fakeDom();
   const pages = [];
@@ -242,7 +244,7 @@ function loadGame(gameDir, opts) {
     UI.toast = function (m) { (window.__toasts = window.__toasts || []).push(String(m)); };
     window.Engine = window.Engine || {};
     Engine.loadImage = function () { return Promise.resolve(null); };
-    Engine.loadSheets = function () { return Promise.resolve(); };
+    Engine.loadSheets = function () { return ${opts.slowLoad ? 'new Promise(function (r) { setTimeout(r, 2000); })' : 'Promise.resolve()'}; };
     Engine.pinSheets = function () {};
     Engine.SHEETS = {}; Engine.makePlayer = function () { return { list: [] }; };
     Engine.updatePlayer = function () {}; Engine.drawPlayer = function () {};
@@ -267,7 +269,13 @@ function loadGame(gameDir, opts) {
     dom.fire('DOMContentLoaded');
     for (const fn of windowListeners['DOMContentLoaded'] || []) fn({});
   } catch (e) { bootError = e; }
-  return { ctx, store, removed, dom, pages, bootError, loadErrors };
+  return {
+    ctx, store, removed, dom, pages, bootError, loadErrors,
+    /** 触发 window 上的事件（桩 DOM 不会自己派发；安卓桥接就绪事件测试用）。 */
+    dispatchWindow(name, detail) {
+      for (const fn of windowListeners[name] || []) fn({ type: name, detail });
+    },
+  };
 }
 
 /** 递归取元素文本（桩 DOM 的 innerHTML 是原样字符串，这里统一用 textContent 递归）。 */
@@ -309,6 +317,39 @@ record('磁盘 32 级 + 残留 1 级 localStorage → 必须载入 32 级，并�
   assert.equal(w.ok, true, '自动保存必须成功：' + JSON.stringify(w));
   const disk = JSON.parse(fs.readFileSync(path.join(game, 'save', 'progress.json'), 'utf8'));
   assert.equal(disk.goldPoint, st.goldPoint, '改动必须写进磁盘存档');
+  srv.kill();
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+});
+
+/* 这批的启动优化：经典界面的战斗走 `SfFight`（SVG），现代 canvas 战斗那 80 多张图
+ *（约 27 MB）不该再拖住首屏。以前 boot 里 `race(battleLoad, 2500ms)`，素材越多首屏越慢；
+ * 现在只有现代界面会在首页挂好后空闲补拉，经典界面直接跳过。 */
+record('经典界面启动不预热 canvas 战斗图集（现代战斗专用，约 27 MB）', async () => {
+  const game = makeGameCopy();
+  const srv = startServer(game);
+  await srv.ready;
+  const g = loadGame(game, { port: () => PORT, uiMode: 'classic' });
+  await sleep(1200);
+  assert.equal(g.ctx.Main.battleAssetsReady(), false,
+    '经典模式启动时不该拉 canvas 战斗图集（由 Main.preloadBattleAssets 显式触发）');
+  srv.kill();
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+});
+
+record('启动中桥接就绪事件 → 不许把页面刷成 reload 循环（安卓每次启动都会发）', async () => {
+  const game = makeGameCopy();
+  const srv = startServer(game);
+  await srv.ready;
+  /* 素材加载放慢：模拟安卓第一次进游戏要拉几秒图集。旧代码在这个窗口里收到
+   * ssdz-save-transport-ready 就会 retryFileSave → 读档成功 → reload；新页面又在素材
+   * 加载阶段收到同一个事件 → 每 0.8 秒刷一次，启动进度永远停在 25%（模拟器实测）。 */
+  const g = loadGame(game, { port: () => PORT, slowLoad: true });
+  g.dispatchWindow('ssdz-save-transport-ready');
+  await sleep(1200);
+  assert.equal(g.pages.filter((p) => p === 'reload').length, 0,
+    '启动中的桥接就绪事件不该触发 reload');
+  const st = g.ctx.State.state();
+  assert.equal(st && st.level, 32, '素材加载完仍要载入磁盘 32 级档');
   srv.kill();
   fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 });
@@ -375,8 +416,126 @@ record('服务器仍有水位线防线：1 级空档不许覆盖 32 级存档文
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(SAVE_LOCAL_1),
   });
   assert.equal(res.status, 409, '低于水位线的写入必须被拒绝');
+  /* 只拦 1 级空档不够：初始档玩到 2 级同样不能盖掉 32 级正式档。 */
+  const lv2 = Object.assign({}, SAVE_LOCAL_1, { level: 2, allWins: 1, name: '旧档' });
+  const res2 = await fetch(`http://127.0.0.1:${port}/__save`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(lv2),
+  });
+  assert.equal(res2.status, 409, '2 级旧档也不许覆盖 32 级正式档');
   const disk = JSON.parse(fs.readFileSync(path.join(game, 'save', 'progress.json'), 'utf8'));
-  assert.equal(disk.level, 32, '磁盘存档不能被 1 级空档覆盖');
+  assert.equal(disk.level, 32, '磁盘存档不能被 1 级/2 级旧档覆盖');
+  srv.kill();
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+});
+
+record('换包后当前槽是 1 级空档：自动载入另一槽的进度，不能停在 1 级新档', async () => {
+  /* 复现用户口径「存档在初始档与有进度的档之间横跳」：
+   * 最后一次保存的顶层是「现代 1 级」（初始档被写回顶层），经典 40 级在 __dualOther；
+   * 换包后 localStorage 偏好仍是 modern，旧逻辑就会停在现代 1 级；下一次启动
+   * 偏好变化又按 classic 读回 40 级。现在当前槽是空档、另一槽有进度时直接救回 40 级。 */
+  const dual = {
+    name: '现代新号', level: 1, exp: 0, power: 5, agility: 4, speed: 5, maxHp: 40,
+    energy: 90, maxEnergy: 90, goldPoint: 100, weapons: [], skills: [], props: { 1: 3 },
+    settings: { volume: 1, muted: false, resolution: 'auto', fullscreen: false, uiMode: 'modern' },
+    savedAt: Date.now(), __dualOther: {
+      name: '经典老号', level: 40, exp: 0, power: 60, agility: 50, speed: 50, maxHp: 500,
+      energy: 90, maxEnergy: 90, goldPoint: 500, weapons: [], skills: [], props: { 1: 3 },
+      settings: { volume: 1, muted: false, resolution: 'auto', fullscreen: false, uiMode: 'classic' },
+      savedAt: Date.now(),
+    },
+  };
+  const game = makeGameCopy(dual, 40);
+  const srv = startServer(game);
+  const port = await srv.ready;
+  const g = loadGame(game, { uiMode: 'modern', port: () => PORT });
+  await sleep(1200);
+  const st = g.ctx.State.state();
+  assert.ok(st, '必须载入一份可玩的进度');
+  assert.equal(st.level, 40, '当前槽是 1 级空档时要自动用另一槽的 40 级档');
+  assert.equal(st.name, '经典老号');
+  assert.equal(g.store.get('ssdz_ui_mode'), 'classic', '自动认领后要把界面偏好写回，下一次启动不再跳');
+  assert.equal(g.pages.filter((p) => p === 'reload').length, 0, '不该靠 reload 掩盖');
+  srv.kill();
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+});
+
+record('转生降回 1 级后还能继续存 2 级：水位线不能把合法降级误拦', async () => {
+  const game = makeGameCopy();
+  const srv = startServer(game);
+  await srv.ready;
+  const g = loadGame(game, { port: () => PORT });
+  await sleep(1200);
+  const st = g.ctx.State.state();
+  assert.equal(st.level, 32);
+  st.level = 1; st.reborn = 1; st.allWins = 120;
+  g.ctx.State.save();
+  await sleep(500);
+  let disk = JSON.parse(fs.readFileSync(path.join(game, 'save', 'progress.json'), 'utf8'));
+  assert.equal(disk.level, 1, '转生档必须能写回 1 级');
+  assert.equal(disk.reborn, 1);
+  st.level = 2; st.exp = 1;
+  g.ctx.State.save();
+  await sleep(500);
+  disk = JSON.parse(fs.readFileSync(path.join(game, 'save', 'progress.json'), 'utf8'));
+  assert.equal(disk.level, 2, '转生后继续升级必须能存（不能被旧 32 级水位线挡住）');
+  srv.kill();
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+});
+
+record('换包后旧单槽档与界面偏好不一致：仍要载入进度，不能变成标题/新开局', async () => {
+  /* 旧版只有单槽存档时，settings.uiMode 可能写的是 modern，而 localStorage 已经是 classic。
+   * 旧逻辑会把这份唯一的进度塞进 otherSlot、S=null → 标题页；下一次启动又读回 32 级。 */
+  const legacy = Object.assign({}, SAVE_32, {
+    settings: { volume: 1, muted: false, resolution: 'auto', fullscreen: false, uiMode: 'modern' },
+  });
+  const game = makeGameCopy(legacy, 32);
+  const srv = startServer(game);
+  const port = await srv.ready;
+  const g = loadGame(game, { uiMode: 'modern', port: () => PORT });
+  await sleep(1200);
+  const st = g.ctx.State.state();
+  assert.ok(st, '旧单槽档必须被载入');
+  assert.equal(st.level, 32, '不能因为界面偏好不同就把 32 级旧档藏起来');
+  assert.equal(st.name, 'Charles');
+  assert.equal(g.pages.filter((p) => p === 'reload').length, 0);
+  srv.kill();
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+});
+
+record('换包后桥接迟到：浏览器里的初始档/2 级旧档不许写回覆盖磁盘 32 级档', async () => {
+  const game = makeGameCopy();
+  const srv = startServer(game);
+  const port = await srv.ready;
+  const g = loadGame(game, { localSave: SAVE_LOCAL_1, port: () => PORT });
+  await sleep(1200);
+  assert.equal(g.ctx.State.state().level, 32, '先载入磁盘正式档');
+  /* 模拟桥接迟到时页面已经按 1 级兜底档开了新局，打了半场升到 2 级，随后自动保存。
+   * 只拦「1 级空档」是不够的：2 级旧档同样不能盖掉 32 级正式档。 */
+  g.ctx.State.newGame('初始试探');
+  g.ctx.State.state().level = 2;
+  g.ctx.State.state().allWins = 1;
+  const r = await g.ctx.State.fileWrite();
+  assert.equal(r.ok, false, '文件里已有 32 级进度时，2 级旧档也必须被拒绝');
+  assert.match(String(r.msg), /已有进度|没有覆盖|已有 32 级|2 级旧档/, '拒绝原因要能看懂：' + r.msg);
+  await sleep(300);
+  const disk = JSON.parse(fs.readFileSync(path.join(game, 'save', 'progress.json'), 'utf8'));
+  assert.equal(disk.level, 32, '磁盘正式档不能被初始档覆盖');
+  assert.equal(disk.name, 'Charles');
+  srv.kill();
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+});
+
+record('调试面板彻底重置是唯一允许把 1 级档写回去的路径', async () => {
+  const game = makeGameCopy();
+  const srv = startServer(game);
+  await srv.ready;
+  const g = loadGame(game, { port: () => PORT });
+  await sleep(1200);
+  g.ctx.State.newGame('重置鼠', { force: true });
+  await sleep(300);
+  const disk = JSON.parse(fs.readFileSync(path.join(game, 'save', 'progress.json'), 'utf8'));
+  assert.equal(disk.level, 1, '显式重置应该真的落盘');
+  assert.equal(disk.name, '重置鼠');
   srv.kill();
   fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 });
@@ -419,6 +578,7 @@ record('导入本地存档的服务器契约：先备份 → force 写回 → me
   const meta = await (await fetch(`http://127.0.0.1:${port}/__save?meta=1`)).json();
   assert.equal(meta.level, 32, 'meta 要报出当前档等级');
   assert.equal(meta.minLevel, 32, 'meta 要报出水位线');
+  assert.equal(meta.maxLevel, 32, 'meta 要报出双槽最高等级（1 级空档保护用它）');
 
   // ③ force 写回一份 40 级档（模拟玩家导入自己的存档）
   const imported = Object.assign({}, SAVE_32, { level: 40, name: 'Charles' });
@@ -448,6 +608,19 @@ record('导入本地存档的服务器契约：先备份 → force 写回 → me
   assert.equal(notSave.status, 400, '数组不是存档对象，必须被拒');
   assert.equal(JSON.parse(fs.readFileSync(savePath, 'utf8')).level, 40, '脏数据不能改动正式存档');
 
+  // ⑥ 双界面存档：当前界面 1 级、另一槽 40 级，水位线必须看两槽最高等级，允许写入
+  const dualLow = Object.assign({}, SAVE_LOCAL_1, {
+    name: '现代新号', level: 1,
+    __dualMode: 'modern', __dualOther: { name: '经典40', level: 40, weapons: [], skills: [], props: {} },
+  });
+  const dualRes = await fetch(`http://127.0.0.1:${port}/__save`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(dualLow),
+  });
+  assert.equal(dualRes.status, 200, '另一界面有 40 级进度时，当前 1 级档不能被水位线误拦');
+  const dualDisk = JSON.parse(fs.readFileSync(savePath, 'utf8'));
+  assert.equal(dualDisk.level, 1, '顶层保存当前界面的 1 级');
+  assert.equal(dualDisk.__dualOther.level, 40, '另一界面 40 级要一起落盘');
+
   srv.kill();
   fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 });
@@ -476,6 +649,101 @@ record('导入建档时的校验：合法存档放行、脏数据拦下', async 
   assert.ok(check({ name: '', level: 5, weapons: [], skills: [], props: {} }), '空名字要拦下');
   assert.ok(check({ name: 'x', level: 'abc', weapons: [], skills: [], props: {} }), '等级不是数字要拦下');
   assert.ok(check({ name: 'x', level: 5, weapons: [], skills: [], props: [] }), 'props 是数组要拦下');
+});
+
+record('导入存档：先载入内存、写后核对，失败能回滚', () => {
+  /* 直接跑真实的 js/state.js：导入不再只是「把原文塞进存储」，
+   * 而是先在内存里按双槽规则载入、生成规范化正文，写盘后再核对当前槽位。
+   * 这一步锁住「提示成功、实际还是旧档」的假成功。 */
+  const storage = new Map();
+  const ctx = {
+    localStorage: {
+      getItem: (k) => storage.get(k) ?? null,
+      setItem: (k, v) => storage.set(k, String(v)),
+      removeItem: (k) => storage.delete(k),
+    },
+    console, Date, Math, setTimeout, clearTimeout,
+  };
+  ctx.window = ctx;
+  vm.createContext(ctx);
+  for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/state.js']) {
+    vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
+  }
+  const S = ctx.State;
+  S.newGame('旧档玩家');
+  S.state().level = 12;
+  S.save();
+  const before = S.exportPayload();
+  const imported = JSON.parse(before);
+  imported.name = '导入测试';
+  imported.level = 40;
+  imported.exp = 1234;
+  const prep = S.prepareImport(JSON.stringify(imported));
+  assert.ok(prep.ok, '合法存档要能准备导入：' + (prep && prep.msg));
+  assert.equal(S.state().name, '导入测试', '导入后内存里应是新档');
+  assert.equal(S.state().level, 40, '导入后内存等级应是 40');
+  assert.ok(S.verifyImport(prep), '写后核对：名字和等级必须与载入的一致');
+  assert.equal(JSON.parse(prep.payload).level, 40, '写盘正文应是规范化后的 40 级档');
+  const bad = S.prepareImport('{bad json');
+  assert.equal(bad.ok, false, '坏 JSON 必须拒绝');
+  assert.equal(S.state().level, 40, '坏 JSON 不能改内存');
+  assert.ok(S.restorePayload(before), '回滚快照要能重新载入');
+  assert.equal(S.state().level, 12, '回滚后应回到旧档');
+});
+
+record('安卓导入：文件选择器不能只认 application/json', () => {
+  /* 微信/QQ/部分 OEM 文件管理器把导出的 .json 标成 text/plain 或 application/octet-stream；
+   * `<input accept>` 只写 .json,application/json 时这些文件在选择器里不显示，表现就是
+   * “导出成功但导入选不到文件”。这里锁住放宽后的白名单。 */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  const m = src.match(/input\.accept\s*=\s*'([^']+)'/);
+  assert.ok(m, 'classic-ui.js 的 pickJsonFile 要设置 input.accept');
+  for (const mime of ['application/json', 'text/plain', 'application/octet-stream']) {
+    assert.ok(m[1].includes(mime), '文件选择器要接受 ' + mime);
+  }
+});
+
+record('桌面导出存档：安装版走 export_save 命令，便携轻壳走 /__export', async () => {
+  const rust = fs.readFileSync(path.join(ROOT, 'src-tauri', 'src', 'lib.rs'), 'utf8').replace(/\r\n/g, '\n');
+  const cu = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/fn export_save\(app: tauri::AppHandle, file_name: String, data: String\)/.test(rust),
+    '安装版必须注册 export_save 命令（iOS 还要拿到 AppHandle 定位 Documents）');
+  assert.ok(/path == "\/__export"/.test(rust) && /dirs::download_dir\(\)/.test(rust),
+    '便携轻壳必须有 /__export 且写系统下载目录（dirs::download_dir）');
+  assert.ok(/async function nativeSave\(/.test(cu) &&
+    /invoke\('export_save', \{ fileName, data: text \}\)/.test(cu),
+    '前端要优先调 export_save，失败再退回 Blob');
+});
+
+record('iOS 导出存档：Documents / 文件 App / 粘贴兜底', () => {
+  /* iOS 不能像桌面那样写系统「下载」目录，也不能赌 WKWebView 的 `<a download>`。
+   * 约定：Rust 把存档写进 App 的 Documents，Info.plist 打开文件共享；
+   * 前端给出「文件」App 路径，并在失败时提供系统分享 / 复制全文；
+   * 导入除文件选择器外，还必须有粘贴文本的保底入口。 */
+  const rust = fs.readFileSync(path.join(ROOT, 'src-tauri', 'src', 'lib.rs'), 'utf8').replace(/\r\n/g, '\n');
+  const cu = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  const plist = fs.readFileSync(path.join(ROOT, 'src-tauri', 'Info.ios.plist'), 'utf8');
+  assert.ok(/fn export_to_documents\(app: &tauri::AppHandle/.test(rust) &&
+    /document_dir\(\)/.test(rust) && /\"display\": format!\(\"「文件」App/.test(rust),
+    'iOS 导出要写 App 的 Documents，并返回「文件」App 的可读路径');
+  assert.ok(/<key>UIFileSharingEnabled<\/key>\s*<true\/>/.test(plist) &&
+    /<key>LSSupportsOpeningDocumentsInPlace<\/key>\s*<true\/>/.test(plist),
+    'Info.ios.plist 要让 Documents 在「文件」App 可见');
+  assert.ok(/function iosClient\(/.test(cu) && /function showIOSExportDone\(/.test(cu) &&
+    /function shareSaveFile\(/.test(cu) && /function copySaveText\(/.test(cu) &&
+    /function importSaveFromPaste\(/.test(cu),
+    '前端要有 iOS 导出提示 / 分享 / 复制，以及粘贴导入兜底');
+  /* iOS 16~24 的 WKWebView 没有系统文件选择面板（wry 只在 macOS 实现 runOpenPanel）。
+   * 导入必须能原生列出 App 的 Documents 并读回，不能只靠 <input type=file>。 */
+  assert.ok(/fn list_save_files\(/.test(rust) && /fn read_save_file\(/.test(rust) &&
+    /fn safe_import_name\(/.test(rust) && /document_dir\(\)/.test(rust),
+    'iOS 导入要有原生 list_save_files / read_save_file，并限制在 Documents 内的 .json');
+  assert.ok(/function openIOSExportList\(/.test(cu) && /invoke\('list_save_files'\)/.test(cu) &&
+    /invoke\('read_save_file', \{ name: it\.file \}\)/.test(cu),
+    'iOS 导入页要能列出并读取 App 导出的存档');
+  assert.ok(/State\.prepareImport/.test(cu) && /State\.verifyImport/.test(cu) &&
+    /restoreImportedSave\(beforeRaw, info\)/.test(cu),
+    '导入必须先载入内存、写后核对，并在失败时回滚旧档（不能假成功）');
 });
 
 (async () => {

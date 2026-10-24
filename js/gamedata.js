@@ -14,29 +14,52 @@
 (function () {
   'use strict';
 
-  // references/new/reference.md 的逐级经验表。51级以后缺史料，沿用每级+250的离线补足。
+  /* `references/ssfight/unpacked/06-游戏数据/松鼠数据表.全量.md` 的「经验表」：
+   * 1~50 级与旧表逐值相同；51~70 级原来缺史料、按每级 +250 补，现按原表补齐
+   * （51 级 9500 … 70 级 38580）。71~90 级原表没有：按 70 级后的同一条曲线
+   * （每级 ×1.08，取整到 10）外推，正好接上 `maxLevel = 90`（MainMovie.as:19620）。 */
   /* ============================================================
    * 【GD1】经验表与学习限制
    * ============================================================ */
   const EXP_TABLE = [0, 20, 60, 140, 220, 310, 400, 490, 580, 680, 850, 1020, 1140, 1270, 1400,
     1530, 1660, 1790, 1930, 2070, 2220, 2360, 2510, 2660, 2810, 2960, 3110, 3270, 3430, 3590,
     3750, 3910, 4080, 4240, 4410, 4580, 4750, 4920, 5100, 5270, 5450, 5630, 5810, 5990, 6170,
-    6350, 6530, 6720, 6900, 7090, 7280];
+    6350, 6530, 6720, 6900, 7090, 7280,
+    /* 51~70：原版「经验表」逐行抄录 */
+    9500, 10180, 10910, 11700, 12560, 13490, 14490, 15570, 16740, 18010,
+    19390, 20890, 22510, 24270, 26180, 28260, 30520, 32980, 35660, 38580,
+    /* 71~90：同曲线外推（×1.08/级，取整到 10） */
+    41670, 45000, 48600, 52490, 56690, 61230, 66130, 71420, 77130, 83300,
+    89960, 97160, 104930, 113320, 122390, 132180, 142750, 154170, 166500, 179820];
   function nextExp(level) {
     if (level < EXP_TABLE.length) return EXP_TABLE[level];
-    return EXP_TABLE[EXP_TABLE.length - 1] + (level - EXP_TABLE.length + 1) * 250;
+    /* 90 级是硬上限，走不到这里；给旧工具/异常等级留一条同曲线兜底。 */
+    let v = EXP_TABLE[EXP_TABLE.length - 1];
+    for (let lv = EXP_TABLE.length; lv <= level; lv++) v = Math.round(v * 1.08 / 10) * 10;
+    return v;
   }
   const WS_LEVELS = [2, 3, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23, 26, 29, 32, 35, 38, 41, 44, 47, 50, 56, 62, 68];
-  const ATTRIBUTE_BOOK_LEVELS = [53, 59, 65];
+  /* 53/59/65 级发属性书是旧离线版的自创（原版服务端升级回包没有这三个道具；
+   * 原版 1~90 级每级都是「+3 属性 +5 生命」）。为把 90 级总获取额对齐到 651，
+   * 这里不再替换成长；已有属性书仍可按道具说明使用（8 点）。 */
+  const ATTRIBUTE_BOOK_LEVELS = [];
   function wsLimit(level) { return WS_LEVELS.filter(lv => lv <= level).length; }
   function canLearn(kind, id, level) {
     id = Number(id);
     if (kind === 'skill' && id === 13) return false;
     return level >= 50 || !(kind === 'weapon' ? [16, 17] : [23, 24]).includes(id);
   }
+  /** 被动 1~5：1~10 级按原表每级增长；11~15 级按原表“再提高 N”逐真级累加。 */
   function passiveBonus(id, level) {
+    id = Number(id);
     const lv = Math.max(1, Math.min(15, Number(level) || 1));
-    return id === 1 || id === 2 ? 2 * lv : id === 3 ? 2 + lv - 1 : id === 4 ? 5 + 8 * (lv - 1) : 0;
+    const baseLv = Math.min(lv, 10);
+    const extra = trueSkillValue(id, lv);
+    if (id === 1 || id === 2) return 2 * baseLv + extra;
+    if (id === 3) return 1 * baseLv + extra;
+    if (id === 4) return 8 * baseLv + extra;
+    if (id === 5) return 10 + 2 * (baseLv - 1) + extra;
+    return 0;
   }
   function initialStats() {
     // 资料确定总量与生命区间，随机分配权重未留存；采用等概率分配。
@@ -46,17 +69,24 @@
     return stats;
   }
 
-  // 关卡类型（stageId 1-6 螳螂, 7-12 仙鹤, 13-18 熊猫；每类 6 星）
+  // 关卡类型（1-6 螳螂, 7-12 仙鹤, 13-18 熊猫；19-24/25-30/31-36 = 超级螳螂/仙鹤/熊猫，
+  // 每类 6 星。超级大关照原版 `showhardWin`：每关只有 **1 个敌人**、经验 100 起，不再是三连战。）
   /* ============================================================
    * 【GD2】关卡数值（类型/血量/经验/碎片）
    * ============================================================ */
   const STAGE_TYPES = [
-    { name: '螳螂', desc: '身手敏捷，攻击速度快，当生命过低时会有惊人的爆发力', recommend: '建议10-15级玩家挑战', anim: 'tl', sheets: ['tl', 'tl_effect'] },
-    { name: '仙鹤', desc: '动作优雅，柔中带刚，前期凶猛但不擅长持久战', recommend: '建议15-20级玩家挑战', anim: 'xh', sheets: ['xh1', 'xh2', 'xh_effect1', 'xh_effect2'] },
-    { name: '熊猫', desc: '憨厚可爱，擅长在对手进攻时抓住破绽进行反击', recommend: '建议20-25级玩家挑战', anim: 'xm', sheets: ['xm1', 'xm2', 'xm_effect'] },
+    { name: '螳螂', desc: '身手敏捷，攻击速度快，当生命过低时会有惊人的爆发力', recommend: '建议10-15级玩家挑战', anim: 'tl', sheets: ['tl', 'tl_effect'], gate: 1, enemies: 3 },
+    { name: '仙鹤', desc: '动作优雅，柔中带刚，前期凶猛但不擅长持久战', recommend: '建议15-20级玩家挑战', anim: 'xh', sheets: ['xh1', 'xh2', 'xh_effect1', 'xh_effect2'], gate: 2, enemies: 3 },
+    { name: '熊猫', desc: '憨厚可爱，擅长在对手进攻时抓住破绽进行反击', recommend: '建议20-25级玩家挑战', anim: 'xm', sheets: ['xm1', 'xm2', 'xm_effect'], gate: 3, enemies: 3 },
+    { name: '超级螳螂', desc: '超级螳螂！不要怕，没准儿能打过。', recommend: '建议30-35级玩家挑战', anim: 'tl', sheets: ['tl', 'tl_effect'], gate: 4, enemies: 1, super: true },
+    { name: '超级仙鹤', desc: '超级仙鹤！你觉得够强大就来试试吧。', recommend: '建议35-40级玩家挑战', anim: 'xh', sheets: ['xh1', 'xh2', 'xh_effect1', 'xh_effect2'], gate: 5, enemies: 1, super: true },
+    { name: '超级熊猫', desc: '超级熊猫！能打过就说明你已经是神鼠了！', recommend: '建议40级以上玩家挑战', anim: 'xm', sheets: ['xm1', 'xm2', 'xm_effect'], gate: 6, enemies: 1, super: true },
   ];
-  function stageTypeOf(stageId) { return STAGE_TYPES[Math.floor((stageId - 1) / 6)]; }
+  function stageTypeOf(stageId) { return STAGE_TYPES[Math.max(0, Math.min(STAGE_TYPES.length - 1, Math.floor((stageId - 1) / 6)))]; }
   function stageStar(stageId) { return ((stageId - 1) % 6) + 1; }
+  /** 这一关有几个敌人：普通大关 3 个，超级大关 1 个（原版 `showhardWin` 的两种文案）。 */
+  function stageEnemyCount(stageId) { const t = stageTypeOf(stageId); return t && t.enemies ? t.enemies : 3; }
+  function isSuperStage(stageId) { return !!(stageTypeOf(stageId) && stageTypeOf(stageId).super); }
 
   // 攻略记载的关卡NPC血量与经验：同星级同位置三者一致，差异只在攻击模式。
   // 字典里熊猫4-6星的血量/属性异常膨胀（疑为原数据错误），以此表为准。
@@ -102,10 +132,17 @@
    * 类型系数是用来抵消三种战斗风格的实际强度差（仙鹤开场展翅/前期 1.3 倍、熊猫 45% 反击、
    * 螳螂双击+低血爆发），数值同样由测量得出。 */
   const STAGE_USE_LEVEL_MODEL = true;
-  const STAGE_LEVEL_BAND = Object.freeze([[10, 15], [15, 20], [20, 25]]);
+  const STAGE_LEVEL_BAND = Object.freeze([[10, 15], [15, 20], [20, 25], [30, 35], [35, 40], [40, 45]]);
   const STAGE_ROLE_STAT = Object.freeze([0.70, 0.78, 0.72]);
   const STAGE_ROLE_HP = Object.freeze([0.90, 1.05, 1.20]);
   const STAGE_TYPE_SCALE = Object.freeze({ tl: 1.15, xh: 0.92, xm: 1.02 });
+  /* 超级大关单敌人：三侠的普通类型系数（tl 1.15 / xh 0.92 / xm 1.02）是按三连战调出来的，
+   * 单挑时仙鹤偏弱、熊猫后几星偏强。给超级关单独一套形状系数与血量倍率。
+   * ⚠ 原版 viewer 里的 `Mantis_boss.swf` / `Crane_boss.swf` / `Panda_boss.swf` 与 `Panda3.swf`
+   *    SHA-256 完全相同（都是同一份熊猫动作占位），没有独立的超级三侠战斗矢量可替换；
+   *    所以超级关仍用 tl/xh/xm 的动作图集，只在数值上区分。 */
+  const SUPER_TYPE_SCALE = Object.freeze({ tl: 1.28, xh: 0.98, xm: 1.05 });
+  const SUPER_HP_MUL = Object.freeze({ tl: 1.60, xh: 1.80, xm: 1.60 });
   const STAGE_PLAYER_CURVE = Object.freeze({ statPer: 1.53, statBase: -2.23, hpPer: 13.58, hpBase: -10.44 });
   /* ============================================================
    * 【GD3】真·武器 / 真·技能（终局线）
@@ -114,30 +151,49 @@
    * 等级口径沿用原表：1~10 是普通，11~15 依次是真1~真5（upgradeMap 第 10~14 行
    * 的成功率 100/8/5/4/3% 正好对上「真1~真5」）。所以真等级 = 等级 − 10。
    *
-   * 真技能的效果**只有真5的端点**有史料（references/new/攻略.md），真1~真4 用
-   * 线性插值取整：真N ≈ 真5 × N / 5。下表每个条目标注了来源：
-   *   [史料] = 攻略写了真5端点；[平衡] = 攻略没有，本项目按同类量级定的取值。
-   * 改数值只动这一张表。 */
+   * 数值直接取 ssfight 原表：
+   *   · 真武器 `harmAdd1` 是**逐真级累计**（convertHarm 的 getTotal）；
+   *   · 真武器 `remark1`（des1）是**固定一次**的追加效果，不是每真级都加；
+   *   · 真技能 `remark1Value` 是每一档的 N；
+   *       - “有 N% 几率” = 当档绝对值（龟甲 / 色诱 / 暴击 / 皮糙 / 野球）；
+   *       - “将再提高 N” = 逐真级累加（力王~武器好手、移形、小宇宙、通灵、
+   *         绝对防御、松果、吸铁、致命反击）。
+   *   这比旧版“只取真5端点 + 线性插值”更贴近原表；原表每一档都有明确值。 */
   const TRUE_SKILL_MAX = 5;
-  const TRUE_SKILL_5 = Object.freeze({
-    7:  { key: 'guiJia',     value: 1.00, src: '史料' },   // 龟甲术：100% 几率可多次使用（多层防御）
-    8:  { key: 'stripGear',  value: 0.56, src: '史料' },   // 色诱之术：56% 几率脱光对手装备，持续 4 回合
-    9:  { key: 'crit4',      value: 0.50, src: '平衡' },   // 暴击：暴击时有 N% 几率打出 4 倍伤害
-    10: { key: 'antiCrit',   value: 0.50, src: '平衡' },   // 皮糙肉厚：额外压制对手 N% 暴击率
-    12: { key: 'doubleHit',  value: 1.00, src: '史料' },   // 野球拳：100% 几率再打一次
-    14: { key: 'cosmos',     value: 0.30, src: '史料' },   // 小宇宙爆发：基础属性 +30%
-    15: { key: 'extraFlat',  value: 18,   src: '用户提供' }, // 通灵召唤：额外 +18 点固定伤害，真级再叠加
-    18: { key: 'disarm',     value: 1.00, src: '史料' },   // 吸铁大法：100% 几率缴械
-    23: { key: 'luckyBase',  value: 137,  src: '史料' },   // 幸运一击：基础伤害 137×N
+  /* 每项：[mode, values]；mode='abs' 当档绝对值，'extra' 逐级累加，'flat' 固定值。 */
+  const TRUE_SKILL_TABLE = Object.freeze({
+    1:  { mode: 'extra', values: [3, 3, 4, 4, 5],     stat: 'power',   text: '将再提高N点力量' },
+    2:  { mode: 'extra', values: [3, 3, 4, 4, 5],     stat: 'agility', text: '将再提高N点敏捷' },
+    3:  { mode: 'extra', values: [2, 2, 3, 3, 4],     stat: 'speed',   text: '将再提高N点速度' },
+    4:  { mode: 'extra', values: [12, 16, 20, 24, 28], stat: 'hp',     text: '将再提高N点生命' },
+    5:  { mode: 'extra', values: [3, 3, 4, 4, 5],     stat: 'weapon',  text: '将再提高N点武器伤害' },
+    7:  { mode: 'abs',   values: [20, 40, 60, 80, 100], key: 'guiJia',  text: '有N%几率可多次使用' },
+    8:  { mode: 'abs',   values: [8, 16, 28, 40, 56],  key: 'stripGear', text: '有N%几率脱光对方装备，持续4回合' },
+    9:  { mode: 'abs',   values: [2, 5, 9, 14, 20],    key: 'crit4',   text: '在暴击发生时，有N%几率产生4倍伤害' },
+    10: { mode: 'abs',   values: [0.5, 1, 2, 3, 5],    key: 'antiCrit', text: '使对手暴击几率减少N%' },
+    11: { mode: 'extra', values: [4, 4, 6, 6, 8],      key: 'dodge',   text: '将再提高N%的闪避率' },
+    12: { mode: 'abs',   values: [20, 40, 60, 80, 100], key: 'doubleHit', text: '有N%几率可多使用一次' },
+    14: { mode: 'extra', values: [2, 3, 4, 5, 6],      key: 'cosmos',  text: '将再提高N%属性值' },
+    15: { mode: 'extra', values: [10, 12, 14, 16, 18], key: 'extraFlat', text: '将再提高N点伤害' },
+    16: { mode: 'extra', values: [5, 6, 7, 8, 9],      key: 'rebound', text: '将再提高N%反弹伤害' },
+    17: { mode: 'extra', values: [6, 8, 10, 12, 14],   key: 'heal',    text: '将再提高N点补血量' },
+    18: { mode: 'extra', values: [6, 8, 10, 12, 18],   key: 'disarm',  text: '收缴对手武器的成功率再提高N%' },
+    23: { mode: 'flat',  value: 10,                   key: 'luckyBase', text: '将再提高10点基础伤害' },
+    24: { mode: 'extra', values: [8, 8, 10, 10, 12],   key: 'counter', text: '将再提高N%反击伤害' },
   });
-  /* 真·武器的额外效果：数值取自原词典 weaponsMap[id].remark1
+  /** 兼容旧读取口：真5端点（绝对项取最后一档，累加项取累计值）。 */
+  const TRUE_SKILL_5 = Object.freeze(Object.keys(TRUE_SKILL_TABLE).reduce((m, k) => {
+    const row = TRUE_SKILL_TABLE[k];
+    m[k] = { key: row.key, value: row.mode === 'abs' ? row.values[4]
+      : row.mode === 'flat' ? row.value
+      : row.values.reduce((a, b) => a + b, 0), src: 'ssfight' };
+    return m;
+  }, {}));
+  /* 真·武器的追加效果：数值取自原词典 weaponsMap[id].remark1
    * （西瓜刀 +5% 连击、流星锤 +3% 扔 3 次、激光剑 +3% 暴击、狼牙棒 +6 持续伤害、
    *   板砖 +3% 打晕、忍者镖 +2% 吸血、沉默之斧 +4% 沉默）。
-   * 只在武器等级 > 10（真形态）时生效——原词典把这几条写在 remark1，就是真武器说明。 */
+   * **固定一次**，只在武器等级 > 10（真形态）时生效；不要乘真级。 */
   const TRUE_WEAPON_BONUS = Object.freeze({
-    /* 1（方天画戟）：真化后**无视装死**（口径同橡皮擦 7 / 吸铁大法 18）。
-     * 这条**不是**原词典 remark1 里的，是 2026-10 用户口径新增（见 docs/更新记录.md 需求138）。 */
-    1: { ignoreFakeDie: 1 },
     4: { combo: 5 }, 10: { triple: 3 }, 11: { crit: 3 },
     12: { dot: 6 }, 13: { stun: 3 }, 14: { lifesteal: 2 }, 16: { silence: 4 },
   });
@@ -152,25 +208,38 @@
   function trueLevel(level) {
     return Math.max(0, Math.min(TRUE_SKILL_MAX, Math.round(Number(level) || 0) - 10));
   }
-  /** 真N 的效果值：真5端点 × N/5（线性插值）。ratio 类返回 0~真5，flat 类按同比例。 */
+  /** 真技能在真N 的效果：abs/flat 返回当档值；extra 返回前 N 档累计值。 */
   function trueSkillValue(id, level) {
-    const row = TRUE_SKILL_5[Number(id)];
-    if (!row) return 0;
-    return row.value * trueLevel(level) / TRUE_SKILL_MAX;
+    const row = TRUE_SKILL_TABLE[Number(id)];
+    const n = trueLevel(level);
+    if (!row || n <= 0) return 0;
+    if (row.mode === 'flat') return row.value;
+    if (row.mode === 'abs') return row.values[n - 1];
+    return row.values.slice(0, n).reduce((a, b) => a + b, 0);
   }
-  function trueSkillRow(id) { return TRUE_SKILL_5[Number(id)] || null; }
+  /** 真技能第 N 档的原始 N（UI/说明用；extra 项不是累计值）。 */
+  function trueSkillStep(id, level) {
+    const row = TRUE_SKILL_TABLE[Number(id)];
+    const n = trueLevel(level);
+    if (!row || n <= 0) return 0;
+    if (row.mode === 'flat') return row.value;
+    return row.values[n - 1];
+  }
+  function trueSkillRow(id) { return TRUE_SKILL_TABLE[Number(id)] || null; }
 
   function stageTargetLevel(stageId) {
-    const type = Math.max(0, Math.min(2, Math.floor((Number(stageId) - 1) / 6)));
+    const type = Math.max(0, Math.min(STAGE_TYPES.length - 1, Math.floor((Number(stageId) - 1) / 6)));
     return STAGE_LEVEL_BAND[type][0] + stageStar(stageId) - 1;
   }
   const stagePlayerStat = (level) => STAGE_PLAYER_CURVE.statPer * level + STAGE_PLAYER_CURVE.statBase;
   const stagePlayerHp = (level) => STAGE_PLAYER_CURVE.hpPer * level + STAGE_PLAYER_CURVE.hpBase;
   function stageTypeScale(stageId) {
-    const type = STAGE_TYPES[Math.max(0, Math.min(2, Math.floor((Number(stageId) - 1) / 6)))];
+    const type = STAGE_TYPES[Math.max(0, Math.min(STAGE_TYPES.length - 1, Math.floor((Number(stageId) - 1) / 6)))];
     return (type && STAGE_TYPE_SCALE[type.anim]) || 1;
   }
   const stageRoleIndex = (npcIndex) => Math.max(1, Math.min(3, Math.round(Number(npcIndex) || 1))) - 1;
+  /** 超级大关只有一个敌人，按「大侠」档位算血/三维（普通关按 1/2/3 号位）。 */
+  const stageRoleOf = (stageId, npcIndex) => isSuperStage(stageId) ? 2 : stageRoleIndex(npcIndex);
 
   /* ============================================================
    * 【D5b】常驻挑战的「当日重复惩罚」
@@ -197,8 +266,14 @@
   function stageFoe(npc, stageId, anim, dailyCount) {
     const st = stageNpcStats(npc);
     const n = Math.max(0, Math.floor(Number(dailyCount) || 0));
+    /* 超级三侠（19~36 关）= 原版 `loadPlayer` 的 `chooseWz` 4/5/6，本来走
+     * `Mantis_boss.swf` / `Crane_boss.swf` / `Panda_boss.swf`。参考资料里这三个
+     * 外部 SWF 全是 404（viewer 里只有 Panda3 的占位副本），所以没有原版变异战斗
+     * 图集可挂；把 `mutant` 传给播放器，由 `Engine` 按经典精英立绘的配色做换色皮。
+     * 普通三侠不带这个标记，继续用原版 `tl/xh/xm` 图集与动作。 */
+    const mutant = isSuperStage(stageId);
     return {
-      name: npc && npc.name, level: 10 + Number(stageId) * 2,
+      name: npc && npc.name, level: stageTargetLevel(stageId) + 5,
       power: challengeDailyScale(st.power, n),
       agility: challengeDailyScale(st.agility, n),
       speed: challengeDailyScale(st.speed, n),
@@ -207,19 +282,33 @@
       skills: String((npc && npc.skills) || '').split('|').filter(Boolean)
         .map((s) => { const q = s.split(':'); return { id: +q[0], level: +q[1] }; }),
       npcType: anim,
+      mutant: mutant,
     };
   }
 
   const STAGE_HP_MUL = 1.18;
+  /* 「常驻三侠」额外增强：1~18 关的徒弟先上阵等于多一条命，这里把普通关的
+   * 三侠三维/血量再抬 12%，超级大关（19~36 变异三侠）不受这条影响。 */
+  const STAGE_REGULAR_MUL = 1.06;
+  const stageRegularMul = (stageId) => isSuperStage(stageId) ? 1 : STAGE_REGULAR_MUL;
   function stageNpcHp(stageId, npcIndex) {
-    const role = stageRoleIndex(npcIndex);
+    const role = stageRoleOf(stageId, npcIndex);
+    const regular = stageRegularMul(stageId);
     if (STAGE_USE_LEVEL_MODEL) {
-      return Math.max(1, Math.round(stagePlayerHp(stageTargetLevel(stageId)) * STAGE_ROLE_HP[role] * STAGE_HP_MUL));
+      /* 超级大关：单敌人、按大侠档位再乘类型专属倍率（比普通关的 1/3 连战强度高得多）。 */
+      const bossMul = isSuperStage(stageId) ? (SUPER_HP_MUL[stageTypeOf(stageId).anim] || 1.6) : 1;
+      return Math.max(1, Math.round(stagePlayerHp(stageTargetLevel(stageId)) * STAGE_ROLE_HP[role] * STAGE_HP_MUL * bossMul * regular));
     }
     const row = STAGE_NPC_HP[stageStar(stageId) - 1];
-    return row ? stageScale(row[role] || 0, STAGE_DIFFICULTY.hp * STAGE_HP_MUL) : 0;
+    return row ? stageScale(row[role] || 0, STAGE_DIFFICULTY.hp * STAGE_HP_MUL * regular) : 0;
   }
   function stageNpcExp(stageId, npcIndex) {
+    /* 原版 `showFightWin`：1-3 门 = 16 + 关号×3；4-6 门 = 100 + (关号−19)×10，
+     * 且超级大关只有一个敌人（这里只在 1 号位发，2/3 号位为 0）。 */
+    if (isSuperStage(stageId)) {
+      if (Number(npcIndex) !== 1) return 0;
+      return stageScale(100 + (Number(stageId) - 19) * 10, STAGE_REWARD_MULT);
+    }
     const row = STAGE_NPC_EXP[stageStar(stageId) - 1];
     return row ? stageScale(row[npcIndex - 1] || 0, STAGE_REWARD_MULT) : 0;
   }
@@ -228,8 +317,9 @@
     const raw = npc || {};
     if (STAGE_USE_LEVEL_MODEL) {
       const stageId = Number(raw.stageId) || 1;
-      const role = stageRoleIndex(raw.npcIndex);
-      const power = Math.max(1, Math.round(stagePlayerStat(stageTargetLevel(stageId)) * STAGE_ROLE_STAT[role] * stageTypeScale(stageId)));
+      const role = stageRoleOf(stageId, raw.npcIndex);
+      const typeScale = isSuperStage(stageId) ? (SUPER_TYPE_SCALE[stageTypeOf(stageId).anim] || 1) : stageTypeScale(stageId);
+      const power = Math.max(1, Math.round(stagePlayerStat(stageTargetLevel(stageId)) * STAGE_ROLE_STAT[role] * typeScale * stageRegularMul(stageId)));
       // 用字典里（含熊猫 ★4-6 修正表）的比例保留同关三人的相对形状
       const shape = (key) => { const v = Number(raw[key]), p = Number(raw.power); return v > 0 && p > 0 ? v / p : 1; };
       return { power, agility: Math.max(1, Math.round(power * shape('agility'))), speed: Math.max(1, Math.round(power * shape('speed'))) };
@@ -238,10 +328,11 @@
     // 明显是原数据错误），这里按 ★1-3 的增长斜率修正；血量仍走攻略表。
     const fix = STAGE_NPC_STAT_FIX[Number(raw.stageId)] && STAGE_NPC_STAT_FIX[Number(raw.stageId)][Number(raw.npcIndex) - 1];
     const base = fix || raw;
+    const regular = stageRegularMul(raw.stageId);
     return {
-      power: stageScale(base.power, STAGE_DIFFICULTY.power),
-      agility: stageScale(base.agility, STAGE_DIFFICULTY.agility),
-      speed: stageScale(base.speed, STAGE_DIFFICULTY.speed),
+      power: stageScale(base.power, STAGE_DIFFICULTY.power * regular),
+      agility: stageScale(base.agility, STAGE_DIFFICULTY.agility * regular),
+      speed: stageScale(base.speed, STAGE_DIFFICULTY.speed * regular),
     };
   }
 
@@ -253,12 +344,83 @@
   const AI_TITLES = ['', '', '', '的师傅', ''];
 
   // 新手初始
+  /* 幻兽（原版 `petsInfo`，MainMovie.as:19146）：id / 名字 / 星级 / 等级上限 / 领导力 / 技能。
+   * 数据只做字典；孵化概率、喂养/进化规则在 State 里收口。 */
+  const PETS = [
+    [1, '蛮犀牛', 1, 10, 5, 1], [2, '小红帽', 1, 10, 5, 2], [3, '冰原狼', 1, 10, 5, 3], [4, '水晶波波', 1, 10, 5, 5],
+    [5, '小花仙', 1, 10, 5, 4], [6, '木船河童', 1, 10, 5, 7], [7, '毒蘑菇', 1, 10, 5, 6], [8, '铁桶雪人', 2, 20, 8, 1],
+    [9, '电锯木偶', 2, 20, 8, 2], [10, '沈王爷', 2, 20, 8, 5], [11, '巨舌笼包', 2, 20, 8, 4], [12, '菜婶婶', 2, 20, 8, 7],
+    [13, '僵尸大少', 2, 20, 8, 6], [14, '哈哈小丑', 2, 20, 8, 8], [15, '长角飞龙', 3, 30, 15, 2], [16, '百战鳄鱼', 3, 30, 15, 1],
+    [17, '绿踪仙鹿', 3, 30, 15, 4], [18, '跳神娃娃', 3, 30, 15, 8], [19, '南瓜大亨', 4, 40, 24, 1], [20, '深海幽鲨', 4, 40, 24, 8],
+    [21, '小恶魔', 1, 10, 5, 9], [22, '大嘴恶花', 1, 10, 5, 11], [23, '哈拉兽', 2, 20, 8, 3], [24, '异星人', 2, 20, 8, 9],
+    [25, '哇哇', 2, 20, 8, 11], [26, '铁嘴蜂', 3, 30, 15, 3], [27, '铃音海豚', 3, 30, 15, 5], [28, '招财熊猫', 3, 30, 15, 10],
+    [29, '稻草人', 3, 30, 15, 6], [30, '酷法', 3, 30, 15, 7], [31, '神灯', 4, 40, 24, 3], [32, '仙玲', 4, 40, 24, 10],
+  ].map(([id, name, grade, maxLevel, leadership, skillId]) => ({ id, name, grade, maxLevel, leadership, skillId }));
+  /* 原版 `petsSkills`（MainMovie.as:19148）逐行抄下来的显示字段。
+   * 数值表（`松鼠数据表.xlsx` 的「幻兽技能」页）最后两列是 **X 的初始值 / 每级成长值**，
+   * 例如奋力一击 24 + 4×（等级−1）、狂暴 12% + 2%×（等级−1）。原版客户端不含服务端结算，
+   * 这里把这两列显式落成数据，Sim 与牧场详情共用同一份，避免两边各写一条公式。 */
+  const PET_SKILL_RULES = {
+    /* id: { serie, kind, base, step, percent, trigger(固定几率；null = 用 X), maxTimes,
+     *       onAction / onFakeDie / passive, hpBelow } */
+    1: { serie: '破坏', kind: 'damage', base: 24, step: 4, percent: false, trigger: 30, maxTimes: 1, onAction: true },
+    2: { serie: '破坏', kind: 'damage', base: 24, step: 4, percent: false, trigger: null, maxTimes: 1, onFakeDie: true },
+    3: { serie: '破坏', kind: 'rage', base: 12, step: 2, percent: true, trigger: null, maxTimes: -1, passive: true },
+    4: { serie: '神圣', kind: 'healPct', base: 10.5, step: 0.5, percent: true, trigger: null, maxTimes: 1, onFakeDie: true },
+    5: { serie: '神圣', kind: 'dodgeHeal', base: 11.5, step: 1.5, percent: false, trigger: null, maxTimes: -1, passive: true },
+    6: { serie: '诅咒', kind: 'healCut', base: 5.5, step: 0.5, percent: true, trigger: null, maxTimes: 1, onAction: true },
+    7: { serie: '诅咒', kind: 'weak', base: 11, step: 1, percent: true, trigger: 35, maxTimes: 1, onAction: true },
+    8: { serie: '诅咒', kind: 'seal', base: 9.5, step: 0.5, percent: true, trigger: null, maxTimes: 1, onAction: true },
+    9: { serie: '破坏', kind: 'nextCrit', base: 5.5, step: 0.5, percent: true, trigger: null, maxTimes: 1, onAction: true },
+    10: { serie: '神圣', kind: 'cleanse', base: 5.5, step: 0.5, percent: true, trigger: null, maxTimes: 1, onAction: true, hpBelow: 0.5 },
+    11: { serie: '诅咒', kind: 'dotPlus', base: 5.5, step: 0.5, percent: true, trigger: null, maxTimes: 1, onAction: true },
+  };
+  const PET_SKILLS = {
+    1: { name: '奋力一击', remark: '己方行动时30%几率发动，命中后直接减少对手X点血量', levelupRemark: '减少血量提高至X' },
+    2: { name: '逆向推倒', remark: '装死后发动，命中后直接减少对手X点血量', levelupRemark: '减少血量提高至X' },
+    3: { name: '狂暴', remark: '血量低于200点时，伤害额外提升X%', levelupRemark: '伤害额外提升至X%' },
+    4: { name: '回光术', remark: '装死后回复松鼠血量上限的X%', levelupRemark: '回血上限提高至X%' },
+    5: { name: '凌波微步', remark: '每次闪避时回复X点血量', levelupRemark: '回复血量提高至X' },
+    6: { name: '三聚氰胺', remark: '行动时有X%几率诅咒对手，使其回血效果减半', levelupRemark: '触发几率提高至X%' },
+    7: { name: '虚弱', remark: '行动时35%几率使对手受到武器攻击时额外承受X%伤害', levelupRemark: '额外承受伤害提高至X%' },
+    8: { name: '整蛊专家', remark: '行动时有X%几率封锁对手一个武器或技能', levelupRemark: '触发几率提高至X%' },
+    9: { name: '打兴奋剂', remark: '行动时有X%几率使下一次攻击必定暴击', levelupRemark: '触发几率提高至X%' },
+    10: { name: '油光满面', remark: '血量低于50%时，每次行动有X%几率移除自身负面效果', levelupRemark: '触发几率提高至X%' },
+    11: { name: '张牙舞爪', remark: '行动时有X%几率使对手的持续负面效果多持续1回合', levelupRemark: '触发几率提高至X%' },
+  };
+  for (const [id, rule] of Object.entries(PET_SKILL_RULES)) {
+    if (PET_SKILLS[id]) Object.assign(PET_SKILLS[id], rule);
+  }
+  /** 幻兽技能在当前等级下的 X（伤害点 / 回血点 / 百分比）。 */
+  function petSkillValue(id, level) {
+    const rule = PET_SKILL_RULES[Number(id)];
+    if (!rule) return 0;
+    return rule.base + rule.step * (Math.max(1, Number(level) || 1) - 1);
+  }
+  /** 这一级「行动时」的触发几率（%）：固定值优先，否则就是 X 本身。 */
+  function petSkillTrigger(id, level) {
+    const rule = PET_SKILL_RULES[Number(id)];
+    if (!rule) return 0;
+    return rule.trigger == null ? petSkillValue(id, level) : rule.trigger;
+  }
+  /** 给界面用的合并视图（名字 / 说明 / 当前 X / 当前触发几率）。 */
+  function petSkillInfo(id, level) {
+    const info = PET_SKILLS[Number(id)];
+    if (!info) return null;
+    return Object.assign({ id: Number(id), value: petSkillValue(id, level), trigger: petSkillTrigger(id, level) }, info);
+  }
+  const PET_GRADE_EXP = { 1: 1000, 2: 2000, 3: 5000, 4: 10000, 5: 20000 };
+  const PET_GRADE_COST = { 2: 50, 3: 100, 4: 200, 5: 500 };
+
   const NEW_PLAYER = {
     name: '', level: 1, exp: 0, power: 5, agility: 5, speed: 4, maxHp: 40,
     energy: 90, maxEnergy: 90, goldPoint: 100, goldCup: 0, integral: null,
     weapons: [],              // 2级首次随机获得武器或技能
     skills: [],
     gears: [], wears: {},      // gears: [{id,used,key,ext:[{id,level}]}]
+    /* 5 级换装教程的一次性白装：必须落存档。旧档没有这个字段时按等级/已有装备迁移，
+     * 避免每次打开游戏第一次进「更换装备」都再送一件。 */
+    starterGearGiven: false,
     props: { 1: 3, 2: 2 },     // 小体力药剂x3 大体力药剂x2
     freePoints: 0,             // 升级发下来、还没分配的自由属性点
     wsPicks: [],               // 升级发下来、还没选的武器/技能「三选一」组
@@ -266,8 +428,39 @@
     stages: {},                // stageId -> {npcIndex, passed}
     dailyWins: 0, allWins: 0, dailyFails: 0, allFails: 0,
     master: null, prentices: [],
-    lastEnergyTs: 0, reborn: 0, joinRankCount: 0, lotteryDate: '', lotteryFree: 1,
-    woodRecord: 0, dailyClaimDate: '', battles: [], shopPurchaseDate: '', shopPurchases: {},
+    /* 好友留言：{ 好友名: [{text, at}] }（经典「查看好友 → 留言」的本地离线实现）。 */
+    friendMessages: {},
+    lastEnergyTs: 0, reborn: 0, joinRankCount: 0, rankCupClaimWeek: '', lotteryDate: '', lotteryFree: 1,
+    /* 天梯商店的限购：`rankPurchases` 按周重置（普通商品），`rankPurchaseTotals` 是
+     * **账号累计**（力/敏/速/血永久丸，原版每个账号只能买 1 个，见 classic-extras）。 */
+    rankPurchases: {}, rankPurchaseTotals: {}, rankPurchaseWeek: '',
+    /* 金宝箱「已开出、还没点确定领取」的那一包（重开就换掉它，领取才入账）。
+     * 关掉游戏再进会自动入账，不会把已经开出的奖励弄丢；见 state.js 的 settlePendingChest。 */
+    chestPending: null,
+    /* 71~90 级升级金宝箱的**账号累计**已发数量：上限 20（每级 1 个）。
+     * 转生回到 1 级再升上来不会重复发，否则「20 箱 ×12 点」可以被转生无限刷。 */
+    levelChests: 0,
+    /* 无尽塔黑色卡片的周限：`{week:'YYYY-MM-DD', count:0}`，每周一重置，最多 10 张。
+     * 挑战塔的黑卡是一次性里程碑，不记在这里。 */
+    blackCardsWeek: { week: '', count: 0 },
+    /* 挑战塔黑卡的一次性账：`blackTowerLayer` = 已经发到第几层（旧档补发用），
+     * `blackBox100` = 100 层自选箱是否已经发过。 */
+    blackTowerLayer: 0, blackBox100: false,
+    woodRecord: 0, woodCount: 0, woodDamage: 0,
+    dailyClaimDate: '', battles: [], shopPurchaseDate: '', shopPurchases: {},
+    /* 村庄建筑（祭坛 / 神迹 / 幻兽牧场）：`{level, upgrading, doneAt, buffId, buffDate, add, addType}`。
+     * 对齐原版 `buildingInfo`（MainMovie.as:4346 `goHomeLand` 的回包）。 */
+    buildings: {
+      altar: { level: 1, upgrading: false, doneAt: 0, buffId: 0, buffDate: '', add: null, addType: -1 },
+      miracle: { level: 1, upgrading: false, doneAt: 0, buffId: 0, buffDate: '', add: { power: 0, agility: 0, speed: 0, hp: 0 }, addType: -1 },
+      beast: { level: 1, upgrading: false, doneAt: 0, buffId: 0, buffDate: '', add: null, addType: -1 },
+    },
+    /* 幻兽牧场（原版 hatchPoint / petsCapacity / playerPets）。老档没有时给一笔
+     * 可体验的孵化点；幻兽升级会再补 200 点并加存储格。 */
+    hatchPoint: 1000,
+    petsCapacity: 6,
+    pets: [],
+    petsTeam: [],
     /* 常驻挑战的「当日已通关次数」：{date, count}，每日递增惩罚的计数（见 State.challengeDailyCount）。 */
     challengeDaily: null,
     tower: { maxLayer: 0, run: null },                                    // 无尽挑战塔（主塔）
@@ -278,7 +471,7 @@
   const ARENA_TITLES = ['经验场', '碎片场'];
 
   /* 升级礼包：以前只有属性成长 + 随机武技，逢 5 级多给一份卷轴/药剂。
-   * 普通等级随机给 1~2 个消耗品，每逢 5 级和属性书等级再给一份大礼包。 */
+   * 普通等级随机给 1~2 个消耗品，每逢 5 级再给一份大礼包。 */
   const LEVEL_GIFT_SMALL = [21, 22, 1, 2, 3, 4, 5, 7];              // 卷轴 / 药剂 / 丹药 / 经验丸
   const LEVEL_GIFT_BIG = { 23: 2, 21: 3, 22: 3, 2: 2 };             // 挑战书 + 卷轴 + 大体力药剂
   const LEVEL_GIFT_RARE = [44, 3, 4, 5, 7];                          // 大礼包额外再抽一个
@@ -309,25 +502,74 @@
     return rows ? rows.map(([pid, count]) => ({ id: pid, count })) : null;
   }
 
-  /* 天梯碎片（本项目新增，id 51）：原版数据里 51~100 是空号。
-   * 依据 references/new/微信图片_20260924010916_259_2.jpg：天梯战里会飘出带「?」的金色碎片，
-   * 攒够 10 个可以随机合成一个力量/敏捷/速度转化丸；恶魔果实种子也走同一条路。
-   * 图标 images/ui/icons/prop/prop-51.png 由白色碎片改色加「?」得来。
-   * 同样只在 gamedata 里补行，GameDict.js 保持与 APK 逐字节一致。 */
+  /* 属性碎片（原版 id 66；复刻沿用 id 51 这个已占用的存档槽，避免旧档迁移）。
+   * 原版 `propsArray` 的 66 是「10 个属性碎片合出随机属性永久丸」，但用户 2026-10 口径
+   * 明确**不要属性永久增加**，改为随机合成 10/11/12 的力量/敏捷/速度转化丸
+   *（10 个 + 50 金松果）。天梯赛战斗里会飘出这块黄色三角「?」碎片。
+   * 图标 images/ui/icons/prop/prop-51.png 按 references/new/微信图片_20260924010916_259_2.jpg
+   * 的黄色三角 + 「?」重画；同样只在 gamedata 里补行，GameDict.js 保持与 APK 逐字节一致。 */
   const CONVERT_SHARD_ID = 51;
-  const CONVERT_SHARD_NAME = '天梯碎片';
+  const CONVERT_SHARD_NAME = '属性碎片';
   const CONVERT_SHARD_COST = 10;
   const CONVERT_FRUIT_ID = 46;         // 恶魔果实种子：天梯同样能掉
-  const CONVERT_PILLS = [10, 11, 12];  // 力量/敏捷/速度转化丸
+  const CONVERT_PILLS = [10, 11, 12];  // 力量/敏捷/速度转化丸（不是永久丸）
   function registerLadderShard() {
     const map = window.propMap;
     if (!map || typeof map.put !== 'function' || map.getValue(CONVERT_SHARD_ID)) return false;
     map.put(String(CONVERT_SHARD_ID), [String(CONVERT_SHARD_ID), CONVERT_SHARD_NAME,
-      CONVERT_SHARD_COST + '个' + CONVERT_SHARD_NAME + '可以随机合成1个力量/敏捷/速度转化丸。每次合成需要50个金松果。天梯赛里点飘出来的碎片可以获得。',
+      CONVERT_SHARD_COST + '个' + CONVERT_SHARD_NAME + '可以随机合成1个力量/敏捷/速度转化丸。每次合成需要50个金松果。',
       '', 'false', '2']);
     return true;
   }
   registerLadderShard();
+
+  /* 原版 Flash 有、但安卓 H5 字典里缺的几件道具。**只在 gamedata 里补行**，
+   * GameDict.js 保持与 APK 逐字节一致。id 50 在本版是「抽奖卷」（无尽塔产出），
+   * 原版 50 是金宝箱 —— 为了不破坏无尽塔存档，金宝箱改用 90，魔法袋用原版 79。
+   * 金宝箱单箱上限 12 点：原版 71~90 级每级只发 1 箱、单箱最高 16 点；
+   * 本版 71~90 级继续每级 +4 点成长（多出 80 点），所以把 20 箱从 16 点压到 12 点
+   * （20×12 = 240，与「原版 20×16 = 320」减去 80 点成长差后的 240 完全相等）。
+   * 魔法袋按原版天梯商店回收，且不再出属性点（原版说明只承诺黑装碎片与其它稀有道具）。 */
+  const EXTRA_PROPS = [
+    ['77', '黑凤凰碎片', '10个碎片可以合成1件黑色凤凰装备（顶级黑色套装）。挑战塔、无尽塔的黑色卡片、魔法袋、金宝箱与黑装融合都有几率获得。', '', 'false', '3'],
+    ['78', '黑圣熊碎片', '10个碎片可以合成1件黑色圣熊装备（顶级黑色套装）。挑战塔、无尽塔的黑色卡片、魔法袋、金宝箱与黑装融合都有几率获得。', '', 'false', '3'],
+    ['79', '魔法袋', '打开后随机获得一种：6级宝石3%、5级宝石15%、蓝色碎片15%（5~10个）、召唤证17%（1~2个）、金松果25%（300~500）、孵化点25%（100）；并额外获得黑色卡片×1。原版另有黑凤凰/黑圣熊碎片，离线版由黑色卡片承接。', '', 'false', '1'],
+    ['80', '黑色卡片', '打开后选择凤凰或圣熊：获得对应碎片1~2个，并额外获得100/200/400金松果。挑战塔（每20/50层1张）、无尽塔（每累计50层1张，周限10）、魔法袋、金宝箱与黑装融合都有几率获得。', '', 'false', '1'],
+    ['82', '召唤证', '在体力不足时，可以使用召唤证参加幻兽竞技。', '10', 'true', '2'],
+    ['89', '黑装自选箱', '打开后可以任选1件黑色凤凰或黑色圣熊装备（头/拳/衣/鞋）。挑战塔第100层首通获得。', '', 'false', '1'],
+    ['90', '金宝箱', '打开后随机获得一种：6级宝石4%、5级宝石22%（10%两颗/12%一颗）、基础属性点49%（6/8/10/12点）、金松果15%（500/750/1000）、黑色卡片8%、完整黑装2%（仅首开）。可花金松果重开，最多500次，单箱最高12点；重开不出完整黑装。', '20', 'false', '5'],
+  ];
+  function registerExtraProps() {
+    const map = window.propMap;
+    if (!map || typeof map.put !== 'function') return 0;
+    let n = 0;
+    for (const row of EXTRA_PROPS) {
+      if (map.getValue(row[0])) continue;
+      map.put(row[0], row.slice());
+      n++;
+    }
+    return n;
+  }
+  registerExtraProps();
+
+  /* 原版天梯商店有「魔法袋」（`松鼠数据表` 其他商店：积分1300 / 金杯2000 / 金松果200）。
+   * 安卓 H5 的 GameDict 只有 14 条、没有这一件，所以同样只在 gamedata 里补一行，
+   * 不改已提交的 `js/gamedict.js`。限购按账号累计 1 次（与永久属性丸同一套账）。 */
+  const EXTRA_RANK_GOODS = [
+    ['19', '19,魔法袋,79,1,2000,200,1300,1,1,使用后有一定几率获得稀有道具。', ','],
+  ];
+  function registerRankGoods() {
+    const map = window.rankgoodsMap;
+    if (!map || typeof map.put !== 'function') return 0;
+    let n = 0;
+    for (const row of EXTRA_RANK_GOODS) {
+      if (map.getValue(row[0])) continue;
+      map.put(row[0], row[1].split(row[2]));
+      n++;
+    }
+    return n;
+  }
+  registerRankGoods();
 
   /* 原版道具说明里写着经验丸「竞技场中无效」，但本版经验竞技场确实吃经验丸加成
    *（见 js/classic-extras.js 的 gainExpWithBoost 调用与 tools/test-extras.cjs），
@@ -676,6 +918,81 @@
   const GEAR_BASE_ATTR = {};
   for (const row of GEAR_BASE) GEAR_BASE_ATTR[row[0]] = row[5];
 
+  /* 黑装：`GEAR_BASE` 里 46/47/67~72 共 8 套、32 件的数据是全的，但 APK 的
+   * `gearMap` 只有 128 件（1~124 / 201~204）、`gearSetMap` 只有 32 套 —— 所以
+   * `addGear(281)` 现在会返回 null。这里在运行期补行，**不改已提交的 gamedict.js**：
+   *   · gearSetMap：品质 5、使用等级 60（原版 `showFusion` 写「橙装50，黑装60级」）、
+   *     组号/序号取原版 equipsArray（46=21 / 47=22 / 67=19 / 68=20 / 69=23 / 70=24 / 71=25 / 72=26）；
+   *   · gearMap：abilities 按部位填（头=敏 / 手=力 / 衣=血 / 鞋=速），与 GEAR_BASE 逐值一致。
+   * quality=5 的黑装在这里补；quality=4 的橙装由下面 registerOrangeGear() 按原版 288 行补齐。 */
+  const BLACK_GEAR_SETS = Object.freeze([
+    Object.freeze({ id: 46, group: 21, index: 33 }),
+    Object.freeze({ id: 47, group: 22, index: 34 }),
+    Object.freeze({ id: 67, group: 19, index: 35 }),
+    Object.freeze({ id: 68, group: 20, index: 36 }),
+    Object.freeze({ id: 69, group: 23, index: 37 }),
+    Object.freeze({ id: 70, group: 24, index: 38 }),
+    Object.freeze({ id: 71, group: 25, index: 39 }),
+    Object.freeze({ id: 72, group: 26, index: 40 }),
+  ]);
+  const BLACK_SHARD_SET = Object.freeze({ 77: 71, 78: 72 });
+  const BLACK_CARD_ID = 80;
+  const BLACK_BOX_ID = 89;
+  function registerBlackGear() {
+    const gmap = window.gearMap, smap = window.gearSetMap;
+    if (!gmap || !smap || typeof gmap.put !== 'function' || typeof smap.put !== 'function') return 0;
+    let n = 0;
+    for (const set of BLACK_GEAR_SETS) {
+      if (smap.getValue(String(set.id))) continue;
+      smap.put(String(set.id), [String(set.id), '5', String(set.group), '60', '1400', '1400', String(set.index)]);
+      n++;
+    }
+    for (const row of GEAR_BASE) {
+      const [id, setId, quality, type, name, base] = row;
+      if (Number(quality) !== 5) continue;
+      if (!BLACK_GEAR_SETS.some((set) => set.id === Number(setId))) continue;
+      if (gmap.getValue(String(id))) continue;
+      const abilities = [0, 0, 0, 0];
+      abilities[Number(type)] = Number(base);
+      gmap.put(String(id), [String(id), abilities.join(','), String(type), name, String(setId)]);
+      n++;
+    }
+    return n;
+  }
+  registerBlackGear();
+
+  /* 橙装 q4：APK 的 gearMap/gearSetMap 同样只有紫装档，原版 equipsArray 里的 125~180 /
+   * 197~212 / 205~208 这 64 件 q4 数据没有进 map。以前用「紫装 id + orange 标记」模拟，
+   * 结果橙装实际吃的是紫装基础值（狂战 25/175，而原版橙装是 45/315）。这里按原版表补齐
+   * q4 的 set/gear 行，让 `addGear(205)` / 融合产物都拿到原版 q4 属性。
+   * set.index 沿用同家族紫装的原画索引（狂战橙=32，黑=33），保证立绘仍走原版橙稿。 */
+  const ORANGE_GEAR_SET_INDEX = Object.freeze({
+    32: 6, 33: 7, 34: 8, 35: 9, 36: 10, 37: 11, 38: 12,
+    39: 20, 40: 21, 41: 22, 42: 23, 43: 24, 44: 25,
+    45: 34, 50: 37, 52: 32, 53: 38,
+  });
+  function registerOrangeGear() {
+    const gmap = window.gearMap, smap = window.gearSetMap;
+    if (!gmap || !smap || typeof gmap.put !== 'function' || typeof smap.put !== 'function') return 0;
+    let n = 0;
+    for (const row of GEAR_BASE) {
+      const [id, setId, quality, type, name, base] = row;
+      if (Number(quality) !== 4) continue;
+      if (!smap.getValue(String(setId))) {
+        const index = ORANGE_GEAR_SET_INDEX[Number(setId)] || Number(setId);
+        smap.put(String(setId), [String(setId), '4', String(setId), '50', '0', '550', String(index)]);
+        n++;
+      }
+      if (gmap.getValue(String(id))) continue;
+      const abilities = [0, 0, 0, 0];
+      abilities[Number(type)] = Number(base);
+      gmap.put(String(id), [String(id), abilities.join(','), String(type), name, String(setId)]);
+      n++;
+    }
+    return n;
+  }
+  registerOrangeGear();
+
   /* ============================================================
    * 【GD6】套装收益（**本复刻版新增，原版没有**）
    * ============================================================ */
@@ -817,10 +1134,11 @@
   /* ============================================================
    * 【GD4】导出 window.GData
    * ============================================================ */
-  window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
-    STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
-    trueLevel, trueSkillValue, trueSkillRow, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
-    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, BLUE_SHARD_DROP_MUL, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
+  window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, stageEnemyCount, isSuperStage, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
+    STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_REGULAR_MUL, SUPER_HP_MUL, SUPER_TYPE_SCALE, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
+    trueLevel, trueSkillValue, trueSkillStep, trueSkillRow, TRUE_SKILL_TABLE, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
+    stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, BLUE_SHARD_DROP_MUL, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, BLACK_GEAR_SETS, BLACK_SHARD_SET, BLACK_CARD_ID, BLACK_BOX_ID, registerBlackGear, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, EXTRA_RANK_GOODS, registerRankGoods, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
+    PETS, PET_SKILLS, PET_SKILL_RULES, petSkillValue, petSkillTrigger, petSkillInfo, PET_GRADE_EXP, PET_GRADE_COST,
     SET_BONUS, SET_BONUS_TIER_MUL, SET_BONUS_GLOBAL_MUL, SET_BONUS_HP_MUL, SET_BONUS_FAMILY_FLOOR,
     SET_BONUS_RAW_KEYS, SET_BONUS_ATTR_KEYS, setBonusTable, setBonusTierMul, setBonusScale, setBonusText };
 })();

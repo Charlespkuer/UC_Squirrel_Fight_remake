@@ -54,6 +54,16 @@
 
 .fusion-arrow{font-size:44px;color:#eda92c;text-shadow:2px 2px 0 #8e6b32;transform:translateY(-8px)}
 
+/* ---------- 词条（2026-10：融合界面直接看材料/卡片词条） ---------- */
+.fusion-ext-line{display:flex;flex-wrap:wrap;justify-content:center;gap:2px;max-width:100%;margin-top:1px}
+.fusion-ext-tag{display:inline-block;max-width:100%;padding:0 6px;border:1px solid #c7a15c;border-radius:999px;
+  background:#fff8df;color:#8a6428;font-size:13px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fusion-ext-line.compact .fusion-ext-tag{font-size:12px;line-height:16px;padding:0 5px}
+.fusion-ext-none{font-size:12px;line-height:16px;color:#ae966f}
+.fusion-picked-exts{width:100%;margin-top:3px;padding-top:4px;border-top:1px dashed #dcc79d}
+.fusion-picked-exts>b{display:block;font-size:15px;font-weight:normal;color:#8b672f;margin-bottom:3px;text-align:center}
+.fusion-ext-tags{display:flex;flex-wrap:wrap;justify-content:center;gap:3px}
+
 /* 预览：金色虚线格 + 旋转高光 + 「必得 1 件」 */
 .fusion-preview{display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0;width:132px;font-size:22px;line-height:26px;color:#a9762f}
 .fusion-preview .fusion-frame{width:76px;height:76px;border-style:dashed;border-color:#e0a12f;
@@ -121,6 +131,7 @@
 .fusion-quality-tag.q2{background:#4f88a3}
 .fusion-quality-tag.q3{background:#8d63a3}
 .fusion-quality-tag.q4{background:#e8842c}
+.fusion-quality-tag.q5{background:#3b2f46}
 .fusion-card-state{position:absolute;bottom:0;left:0;right:0;padding:1px 0;background:#f2e7c9e6;font-size:16px;
   line-height:21px;color:#8d6b38;text-align:center}
 .fusion-gear.selected{box-shadow:inset 0 0 0 3px #fffdf3,0 0 0 3px #8ec155,0 3px 0 #6fa034}
@@ -131,15 +142,6 @@
 .fusion-gear:disabled .fusion-card-state{background:#e2dbcbeb;color:#7b6d55}
 .fusion-empty{grid-column:1/-1;align-self:center;text-align:center;font-size:25px;line-height:1.6;color:#9b835b}
 .fusion-empty span{font-size:21px}
-
-/* 星标装备在融合页的呈现：星标 = 「别把我合掉」的保护标记，所以卡片直接置灰禁用，
- * 右上角挂 ★，状态栏写明「已加星标」，材料区顶上也给一句总数。
- * 注意 .fusion-frame 是 overflow:hidden，★ 必须挂在 frame 外面（.fusion-gear 是
- * position:relative），否则会被裁掉。 */
-.fusion-starred-note{font-size:19px;color:#b8860b;white-space:nowrap}
-.fusion-gear .gear-star{left:auto;right:3px;top:3px;font-size:22px}
-.fusion-gear.starred .fusion-frame{border-color:#ffd323}
-.fusion-gear.starred .fusion-card-state{background:#f7ecc9f2;color:#a8842a}
 
 /* ---------- 状态条 ---------- */
 .fusion-status{flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:9px;margin:0 auto;
@@ -155,6 +157,7 @@
 .fusion-material.q2 .fusion-frame,.fusion-success-item.q2 .fusion-frame{border-color:#5b91a8;box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #9fbcc7}
 .fusion-material.q3 .fusion-frame,.fusion-success-item.q3 .fusion-frame{border-color:#9771a8;box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #bfa4c9}
 .fusion-material.q4 .fusion-frame,.fusion-success-item.q4 .fusion-frame,.fusion-preview.q4 .fusion-frame{border-color:#e8842c;box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #e8bd8a}
+.fusion-material.q5 .fusion-frame,.fusion-success-item.q5 .fusion-frame,.fusion-preview.q5 .fusion-frame{border-color:#3b2f46;box-shadow:inset 0 0 0 4px #fffaf0,0 3px 0 #8d7f96}
 
 /* ---------- 融合成功弹窗 ---------- */
 .fusion-success{display:flex;align-items:center;gap:46px;padding:24px 42px 9px}

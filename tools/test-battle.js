@@ -42,6 +42,12 @@ const canvas = graphics.createCanvas(1170, 690);
 const canvasContext = canvas.getContext('2d'), drawnText = [];
 const originalFillText = canvasContext.fillText.bind(canvasContext);
 canvasContext.fillText = function (text, ...args) { drawnText.push({ text: String(text), at: time }); return originalFillText(text, ...args); };
+/* HUD 改为离屏缓存后，血量/回合数画在第二张 canvas 上；探针也要接上它的 fillText。 */
+function trackCanvasText(c) {
+  const ctx = c.getContext('2d'), fill = ctx.fillText.bind(ctx);
+  ctx.fillText = function (text, ...args) { drawnText.push({ text: String(text), at: time }); return fill(text, ...args); };
+  return c;
+}
 canvas.style = {}; canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1170, height: 690 });
 const ui = { appendChild(node) { children.push(node); } };
 const sandbox = {
@@ -53,7 +59,7 @@ const sandbox = {
   requestAnimationFrame(fn) { const id = ++seq; rafs.set(id, fn); return id; },
   cancelAnimationFrame(id) { rafs.delete(id); },
   document: { getElementById: () => ui, createElement(tag) {
-    if (tag === 'canvas') return graphics.createCanvas(122, 122);
+    if (tag === 'canvas') return trackCanvasText(graphics.createCanvas(122, 122));
     return { style: {}, setAttribute() {}, remove() { const i = children.indexOf(this); if (i >= 0) children.splice(i, 1); } };
   } },
 };
@@ -180,6 +186,11 @@ function save(name) { fs.mkdirSync('out/battle-check', { recursive: true }); fs.
   const overkillHud = drawnText.slice(counterStart).map((entry) => entry.text);
   assert(overkillHud.includes('42/100') && overkillHud.includes('0/100'), 'overkill counter shows actual HP before and after its hit');
   assert(!overkillHud.includes('61/100'), 'overkill damage cannot temporarily restore the attacker HP');
+  const battleSrc = fs.readFileSync('js/battle.js', 'utf8');
+  assert(!/r\.action === 'rest' \? '休息'/.test(battleSrc) && /preparingWeapon\) > 0/.test(battleSrc),
+    '方天画戟蓄力回合不再在敌人头顶飘「休息」文字');
+  assert(/f\.crit && critBadge/.test(battleSrc) && !/floater\(def, '暴击'/.test(battleSrc),
+    '暴击改用 4842 第 3 帧图标 + 伤害数字，不再单独飘「暴击」文字');
   assert.equal(errors.length, 0, errors.join('\n'));
   console.log('Battle regression checks passed; original-atlas renders: out/battle-check');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

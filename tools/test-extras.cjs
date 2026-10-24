@@ -74,6 +74,7 @@ function setup() {
     },
     btn: (label, action) => '<button data-action="' + action + '">' + label + '</button>',
     icon: (kind, id) => '<img src="images/ui/icons/' + kind + '/' + kind + '-' + id + '.png">',
+    goldIcon: () => '<img src="images/ui/icons/gold-acorn.png">',
     // 升级奖励面板：这里只做最小渲染，供断言检查文本内容
     upsHtml: (ups) => (ups && ups.length)
       ? '<div class="reward-stack">' + ups.map((u) => '<div class="reward-panel">升到 ' + u.level + ' 级' +
@@ -118,8 +119,17 @@ function setup() {
 const tests = [];
 function test(name, run) { tests.push([name, run]); }
 function enterArena(g, kind) {
-  g.c.State.state().level = Math.max(g.c.State.state().level, kind === 1 ? 20 : 11);
-  g.c.ClassicExtras.arena(); g.click(kind === 1 ? 'arena-fragment' : 'arena-exp'); g.modalClick();
+  g.c.State.state().level = Math.max(g.c.State.state().level, kind === 0 ? 10 : 15);
+  /* 现代竞技页只留经验/碎片/天梯；幻兽场的机制回归直接走 startArenaCompete(2)，
+   * 不再依赖已被撤掉的 arena-pet 按钮。 */
+  if (kind === 2) {
+    g.c.ClassicExtras.startArenaCompete(2);
+    g.modalClick();
+    return;
+  }
+  g.c.ClassicExtras.arena();
+  g.click(kind === 1 ? 'arena-fragment' : 'arena-exp');
+  g.modalClick();
 }
 function assertBalanced(markup) {
   const voidTags = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
@@ -135,17 +145,19 @@ function assertBalanced(markup) {
   }
 }
 
-test('竞技11/20级门槛在报名确认时再次校验，不扣低等级资源', () => {
+test('竞技10/15级门槛在报名确认时再次校验，不扣低等级资源', () => {
   const g = setup(), s = g.c.State.state();
-  g.c.ClassicExtras.arena(); g.click('arena-exp');
-  assert.match(g.modals.at(-1).html, /11级/); assert.equal(g.battles.length, 0);
-  s.level = 19; g.c.ClassicExtras.arena(); g.click('arena-fragment');
-  assert.match(g.modals.at(-1).html, /20级/); assert.equal(s.energy, 90);
-  s.level = 11; g.c.ClassicExtras.arena(); g.click('arena-exp');
+  s.level = 9; g.c.ClassicExtras.arena(); g.click('arena-exp');
+  assert.match(g.modals.at(-1).html, /10级/); assert.equal(g.battles.length, 0);
+  s.level = 14; g.c.ClassicExtras.arena(); g.click('arena-fragment');
+  assert.match(g.modals.at(-1).html, /15级/); assert.equal(s.energy, 90);
+  g.c.ClassicExtras.startArenaCompete(2);
+  assert.match(g.modals.at(-1).html, /15级/); assert.equal(s.energy, 90);
+  s.level = 10; g.c.ClassicExtras.arena(); g.click('arena-exp');
   s.level = 1; g.modalClick(); assert.equal(g.battles.length, 0); assert.equal(s.energy, 90);
 });
 
-test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进场必付费', () => {
+test('竞技报名扣费：体力 > 对应券 > 另一张券 > 体力药（与现代版一致）', () => {
   const c = setup();
   const S = c.c.State;
   const s = S.state();
@@ -156,7 +168,7 @@ test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进
     const r = c.c.ClassicExtras.payArenaEntry(s, kind);
     return { r, before, after: { e: s.energy, t: s.props[36], b: s.props[39] } };
   };
-  // 优先级：**体力 > 准入道具 > 喝药**。体力充足时扣体力，道具不动。
+  // 优先级：**体力 > 对应券 > 另一张券（现代版兜底） > 喝药**。体力充足时扣体力，道具不动。
   let x = pay(90, 3, 3, 0);
   assert.ok(x.r.ok && x.r.by === 'energy', '经验场体力充足应当扣体力');
   assert.equal(x.after.e, 60, '经验场体力 90→60，实测 ' + x.after.e);
@@ -180,14 +192,22 @@ test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进
   assert.ok(x.r.ok && x.r.by === 'item' && x.r.itemId === 39, '碎片场体力不足时扣勇气徽章');
   assert.equal(x.after.b, 0, '勇气徽章 1→0');
   assert.equal(x.after.e, 10, '体力不该动');
-  // 碎片场**不能**用英雄帖
+  // 体力不足、对应券没有 → 现代版会兜底用另一张券
   x = pay(10, 3, 0, 1);
-  assert.ok(!x.r.ok, '碎片场不该接受英雄帖');
-  assert.equal(x.after.t, 3, '被拒时英雄帖不该被扣');
-  // 经验场**不能**用勇气徽章
+  assert.ok(x.r.ok && x.r.by === 'item' && x.r.itemId === 36 && x.r.fallback, '碎片场没有徽章时兜底扣英雄帖');
+  assert.equal(x.after.t, 2, '英雄帖 3→2');
+  assert.equal(x.after.b, 0, '徽章本来就没有');
   x = pay(10, 0, 3, 0);
-  assert.ok(!x.r.ok, '经验场不该接受勇气徽章');
-  assert.equal(x.after.b, 3, '被拒时勇气徽章不该被扣');
+  assert.ok(x.r.ok && x.r.by === 'item' && x.r.itemId === 39 && x.r.fallback, '经验场没有英雄帖时兜底扣勇气徽章');
+  assert.equal(x.after.b, 2, '勇气徽章 3→2');
+  assert.equal(x.after.t, 0, '英雄帖本来就没有');
+  // 两张都有 → 先扣本场对应券
+  x = pay(10, 1, 1, 1);
+  assert.ok(x.r.ok && x.r.itemId === 39 && !x.r.fallback, '碎片场先扣勇气徽章');
+  assert.equal(x.after.b, 0, '徽章 1→0'); assert.equal(x.after.t, 1, '英雄帖不该动');
+  x = pay(10, 1, 1, 0);
+  assert.ok(x.r.ok && x.r.itemId === 36 && !x.r.fallback, '经验场先扣英雄帖');
+  assert.equal(x.after.t, 0, '英雄帖 1→0'); assert.equal(x.after.b, 1, '勇气徽章不该动');
   // 弹尽粮绝 → 拒绝且不扣任何东西
   x = pay(0, 0, 0, 0);
   assert.ok(!x.r.ok, '什么都没有时应当拒绝');
@@ -205,8 +225,8 @@ test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进
       assert.equal(changed, 1, '一次报名只该扣一种资源（kind=' + kind + ' dE=' + dE + ' dT=' + dT + ' dB=' + dB + '）');
       if (y.r.by === 'energy') assert.ok(dE === 30, '体力路径应当正好扣 30，实测 ' + dE);
       if (y.r.by === 'item') {
-        assert.ok(y.r.itemId === (kind ? 39 : 36), '道具路径应当扣对应入场券');
-        assert.equal(kind ? dB : dT, 1, '道具路径应当正好扣 1 枚');
+        assert.ok(y.r.itemId === 36 || y.r.itemId === 39, '道具路径只能扣两张入场券之一');
+        assert.equal(y.r.itemId === 36 ? dT : dB, 1, '道具路径应当正好扣 1 枚');
       }
     }
   }
@@ -293,14 +313,21 @@ test('竞技报名扣费：碎片场=勇气徽章、经验场=英雄帖，且进
     assert.equal(Number(ss.props[39] || 0), 3, '体力够时不该动徽章');
     assert.equal(Number(ss.props[2] || 0), 1, '体力够时不该喝药');
   }
-  // 回归：体力 0 + 无徽章 → 拒绝，且提示「没有勇气徽章」
+  // 现代兜底：体力 0 + 没徽章 + 有英雄帖 → 碎片场也能用英雄帖进场
   {
     const g = setup(), ss = g.c.State.state();
     ss.level = 25; ss.energy = 0; ss.props[1] = 0; ss.props[2] = 0; ss.props[39] = 0; ss.props[36] = 3;
     enterArena(g, 1);
-    assert.equal(g.battles.length, 0, '没有徽章时不该进场');
-    assert.equal(ss.props[36], 3, '英雄帖不该被扣');
-    assert.match(String(g.modals.at(-1).html), /勇气徽章/, '应当提示缺少勇气徽章');
+    assert.equal(g.battles.length, 1, '有英雄帖时碎片场应当能进场（现代版兜底）');
+    assert.equal(ss.props[36], 2, '英雄帖 3→2');
+  }
+  // 两张券都没有 + 没有体力药 → 拒绝，且提示两种券都没有
+  {
+    const g = setup(), ss = g.c.State.state();
+    ss.level = 25; ss.energy = 0; ss.props[1] = 0; ss.props[2] = 0; ss.props[39] = 0; ss.props[36] = 0;
+    enterArena(g, 1);
+    assert.equal(g.battles.length, 0, '两张券都没有时不该进场');
+    assert.match(String(g.modals.at(-1).html), /英雄帖\/勇气徽章/, '应当提示英雄帖/勇气徽章都没有');
   }
   // 源码层面：两段式扣费的旧写法不该再出现
   const src = fs.readFileSync(path.join(rootDir, 'js', 'classic-extras.js'), 'utf8');
@@ -325,6 +352,7 @@ test('竞技战果弹窗：「返回竞技场」在主操作位（最右）', ()
 
 test('竞技两战只付一次报名费用，冠军150经验且不额外赠送金松果', () => {
   const g = setup(), s = g.c.State.state();
+  s.level = 11;
   enterArena(g, 0); assert.equal(s.energy, 60); assert.equal(g.battles.length, 1);
   g.settle(0, 0);
   const modalCount = g.modals.length;
@@ -337,8 +365,20 @@ test('竞技两战只付一次报名费用，冠军150经验且不额外赠送�
   assertBalanced(g.markup);
 });
 
-test('经验竞技冠亚季四名分别150/75/45/0，半决赛落败必须再打季军赛', () => {
-  for (const [semiWin, secondWin, reward, place] of [[0, 0, 150, '冠军'], [0, 1, 75, '亚军'], [1, 0, 45, '季军'], [1, 1, 0, '第四名']]) {
+test('幻兽竞技场：15级、召唤证优先、冠军发40孵化点', () => {
+  const g = setup(), s = g.c.State.state();
+  s.level = 15; s.energy = 0; s.props[36] = 0; s.props[39] = 0; s.props[82] = 1;
+  const hatch0 = s.hatchPoint || 0;
+  enterArena(g, 2);
+  assert.equal(s.props[82], 0, '体力不足时优先扣召唤证');
+  g.settle(0, 0); g.modalClick(); g.settle(1, 0); g.settle(1, 0);
+  assert.equal((s.hatchPoint || 0) - hatch0, 40, '冠军 40 孵化点');
+  assert.match(g.modals.at(-1).html, /孵化点 ×40/);
+  assertBalanced(g.markup);
+});
+
+test('经验竞技冠亚季四名分别150/100/50/30，半决赛落败必须再打季军赛', () => {
+  for (const [semiWin, secondWin, reward, place] of [[0, 0, 150, '冠军'], [0, 1, 100, '亚军'], [1, 0, 50, '季军'], [1, 1, 30, '第四名']]) {
     const g = setup(), s = g.c.State.state(); enterArena(g, 0);
     g.settle(0, semiWin); g.settle(0, semiWin);
     assert.equal(s.exp, 0); assert.equal(g.modals.at(-1).title, semiWin === 0 ? '晋级决赛' : '争夺季军');
@@ -418,7 +458,7 @@ test('竞技保存中断进度，刷新后继续季军赛不再收费且旧回�
   g.battles[1].opts.onError(); g.c.ClassicExtras.arena(); g.click('arena-resume');
   assert.equal(g.battles.length, 3); assert.equal(s.energy, 60);
   g.settle(1, 0); assert.equal(s.exp, 0);
-  g.settle(2, 0); assert.equal(s.exp, 45); assert.equal(s.classicArenaRun, null);
+  g.settle(2, 0); assert.equal(s.exp, 50); assert.equal(s.classicArenaRun, null);
   assertBalanced(g.markup);
 });
 
@@ -467,14 +507,15 @@ test('天梯胜利夺杯为明确离线概率，失败不会夺杯', () => {
   g.c.ClassicExtras.rank(); g.click('rank-fight'); g.settle(1, 1); assert.equal(s.goldCup, 7);
 });
 
-test('第 2 项：天梯匹配等级只跟积分挂钩，70 级封顶', () => {
+test('第 2 项：天梯匹配等级只跟积分挂钩，90 级封顶', () => {
   const g = setup(), s = g.c.State.state(); s.level = 30; s.joinRankCount = 0;
   const E = g.c.ClassicExtras.rankFoeExpectLevel;
   assert.equal(E(1500), 30, '1500 分（初始分）从 30 级档起步');
   assert.equal(E(1750), 40, '每 +25 分 +1 级');
-  assert.equal(E(2500), 70, '2500 分到顶');
-  assert.equal(E(99999), 70, '封顶 70 级');
-  // 匹配到的实际等级围绕期望值抖动，且绝不超过 70
+  assert.equal(E(2500), 70, '2500 分到 70 级');
+  assert.equal(E(3000), 90, '3000 分到满级 90');
+  assert.equal(E(99999), 90, '封顶 90 级');
+  // 匹配到的实际等级围绕期望值抖动，且绝不超过 90
   g.math.random = () => 0.5;
   assert.equal(g.c.ClassicExtras.rankFoeLevel(1750), 40, '随机取中值时正好等于期望');
   const levels = [];
@@ -482,14 +523,14 @@ test('第 2 项：天梯匹配等级只跟积分挂钩，70 级封顶', () => {
     g.math.random = () => (i % 20) / 20;
     const lv = g.c.ClassicExtras.rankFoeLevel(99999);
     levels.push(lv);
-    assert.ok(lv <= 70 && lv >= 1, '等级在 1~70 内：' + lv);
+    assert.ok(lv <= 90 && lv >= 1, '等级在 1~90 内：' + lv);
   }
-  assert.ok(Math.max(...levels) > 66 && Math.min(...levels) >= 66, '高杯时整体贴近满级：' + levels.slice(0, 5).join(','));
+  assert.ok(Math.max(...levels) > 86 && Math.min(...levels) >= 86, '高积分时整体贴近满级：' + levels.slice(0, 5).join(','));
   // 实战：匹配到的对手 level 就是这条曲线给的等级（不再贴玩家等级）
   s.level = 30; s.goldCup = 0; s.goldPoint = 100; s.integral = 2600;
   g.math.random = () => 0.5;
   g.c.ClassicExtras.rank(); g.click('rank-fight');
-  assert.equal(g.battles.at(-1).foe.level, 70, '高积分 + 30 级玩家也会匹配到满级对手');
+  assert.equal(g.battles.at(-1).foe.level, 74, '2600 分 + 30 级玩家按积分匹配 74 级对手');
   // 金杯多寡不再影响匹配（花金杯不会让对手变软）
   g.settle(0, 0);                                    // 收掉上一场，否则 rankAttempt 未清、按钮禁用
   s.integral = 1500; s.goldCup = 5000;
@@ -566,6 +607,32 @@ test('金杯商店跨周：限兑按周重置，未标周次的旧购买计数�
 });
 
 
+test('力敏速血永久丸按账号累计限购 1 次，跨周也不重置', () => {
+  /* 原版 `timesLimit=1` + 服务端 buyCounts：这四件是**账号级**限购，不是每周刷新。
+   * 复刻以前把所有 timesLimit 都当周限，导致每周都能再买一个、属性无限叠。 */
+  const g = setup(), s = g.c.State.state();
+  s.level = 30; s.integral = 2000; s.goldCup = 2000; s.goldPoint = 500;
+  const choose = () => {
+    g.c.ClassicExtras.rankShop();
+    g.click('rank-shop-next');
+    g.page().querySelector('[data-goods="7"]').onclick();
+  };
+  choose(); g.modalClick();
+  assert.equal(s.rankPurchaseTotals[7], 1, '第一次购买记进账号累计账');
+  assert.equal(s.rankPurchases[7], undefined, '永久丸不再记进按周账');
+  assert.equal(s.props[16], 1, '力量永久 +1 进入背包');
+  const cup = s.goldCup;
+  choose(); g.modalClick();
+  assert.match(g.modals.at(-1).html, /账号累计只能兑换 1 次/);
+  assert.equal(s.rankPurchaseTotals[7], 1, '第二次被账号上限拦住');
+  assert.equal(s.goldCup, cup, '被拦住时不扣金杯');
+  g.advance(8 * 86400000);                       // 跨到下一周
+  choose(); g.modalClick();
+  assert.match(g.modals.at(-1).html, /账号累计只能兑换 1 次/);
+  assert.equal(s.rankPurchaseTotals[7], 1, '跨周也不重置');
+  assert.equal(s.props[16], 1);
+});
+
 test('抽奖首抽免费、防双击，付费经验奖扣20并真正升级', () => {
   const g = setup(), s = g.c.State.state(); g.math.random = () => 0;
   g.c.ClassicExtras.lottery(); const first = g.node('lottery-spin').onclick; first(); first();
@@ -586,6 +653,9 @@ test('每日抽奖：右上角抽奖卷角标 + 删掉底部说明 + 连抽 10 �
   const html = g.markup.at(-1)[1];
   /* ① 右上角标注仓库抽奖卷数量（refreshTickets 就地刷新用的就是 [data-lottery-ticket]） */
   assert.ok(/lottery-ticket-corner/.test(html), '要有右上角角标：' + html.slice(0, 200));
+  /* 金松果奖格用经典统一贴图 gold-acorn，不再走现代 prop-8。 */
+  assert.ok(/images\/ui\/icons\/gold-acorn\.png/.test(html), '抽奖金松果要用经典金松果图');
+  assert.ok(!/prop\/prop-8\.png/.test(html), '抽奖页不该再出现现代 prop-8');
   assert.ok(/lottery-ticket-corner[\s\S]*?data-lottery-ticket/.test(html), '角标里要带抽奖卷数量节点');
   assert.ok(/data-lottery-ticket>3</.test(html), '角标应当显示仓库里的 3 张：' + html.slice(0, 260));
   /* ② 底部那两句说明（「每天免费一次，之后…」「当前金松果：」）已经删掉 */
@@ -664,24 +734,45 @@ test('每条每日任务都有计数来源（防止再出现「抽奖任务不�
   assert.equal(g.c.State.questStatus()[0].done, true, '抽满 2 次后任务可领取');
 });
 
-test('对手等级封顶：随机挑战/擂台再抖也不会冒出 70 级以上的 NPC', () => {
+test('对手等级封顶：随机挑战/擂台再抖也不会冒出 90 级以上的 NPC', () => {
   const g = setup();
   const seen = new Set();
   for (let i = 0; i < 60; i++) {
     for (const asked of [70, 74, 90]) {
       const foe = g.c.State.genAI(asked, '', { levelJitter: 3 });
       seen.add(foe.level);
-      assert.ok(foe.level <= 70, 'genAI(' + asked + ') 生成了 ' + foe.level + ' 级');
+      assert.ok(foe.level <= 90, 'genAI(' + asked + ') 生成了 ' + foe.level + ' 级');
       assert.ok(foe.level >= 1, 'genAI(' + asked + ') 等级不能低于 1');
     }
   }
-  assert.ok(seen.has(70), '满级附近的对手应该真的能生成 70 级（不是全被压到很低）：' + [...seen].sort((a, b) => a - b).join(','));
+  assert.ok(seen.has(90), '满级附近的对手应该真的能生成 90 级（不是全被压到很低）：' + [...seen].sort((a, b) => a - b).join(','));
   // 满级玩家在挑战/擂台里按 ±3 浮动，夹过之后不越界
-  const s = g.c.State.state(); s.level = 70;
+  const s = g.c.State.state(); s.level = 90;
   for (let i = 0; i < 40; i++) {
     const foe = g.c.State.genAI(Math.max(1, s.level + Math.floor(g.math.random() * 6) - 3));
-    assert.ok(foe.level <= 70, '满级玩家的对手是 ' + foe.level + ' 级');
+    assert.ok(foe.level <= 90, '满级玩家的对手是 ' + foe.level + ' 级');
   }
+});
+
+test('魔法袋回到天梯商店：1300 积分 + 2000 金杯 + 200 金松果，账号限 1 次', () => {
+  const g = setup(), s = g.c.State.state();
+  s.level = 30; s.integral = 1300; s.goldCup = 2000; s.goldPoint = 200;
+  const goods = g.c.ClassicExtras.rankGoodsList().find((x) => String(x.id) === '19');
+  assert.ok(goods, '天梯商店要补回原版的魔法袋（goods id 19）');
+  assert.deepEqual([goods.goodsId, goods.cup, goods.gold, goods.integral], ['79', '2000', '200', '1300']);
+  const lim = g.c.ClassicExtras.rankLimitInfo(goods);
+  assert.equal(lim.account, true, '账号级限购');
+  assert.equal(lim.limit, 1);
+  g.c.ClassicExtras.rankShop(2);                     // 15 件 / 6 件一页 → 第 3 页
+  g.page().querySelector('[data-goods="19"]').onclick();
+  g.modalClick();
+  assert.equal(s.props[79], 1, '兑换到 1 个魔法袋');
+  assert.equal(s.goldCup, 0); assert.equal(s.goldPoint, 0);
+  assert.equal(s.rankPurchaseTotals[19], 1, '记进账号累计账');
+  s.goldCup = 2000; s.goldPoint = 200;
+  g.c.ClassicExtras.rankShop(2); g.page().querySelector('[data-goods="19"]').onclick(); g.modalClick();
+  assert.match(g.modals.at(-1).html, /账号累计只能兑换 1 次/);
+  assert.equal(s.props[79], 1, '第二次被账号上限拦住');
 });
 
 test('抽奖离开动画后奖品已保存，重入可继续且旧计时器不会重发奖励', () => {
@@ -770,7 +861,7 @@ test('拜师后自动学会师父驾到，出师花20金松果且角色数据完
   assertBalanced(g.markup);
 });
 
-test('收徒上限随师父等级1/2/3，仅扣10金松果且重复调用不多发徒弟', () => {
+test('收徒上限随师父等级1/2/3，扣10金松果+10体力且重复调用不多发徒弟', () => {
   const g = setup(), s = g.c.State.state();
   assert.equal(g.c.State.apprenticeCap(5), 1);
   assert.equal(g.c.State.apprenticeCap(10), 2);
@@ -779,7 +870,7 @@ test('收徒上限随师父等级1/2/3，仅扣10金松果且重复调用不多�
   s.level = 5;
   g.c.ClassicExtras.master('apprentice');
   const handler = g.node('master-recruit').onclick; handler(); handler();
-  assert.equal(s.energy, 90); assert.equal(s.goldPoint, 90); assert.equal(g.battles.length, 1);
+  assert.equal(s.energy, 80); assert.equal(s.goldPoint, 90); assert.equal(g.battles.length, 1);
   assert.equal(g.battles[0].opts.cost, undefined);
   g.settle(0, 0); g.settle(0, 0);
   assert.equal(s.prentices.length, 1, '重复回调不多发徒弟');
@@ -892,36 +983,39 @@ test('刷新师父/徒弟会换人且范围合理，候选人都带可查看的�
   assert.equal([...g.page().html.matchAll(/data-recruit="\d+"/g)].length, 3, '给 3 位徒弟候选');  assertBalanced(g.markup);
 });
 
-test('师徒候选等级合理化：不超过满级 70，徒弟不会超过师父', () => {
+test('师徒候选等级合理化：不超过满级 90，徒弟不会超过师父', () => {
   const g = setup(), s = g.c.State.state();
-  s.level = 70;
+  s.level = 90;
   g.c.ClassicExtras.master('master');
   let masterLevels = [...g.page().html.matchAll(/data-master="\d+"[\s\S]*?candidate-level">等级 (\d+)/g)].map((m) => Number(m[1]));
   assert.equal(masterLevels.length, 3);
-  assert.ok(masterLevels.every((lv) => lv <= 70), '70 级时师父候选不超过满级：' + masterLevels.join(','));
+  assert.ok(masterLevels.every((lv) => lv <= 90), '90 级时师父候选不超过满级：' + masterLevels.join(','));
   // 换一批再看，多次随机都不能超过满级
   for (let i = 0; i < 6; i++) {
     g.click('master-refresh');
     masterLevels = [...g.page().html.matchAll(/data-master="\d+"[\s\S]*?candidate-level">等级 (\d+)/g)].map((m) => Number(m[1]));
-    assert.ok(masterLevels.every((lv) => lv >= 1 && lv <= 70), '师父等级 1~70：' + masterLevels.join(','));
+    assert.ok(masterLevels.every((lv) => lv >= 1 && lv <= 90), '师父等级 1~90：' + masterLevels.join(','));
   }
   g.c.ClassicExtras.master('apprentice');
   for (let i = 0; i < 6; i++) {
     g.click('recruit-refresh');
     const recruitLevels = [...g.page().html.matchAll(/data-recruit="\d+"[\s\S]*?candidate-level">等级 (\d+)/g)].map((m) => Number(m[1]));
     assert.equal(recruitLevels.length, 3);
-    assert.ok(recruitLevels.every((lv) => lv >= 1 && lv <= 70), '徒弟等级 1~70：' + recruitLevels.join(','));
+    assert.ok(recruitLevels.every((lv) => lv >= 1 && lv <= 90), '徒弟等级 1~90：' + recruitLevels.join(','));
     assert.ok(recruitLevels.every((lv) => lv <= s.level + 1), '徒弟不会比师父强太多：' + recruitLevels.join(','));
   }
   assertBalanced(g.markup);
 });
 
-test('收徒金松果不足不启动，零体力可以收徒，落败消耗一次药剂状态', () => {
+test('收徒金松果/体力不足不启动；落败消耗一次药剂状态', () => {
   const g = setup(), s = g.c.State.state(); s.energy = 0;s.goldPoint=9;
   g.c.ClassicExtras.master('apprentice'); g.click('master-recruit'); assert.equal(g.battles.length, 0); assert.equal(s.goldPoint,9);
-  s.goldPoint = 10; s.propsStates[3] = 20; g.c.ClassicExtras.master('apprentice'); g.click('master-recruit');
+  s.goldPoint = 10; g.c.ClassicExtras.master('apprentice'); g.click('master-recruit');
+  assert.equal(g.battles.length, 0, '零体力不能开始收徒挑战');
+  assert.equal(s.goldPoint, 10, '零体力时不扣金松果');
+  s.energy = 90; s.propsStates[3] = 20; g.c.ClassicExtras.master('apprentice'); g.click('master-recruit');
   g.settle(0, 1); g.settle(0, 1);
-  assert.equal(s.energy, 0);assert.equal(s.goldPoint,0); assert.equal(s.prentices.length, 0); assert.equal(s.exp, 0); assert.equal(s.propsStates[3], 19);
+  assert.equal(s.energy, 80, '收徒挑战扣 10 体力'); assert.equal(s.goldPoint,0); assert.equal(s.prentices.length, 0); assert.equal(s.exp, 0); assert.equal(s.propsStates[3], 19);
 });
 
 test('日供系数：经验 5%~15%、金松果 5%~25%，均按等级之和线性插值', () => {
@@ -936,25 +1030,25 @@ test('日供系数：经验 5%~15%、金松果 5%~25%，均按等级之和线性
   assert.ok(Math.abs(RE(0) - 0.05) < 1e-9, '没徒弟也是经验 5%：' + RE(0));
   assert.ok(Math.abs(RG(0) - 0.05) < 1e-9, '没徒弟也是金松果 5%：' + RG(0));
   assert.ok(Math.abs(RE(1) - 0.05) < 0.01, '一个 1 级徒弟 ≈ 5% 保底：' + RE(1));
-  // 上限：三个满级（Σ=210）正好到顶
-  assert.ok(Math.abs(RE(210) - 0.15) < 1e-9, 'Σ=210 经验正好 15%：' + RE(210));
-  assert.ok(Math.abs(RG(210) - 0.25) < 1e-9, 'Σ=210 金松果正好 25%：' + RG(210));
+  // 上限：三个满级（Σ=270）正好到顶
+  assert.ok(Math.abs(RE(270) - 0.15) < 1e-9, 'Σ=270 经验正好 15%：' + RE(270));
+  assert.ok(Math.abs(RG(270) - 0.25) < 1e-9, 'Σ=270 金松果正好 25%：' + RG(270));
   assert.equal(RE(999), 0.15, '经验封顶 15%');
   assert.equal(RG(999), 0.25, '金松果封顶 25%');
   // 线性：等距的等级之和给出等距的系数
-  assert.ok(Math.abs((RE(40) - RE(20)) - (RE(200) - RE(180))) < 1e-9, '经验线性递增');
-  assert.ok(Math.abs((RG(40) - RG(20)) - (RG(200) - RG(180))) < 1e-9, '金松果线性递增');
+  assert.ok(Math.abs((RE(40) - RE(20)) - (RE(260) - RE(240))) < 1e-9, '经验线性递增');
+  assert.ok(Math.abs((RG(40) - RG(20)) - (RG(260) - RG(240))) < 1e-9, '金松果线性递增');
   // 金松果那条始终不低于经验那条（区间更宽）
-  for (const sum of [0, 50, 105, 160, 210]) {
+  for (const sum of [0, 50, 135, 200, 270]) {
     assert.ok(RG(sum) >= RE(sum) - 1e-9, '金松果系数不该低于经验：Σ=' + sum + ' ' + RG(sum) + ' vs ' + RE(sum));
   }
 
   // 三个满级徒弟：合计正好是我昨日收益的 15%（经验）/ 25%（金松果）
   const s = g.c.State.state();
   s.level = 20; s.exp = 0; s.goldPoint = 0;
-  g.c.State.addPrentice({ name: '满级甲', level: 70 });
-  g.c.State.addPrentice({ name: '满级乙', level: 70 });
-  g.c.State.addPrentice({ name: '满级丙', level: 70 });
+  g.c.State.addPrentice({ name: '满级甲', level: 90 });
+  g.c.State.addPrentice({ name: '满级乙', level: 90 });
+  g.c.State.addPrentice({ name: '满级丙', level: 90 });
   g.c.State.gainExp(1000);
   g.c.State.addGold(400);
   g.advance(86400000);

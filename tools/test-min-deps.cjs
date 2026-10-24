@@ -131,7 +131,7 @@ record('存档列表弹窗：一列紧凑可滚动，不再横排按钮溢出屏
   assert.match(html, /^<div class="save-row current">/, '当前存档那行要有 current 标记');
   assert.match(html, /class="save-level">32<i>级<\/i>/, '等级要单独成徽章');
   assert.match(html, /<span class="save-name">Charles<em>当前<\/em><\/span>/, '名字单独一格，当前档要标注');
-  assert.match(html, /<span class="save-sub">今天 15:20 · 156 KB<\/span>/, '时间与大小放次要行');
+  assert.match(html, /<span class="save-sub"[^>]*>今天 15:20 · 156 KB<\/span>/, '时间与大小放次要行');
   assert.match(html, /data-save-row="0"[^>]*>载入<\/button>/, '每行一个「载入」按钮');
   assert.ok(!/【32级/.test(html), '不该再出现「【32级 …】」这种长按钮文案');
 
@@ -311,6 +311,16 @@ record('js/gamedict.js 与 references/orig/ 的抽取结果一致（可重生成
   assert.equal(r.status, 0, 'gamedict.js 不是最新的：\n' + (r.stderr || r.stdout));
 });
 
+record('调试添加跳过游戏内没有的松鼠拳套/绿松果', () => {
+  /* 原始 GameDict 有 6 松鼠拳套 / 9 绿松果，但本版既没有产出途径也没有 useProp 分支；
+   * 调试面板的「快速获取物品」与「全道具 +10」都不该再发这两件死物。 */
+  const src = fs.readFileSync(path.join(ROOT, 'js', 'debug.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(src, /const UNUSED_PROPS = new Set\(\[6, 9\]\)/, '6/9 要集中在一个排除表里');
+  assert.match(src, /if \(\+id > 0 && !UNUSED_PROPS\.has\(\+id\)\) rows\.push/, '道具下拉要跳过 6/9');
+  assert.match(src, /!CURRENCY_PROPS\[\+id\] && !UNUSED_PROPS\.has\(\+id\)/, '全道具 +10 也要跳过 6/9');
+  assert.match(src, /if \(UNUSED_PROPS\.has\(key\)\) return '这件道具在游戏内没有产出与用途/, '直接调 grantItem 也要拒绝');
+});
+
 /* 每个「浏览器侧模块」都必须能在最小环境下**加载成功**并挂上自己的全局。
  * 这条是补一个真实的坑：js/battle.js 曾经在模块作用域引用了一个只存在于
  * Battle.run 内部的函数 → 文件一加载就 ReferenceError → window.Battle 根本没挂上，
@@ -375,6 +385,23 @@ record('浏览器侧模块都能加载并挂上全局（battle / tower / tower-u
     assert.ok(c[key], '加载完之后 window.' + key + ' 应当存在');
     assert.ok(c[key][need], 'window.' + key + '.' + need + ' 应当存在');
   }
+});
+
+/* 用户 2026-10 回报：安卓玩家「关于复刻版」还是 1.0.4，开发端却是 1.0.5。
+ * 根因是安装包 / APK 的内嵌前端快照只有 css/js/images/audio + index.html：
+ * 运行时 fetch('scripts/version.json') 在 tauri.localhost 下 404，于是退回
+ * js/classic-ui.js 里写死的 VERSION_FALLBACK。这条钉住「快照必须把版本号带进去」。 */
+record('安装包 / APK 必须把版本号带进去（注入 __SSDZ_VERSION + 复制 scripts/version.json）', () => {
+  const build = fs.readFileSync(path.join(ROOT, 'tools', 'build-tauri-app.cjs'), 'utf8');
+  assert.match(build, /const WEB_VERSION_FILE = 'scripts\/version\.json'/,
+    '前端快照要显式认识 scripts/version.json');
+  assert.match(build, /fs\.copyFileSync\(vf, path\.join\(WEB_OUT, WEB_VERSION_FILE\)\)/,
+    '快照里要复制 scripts/version.json（运行时 fetch 读它）');
+  assert.match(build, /window\.__SSDZ_VERSION/,
+    'index.html 要注入 __SSDZ_VERSION（fetch 被拦 / file:// 时也能显示正确版本）');
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
+  assert.match(ui, /window\.__SSDZ_VERSION/,
+    'classic-ui 要优先读注入的版本号，而不是只看 VERSION_FALLBACK');
 });
 
 (async () => {

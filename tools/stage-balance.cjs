@@ -29,7 +29,7 @@ function findRoot(start) {
 
 const root = findRoot(__dirname);
 const RUNS = Math.max(20, Number(process.argv[2]) || 150);
-const rangeArg = process.argv[3] || '1-18';
+const rangeArg = process.argv[3] || '1-36';
 const TUNE = Object.assign({
   hp: 1, power: 1, agility: 1, speed: 1,
   roleHp: [1, 1, 1], rolePower: [1, 1, 1], starHp: [1, 1, 1, 1, 1, 1],
@@ -71,7 +71,8 @@ const { State, Sim, GData } = ctx;
 function targetLevel(stageId) {
   const type = Math.floor((stageId - 1) / 6);
   const star = ((stageId - 1) % 6) + 1;
-  return [10, 15, 20][type] + star - 1;
+  const bands = [[10, 15], [15, 20], [20, 25], [30, 35], [35, 40], [40, 45]];
+  return bands[type][0] + star - 1;
 }
 
 /* 实测的「推荐等级下随机玩家均值」线性近似（每档 400 个 genAI 采样）：
@@ -125,7 +126,8 @@ function runStage(stageId, level) {
   let ratio = 1;
   const fightWins = [];
   let rounds = 0;
-  for (let idx = 1; idx <= 3; idx++) {
+  const count = GData.stageEnemyCount ? GData.stageEnemyCount(stageId) : 3;
+  for (let idx = 1; idx <= count; idx++) {
     const res = Sim.simulate(Object.assign({}, me, { hp: Math.max(1, Math.round(maxHp * ratio)), maxHp }), makeFoe(stageId, idx));
     rounds += res.rounds.length;
     const win = res.winner === 0;
@@ -139,7 +141,8 @@ function runStage(stageId, level) {
 
 function measure(stageId, level) {
   let cleared = 0, rounds = 0;
-  const perFight = [0, 0, 0];
+  const count = GData.stageEnemyCount ? GData.stageEnemyCount(stageId) : 3;
+  const perFight = Array(count).fill(0);
   for (let i = 0; i < RUNS; i++) {
     const r = runStage(stageId, level);
     if (r.cleared) cleared++;

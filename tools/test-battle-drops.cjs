@@ -135,24 +135,28 @@ test('无DOM仍可按时领取与跳过，暂停和非法dt不提前结算',()=>
   g.advance(drop,1900);assert.equal(drop.collect(0),true);drop.skip();assert.equal(g.s().goldPoint,106);assert.equal(g.nodes.length,0);
 });
 
-test('天梯战用专属掉落表：飘出来的是天梯碎片与恶魔果实种子',()=>{
+test('天梯战用专属掉落表：飘出来的是属性碎片与恶魔果实种子',()=>{
   const g=setup();
-  // 全 0 的随机源必中每条掉落的第一项：天梯表第一条就是天梯碎片（id 51）
+  // 全 0 的随机源必中每条掉落的第一项：天梯表第一条就是属性碎片（id 51）
   const drop=g.create([0,0,0,0],true,'rank');
-  g.advance(drop,2100);assert.equal(drop.collect(0),true);
-  assert.equal(g.s().props[51],1,'点一下拿到天梯碎片');
+  g.advance(drop,2100);
+  const card=g.live('button')[0];
+  assert.match(card.innerHTML,/请点确定/,'天梯拾取卡文案是「请点确定」');
+  assert.match(card.className,/rank/,'天梯拾取卡用 rank 尺寸');
+  assert.equal(drop.collect(0),true);
+  assert.equal(g.s().props[51],1,'点一下拿到属性碎片');
   drop.skip();assert.equal(g.s().props[51],3,'跳过会补领剩下两帧（都是碎片）');
   const afterRank=g.s().props[51];
-  // 普通战斗不会掉天梯碎片
+  // 普通战斗不会掉属性碎片
   const plain=g.create([0,0,0,0],true,'challenge');
   g.advance(plain,2100);plain.collect(0);plain.skip();
-  assert.equal(g.s().props[51],afterRank,'普通战斗不掉天梯碎片');
+  assert.equal(g.s().props[51],afterRank,'普通战斗不掉属性碎片');
   assert.equal(g.c.BattleDrops.poolFor('rank').some(p=>p.id===51),true);
   assert.equal(g.c.BattleDrops.poolFor().some(p=>p.id===51),false);
   assert.equal(g.c.BattleDrops.poolFor('rank').some(p=>p.id===46),true,'天梯也掉恶魔果实种子');
 });
 
-test('10 个天梯碎片 + 50 金松果随机合成一个转化丸',()=>{
+test('10 个属性碎片 + 50 金松果随机合成一个转化丸',()=>{
   const g=setup(),s=g.s();
   assert.equal(g.c.State.composeConvertPill().ok,false,'碎片不够不能合成');
   s.props[51]=10;s.goldPoint=200;
@@ -179,7 +183,7 @@ test('蓝色碎片小幅降期望：除碎片竞技场外都吃同一个系数�
     'return function(){return i<q.length?q[i++]:0.5;};})()',c);
   const stage=(stageId,values)=>{
     const s=g.c.State.state();s.level=70;s.props={};
-    for(let i=1;i<=18;i++)s.stages[i]={npcIndex:3,passed:true};
+    for(let i=1;i<=36;i++)s.stages[i]={npcIndex:3,passed:true};
     s.stageRuns={};s.stageRuns[stageId]={attempt:7,npcIndex:3};
     seq(g.c,values);
     const r=g.c.State.finishStageBattle(stageId,7,true,1);
@@ -222,6 +226,25 @@ test('按跳过键只收 2/3（随机抹掉一项）；程序化收尾 / 录像�
   // ④ trimOne 的边界：一项/空清单不会被抹成负数。
   assert.deepEqual(g4.c.BattleDrops.trimOne([{id:1}]).list,[{id:1}]);
   assert.equal(g4.c.BattleDrops.trimOne([]).lost,null);
+});
+
+test('先手动拾取再按跳过：只从剩余里补到 2 件，不重复已拾取项、也不额外补两件',()=>{
+  /* 用户口径 2026-10：一场的 3 件掉落是预先固定的；捡了 1 件再跳过时，
+   * 只能在**没捡的**里面补 1 件（整场 2/3），剩下那件随机丢弃。 */
+  const g=setup(),drop=g.create([0,0,.4,.6,.999999]);
+  g.advance(drop,2100);
+  assert.equal(drop.collect(0),true,'先手动拾取经验');
+  assert.equal(g.s().exp,5);
+  drop.skip(true);
+  same(drop.summary().items.map(x=>x.id),[15,8]);
+  assert.equal(drop.summary().items.length,2,'已捡 1 + 补 1，不能变成 3');
+  assert.equal(drop.summary().lost.id,21,'随机丢掉的必须是还没捡的那一件');
+  assert.equal(g.s().goldPoint,102);
+  assert.equal(g.s().props[21],undefined);
+  const saved=JSON.stringify(g.saved());
+  drop.skip(true);
+  assert.equal(JSON.stringify(g.saved()),saved,'重复跳过不再发奖');
+  assert.equal(drop.summary().items.length,2);
 });
 
 test('战中大小体力药剂掉率再砍一半：权重 5→2.5 / 1→0.5，且小数权重照常摇号',()=>{

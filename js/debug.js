@@ -18,6 +18,37 @@
 (function () {
   'use strict';
 
+  /* 开发者开关：false = 经典界面不显示调试按钮/面板，调试开关也不生效；
+   * true  = 经典界面也照常可用。需要时只改这一行。
+   * ⚠ 提交前必须保持 false：`test-ssfight-render` 的 checkDualSaveAndDebugGate 按这条断言
+   *   （经典界面默认隐藏调试入口，只保留这个源码开关）。本地调试临时改 true 别一起提交。 */
+  const DEBUG_IN_CLASSIC = false;
+
+  /* 【快进 24 小时】把「当前存档」的调试时钟偏移加到 Date.now 上。
+   * 偏移存在各自槽位的 `debugClockOffset` 里：经典/现代两套存档互不影响；
+   * 切换界面后 `State.state()` 变了，这里读到的就是另一套的偏移。
+   * 只改 Date.now（游戏内日期都从它派生），不碰系统时间。 */
+  const nativeDateNow = Date.now.bind(Date);
+  function debugClockOffset() {
+    try {
+      const S = window.State && State.state ? State.state() : null;
+      return Math.max(0, Number(S && S.debugClockOffset) || 0);
+    } catch (e) { return 0; }
+  }
+  if (!Date.__ssdzDebugClock) {
+    Date.now = () => nativeDateNow() + debugClockOffset();
+    Date.__ssdzDebugClock = true;
+  }
+
+  /** 当前是不是经典界面。只在浏览器有 UI 时判断；纯状态测试/无 UI 宿主视为允许。 */
+  function classicUiActive() {
+    try {
+      if (window.UI && typeof UI.currentUiMode === 'function') return UI.currentUiMode() === 'classic';
+    } catch (e) {}
+    return false;
+  }
+  function debugAllowed() { return DEBUG_IN_CLASSIC || !classicUiActive(); }
+
   /* ============================================================
    * 【DBG1】开关存取（localStorage 隔离）
    * ============================================================ */
@@ -26,7 +57,7 @@
    * set() 以 TOGGLES 为准，所以这里漏了也不会出现「开关点不动」的老问题
    * （历史上 noTowerCost / endlessCoin 就漏在这里过，那两个开关于是形同虚设；
    * 2026-10 已按用户口径删掉 —— 见下面 TOGGLES 里的说明）。 */
-  const defaults = { infiniteEnergy: false, godMode: false, shortDay: false, noUpgradeFail: false, freeUpgrade: false, freeShop: false, noStageCost: false, noCoinCost: false };
+  const defaults = { infiniteEnergy: false, godMode: false, shortDay: false, noUpgradeFail: false, freeUpgrade: false, freeShop: false, noStageCost: false, noCoinCost: false, battleStats: false };
   const state = Object.assign({}, defaults);
   try {
     const raw = localStorage.getItem(STORE_KEY);
@@ -36,8 +67,8 @@
   const NUMBER_STRETCH = 1.25;
 
   function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {} }
-  function enabled(key) { return state[key] === true; }
-  function get(key) { return state[key]; }
+  function enabled(key) { return debugAllowed() && state[key] === true; }
+  function get(key) { return debugAllowed() ? state[key] : false; }
   function numberStretch() { return NUMBER_STRETCH; }
   // 位图可能比脚本晚加载完成，图就绪后按当前宽度重画一次
   window.addEventListener('load', () => { if (window.UI && UI.renderNumbers) UI.renderNumbers(); });
@@ -71,6 +102,10 @@
       note: '战斗里玩家的血量只增不减（开战先顶到上限）：吸血、持续伤害、自伤、反伤这些掉血全部不生效，既不会被击倒，也不会在 120 手超时里按血量比例判负',
       on() {},
     },
+    {
+      key: 'battleStats', label: '战斗三维显示',
+      note: '现代战斗左上/右上实时显示双方有效力量、敏捷、速度（含装备、增益与「敏捷/速度/力量降低」）；只影响显示，不改战斗数值',
+    },
     { key: 'noUpgradeFail', label: '升级必定成功', note: '武器与技能升级不再失败' },
     { key: 'freeUpgrade', label: '升级无需消耗', note: '升级不扣金松果、不扣武器/技能卷轴，也不受等级限制' },
     { key: 'freeShop', label: '道具免费', note: '商店购买不扣金松果' },
@@ -80,6 +115,7 @@
     { key: 'noCoinCost', label: '试炼币不消耗', note: '试炼商店（买增益 / 刷新货架 / 买铸币）与铸币商店购买都不扣代币，余额不足也照买' },
   ];
   function set(key, value, session) {
+    if (!debugAllowed()) return false;
     const def = TOGGLES.find((t) => t.key === key);
     if (!def) return false;
     const changed = state[key] !== (value === true);
@@ -96,8 +132,8 @@
     return state;
   }
 
-  // 一键升级目标等级：与游戏满级一致（State.MAX_PLAYER_LEVEL = 70）
-  const MAX_LEVEL = 70;
+  // 一键升级目标等级：与游戏满级一致（State.MAX_PLAYER_LEVEL = 90）
+  const MAX_LEVEL = (window.State && State.MAX_PLAYER_LEVEL) || 90;
   /* ============================================================
    * 【DBG3】一次性工具（重置/发放/遗忘）
    * ============================================================ */
@@ -109,7 +145,7 @@
         const from = S.level;
         if (from >= MAX_LEVEL) return '已经是 ' + MAX_LEVEL + ' 级或更高（调试上限 ' + MAX_LEVEL + '）';
         const gain = { power: 0, agility: 0, speed: 0, hp: 0 };
-        let levels = 0, gifts = 0, books = 0, picks = 0;
+        let levels = 0, gifts = 0, books = 0, picks = 0, chests = 0;
         // 每次只喂「当前等级升下一级」所需的经验，走完整的 gainExp 流程
         for (let guard = 0; S.level < MAX_LEVEL && guard < 200; guard++) {
           const ups = State.gainExp(GData.nextExp(S.level));
@@ -119,6 +155,7 @@
             gain.power += u.power; gain.agility += u.agility; gain.speed += u.speed; gain.hp += u.hp;
             gifts += (u.gifts || []).length;
             if (u.attributeBook) books++;
+            if (u.chest) chests += u.chest;
             if (u.wsChoice) picks++;
           }
         }
@@ -128,10 +165,11 @@
         if (window.UI && UI.classic && UI.classic.promptLevelUpChoices) UI.classic.promptLevelUpChoices();
         return '等级 ' + from + ' → ' + S.level + '（' + levels + ' 级）：力量+' + gain.power + ' 敏捷+' + gain.agility +
           ' 速度+' + gain.speed + ' 生命+' + gain.hp + '，升级礼包 ' + gifts + ' 件' + (books ? '、属性书 ' + books + ' 本' : '') +
+          (chests ? '、金宝箱 ' + chests + ' 个' : '') +
           (picks ? '，武器/技能三选一 ' + picks + ' 组' : '，没有新的武技可选') +
           (S.freePoints ? '，本次分配弹窗里还有 ' + S.freePoints + ' 点没点完' : '');
       } },
-    { label: '一键升级（升1级）', note: '按正常升级结算一次经验，属性成长、升级礼包与武器/技能三选一照常；到 ' + MAX_LEVEL + ' 级就停下',
+    { label: '一键升级', note: '按正常升级结算一次经验，属性成长、升级礼包与武器/技能三选一照常；到 ' + MAX_LEVEL + ' 级就停下',
       run() {
         const S = State.state();
         if (S.level >= MAX_LEVEL) return '已经是 ' + MAX_LEVEL + ' 级或更高（调试上限 ' + MAX_LEVEL + '）';
@@ -153,58 +191,46 @@
     { label: '全道具 +10', run() {
         const S = State.state();
         let n = 0;
-        // 金松果/金杯/经验不是背包道具，跳过（要加它们用上面的「快速获取物品」）
-        propMap.each((id) => { if (+id > 0 && !CURRENCY_PROPS[+id]) { S.props[id] = (S.props[id] || 0) + 10; n++; } });
+        // 金松果/金杯/经验不是背包道具，跳过（要加它们用上面的「快速获取物品」）；
+        // 松鼠拳套 / 绿松果在本版没有产出与使用逻辑，也不发。
+        propMap.each((id) => {
+          if (+id > 0 && !CURRENCY_PROPS[+id] && !UNUSED_PROPS.has(+id)) {
+            S.props[id] = (S.props[id] || 0) + 10;
+            n++;
+          }
+        });
         State.save(); UI.refreshHome();
-        return n + ' 种道具各 +10（货币与经验已跳过）';
+        return n + ' 种道具各 +10（货币、经验与 2 件游戏内没有的道具已跳过）';
       } },
-    { label: '全部武器技能满级', run() {
+    { label: '武技满级', run() {
         const S = State.state();
         S.weapons = S.weapons.map((w) => w.split(':')[0] + ':15');
         S.skills = S.skills.map((s) => s.split(':')[0] + ':15');
         State.save();
         return '已有武器与技能已满级';
       } },
-    { label: '解锁全部关卡', run() {
+    { label: '解锁关卡', run() {
         const S = State.state();
         for (let id = 1; id <= 18; id++) S.stages[id] = { npcIndex: 3, passed: true };
         State.save();
         return '18 个关卡已标记通关';
       } },
-    { label: '重置每日与体力计时', note: '把每日礼包、免费抽奖、天梯今日场次与金杯商店限兑、每日任务进度、弟子日贡、对手刷新费用、体力计时都当成「新的一天」',
+    { label: '快进24小时', note: '只把当前界面（经典/现代各自独立）的游戏时间前进 24 小时：每日礼包、免费抽奖、天梯今日场次与金杯商店限兑、每日任务、弟子日贡、对手刷新费用、体力恢复都按新的一天结算；另一个界面的存档与时间不动。体力会回满，可连续刷关卡/挑战，升级更快',
       run() {
         const S = State.state();
-        const today = State.localDate();
-        S.dailyClaimDate = '';                     // 每日礼包可以再领
-        // 直接标记今天已同步，别再走 syncDailyStats 的「旧档没有日期」分支（那条分支会保留旧计数）
-        S.dailyStatsDate = today;
-        S.dailyWins = 0; S.dailyFails = 0;
-        S.joinRankCount = 0;                       // 天梯赛今日已参赛场次
-        S.rankPurchaseWeek = ''; S.rankPurchases = {};
-        S.lotteryDate = today; S.lotteryFree = 1;  // 每日免费抽奖
-        S.quests = null; S.dailyCounters = null;   // 每日任务：进度与领取状态清空，下次打开活动页重抽
-        S.masterKickDate = '';                     // 师父今天又能让一名徒弟离开
-        S.challengeRefresh = { count: 0, ts: Date.now() };   // 对手刷新费用
-        /* ---------- 弟子日贡（2026-10 用户口径：这一条也要一起重置） ----------
-         * 日供有两道门，**两道都要放开**，只清一道会出现「界面显示可领、实际领不到」：
-         *   ① 『今天领过了』—— 记在徒弟身上的 `lastExpDate` / `tributeClaimedDate`（清掉）；
-         *   ② 『昨天有收益可结算』—— 日供的数额取自 `earnHistory` 里**昨天**那一条，
-         *      昨天没记录（新档 / 当天刚玩）时总量恒为 0，`claimable` 永远是 false。
-         *   旧的调试按钮只做了 ①，于是昨天没收益的档重置完还是领不到日贡 —— 看起来就像没重置。
-         * 这里补上 ②：昨天没记录时，把**今天的**收益流水复制一份当成昨天，
-         * 让「重置 = 回到新的一天、日供可以再领一次」这件事真的成立。 */
-        for (const p of (S.prentices || [])) {
-          p.lastExpDate = '';
-          p.tributeClaimedDate = '';
-        }
-        if (State.ensureYesterdayEarnings) State.ensureYesterdayEarnings();
-        S.lastEnergyTs = Date.now(); S.energy = S.maxEnergy;
+        if (!S) return '当前没有存档';
+        const before = Math.max(0, Number(S.debugClockOffset) || 0);
+        S.debugClockOffset = before + 24 * 60 * 60 * 1000;
+        S.energy = S.maxEnergy;
+        S.lastEnergyTs = Date.now();
+        try { if (State.refreshDaily) State.refreshDaily(); } catch (e) {}
+        try { if (State.tickEnergy) State.tickEnergy(); } catch (e) {}
         State.save();
         if (window.UI && UI.refreshHome) UI.refreshHome();
         if (window.UI && UI.refreshHeader) UI.refreshHeader();
-        return '已重置：每日礼包、免费抽奖、天梯次数与限兑、每日任务、弟子日贡（含「昨日收益」这一道门）、刷新费用、体力计时';
+        return '当前界面已快进24小时：每日/周重置、体力恢复与弟子日供都按新一天结算（另一个界面不受影响）';
       } },
-    { label: '重弹「支持作者」提示', note: '把 30 级那次「自愿支持作者」的一次性提示恢复成待提示：下一次首页刷新或升级奖励处理完之后会再弹一次（正式流程只在升到 30 级时弹一次）',
+    { label: '重弹提示', note: '把 30 级那次「自愿支持作者」的一次性提示恢复成待提示：下一次首页刷新或升级奖励处理完之后会再弹一次（正式流程只在升到 30 级时弹一次）',
       run() {
         if (!(State.supportPromptReset && State.supportPromptReset())) return '当前版本没有这个接口';
         if (window.UI && UI.classic && UI.classic.maybeSupportPrompt) UI.classic.maybeSupportPrompt();
@@ -223,8 +249,8 @@
     const who = typeof name === 'string' && name.trim() ? name.trim() : (S && S.name) || '小松鼠';
     for (const def of TOGGLES) state[def.key] = false;
     save();
-    try { localStorage.removeItem(State.saveKey); } catch (e) {}
-    try { localStorage.removeItem(State.saveKey + '_backup'); } catch (e) {}
+    /* 不清整条 saveKey：现在这是一份双界面槽位存档，删掉会把另一界面的进度也带走。
+     * 新开局只覆盖当前界面槽位，另一槽由 State.newGame/save 原样保留。 */
     // 默认采用无武技的普通开局；调试时也可指定武器。
     let chosen = null;
     const list = State.weaponList ? State.weaponList() : [];
@@ -233,8 +259,15 @@
     } else if (Number.isSafeInteger(Number(weaponId)) && Number(weaponId) > 0) {
       chosen = list.find((w) => w.id === Number(weaponId)) || null;
     }
-    State.newGame(who, chosen ? { weaponId: chosen.id, weaponLevel: 1 } : undefined);
-    if (window.UI && UI.refreshHome) UI.refreshHome();
+    State.newGame(who, Object.assign({ force: true }, chosen ? { weaponId: chosen.id, weaponLevel: 1 } : {}));
+    /* 新档是 classic，但当前页可能还是旧模式/旧等级的 DOM；只 refreshHome 只会改数字，
+     * 不会重画整页，于是会出现"经典 + 现代混在一起"且引导不启动。直接重进首页。 */
+    try {
+      if (window.Main && Main.showHome) Main.showHome();
+      else if (window.UI && UI.refreshHome) UI.refreshHome();
+    } catch (e) {
+      if (window.UI && UI.refreshHome) UI.refreshHome();
+    }
     return {
       name: who, weapons: State.state().weapons.slice(), skills: State.state().skills.slice(),
       weapon: chosen ? chosen.name : null, random: weaponId === 'random',
@@ -254,7 +287,9 @@
   /** 快速获取物品用的道具下拉：字典里的全部道具；金松果/金杯/经验标注成货币。 */
   function itemOptions() {
     const rows = [];
-    propMap.each((id, v) => { if (+id > 0) rows.push({ id: +id, name: v.name }); });
+    propMap.each((id, v) => {
+      if (+id > 0 && !UNUSED_PROPS.has(+id)) rows.push({ id: +id, name: v.name });
+    });
     rows.sort((a, b) => a.id - b.id);
     return rows.map((r) => {
       const tag = CURRENCY_PROPS[r.id] === 'gold' ? '（货币·金松果）' : CURRENCY_PROPS[r.id] === 'goldCup' ? '（货币·金杯）' : CURRENCY_PROPS[r.id] === 'exp' ? '（经验值）' : '';
@@ -372,9 +407,25 @@
     return '铸币 +' + r.amount + '（现有 ' + r.total + ' 枚）';
   }
 
+  /* 调试所得账本的外壳：操作前快照 → 执行 → 记录净增量。
+   * 所有「直接发东西」的按钮都从这里走，系统页才能按索引只回收调试部分。
+   * 不包裹「遗忘」「重置每日」这类**减少/不改变物品**的操作。 */
+  function traceDebug(label, fn) {
+    let before = null;
+    try { before = (window.State && State.debugSnapshot) ? State.debugSnapshot() : null; } catch (e) {}
+    const out = fn();
+    try { if (before && window.State && State.debugRecordDiff) State.debugRecordDiff(before, label); } catch (e) {}
+    return out;
+  }
+
   /* 8 金松果 / 15 经验 / 40 金杯在原版里就是货币或经验值，不是背包道具：
    * 挂进背包只是个用不掉的死物（useType 0/3），所以取物时直接加到对应字段上。 */
   const CURRENCY_PROPS = { 8: 'gold', 40: 'goldCup', 15: 'exp' };
+  /* 原始 GameDict 里有两行，但本版游戏内既没有产出途径、也没有使用逻辑：
+   *   6 松鼠拳套（被挑战经验 +40%）
+   *   9 绿松果（双倍金松果掉落）
+   * 调试「快速获取物品」的下拉与「全道具 +10」都不再列/发，避免发一堆用不掉的死物。 */
+  const UNUSED_PROPS = new Set([6, 9]);
   /** 直接往背包里加道具（调试用，不扣任何货币），并刷新首页/背包。
    *  仍然遵守 9999 的单件上限；金松果/金杯/经验走各自的货币字段。 */
   function grantItem(id, count) {
@@ -382,6 +433,7 @@
     if (!S) return '还没有存档，先开始游戏';
     const n = Math.max(1, Math.min(999, Math.round(Number(count) || 1)));
     const key = Number(id);
+    if (UNUSED_PROPS.has(key)) return '这件道具在游戏内没有产出与用途，调试添加已跳过';
     const def = propMap.getValue(key);
     if (!def) return '道具表里没有编号 ' + id;
     const currency = CURRENCY_PROPS[key];
@@ -415,6 +467,72 @@
    * ============================================================ */
   // ---------- 面板 ----------
   let panel = null, gear = null, drag = null;
+  /* 玩家手动拖过面板之后就不再让面板跟内屏走（按钮始终跟随）。 */
+  let panelPinned = false;
+  let layoutBound = false;
+
+  /** 游戏**内屏**的可见包围盒：经典/现代界面都是 `#ui`（1150×690 设计空间）经
+   *  `Main.resizeLayout()` 等比缩放后的那个矩形。窗口比例和舞台不一致时，窗口四周会留黑边，
+   *  `position:fixed` 贴的是**外框**（窗口），会掉进黑边里；这里改成按内屏的矩形定位。
+   *  `#ui` 还没挂上（启动最早的一瞬间）时退回窗口尺寸。 */
+  function stageRect() {
+    let r = null;
+    try {
+      const ui = document.getElementById('ui');
+      r = ui && ui.getBoundingClientRect ? ui.getBoundingClientRect() : null;
+    } catch (e) { r = null; }
+    if (r && r.width > 120 && r.height > 90) return r;
+    const de = document.documentElement || {};
+    const vw = Math.max(1, de.clientWidth || window.innerWidth || 1);
+    const vh = Math.max(1, de.clientHeight || window.innerHeight || 1);
+    return { left: 0, top: 0, right: vw, bottom: vh, width: vw, height: vh, windowFallback: true };
+  }
+  /** 把入口按钮（以及没被拖过的面板）贴到内屏的右上角。
+   *  尺寸用 getBoundingClientRect 量：按钮本身是 fixed + 不缩放，所以这里只需要平移。 */
+  function layoutDebugUi() {
+    if (!gear) return;
+    const r = stageRect();
+    const margin = 6;
+    /* 按钮隐藏时 offsetWidth 是 0，用一个够用的兜底宽度（实测约 58×34）。 */
+    const gw = Math.max(28, gear.offsetWidth || 58);
+    const gh = Math.max(20, gear.offsetHeight || 34);
+    const gearLeft = Math.max(r.left + 2, r.right - margin - gw);
+    const gearTop = Math.max(r.top + 2, r.top + margin);
+    gear.style.right = 'auto';
+    gear.style.left = Math.round(gearLeft) + 'px';
+    gear.style.top = Math.round(gearTop) + 'px';
+    if (!panel) return;
+    const room = Math.max(160, r.bottom - (gearTop + gh + 8) - 8);
+    /* 面板高度也按内屏算（内联样式优先于 CSS 里的 100vh 兜底），别让它伸到黑边/状态栏外面。 */
+    panel.style.maxHeight = Math.round(room) + 'px';
+    if (panelPinned) return;          // 玩家拖过就留在原地，别再拽回来
+    const pw = Math.max(240, Math.min(panel.offsetWidth || 396, r.width - 16));
+    panel.style.right = 'auto';
+    panel.style.left = Math.round(Math.max(r.left + 8, gearLeft + gw - pw)) + 'px';
+    panel.style.top = Math.round(gearTop + gh + 8) + 'px';
+  }
+  /** 内屏尺寸会变的三条路：窗口 resize / 转屏；`Main.resizeLayout()` 改 `#ui` 的 transform；
+   *  切界面模式重建 `#ui`。前两条直接监听，第三条用 MutationObserver 盯 style/class。 */
+  function bindLayout() {
+    if (layoutBound) return;
+    layoutBound = true;
+    try { window.addEventListener('resize', layoutDebugUi); } catch (e) {}
+    try { window.addEventListener('orientationchange', () => setTimeout(layoutDebugUi, 120)); } catch (e) {}
+    try {
+      if (window.visualViewport) window.visualViewport.addEventListener('resize', layoutDebugUi);
+    } catch (e) {}
+    try {
+      if (document.addEventListener) {
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') layoutDebugUi(); });
+      }
+    } catch (e) {}
+    try {
+      const ui = document.getElementById('ui');
+      if (ui && typeof MutationObserver === 'function') {
+        new MutationObserver(layoutDebugUi).observe(ui, { attributes: true, attributeFilter: ['style', 'class'] });
+      }
+    } catch (e) {}
+  }
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -432,7 +550,8 @@
       '<label class="debug-grant-row"><select data-item-select aria-label="选择要获取的道具">' + itemOptions() + '</select>' +
       '<input type="number" data-item-count min="1" max="999" step="1" value="10" inputmode="numeric" aria-label="获取数量">' +
       '<button type="button" class="uc-button tiny" data-item-grant="1">获取</button></label>' +
-      '<p class="debug-grant-note">直接进背包、不扣金松果；碎片、果实种子、天梯碎片等全部道具都在下拉里。</p></div>' +
+      '<p class="debug-grant-note">直接进背包、不扣金松果；碎片、果实种子、属性碎片等全部道具都在下拉里。</p>' +
+      '<p class="debug-grant-note">永久属性点硬上限 <b>651</b>（含调试）：到顶后属性丸/属性书会拒绝使用；直接改存档也会在保存、读档和战斗前收口。</p></div>' +
       '<div class="debug-grant debug-ws">' +
       '<span class="debug-grant-title">武技：快速获得 / 遗忘</span>' +
       '<label class="debug-grant-row debug-ws-row"><span class="debug-ws-tag">武器</span>' +
@@ -473,9 +592,9 @@
       '<div class="debug-actions">' +
       ACTIONS.map((a, i) => '<button type="button" class="uc-button tiny" data-act="' + i + '" title="' + esc(a.note || a.label) + '">' + esc(a.label) + '</button>').join('') +
       '</div><div class="debug-danger"><label class="debug-weapon"><span>开局武器</span><select data-weapon-select aria-label="彻底重置后的开局武器">' + weaponOptions('default') + '</select></label>' +
-      '<button type="button" class="debug-reset-account" data-reset-account="1">彻底重置账号</button>' +
+      '<button type="button" class="debug-reset-account" data-reset-account="1">彻底重置</button>' +
       '<span>清空存档回到全新开局：等级、属性、道具、装备、关卡进度，以及 1 级后随机领悟的武器与技能全部清掉。开局武器可先用上面的下拉选择（默认沿用原版的方天画戟）。</span></div>' +
-      '<p class="debug-foot">开关保存在 <b>ssdz_debug</b>，不写进正式存档。<button type="button" class="debug-link" data-reset="1">全部关闭并清除</button></p>' +
+      '<p class="debug-foot">开关保存在 <b>ssdz_debug</b>，不写进正式存档。<button type="button" class="debug-link" data-reset="1">全部关闭</button></p>' +
       '<output class="debug-msg" aria-live="polite"></output></div>';
 
     gear = document.createElement('button');
@@ -501,13 +620,17 @@
       const b = e.target.closest('[data-act]');
       if (!b) return;
       const a = ACTIONS[Number(b.dataset.act)];
-      if (a) msg(a.run());
+      if (a) msg(traceDebug('调试：' + a.label, () => a.run()));
     };
     // 快速获取物品：选道具 + 数量后点「获取」，回车同样生效
     const grantBtn = panel.querySelector('[data-item-grant]');
     const grantSelect = panel.querySelector('[data-item-select]');
     const grantCount = panel.querySelector('[data-item-count]');
-    const doGrant = () => msg(grantItem(Number(grantSelect.value), Number(grantCount.value)));
+    const doGrant = () => {
+      const id = Number(grantSelect.value);
+      const def = propMap.getValue(id);
+      msg(traceDebug('调试：获取 ' + ((def && def.name) || ('道具#' + id)), () => grantItem(id, Number(grantCount.value))));
+    };
     grantBtn.onclick = doGrant;
     grantCount.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); doGrant(); } };
     grantSelect.onchange = () => {
@@ -517,8 +640,13 @@
     // 武器/技能：选表 + 等级后获得（回车同样生效），已有武技后面的 × 直接遗忘
     for (const btn of panel.querySelectorAll('[data-ws-learn]')) {
       const kind = btn.dataset.wsLearn;
-      btn.onclick = () => msg(grantWS(kind, panel.querySelector('[data-ws-select="' + kind + '"]').value,
-        panel.querySelector('[data-ws-level="' + kind + '"]').value));
+      btn.onclick = () => {
+        const id = Number(panel.querySelector('[data-ws-select="' + kind + '"]').value);
+        const level = Number(panel.querySelector('[data-ws-level="' + kind + '"]').value);
+        const def = (kind === 'skill' ? State.skillList() : State.weaponList()).find((x) => Number(x.id) === id);
+        msg(traceDebug('调试：获得' + (kind === 'skill' ? '技能 ' : '武器 ') + ((def && def.name) || id),
+          () => grantWS(kind, id, level)));
+      };
       const levelInput = panel.querySelector('[data-ws-level="' + kind + '"]');
       levelInput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); btn.click(); } };
     }
@@ -553,15 +681,15 @@
       const pickedName = picked === 'default' ? '原版初始武器'
         : picked === 'random' ? '随机一把' : (panel.querySelector('[data-weapon-select]').selectedOptions[0].textContent);
       // 两步确认，避免误点清掉进度
-      msg('再次点击「彻底重置账号」确认：清空 ' + who + ' 的全部进度与随机获得的武器/技能，开局武器「' + pickedName + '」');
+      msg('再次点击「彻底重置」确认：清空 ' + who + ' 的全部进度与随机获得的武器/技能，开局武器「' + pickedName + '」');
       const btn = panel.querySelector('[data-reset-account]');
       if (btn.dataset.armed !== '1') {
         btn.dataset.armed = '1';
         btn.textContent = '确认彻底重置？';
-        setTimeout(() => { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = '彻底重置账号'; } }, 4000);
+        setTimeout(() => { if (btn.dataset.armed === '1') { btn.dataset.armed = ''; btn.textContent = '彻底重置'; } }, 4000);
         return;
       }
-      btn.dataset.armed = ''; btn.textContent = '彻底重置账号';
+      btn.dataset.armed = ''; btn.textContent = '彻底重置';
       const r = resetAccount(who, picked === 'default' ? undefined : picked);
       for (const input of panel.querySelectorAll('input[type="checkbox"]')) input.checked = false;
       mark();
@@ -575,24 +703,30 @@
       mark();
     };
 
-    // 拖动标题栏移动面板
+    // 拖动标题栏移动面板（拖过之后就不再自动贴内屏；边界仍按内屏算，免得拖到黑边里找不回来）
     const head = panel.querySelector('.debug-head');
     head.onpointerdown = (e) => {
       if (e.target.closest('button')) return;
       const r = panel.getBoundingClientRect();
       drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+      panelPinned = true;
       head.setPointerCapture(e.pointerId);
     };
     head.onpointermove = (e) => {
       if (!drag) return;
-      const x = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, e.clientX - drag.dx));
-      const y = Math.max(0, Math.min(window.innerHeight - 40, e.clientY - drag.dy));
+      const stage = stageRect();
+      const maxX = Math.max(stage.left, stage.right - panel.offsetWidth);
+      const maxY = Math.max(stage.top, stage.bottom - 40);
+      const x = Math.max(stage.left, Math.min(maxX, e.clientX - drag.dx));
+      const y = Math.max(stage.top, Math.min(maxY, e.clientY - drag.dy));
       panel.style.left = x + 'px'; panel.style.top = y + 'px';
       panel.style.right = 'auto';
     };
     head.onpointerup = (e) => { drag = null; try { head.releasePointerCapture(e.pointerId); } catch (err) {} };
 
     mark();
+    bindLayout();
+    layoutDebugUi();
     // 启动时只还原面板显示；已保存的开关由游戏本身按标记生效，
   }
 
@@ -716,12 +850,22 @@
   }
 
   function isOpen() { return !!(panel && panel.classList.contains('open')); }
+  function refreshAvailability() {
+    if (!gear) return false;
+    const ok = debugAllowed();
+    gear.style.display = ok ? '' : 'none';
+    if (!ok) { panel.classList.remove('open'); gear.classList.remove('open'); }
+    /* display 一变，按钮的可见宽高也跟着变（隐藏时量不到），重新贴一次内屏。 */
+    if (ok) layoutDebugUi();
+    return ok;
+  }
   function togglePanel(force) {
     if (!panel) build();
+    if (!debugAllowed()) { refreshAvailability(); return false; }
     const open = force == null ? !isOpen() : force === true;
     panel.classList.toggle('open', open);
     gear.classList.toggle('open', open);
-    if (open) mark();
+    if (open) { mark(); layoutDebugUi(); }
     return open;
   }
 
@@ -735,7 +879,7 @@
     }, true);
   }
 
-  function init() { build(); bindKeys(); }
+  function init() { build(); bindKeys(); refreshAvailability(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 
@@ -743,11 +887,26 @@
    * 【DBG5】导出 window.Debug
    * ============================================================ */
   window.Debug = {
-    enabled, get, set, toggle, reset, numberStretch, resetAccount, grantItem, grantWS, forgetWS, MAX_LEVEL,
-    open: () => togglePanel(true), close: () => togglePanel(false), togglePanel, state: () => Object.assign({}, state),
+    enabled, get, set, toggle, reset, numberStretch, resetAccount, forgetWS, MAX_LEVEL,
+    /* 控制台/探针直接调这两个入口时也要落到调试所得账本里。 */
+    grantItem: (id, count) => {
+      const def = propMap.getValue(Number(id));
+      return traceDebug('调试：获取 ' + ((def && def.name) || ('道具#' + id)), () => grantItem(id, count));
+    },
+    grantWS: (kind, id, level) => {
+      const def = (kind === 'skill' ? State.skillList() : State.weaponList()).find((x) => Number(x.id) === Number(id));
+      return traceDebug('调试：获得' + (kind === 'skill' ? '技能 ' : '武器 ') + ((def && def.name) || id),
+        () => grantWS(kind, id, level));
+    },
+    open: () => togglePanel(true), close: () => togglePanel(false), togglePanel, refresh: refreshAvailability,
+    allowed: debugAllowed, DEBUG_IN_CLASSIC, state: () => Object.assign({}, state),
+    /* 按内屏重新贴一次入口按钮/面板（窗口尺寸、分辨率档位、界面模式变化后都可以手动叫一次）。 */
+    layout: layoutDebugUi, stageRect,
     /* 【DBG5b】一次性工具清单（只读）：面板按它渲染按钮，回归/探针也可以用它直接跑某一条
-     * （`Debug.actions().find((a) => a.label === '重置每日与体力计时').run()`）——
-     * 与真人点按钮走的是**同一份实现**，不会出现「测试绿、点按钮不生效」那种错位。 */
-    actions: () => ACTIONS.map((a) => ({ label: a.label, note: a.note, run: a.run })),
+     * （`Debug.actions().find((a) => a.label === '快进24小时').run()`）——
+     * 与真人点按钮走的是**同一份实现**，不会出现「测试绿、点按钮不生效」那种错位。
+     * 这里包一层账本记录，控制台直接跑也会留下索引。 */
+    actions: () => ACTIONS.map((a) => ({ label: a.label, note: a.note,
+      run: () => traceDebug('调试：' + a.label, () => a.run()) })),
   };
 })();

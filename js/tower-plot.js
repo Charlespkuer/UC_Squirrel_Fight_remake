@@ -213,6 +213,44 @@
       ],
     },
 
+    /* —— 60/70/80/90 的征战动物 boss（挂在最后一战之前）—— */
+    boss60: {
+      once: true,
+      lines: [
+        '石门内传来细碎的抓挠声。',
+        '一只披着暗色甲胄的兔影从石柱后探出头。',
+        '「狡兔三窟……你以为追到这里，就算找到我了？」',
+        '它的长耳轻轻一抖，四周的岔路同时亮起红光。',
+      ],
+    },
+    boss70: {
+      once: true,
+      lines: [
+        '一声狼嚎震得塔壁上的灰尘簌簌落下。',
+        '铁链拖地，暗御狼王从阴影里走出。',
+        '「能走到这里，你的骨头应该很硬。」',
+        '它压低身形，獠牙间漏出白气。',
+      ],
+    },
+    boss80: {
+      once: true,
+      lines: [
+        '空气里浮起淡紫色的狐火。',
+        '妖狐倚在断裂的栏杆上，尾巴轻轻扫过地面。',
+        '「别紧张，我只是想看看……你的心是不是也这么硬。」',
+        '狐火在她身后聚成一只巨大的眼睛。',
+      ],
+    },
+    boss90: {
+      once: true,
+      lines: [
+        '石柱尽头传来沉重的脚步声。',
+        '暗御猿将把巨斧往地上一顿，整层塔都震了一下。',
+        '「王座之前，只剩我这一关。」',
+        '它抬起覆满旧伤的手臂，挡住了向上的路。',
+      ],
+    },
+
     /* —— 巡视（路上偶遇的魔王）—— */
     patrolGate: {
       once: true,
@@ -394,6 +432,8 @@
   const STORY_FADE_MS = 150;
   /** 当前正在播的那段剧情：{ id, once, line, chars, lines:[{segs,total}], timer }。 */
   let storyState = null;
+  /** 上一次铺到 DOM 的行号：同一行打字时只改 `.now` 这一行，不重解析前面已完成的整段。 */
+  let paintedStoryLine = -1;
   /** 这一屏是不是**正在播剧情**（openEndless 里判：剧情屏上不弹献祭窗、不飘过程提示）。
    *  每次重画 openEndless 都会按 `pendingStory` 重新置位。 */
   let storyShowing = false;
@@ -556,6 +596,7 @@
       return { segs: segs, total: segs.reduce((n, s) => n + s.text.length, 0) };
     });
     storyState = { id: id, once: !!script.once, line: 0, chars: 0, lines: lines, timer: null };
+    paintedStoryLine = -1;
     return storyState;
   }
   /** 已播出的文字（前面几行整行 + 当前行已打出的部分 + 光标）。 */
@@ -594,7 +635,18 @@
     if (!st || typeof document === 'undefined' || !document || typeof document.querySelector !== 'function') return;
     const box = document.querySelector('[data-story-text]');
     if (!box) return;
-    box.innerHTML = storyBodyHtml();
+    /* 同一行只更新当前 `<p>`（打字机每 42ms 一次）；换行/跳行才重铺整段。
+     * 以前每打一个字都 `innerHTML = storyBodyHtml()`，长剧情 O(n²) 且每 tick 丢滚动位置。 */
+    if (paintedStoryLine !== st.line) {
+      box.innerHTML = storyBodyHtml();
+      paintedStoryLine = st.line;
+    } else {
+      const now = typeof box.querySelector === 'function' ? box.querySelector('.tower-story-line.now') : null;
+      const cur = st.lines[st.line];
+      if (now && cur) now.innerHTML = storyHtml(cur.segs, st.chars) +
+        '<span class="tower-story-caret" aria-hidden="true"></span>';
+      else { box.innerHTML = storyBodyHtml(); }
+    }
     storyScrollToCursor(box);
   }
   /** 打字机：打出一个字，然后排下一个 tick。 */
@@ -640,6 +692,7 @@
     const st = storyState;
     storyStopTimer();
     storyState = null;
+    paintedStoryLine = -1;
     if (st && st.once) { try { Tower.markStorySeen(st.id); } catch (e) {} }
     /* 【U20d】店里的商人文案：给**这家店**记一笔「已经讲过了」（`markShopStoryShown`）——
      *   · `once:false` 的随机商人文案（6 段）条件一直成立：不记就会在同一家店里
@@ -688,13 +741,13 @@
         '<div class="endless-title-row"><h2 class="tower-title">' + esc(title) + '</h2></div>' +
         '<div class="tower-story-text">' + inner + '</div></div>';
   }
-  /** 剧情模式的整屏内容：留着**标题**（无尽模式 · 第 x 层），文字**没有边框**地居中打字。
+  /** 剧情模式的整屏内容：留着**标题**（无尽塔 · 第 x 层），文字**没有边框**地居中打字。
    *  左下标「第 m/n 行」按用户口径去掉（要沉浸感）；
    *  右下角那颗「继续」也按 2026-10 用户口径去掉 —— 点屏幕任意位置继续（见 storyNoticeHtml 的注释）。 */
   function storyModeHtml(st, layer) {
     if (!st) return '';
     const body = '<div class="tower-story">' +
-        '<div class="endless-title-row"><h2 class="tower-title">无尽模式 · 第 ' +
+        '<div class="endless-title-row"><h2 class="tower-title">无尽塔 · 第 ' +
           Math.max(1, Math.floor(Number(layer) || 1)) + ' 层</h2></div>' +
       '<div class="tower-story-text" data-story-text>' + storyBodyHtml() + '</div></div>';
     /* 页面每次重画都重新起一次打字机（已经在跑的不要重排）。 */
@@ -763,6 +816,22 @@
     try { return Tower.x00BeforeFirstOf ? Tower.x00BeforeFirstOf() : null; } catch (e) { return null; }
   }
 
+  /** 60/70/80/90 的征战 boss：**只在轮到第 5 场时**播它的开场。
+   *  这四段是 `once:true`，靠存档 seen 表各播一次；不会在进层那一刻抢在三侠前面，
+   *  也不会在打完 boss / 清层之后补播。 */
+  function dueCampaignBoss(run) {
+    if (!run || !Tower.storyEnabled()) return null;
+    const idx = Math.max(0, Math.floor(Number(run.idx) || 0));
+    if (idx !== 4) return null;
+    const plan = Array.isArray(run.plan) ? run.plan : [];
+    const entry = plan[4];
+    if (!entry || entry.kind !== 'campaign') return null;
+    const layer = Math.max(1, Math.floor(Number(run.layer) || 1));
+    const id = 'boss' + layer;
+    if (Tower.storySeen(id)) return null;
+    return storyScript(id) ? id : null;
+  }
+
   /** 这一层里「巡视」那一场之前要播的（首次 `patrolGate`，之后每次偶遇一段 `patrolMeetN`）。
    *
    *  ⚠ 三条硬约束 —— 旧版本在这里踩出了用户报的「一直触发剧情、进不了战斗」：
@@ -814,6 +883,8 @@
     if (run.finished && Math.floor(Number(run.finished.layer) || 0) === Math.floor(Number(run.layer) || 0)) return null;
     const entry = dueEntry(run);
     if (entry) return entry;
+    const boss = dueCampaignBoss(run);
+    if (boss) return boss;
     return duePatrol(run);
   }
 

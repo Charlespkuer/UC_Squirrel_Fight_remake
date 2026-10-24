@@ -16,8 +16,24 @@ param([Parameter(ValueFromRemainingArguments = $true)]$Rest)
 $ErrorActionPreference = 'Continue'
 
 # node 的输出是 UTF-8；Windows PowerShell 5.1 默认按本地代码页（简体中文是 GBK）解码
-# 外部程序输出，中文会变乱码。这里显式按 UTF-8 解码（失败就算了，不影响功能）。
-try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+# 外部程序输出，中文会变乱码。这里显式按 UTF-8 解码。
+#
+# ⚠ 2026-10 用户报「终端显示一些乱码」，按这条线索把三层都钉死：
+#   ① 控制台代码页必须是 65001（`chcp`）—— PowerShell 5.1 在拿不到控制台写通道时
+#      （输出被重定向 / 被父进程捕获）会**退回 ANSI 代码页**编码自己的输出；
+#      65001 之下"ANSI 回退"本身就是 UTF-8，于是无论走哪条路都不乱。
+#   ② `[Console]::OutputEncoding` 用**不带 BOM** 的 UTF8Encoding（`[Text.Encoding]::UTF8`
+#      带 BOM，某些宿主会在输出开头吐出 BOM）；它同时决定"怎么解码 node 的输出"。
+#   ③ `$OutputEncoding` 管"喂给外部程序的编码"，一并设成 UTF-8。
+# 以前 ① 没做、② 包在 try/catch 里静默失败 —— 现在失败会明说。（一键同步.cmd 也会先 chcp。）
+try { chcp.com 65001 | Out-Null } catch { }
+try {
+  $utf8 = New-Object System.Text.UTF8Encoding $false
+  [Console]::OutputEncoding = $utf8
+  $OutputEncoding = $utf8
+} catch {
+  Write-Host ('[!] 没法把控制台切成 UTF-8：' + $_.Exception.Message + ' —— 中文可能显示成乱码，但功能不受影响。')
+}
 $here = $PSScriptRoot
 if (-not $here) { $here = (Get-Location).Path }
 # 先找同步逻辑 sync.js。两种布局都要认，所以从本脚本所在目录往上逐层找：

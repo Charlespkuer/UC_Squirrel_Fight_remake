@@ -1,0 +1,17 @@
+{
+ "generator": "tools/gen-ssfight-ui.cjs --fusion",
+ "source": "references/ssfight/ssfight/ssfight/html5/ssfight.html",
+ "sourceBytes": 26436698,
+ "sourceSha256": "c01b24dc33ccbae4e104983d54e14ff41f018458b10dc983f5bb5f3c78b39abb",
+ "roots": {
+  "help": "3157",
+  "fusing": "3763",
+  "composeType": "4493"
+ },
+ "count": 81,
+ "bitmaps": [],
+ "hd": [],
+ "missingIds": [],
+ "how": "「装备融合」页的补充库元件：SfRender.loadExtra(\"tags-fusion.json\") 之后 3157 = `showFusionHelp()` 的帮助页（text1 + left/right 翻页）、 3763 = `loadMcs([[\"融合中\",\"fusion\"]])` 的融合过场、 4493 = `selectComposeType()` 的类型选择弹窗（原件按蓝/紫/橙三档，复刻的融合规则不分档，未接线）。 主体 4673 的第 8/9/13 帧在 tags-status.json 里，本包不含。",
+ "sha256": "08723150b0ae3a4d87677251cf69dcbe63bb59e2bd2d401b4de92d9cdf1cd0a8"
+}

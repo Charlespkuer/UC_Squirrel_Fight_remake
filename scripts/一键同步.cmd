@@ -4,6 +4,12 @@ rem
 rem  All logic lives in scripts\sync\sync-win.ps1 (a sibling folder): cmd.exe
 rem  mis-parses UTF-8 Chinese inside .cmd files, therefore this file is ASCII-only.
 rem
+rem  Console code page MUST be UTF-8 (65001) before anything prints Chinese:
+rem  node writes UTF-8, and Windows PowerShell 5.1 falls back to the ANSI code page
+rem  (GBK on zh-CN) whenever it cannot use the console write path -- that is the
+rem  "terminal shows mojibake" report of 2026-10. With 65001 the ANSI fallback IS
+rem  UTF-8, so cmd / PowerShell / node all agree.
+rem
 rem  What it does (Mac <-> Windows over ZeroTier):
 rem    1) save data transfer   : save\progress.json, both directions
 rem    2) changed files sync   : only files newer on one side, never deletes
@@ -14,6 +20,7 @@ rem    launcher.cmd status | save-push | save-pull | files-push | files-pull | d
 rem    launcher.cmd <any sync.js argument>   e.g. launcher.cmd push win --save
 setlocal
 cd /d "%~dp0"
+chcp 65001 >nul 2>nul
 set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 if not exist "%PS%" set "PS=powershell"
 rem  this file lives in scripts\ ; sync logic is in scripts\sync\

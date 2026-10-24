@@ -10,6 +10,4 @@ if [ ! -f "./启动游戏.command" ]; then
   printf '按回车键关闭…'; read -r _
   exit 1
 fi
-# 告诉启动器「要关的是 停止游戏 这个窗口」，否则它只会去找 启动游戏.command 的窗口
-export SSDZ_WINDOW_TITLE="$(basename "$0")"
 exec bash "./启动游戏.command" --stop

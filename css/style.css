@@ -1,8 +1,10 @@
 /* 松鼠大战 · 怀旧版 UI 样式 —— 原版橙色系 */
 * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
-html, body { width: 100%; height: 100%; background: #1a120b; overflow: hidden; font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif; }
-#app { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
-#stage { display: block; background: #2d1f10; }
+html, body { width: 100%; height: 100%; height: 100dvh; background: #000; overflow: hidden; overscroll-behavior: none; font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif; }
+/* iOS 的 WKWebView / 安全区：页面铺满整块屏幕，未画到的区域一律黑底。
+   旧版用 height:100% + 居中画布，底部安全区会露出原生窗口的白色，左右也会露白。 */
+#app { position: fixed; inset: 0; width: 100%; height: 100%; height: 100dvh; background: #000; display: flex; align-items: center; justify-content: center; }
+#stage { display: block; background: #000; }
 #ui { position: absolute; pointer-events: none; }
 #ui > * { pointer-events: auto; }
 #boot-note { position: fixed; left: 8px; bottom: 6px; color: rgba(255,230,109,.65); font-size: 12px; z-index: 999; pointer-events: none; }
@@ -81,13 +83,24 @@ body.audio-blocked .audio-hint { display: flex; }
 .foe-info, .ws-info, .shop-info { flex: 1; font-size: 19px; }
 .foe-info b, .ws-info b, .shop-info b { color: #ffe66d; font-size: 21px; }
 .foe-stats { display: block; font-size: 15px; color: #bfa87f; margin-top: 3px; }
-.ws-lv { color: #7cfc00; }
+.ws-lv { color: #c9c58d; }
 .ws-type { background: #8a4b1f; border-radius: 6px; padding: 1px 8px; font-size: 14px; margin-left: 6px; }
 .ws-remark { font-size: 14px; color: #bfa87f; margin-top: 3px; }
+/* 装备融合材料词条：每件装备一行标签，选中后在下方汇总可继承词条。 */
+.gear-ext-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.gear-ext-label { font-size: 13px; color: #d9a441; flex-shrink: 0; }
+.gear-ext-tag { display: inline-block; padding: 1px 8px; border: 1px solid #a9792e; border-radius: 999px; background: rgba(255, 211, 105, .12); color: #ffe6a0; font-size: 13px; line-height: 20px; }
+.gear-ext-none { font-size: 13px; color: #8f7a5c; }
+.fusion-ext-summary { margin: 10px 0 8px; padding: 10px 14px; border: 2px dashed #8a5a24; border-radius: 14px; background: rgba(0, 0, 0, .22); }
+.fusion-ext-head { font-size: 16px; color: #ffe6a0; margin-bottom: 6px; line-height: 1.6; }
+.fusion-ext-head b { font-size: 17px; }
+.fusion-ext-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.fusion-ext-hint { margin-top: 6px; font-size: 13px; color: #bfa87f; line-height: 1.5; }
 .shop-price { color: #ffe66d; font-size: 18px; min-width: 70px; text-align: right; }
 .boss-tag { background: #d63c2a; color: #fff; font-size: 13px; border-radius: 5px; padding: 1px 7px; }
 .icon { flex-shrink: 0; border-radius: 8px; background-color: rgba(255,255,255,.08); }
 .q0 { color: #eee; } .q1 { color: #7cfc00; } .q2 { color: #40c4ff; } .q3 { color: #e040fb; }
+.q4 { color: #ff9800; } .q5 { color: #c9c9d6; }
 .gear-sec-title { font-size: 20px; color: #ffb32e; margin: 14px 0 8px; font-weight: bold; }
 
 /* ---------- 关卡 ---------- */

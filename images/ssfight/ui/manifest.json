@@ -1,0 +1,263 @@
+{
+ "generator": "tools/gen-ssfight-ui.cjs",
+ "source": "references/ssfight/ssfight/ssfight/html5/ssfight.html",
+ "sourceBytes": 26436698,
+ "sourceSha256": "c01b24dc33ccbae4e104983d54e14ff41f018458b10dc983f5bb5f3c78b39abb",
+ "pages": [
+  "load",
+  "showMovie",
+  "main",
+  "fight",
+  "levelup",
+  "system"
+ ],
+ "gear": [
+  "gearHead",
+  "gearFistOut",
+  "gearFistIn",
+  "gearBody",
+  "gearArm",
+  "gearShoe"
+ ],
+ "pageRootIds": {
+  "wsicon": "",
+  "load": "6843",
+  "showMovie": "6926",
+  "main": "7039",
+  "homeLand": "7140",
+  "daoju": "7180",
+  "zhuangtai": "7218",
+  "tiaozhan": "7638",
+  "fight": "7772",
+  "levelup": "7795",
+  "message": "7819",
+  "system": "7847",
+  "gearHead": "1918",
+  "gearFistOut": "1914",
+  "gearFistIn": "2013",
+  "gearBody": "1908",
+  "gearArm": "2007",
+  "gearShoe": "1910",
+  "homeland": "3957",
+  "summons": "4381",
+  "campaign": "3437"
+ },
+ "dictionarySize": 7876,
+ "exportedTags": 7733,
+ "bundles": [
+  {
+   "file": "tags.json",
+   "tags": 1621
+  },
+  {
+   "file": "tags-home.json",
+   "tags": 117
+  },
+  {
+   "file": "tags-daoju.json",
+   "tags": 244
+  },
+  {
+   "file": "tags-status.json",
+   "tags": 1093
+  },
+  {
+   "file": "tags-challenge.json",
+   "tags": 1340
+  },
+  {
+   "file": "tags-message.json",
+   "tags": 73
+  },
+  {
+   "file": "tags-wsicon.json",
+   "tags": 341
+  },
+  {
+   "file": "tags-homeland.json",
+   "tags": 216
+  },
+  {
+   "file": "tags-summons.json",
+   "tags": 932
+  },
+  {
+   "file": "tags-campaign.json",
+   "tags": 283
+  },
+  {
+   "file": "tags-gear.json",
+   "tags": 1473
+  }
+ ],
+ "frameLabels": {
+  "load": 1,
+  "showMovie": 10,
+  "main": 20,
+  "homeLand": 30,
+  "daoju": 40,
+  "zhuangtai": 50,
+  "tiaozhan": 60,
+  "fight": 70,
+  "temp": 80,
+  "levelup": 90,
+  "message": 100,
+  "system": 110
+ },
+ "bitmapCount": 19,
+ "bitmaps": [
+  {
+   "file": "bitmap/3182_0.jpg",
+   "bytes": 13225,
+   "from": "image/jpeg",
+   "firstTag": "3182",
+   "hd": "bitmap/3182_0.hd.jpg",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/7777_0.png",
+   "bytes": 4649,
+   "from": "image/png",
+   "firstTag": "7777",
+   "hd": "bitmap/7777_0.hd.png",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/7775_0.jpg",
+   "bytes": 17452,
+   "from": "image/jpeg",
+   "firstTag": "7775",
+   "hd": "bitmap/7775_0.hd.jpg",
+   "hdRefs": 2
+  },
+  {
+   "file": "bitmap/7748_0.jpg",
+   "bytes": 16249,
+   "from": "image/jpeg",
+   "firstTag": "7748",
+   "hd": "bitmap/7748_0.hd.jpg",
+   "hdRefs": 2
+  },
+  {
+   "file": "bitmap/7741_0.jpg",
+   "bytes": 15549,
+   "from": "image/jpeg",
+   "firstTag": "7741",
+   "hd": "bitmap/7741_0.hd.jpg",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/7721_0.jpg",
+   "bytes": 14168,
+   "from": "image/jpeg",
+   "firstTag": "7721",
+   "hd": "bitmap/7721_0.hd.jpg",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/7694_0.png",
+   "bytes": 14864,
+   "from": "image/png",
+   "firstTag": "7694",
+   "hd": "bitmap/7694_0.hd.png",
+   "hdRefs": 4
+  },
+  {
+   "file": "bitmap/7691_0.jpg",
+   "bytes": 18965,
+   "from": "image/jpeg",
+   "firstTag": "7691",
+   "hd": "bitmap/7691_0.hd.jpg",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/6896_0.jpg",
+   "bytes": 21901,
+   "from": "image/jpeg",
+   "firstTag": "6896",
+   "hd": "bitmap/6896_0.hd.jpg",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/6865_0.jpg",
+   "bytes": 23356,
+   "from": "image/jpeg",
+   "firstTag": "6865",
+   "hd": "bitmap/6865_0.hd.jpg",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/6913_0.jpg",
+   "bytes": 25385,
+   "from": "image/jpeg",
+   "firstTag": "6913",
+   "hd": "bitmap/6913_0.hd.jpg",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/6880_0.jpg",
+   "bytes": 19162,
+   "from": "image/jpeg",
+   "firstTag": "6880",
+   "hd": "bitmap/6880_0.hd.jpg",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/6835_0.jpg",
+   "bytes": 24344,
+   "from": "image/jpeg",
+   "firstTag": "6835",
+   "hd": "bitmap/6835_0.hd.jpg",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/3770_0.png",
+   "bytes": 1582,
+   "from": "image/png",
+   "firstTag": "3770",
+   "hd": "bitmap/3770_0.hd.png",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/7041_0.jpg",
+   "bytes": 10100,
+   "from": "image/jpeg",
+   "firstTag": "7041",
+   "hd": "bitmap/7041_0.hd.jpg",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/3931_0.jpg",
+   "bytes": 6150,
+   "from": "image/jpeg",
+   "firstTag": "3931",
+   "hd": "bitmap/3931_0.hd.jpg",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/3860_0.jpg",
+   "bytes": 13225,
+   "from": "image/jpeg",
+   "firstTag": "3860",
+   "hd": "bitmap/3860_0.hd.jpg",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/3161_0.jpg",
+   "bytes": 46525,
+   "from": "image/jpeg",
+   "firstTag": "3161",
+   "hd": "bitmap/3161_0.hd.jpg",
+   "hdRefs": 1
+  },
+  {
+   "file": "bitmap/3159_0.jpg",
+   "bytes": 18965,
+   "from": "image/jpeg",
+   "firstTag": "3159",
+   "hd": "bitmap/3159_0.hd.jpg",
+   "hdRefs": 1
+  }
+ ],
+ "missingIds": []
+}

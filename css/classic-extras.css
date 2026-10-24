@@ -131,3 +131,33 @@
 .vip-plan span{font-size:17px;color:#7b5a2e}
 /* 首页昵称前的尊贵标识（原版特权 4） */
 .home-name .vip-badge{color:#ffd84d;-webkit-text-stroke:2px #8a5f22;paint-order:stroke fill;margin-right:4px}
+/* 四个竞技场卡片（经验/碎片/幻兽/天梯）：2×2，第 4 张不折到 3 列网格外 */
+.extra-arena-cards.four{grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr)}
+
+/* 经典金杯商店的兑换确认：原版页（7638 第 9 帧）点卡片后的小弹窗。
+   商店版面本身完全用原版帧，这里只排一下"图标 + 名称/价格"这一块。 */
+.classic-rank-buy{display:flex;gap:14px;align-items:flex-start}
+.classic-rank-buy .item-icon{flex:0 0 84px;width:84px;height:84px;border-radius:14px}
+.classic-rank-buy p{margin:4px 0}
+
+/* 金杯商店（道具页同款版面）：售价 = 数字 + 金杯图 + 数字 + 金松果图。
+   比普通商店的 `.item-caption` 再大一号，且不要「杯/果」或「/」文字。 */
+.shop-board .bag-grid .catalog-cell .rank-caption{display:flex;align-items:center;justify-content:center;gap:10px;
+  max-width:none;overflow:visible;font:32px/39px Georgia,"SimSun","Songti SC","STSong",serif;letter-spacing:0;white-space:nowrap}
+.rank-price{display:inline-flex;align-items:center;justify-content:center;gap:10px;white-space:nowrap}
+.rank-price-part{display:inline-flex;align-items:center;gap:3px;line-height:1}
+.rank-price-part b{font-weight:normal;font-size:1em}
+.rank-price-art,.rank-price-part img{width:1.15em;height:1.15em;object-fit:contain;flex:none;filter:drop-shadow(0 1px 0 rgba(90,59,34,.35))}
+.rank-price-detail{display:inline-flex;vertical-align:-.18em;font-size:32px;color:#8a4b12}
+.rank-wallet{margin-top:auto;font-size:20px;line-height:1.4;color:#9a6a2a}
+/* 金杯商店返回键 = 原版 3911（随机挑战「查看」页同款），按舞台坐标覆盖在页面底部。 */
+.rank-shop-back{position:absolute;z-index:3;pointer-events:none}
+.rank-shop-back > svg{display:block;width:100%;height:100%;pointer-events:auto}
+.rank-shop-page .rank-shop-board{padding-bottom:74px}
+.rank-shop-fallback-footer{position:absolute;left:0;right:0;bottom:0}
+
+/* 每日礼包：金松果 + 当天轮换道具，图标都用经典模式素材。 */
+.daily-gift-preview{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px}
+.daily-gift-preview .daily-reward{display:inline-flex;align-items:center;gap:3px;font-size:20px;color:#7b5a2e}
+.daily-gift-preview .daily-reward img{width:24px;height:24px;object-fit:contain;vertical-align:middle}
+.daily-gift-preview .daily-reward b{font-weight:normal}

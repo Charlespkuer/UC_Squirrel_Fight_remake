@@ -1,0 +1,15 @@
+{
+ "generator": "tools/gen-ssfight-ui.cjs --compose",
+ "source": "references/ssfight/ssfight/ssfight/html5/ssfight.html",
+ "sourceBytes": 26436698,
+ "sourceSha256": "c01b24dc33ccbae4e104983d54e14ff41f018458b10dc983f5bb5f3c78b39abb",
+ "roots": {
+  "compose": "4402"
+ },
+ "count": 28,
+ "bitmaps": [],
+ "hd": [],
+ "missingIds": [],
+ "how": "`showCompose1()`（MainMovie.as:16325）`loadMcs([[\"合成中\",\"compose\"]])` 的库元件 4402： 45 帧，前 44 帧为合成过场，最后一帧 `44` 是结果页（c1/t_name/t_temp/t_baseOther/button1..3）； 道具页本体 4886 第 5 帧仍在 tags-status.json。",
+ "sha256": "473b859252a3f8d2512aa05d2f21123d93e8202b784f61b00ef79b80792a10cd"
+}

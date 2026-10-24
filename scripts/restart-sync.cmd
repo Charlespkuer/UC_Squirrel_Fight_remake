@@ -12,8 +12,13 @@ rem    - re-registers the "SSDZ Sync" scheduled task (5-minute watchdog, survive
 rem    - and picks up a newer scripts\sync\sync.js if you just received one.
 rem
 rem  Command line equivalent:  node scripts\sync\sync.js restart
+rem
+rem  chcp 65001 = let the console decode UTF-8 (node prints Chinese as UTF-8;
+rem  without this the restart report shows up as mojibake). Same fix as the
+rem  Chinese-named twin, 重启同步服务.cmd -- reported 2026-10.
 setlocal
 cd /d "%~dp0.."
+chcp 65001 >nul 2>nul
 where node >nul 2>nul
 if errorlevel 1 (
   echo Node.js not found. Install it from https://nodejs.org first.

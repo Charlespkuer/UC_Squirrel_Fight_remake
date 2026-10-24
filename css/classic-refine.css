@@ -16,6 +16,11 @@
 .page-counter{right:56px;bottom:70px;font-size:25px;color:#8b672f;padding:2px 16px;border-radius:16px;
   background:#f6ecd2d9;box-shadow:inset 0 0 0 2px #ffffff9c;text-shadow:none}
 .page-counter.in-board{right:96px;bottom:158px;color:#8b672f;background:#f6ecd2e6}
+/* 道具页的页码按原版渲染图对齐：原版是**纯白文字**（x 994、底 659），没有底框。
+   实测原版白字范围 x 994..1044 / y 638..659，而 refin 默认那条是"棕色+浅灰胶囊"，
+   所以这里只对带 .bag-grid 的页面（背包/商店/兑换）改回白字并挪到原版位置。 */
+.classic-page:has(.bag-grid) .page-counter{left:994px;right:auto;bottom:57px;font-size:28px;
+  color:#fff7d7;padding:0;background:none;box-shadow:none;text-shadow:1px 2px #456c27}
 .collection-board{padding:16px 57px 14px 95px}
 .collection-board .catalog-grid{padding:0;gap:10px 22px;grid-template-rows:1fr 1fr}
 .collection-board .catalog-cell{gap:4px}
@@ -30,25 +35,511 @@
 .empty-slot{cursor:default}.collection-board .empty-slot .item-icon,.classic-bag-board .empty-slot .item-icon{background:#e6d5a9;border:0;box-shadow:none;border-radius:30px;opacity:.7}
 /* 翻页箭头保持居中偏侧的原有位置（原版字面坐标 (7,371)/(1094,371) 会把箭头压到
  * 底板边缘上，观感反而更差，故回退）。 */
-.page-arrow{top:37%;right:9px}.page-arrow.prev{left:8px}.page-arrow .uc-button.arrow{width:62px;height:62px;min-height:0;min-width:0;padding:0;border:5px solid #278000;background:#8bd000;box-shadow:inset 0 0 0 3px #d1f48a;color:#fff9ce}
-.page-arrow .uc-button.arrow .chev{--chev-size:30px;--chev-w:8px;--chev-l:8px;--chev-r:8px}
+.page-arrow{top:37%;right:9px}.page-arrow.prev{left:8px}.page-arrow .uc-button.arrow{width:68px;height:67px;min-height:0;min-width:0;padding:0;border:0;box-shadow:none;
+  background:transparent url('../images/ui/icons/page-arrow-prev.png') center/contain no-repeat;color:transparent}
+/* 翻页键换成 **ssflight 原版那颗绿圆箭头**（从原版道具页渲染图里按轮廓抠出来的透明 PNG，
+   前/后各一张）。原来的圆是 CSS 画的、箭头是字符 ‹ › + `.chev` 拼的，这里整颗换掉。 */
+.page-arrow:not(.prev) .uc-button.arrow,.page-arrow.bag-next .uc-button.arrow{
+  background-image:url('../images/ui/icons/page-arrow-next.png')}
+.page-arrow .uc-button.arrow > *{display:none}
 .classic-tabs.bag-tabs{padding:5px 12px 5px 110px;gap:28px}
-.bag-tabs .uc-tab{flex:0 0 233px;font-size:51px}.bag-tabs .uc-tab.active{background:linear-gradient(#fffdf0,#e6dfce);border-color:#847966;box-shadow:inset 0 0 0 4px #fffdf2}
-.bag-coins{position:relative;flex:1;min-width:160px;height:63px;border-radius:45px;background:#6c3b16;color:white;font:38px Georgia,serif;display:flex;align-items:center;justify-content:center;gap:8px}
-.bag-coins img{position:absolute;width:65px;height:78px;object-fit:contain;left:-24px;top:-11px}.bag-coins b{font-weight:normal;margin-left:22px}
+/* 三颗页签用**原版矢量精灵**（道具页 7180 的 tab/tab1/tab2 = 7150/7152/7156）：
+   `classic-ui.js` 的 `installBagTabVectors()` 把 f1 金皮 / f2 绿皮的静态 SVG
+   塞进按钮里的 `.bag-tab-art`（原版 f3 是另一档奶油，用户口径选中要绿，所以不用 f3）。
+   矢量包到达前按钮走公共 `.uc-tab` 的金/绿药丸兜底（文字是 DOM 文本），
+   不再使用 tab-*.png 位图。 */
+.bag-tabs .uc-tab{flex:0 0 233px;font-size:51px;position:relative}
+.bag-tabs .uc-tab.has-vector-tab{border:0;box-shadow:none;background:none;
+  color:transparent;-webkit-text-stroke:0;text-shadow:none}
+.bag-tab-art{position:absolute;inset:0;display:block;pointer-events:none}
+.bag-tab-art>svg{display:block;width:100%;height:100%;overflow:visible}
+/* 选中态已经是原版绿皮（f2），不再叠常驻提亮；悬停也用同一档绿皮 + 公共光晕。 */
+.bag-tabs .uc-tab.has-vector-tab.sf-selected:not(.sf-hover){filter:none}
+/* 经典（ssflight）主界面左上角的「礼包 / 活动」入口 —— 位置要**避开底栏五键**。
+   历史口径变化（2026-10）：
+     · 第一百四十三批：上下居中；
+     · 第一百四十六批：与村庄门同一水平线（`top:72.2%`）—— 实测**礼包右下角会压到「道具」按钮**
+       （礼包屏幕矩形 28,495 → 127×133，底边 628；「道具」顶边 615，重叠 13px）；
+     · 本批：**往上挪到与底栏按钮留出空档**，底边 612（按钮顶边 615 − 3px 空隙）→
+       `top: 66%`（页面高 717 × 0.66 = 473 是中心，礼包半高约 66，底边 ≈ 539+… 实测见下）。
+   左沿 `left:26px` 与「道具」按钮的左沿（21px）对齐；尺寸 118×124 与村庄门（150×144）同一档。
+   原版这块是运行时挂的库元件，复刻用 DOM 按钮盖在 SVG 上（见 ui-main.js 的 addGiftButton）。
+   ⚠ 试过"以屏幕水平中线为轴镜像"（礼包中心落在 199），实测礼包会钻到 Exp 条上压住文字，不可行。 */
+.ssfight-gift{position:absolute;left:26px;top:63.5%;transform:translateY(-50%);z-index:3;
+  border:0;background:none;padding:0;cursor:pointer;line-height:0;pointer-events:auto;
+  transition:transform .12s ease-out,filter .12s ease-out}
+.ssfight-gift img{width:118px;height:124px;object-fit:contain;filter:drop-shadow(0 3px 0 rgba(90,59,34,.5))}
+.ssfight-gift:hover{filter:brightness(1.06)}
+.ssfight-gift:active{transform:translateY(-50%) scale(.96)}
+/* 礼包/活动里有未处理奖励时的提示：与 classic-ui 的 `.picture-button.attention` 同节奏。
+   图标本身在 `translateY(-50%)` 上，所以关键帧必须把这个位移一起写回去，否则会跳一下。 */
+.ssfight-gift.attention{animation:gift-attention-pulse 2.2s ease-in-out infinite;will-change:transform}
+.ssfight-gift.attention::before{content:'';position:absolute;left:50%;top:50%;width:126%;height:126%;
+  transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;z-index:0;
+  background:radial-gradient(circle,rgba(255,236,140,.9) 0%,rgba(255,226,110,.45) 46%,rgba(255,220,90,0) 72%);
+  animation:gift-attention-glow 2.2s ease-in-out infinite}
+.ssfight-gift.attention img{position:relative;z-index:1}
+@keyframes gift-attention-pulse{0%,100%{transform:translateY(-50%) scale(1)}50%{transform:translateY(-50%) scale(1.10)}}
+@keyframes gift-attention-glow{0%,100%{opacity:.3}50%{opacity:.85}}
+@media (prefers-reduced-motion:reduce){
+  .ssfight-gift.attention{animation:none}
+  .ssfight-gift.attention::before{animation:none;opacity:.6}
+}
+
+/* 村庄页 UI 的**鼠标悬停动效**（用户 2026-10 口径：悬停要有动效，不能只是"静默地换一帧"）。
+   ⚠ 原版那几颗元件（地点胶囊 button6/8/9/10、回家 mainButton、四处立绘 mc1/mc3/mc4/mc5）
+   的"常态/选中"两帧都是**静态图**，时间轴上没有可播的东西（导出数据实测），
+   所以这一档动效是**复刻侧补的**：悬停微放大、按下回弹一下。
+   动效挂在 ui-main.js `popWrap()` 包出来的 `<g class="uc-pop">` 壳上 ——
+   不能直接给元件自己的 `<g>` 加 CSS transform：那会覆盖掉父级每帧重写的原版矩阵（会把按钮挪位）。
+   `transform-box:fill-box` + `transform-origin:center` 让缩放以**元件自己的包围盒中心**为基准
+   （不写的话 SVG 的 transform-origin 默认是用户坐标原点，缩放会把按钮甩到角落里）。 */
+.uc-pop{transform-box:fill-box;transform-origin:center;transform:scale(1);
+  transition:transform .13s cubic-bezier(.34,1.4,.64,1)}
+/* 悬停：放大 + 提亮一圈。提亮是必须的 —— 用户 2026-10 报"祭坛图标没有选中反馈"：
+ * 胶囊常态绿→选中金这一档在深色草地上不够"跳"，加一层暖色光晕就一眼能看见。
+ * ⚠ `.sf-hover` 是**点击路由**（ui-main.js 的 routerOf）自己加上去的类：为了让"指针到底停在
+ * 谁身上"由路由器判定（SVG 原生命中测试是"谁画得晚谁赢"，相邻按钮的热区互相抢），
+ * 元件自己的指针事件被关掉了，`svg :hover` 于是永远不成立 —— 保留 `:hover` 是为了别处，
+ * 这里的观感由 `.sf-hover` 承担，两条声明必须**逐字一致**。 */
+.uc-pop:hover,.uc-pop.sf-hover{transform:scale(1.035);filter:drop-shadow(0 0 4px rgba(255,226,122,.9)) brightness(1.04)}
+/* 选中时**播一遍**回弹（用户 2026-10 口径："选中后就展示一遍动画"）。
+ * 原版那几颗元件（地点胶囊 / 回家 / 四处立绘）的"常态/选中"两帧都是静态图，
+ * 时间轴上没有可播的帧，所以这一遍动效是复刻侧补的：先弹大一点再落回。 */
+.uc-pop.picked{animation:uc-pop-pick .46s cubic-bezier(.34,1.5,.5,1)}
+.uc-pop.pressed{animation:uc-pop-press .16s ease-out;transition:none}
+@keyframes uc-pop-pick{0%{transform:scale(1)}35%{transform:scale(1.085)}64%{transform:scale(.985)}100%{transform:scale(1.035)}}
+@keyframes uc-pop-press{0%{transform:scale(1.035)}45%{transform:scale(.962)}100%{transform:scale(1.035)}}
+@media (prefers-reduced-motion: reduce){
+  .uc-pop{transition:none}
+  .uc-pop:hover,.uc-pop.sf-hover{transform:none}
+  .uc-pop.picked{animation:none}
+  .uc-pop.pressed{animation:none}
+}
+
+/* DOM 卡片与 SVG 壳共用同一套反馈，缩放不碰原版放置矩阵。 */
+.uc-tab,.catalog-cell,.page-footer .uc-button,.page-arrow .uc-button{
+  transition:transform .13s cubic-bezier(.34,1.4,.64,1),filter .13s}
+.sf-feedback{--sf-hover-scale:1.035;--sf-current-scale:1;
+  transform:scale(var(--sf-current-scale));transform-origin:center;
+  transition:transform .14s cubic-bezier(.34,1.6,.5,1),filter .14s,opacity .14s}
+.sf-cell .sf-feedback,.bag-grid .catalog-cell.sf-feedback{--sf-hover-scale:1.12}
+.sf-feedback.sf-hover,.bag-tabs .uc-tab.sf-feedback.sf-hover{--sf-current-scale:var(--sf-hover-scale);
+  transform:scale(var(--sf-current-scale));filter:drop-shadow(0 0 4px rgba(255,226,122,.9)) brightness(1.04)}
+.bag-grid .catalog-cell.sf-feedback.sf-hover{filter:drop-shadow(0 0 6px rgba(255,226,122,.95)) brightness(1.08)}
+.sf-feedback.sf-selected:not(.sf-hover){filter:brightness(1.04)}
+/* 道具页三颗页签的选中态已经是原版绿皮，不再叠常驻提亮（否则绿色会偏白）。 */
+.bag-tabs .uc-tab.sf-selected:not(.sf-hover){filter:none}
+/* 道具选中只用原来的绿卡；与状态格一样，不额外常驻提亮。 */
+.bag-grid .catalog-cell.sf-feedback.sf-selected:not(.sf-hover){filter:none}
+/* 按下时给一圈暖色高光：与状态页那一档（`.uc-pop` 换上高亮帧 + 光晕）的分量看齐。
+   ⚠ 只加 `filter`，不动 `transform` —— `pressed` 那一档的缩放由下面的**关键帧**驱动，
+   在这里再写一条 `transform` 会跟 @keyframes 抢同一属性（动画期间关键帧赢、动画结束后这条赢，
+   表现是"松手之后卡片保持在按下的小尺寸上不动"）。 */
+.sf-feedback.pressed{animation:sf-feedback-press .16s ease-out;transition:none;
+  filter:drop-shadow(0 0 7px rgba(255,226,122,.95)) brightness(1.1)}
+.sf-feedback.picked{animation:sf-feedback-pick .46s cubic-bezier(.34,1.5,.5,1)}
+.sf-feedback.sf-leaving{opacity:.88}
+.sf-feedback:focus-visible{outline:3px solid #ffe27a;outline-offset:3px}
+/* DOM 弹窗的确定键是程序化 focus：WebKit 会按全局 `button:focus-visible` 画一圈系统蓝框，
+ * 在奶油色弹窗上很跳。统一换成与 `.sf-feedback` 同档的暖金焦点环，键盘仍能看见焦点。 */
+.classic-modal .uc-button:focus-visible,
+.classic-modal .modal-close:focus-visible{outline:3px solid #ffe27a;outline-offset:3px}
+/* 按钮文案规范（docs/界面按钮文案规范.md）：动作标签最多 4 个汉字，状态值放到单独的
+ * 小徽章里。弹窗按钮不再用 min-width:200px 硬撑：3 个长标签在 755px 弹窗里会互相压住，
+ * 现在允许换行，并把最小宽度降下来，短标签优先保持一行。 */
+.modal-buttons{flex-wrap:wrap}
+.modal-buttons .uc-button{min-width:140px;max-width:100%;padding-left:24px;padding-right:24px}
+.uc-button .btn-badge{display:inline-flex;align-items:center;justify-content:center;
+  margin-left:8px;padding:0 8px;min-width:22px;height:26px;border-radius:13px;
+  background:#5b3a1d;color:#fff6cf;font-size:17px;line-height:1;letter-spacing:0;
+  -webkit-text-stroke:0;text-shadow:none;vertical-align:middle}
+.settings-grid.system-grid .uc-button .btn-badge{height:24px;font-size:16px}
+@media (max-width:900px){.modal-buttons .uc-button{min-width:120px;font-size:30px;padding-left:16px;padding-right:16px}}
+.uc-tab:not(.sf-feedback):hover,.catalog-cell:not(.sf-feedback):hover{transform:scale(1.035);filter:drop-shadow(0 0 4px rgba(255,226,122,.9)) brightness(1.04)}
+@keyframes sf-feedback-press{0%,100%{transform:scale(var(--sf-current-scale))}45%{transform:scale(.962)}}
+@keyframes sf-feedback-pick{0%{transform:scale(1)}35%{transform:scale(1.13)}64%{transform:scale(.985)}100%{transform:scale(var(--sf-current-scale))}}
+@media (prefers-reduced-motion: reduce){
+  .uc-tab,.catalog-cell,.page-footer .uc-button,.page-arrow .uc-button,.sf-feedback{transition:none}
+  .uc-tab:hover,.catalog-cell:hover,.sf-feedback.sf-hover,.bag-tabs .uc-tab.sf-feedback.sf-hover{transform:none}
+  .sf-feedback.pressed,.sf-feedback.picked{animation:none}
+}
+
+/* 村庄「地点场景页」（祭坛 / 神迹 / 幻兽牧场 / 征战）底部那条**复刻侧说明**。
+   不是原版内容，用 DOM 盖在 SVG 上（与上面的礼包按钮同一个理由：不动原版显示列表、
+   也不跟 SVG 的坐标缩放打架）。
+   ⚠ 两个要点（都是实测踩出来的）：
+     · `pointer-events:none` —— 这条说明压在新页面的按钮上，挡住点击的话就成了"原版按钮坏了"；
+     · 它**只停一会儿就自己收起**（JS 的 NOTE_MS，6.5 秒），所以常驻遮挡不存在。
+       点那些"还没接功能"的按钮时会再把它叫出来并加 `.flash` 闪一下（配一句 toast）。
+   ⚠ 这几页是**固定 1170 设计宽**再整体缩放的，所以字号写设计像素即可，跟 `#ui` 的 `--uiscale` 一起缩。
+   ⚠ 居中**必须**用 `left:0;right:0;margin:0 auto;width:fit-content`，**不能**用老写法
+     `left:50%;transform:translateX(-50%)` —— 绝对定位元素在 `left` 给定、`right:auto` 时，
+     shrink-to-fit 的可用宽度只有"容器宽 − left"（也就是**半个容器**），文案稍长就被压成两行
+     （实测 45 字那条被压在 533 设计像素里换行）。改成左右都锚 0 之后 max-width 才真正生效。 */
+
+.ssfight-pet-art{position:absolute;z-index:2;pointer-events:none;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.ssfight-pet-art svg{width:100%!important;height:100%!important;max-width:100%;max-height:100%}
+.ssfight-pet-art .loading{color:#8b5a1c;font:700 20px 'Microsoft YaHei',sans-serif}
+.ssfight-pet-level{position:absolute;right:4px;bottom:3px;padding:1px 6px;border-radius:999px;background:#3a2208d9;color:#ffe9a8;font:700 12px/1.4 'Microsoft YaHei',sans-serif;text-shadow:0 1px 0 #000;z-index:3}
+.ssfight-pet-detail-head{display:flex;gap:12px;align-items:center}
+.ssfight-pet-portrait{flex:0 0 132px;width:132px;height:132px;border:3px solid #8b5a1c;border-radius:16px;background:linear-gradient(#fff8db,#f4d58b);overflow:hidden;display:flex;align-items:center;justify-content:center}
+.ssfight-pet-portrait svg{width:100%!important;height:100%!important}
+.ssfight-pet-portrait .loading{color:#8b5a1c;font:700 20px 'Microsoft YaHei',sans-serif}
+.ssfight-pet-panel{position:absolute;z-index:7;left:50%;bottom:86px;transform:translateX(-50%);max-width:82%;max-height:34%;overflow:auto;padding:10px 16px;border:2px solid #8b5a1c;border-radius:14px;background:#fff7dcf2;color:#5b3510;font:14px/1.55 'Microsoft YaHei',sans-serif;box-shadow:0 3px 12px #0004;text-align:left}
+.ssfight-pet-panel b{color:#9a4b12}
+.ssfight-pet-panel button,.ssfight-pet-actions button{margin:3px 4px 0 0;padding:4px 12px;border:2px solid #8b5a1c;border-radius:999px;background:linear-gradient(#fff4c8,#f3c85f);color:#6b3e0d;font:700 13px 'Microsoft YaHei',sans-serif;cursor:pointer}
+.ssfight-pet-panel button:hover,.ssfight-pet-actions button:hover{filter:brightness(1.06)}
+.ssfight-pet-actions{margin-left:12px}
+.ssfight-pet-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:2px 12px;margin:4px 0 8px}
+.ssfight-pet-list label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rank-claim{display:flex;flex-direction:column;gap:10px}
+.rank-claim-line{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:6px 10px;align-items:baseline;background:#f7e7c2;border:2px solid #d9bd88;border-radius:16px;padding:10px 14px;color:#7a4a18;font-size:20px}
+.rank-claim-line b{font-size:24px;color:#9a1a06}
+.rank-claim-reward{display:flex;align-items:center;gap:12px;background:#fff8e3;border:3px solid #d9bd88;border-radius:18px;padding:12px 16px;color:#7a4a18;font-size:22px}
+.rank-claim-reward .reward-icon img{width:42px;height:42px;display:block}
+.rank-claim-reward b{font-size:28px;color:#9a1a06}
+.rank-claim-reward span:last-child{margin-left:auto;font-size:18px;color:#8a6a3a}
+.rank-claim-note{margin:0;font-size:20px;color:#9a1a06}
+/* 经典村庄「征战」进的挑战塔 / 无尽塔：整页**纯色**底（用户口径）。
+   ⚠ 必须带上 `html[data-ui-mode="classic"]` 前缀，否则会被 classic.css 里
+   `html[data-ui-mode="classic"] .classic-page` 的村庄底图（classic-bg）盖掉 —— 之前那版
+   渐变一直没生效就是这个原因。无尽塔的 `--tower-bg` 由 tower-ui 按层写入，挑战塔是固定绿。 */
+html[data-ui-mode="classic"] .classic-page.classic-tower,
+.classic-page.classic-tower{background:var(--tower-bg,#4c7c50);transition:background-color .8s ease}
+.classic-page.classic-tower .classic-board{top:92px;bottom:18px;border-radius:38px;padding:18px 26px;box-shadow:inset 0 0 0 4px #fff8d8,0 4px 0 #142b1a;background:linear-gradient(#fff8e3,#eedcb4)}
+.classic-page.classic-tower:has(.page-footer) .classic-board{bottom:103px}
+/* 勇者准备页没有底栏（返回键已挪到右上角）：板面铺到底，避免现代模式下动作行压住四维。 */
+.classic-page.hero-setup-page .classic-board{bottom:18px}
+.classic-tower-bar{position:absolute;top:10px;left:20px;right:20px;height:66px;display:flex;align-items:center;gap:18px;z-index:5}
+.classic-tower-bar .uc-button{height:58px;min-width:190px;font-size:27px;padding:4px 24px}
+.classic-tower .tower-page{height:100%;gap:18px}
+.classic-tower .foe-portrait img{width:100%;height:100%;max-height:100%;object-fit:contain}
+.classic-tower .foe-portrait{height:92px;overflow:hidden;border-radius:14px}
+/* 挑战塔的「本层对手预告」在经典外壳里是**横向一排**（用户口径 2026-10-19）：
+   4~5 张卡片一字排开，每张 = 立绘在上、名字/类型/精英标在下 —— 卡片本体直接沿用
+   tower.css 的默认 `.tower-plan`（那套本来就是横向卡），下面这组 !important 只描述
+   **纵向列表**（无尽塔的对手列 `.vertical`），所以用 `:not(.horizontal)` 把挑战塔那一份排除出去
+   （`.horizontal` 由 tower-ui 的 planHtml 挂上）。
+   ⚠ 进塔页的「BOSS 一览」`.boss-grid` 是**六列网格**，不是纵向列表；这里必须一起排除，
+   否则它的 `flex-direction:column !important` 会把每张 boss 卡压成一行一个（2026-10 用户截图）。 */
+.classic-tower .tower-plan:not(.horizontal):not(.boss-grid){display:flex!important;flex-direction:column!important;gap:8px;width:100%;align-items:stretch}
+.classic-tower .tower-plan:not(.horizontal):not(.boss-grid) li{display:grid!important;grid-template-columns:92px minmax(0,1fr)!important;grid-template-rows:auto auto auto!important;column-gap:8px;row-gap:2px;align-items:center;align-content:center;justify-content:flex-start;text-align:left;padding:4px 8px}
+.classic-tower .tower-plan .foe-portrait{grid-column:1!important;grid-row:1 / span 3!important;width:92px!important;height:80px!important;align-self:center;margin:0}
+.classic-tower .tower-plan .foe-portrait:has(.sf-classic-foe){background:rgba(255,248,230,.9)!important;border:2px solid #e2c68f!important;border-radius:12px!important;box-shadow:none!important;overflow:visible!important}
+/* 征战动物 boss 的小立绘（6833）走同一张卡：奶油底 + 米色描边，和松鼠 boss 的 7232 卡一致。 */
+.classic-tower .tower-plan .foe-portrait:has(.sf-classic-campaign){background:rgba(255,248,230,.9)!important;border:2px solid #e2c68f!important;border-radius:12px!important;box-shadow:none!important;overflow:visible!important}
+.classic-tower .tower-plan:not(.horizontal):not(.boss-grid) li > b{grid-column:2!important;grid-row:1!important;justify-self:start!important;max-width:100%;min-width:0;white-space:normal!important;overflow-wrap:anywhere;text-align:left;line-height:1.15;font-size:19px}
+.classic-tower .tower-plan:not(.horizontal):not(.boss-grid) li > .tower-plan-type{grid-column:2!important;grid-row:2!important;justify-self:start!important;max-width:100%;box-sizing:border-box;white-space:normal!important;overflow-wrap:anywhere;text-align:left;line-height:1.2;font-size:16px}
+.classic-tower .tower-plan:not(.horizontal):not(.boss-grid) li > .elite-tag{grid-column:2!important;grid-row:3!important;justify-self:start!important;max-width:100%;box-sizing:border-box;white-space:normal!important;overflow-wrap:anywhere}
+
+/* 60/70/80/90 层的最后一战是四雄，整列有 5 张对手卡；经典外壳的卡片比现代高一档，
+ * 第 5 张会落到右下角「继续战斗」按钮底下（头像与按钮互相盖住）。5 张时单独收紧：
+ * 立绘 92×80 → 80×68、内边距与行距收一档，其余层不受影响。 */
+.classic-tower .endless-foes.foes-many .tower-plan:not(.horizontal):not(.boss-grid) li{grid-template-columns:80px minmax(0,1fr)!important;padding:2px 8px!important;row-gap:1px!important}
+.classic-tower .endless-foes.foes-many .tower-plan .foe-portrait{width:80px!important;height:68px!important}
+.classic-tower .endless-foes.foes-many .tower-plan:not(.horizontal):not(.boss-grid) li > b{font-size:18px}
+.classic-tower .endless-foes.foes-many .tower-plan:not(.horizontal):not(.boss-grid) li > .tower-plan-type{font-size:14px}
+.classic-tower .endless-foes.foes-many .tower-plan:not(.horizontal):not(.boss-grid) li > .elite-tag{font-size:12px}
+.classic-tower .tower-plan li > .tower-plan-no{display:none!important}
+.sf-classic-foe{display:block;width:100%;height:100%;overflow:hidden}
+.sf-classic-foe svg{width:100%!important;height:100%!important;display:block}
+.sf-classic-campaign{display:block;width:100%;height:100%;overflow:hidden}
+.sf-classic-campaign svg{width:100%!important;height:100%!important;display:block}
+.ssfight-building-level{position:absolute;z-index:6;pointer-events:none;padding:4px 12px;border:2px solid #8b5a1c;border-radius:999px;background:linear-gradient(#fff4c8,#f3c85f);color:#6b3e0d;font:700 16px/1.2 'Microsoft YaHei',sans-serif;text-shadow:0 1px 0 #fff8d8;box-shadow:0 2px 0 #8b5a1c;white-space:nowrap}
+.ssfight-note{position:absolute;left:0;right:0;bottom:4px;margin:0 auto;width:fit-content;z-index:4;
+  max-width:min(1120px,96%);box-sizing:border-box;padding:5px 16px;border-radius:20px;
+  background:#2a1a0fbf;border:2px solid #c9a25a;color:#ffeec2;text-align:center;
+  font:18px/1.3 "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;
+  pointer-events:none;transition:background .18s,border-color .18s,color .18s}
+.ssfight-note.flash{background:#7a4a12f2;border-color:#ffe27a;color:#fff8dc}
+.sf-fight-result{position:absolute;inset:0;z-index:20;background:rgba(22,22,22,.2);pointer-events:auto}
+.sf-fight-result>svg{display:block;width:100%;height:100%}
+@media (prefers-reduced-motion: reduce){ .ssfight-note{transition:none} }
+
+/* 局内战斗的三侠 / 木人模型（7689 第 2/3/4/5 帧里的原版矢量稿）：
+   呼吸只动这层内壳；出招 / 受击 / 倒地由 JS 写在外层 `<g>` 的 transform 上，互不覆盖。 */
+.sf-npc-bob{transform-box:fill-box;transform-origin:center bottom;
+  animation:sf-npc-breathe 2.2s ease-in-out infinite}
+@keyframes sf-npc-breathe{
+  0%,100%{transform:translateY(0) scale(1)}
+  50%{transform:translateY(-1.4px) scale(1.012)}
+}
+@media (prefers-reduced-motion: reduce){ .sf-npc-bob{animation:none} }
+
+/* 生效中的药丸 → 主界面右上角三个状态格（原版 showStates）。
+   位置**留在原版槽位上**（c1/c2/c3 的屏幕矩形，由 JS 按 ma 中点算出来，块中心对齐槽中心），
+   长相则**整条照抄现代版主界面那颗药丸**（用户 2026-10 口径："全面参考现代版 ui 的药丸表现代码，
+   仅需要调整药丸位置即可"）—— 即 `css/classic.css` 的 `.home-buff`：
+     · 块     `.home-buff`  width/height 58px、border-radius 17px、背景 `#fff8e0d9`、
+              `border:2px solid #b98d4f`、`box-shadow:0 1px 2px #4a2c0c55`、居中放图标；
+     · 图标   `.home-buff img`  48px（= 块边长 × 0.83），object-fit:contain；
+     · 角标   `.home-buff i`    `right:-6px / bottom:-6px`、`min-width:26px`、`height:26px`、
+              `border-radius:14px`、背景 `#835230`、`#fff7d7` 字、`border:2px solid #fff3c9`。
+   这里三样都按**比例**写（`--u` = 块边长/58）：块边长随窗口与槽位尺寸缩放，但配方与
+   `.home-buff` 逐条一致 —— 换窗口尺寸时观感不变。
+   ⚠ 原版那三个槽（3414 帧 1 的金渐变描边）已由 JS 藏掉：原版 `showStates` 把槽 `gotoAndStop(2)`
+   之后槽本来就是空的，以前那层"金渐变底板"反而是露在图标外面的多余一层。 */
+.ssfight-states{position:absolute;inset:0;z-index:2;pointer-events:none}
+/* ---------- 状态页的武器 / 技能栏（`js/ssfight/ui-status.js`）----------
+   原版页元件 7218 的第 2、3 帧就是这两个栏：底板 / 顶栏三个 tab / "返回菜单" / 页码 / 翻页箭头
+   全部来自原版素材，格子里那 10 个图标**也是原版素材** ——
+   原版是运行时 `attachMovie(武器/技能名, "mc", 100)` 挂的库元件（"库元件名 = 武器/技能名"），
+   生成器按名字把它们从整片导出里抠进 `tags-wsicon.json`（34 颗），运行时挂进原版格位。
+   格位（导出数据实测）：左上角 (34.1,38.65)、格 41.25 舞台单位、列距 53.3 / 行距 62.7。
+   这里只加**悬停反馈**（用户 2026-10 口径："鼠标悬停在特定武器或技能上面时，
+   进行一个打光与果冻缩放效果，同时显示该武器的名称"）：
+   · 打完光是格子的暖色光圈 + `.uc-pop` 那套亮度提升；果冻缩放复用 `.uc-pop`
+     （`popWrap()` 包出来的壳，见 ui-main.js），这里只把幅度调得比村庄按钮明显一点。 */
+.sf-cell .uc-pop{transition:transform .14s cubic-bezier(.34,1.6,.5,1),filter .14s}
+.sf-cell .uc-pop:hover,.sf-cell .uc-pop.sf-hover{transform:scale(1.12);
+  filter:drop-shadow(0 0 6px rgba(255,226,122,.95)) brightness(1.08)}
+.sf-cell.lit > g:not(.uc-pop),.sf-cell.lit > defs{filter:drop-shadow(0 0 3px rgba(255,214,96,.85))}
+/* 没获得的那一档：**原版自己的另一颗库元件**（名字 + "1"），自带灰底卡片 + 灰名字，
+   不再用灰阶滤镜压 —— 见 `js/ssfight/ui-status.js` 的 `paintCell` 与
+   `tools/gen-ssfight-ui.cjs` 的 `iconRoots()`。素材里没有 `locked` 这一档的旧档
+   （老的 `weapon-skill-icons.json`）会回落到同一颗图标，这时仍给一层灰阶兜底。 */
+.sf-cell .uc-pop > g.locked,
+.sf-cell > g.locked{filter:grayscale(1) brightness(.98) contrast(.86) opacity(.82)}
+.sf-catalog{position:absolute;display:grid;grid-template-columns:repeat(5,1fr);
+  grid-template-rows:repeat(2,1fr);align-items:start;justify-items:center;z-index:2}
+/* ---------- 武器 / 技能详情页（整页 DOM 画，见 ui-status.js 的 DETAIL 注释）----------
+   落点是照着原版截图（`references/screen`）逐块量的舞台坐标，换算见 `detailMapper`。
+   底板 = 一块奶油面板 + 顶部一枚棕色「武器详情」标签，和原版那一页同款排布。 */
+.sf-detail{position:absolute;inset:0;z-index:3;pointer-events:none;--u:3.6px;
+  font-family:"SimHei","Microsoft YaHei",sans-serif}
+.sf-detail>*{pointer-events:auto}
+.sf-d-panel{position:absolute;box-sizing:border-box;pointer-events:none;
+  border-radius:calc(var(--u) * 7);border:calc(var(--u) * .8) solid #a8763a;
+  background:linear-gradient(#fffaea,#f6e6c4 62%,#f0dcb2);
+  box-shadow:inset 0 0 0 calc(var(--u) * .8) #fffdf3,0 calc(var(--u) * .9) calc(var(--u) * 2) rgba(80,50,20,.28)}
+.sf-d-tab{position:absolute;box-sizing:border-box;display:flex;align-items:center;justify-content:center;
+  border-radius:calc(var(--u) * 4);border:calc(var(--u) * .8) solid #5c2f10;color:#ffe9b8;
+  background:linear-gradient(#a8622a,#7c3f14);font-weight:bold;letter-spacing:calc(var(--u) * .5);
+  font-size:calc(var(--u) * 8);text-shadow:0 calc(var(--u) * .3) 0 #3d1c05}
+.sf-d-name{position:absolute;display:flex;align-items:center;justify-content:flex-start;overflow:hidden;
+  font-size:calc(var(--u) * 8.5);font-weight:bold;color:#c2140a;letter-spacing:calc(var(--u) * .4);
+  white-space:nowrap;text-shadow:0 calc(var(--u) * .3) 0 rgba(255,255,255,.6)}
+.sf-d-name.locked{color:#8a7458}
+.sf-d-icon{position:absolute;overflow:hidden}
+.sf-d-icon svg{display:block;width:100%;height:100%}
+.sf-d-icon.locked svg{filter:grayscale(1) brightness(1.12) contrast(.86) opacity(.82)}
+.sf-d-stats{position:absolute;display:flex;flex-direction:column;justify-content:space-between}
+.sf-d-stat{display:flex;align-items:center;gap:calc(var(--u) * 2);padding:calc(var(--u) * .7) calc(var(--u) * 2.4);
+  border-radius:calc(var(--u) * 7);background:linear-gradient(#f3ddb4,#e6c894);
+  box-shadow:inset 0 0 0 calc(var(--u) * .5) #fff6dd}
+.sf-d-stat b{font-size:calc(var(--u) * 7);color:#8a5a18;font-weight:normal}
+.sf-d-stat i{font-size:calc(var(--u) * 7.5);color:#5b3010;font-style:normal;font-weight:bold}
+.sf-d-desc{position:absolute;overflow:hidden;
+  font-size:calc(var(--u) * 7);line-height:1.35;color:#6b4526;white-space:pre-line}
+.sf-d-req,.sf-d-locked{position:absolute;box-sizing:border-box;
+  padding:calc(var(--u) * 2) calc(var(--u) * 2.6);border-radius:calc(var(--u) * 5);
+  background:linear-gradient(#f6e3bd,#eed6a6);border:calc(var(--u) * .6) solid #d3a86a}
+.sf-d-req{display:flex;flex-direction:column;justify-content:space-between}
+.sf-d-locked{display:flex;align-items:center;justify-content:center;text-align:center;
+  font-size:calc(var(--u) * 10);font-weight:bold;color:#b9a27a;letter-spacing:calc(var(--u) * .8);
+  text-shadow:0 calc(var(--u) * .4) 0 #fff6dd,0 0 calc(var(--u) * 1.6) #fff}
+.sf-d-req-head{display:flex;justify-content:flex-end;gap:calc(var(--u) * 4.5);
+  font-size:calc(var(--u) * 7);font-weight:bold;color:#d9770c;
+  text-shadow:0 1px 0 #fff4d6,-1px 0 0 #fff4d6,0 -1px 0 #fff4d6,1px 0 0 #fff4d6}
+.sf-d-req-row{display:flex;align-items:center;gap:calc(var(--u) * 1.6);font-size:calc(var(--u) * 7)}
+.sf-d-req-row b{flex:1;color:#6b3212;font-weight:normal}
+.sf-d-req-row i{font-style:normal;min-width:calc(var(--u) * 11);text-align:center;color:#8a5a18}
+.sf-d-req-row i.have{color:#c8860a;font-weight:bold;border-radius:calc(var(--u) * 4);background:#fff3cf;
+  box-shadow:inset 0 0 0 calc(var(--u) * .5) #e8c47a}
+.sf-d-req-rate{display:flex;align-items:center;gap:calc(var(--u) * 1.8);justify-content:center}
+.sf-d-req-rate b{font-size:calc(var(--u) * 7.5);color:#e07a10;
+  text-shadow:0 1px 0 #fff2c8,-1px 0 0 #fff2c8,0 -1px 0 #fff2c8,1px 0 0 #fff2c8}
+.sf-d-req-rate i{font-size:calc(var(--u) * 8);color:#5a3210;font-style:normal;font-weight:bold}
+.sf-d-ok,.sf-d-back{position:absolute;box-sizing:border-box;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  border-radius:calc(var(--u) * 8);border:calc(var(--u) * .8) solid #a8763a;color:#7a4318;
+  font-size:calc(var(--u) * 7.5);font-weight:bold;
+  background:linear-gradient(#fff7e0,#f0d59a);
+  box-shadow:inset 0 calc(var(--u) * -.6) 0 #c9a468,0 1px 2px #6b452644;
+  transition:transform .12s cubic-bezier(.34,1.6,.5,1),filter .12s}
+.sf-d-ok{background:linear-gradient(#eafbc4,#a8d23e);border-color:#4e8a12;color:#2f5c06}
+.sf-d-ok.off{filter:saturate(.35) brightness(.94);cursor:default}
+.sf-d-ok:hover,.sf-d-back:hover{transform:scale(1.06);filter:brightness(1.06) drop-shadow(0 0 5px rgba(255,226,122,.9))}
+/* ---------- 「查看装备」（对手那一页，`ui-status.js` 的 openFriendGearsOverlay）----------
+   原版是库元件「状态1」第 7 帧（那一颗查不到 spriteId、没提取），这里用同一套 `.sf-detail`
+   面板画一层：标题（名字 + Lv）、四维 + 战斗力、四行"身上穿的"、一颗返回键。
+   ⚠ 四维与四件装备都要**自己排版**：`sf-d-stat` / `sf-fd-list li` 的宽度规则是给
+   详情页那种"横排 + 换行"的布局写的，直接套在绝对定位的框里会互相叠字。 */
+.sf-fg-head{display:flex;align-items:baseline;gap:calc(var(--u) * 5);justify-content:center;
+  font-family:"SimHei","Microsoft YaHei",sans-serif}
+.sf-fg-head b{font-size:calc(var(--u) * 9);color:#9a1a06}
+.sf-fg-head span{font-size:calc(var(--u) * 7);color:#a8763a}
+.sf-fg-stats{display:flex;align-items:center;gap:calc(var(--u) * 4);justify-content:center;flex-wrap:nowrap}
+.sf-fg-stats .sf-d-stat{flex:0 1 auto}
+.sf-fg-label{display:flex;align-items:center;font:calc(var(--u) * 7)/1 "SimHei","Microsoft YaHei",sans-serif;color:#8a5a18}
+.sf-fg-list{display:flex;flex-direction:column;justify-content:space-between;margin:0;padding:0;list-style:none}
+.sf-fg-list li{display:flex;align-items:center;gap:calc(var(--u) * 4);box-sizing:border-box;
+  height:calc(var(--u) * 13);padding:0 calc(var(--u) * 5);border-radius:calc(var(--u) * 7);background:#f6e6c4;
+  font-family:"SimHei","Microsoft YaHei",sans-serif}
+.sf-fg-list li.none{color:#a99274;background:#f3e7cd}
+.sf-fg-list li b{flex:1;font-size:calc(var(--u) * 7.5);font-weight:normal;color:#6b3f12;
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.sf-fg-list li i{font-size:calc(var(--u) * 6.5);font-style:normal;color:#c8860a;white-space:nowrap}
+.sf-fg-list .sf-fd-icon{width:calc(var(--u) * 11);height:calc(var(--u) * 11)}
+
+/* ---------- 挑战页：对手的二级界面（动作菜单 / 查看）----------
+   外观照原版库元件「挑战1」第 1 帧那一页（首键绿色高亮、其余米色圆角条 + 棕描边），
+   见 `js/ssfight/ui-challenge.js` 的 openFriendMenu 注释。整页 DOM，位置居中。 */
+.sf-fmenu,.sf-fdetail{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);
+  width:76%;max-width:640px;box-sizing:border-box;padding:14px 16px 16px;z-index:6;
+  border:4px solid #a8763a;border-radius:24px;background:linear-gradient(#fffdf2,#f7e8c8);
+  box-shadow:inset 0 0 0 4px #fffdf3,0 4px 12px rgba(60,36,10,.35);
+  font-family:"SimHei","Microsoft YaHei",sans-serif;color:#7a4a18}
+.sf-fmenu-head{display:flex;align-items:baseline;gap:10px;justify-content:center;margin-bottom:10px}
+.sf-fmenu-head b{font-size:24px;color:#9a1a06}
+.sf-fmenu-head span{font-size:19px;color:#a8763a}
+.sf-fmenu-note{margin:0 0 6px;text-align:center;font-size:17px;color:#8a6a3a}
+.sf-fmenu-btn{display:block;width:100%;box-sizing:border-box;margin:8px 0 0;padding:10px 12px;cursor:pointer;
+  border:3px solid #b98d4f;border-radius:19px;font:700 21px/1.2 "SimHei","Microsoft YaHei",sans-serif;
+  color:#7a4318;background:linear-gradient(#fff7e0,#f0d59a);
+  box-shadow:inset 0 -3px 0 #c9a468;transition:transform .12s,filter .12s}
+.sf-fmenu-btn.main{border-color:#4e8a12;color:#2f5c06;background:linear-gradient(#eafbc4,#a8d23e)}
+.sf-fmenu-btn:hover{transform:scale(1.03);filter:brightness(1.06) drop-shadow(0 0 6px rgba(255,226,122,.9))}
+.sf-fmenu-btn:active{transform:scale(.98)}
+.sf-fdetail{top:50%;width:82%;max-width:700px;max-height:92%;overflow:auto}
+.sf-fd-head{display:flex;align-items:baseline;gap:10px;justify-content:center;margin-bottom:8px}
+.sf-fd-head b{font-size:24px;color:#9a1a06}
+.sf-fd-head span{font-size:19px;color:#a8763a}
+.sf-fd-stats{display:flex;gap:8px;justify-content:center;margin-bottom:8px}
+.sf-fd-stat{display:flex;align-items:center;gap:6px;padding:2px 10px;border-radius:14px;background:#f0dcb4}
+.sf-fd-stat b{font-size:16px;color:#8a5a18;font-weight:normal}
+.sf-fd-stat i{font-size:18px;color:#5b3010;font-style:normal;font-weight:bold}
+.sf-fd-stat.p i{color:#a4431a}.sf-fd-stat.a i{color:#1e6fa8}
+.sf-fd-stat.s i{color:#2f7a2a}.sf-fd-stat.h i{color:#a01f1f}
+.sf-fdetail h4{margin:8px 0 4px;font-size:17px;color:#8a5a18}
+.sf-fd-list{display:flex;flex-wrap:wrap;gap:6px 10px;margin:0;padding:0;list-style:none}
+.sf-fd-list li{display:flex;align-items:center;gap:6px;width:31%;box-sizing:border-box;
+  padding:2px 6px;border-radius:14px;background:#f6e6c4}
+.sf-fd-list li.none{width:100%;color:#a99274}
+.sf-fd-icon{width:30px;height:30px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.sf-fd-icon svg{display:block;width:100%;height:100%}
+.sf-fd-icon img{width:100%;height:100%;object-fit:contain}
+.sf-fd-list b{font-size:15px;font-weight:normal;color:#6b3f12;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.sf-fd-list i{font-size:14px;font-style:normal;color:#c8860a}
+
+/* ---------- 原版动作菜单上的"行热区" ----------
+   菜单长相 100% 来自原版素材（库元件「挑战1」第 1 帧里的 `subframe`，29 帧画稿，
+   每帧一整张菜单 + 那行绿色高亮）。原版是键盘上下选，这里换成鼠标：
+   每行铺一块**透明**按钮，悬停就把 `subframe` 拨到"那行被选中"的帧，
+   于是绿高亮跟着鼠标走。按钮本身不画任何东西（`background:none;border:0`）。 */
+.sf-mrow{position:absolute;z-index:5;margin:0;padding:0;background:none;border:0;
+  cursor:pointer;appearance:none;outline:none}
+/* 赛事页（竞技场报名后）的**贴底细提示条**：原版那一页（7638 f5）本身没有任何可点的按钮，
+   四个席位与「决」字都是烤图，只有 `statu` 一个状态字段 —— 所以这里只补一条矮条，
+   把"下一场打谁 / 什么时候开打"说清楚，**不再盖住席位**（用户 2026-10 口径：
+   竞技场一切看齐 ssfight，别拿复刻自研的整块面板压在原版帧上）。
+   ⚠ 它自己一个宿主（`.ssfight-arenahint`），**不进 `menuHost()`**：那一层是常驻的，
+   赛事页一走没人收，战斗画面上会一直挂着（还压住战果弹窗与「跳过」键）。 */
+.ssfight-arenahint{position:absolute;inset:0;z-index:6;pointer-events:none;background:transparent}
+.sf-arena{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);
+  width:66%;max-width:560px;box-sizing:border-box;padding:12px 14px 14px;z-index:6;
+  border:4px solid #a8763a;border-radius:24px;background:linear-gradient(#fffdf2,#f7e8c8);
+  box-shadow:inset 0 0 0 4px #fffdf3,0 4px 12px rgba(60,36,10,.35);
+  font-family:"SimHei","Microsoft YaHei",sans-serif;color:#7a4a18}
+.sf-arena-hint{left:50%;bottom:22.5%;transform:translateX(-50%);
+  width:auto;max-width:92%;padding:5px 12px;display:flex;align-items:center;gap:12px;
+  border-width:3px;border-radius:18px;pointer-events:auto}
+.sf-arena-hint b{font-size:20px;color:#9a1a06}
+.sf-arena-hint span{font-size:16px;color:#8a6a3a}
+.sf-arena-hint .sf-mbtn{width:auto;margin:0;padding:5px 16px;font-size:18px}
+.sf-arena-head{display:flex;align-items:baseline;gap:10px;justify-content:center;margin-bottom:8px}
+.sf-arena-head b{font-size:22px;color:#9a1a06}
+.sf-arena-head span{font-size:16px;color:#a8763a}
+.sf-arena-list{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px;padding:0;list-style:none}
+.sf-arena-list li{display:flex;align-items:center;gap:6px;width:48%;box-sizing:border-box;
+  padding:4px 8px;border-radius:14px;background:#f6e6c4}
+.sf-arena-list li.me{background:#dff0c0;box-shadow:inset 0 0 0 2px #9cc45a}
+.sf-arena-list li b{font-size:16px;font-weight:normal;color:#6b3f12;flex:1;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis}
+.sf-arena-list li i{font-size:14px;font-style:normal;color:#c8860a}
+.sf-mbtn{display:block;width:100%;box-sizing:border-box;margin:8px 0 0;padding:9px 12px;cursor:pointer;
+  border:3px solid #b98d4f;border-radius:19px;font:700 20px/1.2 "SimHei","Microsoft YaHei",sans-serif;
+  color:#7a4318;background:linear-gradient(#fff7e0,#f0d59a);
+  box-shadow:inset 0 -3px 0 #c9a468;transition:transform .12s,filter .12s}
+.sf-mbtn.main{border-color:#4e8a12;color:#2f5c06;background:linear-gradient(#eafbc4,#a8d23e)}
+.sf-mbtn:hover{transform:scale(1.03);filter:brightness(1.06) drop-shadow(0 0 6px rgba(255,226,122,.9))}
+.sf-mbtn:active{transform:scale(.98)}
+
+.ssfight-state{position:absolute;display:block;box-sizing:border-box;
+  background:#fff8e0d9;border:calc(var(--u,1px) * 2) solid #b98d4f;border-radius:calc(var(--u,1px) * 17);
+  box-shadow:calc(var(--u,1px) * 0) calc(var(--u,1px) * 1) calc(var(--u,1px) * 2) #4a2c0c55}
+.ssfight-state img{position:absolute;left:50%;top:50%;width:var(--icon,40px);height:var(--icon,40px);
+  transform:translate(-50%,-50%);object-fit:contain;
+  filter:drop-shadow(0 1px 0 rgba(90,59,34,.42))}
+/* 剩余场次：现代版那枚"奶油底 + 金棕描边"的小圆牌（`.home-buff i` 的画法），压在块右下角。 */
+.ssfight-state b{position:absolute;right:calc(var(--u,1px) * -6);bottom:calc(var(--u,1px) * -6);
+  min-width:calc(var(--u,1px) * 26);height:calc(var(--u,1px) * 26);box-sizing:border-box;
+  border-radius:calc(var(--u,1px) * 14);background:#835230;color:#fff7d7;font-weight:bold;
+  font-family:Georgia,serif;font-size:calc(var(--u,1px) * 19);line-height:calc(var(--u,1px) * 22);
+  text-align:center;padding:0 calc(var(--u,1px) * 5);font-style:normal;
+  border:calc(var(--u,1px) * 2) solid #fff3c9}
+/* ⚠ 这里**不要**给 `.ssfight-state` 加"出现时弹一下"的 animation：
+ * 那种 keyframes 首帧带 `transform:scale(.72)`，而动画处在第一帧时**元素真的按 0.72 渲染** ——
+ * 实测它卡在首帧（`getComputedStyle` 一直是 `matrix(.72,…)`），槽从 79.6px 缩成 61px、
+ * 图标也跟着小一圈。去掉之后尺寸才与 `--icon` 对得上。 */
+
+/* 金松果胶囊（道具页顶栏右端）：尺寸与位置按原版道具页渲染图**逐像素量过** ——
+   原版胶囊 x 935..1135 / y 45..105，图标 58×72 跨在左边缘上（左沿 −8、上沿 −5），
+   数字紧贴图标右侧起步（距胶囊左沿 50）而不是居中；数字是白字+深棕描边。
+   ── 2026-10 用户口径：**棕色框整体缩小 15%，下边缘与右边缘不动**（于是整体偏下一点），
+      金松果与数字跟着往右下挪一点。做法：
+      · 尺寸 229×63 → 194.7×53.55（×0.85）。229 是原先 `flex:1` 分到的宽度
+        （= 页签行内容宽 1134 − 110左内距 − 3×233页签 − 3×28间距 − 12右内距），
+        经典页版式是**固定 1170 宽**再整体缩放，所以这里写死是稳的。
+      · 右边缘不动 → `margin-left:auto` 把它顶到行右端（`flex:1` 换掉，否则宽度收不回来）。
+      · 下边缘不动 → `align-self:flex-end` + `margin-bottom:6px`
+        （行内容高 75、旧胶囊 63 居中时下沿距内容底正好 6）。
+      · 图标仍按"贴着胶囊左沿 −8 / 在胶囊内垂直居中"放：`left:-8` 不变（跟着胶囊右移），
+        `top` 由 −5 改成 −9.2 = (53.55−72)/2；数字靠 `padding-left:56` + 垂直居中自动跟随。
+   ── 第一百四十八批（用户口径）：**右上那颗金松果图标放大一档、并整体左移**。
+      尺寸 58×72 → 81.2×100.8（×1.4）；左沿 −8 → −15.2（左移 7.2px）。
+      放大后图标右沿落到 66（原来 50）：数字是**左对齐**的，所以左边距也要一起加宽，
+      否则那颗橡果的实心部分会压到数字上 —— `padding-left` 56 → 64 正好吃掉这段（数字只挪 8px）。
+   ── 本批（第一百四十九批，用户口径）：**稍微缩小一点点、并上移一点点**。
+      尺寸 ×0.94：81.2×100.8 → 76.3×94.75；右下角不再动，而是往上抬 ——
+      若只按"保持垂直居中"缩，`top` 会从 −23.6 变成 −20.6（**看着反而往下走**），
+      所以再往上多抬 6px → `top:-26.6`，净效果是整颗橡果上移 6px、同时小一圈。
+      缩了之后右沿 = −15.2 + 76.3 = 61.1（原来 66），左边距跟着收 5px：
+      `padding-left` 64 → 59（数字只挪 5px，与图标右沿仍留同样的缝）。 */
+.bag-coins{position:relative;flex:0 0 auto;margin-left:auto;margin-bottom:6px;align-self:flex-end;
+  width:194.7px;height:53.55px;border-radius:45px;background:#6c3b16;color:#fffdf0;font:38px Georgia,serif;
+  display:flex;align-items:center;justify-content:flex-start;padding-left:59px}
+.bag-coins img{position:absolute;width:76.3px;height:94.75px;object-fit:contain;left:-15.2px;top:-26.6px}
+.bag-coins b{font-weight:normal;margin-left:0;-webkit-text-stroke:2.4px #57300f;paint-order:stroke fill;text-shadow:0 2px 0 #57300f}
+/* 道具页仓库/商店格子：尺寸、间距、底色全部按**原版道具页渲染图逐像素量过** ——
+   原版格子 154×146、列距 205（缝 ~50）、行距 230（缝 ~84）、第一列起于 x=117；
+   底色是纵向渐变 #f2f2d1 → #fdba26（不是以前那个风车状 conic 渐变）。 */
 .classic-bag-board{padding:15px 28px 19px 76px}
 .bag-layout{display:grid;grid-template-columns:601px 1fr;gap:44px;height:100%;position:relative}
 .bag-grid{padding:0;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:8px 22px}
 .bag-grid .catalog-cell{justify-content:flex-start;gap:5px}
 .bag-grid .item-icon{width:174px;height:167px;border:4px solid #774b32;border-radius:34px;box-shadow:inset 0 0 0 5px #fffdf4;background:repeating-conic-gradient(from 15deg at 50% 52%,#f7e9b6 0deg 18deg,#d9c087 18deg 38deg)}
 .bag-grid .selected .item-icon{background:repeating-conic-gradient(from 15deg,#d8f982 0deg 22deg,#a8d23e 22deg 42deg);border-color:#287d00}
+/* 鼠标扫过即选中：悬停光也走绿色，不再用全局的黄色 sf-hover 光。 */
+.bag-grid .catalog-cell.sf-feedback.sf-hover{filter:drop-shadow(0 0 6px rgba(82,150,35,.95)) brightness(1.04)}
 .bag-grid .item-caption{font:36px/44px Georgia,"SimSun","Songti SC","STSong",serif;color:#8e1006}
-.bag-grid .selected .item-caption{color:#8e1006;font-weight:normal}
+.bag-grid .selected .item-caption{color:#4f7c1d;font-weight:bold}
 .bag-grid .item-icon:has(.reference-art){border:0;box-shadow:none;background:none;overflow:hidden}
 .bag-grid .selected .item-icon:has(.reference-art){outline:0}
-.bag-grid .shop-stock{font:21px/25px "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;color:#866131}
-.classic-page[data-screen="shop"] .bag-grid .item-icon{height:147px;width:157px}
-.classic-page[data-screen="shop"] .bag-grid .item-caption{font-size:28px;line-height:33px}
+/* ⚠ 商店格子**不再单独缩一档**：以前商店每格多一行「今日 x/y」的库存小字，
+   于是 `.classic-page[data-screen="shop"]` 把图标缩到 157×147、价格缩到 28px 来塞下三行，
+   结果商店与背包 / 兑换的格子大小、行距都对不齐（用户 2026-10 报的
+   "去掉今日 x/y 的显示，且通过这个改动让商店界面的图标排布与背包、兑换界面看齐"）。
+   库存信息本来就写在右侧详情的 `.bag-item-meta` 里（每日限购 N 件、今日剩余 M 件），
+   格子上不再重复，三页于是共用同一套格子尺寸。 */
+/* 「金松果贴图 + 数字」的价格（用户 2026-10 第一百五十批口径：商店里不要再用「30 金松果」这种文字）。
+   用在两处：商店格子的 `.item-caption`（价格）与右侧详情的「售价 / 可回收」。
+   橡果按 1em 高缩放、与数字**基线对齐**（`align-items:center` 在行高 44 的胶囊里会偏高）；
+   数字用 Georgia 与背包其它数字同一套字形，颜色跟随所在容器（格子红 / 详情棕）。 */
+.gold-price{display:inline-flex;align-items:center;gap:4px;vertical-align:-.12em;line-height:1}
+.gold-price-art{height:1.05em;width:auto;object-fit:contain;flex-shrink:0;filter:drop-shadow(0 1px 0 rgba(90,59,34,.35))}
+.gold-price b{font-weight:normal;font-family:Georgia,"SimSun","Songti SC","STSong",serif;font-size:1em;line-height:1}
 .bag-detail{position:relative;border-radius:58px;background:linear-gradient(#eed4a5,#e2bf82);padding:11px 21px 16px;color:#6a3b15;display:flex;flex-direction:column;min-width:0;overflow:hidden}
 .bag-detail h3{margin:0 -2px 0;padding:7px 5px 12px;border-radius:40px;background:#cfa469;font:38px/43px "SimSun","Songti SC","STSong",serif;color:#fff9e9;text-align:center;flex-shrink:0}
 .bag-description{font-family:"SimSun","Songti SC","Microsoft YaHei",serif;font-size:39px;line-height:1.1;flex:1;margin:3px 0 7px;overflow:auto;white-space:pre-line}
@@ -120,12 +611,22 @@
 .classic-tabs .uc-tab:has(>.classic-button-art){height:83px;min-height:83px}
 .page-footer>.uc-button:has(>.classic-button-art){height:103px;min-width:397px;width:397px}
 .status-buttons .uc-button:has(>.classic-button-art){height:116px;width:280px}
-.gear-overlay{background:#45384da6}
+.gear-overlay{background:#1b1b1ba6}
 /* 装备详情那一行按钮：橙装带宝石时会有「卸下宝石（5金）/ 星标 / 出售 / 返回」4~5 个，
  * 200px 最小宽 + 28px 间距会超出弹窗宽度 → 允许换行（否则最右边的键会被挤出可视区）。 */
 .gear-detail-overlay .modal-buttons{flex-wrap:wrap;gap:16px 22px}.gear-modal{width:1000px;height:598px;max-height:630px;padding:40px 25px 100px;border-radius:62px}.gear-modal .modal-body{height:100%;padding:0;overflow:hidden}.gear-modal .modal-title{font-size:48px}.gear-modal .modal-buttons{position:absolute;bottom:17px;left:0;right:0}.gear-modal .modal-close{display:none}
-.gear-modal .gear-note{position:static;text-align:center;font-size:27px;margin-bottom:12px;color:#6d321d}.gear-modal .gear-layout{height:365px;grid-template-columns:38% 62%;gap:5px}.gear-modal .gear-slots{position:relative;display:block}.gear-modal .gear-slots .catalog-cell{position:absolute;width:140px;height:134px}.gear-modal .gear-slots .catalog-cell:nth-child(1){top:0;left:119px}.gear-modal .gear-slots .catalog-cell:nth-child(2){top:122px;left:202px}.gear-modal .gear-slots .catalog-cell:nth-child(3){top:122px;left:35px}.gear-modal .gear-slots .catalog-cell:nth-child(4){top:244px;left:119px}.gear-modal .gear-slots .item-icon{width:133px;height:119px;background:#ede0bd;border-radius:29px;border:3px solid #a88256;box-shadow:inset 0 0 0 3px #fff7dc}
+.gear-modal .gear-note{position:static;text-align:center;font-size:27px;margin-bottom:6px;color:#6d321d}.gear-modal .gear-layout{height:365px;grid-template-columns:38% 62%;gap:5px}/* 左侧四格按经典「状态1」第 3 帧的身体轮廓排：头在上、身体在左、手在中间、脚在下；
+   不再是现代版 2×2 方阵（用户 2026-10 口径：排布要类似经典模式）。 */
+.gear-modal .gear-slots{position:relative;display:block;height:365px;padding:0}.gear-modal .gear-slots .catalog-cell{position:absolute;width:122px;height:120px;min-height:0;justify-content:center;gap:2px}.gear-modal .gear-slots .catalog-cell:nth-child(1){left:calc(50% - 61px);top:0}.gear-modal .gear-slots .catalog-cell:nth-child(2){left:calc(72% - 61px);top:122px}.gear-modal .gear-slots .catalog-cell:nth-child(3){left:calc(28% - 61px);top:122px}.gear-modal .gear-slots .catalog-cell:nth-child(4){left:calc(50% - 61px);top:245px}.gear-modal .gear-slots .item-icon{width:133px;height:119px;background:#ede0bd;border-radius:29px;border:3px solid #a88256;box-shadow:inset 0 0 0 3px #fff7dc}
 .gear-modal .gear-list{gap:3px 17px;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr)}.gear-modal .gear-list .item-icon{width:147px;height:138px;border-radius:30px}.gear-modal .gear-list .item-caption{font:27px/32px "SimSun","Songti SC","STSong",serif}.gear-modal .gear-capacity{position:absolute;bottom:80px;right:37px;font-size:25px;color:#7b542d}.gear-modal .page-arrow{top:43%;right:2px}.gear-modal .page-arrow.prev{left:350px}
+/* 「我的装备」左侧 = **落绘 + 四个部位格**（原版 `MainMovie_frame50.as:989 showWears()`：
+ * `[mc_head, mc_hand, mc_body, mc_foot]` 四个部位精灵 + 穿在身上的装备；空格子里写部位名）。
+ * 原来这里只有四个空灰格，玩家看不到自己穿成什么样，也看不出哪一格是哪个部位。 */
+.gear-modal .gear-slots .item-icon{width:96px;height:90px;flex:0 0 auto}
+/* 空格子不许把图标框挤扁：图标固定高度，文字占剩余高度；以前 `.gear-empty{height:100%}`
+   会把同一 flex 列里的 `.item-icon` 从 90px 压到 60 多像素（用户 2026-10 报的“框缩起来”）。 */
+.gear-modal .gear-slots .gear-empty{display:flex;align-items:center;justify-content:center;width:100%;flex:1;min-height:0;font:26px/1 "SimSun","Songti SC","STSong",serif;color:#a58a5f}
+.gear-modal .gear-slots .gear-slot-name{font:25px/29px "SimSun","Songti SC","STSong",serif;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* 装备详情弹窗的按钮排。
  * **2026-10 用户口径：按钮保持游戏里那套固定尺寸（不拉伸、不压字号），一行里放几颗
@@ -149,6 +650,26 @@
 .gear-detail-overlay>.classic-modal>.modal-body{max-height:420px;overflow-y:auto}
 .classic-modal:has(.gear-detail):has(.modal-buttons>.uc-button:nth-child(5))>.modal-body,
 .gear-detail-overlay>.classic-modal:has(.modal-buttons>.uc-button:nth-child(5))>.modal-body{max-height:330px}
+
+/* 「切换界面模式」确认框：取消 / 切换两颗键放大，并从卡片下沿抬起来。
+ * 原来 small-modal 的 max-height(466) 比内容矮，按钮被顶到卡片下边框上（看着又小又靠下），
+ * 用户 2026-10 口径："取消和切换键按钮太小了太靠下，调大往上移动一点"。
+ * 这里给卡片留出内容高度（560 > 55+360+16+86+4+32），body 不再挤压按钮；
+ * 用 overlay 自己的 class 限定，别的确认框不受影响。 */
+.classic-modal-overlay.mode-switch-dialog>.classic-modal.small-modal{max-height:560px;padding-bottom:32px}
+.classic-modal-overlay.mode-switch-dialog>.classic-modal.small-modal>.modal-body{max-height:360px}
+.classic-modal-overlay.mode-switch-dialog>.classic-modal.small-modal>.modal-buttons{margin-top:16px;margin-bottom:4px}
+.classic-modal-overlay.mode-switch-dialog>.classic-modal.small-modal>.modal-buttons .uc-button{
+  min-width:210px;min-height:86px;padding:12px 44px;font-size:44px}
+
+/* 村庄「征战」弹窗：挑战塔 / 无尽塔是这一屏唯一的两个去路，按钮比普通弹窗大一号
+ *（用户口径 2026-10）。overlay 上的 `campaign-dialog` 由 classic-ui.js 的 villageWar() 加。 */
+.classic-modal-overlay.campaign-dialog>.classic-modal.small-modal,
+.classic-page~.classic-modal-overlay.campaign-dialog>.classic-modal.small-modal{width:820px;max-height:600px}
+.classic-modal-overlay.campaign-dialog>.classic-modal.small-modal>.modal-body,
+.classic-page~.classic-modal-overlay.campaign-dialog>.classic-modal.small-modal>.modal-body{max-height:400px}
+.classic-modal-overlay.campaign-dialog .modal-buttons{gap:40px;margin-top:30px}
+.classic-modal-overlay.campaign-dialog .modal-buttons .uc-button{min-width:300px;min-height:84px;padding:12px 38px;font-size:40px}
 
 /* 自由属性点：升级时必选的分配弹窗（无关闭叉）；点数不在其它地方常驻显示 */
 .classic-modal-overlay.point-dialog>.classic-modal.small-modal{max-height:600px;width:800px}
@@ -203,6 +724,12 @@
 .sync-head code{background:#fff6dd;border-radius:8px;padding:0 6px;font-size:18px}
 .sync-on{color:#3f7a24}.sync-off{color:#9a7a4a}.sync-warn{color:#c0392b}
 .sync-actions{display:flex;gap:14px;margin-top:10px;flex-wrap:wrap}
+/* 屏蔽标准那一行（`.gitignore` 读到了几条 / out/ 是否真被挡住）。
+   见 `js/classic-ui.js` 的 `syncPanel()`：数据来自同步服务 `/local/status` 的 `ignore`。 */
+.sync-ignore{margin-top:10px;font-size:17px;line-height:1.6;color:#7a5a2e;background:#fff6dd;
+  border:2px solid #e2cfa4;border-radius:14px;padding:7px 12px}
+.sync-ignore.warn{color:#9a3b1e;border-color:#e0b6a2;background:#fdeee6}
+.sync-ignore code{background:#f6e7c4;border-radius:6px;padding:0 5px;font-size:16px}
 /* 跨设备同步的实时进度：阶段 + 进度条 + 最近几行日志 */
 .sync-progress{margin-top:10px;font-size:18px}
 .sync-progress .sp-head{font-size:20px;line-height:1.5}
@@ -212,11 +739,198 @@
 .sync-progress .sp-hint{margin-top:8px;font-size:17px;line-height:1.6;color:#8a6a3c}
 .sync-progress .sp-actions{margin-top:10px;display:flex;gap:12px}
 
+/* ---------- 同步二级确认弹窗（送/取存档、推/拉文件之前先看预览） ----------
+   内容由 js/classic-ui.js 的 syncAsk() 生成；预览数据来自同步服务的
+   /local/save/preview（两边等级 / 经验 / 金松果）与 /local/files/preview（文件清单 / 改动量）。 */
+.sync-ask{font-size:19px;color:#775535}
+.sync-ask .sync-ask-wait{font-size:24px;line-height:1.5;text-align:center;margin:26px 0 8px;color:#8a6a3c}
+.sync-ask .small-label{display:block;text-align:center;font-size:18px;color:#9b7c53}
+.sync-ask .ask-cards{display:flex;gap:16px;margin-top:4px}
+.sync-ask .ask-card{flex:1 1 0;min-width:0;border:3px solid #d8c295;border-radius:22px;background:#fff8e2;padding:10px 16px}
+.sync-ask .ask-card.keep{border-color:#a6c96a;box-shadow:inset 0 0 0 3px #fffdf1}
+.sync-ask .ask-card.lose{border-color:#dfa07f;box-shadow:inset 0 0 0 3px #fffdf1}
+.sync-ask .ask-card-head{font-size:18px;line-height:1.4;color:#8a6a3c}
+.sync-ask .ask-card-name{font-size:23px;line-height:1.35;color:#6a3b15;word-break:break-all}
+.sync-ask .ask-card-name b{font-size:26px;color:#b05f1d}
+.sync-ask .ask-card-line{font-size:18px;line-height:1.6;color:#775535;word-break:break-all}
+.sync-ask .ask-card-line.small{font-size:16px;color:#9b7c53}
+.sync-ask .ask-gold{width:22px;height:22px;vertical-align:-4px;margin-right:2px}
+.sync-ask .ask-lead{font-size:21px;line-height:1.5;margin:0 0 10px}
+.sync-ask .ask-count{font-size:21px;line-height:1.5;margin:0 0 8px}
+.sync-ask .ask-count b{font-size:24px;color:#b05f1d}
+.sync-ask .ask-verdict{font-size:19px;line-height:1.55;margin:12px 0 0;padding:7px 12px;border-radius:14px;background:#fff6dd;border:2px solid #e2cfa4}
+.sync-ask .ask-verdict.warn{color:#9a3b1e;background:#fdeee6;border-color:#e0b6a2}
+.sync-ask .ask-verdict.ok{color:#3f7a24;background:#eef7e2;border-color:#bcd79b}
+.sync-ask code{background:#f6e7c4;border-radius:6px;padding:0 5px;font-size:17px}
+.sync-ask .ask-files{list-style:none;margin:0;padding:0;max-height:232px;overflow:auto;border:2px solid #e2cfa4;border-radius:14px;background:#fff8e2}
+.sync-ask .ask-files li{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:4px 12px;font-size:17px;line-height:1.5;border-bottom:1px dashed #eadfc2}
+.sync-ask .ask-files li:last-child{border-bottom:0}
+.sync-ask .ask-files .ask-fpath{color:#6a4a24;word-break:break-all}
+.sync-ask .ask-files li b{flex:0 0 auto;color:#8a6a3c;font-size:16px;white-space:nowrap}
+.sync-ask .ask-files li.ask-more{justify-content:flex-start;color:#9b7c53;font-size:16px}
+.sync-ask .ask-foot{margin-top:10px;font-size:17px;line-height:1.6;color:#8a6a3c}
+
 /* ---------- 系统页：分辨率 / 全面屏（画面设置） ----------
-   第 3 项：分辨率与全面屏收进了按钮网格，和音乐/导出/导入/昵称拼成两排 6 个，
-   所以这里只要保证网格是 3 列；原来的 setting-group / setting-choice 一并去掉。 */
-.settings-grid.system-grid{grid-template-columns:repeat(3,1fr)}
+   存档 / 昵称 / 跳过 + 画面 / 状态栏 / 调试，共 8 颗，排成两排 4 个；
+   原来的 setting-group / setting-choice 一并去掉。 */
+.settings-grid.system-grid{grid-template-columns:repeat(4,1fr)}
 .settings-grid.system-grid .uc-button{font-size:28px}
+/* 界面模式单独成卡：两套界面是两套独立存档，属于会改变整个游戏观感与进度的大动作，
+   不跟导出/分辨率这些工具键挤在 4×2 网格里。卡片用米金底板，右侧留一颗大号金键。 */
+.settings-mode-card{position:relative;z-index:1;display:flex;align-items:center;gap:24px;
+  margin:0 30px 20px;padding:16px 22px 16px 26px;border:4px solid #a97b35;border-radius:28px;
+  background:linear-gradient(135deg,#fffbe6,#f2ddb0);box-shadow:inset 0 0 0 3px #fffdf1,0 4px 0 #b78a3e33}
+.settings-mode-copy{display:flex;flex-direction:column;gap:3px;flex:1 1 auto;min-width:0}
+.settings-mode-kicker{font-size:20px;letter-spacing:3px;color:#8b672f;font-weight:bold}
+.settings-mode-name{font-size:34px;line-height:1.15;color:#6d431d}
+.settings-mode-note{font-size:19px;line-height:1.35;color:#8f734e}
+.settings-mode-btn{flex:0 0 auto;min-width:250px;min-height:70px;font-size:28px;gap:4px}
+.settings-mode-arrow{font-size:36px;line-height:1;margin-left:8px}
+/* 刷新玩家次数用完后：保持灰色、压暗并给出禁用光标；到 10 分钟窗口结束会自动重绘恢复。 */
+.classic-page .uc-button.is-exhausted{opacity:.7;filter:grayscale(.45);cursor:not-allowed}
+/* 刷新玩家（未达上限）：悬停变绿、按下有颜色/位移动反馈；鼠标点完不画系统黑焦点框。 */
+.challenge-note .uc-button.refresh-btn{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.challenge-note .uc-button.refresh-btn:focus,
+.challenge-note .uc-button.refresh-btn:focus-visible{outline:none}
+.challenge-note .uc-button.refresh-btn:not(.is-exhausted):hover{
+  background:linear-gradient(#d2f497,#9bdf50 54%,#82c13c);
+  border-color:#416727;
+  box-shadow:inset 0 3px #eaffb2,inset 0 -3px #6aa132,0 2px 2px #40552680;
+  filter:brightness(1.04)}
+.challenge-note .uc-button.refresh-btn:not(.is-exhausted):active{
+  background:linear-gradient(#bde887,#8bcd45 54%,#6dab31)!important;
+  filter:brightness(.98)}
+/* 随机挑战底部操作区：刷新 / 加好友 / 查看 / 挑战他统一加大，底部一整条排开，
+   手机上不再挤成右下角一颗小按钮。 */
+.challenge-note.challenge-footer{left:36px;right:36px;bottom:16px;width:auto;justify-content:space-between;
+  align-items:flex-end;gap:16px}
+.challenge-refresh{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.challenge-hint{flex:0 0 auto;text-align:left;font-size:20px;line-height:1.35;color:#a37b45;white-space:nowrap}
+.challenge-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex:0 1 auto;flex-wrap:wrap;margin-left:auto;align-self:flex-end}
+.challenge-footer .uc-button{min-height:70px;padding:7px 22px;font-size:34px;flex:0 0 auto}
+.challenge-refresh .uc-button{font-size:32px}
+.challenge-preview .mini-stats{position:relative;top:-12px}
+@media (max-width:900px){
+  .challenge-list{width:54%;gap:8px;padding-top:4px}
+  .challenger{height:66px;font-size:32px;padding:2px 10px}
+  .foe-level{min-width:52px;font-size:34px}
+  .challenge-preview{width:330px;height:340px;right:14px}
+  .challenge-preview canvas{width:330px;height:246px}
+  .challenge-preview .mini-stats{top:-10px}
+  .challenge-preview .mini-stats .stat-pill{font-size:25px;height:42px}
+  .challenge-preview .mini-stats .stat-pill b{font-size:19px;width:32px;height:32px}
+  .challenge-note.challenge-footer{left:12px;right:12px;bottom:12px;gap:8px}
+  .challenge-refresh{gap:2px}
+  .challenge-hint{display:block;font-size:22px;line-height:1.25;white-space:normal}
+  .challenge-actions{gap:7px;flex-wrap:nowrap}
+  .challenge-footer .uc-button{min-height:90px;padding:8px 14px;font-size:38px}
+  .challenge-refresh .uc-button{font-size:34px}
+}
+
+/* ---------- 现代随机挑战「查看」面板 ----------
+   原来的 ws-row 是给武器/技能列表用的紧凑行，塞进详情弹窗后像一堆后台表格。
+   这里单独做一层米色卡片：顶部对手信息 + 四维，下面武器/技能两列、装备两列，
+   等级统一用低饱和的橄榄金，不再用 style.css 里那颗 #7cfc00 的荧光绿。 */
+.classic-page~.classic-modal-overlay.foe-detail-overlay>.classic-modal.foe-detail-modal{width:960px;min-height:0;max-height:668px}
+.classic-page~.classic-modal-overlay.foe-detail-overlay>.classic-modal.foe-detail-modal>.modal-body{max-height:512px;padding:2px 8px 0}
+.foe-detail-overlay .classic-modal.foe-detail-modal{width:960px;min-height:0;max-height:668px}
+.foe-detail-overlay .foe-detail-modal>.modal-body{max-height:512px;padding:2px 8px 0}
+.foe-detail{font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;color:#6f512f}
+.fd-hero{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 18px;
+  border:2px solid #d6bc8a;border-radius:22px;background:linear-gradient(135deg,#f8efd8,#ecdcb8);
+  box-shadow:inset 0 0 0 3px #fffaf0}
+.fd-kicker{display:block;font-size:16px;letter-spacing:3px;color:#9a7c4c;font-weight:bold}
+.fd-name{margin:3px 0 0;font-size:36px;line-height:1.1;color:#6f4b24}
+.fd-level{flex:0 0 auto;padding:7px 16px;border-radius:18px;background:#7b6a4e;color:#fff8e8;
+  font-size:24px;font-weight:bold;box-shadow:inset 0 0 0 2px #9b896a;text-shadow:0 1px #5f4e35}
+.fd-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0 16px}
+.fd-stat{display:flex;align-items:baseline;gap:8px;padding:7px 12px;border:2px solid #e2d1ad;
+  border-radius:16px;background:#fbf4e2}
+.fd-stat span{font-size:17px;color:#9a7c4c}
+.fd-stat b{margin-left:auto;font-size:24px;color:#6d4a26}
+.fd-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.fd-section{padding:13px 14px 12px;border:2px solid #ddc79c;border-radius:18px;background:#fdf7e8}
+.fd-section h4{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 9px;
+  font-size:22px;color:#805a2b}
+.fd-section h4 span{display:inline-flex;align-items:center;gap:8px}
+.fd-section h4 span:before{content:"";width:7px;height:22px;border-radius:5px;background:#b9975b}
+.fd-section h4 i{min-width:30px;padding:1px 8px;border-radius:12px;background:#efe2c5;color:#90734d;
+  font-size:16px;font-style:normal;font-weight:normal;text-align:center}
+.fd-list{display:flex;flex-direction:column;gap:7px}
+.fd-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 11px;
+  border:1px solid #e4d3b0;border-radius:14px;background:#fffaf0}
+.fd-item-main{display:flex;align-items:center;gap:8px;min-width:0}
+.fd-item-main b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:22px;color:#704b26}
+.fd-tag{flex:0 0 auto;padding:1px 8px;border:1px solid #e0cda9;border-radius:10px;background:#f3e7ce;
+  color:#8c6e4e;font-size:14px;line-height:1.5}
+.fd-lv{flex:0 0 auto;padding:2px 9px;border:1px solid #d8cba7;border-radius:11px;background:#f4efdd;
+  color:#7f7a4b;font-size:17px;font-weight:bold;line-height:1.45}
+.fd-empty{min-height:38px;display:flex;align-items:center;justify-content:center;border:1px dashed #ddcbaa;
+  border-radius:14px;color:#a38e69;font-size:18px;background:#fffdf6}
+.fd-gear-section{margin-top:16px}
+.fd-gear-list{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.fd-gear{padding:10px 12px;border:1px solid #e4d3b0;border-radius:14px;background:#fffaf0}
+.fd-gear-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.fd-gear-head b{font-size:21px;color:#704b26}
+.fd-attr{margin-left:auto;color:#8a6528;font-size:17px;font-weight:bold}
+.fd-quality{flex:0 0 auto;padding:0 7px;border-radius:9px;background:#efe4cb;color:#8a7554;
+  font-size:14px;line-height:1.6}
+.fd-quality.q1{background:#e6eddc;color:#60744c}
+.fd-quality.q2{background:#e1eaf0;color:#547184}
+.fd-quality.q3{background:#ebe4f0;color:#71628a}
+.fd-quality.q4{background:#f1e3cf;color:#9a6a3f}
+.fd-quality.q5{background:#e8e4de;color:#615b52}
+.fd-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.fd-chip{padding:1px 8px;border:1px solid #e5d5b6;border-radius:10px;background:#f7efdc;
+  color:#7d6544;font-size:15px;line-height:1.6}
+.fd-gem{border-color:#d5ddc4;background:#eef2e6;color:#667351}
+.fd-pets{display:flex;align-items:center;gap:10px;margin-top:12px;padding:9px 12px;
+  border:1px solid #e0cda9;border-radius:14px;background:#fbf4e2}
+.fd-pets-label{flex:0 0 auto;font-size:18px;color:#8b6b42;font-weight:bold}
+.fd-pets .fd-chips{margin-top:0}
+
+/* ---------- 系统分组（系统 / 帮助 / 超级松鼠）的选中与点击口径 ----------
+   · 页签：未选中金皮、选中绿皮（沿用原版 status/weapons/skills 那三颗的配色）；
+     系统这三个字比原版两字 tab 长，字号收小一档，帮助 / 超级松鼠页共用同一个 data-group，自动同步。
+   · 系统页里的按钮：普通动作与未开启项一律金色，只有真正“选中/开启”的才转绿
+     （如「全面屏：开」和正在响的音乐）。点击反馈由 SfUiFeedback 提供：
+     悬停果冻缩放 + 暖光、按下回弹、点击 pick 回弹。 */
+.classic-tabs[data-group="system"] .uc-tab{font-size:48px}
+.sf-system-ui .uc-button:not(.gold):not(.muted):not(.on):not(:disabled){
+  background:linear-gradient(#fff6a1,#ffdb58 38%,#ffb62c 67%,#ec9009);
+  box-shadow:inset 0 3px 0 #fffac2,inset 0 -3px 0 #dd8210,0 2px 2px #62542890}
+.sf-system-ui .uc-button.on{
+  background:linear-gradient(#d2f497,#9bdf50 54%,#82c13c);border-color:#416727;
+  box-shadow:inset 0 3px #eaffb2,inset 0 -4px #6aa132}
+/* 帮助页的图鉴格也按“未选中黄色”走；悬停仍是原来的绿框绿底。 */
+.sf-system-ui .help-item{background:linear-gradient(#fff9df,#ffecae);border-color:#d9bd88}
+.sf-system-ui .help-item:hover{background:linear-gradient(#f2fbdd,#dcf0b6);border-color:#9bc75f}
+
+/* 音乐音量：去掉独立的「音乐：开/关」后，把音量条和「游戏设置」标题放在同一行，
+   样式做成和设置按钮同一颗金/绿胶囊；下面仍是 4 列 × 2 行的八颗设置键。
+   点胶囊（滑条以外）开关音乐；拖滑条仍连续调节。正在响 = 选中态 = 绿色。 */
+.settings-head{display:flex;align-items:center;gap:18px;margin:0 30px 10px;min-height:56px}
+.settings-head>.classic-section-title{margin:0}
+.setting-slider.music-setting{display:flex;align-items:center;gap:14px;flex:1 1 auto;
+  min-height:56px;margin:0;padding:5px 16px 5px 8px;border:3px solid #655133;border-radius:44px;
+  background:linear-gradient(#fff6a1,#ffdb58 38%,#ffb62c 67%,#ec9009);
+  box-shadow:inset 0 3px 0 #fffac2,inset 0 -3px 0 #dd8210,0 2px 2px #62542890;
+  color:#fffaf1;cursor:pointer;transition:background .16s,box-shadow .16s,filter .12s}
+.setting-slider.music-setting:hover{filter:brightness(1.04)}
+.setting-slider.music-setting.on{border-color:#416727;
+  background:linear-gradient(#d2f497,#9bdf50 54%,#82c13c);
+  box-shadow:inset 0 3px #eaffb2,inset 0 -4px #6aa132,0 2px 2px #40552680}
+.music-setting .music-toggle{display:inline-flex;align-items:center;gap:12px;flex:0 0 auto;
+  border:0;background:transparent;color:inherit;font:inherit;font-weight:1000;cursor:pointer;
+  padding:4px 12px;border-radius:30px;white-space:nowrap;line-height:1.1;
+  -webkit-text-stroke:1.4px #6a4a2a;paint-order:stroke fill;text-shadow:0 2px #6a4a2a}
+.music-setting.on .music-toggle{-webkit-text-stroke-color:#31551e;text-shadow:0 2px #31551e}
+.music-setting .slider-label{font-size:26px;line-height:1.1;color:inherit}
+.music-setting .slider-value{font-size:27px;line-height:1.1;min-width:92px;text-align:center;color:inherit}
+.music-setting .music-hint{flex:0 0 auto;font-size:18px;opacity:.92;white-space:nowrap;
+  -webkit-text-stroke:1px #6a4a2a;paint-order:stroke fill;text-shadow:0 1px #6a4a2a}
+.music-setting.on .music-hint{-webkit-text-stroke-color:#31551e;text-shadow:0 1px #31551e}
+
 
 /* ---------- 帮助页（系统分组，原先是弹窗） ---------- */
 .classic-page[data-screen="help"]>.classic-board{overflow-y:auto;overscroll-behavior:contain;
@@ -238,6 +952,13 @@
 /* 状态页的力/敏/速/命数字（第 3 项）：Georgia 数字的字面重心偏低，
    单独把数字上移 6px，圆形字徽不动。 */
 .classic-page[data-screen="status"]>.classic-board>.stat-strip .stat-value{display:block;position:relative;top:-6px}
+
+/* 查看别人的状态页是**盖在挑战页上**的一层：底页保持挂载（返回不刷新敌人），
+   只在视觉上藏起来。`.ssfight-sub`（武器/装备详情层）不能藏，否则查看装备页会一起消失；
+   它和本层同为 z-index:3、后挂载者在上面。 */
+#ui:has(>section.sf-friend-view)>section.classic-home:not(.sf-friend-view):not(.ssfight-sub){visibility:hidden}
+.sf-friend-view{z-index:3;background:url('../images/ssfight/ui/bitmap/3182_0.hd.jpg') center/cover no-repeat,#203a27}
+.sf-friend-back-label{pointer-events:none}
 
 /* ---------- 装备出售页（第 1 项） ---------- */
 .gear-sell-board{overflow:hidden}
@@ -276,7 +997,7 @@
 .classic-modal-overlay.save-list-dialog>.classic-modal.small-modal>.modal-body{max-height:432px;padding:0 6px}
 .classic-modal-overlay.save-list-dialog>.classic-modal.small-modal>.modal-buttons{margin-top:14px}
 .save-list{display:flex;flex-direction:column;gap:7px;padding:2px 4px 6px}
-.save-row{display:grid;grid-template-columns:74px minmax(0,1fr) 150px 92px;align-items:center;gap:10px;
+.save-row{display:grid;grid-template-columns:74px minmax(0,1fr) minmax(120px,240px) 92px;align-items:center;gap:10px;
   background:#fffdf3;border:3px solid #d9c391;border-radius:20px;padding:7px 12px;min-height:52px}
 .save-row.current{border-color:#c2a25e;box-shadow:inset 0 0 0 2px #fff3c4}
 .save-level{display:inline-flex;align-items:baseline;justify-content:center;gap:2px;background:#8a6a3c;color:#fff8e4;
@@ -338,16 +1059,7 @@
   flex:none;
 }
 
-/* 装备星标（防误合 / 误卖） */
-.gear-star{
-  position:absolute;top:-6px;left:-6px;font-size:18px;line-height:1;color:#ffd323;
-  text-shadow:0 0 3px #000,0 0 6px #b8860b;pointer-events:none;
-}
-/* 「更换装备」页的星标：标在**装备名字前面**，不压在装备图上（用户口径 2026-10） */
-.gear-name-star{color:#ffd323;text-shadow:0 1px 1px #6b4a00,0 0 2px #000;margin-right:2px}
-.gear-sell-card.starred{border-color:#ffd323;box-shadow:0 0 6px rgba(255,211,35,.55)}
 .gear-sell-card .item-icon{position:relative}
-.star-text{color:#ffd323}
 
 /* 20 起每 10 层：放弃一个永久增益 */
 .sac-board .sac-lead{font-size:22px;line-height:1.6;margin-bottom:10px}
@@ -384,6 +1096,10 @@
   padding:12px 16px;border:3px solid #d9a441;border-radius:16px;
   background:linear-gradient(#fff8dc,#ffeab0);box-shadow:0 3px 0 #c98f2a}
 .support-panel-text{display:flex;flex-direction:column;gap:4px;min-width:0}
+.support-head{display:flex;align-items:center;gap:12px;width:100%}
+.support-head>.classic-section-title{margin:0}
+.support-version{flex:0 0 auto;margin-left:auto;padding:1px 10px;border:2px solid #c9a34a;border-radius:12px;
+  background:#fff4cd;color:#8a6528;font-size:17px;line-height:1.55;white-space:nowrap}
 .support-panel-text b{color:#7a4a12;font-size:26px}
 .support-panel-text span{color:#8a6428;font-size:18px;line-height:1.35}
 .support-panel .support-btn{margin-left:auto;flex:0 0 auto}
@@ -418,3 +1134,104 @@
  *   不受这次下移影响、也不会被压住。 */
 .gear-modal .gear-note{position:static;text-align:center;font-size:27px;
   margin:24px 8px 8px;color:#6d321d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* 竞技场选择：只放英雄帖 / 勇气徽章两张道具图，点图标直接进场。
+ * 原版素材没有独立的「经验竞技场 / 碎片竞技场」文字元件（只有祭坛说明里连写），
+ * 所以按用户口径不加文字标签；弹窗壳仍走经典 `.classic-modal`。 */
+.classic-modal-overlay.arena-pick-dialog > .classic-modal.small-modal{width:610px;min-height:300px;padding:48px 30px 20px}
+.classic-modal-overlay.arena-pick-dialog > .classic-modal.small-modal > .modal-title{min-width:220px;font-size:30px;padding:5px 30px;line-height:36px}
+.arena-pick{display:flex;justify-content:center;align-items:center;gap:64px;padding:10px 0 6px}
+.arena-pick-btn{border:0;background:transparent;padding:0;cursor:pointer;line-height:0}
+.arena-pick-btn .item-icon{width:122px;height:122px;border-radius:28px;transition:transform .12s ease,box-shadow .12s ease}
+.arena-pick-btn:hover .item-icon{transform:translateY(-3px) scale(1.04);box-shadow:inset 0 0 0 5px white,0 4px 3px #3c401b55}
+.arena-pick-btn:active .item-icon{transform:scale(.97)}
+.arena-pick-btn .item-count{z-index:2;font-size:22px;bottom:0;right:4px;padding:0 5px;border-radius:10px;background:#4b2d1999;line-height:26px}
+/* 取消键用背包道具详情的原版 4419（米色常态 / 第 2 帧绿色悬停），不再画灰色文字键。
+   用户口径：悬停抬起变亮，按下有回弹触感。 */
+.arena-pick-dialog .modal-buttons{justify-content:center;margin-top:14px;min-height:88px}
+.arena-original-back{width:200px;height:72px;display:flex;align-items:center;justify-content:center;
+  transform-origin:center;transition:transform .12s cubic-bezier(.34,1.4,.64,1),filter .12s;
+  will-change:transform;touch-action:manipulation}
+.arena-original-back:hover{transform:translateY(-2px) scale(1.025);filter:brightness(1.05) drop-shadow(0 2px 2px #6b4a2433)}
+.arena-original-back.pressed{transform:translateY(1px) scale(.97);filter:brightness(.98)}
+.arena-original-back>svg{display:block;width:100%;height:100%;overflow:visible}
+
+/* 天梯「战斗准备中」：原版 3464（双方名字 / 排名 / 积分 + VS），按 320×196 舞台居中。 */
+.sf-rank-prep{position:absolute;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;background:rgba(22,22,22,.2);pointer-events:auto}
+.sf-rank-prep>svg{display:block;width:100%;height:100%}
+
+/* 系统页分区标题：保留原版「游戏帮助 / 体力」那种棕色圆牌 + 米色描边。
+ * 顶部页签保持原来的经典渐变样式；本次只保留分区标题这一层美化。 */
+.classic-section-title{display:inline-flex;align-self:flex-start;align-items:center;justify-content:center;width:max-content;
+  min-height:44px;margin:2px 0 8px;padding:2px 28px 4px;border:4px solid #f4e3ba;border-radius:28px;
+  background:linear-gradient(#7b4d2c,#5d351c);box-shadow:inset 0 0 0 3px #8f6239,0 2px 0 #3b2110;
+  color:#fff8e3;font-size:27px;font-weight:bold;line-height:1.1;letter-spacing:1px;
+  text-shadow:0 2px #3f2412;-webkit-text-stroke:1.2px #4a2a14;paint-order:stroke fill;white-space:nowrap}
+.sync-panel>.classic-section-title{margin-left:0}
+.support-panel-text>.classic-section-title{margin:0 0 3px;align-self:flex-start}
+/* ===== 升级页（ssfight 7795 第 30 帧）=====
+ * 原版升级是**整页**：先停 1~29 帧的「NN 级达成」大图，第 30 帧换成
+ * 「升级奖励」面板 + 四格 +「确定」。这里直接挂原版页；下面只管把它盖到
+ * 战果 / 弹窗之上，并给四格里的现代图集图标留出层叠。 */
+.sf-levelup-view{position:absolute;inset:0;z-index:60;outline:none;pointer-events:auto;
+  background:url('../images/ssfight/ui/bitmap/3182_0.hd.jpg') center/cover no-repeat,#203a27}
+.sf-levelup-view>svg{display:block;width:100%;height:100%}
+.sf-levelup-view .sf-levelup-page{font-family:"SimHei","Microsoft YaHei",sans-serif;fill:#7a5528;font-size:10px;font-weight:700;text-anchor:end;pointer-events:none}
+.sf-levelup-view .sf-levelup-cardart{pointer-events:none}
+/* ===== 新手引导（ssfight 3625）=====
+ * 原版是整页提示层：暗色说明条 + 黄色手指 + 半透明目标示意。它只负责“讲”，
+ * 不接管点击，所以整层 pointer-events:none；z-index 压在页面之上、战果/弹窗之下。 */
+#ui>.sf-guide-view{position:absolute;inset:0;z-index:15;pointer-events:none;overflow:hidden}
+/* ⚠ 只给父层写 pointer-events:none 在 iOS 15 的 WKWebView 上不够可靠：它不一定把
+ *   none 继承进 SVG 子树。引导的黄色手指与金环正好压在「开始挑战」上，真机上就变成
+ *   “体力条（DOM）有反应、开始挑战（SVG）点不动”。引导层与同类“只负责展示、必须
+ *   让点击穿透”的层统一加 `.sf-clickthrough`，把**整棵子树**显式关掉 —— 不依赖继承，
+ *   也不改布局。 */
+#ui>.sf-guide-view,
+#ui>.sf-guide-view *,
+.sf-clickthrough,
+.sf-clickthrough *{pointer-events:none!important}
+.sf-guide-view>svg{display:block;width:100%;height:100%}
+/* guide 层与首页 SVG 用**同一套尺寸规则**：首页是 height:100% + width:auto + 居中，
+ * 引导如果强行 width:100%;height:100%，在窗口比例不是 320:196 时两棵树会各自
+ * letterbox 到不同位置，整张说明框/手指就会偏。stage 让两者算出来的框一致。 */
+#ui>.sf-guide-view.stage{display:flex;align-items:center;justify-content:center}
+#ui>.sf-guide-view.stage>svg{width:auto;max-width:100%;height:100%}
+/* 引导要指弹窗（f8/f9「使用」「确定」，弹窗 z-index 30）或升级页（f13「确定」，60）
+ * 里的真按钮：这两步把整层抬到它们上面，不然金环与手指会被压暗层盖住。 */
+#ui>.sf-guide-view.above{z-index:65}
+/* ===== 经典道具合成（ssfight 4886 f5 + 4402）=====
+ * 合成页/结果页都是原版库元件，盖在背包之上；只负责压暗底页并让按钮收点击，
+ * 版式、文字、图标位全部来自 4886 / 4402，不在 CSS 里重画。 */
+#ui>section.sf-compose-view{position:absolute;inset:0;z-index:40;pointer-events:auto!important;
+  background:rgba(22,22,22,.55);overflow:hidden}
+.sf-compose-view>svg{display:block;width:100%;height:100%}
+.sf-compose-view .sf-compose-icon{pointer-events:none}
+/* 背包 / 商店 / 兑换：选中格的绿色底已经在 .item-icon 上，但道具图会盖住大部分底色；
+ * 这里再叠一层很轻的绿色，让整张卡一眼可辨（不改变图标本身的形状/颜色层次）。
+ * ⚠ 图层顺序：道具图 img 必须在遮罩**上面**（z-index:1），否则绿色会盖住道具本身的颜色。
+ *   遮罩留在 z-index:0，只在道具图的透明处透出，起"底光"作用。 */
+.bag-grid .catalog-cell.selected .item-icon>img{position:relative;z-index:1}
+.bag-grid .catalog-cell.selected .item-icon::after{content:'';position:absolute;inset:0;border-radius:inherit;
+  z-index:0;background:rgba(125,190,45,.26);box-shadow:inset 0 0 0 7px rgba(205,255,131,.36);pointer-events:none}
+
+/* ===== 经典背包「道具使用」：ssfight 4886 f1 =====
+ * 原版「道具1」弹窗；版式/文字/按钮全部来自素材，CSS 只负责盖住背包并让整层收点击。
+ * 使用/取消的左右位置由 ui-prop-use.js 在挂载后交换，不在 CSS 里重排。 */
+#ui>section.sf-prop-use-view{position:absolute;inset:0;z-index:40;pointer-events:auto!important;overflow:hidden;
+  /* 与 `.classic-page` 用同一条纵向延伸：背包页按 920:560 补到 712，
+   * 弹窗层不能只铺 690，否则打开/关闭时底图会被拉伸、看起来在漂移。 */
+  top:-11.087px;bottom:-11.087px}
+#ui>section.sf-compose-view{top:-11.087px;bottom:-11.087px}
+.sf-prop-use-view>svg{display:block;width:100%;height:100%}
+.sf-prop-use-view .sf-prop-use-icon{pointer-events:none}
+
+/* ===== 经典主界面体力条悬停提示 =====
+ * 透明热区盖在体力条（energyMc + 当前/上限数字）上；提示用 DOM 气泡画在条下方。
+ * 位置由 ui-main.js 按设计像素写死，外层 --uiscale 不会二次放大。 */
+.ssfight-energy-hover{position:absolute;z-index:8;pointer-events:auto;cursor:help}
+.ssfight-energy-tip{display:none;position:absolute;left:50%;top:calc(100% + 6px);transform:translateX(-50%);
+  white-space:nowrap;padding:4px 12px;border:2px solid #8b5a1c;border-radius:999px;
+  background:#fff7dcf2;color:#5b3510;font:700 13px/1.35 'Microsoft YaHei',sans-serif;
+  box-shadow:0 2px 8px #0004;pointer-events:none;z-index:9}
+.ssfight-energy-hover:hover .ssfight-energy-tip{display:block}

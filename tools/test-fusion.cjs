@@ -25,7 +25,7 @@ function findRoot(start) {
 const rootDir = findRoot(__dirname);
 const files = ['js/gamedict.js', 'js/gamedata.js', 'js/state.js', 'js/classic-fusion.js'];
 
-function setup(ids = [21, 21, 21, 22, 201, 202]) {
+function setup(ids = [21, 21, 21, 22, 201, 202], opts = {}) {
   const storage = new Map([['ssdz_save_v1', 'untouched']]), modals = [], toasts = [];
   let page, board, nodes = [];
   const dataKey = (type) => 'fusion' + type[0].toUpperCase() + type.slice(1);
@@ -49,6 +49,7 @@ function setup(ids = [21, 21, 21, 22, 201, 202]) {
   };
   context.window = context;
   context.UI = {
+    currentUiMode: () => opts.mode || 'classic',
     classic: {
       page() {
         if (page) page.isConnected = false;
@@ -72,6 +73,7 @@ function setup(ids = [21, 21, 21, 22, 201, 202]) {
       },
       btn: (label, action) => '<button data-action="' + action + '">' + label + '</button>',
       spr: (sheet, label) => '<img src="images/ui/sprites/' + sheet + '-' + label + '.png">',
+      goldIcon: () => '<img src="images/ui/icons/gold-acorn.png">',
       toast: (message) => toasts.push(message),
       modal: (title, html, buttons) => modals.push({ title, html, buttons }),
     },
@@ -80,8 +82,15 @@ function setup(ids = [21, 21, 21, 22, 201, 202]) {
   vm.createContext(context);
   for (const file of files) vm.runInContext(fs.readFileSync(path.join(rootDir, file), 'utf8'), context, { filename: file });
   context.State.newGame('融合测试');
-  Object.assign(context.State.state(), { level: 50, goldPoint: 100, gears: [] });
+  context.State.setSettings({ uiMode: opts.mode || 'classic' });
+  Object.assign(context.State.state(), { level: 50, goldPoint: opts.gold || 100, gears: [] });
   const gears = ids.map((id) => context.State.addGear(id));
+  if (opts.orange) {
+    for (const raw of context.State.state().gears) raw.orange = true;   // 底层紫装实例标成传说（橙）
+  }
+  if (opts.starred) {
+    for (const raw of context.State.state().gears) raw.starred = true;   // 旧档残留星标：经典模式应忽略
+  }
   context.ClassicFusion.open();
   const get = (type, value) => query('[data-fusion-' + type + '="' + value + '"]');
   function click(type, value) {
@@ -128,29 +137,60 @@ test('三件不同名的同部位同品质装备可以融合，产物仍是该�
   assert.ok(game.modals[0].html.includes('（头巾）'), '成功弹窗写明部位：' + game.modals[0].html.slice(-160));
 });
 
-test('同部位但品质不同 / 不同部位都不能混入', () => {
-  const game = setup([21, 201, 22]);   // 21 头巾品质2、201 头巾品质3、22 手套品质2
-  game.click('gear', game.gears[0].key);
-  assert.equal(game.get('gear', game.gears[1].key).disabled, true, '品质不同不能混入');
-  assert.equal(game.get('gear', game.gears[2].key).disabled, true, '部位不同不能混入');
+test('经典和现代都可选择并融合三个不同部位的同品质装备', () => {
+  for (const mode of ['classic', 'modern']) {
+    const game = setup([21, 201, 22, 23], { mode });
+    game.click('gear', game.gears[0].key);
+    assert.equal(game.get('gear', game.gears[1].key).disabled, true, '品质不同不能混入');
+    for (const index of [2, 3]) {
+      assert.equal(game.get('gear', game.gears[index].key).disabled, false, mode + ' 不限制材料部位');
+      game.click('gear', game.gears[index].key);
+    }
+    assert.equal(game.get('action', 'fuse').disabled, false);
+    game.click('action', 'fuse');
+    assert.equal(game.modals[0].title, '融合成功');
+    assert.equal(game.context.State.state().goldPoint, 50);
+  }
 });
 
-/* 排序要按「同部位 + 同品质」成组（不再优先同名）：能凑齐三件的组排最前，同名但不搭的靠后 */
-test('装备按同部位同品质成组排序，凑得齐三件的排最前', () => {
-  // 21 格斗头巾 / 25 拳斗头巾 / 29 忍者护额（头巾·品质2）能凑三件；
-  // 22 格斗手套（手套·品质2）只有 1 件；13 拳斗头巾（头巾·品质1）只有 1 件
-  const game = setup([22, 13, 21, 25, 29]);
+test('橙装跨部位也能凑齐三件并合成黑装', () => {
+  /* 49 头巾 / 50 手套 / 51 衣服：底层都是紫装 id，实例标 orange 后品质是 4。
+   * 旧版卡片虽然亮着，但点击时还要求「与第一件同部位」，于是第 2/3 件怎么点都进不去，
+   * 玩家看到的就是「橙装无法选中、合不出黑装」。 */
+  const game = setup([49, 50, 51], { orange: true, gold: 1000, starred: true });
+  game.gears.forEach((gear) => game.click('gear', gear.key));
+  assert.equal(game.get('action', 'fuse').disabled, false, '三件不同部位的橙装要能同时放入');
+  game.click('action', 'fuse');
+  const made = game.context.State.myGears().find((gear) => !game.gears.some((old) => old.key === gear.key));
+  assert.ok(made, '融合产物应当入包');
+  assert.equal(made.quality, 5, '三件橙装 → 黑色装备');
+  assert.equal(game.context.State.state().goldPoint, 800, '橙装融合一次扣 200 金松果');
+  assert.equal(game.modals[0].title, '融合成功');
+  assert.ok(game.modals[0].html.includes('黑色'), '成功弹窗写明黑色品质');
+});
+
+test('原版融合页的材料清单包含橙装，且提示不再写死「蓝色」', () => {
+  const src = fs.readFileSync(path.join(rootDir, 'js/ssfight/ui-status.js'), 'utf8').replace(/\r\n/g, '\n');
+  const materials = src.slice(src.indexOf('function fusionMaterials()'), src.indexOf('function fusionSelected()'));
+  assert.ok(materials.includes('.filter((g) => !g.used)'), '原版融合材料只按未穿戴过滤：' + materials);
+  assert.ok(!/!g\.orange/.test(materials), '不能再把橙装从材料里剔掉');
+  assert.match(src, /function rewriteFusionPrompt\(view, text\)/, '原版「请先放入3件蓝色的装备」要改成可随同套状态更新的通用提示');
+});
+
+/* 推荐材料按品质计数，跨部位的三件也是一个可融合组。 */
+test('装备按同品质成组排序，跨部位凑得齐三件的排最前', () => {
+  const game = setup([22, 13, 21, 23]);
   const names = [...game.board.innerHTML.matchAll(/data-fusion-gear="[^"]+"[^>]*>[\s\S]*?fusion-gear-name">([^<]+)</g)].map((m) => m[1]);
-  assert.equal(names.length, 5, '五件都渲染出来：' + names.join(','));
-  assert.ok(names.slice(0, 3).includes('格斗头巾') && names.slice(0, 3).includes('拳斗头巾') && names.slice(0, 3).includes('忍者护额'),
-    '头巾·品质2 的三件应排在前面：' + names.join(','));
-  assert.ok(game.board.innerHTML.includes('同组 3 件'), '同组 3 件的卡片要标出来');
+  assert.equal(names.length, 4, '四件都渲染出来：' + names.join(','));
+  assert.deepEqual(names.slice(0, 3).sort(), game.gears.filter((g) => g.quality === 2).map((g) => g.name).sort(),
+    '三个不同部位的品质2材料应排在前面：' + names.join(','));
+  assert.ok(game.board.innerHTML.includes('同品质 3 件'), '推荐数量按品质计算');
 });
 
 test('重复选择会移除材料，支持槽位移除和清空，错ID及最高品质不能混入', () => {
   const game = setup([21, 21, 21, 22, 201]), first = game.gears[0], second = game.gears[1];
   game.click('gear', first.key);
-  assert.equal(game.get('gear', game.gears[3].key).disabled, true);
+  assert.equal(game.get('gear', game.gears[3].key).disabled, false, '不同部位现在可以混入');
   game.click('gear', second.key);
   game.click('gear', first.key);
   assert.ok(game.board.innerHTML.includes('已放入 1/3'));
@@ -246,6 +286,52 @@ test('规则条保持单行且完整说明收在弹窗里', () => {
   }
   /* 装备卡必须照常渲染（这一步是在防「列表被挤没」的老毛病） */
   assert.ok(game.board.innerHTML.includes('data-fusion-gear='), '装备列表要渲染出卡片');
+});
+
+test('融合只有一条共有词条时，仍按品质补满词条槽', () => {
+  const game = setup();
+  const S = game.context.State;
+  const state = S.state();
+  state.level = 60; state.goldPoint = 1000; state.gears = [];
+  const keys = [0, 1, 2].map(() => S.addGear(201, [{ id: 1, level: 1 }]).key);
+  const result = S.mergeGears(keys);
+  assert.equal(result.ok, true);
+  assert.equal(result.gear.quality, 4);
+  assert.equal(result.gear.ext.length, 3, '橙装应有 3 条词条');
+  assert.equal(new Set(result.gear.ext.map((ext) => ext.id)).size, 3, '词条不能重复');
+  assert.ok(result.gear.ext.some((ext) => ext.id === 1), '共有的那条词条要保留');
+});
+
+test('三件同套装融合必定得到该套下一品质同部位', () => {
+  const game = setup([201, 202, 203, 177, 178, 179], { gold: 1000 });
+  const S = game.context.State;
+  vm.runInContext('globalThis.__oldRandom = Math.random; Math.random = () => 0', game.context);
+  try {
+    /* 旧规则在三件不同名时完全随机，固定 0 会挑到别的套装；同套保底必须无视它。 */
+    const purple = game.gears.slice(0, 3).map((g) => g.key);
+    const orange = S.mergeGears(purple);
+    assert.equal(orange.ok, true, orange.msg || '紫装融合应成功');
+    assert.equal(orange.gear.id, 205, '3 件狂战紫装 → 狂战橙头盔');
+    assert.equal(S.gearSetFamily(orange.gear.id), '狂战');
+    assert.equal(S.gearPart(orange.gear.id), 0);
+    assert.equal(orange.gear.quality, 4);
+
+    const orangeFury = game.gears.slice(3, 6).map((g) => g.key);
+    const black = S.mergeGears(orangeFury);
+    assert.equal(black.ok, true, black.msg || '橙装融合应成功');
+    assert.equal(black.gear.id, 185, '3 件怒战橙装 → 怒战黑头盔（同套取 id 最小件）');
+    assert.equal(S.gearSetFamily(black.gear.id), '怒战');
+    assert.equal(S.gearPart(black.gear.id), 0);
+    assert.equal(black.gear.quality, 5);
+
+    /* 机器猫的「头 / 拳」是裸后缀，按单件名去后缀会拆成两族；融合认套必须按 setId 的公共前缀。 */
+    const cat = setup([209, 210, 211], { gold: 1000 });
+    const catInfo = cat.context.State.fusionFamilyInfo(cat.gears);
+    assert.equal(catInfo && catInfo.family, '机器猫', '机器猫头/拳/服要认成同一套');
+    assert.equal(catInfo && catInfo.quality, 5, '机器猫橙装同套保底到黑装');
+  } finally {
+    vm.runInContext('Math.random = globalThis.__oldRandom; delete globalThis.__oldRandom', game.context);
+  }
 });
 
 for (const [name, run] of tests) {

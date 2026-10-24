@@ -1,0 +1,2914 @@
+{
+ "generator": "tools/gen-ssfight-ui.cjs",
+ "how": "每个文本字段的框宽与\"一行几个全角字\"；改界面文案前先查这张表，别靠开浏览器量。",
+ "glyph": {
+  "cjkPerEm": 1,
+  "asciiPerEm": 0.5,
+  "families": {
+   "2030": "SimHei",
+   "3146": "Microsoft YaHei"
+  }
+ },
+ "formula": "charsPerLine = floor((bd[1] - bd[0] - lm - rm) / fontH)",
+ "count": 215,
+ "fields": [
+  {
+   "id": "4672",
+   "bundle": "status",
+   "boxW": 64.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 5,
+   "sample": "紫色装备  ",
+   "heldBy": [
+    "4673.goal"
+   ]
+  },
+  {
+   "id": "4671",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "材",
+   "heldBy": []
+  },
+  {
+   "id": "4670",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "融",
+   "heldBy": []
+  },
+  {
+   "id": "4668",
+   "bundle": "status",
+   "boxW": 244.7,
+   "boxH": 17,
+   "fontId": 2030,
+   "fontH": 13,
+   "align": "center",
+   "charsPerLine": 18,
+   "sample": "融合即将开始，本次融合需要200金松果。",
+   "heldBy": [
+    "4673.t_tips"
+   ]
+  },
+  {
+   "id": "4667",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "啊",
+   "heldBy": []
+  },
+  {
+   "id": "4666",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "保",
+   "heldBy": []
+  },
+  {
+   "id": "4665",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "失",
+   "heldBy": []
+  },
+  {
+   "id": "4658",
+   "bundle": "status",
+   "boxW": 180.1,
+   "boxH": 60.8,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 15,
+   "sample": "投掷武器暴击伤害-10% 投掷武器暴击伤害-10",
+   "heldBy": [
+    "4673.baseOther"
+   ]
+  },
+  {
+   "id": "4656",
+   "bundle": "status",
+   "boxW": 71.25,
+   "boxH": 32,
+   "fontId": 3474,
+   "fontH": 13,
+   "align": "left",
+   "charsPerLine": 5,
+   "sample": "力量拳套 ",
+   "heldBy": [
+    "4673.t_name"
+   ]
+  },
+  {
+   "id": "4655",
+   "bundle": "status",
+   "boxW": 241.2,
+   "boxH": 43,
+   "fontId": 2030,
+   "fontH": 13,
+   "align": "center",
+   "charsPerLine": 18,
+   "sample": "快去装备库中查看吧! ",
+   "heldBy": [
+    "4673.des"
+   ]
+  },
+  {
+   "id": "4654",
+   "bundle": "status",
+   "boxW": 166.5,
+   "boxH": 19.1,
+   "fontId": 2030,
+   "fontH": 13,
+   "align": "left",
+   "charsPerLine": 12,
+   "sample": "恭喜你获得：",
+   "heldBy": []
+  },
+  {
+   "id": "4650",
+   "bundle": "status",
+   "boxW": 55.95,
+   "boxH": 27,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 4,
+   "sample": "仙鹤服的",
+   "heldBy": [
+    "4673.t_name2"
+   ]
+  },
+  {
+   "id": "4649",
+   "bundle": "status",
+   "boxW": 46.2,
+   "boxH": 24,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 3,
+   "sample": "敏捷+15",
+   "heldBy": [
+    "4673.t_base1"
+   ]
+  },
+  {
+   "id": "4648",
+   "bundle": "status",
+   "boxW": 55.05,
+   "boxH": 27,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 4,
+   "sample": "仙鹤服的",
+   "heldBy": [
+    "4673.t_name1"
+   ]
+  },
+  {
+   "id": "4647",
+   "bundle": "status",
+   "boxW": 266.5,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 22,
+   "sample": "请在下列装备中选定3件(仅显示未穿的蓝装)",
+   "heldBy": [
+    "4673.require"
+   ]
+  },
+  {
+   "id": "4640",
+   "bundle": "status",
+   "boxW": 127.9,
+   "boxH": 62.3,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "left",
+   "charsPerLine": 11,
+   "sample": "受到对手技能伤害-5% ",
+   "heldBy": [
+    "4673.t_addr2"
+   ]
+  },
+  {
+   "id": "4639",
+   "bundle": "status",
+   "boxW": 127.35,
+   "boxH": 63.3,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "left",
+   "charsPerLine": 11,
+   "sample": "受到对手技能伤害-5% ",
+   "heldBy": [
+    "4673.t_addr1"
+   ]
+  },
+  {
+   "id": "4638",
+   "bundle": "status",
+   "boxW": 46.2,
+   "boxH": 24,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 3,
+   "sample": "敏捷+15",
+   "heldBy": [
+    "4673.t_base2"
+   ]
+  },
+  {
+   "id": "4635",
+   "bundle": "status",
+   "boxW": 87.9,
+   "boxH": 18,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 7,
+   "sample": "100金松果",
+   "heldBy": []
+  },
+  {
+   "id": "4633",
+   "bundle": "status",
+   "boxW": 139.7,
+   "boxH": 18,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 11,
+   "sample": "活动期间融合费用减半",
+   "heldBy": []
+  },
+  {
+   "id": "4632",
+   "bundle": "status",
+   "boxW": 87.9,
+   "boxH": 18,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 7,
+   "sample": "200金松果",
+   "heldBy": []
+  },
+  {
+   "id": "4631",
+   "bundle": "status",
+   "boxW": 78.15,
+   "boxH": 18,
+   "fontId": 3474,
+   "fontH": 14,
+   "align": "left",
+   "charsPerLine": 5,
+   "sample": "200金松果",
+   "heldBy": [
+    "4636.cost"
+   ]
+  },
+  {
+   "id": "4627",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": null,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "",
+   "heldBy": []
+  },
+  {
+   "id": "4626",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 13,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "请",
+   "heldBy": []
+  },
+  {
+   "id": "4625",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 13,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "请",
+   "heldBy": []
+  },
+  {
+   "id": "4624",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 13,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "材",
+   "heldBy": []
+  },
+  {
+   "id": "4623",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 13,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "材",
+   "heldBy": []
+  },
+  {
+   "id": "4622",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 13,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "请",
+   "heldBy": []
+  },
+  {
+   "id": "4614",
+   "bundle": "status",
+   "boxW": 36.2,
+   "boxH": 20.25,
+   "fontId": 3474,
+   "fontH": 14,
+   "align": "left",
+   "charsPerLine": 2,
+   "sample": "100%",
+   "heldBy": []
+  },
+  {
+   "id": "4603",
+   "bundle": "status",
+   "boxW": 78.1,
+   "boxH": 16,
+   "fontId": 3474,
+   "fontH": 11,
+   "align": "right",
+   "charsPerLine": 7,
+   "sample": "一级宝石",
+   "heldBy": [
+    "4605.stone"
+   ]
+  },
+  {
+   "id": "4602",
+   "bundle": "status",
+   "boxW": 127.9,
+   "boxH": 58,
+   "fontId": 3474,
+   "fontH": 11,
+   "align": "left",
+   "charsPerLine": 11,
+   "sample": "基础反击率效果提升-10% 受到对手技能伤害-1",
+   "heldBy": [
+    "4605.t_addr"
+   ]
+  },
+  {
+   "id": "4601",
+   "bundle": "status",
+   "boxW": 61,
+   "boxH": 17,
+   "fontId": 2030,
+   "fontH": 13,
+   "align": "left",
+   "charsPerLine": 4,
+   "sample": "仙鹤服服",
+   "heldBy": [
+    "4605.t_name"
+   ]
+  },
+  {
+   "id": "4600",
+   "bundle": "status",
+   "boxW": 78.1,
+   "boxH": 16,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 6,
+   "sample": "敏捷+5",
+   "heldBy": [
+    "4605.t_base"
+   ]
+  },
+  {
+   "id": "4597",
+   "bundle": "status",
+   "boxW": 206,
+   "boxH": 63.35,
+   "fontId": 3146,
+   "fontH": 14,
+   "align": "center",
+   "charsPerLine": 14,
+   "sample": "出售该装备可获得N个金松果，确定要继续么？ ",
+   "heldBy": [
+    "4673.price"
+   ]
+  },
+  {
+   "id": "4595",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 14,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "先",
+   "heldBy": []
+  },
+  {
+   "id": "4592",
+   "bundle": "status",
+   "boxW": 57.6,
+   "boxH": 28,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 4,
+   "sample": "-10% ",
+   "heldBy": [
+    "4673.baseExtra"
+   ]
+  },
+  {
+   "id": "4591",
+   "bundle": "status",
+   "boxW": 56.6,
+   "boxH": 51,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 4,
+   "sample": "-10% -10% +27.50点",
+   "heldBy": [
+    "4673.baseOtherExtra"
+   ]
+  },
+  {
+   "id": "4583",
+   "bundle": "status",
+   "boxW": 149.8,
+   "boxH": 52,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 12,
+   "sample": "投掷武器暴击伤害-10% 投掷武器暴击伤害-10",
+   "heldBy": [
+    "4673.baseOther"
+   ]
+  },
+  {
+   "id": "4582",
+   "bundle": "status",
+   "boxW": 28.2,
+   "boxH": 30.4,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 2,
+   "sample": "头部",
+   "heldBy": [
+    "4673.type"
+   ]
+  },
+  {
+   "id": "4580",
+   "bundle": "status",
+   "boxW": 81.45,
+   "boxH": 19.85,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 6,
+   "sample": "敏捷+5",
+   "heldBy": [
+    "4673.base"
+   ]
+  },
+  {
+   "id": "4579",
+   "bundle": "status",
+   "boxW": 25,
+   "boxH": 19.85,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 2,
+   "sample": "12",
+   "heldBy": [
+    "4673.level"
+   ]
+  },
+  {
+   "id": "4572",
+   "bundle": "status",
+   "boxW": 116.2,
+   "boxH": 42.9,
+   "fontId": 3474,
+   "fontH": 14,
+   "align": "center",
+   "charsPerLine": 8,
+   "sample": "忍者面具 ",
+   "heldBy": [
+    "4673.t_name"
+   ]
+  },
+  {
+   "id": "4570",
+   "bundle": "status",
+   "boxW": 274.7,
+   "boxH": 18,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 22,
+   "sample": "相同的附加属性效果不叠加,最高的1条生效！",
+   "heldBy": []
+  },
+  {
+   "id": "4569",
+   "bundle": "status",
+   "boxW": 52.95,
+   "boxH": 28,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 4,
+   "sample": "拳斗手套",
+   "heldBy": [
+    "4673.t_6"
+   ]
+  },
+  {
+   "id": "4568",
+   "bundle": "status",
+   "boxW": 57.35,
+   "boxH": 28,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 4,
+   "sample": "拳斗手套",
+   "heldBy": [
+    "4673.t_5"
+   ]
+  },
+  {
+   "id": "4567",
+   "bundle": "status",
+   "boxW": 56.85,
+   "boxH": 28,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 4,
+   "sample": "拳斗手套",
+   "heldBy": [
+    "4673.t_2"
+   ]
+  },
+  {
+   "id": "4566",
+   "bundle": "status",
+   "boxW": 55.05,
+   "boxH": 28,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 4,
+   "sample": "拳斗手套",
+   "heldBy": [
+    "4673.t_3"
+   ]
+  },
+  {
+   "id": "4565",
+   "bundle": "status",
+   "boxW": 55.05,
+   "boxH": 28,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 4,
+   "sample": "拳斗手套",
+   "heldBy": [
+    "4673.t_4"
+   ]
+  },
+  {
+   "id": "4564",
+   "bundle": "status",
+   "boxW": 54.05,
+   "boxH": 28.5,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 4,
+   "sample": "拳斗手套",
+   "heldBy": [
+    "4673.t_1"
+   ]
+  },
+  {
+   "id": "4556",
+   "bundle": "status",
+   "boxW": 73.4,
+   "boxH": 34,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "right",
+   "charsPerLine": 6,
+   "sample": "容量10/12",
+   "heldBy": [
+    "4673.t_count"
+   ]
+  },
+  {
+   "id": "4545",
+   "bundle": "status",
+   "boxW": 37.55,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 3,
+   "sample": "近战 ",
+   "heldBy": [
+    "4673.type"
+   ]
+  },
+  {
+   "id": "4544",
+   "bundle": "status",
+   "boxW": 54.5,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 4,
+   "sample": "8 ",
+   "heldBy": [
+    "4673.levelText"
+   ]
+  },
+  {
+   "id": "4543",
+   "bundle": "status",
+   "boxW": 54.5,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 4,
+   "sample": "999-999 ",
+   "heldBy": [
+    "4673.harm"
+   ]
+  },
+  {
+   "id": "4542",
+   "bundle": "status",
+   "boxW": 75.6,
+   "boxH": 22,
+   "fontId": 2030,
+   "fontH": 13,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "西 瓜 刀",
+   "heldBy": [
+    "4673.name"
+   ]
+  },
+  {
+   "id": "4541",
+   "bundle": "status",
+   "boxW": 150,
+   "boxH": 55,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 12,
+   "sample": "扔2次，对方闪避几率增加 20%。扔第三次的几率",
+   "heldBy": [
+    "4673.des"
+   ]
+  },
+  {
+   "id": "3634",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "类",
+   "heldBy": []
+  },
+  {
+   "id": "3633",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "伤",
+   "heldBy": []
+  },
+  {
+   "id": "3632",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "等",
+   "heldBy": []
+  },
+  {
+   "id": "3664",
+   "bundle": "status",
+   "boxW": 105,
+   "boxH": 23.4,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 8,
+   "sample": "需要松鼠10级",
+   "heldBy": [
+    "3670.level"
+   ]
+  },
+  {
+   "id": "3663",
+   "bundle": "status",
+   "boxW": 37.25,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 3,
+   "sample": "100% ",
+   "heldBy": [
+    "3670.rate"
+   ]
+  },
+  {
+   "id": "3662",
+   "bundle": "status",
+   "boxW": 40.75,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 3,
+   "sample": "12 ",
+   "heldBy": [
+    "3670.current2"
+   ]
+  },
+  {
+   "id": "3661",
+   "bundle": "status",
+   "boxW": 33.25,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 2,
+   "sample": "12 ",
+   "heldBy": [
+    "3670.need2"
+   ]
+  },
+  {
+   "id": "3659",
+   "bundle": "status",
+   "boxW": 33.25,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 2,
+   "sample": "12 ",
+   "heldBy": [
+    "3670.need1"
+   ]
+  },
+  {
+   "id": "3658",
+   "bundle": "status",
+   "boxW": 40.75,
+   "boxH": 40,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 3,
+   "sample": "900000 ",
+   "heldBy": [
+    "3670.current1"
+   ]
+  },
+  {
+   "id": "4691",
+   "bundle": "status",
+   "boxW": 189.85,
+   "boxH": 94.2,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 15,
+   "sample": "                        ",
+   "heldBy": [
+    "4692.info"
+   ]
+  },
+  {
+   "id": "4688",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "融",
+   "heldBy": []
+  },
+  {
+   "id": "4687",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 13,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "融",
+   "heldBy": []
+  },
+  {
+   "id": "4686",
+   "bundle": "status",
+   "boxW": 177.55,
+   "boxH": 50,
+   "fontId": 2030,
+   "fontH": 14,
+   "align": "left",
+   "charsPerLine": 12,
+   "sample": "保护失败，每次融合最多只能保护1个材料装备。 ",
+   "heldBy": [
+    "4692.t_tips"
+   ]
+  },
+  {
+   "id": "4684",
+   "bundle": "status",
+   "boxW": 52.2,
+   "boxH": 18,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 4,
+   "sample": "斗斗头巾",
+   "heldBy": [
+    "4692.text1"
+   ]
+  },
+  {
+   "id": "3732",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "叮",
+   "heldBy": []
+  },
+  {
+   "id": "4681",
+   "bundle": "status",
+   "boxW": 202.95,
+   "boxH": 58,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 16,
+   "sample": "属性点已用完，不能再分配了。属性 ",
+   "heldBy": [
+    "4682.info"
+   ]
+  },
+  {
+   "id": "4676",
+   "bundle": "status",
+   "boxW": 189.85,
+   "boxH": 94.2,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 15,
+   "sample": "                        ",
+   "heldBy": [
+    "4692.info"
+   ]
+  },
+  {
+   "id": "4883",
+   "bundle": "status",
+   "boxW": 138.85,
+   "boxH": 72,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 11,
+   "sample": "10%几率使对手4个回合不能使用技能，每级提高4",
+   "heldBy": [
+    "4886.text2"
+   ]
+  },
+  {
+   "id": "4882",
+   "bundle": "status",
+   "boxW": 139.35,
+   "boxH": 44,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 11,
+   "sample": "恭喜你将得到x小宇宙爆发，是否确认？ ",
+   "heldBy": [
+    "4886.text1"
+   ]
+  },
+  {
+   "id": "4881",
+   "bundle": "status",
+   "boxW": 99.85,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 8,
+   "sample": "大力丸 ",
+   "heldBy": [
+    "4886.name"
+   ]
+  },
+  {
+   "id": "4879",
+   "bundle": "status",
+   "boxW": 124.5,
+   "boxH": 80,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "left",
+   "charsPerLine": 11,
+   "sample": "合成下一级成功率：X% 合成费用：X金松果注：3",
+   "heldBy": [
+    "4886.cost"
+   ]
+  },
+  {
+   "id": "4876",
+   "bundle": "status",
+   "boxW": 99.85,
+   "boxH": 34,
+   "fontId": 2030,
+   "fontH": 14,
+   "align": "center",
+   "charsPerLine": 7,
+   "sample": "大力丸 ",
+   "heldBy": [
+    "4886.name"
+   ]
+  },
+  {
+   "id": "4874",
+   "bundle": "status",
+   "boxW": 133.4,
+   "boxH": 19.85,
+   "fontId": 3374,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 11,
+   "sample": "需要100000松子",
+   "heldBy": [
+    "4886.text1"
+   ]
+  },
+  {
+   "id": "4868",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3374,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "兑",
+   "heldBy": []
+  },
+  {
+   "id": "4873",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3374,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "每",
+   "heldBy": []
+  },
+  {
+   "id": "4872",
+   "bundle": "status",
+   "boxW": 186.65,
+   "boxH": 23.4,
+   "fontId": 3374,
+   "fontH": 14,
+   "align": "center",
+   "charsPerLine": 13,
+   "sample": "当前松子：123456789",
+   "heldBy": [
+    "4886.text0"
+   ]
+  },
+  {
+   "id": "4870",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3374,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "兑",
+   "heldBy": []
+  },
+  {
+   "id": "4869",
+   "bundle": "status",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3374,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "兑",
+   "heldBy": []
+  },
+  {
+   "id": "4867",
+   "bundle": "status",
+   "boxW": 186.65,
+   "boxH": 23.4,
+   "fontId": 3374,
+   "fontH": 14,
+   "align": "center",
+   "charsPerLine": 13,
+   "sample": "当前乐园币：123456789",
+   "heldBy": [
+    "4886.text0"
+   ]
+  },
+  {
+   "id": "4866",
+   "bundle": "status",
+   "boxW": 121.6,
+   "boxH": 19.85,
+   "fontId": 4863,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 10,
+   "sample": "需要100000松子",
+   "heldBy": [
+    "4886.text3"
+   ]
+  },
+  {
+   "id": "4865",
+   "bundle": "status",
+   "boxW": 130.4,
+   "boxH": 19.85,
+   "fontId": 4863,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 10,
+   "sample": "需要100000松子",
+   "heldBy": [
+    "4886.text2"
+   ]
+  },
+  {
+   "id": "4864",
+   "bundle": "status",
+   "boxW": 133.4,
+   "boxH": 19.85,
+   "fontId": 4863,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 11,
+   "sample": "需要100000松子",
+   "heldBy": [
+    "4886.text1"
+   ]
+  },
+  {
+   "id": "4856",
+   "bundle": "status",
+   "boxW": 160.8,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 13,
+   "sample": "UC会员购买道具9折优惠",
+   "heldBy": []
+  },
+  {
+   "id": "4854",
+   "bundle": "status",
+   "boxW": 46.2,
+   "boxH": 23.85,
+   "fontId": 2030,
+   "fontH": 14,
+   "align": "center",
+   "charsPerLine": 3,
+   "sample": "10000 ",
+   "heldBy": [
+    "4886.count"
+   ]
+  },
+  {
+   "id": "4853",
+   "bundle": "status",
+   "boxW": 196.3,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 16,
+   "sample": "每月只能购买1个属性永久丸 ",
+   "heldBy": [
+    "4886.reason"
+   ]
+  },
+  {
+   "id": "4852",
+   "bundle": "status",
+   "boxW": 99.85,
+   "boxH": 21.75,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 8,
+   "sample": "大力丸",
+   "heldBy": [
+    "4886.name"
+   ]
+  },
+  {
+   "id": "4850",
+   "bundle": "status",
+   "boxW": 223.3,
+   "boxH": 36.25,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 18,
+   "sample": "超级松鼠使用该道具不会减少数量",
+   "heldBy": [
+    "4886.vipDes"
+   ]
+  },
+  {
+   "id": "4849",
+   "bundle": "status",
+   "boxW": 99.85,
+   "boxH": 34,
+   "fontId": 2030,
+   "fontH": 14,
+   "align": "center",
+   "charsPerLine": 7,
+   "sample": "大力丸 ",
+   "heldBy": [
+    "4886.name"
+   ]
+  },
+  {
+   "id": "7217",
+   "bundle": "status",
+   "boxW": 52.85,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 10,
+   "align": "left",
+   "charsPerLine": 5,
+   "sample": "1/4",
+   "heldBy": [
+    "7218.page"
+   ]
+  },
+  {
+   "id": "7216",
+   "bundle": "status",
+   "boxW": 52.85,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 10,
+   "align": "left",
+   "charsPerLine": 5,
+   "sample": "1/4",
+   "heldBy": [
+    "7218.page"
+   ]
+  },
+  {
+   "id": "7182",
+   "bundle": "status",
+   "boxW": 95.2,
+   "boxH": 18,
+   "fontId": 2030,
+   "fontH": 14,
+   "align": "center",
+   "charsPerLine": 6,
+   "sample": "999999/999999",
+   "heldBy": [
+    "7218.expNum"
+   ]
+  },
+  {
+   "id": "4755",
+   "bundle": "challenge",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 15,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "请",
+   "heldBy": []
+  },
+  {
+   "id": "4730",
+   "bundle": "challenge",
+   "boxW": 129,
+   "boxH": 86,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 10,
+   "sample": "【消耗】1个挑战书 【奖励】经验，金松果 ",
+   "heldBy": [
+    "4756.info1"
+   ]
+  },
+  {
+   "id": "4727",
+   "bundle": "challenge",
+   "boxW": 171.25,
+   "boxH": 46,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 14,
+   "sample": "每个关卡有3个敌人，中途失败可使用挑战书复活，带",
+   "heldBy": [
+    "4756.info2"
+   ]
+  },
+  {
+   "id": "4725",
+   "bundle": "challenge",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 18,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "不",
+   "heldBy": []
+  },
+  {
+   "id": "4724",
+   "bundle": "challenge",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 18,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "他",
+   "heldBy": []
+  },
+  {
+   "id": "7637",
+   "bundle": "challenge",
+   "boxW": 61,
+   "boxH": 36,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "松果200 ",
+   "heldBy": [
+    "7638.text33"
+   ]
+  },
+  {
+   "id": "7636",
+   "bundle": "challenge",
+   "boxW": 61,
+   "boxH": 31.2,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "金杯100 ",
+   "heldBy": [
+    "7638.text32"
+   ]
+  },
+  {
+   "id": "7635",
+   "bundle": "challenge",
+   "boxW": 61,
+   "boxH": 39.2,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "积分800 ",
+   "heldBy": [
+    "7638.text31"
+   ]
+  },
+  {
+   "id": "7634",
+   "bundle": "challenge",
+   "boxW": 61,
+   "boxH": 36,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "松果200 ",
+   "heldBy": [
+    "7638.text13"
+   ]
+  },
+  {
+   "id": "7633",
+   "bundle": "challenge",
+   "boxW": 61,
+   "boxH": 31.2,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "金杯100 ",
+   "heldBy": [
+    "7638.text12"
+   ]
+  },
+  {
+   "id": "7632",
+   "bundle": "challenge",
+   "boxW": 61,
+   "boxH": 39.2,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "积分800 ",
+   "heldBy": [
+    "7638.text11"
+   ]
+  },
+  {
+   "id": "7631",
+   "bundle": "challenge",
+   "boxW": 61,
+   "boxH": 36,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "松果200 ",
+   "heldBy": [
+    "7638.text23"
+   ]
+  },
+  {
+   "id": "7630",
+   "bundle": "challenge",
+   "boxW": 61,
+   "boxH": 31.2,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "金杯100 ",
+   "heldBy": [
+    "7638.text22"
+   ]
+  },
+  {
+   "id": "7629",
+   "bundle": "challenge",
+   "boxW": 61,
+   "boxH": 39.2,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "积分800 ",
+   "heldBy": [
+    "7638.text21"
+   ]
+  },
+  {
+   "id": "7628",
+   "bundle": "challenge",
+   "boxW": 177.8,
+   "boxH": 37.1,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 14,
+   "sample": "我的积分：                   ",
+   "heldBy": [
+    "7638.title"
+   ]
+  },
+  {
+   "id": "7626",
+   "bundle": "challenge",
+   "boxW": 88.95,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 7,
+   "sample": "小体力药剂 ",
+   "heldBy": [
+    "7638.name"
+   ]
+  },
+  {
+   "id": "7625",
+   "bundle": "challenge",
+   "boxW": 102.6,
+   "boxH": 124,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 8,
+   "sample": "用5点生命随机增加1点力量/敏捷/速度，当基础生",
+   "heldBy": [
+    "7638.des"
+   ]
+  },
+  {
+   "id": "7616",
+   "bundle": "challenge",
+   "boxW": 64.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 5,
+   "sample": "123456789 ",
+   "heldBy": [
+    "7638.myrank"
+   ]
+  },
+  {
+   "id": "7615",
+   "bundle": "challenge",
+   "boxW": 40.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 3,
+   "sample": "2000  ",
+   "heldBy": [
+    "7638.myinte"
+   ]
+  },
+  {
+   "id": "7614",
+   "bundle": "challenge",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "我",
+   "heldBy": []
+  },
+  {
+   "id": "7613",
+   "bundle": "challenge",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "我",
+   "heldBy": []
+  },
+  {
+   "id": "7610",
+   "bundle": "challenge",
+   "boxW": 88.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 7,
+   "sample": "香蕉你个巴拉  ",
+   "heldBy": [
+    "7638.name4"
+   ]
+  },
+  {
+   "id": "7609",
+   "bundle": "challenge",
+   "boxW": 88.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 7,
+   "sample": "香蕉你个巴拉  ",
+   "heldBy": [
+    "7638.name3"
+   ]
+  },
+  {
+   "id": "7608",
+   "bundle": "challenge",
+   "boxW": 88.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 7,
+   "sample": "香蕉你个巴拉  ",
+   "heldBy": [
+    "7638.name2"
+   ]
+  },
+  {
+   "id": "7607",
+   "bundle": "challenge",
+   "boxW": 88.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 7,
+   "sample": "香蕉你个巴拉  ",
+   "heldBy": [
+    "7638.name1"
+   ]
+  },
+  {
+   "id": "7606",
+   "bundle": "challenge",
+   "boxW": 40.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 3,
+   "sample": "2000  ",
+   "heldBy": [
+    "7638.inte4"
+   ]
+  },
+  {
+   "id": "7605",
+   "bundle": "challenge",
+   "boxW": 40.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 3,
+   "sample": "2000  ",
+   "heldBy": [
+    "7638.inte3"
+   ]
+  },
+  {
+   "id": "7604",
+   "bundle": "challenge",
+   "boxW": 40.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 3,
+   "sample": "2000  ",
+   "heldBy": [
+    "7638.inte2"
+   ]
+  },
+  {
+   "id": "7603",
+   "bundle": "challenge",
+   "boxW": 40.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 3,
+   "sample": "2000  ",
+   "heldBy": [
+    "7638.inte1"
+   ]
+  },
+  {
+   "id": "7602",
+   "bundle": "challenge",
+   "boxW": 22.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 1,
+   "sample": "4  ",
+   "heldBy": [
+    "7638.rank4"
+   ]
+  },
+  {
+   "id": "7601",
+   "bundle": "challenge",
+   "boxW": 22.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 1,
+   "sample": "3  ",
+   "heldBy": [
+    "7638.rank3"
+   ]
+  },
+  {
+   "id": "7600",
+   "bundle": "challenge",
+   "boxW": 22.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 1,
+   "sample": "2  ",
+   "heldBy": [
+    "7638.rank2"
+   ]
+  },
+  {
+   "id": "7599",
+   "bundle": "challenge",
+   "boxW": 22.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 1,
+   "sample": "1  ",
+   "heldBy": [
+    "7638.rank1"
+   ]
+  },
+  {
+   "id": "7588",
+   "bundle": "challenge",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "商",
+   "heldBy": []
+  },
+  {
+   "id": "7587",
+   "bundle": "challenge",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "比",
+   "heldBy": []
+  },
+  {
+   "id": "7585",
+   "bundle": "challenge",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "比",
+   "heldBy": []
+  },
+  {
+   "id": "7582",
+   "bundle": "challenge",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "1",
+   "heldBy": []
+  },
+  {
+   "id": "7578",
+   "bundle": "challenge",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "竞",
+   "heldBy": []
+  },
+  {
+   "id": "7574",
+   "bundle": "challenge",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "天",
+   "heldBy": []
+  },
+  {
+   "id": "3384",
+   "bundle": "challenge",
+   "boxW": 22.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 1,
+   "sample": "120",
+   "heldBy": [
+    "3385.level"
+   ]
+  },
+  {
+   "id": "3375",
+   "bundle": "challenge",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 3374,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "L",
+   "heldBy": []
+  },
+  {
+   "id": "3383",
+   "bundle": "challenge",
+   "boxW": 76.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 6,
+   "sample": "香蕉你个巴拉",
+   "heldBy": [
+    "3385.name"
+   ]
+  },
+  {
+   "id": "3377",
+   "bundle": "challenge",
+   "boxW": 34.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 2,
+   "sample": "12000",
+   "heldBy": [
+    "3380.rate"
+   ]
+  },
+  {
+   "id": "3376",
+   "bundle": "challenge",
+   "boxW": 22.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 1,
+   "sample": "120",
+   "heldBy": [
+    "3385.level"
+   ]
+  },
+  {
+   "id": "3373",
+   "bundle": "challenge",
+   "boxW": 76.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 6,
+   "sample": "香蕉你个巴拉",
+   "heldBy": [
+    "3385.name"
+   ]
+  },
+  {
+   "id": "7564",
+   "bundle": "challenge",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "决",
+   "heldBy": []
+  },
+  {
+   "id": "7557",
+   "bundle": "challenge",
+   "boxW": 215,
+   "boxH": 123.9,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 17,
+   "sample": "【竞技规则】 四人参赛，两两进行战斗后由胜者进行",
+   "heldBy": [
+    "7638.desc"
+   ]
+  },
+  {
+   "id": "7553",
+   "bundle": "challenge",
+   "boxW": 208.45,
+   "boxH": 40.5,
+   "fontId": 2030,
+   "fontH": 15,
+   "align": "left",
+   "charsPerLine": 13,
+   "sample": "5级才有资格挑战我们盖世",
+   "heldBy": []
+  },
+  {
+   "id": "7276",
+   "bundle": "challenge",
+   "boxW": 273.75,
+   "boxH": 58.6,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 22,
+   "sample": "螳螂身手敏捷，攻击速度快，当其生命值过低时会有惊",
+   "heldBy": [
+    "7555.desc"
+   ]
+  },
+  {
+   "id": "7274",
+   "bundle": "challenge",
+   "boxW": 56.25,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 4,
+   "sample": "1/4",
+   "heldBy": [
+    "7638.page"
+   ]
+  },
+  {
+   "id": "7235",
+   "bundle": "challenge",
+   "boxW": 26.5,
+   "boxH": 18,
+   "fontId": 2030,
+   "fontH": 14,
+   "align": "left",
+   "charsPerLine": 1,
+   "sample": "99",
+   "heldBy": [
+    "7237.flevel"
+   ]
+  },
+  {
+   "id": "7234",
+   "bundle": "challenge",
+   "boxW": 106.2,
+   "boxH": 32,
+   "fontId": 2030,
+   "fontH": 15,
+   "align": "left",
+   "charsPerLine": 7,
+   "sample": "大力松鼠鼠 ",
+   "heldBy": [
+    "7237.friendname"
+   ]
+  },
+  {
+   "id": "7255",
+   "bundle": "challenge",
+   "boxW": 56.25,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 4,
+   "sample": "1/4",
+   "heldBy": [
+    "7638.page"
+   ]
+  },
+  {
+   "id": "7231",
+   "bundle": "challenge",
+   "boxW": 107.35,
+   "boxH": 99,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 8,
+   "sample": "添加好友功能会",
+   "heldBy": []
+  },
+  {
+   "id": "7226",
+   "bundle": "challenge",
+   "boxW": 107.35,
+   "boxH": 81,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 8,
+   "sample": "点击【邀请】好",
+   "heldBy": []
+  },
+  {
+   "id": "7223",
+   "bundle": "challenge",
+   "boxW": 32.4,
+   "boxH": 19.55,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 2,
+   "sample": "2232",
+   "heldBy": [
+    "7232.power"
+   ]
+  },
+  {
+   "id": "7222",
+   "bundle": "challenge",
+   "boxW": 32.4,
+   "boxH": 19.55,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 2,
+   "sample": "2232",
+   "heldBy": [
+    "7232.speed"
+   ]
+  },
+  {
+   "id": "7221",
+   "bundle": "challenge",
+   "boxW": 32.4,
+   "boxH": 19.55,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 2,
+   "sample": "8888",
+   "heldBy": [
+    "7232.agility"
+   ]
+  },
+  {
+   "id": "7220",
+   "bundle": "challenge",
+   "boxW": 32.4,
+   "boxH": 19.55,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 2,
+   "sample": "8888",
+   "heldBy": [
+    "7232.hp"
+   ]
+  },
+  {
+   "id": "7139",
+   "bundle": "homeLand",
+   "boxW": 106.2,
+   "boxH": 27.6,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 8,
+   "sample": "啊发发拉的孙 ",
+   "heldBy": [
+    "7140.time4"
+   ]
+  },
+  {
+   "id": "7138",
+   "bundle": "homeLand",
+   "boxW": 106.2,
+   "boxH": 27.6,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 8,
+   "sample": "啊发发拉的孙",
+   "heldBy": [
+    "7140.time1"
+   ]
+  },
+  {
+   "id": "7137",
+   "bundle": "homeLand",
+   "boxW": 106.2,
+   "boxH": 27.6,
+   "fontId": 3146,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 8,
+   "sample": "啊发发拉的孙 ",
+   "heldBy": [
+    "7140.time3"
+   ]
+  },
+  {
+   "id": "7179",
+   "bundle": "daoju",
+   "boxW": 105,
+   "boxH": 23.4,
+   "fontId": 3474,
+   "fontH": 14,
+   "align": "left",
+   "charsPerLine": 7,
+   "sample": "1234567",
+   "heldBy": [
+    "7180.text0"
+   ]
+  },
+  {
+   "id": "7168",
+   "bundle": "daoju",
+   "boxW": 59.6,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "left",
+   "charsPerLine": 5,
+   "sample": "999 ",
+   "heldBy": [
+    "7180.text6"
+   ]
+  },
+  {
+   "id": "7167",
+   "bundle": "daoju",
+   "boxW": 59.6,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "left",
+   "charsPerLine": 5,
+   "sample": "999 ",
+   "heldBy": [
+    "7180.text5"
+   ]
+  },
+  {
+   "id": "7166",
+   "bundle": "daoju",
+   "boxW": 59.6,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "left",
+   "charsPerLine": 5,
+   "sample": "999 ",
+   "heldBy": [
+    "7180.text4"
+   ]
+  },
+  {
+   "id": "7165",
+   "bundle": "daoju",
+   "boxW": 59.6,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "left",
+   "charsPerLine": 5,
+   "sample": "999 ",
+   "heldBy": [
+    "7180.text3"
+   ]
+  },
+  {
+   "id": "7164",
+   "bundle": "daoju",
+   "boxW": 59.6,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "left",
+   "charsPerLine": 5,
+   "sample": "999 ",
+   "heldBy": [
+    "7180.text2"
+   ]
+  },
+  {
+   "id": "7163",
+   "bundle": "daoju",
+   "boxW": 59.6,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "left",
+   "charsPerLine": 5,
+   "sample": "999 ",
+   "heldBy": [
+    "7180.text1"
+   ]
+  },
+  {
+   "id": "7162",
+   "bundle": "daoju",
+   "boxW": 59.6,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "999 ",
+   "heldBy": [
+    "7180.text6"
+   ]
+  },
+  {
+   "id": "7161",
+   "bundle": "daoju",
+   "boxW": 59.6,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "999 ",
+   "heldBy": [
+    "7180.text5"
+   ]
+  },
+  {
+   "id": "7160",
+   "bundle": "daoju",
+   "boxW": 59.6,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "999 ",
+   "heldBy": [
+    "7180.text4"
+   ]
+  },
+  {
+   "id": "7159",
+   "bundle": "daoju",
+   "boxW": 59.6,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "999 ",
+   "heldBy": [
+    "7180.text3"
+   ]
+  },
+  {
+   "id": "7158",
+   "bundle": "daoju",
+   "boxW": 59.6,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "999 ",
+   "heldBy": [
+    "7180.text2"
+   ]
+  },
+  {
+   "id": "7157",
+   "bundle": "daoju",
+   "boxW": 59.6,
+   "boxH": 28,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "999 ",
+   "heldBy": [
+    "7180.text1"
+   ]
+  },
+  {
+   "id": "7146",
+   "bundle": "daoju",
+   "boxW": 80.95,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 6,
+   "sample": "999 ",
+   "heldBy": [
+    "7180.lymoney"
+   ]
+  },
+  {
+   "id": "7145",
+   "bundle": "daoju",
+   "boxW": 88.95,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 7,
+   "sample": "小体力药剂 ",
+   "heldBy": [
+    "7180.name"
+   ]
+  },
+  {
+   "id": "7144",
+   "bundle": "daoju",
+   "boxW": 100.95,
+   "boxH": 124,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 8,
+   "sample": "用5点生命随机增加1点力量/敏捷/速度，当基础生",
+   "heldBy": [
+    "7180.des"
+   ]
+  },
+  {
+   "id": "7142",
+   "bundle": "daoju",
+   "boxW": 51.2,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 10,
+   "align": "left",
+   "charsPerLine": 5,
+   "sample": "1/4",
+   "heldBy": [
+    "7180.page"
+   ]
+  },
+  {
+   "id": "7818",
+   "bundle": "message",
+   "boxW": 233.6,
+   "boxH": 44,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 19,
+   "sample": "被XXX（用户名）挑战，你战败了，获得了XXX ",
+   "heldBy": [
+    "7819.text1"
+   ]
+  },
+  {
+   "id": "7817",
+   "bundle": "message",
+   "boxW": 43.8,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "right",
+   "charsPerLine": 3,
+   "sample": "1/4",
+   "heldBy": [
+    "7819.page"
+   ]
+  },
+  {
+   "id": "7810",
+   "bundle": "message",
+   "boxW": 234.4,
+   "boxH": 52,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 19,
+   "sample": "被XXX（用户名）挑战，你战败了，获得了XXX ",
+   "heldBy": [
+    "7819.text2"
+   ]
+  },
+  {
+   "id": "7797",
+   "bundle": "message",
+   "boxW": 194.2,
+   "boxH": 15,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "left",
+   "charsPerLine": 17,
+   "sample": "12/01 12:30",
+   "heldBy": [
+    "7819.text22"
+   ]
+  },
+  {
+   "id": "7796",
+   "bundle": "message",
+   "boxW": 196.65,
+   "boxH": 15,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "left",
+   "charsPerLine": 17,
+   "sample": "12/01 12:30",
+   "heldBy": [
+    "7819.text11"
+   ]
+  },
+  {
+   "id": "7845",
+   "bundle": "main",
+   "boxW": 193.7,
+   "boxH": 81,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 16,
+   "sample": "战斗中随机使用武器、技能和空",
+   "heldBy": []
+  },
+  {
+   "id": "7843",
+   "bundle": "main",
+   "boxW": 200.45,
+   "boxH": 81,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 16,
+   "sample": "师父可以每天得到徒弟经验的10%",
+   "heldBy": []
+  },
+  {
+   "id": "7841",
+   "bundle": "main",
+   "boxW": 193.7,
+   "boxH": 65.25,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 16,
+   "sample": "收徒需要打败他的师父，如果他",
+   "heldBy": []
+  },
+  {
+   "id": "7839",
+   "bundle": "main",
+   "boxW": 193.7,
+   "boxH": 126,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 16,
+   "sample": "力量：决定普通攻击的伤害，也",
+   "heldBy": []
+  },
+  {
+   "id": "7837",
+   "bundle": "main",
+   "boxW": 200.45,
+   "boxH": 96.75,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 16,
+   "sample": "每次战斗都可以获得经验值，被",
+   "heldBy": []
+  },
+  {
+   "id": "7834",
+   "bundle": "main",
+   "boxW": 193.7,
+   "boxH": 96.75,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 16,
+   "sample": "松鼠等级达到5级就可以升级武",
+   "heldBy": []
+  },
+  {
+   "id": "7832",
+   "bundle": "main",
+   "boxW": 193.7,
+   "boxH": 96.75,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 16,
+   "sample": "松鼠等级达到5级就可以升级技",
+   "heldBy": []
+  },
+  {
+   "id": "7831",
+   "bundle": "main",
+   "boxW": 195.2,
+   "boxH": 81,
+   "fontId": 3474,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 16,
+   "sample": "每次发起挑战消耗10点体力，体",
+   "heldBy": []
+  },
+  {
+   "id": "7793",
+   "bundle": "main",
+   "boxW": 194.95,
+   "boxH": 86,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 16,
+   "sample": "恭喜你获得了一个金宝箱，快去“道具”里打开看看吧",
+   "heldBy": [
+    "7794.text1"
+   ]
+  },
+  {
+   "id": "7792",
+   "bundle": "main",
+   "boxW": 67.5,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "+10 ",
+   "heldBy": [
+    "7794.text4"
+   ]
+  },
+  {
+   "id": "7791",
+   "bundle": "main",
+   "boxW": 67.5,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "+10 ",
+   "heldBy": [
+    "7794.text3"
+   ]
+  },
+  {
+   "id": "7790",
+   "bundle": "main",
+   "boxW": 67.5,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "+10 ",
+   "heldBy": [
+    "7794.text2"
+   ]
+  },
+  {
+   "id": "7789",
+   "bundle": "main",
+   "boxW": 67.5,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "+10 ",
+   "heldBy": [
+    "7794.text1"
+   ]
+  },
+  {
+   "id": "7788",
+   "bundle": "main",
+   "boxW": 56.95,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 4,
+   "sample": "+10 ",
+   "heldBy": [
+    "7794.text4"
+   ]
+  },
+  {
+   "id": "7787",
+   "bundle": "main",
+   "boxW": 56.5,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 4,
+   "sample": "+10 ",
+   "heldBy": [
+    "7794.text3"
+   ]
+  },
+  {
+   "id": "7786",
+   "bundle": "main",
+   "boxW": 57.5,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 4,
+   "sample": "+10 ",
+   "heldBy": [
+    "7794.text2"
+   ]
+  },
+  {
+   "id": "7785",
+   "bundle": "main",
+   "boxW": 59.5,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 4,
+   "sample": "+生命10 ",
+   "heldBy": [
+    "7794.text1"
+   ]
+  },
+  {
+   "id": "7784",
+   "bundle": "main",
+   "boxW": 63.45,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "+10 ",
+   "heldBy": [
+    "7794.text3"
+   ]
+  },
+  {
+   "id": "7783",
+   "bundle": "main",
+   "boxW": 60,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "+10 ",
+   "heldBy": [
+    "7794.text2"
+   ]
+  },
+  {
+   "id": "7782",
+   "bundle": "main",
+   "boxW": 65,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "+10 ",
+   "heldBy": [
+    "7794.text1"
+   ]
+  },
+  {
+   "id": "7781",
+   "bundle": "main",
+   "boxW": 70.5,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "+10 ",
+   "heldBy": [
+    "7794.text2"
+   ]
+  },
+  {
+   "id": "7780",
+   "bundle": "main",
+   "boxW": 69.5,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "属性书+10 ",
+   "heldBy": [
+    "7794.text1"
+   ]
+  },
+  {
+   "id": "7779",
+   "bundle": "main",
+   "boxW": 67.5,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "+10 ",
+   "heldBy": [
+    "7794.text1"
+   ]
+  },
+  {
+   "id": "7770",
+   "bundle": "main",
+   "boxW": 254.45,
+   "boxH": 23.8,
+   "fontId": 3146,
+   "fontH": 15,
+   "align": "center",
+   "charsPerLine": 16,
+   "sample": "选择一个宝箱作为奖励 !",
+   "heldBy": [
+    "7771.text0"
+   ]
+  },
+  {
+   "id": "7766",
+   "bundle": "main",
+   "boxW": 104,
+   "boxH": 56,
+   "fontId": 2030,
+   "fontH": 25,
+   "align": "center",
+   "charsPerLine": 4,
+   "sample": " ",
+   "heldBy": [
+    "7767.count"
+   ]
+  },
+  {
+   "id": "7752",
+   "bundle": "main",
+   "boxW": 104,
+   "boxH": 56,
+   "fontId": 2030,
+   "fontH": 25,
+   "align": "center",
+   "charsPerLine": 4,
+   "sample": " ",
+   "heldBy": [
+    "7767.count"
+   ]
+  },
+  {
+   "id": "7728",
+   "bundle": "main",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 13,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "您",
+   "heldBy": []
+  },
+  {
+   "id": "7727",
+   "bundle": "main",
+   "boxW": null,
+   "boxH": null,
+   "fontId": 2030,
+   "fontH": 13,
+   "align": null,
+   "charsPerLine": null,
+   "sample": "闯",
+   "heldBy": []
+  },
+  {
+   "id": "7702",
+   "bundle": "main",
+   "boxW": 59.15,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "9999/9999",
+   "heldBy": [
+    "7703.bloodtext1"
+   ]
+  },
+  {
+   "id": "7701",
+   "bundle": "main",
+   "boxW": 59.15,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 11,
+   "align": "center",
+   "charsPerLine": 5,
+   "sample": "9999/9999",
+   "heldBy": [
+    "7703.bloodtext2"
+   ]
+  },
+  {
+   "id": "7700",
+   "bundle": "main",
+   "boxW": 84.45,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "right",
+   "charsPerLine": 7,
+   "sample": "李二强李二强 ",
+   "heldBy": [
+    "7703.name2"
+   ]
+  },
+  {
+   "id": "7699",
+   "bundle": "main",
+   "boxW": 82.1,
+   "boxH": 30,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 6,
+   "sample": "李二强李二强 ",
+   "heldBy": [
+    "7703.name1"
+   ]
+  },
+  {
+   "id": "7018",
+   "bundle": "main",
+   "boxW": 100.65,
+   "boxH": 34,
+   "fontId": 2030,
+   "fontH": 14,
+   "align": "center",
+   "charsPerLine": 7,
+   "sample": "六个字的名字 ",
+   "heldBy": [
+    "7039.name"
+   ]
+  },
+  {
+   "id": "6841",
+   "bundle": "main",
+   "boxW": 104,
+   "boxH": 16,
+   "fontId": 2030,
+   "fontH": 12,
+   "align": "left",
+   "charsPerLine": 8,
+   "sample": "0000",
+   "heldBy": [
+    "6842.reasonText"
+   ]
+  },
+  {
+   "id": "6839",
+   "bundle": "main",
+   "boxW": 213.55,
+   "boxH": 120.35,
+   "fontId": 2030,
+   "fontH": 13,
+   "align": "left",
+   "charsPerLine": 16,
+   "sample": "连接超时，可能是网络不稳定造",
+   "heldBy": []
+  }
+ ]
+}

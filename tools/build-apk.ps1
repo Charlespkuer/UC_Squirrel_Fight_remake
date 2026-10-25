@@ -147,6 +147,7 @@ Push-Location (Join-Path $SourceRepo 'src-tauri')
 # 传 `--release` 会报 unexpected argument '--release'。
 $cliArgs = if ($Release) { @('android','build','--apk','--target',$map.tauri,'--ci') }
            else          { @('android','build','--debug','--apk','--target',$map.tauri,'--ci') }
+$buildStart = Get-Date
 $cliOut = & node 'node_modules\@tauri-apps\cli\tauri.js' @cliArgs 2>&1
 $cliCode = $LASTEXITCODE
 Pop-Location
@@ -154,9 +155,10 @@ if ($cliCode -ne 0) {
   # 只允许已完成 Cargo 编译、随后因 Windows 链接权限失败的已知边路。
   # 其它失败即使磁盘上有旧 .so 也必须停止，否则会把旧游戏伪装成本次新包。
   $cliText = $cliOut | Out-String
-  $cargoFinished = $cliText -match 'Finished\s+.+(?:profile|target\(s\))'
-  $symlinkDenied = $cliText -match '(?i)(os error 1314|privilege.+not held|symlink.+(?:privilege|denied))'
-  if (-not ($cargoFinished -and $symlinkDenied)) {
+  $symlinkDenied = $cliText -match '(?i)(os error 1314|privilege.+not held|symlink.+(?:privilege|denied|not allowed)|creation symbolic link is not allowed)'
+  # Tauri 的彩色输出可能让 "Finished" 正则失配；改看 .so 是否是本轮构建新写出的。
+  $soFresh = (Test-Path -LiteralPath $so) -and ((Get-Item -LiteralPath $so).LastWriteTime -ge $buildStart.AddSeconds(-2))
+  if (-not ($symlinkDenied -and $soFresh)) {
     $cliOut | Select-Object -Last 25 | ForEach-Object { Write-Host "   $_" }
     throw "Rust/Tauri 构建失败（退出码 $cliCode）；拒绝复用旧 .so。"
   }

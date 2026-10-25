@@ -253,6 +253,8 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .classic-page.classic-tower{background:var(--tower-bg,#4c7c50);transition:background-color .8s ease}
 .classic-page.classic-tower .classic-board{top:92px;bottom:18px;border-radius:38px;padding:18px 26px;box-shadow:inset 0 0 0 4px #fff8d8,0 4px 0 #142b1a;background:linear-gradient(#fff8e3,#eedcb4)}
 .classic-page.classic-tower:has(.page-footer) .classic-board{bottom:103px}
+/* 勇者准备页没有底栏（返回键已挪到右上角）：板面铺到底，避免现代模式下动作行压住四维。 */
+.classic-page.hero-setup-page .classic-board{bottom:18px}
 .classic-tower-bar{position:absolute;top:10px;left:20px;right:20px;height:66px;display:flex;align-items:center;gap:18px;z-index:5}
 .classic-tower-bar .uc-button{height:58px;min-width:190px;font-size:27px;padding:4px 24px}
 .classic-tower .tower-page{height:100%;gap:18px}

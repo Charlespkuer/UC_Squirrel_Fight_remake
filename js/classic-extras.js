@@ -358,7 +358,7 @@
       }
       return C().modal(title, html, actions, options);
     };
-    showConfirm('\u7ade\u6280\u573a\u62a5\u540d', '<p>' + (kind === 0 ? '\u7ecf\u9a8c\u7ade\u6280\u573a' : kind === 1 ? '\u788e\u7247\u7ade\u6280\u573a' : '\u5e7b\u517d\u7ade\u6280\u573a') + '\uff1a\u534a\u51b3\u8d5b\u80dc\u8005\u8fdb\u5165\u51b3\u8d5b\uff0c\u8d25\u8005\u8fdb\u884c\u5b63\u519b\u8d5b\u3002</p><p>\u62a5\u540d\u4e00\u6b21\u6d88\u801730\u4f53\u529b\uff0c\u7b2c\u4e8c\u6218\u4e0d\u518d\u6263\u9664\u3002\u4f53\u529b\u4e0d\u8db3\u65f6\u4f7f\u75281\u5f20\u82f1\u96c4\u5e16/\u52c7\u6c14\u5fbd\u7ae0/\u53ec\u5524\u8bc1\u3002</p>' + note('\u79bb\u7ebf\u5bf9\u624b\u7531\u672c\u5730\u751f\u6210\u3002\u7ade\u6280\u573a\u4e0d\u4f7f\u7528\u6311\u6218\u836f\u5242\u6548\u679c\u3002'), [{ label: '\u62a5\u540d\u53c2\u8d5b', run: () => {
+    showConfirm('\u7ade\u6280\u573a\u62a5\u540d', '<p>' + (kind === 0 ? '\u7ecf\u9a8c\u7ade\u6280\u573a' : kind === 1 ? '\u788e\u7247\u7ade\u6280\u573a' : '\u5e7b\u517d\u7ade\u6280\u573a') + '\uff1a\u534a\u51b3\u8d5b\u80dc\u8005\u8fdb\u5165\u51b3\u8d5b\uff0c\u8d25\u8005\u8fdb\u884c\u5b63\u519b\u8d5b\u3002</p><p>\u62a5\u540d\u4e00\u6b21\u6d88\u801730\u4f53\u529b\uff0c\u7b2c\u4e8c\u6218\u4e0d\u518d\u6263\u9664\u3002\u4f53\u529b\u4e0d\u8db3\u65f6\u4f7f\u75281\u5f20\u82f1\u96c4\u5e16/\u52c7\u6c14\u5fbd\u7ae0/\u53ec\u5524\u8bc1\u3002</p>' + note('\u79bb\u7ebf\u5bf9\u624b\u7531\u672c\u5730\u751f\u6210\u3002\u836f\u4e38\u52a0\u6210\u5728\u7ade\u6280\u573a\u540c\u6837\u751f\u6548\u3002'), [{ label: '\u62a5\u540d\u53c2\u8d5b', run: () => {
       if (State.state() !== owner || activeArenaRun() || !arenaAccess(kind)) return;
       const s = owner;
       State.tickEnergy();
@@ -415,7 +415,10 @@
       C().toast('\u6bd4\u8d5b\u6682\u65f6\u4e2d\u65ad\uff0c\u672c\u8f6e\u5df2\u4fdd\u5b58\uff0c\u53ef\u56de\u7ade\u6280\u573a\u7ee7\u7eed\u3002');
       arenaMatchPage();
     };
-    Main.startBattle(foe, { cost: 0, kind: 'arena', useProps: false, region: 0, skipChest: true, onError: interrupted,
+    /* `useProps: true`：**竞技场战斗面板也吃药丸**（2026-10 用户口径：药丸对竞技场里的属性生效，
+     * 说明里不再写"竞技场中无效"）。属性丸按"每场 1 次"在下面 onEnd 里扣；
+     * 经验丸不在这里扣 —— 它只在发经验的那一刻扣（见结算处的 tickPropStates({kind:'exp'})）。 */
+    Main.startBattle(foe, { cost: 0, kind: 'arena', useProps: true, region: 0, skipChest: true, onError: interrupted,
       /* 【经典模式】打完**直接回原版竞技场页**（原版是回"temp"帧再回 `tiaozhan`）：
        * 不传这个开关的话 `startBattle` 会先 `showHome()`，而首页会把挑战页拆掉，
        * 下面的 `arena()` 就回不去了（用户 2026-10 报的"竞技场开始竞技会跳回现代界面"）。 */
@@ -423,6 +426,9 @@
       onEnd: winner => {
       if (finished || run.settled || run.owner !== State.state()) return;
       finished = true; run.busy = false;
+      /* 属性丸按**场次**扣：半决赛、决赛（或季军赛）各 1 次，与挑战场一致。
+       * 经验丸不在这里扣 —— 碎片/幻兽场不发经验，也就不该消耗它。 */
+      State.tickPropStates({ kind: 'stat' });
       if (phase === 'semi') {
         const won = winner === 0;
         run.phase = won ? 'final' : 'third'; saveArenaRun(run);
@@ -446,7 +452,8 @@
       }
       run.settled = true; arenaRun = null;
       const position = phase === 'final' ? (winner === 0 ? 0 : 1) : (winner === 0 ? 2 : 3);
-      // \u7ecf\u9a8c\u573a\u5403\u7ecf\u9a8c\u4e38\u52a0\u6210\uff08\u7ecf\u9a8c\u4e38 +40% / \u8d85\u7ea7\u7ecf\u9a8c\u4e38 +60%\uff09\uff1b\u788e\u7247\u573a\u53ea\u7ed9\u788e\u7247\u3001\u4e0d\u7ed9\u7ecf\u9a8c\uff08\u4e5f\u5c31\u4e0d\u6d88\u8017\u7ecf\u9a8c\u4e38\uff09\u3002
+      /* 经验竞技场吃经验丸加成（经验丸 +40% / 超级经验丸 +60%）；碎片场只给碎片、不给经验，
+       * 也就**不消耗**经验丸（用户 2026-10：经验丸只在经验竞技场扣次数）。 */
       const kind = Number(run.kind) || 0;
       let baseExp = kind === 0 ? ARENA_EXP[position] : 0;
       let shards = kind === 1 ? ARENA_FRAGMENT_SHARDS[position] : 0;
@@ -476,7 +483,7 @@
       if (hatch) { const st = State.state(); st.hatchPoint = Math.max(0, (Number(st.hatchPoint) || 0) + hatch); }
       const gem = winner === 0 ? State.rollGemDrop(15) : null;   // 45\u7ea7\u8d77\u7ade\u6280\u573a\u83b7\u80dc\u6709\u51e0\u7387\u5f97\u5b9d\u77f3
       const ups = boosted.ups;
-      if (baseExp) State.tickPropStates();   // \u7ecf\u9a8c\u4e38\u6309\u573a\u6b21\u6d88\u8017
+      if (baseExp) State.tickPropStates({ kind: 'exp' });   // 经验丸只按"发过经验的场次"扣
       const boostNote = boostPct ? '\uff08\u542b\u7ecf\u9a8c\u4e38 +' + boostPct + '%\uff09' : '';
       /* ⚠ `exp` 已经在上面按祭坛状态翻过倍了，这里**只负责显示**，不能再加一次。
        * 文案拼在 `outcome` 的最后一段（原版那句"祭坛发出神秘的光芒…"）。 */

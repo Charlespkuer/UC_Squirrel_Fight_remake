@@ -35,6 +35,17 @@ test('狂战各品质使用完整 B 装备容器，护肩随对应衣服帧穿�
     '原版护肩挂点不能补成普通袖口的落点');
 });
 
+test('无尽塔经典预告的 7232 挂点使用 showFace 的非 B 容器', () => {
+  const src = read('js/tower-ui.js');
+  const start = src.indexOf('async function loadClassicGear');
+  const end = src.indexOf('function classicGearType', start);
+  assert.ok(start > 0 && end > start, 'tower-ui 的经典装备表入口应存在');
+  const body = src.slice(start, end);
+  assert.match(body, /for \(const c of slots\.portraitContainer \|\| \[\]\)/,
+    '无尽塔预告与随机挑战 showFace 共用非 B 立绘容器，B 容器原点不同会推偏整套装备');
+  assert.doesNotMatch(body, /slots\.container/);
+});
+
 test('更换装备的怒战头盔逐强化档取原版卡片，并保留卡片父层与角的矩阵精度', () => {
   const table = json('gear-colors.json').byGear;
   assert.deepEqual(table['177']['4'], { 0: 1419, 1: 1419, 2: 1417, 3: 1413 },

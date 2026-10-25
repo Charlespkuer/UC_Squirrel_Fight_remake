@@ -14,6 +14,15 @@
      iOS 15 的 WKWebView 在 body 上声明 touch-action 时，部分版本会吞掉点击合成。 */
   button, input { touch-action: manipulation; }
 }
+/* 安卓 / Chromium：SVG 热区和整页也要去掉「双击缩放」判定。
+   实测（Android 15 WebView / Chrome 124，真触摸）：只给 button/input 声明时，
+   经典界面的 SVG 按钮原生 click 会比 touchend 晚 ~190ms；在这段窗口里再点一下，
+   浏览器会把两下并成一次双击手势 —— 第一下的 click 直接被吞掉。整页声明
+   `touch-action: manipulation` 后 click 降到 ~4ms（见 docs/更新记录.md 第三百六十八批）。
+   ⚠ iOS 走上面那一支：WKWebView 上 body 级 touch-action 会吞掉 click 合成，这里不声明。 */
+@supports not (-webkit-touch-callout: none) {
+  #app, #app * { touch-action: manipulation; }
+}
 </style>
 <link rel="stylesheet" href="css/style.css">
 <link rel="stylesheet" href="css/classic.css">
@@ -54,6 +63,7 @@ window.addEventListener('unhandledrejection', function (e) {
 <!-- 桌面外壳（Tauri）里把存档通道换成 Rust 端文件读写；网页版这一句什么都不做 -->
 <script src="js/tauri-bridge.js"></script>
 <script src="js/sim.js"></script>
+<script src="js/tower-hero.js"></script>
 <script src="js/tower.js"></script>
 <script src="js/battle.js"></script>
 <script src="js/battle-drops.js"></script>

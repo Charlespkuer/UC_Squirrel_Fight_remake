@@ -11,7 +11,8 @@ HTTP 服务器供起来，窗口打开 `http://127.0.0.1:<随机端口>` —— 
 - iOS：`tauri.ios.conf.json` + `Info.ios.plist`（仅横屏、中文显示名、隐藏状态栏/Home 条）；
   UIScene 声明由 `tools/build-ios.cjs` 写进 `gen/apple/project.yml`（`--legacy` 时不写，给 iOS 15~25）。
   `gen/apple` 由 `tauri ios init` 生成、不进仓库，构建脚本会补回 objectVersion 55 / Podfile / 设备族等补丁。
-  出包走 `node tools/build-ios.cjs`（iOS 26+）或 `--legacy`（iOS 15~25），未签名 IPA 落 `dist/`。
+  出包走 `node tools/build-ios.cjs`（iOS 26+）或 `--legacy`（iOS 15~25），未签名 IPA 落 `dist/`；
+  一键版本 + 构建 + 企业签名（并清掉 dist 里其它 IPA）用 `bash scripts/一键打包IPA.command`（见 `tools/build-ios-release.cjs`）。
 - 配置：`tauri.conf.json`，平台差异在 `tauri.windows / tauri.android / tauri.ios / tauri.bundle` 几个 conf 里。
   `web/`、`icons/`、`target/`、`dist/` 都是生成物 / 产物（见 `.gitignore`），别手改；
   `gen/android` 里的安卓工程是本机手工维护的**真源**（图标 / 锁横屏清单 / 版本号 / 签名方案由

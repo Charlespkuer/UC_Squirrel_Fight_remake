@@ -27,7 +27,8 @@ param(
   [string]$Jdk = 'E:\Android\jdk-17.0.20.1+1',
   [string]$Sdk = 'E:\Android\sdk',
   [string]$SourceRepo = '',                       # 默认 = 本脚本上一层的仓库根（下面补）
-  [switch]$SkipSyncStaging
+  [switch]$SkipSyncStaging,
+  [switch]$NoInstall                           # 只构建/校验，不覆盖连接设备上的应用
 )
 
 $ErrorActionPreference = 'Continue'
@@ -91,7 +92,12 @@ if (-not $SkipSyncStaging) {
   Say "暂存前端到 src-tauri\web"
   Push-Location $SourceRepo
   & node (Join-Path $SourceRepo 'tools\build-tauri-app.cjs') --web | Select-Object -Last 1 | ForEach-Object { Ok $_ }
+  $stageCode = $LASTEXITCODE
   Pop-Location
+  if ($stageCode -ne 0) { throw "前端暂存失败（退出码 $stageCode）；停止打包，不能沿用旧快照。" }
+} else {
+  & node (Join-Path $SourceRepo 'tools\build-tauri-app.cjs') --web --check
+  if ($LASTEXITCODE -ne 0) { throw '前端快照已过期；去掉 -SkipSyncStaging 后重新打包。' }
 }
 
 # ---------- 2b) Android 导出桥（Kotlin）覆盖进生成工程 ----------
@@ -102,7 +108,7 @@ $androidTpl = Join-Path $SourceRepo 'src-tauri\android'
 $androidDst = Join-Path $SourceRepo 'src-tauri\gen\android\app\src\main\java\com\ssdz\classic'
 if ((Test-Path $androidTpl) -and (Test-Path $androidDst)) {
   Get-ChildItem $androidTpl -Filter '*.kt' -File | ForEach-Object {
-    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $androidDst $_.Name) -Force
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $androidDst $_.Name) -Force -ErrorAction Stop
   }
   Ok "Android 导出桥模板 → gen\android（MainActivity / AndroidExportBridge）"
 }
@@ -142,21 +148,52 @@ Push-Location (Join-Path $SourceRepo 'src-tauri')
 $cliArgs = if ($Release) { @('android','build','--apk','--target',$map.tauri,'--ci') }
            else          { @('android','build','--debug','--apk','--target',$map.tauri,'--ci') }
 $cliOut = & node 'node_modules\@tauri-apps\cli\tauri.js' @cliArgs 2>&1
+$cliCode = $LASTEXITCODE
 Pop-Location
+if ($cliCode -ne 0) {
+  # 只允许已完成 Cargo 编译、随后因 Windows 链接权限失败的已知边路。
+  # 其它失败即使磁盘上有旧 .so 也必须停止，否则会把旧游戏伪装成本次新包。
+  $cliText = $cliOut | Out-String
+  $cargoFinished = $cliText -match 'Finished\s+.+(?:profile|target\(s\))'
+  $symlinkDenied = $cliText -match '(?i)(os error 1314|privilege.+not held|symlink.+(?:privilege|denied))'
+  if (-not ($cargoFinished -and $symlinkDenied)) {
+    $cliOut | Select-Object -Last 25 | ForEach-Object { Write-Host "   $_" }
+    throw "Rust/Tauri 构建失败（退出码 $cliCode）；拒绝复用旧 .so。"
+  }
+}
 if (-not (Test-Path $so)) {
   $cliOut | Select-Object -Last 20 | ForEach-Object { Write-Host "   $_" }
   throw "Rust 产物不存在：$so"
 }
 Ok "$so（$([math]::Round((Get-Item $so).Length/1MB,1)) MB）"
+& node (Join-Path $SourceRepo 'tools\check-android-package.cjs') --library $so $Abi
+if ($LASTEXITCODE -ne 0) { throw '原生库 ABI / 内存页对齐检查失败，不能继续出包。' }
 
 # ---------- 4) 放 .so + 前端到 Android 工程 ----------
+& node (Join-Path $SourceRepo 'tools\build-tauri-app.cjs') --web --check
+if ($LASTEXITCODE -ne 0) { throw 'Rust 编译期间前端源码发生变化，请重新打包，避免发布旧资源。' }
 $jni = Join-Path $SourceRepo "src-tauri\gen\android\app\src\main\jniLibs\$Abi"
 New-Item -ItemType Directory -Force -Path $jni | Out-Null
-Copy-Item $so (Join-Path $jni 'libssdz_classic_lib.so') -Force
-Ok "libssdz_classic_lib.so → jniLibs\$Abi"
+$jniFile = Join-Path $jni 'libssdz_classic_lib.so'
+$jniInfo = Get-Item -LiteralPath $jniFile -Force -ErrorAction SilentlyContinue
+$sameLink = $false
+if ($jniInfo -and $jniInfo.LinkType -eq 'SymbolicLink' -and $jniInfo.Target) {
+  $linkPath = [string]@($jniInfo.Target)[0]
+  if (-not [System.IO.Path]::IsPathRooted($linkPath)) { $linkPath = Join-Path $jni $linkPath }
+  $sameLink = [string]::Equals([System.IO.Path]::GetFullPath($linkPath), [System.IO.Path]::GetFullPath($so), [System.StringComparison]::OrdinalIgnoreCase)
+}
+if ($sameLink) {
+  Ok "jniLibs\$Abi 已由 Tauri 链接到本次原生库，跳过同文件复制"
+} else {
+  # 当前机器若允许创建链接，Tauri 已经完成这一步；不要经旧链接覆写其它 target。
+  if ($jniInfo -and $jniInfo.LinkType -eq 'SymbolicLink') { Remove-Item -LiteralPath $jniFile -Force -ErrorAction Stop }
+  Copy-Item -LiteralPath $so -Destination $jniFile -Force -ErrorAction Stop
+  Ok "libssdz_classic_lib.so → jniLibs\$Abi"
+}
 
 $assets = Join-Path $SourceRepo 'src-tauri\gen\android\app\src\main\assets'
 robocopy (Join-Path $SourceRepo 'src-tauri\web') $assets /E /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+if ($LASTEXITCODE -ge 8) { throw "前端资源复制失败（robocopy 退出码 $LASTEXITCODE），停止打包。" }
 Ok "前端资源 → assets（$((Get-ChildItem $assets -Recurse -Force -File | Measure-Object).Count) 个文件）"
 # 防止「源码已改、APK 里还是旧快照」：至少核对调试开关这一颗最容易被用户直接看到的标记。
 $debugSrc = Join-Path $SourceRepo 'js\debug.js'
@@ -218,6 +255,8 @@ if ($gradleCode -ne 0) { throw "Gradle 打包失败（退出码 $gradleCode）" 
 # 把 APK 复制成带用途的名字，免得两种包混淆。
 $apk = Join-Path $SourceRepo "src-tauri\gen\android\app\build\outputs\apk\$($map.flavor)\debug\app-$($map.flavor)-debug.apk"
 if (-not (Test-Path $apk)) { throw "没找到 APK：$apk" }
+& node (Join-Path $SourceRepo 'tools\check-android-package.cjs') $apk
+if ($LASTEXITCODE -ne 0) { throw 'APK 原生库 / ZIP 对齐检查失败，不能发布。' }
 
 # ---------- 5a) 版本号体检：APK 里的 versionName/versionCode 必须与 tauri.properties 一致 ----------
 # 为什么：2026-10 审计时 dist 里躺着一个 `squirrel-fight-0.5.0-...apk`，包内实际是
@@ -302,11 +341,17 @@ if (-not ($apksigner -and (Test-Path $apksigner))) {
     Ok "已补签 v1+v2+v3（原包 $(Format-SigFlags $origFlags)）"
   }
 }
+# Gradle / 签名期间源码也可能被修改，发布前再确认仍是本次前端快照。
+& node (Join-Path $SourceRepo 'tools\build-tauri-app.cjs') --web --check
+if ($LASTEXITCODE -ne 0) { throw '打包期间前端源码发生变化；停止发布，请重新打包。' }
+# 补签可能重新写 ZIP；以最终要发布的文件再检查一次。
+& node (Join-Path $SourceRepo 'tools\check-android-package.cjs') $apk
+if ($LASTEXITCODE -ne 0) { throw '最终签名 APK 的原生库 / ZIP 对齐检查失败。' }
 $distDir = Join-Path $SourceRepo 'src-tauri\dist'
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd'
 $apkOut = Join-Path $distDir "ssdz-classic-$Abi-$profile-$stamp.apk"
-Copy-Item $apk $apkOut -Force
+Copy-Item -LiteralPath $apk -Destination $apkOut -Force -ErrorAction Stop
 Say "完成"
 Ok "APK：$apkOut（$([math]::Round((Get-Item $apkOut).Length/1MB,1)) MB）"
 Ok "原始产物：$apk"
@@ -316,7 +361,7 @@ Ok "原始产物：$apk"
 # 于是**装失败也打一个 ✓**（用户看到的就是「打包说好了，手机上说装不上」）。
 # 现在：打印 adb 的真实输出、按退出码/关键字判断，失败就按常见两类给出处方。
 $adb = Join-Path $Sdk 'platform-tools\adb.exe'
-$devices = & $adb devices 2>&1 | Select-String 'device$'
+$devices = if ($NoInstall) { $null } else { & $adb devices 2>&1 | Select-String 'device$' }
 if ($devices) {
   Say "检测到设备，直接安装并启动"
   $installOut = & $adb install -r $apk 2>&1
@@ -342,5 +387,6 @@ if ($devices) {
   & $adb shell monkey -p com.ssdz.classic -c android.intent.category.LAUNCHER 1 2>&1 | Out-Null
   Ok "已启动 com.ssdz.classic"
 } else {
-  Write-Host "   （没有连接的设备，跳过安装。手动装：adb install -r `"$apk`"）" -ForegroundColor DarkGray
+  $skipReason = if ($NoInstall) { '-NoInstall：保留设备现有应用与存档' } else { '没有连接的设备' }
+  Write-Host "   （$skipReason，跳过安装。手动装：adb install -r `"$apk`"）" -ForegroundColor DarkGray
 }

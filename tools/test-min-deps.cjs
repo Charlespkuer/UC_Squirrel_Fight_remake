@@ -404,6 +404,118 @@ record('安装包 / APK 必须把版本号带进去（注入 __SSDZ_VERSION + �
     'classic-ui 要优先读注入的版本号，而不是只看 VERSION_FALLBACK');
 });
 
+record('安卓快速连点：换页后的第二下不再落到新页面（touch-action / 兜底作废 / 换页锁）', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'scripts', 'index.html'), 'utf8');
+  assert.match(html, /@supports not \(-webkit-touch-callout: none\)[\s\S]{0,260}#app, #app \* \{ touch-action: manipulation; \}/,
+    '安卓 / Chromium 要给 #app 整页声明 touch-action: manipulation（只给 button/input 时 SVG 轻点会晚 ~190ms）');
+  const fb = fs.readFileSync(path.join(ROOT, 'js', 'touch-fallback.js'), 'utf8');
+  assert.match(fb, /tapId\+\+/, '新的 touchstart 必须作废上一拍还没到点的 420ms 兜底');
+  assert.match(fb, /if \(mine !== tapId\) return;/, '兜底定时器要核对拍号，不能补发旧坐标的 click');
+  assert.match(fb, /__sfTrustedClickAt/, '兜底要认换页锁吞掉的可信 click（否则锁过期后会补发一次）');
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8');
+  assert.match(ui, /navLockUntil/, '触屏换页后要有输入锁');
+  assert.match(ui, /MutationObserver/, '换页 / 弹层增减要由 MutationObserver 触发输入锁');
+  assert.match(ui, /__sfTrustedClickAt/, '换页锁吞掉可信 click 时要留时间戳，避免被兜底补发');
+});
+
+record('图片临时失败可恢复图集，迟到成功和冷却后的重试都不再永久缺图', async () => {
+  let now = 0, next = 0;
+  const timers = new Map(), images = [];
+  const c = { console: { warn() {} }, Date: { now: () => now }, asstes: [{ id: 'late', src: 'late.png' }],
+    setTimeout(fn, ms) { timers.set(++next, { fn, at: now + ms }); return next; },
+    clearTimeout(id) { timers.delete(id); },
+    Image: class { constructor() { this.width = this.height = this.naturalWidth = 16; images.push(this); } },
+  };
+  c.window = c;
+  vm.createContext(c);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/engine.js'), 'utf8'), c);
+  const E = c.Engine, first = E.loadSheets(['late']);
+  now = 4000;
+  for (const [id, timer] of [...timers]) if (timer.at <= now) { timers.delete(id); timer.fn(); }
+  await first;
+  assert.equal(E.sheet('late'), null);
+  images[0].onload();
+  assert.ok(E.sheet('late'), '超时后迟到的 onload 仍应注册已请求的图集');
+  assert.equal(await E.loadImage('late.png'), images[0]);
+  const failed = E.loadSheetFromUrl('retry', 'retry.png');
+  images[1].onerror();
+  assert.equal(await failed, null);
+  for (let i = 0; i < 20; i++) await E.loadSheetFromUrl('retry', 'retry.png');
+  assert.equal(images.length, 2, '失败冷却期内重复调用不应重发图片请求');
+  now += 1000;
+  const retry = E.loadSheetFromUrl('retry', 'retry.png');
+  images[2].onload();
+  assert.equal((await retry).img, images[2], '下一次显式请求应能重新加载并恢复图集');
+});
+
+record('触摸兜底只补发仍有效的可用目标，禁用、取消、换页和后台触摸均作废', () => {
+  let now = 0, clicks = 0;
+  const handlers = {}, timers = [], root = {}, ui = { childNodes: [root] };
+  const button = { nodeType: 1, tagName: 'BUTTON', disabled: false, isConnected: true,
+    classList: { contains: () => false }, closest() { return this; }, getAttribute: () => null,
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 50, bottom: 50, width: 50, height: 50 }),
+    dispatchEvent() { clicks++; },
+  };
+  const d = { hidden: false, addEventListener(n, fn) { handlers[n] = fn; },
+    getElementById: () => ui, elementsFromPoint: () => [button] };
+  const c = { document: d, navigator: { maxTouchPoints: 1 }, Date: { now: () => now },
+    setTimeout(fn) { timers.push(fn); }, addEventListener(n, fn) { handlers[n] = fn; },
+    getComputedStyle: () => ({ pointerEvents: 'auto' }),
+    MouseEvent: class { constructor(type, opts) { this.type = type; Object.assign(this, opts); } },
+  };
+  c.window = c;
+  vm.createContext(c);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/touch-fallback.js'), 'utf8'), c);
+  const tap = () => {
+    handlers.touchstart({ touches: [{ clientX: 20, clientY: 20 }] });
+    handlers.touchend({ changedTouches: [{ clientX: 20, clientY: 20 }] });
+  };
+  const flush = () => { now += 420; for (const fn of timers.splice(0)) fn(); };
+  tap(); flush(); assert.equal(clicks, 1, '正常漏掉的 click 仍应补发');
+  tap(); handlers.click({ isTrusted: true, target: button }); flush();
+  assert.equal(clicks, 1, '收到真实 click 后不得重复补发');
+  button.disabled = true; tap(); flush(); button.disabled = false;
+  tap(); handlers.touchcancel(); flush();
+  tap(); ui.childNodes = [{}]; flush();
+  handlers.touchstart({ touches: [{ clientX: 20, clientY: 20 }] });
+  ui.childNodes = [{}]; handlers.touchend({ changedTouches: [{ clientX: 20, clientY: 20 }] }); flush();
+  tap(); d.hidden = true; handlers.visibilitychange(); d.hidden = false; flush();
+  tap(); handlers.pagehide(); flush();
+  assert.equal(clicks, 1, '失效触摸不得通过 dispatchEvent 绕过禁用或落到新页面');
+  // Reuse the real SVG router; only its DOM hit/geometry primitives are stubbed.
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-main.js'), 'utf8'), c);
+  const svg = { nodeType: 1, tagName: 'svg', style: {}, isConnected: true, addEventListener() {},
+    getAttribute: () => null, contains(n) { for (; n; n = n.parentNode) if (n === this) return true; return false; } };
+  const clip = () => ({ g: { nodeType: 1, tagName: 'g', style: {}, ownerSVGElement: svg,
+    parentNode: svg, isConnected: true, getAttribute: () => null,
+    getBoundingClientRect: button.getBoundingClientRect, dispatchEvent() { clicks++; } } });
+  const a = clip(), b = clip(), child = g => ({ nodeType: 1, tagName: 'path', ownerSVGElement: svg, parentNode: g });
+  let hit = child(a.g);
+  ui.childNodes = [svg]; d.elementsFromPoint = () => [hit]; d.elementFromPoint = () => hit;
+  const router = c.SfUiMain.toolkit;
+  router.registerHit(a); tap();
+  a.g.isConnected = false; router.registerHit(b); hit = child(b.g); flush();
+  assert.equal(clicks, 1, '同一 SVG 内控件被替换，不能把旧补发落到新 clip');
+  tap(); hit = child(b.g); flush();
+  assert.equal(clicks, 2, '同一 clip 内部动画换了子帧，仍应正常补发');
+});
+
+record('Android 原生库对齐检查接受16KB，拒绝旧4KB的64位库与错误ABI', () => {
+  const { elfInfo } = require('./check-android-package.cjs');
+  const elf = Buffer.alloc(120);
+  elf.write('7f454c46', 0, 'hex'); elf[4] = 2; elf[5] = 1;
+  elf.writeUInt16LE(183, 18); elf.writeBigUInt64LE(64n, 32);
+  elf.writeUInt16LE(56, 54); elf.writeUInt16LE(1, 56);
+  elf.writeUInt32LE(1, 64); elf.writeBigUInt64LE(16384n, 112);
+  assert.equal(elfInfo(elf, 'arm64-v8a').required, 16384);
+  assert.throws(() => elfInfo(elf, 'x86_64'), /ABI/);
+  elf.writeBigUInt64LE(4096n, 112);
+  assert.throws(() => elfInfo(elf, 'arm64-v8a'), /4096.*16384/);
+  elf[4] = 1; elf.writeUInt16LE(40, 18); elf.writeUInt32LE(64, 28);
+  elf.writeUInt16LE(32, 42); elf.writeUInt16LE(1, 44); elf.writeUInt32LE(4096, 92);
+  assert.equal(elfInfo(elf, 'armeabi-v7a').required, 4096);
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of results) {

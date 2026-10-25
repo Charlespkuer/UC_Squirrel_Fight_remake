@@ -17,9 +17,15 @@
    * `stroke`），描边会盖在字芯上；`css/classic.css` 里的 `html.is-android` 分支改用
    * 八向 text-shadow 描边。这里尽早打标记，避免首屏按钮先按桌面规则画一遍。 */
   try {
+    const rootEl = document.documentElement;
     if (window.navigator && /Android/i.test(window.navigator.userAgent || '')) {
-      document.documentElement.classList.add('is-android');
+      rootEl.classList.add('is-android');
     }
+    /* 「没有悬停的设备」：手机/平板点一下之后 `:hover` 会**粘住**，而经典界面的悬停档
+     * 都带 `filter`（离屏合成）。`css/classic-refine.css` 的 `html.is-touch` 分支据此
+     * 把悬停的暖色光晕/提亮全部让给按下态，避免点过的格子一直拖着一次离屏。 */
+    const noHover = !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
+    if (noHover) rootEl.classList.add('is-touch');
   } catch (e) {}
 
   /* ============================================================
@@ -152,7 +158,7 @@
      * 而 #ui 原来恒为 690。经典村庄页是原版 320×196 整页（716.625），装进 690 的盒子后
      * SVG 只能按高度铺满 → 左右各白给 21px 黑边，外面又因为缩放比不一致再白给上下两条。
      * 两处都是纯浪费，这里让盒子跟着走（只影响 ssflight 村庄页，其它屏照旧 690）。 */
-    const tightHome = !!(window.SfUiMain && document.querySelector('.ssfight-home'));
+    const tightHome = !!(window.SfUiMain && document.querySelector('.ssfight-home:not([data-sf-battle-hold])'));
     ui.style.height = (tightHome ? layoutHeight : H) + 'px';
     ui.style.transform = 'scale(' + sx + ',' + sy + ')';
     ui.style.setProperty('--uiscale', Math.min(sx, sy));
@@ -267,6 +273,12 @@
     return Number.isFinite(n) && v !== null && v !== '' ? Math.max(0, Math.min(1, n)) : 1;
   }
   let volume = clampVolume(localStorage.getItem('ssdz_music_volume'));
+  /* 主 BGM 在战斗里**不暂停**，只压成静音（桌面写 volume=0；iOS 忽略 volume，
+   * 同时写 muted=true）：这样打完回随机挑战页时不用等 iOS/WebKit 重新起播
+   * （实测 resume 要几十毫秒、慢机更久，听感就是「音乐停一下」），只还原音量/取消
+   * 静音即可无缝接上。`applyVolume()` 是唯一写音量的地方，静音/后台/战斗三条路径
+   * 都从这里走，避免三处各写一份。 */
+  let bgmDucked = false;
   /** 0~1 的滑块音量：0 等同静音。 */
   function volumeValue() { return volume; }
   function setVolume(value) {
@@ -276,31 +288,54 @@
     else if (muted) muted = false;
     persistSettings({ volume: volume, muted: muted });
     applyVolume();
+    /* 0 等同静音：拖到 0 也要真的停；拖回来（`muted` 已清）再起播。
+     * 这条以前只改内存，滑块归零时声音还在响，要再点一次开关才停。 */
+    playBgm(mode === 'battle' ? 'fight' : 'main');
     return volume;
   }
   function applyVolume() {
-    if (bgm) bgm.volume = BASE_VOLUME * volume;
-    if (fightBgm) fightBgm.volume = BASE_VOLUME * volume;
+    const base = BASE_VOLUME * volume;
+    if (bgm) {
+      /* iOS Safari 会忽略 `HTMLMediaElement.volume`（读取永远是 1），真正能静音的是
+       * `muted`。所以战斗里压低主 BGM 不能只写 volume：两个都写 —— 桌面按音量平滑，
+       * iOS 按 muted 仍能保持播放头继续走，返回时一开就接上，不用重新 play()。 */
+      bgm.muted = bgmDucked;
+      bgm.volume = bgmDucked ? 0 : base;
+    }
+    if (fightBgm) {
+      fightBgm.muted = false;
+      fightBgm.volume = base;
+    }
   }
 
   function playBgm(which) {
     /* 已经切到后台（安卓按 Home / 浏览器切标签页）时不许再起播：
      * 任何一个界面动作都可能顺手调 playBgm，而后台播放正是玩家投诉的那件事。 */
     if (bgSuspended) return;
-    if (muted || volume <= 0) { if (bgm) bgm.pause(); if (fightBgm) fightBgm.pause(); return; }
+    if (muted || volume <= 0) {
+      bgmDucked = false;
+      if (bgm) bgm.pause();
+      if (fightBgm) fightBgm.pause();
+      return;
+    }
     try {
       let audio;
       if (which === 'main') {
-        if (!bgm) { bgm = new Audio('audio/main_bg.mp3'); bgm.loop = true; bgm.volume = BASE_VOLUME * volume; }
+        if (!bgm) { bgm = new Audio('audio/main_bg.mp3'); bgm.loop = true; }
+        bgmDucked = false;
         applyVolume();
         if (fightBgm) fightBgm.pause();
         audio = bgm;
       } else {
-        if (!fightBgm) { fightBgm = new Audio('audio/fight_bg.mp3'); fightBgm.loop = true; fightBgm.volume = BASE_VOLUME * volume; }
+        if (!fightBgm) { fightBgm = new Audio('audio/fight_bg.mp3'); fightBgm.loop = true; }
+        bgmDucked = true;
         applyVolume();
-        if (bgm) bgm.pause();
+        /* 主 BGM 保持原播放头继续走（音量 0）；没起播过就维持暂停，等回主界面再起播。 */
         audio = fightBgm;
       }
+      /* 已经在播就不要重复 play()：iOS 上重复 play 会多一次起播/解码，
+       * 也避免 SfFight 收尾与 startHomeScene 连续两次 playBgm('main') 互相抢。 */
+      if (!audio.paused) return;
       const started = audio.play();
       // 浏览器可能因为「没有用户手势」拒绝自动播放：被拒时挂一次性监听，在第一次点击/按键时补播
       if (started && typeof started.catch === 'function') {
@@ -409,6 +444,47 @@
     Engine.text(ctx, Math.round(pct * 100) + '%', W / 2, by + bh + 34, { size: 22, align: 'center', color: '#fff' });
   }
 
+  /* 现代 canvas 战斗只在首页空闲时预热通用特效与默认场景（29 张，解码约 34 MiB）。
+   * 其它 NPC / 场景由 battle.js 按实际对手与 region 加载，避免首页一次解码全部约 69 MiB。
+   * 经典模式跳过；这批不阻塞首屏，真开打时仍 await 战斗自己的清单并复用 in-flight 请求。 */
+  const BATTLE_SHEETS = Object.freeze(['effectCommonAttack', 'weaponEffect', 'throwEffect', 'win_effect', 'die', 'runAround',
+    'hurtRunBack', 'beatBack', 'think',
+    'skill_6', 'skill_7', 'skill_8', 'skill_9', 'skill_13', 'skill_14', 'skill_15', 'skill_16_1', 'skill_16_2',
+    'skill_17', 'skill_18', 'skill_23', 'skill_8_d', 'skill_9_d', 'skill_15_d', 'skill_18_d_1', 'skill_18_d_2',
+    'fightBack', 'fightMid', 'fightFront']);
+  const BATTLE_PIN = Object.freeze(['effectCommonAttack', 'weaponEffect', 'throwEffect', 'win_effect', 'die', 'runAround',
+    'hurtRunBack', 'beatBack', 'think',
+    'skill_6', 'skill_7', 'skill_8', 'skill_8_d', 'skill_9', 'skill_9_d', 'skill_13', 'skill_14', 'skill_15', 'skill_15_d',
+    'skill_16_1', 'skill_16_2', 'skill_17', 'skill_18', 'skill_18_d_1', 'skill_18_d_2', 'skill_23',
+    'tl', 'tl_effect', 'xh1', 'xh2', 'xh_effect1', 'xh_effect2', 'xm1', 'xm2', 'xm_effect',
+    'woodman1', 'woodman2', 'woodman_effect']);
+  let battleAssetsPromise = null;
+  /** 角色/特效图集必须优先于场景图集，否则同名标签会被场景图元抢走。 */
+  function pinBattleAssets() {
+    try { Engine.pinSheets(BATTLE_PIN); } catch (e) { return false; }
+    return true;
+  }
+  /** 拉现代战斗图集（幂等）。经典模式不主动调它；切到现代 / 真开打时再拉。 */
+  function preloadBattleAssets() {
+    if (battleAssetsPromise) return battleAssetsPromise;
+    battleAssetsPromise = Engine.loadSheets(BATTLE_SHEETS)
+      .then(() => { pinBattleAssets(); return true; })
+      .catch(() => false);
+    return battleAssetsPromise;
+  }
+  /** 首页挂好之后再补拉：不和首屏抢磁盘/解码，也不让启动等它。 */
+  function scheduleBattleAssets() {
+    if (battleAssetsPromise || uiModeIsClassic()) return;
+    const start = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      preloadBattleAssets();
+    };
+    setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(start, { timeout: 2000 });
+      else start();
+    }, 600);
+  }
+
   async function boot() {
     const setStatus = (m) => {
       try { document.title = m; } catch (e) {}
@@ -438,36 +514,13 @@
       'resource_1', 'resource_6', 'resource_13', 'resource_15', 'resource_16', 'resource_3', 'resource_4',
       'resource_5', 'resource_9', 'resource_10', 'resource_11', 'resource_12', 'resource_14', 'resource_2', 'resource_7', 'resource8',
       'new', 'shengbai', 'tanchutiao', 'loadingShadow', 'substarate', 'substarate0', 'draw', 'activity', 'plus', 'minus'];
-    const battleSheets = ['effectCommonAttack', 'weaponEffect', 'throwEffect', 'win_effect', 'die', 'runAround',
-      'hurtRunBack', 'beatBack', 'think', 'hitMe',
-      'skill_6', 'skill_7', 'skill_8', 'skill_9', 'skill_13', 'skill_14', 'skill_15', 'skill_16_1', 'skill_16_2',
-      'skill_17', 'skill_18', 'skill_23', 'skill_8_d', 'skill_9_d', 'skill_15_d', 'skill_18_d_1', 'skill_18_d_2',
-      'tl', 'tl_effect', 'xh1', 'xh2', 'xh_effect1', 'xh_effect2', 'xm1', 'xm2', 'xm_effect',
-      'woodman1', 'woodman2', 'woodman_effect',
-      'lightning1', 'lightning2', 'lightning3', 'lightning4', 'lightning5',
-      'fightBg', 'fightBack', 'fightMid', 'fightFront',
-      'fightBg_robot_mid', 'fightBg_robot_front', 'fightBg_robot_effect',
-      'fightBg_meltRoom_front', 'fightBg_meltRoom_effect',
-      'fightBg_wood_1', 'fightBg_wood_3', 'fightBg_wood_4', 'fightBg_wood_effect2', 'fightBg_wood_effect6',
-      'fightBg_seaWorld_front', 'fightBg_seaWorld_effect'];
-    /* 只有「首屏 + 首页」这批必须等；战斗特效那 50 多张图在后台继续拉，
-     * 真开打时 `battle.js` 还会再 await 一次（引擎会复用同一个 in-flight 请求）。
-     * 以前两批串行都 await，首屏要等全部 100+ 张图（2026-10 审计）。 */
-    const battleLoad = Engine.loadSheets(battleSheets).then(() => {
-      Engine.pinSheets(['effectCommonAttack', 'weaponEffect', 'throwEffect', 'win_effect', 'die', 'runAround',
-        'hurtRunBack', 'beatBack', 'think',
-        'skill_6', 'skill_7', 'skill_8', 'skill_8_d', 'skill_9', 'skill_9_d', 'skill_13', 'skill_14', 'skill_15', 'skill_15_d',
-        'skill_16_1', 'skill_16_2', 'skill_17', 'skill_18', 'skill_18_d_1', 'skill_18_d_2', 'skill_23',
-        'tl', 'tl_effect', 'xh1', 'xh2', 'xh_effect1', 'xh_effect2', 'xm1', 'xm2', 'xm_effect',
-        'woodman1', 'woodman2', 'woodman_effect']);
-      return true;
-    }).catch(() => false);
+    /* 只有「首屏 + 首页」这批必须等。战斗图集（BATTLE_SHEETS）不在这里等 ——
+     * 经典界面不用它，现代界面等首页挂好后由 `scheduleBattleAssets()` 空闲补拉。 */
     await Engine.loadSheets(coreSheets);
-    drawLoading(0.75, '正在加载战斗素材…');
-    setStatus('加载战斗素材…');
+    drawLoading(0.85, '正在加载界面素材…');
+    setStatus('加载界面素材…');
     // 角色/特效图集必须优先于场景图集，否则同名标签会被场景图元抢走
     Engine.pinSheets(['SQ_01', 'SQ_02', 'weaponAttack', 'throwweaponAttack']);
-    try { await Promise.race([battleLoad, new Promise((r) => setTimeout(r, 2500))]); } catch (e) {}
     drawLoading(0.95, '准备完成');
     setStatus('松鼠大战 · 怀旧单机版');
     UI.installFavicon();
@@ -482,10 +535,7 @@
      * 不让玩家卡死在启动屏；迟到的磁盘读如果成功，下次启动会自然接上。 */
     let loadTimedOut = false;
     try {
-      const result = await Promise.race([
-        State.fileLoad(),
-        new Promise((resolve) => setTimeout(() => resolve('__timeout__'), 4000)),
-      ]);
+      const result = await loadFileWithTimeout();
       if (result === '__timeout__') loadTimedOut = true;
       else loaded = !!result;
     } catch (e) { loaded = false; }
@@ -529,7 +579,7 @@
        * base 对不上 → 文件是权威，镜像留给「系统 → 导入存档」处理，绝不自动覆盖。
        * 这样既救回安卓上丢掉的写盘，也不会在双机同步时用本机档盖掉对端。 */
       const mirrorNewer = !!local && local.base != null && Number(local.base) === Number(fileAt)
-        && local.savedAt > fileAt + 1500;
+        && (local.pending || local.savedAt > fileAt + 1500);
       const recovered = mirrorNewer && local.level >= fileLevel && !!(State.load && State.load());
       if (recovered) {
         if (UI && UI.toast) UI.toast('已用本机最后一次自动存档恢复进度（上一次写文件没完成）');
@@ -543,6 +593,7 @@
           localStorage.removeItem(State.saveKey);
           localStorage.removeItem(State.saveKey + '_sync');
           localStorage.removeItem(State.saveKey + '_base');
+          localStorage.removeItem(State.saveKey + '_pending');
         } catch (e) {}
       }
     } else {
@@ -621,8 +672,7 @@
     retryBtn.style.cssText = 'flex:0 0 auto;padding:5px 12px;cursor:pointer';
     retryBtn.onclick = async () => {
       retryBtn.textContent = '正在重试…';
-      const ok = await State.fileProbe();
-      if (ok && await State.fileLoad()) { location.reload(); return; }
+      if (await retryFileSave(true)) return;
       retryBtn.textContent = '重试连线';
       if (UI && UI.toast) UI.toast('还是连不上本地服务器，确认启动器（scripts/启动游戏.cmd 或 squirrel_fight.exe）的窗口没报错后再试');
     };
@@ -652,11 +702,17 @@
     });
   }
 
-  async function retryFileSave() {
+  let retryFileSaveTask = null;
+  function retryFileSave(immediate) {
+    if (retryFileSaveTask) return retryFileSaveTask;
+    retryFileSaveTask = runRetryFileSave(immediate).finally(() => { retryFileSaveTask = null; });
+    return retryFileSaveTask;
+  }
+  async function runRetryFileSave(immediate) {
     if (State.fileLoadedThisBoot()) { hideSaveWarning(); return true; }
     // 首次运行没有存档文件：只要第一笔存档写成功，这条横幅就该消失
     if (((State.fileInfo() || {}).lastWrite || 0) > 0) { hideSaveWarning(); return true; }
-    const delays = [300, 600, 1000, 1500, 2000, 2500, 3000];
+    const delays = immediate ? [0, 300, 600, 1000, 1500, 2000, 2500, 3000] : [300, 600, 1000, 1500, 2000, 2500, 3000];
     for (let i = 0; i < delays.length; i++) {
       await new Promise((r) => setTimeout(r, delays[i]));
       if (State.fileLoadedThisBoot()) { hideSaveWarning(); return true; }
@@ -664,8 +720,8 @@
       try {
         const available = await State.fileProbe();
         if (!available) continue;
-        const ok = await State.fileLoad();
-        if (ok) { location.reload(); return true; }   // 连上了就以磁盘存档为准，重开一遍
+        const ok = await loadFileWithTimeout();
+        if (ok === true) { location.reload(); return true; }   // 连上了就以磁盘存档为准，重开一遍
       } catch (e) { /* 下一轮再试 */ }
     }
     if (!State.fileLoadedThisBoot() && !((State.fileInfo() || {}).lastWrite || 0)) showSaveWarning();
@@ -677,10 +733,21 @@
    * retryFileSave → 读档成功 → location.reload()，新页面又在素材加载阶段收到同一个事件……
    * 实测（模拟器）会变成每 0.8 秒刷一次、启动进度永远停在 25%。 */
   let bootDone = false;
+  let fileLoadTask = null;
+  function loadFileWithTimeout() {
+    if (fileLoadTask) return fileLoadTask;
+    const request = { cancelled: false };
+    let timer;
+    fileLoadTask = Promise.race([
+      State.fileLoad(request),
+      new Promise((resolve) => { timer = setTimeout(() => { request.cancelled = true; resolve('__timeout__'); }, 4000); }),
+    ]).finally(() => { clearTimeout(timer); fileLoadTask = null; });
+    return fileLoadTask;
+  }
   async function preloadFileSave() {
     try {
       if (!(await State.fileProbe())) return false;
-      return !!(await State.fileLoad());
+      return (await loadFileWithTimeout()) === true;
     } catch (e) { return false; }
   }
   /* 部分国产 ROM 的 WebView 会把 Tauri 的全局对象晚十几秒才注入。桥一到就再试一次读写，
@@ -926,6 +993,8 @@
     UI.renderHome();
     fitCanvas();
     startHomeScene();
+    /* 现代界面：首页已经画出来了，再空闲补拉 canvas 战斗图集；经典界面直接跳过。 */
+    scheduleBattleAssets();
     if (window.SfGuide) { try { SfGuide.onHome(); } catch (e) { if (window.__errs) window.__errs.push('SfGuide home: ' + (e && e.message)); } }
   }
 
@@ -988,6 +1057,17 @@
     }
   }
   // ---------- 战斗调度 ----------
+  /** 清空 `#ui` 给战斗画面让位，但**保留**被挑战页按住（`data-sf-battle-hold`）的那棵树。
+   *  挑战页整页 detach 再 append 会触发 WebKit 重新布局/光栅化，返回随机挑战页时就是那一下
+   *  卡顿；按住后它一直在文档里，战斗页只是盖在它上面。没有 hold 时等价于原来的 innerHTML=''。 */
+  function clearUiForBattle() {
+    const ui = document.getElementById('ui');
+    if (!ui) return;
+    for (const node of Array.from(ui.childNodes)) {
+      if (node.nodeType === 1 && node.hasAttribute && node.hasAttribute('data-sf-battle-hold')) continue;
+      ui.removeChild(node);
+    }
+  }
   async function startBattle(foe, opts) {
     opts = opts || {};
     if (mode === 'battle') return;
@@ -1038,7 +1118,7 @@
     } catch (e) { if (window.__errs) window.__errs.push('pet battle: ' + (e && e.message)); }
     mode = 'battle';
     cancelAnimationFrame(rafId);
-    $('#ui').innerHTML = '';
+    clearUiForBattle();
     fitCanvas();
     playBgm('fight');
     if (opts.region != null && foe && foe.region == null) foe.region = opts.region;
@@ -1146,7 +1226,7 @@
     if (!entry || mode === 'battle') return;
     const owner = State.state();
     let settled = false;
-    mode = 'battle'; cancelAnimationFrame(rafId); $('#ui').innerHTML = ''; fitCanvas(); playBgm('fight');
+    mode = 'battle'; cancelAnimationFrame(rafId); clearUiForBattle(); fitCanvas(); playBgm('fight');
     const controller = await runBattle({ canvas, me: entry.me, foe: entry.foe, region: entry.region, result: entry.result, collectDrops: false,
       /* 录像回放同样遵守系统页的「跳过按钮」开关与等级/VIP 解锁，不在这里另开一套。 */
       allowSkip: State.skipButtonEnabled ? State.skipButtonEnabled() : true,
@@ -1250,10 +1330,12 @@
   /* ============================================================
    * 【MN10】导出 window.Main
    * ============================================================ */
-  window.Main = { showHome, showTitle, startBattle, replayBattle, resizeLayout:fitCanvas, setMuted, isMuted: () => muted,
+  window.Main = { showHome, showTitle, startBattle, replayBattle, clearUiForBattle, resizeLayout:fitCanvas, setMuted, isMuted: () => muted,
     volume: volumeValue, setVolume, homePlayer: () => mainPlayer, setHomeFps, W, H,
     settings: settingsSnapshot, setResolution, setFullscreen, setHideStatusBar, applySystemBars,
     isFullscreen: () => !!document.fullscreenElement,
+    /* 现代 canvas 战斗图集：切到现代界面 / 真开打前可以主动预热（幂等，不阻塞首屏）。 */
+    preloadBattleAssets, pinBattleAssets, battleAssetsReady: () => !!battleAssetsPromise,
     /* 自愿支持作者：链接与「打开系统浏览器」的统一出口（界面只调这两个）。 */
     SUPPORT, openExternal, openSupport };
 

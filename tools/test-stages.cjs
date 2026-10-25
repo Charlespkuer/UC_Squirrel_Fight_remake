@@ -135,6 +135,24 @@ test('没有徒弟时关卡仍由师父上阵', () => {
   assert.equal(State.stagePrenticeFighter(), null);
 });
 
+test('关卡徒弟出战：优先派等级最高的徒弟，同级按先来后到', () => {
+  const g = setup(), State = g.c.State;
+  const mk = (name, level) => ({ name, level, power: 10 + level, agility: 10, speed: 10, hp: 100 + level, weapons: ['1:1'], skills: ['1:1'], gears: [] });
+  State.addPrentice(mk('先收的', 12));
+  State.addPrentice(mk('后收的', 30));
+  State.addPrentice(mk('中间的', 20));
+  assert.equal(State.stagePrentice().name, '后收的', '等级最高的徒弟先上阵');
+  const first = State.beginStageBattle(1);
+  assert.equal(first.role, 'prentice');
+  assert.equal(first.prentice, '后收的', '出战名单与提示都用同一个人');
+  assert.equal(State.stagePrenticeFighter().name, '后收的', '战斗面板也换成这位徒弟');
+  /* 同等级：保持原来的先来后到（不因为排序抖动换人） */
+  const g2 = setup(), S2 = g2.c.State;
+  S2.addPrentice(mk('甲', 18));
+  S2.addPrentice(mk('乙', 18));
+  assert.equal(S2.stagePrentice().name, '甲');
+});
+
 test('常驻三侠在徒弟先上阵机制后再增强 6%', () => {
   const { c } = setup();
   const { GData } = c;

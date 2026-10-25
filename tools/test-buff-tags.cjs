@@ -210,7 +210,8 @@ hr('3.5 冗余清理：数据里不再有 xxxOnly / stackable / unique… 这些
         /* 只认「字段读取」：排除对象字面量的 key（后面跟冒号）与函数调用（后面跟括号，
          * 例如 Tower.nextBattle(mode) 是 API 调用，跟增益字段无关）。 */
         const readRe = new RegExp('\\.[' + k[0] + ']' + k.slice(1) + '\\b(?!\\s*[:(])');
-        const hits = src.split('\n').filter((line) => readRe.test(line) && !/FORBIDDEN_FIELDS|BUFF_TAGS|^\s*\*|\/\//.test(line));
+        const hits = src.split('\n').filter((line) => readRe.test(line) && !/FORBIDDEN_FIELDS|BUFF_TAGS|^\s*\*|\/\//.test(line)
+          && !(k === 'hidden' && /\b(?:menu|panel|node|el|input|select|button)\.hidden\b/.test(line)));
         assert.equal(hits.length, 0, f + ' 仍在读 ' + k + '：' + hits.slice(0, 2).join(' / '));
       }
     }

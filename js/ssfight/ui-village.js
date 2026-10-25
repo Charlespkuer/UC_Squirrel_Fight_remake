@@ -635,6 +635,21 @@
       lv.className = 'ssfight-pet-level sf-clickthrough';
       lv.textContent = 'Lv' + pet.level;
       art.appendChild(lv);
+      /* 星级：出阵格 / 「选择出阵召唤兽」列表里以前只有 Lv、看不到几星
+       * （用户 2026-10-24 口径）。只在**可点选的格子**上挂（详情 / 孵化页本来就有
+       * 原版 `star` 精灵），用一个金色小星条，最多 5 星。
+       * ⚠ 必须等 `mountPetArt` 完成后再加：它开头会 `host.innerHTML = '…'` 清楼，
+       * 先加的角标会被一起清掉（实测就是这个原因，页面上一颗星都没有）。 */
+      if (onFire) {
+        const grade = Math.max(0, Math.min(5, Math.round(Number(pet.grade) || 0)));
+        if (grade > 0) {
+          const stars = document.createElement('span');
+          stars.className = 'ssfight-pet-star sf-clickthrough';
+          stars.textContent = '★'.repeat(grade);
+          stars.setAttribute('aria-label', grade + ' 星');
+          art.appendChild(stars);
+        }
+      }
     });
   }
   function wireBeastChoose(view, page, container) {

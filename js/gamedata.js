@@ -38,6 +38,16 @@
     for (let lv = EXP_TABLE.length; lv <= level; lv++) v = Math.round(v * 1.08 / 10) * 10;
     return v;
   }
+  /** 战斗 HUD / 伤害飘字的统一大数格式：1e7 以下按整数，达到 1e7 用科学计数法保留两位小数。 */
+  function formatBigNumber(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '0';
+    const abs = Math.abs(n);
+    if (abs < 1e7) return String(Math.round(n));
+    const exp = Math.floor(Math.log10(abs));
+    const mant = n / Math.pow(10, exp);
+    return mant.toFixed(2) + 'e' + exp;
+  }
   const WS_LEVELS = [2, 3, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23, 26, 29, 32, 35, 38, 41, 44, 47, 50, 56, 62, 68];
   /* 53/59/65 级发属性书是旧离线版的自创（原版服务端升级回包没有这三个道具；
    * 原版 1~90 级每级都是「+3 属性 +5 生命」）。为把 90 级总获取额对齐到 651，
@@ -571,14 +581,25 @@
   }
   registerRankGoods();
 
-  /* 原版道具说明里写着经验丸「竞技场中无效」，但本版经验竞技场确实吃经验丸加成
-   *（见 js/classic-extras.js 的 gainExpWithBoost 调用与 tools/test-extras.cjs），
-   * 所以按实际行为改写这两条说明。GameDict.js 必须与 APK 保持逐字节一致，
-   * 说明修正只在这里做。
+  /* 药丸说明里的「竞技场中无效」按 **2026-10 用户口径整体去掉**：本版药丸在竞技场同样生效
+   *（属性丸进竞技场战斗面板；经验丸加成经验竞技场的经验结算），说明只保留确实不吃药丸的
+   * 「关卡 / 天梯赛」。GameDict.js 必须与 APK 保持逐字节一致，说明修正只在这里做。
    * 注意 Map#getValue 每次都会新建对象，改动必须落到 getValue(...).source 这个底层行数组。 */
   const PROP_REMARK_FIXES = [
+    [3, '增加20%的力量值,最少增加5点,持续20次战斗,关卡、竞技场中无效。',
+        '增加20%的力量值,最少增加5点,持续20次战斗,关卡中无效。'],
+    [4, '增加20%的敏捷值,最少增加5点,持续20次战斗,关卡、竞技场中无效。',
+        '增加20%的敏捷值,最少增加5点,持续20次战斗,关卡中无效。'],
+    [5, '增加20%的速度值,最少增加5点,持续20次战斗,关卡、竞技场中无效。',
+        '增加20%的速度值,最少增加5点,持续20次战斗,关卡中无效。'],
     [7, '增加主动挑战获得经验值40%,持续20次战斗,关卡、竞技场中无效。',
         '增加主动挑战获得经验值40%,持续20次战斗,关卡中无效。'],
+    [41, '增加40%的力量值,最少增加10点,持续20次战斗,关卡,竞技,天梯赛无效。',
+         '增加40%的力量值,最少增加10点,持续20次战斗,关卡,天梯赛无效。'],
+    [42, '增加40%的敏捷值,最少增加10点,持续20次战斗,关卡,竞技,天梯赛无效。',
+         '增加40%的敏捷值,最少增加10点,持续20次战斗,关卡,天梯赛无效。'],
+    [43, '增加40%的速度值,最少增加10点,持续20次战斗,关卡,竞技,天梯赛无效。',
+         '增加40%的速度值,最少增加10点,持续20次战斗,关卡,天梯赛无效。'],
     [44, '增加主动挑战获得经验值60%,持续20次战斗,关卡,竞技,天梯赛无效。',
          '增加主动挑战获得经验值60%,持续20次战斗,关卡,天梯赛无效。'],
     // 抽奖卷（id 50）：原版字典只有占位说明，无尽挑战塔正式启用后补正式文案。
@@ -607,13 +628,37 @@
       const row = map.getValue(id);
       if (!row || !Array.isArray(row.source)) continue;
       const at = remarkAt >= 0 ? remarkAt : row.source.indexOf(from);
+      /* 已经是目标文案 = 重复执行（测试里会再调一次），安静跳过，不要刷 warn。 */
+      if (at >= 0 && row.source[at] === to) continue;
       if (at < 0 || row.source[at] !== from) { console.warn('[gamedata] 道具说明未按预期匹配，跳过：' + id); continue; }
       row.source[at] = to;
       done++;
     }
     return done;
   }
+  /** 天梯商店的金杯兑换里，4 颗超级药丸的说明是 **rankgoodsMap 自己的另一份副本**
+   *  （字段 remark 在第 9 位，`getValue` 每次新建对象，所以必须写回 `source[9]`）。
+   *  道具说明改成「竞技场也生效」之后，这份副本要跟着同步 —— 否则金杯商店的确认弹窗
+   *  又写回"竞技场中无效"（用户 2026-10：说明要**统一**）。 */
+  const PILL_PROP_IDS = [3, 4, 5, 7, 41, 42, 43, 44];
+  function syncPillRankGoodsRemarks() {
+    const goods = window.rankgoodsMap, props = window.propMap;
+    if (!goods || !props || typeof goods.each !== 'function') return 0;
+    const remarkAt = Array.isArray(goods.fields) ? goods.fields.indexOf('remark') : 9;
+    let done = 0;
+    goods.each((id, row) => {
+      if (!row || !Array.isArray(row.source)) return;
+      if (!PILL_PROP_IDS.includes(Number(row.goodsId))) return;
+      const prop = props.getValue(Number(row.goodsId));
+      const remark = prop && prop.remark;
+      if (!remark || remarkAt < 0 || row.source[remarkAt] === remark) return;
+      row.source[remarkAt] = remark;
+      done++;
+    });
+    return done;
+  }
   applyPropRemarkFixes();
+  syncPillRankGoodsRemarks();
 
 
   /* ============================================================
@@ -624,7 +669,7 @@
    * 原版件数（288）严格覆盖本版（128：id 1-124 / 201-204），且这 128 条的数值与
    * gearMap.abilities 逐条一致；其余 160 条（id 125-200 / 205-288）先入库备用，
    * 等做「装备种类覆盖」时可以直接取用，不用再回去翻 Flash 源码。
-   * 运行时的实际属性点 = base 上再乘 ±10% 的随机（见 state.js 的 rollGearAttr）。 */
+   * 运行时的实际属性点 = base 上再乘 ±5% 的随机（见 state.js 的 rollGearAttr）。 */
   const GEAR_BASE = [
     [1, 1, 0, 0, '斗斗头巾', 1],
     [2, 1, 0, 1, '斗斗手套', 1],
@@ -1134,7 +1179,7 @@
   /* ============================================================
    * 【GD4】导出 window.GData
    * ============================================================ */
-  window.GData = { EXP_TABLE, nextExp, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, stageEnemyCount, isSuperStage, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
+  window.GData = { EXP_TABLE, nextExp, formatBigNumber, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, stageEnemyCount, isSuperStage, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
     STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_REGULAR_MUL, SUPER_HP_MUL, SUPER_TYPE_SCALE, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
     trueLevel, trueSkillValue, trueSkillStep, trueSkillRow, TRUE_SKILL_TABLE, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
     stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, BLUE_SHARD_DROP_MUL, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, BLACK_GEAR_SETS, BLACK_SHARD_SET, BLACK_CARD_ID, BLACK_BOX_ID, registerBlackGear, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, EXTRA_RANK_GOODS, registerRankGoods, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,

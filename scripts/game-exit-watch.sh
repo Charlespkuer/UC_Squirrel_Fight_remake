@@ -46,11 +46,22 @@ log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE" 2>/dev/null || true
 }
 
+# 日志只留最近一段：这份日志是运行时产物，长期追加没有上限（曾经到 3.8 MB）。
+# 超过 2 MB 就截到最近 2000 行，避免一次异常循环把它继续滚大。
+if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d ' ')" -gt 2097152 ] 2>/dev/null; then
+  tail -n 2000 "$LOG_FILE" > "$LOG_FILE.tmp" 2>/dev/null && mv "$LOG_FILE.tmp" "$LOG_FILE" 2>/dev/null || rm -f "$LOG_FILE.tmp"
+fi
+
 # 游戏专用浏览器的主进程：命令行里带 --user-data-dir=<游戏 profile>，
 # 且不是 --type= 的渲染 / GPU / 扩展子进程。
+# ⚠ 必须把**检查命令自己**排除掉：`awk -v pat=--user-data-dir=...` 的 argv 里也带着
+#   同样的路径（macOS 的 ps 还会显示成 `-v pat ...`），浏览器关掉之后它会把自己
+#   当成「新的浏览器主进程」，于是每秒记一条「主进程已更换」，永远不会走到
+#   「没找到 → 收尾结束」。2026-10-22 的日志里一天滚了 3.9 万条，就是这条自匹配。
+#   所以按 `$2`（进程名）排掉 awk，而不是按参数字符串匹配。
 find_browser_pid() {
   ps -axo pid=,command= 2>/dev/null | awk -v pat="--user-data-dir=$PROFILE" '
-    index($0, pat) > 0 && $0 !~ /--type=/ { print $1; exit }'
+    index($0, pat) > 0 && $0 !~ /--type=/ && $2 !~ /(^|\/)awk$/ && $0 !~ /game-exit-watch\.sh/ { print $1; exit }'
 }
 
 # Chrome 把实际调试端口写在配置目录的 DevToolsActivePort 第一行。
@@ -92,10 +103,18 @@ quit_browser() {
   return 0
 }
 
+# Chrome 主进程还在、但 CDP 端口已经失联时，用「有没有 renderer 子进程」判断
+# 窗口是不是真的没了。有 renderer 就绝不杀（可能只是 DevTools 服务卡住）。
+has_renderer() {
+  ps -axo command= 2>/dev/null | awk -v pat="--user-data-dir=$PROFILE" '
+    index($0, pat) > 0 && /--type=renderer/ { found = 1 } END { exit found ? 0 : 1 }'
+}
+
 START_TS=$SECONDS
 BROWSER_PID=""
 PORT=""
 PORT_SINCE=0
+PORT_FAIL_SINCE=0
 SEEN_PAGE=0
 EMPTY_STREAK=0
 
@@ -132,6 +151,7 @@ while :; do
 
   if [ -n "$PORT" ]; then
     if n="$(count_pages "$PORT" 2>/dev/null)"; then
+      PORT_FAIL_SINCE=0
       [ "$PORT_SINCE" = "0" ] && PORT_SINCE=$SECONDS
       if [ "$n" -gt 0 ] 2>/dev/null; then
         SEEN_PAGE=1
@@ -156,8 +176,24 @@ while :; do
         fi
       fi
     else
-      # 端口暂时连不上：可能是浏览器正在退出；清空 PORT，下一轮重新读端口文件
+      # 端口暂时连不上：可能是浏览器正在退出；清空 PORT，下一轮重新读端口文件。
+      # 但如果浏览器主进程一直活着、端口却连续 90 秒取不到窗口（2026-10 实测：
+      # Chrome 主进程还在、DevToolsActivePort 已失效），这个循环会无声空转，
+      # 每秒 ps + curl 一次。此时按「有没有 renderer」收尾：没有就退出浏览器，
+      # 有就只结束监视，绝不误杀还开着的游戏窗口。
       PORT=""
+      if [ "$SEEN_PAGE" = "1" ]; then
+        [ "$PORT_FAIL_SINCE" = "0" ] && PORT_FAIL_SINCE=$SECONDS
+        if [ $((SECONDS - PORT_FAIL_SINCE)) -ge 90 ]; then
+          if has_renderer; then
+            log "DevTools 端口已失联 90 秒（浏览器 PID $BROWSER_PID 仍有渲染进程）：结束监视，保留浏览器"
+          else
+            log "DevTools 端口已失联 90 秒，且浏览器已没有渲染进程（窗口已关）：退出游戏专用浏览器 PID $BROWSER_PID"
+            quit_browser "$BROWSER_PID"
+          fi
+          exit 0
+        fi
+      fi
     fi
   fi
 

@@ -361,7 +361,9 @@ test('竞技两战只付一次报名费用，冠军150经验且不额外赠送�
   g.settle(1, 0); assert.equal(s.goldPoint, 100); assert.equal(s.level, 11); assert.equal(s.exp, 150);
   const saved = JSON.stringify(g.saved()); g.settle(1, 0); assert.equal(JSON.stringify(g.saved()), saved);
   assert.equal(s.classicArenaRun, null);
-  assert.equal(g.battles[0].opts.kind, 'arena'); assert.equal(g.battles[1].opts.useProps, false);
+  assert.equal(g.battles[0].opts.kind, 'arena'); assert.equal(g.battles[0].opts.useProps, true,
+    '竞技场战斗面板要吃药丸（属性丸对竞技场属性生效）');
+  assert.equal(g.battles[1].opts.useProps, true);
   assertBalanced(g.markup);
 });
 
@@ -414,13 +416,23 @@ test('经验竞技场吃经验丸加成：经验丸+40%、超级经验丸+60%，
     g.settle(0, 0); g.modalClick(); g.settle(1, 0); g.settle(1, 0);
     assert.equal(s.exp, 150);
   }
-  // 碎片场只给碎片，不发经验、也不消耗经验丸
+  // 碎片场只给碎片，不发经验、也不消耗经验丸；但属性丸真用到了，两场各扣 1 次
   {
     const g = setup(), s = g.c.State.state();
-    s.propsStates[7] = 20; s.energy = 0; s.props[39] = 1; s.props[1] = 0; s.props[2] = 0; enterArena(g, 1);
+    s.propsStates[7] = 20; s.propsStates[3] = 20;
+    s.energy = 0; s.props[39] = 1; s.props[1] = 0; s.props[2] = 0; enterArena(g, 1);
     g.settle(0, 0); g.modalClick(); g.settle(1, 0); g.settle(1, 0);
     assert.equal(s.exp, 0, '碎片场不发经验');
     assert.equal(s.propsStates[7], 20, '碎片场不消耗经验丸');
+    assert.equal(s.propsStates[3], 18, '属性丸按竞技场场次扣（半决赛 + 决赛各 1）');
+  }
+  // 经验场里两类药丸各扣各的：属性丸 2 次 / 经验丸 1 次（结算那一下）
+  {
+    const g = setup(), s = g.c.State.state();
+    s.propsStates[7] = 20; s.propsStates[3] = 20; enterArena(g, 0);
+    g.settle(0, 0); g.modalClick(); g.settle(1, 0); g.settle(1, 0);
+    assert.equal(s.propsStates[3], 18, '属性丸按两场各扣 1 次');
+    assert.equal(s.propsStates[7], 19, '经验丸只在发经验时扣 1 次');
   }
 });
 

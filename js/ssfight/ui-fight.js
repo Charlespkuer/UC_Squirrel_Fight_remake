@@ -171,11 +171,16 @@
   }
 
   /** 这一侧身上穿的装备（经典战斗穿的是**原版装备素材**，不是复刻图集那套）。
-   *  左侧读存档里"穿戴中"的；右侧读对手自带的 `gears`（好友/关卡数据里的原始字段）。
+   *  显式 `gears`（空数组也算）属于参战者自己的外观；左侧未传时才读存档里"穿戴中"的。
+   *  右侧读对手自带的 `gears`（好友/关卡数据里的原始字段）。
    *  ⚠ `Battle` 那条路的 `wears` 是 `Engine.wearsFor()` 产出的**图集片名**（`{src}`），
    *    与原版容器 id 完全无关 —— 这里按"有没有 `id`"过滤掉，绝不拿它去查容器表。 */
   function wearsOf(side, player) {
-    if (side === 0) {
+    /* 徒弟代打：**绝不能**退回师父的 `State.myGears()`。
+     * 新构建的 fighter 带 `gears`（空数组也算），但旧存档 / 旧调用可能没有 ——
+     * `isPrentice` 是最后一道保险：没有 gears 就当没穿，而不是穿师父的。 */
+    if (side === 0 && player && player.isPrentice === true && !Array.isArray(player.gears)) return [];
+    if (side === 0 && !(player && Array.isArray(player.gears))) {
       try { return (State.myGears() || []).filter((g) => g && g.used); } catch (e) { return []; }
     }
     const list = player && (player.gears || player.wears);
@@ -220,7 +225,7 @@
    *  所以防守方的真形态（真·龟甲术 / 真·绝对防御）只能回它自己的技能表查。
    *  优先用**传入的那位参战者自己的**技能表（录像回放要按当时那份，不能读现在的存档）。 */
   function skillsOf(side, player) {
-    let list = (player && Array.isArray(player.skills) && player.skills.length) ? player.skills : null;
+    let list = (player && Array.isArray(player.skills)) ? player.skills : null;
     if (!list && side === 0) { try { list = State.mySkills() || []; } catch (e) { list = []; } }
     const out = {};
     for (const s of (Array.isArray(list) ? list : [])) {
@@ -985,6 +990,21 @@
     if (!npc || npc === 'wood') return null;
     return npc + '_effect_' + key;
   }
+  /** 图集动画这一帧该画哪一张。
+   *
+   *  `play()` 把新动画的 `idx` 设成 **-1**（这样第一次 tick 才会触发 `onFrame(1)`），
+   *  但 `play()` 末尾会立刻 `draw()` 一次。旧写法直接取 `frames[-1]` = `undefined`，
+   *  于是先 `clear()` 再什么都不画 —— 画布上出现**一帧透明**。
+   *  三侠的待机/攻击/受击都走这条路径，玩家看到的就是“回合开始（或新动作起手）
+   *  三侠形象断一下/撕裂一两帧”（用户 2026-10 报的现象）。
+   *  这里在 `idx < 0` 时先画第 1 帧：画面从旧姿势直接接到新动作的第一帧，
+   *  同时保留 `idx=-1`，下一次 tick 仍会正常触发 `onFrame(1)`。 */
+  function atlasPaintFrame(anim) {
+    const frames = anim && anim.frames;
+    if (!frames || !frames.length) return null;
+    const idx = Number(anim.idx);
+    return frames[idx > 0 ? Math.min(idx, frames.length - 1) : 0] || null;
+  }
   function npcAtlasReady(npc) {
     if (!npc || npc === 'wood' || !window.Engine || !Engine.hasAnim || !Engine.has) return false;
     const sheets = NPC_SHEETS[npc];
@@ -1212,7 +1232,7 @@
     function draw(stamp) {
       const t = stamp == null ? now() : stamp;
       if (!layoutCanvas(t)) return;
-      const frame = anim && anim.frames && anim.frames[anim.idx];
+      const frame = atlasPaintFrame(anim);
       if (frame !== paintedFrame) paintDirty = true;
       /* 保留 rAF 节拍和命中回调，只省掉相同 20fps 素材帧的清屏/重画。
        * 特效有独立的帧和寿命；即使角色帧不变，特效切帧/结束也必须刷新。 */
@@ -2084,10 +2104,42 @@
      * `addOrReduce` 第 3 帧就是「暴击」字样（4842 第 3 帧 / 形状 4841），数字用 font 4。 */
     berserk: { frame: 1, symbol: 3, font: 4 },
   };
+  /* 伤害飘字最多显示到 32 位有符号 int（用户 2026-10 口径）。再大也按这个值显示，
+   * 不会因为数字位数继续变多而扩大特效；模板只有 4 位，下面按实际位数补 digit 槽位。 */
+  const DAMAGE_FLOAT_MAX = 0x7fffffff;
+  const FLOAT_DIGIT_MAX = 10;                 // 2147483647 = 10 位
+  const FLOAT_DIGIT_SYMBOL = '3529';          // 原版位图数字精灵（num1..num4 用的同一颗）
+  const FLOAT_DIGIT_SCALE = 0.71;
+  const FLOAT_DIGIT_X = -14.55;               // 与素材里 num1 的矩阵一致
+  const FLOAT_DIGIT_STEP = 12.85;
+  const FLOAT_DIGIT_Y = -0.05;
+  /** 一个伤害数字要显示成什么样：钳到 int 上限、要几个 digit 槽、特效档（封顶第 3 档）。
+   *  单独拎出来是为了让回归能直接核对 9999 / 10000 / int 上限这三个边界。 */
+  function damageFloatPlan(value) {
+    const mag = Math.min(DAMAGE_FLOAT_MAX, Math.max(0, Math.round(Math.abs(Number(value) || 0))));
+    const digits = Math.max(4, Math.min(FLOAT_DIGIT_MAX, String(mag).length));
+    const tier = mag > 20 ? 3 : mag > 10 ? 2 : 1;
+    return { mag: mag, digits: digits, tier: tier };
+  }
+  /** 4 位模板（4315）不够时，向右补 `num5..num10` 的 digit 槽位。
+   *  `showNumber` 靠 `byName('numN')` 找槽位，所以挂上去之后还要写进 `digits.names`。 */
+  function ensureFloatDigits(digits, want) {
+    if (!digits || !digits.attachChild || !digits.names || typeof digits.names.set !== 'function') return;
+    const count = Math.max(4, Math.min(FLOAT_DIGIT_MAX, Math.floor(Number(want) || 0)));
+    for (let i = 5; i <= count; i++) {
+      const name = 'num' + i;
+      if (digits.byName(name)) continue;
+      const clip = digits.attachChild(FLOAT_DIGIT_SYMBOL, 1, name);
+      if (!clip || !clip.setExtraTransform) break;
+      try { digits.names.set(name, clip); } catch (e) { break; }
+      const x = (FLOAT_DIGIT_X + FLOAT_DIGIT_STEP * (i - 1)).toFixed(2);
+      clip.setExtraTransform('matrix(' + FLOAT_DIGIT_SCALE + ',0,0,' + FLOAT_DIGIT_SCALE + ',' + x + ',' + FLOAT_DIGIT_Y + ')');
+    }
+  }
   function floatNumber(side, value, kind) {
     const view = live && live.view;
     if (!view || !view.attachChild) return;
-    const mag = Math.max(0, Math.round(Math.abs(Number(value) || 0)));
+    const plan = damageFloatPlan(value), mag = plan.mag;
     if (!mag) return;
     const spec = FLOAT_KIND[kind] || FLOAT_KIND.hit;
     const base = (live && live.bloodBase && live.bloodBase[side]) || (side === 0 ? [1.05, 56.25, 62.7] : [1.05, 244.25, 62.7]);
@@ -2100,6 +2152,7 @@
     const bloodMc = clip.byName('bloodMc');
     if (bloodMc) {
       const t = T();
+      const digitCount = plan.digits;
       /* 每次都从 `bloodMc` 的**当前帧**重取 `num` / `addOrReduce`。
        * `playClip` 从第 2 帧起播，途中 `bloodMc` 会重建/复用 `num`；只在创建时
        * 写一次，换帧后数字精灵可能回到默认的「0000」（用户 2026-11 报的
@@ -2108,10 +2161,13 @@
         const bm = clip.byName('bloodMc');
         const num = bm && bm.byName('num');
         if (!num) return;
-        stopAt(num, mag > 20 ? 3 : mag > 10 ? 2 : 1);
+        /* 特效大小只到第 3 帧（原来 >10 用第 2 帧、>20 用第 3 帧）；
+         * 位数增加只补数字槽，不会再换更大的字形/特效档。 */
+        stopAt(num, plan.tier);
         stopAt(num.byName('addOrReduce'), spec.symbol);
         const digits = num.byName('num');
-        if (t && digits) t.showNumber(mag, digits, spec.font, 0, 0);
+        if (digits) ensureFloatDigits(digits, digitCount);
+        if (t && digits) t.showNumber(mag, digits, spec.font, 0, 0, digitCount);
       };
       applyNumber();
       /* 播完（末帧透明度已经是 0）把这一颗收掉，并让同侧的叠层计数落回去。 */
@@ -2133,10 +2189,21 @@
    *    · 队列空了才 `attackEnd = true`（这一拍结束）。
    *  复刻这边总伤害已经在 `applyHp()` 里一次性结算（同一份数值），这里只补**演出与分段飘字**：
    *  第一下按余数飘、剩下每 100ms 亮一个球 + 飘一份，观感与原版一致。
-   *  ⚠ 原来这里根本不做分裂：伤害一次飘完、也没有多出来的球（第 257 批自标的「功能缺口」）。 */
+   *  ⚠ 原来这里根本不做分裂：伤害一次飘完、也没有多出来的球（第 257 批自标的「功能缺口」）。
+   *
+   *  ⚠⚠ 复制的必须是**球元件**（`6122` / `6185` 第 31 帧里那颗具名 `ball`，id `6116`），
+   *  不能像旧版那样把整段 `acts.sym`（=`6122` 出手动画本身）挂 n-1 份：
+   *    · 每颗“球”都会把整段幸运一击动作从头播一遍，屏幕上叠着 6 份完整出手动画；
+   *    · 这些克隆是 `attachChild` 挂上去的，没有 `playClip` 的停帧逻辑，渲染器的节拍器
+   *      会把 `playing` 的实例一直循环推进 —— 于是“霜缚·凝滞放一次幸运一击就永远在出招”，
+   *      动画越叠越多直到卡死（用户 2026-10 报的 bug）。
+   *  现在只复制球、且 600ms 后收掉；球本体不做无限循环。 */
   /* 多球分裂的抖动范围（原版 `duplicateMc`：`_x ± (random(50)+10)`、`_y ± random(60)`）。 */
   const BOOM_BALL_JITTER = { xMin: 10, xSpan: 50, ySpan: 60 };
-  function boomSplit(rec, attacker, r, side, acts, aborted) {
+  /* `6122` / `6185` 第 31 帧那颗具名 `ball` 的兜底数据（原版 `boom(ball, count)` 的接收者）。
+   * 正常情况下从当前这一拍的 `attack.byName('ball')` 现取，材质/真形态变了也能跟着走。 */
+  const LUCKY_BALL = Object.freeze({ id: '6116', ma: '-0.75,0,0,0.75,392.65,89.85' });
+  function boomSplit(rec, attacker, r, side, aborted) {
     const view = rec && rec.view;
     const total = Math.max(0, Math.round(Math.abs(Number(r.dmg) || 0)));
     const n = Math.max(2, Math.min(8, Math.round(Number(r.boomCount) || 0)));
@@ -2146,25 +2213,22 @@
     /* 第一下就是"已经打到身上的那一次"：数字换成余数（原版 `defender.reduceBlood(_loc7, 1)`）。 */
     floatNumber(side, first, r.crit ? 'berserk' : 'hit');
     const sel = attacker && attacker.attacks ? attacker.attacks() : null;
-    const ball = sel && sel.byName ? sel.byName('attack') : null;
+    const attack = sel && sel.byName ? sel.byName('attack') : null;
+    const sourceBall = attack && attack.byName ? attack.byName('ball') : null;
     if (!view || !sel || !sel.attachChild) return true;
-    const symId = acts && acts.sym ? String(acts.sym) : '';
-    const base = (ball && ball.g && ball.g.__baseMa) ? String(ball.g.__baseMa) : '';
+    const ballId = (sourceBall && sourceBall.tag && sourceBall.tag.id) || LUCKY_BALL.id;
+    const base = (sourceBall && sourceBall.g && sourceBall.g.__baseMa) ? String(sourceBall.g.__baseMa) : LUCKY_BALL.ma;
     const balls = [];
     for (let i = 1; i < n; i++) {
       const timer = setTimeout(() => {
         if (aborted()) return;
         const dx = (Math.random() < 0.5 ? -1 : 1) * (BOOM_BALL_JITTER.xMin + Math.floor(Math.random() * BOOM_BALL_JITTER.xSpan));
         const dy = (Math.random() < 0.5 ? -1 : 1) * Math.floor(Math.random() * BOOM_BALL_JITTER.ySpan);
-        let clip = null;
-        if (symId) clip = sel.attachChild(symId, 1, 'boom');
-        if (!clip) clip = ball;                        // 兜底：拿不到球元件就不画额外球，只飘数字
-        if (clip && clip !== ball) {
+        /* 只挂**球**（6116），不挂整段攻击动画；拿不到素材球就只飘分段数字。 */
+        const clip = sel.attachChild(ballId, 1, 'boom');
+        if (clip) {
           clip.setExtraTransform((base ? 'matrix(' + base + ') ' : '') + 'translate(' + dx + ',' + dy + ')');
-          visible(clip, false);
-          if (clip.g) clip.g.style.visibility = 'hidden';
           balls.push(clip);
-          visible(clip, true);
           play(clip, 2);
         }
         if (share > 0) floatNumber(side, share, r.crit ? 'berserk' : 'hit');
@@ -2221,7 +2285,10 @@
     const mine = ++seq;
     const ui = document.getElementById('ui');
     if (!ui) throw new Error('SfFight 找不到 #ui');
-    ui.innerHTML = '';
+    /* 挑战页 / 关卡页战斗前会「按住」在原位（`data-sf-battle-hold`），
+     * 这里不能把整棵 #ui 清掉，否则又变成 detach + append 的整页重排。 */
+    if (window.Main && typeof Main.clearUiForBattle === 'function') Main.clearUiForBattle();
+    else ui.innerHTML = '';
     const host = document.createElement('section');
     host.className = 'classic-home ssfight-home';
     host.setAttribute('aria-label', '战斗');
@@ -2819,7 +2886,7 @@
       /* 闪开了就没有伤害数字（`Squirrel.beAttack` 的 `defenseType == 1` 那一支只改身体帧）。 */
       if (r.dmg && !r.dodge) {
         /* 幸运一击：`boomCount > 1` 走原版 `boom()` 的多球分裂（分段飘字 + 复制球）。 */
-        if (!(Number(r.boomCount) > 1 && boomSplit(rec, attacker, r, def, acts, aborted))) {
+        if (!(Number(r.boomCount) > 1 && boomSplit(rec, attacker, r, def, aborted))) {
           floatNumber(def, r.dmg, r.crit ? 'berserk' : 'hit');
         }
       }
@@ -3484,6 +3551,14 @@
      * `_floatKind` 给"这一档飘字用哪一帧模板 / 哪套字形"。 */
     _attackActs: (r) => ATTACK_ACTS[attackPlan(r).frame] || null,
     _floatKind: (kind) => FLOAT_KIND[kind] || FLOAT_KIND.hit,
+    /* 伤害飘字的上限 / 位数 / 特效档（纯函数）：`{ mag, digits, tier }`。 */
+    _damageFloatPlan: (value) => damageFloatPlan(value),
+    /* 4 位数字模板不够时补 num5..num10（回归用假 digits 核对挂载位置）。 */
+    _ensureFloatDigits: (digits, want) => ensureFloatDigits(digits, want),
+    /* 幸运一击多球分裂只复制这颗球，不复制整段出手动画。 */
+    _luckyBall: LUCKY_BALL,
+    /* 三侠图集新动作起手时先画哪一帧（idx=-1 也不能清成空白）。 */
+    _atlasPaintFrame: (anim) => atlasPaintFrame(anim),
     /* 这一拍受击方头顶该飘哪一颗状态图标（`Player.specialEffect` 的 statu 档位）。 */
     _effectStatu: (r) => effectStatu(r),
     WEAPON_ART: Object.freeze({ melee: MELEE_WEAPON_ART, ranged: THROW_WEAPON_ART, size: WEAPON_SIZE_FRAMES }),

@@ -366,6 +366,13 @@ test('好友系统：随机 NPC 也能加为好友，重名/满员有提示，�
   assert.equal(S.friendList()[0].name, cands[0].name);
   assert.equal(S.addFriend(cands[0]).ok, false, '同名不能重复加');
   assert.equal(S.addFriend({ name: '   ' }).ok, false, '空名字不给加');
+  /* 师徒与好友在同一列里显示：同名再加一次就会在第二页重复出现
+   * （用户 2026-10-24 口径："不希望师徒除了在第一页显示，还会在之后的页面中再显示一次"）。 */
+  const st = S.state();
+  st.master = { name: '师父甲', level: 40 };
+  st.prentices = [{ name: '徒弟乙', level: 30, power: 5, agility: 5, speed: 5, hp: 50 }];
+  assert.equal(S.addFriend({ name: '师父甲' }).ok, false, '师父不能再加一遍好友');
+  assert.equal(S.addFriend({ name: '徒弟乙' }).ok, false, '徒弟不能再加一遍好友');
   assert.equal(S.addFriend({ name: '超长名字'.repeat(8), level: 3 }).ok, true, '超长名字会被截断');
   assert.ok(S.friendList()[1].name.length <= 20);
   for (let i = 0; i < 25; i++) S.addFriend({ name: '路人' + i, level: 3 + i, power: 5, agility: 5, speed: 5, hp: 40 });
@@ -898,6 +905,61 @@ test('黑装注册：281~288 可实例化，品质 5 / 使用等级 60 / 主属�
   assert.ok(made && made.quality === 5 && made.useLevel === 60, '黑装可以真的入包');
 });
 
+test('装备主属性恢复 ±5% 小幅随机（经典界面同样生效）', () => {
+  const g = game(), S = g.State;
+  assert.equal(S.settings().uiMode, 'classic', '默认是新号经典档');
+  assert.equal(S.GEAR_ATTR_JITTER, 0.05, '幅度是 ±5%');
+  /* 凤凰铠甲（283）基准 490：±5% = 466~515（四舍五入） */
+  const seen = new Set();
+  for (let i = 0; i < 400; i++) {
+    const v = S.rollGearAttr(283);
+    assert.ok(v >= 466 && v <= 515, '经典界面也要在 ±5% 区间内浮动，实测 ' + v);
+    seen.add(v);
+  }
+  assert.ok(seen.size >= 6, '应当真的在区间内浮动（实测 ' + seen.size + ' 种取值）');
+  /* 产出时 roll 一次写进实例：新装备的主属性落在区间内，且同一件以后不会再变 */
+  const made = S.addGear(283);
+  assert.ok(made && made.abilityVal >= 466 && made.abilityVal <= 515, '新装备主属性落在 ±5% 区间');
+  assert.equal(S.gearInst(283, made.ext, made.abilityVal).abilityVal, made.abilityVal, '实例上存的值不再重掷');
+  /* 显式传入的 attr（旧档 / 融合继承）照原样使用，不被重新随机 */
+  assert.equal(S.gearInst(283, [], 500).abilityVal, 500);
+});
+
+test('读档不会重置装备：主属性 / 词条 / 宝石 / 穿戴原样保留，旧橙装迁移是唯一改值处', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.level = 90;
+  s.gears = [
+    { id: 283, key: 'kept', used: true, ext: [{ id: 3, level: 2 }, { id: 7, level: 1 }], attr: 470, gem: { id: 103, ext: 7 } },
+    { id: 205, key: 'orangeQ4', used: false, ext: [], attr: 43 },
+    /* 更老的档：没有 attr 字段（10.11.1 之前） */
+    { id: 281, key: 'ancient', used: false, ext: [] },
+  ];
+  S.save(); S.load();
+  let rows = S.state().gears;
+  const kept = rows.find((x) => x.key === 'kept');
+  assert.equal(kept.attr, 470, '主属性不能被读档重置');
+  assert.equal(kept.used, true, '穿戴状态要保留');
+  assert.equal(kept.ext.length, 2, '词条要保留');
+  assert.equal(kept.gem && kept.gem.id, 103, '宝石要保留');
+  assert.equal(rows.find((x) => x.key === 'orangeQ4').attr, 43, '橙装实例属性也不能被基准值覆盖');
+  assert.equal(rows.find((x) => x.key === 'ancient').attr, S.gearInst(281).attrBase, '老档缺 attr 时按基准值补');
+  /* 再存再读一次：补出来的基准值已经落档，不会被重新随机成别的数 */
+  S.save(); S.load();
+  rows = S.state().gears;
+  assert.equal(rows.find((x) => x.key === 'ancient').attr, S.gearInst(281).attrBase);
+  assert.equal(rows.find((x) => x.key === 'kept').attr, 470);
+  assert.equal(S.myGears().find((x) => x.key === 'kept').abilityVal, 470, '界面读的也是实例属性');
+  /* 唯一会改写已有主属性的迁移：紫 id + orange 的旧橙装 → q4 id + q4 基准值（原版补行口径）。
+   * 这是**升级**（紫装底 25 → q4 45），不是随机重掷，所以单列出来钉住。
+   * ⚠ 读档会换掉整个 state 对象，改数据必须重新取 `State.state()`。 */
+  S.state().gears = [{ id: 201, key: 'legacyOrange', used: false, ext: [], attr: 24, orange: true }];
+  S.save(); S.load();
+  const migrated = S.state().gears.find((x) => x.key === 'legacyOrange');
+  assert.equal(migrated.id, 205, '旧橙装迁移到 q4 id');
+  assert.equal(migrated.attr, 45, '迁移按 q4 基准值（唯一的改写点）');
+  assert.equal(migrated.orange, undefined);
+});
+
 test('黑装支持镶嵌/卸下宝石：扣 5 金、主属性生效、卸下返还', () => {
   const g = game(), S = g.State;
   S.newGame('黑装宝石', { uiMode: 'classic' });
@@ -927,9 +989,12 @@ test('橙装 q4 使用原版初始属性：狂战 205-208 = 45/45/315/45，融�
   const s = S.state();
   s.level = 90; s.goldPoint = 10000;
   const h = S.addGear(205), p = S.addGear(206), b = S.addGear(207), f = S.addGear(208);
+  /* 主属性带 ±5% 小随机，所以断言基准值（attrBase = 原版 q4 值），再核对实得值落在区间内 */
+  const inRange = (actual, base) => actual >= Math.max(1, Math.round(base * 0.95)) && actual <= Math.round(base * 1.05);
   for (const [item, val] of [[h, 45], [p, 45], [b, 315], [f, 45]]) {
     assert.equal(item.quality, 4, '橙装应为 quality 4');
-    assert.equal(item.abilityVal, val, '橙装主属性要取原版 q4 值，不能是紫装底子');
+    assert.equal(item.attrBase, val, '橙装基准主属性要取原版 q4 值，不能是紫装底子');
+    assert.ok(inRange(item.abilityVal, val), '橙装实得主属性在 ±5% 内：' + item.abilityVal);
     assert.equal(item.useLevel, 50, '橙装使用等级 50');
   }
   assert.equal(S.gearInst(205).abilityVal, 45, 'gearInst(205) 也要是 q4 值');
@@ -940,7 +1005,8 @@ test('橙装 q4 使用原版初始属性：狂战 205-208 = 45/45/315/45，融�
   assert.equal(r.ok, true, r.msg);
   assert.equal(r.gear.quality, 4, '紫→橙产物品质 4');
   assert.equal(r.gear.id, 205, '三件狂战头应合成 q4 狂战头 205');
-  assert.equal(r.gear.abilityVal, 45, '产物主属性取 q4 的 45');
+  assert.equal(r.gear.attrBase, 45, '产物基准主属性取 q4 的 45');
+  assert.ok(inRange(r.gear.abilityVal, 45), '产物实得主属性在 ±5% 内：' + r.gear.abilityVal);
   assert.equal(s.gears.find((x) => x.key === r.gear.key).orange, undefined, 'q4 橙装不再用实例 orange 标记');
   /* 旧档迁移：紫 id + orange:true + 旧紫属性 → q4 id + q4 基准值 */
   s.gears.push({ id: 201, key: 'legacyOrange', used: false, ext: [], attr: 25, orange: true });
@@ -1529,6 +1595,26 @@ test('关卡重打不倒退已解锁的 NPC，通关标记和存档保持', () =
   assert.equal(g.State.setStageProgress(999, { npcIndex: 3 }), false);
 });
 
+/* 常驻关卡「徒弟先上阵」：`SfFight.wearsOf(0, fighter)` 的判据是**有没有 gears 数组**
+ * —— 没有就退回师父自己的穿戴。徒弟代打时身上穿玩家装备（用户 2026-10-24 报的）
+ * 就是 `stagePrenticeFighter()` 没把 gears 交出去。 */
+test('徒弟代打只穿自己的装备：fighter 带 gears 数组，没装备就是空数组', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.level = 90;
+  s.gears = [{ id: 21, used: true, key: 'pg1', ext: [], attr: 10 }];
+  s.prentices = [{
+    name: '小徒', level: 30, power: 10, agility: 10, speed: 10, hp: 100,
+    gears: [{ id: 25, ext: [] }], weapons: [], skills: [],
+  }];
+  const f = S.stagePrenticeFighter();
+  assert.ok(Array.isArray(f.gears), '必须带 gears（少了就会去读师父的 myGears）');
+  assert.deepEqual(f.gears.map((x) => x.id), [25], '只穿徒弟自己的那一件');
+  assert.equal(f.isPrentice, true);
+  s.prentices[0].gears = [];
+  const bare = S.stagePrenticeFighter();
+  assert.ok(Array.isArray(bare.gears) && bare.gears.length === 0, '徒弟没装备时也要交空数组，不能退回师父穿戴');
+});
+
 test('不使用药剂的战斗不消耗有效次数，被动技能按原字典增长', () => {
   const g = game(), s = g.State.state();
   s.skills = ['1:1', '2:2', '3:3', '4:1']; s.propsStates[3] = 20; s.propsStates[7] = 20;
@@ -1541,6 +1627,15 @@ test('不使用药剂的战斗不消耗有效次数，被动技能按原字典�
   g.State.fightReward(true, { useProps: false });
   assert.equal(s.propsStates[3], 20); assert.equal(s.propsStates[7], 20);
   g.State.fightReward(true); assert.equal(s.propsStates[3], 19);
+  /* 竞技场分两次扣：属性丸按场次（`stat`）、经验丸只在发经验时（`exp`）——
+   * 碎片/幻兽竞技场不发经验，就不会误扣经验丸（用户 2026-10 口径）。 */
+  s.propsStates[3] = 20; s.propsStates[7] = 20;
+  g.State.tickPropStates({ kind: 'stat' });
+  assert.equal(s.propsStates[3], 19, '属性丸按场次扣');
+  assert.equal(s.propsStates[7], 20, '只扣属性丸时经验丸不能动');
+  g.State.tickPropStates({ kind: 'exp' });
+  assert.equal(s.propsStates[7], 19, '经验丸只在发经验时扣');
+  assert.equal(s.propsStates[3], 19, '只扣经验丸时属性丸不能动');
 });
 
 test('真化武器/技能数值严格对齐 ssfight 原表（不是真5端点线性插值）', () => {
@@ -1800,22 +1895,31 @@ test('战报保存独立快照，重载可回放，最多保留最新 50 条', (
   assert.ok(!('__dualSaves' in migrated), '旧双槽格式回写后不再留下重复录像数组');
 });
 
-test('经验丸说明不再声称竞技场无效，其它限制仍保留', () => {
+test('药丸说明统一去掉「竞技场无效」，只在真不吃药丸的关卡/天梯保留', () => {
   const g = game();
-  const pill = g.propMap.getValue(7), superPill = g.propMap.getValue(44);
-  assert.equal(pill.name, '经验丸');
-  assert.doesNotMatch(pill.remark, /竞技/);
-  assert.match(pill.remark, /40%/);
-  assert.match(pill.remark, /关卡中无效/, '关卡的无效说明要保留');
-  assert.doesNotMatch(superPill.remark, /竞技/);
-  assert.match(superPill.remark, /60%/);
-  assert.match(superPill.remark, /天梯赛无效/, '天梯赛的无效说明要保留');
+  const remark = (id) => g.propMap.getValue(id).remark;
+  /* 属性丸（3/4/5）与经验丸（7）：只在关卡不吃 —— 竞技场现在也生效。 */
+  for (const [id, pct] of [[3, '20%'], [4, '20%'], [5, '20%'], [7, '40%']]) {
+    assert.doesNotMatch(remark(id), /竞技/, id + ' 的说明不能再说竞技场无效');
+    assert.match(remark(id), new RegExp(pct));
+    assert.match(remark(id), /关卡中无效/, id + ' 的关卡限制要保留');
+  }
+  /* 超级药丸（41~44）：关卡与天梯赛都不吃药丸，说明里保留这两项。 */
+  for (const [id, pct] of [[41, '40%'], [42, '40%'], [43, '40%'], [44, '60%']]) {
+    assert.doesNotMatch(remark(id), /竞技/, id + ' 的说明不能再说竞技场无效');
+    assert.match(remark(id), new RegExp(pct));
+    assert.match(remark(id), /关卡,天梯赛无效/, id + ' 要保留关卡/天梯赛的限制');
+  }
   // 说明修正必须落在底层行数组上，重新取值也要能看到（Map#getValue 每次新建对象）
-  assert.equal(pill.remark, g.propMap.getValue(7).remark);
+  assert.equal(remark(7), g.propMap.getValue(7).remark);
+  /* 天梯商店（rankgoodsMap）里那 4 颗超级药丸是另一份文案副本，必须与道具说明一致。 */
+  for (const [rowId, propId] of [['1', 41], ['2', 42], ['3', 43], ['4', 44]]) {
+    assert.equal(g.rankgoodsMap.getValue(rowId).remark, remark(propId), '金杯商店 ' + rowId + ' 的说明要跟道具同步');
+  }
   // 重复执行是幂等的，不会把已改好的文案再改坏
   g.GData.applyPropRemarkFixes();
   assert.match(g.propMap.getValue(7).remark, /关卡中无效/);
-  assert.equal(g.propMap.getValue(7).remark, pill.remark);
+  assert.equal(g.propMap.getValue(7).remark, remark(7));
 });
 
 test('每日任务：当天固定抽取、进度来真实计数、只能领一次且重载保留', () => {
@@ -2451,6 +2555,21 @@ test('幻兽技能进战斗：奋力一击会产出可回放的 pet 回合', () 
   assert.ok(Array.isArray(pet.hpAfter) && pet.hpAfter.length === 2, '回合快照要带双方血量');
 });
 
+/* 原版 `petsSkills` 里「回光术」的 maxTimes 是 1（按技能记），带 3 只同名幻兽
+ * 在装死那一瞬间**不会连回 3 次**（用户 2026-10-24 口径，客户确认不会多次触发）。 */
+test('幻兽濒死回血：带 3 只回光术一场只结算一次', () => {
+  const g = game(), Sim = g.Sim;
+  const me = { name: '我', level: 30, hp: 60, maxHp: 1000, power: 10, agility: 1, speed: 1,
+    weapons: [], skills: [{ id: 6, level: 1 }],
+    pets: [1, 2, 3].map((id) => ({ id, name: '回光' + id, grade: 1, level: 5, skillId: 4 })) };
+  const foe = { name: '稻草人', level: 50, hp: 99999, maxHp: 99999, power: 5000, agility: 2000, speed: 2000,
+    weapons: [{ id: 1, level: 1 }], skills: [] };
+  const rounds = Sim.simulate(me, foe).rounds || [];
+  const heals = rounds.filter((r) => r.action === 'pet' && Number(r.petSkillId) === 4);
+  assert.equal(heals.length, 1, '3 只回光术也只能有 1 次濒死回血，实际 ' + heals.length + ' 次');
+  assert.ok(heals[0].healSelf > 0, '这一次要真的回血');
+});
+
 /* 色诱之术：原版描述「略过对手一回合」= 眩晕，真化才追加脱装。
  * 玩家常只看到脱装，误以为没有眩晕 —— 这里把 sim 的 stun 事件钉住。 */
 test('色诱之术：命中带眩晕（跳过对手一回合），真化才追加脱装', () => {
@@ -2469,6 +2588,59 @@ test('色诱之术：命中带眩晕（跳过对手一回合），真化才追�
   assert.ok(sawStun, '色诱命中要标 stunApplied（原版「略过对手一回合」）');
   assert.ok(sawStunnedTurn, '对手下一回合要真的被跳过（action:stunned）');
   assert.ok(sawStrip, '真·色诱 56% 脱装要在 20 场内掷中');
+});
+
+test('速度行动条：同一方最多连续行动 5 次', () => {
+  const g = game(), Sim = g.Sim;
+  /* 极端速度差：修复前快的一方会在 60 手行动上限内一路先手；
+   * 现在每 5 次必须让慢的一方出手一次。双方都不带武器 / 技能，排除追加行动干扰。 */
+  const me = { name: '快', level: 80, hp: 500000, maxHp: 500000, power: 1, agility: 1, speed: 100000,
+    weapons: [], skills: [], effects: {} };
+  const foe = { name: '慢', level: 80, hp: 500000, maxHp: 500000, power: 1, agility: 1, speed: 1,
+    weapons: [], skills: [], effects: {} };
+  const rounds = Sim.simulate(me, foe).rounds || [];
+  const seq = rounds.map((r) => r.attacker).filter((side) => side === 0 || side === 1);
+  let maxRun = 0, run = 0, last = null;
+  for (const side of seq) {
+    if (side === last) run++; else { last = side; run = 1; }
+    if (run > maxRun) maxRun = run;
+  }
+  assert.ok(seq.includes(1), '慢的一方也必须有机会出手');
+  assert.equal(maxRun, 5, '速度大幅领先时应当正好连续 5 次，实际 ' + maxRun);
+  assert.ok(seq.length > 10, '60 手行动上限内应正常打多轮，实际 ' + seq.length);
+});
+
+test('闪避类藏品再叠也不会超过 55%', () => {
+  const g = game(), Sim = g.Sim;
+  const mk = (bonus) => ({
+    name: '闪避测试', level: 1, hp: 1000, maxHp: 1000, power: 100, agility: 100, speed: 100,
+    skills: {}, effects: {}, debuffs: { power: 0, agility: 0, speed: 0 },
+    buffFlat: { power: 0, agility: 0, speed: 0 }, mods: { dodgeBonus: bonus },
+    baseStats: { power: 100, agility: 100, speed: 100 }, setFx: {}, stripTurns: 0,
+    silence: 0, dot: null, stun: 0, disarm: 0, swordDodge: 0, meteorDodge: 0, mech: [],
+    pets: [], petSealWeapons: {}, petSealSkills: {}, healMul: 1, healMulBase: 1,
+    petWeakPct: 0, petHealCut: false, petDotPlus: false, shell: 0, usedFakeDie: false,
+  });
+  assert.equal(Sim.dodgeChanceOf(mk(0), mk(540)), Sim.rules.dodgeCap,
+    '闪避精通多栏叠到 540% 也只能取最终上限');
+  assert.equal(Sim.rules.dodgeCap, 55, '最终闪避上限就是 55%');
+});
+
+test('战斗大数显示：达到 1e7 用科学计数法，保留两位小数', () => {
+  const g = game(), G = g.GData;
+  assert.equal(G.formatBigNumber(9999999), '9999999');
+  assert.equal(G.formatBigNumber(10000000), '1.00e7');
+  assert.equal(G.formatBigNumber(12345678), '1.23e7');
+  assert.equal(G.formatBigNumber(-12345678), '-1.23e7');
+});
+
+test('暴击率 70% 硬上限，溢出的暴击率 1:1 转暴伤', () => {
+  const g = game(), Sim = g.Sim;
+  const hero = { skills: { 9: 15 }, silence: 0, setFx: {}, mods: { critBonus: 100, critDmgBonus: 20 } };
+  /* 5（基础）+ 30（15 级暴击）+ 100（藏品）= 135 → 上限 70，溢出 65。 */
+  assert.equal(Sim.critChanceOf(hero), 70, '暴击率硬上限 70%');
+  assert.ok(Math.abs(Sim.critDmgBonusOf(hero) - 0.85) < 1e-9, '20% 基础暴伤 + 65% 溢出（1:1）');
+  assert.equal(Sim.critCap, 70, '上限与面板/结算同源');
 });
 
 /* 果实种子合成：原版走「道具合成」页；规则统一收进 State.composeSeed。 */

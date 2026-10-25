@@ -11,6 +11,8 @@
  * ------------------------------------------------------------ */
 (function () {
   'use strict';
+  /* 战斗数字统一大数格式：1e7 起用科学计数法（两位小数），以下保持整数。 */
+  const fmtBig = (v) => (window.GData && GData.formatBigNumber) ? GData.formatBigNumber(v) : String(Math.round(Number(v) || 0));
   /* ============================================================
    * 【BT1】常量与素材表（图集/特效/命中帧）
    * ============================================================ */
@@ -119,6 +121,20 @@
     try { const item = map.getValue(id); return item ? item.name : fallback; } catch (e) { return fallback; }
   }
 
+  // Numeric-radius paths only; older Android WebViews lack Canvas roundRect.
+  function roundRectPath(c, x, y, w, h, radius) {
+    if (typeof c.roundRect === 'function') { c.roundRect(x, y, w, h, radius); return; }
+    const left = Math.min(x, x + w), right = Math.max(x, x + w);
+    const top = Math.min(y, y + h), bottom = Math.max(y, y + h);
+    const r = Math.max(0, Math.min(Number(radius) || 0, Math.abs(w) / 2, Math.abs(h) / 2));
+    c.moveTo(left + r, top);
+    c.lineTo(right - r, top); c.arcTo(right, top, right, top + r, r);
+    c.lineTo(right, bottom - r); c.arcTo(right, bottom, right - r, bottom, r);
+    c.lineTo(left + r, bottom); c.arcTo(left, bottom, left, bottom - r, r);
+    c.lineTo(left, top + r); c.arcTo(left, top, left + r, top, r);
+    c.closePath();
+  }
+
   /* ============================================================
    * 【BT3】战斗播放主流程 run
    * ============================================================ */
@@ -168,11 +184,18 @@
       : null;
     const wears = sources.map((f) => Engine.wearsFor(f.wears || f.gears));
     const load = new Set([...SQ, 'resource_12', 'resource_2', 'go', 'fightNum_r', 'fightNum_y', 'fightNum_g']);
-    for (const f of sources) if (f.npcType) for (const id of [...(NPC_SHEETS[f.npcType] || []), ...(NPC_EFFECTS[f.npcType] || [])]) load.add(id);
+    for (const f of sources) if (f.npcType) {
+      const kind = npcBase(f.npcType);
+      for (const id of [...(NPC_SHEETS[kind] || []), ...(NPC_EFFECTS[kind] || [])]) load.add(id);
+    }
     for (const ids of Object.values(FX_SHEETS)) for (const id of ids) load.add(id);
     for (const side of wears) for (const wear of side) if (wear) load.add(wear.src);
     for (const layer of region.layers) { if (layer.id) load.add(layer.id); if (layer.fx) load.add(layer.fxSheet || layer.fx); }
     await Engine.loadSheets([...load]);
+    /* 角色 / 特效图集要压在场景图集之上（同名 label 只认最后一个注册的）。
+     * 启动时不再预拉这批图（见 main.js 的 BATTLE_SHEETS），所以这里补一次优先级；
+     * 首页空闲预热完成时也会由 Main.pinBattleAssets() 做同一件事，幂等。 */
+    try { if (window.Main && Main.pinBattleAssets) Main.pinBattleAssets(); } catch (e) {}
     /* 超级三侠（变异三侠）：原版 `*_boss.swf` 不在参考资料里，按经典精英立绘的
      * 配色给普通图集做一层运行时换色；普通三侠不触发，仍是原版图集。 */
     for (const f of sources) {
@@ -364,8 +387,8 @@
     /** 伤害飘字：暴击走 4842 第 3 帧图标 + 黄色数字，普通伤害仍是红色「-N」。
      *  幻兽协战（pet）也能暴击（打兴奋剂），所以统一从这里出。 */
     function damageFloater(side, dmg, crit) {
-      if (crit) { floater(side, String(dmg), 'y', true, true); shake = Math.max(shake, 12); }
-      else floater(side, '-' + dmg, 'r');
+      if (crit) { floater(side, fmtBig(dmg), 'y', true, true); shake = Math.max(shake, 12); }
+      else floater(side, '-' + fmtBig(dmg), 'r');
     }
     function applyHp(r, counterPending, before) {
       if (Array.isArray(r.shellAfter) && r.shellAfter.length === 2) {
@@ -402,7 +425,7 @@
       });
     }
     function rounded(c, x, y, w, h, radius, color) {
-      c.beginPath(); c.roundRect(x, y, w, h, radius); c.fillStyle = color; c.fill();
+      c.beginPath(); roundRectPath(c, x, y, w, h, radius); c.fillStyle = color; c.fill();
     }
     function drawHud() {
       const sig = [hps[0], hps[1], maxHp[0], maxHp[1], shields[0], shields[1], round, speed, ending, cornerVisible,
@@ -426,14 +449,14 @@
         /* 护盾按「占上限的比例」画成血条后面的一段 —— 敌方血条是从右往左长的，
          * 所以那一侧的护盾段要贴在血条的**左端**，保持「越靠内越先被打掉」的直觉。 */
         const sp = Math.max(0, Math.min(1, (Number(shields[side]) || 0) / maxHp[side]));
-        c.save(); c.beginPath(); c.roundRect(x, y, width, height, 31); c.clip();
+        c.save(); c.beginPath(); roundRectPath(c, x, y, width, height, 31); c.clip();
         if (sp > 0) {
           c.fillStyle = 'rgba(120,226,255,.95)';
           c.fillRect(right ? x + width * (1 - pct - sp) : x + width * pct, y, width * sp, height);
         }
         const gradient = c.createLinearGradient(0, y, 0, y + height); gradient.addColorStop(0, '#ffd323'); gradient.addColorStop(1, '#ffaa0e');
         c.fillStyle = gradient; c.fillRect(right ? x + width * (1 - pct) : x, y, width * pct, height); c.restore();
-        Engine.text(c, Math.round(hps[side]) + '/' + maxHp[side], x + width / 2, y + 42,
+        Engine.text(c, fmtBig(hps[side]) + '/' + fmtBig(maxHp[side]), x + width / 2, y + 42,
           { size: 36, align: 'center', color: '#fff8d4', bold: false, stroke: false });
         /* 护盾数值写在生命值右边（有护盾才画，避免平时干扰）。 */
         if (shields[side] > 0) {
@@ -452,12 +475,12 @@
           const color = d.color || '#7e1c16';
           rounded(c,dx, 116, width2, 36, 18, 'rgba(30,16,10,.80)');
           if (whoW) {
-            c.save(); c.beginPath(); c.roundRect(dx, 116, width2, 36, 18); c.clip();
+            c.save(); c.beginPath(); roundRectPath(c, dx, 116, width2, 36, 18); c.clip();
             c.fillStyle = color; c.fillRect(dx, 116, whoW, 36); c.restore();
             Engine.text(c, who, dx + whoW / 2, 142, { size: 19, align: 'center', color: '#fff8d4', stroke: false });
           }
           c.lineWidth = 2; c.strokeStyle = color; c.beginPath();
-          c.roundRect(dx, 116, width2, 36, 18); c.stroke();
+          roundRectPath(c, dx, 116, width2, 36, 18); c.stroke();
           Engine.text(c, body, dx + whoW + 11, 142, { size: 22, align: 'left', color: '#ffe6df', stroke: false });
           dx += width2 + 8;
         }
@@ -470,7 +493,7 @@
         const bw = Math.min(W - 40, label.length * 21 + 44);
         rounded(c,W / 2 - bw / 2, 160, bw, 40, 20, 'rgba(74,32,104,.80)');
         c.lineWidth = 2; c.strokeStyle = '#d9b6f5'; c.beginPath();
-        c.roundRect(W / 2 - bw / 2, 160, bw, 40, 20); c.stroke();
+        roundRectPath(c, W / 2 - bw / 2, 160, bw, 40, 20); c.stroke();
         Engine.text(c, label, W / 2, 188, { size: 22, align: 'center', color: '#f4e6ff', stroke: false });
       }
       /* 调试三维：放在题面下方，两个独立小条，实时读 Sim 每拍结算后的有效值。 */
@@ -482,7 +505,7 @@
           const y = 214;
           rounded(c, x, y, bw, 42, 18, side === 0 ? 'rgba(26,43,22,.82)' : 'rgba(48,20,16,.82)');
           c.lineWidth = 2; c.strokeStyle = side === 0 ? '#9fd36a' : '#e8a06a'; c.beginPath();
-          c.roundRect(x, y, bw, 42, 18); c.stroke();
+          roundRectPath(c, x, y, bw, 42, 18); c.stroke();
           Engine.text(c, side === 0 ? '我方' : '敌方', x + 14, y + 29,
             { size: 21, align: 'left', color: side === 0 ? '#d8ff9c' : '#ffd0a8', stroke: false });
           Engine.text(c, '力 ' + s.power + '　敏 ' + s.agility + '　速 ' + s.speed, x + 72, y + 29,
@@ -591,7 +614,7 @@
       const att = r.attacker, def = 1 - att, f = fighters[att];
       const beforeHp = hps.slice();
       const beforeMax = maxHp.slice();
-      if (r.action === 'dot') { applyHp(r); floater(r.selfDot ? att : def, '-' + r.dmg, 'y'); if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y'); await wait(400); return; }
+      if (r.action === 'dot') { applyHp(r); floater(r.selfDot ? att : def, '-' + fmtBig(r.dmg), 'y'); if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y'); await wait(400); return; }
       if (r.action === 'buff') {
         /* 塔 buff：回合开始的自增益（越战越勇 / 后发制人 / 玉石俱焚）——
          * 没有伤害也没有治疗，只飘一行字说明，别掉进下面的攻击分支播动画。
@@ -602,14 +625,14 @@
         /* 上限被压下来了：两边各飘一次新上限，配合血条数字一起看得到效果。 */
         if (capResult.capped) {
           for (const side of [0, 1]) {
-            if (Number(r.maxHp[side]) < beforeMax[side]) floater(side, '上限 ' + maxHp[side], 'y');
+            if (Number(r.maxHp[side]) < beforeMax[side]) floater(side, '上限 ' + fmtBig(maxHp[side]), 'y');
           }
         }
         await wait(320);
         return;
       }
       if (r.action === 'regen') {   // 塔机制/buff：回合开始回复（百草回春/活血丹/回春术）
-        applyHp(r); floater(att, '+' + r.heal, 'g'); if (r.noteText) floater(att, r.noteText, 'y');
+        applyHp(r); floater(att, '+' + fmtBig(r.heal), 'g'); if (r.noteText) floater(att, r.noteText, 'y');
         await wait(420); return;
       }
       if (r.action === 'rest' || r.action === 'stunned') {
@@ -629,8 +652,8 @@
       if (r.action === 'pet') {
         applyHp(r);
         if (r.dmg) damageFloater(def, r.dmg, !!r.crit);
-        if (r.healSelf) floater(att, '+' + r.healSelf, 'g');
-        if (r.dodgeHeal) floater(def, '+' + r.dodgeHeal, 'g');
+        if (r.healSelf) floater(att, '+' + fmtBig(r.healSelf), 'g');
+        if (r.dodgeHeal) floater(def, '+' + fmtBig(r.dodgeHeal), 'g');
         if (r.fakeDie) floater(Number(r.fakeDieSide == null ? def : r.fakeDieSide), '装死', 'y');
         if (r.noteText) floater(att, r.noteText, 'y');
         await wait(760);
@@ -654,9 +677,9 @@
       function impact() {
         if (didHit || aborted()) return;
         didHit = true; applyHp(r, true, beforeHp);
-        if (r.dodge) { floater(def, '闪避', 'y', true); if (r.dodgeHeal) floater(def, '+' + r.dodgeHeal, 'g'); defending = reaction(def, r); }
+        if (r.dodge) { floater(def, '闪避', 'y', true); if (r.dodgeHeal) floater(def, '+' + fmtBig(r.dodgeHeal), 'g'); defending = reaction(def, r); }
         else if (r.noDmg) {
-          if (r.healSelf) floater(att, '+' + r.healSelf, 'g');
+          if (r.healSelf) floater(att, '+' + fmtBig(r.healSelf), 'g');
           if (r.buffUp) floater(att, '属性提升', 'g');
         }
         else {
@@ -673,12 +696,12 @@
           }
           if (r.jueDui) floater(def, '绝对防御', 'y');
           if (r.debuffText) floater(def, r.debuffText, 'y');
-          if (r.lifesteal) floater(att, '+' + r.lifesteal, 'g');
-          if (r.reboundHurt) floater(att, '-' + r.reboundHurt, 'r');
-          if (r.selfBurn) floater(att, '-' + r.selfBurn, 'r');
+          if (r.lifesteal) floater(att, '+' + fmtBig(r.lifesteal), 'g');
+          if (r.reboundHurt) floater(att, '-' + fmtBig(r.reboundHurt), 'r');
+          if (r.selfBurn) floater(att, '-' + fmtBig(r.selfBurn), 'r');
           // 挑战塔：护盾吸收 / 荆棘反弹 / 机制提示（狂暴·禁锢·吞噬·瞬杀·毒藤·金蝉脱壳·涅槃）
-          if (r.shellAbsorb) floater(def, '护盾-' + r.shellAbsorb, 'y');
-          if (r.thornsDmg) floater(att, '-' + r.thornsDmg, 'r');
+          if (r.shellAbsorb) floater(def, '护盾-' + fmtBig(r.shellAbsorb), 'y');
+          if (r.thornsDmg) floater(att, '-' + fmtBig(r.thornsDmg), 'r');
           if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y');
         }
       }
@@ -700,7 +723,7 @@
         let counterHit = false, counterReaction = Promise.resolve();
         const counterImpact = () => {
           if (counterHit || aborted()) return; counterHit = true; applyHp(r);
-          if (r.counterDmg) floater(att, '-' + r.counterDmg, 'r');
+          if (r.counterDmg) floater(att, '-' + fmtBig(r.counterDmg), 'r');
           if (r.counterFakeDie) {
             /* 同样分「挨反击的那位装死」与「反击者被反伤打死装死」两种情况。 */
             const who = r.counterFakeDieSide == null ? att : r.counterFakeDieSide;
@@ -709,7 +732,7 @@
             return;
           }
           if (r.counterRebound) {
-            floater(att, '绝对防御', 'y'); floater(def, '-' + r.counterRebound, 'r');
+            floater(att, '绝对防御', 'y'); floater(def, '-' + fmtBig(r.counterRebound), 'r');
             counterReaction = reaction(att, { jueDui: true });
             return;
           }

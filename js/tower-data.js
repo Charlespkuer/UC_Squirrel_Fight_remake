@@ -673,6 +673,9 @@
     price: [30, 60, 100, 160],     // 普通/稀有/史诗/传奇
     crossLayerMul: 1.3,            // 跨层类 ×1.3 → 40/80/130
     sellBack: 0.4,                 // 永久件回收 40%
+    /* 【2026-10 用户口径】商店里的**永久类**增益在基础标价上 +10%（卖出价仍按原价回收，
+     * 不跟着涨）。只作用于购买标价，见 shopBuyPrice。 */
+    permanentPriceMul: 1.1,
     /* 【2026-10 用户口径】**限次件**的回收乘数单独降到 30%（永久件不变）——
      * 限次件本来就是「用几场就没了」的临时收益，按永久件的 40% 回收偏便宜。 */
     sellBackLimited: 0.3,
@@ -693,14 +696,21 @@
     const p = SHOP.price[buff.rarity];
     return buff.scope === 'run' ? Math.round(p * SHOP.crossLayerMul / 10) * 10 : p;
   }
+  /** 商店购买价：永久类 +10%（取整到试炼币）；限次类不变。卖出仍按 shopPrice。 */
+  function shopBuyPrice(buff) {
+    const base = shopPrice(buff);
+    if (!buff || buff.kind !== 'permanent') return base;
+    return Math.max(1, Math.round(base * SHOP.permanentPriceMul));
+  }
   /* ============================================================
    * 【D4b】铸币商店（无尽塔 · 战后随机小店）
    *
    * 只在「5 层之后的 x2/x3/x4 与 x7/x8/x9 层」出现：每场战斗结束后 5% 概率刷出；
    * 同一组连续三层（x2~x4 或 x7~x9）最多刷出一次（组号见 mintGroupOf，由 run.mintGroup 记账）。
-   * 店里可以花**铸币**买走 1 件增益，或者免费拿自己已有的 1 件增益去换 1 件；
-   * 二者任一做成就立刻消失（也可以直接走人，不买不换）。
-   * 货架可免费刷新一次，刷新之后就不能再用「免费交换」。
+   * 店里可以花**铸币**买走 1 件增益；第一格固定是 **0 铸币的「等价交换」**——
+   * 买下它只是打开交换选择，挑自己已有的 1 件永久 / 限次增益换 1 件新的。
+   * 任意一次成交（买货 / 完成交换）后立刻消失（也可以直接走人，不买不换）。
+   * 货架可免费刷新一次；刷新之后「等价交换」不再固定首位，按 `swapChance` 随机洗入货架。
    *
    * 售价**固定按稀有度**（不吃 E01/E04 任何折扣）：
    *   普通 0（赠品）/ 稀有 1 / 史诗 2 / 传奇 3 铸币。
@@ -717,6 +727,9 @@
     minLayer: 6,             // 「5 层之后」→ 第 6 层起
     shelf: 5,                // 货架件数
     price: [0, 1, 2, 3],     // 普通/稀有/史诗/传奇 → 铸币
+    /* 「等价交换」只出现在铸币商店：初始进店固定第一格；免费刷新后按这个概率
+     * 随机替换其中一格（位置随机，不再固定首位），货架件数仍是 shelf。 */
+    swapChance: 0.25,
     tiltPaid: 40,            // 稀有度基数：等价于试炼商店刷了 40 试炼币的倾斜
     commonWeightMul: 0.4,    // 普通档权重再下调一档
     opsChance: 0.8,          // 「大概率」上架运营类（传奇不受此限）
@@ -1712,7 +1725,7 @@
     // —— 本层类（主塔=整局；无尽=当前层） ——
     { id: 'G01', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '力量祝福', rarity: 0, kind: 'limited', uses: 10, desc: '下一场战斗力量、敏捷、速度各 +20%', mods: { powerMul: 0.20, agilityMul: 0.20, speedMul: 0.20 } },
     { id: 'G02', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '生命祝福', rarity: 0, kind: 'limited', uses: 5, desc: '下一场战斗生命上限 +20%，并在开战第一回合回复 40% 生命上限', mods: { maxHpMul: 0.20, startHealPct: 0.40 } },
-    { id: 'G03', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '凌波微步', rarity: 1, kind: 'limited', uses: 10, desc: '下一场战斗我方闪避率 +15%', mods: { dodgeBonus: 15 } },
+    { id: 'G03', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '凌波微步', rarity: 1, kind: 'limited', uses: 10, desc: '下一场战斗我方闪避率 +15%（所有闪避来源合计上限 55%）', mods: { dodgeBonus: 15 } },
     { id: 'G04', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '破釜沉舟', rarity: 2, kind: 'limited', uses: 3, desc: '下一场战斗攻击 +70%，生命上限 −20%', mods: { powerMul: 0.70, maxHpMul: -0.20 } },
     /* ============================================================
      * 挑战塔专属「下一场战斗」增益（towerOnly + nextBattle）
@@ -1725,7 +1738,7 @@
       desc: '下一场战斗：前 3 次使用武器时攻击 +50% 且必中，同时免疫反伤；之后我方攻击 −20%',
       mods: { weaponBoostUses: 3, weaponBoostPowerMul: 0.50, weaponBoostMustHit: 1, weaponBoostReflectImmune: 1, weaponBoostFatigueMul: 0.20 } },
     { id: 'T02', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '烟幕', rarity: 1, kind: 'limited', uses: 1,
-      desc: '下一场战斗：我方闪避率 ×1.5',
+      desc: '下一场战斗：我方闪避率 ×1.5（最终不超过 55%）',
       mods: { dodgeMul: 0.50 } },
     { id: 'T03', tags: ['tower', 'battle', 'limited', 'nextBattle'], name: '锁定打击', rarity: 1, kind: 'limited', uses: 1,
       desc: '下一场战斗：所有攻击必中', mods: { mustHitAll: 1 } },
@@ -1792,10 +1805,10 @@
        * 直到它真的被放弃（每 10 层交增益、卖掉等）才会重新进池 —— 见 tower.js 的 poolFilter。 */
       desc: '每场战斗开始时获得 50% 的空生命上限；生命低于 50% 时获得 15% 减伤与 15% 吸血',
       mods: { emptyMaxHpMul: 0.50, lowHpTakenMul: -0.15, lowHpLifestealPct: 0.15, lowHpAt: 0.50 } },
-    /* 抉择扩充：战斗获得的三选一变四选一，可叠 3 层（最高 6 选 1）。
-     * 2026-10 用户口径：**背包里攒到 3 个之后就不再生成** —— 加 `noRestack`
+    /* 抉择扩充：战斗获得的三选一变四选一，最多叠 2 层（最高 5 选 1）。
+     * 2026-10 用户口径：**背包里攒到 2 个之后就不再生成** —— 加 `noRestack`
      * （拿满 maxStacks 即出池，也不会再走「叠满开新栏位」的通用规则）。 */
-    { id: 'C50', tags: ['endless', 'battle', 'shop', 'stackable', 'noRestack'], name: '抉择扩充', rarity: 1, kind: 'permanent', maxStacks: 3,
+    { id: 'C50', tags: ['endless', 'battle', 'shop', 'stackable', 'noRestack'], name: '抉择扩充', rarity: 2, kind: 'permanent', maxStacks: 2,
       desc: '战斗获得的选择项 +1',
       mods: { choiceCount: 1 } },
     /* 减伤成长：每胜利一场，本局受到伤害再 −1%（上限 −25%）。
@@ -1805,8 +1818,10 @@
     { id: 'C48', tags: ['endless', 'battle', 'shop', 'unique'], name: '铜墙铁壁', rarity: 2, kind: 'permanent',
       desc: '本局每胜利一场，受到的伤害额外 −1%，最多 −25%',
       mods: { winTakenMulPct: 0.01, winTakenMulCap: 0.25 } },
-    { id: 'C21', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '暴击精通', rarity: 0, kind: 'permanent', maxStacks: 3, desc: '暴击率 +15%', mods: { critBonus: 15 } },
-    { id: 'C22', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '闪避精通', rarity: 0, kind: 'permanent', maxStacks: 3, desc: '闪避率 +20%', mods: { dodgeBonus: 20 } },
+    { id: 'C64', tags: ['endless', 'shop', 'stackable'], name: '巨力重拳', rarity: 0, kind: 'permanent', unlimitedStacks: true,
+      desc: '暴击伤害 +10%', mods: { critDmgBonus: 10 } },
+    { id: 'C21', tags: ['tower', 'endless', 'battle', 'shop', 'quietStack'], name: '暴击精通', rarity: 0, kind: 'permanent', desc: '暴击率 +15%', mods: { critBonus: 15 } },
+    { id: 'C22', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '闪避精通', rarity: 0, kind: 'permanent', maxStacks: 3, desc: '闪避率 +20%（所有闪避来源合计上限 55%）', mods: { dodgeBonus: 20 } },
     { id: 'C23', tags: ['tower', 'endless', 'battle', 'shop', 'stackable'], name: '轻身术', rarity: 0, kind: 'permanent', maxStacks: 3, desc: '速度 +20%', mods: { speedMul: 0.20 } },
     /* 以战养战：**不能再叠加**（用户口径 2026-10）。去掉 stackable 并锁定 1 份：
      * 既不会同格叠层，也不会按「叠满开新栏位」的通用规则再占一格（见 addBuff 的 permanent 分支）。 */
@@ -1837,7 +1852,7 @@
        * 标志放在 def 根上、不进 mods：`isPureOpsBuff` 要求 mods 的键**全部**落在运营类里，
        * 往里塞一个非运营键会让 E01 不再算「纯运营类」，巡逻收缴那边（魔王不吃运营牌）就会走样。 */
       noExtend: true,
-      desc: '下一场战斗结束后立即开启一次试炼商店，全部商品 7 折；若同时持有「steam大促」，两档折扣叠加为 3.5 折',
+      desc: '下一场战斗后立即开店一次，全部商品 7 折；与「steam大促」叠加为 3.5 折',
       mods: { postBattleShop: 1, postBattleShopDiscount: 0.30 } },
     /* E16「铸币商队」= E01「立即进货」的铸币版：下一场战斗后**必开一家铸币商店**（限次 1）。
      * 与 E01 同场生效时由它**顶掉**那家试炼商店（用户口径：一次战斗只开一家店，铸币优先）；
@@ -1962,7 +1977,7 @@
       desc: '每拥有 1 个永久增益，攻击 +10%；被虚空铭文附魔的增益只算 2%',
       mods: { powerPerPermBuff: 0.10, powerPerPermBuffEnchantedWeight: 0.20 } },
     { id: 'C36', tags: ['endless', 'battle', 'shop', 'oncePerRun', 'ops'], name: '挥金如土', rarity: 3, kind: 'permanent', maxStacks: 1,
-      desc: '每在试炼商店消费5&10&15试炼币，随机获得「力 +1 / 敏 +1 / 速 +1 / 生命上限 +5」中的一项',
+      desc: '每在试炼商店消费 5/10/15 试炼币，随机获得力/敏/速 +1 或生命上限 +5 中的一项',
       mods: { shopSpendStep: 5, shopSpendTiers: [5, 10, 15], shopSpendTierSize: 20,
         shopSpendStat: 1, shopSpendHp: 5, pityWeight: 0 } },
     /* C37「虚空铭文」的自我降权（2026-10 用户口径）：改成与终焉烙印（C49）同一口径的**指数降权**
@@ -2071,8 +2086,7 @@
       mods: { roundStatPct: 0.015 } },
     /* noRestack（任务4）：同名唯一，拿到一次后移出本局可获得池。 */
     { id: 'C55', tags: ['endless', 'battle', 'shop', 'noRestack'], name: '后发制人', rarity: 3, kind: 'permanent',
-      desc: '战斗中每回合开始时，若力/敏/速有一项低于对手，将差距最大的一项补上10%，' +
-        '并令对手该项减少同样的数值；每场战斗结束时清零',
+      desc: '每回合开始时，若力/敏/速有低于对手的，把差距最大的一项补上 10%，对方同减；战斗结束清零',
       mods: { catchUpPct: 0.10 } },
     /* unique：`firstDodge` 是布尔开关（每场第一次受击必闪）→ 多份无意义。 */
     { id: 'C56', tags: ['endless', 'battle', 'shop', 'unique'], name: '风影身法', rarity: 1, kind: 'permanent',
@@ -2083,7 +2097,7 @@
       descEndless: '限次 10 场：每回合开始时我方与敌方的生命上限各 ×90%（向下取整）',
       mods: { roundMaxHpMul: 0.90 } },
     { id: 'C58', tags: ['endless', 'battle', 'shop', 'noRestack', 'ops'], name: '豪掷千金', rarity: 2, kind: 'permanent', maxStacks: 1,
-      desc: '每在试炼商店消费 100 试炼币，立即获得 1 个随机限次增益（按商店刷新权重：越稀有越难出）',
+      desc: '每在试炼商店买货或买铸币消费 100 试炼币，立即获得 1 个随机限次增益（刷新不算；越稀有越难出）',
       mods: { shopSpendLimited: 100, limitedDefaultRerollPaid: 10 } },
     { id: 'C59', tags: ['endless', 'battle', 'shop', 'stackable', 'noRestack', 'ops'], name: '门庭若市', rarity: 2, kind: 'permanent', maxStacks: 3,
       desc: '每进入一次试炼商店，立即获得 80 试炼币',
@@ -2092,6 +2106,17 @@
       desc: '每场战斗敌方对我方的第一次伤害为 0，且我方立刻额外行动一次',
       mods: { firstHitZero: 1, firstHitZeroFreeTurn: 1 } },
 
+    { id: 'HS01', tags: ['endless', 'shop', 'hero', 'ops', 'repeatable'], name: '勇者修炼札', rarity: 1, kind: 'instant',
+      desc: '随机选择一个未满级的局内武技，连续进行3次普通升级尝试；遵循原成功率与失败保底', mods: { heroTraining: 3 } },
+    { id: 'HS02', tags: ['endless', 'shop', 'hero', 'ops', 'repeatable'], name: '遗忘与新生', rarity: 2, kind: 'instant',
+      desc: '自选遗忘一个已学武技，再自选学习一个尚未掌握的武技；新武技继承被遗忘武技的等级', mods: { heroReplace: 1 } },
+    { id: 'HS03', tags: ['endless', 'shop', 'hero', 'ops', 'repeatable'], name: '大师传承', rarity: 2, kind: 'instant',
+      desc: '自选一个未满级的局内武技，直接升到真5满级', mods: { heroGuaranteedMax: 1 } },
+    { id: 'HS04', tags: ['endless', 'shop', 'hero', 'ops', 'repeatable'], name: '禁书残页', rarity: 3, kind: 'instant',
+      /* 0.5^n：每获得一次，这件传奇在商店 / 铸币商店里的动态权重减半（instantIds 计数）。 */
+      desc: '随机学会一个尚未掌握的5级武技；该武技不占普通24项上限，即使未满24项也不计数', mods: { heroSecret: 1, repeatWeight: 0.5 } },
+    { id: 'HB01', tags: ['endless', 'hero', 'story', 'hidden', 'catalog', 'unique'], name: '勇者之剑', rarity: 3, kind: 'permanent', maxStacks: 10,
+      desc: '不占永久栏位，跨百层保留。魔王·镜完成面板复制及自身增益后，其力量降低20%、生命上限降低35%；每次击败巡逻魔王成长一层（最多10层，每层再降2%）；不能复制这份克制', mods: { heroMirrorBlade: 1 } },
     /* ---------- 【U20】照影之境（整百层「觐见魔王」的固定奖励） ----------
      * 用户口径 2026-10：打赢第 100 / 200 / 300… 层的魔王后**固定掉落**这一件，
      * 拾取之后挂在「永久增益」的**最前面**，介绍是 `？？？`（效果刻意不明说），
@@ -2226,6 +2251,7 @@
    * 标签是唯一真相，旧字段只是给历史调用点看的派生值，两边不一致会在加载期抛错。
    * ============================================================ */
   const BUFF_TAGS = Object.freeze({
+    hero: '勇者模式专属：只进入勇者对局的来源池',
     tower: '挑战塔：进挑战塔的场间选择池',
     endless: '无尽塔：进无尽塔的场间选择池 / 商店 / 增益集锦',
     shop: '商店：上试炼商店货架（需同时有 endless）',
@@ -2233,6 +2259,7 @@
     limited: '限次类：效果只服务下一场战斗',
     nextBattle: '效果只服务下一场战斗',
     stackable: '可叠层：可重复获得并叠加',
+    quietStack: '不显示叠层说明：同名多份只按拾取逐条生效',
     oncePerRun: '每局限次获得：一局只能拿到一次',
     noRestack: '拿满上限后移出本局可获得池（不参与「叠满开新栏位」的通用规则）',
     repeatable: '可重复获得（非同名唯一）',
@@ -2281,6 +2308,8 @@
     if (buff.kind === 'instant') {
       return hasTag(buff, 'repeatable') ? '可重复获得，效果可累积' : '';
     }
+    /* 隐藏叠层说明：暴击精通这类按「重复拾取各占一栏」走，不在卡面写叠层规则。 */
+    if (hasTag(buff, 'quietStack')) return '';
     if (hasTag(buff, 'unique')) return '同名唯一，只有 1 层';
     if (hasTag(buff, 'oncePerRun')) return '同名最多 1 份，一局只可能拿到一次';
     if (cap === Infinity) return '可无限叠加';
@@ -2304,6 +2333,23 @@
     if (hasTag(buff, 'story')) return base;
     const note = stackNote(buff);
     return note ? base + '（' + note + '）' : base;
+  }
+  /** 商店卡面用的**短介绍**（2026-10 用户口径）：
+   *  · 不追加「同名唯一 / 用尽后才可能再获得 / 一局只可能拿到一次 / 拿满后本局不再出现」
+   *    这类生命周期提示 —— 商店卡位窄，玩家要先看效果与叠层上限；
+   *  · 保留真正的叠层上限（「最多叠 N 层」「可无限叠加」）与铭文「不占永久栏位」；
+   *  · 完整文案仍走 `descOf`（集锦 / 悬停 / 弹窗）；商店卡面只展示短文案，
+   *    `title` 也挂同一份（万一 6 行没放下，悬停仍能看全）。
+   *  硬上限 6 行由 css/tower.css 的 `.shop-desc` 负责，数据侧尽量写到 6 行以内。 */
+  function shopDescOf(buff, mode) {
+    if (!buff) return '';
+    const base = (mode === 'endless' && buff.descEndless) ? buff.descEndless : buff.desc;
+    if (hasTag(buff, 'story')) return base;
+    if (buff.kind === 'inscription') return base + '（铭文类：不占永久栏位）';
+    const cap = stackCap(buff);
+    if (cap === Infinity) return base + '（可无限叠加）';
+    if (cap > 1) return base + '（最多叠 ' + cap + ' 层）';
+    return base;
   }
   /* 无尽专属 mod：带这些效果的增益只在无尽塔成立（环境词缀 / 试炼币 / 商店 /
    * 铸币 / 结算 / 商店消费相关）。挑战塔带这类标签/效果一律加载期报错。 */
@@ -2445,6 +2491,7 @@
     endlessScaleParts, FOE_STAT_MUL_NOTE,
     buffScore, reviveScoreAt,
     SHOP_PRICE_OFFSET, rollShopPrice,
+    shopPrice, shopBuyPrice,
     rerollPriceAt, rerollPriceCapped, rerollQualityCapped, mechSealsHeal, HEAL_SEAL_MECHS, rerollTilt, tiltRateMul, rawTierWeights, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,
     TIER_DYNAMIC_WEIGHTS, TIER_AVG_INCLUDES_STATIC, LEGEND_PITY, TICKET_FROM_MINT_CAP, ENDLESS_X00_BONUS_TICKETS,
     shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,
@@ -2452,7 +2499,7 @@
     PATROL, patrolLayerInBlock, isPatrolLayer, patrolName,
     MINT_SHOP, mintLayerOk, mintGroupOf, mintPrice, mintWeights, rollMintRarity, mintChance,
     mintPool, opsPool, MINT_EXCLUDE_MODS,
-    BUFF_TAGS, POOL_TAGS, hasTag, tagsOf, buffsWithTag, poolsOf, descOf, stackNote,
+    BUFF_TAGS, POOL_TAGS, hasTag, tagsOf, buffsWithTag, poolsOf, descOf, shopDescOf, stackNote,
     legendWeightFactor, legendOwnedCount, allRepeatableLegendsOwned, LEGEND_BASE_WEIGHT, LEGEND_TIER_DECAY, rarityBoostOf,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,

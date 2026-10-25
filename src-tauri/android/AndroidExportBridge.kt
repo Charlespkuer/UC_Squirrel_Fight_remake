@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.system.Os
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -20,6 +21,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 
 /**
  * 安卓端「导出存档」落点（**所有受支持的 Android 版本都落到系统「下载」目录**）。
@@ -157,18 +160,8 @@ class AndroidExportBridge(
     private fun saveViaMediaStore(name: String, bytes: ByteArray, replace: Boolean): String {
         val resolver = activity.contentResolver
         val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        if (replace) {
-            /* 覆盖自动存档：先删旧行再插新的。个别 ROM 上 openOutputStream("wt") 不截断，
-             * 旧 JSON 的尾巴会留在新内容后面，读出来就是坏档 —— 删了重插最稳。 */
-            val old = findExistingDownload(collection, name)
-            if (old != null) {
-                try {
-                    resolver.delete(old, null, null)
-                } catch (e: Exception) {
-                    Log.w(TAG, "delete old auto backup failed", e)
-                }
-            }
-        }
+        // 新副本完成并发布之前保留旧行，写盘失败仍有上一份可恢复的备份。
+        val old = if (replace) findExistingDownload(collection, name) else null
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
@@ -178,17 +171,38 @@ class AndroidExportBridge(
         val uri = resolver.insert(collection, values)
             ?: return fail("无法在系统下载目录创建文件")
         try {
-            val out = resolver.openOutputStream(uri) ?: return fail("无法写入系统下载目录")
+            val out = resolver.openOutputStream(uri)
+                ?: throw IOException("无法写入系统下载目录")
             out.use { it.write(bytes) }
             val written = readSize(uri)
-            if (written >= 0 && written != bytes.size.toLong()) {
-                return fail("写入不完整（$written/${bytes.size} 字节）")
+            if (written != bytes.size.toLong()) {
+                throw IOException("无法确认完整写入（$written/${bytes.size} 字节）")
             }
             val done = ContentValues().apply {
                 put(MediaStore.MediaColumns.IS_PENDING, 0)
                 put(MediaStore.MediaColumns.DATE_MODIFIED, System.currentTimeMillis() / 1000)
             }
-            resolver.update(uri, done, null, null)
+            if (resolver.update(uri, done, null, null) <= 0) {
+                throw IOException("无法发布系统下载目录中的文件")
+            }
+            if (old != null) {
+                try {
+                    if (resolver.delete(old, null, null) > 0) {
+                        // 插入时旧名字尚占用，系统可能加 (1)；旧副本删除后恢复固定名字。
+                        val canonical = ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                        }
+                        if (resolver.update(uri, canonical, null, null) <= 0) {
+                            Log.w(TAG, "auto backup published but name could not be restored")
+                        }
+                    } else {
+                        Log.w(TAG, "auto backup published but old row could not be removed")
+                    }
+                } catch (e: Exception) {
+                    // 新副本已经发布；旧副本清理失败不回滚这份完整备份。
+                    Log.w(TAG, "auto backup published but old row cleanup failed", e)
+                }
+            }
             /* 系统可能因为同名文件已存在（例如卸载重装留下的旧行）自动改名成 "xxx (1).json"，
              * 返回真实名字，前端提示/日志才不会指错文件。 */
             val actualName = readDisplayName(uri, name)
@@ -251,7 +265,7 @@ class AndroidExportBridge(
                 } else {
                     if (!dir.exists()) dir.mkdirs()
                     val f = File(dir, name)
-                    f.writeBytes(bytes)
+                    writeAtomically(f, bytes)
                     f.absolutePath
                 }
             } catch (e: Exception) {
@@ -267,7 +281,7 @@ class AndroidExportBridge(
         val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         if (!dir.exists() && !dir.mkdirs()) return fail("无法创建系统下载目录")
         val file = if (replace) File(dir, name) else uniqueFile(dir, name)
-        file.writeBytes(bytes)
+        writeAtomically(file, bytes)
         MediaScannerConnection.scanFile(
             activity,
             arrayOf(file.absolutePath),
@@ -275,6 +289,25 @@ class AndroidExportBridge(
             null,
         )
         return ok("Download/" + file.name, "legacy", bytes.size)
+    }
+
+    /** 同目录临时文件写完并刷盘后用 POSIX rename 替换；API 24/25 也支持。
+     *  rename 失败时旧文件未被截断，finally 只清理本次创建的临时文件。 */
+    private fun writeAtomically(file: File, bytes: ByteArray) {
+        val dir = file.parentFile ?: throw IOException("备份目录无效")
+        val temp = File.createTempFile(".ssdz-backup-", ".tmp", dir)
+        try {
+            FileOutputStream(temp).use { out ->
+                out.write(bytes)
+                out.fd.sync()
+            }
+            if (temp.length() != bytes.size.toLong()) {
+                throw IOException("备份写入不完整")
+            }
+            Os.rename(temp.absolutePath, file.absolutePath)
+        } finally {
+            if (temp.exists() && !temp.delete()) Log.w(TAG, "could not remove temporary backup")
+        }
     }
 
     private fun canWriteLegacyDownloads(): Boolean =

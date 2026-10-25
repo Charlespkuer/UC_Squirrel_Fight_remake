@@ -54,6 +54,67 @@
   const spriteCache = Object.create(null);
   let screen = 'home', timer = 0, activePortrait = null, lastRefresh = 0;
   let catalogPage = 0, bagPage = 0, gearPage = 0;
+  /* ============================================================
+   * 【触屏换页后的输入锁】
+   * 安卓实测（Android 15 WebView / Chrome 124，真触摸）：两下轻点间隔 80ms 时，
+   * 第一下已经换页、第二下的 click 会按**新页面同一坐标**重新命中 ——
+   * 例如「道具 → 状态」最后停在背包，或落在背包页同一位置的格子上。
+   * 换页 / 弹层增减后的 160ms 内吞掉 click（只影响触屏设备，桌面鼠标行为不变）；
+   * 正常人类的下一拍在 200ms 以后，不会误伤。
+   * ⚠ 只吞 click，不动 pointerdown/up：SVG 路由的悬停/按下反馈照常，
+   *   被吞掉的是"换页前那一拍遗留的第二下"。
+   * ============================================================ */
+  const touchUi = (() => {
+    try {
+      return !!(document.addEventListener && document.getElementById && window.matchMedia &&
+        matchMedia('(pointer: coarse)').matches);
+    } catch (e) { return false; }
+  })();
+  const nowMs = () => (window.performance && performance.now ? performance.now() : Date.now());
+  let navLockUntil = 0;
+  const navLock = (ms) => { navLockUntil = Math.max(navLockUntil, nowMs() + (ms || 160)); };
+  const navLockInteresting = (n) => !!(n && n.nodeType === 1 && n.classList && (
+    n.classList.contains('classic-page') || n.classList.contains('classic-home') ||
+    n.classList.contains('classic-modal-overlay') || n.classList.contains('ssfight-view') ||
+    n.classList.contains('sf-rank-prep') || n.classList.contains('panel')));
+  if (touchUi) {
+    document.addEventListener('click', (e) => {
+      if (nowMs() >= navLockUntil) return;
+      /* 真实轻点(trusted) 与 touchend 兜底补发(__sfSynth) 才吞；
+       * 程序化 `.click()`（自检 / 自动流程 / 调试）不在此列。 */
+      if (!e.isTrusted && !e.__sfSynth) return;
+      /* 告诉 touch-fallback「这一下确实有可信 click，只是被换页锁吞了」：
+       * 它的 420ms 兜底否则会以为 click 丢了，锁过期后再补发一次旧坐标的 click。
+       * ⚠ 这里必须用 Date.now()：touch-fallback 的 began / lastTrustedClick 都是 Date.now，
+       *   而本文件的 nowMs() 是 performance.now，两个时钟不能混。 */
+      if (e.isTrusted) window.__sfTrustedClickAt = Date.now();
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    }, true);
+    const watchNavLock = () => {
+      const ui = document.getElementById('ui');
+      if (!ui || !window.MutationObserver) return;
+      new MutationObserver((records) => {
+        for (const r of records) {
+          for (const n of r.addedNodes) if (navLockInteresting(n)) { navLock(); return; }
+          for (const n of r.removedNodes) if (navLockInteresting(n)) { navLock(); return; }
+        }
+      }).observe(ui, { childList: true });
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchNavLock, { once: true });
+    else watchNavLock();
+  }
+  /* 当前背包页的「就地刷新」入口（合成页关掉时用它更新数量，不整页重建；见 openBag 里的 refreshBag）。 */
+  let bagRefresh = null;
+  /* 背包排序：黑装自选箱（89）**固定第一页最前**。
+   * 它是挑战塔第 100 层首通的一次性奖励，按 id 升序会排到所有道具之后（玩家一页只有 6 格），
+   * 打开背包第一页看不到，看起来就像「领取后没有进背包」（用户 2026-10 报的 bug）。
+   * 只挪这一件；其余道具仍按 id 升序。 */
+  const bagSort = (a, b) => {
+    const pa = Number(a && a.id) === 89 ? 0 : 1;
+    const pb = Number(b && b.id) === 89 ? 0 : 1;
+    return pa - pb || (Number(a && a.id) || 0) - (Number(b && b.id) || 0);
+  };
   let selectedProp = 0;
   let selectedRankGood = 0;
   /* 图集图标的一级子目录：images/ui/icons/<dir>/<kind>-<id>.png（与磁盘结构一一对应）。 */
@@ -266,9 +327,22 @@
     const fromReference=(locked && grey[kind]?.includes(+id)) || (!locked && kind==='skill' && [6,13].includes(+id));
     return '<img alt="" '+(fromReference?'class="reference-art" ':'')+'src="'+(fromReference?'images/ui/cards/true/'+kind+'-'+id+'.png':atlasIcon(kind,id,locked))+'">';
   }
-  function statsHtml(stats, cls) {
+  function statsHtml(stats, cls, hero) {
     // 数字单独包一层 .stat-value：状态页的四项数字要能单独往上微调，不带着圆形字徽一起动
-    return '<div class="' + (cls || 'stat-strip') + '">' + [['力','power'],['敏','agility'],['速','speed'],['命','hp']].map(([s,k]) => '<div class="stat-pill"><b>' + s + '</b><span class="stat-value">' + esc(stats[k]) + '</span></div>').join('') + '</div>';
+    const allocation = hero && hero.mode === 'setup' && typeof hero.statState === 'function' ? hero.statState() : null;
+    return '<div class="' + (cls || 'stat-strip') + '">' + [['力','power'],['敏','agility'],['速','speed'],['命','hp']].map(([s,k]) => {
+      const editable = !!(allocation && k !== 'hp');
+      let controls = '';
+      if (editable) {
+        const rules = allocation.rules || {}, base = Number((allocation.values || {})[k]) || 0;
+        controls = '<span class="hero-stat-arrows">' +
+          '<button type="button" class="hero-stat-step" data-hero-stat="' + k + ':up" aria-label="' + s + '加1"' +
+            (Number(allocation.pool) > 0 && base < Number(rules.cap) ? '' : ' disabled') + '>▲</button>' +
+          '<button type="button" class="hero-stat-step" data-hero-stat="' + k + ':down" aria-label="' + s + '减1"' +
+            (base > Number(rules.floor) ? '' : ' disabled') + '>▼</button></span>';
+      }
+      return '<div class="stat-pill' + (editable ? ' hero-stat-pill' : '') + '"><b>' + s + '</b><span class="stat-value">' + esc(stats[k]) + '</span>' + controls + '</div>';
+    }).join('') + '</div>';
   }
   // 升级奖励面板用的属性图标：直接复用已按颜色分好的道具图标（3 力 / 4 敏 / 5 速 / 7 经验）。
   // 原版没有单独的「生命」图标，用同风格的圆形字徽补上。
@@ -507,8 +581,10 @@
       const nb = Array.prototype.find.call(p.children, (el) => el && el.classList && el.classList.contains('classic-board'));
       if (nb) { nb.scrollTop = keepTop; nb.scrollLeft = keepLeft; }
     }
-    if (window.SfGuide) { try { SfGuide.onPage(active); } catch (e) {} }
-    promptLevelUpChoices();
+    if (!opts.noAccountPrompts) {
+      if (window.SfGuide) { try { SfGuide.onPage(active); } catch (e) {} }
+      promptLevelUpChoices();
+    }
     return p;
   }
   function modal(title, content, buttons, opts) {
@@ -807,14 +883,411 @@
     }
     openStatusDom();
   }
-  function openStatusDom() {
-    const S=State.state(),st=State.totalStats(),fights=S.dailyWins+S.dailyFails;
-    const p=page('status','status','<canvas class="status-character" width="497" height="341" aria-label="我的松鼠"></canvas><div class="status-right"><div class="status-exp"><span class="home-exp-label">Exp</span><div class="exp-meter"><i style="width:'+Math.min(100,100*S.exp/GData.nextExp(S.level))+'%"></i><span>'+S.exp+'/'+GData.nextExp(S.level)+'</span></div></div><dl class="status-lines"><dt>今日胜率：</dt><dd>'+(fights?Math.round(S.dailyWins/fights*100):0)+'%</dd><dt>战斗场次：</dt><dd>'+(S.allWins+S.allFails)+'</dd></dl><div class="status-buttons">'+btn('更换装备','gears','gold',true)+btn('装备融合','merge','gold')+'</div></div>'+statsHtml(st));
+  function openStatusDom(context) {
+    const hero = context && context.hero;
+    const S=hero ? null : State.state(),st=hero ? heroSourceStats(hero) : State.totalStats(),fights=S ? S.dailyWins+S.dailyFails : 0;
+    const fields = hero ? heroStatusFields(hero) : '<div class="status-exp"><span class="home-exp-label">Exp</span><div class="exp-meter"><i style="width:'+Math.min(100,100*S.exp/GData.nextExp(S.level))+'%"></i><span>'+S.exp+'/'+GData.nextExp(S.level)+'</span></div></div><dl class="status-lines"><dt>今日胜率：</dt><dd>'+(fights?Math.round(S.dailyWins/fights*100):0)+'%</dd><dt>战斗场次：</dt><dd>'+(S.allWins+S.allFails)+'</dd></dl><div class="status-buttons">'+btn('更换装备','gears','gold',true)+btn('装备融合','merge','gold')+'</div>';
+    const p=page('status','status','<canvas class="status-character" width="497" height="341" aria-label="'+(hero?'勇者':'我的松鼠')+'"></canvas><div class="status-right">'+fields+'</div>'+statsHtml(st, null, hero), hero ? {
+      pageClass: 'hero-context-page', homeLabel: '返回', noAccountPrompts: true,
+    } : undefined);
+    if (hero) {
+      if (hero.mode !== 'setup') $('.page-footer',p).insertAdjacentHTML('beforeend',
+        '<button type="button" class="status-sell-link" data-action="hero-log">成长记录</button>' +
+        '<button type="button" class="status-fusion-link" data-action="hero-blade">勇者之剑</button>');
+      return p;
+    }
     portrait($('.status-character',p));
     $('.page-footer',p).insertAdjacentHTML('beforeend',
       '<button class="status-sell-link" data-action="gear-sell" aria-label="装备出售：按品质回收背包里的装备"><span class="status-sell-icon" aria-hidden="true"><i class="status-sell-glyph">$</i></span><span class="status-sell-text">装备出售</span></button>' +
       '<button class="status-fusion-link" data-action="merge" aria-label="装备融合：三件同品质装备合成更高品质"><span class="status-fusion-icon" aria-hidden="true"><i class="status-fusion-glyph">⚒</i></span><span class="status-fusion-text">装备融合</span></button>');
     bind(p,{...actions,merge:openMerge,home});
+    return p;
+  }
+
+  /* ============================================================
+   * 【UC7b】现代界面的勇者页（直接复用状态页的壳与武技图鉴）
+   * ------------------------------------------------------------
+   * 用户 2026-10 口径：
+   *   · 勇者准备 / 详情**不再自绘一套工作台**，直接调用现代状态页
+   *     （共用 `openStatusDom` / `openCatalog`，三颗页签与 `.catalog-grid` 武技页）；
+   *   · 状态页签显示「出发准备」/「勇者详情」，武器 / 技能页签与图鉴页同款格子；
+   *   · 开局逻辑仍照经典 7218 那一套：点亮 3 个、四维上下调、外观只改本局。
+   * 数据与回调由 `js/tower-ui.js` 通过 `UI.classic.openHeroPage(hero, opts)` 传入。
+   * ============================================================ */
+  const HERO_PICK_LIMIT = 3;
+  const heroLevelText = (level) => {
+    const n = Math.max(1, Math.min(15, Math.floor(Number(level) || 1)));
+    return n > 10 ? '真' + (n - 10) : 'Lv.' + n;
+  };
+  function heroSourceStats(hero) {
+    const raw = (typeof hero.stats === 'function' ? hero.stats() : hero.stats) || {};
+    const maxHp = Math.max(0, Math.round(Number(raw.maxHp != null ? raw.maxHp : raw.hp) || 0));
+    return { power: Math.max(0, Math.round(Number(raw.power) || 0)),
+      agility: Math.max(0, Math.round(Number(raw.agility) || 0)),
+      speed: Math.max(0, Math.round(Number(raw.speed) || 0)), maxHp, hp: maxHp };
+  }
+  function heroRefItems(hero) {
+    const out = [];
+    for (const kind of ['weapon', 'skill']) {
+      const list = Array.isArray(hero[kind === 'weapon' ? 'weapons' : 'skills'])
+        ? hero[kind === 'weapon' ? 'weapons' : 'skills'] : [];
+      for (const raw of list) {
+        const hit = /^(\d+):(\d+)$/.exec(String(raw));
+        if (!hit) continue;
+        const id = Number(hit[1]), level = Math.max(1, Math.min(15, Number(hit[2]) || 1));
+        const def = kind === 'weapon'
+          ? (State.weaponInst ? State.weaponInst(id + ':' + level) : null)
+          : (State.skillInst ? State.skillInst(id + ':' + level) : null);
+        out.push({ kind, id, level, ref: (kind === 'weapon' ? 'w:' : 's:') + id,
+          name: (def && def.name) || ((kind === 'weapon' ? '武器 ' : '技能 ') + id),
+          desc: (def && (def.remark || def.desc)) || '' });
+      }
+    }
+    return out;
+  }
+  function heroCatalogOf(kind) {
+    try {
+      if (!window.TowerHero || typeof TowerHero.catalog !== 'function') return [];
+      return TowerHero.catalog().filter((it) => it.kind === kind);
+    } catch (e) { return []; }
+  }
+  function heroCatalogItem(kind, id) {
+    return heroCatalogOf(kind).find((it) => Number(it.id) === Number(id)) || null;
+  }
+  function heroPickRefs(hero) {
+    return (Array.isArray(hero.picks) ? hero.picks : []).map((it) => ({ kind: it.kind, id: Number(it.id) }));
+  }
+  function heroPickKey(it) { return it.kind + ':' + Number(it.id); }
+  function heroAppearanceSlots(hero) {
+    const slots = [0, 0, 0, 0];
+    for (const raw of (Array.isArray(hero.appearance) ? hero.appearance : [])) {
+      const item = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
+      const id = Number(item.id);
+      if (!(id > 0)) continue;
+      const type = Number.isFinite(Number(item.type)) ? Number(item.type)
+        : (State.gearPart ? State.gearPart(id) : (State.gearInst(id) || {}).type);
+      if (Number.isInteger(type) && type >= 0 && type <= 3 && !slots[type]) slots[type] = id;
+    }
+    return slots;
+  }
+  function heroGearName(id) {
+    const n = Number(id) || 0;
+    if (!(n > 0)) return '未穿戴';
+    try { const g = State.gearInst ? State.gearInst(n) : null; return (g && g.name) || ('装备 ' + n); }
+    catch (e) { return '装备 ' + n; }
+  }
+  function heroWearsSource(hero) {
+    const out = [];
+    for (const raw of (Array.isArray(hero.appearance) ? hero.appearance : [])) {
+      const item = (raw && typeof raw === 'object') ? Object.assign({}, raw) : { id: Number(raw) };
+      const id = Number(item.id);
+      if (!(id > 0)) continue;
+      /* 运行中的外观带 type / ext / orange，保留它们（染色与强化档要影响造型）；
+       * 准备页草稿只有 id 时才补一份 gearInst。 */
+      if (Number.isFinite(Number(item.type)) && item.type != null) { out.push(item); continue; }
+      try {
+        const inst = State.gearInst ? State.gearInst(id) : null;
+        out.push(inst || item);
+      } catch (e) { out.push(item); }
+    }
+    return out;
+  }
+  /** Shared status fields: the ordinary layout reads a hero snapshot instead of account data. */
+  function heroStatusFields(hero) {
+    const setup = hero.mode === 'setup', picks = heroPickRefs(hero);
+    const allocation = setup && typeof hero.statState === 'function' ? hero.statState() : null;
+    const pool = Math.max(0, Number(allocation && allocation.pool) || 0);
+    const stats = heroSourceStats(hero), hp = hero.hp || {};
+    const max = setup ? HERO_PICK_LIMIT : Math.max(1, Number(hp.maxHp) || stats.maxHp);
+    const value = setup ? picks.length : Math.max(0, Number(hp.hp) || 0);
+    const ready = picks.length === HERO_PICK_LIMIT && pool === 0;
+    const coins = Math.max(0, Number(hero.coins) || 0);
+    let action = btn(setup ? '开始冒险' : '铸币修炼', setup ? 'hero-start' : 'hero-train', 'gold');
+    if (setup ? !ready : coins <= 0) action = action.replace('<button', '<button disabled');
+    /* 准备页的「武技」不再用经验条，和下面「四维分配 / 外观装备」保持同一套
+     * dt 标签 + 棕色 dd 胶囊；开始界面三行一目了然（用户 2026-10-25 口径）。 */
+    const lines = setup
+      ? '<dt>武技：</dt><dd>' + picks.length + '/' + HERO_PICK_LIMIT + '</dd>' +
+        '<dt>四维分配：</dt><dd>' + (pool ? '余' + pool + '点' : '已分配') + '</dd>' +
+        '<dt>外观装备：</dt><dd>' + heroAppearanceSlots(hero).filter(Boolean).length + ' 件</dd>'
+      : '<dt>累计胜利：</dt><dd>' + Math.max(0, Number(hero.wins) || 0) + '</dd>' +
+        '<dt>当前铸币：</dt><dd>' + coins + '</dd>';
+    const exp = setup ? '' : '<div class="status-exp"><span class="home-exp-label">生命</span>' +
+      '<div class="exp-meter"><i style="width:' + Math.max(0, Math.min(100, value / max * 100)) + '%"></i><span>' + value + '/' + max + '</span></div></div>';
+    return exp + '<dl class="status-lines">' + lines + '</dl><div class="status-buttons">' +
+      btn('外观装备', 'hero-gear', 'gold', true) + action + '</div>';
+  }
+  function heroOwnedMap(hero) {
+    const map = new Map();
+    for (const it of heroPickRefs(hero)) map.set(heroPickKey(it), { kind: it.kind, id: it.id, level: 5 });
+    for (const it of heroRefItems(hero)) map.set(heroPickKey(it), {
+      kind: it.kind, id: it.id, level: it.level, name: it.name, ref: it.ref });
+    return map;
+  }
+  function heroPageOpen(hero, opts, state) {
+    const o = opts || {};
+    const tab = state.tab || 'status';
+    const context = { hero, state, redraw: () => heroPageOpen(hero, o, state) };
+    const p = tab === 'status' ? openStatusDom(context)
+      : openCatalog(tab === 'weapons' ? 'weapon' : 'skill', state.pages[tab === 'weapons' ? 'weapon' : 'skill'], context);
+    const back = $('[data-action="home"]', p);
+    if (back) {
+      back.onclick = (ev) => { if (ev && ev.preventDefault) ev.preventDefault(); if (hero.onBack) hero.onBack(); else home(); };
+    }
+    $$('.classic-tabs .uc-tab', p).forEach((b) => {
+      const key = b.dataset && b.dataset.action;
+      if (key !== 'status' && key !== 'weapons' && key !== 'skills') return;
+      b.onclick = () => {
+        if (key === state.tab) return;
+        state.tab = key;
+        heroPageOpen(hero, o, state);
+      };
+    });
+    $$('[data-hero-stat]', p).forEach((b) => {
+      b.onclick = () => {
+        if (!hero.onAdjustStat) return;
+        const parts = String(b.dataset.heroStat || '').split(':');
+        const out = hero.onAdjustStat(parts[0], parts[1]);
+        if (out && out.ok === false) { toast(out.msg || '无法调整。'); return; }
+        heroPageOpen(hero, o, state);
+      };
+    });
+    const start = $('[data-action="hero-start"]', p);
+    if (start) {
+      start.onclick = () => {
+        if (start.disabled) {
+          const picks = heroPickRefs(hero).length;
+          toast(picks < HERO_PICK_LIMIT ? ('还需点亮 ' + (HERO_PICK_LIMIT - picks) + ' 个武技。') : '先把可分配点分配完。');
+          return;
+        }
+        if (hero.onStart) hero.onStart();
+      };
+    }
+    const gear = $('[data-action="hero-gear"]', p);
+    if (gear) gear.onclick = () => {
+      if (hero.onEquip) openHeroGears(0, context);
+      else if (hero.onGears) hero.onGears();
+    };
+    const train = $('[data-action="hero-train"]', p);
+    if (train) train.onclick = () => openHeroTrainModal(hero, () => heroPageOpen(hero, o, state));
+    const log = $('[data-action="hero-log"]', p);
+    if (log) log.onclick = () => {
+      const lines = (Array.isArray(hero.log) ? hero.log : []).slice(-20).reverse();
+      modal('成长记录', '<p>累计胜利 ' + Math.max(0, Number(hero.wins) || 0) + ' 场 · 巡逻胜利 ' +
+        Math.max(0, Number(hero.patrolWins) || 0) + ' 场 · 不占上限 ' + Math.max(0, Number(hero.uncapped) || 0) + ' 项</p>' +
+        (lines.length ? '<ol>' + lines.map(line => '<li>' + esc(line) + '</li>').join('') + '</ol>' : '<p>每场胜利后获得一次勇者成长。</p>'),
+        [{ label: '返回', cls: 'muted' }], { small: true });
+    };
+    const blade = $('[data-action="hero-blade"]', p);
+    if (blade) blade.onclick = () => {
+      const info = hero.blade;
+      modal('勇者之剑', '<p>' + (info ? '破镜 ×' + Math.max(0, Number(info.stacks) || 0) + '：魔王·镜的力量 −' +
+        Math.round(Number(info.powerCut) * 100) + '%、生命上限 −' + Math.round(Number(info.hpCut) * 100) + '%。' :
+        '击败巡逻魔王后，断锋会在镜中回应你。') + '</p>', [{ label: '返回', cls: 'muted' }], { small: true });
+    };
+    const canvas = $('.status-character', p);
+    if (canvas) {
+      const source = heroWearsSource(hero);
+      let initial = null;
+      try { initial = Engine.wearsFor(source); } catch (e) { initial = []; }
+      portrait(canvas, { useHeroWears: false, wears: initial, still: true });
+      try {
+        if (Engine.loadWears) Engine.loadWears(source).then((wears) => {
+          if (canvas.isConnected) portrait(canvas, { useHeroWears: false, wears: wears, still: true });
+        }).catch(() => {});
+      } catch (e) { /* 素材不可用时仍画默认角色 */ }
+    }
+    return p;
+  }
+  /** 勇者外观的完整装备池：优先用 tower-ui 摊平的 228 件（按品质 → 套装 → 部位），
+   *  没有传时从装备字典现场拼一份。这里**不读取账号拥有**，也不接任何属性。 */
+  function heroGearListOf(hero) {
+    if (hero && Array.isArray(hero.gearList) && hero.gearList.length) return hero.gearList;
+    const rows = [];
+    if (!window.gearMap || typeof gearMap.each !== 'function' || !State.gearInst) return rows;
+    gearMap.each((key, row) => {
+      const id = Number(row && row.id != null ? row.id : key);
+      const gear = State.gearInst(id);
+      if (!gear || !Number.isInteger(Number(gear.type))) return;
+      rows.push({ id, name: gear.name || ('装备 ' + id), type: Number(gear.type),
+        quality: Math.max(0, Math.min(5, Number(gear.quality) || 0)), setId: Number(gear.setId) || 0 });
+    });
+    rows.sort((a, b) => (b.quality - a.quality) || (a.setId - b.setId) || (a.type - b.type) || (a.id - b.id));
+    return rows;
+  }
+  /** 勇者外观页的装备图：黑/橙装有一部分没有导出 PNG，缺图时用部位字占位，
+   *  不让整格变成一块空白；不影响账号装备页的 gearImg。 */
+  function heroGearPic(g) {
+    const part = ['头', '拳', '衣', '鞋'][Number(g && g.type)] || '装';
+    return '<i class="hero-gear-glyph" aria-hidden="true">' + part + '</i>' +
+      '<img alt="" src="images/ui/icons/gear/gear-' + Number(g && g.id) + '.png" ' +
+      'onerror="this.style.display=\'none\';this.parentNode.classList.add(\'missing\')">';
+  }
+  /** 只刷新勇者页上的立绘与「外观装备 N 件」计数（换装弹窗开着时不重画整页）。 */
+  function repaintHeroStatusAppearance(hero) {
+    if (!hero) return;
+    const canvas = $('.status-character');
+    if (canvas) {
+      try {
+        const source = heroWearsSource(hero);
+        Engine.loadWears(source).then((wears) => {
+          if (canvas.isConnected) portrait(canvas, { useHeroWears: false, wears: wears, still: true });
+        }).catch(() => {});
+      } catch (e) { /* 素材不可用时保持原图 */ }
+    }
+    const count = heroAppearanceSlots(hero).filter(Boolean).length;
+    $$('.status-lines dt').forEach((dt) => {
+      if (String(dt.textContent || '').indexOf('外观装备') < 0) return;
+      const dd = dt.nextElementSibling;
+      if (dd) dd.textContent = count + ' 件';
+    });
+  }
+  /* 现代勇者的「外观装备」页：直接套用状态 → 更换装备的 `gear-modal`
+   * （四部位纸娃娃 + 每页 6 件 + 翻页），数据源换成全部 228 件外观。
+   * 没有详情 / 套装收益 / 属性：点一下穿上，再点一下脱下，全部 0 加成。 */
+  function openHeroGears(pg, context) {
+    const hero = context && context.hero;
+    if (!hero) return null;
+    const list = heroGearListOf(hero);
+    if (!list.length) { notice('装备字典还没有加载。'); return null; }
+    const total = Math.max(1, Math.ceil(list.length / 6));
+    const page = Math.max(0, Math.min(total - 1, Number(pg) || 0));
+    const slotNames = ['头部', '手部', '身体', '脚部'];
+    const byId = new Map(list.map((g) => [Number(g.id), g]));
+    const slots = heroAppearanceSlots(hero);
+    const slotLabel = (g, fallback) => g
+      ? '<span class="gear-slot-name q' + Number(g.quality || 0) + '">' + esc(g.name) + '</span>'
+      : '<span class="gear-empty">' + fallback + '</span>';
+    const slotCell = (part) => {
+      const id = Number(slots[part]) || 0, g = id ? byId.get(id) : null;
+      return '<button class="catalog-cell" data-hero-gear-slot="' + part + '"' + (g ? '' : ' disabled') +
+        ' aria-label="' + slotNames[part] + '：' + (g ? esc(g.name) : '未穿戴') + '">' +
+        '<span class="item-icon">' + (g ? heroGearPic(g) : '') + '</span>' + slotLabel(g, slotNames[part]) + '</button>';
+    };
+    const card = (g) => {
+      const id = Number(g.id), used = Number(slots[Number(g.type)]) === id;
+      return '<button class="catalog-cell' + (used ? ' selected' : '') + '" data-hero-gear-card="' + id + '"' +
+        ' data-gear-type="' + Number(g.type) + '" aria-pressed="' + (used ? 'true' : 'false') + '"' +
+        ' title="' + esc(g.name + (g.setLabel ? ' · ' + g.setLabel : '') + ' · ' + (['普通', '优秀', '杰出', '卓越', '传说', '黑色'][g.quality] || '') + '装 · ' + (['头部', '手部', '身体', '脚部'][g.type] || '') + ' · 仅外观') + '">' +
+        '<span class="item-icon">' + heroGearPic(g) + (used ? '<span class="equipped-check">✓</span>' : '') + '</span>' +
+        '<span class="item-caption q' + Number(g.quality || 0) + '">' + esc(g.name) + '</span></button>';
+    };
+    const shown = list.slice(page * 6, page * 6 + 6);
+    const content = '<p class="gear-note">全部装备均可选；每套四件齐全，仅改变造型，所有属性 0 加成。</p>' +
+      '<div class="gear-layout"><div class="gear-slots">' + [0, 1, 2, 3].map(slotCell).join('') + '</div>' +
+      '<div class="gear-list">' + shown.map(card).join('') +
+        Array.from({ length: 6 - shown.length }, () => '<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('') +
+      '</div></div>' +
+      '<span class="gear-capacity">共 ' + list.length + ' 件　' + (page + 1) + '/' + total + '</span>' +
+      (page > 0 ? '<div class="page-arrow prev">' + btn('‹', 'prev', 'arrow') + '</div>' : '') +
+      (page < total - 1 ? '<div class="page-arrow">' + btn('›', 'next', 'arrow') + '</div>' : '');
+    const m = modal('外观装备', content, [{ label: '返回', cls: 'gold', run: () => { if (context.redraw) context.redraw(); } }]);
+    if (!m || !m.element) return m;
+    m.element.classList.add('gear-overlay', 'hero-gear-overlay');
+    const box = $('.classic-modal', m.element);
+    if (box) box.classList.add('gear-modal', 'hero-gear-modal');
+    const slotsHost = $('.gear-slots', m.element);
+    const paintSlots = () => {
+      if (!slotsHost) return;
+      slotsHost.innerHTML = [0, 1, 2, 3].map(slotCell).join('');
+      $$('[data-hero-gear-slot]', slotsHost).forEach((b) => {
+        b.onclick = () => {
+          const part = Number(b.dataset.heroGearSlot);
+          if (!(Number(slots[part]) > 0)) return;
+          slots[part] = 0;
+          applySlots();
+        };
+      });
+    };
+    const sync = () => {
+      paintSlots();
+      $$('[data-hero-gear-card]', m.element).forEach((b) => {
+        const id = Number(b.dataset.heroGearCard), type = Number(b.dataset.gearType);
+        const used = Number(slots[type]) === id;
+        b.classList.toggle('selected', used);
+        b.setAttribute('aria-pressed', used ? 'true' : 'false');
+        const icon = $('.item-icon', b);
+        if (!icon) return;
+        let check = $('.equipped-check', icon);
+        if (used && !check) icon.insertAdjacentHTML('beforeend', '<span class="equipped-check">✓</span>');
+        else if (!used && check) check.remove();
+      });
+    };
+    const applySlots = () => {
+      const next = slots.slice();
+      let out;
+      if (typeof hero.onEquip === 'function') out = hero.onEquip(next);
+      else if (hero.mode === 'setup') { hero.appearance = next.slice(); out = { ok: true, appearance: next.slice() }; }
+      else out = { ok: false, msg: '外观保存失败。' };
+      if (!out || out.ok === false) {
+        toast((out && out.msg) || '外观保存失败。');
+        const old = heroAppearanceSlots(hero);
+        for (let i = 0; i < 4; i++) slots[i] = old[i];
+        sync();
+        return;
+      }
+      if (out.appearance) hero.appearance = out.appearance;
+      else if (hero.mode === 'setup') hero.appearance = next.slice();
+      sync();
+      repaintHeroStatusAppearance(hero);
+    };
+    paintSlots();
+    $$('[data-hero-gear-card]', m.element).forEach((b) => {
+      b.onclick = () => {
+        const id = Number(b.dataset.heroGearCard), type = Number(b.dataset.gearType);
+        if (!(id > 0) || !Number.isInteger(type)) return;
+        slots[type] = Number(slots[type]) === id ? 0 : id;
+        applySlots();
+      };
+    });
+    $('[data-action="prev"]', m.element)?.addEventListener('click', () => { m.close(); openHeroGears(page - 1, context); });
+    $('[data-action="next"]', m.element)?.addEventListener('click', () => { m.close(); openHeroGears(page + 1, context); });
+    return m;
+  }
+
+  /** 现代勇者页入口：返回 { refresh } 方便换外观层重画时保留当前页签。 */
+  function openHeroPage(hero, opts) {
+    if (!hero) return null;
+    const state = { tab: (opts && opts.tab) || 'status', pages: { weapon: 0, skill: 0 } };
+    const ctrl = {
+      refresh: () => { ctrl.element = heroPageOpen(hero, opts || {}, state); return ctrl.element; },
+      tab: () => state.tab,
+      element: null,
+    };
+    ctrl.element = heroPageOpen(hero, opts || {}, state);
+    return ctrl;
+  }
+  /** 现代勇者详情里的「铸币修炼」：只替换本局勇者，不写账号。 */
+  function openHeroTrainModal(hero, refresh) {
+    const refs = heroRefItems(hero).filter((it) => it.level < 15 && !(it.kind === 'skill' && [6, 13].includes(it.id)));
+    if (!refs.length) { toast('没有可修炼的武技。'); return; }
+    const coins = Math.max(0, Math.floor(Number(hero.coins) || 0));
+    if (coins <= 0) { toast('铸币不足（需要 1 枚）。'); return; }
+    const rows = refs.map((it) => {
+      const maxed = it.level >= 15;
+      return '<button type="button" class="hero-train-row" data-hero-train-ref="' + esc(it.ref) + '"' + (maxed ? ' disabled' : '') + '>' +
+        '<span class="hero-train-icon">' + icon(it.kind, it.id, false, false, it.level > 10) + '</span>' +
+        '<span class="hero-train-name"><b>' + esc(it.name) + '</b><em>' + heroLevelText(it.level) + ' → ' +
+          heroLevelText(Math.min(15, it.level + 3)) + '~' + heroLevelText(Math.min(15, it.level + 5)) + '</em></span>' +
+        '<span class="hero-train-cost">1 铸币<br><i>+3~5 级</i></span></button>';
+    }).join('');
+    const m = modal('铸币修炼', '<div class="hero-train-panel"><p>选择一门武技，必定提升 <b>3~5</b> 个小级（封顶真5）。' +
+      '当前铸币 <b class="gold-text">' + coins + '</b> 枚。</p><div class="hero-train-list">' + rows + '</div></div>',
+      [{ label: '返回', cls: 'muted' }], { small: true });
+    if (m && m.element) {
+      m.element.classList.add('hero-train-modal');
+      m.element.querySelectorAll('[data-hero-train-ref]').forEach((b) => {
+        b.onclick = () => {
+          const out = hero.onCoinTrain ? hero.onCoinTrain(b.dataset.heroTrainRef) : { ok: false, msg: '铸币修炼暂不可用。' };
+          m.close();
+          if (!out || !out.ok) { modal('铸币修炼', '<p>' + esc((out && out.msg) || '修炼失败。') + '</p>', [{ label: '返回', cls: 'muted', run: refresh }], { small: true }); return; }
+          modal('修炼完成', '<div class="result-box"><div class="result-title win">武技精进</div><p>' + esc(out.msg) + '</p>' +
+            '<p class="dim">消耗 1 枚铸币，剩余 ' + Math.max(0, Number(out.left) || 0) + ' 枚。</p></div>',
+            [{ label: '继续修炼', cls: 'gold', run: () => { refresh(); openHeroTrainModal(hero, refresh); } },
+             { label: '返回', cls: 'muted', run: refresh }], { small: true });
+        };
+      });
+    }
   }
   function allItems(kind) {
     const a=[];(kind==='weapon'?weaponsMap:skillsMap).each((id,v)=>{if(v&&+id>0)a.push({...v,id:+id});});
@@ -869,40 +1342,77 @@
     if (locked) return row.locked ? String(row.locked) : String(row.id);
     return String(row.id);
   }
-  function openCatalog(kind,pg) {
-    catalogPage=pg||0;
-    const own=kind==='weapon'?State.myWeapons():State.mySkills();
-    const items=allItems(kind),total=Math.ceil(items.length/10),key=kind==='weapon'?'weapons':'skills';
-    catalogPage=Math.min(catalogPage,total-1);
-    const shown=items.slice(catalogPage*10,catalogPage*10+10);
+  function openCatalog(kind,pg,context) {
+    const hero=context && context.hero,setup=hero && hero.mode==='setup';
+    const owned=hero ? heroOwnedMap(hero) : null;
+    const own=hero ? Array.from(owned.values()).filter(it=>it.kind===kind)
+      : kind==='weapon'?State.myWeapons():State.mySkills();
+    const items=hero ? heroCatalogOf(kind) : allItems(kind),total=Math.max(1,Math.ceil(items.length/10)),key=kind==='weapon'?'weapons':'skills';
+    const pageNo=Math.max(0,Math.min(Number(pg)||0,total-1));
+    if (!hero) catalogPage=pageNo;
+    else {
+      context.state.pages[kind]=pageNo;
+      if (!context.state.selected) context.state.selected={weapon:null,skill:null};
+    }
+    const shown=items.slice(pageNo*10,pageNo*10+10);
     const cells=shown.map(it=>{
       const has=own.find(x=>x.id===it.id);
-      const selected=has && selectedItems[kind]===it.id;
+      const selected=has && (setup || (hero ? context.state.selected[kind] : selectedItems[kind])===it.id);
       /* 真形态：武器与技能都算（2026-10 之前只判断武器，技能的真化贴图因此一直不显示）。 */
       const trueForm = !!has && isTrueGear(has);
       /* 2026-10 用户口径：选中之后格子下方的说明**仍然显示等级**（LV/真N），
        * 不再换成该武器 / 技能的名字（名字在详情弹窗里看）。 */
-      return '<button class="catalog-cell '+(!has?'locked':selected?'selected':'')+(trueForm?' true-form':'')+'" data-item="'+it.id+'" aria-label="'+esc(it.name)+(has?' '+levelLabel(has.level):' 尚未获得')+'"><span class="item-icon">'+icon(kind,it.id,!has,selected,trueForm)+'</span><span class="item-caption">'+(has?levelLabel(has.level):'')+'</span></button>';
+      return '<button class="catalog-cell '+(!has?'locked':selected?'selected':'')+(trueForm?' true-form':'')+'" data-item="'+it.id+'"'+
+        (hero?' data-hero-cell="'+kind+':'+it.id+'" aria-pressed="'+(selected?'true':'false')+'"':'')+
+        ' aria-label="'+esc(it.name)+(has?' '+levelLabel(has.level):' 尚未获得')+'"><span class="item-icon">'+icon(kind,it.id,!has,selected,trueForm)+'</span><span class="item-caption">'+(has?levelLabel(has.level):'')+'</span></button>';
     }).join('')+Array.from({length:10-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('');
-    const p=page('status',key,'<div class="catalog-grid">'+cells+'</div>'+(catalogPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(catalogPage<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),{counter:(catalogPage+1)+'/'+total,cls:'collection-board'});
-    $$('[data-item]',p).forEach(b=>b.onclick=()=>{selectedItems[kind]=+b.dataset.item;openCatalog(kind,catalogPage);openItem(kind,+b.dataset.item);});
-    $('[data-action="prev"]',p)?.addEventListener('click',()=>openCatalog(kind,catalogPage-1));
-    $('[data-action="next"]',p)?.addEventListener('click',()=>openCatalog(kind,catalogPage+1));
+    const options={counter:(pageNo+1)+'/'+total,cls:'collection-board'};
+    if (hero) Object.assign(options,{pageClass:'hero-context-page',homeLabel:'返回',noAccountPrompts:true,
+      left:'<span class="hero-page-hint">'+(setup?'已点亮 '+heroPickRefs(hero).length+' / '+HERO_PICK_LIMIT+' · 点一下切换':'已掌握 '+own.length+' 项')+'</span>'});
+    const p=page('status',key,'<div class="catalog-grid">'+cells+'</div>'+(pageNo?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(pageNo<total-1?'<div class="page-arrow">'+btn('›','next','arrow')+'</div>':''),options);
+    $$('[data-item]',p).forEach(b=>b.onclick=()=>{
+      const id=+b.dataset.item;
+      if (setup) {
+        const picks=heroPickRefs(hero),at=picks.findIndex(it=>it.kind===kind && it.id===id);
+        if(at>=0)picks.splice(at,1);
+        else if(picks.length<HERO_PICK_LIMIT)picks.push({kind,id});
+        else {toast('已经点亮 3 个武技；先点暗一个再换。');return;}
+        hero.picks=picks;
+        if(hero.onPicks)hero.onPicks(picks.map(it=>Object.assign({},it)));
+        context.redraw();return;
+      }
+      if(hero){context.state.selected[kind]=id;context.redraw();}
+      else {selectedItems[kind]=id;openCatalog(kind,pageNo);}
+      openItem(kind,id,context);
+    });
+    const turn=next=>{if(hero){context.state.pages[kind]=next;context.redraw();}else openCatalog(kind,next);};
+    $('[data-action="prev"]',p)?.addEventListener('click',()=>turn(pageNo-1));
+    $('[data-action="next"]',p)?.addEventListener('click',()=>turn(pageNo+1));
+    return p;
   }
-  function openItem(kind,id) {
-    const isW=kind==='weapon',S=State.state(),base=(isW?weaponsMap:skillsMap).getValue(id);
-    const it=(isW?State.myWeapons():State.mySkills()).find(x=>x.id===id);
-    const up=it?State.upgradeInfo(kind,id):null;
+  function openItem(kind,id,context) {
+    const hero=context && context.hero,isW=kind==='weapon',S=hero?null:State.state(),base=(isW?weaponsMap:skillsMap).getValue(id);
+    const owned=hero ? heroOwnedMap(hero).get(kind+':'+id) : null;
+    const it=hero ? (owned ? (isW?(window.TowerHero&&TowerHero.heroWeapon?TowerHero.heroWeapon(id+':'+owned.level):State.weaponInst(id+':'+owned.level)):State.skillInst(id+':'+owned.level)) : null)
+      : (isW?State.myWeapons():State.mySkills()).find(x=>x.id===id);
+    const up=!hero && it?State.upgradeInfo(kind,id):null;
     const skillDescriptions={6:'危机时刻装死避开攻击，成功后立即获得行动机会。装死不能升级。',7:'每场抵挡一次伤害，1级抵消20%，每级增加5%。装备附加能力可增加抵挡次数。',11:'增加原有闪避率5%，每级增加2%；按原有闪避率的比例计算。',13:'生命不高于50%时，每次出手有35%概率召唤师傅，每场最多一次。恢复师傅等级×4生命，下次攻击必中。',14:'按裸力量、敏捷、速度各增加1%，最少1点，每级增加1%；每场一次，随后立即行动。'};
     const description=(!isW&&skillDescriptions[id])||base.remark||'';
     const locked=!it;
-    const unupgradeable=!isW && (base.type==='被动' && up?.max || id===13);
+    const unupgradeable=hero ? !!(it && (it.level>=15 || !isW && [6,13].includes(id))) : !isW && (base.type==='被动' && up?.max || id===13);
     const extra=isW?'伤害 '+(it?it.harmLo+'-'+it.harmHi:base.harm):'类别 '+esc(base.type);
-    const right=locked?'<div class="locked-message">尚未获得<br><span class="small-label">升级、开启礼包有机会获得</span></div>':up?.max||unupgradeable?'<div class="locked-message">该'+(isW?'武器':'技能')+'<br>不能升级</div>':'<h3>需要　<span class="muted-text">已有</span></h3><div><span>金松果 '+up.coin+'</span><b>'+S.goldPoint+'</b></div><div><span>卷轴 '+up.book+'</span><b>'+(S.props[up.bookId]||0)+'</b></div><span class="upgrade-rate">成功率 '+up.rate+'%'+(up.fails?'<i class="upgrade-pity">（失败 '+up.fails+' 次，已加 '+up.fails*State.UPGRADE_FAIL_BONUS+'%）</i>':'')+'</span>'+(up.isTrue?'<span class="upgrade-true-tip">真化第 '+up.trueAttempt+' 次（当日 24:00 次数与费用清零，真化不吃失败保底）</span>':'')+'<span class="small-label">需要角色 '+up.levelLimit+' 级</span>';
+    const right=hero ? (locked ? '<div class="locked-message">尚未掌握<br><span class="small-label">在塔内学习新的武技</span></div>' :
+      unupgradeable ? '<div class="locked-message">该武技<br>不能修炼</div>' : '<h3>铸币修炼</h3><div><span>需要铸币 1</span><b>'+Math.max(0,Number(hero.coins)||0)+'</b></div><p class="small-label">必定提升3~5个小级，封顶真5；仅影响本局勇者。</p>') :
+      locked?'<div class="locked-message">尚未获得<br><span class="small-label">升级、开启礼包有机会获得</span></div>':up?.max||unupgradeable?'<div class="locked-message">该'+(isW?'武器':'技能')+'<br>不能升级</div>':'<h3>需要　<span class="muted-text">已有</span></h3><div><span>金松果 '+up.coin+'</span><b>'+S.goldPoint+'</b></div><div><span>卷轴 '+up.book+'</span><b>'+(S.props[up.bookId]||0)+'</b></div><span class="upgrade-rate">成功率 '+up.rate+'%'+(up.fails?'<i class="upgrade-pity">（失败 '+up.fails+' 次，已加 '+up.fails*State.UPGRADE_FAIL_BONUS+'%）</i>':'')+'</span>'+(up.isTrue?'<span class="upgrade-true-tip">真化第 '+up.trueAttempt+' 次（当日 24:00 次数与费用清零，真化不吃失败保底）</span>':'')+'<span class="small-label">需要角色 '+up.levelLimit+' 级</span>';
     const content='<div class="item-detail"><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-summary"><span class="item-icon">'+icon(kind,id,locked,false,isTrueGear(it))+'</span><div class="detail-rows"><span class="detail-row">'+(isW?'阶段':'等级')+' '+(it?levelLabel(it.level,false):1)+(it&&isTrueGear(it)?'（真形态）':'')+'</span><span class="detail-row">'+extra+'</span><span class="detail-row">类型 '+esc(base.type)+'</span></div></div><div class="detail-description">'+esc(description)+(isW&&it?'<br>升至下一阶段额外提升'+esc(base.harmAdd)+'点基础伤害！':'')+'</div></div><div class="detail-upgrade">'+right+'</div></div>';
     // 按钮顺序统一成「动作在前、返回在最后」，与其它弹窗一致
-    modal(isW?'武器详情':'技能详情',content,[{label:locked?'尚未获得':up?.max||unupgradeable?'不能升级':'立即升级',cls:locked||up?.max||unupgradeable?'muted':'gold',run:()=>{
+    modal(isW?'武器详情':'技能详情',content,[{label:locked?'尚未获得':up?.max||unupgradeable?'不能升级':hero?'铸币修炼':'立即升级',cls:locked||up?.max||unupgradeable?'muted':'gold',run:()=>{
       if(locked||up?.max||unupgradeable)return;
+      if(hero){
+        const out=hero.onCoinTrain ? hero.onCoinTrain((isW?'w:':'s:')+id) : {ok:false,msg:'铸币修炼暂不可用。'};
+        toast(out.msg || (out.ok?'修炼完成。':'修炼失败。'));
+        if(out.ok){context.redraw();openItem(kind,id,context);}return;
+      }
       const r=State.doUpgrade(kind,id);toast(r.msg);openCatalog(kind,catalogPage);openItem(kind,id);
     }},{label:'返回',cls:'muted'}]);
   }
@@ -1518,7 +2028,7 @@
         const v = propMap.getValue(90);
         if (v) items.push({ ...v, id: 90 });
       }
-      items.sort((a,b)=>a.id-b.id);
+      items.sort(bagSort);
     }
     const total=Math.max(1,Math.ceil(items.length/6));bagPage=Math.min(bagPage,total-1);
     const shown=items.slice(bagPage*6,bagPage*6+6);
@@ -1549,7 +2059,9 @@
     function openPropEntry(id) {
       const classic = !!(UI.currentUiMode && UI.currentUiMode() === 'classic');
       if (!shop && classic && window.SfCompose && SfCompose.isComposeProp(id)) {
-        SfCompose.open(id, { onClose: () => openBag(mode, bagPage) });
+        /* 关合成页时**优先就地刷新**这一页（数量/说明/金松果），刷新不了再整页重建。
+         * 连点合成时这一步就是 100~290 ms 的卡顿来源（见 refreshBag 的注释）。 */
+        SfCompose.open(id, { onClose: () => { if (!(bagRefresh && bagRefresh())) openBag(mode, bagPage); } });
         return;
       }
       openProp(id, mode);
@@ -1591,6 +2103,49 @@
       };
     });
     wireDetail();
+    /* ============================================================
+     * 合成结束回背包：**就地刷新，不整页重建**
+     * ------------------------------------------------------------
+     * 原版是服务端回包更新格子数量；复刻以前把 `onClose` 直接接到
+     * `openBag(mode,bagPage)` —— 每合成一次就把整页 `innerHTML` 重写一遍
+     * （实测安卓 WebView 上 100~290 ms 的主线程停顿，连点合成时就是"一下一下地卡"）。
+     * 这里改成只更新**可见格子的数量 / 说明 / 底部金松果**；只有可见集合真的变了
+     * （比如碎片用光、格子清空）才返回 false 让调用方整页重建。
+     * ============================================================ */
+    function refreshBag() {
+      if (!p.isConnected) return false;
+      const ui = $('#ui');
+      if (!ui || !ui.contains(p)) return false;
+      const nextItems = [];
+      propMap.each((id,v)=>{
+        if(!State.blackGearEnabled() && State.BLACK_PROP_IDS.includes(+id))return;
+        if(shop?v.buy==='true':bagHas(+id))nextItems.push({...v,id:+id});
+      });
+      if (!shop && State.chestState && State.chestState() && !nextItems.some((it) => it.id === 90)) {
+        const v = propMap.getValue(90);
+        if (v) nextItems.push({ ...v, id: 90 });
+      }
+      if (!shop) nextItems.sort(bagSort);
+      const nextShown = nextItems.slice(bagPage*6, bagPage*6+6);
+      const nowIds = $$('[data-prop]',p).map(b=>+b.dataset.prop).join(',');
+      const nextIds = nextShown.map(it=>it.id).join(',');
+      if (nowIds !== nextIds) return false;      // 可见集合变了：交给 openBag 重建
+      for (const cell of $$('[data-prop]',p)) {
+        const id = +cell.dataset.prop;
+        const def = nextShown.find(it=>it.id===id);
+        if (!def) continue;
+        const caption = shop ? goldPrice(def.price, esc(def.name)) : bagCount(id);
+        const cap = $('.item-caption',cell);
+        if (cap && cap.textContent !== String(caption)) cap.textContent = String(caption);
+        cell.setAttribute('aria-label', esc(def.name)+(shop?'，'+def.price+'金松果':'，拥有'+bagCount(id)+'个'));
+      }
+      if (!nextShown.some(it=>it.id===selectedProp)) selectedProp = nextShown[0]?.id||0;
+      const detail = $('.bag-detail',p);
+      if (detail) { detail.innerHTML = detailMarkup(nextShown.find(it=>it.id===selectedProp)); wireDetail(); }
+      try { refreshHeader(); } catch (e) {}
+      return true;
+    }
+    bagRefresh = refreshBag;
     $('[data-action="rank-shop"]',p)?.addEventListener('click',()=>ClassicExtras.rankShop(0,'shop'));
     $('[data-action="prev"]',p)?.addEventListener('click',(e)=>popTap(e.currentTarget,()=>openBag(mode,bagPage-1)));
     $('[data-action="next"]',p)?.addEventListener('click',(e)=>popTap(e.currentTarget,()=>openBag(mode,bagPage+1)));
@@ -2283,7 +2838,7 @@
       '<b class="fp-value" data-value="'+key+'">0</b><span class="fp-share" data-share="'+key+'">0%</span>'+
       '<button type="button" class="uc-button small" data-point="'+key+'">+'+State.STAT_GAIN[key]+'</button></div>').join('');
     const minPct=Math.round(State.STAT_SHARE_MIN*100);
-    const body='<div class="free-point-box"><p class="free-point-tip">升级留了一点属性给你自己加：力量／敏捷／速度各 +1，生命 +5。四项占比（生命按 10 点折算 1 点）任意一项低于 '+minPct+'% 时必须先补它，系统会直接替你选择。</p>'+
+    const body='<div class="free-point-box"><p class="free-point-tip">升级留了一点属性给你自己加：力量／敏捷／速度各 +1，生命 +5。四项占比（生命按 5 点折算 1 点）任意一项低于 '+minPct+'% 时必须先补它，系统会直接替你选择。</p>'+
       '<div class="free-point-rows">'+rows+'</div>'+
       '<p class="free-point-note" data-live="point-note" role="status"></p>'+
       '<p class="allocation-remaining" data-live="point-left" role="status">剩余 0 点</p></div>';
@@ -4290,10 +4845,12 @@
       '<p><b>无尽塔</b>：免门票的无尽模式，越往上敌人越强。<br>' +
       '最高分 ' + (ei.best | 0) + ' · 最深 ' + (ei.bestLayer | 0) + ' 层（现有抽奖卷 ' + (ei.tickets | 0) + ' 张）</p>' +
       '<p class="small-label">两座塔都是离线单人玩法，不需要队友。</p>';
-    modal('征战', body, [
-      { label: '挑战塔', run: () => { if (window.TowerUI) TowerUI.openTower({ from: 'village' }); } },
-      { label: '无尽塔', cls: 'gold', run: () => { if (window.TowerUI) TowerUI.openEndless({ from: 'village' }); } },
+    /* 用户口径：这两颗入口键要保持大号（300×84 / 40px），别再退回默认小按钮。 */
+    const m = modal('征战', body, [
+      { label: '无尽塔', cls: 'gold war-tower-button', run: () => { if (window.TowerUI) TowerUI.openEndless({ from: 'village' }); } },
+      { label: '挑战塔', cls: 'war-tower-button', run: () => { if (window.TowerUI) TowerUI.openTower({ from: 'village' }); } },
     ], { small: true });
+    if (m && m.element) m.element.classList.add('war-dialog');
   }
   function openVillage() {
     /* 经典模式 + ssflight 素材可用时，进**原版真正的村庄页**（根时间轴帧 30 / homeMc 7140）：
@@ -4681,9 +5238,9 @@
   /* 启动即落一次模式：此时存档还没载入，用 localStorage 兜底；存档载入后 main.js 会再落一次。 */
   applyUiMode(currentUiMode());
 
-  window.UI={...legacy,renderHome,drawHomeHud,drawActor,runAction,currentScreen:()=>screen,refreshHome,renderNumbers,refreshHeader,
+  window.UI={...legacy,renderHome,drawHomeHud,drawActor,runAction,currentScreen:()=>screen,refreshHome,renderNumbers,refreshHeader,openHeroPage,
     setMode,currentUiMode,applyUiMode,nextUiMode,UI_MODE_LSKEY,layoutHeight,smokeSelectors,
-    classic:{page,modal,btn,bind,icon,spr,goldIcon,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog,openSupportModal,maybeSupportPrompt,supportPanelHtml,copyText,supportMeta,wireSystemFeedback,
+    classic:{page,modal,btn,bind,icon,spr,goldIcon,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog,openSupportModal,maybeSupportPrompt,supportPanelHtml,copyText,supportMeta,wireSystemFeedback,openHeroPage,
       /* 【SFR4】经典模式状态页的**武器 / 技能栏**（`js/ssfight/ui-status.js`）要照着复刻这套
        * 图鉴的数据画格子（原版那两个 tab 的图标是运行时 `attachMovie` 的库元件，素材库里没有），
        * 所以把"这一页有哪些东西、自己有没有、是不是真形态"与"打开某一项的详情"这两件事导出去。

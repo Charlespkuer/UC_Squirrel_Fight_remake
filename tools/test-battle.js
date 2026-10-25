@@ -19,6 +19,44 @@ function findRoot(start) {
 }
 
 process.chdir(findRoot(__dirname));
+// One first-frame compatibility case; independent of the optional native canvas package below.
+const roundRectCheck = (async () => {
+  for (const native of [false, true]) {
+    const calls = { native: 0, arcs: 0 }, frames = [], loaded = [];
+    const c = { createLinearGradient: () => ({ addColorStop() {} }) };
+    for (const name of ['setTransform', 'clearRect', 'save', 'restore', 'fillRect', 'drawImage',
+      'beginPath', 'moveTo', 'lineTo', 'closePath', 'fill', 'stroke', 'clip', 'translate']) c[name] = () => {};
+    c.arcTo = () => { calls.arcs++; };
+    if (native) c.roundRect = () => { calls.native++; };
+    const canvas = { style: {}, isConnected: true, getContext: () => c };
+    const env = { console, performance: { now: () => 0 },
+      setTimeout: () => 1, clearTimeout() {},
+      requestAnimationFrame(fn) { frames.push(fn); return frames.length; }, cancelAnimationFrame() {},
+      Debug: { enabled: () => true },
+      document: { getElementById: () => ({ appendChild() {} }), createElement: tag => tag === 'canvas'
+        ? { getContext: () => c } : { style: {}, setAttribute() {}, remove() {} } },
+      Engine: { SHEETS: {}, wearsFor: () => [], loadSheets: async ids => { loaded.push(...ids); }, loadSheetFromUrl: async () => null,
+        has: () => true, hasAnim: () => false, makePlayer: () => ({ list: [] }), playAnim: () => null,
+        updatePlayer() {}, drawPlayer() {}, text() {}, frameSize: () => null },
+    };
+    env.window = env;
+    vm.createContext(env);
+    vm.runInContext(fs.readFileSync('js/battle.js', 'utf8'), env, { filename: 'js/battle.js' });
+    const fighter = { hp: 100, power: 10, agility: 10, speed: 10 };
+    const controller = await env.Battle.run({ canvas, me: fighter, foe: { ...fighter, npcType: 'tw_berserker' }, region: 3, speedToggle: true,
+      trial: { text: 'Trial' }, debuffs: [{ short: 'A', text: 'Debuff' }], result: { winner: 0, rounds: [] } });
+    assert.ok(['xm1', 'xm2', 'xm_effect', 'fightBg_wood_1', 'fightBg_wood_3', 'fightBg_wood_4',
+      'fightBg_wood_effect2', 'fightBg_wood_effect6'].every(id => loaded.includes(id)),
+    '首次直进塔也按 tw_* 对手的基础动画和实际场景加载，不依赖首页预热');
+    assert.ok(!loaded.some(id => /^(?:tl|xh|woodman|fightBg_robot|fightBg_meltRoom|fightBg_seaWorld)/.test(id)),
+      '冷战斗不加载其它 NPC 与其它场景');
+    assert.doesNotThrow(() => frames.shift()(16), 'HUD 首帧的姓名、血条裁剪、削弱、题面与按钮都应可画');
+    assert.ok(native ? calls.native > 0 && calls.arcs === 0 : calls.arcs > 0,
+      '保留原生 roundRect 路径，缺失时才构造圆角路径');
+    controller.cancel();
+  }
+  console.log('PASS 战斗首帧兼容缺少 Canvas roundRect 的 WebView');
+})();
 let graphics;
 try { graphics = require('@napi-rs/canvas'); }
 catch {
@@ -34,7 +72,8 @@ catch {
 if (!graphics) {
   console.log('SKIP tools/test-battle.js：需要可选依赖 @napi-rs/canvas');
   console.log('     装上就能跑：npm install --no-save --package-lock=false @napi-rs/canvas');
-  process.exit(0);
+  roundRectCheck.catch(error => { console.error(error); process.exitCode = 1; });
+  return;
 }
 let time = 0, seq = 0;
 const tasks = new Map(), rafs = new Map(), errors = [], children = [];
@@ -83,6 +122,7 @@ async function until(target) { while (time < target) await tick(Math.min(50, tar
  *（原来是 tools/research/battle-check/，每次跑回归都往 tools/ 里堆 ~10 MB）。 */
 function save(name) { fs.mkdirSync('out/battle-check', { recursive: true }); fs.writeFileSync('out/battle-check/' + name + '.png', canvas.toBuffer('image/png')); }
 (async () => {
+  await roundRectCheck;
   const fighter = { name: '小松鼠', level: 10, hp: 250, power: 30, agility: 20, speed: 20, weapons: [], skills: [] };
   const result = { winner: 0, rounds: [
     { attacker: 0, action: 'common', dmg: 40, hpAfter: [250, 210] },

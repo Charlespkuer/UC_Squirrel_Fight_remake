@@ -18,6 +18,7 @@
   看到那段提示就去改 `.gitignore` / `config.ignore`。
 - `重启同步服务.cmd` / `restart-sync.cmd` → `node sync/sync.js restart`（改过口令或端口后跑一次）。
 - `打包.cmd` / `清缓存.cmd` → `tools/build-release.ps1`。
+- `一键打包IPA.command` → `tools/build-ios-release.cjs`：自动 patch 版本 → 构建 modern / legacy 并企业签名 → `src-tauri/dist` 只保留两个签名 IPA（先用 `--dry-run` 看计划）。
 - `serve.js` / `serve.py`：本地静态服务器（默认 8080）；`update-game.js`：「一键拉取远端更新」的执行体。
 
 约定：`.cmd` 只放 **ASCII**（cmd.exe 读 UTF-8 中文会乱），中文与逻辑放 `.ps1`（必须带 UTF-8 BOM）或 `.js`；

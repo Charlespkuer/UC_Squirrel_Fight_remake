@@ -634,7 +634,7 @@ async function runBuffStacking() {
     const capped = TD.hasTag(b, 'stackable') || Math.max(0, Math.floor(Number(b.maxStacks) || 0)) >= 2;
     /* 这一类才是「有了就再也拿不到第二份」：unique（纯开关）/ 一局一次。
      * ⚠ `noRestack` 不算：它只是「**拿满 maxStacks 之后**移出可获得池」，
-     * 上限之内照样叠（例：C14 涅槃 2 层、C50 抉择扩充 3 层）。 */
+     * 上限之内照样叠（例：C14 涅槃 2 层、C50 抉择扩充 2 层）。 */
     const oneOnly = TD.hasTag(b, 'unique') || TD.hasTag(b, 'oncePerRun');
     const restackStop = TD.hasTag(b, 'noRestack') ? Math.max(1, Math.floor(Number(b.maxStacks) || 1)) : 0;
     /* 拿的次数：**上限 + 2**（有限上限时）—— 顺带验证「叠满之后新栏位还能继续叠」。 */

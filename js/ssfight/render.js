@@ -639,6 +639,15 @@
    *   现在每个视图各有一份注册表，节拍器统一走一遍所有活着的视图，互相不干扰。 */
   const views = new Set();       // 活着的视图（每个视图一棵实例树，key 是它自己的 <svg>）
   let ticker = 0, tickCount = 0;
+  /* 失焦暂停：macOS 切到别的 App 时 `window` 会 blur，但 `document.hidden` 仍是 false。
+   * 首页那条 14fps 节拍会一直重建 SVG 子树（实测约 420 个节点/秒），游戏只是放在后面
+   * 也照样占 CPU。只认**真的收到过 blur**，不拿 `document.hasFocus()` 当启动初值 ——
+   * 部分 WebView 会一开始就报 false，那样动画会永远不动。 */
+  let pageBlurred = false;
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('blur', () => { pageBlurred = true; });
+    window.addEventListener('focus', () => { pageBlurred = false; });
+  }
   let clipSeq = 0;               // 实例自增号（`debug()` 里用来跨两次采样认同一颗实例）
   let cpSeq = 0;                 // clipPath 的全局唯一 id 计数（蒙版用）
 
@@ -650,6 +659,19 @@
     for (const v of clip.nodes.values()) if (v.clip) unregisterDeep(v.clip);
     for (const c of clip.__attached || []) unregisterDeep(c);
   }
+  /** 这个视图的根 `<svg>` 现在看得见吗（`display:none` / `visibility:hidden` 都算看不见）。
+   *  只给节拍器做"看不见就别走帧"的判据；量不到（测试环境没有 getComputedStyle）按可见处理。 */
+  function rootVisible(root) {
+    try {
+      if (!root) return false;
+      if (root.style && root.style.display === 'none') return false;
+      if (typeof getComputedStyle === 'function') {
+        const cs = getComputedStyle(root);
+        if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) return false;
+      }
+    } catch (e) { /* 取不到样式就当可见，绝不因此冻住整页 */ }
+    return true;
+  }
   function startTicker(fps) {
     /* ⚠ 这里**不能**清注册表：mount 是先建完整棵实例树（全部注册）再启节拍的，
      * 第一版 startTicker 里调 stopTicker() 顺手 clear 了注册表，
@@ -658,12 +680,20 @@
     if (ticker) clearInterval(ticker);
     const ms = Math.max(16, 1000 / (fps || 14));
     ticker = setInterval(() => {
-      if (typeof document !== 'undefined' && document.hidden) return;
+      if (typeof document !== 'undefined' && (document.hidden || pageBlurred)) return;
       tickCount++;
       for (const view of [...views]) {
         if (!view.root || !view.root.isConnected) {
           view.live.clear(); views.delete(view); continue;
         }
+        /* 【被盖住 / 被藏起来的页不用走帧】经典界面是"整页叠整页"：
+         * 进道具/状态/融合这些二级页时，底下的村庄页只是 `visibility:hidden`
+         * （classic.css 的 `#ui:has(.classic-page) .ssfight-home`），合成过场里
+         * 合成页自己也是 `display:none`。它们**看不见**，但以前照样每拍
+         * `showFrame()` 一整套子树 —— 手机上就是白白占掉主线程与光栅化。
+         * 可见性每 10 拍（≈0.7 s）复核一次：查得太勤反而自己制造样式重算。 */
+        if (view.__visible === undefined || tickCount % 10 === 0) view.__visible = rootVisible(view.root);
+        if (view.__visible === false) continue;
         for (const c of [...view.live]) {
           /* 被"钉住"的实例（装备持有者）：帧号由外面指定，不自己走。
            * 不钉住的话它会自由播放，每帧放出一个不同的挂点，装备就会在角色身上乱跳。 */

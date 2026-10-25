@@ -53,8 +53,32 @@ function uiHarness(c) {
   vm.runInContext('setTimeout = function () { return 0; }; clearTimeout = function () {};', c);
   c.document = { createElement: () => el(), body: { appendChild: () => {} }, activeElement: null };
   c.UI = { classic: {
-    /* `node` = 这一屏的容器节点本身：剧情屏会往它上面挂「点任意位置继续」的整屏点击处理器。 */
-    page: (group, active, content, opts) => { const node = el(); rendered.push({ kind: 'page', content: content, opts: opts || {}, node: node }); return node; },
+    /* `node` = 这一屏的容器节点本身：剧情屏会往它上面挂「点任意位置继续」的整屏点击处理器。
+     * 剧本选择（无尽塔开局页）要能拿到两张卡：按 HTML 里的 data-script 造最小节点，
+     * 只服务这一条用例；其它选择器仍走原来的 handlers。 */
+    page: (group, active, content, opts) => {
+      const node = el();
+      node.innerHTML = content;
+      const scriptOptions = [...String(content).matchAll(/data-script="([^"]+)"/g)].map((m) => ({
+        getAttribute: () => m[1], onclick: null,
+      }));
+      node.querySelectorAll = (sel) => (sel === '[data-script]' ? scriptOptions : []);
+      node.querySelector = (sel) => {
+        if (sel === '[data-script-picker]') {
+          const menu = { hidden: true };
+          const trigger = { onclick: null, setAttribute: () => {} };
+          return {
+            querySelector: (s) => s === '[data-action="script-toggle"]' ? trigger
+              : s === '.script-menu' ? menu : null,
+            querySelectorAll: (s) => node.querySelectorAll(s),
+          };
+        }
+        if (!handlers.has(sel)) handlers.set(sel, { onclick: null });
+        return handlers.get(sel);
+      };
+      rendered.push({ kind: 'page', content: content, opts: opts || {}, node: node });
+      return node;
+    },
     modal: (title, content, buttons) => {
       rendered.push({ kind: 'modal', title: title, content: content, buttons: buttons || [] });
       return { element: el(), close: () => {} };
@@ -217,7 +241,7 @@ hr('1. 数据层：刷出区间 / 组号 / 固定价 / 运营类标签');
      *（都带 ops 标签，与虚空铭文 C37 同一套运营标签）。 */
     const want = ['E01', 'E02', 'E03', 'E04', 'E05', 'E06', 'E09', 'E10', 'E12', 'E13', 'E14', 'E16', 'E20',
       'C24', 'C25', 'C30', 'C31', 'C36', 'C37', 'C53', 'C58', 'C59', 'C60', 'C61', 'C62'].sort().join(',');
-    assert.equal(ids(TD.opsPool.slice().sort((a, b) => (a.id < b.id ? -1 : 1))), want);
+    assert.equal(ids(TD.opsPool.filter(b => !TD.hasTag(b, 'hero')).sort((a, b) => (a.id < b.id ? -1 : 1))), want);
     for (const b of TD.opsPool) assert.ok(TD.hasTag(b, 'endless'), b.id + ' 运营类应当只属于无尽塔');
   });
 
@@ -371,12 +395,91 @@ hr('3. 货架：5 件 / 固定价 / 运营类优先');
     winOne(c);
     const st = c.Tower.shopState();
     assert.equal(st.slots.length, c.TowerData.MINT_SHOP.shelf, '货架件数');
+    assert.equal(st.slots[0].swap, true, '初始进店第一格必须是 0 铸币的等价交换');
+    assert.equal(st.slots[0].price, 0, '等价交换固定 0 铸币');
     for (const s of st.slots) {
+      if (s.swap) { assert.ok(s.name && s.desc, '等价交换要有名字与说明'); continue; }
       const def = c.TowerData.BUFF_BY_ID[s.id];
-      assert.equal(s.price, c.TowerData.MINT_SHOP.price[def.rarity], s.name + ' 的售价应当是固定价');
+      const expected = c.TowerData.mintPrice(def);
+      assert.equal(s.price, expected, s.name + ' 的售价应当是固定价');
       assert.equal(s.rarity, def.rarity);
       assert.ok(s.name && s.desc, '货架要有名字与说明');
     }
+  });
+
+  check('每 10 层最后一场胜利固定掉 1 枚铸币，只记增量不弹窗', () => {
+    const c = setup(7);
+    const T = c.Tower;
+    T._debugSetEndlessLayer(10);
+    const run = T._debugRun('endless');
+    run.retryToken = 0;
+    run.lastMintGained = 0;
+    let last = null;
+    for (let i = 0; i < 5; i++) {
+      last = winOne(c);
+      if (i < 4) assert.equal(last.mintGained, undefined, '第 ' + (i + 1) + ' 场不该提前掉铸币');
+    }
+    assert.equal(last.layerComplete, true, '第 5 场应当通关第 10 层');
+    assert.equal(last.mintGained, 1, '通关第 10 层应当掉 1 枚铸币');
+    assert.equal(run.retryToken, 1, '铸币余额 +1');
+    assert.equal(run.lastMintGained, 1, '主界面增量字段为 1（用于显示 +1）');
+    assert.equal(T.endlessInfo().run.lastMintGained, 1, 'endlessInfo 要把增量交给界面');
+    assert.equal(run.layer, 10, '第 10 层是 x5，先停在结算商店');
+    assert.ok(run.shop, '通关后照常开结算商店');
+  });
+
+  check('暴击精通去掉可叠加；普通无限叠层暴伤只在商店', () => {
+    const c = setup(7);
+    const TD = c.TowerData, T = c.Tower;
+    const c21 = TD.BUFF_BY_ID.C21;
+    assert.equal(TD.hasTag(c21, 'stackable'), false, 'C21 不再带可叠层词条');
+    assert.equal(TD.stackCap(c21), 1, 'C21 每次拾取只占一栏 1 层');
+    assert.equal(TD.stackNote(c21), '', 'C21 不写叠层说明');
+    assert.equal(TD.descOf(c21, 'endless'), '暴击率 +15%', 'C21 卡面不补叠层说明');
+    const run = T._debugRun('endless');
+    run.permanent = [];
+    assert.ok(T.addBuff(run, 'C21').ok);
+    assert.ok(T.addBuff(run, 'C21').ok);
+    const rows = run.permanent.filter((b) => b.id === 'C21');
+    assert.equal(rows.length, 2, '重复拾取应当占两个背包栏位');
+    assert.equal(rows.every((b) => b.stacks === 1), true, '每栏各 1 层，不再同栏叠 3');
+
+    const c64 = TD.BUFF_BY_ID.C64;
+    assert.equal(c64.rarity, 0, '巨力重拳是普通稀有度');
+    assert.equal(c64.kind, 'permanent', '巨力重拳是永久类');
+    assert.equal(c64.mods.critDmgBonus, 10, '暴伤 +10%');
+    assert.equal(c64.unlimitedStacks, true, '可无限叠加');
+    assert.equal(TD.stackCap(c64), Infinity, '无限叠层');
+    assert.ok(TD.hasTag(c64, 'endless') && TD.hasTag(c64, 'shop'), '只在无尽塔商店出现');
+    assert.equal(TD.hasTag(c64, 'battle'), false, '不进战斗奖励池');
+    assert.ok(TD.mintPool.some((b) => b.id === 'C64'), '铸币商店池包含它');
+    assert.equal(TD.shopBuyPrice(c64), Math.round(TD.shopPrice(c64) * 1.1), '试炼商店永久类 +10%');
+    assert.equal(TD.shopBuyPrice(TD.BUFF_BY_ID.N07), TD.shopPrice(TD.BUFF_BY_ID.N07), '限次类不涨价');
+    assert.equal(TD.mintPrice(TD.BUFF_BY_ID.C01), 1, '铸币基础价不变');
+  });
+
+  check('买走该页传奇后，传奇保底计数立即清零', () => {
+    const c = setup(7);
+    const T = c.Tower;
+    const run = T._debugRun('endless');
+    run.coins = 10000; run.permSlots = 20; run.permanent = [];
+    run.legendPity = T.legendPityNeed();
+    run.shop = { layer: run.layer, retrySold: false, rerollFree: true, rerollCount: 0, discount: false, discountPct: 0,
+      slots: [{ id: 'C14', sold: false, price: 1 }, { id: 'C02', sold: false, price: 1 }] };
+    const res = T.buyShopSlot(0);
+    assert.ok(res.ok, '应当能买下传奇：' + (res.msg || ''));
+    assert.equal(run.legendPity, 0, '买走传奇后计数必须归零，不能带到下一页');
+  });
+
+  check('抉择扩充改为史诗品质，最多叠 2 层', () => {
+    const c = setup(7);
+    const TD = c.TowerData;
+    const c50 = TD.BUFF_BY_ID.C50;
+    assert.equal(c50.rarity, 2, '抉择扩充是史诗品质');
+    assert.equal(c50.maxStacks, 2, '叠加上限 2');
+    assert.equal(TD.stackCap(c50), 2, 'stackCap 同步为 2');
+    assert.match(TD.stackNote(c50), /最多叠 2 层/, '卡面叠层说明同步');
+    assert.equal(TD.descOf(c50, 'endless'), '战斗获得的选择项 +1（最多叠 2 层，拿满后本局不再出现）');
   });
 
   check('每件都不重复、都能拿（ownable + poolFilter 同一口径）', () => {
@@ -509,6 +612,30 @@ hr('3. 货架：5 件 / 固定价 / 运营类优先');
       '买铸币与刷新都要把 shopSpend 交回去');
   });
 
+  check('刷新货架的费用不计入豪掷千金（C58），但挥金如土（C36）照常累计', () => {
+    /* 用户 2026-10-25 口径：刷新费不能推进「每消费 100 币给一个随机限次」的进度，
+     * 否则刷新越多、白拿的限次越多。买货 / 买铸币仍然计入 C58；C36 不受影响。 */
+    const c = setup(7);
+    const T = c.Tower;
+    assert.ok(T.debugGrantBuff('C36').ok, '挥金如土');
+    assert.ok(T.debugGrantBuff('C58').ok, '豪掷千金');
+    const run = T._debugRun('endless');
+    run.coins = 1000;
+    run.shop = { mint: false, layer: run.layer, slots: [{ id: 'C01', sold: false, price: 1 }],
+      retrySold: false, rerollFree: false, rerollCount: 1, rerollPaid: 0, halfPerPage: 0 };
+    run.phase = 'shop';
+    const row = (id) => (run.permanent || []).find((b) => b.id === id) || {};
+    const c36Before = Math.max(0, Math.floor(Number(row('C36').procs) || 0));
+    const c58Before = Math.max(0, Number(row('C58').limitedSpend) || 0);
+    const r = T.rerollShop();
+    assert.equal(r.ok, true, '刷新应当成功');
+    assert.ok(r.paid > 0, '这一刷应当是付费刷新');
+    assert.equal(Math.max(0, Number(row('C58').limitedSpend) || 0), c58Before,
+      'C58 的进度不该被刷新费推进：' + c58Before + ' → ' + row('C58').limitedSpend);
+    assert.ok(Math.max(0, Math.floor(Number(row('C36').procs) || 0)) > c36Before,
+      'C36 仍然把刷新费计入分段（procs ' + c36Before + ' → ' + row('C36').procs + '）');
+  });
+
   check('C59 叠层：铸币商店按层数发（×层数）', () => {
     const c = setup(7);
     c.__rand(0);
@@ -521,6 +648,22 @@ hr('3. 货架：5 件 / 固定价 / 运营类优先');
     assert.ok(run.shop && run.shop.mint);
     assert.equal(run.shop.enterCoins, 240, '3 层 → 240 试炼币（80 × 3）');
     assert.equal(c.Tower.claimShopEnterCoins(), 240);
+  });
+
+  /* 用户 2026-10-24 口径：豪掷千金被水晶铭文附魔后**不是** 100→150（那反而更差），
+   * 而是 100→75。门槛的结算与悬停文案都必须走 `enchCostOf`。 */
+  check('C58 豪掷千金被水晶铭文附魔：门槛 100 → 75（不是 150）', () => {
+    const c = setup(7);
+    const T = c.Tower;
+    assert.ok(T.debugGrantBuff('C58').ok);
+    const run = T._debugRun('endless');
+    const row = run.permanent.find((b) => b.id === 'C58');
+    assert.equal(T.enchCostOf(100, 1), 100, '没附魔仍是 100');
+    assert.equal(T.enchCostOf(100, 1.5), 75, '一张水晶铭文 → 75');
+    row.enchMul = 1.5;
+    assert.equal(T.addShopSpendOf(run, 74), null, '74 币还没到附魔后的门槛');
+    const r = T.addShopSpendOf(run, 1);
+    assert.ok(r && r.limited && r.limited.length === 1, '满 75 币立刻给一个随机限次增益');
   });
 
   check('铸币商店进店飘字接了 C59（界面接线）', () => {
@@ -545,8 +688,8 @@ hr('4. 花铸币买一件（买完立刻收摊）');
     const before = run.retryToken;
     const r = c.Tower.buyMintSlot(0);
     assert.ok(r.ok, '应当买得成：' + (r.msg || ''));
-    assert.equal(r.price, 1, '磐石之躯（稀有）固定价 1 铸币（货架上的 999 不作数）');
-    assert.equal(run.retryToken, before - 1, '扣 1 枚铸币');
+    assert.equal(r.price, c.TowerData.mintPrice(c.TowerData.BUFF_BY_ID.C01), '磐石之躯（稀有永久）固定价 1 铸币');
+    assert.equal(run.retryToken, before - r.price, '扣掉对应铸币');
     assert.equal(run.shop, null, '买完店立刻消失');
     assert.equal(run.phase, null, 'phase 归位（回去继续打）');
     assert.ok((run.permanent || []).some((b) => b.id === 'C01'), '增益应当进构筑');
@@ -598,7 +741,7 @@ hr('4. 花铸币买一件（买完立刻收摊）');
     assert.equal(run.shop.slots[0].sold, false);
     const r2 = c.Tower.buyMintSlot(0, 'C21');
     assert.ok(r2.ok, '替换之后应当买成：' + (r2.msg || ''));
-    assert.equal(run.retryToken, 8);
+    assert.equal(run.retryToken, 8, '稀有永久价 1 铸币');
     assert.ok((run.permanent || []).some((b) => b.id === 'C01'));
     assert.ok(!(run.permanent || []).some((b) => b.id === 'C21'), '被替换的应当出局');
     assert.equal(run.shop, null);
@@ -741,6 +884,35 @@ hr('6. 免费刷新一次（刷新后不能交换）');
     assert.equal(run.shop.rerollCount, 1);
   });
 
+  check('等价交换是 0 铸币的货架商品：可出现在任意格，买下才展开交换列表', () => {
+    const c = setup(7);
+    c.__rand(0);
+    winOne(c);
+    const run = c.Tower._debugRun('endless');
+    run.retryToken = 5;
+    assert.ok(c.Tower.debugGrantBuff('C01').ok, '先拿一件可交换的增益');
+    let st = c.Tower.shopState();
+    assert.equal(st.slots[0].swap, true, '初始进店固定第一格');
+    assert.equal(st.slots[0].price, 0, '售价固定 0 铸币');
+    assert.ok(st.swapCandidates >= 1, '有可交换的增益');
+    /* 模拟刷新后的随机位置：它不是固定第一个，买下之前不会展开交换列表。 */
+    run.shop.slots = [
+      { id: 'C01', sold: false, price: 1 },
+      { id: 'C02', sold: false, price: 1 },
+      { swap: true, sold: false, price: 0, listPrice: 0 },
+    ];
+    run.shop.rerollCount = 1;
+    run.shop.swapOpen = false;
+    st = c.Tower.shopState();
+    assert.equal(st.slots[2].swap, true, '刷新后可以洗到任意格');
+    assert.equal(st.swapOpen, false, '没买之前不展开交换');
+    const r = c.Tower.buyMintSlot(2);
+    assert.equal(r.ok, true, r.msg);
+    assert.equal(r.swap, true, '买下等价交换只是打开选择');
+    assert.equal(run.retryToken, 5, '等价交换不花铸币');
+    assert.equal(run.shop && run.shop.swapOpen, true, '买下之后才打开交换选择');
+  });
+
   check('讨价还价：铸币商店**刷新出的新一页**也重新触发对折', () => {
     const c = setup(7);
     c.__rand(0.99);
@@ -784,7 +956,7 @@ hr('6. 免费刷新一次（刷新后不能交换）');
     run.shop.slots = [{ id: 'C05', sold: false, price: 1 }];
     const r = c.Tower.buyMintSlot(0);
     assert.ok(r.ok, '刷新之后照样能买：' + (r.msg || ''));
-    assert.equal(run.retryToken, 1);
+    assert.equal(run.retryToken, 1, '稀有永久价 1 铸币');
     assert.equal(run.shop, null);
   });
 
@@ -910,7 +1082,7 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     const to = pageSrc.indexOf('【U15】', from);
     assert.ok(from > 0 && to > from, '找不到 U14b 那一段');
     const body = pageSrc.slice(from, to);
-    for (const call of ['Tower.buyMintSlot(i)', 'Tower.rerollMintShop()', 'Tower.swapMintBuff(rowRef(b))', 'Tower.leaveMintShop()']) {
+    for (const call of ['Tower.buyMintSlot(i', 'Tower.rerollMintShop()', 'Tower.swapMintBuff(rowRef(b))', 'Tower.leaveMintShop()']) {
       assert.ok(body.includes(call), '铸币商店页应当调用 ' + call);
     }
   });
@@ -922,12 +1094,16 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     winOne(c);
     /* 掺一格「讨价还价」对折过的商品：页面要能显示原价与对折价（不能因为 listPrice 缺失而炸）。 */
     const run0 = c.Tower._debugRun('endless');
-    run0.shop.slots[0].half = true;
+    const halfSlot = run0.shop.slots.find((s) => !s.swap);
+    assert.ok(halfSlot, '应当有普通商品格');
+    halfSlot.half = true;
+    assert.ok(c.Tower.debugGrantBuff('C02').ok, '先拿一件可交换的增益，等价交换才有购买键');
     c.TowerUI.openMintShop();
     const page = ui.last('page');
     assert.ok(page && page.content.includes('铸币商店'), '页面正文应当有「铸币商店」标题');
     assert.ok(page.content.includes('价格表') && page.content.includes('免费刷新'), '页面应当有价格表与免费刷新');
-    assert.ok(page.content.includes('免费交换'), '页面应当有免费交换区');
+    assert.ok(page.content.includes('等价交换'), '页面应当有第一格的等价交换');
+    assert.ok(page.content.includes('免费交换'), '页面应当有等价交换的购买键');
     assert.ok(page.content.includes('送客'), '页面应当有送客出口');
     assert.ok(page.content.includes('铸币 ' + c.Tower.shopState().retryToken), '标题上应当带铸币余额');
     assert.ok(page.content.includes('对折（原价'), '对折的格子要显示原价：' + page.content.slice(0, 80));
@@ -947,7 +1123,7 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     assert.equal(run.shop, null, '买完店立刻收摊');
     assert.ok((run.permanent || []).some((b) => b.id === 'C01'), '增益应当进构筑');
     const after = ui.last('page');
-    assert.ok(after.content.includes('无尽模式'), '应当回到无尽首页（渲染成功）');
+    assert.ok(after.content.includes('无尽塔'), '应当回到无尽首页（渲染成功）');
   });
 
   check('界面冒烟：点「拿它交换」→ 确认 → 换到新件、收摊', () => {
@@ -957,9 +1133,13 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     winOne(c);
     const run = c.Tower._debugRun('endless');
     assert.ok(c.Tower.debugGrantBuff('C01').ok, '先拿一个稀有·非运营件');
-    run.shop = { mint: true, layer: 7, slots: [], rerollFree: true, rerollCount: 0, swapped: false };
+    run.shop = { mint: true, layer: 7, slots: [{ swap: true, sold: false, price: 0, listPrice: 0 }],
+      rerollFree: true, rerollCount: 0, swapped: false, swapOpen: false };
     run.phase = 'shop';
     c.TowerUI.openMintShop();
+    /* 先买第一格 0 铸币的「等价交换」，页面才展开自己的增益列表。 */
+    ui.click('mintbuy0');
+    assert.equal(run.shop.swapOpen, true, '买下等价交换后应当打开交换选择');
     /* 【2026-10 同名逐条】交换按钮按 **uid**（精确到那一条栏位）绑定。 */
     ui.click('mintswap' + c.Tower.rowRefOf(run, 'C01').key);
     const confirm = ui.last('modal');
@@ -982,9 +1162,9 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     c.TowerUI.openMintShop();
     ui.click('mintreroll');
     assert.equal(run.shop.rerollCount, 1, '应当已经刷新过一次');
-    assert.equal(c.Tower.mintSwapAllowedOf(run), false, '刷新之后不能交换');
+    assert.equal(c.Tower.mintSwapAllowedOf(run), false, '刷新之后不能直接交换（要先买洗出来的等价交换）');
     const page = ui.last('page');
-    assert.ok(page.content.includes('免费交换已不可用'), '页面应当标出交换已锁：' + page.content.slice(0, 120));
+    assert.ok(page.content.includes('不再固定第一格'), '页面应当说明等价交换不再固定首位：' + page.content.slice(0, 160));
     assert.ok(String(page.opts.right || '').includes('继续战斗'),
       '页脚主按钮应当叫「继续战斗」：' + String(page.opts.right || '').slice(0, 160));
     ui.click('mintleave');
@@ -1022,7 +1202,7 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     const run = c.Tower._debugRun('endless');
     run.retryToken = 9;
     c.TowerUI.openMintShop();
-    ui.click('mintbuy0');
+    ui.click('mintbuy1');
     assert.equal(run.shop, null, '买完就收摊');
     assert.equal(run.phase, null);
   });
@@ -1210,10 +1390,11 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     T.debugGrantBuff('N01');
     T.debugGrantBuff('C05');
     run.slotFreeIds = ['C05'];
+    run.shop.swapOpen = true;                       // 等价交换已买下，页面才展开列表
     c.TowerUI.openMintShop();
     const html = ui.last('page').content;
-    /* 从「免费交换」小节标题往后切（货架在它前面，免得撞上同名商品） */
-    const swap = html.slice(html.lastIndexOf('免费交换'));
+    /* 从「选择一件拿出去的增益」小节往后切（货架在它前面，免得撞上同名商品） */
+    const swap = html.slice(html.lastIndexOf('拿出去的增益'));
     const p = { m: swap.indexOf('磨砺'), n: swap.indexOf('蓄力一击'), j: swap.indexOf('坚韧壁垒') };
     assert.ok(p.n >= 0 && p.j >= 0 && p.m >= 0, '三条都该在交换列表里：' + swap.slice(0, 240));
     assert.ok(p.n < p.m && p.m < p.j, '交换列表同样：最新在最上 + 附魔沉最后：' + JSON.stringify(p));
@@ -1312,6 +1493,27 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     const r3 = (/\.shop-slot\.r3\s*\{([^}]*)\}/.exec(css) || [])[1] || '';
     assert.ok(/border-color:\s*#d9a12a/.test(r3), '传奇货架的描边要与 buff-tag.r3 同色：' + r3);
     assert.ok(/linear-gradient\(#fff6c8,\s*#ffe08a\)/.test(r3), '填充也要用 buff-tag.r3 那套金色渐变：' + r3);
+  });
+
+  check('试炼商店画幅上移，返回键缩到略大于继续挑战', () => {
+    const c = setup(7);
+    const ui = uiHarness(c);
+    c.__rand(0.99);
+    winOne(c);
+    const run = c.Tower._debugRun('endless');
+    run.phase = 'shop'; run.choices = null;
+    run.shop = Object.assign({}, run.shop || {}, {
+      layer: run.layer, retrySold: false, rerollFree: true, rerollCount: 0, rerollPaid: 0,
+      slots: [{ id: 'C14', sold: false, price: 100 }],
+    });
+    c.TowerUI.openShop();
+    const page = ui.last('page');
+    assert.match(String(page.opts.pageClass || ''), /tower-shop-page/, '商店页要带专用画幅类');
+    const css = fs.readFileSync(path.join(ROOT, 'css/tower.css'), 'utf8').replace(/\r\n/g, '\n');
+    assert.match(css, /\.classic-page\.classic-tower\.tower-shop-page > \.classic-board\s*\{\s*top:\s*58px/,
+      '商店底板要上移');
+    assert.match(css, /\.classic-page\.tower-shop-page > \.page-footer > \.uc-button\[data-action="home"\]\s*\{[^}]*width:\s*350px[^}]*height:\s*100px/,
+      '返回键 350×100，略大于继续挑战的 320×96');
   });
 
   check('界面冒烟：讨价还价待兑现份数显示在无尽首页', () => {
@@ -1450,6 +1652,33 @@ hr('9. 商店「离开」不被锁住（E01 立即进货 / 每 5 层结算商店
 }
 
 /* ============================================================ */
+hr('9b. 试炼商店卡面紧凑化（2026-10 用户口径：不用翻页就能刷新）');
+{
+  check('卡面介绍 ≤6 行、不带「同名唯一 / 用尽后才可能再获得」，刷新格不写稀有度期望', () => {
+    const c = setup(7);
+    const ui = uiHarness(c);
+    c.__rand(0.99);
+    assert.ok(c.Tower._debugSpawnShop().ok, '应当能开店');
+    const run = c.Tower._debugRun('endless');
+    /* 固定成最长的几条：后发制人 / 挥金如土 / 立即进货 / 浴血重生 / 豪掷千金。 */
+    run.shop.slots = [
+      { id: 'C55', sold: false, price: 10 }, { id: 'C36', sold: false, price: 20 },
+      { id: 'E01', sold: false, price: 30 }, { id: 'C46', sold: false, price: 40 },
+      { id: 'C58', sold: false, price: 50 },
+    ];
+    c.TowerUI.openShop();
+    const page = ui.last('page');
+    assert.ok(page.content.includes('class="shop-desc"'), '卡面介绍要用 shop-desc（完整文案进 title）');
+    assert.ok(!/同名唯一|用尽后才可能再获得|一局只可能拿到一次|拿满后本局不再出现/.test(page.content),
+      '商店短介绍不该再追加生命周期提示');
+    assert.ok(!page.content.includes('期望史诗') && !page.content.includes('越贵越好'),
+      '刷新格不该再展示稀有度期望（越贵越好是隐性规则）');
+    const css = fs.readFileSync(path.join(ROOT, 'css/tower.css'), 'utf8');
+    assert.match(css, /\.shop-slot \.shop-desc\s*\{[^}]*-webkit-line-clamp:\s*6/s, 'CSS 要把卡面硬压到 6 行');
+  });
+}
+
+/* ============================================================ */
 hr('10. 铸币商队（E16）：下一场战斗后必开一家铸币商店，顶掉普通商店');
 {
   const E16 = (c) => c.TowerData.BUFF_BY_ID.E16;
@@ -1550,7 +1779,9 @@ hr('10. 铸币商队（E16）：下一场战斗后必开一家铸币商店，顶
     assert.equal(rw.mintShop, true);
     const r2 = c.Tower._debugRun('endless');
     assert.ok(r2.shop && r2.shop.mint && r2.shop.boundary === true, '应当是顶掉的铸币商店');
-    const buy = c.Tower.buyMintSlot(0);
+    const at = r2.shop.slots.findIndex((s) => !s.swap && !s.sold);
+    assert.ok(at >= 0, '应当有一件正常商品可买');
+    const buy = c.Tower.buyMintSlot(at);
     assert.equal(buy.ok, true, '应当买得到：' + (buy.msg || ''));
     const after = c.Tower._debugRun('endless');
     assert.equal(after.shop, null, '买完收摊');
@@ -1934,6 +2165,14 @@ hr('13. 2026-10 用户口径：抽奖卷只在结算时算（放弃本局弹窗�
           key + '第 ' + local + ' 层应重复首轮相对增长');
       }
     }
+    /* 201 与 101 必须是**同一套等比例下降**：算上 boss 血量缓升后，
+     * 201/200 与 101/100 都恰好等于折扣（用户反映 201 比 101 难得多，实为多继承了一轮，
+     * 不是比例机制坏了；这条守住宿主公式）。 */
+    const finalHp = (n) => parts(n).hpCurve * c.TowerData.endlessBossHpRatio(1, n);
+    for (const end of [100, 200]) {
+      assert.ok(Math.abs(finalHp(end + 1) / finalHp(end) - discount) < 1e-8,
+        '第 ' + (end + 1) + ' 层相对 ' + end + ' 层应同样按折扣下降');
+    }
     assert.equal(KM(101), KM(1), '深度分量随轮内层数重置，完整基础独立继承');
     assert.ok(Math.abs(c.TowerData.endlessScaleParts(120).depth - KM(120)) < 1e-12, '界面出口与曲线同源');
   });
@@ -1978,8 +2217,8 @@ hr('14. 剧情展示模式：开始攀登 → 主界面讲剧情（逐字 / 继�
     assert.match(storyPage, /tower-story/, '剧情模式应当是整屏剧情');
     /* 2026-10 用户口径：右下角那颗「继续」按钮**已经去掉** —— 点屏幕任意位置推进。 */
     assert.ok(!/data-action="story-next"/.test(storyPage), '剧情屏不该再有「继续」按钮');
-    /* 标题按用户口径**保留**（无尽模式 · 第 x 层），「第 m/n 行」进度不要（要沉浸感） */
-    assert.match(storyPage, /无尽模式 · 第 1 层/, '剧情模式要留着标题');
+    /* 标题按用户口径**保留**（无尽塔 · 第 x 层），「第 m/n 行」进度不要（要沉浸感） */
+    assert.match(storyPage, /无尽塔 · 第 1 层/, '剧情模式要留着标题');
     assert.ok(!/tower-story-step/.test(storyPage), '剧情模式不该有「第 m/n 行」提示');
     /* 「不要文本框」= CSS 里 .tower-story-text 不该再有边框 / 底色，且要居中 */
     const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8').replace(/\r\n/g, '\n');
@@ -2163,6 +2402,43 @@ hr('14. 剧情展示模式：开始攀登 → 主界面讲剧情（逐字 / 继�
     ui.click('story-mode');
     assert.equal(c.Tower.storyEnabled(), true, '再点一下回到剧情模式');
     assert.match(ui.last('page').content, /tower-story/, '切回剧情模式后该播的剧情要补上');
+  });
+
+  check('剧本选择：默认剧本直接开局；勇者剧本先到准备页，底部返回键保留、没有右上角关闭键', () => {
+    /* 默认档：选默认剧本 → 开始攀登就是常规无尽塔。 */
+    const a = setup(7);
+    a.Tower.abandon('endless');                    // 回到没有进行中对局的开局页
+    const ua = uiHarness(a);
+    a.TowerUI.openEndless();
+    const first = ua.last('page').content;
+    assert.match(first, /无尽塔/, '开局页标题要叫「无尽塔」');
+    assert.match(first, /默认剧本/, '剧本选择里要有默认剧本');
+    assert.match(first, /勇者剧本/, '剧本选择里要有勇者剧本');
+    assert.match(first, /class="script-demo">DEMO</, '勇者剧本要带 DEMO 标记');
+    assert.ok(!/模式 Demo/.test(first), '旧的「模式 Demo」文案不该还在');
+    assert.equal(ua.last('page').node.querySelectorAll('[data-script]').length, 2, '下拉里正好两张剧本卡');
+    ua.click('fight');
+    assert.ok(a.Tower._debugRun('endless'), '默认剧本点开始攀登应当直接起局');
+    assert.match(ua.last('page').content, /无尽塔 · 第 1 层/, '默认剧本开局标题仍是无尽塔');
+
+    /* 勇者档：选中勇者剧本 → 开始攀登先过勇者准备页。 */
+    const b = setup(7);
+    b.Tower.abandon('endless');
+    const ub = uiHarness(b);
+    /* 这份套件只装了无尽塔状态机；准备页需要 TowerHero 的配置，给个最小桩。 */
+    b.TowerHero = { CONFIG: { initialCount: 3, startLevel: 5 }, catalog: () => [] };
+    b.TowerUI.openEndless();
+    const hero = ub.last('page').node.querySelectorAll('[data-script]')
+      .find((option) => option.getAttribute('data-script') === 'hero');
+    assert.ok(hero, '要有勇者剧本这一档');
+    hero.onclick({ stopPropagation() {} });
+    assert.match(ub.last('page').content, /勇者剧本[\s\S]*DEMO/, '选完勇者剧本后触发按钮要显示这一档和 DEMO');
+    ub.click('fight');
+    const prep = ub.last('page').content;
+    assert.match(prep, /塑造本局勇者/, '勇者剧本点开始攀登先进勇者准备页');
+    assert.ok(!ub.last('page').opts.noFooter, '准备页底部要恢复返回键');
+    assert.equal(ub.last('page').opts.homeLabel, '返回', '底部返回键文案是「返回」');
+    assert.ok(!/hero-setup-close/.test(prep), '准备页不再有右上角小关闭键');
   });
 
   check('剧情屏：点屏幕任意位置都能继续（不是只能点右下角「继续」）；点按钮上不重复推进', () => {
@@ -2559,11 +2835,14 @@ hr('16. 2026-10 镜中世界：整百层打赢魔王 → 拾取照影之境 → 
      * 增幅水晶（纯局内倍率）/ 天命所归都不进入快照。 */
     const staticPower = Math.max(1, Math.round(raw.power * 1.2));
     const staticLifesteal = 0.15;
+    /* 48 层涌泉：0.1×48 = 4.800000000000001，照影快照不能把这个浮点尾巴封进去。 */
+    run.fragileHealBase = 48;
     const history = JSON.stringify(run.runStats), wallet = run.coins;
     assert.ok(T.enterMirrorWorld().ok);
     run = T._debugRun('endless');
     const snap = run.mirrorSnapshot;
     assert.equal(snap.source.firstRound, true);
+    assert.equal(snap.combat.healMul, 5.8, '封存的治疗倍率要收口成 5.8，不能是 5.800000000000001');
     assert.equal(snap.source.power, staticPower, '只封蛮力 +20%，不封增幅水晶 / 回合成长');
     assert.equal(snap.source.agility, raw.agility, '后发制人 / 狂怒不能折进敏捷');
     assert.equal(snap.source.maxHp, raw.hp, '战斗续航 / 空血上限不能折进生命上限');
@@ -2896,6 +3175,11 @@ check('照影之境的拾取卡居中在整个屏幕（不是塔身右侧那半�
   assert.match(rule, /inset:\s*0/, '.tower-mirror 要铺满整个舞台：' + rule);
   assert.ok(!/min-height:\s*62vh/.test(rule), '旧的「半屏 62vh」写法要去掉：' + rule);
   assert.match(rule, /pointer-events:\s*none/, '整屏层自己不吃点击（塔身 / 左下角模式开关照旧）：' + rule);
+  /* fixed 层会建独立层叠上下文；整层自己不抬 z-index 时，白幕盖不住
+   * 「返回征战」（.classic-tower-bar z-index:5）与左下的模式开关。 */
+  const ruleNoComment = rule.replace(/\/\*[\s\S]*?\*\//g, '');
+  const z = Number((ruleNoComment.match(/z-index:\s*(\d+)/) || [])[1] || 0);
+  assert.ok(z > 60, '整屏层要压过塔页动作条（z-index:60），白幕才会连返回/模式开关一起变白：' + rule);
   assert.match(css, /\.tower-mirror\s+\.mirror-card-wrap\s*\{[^}]*pointer-events:\s*auto/,
     '卡片自己仍要能点（pointer-events:auto）');
 });
@@ -2996,6 +3280,14 @@ check('黑装：挑战塔 20/50 层黑卡与 100 层自选箱', () => {
   const T = c.Tower;
   assert.deepEqual([5, 9, 10, 20, 25, 50, 75, 100].map(T.towerBlackCards),
     [0, 0, 0, 1, 0, 1, 0, 0], '每 20 层 1 张、每 50 层再 +1；100 层只给自选箱、不发卡');
+});
+
+check('黑装：100 层自选箱（89）排在背包第一页最前，不会看起来像没进背包', () => {
+  /* 自选箱按 id 升序会排到所有道具之后；背包一页 6 格，玩家在第一页根本看不到。
+   * 现在 classic-ui 的 bagSort 把 89 固定在最前（开包与就地刷新共用同一个排序）。 */
+  const cu = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(cu, /const bagSort = [\s\S]*?Number\(a && a\.id\) === 89[\s\S]*?items\.sort\(bagSort\)[\s\S]*?nextItems\.sort\(bagSort\)/,
+    '背包排序要把 89 放第一页，开包与刷新两处共用');
 });
 
 check('黑装：无尽塔每累计 50 层 1 张黑卡', () => {

@@ -360,9 +360,20 @@
 .shop-slot b { font-size: 23px; line-height: 1.2; color: #7a4a18; }
 .shop-slot i { font-style: normal; font-size: 17px; color: #9b7b51; }
 .shop-slot span { flex: 1; line-height: 1.45; }
+/* 【2026-10】商店卡面介绍：**最多 6 行**、字号比正文小一档。
+ * 卡位窄，长介绍会把「刷新货架」挤出首屏；数据侧用 shopDescOf 去掉生命周期提示，
+ * 这里再兜一层硬上限（超出的部分省略，完整文案在 title 里）。 */
+.shop-slot .shop-desc {
+  flex: 1; font-size: 17px; line-height: 1.35;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; line-clamp: 6;
+  overflow: hidden; max-height: 8.1em;
+}
 .shop-slot em { font-style: normal; color: #999; text-align: center; font-size: 19px; }
 .shop-slot.sold { opacity: .6; }
 .shop-extra { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+/* 刷新 / 铸币是**操作格**，不需要货架卡那么厚的留白：
+ * 收紧内边距与行距，把「刷新」按钮抬进首屏（用户 2026-10 口径：商店不用往下翻就能刷新）。 */
+.shop-extra .shop-slot { padding: 8px 12px; gap: 4px; min-height: 0; }
 .shop-slot.heal { border-color: #8abf6a; background: #f6fce9; }
 .shop-slot.reroll { border-color: #a08ac0; background: #f8f5ff; }
 .shop-sell { display: flex; flex-direction: column; gap: 8px; max-height: 170px; overflow-y: auto; }
@@ -393,10 +404,20 @@
 .shop-slot.ops { border-color: #c9a227; background: #fffdf2; }
 .shop-slot.ops i { color: #9a6b00; }
 .shop-slot.price { border-color: #c9a227; background: #fdf8e6; }
+/* 铸币商店第一格 / 刷新后随机洗出的「等价交换」服务卡：0 铸币，打开交换选择而非直接给增益。 */
+.shop-slot.swap { border-color: #b98a2f; background: #fff7db; box-shadow: 0 0 0 3px #fff1c4 inset; }
+.shop-slot.swap i { color: #9a6b00; }
 .mint-locked { color: #a98a5c; font-size: 18px; }
 
 /* ---------- 讨价还价（E14）：对折的货架格与待兑现提示 ---------- */
 .shop-slot.half { border-color: #4b9e6a; box-shadow: 0 0 0 3px #d6f2df inset; background: #f4fdf7; }
+/* 试炼商店的对折角标：绝对定位，不占卡面行高（见 tower-ui 的 half-badge）。 */
+.shop-slot.half { position: relative; }
+.shop-slot.half .half-badge {
+  position: absolute; top: 37px; right: 8px; z-index: 1;
+  font-size: 14px; line-height: 18px; font-weight: 700; color: #1f6b42;
+  background: #e6f7ec; border: 1px solid #8fd3a9; border-radius: 999px; padding: 0 6px;
+}
 .shop-slot .half-hint { color: #1f6b42; font-weight: 700; font-size: 18px; text-align: center; }
 .buff-pending { margin: 4px 0 2px; }
 .pending-chip {
@@ -746,6 +767,18 @@ ul.settle-calc li.total b { font-size: 22px; }
 /* 商店离开键（继续挑战）放大 */
 .page-footer > .uc-button[data-action="leave"] { min-height: 78px; font-size: 40px; min-width: 320px; }
 
+/* 试炼 / 铸币商店：这一页没有顶部「返回征战」栏（opts.noTabs），底板可以整体上提；
+ * 同时把底栏中央的「返回」缩小到只比「继续挑战」略大，避免它压过商店的主操作。 */
+.classic-page.classic-tower.tower-shop-page > .classic-board { top: 58px; }
+.classic-page.tower-shop-page > .page-footer > .uc-button[data-action="home"] {
+  width: 350px;
+  min-width: 350px;
+  max-width: 350px;
+  height: 100px;
+  min-height: 100px;
+  font-size: 43px;
+}
+
 /* 传奇（r3）配色 + 机制行里的削弱胶囊 */
 .buff-tag.r3, .limit-tag.r3, .hex-card.r3 { border-color: #d9a12a; }
 .buff-tag.r3 { background: linear-gradient(#fff6c8, #ffe08a); }
@@ -1059,7 +1092,13 @@ ul.settle-calc li.total b { font-size: 22px; }
  *   · `pointer-events:none` + 卡片 wrap `auto`：只有卡片吃点击，
  *     塔身 / 左下角模式开关的点击行为与以前完全一样。 */
 .tower-mirror { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-  padding: 12px; pointer-events: none; }
+  padding: 12px; pointer-events: none;
+  /* ⚠ 整层必须自己抬到页面控件之上。`position:fixed` 会给这一层建独立层叠上下文，
+   *   里面白幕的 z-index:60 只在这个上下文里比较 —— 旧版没写这一行时，
+   *   `.classic-tower-bar`（z-index:5）与 DOM 顺序更靠后的「剧情/挑战模式」开关
+   *   都压在整层外面，于是第 100 层白幕铺开时「返回征战」和模式开关**没有变白**。
+   *   80 高于塔页的动作条（60）/货币条（40）/顶部返回栏（5），仍低于 body 上的黑幕（9998）。 */
+  z-index: 80; }
 /* 白幕：盖住整个视口（含塔身与左下角的模式开关），但**在卡片下面**。 */
 .tower-mirror .mirror-veil { position: fixed; inset: 0; background: #fff; opacity: 0;
   transition: opacity 1500ms linear; z-index: 60; pointer-events: none; }
@@ -1256,8 +1295,8 @@ ul.settle-calc li.total b { font-size: 22px; }
   background: #faf1dc; box-shadow: 0 -5px 12px #faf1dc;
 }
 .endless-summary .summary-actions .uc-button {
-  min-height: 42px; padding: 4px 21px; font-size: 24px; letter-spacing: 1px;
-  border-width: 2px; -webkit-text-stroke-width: 1px;
+  min-height: 58px; padding: 7px 28px; font-size: 30px; letter-spacing: 1.2px;
+  border-width: 3px; -webkit-text-stroke-width: 1.4px;
 }
 .endless-summary .summary-actions .uc-button:focus-visible {
   outline: 3px solid #9e783d; outline-offset: 3px;
@@ -1333,3 +1372,460 @@ ul.settle-calc li.total b { font-size: 22px; }
 }
 .endless-page .endless-foes.foes-many .tower-plan.vertical .foe-portrait svg { width: 100%; height: 100%; }
 
+/* 勇者剧本：塔身与奶油卡面保留，勇者选取和成长用青绿色区分。 */
+.tower-footer .uc-button.hero-entry { color: #275b50; border-color: #6a9b84; background: linear-gradient(#f4fff4, #d6ead7); box-shadow: inset 0 0 0 2px #fbfff5, 0 3px 0 #8faa83; }
+
+/* 无尽塔开局：剧本选择（默认剧本 / 勇者剧本）。
+ * 收起时只占一颗按钮；展开后菜单向上弹，不挤动底部的「开始攀登」。 */
+.endless-script-picker { position: relative; display: inline-flex; }
+.tower-footer .uc-button.script-trigger { min-height: 52px; font-size: 25px; padding: 4px 20px; gap: 7px; }
+.script-trigger .script-caret { font-size: 18px; line-height: 1; opacity: .78; }
+.script-menu {
+  position: absolute; right: 0; bottom: calc(100% + 9px); z-index: 70; width: 252px;
+  display: flex; flex-direction: column; gap: 3px; padding: 6px;
+  border: 3px solid #b08a4f; border-radius: 14px;
+  background: #fffaf0; box-shadow: 0 6px 14px #3c401b55, inset 0 0 0 3px #fffce9;
+}
+.script-menu[hidden] { display: none; }
+.script-option {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%;
+  padding: 8px 12px; border: 0; border-radius: 10px; background: transparent;
+  color: #6a4a24; font: inherit; text-align: left; cursor: pointer;
+}
+.script-option:hover { background: #f3e7c8; }
+.script-option.is-active { background: #e4efda; box-shadow: inset 0 0 0 2px #9ab394; }
+.script-option b { font-size: 21px; line-height: 1.2; }
+.script-option small { font-size: 13px; line-height: 1.25; color: #8a6b3c; }
+/* 勇者剧本仍是 demo 阶段：下拉项与当前选中按钮都带一个小标记，不抢主标题。 */
+.script-demo {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid #9ab394;
+  border-radius: 5px;
+  background: #e4efda;
+  color: #355e46;
+  font: 700 11px/1.35 "Microsoft YaHei", "PingFang SC", sans-serif;
+  letter-spacing: .5px;
+  font-style: normal;
+  vertical-align: 2px;
+}
+
+.hero-demo-badge { display: inline-flex; align-items: center; width: fit-content; padding: 4px 10px; border: 1px solid #9ab394; border-radius: 6px; background: #e4efda; color: #355e46; font-size: 14px; font-weight: 700; line-height: 1.2; }
+.hero-demo-stats { flex-shrink: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.hero-demo-stats > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 5px 12px; border: 2px solid #d7c69d; border-radius: 12px; background: #fffbeb; box-shadow: inset 0 1px 0 #fff; }
+.hero-demo-stats span { font-size: 17px; color: #8c714b; }
+.hero-demo-stats b { font-size: 25px; color: #3d654e; font-variant-numeric: tabular-nums; }
+.hero-stat-arrows { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 2px; }
+.hero-stat-step { width: 22px; height: 17px; padding: 0; border: 1px solid #d0bb91; border-radius: 4px; background: #fbf3df; color: #3b7255; font: 700 12px/1 "Microsoft YaHei", "PingFang SC", sans-serif; cursor: pointer; }
+.hero-stat-step:disabled { color: #b7b0a4; background: #f0ece3; border-color: #d8d2c6; cursor: not-allowed; }
+.hero-base-note { flex-shrink: 0; margin: 5px 0 8px; color: #806443; font-size: 14px; line-height: 1.35; }
+/* ============================================================
+ * 勇者剧本准备页（现代界面）—— 形态对齐状态页
+ * 顶栏沿用「状态 / 武器 / 技能」三颗原版页签；状态页签 = 立绘 + 出发准备 + 四维条，
+ * 武器 / 技能页签 = 5×2 图标格。与经典准备页同一套信息结构，但全部是现代 DOM。
+ * ============================================================ */
+.hero-prep-board { overflow: hidden; }
+.hero-prep-board [data-hero-pane][hidden], .hero-prep-board .hero-prep-stats[hidden] { display: none; }
+.hero-prep-status-pane { position: absolute; inset: 16px 26px 112px 20px; }
+.hero-prep-portrait { position: absolute; left: 0; top: 0; bottom: 0; width: 378px; display: flex; align-items: center; justify-content: center; }
+.hero-prep-portrait-art { display: block; width: 356px; height: 352px; }
+.hero-prep-portrait-art svg { pointer-events: none; }
+.hero-prep-summary { position: absolute; left: 388px; right: 2px; top: 0; bottom: 0; display: flex; flex-direction: column; min-width: 0; }
+.hero-prep-title { margin: 0; color: #325c49; font-size: 38px; line-height: 1.1; }
+.hero-prep-kicker { display: flex; align-items: center; gap: 8px; margin: 6px 0 12px; color: #8a6b3c; font-size: 15px; line-height: 1.25; }
+.hero-prep-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.hero-prep-fact { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 7px 12px; border: 2px solid #d7c69d; border-radius: 11px; background: #fffbeb; box-shadow: inset 0 1px 0 #fff; }
+.hero-prep-fact i { color: #8c714b; font-size: 15px; font-style: normal; }
+.hero-prep-fact b { color: #3d654e; font-size: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hero-prep-todo { margin: 9px 0 8px; color: #b06b1f; font-size: 16px; line-height: 1.3; }
+.hero-prep-actions { display: flex; gap: 12px; margin-top: auto; }
+.hero-prep-actions .uc-button { flex: 1 1 0; min-width: 0; min-height: 0; height: 84px; padding: 4px 10px; font-size: 32px; }
+.hero-prep-actions .uc-button:disabled { opacity: .5; filter: grayscale(.5); cursor: not-allowed; }
+.hero-prep-summary .hero-base-note { margin: 8px 0 0; font-size: 12.5px; }
+.classic-page[data-screen="status"] > .classic-board.hero-prep-board > .hero-prep-stats { left: 22px; right: 22px; bottom: 10px; height: 94px; padding: 9px 14px; gap: 12px; }
+.classic-page[data-screen="status"] > .classic-board.hero-prep-board > .hero-prep-stats .stat-pill { height: 62px; padding: 0 10px 0 0; gap: 8px; font: 44px/1 Georgia, serif; }
+.classic-page[data-screen="status"] > .classic-board.hero-prep-board > .hero-prep-stats .stat-pill b { width: 52px; height: 52px; font-size: 29px; border-width: 3px; }
+.classic-page[data-screen="status"] > .classic-board.hero-prep-board > .hero-prep-stats .hero-stat-pill { position: relative; padding-right: 44px; }
+.classic-page[data-screen="status"] > .classic-board.hero-prep-board > .hero-prep-stats .hero-stat-arrows { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); gap: 3px; }
+.classic-page[data-screen="status"] > .classic-board.hero-prep-board > .hero-prep-stats .hero-stat-step { width: 29px; height: 23px; border-radius: 5px; font-size: 11px; }
+.hero-ws-pane { position: absolute; inset: 10px 18px 8px; display: flex; flex-direction: column; min-height: 0; }
+.hero-ws-pane[hidden] { display: none; }
+.hero-ws-head { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 8px 6px; }
+.hero-ws-head h3 { margin: 0; color: #325c49; font-size: 24px; line-height: 1.2; }
+.hero-ws-count { flex: 0 0 auto; padding: 3px 12px; border-radius: 999px; background: #edf4e4; color: #3b7255; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.hero-ws-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); align-content: center; gap: 10px 14px; padding: 0 34px; }
+.hero-ws-cell { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; min-width: 0; padding: 0; border: 0; background: transparent; color: #6f512f; font: inherit; text-align: center; cursor: pointer; }
+.hero-ws-cell[hidden] { display: none; }
+.hero-ws-cell .item-icon { flex: 0 0 auto; width: 132px; height: 132px; border-radius: 26px; border: 3px solid #7f7357; box-shadow: inset 0 0 0 4px #fff, 0 1px 0 #c7b489; background: linear-gradient(135deg, #faf4cf, #e8c885); display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; }
+.hero-ws-cell .item-icon img { width: 90%; height: 90%; object-fit: contain; }
+.hero-ws-cell:hover .item-icon { border-color: #a4b68a; }
+.hero-ws-cell.is-lit .item-icon, .hero-ws-cell.is-selected .item-icon { background: linear-gradient(#eefbbd, #92ca47); outline: 3px solid #9bc75f; }
+.hero-ws-cell.is-selected .item-icon::after { content: "✓"; position: absolute; right: 5px; top: 4px; color: #fffdf3; font-size: 20px; font-weight: 700; text-shadow: 0 1px 2px #4d7a20; }
+.hero-ws-cell.is-locked { opacity: .55; }
+.hero-ws-cell .item-caption { display: flex; flex-direction: column; align-items: center; gap: 1px; max-width: 100%; line-height: 1.15; }
+.hero-ws-cell .item-caption b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
+.hero-ws-cell .item-caption em { display: none; color: #3b7255; font-size: 12px; font-style: normal; }
+.hero-ws-cell.is-selected .item-caption b { color: #598624; }
+.hero-ws-cell.is-selected .item-caption em { display: block; }
+.hero-ws-empty { grid-column: 1 / -1; align-self: center; margin: 0; color: #9a7a4a; font-size: 17px; }
+.hero-ws-desc { flex: 0 0 auto; margin: 4px 34px 0; min-height: 19px; overflow: hidden; color: #8a6b3c; font-size: 13.5px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.hero-ws-page { position: absolute; right: 20px; bottom: 0; color: #8b672f; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.hero-ws-pane .page-arrow { top: 47%; }
+.hero-ws-pane .page-arrow.prev { left: 2px; }
+.hero-ws-pane .page-arrow:not(.prev) { right: 2px; }
+.hero-ws-cell:focus-visible, .hero-ws-pane .page-arrow .uc-button:focus-visible { outline: 3px solid #83a76a; outline-offset: 2px; }
+.hero-gear-rarity { margin: 0 0 12px; }
+.hero-gear-rarity > h4 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 6px; padding: 3px 10px; border-radius: 8px; background: #f2e7ce; color: #6d502f; font-size: 18px; }
+.hero-gear-rarity > h4 span { font-size: 13px; font-weight: 400; color: #947a54; }
+.hero-gear-rarity.q3 > h4 { background: #eadcf6; color: #6b3d8a; }
+.hero-gear-rarity.q4 > h4 { background: #ffedd2; color: #9a5a1f; }
+.hero-gear-rarity.q5 > h4 { background: #e6e1d8; color: #3c3630; }
+.hero-gear-rarity.q2 > h4 { background: #dfeafa; color: #385b82; }
+.hero-gear-rarity.q1 > h4 { background: #e2f0d9; color: #426b35; }
+.hero-gear-set { margin: 0 0 7px; padding: 5px 7px 7px; border: 1px solid #e3d3ae; border-radius: 10px; background: #fffdf7; }
+.hero-gear-set > h5 { margin: 0 0 5px; color: #8a6b3c; font-size: 14px; font-weight: 700; }
+.hero-gear-parts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+.hero-gear-item { position: relative; display: grid; grid-template-columns: 42px minmax(0, 1fr); grid-template-rows: auto auto; gap: 1px 6px; align-items: center; min-width: 0; padding: 5px 6px 12px; border: 2px solid #e4d6b7; border-radius: 9px; background: #fffdf6; font: inherit; text-align: left; cursor: pointer; transition: border-color .12s ease, background .12s ease; }
+.hero-gear-item:hover { border-color: #a4b68a; }
+.hero-gear-item.is-equipped { border-color: #d2a43a; background: #fff6d8; box-shadow: inset 0 0 0 2px #f4df9f; }
+.hero-gear-icon { grid-row: 1 / span 2; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; }
+.hero-gear-icon img { width: 42px; height: 42px; object-fit: contain; }
+/* 黑装/部分橙装没有导出 PNG：用部位字占位，保证每格都看得出是什么部位。 */
+.hero-gear-icon.missing { border: 1px dashed #cdb586; border-radius: 8px; background: #f7eeda; }
+.hero-gear-icon.missing::before { content: attr(data-part); color: #8a6b3c; font-size: 18px; font-weight: 700; }
+.hero-gear-item b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #65482c; font-size: 12px; }
+.hero-gear-item i { color: #8f7658; font-size: 11px; font-style: normal; }
+.hero-gear-zero { position: absolute; right: 5px; bottom: 2px; color: #a58a5f; font-size: 10px; line-height: 1; }
+.hero-gear-item:focus-visible, .hero-story-choice:focus-visible { outline: 3px solid #83a76a; outline-offset: 2px; }
+/* 主界面左下：勇者模式的小全身照（剧情模式按钮右侧） */
+.tower-page > .endless-hero-portrait { position: absolute; left: 170px; bottom: 4px; z-index: 6; width: 88px; height: 106px; display: flex; flex-direction: column; align-items: center; padding: 1px; border: 2px solid #c9a468; border-radius: 12px; background: linear-gradient(#fffdf3, #f4e6c1); box-shadow: inset 0 0 0 2px #fffce9, 0 3px 0 #b08a4f; cursor: pointer; font: inherit; }
+.tower-page > .endless-hero-portrait:hover { border-color: #e0b64a; box-shadow: inset 0 0 0 2px #fffce9, 0 3px 0 #b08a4f, 0 0 9px #ffd76a; }
+.endless-hero-portrait-art { display: block; width: 80px; height: 84px; pointer-events: none; }
+.endless-hero-portrait-art svg { pointer-events: none; }
+.endless-hero-portrait b { color: #7a4a18; font-size: 12px; line-height: 1; }
+/* 勇者状态弹窗 */
+.hero-status-modal .modal-body { max-height: 472px; }
+.hero-status-card { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 16px; align-items: start; }
+.hero-status-side { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; }
+.hero-status-portrait { width: 198px; height: 246px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 2px solid #c9a468; border-radius: 14px; background: radial-gradient(circle at 50% 42%, #fffdf4 0 54%, #f4e9cf 100%); box-shadow: inset 0 2px 6px #d8c49a55; }
+.hero-status-portrait > span { display: block; width: 188px; height: 236px; }
+.hero-status-portrait svg { pointer-events: none; }
+.hero-status-name { color: #6d502f; font-size: 24px; font-weight: 700; }
+.hero-status-hp { color: #8a6b3c; font-size: 14px; }
+.hero-status-main { min-width: 0; }
+.hero-status-modal .hero-demo-stats { gap: 6px; }
+.hero-status-modal .hero-demo-stats > div { padding: 3px 9px; border-width: 1px; }
+.hero-status-modal .hero-demo-stats span { font-size: 14px; }
+.hero-status-modal .hero-demo-stats b { font-size: 21px; }
+.hero-status-modal .hero-base-note { margin: 6px 0; font-size: 13px; }
+.hero-status-gears { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; margin: 7px 0 9px; }
+.hero-status-gear-slot { display: grid; gap: 1px; min-width: 0; padding: 4px 6px; border: 1px solid #e0cb9c; border-radius: 8px; background: #fffdf6; }
+.hero-status-gear-slot i { color: #947a54; font-size: 11px; font-style: normal; }
+.hero-status-gear-slot b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #65482c; font-size: 12px; }
+.hero-status-gear-slot em { color: #a58a5f; font-size: 10px; font-style: normal; }
+.hero-status-loadouts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.hero-status-loadout h4, .hero-status-log h4 { margin: 0 0 4px; color: #6d502f; font-size: 15px; }
+.hero-status-loadout h4 span { color: #9a7a4a; font-size: 12px; font-weight: 400; }
+.hero-status-loadout ul, .hero-status-log ol { margin: 0; padding: 0; list-style: none; }
+.hero-status-loadout ul.is-many { max-height: 126px; overflow-y: auto; }
+.hero-status-loadout li { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 5px; padding: 2px 0; border-bottom: 1px dashed #e2d3b4; }
+.hero-status-ws-icon, .hero-status-ws-icon img { width: 32px; height: 32px; object-fit: contain; }
+.hero-status-loadout li b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #65482c; font-size: 13px; }
+.hero-status-loadout li em { color: #3b7255; font-size: 12px; font-style: normal; font-variant-numeric: tabular-nums; }
+.hero-status-empty { margin: 3px 0; color: #9a7a4a; font-size: 13px; line-height: 1.4; }
+.hero-status-log { margin-top: 8px; padding-top: 6px; border-top: 1px solid #e2d3b4; }
+.hero-status-log li { padding: 2px 0; color: #7c6444; font-size: 12.5px; line-height: 1.35; }
+.hero-event-page > .tower-main { padding: 14px 12px; }
+@media (max-width: 760px) {
+  .hero-status-card { grid-template-columns: minmax(0, 1fr); }
+  .hero-status-portrait { width: 160px; height: 196px; }
+  .hero-status-portrait > span { width: 152px; height: 188px; }
+  .hero-status-gears, .hero-status-loadouts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ============================================================
+ * 勇者模式准备页 / 爬塔回看：随机挑战「查看敌人」那张原版状态页（7218）
+ * ------------------------------------------------------------
+ * 状态页自带的「装备融合」位置被换成「开始挑战」：复用 3911 金胶囊，
+ * 只把它烤死的「返回」字形藏掉，文字由 `heroStartLabelEnsure()` 另挂一层 SVG 文本。
+ * 这样悬停/按下的金色→绿色两帧仍然由原版素材提供，不必另画按钮。
+ * ============================================================ */
+.sf-hero-view .sf-hero-start g[type="shape"][depth="4"] { display: none !important; }
+.sf-hero-view .sf-hero-start { cursor: pointer; }
+.hero-gear-picker { position: fixed; inset: 0; z-index: 9000; display: flex; align-items: center; justify-content: center; padding: 3vh 2vw; background: rgba(18, 28, 17, .6); font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif; color: #6f512f; }
+.hero-gear-picker-panel { width: min(1040px, 96vw); max-height: 94vh; display: flex; flex-direction: column; overflow: hidden; border: 2px solid #d6bd8c; border-radius: 18px; background: #fffaf0; box-shadow: 0 14px 44px #0008, inset 0 0 0 3px #fffdf4; }
+.hero-gear-picker-head { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 12px 18px 10px; border-bottom: 1px solid #e2d2ae; background: linear-gradient(#fffdf4, #fbf3df); }
+.hero-gear-picker-head h3 { margin: 0; color: #5d4227; font-size: 24px; line-height: 1.2; }
+.hero-gear-picker-head p { margin: 4px 0 0; color: #8a6b3c; font-size: 14px; line-height: 1.4; }
+.hero-gear-picker-head p b { color: #3b7255; }
+.hero-gear-picker-total { flex: 0 0 auto; padding: 3px 10px; border-radius: 999px; background: #edf4e4; color: #3b7255; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.hero-gear-picker-slots { flex: 0 0 auto; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 10px 18px 8px; }
+.hero-gear-slot { display: grid; gap: 2px; min-width: 0; padding: 6px 10px; border: 1px solid #e0cb9c; border-radius: 10px; background: #fffdf6; }
+.hero-gear-slot i { color: #947a54; font-size: 12px; font-style: normal; }
+.hero-gear-slot b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #5d4227; font-size: 14px; }
+.hero-gear-slot em { color: #a58a5f; font-size: 11px; font-style: normal; }
+.hero-gear-picker-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 18px 12px; overscroll-behavior: contain; }
+.hero-gear-picker .hero-gear-rarity { margin-bottom: 14px; }
+.hero-gear-picker .hero-gear-rarity > h4 { position: sticky; top: 0; z-index: 2; }
+.hero-gear-picker .hero-gear-parts { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+.hero-gear-picker .hero-gear-item { grid-template-columns: 48px minmax(0, 1fr); padding: 6px 8px 14px; }
+.hero-gear-picker .hero-gear-icon, .hero-gear-picker .hero-gear-icon img { width: 48px; height: 48px; }
+.hero-gear-picker .hero-gear-item b { font-size: 13px; }
+.hero-gear-picker-foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 18px; border-top: 1px solid #e2d2ae; background: #fff6e2; }
+.hero-gear-picker-foot > span { color: #8a6b3c; font-size: 13px; line-height: 1.4; }
+.hero-gear-picker-back { flex: 0 0 auto; min-width: 110px; padding: 8px 20px; border: 2px solid #b08a4f; border-radius: 12px; background: linear-gradient(#fff6a1, #ffdb58 38%, #ffb62c 67%, #ec9009); color: #5a3200; font: inherit; font-size: 18px; font-weight: 700; cursor: pointer; box-shadow: inset 0 2px 0 #fffac2, 0 2px 0 #b08a4f; }
+.hero-gear-picker-back:hover { filter: brightness(1.06); }
+.hero-gear-picker-back:active { transform: translateY(2px); box-shadow: inset 0 2px 0 #fffac2; }
+.hero-gear-picker-back:focus-visible, .hero-gear-picker .hero-gear-item:focus-visible { outline: 3px solid #83a76a; outline-offset: 2px; }
+@media (max-width: 720px) {
+  .hero-gear-picker { padding: 0; }
+  .hero-gear-picker-panel { width: 100vw; height: 100vh; max-height: none; border-radius: 0; border: 0; }
+  .hero-gear-picker-head { padding: 10px 12px 8px; }
+  .hero-gear-picker-head h3 { font-size: 20px; }
+  .hero-gear-picker-head p { font-size: 12px; }
+  .hero-gear-picker-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 8px 12px; }
+  .hero-gear-picker-scroll { padding: 0 12px 10px; }
+  .hero-gear-picker .hero-gear-parts { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .hero-gear-picker .hero-gear-item b { white-space: normal; line-height: 1.25; }
+  .hero-gear-picker-foot { padding: 8px 12px; }
+  .hero-gear-picker-foot > span { display: none; }
+}
+
+
+/* ============================================================
+ * 勇者页（现代界面）—— 直接用状态页壳 + 武技图鉴页
+ * ------------------------------------------------------------
+ * 用户 2026-10 口径：不要再自绘一套勇者工作台；状态页签走现代状态页的
+ * 立绘 / 四维条，武器 / 技能页签走图鉴同款 5×2 格子。
+ * 「出发准备」做成一张更挺拔的奶油卡：标题 + 三个起始武技槽 +
+ * 武技 / 四维 / 外观三块进度 + 底部两键。
+ * ============================================================ */
+.classic-page.hero-page .hero-board { overflow: hidden; }
+.classic-page.hero-page .hero-status-character {
+  left: 10px; top: 10px; width: 468px; height: 322px;
+}
+.classic-page.hero-page .hero-sheet {
+  position: absolute; left: 492px; right: 20px; top: 4px; bottom: 132px;
+  display: flex; flex-direction: column; gap: 0; min-height: 0;
+  padding: 14px 16px 12px; overflow: hidden;
+  border: 3px solid #d4bd8c; border-radius: 18px;
+  background: linear-gradient(155deg, #fffdf4 0%, #fff7df 55%, #f7e9c9 100%);
+  box-shadow: inset 0 0 0 3px #fffdf7, 0 3px 0 #d9c69a;
+}
+.hero-sheet-scroll { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+.hero-sheet-scroll::-webkit-scrollbar { width: 8px; }
+.hero-sheet-scroll::-webkit-scrollbar-thumb { border-radius: 8px; background: #d5bd8a; border: 2px solid #fff7df; }
+.hero-sheet-bottom { flex: 0 0 auto; display: flex; flex-direction: column; gap: 5px; padding-top: 6px; border-top: 1px solid #eadbb8; background: linear-gradient(#fff7df, #f9edcf); }
+.hero-sheet-head { flex: 0 0 auto; }
+.hero-sheet-eyebrow {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px;
+  border-radius: 999px; background: #e9f0dc; color: #4a6b45;
+  font-size: 12px; font-weight: 800; letter-spacing: .08em;
+}
+.hero-sheet-eyebrow::before { content: "◆"; color: #86a56a; font-size: 9px; }
+.hero-sheet-title { margin: 5px 0 3px; color: #325c49; font-size: 32px; line-height: 1.05; letter-spacing: .02em; }
+.hero-sheet-sub { margin: 0; color: #8b6c43; font-size: 13px; line-height: 1.45; }
+.hero-pick-block { flex: 0 0 auto; padding: 8px 10px 9px; border: 2px solid #eadbb8; border-radius: 13px; background: #fffdf5; }
+.hero-block-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.hero-block-head h3 { margin: 0; color: #6d502f; font-size: 15px; }
+.hero-block-head b { color: #b06b1f; font-size: 16px; font-variant-numeric: tabular-nums; }
+.hero-block-head b.is-ready { color: #3d784b; }
+.hero-pick-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.hero-pick-slot {
+  display: grid; grid-template-columns: 54px minmax(0, 1fr); grid-template-rows: auto auto;
+  align-items: center; gap: 1px 7px; min-width: 0; min-height: 64px; padding: 5px 7px;
+  border: 2px dashed #dcc79c; border-radius: 11px; background: #fffaf0;
+}
+.hero-pick-slot.is-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; color: #ad9368; }
+.hero-pick-slot.is-empty i { font: 700 22px/1 Georgia, serif; color: #c2a978; }
+.hero-pick-slot.is-empty em { font-size: 11px; font-style: normal; }
+.hero-pick-slot.is-filled { border-style: solid; border-color: #a9c47f; background: linear-gradient(#fbffe9, #edf7d3); }
+.hero-pick-icon { grid-row: 1 / span 2; width: 52px; height: 52px; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 10px; background: linear-gradient(135deg, #faf4cf, #e8c885); border: 2px solid #b5a174; }
+.hero-pick-icon img { width: 92%; height: 92%; object-fit: contain; }
+.hero-pick-slot b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #4d6e3d; font-size: 13px; }
+.hero-pick-slot em { color: #6f8c5b; font-size: 11px; font-style: normal; }
+.hero-meter { display: block; height: 6px; margin-top: 5px; overflow: hidden; border-radius: 99px; background: #ece0c6; box-shadow: inset 0 1px 1px #d6c39c; }
+.hero-meter i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #95c75c, #5fa53b); transition: width .18s ease; }
+.hero-meter-wide { height: 7px; margin-top: 8px; }
+.hero-facts { flex: 1 1 auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; min-height: 72px; }
+.hero-fact { display: flex; flex-direction: column; justify-content: flex-start; gap: 2px; min-width: 0; padding: 7px 9px; border: 2px solid #e8d8b3; border-radius: 11px; background: #fffdf6; }
+.hero-fact-label { color: #9a7b4e; font-size: 11px; font-weight: 800; letter-spacing: .08em; }
+.hero-fact b { color: #3d654e; font-size: 18px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.hero-fact em { margin-top: auto; color: #9a825e; font-size: 10.5px; font-style: normal; line-height: 1.3; }
+.hero-sheet-note { flex: 0 0 auto; margin: 0; padding: 5px 9px; border-radius: 9px; background: #fff3d6; color: #a26a22; font-size: 12.5px; line-height: 1.35; }
+.hero-sheet-note.is-ready { background: #e8f4da; color: #3b7147; }
+.hero-sheet-actions { flex: 0 0 auto; display: flex; gap: 9px; margin-top: auto; }
+.hero-sheet-actions .uc-button { flex: 1 1 0; min-width: 0; height: 56px; min-height: 0; padding: 3px 8px; font-size: 23px; }
+.hero-sheet-actions .uc-button:disabled { opacity: .55; filter: grayscale(.7); cursor: not-allowed; }
+.hero-train-button { display: inline-flex; flex-direction: column; gap: 0; line-height: 1.05; }
+.hero-train-button small { font-size: 10.5px; font-weight: 500; letter-spacing: 0; -webkit-text-stroke: 0; text-shadow: none; color: #fff8d6; opacity: .92; }
+.hero-sheet-foot { flex: 0 0 auto; margin: 0; color: #93764e; font-size: 11px; line-height: 1.35; }
+.hero-sheet-foot b { color: #a26a22; }
+.hero-sheet-empty { margin: 3px 0; color: #a58a5f; font-size: 12px; line-height: 1.4; }
+/* —— 爬塔中的勇者详情 —— */
+.hero-vitals { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 5px 9px; border-radius: 10px; background: #f5ead2; }
+.hero-hpbar { flex: 1; height: 11px; overflow: hidden; border-radius: 99px; background: #dcc8a6; box-shadow: inset 0 1px 2px #b59a73; }
+.hero-hpbar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #e9755b, #c73c31); }
+.hero-vitals b { color: #6d3b27; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hero-vitals em { color: #9a7b4e; font-size: 10px; font-style: normal; }
+.hero-run-facts { flex: 0 0 auto; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.hero-run-facts span { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; min-width: 0; padding: 4px 8px; border: 1px solid #e6d5b0; border-radius: 8px; background: #fffdf6; }
+.hero-run-facts i { color: #9a7b4e; font-size: 10.5px; font-style: normal; }
+.hero-run-facts b { color: #3d654e; font-size: 16px; font-variant-numeric: tabular-nums; }
+.hero-gear-row { flex: 0 0 auto; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.hero-gear-cell { display: grid; gap: 1px; min-width: 0; padding: 4px 7px; border: 1px solid #e2cfa8; border-radius: 8px; background: #fffdf6; }
+.hero-gear-cell i { color: #9a7b4e; font-size: 9.5px; font-style: normal; }
+.hero-gear-cell b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #65482c; font-size: 11px; }
+.hero-gear-cell em { color: #ad946a; font-size: 9px; font-style: normal; }
+.hero-loadouts { flex: 0 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; min-height: 0; }
+.hero-loadout h4, .hero-log h4 { margin: 0 0 3px; color: #6d502f; font-size: 13px; }
+.hero-loadout h4 span { margin-left: 3px; color: #9a7b4e; font-size: 10px; font-weight: 400; }
+.hero-loadout ul { margin: 0; padding: 0; list-style: none; max-height: 82px; overflow-y: auto; }
+.hero-loadout li { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 4px; padding: 1px 0; border-bottom: 1px dashed #e3d3b2; }
+.hero-loadout-icon, .hero-loadout-icon img { width: 24px; height: 24px; object-fit: contain; }
+.hero-loadout li b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #65482c; font-size: 11px; }
+.hero-loadout li em { color: #3b7255; font-size: 10px; font-style: normal; font-variant-numeric: tabular-nums; }
+.hero-log { flex: 0 0 auto; padding-top: 4px; border-top: 1px solid #e6d5b0; }
+.hero-log ol { margin: 0; padding: 0; list-style: none; max-height: 66px; overflow-y: auto; }
+.hero-log li { padding: 1px 0; color: #7c6444; font-size: 10.5px; line-height: 1.35; }
+/* —— 武技图鉴页 —— */
+.hero-page-hint { color: #8b6a3d; font-size: 14px; line-height: 1.2; }
+.hero-board-catalog .catalog-grid { padding: 0 6px; }
+.hero-ws-cell .item-icon { width: 148px; height: 148px; border-radius: 26px; }
+.hero-ws-cell .item-caption { min-height: 30px; font-size: 23px; }
+.hero-ws-cell.is-locked { opacity: .48; }
+.hero-ws-cell.is-locked:hover { opacity: .7; }
+.hero-ws-cell.hero-owned .item-icon { outline: 3px solid #9bc75f; box-shadow: inset 0 0 0 5px #efffd0, 0 1px 0 #c7b489; }
+/* —— 铸币修炼 / 武技详情 —— */
+.hero-train-modal .modal-body { max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; }
+.hero-train-panel > p { margin: 0 0 8px; line-height: 1.45; }
+.hero-train-list { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 7px; }
+.hero-train-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 7px; min-width: 0; padding: 6px 8px; border: 2px solid #e0cca3; border-radius: 10px; background: #fffdf6; color: #65482c; font: inherit; text-align: left; cursor: pointer; }
+.hero-train-row:hover { border-color: #a9c47f; background: #f4faea; }
+.hero-train-row:disabled { opacity: .45; cursor: not-allowed; }
+.hero-train-icon, .hero-train-icon img { width: 44px; height: 44px; object-fit: contain; }
+.hero-train-name { display: grid; gap: 1px; min-width: 0; }
+.hero-train-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.hero-train-name em { color: #7c8a56; font-size: 11px; font-style: normal; }
+.hero-train-cost { color: #a26a22; font-size: 11px; line-height: 1.25; text-align: right; white-space: nowrap; }
+.hero-train-cost i { color: #9a825e; font-style: normal; font-size: 10px; }
+.hero-item-detail { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 12px; align-items: start; }
+.hero-item-art { display: flex; align-items: center; justify-content: center; width: 96px; height: 96px; border-radius: 16px; border: 2px solid #b5a174; background: linear-gradient(135deg, #faf4cf, #e8c885); }
+.hero-item-art img { width: 92%; height: 92%; object-fit: contain; }
+.hero-item-detail h3 { margin: 0 0 3px; color: #325c49; font-size: 24px; }
+.hero-item-level { margin: 0 0 5px; color: #a26a22; font-size: 14px; }
+.hero-item-desc { margin: 0; color: #7c6444; font-size: 14px; line-height: 1.5; }
+@media (max-width: 760px) {
+  .hero-train-list { grid-template-columns: minmax(0, 1fr); }
+}
+/* 经典 7218 勇者页：3911 位置上的「铸币修炼」键（与开始挑战共用一套金胶囊皮） */
+.sf-hero-view .sf-hero-train g[type="shape"][depth="4"] { display: none !important; }
+.sf-hero-view .sf-hero-train { cursor: pointer; }
+.hero-coin-train-modal .modal-body { max-height: 58vh; overflow-y: auto; overscroll-behavior: contain; }
+.hero-coin-train-panel > p { margin: 0 0 8px; line-height: 1.45; }
+.hero-coin-train-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.hero-coin-train-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 1px 8px; align-items: center; padding: 7px 10px; border: 2px solid #e0cca3; border-radius: 10px; background: #fffdf6; color: #65482c; font: inherit; text-align: left; cursor: pointer; }
+.hero-coin-train-row:hover { border-color: #a9c47f; background: #f4faea; }
+.hero-coin-train-row b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.hero-coin-train-row span { color: #7c8a56; font-size: 12px; }
+.hero-coin-train-row em { grid-row: 1 / span 2; grid-column: 2; color: #a26a22; font-size: 12px; font-style: normal; white-space: nowrap; }
+@media (max-width: 760px) { .hero-coin-train-list { grid-template-columns: minmax(0, 1fr); } }
+
+/* ============================================================
+ * 勇者际遇：沿用剧情模式的整屏文字界面
+ * ------------------------------------------------------------
+ * 不再用「事件卡」；文字仍是 `.tower-story-line`，选择键放在下方。
+ * ============================================================ */
+.hero-event-page > .tower-main { padding: 8px 18px 10px; }
+.hero-story { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.hero-story-head { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 2px 8px 0; }
+.hero-story-title { margin: 0; color: #4e3720; font-family: KaiTi, STKaiti, 'Kaiti SC', 'Kaiti TC', 楷体, 'BiauKai', 'Songti SC', serif;
+  font-size: 26px; font-weight: 700; letter-spacing: .06em; text-shadow: 0 1px 0 #fffdf6; }
+.hero-story-text { flex: 1 1 auto; min-height: 0; overflow-y: auto; justify-content: center; padding: 2px 12px; }
+.hero-story .tower-story-line { font-size: 24px; line-height: 1.55; }
+.hero-story-choices { flex: 0 0 auto; display: grid; gap: 7px; max-height: 40%; overflow-y: auto; padding: 2px 6px 0; }
+.hero-story-choice { display: grid; gap: 2px; width: 100%; padding: 9px 14px; border: 2px solid #d6bd8c; border-radius: 12px; background: linear-gradient(#fffdf6, #fdf6e7); font: inherit; text-align: left; cursor: pointer; box-shadow: 0 2px 0 #dcc9a2; }
+.hero-story-choice:hover { border-color: #7fa06a; background: linear-gradient(#fbfff0, #edf5de); transform: translateY(-1px); }
+.hero-story-choice:active { transform: translateY(1px); box-shadow: none; }
+.hero-story-choice b { color: #4e6f3d; font-size: 19px; line-height: 1.25; }
+.hero-story-choice span { color: #8d7350; font-size: 13px; line-height: 1.4; }
+.hero-story-choice:focus-visible { outline: 3px solid #83a76a; outline-offset: 2px; }
+
+/* 商店 HS02 / HS03 的自选层：与换装层同一套全屏遮罩 + 可滚动列表 */
+.hero-goods-picker { position: fixed; inset: 0; z-index: 9100; display: flex; align-items: center; justify-content: center; padding: 3vh 2vw; background: rgba(18, 28, 17, .62); font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif; color: #6f512f; }
+.hero-goods-panel { width: min(840px, 94vw); max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; border: 2px solid #d6bd8c; border-radius: 18px; background: #fffaf0; box-shadow: 0 14px 44px #0008, inset 0 0 0 3px #fffdf4; }
+.hero-goods-head { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 18px 10px; border-bottom: 1px solid #e2d2ae; background: linear-gradient(#fffdf4, #fbf3df); }
+.hero-goods-head h3 { margin: 0; color: #5d4227; font-size: 24px; line-height: 1.2; }
+.hero-goods-head p { margin: 4px 0 0; color: #8a6b3c; font-size: 13px; line-height: 1.4; }
+.hero-goods-count { flex: 0 0 auto; padding: 3px 10px; border-radius: 999px; background: #edf4e4; color: #3b7255; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.hero-goods-list { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-content: start; gap: 7px; padding: 10px 18px 12px; overscroll-behavior: contain; }
+.hero-goods-item { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; padding: 7px 9px; border: 2px solid #e0cca3; border-radius: 11px; background: #fffdf6; color: #65482c; font: inherit; text-align: left; cursor: pointer; }
+.hero-goods-item:hover { border-color: #a9c47f; background: #f4faea; }
+.hero-goods-icon, .hero-goods-icon img { width: 42px; height: 42px; object-fit: contain; }
+.hero-goods-text { display: grid; gap: 1px; min-width: 0; }
+.hero-goods-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #4e6f3d; font-size: 15px; }
+.hero-goods-text em { color: #a26a22; font-size: 11px; font-style: normal; }
+.hero-goods-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #947a54; font-size: 11px; }
+.hero-goods-arrow { color: #b59a6c; font: 400 24px/1 Georgia, serif; }
+.hero-goods-foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 18px; border-top: 1px solid #e2d2ae; background: #fff6e2; }
+.hero-goods-foot > span { color: #8a6b3c; font-size: 12px; line-height: 1.4; }
+.hero-goods-foot .uc-button { flex: 0 0 auto; min-width: 104px; min-height: 42px; height: 42px; font-size: 18px; }
+@media (max-width: 720px) { .hero-goods-picker { padding: 0; } .hero-goods-panel { width: 100vw; height: 100vh; max-height: none; border-radius: 0; border: 0; } .hero-goods-list { grid-template-columns: minmax(0, 1fr); } }
+/* 勇者页的底栏四维收矮一点，把高度让给「勇者详情」里的武技与操作区 */
+.classic-page.hero-page > .classic-board > .stat-strip.hero-page-stats {
+  left: 14px; right: 14px; bottom: 8px; height: 86px; padding: 8px 14px; gap: 14px;
+}
+.classic-page.hero-page > .classic-board > .stat-strip.hero-page-stats .stat-pill {
+  height: 62px; font: 54px/1 Georgia, serif; padding: 0 9px 0 0; gap: 9px;
+}
+.classic-page.hero-page > .classic-board > .stat-strip.hero-page-stats .stat-pill b {
+  width: 52px; height: 52px; font-size: 29px; border-width: 3px;
+}
+.classic-page.hero-page .hero-sheet { bottom: 104px; }
+.classic-page.hero-page .hero-sheet-title { font-size: 29px; }
+.classic-page.hero-page .hero-sheet-sub { font-size: 12px; }
+.classic-page.hero-page .hero-run-facts { gap: 5px; }
+.classic-page.hero-page .hero-gear-row { gap: 5px; }
+.classic-page.hero-page .hero-log ol { max-height: 54px; }
+/* 准备页：把「开始挑战」上方的内容压紧，保证三块事实与待办提示一屏可见 */
+.classic-page.hero-page .hero-sheet-setup .hero-sheet-head { padding-bottom: 1px; }
+.classic-page.hero-page .hero-sheet-setup .hero-pick-slot { min-height: 56px; grid-template-columns: 46px minmax(0, 1fr); padding: 4px 6px; }
+.classic-page.hero-page .hero-sheet-setup .hero-pick-icon { width: 44px; height: 44px; }
+.classic-page.hero-page .hero-sheet-setup .hero-pick-block { padding: 6px 9px 7px; }
+.classic-page.hero-page .hero-sheet-setup .hero-facts { flex: 0 0 auto; min-height: 0; }
+.classic-page.hero-page .hero-sheet-setup .hero-fact { min-height: 52px; padding: 6px 9px; justify-content: center; gap: 1px; }
+.classic-page.hero-page .hero-sheet-setup .hero-fact b { font-size: 17px; }
+.classic-page.hero-page .hero-sheet-setup .hero-sheet-note { margin-top: 0; }
+.classic-page.hero-page .hero-sheet-setup .hero-sheet-actions .uc-button { height: 52px; font-size: 22px; }
+/* 状态页四维条上的上下键：必须定位在各自胶囊里，不能飘到最右侧 */
+.classic-page.hero-page > .classic-board > .stat-strip.hero-page-stats .hero-stat-pill { position: relative; padding-right: 42px; }
+.classic-page.hero-page > .classic-board > .stat-strip.hero-page-stats .hero-stat-arrows {
+  position: absolute; right: 7px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.classic-page.hero-page > .classic-board > .stat-strip.hero-page-stats .hero-stat-step {
+  width: 27px; height: 21px; border-radius: 5px; font-size: 10px;
+}
+.hero-sheet-state { color: #b06b1f; }
+.hero-sheet-state.is-ready { color: #347a49; }
+.classic-page.hero-page .hero-sheet-setup .hero-pick-slot { min-height: 52px; }
+.classic-page.hero-page .hero-sheet-setup .hero-pick-icon { width: 40px; height: 40px; }
+.classic-page.hero-page .hero-sheet-setup .hero-pick-slot { grid-template-columns: 42px minmax(0, 1fr); }
+
+/* 勇者上下文复用现代状态页：只为两颗局内动作和属性分配键预留空间。 */
+.hero-context-page .status-buttons { margin-left: 0; }
+.hero-context-page .status-buttons .uc-button { flex: 1 1 0; min-width: 0; width: auto; font-size: 34px; }
+.hero-context-page .stat-strip .hero-stat-pill { position: relative; padding-right: 40px; }
+.hero-context-page .hero-stat-arrows { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 2px; }
+.hero-context-page .hero-stat-step { width: 27px; height: 23px; padding: 0; border: 1px solid #b79257; border-radius: 5px; background: #fff3cc; color: #77522a; font-size: 11px; line-height: 1; cursor: pointer; }
+.hero-context-page .hero-stat-step:disabled { opacity: .4; cursor: default; }
+.hero-context-page .hero-page-hint { color: #fff8dc; font-size: 16px; text-shadow: 0 1px 2px #4a331a, 0 0 2px #4a331a; }
+/* 勇者外观页：黑/橙装缺 PNG 时用部位字占位（账号装备页仍按原逻辑隐藏破图） */
+.hero-gear-modal .item-icon .hero-gear-glyph { display: none; align-items: center; justify-content: center; width: 100%; height: 100%; color: #8a6b3c; font: 700 34px/1 "Microsoft YaHei","PingFang SC",sans-serif; text-shadow: 0 1px 0 #fff8dd; }
+.hero-gear-modal .item-icon.missing .hero-gear-glyph { display: flex; }
+.hero-gear-modal .gear-note { max-width: 900px; margin: 0 auto 8px; line-height: 1.35; }
+.hero-gear-modal .gear-slots .catalog-cell { cursor: pointer; }
+.hero-gear-modal .gear-slots .catalog-cell:disabled { cursor: default; }
+.hero-gear-modal .gear-list .catalog-cell { cursor: pointer; }
+.hero-gear-modal .gear-list .catalog-cell.selected .item-icon { outline: 4px solid #278000; outline-offset: 0; box-shadow: inset 0 0 0 6px #ecffa7; }

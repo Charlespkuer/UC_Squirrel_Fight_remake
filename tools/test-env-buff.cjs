@@ -151,6 +151,29 @@ test('界面渲染：每条环境胶囊都带 data-tip（悬停可看）', () =>
   assert.equal(raw, 1, '除了包装函数内部，不该再有裸的 C().modal 调用（否则里面的提示绑不上）');
 });
 
+test('成就提示与过程飘字分队列：旧档里的成就对象不会再显示 [object Object]', () => {
+  const c = setup();
+  const run = c.Tower._debugRun('endless');
+  run.pendingToasts = ['碎掉的烙印失效：测试', { key: 'legacy:1', name: '超凡入圣 · 攻击 +50%', points: 20, layer: run.layer }];
+  run.pendingAchievements = [{ key: 'fresh:1', name: '死而复生 · 累计 3 次', points: 10, layer: run.layer }];
+  /* 过程飘字只收字符串；旧档混进来的成就对象要被挪去成就队列，不能交给 runToast()。 */
+  assert.deepEqual(Array.from(c.Tower.takeRunToasts()), ['碎掉的烙印失效：测试'], '过程飘字只能返回字符串');
+  assert.deepEqual(Array.from(c.Tower.takeAchievementToasts(), (x) => x.name),
+    ['死而复生 · 累计 3 次', '超凡入圣 · 攻击 +50%'], '新旧成就都要从对象队列取出');
+  assert.equal(run.pendingToasts.length, 0);
+  assert.equal(run.pendingAchievements.length, 0);
+  /* 无尽页打开时要同时冲两条队列：成就条在上、过程飘字在下。 */
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8');
+  assert.match(ui, /function flushPendingAchievements\(\)[\s\S]{0,300}flushAchievements\(list\)/,
+    '待显示成就要交给 flushAchievements（内部走 achievementToast）');
+  assert.match(ui, /function flushAchievements\(list\)[\s\S]{0,120}achievementToast\(it\)/,
+    'flushAchievements 必须逐条走 achievementToast');
+  assert.match(ui, /flushRunToasts\(\); flushPendingAchievements\(\)/,
+    'openEndless 要同时冲刷过程飘字与待显示成就');
+  assert.match(ui, /typeof t === 'object'[\s\S]{0,80}achievementToast\(t\)/,
+    '过程飘字队列若漏进对象，也要兜底成成就条而不是 [object Object]');
+});
+
 test('每条环境都真的作用到战斗里（逐条实战验证）', () => {
   const c = setup();
 

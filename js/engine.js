@@ -151,26 +151,44 @@
   // ---------- 图片加载 ----------
   const cache = Object.create(null);   // src -> {img, ok}
   const pendingImages = Object.create(null);
+  const waitingSheets = Object.create(null); // src -> ids waiting for a successful image
   /* 【2026-10 启动提速】单个图片的兜底超时：以前是 12 秒 —— 本地服务器偶发卡住一个请求时，
    * 首屏那几批图集要等满 12 秒才放行（用户实测「启动有时 10 秒+」）。本地素材正常都在毫秒级，
    * 4 秒足够判定「这个请求没戏」。 */
   const IMG_TIMEOUT_MS = 4000;
+  const IMG_RETRY_MS = 1000;
   /* 一批图集的兜底：等全部到位，但最多等这么久 —— 没赶上的会在后台继续加载并照旧注册。
    * 首屏只等「必需素材」那一批（见 js/main.js 的启动流程）。 */
   const SHEETS_DEADLINE_MS = 5000;
   function loadImage(src) {
     if (!src) return Promise.resolve(null);
     const c = cache[src];
-    if (c) return c.ok ? Promise.resolve(c.img) : Promise.resolve(null);
+    if (c && c.ok) return Promise.resolve(c.img);
     if (pendingImages[src]) return pendingImages[src];
+    // A failed local read can recover after resume; retain a short cooldown, not a permanent miss.
+    if (c && Date.now() < c.retryAt) return Promise.resolve(null);
+    if (c) delete cache[src];
     pendingImages[src] = new Promise((resolve) => {
       const img = new Image();
-      let settled = false, timer = 0;
+      let settled = false, timer = 0, failedEntry = null;
+      const ready = () => {
+        cache[src] = { img, ok: true };
+        const ids = waitingSheets[src];
+        if (ids) {
+          delete waitingSheets[src];
+          for (const id of ids) registerSheet(id, img);
+        }
+      };
       const finish = (ok) => {
-        if (settled) return;
+        if (settled) {
+          // The timeout released its caller, but a late onload can still restore requested sheets.
+          if (ok && failedEntry && cache[src] === failedEntry) ready();
+          return;
+        }
         settled = true;
         if (timer) clearTimeout(timer);          // 成功/失败都要收掉兜底定时器
-        cache[src] = { img: ok ? img : null, ok };
+        if (ok) ready();
+        else cache[src] = failedEntry = { img: null, ok: false, retryAt: Date.now() + IMG_RETRY_MS };
         delete pendingImages[src];
         if (!ok) log('img-fail ' + src);
         resolve(ok ? img : null);
@@ -263,6 +281,7 @@
     for (const id of ids) {
       if (!id || SHEETS[id]) continue;
       const src = guessSrc(id);
+      if (src && !(cache[src] && cache[src].ok)) (waitingSheets[src] || (waitingSheets[src] = new Set())).add(id);
       jobs.push(loadImage(src).then((img) => (img ? registerSheet(id, img) : null)));
     }
     const all = Promise.all(jobs);
@@ -272,6 +291,7 @@
   /** 直接按文件路径加载并注册一个图集（原版有些图没有 id 记录） */
   function loadSheetFromUrl(id, url) {
     if (SHEETS[id]) return Promise.resolve(SHEETS[id]);
+    if (url && !(cache[url] && cache[url].ok)) (waitingSheets[url] || (waitingSheets[url] = new Set())).add(id);
     return loadImage(url).then((img) => (img ? registerSheet(id, img) : null));
   }
   function sheet(id) { return SHEETS[id] || null; }

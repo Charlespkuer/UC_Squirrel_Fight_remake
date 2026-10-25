@@ -157,6 +157,49 @@
 .settings-grid.system-grid .uc-button .btn-badge{height:24px;font-size:16px}
 @media (max-width:900px){.modal-buttons .uc-button{min-width:120px;font-size:30px;padding-left:16px;padding-right:16px}}
 .uc-tab:not(.sf-feedback):hover,.catalog-cell:not(.sf-feedback):hover{transform:scale(1.035);filter:drop-shadow(0 0 4px rgba(255,226,122,.9)) brightness(1.04)}
+/* ============================================================
+ * 触屏设备：**悬停态一律不生效**（`html.is-touch` 由 main.js 打标记）
+ * ------------------------------------------------------------
+ * 手机/平板没有"悬停"：Chrome/WebView 会把 `:hover` **粘在最后点过的那一个元素上**，
+ * 直到下一次点别处。经典界面的悬停档几乎都带 `filter`（brightness / drop-shadow）——
+ * 那会让这个元素一直走一遍离屏合成，而界面还在 14 fps 重排，
+ * 于是"点一下道具格、接着开合成过场"就变成每帧都要重画那一格（安卓上实测最明显）。
+ * 触屏上真正的按下反馈由 `.sf-feedback.pressed` / `.uc-pop.pressed` / `.sf-hover`
+ * 这些**按下即撤**的类承担，观感不丢。
+ * ⚠ 选择器带 `html.is-touch` 前缀是为了压过 `tower.css` 等后加载文件的同类规则，
+ *   与加载顺序无关。 */
+@media (hover: none){
+  html.is-touch .uc-button:hover,
+  html.is-touch .uc-tab:hover,
+  html.is-touch .catalog-cell:hover,
+  html.is-touch .spr-button:hover,
+  html.is-touch .ssfight-gift:hover,
+  html.is-touch .candidate-card:hover,
+  html.is-touch .fusion-gear:hover,
+  html.is-touch .fusion-material.filled:hover .fusion-frame,
+  html.is-touch .uc-pop:hover,
+  html.is-touch .sf-cell .uc-pop:hover,
+  html.is-touch .sf-d-ok:hover,
+  html.is-touch .sf-d-back:hover,
+  html.is-touch .sf-fmenu-btn:hover,
+  html.is-touch .sf-mbtn:hover,
+  html.is-touch .status-sell-link:hover,
+  html.is-touch .status-fusion-link:hover,
+  html.is-touch .uc-button.entry-pill:hover,
+  html.is-touch .ws-choice:hover,
+  html.is-touch .setting-slider.music-setting:hover,
+  html.is-touch .gear-sell-card:hover,
+  html.is-touch .arena-pick-btn:hover .item-icon,
+  html.is-touch .arena-original-back:hover,
+  html.is-touch .ssfight-pet-panel button:hover,
+  html.is-touch .ssfight-pet-actions button:hover,
+  html.is-touch .btn:hover,
+  html.is-touch .menu-btn:hover{filter:none}
+  /* SVG 元件壳（`.uc-pop`）连缩放也一起收掉：`<g>` 上的 transform 会让子树按新比例
+   * 重新光栅化，粘住不动时白占一份离屏缓存。按下反馈仍由 `.pressed` 的关键帧给。 */
+  html.is-touch .uc-pop:hover,
+  html.is-touch .sf-cell .uc-pop:hover{transform:none}
+}
 @keyframes sf-feedback-press{0%,100%{transform:scale(var(--sf-current-scale))}45%{transform:scale(.962)}}
 @keyframes sf-feedback-pick{0%{transform:scale(1)}35%{transform:scale(1.13)}64%{transform:scale(.985)}100%{transform:scale(var(--sf-current-scale))}}
 @media (prefers-reduced-motion: reduce){
@@ -182,6 +225,7 @@
 .ssfight-pet-art svg{width:100%!important;height:100%!important;max-width:100%;max-height:100%}
 .ssfight-pet-art .loading{color:#8b5a1c;font:700 20px 'Microsoft YaHei',sans-serif}
 .ssfight-pet-level{position:absolute;right:4px;bottom:3px;padding:1px 6px;border-radius:999px;background:#3a2208d9;color:#ffe9a8;font:700 12px/1.4 'Microsoft YaHei',sans-serif;text-shadow:0 1px 0 #000;z-index:3}
+.ssfight-pet-star{position:absolute;left:3px;top:2px;padding:0 5px;border-radius:999px;background:#3a2208d9;letter-spacing:0;color:#ffdc5e;font:700 14px/1.5 'Microsoft YaHei',sans-serif;text-shadow:0 1px 0 #5a3300;z-index:3}
 .ssfight-pet-detail-head{display:flex;gap:12px;align-items:center}
 .ssfight-pet-portrait{flex:0 0 132px;width:132px;height:132px;border:3px solid #8b5a1c;border-radius:16px;background:linear-gradient(#fff8db,#f4d58b);overflow:hidden;display:flex;align-items:center;justify-content:center}
 .ssfight-pet-portrait svg{width:100%!important;height:100%!important}
@@ -659,6 +703,15 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .classic-modal-overlay.mode-switch-dialog>.classic-modal.small-modal>.modal-buttons{margin-top:16px;margin-bottom:4px}
 .classic-modal-overlay.mode-switch-dialog>.classic-modal.small-modal>.modal-buttons .uc-button{
   min-width:210px;min-height:86px;padding:12px 44px;font-size:44px}
+
+/* 村庄「征战」弹窗：挑战塔 / 无尽塔是这一屏唯一的两个去路，按钮比普通弹窗大一号
+ *（用户口径 2026-10）。overlay 上的 `campaign-dialog` 由 classic-ui.js 的 villageWar() 加。 */
+.classic-modal-overlay.campaign-dialog>.classic-modal.small-modal,
+.classic-page~.classic-modal-overlay.campaign-dialog>.classic-modal.small-modal{width:820px;max-height:600px}
+.classic-modal-overlay.campaign-dialog>.classic-modal.small-modal>.modal-body,
+.classic-page~.classic-modal-overlay.campaign-dialog>.classic-modal.small-modal>.modal-body{max-height:400px}
+.classic-modal-overlay.campaign-dialog .modal-buttons{gap:40px;margin-top:30px}
+.classic-modal-overlay.campaign-dialog .modal-buttons .uc-button{min-width:300px;min-height:84px;padding:12px 38px;font-size:40px}
 
 /* 自由属性点：升级时必选的分配弹窗（无关闭叉）；点数不在其它地方常驻显示 */
 .classic-modal-overlay.point-dialog>.classic-modal.small-modal{max-height:600px;width:800px}
@@ -1224,3 +1277,15 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
   background:#fff7dcf2;color:#5b3510;font:700 13px/1.35 'Microsoft YaHei',sans-serif;
   box-shadow:0 2px 8px #0004;pointer-events:none;z-index:9}
 .ssfight-energy-hover:hover .ssfight-energy-tip{display:block}
+
+/* 村庄「征战」：挑战塔 / 无尽塔两颗入口保持大号（用户 2026-10 口径 300×84 / 40px）。 */
+.classic-modal-overlay.war-dialog > .classic-modal { width: 820px; }
+.war-dialog .modal-buttons { gap: 26px; }
+.war-dialog .modal-buttons .uc-button.war-tower-button {
+  width: 300px; height: 84px; min-height: 84px;
+  font-size: 40px; padding: 0 16px;
+}
+@media (max-width: 780px) {
+  .classic-modal-overlay.war-dialog > .classic-modal { width: calc(100vw - 36px); }
+  .war-dialog .modal-buttons .uc-button.war-tower-button { width: 44vw; height: 72px; min-height: 72px; font-size: 32px; }
+}

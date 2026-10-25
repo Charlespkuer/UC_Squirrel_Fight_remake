@@ -1369,9 +1369,33 @@ async function checkClassicFight() {
    *   sim 按协议第 15 字段发 `boomCount`，战斗层按它复制球元件、每 100ms 亮一个并分段飘字。
    *   以前两处都没有 —— 伤害一次飘完、没有多出来的球（第 257 批自标的功能缺口）。 */
   const simCase23 = fs.readFileSync(path.join(ROOT, 'js', 'sim.js'), 'utf8').replace(/\r\n/g, '\n');
-  assert.ok(/r\.boomCount = mult;/.test(simCase23) && /function boomSplit\(rec, attacker, r, side, acts, aborted\)/.test(uf) &&
-    /boomSplit\(rec, attacker, r, def, acts, aborted\)/.test(uf) && /\}, i \* 100\);/.test(uf),
-    '幸运一击要按 boomCount 走原版 boom() 的多球分裂（每 100ms 一个球 + 分段飘字）');
+  assert.ok(/r\.boomCount = mult;/.test(simCase23) && /function boomSplit\(rec, attacker, r, side, aborted\)/.test(uf) &&
+    /boomSplit\(rec, attacker, r, def, aborted\)/.test(uf) && /\}, i \* 100\);/.test(uf) &&
+    /sel\.attachChild\(ballId, 1, 'boom'\)/.test(uf) && !/sel\.attachChild\(symId, 1, 'boom'\)/.test(uf),
+    '幸运一击要按 boomCount 分裂，但复制的是球（6116）而不是整段出手动画（否则动画不停叠加）');
+  assert.equal(SfFight._luckyBall.id, '6116', '多球分裂的球元件');
+  /* 伤害飘字：4 位模板不够时补 digit 槽，最多到 32 位 int（10 位）；特效档封顶第 3 档。 */
+  assert.equal(JSON.stringify(SfFight._damageFloatPlan(9999)), JSON.stringify({ mag: 9999, digits: 4, tier: 3 }));
+  assert.equal(JSON.stringify(SfFight._damageFloatPlan(10000)), JSON.stringify({ mag: 10000, digits: 5, tier: 3 }));
+  assert.equal(JSON.stringify(SfFight._damageFloatPlan(2147483648)), JSON.stringify({ mag: 2147483647, digits: 10, tier: 3 }),
+    '超过 int 上限按 2147483647 显示（不再变大）');
+  assert.match(uf, /ensureFloatDigits\(digits, digitCount\)/,
+    '位数超过 4 时要给数字容器补 num5..num10 槽位');
+  const digitNames = new Map(), digitXf = [];
+  const fakeDigits = {
+    names: digitNames,
+    byName: (n) => digitNames.get(n) || null,
+    attachChild: (id, frame, name) => {
+      const clip = { id: String(id), frame: frame, setExtraTransform: (t) => digitXf.push(t) };
+      digitNames.set(name, clip);
+      return clip;
+    },
+  };
+  SfFight._ensureFloatDigits(fakeDigits, 6);
+  assert.ok(digitNames.has('num5') && digitNames.has('num6') && !digitNames.has('num7'),
+    '5/6 位数只补到 num6');
+  assert.equal(digitXf.length, 2, '补两个数字槽');
+  assert.match(digitXf[0], /matrix\(0\.71,0,0,0\.71,36\.85,-0\.05\)/, 'num5 接在 num4 右侧');
   assert.equal(JSON.stringify(SfFight._floatKind('heal')), JSON.stringify({ frame: 1, symbol: 2, font: 3 }),
     '回血：加号字形 + 第三套字');
   assert.equal(JSON.stringify(SfFight._floatKind('back')), JSON.stringify({ frame: 2, symbol: 1, font: 2 }),
@@ -1806,6 +1830,18 @@ function checkBalanceAndRewardContracts() {
   const gc = JSON.parse(fs.readFileSync(path.join(ROOT, 'images/ssfight/ui/gear-colors.json'), 'utf8'));
   assert.ok(gc.byGear && gc.byGear['1'] && gc.byGear['1']['0'] && gc.byGear['1']['0']['0'],
     'gear-colors.json 要给出 byGear[装备id][品质][强化档] → 元件号');
+  /* 黑装头 / 手（q5）的库元件名是 `<名字>黑1`，不是 `<名字>黑`；生成器漏掉强化数字后
+   * 这些格子只能退回容器画稿（缺整卡底，用户 2026-10 报的浣熊 / 诅咒头手少一层背景）。
+   * 这里钉住 13 套黑装头 / 手的代表 id：表里必须有 q5 档，tags 包里必须有对应符号。 */
+  for (const id of [213, 214, 237, 238, 257, 258, 261, 262]) {
+    assert.ok(gc.byGear[String(id)] && gc.byGear[String(id)]['5'] && gc.byGear[String(id)]['5']['0'],
+      '黑装头 / 手（q5）必须查到预上色整卡符号：' + id);
+  }
+  const colorTags = JSON.parse(fs.readFileSync(path.join(ROOT, 'images/ssfight/ui/tags-gear-color.json'), 'utf8'));
+  const colorTagIds = new Set(colorTags.map((row) => String(row.id)));
+  for (const id of [1825, 1859, 1744, 1776, 103, 176]) {
+    assert.ok(colorTagIds.has(String(id)), 'tags-gear-color.json 缺黑装头 / 手符号：' + id);
+  }
   assert.ok(/orangeFrameTable/.test(st) && /orangeFrameTable\.get\(Number\(gear\.id\)\)/.test(st),
     '容器稿（战斗 / 兜底）的橙装仍要映射到 q4 橙稿帧');
   const um = read('js/ssfight/ui-main.js');
@@ -1859,9 +1895,17 @@ function checkBalanceAndRewardContracts() {
   assert.ok(/statScale: State\.RANDOM_FOE_SCALE/.test(ch), '随机挑战要传 statScale');
   assert.ok(/function hideSubBackdrop\(view\)/.test(ch) && /hideSubBackdrop\(view\);/.test(ch),
     '动作菜单要收掉 4756 第 1 帧的 3142 蓝色蒙层');
-  assert.ok(/function holdPageForBattle\(/.test(ch) && /function resumePageAfterBattle\(/.test(ch)
-    && /const hold = holdPageForBattle\(\);/.test(ch) && /restore\('random'\)/.test(ch),
-    '挑战战斗回来要复用原 DOM（战斗前摘下、结束后挂回），不许 destroy + 重新挂载闪一下');
+  assert.ok(/BATTLE_HOLD_ATTR = 'data-sf-battle-hold'/.test(ch)
+    && /function holdPageForBattle\(/.test(ch) && /function resumePageAfterBattle\(/.test(ch)
+    && /setAttribute\(BATTLE_HOLD_ATTR/.test(ch) && /removeAttribute\(BATTLE_HOLD_ATTR/.test(ch)
+    && /const hold = holdPageForBattle\(\);/.test(ch) && /restore\('random'\)/.test(ch)
+    && /function clearUiForBattle\(/.test(main)
+    && /hasAttribute\('data-sf-battle-hold'\)/.test(main)
+    && /\.ssfight-home:not\(\[data-sf-battle-hold\]\)/.test(main)
+    && /Main\.clearUiForBattle\(\)/.test(uf)
+    && /bgmDucked/.test(main) && /bgm\.muted = bgmDucked/.test(main)
+    && /if \(!audio\.paused\) return;/.test(main),
+    '挑战战斗回来不重挂整页：页面按住原位（清屏跳过 hold 节点），主 BGM 战斗内只静音不暂停，返回时直接还原');
   assert.ok(/SfChallenge\.holdPageForBattle\(\)/.test(cu)
     && /SfChallenge\.resumePageAfterBattle\(heldPage,'gates',\{keepSub\}\)/.test(cu)
     && /SfChallenge\.refreshGateAt\(gateType\)/.test(cu)
@@ -1869,7 +1913,7 @@ function checkBalanceAndRewardContracts() {
     && /holdPageForBattle: holdPageForBattle/.test(ch) && /resumePageAfterBattle: resumePageAfterBattle/.test(ch)
     && /hold\.sub/.test(ch) && /refreshGateAt: \(t\) =>/.test(ch)
     && /if \(c && c\.stageFight\) \{ c\.stageFight\(id\); return; \}/.test(ch),
-    '关卡连战要复用原版挑战页 + 三级页：战斗前摘下、onEnd 原样挂回；三级页用 refreshGateAt 只更新星标，不重新 mount 4756');
+    '关卡连战要复用原版挑战页 + 三级页：战斗前按住原位、onEnd 原样还原；三级页用 refreshGateAt 只更新星标，不重新 mount 4756');
 }
 
 /* ---------- 31. 经典战斗三侠：现代图集填充 + 熊猫动作文件保留 ----------
@@ -1883,6 +1927,8 @@ function checkHeroAtlasFilling() {
   assert.ok(/function makeAtlasNpcFighter\(/.test(uf) && /function makeStaticNpcFighter\(/.test(uf)
     && /function makeNpcFighter\([\s\S]{0,500}?npcAtlasReady\(npcType\)/.test(uf),
     '三侠优先走现代图集，图集没到时才退回 7689 静态稿');
+  assert.ok(/const frame = atlasPaintFrame\(anim\)/.test(uf) && /function atlasPaintFrame\(anim\)/.test(uf),
+    '三侠图集新动作起手（idx=-1）要先画第 1 帧，不能 clear 后空一帧');
   assert.ok(/Engine\.drawFrame\(ctx, frame, \{ sheets: (?:NPC_SHEETS\[npcType\]|bodySheets) \}\)/.test(uf)
     && /canvas\.width = 1170; canvas\.height = 690;/.test(uf)
     && /host\.appendChild\(canvas\)/.test(uf) && /function layoutCanvas\([^)]*\)/.test(uf)
@@ -1933,6 +1979,10 @@ function checkHeroAtlasFilling() {
   assert.equal(SfFight._npcAnim('tl', 'common'), 'tl_common_attack');
   assert.equal(SfFight._npcAnim('xh', 'skill'), 'xh_skill_attack');
   assert.equal(SfFight._npcAnim('xm', 'hit'), 'xm_hitMe');
+  const fakeFrames = [{ id: 'first' }, { id: 'second' }];
+  assert.equal(SfFight._atlasPaintFrame({ frames: fakeFrames, idx: -1 }), fakeFrames[0],
+    '新动作 idx=-1 时先画第一帧，不能清成空白');
+  assert.equal(SfFight._atlasPaintFrame({ frames: fakeFrames, idx: 1 }), fakeFrames[1]);
   assert.equal(SfFight.NPC_HIT_FRAME.xm_skill_attack, 8);
   assert.ok(fs.existsSync(path.join(ROOT, 'images/ssfight/heroes/Panda3.swf')), '熊猫的 ssfight 动作文件要保留');
   const man = JSON.parse(fs.readFileSync(path.join(ROOT, 'images/ssfight/heroes/manifest.json'), 'utf8'));
@@ -2024,7 +2074,7 @@ function checkClassicRankFlow() {
     '经典天梯菜单走 startRankFlow；页面异步挂载时先等背景回来');
   assert.ok(/onEnd: async winner =>[\s\S]{0,900}?await back\(\)[\s\S]{0,200}?outcome\(/.test(ce),
     '战果弹窗要等背景页恢复后再开（避免被 openChallenge 的 innerHTML 清掉）');
-  assert.ok(/Promise\.race\(\[[\s\S]{0,200}?State\.fileLoad\(\)[\s\S]{0,200}?'__timeout__'/.test(main)
+  assert.ok(/Promise\.race\(\[[\s\S]{0,200}?State\.fileLoad\([^)]*\)[\s\S]{0,200}?'__timeout__'/.test(main)
     && /loadTimedOut/.test(main) && /存档读取超时/.test(main),
     'boot 95% 要有超时兜底：磁盘读卡住时先按本地存档进游戏');
 }
@@ -2200,8 +2250,8 @@ function checkFriendViewPolish() {
   const back = st.slice(st.indexOf('function markFriendBackLabel('), st.indexOf('function wireFrameButtons('));
   assert.match(back, /querySelectorAll\(':scope > \[depth="6"\]'\)[\s\S]{0,900}?textContent = '返回'/,
     '3911 不可用时才退回原 back + 自绘「返回」文字');
-  assert.match(st, /if \(o\.friend\) \{ try \{ await SfRender\.loadExtra\('tags-challenge\.json'\)/,
-    '查看敌人时要先加载 3911 所在的挑战包');
+  assert.match(st, /if \(o\.friend \|\| o\.hero\) \{ try \{ await SfRender\.loadExtra\('tags-challenge\.json'\)/,
+    '查看敌人 / 勇者状态页要先加载 3911 所在的挑战包');
   assert.match(st, /useStageBack\(view, '3911', 1, 160\.3, 175\.5, 1, 'friend-view-back', '__friendViewBack'\)/,
     '查看敌人的返回键要复用关卡「挑战」页的 3911：位置/尺寸对齐，默认第 1 帧黄色');
   assert.match(st, /wireClickable\(stageBack, \{ hover: 2, press: 2, idle: 1, onFire: leaveFriendView \}\)/,
@@ -2628,7 +2678,7 @@ function checkClassicComposeFlow() {
     /swapComposeButtons\(view\);/.test(compose) && /getScreenCTM/.test(compose) &&
     /idle: 1, hover: 2, press: 1/.test(compose) &&
     /mountSymbol\(host, '4402', \{ frame: 1/.test(compose) &&
-    /gotoAndStop\(44\)/.test(compose) &&
+    /stopAt\(view, COMPOSE_RESULT_FRAME\)/.test(compose) && /const COMPOSE_RESULT_FRAME = 44/.test(compose) && /async function playComposeCg\(view, rec\)/.test(compose) &&
     /tags-compose\.json/.test(compose) &&
     /SfCompose\.open\(id/.test(cu) &&
     /function openPropEntry\(id\)[\s\S]{0,500}?SfCompose\.open\(id/.test(cu) &&
@@ -2638,7 +2688,7 @@ function checkClassicComposeFlow() {
      * 再回工作台 —— 所以 onClose 走 afterResult 而不是直接 backToWork。 */
     /SfCompose\.showGearResult\(r\.gear, \{ onClose: afterResult, playCg: true \}\)/.test(st) &&
     /function focusGear\(key\)/.test(st) &&
-    /opts\.playCg/.test(compose) && /frame: playCg \? 1 : 44/.test(compose) && !/playFusing/.test(st) &&
+    /opts\.playCg/.test(compose) && /frame: playCg \? 1 : COMPOSE_RESULT_FRAME/.test(compose) && !/playFusing/.test(st) &&
     /融合即将开始，\\n本次需要/.test(st) &&
     /function wrapFusionHelp/.test(st) &&
     /wireClickable\(close, \{ hover: 2, press: 2, idle: 1, onFire: \(\) => destroyFusionOverlay\(\) \}\)/.test(st) &&
@@ -2932,6 +2982,39 @@ async function checkFightColorBake(fixture) {
     '伤害数字要在 bloodMc 起播后的前几帧重取当前 num，避免换帧回到 0000');
 }
 
+/* ---------- 移动端合成工作流：看不到的页不走帧 / 过场逐帧推完 / 回背包不整页重建 ---------- */
+function checkMobileComposeWorkflow() {
+  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8').replace(/\r\n/g, '\n');
+  const render = read('js/ssfight/render.js');
+  const compose = read('js/ssfight/ui-compose.js');
+  const cu = read('js/classic-ui.js');
+  const main = read('js/main.js');
+  const css = read('css/classic-refine.css');
+  const uiMain = read('js/ssfight/ui-main.js');
+  assert.ok(
+    /* ① 被盖住/藏起来的视图不再每拍 showFrame（二级页盖住村庄页、合成过场盖住合成页）。 */
+    /function rootVisible\(root\)/.test(render) &&
+    /if \(view\.__visible === false\) continue;/.test(render) &&
+    /tickCount % 10 === 0\) view\.__visible = rootVisible/.test(render) &&
+    /* ② 合成过场按总时长逐帧推到第 44 帧：总时长不变，但不会再停在半路（手机上"一闪就没"）。 */
+    /view\.holdAnim\(true\)/.test(compose) && /view\.frame = f - 1; view\.showFrame\(\);/.test(compose) &&
+    /session !== rec \|\| rec\.resultView !== view/.test(compose) &&
+    /* ③ 合成页的会话在宿主被整页清掉后自动回收，不再"假开着"。 */
+    /function liveSession\(\)/.test(compose) && /active: \(\) => !!liveSession\(\)/.test(compose) &&
+    /* ④ 合成结束回背包就地刷新数量（不再 innerHTML 整页重建，实测省 100~290 ms）。 */
+    /let bagRefresh = null;/.test(cu) && /bagRefresh = refreshBag;/.test(cu) &&
+    /if \(!\(bagRefresh && bagRefresh\(\)\)\) openBag\(mode, bagPage\)/.test(cu) &&
+    /* ⑤ 触屏点过之后 :hover 会粘住：悬停档的 filter 一律不生效（离屏合成很贵）。 */
+    /classList\.add\('is-touch'\)/.test(main) &&
+    /@media \(hover: none\)\{/.test(css) && /html\.is-touch \.uc-pop:hover/.test(css) &&
+    /html\.is-touch \.catalog-cell:hover,/.test(css) && /\{filter:none\}/.test(css) &&
+    /* ⑥ 热区量一次就够：同一帧不再重复 getBBox（移动端每次都是强制重排）。 */
+    /clip\.__hitBoxFrame === clip\.__shownFrame/.test(uiMain) &&
+    !/const base = measureHitBox\(clip\);\n\s*if \(base\) merge\(\{ x: base\.x, y: base\.y, width: base\.w, height: base\.h \}\);\n\s*try \{ merge\(measureArtwork\(clip\)\); \}/.test(uiMain),
+    '移动端合成工作流：藏起来的页不走帧、过场逐帧推完、合成后回背包就地刷新、触屏不挂悬停滤镜、热区只量一次'
+  );
+}
+
 (async () => {
   const fixture = await checkClassicViewLifecycle();
   await checkDynamicMaskReuse(fixture);
@@ -2944,6 +3027,7 @@ async function checkFightColorBake(fixture) {
   await checkClassicGearPage(fixture);
   checkClassicArenaPicker();
   checkClassicComposeFlow();
+  checkMobileComposeWorkflow();
   checkClassicPropUseFlow();
   checkClassicMainEnergy();
   checkBagTabVectorSelection();

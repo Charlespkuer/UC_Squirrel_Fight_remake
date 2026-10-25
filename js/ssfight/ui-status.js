@@ -1,7 +1,7 @@
 /* Classic status, weapon and skill tabs (symbol 7218, frames 1/2/3).
  * Uses SfUiMain.toolkit and extracted original assets; State supplies live values.
  * Frame transitions hydrate bitmap digits synchronously before the next paint.
- * Page API: SfStatus.open / openFriend / destroy / refresh.
+ * Page API: SfStatus.open / openFriend / openHero / destroy / refresh.
  * Shared navigation and asset lookup: js/ssfight/AGENTS.md.
  */
 (function () {
@@ -82,6 +82,30 @@
    * ========================================================== */
   const friendView = () => !!(current && current.friend);
   const Friend = () => (current && current.friend) || null;
+  /* ============================================================
+   * 勇者模式：同一颗状态页 7218，换一份数据源
+   * ------------------------------------------------------------
+   * 用户 2026-10-24 口径：勇者模式的准备界面直接复用随机挑战「查看敌人」这张状态页
+   * （状态 / 武器 / 技能三个页签 + 查看/更换装备），不要另造一套 DOM。
+   *   · `mode: 'setup'` = 开局准备：武器/技能两页列出**全部可学习武技**，点亮 3 个；
+   *   · `mode: 'run'` = 爬塔中点头像：只读（武技已随本局成长固定），外观装备仍可换。
+   * 数据、回调都由 `js/tower-ui.js` 通过 `openHero()` 传进来；本文件只负责画与接线。 */
+  const HERO_PICK_LIMIT = 3;
+  const heroView = () => !!(current && current.hero);
+  const Hero = () => (current && current.hero) || null;
+  const heroPickKey = (kind, id) => String(kind) + ':' + Number(id);
+  function heroPickSet() {
+    const set = new Set();
+    for (const it of ((heroView() && Hero().picks) || [])) {
+      if (it && it.kind && Number(it.id) > 0) set.add(heroPickKey(it.kind, it.id));
+    }
+    return set;
+  }
+  function heroPickCount() { return heroPickSet().size; }
+  function heroStartEnabled() {
+    const hero = Hero();
+    return !!(hero && hero.mode === 'setup' && heroPickSet().size >= HERO_PICK_LIMIT);
+  }
   /** 看完别人 → 回**挑战页**（原版 `leavePage()` :13800 的 `gotoAndStop("tiaozhan")`）。 */
   function leaveFriendView() {
     const back = (current && current.backTo) || null;
@@ -295,23 +319,38 @@
     const t = T();
     if (!s || !t) return;
     /* 数据源：自己的话读存档；**查看别人**时整份换成对手那一套
-     * （原版 `playerInfo = isViewfriend ? friendInfo : oldMyInfo`，MainMovie.as:13880-13884）。 */
+     * （原版 `playerInfo = isViewfriend ? friendInfo : oldMyInfo`，MainMovie.as:13880-13884）；
+     * 勇者模式同理，只是换成这一局/这一份草稿的四维与外观。 */
     const foe = Friend();
+    const hero = Hero();
+    const other = foe || hero;
+    /* 准备页的四维会随点亮/点暗的被动技能即时变化，所以 `hero.stats` 允许传函数。 */
+    const hs = hero ? ((typeof hero.stats === 'function' ? hero.stats() : hero.stats) || {}) : null;
     const src = foe ? {
       name: foe.name, level: Math.max(1, Math.round(Number(foe.level) || 1)),
       exp: 0, nextExp: 0, dailyWins: 0, dailyFails: 0, allWins: 0, allFails: 0,
       power: Number(foe.power) || 0, agility: Number(foe.agility) || 0,
       speed: Number(foe.speed) || 0, hp: Number(foe.hp) || 0,
+    } : hero ? {
+      name: '勇者', level: 1, exp: 0, nextExp: 0,
+      /* 准备页还没有战绩；爬塔中回看时把本局胜场写成「战斗场次」。
+       * 今日胜率沿用原版"没有败场时给 100%"的口径，不做假数据。 */
+      dailyWins: Math.max(0, Number(hero.wins) || 0), dailyFails: 0,
+      allWins: Math.max(0, Number(hero.wins) || 0), allFails: 0,
+      power: Number(hs && hs.power) || 0,
+      agility: Number(hs && hs.agility) || 0,
+      speed: Number(hs && hs.speed) || 0,
+      hp: Number(hs && (hs.maxHp || hs.hp)) || 0,
     } : s;
     const main = clipOf(view, 'main_mc') || view;
-    const nextExp = foe ? 0 : Math.max(1, (window.GData && GData.nextExp) ? GData.nextExp(s.level) : (s.nextExp || 1));
+    const nextExp = other ? 0 : Math.max(1, (window.GData && GData.nextExp) ? GData.nextExp(s.level) : (s.nextExp || 1));
 
     /* 经验条 `expMc`：101 帧（第 N 帧 = 蒙版右移 N×0.95），照村庄页 `refreshValues` 同一条公式。
      * 看别人时原版也没有他的经验数据（服务端有 `exp`，这里的对手对象没有）→ 条收空、数字清空。 */
-    const ePct = foe ? 0 : Math.ceil(s.exp * 100 / nextExp);
+    const ePct = other ? 0 : Math.ceil(s.exp * 100 / nextExp);
     stopAt(main.byName ? main.byName('expMc') : null, Math.max(1, Math.min(101, ePct + 1)));
     /* `expNum` 是原版那行 "999999/999999" 占位文本（素材里写死的），写真实值。 */
-    setTextByName(view, 'expNum', foe ? '' : (s.exp + '/' + nextExp));
+    setTextByName(view, 'expNum', other ? '' : (s.exp + '/' + nextExp));
 
     /* 今日胜率 / 战斗场次：原版 `MainMovie.as:13995-14003` ——
      * 胜率用 `showNumber`（**位图数字**，没有场次时原版给 100），
@@ -326,7 +365,7 @@
     showBigNumber(allFights, clipOf(view, 'fightTimes1'), clipOf(view, 'fightTimes2'));
 
     /* 四维：用原版那套数字精灵（`showNumber`），和村庄页顶栏同一套写法。 */
-    const stats = foe
+    const stats = other
       ? { power: src.power, agility: src.agility, speed: src.speed, hp: src.hp }
       : ((State.totalStats && State.totalStats()) || {});
     for (const row of STATS) {
@@ -346,12 +385,23 @@
      * 看别人时贴的是**他自己的** `wearsList`（原版 :13884）。 */
     let worn = [];
     if (foe) worn = Array.isArray(foe.gears) ? foe.gears : [];
-    else { try { worn = (State.myGears ? State.myGears() : []).filter((g) => g && g.used); } catch (e) { worn = []; } }
+    else if (hero) {
+      /* 准备页传进来的是四格 id（`[0,0,0,0]`），爬塔中传的是 run.hero.appearance。
+       * 两种都归一成 `{id,type,ext}`，`dressParts` 只认这一种。 */
+      worn = (Array.isArray(hero.appearance) ? hero.appearance : []).map((raw) => {
+        const item = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
+        const id = Number(item.id);
+        if (!(id > 0)) return null;
+        const type = Number(item.type != null ? item.type : (State.gearPart ? State.gearPart(id) : NaN));
+        if (!Number.isFinite(type)) return null;
+        return { id: id, type: type, ext: Array.isArray(item.ext) ? item.ext : [] };
+      }).filter(Boolean);
+    } else { try { worn = (State.myGears ? State.myGears() : []).filter((g) => g && g.used); } catch (e) { worn = []; } }
     const byType = [];
     for (const g of worn) {
       const ty = Number(g.type != null ? g.type : (State.gearPart ? State.gearPart(g.id) : NaN));
       if (!Number.isFinite(ty)) continue;
-      if (byType[ty] === undefined) byType[ty] = g;
+      if (byType[ty] === undefined) byType[ty] = g.type == null ? Object.assign({}, g, { type: ty }) : g;
     }
     dressParts(view, byType);
     /* 经验数字整体上移一点（见 EXP_DY 的注释）。 */
@@ -402,6 +452,7 @@
      * 同样是 `isViewfriend ? friendInfo : oldMyInfo`，只是把"有没有"换成他的清单）。 */
     const foe = Friend();
     if (foe) return friendGridInfo(foe, gridKind(), current.gridPage || 0);
+    if (heroView()) return heroGridInfo(gridKind(), current.gridPage || 0);
     return C.catalogInfo(gridKind(), current.gridPage || 0);
   }
   /** 把对手那一串 `["id:level", …]` 摊成状态页格子要的 `{items, page, pages}`。
@@ -433,6 +484,62 @@
     const pages = Math.max(1, Math.ceil(items.length / 10));
     const page = Math.max(0, Math.min(pages - 1, pg | 0));
     return { items: items.slice(page * 10, page * 10 + 10), page: page, pages: pages };
+  }
+  /** 勇者模式的武器 / 技能格：清单来自 `TowerHero.catalog()`（与准备页的可选范围同一份），
+   *  准备时点亮 = 已获得（绿卡 + 名字），爬塔中只读 = 已学（带真实等级）。
+   *  ⚠ 未点亮的项也要给 `lockedIcon`：`paintCell` 只认 `it.has ? it.icon : it.lockedIcon`，
+   *    漏了它整格就是空槽，玩家会以为「这一页什么都没有」。 */
+  function heroGridInfo(kind, pg) {
+    const C = window.UI && UI.classic;
+    if (!current || !C || !C.wsIconOf || !window.TowerHero || typeof TowerHero.catalog !== 'function') return null;
+    const hero = Hero();
+    const base = TowerHero.catalog().filter((it) => it.kind === kind);
+    const startLevel = Math.max(1, Number(window.TowerHero && TowerHero.CONFIG && TowerHero.CONFIG.startLevel) || 5);
+    const picked = heroPickSet();
+    const levels = new Map();
+    for (const raw of ((kind === 'weapon' ? hero.weapons : hero.skills) || [])) {
+      const parts = String(raw).split(/[:,]/);
+      const id = Number(parts[0]);
+      if (id > 0) levels.set(id, Math.max(levels.get(id) || 1, Number(parts[1]) || 1));
+    }
+    const items = base.map((it) => {
+      const id = Number(it.id);
+      const has = hero.mode === 'setup' ? picked.has(heroPickKey(kind, id)) : levels.has(id);
+      const level = hero.mode === 'setup' ? (has ? startLevel : 0) : (levels.get(id) || 0);
+      return {
+        id: id, name: it.name || '', has: has, level: level,
+        trueForm: hero.mode !== 'setup' && level > 10,
+        selected: hero.mode === 'setup' && has,
+        label: '',
+        icon: C.wsIconOf(kind, id),
+        lockedIcon: C.wsIconOf(kind, id, true),
+      };
+    });
+    const pages = Math.max(1, Math.ceil(items.length / 10));
+    const page = Math.max(0, Math.min(pages - 1, pg | 0));
+    return { items: items.slice(page * 10, page * 10 + 10), page: page, pages: pages };
+  }
+  /** 切一格武技：点亮 / 点暗。准备页最多 3 个；爬塔中只读。 */
+  function heroTogglePick(kind, id) {
+    const hero = Hero();
+    if (!hero || hero.mode !== 'setup') return { ok: false };
+    const key = heroPickKey(kind, id);
+    const list = (Array.isArray(hero.picks) ? hero.picks : []).map((it) => ({ kind: it.kind, id: Number(it.id) }));
+    const at = list.findIndex((it) => heroPickKey(it.kind, it.id) === key);
+    if (at >= 0) list.splice(at, 1);
+    else if (list.length >= HERO_PICK_LIMIT) {
+      return { ok: false, msg: '最多点亮 ' + HERO_PICK_LIMIT + ' 个武技；先点暗一个再换。' };
+    } else list.push({ kind: kind, id: Number(id) });
+    hero.picks = list;
+    if (typeof hero.onPicks === 'function') hero.onPicks(list.map((it) => Object.assign({}, it)));
+    if (list.length === HERO_PICK_LIMIT && window.UI && UI.toast) {
+      UI.toast('已点亮 ' + HERO_PICK_LIMIT + ' 个武技；回「状态」页点「开始挑战」出发。');
+    }
+    /* 武技页点亮时四维/被动也在变；重写一遍数值，再重画格子。 */
+    try { if (current && current.view) fillValues(current.view); } catch (e) {}
+    try { applyTab(); } catch (e) { if (window.__errs) window.__errs.push('hero pick: ' + (e && e.message)); }
+    refreshHeroChrome();
+    return { ok: true };
   }
   /** 单元格子上要显示的东西。
    *  ⚠ 顺序必须是 **先摆帧、再挂内容**：`showFrame()` 在帧号真的变了的时候会
@@ -567,13 +674,608 @@
       if (g && g.style) g.style.display = on ? '' : 'none';
     }
   }
+  /* ============================================================
+   * 勇者模式的按钮层 —— 把「装备融合」那一位换成「开始挑战」
+   * ------------------------------------------------------------
+   * 原版自己的状态页第 1 帧里就有两颗并排的键：更换装备（`b_change`）与装备融合
+   * （`b_fusion`，实测舞台 x 222.5..300.1 / y 92.9..136）。随机挑战查看敌人时
+   * `b_fusion` 被整颗藏掉，所以那一块是空的。
+   * 勇者准备页正好把 `b_fusion` 藏掉、在原位挂一颗 **3911 金胶囊**（也就是「返回」那颗），
+   * 把「返回」字形层藏掉、自己写「开始挑战」四个字 —— 于是两颗键的版式与原版一致，
+   * 又不用另画一套现代 DOM 按钮。
+   * ⚠ 状态页只有第 1 帧有这两颗键；武器 / 技能页要 `display:none`，否则会压在卡片上。
+   * ========================================================== */
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  /* 开始挑战沿用原版 3911 的皮，只把宽度收窄一点（sx < sy）。 */
+  const HERO_START_AT = { x: 268, y: 112.8, s: 0.7, sx: 0.64 };
+  /* ============================================================
+   * 准备页「出发准备」卡（2026-10 用户口径：参考现代状态页的排布大幅美化）
+   * ------------------------------------------------------------
+   * 原版 7218 的右上角有一块空白（立绘右沿 x≈130、两颗键上沿 y≈98、
+   * 页签下沿 y≈31）。这里用原版奶油底 + 金边画一张小卡：
+   *   标题 / 三块事实（武技 / 四维 / 外观）/ 进度条 / 待办提示。
+   * 仍用 SVG 原生物件（不挂 DOM），所以会跟着 320×196 舞台等比缩放。
+   * ============================================================ */
+  const HERO_TODO_BOX = { x: 148, y: 36, w: 150, h: 60, r: 7 };
+  const HERO_TODO_FACTS = [
+    { key: 'picks', x: 153, w: 43, label: '武技' },
+    { key: 'stats', x: 199, w: 43, label: '四维' },
+    { key: 'gears', x: 245, w: 43, label: '外观' },
+  ];
+  /** 准备页的小字：统一字体，省得每处重复。 */
+  function heroChromeText(x, y, size, fill, weight, anchor) {
+    const text = document.createElementNS(SVG_NS, 'text');
+    text.setAttribute('x', String(x)); text.setAttribute('y', String(y));
+    text.setAttribute('font-size', String(size)); text.setAttribute('fill', fill);
+    text.setAttribute('font-weight', weight || '700');
+    text.setAttribute('text-anchor', anchor || 'start');
+    text.setAttribute('font-family', '"Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif');
+    text.setAttribute('stroke', '#fff6df');
+    text.setAttribute('stroke-width', '1.6');
+    text.setAttribute('stroke-linejoin', 'round');
+    text.setAttribute('paint-order', 'stroke');
+    return text;
+  }
+  function heroSvgRect(x, y, w, h, r, fill, stroke, strokeWidth) {
+    const rect = document.createElementNS(SVG_NS, 'rect');
+    rect.setAttribute('x', String(x)); rect.setAttribute('y', String(y));
+    rect.setAttribute('width', String(w)); rect.setAttribute('height', String(h));
+    rect.setAttribute('rx', String(r == null ? 6 : r));
+    rect.setAttribute('fill', fill); rect.setAttribute('stroke', stroke || 'none');
+    if (strokeWidth) rect.setAttribute('stroke-width', String(strokeWidth));
+    return rect;
+  }
+  /** 右上角「出发准备」卡：标题 + 三块事实 + 进度条 + 待办提示。 */
+  function heroTodoEnsure(view) {
+    let g = view.__heroTodo;
+    if (g && g.isConnected) return g;
+    g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('pointer-events', 'none');
+    g.setAttribute('class', 'sf-hero-todo');
+    const box = HERO_TODO_BOX;
+    g.appendChild(heroSvgRect(box.x, box.y, box.w, box.h, box.r, '#fff9e9', '#d8bd86', 1.6));
+    g.appendChild(heroSvgRect(box.x + 3, box.y + 3, box.w - 6, box.h - 6, box.r - 2, 'none', '#fffdf7', 1));
+    const title = heroChromeText(box.x + 9, box.y + 12, 8.4, '#3d654e', '800', 'start');
+    title.textContent = '出发准备';
+    const badge = heroChromeText(box.x + box.w - 8, box.y + 11.6, 5.2, '#a37735', '700', 'end');
+    badge.textContent = '勇者剧本';
+    g.appendChild(badge);
+    const facts = [];
+    for (const f of HERO_TODO_FACTS) {
+      g.appendChild(heroSvgRect(f.x, box.y + 16, f.w, 18, 4, '#fffdf6', '#e6d4ac', 1));
+      const label = heroChromeText(f.x + 4, box.y + 21.5, 4.6, '#9a7b4e', '700', 'start');
+      label.textContent = f.label;
+      const value = heroChromeText(f.x + 4, box.y + 30.5, 6.8, '#3d654e', '800', 'start');
+      value.textContent = '—';
+      g.appendChild(label); g.appendChild(value);
+      facts.push({ key: f.key, value: value });
+    }
+    /* 进度条：底槽 + 绿色填充。 */
+    g.appendChild(heroSvgRect(box.x + 9, box.y + 38, box.w - 18, 3.6, 2, '#eadfc6', '#dccbaa', 0.6));
+    const meter = heroSvgRect(box.x + 9, box.y + 38, 0, 3.6, 2, '#7fb84d', 'none', 0);
+    g.appendChild(meter);
+    const footer = heroChromeText(box.x + box.w / 2, box.y + 51, 5.6, '#b06b1f', '700', 'middle');
+    footer.textContent = '';
+    g.appendChild(footer);
+    g.appendChild(title);
+    g.__facts = facts; g.__meter = meter; g.__footer = footer;
+    view.g.appendChild(g);
+    view.__heroTodo = g;
+    return g;
+  }
+  function heroTodoRefresh(view) {
+    const hero = Hero();
+    let g = view.__heroTodo;
+    /* 出发准备只属于「状态」页；切到武器 / 技能必须消失。 */
+    if (!hero || hero.mode !== 'setup' || activeTab() !== 'status') { if (g) g.style.display = 'none'; return; }
+    g = heroTodoEnsure(view);
+    g.style.display = '';
+    const picks = heroPickCount();
+    const state = heroStatState();
+    const pool = state ? Math.max(0, Number(state.pool) || 0) : 0;
+    const gears = heroGearSlots().filter((id) => Number(id) > 0).length;
+    const ready = picks >= HERO_PICK_LIMIT && pool === 0;
+    const values = {
+      picks: picks + ' / ' + HERO_PICK_LIMIT,
+      stats: pool > 0 ? ('待分 ' + pool) : '已分配',
+      gears: gears + ' / 4',
+    };
+    for (const fact of (g.__facts || [])) {
+      if (!fact.value) continue;
+      fact.value.textContent = values[fact.key] || '—';
+      fact.value.setAttribute('fill', fact.key === 'picks' && picks >= HERO_PICK_LIMIT ? '#2f7a4f'
+        : fact.key === 'stats' && pool === 0 ? '#2f7a4f' : '#3d654e');
+    }
+    if (g.__meter) {
+      const width = (HERO_TODO_BOX.w - 18) * Math.max(0, Math.min(1, picks / HERO_PICK_LIMIT));
+      g.__meter.setAttribute('width', width.toFixed(2));
+      g.__meter.setAttribute('fill', ready ? '#5ca33a' : '#8fc35d');
+    }
+    if (g.__footer) {
+      g.__footer.textContent = picks < HERO_PICK_LIMIT
+        ? ('还差 ' + (HERO_PICK_LIMIT - picks) + ' 个武技')
+        : (pool > 0 ? ('还有 ' + pool + ' 点可分配') : '准备就绪，可以出发');
+      g.__footer.setAttribute('fill', ready ? '#2f7a4f' : '#b06b1f');
+    }
+  }
+  /* 爬塔回看：右上角空白画一张「勇者之剑」小卡（准备页那一块在这里变成破镜进度）。
+   * 没有剑时也显示「尚未持剑」，告诉玩家首次巡逻胜利后可以寻剑。 */
+  const HERO_BLADE_BOX = { x: 164, y: 38, w: 134, h: 54, r: 7 };
+  function heroBladeCardEnsure(view) {
+    let g = view.__heroBladeCard;
+    if (g && g.isConnected) return g;
+    g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('pointer-events', 'none');
+    g.setAttribute('class', 'sf-hero-blade-card');
+    const box = HERO_BLADE_BOX;
+    g.appendChild(heroSvgRect(box.x, box.y, box.w, box.h, box.r, '#fff9e9', '#d8bd86', 1.6));
+    g.appendChild(heroSvgRect(box.x + 3, box.y + 3, box.w - 6, box.h - 6, box.r - 2, 'none', '#fffdf7', 1));
+    const title = heroChromeText(box.x + 9, box.y + 13, 7.6, '#3d654e', '800', 'start');
+    title.textContent = '勇者之剑';
+    const state = heroChromeText(box.x + box.w - 8, box.y + 12.4, 6.2, '#a37735', '700', 'end');
+    state.textContent = '尚未持剑';
+    const line1 = heroChromeText(box.x + 9, box.y + 27, 6.4, '#6b4a25', '700', 'start');
+    line1.textContent = '';
+    const line2 = heroChromeText(box.x + 9, box.y + 37, 5.2, '#6b4a25', '600', 'start');
+    line2.textContent = '';
+    const line3 = heroChromeText(box.x + 9, box.y + 46, 5.0, '#9a7b4e', '600', 'start');
+    line3.textContent = '';
+    g.appendChild(title); g.appendChild(state); g.appendChild(line1); g.appendChild(line2); g.appendChild(line3);
+    g.__state = state; g.__line1 = line1; g.__line2 = line2; g.__line3 = line3;
+    view.g.appendChild(g);
+    view.__heroBladeCard = g;
+    return g;
+  }
+  function heroBladeCardRefresh(view) {
+    const hero = Hero();
+    let g = view.__heroBladeCard;
+    if (!hero || hero.mode !== 'run' || activeTab() !== 'status') { if (g) g.style.display = 'none'; return; }
+    g = heroBladeCardEnsure(view);
+    g.style.display = '';
+    const blade = hero.blade || null;
+    if (g.__state) {
+      g.__state.textContent = blade ? ('破镜 ×' + blade.stacks) : '尚未持剑';
+      g.__state.setAttribute('fill', blade ? '#2f7a4f' : '#a37735');
+    }
+    if (g.__line1) g.__line1.textContent = blade
+      ? ('力量 −' + Math.round(blade.powerCut * 100) + '% · 生命上限 −' + Math.round(blade.hpCut * 100) + '%')
+      : '首次巡逻胜利后可得';
+    if (g.__line2) g.__line2.textContent = blade
+      ? ('击败巡逻魔王成长 · 当前 ' + blade.stacks + ' / 10 层')
+      : '跨百层保留 · 破镜克镜';
+    if (g.__line3) g.__line3.textContent = blade
+      ? '照影之境不会吞掉已成长层数'
+      : '每次巡逻胜利 +1 层破镜';
+  }
+
+  /** 盖在 3911 胶囊上的「开始挑战」四个字（独立一层，切帧不会把它重建掉）。 */
+  function heroStartLabelEnsure(view) {
+    let g = view.__heroStartLabel;
+    if (!g || g.isConnected === false) {
+      g = document.createElementNS(SVG_NS, 'g');
+      g.setAttribute('pointer-events', 'none');
+      g.setAttribute('transform', 'matrix(' + HERO_START_AT.s + ',0,0,' + HERO_START_AT.s + ',' + HERO_START_AT.x + ',' + HERO_START_AT.y + ')');
+      const text = document.createElementNS(SVG_NS, 'text');
+      text.setAttribute('x', '-1'); text.setAttribute('y', '8');
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('font-size', '16');
+      text.setAttribute('font-family', '"Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif');
+      text.setAttribute('font-weight', '900');
+      text.setAttribute('fill', '#fffdf1');
+      text.setAttribute('stroke', '#542201');
+      text.setAttribute('stroke-width', '3');
+      text.setAttribute('stroke-linejoin', 'round');
+      text.setAttribute('paint-order', 'stroke');
+      text.textContent = '开始挑战';
+      g.appendChild(text);
+      view.g.appendChild(g);
+      view.__heroStartLabel = g;
+    }
+    return g;
+  }
+  function heroStartEnsure(view) {
+    let start = view.__heroStart;
+    if (start && start.g && start.g.isConnected) return start;
+    try { start = view.attachChild('3911', 1, 'hero-start'); } catch (e) { start = null; }
+    if (!start || !start.g) return null;
+    view.__heroStart = start;
+    start.g.classList.add('sf-hero-start');
+    start.g.setAttribute('transform', 'matrix(' + HERO_START_AT.sx + ',0,0,' + HERO_START_AT.s + ',' + HERO_START_AT.x + ',' + HERO_START_AT.y + ')');
+    /* 3911 自带的「返回」白字是 depth 4 那一层；CSS `.sf-hero-start` 负责在所有帧里把它藏掉。 */
+    const hit = start.g.querySelector('[data-hit="1"]');
+    if (hit) {
+      hit.setAttribute('x', '-55'); hit.setAttribute('y', '-11');
+      hit.setAttribute('width', '108'); hit.setAttribute('height', '30');
+    }
+    return start;
+  }
+  /** 爬塔中的「铸币修炼」：与「开始挑战」共用 3911 金胶囊，只是文字与回调不同。
+   *  准备页用开始键；回看页（mode: 'run'）把同一位置换成修炼键。 */
+  function heroTrainEnsure(view) {
+    let btn = view.__heroTrain;
+    if (btn && btn.g && btn.g.isConnected) return btn;
+    try { btn = view.attachChild('3911', 1, 'hero-train'); } catch (e) { btn = null; }
+    if (!btn || !btn.g) return null;
+    view.__heroTrain = btn;
+    btn.g.classList.add('sf-hero-train');
+    btn.g.setAttribute('transform', 'matrix(' + HERO_START_AT.sx + ',0,0,' + HERO_START_AT.s + ',' + HERO_START_AT.x + ',' + HERO_START_AT.y + ')');
+    const hit = btn.g.querySelector('[data-hit="1"]');
+    if (hit) {
+      hit.setAttribute('x', '-55'); hit.setAttribute('y', '-11');
+      hit.setAttribute('width', '108'); hit.setAttribute('height', '30');
+    }
+    return btn;
+  }
+  function heroTrainLabelEnsure(view) {
+    let g = view.__heroTrainLabel;
+    if (!g || g.isConnected === false) {
+      g = document.createElementNS(SVG_NS, 'g');
+      g.setAttribute('pointer-events', 'none');
+      g.setAttribute('transform', 'matrix(' + HERO_START_AT.s + ',0,0,' + HERO_START_AT.s + ',' + HERO_START_AT.x + ',' + HERO_START_AT.y + ')');
+      const text = document.createElementNS(SVG_NS, 'text');
+      text.setAttribute('x', '-1'); text.setAttribute('y', '8');
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('font-size', '16');
+      text.setAttribute('font-family', '"Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif');
+      text.setAttribute('font-weight', '900');
+      text.setAttribute('fill', '#fffdf1');
+      text.setAttribute('stroke', '#542201');
+      text.setAttribute('stroke-width', '3');
+      text.setAttribute('stroke-linejoin', 'round');
+      text.setAttribute('paint-order', 'stroke');
+      text.textContent = '铸币修炼';
+      g.appendChild(text);
+      view.g.appendChild(g);
+      view.__heroTrainLabel = g;
+    }
+    return g;
+  }
+  /** 勇者可修炼武技（与 TowerHero 同一套可升级判据：未满 15、技能 6/13 不可升）。 */
+  function heroTrainCandidates(hero) {
+    const out = [];
+    for (const kind of ['weapon', 'skill']) {
+      for (const raw of ((kind === 'weapon' ? hero.weapons : hero.skills) || [])) {
+        const hit = /^(\d+):(\d+)$/.exec(String(raw));
+        if (!hit) continue;
+        const id = Number(hit[1]), level = Math.max(1, Number(hit[2]) || 1);
+        if (level >= 15 || (kind === 'skill' && [6, 13].includes(id))) continue;
+        const inst = kind === 'weapon' ? State.weaponInst(id) : State.skillInst(id);
+        out.push({ kind, id, level, ref: (kind === 'weapon' ? 'w:' : 's:') + id,
+          name: (inst && inst.name) || ((kind === 'weapon' ? '武器 ' : '技能 ') + id) });
+      }
+    }
+    return out;
+  }
+  function heroTrainLevelText(level) { return level > 10 ? '真' + (level - 10) : 'Lv.' + level; }
+  /** 点「铸币修炼」：在原版页上盖一层 DOM 选择层（与换装层同一做法，只拆自己）。 */
+  function openHeroCoinTrain(hero, view) {
+    if (!hero || typeof hero.onCoinTrain !== 'function') { if (window.UI && UI.toast) UI.toast('铸币修炼暂不可用。'); return; }
+    if (Math.max(0, Number(hero.coins) || 0) <= 0) { if (window.UI && UI.toast) UI.toast('铸币不足（需要 1 枚）。'); return; }
+    const all = heroTrainCandidates(hero);
+    if (!all.length) { if (window.UI && UI.toast) UI.toast('没有可修炼的武技。'); return; }
+    const modal = window.UI && UI.classic && UI.classic.modal;
+    if (!modal) return;
+    const rows = all.map((it) => '<button type="button" class="hero-coin-train-row" data-hero-train-ref="' + esc(it.ref) + '">' +
+      '<b>' + esc(it.name) + '</b><span>' + esc(heroTrainLevelText(it.level)) + ' · 随机 +3~5 级</span><em>1 铸币</em></button>').join('');
+    const m = modal('铸币修炼', '<div class="hero-coin-train-panel"><p>选择一门武技，必定提升 <b>3~5</b> 个小级（封顶真5）。' +
+      '当前铸币 <b class="gold-text">' + Math.max(0, Number(hero.coins) || 0) + '</b> 枚。</p>' +
+      '<div class="hero-coin-train-list">' + rows + '</div></div>', [{ label: '返回', cls: 'muted' }], { small: true });
+    if (!m || !m.element) return;
+    m.element.classList.add('hero-coin-train-modal');
+    m.element.querySelectorAll('[data-hero-train-ref]').forEach((b) => {
+      b.onclick = () => {
+        const out = hero.onCoinTrain(b.dataset.heroTrainRef);
+        m.close();
+        if (!out || !out.ok) {
+          modal('铸币修炼', '<p>' + esc((out && out.msg) || '修炼失败。') + '</p>',
+            [{ label: '返回', cls: 'muted', run: () => { if (window.SfStatus && SfStatus.refresh) SfStatus.refresh(); } }], { small: true });
+          return;
+        }
+        if (typeof out.left === 'number') hero.coins = Math.max(0, out.left);
+        if (window.SfStatus && SfStatus.refresh) SfStatus.refresh();
+        modal('修炼完成', '<div class="result-box"><div class="result-title win">武技精进</div><p>' + esc(out.msg) + '</p>' +
+          '<p class="dim">消耗 1 枚铸币，剩余 ' + Math.max(0, Number(out.left) || 0) + ' 枚。</p></div>',
+          [{ label: '继续修炼', cls: 'gold', run: () => openHeroCoinTrain(hero, view) },
+           { label: '返回', cls: 'muted', run: () => { if (window.SfStatus && SfStatus.refresh) SfStatus.refresh(); } }], { small: true });
+      };
+    });
+  }
+  /* ---------- 力 / 敏 / 速的小上下键（勇者准备页） ----------
+   * 用户 2026-10-24 口径：四维可在开始界面调整，遵循 20% 下限；
+   * 力/敏/速各加一对小上下键，满额或没有可分配点时上键变灰。
+   * 具体规则（预算 275 / 下限 55 / 上限 85）在 TowerHero；这里只画键与读 `hero.statState()`。 */
+  const HERO_STAT_KEYS = ['power', 'agility', 'speed'];
+  const HERO_STAT_NAMES = { power: '力量', agility: '敏捷', speed: '速度' };
+  const HERO_STAT_CELL_RIGHT = { power: 84, agility: 153, speed: 222 };
+  const HERO_STAT_ARROW_AT = { power: 66, agility: 136, speed: 207 };
+  function heroStatState() {
+    const hero = Hero();
+    try { return (hero && typeof hero.statState === 'function') ? hero.statState() : null; } catch (e) { return null; }
+  }
+  /** 把一颗小箭头切到可用 / 灰色。 */
+  function setHeroStatArrow(group, dir, enabled) {
+    const btn = group && group.querySelector('[data-dir="' + dir + '"]');
+    if (!btn) return;
+    const rect = btn.__rect, path = btn.__path;
+    btn.style.pointerEvents = enabled ? 'auto' : 'none';
+    btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+    btn.style.opacity = enabled ? '1' : '.55';
+    if (rect) {
+      rect.setAttribute('fill', enabled ? '#fffaf0' : '#f0ece3');
+      rect.setAttribute('stroke', enabled ? '#d6bd8c' : '#d8d2c6');
+    }
+    if (path) path.setAttribute('fill', enabled ? '#3b7255' : '#b7b0a4');
+  }
+  function heroStatArrowEnsure(view, stat) {
+    const cache = view.__heroStatArrows || (view.__heroStatArrows = {});
+    let group = cache[stat];
+    if (group && group.isConnected) return group;
+    group = document.createElementNS(SVG_NS, 'g');
+    group.setAttribute('class', 'sf-hero-stat-arrow');
+    group.setAttribute('data-stat', stat);
+    group.setAttribute('transform', 'translate(' + HERO_STAT_ARROW_AT[stat] + ',142.5)');
+    const make = (dir) => {
+      const btn = document.createElementNS(SVG_NS, 'g');
+      btn.setAttribute('data-dir', dir);
+      btn.setAttribute('class', 'sf-hero-stat-step');
+      btn.style.pointerEvents = 'auto';
+      btn.style.cursor = 'pointer';
+      const y = dir === 'up' ? 0 : 9;
+      const rect = document.createElementNS(SVG_NS, 'rect');
+      rect.setAttribute('x', '0'); rect.setAttribute('y', String(y));
+      rect.setAttribute('width', '10'); rect.setAttribute('height', '8');
+      rect.setAttribute('rx', '2'); rect.setAttribute('fill', '#fffaf0');
+      rect.setAttribute('stroke', '#d6bd8c'); rect.setAttribute('stroke-width', '0.9');
+      const path = document.createElementNS(SVG_NS, 'path');
+      if (dir === 'up') {
+        path.setAttribute('d', 'M5 1.5 L1.4 6.4 L8.6 6.4 Z');
+      } else {
+        /* 下键的矩形在 y=9..17，三角形也要跟着下移，否则会画到上键上。 */
+        path.setAttribute('d', 'M5 6.5 L1.4 1.6 L8.6 1.6 Z');
+        path.setAttribute('transform', 'translate(0,9)');
+      }
+      path.setAttribute('fill', '#3b7255');
+      const title = document.createElementNS(SVG_NS, 'title');
+      title.textContent = HERO_STAT_NAMES[stat] + (dir === 'up' ? ' +1' : ' −1');
+      btn.appendChild(rect); btn.appendChild(path); btn.appendChild(title);
+      btn.__rect = rect; btn.__path = path;
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const hero = Hero();
+        if (!hero || hero.mode !== 'setup' || typeof hero.adjustStat !== 'function') return;
+        const out = hero.adjustStat(stat, dir);
+        if (!out || !out.ok) return;
+        try { if (current && current.view) fillValues(current.view); } catch (e) {}
+        refreshHeroChrome();
+      });
+      return btn;
+    };
+    group.appendChild(make('up'));
+    group.appendChild(make('down'));
+    view.g.appendChild(group);
+    cache[stat] = group;
+    return group;
+  }
+  function wireHeroStatControls(view) {
+    const hero = Hero();
+    if (!hero || hero.mode !== 'setup' || !heroStatState()) return;
+    for (const stat of HERO_STAT_KEYS) heroStatArrowEnsure(view, stat);
+  }
+  /** 页面元素 → 舞台（320×196）坐标：处理 svg 等比缩放与上下/左右留白。 */
+  function stageRectOf(view, el) {
+    const svg = view && view.root;
+    if (!svg || !el || !el.getBoundingClientRect || !svg.getBoundingClientRect) return null;
+    const sr = svg.getBoundingClientRect();
+    const vb = svg.viewBox && svg.viewBox.baseVal;
+    if (!sr.width || !sr.height || !vb || !vb.width || !vb.height) return null;
+    const par = String(svg.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+    const scale = /slice/.test(par) ? Math.max(sr.width / vb.width, sr.height / vb.height)
+      : Math.min(sr.width / vb.width, sr.height / vb.height);
+    if (!scale) return null;
+    const ax = /xMin/.test(par) ? 0 : /xMax/.test(par) ? 1 : 0.5;
+    const ay = /YMin/.test(par) ? 0 : /YMax/.test(par) ? 1 : 0.5;
+    const x0 = sr.left + (sr.width - vb.width * scale) * ax - vb.x * scale;
+    const y0 = sr.top + (sr.height - vb.height * scale) * ay - vb.y * scale;
+    const r = el.getBoundingClientRect();
+    return { x: (r.left - x0) / scale, y: (r.top - y0) / scale, w: r.width / scale, h: r.height / scale };
+  }
+  /** 按当前力/敏/速值、可分配池与 20% 上下限刷新三对箭头的位置 / 灰态。 */
+  function refreshHeroStatControls() {
+    const hero = Hero();
+    const state = heroStatState();
+    const view = current && current.view;
+    if (!view || !view.__heroStatArrows) return;
+    const show = !!(hero && hero.mode === 'setup' && state && activeTab() === 'status');
+    for (const stat of HERO_STAT_KEYS) {
+      const group = view.__heroStatArrows[stat];
+      if (!group) continue;
+      group.style.display = show ? '' : 'none';
+      if (!show) continue;
+      /* 数值宽度会随被动 / 两位数变三位数变化，箭头跟在实际数字右边；
+       * 再夹在本格范围内，避免压到下一格。 */
+      const clip = clipOf(view, stat);
+      const box = stageRectOf(view, clip && clip.g);
+      let x = box ? (box.x + box.w + 1) : HERO_STAT_ARROW_AT[stat];
+      let y = box ? (box.y + box.h / 2 - 8.5) : 142.5;
+      x = Math.max(54, Math.min(HERO_STAT_CELL_RIGHT[stat] - 10, x));
+      y = Math.max(140.5, Math.min(145, y));
+      group.setAttribute('transform', 'translate(' + x.toFixed(1) + ',' + y.toFixed(1) + ')');
+      const value = Number(state.values && state.values[stat]) || 0;
+      const rules = state.rules || {};
+      setHeroStatArrow(group, 'up', state.pool > 0 && value < Number(rules.cap || 0));
+      setHeroStatArrow(group, 'down', value > Number(rules.floor || 0));
+    }
+  }
+
+  /** 只刷新「开始挑战 / 计数条 / 返回 / 力敏速箭头」的显示状态，不重新挂载。 */
+  /** 准备页把右上角经验条 / 今日胜率 / 战斗场次这块**元素本身**收掉，
+   *  不放白色补丁；文字直接落在奶油底上。返回 / 爬塔页会恢复。 */
+  /** 状态页立绘（松鼠本体 + 装备挂点）在第 1 帧里的**顶层深度从 129 起**
+   *  （129 影子 / 130 脚 / 133 手 / 136 尾巴 / 138 身体 / 141·172 拳套 / 144 脚 /
+   *    147 头 / 169 手；见导出数据）。准备页的「隐藏战绩区」是按**矩形**扫元素的，
+   *  立绘的右半边（右眼 / 右耳 / 右腮红 / 嘴）恰好落在右上角那块矩形里 ——
+   *  2026-10-24 用户报的「松鼠的左眼和左耳缺失」就是它们被当成战绩文字藏掉了。
+   *  这里按**顶层深度**把立绘整棵子树排除，只藏真正的战绩元素。 */
+  function inStatusPortrait(el, root) {
+    let at = el;
+    while (at && at.parentNode && at.parentNode !== root) at = at.parentNode;
+    const d = Number(at && at.getAttribute && at.getAttribute('depth'));
+    return Number.isFinite(d) && d >= 129;
+  }
+  /** 勇者页（准备 / 爬塔回看）把原版「Exp / 今日胜率 / 战斗场次」三块收掉。
+   *  2026-10-24 用户口径：爬塔中点头像查看**也一样**去掉这三块（原先只处理了准备页）。 */
+  function hideHeroStatusFields(view, hide) {
+    if (!view) return;
+    const old = view.__heroFieldHidden;
+    if (old) {
+      for (const rec of old) { try { rec.el.style.display = rec.prev; } catch (e) {} }
+      view.__heroFieldHidden = null;
+    }
+    if (!hide) return;
+    if (!view.g || typeof view.g.querySelectorAll !== 'function') return;
+    const region = { x: 106, y: 28, w: 208, h: 74 };
+    const custom = [
+      view.__heroTodo,
+      view.__heroStart && view.__heroStart.g,
+      view.__heroStartLabel,
+      view.__heroTrain && view.__heroTrain.g,
+      view.__heroTrainLabel,
+      view.__heroBladeCard,
+      ...Object.values(view.__heroStatArrows || {}),
+    ].filter(Boolean);
+    const hidden = [], seen = new Set();
+    const hideOne = (el) => {
+      if (!el || seen.has(el) || el.style.display === 'none') return;
+      seen.add(el);
+      hidden.push({ el: el, prev: el.style.display });
+      el.style.display = 'none';
+    };
+    for (const el of view.g.querySelectorAll('*')) {
+      if (custom.some((node) => node === el || (node.contains && node.contains(el)))) continue;
+      /* 立绘整棵子树不参与矩形隐藏 —— 见上面的注释。 */
+      if (inStatusPortrait(el, view.g)) continue;
+      const r = stageRectOf(view, el);
+      if (!r || !r.w || !r.h) continue;
+      if (r.x < region.x || r.y < region.y || r.x + r.w > region.x + region.w || r.y + r.h > region.y + region.h) continue;
+      if (el.tagName === 'g' && el.children.length > 2) continue;
+      hideOne(el);
+    }
+    /* 数值组整组藏掉：1s 一次的 fillValues 会重建组内数字精灵，
+     * 只藏叶子的话数字会重新长出来。 */
+    for (const name of ['expMc', 'expNum', 'winRate', 'fightTimes1', 'fightTimes2']) {
+      const c = clipOf(view, name);
+      if (c && c.g) hideOne(c.g);
+    }
+    view.__heroFieldHidden = hidden;
+  }
+  function refreshHeroChrome() {
+    if (!heroView() || !current || !current.view) return;
+    const hero = Hero(), view = current.view;
+    const onStatus = activeTab() === 'status';
+    const full = heroStartEnabled();
+    const setup = hero.mode === 'setup';
+    const statState = heroStatState();
+    const pool = statState ? Math.max(0, Number(statState.pool) || 0) : 0;
+    /* 未就绪时整颗按钮转灰（不是黄色再蒙一层灰）；武技齐且点数分配完才恢复黄色。 */
+    const ready = full && pool === 0;
+    const startFilter = ready ? '' : 'grayscale(1) brightness(.94)';
+    /* 准备页与爬塔回看页都收掉 Exp / 今日胜率 / 战斗场次（用户 2026-10-24 口径：
+     * 爬塔里点头像查看时也不要这三块，那一页只留立绘、四维与装备入口）。 */
+    hideHeroStatusFields(view, onStatus);
+    const start = view.__heroStart, label = view.__heroStartLabel;
+    if (start && start.g) {
+      start.g.style.display = setup && onStatus ? '' : 'none';
+      start.g.style.opacity = '1';
+      start.g.style.filter = startFilter;
+      start.g.style.cursor = ready ? 'pointer' : 'not-allowed';
+    }
+    if (label) {
+      label.style.display = setup && onStatus ? '' : 'none';
+      label.style.opacity = '1';
+      label.style.filter = startFilter;
+    }
+    /* 爬塔回看：同一位置把「开始挑战」换成「铸币修炼」。没有铸币时转灰。 */
+    const train = view.__heroTrain, trainLabel = view.__heroTrainLabel;
+    const canTrain = Math.max(0, Number(hero.coins) || 0) > 0;
+    const trainFilter = canTrain ? '' : 'grayscale(1) brightness(.94)';
+    if (train && train.g) {
+      train.g.style.display = !setup && onStatus ? '' : 'none';
+      train.g.style.opacity = '1';
+      train.g.style.filter = trainFilter;
+      train.g.style.cursor = canTrain ? 'pointer' : 'not-allowed';
+    }
+    if (trainLabel) {
+      trainLabel.style.display = !setup && onStatus ? '' : 'none';
+      trainLabel.style.opacity = '1';
+      trainLabel.style.filter = trainFilter;
+    }
+    const bladeCard = view.__heroBladeCard;
+    if (bladeCard) bladeCard.style.display = (!setup && onStatus) ? '' : 'none';
+    heroTodoRefresh(view);
+    heroBladeCardRefresh(view);
+    refreshHeroStatControls();
+  }
+  /** 状态页各帧都需要的几层：返回 / 开始挑战 / 出发清单 / 力敏速上下键。 */
+  function wireHeroChrome() {
+    if (!heroView() || !current || !current.view) return;
+    const hero = Hero(), view = current.view;
+    /* 原版 3362「返回菜单」藏掉，换成随机挑战查看敌人那颗 3911「返回」。
+     * 3911 不在包里时退回 3362 —— 否则整页没有返回键，玩家会被困在准备页。
+     * 准备页和爬塔回看页都保留底部这颗「返回」（2026-10-24 口径：右上角小 × 去掉）。 */
+    const oldBack = clipOf(view, 'back');
+    const back = useStageBack(view, '3911', 1, 160.3, 175.5, 1, 'hero-back', '__heroBack');
+    if (back) {
+      wireClickable(back, { hover: 2, press: 2, idle: 1, onFire: () => { if (hero.onBack) hero.onBack(); } });
+      if (oldBack && oldBack.g) oldBack.g.style.display = 'none';
+    } else if (oldBack) {
+      wireClickable(oldBack, { hover: 2, onFire: () => { if (hero.onBack) hero.onBack(); } });
+    }
+    if (hero.mode === 'setup') {
+      const start = heroStartEnsure(view);
+      if (start) {
+        heroStartLabelEnsure(view);
+        wireClickable(start, {
+          hover: 2, press: 2, idle: 1,
+          onFire: () => {
+            if (!heroStartEnabled()) {
+              if (window.UI && UI.toast) UI.toast('还需点亮 ' + Math.max(0, HERO_PICK_LIMIT - heroPickCount()) + ' 个武技。');
+              return;
+            }
+            if (hero.onStart) hero.onStart();
+          },
+        });
+      }
+      heroTodoEnsure(view);
+    } else {
+      const train = heroTrainEnsure(view);
+      if (train) {
+        heroTrainLabelEnsure(view);
+        wireClickable(train, {
+          hover: 2, press: 2, idle: 1,
+          onFire: () => openHeroCoinTrain(hero, view),
+        });
+      }
+      heroBladeCardEnsure(view);
+    }
+    wireHeroStatControls(view);
+    /* 根帧切页会重建内容；把这几层重新挪到末尾，保证始终画在 7218 页面内容之上。 */
+    const arrows = view.__heroStatArrows || {};
+    for (const node of [view.__heroTodo, view.__heroBladeCard, view.__heroStart && view.__heroStart.g,
+      view.__heroStartLabel, view.__heroTrain && view.__heroTrain.g,
+      view.__heroTrainLabel, arrows.power, arrows.agility, arrows.speed]) {
+      if (node && node.parentNode === view.g) view.g.appendChild(node);
+    }
+    refreshHeroChrome();
+  }
+
   /** 画（或重画）武器 / 技能栏的格子；`status` 页则收掉它。 */
   function applyTab() {
     if (!current || !current.view) return;
     const view = current.view;
     const grid = activeTab() !== 'status';
     showGridParts(grid);
-    if (!grid) return;
+    if (!grid) { if (heroView()) refreshHeroChrome(); return; }
     const info = gridInfo();
     if (info && current) current.gridPage = info.page;
     const kind = gridKind();
@@ -599,6 +1301,7 @@
       hover: 0, press: 0, idle: () => { const i = gridInfo(); return (i && i.page < i.pages - 1) ? 1 : 2; },
       onFire: () => { const i = gridInfo(); if (i && i.page < i.pages - 1) { current.gridPage = i.page + 1; applyTab(); } },
     });
+    if (heroView()) refreshHeroChrome();
   }
   /* ============================================================
    * 二级页：武器 / 技能详情
@@ -638,7 +1341,7 @@
     const ui = document.getElementById('ui');
     if (!ui) return null;
     const el = document.createElement('section');
-    el.className = 'classic-home ssfight-home ssfight-sub';
+    el.className = 'classic-home ssfight-home ssfight-sub ssfight-view';
     el.setAttribute('aria-label', '武器技能详情');
     ui.appendChild(el);
     if (current.container) current.container.classList.add('sf-detail-open');
@@ -1317,6 +2020,14 @@
         e.stopPropagation();
         const it2 = cell.__cellItem;
         if (!it2) return;
+        /* 勇者准备：点一下点亮、再点一下变暗；爬塔中回看武技是只读的（本局成长已固定）。 */
+        if (heroView()) {
+          const hero = Hero();
+          if (!hero || hero.mode !== 'setup') return;
+          const out = heroTogglePick(cell.__cellKind, it2.id);
+          if (out && out.ok === false && out.msg && window.UI && UI.toast) UI.toast(out.msg);
+          return;
+        }
         /* ⚠ **查看别人时不许开详情**：原版 `showWeaponSkillWin`（:16658-16790）整段被
          * `if (!isViewfriend)` 包住 —— 看别人的武器/技能只给看，不给升级/升阶。
          * 不拦这一下的话，点对手的武器会开出"我的"升级页，数据与权限都是错的。 */
@@ -1498,6 +2209,34 @@
      * 而且这一层跟等级检测没同步"）。现在：状态帧按等级选、悬停只给 CSS 光晕，
      * 未开启时点它照原版 `showTips` 的**原文**给一句提示、不进页面。 */
     const lv = () => Math.max(1, Math.round(Number((S() || {}).level) || 1));
+    /* ---------- 勇者模式：同一帧里的两颗键 ----------
+     * 第 1 帧原版就有「更换装备 / 装备融合」两颗并排键（实测 b_change 158..223、
+     * b_fusion 222.5..300.1）。勇者页把 b_fusion 整颗藏掉、原位挂「开始挑战」，
+     * 所以这里只留 b_change 的「更换装备」接线。 */
+    if (heroView()) {
+      const hero = Hero();
+      const outer = clipOf(view, 'b_change');
+      if (outer) stopAt(outer, 1);
+      const fusion = clipOf(view, 'b_fusion');
+      if (fusion && fusion.g) fusion.g.style.display = 'none';
+      /* 与自己的状态页完全同一套：外层 `b_change` 在第 1 帧就是「更换装备」按钮本身，
+       * 它自己的量盒/接线路子已经验证过；不要再往子键里找（子键可能是零尺寸的空壳）。 */
+      if (outer && outer.g) {
+        wireClickable(outer, { hover: 0, press: 0, idle: () => 1, onFire: () => {
+          /* 主路径：玩家自己的「更换装备」原版页（4673 第 3 帧），只是换成全部装备 / 0 加成。
+           * 原版页挂不上（素材缺失等）才退回 tower-ui 的 DOM 装备层。 */
+          const p = openGearsPage();
+          if (p && typeof p.then === 'function') {
+            p.then((ok) => { if (!ok && hero.onGears) hero.onGears(); }).catch((e) => {
+              if (window.__errs) window.__errs.push('hero gears: ' + (e && e.message));
+              if (hero.onGears) hero.onGears();
+            });
+          }
+        } });
+      }
+      wireHeroChrome();
+      return;
+    }
     /* ---------- 查看别人时这两颗换档（原版 `showMainInfo` 的 `isViewfriend` 分支）----------
      * `b_change`(7199)：原版 `gotoAndStop(5)`（已是好友）/ `gotoAndStop(4)`（陌生人），
      *   第 4/5 帧上写的是「查看装备」；`b_fusion`(7207)：`gotoAndStop(3)`（整颗隐藏）。
@@ -1623,9 +2362,9 @@
     await loadIconTable();
     /* 立绘要贴装备 —— 容器素材在 `tags-gear.json`（1.8 MB），只有真进状态页才拉。 */
     try { await SfRender.loadExtra('tags-gear.json'); } catch (e) {}
-    /* 查看别人时底栏要挂**关卡三级页那颗原版 3911「返回」**（用户口径 2026-11：
+    /* 查看别人 / 勇者模式时底栏要挂**关卡三级页那颗原版 3911「返回」**（用户口径 2026-11：
      * 不要自己给 3362 补字，直接用关卡「挑战它」那一页的返回键）。3911 在挑战包里。 */
-    if (o.friend) { try { await SfRender.loadExtra('tags-challenge.json'); } catch (e) {} }
+    if (o.friend || o.hero) { try { await SfRender.loadExtra('tags-challenge.json'); } catch (e) {} }
     await loadFrameTable();
     if (mine !== seq) { openTrace = 'stale mine=' + mine + ' seq=' + seq; return false; }
     const view = await SfRender.mountSymbol(host, '7218', {
@@ -1637,8 +2376,9 @@
     openTrace = 'mounted';
     current = { view: view, container: host, tab: 'status', gridPage: 0,
       /* 查看别人：整页数据源换成他（原版 `isViewfriend`），返回键也换成"回挑战页"。
+       * `hero`：勇者准备 / 爬塔中回看，同一颗页元件、另一份数据源与按钮层。
        * `overlay` = 盖在挑战页上的一层（不拆底页，返回时不重开挑战页 / 不刷新敌人）。 */
-      friend: o.friend || null, backTo: o.backTo || null, overlay: !!o.overlay };
+      friend: o.friend || null, hero: o.hero || null, backTo: o.backTo || null, overlay: !!o.overlay };
     if (o.friend) setTextByName(view, 'playerName', String(o.friend.name || ''));
     /* 页面装好了再让 `main.js` 量一次布局（见 ui-main.js 里同一处的注释：
      * 经典整页是 320×196，`#ui` 的高度在 716.625 / 690 之间切，不重量就会"屏幕边缘失去填充"）。 */
@@ -1757,7 +2497,7 @@
     /* 主属性**标签**：原版 `showFriendInfoWin` 按 `_loc2.type` 选"敏捷+/力量+/生命+/速度+"
      * 的四个分支，并把文案写进 `_loc4[type]` —— 也就是**部位号同时就是那四个标签的下标**
      * （0 头巾=敏捷 / 1 手套=力量 / 2 衣服=生命 / 3 鞋=速度，见 `State.gearInst` 的 attrName）。
-     * 数值优先读 `g.attr`（实例上 roll 过 ±10% 的主属性），再退字典基准值。 */
+     * 数值优先读 `g.attr`（实例上 roll 过 ±5% 的主属性），再退字典基准值。 */
     const GEAR_STAT_LABEL = ['敏捷', '力量', '生命', '速度'];
     const baseText = (ty, g) => {
       if (!g) return '';
@@ -2097,12 +2837,100 @@
   const GEAR_NAME_COLS = 4;
   let gearPage = null;      // { host, view, page, detail }
 
+  /* ---- 勇者模式：经典「更换装备」页的数据源 ----
+   * 用户 2026-10-24 口径：勇者的换装页就是**玩家自己的更换装备页**（4673 第 3 帧），
+   * 装备也用经典装备 UI；区别只有两点：
+   *   ① 列表是**全部 288 件**，按稀有度 → 套装 → 部位排，不是玩家的背包；
+   *   ② 所有装备的主属性 / 附加属性 / 宝石一律 0 加成，只改变外观。
+   * 这里把 `hero.gearList`（tower-ui 的 `heroGearCatalog()` 摊平结果）补成 `State.gearInst`
+   * 那种完整对象，并把数值字段清零；列表 / 详情 / 纸娃娃都复用玩家页的绘制函数。 */
+  function heroGearSlots() {
+    const hero = Hero();
+    const slots = [0, 0, 0, 0];
+    for (const raw of ((hero && hero.appearance) || [])) {
+      const item = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
+      const id = Number(item.id);
+      if (!(id > 0)) continue;
+      let type = Number.isFinite(Number(item.type)) ? Number(item.type) : NaN;
+      if (!Number.isInteger(type) && window.State && State.gearPart) type = Number(State.gearPart(id));
+      if (Number.isInteger(type) && type >= 0 && type <= 3 && !slots[type]) slots[type] = id;
+    }
+    return slots;
+  }
+  function heroGearRows() {
+    const hero = Hero();
+    if (!hero) return [];
+    const slots = heroGearSlots();
+    const sig = slots.join(',');
+    if (hero.__gearRowsSig === sig && Array.isArray(hero.__gearRows)) return hero.__gearRows;
+    const worn = new Set(slots.filter((id) => id > 0).map(Number));
+    const base = Array.isArray(hero.gearList) ? hero.gearList : [];
+    const rows = base.map((it) => {
+      const id = Number(it && it.id);
+      let inst = null;
+      try { inst = (id > 0 && State.gearInst) ? State.gearInst(id) : null; } catch (e) { inst = null; }
+      const g = Object.assign({}, inst || {}, it || {});
+      g.key = 'hero:' + id;
+      g.id = id;
+      g.type = Number(it && it.type != null ? it.type : g.type);
+      if (!Number.isFinite(g.type) && State.gearPart) g.type = Number(State.gearPart(id));
+      g.quality = Math.max(0, Math.min(5, Number(it && it.quality != null ? it.quality : g.quality) || 0));
+      g.setId = Number(it && it.setId != null ? it.setId : g.setId) || 0;
+      g.name = String((it && it.name) || g.name || '');
+      g.attrName = String((inst && inst.attrName) || g.attrName || '');
+      g.useLevel = Math.max(1, Number((inst && inst.useLevel) || g.useLevel) || 1);
+      /* 勇者模式的外观件：主属性 / 附加属性 / 宝石全部 0。 */
+      g.abilityVal = 0;
+      g.ext = [];
+      g.gem = null;
+      g.used = worn.has(id);
+      return g;
+    }).filter((g) => Number(g.id) > 0 && Number.isInteger(Number(g.type)));
+    hero.__gearRows = rows;
+    hero.__gearRowsSig = sig;
+    return rows;
+  }
+  /** 在勇者装备页里穿 / 脱一件外观；回调把最终外观交回 tower-ui（本局草稿或 run.hero）。 */
+  function heroGearEquip(id, equip) {
+    const hero = Hero();
+    if (!hero) return false;
+    const gearId = Number(id);
+    const rows = heroGearRows();
+    const target = rows.find((g) => Number(g.id) === gearId);
+    if (!target) return false;
+    const slots = heroGearSlots();
+    const type = Number(target.type);
+    if (!Number.isInteger(type) || type < 0 || type > 3) return false;
+    if (equip) slots[type] = gearId;
+    else if (Number(slots[type]) === gearId) slots[type] = 0;
+    const next = [];
+    for (const slotId of slots) {
+      if (!(slotId > 0)) continue;
+      const g = rows.find((x) => Number(x.id) === Number(slotId));
+      if (g) next.push({ id: g.id, type: g.type, quality: g.quality, ext: [] });
+    }
+    const out = typeof hero.onEquip === 'function' ? hero.onEquip(next) : next;
+    if (Array.isArray(out)) hero.appearance = out;
+    /* 状态页立绘立刻跟上（换装层是盖在它上面的）。 */
+    try { if (current && current.view) fillValues(current.view); } catch (e) {}
+    return true;
+  }
   function gearListOf() {
+    if (heroView()) return heroGearRows();
     try { return State.gearsInDisplayOrder ? State.gearsInDisplayOrder() : State.myGears() || []; } catch (e) { return []; }
   }
   /** 身上穿的（原版 `getMyWearList()`：按类型取第一件 `isWear == "true"` 的）。 */
   function gearWornOf() {
     const out = [null, null, null, null];
+    if (heroView()) {
+      const rows = heroGearRows();
+      heroGearSlots().forEach((id, type) => {
+        if (!(id > 0)) return;
+        out[type] = rows.find((g) => Number(g.id) === Number(id)) ||
+          { id: Number(id), type: type, quality: 0, ext: [] };
+      });
+      return out;
+    }
     try {
       for (const g of (State.myGears() || [])) {
         const ty = Number(g.type);
@@ -2113,8 +2941,18 @@
   }
   function gearNameText(g) {
     const C = window.UI && UI.classic;
-    try { if (C && C.gearName) return C.gearName(Number(g.id)); } catch (e) {}
-    return String((g && g.name) || '');
+    let fallback = '';
+    try {
+      if (C && C.gearName) {
+        const name = C.gearName(Number(g.id));
+        /* hero 外观池里 q5 黑装上位 / 深海·机器猫 q3 不在 gearMap，
+         * 经典 `gearName` 会退回「装备<id>」；这时优先用 heroGearRows 带进来的真名，
+         * 真名也没有（字典缺条目）才保留原来的「装备N」兜底。 */
+        if (name && !/^装备\s*\d+$/.test(String(name))) return name;
+        fallback = String(name || '');
+      }
+    } catch (e) {}
+    return String((g && g.name) || '') || fallback;
   }
   /** 装备名折行：`t_1..t_6` 一行 4 个字，最多两行（框高 28 ≈ 两行 12 号字）。 */
   function gearNameLines(name) {
@@ -2223,7 +3061,9 @@
     const q = gear.orange === true ? 4 : Math.max(0, Math.min(5, Number(gear.quality) || 0));
     const levels = table[String(q)];
     if (!levels) return null;
-    const lv = ((Number(gear.type) === 0 || Number(gear.type) === 1) && q > 1 && q < 5)
+    /* 头 / 手套的强化档：黑套（q5）里 46/47/67~72 只有无数字的 `<名字>黑`，
+     * 其余黑套（格斗…诅咒）和紫 / 橙一样有 `<名字>黑1~3`；缺档时下面统一回退到 '0'。 */
+    const lv = ((Number(gear.type) === 0 || Number(gear.type) === 1) && q > 1)
       ? gearExtMaxLevel(gear) : 0;
     return levels[String(lv)] || levels['0'] || levels['1'] || levels['2'] || levels['3'] || null;
   }
@@ -2311,7 +3151,7 @@
     const ui = document.getElementById('ui');
     if (!ui) return null;
     const el = document.createElement('section');
-    el.className = 'classic-home ssfight-home ssfight-sub';
+    el.className = 'classic-home ssfight-home ssfight-sub ssfight-view';
     el.setAttribute('aria-label', '我的装备');
     ui.appendChild(el);
     return el;
@@ -2334,6 +3174,7 @@
       const v = current && current.view;
       if (v && v.setStaticPolicy) T().setStaticPolicy(v, {});
       if (current && current.view) fillValues(current.view);
+      if (heroView()) refreshHeroChrome();
     } catch (e) {}
   }
   /** 挂第 3 帧（列表）或第 4 帧（详情）。两页共用同一个宿主，来回切就是"换一层"。 */
@@ -2407,7 +3248,19 @@
       if (!g) continue;
       gearArtIn(clip, g, GEAR_SLOT_ART, GEAR_SLOT_MID, GEAR_SLOT_MID, 0.85);
     }
-    setTextByName(view, 't_count', '容量' + list.length + '/' + State.gearCapacity());
+    setTextByName(view, 't_count', heroView()
+      ? ('外观' + list.length + '件')
+      : ('容量' + list.length + '/' + State.gearCapacity()));
+    /* 顶部那句提示（4673 f3 深度 85，没有实例名）：玩家页保留原版「附加属性不叠加」，
+     * 勇者页改成「只改变造型、全部 0 加成」—— 装备数值在这里被清零，不能再让玩家误会。
+     * 这颗文本字段没有 `na`、也不在 `view.nodes` 的具名表里，直接按 SVG 文本内容改。 */
+    if (heroView() && view.root && view.root.querySelectorAll) {
+      for (const node of view.root.querySelectorAll('text')) {
+        if (String(node.textContent || '').indexOf('附加属性效果不叠加') >= 0) {
+          node.textContent = '外观装备只改变造型，全部属性 0 加成！';
+        }
+      }
+    }
     /* `left`/`right`：不可翻时原版是 `_visible = false`（不是切禁用帧）。 */
     const canPrev = page > 0, canNext = page < pages - 1;
     stopAt(clipOf(view, 'left'), canPrev ? 1 : 2);
@@ -2479,6 +3332,7 @@
   /** 橙装 / 黑装都可镶嵌；旧的最小 State 桩没有 canSocketGem 时退回 quality>3。 */
   const canSocketGear = (gear) => (State.canSocketGem ? State.canSocketGem(gear) : Number(gear && gear.quality) > 3);
   function currentGearByKey(key) {
+    if (heroView()) return heroGearRows().find((g) => String(g.key) === String(key)) || null;
     try { return (State.myGears() || []).find((g) => String(g.key) === String(key)) || null; } catch (e) { return null; }
   }
   async function openGearDetail(key) {
@@ -2493,6 +3347,7 @@
   /** 逐条照 `doShowEquipInfo()`（:7895-7972）。 */
   function fillGearDetail(view, g) {
     const t = T();
+    const hero = Hero();
     const ty = Math.max(0, Math.min(3, Number(g.type) || 0));
     /* `b_on`：`isWear == "true"` → 第 2 帧（已穿 → 按下去是"卸下"），否则第 1 帧。 */
     stopAt(clipOf(view, 'b_on'), g.used ? 2 : 1);
@@ -2500,34 +3355,47 @@
      * 非橙装停第 3 帧（原版 `showStone = false`，那一档是灰的）。
      * ⚠ 外层 `b1`（4590）的第 2 帧只是**换成另一颗带「已镶嵌」字样的按钮**（内层 4589），
      * 绿色高亮档在内层按钮自己的第 2 帧（3152 绿底）；只拨外层会得到一张灰/米色的
-     * 「已镶嵌」——用户 2026-10 口径："已镶嵌那个位置选中后要变绿"。 */
+     * 「已镶嵌」——用户 2026-10 口径："已镶嵌那个位置选中后要变绿"。
+     * 勇者模式没有宝石 / 出售：两颗键整颗藏掉，只留「装备 / 卸下」与「返回」。 */
     const b1 = clipOf(view, 'b1');
-    const canGem = canSocketGear(g);
-    stopAt(b1, canGem ? (g.gem ? 2 : 1) : 3);
-    if (canGem && b1 && b1.byName) {
-      const inner = b1.byName('b1');
-      if (inner) stopAt(inner, g.gem ? 2 : 1);
+    const sell = clipOf(view, 'b_sell');
+    if (b1 && b1.g) b1.g.style.display = hero ? 'none' : '';
+    if (sell && sell.g) sell.g.style.display = hero ? 'none' : '';
+    if (!hero) {
+      const canGem = canSocketGear(g);
+      stopAt(b1, canGem ? (g.gem ? 2 : 1) : 3);
+      if (canGem && b1 && b1.byName) {
+        const inner = b1.byName('b1');
+        if (inner) stopAt(inner, g.gem ? 2 : 1);
+      }
     }
     const name = clipOf(view, 't_name');
     if (t && name) t.setText(name, gearNameText(g));
     setGearTextColor(name, g.quality);
     setTextByName(view, 'type', GEAR_DETAIL_PART[ty]);
-    setTextByName(view, 'level', Math.max(1, Math.round(Number(g.useLevel) || 1)));
-    setTextByName(view, 'base', String(g.attrName || '') + '+' + Math.max(0, Math.round(Number(g.abilityVal) || 0)));
-    /* `baseExtra`：宝石加成（原版 `if (stoneId > 100) " +N%"`）。 */
-    let gemText = '';
-    if (g.gem) {
-      let lv = 0;
-      try { lv = State.gemLevel ? State.gemLevel(g.gem.id) : 0; } catch (e) { lv = 0; }
-      if (lv > 0) gemText = ' +' + State.gemPercent(lv) + '%';
+    setTextByName(view, 'level', hero ? '不限' : Math.max(1, Math.round(Number(g.useLevel) || 1)));
+    setTextByName(view, 'base', hero ? '0 加成'
+      : (String(g.attrName || '') + '+' + Math.max(0, Math.round(Number(g.abilityVal) || 0))));
+    if (hero) {
+      setTextByName(view, 'baseExtra', '');
+      setTextByName(view, 'baseOther', '');
+      setTextByName(view, 'baseOtherExtra', '');
+    } else {
+      /* `baseExtra`：宝石加成（原版 `if (stoneId > 100) " +N%"`）。 */
+      let gemText = '';
+      if (g.gem) {
+        let lv = 0;
+        try { lv = State.gemLevel ? State.gemLevel(g.gem.id) : 0; } catch (e) { lv = 0; }
+        if (lv > 0) gemText = ' +' + State.gemPercent(lv) + '%';
+      }
+      setTextByName(view, 'baseExtra', gemText);
+      /* 附加属性两列（原版 `getAttachmentDesList`）：说明一列有数据，`extraStr` 那列复刻的字典里没有，
+       * 所以**留空**（素材自带作者占位串，必须写空，不能留着）。 */
+      let des = [];
+      try { des = State.extText(g.ext) || []; } catch (e) { des = []; }
+      setTextByName(view, 'baseOther', des.join('\n'));
+      setTextByName(view, 'baseOtherExtra', '');
     }
-    setTextByName(view, 'baseExtra', gemText);
-    /* 附加属性两列（原版 `getAttachmentDesList`）：说明一列有数据，`extraStr` 那列复刻的字典里没有，
-     * 所以**留空**（素材自带作者占位串，必须写空，不能留着）。 */
-    let des = [];
-    try { des = State.extText(g.ext) || []; } catch (e) { des = []; }
-    setTextByName(view, 'baseOther', des.join('\n'));
-    setTextByName(view, 'baseOtherExtra', '');
     /* 图标位：`subFrame1.c1.attachMovie(convertLink(装备)).gotoAndStop(1)`。 */
     const cell = clipOf(view, 'c1');
     if (cell && cell.detachAll) {
@@ -2538,8 +3406,10 @@
   function wireGearDetail(view, key) {
     const t = T();
     if (!t || !view) return;
-    const backToList = () => { void mountGearFrame(GEAR_FRAME_LIST).then(() => renderGearPage()); };
-    /* 装 / 卸：原版 `changeEquip(chooseWz)` —— 走 `State` 那一套规则，不在这里另算数值。 */
+    const hero = Hero();
+    const backToList = () => { if (gearPage) gearPage.detail = null; void mountGearFrame(GEAR_FRAME_LIST).then(() => renderGearPage()); };
+    /* 装 / 卸：原版 `changeEquip(chooseWz)` —— 走 `State` 那一套规则，不在这里另算数值。
+     * 勇者模式：同一颗「装备 / 卸下」键，改的是本局外观（tower-ui 的 onEquip 落盘）。 */
     const onClip = clipOf(view, 'b_on');
     wireClickable(onClip, {
       hover: 0, press: 0,
@@ -2547,6 +3417,16 @@
       onFire: () => {
         const g = currentGearByKey(key);
         if (!g) { backToList(); return; }
+        if (hero) {
+          if (!heroGearEquip(g.id, !g.used)) {
+            if (window.UI && UI.toast) UI.toast('这件外观暂时不能更换。');
+            return;
+          }
+          /* 用户 2026-10-24 口径：确认穿戴 / 卸下后回到上一界面（装备列表），
+           * 不要停在详情页。列表重填后小勾 / 纸娃娃会立刻反映新外观。 */
+          backToList();
+          return;
+        }
         if (g.used) { State.unwear(key); }
         else if (State.wear(key) === false) { if (window.UI && UI.toast) UI.toast('等级不足，暂时无法装备'); return; }
         /* 原版 `showEquips(pageNum1); showWears(); showFace(zhuangtai, …)` 之后仍停在详情页。 */
@@ -2566,26 +3446,28 @@
       onClip.g.addEventListener('mouseenter', () => setGreen(true));
       onClip.g.addEventListener('mouseleave', () => setGreen(false));
     }
-    /* 出售：原版先弹「二次确认」（第 6 帧的 `price` + 两颗键）。复刻的确认框沿用同一套 DOM 弹窗。 */
-    wireClickable(clipOf(view, 'b_sell'), {
-      hover: 2, press: 2, idle: 1,
-      onFire: () => askSellEquipFromDetail(key, backToList),
-    });
-    /* 宝石：原版 `showStoneWin()` → 有宝石走拆卸、没有走镶嵌。
-     * 外层 `b1` 只负责「镶嵌 / 已镶嵌 / 灰」三档；绿色反馈与点击都挂**当前内层按钮**
-     * （镶嵌 4586 / 已镶嵌 4589），内层第 2 帧才是原版绿底。已镶嵌时 idle 也取第 2 帧，
-     * 所以镶上后那颗键保持绿色（选中态），不是只在鼠标悬停时才绿。 */
-    const b1Outer = clipOf(view, 'b1');
-    const b1Inner = b1Outer && b1Outer.byName ? (b1Outer.byName('b1') || b1Outer) : b1Outer;
-    wireClickable(b1Inner, {
-      hover: 2, press: 2,
-      idle: () => {
-        const g = currentGearByKey(key);
-        if (!g || Number(g.quality) <= 3) return 3;
-        return g.gem ? 2 : 1;
-      },
-      onFire: () => { askGemFromDetail(key); },
-    });
+    if (!hero) {
+      /* 出售：原版先弹「二次确认」（第 6 帧的 `price` + 两颗键）。复刻的确认框沿用同一套 DOM 弹窗。 */
+      wireClickable(clipOf(view, 'b_sell'), {
+        hover: 2, press: 2, idle: 1,
+        onFire: () => askSellEquipFromDetail(key, backToList),
+      });
+      /* 宝石：原版 `showStoneWin()` → 有宝石走拆卸、没有走镶嵌。
+       * 外层 `b1` 只负责「镶嵌 / 已镶嵌 / 灰」三档；绿色反馈与点击都挂**当前内层按钮**
+       * （镶嵌 4586 / 已镶嵌 4589），内层第 2 帧才是原版绿底。已镶嵌时 idle 也取第 2 帧，
+       * 所以镶上后那颗键保持绿色（选中态），不是只在鼠标悬停时才绿。 */
+      const b1Outer = clipOf(view, 'b1');
+      const b1Inner = b1Outer && b1Outer.byName ? (b1Outer.byName('b1') || b1Outer) : b1Outer;
+      wireClickable(b1Inner, {
+        hover: 2, press: 2,
+        idle: () => {
+          const g = currentGearByKey(key);
+          if (!g || Number(g.quality) <= 3) return 3;
+          return g.gem ? 2 : 1;
+        },
+        onFire: () => { askGemFromDetail(key); },
+      });
+    }
     wireClickable(clipOf(view, 'b_back'), { hover: 2, onFire: backToList });
   }
   /** 详情页的出售确认（文案照原版 `showSellWin` 的 `price` 字段："出售该装备可获得N个金松果，确定要继续么？"）。 */
@@ -2652,16 +3534,20 @@
   /** 打开「更换装备」这一页（原版 `showEquipsWin()`）。 */
   async function openGearsPage() {
     if (!current || !current.view) return false;
-    /* 5 级换装：先把随机白装发进背包，再挂页；教程沿用原版 13→14→15→22，不另盖层。 */
-    if (window.SfGuide && SfGuide.onGears) { try { SfGuide.onGears(); } catch (e) { if (window.__errs) window.__errs.push('guide gears: ' + (e && e.message)); } }
+    /* 勇者模式：同一页原版换装，只是列表 / 纸娃娃 / 详情换成勇者外观；不跑新手换装引导。 */
+    if (!heroView()) {
+      /* 5 级换装：先把随机白装发进背包，再挂页；教程沿用原版 13→14→15→22，不另盖层。 */
+      if (window.SfGuide && SfGuide.onGears) { try { SfGuide.onGears(); } catch (e) { if (window.__errs) window.__errs.push('guide gears: ' + (e && e.message)); } }
+    }
     /* 先收掉可能开着的武器 / 技能详情层，避免两层叠在一起。 */
     if (current.detail) destroyItemDetailOnly();
     if (!gearPage) gearPage = { host: null, view: null, page: 0, detail: null };
     gearPage.page = 0;
     gearPage.highlight = null;
     /* 有「刚拿到的装备」就直接翻到它所在页 + 高亮：融合产物追加在背包末尾，
-     * 每次从第 1 页打开的话玩家在屏幕上根本看不到它（「融合完找不到装备」）。 */
-    if (pendingGearFocus) {
+     * 每次从第 1 页打开的话玩家在屏幕上根本看不到它（「融合完找不到装备」）。
+     * 勇者换装没有背包焦点，从第 1 页（黑装第一套）开始。 */
+    if (!heroView() && pendingGearFocus) {
       const list = gearListOf();
       const at = list.findIndex((g) => String(g.key) === String(pendingGearFocus));
       if (at >= 0) {
@@ -2672,12 +3558,15 @@
     }
     const view = await mountGearFrame(GEAR_FRAME_LIST);
     if (!view) return false;
+    const host = gearPageHost();
+    if (host) host.setAttribute('aria-label', heroView() ? '更换装备' : '我的装备');
     renderGearPage();
     return true;
   }
   /** 记下「刚拿到的装备」，下一次打开「更换装备」直接落到它那一页并高亮。
    *  返回 { page, pages }（页号从 1 开始，给提示文案用）；找不到返回 null。 */
   function focusGear(key) {
+    if (heroView()) return null;
     if (key == null || key === '') return null;
     const list = gearListOf();
     const at = list.findIndex((g) => String(g.key) === String(key));
@@ -2726,7 +3615,7 @@
     const ui = document.getElementById('ui');
     if (!ui) return null;
     const el = document.createElement('section');
-    el.className = 'classic-home ssfight-home ssfight-sub';
+    el.className = 'classic-home ssfight-home ssfight-sub ssfight-view';
     el.setAttribute('aria-label', '装备融合');
     ui.appendChild(el);
     return el;
@@ -2756,7 +3645,7 @@
     const ui = document.getElementById('ui');
     if (!ui) return null;
     const el = document.createElement('section');
-    el.className = 'classic-home ssfight-home ssfight-sub';
+    el.className = 'classic-home ssfight-home ssfight-sub ssfight-view';
     el.setAttribute('aria-label', '装备融合浮层');
     ui.appendChild(el);
     fusionOver = { host: el, view: null };
@@ -2827,11 +3716,20 @@
     const root = view && (view.g || view);
     if (!root || !root.querySelectorAll) return;
     /* 第一次按原画稿文字找；改过之后原文字已经不在了，用自己打的标记认。
-     * 否则第二次调用（换材料 / 同套提示切换）会找不到这一组、提示永远停在第一句。 */
-    const prompt = root.querySelector('g[data-fusion-prompt="1"]') || [...root.querySelectorAll('g')].find((g) => {
-      const txt = String(g.textContent || '').replace(/\s+/g, '');
-      return txt.indexOf('请先放入') >= 0 && txt.indexOf('装备') >= 0;
-    });
+     * 否则第二次调用（换材料 / 同套提示切换）会找不到这一组、提示永远停在第一句。
+     * ⚠ 找过一次就把节点记在视图上：`textContent` 会把整棵子树拼成字符串，
+     *  对每个 `<g>` 都调一遍是 O(n²)，移动端换一次材料就要几十毫秒。 */
+    let prompt = view.__fusionPrompt;
+    if (!prompt || prompt.isConnected === false || !root.contains(prompt)) {
+      prompt = root.querySelector('g[data-fusion-prompt="1"]');
+      if (!prompt) {
+        for (const g of root.querySelectorAll('g')) {
+          const txt = String(g.textContent || '').replace(/\s+/g, '');
+          if (txt.indexOf('请先放入') >= 0 && txt.indexOf('装备') >= 0) { prompt = g; break; }
+        }
+      }
+      view.__fusionPrompt = prompt || null;
+    }
     if (!prompt) return;
     prompt.setAttribute('data-fusion-prompt', '1');
     const glyphs = [...prompt.querySelectorAll('text')];
@@ -3238,6 +4136,36 @@
       }
       return p;
     },
+    /** 勇者模式的状态页（准备 / 爬塔中回看）：
+     *  与 `openFriend()` 同一颗页元件 7218，数据源换成 `hero.stats / appearance / picks`。
+     *  `opts.overlay === false` = 直接从 `#ui` 另起一页（准备页）；true = 盖在当前塔页上。
+     *  `hero` 里的回调：`onPicks(list)` / `onGears()` / `onStart()` / `onBack()`。 */
+    openHero: (hero, opts) => {
+      const o = opts || {}, ui = document.getElementById('ui');
+      if (!ui) return Promise.resolve(false);
+      if (!o.overlay) ui.innerHTML = '';
+      const host = document.createElement('section');
+      /* `ssfight-view`：盖在塔页（`.classic-page`）上时，classic.css 的
+       * `#ui:has(.classic-page) .classic-home:not(.ssfight-view){display:none}` 才不会把这层藏掉。 */
+      host.className = 'classic-home ssfight-home sf-friend-view sf-hero-view ssfight-view';
+      host.setAttribute('aria-label', o.label || '勇者');
+      ui.appendChild(host);
+      const p = open(host, { hero: hero, overlay: true });
+      if (p && typeof p.then === 'function') {
+        return p.then((ok) => {
+          if (!ok && host && host.parentNode) host.parentNode.removeChild(host);
+          return ok;
+        }, (err) => {
+          if (host && host.parentNode) host.parentNode.removeChild(host);
+          throw err;
+        });
+      }
+      return p;
+    },
+    /** 当前状态页的宿主（调试 / 外部入口用）。 */
+    container: () => (current ? current.container : null),
+    /** 「更换装备」这一层的视图（调试 / 探针用；没开时为 null）。 */
+    gearView: () => (gearPage ? gearPage.view : null),
     /** 「查看装备」（原版 `friendEquipsInfo()`）：在**当前这一页上盖一层**，
      *  不拆状态页 —— 返回就回他的状态页。挑战页的 `SfChallenge.showFriendGears` 走这里。 */
     showFriendGears: () => { try { openFriendGearsOverlay(); return true; } catch (e) { if (window.__errs) window.__errs.push('friendGears: ' + (e && e.message)); return false; } },
@@ -3303,7 +4231,7 @@
         detail: gearPage.detail, frame: (gearPage.view.frame | 0) + 1 };
     },
     destroy: destroy,
-    refresh: () => { if (current) { fillValues(current.view); if (current.tab !== 'status') applyTab(); } },
+    refresh: () => { if (current) { fillValues(current.view); if (current.tab !== 'status') applyTab(); else if (heroView()) refreshHeroChrome(); } },
     view: () => (current ? current.view : null),
     current: () => (current ? { tab: current.tab, friend: current.friend ? { name: current.friend.name, level: current.friend.level } : null } : null),
     /** 最近一次 open() 停在哪一步（调试 / 探针） */

@@ -75,7 +75,7 @@ test('四项占比：低于门槛（20%）必须加那一项，正好等于门�
   s.power = 40; s.agility = 30; s.speed = 25; s.maxHp = 50;
   assert.equal(g.State.forcedStat(), 'hp');
   assert.ok(Math.abs(g.State.statShares().hp - 0.05) < 1e-9);
-  // 生命按 10 点 = 1 点属性折算
+  // 生命按 5 点 = 1 点属性折算
   s.power = 30; s.agility = 30; s.speed = 30; s.maxHp = 300;
   const sh = g.State.statShares();
   for (const key of ['power', 'agility', 'speed', 'hp']) assert.ok(Math.abs(sh[key] - 0.25) < 1e-9, key + ' 25%');

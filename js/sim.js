@@ -89,6 +89,15 @@
     /* 题面·蚀骨：玩家每次出手叠 1 层「攻击 −3%」，这个上限同时被代码与 NPC 文案使用 ——
      * 抽成常量，免得一边改、另一边忘（此前 10 层写在两处）。 */
     erodeMax: 15,
+    /* 速度行动条的连续出手上限（用户 2026-10 口径）：速度再高、行动条攒得再快，
+     * 同一方最多连续行动 5 次；第 6 次必须轮到另一方，不能无限先手。 */
+    maxConsecutiveActions: 5,
+    /* 闪避率的最终上限（百分点）。藏品里的 C22 闪避精通 / G03 凌波微步 / T02 烟幕
+     * 可以叠出远高于 100% 的展示值，但真正掷骰时只到这里；面板也按这个上限显示。 */
+    dodgeCap: 55,
+    /* 暴击率最终上限（百分点，隐藏规则）：溢出的暴击率按 1:1 加进暴击伤害。
+     * 不写进卡面 / 面板说明，属于战斗结算口径。 */
+    critCap: 70,
   });
   /* ============================================================
    * sim 真正实现了战斗效果的主动技能。
@@ -264,6 +273,7 @@
       /* 技能冷却（id → 还要等几次出手；见 RULES.skillCooldown）。 */
       skillCd: {},
       effects: f.effects || {}, masterLevel: Math.max(0, Number(f.masterLevel) || 0),
+      heroTrueBase: !!f.heroTrueBase,
       // 攻略.md 的裸属性解释与 PPT 的含装备解释冲突。本版采用前者，
       // callers provide growth stats excluding equipment, skills and pills.
       // Older fighter snapshots lack this field, so retain their recorded stats.
@@ -280,6 +290,12 @@
        * （受到武器攻击额外承受的百分比）；`petDotPlus` / `petHealCut` 是中了张牙舞爪 /
        * 三聚氰胺之后的持续标记；`petNextCrit` 是打兴奋剂给的下一次必暴。 */
       pets, petRagePct, petDodgeHeal, petUsed: {},
+      /* 濒死（装死）触发的幻兽技能**按技能 id** 记「一场一次」。
+       * 原版 `petsSkills` 每条技能的最后一列 `maxTimes` 对逆向推倒 / 回光术都是 1，
+       * 而装死是所有该技能幻兽在同一瞬间一起判定 —— 旧实现按**队伍槽位**记（`petUsed`），
+       * 带 3 只回光术就会连回 3 次。用户 2026-10-24 口径（对齐 ssfight）：
+       * 同一个濒死技能一场只结算一次，即使队伍里带多只同名幻兽。 */
+      petSkillUsed: {},
       petWeakPct: 0, petDotPlus: false, petHealCut: false, petNextCrit: false,
       petSealWeapons: {}, petSealSkills: {},
       /* 装死之后要补发的幻兽协战（逆向推倒 / 回光术），在下一次循环开头结算。 */
@@ -536,6 +552,12 @@
   const trueLvOf = (level) => (window.GData && GData.trueLevel ? GData.trueLevel(level) : Math.max(0, Math.min(5, (Number(level) || 0) - 10)));
   const trueVal = (id, level) => (window.GData && GData.trueSkillValue ? GData.trueSkillValue(id, level) : 0);
   const trueW = (w, key) => (window.GData && GData.trueWeaponBonus ? GData.trueWeaponBonus(w, key) : 0);
+  /* 勇者专属：武技真化后的白值乘数（真1~4 ×1.5，真5 ×2）。 */
+  const trueBaseMul = (level) => {
+    const lv = Math.max(1, Math.min(15, Math.floor(Number(level) || 1)));
+    return lv >= 15 ? 2 : lv >= 11 ? 1.5 : 1;
+  };
+  const heroBaseMul = (att, level) => att && att.heroTrueBase ? trueBaseMul(level) : 1;
   // 沉默之斧保留四项基础属性技，抑制其余主动、被动及防御技能。
   function skill(c, id) { return c.silence > 0 && id > 4 ? 0 : c.skills[id] || 0; }
   /** 武器基础效果：1~10 级按每级增长；真化部分的追加效果由 `trueW()` **固定一次**叠加，
@@ -544,7 +566,23 @@
     return base + perLevel * (Math.min(w.level, 10) - 1);
   }
   /** 塔 buff 的暴击伤害加成（比例）＋ 套装收益的暴击伤害。 */
-  function critDmgBonus(att) { return ((att.mods && Number(att.mods.critDmgBonus) || 0) + setFx(att, 'critDmgBonus')) / 100; }
+  /** 暴击率原始值（未钳制）：基础 + 暴击技能 + 塔 buff + 套装。 */
+  function rawCritChance(att) {
+    let c = 5;
+    if (skill(att, 9)) c += 2 * skill(att, 9);                  // 暴击
+    if (att.mods && att.mods.critBonus) c += Number(att.mods.critBonus);   // 塔 buff「鹰眼」
+    c += setFx(att, 'critBonus');                               // 套装收益（拳斗 / 狂战套）
+    return c;
+  }
+  /** 隐藏口径：暴击率上限 70%；超出的部分 1:1 转成暴击伤害。 */
+  function critOverflow(att) {
+    return Math.max(0, rawCritChance(att) - RULES.critCap);
+  }
+  function critDmgBonus(att) {
+    const base = ((att.mods && Number(att.mods.critDmgBonus) || 0) + setFx(att, 'critDmgBonus')) / 100;
+    /* 1 个百分点溢出 = +1 个百分点暴击伤害（这里统一换算成倍率的小数）。 */
+    return base + critOverflow(att) / 100;
+  }
 
   function pickOne(list) { return list[Math.floor(Math.random() * list.length)]; }
   /** 「本场没用过」的基准权重；用过的按各自的二次使用概率降权，所以一用再用会被明显压掉。 */
@@ -694,15 +732,11 @@
     if (def.mods && def.mods.dodgeBonus) d += Number(def.mods.dodgeBonus);   // 塔 buff「凌波微步」（加算）
     if (def.mods && def.mods.dodgeMul) d *= 1 + Number(def.mods.dodgeMul);   // 塔 buff「烟幕」：闪避率 ×(1+n)
     d += setFx(def, 'dodgeBonus');                                           // 套装收益（忍者套等）
-    return clamp(d, 0, 55);
+    return clamp(d, 0, RULES.dodgeCap);
   }
 
   function critChance(att) {
-    let c = 5;
-    if (skill(att, 9)) c += 2 * skill(att, 9);                  // 暴击
-    if (att.mods && att.mods.critBonus) c += Number(att.mods.critBonus);   // 塔 buff「鹰眼」
-    c += setFx(att, 'critBonus');                               // 套装收益（拳斗 / 狂战套）
-    return c;
+    return clamp(rawCritChance(att), 0, RULES.critCap);
   }
 
   /**
@@ -941,6 +975,11 @@
     function applyDamage(att, def, rawDmg, r, opts) {
       opts = opts || {};
       const action = opts.action || r.action;
+      /* 勇者武技真化白值：只放大该招式的基础伤害，不进入三维。
+       * 武器白值已在 TowerHero.fighter 里乘过，这里只处理技能。 */
+      if (att.heroTrueBase && action === 'skill') {
+        rawDmg = Math.round(rawDmg * heroBaseMul(att, att.skills[Number(r.id)]));
+      }
       if (att.mods && att.mods.dmgMul) rawDmg = Math.round(rawDmg * Number(att.mods.dmgMul));   // 塔 buff 伤害乘区（猎侠者/机制破解/精英杀手等，tower.js 按对手预算好）
       const setDmgMul = 1 + setFx(att, 'dmgMul');                                                 // 套装收益的伤害乘区（挑斗/维京/诅咒套）
       if (setDmgMul !== 1) rawDmg = Math.round(rawDmg * setDmgMul);
@@ -1297,7 +1336,10 @@
       if (target.petAfterFakeDie) flushPetReactions(target, actor, pushRound);
       return true;
     }
-    /** 装死之后补发逆向推倒 / 回光术；可以多只同时触发（各自一场一次）。 */
+    /** 装死之后补发逆向推倒 / 回光术；**同一技能一场只结算一次**。
+     *  原版 `petsSkills` 里 maxTimes=1 是按技能记的，所以带 3 只回光术不会回 3 次；
+     *  不同技能（例如一只逆向推倒 + 一只回光术）仍然各触发一次。
+     *  取队伍顺序里第一只满足条件的（与原版“上阵顺序优先”一致）。 */
     function flushPetReactions(owner, foe, pushRound) {
       if (!owner || !owner.petAfterFakeDie || owner.hp <= 0) return false;
       owner.petAfterFakeDie = false;
@@ -1305,7 +1347,9 @@
         if (owner.petUsed[pet.slot]) continue;
         const rule = petRule(pet.skillId);
         if (!rule || !rule.onFakeDie) continue;
+        if (owner.petSkillUsed[pet.skillId]) continue;
         owner.petUsed[pet.slot] = true;
+        owner.petSkillUsed[pet.skillId] = true;
         const r = petRoundBase(owner, pet, rule);
         const value = petValue(pet.skillId, pet.level);
         if (rule.kind === 'damage') petDirectDamage(owner, foe, value, r);
@@ -1624,7 +1668,7 @@
         let raw = R(w.lo, w.hi);
         raw = Math.round(raw * (1 + effPower(att) / 120));       // 力量加成
         // 武器好手是额外固定伤害，不随被菜刀削弱的力量一起下降。
-        if (skill(att, 5)) raw += GData.passiveBonus(5, skill(att, 5)) * (1 + effect(att, 31) / 100);
+        if (skill(att, 5)) raw += (GData.passiveBonus(5, skill(att, 5)) * heroBaseMul(att, skill(att, 5))) * (1 + effect(att, 31) / 100);
         raw = Math.round(raw * (1 + (effect(att, w.type === '投掷' ? 7 : 6) + (w.id <= 15 ? effect(att, w.id + 11) : 0)) / 100));
         // 闪亮登场：强化期内的那几次武器，攻击再 +N%
         if (boosted) {
@@ -1652,6 +1696,7 @@
         const antiCrit = trueVal(10, def.skills[10]);
         let cc = critChance(att) * (1 - antiCrit);
         if (w.id === 11) cc += weaponEffect(w, 20, 2, 3) + trueW(w, 'crit');   // 激光剑（真级 +3% 暴击）
+        cc = clamp(cc, 0, RULES.critCap);
         if (att.petNextCrit) {
           att.petNextCrit = false;
           let mult = 2 + (Math.random() < 0.5 ? 0 : 1) + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att);
@@ -1739,7 +1784,11 @@
             const raw = Math.round((R(15, 25) + 7 * (lv - 1)) * (1 + effect(att, 33) / 100));
             if (chance(dodgeChance(att, def))) { att.mustHitNext = false; markDodge(r, def); break; }
             applyDamage(att, def, raw, r, {});
-            if (def.hp > 0 && !r.fakeDie) {
+            /* ⚠ 「风影身法」这类**在 applyDamage 里才落 r.dodge** 的闪避，上面的
+             * `dodgeChance` 预判是抓不到的（那一次已经算命中并进了伤害链）。
+             * 二次判定必须再看一次 r.dodge —— 否则动画显示闪避，眩晕 / 脱装却照样挂上：
+             * 用户实测「妖狐魅惑被闪避后仍然被卸甲」就是这一条。 */
+            if (def.hp > 0 && !r.fakeDie && !r.dodge) {
               def.stun = Math.max(def.stun, petDotRounds(def, 1)); r.stunApplied = true;
               const stripPct = trueVal(8, lv) * 100;
               if (stripPct > 0 && chance(stripPct)) {
@@ -1760,7 +1809,7 @@
           }
           case 14: { // 小宇宙爆发
             att.usedCosmos = true;
-            const cosmosPct = (Math.min(lv, 10) + trueVal(14, lv)) / 100;
+            const cosmosPct = ((Math.min(lv, 10) + trueVal(14, lv)) / 100) * heroBaseMul(att, lv);
             for (const [key, id] of [['power', 36], ['agility', 37], ['speed', 38]]) {
               att.buffFlat[key] = Math.max(1, att.baseStats[key] * cosmosPct) + effect(att, id);
             }
@@ -1775,7 +1824,8 @@
             break;
           }
           case 17: { // 来点松果：满血时不会进候选池；二次及以后权重 1
-            const heal = Math.min(att.maxHp - att.hp, healOf(att, (20 + 2 * (Math.min(lv, 10) - 1) + trueVal(17, lv)) * Math.max(1, effect(att, 40))));
+            const healBase = (20 + 2 * (Math.min(lv, 10) - 1) + trueVal(17, lv)) * Math.max(1, effect(att, 40));
+            const heal = Math.min(att.maxHp - att.hp, healOf(att, healBase * heroBaseMul(att, lv)));
             att.hp += heal;
             r.healSelf = heal; r.noDmg = true; r.actAgain = true;
             break;
@@ -1869,6 +1919,9 @@
 
     // ---- 主循环：速度行动条 ----
     let immediate = null;
+    /* 只统计**行动条正常选出的出手**（不含小宇宙 / 装死这种 immediate 追加行动）：
+     * 同一方连续 5 次后，第 6 次强制推进给另一方。 */
+    let lastApActor = null, apRun = 0;
     while (A.hp > 0 && B.hp > 0 && actions < actionCap) {
       const followup = immediate;
       let actor = followup && followup.actor;
@@ -1884,8 +1937,26 @@
             const elapsed = Math.min((100 - A.ap) / effSpeed(A), (100 - B.ap) / effSpeed(B));
             A.ap += elapsed * effSpeed(A); B.ap += elapsed * effSpeed(B);
           }
-          actor = A.ap >= B.ap ? A : B;
+          let pick = A.ap >= B.ap ? A : B;
+          /* 速度领先只允许连续出手 5 次：行动条本来会继续让快的一方抢拍，
+           * 这里在连续第 5 次之后把时间推进到「另一方满 100」，并确保另一方真的出手。
+           * 先手方同一段时间内也会涨，但压在 99，避免它下一拍又立刻抢回去。 */
+          if (pick === lastApActor && apRun >= RULES.maxConsecutiveActions) {
+            const other = pick === A ? B : A;
+            const gap = Math.max(0, 100 - other.ap);
+            if (gap > 0) {
+              const elapsed = gap / effSpeed(other);
+              other.ap += elapsed * effSpeed(other);
+              pick.ap += elapsed * effSpeed(pick);
+            }
+            other.ap = Math.max(other.ap, 100);
+            if (pick.ap >= 100) pick.ap = 99;
+            pick = other;
+          }
+          actor = pick;
           actor.ap -= 100;
+          if (actor === lastApActor) apRun++;
+          else { lastApActor = actor; apRun = 1; }
         }
       }
       actions++;
@@ -2040,6 +2111,10 @@
      * 传两个战斗体：att = 攻击方、def = 挨打方（守方敏捷、移形换位、木剑/流星锤、
      * 凌波微步/烟幕等全部在这一个函数里结算）。 */
     dodgeChanceOf: (att, def) => dodgeChance(att, def),
+    /* 暴击率 / 暴击伤害的唯一出口（供测试直接核对 70% 上限与 1:1 溢出转化）。 */
+    critChanceOf: (att) => critChance(att),
+    critDmgBonusOf: (att) => critDmgBonus(att),
+    critCap: RULES.critCap,
     /* 低血减伤的即时结算（纯函数）—— 供测试直接核对分段口径 */
     lowHpTakenDamage,
     defenseCaps: { again: BOOSTED_AGAIN_CAP, first: BOOSTED_FIRST_CAP },

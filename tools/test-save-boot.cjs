@@ -185,6 +185,7 @@ function loadGame(gameDir, opts) {
   const store = new Map();
   if (opts.localSave) store.set('ssdz_save_v1', JSON.stringify(opts.localSave));
   if (opts.localBase != null) store.set('ssdz_save_v1_base', String(opts.localBase));
+  if (opts.localPending) store.set('ssdz_save_v1_pending', '1');
   if (opts.uiMode) store.set('ssdz_ui_mode', String(opts.uiMode));
   const removed = [];
   const dom = fakeDom();
@@ -255,12 +256,13 @@ function loadGame(gameDir, opts) {
   `, ctx, { filename: 'stubs.js' });
 
   const loadErrors = [];
-  for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', 'js/main.js']) {
+  for (const f of ['js/gamedict.js', 'js/gamedata.js', 'js/tower-data.js', 'js/state.js', ...(opts.stateOnly ? [] : ['js/main.js'])]) {
     const file = path.join(ROOT, f);
     if (!fs.existsSync(file)) continue;
     try { vm.runInContext(fs.readFileSync(file, 'utf8'), ctx, { filename: f }); }
     catch (e) { loadErrors.push(f + ': ' + (e && e.message)); }
   }
+  if (opts.saveTransport) ctx.State.setSaveTransport(opts.saveTransport);
   // main.js 的 boot 挂在 DOMContentLoaded 上，这里补触发一次（桩 DOM 不会自己发事件）。
   let bootError = null;
   // main.js 把 boot 挂在 window 的 DOMContentLoaded 上，桩 DOM 不会自己发事件，这里补触发。
@@ -293,6 +295,122 @@ const EXTERNAL_GAME = process.env.SSDZ_GAME_ROOT || '';
 const results = [];
 function record(name, fn) { results.push([name, fn]); }
 
+record('原生保存串行确认：旧回包不清新进度，后台失败保留镜像并可重试', async () => {
+  let fileAt = Date.now(), disk = JSON.stringify(SAVE_32), active = 0, peak = 0;
+  const writes = [], tick = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+  const transport = {
+    probe: async () => ({ ok: true, exists: true, savedAt: fileAt, maxLevel: JSON.parse(disk).level }),
+    read: async () => ({ exists: true, savedAt: fileAt, data: disk }),
+    write: (body, opts) => new Promise((resolve, reject) => {
+      active++; peak = Math.max(peak, active);
+      writes.push({ body, opts, fail() { active--; reject(new Error('native IO failed')); },
+        done() { active--; disk = body; fileAt++; resolve({ ok: true, savedAt: fileAt }); } });
+    }),
+  };
+  const g = loadGame(ROOT, { stateOnly: true, saveTransport: transport });
+  await g.ctx.State.fileLoad();
+  g.ctx.State.state().goldPoint = 101; g.ctx.State.save();
+  const first = g.ctx.State.fileWriteNow(); await tick();
+  g.ctx.State.state().goldPoint = 102; g.ctx.State.save();
+  const paused = g.ctx.State.flushFileWrite(); await tick();
+  assert.equal(writes.length, 1, 'onPause 不得抢在未完成的保存前并发写盘');
+  writes[0].done(); await first;
+  assert.equal(g.ctx.State.fileInfo().dirty, true, '旧回包只能确认旧版本');
+  assert.equal(JSON.parse(g.store.get('ssdz_save_v1')).goldPoint, 102);
+  assert.equal(g.ctx.State.localSaveMeta().base, fileAt, '最新镜像要衔接刚确认的磁盘版本');
+  await tick(); writes[1].fail(); await paused;
+  assert.equal(g.ctx.State.fileInfo().dirty, true, '真实 invoke reject 后仍待写');
+  assert.match(g.ctx.State.fileInfo().error, /native IO failed/);
+  const retry = g.ctx.State.flushFileWrite(), duplicate = g.ctx.State.flushFileWrite();
+  await tick(); writes[2].done(); await Promise.all([retry, duplicate]);
+  assert.equal(peak, 1); assert.equal(writes.length, 3, '重复隐藏事件应复用成功确认');
+  assert.equal(JSON.parse(disk).goldPoint, 102);
+  assert.equal(g.ctx.State.fileInfo().dirty, false);
+  assert.equal(g.ctx.State.hasLocalSave(), false, '已确认版本才可退休镜像');
+  // 显式导入也排在正在写入的旧版本之后，保持 force 语义。
+  g.ctx.State.state().goldPoint = 103; g.ctx.State.save();
+  const old = g.ctx.State.fileWriteNow(); await tick();
+  const imported = g.ctx.State.importFileRaw(JSON.stringify(SAVE_LOCAL_1)); await tick();
+  assert.equal(writes.length, 4);
+  writes[3].done(); await old; await tick();
+  assert.equal(writes[4].opts.force, true);
+  writes[4].done(); assert.equal((await imported).ok, true);
+  assert.equal(JSON.parse(disk).level, 1);
+  await g.ctx.State.fileLoad();
+  g.ctx.State.state().goldPoint = 7; g.ctx.State.save();
+  const continued = g.ctx.State.flushFileWrite(); await tick();
+  writes[5].done(); assert.equal((await continued).ok, true, '导入后普通保存不能被旧水位拦住');
+  assert.equal(JSON.parse(disk).goldPoint, 7);
+  // 首次安装迁移同样只能退休已确认版本，取消的加载也不能报成功。
+  let finishMigration, migrationWrites = 0;
+  const fresh = loadGame(ROOT, { stateOnly: true, localSave: SAVE_32, saveTransport: {
+    probe: async () => ({ ok: true, exists: false, savedAt: 0 }),
+    read: async () => ({ exists: false }),
+    write: () => ++migrationWrites === 1 ? new Promise((resolve) => { finishMigration = resolve; })
+      : Promise.resolve({ ok: true, savedAt: fileAt + 2 }),
+  } });
+  const request = {}, migration = fresh.ctx.State.fileLoad(request); await tick();
+  fresh.ctx.State.state().goldPoint = 999; fresh.ctx.State.save(); request.cancelled = true;
+  finishMigration({ ok: true, savedAt: fileAt + 1 });
+  assert.equal(await migration, false);
+  assert.equal(fresh.ctx.State.fileInfo().dirty, true);
+  assert.equal(JSON.parse(fresh.store.get('ssdz_save_v1')).goldPoint, 999, '迁移旧回包不能另行删除最新镜像');
+  await fresh.ctx.State.flushFileWrite();
+});
+
+record('强杀后的待写镜像可恢复毫秒内进度，只接受同一磁盘 base 并兼容旧镜像', async () => {
+  for (const mode of ['pending', 'changed-base', 'legacy-stale', 'legacy-newer', 'unread-fallback']) {
+    const fileAt = Date.now(), local = Object.assign({}, SAVE_32, {
+      goldPoint: 999, savedAt: fileAt + (mode === 'legacy-newer' ? 2000 : 10),
+    });
+    let disk = JSON.stringify(SAVE_32);
+    const writtenGold = [];
+    const transport = {
+      probe: async () => ({ ok: true, exists: true, savedAt: fileAt, maxLevel: 32 }),
+      read: async () => ({ exists: true, savedAt: fileAt, data: disk }),
+      write: async (body) => { writtenGold.push(JSON.parse(body).goldPoint); disk = body; return { ok: true, savedAt: fileAt + 20 }; },
+    };
+    const unread = mode === 'unread-fallback';
+    const g = loadGame(ROOT, { stateOnly: unread, localSave: local, localBase: unread ? null : fileAt + (mode === 'changed-base' ? 1 : 0),
+      localPending: mode === 'pending' || mode === 'changed-base', saveTransport: transport });
+    if (unread) {
+      await g.ctx.State.fileProbe(); g.ctx.State.load(); g.ctx.State.save();
+      assert.equal(g.ctx.State.localSaveMeta().base, null, '只探到 mtime 不能为未读过文件的兜底档认领 base');
+      await g.ctx.State.fileLoad(); await g.ctx.State.flushFileWrite();
+    } else await sleep(250);
+    const recovered = mode === 'pending' || mode === 'legacy-newer';
+    assert.equal(g.ctx.State.state().goldPoint, recovered ? 999 : SAVE_32.goldPoint, mode);
+    assert.ok(writtenGold.every((gold) => gold === (recovered ? 999 : SAVE_32.goldPoint)), mode + ' 不得用异源/已过时镜像覆盖文件');
+    assert.equal(g.ctx.State.hasLocalSave(), false, mode + ' 成功后应清理已确认或失效镜像');
+  }
+});
+
+record('启动读档超时后旧请求不能覆盖操作，手动与桥接重试共用一次读档', async () => {
+  const reads = [], fileAt = Date.now() - 10000;
+  const transport = {
+    probe: async () => ({ ok: true, exists: true, savedAt: fileAt, maxLevel: 32 }),
+    read: () => new Promise((resolve) => reads.push(resolve)),
+    write: async () => ({ ok: true, savedAt: fileAt + 1 }),
+  };
+  const g = loadGame(ROOT, { localSave: Object.assign({}, SAVE_32, { goldPoint: 999 }), saveTransport: transport });
+  for (let i = 0; i < 100 && reads.length < 2; i++) await sleep(10);
+  assert.equal(reads.length, 2, '启动请求超时后只发起一次重试');
+  assert.equal(g.ctx.State.state().goldPoint, 999);
+  g.ctx.State.state().goldPoint = 1000; g.ctx.State.save();
+  g.dispatchWindow('ssdz-save-transport-ready'); g.dispatchWindow('ssdz-save-transport-ready');
+  const banner = g.dom.document.body.querySelector('#save-warning');
+  const clicked = banner.children[1].onclick();
+  await sleep(10); assert.equal(reads.length, 2, '按钮/桥接事件不得另开并发重试');
+  reads[0]({ exists: true, savedAt: fileAt, data: JSON.stringify(SAVE_32) });
+  await sleep(10);
+  assert.equal(g.ctx.State.state().goldPoint, 1000, '失效请求不能覆盖超时后的操作');
+  assert.equal(g.ctx.State.fileLoadedThisBoot(), false, '旧回包不能冒充本次有效读档');
+  assert.equal(g.pages.filter((p) => p === 'reload').length, 0);
+  reads[1]({ exists: true, savedAt: fileAt, data: JSON.stringify(SAVE_32) });
+  await clicked; await sleep(30);
+  assert.equal(g.pages.filter((p) => p === 'reload').length, 1, '只有有效重试完成后重载一次');
+});
+
 record('磁盘 32 级 + 残留 1 级 localStorage → 必须载入 32 级，并清掉残留档', async () => {
   const game = makeGameCopy();
   const srv = startServer(game);
@@ -317,6 +435,21 @@ record('磁盘 32 级 + 残留 1 级 localStorage → 必须载入 32 级，并�
   assert.equal(w.ok, true, '自动保存必须成功：' + JSON.stringify(w));
   const disk = JSON.parse(fs.readFileSync(path.join(game, 'save', 'progress.json'), 'utf8'));
   assert.equal(disk.goldPoint, st.goldPoint, '改动必须写进磁盘存档');
+  srv.kill();
+  fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
+});
+
+/* 这批的启动优化：经典界面的战斗走 `SfFight`（SVG），现代 canvas 战斗那 80 多张图
+ *（约 27 MB）不该再拖住首屏。以前 boot 里 `race(battleLoad, 2500ms)`，素材越多首屏越慢；
+ * 现在只有现代界面会在首页挂好后空闲补拉，经典界面直接跳过。 */
+record('经典界面启动不预热 canvas 战斗图集（现代战斗专用，约 27 MB）', async () => {
+  const game = makeGameCopy();
+  const srv = startServer(game);
+  await srv.ready;
+  const g = loadGame(game, { port: () => PORT, uiMode: 'classic' });
+  await sleep(1200);
+  assert.equal(g.ctx.Main.battleAssetsReady(), false,
+    '经典模式启动时不该拉 canvas 战斗图集（由 Main.preloadBattleAssets 显式触发）');
   srv.kill();
   fs.rmSync(game, { recursive: true, force: true, maxRetries: 5, retryDelay: 120 });
 });

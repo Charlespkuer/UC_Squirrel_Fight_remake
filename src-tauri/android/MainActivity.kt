@@ -73,8 +73,9 @@ class MainActivity : TauriActivity() {
 
   /** 解冻：恢复 JS 计时器与渲染，再让页面把音乐接回原来的位置。 */
   private fun thawWebView() {
-    if (!frozen) return
     try {
+      /* pauseTimers 是进程级状态，frozen 只是这个 Activity 的记账。
+       * Activity 重建后 frozen 会归零，仍必须恢复上一个实例暂停的计时器。 */
       gameWebView?.resumeTimers()
       gameWebView?.onResume()
     } catch (_: Exception) {
@@ -106,7 +107,13 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onDestroy() {
+    lifecycleSeq++
     ui.removeCallbacksAndMessages(null)
+    /* 保证同进程内重建 Activity 时不把全局计时器留在暂停状态。 */
+    try { gameWebView?.resumeTimers() } catch (_: Exception) {}
+    frozen = false
+    gameWebView = null
+    exportBridge = null
     super.onDestroy()
   }
 
@@ -127,6 +134,9 @@ class MainActivity : TauriActivity() {
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
     gameWebView = webView
+    /* WebView 可能晚于 onResume 创建，不能只依赖 Activity 的恢复回调。 */
+    webView.resumeTimers()
+    frozen = false
     val bridge = AndroidExportBridge(this) { gameWebView }
     exportBridge = bridge
     webView.addJavascriptInterface(bridge, "SSDZAndroid")

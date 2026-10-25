@@ -426,6 +426,24 @@ Node 依赖及专用构建缓存。只有远程构建成功、版本和下载完
 
 出包：
 
+Mac 上日常发版可以用一键命令（会自动 patch 版本、构建两种包、企业签名，并把 `dist` 里除两个签名包外的 `.ipa` 全部删掉）：
+
+```bash
+bash scripts/一键打包IPA.command             # 双击也可以
+bash scripts/一键打包IPA.command --dry-run   # 先看目标版本 / 构建号 / 产物，不构建
+bash scripts/一键打包IPA.command --version 1.0.6
+bash scripts/一键打包IPA.command --no-bump
+```
+
+它产出（每个版本只保留这两个签名包）：
+
+- `squirrel_fight_<version>_ios_signed.ipa`：iOS 25–26（modern / UIScene）；
+- `squirrel_fight_<version>_ios_legacy_signed.ipa`：iOS 16–24（legacy）。
+
+构建号默认取 `dist` 里现有 IPA 的最大 `CFBundleVersion` + 1（最低 110），避免 iOS 因 build 号没有递增而拒绝覆盖安装；可用 `--build N` 指定。构建或签名失败会回滚版本文件并保留旧包，只有两个新包都验签通过后才清理旧 `.ipa`。
+
+手动分步：
+
 ```bash
 node tools/build-ios.cjs --check   # 只检查环境
 node tools/build-ios.cjs           # iOS 26/27（带 UIScene）
@@ -469,6 +487,48 @@ AppDelegate 生命周期；两个包的前端与二进制完全相同，只有 I
   系统页的 JSON 导出/导入仍可用。
 - 这是 WebView 套壳；以后要上 App Store 需按 Guideline 4.2 补原生功能/内容，并准备无 alpha 的
   App Store 图标与隐私清单。未签名 IPA 只适合 sideload 分发。
+
+### 企业证书被吊销 / 存档救援（2026-10-23 实例）
+
+`src-tauri/10月20日企业证书` 这张 RAKUTEN 证书在 **2026-10-23 16:05 UTC 被 Apple 置为
+revoked（certificateHold）**。本地与 GitHub 上的 1.0.5 签名包 `codesign --verify --deep --strict`
+都通过、SHA-256 逐字节一致，但 iOS 仍然拒绝安装/启动 —— 问题不在打包，在证书状态。
+描述文件本身也会在 **2026-11-05** 到期，所以即使 Apple 解除 hold，也只剩几天。
+
+签名前先查 OCSP（`tools/sign-ios.cjs` 已内置，吊销会直接退出；`--no-ocsp` 只用于离线排障）：
+
+```bash
+openssl pkcs12 -in "src-tauri/10月20日企业证书/先导入.p12" -passin 'pass:…' \
+  -nokeys -clcerts -legacy > /tmp/leaf.pem
+openssl x509 -inform der -in /Applications/Xcode.app/Contents/SharedFrameworks/AssetRuntime/DVTFoundation.framework/Versions/A/Resources/AppleWWDRCA-2030.cer -out /tmp/wwdr.pem
+openssl ocsp -issuer /tmp/wwdr.pem -cert /tmp/leaf.pem \
+  -url http://ocsp.apple.com/ocsp03-wwdrg301 -resp_text -noverify
+```
+
+**旧版存档还在手机上**：企业版 App 的数据容器是
+`<container>/Library/Application Support/com.ssdz.classic/save/progress.json`，
+旁边还有 `progress.bak.json`；证书吊销不会删除容器。玩家**不要删除 App**（删除会删容器）。
+取出方式：
+
+- Xcode → Devices and Simulators → Installed Apps → Download Container，得到 `.xcappdata`；
+- 或命令行（设备要开开发者模式、解锁、已配对）：
+  ```bash
+  xcrun devicectl list devices
+  xcrun devicectl device copy from --device <UDID> \
+    --domain-type appDataContainer \
+    --domain-identifier jp.co.rakuten-sec.iSPEED.Pushnotification.widgetapp.widgetkitextension \
+    --source . --destination ~/Downloads/松鼠大战容器
+  ```
+- 或 Finder/iTunes 本地备份（不要加密）+ 安装仓库里的
+  `rescue/ios-save-rescue.cjs`（`--container` / `--backup` / `--file`；默认输出推荐档 + 报告）。
+- 取出 `.json` 后放进新版本的 `Documents/`（「文件」App 可见），游戏里「系统 → 导入存档 → 存档列表」导入。
+
+**换新证书时想自动保留旧存档**：新描述文件必须是通配符（`*`）或明确包含旧 Bundle ID，
+用 `node tools/sign-ios.cjs --profile <新.mobileprovision> --p12 <新.p12> --identity "…" \
+--bundle-id jp.co.rakuten-sec.iSPEED.Pushnotification.widgetapp.widgetkitextension` 重签，
+递增 `CFBundleVersion`，覆盖安装到旧 App 上。同 Bundle ID 覆盖安装通常保留数据容器，
+但换 Team 后是否保留要以一台真机实测为准；不放心就先让玩家导出/救援存档再升级。
+公开分发不要再依赖企业证书：网页版 / PWA、TestFlight 或 App Store 才是可持续路径。
 
 ## J. 前端要改吗
 

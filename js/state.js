@@ -231,7 +231,7 @@
       gearKeys.add(key);
       const used = g.used === true && info.useLevel <= next.level && !usedSlots.has(info.type);
       if (used) usedSlots.add(info.type);
-      /* attr：本件装备的主属性点（基准 ±10% 的 roll 结果）。老档没这个字段时按基准值补。 */
+      /* attr：本件装备的主属性点（基准 ±5% 的 roll 结果）。老档没这个字段时按基准值补。 */
       const entry = { id: info.id, key, used, ext: normalizeExt(g.ext),
         attr: integer(g.attr, 0, 0) || info.attrBase };
       if (g.orange === true) entry.orange = true;
@@ -402,7 +402,17 @@
      * 形状只做浅校验：非负整数、不超过当前时间（未来时间会让红点再也不亮）。 */
     next.msgSeenAt = Math.min(Date.now(), integer(next.msgSeenAt, 0, 0));
     // 好友：只保留名字合法的条目，等级夹在 1~满级，最多 20 位
+    /* 同名好友只留第一位：老档 / 早期联机存档里出现过重复名字（用户 2026-10-24 口径：
+     * "我不希望可以添加具有重复名字的好友"）。这里在**读档**时就归一，
+     * 已有重复项不会继续显示成两行；`addFriend` 也会在写入前再挡一次。 */
+    const friendNames = new Set();
     next.friends = (Array.isArray(raw.friends) ? raw.friends : []).filter((f) => object(f) && typeof f.name === 'string' && f.name.trim())
+      .filter((f) => {
+        const name = String(f.name).trim().slice(0, 20);
+        if (!name || friendNames.has(name)) return false;
+        friendNames.add(name);
+        return true;
+      })
       .slice(0, FRIEND_LIMIT).map((f) => ({
         name: String(f.name).trim().slice(0, 20),
         level: Math.max(1, Math.min(MAX_PLAYER_LEVEL, integer(f.level, 1, 1))),
@@ -1564,9 +1574,10 @@
       clampProps();
       clampPermanentStats();
       S.savedAt = Date.now();
+      saveRevision++;
       if (storageMode() === 'file' || saveTransport) {
-        writeMirror();
         fileState.dirty = true;
+        writeMirror();
         scheduleFileWrite();
         return true;
       }
@@ -1607,6 +1618,14 @@
   const LEGACY_KEY = SAVE_KEY;                       // 旧的 localStorage 存档键
   const fileState = { available: false, transportReady: false, checked: false, code: 0, fileAt: 0, fileExists: false, fileLevel: 0, fileReborn: 0, fileBackup: false, lastProbe: 0, error: '', reason: '', lastWrite: 0, lastLoad: 0, lastRead: 0, lastReadErr: '', conflict: false, dirty: false, freshLocal: false, forceWrite: false, path: 'save/progress.json' };
   let fileTimer = 0;
+  let saveRevision = 0;
+  let fileLoadGeneration = 0;
+  let fileWriteTail = Promise.resolve();
+  function queueFileWrite(write) {
+    const task = fileWriteTail.then(write, write);
+    fileWriteTail = task.catch(() => {});
+    return task;
+  }
   /** 一份存档里的最高等级（双槽取两槽最大；服务端水位线用同一套口径）。 */
   function payloadMaxLevel(obj) {
     if (!object(obj)) return 0;
@@ -1651,13 +1670,14 @@
   /** 当前进度存在哪里：'file'（save/progress.json）或 'local'（浏览器兜底）。 */
   function storageMode() { return !testMode && fileState.available ? 'file' : 'local'; }
   function forgetLegacy() {
-    try { localStorage.removeItem(LEGACY_KEY); localStorage.removeItem(LEGACY_KEY + '_sync'); localStorage.removeItem(LEGACY_KEY + '_base'); } catch (e) {}
+    try { localStorage.removeItem(LEGACY_KEY); localStorage.removeItem(LEGACY_KEY + '_sync'); localStorage.removeItem(LEGACY_KEY + '_base'); localStorage.removeItem(LEGACY_KEY + '_pending'); } catch (e) {}
   }
   /** 浏览器兜底档是不是「更新且等级不低于文件里这份」——换机器/双机同步后本机没跟上时，
    * 它就是玩家真正的最新进度，不能当成残留垃圾悄悄删掉（交给 fileWrite 的冲突保护处理）。 */
   function localSaveWorthKeeping(fileAt) {
     const local = localSaveMeta();
     if (!local) return false;
+    if (local.pending && local.base === Number(fileAt)) return true;
     const fileLevel = (S && S.level) || 1;
     return local.savedAt > (Number(fileAt) || 0) + 1000 && local.level >= fileLevel;
   }
@@ -1690,9 +1710,13 @@
        * 要留给玩家手动导入。同级（正常连点几下）照写，否则文件一直写失败时镜像会停旧。 */
       const old = localSaveMeta();
       const fileAt = Number(fileState.fileAt) || 0;
-      if (old && old.savedAt > fileAt + 1000 && old.level > (Number(S.level) || 1)) return false;
-      localStorage.setItem(SAVE_KEY, JSON.stringify(savePayload()));
-      localStorage.setItem(SAVE_KEY + '_base', String(fileAt));
+      const payload = savePayload();
+      if (old && old.savedAt > fileAt + 1000 && old.level > payloadMaxLevel(payload)) return false;
+      // 只探到 mtime、尚未读过文件时，不能把兜底档冒认为基于该文件的新进度。
+      const base = !fileState.lastRead && fileState.fileExists ? (old && old.base != null ? old.base : '') : fileAt;
+      localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
+      localStorage.setItem(SAVE_KEY + '_base', String(base));
+      localStorage.setItem(SAVE_KEY + '_pending', '1');
       return true;
     } catch (e) { return false; }
   }
@@ -1741,9 +1765,10 @@
       const baseRaw = localStorage.getItem(SAVE_KEY + '_base');
       const base = baseRaw == null || baseRaw === '' ? null : Number(baseRaw);
       return {
-        level: Math.max(1, integer(parsed.level, 1, 1)),
+        level: Math.max(1, payloadMaxLevel(parsed)),
         savedAt: Number(parsed.savedAt) || 0,
         base: Number.isFinite(base) ? base : null,
+        pending: localStorage.getItem(SAVE_KEY + '_pending') === '1',
       };
     } catch (e) { return null; }
   }
@@ -1813,20 +1838,32 @@
    * 读主存档：文件优先，没有文件就把 localStorage 里的老档迁进去。
    * 返回 true 表示内存里已经有可玩的进度。
    */
-  async function fileLoad() {
+  async function fileLoad(request) {
+    const generation = ++fileLoadGeneration;
+    const current = () => generation === fileLoadGeneration && !(request && request.cancelled);
     if (!fileState.available) await fileProbe();
-    if (!fileState.available) return false;
+    if (!current() || !fileState.available) return false;
     fileState.lastRead = 0;
     fileState.lastReadErr = '';
     try {
       const info = saveTransport ? await saveTransport.read() : await (await fetch(SAVE_URL, { cache: 'no-store' })).json();
+      // 超时退回本地档后，迟到的旧读不能再改内存、镜像或读档确认状态。
+      if (!current()) return false;
       fileState.fileAt = Number(info.savedAt) || 0;
       fileState.fileLevel = Math.max(fileState.fileLevel, Math.max(0, integer(info.maxLevel, 0, 0)));
       fileState.fileReborn = Math.max(fileState.fileReborn, Math.max(0, integer(info.reborn, 0, 0)));
       fileState.fileBackup = !!info.backup || !!info.recoveredFrom;
       if (info.exists && info.data) {
-        const parsed = typeof info.data === 'string' ? JSON.parse(info.data) : info.data;
+        let parsed = typeof info.data === 'string' ? JSON.parse(info.data) : info.data;
         if (!object(parsed)) throw new Error('存档内容不是对象');
+        /* 先选上次未确认的同源镜像，再结算宝箱/每日刷新；这些初始化会 save，
+         * 若先载入旧文件，它们会把真正待恢复的同级进度覆盖掉。 */
+        const local = localSaveMeta();
+        if (local && local.base === fileState.fileAt && local.level >= payloadMaxLevel(parsed)
+          && (local.pending || local.savedAt > fileState.fileAt + 1500)) {
+          const mirror = JSON.parse(localStorage.getItem(SAVE_KEY));
+          if (object(mirror)) parsed = mirror;
+        }
         fileState.fileLevel = Math.max(fileState.fileLevel, payloadMaxLevel(parsed));
         fileState.fileReborn = Math.max(fileState.fileReborn, payloadReborn(parsed));
         const loaded = adoptPayload(parsed);
@@ -1855,12 +1892,12 @@
       }
       // 文件还不存在：把浏览器里的老档迁进来（只做一次）
       if (load()) {
-        const ok = await fileWrite(true);
-        if (ok.ok) forgetLegacy();     // 迁移：这份兜底档已经写进文件了
-        return true;
+        await fileWrite(true);   // 镜像仅由写入端按实际确认的版本清理。
+        return current();
       }
       return false;
     } catch (e) {
+      if (!current()) return false;
       fileState.lastReadErr = String((e && e.message) || e);
       fileState.error = fileState.lastReadErr;
       return false;
@@ -1891,16 +1928,22 @@
    *  iOS 的 `save_write` 没有 —— 这就是「存档在初始档与有进度的档之间横跳」的来源之一。
    *  现在 JS 先按 meta 里的最高等级拦一次，宿主的 save_write 还会再拦一次。
    *  `fileState.forceWrite`（只有调试面板「彻底重置账号」会设）是唯一允许主动降级的路径。 */
-  async function fileWrite(force) {
+  function fileWrite(force, options) {
+    const allowFreshOverwrite = fileState.forceWrite === true;
+    fileState.forceWrite = false;
+    return queueFileWrite(() => writeCurrentFile(force, allowFreshOverwrite, options || {}));
+  }
+  async function writeCurrentFile(force, allowFreshOverwrite, options) {
     if (testMode) return { ok: false, msg: '自检档不写正式存档' };
+    if (options.background && !fileState.dirty) return { ok: true, msg: '存档没有变化' };
+    fileState.dirty = true;
     if (!fileState.available) await fileProbe();
     if (!fileState.available) return { ok: false, msg: '存档写入不可用：' + (fileState.reason || '未知原因') };
-    const allowFreshOverwrite = fileState.forceWrite === true;
-    fileState.forceWrite = false;   // 只放行紧接着的这一次（重置/导入），不长期打开
     try {
       const meta = await probeMeta(!!force || allowFreshOverwrite);
       const fileAt = Number(meta.savedAt) || 0;
       const localAt = (S && S.savedAt) || 0;
+      const writtenRevision = saveRevision;
       const payload = savePayload();
       const body = JSON.stringify(payload);
       const incomingMax = payloadMaxLevel(payload);
@@ -1930,8 +1973,8 @@
         return { ok: false, conflict: true, msg: '存档文件更新（' + fmtTime(fileAt) + '），已跳过写入' };
       }
       const out = saveTransport ? await saveTransport.write(body, { force: allowFreshOverwrite })
-        : await (await fetch(SAVE_URL + (allowFreshOverwrite ? '?force=1' : ''), { method: 'POST', headers: { 'content-type': 'application/json' }, body })).json();
-      if (!out.ok) throw new Error(out.msg || '写入失败');
+        : await (await fetch(SAVE_URL + (allowFreshOverwrite ? '?force=1' : ''), { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: !!options.keepalive })).json();
+      if (!out || out.ok !== true) throw new Error((out && out.msg) || '写入失败');
       fileState.fileAt = Number(out.savedAt) || Date.now();
       fileState.fileExists = true;
       fileState.lastProbe = Date.now();
@@ -1939,15 +1982,22 @@
       /* 这一份就是刚写进去的内容，等价于“本次启动已经确认过文件”。 */
       if (!fileState.lastRead) fileState.lastRead = fileState.fileAt;
       fileState.conflict = false;
-      fileState.dirty = false;
+      fileState.dirty = saveRevision !== writtenRevision;
+      fileState.error = '';
       fileState.freshLocal = false;
       /* 写成功 = 磁盘上现在就是这份档，等级/转生次数都以它为准确值。
        * 不能保留旧的 40 级水位：转生后合法回到 1 级，下一笔 2 级存档会
        * 因为「2 < 40 且 reborn 没变」被自己的水位线误拦。 */
       fileState.fileLevel = incomingMax;
       fileState.fileReborn = incomingReborn;
-      // 刚写进去的就是当前进度；浏览器兜底档只在「更新且不低于当前等级」时才留着
-      forgetLegacyIfRedundant(fileState.fileAt);
+      // 旧回包只能确认它发出的版本；后续改动仍待写，并以刚确认的磁盘时间重建镜像。
+      if (fileState.dirty) writeMirror();
+      else {
+        let confirmedMirror = false;
+        try { confirmedMirror = localStorage.getItem(SAVE_KEY) === body; } catch (e) {}
+        if (confirmedMirror) forgetLegacy();
+        else forgetLegacyIfRedundant(fileState.fileAt);
+      }
       return { ok: true, msg: '已写入 ' + fileState.path, fileAt: fileState.fileAt };
     } catch (e) {
       fileState.error = String((e && e.message) || e);
@@ -1967,7 +2017,10 @@
     catch (e) { return null; }
   }
   /** 用导入的 JSON 原文覆盖正式存档（安装版/安卓走原生通道，带备份由调用方做）。 */
-  async function importFileRaw(raw) {
+  function importFileRaw(raw) {
+    return queueFileWrite(() => writeImportedFile(raw));
+  }
+  async function writeImportedFile(raw) {
     if (!saveTransport) return { ok: false, msg: '没有可用的存档通道' };
     try {
       let body = String(raw);
@@ -1983,6 +2036,18 @@
       /* 必须**明确**拿到 ok:true。iOS 的旧问题就是命令返回了空对象/非预期结果，
        * `out.ok === false` 放过了它，随后读回旧档还报「导入成功」。 */
       if (!out || out.ok !== true) return { ok: false, msg: (out && out.msg) || '原生存档通道没有确认写入成功' };
+      // force 导入允许合法降级；后续普通保存不能继续拿导入前的高等级水位拦新档。
+      fileState.fileAt = Number(out.savedAt) || fileState.fileAt;
+      fileState.fileExists = true;
+      fileState.fileLevel = payloadMaxLevel(parsed);
+      fileState.fileReborn = payloadReborn(parsed);
+      fileState.freshLocal = false;
+      fileState.lastProbe = Date.now();
+      fileState.lastWrite = Date.now();
+      fileState.conflict = false;
+      fileState.error = '';
+      // 显式导入已成为主档，即使 mtime 恰与旧 base 同毫秒，也不能再恢复旧镜像。
+      forgetLegacy();
       return { ok: true, savedAt: Number(out.savedAt) || 0 };
     } catch (e) {
       return { ok: false, msg: (e && e.message) || String(e) };
@@ -2007,7 +2072,7 @@
     if (!S || (storageMode() !== 'file' && !saveTransport) || typeof setTimeout !== 'function') return;
     fileState.dirty = true;
     if (fileTimer) clearTimeout(fileTimer);
-    fileTimer = setTimeout(() => { fileTimer = 0; void fileWrite(); }, 400);
+    fileTimer = setTimeout(() => { fileTimer = 0; void fileWrite(false, { background: true }); }, 400);
   }
   function flushFileWrite() {
     rememberUiMode();
@@ -2016,26 +2081,11 @@
     /* 先把同步镜像写掉：这一步不依赖 WebView 的异步桥（安卓上 onPause 之后的
      * evaluateJavascript / invoke 都可能被系统打断），进程即使随后被回收，
      * 下一次启动也能从镜像恢复（见 main.js boot 里 base 那一段）。 */
-    if (storageMode() === 'file' || saveTransport) writeMirror();
     if (!fileState.dirty) return;
+    if (storageMode() === 'file' || saveTransport) writeMirror();
     if (storageMode() !== 'file' && !saveTransport) return;
-    /* 文件存在但这次启动还没读进来时不要覆盖（例如桥接晚到、玩家刚进标题就切后台）。 */
-    if (saveTransport && !fileState.lastRead && fileState.fileAt > 0) return;
-    try {
-      const body = JSON.stringify(savePayload());
-      /* 移动端/桌面安装版没有 `/__save`（页面来自 tauri.localhost），必须走宿主的
-       * `saveTransport`；以前这里无条件 fetch('/__save')，退出/切后台的最后一次写盘
-       * 在安卓上必然 404，表现就是“刚玩的进度没保存”。 */
-      if (saveTransport) {
-        void saveTransport.write(body).then((out) => {
-          fileState.lastWrite = Date.now();
-          if (out && out.savedAt) fileState.fileAt = Number(out.savedAt) || fileState.fileAt;
-          fileState.dirty = false;
-        }).catch((e) => { fileState.error = String((e && e.message) || e); });
-        return;
-      }
-      if (typeof fetch === 'function') void fetch(SAVE_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: true });
-    } catch (e) {}
+    // 与防抖/立即保存共用队列、冲突保护和成功确认；隐藏事件重复到达也不并发写盘。
+    return fileWrite(false, { background: true, keepalive: true });
   }
   /* 原生壳（Android MainActivity.onPause）通过这个入口在切后台时立刻刷盘。
    * 不能只依赖 pagehide：Tauri Android WebView 在按 Home/被系统回收时不一定派发。 */
@@ -2370,16 +2420,15 @@
     const g = gearMap.getValue(id);
     return g ? parseInt(g.abilities.split(',')[parseInt(g.type)]) || 0 : 0;
   }
-  /* 每件装备的主属性带 ±10% 浮动：产出时（掉落/碎片合成/融合/商店）roll 一次写进实例，
+  /* 每件装备的主属性带 **±5%** 的小幅随机：产出时（掉落/碎片合成/融合/商店）roll 一次写进实例，
    * 所以同名装备的数值不再完全一样。老档没有 attr 字段时按基准值算。
-   * 用四舍五入而不是取整区间：基准 1/2/3 这种小数值不会因为 ±10% 就翻倍。 */
-  const GEAR_ATTR_JITTER = 0.1;
+   * 用四舍五入而不是取整区间：基准 1/2/3 这种小数值不会因为 ±5% 就翻倍。
+   * ⚠ 2026-10 用户口径：经典界面也重新启用这条随机（此前为了对齐原版 equipsArray 关掉了），
+   * 幅度从原来的 ±10% 收到 ±5% —— 两套界面现在是同一条规则。 */
+  const GEAR_ATTR_JITTER = 0.05;
   function rollGearAttr(id) {
     const base = gearBaseAttr(id);
     if (!base) return 0;
-    /* 经典模式对齐原版 equipsArray：装备主属性是固定值，不掷 ±10%。
-     * 现代模式保留旧手感（±10% 浮动），两套存档互不影响。 */
-    if (slotMode() === 'classic') return base;
     const factor = 1 - GEAR_ATTR_JITTER + Math.random() * GEAR_ATTR_JITTER * 2;
     return Math.max(1, Math.round(base * factor));
   }
@@ -3287,7 +3336,7 @@
     if ((t = has(2))) agility += GData.passiveBonus(2, t.level) * (1 + (effects[28] || 0) / 100);
     if ((t = has(3))) speed += GData.passiveBonus(3, t.level) * (1 + (effects[29] || 0) / 100);
     if ((t = has(4))) hp += GData.passiveBonus(4, t.level) * (1 + (effects[30] || 0) / 100);
-    // 药剂状态（挑战类战斗生效，关卡/竞技无效）
+    // 药剂状态（挑战 / 竞技场战斗生效；关卡、天梯赛不吃）
     if (opts.useProps !== false) {
       const st = S.propsStates || {};
       if (st[3] > 0) power += Math.max(Math.floor(power * 0.2), 5);
@@ -4158,12 +4207,24 @@
     save();
     return true;
   }
-  function tickPropStates() {
-    for (const k of Object.keys(S.propsStates)) {
-      if (S.propsStates[k] > 0) S.propsStates[k]--;
+  /* 药丸分两类：属性丸（力/敏/速，含超级版）与经验丸。属性丸现在**也参与竞技场战斗面板**
+   *（`Main.startBattle` 的 `useProps`，见 classic-extras 的竞技场调用），所以"扣次数"必须分开记：
+   *   · 一场竞技/挑战各扣 1 次属性丸（真的用到了属性加成）；
+   *   · 经验丸只在**发经验的那一刻**扣 —— 经验竞技场会扣，碎片/幻兽竞技场不发经验就不扣。 */
+  const STAT_PILL_IDS = [3, 4, 5, 41, 42, 43];
+  const EXP_PILL = { 7: 0.4, 44: 0.6 };   // 经验丸 40% / 超级经验丸 60%
+  /** 递减药丸剩余场次。`opts.kind`：`'stat'` 只扣属性丸 / `'exp'` 只扣经验丸 / 省略 = 全扣
+   *  （普通挑战一场两样都用到了，仍是一次全扣）。 */
+  function tickPropStates(opts) {
+    const kind = opts && opts.kind;
+    const keys = kind === 'stat' ? STAT_PILL_IDS
+      : kind === 'exp' ? Object.keys(EXP_PILL)
+        : Object.keys(S.propsStates);
+    for (const k of keys) {
+      if (Number(S.propsStates[k]) > 0) S.propsStates[k]--;
     }
   }
-  const EXP_PILL = { 7: 0.4, 44: 0.6 };   // 经验丸 40% / 超级经验丸 60%  /** 当前生效的经验加成百分比（经验丸 + 超级经验丸，可叠加）。 */
+  /** 当前生效的经验加成百分比（经验丸 + 超级经验丸，可叠加）。 */
   function expBoostPct() {
     let pct = 0;
     for (const id of Object.keys(EXP_PILL)) if (S.propsStates[id] > 0) pct += EXP_PILL[id] * 100;
@@ -4314,6 +4375,16 @@
     const name = foe && foe.name ? String(foe.name).trim().slice(0, 20) : '';
     if (!name) return { ok: false, msg: '好友信息无效' };
     if (friendOf(name)) return { ok: false, msg: '【' + name + '】已经是好友了' };
+    /* 师徒与好友是两份名单，但经典挑战页把它们排在**同一列**里 —— 同名再加一次
+     * 就会在好友页出现第二行完全一样的条目（用户 2026-10-24 口径：
+     * "不希望师徒除了在第一页显示，还会在之后的页面中再显示一次"）。
+     * 所以重名判据要连师徒一起看，而不只是 `friendOf`。 */
+    if (S.master && String(S.master.name || '').trim() === name) {
+      return { ok: false, msg: '【' + name + '】已经是你的师父了' };
+    }
+    if ((S.prentices || []).some((p) => p && String(p.name || '').trim() === name)) {
+      return { ok: false, msg: '【' + name + '】已经是你的徒弟了' };
+    }
     if (S.friends.length >= FRIEND_LIMIT) return { ok: false, msg: '好友已满（' + FRIEND_LIMIT + ' 位），先删掉几位吧' };
     S.friends.push({
       name,
@@ -4558,7 +4629,7 @@
    *     `stagePlayerStat/Hp`（三围 + 生命），它是由实测玩家均值标定的；
    *     低等级曲线会低于初始 22 点，所以再和 `22 + 4×(等级−1)` 取大。
    *   · 上限：同一等级一个**可达到的**高配玩家总属性：满成长 + 永久来源（金宝箱/神迹/天梯丸）
-   *     + 四件当前等级可穿的最好主属性装备（+10% 主属性浮动、按等级可用的最高宝石）
+   *     + 四件当前等级可穿的最好主属性装备（+5% 主属性浮动、按等级可用的最高宝石）
    *     + 四个被动技能当前可升到的最高等级。不含可无限重复购买的属性道具/幻兽，
    *     因此它是一个保守的“理论上限”，敌人不会超过真正的最深养成。
    * 两个上下限都随等级单调增长；随机对手在生成完成后按总属性夹到 [下限, 上限]。 */
@@ -4656,7 +4727,7 @@
     for (const row of (GData.GEAR_BASE || [])) {
       const baseAttr = Number(row && row[5]) || 0;
       if (!(baseAttr > 0)) continue;
-      const info = gearInst(row[0], [], Math.ceil(baseAttr * 1.1));   // 主属性 +10% 上限
+      const info = gearInst(row[0], [], Math.ceil(baseAttr * (1 + GEAR_ATTR_JITTER)));   // 主属性 +5% 上限
       if (!info || Number(info.useLevel) > lv) continue;
       const type = Number(info.type);
       if (!(type >= 0 && type < 4)) continue;
@@ -5047,7 +5118,7 @@
       // 原版白绿无词条，蓝装1条且最多2星，紫装2条且最多3星。
       const extSlots = fusionSlots(info.quality);
       const ext = extSlots ? randomExt(extSlots, info.quality >= 3 ? 3 : 2) : [];
-      const piece = { id: gid, used: true, ext, attr: rollGearAttr(gid) };   // 主属性同样 ±10% 浮动
+      const piece = { id: gid, used: true, ext, attr: rollGearAttr(gid) };   // 主属性同样 ±5% 浮动
       /* 橙装 / 宝石：只对**紫装档（quality 3）**掷；橙装是**实例级** quality=4（不是换高 id）。
        * 60 级黑装（quality 5）本来就是更高的一档，不再叠实例橙（叠了会被 `gearQuality`
        * 记成 4，黑装反而在品质口径里降档 —— 注释口径一直是紫装）。 */
@@ -5137,9 +5208,18 @@
   }
   /** 关卡连战里「先上阵」的徒弟：原版 `fightType == 6` 时服务端把左方设成徒弟，
    *  徒弟战败后再走一次 `stage.do` 由师父接手（`showFightStatus` → state 7 → doFight）。
-   *  离线版取第一个徒弟；没有徒弟就直接师父上阵。 */
+   *  离线版**优先派等级最高的徒弟**出战（用户 2026-10 口径：徒弟里最强的那位上，
+   *  而不是当年先收的那位）；等级相同或读不到等级时保持原来的先来后到。
+   *  没有徒弟就直接师父上阵。 */
   function stagePrentice() {
-    return Array.isArray(S.prentices) && S.prentices.length ? S.prentices[0] : null;
+    const list = (Array.isArray(S.prentices) ? S.prentices : []).filter((p) => p && p.name);
+    if (!list.length) return null;
+    let best = list[0], bestLevel = Number(best.level) || 0;
+    for (let i = 1; i < list.length; i++) {
+      const lv = Number(list[i].level) || 0;
+      if (lv > bestLevel) { best = list[i]; bestLevel = lv; }
+    }
+    return best;
   }
   /** 把徒弟快照变成可交给 `Main.startBattle({ fighter })` 的玩家侧面板。
    *  三维/武器/技能沿用收徒时保存的快照；装备补 `wears` 供经典战斗立绘使用。 */
@@ -5157,12 +5237,17 @@
     }
     const weapons = (full.weapons || []).map((w) => typeof w === 'string' ? weaponInst(w) : w).filter(Boolean);
     const skills = (full.skills || []).map((v) => typeof v === 'string' ? skillInst(v) : v).filter(Boolean);
+    /* ⚠ 必须把 `gears` 一起交出去（哪怕是空数组）。
+     * `SfFight.wearsOf(0, fighter)` 的判据是「有没有 `gears` 数组」：没有就退回
+     * `State.myGears()`（**师父自己的穿戴**）—— 徒弟代打时身上穿的是玩家的装备，
+     * 用户 2026-10-24 报的就是这个。空数组 = 徒弟确实没穿，不再借用玩家的。 */
+    const gears = normalizeFoeGears(full.gears || []);
     let wears = [null, null, null, null, null, null];
-    try { wears = Engine.wearsFor(normalizeFoeGears(full.gears || [])); } catch (e) {}
+    try { wears = Engine.wearsFor(gears); } catch (e) {}
     return {
       name: full.name, level, power, agility, speed, hp: Math.max(1, Math.round(hp)), maxHp: Math.max(1, Math.round(hp)),
       baseStats: { power, agility, speed, hp },
-      weapons, skills, wears,
+      weapons, skills, gears, wears,
       effects: {}, masterLevel: S.level,
       isPrentice: true,
     };

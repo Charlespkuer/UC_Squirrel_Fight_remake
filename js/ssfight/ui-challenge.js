@@ -476,10 +476,22 @@
      * 原版"练功房"里那颗 npcType='wood' 的木桩）。 */
     const out = [];
     const s = (S() || {});
-    if (s.master && s.master.name) out.push(foeRow(s.master, 'master'));
-    for (const p of (s.prentices || [])) out.push(foeRow(p, 'prentice'));
-    out.push(dummyRow(s));
-    return out.concat(friends);
+    const seen = new Set();
+    const push = (row) => {
+      if (!row || !row.name) return;
+      const key = String(row.name).trim();
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(row);
+    };
+    if (s.master && s.master.name) push(foeRow(s.master, 'master'));
+    for (const p of (s.prentices || [])) push(foeRow(p, 'prentice'));
+    push(dummyRow(s));
+    /* 师徒 / 木人已经排在最前面：好友里若有同名条目（老档、或先加好友后拜师），
+     * 这里直接跳过 —— 否则它会在**第二页**再出现一次，和第一页的师徒重复。
+     * 用户 2026-10-24 口径："不希望师徒除了在第一页显示，还会在之后的页面中再显示一次"。 */
+    for (const f of friends) push(f);
+    return out;
   }
   /** 师徒条目 → 一行的数据。
    *  ⚠ 这里以前有两个真 bug（用户 2026-10 报的"在随机与好友之间切换后，敌我数据全变成 1"）：
@@ -1600,40 +1612,74 @@
    *     ⚠ 现代界面的好友页早就是这个口径了（`classic-ui.js` 的 `spar()`：
    *       `{cost:0, kind:'friend', useProps:false, collectDrops:false}` + 只弹"切磋结果"），
    *       经典页这一档以前漏了，照它对齐即可 —— 两边共用 `kind:'friend'` 这一个名字。 */
-  /** 战斗期间先把这一页从 `#ui` 摘下来（`Main.startBattle` / `SfFight.run` 都会清空 #ui），
-   *  打完再原样挂回去 —— 回来的是**同一棵 SVG**，不再重新挂载，也就没有那一下闪屏。
-   *  随机挑战 / 切磋 / 关卡连战共用这一套。 */
+  /** 战斗期间把这一页「按住」在原位（`Main.startBattle` / `SfFight.run` 会清 `#ui`，
+   *  但跳过带 hold 标记的节点），打完只还原显示 —— 回来的是**同一棵 SVG**，既不重新
+   *  挂载、也不触发 WebKit 对整棵子树的重新布局。随机挑战 / 切磋 / 关卡连战共用这一套。 */
+  const BATTLE_HOLD_ATTR = 'data-sf-battle-hold';
+  /** 战斗期间把这一页「按在原地」：不从 `#ui` 摘下，只隐藏并标记。
+   *  ------------------------------------------------------------
+   * 以前这里把整棵挑战页 `removeChild`，打完再 `appendChild`。DOM 树本身没变，但
+   * WebKit 会把它当成新插入的子树重新做样式/布局/光栅化；经典页有几千个节点，
+   * 返回时就是那一下卡顿（用户 2026-10：iOS「随机战斗完回随机挑战页会卡一下」）。
+   * 现在让它留在文档里，战斗页盖在上面；隐藏只关掉绘制与命中，不打散布局，
+   * 返回时只 `visibility` 还原，不再重挂。`SfBattle` 清 `#ui` 时也会跳过带这个标记的节点
+   * （见 `Main.clearUiForBattle` / `ui-fight.js` 的 `run`）。 */
   function holdPageForBattle() {
     const page = current;
     const host = page && page.host;
     if (!host || !host.parentNode) return null;
     /* ⚠ **不要** `closeSub()`：关卡的三级页（难度页 / 出战确认）如果在这里拆掉，
      * 战后 `openGate()` 只能重新 mount 一颗 4756 —— 那就是"回到有继续挑战页面时卡一下"。
-     * 连 sub host 一起从 `#ui` 摘下（它原本就盖在主页面上面），战后原样挂回。
-     * `openGate()` 的 `openSub(5)` 会发现 `sub.view` 还在，只做换帧/更新，不重新建树。 */
+     * sub host 同样留在树上，只隐藏并标记；战后按原顺序还原。 */
     const sub = (page.sub && page.sub.host) ? page.sub : null;
-    if (sub && sub.host.parentNode) sub.host.parentNode.removeChild(sub.host);
-    host.parentNode.removeChild(host);
+    const mark = (el) => {
+      if (!el || !el.setAttribute) return;
+      el.setAttribute(BATTLE_HOLD_ATTR, '');
+      el.style.visibility = 'hidden';
+      el.style.pointerEvents = 'none';
+    };
+    mark(host);
+    if (sub) mark(sub.host);
     return { page: page, host: host, sub: sub };
   }
-  /** 把战斗前摘下来的挑战页挂回 #ui，并按 `tab` 重画这一页（不重挂 SVG）。
-   *  `opts.keepSub`：连三级页一起原样挂回、**不**走 `showTab`（它内部会 `closeSub`）；
+  function unmarkHeld(el) {
+    if (!el || !el.removeAttribute) return;
+    el.removeAttribute(BATTLE_HOLD_ATTR);
+    if (el.style) {
+      el.style.visibility = '';
+      el.style.pointerEvents = '';
+    }
+  }
+  /** 把战斗前按住的挑战页还原，并按 `tab` 重画这一页（不重挂 SVG）。
+   *  `opts.keepSub`：连三级页一起原样还原、**不**走 `showTab`（它内部会 `closeSub`）；
    *  调用方随后用 `refreshGateAt()` 只更新三级页的星标/文案。 */
   function resumePageAfterBattle(hold, tab, opts) {
     if (!hold || !hold.host || !hold.page) return false;
     if (current !== hold.page || current.host !== hold.host) return false;
     const ui = document.getElementById('ui');
-    if (ui && !hold.host.isConnected) ui.appendChild(hold.host);
+    /* 理论上页面一直没离开 #ui；只有被别的清屏逻辑摘掉时才补挂一次（兜底）。 */
+    if (!hold.host.isConnected) {
+      if (!ui) return false;
+      ui.appendChild(hold.host);
+    }
     if (hold.host.isConnected === false) return false;
-    /* 三级页要按原顺序挂回：主页面之后 = 仍然盖在上面。 */
-    if (hold.sub && hold.sub.host && !hold.sub.host.isConnected && ui) ui.appendChild(hold.sub.host);
+    unmarkHeld(hold.host);
+    /* 隐藏期间 `SfRender` 的节拍器会把这一视图标记为不可见而跳过；还原后强制它
+     * 下一拍重新量一次，否则页面里还在播的装饰动画要等最多 10 拍（≈0.7 s）才恢复。 */
+    try { if (hold.page.view) hold.page.view.__visible = undefined; } catch (e) {}
+    /* 三级页要按原顺序还原：主页面之后 = 仍然盖在上面。 */
+    if (opts && opts.keepSub && hold.sub && hold.sub.host) {
+      if (!hold.sub.host.isConnected && ui) ui.appendChild(hold.sub.host);
+      unmarkHeld(hold.sub.host);
+      try { if (hold.sub.view) hold.sub.view.__visible = undefined; } catch (e) {}
+      if (current.sub && current.sub.view) setBaseRouterEnabled(current.host, false);
+    }
     hold.page.roster = null;       // 打完回来换一批对手（与原 `backToRandom` 同口径）
     randomCache = null;            // 同上：战斗结束后的随机页要重抽，不吃旧缓存
     hold.page.sel = 0;
     hold.page.page = 1;
     try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
     if (opts && opts.keepSub && hold.sub && hold.sub.host && hold.sub.host.isConnected) {
-      if (current.sub && current.sub.view) setBaseRouterEnabled(current.host, false);
       return true;
     }
     try { showTab(tab || 'random'); } catch (e) {
@@ -1669,7 +1715,7 @@
       return reward;
     };
     const go = () => {
-      /* 战斗前把挑战页摘下来（见 `holdPageForBattle`）：打完原样挂回去，
+      /* 战斗前把挑战页按住（见 `holdPageForBattle`）：打完只还原显示，
        * 不再 `destroy()` + 重新挂载 —— 那一步就是"背景 UI 闪一下"的来源。 */
       const hold = holdPageForBattle();
       const restore = (tab) => {

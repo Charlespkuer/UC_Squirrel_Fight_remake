@@ -208,6 +208,31 @@ test('局内表现：清掉 7688 的静态动物、待机用原版呼吸片断�
     'SfFight 要停 7688 第 2 帧、播原版待机片断、并对没有 comeBacks 的模型跳过归位帧');
 });
 
+test('妖狐魅惑被风影身法闪避后不再挂眩晕 / 卸甲', () => {
+  const Sim = ctx.Sim;
+  /* 「风影身法」的闪避是在 applyDamage 里才落的 r.dodge（预判 dodgeChance 已经算过命中），
+   * 所以这里给妖狐 mustHitAll 让预判必中，只让 firstDodge 那一下生效。随机固定为 0：
+   * 脱装 56% 必中 —— 修复前这一条会同时看到 dodge 和 stripApplied。 */
+  const me = { name: '风影勇者', level: 80, hp: 100000, maxHp: 100000, power: 100, agility: 50, speed: 1,
+    weapons: [], skills: [], effects: {}, mods: { firstDodge: 1 } };
+  const fox = { name: '暗御妖狐', level: 80, hp: 20000, maxHp: 20000, power: 100, agility: 100, speed: 500,
+    weapons: [], skills: [{ id: 8, level: 15 }], castable: [8], pattern: ['skill'], effects: {}, mods: { mustHitAll: 1 } };
+  const oldRandom = Math.random;
+  Math.random = () => 0;
+  let hit = null;
+  try {
+    const res = Sim.simulate(me, fox);
+    hit = (res.rounds || []).find((r) => r.attacker === 1 && r.action === 'skill' && Number(r.id) === 8);
+  } finally {
+    Math.random = oldRandom;
+  }
+  assert.ok(hit, '妖狐第一拍应放出色诱之术（魅惑）');
+  assert.equal(hit.dodge, true, '风影身法要把这一下判成闪避');
+  assert.ok(!hit.stunApplied, '闪避后不能挂「略过一回合」的眩晕');
+  assert.ok(!hit.stripApplied && hit.specialEffect !== 1, '闪避后不能挂真·色诱的卸甲');
+  assert.equal(hit.stripLeft[0], 0, '我方不应处于脱装备状态');
+});
+
 let failed = 0;
 for (const [name, fn] of tests) {
   try { fn(); console.log('  PASS  ' + name); }

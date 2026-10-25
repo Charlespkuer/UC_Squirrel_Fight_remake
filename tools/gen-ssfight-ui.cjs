@@ -1534,9 +1534,14 @@ const GEAR_QUALITY_SUFFIX = ['白', '绿', '蓝', '紫', '橙', '黑'];
 const GEAR_BLACK_SETS = new Set([46, 47, 67, 68, 69, 70, 71, 72]);
 /** 一件装备在某个品质 / 强化档下可能对应的库元件名（按优先级）。 */
 function gearColorCandidates(g, quality, level) {
-  if (GEAR_BLACK_SETS.has(Number(g.setId)) || Number(quality) >= 5) return [g.name + '黑'];
-  const base = g.name + (GEAR_QUALITY_SUFFIX[Number(quality)] || '黑');
-  if ((Number(g.type) === 0 || Number(g.type) === 1) && Number(quality) > 1) {
+  const q = Number(quality);
+  /* 46/47/67~72 是**专门画的黑套**：库元件就叫 `<名字>黑`，不带强化数字。
+   * 其它品质 5 的套装（格斗/拳斗/忍者…/诅咒）头 / 手套仍按原版规则拼
+   * `<名字>黑1~3` —— 之前这里把「品质 >= 5」和专门黑套并成一条，
+   * 头 / 手套的强化数字被跳过，q5 查不到符号只能退回容器画稿（缺卡片底）。 */
+  if (GEAR_BLACK_SETS.has(Number(g.setId))) return [g.name + '黑'];
+  const base = g.name + (GEAR_QUALITY_SUFFIX[q] || '黑');
+  if ((Number(g.type) === 0 || Number(g.type) === 1) && q > 1) {
     /* 原版：`max(addr…Lv)` 为 0 时拼 "1"；`level` 0 就是这一档。 */
     const want = Number(level) > 0 ? Number(level) : 1;
     const out = [base + want];
@@ -1575,7 +1580,7 @@ function gearColorBundle() {
     const table = {};
     for (let q = 0; q <= 5; q++) {
       const levels = {};
-      const wantLevels = (Number(g.type) === 0 || Number(g.type) === 1) && q > 1 && q < 5
+      const wantLevels = (Number(g.type) === 0 || Number(g.type) === 1) && q > 1
         ? [0, 1, 2, 3] : [0];
       for (const lv of wantLevels) {
         let hit = null;

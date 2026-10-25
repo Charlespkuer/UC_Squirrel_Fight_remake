@@ -1,0 +1,7 @@
+# Android 15+ devices may use 16 KiB memory pages. NDK r27 otherwise links at 4 KiB.
+# These target-scoped flags leave desktop and iOS builds unchanged.
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384", "-C", "link-arg=-Wl,-z,common-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384", "-C", "link-arg=-Wl,-z,common-page-size=16384"]

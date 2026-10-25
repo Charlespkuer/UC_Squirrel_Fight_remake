@@ -23,8 +23,25 @@
     try { clip.gotoAndStop(frame); } catch (e) {}
   };
   const GEAR_QUALITY_COLOR = ['#542201', '#65a844', '#2365c9', '#6544a8', '#ff9900', '#000000'];
-  /** 4402「合成中」播到结果帧的时长；道具合成与装备融合共用同一段 CG。 */
+  /** 空闲回调：没有 requestIdleCallback（老 WebView）就退到 300 ms 后。 */
+  const idle = (fn) => {
+    try {
+      if (typeof requestIdleCallback === 'function') { requestIdleCallback(fn, { timeout: 2500 }); return; }
+    } catch (e) {}
+    setTimeout(fn, 300);
+  };
+  /** 4402「合成中」播到结果帧的时长；道具合成与装备融合共用同一段 CG。
+   *  ⚠ 它是**总时长**，不是"等一会儿就跳到结果帧"：以前这里直接 `gotoAndPlay(1)` +
+   *  `setTimeout(1400)` + `gotoAndStop(44)`，而 4402 是按舞台帧率（14 fps）走的 ——
+   *  44 帧要 3.1 秒，1.4 秒时它停在第 20 帧上下，于是每次合成都会**从动画中间硬跳到结果页**
+   *  （手机上更明显：掉帧让它停得更靠前，观感是"合成动画一闪就没了"）。
+   *  现在由 `playComposeCg()` 自己按这个总时长把 1→44 帧**逐帧推完**：
+   *  总时长不变、动画每一帧都会被看到、慢设备上也不会停在中途。 */
   const COMPOSE_CG_MS = 1400;
+  /** 结果帧（1 基）：`fillResultPage` 写的就是这一帧，`playCg:false` 也直接挂它。 */
+  const COMPOSE_RESULT_FRAME = 44;
+  /** CG 逐帧推进时每帧的等待（按帧数摊平 COMPOSE_CG_MS；最快 16 ms）。 */
+  const cgStepMs = (frames) => Math.max(16, Math.round(COMPOSE_CG_MS / Math.max(1, frames - 1)));
 
   let session = null;
   let composeExtraLoaded = false;
@@ -55,6 +72,20 @@
     if (rec.pageView) { try { rec.pageView.destroy(); } catch (e) {} }
     if (rec.host && rec.host.parentNode) rec.host.parentNode.removeChild(rec.host);
     try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
+  }
+
+  /** 会话还活着吗：宿主被别人整页清掉（`#ui.innerHTML = …` / 切到别的页）时，
+   *  只留下一个悬空 session —— `active()` 会一直说"合成页开着"、`busy` 也可能卡住，
+   *  之后再开合成就会对着已经不存在的节点写结果。开新会话前先按这个判据回收。 */
+  function liveSession() {
+    const rec = session;
+    if (!rec) return null;
+    if (rec.host && rec.host.isConnected) return rec;
+    const stale = session;
+    session = null;
+    if (stale.resultView) { try { stale.resultView.destroy(); } catch (e) {} }
+    if (stale.pageView) { try { stale.pageView.destroy(); } catch (e) {} }
+    return null;
   }
 
   function close() {
@@ -265,6 +296,26 @@
     wireButton(ok, close, { idle: 2, hover: 2, press: 1 });
   }
 
+  /** 把 4402 的「合成中」按 **COMPOSE_CG_MS** 的总时长逐帧推到结果帧（见常量注释）。
+   *  自己推帧（`gotoAndStop` 后 `playing=false`，节拍器不会插手），并在每一帧检查会话身份：
+   *  中途关页 / 换页就立刻停下，不要对已经销毁的实例继续 `showFrame`。 */
+  async function playComposeCg(view, rec) {
+    if (!view || !view.showFrame) return false;
+    const total = Math.max(1, Math.min(COMPOSE_RESULT_FRAME, view.frames ? view.frames.length : COMPOSE_RESULT_FRAME));
+    const step = cgStepMs(total);
+    if (view.holdAnim) view.holdAnim(true);
+    stopAt(view, 1);
+    for (let f = 2; f <= total; f++) {
+      await new Promise((r) => setTimeout(r, step));
+      if (session !== rec || rec.resultView !== view || !view.g || !view.g.isConnected) return false;
+      try { view.frame = f - 1; view.showFrame(); } catch (e) {}
+    }
+    if (session !== rec || rec.resultView !== view || !view.g || !view.g.isConnected) return false;
+    stopAt(view, COMPOSE_RESULT_FRAME);
+    if (view.holdAnim) view.holdAnim(false);
+    return true;
+  }
+
   async function playResult(rec, result) {
     const host = rec.host;
     if (!host || !host.isConnected) return;
@@ -272,10 +323,7 @@
     const view = await SfRender.mountSymbol(host, '4402', { frame: 1, label: '合成中' });
     if (session !== rec || !host.isConnected) { try { view.destroy(); } catch (e) {} return; }
     rec.resultView = view;
-    try { view.gotoAndPlay(1); } catch (e) {}
-    await new Promise((r) => setTimeout(r, COMPOSE_CG_MS));
-    if (session !== rec || rec.resultView !== view) return;
-    try { view.gotoAndStop(44); } catch (e) {}
+    if (!(await playComposeCg(view, rec))) return;
     if (result.icon === 'gear' && window.SfStatus && SfStatus.ensureGearColors) {
       try { await SfStatus.ensureGearColors(); } catch (e) {}
     }
@@ -342,17 +390,15 @@
       if (!extra) throw new Error('tags-compose.json');
       if (session !== rec || !host.isConnected) return false;
       const view = await SfRender.mountSymbol(host, '4402', {
-        frame: playCg ? 1 : 44, label: playCg ? '合成中' : '融合结果',
+        frame: playCg ? 1 : COMPOSE_RESULT_FRAME, label: playCg ? '合成中' : '融合结果',
       });
       if (session !== rec || !host.isConnected) { try { view.destroy(); } catch (e) {} return false; }
       rec.resultView = view;
       if (playCg) {
-        try { view.gotoAndPlay(1); } catch (e) {}
-        await new Promise((r) => setTimeout(r, COMPOSE_CG_MS));
-        if (session !== rec || rec.resultView !== view || !host.isConnected) return false;
-        try { view.gotoAndStop(44); } catch (e) {}
+        /* 与道具合成同一段逐帧 CG（见 `playComposeCg`）：总时长不变，但不会再停在半路。 */
+        if (!(await playComposeCg(view, rec))) return false;
       } else {
-        try { view.gotoAndStop(44); } catch (e) {}
+        stopAt(view, COMPOSE_RESULT_FRAME);
       }
       if (window.SfStatus && SfStatus.ensureGearColors) {
         try { await SfStatus.ensureGearColors(); } catch (e) {}
@@ -389,6 +435,13 @@
       /* 取消在左、合成在右（用户 2026-10 口径；碎片/种子/宝石/转化丸共用这一页）。 */
       swapComposeButtons(view);
       wirePage(view, rec);
+      /* 装备类碎片（24/25/26/77/78）的结果页要给装备挂「原版预上色整卡」
+       * （`tags-gear-color.json` ≈1.9 MB + 配色表）：第一次合成时才去拉，会在手机上
+       * 正好卡在"点完合成"那一下（解析 JSON + 建表）。页面已经画出来了，趁空闲先预热；
+       * 拉不到也无所谓，结果页自己还会再试一次。宝石 / 种子 / 转化丸不走这条，不预热。 */
+      if ([24, 25, 26, 77, 78].includes(id)) {
+        idle(() => { try { if (window.SfStatus && SfStatus.ensureGearColors) SfStatus.ensureGearColors(); } catch (e) {} });
+      }
       try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
       return true;
     } catch (e) {
@@ -404,7 +457,9 @@
     showGearResult: showGearResult,
     close: close,
     destroy: destroy,
-    active: () => !!session,
+    /** 只有**宿主还在页面上**才算开着：宿主被整页重建清掉之后不能继续报告 active
+     *  （否则背包那边的入口会以为合成页还开着而不再开新的）。 */
+    active: () => !!liveSession(),
     isComposeProp: isComposeProp,
   });
 })();

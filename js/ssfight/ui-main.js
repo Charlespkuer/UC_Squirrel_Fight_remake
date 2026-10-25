@@ -904,10 +904,16 @@
     finally { hits.forEach((hit, i) => { hit.style.display = displays[i]; }); }
   }
   function measureHitBox(clip) {
-    if (clip.__hitBox) return clip.__hitBox;
+    /* 同一帧量过就直接用：`addHitArea` 一次调用里会问两次包围盒（自身 + 画稿），
+     * 而 `getBBox()` 在移动端是**强制同步布局**，一页十几个控件就是十几次重排。
+     * 换帧（`__shownFrame` 变了）才需要重新量 —— 那一刻画稿真的换了。 */
+    if (clip.__hitBox && clip.__hitBoxFrame === clip.__shownFrame) return clip.__hitBox;
     try {
       const b = measureArtwork(clip);
-      if (b && b.width && b.height) clip.__hitBox = { x: b.x, y: b.y, w: b.width, h: b.height };
+      if (b && b.width && b.height) {
+        clip.__hitBox = { x: b.x, y: b.y, w: b.width, h: b.height };
+        clip.__hitBoxFrame = clip.__shownFrame;
+      }
     } catch (e) {}
     return clip.__hitBox || null;
   }
@@ -1028,7 +1034,9 @@
       else {
         const base = measureHitBox(clip);
         if (base) merge({ x: base.x, y: base.y, width: base.w, height: base.h });
-        try { merge(measureArtwork(clip)); } catch (e) {}
+        /* 只有"这一帧还没量过"才再量一次画稿（`measureHitBox` 内部已经排除了旧热区，
+         * 同一帧重复 `getBBox()` 只会白等一次强制重排 —— 见 measureHitBox 的注释）。 */
+        else { try { merge(measureArtwork(clip)); } catch (e) {} }
         if (animate && clip.frames && clip.frames.length > 1) {
           const keep = clip.frame;
           const union = (clip.__frameBoxes) || (clip.__frameBoxes = measureFrameBoxes(clip));

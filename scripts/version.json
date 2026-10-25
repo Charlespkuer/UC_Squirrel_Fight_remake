@@ -1,6 +1,6 @@
 {
   "version": "1.1.0.1",
-  "commit": "6a49c0a",
+  "commit": "c90d97c",
   "date": "2026-10-26",
   "note": "1.1.0.1：显示版本 / 安装包与 APK 文件名 / 安卓 versionName 使用四段热修号；Cargo/Tauri semver 仍为 1.1.0。游戏内「游戏更新」拿它和远端 tag 对比。"
 }

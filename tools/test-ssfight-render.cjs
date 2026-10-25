@@ -1819,6 +1819,8 @@ function checkBalanceAndRewardContracts() {
     '预上色符号自带整张卡：1:1 挂（纸娃娃 0.85），不能再 fitArtwork 缩成小卡');
   assert.ok(!/^\s*const S = S\(\)/m.test(st) && /const save = S\(\) \|\| \{\}/.test(st) && /save\.props\[id\]/.test(st),
     '宝石弹窗不能写局部 const S = S()：S 遮住 S() 会触发 TDZ，点击直接中断');
+  assert.ok(/function heroGearEquip\([\s\S]{0,1500}?if \(current && current\.view\) \{\s*fillValues\(current\.view\);\s*refreshHeroChrome\(\);\s*\}/.test(st),
+    '勇者换装后要当场刷新「出发准备」卡的外观计数，不能等切页才同步');
   assert.ok(/const b1 = clipOf\(view, 'b1'\)[\s\S]{0,600}?stopAt\(inner, g\.gem \? 2 : 1\)/.test(st)
     && /const b1Inner = b1Outer[\s\S]{0,200}?wireClickable\(b1Inner/.test(st),
     '「已镶嵌」的绿色高亮在内层 b1 按钮第 2 帧：外层只换按钮，idle 也要停绿帧');
@@ -1861,9 +1863,19 @@ function checkBalanceAndRewardContracts() {
   assert.ok(/rec\.pickups && !rec\.o\.skipChest/.test(uf),
     'skipChest 时不能进开宝箱（竞技场/天梯/关卡连战）');
   assert.ok(/function mountChestConfirm\(chest, finish\)/.test(uf)
-    && /SfUiFeedback\.bind\(hit, \{ shell: group \}\)/.test(uf)
-    && /SfUiFeedback\.tap\(hit, finish, \{ delay: 120/.test(uf),
-    '宝箱确定键要有热区 + 经典悬停/按下反馈，并立即 resolve');
+    && /SfUiFeedback\.bind\(group, \{ shell: group \}\)/.test(uf)
+    && /SfUiFeedback\.tap\(group, run, \{ delay: 120/.test(uf)
+    && /group\.addEventListener\('pointerup'/.test(uf)
+    && /group\.addEventListener\('touchend'/.test(uf),
+    '宝箱确定键要有热区 + 经典悬停/按下反馈，pointerup / touchend / click 任一条都能继续（不能只等合成 click）');
+  assert.ok(/const loot = rec\.pickups \? rec\.pickups\.summary\(\)[\s\S]{0,600}?if \(rec\.pickups\) \{ try \{ rec\.pickups\.close\(\); \} catch \(e\) \{\} \}/.test(uf),
+    '战果/宝箱页出现前必须收掉战斗中的悬浮掉落，否则它会压住宝箱选择页、抢走点击');
+  {
+    const tf = read('js/touch-fallback.js');
+    assert.ok(/var svgPE = ''[\s\S]{0,220}?if \(svgPE === 'none'\) continue;/.test(tf)
+      && /function hideFightKeys\(rec\)[\s\S]{0,1400}?rec\.topLayer[\s\S]{0,500}?removeChild\(top\)/.test(uf),
+      '跳过键的顶层覆盖 SVG 收键后必须移除，touch-fallback 不能把 pointer-events:none 的根 SVG 路由成 auto（安卓跳过 → 宝箱卡死）');
+  }
   assert.ok(!/setTimeout\(finish, 3200\)/.test(uf) && /group\.style\.outline = 'none'/.test(uf),
     '宝箱页不许 3.2s 自动回退，确定键也不许出现 UA 蓝焦点框');
   assert.ok(/function makeNpcFighter\(/.test(uf) && /NPC_FRAME = \{ tl: 2, xh: 3, xm: 4, wood: 5 \}/.test(uf),

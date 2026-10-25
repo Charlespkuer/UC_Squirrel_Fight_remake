@@ -211,7 +211,7 @@ $verJsonText = Read-Text $verJsonPath
 $tauriConfText = Read-Text $tauriConfPath
 if ($verJsonText -notmatch '"version"\s*:\s*"([^"]+)"') { Die 'scripts/version.json 里没找到 version 字段' }
 $current = $Matches[1]
-if ($current -notmatch '^\d+\.\d+\.\d+$') { Die "当前版本号格式不对：'$current'" }
+if ($current -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { Die "当前版本号格式不对：'$current'（要 x.y.z 或 x.y.z.w）" }
 
 if (-not $Name) {
   if ($tauriConfText -match '"productName"\s*:\s*"([^"]+)"') { $Name = $Matches[1] }
@@ -233,12 +233,12 @@ function Get-DistVersionInfo($dir) {
   if (-not $dir -or -not (Test-Path -LiteralPath $dir)) { return $info }
   $vers = @()
   foreach ($f in @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue)) {
-    $m = [regex]::Match($f.Name, '^([A-Za-z0-9_.\-]+?)[_.\-](\d+\.\d+\.\d+)[_.\-]')
+    $m = [regex]::Match($f.Name, '^([A-Za-z0-9_.\-]+?)[_.\-](\d+\.\d+\.\d+(?:\.\d+)?)[_.\-]')
     if ($m.Success) {
       $vers += $m.Groups[2].Value
       if (-not $info.BaseName) { $info.BaseName = $m.Groups[1].Value }
     } else {
-      $m2 = [regex]::Match($f.Name, '(\d+\.\d+\.\d+)')
+      $m2 = [regex]::Match($f.Name, '(\d+\.\d+\.\d+(?:\.\d+)?)')
       if ($m2.Success) { $vers += $m2.Groups[1].Value }
     }
   }
@@ -267,18 +267,30 @@ if ($CleanOnly) {
     $baseFrom = 'dist 里的上一版产物名'
   }
   $p = $baseVer.Split('.')
-  $target = "$($p[0]).$($p[1]).$([int]$p[2] + 1)"
+  if ($p.Count -ge 4) {
+    $target = "$($p[0]).$($p[1]).$($p[2]).$([int]$p[3] + 1)"
+  } else {
+    $target = "$($p[0]).$($p[1]).$([int]$p[2] + 1)"
+  }
   if ($distInfo.Version) {
     Ok "上一个版本号：$($distInfo.Version)（从 dist 里 $($distInfo.Count) 个带版本号的文件名中取最大）"
   } else {
     Note 'dist 里没读到带版本号的产物名（目录空 / 不存在 / 名字里没有 x.y.z）→ 版本号回退用 scripts\version.json'
   }
-  Note "版本号基准：$baseVer（来源：$baseFrom）→ patch +1 = $target"
+  Note "版本号基准：$baseVer（来源：$baseFrom）→ 末位 +1 = $target"
 }
-if ($target -notmatch '^\d+\.\d+\.\d+$') { Die "目标版本号格式不对：'$target'（要 x.y.z）" }
+if ($target -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { Die "目标版本号格式不对：'$target'（要 x.y.z 或 x.y.z.w）" }
 
-$segNext = $target.Split('.')
-$nextVer = "$($segNext[0]).$($segNext[1]).$([int]$segNext[2] + 1)"
+$segTarget = @($target.Split('.'))
+# Tauri / Cargo / npm 都只接受三段 semver。四段版本（如 1.1.0.1）作为**显示版本**
+# 写进 scripts/version.json、安装包/APK 文件名与安卓 versionName；底层 Cargo/Tauri
+# 仍写前三段，否则 cargo / tauri CLI 会在解析版本时直接失败。
+$semver = if ($segTarget.Count -ge 4) { ($segTarget[0..2] -join '.') } else { $target }
+if ($segTarget.Count -ge 4) {
+  $nextVer = "$($segTarget[0]).$($segTarget[1]).$($segTarget[2]).$([int]$segTarget[3] + 1)"
+} else {
+  $nextVer = "$($segTarget[0]).$($segTarget[1]).$([int]$segTarget[2] + 1)"
+}
 $verChanged = $target -ne $current
 $commit = (& git -C $ROOT rev-parse --short HEAD 2>$null)
 if (-not $commit) { $commit = 'nogit' }
@@ -298,13 +310,13 @@ $versionEdits = @(
 $lockPath = Join-Path $TAURI 'Cargo.lock'
 
 if ($DryRun -or $CleanOnly) {
-  Note "[跳过版本写入] $(if ($CleanOnly) { '-CleanOnly' } else { '-DryRun' })：会改 Cargo.toml / Cargo.lock / src-tauri/package.json / src-tauri/package-lock.json / tauri.conf.json / scripts\version.json / gen\android\app\tauri.properties 到 $target"
+  Note "[跳过版本写入] $(if ($CleanOnly) { '-CleanOnly' } else { '-DryRun' })：Cargo / npm / tauri.conf 写到 $semver；scripts\version.json / 安卓 versionName / 产物名写到 $target"
 } else {
   foreach ($e in $versionEdits) {
     if (-not (Test-Path $e.Path)) { Warn "缺文件，跳过：$($e.What)"; continue }
-    $n = Replace-First (Read-Text $e.Path) $e.Regex $target
+    $n = Replace-First (Read-Text $e.Path) $e.Regex $semver
     if ($null -eq $n) { Warn "$($e.What) 没找到版本字段"; continue }
-    Write-Utf8NoBom $e.Path $n; Ok "$($e.What) → $target"
+    Write-Utf8NoBom $e.Path $n; Ok "$($e.What) → $semver"
   }
   # package-lock.json 的**根包**版本也要跟（npm ci 会校验；以前只改 package.json，
   # 锁文件在 0.1.3 停了好几个版本）。只替换前两处根版本字段，依赖自己的 version 不动。
@@ -315,16 +327,16 @@ if ($DryRun -or $CleanOnly) {
     if ($lockRe.IsMatch($lockText)) {
       $n = $lockRe.Replace($lockText, {
           param($m)
-          return $m.Groups[1].Value + $target + $m.Groups[2].Value
+          return $m.Groups[1].Value + $semver + $m.Groups[2].Value
         }, 2)
       Write-Utf8NoBom $pkgLockPath $n
-      Ok "package-lock.json(根版本) → $target"
+      Ok "package-lock.json(根版本) → $semver"
     } else { Warn 'package-lock.json 没找到 version 字段' }
   }
   if (Test-Path $lockPath) {
-    $n = Replace-First (Read-Text $lockPath) '(?m)(name = "ssdz-classic"\r?\nversion = ")[^"]+(")' $target
+    $n = Replace-First (Read-Text $lockPath) '(?m)(name = "ssdz-classic"\r?\nversion = ")[^"]+(")' $semver
     if ($null -eq $n) { Warn 'Cargo.lock 没找到 ssdz-classic 块' }
-    else { Write-Utf8NoBom $lockPath $n; Ok "Cargo.lock(ssdz-classic) → $target" }
+    else { Write-Utf8NoBom $lockPath $n; Ok "Cargo.lock(ssdz-classic) → $semver" }
   }
   # version.json：只替换 version / commit / date 三个值，note 与排版原样保留。
   # 不用 ConvertTo-Json —— Windows PowerShell 5.1 会把中文转义成 \uXXXX。
@@ -337,12 +349,17 @@ if ($DryRun -or $CleanOnly) {
 
   # 安卓的版本号还有一处：gen/android/app/tauri.properties（gitignore 掉了，但它是
   # 安卓构建直接读的**真源**——2026-10 改为原地构建后就在这棵树上，build-apk.ps1 出包前
-  # 还会对账）。versionCode 用 Tauri 的算法
-  # major*1000000 + minor*1000 + patch（0.4.6 → 4006），别只改 versionName。
+  # 还会对账）。versionName 写显示版本 $target；versionCode 用
+  # major*1000000 + minor*1000 + patch（0.4.6 → 4006），四段版再把第四段拼到末尾
+  # （1.1.0.1 → 1001000001），既保持递增，又不会和 1.1.0 撞号。
   $androProps = Join-Path $TAURI 'gen\android\app\tauri.properties'
   if (Test-Path $androProps) {
-    $seg = $target.Split('.')
-    $vcode = ([int]$seg[0] * 1000000) + ([int]$seg[1] * 1000) + [int]$seg[2]
+    if ($segTarget.Count -ge 4) {
+      $vcode = ([int64]$segTarget[0] * 1000000000) + ([int64]$segTarget[1] * 1000000) +
+        ([int64]$segTarget[2] * 1000) + [int64]$segTarget[3]
+    } else {
+      $vcode = ([int64]$segTarget[0] * 1000000) + ([int64]$segTarget[1] * 1000) + [int64]$segTarget[2]
+    }
     $n = Replace-First (Read-Text $androProps) '(?m)^(tauri\.android\.versionName=).*$' $target
     if ($null -ne $n) { Write-Utf8NoBom $androProps $n }
     $n = Replace-First (Read-Text $androProps) '(?m)^(tauri\.android\.versionCode=).*$' "$vcode"

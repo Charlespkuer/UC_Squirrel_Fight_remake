@@ -2608,6 +2608,23 @@
       rec.skipSprite = null;
     }
     if (rec.speedButton) { try { rec.speedButton.remove(); } catch (e) {} rec.speedButton = null; }
+    /* 顶层覆盖 SVG 只是跳过键的宿主；键收掉后空壳也必须一起收掉。
+     * 安卓触摸会经过 touch-fallback 的 `svgClipAt()`，它给这个覆盖层建过
+     * 点击路由后会把根的 `pointer-events` 改成 auto —— 空壳留在战果/宝箱页上
+     * 就是一个全屏透明命中层，宝箱怎么点都点不到。 */
+    if (rec.topLayer) {
+      const top = rec.topLayer;
+      try {
+        if (top.parentNode) top.parentNode.removeChild(top);
+        else if (top.remove) top.remove();
+      } catch (e) {}
+      rec.topLayer = null;
+      if (rec.topLayerRO) { try { rec.topLayerRO.disconnect(); } catch (e) {} rec.topLayerRO = null; }
+      if (rec.topLayerRelayout && window.removeEventListener) {
+        window.removeEventListener('resize', rec.topLayerRelayout);
+        rec.topLayerRelayout = null;
+      }
+    }
   }
   /* ============================================================
    * 开打倒计时「3 → 2 → 1 → GO」—— **原版那颗 `3750`**，不是另造的过场
@@ -2724,6 +2741,12 @@
     /* 这一场的收获：与复刻其它战斗同一份（`BattleDrops.summary()`），
      * 战果面板与开宝箱都只是它的**展示**，奖励本身早已在那套规则里发过。 */
     const loot = rec.pickups ? rec.pickups.summary() : { items: [], ups: [] };
+    /* 悬浮掉落是**战斗中的**一层 DOM（`.battle-pickup`，z-index 24），结算开始后
+     * tick 已停，但还没被捡走的那一张会一直留在 `#ui` 里，直接压在战果/宝箱页上面。
+     * 安卓上实测它会盖住宝箱选择页的中上区域：玩家点那颗箱子时，点的其实是
+     * "请点击"飘物，箱子当然没反应（看起来就是宝箱页卡住）。战果页一出现就收掉它，
+     * 未捡的按原版口径本来也不结算；`summary()` 已经先把已收下的战利品取走了。 */
+    if (rec.pickups) { try { rec.pickups.close(); } catch (e) {} }
     result.skipped = !!rec.skippedByButton;
     if (loot.items && loot.items.length) result.pickups = loot.items;
     /* 结算方可以在战果页出现**之前**把这一场的经验 / 金松果算出来（`rewardFor`），
@@ -3380,12 +3403,39 @@
       let done = false;
       const finish = () => { if (done) return; done = true; resolve(); };
       const g = (chest.g || chest);
-      if (g && g.addEventListener) g.addEventListener('click', (event) => {
-        /* 点在「确定」那颗反馈壳里时交给它自己处理（它有 120ms 按下动画）；
-         * 其余位置照旧"点哪都继续"。 */
-        if (event && event.target && event.target.closest && event.target.closest('.sf-chest-confirm')) return;
-        finish();
-      });
+      const inConfirm = (target) => !!(target && target.closest && target.closest('.sf-chest-confirm'));
+      if (g && g.addEventListener) {
+        g.addEventListener('click', (event) => {
+          /* 点在「确定」那颗反馈壳里时交给它自己处理（它有 120ms 按下动画）；
+           * 其余位置照旧"点哪都继续"。 */
+          if (inConfirm(event && event.target)) return;
+          finish();
+        });
+        /* 安卓 WebView 在 SVG 变换层上偶尔不补发合成 click（项目里 iOS 的同类问题
+         * 见 `mountChestHitLayer` 的注释；安卓双击吞掉第一下 click 也见
+         * `js/touch-fallback.js`）。宝箱页**不能只靠 click**：这里再给整层补一条
+         * touchend —— 点画面其它位置一样继续，正好保留"必须玩家点一下"的原意，
+         * 又不会因为 click 丢失把结算永久卡住。 */
+        let tap = null;
+        g.addEventListener('touchstart', (event) => {
+          const pt = event.touches && event.touches[0];
+          if (inConfirm(event.target) || !pt) { tap = null; return; }
+          tap = { x: pt.clientX, y: pt.clientY, t: Date.now() };
+        }, { passive: true });
+        g.addEventListener('touchend', (event) => {
+          const start = tap; tap = null;
+          if (!start || inConfirm(event.target)) return;
+          const pt = event.changedTouches && event.changedTouches[0];
+          if (!pt) return;
+          const dx = pt.clientX - start.x, dy = pt.clientY - start.y;
+          const moved = Math.sqrt(dx * dx + dy * dy), dt = Date.now() - start.t;
+          if (moved <= 14 && dt <= 900) {
+            if (event.cancelable) { try { event.preventDefault(); } catch (e) {} }
+            finish();
+          }
+        }, { passive: false });
+        g.addEventListener('touchcancel', () => { tap = null; });
+      }
       try { mountChestConfirm(chest, finish); } catch (e) { if (window.__errs) window.__errs.push('chest confirm: ' + (e && e.message)); }
       rec.confirmChest = finish;
     });
@@ -3417,6 +3467,8 @@
      * （用户 2026-11 口径："确定键点击后蒙上一层蓝色框"）。这颗键的点击反馈由
      * `.sf-feedback` 的按下 / 回弹承担，不要 UA 焦点框。 */
     group.style.outline = 'none';
+    /* 整颗按钮都接事件（不只是那块透明矩形）：路径 / 文字 / 投影上按下也算「确定」。 */
+    group.style.pointerEvents = 'auto';
     host.appendChild(group);
     for (const { rec } of picked) {
       const node = rec.wrap || rec.node;
@@ -3431,13 +3483,48 @@
     hit.setAttribute('pointer-events', 'all');
     hit.setAttribute('data-hit', '1');
     group.appendChild(hit);
-    if (window.SfUiFeedback) SfUiFeedback.bind(hit, { shell: group });
+    if (window.SfUiFeedback) SfUiFeedback.bind(group, { shell: group });
+    /* 这颗「确定」**不再只认 click**：宝箱选择页早就有 pointerup / touchend 兜底
+     * （见 `mountChestHitLayer` 的注释），翻奖后的确定键却一直只监听 click。
+     * 安卓 WebView 在 SVG 变换层上偶尔不补发合成 click 时，画面就永久停在
+     * "确定"这一页 —— 玩家看到的就是宝箱领取界面卡死。
+     * 现在整颗按钮（不只是那块透明矩形）都参与 pointerup / touchend / click / 键盘：
+     * 任何一条先到都先播 120ms 反馈再 resolve，其余几条被 `armed` 挡住，不会重复。 */
+    let armed = false, down = null, touch = null;
     const fire = (event) => {
-      if (event && event.stopPropagation) event.stopPropagation();
-      if (window.SfUiFeedback) SfUiFeedback.tap(hit, finish, { delay: 120, press: true, pick: true });
-      else finish();
+      if (armed) return;
+      if (event) {
+        if (event.stopPropagation) event.stopPropagation();
+        if (event.cancelable && event.type !== 'keydown') { try { event.preventDefault(); } catch (e) {} }
+      }
+      if (!window.SfUiFeedback) { armed = true; finish(); return; }
+      const run = () => { armed = false; finish(); };
+      if (SfUiFeedback.tap(group, run, { delay: 120, press: true, pick: true })) armed = true;
     };
-    hit.addEventListener('click', fire);
+    group.addEventListener('pointerdown', (event) => {
+      if (event.button != null && event.button !== 0) return;
+      down = { id: event.pointerId, x: event.clientX, y: event.clientY, t: Date.now() };
+    });
+    group.addEventListener('pointerup', (event) => {
+      const start = down; down = null;
+      if (!start || (start.id != null && event.pointerId != null && start.id !== event.pointerId)) return;
+      const dx = event.clientX - start.x, dy = event.clientY - start.y;
+      if (Math.sqrt(dx * dx + dy * dy) <= 14 && Date.now() - start.t <= 900) fire(event);
+    });
+    group.addEventListener('pointercancel', () => { down = null; });
+    group.addEventListener('touchstart', (event) => {
+      const pt = event.changedTouches && event.changedTouches[0];
+      touch = pt ? { x: pt.clientX, y: pt.clientY, t: Date.now() } : null;
+    }, { passive: true });
+    group.addEventListener('touchend', (event) => {
+      const start = touch; touch = null;
+      const pt = event.changedTouches && event.changedTouches[0];
+      if (!start || !pt) return;
+      const dx = pt.clientX - start.x, dy = pt.clientY - start.y;
+      if (Math.sqrt(dx * dx + dy * dy) <= 14 && Date.now() - start.t <= 900) fire(event);
+    }, { passive: false });
+    group.addEventListener('touchcancel', () => { touch = null; });
+    group.addEventListener('click', fire);
     group.addEventListener('keydown', (event) => {
       if (!event.repeat && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); fire(event); }
     });

@@ -234,6 +234,36 @@ if (Test-Path $srcGradle) {
   Write-Host "   ⚠ 仓库里没有 src-tauri\gen\android\app\build.gradle.kts（gitignore 的本机真源），跳过体检；5b 会按 v1/v2/v3 复检" -ForegroundColor Yellow
 }
 
+# ---------- 4c) 安卓 versionName / versionCode 以 scripts\version.json 为准 ----------
+# Cargo / Tauri 只认三段 semver；四段显示版本（如 1.1.0.1）必须写进 Gradle 真正读的
+# gen\android\app\tauri.properties。build-release.ps1 会先写一次，这里在 Tauri 编译之后、
+# Gradle 之前再对齐一次，防止 `tauri android build` 用 tauri.conf 的三段版本把它刷回去。
+$verFile = Join-Path $SourceRepo 'scripts\version.json'
+$propFile = Join-Path $SourceRepo 'src-tauri\gen\android\app\tauri.properties'
+if ((Test-Path $verFile) -and (Test-Path $propFile)) {
+  $verText = [System.IO.File]::ReadAllText($verFile)
+  $verMatch = [regex]::Match($verText, '"version"\s*:\s*"([^"]+)"')
+  if ($verMatch.Success) {
+    $ver = $verMatch.Groups[1].Value
+    if ($ver -match '^\d+\.\d+\.\d+(\.\d+)?$') {
+      $seg = @($ver.Split('.'))
+      if ($seg.Count -ge 4) {
+        $vcode = ([int64]$seg[0] * 1000000000) + ([int64]$seg[1] * 1000000) +
+          ([int64]$seg[2] * 1000) + [int64]$seg[3]
+      } else {
+        $vcode = ([int64]$seg[0] * 1000000) + ([int64]$seg[1] * 1000) + [int64]$seg[2]
+      }
+      $props = [System.IO.File]::ReadAllText($propFile)
+      $props = [regex]::Replace($props, '(?m)^tauri\.android\.versionName=.*$', 'tauri.android.versionName=' + $ver)
+      $props = [regex]::Replace($props, '(?m)^tauri\.android\.versionCode=.*$', 'tauri.android.versionCode=' + $vcode)
+      [System.IO.File]::WriteAllText($propFile, $props, (New-Object System.Text.UTF8Encoding($false)))
+      Ok "安卓版本号对齐 scripts\version.json → $ver / versionCode=$vcode"
+    } else {
+      Write-Host "   ⚠ scripts\version.json 的版本号格式不对：$ver，保留 tauri.properties 原值" -ForegroundColor Yellow
+    }
+  }
+}
+
 # ---------- 5) Gradle 打包 ----------
 # 那个 rust 任务（rustBuild*）不能被调用：它执行 `tauri android android-studio-script`，
 # 而那个入口是给 Android Studio 用的，纯 Gradle 环境下会因为缺 -server-addr 文件而 panic；

@@ -2911,8 +2911,16 @@
     }
     const out = typeof hero.onEquip === 'function' ? hero.onEquip(next) : next;
     if (Array.isArray(out)) hero.appearance = out;
-    /* 状态页立绘立刻跟上（换装层是盖在它上面的）。 */
-    try { if (current && current.view) fillValues(current.view); } catch (e) {}
+    /* 换装层是盖在状态页上的，底页一直开着：立绘（`fillValues`）和右上角
+     * 「出发准备」卡里的**外观 X / 4**（`refreshHeroChrome`）都要当场重算。
+     * 以前这里只调 `fillValues`，外观那一格要等切页 / `SfStatus.refresh()` 才更新，
+     * 玩家看到的就是"刚穿上装备，外观还是 0 / 4"。 */
+    try {
+      if (current && current.view) {
+        fillValues(current.view);
+        refreshHeroChrome();
+      }
+    } catch (e) {}
     return true;
   }
   function gearListOf() {

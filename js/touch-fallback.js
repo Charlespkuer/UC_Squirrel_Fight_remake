@@ -125,6 +125,13 @@
       if (!n || clickThrough(n)) continue;
       var svg = n.ownerSVGElement || ((n.tagName || '').toLowerCase() === 'svg' ? n : null);
       if (!svg || clickThrough(svg) || seen.indexOf(svg) >= 0) continue;
+      /* ⚠ 根 SVG 自己声明 `pointer-events:none` 时不要在这里 `routerOf()`：
+       * 路由初始化会把根 SVG 改成 `pointer-events:auto`。战斗顶层的「跳过键」
+       * 覆盖 SVG 就是这种壳（只有跳过键自己 auto）；安卓轻点跳过后它被打开成
+       * 全屏命中层，跳过键一移除，宝箱页的触摸就全被这层空壳吃掉。 */
+      var svgPE = '';
+      try { svgPE = window.getComputedStyle ? window.getComputedStyle(svg).pointerEvents : ''; } catch (e) {}
+      if (svgPE === 'none') continue;
       seen.push(svg);
       var r = null;
       try { r = svg.__sfRouter || T.routerOf(svg); } catch (e) { r = null; }

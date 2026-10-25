@@ -68,4 +68,5 @@ scripts/sync/sync.config.json
 out/
 images/classic/**/.bak-upscale/
 
-
+web-pwa/
+tools/build-web.cjs

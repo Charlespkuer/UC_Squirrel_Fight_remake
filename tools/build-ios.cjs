@@ -53,6 +53,16 @@ const CLI = path.join(TAURI, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
  * `CFBundleShortVersionString` 可能是旧的（实测 1.0.4 时仍是 1.0.2），必须在
  * `xcodegen generate` 之前同步回来，否则打出来的包名是 1.0.4、包内版本却是旧值。 */
 const VERSION = JSON.parse(fs.readFileSync(path.join(TAURI, 'tauri.conf.json'), 'utf8')).version || '0.0.0';
+/* 显示版本（`scripts/version.json`）允许四段热修号（1.1.0.1）。Apple 的
+ * `CFBundleShortVersionString` 只接受三段，所以**包内**仍然写 `VERSION`，只有
+ * 文件名 / 控制台 / 构建号使用显示版本 —— 这样 IPA 文件名和游戏内「当前版本」
+ * 一致，又不会被 iOS 的版本格式校验拦下。 */
+const DISPLAY_VERSION = (() => {
+  try {
+    const v = String(JSON.parse(fs.readFileSync(path.join(ROOT, 'scripts', 'version.json'), 'utf8')).version || '');
+    return /^\d+\.\d+\.\d+(?:\.\d+)?$/.test(v) ? v : VERSION;
+  } catch (e) { return VERSION; }
+})();
 const ARGS = process.argv.slice(2);
 /* `--build 105`：iOS 26+ 修复包要覆盖 iOS 27 上已装的同版本 104 时，必须有一个更高的
  * CFBundleVersion（manifest 的 bundle-version 也同步用它）。默认仍由版本号去点得到。 */
@@ -61,7 +71,7 @@ const BUILD_OVERRIDE = (() => {
   const v = i >= 0 ? String(ARGS[i + 1] || '') : '';
   return /^\d+(?:\.\d+){0,2}$/.test(v) ? v : '';
 })();
-const BUILD_NUMBER = BUILD_OVERRIDE || String(VERSION.split('.').map((n) => String(Math.max(0, parseInt(n, 10) || 0))).join('')) || '1';
+const BUILD_NUMBER = BUILD_OVERRIDE || String(DISPLAY_VERSION.split('.').map((n) => String(Math.max(0, parseInt(n, 10) || 0))).join('')) || '1';
 const CHECK_ONLY = ARGS.includes('--check');
 const CLEAN = ARGS.includes('--clean');
 const LEGACY = ARGS.includes('--legacy');
@@ -290,7 +300,8 @@ const app = path.join(appsDir, apps[0]);
 
 const conf = JSON.parse(fs.readFileSync(path.join(TAURI, 'tauri.conf.json'), 'utf8'));
 const version = VERSION || conf.version || '0.0.0';
-const out = path.join(DIST, 'squirrel_fight_' + version +
+const label = DISPLAY_VERSION || version;
+const out = path.join(DIST, 'squirrel_fight_' + label +
   (LEGACY ? '_ios_legacy_unsigned.ipa' : '_ios_unsigned.ipa'));
 fs.mkdirSync(DIST, { recursive: true });
 
@@ -343,7 +354,7 @@ try {
 const signed = capture('codesign', ['-dv', app]).ok;
 ok('IPA：' + out + '（' + mb(fs.statSync(out).size) + '）');
 console.log('  App：' + path.relative(ROOT, app) + '（' + mb(fs.statSync(path.join(app, conf.mainBinaryName || 'squirrel_fight')).size) + ' 可执行文件）');
-console.log('  Bundle：' + bundleId + '　版本：' + version + '　最低 iOS：' + minOs + '　设备族：iPhone+iPad');
+console.log('  Bundle：' + bundleId + '　显示版本：' + label + '　包内版本：' + version + '　构建号：' + BUILD_NUMBER + '　最低 iOS：' + minOs + '　设备族：iPhone+iPad');
 console.log('  显示名：' + display + '　方向：横屏　签名：' + (signed ? '已签名（意外）' : '未签名'));
 console.log('  模式：' + (LEGACY ? 'iOS 15~25 传统生命周期（无 UIScene）' : 'iOS 26+ UIScene 生命周期'));
 console.log('');

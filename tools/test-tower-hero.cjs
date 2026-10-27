@@ -900,3 +900,9 @@ test('无尽塔最高纪录同时统计经典与勇者：勇者纪录随存档�
   assert.equal(g2.c.Tower.endlessInfo().allBest, 340, '读档后汇总仍是所有模式最高');
 });
 
+test('勇者无尽塔点击头像默认进入状态页（不是技能页）', () => {
+  const ui = fs.readFileSync(path.join(ROOT, 'js/tower-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(ui, /on\(p, 'hero-status', \(\) => openHeroStatus\('status'\)\)/,
+    '头像的 hero-status 动作要显式传 status，否则会落到技能页');
+});
+

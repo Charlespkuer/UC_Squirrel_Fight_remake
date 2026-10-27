@@ -1936,7 +1936,7 @@
     heroPageCtrl = C().openHeroPage(hero, { tab: tab === 'skills' ? 'skills' : 'status' });
   }
   /** 爬塔中点击勇者小全身照：现代模式直接进状态页，经典模式打开原版 7218 状态页。
-   *  `tab` 可指定初始页签：从头像进来默认进「技能」页（看本局武技等级 / 下一级成功率）。 */
+   *  默认进「状态」页；需要看武技时由调用方显式传 `tab: 'skills'`。 */
   function openHeroStatus(tab) {
     const info = Tower.endlessInfo();
     const run = info && info.run;
@@ -2949,7 +2949,7 @@
     }
     /* 【U18b】左下角那颗按钮：剧情模式 ↔ 挑战模式，切完立刻重画这一屏。 */
     on(p, 'story-mode', () => { Tower.setStoryEnabled(!Tower.storyEnabled()); openEndless(); });
-    on(p, 'hero-status', () => openHeroStatus('skills'));
+    on(p, 'hero-status', () => openHeroStatus('status'));
     on(p, 'last-summary', () => openEndlessSummary(info.lastSummary));
     /* 剧本选择：展开/收起；选中哪一档只重画这一屏，「开始攀登」再按它分流。
      * 这里全部做能力判断 —— 无头回归里的页面桩没有 querySelectorAll / hidden。 */

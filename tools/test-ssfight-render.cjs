@@ -1384,14 +1384,14 @@ async function checkClassicFight() {
     /sel\.attachChild\(ballId, 1, 'boom'\)/.test(uf) && !/sel\.attachChild\(symId, 1, 'boom'\)/.test(uf),
     '幸运一击要按 boomCount 分裂，但复制的是球（6116）而不是整段出手动画（否则动画不停叠加）');
   assert.equal(SfFight._luckyBall.id, '6116', '多球分裂的球元件');
-  /* 转盘 6097 在原素材里会自己循环；必须在短暂旋转后停住，并把 boomCount 压到中心。
-   * 否则就是用户报的「一直转，然后直接打出次数」。 */
-  assert.ok(/function freezeLuckyWheel\(attackClip\)/.test(uf)
-    && /freezeLuckyWheel\(inner\)/.test(uf)
-    && /querySelectorAll\('g\[sid="6097"\], g\[sid="6184"\]'\)/.test(uf)
-    && /clip\.gotoAndStop\(frame\)/.test(uf)
-    && !/lucky-value/.test(uf),
-    '幸运一击的转盘要按 6097/6184 的现有动画帧停住，不另画数字');
+  /* 原素材在转盘第 9 帧出现数字，6091 的朝向和 6090 的结果都需要停在对应帧。 */
+  for (const side of [0, 1]) for (const count of [1, 2, 3, 4, 5, 6]) {
+    const number = { frame: 0, gotoAndStop(n) { this.frame = n; } };
+    const result = { frame: 0, gotoAndStop(n) { this.frame = n; }, byName(n) { return n === 'num' ? number : null; } };
+    SfFight._showLuckyResult(result, { side, luckyCount: count });
+    assert.equal(result.frame, side + 1, '幸运一击结果朝向应与出手方一致');
+    assert.equal(number.frame, count, '幸运一击数字应停在该回合真实倍数');
+  }
   /* 伤害飘字：4 位模板不够时补 digit 槽，最多到 32 位 int（10 位）；特效档封顶第 3 档。 */
   assert.equal(JSON.stringify(SfFight._damageFloatPlan(9999)), JSON.stringify({ mag: 9999, digits: 4, tier: 3 }));
   assert.equal(JSON.stringify(SfFight._damageFloatPlan(10000)), JSON.stringify({ mag: 10000, digits: 5, tier: 3 }));

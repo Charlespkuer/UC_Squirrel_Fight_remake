@@ -615,12 +615,25 @@
     const bakedMirrored = TEXT_ART_BAKED_MIRROR.has(Number(clip.tag.id));
     if (bakedMirrored !== parentMirrored) mirrorInPlace(clip);
   }
+  /** 6091 的首帧脚本确定朝向；其 num（6090）的首帧脚本显示本回合次数。
+   * 外层转盘 6097/6184 的前八帧先转动，第九帧才创建这个结果，不应冻结外层。 */
+  function showLuckyResult(clip, fighter) {
+    if (!clip || !fighter || fighter.luckyCount == null) return;
+    stopAt(clip, Number(fighter.side) === 0 ? 1 : 2);
+    const num = clip.byName && clip.byName('num');
+    if (num) stopAt(num, Math.max(1, Math.min(6, Math.round(Number(fighter.luckyCount) || 1))));
+  }
   /** 新建实例的接管点（`render.js` 的 `onClip`）：钉持有者 / 贴容器 / 拨手里的武器 / 状态图标朝向。 */
   function onClip(clip) {
     /* 手里的武器：原版是这些容器/美术**自己的第 1 帧脚本**在调 `_root.chooseWeaponGo(this)` /
      * `_root.chooseWeapon(this)` / `_root.showWeaponSize(this)`（`Squirrel.as:425/476/522`）。
      * 复刻里接到"实例化这一刻"，与装备那套同一个接管点。 */
     const fighter = fighterOf(clip);
+    if (Number(clip.tag.id) === 6091) {
+      if (fighter) showLuckyResult(clip, fighter);
+      else retryOrientation(clip, showLuckyResult);
+      return;
+    }
     const art = fighter && fighter.weaponNow;
     if (art) {
       const cont = WEAPON_ART_CONTAINERS[Number(clip.tag.id)];
@@ -1663,6 +1676,8 @@
          * （`stopAt` → `showFrame()` → 建子件 → `onClip`），所以必须写在它前面。 */
         api.weaponNow = (r && r.action === 'weapon')
           ? { id: Number(r.id) || 0, level: Number(r.level) || 1 } : null;
+        api.luckyCount = (r && r.action === 'skill' && Number(r.id) === 23)
+          ? Math.max(1, Math.min(6, Math.round(Number(r.boomCount) || 1))) : null;
         stopAt(sel, plan.frame);
         /* 记下这一次真正拨到的是哪一帧（回归据此钉住"技能走的是 4~21 那一档，
          * 不是幻兽的 29+id"）。 */
@@ -1675,8 +1690,6 @@
          * 站着、没有跑过去攻击”。退回当前帧唯一子件，保证普攻/武器至少播一条动作。 */
         const inner = sel.byName('attack') || onlyChildClip(sel);
         if (!inner) return;
-        const luckyCleanup = (r.action === 'skill' && Number(r.id) === 23)
-          ? freezeLuckyWheel(inner) : null;
         await playClip(inner, {
           deep: true, onFrame: (n) => {
             if (acts.guard && n >= acts.guard && h.guard) h.guard();
@@ -1684,7 +1697,6 @@
             if (acts.hit && n >= acts.hit && h.hit) h.hit();
           },
         });
-        if (luckyCleanup) luckyCleanup();
       },
       /** 这一侧的动作到底有没有真的跑起来（调试 / 回归用）。
        *  `atk` / `def` = 此刻**出手动画**（`attacks.attack`）与**受击动画**（`defenses.defense` /
@@ -2245,34 +2257,6 @@
         if (live) live.floats[side] = Math.max(0, (live.floats[side] || 1) - 1);
       });
     }
-  }
-
-  /** 幸运一击的「转盘」：原素材 6122 第 4~7 帧把 6097 接进来后**没有卸载**，
-   *  6097 的 67 帧会自动循环，真形态 6185 用的是另一颗 6184，同样会循环。
-   *  这里在出手后短暂旋转约 1.1s，把当前**动画帧**停住（不另画任何数字/徽章），
-   *  随后 `boomSplit` 仍按 Sim 的 `boomCount` 分段。 */
-  function freezeLuckyWheel(attackClip) {
-    if (!attackClip || !attackClip.g) return null;
-    let timer = null, done = false;
-    const cleanup = () => { if (timer) clearTimeout(timer); timer = null; };
-    const settle = () => {
-      if (!live || live.stopped) { cleanup(); return; }
-      const host = attackClip.g;
-      const nodes = host.querySelectorAll
-        ? host.querySelectorAll('g[sid="6097"], g[sid="6184"]') : [];
-      if (!nodes.length) { if (!done) timer = setTimeout(settle, 50); return; }
-      done = true;
-      for (const el of nodes) {
-        const clip = el.__clip;
-        if (!clip || !clip.gotoAndStop) continue;
-        const max = clip.frameCount ? clip.frameCount() : 0;
-        const frame = Math.max(1, Math.min(max || (clip.frame + 1), Number(clip.frame) + 1));
-        try { clip.gotoAndStop(frame); } catch (e) {}
-      }
-      cleanup();
-    };
-    timer = setTimeout(settle, 1100);
-    return cleanup;
   }
 
   /** `boom(mc, num)`（`MainMovie.as:15710`）：幸运一击的**多球分裂**。
@@ -3772,6 +3756,7 @@
     _ensureFloatDigits: (digits, want) => ensureFloatDigits(digits, want),
     /* 幸运一击多球分裂只复制这颗球，不复制整段出手动画。 */
     _luckyBall: LUCKY_BALL,
+    _showLuckyResult: showLuckyResult,
     /* 三侠图集新动作起手时先画哪一帧（idx=-1 也不能清成空白）。 */
     _atlasPaintFrame: (anim) => atlasPaintFrame(anim),
     /* 这一拍受击方头顶该飘哪一颗状态图标（`Player.specialEffect` 的 statu 档位）。 */

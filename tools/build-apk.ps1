@@ -247,12 +247,11 @@ if ((Test-Path $verFile) -and (Test-Path $propFile)) {
     $ver = $verMatch.Groups[1].Value
     if ($ver -match '^\d+\.\d+\.\d+(\.\d+)?$') {
       $seg = @($ver.Split('.'))
-      if ($seg.Count -ge 4) {
-        $vcode = ([int64]$seg[0] * 1000000000) + ([int64]$seg[1] * 1000000) +
-          ([int64]$seg[2] * 1000) + [int64]$seg[3]
-      } else {
-        $vcode = ([int64]$seg[0] * 1000000) + ([int64]$seg[1] * 1000) + [int64]$seg[2]
-      }
+      # 与 build-release.ps1 同一套「四段热修」编码：三段版 hotfix=0。
+      # 1.1.0.1 = 1001000001，1.1.1 = 1001001000（不是旧的 1001001，否则会被判降级）。
+      $hotfix = if ($seg.Count -ge 4) { [int64]$seg[3] } else { 0 }
+      $vcode = ([int64]$seg[0] * 1000000000) + ([int64]$seg[1] * 1000000) +
+        ([int64]$seg[2] * 1000) + $hotfix
       $props = [System.IO.File]::ReadAllText($propFile)
       $props = [regex]::Replace($props, '(?m)^tauri\.android\.versionName=.*$', 'tauri.android.versionName=' + $ver)
       $props = [regex]::Replace($props, '(?m)^tauri\.android\.versionCode=.*$', 'tauri.android.versionCode=' + $vcode)

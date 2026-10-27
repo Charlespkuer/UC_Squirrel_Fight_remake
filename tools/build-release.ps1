@@ -347,19 +347,16 @@ if ($DryRun -or $CleanOnly) {
   Write-Utf8NoBom $verJsonPath $n
   Ok "scripts\version.json → $target @ $commit $today"
 
-  # 安卓的版本号还有一处：gen/android/app/tauri.properties（gitignore 掉了，但它是
-  # 安卓构建直接读的**真源**——2026-10 改为原地构建后就在这棵树上，build-apk.ps1 出包前
-  # 还会对账）。versionName 写显示版本 $target；versionCode 用
-  # major*1000000 + minor*1000 + patch（0.4.6 → 4006），四段版再把第四段拼到末尾
-  # （1.1.0.1 → 1001000001），既保持递增，又不会和 1.1.0 撞号。
+  # 安卓 versionName 写显示版本 $target；versionCode 统一按「四段热修」编码：
+  #   major*1e9 + minor*1e6 + patch*1e3 + hotfix
+  # 这样 1.1.0.1 → 1001000001，而 1.1.1（三段）按 hotfix=0 编码为 1001001000，
+  # 仍然大于 1.1.0.1；旧的三段公式（1.1.1 → 1001001）会比四段热修包小得多，
+  # 安卓就会判「降版本安装」。三段/四段都走同一套高位编码，不再分叉。
   $androProps = Join-Path $TAURI 'gen\android\app\tauri.properties'
   if (Test-Path $androProps) {
-    if ($segTarget.Count -ge 4) {
-      $vcode = ([int64]$segTarget[0] * 1000000000) + ([int64]$segTarget[1] * 1000000) +
-        ([int64]$segTarget[2] * 1000) + [int64]$segTarget[3]
-    } else {
-      $vcode = ([int64]$segTarget[0] * 1000000) + ([int64]$segTarget[1] * 1000) + [int64]$segTarget[2]
-    }
+    $hotfix = if ($segTarget.Count -ge 4) { [int64]$segTarget[3] } else { 0 }
+    $vcode = ([int64]$segTarget[0] * 1000000000) + ([int64]$segTarget[1] * 1000000) +
+      ([int64]$segTarget[2] * 1000) + $hotfix
     $n = Replace-First (Read-Text $androProps) '(?m)^(tauri\.android\.versionName=).*$' $target
     if ($null -ne $n) { Write-Utf8NoBom $androProps $n }
     $n = Replace-First (Read-Text $androProps) '(?m)^(tauri\.android\.versionCode=).*$' "$vcode"

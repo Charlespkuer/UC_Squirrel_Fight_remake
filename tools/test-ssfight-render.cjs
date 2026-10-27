@@ -1022,6 +1022,13 @@ function checkSharedFeedbackLifecycle() {
   const og = ch.slice(ch.indexOf('async function openGate('), ch.indexOf('async function openGateConfirm('));
   assert.ok(/State\.stageRun\(id\) \? 2 : \(State\.stageAccess\(id\)\.ok \? 1 : 3\)/.test(og),
     '六级页六颗星：在途一轮（= 原版 keep）→ 2「继续挑战」/ 可打 → 1 / 其余 → 3');
+  /* 2026-10 用户口径：关卡出战确认的介绍文字不能越框，且「返回 / 战斗」按钮位置对调。
+   * 两个都落在 `openGateConfirm`：文字缩到 11 号重排、战斗键右移 / 返回键左移。 */
+  const gc = ch.slice(ch.indexOf('async function openGateConfirm('), ch.indexOf('async function openGateConfirm(') + 6000);
+  assert.ok(/setFieldText\(info1,[\s\S]*?,\s*11\)/.test(gc) && /setFieldText\(info2,[\s\S]*?,\s*11\)/.test(gc)
+    && /ok\.setExtraTransform\('translate\(' \+ \(\(dx \+ halfGap\) \/ sa\)/.test(gc)
+    && /no\.setExtraTransform\('translate\(' \+ \(\(-dx - halfGap\) \/ sb\)/.test(gc),
+    '关卡出战确认：info1/info2 缩到 11 号重排，返回在左 / 战斗在右，两键再拉开 GAP');
   /* ③ 详情页：按 kind 选帧 + 技能那一格写死「技能」。 */
   const st = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-status.js'), 'utf8').replace(/\r\n/g, '\n');
   assert.ok(/frame: isW \? 1 : 2, label: '武器技能详情'/.test(st),
@@ -1296,10 +1303,13 @@ async function checkClassicFight() {
     && !/visible\(atk, false\)/.test(idleBody) && /visible\(sel, true\)/.test(uf),
     '角色动作要重启嵌套表情/眼睛层，待机时把出手层复位到第 1 帧（不能整层隐藏：待机本体就画在里面）');
   assert.ok(/function freezeNestedAnim\(/.test(uf)
-    && /if \(o\.deep\) freezeNestedAnim\(clip\);/.test(uf)
+    && /if \(o\.deep && !o\.keepNested\) freezeNestedAnim\(clip\);/.test(uf)
     && /const end = lastContentFrame\(child\)/.test(uf)
-    && /stopAt\(child, end\)/.test(uf),
-    '角色动作结束要冻结嵌套表情/眼睛在最后一个有内容的帧（倒地哭脸不能继续循环切换）');
+    && /stopAt\(child, end\)/.test(uf)
+    && /playClip\(deadClip, \{ deep: true, keepNestedIds: \[6365\] \}\)/.test(uf)
+    && /function freezeNestedAnim\(clip, inGear, keepIds\)/.test(uf)
+    && /if \(keepIds && keepIds\.has\(Number\(clip\.tag && clip\.tag\.id\)\)\) return;/.test(uf),
+    '角色动作结束要冻结嵌套表情/眼睛；失败倒地只放行头顶灵魂，表情停在最后一张脸');
   assert.ok(/holder\.__hero = hero \|\| null;/.test(uf), 'buildFighter 必须把挂上去的主角本体留在 holder 上');
   assert.ok(/const mc = \(holder && holder\.__hero\)/.test(uf), 'makeFighter 必须优先用回传的主角本体');
   const simSrc = fs.readFileSync(path.join(ROOT, 'js/sim.js'), 'utf8').replace(/\r\n/g, '\n');
@@ -1339,8 +1349,8 @@ async function checkClassicFight() {
   for (const [k, acts] of [['dodge', SfFight.ACTS.dodge], ['attackBack', SfFight.ACTS.attackBack]]
     .concat(Object.entries(SfFight.ACTS.comeBack)))
     assert.ok(byId.has(String(acts.sym)), k + ' 的动画元件 ' + acts.sym + ' 要在 tags-fight.json 里');
-  assert.ok(/if \(clip\.frame >= stopIdx\) \{[\s\S]{0,160}?stopAt\(clip, stopIdx \+ 1\);[\s\S]{0,120}?resolve\(\);\s*return;\s*\}/.test(uf),
-    '动作片断播到停止帧必须停住，并在 deep 动作结束时冻结嵌套表情 —— 不停的话节拍器会把同一个动作再循环一遍');
+  assert.ok(/if \(clip\.frame >= stopIdx\) \{[\s\S]{0,700}?stopAt\(clip, stopIdx \+ 1\);[\s\S]{0,700}?if \(o\.deep && !o\.keepNested\) freezeNestedAnim\(clip\);[\s\S]{0,160}?finish\(\);\s*return;\s*\}/.test(uf),
+    '动作片断播到停止帧必须停住；普通 deep 动作冻结嵌套表情，倒地动作只放行 6365 灵魂');
   assert.ok(/playClip\(inner, \{\n\s*(?:deep: true, )?onFrame: \(n\) => \{\n\s*if \(acts\.guard/.test(uf),
     '出手动画要按帧脚本在起手/命中帧回调，而不是固定延时');
   /* ②b⁗⁗ 防御技（绝对防御 16 / 龟甲术 7）**在命中那一刻才起手**（2026-11 第一百七十六批）：
@@ -1374,6 +1384,14 @@ async function checkClassicFight() {
     /sel\.attachChild\(ballId, 1, 'boom'\)/.test(uf) && !/sel\.attachChild\(symId, 1, 'boom'\)/.test(uf),
     '幸运一击要按 boomCount 分裂，但复制的是球（6116）而不是整段出手动画（否则动画不停叠加）');
   assert.equal(SfFight._luckyBall.id, '6116', '多球分裂的球元件');
+  /* 转盘 6097 在原素材里会自己循环；必须在短暂旋转后停住，并把 boomCount 压到中心。
+   * 否则就是用户报的「一直转，然后直接打出次数」。 */
+  assert.ok(/function freezeLuckyWheel\(attackClip\)/.test(uf)
+    && /freezeLuckyWheel\(inner\)/.test(uf)
+    && /querySelectorAll\('g\[sid="6097"\], g\[sid="6184"\]'\)/.test(uf)
+    && /clip\.gotoAndStop\(frame\)/.test(uf)
+    && !/lucky-value/.test(uf),
+    '幸运一击的转盘要按 6097/6184 的现有动画帧停住，不另画数字');
   /* 伤害飘字：4 位模板不够时补 digit 槽，最多到 32 位 int（10 位）；特效档封顶第 3 档。 */
   assert.equal(JSON.stringify(SfFight._damageFloatPlan(9999)), JSON.stringify({ mag: 9999, digits: 4, tier: 3 }));
   assert.equal(JSON.stringify(SfFight._damageFloatPlan(10000)), JSON.stringify({ mag: 10000, digits: 5, tier: 3 }));
@@ -2200,8 +2218,22 @@ function checkClassicSystemStyle() {
   const sysAt = ui.indexOf('function openSystem()');
   const sysBody = ui.slice(sysAt, ui.indexOf('function importSave()', sysAt));
   assert.ok(sysAt > 0 && sysBody.length > 0, '找不到系统页实现');
-  assert.equal((sysBody.match(/sysBtn\(/g) || []).length, 8,
-    '游戏设置应为 8 颗键（存档导出/导入/修改昵称/跳过按钮 + 分辨率/全面屏/状态栏/调试面板），界面模式单独成卡');
+  assert.equal((sysBody.match(/sysBtn\(/g) || []).length, 9,
+    '游戏设置应为 9 颗键（存档导出/导入/修改昵称/跳过按钮 + 分辨率/全面屏/状态栏/后台运行 + 调试面板），界面模式单独成卡');
+  assert.ok(/data-action="background-run"/.test(sysBody) && /Main\.setBackgroundRun/.test(sysBody),
+    '系统页要有「后台运行」开关，并把选择同步给安卓壳');
+  /* 用户 2026-10-27 口径：后台运行不要横跨整排，放 4×2 的第二排最后一格；
+   * 调试面板是工具键，挪到网格下方（仍在系统页、始终可见）。 */
+  const bgAt = sysBody.indexOf("sysBtn('后台运行'");
+  const bgCloseAt = sysBody.indexOf("'</div>'", bgAt);
+  const dbgRowAt = sysBody.indexOf('settings-debug-row', bgAt);
+  assert.ok(bgAt > 0 && bgCloseAt > bgAt && dbgRowAt > bgCloseAt,
+    '「后台运行」应当是 4×2 网格的最后一颗，后面直接结束网格（调试面板另起一行）');
+  assert.ok(/<div class="settings-debug-row">'\+dbgBtn/.test(sysBody),
+    '调试面板要放到网格外的 settings-debug-row');
+  assert.ok(/\.settings-debug-row\{[^}]*display:flex[^}]*justify-content:flex-end/.test(css),
+    '调试面板要放网格外、并靠右对齐（用户 2026-10-27 口径）');
+  assert.ok(!/\.uc-button\.wide\{grid-column/.test(css), '后台运行不再横跨整行');
   assert.ok(/settings-mode-card/.test(sysBody) && /data-action="uimode"/.test(sysBody) &&
     /当前：' \+ esc\(modeNow\)/.test(sysBody),
     '界面模式要单独成卡，并显示当前模式与切换目标');
@@ -2419,6 +2451,19 @@ function checkBattleReactionPolish() {
     /5940: 1, 5952: 1, 5956: 1/.test(fr) &&
     /function orientTextArt\(clip, fighter\) \{[\s\S]{0,320}?stopAt\(clip, 1\)/.test(fr),
     '反击命中时就要起我方受击/归位，不能等对方攻击动画播完；小宇宙/闪避的镜像字标要停在正字帧并给敌方补自翻'
+  );
+  /* 反击伤害要等反击命中才扣血：命中帧先写「主攻击后」的中途血，runCounter().settle() 再写终值。 */
+  assert.ok(
+    /applyHp\(rec, r, \{ beforeCounter: true \}\)/.test(fr) &&
+    /const deferCounter = !!\(opts && opts\.beforeCounter\)[\s\S]{0,120}?counterDmg[\s\S]{0,80}?counterFakeDie[\s\S]{0,80}?counterRebound/.test(fr),
+    '反击伤害不能在主攻击命中帧提前扣血条，要等 attackback 命中'
+  );
+  assert.ok(
+    /function makeStatuApi\(statu\)/.test(fr) &&
+    /const statuApi = makeStatuApi\(holder && holder\.byName \? holder\.byName\('statu'\) : null\)/.test(fr) &&
+    /if \(statu\) stopAt\(statu, statu\.frameCount/.test(fr) &&
+    /setStatu: statuApi\.setStatu, specialEffect: statuApi\.specialEffect/.test(fr),
+    '三侠/木人也要接状态图标（力/敏/速下降会飘），开局先把残留的力↑收掉'
   );
 }
 
@@ -3068,4 +3113,10 @@ function checkMobileComposeWorkflow() {
   checkMessageRankAndTowerCg();
   checkHeroAtlasFilling();
   checkBalanceAndRewardContracts();
+  /* 2026-10 用户报：1 级战斗后消息键还没解锁，主界面却飘着一个 NEW。
+   * `newMessage` 是独立红点，必须跟消息键的 2 级门槛一起判断，不能只看战斗记录。 */
+  const um = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-main.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/const canSeeMessages = Number\(S\.level\) >= 2;/.test(um)
+    && /nm\.gotoAndStop\(canSeeMessages && hasNewMessages\(\) \? 1 : 2\)/.test(um),
+    '1 级未解锁消息键时不能点亮 newMessage 红点（否则 NEW 悬空）');
   console.log('PASS test-ssfight-render（帧语义 / 原版素材契约 / 文本索引 / 经典切页真值、内容宿主与统一命中 / 共用反馈 / 原版战果续战与关闭生命周期 / 位图 HD 覆盖接线（含 1x 归档） / 局内战斗素材与动作映射 / 更换装备原版页）');})().catch(err => { console.error(err); process.exitCode = 1; });

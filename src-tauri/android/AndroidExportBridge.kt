@@ -2,13 +2,16 @@ package com.ssdz.classic
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.ContentUris
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.Looper
 import android.provider.MediaStore
 import android.system.Os
 import android.util.Log
@@ -23,9 +26,11 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
- * 安卓端「导出存档」落点（**所有受支持的 Android 版本都落到系统「下载」目录**）。
+ * 安卓端 JS ↔ 原生桥（`window.SSDZAndroid`）：导出存档落点、沉浸式状态栏、系统浏览器外链。
  *
  * WebView 里 `<a download>` 默认会被 Tauri/Wry 存到应用私有目录
  * `/data/user/0/com.ssdz.classic/...`，普通文件管理器打不开。这里直接写公共目录：
@@ -42,14 +47,18 @@ import java.io.IOException
  * JS 侧入口：`window.SSDZAndroid.*`。返回值都是 JSON 字符串：
  *   `{ok:true,path:"Download/xxx.json",method:"mediastore|legacy",bytes:N}`
  *   `{ok:false,msg:"...",needPermission:true}`（仅老系统未授权时）
+ * 外链入口 `openExternal(url)` 见下面单独一段：它是「支持作者」等按钮在安卓上的唯一出路。
  */
 class AndroidExportBridge(
     private val activity: Activity,
     private val webViewProvider: () -> WebView?,
+    /** 设置页「后台运行」：把开关同步给 MainActivity（决定切后台要不要 pauseTimers）。 */
+    private val onBackgroundRunChanged: (Boolean) -> Unit = {},
 ) {
     companion object {
         private const val TAG = "SSDZExport"
         private const val REQ_WRITE_STORAGE = 0x5353
+        private const val MAX_URL_LENGTH = 2048
         const val AUTO_FILE_NAME = "松鼠大战-自动存档.json"
     }
 
@@ -83,6 +92,61 @@ class AndroidExportBridge(
             }
         }
         return JSONObject().put("ok", true).put("hidden", hide).toString()
+    }
+
+    /** 用系统浏览器打开 http(s) 链接。返回 `{ok:true}` 或 `{ok:false,msg:"..."}`。
+     *
+     *  为什么不用 Rust 里 spawn `am start`：那是以**本应用 uid** 去跑 shell 的命令入口，
+     *  ActivityManager 会校验 `com.android.shell` 与调用 uid 是否一致，结果必然是
+     *  `SecurityException: Permission Denial`；而且 `Command::spawn` 只要进程起来就算成功，
+     *  页面会把「其实没打开」当成成功，玩家看到的就是「点支持作者没反应」（2026-10 反馈）。
+     *  应用自己发 ACTION_VIEW 才是受支持的路径，也不依赖 `am` / PATH / SELinux。
+     */
+    @JavascriptInterface
+    fun openExternal(rawUrl: String): String {
+        val url = rawUrl.trim()
+        val http = url.startsWith("https://", ignoreCase = true) || url.startsWith("http://", ignoreCase = true)
+        if (!http || url.length > MAX_URL_LENGTH || url.any { it.isWhitespace() }) {
+            return fail("链接不合法（只允许 http(s) 网址）")
+        }
+        var result: String? = null
+        val latch = CountDownLatch(1)
+        val open = Runnable {
+            result = try {
+                activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                JSONObject().put("ok", true).toString()
+            } catch (_: ActivityNotFoundException) {
+                fail("这台设备上没有能打开网页的浏览器")
+            } catch (e: Exception) {
+                Log.e(TAG, "open external failed: $url", e)
+                fail("打开浏览器失败：" + (e.message ?: e.javaClass.simpleName))
+            } finally {
+                latch.countDown()
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            // 已经在主线程（例如从别的原生回调进来）就别 post 了，否则会自己等自己。
+            open.run()
+        } else {
+            activity.runOnUiThread(open)
+            /* @JavascriptInterface 跑在 WebView 的 JavaBridge 线程上，等主线程结果不会死锁；
+             * 最多 2 秒，超时按失败处理 —— 前端会退到「复制链接」兜底，不会假报成功。 */
+            latch.await(2, TimeUnit.SECONDS)
+        }
+        return result ?: fail("打开浏览器超时，请稍后再试")
+    }
+
+    /** 设置页「后台运行」开关：`'1'` = 切后台继续跑（MainActivity 不 pauseTimers，音乐也不停），
+     *  `'0'` = 原来的省电行为（暂停音乐并冻结计时器）。 */
+    @JavascriptInterface
+    fun setBackgroundRun(enabled: String): String {
+        val on = enabled == "1" || enabled.equals("true", ignoreCase = true)
+        try {
+            onBackgroundRunChanged(on)
+        } catch (e: Exception) {
+            Log.w(TAG, "setBackgroundRun failed", e)
+        }
+        return JSONObject().put("ok", true).put("backgroundRun", on).toString()
     }
 
     /** 老系统（API ≤ 28）申请写公共下载目录的权限；授权结果通过 JS 回调送回。 */

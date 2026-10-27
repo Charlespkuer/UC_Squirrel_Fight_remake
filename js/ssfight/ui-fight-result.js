@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const NS = 'http://www.w3.org/2000/svg';
-  const SYMBOL = { arena: '3822', rank: '3776', stage: '4839', result: '4692' };
+  const SYMBOL = { arena: '3822', rank: '3776', stage: '4839', result: '4692', notice: '4692' };
   let current = null, generation = 0;
   const node = (tag, attrs) => {
     const n = document.createElementNS(NS, tag);
@@ -351,8 +351,10 @@
       const layout = {
         arena: { x: 48, y: 130, width: 21, size: 9, leading: 10, rows: 2, actionY: 154, pageY: 139 },
         rank: { x: 68, y: 69, width: 18, size: 10, leading: 12, rows: 5, actionY: 143, pageY: 128 },
-        stage: { x: 68, y: 65, width: 18, size: 10, leading: 12, rows: 5, actionY: 137, pageY: 123 },
+        stage: { x: 64, y: 58, width: 20, size: 9.5, leading: 10.5, rows: 6, actionY: 140, pageY: 126 },
         result: { x: 66, y: 78, width: 19, size: 10, leading: 12, rows: 5, actionY: 158, pageY: 141 },
+        /* 4692 的通用提示：没有「战斗胜利」那行，正文从标题下方开始。 */
+        notice: { x: 66, y: 66, width: 19, size: 10, leading: 12, rows: 6, actionY: 158, pageY: 141 },
       }[kind];
       const rows = lines(options.text, layout.width), perPage = layout.rows;
       let page = 0;

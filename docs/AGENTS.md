@@ -26,6 +26,7 @@
 | `经典模式-优化与取证Skill.md` | 经典 UI 按问题查阅的取证参考；日常入口先读 `js/ssfight/AGENTS.md` 和 `.agents/skills/classic-ui-maintenance/SKILL.md` |
 | `界面按钮文案规范.md` | 按钮动作标签的字数/括号/状态徽章规范（用户 2026-10 点名要的）；`tools/test-button-labels.cjs` 是可执行版本 |
 | `双语与本地化方案.md` | 尚未落地的方案（等用户拍板） |
+| `联机实现方案.md` | 服务端权威异步对战的实施计划（用户 2026-10 点名要的）：原版 ssfight 协议取证、无头 Sim 实测、账号/快照/天梯/房间协议、111.229.39.217 部署步骤；**§11 追加独立包 / 服务器权威存档 / 反作弊 / 仅经典界面 / 容量 / 每级快照 / 福利经济**；改动联机先同步这份与 P1 要建的 `tools/test-online-*.cjs` |
 | `AGENTS.md` | 本文件（规范，不是"文档"） |
 | `screenshots/` | README 用的截图 |
 

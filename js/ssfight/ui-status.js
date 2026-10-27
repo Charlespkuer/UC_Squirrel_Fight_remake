@@ -798,8 +798,8 @@
       g.__footer.setAttribute('fill', ready ? '#2f7a4f' : '#b06b1f');
     }
   }
-  /* 爬塔回看：右上角空白画一张「勇者之剑」小卡（准备页那一块在这里变成破镜进度）。
-   * 没有剑时也显示「尚未持剑」，告诉玩家首次巡逻胜利后可以寻剑。 */
+  /* 爬塔回看：右上角空白画一张「渴血之剑」小卡（准备页那一块在这里变成剑的阶段 / 成长 / 献祭）。
+   * 没有剑时也显示「尚未持剑」，告诉玩家第一次巡视胜利后必定获得。 */
   const HERO_BLADE_BOX = { x: 164, y: 38, w: 134, h: 54, r: 7 };
   function heroBladeCardEnsure(view) {
     let g = view.__heroBladeCard;
@@ -811,7 +811,7 @@
     g.appendChild(heroSvgRect(box.x, box.y, box.w, box.h, box.r, '#fff9e9', '#d8bd86', 1.6));
     g.appendChild(heroSvgRect(box.x + 3, box.y + 3, box.w - 6, box.h - 6, box.r - 2, 'none', '#fffdf7', 1));
     const title = heroChromeText(box.x + 9, box.y + 13, 7.6, '#3d654e', '800', 'start');
-    title.textContent = '勇者之剑';
+    title.textContent = '渴血之剑';
     const state = heroChromeText(box.x + box.w - 8, box.y + 12.4, 6.2, '#a37735', '700', 'end');
     state.textContent = '尚未持剑';
     const line1 = heroChromeText(box.x + 9, box.y + 27, 6.4, '#6b4a25', '700', 'start');
@@ -834,18 +834,20 @@
     g.style.display = '';
     const blade = hero.blade || null;
     if (g.__state) {
-      g.__state.textContent = blade ? ('破镜 ×' + blade.stacks) : '尚未持剑';
+      g.__state.textContent = blade ? (blade.unlimited ? '永续' : ('剩 ' + blade.uses + ' 场')) : '尚未持剑';
       g.__state.setAttribute('fill', blade ? '#2f7a4f' : '#a37735');
     }
     if (g.__line1) g.__line1.textContent = blade
-      ? ('力量 −' + Math.round(blade.powerCut * 100) + '% · 生命上限 −' + Math.round(blade.hpCut * 100) + '%')
-      : '首次巡逻胜利后可得';
+      ? (blade.name + (blade.final ? ' · 最终' : blade.dead ? ' · 失活' : ' · 第' + blade.stage + '阶段'))
+      : '第一次巡视胜利';
     if (g.__line2) g.__line2.textContent = blade
-      ? ('击败巡逻魔王成长 · 当前 ' + blade.stacks + ' / 10 层')
-      : '跨百层保留 · 破镜克镜';
+      ? ('献祭成长 ×' + blade.stacks + ' / 5')
+      : '固定获得 · 不可跳过';
     if (g.__line3) g.__line3.textContent = blade
-      ? '照影之境不会吞掉已成长层数'
-      : '每次巡逻胜利 +1 层破镜';
+      ? (blade.final
+        ? ('克镜：力量 −' + Math.round(blade.powerCut * 100) + '% · 生命 −' + Math.round(blade.hpCut * 100) + '%')
+        : (blade.dead ? '失活 · 偏生存 · 无需献祭' : '战斗后需献祭一件祭品'))
+      : '跨百层保留 · 会进化';
   }
 
   /** 盖在 3911 胶囊上的「开始挑战」四个字（独立一层，切帧不会把它重建掉）。 */
@@ -1366,6 +1368,24 @@
     };
   }
   function esc2(v) { return esc(v); }
+  /** 勇者本局已掌握的武技（`id:level`）→ `{id, level, ref}`；没掌握返回 null。 */
+  function heroOwnedItem(kind, id) {
+    const hero = Hero();
+    if (!hero) return null;
+    const list = (kind === 'weapon' ? hero.weapons : hero.skills) || [];
+    for (const raw of list) {
+      const parts = String(raw).split(/[:,]/), sid = Number(parts[0]);
+      if (sid !== Number(id)) continue;
+      return { id: sid, level: Math.max(1, Number(parts[1]) || 1), ref: (kind === 'weapon' ? 'w:' : 's:') + sid };
+    }
+    return null;
+  }
+  /** 勇者武技详情只读的「下一级」信息（等级 / 成功率 / 失败保底 / 满级）。 */
+  function heroReadonlyUp(kind, id) {
+    if (!window.TowerHero || typeof TowerHero.upgradeInfoOf !== 'function') return null;
+    try { return TowerHero.upgradeInfoOf(Hero(), (kind === 'weapon' ? 'w:' : 's:') + Number(id)); }
+    catch (e) { return null; }
+  }
   /** 打开某一项的详情页。`kind` = 'weapon' / 'skill'，`id` = 字典 id。 */
   function openItemDetail(kind, id) {
     const C = window.UI && UI.classic;
@@ -1374,10 +1394,32 @@
     const host = detailHost();
     if (!host) return;
     const base = map.getValue ? map.getValue(id) : null;
-    const own = (kind === 'weapon' ? State.myWeapons() : State.mySkills()).find((x) => x.id === Number(id)) || null;
-    const up = own && State.upgradeInfo ? State.upgradeInfo(kind, Number(id)) : null;
-    const info = (C && C.catalogInfo) ? C.catalogInfo(kind, current.gridPage || 0) : null;
-    const row = info ? info.items.filter((x) => x.id === Number(id))[0] : null;
+    const hero = heroView() ? Hero() : null;
+    let own = null, up = null, row = null;
+    if (hero) {
+      const item = heroOwnedItem(kind, id);
+      if (!item) {
+        /* 未掌握：仍走“尚未获得”的详情，但绝不能用账号里的同名武技。 */
+        const info = gridInfo();
+        row = info ? info.items.filter((x) => x.id === Number(id))[0] : null;
+        detailView(host, kind, id, base, null, null, row);
+        return;
+      }
+      own = item;
+      if (kind === 'weapon' && window.TowerHero && TowerHero.heroWeapon) {
+        /* `heroWeapon` 读的是 `id:level`（不是升级 API 的 `w:id` ref）。 */
+        const w = TowerHero.heroWeapon(Number(id) + ':' + item.level);
+        if (w) own = Object.assign({}, w, { level: item.level });
+      }
+      up = heroReadonlyUp(kind, id);
+      const info = gridInfo();
+      row = info ? info.items.filter((x) => x.id === Number(id))[0] : null;
+    } else {
+      own = (kind === 'weapon' ? State.myWeapons() : State.mySkills()).find((x) => x.id === Number(id)) || null;
+      up = own && State.upgradeInfo ? State.upgradeInfo(kind, Number(id)) : null;
+      const info = (C && C.catalogInfo) ? C.catalogInfo(kind, current.gridPage || 0) : null;
+      row = info ? info.items.filter((x) => x.id === Number(id))[0] : null;
+    }
     detailView(host, kind, id, base, own, up, row);
   }
   /** 画详情页（整页 DOM；只有图标那一小块挂原版矢量元件）。 */
@@ -1450,6 +1492,7 @@
     try { t.freezeDescendants(view); } catch (e) {}
     const locked = !own;
     const maxed = !!(up && up.max);
+    const heroDetail = heroView();
     const s = (S() || {});
     const set = (name, str) => { const c = view.byName(name); if (c && t) t.setText(c, str == null ? '' : String(str)); };
     /* ---------- 排布微调（用户 2026-10 本批 ⑨）----------
@@ -1524,8 +1567,8 @@
         if (isW) {
           const add = String((base && base.harmAdd1) || '').split('|')[idx] || '';
           desText = base && base.remark1
-            ? ('升至下一阶将额外' + base.remark1 + '和' + add + '点基本伤害！')
-            : ('升至下一阶将额外提升' + add + '点基本伤害！');
+            ? ('升至下一阶将额外' + base.remark1 + '和' + add + '点基本伤害')
+            : ('升至下一阶将额外提升' + add + '点基本伤害');
           if (weaponSpecial) desText += '\n特殊效果：' + weaponSpecial;
         } else {
           const row = window.GData && GData.trueSkillRow ? GData.trueSkillRow(id) : null;
@@ -1536,7 +1579,8 @@
         }
       }
     }
-    setWrapped(view.byName('des'), desText);
+    const desClip = setWrapped(view.byName('des'), desText);
+    shrinkDetailDesc(desClip, 0.9);
     /* 名字固定单行（真化名字见 `setDetailName` 的注释），不能按 5 字容量硬断行。 */
     setDetailName(view.byName('name'), shownName);
     /* 图标位：挂原版矢量元件（与格子里那 10 颗同一套素材）。
@@ -1557,18 +1601,30 @@
     const req = view.byName('requirement');
     if (req) {
       const noSkillUp = !isW && [6, 13].indexOf(Number(id)) >= 0;
-      const reqFrame = locked ? (isW ? 4 : 5) : (noSkillUp ? 3 : (maxed ? 6 : 1));
+      const reqFrame = locked ? (isW ? 4 : 5)
+        : ((noSkillUp || (up && up.blocked)) ? 3 : (maxed ? 6 : 1));
       stopAt(req, reqFrame);
       const setReq = (n, v) => { const c = clipOf(req, n); if (c && t) t.setText(c, v == null ? '' : String(v)); };
       if (reqFrame === 1 && up) {
-        setReq('need1', up.coin);
-        setReq('current1', s.goldPoint | 0);
-        setReq('need2', up.book);
-        setReq('current2', ((s.props || {})[up.bookId] | 0));
-        setReq('rate', (up.rate != null ? up.rate + '%' : '100%'));
-        setReq('level', '');
-        /* 「需要」那一列的数字（`need1` 金松果 / `need2` 卷轴）右移一点（用户口径见 `DETAIL_SHIFT`）。 */
-        shiftNeedValues(req, DETAIL_SHIFT.needX);
+        if (heroDetail) {
+          /* 勇者武技：只展示**当前等级 + 下一级成功率**，不消耗账号金松果/卷轴，
+           * 也不提供直接升级（升级仍走本局成长 / 铸币修炼）。 */
+          setReq('need1', '—');
+          setReq('current1', '—');
+          setReq('need2', '—');
+          setReq('current2', '—');
+          setReq('rate', (up.rate != null ? up.rate + '%' : '—'));
+          setReq('level', '勇者 · 只读');
+        } else {
+          setReq('need1', up.coin);
+          setReq('current1', s.goldPoint | 0);
+          setReq('need2', up.book);
+          setReq('current2', ((s.props || {})[up.bookId] | 0));
+          setReq('rate', (up.rate != null ? up.rate + '%' : '100%'));
+          setReq('level', '');
+          /* 「需要」那一列的数字（`need1` 金松果 / `need2` 卷轴）右移一点（用户口径见 `DETAIL_SHIFT`）。 */
+          shiftNeedValues(req, DETAIL_SHIFT.needX);
+        }
       }
     }
     /* 左列「等级 / 伤害 / 类型」三个值一起右移一点（用户口径见 `DETAIL_SHIFT`）。 */
@@ -1598,7 +1654,7 @@
     /* ⚠ 每一处都要判 `current && current.detail`：详情页是异步挂的，玩家可能在
      *   挂载/setText 的间隙就点了「升级」，这时 `current.detail` 已经没了 ——
      *   不判就会抛在 `onFire` 里，把点击变成静默失败（实测"点升级/返回没反应"）。 */
-    if (okBtn && !locked && !maxed) {
+    if (okBtn && !locked && !maxed && !heroDetail) {
       wireClickable(okBtn, {
         idle: 1, hover: 2,
         onFire: () => {
@@ -1612,8 +1668,8 @@
         },
       });
     }
-    /* 锁定 / 满级那一档只有"返回"（`button1`）：别留一颗点了没反应的灰键在路由里。 */
-    if (okBtn && (locked || maxed)) {
+    /* 锁定 / 满级 / 勇者只读那一档只有"返回"（`button1`）：别留一颗点了没反应的灰键在路由里。 */
+    if (okBtn && (locked || maxed || heroDetail)) {
       stopAt(okBtn, 3);
       okBtn.g.style.cursor = 'default';
       okBtn.g.style.pointerEvents = 'none';
@@ -1758,6 +1814,30 @@
     t.setText(node || clip, wrapped);
     return clip;
   }
+  /** 详情页的黑色说明文字缩一号（用户 2026-11：真·狼牙棒这类长说明会压到下方按钮）。
+   *  `setText` 已经把行断好；这里只把每个 `<text>` 的字号与行距一起压到 `factor`。
+   *  以第一行的 y 为锚点向下压缩，块顶不动、块底缩短，不会整体上移。 */
+  function shrinkDetailDesc(clip, factor) {
+    const box = textBoxOf(clip);
+    const node = box && (box.g || box);
+    if (!node || !node.querySelectorAll) return 0;
+    const f = Math.max(0.5, Math.min(1, Number(factor) || 0.9));
+    const list = [...node.querySelectorAll('text')];
+    if (!list.length) return 0;
+    const y0 = parseFloat(list[0].getAttribute('y'));
+    const anchorY = Number.isFinite(y0) ? y0 : 0;
+    let n = 0;
+    for (const el of list) {
+      if (el.__descShrunk) continue;
+      const fs0 = parseFloat(el.getAttribute('font-size')) || 12;
+      el.setAttribute('font-size', (fs0 * f).toFixed(2));
+      const y = parseFloat(el.getAttribute('y'));
+      if (Number.isFinite(y)) el.setAttribute('y', (anchorY + (y - anchorY) * f).toFixed(2));
+      el.__descShrunk = true;
+      n++;
+    }
+    return n;
+  }
   /** 详情页名字固定单行。
    *  `name`=4542 框宽 75.6、13 号字，`wrapToField` 按 `floor(75.6/13)=5` 算容量；
    *  真化名字是「真.」+ 4 个全角字 = 5.55 字宽（实际 72.15），明明放得下，
@@ -1823,6 +1903,7 @@
     const weaponSpecial = isW ? weaponSpecialText(base) : '';
     const locked = !own;
     const maxed = !!(up && up.max);
+    const heroDetail = heroView();
     const ownLv = own ? (Number(own.level) || 0) : 0;
     const trueOwn = ownLv > 10;
     const shownName = base ? ((trueOwn ? '真.' : '') + base.name) : '';
@@ -1830,7 +1911,8 @@
     const harm = own && isW ? (own.harmLo + '-' + own.harmHi)
       : (isW ? (base && base.harm ? base.harm : '') : '技能');
     /* 说明：普通档原表 des；真化档按 `getDescription` / `getDesSkill` 写下一阶。 */
-    let descText = locked ? '尚未获得——升级、开启礼包有机会获得'
+    let descText = locked ? (heroDetail ? '尚未掌握——在塔内学习新的武技'
+      : '尚未获得——升级、开启礼包有机会获得')
       : (base && base.remark ? base.remark : '');
     if (own && !(up && up.fixed)) {
       if (ownLv >= 15) descText = isW ? ('神器已达最高阶段！' + (weaponSpecial ? '\n特殊效果：' + weaponSpecial : '')) : '神技已达最高阶段！';
@@ -1839,8 +1921,8 @@
         if (isW) {
           const add = String((base && base.harmAdd1) || '').split('|')[nextLv - 11] || '';
           descText = base && base.remark1
-            ? ('升至下一阶将额外' + base.remark1 + '和' + add + '点基本伤害！')
-            : ('升至下一阶将额外提升' + add + '点基本伤害！');
+            ? ('升至下一阶将额外' + base.remark1 + '和' + add + '点基本伤害')
+            : ('升至下一阶将额外提升' + add + '点基本伤害');
           if (weaponSpecial) descText += '\n特殊效果：' + weaponSpecial;
         } else {
           const row = window.GData && GData.trueSkillRow ? GData.trueSkillRow(id) : null;
@@ -1852,13 +1934,19 @@
       }
     }
     const rows = [];
-    if (!locked && !maxed && up) {
+    if (!locked && !maxed && up && !heroDetail) {
       rows.push({ label: '金松果', need: up.coin, have: s.goldPoint | 0 });
       rows.push({ label: isW ? '卷轴' : '技能卷轴', need: up.book, have: ((s.props || {})[up.bookId] | 0) });
     }
     const pct = up && !maxed ? up.rate : null;
     const pos = (b) => 'left:' + m.x(b.x).toFixed(2) + 'px;top:' + m.y(b.y).toFixed(2) + 'px;width:' + m.s(b.w).toFixed(2) + 'px;' +
       (b.h ? 'height:' + m.s(b.h).toFixed(2) + 'px;' : '');
+    const heroReq = heroDetail
+      ? '<div class="sf-d-req" style="' + pos(DETAIL.req) + '">' +
+          (pct != null ? '<div class="sf-d-req-rate"><b>下一级成功率</b><i>' + esc2(pct) + '%</i></div>' : '') +
+          '<div class="small-label" style="margin-top:4px">本局勇者武技 · 无法直接升级</div>' +
+        '</div>'
+      : '';
     dom.innerHTML =
       '<div class="sf-d-panel" style="' + pos(DETAIL.panel) + '"></div>' +
       '<div class="sf-d-tab" style="' + pos(DETAIL.tab) + '">' + (isW ? '武器详情' : '技能详情') + '</div>' +
@@ -1869,20 +1957,22 @@
       '</div>' +
       '<div class="sf-d-desc" style="' + pos(DETAIL.desc) + '">' + esc2(descText) + '</div>' +
       (locked
-        ? '<div class="sf-d-locked" style="' + pos(DETAIL.req) + '">尚未获得<br>该' + (isW ? '武器' : '技能') + '</div>'
-        : (rows.length || pct != null
-          ? '<div class="sf-d-req" style="' + pos(DETAIL.req) + '">' +
-              '<div class="sf-d-req-head"><span>需要</span><span>已有</span></div>' +
-              rows.map((r) => '<div class="sf-d-req-row"><b>' + esc2(r.label) + '</b><i class="need">' + esc2(r.need) + '</i><i class="have">' + esc2(r.have) + '</i></div>').join('') +
-              (pct != null ? '<div class="sf-d-req-rate"><b>成功率</b><i>' + esc2(pct) + '%</i></div>' : '') +
-            '</div>'
-          : '')) +
-      '<button class="sf-d-ok' + ((locked || maxed) ? ' off' : '') + '" style="' + pos({ x: DETAIL.btn.ok.x, y: DETAIL.btn.y, w: DETAIL.btn.ok.w, h: DETAIL.btn.h }) + '">' +
-        (maxed ? '已满级' : (isW ? '升级武器' : '升级技能')) + '</button>' +
+        ? '<div class="sf-d-locked" style="' + pos(DETAIL.req) + '">' + (heroDetail ? '尚未掌握<br>该' : '尚未获得<br>该') + (isW ? '武器' : '技能') + '</div>'
+        : (heroDetail
+          ? heroReq
+          : (rows.length || pct != null
+            ? '<div class="sf-d-req" style="' + pos(DETAIL.req) + '">' +
+                '<div class="sf-d-req-head"><span>需要</span><span>已有</span></div>' +
+                rows.map((r) => '<div class="sf-d-req-row"><b>' + esc2(r.label) + '</b><i class="need">' + esc2(r.need) + '</i><i class="have">' + esc2(r.have) + '</i></div>').join('') +
+                (pct != null ? '<div class="sf-d-req-rate"><b>成功率</b><i>' + esc2(pct) + '%</i></div>' : '') +
+              '</div>'
+            : ''))) +
+      '<button class="sf-d-ok' + ((locked || maxed || heroDetail) ? ' off' : '') + '" style="' + pos({ x: DETAIL.btn.ok.x, y: DETAIL.btn.y, w: DETAIL.btn.ok.w, h: DETAIL.btn.h }) + '">' +
+        (maxed ? (heroDetail ? '无法升级' : '已满级') : (heroDetail ? '勇者 · 只读' : (isW ? '升级武器' : '升级技能'))) + '</button>' +
       '<button class="sf-d-back" style="' + pos({ x: DETAIL.btn.back.x, y: DETAIL.btn.y, w: DETAIL.btn.back.w, h: DETAIL.btn.h }) + '">返回</button>';
     mountDetailIcon(dom.querySelector('.sf-d-icon'), row);
     const ok = dom.querySelector('.sf-d-ok');
-    if (ok && !maxed && !locked) ok.addEventListener('click', () => {
+    if (ok && !maxed && !locked && !heroDetail) ok.addEventListener('click', () => {
       const r = State.doUpgrade(kind, Number(id));
       if (window.UI && UI.toast) UI.toast(r.msg);
       /* 成功 / 失败都要重画：等级或成功率档位会变。 */
@@ -2020,12 +2110,19 @@
         e.stopPropagation();
         const it2 = cell.__cellItem;
         if (!it2) return;
-        /* 勇者准备：点一下点亮、再点一下变暗；爬塔中回看武技是只读的（本局成长已固定）。 */
+        /* 勇者准备：点一下点亮、再点一下变暗；爬塔中回看：
+         *   · 已掌握的武技 → 打开**只读详情**（当前等级 / 下一级成功率，不能直接升级）；
+         *   · 未掌握的空格 → 什么都不做（不让它开出“别人的”升级页）。 */
         if (heroView()) {
           const hero = Hero();
-          if (!hero || hero.mode !== 'setup') return;
-          const out = heroTogglePick(cell.__cellKind, it2.id);
-          if (out && out.ok === false && out.msg && window.UI && UI.toast) UI.toast(out.msg);
+          if (!hero) return;
+          if (hero.mode === 'setup') {
+            const out = heroTogglePick(cell.__cellKind, it2.id);
+            if (out && out.ok === false && out.msg && window.UI && UI.toast) UI.toast(out.msg);
+            return;
+          }
+          if (!it2.has) return;
+          openItemDetail(cell.__cellKind, it2.id);
           return;
         }
         /* ⚠ **查看别人时不许开详情**：原版 `showWeaponSkillWin`（:16658-16790）整段被
@@ -2374,7 +2471,8 @@
     });
     if (mine !== seq || host.isConnected === false) { view.destroy(); return false; }
     openTrace = 'mounted';
-    current = { view: view, container: host, tab: 'status', gridPage: 0,
+    const initialTab = (o.tab === 'weapons' || o.tab === 'skills') ? o.tab : 'status';
+    current = { view: view, container: host, tab: initialTab, gridPage: 0,
       /* 查看别人：整页数据源换成他（原版 `isViewfriend`），返回键也换成"回挑战页"。
        * `hero`：勇者准备 / 爬塔中回看，同一颗页元件、另一份数据源与按钮层。
        * `overlay` = 盖在挑战页上的一层（不拆底页，返回时不重开挑战页 / 不刷新敌人）。 */
@@ -2393,6 +2491,11 @@
     t.freezeDescendants(view);
     try { fillValues(view); } catch (e) { if (window.__errs) window.__errs.push('status values: ' + e.message); }
     try { wireTabs(); } catch (e) { if (window.__errs) window.__errs.push('status wire: ' + (e && e.message)); }
+    /* 入口可以指定初始页签：勇者头像 → 直接进「技能」页；普通状态页仍是「状态」。 */
+    try {
+      if (initialTab !== 'status') setTab(initialTab);
+      else applyTab();
+    } catch (e) { if (window.__errs) window.__errs.push('status initial tab: ' + (e && e.message)); }
     /* 数值会变（经验/胜率/穿了装备），1s 一次重刷；与村庄页同一套节拍。 */
     current.timer = setInterval(() => {
       if (!current || current.view !== view || current.tab !== 'status') return;
@@ -4158,7 +4261,7 @@
       host.className = 'classic-home ssfight-home sf-friend-view sf-hero-view ssfight-view';
       host.setAttribute('aria-label', o.label || '勇者');
       ui.appendChild(host);
-      const p = open(host, { hero: hero, overlay: true });
+      const p = open(host, { hero: hero, overlay: true, tab: o.tab });
       if (p && typeof p.then === 'function') {
         return p.then((ok) => {
           if (!ok && host && host.parentNode) host.parentNode.removeChild(host);

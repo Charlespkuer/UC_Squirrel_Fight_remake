@@ -23,6 +23,9 @@ class MainActivity : TauriActivity() {
   /** 当前是否已冻结（pauseTimers）。 */
   private var frozen = false
 
+  /** 设置页「后台运行」：true = 切后台不冻结计时器（音乐也由页面自己决定是否继续）。 */
+  @Volatile private var backgroundRun = false
+
   companion object {
     /* 为什么冻结要延后 250ms：onPause 里那段 evaluateJavascript 要先把音乐 pause 掉、
      * 再把最后一次存档 flush 出去（安卓这一串是异步 IPC）。立刻 pauseTimers 有可能把
@@ -56,6 +59,8 @@ class MainActivity : TauriActivity() {
 
   /** 冻结 WebView：rAF / setInterval 一起停摆，后台不再推进游戏进度（音乐由上面那段 JS 停）。 */
   private fun freezeWebViewSoon() {
+    /* 玩家在设置里打开「后台运行」时不冻结：让计时器 / 动画继续跑（更耗电，玩家自己选）。 */
+    if (backgroundRun) return
     val view = gameWebView ?: return
     if (frozen) return
     val seq = lifecycleSeq
@@ -137,7 +142,7 @@ class MainActivity : TauriActivity() {
     /* WebView 可能晚于 onResume 创建，不能只依赖 Activity 的恢复回调。 */
     webView.resumeTimers()
     frozen = false
-    val bridge = AndroidExportBridge(this) { gameWebView }
+    val bridge = AndroidExportBridge(this, { gameWebView }) { enabled -> backgroundRun = enabled }
     exportBridge = bridge
     webView.addJavascriptInterface(bridge, "SSDZAndroid")
   }

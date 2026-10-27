@@ -38,15 +38,38 @@
     for (let lv = EXP_TABLE.length; lv <= level; lv++) v = Math.round(v * 1.08 / 10) * 10;
     return v;
   }
-  /** 战斗 HUD / 伤害飘字的统一大数格式：1e7 以下按整数，达到 1e7 用科学计数法保留两位小数。 */
+  /** 战斗 HUD / 伤害飘字的统一大数格式：1e7 以下按整数；达到 1e7 改用
+   *  万 / 亿 / 兆 / 京（超过京再用「万京 / 亿京 / 兆京 / 京京…」组合），保留 4 位有效数字。
+   *  阈值与旧版科学计数法一致（仍是 1e7），只换显示单位，不改什么时候开始缩写。 */
+  const BIG_UNITS = ['万', '亿', '兆', '京'];
+  /** 第 n 个「万进」单位：1=万、2=亿、3=兆、4=京、5=万京、6=亿京… */
+  function bigUnitLabel(index) {
+    if (index <= 0) return '';
+    if (index <= 4) return BIG_UNITS[index - 1];
+    return bigUnitLabel(index - 4) + '京';
+  }
+  /** 4 位有效数字；用 toPrecision 先舍入，避免 999.95 → 1000.0 这种多出一位。 */
+  function fourSig(x) {
+    const rounded = Number(x.toPrecision(4));
+    const digits = rounded >= 1000 ? 0 : rounded >= 100 ? 1 : rounded >= 10 ? 2 : 3;
+    return rounded.toFixed(digits);
+  }
   function formatBigNumber(value) {
     const n = Number(value);
     if (!Number.isFinite(n)) return '0';
     const abs = Math.abs(n);
+    /* 阈值不变：1e7 以下仍按整数显示（不是一到 1e4 就变「万」）。 */
     if (abs < 1e7) return String(Math.round(n));
-    const exp = Math.floor(Math.log10(abs));
-    const mant = n / Math.pow(10, exp);
-    return mant.toFixed(2) + 'e' + exp;
+    let index = Math.max(1, Math.floor(Math.log10(abs) / 4));
+    let scale = Math.pow(10, index * 4);
+    let x = abs / scale;
+    /* 9999.5 万这类舍入会进位到 10000，要换到下一个单位（如 1.000亿）。 */
+    if (Number(x.toPrecision(4)) >= 10000) {
+      index += 1;
+      scale = Math.pow(10, index * 4);
+      x = abs / scale;
+    }
+    return (n < 0 ? '-' : '') + fourSig(x) + bigUnitLabel(index);
   }
   const WS_LEVELS = [2, 3, 4, 6, 8, 10, 12, 14, 16, 18, 20, 23, 26, 29, 32, 35, 38, 41, 44, 47, 50, 56, 62, 68];
   /* 53/59/65 级发属性书是旧离线版的自创（原版服务端升级回包没有这三个道具；
@@ -59,15 +82,17 @@
     if (kind === 'skill' && id === 13) return false;
     return level >= 50 || !(kind === 'weapon' ? [16, 17] : [23, 24]).includes(id);
   }
-  /** 被动 1~5：1~10 级按原表每级增长；11~15 级按原表“再提高 N”逐真级累加。 */
+  /** 被动 1~5：1~10 级按原表每级增长；11~15 级按原表“再提高 N”逐真级累加。
+   *  1 级的值按原版数值表（用户 2026-10 提供的图像）取：风驰 2、身强 5；
+   *  其余 2~10 级按 propertyAdd 递增（风驰 +1、身强 +8）。 */
   function passiveBonus(id, level) {
     id = Number(id);
     const lv = Math.max(1, Math.min(15, Number(level) || 1));
     const baseLv = Math.min(lv, 10);
     const extra = trueSkillValue(id, lv);
     if (id === 1 || id === 2) return 2 * baseLv + extra;
-    if (id === 3) return 1 * baseLv + extra;
-    if (id === 4) return 8 * baseLv + extra;
+    if (id === 3) return 2 + 1 * (baseLv - 1) + extra;
+    if (id === 4) return 5 + 8 * (baseLv - 1) + extra;
     if (id === 5) return 10 + 2 * (baseLv - 1) + extra;
     return 0;
   }
@@ -188,7 +213,7 @@
     16: { mode: 'extra', values: [5, 6, 7, 8, 9],      key: 'rebound', text: '将再提高N%反弹伤害' },
     17: { mode: 'extra', values: [6, 8, 10, 12, 14],   key: 'heal',    text: '将再提高N点补血量' },
     18: { mode: 'extra', values: [6, 8, 10, 12, 18],   key: 'disarm',  text: '收缴对手武器的成功率再提高N%' },
-    23: { mode: 'flat',  value: 10,                   key: 'luckyBase', text: '将再提高10点基础伤害' },
+    23: { mode: 'extra', values: [10, 10, 10, 10, 10], key: 'luckyBase', text: '将再提高10点基础伤害' },
     24: { mode: 'extra', values: [8, 8, 10, 10, 12],   key: 'counter', text: '将再提高N%反击伤害' },
   });
   /** 兼容旧读取口：真5端点（绝对项取最后一档，累加项取累计值）。 */
@@ -202,16 +227,20 @@
   /* 真·武器的追加效果：数值取自原词典 weaponsMap[id].remark1
    * （西瓜刀 +5% 连击、流星锤 +3% 扔 3 次、激光剑 +3% 暴击、狼牙棒 +6 持续伤害、
    *   板砖 +3% 打晕、忍者镖 +2% 吸血、沉默之斧 +4% 沉默）。
-   * **固定一次**，只在武器等级 > 10（真形态）时生效；不要乘真级。 */
+   * **逐真级叠加**：用户 2026-10 的数值表里 11~15 级每一格都是这个数
+   * （西瓜刀 5|5|5|5|5、激光剑 3|3|3|3|3…），所以真1 只加一份、真5 加五份；
+   * 旧实现“固定一次”会让真5 少算 4 份。 */
   const TRUE_WEAPON_BONUS = Object.freeze({
     4: { combo: 5 }, 10: { triple: 3 }, 11: { crit: 3 },
     12: { dot: 6 }, 13: { stun: 3 }, 14: { lifesteal: 2 }, 16: { silence: 4 },
   });
-  /** 真武器的某类加成（武器不是真形态时返回 0）。 */
+  /** 真武器的某类加成（武器不是真形态时返回 0；真N = N 份）。 */
   function trueWeaponBonus(weapon, key) {
-    if (!weapon || Number(weapon.level) <= 10) return 0;
+    const lv = trueLevel(weapon && weapon.level);
+    if (!weapon || lv <= 0) return 0;
     const row = TRUE_WEAPON_BONUS[Number(weapon.id)];
-    return row && row[key] ? row[key] : 0;
+    const step = row && row[key] ? row[key] : 0;
+    return step * lv;
   }
 
   /** 真等级：11 级 = 真1 … 15 级 = 真5；10 级及以下为 0。 */
@@ -474,7 +503,10 @@
     /* 常驻挑战的「当日已通关次数」：{date, count}，每日递增惩罚的计数（见 State.challengeDailyCount）。 */
     challengeDaily: null,
     tower: { maxLayer: 0, run: null },                                    // 无尽挑战塔（主塔）
-    endless: { best: 0, weekBest: 0, weekKey: '', bestLayer: 0, shieldDate: '', run: null },
+    /* 无尽塔纪录：best/bestLayer = 经典剧本；heroBest/heroBestLayer = 勇者剧本（两套分开记，
+     * 界面再取两者的最大值作为「所有模式」的最高分/最深）。 */
+    endless: { best: 0, weekBest: 0, weekKey: '', bestLayer: 0,
+      heroBest: 0, heroWeekBest: 0, heroBestLayer: 0, shieldDate: '', run: null },
   };
 
   // 竞技场 AI 名称前缀

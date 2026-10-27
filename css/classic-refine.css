@@ -375,7 +375,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .sf-d-stat b{font-size:calc(var(--u) * 7);color:#8a5a18;font-weight:normal}
 .sf-d-stat i{font-size:calc(var(--u) * 7.5);color:#5b3010;font-style:normal;font-weight:bold}
 .sf-d-desc{position:absolute;overflow:hidden;
-  font-size:calc(var(--u) * 7);line-height:1.35;color:#6b4526;white-space:pre-line}
+  font-size:calc(var(--u) * 6.5);line-height:1.32;color:#6b4526;white-space:pre-line}
 .sf-d-req,.sf-d-locked{position:absolute;box-sizing:border-box;
   padding:calc(var(--u) * 2) calc(var(--u) * 2.6);border-radius:calc(var(--u) * 5);
   background:linear-gradient(#f6e3bd,#eed6a6);border:calc(var(--u) * .6) solid #d3a86a}
@@ -815,10 +815,14 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .sync-ask .ask-foot{margin-top:10px;font-size:17px;line-height:1.6;color:#8a6a3c}
 
 /* ---------- 系统页：分辨率 / 全面屏（画面设置） ----------
-   存档 / 昵称 / 跳过 + 画面 / 状态栏 / 调试，共 8 颗，排成两排 4 个；
-   原来的 setting-group / setting-choice 一并去掉。 */
+   存档 / 昵称 / 跳过 + 画面 / 状态栏 / 后台运行，共 8 颗，排成两排 4 个；
+   调试面板单独放在网格下方（工具键，不占设置格）。原来的 setting-group / setting-choice 一并去掉。 */
 .settings-grid.system-grid{grid-template-columns:repeat(4,1fr)}
 .settings-grid.system-grid .uc-button{font-size:28px}
+/* 调试面板：网格外的一颗工具键，靠右对齐（用户 2026-10-27 口径）、比设置键小一号，
+   不跟 4×2 抢位置。 */
+.settings-debug-row{position:relative;z-index:1;display:flex;justify-content:flex-end;padding:0 30px 6px}
+.settings-debug-row .uc-button{font-size:22px;min-height:56px;padding:0 24px}
 /* 界面模式单独成卡：两套界面是两套独立存档，属于会改变整个游戏观感与进度的大动作，
    不跟导出/分辨率这些工具键挤在 4×2 网格里。卡片用米金底板，右侧留一颗大号金键。 */
 .settings-mode-card{position:relative;z-index:1;display:flex;align-items:center;gap:24px;

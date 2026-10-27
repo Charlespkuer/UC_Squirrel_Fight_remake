@@ -1619,11 +1619,12 @@ test('不使用药剂的战斗不消耗有效次数，被动技能按原字典�
   const g = game(), s = g.State.state();
   s.skills = ['1:1', '2:2', '3:3', '4:1']; s.propsStates[3] = 20; s.propsStates[7] = 20;
   const stats = g.State.totalStats({ useProps: false });
-  same(stats, { power: s.power + 2, agility: s.agility + 4, speed: s.speed + 3, hp: s.maxHp + 8 });
-  /* 真化被动按原表“再提高 N”逐档累加：力王真5 +39、风驰 +24、身强 +180。 */
+  same(stats, { power: s.power + 2, agility: s.agility + 4, speed: s.speed + 4, hp: s.maxHp + 5 });
+  /* 真化被动按原表“再提高 N”逐档累加：力王真5 +39、风驰 +25、身强 +177。
+   * 风驰 1 级为 2（之后每级 +1）、身强 1 级为 5（之后每级 +8），见用户数值表。 */
   s.skills = ['1:15', '3:15', '4:15'];
   const trueStats = g.State.totalStats({ useProps: false });
-  same(trueStats, { power: s.power + 39, agility: s.agility, speed: s.speed + 24, hp: s.maxHp + 180 });
+  same(trueStats, { power: s.power + 39, agility: s.agility, speed: s.speed + 25, hp: s.maxHp + 177 });
   g.State.fightReward(true, { useProps: false });
   assert.equal(s.propsStates[3], 20); assert.equal(s.propsStates[7], 20);
   g.State.fightReward(true); assert.equal(s.propsStates[3], 19);
@@ -1650,15 +1651,33 @@ test('真化武器/技能数值严格对齐 ssfight 原表（不是真5端点线
   assert.deepEqual([11, 12, 13, 14, 15].map((lv) => G.trueSkillValue(24, lv)), [8, 16, 26, 36, 48], '致命反击累计 +48%');
   // 被动：1~10 级基础 + 真化累加
   assert.equal(G.passiveBonus(1, 15), 39, '力王真5 +39');
-  assert.equal(G.passiveBonus(3, 15), 24, '风驰真5 +24');
-  assert.equal(G.passiveBonus(4, 15), 180, '身强真5 +180');
+  assert.equal(G.passiveBonus(3, 15), 25, '风驰真5 +25（1 级 2 + 9 级 ×1 + 真化 14）');
+  assert.equal(G.passiveBonus(4, 15), 177, '身强真5 +177（1 级 5 + 9 级 ×8 + 真化 100）');
   assert.equal(G.passiveBonus(5, 15), 47, '武器好手真5 +47');
-  // 真武器追加效果是固定一次，不是每真级叠加
-  assert.equal(G.trueWeaponBonus({ id: 4, level: 15 }, 'combo'), 5, '西瓜刀真化 +5% 连击');
+  /* 幸运一击：真化每级 +10（表中 11~15 全为 10），真5 累计 +50。 */
+  assert.deepEqual([11, 12, 13, 14, 15].map((lv) => G.trueSkillValue(23, lv)), [10, 20, 30, 40, 50], '幸运一击累计 +50');
+  // 真武器追加效果逐真级叠加：真1 一份、真5 五份
+  assert.equal(G.trueWeaponBonus({ id: 4, level: 15 }, 'combo'), 25, '西瓜刀真5 +25% 连击（5% × 5 真级）');
+  assert.equal(G.trueWeaponBonus({ id: 4, level: 12 }, 'combo'), 10, '西瓜刀真2 +10% 连击');
+  assert.equal(G.trueWeaponBonus({ id: 11, level: 11 }, 'crit'), 3, '激光剑真1 +3% 暴击');
   assert.equal(G.trueWeaponBonus({ id: 4, level: 10 }, 'combo'), 0, '普通形态不生效');
   // 真武器基础伤害按 harmAdd1 逐真级累计
   const w = g.State.weaponInst('4:15');
   assert.equal(w.harmLo, 142); assert.equal(w.harmHi, 150, '西瓜刀真5 142-150');
+});
+
+test('真化概率类效果按原表百分数结算（不是 100 倍，也不是乘算减暴击）', () => {
+  const g = game(), S = g.Sim;
+  const atk = { skills: { 9: 10 }, effects: {}, mods: {}, setFx: {} };   // 暴击 25%
+  assert.equal(S.critChanceVs(atk, { skills: { 10: 11 } }), 24.5, '真1 皮糙：25 − 0.5 个百分点');
+  assert.equal(S.critChanceVs(atk, { skills: { 10: 15 } }), 20, '真5 皮糙：25 − 5 个百分点');
+  assert.equal(S.critChanceVs(atk, { skills: {} }), 25, '没真化不减');
+  /* 色诱 56 / 暴击 4 倍 20 / 野球拳 100 都是百分数；旧代码 ×100 后变成必中，这里守住源码口径。 */
+  const src = fs.readFileSync(path.join(root, 'js/sim.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(!/trueVal\(8, lv\) \* 100/.test(src), '真·色诱 8~56% 不能再 ×100');
+  assert.ok(!/trueVal\(12, lv\) \* 100/.test(src), '真·野球拳 20~100% 不能再 ×100');
+  assert.ok(!/trueVal\(9, att\.skills\[9\]\) \* 100/.test(src), '真·暴击 2~20% 不能再 ×100');
+  assert.match(src, /trueVal\(7, lv\)/, '龟甲术多次使用概率取原表 20/40/60/80/100');
 });
 
 const fighter = (extra) => Object.assign({ name: '松鼠', level: 1, power: 10, agility: 10, speed: 10, hp: 100, weapons: [], skills: [] }, extra);
@@ -1823,8 +1842,9 @@ test('出手权重新表：技能 5 / 普通武器 8 / 投掷前两次 100 / 徒
   assert.equal(d16(10, 1), 0.5); assert.equal(d16(15, 2), 0.5);
   const s7 = (lv, n) => S.shellChanceOf({ skills: { 7: lv }, effects: {}, skillBoost: {} }, n);
   assert.deepEqual([1, 5, 10].map((lv) => s7(lv, 0)), [20, 22, 24.5]);
-  assert.deepEqual([11, 13, 15].map((lv) => s7(lv, 1)), [5, 15, 24]);
-  assert.equal(s7(10, 1), 1); assert.equal(s7(15, 2), 1);
+  /* 真化：首次仍是 24.5；「可多次使用」按原表 N% = 20/40/60/80/100（不是旧的 5/10/15/20/24）。 */
+  assert.deepEqual([11, 13, 15].map((lv) => s7(lv, 1)), [20, 60, 100]);
+  assert.equal(s7(10, 1), 1); assert.equal(s7(15, 2), 100);
   /* 流星锤三连击：固定随机 0 必中 2% 那一下，一次行动打出 3 段。 */
   const meteor = fighter({ power: 100, weapons: [{ id: 10, level: 1 }], mods: { mustHitFirst: 1 }, hp: 100000 });
   const dummy = fighter({ power: 1, agility: 1, speed: 1, hp: 1000000, maxHp: 1000000 });
@@ -2071,28 +2091,36 @@ test('每日任务按角色等级抽题：做不了的任务不会出现，升�
   assert.equal(S.questStatus().map((q) => q.key).join(','), keep, '升级不会换掉仍然能做的题');
 });
 
-test('音量/静音/分辨率/全面屏/状态栏/跳过显示/界面模式写进存档并读得回来', () => {
+test('音量/静音/分辨率/全面屏/状态栏/跳过显示/后台运行/界面模式写进存档并读得回来', () => {
   const g = game(), S = g.State, s = S.state();
-  same(s.settings, { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, showSkip: true, uiMode: 'classic' });
+  same(s.settings, { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true,
+    showSkip: true, backgroundRun: false, uiMode: 'classic' });
   assert.equal(S.RESOLUTIONS.length, 6, '六档分辨率');
   assert.equal(S.UIMODES.length, 2, '两档界面模式');
   assert.equal(S.resolutionHeight('auto'), 0);
   assert.equal(S.resolutionHeight('1080'), 1080);
   assert.equal(S.resolutionHeight('4k'), 0, '认不出的档位当自动');
-  S.setSettings({ volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false, uiMode: 'classic' });
-  same(S.settings(), { volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false, showSkip: true, uiMode: 'classic' });
+  S.setSettings({ volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false,
+    backgroundRun: true, uiMode: 'classic' });
+  same(S.settings(), { volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false,
+    showSkip: true, backgroundRun: true, uiMode: 'classic' });
   // 存档往返（浏览器存档模式下 save/load 走 localStorage）
   S.save(); S.load();
-  same(S.state().settings, { volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false, showSkip: true, uiMode: 'classic' });
+  same(S.state().settings, { volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false,
+    showSkip: true, backgroundRun: true, uiMode: 'classic' });
   // 坏值一律回落，不让坏档把画面或音量弄坏（界面模式认不出时按默认经典）
   same(S.normalizeSettings({ volume: 'x', muted: 'yes', resolution: 42, fullscreen: 1, uiMode: 'neon' }),
-    { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, showSkip: true, uiMode: 'classic' });
-  same(S.normalizeSettings({ volume: 5 }), { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, showSkip: true, uiMode: 'classic' });
-  same(S.normalizeSettings(null), { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, showSkip: true, uiMode: 'classic' });
+    { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true,
+      showSkip: true, backgroundRun: false, uiMode: 'classic' });
+  same(S.normalizeSettings({ volume: 5 }), { volume: 1, muted: false, resolution: 'auto', fullscreen: false,
+    hideStatusBar: true, showSkip: true, backgroundRun: false, uiMode: 'classic' });
+  same(S.normalizeSettings(null), { volume: 1, muted: false, resolution: 'auto', fullscreen: false,
+    hideStatusBar: true, showSkip: true, backgroundRun: false, uiMode: 'classic' });
   // 旧档（没有 settings 字段）读进来要有默认值
   const legacy = JSON.parse(JSON.stringify(s));
   delete legacy.settings;
-  same(S.normalizeSettings(legacy.settings), { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true, showSkip: true, uiMode: 'classic' });
+  same(S.normalizeSettings(legacy.settings), { volume: 1, muted: false, resolution: 'auto', fullscreen: false,
+    hideStatusBar: true, showSkip: true, backgroundRun: false, uiMode: 'classic' });
 });
 
 test('跳过键：超级松鼠 10 级解锁、非 VIP 20 级；系统页开关可隐藏', () => {
@@ -2515,6 +2543,53 @@ test('投掷武器降三维：死老鼠/屎坨坨/菜刀命中后有效三维下
   }
 });
 
+test('狼牙棒持续伤害对双方同口径：命中后给对方挂 DOT，并在对方行动时跳伤', () => {
+  const g = game(), Sim = g.Sim;
+  const oldRandom = g.math.random;
+  g.math.random = () => 0.1;   // 命中/35% 触发都必过，暴击（5%）不触发
+  const base = (name, extra) => Object.assign({ name, level: 30, hp: 99999, maxHp: 99999, power: 100,
+    agility: 100, speed: 1, weapons: [], skills: [], effects: {} }, extra || {});
+  try {
+    /* 我方先手：我方狼牙棒命中 → 敌方挂 DOT → 敌方行动时跳伤。 */
+    const me = base('我方', { speed: 100, weapons: [{ id: 12, level: 5 }], mods: { mustHitAll: 1 } });
+    const foe = base('敌方', { agility: 1 });
+    const mine = Sim.simulate(me, foe);
+    assert.ok(mine.rounds.some((r) => r.action === 'weapon' && r.attacker === 0 && Number(r.id) === 12 && r.dotApplied),
+      '我方狼牙棒命中后应给自己挂上 DOT');
+    assert.ok(mine.rounds.some((r) => r.action === 'dot' && r.attacker === 1 && r.selfDot && r.dmg > 0),
+      '敌方行动时应结算我方挂上的 DOT');
+
+    /* 敌方先手：同一代码路径也要对玩家生效，不能出现单边。 */
+    const me2 = base('我方', { agility: 1 });
+    const foe2 = base('敌方', { speed: 100, weapons: [{ id: 12, level: 5 }], mods: { mustHitAll: 1 } });
+    const theirs = Sim.simulate(me2, foe2);
+    assert.ok(theirs.rounds.some((r) => r.action === 'weapon' && r.attacker === 1 && Number(r.id) === 12 && r.dotApplied),
+      '敌方狼牙棒命中后应给我方挂上 DOT');
+    assert.ok(theirs.rounds.some((r) => r.action === 'dot' && r.attacker === 0 && r.selfDot && r.dmg > 0),
+      '我方行动时应结算敌方挂上的 DOT');
+  } finally { g.math.random = oldRandom; }
+});
+
+test('血牙·狂噬：每损失 25% 生命攻击 +20%（不是旧的 20% / +35%）', () => {
+  const mk = (mech, hp) => ({ name: '血牙', level: 60, hp, maxHp: 1000, power: 100, agility: 100, speed: 200,
+    weapons: [], skills: [], effects: {}, mech });
+  const hero = () => ({ name: '测试松鼠', level: 60, hp: 99999, maxHp: 99999, power: 1, agility: 1, speed: 1,
+    weapons: [], skills: [], effects: {} });
+  const powerAt = (mech, hp) => {
+    const g = game();
+    const res = g.Sim.simulate(hero(), mk(mech, hp), { collectStats: true });
+    const r = res.rounds.find((x) => x.attacker === 1 && x.effStats);
+    assert.ok(r, '敌方应当至少行动一次');
+    return { power: r.effStats[1].power, note: r.noteText || '' };
+  };
+  const plain75 = powerAt([], 750);
+  const blood75 = powerAt(['trialBloodfang'], 750);
+  assert.equal(blood75.power, plain75.power + 20, '损失 25% 时攻击 +20');
+  assert.match(blood75.note, /血牙·狂怒/, '机制触发要有可见提示');
+  const blood50 = powerAt(['trialBloodfang'], 500);
+  assert.equal(blood50.power, plain75.power + 40, '损失 50% 时两层共 +40');
+});
+
 /* 幻兽技能真正进 Sim：行动时触发要发一条独立的 `action:'pet'` 回合，
  * 经典回放据此按 `29 + petId` 播原版动画；`isRound:0` 表示不占 60 手行动上限。 */
 /* 现代随机战斗的「查看对手」：武技等级与装备加成要能从 foe 原始字段翻出来。 */
@@ -2626,20 +2701,31 @@ test('闪避类藏品再叠也不会超过 55%', () => {
   assert.equal(Sim.rules.dodgeCap, 55, '最终闪避上限就是 55%');
 });
 
-test('战斗大数显示：达到 1e7 用科学计数法，保留两位小数', () => {
+test('战斗大数显示：1e7 起用万/亿/兆/京（四位有效数字），以下仍是整数', () => {
   const g = game(), G = g.GData;
   assert.equal(G.formatBigNumber(9999999), '9999999');
-  assert.equal(G.formatBigNumber(10000000), '1.00e7');
-  assert.equal(G.formatBigNumber(12345678), '1.23e7');
-  assert.equal(G.formatBigNumber(-12345678), '-1.23e7');
+  assert.equal(G.formatBigNumber(10000000), '1000万');
+  assert.equal(G.formatBigNumber(12345678), '1235万');
+  assert.equal(G.formatBigNumber(99999999), '1.000亿');
+  assert.equal(G.formatBigNumber(100000000), '1.000亿');
+  assert.equal(G.formatBigNumber(123456789), '1.235亿');
+  assert.equal(G.formatBigNumber(1000000000000), '1.000兆');
+  assert.equal(G.formatBigNumber(1e16), '1.000京');
+  assert.equal(G.formatBigNumber(1e20), '1.000万京');
+  assert.equal(G.formatBigNumber(1e24), '1.000亿京');
+  assert.equal(G.formatBigNumber(1e32), '1.000京京');
+  assert.equal(G.formatBigNumber(-12345678), '-1235万');
 });
 
 test('暴击率 70% 硬上限，溢出的暴击率 1:1 转暴伤', () => {
   const g = game(), Sim = g.Sim;
   const hero = { skills: { 9: 15 }, silence: 0, setFx: {}, mods: { critBonus: 100, critDmgBonus: 20 } };
-  /* 5（基础）+ 30（15 级暴击）+ 100（藏品）= 135 → 上限 70，溢出 65。 */
+  /* 原表「10 级每级增加机率 N%」：15 级暴击技能也只按 10 级算 20%。
+   * 5（基础）+ 20（暴击技能封顶）+ 100（藏品）= 125 → 上限 70，溢出 55。 */
   assert.equal(Sim.critChanceOf(hero), 70, '暴击率硬上限 70%');
-  assert.ok(Math.abs(Sim.critDmgBonusOf(hero) - 0.85) < 1e-9, '20% 基础暴伤 + 65% 溢出（1:1）');
+  assert.equal(Sim.critChanceOf({ skills: { 9: 15 }, silence: 0, setFx: {}, mods: {} }), 25,
+    '真化不再提高暴击率（1~10 级 20%，真级只加 4 倍几率）');
+  assert.ok(Math.abs(Sim.critDmgBonusOf(hero) - 0.75) < 1e-9, '20% 基础暴伤 + 55% 溢出（1:1）');
   assert.equal(Sim.critCap, 70, '上限与面板/结算同源');
 });
 

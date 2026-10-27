@@ -26,7 +26,24 @@
     const element = on(root, 'home', handler);
     if (element) element.textContent = label || '\u8fd4\u56de';
   }
-  function alert(text) { C().modal('\u63d0\u793a', '<p>' + esc(text) + '</p>', [{ label: '\u786e\u5b9a' }], { small: true }); }
+  function alert(text) {
+    const msg = String(text == null ? '' : text);
+    /* 经典模式：原版 4692「提示」对话框（标题/按钮都是原版矢量），不再手搓 DOM 弹窗。 */
+    if (window.SfFightResult && window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic') {
+      let fellBack = false;
+      const fallback = () => {
+        if (fellBack) return;
+        fellBack = true;
+        C().modal('提示', '<p>' + esc(msg) + '</p>', [{ label: '确定' }], { small: true });
+      };
+      try {
+        Promise.resolve(SfFightResult.open({ kind: 'notice', title: '提示', text: msg, actions: [{ label: '确定' }] }))
+          .then((view) => { if (!view) fallback(); }).catch(fallback);
+        return;
+      } catch (e) { fallback(); return; }
+    }
+    C().modal('提示', '<p>' + esc(msg) + '</p>', [{ label: '确定' }], { small: true });
+  }
 
   /* ============================================================
    * 【EX0】村庄「征战」→ 挑战塔 / 无尽塔 二选一
@@ -606,6 +623,26 @@
       const text = s.joinRankCount === 0
         ? '每天前10场免费；第11-20场每场扣除5金松果。\n今日已赛 0/20。'
         : '本日免费场已打完，本场将扣除5金松果。\n今日已赛 ' + s.joinRankCount + '/20。';
+      /* 经典模式用原版「二次确认」4421（确定/取消是原版矢量按钮 + 烤进画稿的字），
+       * 不再手搓绿色 DOM 键；现代界面没有这套素材，仍走 C().modal。 */
+      if (window.SfChallenge && SfChallenge.openOriginalConfirm
+          && window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic') {
+        let fellBack = false;
+        const fallback = () => {
+          if (fellBack) return;
+          fellBack = true;
+          C().modal('天梯赛', '<p>' + text.replace(/\n/g, '<br>') + '</p>', [
+            { label: '开始比赛', cls: 'gold', run: begin },
+            { label: '返回', cls: 'muted' },
+          ], { small: true });
+        };
+        try {
+          Promise.resolve(SfChallenge.openOriginalConfirm({
+            label: '天梯赛', text, accept: begin, swapButtons: true, extraGap: 20,
+          })).then((view) => { if (!view) fallback(); }).catch(fallback);
+          return;
+        } catch (e) { fallback(); return; }
+      }
       C().modal('天梯赛', '<p>' + text.replace(/\n/g, '<br>') + '</p>', [
         { label: '开始比赛', cls: 'gold', run: begin },
         { label: '返回', cls: 'muted' },

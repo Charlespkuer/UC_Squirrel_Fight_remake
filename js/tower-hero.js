@@ -1,7 +1,7 @@
 /* Hero-mode profile and weapon/skill progression. No account writes, currency or save calls.
  * Upgrade rows come from upgradeMap: current levels 1..14 use
  * 100/100/100/70/60/40/25/15/10/100/8/5/4/3 percent.
- * Ordinary levels 1..9 gain +2 percentage points per failure, cleared on success.
+ * Ordinary levels 1..9 gain +3 percentage points per failure, cleared on success.
  * Current level 10 and above use the fixed row rate; 11..15 are true levels 1..5.
  */
 (function () {
@@ -15,6 +15,9 @@
     /* 2026-10-24 用户口径：勇者初始生命 800，力 / 敏 / 速同为 65。 */
     base: Object.freeze({ power: 65, agility: 65, speed: 65, maxHp: 800 }),
   });
+  /* 勇者武技普通级（1~9）的失败保底：每次失败 +3 个百分点，成功后清零。
+   * 账号武技仍是 State.UPGRADE_FAIL_BONUS=2；用户 2026-11 只要求勇者模式 +3。 */
+  const HERO_FAIL_BONUS_PCT = 3;
   /* ---------- 初始四维的重新分配（2026-10-24 用户口径） ----------
    * 生命固定 800，力 / 敏 / 速三项在**总点数不变**的前提下由玩家上下调整。
    * 「20% 下限」沿用玩家自由属性点那条口径：生命按 5 点折算 1 点属性，
@@ -56,6 +59,19 @@
       sum += value;
     }
     return sum === STAT_TOTAL ? out : initialStats();
+  }
+  /** 塔内每 5 层的勇者成长（独立于开局四维分配）。
+   *  不能直接改 base：normalize 的 cleanStats 要求三项合计正好 195，改完会被回滚成 65/65/65。
+   *  这里单存一份附加成长，fighter() 再叠到白值上。 */
+  function cleanTowerBonus(raw) {
+    if (!object(raw)) return null;
+    const out = {
+      power: integer(raw.power, 0, 0, 9999),
+      agility: integer(raw.agility, 0, 0, 9999),
+      speed: integer(raw.speed, 0, 0, 9999),
+      maxHp: integer(raw.maxHp, 0, 0, 999999),
+    };
+    return (out.power || out.agility || out.speed || out.maxHp) ? out : null;
   }
   /** 上 / 下调整一项：下键扣点进池、上键从池里加点；池空 / 满额 / 20% 下限都会拒绝。 */
   function adjustStat(rawValues, rawPool, key, dir) {
@@ -196,6 +212,7 @@
     if (!object(raw)) return null;
     /* baseVer=1 才认玩家调过的四维；旧档（80/65/60/900）没有这个标记，回新的初始 65/65/65/800。 */
     const base = raw.baseVer === 1 ? cleanStats(raw.base) : initialStats();
+    const towerBonus = cleanTowerBonus(raw.towerBonus);
     const hero = Object.assign({}, raw, { version: 1, baseVer: 1,
       base: Object.assign({}, CONFIG.base, base),
       weapons: [], skills: [], appearance: cleanAppearance(raw.appearance), upgradeFails: {}, uncapped: [],
@@ -236,6 +253,8 @@
     if (capped.length > CONFIG.normalLimit) {
       for (const it of capped.slice(CONFIG.normalLimit)) markUncapped(hero, it.ref);
     }
+    if (towerBonus) hero.towerBonus = towerBonus;
+    else delete hero.towerBonus;
     return count(hero) > 0 ? hero : null;
   }
   function repair(hero) {
@@ -276,8 +295,13 @@
   function fighter(raw) {
     const hero = normalize(raw);
     if (!hero) return null;
-    const me = { name: '勇者', level: 90, power: hero.base.power, agility: hero.base.agility,
-      speed: hero.base.speed, hp: hero.base.maxHp, maxHp: hero.base.maxHp,
+    const bonus = hero.towerBonus || {};
+    const baseMaxHp = hero.base.maxHp + (Number(bonus.maxHp) || 0);
+    const me = { name: '勇者', level: 90,
+      power: hero.base.power + (Number(bonus.power) || 0),
+      agility: hero.base.agility + (Number(bonus.agility) || 0),
+      speed: hero.base.speed + (Number(bonus.speed) || 0),
+      hp: baseMaxHp, maxHp: baseMaxHp,
       weapons: hero.weapons.map((s) => heroWeapon(s)).filter(Boolean),
       skills: hero.skills.map((s) => State.skillInst(s)).filter(Boolean).map((s) =>
         Object.assign(s, { trueBaseMul: trueBaseMul(s.level) })),
@@ -308,7 +332,7 @@
       if (!row) break;
       const key = failKey(item.kind, item.id), isTrue = level >= 10;
       const fails = isTrue ? 0 : integer(hero.upgradeFails[key], 0, 0, 999);
-      const rate = Math.min(100, Math.max(0, Number(row.rate) || 0) + (isTrue ? 0 : fails * 2));
+      const rate = Math.min(100, Math.max(0, Number(row.rate) || 0) + (isTrue ? 0 : fails * HERO_FAIL_BONUS_PCT));
       const success = opts.guaranteed === true || roll(opts.rng) * 100 < rate;
       if (success) { setLevel(hero, item, level + 1); delete hero.upgradeFails[key]; successes++; }
       else if (!isTrue) hero.upgradeFails[key] = Math.min(999, fails + 1);
@@ -322,6 +346,29 @@
       : item.name + '升级失败（成功率' + last.rate + '%）。';
     return { ok: true, ref: item.ref, name: item.name, before, level, successes,
       attempts: results.length, success: last.success, rate: last.rate, results, msg: label, label };
+  }
+  /** 只读的下一级信息（界面用）：当前等级、下一级成功率、失败保底次数、是否封顶/不可升级。
+   *  与 `upgrade()` 用同一把尺子：普通 1~9 级的成功率吃「每次失败 +3%」，
+   *  10 级及以上走真化固定行；技能 6 / 13 与 15 级封顶返回 `max: true`。 */
+  function upgradeInfoOf(hero, ref) {
+    if (!repair(hero)) return null;
+    const item = parseRef(ref);
+    if (!item || !owns(hero, item)) return null;
+    const level = Number(String(listOf(hero, item.kind).find((s) => Number(s.split(':')[0]) === item.id)).split(':')[1]) || 1;
+    const blocked = item.kind === 'skill' && [6, 13].includes(item.id);
+    const max = blocked || level >= 15;
+    if (max) {
+      return { ref: item.ref, kind: item.kind, id: item.id, name: item.name, level,
+        next: null, rate: null, fails: 0, max: true, blocked };
+    }
+    const row = upgradeMap.getValue(level);
+    if (!row) return { ref: item.ref, kind: item.kind, id: item.id, name: item.name, level,
+      next: null, rate: null, fails: 0, max: true, blocked };
+    const isTrue = level >= 10;
+    const fails = isTrue ? 0 : integer(hero.upgradeFails[failKey(item.kind, item.id)], 0, 0, 999);
+    const rate = Math.min(100, Math.max(0, Number(row.rate) || 0) + (isTrue ? 0 : fails * HERO_FAIL_BONUS_PCT));
+    return { ref: item.ref, kind: item.kind, id: item.id, name: item.name, level,
+      next: level + 1, rate, fails, isTrue, max: false, blocked: false };
   }
   function learn(hero, options) {
     if (!repair(hero)) return error('勇者数据无效。');
@@ -432,7 +479,7 @@
       atCap: cappedCount(hero) >= CONFIG.normalLimit, msg: label, label };
   }
 
-  window.TowerHero = { CONFIG, catalog, create, normalize, fighter, grow, upgrade, replace, learn,
+  window.TowerHero = { CONFIG, catalog, create, normalize, fighter, grow, upgrade, upgradeInfoOf, replace, learn,
     maxOut, addLevels, cappedCount, uncappedCount: (hero) => uncappedRefs(hero).length,
     uncappedRefs, isUncapped, trueBaseMul, heroWeapon, learnChanceForCount, statRules: () => STAT_RULES, initialStats, adjustStat };
 })();

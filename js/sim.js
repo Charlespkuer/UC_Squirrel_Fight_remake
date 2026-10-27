@@ -12,7 +12,7 @@
  *                 trialDry（封死玩家治疗，每 3 次行动吸取玩家 10% 当前生命）
  *                 trialFrost（第 1/4/7… 次行动冻结玩家）
  *                 trialMirror（单次伤害 ≥20% 最大生命时反弹 45%）
- *                 trialBloodfang（每掉 20% 生命，攻击 +35%）
+ *                 trialBloodfang（每掉 25% 生命，攻击 +20%）
  *                 trialErode（玩家每次出手叠 1 层攻击 −3%，最多 RULES.erodeMax 层）
  *   fighter.mods: 玩家侧塔 buff 数值包 {dmgMul, critBonus, critDmgBonus,
  *                 dodgeBonus, dodgeMul, takenMul, regenPct, lifestealPct, shellPct,
@@ -75,12 +75,12 @@
      *   绝对防御 1~10 级：首次 20,20.5,…,24.5；之后 0.5
      *            11~15 级：首次 24.5；第二次 5,10,15,20,24；第三次及以后 0.5
      *   龟甲术   1~10 级：首次 20,20.5,…,24.5；之后 1
-     *            11~15 级：首次 24.5；第二次 5,10,15,20,24；第三次及以后 1
+     *            11~15 级：首次 24.5；之后按原表 N% 多次使用（20/40/60/80/100）
      * 投掷类攻击完全不触发绝对防御（见 dmgReduce）。 */
     jueDuiFirstBase: 20, jueDuiFirstStep: 0.5, jueDuiRepeat: 0.5,
     jueDuiTrueFirst: 24.5, jueDuiTrueSecond: 5, jueDuiTrueSecondStep: 5, jueDuiTrueSecondMax: 24, jueDuiTrueRepeat: 0.5,
     shellFirstBase: 20, shellFirstStep: 0.5, shellRepeat: 1,
-    shellTrueFirst: 24.5, shellTrueSecond: 5, shellTrueSecondStep: 5, shellTrueSecondMax: 24, shellTrueRepeat: 1,
+    shellTrueFirst: 24.5,
     xhSpeedShare: 0.35,
     skillCooldown: 2,
     /* 题面·熔核·炽壳：**每过一回合**叠一层减伤（+10%/层），第 8 回合起封顶 70%。
@@ -253,6 +253,10 @@
     }
     return {
       side, name: f.name, level: stat(f.level, 1), npcType: f.npcType || null,
+      /* 无尽塔仙鹤专用（见 tower-data 的 endlessXhTune）：缺省时技能 1×、
+       * 前期凶猛仍是原来的 1.3×；只有无尽塔 buildFoe 会写这两个字段。 */
+      xhSkillMul: Number.isFinite(Number(f.xhSkillMul)) ? Math.max(0.1, Math.min(1.5, Number(f.xhSkillMul))) : 1,
+      xhEarlyMul: Number.isFinite(Number(f.xhEarlyMul)) ? Math.max(1, Math.min(1.3, Number(f.xhEarlyMul))) : null,
       power: stat(f.power, 1), agility: stat(f.agility, 1), speed: stat(f.speed, 1),
       maxHp: fullHp, hp: Math.max(1, Math.min(stat(f.hp, 1), fullHp)),
       weapons, skills, usedWeapons: {}, weaponUseCount: {}, usedSkills: {}, /* 每个技能「本场用过几次」——野球拳（12）的快速衰减要用它。 */
@@ -566,10 +570,11 @@
     return base + perLevel * (Math.min(w.level, 10) - 1);
   }
   /** 塔 buff 的暴击伤害加成（比例）＋ 套装收益的暴击伤害。 */
-  /** 暴击率原始值（未钳制）：基础 + 暴击技能 + 塔 buff + 套装。 */
+  /** 暴击率原始值（未钳制）：基础 + 暴击技能 + 塔 buff + 套装。
+   *  原表写明「10 级每级增加机率 N%」：暴击技能 1~10 级成长，11 级起只加真·4 倍几率。 */
   function rawCritChance(att) {
     let c = 5;
-    if (skill(att, 9)) c += 2 * skill(att, 9);                  // 暴击
+    if (skill(att, 9)) c += 2 * Math.min(10, skill(att, 9));   // 暴击
     if (att.mods && att.mods.critBonus) c += Number(att.mods.critBonus);   // 塔 buff「鹰眼」
     c += setFx(att, 'critBonus');                               // 套装收益（拳斗 / 狂战套）
     return c;
@@ -577,6 +582,12 @@
   /** 隐藏口径：暴击率上限 70%；超出的部分 1:1 转成暴击伤害。 */
   function critOverflow(att) {
     return Math.max(0, rawCritChance(att) - RULES.critCap);
+  }
+  /** 对某个对手的最终暴击率：基础暴击 −「真·皮糙肉厚」的百分点压制，再钳到 70%。
+   *  原表：真1~真5 = 0.5/1/2/3/5%，是**百分点**（不是把暴击率乘以 1−N）。 */
+  function critChanceAgainst(att, def) {
+    const antiCrit = def && def.skills ? trueVal(10, def.skills[10]) : 0;
+    return clamp(Math.max(0, critChance(att) - antiCrit), 0, RULES.critCap);
   }
   function critDmgBonus(att) {
     const base = ((att.mods && Number(att.mods.critDmgBonus) || 0) + setFx(att, 'critDmgBonus')) / 100;
@@ -792,7 +803,7 @@
   }
   /** 龟甲术的单次触发概率（%）：按技能等级与「本场第几次触发」取。
    *  1~10 级：首次 20,20.5,…,24.5；之后 1。
-   *  11~15 级：首次 24.5；第二次 5,10,15,20,24；第三次及以后 1。
+   *  11~15 级：首次 24.5；之后按原表「真技有 N% 几率可多次使用」= 20/40/60/80/100。
    *  装备词条 32（龟甲术 N% 几率抵挡 2 次）仍作为**第二次及以后**的平添概率保留。 */
   function shellChanceOf(def, count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
@@ -801,10 +812,7 @@
     if (lv <= 10) {
       base = n === 0 ? RULES.shellFirstBase + RULES.shellFirstStep * (lv - 1) : RULES.shellRepeat;
     } else {
-      const t = Math.max(1, Math.min(5, lv - 10));
-      base = n === 0 ? RULES.shellTrueFirst
-        : n === 1 ? Math.min(RULES.shellTrueSecondMax, RULES.shellTrueSecond + RULES.shellTrueSecondStep * (t - 1))
-          : RULES.shellTrueRepeat;
+      base = n === 0 ? RULES.shellTrueFirst : trueVal(7, lv);
     }
     /* 装备 32「龟甲术N%几率抵挡2次」只在二次及以后叠加，首次仍按技能本体。 */
     const gearBonus = n >= 1 ? Math.max(0, Number(effect(def, 32)) || 0) : 0;
@@ -844,13 +852,15 @@
       if (canTrigger) {
         if (def.shellCharges > 0) def.shellCharges--;
         else def.shellCount = shellCount + 1;
-        const pct = clamp(20 + 5 * (def.skills[7] - 1), 0, 100);
+        /* 原表「10 级每级增加防御 N%」：吸收率 1~10 级成长，真化只加「多次使用」几率。 */
+        const pct = clamp(20 + 5 * (Math.min(def.skills[7], 10) - 1), 0, 100);
         out.guiJia = Math.round(out.dmg * pct / 100);
         out.dmg -= out.guiJia;
       }
     }
     if (skill(def, 10)) {                                      // 皮糙肉厚
-      const pct = clamp((5 + (skill(def, 10) - 1)) * (1 + effect(def, 34) / 100), 0, 80);
+      /* 原表「10 级每级减少伤害提高 N%」：减伤 1~10 级成长，真化只减对手暴击率。 */
+      const pct = clamp((5 + (Math.min(skill(def, 10), 10) - 1)) * (1 + effect(def, 34) / 100), 0, 80);
       out.dmg = Math.round(out.dmg * (100 - pct) / 100);
     }
     if (def.mods && def.mods.takenMul) out.dmg = Math.round(out.dmg * (1 + Number(def.mods.takenMul)));   // 塔 buff「铁布衫」
@@ -995,17 +1005,15 @@
       }
       if (action === 'skill') {
         rawDmg = Math.round(rawDmg * (1 + effect(att, 8) / 100));
-        /* 真·皮糙肉厚：额外压制对手的暴击率（真1~真5 = 0.5/1/2/3/5%）。
-         * 真·暴击：暴击发生时有机会把倍率抬到 4 倍（真1~真5 = 2/5/9/14/20%）。 */
-        const antiCrit = trueVal(10, def.skills[10]);
-        const cc = critChance(att) * (1 - antiCrit);
+        /* 真·皮糙肉厚：额外压制对手的暴击率（真1~真5 = 0.5/1/2/3/5 个百分点）。 */
+        const cc = critChanceAgainst(att, def);
         /* 幻兽·打兴奋剂：下一次攻击必定暴击（技能这一支也吃）。 */
         if (att.petNextCrit) {
           att.petNextCrit = false;
           r.crit = true; r.petCrit = true;
           rawDmg = Math.round(rawDmg * (2 + effect(att, 4) / 100 + critDmgBonus(att)));
         } else if (chance(cc)) {
-          const quad = trueVal(9, att.skills[9]) * 100;
+          const quad = trueVal(9, att.skills[9]);
           const mul = (quad > 0 && chance(quad)) ? 4 : 2;
           if (mul === 4) r.crit4 = true;
           rawDmg = Math.round(rawDmg * (mul + effect(att, 4) / 100 + critDmgBonus(att)));
@@ -1026,24 +1034,30 @@
         const setFinal = setFx(att, 'lowHpFinalMul');
         if (setFinal > 0) { dmg = Math.round(dmg * (1 + setFinal)); r.setLowHpFinalMul = setFinal; }
       }
-      /* 塔 buff「风影身法」：每场战斗**第一次受到攻击时必定闪避**。
-       * 放在这里与「先机预判」（首次伤害为 0）同一处：已经把命中判完、伤害算出来了，
+      /* 塔 buff「先机预判」：每场战斗**敌方第一次攻击必定闪避**，随后我方立刻额外行动一次。
+       * 放在这里与「风影身法」（首次伤害归零）同一处：已经把命中判完、伤害算出来了，
        * 直接把它归零并打上闪避标记 —— 武器分支的常规闪避判定在更前面，所以那一次
        * 天然逃掉的不消耗这个「必定闪避」额度。 */
       if (dmg > 0 && def.mods && Number(def.mods.firstDodge) > 0 && !def.mods.firstDodgeUsed) {
         def.mods.firstDodgeUsed = true;
         dmg = 0;
         markDodge(r, def);
-        r.noteText = (r.noteText ? r.noteText + '·' : '') + '风影身法'; r.noteSide = def.side;
+        r.firstDodge = true;
+        r.noteText = (r.noteText ? r.noteText + '·' : '') + (def.mods.firstDodgeName || '先机预判'); r.noteSide = def.side;
+        /* 先机预判：闪避这一击之后，**我方立刻额外行动一次且不消耗回合**。
+         * 与「装死」同一条路径 —— 把 immediate 指给受击方，主循环下一轮直接让它出手，
+         * 不经过行动条（所以是真·不消耗回合，而不是加速）。 */
+        if (def.mods.firstDodgeFreeTurn && def.hp > 0) {
+          r.firstDodgeFreeTurn = true;
+          if (!immediate) immediate = { actor: def, reason: 'firstDodge' };
+        }
       }
       if (dmg > 0 && def.mods && def.mods.firstHitZero && !def.mods.firstHitZeroUsed) {
         def.mods.firstHitZeroUsed = true;
         dmg = 0;
         r.firstHitZero = true;
-        r.noteText = (r.noteText ? r.noteText + '·' : '') + '先机预判'; r.noteSide = def.side;
-        /* 先机预判（C38）：挡下这一击之后，**我方立刻额外行动一次且不消耗回合**。
-         * 与「装死」同一条路径 —— 把 immediate 指给受击方，主循环下一轮直接让它出手，
-         * 不经过行动条（所以是真·不消耗回合，而不是加速）。 */
+        r.noteText = (r.noteText ? r.noteText + '·' : '') + (def.mods.firstHitZeroName || '先机预判'); r.noteSide = def.side;
+        /* 兼容旧字段：若还有带 `firstHitZeroFreeTurn` 的来源，仍然给额外行动。 */
         if (def.mods.firstHitZeroFreeTurn && def.hp > 0) {
           r.firstHitZeroFreeTurn = true;
           if (!immediate) immediate = { actor: def, reason: 'firstHitZero' };
@@ -1427,13 +1441,13 @@
         for (const key of ['power', 'agility', 'speed']) att.buffFlat[key] += Math.max(1, Math.round(att[key] * 0.5));
         att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '熔核成型';
       }
-      // 血牙：每掉 20% 生命，攻击 +35%（越打越猛）—— 逼一波带走
+      // 血牙：每掉 25% 生命，攻击 +20%（越打越猛）—— 逼一波带走
       if (att.mech.includes('trialBloodfang') && att.maxHp > 0) {
-        const step = Math.floor((1 - att.hp / att.maxHp) / 0.2);
+        const step = Math.floor((1 - att.hp / att.maxHp) / 0.25);
         if (step > att.mechState.bfStep) {
           const add = step - att.mechState.bfStep;
           att.mechState.bfStep = step;
-          att.buffFlat.power += Math.max(1, Math.round(att.mechState.basePower * 0.35)) * add;
+          att.buffFlat.power += Math.max(1, Math.round(att.mechState.basePower * 0.20)) * add;
           att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '血牙·狂怒';
         }
       }
@@ -1478,7 +1492,11 @@
     function npcAction(att, def) {
       // 大招（每场一次）：仙鹤开场即放，螳螂/熊猫压低生命后触发
       const firstAction = !att.acted; att.acted = true;
-      att.npcActs = (att.npcActs || 0) + 1;   // 仙鹤前期凶猛：前3次行动伤害+30%
+      att.npcActs = (att.npcActs || 0) + 1;   // 仙鹤前期凶猛：默认为前3次行动 +30%，无尽塔后期由 xhEarlyMul 逐层收回
+      /* 无尽塔仙鹤：101/201 不再被当作“前期”。buildFoe 只在无尽塔写
+       * `xhEarlyMul`（1.3→1.0）；其它模式没有该字段，继续用原来的 1.3。 */
+      const xhEarly = att.npcType === 'xh' && att.npcActs <= 3
+        ? (att.xhEarlyMul != null ? att.xhEarlyMul : 1.3) : 1;
       npcMechTurnStart(att, def);
       // 瞬杀节奏：每第 4 次行动必定暴击，暴击伤害 +50%
       const rhythm = att.mech.includes('rhythmCrit') && att.npcActs % 4 === 0;
@@ -1498,9 +1516,14 @@
         const lv = att.skills[sid];
         let raw;
         if (att.npcType === 'tl') { raw = Math.round(effPower(att) * (0.6 + Math.random() * 0.3)); r.multiHit = 2; } // 螳螂双击
-        else if (att.npcType === 'xh') { raw = Math.round((effPower(att) + effSpeed(att) * RULES.xhSpeedShare) * (0.9 + lv * 0.1)); }
+        else if (att.npcType === 'xh') {
+          raw = Math.round((effPower(att) + effSpeed(att) * RULES.xhSpeedShare) * (0.9 + lv * 0.1));
+          /* 无尽塔后期收敛：只压这一条技能，不改普攻 / 大招 / 其它模式。
+           * 倍率由 tower-data 的 endlessXhTune 按**绝对层数**给出。 */
+          if (att.xhSkillMul != null) raw = Math.round(raw * att.xhSkillMul);
+        }
         else { raw = Math.round(effPower(att) * (1.3 + lv * 0.1)); } // 熊猫重击
-        if (att.npcType === 'xh' && att.npcActs <= 3) raw = Math.round(raw * 1.3); // 仙鹤前期凶猛
+        if (xhEarly !== 1) raw = Math.round(raw * xhEarly); // 仙鹤前期凶猛（无尽塔后期会降到 1）
         if (att.petNextCrit) { att.petNextCrit = false; raw = Math.round(raw * 2.5); r.crit = true; r.petCrit = true; }
         else if (rhythm) { raw = Math.round(raw * 2.5); r.crit = true; }
         // 命中
@@ -1535,7 +1558,7 @@
       // 普攻
       if (chance(dodgeChance(att, def))) { markDodge(r, def); pushRound(r); return; }
       let raw = Math.round(effPower(att) * (0.8 + Math.random() * 0.4));
-      if (att.npcType === 'xh' && att.npcActs <= 3) raw = Math.round(raw * 1.3); // 仙鹤前期凶猛
+      if (xhEarly !== 1) raw = Math.round(raw * xhEarly); // 仙鹤前期凶猛（无尽塔后期会降到 1）
       if (att.npcType === 'tl' && att.hp < att.maxHp * 0.25) raw = Math.round(raw * 1.3); // 螳螂低血爆发
       if (att.petNextCrit) { att.petNextCrit = false; raw = Math.round(raw * 2.5); r.crit = true; r.petCrit = true; }
       else if (rhythm) { raw = Math.round(raw * 2.5); r.crit = true; }
@@ -1575,9 +1598,15 @@
       }
       if (counter.reboundHurt) r.counterRebound = counter.reboundHurt;
       if (counter.thornsDmg) r.counterThorns = counter.thornsDmg;
+      if (counter.firstDodge) {
+        r.firstDodge = true;
+        r.noteText = (r.noteText ? r.noteText + '·' : '') + (counter.firstDodgeName || '先机预判');
+        r.noteSide = counter.noteSide;
+        if (counter.firstDodgeFreeTurn) r.firstDodgeFreeTurn = true;
+      }
       if (counter.firstHitZero) {
         r.firstHitZero = true;
-        r.noteText = (r.noteText ? r.noteText + '·' : '') + '先机预判';
+        r.noteText = (r.noteText ? r.noteText + '·' : '') + (counter.firstHitZeroName || '先机预判');
         r.noteSide = counter.noteSide;
       }
     }
@@ -1692,10 +1721,9 @@
           if (r.actAgain && att.hp > 0 && def.hp > 0 && !immediate) immediate = { actor: att, reason: 'freeAction' };
           return;
         }
-        // 暴击（真·皮糙肉厚同样压制武器暴击率）
-        const antiCrit = trueVal(10, def.skills[10]);
-        let cc = critChance(att) * (1 - antiCrit);
-        if (w.id === 11) cc += weaponEffect(w, 20, 2, 3) + trueW(w, 'crit');   // 激光剑（真级 +3% 暴击）
+        // 暴击（真·皮糙肉厚同样按「减少 N 个百分点」压制武器暴击率）
+        let cc = critChanceAgainst(att, def);
+        if (w.id === 11) cc += weaponEffect(w, 20, 2, 3) + trueW(w, 'crit');   // 激光剑（真级每级 +3% 暴击）
         cc = clamp(cc, 0, RULES.critCap);
         if (att.petNextCrit) {
           att.petNextCrit = false;
@@ -1704,7 +1732,7 @@
         } else if (chance(cc)) {
           /* 原版暴击：2~3 倍；真·暴击再按 2/5/9/14/20% 判一次 4 倍。 */
           let mult = 2 + (Math.random() < 0.5 ? 0 : 1) + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att);
-          const quad = trueVal(9, att.skills[9]) * 100;
+          const quad = trueVal(9, att.skills[9]);
           if (quad > 0 && chance(quad)) { mult = 4 + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att); r.crit4 = true; }
           raw = Math.round(raw * mult); r.crit = true;
         }
@@ -1781,16 +1809,18 @@
         const freeSkill = att.mods && att.mods.firstSkillFree && !att.usedFreeSkill;
         switch (sid) {
           case 8: { // 色诱之术（真级：有机会脱光对手装备，持续 4 回合）
-            const raw = Math.round((R(15, 25) + 7 * (lv - 1)) * (1 + effect(att, 33) / 100));
+            /* 原表「10 级每级增加伤害 N 点」：伤害只到 10 级，真化只加脱装几率。 */
+            const raw = Math.round((R(15, 25) + 7 * (Math.min(lv, 10) - 1)) * (1 + effect(att, 33) / 100));
             if (chance(dodgeChance(att, def))) { att.mustHitNext = false; markDodge(r, def); break; }
             applyDamage(att, def, raw, r, {});
-            /* ⚠ 「风影身法」这类**在 applyDamage 里才落 r.dodge** 的闪避，上面的
+            /* ⚠ 「先机预判」这类**在 applyDamage 里才落 r.dodge** 的闪避，上面的
              * `dodgeChance` 预判是抓不到的（那一次已经算命中并进了伤害链）。
              * 二次判定必须再看一次 r.dodge —— 否则动画显示闪避，眩晕 / 脱装却照样挂上：
              * 用户实测「妖狐魅惑被闪避后仍然被卸甲」就是这一条。 */
             if (def.hp > 0 && !r.fakeDie && !r.dodge) {
               def.stun = Math.max(def.stun, petDotRounds(def, 1)); r.stunApplied = true;
-              const stripPct = trueVal(8, lv) * 100;
+              /* 原表：真1~真5 = 8/16/28/40/56（%）。trueVal 已经是百分数，不能再 ×100。 */
+              const stripPct = trueVal(8, lv);
               if (stripPct > 0 && chance(stripPct)) {
                 def.stripTurns = petDotRounds(def, 4);
                 r.stripApplied = Math.round(stripPct);
@@ -1800,10 +1830,11 @@
             break;
           }
           case 12: { // 野球拳（真级：有几率再打一次）
-            const raw = Math.round((effPower(att) + effSpeed(att)) * (1.2 + 0.15 * (lv - 1)));
+            /* 原表「10 级每级伤害提高 N%」：倍率只到 10 级，真化只加「再打一次」几率。 */
+            const raw = Math.round((effPower(att) + effSpeed(att)) * (1.2 + 0.15 * (Math.min(lv, 10) - 1)));
             if (chance(dodgeChance(att, def) * 0.7)) { att.mustHitNext = false; markDodge(r, def); break; }
             applyDamage(att, def, raw, r, {});
-            const doublePct = trueVal(12, lv) * 100;
+            const doublePct = trueVal(12, lv);
             if (doublePct > 0 && def.hp > 0 && att.hp > 0 && chance(doublePct)) { r.actAgain = true; r.doubleHit = true; }
             break;
           }
@@ -1844,7 +1875,7 @@
           }
           case 23: { // 幸运一击
             const mult = R(1, 6);
-            const raw = (15 + 8 * (lv - 1) + trueVal(23, lv)) * mult;
+            const raw = (15 + 8 * (Math.min(lv, 10) - 1) + trueVal(23, lv)) * mult;
             r.multiple = mult;
             /* 原版协议第 15 字段 `boomCount` = 这一拍分裂成几个球（`MainMovie.as:17983`
              * `_loc1.boomCount = _loc2[15]`，`sprite6122` 第 31 帧 `_root.boom(ball, count)`）。
@@ -2113,6 +2144,8 @@
     dodgeChanceOf: (att, def) => dodgeChance(att, def),
     /* 暴击率 / 暴击伤害的唯一出口（供测试直接核对 70% 上限与 1:1 溢出转化）。 */
     critChanceOf: (att) => critChance(att),
+    /* 对某个对手的最终暴击率（含真·皮糙肉厚的百分点压制）—— 供测试确定性核对。 */
+    critChanceVs: critChanceAgainst,
     critDmgBonusOf: (att) => critDmgBonus(att),
     critCap: RULES.critCap,
     /* 低血减伤的即时结算（纯函数）—— 供测试直接核对分段口径 */

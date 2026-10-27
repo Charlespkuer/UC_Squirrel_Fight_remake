@@ -464,7 +464,12 @@
         if (!Number.isFinite(layer) || layer < 1 || !Array.isArray(r.plan) || !r.plan.length) return null;
         const copy = Object.assign({}, r);
         delete copy.attempt;
-        copy.choices = null;
+        /* 待选增益 / 排队中的下一批 / 上一场失利的必选窗都要跟着存档走：
+         * 以前这里把 choices 直接抹成 null，玩家退出重进就白丢一次战斗掉落
+         *（还能靠重打同一场刷新）；`pendingRetry` 若不保留则可以直接无代价重打。
+         * 深校验（无效 id、层号/场次对不上）在 tower.js 的 normalizeRun 里做。 */
+        copy.choices = Array.isArray(copy.choices) ? copy.choices : null;
+        copy.choiceQueue = Array.isArray(copy.choiceQueue) ? copy.choiceQueue : [];
         return copy;
       };
       const tw = object(raw.tower) ? raw.tower : {};
@@ -482,6 +487,11 @@
         best: Math.max(0, integer(en.best, 0)), weekBest: Math.max(0, integer(en.weekBest, 0)),
         weekKey: typeof en.weekKey === 'string' ? en.weekKey : '',
         bestLayer: Math.max(0, integer(en.bestLayer, 0)),
+        /* 勇者剧本的最高纪录与经典分开记（用户 2026-10：入口只显示经典最高层/最高分）。
+         * ⚠ 这里以前是显式白名单、漏了这三个字段 —— 读档后勇者纪录直接清零；新增字段必须补进来。 */
+        heroBest: Math.max(0, integer(en.heroBest, 0)),
+        heroWeekBest: Math.max(0, integer(en.heroWeekBest, 0)),
+        heroBestLayer: Math.max(0, integer(en.heroBestLayer, 0)),
         shieldDate: typeof en.shieldDate === 'string' ? en.shieldDate : '',
         /* 【2026-10 第一百零三批 用户报的 bug】**剧情的「只播一次」记账必须跟着存档走**。
          * 它是**跨局**的账：第一次遇商人 / 第一次失去烙印 / 第一次遇巡视（`patrolGate`）…
@@ -523,6 +533,9 @@
       hideStatusBar: st.hideStatusBar !== false,
       /* 跳过键显示开关：默认开；关闭只隐藏战斗中的跳过键，不改变等级/VIP 解锁条件。 */
       showSkip: st.showSkip !== false,
+      /* 后台运行开关：默认关（切后台暂停音乐并冻结计时器，省电）。
+       * 打开后切后台不暂停音乐、安卓壳也不 pauseTimers，游戏继续跑。 */
+      backgroundRun: st.backgroundRun === true,
       uiMode: UIMODE_KEYS.includes(String(st.uiMode)) ? String(st.uiMode) : 'classic',
     };
   }

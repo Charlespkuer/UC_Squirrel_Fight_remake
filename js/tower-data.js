@@ -294,15 +294,15 @@
    * 按段轮转、同屏最多 3 个、挂在本层所有敌人身上）与环境词缀（按战斗随机触发）。
    * 现在**全部合并到环境词缀**：环境是唯一的常驻负面来源，机制不再自动出现。
    *
-   * 每条环境的数值都写成「区间」（如 [0.10, 0.16]），抽取时在区间内随机取值，
+   * 每条环境的数值都写成「区间」（如 [0.06, 0.12]），抽取时在区间内随机取值，
    * 所以同一条环境每次出现强度略有不同。`mods` 里的数字是区间上沿，
    * 实际生效值 = 区间随机值 ×（该 buff 的倍率）。
    * ============================================================ */
   /* 区间写法：'pct' = 比例（渲染成百分数）、'num' = 裸数值（渲染成点数）。
-   * 例：[0.10, 0.16, 'pct'] → 显示 +13%；[18, 32, 'num'] → 显示 +24。 */
+   * 例：[0.06, 0.12, 'pct'] → 显示 +9%；[18, 32, 'num'] → 显示 +24。 */
   const ENDLESS_ENV = Object.freeze([
     /* —— 原段位机制并入（这几个都是「敌人变强」类，bad=true）—— */
-    { id: 'thorns', name: '荆棘反伤', bad: true, noReflect: true, mech: true, mods: { thornsPct: [0.10, 0.16, 'pct'] },
+    { id: 'thorns', name: '荆棘反伤', bad: true, noReflect: true, mech: true, mods: { thornsPct: [0.06, 0.12, 'pct'] },
       desc: '敌人受到伤害时反弹 %thornsPct%' },
     { id: 'regen', name: '自愈回复', bad: true, noReflect: true, mech: true, mods: { regenPct: [0.02, 0.04, 'pct'] },
       desc: '敌人每回合回复 %regenPct% 最大生命' },
@@ -627,6 +627,52 @@
     bossBrokenBrands: 2,      // 已破碎的终焉烙印件数
     bossBrokenFinal: 0.30,    // 每件的终乘（两件 → ×1.6）
   });
+  /* ============================================================
+   * 【渴血之剑】勇者之剑的替代品（2026-10 用户口径）
+   *
+   * 无论勇者剧本还是默认无尽塔，**第一次战胜巡视魔王**必定获得，且替代该场原本的
+   * 传奇三选一（不是可选奖励）。它是一件**限次**装备（仍挂在「限次增益」区域）：
+   *   · 出战时给正负两面加成；每打完一场要求献祭一件「史诗+限次」或「永久」增益，
+   *     献祭让它成长一层（可叠到 5 层）；
+   *   · 限次用尽不会消失，而是进化为下一阶段；王者之剑永续、无需献祭；
+   *   · 闲置 20 场会强制苏醒且无法关闭，用过之后重新计数；
+   *   · 51 层起每 10 层出现一次「活性」事件：连续抑制 3 次 → 涸血之剑（彻底失活、
+   *     永续、偏生存）；增强活性会主动消耗使用次数，加速进化。
+   * ============================================================ */
+  const BLADE = Object.freeze({
+    ids: Object.freeze(['HB01', 'HB02', 'HB03', 'HB04', 'HB05']),
+    stages: Object.freeze(['HB01', 'HB02', 'HB03']),
+    initialId: 'HB01',
+    finalId: 'HB04',
+    deadId: 'HB05',
+    idleLimit: 20,           // 闲置多少场后强制苏醒
+    enhanceUses: 3,          // 增强活性一次消耗几场使用次数
+    eventStart: 51,          // 第一次活性事件的层号
+    eventEvery: 10,          // 之后每 10 层必定一次
+    maxStacks: 5,            // 献祭成长上限
+    sacrificeRarity: 2,      // 限次祭品的最低稀有度（史诗）
+    finalUses: -1,           // -1 = 永续（不再扣次数 / 不需要献祭）
+    mirrorPowerCut: 0.20,    // 王者之剑对镜之魔王：基础力量削减
+    mirrorHpCut: 0.30,       // 王者之剑对镜之魔王：基础生命上限削减
+    mirrorPerStack: 0.02,    // 每多一层献祭再各削 2%
+  });
+  function isBladeId(id) { return BLADE.ids.indexOf(String(id)) >= 0; }
+  function isBladeBuff(b) { return !!(b && isBladeId(b.id)); }
+  /** 剑的当前阶段：1/2/3 是活剑，4 = 王者之剑，5 = 涸血之剑。 */
+  function bladeStageOf(id) {
+    const at = BLADE.ids.indexOf(String(id));
+    return at < 0 ? 0 : at + 1;
+  }
+  /** 某一阶段的下一个 id；没有下一阶段（王者 / 涸血）返回 null。 */
+  function bladeNextId(id) {
+    const at = BLADE.stages.indexOf(String(id));
+    return at >= 0 && at + 1 < BLADE.stages.length ? BLADE.stages[at + 1] : BLADE.finalId;
+  }
+  /** 每 10 层（51/61/71…）的活性事件层号。 */
+  function bladeEventLayer(layer) {
+    const n = Math.floor(Number(layer) || 0);
+    return n >= BLADE.eventStart && (n - BLADE.eventStart) % BLADE.eventEvery === 0;
+  }
   /** 「巡逻 / 觐见魔王」的显示名：**整百层**（100/200/300…）带「魔王·」前缀，其余层不变。
    *  这三处调用点（预告 entryInfo / 建敌人 buildFoe / 实战 foe.name）共用它，
    *  免得「预告是一个名字、打起来是另一个名字」。 */
@@ -857,13 +903,16 @@
     return Math.pow(g, money / 10);
   }
   /* ============================================================
-   * 传奇权重两档下调：传奇的基础权重中幅下调；可重复获得的传奇，重复获得时概率
-   * 继续降；当所有传奇都已获得时，整体获得传奇的概率进一步降低（压低传奇档的
-   * 整体份额，不是只在传奇内部挪权重）。
-   * 实现：稀有度权重第 3 档（传奇）乘一个只跟「本局已拥有传奇条数」有关的系数。
-   * 商店（rollShopSlots）与场间三选一（rollChoices）共用同一份权重，口径一致。
+   * 传奇基础权重：只影响**初始占比**；可重复获得的传奇另有个体 repeatWeight 降权。
+   * 2026-11 用户口径：「**战斗掉落池**里传奇 buff 概率太高，调低传奇 buff 初始权重」——
+   * 战斗奖励三选一的传奇基础权重从 2.2 回调为 **2.0**（自然出率约 2% / 格）。
+   * 试炼商店 / 铸币商店沿用原 2.2，避免顺手改变商店经济与刷新期望；
+   * 两边的抽取仍共用 `rollOneCandidate` 与传奇保底，只有档位预算的基准不同。
+   * ⚠ 档位级 `legendWeightFactor` 已于 2026-10 按另一条口径关闭；这里只改基础权重，
+   *   传奇保底（LEGEND_PITY）不受影响。
    * ============================================================ */
   const LEGEND_BASE_WEIGHT = 2.2;
+  const LEGEND_BATTLE_WEIGHT = 2.0;
   const LEGEND_HOLD_PENALTY = 0.12;      // 每已拥有一条传奇，再乘 0.88
   const LEGEND_ALL_OWNED_PENALTY = 0.35; // 所有传奇都拿到手后，再乘 0.35
   /** 本局已拥有的传奇条数。 */
@@ -920,12 +969,17 @@
   /** 档位**原始**权重（未归一化）：基础表 ×（传奇两档下调 / 天命所归）× 刷新倾斜 p^i。
    *  归一化只是显示口径；真正抽取时会在「动态档位权重」里再缩放并按全局归一化，
    *  所以这里保留原值，便于直接看出每一档的预算。 */
-  function rawTierWeights(tilt, run) {
+  function rawTierWeights(tilt, run, options) {
     const p = Math.max(0, Number(tilt) || 1);
     const boost = rarityBoostOf(run);
-    const legendMul = (LEGEND_BASE_WEIGHT / RARITY_WEIGHTS[3]) * legendWeightFactor(run) * boost.legend;
+    const legendBase = Math.max(0, Number(options && options.legendBase) || LEGEND_BASE_WEIGHT);
+    const legendMul = (legendBase / RARITY_WEIGHTS[3]) * legendWeightFactor(run) * boost.legend;
     const slotMul = (i) => (i === 0 ? boost.common : i === 2 ? boost.epic : 1);
     return RARITY_WEIGHTS.map((v, i) => (i === 3 ? v * legendMul : v * slotMul(i)) * Math.pow(p, i));
+  }
+  /** 战斗奖励三选一的档位预算：与商店同构，传奇基础权重为 2.0（约 2% 出率）。 */
+  function battleTierWeights(tilt, run) {
+    return rawTierWeights(tilt, run, { legendBase: LEGEND_BATTLE_WEIGHT });
   }
   function tiltWeights(tilt, run) {
     const w = rawTierWeights(tilt, run);
@@ -1040,6 +1094,59 @@
    * 否则前三场又变成「把人打残的血墙」。boss 的输出高一大档（FOE_TRIAL_POWER_MUL），
    * 所以「最后一战最难」靠的是伤害与机制，不是血量堆。 */
   const FOE_HERO_POWER_MUL = 0.60;
+  /* ---------- 仙鹤：无尽塔后期技能收敛 ----------
+   * 目标（用户 2026-10 口径）：前中期不动；后期让仙鹤的**期望 DPA**逐渐
+   * 接近熊猫（不是把普攻或大招一起砍）。只作用于无尽塔的三侠仙鹤，
+   * 挑战塔 / 关卡 / 其它模式的仙鹤仍走原公式。
+   *
+   * 100 层的解：同层力量 Pxh=20,252 / Pxm=22,453，速度 Sxh=47,398；
+   * 仙鹤技能 (P+0.35S)×2.4=88,419，熊猫技能 2.8P=62,868；
+   * 按 70% 普攻 + 30% 技能求期望：
+   *   0.7×20,252 + 0.3×88,419×F = 0.7×22,453 + 0.3×62,868
+   *   → F≈0.769。
+   * 30 层以前原样；31~50 层把技能倍率/前期凶猛**线性**降到 50 层的目标
+   * （技能 F≈0.769、前期凶猛 1.0），50 层就与熊猫持平；50~100 层保持该值。
+   * 这样 30 和 50 两个节点都不会出现数值跳变，也不会把中段突然砍一刀。
+   * 101/201… 使用**绝对层数**，并按该层实际的技能等级重新解 F：
+   * 101/201 的敌人等级会回到 24（技能 5 级），XH/XM 的技能倍率同时变，
+   * 固定 0.769 会让仙鹤反而低于熊猫；这里用同一套期望公式动态求 F，
+   * 保证整个后期（含每个百层循环开头）都贴近熊猫，而不是回到 1.3 前期。
+   * 101 起开场“前期凶猛”固定为 1.0，不再有开场 +30%。
+   * ⚠ 不要换成 layerCycle：101 / 201 的 cycle 会回到 1，仙鹤会再次超模。 */
+  const XH_ENDLESS_TUNE = Object.freeze({
+    from: 30, to: 50, earlyFrom: 1.3, early: 1.0,
+  });
+  /** 按技能等级解出“仙鹤期望 DPA = 熊猫”的技能伤害倍率（不含开场 1.3）。 */
+  function xhEndlessParityFactor(skillLevel) {
+    const lv = Math.max(1, Math.min(15, Number(skillLevel) || 1));
+    const xhScale = Number(GData.STAGE_TYPE_SCALE.xh) || 0.92;
+    const xmScale = Number(GData.STAGE_TYPE_SCALE.xm) || 1.02;
+    const normalRatio = xhScale / xmScale;                 // XH 普攻 / XM 普攻
+    const speedPerPower = FOE_STAT_MUL / (FOE_POWER_MUL * FOE_HERO_POWER_MUL);
+    const xhSkill = normalRatio * (1 + 0.35 * speedPerPower) * (0.9 + 0.1 * lv);
+    const xmSkill = 1.3 + 0.1 * lv;
+    /* 0.7*Nxh + 0.3*Sxh*F = 0.7*Nxm + 0.3*Sxm */
+    const target = 0.7 + 0.3 * xmSkill;
+    const base = 0.7 * normalRatio;
+    return Math.max(0, Math.min(1, (target - base) / (0.3 * xhSkill)));
+  }
+  /** 返回无尽塔仙鹤在这一绝对层的 { skill, early } 倍率；非无尽模式不调用。 */
+  function endlessXhTune(layer) {
+    const n = Math.max(1, Math.floor(Number(layer) || 1));
+    if (n <= XH_ENDLESS_TUNE.from) return { skill: 1, early: XH_ENDLESS_TUNE.earlyFrom };
+    const endSkill = xhEndlessParityFactor(15);             // 50~100 层技能都是 15 级
+    if (n < XH_ENDLESS_TUNE.to) {
+      const t = (n - XH_ENDLESS_TUNE.from) / (XH_ENDLESS_TUNE.to - XH_ENDLESS_TUNE.from);
+      return {
+        skill: 1 + (endSkill - 1) * t,
+        early: XH_ENDLESS_TUNE.earlyFrom + (XH_ENDLESS_TUNE.early - XH_ENDLESS_TUNE.earlyFrom) * t,
+      };
+    }
+    if (n <= 100) return { skill: endSkill, early: XH_ENDLESS_TUNE.early };
+    const lv = Math.max(1, Math.min(15, Math.round((endlessScaleParts(n).level || 1) / 5)));
+    return { skill: xhEndlessParityFactor(lv), early: XH_ENDLESS_TUNE.early };
+  }
+
   /* boss 的输出：血量只比三侠厚一点点（见 bossHpRatio），所以「最后一战最难」全靠伤害与机制 ——
    * 0.47 × 1.45 ≈ 0.68，约是三侠（0.47 × 0.60 × 0.92~1.15 ≈ 0.26~0.32）的 2~2.6 倍。 */
   const FOE_TRIAL_POWER_MUL = 1.45;
@@ -1385,11 +1492,11 @@
         '% 最大生命时，超出的部分全额反弹' },
     { id: 'bloodfang', name: '血牙·狂噬', type: '成长型', region: 1, gear: 'shogun',
       bias: { power: 1.08, agility: 1.00, speed: 1.05, hp: 0.94 },
-      weapons: [{ id: 12, level: 6 }], skills: [{ id: 14, level: 7 }, { id: 5, level: 7 }],
+      weapons: [{ id: 12, level: 6 }], skills: [{ id: 14, level: 7 }, { id: 5, level: 7 }, { id: 6, level: 1 }],
       pattern: ['weapon', 'skill', 'weapon', 'common'],
       patternDesc: '固定循环：狼牙棒 → 小宇宙爆发 → 狼牙棒',
       mech: ['trialBloodfang'],
-      mechDesc: '每损失 20% 生命，攻击力 +35%（越拖越猛）' },
+      mechDesc: '每损失 25% 生命，攻击力 +20%（越拖越猛）；带装死，濒死时保留 1 点生命' },
     { id: 'erode', name: '蚀骨·腐毒', type: '消耗型', region: 3, gear: 'curse3',
       bias: { power: 0.86, agility: 0.95, speed: 0.95, hp: 1.28 },
       weapons: [{ id: 8, level: 6 }], skills: [{ id: 10, level: 7 }, { id: 8, level: 7 }],
@@ -1850,9 +1957,10 @@
       /* 【2026-10 第八十批 用户口径】`noExtend: true` = **延续铭文（C62）不能拿它当目标**（特殊设定）：
        * 它是**流程类**增益（下一场战斗后开店），+5 场就等于连开 5 家店，层内节奏会被整个打乱。
        * 标志放在 def 根上、不进 mods：`isPureOpsBuff` 要求 mods 的键**全部**落在运营类里，
-       * 往里塞一个非运营键会让 E01 不再算「纯运营类」，巡逻收缴那边（魔王不吃运营牌）就会走样。 */
+       * 往里塞一个非运营键会让 E01 不再算「纯运营类」，巡逻收缴那边（魔王不吃运营牌）就会走样。
+       * 同一口径也应用在 E15 时间回廊 / E16 铸币商队（都是流程类）。 */
       noExtend: true,
-      desc: '下一场战斗后立即开店一次，全部商品 7 折；与「steam大促」叠加为 3.5 折',
+      desc: '下一场战斗后立即开店一次，全部商品 7 折',
       mods: { postBattleShop: 1, postBattleShopDiscount: 0.30 } },
     /* E16「铸币商队」= E01「立即进货」的铸币版：下一场战斗后**必开一家铸币商店**（限次 1）。
      * 与 E01 同场生效时由它**顶掉**那家试炼商店（用户口径：一次战斗只开一家店，铸币优先）；
@@ -1861,6 +1969,8 @@
     /* E16「铸币商队」全局权重 ×0.5（2026-10 用户口径）：shopWeight 是商店货架与场间三选一共用的
      * 那份静态权重，所以两处的出现率一起减半；档位预算不变（静态权重只在档内分配时起作用）。 */
     { id: 'E16', tags: ['endless', 'battle', 'shop', 'limited', 'nextBattle', 'ops'], name: '铸币商队', rarity: 1, kind: 'limited', uses: 1, shopWeight: 0.5,
+      /* 流程类（下一场战斗后开铸币商店）：与 E01 / E15 同口径，延续铭文不能延长它。 */
+      noExtend: true,
       desc: '下一场战斗结束后立即生成 1 家铸币商店（若本场本该开出普通商店，则由它顶掉）',
       mods: { postBattleMintShop: 1 } },
     /* E17「假如我直接赢」（2026-10 第十八批，用户口径）：**传奇 · 限次 2** 的纯战斗牌 ——
@@ -1943,7 +2053,10 @@
     { id: 'C25', tags: ['endless', 'battle', 'shop', 'ops'], name: '战利品账本', rarity: 1, kind: 'permanent',
       desc: '售出可获得 50 试炼币；每胜利一场售价 +10',
       mods: { sellValue: 50, sellGrowthPerWin: 10 } },
-    { id: 'C15', tags: ['endless', 'battle', 'shop'], name: '增幅水晶', rarity: 2, kind: 'permanent', desc: '本局内所有 buff 的效果 ×1.4', mods: { globalMul: 1.40 } },
+    /* 2026-10 用户口径：同名多张**加算**（1 + 0.3×张数），并与水晶铭文（C60）的增幅加算；
+     * 旧口径是每张独立相乘 1.4^n。 */
+    { id: 'C15', tags: ['endless', 'battle', 'shop'], name: '增幅水晶', rarity: 2, kind: 'permanent',
+      desc: '本局内所有 buff 的效果 ×1.3（多张加算，且与水晶铭文加算）', mods: { globalMul: 1.30 } },
     { id: 'E09', tags: ['endless', 'battle', 'ops'], name: '重整旗鼓', rarity: 0, kind: 'instant',
       desc: '立即获得 1 枚铸币', mods: { instantRetry: 1 } },
     { id: 'E12', tags: ['endless', 'shop', 'oncePerRun', 'ops'], name: '时来运转', rarity: 2, kind: 'instant', maxStacks: 1,
@@ -1955,6 +2068,8 @@
       desc: '立即生效：下一次进入商店时，那一页有 1 件随机商品价格减半（向下取整）',
       mods: { shopHalf: 1 } },
     { id: 'E15', tags: ['endless', 'battle', 'limited', 'nextBattle'], name: '时间回廊', rarity: 3, kind: 'limited', uses: 1,
+      /* 流程类（下一场战斗后重开本层）：延续铭文不能延长它 —— 否则一次 +5 场会把整层反复重开。 */
+      noExtend: true,
       desc: '下一场战斗结束后，立即从本层第 1 场重新开始：手上的增益、试炼币、分数与血量都不回退，敌人数值也不会提升；' +
         '即使那一场是本层最后一场，也照样回到本层开头',
       mods: { layerRestart: 1 } },
@@ -1995,8 +2110,9 @@
     { id: 'C37', tags: ['endless', 'battle', 'shop', 'repeatable', 'hidden', 'ops'], name: '虚空铭文', rarity: 3, kind: 'inscription',
       desc: '从永久增益里三选一，给它附上虚空铭文：它不再占用永久增益位',
       mods: { pickPermanentFree: 1, weightDivBy: 'enchanted', weightDecay: 0.88, pityWeight: 1 } },
-    /* 「水晶铭文」C60（史诗级铭文）：与增幅水晶（C15，全局 ×1.4）同一套逻辑，
-     * 但乘数高 0.1（×1.5）并且**只作用于选中的那一条**永久增益。
+    /* 「水晶铭文」C60（史诗级铭文）：给**选中的那一条**永久增益附魔 ×1.5。
+     * 与增幅水晶（C15，全局 ×1.3/张）**加算**：同一条同时吃两者时
+     * 总倍率 = 1 + 0.3×C15张数 + 0.5，而不是 1.3^n × 1.5（见 tower.js 的 buffEffectMulOf）。
      * 降权口径与虚空铭文一致（`weightDecay 0.88^n`），但**计数必须用自己的**：
      * `weightDivBy: 'enchantedBy'` = 被**这张铭文**附魔过的永久条数。
      * ⚠ 2026-10 第八十批修 bug：原来照抄 C37 的 `'enchanted'`（数的是**虚空**的不占位标记），
@@ -2012,7 +2128,7 @@
       desc: '从已有的烙印增益里三选一，让它立刻破碎（同一烙印有多份则一起破碎）',
       mods: { pickBrandBreak: 1, weightDivBy: 'owned', weightDecay: 0.88, pityWeight: 1 } },
     { id: 'C62', tags: ['endless', 'battle', 'shop', 'repeatable', 'hidden', 'ops'], name: '延续铭文', rarity: 1, kind: 'inscription',
-      desc: '从已有的限次增益里三选一，它的剩余场次 +5',
+      desc: '从已有的限次增益里三选一（流程类除外），它的剩余场次 +5',
       mods: { pickLimitedUses: 5, weightDivBy: 'owned', weightDecay: 0.88, pityWeight: 1 } },
     /* ============================================================
      * 烙印系列（2026-10 统一口径）：**全部可无限叠加**。
@@ -2088,10 +2204,10 @@
     { id: 'C55', tags: ['endless', 'battle', 'shop', 'noRestack'], name: '后发制人', rarity: 3, kind: 'permanent',
       desc: '每回合开始时，若力/敏/速有低于对手的，把差距最大的一项补上 10%，对方同减；战斗结束清零',
       mods: { catchUpPct: 0.10 } },
-    /* unique：`firstDodge` 是布尔开关（每场第一次受击必闪）→ 多份无意义。 */
+    /* unique：`firstHitZero` 是布尔开关（每场第一次受伤归零）→ 多份无意义。 */
     { id: 'C56', tags: ['endless', 'battle', 'shop', 'unique'], name: '风影身法', rarity: 1, kind: 'permanent',
-      desc: '每场战斗中，我方第一次受到攻击时必定闪避',
-      mods: { firstDodge: 1 } },
+      desc: '每场战斗中，我方第一次受到的伤害降低为 0',
+      mods: { firstHitZero: 1, firstHitZeroName: '风影身法' } },
     { id: 'C57', tags: ['tower', 'endless', 'battle', 'shop', 'limited', 'nextBattle'], name: '玉石俱焚', rarity: 2, kind: 'limited', uses: 10,
       desc: '下一场战斗每回合开始时，我方与敌方的生命上限各 ×90%（向下取整）',
       descEndless: '限次 10 场：每回合开始时我方与敌方的生命上限各 ×90%（向下取整）',
@@ -2099,12 +2215,12 @@
     { id: 'C58', tags: ['endless', 'battle', 'shop', 'noRestack', 'ops'], name: '豪掷千金', rarity: 2, kind: 'permanent', maxStacks: 1,
       desc: '每在试炼商店买货或买铸币消费 100 试炼币，立即获得 1 个随机限次增益（刷新不算；越稀有越难出）',
       mods: { shopSpendLimited: 100, limitedDefaultRerollPaid: 10 } },
-    { id: 'C59', tags: ['endless', 'battle', 'shop', 'stackable', 'noRestack', 'ops'], name: '门庭若市', rarity: 2, kind: 'permanent', maxStacks: 3,
-      desc: '每进入一次试炼商店，立即获得 80 试炼币',
+    { id: 'C59', tags: ['endless', 'battle', 'shop', 'stackable', 'noRestack', 'ops'], name: '门庭若市', rarity: 2, kind: 'permanent', maxStacks: 2,
+      desc: '每进入一次商店，立即获得 80 试炼币',
       mods: { shopEnterCoins: 80 } },
     { id: 'C38', tags: ['tower', 'endless', 'battle', 'shop', 'unique'], name: '先机预判', rarity: 2, kind: 'permanent',
-      desc: '每场战斗敌方对我方的第一次伤害为 0，且我方立刻额外行动一次',
-      mods: { firstHitZero: 1, firstHitZeroFreeTurn: 1 } },
+      desc: '每场战斗中，敌方对我方的第一次攻击必定闪避，且我方立刻额外行动一次',
+      mods: { firstDodge: 1, firstDodgeFreeTurn: 1 } },
 
     { id: 'HS01', tags: ['endless', 'shop', 'hero', 'ops', 'repeatable'], name: '勇者修炼札', rarity: 1, kind: 'instant',
       desc: '随机选择一个未满级的局内武技，连续进行3次普通升级尝试；遵循原成功率与失败保底', mods: { heroTraining: 3 } },
@@ -2115,8 +2231,27 @@
     { id: 'HS04', tags: ['endless', 'shop', 'hero', 'ops', 'repeatable'], name: '禁书残页', rarity: 3, kind: 'instant',
       /* 0.5^n：每获得一次，这件传奇在商店 / 铸币商店里的动态权重减半（instantIds 计数）。 */
       desc: '随机学会一个尚未掌握的5级武技；该武技不占普通24项上限，即使未满24项也不计数', mods: { heroSecret: 1, repeatWeight: 0.5 } },
-    { id: 'HB01', tags: ['endless', 'hero', 'story', 'hidden', 'catalog', 'unique'], name: '勇者之剑', rarity: 3, kind: 'permanent', maxStacks: 10,
-      desc: '不占永久栏位，跨百层保留。魔王·镜完成面板复制及自身增益后，其力量降低20%、生命上限降低35%；每次击败巡逻魔王成长一层（最多10层，每层再降2%）；不能复制这份克制', mods: { heroMirrorBlade: 1 } },
+    /* ============================================================
+     * 【渴血之剑】取代原「勇者之剑」：第一次巡视胜利固定获得。
+     * 仍挂在 `limited`（限次区），但用尽会进化而不是消失；`uses: -1` 的两档是永续。
+     * `story` 标签保证它不进任何随机池 / 商店 / 交换；`blade` 标签给状态机与界面认。
+     * 每层的 mods 都会按 `stacks`（献祭次数）线性放大；负面 `takenMul` 也一起放大。
+     * ============================================================ */
+    { id: 'HB01', tags: ['endless', 'story', 'catalog', 'blade'], name: '渴血之剑', rarity: 3, kind: 'limited', uses: 8, maxStacks: 5,
+      desc: '战斗中：力量 +12%/层、攻击吸血 +5%/层、受到伤害 +3%/层。每场战斗后必须献祭一件史诗+限次或永久增益来喂养它（献祭使其成长 1 层）。限次 8 场；用尽后进化为下一阶段。闲置 20 场会强制苏醒。',
+      mods: { powerMul: 0.12, lifestealPct: 0.05, takenMul: 0.03 } },
+    { id: 'HB02', tags: ['endless', 'story', 'catalog', 'blade'], name: '渴血之剑·饥', rarity: 3, kind: 'limited', uses: 8, maxStacks: 5,
+      desc: '战斗中：力量 +18%/层、攻击吸血 +7%/层、受到伤害 +4%/层。每场战斗后仍要献祭（史诗+限次或永久）；限次 8 场，用尽后进化为下一阶段。',
+      mods: { powerMul: 0.18, lifestealPct: 0.07, takenMul: 0.04 } },
+    { id: 'HB03', tags: ['endless', 'story', 'catalog', 'blade'], name: '渴血之剑·狂', rarity: 3, kind: 'limited', uses: 8, maxStacks: 5,
+      desc: '战斗中：力量 +26%/层、攻击吸血 +9%/层、受到伤害 +5%/层。每场战斗后仍要献祭；限次 8 场，用尽后进化为王者之剑。',
+      mods: { powerMul: 0.26, lifestealPct: 0.09, takenMul: 0.05 } },
+    { id: 'HB04', tags: ['endless', 'story', 'catalog', 'blade'], name: '王者之剑', rarity: 3, kind: 'limited', uses: -1, maxStacks: 5,
+      desc: '最终形态：力量 +40%/层、攻击吸血 +12%/层、暴击率 +10%/层、暴击伤害 +20%/层，受到伤害 +4%/层；对镜之魔王额外削减其力量与生命上限。永续，不再消耗次数、不再需要献祭。',
+      mods: { powerMul: 0.40, lifestealPct: 0.12, takenMul: 0.04, critBonus: 10, critDmgBonus: 0.20, kingMirrorBlade: 1 } },
+    { id: 'HB05', tags: ['endless', 'story', 'catalog', 'blade'], name: '涸血之剑', rarity: 3, kind: 'limited', uses: -1, maxStacks: 5,
+      desc: '彻底失活：受到伤害 −6%/层、每回合回复 1%/层最大生命、生命上限 +4%/层、开局护盾 +3%/层。永续，不再需要献祭。',
+      mods: { takenMul: -0.06, regenPct: 0.01, maxHpMul: 0.04, shellPct: 0.03 } },
     /* ---------- 【U20】照影之境（整百层「觐见魔王」的固定奖励） ----------
      * 用户口径 2026-10：打赢第 100 / 200 / 300… 层的魔王后**固定掉落**这一件，
      * 拾取之后挂在「永久增益」的**最前面**，介绍是 `？？？`（效果刻意不明说），
@@ -2147,12 +2282,12 @@
   /* 「下一场战斗」语义的增益 id 集合（挑战塔里打完一场即消耗，卡面不显示限次）。 */
   const TOWER_BATTLE_IDS = BUFFS.filter((b) => hasTag(b, 'nextBattle')).map((b) => b.id);
   const RARITY_NAME = ['普通', '稀有', '史诗', '传奇'];
-  const RARITY_WEIGHTS = [66, 21, 10, 3];        // 每个随机槽独立 Roll
+  const RARITY_WEIGHTS = [66, 21, 10, 3];        // 每个随机槽独立 Roll；传奇实际基础权重走 LEGEND_BASE_WEIGHT
   /* 试炼商店折扣口径：E04 steam大促 −30%（7 折）；E01 立即进货同样 −30%（7 折，2026-10 由 −50% 削弱）；
-   * 两者同时生效时按用户指定合并为 −65%（3.5 折），而不是把两个折扣相加。 */
+   * 两者同时生效时按用户指定合并为 −60%（4 折），而不是把两个折扣相加。 */
   const SHOP_DISCOUNT_E04 = 0.30;
   const SHOP_DISCOUNT_E01 = 0.30;
-  const SHOP_DISCOUNT_BOTH = 0.65;
+  const SHOP_DISCOUNT_BOTH = 0.60;
   const FIXED_HEAL_PCT = 0.5;
   const AUTO_HEAL_PCT = 0.10;                    // 每场打完自动回复的比例（2026-10 由 0.14 下调）
   const ENDLESS_LAYER_HEAL_PCT = 0.20;
@@ -2267,6 +2402,7 @@
     hidden: '不进「增益集锦」展示（彩蛋/特殊获取）',
     catalog: '即使带 hidden 也要进「增益集锦」展示（铭文、选取型强化这类玩家该知道的特殊获取）',
     story: '剧情固定获得：只由剧情节点（整百层「觐见魔王」）发放，不进任何随机池 / 商店货架',
+    blade: '渴血之剑系列：剧情固定、限次区、不可出售 / 交换；状态机按阶段与献祭单独结算',
     ops: '运营类：经济/运营向（试炼币、商店、铸币、出售、商店消费、永久槽位扩容）',
   });
   /* 池子 ← 需要哪些标签：这里的定义就是「严格池子管理」的规则表。 */
@@ -2479,6 +2615,7 @@
     COIN_BATTLE_TIERS, coinBattleTier, coinBattleBase, coinBattleTierLabel, coinBattleTableText,
     FOE_STAT_MUL, FOE_POWER_MUL, FOE_HP_MUL, FOE_HERO_HP_MUL, FOE_HERO_POWER_MUL,
     FOE_TRIAL_POWER_MUL, FOE_WARLORD_POWER_MUL, FOE_CAMPAIGN_POWER_MUL, CAMPAIGN_HP_RATIO,
+    endlessXhTune, XH_ENDLESS_TUNE,
     bossHpRatio, endlessBossHpRatio, BOSS_HP_MIN, BOSS_HP_MAX, WARLORD_HP_RATIO,
     ENDLESS_LAYER_HEAL_PCT, MILESTONE_EVERY, MILESTONE_BOOK_COUNT, rollMilestone, PERMANENT_SLOTS,
     endlessDepthMul, ENDLESS_DEEP_LAYER, ENDLESS_SKIP_LAYER,
@@ -2492,15 +2629,16 @@
     buffScore, reviveScoreAt,
     SHOP_PRICE_OFFSET, rollShopPrice,
     shopPrice, shopBuyPrice,
-    rerollPriceAt, rerollPriceCapped, rerollQualityCapped, mechSealsHeal, HEAL_SEAL_MECHS, rerollTilt, tiltRateMul, rawTierWeights, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,
+    rerollPriceAt, rerollPriceCapped, rerollQualityCapped, mechSealsHeal, HEAL_SEAL_MECHS, rerollTilt, tiltRateMul, rawTierWeights, battleTierWeights, tiltWeights, rerollExpectation, RARITY_SCORE, shopQualityScore,
     TIER_DYNAMIC_WEIGHTS, TIER_AVG_INCLUDES_STATIC, LEGEND_PITY, TICKET_FROM_MINT_CAP, ENDLESS_X00_BONUS_TICKETS,
     shopPool, POOLS, inPool, RARITY_NAME, RARITY_WEIGHTS,
     /* 巡逻（魔王战）：常量 + 两个判据（buildPlan / 预告 / 界面共用）。 */
     PATROL, patrolLayerInBlock, isPatrolLayer, patrolName,
     MINT_SHOP, mintLayerOk, mintGroupOf, mintPrice, mintWeights, rollMintRarity, mintChance,
     mintPool, opsPool, MINT_EXCLUDE_MODS,
+    BLADE, isBladeId, isBladeBuff, bladeStageOf, bladeNextId, bladeEventLayer,
     BUFF_TAGS, POOL_TAGS, hasTag, tagsOf, buffsWithTag, poolsOf, descOf, shopDescOf, stackNote,
-    legendWeightFactor, legendOwnedCount, allRepeatableLegendsOwned, LEGEND_BASE_WEIGHT, LEGEND_TIER_DECAY, rarityBoostOf,
+    legendWeightFactor, legendOwnedCount, allRepeatableLegendsOwned, LEGEND_BASE_WEIGHT, LEGEND_BATTLE_WEIGHT, LEGEND_TIER_DECAY, rarityBoostOf,
     NPCS, NPC_BY_ID, HERO_DEBUFF,
     SQUIRRELS, SQUIRREL_BY_ID, squirrelFor,
     TRIALS, TRIAL_BY_ID, trialFor,

@@ -368,15 +368,18 @@
   /** 角色动作播完后把嵌套表情/眼睛停在**最后一个有内容的帧**。
    *
    *  这些表情层在原版里多数没有脚本、会自己循环；`deep` 一开始把它们全部放行之后，
-   *  父动作停在倒地/胜利的最后一帧，子表情却还在转。倒地后角色会留很久，
-   *  最明显的就是「哭脸表情一帧一帧切换」，而且 Android 的低帧率/节拍会让它更显眼。
+   *  父动作停在受击/胜利的最后一帧，子表情却还在转（Android 的低帧率/节拍会让它更显眼）。
    *  这里只停**嵌套子件**（父件已经由 `playClip` 停在停止帧），装备/钉帧件照旧跳过；
-   *  下一拍动作会重新 `startNestedAnim(deep)`，不会把后续动画冻死。 */
-  function freezeNestedAnim(clip, inGear) {
+   *  下一拍动作会重新 `startNestedAnim(deep)`，不会把后续动画冻死。
+   *  ⚠ **倒地动作例外**：`dead()` 传 `keepNestedIds`，只让 6365 头顶灵魂继续飘；
+   *  6362 表情会在父动作结束后停在最后一个有内容的帧（同一张哭脸），不再循环切换
+   *  「正常 / 哭 / 死鱼眼」几种表情，也不再整体冻住。 */
+  function freezeNestedAnim(clip, inGear, keepIds) {
     if (!clip) return;
     const g = clip.g;
     const tagId = clip.tag && String(clip.tag.id);
     if (tagId && EXPLICIT_STOP_IN_ACTION.has(tagId)) return;
+    if (keepIds && keepIds.has(Number(clip.tag && clip.tag.id))) return;
     const gear = !!inGear || clip.__pinFrame != null
       || !!(g && g.getAttribute && g.getAttribute('slot'));
     const children = [];
@@ -390,7 +393,7 @@
         const end = lastContentFrame(child);
         if (end > 0) stopAt(child, end);
       }
-      freezeNestedAnim(child, childGear);
+      freezeNestedAnim(child, childGear, keepIds);
     }
   }
   /* 脸部保留原版深度：5615 眼白必须低于头装；6062 思考眼睛由动态蒙版裁剪。
@@ -415,6 +418,9 @@
   function playClip(clip, opts) {
     const o = opts || {};
     if (!clip || !clip.gotoAndPlay || !clip.frameCount || !live) return Promise.resolve();
+    const rec = live, combat = !rec.settling;
+    const interrupted = () => live !== rec || rec.stopped || (combat && rec.skipped);
+    if (interrupted()) return Promise.resolve();
     /* `deep`：这一条是**角色动作**（攻击 / 受击 / 闪避 / 归位 / 胜利姿势），
      * 片断里的表情、眼睛、身体嵌套层要按原版从第 1 帧重新播；否则它们可能停在上一拍
      * `playClip` 停住的帧上 —— 经典战斗里“思考方天画戟时眼睛没了”“多次色诱后脸部贴图
@@ -430,15 +436,31 @@
     let seen = o.resume ? clip.frame + 1 : 1;
     if (!o.resume) { play(clip, 2); fire(1); }
     return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        rec.sleepers.delete(finish);
+        // Stop in place: jumping to the final frame would build discarded action trees.
+        if (clip.stop) clip.stop();
+        resolve();
+      };
+      // skip/clean wake the actual animation wait, not just a race around its caller.
+      rec.sleepers.add(finish);
       const tick = () => {
-        if (!live || live.stopped || !clip.g || clip.g.isConnected === false) { resolve(); return; }
+        if (done) return;
+        if (interrupted() || !clip.g || clip.g.isConnected === false) { finish(); return; }
         const n = clip.frame + 1;
         if (n !== seen && n > seen) { for (let k = seen + 1; k <= n; k++) fire(k); }
         seen = n;
         if (clip.frame >= stopIdx) {
           stopAt(clip, stopIdx + 1);
-          if (o.deep) freezeNestedAnim(clip);
-          resolve();
+          /* 默认把嵌套表情/眼睛停在最后一帧，避免倒地哭脸无限循环（第三百二十九批）。
+           * 倒地动作传 `keepNestedIds`：只放行头顶灵魂（6365）继续飘，表情（6362）
+           * 仍停在最后一个有内容的帧 —— 既不停格，也不在几种失败表情之间循环切换。 */
+          if (o.keepNestedIds) freezeNestedAnim(clip, false, new Set(o.keepNestedIds.map(Number)));
+          else if (o.deep && !o.keepNested) freezeNestedAnim(clip);
+          finish();
           return;
         }
         arm(tick);
@@ -502,6 +524,11 @@
     if (npcType) {
       const frame = NPC_FRAME[npcType] || 1;
       stopAt(holder, frame);
+      /* 起点先把状态图标收到**末帧**：`propty` 里的图标默认会露出第一颗（力↑），
+       * 三侠一上场就顶着「力上升」不消失（用户 2026-11 口径）。主角那一支早就这么做了，
+       * NPC 分支以前漏了。收完再由 `specialEffect()` 按这一拍真正中的减益升起对应图标。 */
+      const statu = holder.byName('statu');
+      if (statu) stopAt(statu, statu.frameCount ? statu.frameCount() : 20);
       const model = holder.byName('playerMc') || null;
       holder.__npc = npcType;
       holder.__mutant = !!mutant;
@@ -1137,6 +1164,32 @@
     return layer;
   }
 
+  /** 三侠 / 木人的状态图标：`statu` 容器是 7689 里的 SVG（与身体分开），
+   *  图集版只隐藏静态身体、**不隐藏它**，所以这里给 NPC 也接上同一套
+   *  `setStatu()` / `specialEffect()`。以前 NPC 这两个方法是空函数，菜刀 / 屎坨坨
+   *  打中三侠时力/敏/速下降的图标根本不会出现（用户 2026-11 口径）。 */
+  function makeStatuApi(statu) {
+    const s = statu || null;
+    const c = {
+      statu: s,
+      statuCode: 0,
+      setStatu(code) { c.statuCode = Number(code) || 0; },
+      /** 照 `Player.specialEffect()`：`statu` 从第 1 帧播到末帧（图标升起后消失），
+       *  `propty` 定在要飘的那一颗上。非角色动作不传 deep，图标容器自己的两帧镜像
+       *  由 `onClip` 的 `orientStatu()` 钉住。 */
+      specialEffect() {
+        const icon = STATU_ICON[c.statuCode];
+        c.statuCode = 0;
+        if (!icon || !c.statu) return;
+        stopAt(c.statu, 1);
+        const prop = c.statu.byName('propty');
+        if (prop) stopAt(prop, icon);
+        playClip(c.statu, { stop: c.statu.frameCount ? c.statu.frameCount() : 20 });
+      },
+    };
+    return c;
+  }
+
   /** 现代图集版：透明 canvas 铺在**底图与主 SVG 之间**，按现代 1170×690 坐标画三侠。
    *  层序由 `makeBattleBackLayer()` 拆开：底图 < canvas < 主 SVG（状态/飘字/特效）< 顶部覆盖。
    *
@@ -1262,6 +1315,7 @@
     function tick(stamp) {
       if (disposed || live !== battle || !live || live.stopped) { finishAnim(); return; }
       const a = anim;
+      if (a && a.combat && battle.skipped) { finishAnim(); return; }
       if (!a) { draw(stamp); if (effects.length || !layoutReady) schedule(); return; }
       const at = (stamp - a.start) * Math.max(1, live.speed || 1);
       const raw = Math.floor(at / NPC_FRAME_MS);
@@ -1278,6 +1332,8 @@
     function play(name, opts) {
       const o = opts || {};
       if (disposed || live !== battle || !live || live.stopped) return Promise.resolve();
+      const combat = !battle.settling;
+      if (combat && battle.skipped) return Promise.resolve();
       const frames = window.Engine && Engine.anim ? Engine.anim(name) : null;
       if (!frames || !frames.length) return Promise.resolve();
       if (rafId) stopRaf();
@@ -1287,10 +1343,12 @@
         const finish = () => {
           if (settled) return;
           settled = true;
-          if (anim && anim.finish === finish) anim = null;
+          battle.sleepers.delete(finish);
+          if (anim && anim.finish === finish) { anim = null; stopRaf(); }
           resolve();
         };
-        anim = { name: name, frames: frames, start: now(), idx: -1, loop: !!o.loop, onFrame: o.onFrame, finish: finish };
+        battle.sleepers.add(finish);
+        anim = { name: name, frames: frames, start: now(), idx: -1, loop: !!o.loop, onFrame: o.onFrame, finish: finish, combat: combat };
         draw();
         schedule();
       });
@@ -1329,14 +1387,15 @@
     }
     if (!battle.atlasCleanups) battle.atlasCleanups = new Set();
     battle.atlasCleanups.add(disposeLayout);
+    const statuApi = makeStatuApi(holder && holder.byName ? holder.byName('statu') : null);
     const api = {
-      side: side, holder: holder, mc: holder && holder.__hero, statu: null, info: info, npc: npcType,
+      side: side, holder: holder, mc: holder && holder.__hero, statu: statuApi.statu, info: info, npc: npcType,
       blood: { totalBlood: 1, leftBlood: 1, finalBlood: 1 },
       statuCode: 0, weaponNow: null,
       skills: (info && info.skills) || {},
       skillLevel(id) { return Number(api.skills[Number(id)]) || 0; },
       defenseSkillLevel() { return 0; },
-      dress() {}, setStatu() {}, specialEffect() {},
+      dress() {}, setStatu: statuApi.setStatu, specialEffect: statuApi.specialEffect,
       attacks: () => null, defenses: () => null, playSub: () => null,
       async attack(r, hooks) {
         const h = hooks || {};
@@ -1410,14 +1469,15 @@
   function makeStaticNpcFighter(side, holder, info, npcType) {
     const mc = holder && holder.__hero;
     let isDead = false;
+    const statuApi = makeStatuApi(holder && holder.byName ? holder.byName('statu') : null);
     const api = {
-      side: side, holder: holder, mc: mc, statu: null, info: info, npc: npcType,
+      side: side, holder: holder, mc: mc, statu: statuApi.statu, info: info, npc: npcType,
       blood: { totalBlood: 1, leftBlood: 1, finalBlood: 1 },
       statuCode: 0, weaponNow: null,
       skills: (info && info.skills) || {},
       skillLevel(id) { return Number(api.skills[Number(id)]) || 0; },
       defenseSkillLevel() { return 0; },
-      dress() {}, setStatu() {}, specialEffect() {},
+      dress() {}, setStatu: statuApi.setStatu, specialEffect: statuApi.specialEffect,
       attacks: () => null, defenses: () => null, playSub: () => null,
       async attack(r, hooks) {
         const h = hooks || {};
@@ -1615,6 +1675,8 @@
          * 站着、没有跑过去攻击”。退回当前帧唯一子件，保证普攻/武器至少播一条动作。 */
         const inner = sel.byName('attack') || onlyChildClip(sel);
         if (!inner) return;
+        const luckyCleanup = (r.action === 'skill' && Number(r.id) === 23)
+          ? freezeLuckyWheel(inner) : null;
         await playClip(inner, {
           deep: true, onFrame: (n) => {
             if (acts.guard && n >= acts.guard && h.guard) h.guard();
@@ -1622,6 +1684,7 @@
             if (acts.hit && n >= acts.hit && h.hit) h.hit();
           },
         });
+        if (luckyCleanup) luckyCleanup();
       },
       /** 这一侧的动作到底有没有真的跑起来（调试 / 回归用）。
        *  `atk` / `def` = 此刻**出手动画**（`attacks.attack`）与**受击动画**（`defenses.defense` /
@@ -1786,7 +1849,12 @@
           return;
         }
         stopAt(sel, distance === 1 ? 5 : 4);
-        await playClip(sel.byName('defense'), { deep: true });
+        /* `defenses` 第 5 帧的子件没有 `defense` 实例名（只有第 4 帧有），
+         * 距离档 1 时退回当前帧唯一子件，别让整段倒地动画静默不播。 */
+        const deadClip = sel.byName('defense') || onlyChildClip(sel);
+        /* 倒地后只让头顶灵魂（6365）继续飘；6362 表情在父动作结束时停在最后一张脸，
+         * 避免它 18 帧循环把「正常 / 哭 / 死鱼眼」几种失败表情来回切。 */
+        if (deadClip) await playClip(deadClip, { deep: true, keepNestedIds: [6365] });
       },
       /** `congratulate()`：胜利姿势（`6530` 第 32 帧 `congratulation = 2` → 切战果页）。 */
       async congratulate() {
@@ -2179,6 +2247,34 @@
     }
   }
 
+  /** 幸运一击的「转盘」：原素材 6122 第 4~7 帧把 6097 接进来后**没有卸载**，
+   *  6097 的 67 帧会自动循环，真形态 6185 用的是另一颗 6184，同样会循环。
+   *  这里在出手后短暂旋转约 1.1s，把当前**动画帧**停住（不另画任何数字/徽章），
+   *  随后 `boomSplit` 仍按 Sim 的 `boomCount` 分段。 */
+  function freezeLuckyWheel(attackClip) {
+    if (!attackClip || !attackClip.g) return null;
+    let timer = null, done = false;
+    const cleanup = () => { if (timer) clearTimeout(timer); timer = null; };
+    const settle = () => {
+      if (!live || live.stopped) { cleanup(); return; }
+      const host = attackClip.g;
+      const nodes = host.querySelectorAll
+        ? host.querySelectorAll('g[sid="6097"], g[sid="6184"]') : [];
+      if (!nodes.length) { if (!done) timer = setTimeout(settle, 50); return; }
+      done = true;
+      for (const el of nodes) {
+        const clip = el.__clip;
+        if (!clip || !clip.gotoAndStop) continue;
+        const max = clip.frameCount ? clip.frameCount() : 0;
+        const frame = Math.max(1, Math.min(max || (clip.frame + 1), Number(clip.frame) + 1));
+        try { clip.gotoAndStop(frame); } catch (e) {}
+      }
+      cleanup();
+    };
+    timer = setTimeout(settle, 1100);
+    return cleanup;
+  }
+
   /** `boom(mc, num)`（`MainMovie.as:15710`）：幸运一击的**多球分裂**。
    *
    *  原版链路（`sprite6122` / `sprite6185` 第 31 帧脚本 → `_root.beAttack(); _root.boom(ball, count)`）：
@@ -2267,7 +2363,7 @@
   }
   function wait(ms) {
     const rec = live;
-    if (!rec || rec.stopped) return Promise.resolve();
+    if (!rec || rec.stopped || (rec.skipped && !rec.settling)) return Promise.resolve();
     const scaled = rec.speed > 1 ? ms / rec.speed : ms;
     return new Promise((resolve) => {
       const wake = () => { clearTimeout(timer); rec.sleepers.delete(wake); resolve(); };
@@ -2731,9 +2827,11 @@
       if (loserF && !loserF.isDead()) await loserF.dead(0);
       /* 原版 `congratulate()`（`MainMovie.as:6464`）是倒地动画第 19 帧 `_root.die()` 调的：
        * 胜利姿势与 `fight.winWords` **同一刻**出现（字自己滑进来那 6 帧与姿势并行播）。 */
-      showWinWords(rec.view && rec.view.byName('winWords'), winner);
-      if (winnerF) await winnerF.congratulate();
-      await wait(700);
+      if (!aborted()) {
+        showWinWords(rec.view && rec.view.byName('winWords'), winner);
+        if (winnerF) await winnerF.congratulate();
+      }
+      if (!aborted()) await wait(700);
     }
     if (rec.stopped) return;
     rec.settling = true;
@@ -2770,6 +2868,7 @@
      * 调用方还会自己摆同一张战果页（结算 + 续战键）时传 `skipResultPanel`：这里只切帧，
      * 不等待也不让玩家先看到一遍，避免同一份经验/金松果在开宝箱前后闪两次。 */
     if (!hideVictoryCg && !o.skipResultPanel) await wait(1500);
+    if (rec.stopped || live !== rec) return;
     /* 开宝箱（原版 `fight.gotoAndStop(5)`）：**这一场有掉落机制就开**，与"收了几件"无关 ——
      * 宝箱那四件是原版 `lottery.do` 的另一包奖励（见 `openChest` 里那段说明），
      * 一件都没接到也该有四格可挑；塔战（`collectDrops:false`，没有 `pickups`）照旧不开。 */
@@ -2905,7 +3004,12 @@
        * 复刻照抄过一版 —— 用户 2026-11 口径："绝对防御与龟甲术的动画触发实际太早了，
        * 参考现代版的做法，进行修正"，于是这一拍改成**命中时才举盾**。 */
       if (!guarded) guarded = defender.useSkillDefense(r);
-      applyHp(rec, r);
+      /* 这一拍如果**还带着反击**，先把血条停在「主攻击命中后、反击结算前」：
+       * Sim 的 `hpAfter` 是整拍结算后的终值（含 counterDmg / 反伤 / 装死），
+       * 直接套上去会让反击伤害在**敌人刚被砍中**那一帧就提前扣掉 —— 用户 2026-11 口径：
+       * "敌人触发反击的时候，扣血条的显示与动画同步，不要提前触发扣血条的显示"。
+       * 反击命中那一刻 `runCounter().settle()` 会再走一次 `applyHp(rec, r)` 写终值。 */
+      applyHp(rec, r, { beforeCounter: true });
       /* 闪开了就没有伤害数字（`Squirrel.beAttack` 的 `defenseType == 1` 那一支只改身体帧）。 */
       if (r.dmg && !r.dodge) {
         /* 幸运一击：`boomCount > 1` 走原版 `boom()` 的多球分裂（分段飘字 + 复制球）。 */
@@ -3016,7 +3120,14 @@
     if (rec.hps[att] <= 0 && !attacker.isDead()) { await attacker.dead(0); return; }
   }
 
-  function applyHp(rec, r) {
+  /** 把这一拍的结算值写进血条。
+   *
+   *  `opts.beforeCounter === true` 时，如果这一拍带着反击（`counterDmg` / 反伤 / 装死），
+   *  只结算**主攻击命中后**的中途血量：`hpAfter` 是整拍终值，提前套上去会让反击伤害
+   *  在主攻击命中那一帧就扣掉。中途值从当前血量按这一拍的伤害 / 自伤 / 吸血重算，
+   *  与 `battle.js` 的 `applyHp(r, counterPending, before)` 同一口径。
+   *  反击真正命中时 `runCounter().settle()` 会再调一次（不带 opts）写终值。 */
+  function applyHp(rec, r, opts) {
     if (Array.isArray(r.shellAfter) && r.shellAfter.length === 2) {
       for (let i = 0; i < 2; i++) rec.shields[i] = Math.max(0, Math.round(Number(r.shellAfter[i]) || 0));
     }
@@ -3027,8 +3138,25 @@
       }
     }
     if (Array.isArray(r.hpAfter) && r.hpAfter.length === 2) {
+      const att = Number(r.attacker) === 1 ? 1 : 0;
+      const deferCounter = !!(opts && opts.beforeCounter) &&
+        !!(r.counterDmg || r.counterFakeDie || r.counterRebound || r.counterThorns);
       for (let i = 0; i < 2; i++) {
-        const v = Math.max(0, Math.min(rec.maxHp[i], Number(r.hpAfter[i]) || 0));
+        let v;
+        if (deferCounter) {
+          /* 当前 `rec.hps[i]` 还是这一拍开始前的血量（命中前没有动过血条）。 */
+          const before = Math.max(0, Number(rec.hps[i]) || 0);
+          if (i === att) {
+            v = before + (Number(r.healSelf) || 0) + (Number(r.lifesteal) || 0)
+              - (Number(r.selfBurn) || 0) - (Number(r.reboundHurt) || 0)
+              - (Number(r.thornsDmg) || 0);
+          } else {
+            v = before - (Number(r.dmg) || 0);
+          }
+        } else {
+          v = Number(r.hpAfter[i]) || 0;
+        }
+        v = Math.max(0, Math.min(rec.maxHp[i], v));
         rec.hps[i] = v;
         if (rec.fighters[i]) rec.fighters[i].blood.leftBlood = v;
       }

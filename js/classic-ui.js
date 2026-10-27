@@ -893,7 +893,7 @@
     if (hero) {
       if (hero.mode !== 'setup') $('.page-footer',p).insertAdjacentHTML('beforeend',
         '<button type="button" class="status-sell-link" data-action="hero-log">成长记录</button>' +
-        '<button type="button" class="status-fusion-link" data-action="hero-blade">勇者之剑</button>');
+        '<button type="button" class="status-fusion-link" data-action="hero-blade">渴血之剑</button>');
       return p;
     }
     portrait($('.status-character',p));
@@ -1081,9 +1081,18 @@
     const blade = $('[data-action="hero-blade"]', p);
     if (blade) blade.onclick = () => {
       const info = hero.blade;
-      modal('勇者之剑', '<p>' + (info ? '破镜 ×' + Math.max(0, Number(info.stacks) || 0) + '：魔王·镜的力量 −' +
-        Math.round(Number(info.powerCut) * 100) + '%、生命上限 −' + Math.round(Number(info.hpCut) * 100) + '%。' :
-        '击败巡逻魔王后，断锋会在镜中回应你。') + '</p>', [{ label: '返回', cls: 'muted' }], { small: true });
+      let body;
+      if (!info) body = '第一次战胜巡视魔王后，这柄剑会自己找上你。';
+      else {
+        const stage = info.final ? '最终形态' : (info.dead ? '失活形态' : '第 ' + info.stage + ' 阶段');
+        body = info.name + '（' + stage + '）<br>' +
+          '献祭成长 ×' + Math.max(1, Number(info.stacks) || 1) + ' 层' +
+          (info.unlimited ? ' · 永续' : ' · 剩余 ' + info.uses + ' 场') + '<br>' +
+          (info.final && info.on
+            ? '对镜之魔王：力量 −' + Math.round(Number(info.powerCut) * 100) + '%、生命上限 −' + Math.round(Number(info.hpCut) * 100) + '%。'
+            : (info.dead ? '它已经不饿了，只留下一点安静的护佑。' : '每场战斗后需要献祭一件祭品；用尽次数会进化。'));
+      }
+      modal('渴血之剑', '<p>' + body + '</p>', [{ label: '返回', cls: 'muted' }], { small: true });
     };
     const canvas = $('.status-character', p);
     if (canvas) {
@@ -1395,24 +1404,46 @@
     const owned=hero ? heroOwnedMap(hero).get(kind+':'+id) : null;
     const it=hero ? (owned ? (isW?(window.TowerHero&&TowerHero.heroWeapon?TowerHero.heroWeapon(id+':'+owned.level):State.weaponInst(id+':'+owned.level)):State.skillInst(id+':'+owned.level)) : null)
       : (isW?State.myWeapons():State.mySkills()).find(x=>x.id===id);
-    const up=!hero && it?State.upgradeInfo(kind,id):null;
+    /* 勇者武技详情：只读展示当前等级 / 下一级成功率，**不给直接升级按钮**。
+     * 本局的成长仍走战斗后的自动升级、授业与状态页的「铸币修炼」。 */
+    const heroUp=hero&&it&&window.TowerHero&&TowerHero.upgradeInfoOf
+      ? TowerHero.upgradeInfoOf(hero, (isW?'w:':'s:')+id) : null;
+    const up=hero ? heroUp : (it?State.upgradeInfo(kind,id):null);
     const skillDescriptions={6:'危机时刻装死避开攻击，成功后立即获得行动机会。装死不能升级。',7:'每场抵挡一次伤害，1级抵消20%，每级增加5%。装备附加能力可增加抵挡次数。',11:'增加原有闪避率5%，每级增加2%；按原有闪避率的比例计算。',13:'生命不高于50%时，每次出手有35%概率召唤师傅，每场最多一次。恢复师傅等级×4生命，下次攻击必中。',14:'按裸力量、敏捷、速度各增加1%，最少1点，每级增加1%；每场一次，随后立即行动。'};
     const description=(!isW&&skillDescriptions[id])||base.remark||'';
+    /* 真化说明：武器的“下一阶段”伤害在 11 级起取 harmAdd1 的当档增量（以前一律显示
+     * harmAdd，真化后会少报 20~60 点）；技能把 remark1 里的 N 换成当档数值。 */
+    let trueNote='';
+    if (it && isW) {
+      if (it.level >= 10) {
+        const steps=String(base.harmAdd1||'').split('|').map(Number);
+        const nextStep=it.level<15?(steps[it.level-10]||0):0;
+        const eff=String(base.remark1||'').trim();
+        trueNote=(nextStep?'升至下一阶段额外提升'+nextStep+'点基础伤害！':'已达到真5（15 级）。')+
+          (eff?'<br>真化效果：'+esc(eff)+(it.level>10?'（每真级，当前真'+(it.level-10)+'）':''):'');
+      } else {
+        trueNote='升至下一阶段额外提升'+esc(base.harmAdd)+'点基础伤害！';
+      }
+    }
+    if (it && !isW && it.level > 10 && window.GData && window.GData.trueSkillStep) {
+      const step=window.GData.trueSkillStep(id,it.level);
+      const row=window.GData.trueSkillRow?window.GData.trueSkillRow(id):null;
+      const eff=row&&row.text?String(row.text).replace('N',step):'';
+      if (eff) trueNote='真化效果：'+esc(eff);
+    }
     const locked=!it;
-    const unupgradeable=hero ? !!(it && (it.level>=15 || !isW && [6,13].includes(id))) : !isW && (base.type==='被动' && up?.max || id===13);
+    const unupgradeable=hero ? !!(up && up.max) : !isW && (base.type==='被动' && up?.max || id===13);
     const extra=isW?'伤害 '+(it?it.harmLo+'-'+it.harmHi:base.harm):'类别 '+esc(base.type);
     const right=hero ? (locked ? '<div class="locked-message">尚未掌握<br><span class="small-label">在塔内学习新的武技</span></div>' :
-      unupgradeable ? '<div class="locked-message">该武技<br>不能修炼</div>' : '<h3>铸币修炼</h3><div><span>需要铸币 1</span><b>'+Math.max(0,Number(hero.coins)||0)+'</b></div><p class="small-label">必定提升3~5个小级，封顶真5；仅影响本局勇者。</p>') :
+      unupgradeable ? '<div class="locked-message">该武技<br>不能升级</div>' :
+      '<h3>下一级成功率</h3><div><span>成功率</span><b>'+(up&&up.rate!=null?up.rate+'%':'—')+'</b></div>'+
+        (up&&up.fails?'<span class="upgrade-pity">失败 '+up.fails+' 次，已加 '+up.fails*3+'%</span>':'')+
+        '<p class="small-label">本局勇者武技 · 无法直接升级。</p>') :
       locked?'<div class="locked-message">尚未获得<br><span class="small-label">升级、开启礼包有机会获得</span></div>':up?.max||unupgradeable?'<div class="locked-message">该'+(isW?'武器':'技能')+'<br>不能升级</div>':'<h3>需要　<span class="muted-text">已有</span></h3><div><span>金松果 '+up.coin+'</span><b>'+S.goldPoint+'</b></div><div><span>卷轴 '+up.book+'</span><b>'+(S.props[up.bookId]||0)+'</b></div><span class="upgrade-rate">成功率 '+up.rate+'%'+(up.fails?'<i class="upgrade-pity">（失败 '+up.fails+' 次，已加 '+up.fails*State.UPGRADE_FAIL_BONUS+'%）</i>':'')+'</span>'+(up.isTrue?'<span class="upgrade-true-tip">真化第 '+up.trueAttempt+' 次（当日 24:00 次数与费用清零，真化不吃失败保底）</span>':'')+'<span class="small-label">需要角色 '+up.levelLimit+' 级</span>';
-    const content='<div class="item-detail"><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-summary"><span class="item-icon">'+icon(kind,id,locked,false,isTrueGear(it))+'</span><div class="detail-rows"><span class="detail-row">'+(isW?'阶段':'等级')+' '+(it?levelLabel(it.level,false):1)+(it&&isTrueGear(it)?'（真形态）':'')+'</span><span class="detail-row">'+extra+'</span><span class="detail-row">类型 '+esc(base.type)+'</span></div></div><div class="detail-description">'+esc(description)+(isW&&it?'<br>升至下一阶段额外提升'+esc(base.harmAdd)+'点基础伤害！':'')+'</div></div><div class="detail-upgrade">'+right+'</div></div>';
+    const content='<div class="item-detail"><div><h3 class="detail-name">'+esc(base.name)+'</h3><div class="detail-summary"><span class="item-icon">'+icon(kind,id,locked,false,isTrueGear(it))+'</span><div class="detail-rows"><span class="detail-row">'+(isW?'阶段':'等级')+' '+(it?levelLabel(it.level,false):1)+(it&&isTrueGear(it)?'（真形态）':'')+'</span><span class="detail-row">'+extra+'</span><span class="detail-row">类型 '+esc(base.type)+'</span></div></div><div class="detail-description">'+esc(description)+(trueNote?'<br>'+trueNote:'')+'</div></div><div class="detail-upgrade">'+right+'</div></div>';
     // 按钮顺序统一成「动作在前、返回在最后」，与其它弹窗一致
-    modal(isW?'武器详情':'技能详情',content,[{label:locked?'尚未获得':up?.max||unupgradeable?'不能升级':hero?'铸币修炼':'立即升级',cls:locked||up?.max||unupgradeable?'muted':'gold',run:()=>{
-      if(locked||up?.max||unupgradeable)return;
-      if(hero){
-        const out=hero.onCoinTrain ? hero.onCoinTrain((isW?'w:':'s:')+id) : {ok:false,msg:'铸币修炼暂不可用。'};
-        toast(out.msg || (out.ok?'修炼完成。':'修炼失败。'));
-        if(out.ok){context.redraw();openItem(kind,id,context);}return;
-      }
+    modal(isW?'武器详情':'技能详情',content,[{label:locked?(hero?'尚未掌握':'尚未获得'):(hero?'勇者 · 只读':up?.max||unupgradeable?'不能升级':'立即升级'),cls:locked||up?.max||unupgradeable||hero?'muted':'gold',run:()=>{
+      if(hero||locked||up?.max||unupgradeable)return;
       const r=State.doUpgrade(kind,id);toast(r.msg);openCatalog(kind,catalogPage);openItem(kind,id);
     }},{label:'返回',cls:'muted'}]);
   }
@@ -1687,13 +1718,24 @@
     $('[data-action="endless-entry"]',p)?.addEventListener('click',()=>openTowerEntry('endless'));
   }
   /* 无尽挑战塔入口（关卡页下滑可见）：通关前 18 关解锁（与村庄「征战」同一门槛）。 */
+  /** 无尽塔最高纪录：经典 + 勇者两种剧本都算，取最大值；同时给分模式明细。
+   *  `endlessInfo()` 已给 allBest/allBestLayer，这里再兜一层旧数据/测试桩。 */
+  function endlessBestMeta(e) {
+    e = e || {};
+    const num = (v) => Math.max(0, Math.floor(Number(v) || 0));
+    const best = Math.max(num(e.allBest), num(e.best), num(e.heroBest));
+    const layer = Math.max(num(e.allBestLayer), num(e.bestLayer), num(e.heroBestLayer));
+    const tip = '经典 ' + num(e.best) + ' 分 / ' + num(e.bestLayer) + ' 层 · 勇者 ' +
+      num(e.heroBest) + ' 分 / ' + num(e.heroBestLayer) + ' 层';
+    return { best, layer, tip };
+  }
   function towerEntryHtml() {
     const lock=window.Tower?Tower.unlocked():{ok:false,msg:'数据加载中…'};
     if(!lock.ok)return '<div class="tower-entries"><div class="tower-entry locked"><b>无尽挑战塔</b><span>'+esc(lock.msg)+'</span></div></div>';
-    const t=Tower.towerInfo(),e=Tower.endlessInfo();
+    const t=Tower.towerInfo(),e=Tower.endlessInfo(),eb=endlessBestMeta(e);
     return '<div class="tower-entries">'+
       '<button class="tower-entry" data-action="tower-entry"><b>挑战塔</b><span>已通关 '+t.maxLayer+' 层 · 下一层 '+t.nextLayer+'</span><span class="tower-entry-meta">挑战书×1 → 金松果 '+t.gold+'</span></button>'+
-      '<button class="tower-entry endless" data-action="endless-entry"><b>无尽模式</b><span>最高分 '+e.best+' · 最深 '+e.bestLayer+' 层</span><span class="tower-entry-meta">免门票 · 赢抽奖卷（现有 '+e.tickets+' 张）</span></button>'+
+      '<button class="tower-entry endless" data-action="endless-entry" title="'+esc('最高纪录（所有模式）：' + eb.tip)+'"><b>无尽模式</b><span>最高分 '+eb.best+' · 最深 '+eb.layer+' 层</span><span class="tower-entry-meta">免门票 · 赢抽奖卷（现有 '+e.tickets+' 张）</span></button>'+
       '</div>';
   }
   function openTowerEntry(mode) {
@@ -4285,6 +4327,10 @@
     const skipTitle = '当前：' + (showSkip ? '开' : '关') +
       '。关闭后战斗右下角不再显示「跳过」键；跳过解锁条件仍按超级松鼠页：VIP ' +
       (State.VIP_SKIP_UNLOCK_LEVEL || 10) + ' 级、非 VIP ' + (State.SKIP_UNLOCK_LEVEL || 20) + ' 级。';
+    const bgRun = st.backgroundRun === true;
+    const bgTitle = '当前：' + (bgRun ? '开' : '关') +
+      '。开启后切到后台游戏继续运行（音乐继续播放、计时器不停，会更耗电）；' +
+      '关闭则切到后台暂停音乐并冻结画面。桌面 / 网页只影响音乐暂停。';
     const grid='<div class="settings-grid system-grid">'+
       sysBtn('存档导出','export','gold','把当前存档导出成一个 JSON 文件。iOS 在「文件」App → 我的 iPhone/iPad → 松鼠大战；桌面写系统下载目录。')+
       sysBtn('存档导入','import','gold','从 JSON 文件恢复存档。iOS 用「存档列表」选 App 里的导出，或粘贴存档文本。')+
@@ -4297,8 +4343,11 @@
         st.fullscreen?'开':'关')+
       sysBtn('状态栏','statusbar','gold'+(st.hideStatusBar !== false?' on':''),'当前：'+(st.hideStatusBar !== false?'隐藏':'显示')+'。安卓沉浸模式：隐藏手机顶部状态栏，游戏画面更完整；桌面/网页没有系统状态栏，这个开关无副作用。',
         st.hideStatusBar !== false?'隐藏':'显示')+
-      dbgBtn+
-      '</div>';
+      sysBtn('后台运行','background-run','gold'+(bgRun?' on':''), bgTitle, bgRun?'开':'关')+
+      '</div>'+
+      /* 调试面板不进 4×2 的设置网格：它是开发/排查用的工具键，放网格外面，
+       * 正好给「后台运行」腾出第二排最后一格（用户 2026-10-27 口径）。 */
+      '<div class="settings-debug-row">'+dbgBtn+'</div>';
     const p=page('system','system',supportPanelHtml()+'<div class="settings-head"><h3 class="classic-section-title">游戏设置</h3>'+slider+'</div>'+modeCard+grid+saveFilePanel()+syncPanel()+updatePanelHtml());
     /* 系统页按钮统一走经典反馈：菜单项/设置键/底栏都先弹一下再执行。 */
     $('[data-action="support"]',p).onclick=()=>openSupportModal();
@@ -4311,6 +4360,14 @@
     $('[data-action="skip-display"]',p).onclick=()=>{
       const cur = State.settings().showSkip !== false;
       State.setSettings({showSkip: !cur});
+      openSystem();
+    };
+    /* 后台运行：存档 + 立即同步给安卓壳（壳据此决定切后台要不要 pauseTimers）。 */
+    $('[data-action="background-run"]',p).onclick=()=>{
+      const cur = State.settings().backgroundRun === true;
+      const next = !cur;
+      if (window.Main && Main.setBackgroundRun) Main.setBackgroundRun(next);
+      else State.setSettings({backgroundRun: next});
       openSystem();
     };
     /* 从服务器存档列表导入：绕过系统文件选择器（桌面壳里也能用），列表里带等级与时间。 */
@@ -4839,12 +4896,13 @@
     if (!lock.ok) { notice(lock.msg); return; }
     const ti = (Tower.towerInfo ? Tower.towerInfo() : null) || { maxLayer: 0, nextLayer: 1, gold: 0 };
     const ei = (Tower.endlessInfo ? Tower.endlessInfo() : null) || { best: 0, bestLayer: 0, tickets: 0 };
+    const eb = endlessBestMeta(ei);
     const body =
-      '<p><b>挑战塔</b>：一层一层往上打，每层三选一的增益，通关发金松果。<br>' +
+      '<p><b>挑战塔</b>：关卡模式的无尽版本，奖励也更加丰厚。<br>' +
       '已通关 ' + (ti.maxLayer | 0) + ' 层 · 下一层 ' + (ti.nextLayer | 0) + '（挑战书 ×1 → 金松果 ' + (ti.gold | 0) + '）</p>' +
       '<p><b>无尽塔</b>：免门票的无尽模式，越往上敌人越强。<br>' +
-      '最高分 ' + (ei.best | 0) + ' · 最深 ' + (ei.bestLayer | 0) + ' 层（现有抽奖卷 ' + (ei.tickets | 0) + ' 张）</p>' +
-      '<p class="small-label">两座塔都是离线单人玩法，不需要队友。</p>';
+      '最高分 ' + eb.best + ' · 最深 ' + eb.layer + ' 层</p>' +
+      '<p class="small-label">' + esc(eb.tip) + '</p>' ;
     /* 用户口径：这两颗入口键要保持大号（300×84 / 40px），别再退回默认小按钮。 */
     const m = modal('征战', body, [
       { label: '无尽塔', cls: 'gold war-tower-button', run: () => { if (window.TowerUI) TowerUI.openEndless({ from: 'village' }); } },
@@ -5005,8 +5063,9 @@
    *
    * 这个复刻版完全免费：没有内购、没有广告，也**不会拿支持换任何游戏内好处**。
    * 链接与「打开系统浏览器」的统一实现在 main.js（`Main.SUPPORT` / `Main.openExternal`）：
+   *   · 安卓 → `window.SSDZAndroid.openExternal`（Kotlin 从 Activity 发 ACTION_VIEW）
    *   · 轻壳模式 → 内置服务器的 `/__open`（Tauri 的 ACL 不允许远端来源调 IPC）
-   *   · 安装版 / 安卓 → Rust 命令 `open_external`
+   *   · 安装版 / iOS → Rust 命令 `open_external`
    *   · 便携版 / 浏览器 → `window.open`
    * 全部失败时退到「复制链接」兜底，玩家手动粘贴也能支持。
    * ============================================================ */

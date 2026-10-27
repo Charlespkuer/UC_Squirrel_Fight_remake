@@ -79,8 +79,8 @@ function uiHarness(c) {
       rendered.push({ kind: 'page', content: content, opts: opts || {}, node: node });
       return node;
     },
-    modal: (title, content, buttons) => {
-      rendered.push({ kind: 'modal', title: title, content: content, buttons: buttons || [] });
+    modal: (title, content, buttons, opts) => {
+      rendered.push({ kind: 'modal', title: title, content: content, buttons: buttons || [], opts: opts || {} });
       return { element: el(), close: () => {} };
     },
     btn: (label, action, cls) => '<button class="' + (cls || '') + '" data-action="' + action + '">' + label + '</button>',
@@ -234,6 +234,20 @@ hr('1. 数据层：刷出区间 / 组号 / 固定价 / 运营类标签');
   check('铸币售价固定：普通 0 / 稀有 1 / 史诗 2 / 传奇 3', () => {
     assert.equal(JSON.stringify(TD.MINT_SHOP.price), '[0,1,2,3]');
     for (const b of TD.BUFFS) assert.equal(TD.mintPrice(b), TD.MINT_SHOP.price[b.rarity], b.id);
+  });
+
+  check('战斗掉落传奇初始权重：基础权重 2.0，自然出率约 2% / 格（商店仍是 2.2）', () => {
+    const run = c.Tower._debugRun('endless');
+    assert.equal(TD.LEGEND_BATTLE_WEIGHT, 2.0, '战斗奖励的传奇基础权重为 2.0（约 2% 出率）');
+    assert.equal(TD.LEGEND_BASE_WEIGHT, 2.2, '试炼/铸币商店的基础权重保持原样');
+    const w = TD.battleTierWeights(1, run);
+    const total = w.reduce((a, b) => a + b, 0);
+    const share = w[3] / total;
+    assert.ok(share > 0.018 && share < 0.022,
+      '战斗奖励的传奇初始占比应当落在 1.8%~2.2%（实测 ' + (share * 100).toFixed(2) + '%）');
+    const core = fs.readFileSync(path.join(ROOT, 'js/tower.js'), 'utf8').replace(/\r\n/g, '\n');
+    assert.match(core, /const baseTier = TD\.battleTierWeights\(TD\.rerollTilt\(CHOICE_TILT_PAID\), run\);/,
+      '战斗奖励抽取必须真的走 battleTierWeights，不能只改数据没接线');
   });
 
   check('ops（运营类）与用户口径一致', () => {
@@ -636,18 +650,19 @@ hr('3. 货架：5 件 / 固定价 / 运营类优先');
       'C36 仍然把刷新费计入分段（procs ' + c36Before + ' → ' + row('C36').procs + '）');
   });
 
-  check('C59 叠层：铸币商店按层数发（×层数）', () => {
+  check('C59 叠层：铸币商店按层数发（×层数，最多 2 层）', () => {
     const c = setup(7);
     c.__rand(0);
+    /* 2026-10 用户口径：门庭若市最多叠 2 层（原 3 层）。 */
     assert.ok(c.Tower.debugGrantBuff('C59').ok);
     assert.ok(c.Tower.debugGrantBuff('C59').ok);
-    assert.ok(c.Tower.debugGrantBuff('C59').ok);
-    assert.equal(c.Tower._debugRun('endless').permanent.find((b) => b.id === 'C59').stacks, 3);
+    assert.equal(c.Tower.debugGrantBuff('C59').ok, false, '第 3 次应当被「已叠满（上限 2 层）」拒绝');
+    assert.equal(c.Tower._debugRun('endless').permanent.find((b) => b.id === 'C59').stacks, 2);
     winOne(c);
     const run = c.Tower._debugRun('endless');
     assert.ok(run.shop && run.shop.mint);
-    assert.equal(run.shop.enterCoins, 240, '3 层 → 240 试炼币（80 × 3）');
-    assert.equal(c.Tower.claimShopEnterCoins(), 240);
+    assert.equal(run.shop.enterCoins, 160, '2 层 → 160 试炼币（80 × 2）');
+    assert.equal(c.Tower.claimShopEnterCoins(), 160);
   });
 
   /* 用户 2026-10-24 口径：豪掷千金被水晶铭文附魔后**不是** 100→150（那反而更差），
@@ -1540,6 +1555,110 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     const page = ui.last('page');
     assert.ok(page.content.includes('试炼币'), '标题上要能看见试炼币余额：' + page.content.slice(0, 140));
     assert.equal(c.Tower.shopState().enterCoins, 0, '界面已经把进门币领掉了（只飘一次字）');
+  });
+
+  check('战斗失败的「重新挑战」是必选窗：没有关闭叉，退出重进也绕不过', () => {
+    const c = setup(7);
+    const ui = uiHarness(c);
+    const T = c.Tower;
+    const run = T._debugRun('endless');
+    run.retryToken = 2;
+    run.choices = null; run.choiceQueue = []; run.phase = null; run.env = []; run.noEnvRoll = true;
+    delete run.attempt;
+    const nx = T.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '应当能开战：' + ((nx && nx.msg) || ''));
+    const rw = T.reportBattle('endless', nx.token, false, 0);
+    assert.equal(rw.retryable, true, '有铸币时失败要先给「重新挑战 / 放弃本局」');
+    assert.ok(run.pendingRetry, '失败后要记下「这个窗还没选」');
+    assert.equal(T.nextBattle('endless').ok, false, '窗没处理之前不能再开一场（不能白打）');
+
+    /* 退出重进：这个必选窗要跟着存档走，重进后仍然拦住下一场。 */
+    c.State.save(); c.State.load();
+    assert.ok(T._debugRun('endless').pendingRetry, '存档往返后 pendingRetry 要保留');
+    assert.equal(T.nextBattle('endless').ok, false, '重进后仍然不能白打');
+
+    ui.rendered.length = 0;
+    c.TowerUI.openEndless();
+    const m = ui.last('modal');
+    assert.ok(m && /本场失利/.test(m.title), '重进无尽塔要重新弹出必选窗');
+    assert.equal(m.opts.locked, true, '必选窗不能有右上角关闭叉（modal locked）');
+    assert.equal(m.buttons.map((b) => b.label).sort().join(','), '放弃本局,重新挑战',
+      '只能二选一：重新挑战 / 放弃本局');
+
+    c.Main = { startBattle: () => Promise.resolve(), showHome: () => {} };
+    const before = T._debugRun('endless').retryToken;
+    ui.modalButton('重新挑战').run();
+    assert.equal(T._debugRun('endless').retryToken, before - 1, '重新挑战要扣 1 枚铸币');
+    assert.ok(!T._debugRun('endless').pendingRetry, '选过之后标记要清掉');
+    assert.ok(T._debugRun('endless').attempt, '点「重新挑战」应当立刻开打同一场');
+  });
+
+  check('战斗掉落的待选增益：退出重进不丢，重打同一场也不能刷新选项', () => {
+    const c = setup(7);
+    const T = c.Tower;
+    c.__rand(0.99);                              // 不让铸币商店 / 回响等概率事件掺进来
+    const run = T._debugRun('endless');
+    run.choices = null; run.choiceQueue = []; run.phase = null; run.env = []; run.noEnvRoll = true;
+    delete run.attempt; delete run.pendingRetry;
+    run.idx = 2;                                 // 第 3 场之后是 4 场层的普通战斗掉落
+    const nx = T.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '应当能开战：' + ((nx && nx.msg) || ''));
+    const rw = T.reportBattle('endless', nx.token, true, 1000, 1000, null);
+    assert.ok(rw.choices && rw.choices.length, '第 3 场之后应当给战斗掉落');
+    const first = rw.choices.map((ch) => ch.id).join(',');
+
+    /* 退出重进：待选增益要跟存档走，不能白丢一次掉落。 */
+    c.State.save(); c.State.load();
+    const loaded = T._debugRun('endless');
+    assert.equal((loaded.choices || []).map((ch) => ch.id).join(','), first, '读档后待选增益要原样保留');
+    assert.equal(T.nextBattle('endless').ok, false, '没选之前不能开下一场');
+
+    /* 退出重进后重打同一场：即使换掉全局随机流，掉落也必须还是那一组（不能刷新）。 */
+    c.__rand(0.99);                              // 换一条随机流，顺带压掉回响/商店的概率事件
+    const live = T._debugRun('endless');
+    const snap = live.retrySnap;
+    assert.ok(snap, '战前快照要留着');
+    for (const k of Object.keys(live)) delete live[k];
+    Object.assign(live, JSON.parse(JSON.stringify(snap)));
+    const nx2 = T.nextBattle('endless');
+    assert.ok(nx2 && nx2.ok !== false, '重打同一场应当能开战：' + ((nx2 && nx2.msg) || ''));
+    const rw2 = T.reportBattle('endless', nx2.token, true, 1000, 1000, null);
+    assert.equal((rw2.choices || []).map((ch) => ch.id).join(','), first,
+      '重打同一场不能换一组战斗掉落（旧版可被退出重刷）');
+  });
+
+  check('渴血之剑：献祭 / 活性事件都是没有关闭叉的必选窗', () => {
+    /* 献祭窗 */
+    {
+      const c = setup(7);
+      const ui = uiHarness(c);
+      c.Tower.debugGrantBuff('HB01');
+      c.Tower.debugGrantBuff('C57');
+      const run = c.Tower._debugRun('endless');
+      run.bladeSacrificePending = true;
+      ui.rendered.length = 0;
+      c.TowerUI.openEndless();
+      const m = ui.last('modal');
+      assert.ok(m && /渴血之剑/.test(m.title), '战后应当弹献祭窗');
+      assert.equal(m.opts.locked, true, '献祭窗不能有右上角关闭叉');
+      assert.ok(/C57|破军/.test(m.content) || /史诗/.test(m.content), '窗口里要列出祭品');
+    }
+    /* 活性事件窗 */
+    {
+      const c = setup(7);
+      const ui = uiHarness(c);
+      c.Tower.debugGrantBuff('HB01');
+      const run = c.Tower._debugRun('endless');
+      run.layer = 51; run.plan = [{ kind: 'hero', anim: 'tl' }]; run.idx = 0;
+      c.Tower._debugSetEndlessLayer(51);
+      assert.ok(c.Tower._debugRun('endless').bladeEventPending, '51 层应当有活性事件');
+      ui.rendered.length = 0;
+      c.TowerUI.openEndless();
+      const m = ui.last('modal');
+      assert.ok(m && /活性/.test(m.title), '应当弹活性事件窗');
+      assert.equal(m.opts.locked, true, '活性事件窗不能有右上角关闭叉');
+      assert.equal(m.buttons.map((b) => b.label).sort().join(','), '增强活性,抑制活性');
+    }
   });
 
   check('同一份 run.shop 上，两套 API 互不越界', () => {
@@ -2948,10 +3067,10 @@ hr('16. 2026-10 镜中世界：整百层打赢魔王 → 拾取照影之境 → 
     const first = run.mirrorSnapshot;
     const firstPower = Math.max(1, Math.round(raw.power * 1.2));
     assert.equal(first.source.power, firstPower, '首轮蛮力 +20% 已封存');
-    /* 101 层之后拿到第二张蛮力与增幅水晶：先镜面结算，再按 (1+0.2×1.4) 结算。 */
+    /* 101 层之后拿到第二张蛮力与增幅水晶：先镜面结算，再按 (1+0.2×1.3) 结算。 */
     assert.ok(T.debugGrantBuff('C26').ok);
     assert.ok(T.debugGrantBuff('C15').ok);
-    const after101Power = Math.max(1, Math.round(firstPower * (1 + 0.2 * 1.4)));
+    const after101Power = Math.max(1, Math.round(firstPower * (1 + 0.2 * 1.3)));
     assert.equal(nextMe().power, after101Power, '新加算/乘算增益在照影之境之后结算');
     /* 第 200 层再吸收：第二层以第一层结算后的值为白值；增幅水晶是纯局内倍率，
      * 只影响 101 层当场战斗，不进入第二层快照。 */
@@ -3314,6 +3433,46 @@ check('黑装：挑战塔旧进度补发黑卡与 100 层自选箱（不重复�
   assert.equal(again.cards, 0, '第二次不重复发卡');
   assert.equal(again.box, 0, '第二次不重复发自选箱');
   assert.equal(S.props[80], expected);
+});
+
+check('立即进货 + steam大促：合并为 4 折，E01 描述不再写 3.5 折', () => {
+  const c = setup(7);
+  const T = c.Tower, TD = c.TowerData;
+  assert.ok(T.debugGrantBuff('E04').ok, '先拿 steam大促');
+  assert.ok(T.debugGrantBuff('E01').ok, '再拿立即进货');
+  assert.ok(!/steam|3\.5/.test(TD.BUFF_BY_ID.E01.desc), '立即进货描述不该再写 combo：' + TD.BUFF_BY_ID.E01.desc);
+  const rw = winOne(c);
+  assert.equal(rw.postBattleShop, true, 'E01 应当开出战后商店');
+  const run = T._debugRun('endless');
+  assert.equal(run.shop.discountPct, 0.60, '合并折扣应为 −60%（4 折），实测 ' + run.shop.discountPct);
+  assert.equal(run.shop.combinedCoupon, true, '这家店要标记为合并券店，收摊时清 E04');
+  const st = T.shopState();
+  const slot = st.slots.find((s) => !s.sold && s.listPrice > 0);
+  assert.ok(slot, '应当有一件可买商品');
+  assert.equal(slot.price, Math.max(1, Math.round(slot.listPrice * 0.40)),
+    '实际售价应为原价的 40%：' + slot.price + ' / ' + slot.listPrice);
+  /* 休整商店同样走合并口径（老 bug 是这里把 E04 先吃掉，E01 店只剩 7 折）。 */
+  const c2 = setup(7);
+  assert.ok(c2.Tower.debugGrantBuff('E04').ok);
+  assert.ok(c2.Tower.debugGrantBuff('E01').ok);
+  const r2 = c2.Tower._debugRun('endless');
+  r2.choices = [{ type: 'buff', id: 'C02' }]; r2.restShopUsed = false; r2.phase = null;
+  assert.ok(c2.Tower.openRestShop().ok, '应当能开休整商店');
+  assert.equal(c2.Tower._debugRun('endless').shop.discountPct, 0.60,
+    '休整商店也要按 4 折合并，不能把 E04 提前吃掉');
+  assert.equal(c2.Tower._debugRun('endless').shop.combinedCoupon, true);
+  /* 层末结算商店也走同一份 shopPct，不能因为是 boundary 就退回 7 折。 */
+  const c3 = setup(5);
+  assert.ok(c3.Tower.debugGrantBuff('E04').ok);
+  assert.ok(c3.Tower.debugGrantBuff('E01').ok);
+  const r3 = c3.Tower._debugRun('endless');
+  r3.idx = r3.plan.length - 1; r3.choices = null; r3.phase = null;
+  const nx3 = c3.Tower.nextBattle('endless');
+  assert.ok(nx3.ok, nx3.msg);
+  c3.Tower.reportBattle('endless', nx3.token, true, 1500, 2000);
+  const endShop = c3.Tower._debugRun('endless').shop;
+  assert.equal(endShop.discountPct, 0.60, '层末结算商店也要按 4 折合并');
+  assert.equal(endShop.boundary, true, '层末商店仍要标 boundary');
 });
 
 /* ============================================================ */

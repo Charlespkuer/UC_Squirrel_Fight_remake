@@ -715,7 +715,11 @@
      * 用 localStorage 记"看到哪了"：换机器同步存档时红点会重新亮一次 —— 这是可接受的（它只是提示），
      * 也避免为这一个标记去改存档结构。 */
     const nm = main.byName('newMessage');
-    if (nm && nm.gotoAndStop) nm.gotoAndStop(hasNewMessages() ? 1 : 2);
+    /* 用户 2026-10 报的「1 级战斗后消息还没解锁，却飘着一个 NEW」：`newMessage` 是独立挂在
+     * 主界面上的红点，不受底下 `button4` 的 display 控制。消息键 2 级才解锁（见下面 bits），
+     * 所以红点也必须等到 level >= 2 才允许点亮，否则它会悬在隐藏的消息键位置。 */
+    const canSeeMessages = Number(S.level) >= 2;
+    if (nm && nm.gotoAndStop) nm.gotoAndStop(canSeeMessages && hasNewMessages() ? 1 : 2);
     /* :9414-9428 showStates(c1..c3)：原版是"三个槽先清空、再把生效中的药丸
      * attachMovie 进槽里并缩到 0.71"。复刻的槽清理照旧停在空槽帧（第 2 帧），
      * 图标改由 DOM 层叠在槽上（见 renderStateIcons）—— 库元件"大力丸2"等

@@ -363,22 +363,30 @@ test('碎裂 / 延续铭文与烙印升华：碎烙印、限次 +5、以及「�
   const up = Tower.applyPickBuff('limitedBuff', lim[0].uid);
   assert.equal(up.ok, true);
   assert.equal(up.uses, 15, '10 场 → 15 场：' + up.uses);
-  /* ①b 【第八十批 用户口径】特殊设定：延续铭文**不能取「立即进货」（E01）** ——
-   * 它是流程类增益（下一场战斗后开店），+5 场等于连开 5 家店。候选里过滤 + 直接点也被拒（双保险）。 */
+  /* ①b 【第八十批 用户口径】特殊设定：延续铭文**不能取流程类限次增益**：
+   * E01 立即进货（下一场开店）、E15 时间回廊（重开本层）、E16 铸币商队（下一场开铸币店）。
+   * 候选里过滤 + 直接点也被拒（双保险）。 */
   {
     const rE = Tower._debugRun('endless');
     /* 记下原状，用完**原样放回**（后面几段还接着用这一局的 limited 列表）。 */
     const keepLimited = rE.limited, keepPending = rE.pendingPick;
-    rE.limited = [{ id: 'E01', stacks: 1, uses: 1, on: true, uid: 777001 },
-      { id: 'N03', stacks: 1, uses: 3, on: true, uid: 777002 }];
+    const flowRows = [
+      { id: 'E01', stacks: 1, uses: 1, on: true, uid: 777001 },
+      { id: 'E15', stacks: 1, uses: 1, on: true, uid: 777003 },
+      { id: 'E16', stacks: 1, uses: 1, on: true, uid: 777004 },
+    ];
+    rE.limited = flowRows.concat([{ id: 'N03', stacks: 1, uses: 3, on: true, uid: 777002 }]);
     rE.pendingPick = { kind: 'limitedBuff', buffId: 'C62', addUses: 5 };
     const cands = Tower.pickCandidates('limitedBuff');
-    assert.ok(cands.every((x) => x.id !== 'E01'), 'E01 不该进延续铭文的候选：' + JSON.stringify(cands.map((x) => x.id)));
+    for (const row of flowRows) {
+      assert.ok(cands.every((x) => x.id !== row.id), row.id + ' 不该进延续铭文的候选：' +
+        JSON.stringify(cands.map((x) => x.id)));
+      const bad = Tower.applyPickBuff('limitedBuff', row.uid);
+      assert.equal(bad.ok, false, '直接点 ' + row.id + ' 也要被拒：' + JSON.stringify(bad));
+      assert.match(bad.msg || '', /流程类/, '拒绝理由要说清是流程类：' + bad.msg);
+      assert.equal(rE.limited.find((b) => b.id === row.id).uses, 1, row.id + ' 的场次不能被加上去');
+    }
     assert.ok(cands.some((x) => x.id === 'N03'), '其它限次增益照旧可选：' + JSON.stringify(cands.map((x) => x.id)));
-    const bad = Tower.applyPickBuff('limitedBuff', 777001);
-    assert.equal(bad.ok, false, '直接点 E01 也要被拒：' + JSON.stringify(bad));
-    assert.match(bad.msg || '', /流程类/, '拒绝理由要说清是流程类：' + bad.msg);
-    assert.equal(rE.limited.find((b) => b.id === 'E01').uses, 1, 'E01 的场次不能被加上去');
     rE.limited = keepLimited; rE.pendingPick = keepPending;
   }
   /* ①a 淘金烙印（C53）是**烙印类里的特殊烙印**（用户口径 2026-10）：
@@ -879,6 +887,42 @@ test('觐见魔王（x00）：固定持有两件涅槃plus（3 条命）+ 两件
     assert.equal(px.foe.mods && px.foe.mods.deathSaves, undefined, '它也不该有额外的命');
     assert.equal(px.foe.brokenBrandFinalMul, undefined, '终乘只给 x00');
   }
+});
+
+test('巡视的传奇三选一不再挤掉第 3 场的战斗掉落：两批都保留、选完自动接上', () => {
+  const c = setup(20261026);
+  const T = c.Tower, TD = c.TowerData;
+  T.setStoryEnabled(false);
+  freshRun(c);
+  T._debugSetEndlessLayer(7);
+  const run = T._debugRun('endless');
+  run.choices = null; run.choiceQueue = []; run.phase = null; run.env = []; run.noEnvRoll = true;
+  delete run.attempt; delete run.pendingRetry;
+  /* 第一次巡视会固定发渴血之剑（替代传奇），这条用例要测的是**已持剑后**的巡视传奇。 */
+  assert.equal(T.debugGrantBuff('HB01').ok, true);
+  /* 4 场层：第 3 场打完本该给一次普通战斗掉落；这里把这一场换成巡视。 */
+  run.idx = 2;
+  run.plan[2] = { kind: 'patrol', id: 'patrol', _layer: run.layer, _salt: run.salt };
+  const nx = T.nextBattle('endless');
+  assert.ok(nx && nx.ok !== false, '应当能开战：' + ((nx && nx.msg) || ''));
+  const rw = T.reportBattle('endless', nx.token, true, 1000, 1000, null);
+  assert.equal(rw.choicesKind, 'patrolLegendary', '先展示巡视的传奇三选一');
+  assert.ok(rw.choices && rw.choices.length, '巡视应当给传奇奖励');
+  assert.ok(rw.choices.every((ch) => TD.BUFF_BY_ID[ch.id].rarity === 3),
+    '巡视这一批必须都是传奇：' + JSON.stringify(rw.choices));
+  assert.equal((rw.choiceQueue || []).length, 1, '普通战斗掉落要排队，不能被挤掉');
+  assert.equal(rw.choiceQueue[0].kind, 'normal', '排队的是普通战斗掉落');
+  const normalIds = rw.choiceQueue[0].choices.map((ch) => ch.id).join(',');
+  assert.ok(normalIds.length > 0, '普通掉落应当有内容');
+
+  const picked = T.pickChoice('endless', 0);
+  assert.ok(picked && picked.ok, '先选巡视那批：' + ((picked && picked.msg) || ''));
+  assert.equal(run.choicesKind, 'normal', '选完巡视后自动接上普通战斗掉落');
+  assert.equal(run.choices.map((ch) => ch.id).join(','), normalIds, '接上的必须是原先排队的那一批');
+  const picked2 = T.pickChoice('endless', 0);
+  assert.ok(picked2 && picked2.ok, '普通掉落也要能正常选：' + ((picked2 && picked2.msg) || ''));
+  assert.equal(run.choices, null, '两批都选完就清空');
+  assert.equal((run.choiceQueue || []).length, 0, '队列也要清空');
 });
 
 test('挑战塔/无对局都要给明确答复，不能抛错', () => {

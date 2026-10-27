@@ -1404,7 +1404,7 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
    * C14「涅槃」同理（每层多一次复活机会）。这两条摘出来单独断言。
    * C16/C17 改成「开战第一回合回血」后按胜场量不到，比例由需求65 单独覆盖。 */
   /* 本轮新增的可叠层：C54「越战越勇」（2 层，每层每回合 +1.5%）、
-   * C59「门庭若市」（3 层，每层每进一次商店 +100 试炼币）。 */
+   * C59「门庭若市」（2 层，每层每进一次商店 +80 试炼币）。 */
   /* 2026-10 用户口径：以战养战（C11）不能再叠加、登顶者（C12）削弱为 1/3（锁定 1 份）
    * → 两条都去掉了 stackable，改用 oncePerRun + maxStacks 1。
    * 2026-10 第七十七批：补给（N08）改成可叠层 —— 用户口径「获得后还能继续刷出、次数无限叠加」。 */
@@ -1425,7 +1425,7 @@ test('需求36：所有可叠层增益都必须随层数成比例（修 C06 不�
     const r = T._debugRun('endless');
     r.permanent = [{ id: id, stacks: stacks }];
   /* 这些测量都按「每层/每场」的期望值断言，而期望值里含**全局倍率 g**
-   *（增幅水晶 C15 的 globalMul^层数）。g 会随「这一局恰好选到什么」而变化，
+   *（增幅水晶 C15：1 + 0.3×同名张数）。g 会随「这一局恰好选到什么」而变化，
    * 随机波动会让比值假报（实测 C07 出现 ×2.00 / 上限 60% 而不是 30%）。
    * 这里统一拒绝把 C15 选进来，把 g 锁死在 1，测量才可复现。 */
   const pickNoC15 = (run, avoidId) => {
@@ -1517,7 +1517,7 @@ test('需求37：成长类增益的「面板文字」必须等于「真实累计
   const c = setup();
   const T = c.Tower, S = c.State;
   /* 这些测量都按「每层/每场」的期望值断言，而期望值里含**全局倍率 g**
-   *（增幅水晶 C15 的 globalMul^层数）。g 会随「这一局恰好选到什么」而变化，
+   *（增幅水晶 C15：1 + 0.3×同名张数）。g 会随「这一局恰好选到什么」而变化，
    * 随机波动会让比值假报（实测 C07 出现 ×2.00 / 上限 60% 而不是 30%）。
    * 这里统一拒绝把 C15 选进来，把 g 锁死在 1，测量才可复现。 */
   const pickNoC15 = (run, avoidId) => {
@@ -1675,35 +1675,39 @@ test('需求38：永久增益替换弹窗改为竖排可滚动列表（不再横
 
 test('需求39：反击也算「敌方的一次攻击」——先机预判被反击消耗时也要可见', () => {
   const c = setup();
-  const Sim = c.Sim;
+  const Sim = c.Sim, TD = c.TowerData;
+  assert.equal(TD.BUFF_BY_ID.C38.mods.firstDodge, 1, '先机预判改为首次攻击必闪');
+  assert.equal(TD.BUFF_BY_ID.C38.mods.firstDodgeFreeTurn, 1, '先机预判保留立即行动');
+  assert.equal(TD.BUFF_BY_ID.C56.mods.firstHitZero, 1, '风影身法改为首次受伤归零');
   const mk = (o) => Object.assign({ name: 'X', level: 50, power: 100, agility: 50, speed: 50,
     hp: 6000, maxHp: 6000, weapons: [], skills: [], effects: {},
     baseStats: { power: 100, agility: 50, speed: 50 } }, o);
   /* 场景：我方带「先机预判」且必中；敌方先手、威力压到 1（它的反击算出来是 0 伤害，
-   * 不会生成归零回合），于是我方的免疫只能被敌方**主动普攻**消耗。 */
+   * 不会触发首次闪避），于是我方的必闪只能被敌方**主动普攻**消耗。 */
   let seen = 0;
   for (let t = 0; t < 60; t++) {
     const hero = mk({ name: '我方', speed: 100, agility: 1, power: 200, hp: 30000, maxHp: 30000,
-      mods: { firstHitZero: 1, mustHitAll: 1 } });
+      mods: { firstDodge: 1, firstDodgeFreeTurn: 1, mustHitAll: 1 } });
     const foe = mk({ name: '敌方', speed: 200, agility: 1, power: 1, hp: 30000000, maxHp: 30000000 });
     foe.baseStats.power = 1;
     const res = Sim.simulate(hero, foe);
-    const zero = (res.rounds || []).filter((r) => r.firstHitZero);
-    assert.equal(zero.length, 1, '整场应当恰好免一次，实测 ' + zero.length);
-    /* 语义：被标记归零的那一回合，**敌方那次攻击**没有造成伤害。
-     * 不能直接断言 `!zero[0].dmg` —— 触发免疫的那一回合可能是我方行动（反击已完成免疫），
+    const dodged = (res.rounds || []).filter((r) => r.firstDodge);
+    assert.equal(dodged.length, 1, '整场应当恰好必闪一次，实测 ' + dodged.length);
+    /* 语义：被标记必闪的那一回合，**敌方那次攻击**没有造成伤害。
+     * 不能直接断言 `!dodged[0].dmg` —— 触发必闪的那一回合可能是我方行动（反击已完成必闪），
      * 那一回合我方造成的伤害照旧存在。 */
-    assert.ok(zero[0].firstHitZero === true, '该回合应当带归零标记');
-    assert.ok(!zero.some((r) => r.firstHitZero && r.attacker === 1 && r.dmg > 0),
-      '被归零的敌方攻击不该同时有伤害');
+    assert.ok(dodged[0].firstDodge === true, '该回合应当带必闪标记');
+    assert.ok(dodged[0].firstDodgeFreeTurn === true, '先机预判还要给我方一次额外行动');
+    assert.ok(!dodged.some((r) => r.firstDodge && r.attacker === 1 && r.dmg > 0),
+      '被闪避的敌方攻击不该同时有伤害');
     seen++;
   }
   assert.equal(seen, 60, '样本应当跑满');
-  /* 反向确认：反击触发的归零必须**带上主回合**（否则免疫被悄悄消耗、玩家看不到）。 */
+  /* 反向确认：反击触发的必闪必须**带上主回合**（否则免疫被悄悄消耗、玩家看不到）。 */
   const src = readSrc('js', 'sim.js');
-  assert.ok(/if \(counter\.firstHitZero\) \{/.test(src),
-    '反击的归零标记应当被带进主回合（可见）');
-  assert.ok(/r\.firstHitZero = true;/.test(src), '主回合要记下这次归零');
+  assert.ok(/if \(counter\.firstDodge\) \{/.test(src),
+    '反击的必闪标记应当被带进主回合（可见）');
+  assert.ok(/r\.firstDodge = true;/.test(src), '主回合要记下这次必闪');
 });
 
 test('需求42：叠层增益按层数计价 / 仓库钥匙不进商店 / 登顶者改为固定 +1 力敏速', () => {
@@ -3026,10 +3030,10 @@ test('需求65：战斗续航（C16/C17）改成开战第一回合结算，并�
   assert.equal(contract.me.maxHp, 10000, '血之契约 +100% 时上限应当是 10000，实测 ' + contract.me.maxHp);
   assert.equal(contract.me.hp, 4900 + 500, '回血应当按 10000 × 5% = 500 算，实测 ' + contract.me.hp);
 
-  /* ⑥ 增幅水晶（C15 全局 ×1.4）照旧进乘区：5% → 7%，回 350 */
+  /* ⑥ 增幅水晶（C15 全局 ×1.3）照旧进乘区：5% → 6.5%，回 325 */
   const crystal = battleStart({ permanent: [{ id: 'C16', stacks: 1 }, { id: 'C15', stacks: 1 }] });
   assert.equal(crystal.me.maxHp, 5000, '增幅水晶不改变上限');
-  assert.equal(crystal.me.hp, 2500 + 350, '增幅水晶下回血应当是 7% × 5000 = 350，实测 ' + crystal.me.hp);
+  assert.equal(crystal.me.hp, 2500 + 325, '增幅水晶下回血应当是 6.5% × 5000 = 325，实测 ' + crystal.me.hp);
 
   /* ⑦ 补给 N08 与续航共用同一条「开战回血」通路，于是也一起吃到空血上限
    *    （本轮统一口径的副作用，一并锁死） */
@@ -3828,6 +3832,13 @@ test('需求86：时间回廊（E15）—— 下一场打完后从本层第 1 �
         if (r.phase === 'shop') { c.Tower.closeShop(); if (c.Tower._debugRun('endless').phase === 'checkpoint') c.Tower.continueEndless(); continue; }
         if (r.phase === 'checkpoint') { c.Tower.continueEndless(); continue; }
         if (r.phase === 'sacrifice') { c.Tower.sacrificePerm('C01'); continue; }   // 没有永久增益 → 会自己跳过
+        /* 渴血之剑的必选窗会拦住 nextBattle：这里只为推进抽池，献掉第一件 / 增强活性即可。 */
+        if (r.bladeSacrificePending) {
+          const cand = c.Tower.bladeSacrificeCandidates().list[0];
+          c.Tower.sacrificeBlade(cand ? cand.ref : null);
+          continue;
+        }
+        if (r.bladeEventPending) { c.Tower.resolveBladeEvent('enhance'); continue; }
         const nx = c.Tower.nextBattle('endless');
         if (!nx || nx.ok === false) break;
         c.Tower.reportBattle('endless', nx.token, true, 1500, 2000);
@@ -5768,7 +5779,7 @@ test('需求135：无尽塔增益介绍补全 —— 每条都写明「最多叠
   assert.equal(note('C03'), '最多叠 3 层', 'C03 猎侠者：stackable 无 maxStacks → 同栏 3 层');
   assert.equal(note('C14'), '最多叠 2 层，拿满后本局不再出现', 'C14 涅槃：maxStacks 2 + noRestack');
   assert.equal(note('C50'), '最多叠 2 层，拿满后本局不再出现', 'C50 抉择扩充：2 层 + noRestack');
-  assert.equal(note('C59'), '最多叠 3 层，拿满后本局不再出现', 'C59 门庭若市：3 层 + noRestack');
+  assert.equal(note('C59'), '最多叠 2 层，拿满后本局不再出现', 'C59 门庭若市：2 层 + noRestack');
   assert.equal(note('C54'), '最多叠 2 层', 'C54 越战越勇：2 层');
   assert.equal(note('C04'), '同名唯一，只有 1 层', 'C04 生命源泉：unique');
   assert.equal(note('C36'), '同名最多 1 份，一局只可能拿到一次', 'C36 挥金如土：oncePerRun');
@@ -5786,9 +5797,10 @@ test('需求135：无尽塔增益介绍补全 —— 每条都写明「最多叠
   assert.equal(note('N01'), '', '挑战塔专属（不在无尽体系里）不加叠层说明');
 
   /* ② 展示层：descOf 每条无尽增益都带叠层说明，且不再出现双括号
-   *（即时类不做叠层，只有可重复获得的才补一句）。 */
-  const list = TD.BUFFS.filter((b) => TD.hasTag(b, 'endless') && !TD.hasTag(b, 'hidden'));
-  assert.ok(list.length > 70, '无尽增益数量应当 > 70：' + list.length);
+   *（即时类不做叠层，只有可重复获得的才补一句；剧情固定件不写随机叠层说明）。 */
+  const list = TD.BUFFS.filter((b) => TD.hasTag(b, 'endless') && !TD.hasTag(b, 'hidden')
+    && !TD.hasTag(b, 'story'));
+  assert.ok(list.length > 65, '无尽增益数量应当 > 65：' + list.length);
   for (const b of list) {
     const d = TD.descOf(b, 'endless');
     if (b.kind !== 'instant' && !TD.hasTag(b, 'quietStack')) {
@@ -5812,14 +5824,16 @@ test('需求137：自愿支持作者 —— 系统页入口 / 30 级一次性提
   const uiSrc = readSrc('js', 'classic-ui.js');
   const mainSrc = readSrc('js', 'main.js');
   const rustSrc = readSrc('src-tauri', 'src', 'lib.rs');
+  const ktSrc = readSrc('src-tauri', 'android', 'AndroidExportBridge.kt');
 
   /* ① 链接只有一个来源（main.js 的 Main.SUPPORT），并且是爱发电那个地址 */
   assert.match(mainSrc, /url: 'https:\/\/ifdian\.net\/a\/Charlespkuer'/, '支持链接要写死成爱发电地址');
   assert.match(mainSrc, /function openExternal\(/, '要有一个统一的「打开外部链接」出口');
   assert.match(mainSrc, /function openSupport\(/, '还要有 openSupport 便捷入口');
-  assert.match(mainSrc, /core\.invoke\('open_external'/, '安装版 / 安卓要走 Rust 命令');
+  assert.match(mainSrc, /core\.invoke\('open_external'/, '安装版 / iOS 要走 Rust 命令');
   assert.match(mainSrc, /\/__open\?url=/, '轻壳模式要走内置服务器的 /__open');
   assert.match(mainSrc, /window\.open\(url, '_blank'/, '浏览器 / 便携版退回 window.open');
+  assert.match(mainSrc, /SSDZAndroid/, '安卓要先走 Kotlin 的 SSDZAndroid 桥');
   assert.match(mainSrc, /SUPPORT, openExternal, openSupport/, '三个入口都要导出到 window.Main');
 
   /* ② 系统页最上方：支持面板 + 按钮（源码口径） */
@@ -5889,17 +5903,35 @@ test('需求137：自愿支持作者 —— 系统页入口 / 30 级一次性提
     require('node:vm').runInNewContext(code, ctx);
     return { result: ctx.out, opened, invoked };
   };
-  // ① 安装版 / 安卓：tauri.localhost + IPC → 走 open_external 命令
+  // ① 安装版 / iOS：tauri.localhost + IPC → 走 open_external 命令
   const invoked = [];
   const appCase = runCase({
     location: { hostname: 'tauri.localhost', port: '' },
     tauri: { core: { invoke: (cmd, args) => { invoked.push([cmd, args]); return Promise.resolve(); } } },
     fetch: undefined,
   });
-  return Promise.resolve(appCase.result).then((ok) => {
-    assert.equal(ok, true, '安装版应当成功');
-    assert.equal(invoked[0][0], 'open_external', '要走 Rust 的 open_external 命令');
-    assert.equal(invoked[0][1].url, 'https://ifdian.net/a/Charlespkuer', '参数是支持链接');
+  /* ①b 安卓：优先走 Kotlin 的 window.SSDZAndroid.openExternal（Rust 的 am start 会被拒） */
+  const bridgeCalls = [];
+  const bridgeOk = runCase({
+    location: { hostname: 'tauri.localhost', port: '' },
+    tauri: { core: { invoke: () => { throw new Error('安卓不该走 Rust IPC'); } } },
+    win: { SSDZAndroid: { openExternal: (u) => { bridgeCalls.push(u); return '{"ok":true}'; } } },
+    fetch: undefined,
+  });
+  const bridgeFail = runCase({
+    location: { hostname: 'tauri.localhost', port: '' },
+    tauri: { core: { invoke: () => { throw new Error('安卓不该走 Rust IPC'); } } },
+    win: { SSDZAndroid: { openExternal: () => '{"ok":false,"msg":"没有浏览器"}' } },
+    fetch: undefined,
+  });
+  return Promise.all([Promise.resolve(appCase.result), Promise.resolve(bridgeOk.result), Promise.resolve(bridgeFail.result)])
+    .then(([ok, androidOk, androidFail]) => {
+      assert.equal(ok, true, '安装版应当成功');
+      assert.equal(androidOk, true, '安卓桥成功时要返回 true');
+      assert.equal(bridgeCalls[0], 'https://ifdian.net/a/Charlespkuer', '安卓桥要收到支持链接');
+      assert.equal(androidFail, false, '安卓桥失败时要返回 false（界面据此显示「复制链接」兜底）');
+      assert.equal(invoked[0][0], 'open_external', '要走 Rust 的 open_external 命令');
+      assert.equal(invoked[0][1].url, 'https://ifdian.net/a/Charlespkuer', '参数是支持链接');
     /* ② 装了 opener 插件时优先用它 */
     const viaPlugin = [];
     const pluginCase = runCase({
@@ -5945,14 +5977,17 @@ test('需求137：自愿支持作者 —— 系统页入口 / 30 级一次性提
             assert.equal(b2, false, '被浏览器拦下时要返回 false（界面据此显示「复制链接」）');
             assert.match(uiSrc, /function showSupportFallback\(/, '要有「复制链接」兜底弹窗');
             assert.match(uiSrc, /function copyText\(/, '要有复制文本');
-            /* ⑤ Rust 侧：轻壳的内置服务器要有 /__open，安装版/安卓要有 open_external 命令 */
+            /* ⑤ Rust / Kotlin 侧：轻壳的内置服务器要有 /__open；安装版走 open_external；
+             *   安卓必须由 Kotlin 发 ACTION_VIEW（Rust 里 spawn am 会被 ActivityManager 拒）。 */
             assert.match(rustSrc, /if path == "\/__open"/, '内置服务器要加 /__open 路由');
             assert.match(rustSrc, /fn open_api\(query: &str, out: &mut TcpStream\)/, '要有 /__open 的处理函数');
             assert.match(rustSrc, /fn open_external\(url: String\) -> Result<\(\), String>/, '要有 open_external 命令');
             assert.match(rustSrc, /generate_handler!\[[^\]]*open_external\]/,
               '命令要注册进 invoke_handler');
             assert.match(rustSrc, /fn spawn_opener\(url: &str\)/, '要有跨平台的系统打开器');
-            assert.match(rustSrc, /android\.intent\.action\.VIEW/, '安卓走 Intent');
+            assert.ok(!/Command::new\("am"\)/.test(rustSrc), '安卓不再 spawn am start（会被 ActivityManager 拒绝）');
+            assert.match(ktSrc, /fun openExternal\(rawUrl: String\): String/, '安卓要用 Kotlin 桥发 Intent');
+            assert.match(ktSrc, /Intent\(Intent\.ACTION_VIEW, Uri\.parse\(url\)\)/, '安卓 Intent 必须是 ACTION_VIEW');
             assert.match(rustSrc, /!\url\.contains\(\[/, '链接要过滤 shell 元字符');
           });
         });

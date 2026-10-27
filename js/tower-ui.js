@@ -86,6 +86,26 @@
   let replaceTarget = null;
   /** 【U20】被剧情屏让路的「里程碑奖励」（同一场战斗之后先播剧情，播完再弹它）。 */
   let pendingMilestone = null;
+  /* 上一场失利的「重新挑战 / 放弃本局」窗是不是已经开着：openEndless 会被多次调用，
+   * 不能让同一个必选窗叠出两层（它没有关闭叉，只能二选一）。 */
+  let retryOfferOpen = false;
+  let retryOfferEl = null;
+  /** 必选窗还在不在：真实 DOM 里它被整页导航移除时 `isConnected === false`，
+   *  标志也要跟着复位，否则玩家返回再进来会看不到这个窗、又走不了「重新挑战」。 */
+  function retryOfferVisible() {
+    if (!retryOfferOpen) return false;
+    if (retryOfferEl && retryOfferEl.isConnected === false) retryOfferOpen = false;
+    return retryOfferOpen;
+  }
+  /* 渴血之剑的献祭 / 活性事件也各只有一个窗；openEndless 会重画多次，用同一套
+   * 「元素还在不在」判重，避免叠两层。 */
+  let bladeOfferOpen = false;
+  let bladeOfferEl = null;
+  function bladeOfferVisible() {
+    if (!bladeOfferOpen) return false;
+    if (bladeOfferEl && bladeOfferEl.isConnected === false) bladeOfferOpen = false;
+    return bladeOfferOpen;
+  }
   /** 勇者准备 / 回看的「更换装备」层（挂在 body 上，不跟 #ui 的等比缩放一起缩小）。 */
   let heroGearPickerEl = null;
   /* 从经典村庄「征战」进来还是从关卡页进来：决定返回目标和顶部外壳。 */
@@ -762,7 +782,7 @@
      *   · shopSpendTiers 是数组，单独按成本口径处理。 */
     const RAW_KEYS = new Set(['lowHpAt', 'lowHpRegenAt', 'permSlot', 'pickWeaponPct', 'pickSkillPct',
       'rarityBoost', 'epicMul', 'legendMul', 'commonMul', 'sellValue', 'sellGrowthPerWin',
-      'shopEnterCoins', 'globalMul', 'heroMirrorBlade',
+      'shopEnterCoins', 'globalMul', 'kingMirrorBlade',
       /* 挥金如土的**每次属性收益**是固定整数（+1 / +5），结算读的是基础 mods；
        * 水晶铭文只改「花多少币」这个门槛，不把 +1 变成 +1.5。 */
       'shopSpendStat', 'shopSpendHp']);
@@ -832,7 +852,7 @@
       /* 涅槃可叠 2 层：本层复活机会 = 层数（第 2 层不改属性加成，只多一次机会）。 */
       parts.push('本层复活机会：' + Math.max(1, Math.floor(Number(b.stacks) || 1)) + ' 次');
     }
-    if (m.globalMul) parts.push('全局增幅 ×' + m.globalMul + (b.stacks > 1 ? '，可叠 ' + b.stacks + ' 层' : ''));
+    if (m.globalMul) parts.push('全局增幅 ×' + m.globalMul + '（同名多张加算，且与水晶铭文加算）');
     if (m.powerPerEmptySlot) parts.push('每个空的永久增益位 攻击 +' + Math.round(m.powerPerEmptySlot * 100) + '%');
     if (m.powerPerPermBuff) parts.push('每拥有 1 个永久增益 攻击 +' + Math.round(m.powerPerPermBuff * 100) + '%');
     /* C36「挥金如土」是**分段门槛**（5 / 10 / 15），水晶铭文附魔后每一档都按成本口径降价
@@ -844,7 +864,8 @@
         ' / 敏+' + (m.shopSpendStat || 1) + ' / 速+' + (m.shopSpendStat || 1) +
         ' / 生命上限+' + (m.shopSpendHp || 5) + ' 其中一项');
     }
-    if (m.firstHitZero) parts.push('每场战斗敌方对我方的第一次攻击伤害归零' + (m.firstHitZeroFreeTurn ? '，且我方立刻额外行动一次' : ''));
+    if (m.firstDodge) parts.push('每场战斗中敌方对我方的第一次攻击必定闪避' + (m.firstDodgeFreeTurn ? '，且我方立刻额外行动一次' : ''));
+    if (m.firstHitZero) parts.push('每场战斗中我方第一次受到的伤害降低为 0' + (m.firstHitZeroFreeTurn ? '，且我方立刻额外行动一次' : ''));
     if (m.envIgnore || m.envReflect || m.envDenyGood) parts.push('无视负面环境词缀；敌方无法获得环境词缀加成');
     /* —— 本轮新增 6 个 —— */
     if (m.roundStatPct) parts.push('战斗中每回合开始 力/敏/速 各 +' +
@@ -852,12 +873,11 @@
       '；每场战斗结束时清零');
     if (m.catchUpPct) parts.push('战斗中每回合把「落后对手最多」的那一项补上差距的 ' + Math.round(m.catchUpPct * 100) +
       '%，并让对手那一项减少同样的数值；每场战斗结束时清零');
-    if (m.firstDodge) parts.push('每场战斗中第一次被攻击时必定闪避');
     if (m.roundMaxHpMul) parts.push('战斗中每回合双方生命上限 ×' + Math.round(m.roundMaxHpMul * 100) + '%（向下取整）；每场战斗结束时清零');
     if (m.shopSpendLimited) parts.push('每在试炼商店买货或买铸币消费 ' + m.shopSpendLimited + ' 试炼币 → 立即获得 1 个随机限次增益（刷新不算）');
     if (m.rerollTiltMul) parts.push('本局商店刷新的稀有度提升速度 ×' + m.rerollTiltMul +
       '（每花 10 试炼币带来的提升翻倍）');
-    if (m.shopEnterCoins) parts.push('每进入一次试炼商店 +' + m.shopEnterCoins + ' 试炼币' +
+    if (m.shopEnterCoins) parts.push('每进入一次商店 +' + m.shopEnterCoins + ' 试炼币' +
       (b.stacks > 1 ? '（可叠 ' + b.stacks + ' 层）' : ''));
     if (m.mustHitAll) parts.push('这一场所有攻击必中');
     if (m.mustHitFirst) parts.push('首次攻击必中');
@@ -904,7 +924,7 @@
     if (m.rarityBoost) parts.push('商店史诗 / 传奇出率 ×' + (m.legendMul || 2) + '、普通 ×' + (m.commonMul || 0.5) + '（获得时生效）');
     if (m.sellValue) parts.push('售出获得 ' + Math.round(m.sellValue) + ' 试炼币' +
       (m.sellGrowthPerWin ? '，每胜利一场 +' + Math.round(m.sellGrowthPerWin) : '') + '（经济类，不随铭文变化）');
-    if (m.heroMirrorBlade) parts.push('魔王·镜完成复制后：其力量 −20%、生命上限 −35%（不能复制这份克制）');
+    if (m.kingMirrorBlade) parts.push('对镜之魔王额外生效：其力量 −20%、生命上限 −30%（每层献祭再各 −2%）');
     if (b.progress) parts.push('当前进度：' + b.progress);
     if (buff.mods && buff.mods.shopDiscount) parts.push('下个商店 ' + Math.round((1 - buff.mods.shopDiscount) * 100) / 10 + ' 折');
     if (buff.mods && buff.mods.postBattleShop) parts.push('下一场战斗后开一次商店');
@@ -919,6 +939,26 @@
   function limitTip(b) {
     const buff = TowerData.BUFF_BY_ID[b.id];
     if (!buff) return b.name;
+    /* 渴血之剑：阶段 / 献祭层数 / 剩余场次 / 强制苏醒都要写清，不能套普通限次文案。 */
+    if (TowerData.isBladeId && TowerData.isBladeId(b.id)) {
+      const info = Tower.bladeInfoOf ? Tower.bladeInfoOf() : null;
+      const stage = info ? info.stage : (TowerData.bladeStageOf ? TowerData.bladeStageOf(b.id) : 0);
+      const stageName = info && info.final ? '最终形态' : (info && info.dead ? '失活形态' : '第 ' + stage + ' 阶段');
+      const usesText = b.unlimited
+        ? '永续：不再消耗次数，也不再需要献祭'
+        : '剩余 ' + b.uses + ' 场；用尽后进化为下一阶段';
+      const mirror = info && info.final && info.on
+        ? '对镜之魔王：力量 −' + Math.round((info.powerCut || 0) * 100) + '%、生命上限 −' + Math.round((info.hpCut || 0) * 100) + '%'
+        : '';
+      return [
+        buff.name + '（传奇 · 限次装备 · ' + stageName + '）',
+        TowerData.descOf(buff, 'endless'),
+        '献祭成长：×' + Math.max(1, Number(b.stacks) || 1) + ' 层（每件祭品 +1 层，最多 5 层）',
+        usesText,
+        mirror,
+        b.forced ? '强制苏醒中 · 无法关闭' : (b.on ? '当前生效中 · 点一下可以关掉' : '当前已关闭 · 点一下重新开启'),
+      ].filter(Boolean).join('\n');
+    }
     const fragile = buff.mods && buff.mods.fragileBreakPct;
     if (fragile) {
       return [buff.name + '（' + RARITY[buff.rarity] + ' · 易碎）', buff.desc,
@@ -942,9 +982,16 @@
       '剩余 ' + b.uses + ' 场（每打完一场扣 1，扣完自动消失）',
       b.on ? '当前生效中 · 点一下可以关掉（关掉不扣次数）' : '当前已关闭 · 点一下重新开启'].join('\n');
   }
+  /** 渴血之剑的角标：阶段 / 成长 / 永续 / 强制苏醒。 */
+  function bladeBadgeText(b) {
+    const head = b.forced ? '强制苏醒 · ' : '';
+    const stackTag = b.stacks > 1 ? '×' + b.stacks + ' 层 · ' : '';
+    return head + stackTag + (b.unlimited ? '永续' : '剩 ' + b.uses + ' 场');
+  }
   function limitBadgeText(b) {
     const def = TowerData.BUFF_BY_ID[b.id] || {};
     const stackTag = b.stacks > 1 ? '×' + b.stacks + ' 层 · ' : '';
+    if (TowerData.isBladeId && TowerData.isBladeId(b.id)) return bladeBadgeText(b);
     if (isTowerNext(def, 'endless')) return stackTag + '下一场';
     if (def.mods && def.mods.fragileBreakPct) return stackTag + '易碎 ' + def.mods.fragileBreakPct + '%';
     if (TowerData.hasTag(def, 'nextBattle')) return stackTag + '无尽塔 · 剩 ' + b.uses + ' 场';   // 无尽塔的限次类（含 C57）
@@ -983,7 +1030,7 @@
     const limHtml = lim.length
       ? lim.map((b) => '<button type="button" class="limit-tag r' + b.rarity + (b.on ? '' : ' off') + '" data-toggle="' + esc(rowRef(b)) +
           '" data-tip="' + esc(limitTip(b)) + '" title="' + esc(limitTip(b)) + '">' +
-          '<b>' + esc(b.name) + '</b><i>' + (b.on ? '生效中' : '已关闭') + '</i><em>' +
+          '<b>' + esc(b.name) + '</b><i>' + (b.forced ? '强制苏醒' : (b.on ? '生效中' : '已关闭')) + '</i><em>' +
           limitBadgeText(b) + '</em></button>').join('')
       : '<span class="buff-empty">还没有限次增益</span>';
     /* 讨价还价（E14）：即时类不进 permanent/limited，所以在这里单独把「攒着还没兑现的份数」
@@ -1762,11 +1809,12 @@
       return null;
     }
   }
-  /** 主界面左下「剧情模式」右边那颗小全身照（只在勇者模式出现）。 */
+  /** 主界面左下「剧情模式」右边那颗小全身照（只在勇者模式出现）。
+   *  用户 2026-11 口径：点它直接进**武技页**，看本局已学武技的当前等级与下一级成功率。 */
   function heroPortraitButtonHtml(run) {
     if (!run || run.ruleset !== 'hero' || !run.hero) return '';
     return '<button type="button" class="endless-hero-portrait" data-action="hero-status" ' +
-      'title="查看勇者状态" aria-label="查看勇者状态">' +
+      'title="查看勇者武技" aria-label="查看勇者武技">' +
       '<span class="endless-hero-portrait-art" data-hero-portrait="small" aria-hidden="true"></span>' +
       '<b>勇者</b></button>';
   }
@@ -1807,7 +1855,7 @@
       '<div class="hero-status-side"><div class="hero-status-portrait"><span data-hero-status-art aria-hidden="true"></span></div>' +
       '<div class="hero-status-name">勇者</div>' + hp + '</div>' +
       '<div class="hero-status-main">' + heroStatsHtml(foe) +
-      '<p class="hero-base-note">四维在开局时分配，局内不再变化；不继承账号、套装或幻兽加成，外观装备只改变造型、属性 0 加成。</p>' +
+      '<p class="hero-base-note">四维在开局时分配；每通过 5 层额外获得 生命上限 +50、力/敏/速 +5。不继承账号、套装或幻兽加成，外观装备只改变造型、属性 0 加成。</p>' +
       '<div class="hero-status-gears">' + gearRows + '</div>' +
       '<div class="hero-status-loadouts">' + list('weapon', '武器', '空手') + list('skill', '技能', '尚未学习') + '</div>' +
       '<section class="hero-status-log"><h4>成长记录</h4>' + (log.length
@@ -1817,7 +1865,7 @@
   }
   /** 现代模式：把勇者数据交给 `UI.classic.openHeroPage`，直接用状态页壳与武技图鉴页
    *  （不再自绘状态弹窗）。经典模式仍走 7218 原版状态页。 */
-  function openHeroStatusModern() {
+  function openHeroStatusModern(tab) {
     const info = Tower.endlessInfo();
     const run = info && info.run;
     if (!run || run.ruleset !== 'hero' || !run.hero) { notice('当前不是勇者模式。'); return; }
@@ -1828,6 +1876,9 @@
       stats: fighter || { power: 65, agility: 65, speed: 65, maxHp: 800 },
       weapons: (run.hero.weapons || []).slice(),
       skills: (run.hero.skills || []).slice(),
+      /* 只读详情要显示**失败保底后的实时成功率**：context 必须带上本局失败计数，
+       * 否则 TowerHero.upgradeInfoOf() 只能按基础概率算（用户 2026-11 反馈）。 */
+      upgradeFails: Object.assign({}, run.hero.upgradeFails || {}),
       appearance: (run.hero.appearance || []).map((g) => Object.assign({}, g)),
       wins: Math.max(0, Number(run.hero.wins) || 0),
       patrolWins: Math.max(0, Number(run.hero.patrolWins) || 0),
@@ -1847,6 +1898,7 @@
             hero.stats = (window.TowerHero && TowerHero.fighter) ? (TowerHero.fighter(r.hero) || hero.stats) : hero.stats;
             hero.weapons = (r.hero.weapons || []).slice();
             hero.skills = (r.hero.skills || []).slice();
+            hero.upgradeFails = Object.assign({}, r.hero.upgradeFails || {});
             hero.log = (Array.isArray(r.hero.log) ? r.hero.log : []).slice();
             if (Tower.heroBladeOf) hero.blade = Tower.heroBladeOf();
           }
@@ -1881,15 +1933,16 @@
     };
     closeHeroGearPicker();
     if (!C() || typeof C().openHeroPage !== 'function') { openHeroStatusDom(); return; }
-    heroPageCtrl = C().openHeroPage(hero, { tab: 'status' });
+    heroPageCtrl = C().openHeroPage(hero, { tab: tab === 'skills' ? 'skills' : 'status' });
   }
-  /** 爬塔中点击勇者小全身照：现代模式直接进状态页，经典模式打开原版 7218 状态页。 */
-  function openHeroStatus() {
+  /** 爬塔中点击勇者小全身照：现代模式直接进状态页，经典模式打开原版 7218 状态页。
+   *  `tab` 可指定初始页签：从头像进来默认进「技能」页（看本局武技等级 / 下一级成功率）。 */
+  function openHeroStatus(tab) {
     const info = Tower.endlessInfo();
     const run = info && info.run;
     if (!run || run.ruleset !== 'hero' || !run.hero) { notice('当前不是勇者模式。'); return; }
-    if (classicHeroUi()) { openHeroStatusClassic(); return; }
-    openHeroStatusModern();
+    if (classicHeroUi()) { openHeroStatusClassic(tab); return; }
+    openHeroStatusModern(tab);
   }
   function openHeroStatusDom() {
     const info = Tower.endlessInfo();
@@ -1903,7 +1956,7 @@
     }
   }
   /** 经典状态页的勇者版：只读武技、可换外观装备（`Tower.setHeroAppearance` 落盘）。 */
-  function openHeroStatusClassic() {
+  function openHeroStatusClassic(tab) {
     const info = Tower.endlessInfo();
     const run = info && info.run;
     if (!run || run.ruleset !== 'hero' || !run.hero) { notice('当前不是勇者模式。'); return; }
@@ -1914,6 +1967,7 @@
       appearance: (run.hero.appearance || []).map((g) => Object.assign({}, g)),
       weapons: (run.hero.weapons || []).slice(),
       skills: (run.hero.skills || []).slice(),
+      upgradeFails: Object.assign({}, run.hero.upgradeFails || {}),
       wins: Math.max(0, Number(run.hero.wins) || 0),
       patrolWins: Math.max(0, Number(run.hero.patrolWins) || 0),
       uncapped: window.TowerHero && TowerHero.uncappedCount ? TowerHero.uncappedCount(run.hero) : 0,
@@ -1927,6 +1981,7 @@
             hero.coins = Math.max(0, Number(r.retryToken) || 0);
             hero.weapons = (r.hero.weapons || []).slice();
             hero.skills = (r.hero.skills || []).slice();
+            hero.upgradeFails = Object.assign({}, r.hero.upgradeFails || {});
             hero.stats = (window.TowerHero && TowerHero.fighter) ? (TowerHero.fighter(r.hero) || hero.stats) : hero.stats;
             hero.log = (Array.isArray(r.hero.log) ? r.hero.log : []).slice();
             if (Tower.heroBladeOf) hero.blade = Tower.heroBladeOf();
@@ -1957,7 +2012,7 @@
       onBack: () => { closeHeroGearPicker(); try { SfStatus.destroy(); } catch (e) {} openEndless(); },
     };
     closeHeroGearPicker();
-    const p = SfStatus.openHero(hero, { overlay: true, label: '勇者' });
+    const p = SfStatus.openHero(hero, { overlay: true, label: '勇者', tab: tab === 'skills' ? 'skills' : 'status' });
     if (p && typeof p.then === 'function') {
       p.then((ok) => { if (!ok) openHeroStatusDom(); }).catch((e) => {
         if (window.__errs) window.__errs.push('hero status classic: ' + (e && e.message));
@@ -2213,7 +2268,7 @@
           '<p class="hero-prep-todo" data-hero-start-note>' + note + '</p>' +
           '<div class="hero-prep-actions">' + C().btn('更换装备', 'hero-gear', 'gold') +
             C().btn('开始挑战', 'hero-start', 'gold') + '</div>' +
-          '<p class="hero-base-note">开局前可调整力量 / 敏捷 / 速度（20% 下限）；装备只改变外观、属性 0 加成，被动技能与塔内增益另计。</p>' +
+          '<p class="hero-base-note">开局前可调整力量 / 敏捷 / 速度（20% 下限）；每通过 5 层生命上限 +50、力/敏/速 +5。装备只改变外观、属性 0 加成，被动技能与塔内增益另计。</p>' +
         '</div>' +
       '</div>' +
       '<div class="stat-strip hero-prep-stats" data-hero-preview-stats' + (heroSetupTab === 'status' ? '' : ' hidden') + '>' +
@@ -2763,8 +2818,11 @@
         '<b>' + esc(b.name) + '</b>' + (b.type ? '<span class="tower-plan-type">' + esc(b.type) + '</span>' : '') +
         (b.elite ? '<em class="elite-tag">精英</em>' : '') +
         (i < beatenCount ? '<em class="beaten-tag">✓ 已战胜</em>' : '') + '</li>').join('');
+      const choicesTitle = run.choicesKind === 'patrolLegendary'
+        ? '巡视战利品 · 传奇三选一'
+        : '休整点 · 选一张带走';
       const choicesHtml = run.choices
-        ? '<div class="tower-buffs choice-onpage"><h4>休整点 · 选一张带走</h4>' +
+        ? '<div class="tower-buffs choice-onpage"><h4>' + choicesTitle + '</h4>' +
           /* 选牌是内联在这一屏的，所以「当前环境」要贴在卡片正上方 ——
            * 选牌时一眼能看到这一局现在顶着什么。 */
           (run.env && run.env.length
@@ -2826,8 +2884,16 @@
       /* 还没开始（没有进行中的对局）：这一屏也**不显示抽奖卷 / 铸币**，
        * 下方那行「现有抽奖卷 X 张」一并去掉 —— 只留「开始冲塔」一个按钮。
        * 想看仓库抽奖卷总数请去「每日幸运抽奖」页（那边的口径就是仓库存量）。 */
+      /* 【2026-10 用户口径】最高分/最深要统计**所有剧本**（经典 + 勇者），不是只看经典；
+       * 下面再分模式列一行明细，避免玩家以为勇者纪录没被算进去。 */
+      const num = (v) => Math.max(0, Math.floor(Number(v) || 0));
+      const allBest = Math.max(num(info.allBest), num(info.best), num(info.heroBest));
+      const allWeekBest = Math.max(num(info.allWeekBest), num(info.weekBest), num(info.heroWeekBest));
+      const allBestLayer = Math.max(num(info.allBestLayer), num(info.bestLayer), num(info.heroBestLayer));
       main = '<h2 class="tower-title">无尽塔</h2>' +
-        '<div class="tower-stats">历史最高 <b class="gold-text">' + info.best + '</b> 分 · 本周最高 ' + info.weekBest + ' 分 · 最深 ' + info.bestLayer + ' 层</div>' +
+        '<div class="tower-stats">历史最高 <b class="gold-text">' + allBest + '</b> 分 · 本周最高 ' + allWeekBest + ' 分 · 最深 ' + allBestLayer + ' 层' +
+          '<span class="tower-stats-sub">经典 ' + num(info.best) + ' 分 / ' + num(info.bestLayer) + ' 层 · 勇者 ' +
+            num(info.heroBest) + ' 分 / ' + num(info.heroBestLayer) + ' 层</span></div>' +
         /* 【2026-10 用户口径】开局页**只留增益图鉴与敌人图鉴**：原来这里还有两块文字 ——
          * ①「敌人成长 ×N」刻度行（foeScaleChip，第 1 层 ×1 那把刻度）；
          * ②「每 100 层重来一轮，层号与机制严格对应…」的整段说明。
@@ -2883,7 +2949,7 @@
     }
     /* 【U18b】左下角那颗按钮：剧情模式 ↔ 挑战模式，切完立刻重画这一屏。 */
     on(p, 'story-mode', () => { Tower.setStoryEnabled(!Tower.storyEnabled()); openEndless(); });
-    on(p, 'hero-status', () => openHeroStatus());
+    on(p, 'hero-status', () => openHeroStatus('skills'));
     on(p, 'last-summary', () => openEndlessSummary(info.lastSummary));
     /* 剧本选择：展开/收起；选中哪一档只重画这一屏，「开始攀登」再按它分流。
      * 这里全部做能力判断 —— 无头回归里的页面桩没有 querySelectorAll / hidden。 */
@@ -2910,6 +2976,11 @@
     }
     on(p, 'fight', () => {
       if (info.run) {
+        /* 上一场失利的必选窗还没处理：先弹它（与读档后补弹的是同一个窗）。 */
+        if (info.run.pendingRetry) { if (!retryOfferVisible()) endlessRetryOffer(info.run); return; }
+        /* 渴血之剑的献祭 / 活性事件同样是必选：先处理，不能直接开下一场。 */
+        if (info.run.bladeSacrificePending) { if (!bladeOfferVisible()) openBladeSacrifice(); return; }
+        if (info.run.bladeEventPending) { if (!bladeOfferVisible()) openBladeEvent(); return; }
         if (info.run.choices) { notice('先在下面选一张增益（休整点）。'); return; }
         if (info.run.phase === 'shop') { openShop(); return; }
         if (info.run.phase === 'checkpoint') { openCheckpoint(); return; }
@@ -2939,7 +3010,11 @@
       };
     });
     p.querySelectorAll('[data-toggle]').forEach((el) => {
-      el.onclick = () => { Tower.toggleLimited(el.dataset.toggle); openEndless(); };
+      el.onclick = () => {
+        const res = Tower.toggleLimited(el.dataset.toggle);
+        if (res && !res.ok) notice(res.msg || '现在不能切换这个增益。');
+        openEndless();
+      };
     });
     p.querySelectorAll('[data-replace]').forEach((el) => {
       el.onclick = () => {
@@ -2958,15 +3033,28 @@
      * 成就提示是另一条队列（对象 → 顶部成就条）；先冲过程飘字，它会顺手把旧档里
      * 混在 pendingToasts 的成就对象迁到成就队列，紧接着的 flushPendingAchievements 再取走。 */
     if (!TowerPlot.showing()) { flushRunToasts(); flushPendingAchievements(); }
+    /* 渴血之剑的必选窗优先级高于里程碑 / 献祭：先把它处理完，再轮到别的弹窗。 */
+    const bladeBlocking = !!(info.run && (info.run.bladeSacrificePending || info.run.bladeEventPending));
     /* 20 起每 10 层：出商店后必须放弃一个永久增益（不可取消）。
      * 【U18c】但**献祭前要先播剧情**（第 20 层那一段：「石门天平倾斜 → 苍老的声音」）——
      * 剧情屏上不能弹这个窗，否则剧情和弹窗叠在一起。剧情播完回主界面时这里会再跑一次。 */
-    if (info.run && info.run.phase === 'sacrifice' && !TowerPlot.showing()) setTimeout(() => openPermSacrifice(), 60);
+    if (info.run && info.run.phase === 'sacrifice' && !TowerPlot.showing() && !bladeBlocking) setTimeout(() => openPermSacrifice(), 60);
     /* 【U20】被剧情让路的「里程碑奖励」在这里补弹（同一场战斗之后的终章剧情播完才算轮到它）。 */
-    if (pendingMilestone && !TowerPlot.showing()) {
+    if (pendingMilestone && !TowerPlot.showing() && !bladeBlocking) {
       const pm = pendingMilestone;
       pendingMilestone = null;
       setTimeout(() => milestoneModal(pm.rw, pm.cont), 60);
+    }
+    /* 上一场失利还没选「重新挑战 / 放弃本局」：这个窗是必选的（没有关闭叉）。
+     * 读档 / 退出重进后同样在这里补弹 —— 不弹的话「继续战斗」会直接白打一场。
+     * 同步弹（不排 setTimeout）：界面桩 / 无头回归也能看到这一屏，且页面已经画完。 */
+    if (info.run && info.run.pendingRetry && !TowerPlot.showing() && !retryOfferVisible()) {
+      endlessRetryOffer();
+    }
+    /* 渴血之剑的两个必选窗：献祭优先于活性事件。 */
+    if (info.run && !TowerPlot.showing() && !bladeOfferVisible()) {
+      if (info.run.bladeSacrificePending) openBladeSacrifice();
+      else if (info.run.bladeEventPending) openBladeEvent();
     }
     on(p, 'rest-shop', () => {
       const res = Tower.openRestShop();
@@ -3100,7 +3188,13 @@
   function afterBattle(mode, rw) {
     flushAchievements(rw.achievements);      // 「死而复生」这类在战斗结算时算出的成就
     const growthText = heroGrowthText(rw.heroGrowth);
-    if (growthText) runToast(growthText);
+    /* 勇者每通过 5 层：状态机给 out.heroLayerBonus；用会自动消失的飘条提示，
+     * 与这一场的武技成长合在一条里，避免两条 toast 重叠。 */
+    const layerBonusText = rw.heroLayerBonus
+      ? ('第 ' + rw.heroLayerBonus.layer + ' 层通过：生命上限 +50 · 回复 50 · 力/敏/速 +5')
+      : '';
+    const growthToast = [growthText, layerBonusText].filter(Boolean).join('　');
+    if (growthToast) runToast(growthToast);
     /* 「巡逻」/「觐见魔王」输了**不走失败结算**（2026-10 第六十五批用户口径）：
      * 状态机那边已经把它标成 `patrol: true` 并挂上了 `phase = 'patrolToll'`，
      * 这里必须**先**处理它 —— 否则会掉进下面的 `!rw.win` 分支，弹出失败结算
@@ -3109,9 +3203,20 @@
     if (rw.patrol) { openPatrolToll(); return; }
     if (!rw.win) {
       if (mode === 'tower') towerDefeat(rw);
-      else if (rw.retryable) endlessRetryOffer(rw);
+      else if (rw.retryable) { if (!retryOfferVisible()) endlessRetryOffer(rw); }
       else endlessDefeat(rw);
       return;
+    }
+    /* 【渴血之剑】这一场结束后的必选处理（献祭 / 活性事件）优先于胜利弹窗、里程碑与回响。
+     * `reopen` 已经把主界面画好并弹了必选窗，这里只要不再叠别的弹窗即可。 */
+    if (mode === 'endless') {
+      if (rw.bladeGranted) runToast('获得「渴血之剑」：已放入限次增益');
+      if (rw.bladeEvolved) runToast('渴血之剑进化为「' + (rw.bladeEvolved.name || '下一阶段') + '」');
+      if (rw.bladeForced) runToast('渴血之剑强制苏醒：这一次无法关闭');
+      if (Tower.bladePendingOf && Tower.bladePendingOf()) {
+        if (rw.milestone) pendingMilestone = { rw: rw, cont: () => openEndless() };
+        return;
+      }
     }
     if (mode === 'endless') {
       /* 【2026-10 用户口径】打完一场**不再自动进店**（原来「层末商店 / 铸币商店」会直接弹进店里，
@@ -3578,26 +3683,145 @@
       '<div class="result-lines">已放入背包（每 10 层一次）</div></div>',
       [{ label: '继续', cls: 'gold', run: next }], { small: true });
   }
+  /** 上一场失利的唯一出口：**只能**重新挑战或放弃本局（没有右上角关闭叉）。
+   *  `rw` 可以来自 afterBattle 的结算回包，也可以省略（读档 / 退出重进时按 run 现算）。
+   *  ⚠ 这里不能给「关闭」这条路：关掉之后 `run` 还在、`nextBattle` 以前会直接放行，
+   *  等于无代价重打一场。 */
   function endlessRetryOffer(rw) {
-    modal('本场失利 · 可以重新挑战',
+    const run = (Tower.endlessInfo().run) || {};
+    const layer = Math.max(1, Math.floor(Number(rw && rw.layer) || Number(run.layer) || 1));
+    const battleNo = Math.max(1, Math.floor(Number(rw && rw.battleNo) || Number(run.battleNo) || 1));
+    const battleCount = Math.max(1, Math.floor(Number(rw && rw.battleCount) || Number(run.battleCount) || 4));
+    const score = Math.max(0, Math.floor(Number(rw && rw.score != null ? rw.score : run.score) || 0));
+    const retryLeft = Math.max(0, Math.floor(Number(rw && rw.retryLeft != null ? rw.retryLeft : run.retryToken) || 0));
+    const m = modal('本场失利 · 可以重新挑战',
       '<div class="result-box"><div class="result-title lose">再试一次？</div>' +
-      '<p>倒在第 ' + rw.layer + ' 层第 ' + (rw.battleNo || '?') + '/' + (rw.battleCount || 4) + ' 场。</p>' +
+      '<p>倒在第 ' + layer + ' 层第 ' + battleNo + '/' + battleCount + ' 场。</p>' +
       '<p class="gold-text">消耗 1 枚铸币，回滚到本场开始前（血量 / 试炼币 / 分数 / 增益次数全部还原），再打一次。</p>' +
-      '<div class="result-lines">现有铸币 <b>' + (rw.retryLeft || 0) + '</b> 枚 · 本局分数 ' + rw.score +
+      '<div class="result-lines">现有铸币 <b>' + retryLeft + '</b> 枚 · 本局分数 ' + score +
       ' · 选「放弃本局」也一样按当前层应得 + 试炼币折现结算</div></div>',
       [{ label: '重新挑战', cls: 'gold', run: () => {
+          retryOfferOpen = false; retryOfferEl = null;
           const r = Tower.retryBattle();
-          if (!r.ok) { notice(r.msg || '回滚失败。'); endlessDefeat(rw); return; }
+          if (!r.ok) {
+            notice(r.msg || '回滚失败。');
+            return;              // 标记还在：这一屏点「继续战斗」会重新弹同一个必选窗
+          }
           reopen('endless');
           fight('endless');
         } },
        { label: '放弃本局', cls: 'muted', run: () => {
+          retryOfferOpen = false; retryOfferEl = null;
           const out = Tower.declineRetry();
           endlessDefeat(out);
-        } }], { small: true });
+        } }], { small: true, locked: true });
+    retryOfferEl = (m && m.element) || null;
+    retryOfferOpen = !!retryOfferEl;
   }
   function endlessDefeat(rw) {
     settleResult(rw);
+  }
+  /* ============================================================
+   * 【渴血之剑】献祭窗 + 51 层起的活性事件
+   * ============================================================ */
+  function closeBladeOffer() {
+    bladeOfferOpen = false;
+    bladeOfferEl = null;
+  }
+  /** 战斗后的必选献祭：只列史诗+限次或永久（有铭文时优先吃铭文）。没有祭品时
+   *  只能承受反噬 —— 仍然是一个必选结果，不能靠关窗跳过。 */
+  function openBladeSacrifice() {
+    if (bladeOfferVisible()) return;
+    const got = Tower.bladeSacrificeCandidates();
+    const list = (got && got.list) || [];
+    const info = (got && got.blade) || (Tower.bladeInfoOf ? Tower.bladeInfoOf() : null) || {};
+    if (!list.length) {
+      const m = modal('渴血之剑 · 饥饿',
+        '<div class="result-box"><div class="result-title lose">没有祭品</div>' +
+        '<p>「' + esc(info.name || '渴血之剑') + '」在你的掌心发烫 —— 它需要一件祭品，' +
+        '但你的背包里没有史诗及以上的限次增益，也没有可交出的永久增益。</p>' +
+        '<p class="dim">拒绝喂养会让它反噬：成长 −1 层，并自行沉寂。</p></div>',
+        [{ label: '承受反噬', cls: 'muted', run: () => {
+            const r = Tower.sacrificeBlade(null);
+            closeBladeOffer();
+            openEndless();
+            notice(r && r.ok ? '剑反噬了你，随后沉寂下去。' : ((r && r.msg) || '献祭失败。'),
+              [{ label: '继续', cls: 'gold', run: openEndless }]);
+          } }], { small: true, locked: true });
+      bladeOfferEl = (m && m.element) || null;
+      bladeOfferOpen = !!bladeOfferEl;
+      return;
+    }
+    const rows = list.map((c, i) => {
+      const bits = [RARITY_SHORT[c.rarity] || '', c.kind === 'limited' ? '限次' : '永久'];
+      if (c.meta) bits.push(c.meta);
+      return '<button type="button" class="replace-pick r' + c.rarity + '" data-action="bl' + i + '"' +
+        ' title="' + esc(c.name + '：' + (c.meta || '')) + '">' +
+        '<span class="rp-name">' + esc(c.name) + '</span>' +
+        '<span class="rp-meta">' + bits.join(' · ') + '</span>' +
+        (c.inscription ? '<span class="rp-desc">优先消耗铭文，增益本身保留</span>' : '') +
+        '</button>';
+    }).join('');
+    const m = modal('渴血之剑 · 献祭',
+      '<div class="result-box"><div class="result-title lose">它饿了</div>' +
+      '<p>战斗结束，剑脊上的暗红仍未褪去。它要一件祭品 —— ' +
+      '一件<b>史诗及以上的限次增益</b>，或一件<b>永久增益</b>。</p>' +
+      '<p class="gold-text">当前成长：×' + Math.max(1, Number(info.stacks) || 1) +
+      ' 层 · 剩余 ' + (info.unlimited ? '永续' : (info.uses + ' 场')) + '</p></div>' +
+      '<div class="replace-pick-list">' + rows + '</div>' +
+      '<p class="small-label">可叠加的只消耗一件；永久增益若带铭文，优先消耗水晶铭文，其次虚空铭文，增益本身不会消失。</p>',
+      [], { small: true, locked: true });
+    if (m && m.element) {
+      const actions = {};
+      list.forEach((c, i) => {
+        actions['bl' + i] = () => {
+          const r = Tower.sacrificeBlade(c.ref);
+          if (!r.ok) { notice(r.msg || '献祭失败。'); return; }
+          m.close();
+          closeBladeOffer();
+          openEndless();
+          notice('【' + c.name + '】已献祭 · 渴血之剑成长至 ×' + r.stacks +
+            ' 层' + (r.used && r.used.kind === 'inscription' ? '（铭文被吞掉，增益保留）' : '') + '。',
+            [{ label: '继续', cls: 'gold', run: openEndless }]);
+        };
+      });
+      C().bind(m.element, actions);
+    }
+    bladeOfferEl = (m && m.element) || null;
+    bladeOfferOpen = !!bladeOfferEl;
+  }
+  /** 51 层起每 10 层的活性事件：抑制 / 增强二选一（连续抑制 3 次 → 涸血之剑）。 */
+  function openBladeEvent() {
+    if (bladeOfferVisible()) return;
+    const info = Tower.bladeInfoOf ? Tower.bladeInfoOf() : null;
+    if (!info) { openEndless(); return; }
+    const streak = Math.max(0, Number(info.suppressStreak) || 0);
+    const m = modal('渴血之剑 · 活性',
+      '<div class="result-box"><div class="result-title">剑在呼吸</div>' +
+      '<p>「' + esc(info.name) + '」在鞘中一下一下地搏动，暗红的光沿着裂纹游走。</p>' +
+      '<p>你可以压住它，也可以再喂它一口。</p>' +
+      '<div class="result-lines">当前成长 ×' + info.stacks + ' 层 · 剩余 ' +
+      (info.unlimited ? '永续' : info.uses + ' 场') + ' · 连续抑制 ' + streak + '/3</div></div>',
+      [{ label: '抑制活性', cls: 'muted', run: () => {
+          const r = Tower.resolveBladeEvent('suppress');
+          closeBladeOffer();
+          openEndless();
+          notice(r && r.ok
+            ? (r.dead ? '连续三次抑制：渴血之剑彻底失活，化为「涸血之剑」。'
+              : '你压住了剑的活性（' + r.streak + '/3）。')
+            : ((r && r.msg) || '无法抑制。'), [{ label: '继续', cls: 'gold', run: openEndless }]);
+        } },
+       { label: '增强活性', cls: 'gold', run: () => {
+          const r = Tower.resolveBladeEvent('enhance');
+          closeBladeOffer();
+          openEndless();
+          notice(r && r.ok
+            ? (r.evolved ? ('剑的活性大增，进化为「' + r.evolved.name + '」。')
+              : ('你增强了剑的活性：使用次数 −' + (TowerData.BLADE ? TowerData.BLADE.enhanceUses : 3) + '。'))
+            : ((r && r.msg) || '无法增强。'), [{ label: '继续', cls: 'gold', run: openEndless }]);
+        } }], { small: true, locked: true });
+    bladeOfferEl = (m && m.element) || null;
+    bladeOfferOpen = !!bladeOfferEl;
   }
 
   /* ============================================================

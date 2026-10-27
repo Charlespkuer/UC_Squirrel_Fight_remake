@@ -138,14 +138,17 @@ test('勇者只带所选的三个5级武技和外观，账号成长与消耗品�
   assert.equal(account(), before, '独立勇者战斗不能修改账号武技、装备、药剂或幻兽');
 });
 
-test('普通升级失败每次增加2个百分点，成功清保底，真级维持固定概率', () => {
+test('勇者普通升级失败每次增加3个百分点，成功清保底，真级维持固定概率', () => {
   const { c } = setup(), h = profile(c), H = c.TowerHero;
-  // Exact boundary draws: 60% fails at .60, then the accumulated 62% succeeds at .619.
+  // Exact boundary draws: 60% fails at .60, then the accumulated 63% succeeds at .629.
   const failed = H.upgrade(h, 'w:1', { rng: () => 0.60 });
   assert.equal(failed.success, false);
   assert.equal(failed.level, 5);
-  const passed = H.upgrade(h, 'w:1', { rng: () => 0.619 });
-  assert.equal(passed.rate, 62);
+  const info = H.upgradeInfoOf(h, 'w:1');
+  assert.equal(info.fails, 1, '详情要读到这次失败');
+  assert.equal(info.rate, 63, '失败一次后下一级成功率是 63%');
+  const passed = H.upgrade(h, 'w:1', { rng: () => 0.629 });
+  assert.equal(passed.rate, 63);
   assert.equal(passed.level, 6);
   assert.equal(h.upgradeFails.w1, undefined);
   h.weapons = ['1:11']; h.upgradeFails.w1 = 20;
@@ -252,31 +255,29 @@ test('勇者专属货品真实扣费生效，剧情之剑唯一且在镜复制�
   assert.equal(H.uncappedCount(run.hero), 1);
   assert.deepEqual(refs().filter(it => !known.has(it)).map(it => Number(it.split(':')[2])), [5]);
   assert.equal(T.buffWeightOf(run, 'HS04'), 0.5, 'HS04 每获得一次，动态权重按 0.5^n 减半');
-  run.hero.patrolWins = 1;
-  run.hero.eliteWins = 1;
-  const forge = T.heroEventInfo(), used = T.permUsedOf(run);
-  assert.equal(forge.id, 'forge');
-  const sword = forge.choices.find(it => it.effect === 'sword');
-  assert.equal(T.resolveHeroEvent(sword.id).ok, true);
-  assert.equal(T.permUsedOf(run), used);
-  assert.equal(T.resolveHeroEvent(sword.id).ok, false);
-  assert.equal(run.permanent.filter(it => it.id === 'HB01').length, 1);
-  const mirror = blade => {
+  /* 【渴血之剑】默认 / 勇者模式都可获得；只有最终形态（王者之剑）才克制镜之魔王。 */
+  const granted = T.debugGrantBuff('HB01');
+  assert.equal(granted.ok, true, '渴血之剑应当能放进限次区');
+  const bladeRow = run.limited.find(it => it.id === 'HB01');
+  assert.ok(bladeRow && !run.permanent.some(it => it.id === 'HB01'), '剑在限次区，不在永久区');
+  bladeRow.id = 'HB04'; bladeRow.stacks = 2; bladeRow.uses = -1; bladeRow.on = true;
+  const mirror = (bladeOn) => {
     const probe = plain(run);
     Object.assign(probe, { layer: 100, idx: 0, phase: null, choices: null, shop: null,
       plan: [{ kind: 'patrol', id: 'patrol', x00: true, audience: 'king' }] });
-    if (!blade) probe.permanent = probe.permanent.filter(it => it.id !== 'HB01');
+    const row = (probe.limited || []).find(it => it.id === 'HB04');
+    if (row) row.on = !!bladeOn;
     const next = T.nextBattle('endless', probe);
     assert.equal(next.ok, true, next.msg);
     next.adjustMe(H.fighter(probe.hero));
     return next.foe;
   };
-  const without = mirror(false), withSword = mirror(true);
-  assert.equal(withSword.power, Math.round(without.power * 0.8));
-  assert.equal(withSword.maxHp, Math.round(without.maxHp * 0.65));
+  const without = mirror(false), withKing = mirror(true);
+  assert.equal(withKing.power, Math.round(without.power * 0.78), '2 层王者之剑：力量 −22%');
+  assert.equal(withKing.maxHp, Math.round(without.maxHp * 0.68), '2 层王者之剑：生命上限 −32%');
 });
 
-test('勇者新规则：开局无 60 币、习得 5 级、铸币修炼 +3~5、巡逻魔王让 HB01 成长', () => {
+test('勇者新规则：开局无 60 币、习得 5 级、铸币修炼 +3~5、渴血之剑会成长并跨镜保留', () => {
   const { c } = setup(), T = c.Tower, H = c.TowerHero;
   const run = start(c);
   assert.equal(run.coins, 0, '开局不再送 60 试炼币');
@@ -291,31 +292,83 @@ test('勇者新规则：开局无 60 币、习得 5 级、铸币修炼 +3~5、�
   const after = Number(run.hero.weapons.find(it => it.startsWith('1:')).split(':')[1]);
   assert.ok(after - before >= 3 && after - before <= 5, '铸币修炼应随机 +3~5 级，实际 +' + (after - before));
   assert.equal(run.retryToken, 2, '铸币修炼消耗 1 枚铸币');
-  /* 首次巡逻胜利触发 forge；这里先标记已读，再验证下一场巡逻让 HB01 成长。 */
-  run.hero.patrolWins = 1;
-  run.hero.events = Object.assign({}, run.hero.events, { forge: true });
-  run.permanent.push({ id: 'HB01', stacks: 1, uid: 9001, at: 9001 });
-  run.plan = [{ kind: 'patrol', id: 'patrol', _layer: run.layer, _salt: run.salt, x00: false }];
-  run.idx = 0; run.choices = null; run.phase = null; run.attempt = null; run.finished = null;
+
+  /* 渴血之剑：拿到后每赢一场扣 1 次并要求献祭；献祭让它成长一层。 */
+  assert.equal(T.debugGrantBuff('HB01').ok, true);
+  assert.equal(T.debugGrantBuff('C57').ok, true, '准备一件史诗限次祭品');
+  const blade = run.limited.find(it => it.id === 'HB01');
+  assert.ok(blade, '剑在限次区');
+  assert.equal(blade.uses, 8, '初始限次 8 场');
+  run.plan = [{ kind: 'hero', anim: 'tl' }]; run.idx = 0; run.choices = null; run.phase = null;
+  delete run.attempt; run.finished = null;
   const next = T.nextBattle('endless');
   assert.equal(next.ok, true, next.msg);
   const won = T.reportBattle('endless', next.token, true, 800, 800);
   assert.equal(won.ok, true, won.msg);
-  const sword = run.permanent.find(it => it.id === 'HB01');
-  assert.equal(sword.stacks, 2, '击败巡逻魔王后 HB01 应成长一层');
+  const bladeLive = run.limited.find(it => it.id === 'HB01');
+  assert.ok(bladeLive, '战斗后剑仍在限次区');
+  assert.equal(bladeLive.uses, 7, '赢一场扣 1 次');
+  assert.equal(run.bladeSacrificePending, true, '战斗后必须献祭');
+  const cands = T.bladeSacrificeCandidates().list;
+  const offering = cands.find((it) => it.id === 'C57');
+  assert.ok(offering, '史诗限次 C57 应当进献祭候选：' + JSON.stringify(cands.map((x) => x.id)));
+  const sac = T.sacrificeBlade(offering.ref);
+  assert.equal(sac.ok, true, sac.msg);
+  const bladeAfterSac = run.limited.find(it => it.id === 'HB01');
+  assert.equal(bladeAfterSac.stacks, 2, '献祭后成长 ×2');
+  assert.equal(run.limited.some((it) => it.id === 'C57'), false, 'C57 被吃掉');
   assert.equal(T.heroBladeOf(run).stacks, 2);
-  assert.equal(run.hero.patrolWins, 2);
-  /* 照影之境只保留 HB01 本体与层数，不会把剑的成长吞掉。 */
+
+  /* 照影之境只清旧构筑：剑（限次区）与成长层数必须保留。 */
   run.layer = 100; run.phase = 'mirror'; run.mirrorTaken = 100;
   run.plan = [{ kind: 'patrol', id: 'patrol', _layer: 100, _salt: run.salt, x00: true, audience: 'king' }];
   run.idx = 0; run.choices = null; run.finished = null;
   run.permanent.unshift({ id: c.TowerData.MIRROR.id, stacks: 1, uid: 9002, at: 9002 });
   const mirror = T.enterMirrorWorld();
   assert.equal(mirror.ok, true, mirror.msg);
-  const kept = run.permanent.find(it => it.id === 'HB01');
-  assert.equal(kept.stacks, 2, '照影之境必须保留 HB01 的破镜层数');
+  const kept = run.limited.find(it => it.id === 'HB01');
+  assert.ok(kept, '照影之境不能吞掉渴血之剑');
+  assert.equal(kept.stacks, 2, '照影之境保留献祭成长层数');
   assert.equal(T.heroBladeOf(run).stacks, 2);
   assert.equal(run.layer, 101);
+});
+
+test('血牙·狂噬带装死技能（濒死保留 1 点生命）', () => {
+  const { c } = setup();
+  const def = c.TowerData.TRIAL_BY_ID.bloodfang;
+  assert.ok(def, '血牙·狂噬应当仍在试炼/精英池');
+  assert.ok(def.skills.some((s) => Number(s.id) === 6), '血牙·狂噬要带技能 6 装死');
+  assert.match(def.mechDesc, /装死/, '题面要提示装死');
+});
+
+test('勇者每通过 5 层：生命上限 +50、回复 50、力敏速 +5', () => {
+  const { c, store } = setup();
+  const run = start(c);
+  c.Tower._debugSetEndlessLayer(5);
+  const r0 = c.Tower._debugRun('endless');
+  const before = c.TowerHero.fighter(r0.hero);
+  let rw = null;
+  for (let n = 0; n < 8 && !(rw && rw.heroLayerBonus); n++) {
+    const live = c.Tower._debugRun('endless');
+    live.choices = null; live.phase = null; live.finished = null;
+    const nx = c.Tower.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, '应当能开第 5 层下一场：' + ((nx && nx.msg) || ''));
+    rw = c.Tower.reportBattle('endless', nx.token, true, 1, null);
+    assert.ok(rw && rw.ok !== false, '第 5 层战斗应当结算：' + ((rw && rw.msg) || ''));
+  }
+  assert.deepEqual(plain(rw.heroLayerBonus), { layer: 5, maxHp: 50, heal: 50, power: 5, agility: 5, speed: 5 });
+  const live = c.Tower._debugRun('endless');
+  const after = c.TowerHero.fighter(live.hero);
+  assert.deepEqual(plain(live.hero.towerBonus), { power: 5, agility: 5, speed: 5, maxHp: 50 });
+  assert.equal(after.power, before.power + 5, '力量 +5');
+  assert.equal(after.agility, before.agility + 5, '敏捷 +5');
+  assert.equal(after.speed, before.speed + 5, '速度 +5');
+  assert.equal(after.maxHp, before.maxHp + 50, '生命上限 +50');
+  assert.ok(live.hpAbs >= 51, '过层时回复 50 点（此前血量 1）');
+  c.State.save();
+  const loaded = setup(store, true).c;
+  assert.deepEqual(plain(loaded.Tower._debugRun('endless').hero.towerBonus), { power: 5, agility: 5, speed: 5, maxHp: 50 },
+    '每 5 层成长要读档保留');
 });
 
 test('巡视魔王每个 10 层区块只刷新一次：击败后时间回廊重开本层不再出现', () => {
@@ -393,13 +446,14 @@ test('巡视魔王每个 10 层区块只刷新一次：击败后时间回廊重�
 
 test('现代勇者状态与武技页使用局内等级，训练、外观和返回保留勇者回调', () => {
   const { c } = setup(), run = start(c), s = c.State.state();
-  run.hero.weapons = ['1:12']; run.hero.skills = []; run.retryToken = 1;
+  run.hero.weapons = ['1:12']; run.hero.skills = ['1:5']; run.hero.upgradeFails = { s1: 1 }; run.retryToken = 1;
   s.weapons = ['2:15']; s.skills = ['7:15']; s.goldPoint = 789;
   const account = () => JSON.stringify([s.goldPoint, s.weapons, s.skills, s.gears]);
   const before = account(), dom = modernUi(c), real = c.UI.classic.openHeroPage;
   let context, back = 0;
   c.UI.classic.openHeroPage = (hero, opts) => { context = hero; return real(hero, opts); };
   c.TowerUI.openHeroStatus();
+  assert.deepEqual(plain(context.upgradeFails), { s1: 1 }, '勇者详情要带上本局失败计数');
   assert.ok(dom.find('.status-right')); assert.match(dom.find('.stat-strip').textContent, /800/);
   assert.equal(dom.find('[data-action="hero-train"]').textContent, '铸币修炼');
   /* 现代外观页直接走 onEquip（纸娃娃 + 6 格列表在 classic-ui 里），
@@ -426,14 +480,28 @@ test('现代勇者状态与武技页使用局内等级，训练、外观和返�
   assert.match(dom.find('[data-item="1"]').textContent, /真2/);
   assert.equal(dom.find('[data-item="2"]').classList.contains('locked'), true);
   dom.click('[data-item="1"]');
-  const train = dom.find('.classic-modal-overlay').querySelectorAll('button').find(n => /铸币修炼/.test(n.textContent));
-  assert.ok(train); train.click();
-  assert.deepEqual(plain(run.hero.weapons), ['1:15']); assert.equal(run.retryToken, 0);
+  const detail = dom.find('.classic-modal-overlay');
+  assert.ok(detail, '点击已掌握武技应当打开详情');
+  assert.match(detail.textContent, /下一级成功率/, '详情要显示下一级成功率');
+  assert.match(detail.textContent, /5%/, '真2（12级）的下一级固定成功率是 5%');
+  assert.match(detail.textContent, /无法直接升级/, '勇者详情只读，不提供主动升级');
+  assert.ok(!detail.querySelectorAll('button').some(n => /铸币修炼/.test(n.textContent)),
+    '详情里不再放铸币修炼入口（修炼仍可从状态页按钮进入）');
+  assert.deepEqual(plain(run.hero.weapons), ['1:12'], '查看详情不能改变本局武技等级');
+  assert.equal(run.retryToken, 1, '查看详情不能扣铸币');
+  const close = detail.querySelectorAll('button').find(n => /返回/.test(n.textContent));
+  assert.ok(close, '详情要有返回键'); close.click();
   dom.click('[data-action="skills"]');
   assert.equal(dom.find('[data-item="7"]').classList.contains('locked'), true, '空技能表不能借用账号已学龟甲术');
+  dom.click('[data-item="1"]');
+  const skillDetail = dom.find('.classic-modal-overlay');
+  assert.match(skillDetail.textContent, /63%/, '力王附体 5 级失败 1 次后，下一级成功率应为 63%（不是默认 60%）');
+  assert.match(skillDetail.textContent, /失败 1 次/, '详情要标出失败保底次数');
+  const closeSkill = skillDetail.querySelectorAll('button').find(n => /返回/.test(n.textContent));
+  assert.ok(closeSkill, '技能详情要有返回键'); closeSkill.click();
   dom.click('[data-action="home"]'); assert.equal(back, 1);
   assert.ok(dom.find('[data-action="gears"]'), '退出勇者上下文后恢复普通状态页动作');
-  assert.equal(account(), before, '英雄详情修炼不能扣账号金松果或修改账号武技装备');
+  assert.equal(account(), before, '勇者详情只读，不能扣账号金松果或修改账号武技装备');
 });
 
 test('勇者外观池把重复的黑狂战 / 黑怒战套合并成一套', () => {
@@ -705,7 +773,7 @@ test('勇者剧本每段剧情都有独立文本，并全部走剧情模式模�
   const P = c.TowerPlot;
   assert.ok(P && P.HERO_SCRIPTS, 'tower-plot 要导出勇者剧情表');
   const ids = Object.keys(P.SCRIPTS);
-  assert.equal(ids.length, 43, '默认剧情段数变化时要同步补勇者文本');
+  assert.equal(ids.length, 46, '默认剧情段数变化时要同步补勇者文本');
   for (const id of ids) {
     const lines = P.HERO_SCRIPTS[id];
     assert.ok(Array.isArray(lines) && lines.length > 0, id + ' 缺勇者专属文本');
@@ -729,3 +797,106 @@ test('勇者剧本每段剧情都有独立文本，并全部走剧情模式模�
   assert.match(P.eventHtml({ title: '测试', lines: ['一行'], choices: [{ id: 'x', label: '走', desc: '' }] }),
     /class="tower-story hero-story"/, '勇者际遇要用剧情模式模板');
 });
+
+test('无尽塔仙鹤后期技能按绝对层数收敛，101/201 不回到前期', () => {
+  const { c } = setup();
+  const T = c.TowerData;
+  const t30 = plain(T.endlessXhTune(30));
+  const t40 = plain(T.endlessXhTune(40));
+  const t50 = plain(T.endlessXhTune(50));
+  const t100 = plain(T.endlessXhTune(100));
+  const t101 = plain(T.endlessXhTune(101));
+  const t201 = plain(T.endlessXhTune(201));
+  assert.deepEqual(t30, { skill: 1, early: 1.3 }, '30 层及以前保持原强度');
+  assert.ok(Math.abs(t40.skill - (1 + t50.skill) / 2) < 1e-9,
+    '40 层应正好是 30→50 线性下降的中点');
+  assert.ok(Math.abs(t40.early - 1.15) < 1e-9, '40 层前期凶猛应为 1.3→1.0 的中点');
+  assert.ok(t50.skill < 0.8 && t50.skill > 0.75 && t50.early === 1,
+    '50 层线性降到目标，并收回前期凶猛');
+  assert.deepEqual(plain(T.endlessXhTune(51)), t50, '50 层之后保持目标，不再出现二次跳变');
+  assert.deepEqual(t100, t50, '50~100 层保持 50 层的目标值，不产生二次下降');
+  assert.equal(t101.early, 1, '101 层不能回到前期');
+  assert.equal(t201.early, 1, '201 层不能回到前期');
+  assert.ok(t101.skill < 1 && t101.skill > t100.skill,
+    '101 层技能等级回落到 5，只按期望解出略高的倍率，仍小于 1（不是回到前期）');
+  assert.deepEqual(t201, t101, '201 与 101 同为新循环开头，倍率一致');
+
+  const build = (mode, layer) => c.Tower.buildFoeOf(mode, layer,
+    { kind: 'hero', anim: 'xh' }, 'qa', false).foe;
+  const xh30 = build('endless', 30), xh50 = build('endless', 50);
+  const xh100 = build('endless', 100), xh101 = build('endless', 101);
+  assert.equal(xh30.xhSkillMul, 1, '30 层技能倍率不动');
+  assert.equal(xh30.xhEarlyMul, 1.3, '30 层前期凶猛不动');
+  assert.equal(xh50.xhSkillMul, t50.skill, '50 层落到线性终点');
+  assert.equal(xh50.xhEarlyMul, 1, '50 层收回前期凶猛');
+  assert.equal(xh100.xhSkillMul, t100.skill, '100 层保持目标值');
+  assert.equal(xh100.xhEarlyMul, 1, '100 层不再有前期凶猛');
+  assert.equal(xh101.xhSkillMul, t101.skill, '101 层按绝对层写入 foe');
+  assert.equal(xh101.xhEarlyMul, 1, '101 层不回到前期');
+  const xm50 = c.Tower.buildFoeOf('endless', 50,
+    { kind: 'hero', anim: 'xm' }, 'qa', false).foe;
+  const xhSkill50 = Math.round((xh50.power + xh50.speed * 0.35) * 2.4) * t50.skill;
+  const xmSkill50 = Math.round(xm50.power * 2.8);
+  const xhExpected50 = 0.7 * xh50.power + 0.3 * xhSkill50;
+  const xmExpected50 = 0.7 * xm50.power + 0.3 * xmSkill50;
+  assert.ok(Math.abs(xhExpected50 - xmExpected50) / xmExpected50 < 0.01,
+    '50 层线性终点就应与熊猫持平');
+  const xm100 = c.Tower.buildFoeOf('endless', 100,
+    { kind: 'hero', anim: 'xm' }, 'qa', false).foe;
+  const xhExpected = 0.7 * xh100.power +
+    0.3 * Math.round((xh100.power + xh100.speed * 0.35) * 2.4) * t100.skill;
+  const xmExpected = 0.7 * xm100.power + 0.3 * Math.round(xm100.power * 2.8);
+  assert.ok(Math.abs(xhExpected - xmExpected) / xmExpected < 0.01,
+    '100 层仙鹤期望 DPA 应与熊猫持平');
+  const xm101 = c.Tower.buildFoeOf('endless', 101,
+    { kind: 'hero', anim: 'xm' }, 'qa', false).foe;
+  const lv101 = xh101.skills.find(s => s.id === 20).level;
+  const xhSkill101 = Math.round((xh101.power + xh101.speed * 0.35) * (0.9 + lv101 * 0.1)) * t101.skill;
+  const xhSkill101Rounded = Math.round((xh101.power + xh101.speed * 0.35) * (0.9 + lv101 * 0.1) * t101.skill);
+  const xmSkill101 = Math.round(xm101.power * (1.3 + lv101 * 0.1));
+  const xhExpected101 = 0.7 * xh101.power + 0.3 * xhSkill101;
+  const xmExpected101 = 0.7 * xm101.power + 0.3 * xmSkill101;
+  assert.ok(Math.abs(xhExpected101 - xmExpected101) / xmExpected101 < 0.01,
+    '101 层（新循环）仙鹤期望 DPA 仍与熊猫持平，不回到前期');
+  const oldRandom = vm.runInContext('Math.random', c);
+  c.__oldRandom = oldRandom;
+  vm.runInContext('Math.random = () => 0.1;', c);   // 10% → 必进技能分支；5% 暴击线以下 → 不暴击
+  try {
+    const dummy = { name: 'dummy', level: 90, power: 1, agility: 1, speed: 1,
+      hp: 1e9, maxHp: 1e9, weapons: [], skills: [] };
+    const target = Object.assign({}, xh101, { hp: 1e9, maxHp: 1e9, mods: { mustHitAll: true }, mech: [] });
+    const res = c.Sim.simulate(dummy, target);
+    const hit = res.rounds.find(r => r.attacker === 1 && r.action === 'skill' && !r.ult);
+    assert.ok(hit, '101 层应能打出一次技能');
+    assert.equal(hit.dmg, xhSkill101Rounded, '101 层实际结算不能再乘 1.3 前期凶猛');
+  } finally {
+    vm.runInContext('Math.random = __oldRandom;', c);
+    delete c.__oldRandom;
+  }
+  const towerFoe = build('tower', 50);
+  assert.equal(towerFoe.xhSkillMul, undefined, '挑战塔仙鹤不受影响');
+  assert.equal(towerFoe.xhEarlyMul, undefined, '挑战塔前期凶猛不受影响');
+});
+
+test('无尽塔最高纪录同时统计经典与勇者：勇者纪录随存档保留，汇总取两者最大', () => {
+  const { c, store } = setup();
+  const s = c.State.state();
+  c.Tower.endlessInfo();            // 先让 endless() 把 weekKey 对齐到本周（否则周重置会清掉周纪录）
+  s.endless.best = 120; s.endless.bestLayer = 9;
+  s.endless.heroBest = 340; s.endless.heroWeekBest = 260; s.endless.heroBestLayer = 14;
+  c.State.save();
+  const info = c.Tower.endlessInfo();
+  assert.equal(info.best, 120, '经典纪录仍单独保留');
+  assert.equal(info.heroBest, 340, '勇者纪录单独保留');
+  assert.equal(info.allBest, 340, '所有模式最高分取两者最大');
+  assert.equal(info.allWeekBest, 260, '本周最高也取两者最大');
+  assert.equal(info.allBestLayer, 14, '所有模式最深层取两者最大');
+  /* 读档：以前 state.js 的白名单漏了 heroBest/heroBestLayer，重进游戏勇者纪录就清零。 */
+  const g2 = setup(store, true);
+  const e2 = g2.c.State.state().endless;
+  assert.equal(e2.heroBest, 340, '勇者最高分要随存档保留');
+  assert.equal(e2.heroWeekBest, 260, '勇者本周最高要随存档保留');
+  assert.equal(e2.heroBestLayer, 14, '勇者最深层要随存档保留');
+  assert.equal(g2.c.Tower.endlessInfo().allBest, 340, '读档后汇总仍是所有模式最高');
+});
+

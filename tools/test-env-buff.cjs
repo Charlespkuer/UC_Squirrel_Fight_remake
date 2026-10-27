@@ -120,11 +120,11 @@ test('悬停文案：每条环境都有完整效果 + 数值区间（界面据�
   }
   // 同一条环境在不同取值下文案会跟着变（数值真的写进了文案）
   const def = TD.ENDLESS_ENV_BY_ID.thorns;
-  const a = TD.envText(def, { thornsPct: 0.11 }).text;
-  const b = TD.envText(def, { thornsPct: 0.16 }).text;
+  const a = TD.envText(def, { thornsPct: 0.09 }).text;
+  const b = TD.envText(def, { thornsPct: 0.12 }).text;
   assert.notEqual(a, b, '不同数值的文案应当不同：' + a + ' / ' + b);
-  assert.match(a, /11%/, '数值应当出现在文案里：' + a);
-  assert.match(b, /16%/, '数值应当出现在文案里：' + b);
+  assert.match(a, /9%/, '数值应当出现在文案里：' + a);
+  assert.match(b, /12%/, '数值应当出现在文案里：' + b);
 });
 
 test('界面渲染：每条环境胶囊都带 data-tip（悬停可看）', () => {
@@ -138,10 +138,10 @@ test('界面渲染：每条环境胶囊都带 data-tip（悬停可看）', () =>
   });
   const envChip = vm.runInContext(ui.slice(start, end + 4) + '\nenvChip;', ctx, { filename: 'envChip.js' });
   const html = envChip({ id: 'thorns', name: '荆棘反伤', bad: true, mech: true, left: 4,
-    text: '敌人受到伤害时反弹 +13%', rangeText: '10% ~ 16%' });
+    text: '敌人受到伤害时反弹 +9%', rangeText: '6% ~ 12%' });
   assert.match(html, /data-tip="[^"]+"/, '环境胶囊必须带 data-tip：' + html);
-  assert.match(html, /敌人受到伤害时反弹 \+13%/, '悬停里要有完整效果');
-  assert.match(html, /数值区间：10% ~ 16%/, '悬停里要有数值区间');
+  assert.match(html, /敌人受到伤害时反弹 \+9%/, '悬停里要有完整效果');
+  assert.match(html, /数值区间：6% ~ 12%/, '悬停里要有数值区间');
   assert.match(html, /剩余 4 场/, '悬停里要有剩余场数');
   assert.match(html, /env-mech/, '原机制类要带 env-mech 标记');
   // 塔内所有弹窗都要走「自动绑定悬停」的包装
@@ -178,7 +178,7 @@ test('每条环境都真的作用到战斗里（逐条实战验证）', () => {
   const c = setup();
 
   // 荆棘反伤：敌人受击时反弹
-  withEnv(c, [{ id: 'thorns', left: 5, values: { thornsPct: 0.15 } }]);
+  withEnv(c, [{ id: 'thorns', left: 5, values: { thornsPct: 0.09 } }]);
   let r = nextFoe(c);
   assert.ok(r.foe.mods.thornsPct > 0, '荆棘反伤应当写进敌人 mods');
   let sim = c.Sim.simulate(r.me, r.foe);
@@ -340,7 +340,7 @@ test('100 层循环：机制开关每轮一致，敌人完整基础在轮首承�
   }
   /* 5）跨轮进层（200 → 201）时清掉残留环境，给新一轮干净起点。 */
   T._debugSetEndlessLayer(200);
-  T._debugRun('endless').env = [{ id: 'thorns', left: 5, values: { thornsPct: 0.15 } }];
+  T._debugRun('endless').env = [{ id: 'thorns', left: 5, values: { thornsPct: 0.09 } }];
   T._debugAdvanceLayer();
   assert.equal(T._debugRun('endless').layer, 201);
   assert.equal((T._debugRun('endless').env || []).length, 0, '跨轮时旧环境应当清掉');

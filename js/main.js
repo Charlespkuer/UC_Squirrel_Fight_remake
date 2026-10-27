@@ -181,6 +181,7 @@
       resolution: 'auto',
       fullscreen: false,
       hideStatusBar: true,
+      backgroundRun: false,
     };
   }
   /** 把偏好写回存档：换浏览器/换机器（含双机同步）后设置还在。 */
@@ -212,6 +213,27 @@
     setTimeout(fitCanvas, 0);
     return on !== false;
   }
+  /** 「后台运行」开关：把选择同步给安卓壳（壳决定切后台时要不要 pauseTimers）。
+   *  桌面 / 浏览器没有这个桥，开关只影响 main.js 自己的音乐暂停逻辑。 */
+  function backgroundRunOn() {
+    try { return settingsSnapshot().backgroundRun === true; } catch (e) { return false; }
+  }
+  function applyBackgroundRun() {
+    const on = backgroundRunOn();
+    try {
+      const bridge = window.SSDZAndroid;
+      if (bridge && typeof bridge.setBackgroundRun === 'function') {
+        bridge.setBackgroundRun(on ? '1' : '0');
+      }
+    } catch (e) {}
+    return on;
+  }
+  /** 设置页的「后台运行」开关。 */
+  function setBackgroundRun(on) {
+    persistSettings({ backgroundRun: on === true });
+    applyBackgroundRun();
+    return on === true;
+  }
   /** 存档载入后把偏好接过来：存档优先，并回写 localStorage 供下次启动（标题画面）用。
    *  **偏好没变就直接返回**：以前每次 `showHome()` 都要写 3 次 localStorage + `fitCanvas`、
    *  再被 `showHome` 里的第二次 `fitCanvas` 叠一遍；现在只有读档 / 切档 / 改设置才重跑。 */
@@ -221,7 +243,9 @@
       if (!window.State || !State.settings || !State.state || !State.state()) return;
       const st = State.settings();
       applySystemBars();
-      const sig = [st.volume, st.muted === true, st.uiMode, st.resolution, st.fullscreen === true, st.hideStatusBar !== false].join('|');
+      applyBackgroundRun();
+      const sig = [st.volume, st.muted === true, st.uiMode, st.resolution, st.fullscreen === true, st.hideStatusBar !== false,
+        st.backgroundRun === true].join('|');
       if (!force && sig === appliedSettingsSig) return;
       appliedSettingsSig = sig;
       volume = clampVolume(st.volume);
@@ -359,23 +383,31 @@
    *   · 桌面浏览器切标签页（同一套 visibilitychange）。
    * 回到前台时**接着原来的位置继续放**（play() 就是 resume，不是重头开始）。
    * ============================================================ */
-  let bgSuspended = false;
+  let bgSuspended = false;      // 音乐已因切后台暂停
+  let inBackground = false;     // 当前在后台（无论是否开启「后台运行」）
   function enterBackground() {
-    if (bgSuspended) return;
+    if (inBackground) return;
+    inBackground = true;
+    /* 设置页「后台运行」打开时：不暂停音乐，安卓壳也不会 pauseTimers —— 游戏继续跑。
+     * 存档 flush / 自动导出仍由 MainActivity.onPause 照常调用，这里不拦。 */
+    if (backgroundRunOn()) return;
     bgSuspended = true;
     try { if (bgm) bgm.pause(); } catch (e) {}
     try { if (fightBgm) fightBgm.pause(); } catch (e) {}
   }
   function enterForeground() {
-    if (!bgSuspended) return;
-    bgSuspended = false;
+    if (!inBackground) return;
+    inBackground = false;
     applySystemBars();          // 回前台时原生壳可能重建过系统栏状态，重新落一次
+    applyBackgroundRun();       // 原生壳重建后也要把「后台运行」重新同步一次
+    if (!bgSuspended) return;   // 后台运行模式：音乐没停过，不用重播
+    bgSuspended = false;
     playBgm(mode === 'battle' ? 'fight' : 'main');
   }
   try {
     window.__ssdzEnterBackground = enterBackground;
     window.__ssdzEnterForeground = enterForeground;
-    window.__ssdzIsBackgrounded = () => bgSuspended;
+    window.__ssdzIsBackgrounded = () => inBackground;
     if (document.addEventListener) {
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') enterBackground(); else enterForeground();
@@ -1288,21 +1320,38 @@
   /**
    * 用系统默认浏览器打开一个 http(s) 链接。返回 Promise<boolean>（true = 已交给浏览器）。
    *
-   * 三种运行环境各走一条路（顺序即优先级）：
-   *   1. **Tauri 安装版 / 安卓**（页面来自 tauri.localhost / tauri://）：走 Rust 命令
+   * 四种运行环境各走一条路（顺序即优先级）：
+   *   1. **安卓**：页面里的 `window.SSDZAndroid.openExternal`（Kotlin 从 Activity 发
+   *      ACTION_VIEW）。Rust 的 `open_external` 在安卓上打不开 —— spawn 出来的 `am` 会被
+   *      ActivityManager 按「com.android.shell 不属于本应用 uid」拒掉，而且 spawn 只代表
+   *      进程起来、不代表 Intent 成功，页面会误判为「已打开」（2026-10 玩家反馈）。
+   *   2. **Tauri 安装版 / iOS**（页面来自 tauri.localhost / tauri://）：走 Rust 命令
    *      `open_external`（src-tauri 里注册）；装了 opener 插件时则直接用它。
-   *   2. **轻壳模式 / 便携版**（页面来自 http://127.0.0.1:端口）：轻壳的内置服务器提供
+   *   3. **轻壳模式 / 便携版**（页面来自 http://127.0.0.1:端口）：轻壳的内置服务器提供
    *      `/__open?url=…`（Tauri 的 ACL 不允许这种「远端来源」调用 IPC，所以只能走 HTTP）；
    *      便携版（scripts/serve.js）没有这个路由 → 404 → 退回 window.open（那边就是真浏览器）。
-   *   3. 纯浏览器 / file://：window.open。
+   *   4. 纯浏览器 / file://：window.open。
    * 全部失败时返回 false，调用方据此显示「复制链接」兜底。
    */
   function openExternal(url) {
     const u = String(url || '');
     if (!/^https?:\/\//i.test(u)) return Promise.resolve(false);
+    /* ① 安卓：Kotlin 桥。**必须排在最前面** —— 走 IPC 也能「成功」返回，但实际没打开，
+     * 界面就不会显示「复制链接」兜底，玩家只能干瞪眼。 */
+    const android = typeof window !== 'undefined' ? window.SSDZAndroid : null;
+    if (android && typeof android.openExternal === 'function') {
+      try {
+        const r = JSON.parse(String(android.openExternal(u) || ''));
+        if (r && r.ok) return Promise.resolve(true);
+        if (r && r.msg) console.warn('[openExternal] 安卓端打开链接失败：' + r.msg);
+        return Promise.resolve(false);
+      } catch (e) {
+        console.warn('[openExternal] 安卓桥不可用，改用其它方式', e);
+      }
+    }
     const T = window.__TAURI__;
     const ownServer = viaOwnLocalServer();
-    // ① 安装版 / 安卓（Tauri 应用，页面来自 tauri.localhost / tauri://）
+    // ② 安装版 / iOS（Tauri 应用，页面来自 tauri.localhost / tauri://）
     if (T && !ownServer) {
       if (T.opener && typeof T.opener.openUrl === 'function') {
         try { return Promise.resolve(T.opener.openUrl(u)).then(() => true, () => false); } catch (e) { /* 落下一步 */ }
@@ -1311,14 +1360,14 @@
         return Promise.resolve(T.core.invoke('open_external', { url: u })).then(() => true, () => false);
       }
     }
-    // ② 轻壳模式（Tauri + 自己的本地服务器）：IPC 会被 ACL 拒，走内置服务器的 /__open
+    // ③ 轻壳模式（Tauri + 自己的本地服务器）：IPC 会被 ACL 拒，走内置服务器的 /__open
     if (T && ownServer && typeof fetch === 'function') {
       return fetch('/__open?url=' + encodeURIComponent(u), { cache: 'no-store' })
         .then((r) => (r && r.ok ? r.json() : null))
         .then((j) => (j && j.ok ? true : plainWindowOpen(u)))
         .catch(() => plainWindowOpen(u));
     }
-    /* ③ 便携版 / 网页版：直接同步 window.open。
+    /* ④ 便携版 / 网页版：直接同步 window.open。
      * **不能先 await fetch**（哪怕只是探测 /__open）—— 那样会丢掉「用户点击」这个手势，
      * 浏览器会把它当弹窗拦下来。 */
     return Promise.resolve(plainWindowOpen(u));
@@ -1332,7 +1381,7 @@
    * ============================================================ */
   window.Main = { showHome, showTitle, startBattle, replayBattle, clearUiForBattle, resizeLayout:fitCanvas, setMuted, isMuted: () => muted,
     volume: volumeValue, setVolume, homePlayer: () => mainPlayer, setHomeFps, W, H,
-    settings: settingsSnapshot, setResolution, setFullscreen, setHideStatusBar, applySystemBars,
+    settings: settingsSnapshot, setResolution, setFullscreen, setHideStatusBar, setBackgroundRun, applySystemBars,
     isFullscreen: () => !!document.fullscreenElement,
     /* 现代 canvas 战斗图集：切到现代界面 / 真开打前可以主动预热（幂等，不阻塞首屏）。 */
     preloadBattleAssets, pinBattleAssets, battleAssetsReady: () => !!battleAssetsPromise,

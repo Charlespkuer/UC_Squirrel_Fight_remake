@@ -16,7 +16,8 @@
 //   GET  /__save?meta=1  → {ok, exists, savedAt, size}
 //   GET  /__save         → {ok, exists, savedAt, data}
 //   POST /__save         → 校验 JSON 对象后写盘，返回 {ok, savedAt}
-// 外链 API（轻壳模式的「用浏览器打开」；安装版/安卓走 `open_external` 命令）：
+// 外链 API（轻壳模式的「用浏览器打开」；安装版走 `open_external` 命令，安卓走 Kotlin 的
+// `SSDZAndroid.openExternal` —— 应用进程里 spawn `am` 会被 ActivityManager 拒绝）：
 //   GET  /__open?url=…   → 校验 http(s) 后交给系统默认浏览器，返回 {ok} / {ok:false,msg}
 //   POST /__update?mode=check|git|release|auto[&dry=1]  → 跑 scripts/update-game.js 并把它的 JSON 回给页面
 //        （「一键拉取远端更新」。真正干活的是那个零依赖 Node 脚本 —— 这样壳 / 便携版 / 浏览器
@@ -493,8 +494,11 @@ fn export_api(method: &str, query: &str, body: &[u8], out: &mut TcpStream) -> st
 
 /// 用系统默认浏览器打开一个 http(s) 链接。
 ///   桌面：Windows `cmd /C start`／macOS `open`／Linux `xdg-open`
-///   安卓：`am start -a android.intent.action.VIEW`（部分机型 SELinux 可能拦住 → 前端会退回「复制链接」）
-/// 链接先做白名单校验（只允许 http(s)、只允许可见 ASCII、禁掉 shell 元字符），
+///   安卓：**不在这里做** —— 从应用进程 spawn `am start` 会被 ActivityManager 按
+///     「com.android.shell 不属于本应用 uid」拒掉（SecurityException），而且 spawn 成功
+///     不代表 Intent 成功，页面会把「没打开」当成成功。安卓统一走 Kotlin 的
+///     `SSDZAndroid.openExternal`（前端在 main.js 里优先调它），这里只返回明确错误。
+///   链接先做白名单校验（只允许 http(s)、只允许可见 ASCII、禁掉 shell 元字符），
 /// 免得把一个带 `&` / `"` 的字符串交给 shell 解析。
 fn spawn_opener(url: &str) -> std::io::Result<()> {
     let ok = (url.starts_with("https://") || url.starts_with("http://"))
@@ -517,10 +521,11 @@ fn spawn_opener(url: &str) -> std::io::Result<()> {
     }
     #[cfg(target_os = "android")]
     {
-        std::process::Command::new("am")
-            .args(["start", "-a", "android.intent.action.VIEW", "-d", url])
-            .spawn()
-            .map(|_| ())
+        let _ = url;
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "安卓端请调用 window.SSDZAndroid.openExternal（Kotlin 直接发 ACTION_VIEW）",
+        ))
     }
     #[cfg(target_os = "ios")]
     {
@@ -529,8 +534,9 @@ fn spawn_opener(url: &str) -> std::io::Result<()> {
     }
 }
 
-/// 命令：`open_external` —— 安装版 / 安卓（页面来自 tauri.localhost / tauri://）打开系统浏览器。
+/// 命令：`open_external` —— 安装版 / iOS（页面来自 tauri.localhost / tauri://）打开系统浏览器。
 /// 轻壳模式（页面来自 127.0.0.1 的本地服务器）走上面的 `/__open`，因为那边 IPC 会被 ACL 拒。
+/// 安卓不走这里（`spawn_opener` 会直接报错），见该函数的注释。
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
     spawn_opener(&url).map_err(|e| e.to_string())

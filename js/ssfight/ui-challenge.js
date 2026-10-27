@@ -653,6 +653,17 @@
     }
     return out.join('\n');
   }
+  /** 按指定字号重排一个原版文本字段：不改原字体/框宽，只把行高、行距、首行基线缩到 `size`。
+   *  用于 4756 的 `info1`/`info2` —— 原版字号 12 时 5 行就顶到框底，缩到 11 后同样行数
+   *  仍落在原框内（4756 的两个框高分别只有 86 / 44 舞台单位）。 */
+  function setFieldText(clip, text, size) {
+    if (!clip || !clip.__textBox || !size) return setText(clip, text);
+    const tb = clip.__textBox;
+    tb.lines = tb.lines.map((L) => Object.assign({}, L, { h: size }));
+    tb.step = 1.15 * size + (tb.meta.lead || 0);
+    if (tb.box) tb.base = tb.box.ymin + 2 + (tb.meta.lead || 0) + 0.88 * size;
+    return setText(clip, fitText(clip, text));
+  }
 
   /* ============================================================
    * 页壳：顶栏 / 体力 / 页码 / 返回
@@ -2729,14 +2740,31 @@
     const enemyCount = GData.stageEnemyCount ? GData.stageEnemyCount(id) : 3;
     const expText = enemyCount === 1 ? String(GData.stageNpcExp(id, 1))
       : [1, 2, 3].map((i) => GData.stageNpcExp(id, i)).join('/');
-    /* `info1`（4730）：消耗 + 奖励。 */
-    setText(info1, fitText(info1,
-      '【消耗】：' + cost + '\n【奖励】：经验' + expText + '、金松果' + reward.gold + '、有几率得碎片'));
-    /* `info2`（4727）：对手与连战规则。 */
-    setText(info2, fitText(info2,
+    /* `info1`（4730）：消耗 + 奖励。原版框高 86、字号 12 时行距 14.8，5 行会顶到框底；
+     * 缩到 11 号后仍是原字体、行数不变，但 5 行只到 65 左右，不再压到下面的 `info2`。 */
+    setFieldText(info1, '【消耗】' + cost + '\n【奖励】经验' + expText + '、金松果' + reward.gold + '、几率得碎片', 11);
+    /* `info2`（4727）：对手 + 连战规则。原版框只放得下 3 行（框高 44、行距 11.8），
+     * 4 行就会压住下面的两颗键 —— 缩到 11 号后 4 行到 39.6，刚好在框内。 */
+    setFieldText(info2,
       '对手：' + npc.name + '（' + (run ? run.npcIndex : 1) + '/' + enemyCount + '）\n' +
-      (enemyCount === 1 ? '超级大关只有1个敌人，中途失败\n可使用挑战书复活后继续挑战' : '每个关卡有3个敌人，中途失败\n可使用挑战书复活后继续挑战')));
+      (enemyCount === 1 ? '超级大关只有1个敌人\n中途失败可用挑战书复活'
+        : '连续击败3名敌人\n中途失败可用挑战书复活'), 11);
     const ok = clipOf(view, 'button1'), no = clipOf(view, 'button2');
+    /* 用户 2026-10 口径：出战确认的「返回 / 战斗」位置对调（原版战斗在左、返回在右），
+     * 并且两颗键要再拉开一点（截图里换位后几乎贴在一起）。与 `openOriginalConfirm`
+     * 的 swapButtons 同一套做法：只换两个 clip 的 x 位移，点击语义仍绑
+     * button1=战斗 / button2=返回，且必须在 `wireClickable` 之前换，热区才会按新位置重新量。
+     * 注意方向：战斗要移到右槽，返回移到左槽；`GAP` 是两颗键合计再拉开的舞台单位。 */
+    if (ok && no && ok.g && no.g) {
+      const ma = (clip) => String(clip.g.__baseMa || '').split(',').map(Number);
+      const a = ma(ok), b = ma(no);
+      if (a.length === 6 && b.length === 6 && a.every(Number.isFinite) && b.every(Number.isFinite)) {
+        const dx = b[4] - a[4], GAP = 26, halfGap = GAP / 2;
+        const sa = Math.abs(a[0]) || 1, sb = Math.abs(b[0]) || 1;
+        if (ok.setExtraTransform) ok.setExtraTransform('translate(' + ((dx + halfGap) / sa).toFixed(3) + ',0)');
+        if (no.setExtraTransform) no.setExtraTransform('translate(' + ((-dx - halfGap) / sb).toFixed(3) + ',0)');
+      }
+    }
     wireClickable(ok, {
       hover: 0, press: 0, idle: 1,
       onFire: () => {

@@ -351,7 +351,9 @@
       const layout = {
         arena: { x: 48, y: 130, width: 21, size: 9, leading: 10, rows: 2, actionY: 154, pageY: 139 },
         rank: { x: 68, y: 69, width: 18, size: 10, leading: 12, rows: 5, actionY: 143, pageY: 128 },
-        stage: { x: 64, y: 58, width: 20, size: 9.5, leading: 10.5, rows: 6, actionY: 140, pageY: 126 },
+        /* 4839 的米色正文框左边沿约在 x=72；以前从 64 起排，首字会压到框外
+         * （用户 2026-10 截图「汉字超出框」）。右边界同步收一点，给两侧留白。 */
+        stage: { x: 72, y: 60, width: 18, size: 9.5, leading: 10.5, rows: 6, actionY: 140, pageY: 126 },
         result: { x: 66, y: 78, width: 19, size: 10, leading: 12, rows: 5, actionY: 158, pageY: 141 },
         /* 4692 的通用提示：没有「战斗胜利」那行，正文从标题下方开始。 */
         notice: { x: 66, y: 66, width: 19, size: 10, leading: 12, rows: 6, actionY: 158, pageY: 141 },
@@ -411,8 +413,11 @@
       const ordered = actions.map((action, index) => ({ action, index }))
         .sort((a, b) => rankAction(a.action) - rankAction(b.action) || a.index - b.index);
       const step = ordered.length > 2 ? 66.5 : 90;
+      /* 3776/4839 的可见米色面板中心比 320 画布中心略偏左（实测约 158，而不是 160）。
+       * 按钮组按 160 排会整体偏右；stage / rank 用面板中心 158，其余容器保持 160。 */
+      const actionCX = (kind === 'stage' || kind === 'rank') ? 158 : 160;
       ordered.forEach(({ action, index }, position) => button(action.label || '确定',
-        160 + (position - (ordered.length - 1) / 2) * step, layout.actionY,
+        actionCX + (position - (ordered.length - 1) / 2) * step, layout.actionY,
         () => choose(index), 'result-action-' + index, action.disabled === true, ordered.length > 2 ? 60 : 76));
       if (rows.length > perPage) {
         const more = node('text', { x: kind === 'arena' ? 270 : 251, y: layout.pageY, 'text-anchor': 'end',

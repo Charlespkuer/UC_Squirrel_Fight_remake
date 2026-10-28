@@ -1153,6 +1153,12 @@ async function checkFightResults({ env, Node, body, flushTimeouts }) {
   assert.equal(env.SfFightResult.isOpen(), false);
   assert.equal(prompts, 6, '战果层沿用升级奖励选择入口');
   assert.equal(env.SfRender.viewCount(), 0, '战果退出后回收播放注册');
+  /* 用户 2026-10 口径：关卡胜利正文不能压出米色框，天梯/关卡按钮组要按可见面板中心居中。
+   * 4839/3776 的面板中心实测约 158（不是 320 画布的 160），stage 正文左边距 72。 */
+  const resultSource = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-fight-result.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/stage: \{ x: 72, y: 60, width: 18/.test(resultSource)
+    && /actionCX = \(kind === 'stage' \|\| kind === 'rank'\) \? 158 : 160/.test(resultSource),
+    '关卡胜利正文留出左边距，stage/rank 按钮组用面板中心 158');
 
   /* 有奖励的普通战果走**原版 `fight` 第 2/3 帧**（经验 + 金松果/战利品三格），
    * 不再把"经验 +X 金松果 +Y"拼成文字塞进 4692 提示框。 */

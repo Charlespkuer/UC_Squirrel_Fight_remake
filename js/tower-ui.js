@@ -1003,7 +1003,10 @@
     const list = Tower.ownedBuffs('endless');
     /* 【2026-10 同名逐条】按每条自己的 `slotFree` 排 / 标记；`data-replace` 用 uid。 */
     const perm = orderPermanent(list.filter((b) => b.kind === 'permanent'));
-    const lim = list.filter((b) => b.kind === 'limited');
+    /* 渴血之剑及其变体默认置顶（用户 2026-10 口径）：先按「是不是剑」排，再保持原有顺序。 */
+    const isBladeBuff = (b) => !!(b && TowerData.isBladeId && TowerData.isBladeId(b.id));
+    const lim = list.filter((b) => b.kind === 'limited')
+      .sort((a, b) => Number(isBladeBuff(b)) - Number(isBladeBuff(a)));
     const cap = Number(run.permCap) || ((TowerData.PERMANENT_SLOTS || 5) + Math.max(0, Number(run.permSlots || 0)));   // 槽位上限含扩容类加成
     const permHtml = perm.length
       ? perm.map((b, i) => {
@@ -1028,10 +1031,15 @@
           '<span class="buff-progress-item"><b>' + esc(b.name) + '</b>' + esc(b.progress) + '</span>').join('') + '</div>'
       : '';
     const limHtml = lim.length
-      ? lim.map((b) => '<button type="button" class="limit-tag r' + b.rarity + (b.on ? '' : ' off') + '" data-toggle="' + esc(rowRef(b)) +
-          '" data-tip="' + esc(limitTip(b)) + '" title="' + esc(limitTip(b)) + '">' +
-          '<b>' + esc(b.name) + '</b><i>' + (b.forced ? '强制苏醒' : (b.on ? '生效中' : '已关闭')) + '</i><em>' +
-          limitBadgeText(b) + '</em></button>').join('')
+      ? lim.map((b) => {
+          /* 王者之剑（HB04）用传奇增益的金色外观；前面几把渴血之剑仍保持原限次卡样式。 */
+          const king = !!(TowerData.BLADE && b.id === TowerData.BLADE.finalId);
+          return '<button type="button" class="limit-tag r' + b.rarity +
+            (king ? ' legendary' : '') + (b.on ? '' : ' off') + '" data-toggle="' + esc(rowRef(b)) +
+            '" data-tip="' + esc(limitTip(b)) + '" title="' + esc(limitTip(b)) + '">' +
+            '<b>' + esc(b.name) + '</b><i>' + (b.forced ? '强制苏醒' : (b.on ? '生效中' : '已关闭')) + '</i><em>' +
+            limitBadgeText(b) + '</em></button>';
+        }).join('')
       : '<span class="buff-empty">还没有限次增益</span>';
     /* 讨价还价（E14）：即时类不进 permanent/limited，所以在这里单独把「攒着还没兑现的份数」
      * 摆出来 —— 不然玩家看不到自己叠了几层，进店前也预期不了。 */

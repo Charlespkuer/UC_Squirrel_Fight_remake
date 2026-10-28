@@ -176,5 +176,18 @@ test('献祭窗只认显式开关，DOM 被重画摘掉时不能自动重开', (
     '建弹层前先置位，挡住同一轮重画造成的第二层');
 });
 
+test('限次列表把渴血之剑置顶，王者之剑使用传奇金色外观', () => {
+  const ui = fs.readFileSync(path.join(ROOT, 'js/tower-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  const css = fs.readFileSync(path.join(ROOT, 'css/tower.css'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/const isBladeBuff = \(b\) => !!\(b && TowerData\.isBladeId/.test(ui)
+    && /sort\(\(a, b\) => Number\(isBladeBuff\(b\)\) - Number\(isBladeBuff\(a\)\)\)/.test(ui),
+    '限次增益列表要按 isBladeId 把剑及其变体排在最前');
+  assert.ok(/b\.id === TowerData\.BLADE\.finalId/.test(ui)
+    && /limit-tag r' \+ b\.rarity \+\s*\n\s*\(king \? ' legendary' : ''\)/.test(ui),
+    'HB04 王者之剑要加 legendary 卡面类');
+  assert.ok(/\.limit-tag\.legendary\s*\{[^}]*linear-gradient/.test(css),
+    'legendary 限次卡要有金色渐变外观');
+});
+
 console.log('\n塔增益规则回归：' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exitCode = 1;

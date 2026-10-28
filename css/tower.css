@@ -452,6 +452,13 @@
 .limit-tag em { font-style: normal; font-size: 15px; color: #8a6a3a; }
 .limit-tag.off { filter: grayscale(.7); opacity: .65; }
 .limit-tag.off i { color: #9a6a5a; }
+/* 王者之剑（HB04 最终形态）用传奇增益的金色卡面：金描边 + 金渐变 + 内圈高光，
+ * 与 `.buff-tag.r3` 同一套色彩；前面几把渴血之剑仍用普通限次卡。 */
+.limit-tag.legendary { border-color: #d9a12a; background: linear-gradient(#fff6c8, #ffe08a);
+  box-shadow: 0 0 0 2px #f6d98a inset, 0 0 12px #e8b93a66; color: #6a430f; }
+.limit-tag.legendary b { color: #6a3d08; }
+.limit-tag.legendary i { color: #7a5a1a; }
+.limit-tag.legendary em { color: #8a6418; }
 .choice-onpage { background: rgba(255, 250, 235, .92); border: 3px solid #e2c68f; border-radius: 18px; padding: 6px 10px 10px; }
 .choice-onpage .hex-row { display: flex; gap: 10px; }
 

@@ -143,5 +143,38 @@ test('新账本从 50 起价，卖掉它不会清掉另一本的累计', () => {
   assert.equal(price(nextFresh.uid), 50, '下一本新账本还是 50');
 });
 
+test('献祭限次增益只消耗单次获得的场次，剩余不足一份才整栏移除', () => {
+  const c = setup(), T = c.Tower;
+  const run = T._debugRun('endless');
+  assert.ok(T.addBuff(run, 'HB01').ok, '先拿到渴血之剑');
+  assert.ok(T.addBuff(run, 'N05').ok, '第一份先手制敌');
+  assert.ok(T.addBuff(run, 'N05').ok, '第二份先手制敌（同名累加场次）');
+  const row = () => (run.limited || []).find((b) => b && b.id === 'N05');
+  assert.equal(row().uses, 6, '两份先手制敌 = 6 场');
+
+  run.bladeSacrificePending = true;
+  const cand = T.bladeSacrificeCandidates().list.find((x) => x.id === 'N05');
+  const r = T.sacrificeBlade(cand && cand.ref);
+  assert.equal(r.ok, true, r.msg || '第一刀献祭应当成功');
+  assert.equal(row().uses, 3, '只扣单次获得的 3 场，不能把 6 场全吞');
+  assert.equal(r.used.partial, true, '返回值要标明这次只消耗了一份场次');
+
+  run.bladeSacrificePending = true;
+  const cand2 = T.bladeSacrificeCandidates().list.find((x) => x.id === 'N05');
+  const r2 = T.sacrificeBlade(cand2 && cand2.ref);
+  assert.equal(r2.ok, true, r2.msg || '第二刀献祭应当成功');
+  assert.equal(row(), undefined, '只剩最后一份时整栏移走');
+});
+
+test('献祭窗只认显式开关，DOM 被重画摘掉时不能自动重开', () => {
+  const ui = fs.readFileSync(path.join(ROOT, 'js/tower-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/function bladeOfferVisible\(\) \{[\s\S]{0,260}?return bladeOfferOpen;/.test(ui),
+    'bladeOfferVisible 不能再用弹层 isConnected 反推关闭');
+  assert.ok(!/bladeOfferEl\.isConnected === false\) bladeOfferOpen = false/.test(ui),
+    'DOM 被 openEndless 重画摘掉时不能清掉献祭开关');
+  assert.ok(/bladeOfferOpen = true;\s*\n\s*const got = Tower\.bladeSacrificeCandidates/.test(ui),
+    '建弹层前先置位，挡住同一轮重画造成的第二层');
+});
+
 console.log('\n塔增益规则回归：' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exitCode = 1;

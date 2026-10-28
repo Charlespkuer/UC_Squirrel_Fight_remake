@@ -102,8 +102,8 @@
   let bladeOfferOpen = false;
   let bladeOfferEl = null;
   function bladeOfferVisible() {
-    if (!bladeOfferOpen) return false;
-    if (bladeOfferEl && bladeOfferEl.isConnected === false) bladeOfferOpen = false;
+    /* 只认显式开关，不靠“元素还在不在”反推：`openEndless` 重画 #ui 会把弹层一起摘掉，
+     * 旧写法每次看到 isConnected=false 就清标记，于是下一次重画又开一层，献祭框一直弹。 */
     return bladeOfferOpen;
   }
   /** 勇者准备 / 回看的「更换装备」层（挂在 body 上，不跟 #ui 的等比缩放一起缩小）。 */
@@ -3732,6 +3732,9 @@
    *  只能承受反噬 —— 仍然是一个必选结果，不能靠关窗跳过。 */
   function openBladeSacrifice() {
     if (bladeOfferVisible()) return;
+    /* 先占坑再建弹层：`modal()` 挂到 #ui 之后，若是重画触发的第二轮 openEndless
+     * 先跑，仍能靠这个标记挡住重复弹窗。 */
+    bladeOfferOpen = true;
     const got = Tower.bladeSacrificeCandidates();
     const list = (got && got.list) || [];
     const info = (got && got.blade) || (Tower.bladeInfoOf ? Tower.bladeInfoOf() : null) || {};
@@ -3744,12 +3747,11 @@
         [{ label: '承受反噬', cls: 'muted', run: () => {
             const r = Tower.sacrificeBlade(null);
             closeBladeOffer();
-            openEndless();
             notice(r && r.ok ? '剑反噬了你，随后沉寂下去。' : ((r && r.msg) || '献祭失败。'),
               [{ label: '继续', cls: 'gold', run: openEndless }]);
           } }], { small: true, locked: true });
       bladeOfferEl = (m && m.element) || null;
-      bladeOfferOpen = !!bladeOfferEl;
+      if (!bladeOfferEl) bladeOfferOpen = false;
       return;
     }
     const rows = list.map((c, i) => {
@@ -3779,22 +3781,23 @@
           if (!r.ok) { notice(r.msg || '献祭失败。'); return; }
           m.close();
           closeBladeOffer();
-          openEndless();
-          notice('【' + c.name + '】已献祭 · 渴血之剑成长至 ×' + r.stacks +
-            ' 层' + (r.used && r.used.kind === 'inscription' ? '（铭文被吞掉，增益保留）' : '') + '。',
+          notice('【' + c.name + '】已献祭 · 渴血之剑成长至 ×' + r.stacks + ' 层' +
+            (r.used && r.used.partial ? '（消耗 ' + r.used.consumed + ' 场，剩余 ' + r.used.uses + ' 场）' : '') +
+            (r.used && r.used.kind === 'inscription' ? '（铭文被吞掉，增益保留）' : '') + '。',
             [{ label: '继续', cls: 'gold', run: openEndless }]);
         };
       });
       C().bind(m.element, actions);
     }
     bladeOfferEl = (m && m.element) || null;
-    bladeOfferOpen = !!bladeOfferEl;
+    if (!bladeOfferEl) bladeOfferOpen = false;
   }
   /** 51 层起每 10 层的活性事件：抑制 / 增强二选一（连续抑制 3 次 → 涸血之剑）。 */
   function openBladeEvent() {
     if (bladeOfferVisible()) return;
+    bladeOfferOpen = true;
     const info = Tower.bladeInfoOf ? Tower.bladeInfoOf() : null;
-    if (!info) { openEndless(); return; }
+    if (!info) { bladeOfferOpen = false; openEndless(); return; }
     const streak = Math.max(0, Number(info.suppressStreak) || 0);
     const m = modal('渴血之剑 · 活性',
       '<div class="result-box"><div class="result-title">剑在呼吸</div>' +
@@ -3805,7 +3808,6 @@
       [{ label: '抑制活性', cls: 'muted', run: () => {
           const r = Tower.resolveBladeEvent('suppress');
           closeBladeOffer();
-          openEndless();
           notice(r && r.ok
             ? (r.dead ? '连续三次抑制：渴血之剑彻底失活，化为「涸血之剑」。'
               : '你压住了剑的活性（' + r.streak + '/3）。')
@@ -3814,14 +3816,13 @@
        { label: '增强活性', cls: 'gold', run: () => {
           const r = Tower.resolveBladeEvent('enhance');
           closeBladeOffer();
-          openEndless();
           notice(r && r.ok
             ? (r.evolved ? ('剑的活性大增，进化为「' + r.evolved.name + '」。')
               : ('你增强了剑的活性：使用次数 −' + (TowerData.BLADE ? TowerData.BLADE.enhanceUses : 3) + '。'))
             : ((r && r.msg) || '无法增强。'), [{ label: '继续', cls: 'gold', run: openEndless }]);
         } }], { small: true, locked: true });
     bladeOfferEl = (m && m.element) || null;
-    bladeOfferOpen = !!bladeOfferEl;
+    if (!bladeOfferEl) bladeOfferOpen = false;
   }
 
   /* ============================================================

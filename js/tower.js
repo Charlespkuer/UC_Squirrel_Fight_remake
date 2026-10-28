@@ -2547,6 +2547,21 @@
       }
       return { kind: 'inscription', id: cand.inscription, rowId: row.id };
     }
+    /* 限次增益的「一份」= 一次获得时给的场次（`def.uses`）。同名再获得会累加 uses，
+     * 所以一栏可能存着好几份。献祭时只吃一份场次，不再把整栏剩余场次全部吞掉；
+     * 剩余不足一份时才整栏移除（那已经不足一次献祭的份量）。 */
+    if (cand.kind === 'limited' && cand.stacks <= 1) {
+      const row = (run.limited || []).find((b) => b && Number(b.uid) === Number(cand.uid));
+      if (!row) return null;
+      const def = D().BUFF_BY_ID[row.id] || {};
+      const per = Math.max(1, Math.floor(Number(def.uses) || 1));
+      const left = Math.max(0, Math.floor(Number(row.uses) || 0));
+      if (left > per) {
+        row.uses = left - per;
+        row.on = true;
+        return { kind: 'limited', id: row.id, uses: row.uses, consumed: per, partial: true };
+      }
+    }
     /* 可叠加的只消耗一件（一层）；整栏只有 1 层 / 限次件则整栏移除。 */
     if (cand.stacks > 1) {
       const row = cand.kind === 'permanent'

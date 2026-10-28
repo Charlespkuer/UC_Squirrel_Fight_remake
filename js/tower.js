@@ -3166,6 +3166,13 @@
           /* x00「最后的魔王」的固定持有（两件涅槃plus + 两件破碎终焉烙印）放在**最后**：
            * 终乘要把前面「面板复制 + 上交增益」的结果一起放大。 */
           applyDemonLordLives(foe);
+        } else {
+          /* 寻常「巡视」层的魔王也加强为**两条命**：第二条命只回 75% 生命上限；
+           * 不吃 x00 的 +20% 上限 / 减伤，也不吃破碎终焉烙印。 */
+          const P = D().PATROL || {};
+          applyDemonLordLives(foe, { lives: Number(P.patrolLives) || 1,
+            healPct: P.patrolLifeHealPct == null ? 0.75 : P.patrolLifeHealPct,
+            maxHpMul: 0, takenMul: 0, brands: 0, perBrand: 0 });
         }
         /* 【渴血之剑·王者之剑】对「镜」的额外克制：只有最终形态才生效。
          * 玩家可以把它关掉（on=false），关掉时不削弱敌人；层数越高削得越多。 */
@@ -5504,24 +5511,30 @@
     foe.tollBuffs = names;
     return n;
   }
-  /** x00「最后的魔王」额外固定持有的两件**涅槃plus** + 两件**已破碎的终焉烙印**
-   *（2026-10 第八十二批用户口径；只给 x00，寻常巡逻层那只不额外持有）。
+  /** 魔王额外命数 + x00 固定持有。
    *
-   *  · 涅槃plus：`deathSaves` 里两条带 `bossLife: true` 的条目 —— 死亡时回满血（100% 生命上限），
-   *    并**当场**生命上限 +20%、受到伤害 −15%；第二件触发时这两项叠加（上限 +40%、减伤 30%）。
-   *    触发逻辑在 sim 的 `consumeDeathSave`（先抬上限、再按 healPct 回血、减伤并进 mods.takenMul）。
+   *  · x00「最后的魔王」默认两件**涅槃plus**：`deathSaves` 里两条带 `bossLife: true` 的条目 ——
+   *    死亡时回满血（100% 生命上限），并**当场**生命上限 +20%、受到伤害 −15%；
+   *    第二件触发时这两项叠加（上限 +40%、减伤 30%）。于是它一共 **3 条命**。
+   *  · 寻常「巡视」层那只通过 opts 传 1 条命 / 75% 回血：一共 **2 条命**，不叠 x00 的
+   *    上限与减伤，也不吃破碎终焉烙印。
+   *  · 触发逻辑在 sim 的 `consumeDeathSave`（先抬上限、再按 healPct 回血、减伤并进 mods.takenMul）。
    *    `bossLife` 还有一层作用：**「假如我直接赢」（E17）只吃掉一条命**（见 sim 的 openKill 分支）——
    *    普通敌人的装死 / 涅槃照旧被 E17 无视，只有魔王的命算数。
-   *    于是它一共 **3 条命**（本体 + 两件涅槃plus）。
-   *  · 两件破碎的终焉烙印：终乘 ×(1 + 0.30×2) = **×1.6** 乘进力/敏/速/生命上限，
+   *  · 两件破碎的终焉烙印（只给 x00）：终乘 ×(1 + 0.30×2) = **×1.6** 乘进力/敏/速/生命上限，
    *    与玩家侧 `fragileFinalMul` 同一套口径（存在 +20%/层、损毁 +30%/层，按层加算）。
    *    放在**最后**乘：前面的面板复制与「玩家上交过的增益」都算完之后再终乘。 */
-  function applyDemonLordLives(foe) {
+  function applyDemonLordLives(foe, opts) {
     if (!foe) return null;
     const P = D().PATROL || {};
-    const lives = Math.max(0, Math.floor(Number(P.bossLives) || 0));
-    const brands = Math.max(0, Math.floor(Number(P.bossBrokenBrands) || 0));
-    const perBrand = Math.max(0, Number(P.bossBrokenFinal) || 0);
+    const O = opts || {};
+    const num = (v, fallback) => (v == null || !Number.isFinite(Number(v))) ? fallback : Number(v);
+    const lives = Math.max(0, Math.floor(num(O.lives, P.bossLives) || 0));
+    const brands = Math.max(0, Math.floor(num(O.brands, P.bossBrokenBrands) || 0));
+    const perBrand = Math.max(0, num(O.perBrand, P.bossBrokenFinal) || 0);
+    const healPct = Math.max(0, num(O.healPct, P.bossLifeHealPct) || 1);
+    const lifeMaxHpMul = Math.max(0, num(O.maxHpMul, P.bossLifeMaxHpMul) || 0);
+    const lifeTakenMul = num(O.takenMul, P.bossLifeTakenMul) || 0;
     foe.mods = Object.assign({}, foe.mods || {});
     /* 命数**直接摆回设计值**（不是无脑追加）：
      *   · 保证幂等 —— adjustMe 被调两次不会变 4 条命；
@@ -5529,9 +5542,9 @@
      *   · 只保留非 bossLife 的免死条目（例如上交增益带来的），别把别人的命删了。 */
     if (lives > 0) {
       const one = () => ({
-        healPct: Math.max(0, Number(P.bossLifeHealPct) || 1),
-        maxHpMul: Math.max(0, Number(P.bossLifeMaxHpMul) || 0),
-        takenMul: Number(P.bossLifeTakenMul) || 0,
+        healPct: healPct,
+        maxHpMul: lifeMaxHpMul,
+        takenMul: lifeTakenMul,
         revive: true, bossLife: true, name: '涅槃+',
       });
       const list = [];

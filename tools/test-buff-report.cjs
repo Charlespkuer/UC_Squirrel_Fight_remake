@@ -746,8 +746,10 @@ test('巡逻（魔王战）：随机替换任意一场、魔王本体、收缴�
     /* 玩家这一场确实有增益（暴击精通 + 涅槃），但魔王**不该**拿到它们。 */
     assert.ok(Number(meStub.mods && meStub.mods.critBonus) > 0, '玩家自己是有暴击精通的');
     assert.ok(Array.isArray(meStub.mods.deathSaves) && meStub.mods.deathSaves.length > 0, '玩家自己有涅槃');
-    assert.ok(!mf.mods || (!mf.mods.critBonus && !mf.mods.deathSaves),
-      '魔王**不持有**玩家的增益包（涅槃 / 后发制人 / 越战越勇这类局内效果都不该生效）：' + JSON.stringify(mf.mods));
+    const bossSaves = (mf.mods && mf.mods.deathSaves) || [];
+    assert.ok(!mf.mods || !mf.mods.critBonus, '魔王**不持有**玩家的暴击精通');
+    assert.ok(bossSaves.every((sv) => sv && sv.bossLife === true),
+      'deathSaves 里只允许魔王自己的命，不能抄玩家的涅槃 / 后发制人 / 越战越勇：' + JSON.stringify(mf.mods));
     assert.equal(mf.healMul, undefined, '治疗烙印（healMul）是局内增益，不给魔王');
     assert.equal(mf.skillBoost, undefined, '秘技通神（skillBoost）是局内增益，不给魔王');
     assert.equal(mf.effects['12'], 0.25, '装备词条属于面板，照抄');
@@ -785,7 +787,7 @@ test('巡逻（魔王战）：随机替换任意一场、魔王本体、收缴�
       nxt.entry._layer === pe[0]._layer), '不该又回到同一场巡逻：' + JSON.stringify(nxt.entry));
   }
 });
-test('觐见魔王（x00）：固定持有两件涅槃plus（3 条命）+ 两件破碎终焉烙印，且「假如我直接赢」只吃一条命', () => {
+test('觐见魔王（x00）：两件涅槃plus（3 条命）+ 破碎终焉烙印；寻常巡视也两命、第二条 75%', () => {
   /* 2026-10 第八十二批 用户口径。x00 那一只额外固定持有：
    *   · 两件涅槃plus —— 每条命：死亡回满血 + 当场生命上限 +20%、减伤 15%（可叠加）；
    *   · 两件已破碎的终焉烙印 —— 终乘 ×1.6（力/敏/速/生命上限）。
@@ -870,7 +872,8 @@ test('觐见魔王（x00）：固定持有两件涅槃plus（3 条命）+ 两件
   const oneShot = Sim.simulate(Object.assign({}, hero, { mods: { openKill: 1 } }), plain);
   assert.equal(oneShot.rounds.length, 1, '普通敌人仍是一击带走：' + oneShot.rounds.length);
   assert.equal(oneShot.rounds.filter((r) => r.deathSave).length, 0, '它的涅槃不触发');
-  /* 反向：寻常巡逻层那只**不**额外持有（用户口径限定 x00）。 */
+  /* 对照：寻常「巡视」层那只也加强为两条命，但第二条只回 75%、
+   * 不叠 x00 的生命上限 / 减伤 / 破碎终焉烙印。 */
   {
     /* 先把上面那场没报结果的战斗收掉（否则 nextBattle 会被「上一场还没结算」拒掉）。 */
     if (Tower.interruptBattle) Tower.interruptBattle('endless');
@@ -883,9 +886,27 @@ test('觐见魔王（x00）：固定持有两件涅槃plus（3 条命）+ 两件
     assert.ok(px && px.ok !== false && typeof px.adjustMe === 'function',
       '寻常巡逻层那只也要能开起来：' + ((px && px.msg) || ''));
     px.adjustMe(meStub);
-    assert.equal(px.foe.demonLives, undefined, '寻常巡逻层那只不额外持有涅槃plus');
-    assert.equal(px.foe.mods && px.foe.mods.deathSaves, undefined, '它也不该有额外的命');
+    assert.equal(px.foe.demonLives, 2, '寻常巡视魔王也是两条命（本体 + 1 条）：' + px.foe.demonLives);
+    const saves = (px.foe.mods && px.foe.mods.deathSaves) || [];
+    assert.equal(saves.length, 1, '只多一条命：' + JSON.stringify(saves));
+    assert.equal(saves[0].bossLife, true, '这条命也要带 bossLife（E17 才认它）');
+    assert.equal(saves[0].healPct, 0.75, '第二条命只回 75% 生命上限');
+    assert.equal(saves[0].maxHpMul, 0, '不叠 x00 的生命上限 +20%');
+    assert.equal(saves[0].takenMul, 0, '不叠 x00 的减伤');
     assert.equal(px.foe.brokenBrandFinalMul, undefined, '终乘只给 x00');
+    /* 真打一场：只复活一次，且第二条命的血量是 75% 上限（不是满血）。 */
+    const ordinaryFoe = JSON.parse(JSON.stringify({ name: px.foe.name, level: 70, power: px.foe.power,
+      agility: px.foe.agility, speed: px.foe.speed, hp: px.foe.maxHp, maxHp: px.foe.maxHp,
+      weapons: [], skills: [], effects: {}, baseStats: px.foe.baseStats, mods: px.foe.mods }));
+    const ordinaryHero = { name: '我', level: 70, power: 100000, agility: 100000, speed: 100000,
+      hp: 500000, maxHp: 500000, weapons: [{ id: 3, level: 15 }], skills: [], effects: {},
+      baseStats: { power: 100000, agility: 100000, speed: 100000 } };
+    const killed = Sim.simulate(ordinaryHero, ordinaryFoe);
+    const revives = (killed.rounds || []).filter((r) => r.deathSave);
+    assert.equal(revives.length, 1, '两条命 → 恰好复活一次：' + revives.length);
+    assert.equal(revives[0].hpAfter[1], Math.round(ordinaryFoe.maxHp * 0.75),
+      '第二条命只回 75% 生命上限：' + JSON.stringify(revives[0].hpAfter));
+    assert.equal(killed.winner, 0, '杀满两条命才算赢');
   }
 });
 

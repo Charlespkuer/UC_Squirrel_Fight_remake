@@ -1,6 +1,6 @@
 package com.ssdz.classic
 
-import android.content.ComponentCallbacks2
+import android.content.res.Configuration
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -111,6 +111,21 @@ class MainActivity : TauriActivity() {
     }
   }
 
+  /** 转屏 / 分屏 / 系统栏变化时 WebView 不一定会发 JS resize（iQOO 等 ROM 上实测会停用旧
+   *  viewport）。Activity 的 configChanges 已经声明了 orientation|screenSize|smallestScreenSize，
+   *  系统不会重建 Activity，所以必须在这里主动通知页面重新量一次。 */
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    try {
+      gameWebView?.evaluateJavascript(
+        "window.__ssdzRelayout && window.__ssdzRelayout()",
+        null,
+      )
+    } catch (_: Exception) {
+      // 页面还没建好；启动/回前台还会再补一次。
+    }
+  }
+
   override fun onDestroy() {
     lifecycleSeq++
     ui.removeCallbacksAndMessages(null)
@@ -122,14 +137,21 @@ class MainActivity : TauriActivity() {
     super.onDestroy()
   }
 
-  /** 系统内存吃紧时先让 WebView 释放自己的原生缓存；游戏 JS 的素材表/画布不在
-   *  `freeMemory()` 里，所以不会把正在播的战斗数据清掉。只在「运行中低内存」及更紧的
-   * 档位调用，避免刚进后台就打断最后那次存档 IPC。 */
+  /**
+   * **不要再调 `WebView.freeMemory()`**（2026-10 荣耀丢图）。
+   *
+   * 旧代码在 `level >= TRIM_MEMORY_RUNNING_LOW` 时调它，注释写的是“只释放原生缓存，
+   * 不动 JS 素材”。实际行为不是这样：`freeMemory()` 会把 WebView 已经解码的图片一起
+   * 丢掉。正常设备会按需重新解码，但荣耀 / MagicOS 的 WebView 在图片解码数据被回收后
+   * 可能不再恢复 —— 战斗里所有角色、特效、场景都来自图集，玩家看到的就是整屏只剩
+   * canvas 深色底 + 伤害飘字 + 悬浮奖励（`images/` 全部“消失”）。
+   *
+   * 而且 `TRIM_MEMORY_RUNNING_LOW` 这个门槛包含了 `TRIM_MEMORY_UI_HIDDEN` 和
+   * `BACKGROUND`：每次按 Home 都会走一次，等于主动把战斗图片清掉。内存交给 WebView
+   * 自己的 onTrimMemory 处理；页面侧只在回前台时补拉真正失败过的图片。
+   */
   override fun onTrimMemory(level: Int) {
     super.onTrimMemory(level)
-    if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-      try { gameWebView?.freeMemory() } catch (_: Exception) {}
-    }
   }
 
   /**

@@ -253,6 +253,9 @@
     let extMax = Array.isArray(raw)
       ? raw.reduce((m, e) => Math.max(m, Number(e && e.level) || 0), 0)
       : Math.max(0, Number(raw) || 0);
+    /* 勇者外观件显式带 `tier`（1~3，见 tower-ui 的 heroGearTierCount）：与词条星级同一口径，
+     * 头和拳套的画稿会 +0/+1/+2 帧。账号装备没有这个字段，只认 ext。 */
+    extMax = Math.max(extMax, Math.max(0, Math.min(3, Number(gear.tier) || 0)));
     extMax = Math.max(0, Math.min(3, extMax));
     const addr = (Number(gear.type) === 0 || Number(gear.type) === 1) && extMax > 0 ? extMax - 1 : 0;
     const frame = (orangeFrame || base) + addr;
@@ -386,15 +389,17 @@
     let worn = [];
     if (foe) worn = Array.isArray(foe.gears) ? foe.gears : [];
     else if (hero) {
-      /* 准备页传进来的是四格 id（`[0,0,0,0]`），爬塔中传的是 run.hero.appearance。
-       * 两种都归一成 `{id,type,ext}`，`dressParts` 只认这一种。 */
+      /* 准备页传进来的是四格 `[{id,tier}]`，爬塔中传的是 run.hero.appearance。
+       * 两种都归一成 `{id,type,ext,tier}`，`dressParts` / `wearInfo` 只认这一种
+       * （`tier` = 外观差分档，头 / 拳套的画稿会 +0/+1/+2 帧）。 */
       worn = (Array.isArray(hero.appearance) ? hero.appearance : []).map((raw) => {
         const item = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
         const id = Number(item.id);
         if (!(id > 0)) return null;
         const type = Number(item.type != null ? item.type : (State.gearPart ? State.gearPart(id) : NaN));
         if (!Number.isFinite(type)) return null;
-        return { id: id, type: type, ext: Array.isArray(item.ext) ? item.ext : [] };
+        return { id: id, type: type, ext: Array.isArray(item.ext) ? item.ext : [],
+          tier: Math.max(1, Math.min(3, Number(item.tier) || 1)) };
       }).filter(Boolean);
     } else { try { worn = (State.myGears ? State.myGears() : []).filter((g) => g && g.used); } catch (e) { worn = []; } }
     const byType = [];
@@ -773,7 +778,7 @@
     const picks = heroPickCount();
     const state = heroStatState();
     const pool = state ? Math.max(0, Number(state.pool) || 0) : 0;
-    const gears = heroGearSlots().filter((id) => Number(id) > 0).length;
+    const gears = heroGearSlots().filter((slot) => heroSlotId(slot) > 0).length;
     const ready = picks >= HERO_PICK_LIMIT && pool === 0;
     const values = {
       picks: picks + ' / ' + HERO_PICK_LIMIT,
@@ -2864,8 +2869,12 @@
     const rows = [0, 1, 2, 3].map((ty) => {
       const g = byType[ty];
       const lv = g ? Math.max(1, Number(g.ext) || 1) : 0;
+      const gearImg = g
+        ? ((([201, 202, 203, 204].includes(Number(g.id))) ? 'images/ui/icons/gear/gear-' + Number(g.id) + '-classic.svg'
+          : 'images/ui/icons/gear/gear-' + Number(g.id) + '.png'))
+        : '';
       return '<li class="' + (g ? '' : 'none') + '">' +
-        '<span class="sf-fd-icon gear" data-img="' + (g ? ('images/ui/icons/gear/gear-' + Number(g.id) + '.png') : '') + '"></span>' +
+        '<span class="sf-fd-icon gear" data-img="' + gearImg + '"></span>' +
         '<b>' + esc2(g ? gearName(g) : '（未穿戴）') + '</b>' +
         '<i>' + esc2(GEAR_PART_NAME[ty] || '') + (g ? ('　+' + lv) : '') + '</i></li>';
     }).join('');
@@ -2943,37 +2952,56 @@
   /* ---- 勇者模式：经典「更换装备」页的数据源 ----
    * 用户 2026-10-24 口径：勇者的换装页就是**玩家自己的更换装备页**（4673 第 3 帧），
    * 装备也用经典装备 UI；区别只有两点：
-   *   ① 列表是**全部 288 件**，按稀有度 → 套装 → 部位排，不是玩家的背包；
+   *   ① 列表是**全部外观件**（280 件；头 / 拳套再按差分档摊开，共 464 款），
+   *      按稀有度 → 套装 → 部位排，不是玩家的背包；
    *   ② 所有装备的主属性 / 附加属性 / 宝石一律 0 加成，只改变外观。
    * 这里把 `hero.gearList`（tower-ui 的 `heroGearCatalog()` 摊平结果）补成 `State.gearInst`
    * 那种完整对象，并把数值字段清零；列表 / 详情 / 纸娃娃都复用玩家页的绘制函数。 */
+  /** 勇者外观的四格：`[{id, tier}]`（空 = null）。`tier` 是外观差分 1~3，
+   *  也就是原版头 / 拳套画稿的强化档（见 tower-ui 的 `heroGearTierCount`）。 */
   function heroGearSlots() {
     const hero = Hero();
-    const slots = [0, 0, 0, 0];
+    const slots = [null, null, null, null];
     for (const raw of ((hero && hero.appearance) || [])) {
       const item = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
       const id = Number(item.id);
       if (!(id > 0)) continue;
       let type = Number.isFinite(Number(item.type)) ? Number(item.type) : NaN;
       if (!Number.isInteger(type) && window.State && State.gearPart) type = Number(State.gearPart(id));
-      if (Number.isInteger(type) && type >= 0 && type <= 3 && !slots[type]) slots[type] = id;
+      if (Number.isInteger(type) && type >= 0 && type <= 3 && !slots[type]) {
+        slots[type] = { id: id, tier: Math.max(1, Math.min(3, Number(item.tier) || 1)) };
+      }
     }
     return slots;
+  }
+  /** 一格 → 装备 id / 差分档（兼容老调用直接塞 id 的情况）。 */
+  function heroSlotId(slot) { return slot && typeof slot === 'object' ? Math.max(0, Number(slot.id) || 0) : Math.max(0, Number(slot) || 0); }
+  function heroSlotTier(slot) {
+    return slot && typeof slot === 'object' ? Math.max(1, Math.min(3, Number(slot.tier) || 1)) : 1;
+  }
+  function heroSlotKey(id, tier) { return 'hero:' + Number(id) + ':' + Math.max(1, Math.min(3, Number(tier) || 1)); }
+  /** 外观差分总档数：头 / 拳套按原版画稿分 1~3 档，其余部位只有 1 档。
+   *  档数由 tower-ui 的 `heroGearCatalog()` 算好放在 `gearList[].tiers` 里；
+   *  这里只做兜底（老数据没有 tiers 时按 1 档）。 */
+  function heroRowTiers(row) {
+    const list = Array.isArray(row && row.tiers) ? row.tiers.map(Number).filter((n) => n >= 1 && n <= 3) : [];
+    return list.length ? [...new Set(list)].sort((a, b) => a - b) : [1];
   }
   function heroGearRows() {
     const hero = Hero();
     if (!hero) return [];
     const slots = heroGearSlots();
-    const sig = slots.join(',');
+    const sig = slots.map((s) => (s ? s.id + ':' + s.tier : '0')).join(',');
     if (hero.__gearRowsSig === sig && Array.isArray(hero.__gearRows)) return hero.__gearRows;
-    const worn = new Set(slots.filter((id) => id > 0).map(Number));
+    const worn = new Set(slots.filter(Boolean).map((s) => heroSlotKey(s.id, s.tier)));
     const base = Array.isArray(hero.gearList) ? hero.gearList : [];
-    const rows = base.map((it) => {
+    const rows = [];
+    /* 每件装备按**差分档**摊成多格；衣服 / 鞋子只有 1 档（原版只有头 / 拳套的画稿分档）。 */
+    for (const it of base) {
       const id = Number(it && it.id);
       let inst = null;
       try { inst = (id > 0 && State.gearInst) ? State.gearInst(id) : null; } catch (e) { inst = null; }
       const g = Object.assign({}, inst || {}, it || {});
-      g.key = 'hero:' + id;
       g.id = id;
       g.type = Number(it && it.type != null ? it.type : g.type);
       if (!Number.isFinite(g.type) && State.gearPart) g.type = Number(State.gearPart(id));
@@ -2986,38 +3014,43 @@
       g.abilityVal = 0;
       g.ext = [];
       g.gem = null;
-      g.used = worn.has(id);
-      return g;
-    }).filter((g) => Number(g.id) > 0 && Number.isInteger(Number(g.type)));
-    hero.__gearRows = rows;
+      for (const tier of heroRowTiers(it)) {
+        const row = Object.assign({}, g, { tier: tier });
+        row.key = heroSlotKey(id, tier);
+        row.used = worn.has(row.key);
+        rows.push(row);
+      }
+    }
+    hero.__gearRows = rows.filter((g) => Number(g.id) > 0 && Number.isInteger(Number(g.type)));
     hero.__gearRowsSig = sig;
-    return rows;
+    return hero.__gearRows;
   }
-  /** 在勇者装备页里穿 / 脱一件外观；回调把最终外观交回 tower-ui（本局草稿或 run.hero）。 */
-  function heroGearEquip(id, equip) {
+  /** 在勇者装备页里穿 / 脱一件外观（`gear` = heroGearRows() 的一行，带 tier）；
+   *  回调把最终外观交回 tower-ui（本局草稿或 run.hero）。
+   *  ⚠ 换装层盖在状态页上、底页一直开着：立绘（`fillValues`）与右上角「出发准备」卡里的
+   *  **外观 X / 4**（`refreshHeroChrome`）必须当场重算，不能等切页 / `SfStatus.refresh()`。 */
+  function heroGearEquip(gear, equip) {
     const hero = Hero();
     if (!hero) return false;
-    const gearId = Number(id);
-    const rows = heroGearRows();
-    const target = rows.find((g) => Number(g.id) === gearId);
+    const target = (gear && typeof gear === 'object')
+      ? gear : heroGearRows().find((g) => String(g.key) === String(gear));
     if (!target) return false;
-    const slots = heroGearSlots();
+    const gearId = Number(target.id), gearTier = Math.max(1, Math.min(3, Number(target.tier) || 1));
     const type = Number(target.type);
-    if (!Number.isInteger(type) || type < 0 || type > 3) return false;
-    if (equip) slots[type] = gearId;
-    else if (Number(slots[type]) === gearId) slots[type] = 0;
+    if (!(gearId > 0) || !Number.isInteger(type) || type < 0 || type > 3) return false;
+    const rows = heroGearRows(), slots = heroGearSlots();
+    if (equip) slots[type] = { id: gearId, tier: gearTier };
+    else if (heroSlotId(slots[type]) === gearId && heroSlotTier(slots[type]) === gearTier) slots[type] = null;
     const next = [];
-    for (const slotId of slots) {
-      if (!(slotId > 0)) continue;
-      const g = rows.find((x) => Number(x.id) === Number(slotId));
-      if (g) next.push({ id: g.id, type: g.type, quality: g.quality, ext: [] });
+    for (const slot of slots) {
+      const sid = heroSlotId(slot);
+      if (!(sid > 0)) continue;
+      const tier = heroSlotTier(slot);
+      const g = rows.find((x) => Number(x.id) === sid && Number(x.tier) === tier) || rows.find((x) => Number(x.id) === sid);
+      if (g) next.push({ id: g.id, type: g.type, quality: g.quality, tier: tier, ext: [] });
     }
     const out = typeof hero.onEquip === 'function' ? hero.onEquip(next) : next;
     if (Array.isArray(out)) hero.appearance = out;
-    /* 换装层是盖在状态页上的，底页一直开着：立绘（`fillValues`）和右上角
-     * 「出发准备」卡里的**外观 X / 4**（`refreshHeroChrome`）都要当场重算。
-     * 以前这里只调 `fillValues`，外观那一格要等切页 / `SfStatus.refresh()` 才更新，
-     * 玩家看到的就是"刚穿上装备，外观还是 0 / 4"。 */
     try {
       if (current && current.view) {
         fillValues(current.view);
@@ -3035,10 +3068,13 @@
     const out = [null, null, null, null];
     if (heroView()) {
       const rows = heroGearRows();
-      heroGearSlots().forEach((id, type) => {
+      heroGearSlots().forEach((slot, type) => {
+        const id = heroSlotId(slot);
         if (!(id > 0)) return;
-        out[type] = rows.find((g) => Number(g.id) === Number(id)) ||
-          { id: Number(id), type: type, quality: 0, ext: [] };
+        const tier = heroSlotTier(slot);
+        out[type] = rows.find((g) => Number(g.id) === id && Number(g.tier) === tier) ||
+          rows.find((g) => Number(g.id) === id) ||
+          { id: id, type: type, quality: 0, tier: tier, ext: [] };
       });
       return out;
     }
@@ -3065,6 +3101,8 @@
     } catch (e) {}
     return String((g && g.name) || '') || fallback;
   }
+  /* 用户 2026-10-28 口径：勇者外观页**不标档位数字** —— 同一件装备的几张差分卡直接同名显示，
+   * 挑哪张看卡面画稿 / 立绘本身。档位仍存在 `tier` 里，绘制链路照旧按档取稿。 */
   /** 装备名折行：`t_1..t_6` 一行 4 个字，最多两行（框高 28 ≈ 两行 12 号字）。 */
   function gearNameLines(name) {
     const s = String(name == null ? '' : name);
@@ -3156,12 +3194,14 @@
     finally { gearColorLoading = null; }
     return gearColorTable;
   }
-  /** 装备实例的强化档：原版取 `max(addr1Lv,addr2Lv,addr3Lv)`（没强化按 1）。 */
+  /** 装备实例的强化档：原版取 `max(addr1Lv,addr2Lv,addr3Lv)`（没强化按 1）。
+   *  勇者外观件没有词条，用显式的 `tier`（1~3）表达同一个档位（见 tower-ui 的 heroGearTierCount）。 */
   function gearExtMaxLevel(gear) {
     let max = 0;
     for (const e of (Array.isArray(gear && gear.ext) ? gear.ext : [])) {
       max = Math.max(max, Number(e && e.level) || 0);
     }
+    max = Math.max(max, Number(gear && gear.tier) || 0);
     return Math.max(0, Math.min(3, max));
   }
   function gearColorId(gear) {
@@ -3360,7 +3400,7 @@
       gearArtIn(clip, g, GEAR_SLOT_ART, GEAR_SLOT_MID, GEAR_SLOT_MID, 0.85);
     }
     setTextByName(view, 't_count', heroView()
-      ? ('外观' + list.length + '件')
+      ? ('外观' + list.length + '款')
       : ('容量' + list.length + '/' + State.gearCapacity()));
     /* 顶部那句提示（4673 f3 深度 85，没有实例名）：玩家页保留原版「附加属性不叠加」，
      * 勇者页改成「只改变造型、全部 0 加成」—— 装备数值在这里被清零，不能再让玩家误会。
@@ -3488,6 +3528,7 @@
     setTextByName(view, 'base', hero ? '0 加成'
       : (String(g.attrName || '') + '+' + Math.max(0, Math.round(Number(g.abilityVal) || 0))));
     if (hero) {
+      /* 用户 2026-10-28 口径：勇者外观页不标档位数字（「附加属性」这一列照原版留空）。 */
       setTextByName(view, 'baseExtra', '');
       setTextByName(view, 'baseOther', '');
       setTextByName(view, 'baseOtherExtra', '');
@@ -3529,7 +3570,7 @@
         const g = currentGearByKey(key);
         if (!g) { backToList(); return; }
         if (hero) {
-          if (!heroGearEquip(g.id, !g.used)) {
+          if (!heroGearEquip(g, !g.used)) {
             if (window.UI && UI.toast) UI.toast('这件外观暂时不能更换。');
             return;
           }

@@ -281,9 +281,13 @@
     // 真·武器用的是素材库里的另一套图：images/ui/icons/weapon/weapon-true-<id>.png
     if (kind === 'weapon' && trueForm) return 'images/ui/icons/weapon/weapon-true-' + id + (locked ? '-locked' : '') + '.png';
     if(kind==='weapon' && +id===1 && !locked)return 'images/ui/icons/weapon/weapon-1-classic.png';
+    /* 狂战四件在经典界面固定用原版矢量画稿，不再贴现代正面 PNG。 */
+    if (kind === 'gear' && [201, 202, 203, 204].includes(+id)) {
+      return 'images/ui/icons/gear/gear-' + (+id) + '-classic.svg';
+    }
     /* 原版 Flash 有、H5 图集里没有的三件道具：82 从符号 2419 导出；
      * 79/90 用同风格手绘 SVG 占位（原版没有导出对应的物品图标）。 */
-    if (kind === 'prop' && [79, 82, 90].includes(+id)) return 'images/ui/icons/prop/prop-' + (+id) + '.svg';
+    if (kind === 'prop' && [10, 11, 12, 14, 79, 82, 90].includes(+id)) return 'images/ui/icons/prop/prop-' + (+id) + '.svg';
     return 'images/ui/icons/' + dir + '/' + kind + '-' + id + (locked ? '-locked' : '') + '.png';
   }
   /** 等级 11~15 = 真1~真5；显示成「真N」，10 级及以下显示 LVn。 */
@@ -958,18 +962,27 @@
     return (Array.isArray(hero.picks) ? hero.picks : []).map((it) => ({ kind: it.kind, id: Number(it.id) }));
   }
   function heroPickKey(it) { return it.kind + ':' + Number(it.id); }
+  /** 勇者外观的四格：`[{id, tier}]`（null = 没穿）。`tier` 是原版头 / 拳套的**差分档** 1~3
+   *  （见 tower-ui 的 heroGearTierCount），老数据没有这个字段时按 1 档。 */
   function heroAppearanceSlots(hero) {
-    const slots = [0, 0, 0, 0];
+    const slots = [null, null, null, null];
     for (const raw of (Array.isArray(hero.appearance) ? hero.appearance : [])) {
       const item = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
       const id = Number(item.id);
       if (!(id > 0)) continue;
       const type = Number.isFinite(Number(item.type)) ? Number(item.type)
         : (State.gearPart ? State.gearPart(id) : (State.gearInst(id) || {}).type);
-      if (Number.isInteger(type) && type >= 0 && type <= 3 && !slots[type]) slots[type] = id;
+      if (Number.isInteger(type) && type >= 0 && type <= 3 && !slots[type]) {
+        slots[type] = { id: id, tier: Math.max(1, Math.min(3, Number(item.tier) || 1)) };
+      }
     }
     return slots;
   }
+  function heroSlotId(slot) { return slot && typeof slot === 'object' ? Math.max(0, Number(slot.id) || 0) : Math.max(0, Number(slot) || 0); }
+  function heroSlotTier(slot) {
+    return slot && typeof slot === 'object' ? Math.max(1, Math.min(3, Number(slot.tier) || 1)) : 1;
+  }
+  /* 用户 2026-10-28 口径：外观页不标档位数字，同一件装备的几张差分卡直接同名显示。 */
   function heroGearName(id) {
     const n = Number(id) || 0;
     if (!(n > 0)) return '未穿戴';
@@ -982,12 +995,13 @@
       const item = (raw && typeof raw === 'object') ? Object.assign({}, raw) : { id: Number(raw) };
       const id = Number(item.id);
       if (!(id > 0)) continue;
-      /* 运行中的外观带 type / ext / orange，保留它们（染色与强化档要影响造型）；
-       * 准备页草稿只有 id 时才补一份 gearInst。 */
+      /* 运行中的外观带 type / ext / tier / orange，保留它们（染色与**差分档**要影响造型）；
+       * 准备页草稿只有 id 时才补一份 gearInst —— 补的时候也要把 tier 带上，
+       * 否则换第 2 / 3 档之后立绘还是基础稿。 */
       if (Number.isFinite(Number(item.type)) && item.type != null) { out.push(item); continue; }
       try {
         const inst = State.gearInst ? State.gearInst(id) : null;
-        out.push(inst || item);
+        out.push(inst ? Object.assign({}, inst, { tier: Math.max(1, Math.min(3, Number(item.tier) || 1)) }) : item);
       } catch (e) { out.push(item); }
     }
     return out;
@@ -1108,8 +1122,8 @@
     }
     return p;
   }
-  /** 勇者外观的完整装备池：优先用 tower-ui 摊平的 228 件（按品质 → 套装 → 部位），
-   *  没有传时从装备字典现场拼一份。这里**不读取账号拥有**，也不接任何属性。 */
+  /** 勇者外观的完整装备池：优先用 tower-ui 摊平的全量清单（按品质 → 套装 → 部位，
+   *  每行带 `tiers` = 这一件的差分档数组），没有传时从装备字典现场拼一份。 */
   function heroGearListOf(hero) {
     if (hero && Array.isArray(hero.gearList) && hero.gearList.length) return hero.gearList;
     const rows = [];
@@ -1124,13 +1138,13 @@
     rows.sort((a, b) => (b.quality - a.quality) || (a.setId - b.setId) || (a.type - b.type) || (a.id - b.id));
     return rows;
   }
-  /** 勇者外观页的装备图：黑/橙装有一部分没有导出 PNG，缺图时用部位字占位，
-   *  不让整格变成一块空白；不影响账号装备页的 gearImg。 */
+  /** 勇者外观页的装备图：同一条现代贴图规则 —— 橙装 / 黑装沿用同名紫装的图；
+   *  现代素材里没有同款可借（怒战 / 深海 / 机器猫 / 圣熊 / 凤凰）就**不显示图**。 */
   function heroGearPic(g) {
-    const part = ['头', '拳', '衣', '鞋'][Number(g && g.type)] || '装';
-    return '<i class="hero-gear-glyph" aria-hidden="true">' + part + '</i>' +
-      '<img alt="" src="images/ui/icons/gear/gear-' + Number(g && g.id) + '.png" ' +
-      'onerror="this.style.display=\'none\';this.parentNode.classList.add(\'missing\')">';
+    const iconId = gearIconId(g);
+    if (!(iconId > 0)) return '';
+    return '<img alt="" src="images/ui/icons/gear/gear-' + iconId + '.png" ' +
+      'onerror="this.style.display=\'none\'">';
   }
   /** 只刷新勇者页上的立绘与「外观装备 N 件」计数（换装弹窗开着时不重画整页）。 */
   function repaintHeroStatusAppearance(hero) {
@@ -1151,43 +1165,70 @@
       if (dd) dd.textContent = count + ' 件';
     });
   }
+  /** 外观件的档位键：装备 id + 差分档。 */
+  function heroGearKey(id, tier) {
+    return Number(id) + ':' + Math.max(1, Math.min(3, Number(tier) || 1));
+  }
   /* 现代勇者的「外观装备」页：直接套用状态 → 更换装备的 `gear-modal`
-   * （四部位纸娃娃 + 每页 6 件 + 翻页），数据源换成全部 228 件外观。
+   * （四部位纸娃娃 + 每页 6 件 + 翻页），数据源换成全部外观件。
+   * 头 / 拳套按**差分档**摊成 2~3 张卡（原版画稿随词条档变化，见 tower-ui 的 heroGearTierCount），
+   * 每张卡都能单独选 —— 不再只给「这套装备的默认那一档」。
    * 没有详情 / 套装收益 / 属性：点一下穿上，再点一下脱下，全部 0 加成。 */
   function openHeroGears(pg, context) {
     const hero = context && context.hero;
     if (!hero) return null;
-    const list = heroGearListOf(hero);
-    if (!list.length) { notice('装备字典还没有加载。'); return null; }
+    const base = heroGearListOf(hero);
+    if (!base.length) { notice('装备字典还没有加载。'); return null; }
+    const list = [];
+    for (const g of base) {
+      const tiers = (Array.isArray(g.tiers) ? g.tiers : [1]).map(Number).filter((n) => n >= 1 && n <= 3);
+      for (const tier of (tiers.length ? [...new Set(tiers)] : [1])) list.push(Object.assign({}, g, { tier: tier }));
+    }
     const total = Math.max(1, Math.ceil(list.length / 6));
     const page = Math.max(0, Math.min(total - 1, Number(pg) || 0));
     const slotNames = ['头部', '手部', '身体', '脚部'];
-    const byId = new Map(list.map((g) => [Number(g.id), g]));
+    const byKey = new Map(list.map((g) => [heroGearKey(g.id, g.tier), g]));
     const slots = heroAppearanceSlots(hero);
+    const slotGear = (part) => {
+      const slot = slots[part];
+      const id = heroSlotId(slot);
+      if (!(id > 0)) return null;
+      return byKey.get(heroGearKey(id, heroSlotTier(slot))) || byKey.get(heroGearKey(id, 1)) || null;
+    };
     const slotLabel = (g, fallback) => g
       ? '<span class="gear-slot-name q' + Number(g.quality || 0) + '">' + esc(g.name) + '</span>'
       : '<span class="gear-empty">' + fallback + '</span>';
     const slotCell = (part) => {
-      const id = Number(slots[part]) || 0, g = id ? byId.get(id) : null;
+      const g = slotGear(part);
       return '<button class="catalog-cell" data-hero-gear-slot="' + part + '"' + (g ? '' : ' disabled') +
         ' aria-label="' + slotNames[part] + '：' + (g ? esc(g.name) : '未穿戴') + '">' +
         '<span class="item-icon">' + (g ? heroGearPic(g) : '') + '</span>' + slotLabel(g, slotNames[part]) + '</button>';
     };
+    const cardUsed = (g) => {
+      const slot = slots[Number(g.type)];
+      return heroSlotId(slot) === Number(g.id) && heroSlotTier(slot) === Number(g.tier);
+    };
     const card = (g) => {
-      const id = Number(g.id), used = Number(slots[Number(g.type)]) === id;
-      return '<button class="catalog-cell' + (used ? ' selected' : '') + '" data-hero-gear-card="' + id + '"' +
+      const used = cardUsed(g);
+      const title = g.name + (g.setLabel ? ' · ' + g.setLabel : '') +
+        ' · ' + (['普通', '优秀', '杰出', '卓越', '传说', '黑色'][g.quality] || '') + '装 · ' +
+        (['头部', '手部', '身体', '脚部'][g.type] || '') +
+        (Number(g.tier) > 1 ? ' · 外观差分 ' + Number(g.tier) : '') + ' · 仅外观';
+      return '<button class="catalog-cell' + (used ? ' selected' : '') + '" data-hero-gear-card="' + Number(g.id) + '"' +
+        ' data-hero-gear-tier="' + Number(g.tier) + '"' +
         ' data-gear-type="' + Number(g.type) + '" aria-pressed="' + (used ? 'true' : 'false') + '"' +
-        ' title="' + esc(g.name + (g.setLabel ? ' · ' + g.setLabel : '') + ' · ' + (['普通', '优秀', '杰出', '卓越', '传说', '黑色'][g.quality] || '') + '装 · ' + (['头部', '手部', '身体', '脚部'][g.type] || '') + ' · 仅外观') + '">' +
+        ' title="' + esc(title) + '">' +
         '<span class="item-icon">' + heroGearPic(g) + (used ? '<span class="equipped-check">✓</span>' : '') + '</span>' +
         '<span class="item-caption q' + Number(g.quality || 0) + '">' + esc(g.name) + '</span></button>';
     };
     const shown = list.slice(page * 6, page * 6 + 6);
-    const content = '<p class="gear-note">全部装备均可选；每套四件齐全，仅改变造型，所有属性 0 加成。</p>' +
+    const content = '<p class="gear-note">全部装备均可选；每套四件齐全，仅改变造型，所有属性 0 加成。' +
+      '每件装备只列一张卡，点一下穿上，再点一下脱下。</p>' +
       '<div class="gear-layout"><div class="gear-slots">' + [0, 1, 2, 3].map(slotCell).join('') + '</div>' +
       '<div class="gear-list">' + shown.map(card).join('') +
         Array.from({ length: 6 - shown.length }, () => '<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('') +
       '</div></div>' +
-      '<span class="gear-capacity">共 ' + list.length + ' 件　' + (page + 1) + '/' + total + '</span>' +
+      '<span class="gear-capacity">共 ' + list.length + ' 款　' + (page + 1) + '/' + total + '</span>' +
       (page > 0 ? '<div class="page-arrow prev">' + btn('‹', 'prev', 'arrow') + '</div>' : '') +
       (page < total - 1 ? '<div class="page-arrow">' + btn('›', 'next', 'arrow') + '</div>' : '');
     const m = modal('外观装备', content, [{ label: '返回', cls: 'gold', run: () => { if (context.redraw) context.redraw(); } }]);
@@ -1202,8 +1243,8 @@
       $$('[data-hero-gear-slot]', slotsHost).forEach((b) => {
         b.onclick = () => {
           const part = Number(b.dataset.heroGearSlot);
-          if (!(Number(slots[part]) > 0)) return;
-          slots[part] = 0;
+          if (!(heroSlotId(slots[part]) > 0)) return;
+          slots[part] = null;
           applySlots();
         };
       });
@@ -1211,8 +1252,9 @@
     const sync = () => {
       paintSlots();
       $$('[data-hero-gear-card]', m.element).forEach((b) => {
-        const id = Number(b.dataset.heroGearCard), type = Number(b.dataset.gearType);
-        const used = Number(slots[type]) === id;
+        const id = Number(b.dataset.heroGearCard), tier = Number(b.dataset.heroGearTier) || 1;
+        const used = heroSlotId(slots[Number(b.dataset.gearType)]) === id &&
+          heroSlotTier(slots[Number(b.dataset.gearType)]) === tier;
         b.classList.toggle('selected', used);
         b.setAttribute('aria-pressed', used ? 'true' : 'false');
         const icon = $('.item-icon', b);
@@ -1223,7 +1265,7 @@
       });
     };
     const applySlots = () => {
-      const next = slots.slice();
+      const next = slots.map((s) => (s ? { id: s.id, tier: s.tier } : null));
       let out;
       if (typeof hero.onEquip === 'function') out = hero.onEquip(next);
       else if (hero.mode === 'setup') { hero.appearance = next.slice(); out = { ok: true, appearance: next.slice() }; }
@@ -1235,7 +1277,10 @@
         sync();
         return;
       }
-      if (out.appearance) hero.appearance = out.appearance;
+      /* 回调可能回 `{ok, appearance}`（tower-ui 的本局勇者），也可能直接回数组
+       * （准备页草稿用的绘制对象 `[{id,type,tier}]`）。两种都接住，别把档位丢掉。 */
+      if (Array.isArray(out)) hero.appearance = out;
+      else if (out.appearance) hero.appearance = out.appearance;
       else if (hero.mode === 'setup') hero.appearance = next.slice();
       sync();
       repaintHeroStatusAppearance(hero);
@@ -1244,8 +1289,11 @@
     $$('[data-hero-gear-card]', m.element).forEach((b) => {
       b.onclick = () => {
         const id = Number(b.dataset.heroGearCard), type = Number(b.dataset.gearType);
+        const tier = Math.max(1, Math.min(3, Number(b.dataset.heroGearTier) || 1));
         if (!(id > 0) || !Number.isInteger(type)) return;
-        slots[type] = Number(slots[type]) === id ? 0 : id;
+        const nowId = heroSlotId(slots[type]), nowTier = heroSlotTier(slots[type]);
+        /* 点同一格 = 脱下；点同一件的**另一档** = 换差分，不脱。 */
+        slots[type] = nowId === id && nowTier === tier ? null : { id: id, tier: tier };
         applySlots();
       };
     });
@@ -2946,9 +2994,74 @@
   /* ============================================================
    * 【UC12】装备：列表/详情/出售/镶嵌/融合入口
    * ============================================================ */
+  /* ---------- 现代装备贴图（只用现代模式自带的 PNG，不借经典素材） ----------
+   * `images/ui/icons/gear/` 里只有 128 件：id 1~124 与 201~204。橙装 q4 / 黑装上位没有独立贴图，
+   * 以前 `onerror` 只是把图藏起来 —— 详情 / 列表里就是一块空白（用户 2026-10-28 报的
+   * 「所有橙色装备的详情界面中贴图均缺失」）。
+   * 用户口径：**没有独立贴图就沿用紫装（同名同部位、品质更低的那一件）的贴图**；
+   * 连低品质也没有（怒战 / 深海 / 机器猫 / 圣熊 / 凤凰）就用部位字占位 —— 不借经典画稿。 */
+  const GEAR_ICON_RANGES = Object.freeze([[1, 124], [201, 204]]);
+  function hasGearIcon(id) {
+    const n = Number(id) || 0;
+    return n > 0 && GEAR_ICON_RANGES.some(([a, b]) => n >= a && n <= b);
+  }
+  let gearIconIndex = null;
+  let gearBaseIndex = null;
+  /** `GEAR_BASE` 的 id → 行（只建一次）。`gearIconId` 允许只传 `{id}`，名字/部位从这里补。 */
+  function gearBaseRow(id) {
+    if (!gearBaseIndex) {
+      gearBaseIndex = new Map();
+      const rows = (window.GData && Array.isArray(GData.GEAR_BASE)) ? GData.GEAR_BASE : [];
+      for (const row of rows) gearBaseIndex.set(Number(row && row[0]), row);
+    }
+    return gearBaseIndex.get(Number(id)) || null;
+  }
+  /** 同名同部位里**有现代贴图**的最高品质那一件（对橙装 / 黑装通常就是它的紫装）。 */
+  function gearIconIndexMap() {
+    if (gearIconIndex) return gearIconIndex;
+    const map = new Map();
+    const rows = (window.GData && Array.isArray(GData.GEAR_BASE)) ? GData.GEAR_BASE : [];
+    for (const row of rows) {
+      const id = Number(row && row[0]);
+      if (!hasGearIcon(id)) continue;
+      const key = String(row[4] || '') + '|' + Number(row[3]);
+      const q = Number(row[2]) || 0;
+      const prev = map.get(key);
+      if (!prev || q > prev.q) map.set(key, { id: id, q: q });
+    }
+    gearIconIndex = map;
+    return map;
+  }
+  /** 这件装备实际该显示哪张现代贴图：自己有图就用自己，否则沿用同名同部位的低品质版本。
+   *  返回 0 = 现代素材里完全没有同款（调用方直接留空 / 当它不存在）。 */
+  function gearIconId(g) {
+    const id = Number(g && g.id) || 0;
+    if (hasGearIcon(id)) return id;
+    let name = String((g && g.name) || '');
+    let type = Number(g && g.type);
+    if (!name || !Number.isFinite(type)) {
+      const row = gearBaseRow(id);
+      if (row) {
+        if (!name) name = String(row[4] || '');
+        if (!Number.isFinite(type)) type = Number(row[3]);
+      }
+    }
+    const hit = gearIconIndexMap().get(name + '|' + type);
+    return hit ? hit.id : 0;
+  }
+  /** 这件装备在现代界面里有没有可显示的贴图（自己有 / 更低品质的同款有）。
+   *  没有的（怒战 / 深海 / 机器猫 / 圣熊 / 凤凰）按用户 2026-10-28 口径**当作不存在**：
+   *  不进背包列表 / 出售 / 融合，也不参与融合产物。 */
+  function gearHasArt(g) {
+    return gearIconId(g) > 0;
+  }
+  /** 装备图标（列表 / 详情 / 出售 / 融合共用）：没有可用的现代贴图时**留空**（用户 2026-10-28
+   *  口径：不要部位字占位，没有同款图就不显示图）。 */
   function gearImg(g) {
-    /* 缺图标（黑装还有一部分 id 没有导出 PNG）时隐藏破图标记，卡片底色与名字仍可见。 */
-    return '<img alt="" src="images/ui/icons/gear/gear-'+g.id+'.png" onerror="this.style.visibility=\'hidden\'">';
+    const iconId = gearIconId(g);
+    if (!(iconId > 0)) return '';
+    return '<img alt="" src="images/ui/icons/gear/gear-' + iconId + '.png" ' +
+      'onerror="this.style.visibility=\'hidden\'">';
   }
   /** 装备详情里的「套装收益」小节：套装名 + 已穿件数 + 两档阈值，**逐档标出哪一条已经生效**。
    *  家族按**装备名去掉部位后缀**算（忍者护额/拳套/服/鞋 = 忍者一套），同名跨品质都算同一套；
@@ -2992,8 +3105,10 @@
     gearPage=typeof pg==='number'?pg:0;
     openStatus();
     /* 列表顺序：穿着中 > 获得顺序（规则在 state.js 的 gearsInDisplayOrder）。
-     * 仍然是**每页 6 件 + 翻页**、格子固定尺寸（用户口径 2026-10：不要自适应格子大小）。 */
-    const gears=State.gearsInDisplayOrder(),total=Math.max(1,Math.ceil(gears.length/6));gearPage=Math.min(gearPage,total-1);
+     * 仍然是**每页 6 件 + 翻页**、格子固定尺寸（用户口径 2026-10：不要自适应格子大小）。
+     * 没有现代贴图的装备（怒战 / 深海 / 机器猫 / 圣熊 / 凤凰）按用户 2026-10-28 口径
+     * **当作不存在**：不进列表（旧档 / 调试塞进来的也一样看不见）。 */
+    const gears=State.gearsInDisplayOrder().filter(gearHasArt),total=Math.max(1,Math.ceil(gears.length/6));gearPage=Math.min(gearPage,total-1);
     /* 空的部位格写部位名（原版那一页空格子里也是"头部/身体/手部/脚部"），
      * 装上之后就换成**装备名 + 品质色**（原版 `setEquipTextColor` 按 quality 改字色）。 */
     const slots=['头部','手部','身体','脚部'];
@@ -3022,7 +3137,10 @@
   const QUALITY_LABEL = ['普通', '优秀', '杰出', '卓越', '传说', '黑色'];
   function openGearSell(pg) {
     gearSellPage = Math.max(0, typeof pg === 'number' ? pg : 0);
-    const gears = State.myGears().slice().reverse(), S = State.state();
+    /* 没有现代贴图的装备「当作不存在」（见 gearHasArt）。`typeof` 守卫是给历史用例的：
+     * test-fixes-round / test-state 会把本函数单独抠进 vm 跑，那里没有 classic-ui 作用域。 */
+    const hasArt = (g) => (typeof gearHasArt === 'function' ? gearHasArt(g) : true);
+    const gears = State.myGears().slice().reverse().filter(hasArt), S = State.state();
     const total = Math.max(1, Math.ceil(gears.length / GEAR_SELL_PER));
     gearSellPage = Math.min(gearSellPage, total - 1);
     const shown = gears.slice(gearSellPage * GEAR_SELL_PER, gearSellPage * GEAR_SELL_PER + GEAR_SELL_PER);
@@ -3067,6 +3185,9 @@
   }
   function openGear(key) {
     const g=State.myGears().find(x=>x.key===key);if(!g)return;
+    /* 没有现代贴图的装备「当作不存在」：这类 key 正常不会出现在任何列表里，
+     * 这里只是防御（外部入口 / 旧档残留）。`typeof` 守卫同 openGearSell。 */
+    if (typeof gearHasArt === 'function' && !gearHasArt(g)) return;
     const socketable=State.canSocketGem(g);
     const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+State.gemPercent(g.gem.id-100)+'%，附加 +'+(g.gem.ext)+'%）':'';
     /* 宝石键的文案不带「（5金）」了（用户口径 2026-10：四个键要排在一行，标签越短越好排），
@@ -3110,7 +3231,8 @@
    * 【UC13】消息 / 复仇 / 好友 / 聊天
    * ============================================================ */
   function canRevenge(r) {
-    return !!r && r.winner !== 0 && r.kind !== 'revenge' && REVENGE_EXCLUDED_KINDS.indexOf(r.kind) < 0;
+    /* 原版复仇只来自“被抢方当天收到的战报”；单机没有被动战报，主动挑战失败不产生复仇。 */
+    return false;
   }
   function openMessages(tab,pg) {
     tab=typeof tab==='string'?tab:'messages';pg=pg||0;
@@ -4341,7 +4463,7 @@
         resShort(resNow))+
       sysBtn('全面屏','fullscreen','gold'+(st.fullscreen?' on':''),'当前：'+(st.fullscreen?'开':'关')+'。开启后画面铺满整个窗口（不留黑边，窗口比例差得多时会有轻微拉伸），同时尝试进入系统全屏；按 Esc 可退出系统全屏。',
         st.fullscreen?'开':'关')+
-      sysBtn('状态栏','statusbar','gold'+(st.hideStatusBar !== false?' on':''),'当前：'+(st.hideStatusBar !== false?'隐藏':'显示')+'。安卓沉浸模式：隐藏手机顶部状态栏，游戏画面更完整；桌面/网页没有系统状态栏，这个开关无副作用。',
+      sysBtn('状态栏','statusbar','gold'+(st.hideStatusBar !== false?' on':''),'当前：'+(st.hideStatusBar !== false?'隐藏':'显示')+'。安卓沉浸模式：隐藏手机顶部状态栏和底部/侧边导航栏，游戏画面更完整（边缘滑动仍可临时唤出）；关闭后只恢复顶部状态栏，导航栏仍保持沉浸，避免压住底部按钮。桌面/网页没有系统栏，这个开关无副作用。',
         st.hideStatusBar !== false?'隐藏':'显示')+
       sysBtn('后台运行','background-run','gold'+(bgRun?' on':''), bgTitle, bgRun?'开':'关')+
       '</div>'+
@@ -5313,6 +5435,10 @@
        * 给"查看别人"那一页用：它要按对手自己的武器/技能清单把格子画出来
        * （原版 `showWeaponSkills` 只是把数据源换成 `friendInfo`，见 ui-status.js）。 */
       catalogItems: allItems,
+      /* 装备贴图：橙装 / 黑装没有独立 PNG，由 gearIconId 沿用同名紫装的图（现代素材内）；
+       * 同款图也没有的装备（怒战 / 深海 / 机器猫 / 圣熊 / 凤凰）`gearHasArt` 为 false，
+       * 现代界面把它们**当作不存在**（列表 / 出售 / 融合都不出现）。 */
+      gearImg, gearIconId, gearHasArt, gearIconRanges: GEAR_ICON_RANGES,
       /* 「查看对手」那一页（`js/ssfight/ui-challenge.js` 的好友动作菜单）要用字典里的名字： */
       weaponName:(id)=>{const v=weaponsMap.getValue(Number(id));return v?v.name:('武器'+id);},
       skillName:(id)=>{const v=skillsMap.getValue(Number(id));return v?v.name:('技能'+id);},

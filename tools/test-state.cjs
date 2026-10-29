@@ -1682,12 +1682,90 @@ test('真化概率类效果按原表百分数结算（不是 100 倍，也不是
 
 const fighter = (extra) => Object.assign({ name: '松鼠', level: 1, power: 10, agility: 10, speed: 10, hp: 100, weapons: [], skills: [] }, extra);
 
+test('吸铁大法无视装死：直接打死 1 血带装死的目标，通灵召唤仍触发装死', () => {
+  /* 用户 2026-10-29 口径：吸铁大法（18）的伤害无视装死，技能介绍不写。 */
+  const g = game(); g.math.random = () => 0.99;
+  const hit = (skill) => {
+    const me = fighter({ hp: 999, maxHp: 999, power: 100, agility: 100, speed: 100,
+      skills: [{ id: skill, level: 1 }], pattern: ['skill'] });
+    const foe = fighter({ hp: 1, maxHp: 1, power: 1, agility: 0, speed: 0,
+      skills: [{ id: 6, level: 1 }] });
+    return g.Sim.simulate(me, foe).rounds[0];
+  };
+  const iron = hit(18);
+  assert.equal(iron.action, 'skill'); assert.equal(iron.id, 18);
+  assert.equal(iron.fakeDie, undefined, '吸铁大法不能让装死接管致死伤害');
+  assert.equal(iron.hpAfter[1], 0, '吸铁大法应直接把装死目标打到 0 血');
+  const summon = hit(15);
+  assert.equal(summon.action, 'skill'); assert.equal(summon.id, 15);
+  assert.equal(summon.fakeDie, true, '对照：通灵召唤仍应触发装死');
+  assert.equal(summon.hpAfter[1], 1, '对照：装死保留 1 血');
+});
+
 test('反击后的血量快照与胜负一致，不遗漏最后一击', () => {
   const g = game(); g.math.random = () => 0.2;
   const result = g.Sim.simulate(fighter({ hp: 5 }), fighter({ power: 100 }));
   assert.equal(result.rounds[0].counterDmg > 0, true);
   assert.equal(result.rounds[0].hpAfter[0], 0);
   assert.equal(result.rounds.length, 1); assert.equal(result.winner, 1);
+});
+
+test('反击不可闪避，也不会被绝对防御 / 荆棘弹回反击者', () => {
+  /* 用户 2026-10-29 口径：反击是必中的直接回应；以前复用 applyDamage 时，
+   * 原出手方的绝对防御触发后会把反击伤害弹回**反击者**，看起来就是「我反击、掉血的是我」。
+   * 这里用固定随机流跑真战斗，靠 `counterBlocked` 标记抓「反击被挡下」的回合：
+   * 被挡下时只允许 0 伤害 + 0 反弹，反击者除主攻击伤害外不能再掉血。 */
+  const g = game(), Sim = g.Sim;
+  let blocked = 0, counters = 0;
+  for (let t = 0; t < 400 && blocked < 3; t++) {
+    const me = fighter({ hp: 5000, maxHp: 5000, power: 80, agility: 30, speed: 50,
+      skills: [{ id: 16, level: 15 }] });          // 绝对防御，专门等反击撞上来
+    const foe = fighter({ hp: 5000, maxHp: 5000, power: 80, agility: 30, speed: 60,
+      weapons: [{ id: 3, level: 10 }] });
+    const res = Sim.simulate(me, foe);
+    let prev = [me.hp, foe.hp];
+    for (const r of res.rounds) {
+      if (r.counterDmg != null || r.counterBlocked) {
+        counters++;
+        assert.ok(!r.counterDodge, '反击不能被闪避');
+        if (r.counterBlocked) {
+          blocked++;
+          const def = 1 - r.attacker;
+          const selfLoss = (prev[def] - r.hpAfter[def]) - (r.dmg || 0);
+          assert.ok(selfLoss <= 0, '反击被挡下时反击者不能再掉血，实测多掉 ' + selfLoss);
+          assert.equal(r.counterDmg || 0, 0, '被绝对防御挡下的反击不能反弹伤害');
+          assert.ok(!r.counterRebound, '不能再把反弹伤害记到反击者身上');
+        }
+      }
+      if (r.hpAfter) prev = r.hpAfter;
+    }
+  }
+  assert.ok(counters > 0, '样本里应当出现反击');
+  assert.ok(blocked > 0, '样本里应当出现「反击撞上绝对防御」的回合');
+});
+
+test('绝对防御触发后，举盾方仍按同样的概率反击', () => {
+  /* 用户 2026-10-29 口径：绝对防御挡下攻击后，用盾的一方**继续**按普通反击概率
+   * （25%，熊猫 45%）反击；以前 `reboundHurt` 直接把这当成「已经反伤过」而跳过。
+   * 这里用固定随机流跑真战斗，统计「绝对防御触发」与「同一回合真的反击」的次数；
+   * 25% 概率用 400 场样本做宽松区间，避免偶发波动。 */
+  const g = game(), Sim = g.Sim;
+  let blocked = 0, countered = 0;
+  for (let t = 0; t < 400; t++) {
+    const me = fighter({ hp: 4000, maxHp: 4000, power: 90, agility: 60, speed: 60,
+      skills: [{ id: 16, level: 10 }] });
+    const foe = fighter({ hp: 4000, maxHp: 4000, power: 70, agility: 50, speed: 65,
+      weapons: [{ id: 3, level: 8 }] });
+    for (const r of Sim.simulate(me, foe).rounds) {
+      if (!r.jueDui) continue;
+      blocked++;
+      if (r.counterDmg != null) countered++;
+    }
+  }
+  assert.ok(blocked > 40, '样本里应当有足够多的绝对防御触发，实测 ' + blocked);
+  assert.ok(countered > 0, '绝对防御触发后应当能反击');
+  const rate = countered / blocked;
+  assert.ok(rate > 0.12 && rate < 0.40, '反击概率应接近普通 25%，实测 ' + Math.round(rate * 100) + '%');
 });
 
 test('反击口径：只有近战武器与普攻能触发反击（远程 / 技能 / 已反伤都不行）', () => {
@@ -2475,15 +2553,18 @@ test('村庄建筑：祭坛当日状态、神迹属性点、幻兽升级/孵化/
   assert.ok(foes.every((p) => p.level >= 1 && p.name), '随机敌人幻兽有等级和名字');
 });
 
-/* 幻兽加血不能把「只有 hp、没有 maxHp」的 AI 压成 1+bonus 的低血量：
- * 那会让 Sim 把敌人当前血量夹到几十点，经典血条从满血一帧掉到 0。 */
-test('幻兽加血：没有 maxHp 的对手按当前满血加上限，不能被压成几十点', () => {
+/* 回光术（skill 4）的效果是「装死后按上限 X% 回血」，不是开战加生命上限：
+ * 以前 petBattleBonus 按 grade×8 + level×4 预加 maxHp，玩家看到的就是开战直接加上限，
+ * 带几只还叠几份（用户 2026-10-29 反馈）。现在这类触发型技能不预加血量。 */
+test('回光术不在开战加生命上限，也不会带多只叠加', () => {
   const g = game(), S = g.State;
-  const target = { power: 10, agility: 10, speed: 10, hp: 700 };
-  S.applyPetBonuses(target, [{ grade: 4, level: 10, skillId: 4 }]);
-  const bonusHp = 4 * 8 + 10 * 4;   // petBattleBonus：grade×8 + level×4
-  assert.equal(target.maxHp, 700 + bonusHp, '上限 = 原满血 + 幻兽加血');
-  assert.equal(target.hp, 700 + bonusHp, '当前血量也要一起加上');
+  const target = { power: 10, agility: 10, speed: 10, hp: 700, maxHp: 700 };
+  const healPet = { grade: 4, level: 10, skillId: 4 };
+  const bonus = S.petBattleBonus([healPet, healPet, healPet]);
+  assert.equal(bonus.hp, 0, '回光术不能给开战生命上限加成');
+  S.applyPetBonuses(target, [healPet, healPet, healPet]);
+  assert.equal(target.maxHp, 700, '开战上限保持原值');
+  assert.equal(target.hp, 700, '当前血量也不因回光术预加');
   const foe = S.genAI(70, '', { levelJitter: 0 });
   assert.equal(foe.maxHp, foe.hp, '随机对手生成时就要带满血上限');
 });

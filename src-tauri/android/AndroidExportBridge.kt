@@ -71,8 +71,12 @@ class AndroidExportBridge(
     fun saveAutoBackup(content: String): String =
         runSave(AUTO_FILE_NAME, content, replace = true)
 
-    /** 安卓沉浸模式：设置里的「状态栏」开关。隐藏/显示顶部状态栏，不碰底部导航栏。
-     *  JS 侧：`window.SSDZAndroid.setSystemBarsHidden('1'|'0')`。 */
+    /** 安卓沉浸模式：设置里的「状态栏」开关。隐藏/显示顶部状态栏与底部导航栏。
+     *  JS 侧：`window.SSDZAndroid.setSystemBarsHidden('1'|'0')`。
+     *
+     *  ⚠ 导航栏也必须一起收：`enableEdgeToEdge()` 下 WebView 铺到整块窗口，只藏状态栏时
+     *  三键导航会在底部/侧边盖住游戏画面（iQOO Z5 用户实测：按钮被导航栏切掉、整页像错位）。
+     *  沉浸式 sticky 下从屏幕边缘滑动仍可临时唤出导航栏，不影响返回手势。 */
     @JavascriptInterface
     fun setSystemBarsHidden(hidden: String): String {
         val hide = hidden == "1" || hidden.equals("true", ignoreCase = true)
@@ -80,12 +84,18 @@ class AndroidExportBridge(
             try {
                 val window = activity.window
                 val controller = WindowCompat.getInsetsController(window, window.decorView)
+                val bars = WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars()
                 if (hide) {
-                    controller.hide(WindowInsetsCompat.Type.statusBars())
+                    controller.hide(bars)
                     controller.systemBarsBehavior =
                         WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 } else {
+                    /* 只恢复状态栏；导航栏始终沉浸。否则三键导航会重新盖住游戏底部，
+                     * 用户关掉「隐藏状态栏」后就点不到最下面一排按钮。 */
                     controller.show(WindowInsetsCompat.Type.statusBars())
+                    controller.hide(WindowInsetsCompat.Type.navigationBars())
+                    controller.systemBarsBehavior =
+                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 }
             } catch (_: Exception) {
                 // 个别 ROM 的 insets controller 可能抛异常；不影响游戏本体。

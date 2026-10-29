@@ -65,7 +65,8 @@
   const REVENGE_EXCLUDED_KINDS = ['tower', 'endless', 'stage'];
   /** 这条记录能不能复仇：败绩 + 不是复仇自己 + 不在排除名单里。 */
   function canRevenge(r) {
-    return !!r && r.winner !== 0 && r.kind !== 'revenge' && REVENGE_EXCLUDED_KINDS.indexOf(r.kind) < 0;
+    /* 原版复仇只来自“被抢方当天收到的战报”；单机没有被动战报，主动挑战失败不产生复仇。 */
+    return false;
   }
 
   /* 本地没有服务端：留言页（tab 4）按 `doShowLeaveMsg` 的**排版**写一句说明，
@@ -76,7 +77,7 @@
   const EMPTY_HINT = {
     messages: '暂时没有战斗消息。去打一场挑战，战报就会记在这里。',
     ranklog: '还没有天梯赛记录。到竞技场参加天梯赛，胜负都会记在这里。',
-    revenge: '还没有可以复仇的败绩。塔与关卡里的失败不计入复仇。',
+    revenge: '单机版没有被动战报；主动挑战失败不产生复仇。',
   };
 
   /* ---------- 通用小件（与 ui-status.js 同一套写法） ---------- */

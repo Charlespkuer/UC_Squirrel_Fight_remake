@@ -18,8 +18,18 @@
   const costOf = (gear) => (gear ? State.gearCostOf(gear.quality) : 0);
   const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const art = (gear) => '<img alt="" src="images/ui/icons/gear/gear-' + Number(gear.id) +
-    '.png" onerror="this.style.visibility=\'hidden\'">';   // 缺图标时别摊破图（黑装部分 id 没有 PNG）
+  /* 装备图标：与「我的装备」同一套 `gearImg`（橙装 / 黑装沿用同名紫装的现代贴图）。 */
+  const art = (gear) => (UI.classic && typeof UI.classic.gearImg === 'function')
+    ? UI.classic.gearImg(gear)
+    : '<img alt="" src="images/ui/icons/gear/gear-' + Number(gear.id) +
+      '.png" onerror="this.style.visibility=\'hidden\'">';
+  /* 【2026-10-28 用户口径】现代界面只融合「内部有贴图」的装备：
+   *   · 没有现代贴图的装备（怒战 / 深海 / 机器猫 / 圣熊 / 凤凰）当作不存在 —— 不进材料列表；
+   *   · 产物也只在有贴图的装备里挑（否则合出来又是一张空白卡）。
+   *   经典界面不受这条限制（那边用经典画稿，全部装备都有图）。 */
+  const hasArt = (gear) => (!modernMode() || !UI.classic || typeof UI.classic.gearHasArt !== 'function')
+    ? true : !!UI.classic.gearHasArt(gear);
+  const targetAllowed = (id) => hasArt({ id: Number(id) });
 
   /* ============================================================
    * 【FS1】打开融合页与材料校验
@@ -63,7 +73,7 @@
      * ============================================================ */
     function render(focus) {
       if (!page.isConnected) return;
-      const gears = State.myGears();
+      const gears = State.myGears().filter(hasArt);
       // Another game action may have removed or equipped a selected instance.
       selected = selected.filter((key) => gears.some((gear) => gear.key === key && !gear.used && !cannotMerge(gear)));
       const first = gears.find((gear) => gear.key === selected[0]);
@@ -118,7 +128,7 @@
       /* 三件同套（且该套有下一品质档）时，产物是确定的：提示里直接写出来。
        * `fusionFamilyInfo` 与实际 `mergeGears` 共用 State 的同一份判定。 */
       const pickedGears = selected.map((key) => gears.find((g) => g.key === key)).filter(Boolean);
-      const sameSet = pickedGears.length === 3 && State.fusionFamilyInfo ? State.fusionFamilyInfo(pickedGears) : null;
+      const sameSet = pickedGears.length === 3 && State.fusionFamilyInfo ? State.fusionFamilyInfo(pickedGears, targetAllowed) : null;
       const previewHint = sameSet ? '同套必得：' + sameSet.family : (first ? '产物部位随首件材料' : '必得 1 件');
       const guaranteeText = sameSet ? '同套必得该套 · 品质提升一级'
         : first && first.quality >= 5 ? '同部位黑装洗练 · 材料会被消耗' : '品质提升一级 · 材料会被消耗';
@@ -211,13 +221,13 @@
      * ============================================================ */
     function fuse() {
       if (busy || !page.isConnected) return;
-      const gears = State.myGears(), reason = validation(gears);
+      const gears = State.myGears().filter(hasArt), reason = validation(gears);
       if (reason) { render(); classic.toast(reason); return; }
       const previousQuality = gears.find((gear) => gear.key === selected[0]).quality;
       const previousCost = State.gearCostOf(previousQuality);
       busy = true;
       let result;
-      try { result = State.mergeGears(selected.slice(), { allowMixedParts: true }); }
+      try { result = State.mergeGears(selected.slice(), { allowMixedParts: true, targetAllowed }); }
       finally { busy = false; }
       if (!result.ok) { render(); classic.toast(result.msg); return; }
       selected = []; pageIndex = 0; render();

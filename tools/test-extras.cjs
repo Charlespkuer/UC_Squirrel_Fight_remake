@@ -775,16 +775,14 @@ test('魔法袋回到天梯商店：1300 积分 + 2000 金杯 + 200 金松果，
   const lim = g.c.ClassicExtras.rankLimitInfo(goods);
   assert.equal(lim.account, true, '账号级限购');
   assert.equal(lim.limit, 1);
-  g.c.ClassicExtras.rankShop(2);                     // 15 件 / 6 件一页 → 第 3 页
-  g.page().querySelector('[data-goods="19"]').onclick();
-  g.modalClick();
+  g.c.ClassicExtras.rankBuy('19'); g.modalClick(1);
   assert.equal(s.props[79], 1, '兑换到 1 个魔法袋');
   assert.equal(s.goldCup, 0); assert.equal(s.goldPoint, 0);
   assert.equal(s.rankPurchaseTotals[19], 1, '记进账号累计账');
   s.goldCup = 2000; s.goldPoint = 200;
-  g.c.ClassicExtras.rankShop(2); g.page().querySelector('[data-goods="19"]').onclick(); g.modalClick();
-  assert.match(g.modals.at(-1).html, /账号累计只能兑换 1 次/);
+  g.c.ClassicExtras.rankBuy('19');
   assert.equal(s.props[79], 1, '第二次被账号上限拦住');
+  assert.equal(s.rankPurchaseTotals[19], 1);
 });
 
 test('抽奖离开动画后奖品已保存，重入可继续且旧计时器不会重发奖励', () => {

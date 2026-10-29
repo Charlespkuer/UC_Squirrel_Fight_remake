@@ -149,6 +149,8 @@
       let extMax = Array.isArray(raw)
         ? raw.reduce((m, e) => Math.max(m, Number(e && e.level) || 0), 0)
         : Math.max(0, Number(raw) || 0);
+      /* 勇者外观件显式带 `tier`（1~3，见 tower-ui 的 heroGearTierCount）：与词条星级同一口径。 */
+      extMax = Math.max(extMax, Math.max(0, Math.min(3, Number(g.tier) || 0)));
       extMax = Math.max(0, Math.min(3, extMax));
       /* 对手的装备只有 {id, ext}，没有 type；按 id 回查部位，别让头/拳套的强化配色档被吃掉。 */
       const gtype = Number.isFinite(Number(g.type)) ? Number(g.type) : gearTypeOf(g);
@@ -371,9 +373,8 @@
    *  父动作停在受击/胜利的最后一帧，子表情却还在转（Android 的低帧率/节拍会让它更显眼）。
    *  这里只停**嵌套子件**（父件已经由 `playClip` 停在停止帧），装备/钉帧件照旧跳过；
    *  下一拍动作会重新 `startNestedAnim(deep)`，不会把后续动画冻死。
-   *  ⚠ **倒地动作例外**：`dead()` 传 `keepNestedIds`，只让 6365 头顶灵魂继续飘；
-   *  6362 表情会在父动作结束后停在最后一个有内容的帧（同一张哭脸），不再循环切换
-   *  「正常 / 哭 / 死鱼眼」几种表情，也不再整体冻住。 */
+   *  倒地时保留 6365 灵魂及 6362 表情子树：6362 自身停在原版第 9 帧，
+   *  里面的 6359 泪滴仍按原素材循环。 */
   function freezeNestedAnim(clip, inGear, keepIds) {
     if (!clip) return;
     const g = clip.g;
@@ -386,6 +387,7 @@
     for (const rec of clip.nodes ? clip.nodes.values() : []) if (rec && rec.clip) children.push(rec.clip);
     for (const c of clip.__attached || []) if (c) children.push(c);
     for (const child of children) {
+      if (keepIds && keepIds.has(Number(child.tag && child.tag.id))) continue;
       const cg = child.g;
       const childGear = gear || child.__pinFrame != null
         || !!(cg && cg.getAttribute && cg.getAttribute('slot'));
@@ -455,9 +457,7 @@
         seen = n;
         if (clip.frame >= stopIdx) {
           stopAt(clip, stopIdx + 1);
-          /* 默认把嵌套表情/眼睛停在最后一帧，避免倒地哭脸无限循环（第三百二十九批）。
-           * 倒地动作传 `keepNestedIds`：只放行头顶灵魂（6365）继续飘，表情（6362）
-           * 仍停在最后一个有内容的帧 —— 既不停格，也不在几种失败表情之间循环切换。 */
+          /* 普通动作收招时冻结嵌套层；倒地保留灵魂和已停在原版表情帧的子树。 */
           if (o.keepNestedIds) freezeNestedAnim(clip, false, new Set(o.keepNestedIds.map(Number)));
           else if (o.deep && !o.keepNested) freezeNestedAnim(clip);
           finish();
@@ -629,6 +629,11 @@
      * `_root.chooseWeapon(this)` / `_root.showWeaponSize(this)`（`Squirrel.as:425/476/522`）。
      * 复刻里接到"实例化这一刻"，与装备那套同一个接管点。 */
     const fighter = fighterOf(clip);
+    if (Number(clip.tag.id) === 6362) {
+      /* 原版 sprite6362 第 9 帧 stop；泪滴子元件继续播放。 */
+      playClip(clip, { resume: true, stop: 9, keepNested: true });
+      return;
+    }
     if (Number(clip.tag.id) === 6091) {
       if (fighter) showLuckyResult(clip, fighter);
       else retryOrientation(clip, showLuckyResult);
@@ -1864,9 +1869,8 @@
         /* `defenses` 第 5 帧的子件没有 `defense` 实例名（只有第 4 帧有），
          * 距离档 1 时退回当前帧唯一子件，别让整段倒地动画静默不播。 */
         const deadClip = sel.byName('defense') || onlyChildClip(sel);
-        /* 倒地后只让头顶灵魂（6365）继续飘；6362 表情在父动作结束时停在最后一张脸，
-         * 避免它 18 帧循环把「正常 / 哭 / 死鱼眼」几种失败表情来回切。 */
-        if (deadClip) await playClip(deadClip, { deep: true, keepNestedIds: [6365] });
+        /* 灵魂和泪滴保持动画，表情选择器按原版停在第 9 帧。 */
+        if (deadClip) await playClip(deadClip, { deep: true, keepNestedIds: [6362, 6365] });
       },
       /** `congratulate()`：胜利姿势（`6530` 第 32 帧 `congratulation = 2` → 切战果页）。 */
       async congratulate() {
@@ -2965,7 +2969,7 @@
     const canBack = normalAttack || (r.action === 'weapon' && !RANGED.has(Number(r.id)));
     const startBack = () => {
       if (back || aborted()) return;
-      if (r.counterDmg || r.counterFakeDie || r.counterRebound) {
+      if (r.counterDmg || r.counterFakeDie || r.counterRebound || r.counterBlocked) {
         back = runCounter(rec, r, att, def, attacker, defender, aborted);
         return;
       }
@@ -3124,7 +3128,7 @@
     if (Array.isArray(r.hpAfter) && r.hpAfter.length === 2) {
       const att = Number(r.attacker) === 1 ? 1 : 0;
       const deferCounter = !!(opts && opts.beforeCounter) &&
-        !!(r.counterDmg || r.counterFakeDie || r.counterRebound || r.counterThorns);
+        !!(r.counterDmg || r.counterFakeDie || r.counterRebound || r.counterThorns || r.counterBlocked);
       for (let i = 0; i < 2; i++) {
         let v;
         if (deferCounter) {
@@ -3757,6 +3761,7 @@
     /* 幸运一击多球分裂只复制这颗球，不复制整段出手动画。 */
     _luckyBall: LUCKY_BALL,
     _showLuckyResult: showLuckyResult,
+    _freezeNestedAnim: freezeNestedAnim,
     /* 三侠图集新动作起手时先画哪一帧（idx=-1 也不能清成空白）。 */
     _atlasPaintFrame: (anim) => atlasPaintFrame(anim),
     /* 这一拍受击方头顶该飘哪一颗状态图标（`Player.specialEffect` 的 statu 档位）。 */

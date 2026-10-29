@@ -717,6 +717,43 @@
   function stopTicker() {
     if (ticker) { clearInterval(ticker); ticker = 0; }
   }
+  /** iOS 切后台回来时，WKWebView 可能丢掉 SVG 内嵌位图的解码结果（画面上表现为
+   *  村庄/塔页的位图背景整块消失）。把每个活视图里的 `<image>` href 先摘掉再放回，
+   *  让 WebKit 重新解码；同时轻推一次 SVG 图层，强制重绘。只在 main.js 的 iOS
+   *  恢复钩子里调用，桌面/安卓不会走到这里；不改变当前帧与业务状态。 */
+  function repaintRaster() {
+    for (const view of views) {
+      const root = view.root;
+      if (!root || !root.isConnected) continue;
+      const images = root.querySelectorAll ? root.querySelectorAll('image') : [];
+      for (const img of images) {
+        const href = img.getAttributeNS(XLINK, 'href') || img.getAttribute('href');
+        if (!href) continue;
+        try {
+          img.removeAttributeNS(XLINK, 'href');
+          img.removeAttribute('href');
+          const restore = () => {
+            try { if (img.isConnected) img.setAttributeNS(XLINK, 'href', href); } catch (e) {}
+          };
+          if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restore); else restore();
+        } catch (e) {}
+      }
+      try {
+        const prev = root.style.transform;
+        root.style.transform = 'translateZ(0)';
+        void root.getBoundingClientRect();
+        root.style.transform = prev;
+        /* 再原地摘挂一次 SVG：节点、子元素、事件与当前帧都保留，只让 WebKit 重建
+         * 这一层的合成缓存。iOS 切后台后整层位图丢失时，这一步比只改 transform 更可靠。 */
+        const parent = root.parentNode;
+        if (parent) {
+          const next = root.nextSibling;
+          parent.removeChild(root);
+          parent.insertBefore(root, next);
+        }
+      } catch (e) {}
+    }
+  }
 
   /* ============================================================
    * 静态页策略 —— **"UI 在自己所有可达帧之间乱跳"的统一解法**
@@ -1451,6 +1488,8 @@
 
   window.SfRender = {
     load, loaded, loadExtra, mount, mountSymbol, buildFrames, stopTicker,
+    /** iOS 回前台重解码 SVG 位图 + 强制图层重绘（main.js 的恢复钩子调用）。 */
+    repaintRaster,
     /** 换掉一个文本容器的内容（**会真的按换行断行**；`opts.wrap=true` 时按字段框宽自动折行）。返回是否认出来了。 */
     setText,
     /** 屏幕坐标 ↔ SVG 用户坐标（两轴分别换算；全面屏/`#ui` 非等比缩放也正确）。

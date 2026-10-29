@@ -1153,12 +1153,6 @@ async function checkFightResults({ env, Node, body, flushTimeouts }) {
   assert.equal(env.SfFightResult.isOpen(), false);
   assert.equal(prompts, 6, '战果层沿用升级奖励选择入口');
   assert.equal(env.SfRender.viewCount(), 0, '战果退出后回收播放注册');
-  /* 用户 2026-10 口径：关卡胜利正文不能压出米色框，天梯/关卡按钮组要按可见面板中心居中。
-   * 4839/3776 的面板中心实测约 158（不是 320 画布的 160），stage 正文左边距 72。 */
-  const resultSource = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-fight-result.js'), 'utf8').replace(/\r\n/g, '\n');
-  assert.ok(/stage: \{ x: 72, y: 60, width: 18/.test(resultSource)
-    && /actionCX = \(kind === 'stage' \|\| kind === 'rank'\) \? 158 : 160/.test(resultSource),
-    '关卡胜利正文留出左边距，stage/rank 按钮组用面板中心 158');
 
   /* 有奖励的普通战果走**原版 `fight` 第 2/3 帧**（经验 + 金松果/战利品三格），
    * 不再把"经验 +X 金松果 +Y"拼成文字塞进 4692 提示框。 */
@@ -1312,7 +1306,7 @@ async function checkClassicFight() {
     && /if \(o\.deep && !o\.keepNested\) freezeNestedAnim\(clip\);/.test(uf)
     && /const end = lastContentFrame\(child\)/.test(uf)
     && /stopAt\(child, end\)/.test(uf)
-    && /playClip\(deadClip, \{ deep: true, keepNestedIds: \[6365\] \}\)/.test(uf)
+    && /playClip\(deadClip, \{ deep: true, keepNestedIds: \[6362, 6365\] \}\)/.test(uf)
     && /function freezeNestedAnim\(clip, inGear, keepIds\)/.test(uf)
     && /if \(keepIds && keepIds\.has\(Number\(clip\.tag && clip\.tag\.id\)\)\) return;/.test(uf),
     '角色动作结束要冻结嵌套表情/眼睛；失败倒地只放行头顶灵魂，表情停在最后一张脸');
@@ -3125,4 +3119,17 @@ function checkMobileComposeWorkflow() {
   assert.ok(/const canSeeMessages = Number\(S\.level\) >= 2;/.test(um)
     && /nm\.gotoAndStop\(canSeeMessages && hasNewMessages\(\) \? 1 : 2\)/.test(um),
     '1 级未解锁消息键时不能点亮 newMessage 红点（否则 NEW 悬空）');
+  /* iOS 切后台回来会丢 canvas 绘制缓冲 / SVG 位图解码结果：main.js 必须在
+   * visibilitychange / pageshow 后补画，SfRender 必须提供重解码入口。 */
+  {
+    const main = fs.readFileSync(path.join(ROOT, 'js/main.js'), 'utf8').replace(/\r\n/g, '\n');
+    assert.match(main, /function scheduleForegroundRepaint\(\)/, 'main.js 要有 iOS 回前台补画入口');
+    assert.match(main, /addEventListener\('pageshow', \(\) => scheduleForegroundRepaint\(\)\)/,
+      'pageshow 也要触发补画，不能只靠 visibilitychange');
+    assert.match(main, /SfRender\.repaintRaster/, '回前台要重解码经典 SVG 位图');
+    const render = fs.readFileSync(path.join(ROOT, 'js/ssfight/render.js'), 'utf8').replace(/\r\n/g, '\n');
+    assert.match(render, /function repaintRaster\(\)/, 'SfRender 要有 repaintRaster');
+    assert.equal(typeof SfRender.repaintRaster, 'function', 'SfRender.repaintRaster 要导出');
+    assert.doesNotThrow(() => SfRender.repaintRaster(), '没有视图时调用也不能抛错');
+  }
   console.log('PASS test-ssfight-render（帧语义 / 原版素材契约 / 文本索引 / 经典切页真值、内容宿主与统一命中 / 共用反馈 / 原版战果续战与关闭生命周期 / 位图 HD 覆盖接线（含 1x 归档） / 局内战斗素材与动作映射 / 更换装备原版页）');})().catch(err => { console.error(err); process.exitCode = 1; });

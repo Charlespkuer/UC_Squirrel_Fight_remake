@@ -1358,7 +1358,11 @@
       const lv = Math.max(1, Number(p.level) || 1);
       const sid = Number(p.skillId) || 0;
       if ([1, 2, 3, 9].includes(sid)) out.power += Math.ceil(grade * 1.5 + lv / 5);
-      else if ([4, 5, 10].includes(sid)) out.hp += grade * 8 + lv * 4;
+      /* 【2026-10-29 用户口径】回光术（4）/ 凌波微步（5）/ 油光满面（10）的效果
+       * 都在**触发时**结算（装死回血 / 闪避回血 / 行动净化），**不再预先加生命上限**：
+       * 以前这里按 grade×8 + level×4 加 maxHp，玩家看到的就是「开战直接加血上限」，
+       * 而且带几只就叠几份。现在这三类只保留通用的那点速度，血量完全由战斗中的触发决定。 */
+      else if ([4, 5, 10].includes(sid)) { /* 触发型技能：不预加面板 */ }
       else out.agility += Math.ceil(grade * 1.2 + lv / 6);
       out.speed += Math.ceil(grade / 2);
     }
@@ -2762,10 +2766,16 @@
     const set = def ? gearSetMap.getValue(parseInt(def.setId)) : null;
     return set ? parseInt(set.quality) : -1;
   }
-  /** 某部位 + 某品质的全部装备 id（融合产物从这里随机取一件）。 */
-  function gearIdsOf(part, quality) {
+  /** 某部位 + 某品质的全部装备 id（融合产物从这里随机取一件）。
+   *  `allow(id)`（可选）= 只保留满足条件的 id —— 现代界面用它把「没有贴图的装备」排除在融合之外。 */
+  function gearIdsOf(part, quality, allow) {
     const out = [];
-    gearMap.each((k, v) => { if (Number(v.type) === Number(part) && gearPartQuality(parseInt(v.id)) === Number(quality)) out.push(parseInt(v.id)); });
+    gearMap.each((k, v) => {
+      const id = parseInt(v.id);
+      if (Number(v.type) !== Number(part) || gearPartQuality(id) !== Number(quality)) return;
+      if (typeof allow === 'function' && !allow(id)) return;
+      out.push(id);
+    });
     return out;
   }
   function gearName(id) { const d = gearMap.getValue(id); return d ? d.name : ''; }
@@ -3009,8 +3019,8 @@
    *  若该名字在目标品质不存在（例如斗斗/挑斗白装没有绿装），退回完全随机。
    *  ⚠ 三件同套的保底在 `familyUpgradeTarget` 里**先**处理；这里只服务跨套 / 无下一档的情况。
    *  返回 { id, mutant }：mutant 为 true 表示这次是狂战变异。 */
-  function pickMergeTarget(gs, part, targetQuality) {
-    const pool = gearIdsOf(part, targetQuality);
+  function pickMergeTarget(gs, part, targetQuality, allow) {
+    const pool = gearIdsOf(part, targetQuality, allow);
     if (!pool.length) return null;
     const pick = (list) => list[Math.floor(Math.random() * list.length)];
     const names = gs.map((g) => gearName(g.id));
@@ -3064,14 +3074,14 @@
    *  · 三件材料必须同属一个套装家族（狂战头盔/拳甲/铠甲 = 狂战；黑装 46/67 也算同一套）；
    *  · 目标品质没有该家族（早期白/绿套没有下一档）时返回 null，调用方回退到原有随机规则；
    *  · 同一家族在目标品质有多套数据（狂战 46/67、怒战 47/68）时取 id 最小件，避免随机抖动。 */
-  function familyUpgradeTarget(gs, part, targetQuality) {
+  function familyUpgradeTarget(gs, part, targetQuality, allow) {
     if (!Array.isArray(gs) || gs.length !== 3) return null;
     const families = gs.map((g) => {
       const def = gearMap.getValue(g && g.id);
       return def ? fusionSetFamily(def.setId) : '';
     });
     if (!families[0] || families.some((f) => f !== families[0])) return null;
-    const pool = gearIdsOf(part, targetQuality).filter((id) => {
+    const pool = gearIdsOf(part, targetQuality, allow).filter((id) => {
       const def = gearMap.getValue(id);
       return def && fusionSetFamily(def.setId) === families[0];
     });
@@ -3079,8 +3089,9 @@
     return { id: Math.min.apply(null, pool), mutant: false, family: families[0] };
   }
   /** 融合页提示用：三件材料同套且下一品质存在该家族时返回目标信息，否则 null。
-   *  参数用 `State.myGears()` 的装备对象（id/quality/orange 足够）。 */
-  function fusionFamilyInfo(gears) {
+   *  参数用 `State.myGears()` 的装备对象（id/quality/orange 足够）。
+   *  `allow(id)` 与 `mergeGears` 的 `opts.targetAllowed` 同一条口径（现代界面排除无贴图装备）。 */
+  function fusionFamilyInfo(gears, allow) {
     if (!Array.isArray(gears) || gears.length !== 3) return null;
     const first = gears[0];
     if (!first || !Number.isFinite(Number(first.id))) return null;
@@ -3089,7 +3100,7 @@
     if (gears.some((g) => gearQuality(g) !== quality)) return null;   // 只有同品质材料才提示保底
     const part = gearPart(first.id);
     if (part < 0) return null;
-    const target = familyUpgradeTarget(gears, part, quality + 1);
+    const target = familyUpgradeTarget(gears, part, quality + 1, allow);
     if (!target) return null;
     return { id: target.id, family: target.family, part: part, quality: quality + 1 };
   }
@@ -3098,8 +3109,8 @@
    *  · 97% 留在同一家族（凤凰→凤凰 / 圣熊→圣熊），其中 3% 变异到另一套黑装
    *    （对应原版 helpWords「融合黑装时有较低几率出现深海/机器猫/怒战/狂战」）；
    *  · 品质 5 的池子由 gamedata 的 registerBlackGear 补出来的 46/47/67~72 组成。 */
-  function pickBlackMergeTarget(gs, part) {
-    const pool = gearIdsOf(part, 5);
+  function pickBlackMergeTarget(gs, part, allow) {
+    const pool = gearIdsOf(part, 5, allow);
     if (!pool.length) return null;
     const pick = (list) => list[Math.floor(Math.random() * list.length)];
     const family = gearSetFamily(gs[0].id);
@@ -3112,9 +3123,12 @@
   }
   /** 两种界面统一：三件同品质装备融合，部位和名字均可不同。
    *  产物部位沿用第一件材料；**三件同套且下一品质有该套时**必得该套（`familyUpgradeTarget`），
-   *  其余情况（跨套 / 早期套没有下一档）走原来的同名与变异随机。保留 opts 参数以兼容旧界面。 */
+   *  其余情况（跨套 / 早期套没有下一档）走原来的同名与变异随机。保留 opts 参数以兼容旧界面。
+   *  `opts.targetAllowed(id)`（可选）：产物候选过滤 —— 现代界面只允许「有贴图的装备」，
+   *  避免合出一件列表里看不到的空白装备（用户 2026-10-28 口径）。 */
   function mergeGears(keys, opts) {
     if (!Array.isArray(keys) || keys.length !== 3 || new Set(keys).size !== 3) return { ok: false, msg: '请选择三件不同的装备' };
+    const allow = (opts && typeof opts.targetAllowed === 'function') ? opts.targetAllowed : null;
     const gs = keys.map((k) => S.gears.find((x) => x.key === k)).filter(Boolean);
     if (gs.length !== 3) return { ok: false, msg: '装备不存在' };
     if (!blackGearEnabled() && gs.some((g) => isBlackGearId(g.id))) return { ok: false, msg: '现代界面没有黑装内容' };
@@ -3132,7 +3146,7 @@
     if (q >= 5) {
       /* 3 件黑装 → 同部位黑装（洗 3 条附加），20% 额外返 1 张黑色卡片。
        * 黑装只能从碎片/宝箱/自选箱获得，不能由橙装融合出来。 */
-      const target = pickBlackMergeTarget(gs, part);
+      const target = pickBlackMergeTarget(gs, part, allow);
       if (target == null) return { ok: false, msg: '这个部位还没有可融合的黑装' + partName + '。' };
       S.goldPoint -= cost;
       S.gears = S.gears.filter((g) => !keys.includes(g.key));
@@ -3148,7 +3162,7 @@
     if (q === 4) {
       if (!blackGearEnabled()) return { ok: false, msg: '现代界面没有黑装内容' };
       /* 三件同套 → 必定是同套黑装（下一品质）；没有该套黑装时退回原随机规则。 */
-      const target = familyUpgradeTarget(gs, part, 5) || pickMergeTarget(gs, part, 5);
+      const target = familyUpgradeTarget(gs, part, 5, allow) || pickMergeTarget(gs, part, 5, allow);
       if (target == null) return { ok: false, msg: '这个部位还没有可合成的黑色' + partName + '。' };
       S.goldPoint -= cost;
       S.gears = S.gears.filter((g) => !keys.includes(g.key));
@@ -3160,7 +3174,7 @@
     if (q === 3) {
       // 3 件紫装 → 第一件材料部位的一件**原版 q4 橙装**（205-208 / 125-180 等）
       /* 三件同套 → 必定是同套橙装（下一品质）；没有该套橙装时退回原随机规则。 */
-      const target = familyUpgradeTarget(gs, part, 4) || pickMergeTarget(gs, part, 4);
+      const target = familyUpgradeTarget(gs, part, 4, allow) || pickMergeTarget(gs, part, 4, allow);
       if (target == null) return { ok: false, msg: '这个部位还没有可合成的传说' + partName + '。' };
       S.goldPoint -= cost;
       S.gears = S.gears.filter((g) => !keys.includes(g.key));
@@ -3170,7 +3184,7 @@
       return { ok: true, gear: Object.assign(made || {}, { quality: 4, mutant: target.mutant }) };
     }
     /* 三件同套 → 必定是同套下一品质；没有该套下一档时退回原随机规则。 */
-    const target = familyUpgradeTarget(gs, part, q + 1) || pickMergeTarget(gs, part, q + 1);
+    const target = familyUpgradeTarget(gs, part, q + 1, allow) || pickMergeTarget(gs, part, q + 1, allow);
     if (target == null) return { ok: false, msg: '这个部位还没有更高品质的' + partName + '。' };
     S.goldPoint -= cost;
     S.gears = S.gears.filter((g) => !keys.includes(g.key));

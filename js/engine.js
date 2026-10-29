@@ -163,7 +163,12 @@
   function loadImage(src) {
     if (!src) return Promise.resolve(null);
     const c = cache[src];
-    if (c && c.ok) return Promise.resolve(c.img);
+    /* `ok:true` 也可能是一张 0×0 的坏图（某些 WebView 的 onload 先到、解码失败）。
+     * 这种不能当成“已加载”，否则后面永远拿不到好图。 */
+    if (c && c.ok) {
+      if (c.img && (c.img.naturalWidth || c.img.width)) return Promise.resolve(c.img);
+      delete cache[src];
+    }
     if (pendingImages[src]) return pendingImages[src];
     // A failed local read can recover after resume; retain a short cooldown, not a permanent miss.
     if (c && Date.now() < c.retryAt) return Promise.resolve(null);
@@ -202,6 +207,125 @@
     return pendingImages[src];
   }
   function loadUrl(url) { return loadImage(url); }
+
+  /* ---------- 图片恢复（2026-10 荣耀 WebView 战斗丢图） ----------
+   * Honor / MagicOS 的 WebView 在内存回收或切后台回来时，可能把**已经加载并解码**的
+   * 图片一起丢掉：`img.naturalWidth` 还在，但 `drawImage` 画不出任何像素。战斗里所有
+   * 角色、特效、场景都是图集，于是整屏只剩 canvas 的纯色底和文字/飘字（用户反馈的
+   * 「深色背景 + 伤害 + 悬浮奖励」）。这里做三件事：
+   *   · `retrySheet`：重新走 `Image` 加载；直连失败再用 `fetch → blob:` 兜底，
+   *     绕开 WebView 那条已经坏掉的图片缓存/解码链路；
+   *   · `imagesHealthy`：把图集缩画到 2×2 并读一个像素，直接验证「现在还能不能画」；
+   *   · `recoverSheets`：强制重取，并把新图塞回**同一个 sheet 对象**，动画实例不用重建。
+   * 注意不要把它做成启动时无条件重取：正常设备一次都不应该走到这里。 */
+  const sheetSrc = Object.create(null);        // id -> 原始 src（重试/兜底时要知道从哪来）
+  const retryPending = Object.create(null);    // id -> 进行中的恢复 Promise
+  let healthCanvas = null;
+
+  /** 用 fetch 拿字节、再用 blob: URL 解码。用于直连 `<img>` 已经画不出来的机型。 */
+  function loadImageViaBlob(src) {
+    if (!src || typeof fetch !== 'function' || typeof URL === 'undefined' || !URL.createObjectURL) return Promise.resolve(null);
+    return fetch(src, { cache: 'force-cache' }).then((r) => (r && r.ok ? r.blob() : null)).then((blob) => {
+      if (!blob) return null;
+      const url = URL.createObjectURL(blob);
+      return new Promise((resolve) => {
+        const img = new Image();
+        let settled = false;
+        const done = (ok) => {
+          if (settled) return;
+          settled = true;
+          if (ok) { img.__blobUrl = url; resolve(img); }
+          else { try { URL.revokeObjectURL(url); } catch (e) {} resolve(null); }
+        };
+        img.onload = () => done(true);
+        img.onerror = () => done(false);
+        setTimeout(() => done(false), IMG_TIMEOUT_MS + 2000);
+        try { img.src = url; } catch (e) { done(false); }
+      });
+    }).catch(() => null);
+  }
+
+  /** 把新图塞回已有的 sheet（保留 frames / 动画实例引用），没有 sheet 才新建。 */
+  function applySheetImage(id, img) {
+    const sh = SHEETS[id];
+    if (sh && sh.frames && Object.keys(sh.frames).length) {
+      sh.img = img;
+      sh.w = img.naturalWidth || img.width;
+      sh.h = img.naturalHeight || img.height;
+      return sh;
+    }
+    if (sh) delete SHEETS[id];                 // 之前注册的是坏图（0 尺寸），重新建帧表
+    return registerSheet(id, img);
+  }
+
+  /** 重取一个图集；`force` 连已经“看起来加载成功”的图也换掉（解码数据可能已被回收）。 */
+  function retrySheet(id, force) {
+    id = String(id);
+    if (!force && has(id)) return Promise.resolve(SHEETS[id]);
+    if (retryPending[id]) return retryPending[id];
+    const src = sheetSrc[id] || guessSrc(id);
+    if (!src) return Promise.resolve(null);
+    retryPending[id] = (async () => {
+      /* 先直连重取。force 时删掉 cache，确保真的重新发请求而不是拿旧句柄。 */
+      if (force || (cache[src] && !cache[src].ok)) delete cache[src];
+      let img = await loadImage(src);
+      if (!img) img = await loadImageViaBlob(src);
+      if (!img) return null;
+      cache[src] = { img, ok: true, blobUrl: img.__blobUrl || (cache[src] && cache[src].blobUrl) };
+      return applySheetImage(id, img);
+    })().finally(() => { delete retryPending[id]; });
+    return retryPending[id];
+  }
+
+  /** 一批里面还缺图 / 图已经坏掉的 id。 */
+  function missingSheets(ids) {
+    return (ids || []).filter((id) => id && !has(String(id)));
+  }
+
+  function retrySheets(ids, force) {
+    return Promise.all((ids || []).map((id) => retrySheet(id, force)));
+  }
+
+  /** 切回前台时，把加载失败过的图片重新排一次队（平时 0 次请求）。 */
+  function retryFailedImages() {
+    let n = 0;
+    for (const src of Object.keys(cache)) {
+      if (cache[src] && cache[src].ok) continue;
+      delete cache[src];
+      n++;
+      loadImage(src).catch(() => {});
+    }
+    return n;
+  }
+
+  /** 把图集缩小画进 2×2 再读一个像素：能读出非透明像素 = `drawImage` 现在真的能画。
+   *  只做一次缩略绘制，不碰主画布；用于发现“naturalWidth 还在、但整张图已画不出来”。 */
+  function imagesHealthy(ids) {
+    if (typeof document === 'undefined' || !document.createElement) return true;
+    const list = (ids || []).filter((id) => has(String(id)));
+    if (!list.length) return false;
+    try {
+      if (!healthCanvas) { healthCanvas = document.createElement('canvas'); healthCanvas.width = healthCanvas.height = 2; }
+      const ctx = healthCanvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return true;                   // 没有 2D 上下文的环境（无头回归）不判坏
+      for (const id of list.slice(0, 4)) {
+        const sh = SHEETS[String(id)];
+        if (!sh || !sh.img) continue;
+        ctx.clearRect(0, 0, 2, 2);
+        ctx.drawImage(sh.img, 0, 0, sh.img.naturalWidth || sh.img.width, sh.img.naturalHeight || sh.img.height, 0, 0, 2, 2);
+        const data = ctx.getImageData(0, 0, 2, 2).data;
+        for (let i = 3; i < data.length; i += 4) if (data[i] > 8) return true;
+      }
+      return false;
+    } catch (e) {
+      return false;                            // drawImage/getImageData 抛错同样按“画不出来”处理
+    }
+  }
+
+  /** 强制重取一批图集（恢复路径；调用方负责重绘画布）。 */
+  function recoverSheets(ids) {
+    return retrySheets(ids, true);
+  }
 
   /* ============================================================
    * 【EN4】标签 → 图集索引
@@ -251,7 +375,13 @@
   // ---------- 图集（sheet）注册 ----------
   const SHEETS = Object.create(null);   // id -> {id, img, w, h, def, frames:{label:frame}}
   function registerSheet(id, img) {
-    if (SHEETS[id]) return SHEETS[id];
+    const old = SHEETS[id];
+    if (old) {
+      /* 以前只要 id 注册过就直接返回 —— 于是第一张图即使解码失败（0×0），后面拿到的
+       * 好图也永远进不来。现在坏图允许被替换（恢复路径靠它）。 */
+      if (old.img && (old.img.naturalWidth || old.img.width)) return old;
+      delete SHEETS[id];
+    }
     const def = getDef(id);
     const sh = { id: id, img: img, w: img.width, h: img.height, def: def, frames: Object.create(null) };
     const list = frameList(def);
@@ -279,8 +409,9 @@
   function loadSheets(ids, opts) {
     const jobs = [];
     for (const id of ids) {
-      if (!id || SHEETS[id]) continue;
+      if (!id || has(id)) continue;
       const src = guessSrc(id);
+      if (src) sheetSrc[id] = src;
       if (src && !(cache[src] && cache[src].ok)) (waitingSheets[src] || (waitingSheets[src] = new Set())).add(id);
       jobs.push(loadImage(src).then((img) => (img ? registerSheet(id, img) : null)));
     }
@@ -290,7 +421,8 @@
   }
   /** 直接按文件路径加载并注册一个图集（原版有些图没有 id 记录） */
   function loadSheetFromUrl(id, url) {
-    if (SHEETS[id]) return Promise.resolve(SHEETS[id]);
+    if (has(id)) return Promise.resolve(SHEETS[id]);
+    if (url) sheetSrc[id] = url;
     if (url && !(cache[url] && cache[url].ok)) (waitingSheets[url] || (waitingSheets[url] = new Set())).add(id);
     return loadImage(url).then((img) => (img ? registerSheet(id, img) : null));
   }
@@ -493,6 +625,30 @@
    * 【EN7】绘制
    * ============================================================ */
   // ---------- 绘制 ----------
+  /* 现代战斗贴图（`images/battle/outfit/`）实际覆盖的套装序号 → 头 / 拳套最高差分档。
+   * 原版外观可以选 280 件，但现代图集只画了 1~32（含 113 的特殊套）这几套：
+   *   · 1~5  ：白 / 绿，基础稿；
+   *   · 6~18 ：蓝装，两张（基础 / +1）；
+   *   · 19~31：紫装 / 圣熊（32），三张（基础 / +1 / +2），32 只有基础；
+   *   · 113  ：特殊套，基础稿。
+   * 黑装 33~40、深海 / 机器猫 34/37/38 等**没有任何现代贴图** —— 勇者外观页
+   * 在现代模式里不列它们（用户 2026-10-29 口径：外观要能真的穿出来）。
+   * ⚠ 这张表必须与 `images/battle/outfit/` 的实际文件一致；`tools/test-tower-hero.cjs`
+   * 会扫素材目录核对，别只改这里。 */
+  const MODERN_OUTFIT_TIERS = new Map([
+    ...[1, 2, 3, 4, 5, 32, 113].map((index) => [index, 1]),
+    ...[6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].map((index) => [index, 2]),
+    ...[19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31].map((index) => [index, 3]),
+  ]);
+  function hasModernOutfit(index) {
+    return MODERN_OUTFIT_TIERS.has(Number(index));
+  }
+  /** 头 / 拳套（含内拳套 HandI）这一套能画到第几档；衣服 / 鞋子 / 手臂不分档。 */
+  function modernOutfitTier(index, type) {
+    const ty = Number(type);
+    if (ty !== 0 && ty !== 1 && ty !== 4) return 1;
+    return MODERN_OUTFIT_TIERS.get(Number(index)) || 1;
+  }
   const WEAR_LABELS = { '-1': 0, '4': 1, '5': 2, '1': 3, '3': 4, '6': 5 };
   function wearsFor(source) {
     const out = [null, null, null, null, null, null];
@@ -503,12 +659,19 @@
       const parts = typeof item === 'string' ? item.split(':') : [];
       const id = parts.length ? Number(parts[0]) : Number(item.id || item);
       let level = item.maxLevel || 1;
+      /* 勇者外观自带的**差分档**（1~3，见 tower-ui 的 heroGearTierCount）：与词条星级同一口径，
+       * 头 / 拳套 / 内拳套的图集片名会拼 `_1/_2/_3`。账号装备没有这个字段，走下面的 ext。 */
+      if (item.tier) level = Math.max(level, Math.min(3, Number(item.tier) || 1));
       if (Array.isArray(item.ext)) for (const e of item.ext) level = Math.max(level, Number(e.level) || 1);
       for (let i = 3; i < parts.length; i += 2) level = Math.max(level, Number(parts[i]) || 1);
       let gear, set;
       try { gear = gearMap.getValue(id); set = gear && gearSetMap.getValue(gear.setId); } catch (e) { return; }
       if (!gear || !set) return;
-      const type = Number(gear.type), index = Number(set.index), tier = Math.min(3, level);
+      const type = Number(gear.type), index = Number(set.index);
+      /* 现代图集没画的套装（黑装 33~40 / 深海 / 机器猫等）直接不贴：宁可空着，
+       * 也不要拿一个不存在的 `Head_33_1` 去请求坏图。勇者外观页已在现代模式过滤掉它们。 */
+      if (!hasModernOutfit(index)) return;
+      const tier = Math.min(modernOutfitTier(index, type), Math.min(3, level));
       const put = (n) => {
         const prefix = ['Head', 'HandO', 'Body', 'Foot', 'HandI', 'Arm'][n];
         out[n] = { src: prefix + '_' + index + ([0, 1, 4].includes(n) && index !== 32 ? '_' + tier : ''), label: '0' };
@@ -834,6 +997,16 @@
   /* ============================================================
    * 【EN13】导出 window.Engine
    * ============================================================ */
+  /* 切回前台时再给失败过的图一次机会：荣耀/华为 WebView 在后台回收图片后，
+   * 不回前台主动重发请求就会一直缺图。`retryFailedImages()` 只处理失败表，
+   * 正常设备这里是空循环。 */
+  try {
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') retryFailedImages();
+      });
+    }
+  } catch (e) {}
   window.Engine = {
     W: W, H: H,
     SRC_MAP: SRC_MAP,
@@ -841,8 +1014,12 @@
     CORE_SHEETS: CORE_SHEETS,
     getDef: getDef, frameList: frameList, frameAt: frameAt,
     loadImage: loadImage, loadUrl: loadUrl, loadSheets: loadSheets, loadSheetFromUrl: loadSheetFromUrl,
+    /* 战斗丢图恢复：直连重取 / fetch→blob 兜底 / 画布健康检查 / 强制换图 */
+    retrySheet, retrySheets, retryFailedImages, missingSheets, imagesHealthy, recoverSheets,
     sheet: sheet, spriteFor: spriteFor, spriteIn: spriteIn, pinSheets: pinSheets, frameSize: frameSize, has: has,
     ensureMutantSheets: ensureMutantSheets, mutantSheets: mutantSheets,
+    /* 现代换装贴图覆盖表：外观页用它过滤「选得到但画不出来」的装备，绘制层用它收档。 */
+    hasModernOutfit: hasModernOutfit, modernOutfitTier: modernOutfitTier, MODERN_OUTFIT_TIERS: MODERN_OUTFIT_TIERS,
     anim: anim, hasAnim: hasAnim, animNames: animNames,
     drawFrame: drawFrame, drawSprite: drawSprite,
     frameBounds: frameBounds, wearsFor: wearsFor, loadWears: loadWears,

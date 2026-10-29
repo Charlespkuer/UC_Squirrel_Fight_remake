@@ -371,6 +371,42 @@ test('勇者每通过 5 层：生命上限 +50、回复 50、力敏速 +5', () =
     '每 5 层成长要读档保留');
 });
 
+test('勇者每场胜利后按休息期血量上限的 5% 回血', () => {
+  const { c } = setup();
+  start(c);
+  const nx = c.Tower.nextBattle('endless');
+  assert.ok(nx && nx.ok !== false, '应当能开第一场：' + ((nx && nx.msg) || ''));
+  const rw = c.Tower.reportBattle('endless', nx.token, true, 1, null);
+  assert.ok(rw && rw.ok !== false, '第一场应当结算：' + ((rw && rw.msg) || ''));
+  const info = c.Tower.endlessInfo();
+  const restMax = Math.max(1, Number(info.run.curMaxHp) || 1);
+  const expected = Math.max(1, Math.round(restMax * 0.05));
+  assert.equal(rw.heroRestHeal, expected, '休息回血 = 休息期上限的 5%');
+  assert.ok(info.run.hpAbs >= 1 + expected, '战后血量至少 = 本场剩余 1 + 休息回血');
+});
+
+test('勇者剧本第 1~5 层敌方属性降 10%，第 6 层恢复原曲线', () => {
+  const { c } = setup();
+  start(c);
+  const check = (layer) => {
+    c.Tower._debugSetEndlessLayer(layer);
+    const run = c.Tower._debugRun('endless');
+    run.choices = null; run.phase = null; run.finished = null;
+    const nx = c.Tower.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, layer + ' 层应当能开战：' + ((nx && nx.msg) || ''));
+    const isLast = run.idx === run.plan.length - 1;
+    const raw = c.Tower.buildFoeOf('endless', run.layer, run.plan[run.idx], run.salt, isLast).foe;
+    const mul = layer <= 5 ? 0.9 : 1;
+    for (const key of ['power', 'agility', 'speed', 'hp']) {
+      assert.equal(nx.foe[key], Math.max(1, Math.round(Number(raw[key]) * mul)),
+        layer + ' 层 ' + key + ' 应当按 ' + mul + ' 缩放');
+    }
+    /* 只是看预告，不能把这一场留成“进行中”，否则下一层开不了战。 */
+    c.Tower.interruptBattle('endless', nx.token);
+  };
+  check(1); check(5); check(6);
+});
+
 test('巡视魔王每个 10 层区块只刷新一次：击败后时间回廊重开本层不再出现', () => {
   const { c, store } = setup();
   c.Tower._debugSetNoMintShop(true);
@@ -458,23 +494,26 @@ test('现代勇者状态与武技页使用局内等级，训练、外观和返�
   assert.equal(dom.find('[data-action="hero-train"]').textContent, '铸币修炼');
   /* 现代外观页直接走 onEquip（纸娃娃 + 6 格列表在 classic-ui 里），
    * 不走旧的 onGears 自绘层；全装备池是 GEAR_BASE 的原始 288 件去掉
-   * 46/67、47/68 两组重复黑装后的 280 件，包括黑装上位（比如浣熊 q5）
-   * 与原本没进 gearMap 的深海/机器猫 q3。 */
+   * 46/67、47/68 两组重复黑装后的 280 件，**现代界面只保留 `images/battle/outfit/`
+   * 真的画得出来的套装**：现代图集只画了套装序号 1~32 / 113，所以黑装 33~40、
+   * 深海 / 机器猫、以及没有 gearSetMap 行的 q5 黑装（54~66）都不进池子 → 184 件。
+   * 这样详情页 / 战斗里不会出现「选了却画不出来」的装备。 */
   assert.equal(typeof context.onEquip, 'function');
-  assert.equal(context.gearList.length, 280, '勇者外观池合并重复黑装后应当是 280 件');
+  assert.equal(context.gearList.length, 184, '现代外观池只保留有现代外观贴图的 184 件');
   const blackRaccoon = context.gearList.find((g) => Number(g.id) === 237);
-  assert.ok(blackRaccoon && Number(blackRaccoon.quality) === 5 && blackRaccoon.name === '浣熊头饰',
-    'q5 黑装浣熊头饰必须在勇者外观池里');
-  assert.equal(blackRaccoon.family, '浣熊', '黑装上位也要按套装家族分组');
-  assert.ok(context.gearList.some((g) => Number(g.id) === 189 && Number(g.quality) === 3),
-    '原本漏掉的深海 q3 也要进外观池');
+  assert.equal(blackRaccoon, undefined, 'q5 黑装浣熊头饰没有现代外观贴图，不进池子');
+  assert.ok(context.gearList.every((g) => Number(g.id) < 213),
+    'q5 黑装上位（213~264）没有现代外观贴图，现代池里不该出现');
+  assert.ok(!context.gearList.some((g) => Number(g.id) === 189),
+    '深海 / 机器猫这类没有任何现代贴图的套装当作不存在（不进外观池）');
   const equipped = context.onEquip([203, 0, 0, 0]);
   assert.equal(equipped.ok, true);
   assert.deepEqual(plain(run.hero.appearance.map(g => g.id)), [203]);
-  /* 没有进 gearMap 的 q5 外观也要能被 TowerHero.normalize 接受并落盘。 */
+  /* 没有现代贴图的 q5 外观在现代模式会被 normalize 丢掉（详情 / 战斗都不画）；
+   * 经典模式仍接受它（那边用自己的一套画稿）。 */
   const blackSaved = c.Tower.setHeroAppearance([{ id: 237, type: 0, ext: [] }]);
   assert.equal(blackSaved.ok, true, blackSaved.msg);
-  assert.deepEqual(plain(blackSaved.appearance.map((g) => Number(g.id))), [237]);
+  assert.deepEqual(plain(blackSaved.appearance), [], '现代模式不接受没有现代贴图的外观件');
   context.onBack = () => { back++; c.UI.runAction('status'); };
   dom.click('[data-action="weapons"]');
   assert.match(dom.find('[data-item="1"]').textContent, /真2/);
@@ -504,7 +543,17 @@ test('现代勇者状态与武技页使用局内等级，训练、外观和返�
   assert.equal(account(), before, '勇者详情只读，不能扣账号金松果或修改账号武技装备');
 });
 
-test('勇者外观池把重复的黑狂战 / 黑怒战套合并成一套', () => {
+test('现代勇者左下角立绘走现代图集，不再复用经典 7232', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'js/tower-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(src, /function paintHeroArtModern\(/, '现代立绘渲染器要存在');
+  assert.match(src, /if \(isModernUi\(\) && window\.Engine[\s\S]{0,160}paintHeroArtModern\(/,
+    '现代模式优先走现代战斗图集 + 装备图层的 canvas');
+  assert.match(src, /Engine\.drawFrame\(ctx, frame, \{ sheets: sheets, wears: wears \}\)/,
+    '现代立绘用 Engine 的待机帧与装备图层绘制');
+  assert.match(src, /host\.appendChild\(canvas\)/, '现代立绘画进 canvas 后挂到勇者头像容器');
+});
+
+test('勇者外观池把重复的黑狂战 / 黑怒战套合并，并排除没有现代贴图的套装', () => {
   const { c } = setup(); start(c);
   const dom = modernUi(c);
   const real = c.UI.classic.openHeroPage;
@@ -513,10 +562,56 @@ test('勇者外观池把重复的黑狂战 / 黑怒战套合并成一套', () =>
   c.TowerUI.openHeroStatus();
   assert.ok(context && Array.isArray(context.gearList), '外观页应当拿到 gearList');
   const countOf = (setId) => context.gearList.filter((g) => Number(g.setId) === setId).length;
-  assert.equal(context.gearList.length, 280, '原始 288 件合并 46/67、47/68 两组重复黑装后是 280 件');
-  assert.equal(countOf(46), 4, '黑狂战保留 46（181~184）这一套');
-  assert.equal(countOf(47), 4, '黑怒战保留 47（185~188）这一套');
+  assert.equal(context.gearList.length, 184, '现代外观池只保留有现代外观贴图的 184 件');
+  /* 黑狂战 / 黑怒战（46/47、67/68）在现代图集里没有对应套装序号（33~40），
+   * 所以现代模式整套不出现；重复 id 的合并在经典模式那条池子里仍然生效。 */
+  assert.equal(countOf(46), 0, '黑狂战没有现代贴图 → 现代外观池不出现');
+  assert.equal(countOf(47), 0, '怒战没有现代贴图 → 现代外观池不出现');
   assert.equal(countOf(67) + countOf(68), 0, '67/68 这两套重复 id 不该再出现');
+});
+
+test('现代勇者外观一套装备只有一张卡；经典仍按原版画稿差分', () => {
+  const { c } = setup(); start(c);
+  const dom = modernUi(c);
+  const real = c.UI.classic.openHeroPage;
+  let context;
+  c.UI.classic.openHeroPage = (hero, opts) => { context = hero; return real(hero, opts); };
+  c.TowerUI.openHeroStatus();
+  const gearOf = (id) => context.gearList.find((g) => Number(g.id) === id);
+  /* 现代模式没有外观差分：头 / 拳套 / 衣服 / 鞋子都只有一张卡。 */
+  assert.deepEqual(plain(gearOf(21).tiers), [1], '现代蓝装头巾只有一张卡');
+  assert.deepEqual(plain(gearOf(49).tiers), [1], '现代紫装头巾只有一张卡');
+  assert.deepEqual(plain(gearOf(51).tiers), [1], '现代衣服只有一张卡');
+  assert.deepEqual(plain(gearOf(201).tiers), [1], '现代狂战头只有一张卡');
+  /* 即使外部传入第 3 档，现代模式也收成唯一的造型（不会多出同名卡）。 */
+  const out = context.onEquip([{ id: 49, tier: 3 }, null, null, null]);
+  assert.equal(out.ok, true, out && out.msg);
+  const saved = plain(c.Tower._debugRun('endless').hero.appearance);
+  assert.deepEqual(saved.map((g) => [g.id, g.tier]), [[49, 1]], '现代外观不保留差分档');
+  assert.equal(c.Engine.wearsFor(saved)[0].src, 'Head_19_1', '现代头饰固定用基础稿');
+
+  /* 经典模式仍是原来的差分档：蓝 2 张、紫 3 张、单张画稿的套只有 1 张。 */
+  c.State.setSettings({ uiMode: 'classic' });
+  context = null;
+  c.TowerUI.openHeroStatus();
+  const classicGearOf = (id) => context.gearList.find((g) => Number(g.id) === id);
+  assert.deepEqual(plain(classicGearOf(21).tiers), [1, 2], '经典蓝装格斗头巾（q2）有 2 张画稿');
+  assert.deepEqual(plain(classicGearOf(49).tiers), [1, 2, 3], '经典紫装格斗头巾（q3）有 3 张画稿');
+  assert.deepEqual(plain(classicGearOf(51).tiers), [1], '经典格斗服是衣服，不分档');
+  assert.deepEqual(plain(classicGearOf(201).tiers), [1], '经典黑狂战头只有基础稿（硬加档会贴到空帧）');
+  const classicOut = context.onEquip([{ id: 49, tier: 3 }, null, null, null]);
+  assert.equal(classicOut.ok, true, classicOut && classicOut.msg);
+  const classicSaved = plain(c.Tower._debugRun('endless').hero.appearance);
+  assert.deepEqual(classicSaved.map((g) => [g.id, g.tier]), [[49, 3]], '经典差分档要随外观一起存进本局勇者');
+  assert.equal(c.Engine.wearsFor(classicSaved)[0].src, 'Head_19_3', '经典头饰图集要贴第 3 档画稿');
+  /* 用户 2026-10-28 口径：外观页**不再标档位数字** —— 同名差分卡直接同名显示（挑哪张看画稿/立绘）。
+   * 断言先剥掉注释：上面这些说明里就写着 ②③，不剥会被自己的注释骗过。 */
+  const bare = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  for (const file of ['js/tower-ui.js', 'js/classic-ui.js', 'js/ssfight/ui-status.js']) {
+    assert.ok(!/②③/.test(bare(file)), file + ' 不应再输出档位角标');
+  }
+  assert.ok(!/\.hero-gear-tier\s*\{/.test(bare('css/tower.css')), '档位角标的样式应已删除');
 });
 
 test('爬塔中换外观只改本局勇者四部位，不碰账号装备并能读档保留', () => {
@@ -535,6 +630,48 @@ test('爬塔中换外观只改本局勇者四部位，不碰账号装备并能�
   assert.deepEqual(plain(loaded.Tower._debugRun('endless').hero.appearance.map(it => it.id)), [203]);
   assert.equal(loaded.Tower.setHeroAppearance([{ id: 203, ext: [] }]).ok, true);
   assert.equal(run.hero.wins, 0);
+});
+
+test('现代界面无贴图的装备当作不存在：橙装沿用紫装图、外观池与融合都把它排除', () => {
+  const { c } = setup(); start(c);
+  modernUi(c);   // 装上 UI.classic（现代界面）与 State
+  const C = c.UI.classic;
+  /* 橙装 / 黑装自己没有 PNG：沿用同名同部位、有图的那一件（正常梯度里就是它的紫装）。 */
+  assert.equal(C.gearIconId({ id: 125, name: '格斗头巾', type: 0, quality: 4 }), 49, '橙装格斗头巾沿用紫装 49 的图');
+  assert.equal(C.gearIconId({ id: 213, name: '格斗头巾', type: 0, quality: 5 }), 49, '黑装同理');
+  assert.equal(C.gearIconId({ id: 205, name: '狂战头盔', type: 0, quality: 4 }), 201, '橙狂战沿用紫狂战 201');
+  assert.equal(C.gearIconId({ id: 49, name: '格斗头巾', type: 0, quality: 3 }), 49, '自己有图就照旧用自己');
+  assert.equal(C.gearIconId({ id: 177, name: '怒战头盔', type: 0, quality: 4 }), 0, '怒战没有任何紫装图');
+  assert.equal(C.gearIconId({ id: 197, name: '深海头饰', type: 0, quality: 4 }), 0, '深海没有任何紫装图');
+  assert.equal(C.gearHasArt({ id: 125 }), true, '只传 id 也能认出橙装有图');
+  assert.equal(C.gearHasArt({ id: 177 }), false, '只传 id 也能认出怒战无图');
+  assert.match(C.gearImg({ id: 125, name: '格斗头巾', type: 0, quality: 4 }), /gear-49\.png/, '橙装出图走紫装 PNG');
+  assert.equal(C.gearImg({ id: 177, name: '怒战头盔', type: 0, quality: 4 }), '', '没有图的装备不出图');
+  /* 现代外观池里不再出现这些装备（当作不存在）；有图的橙装仍在。 */
+  const pick = (id) => C.gearIconId({ id: id }) > 0;
+  for (const id of [177, 197, 209, 281]) assert.equal(pick(id), false, id + ' 不该有现代贴图');
+  assert.equal(pick(125), true, '橙装有紫装图，仍算存在');
+  /* 贴图覆盖范围写死在 GEAR_ICON_RANGES 里：必须和 images/ui/icons/gear/ 的实际文件一一对应
+   *（换素材时同步改这里，别让「有图却判成没图 / 没图却去请求 404」）。 */
+  const files = fs.readdirSync(path.join(ROOT, 'images/ui/icons/gear'))
+    .map((f) => Number((/gear-(\d+)\.png/.exec(f) || [])[1])).filter(Boolean).sort((a, b) => a - b);
+  const ids = [];
+  for (const [a, b] of C.gearIconRanges) for (let i = a; i <= b; i++) ids.push(i);
+  assert.deepEqual(ids, files, 'GEAR_ICON_RANGES 必须与 images/ui/icons/gear/ 完全一致');
+  /* 不再借经典素材、也不做任何占位。 */
+  for (const file of ['js/classic-ui.js', 'js/ssfight/ui-status.js']) {
+    const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    assert.ok(!/mountGearCard|gearArtFallback|gear-glyph/.test(src), file + ' 不应再借经典贴图 / 不做占位');
+  }
+  /* 「当作不存在」要覆盖所有现代界面入口：背包列表 / 出售页 / 融合材料与产物 / 外观池。 */
+  const uiSrc = fs.readFileSync(path.join(ROOT, 'js/classic-ui.js'), 'utf8');
+  assert.match(uiSrc, /gearsInDisplayOrder\(\)\.filter\(gearHasArt\)/, '我的装备列表要滤掉无贴图装备');
+  assert.match(uiSrc, /State\.myGears\(\)\.slice\(\)\.reverse\(\)\.filter\(hasArt\)/, '出售页也要滤掉');
+  const fusionSrc = fs.readFileSync(path.join(ROOT, 'js/classic-fusion.js'), 'utf8');
+  assert.match(fusionSrc, /State\.myGears\(\)\.filter\(hasArt\)/, '融合材料只列有贴图的装备');
+  assert.match(fusionSrc, /targetAllowed/, '融合产物也只落在有贴图的装备上');
+  assert.match(fs.readFileSync(path.join(ROOT, 'js/state.js'), 'utf8'), /opts\.targetAllowed/, 'mergeGears 支持产物过滤');
+  assert.match(fs.readFileSync(path.join(ROOT, 'js/tower-ui.js'), 'utf8'), /heroGearVisible/, '外观池同样按有图过滤');
 });
 
 test('勇者四维：生命800、力敏速65，按20%下限在55~85之间重分配并读档保留', () => {

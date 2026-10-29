@@ -161,7 +161,8 @@
   async function run(opts) {
     if (activeController) activeController.cancel();
     const runId = ++runSeq;
-    const canvas = opts.canvas, ctx = canvas.getContext('2d');
+    const canvas = opts.canvas;
+    let ctx = canvas.getContext('2d');
 
     /* HUD 离屏缓存：名字 / 血条 / 血量 / 回合数 / 护盾 / 削弱 / 题面 / 角落键都是
      * 每帧重画的静态内容，只有数值变化时才需要重绘；低端设备上反复 strokeText +
@@ -191,7 +192,26 @@
     for (const ids of Object.values(FX_SHEETS)) for (const id of ids) load.add(id);
     for (const side of wears) for (const wear of side) if (wear) load.add(wear.src);
     for (const layer of region.layers) { if (layer.id) load.add(layer.id); if (layer.fx) load.add(layer.fxSheet || layer.fx); }
-    await Engine.loadSheets([...load]);
+    const watchIds = [...load];
+    /* 荣耀 / 华为 WebView 丢图的恢复节拍：`loadSheets` 的 5 秒截止线只保证“开打不等”，
+     * 没下来的图以前这一场就永远缺着。这里在战斗期间每秒补一次，直连失败走 blob 兜底。 */
+    let retryTimer = 0, lastHealth = 0, lastRecover = 0, retryTries = 0, healthTries = 0;
+    const retryMissingSheets = () => {
+      if (!Engine.missingSheets || !Engine.retrySheets) return;
+      const left = Engine.missingSheets(watchIds);
+      if (left.length) Engine.retrySheets(left);
+    };
+    await Engine.loadSheets(watchIds);
+    if (watchIds.length && Engine.missingSheets && Engine.retrySheets && typeof setInterval === 'function') {
+      retryTimer = setInterval(() => {
+        if (stopped) return;
+        /* 已经补全就不再空转；最多 20 次（约 24s），别让 404 素材一直重试。 */
+        if (!Engine.missingSheets(watchIds).length || ++retryTries > 20) {
+          clearInterval(retryTimer); retryTimer = 0; return;
+        }
+        retryMissingSheets();
+      }, 1200);
+    }
     /* 角色 / 特效图集要压在场景图集之上（同名 label 只认最后一个注册的）。
      * 启动时不再预拉这批图（见 main.js 的 BATTLE_SHEETS），所以这里补一次优先级；
      * 首页空闲预热完成时也会由 Main.pinBattleAssets() 做同一件事，幂等。 */
@@ -270,6 +290,7 @@
     const skipButton = addCornerButton(cornerRects.skip, '跳过', '跳过战斗');
     function clean() {
       cancelAnimationFrame(raf); for (const b of cornerDom) b.remove();
+      if (retryTimer && typeof clearInterval === 'function') { clearInterval(retryTimer); retryTimer = 0; }
       if (document.removeEventListener) document.removeEventListener('visibilitychange', onVisibility);
       if (pickups) pickups.close();
       if (canvas.onclick === onClick) canvas.onclick = previousClick;
@@ -397,7 +418,7 @@
       if (!r.hpAfter) return;
       for (let side = 0; side < 2; side++) {
         let next = r.hpAfter[side];
-        if (counterPending && before && (r.counterDmg || r.counterFakeDie || r.counterRebound)) {
+        if (counterPending && before && (r.counterDmg || r.counterFakeDie || r.counterRebound || r.counterBlocked)) {
           // hpAfter is clamped at zero. Adding an overkill counter damage back
           // would manufacture HP, so derive this frame from the event's start.
           next = before[side] + (side === r.attacker
@@ -528,8 +549,40 @@
         if (cornerRects.skip) drawKey(cornerRects.skip, '跳过', false);
       }
     }
+    /* 荣耀 / 华为 WebView 的恢复入口：重置两块画布（GPU 表面可能已被回收）并重取图集。
+     * `canvas.width = W` 会清空当前帧，但下一帧 render 会完整重画；`ctx` 也重新取一次，
+     * 避免某些内核在表面回收后把旧上下文留成“能调用但画不出来”的状态。 */
+    function resetBattleSurface() {
+      try {
+        canvas.width = W; canvas.height = H;
+        ctx = canvas.getContext('2d');
+        hudCanvas.width = W; hudCanvas.height = H;
+        hudSig = '';
+      } catch (e) {}
+    }
+    function recoverBattleImages() {
+      resetBattleSurface();
+      if (!Engine.recoverSheets) return;
+      /* 丢图通常是“整张 WebView 图片缓存都没了”，不只战斗那几十张。只补 watchIds 会让
+       * 战斗恢复、回首页后头像 / 图标 / 数字仍然缺。这里把当前注册过的图集全部重取一遍；
+       * 健康检查只在真的画不出来时才会走到，正常一局一次都不会触发。 */
+      const all = Object.keys(Engine.SHEETS || {});
+      Engine.recoverSheets(all.length ? all : watchIds).catch(() => {});
+    }
     function render(now) {
       if (stopped) return;
+      /* 图集“看起来加载成功”不等于现在还能画：荣耀 WebView 会在内存回收后丢掉解码数据，
+       * `naturalWidth` 仍是原值、`drawImage` 却画不出像素。每 2 秒拿图集缩画到 2×2 验一次，
+       * 连续失败就重置画布 + 强制重取（最多 3 次，避免 404 素材无限刷）。 */
+      if (now - lastHealth > 2000) {
+        lastHealth = now;
+        const missingNow = Engine.missingSheets ? Engine.missingSheets(watchIds) : [];
+        if (watchIds.length && !missingNow.length && Engine.imagesHealthy && !Engine.imagesHealthy(watchIds) && healthTries < 3 && now - lastRecover > 6000) {
+          lastRecover = now; healthTries++;
+          try { console.warn('[battle] image-loss recover #' + healthTries); } catch (e) {}
+          recoverBattleImages();
+        }
+      }
       const dt = Math.min(100, Math.max(0, now - last)) * speed; last = now;
       if (pickups && combatStarted && !ending && !skipped && !document.hidden) pickups.tick(dt);
       Engine.updatePlayer(player, dt); scenePlayers.forEach((p) => Engine.updatePlayer(p, dt));
@@ -575,6 +628,11 @@
         return;
       }
       if (stopped || raf) return;
+      /* 回前台先重置画布并补图：荣耀/华为 WebView 会把后台期间的 GPU 表面和图片解码
+       * 缓存一起回收，不主动重画会停在“纯色底 + 文字”的残帧上。 */
+      resetBattleSurface();
+      retryMissingSheets();
+      try { if (Engine.retryFailedImages) Engine.retryFailedImages(); } catch (e) {}
       last = performance.now();
       raf = requestAnimationFrame(render);
     }
@@ -651,7 +709,12 @@
        * 保证 Sim 新增的 `action:'pet'` 不会掉进下面的普攻分支被当成松鼠出手。 */
       if (r.action === 'pet') {
         applyHp(r);
-        if (r.dmg) damageFloater(def, r.dmg, !!r.crit);
+        if (r.dmg) {
+          damageFloater(def, r.dmg, !!r.crit);
+          /* 幻兽直接伤害也要让**对方**播受击（蛮犀牛 / 逆向推倒）：以前这里只飘字，
+           * 对方站着不动（用户 2026-10-29 反馈）。装死由 `reaction` 按 fakeDieSide 处理。 */
+          if (hps[def] > 0 && !fighters[def].dead) await reaction(def, r);
+        }
         if (r.healSelf) floater(att, '+' + fmtBig(r.healSelf), 'g');
         if (r.dodgeHeal) floater(def, '+' + fmtBig(r.dodgeHeal), 'g');
         if (r.fakeDie) floater(Number(r.fakeDieSide == null ? def : r.fakeDieSide), '装死', 'y');
@@ -717,13 +780,14 @@
       const moved = !f.npc ? (name === 'fightCommonAttack' || name === 'fightWeaponAttack') : name === f.npc + '_common_attack' && f.npc !== 'xh';
       let recoveredFromCounter = false;
       // 反击原版使用 beatBack；进攻者仍停在接近后的动作末帧，不提前瞬移回待机。
-      if ((r.counterDmg || r.counterFakeDie || r.counterRebound) && hps[def] > 0) {
+      if ((r.counterDmg || r.counterFakeDie || r.counterRebound || r.counterBlocked) && hps[def] > 0) {
         floater(def, '反击', 'y');
         const counterName = fighters[def].npc ? fighters[def].npc + '_beatBack' : 'beatBack';
         let counterHit = false, counterReaction = Promise.resolve();
         const counterImpact = () => {
           if (counterHit || aborted()) return; counterHit = true; applyHp(r);
           if (r.counterDmg) floater(att, '-' + fmtBig(r.counterDmg), 'r');
+          else if (r.counterBlocked) floater(att, r.counterBlocked, 'y');
           if (r.counterFakeDie) {
             /* 同样分「挨反击的那位装死」与「反击者被反伤打死装死」两种情况。 */
             const who = r.counterFakeDieSide == null ? att : r.counterFakeDieSide;

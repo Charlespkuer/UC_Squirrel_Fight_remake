@@ -178,6 +178,20 @@
     const arr = listOf(hero, it.kind), at = arr.findIndex((raw) => Number(String(raw).split(':')[0]) === it.id);
     if (at >= 0) arr[at] = it.id + ':' + level;
   }
+  /** 当前是不是现代界面（只影响「外观能不能画出来」这一层，不碰数值）。 */
+  function modernUi() {
+    try { return !!(window.State && State.settings && State.settings().uiMode === 'modern'); }
+    catch (e) { return false; }
+  }
+  /** 外观件 → 现代图集套装序号（`Head_<index>_<tier>`）。没有这套数据时返回 NaN。 */
+  function outfitIndexOf(setId) {
+    const id = Number(setId);
+    if (!(id > 0)) return NaN;
+    try {
+      const set = window.gearSetMap && gearSetMap.getValue(String(id));
+      return set ? Number(set.index) : NaN;
+    } catch (e) { return NaN; }
+  }
   function cleanAppearance(raw) {
     const out = [], parts = new Set();
     for (const value of Array.isArray(raw) ? raw : []) {
@@ -186,23 +200,36 @@
       /* 外观数据源接受 GData.GEAR_BASE 的原始 288 个 id（外观页展示时合并重复黑装后为 280 件）；
        * 其中 q5 黑装上位（213~264）与深海 / 机器猫 q3（189~196）不在 APK 的 gearMap 里 ——
        * 只做外观时按 GEAR_BASE 行补出 type / setId / quality，不把这些 id 整件丢掉。 */
-      let type, quality;
+      let type, quality, setId = 0;
       if (def) {
         type = Number(def.type);
-        const set = gearSetMap.getValue(def.setId);
+        setId = Number(def.setId) || 0;
+        const set = gearSetMap.getValue(String(setId));
         quality = Number(set && set.quality) || 0;
       } else {
         const rows = (window.GData && Array.isArray(GData.GEAR_BASE)) ? GData.GEAR_BASE : null;
         const row = rows ? rows.find((r) => Number(r && r[0]) === id) : null;
         if (!row) continue;
         type = Number(row[3]);
+        setId = Number(row[1]) || 0;
         quality = Math.max(0, Math.min(5, Number(row[2]) || 0));
       }
       if (type < 0 || type > 3 || parts.has(type)) continue;
       const ext = (Array.isArray(item.ext) ? item.ext : []).filter(object).map((e) => ({
         id: integer(e.id, 0, 0, 100000), level: integer(e.level, 1, 1, 3),
       })).filter((e) => e.id > 0).slice(0, 3);
-      const clean = { id, type, ext, quality: quality, used: true };
+      /* 【2026-11】外观差分（原版头 / 拳套的强化档画稿）：勇者外观件没有真词条，
+       * 玩家在换装页挑的是 1~3 档里的哪一张画稿，这里原样存下来（绘制入口都读 tier）。 */
+      let tier = integer(item.tier, 1, 1, 3);
+      /* 现代模式：只保留 `images/battle/outfit/` 真的画得出来的套装；且**不做外观差分**，
+       * 一套装备只有一张卡 / 一个造型，tier 统一为 1。否则详情页 / 战斗里那件（甚至整套）
+       * 会直接消失，玩家看到的就是「没穿装备」。 */
+      if (modernUi() && window.Engine && typeof Engine.hasModernOutfit === 'function') {
+        const index = outfitIndexOf(setId);
+        if (!Number.isFinite(index) || !Engine.hasModernOutfit(index)) continue;
+        tier = 1;
+      }
+      const clean = { id, type, ext, tier, quality: quality, used: true };
       if (item.orange === true) { clean.orange = true; clean.quality = 4; }
       out.push(clean); parts.add(type);
     }

@@ -1590,7 +1590,8 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
     ui.modalButton('重新挑战').run();
     assert.equal(T._debugRun('endless').retryToken, before - 1, '重新挑战要扣 1 枚铸币');
     assert.ok(!T._debugRun('endless').pendingRetry, '选过之后标记要清掉');
-    assert.ok(T._debugRun('endless').attempt, '点「重新挑战」应当立刻开打同一场');
+    /* 【2026-10-28 用户口径】铸币复活回滚完停在开战前的准备页，不再自动开打。 */
+    assert.ok(!T._debugRun('endless').attempt, '点「重新挑战」只回滚，不自动开打');
   });
 
   check('战斗掉落的待选增益：退出重进不丢，重打同一场也不能刷新选项', () => {
@@ -2254,6 +2255,24 @@ hr('13. 2026-10 用户口径：抽奖卷只在结算时算（放弃本局弹窗�
     assert.match(ui.last('page').content, /无尽塔本局战报/, '大厅能重新打开上局完整战报');
     T.endlessInfo(); T.previewEndlessSummary(); T.abandon('endless');
     assert.equal(c.State.state().props[50], paid, '重复查看或重复结算不会重发抽奖卷');
+  });
+
+  check('结算战报：正文单独滚动，底部操作固定在面板底部（iOS 不依赖 sticky）', () => {
+    const css = fs.readFileSync(path.join(ROOT, 'css', 'tower.css'), 'utf8').replace(/\r\n/g, '\n');
+    const rule = (sel) => {
+      const esc = sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return (css.match(new RegExp(esc + '\\s*\\{[^}]*\\}')) || [''])[0];
+    };
+    const main = rule('.endless-summary-page > .tower-main');
+    assert.match(main, /overflow:\s*hidden/, '战报容器不再整列滚动：' + main);
+    assert.match(main, /display:\s*flex/, '战报容器改成 flex 三段：' + main);
+    assert.match(main, /flex-direction:\s*column/, '战报容器纵向排列：' + main);
+    const body = rule('.endless-summary .summary-body');
+    assert.match(body, /flex:\s*1 1 auto/, '正文占据剩余高度：' + body);
+    assert.match(body, /overflow-y:\s*auto/, '只有正文可以滚动：' + body);
+    const actions = rule('.endless-summary .summary-actions');
+    assert.match(actions, /position:\s*relative/, '底部操作不再依赖 sticky：' + actions);
+    assert.ok(!/position:\s*sticky/.test(actions), 'iOS 上 sticky 会失效，不能再用：' + actions);
   });
 
   check('深度曲线：首轮不变，百层后折扣继承末值并重走首轮相对增长', () => {

@@ -385,6 +385,61 @@
    * ============================================================ */
   let bgSuspended = false;      // 音乐已因切后台暂停
   let inBackground = false;     // 当前在后台（无论是否开启「后台运行」）
+  /** iOS / iPadOS WKWebView（iPadOS 13+ 的 UA 可能伪装成 Macintosh）。 */
+  function iosWebKit() {
+    try {
+      const ua = String(navigator.userAgent || '');
+      return /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    } catch (e) { return false; }
+  }
+  /** iOS 切后台回来：WKWebView 会释放 canvas 的绘制缓冲，也可能丢掉 SVG 内嵌位图 /
+   *  CSS 背景的解码结果；页面本身不会重建，于是看起来就是「背景消失」。
+   *  这里只在 iOS 上按当前屏幕补画一次（title / modern home / 经典 SVG / CSS 底板），
+   *  不改变游戏状态，也不在桌面或安卓上多跑。 */
+  let foregroundRepaintSeq = 0;
+  function scheduleForegroundRepaint() {
+    if (!iosWebKit()) return;
+    const seq = ++foregroundRepaintSeq;
+    const paint = () => {
+      if (seq !== foregroundRepaintSeq) return;
+      try { fitCanvas(); } catch (e) {}
+      if (mode === 'title') {
+        try { drawHomeBg(ctx, homeBgBlur()); } catch (e) {}
+      } else if (mode === 'home' && !ssfightHomeActive()) {
+        try { drawHomeBg(ctx, homeBgBlur()); } catch (e) {}
+        /* 如果回来时 rAF 还没恢复，重启主界面循环；已经在跑就只补这一帧背景。 */
+        if (!rafId) { try { startHomeScene(); } catch (e) {} }
+      }
+      try { if (window.SfRender && SfRender.repaintRaster) SfRender.repaintRaster(); } catch (e) {}
+      try { repaintCssBackgrounds(); } catch (e) {}
+    };
+    /* 回前台的第一帧可能还在恢复图层；补两次（下一次 rAF + 180ms）。 */
+    requestAnimationFrame(() => { paint(); setTimeout(paint, 180); });
+  }
+  /** 让 CSS 底板/页面背景重新走一遍绘制（只重设 inline 样式，不改 CSS 规则）。 */
+  function repaintCssBackgrounds() {
+    const list = document.querySelectorAll('#ui .classic-page, #ui .ssfight-home, #ui .classic-board, #ui .tower-page');
+    for (const el of list) {
+      let bg = 'none', color = '';
+      try {
+        const cs = getComputedStyle(el);
+        bg = cs.backgroundImage || 'none';
+        color = cs.backgroundColor || '';
+      } catch (e) {}
+      if (bg && bg !== 'none') {
+        const previous = el.style.backgroundImage;
+        el.style.backgroundImage = 'none';
+        void el.offsetHeight;               // 强制一次样式/布局，再还回去
+        el.style.backgroundImage = previous;
+      } else if (color && color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') {
+        /* 无尽塔整页是纯色底（--tower-bg），没有图片层；同样轻推一次。 */
+        const previous = el.style.backgroundColor;
+        el.style.backgroundColor = 'transparent';
+        void el.offsetHeight;
+        el.style.backgroundColor = previous;
+      }
+    }
+  }
   function enterBackground() {
     if (inBackground) return;
     inBackground = true;
@@ -410,9 +465,12 @@
     window.__ssdzIsBackgrounded = () => inBackground;
     if (document.addEventListener) {
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') enterBackground(); else enterForeground();
+        if (document.visibilityState === 'hidden') enterBackground();
+        else { enterForeground(); scheduleForegroundRepaint(); }
       });
     }
+    /* iOS 从后台回前台有时只补发 pageshow、不发 visibilitychange（PWA 尤其常见）。 */
+    window.addEventListener('pageshow', () => scheduleForegroundRepaint());
   } catch (e) {}
   function setAudioBlocked(on) {
     if (audioBlocked === !!on) return;

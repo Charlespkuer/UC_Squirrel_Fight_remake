@@ -1037,8 +1037,10 @@
       /* 塔 buff「先机预判」：每场战斗**敌方第一次攻击必定闪避**，随后我方立刻额外行动一次。
        * 放在这里与「风影身法」（首次伤害归零）同一处：已经把命中判完、伤害算出来了，
        * 直接把它归零并打上闪避标记 —— 武器分支的常规闪避判定在更前面，所以那一次
-       * 天然逃掉的不消耗这个「必定闪避」额度。 */
-      if (dmg > 0 && def.mods && Number(def.mods.firstDodge) > 0 && !def.mods.firstDodgeUsed) {
+       * 天然逃掉的不消耗这个「必定闪避」额度。
+       * `opts.noDodge` 给**反击**用：反击是不可闪避的直接回应（用户 2026-10-29 口径），
+       * 不能被先机预判 / 风影身法这类“第一次攻击”机制吃掉。 */
+      if (!opts.noDodge && dmg > 0 && def.mods && Number(def.mods.firstDodge) > 0 && !def.mods.firstDodgeUsed) {
         def.mods.firstDodgeUsed = true;
         dmg = 0;
         markDodge(r, def);
@@ -1052,7 +1054,7 @@
           if (!immediate) immediate = { actor: def, reason: 'firstDodge' };
         }
       }
-      if (dmg > 0 && def.mods && def.mods.firstHitZero && !def.mods.firstHitZeroUsed) {
+      if (!opts.noDodge && dmg > 0 && def.mods && def.mods.firstHitZero && !def.mods.firstHitZeroUsed) {
         def.mods.firstHitZeroUsed = true;
         dmg = 0;
         r.firstHitZero = true;
@@ -1096,8 +1098,13 @@
       att.mustHitNext = false;
       r.dmg = (r.dmg || 0) + dmg;
       if (red.rebound) {
-        /* 反噬豁免：免疫反伤（包括绝对防御的反伤），但**不免疫**被挡住这件事本身。 */
-        if (reflectImmune(att)) {
+        /* 反击（`opts.noReflect`）：反击伤害是对出手方的直接回应，**不再让原出手方的
+         * 绝对防御 / 荆棘把它弹回反击者**。只保留“被挡住”（伤害为 0）与「绝对防御」标记，
+         * 不结算反弹伤害 —— 否则玩家会看到“我反击，掉血的却是我这边”。 */
+        if (opts.noReflect) {
+          r.reflectBlocked = (r.reflectBlocked || 0) + red.rebound;
+        } else if (reflectImmune(att)) {
+          /* 反噬豁免：免疫反伤（包括绝对防御的反伤），但**不免疫**被挡住这件事本身。 */
           r.reflectBlocked = (r.reflectBlocked || 0) + red.rebound;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '反噬豁免'; r.noteSide = att.side;
         } else {
@@ -1108,8 +1115,8 @@
       }
       // —— 受击/命中方机制（挑战塔 NPC 池） ——
       if (dmg > 0) {
-        /* 反噬豁免：本场免疫一切反伤 —— 直接把三种反伤一起跳过。 */
-        const noReflect = reflectImmune(att);
+        /* 反噬豁免 / 反击：本场免疫一切反伤 —— 直接把三种反伤一起跳过。 */
+        const noReflect = !!opts.noReflect || reflectImmune(att);
         if (def.mech.includes('thorns') && att.hp > 0 && !noReflect) {   // 荆棘铁壁：反弹 15%
           const reflect = Math.max(1, Math.round(dmg * 0.15));
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
@@ -1581,34 +1588,39 @@
       /* 反击：被打方用**普攻**反击。必中类近战武器也可以被反击，只有大榔头（2）的说明
        * 明确写“不会被反击”；死神镰刀（15）只是必中，仍可被反击。 */
       if (r.fakeDie || def.hp <= 0 || att.hp <= 0) return;
-      if (r.thornsDmg || r.reboundHurt) return;                  // 已经反伤过 —— 不再反击
+      /* 荆棘反伤已经回应过这一手，不再反击；**绝对防御不同**（用户 2026-10-29 口径）：
+       * 举盾挡下之后，用盾的一方仍按同样的 25%（熊猫 45%）概率反击。 */
+      if (r.thornsDmg || (r.reboundHurt && !r.jueDui)) return;
       let chanceBase = 25;
       if (def.npcType === 'xm') chanceBase = 45;                 // 熊猫善反击
       if (!chance(chanceBase)) return;
       let raw = Math.round(effPower(def) * (0.6 + Math.random() * 0.4) * (1 + effect(def, 5) / 100));
       if (skill(def, 24)) raw = Math.round(raw * (1 + 0.5 + 0.06 * (Math.min(skill(def, 24), 10) - 1) + trueVal(24, skill(def, 24)) / 100)); // 致命反击
-      if (chance(dodgeChance(def, att) * 0.5)) { r.counterDodge = true; petOnDodge(def, r); return; }
+      /* 反击**不可闪避**（用户 2026-10-29 口径）：不再走 `dodgeChance` 判定，
+       * 也不让「先机预判 / 风影身法」把这一下吃掉（传 `noDodge`）。
+       * 反击伤害只打**原出手方**：传 `noReflect` 禁止绝对防御 / 荆棘把这一下弹回反击者
+       * （以前的复用 `applyDamage` 会让某些反伤触发时，掉血的变成反击那一方）。 */
       const counter = { action: 'common' };
-      applyDamage(def, att, raw, counter, {});
+      applyDamage(def, att, raw, counter, { noDodge: true, noReflect: true, counter: true });
       r.counterDmg = counter.dmg;
+      if (counter.jueDui || counter.guiJia) {
+        r.counterBlocked = counter.jueDui ? '绝对防御' : '龟甲术';
+      } else if (counter.shellAbsorb) {
+        r.counterBlocked = '护盾';
+      }
       if (counter.fakeDie) {
         r.counterFakeDie = true;
-        /* 反击里也可能出装死（反击者被绝对防御反伤打死）—— 小回合也要记清是谁装的死。 */
+        /* 反击里也可能出装死（反击伤害本身把出手方打到装死）—— 小回合也要记清是谁装的死。 */
         if (counter.fakeDieSide != null) r.counterFakeDieSide = counter.fakeDieSide;
+      }
+      if (counter.deathSave) {
+        /* 反击触发涅槃 / 金蝉脱壳时，塔的死亡统计也要看得到（与普通回合同一口径）。 */
+        r.counterDeathSave = true;
+        if (counter.revive) r.counterRevive = true;
+        if (counter.noteText) { r.noteText = (r.noteText ? r.noteText + '·' : '') + counter.noteText; r.noteSide = counter.noteSide; }
       }
       if (counter.reboundHurt) r.counterRebound = counter.reboundHurt;
       if (counter.thornsDmg) r.counterThorns = counter.thornsDmg;
-      if (counter.firstDodge) {
-        r.firstDodge = true;
-        r.noteText = (r.noteText ? r.noteText + '·' : '') + (counter.firstDodgeName || '先机预判');
-        r.noteSide = counter.noteSide;
-        if (counter.firstDodgeFreeTurn) r.firstDodgeFreeTurn = true;
-      }
-      if (counter.firstHitZero) {
-        r.firstHitZero = true;
-        r.noteText = (r.noteText ? r.noteText + '·' : '') + (counter.firstHitZeroName || '先机预判');
-        r.noteSide = counter.noteSide;
-      }
     }
 
     function playerLikeAction(att, def) {
@@ -1864,6 +1876,7 @@
           case 18: { // 吸铁大法
             const raw = Math.round((R(5, 20) + 4 * (Math.min(lv, 10) - 1)) * (1 + effect(att, 41) / 100));
             if (chance(dodgeChance(att, def))) { att.mustHitNext = false; markDodge(r, def); break; }
+            /* 用户 2026-10-29 口径：吸铁大法伤害无视装死；技能介绍不写。 */
             applyDamage(att, def, raw, r, { ignoreFakeDie: true });
             const disarmPct = 10 + 4 * (Math.min(lv, 10) - 1) + trueVal(18, lv);
             if (chance(disarmPct)) {

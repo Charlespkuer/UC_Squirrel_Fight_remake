@@ -13,7 +13,8 @@
  *   主塔目标等级 LT(n) = min(90, round(28 + 1.4(n−1)))
  *   主塔强度系数 M(n)  = (1+0.03⌊(m−1)/5⌋)(1+0.04⌊(m−1)/10⌋), m=min(n,30)
  *   主塔单层松果 G(n)  = min(50, 25+(n−1))，再 ×1.5（x5）/×2（x10）（见【D1】）
- *   无尽段系数   B(s)  = min(10, 1.5^(s−1)), s=⌈n/5⌉
+ *   无尽段系数   B(s)  = min(10, 1.5^(s−1)), s=⌈n/5⌉；**第 1~5 层抬高起步、压平坡度**
+ *                       B(n) = 1.20 → 1.40（线性；第 6 层正好仍是 ×1.5，见【D2】）
  *   无尽轮内曲线 K(r)  = 1（r≤30）；1.07^min(r−30,20) × 1.0555^max(0,r−50)（见【D2】）
  *   无尽跨轮基础 F(100c+r) = F(r) × (0.70 × F(100)/F(1))^c，属性/生命分别归一（见【D2b】）
  *   抽奖卷       T(s)  = s（s≤2）；2+2(s−2)（s≥3）——10 层前每档 +1、之后每档 +2
@@ -90,7 +91,28 @@
 
   function endlessLevel(n) { return Math.min(90, Math.round(24 + 1.2 * (n - 1))); }
   const endlessSegment = (n) => Math.max(1, Math.ceil(n / 5));
-  function endlessMult(n) { return Math.min(10, Math.pow(1.5, endlessSegment(n) - 1)); }
+  /* ---------- 第 1~5 层的入段（2026-10-28 用户口径：1 层基础更高、1~5 层增幅更小） ----------
+   * 段位倍率原来按 `ceil(n/5)` 整段取整：1~5 层恒为 ×1、**第 6 层突然 ×1.5** ——
+   * 5→6 层的血量 / 攻击直接跳 +50%（实拍三侠血 345 → 536、力量 12 → 18），
+   * 玩家体感是「5 层和 6 层差太多」。
+   * 第一版（第四百二十七批）把 ×1.5 均摊成几何爬坡（1 → 1.383）；用户接着要求
+   * 「**1 层基础更高、1~5 层涨得更少**」—— 于是改成**抬高起步 + 压平坡度**：
+   *   第 1 层 ×1.20（起步比原来高 20%），到第 5 层只涨到 ×1.40
+   *   （四层共 +16.7%，每层约 +4%，远小于第一版的每层 +8.45%）；
+   *   第 6 层仍是本段原值 ×1.5 —— **6~10 层数值一点不动**，5→6 只剩约 ×1.11。
+   * 两个端点单独提成常量，方便继续微调（用户已连续两轮调这五层）。
+   * ⚠ 只作用于**轮内层号 ≤5**：101 / 201 层（轮内第 1 层）同样吃这一档，与首轮一致。 */
+  const ENDLESS_EARLY_BASE = 1.20;   // 第 1 层的段位倍率（原 ×1）
+  const ENDLESS_EARLY_END = 1.40;    // 第 5 层的段位倍率（第 6 层仍是 ×1.5，见 endlessMult）
+  const ENDLESS_RAMP_LAYER = 6;      // 从这一层起回到「段内恒定 ×1.5」
+  function endlessMult(n) {
+    const layer = Math.max(1, Math.floor(Number(n) || 1));
+    const base = Math.min(10, Math.pow(1.5, endlessSegment(layer) - 1));
+    if (layer >= ENDLESS_RAMP_LAYER) return base;
+    /* 1~5 层线性：1.20 / 1.25 / 1.30 / 1.35 / 1.40 */
+    const t = (layer - 1) / (ENDLESS_RAMP_LAYER - 2);
+    return Math.min(10, ENDLESS_EARLY_BASE + (ENDLESS_EARLY_END - ENDLESS_EARLY_BASE) * t);
+  }
   /* ============================================================
    * 30 层之后的「深度曲线」
    *
@@ -278,9 +300,14 @@
     const cycle = cycleLayer(layer), round = Math.floor((layer - 1) / LAYER_CYCLE);
     const level = endlessLevel(cycle), mult = endlessMult(cycle), depth = endlessDepthMul(cycle);
     const firstLevel = endlessLevel(1), lastLevel = endlessLevel(LAYER_CYCLE);
+    /* 轮首那一份也要按**它自己的段位 / 深度**归一：第 1~5 层现在不再是 ×1（见 endlessMult），
+     * 少了这一项，F(101)/F(100) 会变成「折扣 × 轮首倍率」而不是折扣。 */
+    const firstMult = endlessMult(1) * endlessDepthMul(1);
     const endMult = endlessMult(LAYER_CYCLE) * endlessDepthMul(LAYER_CYCLE);
-    const carryStat = Math.pow(ENDLESS_CYCLE_DISCOUNT * GData.stagePlayerStat(lastLevel) * endMult / GData.stagePlayerStat(firstLevel), round);
-    const carryHp = Math.pow(ENDLESS_CYCLE_DISCOUNT * GData.stagePlayerHp(lastLevel) * endMult / GData.stagePlayerHp(firstLevel), round);
+    const carryStat = Math.pow(ENDLESS_CYCLE_DISCOUNT * GData.stagePlayerStat(lastLevel) * endMult /
+      (GData.stagePlayerStat(firstLevel) * firstMult), round);
+    const carryHp = Math.pow(ENDLESS_CYCLE_DISCOUNT * GData.stagePlayerHp(lastLevel) * endMult /
+      (GData.stagePlayerHp(firstLevel) * firstMult), round);
     const statBase = GData.stagePlayerStat(level) * carryStat, hpBase = GData.stagePlayerHp(level) * carryHp;
     return { layer, cycle, round, level, mult, depth, carryStat, carryHp, statBase, hpBase,
       statCurve: statBase * mult * depth, hpCurve: hpBase * mult * depth,

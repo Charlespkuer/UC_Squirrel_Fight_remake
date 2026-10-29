@@ -442,6 +442,34 @@ test('无尽塔主线剧情：层号/事件 → 该播哪一段（埋点与推�
   assert.equal((T._debugRun('endless').lostMarks || []).length, 1, '这一层确实丢了一条烙印');
 });
 
+test('幻影回响重打三侠时，立即进货 / 铸币商队的开店不会被顶掉', () => {
+  const c = setup();
+  const T = c.Tower;
+  /* 第 19 层第 1 场是三侠位；把回响概率钉成 100%，这一场必定重打。 */
+  T._debugSetEndlessLayer(19);
+  const run = T._debugRun('endless');
+  run.idx = 0; run.limited = []; run.permanent = []; run.shop = null; run.phase = null;
+  delete run.attempt;
+  withEnv(c, [{ id: 'echo', left: 9, values: { repeatChance: 1 } }]);
+  assert.ok(T.debugGrantBuff('E01').ok, '应当能给一条立即进货');
+  const nx = T.nextBattle('endless');
+  assert.equal(nx.entry && nx.entry.kind, 'hero', '第 1 场应当是三侠位');
+  const first = T.reportBattle('endless', nx.token, true, 1500, 2000);
+  assert.ok(first.repeat && first.repeat.shopCreditKept > 0, '回响重打时要把这次开店凭据还回来');
+  assert.equal(first.phase, undefined, '这一场先不开店（重打完才开）');
+  assert.equal((T._debugRun('endless').limited || []).filter((b) => b.id === 'E01').reduce((n, b) => n + Number(b.uses || 0), 0),
+    1, '限次不能被回响白扣：立即进货仍在手上（还剩 1 场）');
+  /* 重打这一场：店照开，限次这时才真的用掉。 */
+  const again = T.nextBattle('endless');
+  assert.equal(again.entry && again.entry.kind, 'hero', '重打的还是同一场');
+  const second = T.reportBattle('endless', again.token, true, 1500, 2000);
+  assert.equal(second.phase, 'shop', '重打胜利后应当立刻开店');
+  assert.ok(second.postBattleShop, '并且是「立即进货」开的战后小店');
+  assert.ok(T._debugRun('endless').shop && T._debugRun('endless').shop.discountPct > 0, '这家店要带 7 折');
+  assert.equal((T._debugRun('endless').limited || []).some((b) => b.id === 'E01'), false,
+    '这一下才真的扣掉限次');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of cases) {

@@ -1673,7 +1673,7 @@ test('需求38：永久增益替换弹窗改为竖排可滚动列表（不再横
   assert.equal(after.permanent.length, 8, '替换后仍是 8 项');
 });
 
-test('需求39：反击也算「敌方的一次攻击」——先机预判被反击消耗时也要可见', () => {
+test('需求39：反击不可被闪避，也不消耗先机预判', () => {
   const c = setup();
   const Sim = c.Sim, TD = c.TowerData;
   assert.equal(TD.BUFF_BY_ID.C38.mods.firstDodge, 1, '先机预判改为首次攻击必闪');
@@ -1703,11 +1703,13 @@ test('需求39：反击也算「敌方的一次攻击」——先机预判被反
     seen++;
   }
   assert.equal(seen, 60, '样本应当跑满');
-  /* 反向确认：反击触发的必闪必须**带上主回合**（否则免疫被悄悄消耗、玩家看不到）。 */
+  /* 反向确认：**反击不能**被先机预判 / 风影身法吃掉（用户 2026-10-29 口径：
+   * 「我不希望反击可以被闪避」）。源码上反击走 noDodge / noReflect 的专用分支。 */
   const src = readSrc('js', 'sim.js');
-  assert.ok(/if \(counter\.firstDodge\) \{/.test(src),
-    '反击的必闪标记应当被带进主回合（可见）');
-  assert.ok(/r\.firstDodge = true;/.test(src), '主回合要记下这次必闪');
+  assert.ok(!/if \(counter\.firstDodge\) \{/.test(src),
+    '反击不再把先机预判的必闪标记带进主回合');
+  assert.ok(/applyDamage\(def, att, raw, counter, \{ noDodge: true, noReflect: true/.test(src),
+    '反击要显式禁用闪避判定与反伤回弹');
 });
 
 test('需求42：叠层增益按层数计价 / 仓库钥匙不进商店 / 登顶者改为固定 +1 力敏速', () => {

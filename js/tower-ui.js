@@ -72,6 +72,11 @@
     const el = document.createElement('div');
     el.className = 'run-toast' + (hold ? ' hold' : '');
     el.textContent = String(text || '');
+    /* 同一时刻可能来好几条（例：一次碎掉多条烙印 → 每条一句「XX烙印已融入身躯」）：
+     * 往上错开一档，别全压在 120px 那一行上叠成一坨。 */
+    let live = 0;
+    try { live = document.querySelectorAll('[class~="run-toast"]:not(.out)').length; } catch (e) { live = 0; }
+    if (live > 0) el.style.bottom = (120 + live * 56) + 'px';
     document.body.appendChild(el);
     const stay = hold ? 7000 : 2400;
     setTimeout(() => { el.classList.add('out'); }, stay);
@@ -411,12 +416,23 @@
     } catch (e) {}
     return NaN;
   }
+  /** 装备画稿帧号：基础帧 + **差分档 - 1**。
+   *  与状态页 `wearInfo` / 战斗 `planSide` 完全同一口径（原版 `constructBpData`：
+   *  `frame += max(addr1Lv,addr2Lv,addr3Lv) - 1`）：勇者外观件用显式的 `tier` 表达这一档，
+   *  账号装备仍走 `ext` 数组；衣服 / 鞋子不吃这一档（原版那两张图集没有分档画稿）。 */
   function classicGearFrame(g) {
     if (!classicGearTables || !g) return 0;
     const base = classicGearTables.frameById.get(Number(g.id));
     if (!base) return 0;
-    /* 与随机挑战 showFace 完全同一口径。 */
-    return base + Math.max(0, (Number(g.ext) || 0) - 1);
+    const raw = g.ext;
+    let level = Array.isArray(raw)
+      ? raw.reduce((m, e) => Math.max(m, Number(e && e.level) || 0), 0)
+      : Math.max(0, Number(raw) || 0);
+    level = Math.max(level, Math.max(0, Math.min(3, Number(g.tier) || 0)));
+    level = Math.max(0, Math.min(3, level));
+    const type = classicGearType(g);
+    const addr = (type === 0 || type === 1) && level > 0 ? level - 1 : 0;
+    return base + addr;
   }
   function attachClassicGear(bg, info) {
     if (!bg || !classicGearTables || !info) return 0;
@@ -1508,15 +1524,16 @@
     }
     return { ok: false, msg: '属性调整暂不可用。' };
   }
-  /** 准备页草稿：武技 / 外观 / 四维分配 / 可分配池。旧草稿缺字段时补默认值。 */
+  /** 准备页草稿：武技 / 外观 / 四维分配 / 可分配池。旧草稿缺字段时补默认值。
+   *  外观是四格 `[{id,tier}]`（null = 没穿），`tier` 是原版的差分档 1~3。 */
   function ensureHeroSetupDraft() {
     const initial = (window.TowerHero && TowerHero.initialStats) ? TowerHero.initialStats()
       : { power: 65, agility: 65, speed: 65 };
-    if (!heroSetupDraft) heroSetupDraft = { picks: [], appearance: [0, 0, 0, 0], stats: initial, statPool: 0 };
+    if (!heroSetupDraft) heroSetupDraft = { picks: [], appearance: [null, null, null, null], stats: initial, statPool: 0 };
     const draft = heroSetupDraft;
     if (!Array.isArray(draft.picks)) draft.picks = [];
-    if (!Array.isArray(draft.appearance)) draft.appearance = [0, 0, 0, 0];
-    while (draft.appearance.length < 4) draft.appearance.push(0);
+    /* 旧草稿只存 id 数组：统一折成 `[{id,tier}]`（没档位就按 1 档）。 */
+    draft.appearance = [0, 1, 2, 3].map((part) => heroGearSlotOf(draft.appearance, part));
     const rules = heroStatRules();
     const keys = ['power', 'agility', 'speed'];
     const src = (draft.stats && typeof draft.stats === 'object') ? draft.stats : initial;
@@ -1581,8 +1598,16 @@
   }
   function heroGearIcon(id, size) {
     const n = Number(size) || 48;
+    /* 橙装 / 黑装没有独立 PNG：沿用同名紫装的图（与账号装备页同一条 `gearIconId` 规则）。 */
+    let iconId = Number(id) || 0;
+    try {
+      if (window.UI && UI.classic && typeof UI.classic.gearIconId === 'function') {
+        const hit = UI.classic.gearIconId({ id: iconId });
+        if (hit > 0) iconId = hit;
+      }
+    } catch (e) { /* 没有 classic-ui 时照旧用原 id */ }
     return '<img alt="" loading="lazy" width="' + n + '" height="' + n +
-      '" src="images/ui/icons/gear/gear-' + Number(id) + '.png" ' +
+      '" src="images/ui/icons/gear/gear-' + iconId + '.png" ' +
       'onerror="this.style.display=\'none\';this.parentNode.classList.add(\'missing\')">';
   }
   const HERO_PART_CHAR = ['头', '拳', '衣', '鞋'];
@@ -1605,6 +1630,8 @@
     const row = rows ? rows.find((r) => Number(r && r[0]) === n) : null;
     return row ? Number(row[3]) : NaN;
   }
+  /** 外观 id / 运行中 hero.appearance → 7232 穿衣链路认识的 `{id,type,tier,quality,ext}`。
+   *  `tier` 是**外观差分**（1~3，原版头 / 拳套的强化档画稿），四个绘制入口都认它。 */
   function heroGearForPaint(appearance) {
     return (Array.isArray(appearance) ? appearance : []).map((raw) => {
       const item = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
@@ -1612,21 +1639,66 @@
       if (!(id > 0)) return null;
       const type = Number.isFinite(Number(item.type)) ? Number(item.type) : heroGearTypeOf(id);
       if (!Number.isFinite(type)) return null;
-      return { id: id, type: type, ext: Array.isArray(item.ext) ? item.ext : [] };
+      let tier = Math.max(1, Math.min(3, Number(item.tier) || 1));
+      /* 现代模式的外观页**不做差分**：一套装备只有一张卡、一个造型。
+       * 这里把旧数据 / 外部传入的 tier 统一收成 1；没有贴图的套装直接剔除。 */
+      if (isModernUi() && window.Engine) {
+        const index = heroGearSetIndexOf(Object.assign({}, item, { id: id, type: type }));
+        /* 现代图集里查不到套装序号（或序号没有贴图）= 这件画不出来，直接从绘制链剔除。 */
+        if (!Number.isFinite(index) || (typeof Engine.hasModernOutfit === 'function' && !Engine.hasModernOutfit(index))) return null;
+        tier = 1;
+      }
+      const out = { id: id, type: type, tier: tier,
+        ext: Array.isArray(item.ext) ? item.ext : [] };
+      if (item.quality != null) out.quality = Number(item.quality) || 0;
+      return out;
     }).filter(Boolean);
   }
-  /** 外观（id 数组或 run.hero.appearance 对象数组）→ 四个部位各一件的 id 数组。
-   *  装备选择层只认这个形状：`[头, 拳, 衣, 鞋]`，0 = 没穿。 */
+  /** 外观（id 数组或 run.hero.appearance 对象数组）→ 四格 `[{id,tier}]`（null = 没穿）。
+   *  装备选择层只认这个形状：`[头, 拳, 衣, 鞋]`。 */
   function heroAppearanceSlots(appearance) {
-    const slots = [0, 0, 0, 0];
+    const slots = [null, null, null, null];
     for (const raw of (Array.isArray(appearance) ? appearance : [])) {
       const item = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
       const id = Number(item.id);
       if (!(id > 0)) continue;
       const type = Number.isFinite(Number(item.type)) ? Number(item.type) : heroGearTypeOf(id);
-      if (Number.isInteger(type) && type >= 0 && type <= 3 && !slots[type]) slots[type] = id;
+      if (Number.isInteger(type) && type >= 0 && type <= 3 && !slots[type]) {
+        slots[type] = { id: id, tier: Math.max(1, Math.min(3, Number(item.tier) || 1)) };
+      }
     }
     return slots;
+  }
+  /** 外观数据 → `Tower.setHeroAppearance` 要的对象数组（丢掉空格；带上差分档与品质）。
+   *  两种形状都吃：
+   *   · 四格 `[{id,tier}|null]`（本文件的选择层 / 准备页草稿，按下标就是部位）；
+   *   · ui-status 交回的 `[{id,type,tier}]` 列表（空部位被跳过，不能按下标当部位）。 */
+  function heroAppearancePaint(appearance) {
+    const slots = [null, null, null, null];
+    (Array.isArray(appearance) ? appearance : []).forEach((raw, index) => {
+      if (!raw) return;
+      const item = (typeof raw === 'object') ? raw : { id: Number(raw) };
+      const id = Math.max(0, Number(item.id) || 0);
+      if (!(id > 0)) return;
+      const typed = Number.isFinite(Number(item.type)) ? Number(item.type)
+        : (index >= 0 && index < 4 ? index : NaN);
+      if (!Number.isInteger(typed) || typed < 0 || typed > 3 || slots[typed]) return;
+      slots[typed] = { id: id, tier: Math.max(1, Math.min(3, Number(item.tier) || 1)) };
+    });
+    const all = heroAllGear();
+    const out = [];
+    for (let part = 0; part < 4; part++) {
+      const slot = slots[part];
+      if (!slot) continue;
+      const item = { id: slot.id, type: part, tier: slot.tier, ext: [] };
+      /* 品质要带上：橙 / 黑装的画稿帧与卡片配色都看它（外观本身 0 加成）。 */
+      const row = all.find((g) => Number(g.id) === slot.id);
+      if (row) item.quality = Math.max(0, Math.min(5, Number(row.quality) || 0));
+      /* 现代模式一套装备只有一张卡、一个造型：旧数据 / 外部传入的 tier 统一收成 1。 */
+      if (isModernUi()) item.tier = 1;
+      out.push(item);
+    }
+    return out;
   }
   /** 准备页的数值预览：固定生命 + 玩家调过的力/敏/速 + 已点亮技能的被动，装备永远 0 加成。 */
   function heroDraftStats(picks, stats) {
@@ -1699,6 +1771,80 @@
    * 两组只是 setId / 装备 id 不同（分别来自黑卡宝箱与黑装融合的变异池），
    * 名字、品质、属性、画稿全部一致；外观页合并成一套（保留 id 小的）。 */
   const HERO_GEAR_DUP_SET_IDS = new Set([67, 68]);
+  /* ---------- 外观差分（原版的「强化档」） ----------
+   * 头 / 拳套的画稿跟着**词条最高档**变（原版 `constructBpData` 的
+   * `frame += (max(addr1Lv,addr2Lv,addr3Lv) - 1)`，MainMovie.as:6608）：
+   * 1 档 = 基础稿，2 / 3 档 = 另外两张画稿。勇者外观件没有真词条，所以用显式的
+   * `tier` 记住玩家选的是哪一档（见 TowerHero.cleanAppearance / 各绘制入口）。
+   * 档数**不是一律 3 档** —— 原版有几套只画了一张：
+   *   · 狂战 / 怒战 / 深海 / 机器猫 / 圣熊 / 凤凰（套装 46~53、67~72）：只有基础稿；
+   *   · 格斗手套 q4（126）与仙鹤拳套 q4（142）：只画了 2 张。
+   * 硬塞不存在的档会贴到**空帧**（头 / 拳套直接消失），所以这里按实际情况收口。
+   * 其余按品质：白 / 绿 1 档、蓝 2 档、紫 / 橙 / 黑 3 档（与 outfit 图集的
+   * Head_/HandO_/HandI_ 后缀数量逐张核对过）。 */
+  const HERO_GEAR_SINGLE_TIER_SETS = new Set([46, 47, 48, 49, 50, 51, 52, 53, 67, 68, 69, 70, 71, 72]);
+  const HERO_GEAR_TIER_CAPS = new Map([[126, 2], [142, 2]]);
+  /** 外观 id → 套装序号（现代图集 `Head_<序号>_<档>` 里的那个序号）。
+   *  只用于「现代模式有没有这张贴图」与差分档收口；数值链路不读它。 */
+  function heroGearSetIndexOf(item) {
+    const row = item || {};
+    const id = Math.max(0, Number(row.id) || 0);
+    let setId = Number(row.setId);
+    if (!(setId > 0) && id > 0) {
+      try {
+        const inst = State.gearInst ? State.gearInst(id) : null;
+        setId = Number(inst && inst.setId) || 0;
+      } catch (e) { setId = 0; }
+      if (!(setId > 0)) {
+        const rows = (window.GData && Array.isArray(GData.GEAR_BASE)) ? GData.GEAR_BASE : null;
+        const base = rows ? rows.find((r) => Number(r && r[0]) === id) : null;
+        setId = Number(base && base[1]) || 0;
+      }
+    }
+    if (!(setId > 0)) return NaN;
+    try {
+      const set = window.gearSetMap && gearSetMap.getValue(String(setId));
+      return set ? Number(set.index) : NaN;
+    } catch (e) { return NaN; }
+  }
+  function isModernUi() {
+    try { return !!(window.UI && UI.currentUiMode && UI.currentUiMode() === 'modern'); } catch (e) { return false; }
+  }
+  function heroGearTierCount(item) {
+    const type = Number(item && item.type);
+    if (type !== 0 && type !== 1) return 1;          // 衣服 / 鞋子 / 手臂的画稿不分档
+    /* 现代模式没有外观差分：一套装备只给一张卡（用户 2026-10-29 口径）。
+     * 经典 7218 仍按画稿品质给 1~3 档，卡面画稿也跟着变。 */
+    if (isModernUi()) return 1;
+    if (HERO_GEAR_SINGLE_TIER_SETS.has(Number(item && item.setId))) return 1;
+    const cap = HERO_GEAR_TIER_CAPS.get(Number(item && item.id));
+    if (cap) return cap;
+    const q = Math.max(0, Math.min(5, Number(item && item.quality) || 0));
+    return q <= 1 ? 1 : q === 2 ? 2 : 3;
+  }
+  function heroGearTiers(item) {
+    const n = heroGearTierCount(item);
+    return Array.from({ length: n }, (_, i) => i + 1);
+  }
+  /* 现代模式**不做外观差分**：一套装备只列一张卡（用户 2026-10-29 口径）。
+   * 经典 7218 仍按原版画稿摊成 1~3 张同名卡（卡面画稿随档位变），档位存进 `tier`。 */
+  /** 现代界面「当作不存在」的装备：没有现代外观贴图的（黑装 33~40 / 深海 / 机器猫…）。
+   *  它们在外观池里会是一张空白卡、穿上也画不出来 —— 按用户 2026-10-29 口径直接不进池子；
+   *  经典界面用经典画稿画，全部保留（那边不是现代界面）。 */
+  function heroGearVisible(item) {
+    if (!isModernUi()) return true;
+    if (window.Engine && typeof Engine.hasModernOutfit === 'function') {
+      const index = heroGearSetIndexOf(item);
+      /* 套装序号没进现代图集 = 这套在现代模式里根本穿不出来。
+       * 连序号都查不到的（q5 黑装 54~66 这种没有 gearSetMap 行的）同理不进池子。 */
+      return Number.isFinite(index) && Engine.hasModernOutfit(index);
+    }
+    /* 没有 Engine（最小测试桩）时退回旧的图标口径。 */
+    try {
+      if (!(window.UI && UI.classic && typeof UI.classic.gearIconId === 'function')) return true;
+      return UI.classic.gearIconId(item) > 0;
+    } catch (e) { return true; }
+  }
   function heroGearCatalog() {
     const rows = [];
     if (!window.State || !State.gearInst) return [];
@@ -1717,7 +1863,10 @@
         const setId = Number(inst && inst.setId != null ? inst.setId : row[1]) || 0;
         const family = (State.gearSetFamily ? State.gearSetFamily(id) : '') ||
           name.replace(HERO_GEAR_PART_SUFFIX, '') || ('套装 ' + setId);
-        rows.push({ id: id, name: name, type: type, quality: quality, setId: setId, family: family });
+        const item = { id: id, name: name, type: type, quality: quality, setId: setId, family: family };
+        item.tiers = heroGearTiers(item);
+        if (!heroGearVisible(item)) continue;
+        rows.push(item);
       }
     } else {
       if (!window.gearMap || typeof gearMap.each !== 'function') return [];
@@ -1725,9 +1874,12 @@
         const id = Number(row && row.id != null ? row.id : key);
         const gear = State.gearInst(id);
         if (!gear || !Number.isInteger(Number(gear.type))) return;
-        rows.push({ id: id, name: gear.name || '', type: Number(gear.type),
+        const item = { id: id, name: gear.name || '', type: Number(gear.type),
           quality: Math.max(0, Math.min(5, Number(gear.quality) || 0)), setId: Number(gear.setId) || 0,
-          family: (State.gearSetFamily ? State.gearSetFamily(id) : '') || ('套装 ' + (Number(gear.setId) || 0)) });
+          family: (State.gearSetFamily ? State.gearSetFamily(id) : '') || ('套装 ' + (Number(gear.setId) || 0)) };
+        item.tiers = heroGearTiers(item);
+        if (!heroGearVisible(item)) return;
+        rows.push(item);
       });
     }
     /* 合并重复黑装套（见 HERO_GEAR_DUP_SET_IDS）：否则外观页会显示两套一模一样的
@@ -1761,28 +1913,47 @@
     }
     return groups;
   }
+  /** 一格外观 → `{id, tier}`（兼容老调用直接塞 id / 0 的情况）。 */
+  function heroGearSlotOf(slots, part) {
+    const raw = Array.isArray(slots) ? slots[part] : null;
+    if (raw && typeof raw === 'object') {
+      const id = Math.max(0, Number(raw.id) || 0);
+      return id > 0 ? { id: id, tier: Math.max(1, Math.min(3, Number(raw.tier) || 1)) } : null;
+    }
+    const id = Math.max(0, Number(raw) || 0);
+    return id > 0 ? { id: id, tier: 1 } : null;
+  }
+  /** 一格外观卡（一件装备 × 一个差分档）。同名多张，卡面画稿本身不同（不再标 ②③）。 */
+  function heroGearCardHtml(item, tier, equipped) {
+    const title = item.name + ' · ' + (HERO_QUALITY[item.quality] || '') + '装 · ' +
+      (HERO_PARTS[item.type] || '') + (tier > 1 ? ' · 外观差分 ' + tier : '') + ' · 仅外观';
+    return '<button type="button" class="hero-gear-item' + (equipped ? ' is-equipped' : '') + '"' +
+      ' data-hero-gear="' + item.id + '" data-gear-part="' + item.type + '" data-hero-tier="' + tier + '"' +
+      ' aria-pressed="' + (equipped ? 'true' : 'false') + '" title="' + esc(title) + '">' +
+      '<span class="hero-gear-icon" data-part="' + esc(HERO_PART_CHAR[item.type] || '装') + '">' + heroGearIcon(item.id, 48) + '</span>' +
+      '<b>' + esc(item.name) + '</b><i>' + esc(HERO_PARTS[item.type] || '') + '</i>' +
+      '<span class="hero-gear-zero">0 加成</span></button>';
+  }
   /** 全部装备的分组网格（准备页的「更换装备」与爬塔中的装备选择层共用这一份）。
-   *  `slots` = `[头,拳,衣,鞋]` 的 id 数组；每个部位只高亮当前那一件。
+   *  `slots` = `[头,拳,衣,鞋]`，每格是 `{id, tier}` 或 id / 0；每个部位只高亮当前那一格。
+   *  头 / 拳套会按**差分档**摊成 2~3 张卡（见 heroGearTierCount），其余部位一张。
    *  ⚠ 所有卡片都写「0 加成」：勇者模式的外观件不参与数值，别在这里接属性。 */
   function heroGearGroupsHtml(slots, groups) {
     const list = groups || heroGearCatalog();
     if (!list.length) return '<p class="hero-status-empty">装备字典还没有加载。</p>';
-    const at = (part) => Number(Array.isArray(slots) ? slots[part] : 0) || 0;
     return list.map((group) =>
       '<section class="hero-gear-rarity q' + group.quality + '"><h4>' + esc(group.label) + '装' +
         '<span>' + group.sets.length + ' 套</span></h4>' +
         group.sets.map((set) => '<div class="hero-gear-set"><h5>' + esc(set.label || set.family) + '</h5>' +
-          '<div class="hero-gear-parts">' + set.items.map((item) =>
-            '<button type="button" class="hero-gear-item' +
-              (at(item.type) === Number(item.id) ? ' is-equipped' : '') +
-              '" data-hero-gear="' + item.id + '" data-gear-part="' + item.type + '" ' +
-              'title="' + esc(item.name + ' · ' + (HERO_QUALITY[item.quality] || '') + '装 · ' + (HERO_PARTS[item.type] || '') + ' · 仅外观') + '">' +
-              '<span class="hero-gear-icon" data-part="' + esc(HERO_PART_CHAR[item.type] || '装') + '">' + heroGearIcon(item.id, 48) + '</span>' +
-              '<b>' + esc(item.name) + '</b><i>' + esc(HERO_PARTS[item.type] || '') + '</i>' +
-              '<span class="hero-gear-zero">0 加成</span></button>').join('') + '</div></div>').join('') +
+          '<div class="hero-gear-parts">' + set.items.map((item) => {
+            const slot = heroGearSlotOf(slots, item.type);
+            return (item.tiers || [1]).map((tier) => heroGearCardHtml(item, tier,
+              !!slot && slot.id === Number(item.id) && slot.tier === tier)).join('');
+          }).join('') + '</div></div>').join('') +
       '</section>').join('');
   }
-  /** 全部装备按「稀有度 → 套装 → 部位」摊平（给经典「更换装备」页的 6 格分页用）。 */
+  /** 全部装备按「稀有度 → 套装 → 部位」摊平（给经典「更换装备」页的 6 格分页用）。
+   *  `tiers` 是这一件的差分档数组（头 / 拳套 2~3 档，其余 1 档），分页在渲染层展开。 */
   function heroAllGear() {
     const out = [];
     for (const group of heroGearCatalog()) {
@@ -1791,14 +1962,71 @@
          * 把 `set.label` 一起带到平铺清单，外观页悬停能分清是哪一套。 */
         for (const item of set.items) out.push(Object.assign({}, item, {
           setLabel: set.label || set.family, setFamily: set.family,
+          tiers: (item.tiers || [1]).slice(),
         }));
       }
     }
     return out;
   }
-  /** 把勇者穿好外观的 7232 画进 host；同一个 host 的旧图会先销毁。 */
+  /** 现代界面的勇者立绘：用现代战斗图集（`SQ_01/02` + 现代装备图层）画静帧。
+   *  与 `battle.js` / 现代状态页同一套外观数据，不再复用经典 7232（用户 2026-10-29 口径：
+   *  左下角也要现代版外观）。`appearance` 支持 `[{id,type,tier}]` / `[{id,tier}]` 两种形状。 */
+  async function paintHeroArtModern(host, appearance, opts) {
+    const o = opts || {};
+    const token = (host.__heroArtSeq = (Number(host.__heroArtSeq) || 0) + 1);
+    const old = host.__heroView;
+    host.__heroView = null;
+    if (old) { try { old.destroy(); } catch (e) {} }
+    if (host.classList) host.classList.remove('ready');
+    host.innerHTML = '';
+    try {
+      const sheets = ['SQ_01', 'SQ_02'];
+      const wears = Engine.wearsFor(heroGearForPaint(appearance));
+      const srcs = sheets.concat(wears.filter(Boolean).map((w) => w && w.src).filter(Boolean));
+      await Engine.loadSheets(srcs);
+      if (host.__heroArtSeq !== token || host.isConnected === false) return null;
+      const frames = Engine.anim('standby');
+      if (!frames || !frames.length) return null;
+      const frame = frames[0];
+      const box = Engine.frameBounds(frame, { sheets: sheets, wears: wears, exclude: ['54', '75', '91', '20001'] });
+      if (!box || !(box.w > 0) || !(box.h > 0)) return null;
+      const canvas = document.createElement('canvas');
+      const rect = host.getBoundingClientRect ? host.getBoundingClientRect() : null;
+      const cssW = Math.max(1, Math.round((rect && rect.width) || host.clientWidth || o.width || 160));
+      const cssH = Math.max(1, Math.round((rect && rect.height) || host.clientHeight || o.height || cssW));
+      const dpr = Math.max(1, Math.min(2, Number(window.devicePixelRatio) || 1));
+      const size = Math.max(128, Math.min(640, Math.round(Math.max(cssW, cssH) * dpr)));
+      canvas.width = canvas.height = size;
+      canvas.className = 'modern-hero-art';
+      canvas.style.width = '100%'; canvas.style.height = '100%';
+      canvas.style.display = 'block';
+      const ctx = canvas.getContext && canvas.getContext('2d');
+      if (!ctx) return null;
+      const pad = Math.max(2, Math.min(14, Number(o.pad) || 5));
+      const zoom = Number(o.zoom) || 1.04;
+      const scale = Math.min((size - pad * 2) / box.w, (size - pad * 2) / box.h) * zoom;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, size, size);
+      ctx.setTransform(scale, 0, 0, scale,
+        size / 2 - (box.x + box.w / 2) * scale, size / 2 - (box.y + box.h / 2) * scale);
+      Engine.drawFrame(ctx, frame, { sheets: sheets, wears: wears });
+      host.appendChild(canvas);
+      host.classList.add('ready');
+      return { canvas: canvas, destroy: () => { if (canvas.parentNode) canvas.parentNode.removeChild(canvas); } };
+    } catch (e) {
+      if (window.__errs) window.__errs.push('modern hero art: ' + (e && e.message));
+      return null;
+    }
+  }
+  /** 把勇者穿好外观的立绘画进 host；同一个 host 的旧图会先销毁。
+   *  现代界面走现代战斗图集；经典界面仍复用 7232 原版元件。 */
   async function paintHeroArt(host, appearance, opts) {
     if (!host) return null;
+    if (isModernUi() && window.Engine && typeof Engine.wearsFor === 'function') {
+      const modern = await paintHeroArtModern(host, appearance, opts);
+      if (modern) return modern;
+      /* 现代图集没挂上 / 画失败时退回经典元件，至少不要留一块空白。 */
+    }
     const token = (host.__heroArtSeq = (Number(host.__heroArtSeq) || 0) + 1);
     const old = host.__heroView;
     host.__heroView = null;
@@ -1887,7 +2115,9 @@
       /* 只读详情要显示**失败保底后的实时成功率**：context 必须带上本局失败计数，
        * 否则 TowerHero.upgradeInfoOf() 只能按基础概率算（用户 2026-11 反馈）。 */
       upgradeFails: Object.assign({}, run.hero.upgradeFails || {}),
-      appearance: (run.hero.appearance || []).map((g) => Object.assign({}, g)),
+      /* 只把**现代图集真的画得出来**的外观交给状态页：黑装 / 深海等没有现代贴图的
+       * 在 `heroGearForPaint` 里已经剔除、差分档也收到实际张数，详情页不会画成裸装。 */
+      appearance: heroGearForPaint(run.hero.appearance).map((g) => Object.assign({}, g)),
       wins: Math.max(0, Number(run.hero.wins) || 0),
       patrolWins: Math.max(0, Number(run.hero.patrolWins) || 0),
       uncapped: window.TowerHero && TowerHero.uncappedCount ? TowerHero.uncappedCount(run.hero) : 0,
@@ -1915,11 +2145,10 @@
         return out;
       },
       /* 现代外观页直接复用「状态 → 更换装备」的纸娃娃 + 6 格列表；
-       * 这里只把四个部位的 id 交给 Tower.setHeroAppearance，不碰任何属性。 */
+       * 这里只把四个部位的 `{id,tier}` 交给 Tower.setHeroAppearance，不碰任何属性。 */
       gearList: heroAllGear(),
       onEquip: (slots) => {
-        const next = (Array.isArray(slots) ? slots : []).filter((id) => Number(id) > 0)
-          .map((id) => ({ id: Number(id), ext: [] }));
+        const next = heroAppearancePaint(slots);
         const res = window.Tower && Tower.setHeroAppearance ? Tower.setHeroAppearance(next) : null;
         if (!res || !res.ok) return res || { ok: false, msg: '外观保存失败。' };
         hero.appearance = (res.appearance || []).map((g) => Object.assign({}, g));
@@ -1930,7 +2159,7 @@
           slots: heroAppearanceSlots(hero.appearance),
           onChange: (next) => {
             const res = window.Tower && Tower.setHeroAppearance
-              ? Tower.setHeroAppearance(next.filter((id) => id > 0).map((id) => ({ id: id, ext: [] }))) : null;
+              ? Tower.setHeroAppearance(heroAppearancePaint(next)) : null;
             if (!res || !res.ok) { notice((res && res.msg) || '外观保存失败。'); return; }
             hero.appearance = (res.appearance || []).map((g) => Object.assign({}, g));
             if (heroPageCtrl && heroPageCtrl.refresh) heroPageCtrl.refresh();
@@ -2001,7 +2230,8 @@
       /* 经典「更换装备」页的数据源：全部 288 件，按稀有度 → 套装 → 部位；数值由 ui-status 清零。 */
       gearList: heroAllGear(),
       onEquip: (next) => {
-        const res = window.Tower && Tower.setHeroAppearance ? Tower.setHeroAppearance(next) : null;
+        /* ui-status 传回来的是四格 `[{id,tier}]`（老调用也可能是 id 数组）。 */
+        const res = window.Tower && Tower.setHeroAppearance ? Tower.setHeroAppearance(heroAppearancePaint(next)) : null;
         if (!res || !res.ok) { notice((res && res.msg) || '外观保存失败。'); return null; }
         return (res.appearance || []).map((g) => Object.assign({}, g));
       },
@@ -2010,7 +2240,7 @@
           slots: heroAppearanceSlots(hero.appearance),
           onChange: (next) => {
             const res = window.Tower && Tower.setHeroAppearance
-              ? Tower.setHeroAppearance(next.filter((id) => id > 0).map((id) => ({ id: id, ext: [] }))) : null;
+              ? Tower.setHeroAppearance(heroAppearancePaint(next)) : null;
             if (!res || !res.ok) { notice((res && res.msg) || '外观保存失败。'); return; }
             hero.appearance = (res.appearance || []).map((g) => Object.assign({}, g));
             if (SfStatus.refresh) SfStatus.refresh();
@@ -2039,14 +2269,15 @@
     document.querySelectorAll('[data-hero-gear-picker]').forEach((node) => node.remove());
   }
   /** 勇者模式的外观装备选择层：全部装备按稀有度 → 套装 → 部位排；全部 0 加成。
+   *  头 / 拳套会按**差分档**摊成 2~3 张卡（原版画稿随词条档变化）。
+   *  `slots` = `[{id,tier}]`（也兼容旧调用直接给 id 数组），`onChange` 回传同样四格。
    *  ⚠ 挂到 `document.body`、用 `position:fixed`：状态页宿主在 `#ui` 里，
    *    移动端 `#ui` 会按 390/1170 ≈ 1/3 等比缩放；挂在宿主里整层会跟着缩成一小块。 */
   function openHeroGearPicker(opts) {
     const o = opts || {};
     closeHeroGearPicker();
     const groups = heroGearCatalog();
-    const slots = (Array.isArray(o.slots) ? o.slots.slice(0, 4) : [0, 0, 0, 0]).map(Number);
-    while (slots.length < 4) slots.push(0);
+    const slots = [0, 1, 2, 3].map((part) => heroGearSlotOf(o.slots, part));
     const el = document.createElement('div');
     el.className = 'hero-gear-picker';
     el.setAttribute('role', 'dialog');
@@ -2054,9 +2285,12 @@
     el.setAttribute('aria-label', '更换装备');
     el.innerHTML = '<div class="hero-gear-picker-panel">' +
       '<header class="hero-gear-picker-head"><div><h3>更换装备</h3>' +
-        '<p>全部装备按稀有度 → 套装 → 部位排列；每件都是 <b>0 加成</b>，只改变外观。</p></div>' +
+        '<p>全部装备按稀有度 → 套装 → 部位排列；每件都是 <b>0 加成</b>，只改变外观。' +
+        (isModernUi()
+          ? '现代模式每件装备只列一张卡，点一下穿上、再点一下脱下。'
+          : '头 / 拳套会按原版画稿列出 2~3 张同名卡（随词条档变化），点哪张穿哪张。') + '</p></div>' +
         '<span class="hero-gear-picker-total">共 ' +
-          groups.reduce((n, g) => n + g.sets.reduce((m, s) => m + s.items.length, 0), 0) + ' 件</span></header>' +
+          groups.reduce((n, g) => n + g.sets.reduce((m, s) => m + s.items.reduce((k, it) => k + (it.tiers || [1]).length, 0), 0), 0) + ' 款</span></header>' +
       '<div class="hero-gear-picker-slots" data-hero-gear-slots></div>' +
       '<div class="hero-gear-picker-scroll">' + heroGearGroupsHtml(slots, groups) + '</div>' +
       '<footer class="hero-gear-picker-foot"><span>点一下穿上，再点一下脱下；同一部位只保留一件。</span>' +
@@ -2069,25 +2303,31 @@
     const paintSlots = () => {
       if (!slotsHost) return;
       slotsHost.innerHTML = HERO_PARTS.map((label, part) => {
-        const id = Number(slots[part]) || 0;
+        const slot = heroGearSlotOf(slots, part);
         return '<span class="hero-gear-slot"><i>' + esc(label) + '</i><b>' +
-          esc(id > 0 ? heroGearName(id) : '未穿戴') + '</b><em>0 加成</em></span>';
+          esc(slot ? heroGearName(slot.id) : '未穿戴') + '</b><em>0 加成</em></span>';
       }).join('');
     };
     const sync = () => {
       el.querySelectorAll('[data-hero-gear]').forEach((btn) => {
-        const part = Number(btn.dataset.gearPart);
-        btn.classList.toggle('is-equipped', Number(slots[part]) === Number(btn.dataset.heroGear));
+        const part = Number(btn.dataset.gearPart), tier = Number(btn.dataset.heroTier) || 1;
+        const slot = heroGearSlotOf(slots, part);
+        btn.classList.toggle('is-equipped',
+          !!slot && slot.id === Number(btn.dataset.heroGear) && slot.tier === tier);
+        btn.setAttribute('aria-pressed', btn.classList.contains('is-equipped') ? 'true' : 'false');
       });
       paintSlots();
     };
     el.querySelectorAll('[data-hero-gear]').forEach((btn) => {
       btn.onclick = () => {
         const id = Number(btn.dataset.heroGear), part = Number(btn.dataset.gearPart);
-        if (!Number.isInteger(part) || part < 0 || part > 3) return;
-        slots[part] = Number(slots[part]) === id ? 0 : id;
+        const tier = Math.max(1, Math.min(3, Number(btn.dataset.heroTier) || 1));
+        if (!(id > 0) || !Number.isInteger(part) || part < 0 || part > 3) return;
+        const now = heroGearSlotOf(slots, part);
+        /* 点同一格（同 id 同档）= 脱下；点同一件的**另一档** = 换差分，不脱。 */
+        slots[part] = now && now.id === id && now.tier === tier ? null : { id: id, tier: tier };
         sync();
-        if (o.onChange) o.onChange(slots.slice());
+        if (o.onChange) o.onChange(slots.map((s) => (s ? { id: s.id, tier: s.tier } : null)));
       };
     });
     const onKey = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); close(); } };
@@ -2116,7 +2356,7 @@
       mode: 'setup',
       stats: () => heroDraftStats(draft.picks, draft.stats),
       picks: draft.picks.map((it) => Object.assign({}, it)),
-      appearance: draft.appearance.slice(),
+      appearance: heroAppearancePaint(draft.appearance),
       wins: 0,
       /* 四维分配：状态页的力/敏/速上下键读这一份，调整后只改草稿，开局时交给 TowerHero.create。 */
       statState: () => ({
@@ -2134,23 +2374,20 @@
       /* 经典「更换装备」页的数据源：全部 288 件，按稀有度 → 套装 → 部位；数值由 ui-status 清零。 */
       gearList: heroAllGear(),
       onEquip: (next) => {
-        const slots = [0, 0, 0, 0];
-        for (const g of (Array.isArray(next) ? next : [])) {
-          const type = Number(g && g.type);
-          if (Number.isInteger(type) && type >= 0 && type <= 3) slots[type] = Number(g.id) || 0;
-        }
-        draft.appearance = slots;
-        return next;
+        /* ui-status 传回来的是四格 `[{id,tier}]`（老调用也可能是 id 数组）。 */
+        draft.appearance = [0, 1, 2, 3].map((part) => heroGearSlotOf(next, part));
+        hero.appearance = heroAppearancePaint(draft.appearance);
+        return hero.appearance;
       },
       onPicks: (list) => { draft.picks = list.map((it) => ({ kind: it.kind, id: Number(it.id) })); },
       onGears: () => {
         openHeroGearPicker({
           slots: draft.appearance.slice(),
           onChange: (next) => {
-            draft.appearance = next.slice();
+            draft.appearance = [0, 1, 2, 3].map((part) => heroGearSlotOf(next, part));
             /* 状态页里的 `hero.appearance` 是开局时拷的一份快照；装备层改的是草稿，
              * 必须同步回这一份，否则关掉选择层后立绘还是旧外观。 */
-            hero.appearance = next.slice();
+            hero.appearance = heroAppearancePaint(draft.appearance);
             if (SfStatus.refresh) SfStatus.refresh();
           },
         });
@@ -2177,7 +2414,7 @@
     if (pool > 0) { notice('还有 ' + pool + ' 点可分配，先把力/敏/速分配完再加入。'); return; }
     const options = { ruleset: 'hero', hero: {
       picks: draft.picks.map((item) => Object.assign({}, item)),
-      appearance: draft.appearance.filter((id) => id > 0).map((id) => ({ id: id, ext: [] })),
+      appearance: heroAppearancePaint(draft.appearance),
       stats: Object.assign({}, draft.stats),
     } };
     closeHeroGearPicker();
@@ -2193,7 +2430,7 @@
       mode: 'setup',
       stats: () => heroDraftStats(draft.picks, draft.stats),
       picks: draft.picks.map((it) => Object.assign({}, it)),
-      appearance: draft.appearance.slice(),
+      appearance: heroAppearancePaint(draft.appearance),
       statState: () => ({
         values: Object.assign({}, draft.stats),
         pool: Math.max(0, Number(draft.statPool) || 0),
@@ -2212,17 +2449,16 @@
       },
       gearList: heroAllGear(),
       onEquip: (slots) => {
-        const ids = [0, 1, 2, 3].map((i) => Number(slots && slots[i]) || 0);
-        draft.appearance = ids.slice();
-        hero.appearance = ids.slice();
-        return { ok: true, appearance: ids.slice() };
+        draft.appearance = [0, 1, 2, 3].map((part) => heroGearSlotOf(slots, part));
+        hero.appearance = heroAppearancePaint(draft.appearance);
+        return { ok: true, appearance: hero.appearance };
       },
       onGears: () => {
         openHeroGearPicker({
           slots: draft.appearance.slice(),
           onChange: (next) => {
-            draft.appearance = next.slice();
-            hero.appearance = next.slice();
+            draft.appearance = [0, 1, 2, 3].map((part) => heroGearSlotOf(next, part));
+            hero.appearance = heroAppearancePaint(draft.appearance);
             if (heroPageCtrl && heroPageCtrl.refresh) heroPageCtrl.refresh();
           },
         });
@@ -2260,7 +2496,7 @@
   function heroPrepStatusHtml(draft, count) {
     const picks = Math.max(0, (draft.picks || []).length);
     const pool = Math.max(0, Number(draft.statPool) || 0);
-    const gears = (draft.appearance || []).filter((id) => Number(id) > 0).length;
+    const gears = (draft.appearance || []).filter((slot) => !!heroGearSlotOf([slot], 0)).length;
     const note = picks < count ? ('还需点亮 ' + Math.max(0, count - picks) + ' 个武技')
       : (pool > 0 ? ('还有 ' + pool + ' 点可分配') : ('已点亮 ' + count + ' 个武技，准备出发'));
     return '<div class="hero-prep-status-pane" data-hero-pane="status">' +
@@ -2392,7 +2628,7 @@
     const update = () => {
       const full = selected.size === count;
       const pool = Math.max(0, Number(draft.statPool) || 0);
-      const gears = (draft.appearance || []).filter((id) => Number(id) > 0).length;
+      const gears = (draft.appearance || []).filter((slot) => !!heroGearSlotOf([slot], 0)).length;
       const counter = find(p, '[data-hero-count]');
       const poolEl = find(p, '[data-hero-pool]');
       const lookEl = find(p, '[data-hero-look]');
@@ -2471,7 +2707,7 @@
       openHeroGearPicker({
         slots: draft.appearance.slice(),
         onChange: (next) => {
-          draft.appearance = next.slice();
+          draft.appearance = [0, 1, 2, 3].map((part) => heroGearSlotOf(next, part));
           update();
           paintHeroArt(find(p, '[data-hero-setup-art]'), draft.appearance, { label: '勇者', pad: 4, zoom: 1.1 });
         },
@@ -2482,7 +2718,7 @@
       const pool = Math.max(0, Number(draft.statPool) || 0);
       if (pool > 0) { notice('还有 ' + pool + ' 点可分配，先把力/敏/速分配完再加入。'); return; }
       const options = { ruleset: 'hero', hero: { picks: draft.picks.map((item) => Object.assign({}, item)),
-        appearance: draft.appearance.filter((id) => id > 0).map((id) => ({ id, ext: [] })),
+        appearance: heroAppearancePaint(draft.appearance),
         stats: Object.assign({}, draft.stats) } };
       closeHeroGearPicker();
       if (beginEndlessRun(options)) heroSetupDraft = null;
@@ -3255,10 +3491,15 @@
       }
       if (rw.repeat) {
         const rp = rw.repeat;
+        /* 立即进货 / 铸币商队本来跟着这一场开店，被回响顶掉后由状态机还回来了：
+         * 这里要说一句，否则玩家会以为「限次扣了却没开店」。 */
+        const keptCredit = Math.max(0, Number(rp.shopCreditKept) || 0);
         modal(rp.name || '幻影回响',
           '<div class="result-box"><div class="result-title">回 响</div>' +
           '<p>三侠的幻影尚未散去 —— 立刻再战第 ' + Math.max(1, Number(rp.battleNo) || 1) + ' 场（同一对手）。</p>' +
-          '<p class="dim">触发概率 ' + Math.round((Number(rp.chance) || 0) * 100) + '% · 这一场同样计入叠层</p></div>',
+          '<p class="dim">触发概率 ' + Math.round((Number(rp.chance) || 0) * 100) + '% · 这一场同样计入叠层</p>' +
+          (keptCredit ? '<p class="dim">「下一场战斗后开店」的增益留到这场之后兑现 —— 这一场不会白扣。</p>' : '') +
+          '</div>',
           [{ label: '再战一场', cls: 'gold', run: () => fight(mode) }], { small: true });
         return;
       }
@@ -3705,7 +3946,8 @@
     const m = modal('本场失利 · 可以重新挑战',
       '<div class="result-box"><div class="result-title lose">再试一次？</div>' +
       '<p>倒在第 ' + layer + ' 层第 ' + battleNo + '/' + battleCount + ' 场。</p>' +
-      '<p class="gold-text">消耗 1 枚铸币，回滚到本场开始前（血量 / 试炼币 / 分数 / 增益次数全部还原），再打一次。</p>' +
+      '<p class="gold-text">消耗 1 枚铸币，回滚到本场开始前（血量 / 试炼币 / 分数 / 增益次数全部还原），' +
+      '回到开战前的准备页 —— 敌人、环境与构筑都能重新看一遍，确认后再点「继续战斗」。</p>' +
       '<div class="result-lines">现有铸币 <b>' + retryLeft + '</b> 枚 · 本局分数 ' + score +
       ' · 选「放弃本局」也一样按当前层应得 + 试炼币折现结算</div></div>',
       [{ label: '重新挑战', cls: 'gold', run: () => {
@@ -3715,8 +3957,12 @@
             notice(r.msg || '回滚失败。');
             return;              // 标记还在：这一屏点「继续战斗」会重新弹同一个必选窗
           }
+          /* 【2026-10-28 用户口径】铸币复活**不再直接开打**：回滚完停在开战前的准备页
+           * （敌人预告 / 血量 / 增益 / 环境 / 分数都能重新看），玩家确认构筑后再自己点
+           * 「继续战斗」；想改主意也能在那一页直接「放弃本局」。
+           * ⚠ 别在这里补 `fight('endless')`：上一版就是回滚后立刻开打，玩家没有调整余地。 */
           reopen('endless');
-          fight('endless');
+          runToast('已回滚到本场开始前，确认敌人与构筑后再点「继续战斗」。');
         } },
        { label: '放弃本局', cls: 'muted', run: () => {
           retryOfferOpen = false; retryOfferEl = null;

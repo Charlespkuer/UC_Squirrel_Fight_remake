@@ -213,6 +213,18 @@ function save(name) { fs.mkdirSync('out/battle-check', { recursive: true }); fs.
     assert(instances.slice(first).some((i) => i.name === (npcType === 'wood' ? 'wood_hitMe' : npcType + '_hitMe')), npcType + ': uses NPC reaction art');
     assert(!instances.slice(first).some((i) => /^skill_18_[12]$/.test(i.name) && i.side === 1), npcType + ': does not use squirrel-only disarm art');
   }
+  /* 幻兽直接伤害（蛮犀牛 / 奋力一击）：对方必须播受击动画，不能只飘伤害数字。 */
+  const petStart = instances.length;
+  let petEnd = 0;
+  await B.run({ canvas, me: fighter, foe: fighter, result: { winner: 0, rounds: [
+    { attacker: 0, action: 'pet', petId: 1, petSkillId: 1, dmg: 12, hpAfter: [250, 238],
+      noteText: '蛮犀牛·奋力一击', petName: '蛮犀牛' },
+  ] }, onEnd: () => petEnd++ });
+  await until(time + 6000);
+  assert.equal(petEnd, 1, 'pet damage round completes');
+  assert(instances.slice(petStart).some((i) => i.side === 1 && i.name === 'hitMe'),
+    '幻兽直接伤害要让对方播受击动画');
+  assert(drawnText.some((t) => t.text === '238/250'), '幻兽伤害仍要正常扣血');
   const counterStart = drawnText.length;
   let overkillEnd = 0;
   await B.run({ canvas, me: { ...fighter, hp: 100 }, foe: { ...fighter, hp: 100 }, result: { winner: 1, rounds: [

@@ -470,6 +470,10 @@ test('碎裂 / 延续铭文与烙印升华：碎烙印、限次 +5、以及「�
   assert.equal(broke.broken, 2, '两份都碎：' + broke.broken);
   assert.equal(Tower.unbrokenBrandCount(Tower._debugRun('endless')), 0, '碎完就没有未破碎的了');
   assert.ok(Number(Tower._debugRun('endless').fragileBurned.power) > 0, '破碎后的加成记进「永久保留」明细');
+  /* 用户 2026-10-28 口径：每碎一份都要飘一条过程提示「XX烙印已融入身躯」。 */
+  const toastsOf = (cc) => (cc.Tower._debugRun('endless').pendingToasts || []).filter((x) => typeof x === 'string');
+  assert.equal(toastsOf(c).filter((t) => t === '力量烙印已融入身躯').length, 2,
+    '碎两份就排两条「力量烙印已融入身躯」：' + JSON.stringify(toastsOf(c)));
   /* ③ 烙印升华 E20：未破碎烙印 ≤3 时不上架；超过 3 份才出现，且一用就把所有烙印碎光。 */
   assert.equal(Tower.poolFilterOf(Tower._debugRun('endless'), TD.BUFF_BY_ID.E20), false, '没烙印时 E20 不该上架');
   for (const id of ['C40', 'C41', 'C42', 'C43']) Tower.debugGrantBuff(id);
@@ -478,6 +482,13 @@ test('碎裂 / 延续铭文与烙印升华：碎烙印、限次 +5、以及「�
   const r = Tower.debugGrantBuff('E20');
   assert.equal(r.res.brokenBrands, 4, '一次碎掉全部 4 份：' + JSON.stringify(r.res.brokenBrands));
   assert.equal(Tower.unbrokenBrandCount(Tower._debugRun('endless')), 0, '全部破碎');
+  const toasts = toastsOf(c);
+  for (const name of ['敏捷烙印', '速度烙印', '力量烙印·精', '敏捷烙印·精']) {
+    assert.ok(toasts.includes(name + '已融入身躯'), 'E20 一次碎多条也要逐条提示：' + name);
+  }
+  /* 提示取走后队列清空（界面 openEndless 时 flushRunToasts 取一次就没了）。 */
+  assert.ok(Tower.takeRunToasts().length >= 4, '待提示里应当有刚才那几条');
+  assert.equal(toastsOf(c).length, 0, '取走之后队列清空');
 });
 test('档位徽记：传奇档要有自己的「金色方框 + 钻石」标志（不再和普通档一样是个黄圆）', () => {
   /* 用户口径 2026-10 第七十九批：选择卡上的档位徽记，普通 ● / 稀有 ◆ / 史诗 ★，

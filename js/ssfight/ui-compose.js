@@ -170,7 +170,11 @@
   }
 
   function iconSrc(kind, id) {
-    if (kind === 'gear') return 'images/ui/icons/gear/gear-' + Number(id) + '.png';
+    if (kind === 'gear') {
+      if ([201, 202, 203, 204].includes(Number(id))) return 'images/ui/icons/gear/gear-' + Number(id) + '-classic.svg';
+      return 'images/ui/icons/gear/gear-' + Number(id) + '.png';
+    }
+    if ([10, 11, 12, 14].includes(Number(id))) return 'images/ui/icons/prop/prop-' + Number(id) + '.svg';
     return 'images/ui/icons/prop/prop-' + Number(id) + '.png';
   }
 

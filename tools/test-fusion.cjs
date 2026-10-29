@@ -334,6 +334,23 @@ test('三件同套装融合必定得到该套下一品质同部位', () => {
   }
 });
 
+test('现代融合只在有贴图的装备之间进行：产物落在放行的候选上', () => {
+  /* 用户 2026-10-28 口径：现代界面把「没有贴图」的装备当作不存在 ——
+   * 材料与产物都只在有现代贴图的装备里挑。这里把「有贴图」缩小成 {49,50,51,125}：
+   * 三件紫装是材料，候选里只剩 125（橙格斗头巾），产物必须正好是它。 */
+  const game = setup([49, 50, 51], { mode: 'modern', gold: 200 });
+  const allowed = new Set([49, 50, 51, 125]);
+  game.context.UI.classic.gearHasArt = (g) => allowed.has(Number(g && g.id));
+  game.context.ClassicFusion.open();
+  game.gears.forEach((gear) => game.click('gear', gear.key));
+  assert.equal(game.get('action', 'fuse').disabled, false, '三件有贴图的紫装可以放进材料');
+  game.click('action', 'fuse');
+  const made = game.context.State.myGears().find((gear) => !game.gears.some((old) => old.key === gear.key));
+  assert.ok(made, '产物应当入包');
+  assert.equal(made.id, 125, '产物只能从「有贴图」的候选里挑：' + made.id + ' ' + made.name);
+  assert.equal(game.modals[0].title, '融合成功');
+});
+
 for (const [name, run] of tests) {
   run();
   console.log('PASS ' + name);

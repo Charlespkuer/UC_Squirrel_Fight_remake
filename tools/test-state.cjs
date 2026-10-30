@@ -1768,6 +1768,45 @@ test('绝对防御触发后，举盾方仍按同样的概率反击', () => {
   assert.ok(rate > 0.12 && rate < 0.40, '反击概率应接近普通 25%，实测 ' + Math.round(rate * 100) + '%');
 });
 
+test('绝对防御挡下多段攻击时整段都不掉血（西瓜刀连击 / 螳螂双击）', () => {
+  /* 用户 2026-10-30 反馈：绝对防御发动的时候，某些情况下玩家自己会受伤。
+   * 根因是多段攻击（西瓜刀连击 / 螳螂双击 / 疾风镰刀舞四连）**每一段各判一次**绝对防御 ——
+   * 第 1 段被挡下并飘出「绝对防御」，第 2 段照常打进来，于是玩家看到「绝对防御 + 自己掉血」。
+   * 现在一次出手只判一次（`jueDuiDecide` → `opts.jueDuiLock`），整段挡下或整段不挡。
+   * 这里用固定随机流跑真战斗，**结构性**断言：绝对防御出现的这一拍，被打方伤害必须是 0。 */
+  const g = game();
+  const matchups = [
+    { label: '西瓜刀连击', make: () => fighter({ hp: 4000, maxHp: 4000, power: 55, agility: 35, speed: 52,
+      weapons: [{ id: 4, level: 12 }] }) },
+    { label: '螳螂双击', make: () => fighter({ npcType: 'tl', hp: 4000, maxHp: 4000, power: 55, agility: 35, speed: 52,
+      skills: [{ id: 8, level: 10 }] }) },
+  ];
+  let blocked = 0, multiHit = 0;
+  for (const m of matchups) {
+    for (let t = 0; t < 300; t++) {
+      const me = fighter({ hp: 4000, maxHp: 4000, power: 80, agility: 40, speed: 55,
+        skills: [{ id: 16, level: 10 }] });
+      const res = g.Sim.simulate(me, m.make());
+      let before = null;
+      for (const r of res.rounds) {
+        if (!r.hpAfter) continue;
+        if (r.jueDui) {
+          blocked++;
+          if ((r.hits || r.multiHit || 1) > 1) multiHit++;
+          assert.equal(r.dmg || 0, 0, m.label + '：绝对防御整段挡下时这一拍的伤害必须是 0');
+          if (r.attacker != null && before) {
+            const def = 1 - r.attacker;
+            assert.ok(before[def] >= r.hpAfter[def], m.label + '：绝对防御这一拍被打方不能再掉血');
+          }
+        }
+        before = r.hpAfter;
+      }
+    }
+  }
+  assert.ok(blocked > 40, '样本里应当有足够多的绝对防御触发，实测 ' + blocked);
+  assert.ok(multiHit > 0, '样本里应当出现「多段攻击撞上绝对防御」，实测 ' + multiHit);
+});
+
 test('反击口径：只有近战武器与普攻能触发反击（远程 / 技能 / 已反伤都不行）', () => {
   /* 2026-10 第八十批用户口径。这里**不锁随机流**：断言的是**结构性**规则 ——
    * 「某类回合里一次反击都不该出现」（由代码分支决定，与随机无关），

@@ -824,6 +824,34 @@
   /* ============================================================
    * 【SM6】减伤链（护盾/绝对防御/减伤）
    * ============================================================ */
+  /** 绝对防御这一次出手是否发动 —— **一次出手只判一次**（多段攻击整段挡下 / 整段不挡）。
+   *
+   *  为什么必须「一次」：西瓜刀连击（2 段）、螳螂双击（2 段）、疾风镰刀舞（4 段）原先每一段
+   *  各判一次，于是出现「第 1 段被绝对防御挡下、第 2 段照常打在玩家身上」——
+   *  玩家看到的画面是「绝对防御发动了，我却掉血」（用户 2026-10-30 反馈的真实 bug）。
+   *  现在由出手方在循环外先判一次，把结果作为 `opts.jueDuiLock` 传给每一段。
+   *
+   *  返回：`'block'` 发动（并记一次降权）/ `'miss'` 不发动 / `null` 不适用
+   *  （没学 / 被沉默 / **投掷类根本不触发**，见需求140）。
+   *  降权计数（`def.jueDuiCount`）仍按「挡过一次」+1 —— 整段挡下只算一次。 */
+  function jueDuiDecide(def, weaponType) {
+    if (!def || !def.skills || !def.skills[16]) return null;
+    if (Number(def.silence) > 0) return null;
+    /* 2026-10 用户口径（需求140）：**投掷类攻击根本不触发绝对防御** —— 不挡、不反弹，
+     * 也**不计入降权计数**（直接跳过判定就等于扔过来的武器不会把后续触发率压下去）。 */
+    if (weaponType === '投掷') return null;
+    if (!chance(jueDuiChanceOf(def, def.jueDuiCount || 0))) return 'miss';
+    def.jueDuiCount = Math.max(0, Math.floor(Number(def.jueDuiCount) || 0)) + 1;
+    return 'block';
+  }
+  /** 绝对防御挡下这一段：伤害归零，按 40% + 每级 4% + 真化加成反弹给出击方。 */
+  function jueDuiBlock(def, dmg, out) {
+    const pct = 40 + 4 * (Math.min(def.skills[16], 10) - 1) + trueVal(16, def.skills[16]);
+    out.jueDui = dmg;
+    out.rebound = Math.round(dmg * pct / 100);
+    out.dmg = 0;
+    return out;
+  }
   function dmgReduce(def, dmg, opts) {
     opts = opts || {};
     let out = { dmg, guiJia: 0, jueDui: 0, rebound: 0 };
@@ -833,18 +861,12 @@
      * 同一场里每挡一次，下一次的触发率就按 jueDuiChanceOf 的曲线往下降
      *（1~10 级：首次 20..24.5、之后 0.5；11~15 级：首次 24.5、第二次 5..24、第三次起 0.5）。
      * 旧的布尔 `usedJueDui` 已被这个计数取代（它只够区分「首次/之后」两档）。
-     * 2026-10 用户口径（需求140）：**投掷类攻击根本不触发绝对防御** —— 不挡、不反弹，
-     * 也**不计入降权计数**（计数只在下面分支里 +1，跳过分支就等于扔过来的武器
-     * 不会把后续触发率压下去）。近战 / 徒手 / 技能照旧。 */
-    if (def.skills[16] && def.silence <= 0 && opts.weaponType !== '投掷'
-        && chance(jueDuiChanceOf(def, def.jueDuiCount || 0))) {
-      def.jueDuiCount = Math.max(0, Math.floor(Number(def.jueDuiCount) || 0)) + 1;
-      const pct = 40 + 4 * (Math.min(def.skills[16], 10) - 1) + trueVal(16, def.skills[16]);
-      out.jueDui = out.dmg;
-      out.rebound = Math.round(out.dmg * pct / 100);
-      out.dmg = 0;
-      return out;
-    }
+     *
+     * `opts.jueDuiLock` = 本次出手的判定结果（多段攻击由出手方在循环外判一次，
+     * 见 jueDuiDecide）：'block' 整段挡下 / 'miss' 整段不挡 / null 不适用。
+     * **不传（undefined）才是单段调用**，这里自己判一次（与旧行为一致）。 */
+    const jueDui = opts.jueDuiLock === undefined ? jueDuiDecide(def, opts.weaponType) : opts.jueDuiLock;
+    if (jueDui === 'block') return jueDuiBlock(def, out.dmg, out);
     if (def.skills[7] && def.silence <= 0) {
       const shellCount = Math.max(0, Math.floor(Number(def.shellCount) || 0));
       const canTrigger = def.shellCharges > 0
@@ -1020,7 +1042,7 @@
           r.crit = true;
         }
       }
-      const red = dmgReduce(def, rawDmg, { action, weaponType: opts.weaponType });
+      const red = dmgReduce(def, rawDmg, { action, weaponType: opts.weaponType, jueDuiLock: opts.jueDuiLock });
       let dmg = red.dmg;
       /* 塔 buff「狂怒」：低血时的加成是**终乘** —— 在加成与减伤都算完之后，直接乘最终伤害，
        * 所以不会被其它乘区稀释（见 tower-data.js 的 C20 注释）。 */
@@ -1389,11 +1411,14 @@
         // 原版 35% / 每击 0.55 倍，实战里几乎每场都放且总伤达 2.2 倍力量）
         r.ultName = '疾风镰刀舞'; r.multiHit = 4;
         if (chance(dodgeChance(att, def))) { markDodge(r, def); pushRound(r); return; }
+        /* 绝对防御一次出手只判一次：四连击要么整段挡下、要么整段不挡（见 jueDuiDecide）。 */
+        const jueDuiLock = jueDuiDecide(def, undefined);
         let total = 0;
         for (let i = 0; i < 4; i++) {
           const rr = { dmg: 0 };
-          applyDamage(att, def, Math.round(effPower(att) * 0.36), rr, { action: 'skill' });
+          applyDamage(att, def, Math.round(effPower(att) * 0.36), rr, { action: 'skill', jueDuiLock: jueDuiLock });
           total += rr.dmg;
+          if (rr.jueDui) r.jueDui = true;
           if (rr.reboundHurt) { r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt; r.jueDui = true; }
           if (rr.fakeDie) inheritFakeDie(r, rr);
           if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
@@ -1535,12 +1560,15 @@
         else if (rhythm) { raw = Math.round(raw * 2.5); r.crit = true; }
         // 命中
         if (chance(dodgeChance(att, def))) { markDodge(r, def); pushRound(r); return; }
+        /* 绝对防御一次出手只判一次：螳螂双击要么整段挡下、要么整段不挡（见 jueDuiDecide）。 */
+        const jueDuiLock = jueDuiDecide(def, undefined);
         let total = 0;
         const hits = r.multiHit || 1;
         for (let i = 0; i < hits; i++) {
           const rr = { dmg: 0 };
-          applyDamage(att, def, raw, rr, { action: 'skill' });
+          applyDamage(att, def, raw, rr, { action: 'skill', jueDuiLock: jueDuiLock });
           total += rr.dmg;
+          if (rr.jueDui) r.jueDui = true;
           if (rr.reboundHurt) { r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt; r.jueDui = true; }
           if (rr.thornsDmg) r.thornsDmg = (r.thornsDmg || 0) + rr.thornsDmg;
           if (rr.shellAbsorb) r.shellAbsorb = (r.shellAbsorb || 0) + rr.shellAbsorb;
@@ -1753,10 +1781,13 @@
         if (w.id === 4 && chance(weaponEffect(w, 10, 2, 5) + trueW(w, 'combo'))) hits = 2;   // 西瓜刀（真级 +5% 连击）
         if (w.id === 10 && chance(weaponEffect(w, 2, 2) + trueW(w, 'triple'))) hits = 3;   // 流星锤（2% + 2%/级；真级 +3% 三扔）
         r.hits = hits;
+        /* 绝对防御一次出手只判一次：连击 / 三扔整段挡下（投掷类本来就不触发，判出来是 null）。
+         * 以前每段各判一次 —— 第 1 段被挡、第 2 段照打，玩家看到「绝对防御」却仍然掉血。 */
+        const jueDuiLock = jueDuiDecide(def, w.type);
         let total = 0;
         for (let i = 0; i < hits; i++) {
           const rr = { dmg: 0 };
-          applyDamage(att, def, raw, rr, { ignoreFakeDie: w.id === 7 || trueW(w, 'ignoreFakeDie') > 0, action: 'weapon', weaponType: w.type });
+          applyDamage(att, def, raw, rr, { ignoreFakeDie: w.id === 7 || trueW(w, 'ignoreFakeDie') > 0, action: 'weapon', weaponType: w.type, jueDuiLock: jueDuiLock });
           total += rr.dmg;
           /* 「绝对防御触发了」这条标记必须**独立于反弹伤害**传播：投掷类被挡下时刻意不反弹
            *（需求140），但战斗动画（battle.js 的 skill_16 / 「绝对防御」飘字）与塔的统计

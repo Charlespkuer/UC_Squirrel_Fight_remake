@@ -865,7 +865,10 @@
      * `opts.jueDuiLock` = 本次出手的判定结果（多段攻击由出手方在循环外判一次，
      * 见 jueDuiDecide）：'block' 整段挡下 / 'miss' 整段不挡 / null 不适用。
      * **不传（undefined）才是单段调用**，这里自己判一次（与旧行为一致）。 */
-    const jueDui = opts.jueDuiLock === undefined ? jueDuiDecide(def, opts.weaponType) : opts.jueDuiLock;
+    /* 反击必中（用户 2026-10-31 口径）：`opts.counter` 时不判绝对防御。
+     * 绝对防御是“整下挡掉”的回避，反击必须落到出手方身上；否则经典回放只演归位、
+     * 不飘任何字，玩家会当成反击被闪避。 */
+    const jueDui = opts.counter ? 'miss' : (opts.jueDuiLock === undefined ? jueDuiDecide(def, opts.weaponType) : opts.jueDuiLock);
     if (jueDui === 'block') return jueDuiBlock(def, out.dmg, out);
     if (def.skills[7] && def.silence <= 0) {
       const shellCount = Math.max(0, Math.floor(Number(def.shellCount) || 0));
@@ -1042,7 +1045,10 @@
           r.crit = true;
         }
       }
-      const red = dmgReduce(def, rawDmg, { action, weaponType: opts.weaponType, jueDuiLock: opts.jueDuiLock });
+      /* `opts.counter` = 反击：反击是必中的直接回应，**连绝对防御也不判**。
+       * 以前只跳过 dodgeChance / 先机预判 / 风影身法，撞上绝对防御仍会 0 伤害；
+       * 经典回放又没有「绝对防御」飘字（只演归位），玩家看到的就是“反击被闪避”。 */
+      const red = dmgReduce(def, rawDmg, { action, weaponType: opts.weaponType, jueDuiLock: opts.jueDuiLock, counter: !!opts.counter });
       let dmg = red.dmg;
       /* 塔 buff「狂怒」：低血时的加成是**终乘** —— 在加成与减伤都算完之后，直接乘最终伤害，
        * 所以不会被其它乘区稀释（见 tower-data.js 的 C20 注释）。 */
@@ -1616,6 +1622,11 @@
       /* 反击：被打方用**普攻**反击。必中类近战武器也可以被反击，只有大榔头（2）的说明
        * 明确写“不会被反击”；死神镰刀（15）只是必中，仍可被反击。 */
       if (r.fakeDie || def.hp <= 0 || att.hp <= 0) return;
+      /* 被闪避 / 被「风影身法」归零的那一手没有“打中”，不能反被对方反击。
+       * 以前不检查 r.dodge：先机预判 / 风影身法在 applyDamage 里把主攻击判成闪避后，
+       * maybeCounter 仍按 25% 触发，回放先飘「闪避」再演反击 —— 玩家看到的就是
+       * 「反击被闪避」（2026-10-31 反馈）。真正打中后被护盾吸收/被挡下仍可反击。 */
+      if (r.dodge || r.firstDodge || r.firstHitZero) return;
       /* 荆棘反伤已经回应过这一手，不再反击；**绝对防御不同**（用户 2026-10-29 口径）：
        * 举盾挡下之后，用盾的一方仍按同样的 25%（熊猫 45%）概率反击。 */
       if (r.thornsDmg || (r.reboundHurt && !r.jueDui)) return;
@@ -1631,10 +1642,15 @@
       const counter = { action: 'common' };
       applyDamage(def, att, raw, counter, { noDodge: true, noReflect: true, counter: true });
       r.counterDmg = counter.dmg;
-      if (counter.jueDui || counter.guiJia) {
-        r.counterBlocked = counter.jueDui ? '绝对防御' : '龟甲术';
-      } else if (counter.shellAbsorb) {
-        r.counterBlocked = '护盾';
+      /* 只有**整下 0 伤害**才算“被挡下”（护盾全吸收 / 龟甲真把伤害吃满的极端档）；
+       * 龟甲只减一部分时仍要按正常反击伤害飘字，不能标成“被挡下”。绝对防御已在
+       * dmgReduce 的 counter 分支跳过，反击必中。 */
+      if (!(counter.dmg > 0)) {
+        if (counter.jueDui || counter.guiJia) {
+          r.counterBlocked = counter.jueDui ? '绝对防御' : '龟甲术';
+        } else if (counter.shellAbsorb) {
+          r.counterBlocked = '护盾';
+        }
       }
       if (counter.fakeDie) {
         r.counterFakeDie = true;
@@ -1784,11 +1800,13 @@
         /* 绝对防御一次出手只判一次：连击 / 三扔整段挡下（投掷类本来就不触发，判出来是 null）。
          * 以前每段各判一次 —— 第 1 段被挡、第 2 段照打，玩家看到「绝对防御」却仍然掉血。 */
         const jueDuiLock = jueDuiDecide(def, w.type);
-        let total = 0;
+        let total = 0, landedHits = 0, dodgedHits = 0;
         for (let i = 0; i < hits; i++) {
           const rr = { dmg: 0 };
           applyDamage(att, def, raw, rr, { ignoreFakeDie: w.id === 7 || trueW(w, 'ignoreFakeDie') > 0, action: 'weapon', weaponType: w.type, jueDuiLock: jueDuiLock });
           total += rr.dmg;
+          if (rr.dmg > 0) landedHits++;
+          if (rr.dodge) dodgedHits++;
           /* 「绝对防御触发了」这条标记必须**独立于反弹伤害**传播：投掷类被挡下时刻意不反弹
            *（需求140），但战斗动画（battle.js 的 skill_16 / 「绝对防御」飘字）与塔的统计
            * 都靠 r.jueDui 判断这次是不是被挡下的 —— 挂在 reboundHurt 上会整条丢掉。 */
@@ -1809,6 +1827,9 @@
           if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
         }
         r.dmg = total;
+        /* 连击/三扔**每一段都被先机预判/风影身法归零**时，这一手整体算闪避：
+         * 回放要播闪避，而且不能反过来触发对方反击（只要有一段真的打中，就不算闪避）。 */
+        if (!landedHits && dodgedHits) r.dodge = true;
         // 武器特效
         if (w.id === 3 && att.hp > 0) { att.swordDodge = Math.max(att.swordDodge, weaponEffect(w, 3, 3)); r.dodgeBuff = att.swordDodge; }
         if (def.hp > 0 && !r.fakeDie) {

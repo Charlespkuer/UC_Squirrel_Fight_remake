@@ -1710,14 +1710,14 @@ test('反击后的血量快照与胜负一致，不遗漏最后一击', () => {
   assert.equal(result.rounds.length, 1); assert.equal(result.winner, 1);
 });
 
-test('反击不可闪避，也不会被绝对防御 / 荆棘弹回反击者', () => {
-  /* 用户 2026-10-29 口径：反击是必中的直接回应；以前复用 applyDamage 时，
-   * 原出手方的绝对防御触发后会把反击伤害弹回**反击者**，看起来就是「我反击、掉血的是我」。
-   * 这里用固定随机流跑真战斗，靠 `counterBlocked` 标记抓「反击被挡下」的回合：
-   * 被挡下时只允许 0 伤害 + 0 反弹，反击者除主攻击伤害外不能再掉血。 */
+test('反击必中：撞上绝对防御也照常结算，不会被闪避 / 弹回', () => {
+  /* 用户 2026-10-31 口径：**所有情况下的反击都是必中的**。以前反击只跳过
+   * dodgeChance / 先机预判 / 风影身法，撞上绝对防御仍会被整下挡掉（0 伤害）；
+   * 经典回放又没有「绝对防御」飘字，只演归位，玩家看到的就是“反击被闪避”。
+   * 现在 `opts.counter` 连绝对防御也不判；反击必须打中出手方，且不再被弹回。 */
   const g = game(), Sim = g.Sim;
-  let blocked = 0, counters = 0;
-  for (let t = 0; t < 400 && blocked < 3; t++) {
+  let counters = 0;
+  for (let t = 0; t < 400; t++) {
     const me = fighter({ hp: 5000, maxHp: 5000, power: 80, agility: 30, speed: 50,
       skills: [{ id: 16, level: 15 }] });          // 绝对防御，专门等反击撞上来
     const foe = fighter({ hp: 5000, maxHp: 5000, power: 80, agility: 30, speed: 60,
@@ -1728,20 +1728,50 @@ test('反击不可闪避，也不会被绝对防御 / 荆棘弹回反击者', ()
       if (r.counterDmg != null || r.counterBlocked) {
         counters++;
         assert.ok(!r.counterDodge, '反击不能被闪避');
-        if (r.counterBlocked) {
-          blocked++;
-          const def = 1 - r.attacker;
-          const selfLoss = (prev[def] - r.hpAfter[def]) - (r.dmg || 0);
-          assert.ok(selfLoss <= 0, '反击被挡下时反击者不能再掉血，实测多掉 ' + selfLoss);
-          assert.equal(r.counterDmg || 0, 0, '被绝对防御挡下的反击不能反弹伤害');
-          assert.ok(!r.counterRebound, '不能再把反弹伤害记到反击者身上');
-        }
+        assert.ok(!r.counterBlocked, '反击不能被绝对防御挡下');
+        assert.ok((r.counterDmg || 0) > 0, '反击必须打出伤害，实测 ' + r.counterDmg);
+        const def = 1 - r.attacker;
+        const selfLoss = (prev[def] - r.hpAfter[def]) - (r.dmg || 0);
+        assert.ok(selfLoss <= 0, '反击被挡下时反击者不能再掉血，实测多掉 ' + selfLoss);
+        assert.ok(!r.counterRebound, '不能再把反弹伤害记到反击者身上');
       }
       if (r.hpAfter) prev = r.hpAfter;
     }
   }
   assert.ok(counters > 0, '样本里应当出现反击');
-  assert.ok(blocked > 0, '样本里应当出现「反击撞上绝对防御」的回合');
+});
+
+test('被闪避的攻击不再触发反击（先机预判 / 风影身法同拍不再演“闪避 + 反击”）', () => {
+  /* 用户 2026-10-31 反馈：玩家仍看到反击被闪避。根因之一是先机预判/风影身法
+   * 在 applyDamage 里把**主攻击**判成闪避后，maybeCounter 仍按 25% 触发；
+   * 回放先播闪避、再演反击，看起来就是“反击被闪避”。这一手没打中就不该有反击。 */
+  const g = game();
+  g.math.random = () => 0;                         // 先机预判必触发；反击概率判定也走 0
+  const me = fighter({ hp: 100, maxHp: 100, power: 100, speed: 100, mods: { mustHitAll: 1 } });
+  const foe = fighter({ hp: 100, maxHp: 100, power: 10, speed: 1, mods: { firstDodge: 1 } });
+  const r = g.Sim.simulate(me, foe).rounds[0];
+  assert.equal(r.dodge, true, '先机预判应先闪避这一击');
+  assert.equal(r.counterDmg == null, true, '被闪避的攻击不能触发反击');
+  assert.equal(r.counterBlocked, undefined, '被闪避的攻击不能触发反击（挡下标记也不该有）');
+});
+
+test('反击对带先机预判 / 风影身法的目标仍然必中', () => {
+  /* 反击用自己的 noDodge 通道，不受目标“第一次攻击必闪 / 首次伤害归零”影响。 */
+  const g = game(), Sim = g.Sim;
+  let counters = 0;
+  for (let t = 0; t < 300 && counters < 5; t++) {
+    const me = fighter({ hp: 5000, maxHp: 5000, power: 100, agility: 30, speed: 100,
+      weapons: [{ id: 3, level: 10 }], mods: { mustHitAll: 1, firstDodge: 1, firstHitZero: true } });
+    const foe = fighter({ hp: 5000, maxHp: 5000, power: 50, agility: 30, speed: 1 });
+    const res = Sim.simulate(me, foe);
+    for (const r of res.rounds) {
+      if (r.counterDmg != null) {
+        counters++;
+        assert.ok(r.counterDmg > 0, '反击不能被先机预判 / 风影身法归零');
+      }
+    }
+  }
+  assert.ok(counters > 0, '样本里应当出现反击');
 });
 
 test('绝对防御触发后，举盾方仍按同样的概率反击', () => {

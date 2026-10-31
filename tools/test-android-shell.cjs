@@ -1,0 +1,77 @@
+#!/usr/bin/env node
+/* ============================================================
+ * tools/test-android-shell.cjs —— 安卓壳生命周期契约
+ *
+ * 只钉一条可感知规则：**Android 16（HyperOS 3 / 澎湃 3）切后台回来不能黑屏**。
+ * 实测（API 36 x86_64 模拟器 / WebView 133）壳里 `onPause()` + `pauseTimers()`
+ * 之后回前台，页面永远停在冻结前最后一帧 —— DOM 还在、JS 还能跑，但画面不再
+ * 更新（该出现的名字缺字、新加的图层不出现）。修法是 Android 16 起不再冻结，
+ * 并在 onResume / onConfigurationChanged 调真实存在的 `window.__ssdzRelayout`
+ * （2026-10 之前安卓壳一直在调，但页面没有定义它，iQOO 的重排是空转）。
+ *
+ * 用法：node tools/test-android-shell.cjs
+ * ============================================================ */
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+function findRoot(start) {
+  let d = start;
+  for (let i = 0; i < 8; i++) {
+    if (fs.existsSync(path.join(d, 'scripts', 'index.html')) || fs.existsSync(path.join(d, 'index.html'))) return d;
+    const up = path.dirname(d);
+    if (up === d) break;
+    d = up;
+  }
+  return path.resolve(start, '..');
+}
+const ROOT = findRoot(__dirname);
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
+const activity = read('src-tauri/android/MainActivity.kt');
+const mainJs = read('js/main.js');
+const renderJs = read('js/ssfight/render.js');
+
+let passed = 0, failed = 0;
+function test(name, fn) {
+  try { fn(); passed++; console.log('  ✓ ' + name); }
+  catch (e) { failed++; console.log('  ✗ ' + name + '\n      ' + (e.message || e)); }
+}
+
+console.log('安卓壳生命周期');
+
+test('Android 16 回前台不再黑屏：版本闸门在冻结之前，重排钩子在页面里真实存在', () => {
+  const freeze = activity.slice(activity.indexOf('private fun freezeWebViewSoon'));
+  const freezeBody = freeze.slice(0, freeze.indexOf('private fun thawWebView'));
+  const gate = freezeBody.search(/Build\.VERSION\.SDK_INT\s*>=\s*(36|Build\.VERSION_CODES\.BAKLAVA)/);
+  const pause = freezeBody.search(/view\.onPause\(\)|view\.pauseTimers\(\)/);
+  assert.ok(gate >= 0, 'MainActivity 缺少 Android 16 版本闸门');
+  assert.ok(pause > gate, '版本闸门必须在 onPause/pauseTimers 之前 return');
+  assert.match(freezeBody, /if \(backgroundRun\) return/, '「后台运行」开关仍要保留');
+  assert.match(activity, /view\.onPause\(\)[\s\S]{0,80}view\.pauseTimers\(\)/, 'Android 15 及以下的冻结不能一起删掉');
+
+  const resume = activity.slice(activity.indexOf('override fun onResume'));
+  const resumeBody = resume.slice(0, resume.indexOf('override fun onConfigurationChanged'));
+  assert.match(resumeBody, /__ssdzRelayout[\s\S]*__ssdzEnterForeground/, 'onResume 应先重排再恢复前台状态');
+  const cfg = activity.slice(activity.indexOf('override fun onConfigurationChanged'));
+  assert.match(cfg.slice(0, cfg.indexOf('override fun onDestroy')), /__ssdzRelayout/, 'onConfigurationChanged 必须通知重排');
+
+  assert.match(mainJs, /function relayoutNow\(\)[\s\S]*?fitCanvas\(\)/, 'relayoutNow 必须重新 fitCanvas');
+  assert.match(mainJs, /window\.__ssdzRelayout\s*=\s*relayoutNow/, '页面必须导出 window.__ssdzRelayout');
+  assert.match(mainJs, /dispatchEvent\(new Event\('resize'\)\)/, '必须补发 resize 让覆盖层重排');
+  assert.match(mainJs, /androidMajorVersion\(\)\s*>=\s*16[\s\S]*?SfRender\.repaintRaster/, 'Android 16 回前台要重解码 SVG 位图');
+  assert.match(renderJs, /function repaintRaster\(\)/, '显示层必须有 repaintRaster');
+  assert.match(renderJs, /repaintRaster,/, 'repaintRaster 必须从 SfRender 导出');
+});
+
+test('昵称不用 CSS filter 加柔影：Android 16 回前台会把第一个字裁掉', () => {
+  const src = read('js/ssfight/ui-main.js');
+  const m = /const NAME_STYLE = \[([\s\S]*?)\]\.join\(';'\)/.exec(src);
+  assert.ok(m, 'ui-main.js 里找不到 NAME_STYLE');
+  assert.doesNotMatch(m[1], /filter\s*:/, 'filter:drop-shadow 会沿用重排前的滤镜区域，把最左一个字裁掉');
+  assert.match(m[1], /text-shadow\s*:/, '柔影应走字形层的 text-shadow');
+});
+
+console.log('');
+if (failed) { console.log(`${passed} passed, ${failed} failed`); process.exit(1); }
+console.log(`全部通过：${passed}/${passed}`);

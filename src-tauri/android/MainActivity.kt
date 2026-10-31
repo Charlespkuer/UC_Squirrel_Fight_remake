@@ -1,6 +1,7 @@
 package com.ssdz.classic
 
 import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -59,6 +60,17 @@ class MainActivity : TauriActivity() {
 
   /** 冻结 WebView：rAF / setInterval 一起停摆，后台不再推进游戏进度（音乐由上面那段 JS 停）。 */
   private fun freezeWebViewSoon() {
+    /* Android 16（API 36，含小米 HyperOS 3 / 澎湃 3）**不再冻结 WebView**：
+     * 实测（Android 16 x86_64 模拟器 / WebView 133）按 Home 超过 250ms 后，
+     * `onPause()` + `pauseTimers()` 能让页面在回前台时**永远停在被冻结前的最后一帧** ——
+     * DOM 还在、JS 还能跑（CDP 能改节点），但画面不再更新：该出现的名字缺字、
+     * 新加的图层不出现；切后台时间再长一点就是整屏黑/旧画面。玩家看到的是
+     * 「黑屏 / 屏幕显示有问题」（2026-10 红米 K90 Pro Max / HyperOS 3 反馈）。
+     *
+     * 计时器继续跑只会让体力/建筑这类按时间推进的进度在后台照算（与设置里
+     * 「后台运行：开」相同），耗电差异远小于黑屏；音乐的暂停仍由上面的
+     * notifyPageBackground() 交给页面处理。Android 15 及以下保持原冻结行为。 */
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) return
     /* 玩家在设置里打开「后台运行」时不冻结：让计时器 / 动画继续跑（更耗电，玩家自己选）。 */
     if (backgroundRun) return
     val view = gameWebView ?: return
@@ -103,8 +115,11 @@ class MainActivity : TauriActivity() {
     lifecycleSeq++
     thawWebView()
     try {
+      /* 先让页面按当前窗口重排，再恢复音乐/系统栏。部分 ROM（iQOO / HyperOS）回前台
+       * 不会补发 JS resize；Android 16 上 WebView 还可能停在冻结前的尺寸上。 */
       gameWebView?.evaluateJavascript(
-        "window.__ssdzEnterForeground && window.__ssdzEnterForeground()",
+        "window.__ssdzRelayout && window.__ssdzRelayout();" +
+          "window.__ssdzEnterForeground && window.__ssdzEnterForeground()",
         null,
       )
     } catch (_: Exception) {

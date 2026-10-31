@@ -388,7 +388,12 @@
    *   现代是"暖白粗体 + 深棕描边/柔影 + 字距"（见 css/classic.css 的 `.home-name`：
    *   `#fffdf0 / font-weight:700 / letter-spacing:2px / text-shadow:0 2px 3px #3a1c04`）。
    *   原版这块是 SVG 里一段 SimHei 文本 —— 只加样式，**不动排版与落点**（落点由原版数据决定）。
-   *   数值都按"舞台单位"给（SVG 的 1 用户单位 = 1 舞台单位，再由外层等比放大）。 */
+   *   数值都按"舞台单位"给（SVG 的 1 用户单位 = 1 舞台单位，再由外层等比放大）。
+   *
+   *   ⚠ 不要用 `filter:drop-shadow()` 给昵称加柔影：Android 16（HyperOS 3 / WebView 133）
+   *   回前台重排时会沿用重排前的 filter 区域，把最左边一个字裁掉 —— 3 字昵称
+   *   「小松鼠」实测只画得出「松鼠」。描边本身已经够读，柔影改用字形层的 text-shadow
+   *   （不进 CSS filter 区域）；旧内核不认 text-shadow 时只是少一层影子，不影响可读性。 */
   const NAME_STYLE = [
     "font-family:'Microsoft YaHei','PingFang SC','Hiragino Sans GB',sans-serif",
     'font-weight:700',
@@ -398,7 +403,7 @@
     'stroke-linejoin:round',
     'paint-order:stroke fill',
     'letter-spacing:.4px',
-    'filter:drop-shadow(0 .5px .55px rgba(58,28,4,.85))',
+    'text-shadow:0 .5px .55px rgba(58,28,4,.85)',
   ].join(';');
   function styleName(main) {
     const box = main.byName('name');

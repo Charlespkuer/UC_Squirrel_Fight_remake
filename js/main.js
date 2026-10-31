@@ -392,13 +392,49 @@
       return /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     } catch (e) { return false; }
   }
+  /** 安卓系统大版本（UA 里的 `Android 16` → 16）；识别不出按 0 处理。 */
+  function androidMajorVersion() {
+    try {
+      const m = /Android\s+(\d+)/i.exec(String(navigator.userAgent || ''));
+      return m ? Number(m[1]) || 0 : 0;
+    } catch (e) { return 0; }
+  }
+  /** 按当前窗口重新量一次布局，并让页面自己的 resize 监听重排。
+   *
+   *  原生壳在 onConfigurationChanged / onResume 里显式调用 `window.__ssdzRelayout()`：
+   *  · iQOO 等 ROM 换方向后 WebView 不补发 JS resize（第三百九十六批的机型问题）；
+   *  · Android 16（HyperOS 3 / 澎湃 3）回前台时 WebView 可能停在冻结前的尺寸。
+   *  只调 fitCanvas() 只能挪 canvas 与 #ui，引导层 / 战斗覆盖层 / 调试面板都是各自
+   *  监听 window resize 的，必须再派发一次合成 resize。 */
+  let relayoutFrame = 0;
+  function relayoutNow() {
+    try { fitCanvas(); } catch (e) {}
+    try {
+      window.dispatchEvent(new Event('resize'));
+    } catch (e) {
+      try {
+        const ev = document.createEvent('Event');
+        ev.initEvent('resize', false, false);
+        window.dispatchEvent(ev);
+      } catch (e2) {}
+    }
+    /* 回前台第一帧可能还在恢复图层：下一帧再量一次（幂等）。 */
+    try {
+      if (!relayoutFrame) {
+        relayoutFrame = requestAnimationFrame(() => { relayoutFrame = 0; try { fitCanvas(); } catch (e) {} });
+      }
+    } catch (e) {}
+  }
   /** iOS 切后台回来：WKWebView 会释放 canvas 的绘制缓冲，也可能丢掉 SVG 内嵌位图 /
    *  CSS 背景的解码结果；页面本身不会重建，于是看起来就是「背景消失」。
-   *  这里只在 iOS 上按当前屏幕补画一次（title / modern home / 经典 SVG / CSS 底板），
-   *  不改变游戏状态，也不在桌面或安卓上多跑。 */
+   *  Android 16 的 WebView 也会丢同一类栅格层（Chromium 在 Adreno / Vulkan 合成路径上
+   *  有已知的 image layer 不上屏问题），表现同样是回前台后整块黑/少图，所以一起补画。
+   *  只在 iOS / Android 16+ 上按当前屏幕补一次，不改变游戏状态。 */
   let foregroundRepaintSeq = 0;
   function scheduleForegroundRepaint() {
-    if (!iosWebKit()) return;
+    const ios = iosWebKit();
+    const android16 = androidMajorVersion() >= 16;
+    if (!ios && !android16) return;
     const seq = ++foregroundRepaintSeq;
     const paint = () => {
       if (seq !== foregroundRepaintSeq) return;
@@ -412,6 +448,12 @@
       }
       try { if (window.SfRender && SfRender.repaintRaster) SfRender.repaintRaster(); } catch (e) {}
       try { repaintCssBackgrounds(); } catch (e) {}
+      if (android16) {
+        /* 荣耀 / 华为丢图那套恢复节拍在战斗里每 6 秒跑一次；回前台的这一下先补发
+         * 真正失败过的图片，再让页面按当前窗口重排。 */
+        try { if (window.Engine && Engine.retryFailedImages) Engine.retryFailedImages(); } catch (e) {}
+        relayoutNow();
+      }
     };
     /* 回前台的第一帧可能还在恢复图层；补两次（下一次 rAF + 180ms）。 */
     requestAnimationFrame(() => { paint(); setTimeout(paint, 180); });
@@ -451,6 +493,9 @@
     try { if (fightBgm) fightBgm.pause(); } catch (e) {}
   }
   function enterForeground() {
+    /* 原生壳在 onResume 里已经先调过一次 __ssdzRelayout；这里再走一次是兜底：
+     * 页面自己收到 visibilitychange 时（浏览器 / iOS / 没走壳的安卓）也能重排。 */
+    try { if (document.readyState !== 'loading') relayoutNow(); } catch (e) {}
     if (!inBackground) return;
     inBackground = false;
     applySystemBars();          // 回前台时原生壳可能重建过系统栏状态，重新落一次
@@ -462,6 +507,9 @@
   try {
     window.__ssdzEnterBackground = enterBackground;
     window.__ssdzEnterForeground = enterForeground;
+    /* 安卓壳的 onConfigurationChanged / onResume 调这个（以前只有调用没有定义，
+     * 所以 iQOO 那条「换方向后重排」的修复实际是空转）。 */
+    window.__ssdzRelayout = relayoutNow;
     window.__ssdzIsBackgrounded = () => inBackground;
     if (document.addEventListener) {
       document.addEventListener('visibilitychange', () => {

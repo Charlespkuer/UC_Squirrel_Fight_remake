@@ -2537,6 +2537,16 @@ function checkGuideLateSteps() {
     /window\.addEventListener\('resize', reflow\)/.test(g),
     '安卓引导的手指/金环要按 getScreenCTM 换算并钉到真实按钮，窗口变化要重算'
   );
+  /* f10 的「返回菜单」贴页面底边：金环 padding 会伸出 320×196 viewBox，SVG 默认
+   * overflow:hidden 裁掉底边，Windows 上看就是「框歪了、没框住」。必须允许画到
+   * viewBox 外，并按窗口可见区夹住（留 1.5px 给描边）。 */
+  assert.ok(
+    /#ui>\.sf-guide-view\{[^}]*overflow:visible/.test(css) &&
+    /#ui>\.sf-guide-view>svg\{overflow:visible\}/.test(css) &&
+    /innerWidth/.test(g) && /innerHeight/.test(g) &&
+    /const vp1 = toPoint\(0, 0\), vp2 = toPoint\(vw, vh\)/.test(g),
+    '引导金环要夹在窗口可见区内，并允许画到素材 viewBox 之外（f10 返回菜单贴底不被裁）'
+  );
 }
 
 /* ---------- 45. 负场开宝箱背景用失败 CG ---------- */

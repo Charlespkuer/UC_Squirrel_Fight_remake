@@ -1229,7 +1229,12 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 /* ===== 新手引导（ssfight 3625）=====
  * 原版是整页提示层：暗色说明条 + 黄色手指 + 半透明目标示意。它只负责“讲”，
  * 不接管点击，所以整层 pointer-events:none；z-index 压在页面之上、战果/弹窗之下。 */
-#ui>.sf-guide-view{position:absolute;inset:0;z-index:15;pointer-events:none;overflow:hidden}
+#ui>.sf-guide-view{position:absolute;inset:0;z-index:15;pointer-events:none;overflow:visible}
+/* 金环要能画到 320×196 的素材 viewBox 之外：f10 的「返回菜单」在页面最底部，
+ * 环的 padding 会伸到 viewBox 下面；SVG 默认 overflow:hidden 会把底边裁掉，
+ * 看起来就是「框歪了、没框住」。父层和 svg 都放开，实际范围由 ui-guide.js
+ * 按窗口可见区夹住（1.5px 内缩，保证描边仍在屏内）。 */
+#ui>.sf-guide-view>svg{overflow:visible}
 /* ⚠ 只给父层写 pointer-events:none 在 iOS 15 的 WKWebView 上不够可靠：它不一定把
  *   none 继承进 SVG 子树。引导的黄色手指与金环正好压在「开始挑战」上，真机上就变成
  *   “体力条（DOM）有反应、开始挑战（SVG）点不动”。引导层与同类“只负责展示、必须

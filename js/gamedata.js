@@ -461,7 +461,7 @@
      * 避免每次打开游戏第一次进「更换装备」都再送一件。 */
     starterGearGiven: false,
     props: { 1: 3, 2: 2 },     // 小体力药剂x3 大体力药剂x2
-    freePoints: 0,             // 升级发下来、还没分配的自由属性点
+    freePoints: 0,             // 特殊途径（金宝箱等）发下来、还没分配的自由属性点
     wsPicks: [],               // 升级发下来、还没选的武器/技能「三选一」组
     propsStates: {},           // 药剂生效场次 {propId: count}
     stages: {},                // stageId -> {npcIndex, passed}

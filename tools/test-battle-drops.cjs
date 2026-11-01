@@ -121,8 +121,8 @@ test('经验掉落走真实升级，跳过3次累计15经验且汇总属性成�
   assert.ok(choices.every((c) => ['weapon','skill'].includes(c.kind) && c.name));
   assert.equal(g.c.State.chooseWS(choices[0].kind, choices[0].id).ok, true);
   assert.equal(g.c.State.pendingWS(), 0);
-  // 每级 4 个点位：3 点属性 + 生命 5。其中 1 点自选：占比过低时系统代选（autoPoint 已进属性），
-  // 否则挂在 freePoints 上等玩家分配，所以要把这两者一起算进预算。
+  // 每级 4 个点位：3 点属性 + 生命 5。第 3 点全部由系统分配（autoPoint 已进属性），
+  // 升级不再挂 freePoints；预算按 autoPoint=1 计。
   const u = summary.ups[0];
   assert.equal(u.power + u.agility + u.speed + u.hp / 5 + (u.freePoint || 0) + (u.autoPoint ? 1 : 0), 4);
   assert.equal(g.saved().level,2);assert.equal(g.saved().exp,13);drop.skip();assert.equal(g.s().exp,13);

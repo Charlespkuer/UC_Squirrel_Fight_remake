@@ -161,7 +161,7 @@
         }
         if (window.UI && UI.refreshHome) UI.refreshHome();
         renderOwned();
-        // 一路上攒下的三选一与自选属性点：直接弹出处理（一键满级会攒几十组/几十点）
+        // 一路上攒下的三选一与特殊属性点：直接弹出处理（一键满级会攒几十组/几十点）
         if (window.UI && UI.classic && UI.classic.promptLevelUpChoices) UI.classic.promptLevelUpChoices();
         return '等级 ' + from + ' → ' + S.level + '（' + levels + ' 级）：力量+' + gain.power + ' 敏捷+' + gain.agility +
           ' 速度+' + gain.speed + ' 生命+' + gain.hp + '，升级礼包 ' + gifts + ' 件' + (books ? '、属性书 ' + books + ' 本' : '') +
@@ -184,7 +184,7 @@
         return '升到 ' + last.level + ' 级（力量+' + sum('power') + ' 敏捷+' + sum('agility') +
           ' 速度+' + sum('speed') + ' 生命+' + sum('hp') + '）' + (gifts ? '，礼包 ' + gifts + ' 件' : '') +
           (picks ? '，武器/技能三选一 ' + picks + ' 组' : '') +
-          (last.autoPoint ? '，' + last.autoPointName + '占比过低已自动补 1 点' : '') +
+          (last.autoPoint ? '，系统分配 1 点（' + last.autoPointName + '）' : '') +
           (S.freePoints ? '，本次分配弹窗里还有 ' + S.freePoints + ' 点没点完' : '');
       } },
     { label: '金松果 +10000', run() { State.addGold(10000, { count: false }); State.save(); UI.refreshHome(); return '金松果 +10000'; } },

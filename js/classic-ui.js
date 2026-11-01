@@ -352,7 +352,7 @@
   // 原版没有单独的「生命」图标，用同风格的圆形字徽补上。
   const STAT_ICON = { power: 3, agility: 4, speed: 5 };
   const STAT_CHAR = { power: '力', agility: '敏', speed: '速', hp: '命' };
-  /** 系统代选卡片用的图标：力/敏/速沿用彩色道具图标，生命没有贴图，退回「命」字徽。 */
+  /** 系统分配卡片用的图标：力/敏/速沿用彩色道具图标，生命没有贴图，退回「命」字徽。 */
   const pointArt = (key) => {
     const id = STAT_ICON[key];
     return id ? '<img alt="" class="reward-icon-img" src="' + atlasIcon('prop', id) + '">' : '<b class="reward-badge">' + STAT_CHAR[key] + '</b>';
@@ -381,11 +381,10 @@
         ? '<div class="reward-card skill"><span class="reward-icon">' + icon(u.rewardKind === 'weapon' ? 'weapon' : 'skill', u.rewardId) + '</span>' +
           '<span class="reward-text">' + esc(u.reward) + '</span></div>'
         : '';
-      // 系统代选的那一点：已经进属性了，顺手在面板上说明原因。
-      // （玩家自选的点走升级弹窗，点数不在界面常驻显示。）
+      // 系统分配的那一点：升级不再让玩家自选，已经直接进属性。
       const point = u.autoPoint
         ? '<div class="reward-card point"><span class="reward-icon">' + pointArt(u.autoPoint) + '</span>' +
-          '<span class="reward-text" title="' + STAT_CHAR[u.autoPoint] + '占比低于门槛，系统直接代选">' + STAT_CHAR[u.autoPoint] + '+' + State.STAT_GAIN[u.autoPoint] + '<span class="point-tag">系统代选</span></span></div>'
+          '<span class="reward-text" title="' + STAT_CHAR[u.autoPoint] + '：系统分配（力/敏/速低于25%时优先补该项，否则四项随机）">' + STAT_CHAR[u.autoPoint] + '+' + State.STAT_GAIN[u.autoPoint] + '<span class="point-tag">系统分配</span></span></div>'
         : '';
       // 武器/技能三选一：卡片只做提示，真正的选择在弹窗里
       const wsPick = u.wsChoice
@@ -1736,7 +1735,7 @@
       }).join('');
       const rows = (u.reward ? '<div class="reward-card skill"><span class="reward-text">' + esc(u.reward) + '</span></div>' : '')
         + (u.wsChoice ? '<div class="reward-card skill"><span class="reward-icon"><b class="reward-badge ws-badge">选</b></span><span class="reward-text">武器/技能 三选一</span></div>' : '')
-        + (u.autoPoint ? '<div class="reward-card point"><span class="reward-icon">' + pointArt(u.autoPoint) + '</span><span class="reward-text">' + STAT_CHAR[u.autoPoint] + '+' + State.STAT_GAIN[u.autoPoint] + '<span class="point-tag">系统代选</span></span></div>' : '')
+        + (u.autoPoint ? '<div class="reward-card point"><span class="reward-icon">' + pointArt(u.autoPoint) + '</span><span class="reward-text">' + STAT_CHAR[u.autoPoint] + '+' + State.STAT_GAIN[u.autoPoint] + '<span class="point-tag">系统分配</span></span></div>' : '')
         + (u.chest ? '<div class="reward-card gift"><span class="reward-icon">' + icon('prop', 90) + '</span><span class="reward-text">金宝箱 ×' + esc(u.chest) + '</span></div>' : '')
         + gifts;
       return '<div class="reward-panel"><div class="reward-level">升到 ' + esc(u.level) + ' 级</div>' +
@@ -2915,10 +2914,9 @@
     bindPicks();
     return m;
   }
-  /* ---------- 自由属性点（升级当场自选，四项平衡，占比过低系统代选） ----------
-   * 规则在 State：allocatePoint 会在某一项占比低于门槛时直接代选（redirected=true），
-   * 所以界面即使被绕过也守得住。这里只负责把「升级时就得选掉」变成一个没有关闭叉的弹窗，
-   * 点数不进背包、不在界面任何地方常驻显示。 */
+  /* ---------- 特殊自由属性点（金宝箱等；升级本身全部系统分配） ----------
+   * 规则在 State：力/敏/速任一项低于三项总和的 25% 时 allocatePoint 直接代选
+   * （redirected=true），所以界面即使被绕过也守得住。生命不参与三项占比，只按 5 点 = 1 点。 */
   const STAT_LABEL={power:'力量',agility:'敏捷',speed:'速度',hp:'生命'};
   const statField=(key)=>key==='hp'?'maxHp':key;
   function freePointDialog() {
@@ -2928,7 +2926,7 @@
       '<b class="fp-value" data-value="'+key+'">0</b><span class="fp-share" data-share="'+key+'">0%</span>'+
       '<button type="button" class="uc-button small" data-point="'+key+'">+'+State.STAT_GAIN[key]+'</button></div>').join('');
     const minPct=Math.round(State.STAT_SHARE_MIN*100);
-    const body='<div class="free-point-box"><p class="free-point-tip">升级留了一点属性给你自己加：力量／敏捷／速度各 +1，生命 +5。四项占比（生命按 5 点折算 1 点）任意一项低于 '+minPct+'% 时必须先补它，系统会直接替你选择。</p>'+
+    const body='<div class="free-point-box"><p class="free-point-tip">这里的点来自金宝箱等特殊途径（升级本身已全部由系统分配）。力量／敏捷／速度各 +1，生命 +5；力/敏/速三项占比任意一项低于 '+minPct+'% 时必须先补它（系统会直接替你选择），生命不参与这项占比。</p>'+
       '<div class="free-point-rows">'+rows+'</div>'+
       '<p class="free-point-note" data-live="point-note" role="status"></p>'+
       '<p class="allocation-remaining" data-live="point-left" role="status">剩余 0 点</p></div>';
@@ -2942,14 +2940,14 @@
       const S=State.state(),shares=State.statShares(),force=State.forcedStat(),left=State.pendingPoints();
       for(const key of State.STAT_KEYS){
         $('[data-value="'+key+'"]',m.element).textContent=S[statField(key)];
-        $('[data-share="'+key+'"]',m.element).textContent=Math.round(shares[key]*100)+'%';
+        $('[data-share="'+key+'"]',m.element).textContent=key==='hp'?'—':(Math.round(shares[key]*100)+'%');
         $('[data-row="'+key+'"]',m.element).classList.toggle('forced',force===key);
         $('[data-point="'+key+'"]',m.element).disabled=left<=0;
       }
       $('[data-live="point-left"]',m.element).textContent='剩余 '+left+' 点';
       $('[data-live="point-note"]',m.element).textContent=force
         ?STAT_LABEL[force]+'占比 '+Math.round(shares[force]*100)+'%，低于 '+minPct+'%，接下来必须加到'+STAT_LABEL[force]+'（系统代选）'
-        :'四项占比都达标，可以自由选择。';
+        :'力/敏/速三项占比都达标，可以自由选择；生命不参与三项占比。';
       $('[data-action="0"]',m.element).disabled=left<=0;                 // 平均分配
       $('[data-action="1"]',m.element).disabled=State.undoDepth()<=0;      // 撤回上一次
       $('[data-action="2"]',m.element).disabled=left>0;                    // 确定

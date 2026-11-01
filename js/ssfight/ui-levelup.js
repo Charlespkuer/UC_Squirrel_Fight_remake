@@ -5,7 +5,7 @@
  * 7795 第 1~29 帧的「NN 级达成」大图，第 30 帧停住并 `showReward()` 把
  * 四格 `fourProperties`（7794）填上：属性各一卡 + 底部「确定」。
  * 原版四格只放「生命/力量/敏捷/速度/武技」；复刻的升级奖励机制更丰富
- * （自由点、三选一、属性书、礼包），这里保留原版版式，把奖励**分页**塞进
+ * （系统分配点、三选一、属性书、礼包），这里保留原版版式，把奖励**分页**塞进
  * 同一组四格，不另画一套现代卡片。
  * ========================================================================== */
 (function () {
@@ -59,11 +59,10 @@
     };
     addStat('power'); addStat('agility'); addStat('speed'); addStat('hp');
     if (up.attributeBook) out.push({ label: '属性书', icon: { kind: 'prop', id: 37 } });
-    if (up.freePoint) out.push({ label: '自由点', icon: { badge: '点' } });
     if (up.autoPoint) {
       const key = up.autoPoint;
       const char = (STAT[key] && STAT[key].char) || '点';
-      out.push({ label: clipText('代选' + char + '+' + statGain(key), 5), icon: { badge: char } });
+      out.push({ label: clipText('分配' + char + '+' + statGain(key), 5), icon: { badge: char } });
     }
     if (up.wsChoice) out.push({ label: '三选一', icon: { badge: '选' } });
     if (up.chest) out.push({ label: '金宝箱×' + up.chest, icon: { kind: 'prop', id: 90 } });

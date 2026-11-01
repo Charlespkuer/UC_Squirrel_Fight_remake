@@ -62,12 +62,14 @@
    * 装备主属性、被动技能、套装、药丸状态、幻兽是对战斗面板的外部加成，不占这 651 点预算。
    * 它必须**高于所有正常产出**（包括旧属性书/转生记录），但任何来源——含调试——都不能越过。 */
   const STAT_HARD_CAP = 651;
-  /* 四项平衡的份额口径：生命按 HP_PER_STAT 点折算成 1 点属性。
-   * 自然成长到 15 级时三项约 14.6、生命约 145，折算后四项刚好各占约 25%，
-   * 所以「平均份额」= 25%，门槛取它的八成（20%）：某一项被压到平均的
-   * 80% 以下时必须先补它，由系统直接代选（转化丸的「占比过低」是另一种口径）。 */
-  const HP_PER_STAT = 10;
-  const STAT_SHARE_MIN = 0.20;
+  /* 生命 5 点 = 1 点（总属性 / 651 上限 / 平均分配同一口径）。
+   * **生命不参与三项占比**：原版 SSFight 的权重只约束力/敏/速。 */
+  const HP_PER_STAT = 5;
+  /* 原版 SSFight 的转化丸口径：力/敏/速任一项低于三项总和的 **25%** 时不能用。
+   * 本作把这套「三项权重」用于升级系统分配与特殊自由点；生命另有等级×9 的
+   * 消耗门槛（原版道具 14/18），不进入这个占比。 */
+  const SHARE_KEYS = ['power', 'agility', 'speed'];
+  const STAT_SHARE_MIN = 0.25;
   /* 画面分辨率档位：'auto' 跟随窗口，其余按「设计基准高度」等比缩放并居中
    * （设计尺寸是 1170×690）。窗口装不下时自动按窗口缩小，不会溢出屏幕。 */
   const RESOLUTIONS = [
@@ -3989,34 +3991,40 @@
   }
 
   /* ============================================================
-   * 【S13】自由属性点（升级自选，失衡代选）
+   * 【S13】特殊自由属性点（金宝箱等，升级不再发放）
    * ============================================================ */
-  // ---------- 自由属性点（升级自选，四项平衡，占比过低由系统代选） ----------
-  /** 某一项按「属性点」口径的份额（生命 10 点折算 1 点）。 */
+  // ---------- 特殊自由属性点（三项 25% 保底；生命不参与三项占比） ----------
+  /** 某一项按「属性点」口径的数值（生命 5 点折算 1 点）。 */
   function statPoints(source, key) {
     const s = object(source) ? source : S;
     const raw = Math.max(0, Number(s && s[STAT_FIELDS[key]]) || 0);
     return key === 'hp' ? raw / HP_PER_STAT : raw;
   }
-  /** 力/敏/速/生命四项的占比（自然成长时各约 25%）。 */
+  /** 力/敏/速三项的占比；生命不进入原版权重口径。 */
   function statShares(source) {
+    const s = object(source) ? source : S;
     let total = 0;
-    for (const key of STAT_KEYS) total += statPoints(source, key);
+    const raw = {};
+    for (const key of SHARE_KEYS) {
+      raw[key] = Math.max(0, Number(s && s[STAT_FIELDS[key]]) || 0);
+      total += raw[key];
+    }
     const out = {};
-    for (const key of STAT_KEYS) out[key] = total > 0 ? statPoints(source, key) / total : 1 / STAT_KEYS.length;
+    for (const key of SHARE_KEYS) out[key] = total > 0 ? raw[key] / total : 1 / SHARE_KEYS.length;
     return out;
   }
-  /** 占比低于 STAT_SHARE_MIN 的属性里最低的那一项；四项都达标时返回 null。 */
+  /** 占比低于 25% 的力/敏/速里最低的那一项；三项都达标时返回 null。 */
   function forcedStat(source) {
     const shares = statShares(source);
-    const low = STAT_KEYS.filter((key) => shares[key] < STAT_SHARE_MIN - 1e-9);
+    const low = SHARE_KEYS.filter((key) => shares[key] < STAT_SHARE_MIN - 1e-9);
     if (!low.length) return null;
     return low.reduce((a, b) => (shares[b] < shares[a] ? b : a));
   }
-  /** 占比最低的那一项（不管有没有过低）。 */
+  /** 四项里数值最低的一项（生命按 5 点折算），用于「平均分配」与 AI 自选。 */
   function lowestStat(source) {
-    const shares = statShares(source);
-    return STAT_KEYS.reduce((a, b) => (shares[b] < shares[a] ? b : a));
+    const vals = {};
+    for (const key of STAT_KEYS) vals[key] = statPoints(source, key);
+    return STAT_KEYS.reduce((a, b) => (vals[b] < vals[a] ? b : a));
   }
   /** 把一点加到某一项上（生命一点 = 5 点血）。 */
   function grantPoint(target) {
@@ -4025,12 +4033,12 @@
     S[STAT_FIELDS[target]] += STAT_GAIN[target];
     return true;
   }
-  /** 还没分配的自由属性点：升级时就该选掉，这里只是「弹窗还没点完」的计数。 */
+  /** 还没分配的特殊自由属性点（金宝箱等；升级不再发放）。 */
   function pendingPoints() { return Math.max(0, integer(S && S.freePoints, 0)); }
   /**
-   * 分配一点自由属性点（力/敏/速各 +1，生命 +5）。
-   * 占比过低的属性必须优先补：requested 不是它时系统直接代选，
-   * 返回值里 redirected=true 供界面提示，规则不靠界面自觉。
+   * 分配一点特殊自由属性点（力/敏/速各 +1，生命 +5）。
+   * 力/敏/速占比低于 25% 时必须优先补：requested 不是它时系统直接代选，
+   * 返回值里 redirected=true 供界面提示，规则不靠界面自觉。生命不参与三项占比。
    */
   function allocatePoint(attr) {
     if (pendingPoints() <= 0) return { ok: false, msg: '没有待分配的自由属性点' };
@@ -4158,7 +4166,7 @@
       /* 到 30 级：埋一个一次性的「自愿支持作者」提示（界面在升级奖励处理完之后才弹，
        * 不会打断三选一 / 属性点流程；见 classic-ui 的 maybeSupportPrompt）。 */
       if (S.level >= SUPPORT_PROMPT_LEVEL) S.supportPrompt = true;
-      /* 1~90 级统一成长：每级 2 点随机 + 1 点自选（合计 3 属性）+ 5 生命。
+      /* 1~90 级统一成长：每级 2 点随机 + 1 点系统分配（合计 3 属性）+ 5 生命。
        * 原版 `MainMovie.as:19620` 的 maxLevel = 90；71~90 级原版只发 1 个金宝箱、
        * 不再加属性（`showReward` 在 level > 70 时提前 return）。本版保留这 20 级的成长手感，
        * 代价是金宝箱单箱上限从 16 点压到 12 点 —— 20×12 = 240，正好等于
@@ -4170,14 +4178,18 @@
       }
       const { power: pw, agility: ag, speed: sp, hp } = growth;
       S.power += pw; S.agility += ag; S.speed += sp; S.maxHp += hp;
-      // 第 3 点由玩家在升级弹窗里自选（力/敏/速/生命）；某一项占比过低时由系统代选
-      let freePoint = 0, autoPoint = null;
+      /* 第 3 点**全部由系统分配**（2026-11 用户口径）：不再发升级自由点、不再弹加点窗。
+       * 力/敏/速任一项低于 25% 时优先补最低项（原版转化丸的三项权重口径）；
+       * 三项都达标时四项随机。玩家仍可通过属性书 / 金宝箱等特殊自由点调控属性。 */
+      let autoPoint = null;
       const forced = forcedStat();
       const pointRoom = Math.floor(statCapRoom());
-      if (forced && pointRoom >= 1) { grantPoint(forced); autoPoint = forced; }
-      else if (pointRoom >= 1) { S.freePoints = pendingPoints() + 1; freePoint = 1; }
+      if (pointRoom >= 1) {
+        const target = forced || STAT_KEYS[Math.floor(Math.random() * STAT_KEYS.length)];
+        if (grantPoint(target)) autoPoint = target;
+      }
       /* pointRoom < 1：已经顶到 651 硬上限（正常升级不会出现，只有调试/旧档超额时才会），
-       * 这一点不再发放，不能让 freePoints 越过上限。 */
+       * 这一点不再发放，不能让待分配点越过上限。 */
       /* 71~90 级：每级 1 个金宝箱（与原版一致；原版在这一段不再给属性，本版仍给 4 点，
        * 所以箱子点数被压到 12 点/箱，见 rollChestReward）。
        * `levelChests` 是**账号累计**上限 20：转生回到 1 级再升上来不会重复发，
@@ -4209,7 +4221,7 @@
         wsChoice: choices.length,
         attributeBook: false,
         chest,
-        freePoint,
+        freePoint: 0,
         autoPoint,
         autoPointName: autoPoint ? STAT_NAMES[autoPoint] : null,
         gifts,
@@ -4860,9 +4872,9 @@
     const base = GData.initialStats();
     for (let lv = 2; lv <= finalLevel; lv++) {
       base.maxHp += 5;
-      // 与玩家共用同一套点位预算：2 点随机（1/4 概率 +5 生命）+ 1 点自由点。
-      // 对手不弹窗，自由点默认在四项里随机挑；占比过低时一律优先补
-      // （和玩家的代选规则一致）。opts.freePointBias 是给平衡测量用的：
+      // 与玩家共用同一套点位预算：2 点随机（1/4 概率 +5 生命）+ 1 点系统分配。
+      // 对手不弹窗，系统点默认在四项里随机挑；力/敏/速占比低于 25% 时优先补
+      // （与玩家的系统分配同一口径）。opts.freePointBias 是给平衡测量用的：
       // 'lowest' 走平均分配，force/power/agility/speed/hp 走堆单项。
       for (let point = 0; point < FREE_POINT_RANDOM; point++) {
         const key = ['power', 'agility', 'speed', 'maxHp'][Math.floor(Math.random() * 4)];
@@ -6170,7 +6182,7 @@
     composeConvertPill, composeSeed, challengeExp, challengeFightsPerLevel, usePropMany, energyHardCap, ENERGY_HARD_CAP, PROP_HARD_CAP,
     MAX_PLAYER_LEVEL, energyCapForLevel,
     statShares, forcedStat, lowestStat, pendingPoints, allocatePoint, allocateEvenly,
-    STAT_SHARE_MIN, STAT_KEYS, STAT_NAMES, STAT_GAIN, HP_PER_STAT, FREE_POINT_RANDOM,
+    STAT_SHARE_MIN, SHARE_KEYS, STAT_KEYS, STAT_NAMES, STAT_GAIN, HP_PER_STAT, FREE_POINT_RANDOM,
     STAT_HARD_CAP, permanentStatTotal, statCapRoom, clampPermanentStats,
     CHALLENGE_EXP_BASE, CHALLENGE_EXP_PER_LEVEL, CHALLENGE_EXP_CAP_LEVEL, EXP_DIFF_STEP, EXP_DIFF_TIGHTEN,
     CHALLENGE_DIFF_RANGE, ARENA_CHAMPION_EXP, ARENA_ENERGY_COST, ARENA_EXP_PER_ENERGY,

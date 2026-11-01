@@ -1,4 +1,4 @@
-/* Run: node tools/test-points.cjs. 自由属性点（升级自选 + 四项平衡、占比过低系统代选）规则测试。
+/* Run: node tools/test-points.cjs. 特殊自由属性点（升级全部系统分配 + 力/敏/速三项 25% 保底）规则测试。
  * 用真实词典与 state.js，随机源固定，便于复现。 */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -32,57 +32,57 @@ function setup() {
 const tests = [];
 const test = (name, run) => tests.push([name, run]);
 const total = (s) => s.power + s.agility + s.speed + s.maxHp / 5;
-const shares = (s) => { const t = s.power + s.agility + s.speed + s.maxHp / 10; return { power: s.power / t, agility: s.agility / t, speed: s.speed / t, hp: (s.maxHp / 10) / t }; };
+const shares = (s) => { const t = s.power + s.agility + s.speed; return { power: s.power / t, agility: s.agility / t, speed: s.speed / t }; };
 const NAMES = { power: '力量', agility: '敏捷', speed: '速度', hp: '生命' };
 
-test('每级升级预算不变：90 级上限，2 点随机 + 1 点自选，71~90 每级再发 1 个金宝箱', () => {
+test('每级升级预算不变：90 级上限，2 点随机 + 1 点系统分配，71~90 每级再发 1 个金宝箱', () => {
   const g = setup(), s = g.s();
-  let pending = 0, auto = 0, chests = 0;
+  let auto = 0, chests = 0;
   for (let level = 2; level <= 90; level++) {
     const before = total(s), beforeFree = s.freePoints || 0;
     const ups = g.State.gainExp(g.GData.nextExp(level - 1));
     assert.equal(ups.length, 1);
-    const u = ups[0], free = (s.freePoints || 0) - beforeFree;
+    const u = ups[0];
     assert.equal(u.attributeBook, false, '53/59/65 不再发属性书（ssfight 没有这三个奖励）');
-    assert.equal(total(s) - before + free, 4, '每级仍是 3 点属性 + 生命 5');
-    assert.equal(free + (u.autoPoint ? 1 : 0), 1, '自选点只有一个去处');
+    assert.equal(total(s) - before, 4, '每级仍是 3 点属性 + 生命 5');
+    assert.equal(u.freePoint, 0, '升级不再发自由点');
+    assert.equal(s.freePoints, beforeFree, '自由点不会因升级增加');
+    assert.ok(u.autoPoint, '第 3 点必须由系统分配');
+    assert.equal(u.autoPointName, NAMES[u.autoPoint]);
+    auto++;
     if (level > 70) { assert.equal(u.chest, 1, '71~90 每级 1 个金宝箱'); chests += u.chest; }
     else assert.equal(u.chest, 0, '70 级及以下不发金宝箱');
-    if (u.autoPoint) { auto++; assert.equal(u.autoPointName, NAMES[u.autoPoint]); assert.equal(u.freePoint, 0); }
-    else { pending++; assert.equal(u.freePoint, 1); }
-    // 代选只能落在占比最低且低于门槛的那一项上
-    if (u.autoPoint) {
+    // 系统分配若落在力/敏/速，补完必须回到 25% 以上；落在生命则按 5 血=1 点。
+    if (u.autoPoint !== 'hp') {
       const sh = shares(s);
-      assert.ok(sh[u.autoPoint] >= g.State.STAT_SHARE_MIN - 1e-9, u.autoPoint + ' 补过之后应回到门槛以上：' + JSON.stringify(sh));
+      assert.ok(sh[u.autoPoint] >= g.State.STAT_SHARE_MIN - 1e-9, u.autoPoint + ' 补过之后应回到 25% 以上：' + JSON.stringify(sh));
     }
   }
-  assert.equal(pending + auto, 89, '2~90 级共 89 次成长');
+  assert.equal(auto, 89, '2~90 级共 89 次成长，全部系统分配');
   assert.equal(chests, 20, '71~90 共 20 个金宝箱');
   assert.equal(s.level, 90);
   assert.equal(total(s) + (s.freePoints || 0), 378, '初始 22 + 89×4 = 378（不含神迹/天梯丸/金宝箱）');
 });
 
-test('四项占比：低于门槛（20%）必须加那一项，正好等于门槛不算过低', () => {
+test('三项占比：力/敏/速低于 25% 必须补，正好 25% 不算过低；生命不参与', () => {
   const g = setup(), s = g.s();
-  // 20/20/20/40 —— 三项正好卡在门槛上
+  // 20/20/20 —— 三项各 33.3%，都达标
   s.power = 20; s.agility = 20; s.speed = 20; s.maxHp = 400;
-  assert.equal(g.State.forcedStat(), null, '正好 20% 不算过低');
-  s.power = 19;
+  assert.equal(g.State.forcedStat(), null, '三项都达标');
+  // 13/20/20 —— 力量 24.5%，低于 25%
+  s.power = 13;
   assert.equal(g.State.forcedStat(), 'power');
   s.power = 30; s.agility = 15; s.speed = 30; s.maxHp = 250;
   assert.equal(g.State.forcedStat(), 'agility', '取最低的那一项');
-  // 生命也是平衡点：三围高、血量低时会被强制补生命
+  // 生命低不参与三项占比：三围 42.1/31.6/26.3 都达标，不强制补生命
   s.power = 40; s.agility = 30; s.speed = 25; s.maxHp = 50;
-  assert.equal(g.State.forcedStat(), 'hp');
-  assert.ok(Math.abs(g.State.statShares().hp - 0.05) < 1e-9);
-  // 生命按 5 点 = 1 点属性折算
-  s.power = 30; s.agility = 30; s.speed = 30; s.maxHp = 300;
-  const sh = g.State.statShares();
-  for (const key of ['power', 'agility', 'speed', 'hp']) assert.ok(Math.abs(sh[key] - 0.25) < 1e-9, key + ' 25%');
+  assert.equal(g.State.forcedStat(), null);
+  // 15/15/30 —— 力/敏正好 25%，不算过低
+  s.power = 15; s.agility = 15; s.speed = 30; s.maxHp = 300;
   assert.equal(g.State.forcedStat(), null);
   // 也接受外部数据对象（genAI 的成长对象用 maxHp 存血）
   assert.equal(g.State.forcedStat({ power: 30, agility: 30, speed: 30, maxHp: 300 }), null);
-  assert.equal(g.State.forcedStat({ power: 100, agility: 30, speed: 30, maxHp: 10 }), 'hp');
+  assert.equal(g.State.forcedStat({ power: 100, agility: 30, speed: 30, maxHp: 10 }), 'agility');
   assert.equal(g.State.lowestStat({ power: 100, agility: 30, speed: 31, maxHp: 10 }), 'hp');
 });
 
@@ -100,17 +100,18 @@ test('分配：四项可选（生命 +5），非法属性/没有点数都拒绝�
   assert.equal(one.ok, true); assert.equal(one.attr, 'hp'); assert.equal(one.gain, 5);
   assert.equal(s.maxHp, hpBefore + GAIN.hp, '生命一点 = 5 点血');
   assert.equal(s.freePoints, 2);
-  // 某一项过低时，点别的项也会被改成补那一项
+  // 某一项过低时，点别的项也会被改成补那一项（力/敏/速三项）
   s.power = 100; s.agility = 40; s.speed = 40; s.maxHp = 100;
   const before = { ...s };
   const r = g.State.allocatePoint('power');
-  assert.equal(r.ok, true); assert.equal(r.attr, 'hp'); assert.equal(r.requested, 'power');
+  assert.equal(r.ok, true); assert.equal(r.attr, 'agility'); assert.equal(r.requested, 'power');
   assert.equal(r.redirected, true, '占比过低时系统代选');
   assert.equal(s.power, before.power, '没有加到玩家点的那一项');
-  assert.equal(s.maxHp, before.maxHp + GAIN.hp);
+  assert.equal(s.agility, before.agility + GAIN.agility);
+  assert.equal(s.maxHp, before.maxHp, '生命不参与三项占比，不会被代选');
   assert.equal(s.freePoints, 1);
-  assert.match(r.msg, /生命/);
-  // 四项都达标之后就能自由加了
+  assert.match(r.msg, /敏捷/);
+  // 三项都达标之后就能自由加了
   s.power = 30; s.agility = 30; s.speed = 30; s.maxHp = 300;
   const free = g.State.allocatePoint('speed');
   assert.equal(free.attr, 'speed'); assert.equal(free.redirected, false); assert.equal(free.forced, false);
@@ -118,9 +119,9 @@ test('分配：四项可选（生命 +5），非法属性/没有点数都拒绝�
   assert.equal(g.State.allocatePoint('power').ok, false, '点完了就不能再加');
 });
 
-test('平均分配：清空待分配点，四项都不会被压得更偏', () => {
+test('平均分配：清空待分配点，力/敏/速三项都不会被压得更偏', () => {
   const g = setup(), s = g.s();
-  // 自然成长附近的状态（一键满级攒点后的样子：四项本来就各占约 25%）
+  // 自然成长附近的状态（三项本来就各占约 1/3；生命按 5 血=1 点单独计）
   s.power = 23; s.agility = 21; s.speed = 28; s.maxHp = 240; s.freePoints = 30;
   const beforeTotal = total(s), before = shares(s);
   const beforeSpread = Math.max(...Object.values(before)) - Math.min(...Object.values(before));
@@ -129,46 +130,44 @@ test('平均分配：清空待分配点，四项都不会被压得更偏', () =>
   assert.equal(total(s), beforeTotal + 30, '30 点全部落地（生命按 +5 计）');
   assert.equal(r.added.power + r.added.agility + r.added.speed + r.added.hp, 30);
   const after = shares(s);
-  for (const key of ['power', 'agility', 'speed', 'hp']) assert.ok(after[key] > 0.15, key + '=' + after[key].toFixed(3));
+  for (const key of ['power', 'agility', 'speed']) assert.ok(after[key] > 0.15, key + '=' + after[key].toFixed(3));
   const afterSpread = Math.max(...Object.values(after)) - Math.min(...Object.values(after));
-  assert.ok(afterSpread <= beforeSpread + 0.06, '平均分配不会让四项更偏：' + beforeSpread.toFixed(3) + ' → ' + afterSpread.toFixed(3));
+  assert.ok(afterSpread <= beforeSpread + 0.06, '平均分配不会让三项更偏：' + beforeSpread.toFixed(3) + ' → ' + afterSpread.toFixed(3));
   assert.equal(g.State.allocateEvenly().remaining, 0, '没有点时调用是安全的空操作');
 });
 
-test('一直堆同一项也会被系统拉回平衡（四项占比收敛，不会永远被强制）', () => {
+test('一直堆同一项也会被系统拉回平衡（三项占比收敛，不会永远被强制）', () => {
   const g = setup(), s = g.s();
-  for (let lv = 1; lv < 20; lv++) g.State.gainExp(g.GData.nextExp(s.level));
-  s.freePoints = 0;
+  s.power = 30; s.agility = 30; s.speed = 30; s.maxHp = 300;
+  s.freePoints = 40;                              // 特殊自由点（金宝箱等），不是升级点
   let forced = 0, manual = 0;
   for (let i = 0; i < 40; i++) {
-    const ups = g.State.gainExp(g.GData.nextExp(s.level));
-    if (ups[0] && ups[0].autoPoint) { forced++; continue; }
-    const r = g.State.allocatePoint('power');       // 玩家一直想加力量
+    const r = g.State.allocatePoint('power');     // 玩家一直想加力量
     if (r.redirected) forced++; else manual++;
   }
   const sh = shares(s);
-  for (const key of ['power', 'agility', 'speed', 'hp']) {
-    assert.ok(sh[key] > 0.15 && sh[key] < 0.40, key + ' 收敛在合理区间：' + sh[key].toFixed(3));
+  for (const key of ['power', 'agility', 'speed']) {
+    assert.ok(sh[key] > 0.15 && sh[key] < 0.55, key + ' 收敛在合理区间：' + sh[key].toFixed(3));
   }
   assert.ok(manual > 0, '玩家的选择仍然生效 ' + manual + ' 次');
   assert.ok(forced > 0 && forced < 40, '过低时会被强制补，但不是每次都强制（强制 ' + forced + '/40）');
 });
 
-test('升级时占比过低由系统直接代选（含生命），不再挂起等玩家', () => {
+test('升级不再挂起自由点：全部由系统分配，力/敏/速过低时补最低项', () => {
   const g = setup(), s = g.s();
   s.level = 20; s.exp = 0; s.power = 100; s.agility = 40; s.speed = 40; s.maxHp = 100; s.freePoints = 0;
   const ups = g.State.gainExp(g.GData.nextExp(20));
   assert.equal(ups.length, 1);
-  assert.equal(ups[0].autoPoint, 'hp', '血量占比过低时由系统补生命');
+  assert.ok(['agility', 'speed'].includes(ups[0].autoPoint), '三项过低时系统补最低项');
   assert.equal(ups[0].freePoint, 0);
-  assert.equal(s.maxHp, 100 + ups[0].hp + GAIN.hp, '代选的生命已经进属性（另有本次随机成长的血量）');
-  assert.equal(s.freePoints, 0, '代选的点不会挂在待分配里');
-  // 四项均衡时正常挂起，等升级弹窗点掉
+  assert.equal(s.maxHp, 100 + ups[0].hp, '系统点没有加到生命（生命不参与三项占比）');
+  assert.equal(s.freePoints, 0, '升级点不会挂在待分配里');
+  // 三项均衡时也由系统分配，不再挂起等玩家
   s.power = 30; s.agility = 30; s.speed = 30; s.maxHp = 300;
   const ups2 = g.State.gainExp(g.GData.nextExp(s.level));
-  assert.equal(ups2[0].autoPoint, null);
-  assert.equal(ups2[0].freePoint, 1);
-  assert.equal(s.freePoints, 1);
+  assert.ok(ups2[0].autoPoint, '三项均衡时仍由系统分配');
+  assert.equal(ups2[0].freePoint, 0);
+  assert.equal(s.freePoints, 0);
 });
 
 test('自由属性点存进存档、读档保留，旧存档按 0 补全', () => {
@@ -189,7 +188,7 @@ test('自由属性点存进存档、读档保留，旧存档按 0 补全', () =>
   assert.equal(g.State.undoDepth(), 0, '撤回栈也一起清空');
 });
 
-test('对手（genAI）与玩家共用同一套成长预算、四项口径与占比门槛', () => {
+test('对手（genAI）与玩家共用同一套成长预算、三项口径与占比门槛', () => {
   const g = setup();
   for (const level of [5, 10, 15, 20, 25, 40, 53, 70, 90]) {
     for (let i = 0; i < 30; i++) {
@@ -198,12 +197,13 @@ test('对手（genAI）与玩家共用同一套成长预算、四项口径与占
         22 + (level - 1) * 4, '等级 ' + level);
       assert.equal(foe.baseStats.hp % 5, 0);
       const b = foe.baseStats;
-      const t = b.power + b.agility + b.speed + b.hp / 10;
-      const sh = { power: b.power / t, agility: b.agility / t, speed: b.speed / t, hp: (b.hp / 10) / t };
-      const sum = sh.power + sh.agility + sh.speed + sh.hp;
-      assert.ok(Math.abs(sum - 1) < 1e-9, '四项占比相加为 1');
-      // 自然成长下四项都在门槛附近，不会有某一项被彻底饿着
-      for (const key of ['power', 'agility', 'speed', 'hp']) assert.ok(sh[key] > 0.15, '等级 ' + level + ' ' + key + '=' + sh[key].toFixed(3));
+      const t = b.power + b.agility + b.speed;
+      const sh = { power: b.power / t, agility: b.agility / t, speed: b.speed / t };
+      const sum = sh.power + sh.agility + sh.speed;
+      assert.ok(Math.abs(sum - 1) < 1e-9, '三项占比相加为 1');
+      // 25% 是「系统点只能这样加」的下限；随机成长仍可能把某一项压到 25% 以下，
+      // 下一级系统点再补。这里只守住自然成长不会被饿到 15% 以下。
+      for (const key of ['power', 'agility', 'speed']) assert.ok(sh[key] > 0.15, '等级 ' + level + ' ' + key + '=' + sh[key].toFixed(3));
     }
   }
 });

@@ -553,14 +553,22 @@
   function openRank() {
     const S = State.state();
     if (S.level < 30) { toast('未满30级不能参加天梯赛'); return; }
-    if (S.integral == null) S.integral = 1500;
+    /* 赛区制（2026-11）：只和本赛区的人机打；积分每周一 0 点减半。 */
+    State.rankSyncWeek();
+    const board = State.rankBoard();
     const box = el('div');
-    box.innerHTML = '<p class="panel-desc">当前积分 <b>' + S.integral + '</b>，今日已参赛 ' + S.joinRankCount + ' 场。胜利得积分与金杯，金杯可在商店兑换稀有奖励！</p>';
+    box.innerHTML = '<p class="panel-desc">赛区 <b>' + (board.label || '—') +
+      '</b>　当前积分 <b>' + Math.max(0, Math.round(Number(S.integral) || 0)) +
+      '</b>　赛区排名 <b>' + (board.me.rank > 0 ? board.me.rank : '-') +
+      '</b>，今日已参赛 ' + S.joinRankCount + ' 场。积分每周一 0 点减半；赛区前 30 名且超过至少一个人机可领 50 金杯。</p>';
     const row = el('div', 'btn-row');
     const b1 = el('button', 'btn btn-primary', '开始匹配');
     const b2 = el('button', 'btn', '金杯商店');
     b1.onclick = () => {
-      const foe = State.genAI(S.level + Math.floor(Math.random() * 6) - 3, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 });
+      const bot = State.rankOpponent();
+      const foe = bot
+        ? Object.assign(State.genAI(bot.level, '', { levelJitter: 0, statScale: State.RANDOM_FOE_SCALE || 1.08 }), { name: bot.name })
+        : State.genAI(S.level, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 });
       p.close();
       S.joinRankCount++;
       State.save();
@@ -568,9 +576,9 @@
         cost: 0, kind: 'rank', useProps: false, region: 2,
         onEnd: (winner) => {
           const win = winner === 0;
-          const delta = win ? 20 + Math.floor(Math.random() * 15) : -(10 + Math.floor(Math.random() * 10));
-          S.integral = Math.max(0, S.integral + delta);
-          const cups = win ? 5 : 1;
+          const delta = State.rankIntegralDelta(S.integral, bot ? bot.score : S.integral, win, { minWinGain: bot ? 1 : 0 });
+          State.rankApplyResult(bot ? bot.botId : '', win, delta);
+          const cups = win ? 3 : 1;
           S.goldCup += cups;
           const ups = State.gainExp(win ? 30 : 10);
           State.save();
@@ -581,15 +589,12 @@
     b2.onclick = () => { p.close(); openRankShop(); };
     row.appendChild(b1); row.appendChild(b2);
     box.appendChild(row);
-    const board = el('div', 'rank-board');
-    board.appendChild(el('div', 'rank-title', '—— 排行榜 ——'));
-    const entries = [{ name: S.name + '（你）', integral: S.integral }];
-    for (let i = 0; i < 9; i++) entries.push({ name: GData.AI_NAMES[(i * 3 + 1) % GData.AI_NAMES.length], integral: 1400 + i * 37 + Math.floor(Math.random() * 30) });
-    entries.sort((a, b) => b.integral - a.integral);
-    entries.forEach((e, i) => {
-      board.appendChild(el('div', 'rank-row' + (e.name.indexOf('你') >= 0 ? ' me' : ''), '<span>#' + (i + 1) + ' ' + e.name + '</span><b>' + e.integral + '</b>'));
+    const boardBox = el('div', 'rank-board');
+    boardBox.appendChild(el('div', 'rank-title', '—— 赛区榜 ' + (board.label || '') + ' ——'));
+    (board.top || []).slice(0, 20).forEach((e) => {
+      boardBox.appendChild(el('div', 'rank-row' + (e.mine ? ' me' : ''), '<span>#' + e.rank + ' ' + e.name + '</span><b>' + e.score + '</b>'));
     });
-    box.appendChild(board);
+    box.appendChild(boardBox);
     const p = openPanel('🏆 天梯赛', box);
   }
 

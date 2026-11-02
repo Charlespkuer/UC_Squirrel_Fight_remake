@@ -3251,12 +3251,12 @@
       battleNo: run.idx + 1, battleCount: run.plan.length, layer: run.layer };
   }
   /** 战斗播放是否允许「跳过」（纯函数，UI 与测试共用）。
-   *  无尽塔 20 层起（用户口径 2026-10：由 30 层下调）—— 到这一阶段一场要打很久。
+   *  无尽塔 10 层起（用户口径 2026-11：由 20 层下调）—— 到这一阶段一场要打很久。
    *  跳过不影响胜负与收益：回合流本来就由 Sim.simulate 一次算完，跳过只是不播动画；
    *  塔内战斗也关了飘物（collectDrops:false），不会因为跳过丢掉落。 */
   function skipPlaybackAllowed(mode, layer) {
     if (mode !== 'endless') return false;
-    const from = Math.max(1, Math.floor(Number(D().ENDLESS_SKIP_LAYER) || 20));
+    const from = Math.max(1, Math.floor(Number(D().ENDLESS_SKIP_LAYER) || 10));
     return Math.max(1, Math.floor(Number(layer) || 1)) >= from;
   }
 

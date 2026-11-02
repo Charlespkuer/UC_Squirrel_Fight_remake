@@ -168,6 +168,12 @@
     next.energy = Math.min(ENERGY_HARD_CAP, next.energy);
     next.integral = next.integral == null ? null : integer(next.integral, 0);
     next.rankCupClaimWeek = typeof raw.rankCupClaimWeek === 'string' ? raw.rankCupClaimWeek : '';
+    /* 天梯赛区 / 周重置 / 赛区人机（2026-11）：本周标识、本周场次、人机名册。 */
+    next.rankWeek = typeof raw.rankWeek === 'string' ? raw.rankWeek : '';
+    next.rankWeekMatches = Math.max(0, integer(raw.rankWeekMatches, 0));
+    next.rankWins = Math.max(0, integer(raw.rankWins, 0));
+    next.rankLosses = Math.max(0, integer(raw.rankLosses, 0));
+    next.rankBots = normalizeRankBots(raw.rankBots);
     /* 天梯商店购买次数：两本账都只收「数字 key → 非负整数」。
      * `rankPurchases` 是按周的；`rankPurchaseTotals` 是账号累计（永久属性丸限购）。 */
     next.rankPurchases = (() => {
@@ -2155,7 +2161,7 @@
   /* ---------- 「战斗操作键」的解锁等级（2026-10 用户口径） ----------
    * 10 级解锁 2 倍速；跳过按超级松鼠页的描述：**开通超级松鼠后 10 级**即可，
    * 非 VIP 仍是 20 级（不再一刀切 20）。挑战塔 / 无尽塔本身要 30 级才开，
-   * 塔的「跳过」另有一条层数门槛：无尽塔 20 层起，见 Tower.skipPlaybackAllowed。 */
+   * 塔的「跳过」另有一条层数门槛：无尽塔 10 层起，见 Tower.skipPlaybackAllowed。 */
   const SPEED_UNLOCK_LEVEL = 10;
   const SKIP_UNLOCK_LEVEL = 20;
   const VIP_SKIP_UNLOCK_LEVEL = 10;
@@ -6108,6 +6114,232 @@
   }
 
   /* ============================================================
+   * 【S22b】天梯赛区 / 赛区人机 / 周结算（2026-11）
+   * ------------------------------------------------------------
+   * 原版 `text7585`：天梯 30 级起、每 10 级一个赛区；积分每周一减半。
+   * 每个赛区每个等级 3 个人机（80-90 共 33 个），人机进排行榜、也参与积分结算，
+   * 每周一回到 300 分，且积分有 50 的硬下限。单机版没有真人，人机就是唯一对手。
+   * ============================================================ */
+  const RANK_DIVISIONS = Object.freeze([
+    { key: 'd30', lo: 30, hi: 39, frame: 1, label: '30级-39级' },
+    { key: 'd40', lo: 40, hi: 49, frame: 2, label: '40级-49级' },
+    { key: 'd50', lo: 50, hi: 59, frame: 3, label: '50级-59级' },
+    { key: 'd60', lo: 60, hi: 69, frame: 4, label: '60级-69级' },
+    { key: 'd70', lo: 70, hi: 79, frame: 5, label: '70级-79级' },
+    { key: 'd80', lo: 80, hi: 90, frame: 6, label: '80级-90级' },
+  ]);
+  const RANK_BOT_BASE_SCORE = 300;
+  const RANK_BOT_FLOOR = 50;
+  const RANK_BOT_PER_LEVEL = 3;
+  const RANK_BOT_NAMES = Object.freeze([
+    '松果见习生', '橡子巡逻员', '树洞守卫', '月光拾荒者', '雾林邮差', '坚果学徒',
+    '古树见习', '溪谷哨兵', '星屑旅人', '雪原新兵', '苔原猎手', '树冠信使',
+  ]);
+
+  /** 每周一 0 点（本地时间）为界，返回周一的 YYYY-MM-DD。 */
+  function rankWeekKey(now) {
+    const d = new Date(Number(now) || Date.now());
+    d.setHours(0, 0, 0, 0);
+    const dow = (d.getDay() + 6) % 7;   // 周一 = 0
+    d.setDate(d.getDate() - dow);
+    return dateKey(d);
+  }
+
+  function rankDivisionOf(level) {
+    const lv = Math.floor(Number(level) || 0);
+    return RANK_DIVISIONS.find((d) => lv >= d.lo && lv <= d.hi) || null;
+  }
+
+  /** 固定名册：每级 3 个，名字带等级后缀。 */
+  function rankBotPlan() {
+    const out = [];
+    let idx = 0;
+    for (const d of RANK_DIVISIONS) {
+      for (let lv = d.lo; lv <= d.hi; lv++) {
+        for (let k = 0; k < RANK_BOT_PER_LEVEL; k++) {
+          idx += 1;
+          out.push({
+            id: 'bot:' + d.key + ':' + lv + ':' + k, level: lv,
+            name: RANK_BOT_NAMES[(idx - 1) % RANK_BOT_NAMES.length] + '·' + lv,
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  function normalizeRankBots(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const item of raw) {
+      if (!object(item)) continue;
+      const id = String(item.id || '');
+      if (!/^bot:/.test(id)) continue;
+      out.push({
+        id,
+        level: Math.max(1, Math.min(MAX_PLAYER_LEVEL, integer(item.level, 1, 1))),
+        name: String(item.name || '').slice(0, 24),
+        score: Math.max(RANK_BOT_FLOOR, integer(item.score, 0)),
+        wins: Math.max(0, integer(item.wins, 0)),
+        losses: Math.max(0, integer(item.losses, 0)),
+      });
+    }
+    return out;
+  }
+
+  /** 两个周标识之间隔了几周（周一日期，至少按 1 周算）。 */
+  function rankWeeksBetween(from, to) {
+    const a = Date.parse(String(from) + 'T00:00:00Z');
+    const b = Date.parse(String(to) + 'T00:00:00Z');
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return 1;
+    return Math.max(1, Math.round((b - a) / (7 * 86400000)));
+  }
+
+  /** 换周：玩家积分按周减半、人机全部回到 300 分并清空胜负。幂等。
+   *  第一次跑（旧档没有 `rankWeek`）只补本周标识与名册，**不动**已有积分 ——
+   *  升级不该把玩家这一周的进度直接抹掉，下一次真正的周一才开始减半。 */
+  function rankSyncWeek() {
+    const s = state();
+    if (!s) return false;
+    const week = rankWeekKey();
+    const bots = Array.isArray(s.rankBots) ? s.rankBots : [];
+    if (s.rankWeek === week && bots.length) return false;
+    const fresh = !s.rankWeek;
+    const missed = fresh ? 1 : rankWeeksBetween(s.rankWeek, week);
+    s.rankWeek = week;
+    if (!fresh) {
+      s.integral = Math.max(0, Math.floor((Number(s.integral) || 0) / Math.pow(2, missed)));
+      s.rankWeekMatches = 0;
+      s.rankWins = 0;
+      s.rankLosses = 0;
+    }
+    s.rankBots = rankBotPlan().map((b) => ({
+      id: b.id, level: b.level, name: b.name, score: RANK_BOT_BASE_SCORE, wins: 0, losses: 0,
+    }));
+    save();
+    return true;
+  }
+
+  function rankCompareRows(a, b) {
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    if (!!a.bot !== !!b.bot) return a.bot ? 1 : -1;
+    return String(a.botId || a.name).localeCompare(String(b.botId || b.name));
+  }
+
+  /** 本赛区的完整榜（真人只有自己 + 该赛区人机），名次已排好。 */
+  function rankBoard() {
+    const s = state();
+    const week = rankWeekKey();
+    if (!s) return { week, division: null, frame: 0, label: '', top: [], me: { score: 0, rank: 0 } };
+    rankSyncWeek();
+    const div = rankDivisionOf(s.level);
+    if (!div) return { week, division: null, frame: 0, label: '', top: [], me: { score: Math.max(0, Number(s.integral) || 0), rank: 0 } };
+    const rows = [];
+    for (const b of (s.rankBots || [])) {
+      if (!b || !rankDivisionOf(b.level) || rankDivisionOf(b.level).key !== div.key) continue;
+      rows.push({ bot: true, botId: b.id, name: b.name, level: b.level, score: b.score, wins: b.wins, losses: b.losses });
+    }
+    rows.push({
+      bot: false, botId: '', name: s.name || '我', level: s.level,
+      score: Math.max(0, Number(s.integral) || 0),
+      wins: Math.max(0, Number(s.rankWins) || 0), losses: Math.max(0, Number(s.rankLosses) || 0), mine: true,
+    });
+    rows.sort(rankCompareRows);
+    rows.forEach((row, i) => { row.rank = i + 1; });
+    const me = rows.find((r) => r.mine);
+    return {
+      week, division: { key: div.key, lo: div.lo, hi: div.hi, frame: div.frame, label: div.label },
+      frame: div.frame, label: div.label, top: rows,
+      me: { score: me ? me.score : 0, rank: me ? me.rank : 0 },
+    };
+  }
+
+  /** 随机挑一个对手人机：优先分数相近的 5 个，避免总打同一个人。 */
+  function rankOpponent() {
+    const board = rankBoard();
+    if (!board.division) return null;
+    const bots = board.top.filter((r) => r.bot);
+    if (!bots.length) return null;
+    const mine = Number(board.me.score) || 0;
+    const near = bots.slice().sort((a, b) => Math.abs(a.score - mine) - Math.abs(b.score - mine)).slice(0, 5);
+    return near[Math.floor(Math.random() * near.length)] || bots[0];
+  }
+
+  /** 积分档：与联机同一套（对手更高 +16；否则按分差 15/2/1/0，输了取负）。
+   *  单机版没有联机版的「300 分以上只匹配真人 / 回落人机不计分」规则；
+   *  另外单机打人机有**保底收益**：传 `minWinGain` 后赢球至少 +N（分差 ≥500 的 0 分档
+   *  在单机不会把收益抹成 0）。 */
+  function rankIntegralDelta(myScore, foeScore, win, opts) {
+    const gap = Number(foeScore) - Number(myScore);
+    let mag;
+    if (gap > 0) mag = 16;
+    else {
+      const ahead = -gap;
+      if (ahead < 50) mag = 15;
+      else if (ahead < 200) mag = 2;
+      else if (ahead < 500) mag = 1;
+      else mag = 0;
+    }
+    const delta = win ? mag : -mag;
+    const floor = Math.max(0, Math.floor(Number(opts && opts.minWinGain) || 0));
+    return (win && floor > 0) ? Math.max(floor, delta) : delta;
+  }
+
+  /** 一场天梯打完：玩家与人机同时结算（人机分数也真的会变）。 */
+  function rankApplyResult(botId, win, delta) {
+    const s = state();
+    if (!s) return null;
+    rankSyncWeek();
+    const d = Math.round(Number(delta) || 0);
+    s.integral = Math.max(0, Math.round((Number(s.integral) || 0) + d));
+    s.rankWeekMatches = Math.max(0, Number(s.rankWeekMatches) || 0) + 1;
+    if (win) s.rankWins = Math.max(0, Number(s.rankWins) || 0) + 1;
+    else s.rankLosses = Math.max(0, Number(s.rankLosses) || 0) + 1;
+    const bot = (s.rankBots || []).find((b) => b && String(b.id) === String(botId));
+    if (bot) {
+      /* 人机积分跟玩家反向同步结算，硬下限 50。 */
+      bot.score = Math.max(RANK_BOT_FLOOR, Math.min(100000, Math.round((Number(bot.score) || 0) - d)));
+      if (win) bot.losses = Math.max(0, Number(bot.losses) || 0) + 1;
+      else bot.wins = Math.max(0, Number(bot.wins) || 0) + 1;
+    }
+    save();
+    return { integral: s.integral, bot: bot ? { id: bot.id, score: bot.score } : null };
+  }
+
+  /** 周奖励资格：本赛区前 30、且至少超过一个人机、本周打过至少一场。 */
+  function rankAwardStatus() {
+    const s = state();
+    if (!s) return { eligible: false, rank: 0, played: 0, surpassedBot: false, week: rankWeekKey(), claimed: false };
+    const board = rankBoard();
+    const meIdx = board.top.findIndex((r) => r.mine);
+    const rank = meIdx >= 0 ? meIdx + 1 : 0;
+    const surpassedBot = meIdx >= 0 && board.top.slice(meIdx + 1).some((r) => r.bot);
+    const played = Math.max(0, Number(s.rankWeekMatches) || 0);
+    const claimed = String(s.rankCupClaimWeek || '') === board.week;
+    return {
+      week: board.week, division: board.division, rank, played, surpassedBot,
+      eligible: played > 0 && rank > 0 && rank <= 30 && surpassedBot,
+      cups: 50, claimed,
+    };
+  }
+
+  /** 领取 50 金杯：一周一次。 */
+  function claimRankCup() {
+    const s = state();
+    if (!s) return { ok: false, rank: 0, cups: 0, msg: '还没有存档。' };
+    const st = rankAwardStatus();
+    if (st.claimed) return { ok: false, already: true, rank: st.rank, cups: 0, goldCup: s.goldCup, msg: '本周的天梯奖励已经领取过了。' };
+    if (!st.played) return { ok: false, rank: st.rank, cups: 0, goldCup: s.goldCup, msg: '本周还没有参加天梯赛，先打一场再来领奖吧。' };
+    if (!(st.rank > 0) || st.rank > 30) return { ok: false, rank: st.rank, cups: 0, goldCup: s.goldCup, msg: '本周没有进入赛区前30名，暂时没有金杯奖励。' };
+    if (!st.surpassedBot) return { ok: false, rank: st.rank, cups: 0, goldCup: s.goldCup, msg: '还没有超过任何一个赛区人机，暂时没有金杯奖励。' };
+    s.goldCup = Math.max(0, Number(s.goldCup) || 0) + 50;
+    s.rankCupClaimWeek = st.week;
+    save();
+    return { ok: true, rank: st.rank, cups: 50, goldCup: s.goldCup, msg: '恭喜进入赛区前30名，成功获得50个金杯奖励！' };
+  }
+
+  /* ============================================================
    * 【S23】导出 window.State
    * ============================================================ */
   window.State = {
@@ -6181,6 +6413,9 @@
     weaponList, skillList, setWeapon, setSkill, forgetWeapon, forgetSkill, setWS, forgetWS,
     composeConvertPill, composeSeed, challengeExp, challengeFightsPerLevel, usePropMany, energyHardCap, ENERGY_HARD_CAP, PROP_HARD_CAP,
     MAX_PLAYER_LEVEL, energyCapForLevel,
+    /* 天梯赛区 / 周重置 / 赛区人机（经典页与复刻 DOM 页共用同一份数据）。 */
+    RANK_DIVISIONS, rankWeekKey, rankDivisionOf, rankBotPlan, rankSyncWeek,
+    rankBoard, rankOpponent, rankIntegralDelta, rankApplyResult, rankAwardStatus, claimRankCup,
     statShares, forcedStat, lowestStat, pendingPoints, allocatePoint, allocateEvenly,
     STAT_SHARE_MIN, SHARE_KEYS, STAT_KEYS, STAT_NAMES, STAT_GAIN, HP_PER_STAT, FREE_POINT_RANDOM,
     STAT_HARD_CAP, permanentStatTotal, statCapRoom, clampPermanentStats,

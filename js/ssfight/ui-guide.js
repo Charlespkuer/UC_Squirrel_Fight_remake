@@ -246,14 +246,14 @@
       const domOf = DOM_TARGETS[stepNo];
       if (domOf) {
         const el = domOf();
-        if (el && el.isConnected) {
+        if (el && el.isConnected && el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0) {
           const ir = el.getBoundingClientRect();
           moveHand(ir);
           addRing(ir, 0);
           return;
         }
         if (tries++ < 12) { setTimeout(paint, 120); return; }
-        if (stepNo === 8 || stepNo === 9) return;
+        if (stepNo === 8 || stepNo === 9 || stepNo === 10) return;
       }
       /* 首页：把烘焙手指/金环钉到真实菜单按钮（安卓 letterbox 下烘焙位置会歪）。
        * 引导常常比首页 SVG 先挂上（尤其安卓），按钮还没出来就等一会儿再量。 */
@@ -274,6 +274,8 @@
       });
     };
     paint();
+    /* 页面重绘或移动端布局调整可能发生在首次测量之后。重新读取真实按钮位置。 */
+    if (stepNo === 10) setTimeout(() => { if (svg.isConnected) paint(); }, 300);
   }
 
   function freeze(view) {

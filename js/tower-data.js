@@ -132,9 +132,9 @@
   const ENDLESS_DEEP_RATE1 = 0.07;
   const ENDLESS_DEEP_RATE2 = 0.0555;
   const ENDLESS_DEEP_SPLIT = 20;      // 30 + 20 = 第 50 层开始切换速率
-  /** 无尽塔「战斗可跳过播放」的起始层（用户口径 2026-10：由 30 层下调到 20 层）。
+  /** 无尽塔「战斗可跳过播放」的起始层（用户口径 2026-11：由 20 层下调到 10 层）。
    *  与 ENDLESS_DEEP_LAYER 无关 —— 那个是敌人深度曲线，不要混用。 */
-  const ENDLESS_SKIP_LAYER = 20;
+  const ENDLESS_SKIP_LAYER = 10;
   /**
    * 轮内第 30 层之后的敌方深度倍率（轮内≤30 层恒为 1）。
    * 第 1~100 层保留原值；第 101/201 层的 KM 回到 1，但完整基础另由 endlessScaleParts 继承。

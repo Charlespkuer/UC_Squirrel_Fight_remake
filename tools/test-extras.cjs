@@ -482,9 +482,10 @@ test('天梯30级门槛、胜3杯败1杯、防双击与重复回调', () => {
   assert.equal(g.battles.length, 1); assert.equal(s.joinRankCount, 1);
   assert.equal(s.energy, 90); assert.equal(s.goldPoint, 100);
   g.settle(0, 0); g.settle(0, 0);
-  assert.equal(s.integral, 1527); assert.equal(s.goldCup, 3); assert.equal(s.exp, 0);
+  /* 赛区人机 300 分起步，0 分玩家赢一场 +16（同分档） */
+  assert.equal(s.integral, 16); assert.equal(s.goldCup, 3); assert.equal(s.exp, 0);
   g.c.ClassicExtras.rank(); g.click('rank-fight'); g.settle(1, 1); g.settle(1, 1);
-  assert.equal(s.integral, 1512); assert.equal(s.goldCup, 4); assert.equal(s.exp, 0);
+  assert.equal(s.integral, 0); assert.equal(s.goldCup, 4); assert.equal(s.exp, 0);
   assert.equal(s.joinRankCount, 2); assert.equal(g.battles[0].opts.kind, 'rank'); assertBalanced(g.markup);
 });
 
@@ -519,36 +520,69 @@ test('天梯胜利夺杯为明确离线概率，失败不会夺杯', () => {
   g.c.ClassicExtras.rank(); g.click('rank-fight'); g.settle(1, 1); assert.equal(s.goldCup, 7);
 });
 
-test('第 2 项：天梯匹配等级只跟积分挂钩，90 级封顶', () => {
-  const g = setup(), s = g.c.State.state(); s.level = 30; s.joinRankCount = 0;
-  const E = g.c.ClassicExtras.rankFoeExpectLevel;
-  assert.equal(E(1500), 30, '1500 分（初始分）从 30 级档起步');
-  assert.equal(E(1750), 40, '每 +25 分 +1 级');
-  assert.equal(E(2500), 70, '2500 分到 70 级');
-  assert.equal(E(3000), 90, '3000 分到满级 90');
-  assert.equal(E(99999), 90, '封顶 90 级');
-  // 匹配到的实际等级围绕期望值抖动，且绝不超过 90
-  g.math.random = () => 0.5;
-  assert.equal(g.c.ClassicExtras.rankFoeLevel(1750), 40, '随机取中值时正好等于期望');
-  const levels = [];
-  for (let i = 0; i < 40; i++) {
-    g.math.random = () => (i % 20) / 20;
-    const lv = g.c.ClassicExtras.rankFoeLevel(99999);
-    levels.push(lv);
-    assert.ok(lv <= 90 && lv >= 1, '等级在 1~90 内：' + lv);
-  }
-  assert.ok(Math.max(...levels) > 86 && Math.min(...levels) >= 86, '高积分时整体贴近满级：' + levels.slice(0, 5).join(','));
-  // 实战：匹配到的对手 level 就是这条曲线给的等级（不再贴玩家等级）
-  s.level = 30; s.goldCup = 0; s.goldPoint = 100; s.integral = 2600;
-  g.math.random = () => 0.5;
+test('天梯只在本赛区匹配人机，对手等级跟着赛区而不是积分', () => {
+  const g = setup(), s = g.c.State.state(); s.level = 30; s.integral = 2600; g.math.random = () => 0.5;
   g.c.ClassicExtras.rank(); g.click('rank-fight');
-  assert.equal(g.battles.at(-1).foe.level, 74, '2600 分 + 30 级玩家按积分匹配 74 级对手');
-  // 金杯多寡不再影响匹配（花金杯不会让对手变软）
-  g.settle(0, 0);                                    // 收掉上一场，否则 rankAttempt 未清、按钮禁用
-  s.integral = 1500; s.goldCup = 5000;
+  const foe = g.battles.at(-1).foe;
+  assert.ok(foe.level >= 30 && foe.level <= 39, '30 级玩家只遇到 30-39 级人机：' + foe.level);
+  assert.ok(/·\d+$/.test(foe.name), '人机名字带等级后缀：' + foe.name);
+  const board30 = g.c.State.rankBoard();
+  assert.equal(board30.division.key, 'd30');
+  assert.equal(board30.top.filter((r) => r.bot).length, 30, '30-39 赛区 30 个人机');
+  /* 85 级换到 80-90 赛区：对手落在 80~90，且赛区有 33 个人机 */
+  g.settle(0, 0);
+  s.level = 85; s.integral = 0; g.c.State.save();
+  g.c.ClassicExtras.rank(); g.click('rank-fight');
+  const foe2 = g.battles.at(-1).foe;
+  assert.ok(foe2.level >= 80 && foe2.level <= 90, '85 级玩家遇到 80-90 级人机：' + foe2.level);
+  const board85 = g.c.State.rankBoard();
+  assert.equal(board85.division.key, 'd80');
+  assert.equal(board85.top.filter((r) => r.bot).length, 33, '80-90 赛区 33 个人机');
+});
+
+test('天梯每周一 0 点减半：玩家积分减半，人机回到 300 分；人机有 50 硬下限', () => {
+  const g = setup(), s = g.c.State.state();
+  s.level = 45; s.integral = 900; s.rankWeek = g.c.State.rankWeekKey(g.c.Date.now() - 7 * 86400000);
+  s.rankBots = [{ id: 'bot:d40:45:0', level: 45, name: '旧人机·45', score: 120, wins: 9, losses: 9 }];
   g.c.State.save();
+  const board = g.c.State.rankBoard();
+  assert.equal(s.integral, 450, '玩家积分减半');
+  assert.equal(s.rankWeek, g.c.State.rankWeekKey(), '本周标识更新');
+  assert.equal(board.division.key, 'd40');
+  assert.equal(board.top.filter((r) => r.bot).length, 30, '人机名册整批重建');
+  assert.ok(board.top.filter((r) => r.bot).every((r) => r.score === 300), '人机全部回到 300 分');
+  /* 玩家赢一场 +16：积分增加，对应人机反向掉分，但不会低于 50。 */
+  const botRow = board.top.find((r) => r.bot);
+  const stored = s.rankBots.find((b) => b.id === botRow.botId);
+  stored.score = 60;
+  g.c.State.rankApplyResult(stored.id, true, 16);
+  assert.equal(stored.score, 50, '人机积分不低于 50');
+  assert.equal(s.integral, 466, '玩家积分 +16');
+});
+
+test('单机天梯不设 300 分真人段：400 分打人机仍正常结算双方积分', () => {
+  const g = setup(), s = g.c.State.state();
+  s.level = 30; s.integral = 400; g.math.random = () => 0.5;
+  g.c.State.rankSyncWeek();
   g.c.ClassicExtras.rank(); g.click('rank-fight');
-  assert.equal(g.battles.at(-1).foe.level, 30, '积分 1500 就还是 30 级档，跟金杯无关');
+  const foe = g.battles.at(-1).foe;
+  g.settle(0, 0);
+  const bot = s.rankBots.find((b) => b.name === foe.name);
+  assert.ok(bot, '对手来自赛区人机名册：' + foe.name);
+  assert.equal(s.integral, 402, '400 分领先人机 100 → 赢一场 +2，没有被 300 分门槛卡掉');
+  assert.equal(bot.score, 298, '对应人机同步 -2');
+});
+
+test('单机打人机保底 +1：领先 500 分以上也不再是 0 分', () => {
+  const g = setup(), s = g.c.State.state();
+  s.level = 30; s.integral = 900; g.math.random = () => 0.5;
+  g.c.State.rankSyncWeek();
+  g.c.ClassicExtras.rank(); g.click('rank-fight');
+  const foe = g.battles.at(-1).foe;
+  g.settle(0, 0);
+  const bot = s.rankBots.find((b) => b.name === foe.name);
+  assert.equal(s.integral, 901, '900 分打赢 300 分人机保底 +1');
+  assert.equal(bot.score, 299, '对应人机同步 -1');
 });
 
 test('天梯每天都可比赛（周日不休赛），金杯商店每天都能打开，跨日旧按钮仍重新校验', () => {
@@ -590,7 +624,9 @@ test('金杯商店兑换校验积分与两种货币，不扣积分，每周限�
   g.advance(86400000); g.c.ClassicExtras.rankShop(); g.click('rank-shop-next'); choose(); g.modalClick();
   assert.equal(loaded.gears.length, 1, '第二天仍然买不了（每周限一件）');
   assert.match(g.modals.at(-1).html, /本周的兑换次数已用完/);
-  g.advance(6 * 86400000); g.c.ClassicExtras.rankShop(); g.click('rank-shop-next'); choose(); g.modalClick();
+  /* 跨周后积分按新规则清零：先让商店过一遍周检查，再把积分打回 2000 验限兑重置 */
+  g.advance(6 * 86400000); g.c.ClassicExtras.rankShop(); loaded.integral = 2000;
+  g.click('rank-shop-next'); choose(); g.modalClick();
   assert.equal(loaded.gears.length, 2); assert.equal(loaded.goldPoint, 100); assert.equal(loaded.goldCup, 1000); assert.equal(loaded.rankPurchases[11], 1);
   assertBalanced(g.markup);
 });
@@ -611,8 +647,9 @@ test('金杯商店跨周：限兑按周重置，未标周次的旧购买计数�
   g.c.ClassicExtras.rankShop(); g.click('rank-shop-next');
   g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick();
   assert.equal(s.gears.length, 1, '同一周内不能再买');
-  g.advance(3 * 86400000);                         // 跨到下一周
-  g.c.ClassicExtras.rankShop(); g.click('rank-shop-next');
+  g.advance(3 * 86400000);                         // 跨到下一周（积分同时清零，重新打回去）
+  g.c.ClassicExtras.rankShop(); s.integral = 2000;
+  g.click('rank-shop-next');
   g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick();
   assert.equal(s.gears.length, 2);
   assert.equal(s.rankPurchases[11], 1);
@@ -638,7 +675,8 @@ test('力敏速血永久丸按账号累计限购 1 次，跨周也不重置', ()
   assert.match(g.modals.at(-1).html, /账号累计只能兑换 1 次/);
   assert.equal(s.rankPurchaseTotals[7], 1, '第二次被账号上限拦住');
   assert.equal(s.goldCup, cup, '被拦住时不扣金杯');
-  g.advance(8 * 86400000);                       // 跨到下一周
+  g.advance(8 * 86400000);                       // 跨到下一周（积分清零，重新打回门槛分）
+  g.c.ClassicExtras.rankShop(); s.integral = 2000;
   choose(); g.modalClick();
   assert.match(g.modals.at(-1).html, /账号累计只能兑换 1 次/);
   assert.equal(s.rankPurchaseTotals[7], 1, '跨周也不重置');

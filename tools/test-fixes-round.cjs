@@ -4569,28 +4569,28 @@ test('需求96：动态稀有度权重——个体降权会按比例缩小整档
   run.slotFreeIds = [];
 });
 
-test('需求97：无尽塔 20 层起战斗右下角同时给倍速键与跳过键（与普通战斗的跳过键同尺寸并排）', () => {
+test('需求97：无尽塔 10 层起战斗右下角同时给倍速键与跳过键（与普通战斗的跳过键同尺寸并排）', () => {
   const c = setup();
   const T = c.Tower;
-  /* ① 策略：只有无尽塔、且到 20 层才允许跳过播放（2026-10 用户口径：由 30 层下调到 20 层） */
-  assert.equal(T.skipPlaybackAllowed('endless', 19), false, '19 层还不给跳过');
-  assert.equal(T.skipPlaybackAllowed('endless', 20), true, '20 层起给跳过');
+  /* ① 策略：只有无尽塔、且到 10 层才允许跳过播放（2026-11 用户口径：由 20 层下调到 10 层） */
+  assert.equal(T.skipPlaybackAllowed('endless', 9), false, '9 层还不给跳过');
+  assert.equal(T.skipPlaybackAllowed('endless', 10), true, '10 层起给跳过');
   assert.equal(T.skipPlaybackAllowed('endless', 45), true, '更深层照给');
   assert.equal(T.skipPlaybackAllowed('tower', 30), false, '挑战塔不给（那里一场就是一层）');
-  /* 「不传 / 传 null」= 走「读当前对局层数」的分支（setup 里当前是 20 层 → 给）。
-   * 先压回第 1 层验证保守口径，再抬回 20。 */
+  /* 「不传 / 传 null」= 走「读当前对局层数」的分支（setup 里当前是 10 层 → 给）。
+   * 先压回第 1 层验证保守口径，再抬回 10。 */
   T._debugSetEndlessLayer(1);
   assert.equal(T.skipPlaybackAllowed('endless', null), false, 'null 时读当前对局层（第 1 层）→ 不给');
   assert.equal(T.skipPlaybackAllowed('endless', 'abc'), false, '脏值也不该放行');
   assert.equal(T.skipPlaybackAllowed('endless'), false, '不传层数时读当前对局的层（这里第 1 层）');
-  T._debugSetEndlessLayer(20);
-  assert.equal(T.skipPlaybackAllowed('endless'), true, '不传层数时应当读当前层（20）');
+  T._debugSetEndlessLayer(10);
+  assert.equal(T.skipPlaybackAllowed('endless'), true, '不传层数时应当读当前层（10）');
   assert.equal(T.skipPlaybackAllowed('endless', T._debugRun('endless').layer), true, '显式传当前层也一致');
-  assert.equal(c.TowerData.ENDLESS_SKIP_LAYER, 20, '起始层常量应当是 20');
+  assert.equal(c.TowerData.ENDLESS_SKIP_LAYER, 10, '起始层常量应当是 10');
   assert.equal(c.TowerData.ENDLESS_DEEP_LAYER, 30, '敌人深度曲线仍是 30 层起（两件事不要混用）');
 
   /* ② 布局（2026-10 用户口径）：倍速 / 跳过键**统一用普通战斗跳过键那一档** 190x70；
-   * 无尽塔 20 层起两个键在右下**并排**，整块贴住右下角（右边缘 1170−16）。 */
+   * 无尽塔 10 层起两个键在右下**并排**，整块贴住右下角（右边缘 1170−16）。 */
   const c2 = { console }; c2.window = c2; vm.createContext(c2);
   vm.runInContext(readSrc('js', 'battle.js'), c2, { filename: 'js/battle.js' });
   const L = c2.Battle._cornerLayout;
@@ -4621,7 +4621,7 @@ test('需求97：无尽塔 20 层起战斗右下角同时给倍速键与跳过�
   assert.match(uiSrc, /const skipAllowed = Tower\.skipPlaybackAllowed\(mode, layerNow\)/,
     'tower-ui 应当用 Tower.skipPlaybackAllowed 决定是否给跳过键');
   assert.match(uiSrc, /allowSkip: skipAllowed, speedToggle: true/,
-    '两座塔都要保留倍速键，无尽塔 20 层起同时允许跳过');
+    '两座塔都要保留倍速键，无尽塔 10 层起同时允许跳过');
 });
 
 test('需求98：传奇保底（B 方案）——repeatable 不再被 ownable 误杀 + C37:C49 保底 1:1', () => {

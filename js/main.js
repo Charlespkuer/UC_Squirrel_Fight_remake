@@ -1271,8 +1271,8 @@
       /* 右下角操作键：跳过 + 倍速，两个都要**等级解锁**（2026-10 用户口径）——
        * 2 倍速 10 级；跳过按超级松鼠页：VIP 10 级 / 非 VIP 20 级。系统页还能单独
        * 关掉跳过键的**显示**（`showSkip`），关闭后这里连按钮都不给。
-       * 调用方传 false 仍能单独关掉（例如无尽塔 20 层以下）。
-       * 挑战塔 / 无尽塔本身要 30 级才开，所以塔里天然都有（塔的跳过另有「20 层起」的层数门槛）。
+       * 调用方传 false 仍能单独关掉（例如无尽塔 10 层以下）。
+       * 挑战塔 / 无尽塔本身要 30 级才开，所以塔里天然都有（塔的跳过另有「10 层起」的层数门槛）。
        * 普通战斗的倍速上限是 2×（不给 3×），塔自己传 speedMax: 3 才拿得到 3×。 */
       allowSkip: opts.allowSkip !== false && (State.skipButtonEnabled ? State.skipButtonEnabled() : State.unlockedSkip()),
       speedToggle: opts.speedToggle !== false && State.unlockedSpeed(),

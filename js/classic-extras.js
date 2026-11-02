@@ -117,32 +117,11 @@
       if (typeof window !== 'undefined' && window.C && C().toast) C().toast(msg);
     } catch (_) {}
   }
-  /** 原版 `gainRankCup()`：天梯榜「领取奖励」直接发 50 个金杯（前100名），
-   * 服务器按赛季判定；本地按「本周」记一次，防止重复领取。 */
+  /** 原版 `gainRankCup()`：天梯榜「领取奖励」发 50 金杯。
+   *  2026-11 口径：**本赛区前 30 名、且至少超过一个人机**才能领，一周一次；
+   *  判定与发奖都在 `State`（经典榜单页与复刻 DOM 页共用同一份数据）。 */
   function claimRankCup() {
-    const s = State.state();
-    if (s.integral == null) s.integral = 1500;
-    const cap = State.MAX_PLAYER_LEVEL || 90;
-    const mine = Math.max(0, Math.round(Number(s.integral) || 0));
-    const entries = [];
-    for (let n = 0; n < 4; n++) {
-      const name = (window.GData && GData.AI_NAMES && GData.AI_NAMES[n * 4]) || ('鼠王' + (n + 1));
-      entries.push({ name, points: 1350 + n * 83, level: Math.min(cap, 34 + n * 6) });
-    }
-    entries.push({ name: s.name || '我', points: mine, level: Math.round(Number(s.level) || 1), mine: true });
-    entries.sort((a, b) => b.points - a.points);
-    const rank = entries.findIndex((e) => e.mine) + 1;
-    const week = rankWeekKey();
-    if (s.rankCupClaimWeek === week) {
-      return { ok: false, already: true, rank, cups: 0, goldCup: s.goldCup, msg: '本周的天梯奖励已经领取过了。' };
-    }
-    if (!(rank > 0 && rank <= 100)) {
-      return { ok: false, already: false, rank, cups: 0, goldCup: s.goldCup, msg: '本赛季没有进入前100名，暂时没有金杯奖励。' };
-    }
-    s.goldCup = Math.max(0, Number(s.goldCup) || 0) + 50;
-    s.rankCupClaimWeek = week;
-    State.save();
-    return { ok: true, already: false, rank, cups: 50, goldCup: s.goldCup, msg: '恭喜进入前100名，成功获得50个金杯奖励！' };
+    return State.claimRankCup();
   }
 
   /** 竞技场战果落点：挑战页 7638 第 4 帧（有「开始竞技」的那一页），不是第 6 帧首屏。
@@ -583,18 +562,27 @@
     const s = State.state(); State.tickEnergy();
     if (rankAttempt && rankAttempt.owner !== s) rankAttempt = null;
     if (s.level < 30) {
-      C().modal('\u5929\u68af\u8d5b', '<div class="extra-finalist">' + sprite(30) + '<div><h3>30\u7ea7\u5f00\u542f\u5929\u68af\u8d5b</h3><p>\u5f53\u524d\u7b49\u7ea7\uff1a' + s.level + '<br>\u5148\u53bb\u6311\u6218\u79ef\u7d2f\u7ecf\u9a8c\u5427\uff01</p></div></div>', [{ label: '\u53bb\u6311\u6218', run: () => UI.runAction('challenge') }, { label: '\u8fd4\u56de', cls: 'muted', run: arena }]); return;
+      C().modal('天梯赛', '<div class="extra-finalist">' + sprite(30) + '<div><h3>30级开启天梯赛</h3><p>当前等级：' + s.level + '<br>先去挑战积累经验吧！</p></div></div>', [{ label: '去挑战', run: () => UI.runAction('challenge') }, { label: '返回', cls: 'muted', run: arena }]); return;
     }
-    if (s.integral == null) { s.integral = 1500; State.save(); }
     refreshRankShopDay();
-    // 天梯赛 30 级才开，榜上对手也都是够级的（顺带显示等级，免得看起来像「不满 30 级也有积分」）
-    const cap = State.MAX_PLAYER_LEVEL || 90;
-    const entries = [0, 1, 2, 3, 4, 5].map((n) => ({
-      name: GData.AI_NAMES[n * 4], points: 1350 + n * 83, level: Math.min(cap, 34 + n * 6),
-    }));
-    entries.push({ name: s.name, points: s.integral, level: s.level, mine: true }); entries.sort((a, b) => b.points - a.points);
-    const p = C().page('challenge', 'arena', '<div class="extra-rank-layout"><div class="extra-rank-self">' + sprite(30) + '<h2>\u5929\u68af\u8d5b</h2><div class="extra-score">\u79ef\u5206 <b>' + s.integral + '</b></div><div class="extra-score">\u91d1\u676f <b>' + s.goldCup + '</b></div><div class="extra-score">\u5339\u914d\u6863\u4f4d <b>Lv' + rankFoeExpectLevel(s.integral) + '</b></div><p>\u4eca\u65e5\u5df2\u53c2\u8d5b ' + s.joinRankCount + ' / 20 \u573a<br>' + (s.joinRankCount >= 20 ? '\u4eca\u65e5\u53c2\u8d5b\u6b21\u6570\u5df2\u7528\u5b8c' : s.joinRankCount < 10 ? '\u672c\u6b21\u514d\u8d39\uff0c\u524d10\u573a\u514d\u8d39' : '\u672c\u6b21\u6d88\u80175\u91d1\u677e\u679c') + '</p>' + button('\u5f00\u59cb\u5339\u914d', 'rank-fight', 'small gold') + button('\u91d1\u676f\u5546\u5e97', 'rank-shop', 'small') + '</div><div class="extra-rank-list"><h3>\u672c\u5730\u6a21\u62df\u6392\u884c\u699c</h3>' + entries.map((entry, i) => '<div class="extra-rank-row ' + (entry.mine ? 'mine' : '') + '"><span>' + (i + 1) + '</span><b>' + esc(entry.name) + (entry.mine ? '\uff08\u4f60\uff09' : '') + ' Lv' + (entry.level || 1) + '</b><strong>' + entry.points + '</strong></div>').join('') + note('\u5929\u68af\u8d5b\u6bcf\u5929\u90fd\u53ef\u4ee5\u8fdb\u884c\uff1b\u91d1\u676f\u5546\u5e97\u6bcf\u5929\u5f00\u653e\u3002\u6bcf\u65e5\u6700\u591a20\u573a\uff0c\u524d10\u573a\u514d\u8d39\uff0c\u5176\u540e\u6bcf\u573a5\u91d1\u677e\u679c\u3002\u80dc\u5229\u5f973\u676f\uff0c\u843d\u8d25\u5f971\u676f\u3002\u79ef\u5206\u4e0e\u593a\u676f\u4e3a\u79bb\u7ebf\u6a21\u62df\uff1b\u83b7\u80dc\u670925%\u673a\u4f1a\u989d\u5916\u593a\u5f973\u676f\u3002\u5339\u914d\u5bf9\u624b\u7684\u7b49\u7ea7\u53ea\u8ddf\u79ef\u5206\u6302\u94a9\uff081500 \u5206\u5bf9\u5e94 30 \u7ea7\u6863\u3001\u6bcf +25 \u5206 +1 \u7ea7\u3001\u4e0a\u9650 70 \u7ea7\uff09\uff0c\u79ef\u5206\u4e0d\u4f1a\u88ab\u82b1\u6389\uff0c\u6240\u4ee5\u6863\u4f4d\u53ea\u4f1a\u8ddf\u7740\u6218\u7ee9\u8d70\u3002') + '</div></div>', { cls: 'extra-board rank-extra-board' });
-    back(p, arena, '\u8fd4\u56de');
+    State.rankSyncWeek();
+    const board = State.rankBoard();
+    const rows = (board.top || []).slice(0, 20);
+    const played = Math.max(0, Number(s.joinRankCount) || 0), limit = 20;
+    const p = C().page('challenge', 'arena', '<div class="extra-rank-layout"><div class="extra-rank-self">' + sprite(30) +
+      '<h2>天梯赛</h2>' +
+      '<div class="extra-score">赛区 <b>' + esc(board.label || '未满30级') + '</b></div>' +
+      '<div class="extra-score">积分 <b>' + Math.max(0, Math.round(Number(s.integral) || 0)) + '</b></div>' +
+      '<div class="extra-score">金杯 <b>' + Math.max(0, Number(s.goldCup) || 0) + '</b></div>' +
+      '<div class="extra-score">赛区排名 <b>' + (board.me.rank > 0 ? board.me.rank : '-') + '</b></div>' +
+      '<p>今日已参赛 ' + played + ' / ' + limit + ' 场<br>' +
+        (played >= limit ? '今日参赛次数已用完' : played < 10 ? '本次免费，前10场免费' : '本次消耗5金松果') + '</p>' +
+      button('开始匹配', 'rank-fight', 'small gold') + button('金杯商店', 'rank-shop', 'small') +
+      '</div><div class="extra-rank-list"><h3>赛区榜</h3>' +
+      rows.map((row) => '<div class="extra-rank-row ' + (row.mine ? 'mine' : '') + '"><span>' + row.rank + '</span><b>' + esc(row.name) + (row.mine ? '（你）' : '') + ' Lv' + (row.level || 1) + '</b><strong>' + row.score + '</strong></div>').join('') +
+      note('天梯赛每天最多 20 场，前 10 场免费，之后每场 5 金松果。胜利 3 金杯、失败 1 金杯，获胜有 25% 概率额外抢 3 金杯（离线模拟）。积分每周一 0 点减半，人机同时回到 300 分；只有进入赛区前 30 名、并且超过至少一个人机，才能领取本周 50 金杯。') +
+      '</div></div>', { cls: 'extra-board rank-extra-board' });
+    back(p, arena, '返回');
     on(p, 'rank-shop', () => rankShop(0));
     const match = on(p, 'rank-fight', () => {
       if (!p.isConnected || State.state() !== s || rankAttempt) return;
@@ -653,20 +641,24 @@
     function begin() {
       if (rankAttempt || rankPrepPending || State.state() !== s) return;
       rankPrepPending = true;
-      const foe = State.genAI(rankFoeLevel(s.integral), '', { statScale: State.RANDOM_FOE_SCALE || 1.08 });
-      showRankPrep(s, foe).then(() => {
+      /* 赛区人机：从本赛区名册里挑一个分数相近的（单机版没有真人，人机就是对手）。 */
+      const bot = State.rankOpponent();
+      const foe = bot
+        ? Object.assign(State.genAI(bot.level, '', { levelJitter: 0, statScale: State.RANDOM_FOE_SCALE || 1.08 }), { name: bot.name })
+        : State.genAI(rankFoeLevel(s.integral), '', { statScale: State.RANDOM_FOE_SCALE || 1.08 });
+      showRankPrep(s, foe, bot).then(() => {
         rankPrepPending = false;
         if (rankAttempt || State.state() !== s) return;
-        rankMatch(back, { foe: foe });
+        rankMatch(back, { foe: foe, bot: bot });
       }).catch(() => {
         rankPrepPending = false;
-        if (!rankAttempt && State.state() === s) rankMatch(back, { foe: foe });
+        if (!rankAttempt && State.state() === s) rankMatch(back, { foe: foe, bot: bot });
       });
     }
   }
   /** 原版 `rankInfoMc`（「战斗准备中」）—— `3464` 在后来的战斗素材包里，
    *  这里按 320×196 舞台居中挂 3 秒；素材没到时只等一小会儿就开打，不挡流程。 */
-  async function showRankPrep(s, foe) {
+  async function showRankPrep(s, foe, bot) {
     const ui = document.getElementById('ui');
     if (!ui || !window.SfRender || !SfRender.mountSymbol) { await new Promise((r) => setTimeout(r, 300)); return; }
     const host = document.createElement('section');
@@ -684,7 +676,8 @@
       });
       const set = (name, value) => { const c = view.byName(name); if (c) SfRender.setText(c, String(value == null ? '' : value)); };
       set('name1', s.name || '我'); set('rank1', '—'); set('inte1', s.integral == null ? '—' : s.integral);
-      set('name2', foe && foe.name ? foe.name : '对手'); set('rank2', '—'); set('inte2', '—');
+      set('name2', foe && foe.name ? foe.name : '对手'); set('rank2', '—');
+      set('inte2', bot && bot.score != null ? bot.score : '—');
       const title = view.byName('title'); if (title && title.gotoAndStop) title.gotoAndStop(1);
     } catch (e) {
       if (window.__errs) window.__errs.push('rank prep: ' + (e && e.message));
@@ -710,7 +703,10 @@
         window.SfChallenge && SfChallenge.goArenaPage);
       const attempt = { owner: s, date: State.localDate(), fee, settled: false };
       rankAttempt = attempt; s.joinRankCount++; s.goldPoint -= fee; State.save();
-      const foe = opts.foe || State.genAI(rankFoeLevel(s.integral), '', { statScale: State.RANDOM_FOE_SCALE || 1.08 });
+      const bot = opts.bot || State.rankOpponent();
+      const foe = opts.foe || (bot
+        ? Object.assign(State.genAI(bot.level, '', { levelJitter: 0, statScale: State.RANDOM_FOE_SCALE || 1.08 }), { name: bot.name })
+        : State.genAI(rankFoeLevel(s.integral), '', { statScale: State.RANDOM_FOE_SCALE || 1.08 }));
       const interrupted = () => {
         if (attempt.settled || rankAttempt !== attempt || State.state() !== s) return;
         attempt.settled = true; rankAttempt = null;
@@ -733,9 +729,15 @@
         onEnd: async winner => {
         if (attempt.settled || rankAttempt !== attempt || State.state() !== s) return;
         attempt.settled = true; rankAttempt = null;
-        const win = winner === 0, delta = win ? 20 + Math.floor(Math.random() * 15) : -(10 + Math.floor(Math.random() * 10));
+        const win = winner === 0;
+        /* 赛区人机也吃积分：玩家涨/跌多少，人机就反向跌/涨多少（同分档 16/15/2/1/0）。
+         * ⚠ 单机版**没有**联机版「300 分以上只匹配真人、回落人机不计分」那套规则：
+         *   任何分数打人机都按分差档正常结算双方积分；而且打人机**保底 +1**
+         *   （领先 500 分以上的 0 分档在单机兜成 1）。 */
+        const delta = State.rankIntegralDelta(s.integral, bot ? bot.score : s.integral, win, { minWinGain: bot ? 1 : 0 });
+        State.rankApplyResult(bot ? bot.botId : '', win, delta);
         const robbed = win && Math.random() < 0.25 ? 3 : 0, cups = (win ? 3 : 1) + robbed;
-        s.integral = Math.max(0, s.integral + delta); s.goldCup += cups; State.save();
+        s.goldCup += cups; State.save();
         try { await back(); } catch (e) {}
         outcome(win, { exp: 0, gold: 0, ups: [] }, '\u79ef\u5206 ' + (delta > 0 ? '+' : '') + delta + '\uff0c\u91d1\u676f +' + cups + (robbed ? '\uff08\u542b\u593a\u5f973\u676f\uff09' : '') + '\u3002\u5f53\u524d\u79ef\u5206 ' + s.integral + '\u3002', back, '\u8fd4\u56de\u5929\u68af\u8d5b',
           [{ label: '\u7ee7\u7eed\u6311\u6218', cls: 'gold', run: () => (classicFlow ? startRankFlow(back, { confirmed: true }) : rankMatch(back)) }], { kind: 'rank', title: win ? '天梯赛胜利' : '天梯赛失利' });
@@ -757,6 +759,8 @@
     const s = State.state();
     if (!s) return;
     if (s.level < 30) { alert('天梯商店需要达到30级。'); return; }
+    /* 天梯积分每周一 0 点减半：先过一遍周检查，避免拿上周的分过门槛。 */
+    if (State.rankSyncWeek) State.rankSyncWeek();
     refreshRankShopDay();
     const item = rankgoodsMap.getValue(String(goodsId)) || rankgoodsMap.getValue(Number(goodsId));
     if (!item) return;
@@ -805,6 +809,7 @@
      * 只把商品源/售价换成金杯+金松果。`origin` 决定退出回哪一页：
      *   'shop'   = 从道具商店底栏进来 → 回商店；
      *   'ladder' = 从天梯菜单进来 → 回天梯菜单（缺省）。 */
+    if (State.rankSyncWeek) State.rankSyncWeek();
     if (window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic'
         && UI.classic && UI.classic.openRankShop) {
       UI.classic.openRankShop(pg || 0, origin || 'ladder');

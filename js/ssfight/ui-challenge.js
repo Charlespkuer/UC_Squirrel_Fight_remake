@@ -1,4 +1,4 @@
-/* ============================================================================
+﻿/* ============================================================================
  * js/ssfight/ui-challenge.js —— 原版**挑战页（tiaozhan 帧）界面代码**的等价 JS【SFR5】
  *
  * 逐句对着原版翻（行号写在每段注释里），显示层用 `js/ssfight/render.js`，
@@ -2484,55 +2484,65 @@
     else if (CE.rankMatch) CE.rankMatch(() => { arenaGo('menu'); });
     else arenaGo('ladder');
   }
-  /** 天梯榜（`showRank` → 帧 8）：原版由服务端下发，复刻用本地模拟榜
-   *  （与 `js/classic-extras.js` 的 rank() 同一份数据：积分 1350 起步的离线榜 + 玩家自己）。 */
+  /** 天梯榜（`showRank` → 帧 8）：**本赛区榜**。
+   *  原版 `rankList.do` 不带参数、由服务端回 `type`（1..6 帧 = 30-39 … 80-90）；
+   *  单机版由 `State.rankBoard()` 给出同一形状的数据：本赛区 30/33 个人机 + 玩家自己。 */
   function showArenaLadder() {
     const view = current.view;
     const s = S() || {};
     stopAt(view, ARENA.ladder);
-    stopAt(clipOf(view, 'type'), 2);
-    const cap = (State.MAX_PLAYER_LEVEL || 90);
-    const mine = Math.max(0, Math.round(Number(s.integral) || 0));
-    const entries = [];
-    for (let n = 0; n < 4; n++) {
-      const name = (window.GData && GData.AI_NAMES && GData.AI_NAMES[n * 4]) || ('鼠王' + (n + 1));
-      entries.push({ name: name, points: 1350 + n * 83, level: Math.min(cap, 34 + n * 6) });
-    }
-    entries.push({ name: s.name || '我', points: mine, level: Math.round(Number(s.level) || 1), mine: true });
-    entries.sort((a, b) => b.points - a.points);
-    const myIdx = entries.findIndex((e) => e.mine);
-    for (let i = 0; i < 4; i++) {
-      const e = entries[i];
-      setText(clipOf(view, 'rank' + (i + 1)), e ? String(i + 1) : '');
-      setText(clipOf(view, 'name' + (i + 1)), e ? (e.name + '（Lv' + e.level + '）') : '');
-      setText(clipOf(view, 'inte' + (i + 1)), e ? String(e.points) : '');
-    }
-    setText(clipOf(view, 'myinte'), String(mine));
-    setText(clipOf(view, 'myrank'), myIdx >= 0 ? String(myIdx + 1) : '-');
-    setVisible(clipOf(view, 'left'), false);
-    setVisible(clipOf(view, 'right'), false);
-    /* 原版 `state == 15` 的 button1 是 `gainRankCup()`：**直接领取前100名的50金杯**，
-     * 不是打开一页空的金杯商店。以前接成 `arenaGo('prize')`，玩家看到的就是 frame9
-     * 那三张没填内容的空卡。现在按原版语义领取，并用经典弹窗把名次/奖励写清楚。 */
+    const board = State.rankBoard ? State.rankBoard() : null;
+    const rows = (board && board.top) || [];
+    const frame = Math.max(0, Math.min(6, Number(board && board.frame) || 0));
+    stopAt(clipOf(view, 'type'), frame || 1);
+    let page = 0;
+    const pages = Math.max(1, Math.ceil(rows.length / 4));
+    const paint = () => {
+      for (let i = 0; i < 4; i++) {
+        const e = rows[page * 4 + i];
+        setText(clipOf(view, 'rank' + (i + 1)), e ? String(e.rank || page * 4 + i + 1) : '');
+        setText(clipOf(view, 'name' + (i + 1)), e ? String(e.name || '') : '');
+        setText(clipOf(view, 'inte' + (i + 1)), e ? String(e.score) : '');
+      }
+      setText(clipOf(view, 'myinte'), String(Math.max(0, Math.round(Number(s.integral) || 0))));
+      setText(clipOf(view, 'myrank'), board && board.me && board.me.rank > 0 ? String(board.me.rank) : '-');
+      setVisible(clipOf(view, 'left'), pages > 1 && page > 0);
+      setVisible(clipOf(view, 'right'), pages > 1 && page < pages - 1);
+    };
+    paint();
+    if (State.rankSyncWeek) State.rankSyncWeek();
+    /* 原版 `state == 15` 的 button1 是 `gainRankCup()`：直接领取 50 金杯。
+     * 2026-11 口径：本赛区前 30 名、且至少超过一个人机，一周一次。 */
     wireClickable(clipOf(view, 'button1'), {
       hover: 0, press: 0, idle: 1,
       onFire: () => {
         const CE = window.ClassicExtras;
         const C = window.UI && UI.classic;
         if (!CE || !CE.claimRankCup || !C) { if (CE && CE.rankShop) CE.rankShop(); return; }
+        State.rankSyncWeek();
         const r = CE.claimRankCup();
         const icon = C.icon ? C.icon('prop', 40) : '';
         const body = '<div class="rank-claim">' +
           '<div class="rank-claim-line"><span>当前排名</span><b>第 ' + (r.rank || '-') + ' 名</b>' +
-            '<span>积分</span><b>' + mine + '</b></div>' +
+            '<span>积分</span><b>' + Math.max(0, Math.round(Number(s.integral) || 0)) + '</b></div>' +
           (r.ok
             ? '<div class="rank-claim-reward"><span class="reward-icon">' + icon + '</span><b>金杯 +' + r.cups + '</b><span>当前 ' + r.goldCup + '</span></div>'
             : '<p class="rank-claim-note">' + esc(r.msg) + '</p>') +
-          '<p class="small-label">' + (r.ok ? '天梯奖励每周结算一次，进入前100名即可领取50金杯。' : '每周结算后排名前100名可领取一次。') + '</p>' +
+          '<p class="small-label">' + (r.ok ? '每周一 0 点积分减半；赛区前30名且超过至少一个人机即可领取50金杯。' : '每周结算后赛区前30名可领取一次（需要先超过一个人机）。') + '</p>' +
           '</div>';
         C.modal('天梯奖励', body, [{ label: '知道了', cls: 'gold' }], { small: true });
       },
     });
+    wireClickable(clipOf(view, 'left'), { hover: 0, onFire: () => {
+      if (page <= 0) return;
+      page -= 1;
+      paint();
+    } });
+    wireClickable(clipOf(view, 'right'), { hover: 0, onFire: () => {
+      if (page >= pages - 1) return;
+      page += 1;
+      paint();
+    } });
     wireClickable(clipOf(view, 'back'), { hover: 0, onFire: () => arenaGo('menu') });
   }
   /* ============================================================

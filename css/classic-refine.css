@@ -51,7 +51,7 @@
 .bag-tabs .uc-tab{flex:0 0 233px;font-size:51px;position:relative}
 .bag-tabs .uc-tab.has-vector-tab{border:0;box-shadow:none;background:none;
   color:transparent;-webkit-text-stroke:0;text-shadow:none}
-.bag-tab-art{position:absolute;inset:0;display:block;pointer-events:none}
+.bag-tab-art{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;display:block;pointer-events:none}
 .bag-tab-art>svg{display:block;width:100%;height:100%;overflow:visible}
 /* 选中态已经是原版绿皮（f2），不再叠常驻提亮；悬停也用同一档绿皮 + 公共光晕。 */
 .bag-tabs .uc-tab.has-vector-tab.sf-selected:not(.sf-hover){filter:none}
@@ -297,7 +297,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
   font:18px/1.3 "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;
   pointer-events:none;transition:background .18s,border-color .18s,color .18s}
 .ssfight-note.flash{background:#7a4a12f2;border-color:#ffe27a;color:#fff8dc}
-.sf-fight-result{position:absolute;inset:0;z-index:20;background:rgba(22,22,22,.2);pointer-events:auto}
+.sf-fight-result{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;z-index:20;background:rgba(22,22,22,.2);pointer-events:auto}
 .sf-fight-result>svg{display:block;width:100%;height:100%}
 @media (prefers-reduced-motion: reduce){ .ssfight-note{transition:none} }
 
@@ -324,7 +324,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
    `.home-buff` 逐条一致 —— 换窗口尺寸时观感不变。
    ⚠ 原版那三个槽（3414 帧 1 的金渐变描边）已由 JS 藏掉：原版 `showStates` 把槽 `gotoAndStop(2)`
    之后槽本来就是空的，以前那层"金渐变底板"反而是露在图标外面的多余一层。 */
-.ssfight-states{position:absolute;inset:0;z-index:2;pointer-events:none}
+.ssfight-states{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;z-index:2;pointer-events:none}
 /* ---------- 状态页的武器 / 技能栏（`js/ssfight/ui-status.js`）----------
    原版页元件 7218 的第 2、3 帧就是这两个栏：底板 / 顶栏三个 tab / "返回菜单" / 页码 / 翻页箭头
    全部来自原版素材，格子里那 10 个图标**也是原版素材** ——
@@ -350,7 +350,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 /* ---------- 武器 / 技能详情页（整页 DOM 画，见 ui-status.js 的 DETAIL 注释）----------
    落点是照着原版截图（`references/screen`）逐块量的舞台坐标，换算见 `detailMapper`。
    底板 = 一块奶油面板 + 顶部一枚棕色「武器详情」标签，和原版那一页同款排布。 */
-.sf-detail{position:absolute;inset:0;z-index:3;pointer-events:none;--u:3.6px;
+.sf-detail{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;z-index:3;pointer-events:none;--u:3.6px;
   font-family:"SimHei","Microsoft YaHei",sans-serif}
 .sf-detail>*{pointer-events:auto}
 .sf-d-panel{position:absolute;box-sizing:border-box;pointer-events:none;
@@ -480,7 +480,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
    竞技场一切看齐 ssfight，别拿复刻自研的整块面板压在原版帧上）。
    ⚠ 它自己一个宿主（`.ssfight-arenahint`），**不进 `menuHost()`**：那一层是常驻的，
    赛事页一走没人收，战斗画面上会一直挂着（还压住战果弹窗与「跳过」键）。 */
-.ssfight-arenahint{position:absolute;inset:0;z-index:6;pointer-events:none;background:transparent}
+.ssfight-arenahint{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;z-index:6;pointer-events:none;background:transparent}
 .sf-arena{position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);
   width:66%;max-width:560px;box-sizing:border-box;padding:12px 14px 14px;z-index:6;
   border:4px solid #a8763a;border-radius:24px;background:linear-gradient(#fffdf2,#f7e8c8);
@@ -622,7 +622,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
    字形保持放大后的 48px，所以锤子在缩小后的方框里依旧填得很满。 */
 .status-fusion-icon{width:46px;height:46px;font-size:48px}
 .status-sell-icon{width:46px;height:46px;font-size:30px}
-.status-fusion-icon::before,.status-sell-icon::before{content:'';position:absolute;inset:0;border-radius:16px;
+.status-fusion-icon::before,.status-sell-icon::before{content:'';position:absolute;top:0;right:0;bottom:0;left:0;inset:0;border-radius:16px;
   background:radial-gradient(circle at 50% 42%,#ffffff38,transparent 62%);pointer-events:none}
 .status-fusion-icon .status-fusion-glyph,.status-sell-icon .status-sell-glyph{font-style:normal;line-height:1;display:block}
 /* 两个字形在各自方框里的垂直位置分开调：⚒ 交叠锤子偏下 4px，$ 偏下 1px */
@@ -646,7 +646,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .uc-button.entry-pill:hover{filter:brightness(1.05)}
 .classic-page[data-screen="status"] .status-character{left:-27px;top:15px}
 .status-right{left:510px;right:29px;top:4px}
-.status-exp{position:relative;height:87px;gap:36px;z-index:0}.status-exp:before{content:"";position:absolute;inset:-8px -27px -1px -105px;background:linear-gradient(90deg,transparent,#bada73 27%,#aad069);z-index:-1}
+.status-exp{position:relative;height:87px;gap:36px;z-index:0}.status-exp:before{content:"";position:absolute;top:-8px;right:-27px;bottom:-1px;left:-105px;inset:-8px -27px -1px -105px;background:linear-gradient(90deg,transparent,#bada73 27%,#aad069);z-index:-1}
 .status-exp .home-exp-label{font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;font-size:49px;font-style:normal;font-weight:bold;-webkit-text-stroke:7px #17445b;paint-order:stroke fill;text-shadow:none}
 .status-exp .exp-meter{max-width:none;height:69px;border:0;box-shadow:none;background:#154865;border-radius:42px}.status-exp .exp-meter>i{background:#57a9c3}.status-exp .exp-meter>span{font:44px/68px "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;color:#fff}
 .status-lines{padding:11px 66px 3px 61px;grid-template-columns:208px 1fr;gap:11px 6px;font-size:41px}.status-lines dt{-webkit-text-stroke:5px #603c1d;paint-order:stroke fill}.status-lines dd{font-size:58px;line-height:55px;letter-spacing:3px}
@@ -657,7 +657,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .classic-page[data-screen="status"]>.classic-board>.stat-strip .stat-pill b{width:68px;height:68px;font-size:39px;border:4px solid #6b441f;-webkit-text-stroke:0}
 .extra-arena-cards .extra-arena-picture{width:158px;height:158px}.extra-arena-cards p{white-space:normal;min-height:57px;line-height:26px;font-size:21px;margin:5px 0 8px}.arena-extra-board .extra-arena-cost{margin-top:10px}
 .reference-button-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-.classic-button-art{display:block;position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none}
+.classic-button-art{display:block;position:absolute;top:0;right:0;bottom:0;left:0;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none}
 .uc-button:has(>.classic-button-art),.classic-tabs .uc-tab:has(>.classic-button-art){border:0;box-shadow:none;background:transparent;padding:0}
 .classic-tabs .uc-tab:has(>.classic-button-art){height:83px;min-height:83px}
 .page-footer>.uc-button:has(>.classic-button-art){height:103px;min-width:397px;width:397px}
@@ -1216,7 +1216,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .arena-original-back>svg{display:block;width:100%;height:100%;overflow:visible}
 
 /* 天梯「战斗准备中」：原版 3464（双方名字 / 排名 / 积分 + VS），按 320×196 舞台居中。 */
-.sf-rank-prep{position:absolute;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;background:rgba(22,22,22,.2);pointer-events:auto}
+.sf-rank-prep{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;z-index:19;display:flex;align-items:center;justify-content:center;background:rgba(22,22,22,.2);pointer-events:auto}
 .sf-rank-prep>svg{display:block;width:100%;height:100%}
 
 /* 系统页分区标题：保留原版「游戏帮助 / 体力」那种棕色圆牌 + 米色描边。
@@ -1232,7 +1232,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
  * 原版升级是**整页**：先停 1~29 帧的「NN 级达成」大图，第 30 帧换成
  * 「升级奖励」面板 + 四格 +「确定」。这里直接挂原版页；下面只管把它盖到
  * 战果 / 弹窗之上，并给四格里的现代图集图标留出层叠。 */
-.sf-levelup-view{position:absolute;inset:0;z-index:60;outline:none;pointer-events:auto;
+.sf-levelup-view{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;z-index:60;outline:none;pointer-events:auto;
   background:url('../images/ssfight/ui/bitmap/3182_0.hd.jpg') center/cover no-repeat,#203a27}
 .sf-levelup-view>svg{display:block;width:100%;height:100%}
 .sf-levelup-view .sf-levelup-page{font-family:"SimHei","Microsoft YaHei",sans-serif;fill:#7a5528;font-size:10px;font-weight:700;text-anchor:end;pointer-events:none}
@@ -1240,7 +1240,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 /* ===== 新手引导（ssfight 3625）=====
  * 原版是整页提示层：暗色说明条 + 黄色手指 + 半透明目标示意。它只负责“讲”，
  * 不接管点击，所以整层 pointer-events:none；z-index 压在页面之上、战果/弹窗之下。 */
-#ui>.sf-guide-view{position:absolute;inset:0;z-index:15;pointer-events:none;overflow:visible}
+#ui>.sf-guide-view{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;z-index:15;pointer-events:none;overflow:visible}
 /* 金环要能画到 320×196 的素材 viewBox 之外：f10 的「返回菜单」在页面最底部，
  * 环的 padding 会伸到 viewBox 下面；SVG 默认 overflow:hidden 会把底边裁掉，
  * 看起来就是「框歪了、没框住」。父层和 svg 都放开，实际范围由 ui-guide.js
@@ -1267,7 +1267,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 /* ===== 经典道具合成（ssfight 4886 f5 + 4402）=====
  * 合成页/结果页都是原版库元件，盖在背包之上；只负责压暗底页并让按钮收点击，
  * 版式、文字、图标位全部来自 4886 / 4402，不在 CSS 里重画。 */
-#ui>section.sf-compose-view{position:absolute;inset:0;z-index:40;pointer-events:auto!important;
+#ui>section.sf-compose-view{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;z-index:40;pointer-events:auto!important;
   background:rgba(22,22,22,.55);overflow:hidden}
 .sf-compose-view>svg{display:block;width:100%;height:100%}
 .sf-compose-view .sf-compose-icon{pointer-events:none}
@@ -1276,13 +1276,13 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
  * ⚠ 图层顺序：道具图 img 必须在遮罩**上面**（z-index:1），否则绿色会盖住道具本身的颜色。
  *   遮罩留在 z-index:0，只在道具图的透明处透出，起"底光"作用。 */
 .bag-grid .catalog-cell.selected .item-icon>img{position:relative;z-index:1}
-.bag-grid .catalog-cell.selected .item-icon::after{content:'';position:absolute;inset:0;border-radius:inherit;
+.bag-grid .catalog-cell.selected .item-icon::after{content:'';position:absolute;top:0;right:0;bottom:0;left:0;inset:0;border-radius:inherit;
   z-index:0;background:rgba(125,190,45,.26);box-shadow:inset 0 0 0 7px rgba(205,255,131,.36);pointer-events:none}
 
 /* ===== 经典背包「道具使用」：ssfight 4886 f1 =====
  * 原版「道具1」弹窗；版式/文字/按钮全部来自素材，CSS 只负责盖住背包并让整层收点击。
  * 使用/取消的左右位置由 ui-prop-use.js 在挂载后交换，不在 CSS 里重排。 */
-#ui>section.sf-prop-use-view{position:absolute;inset:0;z-index:40;pointer-events:auto!important;overflow:hidden;
+#ui>section.sf-prop-use-view{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;z-index:40;pointer-events:auto!important;overflow:hidden;
   /* 与 `.classic-page` 用同一条纵向延伸：背包页按 920:560 补到 712，
    * 弹窗层不能只铺 690，否则打开/关闭时底图会被拉伸、看起来在漂移。 */
   top:-11.087px;bottom:-11.087px}

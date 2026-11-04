@@ -103,7 +103,7 @@
 }
 /* 砖缝质感 */
 .tower-floor::after {
-  content: ''; position: absolute; inset: 4px 5px; border-radius: 5px; pointer-events: none;
+  content: ''; position: absolute; top:4px;right:5px;bottom:4px;left:5px;inset: 4px 5px; border-radius: 5px; pointer-events: none;
   background: repeating-linear-gradient(90deg, rgba(255, 255, 255, .07) 0 3px, transparent 3px 27px);
 }
 .tower-floor-no { position: relative; z-index: 1; font-size: 18px; font-weight: bold; color: #a9bcd6; letter-spacing: 1px; }
@@ -331,7 +331,7 @@
   box-shadow:0 0 9px #d9a12a88,inset 0 0 7px #ffd76a44;
 }
 .hex-card.r3 .hex-emblem::before{
-  content:'';position:absolute;inset:0;margin:auto;width:19px;height:19px;transform:rotate(45deg);
+  content:'';position:absolute;top:0;right:0;bottom:0;left:0;inset:0;margin:auto;width:19px;height:19px;transform:rotate(45deg);
   background:linear-gradient(135deg,#fff6cf,#e8ae1c 55%,#a9740a);
   box-shadow:0 0 6px #ffe9a8aa;
 }
@@ -886,7 +886,7 @@ ul.settle-calc li.total b { font-size: 22px; }
 .buff-tag.ench-crystal i{color:#8e2c22}
 .buff-tag.ench-both{position:relative;border-color:transparent;box-shadow:0 0 0 2px #ffdad3 inset}
 .buff-tag.ench-both::before,
-.buff-tag.ench-both::after{content:'';position:absolute;inset:-3px;border-radius:16px;
+.buff-tag.ench-both::after{content:'';position:absolute;top:-3px;right:-3px;bottom:-3px;left:-3px;inset:-3px;border-radius:16px;
   border:3px solid;pointer-events:none}
 .buff-tag.ench-both::before{border-color:#c0392b;clip-path:inset(0 50% 0 0)}
 .buff-tag.ench-both::after{border-color:#3f9d9d;clip-path:inset(0 0 0 50%)}
@@ -929,7 +929,7 @@ ul.settle-calc li.total b { font-size: 22px; }
 }
 .tower-floor-no { font-size: clamp(14px, 1.6vh, 19px); letter-spacing: 0; padding: 0; }   /* 层高更高，层号也跟着放大一档 */
 .tower-floor.now .tower-floor-no { padding: 0 10px 0 12px; }
-.tower-floor::after { inset: 3px 4px; border-radius: 4px; }
+.tower-floor::after { top:3px;right:4px;bottom:3px;left:4px;inset: 3px 4px; border-radius: 4px; }
 .tower-floor.fifth-floor::before,
 .tower-floor.elite-floor::before { right: 4px; width: 6px; height: 6px; margin-top: -3px; }
 .tower-marker { left: 4px; border-left-width: 9px; border-top-width: 5px; border-bottom-width: 5px; margin-top: -5px; }
@@ -1108,12 +1108,12 @@ ul.settle-calc li.total b { font-size: 22px; }
    *   80 高于塔页的动作条（60）/货币条（40）/顶部返回栏（5），仍低于 body 上的黑幕（9998）。 */
   z-index: 80; }
 /* 白幕：盖住整个视口（含塔身与左下角的模式开关），但**在卡片下面**。 */
-.tower-mirror .mirror-veil { position: fixed; inset: 0; background: #fff; opacity: 0;
+.tower-mirror .mirror-veil { position: fixed; top:0;right:0;bottom:0;left:0;inset: 0; background: #fff; opacity: 0;
   transition: opacity 1500ms linear; z-index: 60; pointer-events: none; }
 .tower-mirror.mirror-white .mirror-veil { opacity: 1; }
 .tower-mirror .mirror-card-wrap { position: relative; z-index: 70; pointer-events: auto; }
 /* 黑幕：连卡片一起吃掉 —— 所以它挂在 body 上、z-index 比什么都高。 */
-.mirror-black-veil { position: fixed; inset: 0; background: #000; opacity: 0;
+.mirror-black-veil { position: fixed; top:0;right:0;bottom:0;left:0;inset: 0; background: #000; opacity: 0;
   transition: opacity 1500ms linear; z-index: 9998; pointer-events: none; }
 .mirror-black-veil.on { opacity: 1; }
 .mirror-black-veil.out { opacity: 0; transition-duration: 850ms; }
@@ -1135,7 +1135,7 @@ ul.settle-calc li.total b { font-size: 22px; }
 .mirror-card .mirror-emblem { position: relative; display: block; width: 58px; height: 58px; box-sizing: border-box;
   border: 4px solid #ffd76a; border-radius: 9px; background: linear-gradient(180deg, #6a4708, #2b1a00);
   box-shadow: 0 0 12px rgba(217,161,42,.6), inset 0 0 9px rgba(255,215,106,.28); }
-.mirror-card .mirror-emblem::before { content: ''; position: absolute; inset: 0; margin: auto; width: 24px; height: 24px;
+.mirror-card .mirror-emblem::before { content: ''; position: absolute; top:0;right:0;bottom:0;left:0;inset: 0; margin: auto; width: 24px; height: 24px;
   transform: rotate(45deg); background: linear-gradient(135deg, #fff6cf, #e8ae1c 55%, #a9740a);
   box-shadow: 0 0 8px rgba(255,233,168,.7); }
 .mirror-card .mirror-name { font-size: 38px; line-height: 1.15; letter-spacing: 4px; color: #ffe9a8;
@@ -1449,7 +1449,7 @@ ul.settle-calc li.total b { font-size: 22px; }
  * ============================================================ */
 .hero-prep-board { overflow: hidden; }
 .hero-prep-board [data-hero-pane][hidden], .hero-prep-board .hero-prep-stats[hidden] { display: none; }
-.hero-prep-status-pane { position: absolute; inset: 16px 26px 112px 20px; }
+.hero-prep-status-pane { position: absolute; top:16px;right:26px;bottom:112px;left:20px;inset: 16px 26px 112px 20px; }
 .hero-prep-portrait { position: absolute; left: 0; top: 0; bottom: 0; width: 378px; display: flex; align-items: center; justify-content: center; }
 .hero-prep-portrait-art { display: block; width: 356px; height: 352px; }
 .hero-prep-portrait-art svg { pointer-events: none; }
@@ -1471,7 +1471,7 @@ ul.settle-calc li.total b { font-size: 22px; }
 .classic-page[data-screen="status"] > .classic-board.hero-prep-board > .hero-prep-stats .hero-stat-pill { position: relative; padding-right: 44px; }
 .classic-page[data-screen="status"] > .classic-board.hero-prep-board > .hero-prep-stats .hero-stat-arrows { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); gap: 3px; }
 .classic-page[data-screen="status"] > .classic-board.hero-prep-board > .hero-prep-stats .hero-stat-step { width: 29px; height: 23px; border-radius: 5px; font-size: 11px; }
-.hero-ws-pane { position: absolute; inset: 10px 18px 8px; display: flex; flex-direction: column; min-height: 0; }
+.hero-ws-pane { position: absolute; top:10px;right:18px;bottom:8px;left:18px;inset: 10px 18px 8px; display: flex; flex-direction: column; min-height: 0; }
 .hero-ws-pane[hidden] { display: none; }
 .hero-ws-head { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 8px 6px; }
 .hero-ws-head h3 { margin: 0; color: #325c49; font-size: 24px; line-height: 1.2; }
@@ -1575,7 +1575,7 @@ ul.settle-calc li.total b { font-size: 22px; }
  * ============================================================ */
 .sf-hero-view .sf-hero-start g[type="shape"][depth="4"] { display: none !important; }
 .sf-hero-view .sf-hero-start { cursor: pointer; }
-.hero-gear-picker { position: fixed; inset: 0; z-index: 9000; display: flex; align-items: center; justify-content: center; padding: 3vh 2vw; background: rgba(18, 28, 17, .6); font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif; color: #6f512f; }
+.hero-gear-picker { position: fixed; top:0;right:0;bottom:0;left:0;inset: 0; z-index: 9000; display: flex; align-items: center; justify-content: center; padding: 3vh 2vw; background: rgba(18, 28, 17, .6); font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif; color: #6f512f; }
 .hero-gear-picker-panel { width: min(1040px, 96vw); max-height: 94vh; display: flex; flex-direction: column; overflow: hidden; border: 2px solid #d6bd8c; border-radius: 18px; background: #fffaf0; box-shadow: 0 14px 44px #0008, inset 0 0 0 3px #fffdf4; }
 .hero-gear-picker-head { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 12px 18px 10px; border-bottom: 1px solid #e2d2ae; background: linear-gradient(#fffdf4, #fbf3df); }
 .hero-gear-picker-head h3 { margin: 0; color: #5d4227; font-size: 24px; line-height: 1.2; }
@@ -1775,7 +1775,7 @@ ul.settle-calc li.total b { font-size: 22px; }
 .hero-story-choice:focus-visible { outline: 3px solid #83a76a; outline-offset: 2px; }
 
 /* 商店 HS02 / HS03 的自选层：与换装层同一套全屏遮罩 + 可滚动列表 */
-.hero-goods-picker { position: fixed; inset: 0; z-index: 9100; display: flex; align-items: center; justify-content: center; padding: 3vh 2vw; background: rgba(18, 28, 17, .62); font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif; color: #6f512f; }
+.hero-goods-picker { position: fixed; top:0;right:0;bottom:0;left:0;inset: 0; z-index: 9100; display: flex; align-items: center; justify-content: center; padding: 3vh 2vw; background: rgba(18, 28, 17, .62); font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif; color: #6f512f; }
 .hero-goods-panel { width: min(840px, 94vw); max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; border: 2px solid #d6bd8c; border-radius: 18px; background: #fffaf0; box-shadow: 0 14px 44px #0008, inset 0 0 0 3px #fffdf4; }
 .hero-goods-head { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 18px 10px; border-bottom: 1px solid #e2d2ae; background: linear-gradient(#fffdf4, #fbf3df); }
 .hero-goods-head h3 { margin: 0; color: #5d4227; font-size: 24px; line-height: 1.2; }

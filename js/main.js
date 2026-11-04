@@ -105,7 +105,12 @@
    * 判据用 DOM 上的 `.ssfight-home`：只有真的挂上了，才放心跳过 canvas 绘制。
    */
   function ssfightHomeActive() {
-    return uiModeIsClassic() && !!window.SfUiMain && !!document.querySelector('.ssfight-home');
+    if (!uiModeIsClassic() || !window.SfUiMain) return false;
+    const el = document.querySelector('.ssfight-home');
+    /* 只有壳不算数：挂载失败 / 还没挂完时壳里没有 SVG（壳本身是不透明深绿底）。这时必须让
+     * canvas 主页继续画，否则整屏只剩一块深绿 —— 2026-11 红米 K90 Pro Max / HyperOS 3.0.23
+     * 玩家反馈的「绝大多数时候只有一个深绿色的背景」就是这条判据只看了壳在不在。 */
+    return !!(el && el.querySelector('svg'));
   }
   /**
    * 首页用哪张底图：
@@ -630,6 +635,10 @@
       if (el) el.textContent = m;
     };
     fitCanvas();
+    /* 标题页也要沉浸：`applyStoredSettings()` 要等存档载入之后才跑，旧机（Android 11 /
+     * 三键导航，如 iQOO Z5）在标题页会露出一条导航栏，把「开始游戏」和底栏挤到一边。
+     * 这里先按 localStorage 里的偏好落一次；没有原生桥时是空操作，之后再补一次。 */
+    applySystemBars();
     // 一打开页面就起 BGM，不必等素材加载完或点「开始游戏」（被自动播放策略拦下时会在第一次交互补播）
     playBgm('main');
     drawLoading(0.05, '松鼠大战 · 怀旧复刻版');
@@ -1135,6 +1144,14 @@
     scheduleBattleAssets();
     if (window.SfGuide) { try { SfGuide.onHome(); } catch (e) { if (window.__errs) window.__errs.push('SfGuide home: ' + (e && e.message)); } }
   }
+  /** 恢复钩子：只有确实停在首页、且主界面循环已经退出时，才重新起一次 canvas 场景。
+   *  经典主页挂载失败会把深绿空壳摘掉（见 classic-ui.js 的 mountClassicHome），
+   *  但那时 `startHomeScene()` 早已因为「壳在」返回过，必须靠这里把画面接回来。 */
+  function resumeHomeScene() {
+    if (mode !== 'home') return false;
+    try { if (!rafId) startHomeScene(); } catch (e) { return false; }
+    return true;
+  }
 
   // 主界面点击：命中菜单按钮
   canvas.addEventListener('click', (e) => {
@@ -1486,6 +1503,9 @@
    * 【MN10】导出 window.Main
    * ============================================================ */
   window.Main = { showHome, showTitle, startBattle, replayBattle, clearUiForBattle, resizeLayout:fitCanvas, setMuted, isMuted: () => muted,
+    /* 经典主页挂载失败时由 classic-ui.js 的恢复流程调用：空壳摘掉后重起 canvas 主页。
+     * 只在真的还在首页时才动（战斗中/标题页返回 false），不硬塞 startHomeScene。 */
+    resumeHomeScene,
     volume: volumeValue, setVolume, homePlayer: () => mainPlayer, setHomeFps, W, H,
     settings: settingsSnapshot, setResolution, setFullscreen, setHideStatusBar, setBackgroundRun, applySystemBars,
     isFullscreen: () => !!document.fullscreenElement,

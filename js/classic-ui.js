@@ -695,6 +695,88 @@
   /* ============================================================
    * 【UC6】主界面首页（canvas 渲染 + 松鼠画像）
    * ============================================================ */
+  /* 【经典主页自愈】2026-11 玩家反馈（红米 K90 Pro Max / HyperOS 3.0.23 / Android 16）：
+   * 「绝大多数时候只有一个深绿色的背景」。复现：经典主页的空壳 `.ssfight-home` 是**不透明深绿底**
+   * （#203a27），`SfUiMain.mount()` 一旦因为素材请求失败 / 超时 throw，空壳留在页面上、里面没有 SVG，
+   * 而 main.js 的 `ssfightHomeActive()` 只看壳在不在 → canvas 主界面循环直接返回；
+   * 结果是整屏只剩深绿底，既没有按钮也没有报错，只能杀进程重开。
+   *
+   * 所以这里不再 fire-and-forget：挂载带**看门狗 + 重试**；失败就摘掉空壳、立刻放上**可点的复刻
+   * DOM 主页**（canvas 画村庄底 + DOM 顶栏/按钮），原版页在背后继续重试，挂上了再换回来；
+   * 三次都失败就停在复刻主页。成功路径完全不变。 */
+  let forceDomHome = false;
+  const CLASSIC_HOME_MOUNT_TIMEOUT_MS = 9000;
+  let classicHomeMountSeq = 0;
+  /** 壳里到底有没有画出来的原版页面（`SfRender.mount` 成功一定会插一棵有子节点的 SVG）。 */
+  function classicHomeHasArt(box) {
+    try {
+      const svg = box && box.querySelector && box.querySelector('svg');
+      return !!(svg && svg.childElementCount > 0);
+    } catch (e) { return false; }
+  }
+  function mountClassicHome(box, attempt) {
+    attempt = attempt | 0;
+    const seq = ++classicHomeMountSeq;
+    const timeoutMs = CLASSIC_HOME_MOUNT_TIMEOUT_MS + attempt * 3000;
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => finish(new Error('挂载超时')), timeoutMs);
+      function finish(err) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (seq !== classicHomeMountSeq) { resolve(); return; }
+        if (!err && !classicHomeHasArt(box)) err = new Error('挂载结果为空');
+        if (!err) {
+          /* 挂载期间壳是隐藏的（不透明深绿底不能盖住 canvas 主页），成了再交给 CSS 正常接管。
+           * 失败过一次时页面上还压着可点的复刻主页，原版页挂好就让它让位。 */
+          try { box.style.visibility = ''; } catch (e) {}
+          try { const dom = $('#ui .classic-home:not(.ssfight-home)'); if (dom) dom.remove(); } catch (e) {}
+          resolve(); return;
+        }
+        if (window.__errs) window.__errs.push('SfUiMain: ' + (err && err.message ? err.message : err));
+        if (screen !== 'home' || !box || box.isConnected === false) { resolve(); return; }
+        /* 空壳必须先摘：它会把 canvas 主界面整块盖住，留着就是「深绿屏」。 */
+        if (!classicHomeHasArt(box)) {
+          try { box.remove(); } catch (e) {}
+          try { if (window.Main && Main.resumeHomeScene) Main.resumeHomeScene(); } catch (e) {}
+        }
+        /* 第一次失败就先把**可点的复刻主页**放上来，原版主页在背后继续重试：
+         * 不让玩家对着没有 HUD 的村庄底干等（真挂起时三次看门狗加起来能到半分钟）。 */
+        let domHome = $('#ui .classic-home:not(.ssfight-home)');
+        if (!domHome) {
+          if (attempt === 0) toast('原版主界面加载失败，正在重试…');
+          forceDomHome = true;
+          try { renderHome(); } catch (e) { if (window.__errs) window.__errs.push('renderHome fallback: ' + (e && e.message)); }
+          /* 复刻主页是透明的：必须让 canvas 把村庄背景/主角画在它下面。 */
+          try { if (window.Main && Main.resumeHomeScene) Main.resumeHomeScene(); } catch (e) {}
+          domHome = $('#ui .classic-home:not(.ssfight-home)');
+        }
+        if (attempt < 2) {
+          setTimeout(() => {
+            if (seq !== classicHomeMountSeq || screen !== 'home') { resolve(); return; }
+            let host = $('#ui .ssfight-home');
+            if (!host) {
+              host = document.createElement('section');
+              host.className = 'classic-home ssfight-home';
+              host.setAttribute('aria-label', '松鼠大战主页');
+              /* 重试期间同样隐藏：复刻主页与 canvas 继续用，挂成了再显形。 */
+              host.style.visibility = 'hidden';
+              $('#ui').appendChild(host);
+            }
+            mountClassicHome(host, attempt + 1).then(resolve);
+          }, 800 * (attempt + 1));
+          return;
+        }
+        /* 三次都失败：复刻主页就是最终态（经典二级页仍可正常打开），不再留一块点不动的深绿。 */
+        toast('原版主界面加载失败，已切回复刻主页');
+        resolve();
+      }
+      try {
+        Promise.resolve(window.SfUiMain.mount(box)).then(() => finish(null), (e) => finish(e || new Error('挂载失败')));
+      } catch (e) { finish(e || new Error('挂载失败')); }
+    });
+  }
   function renderHome() {
     closeOriginalResult();
     screen = 'home'; activePortrait = null;
@@ -702,7 +784,7 @@
     /* 【SFR2】经典模式：村庄页**整页由原版导出数据渲染**（js/ssfight/render.js + ui-main.js）。
      * 原版页面自带顶栏（昵称/等级/体力）、Exp 条、底栏五键与全部图标，
      * 所以这里不再拼复刻的 DOM 版；canvas 那边也同步不再画背景与 HUD（见 main.js 的 ssfightHomeActive）。 */
-    if (currentUiMode() === 'classic' && window.SfUiMain) {
+    if (!forceDomHome && currentUiMode() === 'classic' && window.SfUiMain) {
       /* 回主界面 = 把上一棵原版页面收干净。`SfUiMain.mount()` 自己会拆自己那一棵，
        * 但状态页 / 挑战页是**并列**的两棵树（各自带 1s 重刷），必须在这里一起收掉 ——
        * 不然从二级页回主界面时它们会挂在一棵已经不在页面上的树上继续跑。 */
@@ -710,14 +792,18 @@
       if (window.SfChallenge && SfChallenge.destroy) { try { SfChallenge.destroy(); } catch (e) {} }
       if (window.SfVillage && SfVillage.destroy) { try { SfVillage.destroy(); } catch (e) {} }
       if (window.SfMessage && SfMessage.destroy) { try { SfMessage.destroy(); } catch (e) {} }
-      $('#ui').innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠大战主页"></section>';
+      /* 挂载期间先藏起来：`.ssfight-home` 自带 #203a27 不透明底，挂载慢/失败时留在页面上就是
+       * 「整屏只剩深绿」。藏起来后 canvas 主页继续画（ssfightHomeActive 也只认挂好的 SVG），
+       * 挂成功由 mountClassicHome 去掉 inline visibility。 */
+      $('#ui').innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠大战主页" style="visibility:hidden"></section>';
       const box = $('#ui .ssfight-home');
-      if (box) window.SfUiMain.mount(box).catch((e) => { if (window.__errs) window.__errs.push('SfUiMain: ' + e.message); });
+      if (box) mountClassicHome(box, 0);
       /* 进主界面就预热道具页三颗页签的矢量包（188 KB）：等玩家点「道具」时多半已就绪，
        * 首屏会直接走矢量页签，不经过 CSS 药丸兜底。不阻塞主界面挂载。 */
       void preloadBagTabVectors();
       return;
     }
+    forceDomHome = false;
     $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label" role="img" aria-label="经验" title="经验">' + spr('draw', 15, 'home-exp-art') + '</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/ui/home/activity.png">' + '</button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/ui/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
     bind($('.classic-home'),actions);buffSignature='';
     refreshHome();

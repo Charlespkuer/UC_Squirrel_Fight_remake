@@ -19,16 +19,27 @@
   const extraPromises = new Map();
 
   /* ---------- 素材库加载（一次，之后缓存） ---------- */
+  /** 取一份素材 JSON。先走 `force-cache`（本地素材，热启动最快）；失败再用 `no-store` 重取一次。
+   *  为什么必须重试：换包后 WebView 里可能还留着上一版 / 被截断的缓存响应（同一个 URL），
+   *  原样重试永远命中那条坏缓存 —— 表现就是经典主页挂不出来、整屏只剩深绿底。 */
+  async function fetchJson(file, noCache) {
+    const r = await fetch(BASE + file, noCache ? { cache: 'no-store' } : { cache: 'force-cache' });
+    if (!r || !r.ok) throw new Error('素材包缺失：' + file);
+    return r.json();
+  }
+  async function fetchJsonRetry(file) {
+    try { return await fetchJson(file); }
+    catch (e) { return fetchJson(file, true); }
+  }
   async function load() {
     if (bundle) return bundle;
     if (loadPromise) return loadPromise;
     loadPromise = (async () => {
       const [tl, tags, textFields] = await Promise.all([
-        fetch(BASE + 'timeline.json', { cache: 'force-cache' }).then((r) => r.json()),
-        fetch(BASE + 'tags.json', { cache: 'force-cache' }).then((r) => r.json()),
+        fetchJsonRetry('timeline.json'),
+        fetchJsonRetry('tags.json'),
         // EditText boxes/alignment come from SWF metadata, not exported glyph baselines.
-        fetch(BASE + 'textfields.json', { cache: 'force-cache' })
-          .then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+        fetchJsonRetry('textfields.json').catch(() => ({})),
       ]);
       const hash = new Map();
       for (const t of tags) hash.set(String(t.id), t);
@@ -48,9 +59,7 @@
     if (b.extra && b.extra.has(file)) return b;
     if (extraPromises.has(file)) return extraPromises.get(file);
     const pending = (async () => {
-      const r = await fetch(BASE + file, { cache: 'force-cache' });
-      if (!r || !r.ok) throw new Error('素材包缺失：' + file);
-      const list = await r.json();
+      const list = await fetchJsonRetry(file);
       const exactGear = file === 'tags-gear.json' || file === 'tags-gear-color.json';
       for (const t of list) {
         const k = String(t.id);

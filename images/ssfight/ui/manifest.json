@@ -43,11 +43,11 @@
   "campaign": "3437"
  },
  "dictionarySize": 7876,
- "exportedTags": 7733,
+ "exportedTags": 7736,
  "bundles": [
   {
    "file": "tags.json",
-   "tags": 1621
+   "tags": 1624
   },
   {
    "file": "tags-home.json",

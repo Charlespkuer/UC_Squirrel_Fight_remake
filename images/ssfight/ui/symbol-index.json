@@ -3656,7 +3656,7 @@
   },
   "main": {
    "bundle": "tags.json",
-   "count": 268,
+   "count": 270,
    "names": {
     "menu": {
      "id": "7824",
@@ -6937,6 +6937,22 @@
       1
      ],
      "owner": "6842"
+    },
+    "talkBoard": {
+     "id": "3704",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [],
+     "owner": "7039",
+     "dynamic": "原版 squirrelTalk() 运行时 attachMovie，落点 (107,24)（version=\"h\"）；第 1 帧气泡 3702 + 文本 3703（实例名 words）"
+    },
+    "说话板子": {
+     "id": "3704",
+     "kind": "sprite",
+     "frames": 3,
+     "inFrames": [],
+     "owner": "7039",
+     "dynamic": "原版 squirrelTalk() 运行时 attachMovie，落点 (107,24)（version=\"h\"）；第 1 帧气泡 3702 + 文本 3703（实例名 words）"
     }
    }
   },

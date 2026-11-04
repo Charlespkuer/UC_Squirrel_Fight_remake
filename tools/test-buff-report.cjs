@@ -291,7 +291,9 @@ test('增幅铭文（史诗·铭文）：给选中的永久增益 ×1.5，且同
     /* 双色外框 = 两个伪元素各画半圈（::before 左红 / ::after 右青，clip-path 各裁一半）。
      * ⚠ 不要退回「单个 ::before + z-index:-1 画在元素背后」：父级 `position:relative` +
      *   z-index 会自建层叠上下文，负 z-index 的子元素其实画在**父级背景之上** → 整块被铺满。 */
-    const bothCss = (css.match(/\.buff-tag\.ench-both\{[\s\S]{0,420}/) || [''])[0];
+    /* 取窗口放宽到 700：2026-11 给 `inset` 补 top/right/bottom/left 长写后，这条规则变长了
+     * （老 WebView 不认 inset 简写，见 test-android-shell 的同批契约），420 会把 ::after 截掉。 */
+    const bothCss = (css.match(/\.buff-tag\.ench-both\{[\s\S]{0,700}/) || [''])[0];
     assert.ok(/::before[^}]*?border-color:#c0392b/.test(bothCss), '左半圈是红色：' + bothCss.slice(0, 120));
     assert.ok(/::after[^}]*?border-color:#3f9d9d/.test(bothCss), '右半圈是青色（虚空铭文那支）');
     assert.ok(/::before[^}]*?clip-path:inset\(0 50% 0 0\)/.test(bothCss) &&

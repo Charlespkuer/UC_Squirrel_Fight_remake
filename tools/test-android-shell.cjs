@@ -72,6 +72,39 @@ test('昵称不用 CSS filter 加柔影：Android 16 回前台会把第一个字
   assert.match(m[1], /text-shadow\s*:/, '柔影应走字形层的 text-shadow');
 });
 
+test('经典主页挂载失败不能只剩深绿底：看门狗 + 重试 + 空壳判定 + 兜底主页', () => {
+  const classic = read('js/classic-ui.js');
+  assert.match(classic, /function mountClassicHome\(box, attempt\)/, '经典主页挂载必须走带恢复的 mountClassicHome');
+  assert.match(classic, /setTimeout\(\(\) => finish\(new Error\('挂载超时'\)\)/, '挂载必须有看门狗，不能无限等');
+  assert.match(classic, /box\.remove\(\)/, '失败时先摘掉不透明空壳，否则 canvas 主页永远被盖住');
+  assert.match(classic, /attempt < 2[\s\S]{0,600}mountClassicHome\(host, attempt \+ 1\)/, '挂载失败要重试');
+  assert.match(classic, /forceDomHome = true[\s\S]{0,120}renderHome\(\)/, '首次失败就要退回可点的复刻主页（后台继续重试）');
+  assert.match(mainJs, /function ssfightHomeActive\(\)[\s\S]{0,400}querySelector\('svg'\)/, 'ssfightHomeActive 不能只看壳在不在');
+  assert.match(renderJs, /async function fetchJson\(file, noCache\)[\s\S]{0,200}no-store/, '素材 JSON 失败要绕开缓存重取一次');
+});
+
+test('老 WebView（Android 11 / Chromium 8x）兼容：整屏绝对层不依赖 inset 简写', () => {
+  const fsMod = require('node:fs');
+  const cssDir = path.join(ROOT, 'css');
+  const declRe = /(^|[;{\n]\s*)inset\s*:\s*([^;}]+)(;?)/g;
+  const valueRe = /^-?\d+(?:\.\d+)?(?:px|%)?(?:\s+-?\d+(?:\.\d+)?(?:px|%)?){0,3}$/;
+  let checked = 0;
+  for (const f of fsMod.readdirSync(cssDir).filter((x) => x.endsWith('.css'))) {
+    const text = fsMod.readFileSync(path.join(cssDir, f), 'utf8');
+    let m;
+    while ((m = declRe.exec(text))) {
+      if (!valueRe.test(m[2].trim())) continue;      // 注释里的 "inset:0` —— …" 不算声明
+      checked++;
+      const before = text.slice(Math.max(0, m.index - 240), m.index);
+      assert.match(before, /(^|[;{\s])top\s*:/, `${f} 的 inset:${m[2].trim()} 缺 top 长写回退（Chromium <87 整层会塌成 0×0）`);
+      assert.match(before, /(^|[;{\s])left\s*:/, `${f} 的 inset:${m[2].trim()} 缺 left 长写回退`);
+    }
+  }
+  assert.ok(checked >= 30, 'inset 声明数量异常：只检查到 ' + checked + ' 条');
+  const boot = mainJs.slice(mainJs.indexOf('async function boot()'), mainJs.indexOf('async function boot()') + 600);
+  assert.match(boot, /applySystemBars\(\)/, '标题页也要先落一次沉浸（Android 11 三键导航会占掉一条）');
+});
+
 console.log('');
 if (failed) { console.log(`${passed} passed, ${failed} failed`); process.exit(1); }
 console.log(`全部通过：${passed}/${passed}`);

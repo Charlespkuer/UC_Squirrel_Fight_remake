@@ -1516,6 +1516,97 @@
     for (const c of multiFrameKids(clip)) stopPlay(c);
   }
 
+  /* ============================================================
+   * 主界面松鼠的「说话板子」（原版库元件 3704）
+   * ------------------------------------------------------------
+   * 原版主界面只有**一条**循环动画：`myself`（6988，88 帧 @14fps ≈ 6.3 秒一圈）。
+   * 这一圈的第 1 帧脚本是 `_root.clearWords()`、第 40 帧是 `_root.showWords()`
+   * （`动作脚本/sprite6988/sprite6988_frame{1,40}.as`），于是每圈走到后半段，
+   * 松鼠头顶会冒出一个气泡对话框说一条提示，下一圈开头再收起。
+   *   · `MainMovie.as:15811 squirrelTalk()`：`pare.attachMovie("说话板子", "_mc", 100)`
+   *     随后 `setText(talk_mc.words, wordsStr)` —— 气泡是库元件，不是静态放置；
+   *   · `:15825 showWords()`：从 `wordsArray` 里**随机**取一条；落点按 `version` 适配，
+   *     本素材是 `version = "h"`（MainMovie.as:19711），对应 `main` 内的 **(107, 24)**；
+   *   · `:15821 clearTalk()` = `talk_mc.removeMovieClip()`（复刻直接切显示）。
+   * `wordsArray` 的 19 条原文在 `MainMovie_frame1.as:19139`；服务端 `config.xml` 的
+   * `<words>` 节点与它逐条相同（原版允许服务端覆盖这批文案，单机版没有下发通道，用内置那份）。
+   *
+   * ⚠ `showWords()` 里还有一句 `main.wordsMc.gotoAndStop(1)`，但整片导出里**没有任何**
+   *   名为 `wordsMc` 的放置/导出符号（main 7039 只有 1 帧，静态放置里也没有），
+   *   这句在原版 h 版里是必然抛错的死代码（抛错还会中断后面的 `squirrelTalk`）——
+   *   复刻不复现它，否则气泡永远出不来。
+   * ⚠ 气泡第 1 帧帧尾的 `stop()` 是**动作**，导出时已被裁掉（`prune` 删 `ac`），
+   *   所以这里必须显式 `pinFrame(1)`：不钉住的话节拍器会把它推到第 2 帧
+   *   （第 2 帧就是两条 remove）当场消失。
+   * ========================================================== */
+  const TALK_BOARD = '3704';
+  /** `version == "h"` 的落点（MainMovie.as:15844-15852 的三档里 h 那档）。 */
+  const TALK_AT = { x: 107, y: 24 };
+  /** 出现在走路圈的第几帧（1-based，与 `sprite6988_frame40.as` 的帧号一致）。 */
+  const TALK_FRAME = 40;
+  /** `MainMovie_frame1.as:19139` 的 wordsArray 原文（顺序、标点照抄，半角逗号也是原版如此）
+   *  + 末尾 1 条本复刻自己加的（原版 19 条，见数组里那条注释）。 */
+  const WALK_WORDS = [
+    '武器和技能可以升级,升级后会变得更强。',
+    '体力是随时间恢复的哦~',
+    '招收徒弟可以给你带来额外的收获。',
+    '吃药可以补充体力,提升各种属性。',
+    '升级武器需要金松果和武器卷轴。',
+    '升级技能需要金松果和技能卷轴。',
+    '闲着真无聊,快去挑战吧！',
+    '带着徒弟去打关卡要轻松得多哦~',
+    '关卡的星级代表难度,星星越多越困难哦~',
+    '10级就可以去挑战关卡了！',
+    '我每天都想见到你,记得来看我哦~',
+    '关卡通过后有经验和金松果的奖励。',
+    '关卡通过以后，还有几率获得装备碎片哦！',
+    '装备可以增加基本属性，让你变得更强大！',
+    '20级就可以融合装备啦，神兵利器亲手打造！',
+    '30级以上的松鼠可以参加天梯赛！',
+    '我要当超级松鼠，享受特权~',
+    '想要极品装备和超强道具，就去参加天梯赛！',
+    '带我去挑战木头人，看看我有多强！',
+    /* ⚠ 下面这条**不是原版 wordsArray**（原版 19 条到上一条为止）：用户 2026-11 点名加的一条，
+     *   两边仓库（联机版 / 单机版）保持同一份，别在别处再加第二份文案表。 */
+    '本复刻版本的作者在github上人称Charlespkuer哦',
+  ];
+
+  /** `squirrelTalk()` 的复刻：把 3704 挂到 `main` 的 (107,24)、停在气泡那帧并先藏起来。
+   *  只挂一次 —— 之后每圈只切显示 + 换文案（原版是每圈 attach/remove 一次，
+   *  但重建一棵 SVG 子树没有必要，观感一样）。 */
+  function initTalkBoard(view) {
+    const main = view && view.byName ? view.byName('main') : null;
+    const me = main && main.byName ? main.byName('myself') : null;
+    if (!main || !main.attachChild || !me || typeof me.frameCount !== 'function') return null;
+    /* 素材换了 / 帧数不够时宁可不显示，也不要在错误帧上闪一下。 */
+    if (me.frameCount() < TALK_FRAME) return null;
+    const board = main.attachChild(TALK_BOARD, 1, 'talkBoard');
+    if (!board || !board.g) return null;
+    board.setExtraTransform('translate(' + TALK_AT.x + ',' + TALK_AT.y + ')');
+    pinFrame(board, 1);                      // 原版帧尾的 stop()
+    board.g.classList.add('sf-talk-board');
+    board.g.style.display = 'none';
+    board.g.setAttribute('aria-hidden', 'true');
+    return { me: me, board: board, shown: false };
+  }
+
+  /** 走路圈的「第 40 帧说话 / 第 1 帧收起」。复刻没有 AS 帧脚本，用视图节拍钩子
+   *  （`render.js` 每拍推完帧后回调一次）读 `myself` 的当前帧 —— 与帧号一一对应，
+   *  改帧率也不会错拍。每圈第一次露脸时换一条随机文案（同 `showWords` 的随机取法）。 */
+  function tickTalkBoard(talk) {
+    if (!talk || !talk.board || !talk.board.g) return;
+    if (talk.board.g.isConnected === false) return;
+    const show = talk.me.frame >= TALK_FRAME - 1;
+    if (show === talk.shown) return;
+    talk.shown = show;
+    if (show) {
+      const words = WALK_WORDS[Math.floor(Math.random() * WALK_WORDS.length)];
+      setText(talk.board.byName('words'), words, { wrap: true });
+    }
+    talk.board.g.style.display = show ? '' : 'none';
+    talk.board.g.setAttribute('aria-hidden', show ? 'false' : 'true');
+  }
+
   /* ---------- 悬停中的底栏五键 ----------
    * `refreshValues()` 每秒重刷一次，会把五键重新"静默"（换帧会重建子树，新出生的装饰默认会自己播）。
    * 指针正停在上面那一颗的装饰正在放"选中"那一遍动画，不能被动 —— 所以记一份**名字**名单跳过它
@@ -1584,6 +1675,15 @@
     refreshValues(view);
     wireButtons(view);
     syncGiftVisibility(container);
+    /* 主界面松鼠的说话板子（原版 3704）：挂在 `main` 上、由走路圈的帧号驱动显示。 */
+    const talk = initTalkBoard(view);
+    if (talk) {
+      const prevTick = view.onTick;
+      view.onTick = () => {
+        if (typeof prevTick === 'function') { try { prevTick(); } catch (e) {} }
+        try { tickTalkBoard(talk); } catch (e) { if (window.__errs) window.__errs.push('talk board: ' + (e && e.message)); }
+      };
+    }
     /* 页面装好了再让 `main.js` 量一次布局：经典模式的整页是原版 320×196（= 716.625 高），
      * 而 `#ui` 的高度是按"当前页有没有 `.ssfight-home`"选 716.625 / 690 的。
      * 从复刻的 DOM 二级页（690）回到经典页时不再量一次，`#ui` 就还是 690 ——

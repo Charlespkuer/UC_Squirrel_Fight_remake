@@ -20,6 +20,8 @@
  *   node tools/gen-ssfight-ui.cjs            # 默认提取 main（村庄主界面）
  *   node tools/gen-ssfight-ui.cjs main daoju # 指定多页
  *   node tools/gen-ssfight-ui.cjs --all      # 12 个界面全提
+ *   node tools/gen-ssfight-ui.cjs --talk     # 只把主页「说话板子」(3704) 增量并进 tags.json
+ *                                            # （不整包重生成，保留已有标签的全精度矩阵）
  *
  * 缺参考目录时会明确报错（与 gen-vendor-data.cjs 同一约定：不静默产出空文件）。
  * ========================================================================== */
@@ -1771,7 +1773,73 @@ function fightPetBundle() {
   console.log('tags-fight-pets.json: %d tags, %d pets', tags.length, roots.length);
 }
 
-if (process.argv.includes('--fight-pets')) fightPetBundle();
+/* ---------- 主页松鼠的「说话板子」= 原版运行时 attachMovie 的库元件 ----------
+ * `MainMovie.as:15811 squirrelTalk()`：
+ *   `pare.attachMovie("说话板子", "_mc", 100)` → `setText(talk_mc.words, …)`；
+ * `:15821 clearTalk()` 是 `talk_mc.removeMovieClip()`。
+ * 名字 → 角色 id 走 `swfSymbolIds()`：**3704**（导出实测 3 帧）：
+ *   · 第 1 帧 = 气泡形状 **3702**（浅米渐变 + 深棕描边，尾部朝左下）+ 文本 **3703**
+ *     （放置名 `words`，矩阵 `1,0,0,1,91.65,37.7`）；帧尾带 `stop()`；
+ *   · 第 2 帧 = 两条 remove（气泡与文字一起消失）；第 3 帧空。
+ * 文本字段元数据在 `textfields.json`（3703：bd = [-2,102,-2,39.3]、fh 12、深棕 rgb(82,56,46)），
+ * 所以整颗元件只占 3 个标签、约 1.7 KB 矢量数据。
+ * ⚠ 它**不在**第 20 帧的静态放置里（原版是运行时有 hint 才挂、换圈时摘；它只被
+ *   `FIGHT_PARTS` 静态提进过 `tags-fight.json`），所以这里只把闭包并进 `tags.json`，
+ *   **不补静态放置** —— 挂/摘由 `ui-main.js` 的 `initTalkBoard` 照原版做。 */
+const TALK_BOARD = '3704';
+
+/* ---------- 增量：只把「说话板子」并进现有 tags.json ----------
+ * 为什么不走常规页包：main 的静态闭包本来就不含它（原版运行时 attachMovie），
+ * 而 `tags.json` 里另有若干带着**全精度矩阵**的标签，整包重生成会退回两位小数、
+ * 把那些页的版面挪掉。所以这里只做增量：补 3704 闭包，其余标签原样保留。 */
+function talkBoardBundle() {
+  const tagsFile = path.join(OUT, 'tags.json');
+  if (!fs.existsSync(tagsFile)) die('缺 tags.json：先跑 node tools/gen-ssfight-ui.cjs main（或默认全量）');
+  const tags = JSON.parse(fs.readFileSync(tagsFile, 'utf8'));
+  const have = new Set(tags.map((t) => String(t.id)));
+  const { data } = readMovie();
+  const byId = new Map(data.tg.map((t) => [String(t.id), t]));
+  const r = closure(byId, [TALK_BOARD]);
+  if (r.missing.length) die('说话板子闭包缺标签：' + r.missing.join(','));
+  const additions = r.tags.map(prune).filter((t) => !have.has(String(t.id)));
+  additions.forEach((t) => tags.push(t));
+  tags.sort((a, b) => Number(a.id) - Number(b.id));
+  fs.writeFileSync(tagsFile, JSON.stringify(tags));
+  const manifestFile = path.join(OUT, 'manifest.json');
+  if (fs.existsSync(manifestFile)) {
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+    const entry = (manifest.bundles || []).find((b) => b.file === 'tags.json');
+    if (entry) entry.tags = tags.length;
+    manifest.exportedTags = (manifest.bundles || []).reduce((n, b) => n + (Number(b.tags) || 0), 0);
+    fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 1));
+  }
+  /* 索引里补两行（`inFrames: []` + `dynamic`）：它不是任何一帧的静态放置，是运行时
+   * `main.attachMovie` 挂的。留这两行的唯一目的是**按名字能搜到**（否则
+   * `ssfight-index.cjs --name 说话板子` 会空手而归，下一批又会以为素材缺失）：
+   * 一个用界面里的实例名 `talkBoard`，一个用原版导出名「说话板子」。 */
+  const symFile = path.join(OUT, 'symbol-index.json');
+  if (fs.existsSync(symFile)) {
+    const idx = JSON.parse(fs.readFileSync(symFile, 'utf8'));
+    const mainIdx = idx.bundles && idx.bundles.main;
+    if (mainIdx) {
+      if (!mainIdx.names) mainIdx.names = {};
+      const note = '原版 squirrelTalk() 运行时 attachMovie，落点 (107,24)（version="h"）；'
+        + '第 1 帧气泡 3702 + 文本 3703（实例名 words）';
+      let added = 0;
+      for (const key of ['talkBoard', '说话板子']) {
+        if (!mainIdx.names[key]) added++;
+        mainIdx.names[key] = { id: TALK_BOARD, kind: 'sprite', frames: 3, inFrames: [], owner: String(PAGES.main), dynamic: note };
+      }
+      mainIdx.count = (mainIdx.count || 0) + added;
+      fs.writeFileSync(symFile, JSON.stringify(idx, null, 1));
+    }
+  }
+  console.log('说话板子增量：新增 %d 个标签（%s）；tags.json 共 %d 个标签',
+    additions.length, additions.map((t) => t.id).join('/'), tags.length);
+}
+
+if (process.argv.includes('--talk')) talkBoardBundle();
+else if (process.argv.includes('--fight-pets')) fightPetBundle();
 else if (process.argv.includes('--social-dialog')) socialDialogBundle();
 else if (process.argv.includes('--gear-colors')) gearColorBundle();
 else if (process.argv.includes('--fight-result')) fightResultBundle();

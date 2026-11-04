@@ -3,7 +3,7 @@
 html, body { width: 100%; height: 100%; height: 100dvh; background: #000; overflow: hidden; overscroll-behavior: none; font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif; }
 /* iOS 的 WKWebView / 安全区：页面铺满整块屏幕，未画到的区域一律黑底。
    旧版用 height:100% + 居中画布，底部安全区会露出原生窗口的白色，左右也会露白。 */
-#app { position: fixed; inset: 0; width: 100%; height: 100%; height: 100dvh; background: #000; display: flex; align-items: center; justify-content: center; }
+#app { position: fixed; top:0;right:0;bottom:0;left:0;inset: 0; width: 100%; height: 100%; height: 100dvh; background: #000; display: flex; align-items: center; justify-content: center; }
 #stage { display: block; background: #000; }
 #ui { position: absolute; pointer-events: none; }
 #ui > * { pointer-events: auto; }
@@ -19,7 +19,7 @@ body.audio-blocked .audio-hint { display: flex; }
 @media (prefers-reduced-motion: reduce) { .audio-hint { animation: none; } }
 
 /* ---------- 标题画面 ---------- */
-.title-screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(180deg, rgba(12,32,10,.62), rgba(18,12,4,.78)); gap: 18px; }
+.title-screen { position: absolute; top:0;right:0;bottom:0;left:0;inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(180deg, rgba(12,32,10,.62), rgba(18,12,4,.78)); gap: 18px; }
 .title-logo { font-size: 96px; font-weight: bold; color: #ffb32e; text-shadow: 0 5px 0 #8a4b1f, 0 8px 18px rgba(0,0,0,.6); letter-spacing: 12px; }
 .title-sub { color: #ffe66d; font-size: 24px; letter-spacing: 6px; margin-bottom: 20px; }
 #name-input { font-size: 24px; padding: 12px 20px; border-radius: 12px; border: 3px solid #8a4b1f; text-align: center; width: 340px; outline: none; }
@@ -46,7 +46,7 @@ body.audio-blocked .audio-hint { display: flex; }
 .tb-reborn { color: #ff9ff3; font-size: 16px; margin-left: 8px; }
 .tb-exp { position: relative; width: 260px; height: 20px; background: rgba(0,0,0,.6); border-radius: 10px; margin-top: 6px; overflow: hidden; }
 .tb-exp-fill { height: 100%; background: linear-gradient(90deg, #7cb342, #aed581); }
-.tb-exp span { position: absolute; inset: 0; text-align: center; font-size: 14px; color: #fff; line-height: 20px; text-shadow: 0 1px 2px #000; }
+.tb-exp span { position: absolute; top:0;right:0;bottom:0;left:0;inset: 0; text-align: center; font-size: 14px; color: #fff; line-height: 20px; text-shadow: 0 1px 2px #000; }
 .tb-right { display: flex; gap: 22px; }
 .tb-res { color: #fff; font-size: 20px; text-shadow: 0 2px 3px #000; }
 .tb-res b { color: #ffe66d; }
@@ -64,7 +64,7 @@ body.audio-blocked .audio-hint { display: flex; }
 .menu-btn:hover { filter: brightness(1.1); transform: translateY(-2px); }
 
 /* ---------- 面板 ---------- */
-.panel-overlay { position: absolute; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 10; }
+.panel-overlay { position: absolute; top:0;right:0;bottom:0;left:0;inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 10; }
 .panel { width: 880px; max-width: 92%; max-height: 88%; background: linear-gradient(180deg, #4a2f14, #33200c); border: 4px solid #8a4b1f; border-radius: 18px; display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,.7); }
 .panel-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-bottom: 3px solid #8a4b1f; background: rgba(0,0,0,.25); border-radius: 14px 14px 0 0; }
 .panel-title { font-size: 26px; font-weight: bold; color: #ffb32e; text-shadow: 0 2px 3px #000; }

@@ -246,7 +246,7 @@
       /* 星标：标记后不会被误融合 / 误出售（防止手滑把好装备合掉）。 */
       if (g.starred === true) entry.starred = true;
       const gemLv = g.gem && gemLevel(g.gem.id);
-      if (gemLv) entry.gem = { id: 100 + gemLv, ext: Math.max(1, Math.min(99, integer(g.gem.ext, 1, 1))) };
+      if (gemLv) entry.gem = { id: 100 + gemLv };
       return entry;
     });
     /* 5 级换装教程的一次性白装。新档显式 false；旧档没有字段时按「已经升过 5 级 / 已有装备 /
@@ -409,7 +409,7 @@
      * 落进存档就跟着 save/progress.json 走，换机器同步也一致（红点不会再重复亮）。
      * 形状只做浅校验：非负整数、不超过当前时间（未来时间会让红点再也不亮）。 */
     next.msgSeenAt = Math.min(Date.now(), integer(next.msgSeenAt, 0, 0));
-    // 好友：只保留名字合法的条目，等级夹在 1~满级，最多 20 位
+    // 好友：只保留名字合法的条目，等级夹在 1~满级；500 是防滥用安全线（原版无上限，见 FRIEND_LIMIT）
     /* 同名好友只留第一位：老档 / 早期联机存档里出现过重复名字（用户 2026-10-24 口径：
      * "我不希望可以添加具有重复名字的好友"）。这里在**读档**时就归一，
      * 已有重复项不会继续显示成两行；`addFriend` 也会在写入前再挡一次。 */
@@ -846,7 +846,7 @@
       weapons: arr(x.weapons), skills: arr(x.skills), props: sortedProps(x.props),
       stages: sortedProps(x.stages),
       gears: arr(x.gears).map((g) => [Number(g && g.id) || 0, String((g && g.key) || ''),
-        !!(g && g.used), Number(g && g.attr) || 0, arr(g && g.ext), g && g.gem ? [g.gem.id, g.gem.ext] : null]),
+        !!(g && g.used), Number(g && g.attr) || 0, arr(g && g.ext), g && g.gem ? [g.gem.id, 0] : null]),
       uiMode: object(x.settings) ? String(x.settings.uiMode || '') : '',
     });
     return JSON.stringify({
@@ -2407,9 +2407,12 @@
    * ============================================================ */
   // ---------- 装备 ----------
   let gearKeySeq = 1;
+  /* 旧档/网页版 32「龟甲术N%几率抵挡2次」在 ssfight 表里已改为 44「龟甲术防降属性效果+N%」；
+   * 读档时按同星级迁移，避免旧装备的词条被 normalize 直接丢掉。 */
+  const LEGACY_EXT_ID = Object.freeze({ 32: 44 });
   function normalizeExt(ext) {
-    return (Array.isArray(ext) ? ext : []).filter((e) => object(e) && attachmentMap.getValue(e.id)).map((e) => ({
-      id: Number(e.id), level: Math.min(3, integer(e.level, 1, 1)),
+    return (Array.isArray(ext) ? ext : []).filter((e) => object(e) && attachmentMap.getValue(LEGACY_EXT_ID[Number(e.id)] || e.id)).map((e) => ({
+      id: LEGACY_EXT_ID[Number(e.id)] || Number(e.id), level: Math.min(3, integer(e.level, 1, 1)),
     }));
   }
   /** 旧橙装是「紫装 id + orange:true」的实例级模拟；107 起 q4 行已按原版补齐。
@@ -2483,7 +2486,7 @@
       if (!info) return null;
       const out = Object.assign(info, { used: g.used, key: g.key });
       if (g.orange === true) { out.orange = true; out.quality = 4; }   // 兼容旧档的实例级橙标记
-      if (g.gem && gemLevel(g.gem.id)) out.gem = { id: Number(g.gem.id), ext: g.gem.ext };
+      if (g.gem && gemLevel(g.gem.id)) out.gem = { id: Number(g.gem.id), units: gemAffixUnits(g.gem.id) };
       return out;
     }).filter(Boolean).filter((g) => blackGearEnabled() || Number(g.quality) !== 5);
   }
@@ -2623,6 +2626,23 @@
    * 原版 MainMovie.as:45-54 getPercentById：5*(n²-n+2)，n = 宝石等级（1..7）
    * → 10 / 20 / 40 / 70 / 110 / 160 / 220 %。 */
   function gemPercent(lv) { lv = integer(lv, 0, 0); return lv > 0 ? 5 * (lv * lv - lv + 2) : 0; }
+  /* 宝石对「附加属性」的增幅：原版不是随机百分比，而是按宝石等级给 1~12 个单位的阶梯。
+   * 2013-10 的宝石加成表：1/2/3/5/7/9/12 级 → 1/2/3/5/7/9/12 个单位；
+   * 客户端 `getAttachment(id, star, count-1)` 按单位数取 extraValue，与星级 ability 相加。 */
+  const GEM_AFFIX_UNITS = Object.freeze([1, 2, 3, 5, 7, 9, 12]);
+  function gemAffixUnits(gemId) { const lv = gemLevel(gemId); return lv ? GEM_AFFIX_UNITS[lv - 1] : 0; }
+  /** 某条词条在「星级 + 宝石增幅单位」下的实际值：ability[star-1] + extra[units-1]。 */
+  function attachmentValue(id, star, units) {
+    const def = attachmentMap.getValue(Number(id));
+    if (!def) return { base: 0, extra: 0, total: 0 };
+    const abilities = String(def.ability || '').split(',').map(Number);
+    const extras = String(def.extra || '').split(',').map(Number);
+    const starIdx = Math.max(0, Math.min(abilities.length - 1, (Number(star) || 1) - 1));
+    const base = Number(abilities[starIdx]) || 0;
+    const unitIdx = (Number(units) || 0) - 1;
+    const extra = unitIdx >= 0 && unitIdx < extras.length ? (Number(extras[unitIdx]) || 0) : 0;
+    return { base, extra, total: base + extra };
+  }
   /* 宝石合成成功率：0.88^lv（lv = 材料宝石等级）→ 88% / 77% / 68% / 60% / 53% / 46%。 */
   const gemMergeRate = (lv) => Math.pow(0.88, Math.max(1, Math.min(6, integer(lv, 1, 1))));
   /** 45级起，关卡通关与竞技场获胜有几率获得1级（75%）或2级（25%）宝石。 */
@@ -2656,7 +2676,8 @@
     save();
     return { ok: true, success: false, msg: '合成失败，宝石没有变化' };
   }
-  /** 镶嵌免费；每件橙色或黑色装备限 1 颗；附加属性提升幅度随机，拆卸后重新镶嵌可重随。 */
+  /** 镶嵌 / 卸下各 5 金松果；每件橙色或黑色装备限 1 颗。
+   *  宝石不再随机附加属性百分比，而是按原版 1/2/3/5/7/9/12 个单位抬高词条增幅。 */
   /* 镶嵌 / 卸下宝石的金松果费用（2026-10 用户口径：装上与卸下**都要** 5 金松果）。 */
   const GEM_SOCKET_COST = 5;
   function socketGem(gearKey, gemId) {
@@ -2669,9 +2690,14 @@
     if (S.goldPoint < GEM_SOCKET_COST) return { ok: false, msg: '镶嵌需要 ' + GEM_SOCKET_COST + ' 金松果' };
     S.goldPoint -= GEM_SOCKET_COST;
     S.props[gemId]--;
-    g.gem = { id: Number(gemId), ext: lv * (2 + Math.floor(Math.random() * 3)) };
+    g.gem = { id: Number(gemId) };
+    const units = gemAffixUnits(gemId);
+    const first = normalizeExt(g.ext)[0];
+    const firstDef = first ? attachmentMap.getValue(first.id) : null;
+    const firstVal = first ? attachmentValue(first.id, first.level, units) : null;
+    const sample = firstDef && firstVal ? '，' + firstDef.name.replace('N', String(firstVal.total)) : '';
     save();
-    return { ok: true, msg: propMap.getValue(gemId).name + ' 镶嵌成功（−' + GEM_SOCKET_COST + ' 金松果）：主属性 +' + gemPercent(lv) + '%，附加属性效果 +' + g.gem.ext + '%' };
+    return { ok: true, msg: propMap.getValue(gemId).name + ' 镶嵌成功（−' + GEM_SOCKET_COST + ' 金松果）：主属性 +' + gemPercent(lv) + '%，附加属性增幅 ' + units + ' 档' + sample };
   }
   function unsocketGem(gearKey) {
     const g = S.gears.find((x) => x.key === gearKey);
@@ -2765,7 +2791,7 @@
        * 否则挑战页立绘、查看装备、切磋时的套装收益都会退回紫装。 */
       if (g && g.orange === true) out.orange = true;
       const gemLv = g && g.gem && gemLevel(g.gem.id);
-      if (gemLv) out.gem = { id: 100 + gemLv, ext: Math.max(1, Math.min(99, integer(g.gem.ext, 1, 1))) };
+      if (gemLv) out.gem = { id: 100 + gemLv, units: gemAffixUnits(100 + gemLv) };
       return out;
     }).filter(Boolean);
   }
@@ -3224,13 +3250,43 @@
     }
     return ext;
   }
-  function extText(ext) {
+  /** 词条文本。`units` = 宝石增幅单位（0 = 不显示增幅，取星级基础值）。 */
+  function extText(ext, units) {
     return (ext || []).map((e) => {
-      const a = attachmentMap.getValue(e.id);
+      const id = LEGACY_EXT_ID[Number(e.id)] || e.id;
+      const a = attachmentMap.getValue(id);
       if (!a) return '';
-      const v = a.ability.split(',')[Math.min(e.level - 1, a.ability.split(',').length - 1)];
-      return a.name.replace('N', v);
+      const v = attachmentValue(id, e.level, units);
+      return a.name.replace('N', String(v.total));
     }).filter(Boolean);
+  }
+  /** 装备详情用：带上宝石增幅的拆分，例如「龟甲术防降属性效果60%（基础30%+增幅30%）」。 */
+  function extTextForGear(gear, detail) {
+    const units = gemAffixUnits(gear && gear.gem && gear.gem.id);
+    return (gear && gear.ext ? gear.ext : []).map((e) => {
+      const id = LEGACY_EXT_ID[Number(e.id)] || e.id;
+      const a = attachmentMap.getValue(id);
+      if (!a) return '';
+      const v = attachmentValue(id, e.level, units);
+      return a.name.replace('N', String(v.total)) + (detail && v.extra > 0 ? '（基础' + v.base + '+增幅' + v.extra + '）' : '');
+    }).filter(Boolean);
+  }
+  /** 原版装备详情右列 `baseOtherExtra`：只列宝石增幅的额外值（+30% / +30点 / +3倍 / -10%）。 */
+  function extExtraText(ext, units) {
+    return (ext || []).map((e) => {
+      const id = LEGACY_EXT_ID[Number(e.id)] || e.id;
+      const a = attachmentMap.getValue(id);
+      if (!a) return '';
+      const v = attachmentValue(id, e.level, units);
+      if (!v.extra) return '';
+      const name = String(a.name || '');
+      const sign = name.indexOf('-N%') >= 0 ? '-' : '+';
+      const unit = name.indexOf('N点') >= 0 ? '点' : name.indexOf('N倍') >= 0 ? '倍' : '%';
+      return sign + v.extra + unit;
+    }).filter(Boolean);
+  }
+  function extExtraTextForGear(gear) {
+    return extExtraText(gear && gear.ext, gemAffixUnits(gear && gear.gem && gear.gem.id));
   }
   function addGear(id, ext, attr) {
     if (!blackGearEnabled() && isBlackGearId(id)) return null;
@@ -3270,10 +3326,10 @@
       if (!blackGearEnabled() && isBlackGearId(gear.id)) continue;
       const info = gearInst(gear.id, gear.ext, gear.attr);
       if (!info || S.level < info.useLevel) continue;
+      const units = gemAffixUnits(gear.gem && gear.gem.id);
       for (const ext of normalizeExt(gear.ext)) {
-        const values = attachmentMap.getValue(ext.id).ability.split(',').map(Number);
-        const boost = gear.gem ? 1 + gear.gem.ext / 100 : 1;   // 橙色/黑色装备宝石提升附加属性效果
-        effects[ext.id] = Math.max(effects[ext.id] || 0, Math.round(values[ext.level - 1] * boost));
+        const v = attachmentValue(ext.id, ext.level, units);
+        effects[ext.id] = Math.max(effects[ext.id] || 0, Math.round(v.total));
       }
     }
     return effects;
@@ -4411,7 +4467,14 @@
    * ============================================================ */
   // ---------- 好友（离线版：随机 NPC 也能加） ----------
   /* 好友只是本地保存的一份对手快照（名字 + 等级 + 三维），可以切磋，不连接真实玩家。 */
-  const FRIEND_LIMIT = 20;
+  /* 原版 ssfight **没有好友数量上限**：`MainMovie.as` 的 `getFriends`（:2609-2705）把
+   * 服务端 `<friends>` 整份读进 `friendsArray`，`showMyFriends`（:13204）按 4 行/页翻页，
+   * `doShowFriends`（:13327）的 `pageCount1 = ceil(总人数 / 4)`，没有任何拒绝分支；
+   * 抓包 `friends.do?order=2` 里能拿到 **142 位**好友（`unpacked/05-服务器协议/抓包原文/new/023…`）。
+   * `friendsCount < 10`（:7246）是「10 位好友送 50 金松果」的奖励门槛，不是上限。
+   * 这里保留 50 是沿用联机服务端**已有的防滥用安全线**（好友页会把每个好友的战斗体
+   * 随列表下发，50 是服务端一次响应的预算），不是原版数值；单机版同一个数。 */
+  const FRIEND_LIMIT = 50;
   const friendLimit = () => FRIEND_LIMIT;
   function friendList() { if (!Array.isArray(S.friends)) S.friends = []; return S.friends; }
   function friendOf(name) { return S.friends.find((f) => f.name === name) || null; }
@@ -4726,8 +4789,8 @@
         orange: g.orange === true,
         setName: set ? set.name : '',
         attrName: info.attrName, abilityVal: info.abilityVal,
-        ext: extText(g.ext),
-        gem: gemLv ? { level: gemLv, percent: gemPercent(gemLv), ext: Number(g.gem.ext) || 0 } : null,
+        ext: extTextForGear(g),
+        gem: gemLv ? { level: gemLv, percent: gemPercent(gemLv), units: gemAffixUnits(100 + gemLv) } : null,
       };
     }).filter(Boolean);
     return {
@@ -4934,16 +4997,15 @@
       const info = gearInst(gear.id, gear.ext, gear.attr);
       if (!info) continue;
       /* 宝石加成与玩家侧 `totalStats` / `equipmentEffects` 同一条口径：
-       * 主属性 ×(1 + gemPercent%)，附加词条 ×(1 + gem.ext%)。 */
+       * 主属性 ×(1 + gemPercent%)，附加词条按宝石增幅单位取 ability+extra。 */
       const gemLv = gear.gem ? gemLevel(gear.gem.id) : 0;
       const mainMul = gemLv ? 1 + gemPercent(gemLv) / 100 : 1;
       foe[['agility', 'power', 'hp', 'speed'][info.type]] += Math.round(info.abilityVal * mainMul);
-      const gemBoost = gear.gem ? 1 + Math.max(0, Number(gear.gem.ext) || 0) / 100 : 1;
+      const gemUnits = gemAffixUnits(gear.gem && gear.gem.id);
       for (const ext of gear.ext || []) {
         const def = attachmentMap.getValue(ext.id);
         if (!def) continue;
-        const values = String(def.ability || '').split(',').map(Number);
-        const val = Math.round(values[ext.level - 1] * gemBoost);
+        const val = Math.round(attachmentValue(ext.id, ext.level, gemUnits).total);
         if (Number.isFinite(val)) foe.effects[ext.id] = Math.max(foe.effects[ext.id] || 0, val);
       }
     }
@@ -4993,10 +5055,13 @@
   }
 
   /* ---------- 对手身上「狂战套」的概率（需求164/166，**只剩现代模式在用**） ----------
-   * 狂战套（set 51，唯一的 **50 级套**）以前**独占「最高档」**：50 级以后
-   * 每件装备有 75% 落进那一档 → 随机对手几乎人人全身狂战。改成**每个部位**掷一次：
+   * 狂战套（set 51）2026-11 起按原版 Flash 对齐为 **30 级套**（玩家 30 级可穿）；
+   * 但随机 AI 的**狂战曲线仍从 50 级起** —— 那是配装强度口径（需求166 的 10%→50%），
+   * 与「玩家几级能穿」是两件事：50 级前普通池会把 set 51 明确剔除，见 `randomAIGears`。
+   * 以前这套**独占「最高档」**：50 级以后每件装备有 75% 落进那一档 → 随机对手几乎人人
+   * 全身狂战。改成**每个部位**掷一次：
    *   · 50 级起：10% +（等级 − 50）× 1%  →  50 级 10%、55 级 15%、70 级 30%
-   *   · 50 级之前：0（那套本来就要 50 级才解锁，压根不在池子里）
+   *   · 50 级之前：0（普通池里没有狂战）
    * 命中 → 该件穿狂战；没命中 → 该件完全避开狂战，从次高档里挑。
    * **经典模式不再用这条曲线**（2026-10 用户口径）：黑装（60 级 8 套）加入档位池后
    * 狂战已经不一定是「最强的一套」，而且经典普通 AI 本来就整套关闭套装收益 ——
@@ -5036,7 +5101,8 @@
 
   /* ---------- 随机对手装备的**档位下限 / 全套门槛**（2026-10 用户口径） ----------
    * ① **档位下限**（按套装使用等级）：等级越高，池里越不出现远古低档装——
-   *   · 60 级起 ≥ 25 档：池里只剩 25 档紫装、50 级狂战、60 级黑装（再往下就没有 60 级该穿的了）；
+   *   · 60 级起 ≥ 25 档：池里只剩 25 档紫装、30 级狂战（AI 曲线 50 起、普通池仍剔除）、
+   *     60 级黑装（再往下就没有 60 级该穿的了）；
    *   · 40 级起 ≥ 20 档：至少紫色档（蓝色及以下不再出现）；
    *   · 40 级以下维持原来的全档池（低级别的过渡装本来就该占满）。
    * ② **全套门槛**（AI_FULL_GEAR_LEVEL）：≥ 40 级的随机对手必定四件全穿，
@@ -5172,7 +5238,7 @@
         piece.orange = true;
         if (Math.random() < aiGemChance(ref)) {
           const lv = aiGemLevel(ref);
-          if (lv) piece.gem = { id: 100 + lv, ext: lv * (2 + Math.floor(Math.random() * 3)) };
+          if (lv) piece.gem = { id: 100 + lv };
         }
       }
       out.push(piece);
@@ -6131,6 +6197,18 @@
   const RANK_BOT_BASE_SCORE = 300;
   const RANK_BOT_FLOOR = 50;
   const RANK_BOT_PER_LEVEL = 3;
+  /* 每日场次（原版客户端 `alertRank` 的口径）：一天 30 场，1-10 免费、
+   * 11-20 每场 5、21-30 每场 10 金松果。 */
+  const RANK_DAILY_LIMIT = 30;
+  const RANK_FREE_PLAYS = 10;
+  const RANK_PAID_COST = 5;
+  const RANK_LATE_FROM = 20;
+  const RANK_LATE_COST = 10;
+  function rankFeeAt(played) {
+    const n = Math.max(0, Math.floor(Number(played) || 0));
+    if (n >= RANK_DAILY_LIMIT || n < RANK_FREE_PLAYS) return 0;
+    return n >= RANK_LATE_FROM ? RANK_LATE_COST : RANK_PAID_COST;
+  }
   const RANK_BOT_NAMES = Object.freeze([
     '松果见习生', '橡子巡逻员', '树洞守卫', '月光拾荒者', '雾林邮差', '坚果学徒',
     '古树见习', '溪谷哨兵', '星屑旅人', '雪原新兵', '苔原猎手', '树冠信使',
@@ -6360,13 +6438,13 @@
     apprenticeTributeTable,
     TRIBUTE_LEVEL_SUM_FULL,
     undoPoint, undoDepth, hasUpgradableWS,
-    gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, grantStarterGear, extText, randomExt,
+    gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, grantStarterGear, extText, extTextForGear, extExtraText, extExtraTextForGear, randomExt,
     blackGearEnabled, isBlackGearId, BLACK_PROP_IDS,
     gearBaseAttr, rollGearAttr, gearCostOf, GEAR_ATTR_JITTER,
     FUSION_SAME_NAME_RATE, FUSION_MUTANT_RATE, FUSION_MUTANT_SET, FUSION_ORANGE_MUTANT_SET, FUSION_EXT_UPGRADE_RATE,
     FUSION_EXT_INHERIT_RATE, FUSION_EXT_SLOTS,
     toggleGearStar, isGearStarred, gearsInDisplayOrder,
-    gemLevel, gemPercent, gemMergeRate, rollGemDrop, mergeGems, socketGem, unsocketGem, canSocketGem,
+    gemLevel, gemPercent, gemMergeRate, rollGemDrop, mergeGems, socketGem, unsocketGem, canSocketGem, gemAffixUnits, attachmentValue, GEM_AFFIX_UNITS,
     totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, openChestProp, gainRandomWS, wsChoices, wsInfo,
     chestState, beginChest, confirmChest, reopenChest, chestReopenCost, CHEST_REOPEN_MAX, settlePendingChest,
     blackCardOptions, applyBlackCard, blackGearBoxOptions, applyBlackGearBox,
@@ -6416,6 +6494,7 @@
     /* 天梯赛区 / 周重置 / 赛区人机（经典页与复刻 DOM 页共用同一份数据）。 */
     RANK_DIVISIONS, rankWeekKey, rankDivisionOf, rankBotPlan, rankSyncWeek,
     rankBoard, rankOpponent, rankIntegralDelta, rankApplyResult, rankAwardStatus, claimRankCup,
+    RANK_DAILY_LIMIT, RANK_FREE_PLAYS, RANK_PAID_COST, RANK_LATE_FROM, RANK_LATE_COST, rankFeeAt,
     statShares, forcedStat, lowestStat, pendingPoints, allocatePoint, allocateEvenly,
     STAT_SHARE_MIN, SHARE_KEYS, STAT_KEYS, STAT_NAMES, STAT_GAIN, HP_PER_STAT, FREE_POINT_RANDOM,
     STAT_HARD_CAP, permanentStatTotal, statCapRoom, clampPermanentStats,

@@ -632,7 +632,7 @@
       { id: 184, type: 3 },   // 黑狂战短靴
     ]),
     /* 魔王身上那套狂战甲的**套装收益**按哪个家族算（`State.setBonusEffects` 的入口）。
-     * 它就是玩家能拿到的那套 50 级传说档（GEAR.berserk，Set 51「狂战」）——
+     * 它就是玩家能拿到的那套传说档狂战（GEAR.berserk，Set 51「狂战」）——
      * 家族在 SET_BONUS_FAMILY_FLOOR 里有品质下限 4（橙档系数），
      * 所以黑/橘狂战在数值上都按橙装算，与外观无关。 */
     setKey: 'berserk',

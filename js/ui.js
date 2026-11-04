@@ -557,20 +557,30 @@
     State.rankSyncWeek();
     const board = State.rankBoard();
     const box = el('div');
+    const dailyLimit = State.RANK_DAILY_LIMIT || 30;
+    const played = Math.max(0, Number(S.joinRankCount) || 0);
+    const nextFee = State.rankFeeAt(played);
     box.innerHTML = '<p class="panel-desc">赛区 <b>' + (board.label || '—') +
       '</b>　当前积分 <b>' + Math.max(0, Math.round(Number(S.integral) || 0)) +
       '</b>　赛区排名 <b>' + (board.me.rank > 0 ? board.me.rank : '-') +
-      '</b>，今日已参赛 ' + S.joinRankCount + ' 场。积分每周一 0 点减半；赛区前 30 名且超过至少一个人机可领 50 金杯。</p>';
+      '</b>，今日已参赛 ' + played + ' / ' + dailyLimit + ' 场（本场' +
+      (nextFee > 0 ? '消耗 ' + nextFee + ' 金松果' : '免费') +
+      '）。积分每周一 0 点减半；赛区前 30 名且超过至少一个人机可领 50 金杯。</p>';
     const row = el('div', 'btn-row');
     const b1 = el('button', 'btn btn-primary', '开始匹配');
     const b2 = el('button', 'btn', '金杯商店');
     b1.onclick = () => {
+      const nowPlayed = Math.max(0, Number(S.joinRankCount) || 0);
+      if (nowPlayed >= dailyLimit) { toast('今天的 ' + dailyLimit + ' 场天梯赛已经打完了，明天再来吧。'); return; }
+      const fee = State.rankFeeAt(nowPlayed);
+      if (fee > 0 && S.goldPoint < fee) { toast('金松果不足：本场需要 ' + fee + ' 个金松果。'); return; }
       const bot = State.rankOpponent();
       const foe = bot
         ? Object.assign(State.genAI(bot.level, '', { levelJitter: 0, statScale: State.RANDOM_FOE_SCALE || 1.08 }), { name: bot.name })
         : State.genAI(S.level, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 });
       p.close();
-      S.joinRankCount++;
+      S.joinRankCount = nowPlayed + 1;
+      if (fee > 0) S.goldPoint = Math.max(0, Number(S.goldPoint) || 0) - fee;
       State.save();
       Main.startBattle(foe, {
         cost: 0, kind: 'rank', useProps: false, region: 2,
@@ -762,7 +772,7 @@
       const g = worn.find((x) => x.type === t);
       const row = el('div', 'ws-row');
       if (g) {
-        row.innerHTML = gearIcon(g) + '<div class="ws-info"><b class="' + QUALITY_CLS[Math.min(3, g.quality)] + '">' + g.name + '</b> <span class="ws-type">' + slots[t] + '</span><div class="ws-remark">' + g.attrName + '+' + g.abilityVal + ' ' + State.extText(g.ext).join('，') + '</div></div>';
+        row.innerHTML = gearIcon(g) + '<div class="ws-info"><b class="' + QUALITY_CLS[Math.min(3, g.quality)] + '">' + g.name + '</b> <span class="ws-type">' + slots[t] + '</span><div class="ws-remark">' + g.attrName + '+' + g.abilityVal + ' ' + State.extTextForGear(g).join('，') + '</div></div>';
         const btn = el('button', 'btn', '卸下');
         btn.onclick = () => { State.unwear(g.key); p.close(); openGears(); };
         row.appendChild(btn);
@@ -777,7 +787,7 @@
     const selected = new Set();
     /** 词条行：和装备名/主属性分开，融合选材料时一眼能看到每件装备带什么。 */
     const extTags = (g) => {
-      const list = State.extText(g.ext);
+      const list = State.extTextForGear(g);
       return '<div class="gear-ext-line"><span class="gear-ext-label">词条</span>' +
         (list.length ? list.map((x) => '<span class="gear-ext-tag">' + escHtml(x) + '</span>').join('')
           : '<span class="gear-ext-none">无附加词条</span>') + '</div>';

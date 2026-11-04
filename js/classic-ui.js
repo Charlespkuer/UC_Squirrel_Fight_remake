@@ -2882,8 +2882,7 @@
       '<b class="ws-choice-name">' + esc(c.name) + '</b>' +
       '<span class="ws-choice-kind">' + (c.kind === 'weapon' ? '武器' : '技能') + (c.type ? ' · ' + esc(c.type) : '') + '</span>' +
       '<span class="ws-choice-desc">' + esc(c.remark || '—') + '</span></button>';
-    const body = '<div class="ws-choice-box"><p class="free-point-tip">升级奖励：从下面' + list.length + ' 个里选一个学会（' +
-      (State.pendingWS() > 1 ? '还有 ' + (State.pendingWS() - 1) + ' 组在后面等着' : '只有这一组') + '）。</p>' +
+    const body = '<div class="ws-choice-box"><p class="free-point-tip">升级奖励：从下面' + list.length + ' 个里选一个学会' + '</p>' +
       '<div class="ws-choice-row' + (list.length < 3 ? ' few' : '') + '">' + list.map(card).join('') + '</div></div>';
     const m = modal('选择武器或技能', body, [
       { label: State.pendingWS() > 1 ? '全部随机' : '随便来一个', cls: 'muted', close: false, run: () => { State.chooseWSRandom(); refresh(); } },
@@ -3187,11 +3186,11 @@
      * 这里只是防御（外部入口 / 旧档残留）。`typeof` 守卫同 openGearSell。 */
     if (typeof gearHasArt === 'function' && !gearHasArt(g)) return;
     const socketable=State.canSocketGem(g);
-    const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+State.gemPercent(g.gem.id-100)+'%，附加 +'+(g.gem.ext)+'%）':'';
+    const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+State.gemPercent(State.gemLevel(g.gem.id))+'%，附加属性增幅 '+State.gemAffixUnits(g.gem.id)+' 档）':'';
     /* 宝石键的文案不带「（5金）」了（用户口径 2026-10：四个键要排在一行，标签越短越好排），
      * 费用改在这行小字里说明，免得玩家不知道要花金松果。 */
     const gemCost=socketable?'<br><span class="small-label">宝石：镶嵌 / 卸下各 5 金松果</span>':'';
-    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说','黑色'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+(g.attrBase&&g.attrBase!==g.abilityVal?'（基准 '+g.attrBase+'，本件有浮动）':'')+'<br>附加属性：<br>'+State.extText(g.ext).map(esc).join('<br>')+gemInfo+gemCost+setBonusBlock(g)+'</div></div>';
+    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说','黑色'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+(g.attrBase&&g.attrBase!==g.abilityVal?'（基准 '+g.attrBase+'，本件有浮动）':'')+'<br>附加属性：<br>'+State.extTextForGear(g, true).map(esc).join('<br>')+gemInfo+gemCost+setBonusBlock(g)+'</div></div>';
     /* 装 / 卸之后列表会重排（穿着 > 获得顺序），所以**跟着这一件翻到它新位置所在的那一页**，
      * 否则在后面的页上点「装备」，东西会当场跳到第一页、看不见了。 */
     const buttons=[{label:g.used?'卸下':'装备',run:()=>{const ok=g.used?State.unwear(key):State.wear(key);if(ok===false)toast('等级不足，暂时无法装备');
@@ -3323,7 +3322,7 @@
     const recs=friendCandidates.map((c,i)=>rowOf(c,i,true)).join('');
     const content='<div class="friend-scroll">'+
       '<div class="friend-panel"><div class="friend-head"><h3>我的好友</h3>'+
-      '<span class="small-label">'+list.length+' / '+State.friendLimit()+'　切磋不消耗体力、不结算奖励</span></div>'+
+      '<span class="small-label">'+list.length+' 位好友　切磋不消耗体力、不结算奖励</span></div>'+
       '<div class="friend-list">'+mine+'</div></div>'+
       '<div class="friend-panel"><div class="friend-head"><h3>推荐好友</h3>'+
       '<span class="small-label">等级和你接近的随机松鼠，加为好友后可以随时切磋</span>'+
@@ -5100,7 +5099,7 @@
       lines.push('碎片来源：黑色卡片、魔法袋（必得 1 卡）、金宝箱（8% 黑卡 / 首开 2% 完整黑装）、黑装融合（20% 返 1 卡）');
     }
     if (id === 79) {
-      lines.push('金杯商店：1300 积分 + 2000 金杯 + 200 金松果，账号限兑 1 次（原版天梯商店的魔法袋）');
+      lines.push('金杯商店：180 积分 + 2000 金杯 + 200 金松果，账号限兑 1 次（原版天梯商店的魔法袋）');
       lines.push('打开魔法袋（各档互斥）：6级宝石 3%、5级宝石 15%、蓝色碎片 15%（5~10）、召唤证 17%（1~2）、金松果 25%（300~500）、孵化点 25%（100）' + (State.blackGearEnabled() ? '；并额外获得黑色卡片 ×1' : ''));
     }
     if (id === 80) {

@@ -306,7 +306,10 @@ record('战斗图集与动画：三侠/木人/场景/我方，路径与每一帧
 
 record('js/gamedict.js 与 references/orig/ 的抽取结果一致（可重生成）', () => {
   const orig = path.join(ROOT, 'references', 'orig', 'GameDict.js');
-  if (!fs.existsSync(orig)) { console.log('    （跳过：这是精简包，没有 references/orig/）'); return; }
+  const ss = path.join(ROOT, 'references', 'ssfight', 'viewer', 'game', 'FightGame', 'config1.xml');
+  if (!fs.existsSync(orig) || !fs.existsSync(ss)) {
+    console.log('    （跳过：这是精简包，没有 references/orig/ 或 ssfight config1.xml）'); return;
+  }
   const r = spawnSync(process.execPath, [path.join(ROOT, 'tools', 'gen-vendor-data.cjs'), '--check'], { encoding: 'utf8' });
   assert.equal(r.status, 0, 'gamedict.js 不是最新的：\n' + (r.stderr || r.stdout));
 });

@@ -242,6 +242,39 @@
     for (const ch of String(text)) w += charWidth(ch, em);
     return w;
   }
+  /* ---------- 纯数字文本的光学校正（2026-11 安卓实测） ----------
+   * 经典界面的中文标签是 SWF 里烘成**矢量**的黑体，动态数值却必须用系统字体画：
+   * Windows 落到 Microsoft YaHei / SimHei（数字墨高实测 ≈0.775em），安卓 WebView
+   * 只有 Noto Sans CJK + Roboto（同一串数字墨高 ≈0.725em）。基线和字号都一样时，
+   * 安卓的数字**矮一截**，看起来像挂在基线下面 —— 装备详情的「使用等级：50」
+   * 最明显（用户 2026-11 反馈，本机 x86_64 模拟器复现）。
+   * 修法：只对**纯数字短串**按当前字体实测墨高做一次差量抬升（最多 0.05em）。
+   * 参考值 0.775 取自原版/Windows 的字体，所以那边差量为 0、完全不动；
+   * 中文和混排（「敏捷+25」「4/179820」）不碰 —— 它们的墨高各平台一致，
+   * 抬了反而会真的偏离基线。 */
+  const DIGIT_REF_ASCENT = 0.775;
+  const digitAscentCache = new Map();
+  function digitAscent(fd) {
+    const key = String(fd == null ? '' : fd);
+    if (digitAscentCache.has(key)) return digitAscentCache.get(key);
+    let ratio = DIGIT_REF_ASCENT;
+    const ctx = measureContext();
+    if (ctx) {
+      try {
+        ctx.font = '100px ' + fontFamily(fd);
+        const m = ctx.measureText('0123456789');
+        const asc = Number(m && m.actualBoundingBoxAscent);
+        if (asc > 0) ratio = Math.min(0.9, Math.max(0.6, asc / 100));
+      } catch (e) { /* 量不到就按参考字体处理，差量为 0 */ }
+    }
+    digitAscentCache.set(key, ratio);
+    return ratio;
+  }
+  /** 纯数字短串需要抬升多少 em（缺多少数字墨高补多少，最多 0.05em）。 */
+  function digitLift(text, fd) {
+    if (!/^\d{1,4}$/.test(String(text == null ? '' : text).trim())) return 0;
+    return Math.max(0, Math.min(0.05, DIGIT_REF_ASCENT - digitAscent(fd)));
+  }
   /** 拆成「不会从标点开头」的最小片段：ASCII 数字/单词成组，中文标点贴在前一个片段后。 */
   function wrapTokens(text) {
     const tokens = [];
@@ -334,7 +367,9 @@
       } else {
         if (b.anchor === 'middle' || b.anchor === 'end') t.setAttribute('text-anchor', b.anchor);
         t.setAttribute('x', b.x);
-        t.setAttribute('y', Math.round((b.base + i * b.step) * 100) / 100);
+        /* 纯数字短串补一点墨高（见 `digitLift`）：安卓字体数字矮，按基线画会显得挂低。 */
+        const lift = digitLift(L.tx, L.fd) * (Number(L.h) || Number((b.meta && b.meta.fh) || 12));
+        t.setAttribute('y', Math.round((b.base + i * b.step - lift) * 100) / 100);
       }
       host.appendChild(t);
     });

@@ -799,12 +799,13 @@
     const boost = passiveSkillBoost(def, 16);
     const out = base * (1 + boost);
     if (!boost) return out;                                  // 没加成：原样
-    return Math.min(out, n === 0 ? BOOSTED_FIRST_CAP : BOOSTED_AGAIN_CAP);
+    /* C33 的封顶只应压住「加成带来的溢出」，不能把原本更高的基础值压回去
+     *（真5 的二次触发本来就 0.5/100，先 ×2.5 再封 45 会越抽越弱）。 */
+    return Math.max(base, Math.min(out, n === 0 ? BOOSTED_FIRST_CAP : BOOSTED_AGAIN_CAP));
   }
   /** 龟甲术的单次触发概率（%）：按技能等级与「本场第几次触发」取。
    *  1~10 级：首次 20,20.5,…,24.5；之后 1。
-   *  11~15 级：首次 24.5；之后按原表「真技有 N% 几率可多次使用」= 20/40/60/80/100。
-   *  装备词条 32（龟甲术 N% 几率抵挡 2 次）仍作为**第二次及以后**的平添概率保留。 */
+   *  11~15 级：首次 24.5；之后按原表「真技有 N% 几率可多次使用」= 20/40/60/80/100。 */
   function shellChanceOf(def, count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
     const lv = Math.max(1, Math.floor(Number(def && def.skills && def.skills[7]) || 1));
@@ -814,12 +815,10 @@
     } else {
       base = n === 0 ? RULES.shellTrueFirst : trueVal(7, lv);
     }
-    /* 装备 32「龟甲术N%几率抵挡2次」只在二次及以后叠加，首次仍按技能本体。 */
-    const gearBonus = n >= 1 ? Math.max(0, Number(effect(def, 32)) || 0) : 0;
     const boost = passiveSkillBoost(def, 7);
-    const out = (base + gearBonus) * (1 + boost);
+    const out = base * (1 + boost);
     if (!boost) return out;                                  // 没加成：原样
-    return Math.min(out, n === 0 ? BOOSTED_FIRST_CAP : BOOSTED_AGAIN_CAP);
+    return Math.max(base, Math.min(out, n === 0 ? BOOSTED_FIRST_CAP : BOOSTED_AGAIN_CAP));
   }
   /* ============================================================
    * 【SM6】减伤链（护盾/绝对防御/减伤）
@@ -844,9 +843,10 @@
     def.jueDuiCount = Math.max(0, Math.floor(Number(def.jueDuiCount) || 0)) + 1;
     return 'block';
   }
-  /** 绝对防御挡下这一段：伤害归零，按 40% + 每级 4% + 真化加成反弹给出击方。 */
+  /** 绝对防御挡下这一段：伤害归零，按 40% + 每级 4% + 真化加成 + 词条 47 的加点反弹给出击方。 */
   function jueDuiBlock(def, dmg, out) {
-    const pct = 40 + 4 * (Math.min(def.skills[16], 10) - 1) + trueVal(16, def.skills[16]);
+    const pct = 40 + 4 * (Math.min(def.skills[16], 10) - 1) + trueVal(16, def.skills[16]) +
+      Math.max(0, Number(effect(def, 47)) || 0);
     out.jueDui = dmg;
     out.rebound = Math.round(dmg * pct / 100);
     out.dmg = 0;
@@ -1009,6 +1009,11 @@
     }
     function applyDamage(att, def, rawDmg, r, opts) {
       opts = opts || {};
+      /* 46「减少暴击伤害-N%」：只在挨的这一下确实是暴击时生效（按最终暴击伤害比例削减）。 */
+      if (r.crit) {
+        const cut = clamp(Number(effect(def, 46)) || 0, 0, 80);
+        if (cut > 0) { rawDmg = Math.round(rawDmg * (1 - cut / 100)); r.critCut = cut; }
+      }
       const action = opts.action || r.action;
       /* 勇者武技真化白值：只放大该招式的基础伤害，不进入三维。
        * 武器白值已在 TowerHero.fighter 里乘过，这里只处理技能。 */
@@ -1036,12 +1041,12 @@
         if (att.petNextCrit) {
           att.petNextCrit = false;
           r.crit = true; r.petCrit = true;
-          rawDmg = Math.round(rawDmg * (2 + effect(att, 4) / 100 + critDmgBonus(att)));
+          rawDmg = Math.round(rawDmg * (2 + effect(att, 45) / 100 + effect(att, 4) / 100 + critDmgBonus(att)));
         } else if (chance(cc)) {
           const quad = trueVal(9, att.skills[9]);
           const mul = (quad > 0 && chance(quad)) ? 4 : 2;
           if (mul === 4) r.crit4 = true;
-          rawDmg = Math.round(rawDmg * (mul + effect(att, 4) / 100 + critDmgBonus(att)));
+          rawDmg = Math.round(rawDmg * (mul + effect(att, 45) / 100 + effect(att, 4) / 100 + critDmgBonus(att)));
           r.crit = true;
         }
       }
@@ -1630,9 +1635,10 @@
       /* 荆棘反伤已经回应过这一手，不再反击；**绝对防御不同**（用户 2026-10-29 口径）：
        * 举盾挡下之后，用盾的一方仍按同样的 25%（熊猫 45%）概率反击。 */
       if (r.thornsDmg || (r.reboundHurt && !r.jueDui)) return;
-      let chanceBase = 25;
-      if (def.npcType === 'xm') chanceBase = 45;                 // 熊猫善反击
-      if (!chance(chanceBase)) return;
+      /* 49「基础反击率效果提升N%」按原版「反击几率加 N%」的加点口径叠加（25/45 基线 + N 个百分点）。 */
+      let chanceBase = 25 + Math.max(0, Number(effect(def, 49)) || 0);
+      if (def.npcType === 'xm') chanceBase = 45 + Math.max(0, Number(effect(def, 49)) || 0);
+      if (!chance(clamp(chanceBase, 0, 100))) return;
       let raw = Math.round(effPower(def) * (0.6 + Math.random() * 0.4) * (1 + effect(def, 5) / 100));
       if (skill(def, 24)) raw = Math.round(raw * (1 + 0.5 + 0.06 * (Math.min(skill(def, 24), 10) - 1) + trueVal(24, skill(def, 24)) / 100)); // 致命反击
       /* 反击**不可闪避**（用户 2026-10-29 口径）：不再走 `dodgeChance` 判定，
@@ -1754,7 +1760,9 @@
         raw = Math.round(raw * (1 + effPower(att) / 120));       // 力量加成
         // 武器好手是额外固定伤害，不随被菜刀削弱的力量一起下降。
         if (skill(att, 5)) raw += (GData.passiveBonus(5, skill(att, 5)) * heroBaseMul(att, skill(att, 5))) * (1 + effect(att, 31) / 100);
-        raw = Math.round(raw * (1 + (effect(att, w.type === '投掷' ? 7 : 6) + (w.id <= 15 ? effect(att, w.id + 11) : 0)) / 100));
+        /* 武器专属词条：1~15 号按 id+11 取 12~26；16 沉默之斧 = 42、17 双刃剑 = 43。 */
+        const specificId = w.id <= 15 ? w.id + 11 : (w.id === 16 ? 42 : w.id === 17 ? 43 : 0);
+        raw = Math.round(raw * (1 + (effect(att, w.type === '投掷' ? 7 : 6) + (specificId ? effect(att, specificId) : 0)) / 100));
         // 闪亮登场：强化期内的那几次武器，攻击再 +N%
         if (boosted) {
           raw = Math.round(raw * (1 + (Number(att.mods.weaponBoostPowerMul) || 0)));
@@ -1783,13 +1791,13 @@
         cc = clamp(cc, 0, RULES.critCap);
         if (att.petNextCrit) {
           att.petNextCrit = false;
-          let mult = 2 + (Math.random() < 0.5 ? 0 : 1) + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att);
+          let mult = 2 + (Math.random() < 0.5 ? 0 : 1) + effect(att, 45) / 100 + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att);
           raw = Math.round(raw * mult); r.crit = true; r.petCrit = true;
         } else if (chance(cc)) {
           /* 原版暴击：2~3 倍；真·暴击再按 2/5/9/14/20% 判一次 4 倍。 */
-          let mult = 2 + (Math.random() < 0.5 ? 0 : 1) + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att);
+          let mult = 2 + (Math.random() < 0.5 ? 0 : 1) + effect(att, 45) / 100 + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att);
           const quad = trueVal(9, att.skills[9]);
-          if (quad > 0 && chance(quad)) { mult = 4 + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att); r.crit4 = true; }
+          if (quad > 0 && chance(quad)) { mult = 4 + effect(att, 45) / 100 + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att); r.crit4 = true; }
           raw = Math.round(raw * mult); r.crit = true;
         }
         // 连击/三扔
@@ -1802,7 +1810,7 @@
         const jueDuiLock = jueDuiDecide(def, w.type);
         let total = 0, landedHits = 0, dodgedHits = 0;
         for (let i = 0; i < hits; i++) {
-          const rr = { dmg: 0 };
+          const rr = { dmg: 0, crit: r.crit, crit4: r.crit4 };
           applyDamage(att, def, raw, rr, { ignoreFakeDie: w.id === 7 || trueW(w, 'ignoreFakeDie') > 0, action: 'weapon', weaponType: w.type, jueDuiLock: jueDuiLock });
           total += rr.dmg;
           if (rr.dmg > 0) landedHits++;
@@ -1832,13 +1840,19 @@
         if (!landedHits && dodgedHits) r.dodge = true;
         // 武器特效
         if (w.id === 3 && att.hp > 0) { att.swordDodge = Math.max(att.swordDodge, weaponEffect(w, 3, 3)); r.dodgeBuff = att.swordDodge; }
+        /* 44「龟甲术防降属性效果+N%」：龟甲术真挡下这一手时，吉祥三宝的降属性按 N% 削减。
+         * 旧版口径见 2013 年坦克搭配攻略：它防的就是死老鼠/屎坨坨/菜刀的降力量/敏捷/速度。 */
+        const shellAntiDrop = r.guiJia > 0 && skill(def, 7) && def.silence <= 0
+          ? clamp(Number(effect(def, 44)) || 0, 0, 100) / 100 : 0;
+        const dropMul = 1 - shellAntiDrop;
+        if (shellAntiDrop > 0) r.debuffCut = Math.round(shellAntiDrop * 100);
         if (def.hp > 0 && !r.fakeDie) {
           /* `debuffStat` 是给**战斗动画**用的结构化字段（`debuffText` 是给人看的中文）：
            * 经典战斗要在挨打方头顶飘「力/敏/速下降」那颗原版状态图标（`propty` 第 4/5/6 帧），
            * 靠中文串匹配太脆，所以这里把"降的是哪一项"显式带出来。 */
-          if (w.id === 5) { def.debuffs.agility = Math.max(def.debuffs.agility, weaponEffect(w, 10, 2)); r.debuffText = '敏捷降低！'; r.debuffStat = 'agility'; }
-          if (w.id === 6) { def.debuffs.speed = Math.max(def.debuffs.speed, weaponEffect(w, 10, 2)); r.debuffText = '速度降低！'; r.debuffStat = 'speed'; }
-          if (w.id === 8) { def.debuffs.power = Math.max(def.debuffs.power, weaponEffect(w, 10, 1)); r.debuffText = '力量降低！'; r.debuffStat = 'power'; }
+          if (w.id === 5) { def.debuffs.agility = Math.max(def.debuffs.agility, weaponEffect(w, 10, 2) * dropMul); r.debuffText = '敏捷降低！'; r.debuffStat = 'agility'; }
+          if (w.id === 6) { def.debuffs.speed = Math.max(def.debuffs.speed, weaponEffect(w, 10, 2) * dropMul); r.debuffText = '速度降低！'; r.debuffStat = 'speed'; }
+          if (w.id === 8) { def.debuffs.power = Math.max(def.debuffs.power, weaponEffect(w, 10, 1) * dropMul); r.debuffText = '力量降低！'; r.debuffStat = 'power'; }
           if (w.id === 12 && chance(35)) { def.dot = { dmg: weaponEffect(w, 4, 3, 6) + trueW(w, 'dot'), rounds: petDotRounds(def, 4) }; r.dotApplied = true; }
           if (w.id === 13 && chance(weaponEffect(w, 10, 3, 3) + trueW(w, 'stun'))) { def.stun = Math.max(def.stun, petDotRounds(def, 1)); r.stunApplied = true; }
           if (w.id === 16 && chance(weaponEffect(w, 10, 4, 4) + trueW(w, 'silence'))) { def.silence = Math.max(def.silence, petDotRounds(def, 4)); r.silenceApplied = true; }
@@ -1940,7 +1954,7 @@
           }
           case 23: { // 幸运一击
             const mult = R(1, 6);
-            const raw = (15 + 8 * (Math.min(lv, 10) - 1) + trueVal(23, lv)) * mult;
+            const raw = (15 + 8 * (Math.min(lv, 10) - 1) + trueVal(23, lv) + Math.max(0, Number(effect(att, 48)) || 0)) * mult;
             r.multiple = mult;
             /* 原版协议第 15 字段 `boomCount` = 这一拍分裂成几个球（`MainMovie.as:17983`
              * `_loc1.boomCount = _loc2[15]`，`sprite6122` 第 31 帧 `_root.boom(ball, count)`）。
@@ -1970,10 +1984,10 @@
       let raw = Math.round(effPower(att) * (0.8 + Math.random() * 0.4) * (1 + effect(att, 5) / 100));
       if (att.petNextCrit) {
         att.petNextCrit = false;
-        raw = Math.round(raw * (2 + Math.random() + effect(att, 1) / 100 + critDmgBonus(att)));
+        raw = Math.round(raw * (2 + Math.random() + effect(att, 45) / 100 + effect(att, 1) / 100 + critDmgBonus(att)));
         r.crit = true; r.petCrit = true;
       } else if (chance(critChance(att))) {
-        raw = Math.round(raw * (2 + effect(att, 1) / 100 + critDmgBonus(att))); r.crit = true;
+        raw = Math.round(raw * (2 + effect(att, 45) / 100 + effect(att, 1) / 100 + critDmgBonus(att))); r.crit = true;
       }
       applyDamage(att, def, raw, r, {});
       maybeCounter(att, def, r, 'common');     // 普攻可以被反击

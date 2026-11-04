@@ -1533,7 +1533,7 @@
     const draft = heroSetupDraft;
     if (!Array.isArray(draft.picks)) draft.picks = [];
     /* 旧草稿只存 id 数组：统一折成 `[{id,tier}]`（没档位就按 1 档）。 */
-    draft.appearance = [0, 1, 2, 3].map((part) => heroGearSlotOf(draft.appearance, part));
+    draft.appearance = heroAppearanceSlots(draft.appearance);
     const rules = heroStatRules();
     const keys = ['power', 'agility', 'speed'];
     const src = (draft.stats && typeof draft.stats === 'object') ? draft.stats : initial;
@@ -1623,7 +1623,9 @@
     try {
       if (window.State && State.gearPart) {
         const type = Number(State.gearPart(n));
-        if (Number.isFinite(type)) return type;
+        /* `State.gearPart` 对不在 gearMap 里的 q5 黑装上位 / 深海·机器猫返回 -1；
+         * 不能把 -1 当成有效部位，继续从 GEAR_BASE 补真实 type。 */
+        if (Number.isInteger(type) && type >= 0 && type <= 3) return type;
       }
     } catch (e) {}
     const rows = (window.GData && Array.isArray(GData.GEAR_BASE)) ? GData.GEAR_BASE : null;
@@ -1662,7 +1664,8 @@
       const item = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
       const id = Number(item.id);
       if (!(id > 0)) continue;
-      const type = Number.isFinite(Number(item.type)) ? Number(item.type) : heroGearTypeOf(id);
+      const rawType = Number(item.type);
+      const type = Number.isInteger(rawType) && rawType >= 0 && rawType <= 3 ? rawType : heroGearTypeOf(id);
       if (Number.isInteger(type) && type >= 0 && type <= 3 && !slots[type]) {
         slots[type] = { id: id, tier: Math.max(1, Math.min(3, Number(item.tier) || 1)) };
       }
@@ -2374,8 +2377,10 @@
       /* 经典「更换装备」页的数据源：全部 288 件，按稀有度 → 套装 → 部位；数值由 ui-status 清零。 */
       gearList: heroAllGear(),
       onEquip: (next) => {
-        /* ui-status 传回来的是四格 `[{id,tier}]`（老调用也可能是 id 数组）。 */
-        draft.appearance = [0, 1, 2, 3].map((part) => heroGearSlotOf(next, part));
+        /* ui-status 交回的是**扁平外观列表**（空部位被跳过，元素带 type），
+         * 不能按下标当部位 —— 否则连点几件同一部位会依次塞进头/手/身/脚四格
+         * （用户 2026-11-03 报的「四格都穿同一部位」）。按 type 归位并去重。 */
+        draft.appearance = heroAppearanceSlots(next);
         hero.appearance = heroAppearancePaint(draft.appearance);
         return hero.appearance;
       },
@@ -2384,7 +2389,7 @@
         openHeroGearPicker({
           slots: draft.appearance.slice(),
           onChange: (next) => {
-            draft.appearance = [0, 1, 2, 3].map((part) => heroGearSlotOf(next, part));
+            draft.appearance = heroAppearanceSlots(next);
             /* 状态页里的 `hero.appearance` 是开局时拷的一份快照；装备层改的是草稿，
              * 必须同步回这一份，否则关掉选择层后立绘还是旧外观。 */
             hero.appearance = heroAppearancePaint(draft.appearance);
@@ -2449,7 +2454,7 @@
       },
       gearList: heroAllGear(),
       onEquip: (slots) => {
-        draft.appearance = [0, 1, 2, 3].map((part) => heroGearSlotOf(slots, part));
+        draft.appearance = heroAppearanceSlots(slots);
         hero.appearance = heroAppearancePaint(draft.appearance);
         return { ok: true, appearance: hero.appearance };
       },
@@ -2457,7 +2462,7 @@
         openHeroGearPicker({
           slots: draft.appearance.slice(),
           onChange: (next) => {
-            draft.appearance = [0, 1, 2, 3].map((part) => heroGearSlotOf(next, part));
+            draft.appearance = heroAppearanceSlots(next);
             hero.appearance = heroAppearancePaint(draft.appearance);
             if (heroPageCtrl && heroPageCtrl.refresh) heroPageCtrl.refresh();
           },
@@ -2707,7 +2712,7 @@
       openHeroGearPicker({
         slots: draft.appearance.slice(),
         onChange: (next) => {
-          draft.appearance = [0, 1, 2, 3].map((part) => heroGearSlotOf(next, part));
+          draft.appearance = heroAppearanceSlots(next);
           update();
           paintHeroArt(find(p, '[data-hero-setup-art]'), draft.appearance, { label: '勇者', pad: 4, zoom: 1.1 });
         },
@@ -4559,7 +4564,9 @@
   /* ============================================================
    * 【U17】模块导出 —— window.TowerUI
    * ============================================================ */
-  window.TowerUI = { openTower, openEndless, openHeroSetup, openHeroStatus, openMintShop, openShop, openPickBuff, openPatrolToll, openPatrolDiscard };
+  window.TowerUI = { openTower, openEndless, openHeroSetup, openHeroStatus, openMintShop, openShop, openPickBuff, openPatrolToll, openPatrolDiscard,
+    /* 回归用：勇者外观扁平列表 → 四部位格（同部位去重）。 */
+    _heroAppearanceSlots: heroAppearanceSlots };
   /* 【U18】把「剧情播完之后回主界面」这条线接给 tower-plot.js ——
    * 剧情模块不直接引用 tower-ui（两个文件互不 require），只认这一根线。 */
   if (window.TowerPlot && TowerPlot.setMainOpener) TowerPlot.setMainOpener(openEndless);

@@ -2621,7 +2621,7 @@
     const addrText = (g) => {
       if (!g) return '';
       let lines = [];
-      try { lines = State.extText ? State.extText(g.ext || []) : []; } catch (e) { lines = []; }
+      try { lines = State.extTextForGear ? State.extTextForGear(g) : (State.extText ? State.extText(g.ext || []) : []); } catch (e) { lines = []; }
       lines = (lines || []).filter(Boolean);
       return lines.length ? lines.join('\n') : '无';
     };
@@ -3545,8 +3545,10 @@
        * 所以**留空**（素材自带作者占位串，必须写空，不能留着）。 */
       let des = [];
       try { des = State.extText(g.ext) || []; } catch (e) { des = []; }
+      let desExtra = [];
+      try { desExtra = State.extExtraTextForGear ? State.extExtraTextForGear(g) : []; } catch (e) { desExtra = []; }
       setTextByName(view, 'baseOther', des.join('\n'));
-      setTextByName(view, 'baseOtherExtra', '');
+      setTextByName(view, 'baseOtherExtra', desExtra.join('\n'));
     }
     /* 图标位：`subFrame1.c1.attachMovie(convertLink(装备)).gotoAndStop(1)`。 */
     const cell = clipOf(view, 'c1');
@@ -4073,7 +4075,7 @@
       if (label) setGearTextColor(label, g ? g.quality : 0);
       setTextByName(view, 't_base' + (i + 1), g ? (String(g.attrName || '') + '+' + Math.max(0, Math.round(Number(g.abilityVal) || 0))) : '');
       let addr = [];
-      try { addr = (g && State.extText(g.ext)) || []; } catch (e) { addr = []; }
+      try { addr = (g && State.extTextForGear ? State.extTextForGear(g) : (g ? State.extText(g.ext) : [])) || []; } catch (e) { addr = []; }
       setTextByName(view, 't_addr' + (i + 1), addr.join('\n'));
       if (card) {
         card.__gearKey = g ? String(g.key) : null;

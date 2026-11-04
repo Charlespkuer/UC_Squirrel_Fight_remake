@@ -1740,7 +1740,39 @@ function socialDialogBundle() {
   console.log('tags-social-dialog.json: %d tags; existing page bundles untouched', tags.length);
 }
 
-if (process.argv.includes('--social-dialog')) socialDialogBundle();
+// Battle HUD uses the named ExportAssets, not the ranch's 4280 full-body frames.
+function fightPetBundle() {
+  const petNames = ['蛮犀牛','小红帽','冰原狼','水晶波波','小花仙','木船河童','毒蘑菇','铁桶雪人','电锯木偶','沈王爷','巨舌笼包','菜婶婶','僵尸大少','哈哈小丑','长角飞龙','百战鳄鱼','绿踪仙鹿','跳神娃娃','南瓜大亨','深海幽鲨','小恶魔','大嘴恶花','哈拉兽','异星人','哇哇','铁嘴蜂','铃音海豚','招财熊猫','稻草人','酷法','神灯','仙玲'];
+  const exports = swfSymbolIds();
+  const roots = petNames.map(name => exports.get(name));
+  if (roots.some(id => !id)) die('缺少幻兽导出符号：' + petNames.filter((_, i) => !roots[i]).join('、'));
+  const { data, sha } = readMovie();
+  const byId = new Map(data.tg.map(tag => [String(tag.id), tag]));
+  // Existing bundles already ship refined shared symbols. Resolve their entire
+  // dependency closure using those definitions, preserving the renderer's IDs.
+  const files = fs.readdirSync(OUT).filter(f => /^tags(?:-[\w-]+)?\.json$/.test(f) && f !== 'tags-fight-pets.json');
+  const order = ['tags.json', 'tags-fight.json', 'tags-gear.json', 'tags-gear-color.json'];
+  files.sort((a,b) => (order.indexOf(a) < 0 ? 100 : order.indexOf(a)) - (order.indexOf(b) < 0 ? 100 : order.indexOf(b)) || a.localeCompare(b));
+  const existing = new Map();
+  for (const file of files) for (const tag of JSON.parse(fs.readFileSync(path.join(OUT, file), 'utf8'))) {
+    const id = String(tag.id);
+    if (!existing.has(id)) existing.set(id, tag);
+  }
+  for (const [id, tag] of existing) byId.set(id, tag);
+  const { tags: raw, missing } = closure(byId, roots);
+  if (missing.length) die('幻兽素材闭包缺失：' + missing.join(', '));
+  // Copy before pruning because the routine rounds placement matrices in place.
+  const tags = raw.map(tag => existing.has(String(tag.id)) ? tag : prune(JSON.parse(JSON.stringify(tag))))
+    .sort((a,b) => Number(a.id) - Number(b.id));
+  const stats = { bitmaps: [] };
+  extractBitmaps(tags, stats);
+  fs.writeFileSync(path.join(OUT, 'tags-fight-pets.json'), JSON.stringify(tags));
+  fs.writeFileSync(path.join(OUT, 'fight-pets-manifest.json'), JSON.stringify({ generator:'tools/gen-ssfight-ui.cjs --fight-pets', sourceSha256:sha, roots, names:petNames, count:tags.length, bitmaps:stats.bitmaps }, null, 2));
+  console.log('tags-fight-pets.json: %d tags, %d pets', tags.length, roots.length);
+}
+
+if (process.argv.includes('--fight-pets')) fightPetBundle();
+else if (process.argv.includes('--social-dialog')) socialDialogBundle();
 else if (process.argv.includes('--gear-colors')) gearColorBundle();
 else if (process.argv.includes('--fight-result')) fightResultBundle();
 else if (process.argv.includes('--campaign-boss')) campaignBossBundle();

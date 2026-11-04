@@ -743,9 +743,13 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .point-tag{font-size:13px;color:#8a4a3a;background:#ffe6df;border-radius:8px;padding:0 5px;font-weight:normal}
 .reward-card.skill .reward-badge.ws-badge{color:#2f5f26;background:radial-gradient(circle at 38% 32%,#eaf7dd,#b6dd97)}
 
-/* 升级「三选一」：武器/技能候选（无关闭叉，必须选一个） */
-.classic-modal-overlay.ws-choice-dialog>.classic-modal.small-modal{max-height:620px;width:980px}
-.classic-modal-overlay.ws-choice-dialog>.classic-modal.small-modal>.modal-body{max-height:490px;overflow-y:auto}
+/* 升级「三选一」：武器/技能候选（无关闭叉，必须选一个）。
+ * 三张卡是 284×3 + 16×2 = 884px，卡片本身不动；只把外框收窄、左右内边距压到 20px，
+ * 正文就有 906px（940px 外框时只有 890，只剩 6px 余量，多一个滚动条就掉行），
+ * 三张稳定并排、左右各留 36px。原来是 980px + 42px 内边距，正文 886px 再被
+ * .modal-body 的 scrollbar-gutter:stable 吃掉 15px 只剩 871px < 884px，第三张必换行。 */
+.classic-modal-overlay.ws-choice-dialog>.classic-modal.small-modal{max-height:620px;width:956px;padding-left:20px;padding-right:20px}
+.classic-modal-overlay.ws-choice-dialog>.classic-modal.small-modal>.modal-body{max-height:490px;overflow-y:auto;scrollbar-gutter:auto}
 .ws-choice-box{display:flex;flex-direction:column;gap:10px}
 .ws-choice-row{display:flex;gap:16px;justify-content:center;align-items:stretch;flex-wrap:wrap}
 .ws-choice{display:flex;flex-direction:column;align-items:center;gap:6px;width:284px;padding:14px 12px 12px;cursor:pointer;

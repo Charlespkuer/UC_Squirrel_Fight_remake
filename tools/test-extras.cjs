@@ -489,16 +489,20 @@ test('天梯30级门槛、胜3杯败1杯、防双击与重复回调', () => {
   assert.equal(s.joinRankCount, 2); assert.equal(g.battles[0].opts.kind, 'rank'); assertBalanced(g.markup);
 });
 
-test('天梯前10场免费、后10场各5金、20场上限，次日恢复次数', () => {
+test('天梯前10场免费、11-20每场5金、21-30每场10金、30场上限，次日恢复次数', () => {
   const g = setup(), s = g.c.State.state(); s.level = 30; g.math.random = () => 0.5;
-  for (let i = 0; i < 20; i++) {
+  s.goldPoint = 200;
+  const feeAt = (n) => (n < 10 ? 0 : n < 20 ? 5 : 10);
+  let gold = 200;
+  for (let i = 0; i < 30; i++) {
     g.c.ClassicExtras.rank(); g.click('rank-fight'); g.settle(i, 1);
-    assert.equal(s.goldPoint, 100 - Math.max(0, i - 9) * 5);
+    gold -= feeAt(i);
+    assert.equal(s.goldPoint, gold, '第 ' + (i + 1) + ' 场扣费');
     assert.equal(s.joinRankCount, i + 1);
   }
   assert.equal(s.goldPoint, 50); assert.equal(s.energy, 90);
   g.c.ClassicExtras.rank(); assert.equal(g.node('rank-fight').disabled, true);
-  g.node('rank-fight').onclick(); assert.equal(g.battles.length, 20);
+  g.node('rank-fight').onclick(); assert.equal(g.battles.length, 30);
   g.advance(86400000); g.c.ClassicExtras.rank(); assert.equal(s.joinRankCount, 0);
   g.click('rank-fight'); assert.equal(s.goldPoint, 50); assert.equal(s.joinRankCount, 1);
 });
@@ -594,10 +598,10 @@ test('天梯每天都可比赛（周日不休赛），金杯商店每天都能�
    * 直接调用它不该开打；重新渲染出新按钮之后才轮到明天。 */
   const st = g.c.State.state();
   const keep = st.joinRankCount;
-  st.joinRankCount = 20;
+  st.joinRankCount = 30;
   g.c.ClassicExtras.rank();
   const stale = g.node('rank-fight').onclick;
-  assert.equal(g.node('rank-fight').disabled, true, '满 20 场时按钮应当禁用');
+  assert.equal(g.node('rank-fight').disabled, true, '满 30 场时按钮应当禁用');
   stale();
   assert.equal(g.battles.length, 0, '满场时旧按钮不该开打');
   /* 需求：周日不休赛 —— 推进 4 天（到周日）后按钮仍可点、点了就能开打。 */
@@ -610,7 +614,7 @@ test('天梯每天都可比赛（周日不休赛），金杯商店每天都能�
 });
 
 test('金杯商店兑换校验积分与两种货币，不扣积分，每周限一件且下周一重置', () => {
-  const g = setup(), s = g.c.State.state(); s.level = 30; s.integral = 1900; s.goldCup = 1000; s.goldPoint = 500;
+  const g = setup(), s = g.c.State.state(); s.level = 30; s.integral = 299; s.goldCup = 1000; s.goldPoint = 500;
   g.c.ClassicExtras.rank(); g.click('rank-shop'); g.click('rank-shop-next');
   const choose = () => g.page().querySelector('[data-goods="11"]').onclick();
   choose(); g.modalClick(); assert.equal(s.goldCup, 1000); assert.equal(s.goldPoint, 500); assert.equal(s.gears.length, 0);
@@ -804,12 +808,21 @@ test('对手等级封顶：随机挑战/擂台再抖也不会冒出 90 级以上
   }
 });
 
-test('魔法袋回到天梯商店：1300 积分 + 2000 金杯 + 200 金松果，账号限 1 次', () => {
+test('魔法袋回到天梯商店：180 积分 + 2000 金杯 + 200 金松果，账号限 1 次', () => {
   const g = setup(), s = g.c.State.state();
-  s.level = 30; s.integral = 1300; s.goldCup = 2000; s.goldPoint = 200;
+  s.level = 30; s.integral = 180; s.goldCup = 2000; s.goldPoint = 200;
   const goods = g.c.ClassicExtras.rankGoodsList().find((x) => String(x.id) === '19');
   assert.ok(goods, '天梯商店要补回原版的魔法袋（goods id 19）');
-  assert.deepEqual([goods.goodsId, goods.cup, goods.gold, goods.integral], ['79', '2000', '200', '1300']);
+  assert.deepEqual([goods.goodsId, goods.cup, goods.gold, goods.integral], ['79', '2000', '200', '180']);
+  /* 2026-11 用户口径：金杯商店 23 件商品的积分门槛整体下调，第二套狂战单独 400。 */
+  const integral = {
+    1: 50, 2: 50, 3: 50, 4: 50, 5: 100, 6: 100, 7: 200, 8: 200, 9: 200, 10: 200,
+    11: 300, 12: 300, 13: 300, 14: 300, 15: 180, 16: 180, 17: 180, 18: 180, 19: 180,
+    20: 400, 21: 400, 22: 400, 23: 400,
+  };
+  for (const [id, value] of Object.entries(integral)) {
+    assert.equal(Number(g.c.rankgoodsMap.getValue(id).integral), value, '商品 ' + id + ' 的积分门槛');
+  }
   const lim = g.c.ClassicExtras.rankLimitInfo(goods);
   assert.equal(lim.account, true, '账号级限购');
   assert.equal(lim.limit, 1);

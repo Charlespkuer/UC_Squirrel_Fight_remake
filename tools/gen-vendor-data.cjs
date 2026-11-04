@@ -8,6 +8,7 @@
  *
  * 只抽真正被游戏代码用到的（判断依据：grep 游戏 js/*.js，引用数为 0 的一律不抽）：
  *   · GameDict.js 的 10 个数据字典（武器/技能/道具/装备/套装/强化/NPC/附件/天梯商品/礼包）
+ *     （附件表以 references/ssfight/.../config1.xml 的 48 条为准；缺这份参考时退回 GameDict.js）
  *   · assets.js 的 asstes 素材清单（引擎用它把 id 映射到图片路径）
  *   · assets.js 的 imgMap 图集帧表（引擎用它找每帧在图里的坐标/尺寸/注册点）
  *   · animationStr.js 的 AnimationStr 动画帧表（引擎的动画播放器读它）
@@ -41,6 +42,9 @@ const ROOT = findRoot(__dirname);
  * 已按用户口径删除，这里不再保留迁移期的回退目录（留着只会让「到底去哪儿找」有两种答案）。
  * `references/` 整目录不进仓库，所以这个脚本是**非运行时**工具：缺了原版文件就明确报错。 */
 const ORIG_DIR = path.join(ROOT, 'references', 'orig');
+/* 装备附件表以 ssfight（PC 原版）为准：`references/ssfight/.../config1.xml` 的 48 条
+ *（32 为空号，42~49 是后加的 8 条）。缺这份参考时退回 GameDict.js 的 41 条，保证精简包仍能生成。 */
+const SSFIGHT_CONFIG = path.join(ROOT, 'references', 'ssfight', 'viewer', 'game', 'FightGame', 'config1.xml');
 function origFile(name) {
   const f = path.join(ORIG_DIR, name);
   if (fs.existsSync(f)) return f;
@@ -145,6 +149,25 @@ function jsString(text) {
   return JSON.stringify(String(text));
 }
 
+/** ssfight 的 config1.xml 附件表：id / 星级 ability / 12 档增幅 extraValue / 名称。 */
+function ssAttachmentTable() {
+  if (!fs.existsSync(SSFIGHT_CONFIG)) return null;
+  const xml = fs.readFileSync(SSFIGHT_CONFIG, 'utf8');
+  const block = xml.match(/<attachments>[\s\S]*?<\/attachments>/);
+  if (!block) return null;
+  const rows = [...block[0].matchAll(/<x\b[^>]*\/>/g)].map((m) => m[0]).map((tag) => {
+    const attr = (name) => {
+      const hit = tag.match(new RegExp('\\b' + name + '="([^"]*)"'));
+      return hit ? hit[1] : '';
+    };
+    return { id: Number(attr('id')), ability: attr('ability'), extra: attr('extraValue'), name: attr('name') };
+  }).sort((a, b) => a.id - b.id);
+  return {
+    fields: ['id', 'ability', 'extra', 'name'],
+    rows: rows.map((r) => ({ key: r.id, raw: `${r.id} ${r.ability} ${r.extra} ${r.name}`, sep: ' ' })),
+  };
+}
+
 /* ---------- 资源目录整理（2026-10）：原版扁平路径 → 新目录 ----------
  * 原版数据里的图片是一个**扁平目录**（`images/wuqi.png`、`images/effect/skill_6.png`…）。
  * 2026-10 把 images/ 按用途分成了 images/atlas（图集切片）| images/battle/fx（战斗特效）|
@@ -242,7 +265,8 @@ function build() {
   out.push(' * 原版文件本体在 references/orig/（只作参考，不参与运行）；游戏跑起来只认这里的数据，');
   out.push(' * 所以运行过程中不会再引用 references/ 下的任何文件。');
   out.push(' *');
-  out.push(' * 数据来源：references/orig/GameDict.js、assets.js、animationStr.js');
+  out.push(' * 数据来源：references/orig/GameDict.js、assets.js、animationStr.js；');
+  out.push(' * 装备附件表另取 references/ssfight/viewer/game/FightGame/config1.xml（48 条）。');
   out.push(' * 重新生成：node tools/gen-vendor-data.cjs');
   out.push(' * ============================================================ */');
   out.push('(function () {');
@@ -287,7 +311,11 @@ function build() {
   for (const [name, label] of DICTS) {
     const map = ctx[name];
     if (!map) { out.push('  /* ' + name + '（' + label + '）：原版数据里没有，跳过 */'); continue; }
-    const { fields, rows } = dumpDict(map, name, putTable);
+    let { fields, rows } = dumpDict(map, name, putTable);
+    if (name === 'attachmentMap') {
+      const ss = ssAttachmentTable();
+      if (ss) ({ fields, rows } = ss);
+    }
     // 键保持原类型（原版 keys 里是数字 1、2、3…，不是字符串）
     const rowsText = rows.map((r) => '[' + (typeof r.key === 'number' ? r.key : JSON.stringify(String(r.key))) + ', ' + jsString(r.raw) + ', ' + jsString(r.sep) + ']').join(',\n      ');
     out.push('  /* ' + label + '：' + rows.length + ' 条 */');

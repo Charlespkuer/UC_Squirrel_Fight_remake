@@ -1278,7 +1278,7 @@ async function checkClassicFight() {
   assert.equal(SfFight._attackActs({ action: 'pet', petId: 1 }).hit, 22, '幻兽 1 的 beAttack 在第 22 帧');
   assert.equal(SfFight._defenseKind({ action: 'pet', petId: 1 }), 'hit', '幻兽 1 有专属受击动画');
   assert.equal(SfFight._defenseKind({ action: 'pet', petId: 5 }), 'none', '回光术那条不播受击动作');
-  assert.equal(SfFight.PET_FRAMES.art, '4280', 'HUD 幻兽格用「全身」4280 的第 pet.id 帧');
+  assert.deepEqual(Array.from(SfFight.PET_FRAMES.art), JSON.parse(fs.readFileSync(path.join(dir, 'fight-pets-manifest.json'), 'utf8')).roots, 'HUD 按幻兽 id 使用原版独立图标');
   /* ②b 主角本体必须由 `buildFighter` 回传：`slot.attachChild()` **不进** `byName` 表，
    *   而 7639 第 2 帧已经把第 1 帧那批挂点摘掉了 —— 回头 `slot.byName('playerMc')` 永远是 null，
    *   于是"战斗里一个动作都不播"（2026-10 实拍发现：两个 `hasMc` 都是 false）。 */
@@ -2379,6 +2379,21 @@ function checkLevelUpStyle() {
     /\.sf-levelup-view\{[^}]*z-index:60/.test(css),
     '升级奖励要挂原版 7795 升级页，并保留现代奖励与后续三选一/加点'
   );
+  /* 用户 2026-11 口径：升级「三选一」三张候选要并排一行，卡片本身尺寸不动。
+   * 卡片 3×284 + 2×16 = 884px，所以外框正文（宽 - 两侧边框 - 左右内边距）必须连
+   * 「一条 15px 滚动条」一起容得下 —— 980/42 那版正文只有 886，被滚动条吃到 871 就掉行。 */
+  const baseCss = fs.readFileSync(path.join(ROOT, 'css/classic.css'), 'utf8').replace(/\r\n/g, '\n');
+  const wsFrame = /\.classic-modal-overlay\.ws-choice-dialog>\.classic-modal\.small-modal\{([^}]*)\}/.exec(css);
+  const wsCard = /\.ws-choice\{[^}]*?width:(\d+)px/.exec(css);
+  const wsRow = /\.ws-choice-row\{[^}]*?gap:(\d+)px/.exec(css);
+  const baseModal = /\.classic-modal\{([^}]*)\}/.exec(baseCss);
+  assert.ok(wsFrame && wsCard && wsRow && baseModal, '三选一要有自己的外框 / 卡片 / 行距规则');
+  const px = (src, re) => Number(re.exec(src)[1]);
+  const need = 3 * px(wsCard[0], /width:(\d+)px/) + 2 * px(wsRow[0], /gap:(\d+)px/);
+  const inner = px(wsFrame[1], /width:(\d+)px/) - 2 * px(baseModal[1], /border:(\d+)px/)
+    - px(wsFrame[1], /padding-left:(\d+)px/) - px(wsFrame[1], /padding-right:(\d+)px/);
+  assert.ok(inner >= need + 15,
+    '升级三选一的正文要放得下三张卡并排（含 15px 滚动条余量）：正文 ' + inner + 'px，三张需要 ' + need + 'px');
 }
 
 /* ---------- 41. 新手引导：原版 3625 + 首段 1~7 帧 ---------- */

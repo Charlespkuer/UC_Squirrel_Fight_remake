@@ -2051,37 +2051,31 @@
       .map((p) => ({ id: Number(p.id), name: String(p.name || '幻兽'), grade: Number(p.grade) || 1,
         level: Number(p.level) || 1, skillId: Number(p.skillId) || 0 }));
   }
-  /** `showBringPets()`：把原版「全身」4280 的第 `pet.id` 帧缩进 3414 幻兽格（42×42）。
-   * 原版是 `attachMovie(summons.name, "summonsImgMc", 100)` —— 每只幻兽一个导出符号；
-   * 复刻的素材库里等价的整身图就是 4280 的第 id 帧（牧场卡片也用同一颗）。 */
-  function mountPetSlot(slot, pet) {
+  /* 血条下六个幻兽格挂的是**每只幻兽自己的独立图标**，不是牧场那套「全身」4280 立绘。
+   * 原版 `showBringPets()` 就是 `attachMovie(summons.name, "summonsImgMc", 100)` ——
+   * 由导出名取每只幻兽的库元件；这里的 32 个符号号按 `petsInfo` 顺序（id 1..32）排，
+   * 与 `images/ssfight/ui/fight-pets-manifest.json` 的 `roots` 一一对应。
+   * 素材单独成包（`tags-fight-pets.json`，`node tools/gen-ssfight-ui.cjs --fight-pets`），
+   * 没有幻兽的普通战斗不必多付这一份。 */
+  const HUD_PET_SYMBOLS = ['2565','2494','2961','2664','2483','2734','2883','2465',
+    '2898','2687','2809','2947','2828','2854','2442','2972','2744','2634','2721','2710',
+    '2518','2926','2841','2456','2578','2621','2781','2432','2907','2796','2689','2542'];
+  /* 原版 defenderS1..3 在 x=213 / 245 / 277，最右一颗几乎贴 HUD 右沿。
+   * 2026-10 用户口径：「战斗中敌方的幻兽 UI 显示太靠右了，往左调整一点」——
+   * 三格整体左移 12 个舞台单位，图标、血条与右侧村庄门之间留出空隙。 */
+  const DEFENDER_PET_DX = -12;
+  function mountPetSlot(slot, pet, dx) {
     if (!slot || !slot.attachChild) return;
-    /* 同一格重复挂载时先清掉上一张裁剪壳（例如 HUD 被重新 hydrate）。 */
-    try {
-      const old = slot.g && slot.g.querySelectorAll ? slot.g.querySelectorAll('svg[data-pet-art="1"]') : [];
-      for (const n of old) if (n.parentNode) n.parentNode.removeChild(n);
-    } catch (e) {}
+    if (slot.setExtraTransform) slot.setExtraTransform(dx ? 'translate(' + dx + ',0)' : '');
     try { if (slot.detachAll) slot.detachAll(); } catch (e) {}
+    const id = HUD_PET_SYMBOLS[Number(pet.id) - 1];
     let clip = null;
-    try { clip = slot.attachChild('4280', Math.max(1, Number(pet.id) || 1), 'summonsImgMc'); } catch (e) { clip = null; }
+    try { if (id) clip = slot.attachChild(id, 1, 'summonsImgMc'); } catch (e) { clip = null; }
     if (!clip || !clip.g) { visible(slot, false); return; }
     clip.playing = false;
-    let box = null;
-    try { box = clip.g.getBBox(); } catch (e) { box = null; }
-    if (!box || !(box.width > 0) || !(box.height > 0)) { visible(slot, false); return; }
-    const pad = Math.max(0.8, Math.min(2, Math.max(box.width, box.height) * 0.02));
-    const host = clip.g.parentNode;
-    if (!host || !document.createElementNS) { visible(slot, false); return; }
-    const NS = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(NS, 'svg');
-    svg.setAttribute('x', '0'); svg.setAttribute('y', '0');
-    svg.setAttribute('width', '42'); svg.setAttribute('height', '42');
-    svg.setAttribute('viewBox', (box.x - pad) + ' ' + (box.y - pad) + ' ' + (box.width + pad * 2) + ' ' + (box.height + pad * 2));
-    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-    svg.setAttribute('overflow', 'hidden');
-    svg.setAttribute('data-pet-art', '1');
-    host.insertBefore(svg, clip.g);
-    svg.appendChild(clip.g);
+    /* 原版 `showBringPets` 在非 c 版式（就是这套 HUD）用 1.4；0.71 那一档属于另一种版式，
+     * 套在这里会让图标只有半个格子大。 */
+    clip.setExtraTransform('scale(1.4)');
   }
   function showFightInfo(hud, names) {
     const t = T();
@@ -2102,7 +2096,7 @@
         if (!pets[i]) { visible(slot, false); continue; }
         visible(slot, true);
         stopAt(slot, 2);                 // 原版先 `gotoAndStop(2)` 清空槽位
-        mountPetSlot(slot, pets[i]);
+        mountPetSlot(slot, pets[i], side === 1 ? DEFENDER_PET_DX : 0);
       }
     }
     refreshBlood(hud);
@@ -2408,10 +2402,9 @@
       try { await SfRender.loadExtra('tags-campaign-boss.json'); }
       catch (e) { /* 缺包就退回松鼠外观，战斗逻辑照走 */ }
     }
-    /* 幻兽格用的是「全身」4280（`tags-summons.json`，牧场卡片同一颗）。
-     * 只有这一场真的有幻兽才加载，没有幻兽的普通战斗不多付这一份素材。 */
+    /* 战斗栏加载各幻兽的原版独立图标；没有幻兽时不加载。 */
     if (rec.petTeams.some((list) => list.length)) {
-      try { await SfRender.loadExtra('tags-summons.json'); } catch (e) { /* 缺包就没有立绘，逻辑照走 */ }
+      try { await SfRender.loadExtra('tags-fight-pets.json'); } catch (e) { /* 缺包时继续战斗 */ }
     }
     /* 三侠的现代动作图集（与 `battle.js` 同一份 AnimationStr / atlas）：
      * 只加载这一场真的会出场的体型；最多等 1.2s，没等到就退回 7689 静态稿。 */
@@ -3767,9 +3760,11 @@
     /* 这一拍受击方头顶该飘哪一颗状态图标（`Player.specialEffect` 的 statu 档位）。 */
     _effectStatu: (r) => effectStatu(r),
     WEAPON_ART: Object.freeze({ melee: MELEE_WEAPON_ART, ranged: THROW_WEAPON_ART, size: WEAPON_SIZE_FRAMES }),
-    /* 幻兽协战的全部帧号（回归 / 探针用）：攻击帧 30..61 与受击帧 11..40。 */
+    /* 幻兽协战的全部帧号（回归 / 探针用）：攻击帧 30..61、受击帧 11..40，
+     * `art` = HUD 幻兽格按 `petsInfo` id 取的原版独立图标（见 `mountPetSlot`）。 */
     PET_FRAMES: Object.freeze({
-      attack: PET_ATTACK_ACTS, defense: PET_DEFENSE_FRAME, art: '4280', slot: '3414',
+      attack: PET_ATTACK_ACTS, defense: PET_DEFENSE_FRAME, art: Object.freeze(HUD_PET_SYMBOLS.slice()),
+      slot: '3414',
     }),
     /* 开打倒计时 = 血条 HUD 第 8 帧里那颗原版 `3750`（不是自造元件，见 `playHudCountdown`）。 */
     COUNTDOWN: Object.freeze({ tag: COUNTDOWN_TAG, holder: '7703', holderFrame: HUD_STOP,

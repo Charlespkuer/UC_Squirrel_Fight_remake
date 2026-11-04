@@ -568,7 +568,8 @@
     State.rankSyncWeek();
     const board = State.rankBoard();
     const rows = (board.top || []).slice(0, 20);
-    const played = Math.max(0, Number(s.joinRankCount) || 0), limit = 20;
+    const played = Math.max(0, Number(s.joinRankCount) || 0), limit = State.RANK_DAILY_LIMIT || 30;
+    const nextFee = State.rankFeeAt(played);
     const p = C().page('challenge', 'arena', '<div class="extra-rank-layout"><div class="extra-rank-self">' + sprite(30) +
       '<h2>天梯赛</h2>' +
       '<div class="extra-score">赛区 <b>' + esc(board.label || '未满30级') + '</b></div>' +
@@ -576,11 +577,13 @@
       '<div class="extra-score">金杯 <b>' + Math.max(0, Number(s.goldCup) || 0) + '</b></div>' +
       '<div class="extra-score">赛区排名 <b>' + (board.me.rank > 0 ? board.me.rank : '-') + '</b></div>' +
       '<p>今日已参赛 ' + played + ' / ' + limit + ' 场<br>' +
-        (played >= limit ? '今日参赛次数已用完' : played < 10 ? '本次免费，前10场免费' : '本次消耗5金松果') + '</p>' +
+        (played >= limit ? '今日参赛次数已用完'
+          : nextFee === 0 ? '本次免费，前' + (State.RANK_FREE_PLAYS || 10) + '场免费'
+            : '本次消耗' + nextFee + '金松果') + '</p>' +
       button('开始匹配', 'rank-fight', 'small gold') + button('金杯商店', 'rank-shop', 'small') +
       '</div><div class="extra-rank-list"><h3>赛区榜</h3>' +
       rows.map((row) => '<div class="extra-rank-row ' + (row.mine ? 'mine' : '') + '"><span>' + row.rank + '</span><b>' + esc(row.name) + (row.mine ? '（你）' : '') + ' Lv' + (row.level || 1) + '</b><strong>' + row.score + '</strong></div>').join('') +
-      note('天梯赛每天最多 20 场，前 10 场免费，之后每场 5 金松果。胜利 3 金杯、失败 1 金杯，获胜有 25% 概率额外抢 3 金杯（离线模拟）。积分每周一 0 点减半，人机同时回到 300 分；只有进入赛区前 30 名、并且超过至少一个人机，才能领取本周 50 金杯。') +
+      note('天梯赛每天最多 30 场：前 10 场免费，第 11-20 场每场 5 金松果，第 21-30 场每场 10 金松果。胜利 3 金杯、失败 1 金杯，获胜有 25% 概率额外抢 3 金杯（离线模拟）。积分每周一 0 点减半，人机同时回到 300 分；只有进入赛区前 30 名、并且超过至少一个人机，才能领取本周 50 金杯。') +
       '</div></div>', { cls: 'extra-board rank-extra-board' });
     back(p, arena, '返回');
     on(p, 'rank-shop', () => rankShop(0));
@@ -588,10 +591,10 @@
       if (!p.isConnected || State.state() !== s || rankAttempt) return;
       rankMatch();
     });
-    match.disabled = s.joinRankCount >= 20 || !!rankAttempt;
+    match.disabled = s.joinRankCount >= limit || !!rankAttempt;
   }
-  /** 天梯赛报名费（复刻上限 20 场；与 `rankMatch` 同一口径）。 */
-  function rankFeeNow(s) { return s.joinRankCount < 10 ? 0 : 5; }
+  /** 天梯赛报名费（原版客户端 alertRank 口径：1-10 免费、11-20 每场 5、21-30 每场 10）。 */
+  function rankFeeNow(s) { return State.rankFeeAt(s && s.joinRankCount); }
   let rankPrepPending = false;
   /** 【经典天梯流程】对齐原版 `alertRank`（:23720）+ `beforeRank`（:18149）：
    *   点「开始比赛」→ 首次 / 免费场用完时先弹经典二次确认（原版 `makeSure`）；
@@ -604,13 +607,14 @@
     if (rankAttempt || rankPrepPending) return;
     State.tickEnergy();
     if (s.level < 30) { alert('天梯赛需要达到30级。'); return; }
-    if (s.joinRankCount >= 20) { alert('今天已经参加20场，明天再来吧！'); return; }
+    const dailyLimit = State.RANK_DAILY_LIMIT || 30;
+    if (s.joinRankCount >= dailyLimit) { alert('今天已经参加' + dailyLimit + '场，明天再来吧！'); return; }
     const fee = rankFeeNow(s);
-    if (s.goldPoint < fee) { alert('第11至20场每场需要5金松果，当前金松果不足。'); return; }
+    if (s.goldPoint < fee) { alert('金松果不足：本场需要 ' + fee + ' 个金松果。'); return; }
     if (!o.confirmed && (s.joinRankCount === 0 || s.joinRankCount > 9)) {
       const text = s.joinRankCount === 0
-        ? '每天前10场免费；第11-20场每场扣除5金松果。\n今日已赛 0/20。'
-        : '本日免费场已打完，本场将扣除5金松果。\n今日已赛 ' + s.joinRankCount + '/20。';
+        ? '每天前10场免费；第11-20场每场扣除5金松果，第21-30场每场扣除10金松果。\n今日已赛 0/' + dailyLimit + '。'
+        : '本日免费场已打完，本场将扣除' + fee + '金松果。\n今日已赛 ' + s.joinRankCount + '/' + dailyLimit + '。';
       /* 经典模式用原版「二次确认」4421（确定/取消是原版矢量按钮 + 烤进画稿的字），
        * 不再手搓绿色 DOM 键；现代界面没有这套素材，仍走 C().modal。 */
       if (window.SfChallenge && SfChallenge.openOriginalConfirm
@@ -696,9 +700,10 @@
       if (rankAttempt) return;
       State.tickEnergy();
       if (s.level < 30) { alert('\u5929\u68af\u8d5b\u9700\u8981\u8fbe\u523030\u7ea7\u3002'); return; }
-      if (s.joinRankCount >= 20) { alert('\u4eca\u5929\u5df2\u7ecf\u53c2\u52a020\u573a\uff0c\u660e\u5929\u518d\u6765\u5427\uff01'); return; }
-      const fee = s.joinRankCount < 10 ? 0 : 5;
-      if (s.goldPoint < fee) { alert('\u7b2c11\u81f320\u573a\u6bcf\u573a\u9700\u89815\u91d1\u677e\u679c\uff0c\u5f53\u524d\u91d1\u677e\u679c\u4e0d\u8db3\u3002'); return; }
+      const dailyLimit = State.RANK_DAILY_LIMIT || 30;
+      if (s.joinRankCount >= dailyLimit) { alert('\u4eca\u5929\u5df2\u7ecf\u53c2\u52a0' + dailyLimit + '\u573a\uff0c\u660e\u5929\u518d\u6765\u5427\uff01'); return; }
+      const fee = State.rankFeeAt(s.joinRankCount);
+      if (s.goldPoint < fee) { alert('\u91d1\u677e\u679c\u4e0d\u8db3\uff1a\u672c\u573a\u9700\u8981 ' + fee + ' \u4e2a\u91d1\u677e\u679c\u3002'); return; }
       const classicFlow = !!(window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic' &&
         window.SfChallenge && SfChallenge.goArenaPage);
       const attempt = { owner: s, date: State.localDate(), fee, settled: false };

@@ -354,9 +354,11 @@ test('满级 90 级：经验不再升级，69 级 179、70 级 180、满级 200 
   assert.equal(S.state().maxEnergy, 200);
 });
 
-test('好友系统：随机 NPC 也能加为好友，重名/满员有提示，删除与存档往返正常', () => {
+test('好友系统：随机 NPC 也能加为好友，重名/超长名字/安全上限与存档往返正常', () => {
   const g = game(), S = g.State;
-  assert.equal(S.friendLimit(), 20);
+  /* 原版 ssfight 没有好友数量上限（抓包 142 人）；50 是联机服务端既有的防滥用安全线。
+   * 这条钉住旧的 20 上限已撤销、客户端与服务端同一口径。 */
+  assert.equal(S.friendLimit(), 50);
   assert.equal(S.friendList().length, 0);
   const cands = S.rollFriendCandidates(3);
   assert.equal(cands.length, 3);
@@ -375,8 +377,8 @@ test('好友系统：随机 NPC 也能加为好友，重名/满员有提示，�
   assert.equal(S.addFriend({ name: '徒弟乙' }).ok, false, '徒弟不能再加一遍好友');
   assert.equal(S.addFriend({ name: '超长名字'.repeat(8), level: 3 }).ok, true, '超长名字会被截断');
   assert.ok(S.friendList()[1].name.length <= 20);
-  for (let i = 0; i < 25; i++) S.addFriend({ name: '路人' + i, level: 3 + i, power: 5, agility: 5, speed: 5, hp: 40 });
-  assert.equal(S.friendList().length, 20, '好友上限 20');
+  for (let i = 0; i < 50; i++) S.addFriend({ name: '路人' + i, level: 3 + i, power: 5, agility: 5, speed: 5, hp: 40 });
+  assert.equal(S.friendList().length, 50, '安全上限 50（原版无上限）');
   assert.match(S.addFriend({ name: '再来一个' }).msg, /好友已满/);
   // 切磋用的对手对象
   const foe = S.friendFoe(S.friendList()[0]);
@@ -887,6 +889,30 @@ test('卖出装备按品质给价：白55-60 / 绿60-65 / 蓝65-70 / 紫90-110 /
   });
   assert.deepEqual(Array.from(S.gearSellRange(9)), [500, 700], '越界品质夹到最高档');
   assert.deepEqual(Array.from(S.gearSellRange(-3)), [55, 60], '负品质夹到最低档');
+});
+
+test('装备使用等级按原版 Flash：紫狂战 30 / 白装 5 / 橙 50 / 黑 60', () => {
+  /* 用户 2026-11 口径：**以 Flash equipsArray 为准**。H5 版 gearSetMap 有两处不一致：
+   * set 1/2（斗斗/挑斗白装）10 vs 5、set 51（紫狂战）50 vs 30；`gamedata` 的
+   * `alignFlashGearLevels()` 在启动时把这两处校正成 Flash 值。 */
+  const g = game(), S = g.State;
+  S.newGame('等级对齐', { uiMode: 'classic' });
+  const s = S.state();
+  assert.equal(Number(g.gearSetMap.getValue('1').level), 5, 'set 1 表内等级 5（Flash）');
+  assert.equal(Number(g.gearSetMap.getValue('2').level), 5, 'set 2 表内等级 5（Flash）');
+  assert.equal(Number(g.gearSetMap.getValue('51').level), 30, 'set 51 表内等级 30（Flash）');
+  assert.equal(S.gearInst(1).useLevel, 5, '斗斗白装 5 级');
+  assert.equal(S.gearInst(9).useLevel, 12, '绿装 12 级');
+  assert.equal(S.gearInst(49).useLevel, 20, '紫装 20 级档');
+  assert.equal(S.gearInst(65).useLevel, 25, '紫装 25 级档');
+  for (const id of [201, 202, 203, 204]) assert.equal(S.gearInst(id).useLevel, 30, '紫狂战 ' + id + ' 30 级');
+  assert.equal(S.gearInst(205).useLevel, 50, '橙狂战 50 级');
+  assert.equal(S.gearInst(181).useLevel, 60, '黑狂战 60 级');
+  const head = S.addGear(201);
+  s.level = 29;
+  assert.equal(S.wear(head.key), false, '29 级穿不上紫狂战');
+  s.level = 30;
+  assert.equal(S.wear(head.key), true, '30 级能穿紫狂战');
 });
 
 test('黑装注册：281~288 可实例化，品质 5 / 使用等级 60 / 主属性按部位', () => {

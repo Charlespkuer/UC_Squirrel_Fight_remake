@@ -632,6 +632,26 @@ test('爬塔中换外观只改本局勇者四部位，不碰账号装备并能�
   assert.equal(run.hero.wins, 0);
 });
 
+test('勇者准备页换装按部位归位：同部位多选只保留一件，不会四格都穿同一部位', () => {
+  const { c } = setup();
+  modernUi(c);
+  /* 模拟 ui-status 交回的**扁平外观列表**（空部位跳过、元素带 type）：
+   * 四件全是手套（type=1），必须只落在手部一格；以前按下标映射会依次塞满头/手/身/脚。 */
+  const allHands = c.TowerUI._heroAppearanceSlots([
+    { id: 14, type: 1 }, { id: 26, type: 1 }, { id: 38, type: 1 }, { id: 50, type: 1 },
+  ]);
+  assert.deepEqual(plain(allHands.map((slot) => slot && slot.id)), [null, 14, null, null],
+    '同部位多选只能保留第一件');
+  /* 四部位各一件时仍按 type 归位（不是按传入顺序）。 */
+  const mixed = c.TowerUI._heroAppearanceSlots([
+    { id: 16, type: 3 }, { id: 13, type: 0 }, { id: 15, type: 2 }, { id: 14, type: 1 },
+  ]);
+  assert.deepEqual(plain(mixed.map((slot) => slot && slot.id)), [13, 14, 15, 16], '四部位按 type 归位');
+  /* q5 黑装上位不在 gearMap 里（State.gearPart 返回 -1），手式按 GEAR_BASE 补真实部位。 */
+  const q5 = c.TowerUI._heroAppearanceSlots([{ id: 237, type: -1 }]);
+  assert.deepEqual(plain(q5.map((slot) => slot && slot.id)), [237, null, null, null], 'q5 黑装按 GEAR_BASE 归位');
+});
+
 test('现代界面无贴图的装备当作不存在：橙装沿用紫装图、外观池与融合都把它排除', () => {
   const { c } = setup(); start(c);
   modernUi(c);   // 装上 UI.classic（现代界面）与 State

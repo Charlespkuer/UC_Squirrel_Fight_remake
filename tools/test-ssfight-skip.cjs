@@ -41,7 +41,7 @@ function setup() {
   assert.ok(begin >= 0 && end > begin, '真实 controller 接口应可定位');
   const controller = source.slice(begin, end);
   source = source.replace('  window.SfFight = Object.freeze({', `
-  window.__skip = { setLive(rec) { live = rec; }, perform, playClip,
+  window.__skip = { setLive(rec) { live = rec; }, perform, playClip, mountPetSlot,
     controller(rec) { const pickups = rec.pickups, result = rec.result, o = rec.o;
       ${controller}
       rec.controller = controller; return controller;
@@ -99,6 +99,21 @@ function setup() {
 }
 
 async function test() {
+  const petTest = setup();
+  const petManifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'images/ssfight/ui/fight-pets-manifest.json'), 'utf8'));
+  const petTags = JSON.parse(fs.readFileSync(path.join(ROOT, 'images/ssfight/ui/tags-fight-pets.json'), 'utf8'));
+  for (let i = 0; i < 32; i++) {
+    let actual;
+    const slot = { detachAll() {}, attachChild(id, frame, name) {
+      actual = { id, frame, name };
+      return { g: {}, setExtraTransform(value) { actual.transform = value; } };
+    } };
+    petTest.env.__skip.mountPetSlot(slot, { id: i + 1 });
+    assert.equal(actual.id, petManifest.roots[i]);
+    assert.ok(petTags.some(t => String(t.id) === actual.id && t.tp === 39));
+    assert.equal(actual.frame, 1); assert.equal(actual.name, 'summonsImgMc');
+    assert.equal(actual.transform, 'scale(1.4)');
+  }
   const g = setup(), b = g.battle(); await g.flush();
   assert.equal(b.attack.playing, true, '真 playRound 正在 await 出手动画');
   const late = [...g.rafs.values()];

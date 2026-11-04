@@ -81,6 +81,11 @@ test('经典主页挂载失败不能只剩深绿底：看门狗 + 重试 + 空�
   assert.match(classic, /forceDomHome = true[\s\S]{0,120}renderHome\(\)/, '首次失败就要退回可点的复刻主页（后台继续重试）');
   assert.match(mainJs, /function ssfightHomeActive\(\)[\s\S]{0,400}querySelector\('svg'\)/, 'ssfightHomeActive 不能只看壳在不在');
   assert.match(renderJs, /async function fetchJson\(file, noCache\)[\s\S]{0,200}no-store/, '素材 JSON 失败要绕开缓存重取一次');
+  /* 2026-11 残余绿屏：mount 成功但 SVG 0×0 / 被挤出画面时，只数子节点会误判成「挂好了」。 */
+  assert.match(classic, /function classicHomeHasArt\(box\)[\s\S]{0,900}getBoundingClientRect\(\)[\s\S]{0,400}< br\.width \* br\.height \* 0\.45/, '可见性判定必须量几何，不能只数子节点');
+  assert.match(classic, /function scheduleClassicHomeVerify\(box, seq\)[\s\S]{0,900}repaintRaster/, '挂载成功后要复查并补一次重解码');
+  assert.match(classic, /function failClassicHomeVisible\(box, seq, why\)[\s\S]{0,300}forceDomHome = true/, '几何异常要退回复刻主页');
+  assert.match(classic, /classicHomeEscapeHatch[\s\S]{0,1200}pointerdown[\s\S]{0,1400}已切到安全模式/, '要有左上角连点 3 次的安全模式逃生口');
 });
 
 test('老 WebView（Android 11 / Chromium 8x）兼容：整屏绝对层不依赖 inset 简写', () => {

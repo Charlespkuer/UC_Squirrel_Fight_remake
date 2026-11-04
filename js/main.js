@@ -639,6 +639,9 @@
      * 三键导航，如 iQOO Z5）在标题页会露出一条导航栏，把「开始游戏」和底栏挤到一边。
      * 这里先按 localStorage 里的偏好落一次；没有原生桥时是空操作，之后再补一次。 */
     applySystemBars();
+    /* 原生桥 / insets 偶尔比页面晚一拍（HyperOS 3 上见过启动后系统栏又冒出来）：1.2s 补落一次，
+     * 没有原生桥时仍是空操作。 */
+    setTimeout(() => { try { applySystemBars(); } catch (e) {} }, 1200);
     // 一打开页面就起 BGM，不必等素材加载完或点「开始游戏」（被自动播放策略拦下时会在第一次交互补播）
     playBgm('main');
     drawLoading(0.05, '松鼠大战 · 怀旧复刻版');

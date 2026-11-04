@@ -707,13 +707,107 @@
   let forceDomHome = false;
   const CLASSIC_HOME_MOUNT_TIMEOUT_MS = 9000;
   let classicHomeMountSeq = 0;
-  /** 壳里到底有没有画出来的原版页面（`SfRender.mount` 成功一定会插一棵有子节点的 SVG）。 */
-  function classicHomeHasArt(box) {
+  /** 每个页面生命周期只补一次 repaintRaster（每次回首页都重解码会闪一下村庄底）。 */
+  let classicHomeNudgedOnce = false;
+  /** 只在挂载完成那一刻用：`SfRender.mount` 成功一定会插一棵有子节点的 SVG。几何要等一拍
+   *  （`#ui` 缩放/高度、字体量宽都在随后一拍才稳定），交给 scheduleClassicHomeVerify 复查。 */
+  function classicHomeHasSvg(box) {
     try {
       const svg = box && box.querySelector && box.querySelector('svg');
       return !!(svg && svg.childElementCount > 0);
     } catch (e) { return false; }
   }
+  /** 壳里到底有没有**看得见**的原版页面：不只看节点数，还要看 SVG 真的落在壳里。
+   *  2026-11 玩家仍报绿屏：mount 成功、SVG 有几十个节点，但盒子 0×0 / 被挤出画面 / 被隐藏，
+   *  画面上就只剩 `.ssfight-home` 的深绿底 —— 只数子节点会把这种状态误判成「挂好了」。 */
+  function classicHomeHasArt(box) {
+    try {
+      const svg = box && box.querySelector && box.querySelector('svg');
+      if (!svg || !svg.childElementCount) return false;
+      const r = svg.getBoundingClientRect();
+      if (!r || r.width < 2 || r.height < 2) return false;
+      const br = box.getBoundingClientRect();
+      if (br && br.width > 2 && br.height > 2) {
+        const iw = Math.min(r.right, br.right) - Math.max(r.left, br.left);
+        const ih = Math.min(r.bottom, br.bottom) - Math.max(r.top, br.top);
+        if (iw <= 0 || ih <= 0) return false;
+        /* 至少盖住壳的 45%：缩成一条 / 挪到角落也算坏。 */
+        if (iw * ih < br.width * br.height * 0.45) return false;
+      }
+      const cs = getComputedStyle(svg);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) < 0.05) return false;
+      return true;
+    } catch (e) { return false; }
+  }
+  /** Android 16 的 WebView 可能「挂好了但整层不上屏」（Adreno / Vulkan 合成路径的已知问题）。
+   *  挂载成功后按 0.7s / 1.6s / 3.5s 复查：几何坏了先重排 + 强制重解码一次，仍坏就摘壳退回
+   *  可点的复刻主页；几何正常时在 Android 上补一次 repaintRaster，让合成器重建一次位图。 */
+  function scheduleClassicHomeVerify(box, seq) {
+    const android = /Android/i.test(String(navigator.userAgent || ''));
+    let nudged = false;
+    const check = (attempt) => {
+      if (seq !== classicHomeMountSeq || screen !== 'home' || !box || box.isConnected === false) return;
+      if (classicHomeHasArt(box)) {
+        if (android && !nudged && !classicHomeNudgedOnce) {
+          nudged = true;
+          classicHomeNudgedOnce = true;
+          try { if (window.SfRender && SfRender.repaintRaster) SfRender.repaintRaster(); } catch (e) {}
+        }
+        if (attempt < 2) setTimeout(() => check(attempt + 1), attempt === 0 ? 900 : 1900);
+        return;
+      }
+      if (attempt === 0) {
+        try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
+        try { if (window.SfRender && SfRender.repaintRaster) SfRender.repaintRaster(); } catch (e) {}
+        setTimeout(() => {
+          if (seq !== classicHomeMountSeq || screen !== 'home' || !box || box.isConnected === false) return;
+          if (classicHomeHasArt(box)) { check(1); return; }
+          failClassicHomeVisible(box, seq, 'SVG 尺寸/位置异常');
+        }, 500);
+        return;
+      }
+      failClassicHomeVisible(box, seq, 'SVG 尺寸/位置异常');
+    };
+    setTimeout(() => check(0), 700);
+  }
+  /** 挂载成功但页面实际不可见：摘壳、退回可点的复刻主页，并把序号推进让在途回调作废。 */
+  function failClassicHomeVisible(box, seq, why) {
+    if (seq !== classicHomeMountSeq || screen !== 'home') return;
+    classicHomeMountSeq++;
+    if (window.__errs) window.__errs.push('SfUiMain: ' + why);
+    try { box.remove(); } catch (e) {}
+    forceDomHome = true;
+    try { renderHome(); } catch (e) { if (window.__errs) window.__errs.push('renderHome fallback: ' + (e && e.message)); }
+    try { if (window.Main && Main.resumeHomeScene) Main.resumeHomeScene(); } catch (e) {}
+    try { toast('主界面显示异常，已切到安全模式'); } catch (e) {}
+  }
+  /* 逃生口：真机上万一 SVG「几何正常但没画出来」，玩家在舞台左上角 1.6 秒内连点 3 次即可强切
+   * 可点的复刻主页。只统计左上角空白区，不抢按钮/立绘的点击。 */
+  (function classicHomeEscapeHatch() {
+    let taps = [];
+    try {
+      document.addEventListener('pointerdown', (e) => {
+        if (screen !== 'home') return;
+        const box = $('#ui .ssfight-home');
+        if (!box) return;
+        const r = box.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+        const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+        if (x < 0 || y < 0 || x > 0.2 || y > 0.22) return;
+        const now = Date.now();
+        taps = taps.filter((t) => now - t < 1600);
+        taps.push(now);
+        if (taps.length < 3) return;
+        taps = [];
+        classicHomeMountSeq++;
+        try { box.remove(); } catch (err) {}
+        forceDomHome = true;
+        try { renderHome(); } catch (err) {}
+        try { if (window.Main && Main.resumeHomeScene) Main.resumeHomeScene(); } catch (err) {}
+        try { toast('已切到安全模式（复刻主页）'); } catch (err) {}
+      }, true);
+    } catch (e) {}
+  })();
   function mountClassicHome(box, attempt) {
     attempt = attempt | 0;
     const seq = ++classicHomeMountSeq;
@@ -726,12 +820,14 @@
         settled = true;
         clearTimeout(timer);
         if (seq !== classicHomeMountSeq) { resolve(); return; }
-        if (!err && !classicHomeHasArt(box)) err = new Error('挂载结果为空');
+        if (!err && !classicHomeHasSvg(box)) err = new Error('挂载结果为空');
         if (!err) {
           /* 挂载期间壳是隐藏的（不透明深绿底不能盖住 canvas 主页），成了再交给 CSS 正常接管。
            * 失败过一次时页面上还压着可点的复刻主页，原版页挂好就让它让位。 */
           try { box.style.visibility = ''; } catch (e) {}
           try { const dom = $('#ui .classic-home:not(.ssfight-home)'); if (dom) dom.remove(); } catch (e) {}
+          /* 成功 ≠ 画出来了：Android 上再复查尺寸并补一次重解码（见 scheduleClassicHomeVerify）。 */
+          scheduleClassicHomeVerify(box, seq);
           resolve(); return;
         }
         if (window.__errs) window.__errs.push('SfUiMain: ' + (err && err.message ? err.message : err));

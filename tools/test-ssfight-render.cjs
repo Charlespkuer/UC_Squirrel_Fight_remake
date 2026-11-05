@@ -1375,6 +1375,13 @@ async function checkClassicFight() {
     '伤害数字模板要按飘字所在的那一侧选，不能按加血/扣血选');
   assert.ok(/Math\.floor\(Math\.random\(\) \* 30\)/.test(uf) && !/Math\.random\(\) \* 60/.test(uf),
     '飘字抖动照 showBlood：只有横向 random(30)，没有纵向 random(60)');
+  /* 用户 2026-11 木桩测试：每回合「红伤害 + 下一拍绿回血」原来都落在同一个位置，
+   * 后出现的绿字把红字盖住，看起来像"没有红字"。现在同侧往下叠留 36 个局部单位；
+   * 木桩回血只改血条、不再飘绿字（否则每回合都会盖住上一拍的红字）。 */
+  assert.ok(/const stackOffset = Math\.min\(3, stack\) \* 36;/.test(uf),
+    '同侧飘字按 36 个局部单位分层，红伤害与绿回血不能叠在同一点');
+  assert.ok(!/floatNumber\(def, r\.practiceHeal, 'heal'\)/.test(uf),
+    '练功木桩回血不再飘绿字（只更新血条），避免盖住红伤害数字');
   /* ②b⁗⁗ 幸运一击的多球分裂（`MainMovie.as:15710 boom()` / `sprite6122` 第 31 帧）：
    *   sim 按协议第 15 字段发 `boomCount`，战斗层按它复制球元件、每 100ms 亮一个并分段飘字。
    *   以前两处都没有 —— 伤害一次飘完、没有多出来的球（第 257 批自标的功能缺口）。 */
@@ -1622,10 +1629,16 @@ async function checkClassicFight() {
   assert.equal(SfFight._weaponArt(false, 15), 7, '死神镰刀（近战 15）→ 容器第 7 帧');
   assert.equal(SfFight._weaponArt(true, 10), 6, '流星锤（投掷 10）→ 容器第 6 帧');
   assert.equal(SfFight._weaponArt(false, 6), 0, '表里没有的（6 = 投掷）不能拨近战容器');
-  assert.equal(SfFight._weaponSize(15), 9, '15 级武器 → 型号第 9 帧（showWeaponSize）');
+  assert.equal(SfFight._weaponSize(15), 8, '15 级武器 → 型号第 8 帧（真5 红；与真4 对调）');
   assert.equal(SfFight._weaponSize(1), 1, '低等级武器 → 型号第 1 帧');
-  const SIZE = { 8: 2, 9: 3, 10: 4, 11: 5, 12: 6, 13: 7, 14: 8, 15: 9 };
+  /* 用户 2026-11 口径：真1 无 / 真2 白 / 真3 浅蓝 / 真4 黄 / 真5 红。
+   * 原版 `showWeaponSize` 是 14→8 / 15→9（红在真4、黄在真5），复刻按用户口径把
+   * 最后两档对调；其余普通档照原表不动。 */
+  const SIZE = { 8: 2, 9: 3, 10: 4, 11: 5, 12: 6, 13: 7, 14: 9, 15: 8 };
   for (const [lv, fr] of Object.entries(SIZE)) assert.equal(SfFight._weaponSize(Number(lv)), fr, lv + ' 级型号帧');
+  assert.ok(/node\.__clip && node\.__clip\.frames && node\.__clip\.frames\.length > 1/.test(
+    fs.readFileSync(path.join(ROOT, 'js/ssfight/render.js'), 'utf8').replace(/\r\n/g, '\n')),
+  '节点自己就是多帧 MovieClip 时不能把父级 cx 烘进当前画稿（真武器辉光 5649 会一直停在青色）');
   for (const [ranged, t] of [[false, SfFight.WEAPON_ART.melee], [true, SfFight.WEAPON_ART.ranged]]) {
     const cont = byId.get(String(t.sym));
     const n = ((cont || {}).Sf || []).filter((p) => p.tp === 1).length + 1;

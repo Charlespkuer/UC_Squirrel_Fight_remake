@@ -64,6 +64,8 @@
     xm_common_attack: 6, xm_skill_attack: 8, beatBack: 4 };
   const RANGED = new Set([5, 6, 7, 8, 9, 10, 13, 14]);
   const weaponLabelFor = (id, level) => String((level > 10 ? 1200 : level > 7 ? 1100 : 1000) + Number(id));
+  /** 真武器出手辉光：真1 无 / 真2 白 / 真3 浅蓝 / 真4 黄 / 真5 红（与经典战斗同一张表）。 */
+  const weaponGlowFor = (level) => (window.GData && GData.trueWeaponGlow ? GData.trueWeaponGlow(level) : '');
   const isThrowing = (id) => RANGED.has(Number(id));
   const SKILL_DEFEND = { 8: ['skill_8_1', 'effect_skill_8_defend'], 12: ['skill_9_1', 'effect_skill_9_1'],
     15: ['skill_15_1', 'effect_skill_15_defend'], 18: ['skill_18_2', 'effect_skill_18_defend_2'] };
@@ -722,14 +724,16 @@
         await wait(760);
         return;
       }
-      let name, fx, weaponLabel = null;
+      let name, fx, weaponLabel = null, weaponGlow = null;
       if (f.npc) {
         name = npcAnim(f.npc, r.action === 'skill' ? 'skill' : 'common');
         fx = f.npc + (r.action === 'skill' ? '_effect_skillAttack' : '_effect_commonAttack');
         if (r.ultName) floater(att, r.ultName, 'r', true);
       } else if (r.action === 'weapon') {
         name = isThrowing(r.id) ? 'fightThrowWeaponAttack' : 'fightWeaponAttack';
-        fx = isThrowing(r.id) ? 'effect_throw' : 'effect_weapon'; weaponLabel = weaponLabelFor(r.id, r.level || 1);
+        fx = isThrowing(r.id) ? 'effect_throw' : 'effect_weapon';
+        weaponLabel = weaponLabelFor(r.id, r.level || 1);
+        weaponGlow = weaponGlowFor(r.level || 1);
       } else if (r.action === 'skill') {
         name = 'skill_' + (r.id === 12 ? 9 : r.id); fx = 'effect_' + name;
         floater(att, nameOf(skillsMap, r.id, '技能'), 'y');
@@ -768,8 +772,8 @@
           if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y');
         }
       }
-      effect(fx, att, { weaponLabel });
-      await action(att, name, { weaponLabel, onFrame: (frame) => { if (frame === hit) impact(); } });
+      effect(fx, att, { weaponLabel, weaponGlow });
+      await action(att, name, { weaponLabel, weaponGlow, onFrame: (frame) => { if (frame === hit) impact(); } });
       if (!didHit && !aborted()) impact();
       await defending;
       if (aborted()) return;
@@ -871,5 +875,5 @@
      * 一场战斗要按模拟出的回合数逐帧播几十秒，等价性验证只需要"结果 + 结算链路"，
      * 所以探针要能主动把它跳到结算（与玩家按右下角「跳过」是同一条路径）。 */
     active: () => activeController,
-    run, makeAvatar, REGIONS, weaponLabelFor, isThrowing };
+    run, makeAvatar, REGIONS, weaponLabelFor, weaponGlowFor, isThrowing };
 })();

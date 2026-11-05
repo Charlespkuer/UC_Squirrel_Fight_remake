@@ -166,12 +166,14 @@ test('献祭限次增益只消耗单次获得的场次，剩余不足一份才�
   assert.equal(row(), undefined, '只剩最后一份时整栏移走');
 });
 
-test('献祭窗只认显式开关，DOM 被重画摘掉时不能自动重开', () => {
+test('献祭窗在换页重画时复位，但同一轮重画只开一层', () => {
   const ui = fs.readFileSync(path.join(ROOT, 'js/tower-ui.js'), 'utf8').replace(/\r\n/g, '\n');
   assert.ok(/function bladeOfferVisible\(\) \{[\s\S]{0,260}?return bladeOfferOpen;/.test(ui),
     'bladeOfferVisible 不能再用弹层 isConnected 反推关闭');
+  assert.ok(/function openEndless\(opts\) \{[\s\S]{0,500}?if \(bladeOfferOpen\) \{ bladeOfferOpen = false; bladeOfferEl = null; \}/.test(ui),
+    'openEndless 重画 #ui 前要复位献祭窗开关，否则丢窗后不再重开、直接卡死');
   assert.ok(!/bladeOfferEl\.isConnected === false\) bladeOfferOpen = false/.test(ui),
-    'DOM 被 openEndless 重画摘掉时不能清掉献祭开关');
+    'DOM 被 openEndless 重画摘掉时不能靠 isConnected 反推（会叠出第二层）');
   assert.ok(/bladeOfferOpen = true;\s*\n\s*const got = Tower\.bladeSacrificeCandidates/.test(ui),
     '建弹层前先置位，挡住同一轮重画造成的第二层');
 });

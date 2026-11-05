@@ -49,6 +49,9 @@
   function R(lo, hi) { return lo + Math.floor(Math.random() * (hi - lo + 1)); }
   function chance(pct) { return Math.random() * 100 < pct; }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  /* 与联机版同一组「首次投掷后可再投一次」的投掷武器：联机的动态权重给它们 2 次使用额度，
+   * 单机对齐时也按这组算。 */
+  const DOUBLE_THROW_IDS = new Set([5, 6, 8, 9, 13, 14]);
   // The client receives server-generated battles; no original trigger threshold
   // survives in its dictionary. Keep these reconstruction choices explicit.
   const RULES = Object.freeze({
@@ -60,7 +63,12 @@
      *   · 普通武器：用过之后一律 repeatWeapon（8）；
      *   · 投掷武器：前两次使用 100，第三次及以后 repeatWeapon（8）；
      *   · 其余主动技能：第二次及以后一律 repeatSkill（5）；来点松果 17 二次及以后为 1；
-     *   · 不再叠加「上一回合刚用过 ×0.3」的额外惩罚 —— 新表要求权重就是表里的数。 */
+     *   · 不再叠加「上一回合刚用过 ×0.3」的额外惩罚 —— 新表要求权重就是表里的数。
+     * 2026-11 用户新口径（对齐联机版）：**额度用尽后权重归 0、退出候选池** ——
+     *   · 普通/真化武器、普通/真化技能都是 1 次；
+     *   · 只有六种「可再投一次」的投掷武器保留 2 次额度。
+     *   · `repeatWeapon` / `repeatSkill` 仍保留给“未满额度时的第二次”这条旧口径
+     *     （现在只有六种投掷武器的第二次会走到 `repeatWeapon`）。 */
     repeatWeapon: 8,
     repeatSkill: 5,
     repeatSpecialFirst: 5, repeatSpecialAgain: 5,
@@ -260,7 +268,7 @@
       power: stat(f.power, 1), agility: stat(f.agility, 1), speed: stat(f.speed, 1),
       maxHp: fullHp, hp: Math.max(1, Math.min(stat(f.hp, 1), fullHp)),
       weapons, skills, usedWeapons: {}, weaponUseCount: {}, usedSkills: {}, /* 每个技能「本场用过几次」——野球拳（12）的快速衰减要用它。 */
-      skillUseCount: {}, lastWeaponId: null, lastSkillId: null,
+      skillUseCount: {}, lastWeaponId: null, lastWeaponTurn: 0, lastSkillId: null,
       /* 完整技能表的稳定顺序（skills 是「id → 等级」的对象，不是数组！）。
        * 原版这里写的是 skills[id] 下标访问，永远取不到东西 —— 所以固定循环的技能
        * 只能退化成「取 actives 里最小的 id」，元素术鼠因此整场都在放来点松果。 */
@@ -634,6 +642,9 @@
     return Math.max(0, Math.floor(Number(att.skillUseCount[id]) || 0));
   }
   function skillWeight(att, id) {
+    /* 与联机版对齐（用户 2026-11 口径）：普通/真化技能都用 1 次后权重归 0，
+     * 并从出手候选池里剔除；只有明确标成“可多次”的特殊机制才走别的分支。 */
+    if (skillUseCountOf(att, id) >= 1) return 0;
     let w = att.usedSkills[id] ? repeatRateOf(id, skillUseCountOf(att, id)) : UNUSED_WEIGHT;
     /* 秘技通神（C33）：该技能的触发概率 ×(1+加成)。走独立的 skillBoost 通道，
      * 不再借用 effects（那是装备词条/武器效果槽的编号空间，会造成串味）。 */
@@ -641,10 +652,12 @@
     if (boost > 0) w *= 1 + boost;
     return w;
   }
-  /** 武器权重：普通武器首次 100、之后 8；投掷武器前两次 100、第三次起 8。
+  /** 武器权重：普通武器首次 100；六种可再投一次的投掷武器前两次 100。
    *  例外：流星锤（10）与橡皮擦（7）虽是投掷，但第二次起按近战口径 8；
    *  流星锤一次三连击只算**一次**武器使用（`weaponUseCount` 每次行动只 +1）。
-   *  `w` 可以是武器对象（带 type）或武器 id；id 形式会回到 att.weapons 里找类型。 */
+   *  **额度用尽后返回 0**（普通/真化武器 1 次；六种可再投的投掷武器 2 次），
+   *  由 `usableWeapons` 剔出候选池。真化不再额外给 2 次额度（用户 2026-11 口径）。
+   *  `w` 可以是武器对象（带 type/level）或武器 id；id 形式会回到 att.weapons 里找。 */
   function weaponWeight(att, w) {
     const id = w && typeof w === 'object' ? w.id : w;
     const weapon = w && typeof w === 'object'
@@ -654,6 +667,10 @@
     const count = att.weaponUseCount && att.weaponUseCount[id] != null
       ? Math.max(0, Math.floor(Number(att.weaponUseCount[id]) || 0))
       : (used ? 1 : 0);
+    /* 与联机版对齐（用户 2026-11 口径）：普通/真化武器都用 1 次后权重归 0；
+     * 只有六种「可再投一次」的投掷武器保留 2 次额度。 */
+    const maxUses = DOUBLE_THROW_IDS.has(Number(id)) ? 2 : 1;
+    if (count >= maxUses) return 0;
     const specialThrowRepeat = Number(id) === 7 || Number(id) === 10;
     if (weapon && weapon.type === '投掷' && !specialThrowRepeat) {
       return count < 2 ? UNUSED_WEIGHT : RULES.repeatWeapon;
@@ -722,9 +739,18 @@
   function pickSkill(att, actives) {
     return pickWeighted(actives, (id) => skillWeight(att, id));
   }
-  /** 武器选择：同一套口径。`pool` 给整蛊专家过滤后的可用武器。 */
+  /** 武器选择：同一套口径。`pool` 给整蛊专家过滤后的可用武器。
+   *  ⚠ 用户 2026-11 木桩测试口径：**上一手用的武器，下一手不要立刻再抽到**
+   *  （大榔头连着出两次看起来像“一把武器打了两下”）。只在「上一手就是武器、
+   *  且这一手紧挨着它」时排除；中间隔了普攻/技能、或只剩这一把可用时不排除。
+   *  `lastWeaponTurn` 用出手者的 `turnId` 记，所以只数**自己的**连续出手。 */
   function pickWeapon(att, pool) {
-    return pickWeighted(pool && pool.length ? pool : att.weapons, (w) => weaponWeight(att, w));
+    const list = (pool && pool.length ? pool : att.weapons) || [];
+    const lastId = Number(att.lastWeaponId) || 0;
+    const consecutive = lastId > 0 && Number(att.lastWeaponTurn) > 0
+      && Number(att.turnId) - Number(att.lastWeaponTurn) === 1;
+    const alt = consecutive ? list.filter((w) => Number(w && w.id) !== lastId) : list;
+    return pickWeighted(alt.length ? alt : list, (w) => weaponWeight(att, w));
   }
 
   /* ============================================================
@@ -1688,7 +1714,8 @@
       // 行动选择：武器 45% / 技能 35% / 普攻 20%
       /* 幻兽·整蛊专家：被封住的武器/技能整场不能再用。这里先过滤，
        * 后面的 `pickKind` / `pickWeapon` / `nextPatternSkill` 都只看可用池。 */
-      const usableWeapons = att.weapons.filter((w) => w && !att.petSealWeapons[w.id]);
+      const usableWeapons = att.weapons.filter((w) => w && !att.petSealWeapons[w.id] &&
+        (weaponWeight(att, w) > 0 || (att.pendingWeapon && att.pendingWeapon.id === w.id)));
       const canWeapon = usableWeapons.length > 0 && att.disarm <= 0;
       /* 来点松果不再硬性每场一次：二次及以后按 `repeatRateOf` 的 1 权重参与抽取；
        * 野球拳也没有额外闸门，二次及以后按权重 5 参与抽取。 */
@@ -1701,7 +1728,7 @@
         !att.petSealSkills[id] &&
         !(id === 14 && att.usedCosmos) && !(id === 17 && att.hp >= att.maxHp) &&
         !(att.pattern && att.skillCd && att.skillCd[id] > 0) &&        // 冷却中（只对固定循环的敌人生效）
-        !att.turnSkills[id]);
+        !att.turnSkills[id] && skillWeight(att, id) > 0);
       const canSkill = actives.length > 0 && att.silence <= 0;
       const forceCosmos = !!(att.mods && att.mods.cosmosFirst) && !att.usedCosmos && canSkill &&
         actives.some((id) => Number(id) === 14);
@@ -1732,6 +1759,7 @@
         att.weaponUseCount = att.weaponUseCount || {};
         att.weaponUseCount[w.id] = Math.max(0, Math.floor(Number(att.weaponUseCount[w.id]) || 0)) + 1;
         att.lastWeaponId = w.id;
+        att.lastWeaponTurn = Number(att.turnId) || 0;
         att.pendingWeapon = null;
         if (w.id === 1 && !prepared) {
           att.pendingWeapon = w;
@@ -2208,6 +2236,8 @@
     /* 出手类型的三份权重（武器/技能/徒手）与占比 —— 供测试直接核对
      * 「持有的武技越多 → 徒手越少」「全部用过一遍 → 徒手变多」。 */
     kindWeights,
+    /* 武器选择的纯函数（供回归核对「上一手用过的武器不会立刻再抽到」）。 */
+    pickWeapon,
     /* 题面·熔核·炽壳的减伤曲线（每回合 +10%、封顶 70%）—— 纯函数，供测试直接核对 */
     coreReduceOf, coreMaxStacks,
     /* 防御被动的单次触发概率（%）与被动加成读取 —— 供测试/调参直接核对，

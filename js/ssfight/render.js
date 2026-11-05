@@ -543,6 +543,10 @@
   }
   function colorPaintList(node) {
     if (!node || !node.childNodes) return null;
+    /* ⚠ 节点**自己**就是一个多帧 MovieClip 时，不能把父级 cx 烘进它当前的画稿：
+     * 它下一帧会换掉内部节点，烘过的颜色当场丢失（真武器 5649 的辉光就是这样
+     * 一直停在第一档的青色，真2~真5 看起来全一样）。这一档必须挂父级 filter。 */
+    if (node.__clip && node.__clip.frames && node.__clip.frames.length > 1) return null;
     /* 子树里还有滤镜、或已经有**别的节点**烘焙过的 cx（嵌套颜色变换）：
      * 父级再烘会覆盖子级的合成结果，这一档仍交给 SVG 滤镜。 */
     let blocked = false;

@@ -7,6 +7,136 @@
 
 ---
 
+## 〇、标准打包流程（新 agent 先看这里）
+
+> 适用范围：单机版仓库 `E:\Squirrel_Fight`（入口 `scripts/index.html`）。联机版是另一个仓库，
+> 部署/出包看 `E:\Squirrel_Fight_Online\AGENTS.md`，不要混用这里的服务器步骤。
+>
+> 原则：**先本地全绿，再模拟器矩阵，再推送，远端 CI 绿了才打包**。任何一步失败都停下来修，
+> 不要带病推送，也不要在 CI 没绿时先出包。
+
+### 1. 本地 Node 全量回归
+
+```powershell
+cd E:\Squirrel_Fight
+$fail=@()
+Get-ChildItem tools\test-*.cjs | Sort-Object Name | ForEach-Object {
+  Write-Host "=== $($_.Name) ==="
+  node $_.FullName
+  if ($LASTEXITCODE -ne 0) { $fail += $_.Name }
+}
+node tools\test-battle.js
+node tools\check-asset-paths.cjs
+node tools\check-encodings.cjs
+if ($fail.Count) { throw "失败：$($fail -join ', ')" }
+```
+
+- 失败先修；概率类用例偶尔抖动时至少连跑 5 次确认，不能只看一次重跑。
+- `test-battle.js` 缺 `@napi-rs/canvas` 会打 `SKIP`，这是允许的；其余失败不允许。
+- 资源/编码检查必须过；编码检查只对仓库文件负责，`references/` 的本机文件不算。
+
+### 2. Windows 模拟器矩阵（Android）
+
+本机工具链（换机器时改路径）：
+
+- JDK：`E:\Android\jdk-17.0.20.1+1`
+- SDK：`E:\Android\sdk`（platform-tools / build-tools 35 / NDK 27）
+- AVD：`ssdz_api28`（Android 9）、`ssdz_api30`（11）、`ssdz_test`（15）、`ssdz_api36`（16）
+
+**2.1 出模拟器测试包**（x86_64 debug；先不要出正式包）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-release.ps1 `
+  -Version 1.1.5 -SkipExe -SkipInstaller -SkipIos -DebugApk -Abi x86_64 -KeepCache
+```
+
+如果本机装了 `pwsh` 也可以用 `pwsh`；没有就固定用上面的 `powershell`（Windows PowerShell 5.1）。
+
+**2.2 逐个系统启动/安装/冒烟**
+
+```powershell
+$adb='E:\Android\sdk\platform-tools\adb.exe'
+$emu='E:\Android\sdk\emulator\emulator.exe'
+
+& $emu -avd ssdz_api30 -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot -port 5554
+# 等 sys.boot_completed=1
+& $adb -s emulator-5554 uninstall com.ssdz.classic   # 只清测试机；有更新版本时先卸，否则会 INSTALL_FAILED_VERSION_DOWNGRADE
+& $adb -s emulator-5554 install src-tauri\dist\ssdz-classic-x86_64-debug-*.apk
+& $adb -s emulator-5554 shell monkey -p com.ssdz.classic -c android.intent.category.LAUNCHER 1
+```
+
+每个 AVD 必看：
+
+1. 标题页出现「开始游戏」；
+2. 进入主页（体力/金币/开始挑战可见）；
+3. 开始一场战斗，首帧正常、无卡死；
+4. `adb logcat -d` 里没有 `Tauri/Console` 的 `Uncaught` / `SyntaxError` / `FATAL`。
+
+`ssdz_api36` / `ssdz_test` 用同样步骤换 `-avd` 名即可；一次只开一个模拟器，避免端口和内存冲突。
+
+**已实测的系统基线**（2026-11）：
+
+| Android | WebView | 结果 |
+| --- | --- | --- |
+| 9（API28） | 69（系统自带） | **不支持**：`Object.fromEntries` / `?.` 解析失败，标题后主页报 `UI.drawHomeHud is not a function`。不要把它当 1.1.5 回归。 |
+| 11（API30） | 83 | 通过：标题/主页/战斗首帧 |
+| 15（API35） | 124 | 通过：标题/主页 |
+| 16（API36） | 133 | 通过：标题/主页 |
+
+安卓实际支持基线按 **WebView 83（Android 11）+** 记录；API28 的 WebView 69 低于项目的现代 JS 语法要求。
+如果以后要真正支持 Android 9，需要补 `Object.fromEntries` polyfill 并把 `?.` 转译，不能只改 `minSdk`。
+
+### 3. 版本号与发版说明
+
+- 指定版本用 `-Version 1.1.5`，不要靠自动 `+1`（`build-release.ps1` 的自动 bump 只加末位）。
+- 版本写入：`scripts/version.json`、`src-tauri/{Cargo.toml,Cargo.lock,package.json,tauri.conf.json}`、
+  `src-tauri/gen/android/app/tauri.properties`（versionName + versionCode）。
+- 把 `scripts/version.json` 的 `note` 改成这一版能感知的内容；`commit` 在代码提交后回填。
+- 不要把 `src-tauri/dist/`、`src-tauri/web/`、`src-tauri/target/` 提交进 Git。
+
+### 4. 提交并推送
+
+```powershell
+git status --short
+git diff --stat
+git add <只加本次要发布的文件>
+git commit -m "1.1.5：<一句话>"
+git push origin main
+```
+
+- 推送前确认没有把 `out/` 的截图/日志、`references/`、生成的 `dist/web/target` 加进去。
+- 推送后等 GitHub Actions 的 **Node 测试（ubuntu/macos/windows × Node 20）** 全绿。
+  本机没有 `gh` 时用公开 API 查最近一次 run：
+
+```powershell
+$repo='Charlespkuer/UC_Squirrel_Fight_remake'
+$runs=Invoke-RestMethod "https://api.github.com/repos/$repo/actions/runs?branch=main&per_page=1"
+$runs.workflow_runs[0] | Select-Object head_sha,status,conclusion,html_url
+```
+
+`conclusion` 必须是 `success`；`failure` / `cancelled` 时**停止出包**，修完重新提交推送。
+远端 CI 只证明 Node 测试和编码/资源检查过了，不替代模拟器冒烟。
+
+### 5. 正式出包（远端 CI 绿后）
+
+```powershell
+# 先断开/关闭模拟器，避免 build-apk 把包装到测试机时遇到版本降级
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-release.ps1 -Version 1.1.5 -SkipIos
+```
+
+- `-SkipIos` 只在 Mac 对端不可用时用；Mac 在线时不要加，让脚本顺序出 modern/legacy IPA。
+- 脚本会删 `src-tauri\dist` 里上一版旧包，再出 Windows exe / NSIS 安装包 / arm64 APK /（可选）IPA。
+- 测试用 `-DebugApk -KeepCache` 只用于模拟器；正式包不要带这两个参数。
+- 出包后检查 `src-tauri\dist` 文件名和版本号；APK 用 `aapt2 dump badging` / `apksigner verify` 复检。
+
+### 6. 收尾
+
+- 模拟器 `adb emu kill`；本地 `serve.js` / Chrome 调试实例关掉。
+- 只保留 `out/` 规范允许的长期工具；本轮截图、日志、临时 CDP 脚本按 `out/AGENT.md` 清理。
+- 不把 `dist/` 产物提交；发布包上传/Release 按上面的 GitHub Release 流程另外做。
+
+---
+
 # 跨平台运行与 GitHub 发布指南
 
 > 结论先说：**这是个纯静态 HTML5 游戏，运行时不依赖任何系统特性，macOS、Windows、Linux 都能玩，也能原样发布到 GitHub Pages**。

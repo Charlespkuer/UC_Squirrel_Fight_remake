@@ -106,7 +106,7 @@ sandbox.window = sandbox;
 vm.createContext(sandbox);
 /* 原版数据只从仓库里的 js/gamedict.js 读（与 index.html 同一个数据源）；
  * references/ 只是参考资料，不参与运行，跑回归也不该依赖它。 */
-for (const file of ['js/gamedict.js', 'js/engine.js', 'js/battle.js']) vm.runInContext(fs.readFileSync(file, 'utf8'), sandbox, { filename: file });
+for (const file of ['js/gamedict.js', 'js/gamedata.js', 'js/engine.js', 'js/battle.js']) vm.runInContext(fs.readFileSync(file, 'utf8'), sandbox, { filename: file });
 const E = sandbox.Engine, B = sandbox.Battle;
 const instances = [];
 const originalPlay = E.playAnim;
@@ -127,12 +127,19 @@ function save(name) { fs.mkdirSync('out/battle-check', { recursive: true }); fs.
   const result = { winner: 0, rounds: [
     { attacker: 0, action: 'common', dmg: 40, hpAfter: [250, 210] },
     { attacker: 1, action: 'common', dmg: 25, counterDmg: 5, hpAfter: [225, 205] },
-    { attacker: 0, action: 'weapon', id: 3, level: 8, dmg: 205, hpAfter: [225, 0] },
+    { attacker: 0, action: 'weapon', id: 3, level: 12, dmg: 205, hpAfter: [225, 0] },
   ] };
   let ended = 0;
   const controller = await B.run({ canvas, me: fighter, foe: { ...fighter, name: '螳螂', npcType: 'tl' }, region: 3, result, onEnd: () => ended++ });
   assert(E.frameSize('fightNum_r', '4').w === 45, 'grid number atlas is registered');
   assert(B.weaponLabelFor(3, 8) === '1103');
+  /* 真武器辉光（用户 2026-11 口径）：真1 无 / 真2 白 / 真3 浅蓝 / 真4 黄 / 真5 红。 */
+  assert.equal(B.weaponGlowFor(10), '', '普通武器没有真化辉光');
+  assert.equal(B.weaponGlowFor(11), '', '真1 无辉光');
+  assert.equal(B.weaponGlowFor(12), '#ffffff', '真2 白');
+  assert.equal(B.weaponGlowFor(13), '#9fe8ff', '真3 浅蓝');
+  assert.equal(B.weaponGlowFor(14), '#ffe14a', '真4 黄');
+  assert.equal(B.weaponGlowFor(15), '#ff5a4f', '真5 红');
   await until(1750); save('01-idle-forest');
   const npc = instances.find((i) => i.name === 'tl_rest');
   assert.equal(npc.mirror, false, 'right-side NPC timeline must not be mirrored again');
@@ -145,6 +152,8 @@ function save(name) { fs.mkdirSync('out/battle-check', { recursive: true }); fs.
   assert(drawnText.some((t) => t.text === '210/250'), 'HP falls on impact');
   await until(3150); save('04-npc-attack');
   await until(10000); save('05-result');
+  assert(instances.some((i) => i.name === 'fightWeaponAttack' && i.weaponLabel === '1203' && i.weaponGlow === '#ffffff'),
+    '真2 武器出手把真化贴图与白色辉光一起传给播放器');
   assert.equal(ended, 1, 'complete battle calls onEnd once');
   assert.equal(rafs.size, 0, 'finished battle stops its render loop');
   assert.equal(children.length, 0, 'finished battle removes the accessible skip control');

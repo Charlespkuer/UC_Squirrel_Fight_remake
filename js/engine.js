@@ -724,6 +724,7 @@
     const mirror = !!opt.mirror;
     const filters = opt.only || null;     // 只画这些标签（数组或 Set）
     const exclude = opt.exclude || null;
+    const glow = opt.weaponGlow || null;  // 真武器出手辉光（真2~真5 的白/浅蓝/黄/红）
     const wl = opt.weaponLabel == null ? null : String(opt.weaponLabel);
     const sheets = opt.sheets || null;    // 指定图集（按优先级）；不指定则用全局标签索引
     let n = 0;
@@ -750,6 +751,14 @@
       else { tx += ox * scale; ty += oy * scale; }
       ctx.save();
       ctx.globalAlpha *= el.alpha * (opt.alpha == null ? 1 : opt.alpha);
+      /* 真武器：只给武器替身（label > 1000）加一层同色外发光，角色/衣服不发光。
+       * 阴影在变换后设置，shadowBlur 按屏幕像素算，缩放后仍然是一圈稳定的光晕。 */
+      if (glow && +el.label > 1000) {
+        ctx.shadowColor = glow;
+        ctx.shadowBlur = 18;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+      }
       ctx.transform(a, b, c, d, tx, ty);
       ctx.drawImage(sp.sh.img, f.sx, f.sy, f.sw, f.sh, 0, 0, fd.w, fd.h);
       ctx.restore();
@@ -791,6 +800,7 @@
       scale: opts.scale == null ? 1 : opts.scale,
       mirror: !!opts.mirror,
       weaponLabel: opts.weaponLabel == null ? null : String(opts.weaponLabel),
+      weaponGlow: opts.weaponGlow || null,
       only: opts.only || null, exclude: opts.exclude || null,
       sheets: opts.sheets || null,
       wears: opts.wears || null,

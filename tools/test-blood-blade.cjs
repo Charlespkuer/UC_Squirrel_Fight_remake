@@ -207,6 +207,7 @@ test('限次用尽进化为下一阶段；最终王者之剑永续、不再献�
   grantBlade(c);
   let run = runOf(c);
   const row = bladeRow(c);
+  c.Tower.debugGrantBuff('C57');                       // 备一件祭品，单独验证「进化后仍要献祭」
   row.uses = 1;
   winOnce(c);
   let info = c.Tower.bladeInfoOf();
@@ -232,6 +233,78 @@ test('限次用尽进化为下一阶段；最终王者之剑永续、不再献�
   assert.equal(run.bladeSacrificePending, undefined);
 });
 
+test('没有合格祭品时自动吞噬使用次数并继续，不弹窗、不掉成长', () => {
+  const c = setup();
+  grantBlade(c);
+  const run = runOf(c);
+  const row = bladeRow(c);
+  run.permanent = [];
+  run.limited = (run.limited || []).filter((b) => b && b.id === 'HB01');
+  assert.equal(c.Tower.bladeSacrificeCandidates().list.length, 0, '手里没有合格祭品');
+  const rw = winOnce(c);
+  assert.equal(rw.bladeStarved && rw.bladeStarved.consumed, 1, '战后自动吞噬 1 次');
+  assert.equal(run.bladeSacrificePending, undefined, '不再挂必选献祭标记');
+  let info = c.Tower.bladeInfoOf();
+  assert.equal(info.uses, 6, '8 场 − 本场 1 − 自动吞噬 1 = 6');
+  assert.equal(info.stacks, 1, '自动吞噬不掉成长');
+  assert.equal(info.on, true, '自动吞噬不熄灭剑');
+  assert.ok((run.pendingToasts || []).some((t) => /自动吞噬/.test(t)), '要有一条飘字说明');
+
+  /* 旧档里已经落了 pending、但没有祭品：同样自动结算，不再弹「承受反噬」空窗。 */
+  run.bladeSacrificePending = true;
+  const r = c.Tower.sacrificeBlade(null);
+  assert.equal(r.ok, true, r.msg);
+  assert.equal(r.starved, true);
+  assert.equal(r.uses, 5, '旧档补算也吞 1 次');
+  assert.equal(run.bladeSacrificePending, undefined);
+  assert.equal(c.Tower.bladeInfoOf().stacks, 1);
+  assert.equal(c.Tower.bladeInfoOf().on, true);
+});
+
+test('削弱后的成长表生效：力/吸血按新值，王者/涸血永续加成不再被跳过', () => {
+  const c = setup();
+  grantBlade(c);
+  const run = runOf(c);
+  const row = bladeRow(c);
+  run.permanent = [];
+  run.limited = (run.limited || []).filter((b) => b && c.TowerData.isBladeId(b.id));
+  const effects = () => Object.fromEntries(c.Tower.debugBuffReport('endless').effects);
+  const set = (id, stacks) => {
+    row.id = id; row.stacks = stacks; row.uses = ['HB04', 'HB05'].includes(id) ? -1 : 8; row.on = true;
+  };
+  set('HB01', 1);
+  let e = effects();
+  assert.equal(e['攻击'], '+10%');
+  assert.equal(e['攻击吸血'], '+3%');
+  assert.equal(e['受到伤害'], '+3%');
+  set('HB02', 1); e = effects();
+  assert.equal(e['攻击'], '+13%');
+  assert.equal(e['攻击吸血'], '+5%');
+  assert.equal(e['受到伤害'], '+4%');
+  set('HB03', 1); e = effects();
+  assert.equal(e['攻击'], '+18%');
+  assert.equal(e['攻击吸血'], '+8%');
+  assert.equal(e['受到伤害'], '+5%');
+  set('HB04', 1); e = effects();
+  assert.equal(e['攻击'], '+30%');
+  assert.equal(e['攻击吸血'], '+12%');
+  assert.equal(e['受到伤害'], '+5%');
+  assert.equal(e['暴击率'], '+7%');
+  assert.equal(e['暴击伤害'], '+20%');
+  set('HB04', 5); e = effects();
+  assert.equal(e['攻击'], '+150%');
+  assert.equal(e['暴击率'], '+35%');
+  assert.equal(e['暴击伤害'], '+100%');
+  set('HB05', 1); e = effects();
+  assert.equal(e['受到伤害'], '-6%');
+  assert.equal(e['每回合回血'], '+1% 最大生命');
+  assert.equal(e['生命上限'], '+4%');
+  assert.equal(e['护盾'], '+3%');
+  set('HB05', 5); e = effects();
+  assert.equal(e['受到伤害'], '-30%');
+  assert.equal(e['护盾'], '+15%');
+});
+
 test('闲置 20 场强制苏醒且无法关闭；用过重新计数', () => {
   const c = setup();
   grantBlade(c);
@@ -244,6 +317,7 @@ test('闲置 20 场强制苏醒且无法关闭；用过重新计数', () => {
   assert.equal(info.forced, true, '无法关闭');
   assert.equal(c.Tower.toggleLimited(String(bladeRow(c).uid), false).ok, false, '强制苏醒期间不能关');
   /* 下一场真正用一次。 */
+  c.Tower.debugGrantBuff('C57');                       // 备一件祭品，验证强制使用后仍要献祭
   winOnce(c);
   info = c.Tower.bladeInfoOf();
   assert.equal(info.forced, false, '用过之后解除强制');

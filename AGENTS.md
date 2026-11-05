@@ -8,7 +8,7 @@
 - 存档、背包、货币、建筑与日常规则：从 `js/state.js` 的 `State` API 查起；页面调用 API，不另存一套数值。
 - 战斗与数值：`js/battle.js`、`js/sim.js`；字典源是已提交的 `js/gamedict.js`，派生规则在 `js/gamedata.js`。
 - 无尽塔：`js/tower.js` / `js/tower-ui.js`；剧情改动先读 `docs/剧情触发条件.md`，实现是 `js/tower-plot.js`。
-- 运行与打包：`scripts/serve.js`、`tools/build-guide.md`。页面脚本和 CSS 的实际加载顺序以 `scripts/index.html` 为准。
+- 运行与打包：`scripts/serve.js`、`tools/build-guide.md`（**标准打包流程**在该文件顶部，发版/打包前先读）。页面脚本和 CSS 的实际加载顺序以 `scripts/index.html` 为准。
 - 双击入口与双机同步（一键同步、端口、日志）：读 `scripts/AGENTS.md`；桌面 / 安卓壳：读 `src-tauri/AGENTS.md`。
 - 运行时素材目录：读 `images/AGENTS.md`；本机参考资料（`references/`，不进仓库、先拷贝出来再消费）：读 `references/AGENTS.md`。
 

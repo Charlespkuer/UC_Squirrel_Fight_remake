@@ -242,6 +242,14 @@
     const step = row && row[key] ? row[key] : 0;
     return step * lv;
   }
+  /* 真武器出手时的辉光颜色（用户 2026-11 口径，顺序固定）：
+   *   真1 无 / 真2 白 / 真3 浅蓝 / 真4 黄 / 真5 红。
+   * 经典战斗用它给型号帧补一层轻量外发光（真2 的型号帧本身没有彩色辉光，
+   * 白档只能靠这一层看出来）；现代 canvas 战斗用它给武器贴图加同色阴影。 */
+  const TRUE_WEAPON_GLOW = Object.freeze(['', '', '#ffffff', '#9fe8ff', '#ffe14a', '#ff5a4f']);
+  function trueWeaponGlow(level) {
+    return TRUE_WEAPON_GLOW[trueLevel(level)] || '';
+  }
 
   /** 真等级：11 级 = 真1 … 15 级 = 真5；10 级及以下为 0。 */
   function trueLevel(level) {
@@ -1278,7 +1286,7 @@
    * ============================================================ */
   window.GData = { EXP_TABLE, nextExp, formatBigNumber, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, stageEnemyCount, isSuperStage, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
     STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_REGULAR_MUL, SUPER_HP_MUL, SUPER_TYPE_SCALE, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
-    trueLevel, trueSkillValue, trueSkillStep, trueSkillRow, TRUE_SKILL_TABLE, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus,
+    trueLevel, trueSkillValue, trueSkillStep, trueSkillRow, TRUE_SKILL_TABLE, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus, TRUE_WEAPON_GLOW, trueWeaponGlow,
     stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, BLUE_SHARD_DROP_MUL, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, BLACK_GEAR_SETS, BLACK_SHARD_SET, BLACK_CARD_ID, BLACK_BOX_ID, registerBlackGear, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, EXTRA_RANK_GOODS, registerRankGoods, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
     PETS, PET_SKILLS, PET_SKILL_RULES, petSkillValue, petSkillTrigger, petSkillInfo, PET_GRADE_EXP, PET_GRADE_COST,
     SET_BONUS, SET_BONUS_TIER_MUL, SET_BONUS_GLOBAL_MUL, SET_BONUS_HP_MUL, SET_BONUS_FAMILY_FLOOR,

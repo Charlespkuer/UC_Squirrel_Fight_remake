@@ -678,14 +678,16 @@
     deadId: 'HB05',
     idleLimit: 20,           // 闲置多少场后强制苏醒
     enhanceUses: 3,          // 增强活性一次消耗几场使用次数
+    starveUses: 1,           // 没有合格祭品时，剑自动吞噬几场使用次数（不再弹窗卡住）
     eventStart: 51,          // 第一次活性事件的层号
     eventEvery: 10,          // 之后每 10 层必定一次
     maxStacks: 5,            // 献祭成长上限
     sacrificeRarity: 2,      // 限次祭品的最低稀有度（史诗）
     finalUses: -1,           // -1 = 永续（不再扣次数 / 不需要献祭）
-    mirrorPowerCut: 0.20,    // 王者之剑对镜之魔王：基础力量削减
-    mirrorHpCut: 0.30,       // 王者之剑对镜之魔王：基础生命上限削减
-    mirrorPerStack: 0.02,    // 每多一层献祭再各削 2%
+    mirrorPowerCut: 0.15,    // 王者之剑对镜之魔王：×1 层的力量削减
+    mirrorPowerCutMax: 0.20, // ×5 层（满成长）的力量削减，中间层线性
+    mirrorHpCut: 0.20,       // 王者之剑对镜之魔王：×1 层的生命上限削减
+    mirrorHpCutMax: 0.30,    // ×5 层（满成长）的生命上限削减，中间层线性
   });
   function isBladeId(id) { return BLADE.ids.indexOf(String(id)) >= 0; }
   function isBladeBuff(b) { return !!(b && isBladeId(b.id)); }
@@ -2269,17 +2271,17 @@
      * 每层的 mods 都会按 `stacks`（献祭次数）线性放大；负面 `takenMul` 也一起放大。
      * ============================================================ */
     { id: 'HB01', tags: ['endless', 'story', 'catalog', 'blade'], name: '渴血之剑', rarity: 3, kind: 'limited', uses: 8, maxStacks: 5,
-      desc: '战斗中：力量 +12%/层、攻击吸血 +5%/层、受到伤害 +3%/层。每场战斗后必须献祭一件史诗+限次或永久增益来喂养它（献祭使其成长 1 层）。限次 8 场；用尽后进化为下一阶段。闲置 20 场会强制苏醒。',
-      mods: { powerMul: 0.12, lifestealPct: 0.05, takenMul: 0.03 } },
+      desc: '战斗中：力量 +10%/层、攻击吸血 +3%/层、受到伤害 +3%/层。每场战斗后必须献祭一件史诗+限次或永久增益来喂养它（献祭使其成长 1 层；没有可献祭的增益时不会卡住，自动吞噬 1 次使用次数继续）。限次 8 场；用尽后进化为下一阶段。闲置 20 场会强制苏醒。',
+      mods: { powerMul: 0.10, lifestealPct: 0.03, takenMul: 0.03 } },
     { id: 'HB02', tags: ['endless', 'story', 'catalog', 'blade'], name: '渴血之剑·饥', rarity: 3, kind: 'limited', uses: 8, maxStacks: 5,
-      desc: '战斗中：力量 +18%/层、攻击吸血 +7%/层、受到伤害 +4%/层。每场战斗后仍要献祭（史诗+限次或永久）；限次 8 场，用尽后进化为下一阶段。',
-      mods: { powerMul: 0.18, lifestealPct: 0.07, takenMul: 0.04 } },
+      desc: '战斗中：力量 +13%/层、攻击吸血 +5%/层、受到伤害 +4%/层。每场战斗后仍要献祭（史诗+限次或永久；没有可献祭的增益时自动吞噬 1 次使用次数继续）；限次 8 场，用尽后进化为下一阶段。',
+      mods: { powerMul: 0.13, lifestealPct: 0.05, takenMul: 0.04 } },
     { id: 'HB03', tags: ['endless', 'story', 'catalog', 'blade'], name: '渴血之剑·狂', rarity: 3, kind: 'limited', uses: 8, maxStacks: 5,
-      desc: '战斗中：力量 +26%/层、攻击吸血 +9%/层、受到伤害 +5%/层。每场战斗后仍要献祭；限次 8 场，用尽后进化为王者之剑。',
-      mods: { powerMul: 0.26, lifestealPct: 0.09, takenMul: 0.05 } },
+      desc: '战斗中：力量 +18%/层、攻击吸血 +8%/层、受到伤害 +5%/层。每场战斗后仍要献祭（没有可献祭的增益时自动吞噬 1 次使用次数继续）；限次 8 场，用尽后进化为王者之剑。',
+      mods: { powerMul: 0.18, lifestealPct: 0.08, takenMul: 0.05 } },
     { id: 'HB04', tags: ['endless', 'story', 'catalog', 'blade'], name: '王者之剑', rarity: 3, kind: 'limited', uses: -1, maxStacks: 5,
-      desc: '最终形态：力量 +40%/层、攻击吸血 +12%/层、暴击率 +10%/层、暴击伤害 +20%/层，受到伤害 +4%/层；对镜之魔王额外削减其力量与生命上限。永续，不再消耗次数、不再需要献祭。',
-      mods: { powerMul: 0.40, lifestealPct: 0.12, takenMul: 0.04, critBonus: 10, critDmgBonus: 0.20, kingMirrorBlade: 1 } },
+      desc: '最终形态：力量 +30%/层、攻击吸血 +12%/层、暴击率 +7%/层、暴击伤害 +20%/层，受到伤害 +5%/层；对镜之魔王额外削减其力量与生命上限。永续，不再消耗次数、不再需要献祭。',
+      mods: { powerMul: 0.30, lifestealPct: 0.12, takenMul: 0.05, critBonus: 7, critDmgBonus: 0.20, kingMirrorBlade: 1 } },
     { id: 'HB05', tags: ['endless', 'story', 'catalog', 'blade'], name: '涸血之剑', rarity: 3, kind: 'limited', uses: -1, maxStacks: 5,
       desc: '彻底失活：受到伤害 −6%/层、每回合回复 1%/层最大生命、生命上限 +4%/层、开局护盾 +3%/层。永续，不再需要献祭。',
       mods: { takenMul: -0.06, regenPct: 0.01, maxHpMul: 0.04, shellPct: 0.03 } },

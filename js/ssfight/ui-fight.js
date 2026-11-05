@@ -647,6 +647,11 @@
         if (fr) { stopAt(clip, fr); return; }
       } else if (WEAPON_ART_SYMS.has(Number(clip.tag.id))) {
         stopAt(clip, WEAPON_SIZE_FRAMES[art.level] || 1);
+        /* 真2~真5 的固定色外发光：型号帧 6/7/9/8 本身已经带同色辉光，
+         * 真2 的白档（帧 6）没有彩色辉光，所以统一再补一层很轻的 drop-shadow，
+         * 既让白档看得见，也让各档的颜色顺序在战斗中一眼能分辨。 */
+        const glow = weaponTrueGlow(art.level);
+        if (glow && clip.g && clip.g.style) clip.g.style.filter = 'drop-shadow(0 0 5px ' + glow + ')';
         return;
       }
     }
@@ -766,8 +771,17 @@
   const THROW_WEAPON_ART = { sym: 5776, frames: { 5: 1, 6: 2, 7: 3, 8: 4, 9: 5, 10: 6, 13: 7, 14: 8 } };
   /** 武器容器（`5734` / `5776`）→ 它自己那一套 id → 帧 的映射。 */
   const WEAPON_ART_CONTAINERS = { 5734: MELEE_WEAPON_ART, 5776: THROW_WEAPON_ART };
-  /** 单把武器的美术（`showWeaponSize` 的接收者）→ 按等级挑型号帧。 */
-  const WEAPON_SIZE_FRAMES = { 8: 2, 9: 3, 10: 4, 11: 5, 12: 6, 13: 7, 14: 8, 15: 9 };
+  /** 单把武器的美术（`showWeaponSize` 的接收者）→ 按等级挑型号帧。
+   *  普通 8~13 级照原版 2~7 帧；真化四档按用户 2026-11 口径固定成
+   *  **真1 无 / 真2 白 / 真3 浅蓝 / 真4 黄 / 真5 红**：
+   *  型号帧 5 = 真1（无彩色辉光）、6 = 真2（白）、7 = 真3（浅蓝）、
+   *  9 = 真4（黄）、8 = 真5（红）。原版 `showWeaponSize` 是 14→8 / 15→9
+   *  （红在真4、黄在真5），与用户口径相反，所以最后两档对调，其余不动。 */
+  const WEAPON_SIZE_FRAMES = { 8: 2, 9: 3, 10: 4, 11: 5, 12: 6, 13: 7, 14: 9, 15: 8 };
+  /** 真武器外发光颜色（与 `GData.trueWeaponGlow` 同一张表；取不到时退回空串）。 */
+  function weaponTrueGlow(level) {
+    return (window.GData && GData.trueWeaponGlow) ? GData.trueWeaponGlow(level) : '';
+  }
   const WEAPON_ART_SYMS = new Set([5666, 5670, 5674, 5679, 5686, 5697, 5706, 5724, 5733,
     5753, 5757, 5760, 5763, 5766, 5769, 5772, 5775]);
   function attackPlan(r) {
@@ -2223,10 +2237,15 @@
     const base = (live && live.bloodBase && live.bloodBase[side]) || (side === 0 ? [1.05, 56.25, 62.7] : [1.05, 244.25, 62.7]);
     const clip = view.attachChild(side === 0 ? '4845' : '4846', spec.frame, 'float');
     if (!clip) return;
-    /* 复制点的抖动 + 同一侧往下叠（原版 `showBlood` 的 `index` 逻辑）。 */
+    /* 复制点的抖动 + 同一侧往下叠（原版 `showBlood` 的 `index` 逻辑）。
+     * ⚠ 原版 `index * 20` 在 14fps 的 320×196 舞台上够用；复刻这里的数字更大，
+     * 木桩战每回合「红伤害 + 下一拍绿回血」会叠在同一个位置，后出现的绿字把红字盖住
+     * （用户 2026-11 口径：“攻击到敌人身上后没有显示红字”）。36 个局部单位能把两行分开；
+     * 同一侧同时超过 3 颗时不再继续往下推，避免推出舞台。 */
     const jx = (Math.random() < 0.5 ? -1 : 1) * Math.floor(Math.random() * 30);
     const stack = (live.floats[side] = (live.floats[side] || 0) + 1);
-    clip.setExtraTransform('matrix(' + base[0] + ',0,0,' + base[0] + ',' + (base[1] + jx) + ',' + (base[2] + stack * 20) + ')');
+    const stackOffset = Math.min(3, stack) * 36;
+    clip.setExtraTransform('matrix(' + base[0] + ',0,0,' + base[0] + ',' + (base[1] + jx) + ',' + (base[2] + stackOffset) + ')');
     const bloodMc = clip.byName('bloodMc');
     if (bloodMc) {
       const t = T();
@@ -2890,8 +2909,9 @@
         const left = Math.min(total, Math.max(0, Number(f.blood.leftBlood) || 0) + Number(r.practiceHeal));
         f.blood.leftBlood = left;
         rec.hps[def] = left;
-        floatNumber(def, r.practiceHeal, 'heal');
         if (rec.hud) refreshBlood(rec.hud);
+        /* 木桩每回合回满：只补血条，不飘绿字。绿字会反复盖住/挤走上一拍的红伤害
+         * （用户 2026-11 口径：“攻击到敌人身上后没有显示红字”）。 */
         await wait(260);
         if (aborted()) return;
       }

@@ -325,6 +325,18 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
    ⚠ 原版那三个槽（3414 帧 1 的金渐变描边）已由 JS 藏掉：原版 `showStates` 把槽 `gotoAndStop(2)`
    之后槽本来就是空的，以前那层"金渐变底板"反而是露在图标外面的多余一层。 */
 .ssfight-states{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;z-index:2;pointer-events:none}
+/* ---------- 主界面松鼠的「说话板子」(原版库元件 3704) 专用叠层 ----------
+   为什么单独一层：药丸是 **DOM**（`.ssfight-states`，`z-index:2`），气泡原来是 main 里的一颗
+   SVG 子元件 —— DOM 永远画在整块 SVG 之上，三颗药丸正好压在气泡顶部的第一行字上
+   （用户 2026-11-05 口径："主界面的对话框提示可以遮住药丸提示"）。
+   所以气泡改成自己一层 SVG，`z-index` 比药丸高一级；铺法与主 SVG 完全一致
+   （外层 flex 居中 + `height:100%;width:auto`），落点靠 JS 侧偏移 viewBox 表达，
+   所以两层永远像素对齐，窗口拉伸/全面屏也一致。
+   ⚠ 长写 top/right/bottom/left 必须在 `inset` 前面：Android 11 的 WebView 83 不认简写。 */
+.ssfight-talk{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;z-index:3;
+  display:none;align-items:center;justify-content:center;pointer-events:none}
+.ssfight-talk.on{display:flex}
+.ssfight-talk svg{display:block;height:100%;width:auto;max-width:100%}
 /* ---------- 状态页的武器 / 技能栏（`js/ssfight/ui-status.js`）----------
    原版页元件 7218 的第 2、3 帧就是这两个栏：底板 / 顶栏三个 tab / "返回菜单" / 页码 / 翻页箭头
    全部来自原版素材，格子里那 10 个图标**也是原版素材** ——

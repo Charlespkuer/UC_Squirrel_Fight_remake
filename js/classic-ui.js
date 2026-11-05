@@ -1285,7 +1285,7 @@
           (info.unlimited ? ' · 永续' : ' · 剩余 ' + info.uses + ' 场') + '<br>' +
           (info.final && info.on
             ? '对镜之魔王：力量 −' + Math.round(Number(info.powerCut) * 100) + '%、生命上限 −' + Math.round(Number(info.hpCut) * 100) + '%。'
-            : (info.dead ? '它已经不饿了，只留下一点安静的护佑。' : '每场战斗后需要献祭一件祭品；用尽次数会进化。'));
+            : (info.dead ? '它已经不饿了，只留下一点安静的护佑。' : '每场战斗后需要献祭一件祭品；没有合格祭品时会自动吞噬使用次数（不会卡住）；用尽次数会进化。'));
       }
       modal('渴血之剑', '<p>' + body + '</p>', [{ label: '返回', cls: 'muted' }], { small: true });
     };

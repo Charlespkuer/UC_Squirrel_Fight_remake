@@ -2994,6 +2994,11 @@
 
   function openEndless(opts) {
     setTowerOrigin(opts);
+    /* 这一屏会整页重画 #ui，已经挂着的献祭 / 活性弹层会随 DOM 一起消失。
+     * 开关必须同步复位：否则页面末尾的 `bladeOfferVisible()` 仍为 true，
+     * 不会重开窗，玩家没有窗可点、`nextBattle` 又拒绝开战 —— 整个卡住。
+     * 复位的时机只放在这里（重画开始），窗口本身仍只开一层。 */
+    if (bladeOfferOpen) { bladeOfferOpen = false; bladeOfferEl = null; }
     const heroEvent = typeof Tower.heroEventInfo === 'function' ? Tower.heroEventInfo() : null;
     if (heroEvent) { openHeroEvent(heroEvent, Tower.endlessInfo()); return; }
     /* 【U18c】到这一屏就**直接触发**该播的剧情（用户口径 2026-10：不要先点一次「继续战斗」）。
@@ -3987,8 +3992,9 @@
     bladeOfferOpen = false;
     bladeOfferEl = null;
   }
-  /** 战斗后的必选献祭：只列史诗+限次或永久（有铭文时优先吃铭文）。没有祭品时
-   *  只能承受反噬 —— 仍然是一个必选结果，不能靠关窗跳过。 */
+  /** 战斗后的必选献祭：只列史诗+限次或永久（有铭文时优先吃铭文）。
+   *  没有祭品时**不再弹空窗**：状态机已经自动吞噬使用次数并继续；旧档如果还带着
+   *  `bladeSacrificePending`，这里补做同一次自动结算，避免玩家停在没有按钮的界面上。 */
   function openBladeSacrifice() {
     if (bladeOfferVisible()) return;
     /* 先占坑再建弹层：`modal()` 挂到 #ui 之后，若是重画触发的第二轮 openEndless
@@ -3998,19 +4004,16 @@
     const list = (got && got.list) || [];
     const info = (got && got.blade) || (Tower.bladeInfoOf ? Tower.bladeInfoOf() : null) || {};
     if (!list.length) {
-      const m = modal('渴血之剑 · 饥饿',
-        '<div class="result-box"><div class="result-title lose">没有祭品</div>' +
-        '<p>「' + esc(info.name || '渴血之剑') + '」在你的掌心发烫 —— 它需要一件祭品，' +
-        '但你的背包里没有史诗及以上的限次增益，也没有可交出的永久增益。</p>' +
-        '<p class="dim">拒绝喂养会让它反噬：成长 −1 层，并自行沉寂。</p></div>',
-        [{ label: '承受反噬', cls: 'muted', run: () => {
-            const r = Tower.sacrificeBlade(null);
-            closeBladeOffer();
-            notice(r && r.ok ? '剑反噬了你，随后沉寂下去。' : ((r && r.msg) || '献祭失败。'),
-              [{ label: '继续', cls: 'gold', run: openEndless }]);
-          } }], { small: true, locked: true });
-      bladeOfferEl = (m && m.element) || null;
-      if (!bladeOfferEl) bladeOfferOpen = false;
+      const r = Tower.sacrificeBlade(null);
+      bladeOfferOpen = false;
+      bladeOfferEl = null;
+      const msg = r && r.ok
+        ? ('没有可献祭的增益：' + (r.name || info.name || '渴血之剑') + ' 自动吞噬 ' +
+          Math.max(1, Number(r.consumed) || 1) + ' 次使用次数' +
+          (r.evolved ? ('，进化为「' + r.evolved.name + '」')
+            : (r.uses > 0 ? ('（剩余 ' + r.uses + ' 场）') : '')) + '。')
+        : ((r && r.msg) || '献祭失败。');
+      notice(msg, [{ label: '继续', cls: 'gold', run: openEndless }]);
       return;
     }
     const rows = list.map((c, i) => {

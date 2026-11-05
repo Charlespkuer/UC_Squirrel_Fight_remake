@@ -1384,10 +1384,17 @@
     if (!(ench > 1)) return base;
     return Math.round((base + ench - 1) * 10000) / 10000;
   }
-  /** 生效中的 buff：永久全部生效；限次只在「开关打开且还有次数」时生效。 */
+  /** 生效中的 buff：永久全部生效；限次只在「开关打开且还有次数」时生效。
+   *  例外：渴血之剑的最终 / 失活形态用 `uses = -1` 表示永续，必须和普通限次区分开
+   *  （以前 `!(b.uses > 0)` 把 -1 一起跳过，导致王者之剑 / 涸血之剑的 mods 全不生效）。 */
   function eachBuff(run, fn) {
     for (const b of run.permanent || []) fn(D().BUFF_BY_ID[b.id], b.stacks, b);
-    for (const b of run.limited || []) { if (b.on === false || !(b.uses > 0)) continue; fn(D().BUFF_BY_ID[b.id], b.stacks, b); }
+    for (const b of run.limited || []) {
+      if (b.on === false) continue;
+      const unlimitedBlade = Number(b.uses) === -1 && D().isBladeId(b.id);
+      if (!(b.uses > 0) && !unlimitedBlade) continue;
+      fn(D().BUFF_BY_ID[b.id], b.stacks, b);
+    }
   }
   /** 一次生效类增益「到底给了什么」——调试台要把效果写清楚，不能只显示个名字。 */
   function instantDetail(buff) {
@@ -2421,10 +2428,14 @@
     const dead = row.id === cfg.deadId;
     const round4 = (v) => Math.round(v * 10000) / 10000;
     const on = row.on !== false;
+    /* 破镜削减按成长层数在 ×1 基础值与 ×5 满层值之间线性插值：
+     * 力量 15%→20%、生命上限 20%→30%（用户 2026-11-05 口径）。 */
+    const cutT = cfg.maxStacks > 1 ? (stacks - 1) / (cfg.maxStacks - 1) : 0;
+    const lerpCut = (min, max) => round4(min + (max - min) * cutT);
     const powerCut = finalForm && on
-      ? round4(Math.min(0.38, cfg.mirrorPowerCut + cfg.mirrorPerStack * (stacks - 1))) : 0;
+      ? Math.min(cfg.mirrorPowerCutMax, lerpCut(cfg.mirrorPowerCut, cfg.mirrorPowerCutMax)) : 0;
     const hpCut = finalForm && on
-      ? round4(Math.min(0.53, cfg.mirrorHpCut + cfg.mirrorPerStack * (stacks - 1))) : 0;
+      ? Math.min(cfg.mirrorHpCutMax, lerpCut(cfg.mirrorHpCut, cfg.mirrorHpCutMax)) : 0;
     return {
       id: row.id, uid: row.uid, name: def.name || '渴血之剑', desc: def.desc || '',
       stage: D().bladeStageOf(row.id), final: finalForm, dead: dead,
@@ -2475,6 +2486,37 @@
     save();
     return row;
   }
+  /** 没有合格祭品时的自动结算：额外吞噬 N 次使用次数（不清成长、不关闭剑）。
+   *  返回 { starved, consumed, uses, evolved }；由 `bladeAfterBattle` 与旧档的
+   *  `sacrificeBlade(null)` 共用，调用方负责清理 `bladeSacrificePending`。 */
+  function starveBlade(run, out) {
+    const row = bladeRowOf(run);
+    if (!row) return null;
+    const cfg = D().BLADE;
+    const consumed = Math.max(1, Math.floor(Number(cfg.starveUses) || 1));
+    if (!(row.uses > 0)) return null;
+    const oldId = row.id;
+    row.uses = Math.max(0, Math.floor(Number(row.uses) || 0) - consumed);
+    let evolved = null;
+    if (!(row.uses > 0)) {
+      const next = D().bladeNextId(row.id);
+      if (next && next !== row.id) {
+        const nextDef = D().BUFF_BY_ID[next] || {};
+        row.id = next;
+        row.uses = Number(nextDef.uses) < 0 ? -1 : Math.max(1, Number(nextDef.uses) || 1);
+        evolved = { id: next, name: nextDef.name || next };
+        if (out) out.bladeEvolved = evolved;
+        run.pendingToasts = (run.pendingToasts || []).concat(['渴血之剑进化为「' + (nextDef.name || next) + '」']).slice(-12);
+      }
+    }
+    const name = (D().BUFF_BY_ID[row.id] || {}).name || '渴血之剑';
+    const left = row.uses > 0 ? ('剩余 ' + row.uses + ' 场') : ('已进化为' + name);
+    run.pendingToasts = (run.pendingToasts || []).concat([
+      '没有可献祭的增益：' + name + ' 自动吞噬 ' + consumed + ' 次使用次数（' + left + '）',
+    ]).slice(-12);
+    logBuff(run, oldId, 'lose', { detail: '没有祭品：自动吞噬 ' + consumed + ' 次使用次数' });
+    return { starved: true, consumed: consumed, uses: row.uses, evolved: evolved };
+  }
   /** 每场胜利后的剑：消耗一次使用次数、进化、要求献祭，或在闲置 20 场后强制苏醒。
    *  由 consumeLimited 调用 —— 那个位置在所有「提前 return」分支之前，层通关 / 重复 / 回廊
    *  都不会漏掉这一场。 */
@@ -2511,8 +2553,18 @@
       }
     }
     if (row.id !== cfg.finalId && row.id !== cfg.deadId) {
-      run.bladeSacrificePending = true;
-      if (out) out.bladeSacrifice = true;
+      /* 没有一件合格祭品时**不再弹必选窗**：自动多吞 N 次使用次数并继续。
+       * 旧口径是「成长 −1、剑自行沉寂」，但那条路会弹一个只有「承受反噬」的窗；
+       * 玩家没有祭品时点完窗仍可能因为重画丢窗而卡死（用户 2026-11-05 反馈）。
+       * 现在状态机直接结算，窗口只在**有祭品**时出现。 */
+      if (bladeSacrificeCandidates(run).list.length) {
+        run.bladeSacrificePending = true;
+        if (out) out.bladeSacrifice = true;
+      } else {
+        const s = starveBlade(run, out);
+        if (s && out) out.bladeStarved = s;
+        delete run.bladeSacrificePending;
+      }
     }
     return bladeInfoOf(run);
   }
@@ -2614,7 +2666,7 @@
     if (!takeOwnedBuff(run, Number(row.uid) > 0 ? Number(row.uid) : row.id, detail)) return null;
     return { kind: cand.kind, id: row.id, removed: true };
   }
-  /** 完成一次献祭；`ref` 为空 = 没有可献祭的祭品，承受反噬。 */
+  /** 完成一次献祭；`ref` 为空 = 没有可献祭的祭品，走自动吞噬（只扣使用次数，不掉成长）。 */
   function sacrificeBlade(ref) {
     const run = endless().run;
     if (!run || !run.bladeSacrificePending) return { ok: false, msg: '现在不需要献祭。' };
@@ -2623,13 +2675,13 @@
     const got = bladeSacrificeCandidates(run);
     if (!ref) {
       if (got.list.length) return { ok: false, msg: '必须选择一件祭品。' };
-      row.stacks = Math.max(1, Math.floor(Number(row.stacks) || 1) - 1);
-      row.on = false;
-      row.forced = false;
+      /* 旧档里已经落了 `bladeSacrificePending`、但手里没有合格祭品：不再要求点
+       * 「承受反噬」，直接走和新战斗同一套自动吞噬（只扣使用次数，不掉成长）。 */
+      const s = starveBlade(run, null);
       delete run.bladeSacrificePending;
-      logBuff(run, row.id, 'lose', { detail: '没有祭品：剑反噬并自行沉寂（成长 −1）' });
       save();
-      return { ok: true, starved: true, name: (D().BUFF_BY_ID[row.id] || {}).name || '渴血之剑' };
+      return { ok: true, starved: true, name: (D().BUFF_BY_ID[row.id] || {}).name || '渴血之剑',
+        uses: row.uses, consumed: s ? s.consumed : 0, evolved: s ? s.evolved : null };
     }
     const cand = got.list.find((c) => c.ref === String(ref));
     if (!cand) return { ok: false, msg: '这件祭品已经不在手里了。' };

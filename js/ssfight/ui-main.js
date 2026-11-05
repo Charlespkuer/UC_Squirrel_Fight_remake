@@ -1573,29 +1573,52 @@
 
   /** `squirrelTalk()` 的复刻：把 3704 挂到 `main` 的 (107,24)、停在气泡那帧并先藏起来。
    *  只挂一次 —— 之后每圈只切显示 + 换文案（原版是每圈 attach/remove 一次，
-   *  但重建一棵 SVG 子树没有必要，观感一样）。 */
-  function initTalkBoard(view) {
+   *  但重建一棵 SVG 子树没有必要，观感一样）。
+   *
+   * ⚠ **为什么气泡不挂在 main 里**（2026-11-05 用户口径「对话框提示要能遮住药丸提示」）：
+   *   药丸是 **DOM 叠层**（`.ssfight-states`，`z-index:2`），而气泡原来是 main 里的一颗
+   *   SVG 子元件 —— DOM 永远画在整块 SVG 上面，三颗药丸正好压在气泡顶部的第一行字上。
+   *   所以气泡单独挂一层**自己的 SVG**（`.ssfight-talk`，`z-index:3`，同样按舞台 viewBox
+   *   等比铺满、同样居中），层级就落在药丸之上；落点用**偏移 viewBox** 表达（见下），
+   *   不需要在任何元素上写 transform。 */
+  async function initTalkBoard(view, container) {
     const main = view && view.byName ? view.byName('main') : null;
     const me = main && main.byName ? main.byName('myself') : null;
-    if (!main || !main.attachChild || !me || typeof me.frameCount !== 'function') return null;
+    if (!main || !me || typeof me.frameCount !== 'function') return null;
     /* 素材换了 / 帧数不够时宁可不显示，也不要在错误帧上闪一下。 */
     if (me.frameCount() < TALK_FRAME) return null;
-    const board = main.attachChild(TALK_BOARD, 1, 'talkBoard');
-    if (!board || !board.g) return null;
-    board.setExtraTransform('translate(' + TALK_AT.x + ',' + TALK_AT.y + ')');
+    if (!container || !window.SfRender || !SfRender.mountSymbol) return null;
+    const host = document.createElement('div');
+    host.className = 'ssfight-talk';
+    host.setAttribute('aria-hidden', 'true');
+    container.appendChild(host);
+    /* 落点 = 把 viewBox **左上角挪到 (−107,−24)**：`translate(107,24)` 与「viewBox 反向平移」
+     * 在画面上是等价的，而后者不需要给外层 `<svg>` 写 transform（老 WebView 对
+     * 根 `<svg>` 上的 transform 支持不一），坐标全部留在 SVG 用户单位里。 */
+    const tl = (SfRender.timeline && SfRender.timeline()) || {};
+    const w = Number(tl.Fw) || 320, h = Number(tl.Fh) || 196;
+    const xi = ((tl.Ft && Number(tl.Ft.xi)) || 0) - TALK_AT.x;
+    const yi = ((tl.Ft && Number(tl.Ft.yi)) || 0) - TALK_AT.y;
+    let board = null;
+    try {
+      board = await SfRender.mountSymbol(host, TALK_BOARD, { viewBox: xi + ' ' + yi + ' ' + w + ' ' + h });
+    } catch (e) {
+      if (window.__errs) window.__errs.push('talk board: ' + (e && e.message));
+      if (host.parentNode) host.parentNode.removeChild(host);
+      return null;
+    }
+    if (!board) { if (host.parentNode) host.parentNode.removeChild(host); return null; }
     pinFrame(board, 1);                      // 原版帧尾的 stop()
-    board.g.classList.add('sf-talk-board');
-    board.g.style.display = 'none';
-    board.g.setAttribute('aria-hidden', 'true');
-    return { me: me, board: board, shown: false };
+    if (board.root) board.root.classList.add('sf-talk-board');
+    return { me: me, board: board, host: host, shown: false };
   }
 
   /** 走路圈的「第 40 帧说话 / 第 1 帧收起」。复刻没有 AS 帧脚本，用视图节拍钩子
    *  （`render.js` 每拍推完帧后回调一次）读 `myself` 的当前帧 —— 与帧号一一对应，
    *  改帧率也不会错拍。每圈第一次露脸时换一条随机文案（同 `showWords` 的随机取法）。 */
   function tickTalkBoard(talk) {
-    if (!talk || !talk.board || !talk.board.g) return;
-    if (talk.board.g.isConnected === false) return;
+    if (!talk || !talk.board || !talk.host) return;
+    if (!talk.host.isConnected) return;
     const show = talk.me.frame >= TALK_FRAME - 1;
     if (show === talk.shown) return;
     talk.shown = show;
@@ -1603,8 +1626,14 @@
       const words = WALK_WORDS[Math.floor(Math.random() * WALK_WORDS.length)];
       setText(talk.board.byName('words'), words, { wrap: true });
     }
-    talk.board.g.style.display = show ? '' : 'none';
-    talk.board.g.setAttribute('aria-hidden', show ? 'false' : 'true');
+    talk.host.classList.toggle('on', show);
+    talk.host.setAttribute('aria-hidden', show ? 'false' : 'true');
+  }
+  /** 收起整层（离开主界面 / 重新挂载时）：视图要 `destroy()`，否则它会留在播放注册表里空转。 */
+  function destroyTalkBoard(talk) {
+    if (!talk) return;
+    if (talk.board && typeof talk.board.destroy === 'function') { try { talk.board.destroy(); } catch (e) {} }
+    if (talk.host && talk.host.parentNode) talk.host.parentNode.removeChild(talk.host);
   }
 
   /* ---------- 悬停中的底栏五键 ----------
@@ -1617,6 +1646,8 @@
   let current = null;
   let timer = 0;
   let viewSeq = 0;
+  /** 说话板子那一层的句柄（独立视图 + 宿主 div），`destroy()` 里要显式收。 */
+  let talkOverlay = null;
 
   async function mount(container) {
     if (!window.SfRender) throw new Error('SfRender 未加载');
@@ -1675,8 +1706,14 @@
     refreshValues(view);
     wireButtons(view);
     syncGiftVisibility(container);
-    /* 主界面松鼠的说话板子（原版 3704）：挂在 `main` 上、由走路圈的帧号驱动显示。 */
-    const talk = initTalkBoard(view);
+    /* 主界面松鼠的说话板子（原版 3704）：单独一层 SVG 盖在药丸上面，由走路圈的帧号驱动显示。 */
+    const talk = await initTalkBoard(view, container);
+    if (mine !== viewSeq || container.isConnected === false) {
+      destroyTalkBoard(talk);
+      view.destroy();
+      return null;
+    }
+    talkOverlay = talk;
     if (talk) {
       const prevTick = view.onTick;
       view.onTick = () => {
@@ -1723,6 +1760,10 @@
     for (const t of playingTimers.values()) clearTimeout(t);
     playingTimers.clear();
     villagePlaying.clear();
+    /* 气泡那一层是**独立视图**（自己在播放注册表里），必须显式 destroy ——
+     * 它挂在 container 上，不会跟着主视图的 svg 一起被摘掉。 */
+    destroyTalkBoard(talkOverlay);
+    talkOverlay = null;
     if (current) {
       try { if (current.destroy) current.destroy(); } catch (e) {}
       current = null;

@@ -1866,11 +1866,11 @@ test('绝对防御挡下多段攻击时整段都不掉血（西瓜刀连击 / �
 test('反击口径：只有近战武器与普攻能触发反击（远程 / 技能 / 已反伤都不行）', () => {
   /* 2026-10 第八十批用户口径。这里**不锁随机流**：断言的是**结构性**规则 ——
    * 「某类回合里一次反击都不该出现」（由代码分支决定，与随机无关），
-   * 以及「近战 / 普攻这两类里必须出现过反击」（样本给足 40 场，实测每类都有几百次）。 */
+   * 以及「近战 / 普攻这两类里必须出现过反击」（样本给足 80 场，实测每类都有几百次）。 */
   const g = game();
   const isCounter = (r) => r.counterDmg != null || r.counterDodge || r.counterFakeDie;
   let melee = 0, meleeCounter = 0, ranged = 0, rangedCounter = 0, skill = 0, skillCounter = 0, commonCounter = 0;
-  for (let t = 0; t < 40; t++) {
+  for (let t = 0; t < 80; t++) {
     /* 我方带近战木剑(3) + 投掷飞镖(5) + 主动技色诱之术(8)，三类动作都会用上。 */
     const me = fighter({ power: 80, speed: 80, hp: 4000, weapons: ['3:5', '5:5'], skills: ['8:3'] });
     const foe = fighter({ power: 20, speed: 20, hp: 60000 });
@@ -1890,7 +1890,7 @@ test('反击口径：只有近战武器与普攻能触发反击（远程 / 技�
   assert.ok(commonCounter > 0, '普攻仍然可以被反击，实测 ' + commonCounter);
   /* 已经反伤过的那一手不再反击：敌方带荆棘，我方每次武器攻击都被反伤回应。 */
   let thornRounds = 0, thornCounter = 0;
-  for (let t = 0; t < 40; t++) {
+  for (let t = 0; t < 80; t++) {
     const me = fighter({ power: 80, speed: 80, hp: 4000, weapons: ['3:5'] });
     const foe = fighter({ power: 20, speed: 20, hp: 60000, mech: ['thorns'] });
     for (const r of g.Sim.simulate(me, foe).rounds) {
@@ -1988,27 +1988,41 @@ test('徒手攻击的权重：基准 100，工具再多也让它的份额不低�
   assert.equal(heavy.weapon + heavy.skill + heavy.common, heavy.total);
 });
 
-test('出手权重新表：技能 5 / 普通武器 8 / 投掷前两次 100 / 徒手 100；绝对防御与龟甲术按等级首/次/三次', () => {
+test('出手权重：未用 100；普通/真化武技 1 次后 0；六种投掷 2 次后 0；徒手 100；绝对防御与龟甲术按等级首/次/三次', () => {
   const g = game(), S = g.Sim;
   assert.equal(S.rules.repeatSkill, 5);
   assert.equal(S.rules.repeatWeapon, 8);
   assert.equal(S.rules.commonAttackWeight, 100);
   assert.equal(S.repeatRateOf(17, 1), 1, '来点松果二次及以后权重 1');
-  assert.equal(S.actionWeights.skill({ usedSkills: { 15: true }, skillUseCount: { 15: 1 }, effects: {} }, 15), 5);
+  /* 技能额度：普通/真化都是 1 次，用后归 0；真化不再额外给第二次。 */
+  assert.equal(S.actionWeights.skill({ usedSkills: { 15: true }, skillUseCount: { 15: 1 }, skills: { 15: 10 }, effects: {} }, 15), 0,
+    '普通技能用 1 次后权重 0');
+  assert.equal(S.actionWeights.skill({ usedSkills: { 15: true }, skillUseCount: { 15: 1 }, skills: { 15: 11 }, effects: {} }, 15), 0,
+    '真化技能也用 1 次后权重 0');
   const att = { weapons: [{ id: 1, type: '近战' }, { id: 5, type: '投掷' }, { id: 10, type: '投掷' }, { id: 7, type: '投掷' }], usedWeapons: {}, weaponUseCount: {}, effects: {} };
   assert.equal(S.actionWeights.weapon(att, att.weapons[0]), 100, '普通武器首次 100');
   att.usedWeapons[1] = true; att.weaponUseCount[1] = 1;
-  assert.equal(S.actionWeights.weapon(att, att.weapons[0]), 8, '普通武器二次起 8');
+  assert.equal(S.actionWeights.weapon(att, att.weapons[0]), 0, '普通武器用 1 次后权重 0');
   assert.equal(S.actionWeights.weapon(att, att.weapons[1]), 100, '投掷武器第一次 100');
   att.usedWeapons[5] = true; att.weaponUseCount[5] = 1;
-  assert.equal(S.actionWeights.weapon(att, att.weapons[1]), 100, '投掷武器第二次仍 100');
+  assert.equal(S.actionWeights.weapon(att, att.weapons[1]), 100, '六种可再投一次的投掷武器第二次仍 100');
   att.weaponUseCount[5] = 2;
-  assert.equal(S.actionWeights.weapon(att, att.weapons[1]), 8, '投掷武器第三次起 8');
-  /* 流星锤（10）/橡皮擦（7）虽是投掷，第二次起按近战 8；流星锤三连击仍只算一次使用。 */
+  assert.equal(S.actionWeights.weapon(att, att.weapons[1]), 0, '投掷武器用 2 次后权重 0');
+  /* 流星锤（10）/橡皮擦（7）虽是投掷，第二次按近战 8；但额度只有 1 次，真化也不放宽。 */
   att.usedWeapons[10] = true; att.weaponUseCount[10] = 1;
   att.usedWeapons[7] = true; att.weaponUseCount[7] = 1;
-  assert.equal(S.actionWeights.weapon(att, att.weapons[2]), 8, '流星锤第二次起 8');
-  assert.equal(S.actionWeights.weapon(att, att.weapons[3]), 8, '橡皮擦第二次起 8');
+  assert.equal(S.actionWeights.weapon(att, att.weapons[2]), 0, '流星锤用 1 次后权重 0');
+  assert.equal(S.actionWeights.weapon(att, att.weapons[3]), 0, '橡皮擦用 1 次后权重 0');
+  const trueMeteor = { id: 10, type: '投掷', level: 12 };
+  const trueEraser = { id: 7, type: '投掷', level: 12 };
+  const specialAtt = { weapons: [trueMeteor, trueEraser], usedWeapons: { 10: true, 7: true }, weaponUseCount: { 10: 1, 7: 1 }, effects: {} };
+  assert.equal(S.actionWeights.weapon(specialAtt, trueMeteor), 0, '真化流星锤也用 1 次后权重 0');
+  assert.equal(S.actionWeights.weapon(specialAtt, trueEraser), 0, '真化橡皮擦也用 1 次后权重 0');
+  const trueWeapon = { id: 2, type: '近战', level: 12 };
+  const trueAtt = { weapons: [trueWeapon], usedWeapons: {}, weaponUseCount: {}, effects: {} };
+  assert.equal(S.actionWeights.weapon(trueAtt, trueWeapon), 100, '真化武器首次 100');
+  trueAtt.usedWeapons[2] = true; trueAtt.weaponUseCount[2] = 1;
+  assert.equal(S.actionWeights.weapon(trueAtt, trueWeapon), 0, '真化武器也用 1 次后权重 0（不再给 2 次）');
   const d16 = (lv, n) => S.jueDuiChanceOf({ skills: { 16: lv }, effects: {}, skillBoost: {} }, n);
   assert.deepEqual([1, 5, 10].map((lv) => d16(lv, 0)), [20, 22, 24.5]);
   assert.deepEqual([11, 13, 15].map((lv) => d16(lv, 1)), [5, 15, 24]);
@@ -2024,6 +2038,14 @@ test('出手权重新表：技能 5 / 普通武器 8 / 投掷前两次 100 / 徒
   g.math.random = () => 0;
   const wround = g.Sim.simulate(meteor, dummy).rounds.find((r) => r.attacker === 0 && r.action === 'weapon');
   assert.equal(wround && wround.hits, 3, '流星锤应当有连续扔 3 次的概率并且一次行动打出 3 段');
+  /* 用户 2026-11 木桩测试口径：上一手是武器时，下一手紧挨着不能又抽到同一把
+   * （大榔头连着出两次看起来像"一把武器打了两下"）；中间隔了一手则不受限。 */
+  const pickAtt = { weapons: [{ id: 1, type: '近战' }, { id: 2, type: '近战' }],
+    usedWeapons: {}, weaponUseCount: {}, turnId: 5, lastWeaponId: 1, lastWeaponTurn: 4 };
+  g.math.random = () => 0;
+  assert.equal(g.Sim.pickWeapon(pickAtt, pickAtt.weapons).id, 2, '上一手用过的武器不会连续再抽到');
+  pickAtt.lastWeaponTurn = 3;
+  assert.equal(g.Sim.pickWeapon(pickAtt, pickAtt.weapons).id, 1, '中间隔了一手时允许再抽到同一把');
 });
 
 test('全部原版武器、技能与 NPC 的事件流都能有限结束并维持合法血量', () => {

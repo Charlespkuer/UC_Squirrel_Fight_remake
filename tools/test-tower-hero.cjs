@@ -263,18 +263,34 @@ test('勇者专属货品真实扣费生效，剧情之剑唯一且在镜复制�
   bladeRow.id = 'HB04'; bladeRow.stacks = 2; bladeRow.uses = -1; bladeRow.on = true;
   const mirror = (bladeOn) => {
     const probe = plain(run);
-    Object.assign(probe, { layer: 100, idx: 0, phase: null, choices: null, shop: null,
-      plan: [{ kind: 'patrol', id: 'patrol', x00: true, audience: 'king' }] });
+    /* 用普通巡逻层（x00=false）：不经过「上交增益」那一段，复制面板 = 削减前定格，
+     * 这样可以直接验破镜比例；x00 的额外加成不混进这条断言。 */
+    Object.assign(probe, { layer: 45, idx: 0, phase: null, choices: null, shop: null,
+      plan: [{ kind: 'patrol', id: 'patrol', x00: false }] });
     const row = (probe.limited || []).find(it => it.id === 'HB04');
     if (row) row.on = !!bladeOn;
     const next = T.nextBattle('endless', probe);
     assert.equal(next.ok, true, next.msg);
-    next.adjustMe(H.fighter(probe.hero));
-    return next.foe;
+    const me = H.fighter(probe.hero);
+    next.adjustMe(me);
+    return { foe: next.foe, me: me };
   };
   const without = mirror(false), withKing = mirror(true);
-  assert.equal(withKing.power, Math.round(without.power * 0.78), '2 层王者之剑：力量 −22%');
-  assert.equal(withKing.maxHp, Math.round(without.maxHp * 0.68), '2 层王者之剑：生命上限 −32%');
+  /* 2026-11-05 口径：破镜削减按成长层数在 ×1 与 ×5 之间线性插值
+   * 力量 15%→20%、生命上限 20%→30%；2 层是 16.25% / 22.5%。
+   * 魔王会连玩家面板一起复制，`copiedFromPlayer` 是复制后、削减前的定格值 ——
+   * 用它算削减，避免把「王者之剑自身的力量加成被一起复制」混进断镜比例。 */
+  const B = c.TowerData.BLADE;
+  const cutT = (2 - 1) / (B.maxStacks - 1);
+  const powerCut = B.mirrorPowerCut + (B.mirrorPowerCutMax - B.mirrorPowerCut) * cutT;
+  const hpCut = B.mirrorHpCut + (B.mirrorHpCutMax - B.mirrorHpCut) * cutT;
+  assert.equal(T.bladeInfoOf().powerCut, powerCut, '王者之剑 2 层破镜力量削减：' + JSON.stringify(T.bladeInfoOf()));
+  assert.equal(without.foe.heroCounter, undefined, '关掉王者之剑就没有断镜标记');
+  assert.ok(withKing.foe.heroCounter, '王者之剑应给魔王打上断镜标记：' + withKing.foe.heroCounter);
+  assert.equal(withKing.foe.power, Math.round(withKing.foe.copiedFromPlayer.power * (1 - powerCut)),
+    '2 层王者之剑：复制面板力量再 −16.25%');
+  assert.equal(withKing.foe.maxHp, Math.round(withKing.foe.copiedFromPlayer.maxHp * (1 - hpCut)),
+    '2 层王者之剑：复制面板生命上限再 −22.5%');
 });
 
 test('勇者新规则：开局无 60 币、习得 5 级、铸币修炼 +3~5、渴血之剑会成长并跨镜保留', () => {

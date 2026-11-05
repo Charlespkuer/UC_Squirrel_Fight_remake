@@ -1186,17 +1186,33 @@ test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => 
    * 用固定低随机数强制每次都抽到武器（否则普通武器用过后只有 8 权重，样本里可能凑不满 N 次）。 */
   const oldRandom = vm.runInContext('Math.random', c);
   c.__rand(0.01);
+  /* 新权重对齐联机后，普通武器用过 1 次就退出候选池；要验证「前 N 次武器不消耗回合」，
+   * 必须给 N 把不同的武器（不能靠同一把反复抽）。 */
+  const freeWeaponIds = [3, 4, 15];
+  const simFree = (mods, count) => {
+    const me = mk2(mods);
+    me.weapons = freeWeaponIds.slice(0, count).map((id) => ({ id: id, level: 1, lo: 200, hi: 200, type: '近战' }));
+    return c.Sim.simulate(me, JSON.parse(JSON.stringify(foe2)));
+  };
+  /* 闪亮登场要看到「前 n 次强化 + 之后 n+4 次衰减」，同样不能靠同一把武器反复抽：
+   * 给 n+4 把不同的近战武器，每把普通档 1 次。 */
+  const boostWeaponIds = [3, 4, 15, 2, 11, 16, 17];
+  const simBoost = (n, mods) => {
+    const me = mk2(mods);
+    me.weapons = boostWeaponIds.slice(0, n + 4).map((id) => ({ id: id, level: 1, lo: 200, hi: 200, type: '近战' }));
+    return c.Sim.simulate(me, JSON.parse(JSON.stringify(foe2)));
+  };
   for (const [n, id] of [[3, 'M02'], [1, 'T08']]) {
-    const free = simOf({ weaponFreeUses: n }).rounds
+    const free = simFree({ weaponFreeUses: n }, n).rounds
       .filter((r) => r.attacker === 0 && r.action === 'weapon' && r.actAgain).length;
     assert.equal(free, n, id + '：应当恰好有 ' + n + ' 次使用武器不消耗回合，实测 ' + free);
   }
-  assert.equal(simOf({}).rounds.filter((r) => r.attacker === 0 && r.action === 'weapon' && r.actAgain).length, 0,
+  assert.equal(simFree({}, 3).rounds.filter((r) => r.attacker === 0 && r.action === 'weapon' && r.actAgain).length, 0,
     '没有该 buff 时不该出现「不消耗回合」的武器');
 
   // ② 闪亮登场：强化必须**只落在前 3 次使用武器**上（用 round 上的显式标记判定，不受暴击随机影响）
   for (const n of [3, 1]) {
-    const rounds = simOf({ weaponBoostUses: n, weaponBoostPowerMul: 0.50, weaponBoostMustHit: 1,
+    const rounds = simBoost(n, { weaponBoostUses: n, weaponBoostPowerMul: 0.50, weaponBoostMustHit: 1,
       weaponBoostFatigueMul: 0.20 }).rounds.filter((r) => r.attacker === 0 && r.action === 'weapon');
     const marked = rounds.filter((r) => r.weaponBoost != null);
     assert.equal(marked.length, n, '闪亮登场：应当恰好有 ' + n + ' 次武器吃到强化，实测 ' + marked.length);
@@ -1211,7 +1227,7 @@ test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => 
     const dmgOf = (rs) => rs.map((r) => Number(r.dmg) || 0);
     let front = 0, frontN = 0, back = 0, backN = 0;
     for (let k = 0; k < 40; k++) {
-      const rw = simOf({ weaponBoostUses: n, weaponBoostPowerMul: 0.50, weaponBoostMustHit: 1,
+      const rw = simBoost(n, { weaponBoostUses: n, weaponBoostPowerMul: 0.50, weaponBoostMustHit: 1,
         weaponBoostFatigueMul: 0.20 }).rounds.filter((r) => r.attacker === 0 && r.action === 'weapon');
       for (const v of dmgOf(rw.slice(0, n))) { front += v; frontN++; }
       for (const v of dmgOf(rw.slice(n, n + 4))) { back += v; backN++; }
@@ -1222,7 +1238,7 @@ test('需求24：挑战塔专属 buff 只进挑战塔，且效果生效', () => 
         '（跨 40 场：强化 ' + Math.round(front / frontN) + ' vs 衰减 ' + Math.round(back / backN) + '）');
     }
   }
-  assert.equal(simOf({}).rounds.filter((r) => r.attacker === 0 && r.action === 'weapon' && r.weaponBoost != null).length,
+  assert.equal(simBoost(3, {}).rounds.filter((r) => r.attacker === 0 && r.action === 'weapon' && r.weaponBoost != null).length,
     0, '没有该 buff 时不该出现强化标记');
   c.__oldRandom = oldRandom;
   vm.runInContext('Math.random = __oldRandom;', c);

@@ -2066,7 +2066,20 @@
     return !!(currentUiMode() === 'classic' && window.SfChallenge);
   }
   function stageFight(stageId) {
-    const started=State.beginStageBattle(stageId);    if(!started.ok){notice(started.msg,started.needsBook?[{label:'购买',run:()=>openProp(23,true)},{label:'返回',cls:'gold',run:()=>stageConfirm(stageId)}]:undefined);return;}
+    const started=State.beginStageBattle(stageId);
+    if(!started.ok){
+      /* 经典出战确认页只有「战斗 / 返回」两颗原版键：复活次数用完、或没书可复活时点「战斗」只会弹
+       * 一句提示，玩家没有任何办法结束这一轮 —— 之后每次点关卡都是同一个死胡同（用户 2026-11 报的
+       * 「挑战书用完后进不去挑战」）。失败提示里必须补「结束本轮」出口。 */
+      const run=State.stageRun(stageId);
+      const blocked=!!run && (run.needsRevive===true || run.revives>=2);
+      const actions=[];
+      if(started.needsBook) actions.push({label:'购买',run:()=>openProp(23,true)});
+      if(blocked) actions.push({label:'结束本轮',run:()=>stageAbandon(stageId)});
+      actions.push({label:'返回',cls:'gold',run:()=>stageConfirm(stageId)});
+      notice(started.msg,actions);
+      return;
+    }
     const npc=State.npcOf(stageId,started.npcIndex),type=GData.stageTypeOf(stageId);
     /* 原版 `fightType == 6` 的关卡战斗：徒弟先上阵；徒弟失败后 state 7 再让师父接手。
      * 这里把徒弟快照作为 `fighter` 交给 Main.startBattle，战败时不结算、不扣复活。 */

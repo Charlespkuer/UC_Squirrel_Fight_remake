@@ -376,6 +376,44 @@ test('UI失败复活、结束确认、购买挑战书与错误重试都有出口
   g.c.stageConfirm(1); g.modalClick('继续战斗'); assert.equal(g.battles.length, 5);
 });
 
+test('经典出战页：复活用完/没书可复活时必须给「结束本轮」出口，不能卡死关卡', () => {
+  const g = setup(), State = g.c.State, s = g.s();
+  s.props[23] = 3;
+  /* 打出「复活 2 次后仍失败」的卡死态：3 本书 = 入场 1 + 复活 2。 */
+  let r = State.beginStageBattle(1); assert.equal(r.ok, true, r.msg);
+  State.finishStageBattle(1, r.token, false);
+  for (let i = 0; i < 2; i++) {
+    r = State.beginStageBattle(1); assert.equal(r.ok, true, r.msg);
+    State.finishStageBattle(1, r.token, false);
+  }
+  const run = State.stageRun(1);
+  assert.equal(run.revives, 2); assert.equal(run.needsRevive, true);
+  assert.equal(State.beginStageBattle(1).ok, false, '复活次数用完，不能开打');
+  /* 经典出战确认页只有「战斗/返回」，点战斗走的就是 stageFight —— 失败提示里必须有出口。 */
+  g.c.stageFight(1);
+  assert.match(g.modals.at(-1).html, /本轮已用完2次复活机会/);
+  assert.ok(g.modals.at(-1).buttons.some((b) => b.label === '结束本轮'), '失败提示里要有结束本轮');
+  g.modalClick('结束本轮');
+  g.modalClick('结束本轮');
+  assert.equal(State.stageRun(1), null, '结束本轮后不再卡在这个关卡');
+  s.props[23] = 1;
+  assert.equal(State.beginStageBattle(1).ok, true, '结束本轮后能重新开一轮');
+
+  /* 还没到 2 次、但手里没书：同样要能结束本轮，而不是每次点战斗只弹「挑战书不足」。 */
+  const g2 = setup(), S2 = g2.c.State, s2 = g2.s();
+  s2.props[23] = 1;
+  const t = S2.beginStageBattle(1); S2.finishStageBattle(1, t.token, false);
+  assert.equal(s2.props[23], 0);
+  g2.c.stageFight(1);
+  assert.ok(g2.modals.at(-1).buttons.some((b) => b.label === '结束本轮'), '没书复活也要有结束本轮');
+  /* 复刻确认页仍保留「复活再战」去买书；点下去后的失败提示同样带结束本轮。 */
+  g2.c.stageConfirm(1);
+  assert.ok(g2.modals.at(-1).buttons.some((b) => b.label === '复活再战'), '复刻确认页仍可去购买');
+  g2.modalClick('复活再战');
+  assert.ok(g2.modals.at(-1).buttons.some((b) => b.label === '结束本轮'), '复刻确认页点复活同样有结束本轮');
+});
+
+
 test('战果按最后一帧剩余血量继承，缺少 hpAfter 也不抛错（跳过同样安全）', () => {
   const g = setup(); g.s().props[23] = 5;
   g.c.openStages(); g.click('type0'); g.click('star1');

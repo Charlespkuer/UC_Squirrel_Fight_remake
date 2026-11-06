@@ -536,13 +536,15 @@
     }
     return host;
   }
-  /** 当前生效的药丸（propsStates>0），按 STATE_PILLS 的顺序，最多 3 个（原版就是 3 个槽）。 */
+  /** 当前生效的药丸（propsStates>0），按 STATE_PILLS 的顺序。
+   *  原版 `showStates` 只有 c1..c3 三个槽，旧实现跟着 `slice(0, 3)`；但四颗药丸
+   *  （力量/敏捷/速度/经验）可以同时吃满，第 4 颗会被整颗吞掉（用户 2026-11 反馈）。
+   *  这里**全部返回**，位置与让位规则交给 `positionStateIcons`。 */
   function activeStatePills() {
     let states = {};
     try { states = (State.state() || {}).propsStates || {}; } catch (e) { return []; }
     return STATE_PILLS.filter((p) => states[p.id] > 0)
-      .map((p) => ({ id: p.id, label: p.label, count: states[p.id] }))
-      .slice(0, 3);
+      .map((p) => ({ id: p.id, label: p.label, count: states[p.id] }));
   }
   function renderStateIcons(container, view) {
     const host = stateIconsHost(container);
@@ -582,39 +584,56 @@
     const probe = stateLayoutProbe(host);
     const hostScale = probe.scale || 1;
     const fix = (screenPx) => (hostScale ? screenPx / hostScale : screenPx);
-    const slots = ['c1', 'c2', 'c3'];
-    host.querySelectorAll('.ssfight-state').forEach((el, i) => {
-      const clip = main.byName(slots[i]);
-      if (!clip || !clip.g) { el.style.display = 'none'; return; }
-      /* 空槽停在**第 2 帧（空帧）**，直接量它的包围盒是 0×0（这点踩了很久）。
-       * 所以位置从矩阵推：本层原点 → 父级坐标（ma）→ 屏幕（父级 `<g>` 的 CTM）。
-       * 边长 = 画稿边长 × 「本层坐标 → 屏幕」的比例 = k × 父级本层缩放 × 本层缩放。
-       * ⚠ 别拿 `getScreenCTM` 的行列式当总比例：实测 `main`（7039）那层的 base 矩阵是**单位矩阵**，
-       * 混着乘会把格子量成 61px 或 383px（两种都踩过）。 */
+    /* 原版三个槽（c1/c2/c3）的屏幕中心与边长 —— 它们是 `showStates` 的固定落点。
+     * 空槽停在**第 2 帧（空帧）**，直接量包围盒是 0×0，所以位置从矩阵推：
+     * 本层原点 → 父级坐标（ma）→ 屏幕（父级 `<g>` 的 CTM）；
+     * 边长 = 画稿边长 ×（k × 父级本层缩放 × 本层缩放）。
+     * ⚠ 别拿 `getScreenCTM` 的行列式当总比例（`main` 7039 是单位矩阵，混乘会量成 61/383px）。 */
+    const slots = ['c1', 'c2', 'c3'].map((name) => {
+      const clip = main.byName(name);
+      if (!clip || !clip.g) return null;
       const m = placementOf(clip);
-      const sx = sx0(clip), sy = sy0(clip);                     // 画稿原点在本层坐标里（导出数据就是 0）
-      const px = m[4] + m[0] * sx + m[2] * sy;                  // → 父级坐标
-      const py = m[5] + m[1] * sx + m[3] * sy;
-      /* c1/c2/c3 的父级是 `main`（base 矩阵是单位矩阵），px/py 就是舞台用户坐标；
-       * 走 userToClient 避开 iOS 15 漏掉 #ui scale 的 getScreenCTM。 */
+      const px = m[4] + m[0] * sx0(clip) + m[2] * sy0(clip);
+      const py = m[5] + m[1] * sx0(clip) + m[3] * sy0(clip);
       const p = (clip.parent === main && userToClient(view.root, px, py)) || toScreen(clip.parent, px, py);
       /* k 已经是「SVG 用户单位 → 屏幕像素」，所以 slotSide 本身就是屏幕像素；
        * 不要再乘 hostScale（那是 CSS→屏幕的缩放）。多乘一次会让药丸再缩小 0.55 倍。 */
       const slotSide = STATE_SLOT * k * localScale(clip.parent) * localScale(clip);
-      if (!(slotSide > 0)) { el.style.display = 'none'; return; }
+      if (!(slotSide > 0)) return null;
+      return { cx: p.x + slotSide / 2, cy: p.y + slotSide / 2, side: slotSide };
+    }).filter(Boolean);
+    /* 槽一个都量不到（还没挂好 / 不是经典 SVG）：把药丸收起来，别让它们堆在左上角
+     * 默认位置。旧实现是逐个 `display:none`，这里保留同一兜底。 */
+    if (!slots.length) {
+      host.querySelectorAll('.ssfight-state').forEach((el) => { el.style.display = 'none'; });
+      return;
+    }
+    const base = slots[0];
+    const nodes = host.querySelectorAll('.ssfight-state');
+    const n = nodes.length;
+    /* 间距沿用 c1→c3 的两个间隔；槽不够 3 个时退回格子边长。 */
+    const dx = slots.length >= 3 ? (slots[2].cx - slots[0].cx) / 2 : base.side;
+    const dy = slots.length >= 3 ? (slots[2].cy - slots[0].cy) / 2 : 0;
+    /* 超过原版 3 个槽时（力/敏/速/经验四颗全吃）：整行向**左**让位，最右一颗仍钉在 c3、
+     * 顺序不变 —— 第 4 颗不会被吞掉，也不会把格子顶出右边界。 */
+    const overflow = Math.max(0, n - slots.length);
+    nodes.forEach((el, i) => {
+      const slot = slots[Math.min(i, slots.length - 1)] || base;
+      const center = overflow > 0
+        ? { cx: base.cx + dx * (i - overflow), cy: base.cy + dy * (i - overflow), side: base.side }
+        : slot;
       /* 药丸块比原版那个格子小一档，**居中**盖在槽上（原版 `attachMovie` 的落点也是槽的原点，
        * 只是原版药丸自带留白；这里按包围盒对齐，看起来更稳）。
        * 都在屏幕像素里换算，最后统一走 `fix()` 折回设计像素，与 `--uiscale` 抵消。 */
-      const side = slotSide * STATE_CHIP_RATIO;
+      const side = center.side * STATE_CHIP_RATIO;
       /* `side` 是**屏幕像素**目标；写进 DOM 的 width/height/--icon/--u 都是 CSS px，
        * 还要再被宿主自身的 `--uiscale` 乘一次。以前只对 left/top 做了 fix，宽高没除，
        * 安卓上宿主缩放约 0.55 时药丸会被缩成约 17px（用户报的“药丸过小”）。
        * 这里把三档尺寸统一折回设计像素，桌面 hostScale=1 时结果不变。 */
       const sideCss = fix(side);
-      const cx = p.x + slotSide / 2, cy = p.y + slotSide / 2;
       el.style.display = '';
-      el.style.left = fix(cx - hostRect.left - side / 2) + 'px';
-      el.style.top = fix(cy - hostRect.top - side / 2) + 'px';
+      el.style.left = fix(center.cx - hostRect.left - side / 2) + 'px';
+      el.style.top = fix(center.cy - hostRect.top - side / 2) + 'px';
       el.style.width = sideCss + 'px';
       el.style.height = sideCss + 'px';
       /* 图标按 STATE_ICON_RATIO 缩一档（＝现代版 `.home-buff` 的 48/58）。

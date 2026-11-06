@@ -77,7 +77,9 @@ button,input,select{font:inherit}button{touch-action:manipulation}button:focus-v
    slow WebViews it used to flash the modern squirrel before the classic page. */
 .ssfight-home.ssfight-home-loading{visibility:visible;background:url("../images/ssfight/ui/bitmap/3182_0.hd.jpg") center/cover no-repeat,#cfe6f5}
 /* Same backdrop for the playable DOM fallback (used when the classic SVG never mounts). */
-.classic-home.ssfight-dom-fallback{background:url("../images/ssfight/ui/bitmap/3182_0.hd.jpg") center/cover no-repeat,#cfe6f5}
+/* 村庄底图只给**经典模式**的兜底主页（`renderHome` 在 classic 时补 `ssfight-classic-fallback`）；
+ * 现代主页是 canvas 场景，DOM 页必须透明，否则会把 canvas 上的松鼠整只盖住。 */
+.classic-home.ssfight-classic-fallback{background:url("../images/ssfight/ui/bitmap/3182_0.hd.jpg") center/cover no-repeat,#cfe6f5}
 .ssfight-home svg{display:block;height:100%;width:auto;max-width:100%}
 /* 经典挑战页的**二级/三级页**（原版库元件「挑战1」= 4756）挂在**另一层** `<section>` 上：
    原版是 `loadMcs([["挑战1","tiaozhanSub",…]])` 往当前页里 attach 一颗库元件，
@@ -357,11 +359,7 @@ html.is-android .uc-button.tiny{--uc-outline:0.85px}
 /* 经典好友动作菜单右下角的「拜师」入口（原版只有收徒/加好友，没有主动拜师）。 */
 .sf-master-btn{position:absolute;right:24px;bottom:16px;z-index:6;
   min-width:126px;font-size:23px;padding:3px 18px}
-/* 经典战斗：护盾值（挑战塔「坚韧壁垒 / 石像鬼磐岩」）挂在血条下方。 */
-.sf-shield-badge{position:absolute;z-index:8;display:none;
-  padding:1px 7px;border:2px solid #7fc9ef;border-radius:11px;background:linear-gradient(#e9fbff,#85d3f4);
-  color:#125a80;font:bold 15px/18px "Microsoft YaHei","PingFang SC",sans-serif;white-space:nowrap;
-  box-shadow:0 2px 0 #3d8cb1,inset 0 1px #ffffffcc;pointer-events:none;text-shadow:0 1px #ffffff}
+/* 护盾不再挂 DOM 小牌：现在直接画在血条自己的 SVG 子树里（见 ui-fight 的 drawShieldBar）。 */
 .item-icon:has(.reference-art){border:0;background:transparent;box-shadow:none;border-radius:0;overflow:visible}
 .item-icon>.reference-art{width:100%;height:100%}
 .village-door{background:none;border:0;box-shadow:none;width:110px;height:110px;right:40px;bottom:160px}

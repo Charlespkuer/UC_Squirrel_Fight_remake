@@ -3,10 +3,12 @@
  *   node tools/test-stage-balance.cjs
  *
  * 断言：
- *   1) 推荐等级下每档通关率落在 30%~95%（原来 0%~23%，明显打不过）；
- *      螳螂★6 是全表最紧的一档（400 轮实测约 33%，第三场「大侠」是瓶颈），按 30% 卡下限；
+ *   1) 推荐等级下每档通关率落在 28%~95%（原来 0%~23%，明显打不过）；
+ *      螳螂★6 是全表最紧的一档（400 轮实测约 31%，第三场「大侠」是瓶颈），按 28% 卡下限；
  *      再低就说明难度跑偏，不是运气问题。采样 400 轮而不是 200：词条表换成 ssfight 原表后，
  *      固定随机流在 200 轮那一段刚好落在 27%，真随机 1500 轮实测 32%，属于采样抖动。
+ *      2026-11 第四百七十四批「反击无视装死」按用户口径改规则后，这一档从 31% 降到 29%；
+ *      30% 的旧下限会把这条**有意的规则改动**判成回归，所以下限改成 28%（实测 29%，留 1 个点）。
  *   2) 低 4 级明显更难（比推荐等级低 15 个百分点以上）
  *   3) 高 2 级明显更轻松（比低 4 级高 20 个百分点以上、且不低于 55%）
  *   4) 每场（学徒/拳师/大侠）在推荐等级下都有胜机（>25%）
@@ -92,7 +94,7 @@ for (const stageId of SAMPLE) {
   const high = measure(stageId, target + 2, CHAINS);
   const info = label + ' 推荐' + target + '级：低4 ' + pct(low.cleared) + ' / 目标 ' + pct(at.cleared) + ' / 高2 ' + pct(high.cleared) +
     '　三场 ' + at.perFight.map(pct).join('/');
-  assert.ok(at.cleared >= 0.30 && at.cleared <= 0.95, '推荐等级通关率应在 30%~95%：' + info);
+  assert.ok(at.cleared >= 0.28 && at.cleared <= 0.95, '推荐等级通关率应在 28%~95%：' + info);
   assert.ok(low.cleared <= at.cleared - 0.15, '低 4 级应明显更难：' + info);
   assert.ok(high.cleared >= low.cleared + 0.2 && high.cleared >= 0.55, '高 2 级应明显更轻松：' + info);
   at.perFight.forEach((p, i) => assert.ok(p > 0.25, '第' + (i + 1) + '场在推荐等级下要有胜机：' + info));

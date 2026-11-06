@@ -482,6 +482,7 @@ test('练功木桩：10 次训练锁血但保留 800+ 伤害，分项纪录取�
     practice: true, practiceRounds: 10,
   };
   const r = Sim.simulate(me, dummy);
+  assert.ok(r.rounds.every((x) => !x.dodge), '木桩不闪避：第二把菜刀也不能被闪掉（原版 Stakes 没有闪避分支）');
   assert.equal(r.rounds.length, 10, '固定 10 次出手就收尾（不会因为 800 血被打空提前结束）');
   assert.ok(r.rounds.every((x) => x.attacker === 0), '木桩不抢回合：10 次全是玩家出手');
   assert.ok(r.rounds.every((x) => x.hpAfter[0] === me.hp), '木桩不还手：玩家血量不减');
@@ -1785,6 +1786,22 @@ test('反击必中：撞上绝对防御也照常结算，不会被闪避 / 弹�
     }
   }
   assert.ok(counters > 0, '样本里应当出现反击');
+});
+
+test('反击无视装死：带装死的出手方被反击打到 0 血，装死不接管', () => {
+  /* 用户 2026-11 反馈：反击还是被装死救回。以前反击的 applyDamage 没带 ignoreFakeDie，
+   * 1 血 + 装死（技能 6）的出手方被反击时停在 1 血并触发装死。现在反击直接打死
+   *（涅槃 / 金蝉脱壳仍照常），回放按「被反击打死」倒地处播。 */
+  const g = game(), Sim = g.Sim;
+  const me = fighter({ hp: 5000, maxHp: 5000, power: 80, agility: 0, speed: 1 });
+  me.effects = { 49: 100 };                        // 反击概率 100%，必出反击
+  const foe = fighter({ hp: 1, maxHp: 1, power: 10, agility: 0, speed: 100, skills: [{ id: 6, level: 1 }] });
+  const res = Sim.simulate(me, foe);
+  const r = res.rounds.find((x) => x.counterDmg > 0);
+  assert.ok(r, '样本里应当出现反击');
+  assert.equal(r.attacker, 1, '应当是 1 血带装死的那位先出手，实测 attacker=' + r.attacker);
+  assert.equal(r.hpAfter[1], 0, '反击要无视装死、直接打到 0 血，实测 ' + r.hpAfter[1]);
+  assert.ok(!r.counterFakeDie, '反击不能再把装死记成 counterFakeDie');
 });
 
 test('被闪避的攻击不再触发反击（先机预判 / 风影身法同拍不再演“闪避 + 反击”）', () => {

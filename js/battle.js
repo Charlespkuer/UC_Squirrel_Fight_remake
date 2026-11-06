@@ -244,7 +244,8 @@
     const hpOf = (f) => Math.max(1, Math.round(Number(f.hp) || 1));
     const hps = sources.map((f) => Math.min(hpOf(f), Number(f.maxHp) > 0 ? Math.round(Number(f.maxHp)) : hpOf(f)));
     /* 护盾（石像鬼机制 / 塔 buff「坚韧壁垒」）：初值取模拟的开局护盾，
-     * 之后每帧跟随事件里的 shellAfter 更新。血条上画一段浅蓝，数值旁标「＋护盾 N」。 */
+     * 之后每帧跟随事件里的 shellAfter 更新。淡蓝段压在黄色血条最左一段，
+     * 血量数字把护盾算进分子（`血量+护盾/上限`），不再单独写护盾数字标签。 */
     const shields = Array.isArray(result.startShell) && result.startShell.length === 2
       ? result.startShell.map((v) => Math.max(0, Math.round(Number(v) || 0)))
       : [0, 0];
@@ -393,6 +394,28 @@
         if (!play(side, name, Object.assign({}, o, { onDone: done }))) done();
       });
     }
+    /** 把一条受击动画钉在**首帧**（= 刚挨打的贴身位），并立刻 resolve。
+     *  `bjBack` / 三侠的 `hurtRunBack` 整段是“被打退”——实测 `bjBack` 首帧包围盒
+     *  中心 x≈632、末帧≈237，会一路退回原位；反击致死若照常播完再倒地，就又是
+     *  “先回去才死”（用户 2026-11 口径）。经典播放器对应的是 `dead(1)`（直接停在
+     *  挨打处），现代没有那一帧，所以这里把受击姿态停在首帧，末尾 `die` 再按首帧
+     *  的包围盒差补位移，尸体就留在挨反击的地方。 */
+    function holdFirstFrame(side, name) {
+      if (!Engine.hasAnim(name)) return Promise.resolve();
+      return new Promise((resolve) => {
+        let settled = false, inst = null;
+        const freeze = () => {
+          if (settled) return;
+          settled = true;
+          if (inst) { inst.done = true; inst.frame = 0; }
+          resolve();
+        };
+        inst = play(side, name, { onFrame: (frame) => { if (frame >= 1) freeze(); } });
+        if (!inst) { freeze(); return; }
+        /* 只有 1 帧 / 图集没到时 onFrame 不会来；兜底不能把整场卡住。 */
+        void wait(600).then(freeze);
+      });
+    }
     function point(side) {
       const f = fighters[side], inst = f.inst;
       if (inst) {
@@ -469,23 +492,20 @@
           { size: 32, bold: false, align: 'center', color: '#9f3f17', stroke: false });
         rounded(c,x, y, width, height, 31, '#ff6100');
         const pct = Math.max(0, Math.min(1, hps[side] / maxHp[side]));
-        /* 护盾按「占上限的比例」画成血条后面的一段 —— 敌方血条是从右往左长的，
-         * 所以那一侧的护盾段要贴在血条的**左端**，保持「越靠内越先被打掉」的直觉。 */
         const sp = Math.max(0, Math.min(1, (Number(shields[side]) || 0) / maxHp[side]));
         c.save(); c.beginPath(); roundRectPath(c, x, y, width, height, 31); c.clip();
+        const gradient = c.createLinearGradient(0, y, 0, y + height); gradient.addColorStop(0, '#ffd323'); gradient.addColorStop(1, '#ffaa0e');
+        c.fillStyle = gradient; c.fillRect(right ? x + width * (1 - pct) : x, y, width * pct, height);
+        /* 护盾：淡蓝色**压在黄色血条的最左一段**（条长仍按生命上限，不额外长出去）。
+         * 敌方血条是从右往左长的，它的“最左”就是黄条靠近中线的那一端。 */
         if (sp > 0) {
           c.fillStyle = 'rgba(120,226,255,.95)';
-          c.fillRect(right ? x + width * (1 - pct - sp) : x + width * pct, y, width * sp, height);
+          c.fillRect(right ? x + width * (1 - pct) : x, y, width * sp, height);
         }
-        const gradient = c.createLinearGradient(0, y, 0, y + height); gradient.addColorStop(0, '#ffd323'); gradient.addColorStop(1, '#ffaa0e');
-        c.fillStyle = gradient; c.fillRect(right ? x + width * (1 - pct) : x, y, width * pct, height); c.restore();
-        Engine.text(c, fmtBig(hps[side]) + '/' + fmtBig(maxHp[side]), x + width / 2, y + 42,
+        c.restore();
+        /* 血量数字把护盾算进分子：x = 血量 + 盾量，y = 生命上限。 */
+        Engine.text(c, fmtBig(hps[side] + (Number(shields[side]) || 0)) + '/' + fmtBig(maxHp[side]), x + width / 2, y + 42,
           { size: 36, align: 'center', color: '#fff8d4', bold: false, stroke: false });
-        /* 护盾数值写在生命值右边（有护盾才画，避免平时干扰）。 */
-        if (shields[side] > 0) {
-          Engine.text(c, '＋护盾 ' + Math.round(shields[side]), x + width / 2 + 104, y + 40,
-            { size: 24, align: 'left', color: '#8fe8ff' });
-        }
       }
       const debuffs = Array.isArray(opts.debuffs) ? opts.debuffs : [];
       if (debuffs.length) {
@@ -669,8 +689,29 @@
       }
       idle(side);
     }
+    /** 被反击打死的出手方：末尾倒地时用它算出“倒在被反击的地方”的位移。
+     *  `hurt` 是挨反击时实际播的受击动画（它的首帧就停在攻击后的贴身位）。 */
+    let counterDeath = null;
+    /** 现代 `die` 只有“原位倒地”一套；原版 `dead(distance)` 的 `distance=1` 是
+     *  “在对手那边倒下”。这里用**受击动画首帧**与 `die` 首帧的包围盒中心差换算屏幕位移：
+     *  未镜像的一侧直接相加，镜像的一侧（向右的敌人 / 向左的三侠）取反。 */
+    function counterDeathOffset(side, hurtName, dieName) {
+      const f = fighters[side];
+      if (!f || !hurtName || !dieName) return 0;
+      const sheets = f.npc ? sheetsFor(f) : SQ;
+      const wears = f.npc ? null : f.wears;
+      const hurt = Engine.anim(hurtName), die = Engine.anim(dieName);
+      if (!hurt || !hurt.length || !die || !die.length) return 0;
+      const exclude = ['54', '75', '91'];
+      const hb = Engine.frameBounds(hurt[0], { sheets, wears, exclude });
+      const db = Engine.frameBounds(die[0], { sheets, wears, exclude });
+      if (!hb || !db) return 0;
+      const d = (hb.x + hb.w / 2) - (db.x + db.w / 2);
+      return Math.round(mirrorFor(side) ? -d : d);
+    }
     async function playRound(r) {
       if (debugBattleStats && Array.isArray(r.effStats)) liveStats = r.effStats;
+      counterDeath = null;
       const att = r.attacker, def = 1 - att, f = fighters[att];
       const beforeHp = hps.slice();
       const beforeMax = maxHp.slice();
@@ -752,8 +793,10 @@
         else {
           defending = reaction(def, r);
           /* 原版 `showBlood()`：暴击时 `addOrReduce` 停在**第 3 帧（暴击字样）**，
-           * 数字换成 **font 4** 的黄色档；不再单独飘一行「暴击」。 */
-          if (r.dmg) damageFloater(def, r.dmg, !!r.crit);
+           * 数字换成 **font 4** 的黄色档；不再单独飘一行「暴击」。
+           * 护盾吸收的那一截也算进这次的红字伤害（用户 2026-11 口径：打到盾上不能没有红字）。 */
+          const shownDmg = (Number(r.dmg) || 0) + (Number(r.shellAbsorb) || 0);
+          if (shownDmg) damageFloater(def, shownDmg, !!r.crit);
           if (r.hits > 1 || r.multiHit > 1) floater(def, (r.hits || r.multiHit) + '连击', 'y');
           if (r.fakeDie) {
             /* 普通受击 → 挨打的那位装死；被反伤 → **出手的那位**装死（需求143）。 */
@@ -766,8 +809,7 @@
           if (r.lifesteal) floater(att, '+' + fmtBig(r.lifesteal), 'g');
           if (r.reboundHurt) floater(att, '-' + fmtBig(r.reboundHurt), 'r');
           if (r.selfBurn) floater(att, '-' + fmtBig(r.selfBurn), 'r');
-          // 挑战塔：护盾吸收 / 荆棘反弹 / 机制提示（狂暴·禁锢·吞噬·瞬杀·毒藤·金蝉脱壳·涅槃）
-          if (r.shellAbsorb) floater(def, '护盾-' + fmtBig(r.shellAbsorb), 'y');
+          // 挑战塔：护盾吸收并入上面的红字伤害；这里只留荆棘反弹 / 机制提示
           if (r.thornsDmg) floater(att, '-' + fmtBig(r.thornsDmg), 'r');
           if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y');
         }
@@ -787,10 +829,12 @@
       if ((r.counterDmg || r.counterFakeDie || r.counterRebound || r.counterBlocked) && hps[def] > 0) {
         floater(def, '反击', 'y');
         const counterName = fighters[def].npc ? fighters[def].npc + '_beatBack' : 'beatBack';
-        let counterHit = false, counterReaction = Promise.resolve();
+        let counterHit = false, counterReaction = Promise.resolve(), counterHurt = '';
         const counterImpact = () => {
           if (counterHit || aborted()) return; counterHit = true; applyHp(r);
-          if (r.counterDmg) floater(att, '-' + fmtBig(r.counterDmg), 'r');
+          /* 反击打在护盾上也要红字：`counterAbsorb` 是这次反击被盾吃掉的部分。 */
+          const shownCounter = (Number(r.counterDmg) || 0) + (Number(r.counterAbsorb) || 0);
+          if (shownCounter) floater(att, '-' + fmtBig(shownCounter), 'r');
           else if (r.counterBlocked) floater(att, r.counterBlocked, 'y');
           if (r.counterFakeDie) {
             /* 同样分「挨反击的那位装死」与「反击者被反伤打死装死」两种情况。 */
@@ -805,18 +849,27 @@
             return;
           }
           const hurt = moved ? (f.npc ? f.npc + '_hurtRunBack' : 'bjBack') : (f.npc ? npcAnim(f.npc, 'hit') : 'hitMe');
+          counterHurt = hurt;
           if (Engine.hasAnim(hurt)) {
-            effect(moved ? (f.npc ? f.npc + '_effect_hurtRunBack' : 'effect_hurtRunBack') : (f.npc ? f.npc + '_effect_hitMe' : 'effect_hitMe'), att);
-            counterReaction = action(att, hurt); recoveredFromCounter = moved;
+            /* `applyHp(r)` 刚写上整拍终值：这一下会打死出手方时，受击/击退动画不再
+             * 整段播完（它会把角色退回原位），改钉在首帧的挨打处；收尾的 `die`
+             * 再用首帧包围盒差停在同一位置。 */
+            const lethal = hps[att] <= 0;
+            if (!lethal) effect(moved ? (f.npc ? f.npc + '_effect_hurtRunBack' : 'effect_hurtRunBack') : (f.npc ? f.npc + '_effect_hitMe' : 'effect_hitMe'), att);
+            counterReaction = lethal ? holdFirstFrame(att, hurt) : action(att, hurt);
+            recoveredFromCounter = moved;
           }
         };
         effect(fighters[def].npc ? fighters[def].npc + '_effect_beatBack' : 'effect_beatBack', def);
         if (Engine.hasAnim(counterName)) await action(def, counterName, { onFrame: (frame) => { if (frame === 4) counterImpact(); } });
         counterImpact();
         await counterReaction;
+        if (hps[att] <= 0) counterDeath = { side: att, hurt: counterHurt };
       }
       applyHp(r);
-      await returnHome(att, name, moved && !recoveredFromCounter);
+      /* 被打死的一侧不再走归位/待机：`returnHome` 里的 `idle` 会把它搬回原位，
+       * 刚钉住的受击姿态就白钉了（用户 2026-11：“打着打着人回去了才死”）。 */
+      if (hps[att] > 0) await returnHome(att, name, moved && !recoveredFromCounter);
       idle(def);
       await wait(170);
     }
@@ -843,7 +896,11 @@
         fighters[loser].dead = true;
         const dead = fighters[loser].npc ? npcAnim(fighters[loser].npc, 'die') : 'die';
         effect(fighters[loser].npc ? fighters[loser].npc + '_effect_die' : 'effect_dead', loser);
-        await action(loser, Engine.hasAnim(dead) ? dead : npcAnim(fighters[loser].npc, 'idle'));
+        /* 被反击打死的那一方：倒地位置留在**挨反击的贴身位**（原版 `dead(1)` 的语义），
+         * 不要先瞬移回原位再倒。 */
+        const dieX = (counterDeath && counterDeath.side === loser)
+          ? counterDeathOffset(loser, counterDeath.hurt, dead) : 0;
+        await action(loser, Engine.hasAnim(dead) ? dead : npcAnim(fighters[loser].npc, 'idle'), dieX ? { x: dieX } : undefined);
         const win = fighters[winner].npc ? npcAnim(fighters[winner].npc, 'win') : 'win';
         effect(fighters[winner].npc ? fighters[winner].npc + '_effect_win' : 'effect_win', winner);
         await action(winner, Engine.hasAnim(win) ? win : npcAnim(fighters[winner].npc, 'idle'));

@@ -240,6 +240,24 @@
     return out;
   }
 
+  /** 这一侧的武器表（id → 等级）。
+   *  武器型号帧和真化闪电**按这一场真正装备的等级**画，不盲信回合事件里的 `level`：
+   *  录像 / 回放 / 旧战斗里的事件可能来自另一份面板，外观以 `me` / `foe` 的清单为准。
+   *  （`level` 只作为清单缺失时的兜底。） */
+  function weaponsOf(side, player) {
+    let list = (player && Array.isArray(player.weapons)) ? player.weapons : null;
+    if (!list && side === 0) { try { list = State.myWeapons() || []; } catch (e) { list = []; } }
+    const out = {};
+    for (const w of (Array.isArray(list) ? list : [])) {
+      if (!w) continue;
+      const p = typeof w === 'string' ? w.split(/[:,]/) : null;
+      const id = Number(p ? p[0] : w.id);
+      const lv = Number(p ? (p[1] || 1) : w.level);
+      if (Number.isFinite(id)) out[id] = Number.isFinite(lv) && lv > 0 ? lv : 1;
+    }
+    return out;
+  }
+
   /* ---------- 战利品图标（战果页 / 开宝箱那一格） ----------
    * 原版 `mc.c1.attachMovie(<道具名>, "mc", 100)`（战果页 :18804 / 开宝箱 :18691）——
    * 库元件名就是道具名，映射表由 `node tools/gen-ssfight-ui.cjs --fight` 一并产出
@@ -646,12 +664,8 @@
         const fr = cont.frames[art.id];
         if (fr) { stopAt(clip, fr); return; }
       } else if (WEAPON_ART_SYMS.has(Number(clip.tag.id))) {
-        stopAt(clip, WEAPON_SIZE_FRAMES[art.level] || 1);
-        /* 真2~真5 的固定色外发光：型号帧 6/7/9/8 本身已经带同色辉光，
-         * 真2 的白档（帧 6）没有彩色辉光，所以统一再补一层很轻的 drop-shadow，
-         * 既让白档看得见，也让各档的颜色顺序在战斗中一眼能分辨。 */
-        const glow = weaponTrueGlow(art.level);
-        if (glow && clip.g && clip.g.style) clip.g.style.filter = 'drop-shadow(0 0 5px ' + glow + ')';
+        paintWeaponArtClip(clip, fighter);
+        refreshWeaponArt(clip, fighter);
         return;
       }
     }
@@ -784,6 +798,56 @@
   }
   const WEAPON_ART_SYMS = new Set([5666, 5670, 5674, 5679, 5686, 5697, 5706, 5724, 5733,
     5753, 5757, 5760, 5763, 5766, 5769, 5772, 5775]);
+  /** 武器美术/辉光要用的等级：**优先这一场装备清单里的真实等级**，回合事件里的
+   *  `level` 只作兜底。这样即使录像/旧事件把真5 的 15 带到了 10 级武器上，外观也按 10 画。 */
+  function weaponArtLevel(fighter, art) {
+    const id = Number(art && art.id);
+    const owned = fighter && typeof fighter.weaponLevel === 'function' ? fighter.weaponLevel(id) : 0;
+    const lv = owned || Number(art && art.level) || 1;
+    return Math.max(1, Math.min(15, Math.round(lv)));
+  }
+  /** 递归走一棵 MovieClip 子树（`nodes` 的换帧放置 + `attachChild` 挂上来的）。 */
+  function eachClipTree(root, fn) {
+    if (!root || typeof fn !== 'function') return;
+    fn(root);
+    if (root.nodes) for (const rec of root.nodes.values()) if (rec && rec.clip) eachClipTree(rec.clip, fn);
+    for (const c of root.__attached || []) eachClipTree(c, fn);
+  }
+  /** 给武器美术拨型号帧 / 真化外发光，并处理它身上那两层闪电（5649 / 5660）。
+   *
+   *  ⚠ 5649 / 5660 是 5 帧的**辉光/闪电叠层**，原版靠父级放置的 `cx` 染成
+   *  真1~真5 的颜色；但复刻的节拍器会让它们自己从第 1 帧播到第 5 帧。
+   *  10 级武器的型号帧 4 本身就带一层青色闪电，不处理的话：
+   *    · 10 级死神镰刀也会放"真化"闪电（用户 2026-11 口径："应该没有特效"）；
+   *    · 自播到第 5 帧时，闪电形状/亮度还会跳，看起来像在真1~真5 之间乱切。
+   *  所以非真形态（等级 ≤10）直接藏掉这两层；真形态钉在第 1 帧，颜色交给父级 `cx`
+   *  + `drop-shadow`，不再让它自己播。 */
+  function paintWeaponArtClip(clip, fighter) {
+    if (!clip || !clip.tag) return;
+    const sid = Number(clip.tag.id);
+    const art = fighter && fighter.weaponNow;
+    if (!art) return;
+    const lv = weaponArtLevel(fighter, art);
+    if (WEAPON_ART_SYMS.has(sid)) {
+      stopAt(clip, WEAPON_SIZE_FRAMES[lv] || 1);
+      const glow = weaponTrueGlow(lv);
+      if (clip.g && clip.g.style) clip.g.style.filter = glow ? 'drop-shadow(0 0 5px ' + glow + ')' : '';
+      return;
+    }
+    if (sid === 5649 || sid === 5660) {
+      const trueN = (window.GData && GData.trueLevel)
+        ? GData.trueLevel(lv) : (lv > 10 ? Math.min(5, lv - 10) : 0);
+      if (trueN <= 0) { clip.playing = false; visible(clip, false); }
+      else { visible(clip, true); stopAt(clip, 1); }
+    }
+  }
+  /** 在整棵出手子树上重刷武器外观：`onClip` 只在实例**出生**时跑一次，换帧复用
+   *  同一个武器 clip 时不会重跑；这里在每次拨完 `attacks` 选择帧后补一遍，
+   *  保证同一条动画复用/回放时型号帧与闪电状态都是这一拍该有的。 */
+  function refreshWeaponArt(root, fighter) {
+    if (!root || !fighter || !fighter.weaponNow) return;
+    eachClipTree(root, (clip) => paintWeaponArtClip(clip, fighter));
+  }
   function attackPlan(r) {
     /* 幻兽协战：`attacks` 第 `29 + 幻兽 id` 帧（30..61）。 */
     if (r.action === 'pet') {
@@ -1619,7 +1683,10 @@
       weaponNow: null,
       /** 这位参战者自己的技能等级（id → 等级）；真形态那一档要读它。 */
       skills: (info && info.skills) || {},
+      /** 这一场真正装备的武器等级（id → 等级）；武器外观以它为准。 */
+      weapons: (info && info.weapons) || {},
       skillLevel(id) { return Number(api.skills[Number(id)]) || 0; },
+      weaponLevel(id) { return Number(api.weapons[Number(id)]) || 0; },
       /** 这一拍防守技（装死 6 / 龟甲术 7 / 绝对防御 16）该用哪个等级挑档。 */
       defenseSkillLevel(r) {
         if (r && r.fakeDie) return api.skillLevel(6);
@@ -1698,6 +1765,9 @@
         api.luckyCount = (r && r.action === 'skill' && Number(r.id) === 23)
           ? Math.max(1, Math.min(6, Math.round(Number(r.boomCount) || 1))) : null;
         stopAt(sel, plan.frame);
+        /* `onClip` 只在武器 clip **出生**那次跑；同一条出手动画复用同一个 clip 时
+         * 不会重跑，所以这里按这一拍的真实武器等级再刷一遍型号帧/闪电。 */
+        refreshWeaponArt(sel, api);
         /* 记下这一次真正拨到的是哪一帧（回归据此钉住"技能走的是 4~21 那一档，
          * 不是幻兽的 29+id"）。 */
         api.lastAttack = { frame: plan.frame, action: String(r.action), id: Number(r.id) || 0,
@@ -2116,32 +2186,6 @@
     refreshBlood(hud);
     void t;
   }
-  /** 护盾值挂在血条上方：经典 HUD 的 `bloodbar` 本身没有护盾图层，
-   *  挑战塔「坚韧壁垒 / 石像鬼磐岩」的 `shellAfter` 以前只在内部记账，玩家看到的
-   *  是“打中了却没掉血”。这里补一颗蓝色「护盾 N」小牌，盾归零自动隐藏。 */
-  function refreshShieldBadge(rec, side, bar) {
-    if (!rec || !rec.host) return;
-    if (!rec.shieldBadges) rec.shieldBadges = [null, null];
-    let badge = rec.shieldBadges[side];
-    if (!badge || !badge.isConnected) {
-      badge = document.createElement('div');
-      badge.className = 'sf-shield-badge';
-      badge.setAttribute('aria-live', 'polite');
-      rec.host.appendChild(badge);
-      rec.shieldBadges[side] = badge;
-    }
-    const value = Math.max(0, Math.round(Number(rec.shields && rec.shields[side]) || 0));
-    const node = bar && (bar.g || bar);
-    if (!value || !node || !node.getBoundingClientRect) { badge.style.display = 'none'; return; }
-    const r = node.getBoundingClientRect(), h = rec.host.getBoundingClientRect();
-    if (!r.width && !r.height) { badge.style.display = 'none'; return; }
-    badge.textContent = '盾 ' + value;
-    /* 贴在血条数字正下方：不盖名字、不盖血量数字、也不和中间的回合数抢位置。 */
-    badge.style.left = (r.left - h.left + r.width / 2) + 'px';
-    badge.style.top = (r.bottom - h.top + 1) + 'px';
-    badge.style.transform = 'translate(-50%,0)';
-    badge.style.display = 'block';
-  }
   function refreshBlood(hud) {
     const t = T();
     if (!live || !hud) return;
@@ -2150,17 +2194,70 @@
       if (!f) continue;
       const total = Math.max(1, f.blood.totalBlood || 1);
       const left = Math.max(0, Math.min(total, f.blood.leftBlood));
+      const shield = Math.max(0, Math.round(Number(live.shields && live.shields[i]) || 0));
       const bar = hud.byName('bloodbar' + (i + 1));
       stopAt(bar, Math.max(1, Math.min(BLOOD_BAR_FRAMES, Math.floor((total - left) * 100 / total) || 1)));
       const txt = hud.byName('bloodtext' + (i + 1));
       /* 血量数字不按原版 59 单位字段框裁切：高层/高 buff 的生命会超过六位，
-       * 裁掉后看起来像“数字被血条边界挡住”。只放开这两条字段。 */
-      if (txt) setText(txt, left + '/' + total + ' ', { noClip: true });
-      /* 用血条上的数字框当锚点：`bloodbar` 那两个元件在素材里是整条轨道，
-       * 直接取中心会落到屏幕中间（实测护盾牌会压到回合数旁边）。 */
-      refreshShieldBadge(live, i, txt || bar);
+       * 裁掉后看起来像“数字被血条边界挡住”。只放开这两条字段。
+       * 护盾算进分子：x = 血量+护盾，y = 生命上限。 */
+      if (txt) setText(txt, (left + shield) + '/' + total + ' ', { noClip: true });
+      drawShieldBar(live, i, bar, left, total, shield);
     }
     if (t) t.showNumber(Math.max(0, live.roundsLeft), hud, 0, 0, 'right', 2);
+  }
+  /** 护盾条：**画在血条自己的 SVG 子树里**（不再用按屏幕 px 定位的 DOM 小牌 ——
+   *  Android 上主机缩放/留边会让那块「盾 N」明显偏移）。淡蓝色压在黄色血条**最左**一段，
+   *  条的总长仍按生命上限；数字已由 `refreshBlood` 改成 `血量+护盾/上限`。
+   *  敌方那根血条在素材里是**镜像**的（HUD 里 x 缩放为负），它的“视觉最左”落在本地坐标右端。 */
+  function drawShieldBar(rec, side, bar, left, total, shield) {
+    if (!rec || !bar) return;
+    if (!rec.shieldRects) rec.shieldRects = [null, null];
+    let rect = rec.shieldRects[side];
+    const host = bar.getContentHost ? bar.getContentHost() : null;
+    if (!shield || !host) {
+      if (rect && rect.parentNode) rect.parentNode.removeChild(rect);
+      rec.shieldRects[side] = null;
+      return;
+    }
+    /* 血条轮廓 = 蒙版轨道 `7695` 的 bbox；黄条是 `7696`（换帧时带 clip-path 的 wrap）。 */
+    let box = null, clipAttr = '';
+    if (bar.nodes) {
+      for (const v of bar.nodes.values()) {
+        if (!v) continue;
+        if (String(v.id) === '7695' && v.node && v.node.getBBox) {
+          try { const b = v.node.getBBox(); if (b && b.width > 0) box = b; } catch (e) { /* 没布局 */ }
+        }
+        if (v.wrap && v.wrap.getAttribute) {
+          const cp = v.wrap.getAttribute('clip-path');
+          if (cp) clipAttr = cp;
+        }
+      }
+    }
+    if (!box) return;
+    if (!rect || !rect.parentNode) {
+      rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('fill', '#78e2ff');
+      rect.setAttribute('fill-opacity', '0.95');
+      rect.setAttribute('pointer-events', 'none');
+      rec.shieldRects[side] = rect;
+    }
+    /* 放到内容层最后 = 压在黄条上面；换帧会重排，所以每次刷新都重新 append。 */
+    host.appendChild(rect);
+    const pct = Math.max(0, Math.min(1, left / Math.max(1, total)));
+    const sp = Math.max(0, Math.min(1, shield / Math.max(1, total)));
+    let mirrored = false;
+    try {
+      const m = bar.g && bar.g.getCTM && bar.g.getCTM();
+      if (m) mirrored = m.a < 0;
+    } catch (e) { /* 忽略 */ }
+    const width = box.width * sp;
+    const x = mirrored ? box.x + box.width * (pct - sp) : box.x;
+    rect.setAttribute('x', x.toFixed(2));
+    rect.setAttribute('y', box.y.toFixed(2));
+    rect.setAttribute('width', Math.max(0, width).toFixed(2));
+    rect.setAttribute('height', box.height.toFixed(2));
+    if (clipAttr) rect.setAttribute('clip-path', clipAttr); else rect.removeAttribute('clip-path');
   }
   /** `showBlood()`（`MainMovie.as:15756`）：把**那一侧**的伤害数字模板复制一份再播。
    *
@@ -2300,9 +2397,9 @@
   /* `6122` / `6185` 第 31 帧那颗具名 `ball` 的兜底数据（原版 `boom(ball, count)` 的接收者）。
    * 正常情况下从当前这一拍的 `attack.byName('ball')` 现取，材质/真形态变了也能跟着走。 */
   const LUCKY_BALL = Object.freeze({ id: '6116', ma: '-0.75,0,0,0.75,392.65,89.85' });
-  function boomSplit(rec, attacker, r, side, aborted) {
+  function boomSplit(rec, attacker, r, side, aborted, amount) {
     const view = rec && rec.view;
-    const total = Math.max(0, Math.round(Math.abs(Number(r.dmg) || 0)));
+    const total = Math.max(0, Math.round(Math.abs(Number(amount != null ? amount : r.dmg) || 0)));
     const n = Math.max(2, Math.min(8, Math.round(Number(r.boomCount) || 0)));
     if (!total) return false;
     const share = Math.floor(total / n);
@@ -2533,6 +2630,7 @@
       const campaign = sources[i] && sources[i].campaign ? sources[i].campaign : null;
       rec.fighters[i] = makeFighter(i, buildFighter(view, i, wearsOf(i, sources[i]), npc, campaign, !!(sources[i] && sources[i].mutant)), {
         name: names[i], maxHp: rec.maxHp[i], skills: skillsOf(i, sources[i]),
+        weapons: weaponsOf(i, sources[i]),
       });
       const f = rec.fighters[i];
       if (f) { f.blood.totalBlood = rec.maxHp[i]; f.blood.leftBlood = rec.hps[i]; f.blood.finalBlood = rec.hps[i]; }
@@ -2900,18 +2998,19 @@
       const f = rec.fighters[side];
       if (f) f.idle();
     }
-    /* 练功木桩：上一拍扣掉的血在**下一拍开头**回满。Sim 把这次回血记在
-     * `r.practiceHeal`，这里先补血条再演这一拍，所以玩家看得到“先扣、下回合加回来”。 */
+    /* 练功木桩：Sim 在**这一拍开头**就把上一拍的伤害回满了（`r.practiceHeal`）。
+     * 这里先把血条补回去再演这一拍，玩家看得到“先扣、下回合加回来”。
+     * ⚠ 回满**只补血条、不飘绿字**：绿字会盖住/挤走这一拍的红伤害数字。
+     * 不要把回血挪到收尾：`hpAfter` 是“回满后再扣”的终值，收尾再加回会把这一拍
+     * 的伤害扣在上一拍的残血上，木桩会显示成快死了（2026-11 实测 21/800、1/800）。 */
     if (r.practiceHeal > 0) {
-      const f = rec.fighters[def];
-      if (f) {
-        const total = Math.max(1, f.blood.totalBlood || rec.maxHp[def] || 1);
-        const left = Math.min(total, Math.max(0, Number(f.blood.leftBlood) || 0) + Number(r.practiceHeal));
-        f.blood.leftBlood = left;
+      const pf = rec.fighters[def];
+      if (pf) {
+        const total = Math.max(1, pf.blood.totalBlood || rec.maxHp[def] || 1);
+        const left = Math.min(total, Math.max(0, Number(pf.blood.leftBlood) || 0) + Number(r.practiceHeal));
+        pf.blood.leftBlood = left;
         rec.hps[def] = left;
         if (rec.hud) refreshBlood(rec.hud);
-        /* 木桩每回合回满：只补血条，不飘绿字。绿字会反复盖住/挤走上一拍的红伤害
-         * （用户 2026-11 口径：“攻击到敌人身上后没有显示红字”）。 */
         await wait(260);
         if (aborted()) return;
       }
@@ -3011,11 +3110,13 @@
        * "敌人触发反击的时候，扣血条的显示与动画同步，不要提前触发扣血条的显示"。
        * 反击命中那一刻 `runCounter().settle()` 会再走一次 `applyHp(rec, r)` 写终值。 */
       applyHp(rec, r, { beforeCounter: true });
-      /* 闪开了就没有伤害数字（`Squirrel.beAttack` 的 `defenseType == 1` 那一支只改身体帧）。 */
-      if (r.dmg && !r.dodge) {
+      /* 闪开了就没有伤害数字（`Squirrel.beAttack` 的 `defenseType == 1` 那一支只改身体帧）。
+       * 护盾吸收的那一截也并入这次红字（用户 2026-11 口径：打到盾上不能没有伤害数字）。 */
+      const shownDmg = (Number(r.dmg) || 0) + (Number(r.shellAbsorb) || 0);
+      if (shownDmg && !r.dodge) {
         /* 幸运一击：`boomCount > 1` 走原版 `boom()` 的多球分裂（分段飘字 + 复制球）。 */
-        if (!(Number(r.boomCount) > 1 && boomSplit(rec, attacker, r, def, aborted))) {
-          floatNumber(def, r.dmg, r.crit ? 'berserk' : 'hit');
+        if (!(Number(r.boomCount) > 1 && boomSplit(rec, attacker, r, def, aborted, shownDmg))) {
+          floatNumber(def, shownDmg, r.crit ? 'berserk' : 'hit');
         }
       }
       if (r.healSelf) floatNumber(att, r.healSelf, 'heal');
@@ -3078,7 +3179,15 @@
 
   /** `attackBack()` + `beBttackBack()`：反击那一路（`Squirrel.as:369` / `MainMovie.as:6418`）。
    *  原版顺序：受击方的 `attackback`(6516) 放到**第 5 帧** → 出手方 `reduceBlood(harmToSelf, 5)`
-   *  并 `comeBack(1|2)` 归位；被反伤打出装死时改播装死那一段。 */
+   *  并 `comeBack(1)` 归位；被反伤打出装死时改播装死那一段。
+   *
+   *  ⚠ **0 伤害的反击也不能播「被闪避」**（2026-11-06 用户反馈，无尽塔 1.1.5 实拍）：
+   *  `comeBack(2)` → `6523`（`comeBacks` 第 3 帧）复用了闪避 `6432` 的整套画稿，里面就带着
+   *  `6431`「闪避」字标（`sprite6432` / `sprite6523` 都引用 `6431`，见 `tags-fight.json`）。
+   *  于是「绝对防御挡下后反击 → 被护盾/龟甲术整下吃满 0 伤害」会被演成「反击被闪避」，
+   *  与「反击不可闪避」的口径正面冲突。反击永远不会 `r.dodge`（`maybeCounter` 的
+   *  `noDodge` + `opts.counter`），所以这里统一走 `comeBack(1)`（被击退）；
+   *  「被闪避」那一档只留给真正的闪避（受击方的 `DODGE_ACTS`）。 */
   async function runCounter(rec, r, att, def, attacker, defender, aborted) {
     let done = false, reaction = null, reactionStarted = false;
     /** 反击命中的**同一刻**就让出手方起受击/击退反应；以前要等 defender 的
@@ -3094,14 +3203,21 @@
         }
         return;
       }
-      if (rec.hps[att] <= 0 && !attacker.isDead()) { reaction = attacker.dead(0); return; }
-      if (!attacker.isDead()) reaction = attacker.comeBack(r.counterDmg ? 1 : 2);
+      /* 被反击打死的人**倒在挨打的地方**（攻击后的贴身位），不是回原位再倒：
+       * 原版 `dead(distance)` 的 `distance=1` → `defenses` 第 5 帧（`6366` 的 ma 比第 4 帧
+       * 右移 122.4 个局部单位），正是“在对手那边倒下”的那一档；`dead(0)` 是原位倒地。 */
+      if (rec.hps[att] <= 0 && !attacker.isDead()) { reaction = attacker.dead(1); return; }
+      /* 反击不可闪避：0 伤害只可能是被护盾/龟甲术挡住，绝不能用 `comeBack(2)`
+       *（6523 = 闪避画稿，含 6431「闪避」字标）。 */
+      if (!attacker.isDead()) reaction = attacker.comeBack(1);
     };
     const settle = () => {
       if (done || aborted()) return;
       done = true;
       applyHp(rec, r);
-      if (r.counterDmg) floatNumber(att, r.counterDmg, 'back');
+      /* 反击被护盾吃掉的那一截也并进红字（`counterAbsorb` 由 sim 落在这拍上）。 */
+      const shown = (Number(r.counterDmg) || 0) + (Number(r.counterAbsorb) || 0);
+      if (shown) floatNumber(att, shown, 'back');
       if (r.counterRebound) floatNumber(def, r.counterRebound, 'back');
       if (rec.hud) refreshBlood(rec.hud);
       startReaction();
@@ -3117,8 +3233,9 @@
       if (f && !f.isDead()) await f.beAttack({ fakeDie: true, fakeDieSide: who });
       return;
     }
-    /* 反伤把出手方打死了：原版 `reduceBlood` 里那一下 `checkDead()` 会直接用倒地顶掉归位。 */
-    if (rec.hps[att] <= 0 && !attacker.isDead()) { await attacker.dead(0); return; }
+    /* 反伤把出手方打死了：原版 `reduceBlood` 里那一下 `checkDead()` 会直接用倒地顶掉归位。
+     * 同样用 `dead(1)`（`defenses` 第 5 帧）—— 倒在挨反击的地方，而不是瞬移回原位。 */
+    if (rec.hps[att] <= 0 && !attacker.isDead()) { await attacker.dead(1); return; }
   }
 
   /** 把这一拍的结算值写进血条。

@@ -313,6 +313,14 @@ const { buildFrames } = SfRender;
     'renderStateIcons 的跳过条件必须同时比较 stateSig 与宿主上的戳');
   const dstr = src.slice(src.indexOf('function destroy()'), src.indexOf('function destroy()') + 500);
   assert.ok(/stateSig\s*=\s*''/.test(dstr), 'destroy() 必须清掉 stateSig（宿主 DOM 已经跟着被摘掉了）');
+  /* 原版 `showStates` 只有 c1..c3 三个槽，但四颗药丸（力/敏/速/经验）可以同时吃满：
+   * 旧实现 `slice(0, 3)` 会把第 4 颗整颗吞掉（用户 2026-11 反馈）。现在超过 3 颗时
+   * 整行按 c1→c3 的间距向左让位，最右一颗仍钉在 c3，顺序不变。 */
+  const act = src.slice(src.indexOf('function activeStatePills'), src.indexOf('function renderStateIcons'));
+  const pos = src.slice(src.indexOf('function positionStateIcons'), src.indexOf('function stateLayoutProbe'));
+  assert.ok(!/\.slice\(0, 3\)/.test(act) && /const overflow = Math\.max\(0, n - slots\.length\)/.test(pos) &&
+    /base\.cx \+ dx \* \(i - overflow\)/.test(pos),
+    '经典主页药丸栏不能只画 3 颗：四颗全吃时第 4 颗要向左让位显示');
 }
 
 /* ---------- 11. 挑战页（tiaozhan / 7638）：页包必须自带**页根**与二级/三级页库元件 ----------
@@ -1660,6 +1668,13 @@ async function checkClassicFight() {
     '武器容器 / 武器美术要在 onClip 里按"这一拍用的武器"拨帧');
   assert.ok(/api\.weaponNow = \(r && r\.action === 'weapon'\)/.test(uf),
     '出手前要先记下这一拍的武器（容器是拨帧那一刻建出来的）');
+  /* 用户 2026-11 口径："10 级的死神镰刀应该没有特效"。型号帧 4 本身带一层
+   * 5649/5660 的青色闪电，旧实现直接照帧播，10 级武器也会放真化闪电；
+   * 现在按这一场装备清单里的真实等级藏掉非真形态的闪电，真形态钉在第 1 帧。 */
+  assert.ok(/function weaponsOf\(side, player\)/.test(uf) && /weapons: weaponsOf\(i, sources\[i\]\)/.test(uf),
+    '武器外观要按这一场装备清单的等级画，不盲信回合事件里的 level');
+  assert.ok(/function paintWeaponArtClip/.test(uf) && /sid === 5649 \|\| sid === 5660/.test(uf) && /trueN <= 0/.test(uf),
+    '10 级及以下武器必须藏掉 5649/5660 的真化闪电');
   /* ②g 真形态的防御技：`Squirrel.useSkillDefense` 按 `defenderWeaponLevel > 10` 走第 4 / 第 5 帧
    *   （真·龟甲术 / 真·绝对防御）。以前恒返回基础档 → 玩家没那一段也照演普通档。 */
   assert.equal(SfFight._defenseSkillFrame(7, 3), 2, '龟甲术未真化 → 第 2 帧');
@@ -2494,12 +2509,65 @@ function checkBattleReactionPolish() {
     /const deferCounter = !!\(opts && opts\.beforeCounter\)[\s\S]{0,120}?counterDmg[\s\S]{0,80}?counterFakeDie[\s\S]{0,80}?counterRebound/.test(fr),
     '反击伤害不能在主攻击命中帧提前扣血条，要等 attackback 命中'
   );
+  /* 0 伤害的反击（被护盾/龟甲术整下吃满）不能走 comeBack(2)：6523 复用了闪避 6432 的整套画稿、
+   * 含 6431「闪避」字标，回放就成了「反击被闪避」（用户 2026-11-06 在无尽塔 1.1.5 实拍）。 */
+  assert.ok(
+    /if \(!attacker\.isDead\(\)\) reaction = attacker\.comeBack\(1\)/.test(counter) &&
+    !/comeBack\(r\.counterDmg \? 1 : 2\)/.test(counter),
+    '0 伤害的反击不能播「被闪避」归位（comeBack(2) = 6523，含 6431「闪避」字标）'
+  );
+  /* 被反击打死的一方要**倒在被反击的地方**：经典 `dead(1)` 用 defenses 第 5 帧（6366 比第 4 帧
+   * 右移 122.4 个局部单位）；现代 `die` 只有原位一套，用受击动画首帧与 die 首帧的包围盒差补位移。 */
+  const btlDie = fs.readFileSync(path.join(ROOT, 'js/battle.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(
+    /reaction = attacker\.dead\(1\)/.test(counter) &&
+    /await attacker\.dead\(1\)/.test(counter) &&
+    /let counterDeath = null;/.test(btlDie) &&
+    /counterDeath = \{ side: att, hurt: counterHurt \}/.test(btlDie) &&
+    /counterDeathOffset\(loser, counterDeath\.hurt, dead\)/.test(btlDie),
+    '被反击打死要在挨打处倒下（经典 dead(1) = defenses 第 5 帧；现代按受击首帧补位移）'
+  );
   assert.ok(
     /function makeStatuApi\(statu\)/.test(fr) &&
     /const statuApi = makeStatuApi\(holder && holder\.byName \? holder\.byName\('statu'\) : null\)/.test(fr) &&
     /if \(statu\) stopAt\(statu, statu\.frameCount/.test(fr) &&
     /setStatu: statuApi\.setStatu, specialEffect: statuApi\.specialEffect/.test(fr),
     '三侠/木人也要接状态图标（力/敏/速下降会飘），开局先把残留的力↑收掉'
+  );
+}
+
+/* ---------- 42b. 护盾显示：蓝条压在血条最左、数字并入护盾、删掉「盾 N」、打到盾上飘红字 ---------- */
+function checkShieldDisplay() {
+  const fr = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-fight.js'), 'utf8').replace(/\r\n/g, '\n');
+  const btl = fs.readFileSync(path.join(ROOT, 'js/battle.js'), 'utf8').replace(/\r\n/g, '\n');
+  const has = (src, text) => src.indexOf(text) >= 0;
+  /* 用户 2026-11 口径：护盾不再用屏幕 px 定位的独立小牌（安卓端会明显偏移）；
+   * 直接画在血条最左一段，血量数字 = (血量+护盾)/上限，打到盾上并入红字伤害。 */
+  assert.ok(
+    has(fr, 'function drawShieldBar') && !has(fr, 'refreshShieldBadge') && !has(fr, 'sf-shield-badge') &&
+    has(fr, "setText(txt, (left + shield) + '/' + total") &&
+    has(fr, 'const shownDmg = (Number(r.dmg) || 0) + (Number(r.shellAbsorb) || 0)') &&
+    has(btl, 'fillRect(right ? x + width * (1 - pct) : x, y, width * sp, height)') &&
+    has(btl, 'fmtBig(hps[side] + (Number(shields[side]) || 0))') &&
+    !has(btl, '＋护盾 ') &&
+    has(btl, 'const shownDmg = (Number(r.dmg) || 0) + (Number(r.shellAbsorb) || 0)'),
+    '护盾：蓝条画在黄色血条最左一段、血量 = (血量+护盾)/上限、删掉独立「盾 N」小牌，打到盾上仍飘红字'
+  );
+}
+
+/* ---------- 42c. 现代主页不能被不透明底图盖住 canvas 松鼠 ---------- */
+function checkModernHomeCanvas() {
+  const cu = fs.readFileSync(path.join(ROOT, 'js/classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  const css = fs.readFileSync(path.join(ROOT, 'css/classic.css'), 'utf8').replace(/\r\n/g, '\n');
+  /* 2026-11 用户报「现代界面连主界面松鼠都消失了」：`.ssfight-dom-fallback` 被无条件铺了
+   * 经典村庄底图（1.1.6 的经典主页占位），而它同时是现代主页的 DOM 页 —— 不透明底图把
+   * canvas 的现代场景和松鼠整只盖住。底图只能给 classic 的兜底页。 */
+  assert.ok(
+    /classicFallback = currentUiMode\(\) === 'classic'/.test(cu) &&
+    /ssfight-dom-fallback' \+ \(classicFallback \? ' ssfight-classic-fallback' : ''\)/.test(cu) &&
+    /\.classic-home\.ssfight-classic-fallback\{background:/.test(css) &&
+    !/\.classic-home\.ssfight-dom-fallback\{background:/.test(css),
+    '现代主页的 DOM 页必须透明（村庄底图只给 classic 兜底页），否则会盖住 canvas 上的松鼠'
   );
 }
 
@@ -3148,6 +3216,8 @@ function checkMobileComposeWorkflow() {
   checkNewbieTutorials();
   checkHelpContent();
   checkBattleReactionPolish();
+  checkShieldDisplay();
+  checkModernHomeCanvas();
   checkOnboardingDefaults();
   checkBagDetailClicks();
   checkGuideLateSteps();

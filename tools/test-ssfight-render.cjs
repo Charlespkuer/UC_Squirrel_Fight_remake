@@ -1061,9 +1061,11 @@ function checkSharedFeedbackLifecycle() {
     && /'当前效果：' \+ ironCurrentText\(ownLv\)/.test(st)
     && /function weaponRemarkText\(base, lv\)/.test(st)
     && /function skillRemarkText\(base, lv\)/.test(st)
+    && /id === 14[\s\S]{0,120}'吸血'/.test(st)
+    && /\[14, 16\]\.includes/.test(st)
     && /ownLv >= 15[\s\S]{0,600}当前效果：/.test(st)
     && /nextLv > 10[\s\S]{0,900}curLine/.test(st),
-    '武器/技能真化详情要写当前效果：吸铁真5 100%、沉默之斧按当前等级算概率，而不是复读基础 10%');
+    '武器/技能真化详情要写当前效果：吸铁真5 100%、沉默之斧/忍者镖按当前等级算概率，而不是复读基础 10%');
 }
 
 /* ---------- 24. 两处"鼠标悬停就该有反应"的口径（2026-10 第一百六十一批）----------

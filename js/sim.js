@@ -1885,7 +1885,16 @@
           if (w.id === 13 && chance(weaponEffect(w, 10, 3, 3) + trueW(w, 'stun'))) { def.stun = Math.max(def.stun, petDotRounds(def, 1)); r.stunApplied = true; }
           if (w.id === 16 && chance(weaponEffect(w, 10, 4, 4) + trueW(w, 'silence'))) { def.silence = Math.max(def.silence, petDotRounds(def, 4)); r.silenceApplied = true; }
         }
-        if (w.id === 14 && att.hp > 0) { const heal = Math.min(att.maxHp - att.hp, healOf(att, total * (weaponEffect(w, 10, 4, 2) + trueW(w, 'lifesteal')) / 100)); att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
+        /* 忍者镖吸血按**减伤前**的武器伤害算，不是最终掉血量。
+         * 原版抓包（竞技场 065：武器 14:7，最终伤害 76，回复 42，当时缺 195 血未触顶）
+         * 正好对上 `42 / 34% ≈ 124` 的减伤前伤害；按最终 76 只会回 26。
+         * 仍然只在**真的打中**（total > 0）时触发；被打空/绝对防御挡成 0 不回血。 */
+        if (w.id === 14 && att.hp > 0 && total > 0) {
+          const pct = weaponEffect(w, 10, 4) + trueW(w, 'lifesteal');
+          const heal = Math.min(att.maxHp - att.hp, healOf(att, raw * pct / 100));
+          att.hp += heal;
+          r.lifesteal = (r.lifesteal || 0) + heal;
+        }
         if (w.id === 17 && att.hp > 0) { const self = Math.round(att.hp * 0.1); att.hp -= self; r.selfBurn = self; tryDeathSave(att, r); }
         // 反击（只有大榔头 2 的说明写“不会被反击”；死神镰刀 15 只是必中，仍可被反击）
         maybeCounter(att, def, r, (w.type === '近战' && w.id !== 2) ? 'melee' : 'ranged');

@@ -1687,9 +1687,12 @@ test('真化武器/技能数值严格对齐 ssfight 原表（不是真5端点线
   assert.equal(G.trueWeaponBonus({ id: 4, level: 12 }, 'combo'), 10, '西瓜刀真2 +10% 连击');
   assert.equal(G.trueWeaponBonus({ id: 11, level: 11 }, 'crit'), 3, '激光剑真1 +3% 暴击');
   assert.equal(G.trueWeaponBonus({ id: 16, level: 15 }, 'silence'), 20, '沉默之斧真5 +20% 沉默（4% × 5 真级）');
+  assert.equal(G.trueWeaponBonus({ id: 14, level: 15 }, 'lifesteal'), 10, '忍者镖真5 +10% 吸血（2% × 5 真级）');
   assert.equal(G.trueWeaponBonus({ id: 4, level: 10 }, 'combo'), 0, '普通形态不生效');
   // 吸铁大法真5：10 级 46% + 真化累计 54% = 100%
   assert.equal(10 + 4 * 9 + G.trueSkillValue(18, 15), 100, '吸铁大法真5 100% 缴械');
+  const dart = g.State.weaponInst('14:15');
+  assert.equal(dart.harmLo, 73); assert.equal(dart.harmHi, 75, '忍者镖真5 73-75');
   // 真武器基础伤害按 harmAdd1 逐真级累计
   const w = g.State.weaponInst('4:15');
   assert.equal(w.harmLo, 142); assert.equal(w.harmHi, 150, '西瓜刀真5 142-150');
@@ -1710,6 +1713,20 @@ test('真化概率类效果按原表百分数结算（不是 100 倍，也不是
 });
 
 const fighter = (extra) => Object.assign({ name: '松鼠', level: 1, power: 10, agility: 10, speed: 10, hp: 100, weapons: [], skills: [] }, extra);
+
+test('忍者镖吸血按减伤前伤害结算，不是最终掉血量', () => {
+  const g = game(); g.math.random = () => 0.5;
+  const me = fighter({ hp: 100, maxHp: 1000, power: 100, agility: 100, speed: 100,
+    weapons: ['14:10'], pattern: ['weapon'] });
+  /* 对手把投掷伤害减 80%：最终掉血远小于减伤前伤害，用来区分两种口径。 */
+  const foe = fighter({ hp: 10000, maxHp: 10000, power: 1, agility: 1, speed: 1,
+    effects: { 10: 80 } });
+  const r = g.Sim.simulate(me, foe).rounds.find((x) => x.attacker === 0 && x.action === 'weapon' && x.id === 14);
+  assert.ok(r, '必须打出忍者镖');
+  assert.ok(r.lifesteal > 0, '吸血必须真的回血');
+  assert.ok(r.lifesteal > Math.round(r.dmg * 0.46) + 5,
+    '吸血应按减伤前伤害算：最终 ' + r.dmg + '，回血 ' + r.lifesteal);
+});
 
 test('吸铁大法无视装死：直接打死 1 血带装死的目标，通灵召唤仍触发装死', () => {
   /* 用户 2026-10-29 口径：吸铁大法（18）的伤害无视装死，技能介绍不写。 */

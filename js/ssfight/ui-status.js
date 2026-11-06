@@ -1472,14 +1472,21 @@
       const pct = 10 + 4 * (Math.min(n, 10) - 1) + 4 * Math.max(0, n - 10);
       return pct + '%几率使对手4个回合不能使用技能';
     }
+    if (id === 14) {
+      const pct = 10 + 4 * (Math.min(n, 10) - 1) + 2 * Math.max(0, n - 10);
+      return '吸血' + pct + '%';
+    }
     return String(base.remark).replace(/\s*[,，]?\s*(每级|升级)[\s\S]*$/, '').trim();
   }
-  /** 普通武器介绍：16 沉默之斧把开头的「10%」替换成当前等级的真实概率。 */
+  /** 普通武器介绍：14 忍者镖 / 16 沉默之斧把开头的「10%」替换成当前等级的真实概率。 */
   function weaponRemarkText(base, lv) {
     if (!base || !base.remark) return '';
-    if (Number(base.id) !== 16) return base.remark;
+    const id = Number(base.id);
+    if (id !== 14 && id !== 16) return base.remark;
     const n = Math.max(1, Math.min(15, Number(lv) || 1));
-    const pct = 10 + 4 * (Math.min(n, 10) - 1) + 4 * Math.max(0, n - 10);
+    const pct = id === 14
+      ? 10 + 4 * (Math.min(n, 10) - 1) + 2 * Math.max(0, n - 10)
+      : 10 + 4 * (Math.min(n, 10) - 1) + 4 * Math.max(0, n - 10);
     return String(base.remark).replace(/10%/, pct + '%');
   }
   /** 吸铁大法当前效果：等级封顶 10 的伤害 + 累计缴械率（真 5 = 100%）。 */
@@ -1604,11 +1611,11 @@
     if (own && !(up && up.fixed)) {
       const nextLv = Math.min(15, ownLv + 1);
       const curLine = isW
-        ? (Number(base && base.id) === 16 ? '当前效果：' + weaponSpecial : '')
+        ? ([14, 16].includes(Number(base && base.id)) ? '当前效果：' + weaponSpecial : '')
         : (Number(base && base.id) === 18 ? '当前效果：' + ironCurrentText(ownLv) : '');
       if (ownLv >= 15) {
         desText = isW
-          ? ('神器已达最高阶段！' + (weaponSpecial ? (Number(base && base.id) === 16 ? '\n当前效果：' : '\n特殊效果：') + weaponSpecial : ''))
+          ? ('神器已达最高阶段！' + (weaponSpecial ? ([14, 16].includes(Number(base && base.id)) ? '\n当前效果：' : '\n特殊效果：') + weaponSpecial : ''))
           : '神技已达最高阶段！';
         if (!isW && curLine) desText += '\n' + curLine;
       } else if (nextLv > 10) {
@@ -1966,11 +1973,11 @@
       : (isW ? weaponRemarkText(base, ownLv) : skillRemarkText(base, ownLv));
     if (own && !(up && up.fixed)) {
       const curLine = isW
-        ? (Number(base && base.id) === 16 ? '当前效果：' + weaponSpecial : '')
+        ? ([14, 16].includes(Number(base && base.id)) ? '当前效果：' + weaponSpecial : '')
         : (Number(base && base.id) === 18 ? '当前效果：' + ironCurrentText(ownLv) : '');
       if (ownLv >= 15) {
         descText = isW
-          ? ('神器已达最高阶段！' + (weaponSpecial ? (Number(base && base.id) === 16 ? '\n当前效果：' : '\n特殊效果：') + weaponSpecial : ''))
+          ? ('神器已达最高阶段！' + (weaponSpecial ? ([14, 16].includes(Number(base && base.id)) ? '\n当前效果：' : '\n特殊效果：') + weaponSpecial : ''))
           : '神技已达最高阶段！';
         if (!isW && curLine) descText += '\n' + curLine;
       } else if (ownLv + 1 > 10) {

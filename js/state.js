@@ -2378,11 +2378,13 @@
       S.goldPoint -= info.coin;
       if (info.book > 0) S.props[info.bookId] -= info.book;
     }
+    /* 每日任务按「尝试一次」计数：扣完费用、确定要掷成功率时先记，
+     * 不能等到 ok 才记 —— 否则升级失败永远做不完这条任务（2026-11 用户口径）。 */
+    bumpDaily('upgrade', 1, true);
     const ok = debugOn('noUpgradeFail') ? true : Math.random() * 100 < info.rate;
     if (!object(S.upgradeFails)) S.upgradeFails = {};
     const failKey = upgradeFailKey(kind, id);
     if (ok) {
-      bumpDaily('upgrade', 1, true);
       const arr = kind === 'weapon' ? S.weapons : S.skills;
       for (let i = 0; i < arr.length; i++) {
         const [wid, lv] = arr[i].split(':').map(Number);

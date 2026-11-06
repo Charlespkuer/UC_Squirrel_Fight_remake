@@ -2286,6 +2286,25 @@ test('每日任务按角色等级抽题：做不了的任务不会出现，升�
   assert.equal(S.questStatus().map((q) => q.key).join(','), keep, '升级不会换掉仍然能做的题');
 });
 
+test('每日任务「升级武器或技能」：升级失败也算尝试一次', () => {
+  const g = game(), S = g.State, s = S.state();
+  /* 4→5 的基础成功率是 70%；固定随机 0.99 必失败。只要扣了金松果/卷轴、
+   * 真的掷了这一次，就应该记进每日任务，而不是等升级成功才记。 */
+  s.level = 70;
+  s.weapons = ['1:4'];
+  s.skills = [];
+  s.goldPoint = 1000;
+  s.props[22] = 20;
+  s.quests = { date: S.localDate(), list: [{ key: 'upgrade', need: 1, rewards: [], claimed: false }] };
+  s.dailyCounters = { date: S.localDate(), upgrade: 0 };
+  g.math.random = () => 0.99;
+  const r = S.doUpgrade('weapon', 1);
+  assert.equal(r.ok, false, '这一手应当升级失败');
+  assert.equal(S.state().dailyCounters.upgrade, 1, '失败的一次尝试也要计数');
+  const row = S.questStatus().find((q) => q.key === 'upgrade');
+  assert.ok(row && row.done, '升级任务应当变成已完成：' + JSON.stringify(row));
+});
+
 test('音量/静音/分辨率/全面屏/状态栏/跳过显示/后台运行/界面模式写进存档并读得回来', () => {
   const g = game(), S = g.State, s = S.state();
   same(s.settings, { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true,

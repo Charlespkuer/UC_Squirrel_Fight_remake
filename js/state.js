@@ -544,6 +544,9 @@
       /* 后台运行开关：默认关（切后台暂停音乐并冻结计时器，省电）。
        * 打开后切后台不暂停音乐、安卓壳也不 pauseTimers，游戏继续跑。 */
       backgroundRun: st.backgroundRun === true,
+      /* 兼容渲染：Android 16 / Adreno 的 Vulkan 合成器丢贴图层时，整页落软件图层。
+       * auto = 按机型和系统自动判断（默认）；on/off 供玩家手动逃生。 */
+      compatRender: ['auto', 'on', 'off'].includes(String(st.compatRender)) ? String(st.compatRender) : 'auto',
       uiMode: UIMODE_KEYS.includes(String(st.uiMode)) ? String(st.uiMode) : 'classic',
     };
   }

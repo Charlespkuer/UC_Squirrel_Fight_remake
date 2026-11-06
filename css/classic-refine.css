@@ -844,7 +844,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .settings-grid.system-grid .uc-button{font-size:28px}
 /* 调试面板：网格外的一颗工具键，靠右对齐（用户 2026-10-27 口径）、比设置键小一号，
    不跟 4×2 抢位置。 */
-.settings-debug-row{position:relative;z-index:1;display:flex;justify-content:flex-end;padding:0 30px 6px}
+.settings-debug-row{position:relative;z-index:1;display:flex;justify-content:flex-end;gap:10px;padding:0 30px 6px}
 .settings-debug-row .uc-button{font-size:22px;min-height:56px;padding:0 24px}
 /* 界面模式单独成卡：两套界面是两套独立存档，属于会改变整个游戏观感与进度的大动作，
    不跟导出/分辨率这些工具键挤在 4×2 网格里。卡片用米金底板，右侧留一颗大号金键。 */

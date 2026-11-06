@@ -2308,7 +2308,7 @@ test('每日任务「升级武器或技能」：升级失败也算尝试一次',
 test('音量/静音/分辨率/全面屏/状态栏/跳过显示/后台运行/界面模式写进存档并读得回来', () => {
   const g = game(), S = g.State, s = S.state();
   same(s.settings, { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true,
-    showSkip: true, backgroundRun: false, uiMode: 'classic' });
+    showSkip: true, backgroundRun: false, compatRender: 'auto', uiMode: 'classic' });
   assert.equal(S.RESOLUTIONS.length, 6, '六档分辨率');
   assert.equal(S.UIMODES.length, 2, '两档界面模式');
   assert.equal(S.resolutionHeight('auto'), 0);
@@ -2317,24 +2317,24 @@ test('音量/静音/分辨率/全面屏/状态栏/跳过显示/后台运行/界�
   S.setSettings({ volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false,
     backgroundRun: true, uiMode: 'classic' });
   same(S.settings(), { volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false,
-    showSkip: true, backgroundRun: true, uiMode: 'classic' });
+    showSkip: true, backgroundRun: true, compatRender: 'auto', uiMode: 'classic' });
   // 存档往返（浏览器存档模式下 save/load 走 localStorage）
   S.save(); S.load();
   same(S.state().settings, { volume: 0.35, muted: true, resolution: '900', fullscreen: true, hideStatusBar: false,
-    showSkip: true, backgroundRun: true, uiMode: 'classic' });
+    showSkip: true, backgroundRun: true, compatRender: 'auto', uiMode: 'classic' });
   // 坏值一律回落，不让坏档把画面或音量弄坏（界面模式认不出时按默认经典）
   same(S.normalizeSettings({ volume: 'x', muted: 'yes', resolution: 42, fullscreen: 1, uiMode: 'neon' }),
     { volume: 1, muted: false, resolution: 'auto', fullscreen: false, hideStatusBar: true,
-      showSkip: true, backgroundRun: false, uiMode: 'classic' });
+      showSkip: true, backgroundRun: false, compatRender: 'auto', uiMode: 'classic' });
   same(S.normalizeSettings({ volume: 5 }), { volume: 1, muted: false, resolution: 'auto', fullscreen: false,
-    hideStatusBar: true, showSkip: true, backgroundRun: false, uiMode: 'classic' });
+    hideStatusBar: true, showSkip: true, backgroundRun: false, compatRender: 'auto', uiMode: 'classic' });
   same(S.normalizeSettings(null), { volume: 1, muted: false, resolution: 'auto', fullscreen: false,
-    hideStatusBar: true, showSkip: true, backgroundRun: false, uiMode: 'classic' });
+    hideStatusBar: true, showSkip: true, backgroundRun: false, compatRender: 'auto', uiMode: 'classic' });
   // 旧档（没有 settings 字段）读进来要有默认值
   const legacy = JSON.parse(JSON.stringify(s));
   delete legacy.settings;
   same(S.normalizeSettings(legacy.settings), { volume: 1, muted: false, resolution: 'auto', fullscreen: false,
-    hideStatusBar: true, showSkip: true, backgroundRun: false, uiMode: 'classic' });
+    hideStatusBar: true, showSkip: true, backgroundRun: false, compatRender: 'auto', uiMode: 'classic' });
 });
 
 test('跳过键：超级松鼠 10 级解锁、非 VIP 20 级；系统页开关可隐藏', () => {

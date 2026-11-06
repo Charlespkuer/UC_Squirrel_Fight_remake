@@ -88,6 +88,19 @@ test('经典主页挂载失败不能只剩深绿底：看门狗 + 重试 + 空�
   assert.match(classic, /classicHomeEscapeHatch[\s\S]{0,1200}pointerdown[\s\S]{0,1400}已切到安全模式/, '要有左上角连点 3 次的安全模式逃生口');
 });
 
+test('Android 16 / Adreno 绿屏：原生软件图层逃生口 + 经典主页先用原版底图占位', () => {
+  /* Chromium 576362369：Android 16 + Adreno 的 WebView 在 Vulkan 合成路径会整块丢贴图层，
+   * 页面只剩 CSS 底色 / 文字 / 悬浮 DOM。原生层显式落软件图层绕开，且只对已知风险 SoC 自动开。 */
+  assert.match(activity, /fun shouldUseSoftwareRenderer\(\)[\s\S]{0,800}SOC_MODEL[\s\S]{0,400}SM8850/, '原生壳要按 Android 16 + SoC 自动判定');
+  assert.match(activity, /setLayerType\(if \(enabled\) View\.LAYER_TYPE_SOFTWARE/, '要显式切到软件图层');
+  assert.match(activity, /RenderBridge[\s\S]{0,500}setSoftwareRender/, '要保留 JS 逃生桥（设置页可手动切换）');
+  assert.match(activity, /addJavascriptInterface\(RenderBridge\(\), "SSDZRender"\)/, '桥必须注入到页面');
+  assert.match(mainJs, /function applyCompatRender\(\)[\s\S]{0,500}SSDZRender[\s\S]{0,120}setSoftwareRender/, '页面设置要能驱动原生软件图层');
+  const classic = read('js/classic-ui.js');
+  assert.match(classic, /classic-home ssfight-home ssfight-home-loading/, '经典主页挂载期间要有 loading 占位类');
+  assert.match(read('css/classic.css'), /\.ssfight-home\.ssfight-home-loading\{[^}]*3182_0\.hd\.jpg/, '占位层必须用原版村庄底图，不能露出现代 canvas 松鼠');
+});
+
 test('老 WebView（Android 11 / Chromium 8x）兼容：整屏绝对层不依赖 inset 简写', () => {
   const fsMod = require('node:fs');
   const cssDir = path.join(ROOT, 'css');

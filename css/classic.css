@@ -72,6 +72,12 @@ button,input,select{font:inherit}button{touch-action:manipulation}button:focus-v
    最右一格**贴着舞台右边界**（槽右沿 ≈ 302.4 舞台单位），药丸块 + 右下角那枚"剩余场次"小圆牌
    会再探出去一点 —— 原版靠 Flash"舞台外照样画"兜着，这里一 `hidden` 就把角标切掉半截。 */
 .ssfight-home{position:absolute;top:0;right:0;bottom:0;left:0;inset:0;overflow:visible;background:#203a27;display:flex;align-items:center;justify-content:center}
+/* Keep the classic village bitmap on screen while the original home SVG mounts.
+   The modern canvas home sits underneath and is intentionally hidden here: on
+   slow WebViews it used to flash the modern squirrel before the classic page. */
+.ssfight-home.ssfight-home-loading{visibility:visible;background:url("../images/ssfight/ui/bitmap/3182_0.hd.jpg") center/cover no-repeat,#cfe6f5}
+/* Same backdrop for the playable DOM fallback (used when the classic SVG never mounts). */
+.classic-home.ssfight-dom-fallback{background:url("../images/ssfight/ui/bitmap/3182_0.hd.jpg") center/cover no-repeat,#cfe6f5}
 .ssfight-home svg{display:block;height:100%;width:auto;max-width:100%}
 /* 经典挑战页的**二级/三级页**（原版库元件「挑战1」= 4756）挂在**另一层** `<section>` 上：
    原版是 `loadMcs([["挑战1","tiaozhanSub",…]])` 往当前页里 attach 一颗库元件，

@@ -822,9 +822,9 @@
         if (seq !== classicHomeMountSeq) { resolve(); return; }
         if (!err && !classicHomeHasSvg(box)) err = new Error('挂载结果为空');
         if (!err) {
-          /* 挂载期间壳是隐藏的（不透明深绿底不能盖住 canvas 主页），成了再交给 CSS 正常接管。
-           * 失败过一次时页面上还压着可点的复刻主页，原版页挂好就让它让位。 */
+          /* 挂载成功：撤掉「原版村庄底」占位，交给真正的 SVG。 */
           try { box.style.visibility = ''; } catch (e) {}
+          try { box.classList.remove('ssfight-home-loading'); } catch (e) {}
           try { const dom = $('#ui .classic-home:not(.ssfight-home)'); if (dom) dom.remove(); } catch (e) {}
           /* 成功 ≠ 画出来了：Android 上再复查尺寸并补一次重解码（见 scheduleClassicHomeVerify）。 */
           scheduleClassicHomeVerify(box, seq);
@@ -854,10 +854,9 @@
             let host = $('#ui .ssfight-home');
             if (!host) {
               host = document.createElement('section');
-              host.className = 'classic-home ssfight-home';
+              host.className = 'classic-home ssfight-home ssfight-home-loading';
               host.setAttribute('aria-label', '松鼠大战主页');
-              /* 重试期间同样隐藏：复刻主页与 canvas 继续用，挂成了再显形。 */
-              host.style.visibility = 'hidden';
+              /* 重试期间同样显示原版村庄底：盖住 canvas 的现代松鼠，挂成了再交给 SVG。 */
               $('#ui').appendChild(host);
             }
             mountClassicHome(host, attempt + 1).then(resolve);
@@ -888,10 +887,11 @@
       if (window.SfChallenge && SfChallenge.destroy) { try { SfChallenge.destroy(); } catch (e) {} }
       if (window.SfVillage && SfVillage.destroy) { try { SfVillage.destroy(); } catch (e) {} }
       if (window.SfMessage && SfMessage.destroy) { try { SfMessage.destroy(); } catch (e) {} }
-      /* 挂载期间先藏起来：`.ssfight-home` 自带 #203a27 不透明底，挂载慢/失败时留在页面上就是
-       * 「整屏只剩深绿」。藏起来后 canvas 主页继续画（ssfightHomeActive 也只认挂好的 SVG），
-       * 挂成功由 mountClassicHome 去掉 inline visibility。 */
-      $('#ui').innerHTML = '<section class="classic-home ssfight-home" aria-label="松鼠大战主页" style="visibility:hidden"></section>';
+      /* 挂载期间先显示**原版村庄底图**（不是现代 canvas 松鼠，也不是不透明深绿）：
+       * 新机挂载要 0.5~1.5 秒，之前这段会露出 canvas 的现代松鼠，玩家看到的就是
+       * 「闪一下现代版松鼠再切回经典版」。底图与经典主页同一个素材，切换时没有跳色。
+       * 挂成功由 mountClassicHome 去掉 loading 类。 */
+      $('#ui').innerHTML = '<section class="classic-home ssfight-home ssfight-home-loading" aria-label="松鼠大战主页"></section>';
       const box = $('#ui .ssfight-home');
       if (box) mountClassicHome(box, 0);
       /* 进主界面就预热道具页三颗页签的矢量包（188 KB）：等玩家点「道具」时多半已就绪，
@@ -900,7 +900,7 @@
       return;
     }
     forceDomHome = false;
-    $('#ui').innerHTML = '<section class="classic-home" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label" role="img" aria-label="经验" title="经验">' + spr('draw', 15, 'home-exp-art') + '</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/ui/home/activity.png">' + '</button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/ui/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
+    $('#ui').innerHTML = '<section class="classic-home ssfight-dom-fallback" aria-label="松鼠大战主页"><div class="home-status"><span class="home-name">' + vipBadge() + esc(S.name) + '</span><span class="home-level">' + num(S.level, true) + '</span><span class="energy-label cartoon">体力</span><div class="uc-meter home-energy"><i></i><span class="home-energy-val">' + num(S.energy + '/' + S.maxEnergy, true) + '</span></div></div><div class="home-subbar"><span class="home-exp-label" role="img" aria-label="经验" title="经验">' + spr('draw', 15, 'home-exp-art') + '</span><div class="exp-meter"><i></i><span class="home-exp-val">' + num(S.exp + '/' + GData.nextExp(S.level), true) + '</span></div><div class="home-money">' + icon('prop',1) + '<button data-action="shop" aria-label="金松果商店">' + num(S.goldPoint, true) + '</button></div></div><div class="home-buffs" aria-label="生效中的限时用品"></div><div class="home-side"><button class="picture-button' + (dailyAttention() ? ' attention' : '') + '" data-action="daily" aria-label="活动' + (dailyAttention() ? '，有可领取的奖励' : '') + '">' + '<img alt="活动" src="images/ui/home/activity.png">' + '</button></div><button class="village-door" data-action="village" aria-label="村庄"><img alt="" src="images/ui/home/village.png"></button><nav class="home-menu" aria-label="主菜单">' + btn('道具','bag') + btn('状态','status') + btn('开始挑战','challenge','gold') + btn('消息','messages') + btn('系统','system') + '</nav></section>';
     bind($('.classic-home'),actions);buffSignature='';
     refreshHome();
     renderNumbers();
@@ -4645,6 +4645,12 @@
     const bgTitle = '当前：' + (bgRun ? '开' : '关') +
       '。开启后切到后台游戏继续运行（音乐继续播放、计时器不停，会更耗电）；' +
       '关闭则切到后台暂停音乐并冻结画面。桌面 / 网页只影响音乐暂停。';
+    const compat = st.compatRender || 'auto';
+    const compatLabel = compat === 'on' ? '开' : compat === 'off' ? '关' : '自动';
+    const compatTitle = '当前：' + compatLabel +
+      '。安卓 16 / 高通 Adreno 新机（K90 Pro Max、MagicPad3 Pro）的 WebView 在 Vulkan 合成路径下会' +
+      '整块丢失贴图层，表现为深绿底、贴图错位或只剩悬浮奖励。自动档按 SoC + 系统版本启用；' +
+      '若你的机器仍有绿屏，手动切到「开」；桌面 / 网页无副作用。';
     const grid='<div class="settings-grid system-grid">'+
       sysBtn('存档导出','export','gold','把当前存档导出成一个 JSON 文件。iOS 在「文件」App → 我的 iPhone/iPad → 松鼠大战；桌面写系统下载目录。')+
       sysBtn('存档导入','import','gold','从 JSON 文件恢复存档。iOS 用「存档列表」选 App 里的导出，或粘贴存档文本。')+
@@ -4661,7 +4667,10 @@
       '</div>'+
       /* 调试面板不进 4×2 的设置网格：它是开发/排查用的工具键，放网格外面，
        * 正好给「后台运行」腾出第二排最后一格（用户 2026-10-27 口径）。 */
-      '<div class="settings-debug-row">'+dbgBtn+'</div>';
+      '<div class="settings-debug-row">' +
+        sysBtn('兼容渲染','compat-render','gold'+(compat === 'on' ? ' on' : ''), compatTitle, compatLabel) +
+        dbgBtn +
+      '</div>';
     const p=page('system','system',supportPanelHtml()+'<div class="settings-head"><h3 class="classic-section-title">游戏设置</h3>'+slider+'</div>'+modeCard+grid+saveFilePanel()+syncPanel()+updatePanelHtml());
     /* 系统页按钮统一走经典反馈：菜单项/设置键/底栏都先弹一下再执行。 */
     $('[data-action="support"]',p).onclick=()=>openSupportModal();
@@ -4682,6 +4691,14 @@
       const next = !cur;
       if (window.Main && Main.setBackgroundRun) Main.setBackgroundRun(next);
       else State.setSettings({backgroundRun: next});
+      openSystem();
+    };
+    /* 兼容渲染：auto → on → off。安卓 16 / Adreno 绿屏时的手动逃生口。 */
+    $('[data-action="compat-render"]',p).onclick=()=>{
+      const cur = State.settings().compatRender || 'auto';
+      const next = cur === 'auto' ? 'on' : cur === 'on' ? 'off' : 'auto';
+      if (window.Main && Main.setCompatRender) Main.setCompatRender(next);
+      else State.setSettings({compatRender: next});
       openSystem();
     };
     /* 从服务器存档列表导入：绕过系统文件选择器（桌面壳里也能用），列表里带等级与时间。 */

@@ -5,8 +5,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.View
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
+import org.json.JSONObject
 
 class MainActivity : TauriActivity() {
   /** Tauri 创建出来的 WebView；onPause 时用它把最后一次防抖写盘立刻刷到原生存档。 */
@@ -35,8 +38,75 @@ class MainActivity : TauriActivity() {
     private const val FREEZE_DELAY_MS = 250L
   }
 
+  /**
+   * Android 16 / Adreno 8xx 的合成器绿色空层规避开关。
+   *
+   * Chromium 公开放置的问题（issues.chromium.org/576362369，SM-S928B / Android 16）：
+   * WebView 在 Vulkan 合成路径下会丢掉**整块贴图层**，页面只剩 CSS 底色与文字/悬浮 DOM
+   * —— 与玩家反馈的「深绿底 + 只显示部分特效与悬浮奖励」一致。K90 Pro Max 与
+   * MagicPad3 Pro 都是第五代骁龙 8 至尊版（SM8850）+ Android 16，Honor 100 Pro 是
+   * 8 Gen 2 + Android 14（不走 Vulkan 路径），正好解释「只有新机绿屏」。
+   *
+   * 原生层没有 `--disable-features=WebViewVulkanIntermediateBuffer` 的公开入口，所以
+   * 在 WebView 上显式落到软件图层：整棵页面由 HWUI 画进软件位图，绕开 Vulkan 合成器。
+   * 只对已知风险 SoC 自动开启；其它机器可用 Intent extra `forceSoftware=true` 或页面里的
+   * `window.SSDZRender.setSoftwareRender('1')` 做验证/逃生。
+   */
+  private var forceSoftwareRender = false
+
+  @Volatile private var softwareRender = false
+
+  /** 只在 Android 16 + 高通 Adreno 8xx/7xx 上自动启用。 */
+  private fun shouldUseSoftwareRenderer(): Boolean {
+    if (Build.VERSION.SDK_INT < 36) return false
+    val maker = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MANUFACTURER else ""
+    val model = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL else ""
+    val qualcomm = maker.equals("Qualcomm", ignoreCase = true) ||
+      Build.HARDWARE.startsWith("qcom", ignoreCase = true)
+    if (!qualcomm) return false
+    val known = listOf("SM8850", "SM8750", "SM8650", "SM8550", "SM8475", "SM8450")
+    return known.any { model.startsWith(it, ignoreCase = true) }
+  }
+
+  /** 切 WebView 的图层类型；必须在主线程调用。重复调用是幂等的。 */
+  private fun applySoftwareRender(view: WebView?, enabled: Boolean) {
+    val target = view ?: return
+    ui.post {
+      try {
+        target.setLayerType(if (enabled) View.LAYER_TYPE_SOFTWARE else View.LAYER_TYPE_HARDWARE, null)
+        softwareRender = enabled
+      } catch (_: Exception) {
+        // 个别 ROM 不允许改图层；保持默认硬件路径，页面照样能玩。
+      }
+    }
+  }
+
+  /** 调试/逃生桥：`window.SSDZRender.setSoftwareRender('auto'|'1'|'0')`。 */
+  private inner class RenderBridge {
+    @JavascriptInterface
+    fun setSoftwareRender(mode: String): String {
+      val text = mode.trim().lowercase()
+      val on = when (text) {
+        "1", "true", "on" -> true
+        "0", "false", "off" -> false
+        else -> shouldUseSoftwareRenderer() || forceSoftwareRender
+      }
+      applySoftwareRender(gameWebView, on)
+      return JSONObject().put("ok", true).put("software", on).put("mode", text).toString()
+    }
+
+    @JavascriptInterface
+    fun renderInfo(): String = JSONObject()
+      .put("software", softwareRender)
+      .put("sdk", Build.VERSION.SDK_INT)
+      .put("soc", if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL else "")
+      .toString()
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
+    /* 验证/逃生：`adb shell am start ... --ez forceSoftware true` 强制软件图层。 */
+    forceSoftwareRender = intent?.getBooleanExtra("forceSoftware", false) == true
     super.onCreate(savedInstanceState)
   }
 
@@ -179,9 +249,17 @@ class MainActivity : TauriActivity() {
     /* WebView 可能晚于 onResume 创建，不能只依赖 Activity 的恢复回调。 */
     webView.resumeTimers()
     frozen = false
+    /* Android 16 + Adreno 的 Vulkan 合成丢层：在页面加载前就落到软件图层，避免先闪一次绿底。
+     * 这是整棵 WebView 的绘制路径切换，不是改页面内容；关闭时仍回硬件图层。
+     * 用 post 再落一次：个别 ROM 在 attach 到窗口时会把图层属性重置，等第一帧前重设最稳。 */
+    if (forceSoftwareRender || shouldUseSoftwareRenderer()) {
+      softwareRender = true
+      applySoftwareRender(webView, true)
+    }
     val bridge = AndroidExportBridge(this, { gameWebView }) { enabled -> backgroundRun = enabled }
     exportBridge = bridge
     webView.addJavascriptInterface(bridge, "SSDZAndroid")
+    webView.addJavascriptInterface(RenderBridge(), "SSDZRender")
   }
 
   /** 存储权限弹窗的结果转给导出桥（Android 9 及以下才有这条路径）。 */

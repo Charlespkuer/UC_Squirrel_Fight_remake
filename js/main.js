@@ -239,6 +239,26 @@
     applyBackgroundRun();
     return on === true;
   }
+  /** 兼容渲染：安卓 16 / Adreno 的 Vulkan 合成器会整块丢贴图层（只剩 CSS 底色与 DOM 文字）。
+   *  auto = 原生壳按 SoC + 系统版本判断；on/off 是玩家的手动逃生开关。桌面 / 网页没有桥，无操作。 */
+  function compatRenderMode() {
+    try { return settingsSnapshot().compatRender || 'auto'; } catch (e) { return 'auto'; }
+  }
+  function applyCompatRender() {
+    const mode = compatRenderMode();
+    try {
+      if (window.SSDZRender && typeof SSDZRender.setSoftwareRender === 'function') {
+        SSDZRender.setSoftwareRender(mode);
+      }
+    } catch (e) {}
+    return mode;
+  }
+  function setCompatRender(mode) {
+    const next = ['auto', 'on', 'off'].includes(String(mode)) ? String(mode) : 'auto';
+    persistSettings({ compatRender: next });
+    applyCompatRender();
+    return next;
+  }
   /** 存档载入后把偏好接过来：存档优先，并回写 localStorage 供下次启动（标题画面）用。
    *  **偏好没变就直接返回**：以前每次 `showHome()` 都要写 3 次 localStorage + `fitCanvas`、
    *  再被 `showHome` 里的第二次 `fitCanvas` 叠一遍；现在只有读档 / 切档 / 改设置才重跑。 */
@@ -249,8 +269,9 @@
       const st = State.settings();
       applySystemBars();
       applyBackgroundRun();
+      applyCompatRender();
       const sig = [st.volume, st.muted === true, st.uiMode, st.resolution, st.fullscreen === true, st.hideStatusBar !== false,
-        st.backgroundRun === true].join('|');
+        st.backgroundRun === true, st.compatRender || 'auto'].join('|');
       if (!force && sig === appliedSettingsSig) return;
       appliedSettingsSig = sig;
       volume = clampVolume(st.volume);
@@ -1510,7 +1531,7 @@
      * 只在真的还在首页时才动（战斗中/标题页返回 false），不硬塞 startHomeScene。 */
     resumeHomeScene,
     volume: volumeValue, setVolume, homePlayer: () => mainPlayer, setHomeFps, W, H,
-    settings: settingsSnapshot, setResolution, setFullscreen, setHideStatusBar, setBackgroundRun, applySystemBars,
+    settings: settingsSnapshot, setResolution, setFullscreen, setHideStatusBar, setBackgroundRun, setCompatRender, applySystemBars,
     isFullscreen: () => !!document.fullscreenElement,
     /* 现代 canvas 战斗图集：切到现代界面 / 真开打前可以主动预热（幂等，不阻塞首屏）。 */
     preloadBattleAssets, pinBattleAssets, battleAssetsReady: () => !!battleAssetsPromise,

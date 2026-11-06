@@ -1686,7 +1686,10 @@ test('真化武器/技能数值严格对齐 ssfight 原表（不是真5端点线
   assert.equal(G.trueWeaponBonus({ id: 4, level: 15 }, 'combo'), 25, '西瓜刀真5 +25% 连击（5% × 5 真级）');
   assert.equal(G.trueWeaponBonus({ id: 4, level: 12 }, 'combo'), 10, '西瓜刀真2 +10% 连击');
   assert.equal(G.trueWeaponBonus({ id: 11, level: 11 }, 'crit'), 3, '激光剑真1 +3% 暴击');
+  assert.equal(G.trueWeaponBonus({ id: 16, level: 15 }, 'silence'), 20, '沉默之斧真5 +20% 沉默（4% × 5 真级）');
   assert.equal(G.trueWeaponBonus({ id: 4, level: 10 }, 'combo'), 0, '普通形态不生效');
+  // 吸铁大法真5：10 级 46% + 真化累计 54% = 100%
+  assert.equal(10 + 4 * 9 + G.trueSkillValue(18, 15), 100, '吸铁大法真5 100% 缴械');
   // 真武器基础伤害按 harmAdd1 逐真级累计
   const w = g.State.weaponInst('4:15');
   assert.equal(w.harmLo, 142); assert.equal(w.harmHi, 150, '西瓜刀真5 142-150');

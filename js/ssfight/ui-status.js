@@ -1461,15 +1461,53 @@
    * ⚠ 用户 2026-10 口径⑥："武器与技能详情页与ssfight版本差距甚远" —— 以前整页是复刻自绘的
    *   DOM 面板（`.sf-detail`），现在改成挂原版帧 + 写字段。 */
   /** 武器特殊效果：原表 `remark` 是「特殊效果,每级增加…」一整句；这里只取特殊效果，
-   *  成长部分由详情页的「升至下一阶…」那行负责，避免同一句写两遍。 */
-  function weaponSpecialText(base) {
+   *  成长部分由详情页的「升至下一阶…」那行负责，避免同一句写两遍。
+   *  对 16 沉默之斧，按当前等级算**现在**的沉默概率（10% + 每级 4% + 真化每级 4%），
+   *  不再永远复读基础 `10%`。 */
+  function weaponSpecialText(base, lv) {
     if (!base || !base.remark) return '';
+    const id = Number(base.id);
+    const n = Math.max(1, Math.min(15, Number(lv) || 1));
+    if (id === 16) {
+      const pct = 10 + 4 * (Math.min(n, 10) - 1) + 4 * Math.max(0, n - 10);
+      return pct + '%几率使对手4个回合不能使用技能';
+    }
     return String(base.remark).replace(/\s*[,，]?\s*(每级|升级)[\s\S]*$/, '').trim();
+  }
+  /** 普通武器介绍：16 沉默之斧把开头的「10%」替换成当前等级的真实概率。 */
+  function weaponRemarkText(base, lv) {
+    if (!base || !base.remark) return '';
+    if (Number(base.id) !== 16) return base.remark;
+    const n = Math.max(1, Math.min(15, Number(lv) || 1));
+    const pct = 10 + 4 * (Math.min(n, 10) - 1) + 4 * Math.max(0, n - 10);
+    return String(base.remark).replace(/10%/, pct + '%');
+  }
+  /** 吸铁大法当前效果：等级封顶 10 的伤害 + 累计缴械率（真 5 = 100%）。 */
+  function ironCurrentText(lv) {
+    const n = Math.max(1, Math.min(15, Number(lv) || 1));
+    const cap = Math.min(n, 10);
+    const lo = 5 + 4 * (cap - 1), hi = 20 + 4 * (cap - 1);
+    const extra = window.GData && GData.trueSkillValue
+      ? GData.trueSkillValue(18, n)
+      : [0, 6, 14, 24, 36, 54][Math.max(0, Math.min(5, n - 10))];
+    const pct = Math.min(100, 10 + 4 * (cap - 1) + extra);
+    return lo + '-' + hi + '点伤害，' + pct + '%使对手4回合不能使用武器';
+  }
+  /** 技能普通介绍：18 吸铁大法把开头的「10%」替换成当前等级的真实缴械率。 */
+  function skillRemarkText(base, lv) {
+    if (!base || !base.remark) return '';
+    if (Number(base.id) !== 18) return base.remark;
+    const n = Math.max(1, Math.min(15, Number(lv) || 1));
+    const cap = Math.min(n, 10);
+    const extra = window.GData && GData.trueSkillValue ? GData.trueSkillValue(18, n) : 0;
+    const pct = Math.min(100, 10 + 4 * (cap - 1) + extra);
+    return String(base.remark).replace(/10%/, pct + '%');
   }
   async function buildDetailAsset(host, kind, id, base, own, up, row) {
     const t = T();
     const isW = kind === 'weapon';
-    const weaponSpecial = isW ? weaponSpecialText(base) : '';
+    const ownLv = own ? (Number(own.level) || 0) : 0;
+    const weaponSpecial = isW ? weaponSpecialText(base, ownLv || 1) : '';
     /* ⚠ 武器页与技能页是**同一个元件的两帧**（原版 `showWeaponSkillWin`：
      *   `subFrame.gotoAndStop(1)` 武器 / `gotoAndStop(2)` 技能，MainMovie.as:16678 / 16731）。
      *   两帧各自的标题（`武器详情` / `技能详情`）、图标位（`c1` = **3636** 武器 / **4547** 技能）
@@ -1538,7 +1576,6 @@
       }
       return n;
     };
-    const ownLv = own ? (Number(own.level) || 0) : 0;
     const trueOwn = ownLv > 10;
     /* 原版真化详情页把名字写成「真.名字」（showWeaponSkill3 的 setText(name,"真."+name)）。 */
     const shownName = base ? ((trueOwn ? '真.' : '') + base.name) : '';
@@ -1562,11 +1599,17 @@
     /* 介绍：普通档写原表 `des`；真化档按原版 `getDescription` / `getDesSkill`
      * 写**下一阶**的真化说明（`remark1Value` / `harmAdd1` 逐个取值，不是复刻自编的
      * 每级 +harmAdd）。到真5 写最高阶段；6/13 这种不可升级技能保持基础说明。 */
-    let desText = base && base.remark ? base.remark : '';
+    let desText = isW ? weaponRemarkText(base, ownLv) : skillRemarkText(base, ownLv);
     if (own && !(up && up.fixed)) {
       const nextLv = Math.min(15, ownLv + 1);
+      const curLine = isW
+        ? (Number(base && base.id) === 16 ? '当前效果：' + weaponSpecial : '')
+        : (Number(base && base.id) === 18 ? '当前效果：' + ironCurrentText(ownLv) : '');
       if (ownLv >= 15) {
-        desText = isW ? ('神器已达最高阶段！' + (weaponSpecial ? '\n特殊效果：' + weaponSpecial : '')) : '神技已达最高阶段！';
+        desText = isW
+          ? ('神器已达最高阶段！' + (weaponSpecial ? (Number(base && base.id) === 16 ? '\n当前效果：' : '\n特殊效果：') + weaponSpecial : ''))
+          : '神技已达最高阶段！';
+        if (!isW && curLine) desText += '\n' + curLine;
       } else if (nextLv > 10) {
         const idx = nextLv - 11;
         if (isW) {
@@ -1574,13 +1617,14 @@
           desText = base && base.remark1
             ? ('升至下一阶将额外' + base.remark1 + '和' + add + '点基本伤害')
             : ('升至下一阶将额外提升' + add + '点基本伤害');
-          if (weaponSpecial) desText += '\n特殊效果：' + weaponSpecial;
+          if (curLine) desText += '\n' + curLine;
         } else {
           const row = window.GData && GData.trueSkillRow ? GData.trueSkillRow(id) : null;
           if (row && row.text) {
             const n = window.GData && GData.trueSkillStep ? GData.trueSkillStep(id, nextLv) : '';
             desText = '升至下一阶' + String(row.text).replace('N', n);
           }
+          if (curLine) desText += '\n' + curLine;
         }
       }
     }
@@ -1905,7 +1949,7 @@
     dom.style.setProperty('--u', m.s(1).toFixed(3) + 'px');
     const s = (S() || {});
     const isW = kind === 'weapon';
-    const weaponSpecial = isW ? weaponSpecialText(base) : '';
+    const weaponSpecial = isW ? weaponSpecialText(base, own ? own.level : 1) : '';
     const locked = !own;
     const maxed = !!(up && up.max);
     const heroDetail = heroView();
@@ -1918,23 +1962,31 @@
     /* 说明：普通档原表 des；真化档按 `getDescription` / `getDesSkill` 写下一阶。 */
     let descText = locked ? (heroDetail ? '尚未掌握——在塔内学习新的武技'
       : '尚未获得——升级、开启礼包有机会获得')
-      : (base && base.remark ? base.remark : '');
+      : (isW ? weaponRemarkText(base, ownLv) : skillRemarkText(base, ownLv));
     if (own && !(up && up.fixed)) {
-      if (ownLv >= 15) descText = isW ? ('神器已达最高阶段！' + (weaponSpecial ? '\n特殊效果：' + weaponSpecial : '')) : '神技已达最高阶段！';
-      else if (ownLv + 1 > 10) {
+      const curLine = isW
+        ? (Number(base && base.id) === 16 ? '当前效果：' + weaponSpecial : '')
+        : (Number(base && base.id) === 18 ? '当前效果：' + ironCurrentText(ownLv) : '');
+      if (ownLv >= 15) {
+        descText = isW
+          ? ('神器已达最高阶段！' + (weaponSpecial ? (Number(base && base.id) === 16 ? '\n当前效果：' : '\n特殊效果：') + weaponSpecial : ''))
+          : '神技已达最高阶段！';
+        if (!isW && curLine) descText += '\n' + curLine;
+      } else if (ownLv + 1 > 10) {
         const nextLv = ownLv + 1;
         if (isW) {
           const add = String((base && base.harmAdd1) || '').split('|')[nextLv - 11] || '';
           descText = base && base.remark1
             ? ('升至下一阶将额外' + base.remark1 + '和' + add + '点基本伤害')
             : ('升至下一阶将额外提升' + add + '点基本伤害');
-          if (weaponSpecial) descText += '\n特殊效果：' + weaponSpecial;
+          if (curLine) descText += '\n' + curLine;
         } else {
           const row = window.GData && GData.trueSkillRow ? GData.trueSkillRow(id) : null;
           if (row && row.text) {
             const n = window.GData && GData.trueSkillStep ? GData.trueSkillStep(id, nextLv) : '';
             descText = '升至下一阶' + String(row.text).replace('N', n);
           }
+          if (curLine) descText += '\n' + curLine;
         }
       }
     }

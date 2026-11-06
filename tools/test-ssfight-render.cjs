@@ -1055,9 +1055,15 @@ function checkSharedFeedbackLifecycle() {
     && /wireClickable\(okBtn, \{\s*idle: 1, hover: 2,/.test(st)
     && /stopAt\(okBtn, 3\);\s*\n\s*okBtn\.g\.style\.cursor = 'default';/.test(st),
     '详情页返回/升级键：默认灰、悬停变绿（wireClickable idle:1/hover:2）；不可升级档才停 f3 深灰');
-  assert.ok(/function weaponSpecialText\(base\)/.test(st)
-    && /特殊效果：' \+ weaponSpecial/.test(st) && /weaponSpecialText\(base\)/.test(st),
-    '武器真化详情要在「下一阶增加伤害」那行补特殊效果介绍');
+  assert.ok(/function weaponSpecialText\(base, lv\)/.test(st)
+    && /weaponSpecialText\(base,/.test(st)
+    && /function ironCurrentText\(lv\)/.test(st)
+    && /'当前效果：' \+ ironCurrentText\(ownLv\)/.test(st)
+    && /function weaponRemarkText\(base, lv\)/.test(st)
+    && /function skillRemarkText\(base, lv\)/.test(st)
+    && /ownLv >= 15[\s\S]{0,600}当前效果：/.test(st)
+    && /nextLv > 10[\s\S]{0,900}curLine/.test(st),
+    '武器/技能真化详情要写当前效果：吸铁真5 100%、沉默之斧按当前等级算概率，而不是复读基础 10%');
 }
 
 /* ---------- 24. 两处"鼠标悬停就该有反应"的口径（2026-10 第一百六十一批）----------

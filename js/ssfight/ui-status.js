@@ -1501,7 +1501,8 @@
     const cap = Math.min(n, 10);
     const extra = window.GData && GData.trueSkillValue ? GData.trueSkillValue(18, n) : 0;
     const pct = Math.min(100, 10 + 4 * (cap - 1) + extra);
-    return String(base.remark).replace(/10%/, pct + '%');
+    const lo = 5 + 4 * (cap - 1), hi = 20 + 4 * (cap - 1);
+    return String(base.remark).replace(/^5-20/, lo + '-' + hi).replace(/10%/, pct + '%');
   }
   async function buildDetailAsset(host, kind, id, base, own, up, row) {
     const t = T();

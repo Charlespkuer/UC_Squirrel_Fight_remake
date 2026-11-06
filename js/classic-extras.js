@@ -411,10 +411,10 @@
       C().toast('\u6bd4\u8d5b\u6682\u65f6\u4e2d\u65ad\uff0c\u672c\u8f6e\u5df2\u4fdd\u5b58\uff0c\u53ef\u56de\u7ade\u6280\u573a\u7ee7\u7eed\u3002');
       arenaMatchPage();
     };
-    /* `useProps: true`：**竞技场战斗面板也吃药丸**（2026-10 用户口径：药丸对竞技场里的属性生效，
-     * 说明里不再写"竞技场中无效"）。属性丸按"每场 1 次"在下面 onEnd 里扣；
-     * 经验丸不在这里扣 —— 它只在发经验的那一刻扣（见结算处的 tickPropStates({kind:'exp'})）。 */
-    Main.startBattle(foe, { cost: 0, kind: 'arena', useProps: true, region: 0, skipChest: true, onError: interrupted,
+    /* 2026-11 对齐联机口径：竞技场只让经验丸生效。
+     * · 力量/敏捷/速度丸（含超级版）不进竞技场战斗面板，也不扣剩余场次；
+     * · 经验丸只在经验竞技场结算经验时生效并扣 1 次，碎片/幻兽场不发经验就不扣。 */
+    Main.startBattle(foe, { cost: 0, kind: 'arena', useProps: false, region: 0, skipChest: true, onError: interrupted,
       /* 【经典模式】打完**直接回原版竞技场页**（原版是回"temp"帧再回 `tiaozhan`）：
        * 不传这个开关的话 `startBattle` 会先 `showHome()`，而首页会把挑战页拆掉，
        * 下面的 `arena()` 就回不去了（用户 2026-10 报的"竞技场开始竞技会跳回现代界面"）。 */
@@ -422,9 +422,7 @@
       onEnd: winner => {
       if (finished || run.settled || run.owner !== State.state()) return;
       finished = true; run.busy = false;
-      /* 属性丸按**场次**扣：半决赛、决赛（或季军赛）各 1 次，与挑战场一致。
-       * 经验丸不在这里扣 —— 碎片/幻兽场不发经验，也就不该消耗它。 */
-      State.tickPropStates({ kind: 'stat' });
+      /* 属性丸在竞技场不生效，也不扣次数；经验丸只在发经验时扣（见结算处）。 */
       if (phase === 'semi') {
         const won = winner === 0;
         run.phase = won ? 'final' : 'third'; saveArenaRun(run);

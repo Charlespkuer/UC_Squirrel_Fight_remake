@@ -1654,8 +1654,8 @@ test('不使用药剂的战斗不消耗有效次数，被动技能按原字典�
   g.State.fightReward(true, { useProps: false });
   assert.equal(s.propsStates[3], 20); assert.equal(s.propsStates[7], 20);
   g.State.fightReward(true); assert.equal(s.propsStates[3], 19);
-  /* 竞技场分两次扣：属性丸按场次（`stat`）、经验丸只在发经验时（`exp`）——
-   * 碎片/幻兽竞技场不发经验，就不会误扣经验丸（用户 2026-10 口径）。 */
+  /* 公共扣次入口仍分 stat / exp：普通挑战一次全扣；经验丸结算只扣 exp。
+   * 竞技场已改成只让经验丸生效（属性丸不生效也不扣），不在这里模拟竞技场。 */
   s.propsStates[3] = 20; s.propsStates[7] = 20;
   g.State.tickPropStates({ kind: 'stat' });
   assert.equal(s.propsStates[3], 19, '属性丸按场次扣');
@@ -2110,20 +2110,23 @@ test('战报保存独立快照，重载可回放，最多保留最新 50 条', (
   assert.ok(!('__dualSaves' in migrated), '旧双槽格式回写后不再留下重复录像数组');
 });
 
-test('药丸说明统一去掉「竞技场无效」，只在真不吃药丸的关卡/天梯保留', () => {
+test('药丸说明：属性丸竞技场无效，经验丸注明经验竞技场除外', () => {
   const g = game();
   const remark = (id) => g.propMap.getValue(id).remark;
-  /* 属性丸（3/4/5）与经验丸（7）：只在关卡不吃 —— 竞技场现在也生效。 */
-  for (const [id, pct] of [[3, '20%'], [4, '20%'], [5, '20%'], [7, '40%']]) {
-    assert.doesNotMatch(remark(id), /竞技/, id + ' 的说明不能再说竞技场无效');
+  /* 属性丸（3/4/5）与超级属性丸（41/42/43）：竞技场不生效，说明里要保留竞技场。 */
+  for (const [id, pct] of [[3, '20%'], [4, '20%'], [5, '20%'], [41, '40%'], [42, '40%'], [43, '40%']]) {
+    assert.match(remark(id), /竞技场/, id + ' 的说明必须写竞技场无效');
+    assert.match(remark(id), /天梯赛/, id + ' 的天梯限制要保留');
     assert.match(remark(id), new RegExp(pct));
-    assert.match(remark(id), /关卡中无效/, id + ' 的关卡限制要保留');
+    assert.match(remark(id), /关卡/);
   }
-  /* 超级药丸（41~44）：关卡与天梯赛都不吃药丸，说明里保留这两项。 */
-  for (const [id, pct] of [[41, '40%'], [42, '40%'], [43, '40%'], [44, '60%']]) {
-    assert.doesNotMatch(remark(id), /竞技/, id + ' 的说明不能再说竞技场无效');
+  /* 经验丸（7/44）：关卡、天梯无效，但经验竞技场是例外。 */
+  for (const [id, pct] of [[7, '40%'], [44, '60%']]) {
+    assert.doesNotMatch(remark(id), /竞技场中无效/, id + ' 不能再写竞技场中无效');
+    assert.match(remark(id), /经验竞技场除外/, id + ' 要注明经验竞技场除外');
+    assert.match(remark(id), /天梯赛/, id + ' 的天梯限制要保留');
     assert.match(remark(id), new RegExp(pct));
-    assert.match(remark(id), /关卡,天梯赛无效/, id + ' 要保留关卡/天梯赛的限制');
+    assert.match(remark(id), /关卡/);
   }
   // 说明修正必须落在底层行数组上，重新取值也要能看到（Map#getValue 每次新建对象）
   assert.equal(remark(7), g.propMap.getValue(7).remark);
@@ -2133,7 +2136,7 @@ test('药丸说明统一去掉「竞技场无效」，只在真不吃药丸的�
   }
   // 重复执行是幂等的，不会把已改好的文案再改坏
   g.GData.applyPropRemarkFixes();
-  assert.match(g.propMap.getValue(7).remark, /关卡中无效/);
+  assert.match(g.propMap.getValue(7).remark, /关卡、天梯赛无效/);
   assert.equal(g.propMap.getValue(7).remark, remark(7));
 });
 

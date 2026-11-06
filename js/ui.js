@@ -504,6 +504,14 @@
       else if ((S.props[36] || 0) > 0) S.props[36]--;
       else S.props[39]--;
       State.save();
+      /* 对齐联机竞技场口径：属性丸不进竞技场面板（useProps:false），也不扣次数；
+       * 经验丸仍加成竞技场经验，并在真正发经验时扣 1 次（碎片/幻兽场不发经验就不扣）。 */
+      const arenaExp = (base) => {
+        const got = State.gainExpWithBoost(base);
+        State.tickPropStates({ kind: 'exp' });
+        State.save();
+        return got;
+      };
       const ais = [State.genAI(S.level, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 }), State.genAI(S.level, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 }), State.genAI(S.level, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 })];
       p.close();
       toast('你抽到的对手是【' + ais[0].name + '】Lv.' + ais[0].level + '，比赛开始！', 2500);
@@ -512,7 +520,8 @@
           cost: 0, kind: 'arena', useProps: false, region: 0,
           onEnd: (winner) => {
             if (winner !== 0) {
-              showResult(false, ais[0], { exp: 10, gold: 0, ups: State.gainExp(10) }, '<div>止步半决赛，获得参与经验。</div>');
+              const got = arenaExp(10);
+              showResult(false, ais[0], { exp: got.exp, gold: 0, ups: got.ups }, '<div>止步半决赛，获得参与经验。</div>');
               return;
             }
             const other = Sim.simulate(ais[1], ais[2]);
@@ -524,18 +533,18 @@
                 onEnd: (w2) => {
                   if (w2 === 0) {
                     if (mode === 0) {
-                      const ups = State.gainExp(150);
+                      const got = arenaExp(150);
                       State.addGold(10);
-                      showResult(true, finalist, { exp: 150, gold: 10, ups: ups }, '<div>🏆 竞技场冠军！</div>');
+                      showResult(true, finalist, { exp: got.exp, gold: 10, ups: got.ups }, '<div>🏆 竞技场冠军！</div>');
                     } else {
                       S.props[26] = (S.props[26] || 0) + 8;
-                      const ups2 = State.gainExp(30);
-                      showResult(true, finalist, { exp: 30, gold: 0, ups: ups2 }, '<div>🏆 碎片场冠军！蓝色碎片 x8</div>');
+                      const got = arenaExp(30);
+                      showResult(true, finalist, { exp: got.exp, gold: 0, ups: got.ups }, '<div>🏆 碎片场冠军！蓝色碎片 x8</div>');
                     }
                     State.save();
                   } else {
-                    const ups3 = State.gainExp(75);
-                    showResult(false, finalist, { exp: 75, gold: 0, ups: ups3 }, '<div>获得亚军（75经验）</div>');
+                    const got = arenaExp(75);
+                    showResult(false, finalist, { exp: got.exp, gold: 0, ups: got.ups }, '<div>获得亚军（75经验）</div>');
                   }
                 },
               });

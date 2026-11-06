@@ -1988,6 +1988,9 @@
             break;
           }
           case 18: { // 吸铁大法
+            /* 原版 `skillsArray` 18 号「吸铁大法」没有“必中”：这里必须先走 `dodgeChance`。
+             * 只有师父驾到（13）给的下一次攻击必中 / 塔 buff 的 `mustHitNext` 才会让这一下必中；
+             * 13 的“下次攻击必中”是技能 13 的效果，不是吸铁本身。 */
             const raw = Math.round((R(5, 20) + 4 * (Math.min(lv, 10) - 1)) * (1 + effect(att, 41) / 100));
             if (chance(dodgeChance(att, def))) { att.mustHitNext = false; markDodge(r, def); break; }
             /* 用户 2026-10-29 口径：吸铁大法伤害无视装死；技能介绍不写。 */

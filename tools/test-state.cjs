@@ -1749,6 +1749,21 @@ test('吸铁大法无视装死：直接打死 1 血带装死的目标，通灵�
   assert.equal(summon.hpAfter[1], 1, '对照：装死保留 1 血');
 });
 
+test('吸铁大法不是必中：高敏捷目标可以闪避（原版 18 号技能没有必中）', () => {
+  /* 原版 `MainMovie.as` 的 `skillsArray` 18 号没有“必中”；明确写必中的只有
+   * 13 师父驾到（下次攻击）、23 幸运一击、武器 9 / 15。这里固定随机 0，
+   * 让任何 >0 的闪避率都判定为闪避，锁住“吸铁可被闪避”的口径。 */
+  const g = game(); g.math.random = () => 0;
+  const me = fighter({ hp: 100000, maxHp: 100000, power: 100, agility: 10, speed: 1000,
+    skills: [{ id: 18, level: 10 }], castable: [18], pattern: ['skill'] });
+  const foe = fighter({ hp: 100000, maxHp: 100000, power: 1, agility: 1000, speed: 1 });
+  const r = g.Sim.simulate(me, foe).rounds[0];
+  assert.equal(r.action, 'skill'); assert.equal(r.id, 18);
+  assert.equal(r.dodge, true, '吸铁大法不是必中，固定随机 0 下应当被闪避');
+  assert.ok(!r.dmg, '被闪避的吸铁大法不应造成伤害');
+  assert.ok(!r.disarmApplied, '被闪避时也不应缴械');
+});
+
 test('反击后的血量快照与胜负一致，不遗漏最后一击', () => {
   const g = game(); g.math.random = () => 0.2;
   const result = g.Sim.simulate(fighter({ hp: 5 }), fighter({ power: 100 }));

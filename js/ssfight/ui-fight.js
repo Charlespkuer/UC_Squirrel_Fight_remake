@@ -53,9 +53,11 @@
   /* `Player.specialEffect()` 的四档 → `statu.propty` 的第几帧。
    * 这 8 颗图标逐帧渲染核对过（2026-11，`propty` 7657 的 8 帧）：
    *   1 力↑ / 2 敏↑ / 3 速↑ / **4 力↓ / 5 敏↓ / 6 速↓** / 7 ↑速敏力（全属性提升）/ **8 晕击**。
-   * 战斗里真正会用到的就是 4/5/6/8，与原版客户端逐条对得上：
+   * 战斗里真正会用到的就是 4/5/6/8：
    *   · `MainMovie.as:6357` 的 `specialEffectType` 1→statu 3（力↓）/ 2→statu 1（敏↓）/ 3→statu 2（速↓）；
-   *   · `Squirrel.attack` 的投掷分支按武器 5/6/8 选 statu 1/2/3，而 sim 里正是 5=敏捷降低、6=速度降低、8=力量降低。 */
+   *   · `Squirrel.attack` 的投掷分支按武器 5/6/8 选 statu 1/2/3，而 sim 里正是 5=敏捷降低、6=速度降低、8=力量降低；
+   *   · **statu 4（晕击）只在被跳过的那一拍由 `playRound` 直接 setStatu(4)** —— 命中拍不飘，
+   *     否则同一记板砖会出现「命中一颗 + 跳过一颗」的连续两次晕眩标识（见 `effectStatu`）。 */
   const STATU_ICON = { 1: 5, 2: 6, 3: 4, 4: 8 };
   /** `propty` 里那 8 颗图标容器（它们各自的第 1 帧脚本是 `stop(); _root.showReverse(this, 1)`）。 */
   const STATU_ICON_SYMS = new Set([7640, 7641, 7642, 7645, 7647, 7649, 7653, 7656,
@@ -297,6 +299,13 @@
     if (t && node) { t.setText(node, str, opts); return; }
     if (node && node.textContent !== undefined) node.textContent = str == null ? '' : String(str);
   }
+  /** 血条上的两个昵称：按字段框宽度缩字号，保证「7 个汉字」和英文昵称都能完整显示。
+   *  `name1`（玩家侧）只有 82.1 单位宽，7 个汉字要 84；不缩会裁掉最后一个字的边缘。
+   *  ASCII 宽度按 SimHei 实测 0.5 em 计（`name2` 上 21 个字母要 126）。 */
+  function setNameText(node, text) {
+    setText(node, text);
+    if (window.SfRender && SfRender.fitTextWidth) SfRender.fitTextWidth(node, { ascii: 0.5, min: 6 });
+  }
   function visible(clip, on) {
     const g = clip && (clip.g || clip);
     if (g && g.style) g.style.visibility = on ? '' : 'hidden';
@@ -456,24 +465,44 @@
     let seen = o.resume ? clip.frame + 1 : 1;
     if (!o.resume) { play(clip, 2); fire(1); }
     return new Promise((resolve) => {
-      let done = false;
+      let done = false, guard = 0, tick = null;
+      /* 动画收尾和 `onFrame`（命中 / 防御起手 / 闪避归位）都靠**渲染器的节拍器**驱动，
+       * 不再用 rAF 轮询 `clip.frame`。原因（2026-11 安卓实拍）：节拍器是 14fps 的
+       * `setInterval`，而 rAF 会被软件图层 / 重布局拖到几百毫秒；两边一旦错开，
+       * `playClip` 看到的帧号可能已经绕过停止帧一整圈 —— 动作于是**又播一遍**，
+       * 命中回调也落在受击/闪避动画之后（“重复出招、闪避扣血动画对不上”）。
+       * 这里只登记一个每拍检查器：节拍器每推进一步，就在**同一拍**判断是否到了停止帧。
+       * `tickWatchers` 由 run() 挂在战斗视图的 `onTick` 上；没有它（无头回归）才退回 rAF。 */
+      const watched = !!(rec.tickWatchers && rec.tickWatchers.add);
       const finish = () => {
         if (done) return;
         done = true;
         rec.sleepers.delete(finish);
+        if (watched && tick) rec.tickWatchers.delete(tick);
+        if (guard) {
+          clearTimeout(guard);
+          const at = rec.timers ? rec.timers.indexOf(guard) : -1;
+          if (at >= 0) rec.timers.splice(at, 1);
+        }
         // Stop in place: jumping to the final frame would build discarded action trees.
         if (clip.stop) clip.stop();
         resolve();
       };
       // skip/clean wake the actual animation wait, not just a race around its caller.
       rec.sleepers.add(finish);
-      const tick = () => {
+      tick = () => {
         if (done) return;
         if (interrupted() || !clip.g || clip.g.isConnected === false) { finish(); return; }
+        const prevSeen = seen;
         const n = clip.frame + 1;
-        if (n !== seen && n > seen) { for (let k = seen + 1; k <= n; k++) fire(k); }
+        const wrapped = n < prevSeen;
+        if (n !== prevSeen && n > prevSeen) { for (let k = prevSeen + 1; k <= n; k++) fire(k); }
         seen = n;
-        if (clip.frame >= stopIdx) {
+        if (clip.frame >= stopIdx || wrapped) {
+          /* 正常路径：节拍器逐帧推进，第一次 `clip.frame >= stopIdx` 就停在停止帧，
+           * 不会绕过一圈。`wrapped` 只是兜底：万一 clip 被外部重新起播，不能把
+           * perform() 永远卡住；把没来得及触发的帧回调补齐后再收尾。 */
+          if (wrapped) for (let k = Math.max(1, prevSeen + 1); k <= stopIdx + 1; k++) fire(k);
           stopAt(clip, stopIdx + 1);
           /* 普通动作收招时冻结嵌套层；倒地保留灵魂和已停在原版表情帧的子树。 */
           if (o.keepNestedIds) freezeNestedAnim(clip, false, new Set(o.keepNestedIds.map(Number)));
@@ -481,9 +510,22 @@
           finish();
           return;
         }
-        arm(tick);
+        if (!watched) arm(tick);
       };
-      arm(tick);
+      if (watched) { rec.tickWatchers.add(tick); tick(); }
+      else arm(tick);
+      if (done) return;
+      /* 视觉节拍器的兜底：视图被摘 / 切后台 / 元件没注册时，perform() 不能永远等。
+       * 留足“正常播完 + 4s”的余量；真的卡住时把剩下的帧回调补上再收尾。 */
+      const frames = Math.max(1, clip.frameCount ? clip.frameCount() : 1);
+      guard = setTimeout(() => {
+        if (done) return;
+        for (let k = seen + 1; k <= stopIdx + 1; k++) fire(k);
+        stopAt(clip, stopIdx + 1);
+        try { if (clip.stop) clip.stop(); } catch (e) {}
+        finish();
+      }, Math.max(2500, Math.ceil(frames * 90 / Math.max(1, rec.speed || 1)) + 4000));
+      if (rec.timers) rec.timers.push(guard);
     });
   }
 
@@ -881,17 +923,20 @@
   }
   /** 这一回合要给受击方飘哪一颗状态图标 —— 返回 `Player.specialEffect()` 的 statu 档位。
    *
-   *  复刻的事件流里没有原版那个 `specialEffectType`，所以按**真实的中招效果**映回原版那四档
+   *  复刻的事件流里没有原版那个 `specialEffectType`，所以按**真实的中招效果**映回原版那几档
    *  （`STATU_ICON`：statu 1→图标 5 / 2→6 / 3→4 / 4→8）：
-   *    · **眩晕**（色诱之术 / 板砖的 `stunApplied`）→ statu 4 → 第 8 帧「晕击」；
    *    · **力/敏/速下降**（投掷武器 8 / 5 / 6，sim 的 `debuffStat`）→ statu 3 / 1 / 2 → 第 4 / 5 / 6 帧。
+   *    · **眩晕 / 冻结不在命中这一拍飘**。`stunApplied` 只表示"这一下把对手打晕了"，
+   *      「晕击」图标统一由**被跳过的那一拍**（见 `playRound` 的 `action:'stunned'` 分支）飘一次。
+   *      ⚠ 两处都飘 = 命中一颗 + 跳过一颗，玩家看到的就是**连续两次晕眩标识**、像是被晕了两个回合
+   *      （2026-11 玩家反馈："敌人板砖武器让自己晕眩了两个回合，头上连续出现的两次晕眩标识"）。
+   *      单次眩晕在 sim 里只跳过 1 个回合（`stun` 记 1、被跳过时自减到 0），所以这里必须返回 0。
    *  ⚠⚠ 2026-11 用户口径："给敌人施加 debuff 的时候飘的 debuff ui 是错误的 ui"。原因就是这里
    *  以前把三档 statu 当成了"中毒/沉默/缴械"用（stun→statu 3 = **力量下降**、中毒→statu 1 = 敏捷下降…），
    *  而 statu 3 在原版的意思恰恰是**力量下降** —— 于是眩晕飘出"力↓"、吃毒飘出"敏↓"。
    *  原版对**中毒 / 沉默 / 缴械根本没有图标**（中毒只飘伤害数字、冻结走冻结横幅），所以一律返回 0
    *  —— 现代播放器同样只给 `debuffText` 飘字、不给这些效果图标。 */
   function effectStatu(r) {
-    if (r.stunApplied || r.freezeApplied) return 4;
     const stat = r.debuffStat || (/力量/.test(r.debuffText || '') ? 'power'
       : /敏捷/.test(r.debuffText || '') ? 'agility'
         : /速度/.test(r.debuffText || '') ? 'speed' : '');
@@ -2164,8 +2209,8 @@
   function showFightInfo(hud, names) {
     const t = T();
     stopAt(hud, HUD_FRAME);
-    setText(hud.byName('name1'), names[0]);
-    setText(hud.byName('name2'), names[1]);
+    setNameText(hud.byName('name1'), names[0]);
+    setNameText(hud.byName('name2'), names[1]);
     /* 状态格 `c1..c3`（3414）由 `showStates` 管药丸；这一场还没接药丸，照旧收掉。
      * 幻兽格 `attackerS1..3` / `defenderS1..3` 按 `showBringPets` 填：
      * 左侧 1→2→3，右侧 3→2→1（原版对右方传入的顺序就是反的）。 */
@@ -2189,6 +2234,15 @@
   function refreshBlood(hud) {
     const t = T();
     if (!live || !hud) return;
+    /* 【性能】每回合开始 / 命中 / 闪避后都会调一次；只有血量、护盾或剩余回合真的变了
+     * 才重写血条帧与文本（`stopAt` 会走 showFrame），否则这一拍纯属重复劳动。 */
+    const sig = [live.fighters[0] && live.fighters[0].blood.leftBlood,
+      live.fighters[0] && live.fighters[0].blood.totalBlood,
+      live.fighters[1] && live.fighters[1].blood.leftBlood,
+      live.fighters[1] && live.fighters[1].blood.totalBlood,
+      live.shields && live.shields[0], live.shields && live.shields[1], live.roundsLeft].join('|');
+    if (live.bloodSig === sig) return;
+    live.bloodSig = sig;
     for (let i = 0; i < 2; i++) {
       const f = live.fighters[i];
       if (!f) continue;
@@ -2220,21 +2274,40 @@
       rec.shieldRects[side] = null;
       return;
     }
-    /* 血条轮廓 = 蒙版轨道 `7695` 的 bbox；黄条是 `7696`（换帧时带 clip-path 的 wrap）。 */
-    let box = null, clipAttr = '';
+    /* 血条轮廓 = 蒙版轨道 `7695` 的 bbox；黄条是 `7696`（换帧时带 clip-path 的 wrap）。
+     * 这两项在整场战斗里是**固定几何**（只有血条填充帧在变），`getBBox()` / `getCTM()`
+     * 会强制布局，安卓上每拍都量会明显拖慢；量一次缓存到这一侧。 */
+    if (!rec.shieldGeom) rec.shieldGeom = [null, null];
+    let geom = rec.shieldGeom[side];
+    if (!geom || geom.bar !== bar) {
+      let box = null;
+      if (bar.nodes) {
+        for (const v of bar.nodes.values()) {
+          if (!v) continue;
+          if (String(v.id) === '7695' && v.node && v.node.getBBox) {
+            try { const b = v.node.getBBox(); if (b && b.width > 0) box = b; } catch (e) { /* 没布局 */ }
+          }
+        }
+      }
+      if (!box) return;
+      let mirrored = false;
+      try {
+        const m = bar.g && bar.g.getCTM && bar.g.getCTM();
+        if (m) mirrored = m.a < 0;
+      } catch (e) { /* 忽略 */ }
+      geom = { bar: bar, box: box, mirrored: mirrored };
+      rec.shieldGeom[side] = geom;
+    }
+    /* clip-path 随血条换帧可能换 ID，读当前帧的 wrap（纯属性遍历，不触发布局）。 */
+    let clipAttr = '';
     if (bar.nodes) {
       for (const v of bar.nodes.values()) {
-        if (!v) continue;
-        if (String(v.id) === '7695' && v.node && v.node.getBBox) {
-          try { const b = v.node.getBBox(); if (b && b.width > 0) box = b; } catch (e) { /* 没布局 */ }
-        }
-        if (v.wrap && v.wrap.getAttribute) {
+        if (v && v.wrap && v.wrap.getAttribute) {
           const cp = v.wrap.getAttribute('clip-path');
           if (cp) clipAttr = cp;
         }
       }
     }
-    if (!box) return;
     if (!rect || !rect.parentNode) {
       rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
       rect.setAttribute('fill', '#78e2ff');
@@ -2242,17 +2315,14 @@
       rect.setAttribute('pointer-events', 'none');
       rec.shieldRects[side] = rect;
     }
-    /* 放到内容层最后 = 压在黄条上面；换帧会重排，所以每次刷新都重新 append。 */
-    host.appendChild(rect);
+    /* 放到内容层最后 = 压在黄条上面；换帧会重排，所以不在最后才重新 append
+     * （已经在最后就什么都不做，避免每拍都把节点搬来搬去触发重排）。 */
+    if (rect.parentNode !== host || host.lastChild !== rect) host.appendChild(rect);
+    const box = geom.box;
     const pct = Math.max(0, Math.min(1, left / Math.max(1, total)));
     const sp = Math.max(0, Math.min(1, shield / Math.max(1, total)));
-    let mirrored = false;
-    try {
-      const m = bar.g && bar.g.getCTM && bar.g.getCTM();
-      if (m) mirrored = m.a < 0;
-    } catch (e) { /* 忽略 */ }
     const width = box.width * sp;
-    const x = mirrored ? box.x + box.width * (pct - sp) : box.x;
+    const x = geom.mirrored ? box.x + box.width * (pct - sp) : box.x;
     rect.setAttribute('x', x.toFixed(2));
     rect.setAttribute('y', box.y.toFixed(2));
     rect.setAttribute('width', Math.max(0, width).toFixed(2));
@@ -2455,6 +2525,8 @@
     if (rec.bgLayerRO) { try { rec.bgLayerRO.disconnect(); } catch (e) {} }
     if (rec.skipButton) rec.skipButton.remove();
     if (rec.speedButton) rec.speedButton.remove();
+    if (rec.tickWatchers) rec.tickWatchers.clear();
+    if (rec.view && rec.view.onTick === rec.tickHook) rec.view.onTick = rec.prevTick || null;
     if (rec.host && rec.host.parentNode) rec.host.parentNode.removeChild(rec.host);
     if (rec.view) { try { rec.view.destroy(); } catch (e) {} }
     if (live === rec) live = null;
@@ -2550,11 +2622,24 @@
     try { await loadGearTables(); } catch (e) { /* 没表就不穿装备 */ }
     try { await loadLootIcons(); } catch (e) { /* 没表就不画战利品图标 */ }
     if (mine !== seq || rec.stopped) return null;
+    /* 先建检查器集合：`mountSymbol` 期间出生的实例（例如倒地主子树 6362）也会在
+     * `onClip` 里调 playClip；它们要跟后面的回合动画用同一套节拍器，不能退回 rAF。 */
+    rec.tickWatchers = new Set();
     const view = await SfRender.mountSymbol(host, SYM.fight, {
       frame: F.scene, label: '战斗', policy: {}, onClip: onClip,
     });
     if (mine !== seq || rec.stopped) { view.destroy(); return null; }
     rec.view = view;
+    /* 战斗动画的收尾/命中回调由渲染器节拍器驱动（见 playClip）。
+     * `onTick` 是节拍器把所有播放实例推进一步之后调用的视图钩子；挂在这里，
+     * 检查器和动画帧就在**同一拍**执行，不再受 rAF 被拖慢的影响。
+     * 保留其它页面可能已经挂过的 onTick（战斗视图通常没有，但不能假设）。 */
+    rec.prevTick = view.onTick;
+    rec.tickHook = () => {
+      if (typeof rec.prevTick === 'function') { try { rec.prevTick(); } catch (e) {} }
+      for (const fn of [...rec.tickWatchers]) { try { fn(); } catch (e) {} }
+    };
+    view.onTick = rec.tickHook;
     try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
     const t = T();
     if (t) t.freezeDescendants(view);
@@ -3057,7 +3142,9 @@
     /* 归位已经在函数开头（所有分支共用）做过了 —— 见上面那段注释。 */
     /* ⚠ 出手这一拍原版**只按 `currentRound.specialEffectType` 给受击方拨状态图标**
      * （`MainMovie.as:6357`：1→statu 3 / 2→statu 1 / 3→statu 2），闪避与技能防御**不走这里** ——
-     * 那两种改的是**身体帧**（`mc.gotoAndStop(3|4)`，由 `beAttack` 负责）。 */
+     * 那两种改的是**身体帧**（`mc.gotoAndStop(3|4)`，由 `beAttack` 负责）。
+     * **眩晕不在这条路上**：命中拍只记 `stunApplied`，图标留给下一拍 `action:'stunned'` 飘一次，
+     * 否则同一记板砖会在命中 / 跳过两个拍子各飘一颗「晕击」（见 `effectStatu` 的注释）。 */
     defender.setStatu(effectStatu(r));
 
     const acts = ATTACK_ACTS[attackPlan(r).frame] || {};

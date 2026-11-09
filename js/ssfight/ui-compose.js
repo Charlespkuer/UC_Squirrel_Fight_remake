@@ -155,7 +155,7 @@
   }
 
   function isComposeProp(id) {
-    return [24, 25, 26, 45, 46, 77, 78].includes(id) || id === (window.GData && GData.CONVERT_SHARD_ID) || !!(window.State && State.gemLevel(id));
+    return [24, 25, 26, 45, 46, 108, 109, 77, 78].includes(id) || id === (window.GData && GData.CONVERT_SHARD_ID) || !!(window.State && State.gemLevel(id));
   }
 
   function costText(id) {
@@ -231,7 +231,7 @@
 
   function composeAction(id) {
     if ([24, 25, 26, 77, 78].includes(id)) return State.composeGear(id);
-    if ([45, 46].includes(id)) return State.composeSeed(id);
+    if ([45, 46, 108, 109].includes(id)) return State.composeSeed(id);
     if (id === (window.GData && GData.CONVERT_SHARD_ID)) return State.composeConvertPill();
     if (State.gemLevel(id)) return State.mergeGems(id);
     return { ok: false, msg: '这个道具不能合成' };
@@ -258,7 +258,7 @@
         ? UI.classic.gearName(Number(r.gear.id)) : ((info && info.name) || '装备');
       const quality = State.gearQuality ? State.gearQuality(r.gear) : ((info && info.quality) || 0);
       const extra = State.extText ? (State.extText(r.gear.ext) || []) : [];
-      const temp = info ? ('基本属性:' + (info.attrName || '') + '+' + Math.max(0, Math.round(Number(info.abilityVal) || 0))) : '';
+      const temp = info ? ('基本属性:' + State.gearAttrText(info, { name: true })) : '';
       return { name: name, temp: wrapText(temp), extra: extra.length ? wrapText('附加属性:' + extra.join(' / ')) : '', icon: 'gear', id: r.gear.id, gear: r.gear, quality: quality };
     }
     if (kind === 'gem') {

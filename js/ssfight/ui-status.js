@@ -130,10 +130,10 @@
     if (!clip || !clip.gotoAndStop) return;
     try { clip.gotoAndStop(n); } catch (e) {}
   }
-  function setTextByName(host, name, str) {
+  function setTextByName(host, name, str, opts) {
     const t = T();
     const n = clipOf(host, name);
-    if (t && n) t.setText(n, str);
+    if (t && n) t.setText(n, str, opts);
     return n;
   }
   /** 换帧会把 `<g>` 的子节点整个重建 —— 动效壳与点击区会一起没掉，所以每次 goTo 后重包一遍。 */
@@ -2670,11 +2670,15 @@
     const baseText = (ty, g) => {
       if (!g) return '';
       const label = GEAR_STAT_LABEL[ty] || '敏捷';
-      let amount = 0;
+      let amount = 0, base = 0;
       if (Number.isFinite(Number(g.attr)) && Number(g.attr) > 0) amount = Number(g.attr);
-      if (!amount) { try { amount = Number(State.gearBaseAttr ? State.gearBaseAttr(Number(g.id)) : 0) || 0; } catch (e) { amount = 0; } }
+      try { base = Number(State.gearBaseAttr ? State.gearBaseAttr(Number(g.id)) : 0) || 0; } catch (e) { base = 0; }
+      if (!amount) amount = base;
       if (!amount) amount = Math.max(1, Number(g.ext) || 1);
-      return label + '+' + amount;
+      if (!base) base = amount;
+      /* 46.2×24 的字段放不下「敏捷 84(+5%)」一行，拆成「属性名 / 最终值(+b%)」两行。 */
+      return label + '\n' + State.gearAttrText({ id: Number(g.id), abilityVal: amount, attrBase: base,
+        attrPct: g.attrPct, attrName: label });
     };
     /* `t_addr`：原版 `getEquipAttachmentDes` 的等价物 —— `State.extText` 已经把每条附加属性
      * 的说明算好（`基础反击率效果提升-10%` 这种），逐条换行拼起来；一条都没有时照原版写"无"。 */
@@ -3586,7 +3590,7 @@
     setTextByName(view, 'type', GEAR_DETAIL_PART[ty]);
     setTextByName(view, 'level', hero ? '不限' : Math.max(1, Math.round(Number(g.useLevel) || 1)));
     setTextByName(view, 'base', hero ? '0 加成'
-      : (String(g.attrName || '') + '+' + Math.max(0, Math.round(Number(g.abilityVal) || 0))));
+      : State.gearAttrText(g, { name: true }));
     if (hero) {
       /* 用户 2026-10-28 口径：勇者外观页不标档位数字（「附加属性」这一列照原版留空）。 */
       setTextByName(view, 'baseExtra', '');
@@ -3811,7 +3815,9 @@
    *   · `cBack{i}` 只在**一件材料都没有**时可见（它是空格底）；
    *   · `mc_tips`：0 件 → 按类型 1/4/5；1~2 件 → 2；满 3 件 → 3。
    * ⚠ 复刻的融合规则与原件不同（原件按 composeType 分蓝/紫/橙三档、材料页每页 2 件；
-   *   复刻经典页是"任意 3 件**同品质** → 升一档（不要求同部位）"，费用与校验都在 `State.mergeGears`）——
+   *   复刻经典页是"任意 3 件**同品质** → 升一档（不要求同部位）"，2026-11 又把
+   *   产物部位/词条/变异对齐联机版：部位随机、词条按星级继承前两条、2% 变异；
+   *   费用与校验都在 `State.mergeGears`）——
    *   所以这里**版式照原版、规则与文案走 `State`**，件数上限仍是 3 件。
    * ========================================================== */
   const FUSION_FRAME = { work: 8, pick: 9, confirm: 13 };
@@ -3932,15 +3938,20 @@
     /* 第一次按原画稿文字找；改过之后原文字已经不在了，用自己打的标记认。
      * 否则第二次调用（换材料 / 同套提示切换）会找不到这一组、提示永远停在第一句。
      * ⚠ 找过一次就把节点记在视图上：`textContent` 会把整棵子树拼成字符串，
-     *  对每个 `<g>` 都调一遍是 O(n²)，移动端换一次材料就要几十毫秒。 */
+     *  对每个 `<g>` 都调一遍是 O(n²)，移动端换一次材料就要几十毫秒。
+     * ⚠ 不能取**最外层**的 `mc_tips`：那一层带着 `matrix(...,44.65,44)`，而原画稿里的
+     *   文字还在内层 `matrix(...,5.85,-6)` 里。2026-11 用户截图里的「黄字偏下、和下一行
+     *   叠在一起」就是新 `<text>` 直接挂到外层、baseline 比原稿低 6 个单位造成的。 */
     let prompt = view.__fusionPrompt;
     if (!prompt || prompt.isConnected === false || !root.contains(prompt)) {
       prompt = root.querySelector('g[data-fusion-prompt="1"]');
       if (!prompt) {
+        let deepest = null;
         for (const g of root.querySelectorAll('g')) {
           const txt = String(g.textContent || '').replace(/\s+/g, '');
-          if (txt.indexOf('请先放入') >= 0 && txt.indexOf('装备') >= 0) { prompt = g; break; }
+          if (txt.indexOf('请先放入') >= 0 && txt.indexOf('装备') >= 0) deepest = g;
         }
+        prompt = deepest;
       }
       view.__fusionPrompt = prompt || null;
     }
@@ -3954,12 +3965,17 @@
       const v = first.getAttribute(a);
       if (v != null) keep[a] = v;
     }
+    const x = first.getAttribute('x') || '0';
+    const y = first.getAttribute('y') || '14';
     for (const g of glyphs) g.remove();
+    /* 空串 = 这一档不需要提示（三件已齐，`mc_tips` 自己的黄字就是状态行）：
+     * 只清掉旧文字，不再补一句默认文案，避免两条提示叠在一起。 */
+    if (!text) return;
     const n = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    n.setAttribute('x', '0');
-    n.setAttribute('y', '14');
+    n.setAttribute('x', x);
+    n.setAttribute('y', y);
     for (const [a, v] of Object.entries(keep)) n.setAttribute(a, v);
-    n.textContent = text || '请先放入3件同品质装备';
+    n.textContent = text;
     prompt.appendChild(n);
   }
 
@@ -3968,9 +3984,6 @@
     const all = fusionMaterials();
     const sel = fusionSelected();
     const picked = sel.map((k) => all.find((g) => g.key === k)).filter(Boolean);
-    /* 三件同套且该套有下一品质档时，工作台直接写“同套必得：狂战/怒战…”。 */
-    const sameSet = picked.length === 3 && State.fusionFamilyInfo ? State.fusionFamilyInfo(picked) : null;
-    rewriteFusionPrompt(view, sameSet ? '同套必得：' + sameSet.family : '');
     for (let i = 0; i < 3; i++) {
       const cell = clipOf(view, 'c' + (i + 1));
       const back = clipOf(view, 'cBack' + (i + 1));
@@ -4009,6 +4022,9 @@
       } else if (picked.length < 3) stopAt(tips, 2);
       else stopAt(tips, 3);
     }
+    /* 先切 `mc_tips` 的帧，再改写它的提示：3 件齐时帧 3 自带「材料满足条件，可以进行融合」，
+     * 此时不能再补默认的「请先放入3件同品质装备」；0~2 件时才用通用提示替换原稿的蓝/紫/橙文案。 */
+    rewriteFusionPrompt(view, picked.length >= 3 ? '' : '请先放入3件同品质装备');
     const cost = clipOf(view, 'mergeCost');
     if (cost) {
       stopAt(cost, 1);
@@ -4069,17 +4085,18 @@
     const view = await mountFusionOverlay(host, '3157', '装备融合帮助');
     if (!view) return;
     const C = window.UI && UI.classic;
-    const extInherit = Math.round((Number(State.FUSION_EXT_INHERIT_RATE) || 0) * 100);
     const extUpgrade = Math.round((Number(State.FUSION_EXT_UPGRADE_RATE) || 0) * 100);
+    const mutant = Math.round((Number(State.FUSION_ONLINE_MUTANT_RATE) || 0.02) * 100);
     const words = [
       '选 3 件同品质的未穿戴装备，融合成 1 件更高品质的装备。',
       '费用按材料品质：白 ' + fusionCostOf(0) + ' / 绿 ' + fusionCostOf(1) + ' / 蓝 ' + fusionCostOf(2) +
-        ' / 紫 ' + fusionCostOf(3) + ' / 橙 ' + fusionCostOf(4) + ' 金松果。',
+        ' / 紫 ' + fusionCostOf(3) + ' / 橙 ' + fusionCostOf(4) + ' / 黑 ' + fusionCostOf(5) + ' 金松果。',
       '已穿戴的装备不能作为材料；部位和名字可以完全不同。',
       '3 件同品质的紫装可以融成一件传说装备；3 件橙色装备可以融成一件黑色装备；融合成功率 100%。',
-      '三件材料同属一套（如狂战头盔/拳甲/铠甲）且该套有下一品质档时，产物必定是同套装的下一品质、首件材料部位；该套没有下一品质档（早期白/绿套）或材料跨套时按随机规则。品质 5 的黑装已是最高档，三件黑装仍按同部位洗练。',
-      '部位和名字可以完全不同。产物的每个词条都有 ' + extInherit + '% 概率从三件材料的词条里继承；' +
-        '继承到的词条取材料里的最高星级，另有 ' + extUpgrade + '% 概率再升 1 星（最高 3 星）。',
+      '产物部位从三件材料中随机选取；优先落在来源材料同套，存在可用目标时变异概率为 ' + mutant + '%。',
+      '按星级从高到低继承前两条，同星级按选取材料和词条的顺序排列。',
+      '第三条从其余材料词条中随机选取；词条有机会升一星，最高三星。低品质装备按已有词条槽位继承。',
+      '黑色装备可继续融合；同名词条也按各自顺序参与继承，每条继承后另有 ' + extUpgrade + '% 概率升 1 星。',
     ];
     fusionHelpPage = 0;
     const pager = (list) => {
@@ -4133,7 +4150,10 @@
       setTextByName(view, 't_name' + (i + 1), g ? gearNameText(g) : '');
       const label = clipOf(view, 't_name' + (i + 1));
       if (label) setGearTextColor(label, g ? g.quality : 0);
-      setTextByName(view, 't_base' + (i + 1), g ? (String(g.attrName || '') + '+' + Math.max(0, Math.round(Number(g.abilityVal) || 0))) : '');
+      setTextByName(view, 't_base' + (i + 1), g ? (String(g.attrName || '') + '\n' + State.gearAttrText(g)) : '', { noClip: true });
+      /* 原版 t_base 的 EditText 框只有 46.2 单位宽（textfields-index：3 个字），
+       * 生命/速度等基础值到三位数后会被裁掉最后一位（用户 2026-11 实拍）。这里只对
+       * 基础属性行放开裁切；附加词条继续用各自的框，避免长词条压出卡片。 */
       let addr = [];
       try { addr = (g && State.extTextForGear ? State.extTextForGear(g) : (g ? State.extText(g.ext) : [])) || []; } catch (e) { addr = []; }
       setTextByName(view, 't_addr' + (i + 1), addr.join('\n'));
@@ -4263,11 +4283,7 @@
     const q = picked.length ? Number(picked[0].quality) : 0;
     const cost = fusionCostOf(q);
     setTextByName(view, 't_tips', '融合即将开始，\n本次需要' + cost + '个金松果。');
-    const sameSet = picked.length === 3 && State.fusionFamilyInfo ? State.fusionFamilyInfo(picked) : null;
-    const exact = sameSet && State.gearInst ? State.gearInst(sameSet.id) : null;
-    setTextByName(view, 'goal', sameSet
-      ? (FUSION_QUALITY_NAMES[Math.min(5, sameSet.quality)] || '') + (exact && exact.name ? exact.name : sameSet.family) + '　'
-      : (FUSION_QUALITY_NAMES[Math.min(5, q + 1)] || '') + '装备　');
+    setTextByName(view, 'goal', (FUSION_QUALITY_NAMES[Math.min(5, q + 1)] || '') + '装备　');
     const back = () => { void mountFusionFrame(FUSION_FRAME.work).then(() => { fillFusionWork(fusionPage && fusionPage.view); wireFusionWork(fusionPage && fusionPage.view); }); };
     wireClickable(clipOf(view, 'b_back'), { hover: 2, onFire: back });
     wireClickable(clipOf(view, 'b_ok'), {

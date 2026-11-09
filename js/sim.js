@@ -1341,7 +1341,10 @@
       if (had) r.petCleanse = true;
       return had;
     }
-    /** 幻兽·张牙舞爪：对手新中的持续负面效果 +1 回合。 */
+    /** 幻兽·张牙舞爪：对手新中的**持续伤害 / 持续负面**（中毒、沉默、缴械、脱装）+1 回合。
+     *  ⚠ **眩晕不在此列**：板砖 / 色诱 / 熊掌震地都是「跳过一回合」的控制，
+     *  一旦被延长就是「一砖晕两回合」，玩家会看到我方连续两拍不能出手、敌方连着多打两拍
+     *  （2026-11 随机挑战录屏反馈）。所以眩晕一律 `Math.max(def.stun, 1)`，不走这个函数。 */
     function petDotRounds(target, rounds) {
       return Math.max(1, Number(rounds) || 1) + (target && target.petDotPlus ? 1 : 0);
     }
@@ -1410,7 +1413,7 @@
         target.petDotPlus = true;
         r.petDotPlus = true;
         if (target.dot) target.dot.rounds = Math.max(target.dot.rounds, petDotRounds(target, target.dot.rounds));
-        if (target.stun > 0) target.stun += 1;
+        /* 已生效的持续时间类效果一并补 1 回合；**眩晕不补** —— 见 `petDotRounds` 的注释。 */
         if (target.silence > 0) target.silence += 1;
         if (target.disarm > 0) target.disarm += 1;
         if (target.stripTurns > 0) target.stripTurns += 1;
@@ -1893,7 +1896,7 @@
           if (w.id === 6) { def.debuffs.speed = Math.max(def.debuffs.speed, weaponEffect(w, 10, 2) * dropMul); r.debuffText = '速度降低！'; r.debuffStat = 'speed'; }
           if (w.id === 8) { def.debuffs.power = Math.max(def.debuffs.power, weaponEffect(w, 10, 1) * dropMul); r.debuffText = '力量降低！'; r.debuffStat = 'power'; }
           if (w.id === 12 && chance(35)) { def.dot = { dmg: weaponEffect(w, 4, 3, 6) + trueW(w, 'dot'), rounds: petDotRounds(def, 4) }; r.dotApplied = true; }
-          if (w.id === 13 && chance(weaponEffect(w, 10, 3, 3) + trueW(w, 'stun'))) { def.stun = Math.max(def.stun, petDotRounds(def, 1)); r.stunApplied = true; }
+          if (w.id === 13 && chance(weaponEffect(w, 10, 3, 3) + trueW(w, 'stun'))) { def.stun = Math.max(def.stun, 1); r.stunApplied = true; }
           if (w.id === 16 && chance(weaponEffect(w, 10, 4, 4) + trueW(w, 'silence'))) { def.silence = Math.max(def.silence, petDotRounds(def, 4)); r.silenceApplied = true; }
         }
         /* 忍者镖吸血按**减伤前**的武器伤害算，不是最终掉血量。
@@ -1944,7 +1947,7 @@
              * 二次判定必须再看一次 r.dodge —— 否则动画显示闪避，眩晕 / 脱装却照样挂上：
              * 用户实测「妖狐魅惑被闪避后仍然被卸甲」就是这一条。 */
             if (def.hp > 0 && !r.fakeDie && !r.dodge) {
-              def.stun = Math.max(def.stun, petDotRounds(def, 1)); r.stunApplied = true;
+              def.stun = Math.max(def.stun, 1); r.stunApplied = true;
               /* 原表：真1~真5 = 8/16/28/40/56（%）。trueVal 已经是百分数，不能再 ×100。 */
               const stripPct = trueVal(8, lv);
               if (stripPct > 0 && chance(stripPct)) {
@@ -2073,8 +2076,15 @@
       const saves = (B.mods && Array.isArray(B.mods.deathSaves)) ? B.mods.deathSaves : [];
       const bossLife = saves.findIndex((sv) => sv && sv.bossLife);
       B.hp = 0;
+      /* E17 是「直接赢」，不是一次普通伤害：敌方护盾也一并作废，否则 HUD 会留下
+       * 护盾条 / 血量分子里的盾值（用户 2026-11 截图）。若魔王还有 bossLife 会复活，
+       * 则只清敌方护盾、保留玩家护盾（战斗还要继续）；真的直接结束战斗时，
+       * 玩家剩余护盾也归零，胜利画面不留盾。 */
+      B.shell = 0;
+      B.shellCharges = 0;
       const rr = { attacker: 0, action: 'dot', dmg: dmg, noteText: '假如我直接赢', noteSide: 0 };
       if (bossLife >= 0) consumeDeathSave(B, saves.splice(bossLife, 1)[0], rr);
+      if (B.hp <= 0 && !godSave(B)) { A.shell = 0; A.shellCharges = 0; }
       pushRound(rr);
     }
 

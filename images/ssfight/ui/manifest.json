@@ -40,10 +40,11 @@
   "gearShoe": "1910",
   "homeland": "3957",
   "summons": "4381",
-  "campaign": "3437"
+  "campaign": "3437",
+  "repair": "5614"
  },
  "dictionarySize": 7876,
- "exportedTags": 7736,
+ "exportedTags": 8467,
  "bundles": [
   {
    "file": "tags.json",
@@ -88,6 +89,10 @@
   {
    "file": "tags-gear.json",
    "tags": 1473
+  },
+  {
+   "file": "tags-repair.json",
+   "tags": 731
   }
  ],
  "frameLabels": {

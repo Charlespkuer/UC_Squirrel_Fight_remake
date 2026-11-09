@@ -2,11 +2,12 @@
 /* ============================================================
  * tools/test-tower-buff-rules.cjs — 无尽塔增益数值 / 商店售卖规则回归
  *
- * 覆盖本轮三条可感知规则：
+ * 覆盖本轮四条可感知规则：
  *   ① 增幅水晶（C15）同名多张**加算**（1 + 0.3×张数），且与水晶铭文（C60）加算；
  *   ② 门庭若市（C59）的描述是「进入商店」，不是「进入试炼商店」；
  *   ③ 战利品账本（C25）同店卖旧买新时，新账本按 50 起价，不继承旧账本累计，
- *      卖掉新账本也不会清掉另一本的累计。
+ *      卖掉新账本也不会清掉另一本的累计；
+ *   ④ 替换弹窗的「取消」不会被二次 bind 覆写；卡面类型标签覆盖所有 buff kind（铭文不能是 undefined）。
  *
  * 用法：node tools/test-tower-buff-rules.cjs
  * ============================================================ */
@@ -189,6 +190,39 @@ test('限次列表把渴血之剑置顶，王者之剑使用传奇金色外观',
     'HB04 王者之剑要加 legendary 卡面类');
   assert.ok(/\.limit-tag\.legendary\s*\{[^}]*linear-gradient/.test(css),
     'legendary 限次卡要有金色渐变外观');
+});
+
+hr('4. 界面接线：替换弹窗的取消键 / 铭文卡面标签');
+test('替换弹窗二次 bind 之后「取消」仍可点，替换行也照常绑上', () => {
+  const cu = fs.readFileSync(path.join(ROOT, 'js', 'classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  const start = cu.indexOf('  function bind(root, actions) {');
+  const end = cu.indexOf('  function frameUrl(', start);
+  assert.ok(start > 0 && end > start, 'classic-ui 里应当能切出 bind()');
+  const ctx = { popTap: (el, fn) => fn(), console };
+  vm.createContext(ctx);
+  /* 复刻真实顺序：modal() 先给底部「取消」挂好 onclick，随后 tower-ui 再 bind 弹窗补列表行。 */
+  vm.runInContext(cu.slice(start, end) +
+    '\nvar fired = [];' +
+    '\nvar cancel = { dataset: { action: "0" }, classList: { contains: function () { return false; } }, onclick: function () { fired.push("cancel"); } };' +
+    '\nvar row = { dataset: { action: "rp0" }, classList: { contains: function () { return false; } }, onclick: null };' +
+    '\n$$ = function () { return [cancel, row]; };' +
+    '\nbind({}, { rp0: function () { fired.push("row"); } });' +
+    '\ncancel.onclick(); row.onclick();' +
+    '\nglobalThis.__out = fired.join(",");', ctx);
+  assert.equal(ctx.__out, 'cancel,row', '取消键与替换行都要能点：' + ctx.__out);
+});
+
+test('增益卡面的类型标签覆盖每种 kind（铭文不再显示 undefined）', () => {
+  const c = setup();
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  const scopeLine = /const SCOPE = \{[^}]*\};/.exec(ui);
+  assert.ok(scopeLine, 'tower-ui 里应当有 SCOPE 卡面类型表');
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(scopeLine[0] + '\nglobalThis.__SCOPE = SCOPE;', ctx);
+  for (const b of c.TowerData.BUFFS) {
+    assert.ok(ctx.__SCOPE[b.kind], b.id + '（kind=' + b.kind + '）的卡面类型标签缺失，界面上会画出 undefined');
+  }
 });
 
 console.log('\n塔增益规则回归：' + pass + ' 通过 / ' + fail + ' 失败');

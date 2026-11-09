@@ -174,8 +174,9 @@
     next.rankWins = Math.max(0, integer(raw.rankWins, 0));
     next.rankLosses = Math.max(0, integer(raw.rankLosses, 0));
     next.rankBots = normalizeRankBots(raw.rankBots);
-    /* 天梯商店购买次数：两本账都只收「数字 key → 非负整数」。
-     * `rankPurchases` 是按周的；`rankPurchaseTotals` 是账号累计（永久属性丸限购）。 */
+    /* 天梯商店购买次数：三本账都只收「数字 key → 非负整数」。
+     * `rankPurchases` 是按周的；`rankPurchaseTotals` 是账号累计（永久属性丸限购）；
+     * `rankMonthPurchases` 是两套狂战的月度账（每月 1 号 0 点重置，见 classic-extras）。 */
     next.rankPurchases = (() => {
       const src = object(raw.rankPurchases) ? raw.rankPurchases : {};
       const out = {};
@@ -194,7 +195,25 @@
       }
       return out;
     })();
-    next.name = typeof next.name === 'string' && next.name.trim() ? next.name : '小松鼠';
+    next.rankMonthPurchases = (() => {
+      const src = object(raw.rankMonthPurchases) ? raw.rankMonthPurchases : {};
+      const out = {};
+      for (const key of Object.keys(src)) {
+        const n = integer(src[key], 0);
+        if (/^\d+$/.test(key) && n > 0) out[key] = n;
+      }
+      return out;
+    })();
+    next.rankPurchaseMonth = typeof raw.rankPurchaseMonth === 'string' ? raw.rankPurchaseMonth : '';
+    /* 旧存档最多 12 个汉字，保留原样；新昵称在标题页/改名时已按 7 个字收口。
+     * 这里只防超大/损坏名字（导入或旧调试档），并去掉首尾空白。 */
+    {
+      const rawName = typeof next.name === 'string' ? next.name.trim() : '';
+      const rules = typeof window !== 'undefined' && window.NicknameRules;
+      next.name = rawName
+        ? (rules && typeof rules.truncate === 'function' ? (rules.truncate(rawName, 36) || '小松鼠') : rawName.slice(0, 20))
+        : '小松鼠';
+    }
     next.lastEnergyTs = Number(next.lastEnergyTs) > 0 ? Math.min(Date.now(), integer(next.lastEnergyTs, Date.now(), 1)) : Date.now();
     next.upgradeFails = (() => {
       const src = object(raw.upgradeFails) ? raw.upgradeFails : {};
@@ -239,9 +258,11 @@
       gearKeys.add(key);
       const used = g.used === true && info.useLevel <= next.level && !usedSlots.has(info.type);
       if (used) usedSlots.add(info.type);
-      /* attr：本件装备的主属性点（基准 ±5% 的 roll 结果）。老档没这个字段时按基准值补。 */
+      /* attr：本件装备的主属性点（基准 ±5% 的 roll 结果）。老档没这个字段时按基准值补。
+       * attrPct：这次 roll 的整数百分比；老档没有该字段时按 attr/基准反推后落库。 */
+      const attr = integer(g.attr, 0, 0) || info.attrBase;
       const entry = { id: info.id, key, used, ext: normalizeExt(g.ext),
-        attr: integer(g.attr, 0, 0) || info.attrBase };
+        attr: attr, attrPct: gearAttrPctOf(info.id, attr, g.attrPct) };
       if (g.orange === true) entry.orange = true;
       /* 星标：标记后不会被误融合 / 误出售（防止手滑把好装备合掉）。 */
       if (g.starred === true) entry.starred = true;
@@ -281,6 +302,34 @@
         if (picks.length >= 40) break;   // 防止坏档堆出几百组
       }
       next.wsPicks = picks;
+    }
+    /* 天使/恶魔果实：已经抽出的三选一必须原样保留（大退重进不重抽）；
+     * 只在武技状态变化导致候选失效时过滤，绝不因为读档重新摇号。 */
+    {
+      const rawFruit = object(next.fruitChoices) ? next.fruitChoices : {};
+      const owned = new Set([
+        ...(next.weapons || []).map((w) => 'w' + parseInt(w)),
+        ...(next.skills || []).map((s) => 's' + parseInt(s)),
+      ]);
+      const fruitChoices = {};
+      for (const id of [47, 48]) {
+        const p = rawFruit[id];
+        if (!object(p) || !Array.isArray(p.options)) continue;
+        const mode = p.mode === 'lose' ? 'lose' : 'gain';
+        const list = [];
+        for (const c of p.options) {
+          if (!object(c) || (c.kind !== 'weapon' && c.kind !== 'skill')) continue;
+          const num = Number(c.id);
+          const def = (c.kind === 'weapon' ? weaponsMap : skillsMap).getValue(num);
+          if (!def) continue;
+          const code = (c.kind === 'weapon' ? 'w' : 's') + num;
+          if (mode === 'gain' && owned.has(code)) continue;
+          if (mode === 'lose' && !owned.has(code)) continue;
+          list.push({ kind: c.kind, id: num, name: def.name, remark: def.remark || '', type: def.type || '' });
+        }
+        if (list.length) fruitChoices[id] = { mode, options: list, at: Number(p.at) || 0 };
+      }
+      next.fruitChoices = fruitChoices;
     }
     const savedRuns = object(next.stageRuns) ? next.stageRuns : {};
     next.stageRuns = {};
@@ -545,7 +594,9 @@
        * 打开后切后台不暂停音乐、安卓壳也不 pauseTimers，游戏继续跑。 */
       backgroundRun: st.backgroundRun === true,
       /* 兼容渲染：Android 16 / Adreno 的 Vulkan 合成器丢贴图层时，整页落软件图层。
-       * auto = 按机型和系统自动判断（默认）；on/off 供玩家手动逃生。 */
+       * auto = 只对现场确认过绿屏的**整机**（K90 Pro Max / MagicPad3 Pro）自动开（默认）；
+       * 同款 SoC 的其它机型保持硬件渲染 —— 软件层满分辨率实测约 30fps，会自动变成“战斗卡”。
+       * on/off 供其它机型手动逃生；没有绿屏证据的机器不要自动开。 */
       compatRender: ['auto', 'on', 'off'].includes(String(st.compatRender)) ? String(st.compatRender) : 'auto',
       uiMode: UIMODE_KEYS.includes(String(st.uiMode)) ? String(st.uiMode) : 'classic',
     };
@@ -2142,7 +2193,13 @@
     Object.assign(S, GData.initialStats());
     S.stageRuns = {};
     S.friends = [];
-    S.name = typeof name === 'string' && name.trim() ? name.trim().slice(0, 20) : '小松鼠';
+    /* 昵称上限 7 个汉字（英文/数字按 1/3 计）；标题页会先校验，这里再兜底截断，
+     * 防止调试/脚本路径把超长名字写进存档。没有 `NicknameRules` 的测试环境退回旧行为。 */
+    const rawName = typeof name === 'string' && name.trim() ? name.trim() : '小松鼠';
+    const rules = typeof window !== 'undefined' && window.NicknameRules;
+    S.name = rules && typeof rules.truncate === 'function'
+      ? (rules.truncate(rawName, rules.MAX_UNITS) || '小松鼠')
+      : rawName.slice(0, 20);
     S.newbieStartDate = localDate();   // 新号前三天每日礼包额外福利
     S.debugClockOffset = 0;            // 调试「快进24小时」按槽位独立
     S.lastEnergyTs = Date.now();
@@ -2441,7 +2498,7 @@
     if (!old) return g;
     const target = orangeGearLookup().get(String(old.name) + '|' + Number(old.type));
     if (!target) return g;
-    return Object.assign({}, g, { id: target, attr: gearBaseAttr(target), orange: undefined });
+    return Object.assign({}, g, { id: target, attr: gearBaseAttr(target), attrPct: 0, orange: undefined });
   }
   /** 装备主属性点的**基准值**：优先取原版 Flash 装备独立属性点表（gamedata.js 的
    *  【GD5】GData.GEAR_BASE_ATTR，288 条），退回 gearMap.abilities 里该部位那一位
@@ -2457,15 +2514,33 @@
    * 所以同名装备的数值不再完全一样。老档没有 attr 字段时按基准值算。
    * 用四舍五入而不是取整区间：基准 1/2/3 这种小数值不会因为 ±5% 就翻倍。
    * ⚠ 2026-10 用户口径：经典界面也重新启用这条随机（此前为了对齐原版 equipsArray 关掉了），
-   * 幅度从原来的 ±10% 收到 ±5% —— 两套界面现在是同一条规则。 */
-  const GEAR_ATTR_JITTER = 0.05;
-  function rollGearAttr(id) {
+   * 幅度从原来的 ±10% 收到 ±5% —— 两套界面现在是同一条规则。
+   *
+   * 2026-11 用户口径：随机加成同时落库为**整数百分比** `attrPct`（-5~+5）。界面写成
+   * `最终值(+/-百分比)`；融合产物按三件材料 `attrPct` 的平均值取相邻两个整数。 */
+  const GEAR_ATTR_PCT_MAX = 5;
+  function gearAttrPctClamp(pct) {
+    return Math.max(-GEAR_ATTR_PCT_MAX, Math.min(GEAR_ATTR_PCT_MAX,
+      Number.isFinite(Number(pct)) ? Math.round(Number(pct)) : 0));
+  }
+  /** 百分比 → 主属性点（基准 × (1 + pct/100)，四舍五入，至少 1）。 */
+  function gearAttrValueOf(id, pct) {
     const base = gearBaseAttr(id);
     if (!base) return 0;
-    const factor = 1 - GEAR_ATTR_JITTER + Math.random() * GEAR_ATTR_JITTER * 2;
-    return Math.max(1, Math.round(base * factor));
+    return Math.max(1, Math.round(base * (1 + gearAttrPctClamp(pct) / 100)));
   }
-  function gearInst(id, ext, attr) {
+  /** 实例的随机百分比：优先读落库的 `attrPct`；老档没有该字段时按 attr/基准反推。 */
+  function gearAttrPctOf(id, attr, pct) {
+    if (pct != null && Number.isFinite(Number(pct))) return gearAttrPctClamp(pct);
+    const base = gearBaseAttr(id);
+    const value = Number(attr);
+    if (!base || !Number.isFinite(value) || value <= 0) return 0;
+    return gearAttrPctClamp(Math.round((value / base - 1) * 100));
+  }
+  /** 新产出：先掷 -5~+5 的整数百分比，再折算成属性点。 */
+  function rollGearAttrPct() { return Math.floor(Math.random() * (GEAR_ATTR_PCT_MAX * 2 + 1)) - GEAR_ATTR_PCT_MAX; }
+  function rollGearAttr(id) { return gearAttrValueOf(id, rollGearAttrPct()); }
+  function gearInst(id, ext, attr, attrPct) {
     const g = gearMap.getValue(id);
     if (!g) return null;
     const set = gearSetMap.getValue(g.setId);
@@ -2479,7 +2554,8 @@
      * 新手 5 级教程送的白装必须能当场穿上）；高品质装备原有的 25/30/50/60 使用等级继续保留。 */
     const setLevel = parseInt(set ? set.level : 1);
     return {
-      id: parseInt(id), name: g.name, type, attrName, abilityVal, attrBase: base, quality,
+      id: parseInt(id), name: g.name, type, attrName, abilityVal, attrBase: base,
+      attrPct: gearAttrPctOf(id, abilityVal, attrPct), quality,
       useLevel: quality === 0 ? 5 : Math.max(5, Number.isFinite(setLevel) ? setLevel : 5),
       price: parseInt(set ? set.price : 10),
       setId: parseInt(g.setId), ext: normalizeExt(ext),
@@ -2487,7 +2563,7 @@
   }
   function myGears() {
     return S.gears.map((g) => {
-      const info = gearInst(g.id, g.ext, g.attr);
+      const info = gearInst(g.id, g.ext, g.attr, g.attrPct);
       if (!info) return null;
       const out = Object.assign(info, { used: g.used, key: g.key });
       if (g.orange === true) { out.orange = true; out.quality = 4; }   // 兼容旧档的实例级橙标记
@@ -2517,6 +2593,15 @@
   const gearSellPrice = (quality) => { const [lo, hi] = gearSellRange(quality); return lo + Math.floor(Math.random() * (hi - lo + 1)); };
   /** 品质需要按实例算：橙装是写在实例上的 quality=4。 */
   function gearQuality(gear) { return gear && gear.orange === true ? 4 : (gearInst(gear.id) || {}).quality || 0; }
+  /** 界面统一的装备主属性写法（2026-11 用户口径）：`84(+5%)` / `76(-3%)`。
+   *  a = 加成后的结算值，b = 本件随机的整数百分比；`opts.name` 时前面带属性名。 */
+  function gearAttrText(gear, opts) {
+    if (!gear) return '';
+    const value = Math.max(0, Math.round(Number(gear.abilityVal) || 0));
+    const pct = gearAttrPctOf(gear.id, value, gear.attrPct);
+    const body = value + '(' + (pct >= 0 ? '+' : '-') + Math.abs(pct) + '%)';
+    return (opts && opts.name) ? ((gear.attrName ? gear.attrName + ' ' : '') + body) : body;
+  }
   /** 星标只属于现代界面；经典界面**完全没有星标**（连旧档里的 starred 也一律忽略）。 */
   function starEnabled() { return slotMode() !== 'classic'; }
   /** 切换星标：标上之后不会被误融合 / 误出售。 */
@@ -2614,7 +2699,11 @@
     if (held < 1) return { ok: false, msg: '背包里没有这个道具' };
     const n = Math.max(1, Math.min(held, Math.round(Number(count) || 1)));
     S.props[id] = held - n;
-    if (S.props[id] <= 0) delete S.props[id];
+    if (S.props[id] <= 0) {
+      delete S.props[id];
+      /* 卖出最后一个果实时，作废它已经抽出的候选，避免留下无法使用的待选。 */
+      if ((id === 47 || id === 48) && S.fruitChoices) delete S.fruitChoices[id];
+    }
     const gold = price * n;
     addGold(gold);
     bumpDaily('sell', n, true);   // 每日任务：卖出 N 个道具
@@ -2790,6 +2879,7 @@
         id: id,
         ext: Array.isArray(g && g.ext) ? g.ext.slice(0, 3) : [],
         attr: g && g.attr ? g.attr : undefined,
+        attrPct: g && g.attrPct != null ? gearAttrPctClamp(g.attrPct) : undefined,
         type: g && g.type != null ? Number(g.type) : gearPart(id),
       };
       /* 橙装与宝石是**实例级**字段（同 id 的紫装不是橙装）；好友/师徒快照也要带过去，
@@ -2966,14 +3056,17 @@
     return applySetBonuses(foe, gears, level);
   }
 
-  /* ---------- 融合的两条核心规则（数值都提在这里，方便调） ----------
-   * ① 产物名称三选一（只有「2 件同名」「3 件同名」才进这一支）：
-   *    · **2 件同名**：50% 沿用原名 / **3% 变异狂战** / **47% 变成随机其它装备**；
-   *    · **3 件同名**：97% 沿用原名 / 3% 变异狂战（三件同名更容易保住名字）。
-   *    变异目标是狂战套（setId 51，紫档 id 201-204，按部位对应）；
-   *    目标品质没有狂战件时（绿/蓝档）不掷变异，那 3% 归到「随机其它」那一支。
-   *    2026-10 用户口径：变异率从初版 25%/10% 两轮下调到 **两件 3% / 三件 3%**，
-   *    并把两件同名「保不住名」的那部分明确成 47% 随机其它装备（以前是并回随机池）。 */
+  /* ---------- 融合的核心规则（2026-11 对齐联机版，数值都提在这里） ----------
+   * ① 产物部位：从三件材料里**随机取一件**的部位（不再固定首件，也不再按同套保底）。
+   * ② 产物目标：目标品质 = 材料品质 + 1（黑装封顶 5）；同部位、目标品质里
+   *    优先取「与来源材料同套」的装备；存在其它套时，2% 概率变异到变异池
+   *    （紫/蓝档狂战 51、紫→橙狂战 52、橙/黑档深海/机器猫/怒战/狂战 67~70），
+   *    否则留在同套；没有同套时才从其它套里随机。
+   * ③ 词条：按星级从高到低继承前两条，同星级按材料顺序；第三条从剩余材料词条随机。
+   *
+   * 下面 `FUSION_SAME_NAME_RATE` / `FUSION_MUTANT_RATE` / `pickMergeTarget` 等是
+   * 旧版「同名保名 / 3% 变异 / 同套保底」的规则，保留常量和函数给旧界面 / 旧档引用，
+   * 实际 `mergeGears` 已不再调用。 */
   const FUSION_SAME_NAME_RATE = { 2: 0.50, 3: 0.97 };
   const FUSION_MUTANT_RATE = { 2: 0.03, 3: 0.03 };
   const FUSION_MUTANT_SET = 51;
@@ -2981,13 +3074,9 @@
   const FUSION_ORANGE_MUTANT_SET = 52;
   /* 橙装融合出黑装时，原版 helpWords 里的「深海/机器猫/怒战/狂战」变异池。 */
   const FUSION_BLACK_MUTANT_SETS = Object.freeze([67, 68, 69, 70]);
-  /* ② 词条继承（2026-10 用户口径）：**跨部位、跨名字也生效**。
-   *    · 只要同一个词条在 ≥2 件材料里出现，产物**必定**继承它（优先占用词条槽）；
-   *    · 其余词条槽仍各自 50% 概率从三件材料的全部词条里抽一条；
-   *    · 同名词条在非必继承池里按出现次数加权，取材料里的最高星级；
-   *    · 继承后仍按 50% 概率升 1 星（上限 3 星）。
-   *    必继承条目可能多于目标品质的常规槽位（例如三件都带同一条紫装材料），
-   *    此时产物会保留全部必继承条目 —— 这是用户“一定继承”的硬要求，不能为了槽位数丢掉词条。 */
+  /* 联机版融合的变异概率（三件材料都有可用目标时）。 */
+  const FUSION_ONLINE_MUTANT_RATE = 0.02;
+  /* 旧版逐槽继承概率；联机版改成「前两条固定 + 第三条随机」，常量只为兼容旧界面导出。 */
   const FUSION_EXT_INHERIT_RATE = 0.5;
   const FUSION_EXT_UPGRADE_RATE = 0.5;
   const FUSION_EXT_MAX_LEVEL = 3;
@@ -2999,54 +3088,62 @@
     const slots = fusionSlots(quality);
     return slots ? randomExt(slots, quality >= 3 ? 3 : 2) : [];
   }
-  /** 融合产物的词条：
-   *  ① 先在材料里统计每个词条出现在几件装备上；出现 ≥2 件的条目无条件继承；
-   *  ② 剩余槽位再按 50% 概率从材料池继承，否则随机补一条；
-   *  ③ 材料词条池与部位 / 装备名无关，所以三件完全不同部位、不同名字也能互相继承；
-   *  ④ 产物词条不重复；同一 id 取材料里的最高星级，继承后仍按 50% 概率升 1 星。 */
+  /** 融合产物的词条（2026-11 对齐联机版）：
+   *  ① 把三件材料的词条按**星级从高到低**排列，同星级按材料顺序 / 材料内词条顺序；
+   *  ② 前两条固定继承；第三条从剩下的材料词条里随机抽；
+   *  ③ 同名词条按各自出现次数参与，不合并、不去重（两条同 id 可以同时出现）；
+   *  ④ 继承后每条仍有 50% 概率升 1 星（上限 3 星）；低品质只保留对应槽位。 */
   function mergeExt(gs, targetQuality) {
     const slots = fusionSlots(targetQuality);
     if (!slots) return [];
-    const level = new Map(), counts = new Map(), pool = [];
+    const upgrade = (entry) => ({
+      id: entry.id,
+      level: entry.level < FUSION_EXT_MAX_LEVEL && Math.random() < FUSION_EXT_UPGRADE_RATE
+        ? entry.level + 1 : entry.level,
+    });
+    /* 隐藏机制：只有**黑装产物**（3 橙→黑 / 3 黑→黑）在材料里恰好有 4 个
+     * 「≥2 件共有」的不同词条时，允许突破 3 槽、生成 4 词条；四条各取材料里的
+     * 最高星级。少于或不为 4 个共有词条时仍按常规槽位封顶，不对外写进帮助页。 */
+    const sharedCounts = new Map(), sharedLevels = new Map(), sharedIndex = new Map();
+    let cursor = 0;
     for (const g of gs) {
       const seen = new Set();
       for (const e of normalizeExt(g.ext)) {
         const id = Number(e.id);
-        level.set(id, Math.max(level.get(id) || 0, e.level));
-        if (seen.has(id)) continue;        // 同一件材料里重复的同 id 词条只算一份
+        if (!sharedIndex.has(id)) sharedIndex.set(id, cursor++);
+        sharedLevels.set(id, Math.max(sharedLevels.get(id) || 0, Number(e.level) || 1));
+        if (seen.has(id)) continue;
         seen.add(id);
-        counts.set(id, (counts.get(id) || 0) + 1);
-        pool.push(id);                     // 不同材料各带一次 → 池里出现多次
+        sharedCounts.set(id, (sharedCounts.get(id) || 0) + 1);
       }
     }
-    const inherit = (id) => {
-      let lv = level.get(id) || 1;
-      if (lv < FUSION_EXT_MAX_LEVEL && Math.random() < FUSION_EXT_UPGRADE_RATE) lv += 1;
-      return { id, level: lv };
-    };
-    const out = [], used = new Set();
-    /* 出现 ≥2 件的词条：必继承。排序只为让同样满足条件时结果稳定（次数多的优先）。 */
-    const must = [...counts.entries()].filter(([, n]) => n >= 2)
-      .sort((a, b) => b[1] - a[1] || (level.get(b[0]) || 0) - (level.get(a[0]) || 0))
-      .map(([id]) => id);
-    for (const id of must) {
-      if (used.has(id)) continue;
-      out.push(inherit(id));
-      used.add(id);
+    const shared = [...sharedCounts.entries()].filter(([, n]) => n >= 2)
+      .map(([id]) => ({ id, level: sharedLevels.get(id) || 1, index: sharedIndex.get(id) || 0 }))
+      .sort((a, b) => b.level - a.level || a.index - b.index);
+    if (targetQuality === 5 && shared.length === 4) return shared.map(upgrade);
+    const source = [];
+    for (const g of gs) {
+      for (const e of normalizeExt(g.ext)) {
+        source.push({ id: e.id, level: e.level, index: source.length });
+      }
     }
+    const ordered = source.slice().sort((a, b) => b.level - a.level || a.index - b.index);
+    const first = ordered.slice(0, Math.min(2, slots));
+    const out = first.map(upgrade);
+    const selected = new Set(first.map((e) => e.index));
+    const remaining = ordered.filter((e) => !selected.has(e.index));
+    const used = new Set(out.map((e) => Number(e.id)));
     while (out.length < slots) {
-      const candidates = pool.filter((id) => !used.has(id));
-      /* 每个剩余槽单独掷 50%；候选池空了就只能随机，不额外消耗一次继承判定。 */
-      if (candidates.length && Math.random() < FUSION_EXT_INHERIT_RATE) {
-        const id = candidates[Math.floor(Math.random() * candidates.length)];
-        out.push(inherit(id));
-        used.add(id);
-        continue;
+      if (remaining.length) {
+        const picked = remaining.splice(Math.floor(Math.random() * remaining.length), 1)[0];
+        out.push(upgrade(picked));
+        used.add(Number(picked.id));
+      } else {
+        const [extra] = randomExt(1, 1, used);
+        if (!extra) break;
+        out.push(upgrade(extra));
+        used.add(Number(extra.id));
       }
-      const [extra] = randomExt(1, targetQuality >= 3 ? 3 : 2, used);
-      if (!extra) break;
-      out.push(extra);
-      used.add(Number(extra.id));
     }
     return out;
   }
@@ -3127,21 +3224,11 @@
     if (!pool.length) return null;
     return { id: Math.min.apply(null, pool), mutant: false, family: families[0] };
   }
-  /** 融合页提示用：三件材料同套且下一品质存在该家族时返回目标信息，否则 null。
-   *  参数用 `State.myGears()` 的装备对象（id/quality/orange 足够）。
-   *  `allow(id)` 与 `mergeGears` 的 `opts.targetAllowed` 同一条口径（现代界面排除无贴图装备）。 */
-  function fusionFamilyInfo(gears, allow) {
-    if (!Array.isArray(gears) || gears.length !== 3) return null;
-    const first = gears[0];
-    if (!first || !Number.isFinite(Number(first.id))) return null;
-    const quality = gearQuality(first);
-    if (!(quality >= 0 && quality < 5)) return null;
-    if (gears.some((g) => gearQuality(g) !== quality)) return null;   // 只有同品质材料才提示保底
-    const part = gearPart(first.id);
-    if (part < 0) return null;
-    const target = familyUpgradeTarget(gears, part, quality + 1, allow);
-    if (!target) return null;
-    return { id: target.id, family: target.family, part: part, quality: quality + 1 };
+  /** 融合页提示：2026-11 对齐联机版后，产物部位/套装/词条都由随机决定，
+   *  不再存在「三件同套必得」的确定产物，因此这里恒返回 null（界面不写保底提示）。
+   *  保留函数是为了旧界面 / 旧回归仍能安全调用。 */
+  function fusionFamilyInfo() {
+    return null;
   }
 
   /** 黑装融合的目标：3 件黑装 → 同部位黑装。
@@ -3160,9 +3247,33 @@
     if (same.length && roll < 0.73) return { id: pick(same), mutant: false };
     return { id: pick(pool), mutant: false };
   }
+  /** 融合产物的主属性百分比（2026-11 用户口径）：
+   *  · 三件材料各自的整数百分比取平均；
+   *  · 非整数平均值取**最接近的两个整数**（即 floor / ceil）随机；
+   *  · 平均值恰好是整数 x 时取 **x 与 x+1** 随机；
+   *  · 结果封顶 +5%（下限对称 -5%）。
+   *  返回整数百分比，属性点由目标装备自己的基准值折算。 */
+  function fusionAttrPctOf(pcts) {
+    const list = (Array.isArray(pcts) ? pcts : []).map((p) => gearAttrPctClamp(p));
+    const avg = list.length ? list.reduce((a, b) => a + b, 0) / list.length : 0;
+    let lo = Math.floor(avg), hi = Math.ceil(avg);
+    if (Number.isInteger(avg)) hi = avg + 1;
+    const a = gearAttrPctClamp(lo), b = gearAttrPctClamp(hi);
+    const candidates = a === b ? [a] : [a, b];
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+  /** 融合产物的 { attr, pct }：材料百分比 → 产物百分比 → 目标装备基准值。 */
+  function fusionGearAttr(gs, targetId) {
+    const pct = fusionAttrPctOf((gs || []).map((g) => gearAttrPctOf(g && g.id, g && g.attr, g && g.attrPct)));
+    return { pct, attr: gearAttrValueOf(targetId, pct) };
+  }
   /** 两种界面统一：三件同品质装备融合，部位和名字均可不同。
-   *  产物部位沿用第一件材料；**三件同套且下一品质有该套时**必得该套（`familyUpgradeTarget`），
-   *  其余情况（跨套 / 早期套没有下一档）走原来的同名与变异随机。保留 opts 参数以兼容旧界面。
+   *  2026-11 对齐联机版：
+   *   · 产物部位从三件材料里**随机取一件**（不再固定首件，也没有同套保底）；
+   *   · 目标品质 = 材料品质 + 1（黑装封顶 5）；优先取「来源材料同套」的目标，
+   *     存在其它套时 2% 概率变异（紫/蓝档狂战、紫→橙狂战、橙/黑档黑装变异池）；
+   *   · 词条按 `mergeExt` 的「星级前两条 + 第三条随机」；
+   *   · 主属性百分比仍按三件材料平均继承（单机 2026-11 口径）。
    *  `opts.targetAllowed(id)`（可选）：产物候选过滤 —— 现代界面只允许「有贴图的装备」，
    *  避免合出一件列表里看不到的空白装备（用户 2026-10-28 口径）。 */
   function mergeGears(keys, opts) {
@@ -3176,61 +3287,43 @@
     if (gs.some((g) => isGearStarred(g))) {
       return { ok: false, msg: '有装备已加星标（防误合），先取消星标再融合' };
     }
-    const part = gearPart(gs[0].id), q = gearQuality(gs[0]);
-    if (part < 0) return { ok: false, msg: '装备数据异常' };
+    const q = gearQuality(gs[0]);
     if (gs.some((g) => gearQuality(g) !== q)) return { ok: false, msg: '需要三件同品质的装备' };
-    const partName = ['头巾', '手套', '衣服', '鞋子'][part] || '装备';
+    /* 现代界面没有黑装：橙装（q4）不能再往上合，黑装材料也会在上面被拦。 */
+    if (q >= 4 && !blackGearEnabled()) return { ok: false, msg: '现代界面没有黑装内容' };
+    const sourceGear = gs[Math.floor(Math.random() * gs.length)];
+    const part = gearPart(sourceGear.id);
+    if (part < 0) return { ok: false, msg: '装备数据异常' };
     const cost = gearCostOf(q);
     if (S.goldPoint < cost) return { ok: false, msg: '融合费用不足（需要 ' + cost + ' 金松果）' };
-    if (q >= 5) {
-      /* 3 件黑装 → 同部位黑装（洗 3 条附加），20% 额外返 1 张黑色卡片。
-       * 黑装只能从碎片/宝箱/自选箱获得，不能由橙装融合出来。 */
-      const target = pickBlackMergeTarget(gs, part, allow);
-      if (target == null) return { ok: false, msg: '这个部位还没有可融合的黑装' + partName + '。' };
-      S.goldPoint -= cost;
-      S.gears = S.gears.filter((g) => !keys.includes(g.key));
-      const made = addGear(target.id, mergeExt(gs, 5));
-      const card = Math.random() < 0.2 ? 1 : 0;
-      if (card) S.props[80] = (S.props[80] || 0) + card;
-      bumpDaily('merge', 1, true);   // 每日任务：合成或融合 N 次装备
-      save();
-      return { ok: true, gear: Object.assign(made || {}, { quality: 5, mutant: target.mutant }), card };
-    }
-    /* 3 件橙装 → 1 件黑装（原版 composeType=3：材料 quality 4、产物「黑色装备」）。
-     * 现代界面已删除黑装内容，橙装仍是现代融合链的顶端，直接拒绝。 */
-    if (q === 4) {
-      if (!blackGearEnabled()) return { ok: false, msg: '现代界面没有黑装内容' };
-      /* 三件同套 → 必定是同套黑装（下一品质）；没有该套黑装时退回原随机规则。 */
-      const target = familyUpgradeTarget(gs, part, 5, allow) || pickMergeTarget(gs, part, 5, allow);
-      if (target == null) return { ok: false, msg: '这个部位还没有可合成的黑色' + partName + '。' };
-      S.goldPoint -= cost;
-      S.gears = S.gears.filter((g) => !keys.includes(g.key));
-      const made = addGear(target.id, mergeExt(gs, 5));
-      bumpDaily('merge', 1, true);   // 每日任务：合成或融合 N 次装备
-      save();
-      return { ok: true, gear: Object.assign(made || {}, { quality: 5, mutant: target.mutant }), card: 0 };
-    }
-    if (q === 3) {
-      // 3 件紫装 → 第一件材料部位的一件**原版 q4 橙装**（205-208 / 125-180 等）
-      /* 三件同套 → 必定是同套橙装（下一品质）；没有该套橙装时退回原随机规则。 */
-      const target = familyUpgradeTarget(gs, part, 4, allow) || pickMergeTarget(gs, part, 4, allow);
-      if (target == null) return { ok: false, msg: '这个部位还没有可合成的传说' + partName + '。' };
-      S.goldPoint -= cost;
-      S.gears = S.gears.filter((g) => !keys.includes(g.key));
-      const made = addGear(target.id, mergeExt(gs, 4));
-      bumpDaily('merge', 1, true);   // 每日任务：合成或融合 N 次装备
-      save();
-      return { ok: true, gear: Object.assign(made || {}, { quality: 4, mutant: target.mutant }) };
-    }
-    /* 三件同套 → 必定是同套下一品质；没有该套下一档时退回原随机规则。 */
-    const target = familyUpgradeTarget(gs, part, q + 1, allow) || pickMergeTarget(gs, part, q + 1, allow);
-    if (target == null) return { ok: false, msg: '这个部位还没有更高品质的' + partName + '。' };
+
+    const targetQuality = Math.min(5, q + 1);
+    const pool = gearIdsOf(part, targetQuality, allow);
+    if (!pool.length) return { ok: false, msg: '该部位没有可融合的目标装备' };
+    /* 目标优先跟「部位来源材料」同套；有其它套时才有 2% 变异。
+     * 变异池：紫/蓝档 51（紫狂战）、紫→橙 52（橙狂战）、橙/黑档 67~70（深海/机器猫/怒战/狂战）。 */
+    const family = fusionSetFamily(gearSetOf(sourceGear.id));
+    const inherited = pool.filter((id) => fusionSetFamily(gearSetOf(id)) === family);
+    const mutationSets = targetQuality === 5 ? FUSION_BLACK_MUTANT_SETS
+      : targetQuality === 4 ? [FUSION_ORANGE_MUTANT_SET] : [FUSION_MUTANT_SET];
+    const alternatives = pool.filter((id) => fusionSetFamily(gearSetOf(id)) !== family);
+    const special = alternatives.filter((id) => mutationSets.includes(gearSetOf(id)));
+    const mutants = special.length ? special : alternatives;
+    const mutated = mutants.length > 0 && Math.random() < FUSION_ONLINE_MUTANT_RATE;
+    const available = mutated ? mutants
+      : (inherited.length ? inherited : pool.filter((id) => !mutants.includes(id)));
+    const candidates = available.length ? available : pool;
+    const id = candidates[Math.floor(Math.random() * candidates.length)];
+
     S.goldPoint -= cost;
     S.gears = S.gears.filter((g) => !keys.includes(g.key));
-    const g = addGear(target.id, mergeExt(gs, q + 1));
+    const fused = fusionGearAttr(gs, id);
+    const made = addGear(id, mergeExt(gs, targetQuality), fused.attr, fused.pct);
+    const card = q >= 5 && Math.random() < 0.2 ? 1 : 0;
+    if (card) S.props[80] = (S.props[80] || 0) + card;
     bumpDaily('merge', 1, true);   // 每日任务：合成或融合 N 次装备
     save();
-    return { ok: true, gear: Object.assign(g || {}, { mutant: target.mutant }) };
+    return { ok: true, gear: Object.assign(made || {}, { quality: targetQuality, mutant: mutated }), card };
   }
   function autoEnergyPotion(need) {
     const s = state();
@@ -3293,14 +3386,26 @@
   function extExtraTextForGear(gear) {
     return extExtraText(gear && gear.ext, gemAffixUnits(gear && gear.gem && gear.gem.id));
   }
-  function addGear(id, ext, attr) {
+  function addGear(id, ext, attr, attrPct) {
     if (!blackGearEnabled() && isBlackGearId(id)) return null;
-    const rolled = attr == null ? rollGearAttr(id) : (integer(attr, 0, 0) || rollGearAttr(id));
-    const info = gearInst(id, ext, rolled);
+    /* attr / attrPct 可以只给一个：给 attr（旧档、调试、融合产物）就反推百分比；
+     * 都没给才重新掷 -5~+5 的整数百分比。 */
+    let pct, rolled;
+    if (attr == null && attrPct == null) {
+      pct = rollGearAttrPct();
+      rolled = gearAttrValueOf(id, pct);
+    } else if (attr == null) {
+      pct = gearAttrPctClamp(attrPct);
+      rolled = gearAttrValueOf(id, pct);
+    } else {
+      rolled = integer(attr, 0, 0) || gearAttrValueOf(id, attrPct);
+      pct = gearAttrPctOf(id, rolled, attrPct);
+    }
+    const info = gearInst(id, ext, rolled, pct);
     if (!info) return null;
     let key;
     do { key = 'g' + Date.now() + '_' + (gearKeySeq++); } while (S.gears.some((g) => g.key === key));
-    S.gears.push({ id: info.id, used: false, key, ext: info.ext, attr: rolled });
+    S.gears.push({ id: info.id, used: false, key, ext: info.ext, attr: rolled, attrPct: pct });
     save();
     return Object.assign(info, { key, used: false });
   }
@@ -3838,11 +3943,18 @@
       case 38: { const g = 20 + Math.floor(Math.random() * 80); addGold(g); msg = `打开红包，获得${g}金松果！`; break; }
       case 47:   // 天使果实：随机三选一（学会一个）
       case 48: { // 恶魔果实：随机三选一（遗忘一个）
-        // 这里只回传候选，由界面弹窗选完再走 applyFruitChoice，所以提前返回、不消耗果实
+        /* 已经抽出的候选必须原样复用：界面没有取消键，但大退 / 重开背包也不能重抽。 */
+        const pending = S.fruitChoices && S.fruitChoices[id];
+        if (pending && Array.isArray(pending.options) && pending.options.length) {
+          return { ok: false, needsFruitChoice: true, fruit: id, mode: pending.mode, options: pending.options, msg: '请从三个里选一个' };
+        }
         const fruit = fruitOptions(id);
         if (!fruit) {
           return { ok: false, msg: id === 47 ? '获得失败：可能已达上限或运气不佳' : '没有可以遗忘的武器或技能' };
         }
+        if (!object(S.fruitChoices)) S.fruitChoices = {};
+        S.fruitChoices[id] = { mode: fruit.mode, options: fruit.options, at: Date.now() };
+        save();
         return { ok: false, needsFruitChoice: true, fruit: id, mode: fruit.mode, options: fruit.options, msg: '请从三个里选一个' };
       }
       case 28: case 29: case 30: case 31: case 32: case 49: { // 礼包
@@ -3968,11 +4080,17 @@
     id = Number(id); targetId = Number(targetId);
     kind = kind === 'weapon' ? 'weapon' : 'skill';
     if (!(S.props[id] > 0)) return { ok: false, msg: '没有这个果实' };
+    const pending = S.fruitChoices && S.fruitChoices[id];
+    if (pending && Array.isArray(pending.options)
+      && !pending.options.some((c) => c && c.kind === kind && Number(c.id) === targetId)) {
+      return { ok: false, msg: '请选择这次抽出的候选' };
+    }
     const label = kind === 'weapon' ? '武器' : '技能';
     if (id === 47) {
       const info = grantWS((kind === 'weapon' ? 'w' : 's') + targetId);
       if (!info) return { ok: false, msg: '这个' + label + '暂时学不了' };
       S.props[id]--; if (S.props[id] <= 0) delete S.props[id];
+      if (S.fruitChoices) delete S.fruitChoices[id];
       bumpDaily('use', 1, true);
       save();
       return { ok: true, msg: '获得了 ' + info.name + '！' };
@@ -3987,6 +4105,7 @@
       arr.splice(idx, 1);
       if (typeof debugForgetWS === 'function') debugForgetWS(kind, targetId);
       S.props[id]--; if (S.props[id] <= 0) delete S.props[id];
+      if (S.fruitChoices) delete S.fruitChoices[id];
       bumpDaily('use', 1, true);
       save();
       return { ok: true, msg: '遗忘了 ' + ((info && info.name) || label) };
@@ -3995,6 +4114,20 @@
   }
   /** 还没选的「三选一」：升级发下来就必须选掉（和自由属性点一样，只是会排队）。 */
   function pendingWS() { return S && Array.isArray(S.wsPicks) ? S.wsPicks.length : 0; }
+  /** 已经抽出、还没选的天使/恶魔果实候选（重开背包 / 大退后仍用同一组）。 */
+  function pendingFruitChoices() {
+    if (!S) return [];
+    const map = {};
+    if (object(S.fruitChoices)) Object.assign(map, S.fruitChoices);
+    if (object(S.__onlineFruitChoices)) Object.assign(map, S.__onlineFruitChoices);
+    const out = [];
+    for (const id of [47, 48]) {
+      const p = map[id];
+      if (!object(p) || !Array.isArray(p.options) || !p.options.length) continue;
+      out.push({ fruit: id, mode: p.mode === 'lose' ? 'lose' : 'gain', options: p.options });
+    }
+    return out;
+  }
   /* ============================================================
    * 「自愿支持作者」的一次性提示（30 级）
    *
@@ -4346,7 +4479,7 @@
    *  经典合成的页面/动画在 `js/ssfight/ui-compose.js`，这里只留数值规则。 */
   function composeSeed(seedId) {
     seedId = Number(seedId);
-    const fruit = seedId === 45 ? 47 : seedId === 46 ? 48 : 0;
+    const fruit = (seedId === 45 || seedId === 108) ? 47 : (seedId === 46 || seedId === 109) ? 48 : 0;
     if (!fruit) return { ok: false, msg: '这个种子不能合成' };
     if ((S.props[seedId] || 0) < 10) return { ok: false, msg: '需要 10 个' + (propMap.getValue(seedId) || {}).name };
     if (S.goldPoint < 50) return { ok: false, msg: '合成需要 50 金松果' };
@@ -4724,16 +4857,34 @@
     '瓜子杀手', '老松鼠', '鼠门弄斧', '松间明月', '大尾巴狼', '树梢舞者', '松针小王子', '橡果终结者'];
 
   const AI_TITLE = ['', '', '', '', '的师傅', '的师兄', '的宿敌', '二世'];
+  /** 人机昵称上限：**7 个汉字**（用户 2026-11 口径）。
+   *  超过这个长度的组合名进了战斗，血条上的 `name2`（84.45 单位宽）只能显示 7 个字，
+   *  后面的字会被字段框裁掉 —— 所以不再生成 8~9 个字的「前缀+核心+称号」。 */
+  const AI_NAME_MAX = 7;
 
-  /** 随机生成一个对手名字：固定昵称池或「前缀+核心词」，少数带称号。 */
+  /** 按汉字个数截断（只有兜底用；正常组合在生成时就保证放得下）。 */
+  function clipAIName(name) {
+    const chars = [...String(name == null ? '' : name)];
+    return chars.length > AI_NAME_MAX ? chars.slice(0, AI_NAME_MAX).join('') : chars.join('');
+  }
+  /** 把称号/后缀追加到名字后面，但只在总长仍 ≤7 个汉字时追加；
+   *  不再先拼再 `slice`（那样会切出「尾巴达人的师」这种半截称号）。 */
+  function fitAIName(name, suffix) {
+    const base = String(name == null ? '' : name);
+    const extra = String(suffix == null ? '' : suffix);
+    if (!extra) return base;
+    return [...base + extra].length <= AI_NAME_MAX ? base + extra : base;
+  }
+
+  /** 随机生成一个对手名字：固定昵称池或「前缀+核心词」，少数带称号。
+   *  两条路都保证不超过 7 个汉字（称号只在放得下时追加）。 */
   function randomAIName(rng) {
     const r = typeof rng === 'function' ? rng : Math.random;
     // 固定昵称（已经朗朗上口，不加称号）
-    if (r() < 0.3) return AI_NICK[Math.floor(r() * AI_NICK.length)];
+    if (r() < 0.3) return clipAIName(AI_NICK[Math.floor(r() * AI_NICK.length)]);
     const name = AI_PREFIX[Math.floor(r() * AI_PREFIX.length)] + AI_CORE[Math.floor(r() * AI_CORE.length)];
-    // 称号只加在组合名上，且不超过 12 字
     const title = AI_TITLE[Math.floor(r() * AI_TITLE.length)];
-    return (name + title).slice(0, 12);
+    return fitAIName(name, title);
   }
 
   /* ---------- 随机对手的总属性上下限（2026-10 用户口径） ----------
@@ -4840,7 +4991,7 @@
     for (const row of (GData.GEAR_BASE || [])) {
       const baseAttr = Number(row && row[5]) || 0;
       if (!(baseAttr > 0)) continue;
-      const info = gearInst(row[0], [], Math.ceil(baseAttr * (1 + GEAR_ATTR_JITTER)));   // 主属性 +5% 上限
+      const info = gearInst(row[0], [], gearAttrValueOf(row[0], GEAR_ATTR_PCT_MAX));   // 主属性 +5% 上限
       if (!info || Number(info.useLevel) > lv) continue;
       const type = Number(info.type);
       if (!(type >= 0 && type < 4)) continue;
@@ -4941,7 +5092,9 @@
     // 满级 90：挑战/天梯/竞技场都在玩家等级上下浮动，玩家接近满级时浮上去就会冒出 91 级以上的对手，
     // 所以在出口处统一夹一次（所有对手生成都走这里）。
     const finalLevel = Math.min(MAX_PLAYER_LEVEL, Math.max(integer(opts.minLevel, 1, 1), rolled));
-    const name = (opts.name ? String(opts.name) : randomAIName()) + (nameSuffix || '');
+    /* 人机名字统一在出口收口到 7 个汉字；显式 `opts.name`（剧情/特殊 NPC）原样保留，
+     * 只有随机人机才追加 `nameSuffix`（同样只加在放得下时）。 */
+    const name = opts.name ? String(opts.name) : fitAIName(randomAIName(), nameSuffix);
     // 离线对手遵循相同的基础成长预算，避免用旧高成长公式压过新建玩家。
     const base = GData.initialStats();
     for (let lv = 2; lv <= finalLevel; lv++) {
@@ -5234,7 +5387,8 @@
       // 原版白绿无词条，蓝装1条且最多2星，紫装2条且最多3星。
       const extSlots = fusionSlots(info.quality);
       const ext = extSlots ? randomExt(extSlots, info.quality >= 3 ? 3 : 2) : [];
-      const piece = { id: gid, used: true, ext, attr: rollGearAttr(gid) };   // 主属性同样 ±5% 浮动
+      const attrPct = rollGearAttrPct();                                    // 主属性同样 ±5% 浮动
+      const piece = { id: gid, used: true, ext, attr: gearAttrValueOf(gid, attrPct), attrPct };
       /* 橙装 / 宝石：只对**紫装档（quality 3）**掷；橙装是**实例级** quality=4（不是换高 id）。
        * 60 级黑装（quality 5）本来就是更高的一档，不再叠实例橙（叠了会被 `gearQuality`
        * 记成 4，黑装反而在品质口径里降档 —— 注释口径一直是紫装）。 */
@@ -5665,7 +5819,9 @@
     { id: 23, range: [1, 2], weight: 1.0 },   // 挑战书
     { id: 1, range: [1, 2], weight: 1.0 },    // 小体力药剂
     { id: 7, range: [1, 1], weight: 0.7, pill: true },    // 经验丸
-    { id: 45, range: [1, 1], weight: 0.4 },   // 天使果实种子
+    { id: 45, range: [1, 1], weight: 0.2 },   // 天使果实种子（0.5×）
+    { id: 108, range: [1, 1], weight: 0.06 }, // 天使果实碎片（每日任务小概率）
+    { id: 109, range: [1, 1], weight: 0.06 }, // 恶魔果实碎片（每日任务小概率）
     { id: 2, range: [1, 1], weight: 0.3 },    // 大体力药剂（高级）
     { id: 44, range: [1, 1], weight: 0.06, pill: true },  // 超级经验丸（高级药丸，概率大幅下调）
   ];
@@ -6438,16 +6594,17 @@
     weaponInst, skillInst, myWeapons, mySkills, wsLimit, ownedWSCount,
     upgradeInfo, doUpgrade, upgradeFails, UPGRADE_COIN, UPGRADE_FAIL_BONUS,
     isTrueLevel, TRUE_SKILL_MAX_LEVEL,
-    fruitOptions, applyFruitChoice,
+    fruitOptions, applyFruitChoice, pendingFruitChoices,
     trackEarn, earnOn, ensureYesterdayEarnings, addGold,
     apprenticeTributeTable,
     TRIBUTE_LEVEL_SUM_FULL,
     undoPoint, undoDepth, hasUpgradableWS,
-    gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, composeGear, mergeGears, addGear, grantStarterGear, extText, extTextForGear, extExtraText, extExtraTextForGear, randomExt,
+    gearInst, myGears, wear, unwear, sellGear, gearSellPrice, gearSellRange, gearQuality, gearAttrText, composeGear, mergeGears, addGear, grantStarterGear, extText, extTextForGear, extExtraText, extExtraTextForGear, randomExt,
     blackGearEnabled, isBlackGearId, BLACK_PROP_IDS,
-    gearBaseAttr, rollGearAttr, gearCostOf, GEAR_ATTR_JITTER,
+    gearBaseAttr, gearAttrPctOf, gearAttrPctClamp, gearAttrValueOf, fusionAttrPctOf, rollGearAttr, rollGearAttrPct, gearCostOf,
+    GEAR_ATTR_PCT_MAX, GEAR_ATTR_JITTER: GEAR_ATTR_PCT_MAX / 100,
     FUSION_SAME_NAME_RATE, FUSION_MUTANT_RATE, FUSION_MUTANT_SET, FUSION_ORANGE_MUTANT_SET, FUSION_EXT_UPGRADE_RATE,
-    FUSION_EXT_INHERIT_RATE, FUSION_EXT_SLOTS,
+    FUSION_ONLINE_MUTANT_RATE, FUSION_EXT_INHERIT_RATE, FUSION_EXT_SLOTS,
     toggleGearStar, isGearStarred, gearsInDisplayOrder,
     gemLevel, gemPercent, gemMergeRate, rollGemDrop, mergeGems, socketGem, unsocketGem, canSocketGem, gemAffixUnits, attachmentValue, GEM_AFFIX_UNITS,
     totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, openChestProp, gainRandomWS, wsChoices, wsInfo,
@@ -6480,7 +6637,8 @@
     apprenticeLevelSum, apprenticeTributeRatio, claimApprenticeExp, canKickToday, kickPrentice,
     beginRecruitChallenge, finishRecruitChallenge, cancelRecruitChallenge,
     MASTER_SKILL_ID, MASTER_SKILL_NAME,
-    genAI, RANDOM_FOE_SCALE, stageProgress, setStageProgress, npcOf, highestStageId, stageRun, stageAccess, stageReward,
+    genAI, randomAIName, fitAIName, clipAIName, AI_NAME_MAX,
+    RANDOM_FOE_SCALE, stageProgress, setStageProgress, npcOf, highestStageId, stageRun, stageAccess, stageReward,
     beginStageBattle, finishStageBattle, interruptStageBattle, abandonStageRun, stagePrentice, stagePrenticeFighter, stagePrenticeLost,
     localDate, dailyStatus, dailyGiftExtra, challengeDailyCount, noteChallengeClear, refreshDaily: syncDailyStats, claimDaily, recordBattle, battleHistory, recordWoodBattle,
     /* 「消息」红点的记账（落存档，见 normalizeSave 里 msgSeenAt 那段注释）。 */

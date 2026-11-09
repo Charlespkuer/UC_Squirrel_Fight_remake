@@ -132,7 +132,11 @@
   let muted = localStorage.getItem('ssdz_music_muted') === '1';
   let activeBattle = null;
 
-  function fitCanvas() {
+  /* 上一次真正落地的缩放参数：新平台（Android 16 / 折叠屏 / 分屏）会连续补发多拍
+   * resize / configuration change，`fitCanvas` 每次都重写 #ui 的 transform、字号并重画
+   * 数字，肉眼就是「界面缩放不停切换」。同样的结果只落一次，重复调用直接返回。 */
+  let fitSignature = '';
+  function fitCanvas(force) {
     // 页面高度由展示层决定：复刻的菜单页是 920:560 → 712.174，战斗/首页 canvas 是 690。
     // 经典模式的村庄页是原版 320×196 整页 → 716.625（见 UI.layoutHeight）。
     const layoutHeight = (window.UI && UI.layoutHeight) ? UI.layoutHeight(W, H)
@@ -145,6 +149,9 @@
     const vw = Math.max(1, de.clientWidth || window.innerWidth || W);
     const vh = Math.max(1, de.clientHeight || window.innerHeight || layoutHeight);
     const st = settingsSnapshot();
+    /* 容器高度和 layoutHeight 用同一个数：经典整页是 716.625，复刻 DOM 二级页按 690 高。 */
+    const tightHome = !!(window.SfUiMain && document.querySelector('.ssfight-home:not([data-sf-battle-hold])'));
+    const uiHeight = tightHome ? layoutHeight : H;
     let sx, sy;
     if (st.fullscreen) {
       // 全面屏：两轴各自铺满窗口，不留黑边（窗口比例和 1170:690 差得多时会有轻微拉伸）
@@ -155,16 +162,15 @@
       const target = (window.State && State.resolutionHeight) ? State.resolutionHeight(st.resolution) : 0;
       sx = sy = target ? Math.min(fit, target / layoutHeight) : fit;
     }
+    const signature = [vw, vh, layoutHeight, uiHeight, sx.toFixed(6), sy.toFixed(6),
+      st.fullscreen === true, st.resolution || 'auto'].join('|');
+    if (!force && signature === fitSignature) return;
+    fitSignature = signature;
     canvas.style.width = W * sx + 'px';
     canvas.style.height = H * sy + 'px';
     const ui = $('#ui');
     ui.style.width = W + 'px';
-    /* 容器高度必须和 layoutHeight 用**同一个数**：整屏缩放是按 layoutHeight 算的，
-     * 而 #ui 原来恒为 690。经典村庄页是原版 320×196 整页（716.625），装进 690 的盒子后
-     * SVG 只能按高度铺满 → 左右各白给 21px 黑边，外面又因为缩放比不一致再白给上下两条。
-     * 两处都是纯浪费，这里让盒子跟着走（只影响 ssflight 村庄页，其它屏照旧 690）。 */
-    const tightHome = !!(window.SfUiMain && document.querySelector('.ssfight-home:not([data-sf-battle-hold])'));
-    ui.style.height = (tightHome ? layoutHeight : H) + 'px';
+    ui.style.height = uiHeight + 'px';
     ui.style.transform = 'scale(' + sx + ',' + sy + ')';
     ui.style.setProperty('--uiscale', Math.min(sx, sy));
     ui.style.fontSize = (16 * Math.min(sx, sy)) + 'px';
@@ -173,7 +179,7 @@
     // 标题页是静态的（不再跑 rAF 循环）：窗口尺寸变化时补画一次背景。
     if (mode === 'title') { try { drawHomeBg(ctx, homeBgBlur()); } catch (e) {} }
   }
-  window.addEventListener('resize', fitCanvas);
+  window.addEventListener('resize', () => fitCanvas());
 
   /** 存档里的本机偏好（音量/静音/分辨率/全面屏）；存档还没载入时用 localStorage 兜底。 */
   function settingsSnapshot() {
@@ -433,8 +439,7 @@
    *  只调 fitCanvas() 只能挪 canvas 与 #ui，引导层 / 战斗覆盖层 / 调试面板都是各自
    *  监听 window resize 的，必须再派发一次合成 resize。 */
   let relayoutFrame = 0;
-  function relayoutNow() {
-    try { fitCanvas(); } catch (e) {}
+  function fireWindowResize() {
     try {
       window.dispatchEvent(new Event('resize'));
     } catch (e) {
@@ -444,12 +449,22 @@
         window.dispatchEvent(ev);
       } catch (e2) {}
     }
-    /* 回前台第一帧可能还在恢复图层：下一帧再量一次（幂等）。 */
+  }
+  function relayoutNow() {
+    /* 原生 onResume / onConfigurationChanged / 系统栏动画会在一两帧内连发多次；
+     * 以前每次都同步 fitCanvas + dispatch resize，还会再排一拍 fitCanvas，页面因此
+     * 反复按两个尺寸重排。合并到下一帧只做一次，重复调用直接吞掉。 */
+    if (relayoutFrame) return;
     try {
-      if (!relayoutFrame) {
-        relayoutFrame = requestAnimationFrame(() => { relayoutFrame = 0; try { fitCanvas(); } catch (e) {} });
-      }
-    } catch (e) {}
+      relayoutFrame = requestAnimationFrame(() => {
+        relayoutFrame = 0;
+        try { fitCanvas(); } catch (e) {}
+        fireWindowResize();
+      });
+    } catch (e) {
+      try { fitCanvas(); } catch (e2) {}
+      fireWindowResize();
+    }
   }
   /** iOS 切后台回来：WKWebView 会释放 canvas 的绘制缓冲，也可能丢掉 SVG 内嵌位图 /
    *  CSS 背景的解码结果；页面本身不会重建，于是看起来就是「背景消失」。
@@ -1093,7 +1108,7 @@
         <div class="title-logo">松鼠大战</div>
         <div class="title-sub">UC乐园 · 熟悉的松鼠回来了</div>
         <img class="classic-portrait" src="images/ui/characters/squirrel-classic.png" alt="经典松鼠">
-        <div class="title-form"><input id="name-input" maxlength="12" aria-label="松鼠昵称" placeholder="给你的松鼠起个名字" value="小松鼠">
+        <div class="title-form"><input id="name-input" maxlength="21" aria-label="松鼠昵称" placeholder="给你的松鼠起个名字" value="小松鼠">
         <button id="start-btn" class="uc-button gold">开始游戏</button></div>
         <div class="title-tip">怀旧单机版 · 进度自动保存</div>
       </div>`;
@@ -1101,8 +1116,11 @@
      * 纯空转。现在只画一次；窗口 resize 由 fitCanvas 末尾补画。 */
     drawHomeBg(ctx, homeBgBlur());
     $('#start-btn').onclick = () => {
-      const name = $('#name-input').value.trim() || '小松鼠';
-      State.newGame(name);
+      const raw = String($('#name-input').value || '').trim() || '小松鼠';
+      const rules = window.NicknameRules;
+      const check = rules ? rules.check(raw) : { ok: true, name: raw };
+      if (!check.ok) { if (window.UI && UI.toast) UI.toast(check.reason); return; }
+      State.newGame(check.name);
       /* 新号默认经典界面：把新档里的 uiMode 立刻落到 <html>/localStorage，
        * 否则标题画面用的是上一次的兜底值，首屏会先闪现代界面。 */
       try { if (window.UI && UI.applyUiMode) UI.applyUiMode(State.settings().uiMode); } catch (e) {}

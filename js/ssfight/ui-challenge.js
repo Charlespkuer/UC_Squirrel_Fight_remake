@@ -1,4 +1,4 @@
-﻿/* ============================================================================
+/* ============================================================================
  * js/ssfight/ui-challenge.js —— 原版**挑战页（tiaozhan 帧）界面代码**的等价 JS【SFR5】
  *
  * 逐句对着原版翻（行号写在每段注释里），显示层用 `js/ssfight/render.js`，
@@ -758,7 +758,12 @@
   /** 把一页的行文字写进去（并做落点校正）。 */
   function setRowTexts(row, item) {
     if (!row || !row.byName) return;
-    setText(row.byName('friendname'), item ? item.name : '');
+    const nameClip = row.byName('friendname');
+    setText(nameClip, item ? item.name : '');
+    /* 7 个汉字（84 单位）本来放得下 88.2 的框；但昵称规则允许 21 个英文字母
+     * （按 1/3 汉字计 = 7 个字），SimHei 下约 126 单位。只在放不下时缩字号，
+     * 不裁字、也不横向压扁（用户 2026-10 的口径仍然保留）。 */
+    if (item && window.SfRender && SfRender.fitTextWidth) SfRender.fitTextWidth(nameClip, { ascii: 0.5, min: 7 });
     setText(row.byName('flevel'), item ? item.level : '');
     alignRowText(row);
   }
@@ -2254,8 +2259,11 @@
       if (SfFightResult.isOpen()) return;
       const phase = run.phase, foe = phase === 'final' ? run.finalist : phase === 'third' ? run.consolation : run.foe;
       const title = phase === 'final' ? '决赛' : phase === 'third' ? '季军赛' : '半决赛';
+      /* 用户 2026-11 口径（与联机版同步）：这一页只留「谁打谁 + 开始/返回」。
+       * 以前正文那两行（"本轮进度已保留。开始下一场比赛不再扣除体力。"）在这张对局页
+       * 上既没给出本场收益，又在赛前就说第二场不扣体力 —— 直接去掉，收益交给每场
+       * 战斗后的原版战果页（局内 7772 那张：经验 + 悬浮物品三格）。 */
       SfFightResult.open({ kind: 'arena', title, neutral: phase === 'semi', win: phase === 'semi' ? null : phase !== 'third', player: S(), foe,
-        text: '本轮进度已保留。开始下一场比赛不再扣除体力。',
         actions: [{ label: '开始' + title, run: () => { destroy(); ClassicExtras.fightArena(run); } },
           { label: '返回', run: () => arenaGo('home') }],
       }).catch(error => { if (window.UI && UI.toast) UI.toast(error.message); });

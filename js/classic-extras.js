@@ -354,7 +354,7 @@
       }
       return C().modal(title, html, actions, options);
     };
-    showConfirm('\u7ade\u6280\u573a\u62a5\u540d', '<p>' + (kind === 0 ? '\u7ecf\u9a8c\u7ade\u6280\u573a' : kind === 1 ? '\u788e\u7247\u7ade\u6280\u573a' : '\u5e7b\u517d\u7ade\u6280\u573a') + '\uff1a\u534a\u51b3\u8d5b\u80dc\u8005\u8fdb\u5165\u51b3\u8d5b\uff0c\u8d25\u8005\u8fdb\u884c\u5b63\u519b\u8d5b\u3002</p><p>\u62a5\u540d\u4e00\u6b21\u6d88\u801730\u4f53\u529b\uff0c\u7b2c\u4e8c\u6218\u4e0d\u518d\u6263\u9664\u3002\u4f53\u529b\u4e0d\u8db3\u65f6\u4f7f\u75281\u5f20\u82f1\u96c4\u5e16/\u52c7\u6c14\u5fbd\u7ae0/\u53ec\u5524\u8bc1\u3002</p>' + note('\u79bb\u7ebf\u5bf9\u624b\u7531\u672c\u5730\u751f\u6210\u3002\u836f\u4e38\u52a0\u6210\u5728\u7ade\u6280\u573a\u540c\u6837\u751f\u6548\u3002'), [{ label: '\u62a5\u540d\u53c2\u8d5b', run: () => {
+    showConfirm('\u7ade\u6280\u573a\u62a5\u540d', '<p>' + (kind === 0 ? '\u7ecf\u9a8c\u7ade\u6280\u573a' : kind === 1 ? '\u788e\u7247\u7ade\u6280\u573a' : '\u5e7b\u517d\u7ade\u6280\u573a') + '\uff1a\u534a\u51b3\u8d5b\u80dc\u8005\u8fdb\u5165\u51b3\u8d5b\uff0c\u8d25\u8005\u8fdb\u884c\u5b63\u519b\u8d5b\u3002</p><p>\u62a5\u540d\u4e00\u6b21\u6d88\u801730\u4f53\u529b\uff0c\u7b2c\u4e8c\u6218\u4e0d\u518d\u6263\u9664\u3002\u4f53\u529b\u4e0d\u8db3\u65f6\u4f7f\u75281\u5f20\u82f1\u96c4\u5e16/\u52c7\u6c14\u5fbd\u7ae0/\u53ec\u5524\u8bc1\u3002</p>' + note('\u79bb\u7ebf\u5bf9\u624b\u7531\u672c\u5730\u751f\u6210\u3002\u5c5e\u6027\u4e38\u5728\u7ade\u6280\u573a\u65e0\u6548\uff0c\u4e5f\u4e0d\u6263\u6b21\u6570\u3002'), [{ label: '\u62a5\u540d\u53c2\u8d5b', run: () => {
       if (State.state() !== owner || activeArenaRun() || !arenaAccess(kind)) return;
       const s = owner;
       State.tickEnergy();
@@ -437,10 +437,13 @@
          *   2026-10 \u771f\u5b9e\u8e29\u8fc7\uff1a`arenaMatchHtml` \u5bf9\u5355\u4e2a `consolation` \u8c03 `.map`\uff09\u3002
          *   \u5f39\u7a97\u662f\u552f\u4e00\u80fd\u544a\u8bc9\u73a9\u5bb6"\u4e0b\u4e00\u6b65\u600e\u4e48\u529e"\u7684\u4e1c\u897f\uff0c\u4e0d\u80fd\u8ddf\u7740\u4e00\u8d77\u6ca1\u3002 */
         try {
+          /* 用户 2026-11 口径（与联机版同步）：这张对局弹窗只写「谁打谁 + 开始/返回」，
+           * 不再写「第二场不扣体力 / 本轮进度保留」这类进度说明。
+           * 宝石仍照原样单独写一行（它是这一场真的拿到的东西）。 */
           if (originalResult({ kind: 'arena', title, win: won, player: State.state(), foe: opponent,
-            text: (gem ? '获得 ' + gem.name + ' ×1。\n' : '') + '第二战无需再消耗体力，本轮进度已保留。',
+            text: gem ? '获得 ' + gem.name + ' ×1。' : '',
             actions: [{ label: won ? '开始决赛' : '开始季军赛', run: () => fightArena(run) }, { label: '稍后继续', run: arena }] })) return;
-          C().modal(title, '<div class="extra-finalist">' + image('images/ui/characters/squirrel-classic.png', '\u4e0b\u4e00\u573a\u5bf9\u624b') + '<div><h3>' + (won ? '\u534a\u51b3\u8d5b\u83b7\u80dc\uff01' : '\u8fd8\u6709\u5b63\u519b\u8d5b\uff0c\u7ee7\u7eed\u52a0\u6cb9\uff01') + '</h3><p>\u4e0b\u4e00\u573a\u5bf9\u624b\uff1a' + esc(opponent.name) + '<br>\u7b49\u7ea7 ' + opponent.level + '</p></div></div>' + (gem ? note('\u83b7\u5f97 ' + gem.name + ' \u00d71\uff01') : '') + note('\u7b2c\u4e8c\u6218\u65e0\u9700\u518d\u6d88\u8017\u4f53\u529b\uff0c\u5173\u95ed\u9875\u9762\u540e\u4ecd\u53ef\u7ee7\u7eed\u672c\u8f6e\u3002'), [{ label: won ? '\u5f00\u59cb\u51b3\u8d5b' : '\u5f00\u59cb\u5b63\u519b\u8d5b', run: () => fightArena(run) }, { label: '\u7a0d\u540e\u7ee7\u7eed', cls: 'muted', run: arena }]);
+          C().modal(title, '<div class="extra-finalist">' + image('images/ui/characters/squirrel-classic.png', '\u4e0b\u4e00\u573a\u5bf9\u624b') + '<div><h3>' + (won ? '\u534a\u51b3\u8d5b\u83b7\u80dc\uff01' : '\u8fd8\u6709\u5b63\u519b\u8d5b\uff0c\u7ee7\u7eed\u52a0\u6cb9\uff01') + '</h3><p>\u4e0b\u4e00\u573a\u5bf9\u624b\uff1a' + esc(opponent.name) + '<br>\u7b49\u7ea7 ' + opponent.level + '</p></div></div>' + (gem ? note('\u83b7\u5f97 ' + gem.name + ' \u00d71\uff01') : ''), [{ label: won ? '\u5f00\u59cb\u51b3\u8d5b' : '\u5f00\u59cb\u5b63\u519b\u8d5b', run: () => fightArena(run) }, { label: '\u7a0d\u540e\u7ee7\u7eed', cls: 'muted', run: arena }]);
         } catch (e) { if (window.__errs) window.__errs.push('arena modal: ' + (e && e.message)); }
         return;
       }
@@ -519,22 +522,63 @@
     d.setDate(d.getDate() - (d.getDay() + 6) % 7);      // 周一为一周起点
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
+  /** 月度 key 必须用真实日历月，不能用 localDate()：后者有 12 点换日，
+   * 会在月末中午提前跳到下个月。固定 Asia/Shanghai，保证每月 1 号 0 点重置。 */
+  function rankMonthKey() {
+    try {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit',
+      }).formatToParts(new Date(Date.now()));
+      const get = (type) => (parts.find((p) => p.type === type) || {}).value || '';
+      return get('year') + '-' + get('month');
+    } catch (_) {
+      const d = new Date(Date.now() + 8 * 3600000); // 固定 Asia/Shanghai（UTC+8，无夏令时）
+      return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
+    }
+  }
   function refreshRankShopDay() {
-    const s = State.state(), week = rankWeekKey();
-    if (!s.rankPurchaseTotals || typeof s.rankPurchaseTotals !== 'object' || Array.isArray(s.rankPurchaseTotals)) s.rankPurchaseTotals = {};
+    const s = State.state();
+    if (!s) return;
+    let dirty = false;
+    const week = rankWeekKey(), month = rankMonthKey();
+    if (!s.rankPurchaseTotals || typeof s.rankPurchaseTotals !== 'object' || Array.isArray(s.rankPurchaseTotals)) { s.rankPurchaseTotals = {}; dirty = true; }
+    if (!s.rankMonthPurchases || typeof s.rankMonthPurchases !== 'object' || Array.isArray(s.rankMonthPurchases)) { s.rankMonthPurchases = {}; dirty = true; }
+    /* 两套狂战的月度账：首次升级时把本周已经买过的件数搬进本月账（避免白送一次）；
+     * 之后每月 1 号 0 点整月清空。 */
+    if (!s.rankPurchaseMonth) {
+      /* 只有「本周周一已经在本月」时才把周账搬进本月账；跨月的那一周可能含上个月的购买，
+       * 不能算到本月（宁可不拦，也不要误拦）。 */
+      const weekStart = String(s.rankPurchaseWeek || '');
+      const sameMonthWeek = !weekStart || weekStart >= month + '-01';
+      for (const id of RANK_MONTHLY_LIMIT_GOODS) {
+        const old = sameMonthWeek ? Math.max(0, Math.floor(Number(s.rankPurchases && s.rankPurchases[id]) || 0)) : 0;
+        if (old > 0) s.rankMonthPurchases[id] = Math.max(old, Math.floor(Number(s.rankMonthPurchases[id]) || 0));
+      }
+      s.rankPurchaseMonth = month;
+      dirty = true;
+    } else if (s.rankPurchaseMonth !== month) {
+      s.rankMonthPurchases = {};
+      s.rankPurchaseMonth = month;
+      dirty = true;
+    }
     /* 旧档没有账号累计账：把本周已经买过的永久属性丸搬进累计账，至少不会因为改版
      * 让已经买过的人再白拿一个（更早的周次没有记录，无法回溯）。 */
     for (const id of RANK_ACCOUNT_LIMIT_GOODS) {
       const old = Math.max(0, Math.floor(Number(s.rankPurchases && s.rankPurchases[id]) || 0));
       if (old > 0) s.rankPurchaseTotals[id] = Math.max(old, Math.floor(Number(s.rankPurchaseTotals[id]) || 0));
     }
-    if (s.rankPurchaseWeek === week && s.rankPurchases && typeof s.rankPurchases === 'object' && !Array.isArray(s.rankPurchases)) return;
     // 旧档只有按天标记（rankPurchaseDay）：换成按周后第一次打开清空即可
-    s.rankPurchases = {};
-    s.rankPurchaseWeek = week;
-    if (s.rankPurchaseDay !== undefined) delete s.rankPurchaseDay;
-    State.save();
+    if (s.rankPurchaseWeek !== week || !s.rankPurchases || typeof s.rankPurchases !== 'object' || Array.isArray(s.rankPurchases)) {
+      s.rankPurchases = {};
+      s.rankPurchaseWeek = week;
+      if (s.rankPurchaseDay !== undefined) delete s.rankPurchaseDay;
+      dirty = true;
+    }
+    if (dirty) State.save();
   }
+  /* 两套狂战（goods 11-14 第一套 / 20-23 第二套）：2026-11 用户口径改为
+   * **每月限兑 1 次**，每月 1 号 0 点（Asia/Shanghai）重置。 */
+  const RANK_MONTHLY_LIMIT_GOODS = Object.freeze([11, 12, 13, 14, 20, 21, 22, 23]);
   /* 力/敏/速/血永久丸（goods id 7~10）：原版 `timesLimit` 是 **1**，且是账号级限购；
    * 复刻以前把所有 timesLimit 都当“每周限兑”，于是每周都能再买一个，属性会无限叠。
    * 这四件改用 `rankPurchaseTotals`（不随周重置），上限就是字典里的 timesLimit（1）。
@@ -546,10 +590,12 @@
     const s = State.state() || {};
     const id = String(item.id);
     const account = RANK_ACCOUNT_LIMIT_GOODS.includes(Number(item.id));
+    const monthly = RANK_MONTHLY_LIMIT_GOODS.includes(Number(item.id));
     const limit = Math.max(0, Math.floor(Number(item.timesLimit) || 0));
-    const bag = account ? (s.rankPurchaseTotals || {}) : (s.rankPurchases || {});
+    const bag = monthly ? (s.rankMonthPurchases || {}) : account ? (s.rankPurchaseTotals || {}) : (s.rankPurchases || {});
     const bought = Math.max(0, Math.floor(Number(bag[id]) || 0));
-    return { account, limit, bought, remaining: limit > 0 ? Math.max(0, limit - bought) : Infinity };
+    return { account, monthly, limit, bought, remaining: limit > 0 ? Math.max(0, limit - bought) : Infinity,
+      month: monthly ? String(s.rankPurchaseMonth || '') : '' };
   }
   function rank() {
     /* 经典模式的天梯页由挑战页原版帧负责，不再落回复刻自研的 DOM 天梯页。 */
@@ -772,9 +818,11 @@
     if (Number(s.integral) < needIntegral) { alert('天梯积分尚未达到兑换要求。'); return; }
     if (Number(s.goldCup) < needCup || Number(s.goldPoint) < needGold) { alert('金杯或金松果不足。'); return; }
     if (lim.limit > 0 && lim.bought >= lim.limit) {
-      alert(lim.account
-        ? '该奖励每个账号累计只能兑换 ' + lim.limit + ' 次，已经兑换完了。'
-        : '该奖励本周的兑换次数已用完，下周一重置后可再兑换。');
+      alert(lim.monthly
+        ? '该奖励本月只能兑换 ' + lim.limit + ' 次，下个月 1 号 0 点重置。'
+        : lim.account
+          ? '该奖励每个账号累计只能兑换 ' + lim.limit + ' 次，已经兑换完了。'
+          : '该奖励本周的兑换次数已用完，下周一重置后可再兑换。');
       return;
     }
     const icon = item.type === '2' ? C().icon('gear', +item.goodsId) : C().icon('prop', +item.goodsId);
@@ -785,14 +833,15 @@
         '<p>' + esc(item.remark || '') + '</p>' +
         '<p>需要：<span class="rank-price rank-price-detail"><span class="rank-price-part"><b>' + needCup + '</b>' + C().icon('prop', 40) + '</span><span class="rank-price-part"><b>' + needGold + '</b>' + C().goldIcon() + '</span></span></p>' +
         '<p class="small-label">积分要求 ' + needIntegral +
-          (lim.limit > 0 ? ' · ' + (lim.account ? '账号限购 ' : '每周限兑 ') + lim.limit + ' 次（已购 ' + lim.bought + '）' : '') + '</p>' +
+          (lim.limit > 0 ? ' · ' + (lim.monthly ? '每月限兑 ' : lim.account ? '账号限购 ' : '每周限兑 ') + lim.limit + ' 次（已' + (lim.account ? '购 ' : '兑 ') + lim.bought + '）' : '') + '</p>' +
       '</div></div>',
       [{ label: '返回', cls: 'muted' }, { label: '确认兑换', cls: 'gold', run: () => {
         if (redeemed || State.state() !== s) return;
         refreshRankShopDay();
         const lim2 = rankLimitInfo(item);
         if (lim2.limit > 0 && lim2.bought >= lim2.limit) {
-          alert(lim2.account ? '该奖励每个账号累计只能兑换 ' + lim2.limit + ' 次，已经兑换完了。' : '该奖励本周的兑换次数已用完。');
+          alert(lim2.monthly ? '该奖励本月只能兑换 ' + lim2.limit + ' 次，下个月 1 号 0 点重置。'
+            : lim2.account ? '该奖励每个账号累计只能兑换 ' + lim2.limit + ' 次，已经兑换完了。' : '该奖励本周的兑换次数已用完。');
           return;
         }
         if (Number(s.goldCup) < needCup || Number(s.goldPoint) < needGold) { alert('金杯或金松果不足。'); return; }
@@ -800,7 +849,7 @@
         s.goldCup -= needCup; s.goldPoint -= needGold;
         if (item.type === '2') State.addGear(+item.goodsId, State.randomExt(2));
         else addProp(+item.goodsId, +item.count);
-        const bag = lim2.account ? s.rankPurchaseTotals : s.rankPurchases;
+        const bag = lim2.monthly ? s.rankMonthPurchases : lim2.account ? s.rankPurchaseTotals : s.rankPurchases;
         bag[item.id] = (bag[item.id] || 0) + 1;
         State.save();
         C().toast('兑换成功：' + item.name);
@@ -826,7 +875,7 @@
     const selected = goods.slice(pg * 6, pg * 6 + 6);
     const limitOf = (item) => {
       const lim = rankLimitInfo(item);
-      return lim.limit > 0 ? (lim.account ? '账号限购 ' : '每周限兑 ') + lim.limit + ' 次（已' + (lim.account ? '购 ' : '兑 ') + lim.bought + '）' : '';
+      return lim.limit > 0 ? (lim.monthly ? '每月限兑 ' : lim.account ? '账号限购 ' : '每周限兑 ') + lim.limit + ' 次（已' + (lim.account ? '购 ' : '兑 ') + lim.bought + '）' : '';
     };
     const p = C().page('bag', 'shop', '<div class="extra-shop-balance">\u91d1\u676f ' + s.goldCup + '\u3000\u91d1\u677e\u679c ' + s.goldPoint + '\u3000\u79ef\u5206 ' + s.integral + '</div><div class="extra-shop-grid">' + selected.map(item => '<button class="extra-shop-item" data-goods="' + item.id + '">' + (item.type === '2' ? image('images/ui/icons/gear/gear-' + item.goodsId + '.png', item.name) : C().icon('prop', +item.goodsId)) + '<b>' + esc(item.name) + '</b><span>' + item.cup + '\u91d1\u676f + ' + item.gold + '\u91d1\u677e\u679c</span><small>\u79ef\u5206\u9700 ' + item.integral + (limitOf(item) ? ' \u00b7 ' + limitOf(item) : '') + '</small></button>').join('') + '</div><div class="extra-pagination">' + button('\u4e0a\u4e00\u9875', 'rank-shop-prev', 'tiny muted') + '<span>' + (pg + 1) + '/' + total + '</span>' + button('\u4e0b\u4e00\u9875', 'rank-shop-next', 'tiny muted') + '</div>', { cls: 'extra-board extra-cup-shop' });
     back(p, rank, '\u8fd4\u56de\u5929\u68af\u8d5b');
@@ -842,13 +891,14 @@
         if (s.goldCup < +item.cup || s.goldPoint < +item.gold) { alert('\u91d1\u676f\u6216\u91d1\u677e\u679c\u4e0d\u8db3\u3002'); return; }
         const lim = rankLimitInfo(item);
         if (lim.limit > 0 && lim.bought >= lim.limit) {
-          alert(lim.account ? '\u8be5\u5956\u52b1\u6bcf\u4e2a\u8d26\u53f7\u7d2f\u8ba1\u53ea\u80fd\u5151\u6362 ' + lim.limit + ' \u6b21\uff0c\u5df2\u7ecf\u5151\u6362\u5b8c\u4e86\u3002' : '\u8be5\u5956\u52b1\u672c\u5468\u7684\u5151\u6362\u6b21\u6570\u5df2\u7528\u5b8c\uff0c\u4e0b\u5468\u4e00\u91cd\u7f6e\u540e\u53ef\u518d\u5151\u6362\u3002');
+          alert(lim.monthly ? '该奖励本月只能兑换 ' + lim.limit + ' 次，下个月 1 号 0 点重置。'
+            : lim.account ? '该奖励每个账号累计只能兑换 ' + lim.limit + ' 次，已经兑换完了。' : '该奖励本周的兑换次数已用完，下周一重置后可再兑换。');
           return;
         }
         redeemed = true;
         s.goldCup -= +item.cup; s.goldPoint -= +item.gold;
         if (item.type === '2') State.addGear(+item.goodsId, State.randomExt(2)); else addProp(+item.goodsId, +item.count);
-        const bag = lim.account ? s.rankPurchaseTotals : s.rankPurchases;
+        const bag = lim.monthly ? s.rankMonthPurchases : lim.account ? s.rankPurchaseTotals : s.rankPurchases;
         bag[item.id] = (bag[item.id] || 0) + 1; State.save(); C().toast('\u5151\u6362\u6210\u529f\uff1a' + item.name); rankShop(pg);
       } }, { label: '\u8fd4\u56de', cls: 'muted' }], { small: true });
     });

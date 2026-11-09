@@ -435,6 +435,60 @@
     drawLines(g);
     return g;
   }
+  /** 文本按“字号 = 1”估算宽度：中文/全角 1em，ASCII 默认 0.56em（SimHei 实测约 0.5em，
+   *  这里留一点余量）。`spacing` 是每个字额外加的字距（主界面昵称有 letter-spacing）。
+   *  只用于 `fitTextWidth` 的兜底估算；真实浏览器里画出来的宽度仍以字体为准。 */
+  function estimateTextWidth(text, opts) {
+    const o = opts || {};
+    const ascii = Number.isFinite(Number(o.ascii)) ? Number(o.ascii) : 0.56;
+    const spacing = Number.isFinite(Number(o.spacing)) ? Number(o.spacing) : 0;
+    const em = Number.isFinite(Number(o.em)) ? Number(o.em) : 1;
+    let units = 0, chars = 0;
+    for (const ch of String(text == null ? '' : text)) {
+      units += /^[\x20-\x7e]$/.test(ch) ? ascii : 1;
+      chars++;
+    }
+    return units * em + chars * spacing;
+  }
+  /** **只在放不下时缩字号**，不裁字、不横向拉扁（用户 2026-10 明确不要 `textLength`）。
+   *  战场血条的名字框 `name1` 只有 82.1 单位宽，7 个汉字要 84 —— 不缩就会裁掉最后
+   *  一个字的一小截；英文昵称（按 1/3 权重最多 21 个字母）更宽。这里按字段框宽度
+   *  算一个能完整放下的字号，写回这一组 `<text>`。
+   *  opts：`ascii`（ASCII 字宽 / 字号）、`spacing`（每字字距）、`min`（最小字号）、
+   *        `width`（覆盖字段框宽度，例如主界面昵称框）。
+   *  返回最终字号（没缩就是原字号）。 */
+  function fitTextWidth(node, opts) {
+    if (!node || !node.__textBox) return 0;
+    const b = node.__textBox;
+    const meta = b.meta || {};
+    const host = node.g || node;
+    const list = host && host.querySelectorAll ? [...host.querySelectorAll('text')] : [];
+    if (!list.length) return 0;
+    const measured = Number(list[0].getAttribute('font-size')) || (b.lines[0] && b.lines[0].h) || meta.fh || 12;
+    /* 同一个节点可能每秒重刷（主界面昵称），以第一次见到的字号为基准，
+     * 避免已经缩过一次的节点被继续越缩越小。`setText` 重建文本时字号会回到素材值。 */
+    const KEY = '__sfFitBase';
+    if (!(b[KEY] > 0)) b[KEY] = measured;
+    const base = b[KEY];
+    const W = Number(opts && opts.width) || (b.box ? (b.box.xmax - b.box.xmin - (meta.lm || 0) - (meta.rm || 0)) : 0);
+    if (!(W > 0)) return base;
+    const spacing = Number.isFinite(Number(opts && opts.spacing)) ? Number(opts.spacing) : 0;
+    const min = Number.isFinite(Number(opts && opts.min)) ? Number(opts.min) : 6;
+    let widest = 0, widestUnits = 0, widestChars = 0;
+    for (const el of list) {
+      const text = String(el.textContent == null ? '' : el.textContent);
+      const units = estimateTextWidth(text, { ascii: opts && opts.ascii, em: 1 });
+      const chars = [...text].length;
+      const w = units * base + chars * spacing;
+      if (w > widest) { widest = w; widestUnits = units; widestChars = chars; }
+    }
+    if (!(widest > W + 0.01) || !(widestUnits > 0)) return base;
+    /* 解 units*size + chars*spacing = W（字距不跟着字号缩）。 */
+    const avail = W - widestChars * spacing;
+    const size = Math.max(min, Math.floor((avail / widestUnits) * 10) / 10);
+    for (const el of list) el.setAttribute('font-size', String(size));
+    return size;
+  }
   /** 换掉一个文本容器的内容（`SfRender.setText`）。
    *  `str` 里的换行会**真的断行** —— 界面代码拼多行文案（祭坛三行几率、神迹记录…）全靠它。
    *  `opts.wrap = true` 时再按当前字段框宽自动折行（详情页的长技能说明用）。
@@ -651,6 +705,20 @@
         else { delete c.rp; delete c.placedHere; }
         f.set(d, c);
       }
+      /* 【性能】帧内容在建树后**不会再变**，把 showFrame 每拍都要算的三样东西
+       * 缓存在帧对象上：排序后的深度表 / 蒙版表 / 「这一帧有没有具名放置」。
+       * 战斗里 100+ 个播放实例 × 14fps 反复算 `[...keys()].sort()` 与 O(深度×蒙版)
+       * 扫描，是白白的主线程开销（2026-11 安卓实测 showFrame 在 JS 采样里排前列）。 */
+      const depths = [...f.keys()].sort((a, b) => a - b);
+      const masks = [];
+      for (const d of depths) {
+        const q = f.get(d);
+        if (q && q.cD !== undefined) masks.push({ d: d, cD: q.cD, p: q });
+      }
+      f.__depths = depths;
+      f.__masks = masks;
+      f.__maskDepths = new Set(masks.map((m) => m.d));
+      f.__hasNames = depths.some((d) => { const q = f.get(d); return !!(q && q.na); });
       frames.push(f);
       seg = new Set();
     };
@@ -751,6 +819,13 @@
           }
           if (!c.playing || c.frames.length < 2) continue;
           if (!c.g.isConnected) { unregisterDeep(c); continue; }   // 已被摘除的实例：回收
+          /* 【性能】自己这一层就不可见的实例（战斗里的备用手位 / 隐藏群演）：
+           * 播放头照常走，但不重画子树 —— 看不见的帧没有光栅化价值。 */
+          const st = c.g.style;
+          if (st && (st.visibility === 'hidden' || st.display === 'none')) {
+            c.frame = (c.frame + 1) % c.frames.length;
+            continue;
+          }
           c.frame = (c.frame + 1) % c.frames.length;
           try { c.showFrame(); } catch (e) {}
         }
@@ -972,12 +1047,16 @@
     return cp.id;
   };
   MovieClip.prototype.showFrame = function () {
+    /* 【性能】同帧重复 showFrame（HUD 每回合 `gotoAndStop(同一帧)`、每秒刷数值）在 Flash
+     * 里不会重建显示列表；这里同样什么都不用做 —— 文本、装备、额外变换各有自己的入口，
+     * 不需要靠重放这一帧来“刷新”。战斗里 100+ 个播放实例 × 14fps，这一条能省掉大量
+     * 重复的属性读/写（2026-11 安卓采样里 showFrame 是 JS 侧最热的一档）。 */
+    if (this.__shownFrame === this.frame) return this;
     const frame = this.frames[this.frame] || new Map();
-    /* 帧是否真的推进了：同帧重复 showFrame（比如每秒刷新数值时的 gotoAndStop(原帧)）
-     * 在 Flash 里不会重建显示列表，rp 也不重新生效。 */
-    const frameAdvanced = this.__shownFrame !== this.frame;
-    this.names.clear();
-    const depths = [...frame.keys()].sort((a, b) => a - b);
+    /* 帧是否真的推进了：走到这里一定推进了（同帧已在上面返回）。 */
+    const frameAdvanced = true;
+    if (frame.__hasNames || this.names.size) this.names.clear();
+    const depths = frame.__depths || (frame.__depths = [...frame.keys()].sort((a, b) => a - b));
     /* Most animation steps only change matrices. Moving every reused node to the end of its
      * parent would still invalidate the SVG display list. Skip moves only when the complete
      * depth order already matches, including the boundary before runtime attachments. */
@@ -1005,12 +1084,16 @@
      * 村庄页只有两处 —— 体力条的填充（7022 d1→cD 3）与经验条的填充（4318 同理），
      * 但缺了它后果很明显：蒙版形状没有填充样式 → SVG 默认填成**黑色**，既盖住「体力」两个字，
      * 又让填充条整条露出来（和经验条外框对不上）。 */
-    const masks = [];
-    for (const d of depths) {
-      const q = frame.get(d);
-      if (q && q.cD !== undefined) masks.push({ d: d, cD: q.cD, p: q });
-    }
-    const isMaskDepth = (d) => { for (const m of masks) if (m.d === d) return true; return false; };
+    const masks = frame.__masks || (frame.__masks = (() => {
+      const out = [];
+      for (const d of depths) {
+        const q = frame.get(d);
+        if (q && q.cD !== undefined) out.push({ d: d, cD: q.cD, p: q });
+      }
+      return out;
+    })());
+    const maskDepths = frame.__maskDepths || (frame.__maskDepths = new Set(masks.map((m) => m.d)));
+    const isMaskDepth = (d) => maskDepths.has(d);
     const maskOf = (d) => { for (const m of masks) if (d > m.d && d <= m.cD) return m; return null; };
     const next = new Map();
     for (const d of depths) {
@@ -1540,6 +1623,10 @@
     repaintRaster,
     /** 换掉一个文本容器的内容（**会真的按换行断行**；`opts.wrap=true` 时按字段框宽自动折行）。返回是否认出来了。 */
     setText,
+    /** 只在放不下时缩字号（不裁字、不横向压扁）；见 `fitTextWidth` 的注释。 */
+    fitTextWidth,
+    /** 文本宽度估算（字号 = 1 时）：回归与其它页面的自适应共用。 */
+    estimateTextWidth,
     /** 屏幕坐标 ↔ SVG 用户坐标（两轴分别换算；全面屏/`#ui` 非等比缩放也正确）。
      *  页面覆盖物（引导金环、三侠图集层）用它，避免 iOS 15 的 `getScreenCTM` 209220。 */
     svgScreenMap,

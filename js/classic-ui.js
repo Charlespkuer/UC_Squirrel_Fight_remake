@@ -137,9 +137,13 @@
     'arena', 'stages', 'messages', 'chat', 'ranklog', 'revenge', 'toplist', 'system', 'help', 'village', 'vip'];
   function bind(root, actions) {
     $$('[data-action]', root).forEach(b => {
+      /* ⚠ 没登记的动作**不要碰**：同一棵 DOM 可能被二次 bind —— 弹窗是先由 modal()
+       * 绑底部按钮（取消等），再由调用方 `bind(弹窗, { 列表行 })` 补绑列表。
+       * 以前这里无条件写 `onclick`，后一次 bind 会把「取消」也换成查不到动作的空壳，
+       * 点下去毫无反应（2026-11 用户录屏：永久增益已满 → 取消键没反应，× 却能关）。 */
+      const f = actions[b.dataset.action];
+      if (!f) return;
       b.onclick = () => {
-        const f = actions[b.dataset.action];
-        if (!f) return;
         /* ⑩ 点击缩放动效（见 `popTap` 的注释）：页签这类"点完就换页"的键，
          * 要等这一遍缩放播完再换，否则反馈一闪都没看见。 */
         if (b.classList && (b.classList.contains('uc-tab') || b.classList.contains('sf-feedback'))) popTap(b, () => f(b));
@@ -1759,7 +1763,7 @@
         if (g.gem) chips.push('<span class="fd-chip fd-gem">宝石 Lv.' + g.gem.level + '　+' + g.gem.percent + '%</span>');
         return '<div class="fd-gear"><div class="fd-gear-head"><b>' + esc(g.part + '·' + g.name) + '</b>' +
           '<span class="fd-quality q' + (Number(g.quality) || 0) + '">' + qualityName(g) + '</span>' +
-          '<span class="fd-attr">' + esc(g.attrName) + ' +' + Number(g.abilityVal || 0) + '</span></div>' +
+          '<span class="fd-attr">' + esc(State.gearAttrText(g, { name: true })) + '</span></div>' +
           (chips.length ? '<div class="fd-chips">' + chips.join('') + '</div>' : '') + '</div>';
       }).join('')
       : empty('没有装备');
@@ -2538,9 +2542,9 @@
         '</span>';
     };
     const limitText = (g) => {
-      const lim = CE.rankLimitInfo ? CE.rankLimitInfo(g) : { account: false, limit: Number(g.timesLimit) || 0, bought: Number((S.rankPurchases || {})[g.id]) || 0 };
+      const lim = CE.rankLimitInfo ? CE.rankLimitInfo(g) : { account: false, monthly: false, limit: Number(g.timesLimit) || 0, bought: Number((S.rankPurchases || {})[g.id]) || 0 };
       if (!(lim.limit > 0)) return '不限兑换次数';
-      return (lim.account ? '账号限购 ' : '本周限兑 ') + lim.limit + ' 次（已' + (lim.account ? '购 ' : '兑 ') + lim.bought + '）';
+      return (lim.monthly ? '每月限兑 ' : lim.account ? '账号限购 ' : '本周限兑 ') + lim.limit + ' 次（已' + (lim.account ? '购 ' : '兑 ') + lim.bought + '）';
     };
     const detailMarkup = (g) => {
       if (!g) return '<h3>金杯商店</h3><div class="bag-description">本周还没有可兑换的奖励。</div>';
@@ -2858,7 +2862,7 @@
       return;
     }
     if(id===79||id===90){ openChestDetail(id,shop); return; }
-    const isFragment=[24,25,26].includes(id),isConvertShard=id===GData.CONVERT_SHARD_ID,isSeed=[45,46].includes(id),isGem=State.gemLevel(id)>0,canUse=base.useType==='1';
+    const isFragment=[24,25,26].includes(id),isConvertShard=id===GData.CONVERT_SHARD_ID,isSeed=[45,46,108,109].includes(id),isGem=State.gemLevel(id)>0,canUse=base.useType==='1';
     /* 经典背包的 useType 1 道具：改用原版「道具1」4886 f1 的 SVG 弹窗，
      * 不再画手搓 DOM 详情（商店 / 兑换页保持原样）。素材挂载失败时
      * `openClassicUseProp` 会以 forceDom 回退到下面这套 DOM 弹窗。 */
@@ -2889,7 +2893,7 @@
     const perPotion=id===1?10:30;
     const batchCost=isGem?3:10;                    // 每次合成消耗的材料个数
     const batchGold=isGem?10:50;                   // 每次合成消耗的金松果
-    const fruitId=id===45?47:48;
+    const fruitId=(id===45||id===108)?47:48;
     const batchName=isFragment?'装备':isSeed?propMap.getValue(fruitId).name:isConvertShard?'转化丸（随机）':'更高一级宝石';
     // 每种道具当前能不能再来一次（材料/金币/体力上限），用来说明按钮为什么变灰
     const blockReason=()=>{
@@ -3012,7 +3016,7 @@
       '</p><div class="ws-choice-row' + (r.options.length < 3 ? ' few' : '') + '">' +
       r.options.map(card).join('') + '</div></div>';
     const m = modal(isGain ? '天使果实 · 三选一' : '恶魔果实 · 三选一', body,
-      [{ label: isGain ? '先不用' : '放弃使用', cls: 'muted' }], { small: true, locked: true });
+      [], { small: true, locked: true });
     m.element.classList.add('ws-choice-dialog');
     $$('[data-fruit-pick]', m.element).forEach(b => b.addEventListener('click', () => {
       const c = r.options[Number(b.dataset.fruitPick)];
@@ -3186,6 +3190,9 @@
     /* 升级流程全部处理完了：这时才是「到 30 级 → 自愿支持作者」的最佳时机，
      * 不会插在三选一 / 属性点前面（见 maybeSupportPrompt，取提示权是一次性的）。 */
     maybeSupportPrompt();
+    /* 升级页在「点确定后还有三选一」时会只留全屏 CG 当背景（见 ui-levelup 的
+     * holdBackground）；三选一 / 加点都处理完，这里把背景层收掉。 */
+    if (window.SfLevelUp && SfLevelUp.releaseBackground) SfLevelUp.releaseBackground();
     return null;
   }
   /* ============================================================
@@ -3390,7 +3397,7 @@
     /* 宝石键的文案不带「（5金）」了（用户口径 2026-10：四个键要排在一行，标签越短越好排），
      * 费用改在这行小字里说明，免得玩家不知道要花金松果。 */
     const gemCost=socketable?'<br><span class="small-label">宝石：镶嵌 / 卸下各 5 金松果</span>':'';
-    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说','黑色'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(g.attrName)+' +'+g.abilityVal+(g.attrBase&&g.attrBase!==g.abilityVal?'（基准 '+g.attrBase+'，本件有浮动）':'')+'<br>附加属性：<br>'+State.extTextForGear(g, true).map(esc).join('<br>')+gemInfo+gemCost+setBonusBlock(g)+'</div></div>';
+    const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说','黑色'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(State.gearAttrText(g, { name: true }))+'<br>附加属性：<br>'+State.extTextForGear(g, true).map(esc).join('<br>')+gemInfo+gemCost+setBonusBlock(g)+'</div></div>';
     /* 装 / 卸之后列表会重排（穿着 > 获得顺序），所以**跟着这一件翻到它新位置所在的那一页**，
      * 否则在后面的页上点「装备」，东西会当场跳到第一页、看不见了。 */
     const buttons=[{label:g.used?'卸下':'装备',run:()=>{const ok=g.used?State.unwear(key):State.wear(key);if(ok===false)toast('等级不足，暂时无法装备');
@@ -4654,8 +4661,10 @@
     const compatLabel = compat === 'on' ? '开' : compat === 'off' ? '关' : '自动';
     const compatTitle = '当前：' + compatLabel +
       '。安卓 16 / 高通 Adreno 新机（K90 Pro Max、MagicPad3 Pro）的 WebView 在 Vulkan 合成路径下会' +
-      '整块丢失贴图层，表现为深绿底、贴图错位或只剩悬浮奖励。自动档按 SoC + 系统版本启用；' +
-      '若你的机器仍有绿屏，手动切到「开」；桌面 / 网页无副作用。';
+      '整块丢失贴图层，表现为深绿底、贴图错位或只剩悬浮奖励。自动档只对现场确认过该问题的整机' +
+      '（K90 Pro Max / MagicPad3 Pro）开启 —— 同款 SoC 的其它机型也保持硬件渲染（软件层满分辨率' +
+      '只有约 30fps，是“战斗卡顿”的主要来源）；若你的机器仍有绿屏，手动切到「开」；' +
+      '若开启后战斗卡顿，切到「关」。桌面 / 网页无副作用。';
     const grid='<div class="settings-grid system-grid">'+
       sysBtn('存档导出','export','gold','把当前存档导出成一个 JSON 文件。iOS 在「文件」App → 我的 iPhone/iPad → 松鼠大战；桌面写系统下载目录。')+
       sysBtn('存档导入','import','gold','从 JSON 文件恢复存档。iOS 用「存档列表」选 App 里的导出，或粘贴存档文本。')+
@@ -4797,7 +4806,9 @@
     $('[data-action="export"]',p).onclick=exportSaveFile;
     $('[data-action="import"]',p).onclick=importSave;
     $('[data-action="rename"]',p).onclick=()=>{
-      const m=modal('修改昵称','<p>给你的松鼠起个名字</p><input id="rename-input" maxlength="12" value="'+esc(State.state().name)+'" style="width:100%;padding:14px;border:3px solid #b39763;border-radius:18px;color:#715231;background:#fffdf1">',[{label:'确定',close:false,run:()=>{const name=$('#rename-input',m.element).value.trim();if(!name){toast('名字不能为空');return;}State.state().name=name;State.save();m.close();refreshHome();}},{label:'返回',cls:'muted'}],{small:true});
+      const rules=window.NicknameRules;
+      const tip=rules?('最多 '+rules.MAX_WEIGHT+' 个汉字（英文/数字按 1/3 个汉字计）。'):'';
+      const m=modal('修改昵称','<p>给你的松鼠起个名字</p><input id="rename-input" maxlength="21" value="'+esc(State.state().name)+'" style="width:100%;padding:14px;border:3px solid #b39763;border-radius:18px;color:#715231;background:#fffdf1">'+(tip?'<p class="small-label" style="margin-top:8px">'+tip+'</p>':''),[{label:'确定',close:false,run:()=>{const raw=$('#rename-input',m.element).value;const check=rules?rules.check(raw):{ok:!!String(raw||'').trim(),name:String(raw||'').trim(),reason:'名字不能为空'};if(!check.ok){toast(check.reason||'名字不能为空');return;}State.state().name=check.name;State.save();m.close();refreshHome();}},{label:'返回',cls:'muted'}],{small:true});
     };
     wireSystemFeedback(p);
   }
@@ -5357,7 +5368,7 @@
       ? '<p><b>黑装</b>：3 件橙装在「装备融合」里可合成 1 件黑装；黑凤凰/黑圣熊也可用 10 个碎片 + 1000 金松果合成。黑色卡片来自挑战塔 20/50 层（第 100 层给黑装自选箱）、无尽塔每累计 50 层（周限 10）、金宝箱、魔法袋和黑装融合；3 件黑装可继续融合洗词条，使用等级 60。</p>'
       : '';
     // 帮助是「系统」分组下的正常页面（以前是弹窗，会挡住底下的界面）
-    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能；71 级起每升 1 级还会获得 1 个金宝箱（最高 90 级）。在状态页查看和升级。永久属性点（力/敏/速/生命，生命 5 点算 1 点）总上限 <b>651</b>；旧档、属性书和调试也不能突破，装备/被动/药丸另算。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。前 18 关每轮消耗1张挑战书、连续击败3名敌人；后 18 关（19-36）是超级三侠，每关只有1名强敌。失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件同品质装备可以融合（3件同套且有下一品质档时必得该套）。带徒弟挑战时徒弟会先上阵；徒弟战败后师父免费接手同一名对手（不消耗挑战书、也不占用复活次数）。</p><p><b>竞技场</b>：10级开启经验竞技场，15级开启碎片竞技场与幻兽竞技场；报名一次打完两场。经验场名次奖励 150/100/50/30 经验，碎片场 8/6/4/3 蓝片，幻兽场 40/35/30/25 孵化点。</p><p><b>幻兽</b>：村庄「幻兽牧场」孵化、编队、喂养、进化；孵化消耗 200 孵化点。幻兽竞技场用召唤证报名；召唤证可在道具商店用 10 金松果购买，也能从魔法袋中开出。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。天梯赛战斗里会飘出黄色三角的「属性碎片」，点碎片拾取；10 个属性碎片 + 50 金松果可在背包合成 1 个随机力量/敏捷/速度转化丸。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；iOS 的导出文件在「文件」App → 我的 iPhone/iPad → 松鼠大战，导入时也可以直接粘贴存档文本；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45 级后通关关卡或竞技场获胜有几率获得 1~2 级宝石；3 个同级宝石 + 10 金松果可合成高一级（可能失败降级）。宝石可镶入橙色或黑色装备，每件 1 颗，镶嵌/卸下各 5 金松果。</p><p><b>套装收益（仅现代界面）</b>：同名装备 2/4 件各一档加成，按该套最低品质计算；经典界面没有套装收益。</p><p><b>挑战塔</b>：通关前 18 关后解锁。逐层挑战，通关得金松果与碎片；第 20/50 层里程碑发黑卡，第 100 层给黑装自选箱。</p><p><b>无尽塔</b>：没有层数上限，每 100 层一轮。战斗得试炼币，可在试炼商店/铸币商店买增益；每累计 50 层 1 张黑卡，每周最多 10 张。</p>' + blackHelp + '<h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
+    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能；71 级起每升 1 级还会获得 1 个金宝箱（最高 90 级）。在状态页查看和升级。永久属性点（力/敏/速/生命，生命 5 点算 1 点）总上限 <b>651</b>；旧档、属性书和调试也不能突破，装备/被动/药丸另算。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。前 18 关每轮消耗1张挑战书、连续击败3名敌人；后 18 关（19-36）是超级三侠，每关只有1名强敌。失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件同品质装备可以融合（产物部位从三件材料随机，词条按星级/材料顺序继承前两条）。带徒弟挑战时徒弟会先上阵；徒弟战败后师父免费接手同一名对手（不消耗挑战书、也不占用复活次数）。</p><p><b>竞技场</b>：10级开启经验竞技场，15级开启碎片竞技场与幻兽竞技场；报名一次打完两场。经验场名次奖励 150/100/50/30 经验，碎片场 8/6/4/3 蓝片，幻兽场 40/35/30/25 孵化点。</p><p><b>幻兽</b>：村庄「幻兽牧场」孵化、编队、喂养、进化；孵化消耗 200 孵化点。幻兽竞技场用召唤证报名；召唤证可在道具商店用 10 金松果购买，也能从魔法袋中开出。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。天梯赛战斗里会飘出黄色三角的「属性碎片」，点碎片拾取；10 个属性碎片 + 50 金松果可在背包合成 1 个随机力量/敏捷/速度转化丸。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；iOS 的导出文件在「文件」App → 我的 iPhone/iPad → 松鼠大战，导入时也可以直接粘贴存档文本；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45 级后通关关卡或竞技场获胜有几率获得 1~2 级宝石；3 个同级宝石 + 10 金松果可合成高一级（可能失败降级）。宝石可镶入橙色或黑色装备，每件 1 颗，镶嵌/卸下各 5 金松果。</p><p><b>套装收益（仅现代界面）</b>：同名装备 2/4 件各一档加成，按该套最低品质计算；经典界面没有套装收益。</p><p><b>挑战塔</b>：通关前 18 关后解锁。逐层挑战，通关得金松果与碎片；第 20/50 层里程碑发黑卡，第 100 层给黑装自选箱。</p><p><b>无尽塔</b>：没有层数上限，每 100 层一轮。战斗得试炼币，可在试炼商店/铸币商店买增益；每累计 50 层 1 张黑卡，每周最多 10 张。</p>' + blackHelp + '<h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
     $$('[data-guide]', p).forEach((b) => b.onclick = () => openGuideItem(+b.dataset.guide));
     wireSystemFeedback(p);
     return p;
@@ -5483,7 +5494,7 @@
    *  `scripts/version.json` 时才会用到（file:// 直接打开、注入被拦）。
    *  安装包 / APK 由 `tools/build-tauri-app.cjs --web` 注入真实版本并带上 version.json，
    *  正常发布包不会走到这里；发版时顺手把这一行同步成当前版本即可。 */
-  const VERSION_FALLBACK = '1.1.6';
+  const VERSION_FALLBACK = '1.1.8';
   let gameVersion = String((typeof window !== 'undefined' && window.__SSDZ_VERSION) || VERSION_FALLBACK);
   let versionRequested = false;
   function versionLabel(v) {
@@ -5635,7 +5646,7 @@
 
   window.UI={...legacy,renderHome,drawHomeHud,drawActor,runAction,currentScreen:()=>screen,refreshHome,renderNumbers,refreshHeader,openHeroPage,
     setMode,currentUiMode,applyUiMode,nextUiMode,UI_MODE_LSKEY,layoutHeight,smokeSelectors,
-    classic:{page,modal,btn,bind,icon,spr,goldIcon,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog,openSupportModal,maybeSupportPrompt,supportPanelHtml,copyText,supportMeta,wireSystemFeedback,openHeroPage,
+    classic:{page,modal,btn,bind,icon,spr,goldIcon,propIconSrc:(id)=>atlasIcon('prop',id),statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog,openSupportModal,maybeSupportPrompt,supportPanelHtml,copyText,supportMeta,wireSystemFeedback,openHeroPage,
       /* 【SFR4】经典模式状态页的**武器 / 技能栏**（`js/ssfight/ui-status.js`）要照着复刻这套
        * 图鉴的数据画格子（原版那两个 tab 的图标是运行时 `attachMovie` 的库元件，素材库里没有），
        * 所以把"这一页有哪些东西、自己有没有、是不是真形态"与"打开某一项的详情"这两件事导出去。

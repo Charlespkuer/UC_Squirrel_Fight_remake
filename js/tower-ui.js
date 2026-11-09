@@ -84,7 +84,10 @@
   }
 
   const RARITY = TowerData.RARITY_NAME || ['普通', '稀有', '史诗', '传奇'];
-  const SCOPE = { limited: '限次', permanent: '永久', instant: '即时' };
+  /* 卡面副标题按 buff.kind 取词；**每种 kind 都要有一项** —— 漏了就会把 `undefined`
+   * 原样画到卡面上（2026-11 用户截图：水晶铭文 C60 的卡面就是「undefined」）。
+   * 铭文是第 4 种类型（虚空 / 水晶 / 碎裂 / 延续），不占永久栏位。 */
+  const SCOPE = { limited: '限次', permanent: '永久', instant: '即时', inscription: '铭文' };
   /* 无尽塔的「环境词缀」：段位机制（荆棘反伤/自愈回复/吸血/护盾/吞噬成长）已经并进来了，
    * 所以现在只有这一个常驻负面机制来源。每条环境都带：本局摇出来的实际数值、
    * 渲染好的效果文案、数值区间（悬停可见）。 */

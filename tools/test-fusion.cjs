@@ -110,7 +110,7 @@ test('三件蓝装融合成紫装，只扣50金松果，正式存档保持不变
   assert.equal(game.get('action', 'fuse').disabled, true);
   keys.forEach((key) => game.click('gear', key));
   assert.equal(game.get('action', 'fuse').disabled, false);
-  assert.ok(game.board.innerHTML.includes('卓越头巾'), '预览写成「卓越 + 部位」：' + game.board.innerHTML.match(/fusion-preview-label">[^<]*/));
+  assert.ok(game.board.innerHTML.includes('卓越装备'), '预览写成「卓越 + 随机部位」：' + game.board.innerHTML.match(/fusion-preview-label">[^<]*/));
   game.click('action', 'fuse');
   assert.equal(game.context.State.state().goldPoint, 50);
   const inventory = game.context.State.myGears();
@@ -281,14 +281,14 @@ test('规则条保持单行且完整说明收在弹窗里', () => {
   game.click('action', 'rules');
   const modal = game.modals[game.modals.length - 1];
   assert.equal(modal.title, '融合规则');
-  for (const key of ['材料', '费用', '产物', '名称', '词条']) {
+  for (const key of ['材料', '费用', '产物', '变异', '词条']) {
     assert.ok(modal.html.includes(key), '详细规则里要有「' + key + '」');
   }
   /* 装备卡必须照常渲染（这一步是在防「列表被挤没」的老毛病） */
   assert.ok(game.board.innerHTML.includes('data-fusion-gear='), '装备列表要渲染出卡片');
 });
 
-test('融合只有一条共有词条时，仍按品质补满词条槽', () => {
+test('融合词条按星级/材料顺序继承前两条，第三条随机补满', () => {
   const game = setup();
   const S = game.context.State;
   const state = S.state();
@@ -298,48 +298,40 @@ test('融合只有一条共有词条时，仍按品质补满词条槽', () => {
   assert.equal(result.ok, true);
   assert.equal(result.gear.quality, 4);
   assert.equal(result.gear.ext.length, 3, '橙装应有 3 条词条');
-  assert.equal(new Set(result.gear.ext.map((ext) => ext.id)).size, 3, '词条不能重复');
-  assert.ok(result.gear.ext.some((ext) => ext.id === 1), '共有的那条词条要保留');
+  assert.equal(String(result.gear.ext[0].id), '1', '第一条继承材料里的词条 1');
+  assert.equal(String(result.gear.ext[1].id), '1', '第二条仍继承词条 1（同名词条不合并）');
+  assert.ok(Number.isFinite(Number(result.gear.ext[2].id)), '第三条从剩余材料词条随机补满');
 });
 
-test('三件同套装融合必定得到该套下一品质同部位', () => {
-  const game = setup([201, 202, 203, 177, 178, 179], { gold: 1000 });
-  const S = game.context.State;
-  vm.runInContext('globalThis.__oldRandom = Math.random; Math.random = () => 0', game.context);
-  try {
-    /* 旧规则在三件不同名时完全随机，固定 0 会挑到别的套装；同套保底必须无视它。 */
-    const purple = game.gears.slice(0, 3).map((g) => g.key);
-    const orange = S.mergeGears(purple);
-    assert.equal(orange.ok, true, orange.msg || '紫装融合应成功');
-    assert.equal(orange.gear.id, 205, '3 件狂战紫装 → 狂战橙头盔');
-    assert.equal(S.gearSetFamily(orange.gear.id), '狂战');
-    assert.equal(S.gearPart(orange.gear.id), 0);
-    assert.equal(orange.gear.quality, 4);
-
-    const orangeFury = game.gears.slice(3, 6).map((g) => g.key);
-    const black = S.mergeGears(orangeFury);
-    assert.equal(black.ok, true, black.msg || '橙装融合应成功');
-    assert.equal(black.gear.id, 185, '3 件怒战橙装 → 怒战黑头盔（同套取 id 最小件）');
-    assert.equal(S.gearSetFamily(black.gear.id), '怒战');
-    assert.equal(S.gearPart(black.gear.id), 0);
-    assert.equal(black.gear.quality, 5);
-
-    /* 机器猫的「头 / 拳」是裸后缀，按单件名去后缀会拆成两族；融合认套必须按 setId 的公共前缀。 */
-    const cat = setup([209, 210, 211], { gold: 1000 });
-    const catInfo = cat.context.State.fusionFamilyInfo(cat.gears);
-    assert.equal(catInfo && catInfo.family, '机器猫', '机器猫头/拳/服要认成同一套');
-    assert.equal(catInfo && catInfo.quality, 5, '机器猫橙装同套保底到黑装');
-  } finally {
-    vm.runInContext('Math.random = globalThis.__oldRandom; delete globalThis.__oldRandom', game.context);
+test('融合产物部位从三件材料随机取，2% 变异阈值与联机一致', () => {
+  function run(draws) {
+    const game = setup([201, 202, 203], { gold: 1000 });
+    const S = game.context.State;
+    vm.runInContext('globalThis.__oldRandom = Math.random; globalThis.__draws = ' +
+      JSON.stringify(draws) + '; globalThis.__drawIndex = 0;' +
+      'Math.random = () => (__drawIndex < __draws.length ? __draws[__drawIndex++] : 0.9);', game.context);
+    try {
+      return S.mergeGears(game.gears.map((gear) => gear.key));
+    } finally {
+      vm.runInContext('Math.random = __oldRandom; delete __oldRandom; delete __draws; delete __drawIndex;', game.context);
+    }
   }
+  /* 201/202/203 = 狂战紫 头/拳/服；第一掷选部位来源材料。 */
+  assert.equal(run([0.1, 0.5]).gear.type, 0, '0.1 选第一件（头巾）');
+  assert.equal(run([0.4, 0.5]).gear.type, 1, '0.4 选第二件（手套）');
+  assert.equal(run([0.9, 0.5]).gear.type, 2, '0.9 选第三件（衣服）');
+  assert.equal(run([0.1, 0.019]).gear.mutant, true, '0.019 < 0.02 触发变异');
+  assert.equal(run([0.1, 0.02]).gear.mutant, false, '0.02 不触发变异');
+  const game = setup([201, 202, 203]);
+  assert.equal(game.context.State.fusionFamilyInfo(game.gears), null, '不再显示同套保底提示');
 });
 
 test('现代融合只在有贴图的装备之间进行：产物落在放行的候选上', () => {
   /* 用户 2026-10-28 口径：现代界面把「没有贴图」的装备当作不存在 ——
    * 材料与产物都只在有现代贴图的装备里挑。这里把「有贴图」缩小成 {49,50,51,125}：
    * 三件紫装是材料，候选里只剩 125（橙格斗头巾），产物必须正好是它。 */
-  const game = setup([49, 50, 51], { mode: 'modern', gold: 200 });
-  const allowed = new Set([49, 50, 51, 125]);
+  const game = setup([49, 49, 49], { mode: 'modern', gold: 200 });
+  const allowed = new Set([49, 125]);
   game.context.UI.classic.gearHasArt = (g) => allowed.has(Number(g && g.id));
   game.context.ClassicFusion.open();
   game.gears.forEach((gear) => game.click('gear', gear.key));

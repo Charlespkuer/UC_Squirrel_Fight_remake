@@ -21,6 +21,20 @@ class MainActivity : TauriActivity() {
   /** 主线程消息队列：用来「稍等一拍再冻结 WebView」。 */
   private val ui = Handler(Looper.getMainLooper())
 
+  /** 合并连续的系统配置变化：新机（Android 16 / 折叠屏 / 分屏）一次转屏或系统栏动画
+   *  会在几帧内连发多次 `onConfigurationChanged`。每次立即 evaluate 会让页面反复
+   *  fitCanvas，表现就是「界面缩放不停切换」。这里只保留最后一拍，80ms 后通知一次。 */
+  private val relayoutRunnable = Runnable {
+    try {
+      gameWebView?.evaluateJavascript(
+        "window.__ssdzRelayout && window.__ssdzRelayout()",
+        null,
+      )
+    } catch (_: Exception) {
+      // 页面还没建好；启动/回前台还会再补一次。
+    }
+  }
+
   /** 生命周期序号：onPause 排的冻结任务只有在期间没回到前台时才执行。 */
   private var lifecycleSeq = 0
 
@@ -56,7 +70,14 @@ class MainActivity : TauriActivity() {
 
   @Volatile private var softwareRender = false
 
-  /** 只在 Android 16 + 高通 Adreno 8xx/7xx 上自动启用。 */
+  /** 只在 Android 16 + 现场确认过绿屏的**整机**上自动启用（K90 Pro Max / MagicPad3 Pro）。
+   *
+   *  ⚠ 自动档只覆盖这两台现场确认过绿屏的机器（同 SM8850 的其它机型不算）。
+   *  1.1.6 曾把 SM8450/8475/8550/8650/8750 一起自动落到软件层；1.1.7 又按 SoC 把整个
+   *  SM8850 家族都按到软件层 —— 软件光栅化要把整棵 WebView 每帧画到 CPU 上（模拟器实测
+   *  50 分位 16.7ms → 33.3ms，约 30fps），于是“画面本来正常的机器”更新后变成战斗卡顿。
+   *  没有绿屏证据的机器不再自动开；仍可用设置页「兼容渲染 → 开」或
+   *  `--ez forceSoftware true` 手动逃生。 */
   private fun shouldUseSoftwareRenderer(): Boolean {
     if (Build.VERSION.SDK_INT < 36) return false
     val maker = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MANUFACTURER else ""
@@ -64,8 +85,18 @@ class MainActivity : TauriActivity() {
     val qualcomm = maker.equals("Qualcomm", ignoreCase = true) ||
       Build.HARDWARE.startsWith("qcom", ignoreCase = true)
     if (!qualcomm) return false
-    val known = listOf("SM8850", "SM8750", "SM8650", "SM8550", "SM8475", "SM8450")
-    return known.any { model.startsWith(it, ignoreCase = true) }
+    val known = listOf("SM8850")
+    if (!known.any { model.startsWith(it, ignoreCase = true) }) return false
+    /* 【2026-11 性能口径】**同 SoC 不等于同毛病**：1.1.6/1.1.7 只要 SM8850 就自动落软件层，
+     * 于是所有新骁龙 8 至尊版（不止 K90 Pro Max）都被按到 CPU 光栅化 —— 模拟器实测软件层
+     * 满分辨率 50 分位 33ms（约 30fps，硬件路径 16.7ms/60fps），这正是玩家反馈“战斗还是卡”
+     * 的主要来源。自动档现在只认**现场确认过绿屏**的整机（K90 Pro Max / MagicPad3 Pro，
+     * 按型号/产品名/代号匹配）；其余 SM8850 保持硬件渲染，真遇到绿屏仍可在
+     * 「系统 → 兼容渲染 → 开」手动逃生，或 `--ez forceSoftware true`。 */
+    val names = listOf(Build.MODEL, Build.DEVICE, Build.PRODUCT, Build.BRAND, Build.MANUFACTURER)
+      .joinToString(" ").lowercase().replace(" ", "")
+    return names.contains("k90") || names.contains("25102") ||
+      names.contains("magicpad3") || names.contains("elpw") || names.contains("elpn")
   }
 
   /** 切 WebView 的图层类型；必须在主线程调用。重复调用是幂等的。 */
@@ -183,6 +214,7 @@ class MainActivity : TauriActivity() {
   override fun onResume() {
     super.onResume()
     lifecycleSeq++
+    ui.removeCallbacks(relayoutRunnable)
     thawWebView()
     try {
       /* 先让页面按当前窗口重排，再恢复音乐/系统栏。部分 ROM（iQOO / HyperOS）回前台
@@ -201,14 +233,10 @@ class MainActivity : TauriActivity() {
    *  系统不会重建 Activity，所以必须在这里主动通知页面重新量一次。 */
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
-    try {
-      gameWebView?.evaluateJavascript(
-        "window.__ssdzRelayout && window.__ssdzRelayout()",
-        null,
-      )
-    } catch (_: Exception) {
-      // 页面还没建好；启动/回前台还会再补一次。
-    }
+    /* 多拍合并：系统栏 / 转屏 / 分屏会连续发配置变化，单拍立即重排会让页面在两个
+     * 尺寸之间来回缩放。只留最后一拍，等 80ms 稳定后再量。 */
+    ui.removeCallbacks(relayoutRunnable)
+    ui.postDelayed(relayoutRunnable, 80L)
   }
 
   override fun onDestroy() {

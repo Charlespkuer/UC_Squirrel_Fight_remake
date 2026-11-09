@@ -85,6 +85,48 @@
     if (typeof clip.gotoAndStop === 'function') clip.gotoAndStop(n);
   }
 
+  /* 等级标里 "Lv" + 数字这一组的微调（用户 2026-11-07 口径：「LvX 往右上挪一点」）。
+   * 只动 `viplevel`（7032）第 1 帧的 d18（"Lv" 字形 7031）与 d19（数字精灵 4780），
+   * 图标 `vipType`(d1) 不动 —— 挪完 "LvX" 正好落在图标的中线上、也不再压住菱形右尖。
+   * 坐标按**舞台单位**给（原版舞台 320×196，1 单位 ≈ 满宽窗口的 1/320）：
+   *  · d18 的原版矩阵是单位阵 → 局部位移 = 舞台位移；
+   *  · d19 的 base 是 `0.61,0,0,0.61,26.85,4.7` → 局部位移 = 舞台位移 / 0.61。
+   * 用 `setDepthExtra` 而不是改 tags.json：原版矩阵由父级换帧时重写，附加段单独存、接在后面。 */
+  const VIP_TEXT_DX = 2.5;      // 正 = 右
+  const VIP_TEXT_DY = -1.8;     // 负 = 上（SVG 的 +y 向下）
+  const VIP_NUM_SIGMA = 0.61;   // d19 数字精灵原版矩阵的缩放
+  const VIP_LV_DEPTH = 18;      // 7032 f1 里 "Lv" 字形的深度
+  const VIP_NUM_DEPTH = 19;     // 7032 f1 里 `num` 数字精灵的深度
+
+  /**
+   * 主界面超级松鼠（原版 VIP）等级标：`MainMovie.as:15947-15966 showViplevel`。
+   * 生效时停第 1 帧，等级写进子数字精灵 `num`（帧号 = 等级 + 1，10 级是第 11 帧的“10”）；
+   * `vipType` 第 1 帧 = 新版超级松鼠、第 2 帧 = 旧版 UC VIP。未生效/已到期停第 2 帧（空帧）。
+   * 单独抽出来是给 `tools/test-ssfight-render.cjs` 用假 clip 直接钉住帧号。
+   */
+  function syncVipBadge(main) {
+    const vip = main && main.byName ? main.byName('viplevel') : null;
+    if (!vip || !vip.gotoAndStop) return false;
+    const level = (window.State && State.vipLevel) ? Math.max(0, Number(State.vipLevel()) || 0) : 0;
+    if (level > 0) {
+      vip.gotoAndStop(1);
+      const num = vip.byName('num');
+      if (num && num.gotoAndStop) num.gotoAndStop(Math.min(num.frameCount(), level + 1));
+      const type = vip.byName('vipType');
+      if (type && type.gotoAndStop) type.gotoAndStop(1);
+      /* 每次刷新都重设一遍：换帧 / 重新挂载会重建这两个子节点，附加段跟着节点走。 */
+      if (vip.setDepthExtra) {
+        vip.setDepthExtra(VIP_LV_DEPTH, 'translate(' + VIP_TEXT_DX + ',' + VIP_TEXT_DY + ')');
+        vip.setDepthExtra(VIP_NUM_DEPTH, 'translate(' +
+          (VIP_TEXT_DX / VIP_NUM_SIGMA).toFixed(3) + ',' +
+          (VIP_TEXT_DY / VIP_NUM_SIGMA).toFixed(3) + ')');
+      }
+    } else {
+      vip.gotoAndStop(2);
+    }
+    return true;
+  }
+
   /** 原版的 setText(文本框, 字符串)：把文本占位换成真实内容（村庄页用它写昵称）。
    *  ⚠ 换行必须交给显示层（`SfRender.setText`）：SVG 的 `<text>` **不会**把 `\r`/`\n` 当断行，
    *  自己写 `textContent` 的话多行文案会连成一行冲出字段框（祭坛那三行双倍几率就是这么坏的）。
@@ -441,11 +483,12 @@
    * 药丸库元件（"大力丸2" 等）是**运行时按名挂的**，不在静态闭包里 ——
    * 所以复刻用「道具图标」在槽上盖一层 DOM。
    *
-   * ⚠ 2026-10 用户口径（本批）：**格子长相全面照现代版界面那套药丸来画**，
-   *   只把**位置**留在原版槽位。现代版主界面那颗就是 `css/classic.css` 的 `.home-buff`：
-   *   奶油白圆角块 + 金棕描边 + 内高光 + 白底金棕描边的"剩余场次"小圆牌（`.home-buff i`），
-   *   图标 48px 填在 58px 的块里。现在 `.ssfight-state`（见 css/classic-refine.css）
-   *   就是**逐条照抄那一套**，尺寸与位置由 `positionStateIcons` 按原版槽位算出来。
+   * ⚠ 2026-11 用户口径（本批）：**去掉药丸外面的框、贴图放大，并保留剩余场次角标**。
+   *   原版主界面就是药丸直接贴在槽位上，没有奶油底块；用户要求把之前那层
+   *   "现代配方"的圆角块去掉，但**右下角的剩余场次要留着**。
+   *   所以 `.ssfight-state`（见 css/classic-refine.css）现在 = 可见药丸（槽边长）
+   *   + 一颗悬浮在右下角的数字角标；道具矢量四周有留白，贴图盒子放大到槽的 1.5 倍
+   *   （见 STATE_ICON_SCALE），并逐个校正矢量的居中偏移（见 STATE_ICON_NUDGE）。
    *   顺带把原版那三个**槽自己**藏起来：原版 `gotoAndStop(2)` 是空帧、槽本来就什么都不画，
    *   而帧 1 那条金渐变描边形状以前一直露在图标外面当"底板"，正是用户觉得"丑"的那一层。
    * ========================================================== */
@@ -463,13 +506,39 @@
    * 空槽停在**第 2 帧（空帧）**，`getBoundingClientRect()` 量出来是 0×0 ——
    * 所以槽的位置与大小只能算，不能量（量出来是 0 就把图标缩没了）。 */
   const STATE_SLOT = 42.3;
-  /* 药丸块占槽的比例：块比原版那个格子略小一点，居中盖在槽上。
-   * （现代版是 58px 的块装 48px 的图标 → 图标/块 = 0.83，下面那档也照这个来。） */
-  const STATE_CHIP_RATIO = 0.76;
-  /* 图标占**药丸块**的比例 —— 与 `.home-buff img` 的 48/58 = 0.83 同一档。 */
-  const STATE_ICON_RATIO = 0.83;
-  /* 图标源：道具图集。不引 classic-ui 的 atlasIcon：那个函数在 IIFE 里没导出。 */
+  /* 药丸图标盒子占槽边长的比例。原版 `showStates` 把库元件"大力丸2"按 0.71 直接挂进槽里，
+   * 药丸差不多占满槽；复刻用的是道具矢量（四周留白，可见药丸只占 viewBox 的 ~0.67），
+   * 所以盒子要放大 1 / 0.67 ≈ 1.5 倍，可见药丸直径才等于槽边长（截图实测 ≈ 1.03 倍）。
+   * 盒子比槽大是正常的：多出来的是矢量自带的透明留白，药丸的中心仍对齐槽中心。 */
+  const STATE_ICON_SCALE = 1.5;
+  /* 8 颗道具矢量在 viewBox 里并不完全居中 —— 速度丸（5）最明显，可见药丸比盒子中心
+   * 偏下约 3.4%（1928 宽下约 6px，用户 2026-11 直接看出来了）。这里按 467px 栅格化后
+   * alpha>220 的可见包围盒实测值，把贴图整体平移回盒子中心；单位是"图标盒子边长的比例"。
+   * PNG 图集（兜底）本身居中，不套这张表。
+   * 值 = [nx, ny]，ny<0 表示往上抬。 */
+  const STATE_ICON_NUDGE = {
+    3: [0.0075, -0.0161],
+    4: [0.0021, 0.0064],
+    5: [-0.0075, -0.0343],
+    7: [-0.0021, -0.0032],
+    41: [0, 0],
+    42: [0, 0],
+    43: [0, 0],
+    44: [0, -0.001],
+  };
+  /* 图标源：主页这 8 颗药丸用联机版同款的原版无框矢量（道具矢量四周有透明留白，
+   * 正合 STATE_ICON_SCALE）；没有矢量时仍回退现代 PNG 图集。
+   * ⚠ 单机版的 `UI.classic.propIconSrc` 目前对这 8 颗仍返回 PNG（它的无框矢量名单还没扩到
+   * 药丸），所以这里先命中本地名单；其余道具继续走公共表 / PNG 兜底。 */
+  const STATE_PILL_SVG = new Set([3, 4, 5, 7, 41, 42, 43, 44]);
   const STATE_ICON_BASE = 'images/ui/icons/prop/prop-';
+  function stateIconSrc(id) {
+    const n = Number(id);
+    if (STATE_PILL_SVG.has(n)) return STATE_ICON_BASE + n + '.svg';
+    const classic = window.UI && window.UI.classic;
+    if (classic && typeof classic.propIconSrc === 'function') return classic.propIconSrc(n);
+    return STATE_ICON_BASE + n + '.png';
+  }
   /* 上一次真正写进宿主 DOM 的那个签名。
    * ⚠ 这**不能**当成"当前该显示什么"的缓存 —— 它必须跟着宿主 DOM 一起失效。
    * 第一百五十批修的正是这个：切到现代模式再切回来，`.ssfight-home` 是新的（空的），
@@ -560,7 +629,7 @@
       host.innerHTML = pills.map((p) => '<span class="ssfight-state" data-pill="' + p.id + '" role="img"' +
         ' aria-label="' + esc(p.label + '：剩余 ' + p.count + ' 场战斗') + '"' +
         ' title="' + esc(p.label + '（剩余 ' + p.count + ' 场战斗）') + '">' +
-        '<img alt="" src="' + STATE_ICON_BASE + p.id + '.png">' +
+        '<img alt="" src="' + stateIconSrc(p.id) + '">' +
         '<b>' + p.count + '</b></span>').join('');
     }
     positionStateIcons(host, view);
@@ -622,27 +691,34 @@
       const center = overflow > 0
         ? { cx: base.cx + dx * (i - overflow), cy: base.cy + dy * (i - overflow), side: base.side }
         : slot;
-      /* 药丸块比原版那个格子小一档，**居中**盖在槽上（原版 `attachMovie` 的落点也是槽的原点，
-       * 只是原版药丸自带留白；这里按包围盒对齐，看起来更稳）。
+      /* 可见药丸 = 槽边长，**中心对齐槽中心**（原版 `attachMovie` 也是把药丸挂在槽的原点、
+       * 再按槽居中）。贴图盒子再放大 1.5 倍（道具矢量自带留白），于是可见药丸正好铺满
+       * 这个 `span` —— 右下角的剩余场次角标才能贴着药丸边缘放。
        * 都在屏幕像素里换算，最后统一走 `fix()` 折回设计像素，与 `--uiscale` 抵消。 */
-      const side = center.side * STATE_CHIP_RATIO;
-      /* `side` 是**屏幕像素**目标；写进 DOM 的 width/height/--icon/--u 都是 CSS px，
+      const pillSide = center.side;
+      /* `pillSide` 是**屏幕像素**目标；写进 DOM 的 width/height/--icon/--u 是 CSS px，
        * 还要再被宿主自身的 `--uiscale` 乘一次。以前只对 left/top 做了 fix，宽高没除，
        * 安卓上宿主缩放约 0.55 时药丸会被缩成约 17px（用户报的“药丸过小”）。
-       * 这里把三档尺寸统一折回设计像素，桌面 hostScale=1 时结果不变。 */
-      const sideCss = fix(side);
+       * 这里把尺寸统一折回设计像素，桌面 hostScale=1 时结果不变。 */
+      const sideCss = fix(pillSide);
+      const iconCss = sideCss * STATE_ICON_SCALE;
       el.style.display = '';
-      el.style.left = fix(center.cx - hostRect.left - side / 2) + 'px';
-      el.style.top = fix(center.cy - hostRect.top - side / 2) + 'px';
+      el.style.left = fix(center.cx - hostRect.left - pillSide / 2) + 'px';
+      el.style.top = fix(center.cy - hostRect.top - pillSide / 2) + 'px';
       el.style.width = sideCss + 'px';
       el.style.height = sideCss + 'px';
-      /* 图标按 STATE_ICON_RATIO 缩一档（＝现代版 `.home-buff` 的 48/58）。
-       * 块本身走 DOM 而不去拨 SVG 的帧：`refreshValues` 每秒都把 c1/c2/c3 拨回空帧。
-       * `--u` 是"现代版 58px 那块"的换算单位（= 块边长 / 58）：CSS 里所有尺寸都写在
-       * `.home-buff` 的原值 × `--u`，于是换窗口尺寸时配方不变、观感一致。 */
-      const icon = sideCss * STATE_ICON_RATIO;
-      el.style.setProperty('--icon', icon.toFixed(3) + 'px');
-      el.style.setProperty('--u', (sideCss / 58).toFixed(4) + 'px');
+      el.style.setProperty('--icon', iconCss.toFixed(3) + 'px');
+      /* 角标沿用现代版 `.home-buff i` 的配方，但按**药丸**（不是那块 58px 的底）缩放：
+       * 26/80 ≈ 药丸直径的 1/3，两个数字的胶囊宽度也不会压到隔壁那颗。 */
+      el.style.setProperty('--u', (sideCss / 80).toFixed(4) + 'px');
+      /* 矢量贴图的可见药丸不完全居中（速度丸偏下最明显），按实测值平移回来；
+       * PNG 图集本身居中，不套这张表。药丸本身走 DOM 而不去拨 SVG 的帧：
+       * `refreshValues` 每秒都把 c1/c2/c3 拨回空帧。 */
+      const img = el.querySelector('img');
+      const svg = img && /\.svg(?:$|\?)/i.test(img.getAttribute('src') || '');
+      const nudge = svg ? (STATE_ICON_NUDGE[Number(el.getAttribute('data-pill'))] || [0, 0]) : [0, 0];
+      el.style.setProperty('--nx', (iconCss * nudge[0]).toFixed(2) + 'px');
+      el.style.setProperty('--ny', (iconCss * nudge[1]).toFixed(2) + 'px');
     });
   }
   /** 量宿主自身被缩放的倍数（挂一个 100px 的探针进去量，量完就摘）。
@@ -687,9 +763,17 @@
     const nextExp = Math.max(1, (window.GData && GData.nextExp) ? GData.nextExp(S.level)
       : (S.nextExp || 1));
 
-    setText(main.byName('name'), S.name);                                    // :9378
+    const nameClip = main.byName('name');
+    setText(nameClip, S.name);                                               // :9378
+    /* 昵称最多 7 个汉字（英文/数字按 1/3 计，最多 21 个字母）。原版字段框只有
+     * 100.65 单位宽、14 号字，7 个汉字 + 字距已经贴边，英文昵称更宽 ——
+     * 先套上昵称样式再按框宽缩字号，最后描边（描边宽度跟最终字号走）。 */
+    styleName(main);
+    if (window.SfRender && SfRender.fitTextWidth) {
+      SfRender.fitTextWidth(nameClip, { ascii: 0.72, spacing: 0.4, min: 6 });
+    }
     /* 昵称加一点黑色描边（用户 2026-10 本批 ⑩，见 `paintNicknameStroke` 的注释）。 */
-    paintNicknameStroke(main.byName('name'));
+    paintNicknameStroke(nameClip);
     setFrame(main.byName('expMc'), Math.ceil(S.exp * 100 / nextExp) + 1);    // :9379
     const pct = Math.floor(S.exp * 1000 / nextExp);                          // :9380（千分比）
     /* ⚠ 经验数字写进的是 **main.expNum**（原版 :9385/:9389/:9393/:9397 传的都是 main.expNum）。
@@ -758,13 +842,8 @@
     }
     /* 药丸图标只在**主菜单页**（有 c1 的那一页）上画；村庄页的 homeMc 里没有这三个槽。 */
     if (main.byName('c1')) renderStateIcons(view.el, view);
-    /* :15947-15966 showViplevel：非 VIP → gotoAndStop(2)（隐藏态）。
-     * 复刻免费版没有 VIP（State.vipLevel() 恒 0）→ 永远停在隐藏帧。 */
-    const vip = main.byName('viplevel');
-    if (vip && vip.gotoAndStop) vip.gotoAndStop(2);
-    if (vip && vip.style && window.State.vipLevel) {
-      vip.style.display = State.vipLevel() > 0 ? '' : 'none';
-    }
+    /* :15947-15966 showViplevel：超级松鼠（VIP）生效 → 等级标；未开通/到期 → 空帧。 */
+    syncVipBadge(main);
     /* constructMainMenu（MainMovie.as:6992-7020）：底栏按等级解锁 ——
      * 1 级只有「开始挑战」；2 级加「消息 / 系统」；3 级起全开（原版 bitArray 原样）。 */
     const bits = S.level <= 1 ? [0, 0, 1, 0, 0] : S.level === 2 ? [0, 0, 1, 1, 1] : [1, 1, 1, 1, 1];
@@ -1906,6 +1985,35 @@
    *  这里用 72ms：既"看得出在放动画"，又不会慢到让悬停像卡住。
    *  元件帧数见 `images/ssfight/ui/tags-home.json`：mc1=6 / mc3=7 / mc4=7 / mc5=2 帧。 */
   const VILLAGE_PLAY_MS = 72;
+  /* ---------- 建筑升级中的「松鼠修房子」动画 ----------
+   * 原版 `showUpgrading()`（MainMovie.as:9680-9762）在某个地点升级中时，把库元件
+   * **「松鼠修房子」** 挂到那一栋建筑的容器里（`mc1.attachMovie(...)`），松鼠便抡锤子
+   * 敲三下、每下带一次星光，循环播放。挂载参数照抄原版（version = "h"）：
+   *   mc1 祭坛：_xscale=-100、_yscale=100、_x+=450、_y+=250
+   *   mc3 神迹：_xscale= -70、_yscale= 70、_x+=190、_y+=120
+   *   mc4 幻兽：_xscale=-100、_yscale=100、_x+=400、_y+=100
+   * 素材是运行期 attach 的库元件（5614），不在 `tags-home.json` 的静态闭包里 ——
+   * 所以单独成包（`tags-repair.json`），只有真的有建筑在升级时才 `loadExtra()` 一次。 */
+  const REPAIR_SYMBOL = '5614';
+  const REPAIR_BUNDLE = 'tags-repair.json';
+  const REPAIR_AT = {
+    mc1: { x: 450, y: 250, scale: 1 },
+    mc3: { x: 190, y: 120, scale: 0.7 },
+    mc4: { x: 400, y: 100, scale: 1 },
+  };
+  let repairBundle = 0;               // 0 未加载 / 1 加载中 / 2 可用 / -1 加载失败
+  let repairBundlePromise = null;
+  function ensureRepairBundle() {
+    if (repairBundle === 2) return Promise.resolve(true);
+    if (repairBundlePromise) return repairBundlePromise;
+    repairBundle = 1;
+    repairBundlePromise = SfRender.loadExtra(REPAIR_BUNDLE).then(() => {
+      repairBundle = 2; repairBundlePromise = null; return true;
+    }, () => {
+      repairBundle = -1; repairBundlePromise = null; return false;
+    });
+    return repairBundlePromise;
+  }
   /** 把元件**从头播一遍**（放完停在最后一帧；`loop` 为真则循环播，直到 `stopPlay` 叫停）。
    *  这是 Flash 里 `gotoAndPlay()` 的等价物 —— 复刻的节拍器也能推进它，
    *  但这里必须**自己走**：一是立绘要"放完停在最后一帧"（节拍器只管循环推进），
@@ -2012,18 +2120,23 @@
     wireVillage(view);
     /* 建筑等级的结算放在**进村庄**这一刻（原版 `showHomeLand` → `checkUpgraded`，:9507）：
      * 升级完成、神迹发属性点、并把提示弹出来。结算完再重画一次立绘与倒计时。 */
-    try { settleVillageBuildings(); } catch (e) { if (window.__errs) window.__errs.push('village buildings: ' + (e && e.message)); }
+    let settled = [];
+    try { settled = settleVillageBuildings() || []; } catch (e) { if (window.__errs) window.__errs.push('village buildings: ' + (e && e.message)); }
+    /* `wireVillage` 在上面已经按**结算前**的 `upgrading` 挂过「松鼠修房子」并写了倒计时；
+     * 结算真的完成了升级时立刻重画一遍，否则建筑会停在旧档、松鼠也还在敲。 */
+    if (settled.length) { try { refreshVillageBuildings(); } catch (e) {} }
     /* 新手引导 f17/f19/f20/f26 都在村庄页（原版 HOME_LAND :9480-9670）。
      * ⚠ UI.currentScreen() 在村庄页仍是 'home'（openVillage 不改 screen），
      * 所以这里显式通知一次。 */
     if (window.SfGuide) { try { SfGuide.onPage('village'); } catch (e) {} }
     return view;
   }
-  /** 进村庄时结算"升级完成"（原版 `checkUpgraded` :9763）并把结果告诉玩家。 */
+  /** 进村庄时结算"升级完成"（原版 `checkUpgraded` :9763）并把结果告诉玩家。
+   *  返回 `State.settleBuildings()` 的完成列表（调用方据此决定要不要重画）。 */
   function settleVillageBuildings() {
-    if (!(window.State && State.settleBuildings)) return;
+    if (!(window.State && State.settleBuildings)) return [];
     const done = State.settleBuildings() || [];
-    if (!done.length) return;
+    if (!done.length) return [];
     const names = { altar: '祭坛', miracle: '神迹', beast: '幻兽牧场' };
     const lines = done.map((d) => {
       if (d.key === 'altar') return '祭坛升级完成啦，特殊状态的触发几率提高了！';
@@ -2035,6 +2148,7 @@
     });
     lines.forEach((t) => { try { if (window.UI && UI.toast) UI.toast(t); } catch (e) {} });
     void names;
+    return done;
   }
   /** 重画村庄页的建筑相关显示（等级牌子 / 立绘档位 / 升级倒计时）。
    *  地点页里升级成功之后由 `SfVillage` 回过头来调（见 ui-village.js 的 finishUpgrade）。 */
@@ -2198,6 +2312,69 @@
       setText(rel('time3'), m && m.upgrading ? show(m.remainTime) : '');
       setText(rel('time4'), b && b.upgrading ? show(b.remainTime) : '');
     };
+    /* ---------- 升级中的「松鼠修房子」动画 ----------
+     * 原版 `showUpgrading()` 只对 `upgrading == "true"` 的那几栋 `attachMovie`；
+     * 升级完成 / 取消后 `removeMovieClip()`。复刻照同一条状态走：
+     *   ① 对应建筑在升级 → `attachChild('5614')`，写原版的镜像/偏移，交给节拍器循环；
+     *   ② 不在升级 → 摘掉（`detachAll()` 会连子动画一起注销，避免留下空转实例）。 */
+    const repairClips = view.__repairClips || (view.__repairClips = new Map());
+    const detachRepair = (name) => {
+      const c = repairClips.get(name);
+      if (!c) return;
+      repairClips.delete(name);
+      c.playing = false;
+      if (view.live) view.live.delete(c);      // 摘下来的这一颗自己不会再被节拍器回收
+      const host = rel(name);
+      if (host && host.g) {
+        host.g.classList.remove('sf-repairing-host');
+        const shell = host.g.querySelector(':scope > g.uc-pop');
+        if (shell) shell.classList.remove('sf-repairing');
+      }
+      if (host && host.detachAll) host.detachAll();
+      else if (c.g && c.g.parentNode) c.g.parentNode.removeChild(c.g);
+    };
+    const repairWanted = () => Object.keys(REPAIR_AT).filter((name) => {
+      const b = buildingOf(name);
+      return !!(b && b.upgrading && rel(name));
+    });
+    const attachRepair = () => {
+      if (current !== view) return;
+      const want = repairWanted();
+      for (const name of [...repairClips.keys()]) if (want.indexOf(name) < 0) detachRepair(name);
+      for (const name of want) {
+        if (repairClips.has(name)) continue;
+        const host = rel(name);
+        const at = REPAIR_AT[name];
+        let clip = null;
+        try { clip = host.attachChild(REPAIR_SYMBOL, 1, 'repair'); } catch (e) { clip = null; }
+        if (!clip) continue;
+        /* 原版 `_xscale=-100; _yscale=100; _x+=450; _y+=250` —— 镜像 + 平移；
+         * `_x/_y` 是元件局部坐标，不受 `_xscale` 影响，所以平移量原样写。 */
+        clip.setExtraTransform('matrix(' + (-at.scale) + ',0,0,' + at.scale + ',' + at.x + ',' + at.y + ')');
+        clip.holdAnim(true);           // 静态页策略别再把它冻回第 1 帧
+        clip.play();                   // 交给渲染层的 14 fps 节拍器循环（原版同样 14 fps）
+        /* ⚠ 建筑壳在动画期间禁止 CSS filter / transform：逐帧变化的子树会让
+         * Android WebView / 部分 Chromium 复用旧滤镜区域，背景上出现矩形色块。
+         * 规则见 css/classic-refine.css 的 `.uc-pop.sf-repairing`。 */
+        if (host.g) {
+          const shell = host.g.querySelector(':scope > g.uc-pop');
+          if (shell) shell.classList.add('sf-repairing');
+          /* 祭坛 mc1 的 placement.cx 会生成一个 feComponentTransfer 滤镜；滤镜区域
+           * 按 bbox 每帧变化，WebView/Chromium 会留下矩形色块。用 CSS 类把**宿主**
+           * 的 filter 压掉（CSS 属性优先于 presentation attribute，渲染层之后重写
+           * 属性也压得住），动画摘掉即恢复原色。 */
+          host.g.classList.add('sf-repairing-host');
+        }
+        repairClips.set(name, clip);
+      }
+    };
+    const syncRepair = () => {
+      const want = repairWanted();
+      for (const name of [...repairClips.keys()]) if (want.indexOf(name) < 0) detachRepair(name);
+      if (!want.length) return;
+      if (repairBundle === 2) attachRepair();
+      else ensureRepairBundle().then((ok) => { if (ok) attachRepair(); });
+    };
     settleVillage();
     paintBuildingNumbers();
     paintBuildTimers();
@@ -2211,8 +2388,9 @@
     }, 80);
     /* ② 回家 / ③ 地点胶囊 / ④ 立绘那三套监听**只接一次**：本函数会被
      * `refreshVillageBuildings()`（地点页升级成功后重画）再调一次，
-     * 再走一遍就会把每颗按钮挂上第二套监听（点一下触发两次）。 */
-    if (already) return;
+     * 再走一遍就会把每颗按钮挂上第二套监听（点一下触发两次）。
+     * 但「松鼠修房子」的状态要跟着重算 —— 升级成功/完成都在重画时切换。 */
+    if (already) { syncRepair(); return; }
     /* ② 回家（7136）：3 帧里 1 常态 / 2 高亮 / 3 禁用空；里面那颗 9 帧的浮动图标**照原样播**。
      *   悬停/按下额外挂一层 CSS 动效壳（`.uc-pop`），见 popWrap 的注释。 */
     try {
@@ -2340,9 +2518,12 @@
      * 连带把 num 数字精灵拨回出厂占位（神迹/幻兽看起来闪成 00/100）。所有会换帧的接线
      * 做完后再同步重画一次，浏览器这一帧画出来就是正确等级，不再靠 80ms 后补。 */
     try { paintBuildingNumbers(); paintBuildTimers(); } catch (e) {}
+    /* 初次接线放在**所有量热区/包动效壳之后**：`addHitArea` 是按包围盒铺的，
+     * 先挂动画会把建筑的热区一起撑大。升级状态变化时由上面的早退分支再算。 */
+    try { syncRepair(); } catch (e) {}
   }
 
-  window.SfUiMain = { mount, mountVillage, destroy, refreshValues, showNumber, setText, BUTTON_ACTIONS,
+  window.SfUiMain = { mount, mountVillage, destroy, refreshValues, showNumber, setText, syncVipBadge, BUTTON_ACTIONS,
     markMessagesSeen, hasNewMessages,
     /** 地点页里升级成功之后重画村庄页（等级牌子 / 立绘档位 / 升级倒计时）。 */
     refreshVillageBuildings,

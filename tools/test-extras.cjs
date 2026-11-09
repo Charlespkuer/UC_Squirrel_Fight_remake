@@ -618,50 +618,71 @@ test('天梯每天都可比赛（周日不休赛），金杯商店每天都能�
   g.click('rank-fight'); assert.equal(g.battles.length, 1);                       // 周日真的能打
 });
 
-test('金杯商店兑换校验积分与两种货币，不扣积分，每周限一件且下周一重置', () => {
+test('金杯商店兑换校验积分与两种货币，不扣积分，狂战套每月限一件且下月 1 号重置', () => {
   const g = setup(), s = g.c.State.state(); s.level = 30; s.integral = 299; s.goldCup = 1000; s.goldPoint = 500;
   g.c.ClassicExtras.rank(); g.click('rank-shop'); g.click('rank-shop-next');
   const choose = () => g.page().querySelector('[data-goods="11"]').onclick();
   choose(); g.modalClick(); assert.equal(s.goldCup, 1000); assert.equal(s.goldPoint, 500); assert.equal(s.gears.length, 0);
   s.integral = 2000; choose(); const confirm = g.modals.at(-1).buttons[0].run; confirm(); confirm();
-  assert.equal(s.goldCup, 0); assert.equal(s.goldPoint, 300); assert.equal(s.gears[0].id, 201); assert.equal(s.rankPurchases[11], 1); assert.equal(s.integral, 2000);
+  assert.equal(s.goldCup, 0); assert.equal(s.goldPoint, 300); assert.equal(s.gears[0].id, 201); assert.equal(s.rankMonthPurchases[11], 1); assert.equal(s.integral, 2000);
+  assert.ok(/^\d{4}-\d{2}$/.test(s.rankPurchaseMonth), '记下月度账：' + s.rankPurchaseMonth);
+  assert.equal(s.rankPurchases[11], undefined, '狂战件不再记进按周账');
   s.goldCup = 2000; choose(); g.modalClick(); assert.equal(s.gears.length, 1); assert.equal(s.goldPoint, 300);
-  assert.match(g.modals.at(-1).html, /本周的兑换次数已用完/);
+  assert.match(g.modals.at(-1).html, /本月只能兑换 1 次/);
   g.c.State.save(); g.c.State.load(); const loaded = g.c.State.state();
   g.c.ClassicExtras.rankShop(); g.click('rank-shop-next'); choose(); g.modalClick(); assert.equal(loaded.gears.length, 1);
-  // 第 3 项：限兑按**周**重置 —— 隔一天还不能买，隔一周才可以
+  // 第 3 项：限兑按**月**重置 —— 隔一天还不能买，跨到下个月才可以
   g.advance(86400000); g.c.ClassicExtras.rankShop(); g.click('rank-shop-next'); choose(); g.modalClick();
-  assert.equal(loaded.gears.length, 1, '第二天仍然买不了（每周限一件）');
-  assert.match(g.modals.at(-1).html, /本周的兑换次数已用完/);
-  /* 跨周后积分按新规则清零：先让商店过一遍周检查，再把积分打回 2000 验限兑重置 */
-  g.advance(6 * 86400000); g.c.ClassicExtras.rankShop(); loaded.integral = 2000;
+  assert.equal(loaded.gears.length, 1, '第二天仍然买不了（每月限一件）');
+  assert.match(g.modals.at(-1).html, /本月只能兑换 1 次/);
+  /* 跨月后积分按周规则重算：先让商店过一遍周检查，再把积分打回 2000 验限兑重置 */
+  g.advance(8 * 86400000); g.c.ClassicExtras.rankShop(); loaded.integral = 2000;
   g.click('rank-shop-next'); choose(); g.modalClick();
-  assert.equal(loaded.gears.length, 2); assert.equal(loaded.goldPoint, 100); assert.equal(loaded.goldCup, 1000); assert.equal(loaded.rankPurchases[11], 1);
+  assert.equal(loaded.gears.length, 2); assert.equal(loaded.goldPoint, 100); assert.equal(loaded.goldCup, 1000); assert.equal(loaded.rankMonthPurchases[11], 1);
   assertBalanced(g.markup);
 });
 
-test('金杯商店跨周：限兑按周重置，未标周次的旧购买计数在迁移时清空', () => {
+test('金杯商店跨月迁移：旧周账里的狂战件数搬进本月账，不会白送一次', () => {
   const g = setup(), s = g.c.State.state(); s.level = 30; s.integral = 2000; s.goldCup = 4000; s.goldPoint = 1000;
-  s.rankPurchases = { 11: 1 };   // 旧档只有计数、没有日期
+  s.rankPurchases = { 11: 1 };   // 旧档只有按周计数、没有月度标记
   g.c.ClassicExtras.rankShop(); g.click('rank-shop-next');
-  assert.deepEqual(JSON.parse(JSON.stringify(s.rankPurchases)), {});   // 迁移到按周重置时清空
-  assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(s.rankPurchaseWeek), '记下本周周一：' + s.rankPurchaseWeek);
+  assert.equal(s.rankMonthPurchases[11], 1, '旧周账要搬进本月账');
+  assert.ok(/^\d{4}-\d{2}$/.test(s.rankPurchaseMonth), '记下本月：' + s.rankPurchaseMonth);
+  assert.deepEqual(JSON.parse(JSON.stringify(s.rankPurchases)), {}, '按周账照旧清空');
   assert.equal(s.rankPurchaseDay, undefined, '旧的按天标记要删掉');
   g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick();
-  assert.equal(s.gears.length, 1);
-  g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick();
-  assert.equal(s.gears.length, 1);
-  assert.match(g.modals.at(-1).html, /本周的兑换次数已用完/);
-  g.advance(3 * 86400000);                         // 同一周内（周三 → 周六）
-  g.c.ClassicExtras.rankShop(); g.click('rank-shop-next');
-  g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick();
-  assert.equal(s.gears.length, 1, '同一周内不能再买');
-  g.advance(3 * 86400000);                         // 跨到下一周（积分同时清零，重新打回去）
+  assert.equal(s.gears.length, 0, '迁移后本月已经算买过，不能再买');
+  assert.match(g.modals.at(-1).html, /本月只能兑换 1 次/);
+  g.advance(8 * 86400000);                         // 跨到下个月（积分按周规则重算）
   g.c.ClassicExtras.rankShop(); s.integral = 2000;
   g.click('rank-shop-next');
   g.page().querySelector('[data-goods="11"]').onclick(); g.modalClick();
-  assert.equal(s.gears.length, 2);
-  assert.equal(s.rankPurchases[11], 1);
+  assert.equal(s.gears.length, 1, '跨月后恢复 1 次');
+  assert.equal(s.rankMonthPurchases[11], 1);
+});
+
+test('两套狂战（11-14 / 20-23）都按每月限兑一次', () => {
+  const g = setup(), s = g.c.State.state();
+  s.level = 30; s.integral = 5000; s.goldCup = 20000; s.goldPoint = 10000;
+  const buy = (page, id) => {
+    g.c.ClassicExtras.rankShop();
+    for (let i = 1; i < page; i++) g.click('rank-shop-next');
+    g.page().querySelector('[data-goods="' + id + '"]').onclick(); g.modalClick();
+  };
+  /* 第一套（goods 11-14）在第 2 页 */
+  buy(2, 11); assert.equal(s.gears.length, 1);
+  buy(2, 11); assert.equal(s.gears.length, 1, '第一套本月第二次被拦');
+  assert.match(g.modals.at(-1).html, /本月只能兑换 1 次/);
+  /* 第二套（goods 20-23）在第 4 页 */
+  buy(4, 20); assert.equal(s.gears.length, 2);
+  buy(4, 20); assert.equal(s.gears.length, 2, '第二套本月第二次被拦');
+  assert.match(g.modals.at(-1).html, /本月只能兑换 1 次/);
+  assert.equal(s.rankMonthPurchases[11], 1);
+  assert.equal(s.rankMonthPurchases[20], 1);
+  g.advance(40 * 86400000);                       // 跨月
+  g.c.ClassicExtras.rankShop(); s.integral = 5000;
+  buy(2, 11); buy(4, 20);
+  assert.equal(s.gears.length, 4, '跨月后两套都恢复 1 次');
 });
 
 

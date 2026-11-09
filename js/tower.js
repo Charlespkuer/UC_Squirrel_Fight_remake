@@ -55,6 +55,11 @@
    * 不改变常规无尽塔 / 经典模式的早期曲线。0.90 = 力 / 敏 / 速 / 生命各降 10%。 */
   const HERO_EARLY_FOE_MUL = 0.90;
   const HERO_EARLY_FOE_LAST_LAYER = 5;
+  /* 【2026-11-09 用户口径】无尽塔第 1~5 层敌方力 / 敏 / 速 / 生命**再各降 5%**。
+   * 这是两种无尽剧本共用的早段修正：与勇者原来的 10% 乘算（0.90 × 0.95 = 0.855），
+   * 经典无尽直接 ×0.95；第 6 层起恢复原曲线。 */
+  const ENDLESS_EARLY_FOE_MUL = 0.95;
+  const ENDLESS_EARLY_FOE_LAST_LAYER = 5;
 
   function debug(flag) { return typeof debugOn === 'function' && debugOn(flag); }
   /** 调试开关「试炼币不消耗」（2026-10 用户口径，取代原来那个没生效的「无尽试炼币拉满」）：
@@ -2952,12 +2957,21 @@
      * 判定与进层那次共用同一份（`TowerPlot.due`，见 autoPlayStory），不会出现两种口径。 */
     if (mode === 'endless' && !previewRun) autoPlayStory(run);
     const built = buildFoe(mode, run.layer, entry, run.salt, isLastBattle);
-    /* 勇者剧本 1~5 层：敌人面板整体收一档（用户 2026-10-29 口径）。
-     * 放在 buildFoe 之后、所有敌方削弱（E07/E11 / 威慑）之前，乘区顺序不影响结果。 */
-    if (isHeroRun(run) && Math.max(1, Math.floor(Number(run.layer) || 1)) <= HERO_EARLY_FOE_LAST_LAYER) {
+    /* 1~5 层早段修正（2026-10-29 勇者 10%；2026-11-09 两种无尽剧本通用再降 5%）：
+     * 放在 buildFoe 之后、所有敌方削弱（E07/E11 / 威慑）之前，乘区顺序不影响结果。
+     * 两段各自取整：先落勇者原来的 10%，再乘通用 0.95 —— 对勇者来说就是
+     * 「当前面板再 ×0.95」，不会因为合并成 0.855 一次取整而多降 1 点。 */
+    const earlyLayer = Math.max(1, Math.floor(Number(run.layer) || 1));
+    if (isHeroRun(run) && earlyLayer <= HERO_EARLY_FOE_LAST_LAYER) {
       const foe = built.foe;
       for (const key of ['power', 'agility', 'speed', 'hp']) {
         foe[key] = Math.max(1, Math.round((Number(foe[key]) || 1) * HERO_EARLY_FOE_MUL));
+      }
+    }
+    if (mode === 'endless' && earlyLayer <= ENDLESS_EARLY_FOE_LAST_LAYER) {
+      const foe = built.foe;
+      for (const key of ['power', 'agility', 'speed', 'hp']) {
+        foe[key] = Math.max(1, Math.round((Number(foe[key]) || 1) * ENDLESS_EARLY_FOE_MUL));
       }
     }
     const foeCtx = { hero: entry.kind === 'hero', poolNpc: built.poolNpc, elite: built.elite };

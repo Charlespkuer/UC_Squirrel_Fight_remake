@@ -54,7 +54,11 @@ test('Android 16 回前台不再黑屏：版本闸门在冻结之前，重排钩
   const resumeBody = resume.slice(0, resume.indexOf('override fun onConfigurationChanged'));
   assert.match(resumeBody, /__ssdzRelayout[\s\S]*__ssdzEnterForeground/, 'onResume 应先重排再恢复前台状态');
   const cfg = activity.slice(activity.indexOf('override fun onConfigurationChanged'));
-  assert.match(cfg.slice(0, cfg.indexOf('override fun onDestroy')), /__ssdzRelayout/, 'onConfigurationChanged 必须通知重排');
+  const cfgBody = cfg.slice(0, cfg.indexOf('override fun onDestroy'));
+  assert.match(cfgBody, /relayoutRunnable|__ssdzRelayout/,
+    'onConfigurationChanged 必须通知重排（合并连拍后再调 __ssdzRelayout）');
+  assert.match(cfgBody, /postDelayed\(relayoutRunnable,\s*80L\)/,
+    '连续配置变化要合并成一拍（80ms），不能每拍都重排');
 
   assert.match(mainJs, /function relayoutNow\(\)[\s\S]*?fitCanvas\(\)/, 'relayoutNow 必须重新 fitCanvas');
   assert.match(mainJs, /window\.__ssdzRelayout\s*=\s*relayoutNow/, '页面必须导出 window.__ssdzRelayout');
@@ -92,6 +96,20 @@ test('Android 16 / Adreno 绿屏：原生软件图层逃生口 + 经典主页先
   /* Chromium 576362369：Android 16 + Adreno 的 WebView 在 Vulkan 合成路径会整块丢贴图层，
    * 页面只剩 CSS 底色 / 文字 / 悬浮 DOM。原生层显式落软件图层绕开，且只对已知风险 SoC 自动开。 */
   assert.match(activity, /fun shouldUseSoftwareRenderer\(\)[\s\S]{0,800}SOC_MODEL[\s\S]{0,400}SM8850/, '原生壳要按 Android 16 + SoC 自动判定');
+  /* 自动档只覆盖现场确认过绿屏的整机；1.1.6 把 8 Gen 2/3 等也一并落到软件层，
+   * 1.1.7 又把整个 SM8850 家族按到软件层 —— 这些原本能玩的机器更新后变成严重卡顿。
+   * 1.1.8 起 SoC 只是第一道闸，整机型号（K90 Pro Max / MagicPad3 Pro）才决定自动开。 */
+  {
+    const fn = activity.slice(activity.indexOf('private fun shouldUseSoftwareRenderer'),
+      activity.indexOf('private fun applySoftwareRender'));
+    const known = /val known = listOf\(([^)]*)\)/.exec(fn);
+    assert.ok(known, '自动档 SoC 名单要写成 listOf(...)');
+    assert.deepEqual((known[1].match(/"[^"]+"/g) || []), ['"SM8850"'],
+      '自动档只保留现场确认过绿屏的 SM8850，不能按 SoC 代际一刀切');
+    assert.match(fn, /Build\.MODEL[\s\S]{0,200}names/, '同 SoC 还要按整机型号再筛一次（不能让整个 SM8850 家族都落软件层）');
+    assert.match(fn, /names\.contains\("k90"\)/, 'K90 Pro Max 要命中自动档');
+    assert.match(fn, /names\.contains\("magicpad3"\)/, 'MagicPad3 Pro 要命中自动档');
+  }
   assert.match(activity, /setLayerType\(if \(enabled\) View\.LAYER_TYPE_SOFTWARE/, '要显式切到软件图层');
   assert.match(activity, /RenderBridge[\s\S]{0,500}setSoftwareRender/, '要保留 JS 逃生桥（设置页可手动切换）');
   assert.match(activity, /addJavascriptInterface\(RenderBridge\(\), "SSDZRender"\)/, '桥必须注入到页面');

@@ -268,7 +268,7 @@
         const ext = g.ext && g.ext.length ? '　' + escHtml(g.ext.join('，')) : '';
         const gem = g.gem ? '　宝石 Lv.' + g.gem.level + '（+' + g.gem.percent + '%）' : '';
         return '<div class="ws-row"><div class="ws-info"><b>' + escHtml(g.part + '·' + g.name) + '</b> <span class="ws-lv">' +
-          escHtml(g.attrName) + '+' + g.abilityVal + '</span>' +
+          escHtml(State.gearAttrText(g, { name: true })) + '</span>' +
           '<div class="ws-remark">' + escHtml(g.setName || '散件') + ext + gem + '</div></div></div>';
       }).join('')
       : '<p class="panel-desc">没有装备</p>';
@@ -781,7 +781,7 @@
       const g = worn.find((x) => x.type === t);
       const row = el('div', 'ws-row');
       if (g) {
-        row.innerHTML = gearIcon(g) + '<div class="ws-info"><b class="' + QUALITY_CLS[Math.min(3, g.quality)] + '">' + g.name + '</b> <span class="ws-type">' + slots[t] + '</span><div class="ws-remark">' + g.attrName + '+' + g.abilityVal + ' ' + State.extTextForGear(g).join('，') + '</div></div>';
+        row.innerHTML = gearIcon(g) + '<div class="ws-info"><b class="' + QUALITY_CLS[Math.min(3, g.quality)] + '">' + g.name + '</b> <span class="ws-type">' + slots[t] + '</span><div class="ws-remark">' + escHtml(State.gearAttrText(g, { name: true })) + ' ' + escHtml(State.extTextForGear(g).join('，')) + '</div></div>';
         const btn = el('button', 'btn', '卸下');
         btn.onclick = () => { State.unwear(g.key); p.close(); openGears(); };
         row.appendChild(btn);
@@ -791,7 +791,7 @@
       wornDiv.appendChild(row);
     }
     box.appendChild(wornDiv);
-    box.appendChild(el('div', 'gear-sec-title', '装备背包（' + bag.length + '）— 选中3件同品质装备可融合升品质（部位/名字可不同；3件同套且有下一品质档时必得该套）'));
+    box.appendChild(el('div', 'gear-sec-title', '装备背包（' + bag.length + '）— 选中3件同品质装备可融合升品质（部位/名字可不同；产物部位从三件材料随机）'));
     const bagDiv = el('div', 'ws-list');
     const selected = new Set();
     /** 词条行：和装备名/主属性分开，融合选材料时一眼能看到每件装备带什么。 */
@@ -803,7 +803,7 @@
     };
     for (const g of bag) {
       const row = el('div', 'ws-row');
-      row.innerHTML = gearIcon(g) + '<div class="ws-info"><b class="' + QUALITY_CLS[Math.min(3, g.quality)] + '">' + g.name + '</b><div class="ws-remark">' + g.attrName + '+' + g.abilityVal + '　需' + g.useLevel + '级</div>' + extTags(g) + '</div>';
+      row.innerHTML = gearIcon(g) + '<div class="ws-info"><b class="' + QUALITY_CLS[Math.min(3, g.quality)] + '">' + g.name + '</b><div class="ws-remark">' + escHtml(State.gearAttrText(g, { name: true })) + '　需' + g.useLevel + '级</div>' + extTags(g) + '</div>';
       const wearBtn = el('button', 'btn btn-primary', '穿戴');
       wearBtn.disabled = S.level < g.useLevel;
       wearBtn.onclick = () => {
@@ -830,19 +830,17 @@
     function refreshSummary() {
       const picked = [...selected].map((key) => bag.find((x) => x.key === key)).filter(Boolean);
       if (!picked.length) {
-        summary.innerHTML = '<div class="fusion-ext-hint">选中装备后，这里会列出它们的全部附加词条；两件以上材料都带的词条必继承，其余每个词条槽 50% 概率继承。</div>';
+        summary.innerHTML = '<div class="fusion-ext-hint">选中装备后，这里会列出它们的全部附加词条；融合时按星级/材料顺序继承前两条，第三条从剩余词条随机。</div>';
         return;
       }
       const tags = new Set();
       picked.forEach((g) => State.extText(g.ext).forEach((x) => tags.add(x)));
-      const sameSet = picked.length === 3 && State.fusionFamilyInfo ? State.fusionFamilyInfo(picked) : null;
       summary.innerHTML = '<div class="fusion-ext-head">已选 ' + picked.length + '/3：' +
         picked.map((g) => '<b class="q' + Math.min(3, g.quality) + '">' + escHtml(g.name) + '</b>').join('、') + '</div>' +
-        (sameSet ? '<div class="fusion-ext-hint">三件同套（' + escHtml(sameSet.family) + '）：必得下一品质同套装的同部位装备。</div>' : '') +
         '<div class="fusion-ext-tags">' + (tags.size
           ? [...tags].map((x) => '<span class="gear-ext-tag">' + escHtml(x) + '</span>').join('')
           : '<span class="gear-ext-none">这些装备没有附加词条</span>') + '</div>' +
-        '<div class="fusion-ext-hint">两件以上材料都带的词条必继承；其余词条每个槽 50% 概率继承。</div>';
+        '<div class="fusion-ext-hint">前两条按星级/材料顺序继承，第三条从剩余词条随机；每条仍有 50% 概率升 1 星。</div>';
     }
     box.appendChild(summary);
     refreshSummary();
@@ -1007,7 +1005,7 @@
       '<p><b>属性</b>：力量决定伤害，敏捷决定闪避，速度决定出手频率，生命即血量。</p>' +
       '<p><b>武器/技能</b>：战斗中随机使用。升级需要金松果+卷轴，成功率随等级降低；普通1~10级失败后每次提高2%成功率，真化线不保底。</p>' +
       '<p><b>关卡</b>：10级起挑战螳螂→仙鹤→熊猫，需要挑战书，通关可得装备碎片。带徒弟时徒弟先上阵，徒弟战败后师父免费接手同一名对手（不耗挑战书/复活次数）。</p>' +
-      '<p><b>装备</b>：10个碎片+金松果合成（白30/绿40/蓝50）；3件同品质装备+金松果融合升品质（部位/名字可不同；白30/绿40/蓝50/紫60）。3件同套且有下一品质档时必得该套；两件以上材料都带的词条必继承。</p>' +
+      '<p><b>装备</b>：10个碎片+金松果合成（白30/绿40/蓝50）；3件同品质装备+金松果融合升品质（部位/名字可不同；白30/绿40/蓝50/紫60/橙200/黑1000）。产物部位从三件材料随机；词条按星级/材料顺序继承前两条，第三条从剩余词条随机。</p>' +
       '<p><b>转生</b>：使用转生果回到1级，属性成长更高（保留装备）。</p>' +
       '<p><b>存档</b>：自动保存在浏览器本地。</p>';
     const row = el('div', 'btn-row');

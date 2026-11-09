@@ -401,7 +401,7 @@ test('勇者每场胜利后按休息期血量上限的 5% 回血', () => {
   assert.ok(info.run.hpAbs >= 1 + expected, '战后血量至少 = 本场剩余 1 + 休息回血');
 });
 
-test('勇者剧本第 1~5 层敌方属性降 10%，第 6 层恢复原曲线', () => {
+test('勇者剧本第 1~5 层在通用 5% 之外再降 10%，第 6 层恢复原曲线', () => {
   const { c } = setup();
   start(c);
   const check = (layer) => {
@@ -412,10 +412,41 @@ test('勇者剧本第 1~5 层敌方属性降 10%，第 6 层恢复原曲线', ()
     assert.ok(nx && nx.ok !== false, layer + ' 层应当能开战：' + ((nx && nx.msg) || ''));
     const isLast = run.idx === run.plan.length - 1;
     const raw = c.Tower.buildFoeOf('endless', run.layer, run.plan[run.idx], run.salt, isLast).foe;
-    const mul = layer <= 5 ? 0.9 : 1;
+    /* 先落勇者 10%，再乘通用 5%；两段各自取整（与 nextBattle 同序）。 */
+    const scaled = (value) => {
+      let out = Math.max(1, Math.round(Number(value) || 1));
+      if (layer <= 5) out = Math.max(1, Math.round(out * 0.9));
+      if (layer <= 5) out = Math.max(1, Math.round(out * 0.95));
+      return out;
+    };
     for (const key of ['power', 'agility', 'speed', 'hp']) {
-      assert.equal(nx.foe[key], Math.max(1, Math.round(Number(raw[key]) * mul)),
-        layer + ' 层 ' + key + ' 应当按 ' + mul + ' 缩放');
+      assert.equal(nx.foe[key], scaled(raw[key]),
+        layer + ' 层 ' + key + ' 应当先 ×0.9 再 ×0.95');
+    }
+    /* 只是看预告，不能把这一场留成“进行中”，否则下一层开不了战。 */
+    c.Tower.interruptBattle('endless', nx.token);
+  };
+  check(1); check(5); check(6);
+});
+
+test('经典无尽塔第 1~5 层敌方属性降 5%，第 6 层恢复原曲线', () => {
+  const { c } = setup();
+  start(c, false);
+  const check = (layer) => {
+    c.Tower._debugSetEndlessLayer(layer);
+    const run = c.Tower._debugRun('endless');
+    run.choices = null; run.phase = null; run.finished = null;
+    const nx = c.Tower.nextBattle('endless');
+    assert.ok(nx && nx.ok !== false, layer + ' 层应当能开战：' + ((nx && nx.msg) || ''));
+    const isLast = run.idx === run.plan.length - 1;
+    const raw = c.Tower.buildFoeOf('endless', run.layer, run.plan[run.idx], run.salt, isLast).foe;
+    const scaled = (value) => {
+      const out = Math.max(1, Math.round(Number(value) || 1));
+      return layer <= 5 ? Math.max(1, Math.round(out * 0.95)) : out;
+    };
+    for (const key of ['power', 'agility', 'speed', 'hp']) {
+      assert.equal(nx.foe[key], scaled(raw[key]),
+        layer + ' 层 ' + key + ' 应当按 0.95 缩放');
     }
     /* 只是看预告，不能把这一场留成“进行中”，否则下一层开不了战。 */
     c.Tower.interruptBattle('endless', nx.token);

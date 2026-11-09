@@ -37,8 +37,8 @@
      * 权重可以是小数：`plan()` 只按权重和摇号，不要求整数（改这里就够了，别处不用同步）。 */
     { id: 1, name: '小体力药剂', count: 1, weight: 2.5 },
     { id: 2, name: '大体力药剂', count: 1, weight: 0.5 },
-    { id: 45, name: '天使果实种子', count: 1, weight: 2 },
-    { id: 46, name: '恶魔果实种子', count: 1, weight: 1 },
+    { id: 45, name: '天使果实种子', count: 1, weight: 1 },
+    { id: 46, name: '恶魔果实种子', count: 1, weight: 0.5 },
     { id: 24, name: '白色碎片', count: 1, weight: 5 },
     { id: 25, name: '绿色碎片', count: 1, weight: 3 },
     { id: 26, name: '蓝色碎片', count: 1, weight: 1 * BLUE_MUL },
@@ -48,7 +48,7 @@
    * 卡片文案是「请点确定」而不是普通战斗的「请点击」。 */
   const LADDER_POOL = [
     { id: 51, name: '属性碎片', count: 1, weight: 34 },
-    { id: 46, name: '恶魔果实种子', count: 1, weight: 10 },
+    { id: 46, name: '恶魔果实种子', count: 1, weight: 5 },
     { id: 15, name: '经验', count: 5, weight: 22 },
     { id: 8, name: '金松果', count: 2, weight: 18 },
     { id: 21, name: '技能卷轴', count: 1, weight: 8 },

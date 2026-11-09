@@ -46,8 +46,6 @@
     page.setAttribute('aria-label', '装备融合');
 
     const PART_NAME = ['头巾', '手套', '衣服', '鞋子'];
-    const partOf = (gear) => (gear ? State.gearPart(gear.id) : -1);
-    const partLabel = (gear) => PART_NAME[partOf(gear)] || '装备';
     /** 词条标签：融合页的卡片/材料槽直接显示，不再只藏在 title/aria 里。 */
     const extTags = (gear, compact) => {
       const list = gear ? State.extText(gear.ext) : [];
@@ -114,7 +112,7 @@
         const caption = chosen ? '材料 ' + (selected.indexOf(gear.key) + 1)
           : unavailable || (sameGroup >= 3 ? '同品质 ' + sameGroup + ' 件' : '可放入');
         const effects = State.extText(gear.ext).join('，');
-        const detail = gear.name + '，' + qualities[gear.quality] + '，' + gear.attrName + ' +' + gear.abilityVal + (effects ? '，' + effects : '');
+        const detail = gear.name + '，' + qualities[gear.quality] + '，' + State.gearAttrText(gear, { name: true }) + (effects ? '，' + effects : '');
         return '<button type="button" class="fusion-gear q' + gear.quality + (chosen ? ' selected' : '') +
           '" data-fusion-gear="' + esc(gear.key) + '" aria-pressed="' + chosen + '" aria-label="' + esc(detail + '，' + (chosen ? '已放入，点击移除' : unavailable || '点击放入')) + '" title="' + esc(detail) + '"' + (unavailable && !chosen ? ' disabled' : '') + '>' +
           '<span class="fusion-frame">' + art(gear) +
@@ -124,14 +122,11 @@
       }).join('');
       const pips = [0, 1, 2].map((i) => '<i class="' + (i < selected.length ? 'on' : '') + '"></i>').join('');
       const nextQuality = first ? (first.quality >= 5 ? 5 : first.quality + 1) : 0;
-      const previewLabel = first ? (first.quality >= 5 ? '黑装洗练' : (qualities[nextQuality] || '') + partLabel(first)) : '更高品质';
-      /* 三件同套（且该套有下一品质档）时，产物是确定的：提示里直接写出来。
-       * `fusionFamilyInfo` 与实际 `mergeGears` 共用 State 的同一份判定。 */
+      const previewLabel = first ? (first.quality >= 5 ? '黑装洗练' : (qualities[nextQuality] || '') + '装备') : '更高品质';
+      /* 联机版融合的产物部位从三件材料随机取，页面不再承诺「同套必得 / 首件部位」。 */
       const pickedGears = selected.map((key) => gears.find((g) => g.key === key)).filter(Boolean);
-      const sameSet = pickedGears.length === 3 && State.fusionFamilyInfo ? State.fusionFamilyInfo(pickedGears, targetAllowed) : null;
-      const previewHint = sameSet ? '同套必得：' + sameSet.family : (first ? '产物部位随首件材料' : '必得 1 件');
-      const guaranteeText = sameSet ? '同套必得该套 · 品质提升一级'
-        : first && first.quality >= 5 ? '同部位黑装洗练 · 材料会被消耗' : '品质提升一级 · 材料会被消耗';
+      const previewHint = first ? '产物部位从三件材料随机' : '必得 1 件';
+      const guaranteeText = first && first.quality >= 5 ? '同品质黑装洗练 · 材料会被消耗' : '品质提升一级 · 材料会被消耗';
       /* 已选材料能提供的词条并集：不重复列出同名效果，玩家融合前就能看到候选池。 */
       const pickedTags = new Set();
       pickedGears.forEach((g) => State.extText(g.ext).forEach((x) => pickedTags.add(x)));
@@ -149,7 +144,7 @@
         /* 规则条只留一行（flex + nowrap + 省略号），细节全部收进「详细规则」弹窗 ——
          * 之前把整段说明塞在这里，<br> 会被 flex 拆成一堆竖条，还会把下面的装备列表挤没。 */
         '<p class="fusion-rules"><b>规则</b>' +
-        '<span class="fusion-rules-text">3 件<em>同品质</em>装备（部位/名字可不同）→ 品质高一级；3 件同套且有下一品质档 → 必得该套；重合词条必继承。</span>' +
+        '<span class="fusion-rules-text">3 件<em>同品质</em>装备（部位/名字可不同）→ 品质高一级；产物部位从三件材料随机；词条按星级/材料顺序继承前两条。</span>' +
         '<button type="button" class="uc-button tiny muted" data-fusion-action="rules">详细规则</button></p>' +
         '<div class="fusion-inventory-panel"><div class="fusion-inventory-heading"><h3>选择装备<span class="fusion-pips" aria-label="已放入 ' + selected.length + ' / 3">' + pips + '</span><span class="fusion-count">已放入 ' + selected.length + '/3</span></h3><button type="button" class="uc-button tiny muted" data-fusion-action="clear"' + (selected.length ? '' : ' disabled') + '>清空材料</button><div class="fusion-pagination"><button type="button" class="uc-button tiny" data-fusion-action="previous" aria-label="上一页装备"' + (pageIndex === 0 ? ' disabled' : '') + '><i class="chev chev-l" aria-hidden="true"></i></button><span>' + (pageIndex + 1) + ' / ' + pages + '</span><button type="button" class="uc-button tiny" data-fusion-action="next" aria-label="下一页装备"' + (pageIndex + 1 >= pages ? ' disabled' : '') + '><i class="chev chev-r" aria-hidden="true"></i></button></div></div>' +
         '<div class="fusion-inventory">' + (cards || '<div class="fusion-empty">还没有可以选择的装备。<br><span>收集装备碎片，可在道具中合成装备。</span></div>') + '</div></div>' +
@@ -195,24 +190,19 @@
      * ============================================================ */
     function showRules() {
       const pct = (v) => Math.round(v * 100) + '%';
-      const mut = (k) => pct(Math.max(0, Number(State.FUSION_MUTANT_RATE[k]) || 0));
-      const same = (k) => pct(Math.max(0, Number(State.FUSION_SAME_NAME_RATE[k]) || 0));
-      /* 「随机其它」= 100% − 变异 − 保名（两件同名是 47%，三件同名是 0）。 */
-      const other = (k) => pct(Math.max(0, 1 - (Number(State.FUSION_MUTANT_RATE[k]) || 0) - (Number(State.FUSION_SAME_NAME_RATE[k]) || 0)));
+      const mutant = pct(Number(State.FUSION_ONLINE_MUTANT_RATE) || 0.02);
       classic.modal('融合规则', '<div class="fusion-help">' +
         '<p><b>材料</b>3 件同品质、未穿戴的装备，会被消耗；部位和名字可以完全不同。</p>' +
         '<p><b>费用</b>白 ' + State.gearCostOf(0) + ' · 绿 ' + State.gearCostOf(1) +
-        ' · 蓝 ' + State.gearCostOf(2) + ' · 紫 ' + State.gearCostOf(3) + ' · 橙 ' + State.gearCostOf(4) + ' 金松果（按材料品质）。</p>' +
-        '<p><b>产物</b>部位随第一件材料、品质高一级的 1 件；3 紫 → 传说橙（可镶嵌宝石）；' +
-        (modernMode() ? '现代界面已删除黑装，橙装不能再融合。' : '3 橙 → 黑色装备（原版 composeType=3，材料就是橙装）。') + '</p>' +
-        '<p><b>同套保底</b>三件材料同属一套（如狂战头盔/拳甲/铠甲）且该套有下一品质档时，产物必定是同套装的下一品质、首件材料部位；同套黑装 46/67、47/68 取 id 最小件。该套没有下一品质档（早期白/绿套）或材料跨套时按下面这条随机规则；品质 5 的黑装已是最高档，三件黑装仍按同部位洗练（97% 同家族）。</p>' +
-        '<p><b>名称</b>三件同名 ' + same(3) + ' 保名 / ' + mut(3) + ' <em>变异</em>；' +
-        '两件同名 ' + same(2) + ' 保名 / ' + mut(2) + ' <em>变异</em> / ' + other(2) + ' 随机其它装备；' +
-        '三件全不同名则完全随机。橙→黑时变异池是深海/机器猫/怒战/狂战；品质太低（没有对应变异件）时不掷变异，那部分并入随机。</p>' +
-        '<p><b>词条</b>同一个词条只要在两件以上材料里出现，产物<b>必定继承</b>（不同部位、不同名字也算）；' +
-        '其余每个词条槽有 ' + pct(State.FUSION_EXT_INHERIT_RATE || 0.5) +
-        ' 概率从材料词条里继承，取最高星；继承后另有 ' +
-        pct(State.FUSION_EXT_UPGRADE_RATE) + ' 升 1 星（上限 3），没掷中则随机。</p>' +
+        ' · 蓝 ' + State.gearCostOf(2) + ' · 紫 ' + State.gearCostOf(3) + ' · 橙 ' + State.gearCostOf(4) +
+        ' · 黑 ' + State.gearCostOf(5) + ' 金松果（按材料品质）。</p>' +
+        '<p><b>产物</b>部位从三件材料中随机取一件，品质高一级；3 紫 → 传说橙（可镶嵌宝石）；' +
+        (modernMode() ? '现代界面已删除黑装，橙装不能再融合。' : '3 橙 → 黑色装备；3 件黑装可继续洗练。') + '</p>' +
+        '<p><b>变异</b>产物优先落在来源材料同套；存在其它套时 ' + mutant + ' 概率变异到变异池：' +
+        '紫/蓝档为狂战，紫→橙为橙色狂战，橙/黑档为深海/机器猫/怒战/狂战。没有同套目标时才从其它套随机。</p>' +
+        '<p><b>词条</b>按星级从高到低继承前两条，同星级按材料和词条顺序排列；第三条从其余材料词条中随机。' +
+        '同名词条按各自出现次数参与；每条继承后另有 ' + pct(State.FUSION_EXT_UPGRADE_RATE) +
+        ' 概率升 1 星（上限 3 星）。低品质按已有词条槽位截断（蓝 1 / 紫 2 / 橙黑 3）。</p>' +
         '</div>', [{ label: '知道了', cls: 'gold' }]);
     }
 
@@ -235,7 +225,7 @@
       const effects = State.extText(gear.ext);
       /* 「卖出」：融合产物常是拿去变现的，介绍页直接给卖出入口（点不开确认就关弹窗，
        * close:false 让确认框叠在介绍页上，取消后介绍页还在）。 */
-      const success = classic.modal('融合成功', '<div class="fusion-success"><div class="fusion-success-item q' + gear.quality + '"><span class="fusion-frame">' + art(gear) + '</span><strong>' + esc(gear.name) + '</strong></div><div class="fusion-success-details"><div class="fusion-quality-change"><span class="q' + previousQuality + '">' + qualities[previousQuality] + '</span><span aria-hidden="true"> → </span><strong class="q' + gear.quality + '">' + qualities[gear.quality] + '</strong></div><p>基本属性：' + esc(gear.attrName) + ' +' + gear.abilityVal + '<br>使用等级：' + gear.useLevel + ' 级</p>' + (gear.mutant ? '<p class="fusion-mutant">⚡ <b>' + (gear.quality === 5 ? '黑装变异' : '狂战变异') + '</b>：这次没保住原名，变成了该部位的' + (gear.quality === 5 ? '深海/机器猫/怒战/狂战' : '狂战') + '装备</p>' : '') + (effects.length ? '<p class="fusion-effects">' + effects.map(esc).join('<br>') + '</p>' : '') + '</div></div><p class="fusion-success-note">已消耗 3 件材料和 ' + previousCost + ' 金松果，新装备（' + (PART_NAME[State.gearPart(gear.id)] || '装备') + '）已放入装备背包。</p>', [
+      const success = classic.modal('融合成功', '<div class="fusion-success"><div class="fusion-success-item q' + gear.quality + '"><span class="fusion-frame">' + art(gear) + '</span><strong>' + esc(gear.name) + '</strong></div><div class="fusion-success-details"><div class="fusion-quality-change"><span class="q' + previousQuality + '">' + qualities[previousQuality] + '</span><span aria-hidden="true"> → </span><strong class="q' + gear.quality + '">' + qualities[gear.quality] + '</strong></div><p>基本属性：' + esc(State.gearAttrText(gear, { name: true })) + '<br>使用等级：' + gear.useLevel + ' 级</p>' + (gear.mutant && Number(gear.quality) >= 3 ? '<p class="fusion-mutant">⚡ <b>' + (gear.quality === 5 ? '黑装变异' : '狂战变异') + '</b>：产物变异到了' + (gear.quality === 5 ? '深海/机器猫/怒战/狂战' : '狂战') + '套。</p>' : '') + (effects.length ? '<p class="fusion-effects">' + effects.map(esc).join('<br>') + '</p>' : '') + '</div></div><p class="fusion-success-note">已消耗 3 件材料和 ' + previousCost + ' 金松果，新装备（' + (PART_NAME[State.gearPart(gear.id)] || '装备') + '）已放入装备背包。</p>', [
         { label: '卖出', cls: 'muted', close: false, run: () => {
             const range = State.gearSellRange(State.gearQuality(gear));
             classic.modal('卖出装备', '<p>确定以 <b>' + range[0] + '~' + range[1] + '</b> 金松果卖出【' + esc(gear.name) + '】吗？</p>', [

@@ -318,6 +318,13 @@
         const player = options.player || {}, foe = options.foe || {};
         set('name1', player.name || '我'); set('level1', player.level || '');
         set('name2', foe.name || ''); set('level2', foe.level || '');
+        /* 3822 的两个昵称框只有 76.2 单位宽（字号 12）：7 个汉字要 84、21 个字母要 126，
+         * 直接 `setText` 会被卡片裁掉（用户 2026-11 报的「联机决赛弹窗昵称显示不完全」，单机同一容器）。
+         * 与战斗血条的 `setNameText` 同一条口径：只在放不下时缩字号，不裁字、不横向拉扁。 */
+        for (const field of ['name1', 'name2']) {
+          const target = view.byName(field);
+          if (target && window.SfRender && SfRender.fitTextWidth) SfRender.fitTextWidth(target, { ascii: 0.5, min: 6 });
+        }
         // The pill is depth 9. Its baked label is the first three paths of
         // shape 3784 at depth 13 (bounds x139.5–176.85, y140.55–158.7), while
         // that shape's remaining two paths draw the left avatar's card.

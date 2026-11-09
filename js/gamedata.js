@@ -471,6 +471,7 @@
     props: { 1: 3, 2: 2 },     // 小体力药剂x3 大体力药剂x2
     freePoints: 0,             // 特殊途径（金宝箱等）发下来、还没分配的自由属性点
     wsPicks: [],               // 升级发下来、还没选的武器/技能「三选一」组
+    fruitChoices: {},          // 天使/恶魔果实已抽出的三选一（大退重进不重抽）
     propsStates: {},           // 药剂生效场次 {propId: count}
     stages: {},                // stageId -> {npcIndex, passed}
     dailyWins: 0, allWins: 0, dailyFails: 0, allFails: 0,
@@ -479,8 +480,11 @@
     friendMessages: {},
     lastEnergyTs: 0, reborn: 0, joinRankCount: 0, rankCupClaimWeek: '', lotteryDate: '', lotteryFree: 1,
     /* 天梯商店的限购：`rankPurchases` 按周重置（普通商品），`rankPurchaseTotals` 是
-     * **账号累计**（力/敏/速/血永久丸，原版每个账号只能买 1 个，见 classic-extras）。 */
+     * **账号累计**（力/敏/速/血永久丸，原版每个账号只能买 1 个，见 classic-extras），
+     * `rankMonthPurchases` 是两套狂战（goods 11-14 / 20-23）的**每月限兑**账，
+     * `rankPurchaseMonth` 记当前月度（YYYY-MM，Asia/Shanghai 每月 1 号 0 点重置）。 */
     rankPurchases: {}, rankPurchaseTotals: {}, rankPurchaseWeek: '',
+    rankMonthPurchases: {}, rankPurchaseMonth: '',
     /* 金宝箱「已开出、还没点确定领取」的那一包（重开就换掉它，领取才入账）。
      * 关掉游戏再进会自动入账，不会把已经开出的奖励弄丢；见 state.js 的 settlePendingChest。 */
     chestPending: null,
@@ -588,6 +592,8 @@
     ['82', '召唤证', '在体力不足时，可以使用召唤证参加幻兽竞技。', '10', 'true', '2'],
     ['89', '黑装自选箱', '打开后可以任选1件黑色凤凰或黑色圣熊装备（头/拳/衣/鞋）。挑战塔第100层首通获得。', '', 'false', '1'],
     ['90', '金宝箱', '打开后随机获得一种：6级宝石4%、5级宝石22%（10%两颗/12%一颗）、基础属性点49%（6/8/10/12点）、金松果15%（500/750/1000）、黑色卡片8%、完整黑装2%（仅首开）。可花金松果重开，最多500次，单箱最高12点；重开不出完整黑装。', '20', 'false', '5'],
+    ['108', '天使果实碎片', '10个碎片可以合成1个天使果实（需要50个金松果）。每日任务小概率获得。', '', 'false', '2'],
+    ['109', '恶魔果实碎片', '10个碎片可以合成1个恶魔果实（需要50个金松果）。每日任务小概率获得。', '', 'false', '2'],
   ];
   function registerExtraProps() {
     const map = window.propMap;

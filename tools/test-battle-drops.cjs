@@ -84,8 +84,14 @@ test('跳过补齐包括过期和未出现的3奖，已点奖不重复且重复�
   const g=setup(),drop=g.create([0,.4,.6,.72]);
   g.advance(drop,4200);assert.equal(drop.summary().items.length,0); // First gold pickup missed.
   g.advance(drop,7801);assert.equal(drop.collect(1),true);assert.equal(g.s().props[21],1);
-  drop.skip();same(drop.summary().items.map(x=>x.id),[21,8,22]);
-  assert.equal(g.s().goldPoint,102);assert.equal(g.s().props[21],1);assert.equal(g.s().props[22],1);assert.equal(g.live().length,0);
+  drop.skip();
+  const skipped=drop.summary().items;
+  assert.equal(skipped.length,3,'跳过要补齐三份');
+  assert.ok(skipped.every((x)=>[1,2,8,15,21,22,24,25,26,45,46].includes(x.id)),'补齐项来自掉落池');
+  assert.equal(g.s().goldPoint,102);
+  const counted={}; for(const x of skipped) counted[x.id]=(counted[x.id]||0)+x.count;
+  for(const id of Object.keys(counted)) if(id!=='8' && id!=='15') assert.equal(g.s().props[id],counted[id],'补齐项都要入账：'+id);
+  assert.equal(g.live().length,0);
   const saved=JSON.stringify(g.saved());drop.skip();g.advance(drop,100000);assert.equal(JSON.stringify(g.saved()),saved);assert.equal(drop.summary().items.length,3);
 });
 
@@ -154,6 +160,10 @@ test('天梯战用专属掉落表：飘出来的是属性碎片与恶魔果实�
   assert.equal(g.c.BattleDrops.poolFor('rank').some(p=>p.id===51),true);
   assert.equal(g.c.BattleDrops.poolFor().some(p=>p.id===51),false);
   assert.equal(g.c.BattleDrops.poolFor('rank').some(p=>p.id===46),true,'天梯也掉恶魔果实种子');
+  const normalPool = g.c.BattleDrops.poolFor();
+  assert.equal(normalPool.find(p=>p.id===45).weight, 1, '普通掉落天使种子权重减半');
+  assert.equal(normalPool.find(p=>p.id===46).weight, 0.5, '普通掉落恶魔种子权重减半');
+  assert.equal(g.c.BattleDrops.poolFor('rank').find(p=>p.id===46).weight, 5, '天梯恶魔种子权重减半');
 });
 
 test('10 个属性碎片 + 50 金松果随机合成一个转化丸',()=>{

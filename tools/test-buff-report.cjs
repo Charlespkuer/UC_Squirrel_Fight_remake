@@ -923,6 +923,27 @@ test('觐见魔王（x00）：两件涅槃plus（3 条命）+ 破碎终焉烙印
   }
 });
 
+test('E17「假如我直接赢」与护盾：敌方护盾清零，直接胜利时双方不留盾', () => {
+  const c = setup();
+  const { Sim } = c;
+  const mkMe = () => ({ name: '我', level: 70, power: 1000, agility: 100, speed: 100, hp: 1000, maxHp: 1000,
+    baseStats: { power: 100, agility: 100, speed: 100 }, weapons: [{ id: 1, level: 1 }], skills: [], effects: {},
+    mods: { openKill: 1, shellPct: 0.1 } });
+  const mkFoe = (mods) => ({ name: '敌', level: 70, power: 100, agility: 100, speed: 100, hp: 1000, maxHp: 1000,
+    baseStats: { power: 100, agility: 100, speed: 100 }, weapons: [], skills: [], effects: {}, mods });
+  const plain = Sim.simulate(mkMe(), mkFoe({ shellPct: 0.2 }));
+  assert.equal(plain.winner, 0, '普通敌人直接被 E17 判胜');
+  assert.equal(plain.rounds.length, 1, '普通敌人没有第二条命');
+  assert.equal(plain.rounds[0].shellAfter[0], 0, '直接胜利后玩家护盾不能残留');
+  assert.equal(plain.rounds[0].shellAfter[1], 0, '直接胜利后敌方护盾不能残留');
+  const boss = Sim.simulate(mkMe(), mkFoe({ shellPct: 0.2,
+    deathSaves: [{ bossLife: true, healPct: 1, name: '涅槃+' }] }));
+  assert.equal(boss.rounds[0].deathSave, true, 'bossLife 照常吃一条命');
+  assert.equal(boss.rounds[0].shellAfter[1], 0, '魔王复活时敌方护盾也先归零');
+  assert.ok(boss.rounds[0].shellAfter[0] > 0, '战斗继续时玩家护盾保留');
+  assert.ok(boss.rounds.length > 1, '魔王还有后续战斗');
+});
+
 test('巡视的传奇三选一不再挤掉第 3 场的战斗掉落：两批都保留、选完自动接上', () => {
   const c = setup(20261026);
   const T = c.Tower, TD = c.TowerData;

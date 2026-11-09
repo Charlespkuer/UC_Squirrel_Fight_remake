@@ -22,6 +22,8 @@
  *   node tools/gen-ssfight-ui.cjs --all      # 12 个界面全提
  *   node tools/gen-ssfight-ui.cjs --talk     # 只把主页「说话板子」(3704) 增量并进 tags.json
  *                                            # （不整包重生成，保留已有标签的全精度矩阵）
+ *   node tools/gen-ssfight-ui.cjs repair     # 只增量重出村庄升级动画 tags-repair.json
+ *                                            # （不重写其它页包/索引，只合并清单里的 repair 条目）
  *
  * 缺参考目录时会明确报错（与 gen-vendor-data.cjs 同一约定：不静默产出空文件）。
  * ========================================================================== */
@@ -82,6 +84,19 @@ const SCENES = {
   summons: '4381',
   campaign: '3437',
 };
+/* ---------- 村庄建筑升级中的「松鼠修房子」动画（运行时 attachMovie 的库元件） ----------
+ * 原版 `showUpgrading()`（MainMovie.as:9680-9762）在某个地点升级中时，把库元件
+ * **「松鼠修房子」** 挂到那一栋建筑的容器里（mc1 祭坛 / mc3 神迹 / mc4 幻兽牧场），
+ * 松鼠就在工地上抡锤子 —— 三段落锤、每段一次星光，循环播放。
+ *
+ * 它不在村庄页根元件 7140 的静态闭包里（`attachMovie` 是运行时的），所以单独成包
+ * `tags-repair.json`，只有真的有建筑在升级时 `loadExtra()` 一次。
+ *
+ * ⚠ 名字→id 仍走 `swfSymbolIds()`（ExportAssets 名字 → 紧邻其前的 DefineSprite）。
+ *   `01-swf-符号表/导出符号表.tsv` 把「松鼠修房子」记成 **5615** —— 那是紧跟在它后面
+ *   的静态松鼠立绘；真动画是 **5614**（23 帧，含 5605~5613 这些锤子/星光/残影子元件，
+ *   与 `resource/Sprite/sprite5614.html` 一致）。同一张表整体错位一格，别拿它查 id。 */
+const REPAIR = { repair: '5614' };
 /* ---------- 状态页立绘的"四个部位容器" ----------
  * 原版状态页的主角落绘**不是一整张图**，而是四个部位精灵拼的
  * （`MainMovie.as:989 showWears()`：`[subFrame.mc_head, mc_hand, mc_body, mc_foot]`
@@ -357,7 +372,7 @@ function iconRoots() {
 }
 /* 名字 → 该页的根元件 id；`wsicon` 是"一整批图标"而不是单页，根 id 由 `iconRoots()` 现算，
  * 所以这里给个占位（`ROOTS` 只用来校验"认不认识这个名字"）。 */
-const ROOTS = Object.assign({ [ICON_BUNDLE]: '' }, PAGES, GEAR, SCENES);
+const ROOTS = Object.assign({ [ICON_BUNDLE]: '' }, PAGES, GEAR, SCENES, REPAIR);
 
 function die(msg) { console.error('✗ ' + msg); process.exit(1); }
 
@@ -599,11 +614,11 @@ const TEXT_NOTE = {
 function main() {
   const args = process.argv.slice(2);
   /* 默认 = 村庄主菜单页 + **真正的村庄页（homeLand）** + 道具页 + **状态页（zhuangtai）**
-   * + 6 个装备容器 + 三个「地点场景页」库元件：这几样是运行时真正要用的。
+   * + 6 个装备容器 + 三个「地点场景页」库元件 + 村庄升级动画：这几样是运行时真正要用的。
    * ⚠ 状态页也在默认里 —— manifest 的 `bundles` 是"跑过哪些"的记录，
    *   漏掉哪一份，`tools/test-ssfight-render.cjs` 那条"包里都列出来了"的断言就会红。 */
   const DEFAULT = ['main', 'homeLand', 'daoju', 'zhuangtai', 'tiaozhan', 'message', ICON_BUNDLE]
-    .concat(Object.keys(GEAR), Object.keys(SCENES));
+    .concat(Object.keys(GEAR), Object.keys(SCENES), Object.keys(REPAIR));
   const wanted = args.includes('--all') ? Object.keys(ROOTS) : (args.includes('--gear') ? Object.keys(GEAR) : (args.length ? args : DEFAULT));
   for (const w of wanted) if (!(w in ROOTS)) die('不认识的名字：' + w + '（可选：' + Object.keys(ROOTS).join(' / ') + '）');
 
@@ -654,10 +669,15 @@ function main() {
     homeland: 'tags-homeland.json',
     summons: 'tags-summons.json',
     campaign: 'tags-campaign.json',
+    /* 村庄建筑升级中的「松鼠修房子」动画（见上面 REPAIR 的注释）。
+     * 只有真的有建筑在升级时界面才 `loadExtra()` 这一份。 */
+    repair: 'tags-repair.json',
   };
   const pageWanted = wanted.filter((w) => PAGES[w] && !BUNDLES[w]);
   const gearWanted = wanted.filter((w) => GEAR[w]);
+  const repairWanted = wanted.filter((w) => REPAIR[w]);
   const gearOnly = gearWanted.length > 0 && wanted.every((w) => GEAR[w]);
+  const repairOnly = repairWanted.length > 0 && wanted.every((w) => REPAIR[w]);
   if (gearWanted.length) {
     const names = swfSymbolIds();
     const links = ['头B', '外拳套B', '内拳套B', '衣服B', '手臂B', '鞋子B'];
@@ -665,6 +685,14 @@ function main() {
       if (names.get(links[i]) !== GEAR[name]) die('装备容器与 SWF 导出名不符：' + name);
       if (names.get(links[i].slice(0, -1)) !== PORTRAIT_GEAR[name]) die('立绘装备容器与 SWF 导出名不符：' + name);
     });
+  }
+  if (repairWanted.length) {
+    const names = swfSymbolIds();
+    for (const w of repairWanted) {
+      if (names.get('松鼠修房子') !== REPAIR[w]) {
+        die('村庄升级动画与 SWF 导出名不符：' + w + '（应为 ' + names.get('松鼠修房子') + '）');
+      }
+    }
   }
   const parts = [];
   if (pageWanted.length) parts.push({ file: 'tags.json', roots: pageWanted.map((w) => ROOTS[w]) });
@@ -714,6 +742,31 @@ function main() {
         die('页包 ' + part.file + ' 里缺页根元件 ' + ROOTS[w] + '（' + w + '）');
       }
     }
+  }
+
+  /* ---------- 增量：只重出「松鼠修房子」动画 ----------
+   * 与 gearOnly 同一个理由：默认把 12 页重出一遍会改写 tags.json（它现在仍含
+   * levelup / system 等根时间轴页），不能为了加一颗动画把别的页面降级。
+   * `node tools/gen-ssfight-ui.cjs repair` 只写 tags-repair.json + 清单里的 repair 条目。 */
+  if (repairOnly) {
+    const part = perPart.find((p) => p.file === 'tags-repair.json');
+    if (!part) die('repair 增量导出没有产出 tags-repair.json');
+    fs.writeFileSync(path.join(OUT, part.file), JSON.stringify(part.tags));
+    const manifestFile = path.join(OUT, 'manifest.json');
+    if (fs.existsSync(manifestFile)) {
+      const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+      manifest.pageRootIds = Object.assign({}, manifest.pageRootIds, { repair: REPAIR.repair });
+      const bundles = manifest.bundles || [];
+      const entry = bundles.find((item) => item.file === part.file);
+      if (entry) entry.tags = part.tags.length;
+      else bundles.push({ file: part.file, tags: part.tags.length });
+      manifest.bundles = bundles;
+      manifest.exportedTags = bundles.reduce((sum, item) => sum + item.tags, 0);
+      fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 1));
+    }
+    console.log('村庄升级动画增量导出完成：tags-repair.json（%d 个标签）；清单只合并 repair 条目，其它页包/索引保持原样。',
+      part.tags.length);
+    return;
   }
 
   const stats = { bitmaps: [] };

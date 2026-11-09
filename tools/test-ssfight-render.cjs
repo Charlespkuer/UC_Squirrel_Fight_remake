@@ -263,6 +263,59 @@ const { buildFrames } = SfRender;
   }
 }
 
+/* ---------- 8b. 村庄升级中的「松鼠修房子」动画（5614） ----------
+ * 原版 `showUpgrading()`（MainMovie.as:9713-9761）在建筑升级中把库元件
+ * **「松鼠修房子」** `attachMovie` 到 mc1/mc3/mc4；它不是村庄页 7140 的静态闭包，
+ * 所以单独成包 `tags-repair.json`，只在真有建筑升级时 `loadExtra()`。
+ * 钉三件事：
+ *   ① 包在、根 5614 在、闭包自闭合（漏 id 时渲染器是静默少画，不会报错）；
+ *   ② 23 帧里确实有身体件 / 锤子 5607 / 星光 5609~5610 / 残影 5611~5612；
+ *   ③ 界面照原版三组镜像与偏移挂载。 */
+{
+  const dir = path.join(ROOT, 'images', 'ssfight', 'ui');
+  const file = path.join(dir, 'tags-repair.json');
+  assert.ok(fs.existsSync(file), '应当生成 tags-repair.json（node tools/gen-ssfight-ui.cjs repair）');
+  const tags = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const byId = new Map(tags.map((t) => [String(t.id), t]));
+  assert.ok(byId.has('5614'), 'tags-repair.json 里应当有「松鼠修房子」5614');
+  assert.equal(byId.get('5614').tp, 39, '5614 应当是精灵（tp39）');
+  const missing = new Set();
+  for (const t of tags) {
+    for (const p of t.Sf || []) if (p.id !== undefined && !byId.has(String(p.id))) missing.add(String(p.id));
+  }
+  assert.equal(missing.size, 0,
+    'tags-repair.json 的闭包不闭合，渲染时会静默少画：' + [...missing].slice(0, 8).join(', '));
+  const frames = buildFrames(byId.get('5614').Sf);
+  assert.ok(frames.length >= 20, '5614 应当是 20+ 帧的循环动画（现有 ' + frames.length + ' 帧）');
+  const idsAt = (i) => new Set([...frames[i].values()].map((p) => String(p.id)));
+  assert.ok(idsAt(0).has('4950') && idsAt(0).has('5116') && idsAt(0).has('5188'),
+    '5614 第 1 帧应当有 IK 挂点 4950/5116/5188');
+  assert.ok(idsAt(2).has('5263') && idsAt(2).has('5264') && idsAt(2).has('5607'),
+    '5614 第 3 帧应当摆出身体件与锤子 5607');
+  assert.ok(idsAt(6).has('5609') && idsAt(7).has('5611'),
+    '5614 的落锤段应当放出星光 5609/5610 与残影 5611/5612');
+  const main = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-main.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(main, /REPAIR_SYMBOL = '5614'/, '村庄升级动画应当挂 5614');
+  assert.match(main, /REPAIR_BUNDLE = 'tags-repair\.json'/, '升级动画应当按需拉 tags-repair.json');
+  assert.match(main, /classList\.add\('sf-repairing'\)/, '动画挂上时建筑壳要打 sf-repairing');
+  assert.match(main, /classList\.remove\('sf-repairing'\)/, '动画摘掉时建筑壳要去掉 sf-repairing');
+  assert.match(main, /classList\.add\('sf-repairing-host'\)/, '动画挂上时宿主建筑要打 sf-repairing-host');
+  assert.match(main, /classList\.remove\('sf-repairing-host'\)/, '动画摘掉时宿主建筑要去掉 sf-repairing-host');
+  const refine = fs.readFileSync(path.join(ROOT, 'css/classic-refine.css'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(refine, /\.uc-pop\.sf-repairing[^{]*\{[^}]*filter:\s*none/,
+    '升级动画期间建筑壳必须禁用 CSS filter（否则 WebView 会复用旧滤镜区域，出现矩形色块）');
+  assert.match(refine, /g\.sf-repairing-host\s*\{[^}]*filter:\s*none/,
+    '升级动画期间宿主建筑自己的 cx 滤镜也必须停用（filters 区域逐帧变化会留下矩形色块）');
+  for (const [mc, at] of Object.entries({ mc1: [450, 250, 1], mc3: [190, 120, 0.7], mc4: [400, 100, 1] })) {
+    const scale = at[2].toString().replace('.', '\\.');
+    assert.match(main, new RegExp(mc + ':\\s*\\{ x: ' + at[0] + ', y: ' + at[1] + ', scale: ' + scale + ' \\}'),
+      mc + ' 的挂载参数要照原版 showUpgrading()（镜像、偏移、缩放）');
+  }
+  const mani = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+  assert.ok((mani.bundles || []).some((b) => b.file === 'tags-repair.json'),
+    'manifest.bundles 里应当列出 tags-repair.json');
+}
+
 /* ---------- 9. 状态页（zhuangtai / 7218）：页包必须自带**页根**与四个部位精灵 ----------
  * 状态页整页由原版素材渲染（`js/ssfight/ui-status.js`），两处最容易静默失效的地方：
  *   ① 页包缺 `7218` —— `mountSymbol('7218')` 直接抛"素材库里没有元件"（第一次生成就踩了这个：
@@ -321,6 +374,14 @@ const { buildFrames } = SfRender;
   assert.ok(!/\.slice\(0, 3\)/.test(act) && /const overflow = Math\.max\(0, n - slots\.length\)/.test(pos) &&
     /base\.cx \+ dx \* \(i - overflow\)/.test(pos),
     '经典主页药丸栏不能只画 3 颗：四颗全吃时第 4 颗要向左让位显示');
+  /* 2026-11 新版药丸：去掉奶油底/描边、可见药丸 = 槽边长、贴图盒子 1.5 倍，
+   * 并按 8 张原版无框矢量的实测包围盒做 --nx/--ny 校正。 */
+  const pillCss = fs.readFileSync(path.join(ROOT, 'css/classic-refine.css'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/const STATE_ICON_SCALE = 1\.5;/.test(src) && /const STATE_ICON_NUDGE = \{/.test(src) &&
+    /\.ssfight-state\{position:absolute;display:block;box-sizing:border-box\}/.test(pillCss) &&
+    /--nx,0px/.test(pillCss) &&
+    [3, 4, 5, 7, 41, 42, 43, 44].every((id) => fs.existsSync(path.join(ROOT, 'images/ui/icons/prop/prop-' + id + '.svg'))),
+    '主页药丸按联机版新版：无底板、贴图放大 1.5 倍、矢量按 --nx/--ny 校正并带齐 8 张 SVG');
 }
 
 /* ---------- 11. 挑战页（tiaozhan / 7638）：页包必须自带**页根**与二级/三级页库元件 ----------
@@ -721,6 +782,42 @@ const { buildFrames } = SfRender;
     assert.ok(st && st['mc_tab1'] && st['mc_tab1'].owner === '4673',
       'symbol-index 里 mc_tab1 要挂在 4673 上（好友装备那一页的四个格子）');
   }
+}
+
+/* ---------- 19b. 战斗血条昵称：7 个汉字 / 21 个英文字母都要完整显示 ----------
+ * `name1` 只有 82.1 单位宽（7 个汉字要 84），`name2` 是 84.45；英文昵称按 1/3
+ * 权重最多 21 个字母（SimHei 下约 126 单位）。`fitTextWidth` 只在放不下时缩字号，
+ * 不裁字、不横向压扁。 */
+{
+  const fit = (text, width) => {
+    let size = 12;
+    const el = {
+      textContent: text,
+      getAttribute: (k) => (k === 'font-size' ? String(size) : null),
+      setAttribute: (k, v) => { if (k === 'font-size') size = Number(v); },
+    };
+    const node = {
+      __textBox: { meta: { fh: 12, bd: [-8, -8 + width] }, box: { xmin: -8, xmax: -8 + width }, lines: [{ h: 12 }] },
+      g: { querySelectorAll: () => [el] },
+    };
+    return { size, out: (SfRender.fitTextWidth(node, { ascii: 0.5, min: 6 }), size) };
+  };
+  assert.equal(fit('中'.repeat(7), 84.45).out, 12, '7 个汉字在 name2（84.45）应当原字号放得下');
+  const own = fit('中'.repeat(7), 82.1).out;
+  assert.ok(own < 12 && 7 * own <= 82.1, 'name1（82.1）的 7 个汉字要缩到框内，实得 ' + own);
+  const latin = fit('A'.repeat(21), 84.45).out;
+  assert.ok(21 * 0.5 * latin <= 84.45, 'name2 的 21 个英文字母要缩到框内，实得 ' + latin);
+  const fightSrc = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-fight.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/function setNameText\(node, text\)/.test(fightSrc)
+    && /SfRender\.fitTextWidth\(node, \{ ascii: 0\.5, min: 6 \}\)/.test(fightSrc)
+    && /setNameText\(hud\.byName\('name1'\)/.test(fightSrc)
+    && /setNameText\(hud\.byName\('name2'\)/.test(fightSrc),
+    '战斗血条的 name1/name2 都要走 setNameText 的自适应');
+  const challengeSrc = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-challenge.js'), 'utf8').replace(/\r\n/g, '\n');
+  const mainSrc = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-main.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/SfRender\.fitTextWidth\(nameClip, \{ ascii: 0\.5, min: 7 \}\)/.test(challengeSrc)
+    && /SfRender\.fitTextWidth\(nameClip, \{ ascii: 0\.72, spacing: 0\.4, min: 6 \}\)/.test(mainSrc),
+    '挑战页行昵称与主界面昵称也要按各自字段框宽缩字号');
 }
 
 /* ---------- 20. 换 tab 后立即有真值、反馈壳与命中对象保持同一棵树 ----------
@@ -1156,6 +1253,19 @@ async function checkFightResults({ env, Node, body, flushTimeouts }) {
     assert.equal(opened.host.isConnected, false, '续战前销毁自己的战果层');
     assert.equal(opened.choose(0), false, '关闭后的旧回调不能再次提交');
   }
+  /* 3822 的两个昵称框只有 76.2 单位宽：7 个汉字（84）与 21 个字母（约 126）都要缩字号，
+   * 不能裁字 —— 与联机版同一条（用户 2026-11 报的竞技场决赛弹窗昵称显示不完全）。 */
+  const arenaLong = await env.SfFightResult.open({ kind: 'arena', win: true, title: '决赛',
+    player: { name: '一二三四五六七', level: 90 }, foe: { name: 'ABCDEFGHIJKLMNOPQRSTU', level: 90 } });
+  const textSize = (clip) => {
+    const t = clip && clip.querySelector ? clip.querySelector('text') : null;
+    return t ? Number(t.getAttribute('font-size')) : 0;
+  };
+  assert.ok(textSize(arenaLong.view.byName('name1')) > 0 && textSize(arenaLong.view.byName('name1')) < 12,
+    '7 个汉字的竞技场昵称要缩字号放进 76.2 的框里');
+  assert.ok(textSize(arenaLong.view.byName('name2')) > 0 && textSize(arenaLong.view.byName('name2')) < 12,
+    '21 个字母的竞技场昵称要缩字号放进 76.2 的框里');
+  arenaLong.close();
   const previous = await env.SfFightResult.open({ kind: 'rank', text: '旧战果' });
   let resumed = 0;
   const latest = await env.SfFightResult.open({ kind: 'stage', text: '新战果', actions: [
@@ -1465,9 +1575,13 @@ async function checkClassicFight() {
    *     以前 stun→statu 3（= 力量下降）、中毒→statu 1（= 敏捷下降）…整张表都对错了位，
    *     而原版对中毒 / 沉默 / 缴械根本没有图标（中毒只飘伤害数字）。
    *   · **一直闪**：`statu`(7658) 是 20 帧、**第 1 帧与第 20 帧都 stop()** 的"图标升起"动画，
-   *     以前裸 `play()` 会被节拍器无限循环 —— 升上去又从头来，看起来就是头顶一直闪。 */
+   *     以前裸 `play()` 会被节拍器无限循环 —— 升上去又从头来，看起来就是头顶一直闪。
+   *   2026-11 玩家反馈"敌人板砖打晕了自己两个回合、头上连续两次晕眩标识"：命中拍
+   *   `stunApplied` 飘一颗 + 被跳过那一拍又飘一颗，一记只晕 1 回合的板砖看起来像晕了 2 回合。
+   *   现在**命中拍不飘**（`effectStatu` 返回 0），「晕击」只在 `action:'stunned'` 那一拍飘一次。 */
   assert.equal(SfFight._effectStatu({}), 0, '没中招就不飘图标');
-  assert.equal(SfFight._effectStatu({ stunApplied: true }), 4, '眩晕 → statu 4（propty 第 8 帧「晕击」）');
+  assert.equal(SfFight._effectStatu({ stunApplied: true }), 0,
+    '眩晕不在命中拍飘「晕击」：否则 + 跳过拍那颗 = 连续两颗，看起来像被晕了两个回合');
   assert.equal(SfFight._effectStatu({ debuffStat: 'power' }), 3, '力量降低 → statu 3（propty 第 4 帧）');
   assert.equal(SfFight._effectStatu({ debuffStat: 'agility' }), 1, '敏捷降低 → statu 1（propty 第 5 帧）');
   assert.equal(SfFight._effectStatu({ debuffStat: 'speed' }), 2, '速度降低 → statu 2（propty 第 6 帧）');
@@ -1566,7 +1680,7 @@ async function checkClassicFight() {
   assert.ok(/let beat = r\.action === 'dot' \? 400 : r\.action === 'buff' \? 320 : r\.action === 'regen' \? 420 : 0;/.test(uf),
     'dot / buff / regen 的节拍要照现代播放器（400 / 320 / 420），不能只有 ROUND_GAP');
   assert.ok(/beat = 700;/.test(uf) && /who\.setStatu\(4\); who\.specialEffect\(\);/.test(uf),
-    '眩晕那一拍要飘原版「晕击」图标并给出一拍时间');
+    '眩晕那一拍要飘原版「晕击」图标并给出一拍时间（整次眩晕**只在这一拍**飘）');
   /* ③ 胜负一定就不再给"跳过"：原版 `congratulate()`(:6468) / `clearFrames()`(:15626) 都会
    *   `_root.skipmc.removeMovieClip()`；复刻以前把跳过键一路留到战果 CG 与开宝箱那两页。 */
   assert.ok(/function hideFightKeys\(rec\)/.test(uf) && /hideFightKeys\(rec\);\n\s*if \(!rec\.skipped\)/.test(uf),
@@ -1756,6 +1870,18 @@ async function checkClassicFight() {
    *   画没了 —— 演完闪避人消失一下，看起来就是"敌方 UI 一直闪"）。 */
   assert.ok(/function lastContentFrame\(clip\)/.test(uf) && /lastContentFrame\(clip\) - 1/.test(uf),
     'playClip 的缺省停帧要跳过尾部空帧（lastContentFrame）');
+  /* ④c′ 动作收尾 / 命中回调必须跟**渲染器节拍器**走，不能用 rAF 轮询 `clip.frame`：
+   *   节拍器是 14fps 的 setInterval，安卓软件图层/低端机上 rAF 会被拖到几百毫秒；
+   *   两边错开后 playClip 可能已经绕过停止帧一整圈 → 动作又播一遍、命中回调晚到
+   *   （2026-11 安卓实拍：重复出招、闪避扣血动画对不上）。 */
+  assert.ok(/rec\.tickWatchers = new Set\(\)/.test(uf) &&
+    /rec\.tickHook = \(\) => \{[\s\S]{0,240}rec\.tickWatchers/.test(uf) &&
+    /view\.onTick = rec\.tickHook/.test(uf) &&
+    /const watched = !!\(rec\.tickWatchers && rec\.tickWatchers\.add\)/.test(uf) &&
+    /if \(watched\) \{ rec\.tickWatchers\.add\(tick\); tick\(\); \}/.test(uf) &&
+    /if \(!watched\) arm\(tick\);/.test(uf) &&
+    /const wrapped = n < prevSeen;/.test(uf),
+    'playClip 要由渲染器节拍器驱动（tickWatchers 挂在 view.onTick），rAF 只作无头回归兜底，并处理绕过停止帧的情况');
   /* ④d 带字的特效元件要**原地镜像**（见 `onClip` 的 TEXT_ART_SYMS）：三颗字型都是**正字烘焙**
    *   （6431 闪避 / 5864 师父驾到 / 6438 装死，独立挂载单看都是正的），敌方子树本来就镜像 →
    *   只给敌方补一次自翻。名单按"黄橙渐变 + 棕描边"的字形样式从包里扫出来，与代码常量必须一致。 */
@@ -2228,7 +2354,7 @@ function checkClassicGiftAttention() {
   assert.ok(/function giftIcon\(id\) \{ return Number\(id\) === 8 \? goldIcon\(\) : icon\('prop', id\); \}/.test(dailyUi)
     && /giftIcon\(g\.id\)/.test(dailyUi) && /d\.extra/.test(dailyUi) && /daily-gift-preview/.test(dailyUi),
     '经典礼包/每日奖励里的金松果要用经典 gold-acorn，并显示当天轮换道具');
-  assert.ok(/icon\.kind === 'prop' && Number\(icon\.id\) === 8\) return 'images\/ui\/icons\/gold-acorn\.png'/.test(levelUp),
+  assert.ok(/Number\(icon\.id\) === 8\) return 'images\/ui\/icons\/gold-acorn\.png'/.test(levelUp),
     '经典升级礼包四格里的金松果也要用经典图标');
 
 
@@ -2414,6 +2540,22 @@ function checkLevelUpStyle() {
     /levelUpUi \? '' : stageUpsHtml/.test(cu) &&
     /\.sf-levelup-view\{[^}]*z-index:60/.test(css),
     '升级奖励要挂原版 7795 升级页，并保留现代奖励与后续三选一/加点'
+  );
+  /* 天使/恶魔果实三选一：没有取消/关闭键，必须从服务器/存档给出的候选中选一个。 */
+  assert.ok(!/label: isGain \? '先不用'/.test(cu) && /\[\], \{ small: true, locked: true \}/.test(cu),
+    '果实三选一不能保留取消键（只能用本次候选提交）');
+  /* 2026-11 联机版同步：升级页取原版舞台取景（7775 全屏 CG 不再偏右下）、
+   * 四维卡改用背包里的永久属性书图标（16~19）、武技三选一不再占卡片，
+   * 并且点确定后把 7775 当三选一背景保留，选完由 classic-ui 收掉。 */
+  assert.ok(
+    /const STAGE_VIEWBOX = '11\.3 6\.25 320 196'/.test(lv) &&
+    /viewBox: STAGE_VIEWBOX/.test(lv) &&
+    /function holdBackground/.test(lv) && /function releaseBackground/.test(lv) &&
+    /releaseBackground,/.test(lv) && /prop: 19/.test(lv) && /prop: 16/.test(lv) &&
+    !/if \(up\.wsChoice\) out\.push/.test(lv) &&
+    /\.sf-levelup-view\.sf-levelup-bg-only\{[^}]*z-index:25/.test(css) &&
+    /SfLevelUp\.releaseBackground/.test(cu),
+    '升级页要同步原版取景、属性书卡图、三选一背景保留与收尾'
   );
   /* 用户 2026-11 口径：升级「三选一」三张候选要并排一行，卡片本身尺寸不动。
    * 卡片 3×284 + 2×16 = 884px，所以外框正文（宽 - 两侧边框 - 左右内边距）必须连
@@ -2861,6 +3003,7 @@ function checkClassicComposeFlow() {
     /function focusGear\(key\)/.test(st) &&
     /opts\.playCg/.test(compose) && /frame: playCg \? 1 : COMPOSE_RESULT_FRAME/.test(compose) && !/playFusing/.test(st) &&
     /融合即将开始，\\n本次需要/.test(st) &&
+    /setTextByName\(view, 't_base' \+ \(i \+ 1\)[\s\S]{0,160}?\{ noClip: true \}/.test(st) &&
     /function wrapFusionHelp/.test(st) &&
     /wireClickable\(close, \{ hover: 2, press: 2, idle: 1, onFire: \(\) => destroyFusionOverlay\(\) \}\)/.test(st) &&
     /hover: 2, press: 2, idle: 1,\s*onFire: \(\) => askSellEquipFromDetail/.test(st) &&
@@ -2943,6 +3086,41 @@ function checkClassicMainEnergy() {
     /\.ssfight-energy-hover\{/.test(css) && /\.ssfight-energy-tip\{/.test(css),
     '经典主界面每秒要结算体力，体力条悬停要显示距下次恢复的倒计时'
   );
+}
+
+/* ---------- 主界面超级松鼠等级标：生效时按等级写 num，未开通/到期回空帧 ---------- */
+function checkMainVipBadge(env) {
+  assert.equal(typeof env.SfUiMain.syncVipBadge, 'function', 'ui-main 要导出 syncVipBadge 供显示层回归');
+  const clip = (name) => ({
+    name, frame: 0,
+    frameCount() { return name === 'num' ? 12 : 1; },
+    gotoAndStop(n) { this.frame = n; },
+  });
+  const vip = clip('viplevel'), num = clip('num'), type = clip('vipType');
+  vip.byName = (name) => name === 'num' ? num : (name === 'vipType' ? type : null);
+  const main = { byName: (name) => name === 'viplevel' ? vip : null };
+  const original = env.State.vipLevel;
+  try {
+    env.State.vipLevel = () => 5;
+    assert.equal(env.SfUiMain.syncVipBadge(main), true);
+    assert.equal(vip.frame, 1, '超级松鼠生效时 viplevel 停第 1 帧');
+    assert.equal(num.frame, 6, '5 级 = 数字精灵第 6 帧');
+    assert.equal(type.frame, 1, '新版超级松鼠用 vipType 第 1 帧');
+    env.State.vipLevel = () => 10;
+    env.SfUiMain.syncVipBadge(main);
+    assert.equal(num.frame, 11, '10 级 = 数字精灵第 11 帧的“10”');
+    env.State.vipLevel = () => 0;
+    env.SfUiMain.syncVipBadge(main);
+    assert.equal(vip.frame, 2, '未开通/到期回空帧');
+  } finally {
+    env.State.vipLevel = original;
+  }
+  /* 素材契约：7032 第 1 帧摆 vipType + num，第 2 帧整帧移除（所以空帧不会留残影）。 */
+  const tags = JSON.parse(fs.readFileSync(path.join(ROOT, 'images/ssfight/ui/tags.json'), 'utf8'));
+  const frames = SfRender.buildFrames(tags.find((t) => String(t.id) === '7032').Sf);
+  assert.equal(frames.length, 2, 'viplevel 就是 2 帧：1=显示、2=空帧');
+  assert.ok(frames[0].has(1) && frames[0].has(19), 'viplevel 第 1 帧要有 vipType(d1) 与 num(d19)');
+  assert.equal(frames[1].size, 0, 'viplevel 第 2 帧为空');
 }
 
 /* ---------- 道具页三颗页签：改用原版 7180 的矢量精灵，不再用 tab-*.png ---------- */
@@ -3201,6 +3379,7 @@ function checkMobileComposeWorkflow() {
   checkMobileComposeWorkflow();
   checkClassicPropUseFlow();
   checkClassicMainEnergy();
+  checkMainVipBadge(fixture.env);
   checkBagTabVectorSelection();
   checkBagSelectedLayer();
   await checkEyeLayerOrder(fixture);

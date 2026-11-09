@@ -291,6 +291,12 @@ if ($segTarget.Count -ge 4) {
 } else {
   $nextVer = "$($segTarget[0]).$($segTarget[1]).$([int]$segTarget[2] + 1)"
 }
+# 四段显示版本（x.y.z.w）目前只能出 Windows / Android：Mac 端 iOS 构建按
+# tauri.conf.json 的三段版本校验并命名 IPA，四段会被拒绝。自动跳过，避免整条出包失败。
+if ($needIos -and $segTarget.Count -ge 4) {
+  Warn "iOS 远程构建暂不支持四段显示版本 $target（只支持三段）；本版跳过 iOS，Windows / Android 照常出包。"
+  $needIos = $false
+}
 $verChanged = $target -ne $current
 $commit = (& git -C $ROOT rev-parse --short HEAD 2>$null)
 if (-not $commit) { $commit = 'nogit' }

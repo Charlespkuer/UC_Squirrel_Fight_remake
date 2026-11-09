@@ -7,6 +7,11 @@
   const disabled = (node) => !live(node) || node.disabled ||
     (node.getAttribute && node.getAttribute('aria-disabled') === 'true');
   const reduced = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  /* 触屏 / 新平台没有真正的悬停：`pointerenter` 只在点下那一拍来一次，`pointerleave`
+   * 要等下一次点别处。若仍给它加 `.sf-hover`，卡片会一直停在放大 1.12 倍的状态，
+   * 页面重绘 / 再次落到同一格时又反复切换 —— 用户看到的「界面缩放不停切换」之一。
+   * 按下 / 选中反馈仍由 `.pressed` / `.picked` / `.sf-selected` 承担。 */
+  const noHover = () => !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
   function state(node) {
     let s = states.get(node);
     if (!s) { s = { options: {}, pickTimer: 0, pressTimer: 0, actionTimer: 0, pending: false }; states.set(node, s); }
@@ -25,6 +30,7 @@
     if (!live(host)) return null;
     host.classList.add('sf-feedback');
     host.classList.toggle('sf-selected', selected(node, s));
+    if (noHover()) host.classList.remove('sf-hover');
     return host;
   }
   function unpress(node, s) {
@@ -50,7 +56,7 @@
     if (s.bound) return node;
     s.bound = true;
     node.addEventListener('pointerenter', () => {
-      if (s.options.hover === false || disabled(node)) return;
+      if (s.options.hover === false || noHover() || disabled(node)) return;
       const host = refresh(node, s);
       if (host) host.classList.add('sf-hover');
     });

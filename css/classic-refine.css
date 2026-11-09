@@ -117,6 +117,22 @@
   .uc-pop.pressed{animation:none}
 }
 
+/* 升级动画播放期间，建筑壳**不能挂 CSS filter / transform**：
+ * 「松鼠修房子」是逐帧变化的 SVG 子树，Android WebView / 部分 Chromium 会沿用
+ * 旧滤镜区域，在动画周围留出矩形色块（与第四百三十三批昵称 drop-shadow 同一类问题）。
+ * `sf-repairing` 由 ui-main.js 在 5614 挂上/摘掉时同步；胶囊高亮与倒计时不受影响。 */
+.uc-pop.sf-repairing,
+.uc-pop.sf-repairing:hover,
+.uc-pop.sf-repairing.sf-hover,
+.uc-pop.sf-repairing.pressed,
+.uc-pop.sf-repairing.picked{filter:none;transform:none;animation:none}
+
+/* 宿主建筑自己的 `placement.cx` 滤镜也要在升级动画期间关掉（祭坛 mc1 有）。
+ * 它是 `feComponentTransfer`，`x/y/width/height` 按**每帧变化的 bbox** 算；
+ * WebView / Chromium 会沿用旧滤镜区域，在动画周围留下矩形色块。
+ * ⚠ 这里用 CSS 属性压 presentation attribute：不受渲染层之后重写 `filter` 属性影响。 */
+g.sf-repairing-host{filter:none}
+
 /* DOM 卡片与 SVG 壳共用同一套反馈，缩放不碰原版放置矩阵。 */
 .uc-tab,.catalog-cell,.page-footer .uc-button,.page-arrow .uc-button{
   transition:transform .13s cubic-bezier(.34,1.4,.64,1),filter .13s}
@@ -522,23 +538,26 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .sf-mbtn:hover{transform:scale(1.03);filter:brightness(1.06) drop-shadow(0 0 6px rgba(255,226,122,.9))}
 .sf-mbtn:active{transform:scale(.98)}
 
-.ssfight-state{position:absolute;display:block;box-sizing:border-box;
-  background:#fff8e0d9;border:calc(var(--u,1px) * 2) solid #b98d4f;border-radius:calc(var(--u,1px) * 17);
-  box-shadow:calc(var(--u,1px) * 0) calc(var(--u,1px) * 1) calc(var(--u,1px) * 2) #4a2c0c55}
-.ssfight-state img{position:absolute;left:50%;top:50%;width:var(--icon,40px);height:var(--icon,40px);
-  transform:translate(-50%,-50%);object-fit:contain;
+/* 药丸本体：只有贴图 + 右下角的剩余场次角标，没有底板 / 描边。
+   `span` 的宽高 = **可见药丸直径**（槽边长，由 JS 写死），贴图盒子 `--icon` 比它大 1.5 倍
+   （道具矢量自带留白），所以贴图用绝对定位居中、可以溢出 span；`--nx/--ny` 是逐颗校正
+   矢量居中偏移的平移量（见 ui-main.js 的 STATE_ICON_NUDGE）。
+   角标沿用现代版 `.home-buff i` 的配方：`--u` = 可见药丸边长 / 80。 */
+.ssfight-state{position:absolute;display:block;box-sizing:border-box}
+.ssfight-state img{position:absolute;left:50%;top:50%;width:var(--icon,60px);height:var(--icon,60px);
+  transform:translate(-50%,-50%) translate(var(--nx,0px),var(--ny,0px));object-fit:contain;
   filter:drop-shadow(0 1px 0 rgba(90,59,34,.42))}
-/* 剩余场次：现代版那枚"奶油底 + 金棕描边"的小圆牌（`.home-buff i` 的画法），压在块右下角。 */
 .ssfight-state b{position:absolute;right:calc(var(--u,1px) * -6);bottom:calc(var(--u,1px) * -6);
   min-width:calc(var(--u,1px) * 26);height:calc(var(--u,1px) * 26);box-sizing:border-box;
   border-radius:calc(var(--u,1px) * 14);background:#835230;color:#fff7d7;font-weight:bold;
   font-family:Georgia,serif;font-size:calc(var(--u,1px) * 19);line-height:calc(var(--u,1px) * 22);
   text-align:center;padding:0 calc(var(--u,1px) * 5);font-style:normal;
-  border:calc(var(--u,1px) * 2) solid #fff3c9}
+  border:calc(var(--u,1px) * 2) solid #fff3c9;
+  text-shadow:0 1px 0 rgba(60,30,10,.55)}
 /* ⚠ 这里**不要**给 `.ssfight-state` 加"出现时弹一下"的 animation：
  * 那种 keyframes 首帧带 `transform:scale(.72)`，而动画处在第一帧时**元素真的按 0.72 渲染** ——
  * 实测它卡在首帧（`getComputedStyle` 一直是 `matrix(.72,…)`），槽从 79.6px 缩成 61px、
- * 图标也跟着小一圈。去掉之后尺寸才与 `--icon` 对得上。 */
+ * 图标也跟着小一圈。去掉之后尺寸才与槽位对得上。 */
 
 /* 金松果胶囊（道具页顶栏右端）：尺寸与位置按原版道具页渲染图**逐像素量过** ——
    原版胶囊 x 935..1135 / y 45..105，图标 58×72 跨在左边缘上（左沿 −8、上沿 −5），
@@ -1249,6 +1268,10 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .sf-levelup-view>svg{display:block;width:100%;height:100%}
 .sf-levelup-view .sf-levelup-page{font-family:"SimHei","Microsoft YaHei",sans-serif;fill:#7a5528;font-size:10px;font-weight:700;text-anchor:end;pointer-events:none}
 .sf-levelup-view .sf-levelup-cardart{pointer-events:none}
+/* 点「确定」后还有武技三选一时：整页降到弹窗（z-index 30）下面，只留 7775 全屏 CG
+ * 当背景；面板 / 四格 / 确定都藏掉，不能压在三选一弹窗上，也不能吃掉点击。 */
+.sf-levelup-view.sf-levelup-bg-only{z-index:25;pointer-events:none}
+.sf-levelup-view.sf-levelup-bg-only>svg>g:not(.sf-levelup-cg){display:none}
 /* ===== 新手引导（ssfight 3625）=====
  * 原版是整页提示层：暗色说明条 + 黄色手指 + 半透明目标示意。它只负责“讲”，
  * 不接管点击，所以整层 pointer-events:none；z-index 压在页面之上、战果/弹窗之下。 */

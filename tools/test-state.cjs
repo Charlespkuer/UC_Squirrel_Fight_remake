@@ -33,7 +33,7 @@ function game(search) {
   if (search !== undefined) context.location = { search };
   context.window = context;
   vm.createContext(context);
-  for (const file of ['js/gamedict.js', 'js/gamedata.js', 'js/state.js', 'js/sim.js']) {
+  for (const file of ['js/nickname.js', 'js/gamedict.js', 'js/gamedata.js', 'js/state.js', 'js/sim.js']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file });
   }
   const math = vm.runInContext('Math', context);
@@ -461,6 +461,33 @@ test('随机对手：武技总数跟等级走，高等级能出橙装与宝石',
   assert.equal(low.weapons.length + low.skills.length, g.GData.wsLimit(10),
     '10 级随机对手的武技总数必须是 wsLimit(10)');
   assert.ok((low.gears || []).every((gear) => !gear.orange), '10 级不能出橙装');
+});
+
+/* 用户 2026-11 口径：人机随机昵称不超过 7 个汉字；「前缀+核心+称号」的组合词
+ * 只在称号放得下时追加，不能先拼再截（会切出「尾巴达人的师」这种半截称号）。 */
+test('人机随机昵称不超过 7 个汉字（组合称号只在放得下时追加）', () => {
+  const g = game(), S = g.State;
+  let seed = 1;
+  const rng = () => { seed = (seed * 48271) % 2147483647; return seed / 2147483647; };
+  let titled = 0;
+  for (let i = 0; i < 5000; i++) {
+    const name = S.randomAIName(rng);
+    assert.ok([...name].length <= S.AI_NAME_MAX, '超过 7 个汉字：' + name);
+    if (/(?:的师傅|的师兄|的宿敌|二世)$/.test(name)) titled++;
+  }
+  assert.ok(titled > 0, '短组合（如「小鼠的师傅」）仍应偶尔带称号，不能为了长度全砍掉');
+  const foe = S.genAI(70, '', { levelJitter: 0 });
+  assert.ok([...foe.name].length <= S.AI_NAME_MAX, 'genAI 出口也要收口：' + foe.name);
+});
+
+/* 标题页/改名的 7 个汉字口径（英文/数字按 1/3 计）：新开档兜底截断，21 个字母保留。 */
+test('玩家昵称最多 7 个汉字（英文 1/3），新开档兜底截断', () => {
+  const g = game(), S = g.State;
+  S.newGame('八个汉字测试名字', { uiMode: 'classic' });
+  assert.equal(S.state().name, '八个汉字测试名');
+  const latin = 'abcdefghijklmnopqrstu';
+  S.newGame(latin, { uiMode: 'classic' });
+  assert.equal(S.state().name, latin);
 });
 
 /* 练功木桩：对齐 reference 里 `Stakes` 的口径 —— 木桩不判死亡，战斗按固定回合收尾。
@@ -1027,7 +1054,7 @@ test('橙装 q4 使用原版初始属性：狂战 205-208 = 45/45/315/45，融�
   assert.equal(S.gearInst(205).abilityVal, 45, 'gearInst(205) 也要是 q4 值');
   /* 三件紫狂战头 → 橙狂战头：目标应是 q4 id 205，不是 201 + orange 标记 */
   const mats = [S.addGear(201), S.addGear(201), S.addGear(201)];
-  g.math.random = () => 0.5;   // 不触发 3% 变异，走同名保名
+  g.math.random = () => 0.5;   // 高于 2% 变异阈值，走同套目标
   const r = S.mergeGears(mats.map((x) => x.key));
   assert.equal(r.ok, true, r.msg);
   assert.equal(r.gear.quality, 4, '紫→橙产物品质 4');
@@ -1047,6 +1074,72 @@ test('橙装 q4 使用原版初始属性：狂战 205-208 = 45/45/315/45，融�
   assert.equal(migrated.id, 205, '旧橙装迁移到同部位同名的 q4 id');
   assert.equal(migrated.attr, 45, '旧橙装迁移后主属性改为 q4 基准值');
   assert.equal(migrated.orange, undefined, '迁移后去掉实例 orange 标记');
+});
+
+test('融合主属性：三件材料百分比平均后取最接近的两个整数（整数取 x/x+1）', () => {
+  const g = game(), S = g.State;
+  S.newGame('融合属性', { uiMode: 'classic' });
+  const s = S.state();
+  s.level = 90; s.goldPoint = 10000;
+  const base = S.gearBaseAttr(201);
+  const val = Math.round(base * 1.04);
+  const mk = () => S.addGear(201, [], val, 4);
+  /* 三件都是 +4%：平均值正好是整数 4，产物只能是 4% 或 5%（封顶 +5%）。 */
+  g.math.random = () => 0;
+  const a = S.mergeGears([mk().key, mk().key, mk().key]);
+  assert.equal(a.ok, true, a.msg || '融合应成功');
+  assert.equal(a.gear.attrPct, 4, '随机流取第一档时是 4%');
+  assert.equal(a.gear.abilityVal, Math.round(S.gearBaseAttr(a.gear.id) * 1.04), '属性点按目标装备基准折算');
+  assert.equal(S.gearAttrText(a.gear), a.gear.abilityVal + '(+4%)', '界面写成 a(+b%)');
+  g.math.random = () => 0.999;
+  const b = S.mergeGears([mk().key, mk().key, mk().key]);
+  assert.equal(b.ok, true, b.msg || '融合应成功');
+  assert.equal(b.gear.attrPct, 5, '同一次平均的另一档是 +5%，不能超过 +5%');
+  assert.equal(S.gearAttrText(b.gear), b.gear.abilityVal + '(+5%)');
+});
+
+test('融合词条最多 3 条（橙装常规槽位封顶）', () => {
+  const g = game(), S = g.State;
+  S.newGame('融合词条封顶', { uiMode: 'classic' });
+  const s = S.state();
+  s.level = 90; s.goldPoint = 10000; s.gears = [];
+  const ext = (ids) => ids.map((id) => ({ id, level: 1 }));
+  /* 三件材料各带 3 条，共 9 个词条；常规规则只取星级/材料顺序的前两条，第三条再随机，
+   * 因此橙装最多 3 条；黑装的 4 词条隐藏机制见下一条用例。 */
+  const mats = [
+    S.addGear(201, ext([1, 2, 3])),
+    S.addGear(201, ext([1, 2, 4])),
+    S.addGear(201, ext([1, 3, 4])),
+  ];
+  const r = S.mergeGears(mats.map((x) => x.key));
+  assert.equal(r.ok, true, r.msg || '融合应成功');
+  assert.equal(r.gear.ext.length, 3, '橙装最多 3 条词条，不能出 4 词条');
+  assert.equal(String(r.gear.ext[0].id), '1', '第一条按材料顺序取第一个词条');
+  assert.equal(String(r.gear.ext[1].id), '2', '第二条按材料顺序取第二个词条');
+  assert.ok(r.gear.ext.every((e) => [1, 2, 3, 4].includes(Number(e.id))), '第三条只能从材料词条池里随机抽');
+});
+
+test('黑装隐藏 4 词条：材料恰好四对共有词条时才生成', () => {
+  const g = game(), S = g.State;
+  S.newGame('黑装隐藏四词条', { uiMode: 'classic' });
+  const s = S.state();
+  s.level = 90; s.goldPoint = 10000; s.gears = [];
+  g.math.random = () => 0.5;
+  const ext = (ids) => ids.map((id) => ({ id, level: 1 }));
+  const mergeBlack = (patterns) => {
+    const mats = patterns.map((ids) => S.addGear(281, ext(ids)));
+    return S.mergeGears(mats.map((x) => x.key));
+  };
+  /* 1/2/3/4 都至少出现在两件材料里：四对共有词条 → 黑装隐藏 4 词条。 */
+  const four = mergeBlack([[1, 2, 3], [1, 2, 4], [1, 3, 4]]);
+  assert.equal(four.ok, true, four.msg || '黑装融合应成功');
+  assert.equal(four.gear.quality, 5, '产物是黑装');
+  assert.equal(four.gear.ext.length, 4, '四对共有词条才允许出 4 条');
+  assert.deepEqual(new Set(four.gear.ext.map((e) => Number(e.id))), new Set([1, 2, 3, 4]), '四条就是四对共有词条');
+  /* 只有三对共有词条时仍是 3 条。 */
+  const three = mergeBlack([[1, 2, 3], [1, 2, 3], [1, 2, 3]]);
+  assert.equal(three.ok, true, three.msg || '黑装融合应成功');
+  assert.equal(three.gear.ext.length, 3, '不是四对时黑装仍按 3 槽封顶');
 });
 
 test('现代界面删除黑装内容：不可获得/合成/开卡，读档清理；经典界面保留', () => {
@@ -1418,37 +1511,41 @@ test('融合默认允许跨部位材料，现代与经典遵循同一品质要�
   assert.equal(r.gear.quality, 2, '同品质三件升一档');
 });
 
-test('融合词条：两件以上材料重合的词条必定继承（跨部位/跨名字）', () => {
+test('融合词条：前两条按星级/材料顺序继承，同名词条不合并', () => {
   const g = game(), S = g.State;
   const mats = [
     S.addGear(21, [{ id: 1, level: 1 }, { id: 2, level: 1 }]),
     S.addGear(22, [{ id: 1, level: 2 }]),
     S.addGear(23, [{ id: 3, level: 1 }]),
   ];
-  g.math.random = () => 0.9;    // 非必继承槽全部不中，且保名/随机取件不会越界
+  g.math.random = () => 0.9;    // 不触发升星，方便核对继承顺序
   const r = S.mergeGears(mats.map((x) => x.key), { allowMixedParts: true });
   assert.equal(r.ok, true);
   const ids = r.gear.ext.map((e) => e.id);
-  assert.ok(ids.includes(1), '词条 1 在两件材料里出现，必须继承；实际 ' + ids.join(','));
-  assert.equal(r.gear.ext.find((e) => e.id === 1).level, 2, '继承时取材料里的最高星级');
+  assert.equal(ids.length, 2, '紫装产物两个词条槽');
+  assert.equal(String(ids[0]), '1', '最高星级的词条排第一');
+  assert.equal(String(ids[1]), '1', '同名词条在第二条仍保留（不合并、不去重）');
+  assert.equal(r.gear.ext[0].level, 2, '继承时取材料里的最高星级');
 });
 
-test('融合词条每个槽 50% 从材料继承，跨部位/跨名字也生效', () => {
+test('融合词条：前两条固定继承，第三条从剩余材料随机', () => {
   const g = game(), S = g.State;
-  assert.equal(S.FUSION_EXT_INHERIT_RATE, 0.5, '每个产物词条槽的继承概率是 50%');
-  /* 蓝装头/手/衣服（id 21/22/23）各带一条不同词条：三件完全不同部位、不同名字。 */
+  /* 紫装头/手/衣服（id 201/202/203）各带一条不同词条：三件完全不同部位、不同名字。 */
   const mats = [[1], [2], [3]].map((ids, i) => {
-    const gear = S.addGear([21, 22, 23][i], ids.map((id) => ({ id, level: 1 })));
+    const gear = S.addGear([201, 202, 203][i], ids.map((id) => ({ id, level: 1 })));
     gear.used = false;
     return gear;
   });
-  g.math.random = () => 0;      // 每个继承判定都中，且每条都触发 +1 星
+  g.math.random = () => 0;      // 第三条取剩余池第一项，且每条都触发 +1 星
   const r = S.mergeGears(mats.map((x) => x.key), { allowMixedParts: true });
   assert.equal(r.ok, true);
-  assert.equal(r.gear.ext.length, 2, '紫装产物两个词条槽');
-  same(r.gear.ext.map((e) => e.id), [1, 2]);          // 两个槽分别从两件不同材料继承
-  same(r.gear.ext.map((e) => e.level), [2, 2]);       // 继承后按 50% 概率升 1 星
-  assert.ok(r.gear.ext.every((e) => [1, 2, 3].includes(e.id)), '继承的词条只能来自三件材料');
+  assert.equal(r.gear.ext.length, 3, '橙装产物三个词条槽');
+  assert.equal(String(r.gear.ext[0].id), '1', '第一条来自第一件材料');
+  assert.equal(String(r.gear.ext[1].id), '2', '第二条来自第二件材料');
+  assert.equal(String(r.gear.ext[2].id), '3', '第三条从剩余材料词条中随机');
+  assert.equal(r.gear.ext[0].level, 2, '继承后按 50% 概率升 1 星');
+  assert.equal(r.gear.ext[1].level, 2, '继承后按 50% 概率升 1 星');
+  assert.equal(r.gear.ext[2].level, 2, '继承后按 50% 概率升 1 星');
 });
 
 test('需求146：套装收益 —— 同名 2/4 件两档、按最低品质缩放，且真的进战斗', () => {
@@ -2229,6 +2326,9 @@ test('每日任务：当天固定抽取、进度来真实计数、只能领一�
     const chance = superPill.weight / total;
     assert.ok(chance < 0.05, '超级经验丸概率应低于 5%，实际 ' + (chance * 100).toFixed(1) + '%');
     assert.ok(chance < best / total / 5, '应明显低于最高权重的奖励');
+    assert.equal(pool.find((item) => item.id === 45).weight, 0.2, '天使种子每日概率减半');
+    assert.ok(pool.some((item) => item.id === 108 && item.weight === 0.06), '每日任务可出现天使果实碎片');
+    assert.ok(pool.some((item) => item.id === 109 && item.weight === 0.06), '每日任务可出现恶魔果实碎片');
     // 药丸数量固定 1（池子里就不能是区间）
     for (const item of pool) if ([3, 4, 5, 7, 44].includes(item.id)) {
       assert.equal(item.range[0], 1, '药丸数量应为 1：id ' + item.id);
@@ -2937,6 +3037,42 @@ test('色诱之术：命中带眩晕（跳过对手一回合），真化才追�
   assert.ok(sawStrip, '真·色诱 56% 脱装要在 20 场内掷中');
 });
 
+/* 板砖：一次投掷只晕 1 个回合。张牙舞爪（幻兽技能 11）只延长持续伤害 / 持续负面
+ * （中毒、沉默、缴械、脱装），**不能把「跳过一回合」的眩晕延长成 2 回合**：
+ * 2026-11 玩家录屏——随机挑战里敌方板砖只丢了一次，我方却连续两拍不能出手、
+ * 敌方连着多打两拍。根因就是 `petDotRounds(def, 1)` 把眩晕也算进了持续负面。 */
+test('板砖眩晕只跳 1 回合：张牙舞爪不延长眩晕', () => {
+  const g = game(), Sim = g.Sim;
+  const me = { name: '我', level: 50, hp: 100000, maxHp: 100000, power: 1, agility: 10, speed: 30,
+    weapons: [], skills: [], effects: {} };
+  const foe = () => ({ name: '砖头敌人', level: 50, hp: 100000, maxHp: 100000, power: 20, agility: 10, speed: 10,
+    weapons: [{ id: 13, level: 15 }], skills: [], effects: {}, pattern: ['weapon'],
+    pets: [{ id: 22, name: '大嘴恶花', grade: 3, level: 40, skillId: 11 }] });
+  let dotPlus = 0, stunAfterDotPlus = 0, extraSkips = 0;
+  for (let i = 0; i < 30; i++) {
+    const rounds = Sim.simulate(me, foe()).rounds || [];
+    let active = false;
+    for (let j = 0; j < rounds.length; j++) {
+      const r = rounds[j];
+      if (r.action === 'pet' && Number(r.petSkillId) === 11 && r.petDotPlus) { active = true; dotPlus++; }
+      if (!active || !r.stunApplied || r.attacker !== 1) continue;
+      stunAfterDotPlus++;
+      /* 这条眩晕之后、我方下一次真正出手之前被跳过的拍数 */
+      let n = 0;
+      for (let k = j + 1; k < rounds.length; k++) {
+        const q = rounds[k];
+        if (q.attacker !== 0) continue;
+        if (q.action === 'stunned') { n++; continue; }
+        if (q.action === 'weapon' || q.action === 'skill' || q.action === 'common' || q.action === 'pet') break;
+      }
+      if (n > 1) extraSkips++;
+    }
+  }
+  assert.ok(dotPlus > 0, '30 场内要掷中一次张牙舞爪（命中记 petDotPlus）');
+  assert.ok(stunAfterDotPlus > 0, '张牙舞爪生效后还要再掷中一次板砖眩晕');
+  assert.equal(extraSkips, 0, '张牙舞爪生效后，一次板砖也只能跳 1 个回合（实际多跳 ' + extraSkips + ' 次）');
+});
+
 test('速度行动条：同一方最多连续行动 5 次', () => {
   const g = game(), Sim = g.Sim;
   /* 极端速度差：修复前快的一方会在 60 手行动上限内一路先手；
@@ -3013,6 +3149,43 @@ test('果实种子合成：10 个种子 + 50 金松果换 1 个果实，材料/�
   assert.equal(S.composeSeed(45).ok, false, '没有种子时不能合成');
   s.goldPoint = 50;
   assert.equal(S.composeSeed(46).ok, false, '没有恶魔果实种子时不能合成');
+});
+
+test('果实碎片：10 个天使/恶魔碎片 + 50 金松果合成对应果实', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.props[108] = 10; s.props[109] = 10; s.goldPoint = 100;
+  assert.equal(S.composeSeed(108).ok, true, '天使碎片可合成');
+  assert.equal(s.props[47], 1);
+  assert.equal(s.props[108], 0);
+  assert.equal(S.composeSeed(109).ok, true, '恶魔碎片可合成');
+  assert.equal(s.props[48], 1);
+  assert.equal(s.props[109], 0);
+  assert.equal(s.goldPoint, 0);
+});
+
+test('天使/恶魔果实三选一：重开与读档都不重抽，选完清掉待选', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.level = 60; s.weapons = []; s.skills = [];
+  s.props[47] = 1;
+  const first = S.useProp(47);
+  assert.equal(first.needsFruitChoice, true);
+  const frozen = JSON.stringify(first.options);
+  assert.equal(JSON.stringify(S.useProp(47).options), frozen, '重开背包不重抽');
+  S.save(); S.load();
+  assert.equal(JSON.stringify(S.useProp(47).options), frozen, '读档/大退后仍用同一组候选');
+  const pick = first.options[0];
+  assert.equal(S.applyFruitChoice(47, pick.kind, pick.id).ok, true);
+  assert.equal(S.pendingFruitChoices().length, 0, '选完后待选清空');
+});
+
+test('升级武技三选一：候选随存档固定，读档不重抽', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.level = 60; s.weapons = []; s.skills = [];
+  s.wsPicks = [S.wsChoices(3)];
+  const before = JSON.stringify(S.currentWSChoices());
+  assert.ok(before.length > 2, '应有候选');
+  S.save(); S.load();
+  assert.equal(JSON.stringify(S.currentWSChoices()), before, '读档后仍是同一组候选');
 });
 
 let failed = 0;

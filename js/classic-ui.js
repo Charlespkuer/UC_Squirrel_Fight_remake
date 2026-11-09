@@ -5494,7 +5494,7 @@
    *  `scripts/version.json` 时才会用到（file:// 直接打开、注入被拦）。
    *  安装包 / APK 由 `tools/build-tauri-app.cjs --web` 注入真实版本并带上 version.json，
    *  正常发布包不会走到这里；发版时顺手把这一行同步成当前版本即可。 */
-  const VERSION_FALLBACK = '1.1.8';
+  const VERSION_FALLBACK = '1.1.8.1';
   let gameVersion = String((typeof window !== 'undefined' && window.__SSDZ_VERSION) || VERSION_FALLBACK);
   let versionRequested = false;
   function versionLabel(v) {

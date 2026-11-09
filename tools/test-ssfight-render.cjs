@@ -3364,6 +3364,16 @@ function checkMobileComposeWorkflow() {
   );
 }
 
+/* ---------- 商店购买窗：合并 f2 的购买/取消按钮后必须强制重建显示列表 ---------- */
+{
+  /* 1.1.8 的 showFrame 同帧早退是性能优化，但 `mergeBuyFrame` 会整体换掉 frames 再停在
+   * 同一帧；不重置 `__shownFrame` 就什么都重建不出来，弹窗残留 f1 的「使用/取消」，
+   * 玩家看到按钮错位、购买键点不动（2026-11 用户反馈）。 */
+  const src = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-prop-use.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(src, /view\.frames = \[merged\][\s\S]{0,400}view\.__shownFrame = -1[\s\S]{0,120}view\.showFrame\(\)/,
+    '商店购买窗合并按钮后必须清 __shownFrame，否则 showFrame 同帧早退、残留「使用/取消」');
+}
+
 (async () => {
   const fixture = await checkClassicViewLifecycle();
   await checkDynamicMaskReuse(fixture);

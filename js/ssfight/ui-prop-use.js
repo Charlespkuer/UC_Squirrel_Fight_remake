@@ -193,6 +193,10 @@
     }
     view.frames = [merged];
     view.frame = 0;
+    /* ⚠ 帧数组被整体换掉了，必须强制重建显示列表：`showFrame()` 对“同帧重复调用”
+     * 会直接返回（1.1.8 的性能优化），不重置 __shownFrame 的话合并进来的「购买/取消」
+     * 永远不会出现，弹窗上残留 f1 的「使用/取消」——按钮错位、点不动（2026-11 用户反馈）。 */
+    view.__shownFrame = -1;
     view.showFrame();
     return true;
   }

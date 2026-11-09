@@ -3374,6 +3374,17 @@ function checkMobileComposeWorkflow() {
     '商店购买窗合并按钮后必须清 __shownFrame，否则 showFrame 同帧早退、残留「使用/取消」');
 }
 
+/* ---------- 融合选材料：基础属性必须单行，不能压到第一条词条上 ---------- */
+{
+  /* t_base 是原版单行字段（框高 24）；1.1.8 拆成「名字\n数值」后第二行落在 y≈406，
+   * 正好压住 t_addr 第一条词条（y≈403），用户截图里的“重字”就是它。 */
+  const src = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-status.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(src, /setTextByName\(view, 't_base' \+ \(i \+ 1\), g \? State\.gearAttrText\(g, \{ name: true \}\) : '', \{ noClip: true \}\);/,
+    '融合选材料的基础属性要单行写 name+数值，不能拆成两行压住词条');
+  assert.ok(!/t_base' \+ \(i \+ 1\), g \? \(String\(g\.attrName/.test(src),
+    '不要再把 t_base 拆成「名字\\n数值」两行');
+}
+
 (async () => {
   const fixture = await checkClassicViewLifecycle();
   await checkDynamicMaskReuse(fixture);

@@ -4150,10 +4150,11 @@
       setTextByName(view, 't_name' + (i + 1), g ? gearNameText(g) : '');
       const label = clipOf(view, 't_name' + (i + 1));
       if (label) setGearTextColor(label, g ? g.quality : 0);
-      setTextByName(view, 't_base' + (i + 1), g ? (String(g.attrName || '') + '\n' + State.gearAttrText(g)) : '', { noClip: true });
-      /* 原版 t_base 的 EditText 框只有 46.2 单位宽（textfields-index：3 个字），
-       * 生命/速度等基础值到三位数后会被裁掉最后一位（用户 2026-11 实拍）。这里只对
-       * 基础属性行放开裁切；附加词条继续用各自的框，避免长词条压出卡片。 */
+      /* 【2026-11-10 修重字】基础属性必须**一行**：`t_base` 是原版单行字段（框高 24、
+       * 字号 12），1.1.8 把它拆成「名字\n数值」两行后，第二行正好压在 `t_addr` 的第一条
+       * 词条上（y≈406 vs 403），玩家看到的就是「基础值 + 词条」叠成一团。
+       * 框宽仍按 46.2 放开裁切，长数值照常显示。 */
+      setTextByName(view, 't_base' + (i + 1), g ? State.gearAttrText(g, { name: true }) : '', { noClip: true });
       let addr = [];
       try { addr = (g && State.extTextForGear ? State.extTextForGear(g) : (g ? State.extText(g.ext) : [])) || []; } catch (e) { addr = []; }
       setTextByName(view, 't_addr' + (i + 1), addr.join('\n'));

@@ -1,14 +1,12 @@
-/* Four restored auxiliary screens, in the shared 1170 × 690 coordinate space. */
 .extra-score{clear:both}
 .extra-arena-cards .extra-arena-picture{width:180px;height:180px}
 .arena-extra-board .extra-arena-cost{font-size:21px;line-height:1.4;padding:8px 20px;margin-top:12px}
 .extra-board{padding:22px 30px}.extra-note{font-size:20px;line-height:1.45;color:#9b7b51;text-align:center;margin:10px 0 0}.extra-board h2,.extra-board h3{font-family:"Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;font-weight:normal;color:#92632e;margin:0}.extra-board h2{font-size:36px}.extra-board h3{font-size:28px}
 .extra-arena-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:32px;text-align:center}.extra-arena-cards article{min-width:0}.extra-arena-picture{width:198px;height:206px;object-fit:contain}.extra-arena-cards h2{font-size:31px;margin-top:-4px}.extra-arena-cards p{font-size:20px;line-height:30px;margin:5px 0 10px;white-space:nowrap}.extra-arena-cards .uc-button{min-width:190px}.extra-arena-cost{font-size:23px;line-height:1.55;margin-top:17px;padding:11px 20px;border-radius:26px;text-align:center;background:#ead0a3;color:#896037}.extra-resume{position:absolute;left:160px;right:160px;bottom:9px;padding:8px;background:#fff5d4;border-radius:22px;font-size:21px;text-align:center}.extra-resume .uc-button{margin-left:20px}.extra-finalist{display:flex;align-items:center;justify-content:center;gap:35px}.extra-finalist>img{width:240px;height:235px;object-fit:contain}.extra-finalist h3{font-size:34px;color:#b98929}.extra-finalist p{line-height:1.6}.extra-result{text-align:center;font-size:28px}.extra-result>strong{display:block;font-size:64px;color:#ffc847;margin:8px}.extra-result p{margin:12px 0}.extra-result .extra-levelup{color:#6d983d;font-size:25px}
 .extra-rank-layout{display:grid;grid-template-columns:335px 1fr;gap:34px;height:100%}.extra-rank-self{text-align:center;border-right:3px solid #dfc89a;padding-right:29px}.extra-rank-self .extra-arena-picture{width:122px;height:113px;float:left;margin-right:8px}.extra-rank-self h2{padding-top:29px;margin-bottom:35px;font-size:36px}.extra-score{font-size:25px;display:flex;align-items:center;justify-content:space-between;padding:3px 18px;margin:7px 0;border-radius:21px;background:#ebd0a0}.extra-score b{font:32px Georgia,serif;color:#af762b}.extra-rank-self>p{font-size:21px;margin:12px 0}.extra-rank-self>.uc-button{display:flex;width:100%;margin-top:11px}.extra-rank-list>h3{text-align:center;margin:1px 0 10px}.extra-rank-row{display:flex;align-items:center;gap:14px;height:40px;font-size:22px;border-bottom:1px solid #dfc9a1;padding:0 15px}.extra-rank-row>span{width:27px;font:25px Georgia,serif;color:#c69233}.extra-rank-row>b{font-weight:normal;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.extra-rank-row>strong{font:25px Georgia,serif}.extra-rank-row.mine{background:#d2e6a3;border-radius:20px;color:#57752b;border-bottom:0}.extra-rank-list .extra-note{font-size:19px;margin-top:12px}
-/* 赛区榜有 20 行（原版一页只放 4 行），而这张复刻页的板面只有一屏高：
-   不约束网格行时，右列会把整行撑到 970px，左列的「开始匹配 / 金杯商店」
-   被 board 的 overflow:hidden 裁掉（安卓 989×446 实测）。只给这张页加：
-   行高锁在板面内、右列内部滚动、左列压缩间距让两颗按钮完整露出。 */
+/* Rank board has 20 rows; without a fixed row track the right column grows to 970px and the
+   left column's buttons get clipped by overflow:hidden (Android 989×446). This page only:
+   rows stay inside the board, right column scrolls internally, left spacing tightens. */
 .rank-extra-board .extra-rank-layout{grid-template-rows:minmax(0,1fr);min-height:0}
 .rank-extra-board .extra-rank-list{min-height:0;overflow-y:auto;padding-right:4px}
 .rank-extra-board .extra-rank-self h2{padding-top:6px;margin-bottom:0}
@@ -16,16 +14,13 @@
 .rank-extra-board .extra-rank-self>p{margin:6px 0}
 .rank-extra-board .extra-rank-self>.uc-button{margin-top:0}
 .rank-extra-board .extra-rank-self>.uc-button+.uc-button{margin-top:5px}
-/* 顶图从 122×113 收到 110×102：短屏下刚好把「金杯商店」的底边收进板面内。 */
 .rank-extra-board .extra-rank-self .extra-arena-picture{width:110px;height:102px}
 .extra-cup-shop{padding-top:62px;padding-bottom:54px}.extra-shop-balance{position:absolute;top:17px;left:0;right:0;text-align:center;font-size:25px;color:#a07328}.extra-shop-grid{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:14px 24px;height:100%}.extra-shop-item{display:grid;grid-template-columns:84px 1fr;align-content:center;column-gap:10px;row-gap:5px;border:2px solid #d6bb8c;background:#f2dcb5;border-radius:26px;padding:12px 10px;text-align:left;color:#88603c;cursor:pointer;min-width:0}.extra-shop-item img{grid-row:1/4;width:80px;height:92px;object-fit:contain}.extra-shop-item b{font-size:23px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.extra-shop-item span{font-size:17px;white-space:nowrap}.extra-shop-item small{font-size:17px;color:#ad8a57;white-space:nowrap}.extra-pagination{position:absolute;left:0;right:0;bottom:10px;display:flex;gap:24px;align-items:center;justify-content:center;font-size:23px}
-.lottery-extra-board{padding-top:63px;padding-bottom:102px}.extra-lottery-heading{position:absolute;top:11px;left:0;right:0;text-align:center;font-size:36px;color:#ffd854!important}.extra-lottery-prizes{display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(2,1fr);gap:14px 22px;height:100%;padding:0 15px}.extra-prize{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:0;border:3px solid #c5a471;border-radius:28px;background:linear-gradient(#fff4cd,#efd5a4);box-shadow:inset 0 0 0 3px #fff9df;transition:background .06s,box-shadow .06s}.extra-prize img{width:94px;height:84px;object-fit:contain}.extra-prize>span{font-size:19px;white-space:nowrap;color:#8c663f}.extra-prize.lit{background:linear-gradient(#fff4a1,#ffd253);border-color:#de931f;box-shadow:0 0 0 4px #ffe978,0 0 22px #edbd39}.extra-lottery-footer{position:absolute;bottom:16px;left:57px;right:57px;display:flex;align-items:center;justify-content:space-between;gap:25px}.extra-lottery-footer>div{display:flex;align-items:center;gap:25px;font-size:22px}.extra-lottery-footer b{font-size:25px;color:#b4812b}.extra-lottery-footer span{font-size:19px;line-height:1.5;color:#a08459}.extra-lottery-footer strong{font-weight:normal;color:#9e6d2a}.extra-lottery-footer>.uc-button{font-size:32px;min-width:205px}/* 每日幸运抽奖（本轮）：右上角仓库抽奖卷角标 + 连抽 10 次按钮 + 十连汇总清单 */
-.lottery-ticket-corner{position:absolute;top:14px;right:28px;display:flex;align-items:center;gap:6px;font-size:21px;color:#8c663f;
+.lottery-extra-board{padding-top:63px;padding-bottom:102px}.extra-lottery-heading{position:absolute;top:11px;left:0;right:0;text-align:center;font-size:36px;color:#ffd854!important}.extra-lottery-prizes{display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:repeat(2,1fr);gap:14px 22px;height:100%;padding:0 15px}.extra-prize{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:0;border:3px solid #c5a471;border-radius:28px;background:linear-gradient(#fff4cd,#efd5a4);box-shadow:inset 0 0 0 3px #fff9df;transition:background .06s,box-shadow .06s}.extra-prize img{width:94px;height:84px;object-fit:contain}.extra-prize>span{font-size:19px;white-space:nowrap;color:#8c663f}.extra-prize.lit{background:linear-gradient(#fff4a1,#ffd253);border-color:#de931f;box-shadow:0 0 0 4px #ffe978,0 0 22px #edbd39}.extra-lottery-footer{position:absolute;bottom:16px;left:57px;right:57px;display:flex;align-items:center;justify-content:space-between;gap:25px}.extra-lottery-footer>div{display:flex;align-items:center;gap:25px;font-size:22px}.extra-lottery-footer b{font-size:25px;color:#b4812b}.extra-lottery-footer span{font-size:19px;line-height:1.5;color:#a08459}.extra-lottery-footer strong{font-weight:normal;color:#9e6d2a}.extra-lottery-footer>.uc-button{font-size:32px;min-width:205px}.lottery-ticket-corner{position:absolute;top:14px;right:28px;display:flex;align-items:center;gap:6px;font-size:21px;color:#8c663f;
   background:linear-gradient(#fff9df,#f1d9a8);border:3px solid #c5a471;border-radius:24px;padding:2px 18px;box-shadow:inset 0 0 0 2px #fffdf2}
 .lottery-ticket-corner b{font-size:26px;color:#b4812b}
 .extra-lottery-footer>.lottery-buttons{display:flex;align-items:center;gap:18px}
 .extra-lottery-footer>.lottery-buttons>.uc-button{font-size:32px;min-width:205px}
-/* 十连结果：与抽奖页奖励格同款的 5×2 一屏铺开（不滚动） */
 .extra-lottery-win.grid{text-align:center}
 .lottery-result-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px 12px}
 .lottery-result-grid .extra-prize{min-height:112px;border-radius:20px;border-width:3px;padding:6px 4px;gap:2px}
@@ -33,8 +28,6 @@
 .lottery-result-grid .extra-prize>span{font-size:16px;line-height:1.2;white-space:normal;text-align:center;color:#8c663f}
 .extra-lottery-win{text-align:center}.extra-lottery-win img{width:165px;height:165px;object-fit:contain;display:block;margin:0 auto 8px}.extra-lottery-win>strong{font-size:34px;color:#c48e27}.extra-lottery-win p{color:#719238;font-size:25px}
 .extra-master-layout{display:grid;grid-template-columns:270px 1fr;gap:27px;height:100%}.extra-master-portrait{width:260px;height:370px;object-fit:contain;align-self:center}.extra-master-main{padding-top:1px;padding-right:10px;min-width:0;overflow-y:auto}.extra-master-main h2{font-size:35px;margin-bottom:12px}.extra-master-candidates{display:grid;gap:9px}.extra-master-candidates>div,.extra-master-current{display:flex;gap:13px;align-items:center;background:#ebd0a4;padding:7px 14px;border-radius:23px;font-size:23px;height:52px}.extra-master-candidates>div>b,.extra-master-current>.master-head>b{flex:1;font-weight:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.extra-master-candidates span,.extra-master-current span{font:24px Georgia,serif;color:#ac802e}.extra-master-current{height:61px}.extra-master-tip{font-size:21px;line-height:1.6;margin:15px 0;background:#f0dcba;border-radius:24px;padding:15px 20px;color:#a38359}.extra-apprentice-title{display:flex;align-items:center;justify-content:space-between;gap:15px;margin:16px 0 9px}.extra-apprentice-title h3{font-size:26px}.extra-apprentices{display:grid;gap:6px}.extra-apprentices>div{display:flex;align-items:center;gap:9px;background:#f0dfba;border-radius:21px;padding:4px 13px}.extra-apprentices img{width:51px;height:46px;object-fit:contain}.extra-apprentices span{flex:1;font-size:17px;line-height:1.2}.extra-apprentices b{font-weight:normal;font-size:20px}.extra-apprentices>p{font-size:22px;line-height:1.6;color:#aa8c62;margin:4px 0}.extra-master-main>.extra-note{font-size:18px;margin-top:11px}.extra-master-main .uc-button.tiny{font-size:21px;min-height:34px;padding:3px 15px}
-
-/* ---------- 师徒系统 ---------- */
 .extra-master-sep{border:0;border-top:3px dashed #dfcca1;margin:18px 0}
 .candidate-row{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0}
 .candidate-card{flex:1 1 0;min-width:150px;background:#fffaf0;border:3px solid #d9bd88;border-radius:20px;
@@ -63,15 +56,12 @@
 .extra-apprentice-title{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .extra-apprentice-title h3{margin:0}
 
-/* 师徒页：用页签把「我的师父」与「我的徒弟」分开，避免棋盘超高被裁切 */
 .master-tabs{display:flex;gap:14px;margin:0 0 12px}
 .master-tabs .uc-tab{flex:0 1 auto;min-width:200px;min-height:56px;font-size:32px;padding:4px 22px}
 .master-panel{min-height:300px}
-/* 「我的师父」卡片装的是属性网格+武器技能清单，不能沿用候选行的固定高度 flex 布局 */
 .extra-master-main .extra-master-current{display:block;height:auto;padding:10px 14px}
 .extra-master-main .extra-master-current .profile-panel{margin-top:6px}
 
-/* 师徒页收紧一点，保证页签 + 候选列表 + 四维详情都能落在棋盘内 */
 .master-extra-board{padding-top:14px!important;padding-bottom:10px!important}
 .master-tabs{margin:0 0 8px}
 .master-tabs .uc-tab{min-height:50px;font-size:29px;padding:3px 18px}
@@ -90,8 +80,6 @@
 .extra-master-main h2,.extra-master-main h3{font-size:27px}
 .extra-master-main .extra-note{font-size:17px;margin-top:6px}
 
-/* ---------- 排行榜（原版 STATE.TOPLIST） ---------- */
-/* 头部与排序标签固定，只有名次列表滚动，页面支持下滑看完整榜单 */
 .toplist-board{display:flex;flex-direction:column;padding:16px 34px 10px}
 .toplist-head,.toplist-tabs,.toplist-locked-note,.toplist-board>.extra-note{flex:0 0 auto}
 .toplist-board{padding:16px 34px 10px}
@@ -115,8 +103,6 @@
 .toplist-me .toplist-locked{color:#b08a4e;font-size:22px}
 .toplist-locked-note{margin:0 0 7px;padding:6px 16px;border-radius:18px;background:#fff2cc;
   box-shadow:inset 0 0 0 3px #ffd98a;font-size:20px;line-height:1.35;color:#8a4b12}
-
-/* ---------- 超级松鼠（原版 VIP） ---------- */
 .vip-board{padding:10px 34px 6px;font-size:19px;color:#7b5a2e;overflow-y:auto}
 .vip-status{display:flex;align-items:center;gap:16px;padding:6px 18px;border-radius:24px;background:#f6e8c6}
 .vip-status.on{background:linear-gradient(#fff6cf,#ffe6a1);box-shadow:inset 0 0 0 4px #e8c46a}
@@ -142,19 +128,13 @@
   border:4px solid #8a5f22;border-radius:24px;background:linear-gradient(#fff3ba,#ffd25f)}
 .vip-plan b{font-size:25px;color:#8a4b12}
 .vip-plan span{font-size:17px;color:#7b5a2e}
-/* 首页昵称前的尊贵标识（原版特权 4） */
 .home-name .vip-badge{color:#ffd84d;-webkit-text-stroke:2px #8a5f22;paint-order:stroke fill;margin-right:4px}
-/* 四个竞技场卡片（经验/碎片/幻兽/天梯）：2×2，第 4 张不折到 3 列网格外 */
 .extra-arena-cards.four{grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr)}
 
-/* 经典金杯商店的兑换确认：原版页（7638 第 9 帧）点卡片后的小弹窗。
-   商店版面本身完全用原版帧，这里只排一下"图标 + 名称/价格"这一块。 */
 .classic-rank-buy{display:flex;gap:14px;align-items:flex-start}
 .classic-rank-buy .item-icon{flex:0 0 84px;width:84px;height:84px;border-radius:14px}
 .classic-rank-buy p{margin:4px 0}
 
-/* 金杯商店（道具页同款版面）：售价 = 数字 + 金杯图 + 数字 + 金松果图。
-   比普通商店的 `.item-caption` 再大一号，且不要「杯/果」或「/」文字。 */
 .shop-board .bag-grid .catalog-cell .rank-caption{display:flex;align-items:center;justify-content:center;gap:10px;
   max-width:none;overflow:visible;font:32px/39px Georgia,"SimSun","Songti SC","STSong",serif;letter-spacing:0;white-space:nowrap}
 .rank-price{display:inline-flex;align-items:center;justify-content:center;gap:10px;white-space:nowrap}

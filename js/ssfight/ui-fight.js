@@ -1,40 +1,11 @@
 /* Classic in-battle presentation rendered from the original ssfight fight frame.
- *
- * Evidence (all from the committed asset library + the reference decompile):
- *   · `7772` is the root timeline's frame 70 ("fight"): f1 = `backGround`(7692) + `blood`(7703)
- *     + `winWords`(7717); f2/f3 = the result panel; f5 = `openChest`(7771) chest lottery.
- *   · The two fighters are two instances of `7689`, which the original root timeline places on
- *     frame 60 as `player1` / `player2` at depth 485 / 532 with matrix
- *     `±0.453003,0,0,0.452866,17.05|303.4,107.45`. Frame 1 = the squirrel body slot
- *     (`playerMc` = 7639, `statu` = 7658); frames 2..6 are the other bodies.
- *   · `松鼠` (6532) is attached at runtime by `setUp()` (MainMovie.as:6173/6245), so it is not
- *     in any static closure; its frames are the animation selectors:
- *     f1 `attacks`(6339) / f2 `defenses`(6427) / f3 `dodges`(6433) / f4 `defenseSkills`(6512) /
- *     f5 `attackbacks`(6517) / f6 `comeBacks`(6524) / f7 `winPoses`(6531).
- *   · Frame choices mirror `Squirrel.as`; round fields map from the sim event stream in
- *     `attackPlan` / `defensePlan` below.
- *   · Timing is **not** a controller: like the original, each action clip fires the next step
- *     from its own frame actions (`03-反编译源码/动作脚本/sprite<id>.as`): `useSkillDefense()` on
- *     the wind-up frame, `beAttack()` on the contact frame, `setAttackEnd()` / `stop()` on the
- *     last frame, `attackBack()` on the defender's own reaction frame, `die()` /
- *     `congratulate()` at the end of the death pose. See `ATTACK_ACTS` / `DEFENSE_ACTS` and
- *     `playClip` (a clip must **stop** on its last frame — the original writes `stop()` there,
- *     and a still-`playing` clip would loop the same move a second time).
- *   · Damage numbers are per-side templates (`fightSub.leftBlood` 4845 / `rightBlood` 4846)
- *     duplicated by `showBlood()` — see `floatNumber`.
- *   · Gear is worn exactly like the village page: the holders placed inside each animation frame
- *     (`ikNode_*`) are pinned to the equipment frame and their slot emits the container
- *     (gear-slots.json / gear-frames.json).
- *
- * Page API: SfFight.run(opts) → controller, mirroring Battle.run's contract.
- * Assets: images/ssfight/ui/tags-fight.json (tools/gen-ssfight-ui.cjs --fight).
+ *        整包 tags-fight.json 只作生成器 / 测试 oracle，运行时不再加载。
  */
 (function () {
   'use strict';
 
   const T = () => (window.SfUiMain && window.SfUiMain.toolkit) || null;
   const S = () => (window.State && State.state && State.state()) || null;
-  /* 无头回归里没有 rAF；统一走这两个别名，别在业务代码里直接摸 window。 */
   const raf = (fn) => (window.requestAnimationFrame ? window.requestAnimationFrame(fn) : setTimeout(() => fn(Date.now()), 16));
   const caf = (id) => { try { (window.cancelAnimationFrame || clearTimeout)(id); } catch (e) {} };
 
@@ -44,44 +15,32 @@
   };
   /* 7772 的帧号：1 = 战斗场景 / 2 = 战果（玩家胜）/ 3 = 战果（玩家负）/ 4 = 伤害累计 / 5 = 开宝箱 / 6 = 空 */
   const F = { scene: 1, win: 2, lose: 3, harm: 4, chest: 5, blank: 6 };
-  /* 原版根时间轴帧 60 把 `player1`/`player2` 摆成左右两侧（深度 485 / 532）。 */
   const SIDE_MATRIX = ['0.453003,0,0,0.452866,17.05,107.45', '-0.453003,0,0,0.452866,303.4,107.45'];
   const BG_FRAMES = 5;          // `random(backGround._totalframes - 1) + 1` → 1..5
   const HUD_FRAME = 8;          // `blood` 播到第 8 帧就 stop 并 showFightInfo
   const BLOOD_BAR_FRAMES = 101; // 7697 共 102 帧，第 N 帧 = 扣掉 N%
   const RANGED = new Set([5, 6, 7, 8, 9, 10, 13, 14]);
   /* `Player.specialEffect()` 的四档 → `statu.propty` 的第几帧。
-   * 这 8 颗图标逐帧渲染核对过（2026-11，`propty` 7657 的 8 帧）：
-   *   1 力↑ / 2 敏↑ / 3 速↑ / **4 力↓ / 5 敏↓ / 6 速↓** / 7 ↑速敏力（全属性提升）/ **8 晕击**。
-   * 战斗里真正会用到的就是 4/5/6/8：
-   *   · `MainMovie.as:6357` 的 `specialEffectType` 1→statu 3（力↓）/ 2→statu 1（敏↓）/ 3→statu 2（速↓）；
    *   · `Squirrel.attack` 的投掷分支按武器 5/6/8 选 statu 1/2/3，而 sim 里正是 5=敏捷降低、6=速度降低、8=力量降低；
    *   · **statu 4（晕击）只在被跳过的那一拍由 `playRound` 直接 setStatu(4)** —— 命中拍不飘，
    *     否则同一记板砖会出现「命中一颗 + 跳过一颗」的连续两次晕眩标识（见 `effectStatu`）。 */
   const STATU_ICON = { 1: 5, 2: 6, 3: 4, 4: 8 };
-  /** `propty` 里那 8 颗图标容器（它们各自的第 1 帧脚本是 `stop(); _root.showReverse(this, 1)`）。 */
   const STATU_ICON_SYMS = new Set([7640, 7641, 7642, 7645, 7647, 7649, 7653, 7656,
     /* 小宇宙爆发动画里那三颗「力/敏/速」字标（5940/5952/5956 各 2 帧，第 2 帧是镜像）：
-     * 它们同样是挂在角色身上的状态字标，敌方整棵子树镜像后会反字；按状态图标同一条
      * 规则停在正字帧、敌方补一次自翻。 */
     5940, 5952, 5956]);
   /** 每颗图标的**正字帧**（两帧互为镜像，`showReverse` 就是按左右选一帧）。
    *  ⚠ 各颗的约定**并不一致**，逐帧独立渲染核对（2026-10-17 复核；2026-11 再核）：
-   *    7640/7641/7642/7645/7647/7649（力↑敏↑速↑力↓敏↓速↓）→ 第 **1** 帧正写；
-   *    7653（↑速敏力）→ 第 **1** 帧正写；
    *    7656（击晕）→ 第 **1** 帧才是正的（第 2 帧是镜像的"晕击"，旧版误记成 2，
-   *    于是敌方头顶的「击晕」一直是反着写的两个字 —— 用户 2026-11 口径）。
    *  选帧之后由 `onClip` 给**敌方**（父级整棵子树 scaleX<0）再翻一次自己。 */
   const STATU_ICON_FRAME = { 7640: 1, 7641: 1, 7642: 1, 7645: 1, 7647: 1, 7649: 1, 7653: 1, 7656: 1,
     5940: 1, 5952: 1, 5956: 1 };
 
-  /* ---------- 装备表（与村庄页同一份；只在真要穿时加载 tags-gear.json） ---------- */
   let gearTables = null;
   async function loadGearTables() {
     if (gearTables) return gearTables;
     await SfRender.loadExtra('tags-gear.json');
-    const B = 'images/ssfight/ui/';
-    const j = (f) => fetch(B + f, { cache: 'force-cache' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const j = (f) => SfRender.loadTable(f).catch(() => null);
     const [frames, slots] = await Promise.all([j('gear-frames.json'), j('gear-slots.json')]);
     if (!frames || !slots) return null;
     const containerIds = {};
@@ -107,7 +66,6 @@
    *  ⚠ 对手身上那套（`State.genAI()` → `randomAIGears()`）只存 `{id, used, ext, attr}`，
    *  **没有 `type` 字段** —— 直接读 `g.type` 会得 `NaN`，`byType` 里就会出现一个 `NaN` 键、
    *  四个部位一个都对不上，结果 `planSide` 返回 null、对手**一件装备都不穿**
-   *（2026-11 用户口径："玩家与对手的装备都没有正确穿戴，全都是无装备情形"）。
    *  这里按 id 回字典查类型兜底。 */
   function gearTypeOf(g) {
     const ty = Number(g && g.type);
@@ -126,7 +84,6 @@
     } catch (e) {}
     return NaN;
   }
-  /** 一侧的穿搭计划：挂点 id → 容器 / 帧号，持有者 id → 该钉的帧（照 `planWears`）。 */
   function planSide(wears) {
     const t = gearTables;
     if (!t) return null;
@@ -151,7 +108,6 @@
       let extMax = Array.isArray(raw)
         ? raw.reduce((m, e) => Math.max(m, Number(e && e.level) || 0), 0)
         : Math.max(0, Number(raw) || 0);
-      /* 勇者外观件显式带 `tier`（1~3，见 tower-ui 的 heroGearTierCount）：与词条星级同一口径。 */
       extMax = Math.max(extMax, Math.max(0, Math.min(3, Number(g.tier) || 0)));
       extMax = Math.max(0, Math.min(3, extMax));
       /* 对手的装备只有 {id, ext}，没有 type；按 id 回查部位，别让头/拳套的强化配色档被吃掉。 */
@@ -192,19 +148,10 @@
     return list.filter((g) => g && typeof g === 'object' && g.id != null && g.src == null);
   }
   /* ---------- 三侠 / 木人：原版 `7689` 的第 2/3/4/5 帧就是现成的原版矢量模型 ----------
-   * 原版 `loadPlayer`（MainMovie.as:17186）按 `chooseWz` 把 `player2` 拨到 2/3/4，再往
-   * `player2.playerMc` 里 `attachMovie("螳螂"/"仙鹤"/"熊猫")`。那一颗外部 SWF 不在仓库的
-   * 参考资料里（`viewer/game/FightGame/*.swf` 抓回来的是同一个占位文件），但**主 SWF 的
-   * `7689` 第 2/3/4 帧里已经烤好了三侠的静态矢量稿**（7660=螳螂 / 7662=仙鹤 / 7685=熊猫，
-   * 逐颗渲染核对过）；第 5 帧 7687 是木人。
    * 这里用它们当对手模型，再用 CSS 呼吸 + 简单的出招/受击位移补上"会动"的观感；
    * 三侠各自的战斗机制（螳螂双击、仙鹤前期凶猛、熊猫反击）本来就在 `Sim` 里按 `npcType` 算。 */
   const NPC_FRAME = { tl: 2, xh: 3, xm: 4, wood: 5 };
-  const NPC_NAME = { tl: '螳螂', xh: '仙鹤', xm: '熊猫', wood: '木人' };
-  /** 对手的 `npcType` → 三侠档；挑战塔的 `tw_*` 按体型映射（与 `battle.js` 同一张表）。 */
   function npcTypeOf(foe) {
-    /* 征战动物 boss：`foe.campaign` 是 tower.js 给的 6833 形态描述；它不是三侠图集，
-     * 也不走 makeStaticNpcFighter，SfFight 用专门的 buildFighter 分支挂 6833。 */
     if (foe && foe.campaign) return 'campaign';
     const raw = String((foe && foe.npcType) || '').toLowerCase();
     if (!raw) return null;
@@ -244,7 +191,6 @@
 
   /** 这一侧的武器表（id → 等级）。
    *  武器型号帧和真化闪电**按这一场真正装备的等级**画，不盲信回合事件里的 `level`：
-   *  录像 / 回放 / 旧战斗里的事件可能来自另一份面板，外观以 `me` / `foe` 的清单为准。
    *  （`level` 只作为清单缺失时的兜底。） */
   function weaponsOf(side, player) {
     let list = (player && Array.isArray(player.weapons)) ? player.weapons : null;
@@ -261,16 +207,14 @@
   }
 
   /* ---------- 战利品图标（战果页 / 开宝箱那一格） ----------
-   * 原版 `mc.c1.attachMovie(<道具名>, "mc", 100)`（战果页 :18804 / 开宝箱 :18691）——
-   * 库元件名就是道具名，映射表由 `node tools/gen-ssfight-ui.cjs --fight` 一并产出
    * （`images/ssfight/ui/loot-icons.json`，名字来源是 `js/battle-drops.js` 的掉落池）。
    * 原版就是 `{_x:0, _y:0}` **不缩放**（图标画稿是按格子尺度画的），所以这里也不补变换。 */
   let lootIcons = null;
   async function loadLootIcons() {
     if (lootIcons) return lootIcons;
     try {
-      const r = await fetch(SfRender.BASE + 'loot-icons.json', { cache: 'force-cache' });
-      lootIcons = (r && r.ok) ? ((await r.json()).byId || {}) : {};
+      const table = await SfRender.loadTable('loot-icons.json');
+      lootIcons = (table && table.byId) || {};
     } catch (e) { lootIcons = {}; }
     return lootIcons;
   }
@@ -281,7 +225,6 @@
     return target.attachChild(hit.id, 1, 'prize');
   }
 
-  /* ---------- 战斗视图 ---------- */
   let live = null;      // 正在播的那一场
   let seq = 0;
 
@@ -310,8 +253,6 @@
     const g = clip && (clip.g || clip);
     if (g && g.style) g.style.visibility = on ? '' : 'hidden';
   }
-  /** 挂一次 rAF：到点先把自己从 `live.rafs` 里摘掉再执行 —— 一场战斗要挂几百次观察，
-   *  只 push 不摘的话这个数组会长到几千项，`clean()` 时要逐个 cancel。 */
   function arm(fn) {
     const rec = live;
     if (!rec) return;
@@ -323,48 +264,15 @@
     rec.rafs.push(id);
   }
   /** 播一条动作片断，**在帧脚本写的停止帧上停住**（`opts.stop` 缺省 = 末帧）。
-   *
    *  ⚠⚠ 这一条是"动画会播两遍 / 胜利失败动作重复播放"的根因所在。
-   *  渲染器的节拍器会让任何 `playing === true` 的实例**循环**推进；以前这里只 `resolve()`、
-   *  不停帧，于是 await 一回来，同一个片断又从第 1 帧自己播第二遍（用户 2026-11 口径）。
-   *  原版的每个动作元件末帧都写了 `stop()`（`动作脚本/sprite<元件号>.as` 逐条核过，括号里是
-   *  渲染器数出来的帧数 —— **两者逐条相等**）：`5630`(17) 第 17 帧 stop、`5778`(22) 第 22 帧
-   *  `setAttackEnd()`、`4844`(20) 第 20 帧 stop、`6366`(19) 第 19 帧 `_root.die()`、
-   *  `6530`(32) 第 32 帧 `congratulation = 2`、`7703`(8) 第 8 帧 `showFightInfo()`。
-   *  所以"播到末帧就停"与"照帧脚本停"是同一件事。
-   *
    *  `onFrame(n)` 收到 **1 基**帧号（直接对着原版 `.as` 里的数字读），而且是"越过了就补触发"
-   *  （节拍器是 14 fps、观察走 rAF，一步可能跨过两帧）。
-   *
    *  ⚠⚠ 还有一条**必须**在这里做：**放行这条片断内部的"嵌套动画"**。
-   *  原版每个动作元件里都嵌着若干多帧子元件，它们靠 Flash 的"嵌套 clip 自动播"在走：
    *   · `5616`（17 帧，`sprite5616.as` **没有脚本** → 一直循环）= 待机 / 呼吸姿势，
-   *     每个动作的**第 1 帧与末帧**放的都是它 —— "待机时松鼠在呼吸"就是它；
-   *   · `6347`（普通受击，10 帧）里嵌 `6346`（11 帧）= 挨打那一下的**表情 / 受击特效**；
-   *   · `5630`（普攻）里嵌 `5625`（15 帧）= 挥拳的**动效**；
-   *   · `5843`（色诱之术）里嵌 `5785`（11 帧）等一整串特效元件。
-   *  复刻的静态页策略**出生即冻结**（`render.js` 的 `applyStatic`），于是这些嵌套动画全停在
-   *  第一帧：待机**僵住**、攻击 / 技能 / 挨打**没有表情与动效**（用户 2026-11 口径：
-   *  "321 go 倒计时的时候松鼠理应有呼吸动作而不是僵住的"、"来点松果、师傅驾到等技能会有表情上的
-   *  动作，各种攻击也会有表情上的动作，诱惑等技能也有双方专属的表情动作……很多都没有实现"）。
-   *  这里按 Flash 的语义放行：**凡是我们主动播的片断，它整棵子树都不再冻结**
-   *  （`__keepAnim` 会随实例出生向下继承，见 `render.js` 的 `showFrame` / `walkStatic`）。
-   *  钉住 / 显式停住的那些**照样有效**：装备持有者走 `pinFrame`（节拍器里优先于播放判定），
-   *  贴好的装备容器走 `setSymbol` → `gotoAndStop`（停帧）。
-   *
-   *  ⚠ 哪些嵌套元件确实该"出生就在播"：`动作脚本/sprite<N>.as` 里**没有脚本**的那些
-   *  （逐条核过：`5615`(20) / `5616`(17) / `5625`(15) / `6346`(11) / `3195` / `5189` /
-   *  `4950` / `5116` / `5188` / `5262` / `5605` 都没有脚本 → 原版里一直自动播）。
-   *  有 `stop()` 的（例：色诱之术的 `5785`、普通受击的 `6347`）由外面那条 `playClip` 的
    *  停帧逻辑管 —— 嵌套那一层这里只管"让它转"，不额外改它的帧。 */
   /** 递归放行一棵子树里的嵌套动画；`self` = 连这颗自己一起拨回第 1 帧开始播
    *  （待机呼吸要；`playClip` 外面马上会 `gotoAndPlay(2)`，所以它只要子树）。
    *  `inGear` / 自身是装备时**整支跳过** —— 挂点是 `pinFrame` 钉住的、容器是 `[slot]`
-   *  显式停帧的，让它们自己转就等于"装备在角色身上乱跳"（2026-10 踩过）。
    *  ⚠ 只有 `self === true` 那一档才会"拨帧开始播"，子树一律**只放行不拨帧**：
-   *  里面有的是**故意停住的**（例：状态图标容器 `7640…7656` 两帧是镜像档，
-   *  `specialEffect` 已经 `gotoAndStop` 定住那一档，再让它自己播就会左右翻面闪；
-   *  装备容器同理）。真正"该自己播"的嵌套元件会在**出生那一刻**继承 `__keepAnim`
    *  并保持 `playing = true`（`render.js` 的 `showFrame`），不需要这里动手。 */
   /* 动作片断里**显式 stop 在第 1 帧**的特效（5785 = 色诱之术那张脸/特效），
    * 只能按原版停在第一帧，不能被“重启动画”顺手放走。 */
@@ -392,15 +300,10 @@
     }
     for (const c of clip.__attached || []) startNestedAnim(c, nextSelf, gear, deep, force);
   }
-  /** `playClip` / `play` 用：只放行子树（外面自己会从第 2 帧开始播）。 */
   function allowNestedAnim(clip) { startNestedAnim(clip, false, false); }
   /** 角色动作播完后把嵌套表情/眼睛停在**最后一个有内容的帧**。
-   *
-   *  这些表情层在原版里多数没有脚本、会自己循环；`deep` 一开始把它们全部放行之后，
    *  父动作停在受击/胜利的最后一帧，子表情却还在转（Android 的低帧率/节拍会让它更显眼）。
    *  这里只停**嵌套子件**（父件已经由 `playClip` 停在停止帧），装备/钉帧件照旧跳过；
-   *  下一拍动作会重新 `startNestedAnim(deep)`，不会把后续动画冻死。
-   *  倒地时保留 6365 灵魂及 6362 表情子树：6362 自身停在原版第 9 帧，
    *  里面的 6359 泪滴仍按原素材循环。 */
   function freezeNestedAnim(clip, inGear, keepIds) {
     if (!clip) return;
@@ -427,10 +330,8 @@
   }
   /* 脸部保留原版深度：5615 眼白必须低于头装；6062 思考眼睛由动态蒙版裁剪。
    * 原 SWF/Ruffle 逐帧对照 5843/6127 的睁眼、闭眼与侧脸后，确认不能按固定
-   * depth 50/55 重排：那里会换成整张眼皮、眼影、眼线或爱心，重排会改变表情轮廓。
    * 蒙版与颜色变换的继承/撤销由显示层处理，不能通过把眼白抬到脸皮上方补偿。 */
   /** 一条时间轴里**最后一个有内容的帧**（1 基）。很多动作元件在收招后拖了几条空帧
-   *  （实测：闪避 `6432` 第 8~11 帧、`6524` 末两帧），停在那几条空帧上等于**把角色画没了** ——
    *  表现就是"闪避 / 受击演完人消失一下再出现"（用户 2026-11 口径："敌方 UI 一直闪"）。 */
   function lastContentFrame(clip) {
     const frames = clip && clip.frames;
@@ -438,7 +339,6 @@
     for (let i = frames.length - 1; i >= 0; i--) {
       const fr = frames[i];
       if (!fr) continue;
-      /* `render.js` 的 `buildFrames` 把每一帧存成 `Map<depth, 放置>`：size 为 0 就是空帧。 */
       const size = (typeof fr.size === 'number') ? fr.size : (fr.nodes ? fr.nodes.size : 0);
       if (size > 0) return i + 1;
     }
@@ -452,7 +352,6 @@
     if (interrupted()) return Promise.resolve();
     /* `deep`：这一条是**角色动作**（攻击 / 受击 / 闪避 / 归位 / 胜利姿势），
      * 片断里的表情、眼睛、身体嵌套层要按原版从第 1 帧重新播；否则它们可能停在上一拍
-     * `playClip` 停住的帧上 —— 经典战斗里“思考方天画戟时眼睛没了”“多次色诱后脸部贴图
      * 叠着上一张”就是这一类。HUD / statu / 宝箱这些非角色动作不传 deep。 */
     if (o.deep) startNestedAnim(clip, true, false, true, true);
     else allowNestedAnim(clip);
@@ -461,17 +360,12 @@
     const endIdx = Math.max(0, Math.min(last, lastContentFrame(clip) - 1));
     const stopIdx = (o.stop != null) ? Math.max(0, Math.min(last, Number(o.stop) - 1)) : endIdx;
     const fire = (n) => { if (o.onFrame) { try { o.onFrame(n); } catch (e) {} } };
-    /* `resume` = 这一条**已经在播**（`useSkillDefense()` 起手的那条防御技），别再从头拉一遍。 */
     let seen = o.resume ? clip.frame + 1 : 1;
     if (!o.resume) { play(clip, 2); fire(1); }
     return new Promise((resolve) => {
       let done = false, guard = 0, tick = null;
       /* 动画收尾和 `onFrame`（命中 / 防御起手 / 闪避归位）都靠**渲染器的节拍器**驱动，
-       * 不再用 rAF 轮询 `clip.frame`。原因（2026-11 安卓实拍）：节拍器是 14fps 的
-       * `setInterval`，而 rAF 会被软件图层 / 重布局拖到几百毫秒；两边一旦错开，
-       * `playClip` 看到的帧号可能已经绕过停止帧一整圈 —— 动作于是**又播一遍**，
        * 命中回调也落在受击/闪避动画之后（“重复出招、闪避扣血动画对不上”）。
-       * 这里只登记一个每拍检查器：节拍器每推进一步，就在**同一拍**判断是否到了停止帧。
        * `tickWatchers` 由 run() 挂在战斗视图的 `onTick` 上；没有它（无头回归）才退回 rAF。 */
       const watched = !!(rec.tickWatchers && rec.tickWatchers.add);
       const finish = () => {
@@ -484,11 +378,9 @@
           const at = rec.timers ? rec.timers.indexOf(guard) : -1;
           if (at >= 0) rec.timers.splice(at, 1);
         }
-        // Stop in place: jumping to the final frame would build discarded action trees.
         if (clip.stop) clip.stop();
         resolve();
       };
-      // skip/clean wake the actual animation wait, not just a race around its caller.
       rec.sleepers.add(finish);
       tick = () => {
         if (done) return;
@@ -504,7 +396,6 @@
            * perform() 永远卡住；把没来得及触发的帧回调补齐后再收尾。 */
           if (wrapped) for (let k = Math.max(1, prevSeen + 1); k <= stopIdx + 1; k++) fire(k);
           stopAt(clip, stopIdx + 1);
-          /* 普通动作收招时冻结嵌套层；倒地保留灵魂和已停在原版表情帧的子树。 */
           if (o.keepNestedIds) freezeNestedAnim(clip, false, new Set(o.keepNestedIds.map(Number)));
           else if (o.deep && !o.keepNested) freezeNestedAnim(clip);
           finish();
@@ -529,12 +420,8 @@
     });
   }
 
-  /* ============================================================
-   * 格斗者：`Player` / `Squirrel` / `Animals` 的等价物
-   * ============================================================ */
   /** 把一侧的 `7689` 挂到战斗视图上并摆到原版位置。
    *  ⚠ 原版链路是 `player1.playerMc.attachMovie("松鼠","playerMc")` —— 也就是
-   *  **挂在 7639 这颗"身体槽"里面**，而 7639 的第 2 帧会把第 1 帧那批 `ikNode_*` 摘掉
    *  （`gotoAndStop(2)`）。`attachChild` 不会写进 `byName` 表，所以主角本体**必须由这里回传**，
    *  不能回头再 `slot.byName('playerMc')` 取（那样永远是 null，动作全都不播 —— 2026-10 实拍发现的）。 */
   function buildFighter(view, side, wears, npcType, campaign, mutant) {
@@ -542,19 +429,12 @@
     const holder = view.attachChild(SYM.fighter, 1, 'player' + (side + 1));
     if (!holder) return null;
     holder.setExtraTransform('matrix(' + SIDE_MATRIX[side] + ')');
-    /* 征战（副本）动物 boss：`player2.gotoAndStop(6)` + `attachMovie("副本角色所有")`。
-     * 原版是 6833 的 `mcFrame` 拨到动物形态，再取它的 `playerMc` 作为 action 宿主；
-     * 这里同样把 6833 挂到 7689 的 playerMc 槽位，`makeFighter` 拿到的是里面的动物模型。 */
     if (campaign) {
       /* 原版 `player2.gotoAndStop(6)` 才是征战体型槽；frame1 是松鼠，直接挂 6833 会把
        * 动物按松鼠槽的局部坐标放大到两倍。 */
       stopAt(holder, 6);
       /* 7689 第 6 帧的 `playerMc` 槽是 **7688**（2 帧）：
-       *   · 第 1 帧 = 一整套**拼好的静态动物**（19 颗零件，姿态就是狡兔）；
-       *   · 第 2 帧 = 空帧（全部 remove）。
-       * 原版 `MainMovie.as:6237` 挂完 6833 立刻 `player2.playerMc.gotoAndStop(2)` ——
        * 就是为了把这只静态动物收掉。复刻以前停在第 1 帧，于是那只**狡兔永远留在敌人位置**：
-       * 狡兔战里和真模型叠成重影、狼王 / 妖狐 / 猿将战里多出一只狡兔
        * （用户 2026-10 口径："猿将战中敌人位置还有一个狡兔"）。 */
       const slot = holder.byName('playerMc');
       if (slot) {
@@ -579,13 +459,10 @@
        * `npcType` 去查 NPC_FRAME，最后变成一只静态木人。 */
       return holder;
     }
-    /* 三侠 / 木人：原版 `player2.gotoAndStop(2/3/4/5)` + 往 `playerMc` 挂模型。
-     * 这里直接用 7689 对应帧里**已经烤好的原版矢量稿**（见 NPC_FRAME 的注释）。 */
     if (npcType) {
       const frame = NPC_FRAME[npcType] || 1;
       stopAt(holder, frame);
       /* 起点先把状态图标收到**末帧**：`propty` 里的图标默认会露出第一颗（力↑），
-       * 三侠一上场就顶着「力上升」不消失（用户 2026-11 口径）。主角那一支早就这么做了，
        * NPC 分支以前漏了。收完再由 `specialEffect()` 按这一拍真正中的减益升起对应图标。 */
       const statu = holder.byName('statu');
       if (statu) stopAt(statu, statu.frameCount ? statu.frameCount() : 20);
@@ -629,7 +506,6 @@
   /* 带字的特效元件（见 `onClip` 里那段说明）：三颗字型精灵**都是正字烘焙**
    * （2026-10-17 / 2026-11 逐颗独立挂载核对：6431「闪避」、5864「师父驾到」、6438「装死」
    * 脱离父级镜像单看都是正的；旧版把 6438 误当成反字烘焙，于是敌方装死被父级镜像翻反、
-   * 我方又被自翻一次，两侧都不对）。屏幕朝向 = 烘焙朝向 ⊕ 父级镜像（敌方整棵子树
    * scaleX<0）⊕ 自翻；所以只要敌方补一次自翻即可。 */
   const TEXT_ART_SYMS = new Set([5864, 6431, 6438]);
   const TEXT_ART_BAKED_MIRROR = new Set();
@@ -667,9 +543,6 @@
     if (Number(fighter.side) !== 0 && clip.setExtraTransform) clip.setExtraTransform('scale(-1,1)');
   }
   function orientTextArt(clip, fighter) {
-    /* 6431「闪避」有 2 帧（6429 正字 / 6430 镜像）；它挂在闪避动画里会自播，
-     * 表现就是“闪避两个字左右来回闪”。和其它字标一样先钉在正字第 1 帧，
-     * 敌方再补一次自翻。 */
     stopAt(clip, 1);
     const parentMirrored = Number(fighter.side) !== 0;
     const bakedMirrored = TEXT_ART_BAKED_MIRROR.has(Number(clip.tag.id));
@@ -686,11 +559,9 @@
   /** 新建实例的接管点（`render.js` 的 `onClip`）：钉持有者 / 贴容器 / 拨手里的武器 / 状态图标朝向。 */
   function onClip(clip) {
     /* 手里的武器：原版是这些容器/美术**自己的第 1 帧脚本**在调 `_root.chooseWeaponGo(this)` /
-     * `_root.chooseWeapon(this)` / `_root.showWeaponSize(this)`（`Squirrel.as:425/476/522`）。
      * 复刻里接到"实例化这一刻"，与装备那套同一个接管点。 */
     const fighter = fighterOf(clip);
     if (Number(clip.tag.id) === 6362) {
-      /* 原版 sprite6362 第 9 帧 stop；泪滴子元件继续播放。 */
       playClip(clip, { resume: true, stop: 9, keepNested: true });
       return;
     }
@@ -712,11 +583,7 @@
       }
     }
     /* 状态图标的**正字 / 朝向**：图标容器（7640…7656）自己的第 1 帧脚本是
-     * `stop(); _root.showReverse(this, 1)` —— 两帧互为镜像（`showReverse`：左 1 / 右 2）。
      * ⚠⚠ 但**敌方那一侧整个 `7689` 本身就是镜像的**（原版就这么摆：面朝左），挂在它里面的
-     * 状态图标会连字一起被翻过去 —— 力↓ 变成反着写的力、「晕击」变成反着写的两个字
-     * （用户 2026-11 口径："敌方的信息提示镜像是错误的做法，镜像后是反过来的字，这就不对了"）。
-     * 所以这里改成：**统一用"正字帧"，右边那位再把自己翻回来一次**（`scale(-1,1)` 只翻自己这一层，
      * 位置不动、箭头也照旧朝下），而不是去挑那颗"预先镜像好"的帧 —— 后者各颗约定不一致
      *（见 `STATU_ICON_FRAME`），挑错一颗就又是反字。 */
     if (STATU_ICON_SYMS.has(Number(clip.tag.id))) {
@@ -725,10 +592,6 @@
       return;
     }
     /* **带字的特效**（"闪避" / "师父驾到" / "装死" / "被击退" 里那几颗字）：
-     * 屏幕朝向 = 烘焙朝向 ⊕ 父级镜像（敌方整棵子树 scaleX<0）⊕ 自翻。
-     * 三颗字都是正字烘焙（见 `TEXT_ART_BAKED_MIRROR` 的注释），敌方补一次自翻即可。
-     * 名单怎么来的：在 `tags-fight.json` 里按"黄橙渐变 + 棕描边"的字形样式扫出来的三颗字型元
-     * 件（5862/5863→5864、6429/6430→6431、6436/6437→6438），宿主是
      * `5922`（师父驾到）/`6432`（闪避）/`6440`（装死）/`6523`（被击退）—— 都在角色身上。 */
     if (TEXT_ART_SYMS.has(Number(clip.tag.id))) {
       if (fighter) orientTextArt(clip, fighter);
@@ -748,47 +611,22 @@
       clip.setSymbol(p.symbol, p.frame, 1, 'topleft');
       clip.__gearSlot = true;
       /* ⚠ 身体装备（`gearBody` / `gearArm`，type 2）**不能**在战斗层再 `mirrorInPlace` 一次。
-       * 依据（2026-10 逐项核对）：
        *  · 容器画稿和角色**同向**：村庄 `myself` 穿的是同一套 B 容器、同一个 `topleft` 锚点，
-       *    不翻转就合身；敌方那一侧整棵 `7689` 本来就是 `scaleX<0`，由父级统一镜像。
-       *  · `mirrorInPlace` 是给"带字特效"做**绕包围盒中心**原地翻转的，它只写
-       *    `translate(2cx) scale(-1,1)`，会把 `setSymbol(..., 'topleft')` 刚算好的
        *    `translate(-bbox.x,-bbox.y)` 整段覆盖掉 —— 贴图整体左上偏一个包围盒原点
-       *    （身体服实测偏 28.8×22.4 个局部单位，约 63×49 屏幕像素），看起来"完全没合身"，
-       *    偏上去的那截袖子/肩甲还像"身体旁边多了一段手臂"（用户 2026-10 口径）。
        * 所以这里保持 `setSymbol` 的 `topleft` 锚点，只让父级负责朝向。 */
       if (fighter && live && live.strip && live.strip[Number(fighter.side)]) setGearClipHidden(clip, true);
     }
   }
 
-  /* ============================================================
-   * 回合 → 动作帧：`Squirrel.as` 的选择逻辑
-   * ------------------------------------------------------------
-   * 原版 `currentRound` 由服务端给，字段是 `attackType` / `weaponSkillId` / `defenseType` /
-   * `defenseSkillId`；复刻的 `Sim.simulate()` 给的是另一套（`action` / `id` / `dodge` / …），
-   * 下面几张表就是**全部**映射规则，改动画只动这里。
-   *
-   * ⚠⚠ 四档 attackType 对应的是**四组完全不同的动画**（`Squirrel.as:8-149`）：
-   *   1 = 普通攻击 → `attacks` 第 1 帧
-   *   2 = 武器攻击 → 近战第 2 帧 / 投掷第 3 帧
-   *   3 = **技能**   → 按 `weaponSkillId` 进 switch（**只有 8/12/13/14/15/17/18/23 这 8 个**）
-   *   4 = **幻兽/召唤** → 第 `29 + id` 帧（`attacks.attack.allPets…`）
-   * 第 4 档**只在 `action:'pet'` 时走**（见 `PET_ATTACK_ACTS`）；技能仍走第 3 档。
-   * 2026-11 用户口径："战斗中我观察到我方大量使用了幻兽……说明你的武器和技能调用出了很大的问题"，
-   * 当时就是把所有 `action == 'skill'` 都塞进了第 4 档（`29 + id`），于是每个技能都在放召唤动画。
-   * ========================================================== */
   /* 技能 → `attacks` 选择帧 `[普通, 真形态(等级>10)]`（`Squirrel.as` 的 switch 逐条抄）。 */
   const SKILL_ATTACK_FRAME = {
     8: [4, 15], 12: [5, 16], 13: [6, 6], 14: [7, 17],
     15: [8, 18], 17: [9, 19], 18: [10, 20], 23: [12, 21],
   };
-  /** 这个技能有没有"出手动画"（不在表里的都是被动/防御类：力王附体、暴击、装死……）。 */
-  const hasAttackAnim = (id) => Object.prototype.hasOwnProperty.call(SKILL_ATTACK_FRAME, Number(id));
   function isTrueForm(r) {
     return r.trueForm === true || r.isTrue === true || Number(r.level) > 10;
   }
   /* ---------- 幻兽协战：原版 `attackType 4` ----------
-   * `Squirrel.attack()` 对第 4 档只做一件事：`mc.attacks.gotoAndStop(29 + weaponSkillId)`
    * —— 帧号就是 **petsInfo 的幻兽 id**（30..61，共 32 只），每帧里烤好了这只幻兽自己的
    * 出招动画。`sprite<元件号>.as` 的第 N 帧 `_root.beAttack()` 就是命中帧，逐条抄在下面。 */
   const PET_ATTACK_ACTS = {
@@ -813,25 +651,12 @@
    * 原版出手动画里**真的握着这一拍用的那把武器**，靠的还是"帧脚本"：
    *   · 近战武器攻击（`5748`）在 `ikNode_98`/`ikNode_116` 上挂了容器 `5735` → 里面是 `5734`
    *     （9 帧，一帧一把近战武器），`5734` 第 1 帧调 `_root.chooseWeaponGo(this)`
-   *     → `Squirrel.chooseWeaponGo` 按 `weaponSkillId` 拨帧；
-   *   · 投掷攻击（`5778`）里是 `5776`（8 帧，一帧一把投掷武器），第 1 帧调 `_root.chooseWeapon(this)`
-   *     → `Squirrel.chooseWeapon`；
-   *   · 选中的那把武器美术（`5666`…`5775`）自己第 1 帧调 `_root.showWeaponSize(this)`
-   *     → `Squirrel.showWeaponSize` 按 `attackerWeaponLevel` 再挑**型号**（8 级 → 第 2 帧 … 15 级 → 第 9 帧）。
-   * 三张表合起来才是"拿出哪把武器、多大"。
-   *
-   * ⚠⚠ 复刻以前一条都没接，于是近战一律停在容器第 1 帧 = **方天画戟**、投掷一律第 1 帧 = **死老鼠**：
-   *   玩家换了武器（或早把方天画戟卖了）战斗里照样握着它 —— 用户 2026-11 口径：
    *   "战斗中玩家会使用自己没有的技能&武器"。 */
   const MELEE_WEAPON_ART = { sym: 5734, frames: { 1: 1, 2: 2, 3: 3, 4: 4, 11: 5, 12: 6, 15: 7, 16: 8, 17: 9 } };
   const THROW_WEAPON_ART = { sym: 5776, frames: { 5: 1, 6: 2, 7: 3, 8: 4, 9: 5, 10: 6, 13: 7, 14: 8 } };
   /** 武器容器（`5734` / `5776`）→ 它自己那一套 id → 帧 的映射。 */
   const WEAPON_ART_CONTAINERS = { 5734: MELEE_WEAPON_ART, 5776: THROW_WEAPON_ART };
   /** 单把武器的美术（`showWeaponSize` 的接收者）→ 按等级挑型号帧。
-   *  普通 8~13 级照原版 2~7 帧；真化四档按用户 2026-11 口径固定成
-   *  **真1 无 / 真2 白 / 真3 浅蓝 / 真4 黄 / 真5 红**：
-   *  型号帧 5 = 真1（无彩色辉光）、6 = 真2（白）、7 = 真3（浅蓝）、
-   *  9 = 真4（黄）、8 = 真5（红）。原版 `showWeaponSize` 是 14→8 / 15→9
    *  （红在真4、黄在真5），与用户口径相反，所以最后两档对调，其余不动。 */
   const WEAPON_SIZE_FRAMES = { 8: 2, 9: 3, 10: 4, 11: 5, 12: 6, 13: 7, 14: 9, 15: 8 };
   /** 真武器外发光颜色（与 `GData.trueWeaponGlow` 同一张表；取不到时退回空串）。 */
@@ -848,7 +673,6 @@
     const lv = owned || Number(art && art.level) || 1;
     return Math.max(1, Math.min(15, Math.round(lv)));
   }
-  /** 递归走一棵 MovieClip 子树（`nodes` 的换帧放置 + `attachChild` 挂上来的）。 */
   function eachClipTree(root, fn) {
     if (!root || typeof fn !== 'function') return;
     fn(root);
@@ -856,13 +680,9 @@
     for (const c of root.__attached || []) eachClipTree(c, fn);
   }
   /** 给武器美术拨型号帧 / 真化外发光，并处理它身上那两层闪电（5649 / 5660）。
-   *
    *  ⚠ 5649 / 5660 是 5 帧的**辉光/闪电叠层**，原版靠父级放置的 `cx` 染成
    *  真1~真5 的颜色；但复刻的节拍器会让它们自己从第 1 帧播到第 5 帧。
    *  10 级武器的型号帧 4 本身就带一层青色闪电，不处理的话：
-   *    · 10 级死神镰刀也会放"真化"闪电（用户 2026-11 口径："应该没有特效"）；
-   *    · 自播到第 5 帧时，闪电形状/亮度还会跳，看起来像在真1~真5 之间乱切。
-   *  所以非真形态（等级 ≤10）直接藏掉这两层；真形态钉在第 1 帧，颜色交给父级 `cx`
    *  + `drop-shadow`，不再让它自己播。 */
   function paintWeaponArtClip(clip, fighter) {
     if (!clip || !clip.tag) return;
@@ -903,7 +723,6 @@
       return { frame: isTrueForm(r) ? pair[1] : pair[0] };
     }
     /* `attackType 0` = "这一拍不出手"（`Squirrel.attack` 的第一支）：`attacks` 第 11 帧 = `6067`，
-     * 30 帧的"站着准备"动作（第 1 帧 stop、第 2 帧 play、第 30 帧 setAttackEnd）。
      * 复刻的休息 / 眩晕回合以前**完全不播它**（只等 420ms），所以方天画戟的
      * "思考一回合"在画面上根本看不出来（用户 2026-11 口径）。 */
     if (r.action === 'rest' || r.action === 'stunned') return { frame: 11 };
@@ -911,7 +730,6 @@
   }
   /* 防御技能（`useSkillDefense` / `Player.specialEffect` 的 `defenseSkillId`）。
    * ⚠ 龟甲术（7）与绝对防御（16）各有一档**真形态**：`Squirrel.useSkillDefense` 里按
-   * `defenderWeaponLevel > 10` 分别走第 4 / 第 5 帧（`DEFENSE_SKILL_ACTS` 里那两条就是它）。
    * 以前这里恒返回基础档，真·龟甲术 / 真·绝对防御**永远播普通档** —— 也是"用了自己没有的技能"。 */
   const DEFENSE_SKILL_FRAME = { 6: 1, 7: 2, 16: 3 };
   const DEFENSE_SKILL_TRUE_FRAME = { 7: 4, 16: 5 };
@@ -922,19 +740,9 @@
     return DEFENSE_SKILL_FRAME[k];
   }
   /** 这一回合要给受击方飘哪一颗状态图标 —— 返回 `Player.specialEffect()` 的 statu 档位。
-   *
-   *  复刻的事件流里没有原版那个 `specialEffectType`，所以按**真实的中招效果**映回原版那几档
-   *  （`STATU_ICON`：statu 1→图标 5 / 2→6 / 3→4 / 4→8）：
    *    · **力/敏/速下降**（投掷武器 8 / 5 / 6，sim 的 `debuffStat`）→ statu 3 / 1 / 2 → 第 4 / 5 / 6 帧。
    *    · **眩晕 / 冻结不在命中这一拍飘**。`stunApplied` 只表示"这一下把对手打晕了"，
    *      「晕击」图标统一由**被跳过的那一拍**（见 `playRound` 的 `action:'stunned'` 分支）飘一次。
-   *      ⚠ 两处都飘 = 命中一颗 + 跳过一颗，玩家看到的就是**连续两次晕眩标识**、像是被晕了两个回合
-   *      （2026-11 玩家反馈："敌人板砖武器让自己晕眩了两个回合，头上连续出现的两次晕眩标识"）。
-   *      单次眩晕在 sim 里只跳过 1 个回合（`stun` 记 1、被跳过时自减到 0），所以这里必须返回 0。
-   *  ⚠⚠ 2026-11 用户口径："给敌人施加 debuff 的时候飘的 debuff ui 是错误的 ui"。原因就是这里
-   *  以前把三档 statu 当成了"中毒/沉默/缴械"用（stun→statu 3 = **力量下降**、中毒→statu 1 = 敏捷下降…），
-   *  而 statu 3 在原版的意思恰恰是**力量下降** —— 于是眩晕飘出"力↓"、吃毒飘出"敏↓"。
-   *  原版对**中毒 / 沉默 / 缴械根本没有图标**（中毒只飘伤害数字、冻结走冻结横幅），所以一律返回 0
    *  —— 现代播放器同样只给 `debuffText` 飘字、不给这些效果图标。 */
   function effectStatu(r) {
     const stat = r.debuffStat || (/力量/.test(r.debuffText || '') ? 'power'
@@ -950,7 +758,6 @@
   const SKILL_DEFENSE_FRAME = { 8: [7, 9], 12: [2, 2], 15: [6, 6], 18: [8, 3], 23: [1, 1] };
   /** 这一拍受击方该播哪一段。`side` = **正在演出的这一侧**（0/1）：
    *  ⚠ `r.fakeDie` 说的是"**有人**装了死"，装死的是 `r.fakeDieSide`（普通受击 = 挨打那位；
-   *  被反伤打死 = **出手那位**，见 sim 的 `reflectHurt`）。以前这里不看这一位，
    *  于是"出手方被反伤打出装死"时**挨打方**会莫名其妙演一段装死 —— 玩家没这个技能也照演
    *  （用户 2026-11："战斗中玩家会使用自己没有的技能"）。现代播放器从一开始就分这一位
    *  （`battle.js` 的 reaction：`r.fakeDieSide == null || Number(r.fakeDieSide) === Number(side)`）。 */
@@ -983,26 +790,8 @@
     return { kind: 'hit' };
   }
 
-  /* ============================================================
-   * 【帧脚本】原版每个动作元件**自己**的帧动作表
-   * ------------------------------------------------------------
-   * 原版没有"时间轴控制器"：整套战斗演出是**动画片断自己的帧动作**在关键帧上回调 `_root`
-   * （反编译源码 `03-反编译源码/动作脚本/sprite<元件号>.as` 逐条可查）：
-   *   · `_root.useSkillDefense()` —— 防御技起手（`Squirrel.useSkillDefense`，只有
-   *     `defenseType == 2` 才有动作）。注意它在 **`beAttack` 之前好几帧**：原版是先在
-   *     出手动画放到第 3~25 帧时把盾举起来，再在第 9~31 帧挨打。
-   *   · `_root.beAttack()` —— 命中：受击方起手 + 扣血 + 飘字（`Player.reduceBlood`）。
-   *   · `_root.setAttackEnd()` / `_root.boom()` —— 这一拍结束，`myLogic` 才发下一拍。
-   *   · `_root.attackBack()` —— **受击动画自己**放到这一帧才反击 / 归位。
-   *   · `_root.die()` / `_root.congratulate()` —— 倒地播到最后一帧才算"死"，胜利方随即起手。
-   *
-   * 复刻以前用"出手后固定等一拍（71ms）就当打中了"，招式还在起手、对面先倒了 ——
-   * 观感就是"我方攻击动画与敌方受击动画对不上"（用户 2026-11 口径，本批最严重的一条）。
-   * 下面三张表就是**全部**帧号；键 = 对应选择器的帧号（`attackPlan` / `defensePlan` 的返回值）。
-   * ========================================================== */
   /** `attacks`(6339) 选择帧 → 该动画元件在**第几帧**干什么。
    *  ⚠ `guard`（原版帧脚本里提前调 `_root.useSkillDefense()` 的那一帧）**现在只留作取证**：
-   *  照用户 2026-11 口径"绝对防御与龟甲术的动画触发实际太早了，参考现代版的做法"，
    *  防御技改在**命中那一刻**起手（见 `playRound` 的 `impact`），与 `battle.js` 一致。 */
   const ATTACK_ACTS = {
     1: { sym: 5630, guard: 3, hit: 9 },          // 普通攻击
@@ -1040,7 +829,6 @@
     8: { sym: 6395 },                            // 18 吸铁大法
     9: { sym: 6415 },                            // 8 色诱之术（中特效且身上有装备）
     /* 幻兽协战的受击帧（`squirrelAttackConfig` attackType 4 段；11..40）。
-     * 这些帧里有几帧的子件没有实例名（例如 19 帧是 6424），`beAttack` 会用
      * `onlyChildClip()` 兜底，不能因为 `byName('defense')` 为空就整段跳过。 */
     11: { sym: 6416 }, 12: { sym: 6418 }, 13: { sym: 6347 }, 16: { sym: 6421 },
     17: { sym: 6421 }, 18: { sym: 6347 }, 19: { sym: 6424 }, 22: { sym: 6421 },
@@ -1048,7 +836,6 @@
     28: { sym: 6421 }, 29: { sym: 6347 }, 30: { sym: 6421 }, 32: { sym: 6425 },
     35: { sym: 6425 }, 39: { sym: 6421 }, 40: { sym: 6421 },
   };
-  /** `defenseSkills`(6512) 选择帧 → 防御技动画（`back` 同上）。 */
   const DEFENSE_SKILL_ACTS = {
     1: { sym: 6440, back: 36 },                  // 6 装死
     2: { sym: 6464, back: 31 },                  // 7 龟甲术
@@ -1061,22 +848,17 @@
   /* 反击（`attackbacks` 6517 第 1 帧）：第 5 帧 `beBttackBack()`（结算反伤 + 出手方归位）、
    * 第 15 帧 `congratulate()`（本文件把它交给收尾那一步，见 `perform`）。 */
   const ATTACKBACK_ACTS = { sym: 6516, hit: 5 };
-  /** `comeBack(type)`：`type` 0/1/2 → `comeBacks`(6524) 第 1/2/3 帧 → 下面这三个元件。 */
   const COMEBACK_ACTS = { 1: { sym: 6521 }, 2: { sym: 6522 }, 3: { sym: 6523 } };
   const HUD_STOP = 8;                          // `7703` 血条：第 8 帧 `stop(); showFightInfo(this)`
   /** 相邻两拍之间的呼吸（现代播放器 `battle.js` 每回合收尾 `await wait(170)`）。 */
   const ROUND_GAP = 170;
-  /** 帧脚本里 `back` 的通用接线：`acts` 有 `back` 且放到那一帧了就回调。 */
   const backHook = (acts, hooks, key) => {
     const at = acts && acts.back;
     if (!at || !hooks || !hooks[key || 'back']) return undefined;
     return (n) => { if (n >= at) hooks[key || 'back'](); };
   };
 
-  /** 一个"格斗者"：包住 `7689` 实例，暴露 `Squirrel.as` 的那几个动作。 */
   /* ---------- 三侠 / 木人的静态矢量模型：呼吸 + 出招 / 受击 / 倒地 ----------
-   * 原版外部 SWF（`FightGame/Mantis3.swf` 等）没有进仓库的参考资料，但 7689 的
-   * 第 2/3/4/5 帧已经把三侠与木人的**静态矢量稿**烤在主 SWF 里；这里把画稿包进一个
    * 呼吸壳（CSS 只动壳），动作位移写到外面的 `mc` 上，两者互不影响。 */
   const NPC_NS = 'http://www.w3.org/2000/svg';
   function prepareNpcModel(model) {
@@ -1121,21 +903,6 @@
     npcPose(api, {});
     if (api.mc && api.mc.g) api.mc.g.style.opacity = '';
   }
-  /** ============================================================
-   * 三侠 / 木人：经典战斗里的**现代战斗素材填充**
-   * ------------------------------------------------------------
-   * 用户口径（2026-11）：保留已找到的 ssfight 熊猫动作文件，但经典战斗先用
-   * **现代播放器同一套 `AnimationStr` 图集**把熊猫 / 螳螂 / 仙鹤补齐。
-   * 松鼠本体仍走原来的 `7689` 矢量动画；这里只替换 NPC 那一侧。
-   *
-   * 实现：把现代 1170×690 动画画进一层透明 canvas，再把它与经典 320×196 舞台
-   * **同区域叠放**（HTML canvas，见下方 WebKit foreignObject 说明）。
-   * 动作名、命中帧、特效与 `battle.js` 对齐：
-   *   · 待机 `_rest` / 普攻 `_common_attack` / 技能 `_skill_attack`
-   *   · 受击 `_hitMe` / 闪避 `_runAround` / 反击 `_beatBack`
-   *   · 归位 `_runBack` / 倒地 `_die` / 胜利 `_win`
-   * 图集没加载到时才退回 7689 的静态稿（旧实现，保留兜底）。
-   * ============================================================ */
   const NPC_SHEETS = { tl: ['tl'], xh: ['xh1', 'xh2'], xm: ['xm1', 'xm2'], wood: ['woodman1', 'woodman2'] };
   const NPC_EFFECT_SHEETS = { tl: ['tl_effect'], xh: ['xh_effect1', 'xh_effect2'], xm: ['xm_effect'], wood: ['woodman_effect'] };
   const NPC_ACTION = {
@@ -1159,13 +926,8 @@
     return npc + '_effect_' + key;
   }
   /** 图集动画这一帧该画哪一张。
-   *
    *  `play()` 把新动画的 `idx` 设成 **-1**（这样第一次 tick 才会触发 `onFrame(1)`），
-   *  但 `play()` 末尾会立刻 `draw()` 一次。旧写法直接取 `frames[-1]` = `undefined`，
-   *  于是先 `clear()` 再什么都不画 —— 画布上出现**一帧透明**。
    *  三侠的待机/攻击/受击都走这条路径，玩家看到的就是“回合开始（或新动作起手）
-   *  三侠形象断一下/撕裂一两帧”（用户 2026-10 报的现象）。
-   *  这里在 `idx < 0` 时先画第 1 帧：画面从旧姿势直接接到新动作的第一帧，
    *  同时保留 `idx=-1`，下一次 tick 仍会正常触发 `onFrame(1)`。 */
   function atlasPaintFrame(anim) {
     const frames = anim && anim.frames;
@@ -1182,17 +944,9 @@
   }
 
   /** 把一层 HTML/SVG 覆盖物铺到经典舞台 SVG 的显示区域上（两者都在 `#ui` 的设计坐标里）。
-   *
    *  **优先按设计坐标定位**：`offsetLeft/offsetTop` + `clientWidth/clientHeight` 都是
    *  `#ui` 缩放前的值，`SfRender.svgScreenMap()` 给出的 `content` 也是设计单位。
    *  这样完全不需要把屏幕矩形除回来，也不会被 iOS 15 的 `getScreenCTM` 209220 或
-   *  「全面屏」下 `sx !== sy` 的非等比 `#ui` 缩放带偏。
-   *
-   *  以前这里用 `host.clientWidth / hostRect.width` 一个比例折回设计坐标：等比缩放时
-   *  恰好正确，**全面屏时 x/y 比例不同**，三侠图集 canvas 的高度会被算成
-   *  `stageHeight * sy / sx`（iPhone 横屏约 75%），并被顶到舞台顶部 —— 用户看到的
-   *  「三侠定位与缩放大幅改变」。现在直接取舞台内容的设计高度，不再换算。
-   *
    *  返回舞台内容在设计坐标里的尺寸；量不到（隐藏 / 还没布局）时返回 null。 */
   function layoutStageOverlay(el, root, host) {
     if (!el || !root || !host) return null;
@@ -1264,10 +1018,8 @@
   }
 
   /** 战斗底色层：把原版 `backGround` 从主 SVG 挪到 canvas **下面**。
-   *
    *  三侠图集是普通 HTML canvas，天然压在主 SVG 之上；不拆层时，NPC 身上的伤害数字、
    *  状态图标、技能特效全在主 SVG 里，会被整块 canvas 挡住。现在层序是：
-   *    底图 SVG（z-index 0） < NPC canvas（z-index 1） < 主 SVG（z-index 2，角色/特效/HUD）
    *     < 顶部覆盖 SVG（z-index 3，跳过键）
    *  主 SVG 里的 SVG 特效因此重新压在 NPC 上面；NPC 的静态身体只隐藏 `holder.__hero`，
    *  `statu` 等 SVG 状态图标仍留在主 SVG 里正常显示。 */
@@ -1307,7 +1059,6 @@
 
   /** 三侠 / 木人的状态图标：`statu` 容器是 7689 里的 SVG（与身体分开），
    *  图集版只隐藏静态身体、**不隐藏它**，所以这里给 NPC 也接上同一套
-   *  `setStatu()` / `specialEffect()`。以前 NPC 这两个方法是空函数，菜刀 / 屎坨坨
    *  打中三侠时力/敏/速下降的图标根本不会出现（用户 2026-11 口径）。 */
   function makeStatuApi(statu) {
     const s = statu || null;
@@ -1315,9 +1066,6 @@
       statu: s,
       statuCode: 0,
       setStatu(code) { c.statuCode = Number(code) || 0; },
-      /** 照 `Player.specialEffect()`：`statu` 从第 1 帧播到末帧（图标升起后消失），
-       *  `propty` 定在要飘的那一颗上。非角色动作不传 deep，图标容器自己的两帧镜像
-       *  由 `onClip` 的 `orientStatu()` 钉住。 */
       specialEffect() {
         const icon = STATU_ICON[c.statuCode];
         c.statuCode = 0;
@@ -1333,16 +1081,8 @@
 
   /** 现代图集版：透明 canvas 铺在**底图与主 SVG 之间**，按现代 1170×690 坐标画三侠。
    *  层序由 `makeBattleBackLayer()` 拆开：底图 < canvas < 主 SVG（状态/飘字/特效）< 顶部覆盖。
-   *
    *  ⚠ **不要把 canvas 放进 `<foreignObject>`**。WebKit / iOS 有一条 17 年未修的
-   *  合成层 bug（bugs.webkit.org 23113，原 83189「Canvas inside SVG(foreignObject)
    *  positioning error」）：canvas 一旦因为尺寸或祖先 transform 进入独立合成层，
-   *  foreignObject 的缩放/位移就**不再作用到 canvas 内容**上 —— 画面里表现为
-   *  「三侠位置和大小突然变了」（用户 2026-10 的 iOS 经典模式反馈）。
-   *  现代模式的主战斗画布是普通 `<canvas>`，不走 foreignObject，所以没有这个问题；
-   *  这里改成把 canvas 直接挂在经典战斗的 HTML 宿主上、与舞台 SVG 同尺寸叠放。
-   *  普通 HTML canvas 的 CSS 缩放 iOS 支持得很好，也不会触发那条 foreignObject bug。
-   *  坐标仍按现代 1170×690 画，绘制前把 canvas 的变换设成「舞台显示尺寸 / 1170×690」。
    */
   function makeAtlasNpcFighter(side, holder, info, npcType, mutant) {
     const battle = live;
@@ -1376,7 +1116,6 @@
     let paintDirty = true, paintedFrame = null;
     let resizeObserver = null, layoutObserver = null;
     const effects = [];
-    /* 变异三侠：换色图集已就绪时用它；没有就退回普通图集（原版 *_boss.swf 不在参考资料里）。 */
     const bodySheets = mutant && Engine.mutantSheets ? (Engine.mutantSheets(npcType) || NPC_SHEETS[npcType]) : NPC_SHEETS[npcType];
     const now = () => (window.performance && performance.now ? performance.now() : Date.now());
 
@@ -1708,13 +1447,10 @@
   function makeFighter(side, holder, info) {
     if (holder && holder.__npc) return makeNpcFighter(side, holder, info, holder.__npc, !!holder.__mutant);
     const slot = holder && holder.byName('playerMc');
-    /* 主角本体是 `buildFighter` 当场挂上去并回传的（`attachChild` 不进 `byName` 表，
-     * 而 7639 第 2 帧已经把第 1 帧那批挂点摘掉了 —— 见 `buildFighter` 的注释）。 */
     const mc = (holder && holder.__hero) || (slot && slot.byName('playerMc')) || null;
     const statu = holder && holder.byName('statu');
     /* ⚠ "倒过了没有"必须放在**闭包变量**里：`api` 的字面量里曾经同时有 `dead: false`
      * 和 `async dead(distance){}` —— 后者覆盖前者，于是 `api.dead` 是那个方法；
-     * 而 `dead()` 里再写 `api.dead = true` 会把方法本身换成 `true`（第二次调用直接 TypeError）。
      * 对外仍然暴露 `isDead()`。 */
     let isDead = false;
     const campaign = !!(holder && holder.__campaign);
@@ -1743,15 +1479,7 @@
       dress() { if (mc) dressTree(mc, side); },
       setStatu(code) { api.statuCode = code; },
       /** `Player.specialEffect()`：把这一拍中的状态图标从**自己头顶**升起来。
-       *  原版逐条（`Player.as:205` + `sprite7658.as` / `sprite7657.as` / `sprite7640.as`）：
-       *    `statuMc.gotoAndPlay(2); statuMc.propty.gotoAndStop(_loc2);`
-       *  · `statu`(7658) 是 20 帧的"图标升起"动画，**第 1 帧与第 20 帧都是 `stop()`**
-       *    （第 20 帧还 remove 掉 `propty`）—— 所以它**播一次就停**。
        *    ⚠⚠ 复刻以前是裸 `play(statu, 2)`：渲染器的节拍器会一直循环它，图标升上去又从头来，
-       *    表现就是"战斗后期双方头顶**一直闪烁**同一个标识"（用户 2026-11 口径）。
-       *  · `propty`(7657) 第 1 帧 `stop()`：选中的那颗图标定住不自己换帧。
-       *  · 图标容器（7640…7656）第 1 帧 `stop(); _root.showReverse(this, 1)` —— 按**飘在谁头上**
-       *    选左右朝向（见 `showReverse`：左边那位第 1 帧、右边第 2 帧；两帧是镜像）。
        *    这一步由 `onClip` 在图标实例出生时接管（见 `STATU_ICON_SYMS`）。 */
       specialEffect() {
         const icon = STATU_ICON[api.statuCode];
@@ -1773,18 +1501,15 @@
       },
       /** `attack()`：拨动作选择帧 → 播里面那条 `attack`。
        *  **命中帧照原版帧脚本**（`ATTACK_ACTS`）：`hooks.hit` = "这下打到了"，
-       *  `hooks.heal` = 那一档的加血时刻（13 师父驾到 / 17 来点松果第 37 帧）。
        *  `hooks.guard`（原版"提前举盾"的那一帧）**不再接线** —— 见 `ATTACK_ACTS` 的注释。 */
       async attack(r, hooks) {
         const sel = mc && mc.byName('attacks');
         if (!sel) return;
         visible(sel, true);
         /* 原版 `Animals.as:13-35` 的出手选择只有 1/2/3 三档，逐条抄：
-         *   attackType 1（普攻）→ `attacks` 第 1 帧
          *   attackType 2（武器）→ **也是第 1 帧**（普攻/武器共用一条动作，以前这里错拨到第 2 帧）
          *   attackType 3（技能）→ 第 2 帧
          *   attackType 4（幻兽）→ 第 3 帧
-         * 不是松鼠那套几十帧的技能表；命中帧也没有逐技能帧脚本，
          * 按动作条的一半触发 hooks.hit 即可（Sim 的伤害早已单独结算）。 */
         if (campaign) {
           if (api.stopBreath) api.stopBreath();
@@ -1834,7 +1559,6 @@
       },
       /** 这一侧的动作到底有没有真的跑起来（调试 / 回归用）。
        *  `atk` / `def` = 此刻**出手动画**（`attacks.attack`）与**受击动画**（`defenses.defense` /
-       *  `dodges.dodge` / `defenseSkills.deSkill`）里那一条播到第几帧（1 基）——
        *  "命中帧 → 受击起手差了几帧"这类时序问题只靠它能量出来。 */
       debug: () => {
         const innerOf = (selName, kid) => {
@@ -1857,7 +1581,6 @@
           box, atkBox, lastAttack: api.lastAttack || null };
       },
       /** `useSkillDefense()`：防御技起手（`Squirrel.useSkillDefense`）。
-       *  原版是**出手动画**在第 3~25 帧回调的，所以挨打之前盾就举起来了。
        *  返回 false = 这一拍不是防御技（`defenseType != 2`），什么都没做。
        *  ⚠ 征战动物 boss 走 `Animals.useSkillDefense()` —— **空函数**（`Animals.as:56`），
        *  而且动物模型第 4 帧是空帧（没有 `defenseSkills` 层）。这里必须先返回 false，
@@ -1877,8 +1600,6 @@
       /** `beAttack()`：受击 / 闪避 / 技能防御。
        *  ⚠ 顺序必须照原版：**先把身体拨到那一档、再在里面找子动作**。
        *  以前闪避与技能防御写反了（先 `byName` 后拨帧），而 `byName()` 只反映**当前帧** ——
-       *  那时身体还停在 `attacks` 那一档上，`byName('dodges')` / `byName('defenseSkills')`
-       *  恒为 null，于是这两种反应**一次都没播出来**，只把姿势切成定格的第 1 帧。
        *  `hooks.guarded` = 防御技已经由 `useSkillDefense()` 起手过（不要再从头播一遍）。 */
       async beAttack(r, hooks) {
         if (api.stopBreath) api.stopBreath();
@@ -1886,7 +1607,6 @@
         const d = defensePlan(r, !!(live && live.plans[side]), api.defenseSkillLevel(r), side);
         const frame = d.frame || 1;
         /* 真·色诱命中：原版 `dropEquipPlayer` 会把这一侧的装备从身体上摘掉
-         *（`chooseEquipLoader` 在 `checkPlayerWear` 报“脱光”时不再贴装备）。
          * 这里在命中帧真正卸下视觉；`syncStrip` 负责 4 回合到期后穿回。 */
         if (r && r.stripApplied && Number(r.specialEffect) === 1) setGearStripped(side, true);
         /* 幻兽的非伤害技能：原版 `getBeAttackFrame(4, id) == -1` 时直接 return，
@@ -1962,9 +1682,7 @@
       },
       /** `comeBack(type)`：被反击击退之后归位（`type` 决定播哪一档，见 `COMEBACK_ACTS`）。
        *  ⚠ 原版 `Animals.comeBack`（`Animals.as:101-122`）第一句就是
-       *  `getWeaponSkillType()`，而 `Player.getWeaponSkillType`（:184-202）对
        *  **暗御狡兔（174/179/181）与暗御妖狐（180）恒返回 0** → 直接 return，
-       *  **根本不换身体帧**。它们的模型第 6 帧本来就是空帧（没有 `comeBacks` 层）——
        *  照松鼠那套 `mc.gotoAndStop(6)` 就会把敌人当场画没，下一拍 `idle()` 才回来
        *  （实拍：狡兔每次普攻后消失约 0.8s）。狼王 / 猿将 第 6 帧有 `comeBacks`，照旧演。 */
       async comeBack(type) {
@@ -1998,10 +1716,8 @@
         /* `defenses` 第 5 帧的子件没有 `defense` 实例名（只有第 4 帧有），
          * 距离档 1 时退回当前帧唯一子件，别让整段倒地动画静默不播。 */
         const deadClip = sel.byName('defense') || onlyChildClip(sel);
-        /* 灵魂和泪滴保持动画，表情选择器按原版停在第 9 帧。 */
         if (deadClip) await playClip(deadClip, { deep: true, keepNestedIds: [6362, 6365] });
       },
-      /** `congratulate()`：胜利姿势（`6530` 第 32 帧 `congratulation = 2` → 切战果页）。 */
       async congratulate() {
         stopAt(mc, 7);
         const sel = mc && mc.byName('winPoses');
@@ -2014,12 +1730,8 @@
         stopAt(mc, 1);
         /* 色诱之术 5843 的末段带着「道场」场景，它挂在 `attacks` 选择器里；
          * 只把身体拨回第 1 帧并不会把 `attacks` 的当前子件清掉，于是技能播完后
-         * 场景可能残留在下一拍下面（多次色诱后尤其明显）。
-         *
          * ⚠⚠ 这里**不能**把 `attacks` 整层 `visibility:hidden` —— 战斗身体第 1 帧
          * （`6532` → `attacks` `6339` → `5630`）里画的就是待机松鼠本人：
-         * 隐藏出手层 = 把角色整个画没（用户 2026-10 报的"我方与敌方都会时不时消失身影"）。
-         * 正确做法是**把出手层复位到干净的第 1 帧**：`6339` 第 1 帧 = 普攻 `5630`，
          * `5630` 第 1 帧 = 待机姿势 `5616`，复位后 `startIdlePose` 再让呼吸转起来。 */
         const atk = mc && mc.byName('attacks');
         if (atk) {
@@ -2058,7 +1770,6 @@
       dressTree(rec.clip, side);
     }
   }
-  /** 真·色诱：把一格装备视觉藏起来 / 放回来（只动 `plan.bySlot` 贴出来的装备容器）。 */
   function setGearClipHidden(clip, on) {
     const node = clip && (clip.g || clip);
     if (node && node.style) node.style.display = on ? 'none' : '';
@@ -2069,7 +1780,6 @@
     if (!clip.nodes) return;
     for (const rec of clip.nodes.values()) if (rec.clip) walkClips(rec.clip, fn);
   }
-  /** 把某一侧的全部装备视觉同步成“穿着 / 被脱光”。 */
   function setGearStripped(side, on) {
     if (!live || !live.strip) return;
     live.strip[side] = !!on;
@@ -2087,19 +1797,11 @@
   }
 
   /** 待机姿势元件：`5616`（`静止姿势`，17 帧）。
-   *  **原版每个动作的第 1 帧与末帧放的都是它**，而 `sprite5616.as` 里**一条脚本都没有**
    *  —— 也就是 Flash 里它一出生就一直循环，那正是"松鼠站着时在呼吸"（帧间包围盒会走 ±8 单位，
-   *  逐帧渲染核对过：第 1/4/8/12/16/17 帧的姿势与眼神都在动）。
-   *  复刻的静态页策略把它冻在第 1 帧 → 倒计时 / 两拍之间是**僵住**的（用户 2026-11 口径：
-   *  "321 go 倒计时的时候松鼠理应有呼吸动作而不是僵住的，修复该问题"）。
-   *  这里显式让它转起来（`gotoAndPlay` = 节拍器自己回卷 = 无限循环）；
    *  换帧重建时这个实例会被换掉，不用手动收，`idle()` 每拍开头再叫一次。 */
   const IDLE_POSE_SYM = '5616';
   /* ---------- 征战动物 boss 的"层"与待机呼吸 ----------
-   * 动物模型（6833 那一帧里挂的 `playerMc`）是 7 帧的角色本体，层名与松鼠那套不完全一样：
-   *   f1 `attacks` / f2 `defenses` / f3 `dodges` / f4 **空帧** /
    *   f5 `attackbacks` / f6 `comeBacks`（**只有狼王 6635、猿将 6709 有**）/ f7 `winPoses`
-   * —— 与 `Animals.as` 的 `mc.gotoAndStop(2|3|5|6|7)` 逐条对得上（狡兔 6598 / 妖狐 6684
    * 的第 6 帧是空的，对应 `getWeaponSkillType()==0`，见 `comeBack` 的注释）。 */
   /** 这只模型**有没有**某一层（例：`comeBacks`）。
    *  ⚠ 不能用 `mc.byName(name)` 判断：`byName` 只反映**当前帧**，而"这一层存不存在"要在
@@ -2113,7 +1815,6 @@
   }
   /** 待机呼吸片断（原版无脚本 → 一直循环）：`6533` 狡兔 / `6603` 狼王 / `6636` 妖狐 / `6685` 猿将。
    *  它们嵌在**每只动物出手动画的第 1 帧**里（6540/6604/6639/6686 的第 1 帧唯一那颗 depth 1
-   *  子 clip，`sprite6533.as` 等四颗脚本都不存在，逐颗核过）。`idle()` 复位到第 1 帧之后，
    *  从 `attacks.attack` 的 depth 1 取到的就是它。 */
   function campaignIdleClip(f) {
     const mc = f && f.mc;
@@ -2171,9 +1872,6 @@
     return false;
   }
 
-  /* ============================================================
-   * HUD（`showFightInfo` / `showBlood` / `Player.reduceBlood`）
-   * ============================================================ */
   /** 这一场的幻兽队伍（最多 3 只，保持编队顺序）。 */
   function hudPetList(f) {
     return (Array.isArray(f && f.pets) ? f.pets : []).filter((p) => p && Number(p.id) > 0).slice(0, 3)
@@ -2181,10 +1879,7 @@
         level: Number(p.level) || 1, skillId: Number(p.skillId) || 0 }));
   }
   /* 血条下六个幻兽格挂的是**每只幻兽自己的独立图标**，不是牧场那套「全身」4280 立绘。
-   * 原版 `showBringPets()` 就是 `attachMovie(summons.name, "summonsImgMc", 100)` ——
    * 由导出名取每只幻兽的库元件；这里的 32 个符号号按 `petsInfo` 顺序（id 1..32）排，
-   * 与 `images/ssfight/ui/fight-pets-manifest.json` 的 `roots` 一一对应。
-   * 素材单独成包（`tags-fight-pets.json`，`node tools/gen-ssfight-ui.cjs --fight-pets`），
    * 没有幻兽的普通战斗不必多付这一份。 */
   const HUD_PET_SYMBOLS = ['2565','2494','2961','2664','2483','2734','2883','2465',
     '2898','2687','2809','2947','2828','2854','2442','2972','2744','2634','2721','2710',
@@ -2298,7 +1993,6 @@
       geom = { bar: bar, box: box, mirrored: mirrored };
       rec.shieldGeom[side] = geom;
     }
-    /* clip-path 随血条换帧可能换 ID，读当前帧的 wrap（纯属性遍历，不触发布局）。 */
     let clipAttr = '';
     if (bar.nodes) {
       for (const v of bar.nodes.values()) {
@@ -2330,28 +2024,8 @@
     if (clipAttr) rect.setAttribute('clip-path', clipAttr); else rect.removeAttribute('clip-path');
   }
   /** `showBlood()`（`MainMovie.as:15756`）：把**那一侧**的伤害数字模板复制一份再播。
-   *
-   * 原版链路（逐条抄）：
-   *   · 模板 = 各自那一侧的 `blood.mc`（`MainMovie.as:6165`：`blood1.mc = fightSub.leftBlood`
-   *     左侧/我方、`blood2.mc = fightSub.rightBlood` 右侧/对手）——**按"飘在哪一边"选**，
-   *     **不是**按加血/扣血选。以前写成了 `heal ? 4846 : 4845`：扣血恒定拿 4845、
    *     加血恒定拿 4846，治疗数字会跑到对面那一侧去。
-   *   · 它们挂在 `fightSub`(4847) 第 1 帧的 `1.05,0,0,1.05, 56.25|244.25, 62.7` 上 ——
    *     这就是**飘字落点**（装备包之外唯一一处能拿到它的地方，`run()` 里量一次存进
-   *     `live.bloodBase`）。
-   *   · `mc.gotoAndStop(type == 0 ? 1 : 2)`：第 1 帧 = 常规落点 / 第 2 帧 = 反伤·自伤那一档
-   *     （整串数字右移 ~111；对手侧在素材里就是镜像的 -124）。以前恒定 `stopAt(clip, 1)`。
-   *   · `mc._x += random(30) * ±1`、`mc._y += index * 20`（同一侧连续飘字往下叠）。
-   *     ⚠ **没有纵向随机抖动** —— `±(random(50)+10)` / `±random(60)` 那是 `duplicateMc()`
-   *     （`boom` 分次扣血用的）的规则；以前混进来之后数字会散开 ±60，观感就是"飘得哪儿都是"。
-   *   · `mc.bloodMc.num.gotoAndStop(blood > 20 ? 3 : blood > 10 ? 2 : 1)` —— 数字**三档大小**
-   *     （4843 的三帧把位图数字缩到 0.93 / 1.53 / 1.89）。
-   *   · `addOrReduce.gotoAndStop(symbol)` + 字形档 `showNumber(blood, …, font, 0, 0)`，
-   *     两处都由 **symbol** 决定（`Player.reduceBlood` :83 / `addBlood` :125）：
-   *       · symbol **1** = 扣血（`human`/`skill`/`dot` 都是它）→ addOrReduce 第 1 帧（减）、字形 **2**
-   *       · symbol **2** = 回血 → 第 2 帧（加）、字形 **3**
-   *       · symbol **3** = 狂暴反击那一路 → 第 3 帧、字形 **4**
-   *   · `bloodMc.gotoAndPlay(2)` → 21 帧的"弹出 → 上飘 → 淡出"（第 12 帧起透明度逐帧降到 0），
    *     末帧 `stop()`。 */
   const FLOAT_KIND = {
     hit: { frame: 1, symbol: 1, font: 2 },
@@ -2380,8 +2054,6 @@
     const tier = mag > 20 ? 3 : mag > 10 ? 2 : 1;
     return { mag: mag, digits: digits, tier: tier };
   }
-  /** 4 位模板（4315）不够时，向右补 `num5..num10` 的 digit 槽位。
-   *  `showNumber` 靠 `byName('numN')` 找槽位，所以挂上去之后还要写进 `digits.names`。 */
   function ensureFloatDigits(digits, want) {
     if (!digits || !digits.attachChild || !digits.names || typeof digits.names.set !== 'function') return;
     const count = Math.max(4, Math.min(FLOAT_DIGIT_MAX, Math.floor(Number(want) || 0)));
@@ -2434,7 +2106,6 @@
         if (t && digits) t.showNumber(mag, digits, spec.font, 0, 0, digitCount);
       };
       applyNumber();
-      /* 播完（末帧透明度已经是 0）把这一颗收掉，并让同侧的叠层计数落回去。 */
       playClip(bloodMc, { onFrame: (n) => { if (n <= 3) applyNumber(); } }).then(() => {
         if (clip.destroy) clip.destroy();
         else if (clip.g && clip.g.parentNode) clip.g.parentNode.removeChild(clip.g);
@@ -2444,25 +2115,11 @@
   }
 
   /** `boom(mc, num)`（`MainMovie.as:15710`）：幸运一击的**多球分裂**。
-   *
-   *  原版链路（`sprite6122` / `sprite6185` 第 31 帧脚本 → `_root.beAttack(); _root.boom(ball, count)`）：
-   *    · `count = currentRound.boomCount`（协议第 15 字段；`sprite7850` 的 `mc.attacks.attack.count`）；
    *    · 总伤害先扣**余数**：`floor(harm/num)*(num-1)` 个球各分一份，第一个数字拿 `harm - 份额*(num-1)`；
-   *    · 其余 `num-1` 个球是**复制出来的球元件**：`duplicateMc` 每次随机 `_x ±(10..59)`、`_y ±(0..59)`，
    *      出生时隐藏；之后**每 100ms** 亮一个、`gotoAndPlay(2)`、并扣它那一份血；
    *    · 队列空了才 `attackEnd = true`（这一拍结束）。
    *  复刻这边总伤害已经在 `applyHp()` 里一次性结算（同一份数值），这里只补**演出与分段飘字**：
-   *  第一下按余数飘、剩下每 100ms 亮一个球 + 飘一份，观感与原版一致。
-   *  ⚠ 原来这里根本不做分裂：伤害一次飘完、也没有多出来的球（第 257 批自标的「功能缺口」）。
-   *
-   *  ⚠⚠ 复制的必须是**球元件**（`6122` / `6185` 第 31 帧里那颗具名 `ball`，id `6116`），
-   *  不能像旧版那样把整段 `acts.sym`（=`6122` 出手动画本身）挂 n-1 份：
-   *    · 每颗“球”都会把整段幸运一击动作从头播一遍，屏幕上叠着 6 份完整出手动画；
-   *    · 这些克隆是 `attachChild` 挂上去的，没有 `playClip` 的停帧逻辑，渲染器的节拍器
-   *      会把 `playing` 的实例一直循环推进 —— 于是“霜缚·凝滞放一次幸运一击就永远在出招”，
-   *      动画越叠越多直到卡死（用户 2026-10 报的 bug）。
    *  现在只复制球、且 600ms 后收掉；球本体不做无限循环。 */
-  /* 多球分裂的抖动范围（原版 `duplicateMc`：`_x ± (random(50)+10)`、`_y ± random(60)`）。 */
   const BOOM_BALL_JITTER = { xMin: 10, xSpan: 50, ySpan: 60 };
   /* `6122` / `6185` 第 31 帧那颗具名 `ball` 的兜底数据（原版 `boom(ball, count)` 的接收者）。
    * 正常情况下从当前这一拍的 `attack.byName('ball')` 现取，材质/真形态变了也能跟着走。 */
@@ -2499,7 +2156,6 @@
       }, i * 100);
       if (rec.timers) rec.timers.push(timer);
     }
-    /* 分裂完把复制出来的球收掉（原版它们随父容器一起被下一拍清掉）。 */
     const cleanup = setTimeout(() => {
       for (const c of balls) { try { if (c.destroy) c.destroy(); } catch (e) {} }
     }, n * 100 + 600);
@@ -2507,9 +2163,43 @@
     return true;
   }
 
-  /* ============================================================
-   * 主流程
-   * ============================================================ */
+  const FIGHT_CORE_FILE = 'tags-fight-core.json';
+  const fightChunkFile = (sym) => 'tags-fight-' + String(sym) + '.json';
+  /* 本场可能出现的攻击动作：战斗结果的每一拍 + 双方武器/技能/幻兽的静态可能。
+   * 只加载这些动作包，核心包（受击/闪避/防御技/HUD/战果）常驻。 */
+  function fightAttackSymbols(o) {
+    const syms = new Set();
+    const addFrame = (frame) => {
+      const acts = ATTACK_ACTS[Number(frame)];
+      if (acts && acts.sym) syms.add(String(acts.sym));
+    };
+    addFrame(1); addFrame(11);
+    const rounds = (o && o.result && Array.isArray(o.result.rounds)) ? o.result.rounds : [];
+    for (const r of rounds) addFrame(attackPlan(r).frame);
+    for (const f of [o && o.me, o && o.foe]) {
+      if (!f) continue;
+      for (const w of (Array.isArray(f.weapons) ? f.weapons : [])) addFrame(RANGED.has(Number(w && w.id)) ? 3 : 2);
+      for (const s of (Array.isArray(f.skills) ? f.skills : [])) {
+        const pair = SKILL_ATTACK_FRAME[Number(s && s.id)];
+        if (pair) { addFrame(pair[0]); addFrame(pair[1]); }
+      }
+      for (const p of hudPetList(f)) addFrame(29 + Number(p.id));
+    }
+    return [...syms];
+  }
+  async function loadFightAssets(o) {
+    await SfRender.loadExtra(FIGHT_CORE_FILE);
+    const syms = fightAttackSymbols(o);
+    const files = syms.map(fightChunkFile);
+    if (files.length) {
+      try { await Promise.all(files.map((f) => SfRender.loadExtra(f))); }
+      catch (e) {
+        for (const f of files) { try { if (SfRender.releaseExtra) SfRender.releaseExtra(f); } catch (releaseError) {} }
+        throw e;
+      }
+    }
+    return files;
+  }
   function clean() {
     const rec = live;
     if (!rec) return;
@@ -2529,6 +2219,11 @@
     if (rec.view && rec.view.onTick === rec.tickHook) rec.view.onTick = rec.prevTick || null;
     if (rec.host && rec.host.parentNode) rec.host.parentNode.removeChild(rec.host);
     if (rec.view) { try { rec.view.destroy(); } catch (e) {} }
+    if (window.SfRender && SfRender.queueExtraRelease) {
+      for (const file of (rec.fightChunks || [])) SfRender.queueExtraRelease(file, 1200);
+      SfRender.queueExtraRelease('tags-fight-pets.json', 1200);
+      if (!(rec.o && rec.o.kind === 'campaign')) SfRender.queueExtraRelease('tags-campaign-boss.json', 1200);
+    }
     if (live === rec) live = null;
   }
   function wait(ms) {
@@ -2551,18 +2246,15 @@
     const mine = ++seq;
     const ui = document.getElementById('ui');
     if (!ui) throw new Error('SfFight 找不到 #ui');
-    /* 挑战页 / 关卡页战斗前会「按住」在原位（`data-sf-battle-hold`），
-     * 这里不能把整棵 #ui 清掉，否则又变成 detach + append 的整页重排。 */
-    if (window.Main && typeof Main.clearUiForBattle === 'function') Main.clearUiForBattle();
-    else ui.innerHTML = '';
     const host = document.createElement('section');
     host.className = 'classic-home ssfight-home';
     host.setAttribute('aria-label', '战斗');
-    ui.appendChild(host);
+    /* 先不插进 #ui：素材（core + 本场动作包 + 图集）就绪前保留原页面，
+     * 避免加载期间整屏只剩深绿底 / 战斗页闪一下。 */
+    host.style.visibility = 'hidden';
 
     const rec = {
       host: host, view: null, fighters: [null, null], plans: [null, null], speeds: 1,
-      /* 真·色诱：这一侧当前是否处于“被脱光装备”的视觉状态。 */
       strip: [false, false],
       rounds: [], index: 0, round: 0, roundsLeft: 0, floats: [0, 0], hps: [1, 1], maxHp: [1, 1],
       shields: [0, 0], speed: 1, stopped: false, skipped: false, ended: false,
@@ -2572,18 +2264,30 @@
       /* 「跳过」的即时信号：开打前奏（血条滑入 / 3-2-1-GO）不是回合演出，玩家按跳过时
        * 不能等它自己播完 —— `perform` 在每段前奏上都和这个 Promise 赛跑（见 `controller.skip`）。 */
       skipSignal: null, wakeSkip: null,
+      fightChunks: [],
       /* 这一场的入参（开宝箱要按 `kind` 选掉落池、按 `dropRandom` 保持可复现）。 */
       o: o,
     };
     live = rec;
     rec.skipSignal = new Promise((resolve) => { rec.wakeSkip = resolve; });
     /* 战斗中悬浮奖励（与复刻其它战斗同一份机制、同一份掉落规则）：
-     * 它有自己的 DOM 层与 rAF 节拍，`collectDrops === false`（挑战塔 / 无尽塔）时不建。
      * ⚠ 真正的创建放到 `Sim.simulate()` **之后**（见下方 RNG 顺序说明）：这里先占位，
      *   让 `skip()` / `clean()` 在加载素材期间被调用时也能安全拿到 null。 */
     let pickups = null;
 
-    await SfRender.loadExtra('tags-fight.json');
+    const result = o.result || (window.Sim && Sim.simulate ? Sim.simulate(o.me, o.foe) : null);
+    if (!result) {
+      try { clean(); } catch (cleanError) { if (window.__errs) window.__errs.push('SfFight clean: ' + (cleanError && cleanError.message)); }
+      throw new Error('SfFight 需要战斗结果');
+    }
+    rec.result = result;
+    try {
+      rec.fightChunks = await loadFightAssets(Object.assign({}, o, { result: result }));
+    } catch (e) {
+      try { clean(); } catch (cleanError) { if (window.__errs) window.__errs.push('SfFight clean: ' + (cleanError && cleanError.message)); }
+      try { if (SfRender.queueExtraRelease) SfRender.queueExtraRelease(FIGHT_CORE_FILE, 2000); } catch (releaseError) {}
+      throw e;
+    }
     /* 征战动物 boss 的 6833 模型单独成包：只有这一场真的遇到 campaign 才加载，
      * 普通随机战 / 塔战不多付这 3 MB。 */
     if (o.foe && o.foe.campaign) {
@@ -2594,8 +2298,6 @@
     if (rec.petTeams.some((list) => list.length)) {
       try { await SfRender.loadExtra('tags-fight-pets.json'); } catch (e) { /* 缺包时继续战斗 */ }
     }
-    /* 三侠的现代动作图集（与 `battle.js` 同一份 AnimationStr / atlas）：
-     * 只加载这一场真的会出场的体型；最多等 1.2s，没等到就退回 7689 静态稿。 */
     if (window.Engine && Engine.loadSheets) {
       const kinds = new Set();
       for (const src of [o.me, o.foe]) {
@@ -2622,17 +2324,27 @@
     try { await loadGearTables(); } catch (e) { /* 没表就不穿装备 */ }
     try { await loadLootIcons(); } catch (e) { /* 没表就不画战利品图标 */ }
     if (mine !== seq || rec.stopped) return null;
+    /* 素材就绪后再清底页、一次挂上战斗页；中间不给浏览器留出空 #ui 的绘制帧。 */
+    if (window.Main && typeof Main.clearUiForBattle === 'function') Main.clearUiForBattle();
+    else ui.innerHTML = '';
+    ui.appendChild(host);
     /* 先建检查器集合：`mountSymbol` 期间出生的实例（例如倒地主子树 6362）也会在
      * `onClip` 里调 playClip；它们要跟后面的回合动画用同一套节拍器，不能退回 rAF。 */
     rec.tickWatchers = new Set();
-    const view = await SfRender.mountSymbol(host, SYM.fight, {
-      frame: F.scene, label: '战斗', policy: {}, onClip: onClip,
-    });
+    let view;
+    try {
+      view = await SfRender.mountSymbol(host, SYM.fight, {
+        frame: F.scene, label: '战斗', policy: {}, onClip: onClip,
+      });
+    } catch (mountError) {
+      /* 挂载失败时把空壳摘掉：底页可能还按 data-sf-battle-hold 留在 #ui 里。 */
+      if (host.parentNode) host.parentNode.removeChild(host);
+      throw mountError;
+    }
     if (mine !== seq || rec.stopped) { view.destroy(); return null; }
     rec.view = view;
+    host.style.visibility = '';
     /* 战斗动画的收尾/命中回调由渲染器节拍器驱动（见 playClip）。
-     * `onTick` 是节拍器把所有播放实例推进一步之后调用的视图钩子；挂在这里，
-     * 检查器和动画帧就在**同一拍**执行，不再受 rAF 被拖慢的影响。
      * 保留其它页面可能已经挂过的 onTick（战斗视图通常没有，但不能假设）。 */
     rec.prevTick = view.onTick;
     rec.tickHook = () => {
@@ -2644,12 +2356,7 @@
     const t = T();
     if (t) t.freezeDescendants(view);
 
-    const result = o.result || (window.Sim && Sim.simulate ? Sim.simulate(o.me, o.foe) : null);
-    if (!result) throw new Error('SfFight 需要战斗结果');
-    rec.result = result;
-
     /* 悬浮掉落必须在 `Sim.simulate()` **之后**创建（与现代 `Battle.run` 同一顺序）。
-     * `BattleDrops.create()` 会立刻调用 `plan()` 抽 4 次 `Math.random()`（1 次时间偏移 +
      * 3 件掉落）。以前这里在模拟之前建它，于是同一组输入下，经典战斗的出手抽签
      * 随机流整体后移 4 个随机数 —— 选武器/选技能/普攻的权重明明共用 `Sim`，
      * 实际抽出来的回合却和现代战斗对不上（QA 固定随机流时尤其明显）。
@@ -2658,8 +2365,6 @@
       ? BattleDrops.create({ root: ui, random: o.dropRandom, kind: o.kind }) : null;
     rec.pickups = pickups;
 
-    /* 场景：原版 `fight.backGround.gotoAndStop(random(_totalframes - 1) + 1)`。
-     * 复刻的普通战斗已经按 region 选好了场景，所以 region 给定时就用它（0..4 → 帧 1..5）。 */
     const bg = view.byName('backGround');
     const bgFrame = (o.region != null && Number(o.region) >= 0 && Number(o.region) < BG_FRAMES)
       ? Number(o.region) + 1 : (1 + Math.floor(Math.random() * BG_FRAMES));
@@ -2667,8 +2372,6 @@
 
     /* `fightSub`(4847) = 原版 `loadMcs([["战斗1","fightSub",currentFrame]])`（MainMovie.as:24110）：
      * 第 1 帧放着**左右两颗伤害数字模板**（`leftBlood` 4845 / `rightBlood` 4846）与
-     * 「继续挑战」对话框 `keepFight`(4839)。模板在 `setUp()` 里被 `gotoAndStop(_totalframes)` 收掉，
-     * 只在 `showBlood()` 里被 `duplicateMovieClip` 出来用 —— 复刻这边用 `attachChild` 现挂，
      * 落点直接读模板自己的放置矩阵（**飘字位置全靠它**，不要再拍脑袋写坐标）。 */
     const sub = view.attachChild(SYM.fightSub, 1, 'fightSub');
     if (sub) {
@@ -2706,7 +2409,6 @@
      * 其余战斗不传时仍按原版 60。 */
     rec.roundsLeft = Math.max(1, Math.floor(Number(o.maxRounds) || 60));
 
-    /* HUD + 两个格斗者 */
     const hud = view.byName('blood');
     const winWords = view.byName('winWords');
     stopAt(winWords, winWords && winWords.frameCount ? winWords.frameCount() : 6);
@@ -2728,9 +2430,7 @@
     }
     if (hud) {
       /* 原版是 `fightPrelude()` → `fight.blood.gotoAndPlay(2)`；血条元件自己的帧脚本
-       * （`sprite7703.as`）在第 8 帧 `stop(); _root.showFightInfo(this)` ——
        * 也就是"血条滑进来之后名字/数字才出现"。以前这里按**猜的时间**补了 460ms，
-       * 现在直接照那一帧接。
        * 这个 Promise 交给 `perform` —— 原版开打倒计时（3/2/1/GO）就是接在它后面的。 */
       rec.hudReady = playClip(hud, {
         stop: HUD_STOP,
@@ -2754,9 +2454,7 @@
       const sk = view.attachChild(SYM.skip, 1, 'skip');
       if (sk && sk.g) {
         /* 原版 `showSkip()` 是 `attachMovie("跳过","skipmc",100,{_x:0,_y:0})`（不缩放），
-         * 但那一颗在导出的 h 版里比"c 版原版截图"里那颗**宽约 11%**
          *（2026-11 用户口径："跳过键太大了"；把两张图的右下角裁出来等比对齐量过：
-         * 原版占舞台宽 21.9%，复刻 24.4%，高度两边都是 16%）。
          * 这里按**自己的中心**缩 0.8（不是按原点缩，否则整颗会往左上跑）。 */
         sk.setExtraTransform('translate(271.5,172.5) scale(0.8) translate(-271.5,-172.5)');
         /* 反馈壳与经典界面其它按钮同一套（`.sf-feedback`：悬停暖色光晕 + 1.035 缩放、
@@ -2820,7 +2518,6 @@
         rec.skipped = true;
         rec.skippedByButton = !!byButton;
         /* 开打前奏里按跳过也要**当场**收尾：血条滑入 / 3-2-1-GO 都在 `perform` 里 await，
-         * 以前只置 `skipped`，倒计时那颗 `3750` 仍会播完（约 2.1s），玩家看到的就是
          * "321GO 播完之前按跳过没反应"。这里把倒计时停住，并用 `wakeSkip` 打断前奏的等待。 */
         if (rec.countdown) {
           const cd = rec.countdown;
@@ -2877,7 +2574,6 @@
     };
   }
 
-  /* ---------- 演出 ---------- */
   /** 收掉"跳过 / 倍速"两颗键（原版 `congratulate()` / `clearFrames()` 里的
    *  `_root.skipmc.removeMovieClip()`）。幂等：多次调用只摘一次。 */
   function hideFightKeys(rec) {
@@ -2905,26 +2601,8 @@
       }
     }
   }
-  /* ============================================================
-   * 开打倒计时「3 → 2 → 1 → GO」—— **原版那颗 `3750`**，不是另造的过场
-   * ------------------------------------------------------------
-   * 原版开打时的 3/2/1/GO **不是**运行时另挂的元件，而是血条 HUD（`7703`）**第 8 帧**
-   * 里的一颗子元件 `3750`（42 帧，逐帧表见 `MainMovie.as` 的 `sprite3750`）：
-   *   f1-6 = 3 / f7-12 = 2 / f13-19 = 1 / f19-29 = GO（每档 1.5 → 1.25 → 1 → 空 → 0.88 → 0.75
-   *   的弹入弹出版）；f30-41 是**空帧**，f41 `stop()`；f29 那一拍还写了
-   *   `_root.canFight = true / attackEnd = true`（＝"可以出手了"）。
-   * 血条元件自己的第 8 帧脚本是 `stop(); _root.showFightInfo(this)`，所以这颗倒计时天然
-   * 接在"血条滑进来之后、第一拍之前"——与 `playRound` 的顺序天然一致。
-   * ⚠⚠ 复刻以前**另造了一颗 `gocd`**（按 H5 客户端 `assets.js` 的 go 图集裁 4 帧）挂在场景中央，
-   *   于是同一场战斗里出现**两版 321GO**：`gocd` 播一次，原版 `3750` 又开始播；
-   *   更糟的是渲染器节拍器会把"还在播"的实例**循环推进**，`3750` 于是整场战斗一直在
-   *   3/2/1/GO 里打转（用户 2026-11 口径："有两个版本的 321go，其中一个会在战斗中一直循环"）。
-   *   现在**只保留原版这一颗**（与 ssfight 对齐），由这里显式播一次、停在 GO 之后的空帧上；
-   *   停住之后 `playing = false`，节拍器不会再把它从头循环。
-   * ============================================================ */
   const COUNTDOWN_TAG = '3750';    // 血条 HUD 第 8 帧里的 3/2/1/GO
   const COUNTDOWN_END = 30;        // 29 = GO 的最后一帧；30 起是空帧（原版 f41 stop）
-  /** 在一棵 clip 子树里按**元件号**找一颗实例（`byName` 只认具名元件，这颗没有实例名）。 */
   function clipByTag(clip, id, depth) {
     if (!clip || depth > 12) return null;
     if (clip.tag && String(clip.tag.id) === String(id)) return clip;
@@ -2943,15 +2621,11 @@
     const clip = clipByTag(rec.hud, COUNTDOWN_TAG, 0);
     if (!clip || !clip.gotoAndPlay) return;
     rec.countdown = clip;
-    /* `playClip` 一路把它推到 `stop` 指定的那一帧再停住（`stopAt` + `playing = false`）——
-     * 这就是"只播一次"的落点。 */
     await playClip(clip, { stop: COUNTDOWN_END });
     if (rec.countdown === clip) rec.countdown = null;
     void aborted;
   }
 
-  /** 取一个"每帧换一个子实例"的容器里那颗子 clip —— 导出里这些子件**没有实例名**
-   *  （`byName` 找不到），只能按深度取：`statu.propty` 里的状态图标、`winWords` 里的胜负字。 */
   function onlyChildClip(clip) {
     if (!clip || !clip.nodes) return null;
     for (const rec of clip.nodes.values()) if (rec && rec.clip) return rec.clip;
@@ -2959,10 +2633,7 @@
   }
   /** `fight.winWords.gotoAndStop(1|2)` —— **并把里面那段字播出来**。
    *  `7717`（winWords）的每一帧都是一个"字滑进来"的动画容器（胜负字 `7708` / 失败字 `7711`，
-   *  各 6 帧、第 6 帧 `stop()`），而它自己的第 1 帧是**两半字分别停在屏幕外**
-   *  （`7704` 在 x=-260.75、`7705` 在 x=+484.3）。原版是 `gotoAndStop` 之后**子元件自己**
    *  从第 1 帧开始播（Flash 嵌套 clip 自动播），复刻里所有 clip 都被冻结、必须显式播 ——
-   *  以前只 `stopAt(ww, 1|2)`，于是"胜利 / 失败"停在滑进来的第一帧：两半几乎全在屏幕外
    *  （用户 2026-11 口径："战斗结束后还在庆祝时的胜利&失败字样几乎超出屏幕了，位置完全不对"）。 */
   function showWinWords(ww, winner) {
     if (!ww) return;
@@ -2983,6 +2654,12 @@
     if (!aborted()) await Promise.race([playHudCountdown(rec, aborted), rec.skipSignal]);
     for (let i = 0; i < rec.rounds.length && !aborted(); i++) {
       rec.round = Math.max(0, 99 - i);
+      /* 涅槃加时（`Sim` 在 60 手判负前复活玩家）：这一拍之后是**新的 60 手窗口**，
+       * 剩余回合要重新从满格开始走，否则玩家会看到「回合已经 0 了还在打」。
+       * 事件本身是 `isRound:0`，不占回合数。 */
+      if (rec.rounds[i] && rec.rounds[i].timeoutRevive) {
+        rec.roundsLeft = Math.max(1, Math.floor(Number(o.maxRounds) || 60));
+      }
       /* 幻兽协战（`isRound:0`）不占原版 60 手回合数，HUD 的剩余回合不往下掉。 */
       if (!rec.rounds[i] || Number(rec.rounds[i].isRound) !== 0) rec.roundsLeft = Math.max(0, rec.roundsLeft - 1);
       if (rec.hud) refreshBlood(rec.hud);
@@ -3008,8 +2685,6 @@
       /* 倒地多半已经在本回合"血见底"那一刻起过了（见 `playRound` 的 `impact`）——
        * 这里只补没起过的。⚠ `dead()` 是方法、恒为真，判"演过没有"要问 `isDead()`。 */
       if (loserF && !loserF.isDead()) await loserF.dead(0);
-      /* 原版 `congratulate()`（`MainMovie.as:6464`）是倒地动画第 19 帧 `_root.die()` 调的：
-       * 胜利姿势与 `fight.winWords` **同一刻**出现（字自己滑进来那 6 帧与姿势并行播）。 */
       if (!aborted()) {
         showWinWords(rec.view && rec.view.byName('winWords'), winner);
         if (winnerF) await winnerF.congratulate();
@@ -3023,15 +2698,12 @@
      * 战果面板与开宝箱都只是它的**展示**，奖励本身早已在那套规则里发过。 */
     const loot = rec.pickups ? rec.pickups.summary() : { items: [], ups: [] };
     /* 悬浮掉落是**战斗中的**一层 DOM（`.battle-pickup`，z-index 24），结算开始后
-     * tick 已停，但还没被捡走的那一张会一直留在 `#ui` 里，直接压在战果/宝箱页上面。
-     * 安卓上实测它会盖住宝箱选择页的中上区域：玩家点那颗箱子时，点的其实是
      * "请点击"飘物，箱子当然没反应（看起来就是宝箱页卡住）。战果页一出现就收掉它，
      * 未捡的按原版口径本来也不结算；`summary()` 已经先把已收下的战利品取走了。 */
     if (rec.pickups) { try { rec.pickups.close(); } catch (e) {} }
     result.skipped = !!rec.skippedByButton;
     if (loot.items && loot.items.length) result.pickups = loot.items;
     /* 结算方可以在战果页出现**之前**把这一场的经验 / 金松果算出来（`rewardFor`），
-     * 这样第一张战果页就能写全"经验 + 金松果 + 悬浮物品"，不用等开完宝箱再弹第三张。
      * 挑战页传的就是 `State.fightReward`；算过一次后调用方自己缓存，`onEnd` 不会重复扣/发。 */
     let reward = null;
     if (typeof o.rewardFor === 'function') {
@@ -3039,15 +2711,12 @@
         if (window.__errs) window.__errs.push('SfFight rewardFor: ' + (e && (e.stack || e.message) || e));
       }
     }
-    /* 战果面板（原版 `fight.gotoSton(2|3)`）：这一页就是"战斗结束后的 CG"，
-     * 之后再按收获开宝箱（`fight.gotoAndStop(5)` → `openChest`）。 */
     /* 经典塔：胜利后不要原版战果 CG 停一下，直接交给塔的结算/下一场；
      * 失败仍保留败北面板（用户只要求去掉“战斗胜利后的 CG”）。 */
     const hideVictoryCg = !!(o.hideVictoryCg && winner === 0);
     if (!hideVictoryCg) showResultPanel(rec, o, result, winner, loot, reward);
     /* 战果页要**停一下**再进开宝箱：原版 `myLogic` 的 `state == 1` 那一支是等 60 拍
      * （14 fps ≈ 4.3 s，按 fire 可以提前结束）才 `setState(4)` → `fight.gotoAndStop(5)`。
-     * 复刻这边压到 1.5 s —— 够看清战果，也不至于干等。
      * 调用方还会自己摆同一张战果页（结算 + 续战键）时传 `skipResultPanel`：这里只切帧，
      * 不等待也不让玩家先看到一遍，避免同一份经验/金松果在开宝箱前后闪两次。 */
     if (!hideVictoryCg && !o.skipResultPanel) await wait(1500);
@@ -3073,11 +2742,6 @@
      * `MainMovie.as:6353`）—— 归位是"下一拍的开头"，不是"上一拍的结尾"：
      *   · 主动作那一支（普通 / 武器 / 技能）以前只在分支里归位；
      *   · 而 `dot/buff/regen/rest/stunned` 这支**完全没归位**，于是上一拍停在 `comeBacks`(6) /
-     *     `attackbacks`(5) 的身体会一直保留 —— 身体不在第 1 帧时 `mc.byName('attacks')` 是
-     *     **null**，`attack()` 直接返回，画面上什么都不播。
-     * ⚠ 这正是"方天画戟没有准备的前摇回合"的根因：Sim 明明推了一拍
-     *   `{action:'rest', preparingWeapon:1}`（`sim.js:1236-1239`），`playRound` 也照原版去播
-     *   `attackType 0` 的 `6067`（思考气泡），但身体还停在上一拍的归位帧上 → 这一拍静默跳过。
      * 归位放在**最前面**（所有分支共用）才与 `attack()` 的语义一致。 */
     for (const side of [att, def]) {
       const f = rec.fighters[side];
@@ -3106,15 +2770,11 @@
       if (r.heal) floatNumber(att, r.heal, 'heal');
       if (rec.hud) refreshBlood(rec.hud);
       /* ---- 这几拍都没有"出手动画"，但**不能一眨眼就过去** ----
-       * 2026-11 用户口径："在一些情况下两次攻击之间的间隔还是有问题"。查下来有一条就是这里：
-       * 上一批把这一支的收尾统一成了 `ROUND_GAP`（170ms），于是"中毒 / 回复 / 休息 / 眩晕"
        * 这些没有动作的拍子几乎瞬间跳过 —— 连着两次出手看起来就是"前后脚"。
-       * 现在按**现代播放器**的同一组节拍（`battle.js`：dot 400 / buff 320 / regen 420 /
        * rest·stunned 500）： */
       let beat = r.action === 'dot' ? 400 : r.action === 'buff' ? 320 : r.action === 'regen' ? 420 : 0;
       if (r.action === 'rest' && Number(r.preparingWeapon) > 0) {
         /* 方天画戟「攻击前需要休息一回合」的**思考一回合**：`attackType 0` → `attacks` 第 11 帧
-         * = `6067`（30 帧，≈2.1s）。`6067` 里那颗 `6062` 就是"想着一把方天画戟"的思考气泡，
          * 所以**只有蓄力那一拍**才播它（现代播放器同口径：`r.preparingWeapon === 1` 才走
          * `commonThink` + 思考气泡）。这一段的长度由动画自己给，不再额外补节拍。 */
         const who = rec.fighters[att];
@@ -3124,11 +2784,6 @@
         }
         beat = 0;
       } else if (r.action === 'stunned') {
-        /* 眩晕：**不播 6067** —— 那一段的气泡画的是"在想一把方天画戟"，
-         * 给眩晕的角色看等于又在演"自己没有的东西"。改用原版自己那颗「晕击」状态图标
-         * （`statu` 第 4 档 = `propty` 第 8 帧，逐帧渲染核对过），配现代播放器那一拍（~700ms）。
-         * 原版客户端对 attackType 0 只认 6067 一段，但它那套里根本没有眩晕的图形 ——
-         * 现代播放器也是"飘一行『眩晕』+ 等 500ms"，这里只是把提示换成原版素材。 */
         const who = rec.fighters[att];
         if (who) { who.setStatu(4); who.specialEffect(); }
         beat = 700;
@@ -3142,7 +2797,6 @@
     /* 归位已经在函数开头（所有分支共用）做过了 —— 见上面那段注释。 */
     /* ⚠ 出手这一拍原版**只按 `currentRound.specialEffectType` 给受击方拨状态图标**
      * （`MainMovie.as:6357`：1→statu 3 / 2→statu 1 / 3→statu 2），闪避与技能防御**不走这里** ——
-     * 那两种改的是**身体帧**（`mc.gotoAndStop(3|4)`，由 `beAttack` 负责）。
      * **眩晕不在这条路上**：命中拍只记 `stunApplied`，图标留给下一拍 `action:'stunned'` 飘一次，
      * 否则同一记板砖会在命中 / 跳过两个拍子各飘一颗「晕击」（见 `effectStatu` 的注释）。 */
     defender.setStatu(effectStatu(r));
@@ -3154,15 +2808,6 @@
      * （`DEFENSE_ACTS` 的 `back`，普通受击是第 10 帧）。`MainMovie.as:6418` 那一支只做两件事：
      *   · `attackBack == "true"`（这一拍真被打回来了，即 `harmToSelf > 0`）→ 受击方反击；
      *   · 否则 `canBeAttackBack == "true"` → **出手方播归位动画 `comeBack(0)`**。
-     * `canBeAttackBack` 由 `parseFightLog`（:17944）现算：**普通攻击恒 true、近战武器 true**，
-     * 投掷 / 技能 / 幻兽 false。
-     * ⚠⚠ `Sim` 给普通攻击的动作名是 **`'common'`**（`sim.js` 的 `r.action = 'common'`），
-     * 这里以前写的是 `r.action === 'attack'` —— 一个**永远不会成立**的判断，于是
-     * **徒手/普攻之后出手方根本不走回来**：攻击动画末帧明明停在对面身边（`5630` 第 17 帧
-     * 把静止姿势摆在 x=+231.8），下一拍开头 `idle()` 一拨就**瞬移**回原位，
-     * 而且这一拍比原版少了走回来那 ~0.7s —— 用户 2026-11 口径：
-     * "在一些情况下两次攻击之间的间隔还是有问题"（普攻那一拍的间隔明显偏短、且会跳帧）。
-     * 现代播放器那边用的是**动画名**（`battle.js`：`name === 'fightCommonAttack' || …`），
      * 一直是正确归位的。 */
     const normalAttack = r.action === 'common' || r.action === 'attack';
     const canBack = normalAttack || (r.action === 'weapon' && !RANGED.has(Number(r.id)));
@@ -3173,8 +2818,6 @@
         return;
       }
       /* ⚠ 出手动画的末帧是**留在对面身边**的（`5630` 第 17 帧把静止姿势 `5616` 摆在
-       * x=+231.8、`5748` 同款），"走回来"靠的就是这条 `comeBack(0)`（`6521`：第 2 帧
-       * x=289 → 第 5 帧回到 113 → 第 10 帧站回原位，末帧 `setAttackEnd()`）。
        * 以前完全没播它，所以"玩家攻击后不返回原位"。 */
       if (canBack) back = attacker.comeBack(0);
     };
@@ -3186,9 +2829,6 @@
       hit = true;
       rec.impactVia = via || 'hook';
       /* 防御技（绝对防御 16 / 龟甲术 7）的起手：**照现代播放器，落在挨打那一刻**
-       * （`battle.js` 的 `impact` 里就是 `defending = reaction(def, r)`，盾与挨打同一拍）。
-       * 原版客户端是**出手动画第 3~25 帧的帧脚本提前调** `_root.useSkillDefense()`（`ATTACK_ACTS.guard`），
-       * 复刻照抄过一版 —— 用户 2026-11 口径："绝对防御与龟甲术的动画触发实际太早了，
        * 参考现代版的做法，进行修正"，于是这一拍改成**命中时才举盾**。 */
       if (!guarded) guarded = defender.useSkillDefense(r);
       /* 这一拍如果**还带着反击**，先把血条停在「主攻击命中后、反击结算前」：
@@ -3214,7 +2854,6 @@
       if (r.selfBurn) floatNumber(att, r.selfBurn, 'back');
       if (rec.hud) refreshBlood(rec.hud);
       /* 血见底就**当场**起倒地动画：原版 `Player.reduceBlood` 里紧接着就 `checkDead()` →
-       * `looser.dead(distance)`，倒地与这一拍的收招是并行的，不是等整套动作演完再倒。
        * 装死 / 绝对防御挡下来的那些不算死（`defensePlan` 会走 defenseSkills）。 */
       if (rec.hps[def] <= 0 && !r.fakeDie && !defender.isDead()) {
         defend = defender.dead(0);
@@ -3227,7 +2866,6 @@
       }
       defender.specialEffect();
     };
-    /* 13 师父驾到 / 17 来点松果：帧脚本在第 37 帧调 `_root.attacker.addBlood(...)`。 */
     const onHeal = () => {
       if (healed || aborted()) return;
       healed = true;
@@ -3267,13 +2905,7 @@
   /** `attackBack()` + `beBttackBack()`：反击那一路（`Squirrel.as:369` / `MainMovie.as:6418`）。
    *  原版顺序：受击方的 `attackback`(6516) 放到**第 5 帧** → 出手方 `reduceBlood(harmToSelf, 5)`
    *  并 `comeBack(1)` 归位；被反伤打出装死时改播装死那一段。
-   *
    *  ⚠ **0 伤害的反击也不能播「被闪避」**（2026-11-06 用户反馈，无尽塔 1.1.5 实拍）：
-   *  `comeBack(2)` → `6523`（`comeBacks` 第 3 帧）复用了闪避 `6432` 的整套画稿，里面就带着
-   *  `6431`「闪避」字标（`sprite6432` / `sprite6523` 都引用 `6431`，见 `tags-fight.json`）。
-   *  于是「绝对防御挡下后反击 → 被护盾/龟甲术整下吃满 0 伤害」会被演成「反击被闪避」，
-   *  与「反击不可闪避」的口径正面冲突。反击永远不会 `r.dodge`（`maybeCounter` 的
-   *  `noDodge` + `opts.counter`），所以这里统一走 `comeBack(1)`（被击退）；
    *  「被闪避」那一档只留给真正的闪避（受击方的 `DODGE_ACTS`）。 */
   async function runCounter(rec, r, att, def, attacker, defender, aborted) {
     let done = false, reaction = null, reactionStarted = false;
@@ -3291,7 +2923,6 @@
         return;
       }
       /* 被反击打死的人**倒在挨打的地方**（攻击后的贴身位），不是回原位再倒：
-       * 原版 `dead(distance)` 的 `distance=1` → `defenses` 第 5 帧（`6366` 的 ma 比第 4 帧
        * 右移 122.4 个局部单位），正是“在对手那边倒下”的那一档；`dead(0)` 是原位倒地。 */
       if (rec.hps[att] <= 0 && !attacker.isDead()) { reaction = attacker.dead(1); return; }
       /* 反击不可闪避：0 伤害只可能是被护盾/龟甲术挡住，绝不能用 `comeBack(2)`
@@ -3326,11 +2957,9 @@
   }
 
   /** 把这一拍的结算值写进血条。
-   *
    *  `opts.beforeCounter === true` 时，如果这一拍带着反击（`counterDmg` / 反伤 / 装死），
    *  只结算**主攻击命中后**的中途血量：`hpAfter` 是整拍终值，提前套上去会让反击伤害
    *  在主攻击命中那一帧就扣掉。中途值从当前血量按这一拍的伤害 / 自伤 / 吸血重算，
-   *  与 `battle.js` 的 `applyHp(r, counterPending, before)` 同一口径。
    *  反击真正命中时 `runCounter().settle()` 会再调一次（不带 opts）写终值。 */
   function applyHp(rec, r, opts) {
     if (Array.isArray(r.shellAfter) && r.shellAfter.length === 2) {
@@ -3369,21 +2998,16 @@
   }
 
   /* ---------- 战果面板（`showFightResult`） ----------
-   * 逐条照 `MainMovie.as:18703-18848`。帧里的具名元件（导出实测）：
    *   `backgd`(7722) CG 底 / `prizeBackg`(7725) 奖励板 / `maxlevel`(7730) 横幅
-   *   （**每帧一条烤在里面的文案**：f1 =「闯关成功，本关经验已在上次掉线前获得。」/
    *    f2 =「您的等级已达上限，无法获得经验。」/ f3 = 增益提示 / **f4 = 不带文案**）
    *   / `shoutu`(7736) 收益栏 / `getExp`(7739, f1 里 `exp` 是数字精灵 4315)
    *   三格奖励 = `c1/c2/c3`(3414) + `num/num1/num3`(4843)。
-   * ⚠ 数字要写进 **`num.num`**（4315 才是那排位图数字）而不是 `num`（4843 是它的外壳）：
    *   写错层级不会报错，只是那一格永远停在素材里的占位串 —— 实拍就是两排「-0000」。 */
   function showResultPanel(rec, o, result, winner, loot, reward) {
     const view = rec.view;
     if (!view) return;
-    /* `clearFrames()`：原版在出战果之前把两个格斗者收掉（`player1.gotoAndStop(_totalframes)`）。 */
     for (const f of rec.fighters) {
       if (!f || !f.holder) continue;
-      /* 图集层一起收掉：战果页 / 宝箱页不该还压着战斗中的模型。 */
       if (f.hide) { try { f.hide(); } catch (e) {} }
       const last = f.holder.frameCount ? f.holder.frameCount() : 8;
       stopAt(f.holder, last);
@@ -3448,7 +3072,6 @@
         if (sign) stopAt(sign, 2);                      // 2 = "加"（原版 `addOrReduce.gotoAndStop(2)`）
         if (t && digits) t.showNumber(Math.max(1, Math.round(Number(it.count) || 1)), digits, 0, 0, 0);
       }
-      /* 格子里的道具图（原版 `attachMovie(<道具名>, "mc", 100)`）。 */
       if (it && slot.cell && slot.cell.detachAll) { slot.cell.detachAll(); attachLootIcon(slot.cell, it); }
       if (it) gained++;
     }
@@ -3456,36 +3079,14 @@
   }
 
   /* ---------- 开宝箱：`showLottery1` / `showLottery2` / `showPrize` ----------
-   * 逐条照 `MainMovie.as:18595-18702`，元件结构照导出实测：
-   *   · `fight.gotoAndStop(5)` → `openChest`(7771) 第 1 帧：四格 `k1..k4`(7767) + 四块
    *     `b1..b4`(7769) + 提示文本 `text0`(7770，素材自带"选择一个宝箱作为奖励 !")。
-   *   · **选择阶段（state 4）**：`myDraw()` 每拍 `showButton(rewardButtons, jiantou_WZ_X1-1)`
-   *     → 四格 `gotoAndStop(选中 ? 2 : 1)`。`7767` 的两帧是**两套完全不同的元件**：
-   *     第 1 帧 `k`=7751（普通箱子）+ `count`=7752；第 2 帧 `k`=7765（箱子 + 三个"?"的问号
-   *     提示）+ `count`=7766 —— 这就是原版的"选中高亮"，不是变色。
    *   · **开箱（`showLottery1`）**：四块 `b` 一起 `gotoAndPlay(2)`（7769 的箱子缩放动画，
-   *     第 5 帧 `stop()`），四格的 `k` 子元件也一起 `gotoAndPlay(2)`：`7751`/`7765` 都是
    *     10 帧，**第 10 帧才摆出 `c1`(3414) 这个奖品槽**并 `stop()`；选中的那颗是 `7765`，
-   *     它的第 10 帧帧脚本就是 `_root.showLottery2()` —— 所以"开箱"这一下是**动画自己**收尾的。
-   *   · **揭晓（`showLottery2`）**：`openChest.gotoAndStop(2)`（多出确定键 `3152` + `4659`）、
-   *     `text0 = "恭喜你获得"`，然后逐格 `showPrize(格子的 k, 格子的 count, 奖品, 是否选中)`：
-   *     `mc.c1.attachMovie(<奖品名>, "mc", 0, {0,0})` + `textMc.text = "X" + count` +
-   *     `mc.c1.gotoAndStop(2)`（第 2 帧是空帧，把占位图 `2443` 收掉、只留挂上去的奖品图）。
-   *     奖品分配照原版：**先 `lotArray.shift()` 取第一件给选中的那一格**，其余按格子顺序
-   *     依次取剩下的 —— 所以"选哪一格"只决定谁拿第一件，不会选空。
    *   · **收尾（state 5）**：按一下 fire → `setState(2)`（复刻这边等价于点任意位置 / 超时）。 */
   /** 宝箱四选一的**稳定热区层**（2026-10 修复 iOS 点第二个及以后箱子没反应）。
-   *
    * 原实现把 `mouseenter` / `click` 直接挂在四颗 `k`(7767) 的 `<g>` 上。iOS 的轻点会先合成
    * `mouseenter`（相当于一次悬停），而那个回调里 `paint()` 会立刻 `gotoAndStop` 重建这颗
    * `k` 的子元件 —— 触点下的 DOM 在事件派发中途被换掉，WKWebView 有时就不再补发 click：
-   * 画面停在“选择一个宝箱”，看起来就是卡死。左数第一个箱子本来就是选中帧（`paint()` 是
-   * 空操作、不重建 DOM），所以只有它不是第一个时才触发。
-   *
-   * 现在把热区画在一层**不随宝箱换帧重建**的透明 `<rect>` 上（挂在视图 `<svg>` 根、压在
-   * 所有画稿之上），悬停/按下/抬起/click 都只和这层打交道；`pointerup` 与 `touchend` 都
-   * 能直接提交选择，不再依赖 iOS 是否补发 click。热区坐标用 `SfRender.svgScreenMap()` 从
-   * 屏幕坐标折回 viewBox（它已经处理了全面屏 x/y 缩放不一致，不能用 `getScreenCTM`）。
    * 选完（或视图销毁）整层移除，不会挡住后面的“确定”键。 */
   function mountChestHitLayer(view, keys, handlers) {
     const svg = view && (view.g || view.el);
@@ -3605,7 +3206,6 @@
     const chest = view.byName('openChest');
     if (!chest) return;
     /* 7771 第 1 帧的背景是 7748_0.jpg（欢庆胜利那张）；负场还沿用就会在开宝箱页
-     * 看到胜利 CG。原版负场战果用的是 7741（垂头丧气），这里把宝箱页的背景位图
      * 换成同一张 7741_0.hd.jpg。只改背景 pattern，不动宝箱/按钮。 */
     if (winner === 1) {
       try {
@@ -3624,7 +3224,6 @@
     const keys = [1, 2, 3, 4].map((i) => chest.byName('k' + i));
     const boards = [1, 2, 3, 4].map((i) => chest.byName('b' + i));
     const text0 = chest.byName('text0');
-    /* `showButton(rewardButtons, idx)`：选中的那一格拨到第 2 帧，其余第 1 帧。 */
     let sel = 0;
     const paint = () => keys.forEach((k, i) => { if (k) stopAt(k, i === sel ? 2 : 1); });
     paint();
@@ -3652,10 +3251,7 @@
     if (rec.stopped) return;
 
     /* ---- `showLottery1(wz)`：四块 `b` + 四格 `k` 一起播 ----
-     * 每一条都要**各自停在自己的末帧**（导出里没有帧动作，`stop()` 得由这里补）：
-     * `7769`(b) 末帧 = 第 **5** 帧、`7751`/`7765`(k) 末帧 = 第 **10** 帧（`c1` 奖品槽就在这一帧）。
      * ⚠ `7769` 的第 5/6 帧是**空帧**：`playClip` 的缺省停帧会按 `lastContentFrame` 停到第 4 帧，
-     *   而第 4 帧正好是箱体炸开的两条棕色碎片 —— 四格翻奖时它们会一直插在奖品图标上
      *   （用户 2026-11 口径："宝箱图标没有完全消失，留了一部分在上面"）。这里必须显式停第 5 帧。 */
     for (const b of boards) if (b) playClip(b, { stop: 5 });
     const opening = [];
@@ -3667,9 +3263,7 @@
       return inner;
     });
     /* 选中的那颗 `7765` 停在第 10 帧时，帧脚本就是 `_root.showLottery2()` —— 四颗一样长，
-     * 所以等它们全部停住即可。
      * ⚠ 兜底：`playClip` 靠 rAF 观察帧号；iOS WKWebView 在触摸/合成层切换时可能长时间
-     *   不派发 rAF，`Promise.all` 就永远不 resolve（玩家看到的是选完箱子后停住）。这里给它
      *   一个 2.5s 上限，超时后显式把四颗 k 停到第 10 帧（奖品槽那一帧），照常揭晓。 */
     let opened = true;
     if (opening.length) {
@@ -3690,12 +3284,9 @@
 
     /* ---- `showLottery2()`：翻奖 ----
      * ⚠ 原版这四格的内容是服务端 `flash/lottery.do` 下发的 `fightResult.lotArray`
-     *（`lottery()` :3575-3607 解析成 `{id, count, lotteryed}`，**永远是 4 件**），
      * 与战斗中飘出来的 `prop` 是**两份东西**：飘的是即时掉落（`doGetProp`），
      * 宝箱这一份是"四选一"，只有选中的那件会 `addProp` 进背包（`showPrize` 的 `isPrize` 分支）。
      * 复刻以前直接把"战斗中收下的掉落"塞进这四格 —— 掉落最多 3 件、玩家没接住的更少，
-     * 于是**每次都会有一格空着**（用户 2026-11 口径："总会有一些奖品没有正常显示，贴图有问题"）。
-     * 现在照原版重新抽一包 4 件（同一个掉落池、同一套权重，见 `BattleDrops.poolFor`），
      * 四格都有奖品；玩家选中的那件按原版口径**入账**（另外三件只是展示）。 */
     stopAt(chest, 2);
     const items = planChestPrizes(rec.o ? rec.o.kind : 'challenge', rec.o ? rec.o.dropRandom : null, loot.items);
@@ -3728,7 +3319,6 @@
     if (text0 && label) setText(text0, '恭喜你获得' + label);
 
     /* 翻奖之后要**等玩家点一下**才继续（原版 `state == 5` 按 fire → `setState(2)`）。
-     * 那一页的「确定」是画在帧里的形状、没有实例名（3152 底 + 4659 字），所以这里给它
      * 补一块真正的热区 + 经典界面通用的悬停/按下反馈；否则点上去毫无反应。
      * ⚠ 用户 2026-11 口径："开宝箱后的界面不许自动回退到随机挑战页" —— 不再挂 3.2s 兜底
      * 定时器，必须由玩家点「确定」或点这一层其它位置才继续。 */
@@ -3745,7 +3335,6 @@
           finish();
         });
         /* 安卓 WebView 在 SVG 变换层上偶尔不补发合成 click（项目里 iOS 的同类问题
-         * 见 `mountChestHitLayer` 的注释；安卓双击吞掉第一下 click 也见
          * `js/touch-fallback.js`）。宝箱页**不能只靠 click**：这里再给整层补一条
          * touchend —— 点画面其它位置一样继续，正好保留"必须玩家点一下"的原意，
          * 又不会因为 click 丢失把结算永久卡住。 */
@@ -3818,9 +3407,7 @@
     group.appendChild(hit);
     if (window.SfUiFeedback) SfUiFeedback.bind(group, { shell: group });
     /* 这颗「确定」**不再只认 click**：宝箱选择页早就有 pointerup / touchend 兜底
-     * （见 `mountChestHitLayer` 的注释），翻奖后的确定键却一直只监听 click。
      * 安卓 WebView 在 SVG 变换层上偶尔不补发合成 click 时，画面就永久停在
-     * "确定"这一页 —— 玩家看到的就是宝箱领取界面卡死。
      * 现在整颗按钮（不只是那块透明矩形）都参与 pointerup / touchend / click / 键盘：
      * 任何一条先到都先播 120ms 反馈再 resolve，其余几条被 `armed` 挡住，不会重复。 */
     let armed = false, down = null, touch = null;
@@ -3866,7 +3453,6 @@
 
   /** 宝箱那一包 4 件奖品（原版 `flash/lottery.do` 下发的 `fightResult.lotArray` 的等价物）：
    *  同一个掉落池、同一套权重（`BattleDrops.poolFor`），抽 4 次 —— 四格**永远都有奖品**，
-   *  不会再有"某一格空着 / 贴图不对"（见 `openChest` 里那段说明）。
    *  没有掉落池（老包 / 塔战 `collectDrops:false`）时退回"这一场收下的掉落"，至少不白屏。 */
   function planChestPrizes(kind, random, fallback) {
     const pool = (window.BattleDrops && BattleDrops.poolFor) ? BattleDrops.poolFor(kind || 'challenge') : null;
@@ -3882,8 +3468,6 @@
       return hit;
     };
     for (let i = 0; i < 4; i++) {
-      /* 抽到重复的就再摇一次（最多 3 次）：四格摆出来三张 "经验" 很怪。
-       * 池子小 / 权重集中时允许重复，不会死循环。 */
       let hit = take();
       for (let k = 0; k < 2 && out.some((x) => x.id === hit.id); k++) hit = take();
       out.push({ id: hit.id, name: hit.name, count: hit.count });
@@ -3898,11 +3482,9 @@
     if (window.BattleDrops && BattleDrops.grant) {
       try { BattleDrops.grant([rec.chestPrize]); } catch (e) {}
     }
-    /* 战果 / 录像里也要看得到这一件（`result.pickups` 与 `loot.items` 是同一个数组）。 */
     if (loot && Array.isArray(loot.items)) loot.items.push({ ...rec.chestPrize });
   }
 
-  /** 数一棵子树里"已经贴上装备的挂点"（`onClip` 会给贴上容器的实例盖一个 `slot` 记号）。 */
   function countDressed(clip, seen) {
     if (!clip || !clip.nodes) return 0;
     const mark = seen || new Set();
@@ -3935,25 +3517,21 @@
       cur: live.curRound ? { action: String(live.curRound.action || ''), id: Number(live.curRound.id) || 0, attacker: Number(live.curRound.attacker) || 0 } : null,
       impact: live.impactVia || null,
       weapon: live.fighters.map((f) => (f && f.weaponNow) ? { id: f.weaponNow.id, level: f.weaponNow.level } : null),
-      /* `plans` / `dressed`：穿搭计划有没有建出来、格斗者身上到底贴上了几个挂点。
-       * 这两项是"装备没穿上"这类问题的第一手证据（2026-11 用户口径：战斗中双方都是无装备）。 */
       shields: live.shields.slice(),
       plans: live.plans.map((p) => (p ? { slots: p.bySlot.size, holders: p.holders.size } : null)),
       dressed: live.fighters.map((f) => (f && f.mc ? countDressed(f.mc) : 0)),
       fighters: live.fighters.map((f) => (f ? Object.assign({ hp: f.blood.leftBlood }, f.debug()) : null)) } : null),
-    /** 开宝箱那一步是**等玩家点**的（原版 `jiantou_WZ_X1` 选一个箱子再按 Fire）。
-     *  这个入口给回归用例与探针用：等价于"玩家点了第 i 个宝箱"（0 基）。 */
     pickChest: (i) => { if (live && live.chestPick) { live.chestPick(Math.max(0, Math.min(3, Number(i) || 0))); return true; } return false; },
     /** 翻奖之后那一下"确定"（等价于玩家点了宝箱页任意位置）。 */
     confirmChest: () => { if (live && live.confirmChest) { live.confirmChest(); return true; } return false; },
-    /** `run` 的同步骨架是否可用（调用方先探测再决定走不走经典战斗）。 */
     ready: () => !!(window.SfRender && window.State),
     SYM, FRAME: F, SIDE_MATRIX,
-    /* 三侠动作表 / 图集（回归与探针用） */
     NPC_SHEETS: Object.freeze(NPC_SHEETS), NPC_ACTION: Object.freeze(NPC_ACTION), NPC_HIT_FRAME: Object.freeze(NPC_HIT_FRAME),
     _npcAnim: (npc, action) => npcAnimName(String(npc || ''), action),
     /* 纯函数（供 tools/*.cjs 直接核对映射规则） */
     _attackFrame: (r) => attackPlan(r).frame,
+    /* 本场要加载哪些动作包（core 之外）：战斗结果每一拍 + 双方武器/技能/幻兽。 */
+    _fightAttackSymbols: (o) => fightAttackSymbols(o),
     /* 幻兽帧：`29 + petId` 与原版 `squirrelAttackConfig` 的 attackType 4 段。 */
     _petAttackFrame: (petId) => 29 + Math.max(1, Math.min(32, Number(petId) || 1)),
     _petDefenseFrame: (petId) => PET_DEFENSE_FRAME[Number(petId)] || -1,
@@ -3975,7 +3553,6 @@
     _damageFloatPlan: (value) => damageFloatPlan(value),
     /* 4 位数字模板不够时补 num5..num10（回归用假 digits 核对挂载位置）。 */
     _ensureFloatDigits: (digits, want) => ensureFloatDigits(digits, want),
-    /* 幸运一击多球分裂只复制这颗球，不复制整段出手动画。 */
     _luckyBall: LUCKY_BALL,
     _showLuckyResult: showLuckyResult,
     _freezeNestedAnim: freezeNestedAnim,
@@ -3990,7 +3567,6 @@
       attack: PET_ATTACK_ACTS, defense: PET_DEFENSE_FRAME, art: Object.freeze(HUD_PET_SYMBOLS.slice()),
       slot: '3414',
     }),
-    /* 开打倒计时 = 血条 HUD 第 8 帧里那颗原版 `3750`（不是自造元件，见 `playHudCountdown`）。 */
     COUNTDOWN: Object.freeze({ tag: COUNTDOWN_TAG, holder: '7703', holderFrame: HUD_STOP,
       frames: 41, endFrame: COUNTDOWN_END }),
     ACTS: Object.freeze({

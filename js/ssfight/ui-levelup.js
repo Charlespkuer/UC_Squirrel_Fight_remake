@@ -1,39 +1,24 @@
-/* ============================================================================
- * ui-levelup.js —— 升级奖励页（ssfight 原版 7795 第 30 帧）+ 现代升级奖励数据
- *
- * 原版 `showLevelUp()`（MainMovie.as:7035）先 `gotoAndStop("levelup")` 播
- * 7795 第 1~29 帧的「NN 级达成」大图，第 30 帧停住并 `showReward()` 把
- * 四格 `fourProperties`（7794）填上：属性各一卡 + 底部「确定」。
- * 原版 `showReward()`（MainMovie.as:7069-7189）按「生命 / 敏捷 / 力量 / 速度」
- * 往 `c1` 里 `attachMovie` 对应属性图；下面四格文字写「生命+5」这类增量。
- * 四维只是**展示**，不是让玩家选。属性卡图用背包/商店那四本永久属性书的
- * 图标（道具 16~19：力 / 敏 / 速 / HP），原版 SWF 没有它们的同名导出，
- * 项目里一直保留着 `prop-16..19.png`（见 classic-ui 的 PROP_SVG_IDS 注释）。
- * 本作沿用这套：四维成长 + 系统代分配点合并成当级总增量显示在四格里，
- * 属性书 / 金宝箱 / 礼包等实物奖励照常占格；武技三选一不再放占位卡，
- * 关掉升级页后再弹三选一弹窗。
- * ========================================================================== */
+// ui-levelup.js — 升级奖励页（原版 7795 第 30 帧）; four `fourProperties` slots (7794) are display-only:
+// stat growth + auto points merged per level, physical rewards occupy slots, weapon-choice modal opens after.
 (function () {
   'use strict';
   const NS = 'http://www.w3.org/2000/svg';
   const XLINK = 'http://www.w3.org/1999/xlink';
   const SPLASH_SINGLE = 1100;
   const SPLASH_MULTI = 700;
-  /* 原版把 7795 挂在根舞台 (-11.3,-6.25) 上（`timeline.json` 的 levelup 标签），
-   * 它自己的全屏 CG（7775）从 (11.3,4.9) 开始画。直接 `mountSymbol` 会丢掉这两个
-   * 偏移：CG 左上露出底页、右下被屏外裁掉，面板也偏右下（用户 2026-11 截图）。
-   * 把视口换成同一块 320×196 裁切，等价于原版舞台的取景，不用再平移子节点。 */
+  // 7795 sits at root stage (-11.3,-6.25) and its full-screen CG (7775) draws from (11.3,4.9).
+  // Plain mountSymbol loses both offsets (CG leaks top-left, clipped bottom-right). This viewBox is
+  // the same 320×196 crop as the original stage, so child nodes need no extra translation.
   const STAGE_VIEWBOX = '11.3 6.25 320 196';
-  /* 四维卡图 = 背包里那四本永久属性书的图标（道具 16 力 / 17 敏 / 18 速 / 19 HP）。
-   * 用户截图 p1 就是这四张；SWF 里 `生命/敏捷/力量/速度` 的同名导出会落到
-   * acorn/fruit/book/gift，不是四维书，别再用那一套。 */
+  // Stat-card art = the four permanent stat books (props 16 str / 17 agi / 18 spd / 19 HP; prop-16..19.png).
+  // SWF exports named 生命/敏捷/力量/速度 resolve to acorn/fruit/book/gift — do not use those.
   const STAT = {
     hp: { name: '生命', prop: 19 },
     agility: { name: '敏捷', prop: 17 },
     power: { name: '力量', prop: 16 },
     speed: { name: '速度', prop: 18 },
   };
-  const STAT_ORDER = ['hp', 'agility', 'power', 'speed'];   // 与原版 showReward 的数组顺序一致
+  const STAT_ORDER = ['hp', 'agility', 'power', 'speed'];   // Same order as the original showReward array.
   let inst = null;
   let seq = 0;
 
@@ -47,8 +32,7 @@
     if (s.length > max) s = s.slice(0, Math.max(1, max - 1)) + '…';
     return s;
   }
-  /** 四格文字只有约 5 个汉字宽：礼包名收成「体力药×2 / 礼包×1」这类能读全的短标签，
-   *  具体是什么道具由卡片图标表达。 */
+  // Four slots are ~5 hanzi wide: shorten gift names («体力药×2»); the card icon carries the detail.
   function giftLabel(g) {
     let name = String(g.name || '道具').replace(/^(小|大|中)/, '');
     if (/礼包/.test(name)) name = '礼包';
@@ -56,17 +40,14 @@
     const count = Number(g.count) > 1 ? '×' + g.count : '';
     return clipText(name + count, 5);
   }
-  /** 系统代分配点的一点值：力/敏/速 +1，生命 +5（与 `State.STAT_GAIN` 同一口径）。 */
+  // Auto-allocated point: str/agi/spd +1, HP +5 (same as State.STAT_GAIN).
   function statGain(key) {
     const g = window.State && State.STAT_GAIN && Number(State.STAT_GAIN[key]);
     return g > 0 ? g : (key === 'hp' ? 5 : 1);
   }
-  /** 一件升级奖励 → 一张原版四格卡（label + 图标）。
-   *  · 四维：随机成长 + 系统代分配点合并成**本级总增量**，按原版顺序
-   *    （生命 / 敏捷 / 力量 / 速度）各占一格；只是展示，玩家不用选。
-   *  · 武技三选一：不放占位卡（用户 2026-11 口径：「三选一」标识太傻），
-   *    关掉升级页后再弹三选一弹窗。
-   *  · 属性书 / 金宝箱 / 礼包 / 旧版随机武技仍按实物占格。 */
+  // One reward -> one of the original four slots (label + icon). Stats merge random growth +
+  // auto points into this level's total, display only (the player never picks). Weapon choice is
+  // deferred to a modal after closing; tomes/chest/gift/random skill keep physical slots.
   function entriesFor(up) {
     const out = [];
     const gain = { hp: Number(up.hp) || 0, agility: Number(up.agility) || 0, power: Number(up.power) || 0, speed: Number(up.speed) || 0 };
@@ -98,22 +79,22 @@
   }
   function iconHref(icon) {
     if (!icon || !icon.kind || icon.id == null) return '';
-    /* 礼包里的金松果（id 8）在经典模式统一用经典那张小松果（原版 3867 矢量），
-     * 不用现代 330×330 prop-8。其余道具走 `UI.classic.propIconSrc`（原版无框矢量优先）。 */
+    // Gift pinecone (id 8) uses the classic small pinecone (original 3867 vector), not modern
+    // 330×330 prop-8; other props go through UI.classic.propIconSrc.
     if (icon.kind === 'prop') {
-      if (Number(icon.id) === 8) return 'images/ui/icons/gold-acorn.png';
+      if (Number(icon.id) === 8) return 'images/ui/icons/gold-acorn.svg';
       const classic = window.UI && window.UI.classic;
       if (classic && typeof classic.propIconSrc === 'function') return classic.propIconSrc(icon.id);
       return 'images/ui/icons/prop/prop-' + icon.id + '.png';
     }
-    return 'images/ui/icons/' + icon.kind + '/' + icon.kind + '-' + icon.id + '.png';
+    return 'images/ui/icons/' + icon.kind + '/' + icon.kind + '-' + icon.id +
+      (icon.kind === 'weapon' || icon.kind === 'skill' ? '.svg' : '.png');
   }
-  /** 卡片 c1 槽里放图标：优先用现代道具/武技图集切图，没有贴图的用字徽。
-   *  四维卡用背包那四本永久属性书的图标（prop-16..19），放进原版 7778 金卡；
-   *  `icon.scale` 让书卡比普通道具略大一点，标签仍由四格文字写增量。 */
+  // Card art: modern prop/skill atlas when available, else a character badge; stat cards use
+  // prop-16..19 in the original 7778 gold card, icon.scale makes them slightly larger.
   function setCardArt(slot, icon) {
     if (!slot || !slot.g) return;
-    try { if (slot.gotoAndStop) slot.gotoAndStop(1); } catch (e) { /* 帧结构缺省时保持现状 */ }
+    try { if (slot.gotoAndStop) slot.gotoAndStop(1); } catch (e) { /* no frame structure: keep current content */ }
     const host = (slot.getContentHost && slot.getContentHost()) || slot.g;
     if (!host) return;
     for (const old of host.querySelectorAll('.sf-levelup-cardart')) old.remove();
@@ -163,7 +144,7 @@
     if (text && t) t.setText(text, entry.label || '');
     if (slot) setCardArt(slot, entry.icon);
   }
-  /** 按钮「确定」是原版 3152 胶囊 + 4659 文字（都没有实例名，直接按深度取）。 */
+  // Confirm = original 3152 capsule + 4659 text; both unnamed, so picked by depth.
   function wireConfirm(view) {
     if (!view || !view.g) return;
     for (const depth of ['20', '22']) {
@@ -221,7 +202,7 @@
       try { t.showNumber(level, num, 0, 0, 'right'); } catch (e) { err(e); }
     }
   }
-  /** 当前这一级的奖励分页；每页最多四个，照原版 7794 的 1~4 帧。 */
+  // Reward pages; max four per page, matching original 7794 frames 1-4.
   function currentPages() {
     return chunks(entriesFor(inst.ups[inst.upIndex]), 4);
   }
@@ -255,7 +236,7 @@
     view.playing = false;
     freeze(view);
     const gear = view.byName ? view.byName('c1') : null;
-    if (gear && gear.g) gear.g.style.display = 'none';       // 原版单件装备格：现代升级奖励没有这一格
+    if (gear && gear.g) gear.g.style.display = 'none';       // Original single-gear slot; modern level-up rewards never use it.
     const fp = view.byName ? view.byName('fourProperties') : null;
     if (fp) {
       try { fp.gotoAndStop(Math.max(1, Math.min(4, cards.length))); } catch (e) { err(e); }
@@ -267,20 +248,20 @@
     markBackground(view);
     inst.ready = true;
   }
-  /** 给 7775 全屏 CG 那一组打标：确定后若还要弹三选一，可以只留它当背景。 */
+  // Tag the 7775 full-screen CG group so a following weapon-choice modal can keep it as background.
   function markBackground(view) {
     if (!view || !view.g) return;
     let cg = null;
     try { cg = view.g.querySelector(':scope > g > path[fill^="url(#f7775"]'); } catch (e) { cg = null; }
     if (cg && cg.parentNode && cg.parentNode.classList) cg.parentNode.classList.add('sf-levelup-cg');
   }
-  /** 升级页关掉后是否还有必须由玩家处理的武技三选一。 */
+  // Whether a weapon-choice modal still needs the player after the level-up page closes.
   function pendingWs() {
     try {
       return !!(window.State && typeof State.pendingWS === 'function' && State.pendingWS() > 0);
     } catch (e) { return false; }
   }
-  /** 只留全屏 CG：面板 / 四格 / 确定都藏起来，背景层降到弹窗之下，给三选一当底图。 */
+  // Keep only the full-screen CG: hide panel/slots/confirm and lower the background under the modal.
   function holdBackground() {
     if (!inst || !inst.host) return false;
     inst.backgroundHeld = true;
@@ -290,7 +271,7 @@
     markBackground(inst.view);
     return true;
   }
-  /** 三选一 / 加点都处理完：把背景层收掉。 */
+  // Modal/points handled: remove the background layer.
   function releaseBackground() {
     if (!inst || !inst.backgroundHeld) return false;
     destroy();
@@ -315,8 +296,8 @@
   function finish() {
     if (!inst) return;
     const cb = inst.onDone;
-    /* 后面还有武技三选一：先别拆整页，只留全屏 CG 给弹窗当背景；
-     * `releaseBackground()` 由 classic-ui 在三选一 / 加点都处理完后调用。 */
+    // Weapon choice still pending: keep the page, leave the full-screen CG as modal background;
+    // classic-ui calls releaseBackground() after both choice and points are handled.
     if (pendingWs()) {
       holdBackground();
       if (typeof cb === 'function') {

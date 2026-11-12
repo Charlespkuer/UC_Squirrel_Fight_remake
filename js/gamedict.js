@@ -1,14 +1,5 @@
-/* ============================================================
- * gamedict.js — 原版数据字典 / 素材清单 / 动画帧表（**运行时数据，不是参考文件**）
- *
- * 这个文件由 tools/gen-vendor-data.cjs 从原版数据自动生成，不要手改。
- * 原版文件本体在 references/orig/（只作参考，不参与运行）；游戏跑起来只认这里的数据，
- * 所以运行过程中不会再引用 references/ 下的任何文件。
- *
- * 数据来源：references/orig/GameDict.js、assets.js、animationStr.js；
- * 装备附件表另取 references/ssfight/viewer/game/FightGame/config1.xml（48 条）。
- * 重新生成：node tools/gen-vendor-data.cjs
- * ============================================================ */
+// gamedict.js — 原版数据字典/素材清单/动画帧表；tools/gen-vendor-data.cjs 生成，不要手改。
+// 数据来源 references/orig/（只作参考，运行时不引用）；重新生成：node tools/gen-vendor-data.cjs。
 (function () {
   'use strict';
 

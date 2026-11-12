@@ -182,6 +182,9 @@ function buildWebSnapshot(checkOnly) {
     if (!fs.existsSync(src)) { console.warn('跳过（不存在）: ' + item); continue; }
     copyRecursive(src, path.join(WEB_OUT, item));
   }
+  /* 战斗整包只作生成器 / 测试 oracle；运行时用 core + 本场动作包，发布快照不带 8.9 MB 整包。 */
+  const wholeFight = path.join(WEB_OUT, 'images/ssfight/ui/tags-fight.json');
+  if (fs.existsSync(wholeFight)) fs.unlinkSync(wholeFight);
   let size = 0;
   const files = webWalk(WEB_OUT);
   for (const rel of files) size += fs.statSync(path.join(WEB_OUT, rel)).size;

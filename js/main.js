@@ -1,36 +1,18 @@
-/* ============================================================
- * main.js — 启动引导、主界面场景、战斗调度
- * ============================================================ */
 
-/* ------------------------------------------------------------
- * 目录：启动引导 / 主界面场景 / 战斗调度
- * Ctrl+F 搜节号（如「【MN1】」）直达对应代码块。
- *
- *  【MN1】启动与画布  【MN2】音频  【MN3】素材加载
- *  【MN4】战斗观察模式  【MN5】自检模式  【MN6】标题画面
- *  【MN7】主界面场景  【MN8】战斗调度  【MN9】支持作者 / 打开外部链接  【MN10】导出 window.Main
- * ------------------------------------------------------------ */
 (function () {
   'use strict';
 
   /* 安卓 WebView 对 HTML `paint-order: stroke fill` 只认第一个值（计算值会退化成
-   * `stroke`），描边会盖在字芯上；`css/classic.css` 里的 `html.is-android` 分支改用
    * 八向 text-shadow 描边。这里尽早打标记，避免首屏按钮先按桌面规则画一遍。 */
   try {
     const rootEl = document.documentElement;
     if (window.navigator && /Android/i.test(window.navigator.userAgent || '')) {
       rootEl.classList.add('is-android');
     }
-    /* 「没有悬停的设备」：手机/平板点一下之后 `:hover` 会**粘住**，而经典界面的悬停档
-     * 都带 `filter`（离屏合成）。`css/classic-refine.css` 的 `html.is-touch` 分支据此
-     * 把悬停的暖色光晕/提亮全部让给按下态，避免点过的格子一直拖着一次离屏。 */
     const noHover = !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
     if (noHover) rootEl.classList.add('is-touch');
   } catch (e) {}
 
-  /* ============================================================
-   * 【MN1】启动与画布（尺寸适配/输入）
-   * ============================================================ */
   const $ = (s) => document.querySelector(s);
   const canvas = $('#stage');
   const ctx = canvas.getContext('2d');
@@ -50,7 +32,6 @@
 
   /** 主界面背景：等比铺满 1170×690，可加轻微虚化与淡化作纱。
    *  现代模式的 main.jpg 细节很密，HUD 与角色压上去会互相抢，所以默认轻微虚化 + 提亮；
-   *  经典模式用原版底图，按「原图锐利」处理（见 homeBgBlur）。
    *  **静态层缓存**：虚化 + 白纱是纯静态的，以前每帧都在主画布上重做一次 canvas blur；
    *  现在按「尺寸 + 底图 + 虚化强度」缓存到离屏 canvas，主循环只 `drawImage` 一次。 */
   let homeBgCache = null, homeBgCacheKey = '';
@@ -63,7 +44,6 @@
     c.drawImage(bg, ox, oy, dw, dh);
     if (blur) c.filter = 'none';
     if (blur) {
-      // 淡化作纱：只压很薄一层，底图细节尽量保留
       c.fillStyle = 'rgba(255,250,236,0.09)';
       c.fillRect(0, 0, W, H);
       const g = c.createLinearGradient(0, H * 0.62, 0, H);
@@ -100,10 +80,6 @@
       return State.settings().uiMode === 'classic';
     } catch (e) { return true; }
   }
-  /**
-   * 经典模式下村庄页由**原版导出数据**渲染成 SVG（`js/ssfight/`），canvas 不再画首页场景。
-   * 判据用 DOM 上的 `.ssfight-home`：只有真的挂上了，才放心跳过 canvas 绘制。
-   */
   function ssfightHomeActive() {
     if (!uiModeIsClassic() || !window.SfUiMain) return false;
     const el = document.querySelector('.ssfight-home');
@@ -113,17 +89,13 @@
     return !!(el && el.querySelector('svg'));
   }
   /**
-   * 首页用哪张底图：
    *   · 现代模式 = 现在的写实重绘（`main.jpg`，安卓客户端素材）；
-   *   · 经典模式 = **2011 原版那 320×196 的扁平村庄底图**（ssfight.swf 内嵌位图）。
    * 两张都在启动时预载，所以热切换不用重新加载。
    */
   function homeBgImage() {
     if (uiModeIsClassic() && mainBgSsfight) return mainBgSsfight;
     return mainBg;
   }
-  /** 首页背景的虚化强度。**经典模式按原版「原图锐利」处理**（虚化与白纱一起关掉，
-   *  见 docs/经典模式-可行性.md §4.1 #1）；现代模式保持现在的轻微虚化 + 提亮。 */
   function homeBgBlur() {
     if (uiModeIsClassic()) return 0;
     return mainBgSoft ? HOME_BG_BLUR : 0;
@@ -133,23 +105,18 @@
   let activeBattle = null;
 
   /* 上一次真正落地的缩放参数：新平台（Android 16 / 折叠屏 / 分屏）会连续补发多拍
-   * resize / configuration change，`fitCanvas` 每次都重写 #ui 的 transform、字号并重画
    * 数字，肉眼就是「界面缩放不停切换」。同样的结果只落一次，重复调用直接返回。 */
   let fitSignature = '';
   function fitCanvas(force) {
     // 页面高度由展示层决定：复刻的菜单页是 920:560 → 712.174，战斗/首页 canvas 是 690。
-    // 经典模式的村庄页是原版 320×196 整页 → 716.625（见 UI.layoutHeight）。
     const layoutHeight = (window.UI && UI.layoutHeight) ? UI.layoutHeight(W, H)
       : ($('#ui .classic-page') ? W * 560 / 920 : H);
-    // 用 documentElement.clientWidth/Height：它们**不含**滚动条占的位置，
-    // 而 window.innerWidth/Height 含。Windows 的滚动条占位会让 innerWidth 在
     // 「弹窗出现/消失」时变化，导致整屏缩放跳一下；macOS 的覆盖式滚动条不占位，
     // 所以在 mac 上看不出来 —— 这里统一按不含滚动条的尺寸算，两个平台就一致了。
     const de = document.documentElement || {};
     const vw = Math.max(1, de.clientWidth || window.innerWidth || W);
     const vh = Math.max(1, de.clientHeight || window.innerHeight || layoutHeight);
     const st = settingsSnapshot();
-    /* 容器高度和 layoutHeight 用同一个数：经典整页是 716.625，复刻 DOM 二级页按 690 高。 */
     const tightHome = !!(window.SfUiMain && document.querySelector('.ssfight-home:not([data-sf-battle-hold])'));
     const uiHeight = tightHome ? layoutHeight : H;
     let sx, sy;
@@ -217,15 +184,12 @@
     } catch (e) {}
     return hide;
   }
-  /** 设置页的「状态栏」开关。 */
   function setHideStatusBar(on) {
     persistSettings({ hideStatusBar: on !== false });
     applySystemBars();
     setTimeout(fitCanvas, 0);
     return on !== false;
   }
-  /** 「后台运行」开关：把选择同步给安卓壳（壳决定切后台时要不要 pauseTimers）。
-   *  桌面 / 浏览器没有这个桥，开关只影响 main.js 自己的音乐暂停逻辑。 */
   function backgroundRunOn() {
     try { return settingsSnapshot().backgroundRun === true; } catch (e) { return false; }
   }
@@ -239,7 +203,6 @@
     } catch (e) {}
     return on;
   }
-  /** 设置页的「后台运行」开关。 */
   function setBackgroundRun(on) {
     persistSettings({ backgroundRun: on === true });
     applyBackgroundRun();
@@ -266,7 +229,6 @@
     return next;
   }
   /** 存档载入后把偏好接过来：存档优先，并回写 localStorage 供下次启动（标题画面）用。
-   *  **偏好没变就直接返回**：以前每次 `showHome()` 都要写 3 次 localStorage + `fitCanvas`、
    *  再被 `showHome` 里的第二次 `fitCanvas` 叠一遍；现在只有读档 / 切档 / 改设置才重跑。 */
   let appliedSettingsSig = '';
   function applyStoredSettings(force) {
@@ -310,7 +272,6 @@
     fitCanvas();
     return !!on;
   }
-  /** 分辨率档位：'auto' 或 RESOLUTIONS 里的 key。 */
   function setResolution(key) {
     persistSettings({ resolution: String(key) });
     fitCanvas();
@@ -319,10 +280,6 @@
   // 进出系统全屏（含按 Esc）后重新算一次缩放；精简 DOM 环境（自检脚本）里没有这个 API
   if (document.addEventListener) document.addEventListener('fullscreenchange', () => fitCanvas());
 
-  /* ============================================================
-   * 【MN2】音频（BGM 音量调节）
-   * ============================================================ */
-  // ---------- 音频：BGM 音量可连续调节 ----------
   const BASE_VOLUME = 0.35;
   function clampVolume(v) {
     const n = Number(v);
@@ -331,21 +288,16 @@
   let volume = clampVolume(localStorage.getItem('ssdz_music_volume'));
   /* 主 BGM 在战斗里**不暂停**，只压成静音（桌面写 volume=0；iOS 忽略 volume，
    * 同时写 muted=true）：这样打完回随机挑战页时不用等 iOS/WebKit 重新起播
-   * （实测 resume 要几十毫秒、慢机更久，听感就是「音乐停一下」），只还原音量/取消
    * 静音即可无缝接上。`applyVolume()` 是唯一写音量的地方，静音/后台/战斗三条路径
    * 都从这里走，避免三处各写一份。 */
   let bgmDucked = false;
-  /** 0~1 的滑块音量：0 等同静音。 */
   function volumeValue() { return volume; }
   function setVolume(value) {
     volume = clampVolume(value);
-    // 静音标记只在滑块归零或恢复时同步，避免两套状态互相覆盖
     if (volume <= 0) muted = true;
     else if (muted) muted = false;
     persistSettings({ volume: volume, muted: muted });
     applyVolume();
-    /* 0 等同静音：拖到 0 也要真的停；拖回来（`muted` 已清）再起播。
-     * 这条以前只改内存，滑块归零时声音还在响，要再点一次开关才停。 */
     playBgm(mode === 'battle' ? 'fight' : 'main');
     return volume;
   }
@@ -365,8 +317,6 @@
   }
 
   function playBgm(which) {
-    /* 已经切到后台（安卓按 Home / 浏览器切标签页）时不许再起播：
-     * 任何一个界面动作都可能顺手调 playBgm，而后台播放正是玩家投诉的那件事。 */
     if (bgSuspended) return;
     if (muted || volume <= 0) {
       bgmDucked = false;
@@ -386,7 +336,6 @@
         if (!fightBgm) { fightBgm = new Audio('audio/fight_bg.mp3'); fightBgm.loop = true; }
         bgmDucked = true;
         applyVolume();
-        /* 主 BGM 保持原播放头继续走（音量 0）；没起播过就维持暂停，等回主界面再起播。 */
         audio = fightBgm;
       }
       /* 已经在播就不要重复 play()：iOS 上重复 play 会多一次起播/解码，
@@ -401,20 +350,6 @@
   }
   /** 自动播放被拦下时在页面上提示「点一下开启音乐」；能播了就收起提示。 */
   let audioBlocked = false;
-  /* ============================================================
-   * 切后台冻结：音乐 + 游戏进度
-   *
-   * 安卓 WebView 的 <audio> **不会**跟着应用生命周期走：实测（API 35 模拟器，
-   * 见 docs/更新记录.md 2026-10 本批）按 Home 之后 AudioPlaybackConfiguration
-   * 仍然是 state:started，`document.hidden` 已经为 true，但没有任何人去 pause 它 ——
-   * 于是玩家听到「音乐一直在后台响，除非彻底杀掉这个后台」。
-   *
-   * 三条路都汇到这两个函数：
-   *   · 页面自己收到 visibilitychange（实测安卓 WebView 会发，且只发一次）；
-   *   · 安卓壳 MainActivity.onPause / onResume 显式调 `__ssdzEnterBackground` / `__ssdzEnterForeground`；
-   *   · 桌面浏览器切标签页（同一套 visibilitychange）。
-   * 回到前台时**接着原来的位置继续放**（play() 就是 resume，不是重头开始）。
-   * ============================================================ */
   let bgSuspended = false;      // 音乐已因切后台暂停
   let inBackground = false;     // 当前在后台（无论是否开启「后台运行」）
   /** iOS / iPadOS WKWebView（iPadOS 13+ 的 UA 可能伪装成 Macintosh）。 */
@@ -432,11 +367,8 @@
     } catch (e) { return 0; }
   }
   /** 按当前窗口重新量一次布局，并让页面自己的 resize 监听重排。
-   *
-   *  原生壳在 onConfigurationChanged / onResume 里显式调用 `window.__ssdzRelayout()`：
    *  · iQOO 等 ROM 换方向后 WebView 不补发 JS resize（第三百九十六批的机型问题）；
    *  · Android 16（HyperOS 3 / 澎湃 3）回前台时 WebView 可能停在冻结前的尺寸。
-   *  只调 fitCanvas() 只能挪 canvas 与 #ui，引导层 / 战斗覆盖层 / 调试面板都是各自
    *  监听 window resize 的，必须再派发一次合成 resize。 */
   let relayoutFrame = 0;
   function fireWindowResize() {
@@ -469,7 +401,6 @@
   /** iOS 切后台回来：WKWebView 会释放 canvas 的绘制缓冲，也可能丢掉 SVG 内嵌位图 /
    *  CSS 背景的解码结果；页面本身不会重建，于是看起来就是「背景消失」。
    *  Android 16 的 WebView 也会丢同一类栅格层（Chromium 在 Adreno / Vulkan 合成路径上
-   *  有已知的 image layer 不上屏问题），表现同样是回前台后整块黑/少图，所以一起补画。
    *  只在 iOS / Android 16+ 上按当前屏幕补一次，不改变游戏状态。 */
   let foregroundRepaintSeq = 0;
   function scheduleForegroundRepaint() {
@@ -515,7 +446,6 @@
         void el.offsetHeight;               // 强制一次样式/布局，再还回去
         el.style.backgroundImage = previous;
       } else if (color && color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') {
-        /* 无尽塔整页是纯色底（--tower-bg），没有图片层；同样轻推一次。 */
         const previous = el.style.backgroundColor;
         el.style.backgroundColor = 'transparent';
         void el.offsetHeight;
@@ -548,8 +478,6 @@
   try {
     window.__ssdzEnterBackground = enterBackground;
     window.__ssdzEnterForeground = enterForeground;
-    /* 安卓壳的 onConfigurationChanged / onResume 调这个（以前只有调用没有定义，
-     * 所以 iQOO 那条「换方向后重排」的修复实际是空转）。 */
     window.__ssdzRelayout = relayoutNow;
     window.__ssdzIsBackgrounded = () => inBackground;
     if (document.addEventListener) {
@@ -575,7 +503,6 @@
       document.body.appendChild(hint);
     }
   }
-  /** 自动播放被拦截时，等第一次用户交互再补播当前场景的 BGM（只挂一次）。 */
   let audioUnlockArmed = false;
   function armAudioUnlock() {
     setAudioBlocked(true);
@@ -590,10 +517,6 @@
     for (const name of events) window.addEventListener(name, retry, true);
   }
 
-  /* ============================================================
-   * 【MN3】素材加载
-   * ============================================================ */
-  // ---------- 加载 ----------
   function drawLoading(pct, note) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#22303a';
@@ -624,7 +547,6 @@
   }
 
   /* 现代 canvas 战斗只在首页空闲时预热通用特效与默认场景（29 张，解码约 34 MiB）。
-   * 其它 NPC / 场景由 battle.js 按实际对手与 region 加载，避免首页一次解码全部约 69 MiB。
    * 经典模式跳过；这批不阻塞首屏，真开打时仍 await 战斗自己的清单并复用 in-flight 请求。 */
   const BATTLE_SHEETS = Object.freeze(['effectCommonAttack', 'weaponEffect', 'throwEffect', 'win_effect', 'die', 'runAround',
     'hurtRunBack', 'beatBack', 'think',
@@ -643,7 +565,6 @@
     try { Engine.pinSheets(BATTLE_PIN); } catch (e) { return false; }
     return true;
   }
-  /** 拉现代战斗图集（幂等）。经典模式不主动调它；切到现代 / 真开打时再拉。 */
   function preloadBattleAssets() {
     if (battleAssetsPromise) return battleAssetsPromise;
     battleAssetsPromise = Engine.loadSheets(BATTLE_SHEETS)
@@ -651,7 +572,6 @@
       .catch(() => false);
     return battleAssetsPromise;
   }
-  /** 首页挂好之后再补拉：不和首屏抢磁盘/解码，也不让启动等它。 */
   function scheduleBattleAssets() {
     if (battleAssetsPromise || uiModeIsClassic()) return;
     const start = () => {
@@ -672,7 +592,6 @@
     };
     fitCanvas();
     /* 标题页也要沉浸：`applyStoredSettings()` 要等存档载入之后才跑，旧机（Android 11 /
-     * 三键导航，如 iQOO Z5）在标题页会露出一条导航栏，把「开始游戏」和底栏挤到一边。
      * 这里先按 localStorage 里的偏好落一次；没有原生桥时是空操作，之后再补一次。 */
     applySystemBars();
     /* 原生桥 / insets 偶尔比页面晚一拍（HyperOS 3 上见过启动后系统栏又冒出来）：1.2s 补落一次，
@@ -682,7 +601,6 @@
     playBgm('main');
     drawLoading(0.05, '松鼠大战 · 怀旧复刻版');
     setStatus('加载背景…');
-    // 主界面背景：用原版 main.jpg（868×512，比例与原设计空间一致）。
     // 加载失败时退回自绘村庄，保证离线也能显示。
     /* 两张底图并行拉：主图失败才退 village.svg（退回本身要等主图结果，所以放在 then 里）。 */
     const [mainImg, ssfImg] = await Promise.all([
@@ -740,7 +658,6 @@
     }
     /* 浏览器兜底档只在「磁盘上确实没有更高进度」时才允许顶上来。
      * 以前只看 `hasLocalSave()`：iOS 换包/桥接迟到时，浏览器里残留的 1 级档会把
-     * 磁盘上几十级的正式档顶掉一次，下一次启动又读回文件 —— 玩家看到的就是
      * 「初始存档与有进度的存档横跳」。现在磁盘档的等级更高时直接不回落。 */
     const bootInfo = State.fileInfo ? (State.fileInfo() || {}) : {};
     const bootLocal = State.localSaveMeta ? State.localSaveMeta() : null;
@@ -754,14 +671,11 @@
     if (loaded) {
       /* 正式存档读进来了，但**本机浏览器镜像比文件还新**：说明上一次退出时那次文件写入
        * 没落盘（安卓切后台 → 异步 IPC 被系统回收打断，是这台设备上最常见的一种）。
-       * 镜像就是上一次真正的进度，先用它，再立刻补写回文件；
-       * 这比「以文件为准」把最后一段进度丢掉要正确得多。
        * 顺序很重要：先比时间，再看等级不低于文件里的那份，最后才 load() 覆盖内存状态。 */
       const local = State.localSaveMeta ? State.localSaveMeta() : null;
       const fileAt = (State.fileInfo() || {}).fileAt || 0;
       const fileLevel = ((State.state() || {}).level) || 1;
       /* 只有「镜像里记的文件 mtime == 文件当前 mtime」才认：说明文件在那次写失败之后
-       * 没被任何人改过（包括同步服务/另一台机器/手动导入），镜像就是丢了的那一次进度。
        * base 对不上 → 文件是权威，镜像留给「系统 → 导入存档」处理，绝不自动覆盖。
        * 这样既救回安卓上丢掉的写盘，也不会在双机同步时用本机档盖掉对端。 */
       const mirrorNewer = !!local && local.base != null && Number(local.base) === Number(fileAt)
@@ -771,8 +685,6 @@
         if (UI && UI.toast) UI.toast('已用本机最后一次自动存档恢复进度（上一次写文件没完成）');
         Promise.resolve(State.fileWriteNow && State.fileWriteNow()).catch(() => {});
       } else if (!!local && local.savedAt > fileAt + 1000 && local.level >= fileLevel) {
-        /* 镜像更新、来源不明（base 对不上）：一律留着，交给冲突保护，
-         * 别当成残留垃圾删掉。 */
         if (UI && UI.toast) UI.toast('浏览器里还有一份更新的存档，已先保留；要换用它请到「系统 → 导入存档」');
       } else {
         try {
@@ -787,25 +699,12 @@
       showSaveWarning();
       retryFileSave();
     }
-    // 首页数字按当前调试设置（数字宽度）重画一次，保证刷新后立即生效
     if (window.UI && UI.renderNumbers) UI.renderNumbers();
     if (/[?&]test=1(?:&|$)/.test(location.search)) runSelfTest();
     if (/[?&]test=2(?:&|$)/.test(location.search)) runBattleLoop();
     bootDone = true;
   }
 
-  /* ============================================================
-   * 存档告警与自动重连
-   *
-   * 触发场景：启动时如果服务器晚了一步、或者页面是被 file:// 打开、
-   * 或者端口上蹲着一个没有 /__save 的旧服务器，fileLoad() 就会失败；
-   * 此时绝不能静默退回 localStorage 里残留的旧档——必须挂红横幅明示并自动重连。
-   *
-   * 现在：① 磁盘存档永远是第一优先，读不到才回落，并且立刻在画面顶部
-   *       挂一条横幅把原因写清楚（app 窗口里 confirm() 可能被吞掉，
-   *       所以这里用页面内元素，不依赖弹窗）；
-   *       ② 后台自动重试探测 + 读档，连上就自动重载，回到磁盘存档。
-   * ============================================================ */
   let pageHiddenAt = 0;
   let saveBanner = null;
 
@@ -823,7 +722,6 @@
     let how, color;
     if (info.transportReady && !inFile) {
       // 通道是好的，只是还没有存档文件（首次运行最常见）——不用红色报错吓人，
-      // 等第一次保存就会写出文件，这条横幅随后会自己消失。
       color = '#1d5c3a';
       how = '还没有存档文件，第一次保存后就会自动写到这里：' + (info.path || 'save/progress.json') +
         '。现在可以直接开始玩。';
@@ -914,8 +812,6 @@
     return false;
   }
   /* 启动还没走完（还在拉素材/还没读档）时，桥接就绪只把存档**读进内存**，
-   * 绝不 reload：安卓上 tauri-bridge 会在 DOMContentLoaded 与 window load 各问一次
-   * `save_path`，于是 ssdz-save-transport-ready 可能连发两次；旧代码每次都走
    * retryFileSave → 读档成功 → location.reload()，新页面又在素材加载阶段收到同一个事件……
    * 实测（模拟器）会变成每 0.8 秒刷一次、启动进度永远停在 25%。 */
   let bootDone = false;
@@ -945,10 +841,6 @@
     });
   }
 
-  /* ============================================================
-   * 【MN4】战斗观察模式（?test=2）
-   * ============================================================ */
-  // ---------- 战斗观察模式（?test=2） ----------
   async function runBattleLoop() {
     await new Promise((r) => setTimeout(r, 600));
     State.newGame('观察鼠');
@@ -972,10 +864,6 @@
     again();
   }
 
-  /* ============================================================
-   * 【MN5】自检模式（?test=1）
-   * ============================================================ */
-  // ---------- 自检模式（?test=1） ----------
   async function runSelfTest() {
     const log = [];
     const ok = (name, cond, extra) => {
@@ -991,7 +879,6 @@
       showHome();
       await new Promise((r) => setTimeout(r, 700));
       /* 新号默认经典模式：首页是 `SfUiMain.mount()` 异步挂出来的原版 SVG 页，
-       * 没有现代模式的 `.home-menu button` / `__homeRegions`。这里两种模式都认，
        * 否则 ?test=1 在默认（经典）档下会假红（2026-10 审计实测）。 */
       for (let i = 0; i < 30 && !document.querySelector('#ui .ssfight-home svg'); i++) {
         await new Promise((r) => setTimeout(r, 100));
@@ -1016,7 +903,6 @@
         { name: 'A', level: 1, power: 8, agility: 8, speed: 8, hp: 50, weapons: [{ id: 1, level: 1 }], skills: [] }, foe);
       ok('simulate', simRes && (simRes.winner === 0 || simRes.winner === 1) && simRes.rounds.length > 0,
         'rounds=' + (simRes && simRes.rounds.length));
-      // 转生果：回到 1 级并重置为初始武器与技能（与 NEW_PLAYER 一致）
       const rebornState = State.state();
       const savedWeapons = rebornState.weapons.slice(), savedSkills = rebornState.skills.slice();
       rebornState.level = 20; rebornState.weapons = ['1:5', '6:8', '15:11']; rebornState.skills = ['1:3'];
@@ -1032,7 +918,6 @@
       rebornState.level = 20; rebornState.weapons = savedWeapons; rebornState.skills = savedSkills;
       const battleDone = new Promise((resolve) => {
         /* `skipChest`：经典模式的原版战斗在战果后会开「四选一宝箱」并**等玩家点**，
-         * 自检没人点 → `onEnd` 永远不回调（2026-10 审计实测卡在这里）。
          * 冒烟只看战斗能不能跑完，宝箱流程由 ui-fight 自己的用例覆盖。 */
         Main.startBattle(State.genAI(1), { region: 0, skipChest: true, onEnd: (w, r) => resolve({ w: w, rounds: r.rounds.length }) });
       });
@@ -1053,7 +938,6 @@
         : 'timeout sheets=' + Object.keys(Engine.SHEETS).length + ' errs=' + (window.__errs || []).slice(0, 6).join(';'));
       await new Promise((r) => setTimeout(r, 900));
       ok('back-home', mode === 'home');
-      // 逐个菜单面板做渲染冒烟测试（先临时升到 30 级以覆盖天梯赛）
       State.state().level = Math.max(30, State.state().level);
       State.state().integral = 1500;
       const keys = ['challenge', 'stages', 'arena', 'rank', 'weapons', 'skills', 'bag', 'gears', 'shop', 'lottery', 'master', 'help'];
@@ -1093,10 +977,6 @@
     document.getElementById('ui').appendChild(div);
   }
 
-  /* ============================================================
-   * 【MN6】标题画面
-   * ============================================================ */
-  // ---------- 标题画面 ----------
   function showTitle() {
     mode = 'title';
     cancelAnimationFrame(rafId);
@@ -1130,17 +1010,10 @@
     $('#name-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('#start-btn').click(); });
   }
 
-  /* ============================================================
-   * 【MN7】主界面场景（松鼠动作 + HUD）
-   * ============================================================ */
-  // ---------- 主界面：有松鼠动作的场景 + 原版 HUD ----------
   let homeRegions = [];
   /** 只启动主界面 **canvas 场景**（背景 + 松鼠 + HUD 循环）：不碰 `#ui`、不碰引导。
    *  正常回首页走 `showHome()`（先重建 #ui 里的页面，再调这里）；
-   *  `startBattle` 的 `keepScreen` 收尾（随机挑战 / 关卡连战 / 竞技场）也要调它 ——
    *  那一支的页面 DOM 由调用方自己恢复，但 **canvas 必须从战斗终帧切回主界面场景**：
-   *  现代模式的挑战页背景是透明的（css/classic.css 的 `.classic-page` 只有顶部条带），
-   *  不切的话打完那一眼奖励弹窗下面盖的还是战斗画面（用户 2026-10 报的
    *  "随机挑战战斗结束、弹奖励的时候背景还是战斗画面，应当是主界面"）。 */
   function startHomeScene() {
     mode = 'home';
@@ -1157,7 +1030,6 @@
       if (classicHome || ssfightHomeActive()) {
         homeRegions = [];
         window.__homeRegions = homeRegions;
-        // The SVG renderer owns this scene. Mode changes and battle returns restart this function.
         rafId = 0;
         return;
       }
@@ -1182,7 +1054,6 @@
     UI.renderHome();
     fitCanvas();
     startHomeScene();
-    /* 现代界面：首页已经画出来了，再空闲补拉 canvas 战斗图集；经典界面直接跳过。 */
     scheduleBattleAssets();
     if (window.SfGuide) { try { SfGuide.onHome(); } catch (e) { if (window.__errs) window.__errs.push('SfGuide home: ' + (e && e.message)); } }
   }
@@ -1207,7 +1078,6 @@
 
   /** 主界面场景：原版 mainWalk1 循环跑动（88 帧，含翻滚与拖影）。
    *  帧推进交给 Engine 播放器，绘制在 UI.drawHomeHud 的主角盒子里完成。
-   *  **播放速度**：原版导出按 22fps 播（一循环 ≈4 秒），实测现代首页里松鼠跑得太赶
    *  （2026-10 用户口径「往返走的动画播慢一点」），降到 14fps（一循环 ≈6.3 秒）。
    *  位移是烘进每帧的偏移量，所以帧慢了、走动也一起慢，不需要另改位置。
    *  需要临时调回快/更慢：`Main.setHomeFps(帧率)`（调试入口）。 */
@@ -1225,12 +1095,8 @@
   }
   let homeBgPlayer = null, homeWalk = null;
 
-  /* ============================================================
-   * 【MN8】战斗调度
-   * ============================================================ */
   /** 这一场由谁来播：经典模式 = **原版 fight 帧**（`js/ssfight/ui-fight.js`），
-   *  现代模式 = canvas 播放器（`js/battle.js`）。
-   *  ⚠ `SfFight` 要用的素材包（`tags-fight.json`，8.4 MB）是**按需加载**的；它自己的
+   *  ⚠ `SfFight` 要用的素材（core + 本场动作包）是**按需加载**的；它自己的
    *    初始加载失败会**向上抛**，这里退回 canvas —— 宁可画面是复刻的，也不能让玩家打不了。 */
   function battleRenderer() {
     try {
@@ -1253,7 +1119,6 @@
       return Battle.run(opts);
     }
   }
-  // ---------- 战斗调度 ----------
   /** 清空 `#ui` 给战斗画面让位，但**保留**被挑战页按住（`data-sf-battle-hold`）的那棵树。
    *  挑战页整页 detach 再 append 会触发 WebKit 重新布局/光栅化，返回随机挑战页时就是那一下
    *  卡顿；按住后它一直在文档里，战斗页只是盖在它上面。没有 hold 时等价于原来的 innerHTML=''。 */
@@ -1274,7 +1139,6 @@
      * 不再套玩家自己的装备/套装/幻兽乘区（那些属于师父，不能偷偷帮徒弟加面板）。 */
     const useFighter = !!(opts.fighter && typeof opts.fighter === 'object');
     const stats = useFighter ? null : State.totalStats({ useProps: opts.useProps !== false });
-    // hpRatio 是关卡连战的入场血量比例：hp 按比例继承，maxHp 仍是不变的上限。
     const startRatio = opts.hpRatio == null ? 1 : Math.min(1, Math.max(0.01, Number(opts.hpRatio) || 0));
     const me = useFighter ? Object.assign({}, opts.fighter) : (() => {
       const maxHp = Math.max(1, Math.round(stats.hp));
@@ -1294,14 +1158,8 @@
       me.maxHp = Math.max(1, Math.round(Number(me.maxHp || me.hp) || 1));
       me.hp = Math.max(1, Math.round(Math.min(me.maxHp, Number(me.hp) || me.maxHp) * startRatio));
     } else {
-      // 挑战塔等玩法在构建完玩家面板后注入本场的 buff 修正（属性乘区/护盾/吸血等）。
       if (typeof opts.adjustMe === 'function') opts.adjustMe(me);
-      /* 套装收益：属性部分已经在 totalStats 里加过，这里只落战斗修正（fighter.setFx）。
-       * 放在 adjustMe **之后** —— 塔的 buff 走 mods、套装走 setFx，两包互不覆盖；
-       * 也不吃塔的「增幅水晶」全局倍率（那是本局增益的倍率，装备收益不该被它放大）。 */
       State.applySetBonuses(me);
-      /* 幻兽出战队伍：先把宠物加成落到玩家面板，再给随机 AI 对手生成 1~3 只幻兽。
-       * 都是“开战前一次性”的数值面板，Sim 不需要知道幻兽的存储细节。 */
       try {
         me.pets = State.petTeam ? State.petTeam() : [];
         if (window.State && State.applyPetBonuses) State.applyPetBonuses(me, me.pets);
@@ -1328,10 +1186,7 @@
       classicFight: campaignClassic,
       canvas, me, foe, region: opts.region, kind: opts.kind, collectDrops: opts.collectDrops !== false,
       /* 右下角操作键：跳过 + 倍速，两个都要**等级解锁**（2026-10 用户口径）——
-       * 2 倍速 10 级；跳过按超级松鼠页：VIP 10 级 / 非 VIP 20 级。系统页还能单独
        * 关掉跳过键的**显示**（`showSkip`），关闭后这里连按钮都不给。
-       * 调用方传 false 仍能单独关掉（例如无尽塔 10 层以下）。
-       * 挑战塔 / 无尽塔本身要 30 级才开，所以塔里天然都有（塔的跳过另有「10 层起」的层数门槛）。
        * 普通战斗的倍速上限是 2×（不给 3×），塔自己传 speedMax: 3 才拿得到 3×。 */
       allowSkip: opts.allowSkip !== false && (State.skipButtonEnabled ? State.skipButtonEnabled() : State.unlockedSkip()),
       speedToggle: opts.speedToggle !== false && State.unlockedSpeed(),
@@ -1339,9 +1194,7 @@
       /* 训练木桩等特殊战斗的回合上限（默认 0 = 播放器自己的 60）。只影响 HUD 的剩余
        * 回合数字；真正的收尾由 Sim 的 practiceRounds 决定（见 js/sim.js）。 */
       maxRounds: Number(opts.maxRounds) > 0 ? Math.floor(Number(opts.maxRounds)) : 0,
-      // 挑战塔 boss 机制：贴一条进战斗画面（opts.trial = {text}）
       trial: opts.trial,
-      // 挑战塔：三侠大招留下的本层削弱（画在玩家血条下方）
       debuffs: opts.debuffs,
       dropRandom: (window.QA_FIXTURE && QA_FIXTURE.dropRandom) || opts.dropRandom,
       /* 挑战页在战果页出现前算经验/金松果（`State.fightReward`），让第一张战果页就能
@@ -1351,8 +1204,6 @@
        * 战果页，避免同一份"经验 + 金松果"在开宝箱前后各闪一次。 */
       skipResultPanel: opts.skipResultPanel === true,
       hideVictoryCg: opts.hideVictoryCg === true,
-      /* 竞技场 / 天梯 / 关卡连战**不发宝箱**（用户 2026-11 口径）：这些是连续挑战，
-       * 奖励走各自的结算；随机挑战仍保留开宝箱。 */
       skipChest: opts.skipChest === true,
       onEnd: (winner, result, loot, reward) => {
         if (settled) return;
@@ -1366,25 +1217,15 @@
         playBgm('main');
         /* ⚠ `keepScreen`：经典模式的**连战 / 竞技场**要"打完直接回原来那一页"。
          * 默认这条 `showHome()` 会先把 `#ui` 换成经典首页（并在 `renderHome()` 里
-         * `SfChallenge.destroy()`），调用方的 `onEnd` 再想回挑战页就晚了 ——
-         * 用户 2026-10 报的"关卡连战间隙会跳回现代界面 / 竞技场开始竞技也跳回现代界面"
          * 就是这个顺序造成的。传 `keepScreen: true` 时这里不换页，由调用方自己恢复。
          * ⚠⚠ 但**模式必须自己拨回 `home`**：`mode` 只在 `showHome()` 里被重置，
-         *   而这一支恰恰不调 `showHome()` —— 于是打完一场之后 `mode` 永远停在 `'battle'`，
-         *   下一场 `startBattle` 第一行的 `if (mode === 'battle') return;` 直接**静默返回**：
-         *   关卡连战第二场"点了没反应"（用户 2026-10 报的"无法正常进行连战"）、
-         *   竞技场决赛同样打不起来。
          * 另外 canvas 也要从战斗终帧切回主界面场景（`startHomeScene()` 一并做掉，语义就是
-         *   "战斗播完了、界面由调用方恢复"）：现代模式的挑战页背景是透明的，只拨 `mode`
-         *   不重画 canvas 的话，打完弹奖励时背景停在战斗画面上（用户 2026-10 报的
          *   "随机挑战战斗结束、弹奖励的时候背景还是战斗画面，应当是主界面"）。 */
         if (!opts.keepScreen) showHome();
         else startHomeScene();
         /* 现代 canvas 播放器不认 `rewardFor`（经典 SfFight 才在战果页出现前自己算）。
          * 这里在**确认还是同一个存档**之后再补算一次，交给调用方和收益弹窗：
-         * 既让现代随机挑战的结算能写出经验/金松果，又不会在战斗中途切档时把奖励
          * 发给新档（`State.fightReward` 读写的是当前全局存档）。`settle` 自己缓存，
-         * 调用方 `onEnd` 再调一次也只是取回同一份。
          * 经典渲染器已经把 reward 传进来了，不能重复算 —— 有的 `rewardFor` 不缓存。 */
         let finalReward = reward;
         if (!classicFight && finalReward == null && typeof opts.rewardFor === 'function') {
@@ -1395,12 +1236,7 @@
         opts.onEnd && opts.onEnd(winner, result, loot, finalReward);
         /* 「战斗拾取」那层复刻自研的收益弹窗**只留给现代界面**。
          * 经典模式（原版 fight 帧）里收获是**画在战果页**上的 —— 原版 `showFightResult()`
-         * （MainMovie.as:18703-18840）把这一场的东西填进 `c1/c2/c3` 三格 + `getExp`，
-         * 战斗中飘到的道具另有 `获取道具`(3960) 那张小牌子，**没有**任何"结束后再弹一层"
-         * 的实现（用户 2026-11 口径："收益弹窗的 ui 风格很明显和 ssfight 版本不符"）。
-         * 所以这一档按"原版没有就删掉"处理：不再往原版战果页上盖一层 DOM 弹窗。
          * ⚠ 两座塔（挑战塔 / 无尽塔）也不走这里：塔的产出全部由
-         * `Tower.reportBattle` 结算，塔页自己负责「战斗胜利 / 层数通关 / 选增益 / 里程碑」，
          * 战斗结束**不能再叠一层空的「战斗拾取」**（`collectDrops:false` 时它只有
          * 「胜利！」和一个确定键；用户 2026-10 报的就是无尽塔胜利后这个空弹窗）。 */
         const towerFight = opts.kind === 'tower' || opts.kind === 'endless';
@@ -1447,19 +1283,12 @@
     persistSettings({ volume: volume, muted: muted });
     playBgm(mode === 'battle' ? 'fight' : 'main');
   }
-  /** 调试/验证用：调整首页循环跑动的播放速度。 */
   function setHomeFps(fps) {
     const value = Math.max(1, Math.min(60, Number(fps) || 22));
     for (const inst of mainPlayer.list) inst.fps = value;
     return value;
   }
 
-  /* ============================================================
-   * 【MN9】「自愿支持作者」与「打开外部链接」
-   *
-   * 这个复刻版完全免费：没有内购、没有广告，支持纯属自愿，不换取任何游戏内好处。
-   * 链接统一放这里，改渠道只动这一处（要点见 docs/更新记录.md）。
-   * ============================================================ */
   const SUPPORT = Object.freeze({
     url: 'https://ifdian.net/a/Charlespkuer',
     label: '爱发电',
@@ -1484,19 +1313,10 @@
   }
   /**
    * 用系统默认浏览器打开一个 http(s) 链接。返回 Promise<boolean>（true = 已交给浏览器）。
-   *
    * 四种运行环境各走一条路（顺序即优先级）：
    *   1. **安卓**：页面里的 `window.SSDZAndroid.openExternal`（Kotlin 从 Activity 发
-   *      ACTION_VIEW）。Rust 的 `open_external` 在安卓上打不开 —— spawn 出来的 `am` 会被
-   *      ActivityManager 按「com.android.shell 不属于本应用 uid」拒掉，而且 spawn 只代表
    *      进程起来、不代表 Intent 成功，页面会误判为「已打开」（2026-10 玩家反馈）。
    *   2. **Tauri 安装版 / iOS**（页面来自 tauri.localhost / tauri://）：走 Rust 命令
-   *      `open_external`（src-tauri 里注册）；装了 opener 插件时则直接用它。
-   *   3. **轻壳模式 / 便携版**（页面来自 http://127.0.0.1:端口）：轻壳的内置服务器提供
-   *      `/__open?url=…`（Tauri 的 ACL 不允许这种「远端来源」调用 IPC，所以只能走 HTTP）；
-   *      便携版（scripts/serve.js）没有这个路由 → 404 → 退回 window.open（那边就是真浏览器）。
-   *   4. 纯浏览器 / file://：window.open。
-   * 全部失败时返回 false，调用方据此显示「复制链接」兜底。
    */
   function openExternal(url) {
     const u = String(url || '');
@@ -1525,7 +1345,6 @@
         return Promise.resolve(T.core.invoke('open_external', { url: u })).then(() => true, () => false);
       }
     }
-    // ③ 轻壳模式（Tauri + 自己的本地服务器）：IPC 会被 ACL 拒，走内置服务器的 /__open
     if (T && ownServer && typeof fetch === 'function') {
       return fetch('/__open?url=' + encodeURIComponent(u), { cache: 'no-store' })
         .then((r) => (r && r.ok ? r.json() : null))
@@ -1541,9 +1360,6 @@
    *  界面请优先用 `UI.classic.openSupportModal()` —— 它带「复制链接」兜底。 */
   function openSupport() { return openExternal(SUPPORT.url); }
 
-  /* ============================================================
-   * 【MN10】导出 window.Main
-   * ============================================================ */
   window.Main = { showHome, showTitle, startBattle, replayBattle, clearUiForBattle, resizeLayout:fitCanvas, setMuted, isMuted: () => muted,
     /* 经典主页挂载失败时由 classic-ui.js 的恢复流程调用：空壳摘掉后重起 canvas 主页。
      * 只在真的还在首页时才动（战斗中/标题页返回 false），不硬塞 startHomeScene。 */
@@ -1551,9 +1367,7 @@
     volume: volumeValue, setVolume, homePlayer: () => mainPlayer, setHomeFps, W, H,
     settings: settingsSnapshot, setResolution, setFullscreen, setHideStatusBar, setBackgroundRun, setCompatRender, applySystemBars,
     isFullscreen: () => !!document.fullscreenElement,
-    /* 现代 canvas 战斗图集：切到现代界面 / 真开打前可以主动预热（幂等，不阻塞首屏）。 */
     preloadBattleAssets, pinBattleAssets, battleAssetsReady: () => !!battleAssetsPromise,
-    /* 自愿支持作者：链接与「打开系统浏览器」的统一出口（界面只调这两个）。 */
     SUPPORT, openExternal, openSupport };
 
   window.addEventListener('DOMContentLoaded', boot);

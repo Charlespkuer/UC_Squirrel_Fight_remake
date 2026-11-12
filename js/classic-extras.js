@@ -1,13 +1,4 @@
 /* Additional classic UC screens. All progression stays in the current State save. */
-
-/* ------------------------------------------------------------
- * 目录：经典 UC 扩展界面（竞技场/天梯/抽奖/师徒/排行/VIP）
- * Ctrl+F 搜节号（如「【EX1】」）直达对应代码块。
- *
- *  【EX1】竞技场  【EX2】天梯赛  【EX3】抽奖
- *  【EX4】师徒系统  【EX5】排行榜  【EX6】超级松鼠
- *  【EX7】导出 window.ClassicExtras
- * ------------------------------------------------------------ */
 (function () {
   'use strict';
   const C = () => UI.classic;
@@ -28,7 +19,7 @@
   }
   function alert(text) {
     const msg = String(text == null ? '' : text);
-    /* 经典模式：原版 4692「提示」对话框（标题/按钮都是原版矢量），不再手搓 DOM 弹窗。 */
+    /* 经典模式：原版 4692「提示」对话框（标题/按钮都是原版矢量），不手搓 DOM 弹窗。 */
     if (window.SfFightResult && window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic') {
       let fellBack = false;
       const fallback = () => {
@@ -45,30 +36,14 @@
     C().modal('提示', '<p>' + esc(msg) + '</p>', [{ label: '确定' }], { small: true });
   }
 
-  /* ============================================================
-   * 【EX0】村庄「征战」→ 挑战塔 / 无尽塔 二选一
-   * ------------------------------------------------------------
-   * ⚠ 这一页（`campaign()`，整页现代外壳）**已经撤掉**：用户 2026-10 口径
-   *   "点开村庄的征战界面时，单独做一个挑战塔与无尽塔的界面，不要套用现代 ui 的背景等，
-   *    就做一个小的弹出界面即可，两个模式的 ui 就用现代版的 ui 即可。"
-   * 现在是 `js/classic-ui.js` 的 `villageWar()` 在**经典村庄页上盖一个小弹窗**
-   * （复刻经典 UI 的 `.classic-modal`），两颗键直接调 `TowerUI.openTower()` /
-   * `openEndless()` —— 就是现代版关卡页那两颗入口进去的界面。
-   * 原版的「征战」本身是**四人组队 + 服务端开房**的玩法（`joinCopy.do` / `rollDatas` 掷骰分赃，
-   * 见 docs/更新记录.md 第一百五十六批的取证结论）：界面元件「征战」在导出里没有 spriteId、
-   * "四人同时在线"在离线单机里也没有对应物，所以那一套不做（也不该占着这个入口）。
-   * ============================================================ */
-  // \u56db\u540d\u5956\u52b1\uff08\u51a0/\u4e9a/\u5b63/\u7b2c\u56db\uff09\u3002\u788e\u7247\u573a\u53ea\u7ed9\u788e\u7247\uff0c\u4e0d\u53d1\u7ecf\u9a8c\u3002
-  /* ============================================================
-   * 【EX1】竞技场（门票/战斗/结算）
-   * ============================================================ */
+  /* 村庄「征战」→ 挑战塔/无尽塔二选一：原版是四人组队 + 服务端开房（领奖靠 rollDatas 掷骰分赃），
+   * 离线版不做（界面元件「征战」在导出里也没有 spriteId）。现在由 js/classic-ui.js 的 villageWar()
+   * 在经典村庄页上盖小弹窗，两颗键直接调 TowerUI.openTower() / openEndless()。 */
   const ARENA_EXP = [150, 100, 50, 30];
-  /* 幻兽竞技场（原版 arenaType==2）：名次奖励是孵化点 40/35/30/25，
-   * 入场券是召唤证（82），15 级开放。 */
+  /* 幻兽竞技场（原版 arenaType==2）：名次奖励是孵化点 40/35/30/25，入场券是召唤证(82)，15 级开放。 */
   const ARENA_HATCH = [40, 35, 30, 25];
-  /* 碎片竞技场的名次奖励（冠/亚/季/第四，按 4 人两轮结算）——**专属产出，不受
-   * GData.BLUE_SHARD_DROP_MUL 影响**（2026-10 用户口径：除碎片竞技场外所有蓝色碎片掉落才降期望）。
-   * 它没动，由 tools/test-extras.cjs 的「四名依次 8/6/4/3」用例守着。 */
+  /* 碎片竞技场名次奖励（冠/亚/季/第四，4 人两轮结算）是专属产出，不受 GData.BLUE_SHARD_DROP_MUL 影响；
+   * tools/test-extras.cjs 的「四名依次 8/6/4/3」用例守着。 */
   const ARENA_FRAGMENT_SHARDS = [8, 6, 4, 3];
   function addProp(id, count) { const s = State.state(); s.props[id] = (s.props[id] || 0) + count; }
   function originalResult(spec) {
@@ -104,49 +79,43 @@
     }
     return arenaRun;
   }
-  /** 把"打了一半"的 `busy` 抹掉。`ui-challenge` 回到赛事页时调它 —— 否则刷新 / 关掉页面之后
-   *  存档里一直留着 `busy: true`，挑战页那一层永远被判成"战斗中"，再也画不出来（满屏墨绿）。 */
+  // 把「打了一半」的 busy 抹掉（ui-challenge 回到赛事页时调）：否则刷新 / 关掉页面之后
+  // 存档里一直留着 busy:true，挑战页那一层永远被判成「战斗中」，再也画不出来（满屏墨绿）。
   function clearArenaBusy() {
     if (arenaRun && arenaRun.busy) arenaRun.busy = false;
     return !!arenaRun;
   }
-  /** 体力药提示：优先用游戏内全局 toast（和别处一致），拿不到就退回弹窗，保证一定看得见。 */
+  // 体力药提示：优先用游戏内全局 toast（和别处一致），拿不到就退回弹窗，保证一定看得见。
   function showHint(msg) {
     try {
       if (typeof toast === 'function') { toast(msg); return; }
       if (typeof window !== 'undefined' && window.C && C().toast) C().toast(msg);
     } catch (_) {}
   }
-  /** 原版 `gainRankCup()`：天梯榜「领取奖励」发 50 金杯。
-   *  2026-11 口径：**本赛区前 30 名、且至少超过一个人机**才能领，一周一次；
-   *  判定与发奖都在 `State`（经典榜单页与复刻 DOM 页共用同一份数据）。 */
+  /* 原版 gainRankCup()：天梯榜「领取奖励」发 50 金杯。本赛区前 30 名、且至少超过一个人机才能领，
+   * 一周一次；判定与发奖都在 State（经典榜单页与复刻 DOM 页共用同一份数据）。 */
   function claimRankCup() {
     return State.claimRankCup();
   }
 
-  /** 竞技场战果落点：挑战页 7638 第 4 帧（有「开始竞技」的那一页），不是第 6 帧首屏。
-   *  用户 2026-10 口径：竞技胜利后要回到有开始竞技的页面，而不是竞技场主界面。 */
+  // 竞技场战果落点：挑战页 7638 第 4 帧（有「开始竞技」的那一页），不是第 6 帧首屏。
   function arenaRules() {
-    /* 只有经典界面才把这一页交回原版挑战页；现代界面的竞技场是下面这套 DOM 页，
-     * 以前无条件走 SfChallenge 会把玩家带到「挑战」页（用户 2026-10 报的“竞技打不开”）。 */
+    /* 只有经典界面才把这一页交回原版挑战页；现代界面的竞技场是下面这套 DOM 页。 */
     if (UI.currentUiMode && UI.currentUiMode() === 'classic' && window.SfChallenge && SfChallenge.goArenaPage) {
       SfChallenge.goArenaPage('rules'); return;
     }
     arena();
   }
-  /** 「报名参赛」——经典模式竞技场那一页的「开始比赛」走的就是它（见 ui-challenge 的
-   *  `showArenaRules`）。原版那一下是 `joinArena.do` 开房 → 服务端回 `showRacing2` 落赛事页；
-   * 复刻没有服务端，所以在这里**本地抽三个对手 + 定赛事局面**，再交给 `fightArena` 打第一场。
-   * ⚠ 一定要把这一颗暴露出去：规则页的键以前接的是 `arena()`（= 回竞技场首屏），
-   *   于是"点开始竞技就退回上一页"（用户 2026-10 报的）。 */
+  /* 「报名参赛」：经典竞技场那一页的「开始比赛」走它（见 ui-challenge 的 showArenaRules）。
+   * 原版是 joinArena.do 开房 → 服务端回 showRacing2；复刻没有服务端，所以本地抽三个对手 + 定赛事局面，
+   * 再交给 fightArena 打第一场。⚠ 必须暴露出去：规则页那颗键不能接 arena()（会退回上一页）。 */
   function startArenaCompete(kind) {
     const existing = activeArenaRun();
     if (existing) { resumeArena(existing); return; }
     confirmArena(kind || 0);
   }
-  /** 竞技场选择弹窗的关闭键：用背包道具详情里那颗原版「取消」键（4419）。
-   *  4419 是原版按钮自己的自然比例，米色常态 / 第 2 帧绿色悬停，文字也足够大，
-   *  不需要再把 3911 拉成窄高比例。挂载失败才退回金色文字键（仅兜底）。 */
+  /* 竞技场选择弹窗的关闭键：用背包道具详情里那颗原版「取消」键（4419），它自带自然比例
+   *（米色常态 / 第 2 帧绿），不必把 3911 拉成窄高；挂载失败才退回金色文字键。 */
   function mountArenaCancel(m, onCancel) {
     const footer = find(m.element, '.modal-buttons');
     if (!footer) return;
@@ -216,10 +185,8 @@
       mount();
     }
   }
-  /** 「开始竞技」后的小选择弹窗：左英雄帖（经验场）/ 右勇气徽章（碎片场）。
-   *  两张图都是游戏内道具图集，弹窗壳走经典 `.classic-modal`，不另造现代页面。
-   *  原版素材里没有独立的「经验竞技场 / 碎片竞技场」文字元件（只有祭坛说明里连写），
-   *  所以按用户口径**只放图标**，点图标直接进场；`aria-label` 留给读屏 / 探针。 */
+  /* 「开始竞技」后的小选择弹窗：左英雄帖（经验场）/ 右勇气徽章（碎片场）/ 幻兽召唤证。
+   * 原版没有独立的「经验竞技场/碎片竞技场」文字元件，所以只放图标，aria-label 留给读屏/探针。 */
   function chooseArena() {
     const C = () => UI.classic;
     const s = State.state();
@@ -248,16 +215,14 @@
     });
   }
   function arena() {
-    /* 【经典模式】这一页由**原版竞技场帧**渲染（挑战页 7638 的第 6 帧 + `compete` 两颗键），
-     * 所以这里只把界面交回给挑战页 —— 用户 2026-10 口径："竞技场开始竞技会跳回现代界面，
-     * 经典模式下完全是经典模式。" 报名/开打的流程仍走本文件（原版那套要服务端）。 */
+    /* 经典模式：这一页由原版竞技场帧渲染（挑战页 7638 第 6 帧 + compete 两颗键），这里只把界面交回
+     * SfChallenge；报名/开打流程仍走本文件（原版那套要服务端）。 */
     if (UI.currentUiMode && UI.currentUiMode() === 'classic' && window.SfChallenge && SfChallenge.goArenaPage) {
       SfChallenge.goArenaPage('home'); return;
     }
     State.tickEnergy();
     const s = State.state(), run = activeArenaRun();
-    /* 现代竞技页只保留一排三种：经验场 / 碎片场 / 天梯。
-     * 幻兽竞技场和螳螂大侠等场外立绘不再出现；三张卡各自保留原版金杯/宝石杯/天梯 UI 图片。 */
+    /* 现代竞技页只保留一排三种：经验场 / 碎片场 / 天梯；三张卡各自保留原版金杯/宝石杯/天梯 UI 图。 */
     const cards = [
       { art: 28, name: '\u7ecf\u9a8c\u7ade\u6280\u573a', text: '10\u7ea7\u5f00\u542f\uff0c\u51a0\u519b150\uff0f\u4e9a\u519b100\uff0f\u5b63\u519b50\uff0f\u6bbf\u519b30\u7ecf\u9a8c', action: 'arena-exp' },
       { art: 29, name: '\u788e\u7247\u7ade\u6280\u573a', text: '15\u7ea7\u5f00\u542f\uff0c\u56db\u540d\u4f9d\u6b21\u83b7\u5f978\uff0f6\uff0f4\uff0f3\u84dd\u8272\u788e\u7247', action: 'arena-fragment' },
@@ -280,8 +245,7 @@
     on(p, 'arena-resume', () => resumeArena(activeArenaRun()));
   }
   function arenaAccess(kind) {
-    /* 原版门槛：经验场 10 级（AS:15132），碎片场 / 幻兽场 15 级（AS:22662）。
-     * 以前经验场写成 11、碎片场写成 20，入口却按 10 级放行 —— 10 级能进页却报不了名。 */
+    /* 原版门槛：经验场 10 级（AS:15132），碎片场 / 幻兽场 15 级（AS:22662）。 */
     const level = kind === 0 ? 10 : 15;
     if (State.state().level >= level) return true;
     const name = kind === 0 ? '\u7ecf\u9a8c\u7ade\u6280\u573a' : kind === 1 ? '\u788e\u7247\u7ade\u6280\u573a' : '\u5e7b\u517d\u7ade\u6280\u573a';
@@ -292,13 +256,9 @@
     const admission = kind === 0 ? 36 : kind === 1 ? 39 : 82;   // 经验/碎片/幻兽
     const other = kind === 0 ? 39 : 36;
     const freeEnergyDebug = () => !!(typeof window !== 'undefined' && window.Debug && window.Debug.enabled('infiniteEnergy'));
-    /* 与现代版 `joinArena` 的扣费顺序对齐：
-     *   ① 体力够 30 → 扣体力；
-     *   ② 体力不够 → 先扣本场对应入场券（经验场英雄帖 / 碎片场勇气徽章）；
-     *   ③ 对应券没有 → 现代版会兜底用另一张券；这里照样先于体力药；
-     *   ④ 两张券都没有 → 自动喝体力药补到 30，再扣体力；
-     *   ⑤ 都不够 → 拒绝。
-     * 「先记后扣 + 精确核对」保留：每次只允许扣一种资源，扣不动就不放行。 */
+    /* 与现代版 joinArena 的扣费顺序对齐：体力够 30 先扣体力；不够先扣本场入场券（经验场英雄帖 36 /
+     * 碎片场勇气徽章 39），对应券没有时兜底用另一张，再没有就自动喝体力药补到 30，都不够则拒绝。
+     * 「先记后扣 + 精确核对」：每次只允许扣一种资源，扣不动就不放行。 */
     const takeItem = (id) => {
       const before = Number(s.props[id]) || 0;
       if (!(before > 0)) return false;
@@ -338,16 +298,14 @@
     if (existing) { fightArena(existing); return; }
     if (!arenaAccess(kind)) return;
     const owner = State.state();
-    // Original showJoinCheckWin uses the confirmation library symbol; payment
-    // and opponent selection still run through the existing actions below.
+    // 原版 showJoinCheckWin 用确认库元件；扣费与对手选择仍走下面现有的 actions。
     const showConfirm = (title, html, actions, options) => {
       if (UI.currentUiMode && UI.currentUiMode() === 'classic' && window.SfChallenge && SfChallenge.openOriginalConfirm) {
         const ticket = kind === 0 ? '英雄帖' : kind === 1 ? '勇气徽章' : '召唤证';
         const text = (kind === 0 ? '经验竞技场' : kind === 1 ? '碎片竞技场' : '幻兽竞技场') + '\n' +
           '报名消耗30体力，两轮比赛只扣一次。体力不足时使用入场券（' + ticket + '），最后自动补充体力药。\n是否报名参赛？';
-        /* 2026-10 用户口径：竞技场报名确认的「确定 / 取消」左右对调，两键悬停变绿，
-         * 并把两键的间距再拉开一点。只对这条报名确认传 swapButtons / extraGap，
-         * 好友/收徒等其他 4421 确认框保持原版键位与间距。 */
+        /* 竞技场报名确认的「确定 / 取消」左右对调、两键悬停变绿、间距拉开；只对这条报名确认传
+         * swapButtons / extraGap，好友/收徒等其他 4421 确认框保持原版键位与间距。 */
         SfChallenge.openOriginalConfirm({ label: title, text, accept: actions[0].run, swapButtons: true, extraGap: 20 })
           .catch(() => showHint('报名确认界面加载失败，请重试。'));
         return;
@@ -358,12 +316,9 @@
       if (State.state() !== owner || activeArenaRun() || !arenaAccess(kind)) return;
       const s = owner;
       State.tickEnergy();
-      /* 报名费用：体力 30，或（体力不足时）1 张准入道具 ——
-       *   经验竞技场 → 英雄帖(36)；碎片竞技场 → 勇气徽章(39)；对应券没有时按现代版兜底用另一张券，最后才喝体力药。
-       * 重构成「先判定 payArenaEntry、再一次性扣」：原写法是
-       *   `if (s.energy < 30) { ...道具... }` + `if (s.energy >= 30) { consumeEnergy }`，
-       * 两段都可能被绕过（体力量不足时道具没扣、consumeEnergy 又失败就直接往下走），
-       * 现在只要判定通过就一定扣掉，判定不通过就一定 return。 */
+      /* 报名费：体力 30，或（不足时）1 张准入道具 —— 经验场英雄帖(36) / 碎片场勇气徽章(39)，
+       * 对应券没有时按现代版兜底用另一张券，最后才喝体力药。重构成「先判定 payArenaEntry、
+       * 再一次性扣」：旧写法两段判定都可能被绕过（道具没扣、consumeEnergy 失败却继续往下走）。 */
       const pay = payArenaEntry(s, kind);
       if (!pay.ok) {
         if (pay.reason === 'no-energy-no-item') {
@@ -379,8 +334,8 @@
       }
       const foes = [State.genAI(s.level, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 }), State.genAI(s.level, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 }), State.genAI(s.level, '', { statScale: State.RANDOM_FOE_SCALE || 1.08 })];
       const other = Sim.simulate(foes[1], foes[2]);
-      /* 报名后先看「随机匹配」页：经典模式复用挑战页 7638 的竞技赛事帧，
-       * 四个席位就是刚抽出来的三名对手；玩家点「开始半决赛」才真正进战斗。 */
+      /* 报名后先看「随机匹配」页：经典模式复用挑战页 7638 的竞技赛事帧，四个席位就是刚抽出来的
+       * 三名对手；玩家点「开始半决赛」才真正进战斗。 */
       arenaRun = { owner: s, kind, phase: 'semi', foe: foes[0], finalist: foes[other.winner === 0 ? 1 : 2], consolation: foes[other.winner === 0 ? 2 : 1], busy: false, settled: false, matching: true };
       saveArenaRun(arenaRun);
       if (!resumeArena(arenaRun)) fightArena(arenaRun);
@@ -390,9 +345,8 @@
     if (window.SfChallenge && SfChallenge.goArenaPage) { SfChallenge.goArenaPage('match'); return true; }
     return false;
   }
-  /** 经典竞技：报名/中断恢复后先停在「赛事页」——半决赛显示随机匹配结果，
-   *  决赛/季军赛显示下一场对手；页面由 `SfChallenge` 展示 3 秒后自动开打。
-   *  没有经典赛事页（现代模式）时退回直接开打。 */
+  /* 经典竞技：报名/中断恢复后先停在「赛事页」——半决赛显示随机匹配结果，决赛/季军赛显示下一场对手；
+   * 页面由 SfChallenge 展示 3 秒后自动开打；没有经典赛事页（现代模式）时退回直接开打。 */
   function resumeArena(run) {
     if (!run) return false;
     const classic = !!(window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic');
@@ -411,13 +365,11 @@
       C().toast('\u6bd4\u8d5b\u6682\u65f6\u4e2d\u65ad\uff0c\u672c\u8f6e\u5df2\u4fdd\u5b58\uff0c\u53ef\u56de\u7ade\u6280\u573a\u7ee7\u7eed\u3002');
       arenaMatchPage();
     };
-    /* 2026-11 对齐联机口径：竞技场只让经验丸生效。
-     * · 力量/敏捷/速度丸（含超级版）不进竞技场战斗面板，也不扣剩余场次；
-     * · 经验丸只在经验竞技场结算经验时生效并扣 1 次，碎片/幻兽场不发经验就不扣。 */
+    /* 竞技场只让经验丸生效：力/敏/速丸（含超级版）不进战斗面板、也不扣剩余场次；
+     * 经验丸只在经验竞技场结算经验时生效并扣 1 次，碎片/幻兽场不发经验就不扣。 */
     Main.startBattle(foe, { cost: 0, kind: 'arena', useProps: false, region: 0, skipChest: true, onError: interrupted,
-      /* 【经典模式】打完**直接回原版竞技场页**（原版是回"temp"帧再回 `tiaozhan`）：
-       * 不传这个开关的话 `startBattle` 会先 `showHome()`，而首页会把挑战页拆掉，
-       * 下面的 `arena()` 就回不去了（用户 2026-10 报的"竞技场开始竞技会跳回现代界面"）。 */
+      /* 经典模式打完直接回原版竞技场页（原版是回 "temp" 帧再回 tiaozhan）：不传这个开关
+       * startBattle 会先 showHome()，而首页会把挑战页拆掉，下面的 arena() 就回不去了。 */
       keepScreen: !!(window.SfChallenge && SfChallenge.goArenaPage),
       onEnd: winner => {
       if (finished || run.settled || run.owner !== State.state()) return;
@@ -426,20 +378,16 @@
       if (phase === 'semi') {
         const won = winner === 0;
         run.phase = won ? 'final' : 'third'; saveArenaRun(run);
-        const gem = won ? State.rollGemDrop(15) : null;   // 45\u7ea7\u8d77\u7ade\u6280\u573a\u83b7\u80dc\u6709\u51e0\u7387\u5f97\u5b9d\u77f3
+        const gem = won ? State.rollGemDrop(15) : null;
         if (gem) State.save();
         const opponent = won ? run.finalist : run.consolation, title = won ? '\u664b\u7ea7\u51b3\u8d5b' : '\u4e89\u593a\u5b63\u519b';
-        arena();   // \u534a\u51b3\u8d5b\u540e\u56de\u5230\u7ade\u6280\u573a\u9875\u505a\u80cc\u666f\uff08\u73a9\u5bb6\u521a\u4ece\u8fd9\u91cc\u62a5\u540d\uff09
+        arena();
         arenaMatchPage();
-        /* \u26a0 `C().modal(...)` \u5728\u8fd9\u91cc\u5fc5\u987b**\u5305\u4e00\u5c42 try**\uff1a\u5b83\u4e0b\u9762\u8c03\u7684
-         *   `arenaMatchPage()` \u4f1a\u91cd\u753b\u7ade\u6280\u573a\u9875\uff0c\u4e00\u65e6\u90a3\u4e00\u6b65\u629b\u5f02\u5e38\uff0c
-         *   \u8fd9\u91cc\u4e5f\u8ddf\u7740\u6302\u6389 \u2014\u2014 \u73a9\u5bb6\u770b\u5230\u7684\u5c31\u662f"\u6218\u6597\u7ed3\u675f\u540e\u5361\u6b7b"\uff08
-         *   2026-10 \u771f\u5b9e\u8e29\u8fc7\uff1a`arenaMatchHtml` \u5bf9\u5355\u4e2a `consolation` \u8c03 `.map`\uff09\u3002
-         *   \u5f39\u7a97\u662f\u552f\u4e00\u80fd\u544a\u8bc9\u73a9\u5bb6"\u4e0b\u4e00\u6b65\u600e\u4e48\u529e"\u7684\u4e1c\u897f\uff0c\u4e0d\u80fd\u8ddf\u7740\u4e00\u8d77\u6ca1\u3002 */
+        /* C().modal(...) 必须包一层 try：下面调的 arenaMatchPage() 会重画竞技场页，一旦那步抛异常
+         * 这里也会挂掉 —— 玩家看到的就是「战斗结束后卡死」；弹窗是唯一能告诉玩家下一步怎么办的东西。 */
         try {
-          /* 用户 2026-11 口径（与联机版同步）：这张对局弹窗只写「谁打谁 + 开始/返回」，
-           * 不再写「第二场不扣体力 / 本轮进度保留」这类进度说明。
-           * 宝石仍照原样单独写一行（它是这一场真的拿到的东西）。 */
+          /* 这张对局弹窗只写「谁打谁 + 开始/返回」，不写「第二场不扣体力 / 本轮进度保留」这类进度说明；
+           * 宝石照原样单独写一行（它是这一场真的拿到的东西）。 */
           if (originalResult({ kind: 'arena', title, win: won, player: State.state(), foe: opponent,
             text: gem ? '获得 ' + gem.name + ' ×1。' : '',
             actions: [{ label: won ? '开始决赛' : '开始季军赛', run: () => fightArena(run) }, { label: '稍后继续', run: arena }] })) return;
@@ -450,19 +398,15 @@
       run.settled = true; arenaRun = null;
       const position = phase === 'final' ? (winner === 0 ? 0 : 1) : (winner === 0 ? 2 : 3);
       /* 经验竞技场吃经验丸加成（经验丸 +40% / 超级经验丸 +60%）；碎片场只给碎片、不给经验，
-       * 也就**不消耗**经验丸（用户 2026-10：经验丸只在经验竞技场扣次数）。 */
+       * 也就不消耗经验丸（经验丸只在经验竞技场扣次数）。 */
       const kind = Number(run.kind) || 0;
       let baseExp = kind === 0 ? ARENA_EXP[position] : 0;
       let shards = kind === 1 ? ARENA_FRAGMENT_SHARDS[position] : 0;
       const hatch = kind === 2 ? ARENA_HATCH[position] : 0;
-      /* 【祭坛当日状态】原版 `getBufRewarTips`（MainMovie.as:4330）：
-       * 领到经验/碎片双倍状态之后，**参加竞技场时有几率双倍**（几率 = 祭坛当前等级那一档，
-       * 见 `buildingUpInfo`）。这里就是"参加时"那一下 —— 结算时按几率掷一次。
-       * ⚠ 翻倍必须发生在**入账之前**：
-       *   · 经验入账在 `State.gainExpWithBoost(baseExp)` 内部（它还会回传升级结果 `ups`），
-       *     所以乘的是 `baseExp`，不能等 `boosted.exp` 出来再乘（那样升级结算就对不上了）；
-       *   · 碎片入账在 `addProp(26, shards)`，乘在读它之前。
-       * 这样界面文案（同一个变量）与账上永远是同一个数。 */
+      /* 【祭坛当日状态】原版 getBufRewarTips（MainMovie.as:4330）：领到经验/碎片双倍状态之后，
+       * 参加竞技场有几率双倍（几率 = 祭坛当前等级那一档，见 buildingUpInfo），结算时按几率掷一次。
+       * ⚠ 翻倍必须在入账之前：经验乘 baseExp（gainExpWithBoost 内部还会回传升级结果 ups），
+       * 碎片乘在读 addProp(26, shards) 之前 —— 这样界面文案与账上永远是同一个数。 */
       let buffNote = '';
       if (baseExp && State.activeBuildingBuff && State.activeBuildingBuff('arenaExp')) {
         const rate = State.buildingDoubleRate('altar', 'arenaExp');
@@ -472,28 +416,22 @@
         const rate = State.buildingDoubleRate('altar', 'arenaProp');
         if (rate > 0 && Math.random() * 100 < rate) { shards *= 2; buffNote = '祭坛发出神秘的光芒，恭喜你获得了双倍碎片奖励！'; }
       }
-      // \u52a0\u6210\u767e\u5206\u6bd4\u8981\u5728 tickPropStates \u6d88\u8017\u672c\u573a\u7528\u91cf\u4e4b\u524d\u8bfb\uff0c\u5426\u5219\u7ed3\u7b97\u6587\u6848\u4f1a\u663e\u793a\u6210 0%
+      // 加成百分比要在 tickPropStates 消耗本场用量之前读，否则结算文案会显示成 0%。
       const boostPct = baseExp ? State.expBoostPct() : 0;
       const boosted = baseExp ? State.gainExpWithBoost(baseExp) : { exp: 0, ups: [] };
       const exp = boosted.exp;
       if (shards) addProp(26, shards);
       if (hatch) { const st = State.state(); st.hatchPoint = Math.max(0, (Number(st.hatchPoint) || 0) + hatch); }
-      const gem = winner === 0 ? State.rollGemDrop(15) : null;   // 45\u7ea7\u8d77\u7ade\u6280\u573a\u83b7\u80dc\u6709\u51e0\u7387\u5f97\u5b9d\u77f3
+      const gem = winner === 0 ? State.rollGemDrop(15) : null;
       const ups = boosted.ups;
-      if (baseExp) State.tickPropStates({ kind: 'exp' });   // 经验丸只按"发过经验的场次"扣
+      if (baseExp) State.tickPropStates({ kind: 'exp' });   // 经验丸只按「发过经验的场次」扣
       const boostNote = boostPct ? '\uff08\u542b\u7ecf\u9a8c\u4e38 +' + boostPct + '%\uff09' : '';
-      /* ⚠ `exp` 已经在上面按祭坛状态翻过倍了，这里**只负责显示**，不能再加一次。
-       * 文案拼在 `outcome` 的最后一段（原版那句"祭坛发出神秘的光芒…"）。 */
+      // exp 已经在上面按祭坛状态翻过倍，这里只负责显示，不能再加一次。
       const buffTail = buffNote ? '\uff01' + buffNote.replace(/！/g, '') : '';
       saveArenaRun(null);
-      /* 【经典模式】整场竞技打完（决赛 / 季军赛）→ **直接回"开始竞技"那一页**（挑战页 7638 的第 6 帧，
-       * `compete` 两颗键那一屏），并只弹一个写清本场奖励的弹窗 —— 这是用户 2026-10 本批 ⑧ 的口径：
-       * "当前竞技场的竞技结束后会停留在一个很诡异的界面，再点击一下才能返回竞技主界面，
-       *  我希望竞技结束后就直接回到开始竞技的界面，显示一个弹窗显示该场竞技的奖励即可。"
-       * 那个"很诡异的界面"就是原来的赛事页（第 5 帧那四个空席位，`paintArenaSeats` 已经没有对手可画）。
-       * 现在：`arena()`（= `SfChallenge.goArenaPage('home')`）先把背板画好，弹窗再压上去；
-       * `outcome()` 的"返回 / 继续"两键也都落到首屏。
-       * ⚠ `arenaMatchPage()` **不要再调**：它是"回赛事页"，正是要避开的那一屏。 */
+      /* 经典模式整场竞技打完（决赛 / 季军赛）直接回「开始竞技」那一页（挑战页 7638 第 6 帧，
+       * compete 两颗键那一屏），并只弹一个写清本场奖励的弹窗。arena() 先把背板画好，弹窗再压上去。
+       * ⚠ 不要再调 arenaMatchPage()：那是「回赛事页」，正是要避开的四个空席位那一屏。 */
       arenaRules();   // 战果弹窗放回**有「开始竞技」的规则页**（7638 第 4 帧），不回竞技场首屏
       const backHome = () => arenaRules();
       outcome(winner === 0, { exp, gold: 0, ups, hatch }, '获得' + ['冠军', '亚军', '季军', '第四名'][position] + '！' + (hatch ? '孵化点 ×' + hatch + '。' : (shards ? '蓝色碎片 ×' + shards + (exp ? '、经验 ' + exp + boostNote : '') + '。' : '奖励' + exp + '经验' + boostNote + '。')) + (gem ? '获得 ' + gem.name + ' ×1！' : '') + buffTail, backHome, '返回竞技场');
@@ -501,9 +439,6 @@
   }
 
   let rankAttempt = null;
-  /* ============================================================
-   * 【EX2】天梯赛（匹配/积分/商店）
-   * ============================================================ */
   const RANK_LEVEL_BASE = 30, RANK_INTEGRAL_BASE = 1500, RANK_INTEGRAL_PER_LEVEL = 25, RANK_LEVEL_SPREAD = 4;
   function rankFoeLevel(integral, cap) {
     const top = Math.max(1, Math.min(State.MAX_PLAYER_LEVEL || 90, Number(cap) || 90));
@@ -511,7 +446,7 @@
     const jitter = (Math.random() * 2 - 1) * RANK_LEVEL_SPREAD;
     return Math.max(1, Math.min(top, Math.round(expect + jitter)));
   }
-  /** 只算期望值（给界面提示/测试用，不带随机）。 */
+  // 只算期望值（给界面提示/测试用，不带随机）。
   function rankFoeExpectLevel(integral, cap) {
     const top = Math.max(1, Math.min(State.MAX_PLAYER_LEVEL || 90, Number(cap) || 90));
     return Math.max(1, Math.min(top, Math.round(
@@ -522,8 +457,8 @@
     d.setDate(d.getDate() - (d.getDay() + 6) % 7);      // 周一为一周起点
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
-  /** 月度 key 必须用真实日历月，不能用 localDate()：后者有 12 点换日，
-   * 会在月末中午提前跳到下个月。固定 Asia/Shanghai，保证每月 1 号 0 点重置。 */
+  /* 月度 key 必须用真实日历月，不能用 localDate()：后者有 12 点换日，会在月末中午提前跳到下个月。
+   * 固定 Asia/Shanghai，保证每月 1 号 0 点重置。 */
   function rankMonthKey() {
     try {
       const parts = new Intl.DateTimeFormat('en-CA', {
@@ -547,8 +482,7 @@
      * 之后每月 1 号 0 点整月清空。 */
     if (!s.rankPurchaseMonth) {
       /* 只有「本周周一已经在本月」时才把周账搬进本月账；跨月的那一周可能含上个月的购买，
-       * 不能算到本月（宁可不拦，也不要误拦）。 */
-      const weekStart = String(s.rankPurchaseWeek || '');
+       * 不能算到本月（宁可不拦，也不要误拦）。 */      const weekStart = String(s.rankPurchaseWeek || '');
       const sameMonthWeek = !weekStart || weekStart >= month + '-01';
       for (const id of RANK_MONTHLY_LIMIT_GOODS) {
         const old = sameMonthWeek ? Math.max(0, Math.floor(Number(s.rankPurchases && s.rankPurchases[id]) || 0)) : 0;
@@ -562,12 +496,11 @@
       dirty = true;
     }
     /* 旧档没有账号累计账：把本周已经买过的永久属性丸搬进累计账，至少不会因为改版
-     * 让已经买过的人再白拿一个（更早的周次没有记录，无法回溯）。 */
-    for (const id of RANK_ACCOUNT_LIMIT_GOODS) {
+     * 让已经买过的人再白拿一个（更早的周次没有记录，无法回溯）。 */    for (const id of RANK_ACCOUNT_LIMIT_GOODS) {
       const old = Math.max(0, Math.floor(Number(s.rankPurchases && s.rankPurchases[id]) || 0));
       if (old > 0) s.rankPurchaseTotals[id] = Math.max(old, Math.floor(Number(s.rankPurchaseTotals[id]) || 0));
     }
-    // 旧档只有按天标记（rankPurchaseDay）：换成按周后第一次打开清空即可
+    // 旧档只有按天标记（rankPurchaseDay）：换成按周后第一次打开清空即可。
     if (s.rankPurchaseWeek !== week || !s.rankPurchases || typeof s.rankPurchases !== 'object' || Array.isArray(s.rankPurchases)) {
       s.rankPurchases = {};
       s.rankPurchaseWeek = week;
@@ -576,14 +509,10 @@
     }
     if (dirty) State.save();
   }
-  /* 两套狂战（goods 11-14 第一套 / 20-23 第二套）：2026-11 用户口径改为
-   * **每月限兑 1 次**，每月 1 号 0 点（Asia/Shanghai）重置。 */
+  /* 两套狂战（goods 11-14 第一套 / 20-23 第二套）：每月限兑 1 次，每月 1 号 0 点（Asia/Shanghai）重置。 */
   const RANK_MONTHLY_LIMIT_GOODS = Object.freeze([11, 12, 13, 14, 20, 21, 22, 23]);
-  /* 力/敏/速/血永久丸（goods id 7~10）：原版 `timesLimit` 是 **1**，且是账号级限购；
-   * 复刻以前把所有 timesLimit 都当“每周限兑”，于是每周都能再买一个，属性会无限叠。
-   * 这四件改用 `rankPurchaseTotals`（不随周重置），上限就是字典里的 timesLimit（1）。
-   * 魔法袋（goods id 19）同样是账号限 1：原版天梯商店卖它，离线版补回这一行
-   * （见 gamedata 的 EXTRA_RANK_GOODS），也走同一本账号累计账。 */
+  /* 力/敏/速/血永久丸（goods 7~10）与魔法袋（19）都是账号级限购 1（原版 timesLimit）：
+   * 走 rankPurchaseTotals（不随周重置），上限就是字典里的 timesLimit；魔法袋见 gamedata 的 EXTRA_RANK_GOODS。 */
   const RANK_ACCOUNT_LIMIT_GOODS = Object.freeze([7, 8, 9, 10, 19]);
   function rankLimitInfo(goods) {
     const item = goods || {};
@@ -598,7 +527,7 @@
       month: monthly ? String(s.rankPurchaseMonth || '') : '' };
   }
   function rank() {
-    /* 经典模式的天梯页由挑战页原版帧负责，不再落回复刻自研的 DOM 天梯页。 */
+    // 经典模式的天梯页由挑战页原版帧负责，不再落回复刻自研的 DOM 天梯页。
     if (window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic' && window.SfChallenge && SfChallenge.goArenaPage) {
       SfChallenge.goArenaPage('ladder');
       return;
@@ -637,13 +566,12 @@
     });
     match.disabled = s.joinRankCount >= limit || !!rankAttempt;
   }
-  /** 天梯赛报名费（原版客户端 alertRank 口径：1-10 免费、11-20 每场 5、21-30 每场 10）。 */
+  // 天梯赛报名费（原版客户端 alertRank 口径：1-10 免费、11-20 每场 5、21-30 每场 10）。
   function rankFeeNow(s) { return State.rankFeeAt(s && s.joinRankCount); }
   let rankPrepPending = false;
-  /** 【经典天梯流程】对齐原版 `alertRank`（:23720）+ `beforeRank`（:18149）：
-   *   点「开始比赛」→ 首次 / 免费场用完时先弹经典二次确认（原版 `makeSure`）；
-   *   确认后先摆「战斗准备中」原版 3464（双方名字 / 积分 / VS）3 秒，再进战斗。
-   *   `rankMatch` 保留原样给现代 DOM 页与回归用例直接开打；经典页只走这里。 */
+  /* 【经典天梯流程】对齐原版 alertRank（:23720）+ beforeRank（:18149）：点「开始比赛」→ 首次 / 免费场
+   * 用完时先弹经典二次确认（原版 makeSure）；确认后先摆「战斗准备中」3464（双方名字/积分/VS）3 秒再进战斗。
+   * rankMatch 保留原样给现代 DOM 页与回归用例直接开打；经典页只走这里。 */
   function startRankFlow(after, opts) {
     const back = (typeof after === 'function') ? after : rank;
     const o = opts || {};
@@ -659,8 +587,8 @@
       const text = s.joinRankCount === 0
         ? '每天前10场免费；第11-20场每场扣除5金松果，第21-30场每场扣除10金松果。\n今日已赛 0/' + dailyLimit + '。'
         : '本日免费场已打完，本场将扣除' + fee + '金松果。\n今日已赛 ' + s.joinRankCount + '/' + dailyLimit + '。';
-      /* 经典模式用原版「二次确认」4421（确定/取消是原版矢量按钮 + 烤进画稿的字），
-       * 不再手搓绿色 DOM 键；现代界面没有这套素材，仍走 C().modal。 */
+      /* 经典模式用原版二次确认 4421（确定/取消是原版矢量按钮 + 烤进画稿的字），不手搓绿色 DOM 键；
+       * 现代界面没有这套素材，仍走 C().modal。 */
       if (window.SfChallenge && SfChallenge.openOriginalConfirm
           && window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic') {
         let fellBack = false;
@@ -689,7 +617,7 @@
     function begin() {
       if (rankAttempt || rankPrepPending || State.state() !== s) return;
       rankPrepPending = true;
-      /* 赛区人机：从本赛区名册里挑一个分数相近的（单机版没有真人，人机就是对手）。 */
+      // 赛区人机：从本赛区名册里挑一个分数相近的（单机版没有真人，人机就是对手）。
       const bot = State.rankOpponent();
       const foe = bot
         ? Object.assign(State.genAI(bot.level, '', { levelJitter: 0, statScale: State.RANDOM_FOE_SCALE || 1.08 }), { name: bot.name })
@@ -704,8 +632,8 @@
       });
     }
   }
-  /** 原版 `rankInfoMc`（「战斗准备中」）—— `3464` 在后来的战斗素材包里，
-   *  这里按 320×196 舞台居中挂 3 秒；素材没到时只等一小会儿就开打，不挡流程。 */
+  /* 原版 rankInfoMc「战斗准备中」：3464 在后来的战斗素材包里，这里按 320×196 舞台居中挂 3 秒；
+   * 素材没到时只等一小会儿就开打，不挡流程。 */
   async function showRankPrep(s, foe, bot) {
     const ui = document.getElementById('ui');
     if (!ui || !window.SfRender || !SfRender.mountSymbol) { await new Promise((r) => setTimeout(r, 300)); return; }
@@ -715,7 +643,7 @@
     ui.appendChild(host);
     let view = null;
     try {
-      try { await SfRender.loadExtra('tags-fight.json'); } catch (e) { /* 没素材就不摆 */ }
+      try { await SfRender.loadExtra('tags-fight-core.json'); } catch (e) { /* 没素材就不摆 */ }
       if (!host.isConnected || State.state() !== s) return;
       view = await SfRender.mountSymbol(host, '3464', {
         frame: 1, label: '战斗准备中',
@@ -735,8 +663,8 @@
     if (host.parentNode) host.parentNode.removeChild(host);
   }
   function rankMatch(after, options) {
-    /* `after` = 打完这一场回哪一页（不给就回复刻自研的天梯页 `rank`）。
-     * 经典模式下由 `js/ssfight/ui-challenge.js` 传"回原版那一页"进来 —— 见那边的注释。 */
+    /* after = 打完这一场回哪一页（不给就回复刻自研的天梯页 rank）。
+     * 经典模式下由 js/ssfight/ui-challenge.js 传「回原版那一页」进来。 */
     const back = (typeof after === 'function') ? after : rank;
     const opts = options || {};
     {
@@ -766,23 +694,18 @@
         C().toast('\u6bd4\u8d5b\u4e2d\u65ad\uff0c\u672c\u6b21\u53c2\u8d5b\u6b21\u6570\u548c\u8d39\u7528\u5df2\u9000\u8fd8\u3002');
       };
       Main.startBattle(foe, { cost: 0, kind: 'rank', useProps: false, region: 2, skipChest: true, onError: interrupted,
-        /* 【经典模式】打完**直接回原版天梯赛那一页**（与竞技场的 `keepScreen` 同一条口径）：
-         * 不传这个开关的话 `startBattle` 会先 `showHome()`，而首页的 `renderHome()` 会
-         * `SfChallenge.destroy()` 把挑战页整棵拆掉 —— 战果弹窗于是压在主界面（首页）上。
-         * 用户 2026-10 口径（本批 ③）："天梯赛的战斗后的页面弹出来的战斗结果与选择是否继续战斗的页面时，
-         * 其背景会退回到主界面，我不希望这样，我希望背景仍然是天梯赛的开始比赛界面。"
-         * `keepScreen` 时不换页，由下面 `back()` 把"天梯赛菜单"那一帧恢复好，弹窗才落在它上面。
-         * ⚠ `keepScreen` 分支里 `startBattle` 会把 `mode` 拨回 `home`（见 main.js 那段注释），
-         * 所以「继续挑战」再打一场不会因为 `mode === 'battle'` 被静默挡掉。 */
+        /* 经典模式打完直接回原版天梯赛那一页（与竞技场 keepScreen 同一条口径）：不传这个开关
+         * startBattle 会先 showHome()，而 renderHome() 会 SfChallenge.destroy() 拆掉挑战页，
+         * 战果弹窗就压在主界面上。keepScreen 时由 back() 恢复「天梯赛菜单」那一帧；该分支里
+         * startBattle 会把 mode 拨回 home，所以「继续挑战」再打一场不会被静默挡掉。 */
         keepScreen: !!(window.SfChallenge && SfChallenge.goArenaPage),
         onEnd: async winner => {
         if (attempt.settled || rankAttempt !== attempt || State.state() !== s) return;
         attempt.settled = true; rankAttempt = null;
         const win = winner === 0;
         /* 赛区人机也吃积分：玩家涨/跌多少，人机就反向跌/涨多少（同分档 16/15/2/1/0）。
-         * ⚠ 单机版**没有**联机版「300 分以上只匹配真人、回落人机不计分」那套规则：
-         *   任何分数打人机都按分差档正常结算双方积分；而且打人机**保底 +1**
-         *   （领先 500 分以上的 0 分档在单机兜成 1）。 */
+         * ⚠ 单机版没有联机版「300 分以上只匹配真人、回落人机不计分」那套规则：任何分数打人机
+         * 都按分差档正常结算双方积分，而且打人机保底 +1（领先 500 分以上的 0 分档兜成 1）。 */
         const delta = State.rankIntegralDelta(s.integral, bot ? bot.score : s.integral, win, { minWinGain: bot ? 1 : 0 });
         State.rankApplyResult(bot ? bot.botId : '', win, delta);
         const robbed = win && Math.random() < 0.25 ? 3 : 0, cups = (win ? 3 : 1) + robbed;
@@ -793,17 +716,16 @@
       } }).catch(interrupted);
     }
   }
-  /** 经典金杯商店的数据出口：先把"按周"限兑刷新一次，再返回全部商品。
-   *  版面交给 `ui-challenge.js` 的原版 7638 第 9 帧（3 件/页，照 `showGoodsShop`），
-   *  这里不再画页、也不复制价格/积分/周限。 */
+  /* 经典金杯商店的数据出口：先刷新一次按周限兑，再返回全部商品。版面交给 ui-challenge.js 的
+   * 原版 7638 第 9 帧（3 件/页，照 showGoodsShop），这里不画页、也不复制价格/积分/周限。 */
   function rankGoodsList() {
     refreshRankShopDay();
     const goods = [];
     rankgoodsMap.each((id, item) => goods.push(item));
     return goods;
   }
-  /** 经典金杯商店的兑换确认：原版 `buyGoodsWin` 的等价物（经典弹窗 + 扣金杯/金松果）。
-   *  成功后回调 `onDone`，让商店页重画余额与"本周已兑"状态。 */
+  /* 经典金杯商店的兑换确认：原版 buyGoodsWin 的等价物（经典弹窗 + 扣金杯/金松果）；
+   * 成功后回调 onDone，让商店页重画余额与「本周已兑」状态。 */
   function rankBuy(goodsId, onDone) {
     const s = State.state();
     if (!s) return;
@@ -857,10 +779,8 @@
       } }], { small: true });
   }
   function rankShop(pg, origin) {
-    /* 经典模式：直接复用道具页「商店」的版面（6 格/页、右侧说明、翻页、悬停变绿），
-     * 只把商品源/售价换成金杯+金松果。`origin` 决定退出回哪一页：
-     *   'shop'   = 从道具商店底栏进来 → 回商店；
-     *   'ladder' = 从天梯菜单进来 → 回天梯菜单（缺省）。 */
+    /* 经典模式：直接复用道具页「商店」的版面（6 格/页、右侧说明、翻页、悬停变绿），只把商品源 /
+     * 售价换成金杯+金松果。origin 决定退出回哪一页：'shop' 回道具商店、'ladder' 回天梯菜单（缺省）。 */
     if (State.rankSyncWeek) State.rankSyncWeek();
     if (window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic'
         && UI.classic && UI.classic.openRankShop) {
@@ -904,13 +824,9 @@
     });
   }
 
-  // \u666e\u901a\u836f\u4e38\uff08\u5927\u529b/\u654f\u6377/\u901f\u5ea6/\u7ecf\u9a8c\u4e38\uff09\uff1a\u62bd\u5956\u91cc\u7684\u300c\u968f\u673a\u666e\u901a\u836f\u4e38\u00d72\u300d\u4ece\u8fd9\u56db\u79cd\u91cc\u62bd
-  /* ============================================================
-   * 【EX3】抽奖
-   * ============================================================ */
   const NORMAL_PILLS = [3, 4, 5, 7];
-  /* 高级药丸（2026-10 用户口径）：抽奖里的「随机药丸」有 5% 概率升格成这一档 ——
-   * 与普通药丸一一对应（超级大力/敏捷/速度/经验丸，见 gamedict 41~44）。 */
+  /* 高级药丸：抽奖里的「随机药丸」有 5% 概率升格成这一档，与普通药丸一一对应
+   *（超级大力/敏捷/速度/经验丸，见 gamedict 41~44）。 */
   const SUPER_PILLS = [41, 42, 43, 44];
   const SUPER_PILL_CHANCE = 0.05;
   const prizes = [
@@ -937,8 +853,8 @@
   function refreshTickets() {
     const s = State.state(); if (!s) return;
     const n = s.props[50] || 0;
-    /* 注意：`$$` 是 classic-ui.js 内部的局部函数、**不是全局**，所以这里自己查 DOM。
-     * 没有真实 DOM 时（单测的沙箱）静默跳过 —— 刷新展示失败不该中断存档流程。 */
+    /* 注意：$$ 是 classic-ui.js 内部的局部函数、不是全局，所以这里自己查 DOM。
+     * 没有真实 DOM 时（单测沙箱）静默跳过 —— 刷新展示失败不该中断存档流程。 */
     const paint = (sel) => {
       const root = (typeof document !== 'undefined' && document) ? document : null;
       if (!root || !root.querySelectorAll) return;
@@ -949,11 +865,10 @@
     if (window.UI && UI.refreshHeader) { try { UI.refreshHeader(); } catch (e) { /* 顶栏刷新失败不影响抽奖卷 */ } }
   }
   function lottery() {
-    // Rewards are already settled before the animation. Reopening the page may
-    // dismiss that animation; its pending timer must not lock the new controls.
+    // 奖励在动画之前已经结算；重开这一页会 dismiss 那个动画，它挂着的 pending timer 不能锁住新页面的控件。
     const version = ++lotteryVersion;
     spinning = false;
-    /* 上次打开时挂在页面上的原版 3911 返回键视图：重开前先收掉，别让它在播放表里空转。 */
+    // 上次打开时挂在页面上的原版 3911 返回键视图：重开前先收掉，别让它在播放表里空转。
     if (lotteryBackPage && C().destroyClassicBack) {
       try { C().destroyClassicBack(lotteryBackPage); } catch (e) {}
     }
@@ -962,13 +877,13 @@
     const s = State.state();
     const TICKET = 50;
 
-    /** 当前手上的抽奖资源：每日免费次数 + 仓库抽奖卷 + 金松果（每次 20）。 */
+    // 当前手上的抽奖资源：每日免费次数 + 仓库抽奖卷 + 金松果（每次 20）。
     const affordable = (n) => Math.max(0, s.lotteryFree || 0) + Math.max(0, s.props[TICKET] || 0)
       + Math.floor(Math.max(0, s.goldPoint) / 20) >= n;
     const spinLabel = () => (s.lotteryFree > 0 ? '免费抽奖'
       : (s.props[TICKET] || 0) > 0 ? '用抽奖卷抽奖' : '20 金松果抽奖');
-    /** 一次抽奖的**立即结算**（扣费顺序：每日免费 → 抽奖卷 → 20 金松果）。
-     *  一次点击立即结算，离开动画页或刷新页面不会漏奖或多发奖励。 */
+    // 一次抽奖的立即结算（扣费顺序：每日免费 → 抽奖卷 → 20 金松果）；
+    // 一次点击立即结算，离开动画页或刷新页面不会漏奖或多发奖励。
     const settleOne = () => {
       if (s.lotteryFree > 0) s.lotteryFree--;
       else if (s.props[TICKET] > 0) { s.props[TICKET]--; if (s.props[TICKET] <= 0) delete s.props[TICKET]; }
@@ -1001,7 +916,7 @@
       '<div class="extra-lottery-footer"><div><b data-lottery-status>\u4eca\u65e5\u514d\u8d39 ' + s.lotteryFree + ' \u6b21</b></div>' +
       '<div class="lottery-buttons">' +
       button(spinLabel(), 'lottery-spin', 'gold') + button('\u8fde\u62bd 10 \u6b21', 'lottery-spin10', 'gold') + '</div></div>';
-    /* 顶部「背包 / 商店 / 兑换」用道具页同一套原版页签矢量；底部不再自建手绘底栏，
+    /* 顶部「背包 / 商店 / 兑换」用道具页同一套原版页签矢量；底部不自建手绘底栏，
      * 改挂「随机挑战 → 查看」那一页的原版 3911 返回键（与金杯商店共用同一份实现）。 */
     const p = C().page('bag', 'bag', content, { cls: 'extra-board lottery-extra-board', noFooter: true });
     lotteryBackPage = p;
@@ -1013,7 +928,7 @@
       UI.runAction('bag');
     };
     if (C().mountClassicBack) C().mountClassicBack(p, leaveLottery);
-    /* 从顶部页签切走时也收掉 3911 的视图（否则旧页面被移除后它还在播放表里）。 */
+    // 从顶部页签切走时也收掉 3911 的视图（否则旧页面被移除后它还在播放表里）。
     if (p.addEventListener) {
       p.addEventListener('click', (ev) => {
         const hit = ev.target && ev.target.closest ? ev.target.closest('.classic-tabs .uc-tab') : null;
@@ -1023,7 +938,7 @@
       }, true);
     }
 
-    /* 抽奖动画：依次点亮奖品格；结束后回调（单抽 / 连抽共用）。 */
+    // 抽奖动画：依次点亮奖品格；结束后回调（单抽 / 连抽共用）。
     const animateThen = (steps, done) => {
       let step = 0;
       const walk = () => {
@@ -1042,7 +957,7 @@
       const ten = find(p, '[data-action="lottery-spin10"]');
       if (ten) ten.textContent = busy ? '\u62bd\u5956\u4e2d\u2026' : '\u8fde\u62bd 10 \u6b21';
     };
-    /** 抽完之后统一收尾：刷新免费次数 / 抽奖卷 / 顶栏金松果。 */
+    // 抽完之后统一收尾：刷新免费次数 / 抽奖卷 / 顶栏金松果。
     const afterDraw = () => {
       spinning = false; setBusy(false);
       const st = find(p, '[data-lottery-status]');
@@ -1090,40 +1005,35 @@
     });
     spin10.disabled = spinning;
   }
-  /* ============================================================
-   * 【EX4】师徒系统
-   * ============================================================ */
-  // ==================== \u5e08\u5f92\u7cfb\u7edf ====================
-  // \u53c2\u8003\u8bbe\u5b9a\uff1a\u62dc\u5e08\u540e\u81ea\u52a8\u5b66\u4f1a\u300c\u5e08\u7236\u9a7e\u5230\u300d\uff1b\u6536\u5f92\u9700\u5148\u6253\u8d25\u5bf9\u65b9\uff08\u5bf9\u65b9\u5df2\u6709\u5e08\u7236\u5219\u6253\u4ed6\u5e08\u7236\uff09\uff1b
-  // \u6536\u5f92\u4e0a\u9650\u968f\u7b49\u7ea71/2/3\u4eba\uff1b\u6628\u65e5\u65e5\u8d21\u7531\u6301\u4e45\u5316\u7684\u6709\u9650\u79bb\u7ebf\u6218\u6597\u8d26\u76ee\u630910%/5%\u7ed3\u7b97\u3002
-  // \u5e08\u7236\u6bcf\u5929\u53ef\u8e22 1 \u4e2a\u5f92\u5f1f\uff1b\u5f92\u5f1f\u4e3b\u52a8\u9000\u5e08\u95e8\u82b1 20 \u91d1\u677e\u679c\u3002
+  /* 师徒：拜师后自动学会「师父驾到」；收徒需先打败对方（对方已有师父则打他师父）；上限随等级 1/2/3 人；
+   * 昨日日贡按持久化的有限离线战斗账目结算 10%/5%。师父每天可踢 1 个徒弟；徒弟主动退师门花 20 金松果。 */
   const MASTER_CANDIDATE_COUNT = 3;
   const RECRUIT_CANDIDATE_COUNT = 3;
 
-  /** \u5e08\u7236\u5019\u9009\u4eba\uff1a\u7b49\u7ea7\u5728\u73a9\u5bb6\u7b49\u7ea7\u4e0a\u65b9\u6709\u8f83\u5927\u968f\u673a\u8303\u56f4\uff08\u4e0d\u8d85\u8fc7\u6ee1\u7ea7\uff09\uff0c\u5e76\u5e26\u5b8c\u6574\u5c5e\u6027/\u6b66\u5668/\u6280\u80fd\u3002 */
+  // 师父候选人：等级在玩家等级上方有较大随机范围（不超过满级），并带完整属性/武器/技能。
   function rollMasterCandidates() {
     const s = State.state();
     const cap = State.MAX_PLAYER_LEVEL || 90;
     const base = Math.max(3, Math.min(s.level, cap));
     return Array.from({ length: MASTER_CANDIDATE_COUNT }, () => {
-      // \u5e08\u7236\u901a\u5e38\u6bd4\u5f92\u5f1f\u5f3a\uff1a+2 ~ +12 \u7ea7\uff0c\u4f46\u4e0d\u4f1a\u8d85\u8fc7\u6ee1\u7ea7
+      // 师父通常比徒弟强：+2 ~ +12 级，但不会超过满级
       const level = Math.min(cap, Math.max(2, base + 2 + Math.floor(Math.random() * 11)));
       return State.genAI(level, '', { levelJitter: 0, gearSelfLevel: true });
     });
   }
-  /** \u53ef\u6536\u670d\u5f92\u5f1f\u5019\u9009\u4eba\uff1a\u7b49\u7ea7\u63a5\u8fd1\u73a9\u5bb6\uff08\u4e0d\u8d85\u8fc7\u6ee1\u7ea7\uff09\uff0c\u5e26\u5b8c\u6574\u5c5e\u6027\u4fbf\u4e8e\u67e5\u770b\u540e\u518d\u51b3\u5b9a\u3002 */
+  // 可收服徒弟候选人：等级接近玩家（不超过满级），带完整属性便于查看后再决定。
   function rollRecruitCandidates() {
     const s = State.state();
     const cap = State.MAX_PLAYER_LEVEL || 90;
     return Array.from({ length: RECRUIT_CANDIDATE_COUNT }, () => {
       const base = Math.max(1, s.level + (Math.random() < 0.5 ? -2 : 0));
       const foe = State.genAI(base, '', { levelJitter: 2, gearSelfLevel: true });
-      // \u5f92\u5f1f\u4e0d\u4f1a\u6bd4\u5e08\u7236\u5f3a\u592a\u591a\uff0c\u4e5f\u4e0d\u4f1a\u8d85\u8fc7\u6ee1\u7ea7
+      // 徒弟不会比师父强太多，也不会超过满级
       foe.level = Math.max(1, Math.min(cap, Math.min(foe.level, s.level + 1)));
       return foe;
     });
   }
-  /** \u5c5e\u6027\u8ff7\u4f60\u6761 + \u6b66\u5668/\u6280\u80fd\u6e05\u5355\uff0c\u5e08\u7236\u4e0e\u5f92\u5f1f\u8be6\u60c5\u5171\u7528\u3002 */
+  // 属性迷你条 + 武器/技能清单，师父与徒弟详情共用。
   function profileStats(row) {
     const pills = [['\u529b', row.power], ['\u654f', row.agility], ['\u901f', row.speed], ['\u547d', row.hp]]
       .map(([k, v]) => '<div class="stat-pill"><b>' + k + '</b>' + esc(v == null ? '-' : v) + '</div>').join('');
@@ -1167,19 +1077,16 @@
   let masterSel = 0, recruitSel = 0, apprenticeSel = 0, recruitBusy = false, recruitOwner = null;
   let masterTab = 'master';
 
-  /* ============================================================
-   * 【EX1b】徒弟日供：领取入口与结算弹窗
-   * 活动页（每日礼包那一屏）与师徒页共用这一条路径 —— 两边按钮都调 claimTribute()，
-   * 所以「领一次」的判定只有 State 一处，界面不会各写一套。
-   * ============================================================ */
-  /** 每个徒弟今天还能领的日供（领取前调用，用来做「这份是谁供的」明细）。 */
+  /* 徒弟日供：领取入口与结算弹窗。活动页（每日礼包那一屏）与师徒页共用这一条路径 ——
+   * 两边按钮都调 claimTribute()，所以「领一次」的判定只有 State 一处，界面不会各写一套。 */
+  // 每个徒弟今天还能领的日供（领取前调用，用来做「这份是谁供的」明细）。
   function tributeRows() {
     return (State.state().prentices || []).map((p) => {
       const d = State.apprenticeDailyStatus(p);
       return { name: p.name, level: p.level, exp: d.exp, gold: d.gold, claimable: d.claimable, claimed: d.claimed };
     });
   }
-  /** 活动页那张日供卡要显示的状态：能不能领 / 领过了 / 还没徒弟。 */
+  // 活动页那张日供卡要显示的状态：能不能领 / 领过了 / 还没徒弟。
   function tributeStatus() {
     const rows = tributeRows(), total = State.apprenticeDailyTotal();
     const claimable = (total.exp > 0 || total.gold > 0);
@@ -1188,18 +1095,18 @@
       claimed: rows.length > 0 && !claimable && rows.every((r) => r.claimed),
     };
   }
-  /** 领日供 + 结算弹窗。`after` 在玩家确认后回调（活动页用它重画弹窗，师徒页用它回页）。 */
+  // 领日供 + 结算弹窗。after 在玩家确认后回调（活动页用它重画弹窗，师徒页用它回页）。
   function claimTribute(after) {
     const done = () => { if (after) after(); };
     const rows = tributeRows().filter((r) => r.claimable);
     const r = State.claimApprenticeExp();
     if (!r.ok) { C().toast(r.msg); done(); return r; }
-    /* 结算面板走升级奖励那一套 reward-card（图标 + 数值），比原来一行大字更好认；
+    /* 结算面板走升级奖励那一套 reward-card（图标 + 数值），比一行大字更好认；
      * 下面再列一条明细，说明这一份日供分别是哪个徒弟供的。 */
     const card = (cls, art, label, value) => value > 0
       ? '<div class="reward-card ' + cls + '"><span class="reward-icon">' + art + '</span>' +
         '<span class="reward-text">' + label + ' +' + esc(value) + '</span></div>' : '';
-    const cards = card('green', '<img alt="" class="reward-icon-img" src="images/ui/icons/drop-exp-classic.png">', '经验', r.total) +
+    const cards = card('green', '<img alt="" class="reward-icon-img" src="images/ui/icons/prop/prop-15.svg">', '经验', r.total) +
       card('gift', C().goldIcon ? C().goldIcon() : C().icon('prop', 8), '金松果', r.gold);
     const detail = rows.length
       ? '<div class="tribute-rows">' + rows.map((x) =>
@@ -1224,7 +1131,6 @@
     const cap = State.apprenticeCap(s.level);
     const hasMasterSkill = s.skills.some((x) => Number(String(x).split(':')[0]) === State.MASTER_SKILL_ID);
 
-    // ---- \u6211\u7684\u5e08\u7236 / \u62dc\u5e08 ----
     const masterBlock = s.master
       ? '<h2>\u6211\u7684\u5e08\u7236</h2><div class="extra-master-current"><div class="master-head"><b>' + esc(s.master.name) + '</b>' +
         '<span>\u7b49\u7ea7 ' + esc(s.master.level) + '</span></div>' +
@@ -1244,7 +1150,6 @@
         '<div class="master-actions">' + button('\u5237\u65b0\u5e08\u7236', 'master-refresh') +
         (masterCandidates[masterSel] ? button('\u62dc\u4ed6\u4e3a\u5e08', 'master-join', 'gold') : '') + '</div>';
 
-    // ---- \u6211\u7684\u5f92\u5f1f / \u6536\u5f92 ----
     const dailyTotal = State.apprenticeDailyTotal();
     const unclaimed = dailyTotal.exp > 0 || dailyTotal.gold > 0;
     const apprenticeBlock =
@@ -1283,7 +1188,6 @@
       { cls: 'extra-board master-extra-board' });
     back(p, () => UI.runAction('village'), '\u8fd4\u56de\u6751\u5e84');
 
-    // ---- \u4ea4\u4e92 ----
     p.querySelectorAll('[data-mtab]').forEach((el) => el.onclick = () => { masterTab = el.dataset.mtab; master(); });
     p.querySelectorAll('[data-master]').forEach((el) => el.onclick = () => { masterSel = Number(el.dataset.master); master(); });
     p.querySelectorAll('[data-recruit]').forEach((el) => el.onclick = () => { recruitSel = Number(el.dataset.recruit); master(); });
@@ -1355,20 +1259,14 @@
     });
   }
 
-  // ---------- \u6392\u884c\u699c\uff08\u539f\u7248 STATE.TOPLIST\uff1b\u5355\u673a\u7528\u56fa\u5b9a\u79cd\u5b50\u6a21\u62df\u699c\u5355\uff09 ----------
-  /* \u539f\u7248 loadRankList / LoadRank \u7531\u670d\u52a1\u7aef\u4e0b\u53d1\u771f\u5b9e\u73a9\u5bb6\u699c\uff1b\u5355\u673a\u7248\u7528\u786e\u5b9a\u6027\u968f\u673a
-   * \uff08\u6bcf\u5468\u4e00\u4e2a\u79cd\u5b50\uff09\u751f\u6210\u4e00\u6279\u79bb\u7ebf\u677e\u9f20\uff0c\u518d\u628a\u73a9\u5bb6\u63d2\u8fdb\u53bb\uff0c\u56e0\u6b64\u540c\u4e00\u5468\u5185\u699c\u5355\u7a33\u5b9a\u3002 */
+  /* 原版 loadRankList / LoadRank 由服务端下发真实玩家榜；单机版用确定性随机（每周一个种子）生成一批
+   * 离线松鼠，再把玩家插进去，因此同一周内榜单稳定。 */
   let toplistTab = 'level';
-  /* ============================================================
-   * 【EX5】排行榜（固定种子模拟榜）
-   * ============================================================ */
   const RANK_LEVEL = 30;   // 原版天梯赛 30 级开启
   const TOPLIST_TABS = [['level', '\u7b49\u7ea7'], ['cup', '\u91d1\u676f'], ['integral', '\u79ef\u5206']];
   const TOPLIST_TITLES = ['\u677e\u9f20\u5c0f\u9738', '\u68ee\u6797\u4e00\u9738', '\u98ce\u901f\u4f20\u5947', '\u575a\u679c\u5927\u738b',
     '\u677e\u9f20\u5c0f\u9738\u4e8c\u4e16', '\u68a6\u5e7b\u6a61\u5b50', '\u91d1\u677e\u679c\u5b88\u62a4\u8005', '\u6708\u5149\u98de\u9f20',
     '\u96fe\u6797\u730e\u624b', '\u96ea\u539f\u65c5\u4eba', '\u53e4\u6811\u5b88\u671b\u8005', '\u661f\u8fb0\u4e4b\u5f71'];
-  // 说明：以前原版的 Map.min.js 会覆盖全局 Map（window.Map），所以这里只能用手写对象缓存；
-  // 现在数据走 js/gamedict.js（自带独立实现、不碰全局 Map），下面继续用手写对象也完全没问题。
   let toplistCache = Object.create(null);
   function rankWeekSeed() {
     const d = new Date(Date.now());
@@ -1406,7 +1304,7 @@
         npc: true,
       });
     }
-    // 天梯赛 30 级才开启：不够级就没有金杯与积分，也不进天梯榜
+  // 天梯赛 30 级才开启：不够级就没有金杯与积分，也不进天梯榜
     const qualified = s.level >= RANK_LEVEL;
     rows.push({
       name: s.name, level: s.level,
@@ -1426,7 +1324,6 @@
     const rows = toplistRows();
     const ladderTab = key === 'cup' || key === 'integral';
     const qualified = s.level >= RANK_LEVEL;
-    const mineRow = rows.find((r) => !r.npc);
     // 不够 30 级就不进天梯榜：名次按等级榜算，金杯/积分显示为「—」
     const mine = ladderTab && !qualified ? null : rows.findIndex((r) => !r.npc) + 1;
     const rankText = mine ? '<b>' + mine + '</b> / ' + rows.length
@@ -1459,12 +1356,8 @@
     on(p, 'integral', () => { toplistTab = 'integral'; toplistCache = Object.create(null); toplist(); });
   }
 
-  // ---------- \u8d85\u7ea7\u677e\u9f20\uff08\u539f\u7248 VIP\uff1b\u6539\u6210\u91d1\u677e\u679c\u8d2d\u4e70\u7684\u5355\u673a\u7248\uff09 ----------
-  /* \u7279\u6743\u6587\u6848\u4e0e\u7b49\u7ea7\u8868\u53d6\u81ea\u539f\u5ba2\u6237\u7aef js/ssdz-pkg2.js \u7684 VIP \u754c\u9762\u5185\u5d4c\u6587\u672c\uff0c
-   * \u539f\u7248\u6309\u5929\u552e\u5356\uff08buyVIP.do\uff09\uff0c\u8fd9\u91cc\u6539\u6210\u91d1\u677e\u679c\u3002 */
-  /* ============================================================
-   * 【EX6】超级松鼠（VIP）
-   * ============================================================ */
+  /* 特权文案与等级表取自原客户端 js/ssdz-pkg2.js 的 VIP 界面内嵌文本；
+   * 原版按天售卖（buyVIP.do），这里改成金松果购买。 */
   const VIP_PRIVILEGES = [
     '\u89d2\u8272\u7b49\u7ea710\u7ea7\u4ee5\u4e0a\u7684VIP\u53ef\u4ee5\u8df3\u8fc7\u6218\u6597\uff08\u53ef\u81ea\u52a8\u83b7\u5f97\u70b9\u51fb\u7c7b\u9053\u5177\uff09',
     '\u88ab\u52a8\u7ecf\u9a8c\u4e0a\u9650\u5927\u5e45\u63d0\u9ad8\uff0c\u6700\u9ad8\u53ef\u8fbe400\u7ecf\u9a8c/\u5929',
@@ -1506,14 +1399,11 @@
     if (C().wireSystemFeedback) C().wireSystemFeedback(p);
   }
 
-  /* ============================================================
-   * 【EX7】导出 window.ClassicExtras
-   * ============================================================ */
   window.ClassicExtras = {
     payArenaEntry, arena, startArenaCompete, chooseArena, startRankFlow, rank, rankShop: (pg, origin) => rankShop(pg || 0, origin), rankGoodsList, rankBuy, rankLimitInfo, rankMatch, lottery, refreshTickets, master, toplist, vip, lotteryPrizes: prizes,
     claimTribute, tributeStatus,
-    /* 竞技场赛事页（`js/ssfight/ui-challenge.js` 的 `match` 子页）要用这两个：
-     * 当前这轮的赛事快照，以及"打下一场"的入口。 */
+    /* 竞技场赛事页（js/ssfight/ui-challenge.js 的 match 子页）要用这两个：
+     * 当前这轮的赛事快照，以及「打下一场」的入口。 */
     arenaRun: () => activeArenaRun(), saveArenaRun, fightArena: (run) => fightArena(run || activeArenaRun()),
     /* 回到赛事页时抹掉"打了一半"的 `busy`（见 `clearArenaBusy` 的注释）。 */
     clearArenaBusy,

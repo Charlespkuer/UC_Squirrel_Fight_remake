@@ -1,11 +1,4 @@
 /* Three-material equipment fusion in the classic UC visual shell. */
-
-/* ------------------------------------------------------------
- * 目录：装备融合界面（三合一）
- * Ctrl+F 搜节号（如「【FS1】」）直达对应代码块。
- *
- *  【FS1】打开融合页与材料校验  【FS2】渲染  【FS3】详细规则弹窗  【FS4】融合执行与成功弹窗
- * ------------------------------------------------------------ */
 (function () {
   'use strict';
   const PAGE_SIZE = 6;
@@ -18,22 +11,17 @@
   const costOf = (gear) => (gear ? State.gearCostOf(gear.quality) : 0);
   const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  /* 装备图标：与「我的装备」同一套 `gearImg`（橙装 / 黑装沿用同名紫装的现代贴图）。 */
+  /* 装备图标与「我的装备」同一套 gearImg（橙装/黑装沿用同名紫装的现代贴图）。 */
   const art = (gear) => (UI.classic && typeof UI.classic.gearImg === 'function')
     ? UI.classic.gearImg(gear)
     : '<img alt="" src="images/ui/icons/gear/gear-' + Number(gear.id) +
       '.png" onerror="this.style.visibility=\'hidden\'">';
-  /* 【2026-10-28 用户口径】现代界面只融合「内部有贴图」的装备：
-   *   · 没有现代贴图的装备（怒战 / 深海 / 机器猫 / 圣熊 / 凤凰）当作不存在 —— 不进材料列表；
-   *   · 产物也只在有贴图的装备里挑（否则合出来又是一张空白卡）。
-   *   经典界面不受这条限制（那边用经典画稿，全部装备都有图）。 */
+  /* 现代界面只融合有贴图的装备：无贴图的套（怒战/深海/机器猫/圣熊/凤凰）不进材料列表，
+   * 产物也只在有贴图的里挑，否则合出来是空白卡。经典界面用经典画稿，不受限。 */
   const hasArt = (gear) => (!modernMode() || !UI.classic || typeof UI.classic.gearHasArt !== 'function')
     ? true : !!UI.classic.gearHasArt(gear);
   const targetAllowed = (id) => hasArt({ id: Number(id) });
 
-  /* ============================================================
-   * 【FS1】打开融合页与材料校验
-   * ============================================================ */
   function open() {
     const classic = UI.classic;
     if (!classic) return;
@@ -46,7 +34,6 @@
     page.setAttribute('aria-label', '装备融合');
 
     const PART_NAME = ['头巾', '手套', '衣服', '鞋子'];
-    /** 词条标签：融合页的卡片/材料槽直接显示，不再只藏在 title/aria 里。 */
     const extTags = (gear, compact) => {
       const list = gear ? State.extText(gear.ext) : [];
       return '<div class="fusion-ext-line' + (compact ? ' compact' : '') + '">' +
@@ -66,9 +53,6 @@
       return '';
     }
 
-    /* ============================================================
-     * 【FS2】渲染（工作台/材料卡/分页）
-     * ============================================================ */
     function render(focus) {
       if (!page.isConnected) return;
       const gears = State.myGears().filter(hasArt);
@@ -123,11 +107,10 @@
       const pips = [0, 1, 2].map((i) => '<i class="' + (i < selected.length ? 'on' : '') + '"></i>').join('');
       const nextQuality = first ? (first.quality >= 5 ? 5 : first.quality + 1) : 0;
       const previewLabel = first ? (first.quality >= 5 ? '黑装洗练' : (qualities[nextQuality] || '') + '装备') : '更高品质';
-      /* 联机版融合的产物部位从三件材料随机取，页面不再承诺「同套必得 / 首件部位」。 */
+      /* 产物部位从三件材料随机（联机口径），页面不承诺「同套必得 / 首件部位」。 */
       const pickedGears = selected.map((key) => gears.find((g) => g.key === key)).filter(Boolean);
       const previewHint = first ? '产物部位从三件材料随机' : '必得 1 件';
       const guaranteeText = first && first.quality >= 5 ? '同品质黑装洗练 · 材料会被消耗' : '品质提升一级 · 材料会被消耗';
-      /* 已选材料能提供的词条并集：不重复列出同名效果，玩家融合前就能看到候选池。 */
       const pickedTags = new Set();
       pickedGears.forEach((g) => State.extText(g.ext).forEach((x) => pickedTags.add(x)));
       const pickedHtml = selected.length
@@ -141,8 +124,7 @@
         '<div class="fusion-workbench"><div class="fusion-materials" aria-label="融合材料">' + materials + '</div>' +
         '<span class="fusion-arrow" aria-hidden="true">➜</span><div class="fusion-preview ' + (first ? 'q' + nextQuality : 'missing') + '"><span class="fusion-frame"><span class="fusion-question">?</span></span><span class="fusion-preview-label">' + previewLabel + '</span><span class="fusion-preview-hint">' + previewHint + '</span></div>' +
         '<div class="fusion-operation"><span class="fusion-cost">' + (first ? '消耗 <b>' + costOf(first) + '</b> 金松果' : '按品质 30 / 40 / 50 / 60') + '</span><button type="button" class="uc-button gold" data-fusion-action="fuse"' + (reason || busy ? ' disabled' : '') + '>开始融合</button><span class="fusion-guarantee">' + guaranteeText + '</span>' + pickedHtml + '</div></div>' +
-        /* 规则条只留一行（flex + nowrap + 省略号），细节全部收进「详细规则」弹窗 ——
-         * 之前把整段说明塞在这里，<br> 会被 flex 拆成一堆竖条，还会把下面的装备列表挤没。 */
+        /* 规则条必须单行（flex + nowrap + 省略号）：整段说明塞这里会被 <br> 拆成竖条并挤掉装备列表。 */
         '<p class="fusion-rules"><b>规则</b>' +
         '<span class="fusion-rules-text">3 件<em>同品质</em>装备（部位/名字可不同）→ 品质高一级；产物部位从三件材料随机；词条按星级/材料顺序继承前两条。</span>' +
         '<button type="button" class="uc-button tiny muted" data-fusion-action="rules">详细规则</button></p>' +
@@ -161,11 +143,8 @@
           if (selected.includes(key)) selected = selected.filter((item) => item !== key);
           else {
             const material = current.find((item) => item.key === selected[0]);
-            /* 只要求**同品质**：经典融合页传 `allowMixedParts:true`，规则条与
-             * `mergeGears` 都允许部位/名字不同；结果部位沿用第一件材料。
-             * 旧版这里还拦了 `partOf(material) !== partOf(gear)`，于是三件橙装
-             * 只要部位不同，第二/三件怎么点都进不去（用户 2026-10「橙装无法选中 /
-             * 合不出黑装」）。 */
+            /* 只要求同品质（部位/名字可不同）：经典融合页传 allowMixedParts:true，
+             * 产物部位沿用第一件材料；再按部位拦会让部位不同的材料永远选不进去。 */
             if (selected.length >= 3 || material && material.quality !== gear.quality) return;
             selected.push(key);
           }
@@ -185,9 +164,6 @@
       }
     }
 
-    /* ============================================================
-     * 【FS3】详细规则弹窗（规则条只放一句话，细节都收在这里）
-     * ============================================================ */
     function showRules() {
       const pct = (v) => Math.round(v * 100) + '%';
       const mutant = pct(Number(State.FUSION_ONLINE_MUTANT_RATE) || 0.02);
@@ -206,9 +182,6 @@
         '</div>', [{ label: '知道了', cls: 'gold' }]);
     }
 
-    /* ============================================================
-     * 【FS4】融合执行与成功弹窗（含卖出）
-     * ============================================================ */
     function fuse() {
       if (busy || !page.isConnected) return;
       const gears = State.myGears().filter(hasArt), reason = validation(gears);
@@ -223,8 +196,7 @@
       selected = []; pageIndex = 0; render();
       const gear = result.gear;
       const effects = State.extText(gear.ext);
-      /* 「卖出」：融合产物常是拿去变现的，介绍页直接给卖出入口（点不开确认就关弹窗，
-       * close:false 让确认框叠在介绍页上，取消后介绍页还在）。 */
+      /* 卖出入口用 close:false：确认框叠在介绍页上，取消后介绍页仍在。 */
       const success = classic.modal('融合成功', '<div class="fusion-success"><div class="fusion-success-item q' + gear.quality + '"><span class="fusion-frame">' + art(gear) + '</span><strong>' + esc(gear.name) + '</strong></div><div class="fusion-success-details"><div class="fusion-quality-change"><span class="q' + previousQuality + '">' + qualities[previousQuality] + '</span><span aria-hidden="true"> → </span><strong class="q' + gear.quality + '">' + qualities[gear.quality] + '</strong></div><p>基本属性：' + esc(State.gearAttrText(gear, { name: true })) + '<br>使用等级：' + gear.useLevel + ' 级</p>' + (gear.mutant && Number(gear.quality) >= 3 ? '<p class="fusion-mutant">⚡ <b>' + (gear.quality === 5 ? '黑装变异' : '狂战变异') + '</b>：产物变异到了' + (gear.quality === 5 ? '深海/机器猫/怒战/狂战' : '狂战') + '套。</p>' : '') + (effects.length ? '<p class="fusion-effects">' + effects.map(esc).join('<br>') + '</p>' : '') + '</div></div><p class="fusion-success-note">已消耗 3 件材料和 ' + previousCost + ' 金松果，新装备（' + (PART_NAME[State.gearPart(gear.id)] || '装备') + '）已放入装备背包。</p>', [
         { label: '卖出', cls: 'muted', close: false, run: () => {
             const range = State.gearSellRange(State.gearQuality(gear));

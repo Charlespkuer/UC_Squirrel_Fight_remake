@@ -1274,40 +1274,88 @@ test('无尽塔黑卡周限：每周最多 10 张，周一重置', () => {
   assert.equal(s.props[80], 11);
 });
 
-test('天使/恶魔果实改成随机三选一，选完才消耗', () => {
+test('天使/恶魔果实一次只给 1 个随机武技，确定后才生效', () => {
   const g = game(), S = g.State, s = S.state();
   s.level = 60; s.goldPoint = 100000;
   s.weapons = ['15:1']; s.skills = ['12:1'];
   s.props[47] = 2; s.props[48] = 2;
 
-  // 天使果实：回传最多 3 个可学候选，此时还不能消耗果实
+  // 天使果实：只回传 1 个可学候选，此时还不能消耗果实
   const gain = S.useProp(47);
   assert.equal(gain.ok, false);
-  assert.equal(gain.needsFruitChoice, true, '要弹窗让玩家选');
+  assert.equal(gain.needsFruitChoice, true, '要弹窗让玩家确认');
   assert.equal(gain.mode, 'gain');
-  assert.ok(gain.options.length >= 1 && gain.options.length <= 3, '候选 1~3 个');
-  assert.equal(s.props[47], 2, '未选之前不消耗果实');
+  assert.equal(gain.options.length, 1, '一次只显示 1 个随机武技');
+  assert.equal(s.props[47], 2, '未确认之前不消耗果实');
   const pick = gain.options[0];
   const applied = S.applyFruitChoice(47, pick.kind, pick.id);
   assert.equal(applied.ok, true, applied.msg);
-  assert.equal(s.props[47], 1, '选完才扣一个');
+  assert.equal(s.props[47], 1, '确认后才扣一个');
   assert.ok((pick.kind === 'weapon' ? s.weapons : s.skills).some((x) => parseInt(x) === pick.id), '真的学会了');
 
-  // 恶魔果实：候选都来自已拥有的，选中后忘掉那一个
+  // 恶魔果实：候选来自已拥有的，确认后忘掉那一个
   const before = s.weapons.length + s.skills.length;
   const lose = S.useProp(48);
   assert.equal(lose.needsFruitChoice, true);
   assert.equal(lose.mode, 'lose');
-  assert.ok(lose.options.length >= 1 && lose.options.length <= 3);
-  for (const o of lose.options) {
-    const inW = s.weapons.some((x) => parseInt(x) === o.id);
-    const inS = s.skills.some((x) => parseInt(x) === o.id);
-    assert.ok((o.kind === 'weapon' ? inW : inS), '候选必须是自己拥有的：' + o.name);
-  }
+  assert.equal(lose.options.length, 1, '一次只显示 1 个随机武技');
   const drop = lose.options[0];
+  assert.ok((drop.kind === 'weapon' ? s.weapons : s.skills).some((x) => parseInt(x) === drop.id), '候选必须是自己拥有的：' + drop.name);
   assert.equal(S.applyFruitChoice(48, drop.kind, drop.id).ok, true);
   assert.equal(s.weapons.length + s.skills.length, before - 1, '真的忘掉了一个');
   assert.equal(s.props[48], 1);
+});
+
+test('果实取消也消耗：取消过的武技不再重复，遍历完一轮才清零', () => {
+  const g = game(), S = g.State, s = S.state();
+  s.level = 60; s.weapons = []; s.skills = [];
+  s.props[47] = 500;
+  const pool = [];
+  g.weaponsMap.each((k, v) => { if (g.GData.canLearn('weapon', v.id, s.level)) pool.push({ kind: 'weapon', id: Number(v.id) }); });
+  g.skillsMap.each((k, v) => { if (g.GData.canLearn('skill', v.id, s.level)) pool.push({ kind: 'skill', id: Number(v.id) }); });
+  assert.ok(pool.length > 4, '可学武技要够多才能验证遍历：' + pool.length);
+
+  /* 连点 pool.length 次「取消」：每次只给 1 个、取消都消耗果实、且一个都不重复 ——
+   * 抽 pool.length 次不重复，就等价于把整个可选池遍历了一遍。 */
+  const seen = [];
+  for (let i = 0; i < pool.length; i++) {
+    const r = S.useProp(47);
+    assert.equal(r.needsFruitChoice, true);
+    assert.equal(r.options.length, 1, '一次只显示 1 个');
+    const c = r.options[0];
+    assert.ok(!seen.some((x) => x.kind === c.kind && x.id === c.id), '第 ' + (i + 1) + ' 次取消前不该重复：' + c.name);
+    const res = S.cancelFruitChoice(47);
+    assert.equal(res.ok, true, res.msg);
+    assert.equal(s.props[47], 499 - i, '取消也消耗果实');
+    assert.equal(s.weapons.length + s.skills.length, 0, '取消不改变武技');
+    seen.push(c);
+  }
+
+  // 整池都出现过一轮：下一次先清零记录、重新随机遍历（当前待确认时不扣果实）
+  const again = S.useProp(47);
+  assert.equal(again.needsFruitChoice, true);
+  assert.equal(s.fruitSeen[47].length, 0, '遍历完一轮后记录清零');
+  assert.equal(s.props[47], 500 - pool.length, '待确认时不扣果实');
+  const frozen = JSON.stringify(again.options);
+  assert.equal(JSON.stringify(S.useProp(47).options), frozen, '重开背包不重抽');
+  S.save(); S.load();
+  assert.equal(JSON.stringify(S.useProp(47).options), frozen, '读档 / 大退后仍用同一个结果');
+  const finalPick = S.state().fruitChoices[47].options[0];
+  assert.equal(S.applyFruitChoice(47, finalPick.kind, finalPick.id).ok, true, '确定后学会');
+
+  // 恶魔果实同样：取消不遗忘、照样消耗；下一次换一个（2 件里取消 1 件，另一件必须轮换到）
+  const cur = S.state();   // load() 会换掉存档对象，之后一律用新的这一份
+  cur.weapons = ['15:1']; cur.skills = ['12:1']; cur.props[48] = 2;
+  const d1 = S.useProp(48);
+  assert.equal(d1.options.length, 1);
+  const dc = d1.options[0];
+  assert.equal(S.cancelFruitChoice(48).ok, true);
+  assert.equal(cur.props[48], 1, '取消也消耗恶魔果实');
+  assert.equal(cur.weapons.length + cur.skills.length, 2, '取消不遗忘');
+  const d2 = S.useProp(48);
+  assert.notEqual(d2.options[0].kind + d2.options[0].id, dc.kind + dc.id, '下一次换一个');
+  assert.equal(S.applyFruitChoice(48, d2.options[0].kind, d2.options[0].id).ok, true, '确定后遗忘');
+  assert.equal(cur.weapons.length + cur.skills.length, 1);
 });
 
 test('自由属性点分配可以撤回，撤回只退弹窗里分配的那些', () => {
@@ -3163,19 +3211,20 @@ test('果实碎片：10 个天使/恶魔碎片 + 50 金松果合成对应果实'
   assert.equal(s.goldPoint, 0);
 });
 
-test('天使/恶魔果实三选一：重开与读档都不重抽，选完清掉待选', () => {
+test('天使/恶魔果实随机结果：重开与读档都不重抽，确认后清掉待选', () => {
   const g = game(), S = g.State, s = S.state();
   s.level = 60; s.weapons = []; s.skills = [];
   s.props[47] = 1;
   const first = S.useProp(47);
   assert.equal(first.needsFruitChoice, true);
+  assert.equal(first.options.length, 1);
   const frozen = JSON.stringify(first.options);
   assert.equal(JSON.stringify(S.useProp(47).options), frozen, '重开背包不重抽');
   S.save(); S.load();
-  assert.equal(JSON.stringify(S.useProp(47).options), frozen, '读档/大退后仍用同一组候选');
+  assert.equal(JSON.stringify(S.useProp(47).options), frozen, '读档/大退后仍用同一个结果');
   const pick = first.options[0];
   assert.equal(S.applyFruitChoice(47, pick.kind, pick.id).ok, true);
-  assert.equal(S.pendingFruitChoices().length, 0, '选完后待选清空');
+  assert.equal(S.pendingFruitChoices().length, 0, '确认后待选清空');
 });
 
 test('升级武技三选一：候选随存档固定，读档不重抽', () => {

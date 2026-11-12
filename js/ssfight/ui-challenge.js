@@ -1,70 +1,26 @@
-/* ============================================================================
- * js/ssfight/ui-challenge.js —— 原版**挑战页（tiaozhan 帧）界面代码**的等价 JS【SFR5】
- *
- * 逐句对着原版翻（行号写在每段注释里），显示层用 `js/ssfight/render.js`，
- * 素材来自 `images/ssfight/ui/tags-challenge.json`（`tools/gen-ssfight-ui.cjs tiaozhan` 生成，
- * 页根元件 = **7638**；二级/三级页的库元件「挑战1」= **4756** 也一并打进这个包）。
- * **不照截图重画**：这里每一条赋值都能在原版 `.as` 或导出数据里找到出处。
- *
- * 原版这一页的骨架（导出数据 + MainMovie.as 实测）：
- *   · 根元件 7638 **9 个非空帧**，按 tab / 子页切换：
- *       f1 = 我的好友（4 行 + 右列 + 翻页 + 加好友）
- *       f2 = 随机挑战（3 行 + 第 4 行是"刷新玩家"）
- *       f3 = 关卡（`fubenSub` = 7555，一页 3 个大门 + desc + 左右翻页）
- *       f4/f5/f6/f7/f8/f9 = 竞技场报名 / 对局 / 结果 / 天梯榜 / 奖励说明
- *   · 顶栏 4 个 tab（位置见下表，`MainMovie.as:23764` 的 `mainButtons`）：
- *       `tab`(7264) 随机 / `tab1`(7260) 我的好友 / `tab2`(7257) 竞技场 / `tab3`(7266) 关卡
- *     每个 tab 元件 4 帧：**1 常态 / 2 选中 / 3 另一档 / 4 空**（导出数据实测）。
- *   · 行元件 `f1..f4`（7237）里是 `friendname` + `flevel` 两个文本；
- *     右列拳套卡 `s1..s4`（7251）按"关系"切 1~5 帧、末帧为空白（`doShowFriends` :13327）；
- *     右面板 `rightBg`（7232）放立绘与力/敏/速/命。
- *   · 关卡二级页 = `fubenSub`（7555）第 1 帧 / 3 个门卡 `button1..3`（4748：1 可打 / 3 锁定）
- *     + `bg1..3`（7549，帧 = 门号×2−1）+ `desc`；三级页 = 库元件「挑战1」**4756**：
- *       第 5 帧 = 难度选择（`style`=4738 按门号切帧 + `button1..6` 六颗星 + `back`），
- *       第 4 帧 = 出战确认（`info1` / `info2` + `button1` / `button2`）。（`showGate` :1015 /
- *       `showhardWin` :1161 / `showFightWin` :1192）
- *
- * ⚠ 「现代适配」的两处刻意偏差（其余逐条照原版）：
- *   1. 原版是**键盘选中 + Fire**：行 `f1..f4` 的 onFire 进的是"好友动作菜单"（`seeFriend()`）。
- *      复刻没有服务端关系数据（`relation`），所以：**点行 = 选中**（右面板显示该对手的力敏速命），
- *      **点行右端的拳套卡 `s1..s4` = 直接开战** —— 就是"选中再按确定"的鼠标等价物。
- *   2. 竞技场 tab 复用复刻已有的竞技场页（`UI.runAction('arena')`）：原版那一套要服务端
- *      房间 / 报名 / 掷骰子，复刻的竞技场是自研实现，语义相同、界面按现代样式。
- *
- * 用法：
- *   await SfChallenge.open(container);   // 渲染挑战页 + 绑定当前存档
- *   SfChallenge.destroy();
- * ========================================================================== */
+// 页根 7638 的 9 个非空帧：1 好友 / 2 随机 / 3 关卡 / 4 竞技场规则 / 5 报名 / 6 首屏 /
+// 7 天梯菜单 / 8 天梯榜 / 9 奖励说明。
 (function () {
   'use strict';
 
-  /** 复刻侧通用件（量热区 / 动效壳 / 按下闪一遍 / 钉帧 / 数字精灵 …），在 `ui-main.js` 里实现并导出。 */
+  // 公共交互件（量热区 / 动效壳 / 按下闪 / 钉帧 / 数字精灵）在 ui-main.js 实现并导出。
   const T = () => (window.SfUiMain && window.SfUiMain.toolkit) || null;
   const S = () => (window.State && State.state && State.state()) || null;
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  /* 顶栏四个 tab：实例名 → 语义（`MainMovie.as` 的 showRandomFriends / showMyFriends /
-   * showMyRacing / showMyGate 与 `setHeadButtons` :13028 起的 onFire 逐条对应）。 */
   const TABS = [['tab', 'random'], ['tab1', 'friends'], ['tab2', 'arena'], ['tab3', 'gates']];
-  /** 页帧号：好友 / 随机 / 关卡（`showMyFriends`→frame 1、`showRandomFriends`→frame 2、
-   *  `showGate`→frame 3、`showMyRacing`→`showRacing0()`→frame 6（竞技场首屏））。 */
   const PAGE = { friends: 1, random: 2, gates: 3, arena: 6 };
-  /* 竞技场那一套的子页帧号（原版 `showRacing0/1/2` 与 `showRank` 里的 gotoAndStop）：
-   *   f4 = 冠军赛规则 + 「开始比赛」（`desc` / `startCompete` / `tiaozhanTap`）
-   *   f6 = 竞技场首屏（`compete` 两颗键：冠军赛 / 天梯赛）
-   *   f7 = 天梯赛菜单（`button1` 奖励说明 / `button2` 天梯排行 / `button3` 我的排行）
-   *   f8 = 天梯榜（`rank1..4` / `inte1..4` / `name1..4` / `myinte` / `myrank` / `type`）
-   *   f9 = 奖励说明（`title` / `des` / `name` / `text11..13`/`21..23`/`31..33`） */
+  // 竞技场子页帧：4 规则 / 5 报名 / 6 首屏 / 7 菜单 / 8 天梯榜 / 9 奖励说明。
   const ARENA = { rules: 4, join: 5, home: 6, menu: 7, ladder: 8 };
 
-  let current = null;    // { view, host, tab, page, roster, sel, sub }
-  /* 随机挑战名单缓存（用户口径：离开随机页再回来不刷新）。
-   * 只缓存**随机页**那一批，和 `current.roster`（各 tab 共用）分开；`state` 用来在
-   * 新档 / 读档（`State.state()` 换对象）后自动作废。手动「刷新玩家」/ 打完一场仍会清空。 */
-  let randomCache = null; // { state, roster }
+  // 复刻偏差：点行 = 选中（右侧显示力敏速命），点右端拳套卡 s1..s4 = 开战；
+  let current = null;
+  // 随机挑战名单缓存：离开随机页再回来不刷新；只缓存随机页那一批，
+  // 新档 / 读档（State.state() 换对象）后自动作废；手动刷新或打完一场仍会清空。
+  let randomCache = null;
   let seq = 0;
-  /* 刷新玩家：不扣金松果，最多 10 次；随机挑战开始或超过 10 分钟重置。 */
+  // 刷新玩家不扣金松果，最多 10 次；随机挑战开始或超过 10 分钟重置。
   const REFRESH_LIMIT = 10;
   const REFRESH_WINDOW = 10 * 60 * 1000;
   let refreshTimer = 0;
@@ -85,66 +41,22 @@
     return Math.max(0, REFRESH_LIMIT - Math.max(0, Number(rf && rf.count) || 0));
   }
 
-  /* ============================================================
-   * 关系（原版服务端下发的 `relation`）→ 两套帧号
-   * ------------------------------------------------------------
-   * 复刻没有服务端，但存档里本来就有这三种关系（师父 / 徒弟 / 好友），
-   * 加上原版那颗木人（`relation = 4`），所以这张表能逐条对上原版：
-   *   · `s1..s4`（拳套卡 7251）那枚**关系标志**（`doShowFriends` :13366-13385）：
-   *     `relation` 2(师父)→帧1 / 1(徒弟)→帧2 / 0·3·null·4→帧3 / −1→帧4 / −2→帧5；
-   *   · 动作菜单 `subframe`（4723，29 帧）的分支起点（`myDraw` :22318-22357）：
-   *     1(好友)→1 / 3(徒弟)→6 / 5(陌生人)→11 / 4(陪练)→15 / 2(师父)→20 / 6(木人)→26。
-   * 木人那一档原版就是 `relation = 4`（`s` 卡停第 4 帧），所以复刻直接给它 4，
-   * 不用再编一个"练功"关系值。
-   * ========================================================== */
+  // 原版 relation（服务端下发）→ 两套帧号：s1..s4 关系标志 7251：
   const REL = { friend: 0, prentice: 1, master: 2, stranger: 3, dummy: 4 };
   const relOf = (foe) => {
     if (foe && foe.dummy) return REL.dummy;
-    /* 随机页的对手在原版一律是**陌生人**：服务端 `getFriends("random")` 把每一条
-     * 都强制写成 `relation = 3`（MainMovie.as:2633-2636），于是 `seeFriend()` 翻成
-     * `actionType = 5`，菜单第四颗就是「加好友」。
-     * 复刻的随机对手是 `State.genAI` 现抽的（没有 `kind`），旧写法落到默认好友档，
-     * 菜单就拨到了好友画稿（帧 1..4，第四颗是「收为徒弟」）—— 用户 2026-10 报的就是它。
-     * 按"当前站在哪一页"补回原版关系：随机页 = 陌生人；好友页才看 `kind`。 */
+    // 原版随机页对手一律是陌生人（服务端 getFriends("random") 强制 relation=3），
     if (current && current.tab === 'random') return REL.stranger;
     if (foe && foe.kind === 'master') return REL.master;
     if (foe && foe.kind === 'prentice') return REL.prentice;
     return REL.friend;
   };
-  /** `s1..s4` 关系标志停哪一帧（原版 `doShowFriends` :13366-13385）。
-   *  ⚠ **木人走第 3 帧**（= 原版那一档的「邀请」话术）：原版把 `relation == 4` 与
-   *   0 / 3 / null 并列 `gotoAndStop(3)`，木人**没有**自己的专用标志帧
-   *   （`7251` 只有 7 帧：2 徒弟 / 4 -1 / 5 -2 / 6、7 空档）。
-   *   复刻以前按"复刻自己的木人语义"把它单拨到第 4 帧，反而对不上原版 —— 用户 2026-10 口径：
-   *   "我希望测攻击木头人右侧仍然是拳头标志而不是邀请二字"（即**照原版**那一档，别自创）。 */
+  // 木人必须走第 3 帧：原版把 relation==4 与 0/3/null 并列 gotoAndStop(3)，
+  // 7251 只有 7 帧（2 徒弟 / 4 -1 / 5 -2 / 6、7 空档），没有木人专用标志帧。
   const RELATION_BADGE = { '-2': 5, '-1': 4, '0': 3, '1': 2, '2': 1, '3': 3, '4': 3 };
   function relationFrame(foe) {
     return RELATION_BADGE[String(relOf(foe))] || 3;
   }
-  /* ============================================================
-   * 动作菜单 `subframe`（4723）的**分支**（= 原版 `actionType`）
-   * ------------------------------------------------------------
-   * 原版 `seeFriend()`（MainMovie.as:23212-23257）**先把关系翻成 `actionType`**，
-   * 再由 `myDraw()`（:22318-22357）的 `switch (actionType)` 拨帧：
-   *   actionType 1（好友，relation 0）   → `gotoAndStop(jiantou_WZ_Y2)`        帧 1..4
-   *   actionType 2（师父，relation 2）   → `gotoAndStop(jiantou_WZ_Y2 + 19)`   帧 20..24
-   *                                        （第 4 行是左右两颗：`jiantou+21` = 23 查看 /
-   *                                          `jiantou_WZ_X2 + 22` = 24 返回）
-   *   actionType 3（徒弟，relation 1）   → `gotoAndStop(jiantou_WZ_Y2 + 5)`    帧 6..9
-   *   actionType 4（陪练，relation null）→ `gotoAndStop(jiantou_WZ_Y2 + 14)`   帧 15、16
-   *   actionType 5（陌生人，relation 3） → `gotoAndStop(jiantou_WZ_Y2 + 10)`   帧 11..14
-   *   actionType 6（木人，relation 4）   → `gotoAndStop(jiantou_WZ_Y2 + 25)`   帧 26..28
-   * `jiantou_WZ_Y2` 是 **1-based 的行号**（`seeFriend` 进来时置 1，即第 1 行）。
-   *
-   * ⚠ 复刻以前把两个世界的编号混在一张表里（"case" 用的是自己排的顺序：徒弟 2 / 师父 5 /
-   *   陌生人 3 / 木人 6），于是**六档里错了四档**：木人打开的是"挑战Ta!/返回/查看"（而它
-   *   本该是"测攻击/查看记录/关闭"）、徒弟打开的是陌生人那一套、师父打开的是徒弟那一套……
-   *   绿高亮跟着 `subframe` 的帧走，所以看着就是"亮起来的那一行跟鼠标不在一条上"、
-   *   而且菜单里的项跟对手对不上（用户 2026-10 报的"指针不在挑战Ta 上面、这个 ui 却异常亮起"）。
-   *   现在这张表**逐条照抄 `seeFriend` 的关系→actionType**，`MENU_LAYOUT` 的键也用 actionType。
-   * ⚠ 用 `switch` 而不是查表：`REL` 的取值（friend 0 / prentice 1 / master 2 / stranger 3 /
-   *   dummy 4）与 `actionType` 是两套编号（"陪练"才是 actionType 4，而 `REL.dummy` 也是 4
-   *   —— 写表会撞键）。 */
   const MENU_CASE = (rel) => {
     switch (rel) {
       case REL.master: return 2;     // 我的师父
@@ -154,10 +66,6 @@
       default: return 1;             // 好友（actionType 4「陪练」复刻用不到）
     }
   };
-  /* 每个分支的**起始帧号**（= `MENU_LAYOUT[case].base`，与上表的偏移一一对应）：
-   *   1 → 1（好友）/ 2 → 20（师父）/ 3 → 6（徒弟）/ 4 → 15（陪练）/ 5 → 11（陌生人）/ 6 → 26（木人）。 */
-
-  /* ---------- 通用小件 ---------- */
   const clipOf = (host, name) => (host && host.byName ? host.byName(name) : null);
   function stopAt(clip, n) {
     if (!clip || !clip.gotoAndStop) return;
@@ -167,41 +75,19 @@
     const t = T();
     if (t && clip) t.setText(clip, str == null ? '' : String(str));
   }
-  /* ============================================================
-   * 顶栏四个 tab 的取用
-   * ------------------------------------------------------------
-   * 随机 / 好友 / 关卡三页里 `tab..tab3` 直接挂在页根（7638）上；
-   * 但**竞技场那几帧**（f4 的「冠军赛」规则页等）把四个 tab 塞进了库元件
-   * `tiaozhanTap`（7562，5 帧 = 四种"把当前那颗提到最前"的排法）里，
-   * 页根上根本没有 `tab` 这个名字 —— 只按页根找的话，竞技页上的 tab 是**死的**。 */
   function tabClip(view, name) {
     const direct = clipOf(view, name);
     if (direct) return direct;
     const tap = clipOf(view, 'tiaozhanTap');
     return tap && tap.byName ? tap.byName(name) : null;
   }
-  /* ============================================================
-   * 行内两段文字的落点校正（原版截图逐像素量过，见 docs/更新记录）
-   * ------------------------------------------------------------
-   * 原版这两段是 Flash 的 EditText，落点由 Flash 自己的排版规则算；
-   * 复刻的 `<text>` 走的是 `textfields.json` 的字段框公式（见 render.js 的 textNode）。
-   * 拿原版截图（`references/screen/屏幕截图 2026-09-23 162807.png`）与复刻渲染
-   * 按**舞台单位**逐像素比过之后，这两处才是真差：
-   *   · `flevel`（等级数字，元件 7235）：原版**居中**在等级徽章（元件 7233，
-   *     局部包围盒 x[-1,18.05] y[-8.95,9.45]）里；复刻偏左 1.50、偏下 2.05 个舞台单位。
-   *   · `friendname`（昵称，元件 7234）：原版的字墨比复刻低 4.1~5.0 个舞台单位（取 4.6）。
-   * 三个常量集中在这里，改这一处就能回调；字号从 `textfields.json` 来，这里不碰。
-   * ⚠ 换帧（`gotoAndStop`）会**重建**文本节点（导出数据里这两条放置带 `rp`），
-   *   重建出来的就是素材里的占位串（"大力松鼠鼠" / "99"）—— 所以每次换帧后都要
-   *   `repaintRows()` 重写一遍，否则"选中别的敌人之后，原来那一行的名字会变成占位串"。
-   * ========================================================== */
+  // 字号来自 textfields.json，改这两个常量即可。⚠ 换帧会重建文本节点（导出放置带 rp），
+  // 所以每次换帧后都要 repaintRows()，否则选中别的敌人后原行名字会变回占位串。
   const ROW_BADGE = { x0: -1, x1: 18.05, y0: -8.95, y1: 9.45 };   // 元件 7233（等级徽章）局部框
   const LEVEL_MA = { x: 1.9, y: -6.95 };                          // 元件 7235 的放置平移
   const LEVEL_FONT = 14;                                          // 元件 7235 的字号（textfields.json）
   const LEVEL_INK = 0.714;                                        // 数字墨高 / 字号（实测）
-  /* 昵称的落点微调（用户 2026-10 口径："当前的对手中文名略偏下偏左，稍微向右上移动一点"）：
-   * 之前是"整体下移 4.6"（那一版是对着参考截图量的），现在按"再往右上挪一点"收一档。
-   * 两个常量集中在这里，改这一处就能回调。 */
+  // 昵称落点微调（舞台单位）：两个常量集中在这里，改这一处即可。
   const NAME_DY = 3.4;                                            // 昵称相对字段框的下移量（舞台单位）
   const NAME_DX = 1.2;                                            // 昵称右移量（舞台单位）
   function alignRowText(row) {
@@ -221,7 +107,6 @@
     const nnode = ng && (ng.g || ng);
     if (nnode && nnode.querySelectorAll) {
       for (const t of nnode.querySelectorAll('text')) {
-        /* 幂等：基准值只记一次，之后每次都写成 基准 + 偏移（不会被反复累加）。 */
         if (t.__rowBaseY == null) t.__rowBaseY = Number(t.getAttribute('y') || 0);
         if (t.__rowBaseX == null) t.__rowBaseX = Number(t.getAttribute('x') || 0);
         t.setAttribute('y', t.__rowBaseY + NAME_DY);
@@ -229,11 +114,10 @@
       }
     }
   }
-  /** 原版 `mc.left._visible = false`（不是切禁用帧）—— 照抄成 CSS `visibility`。 */
   function setVisible(clip, on) {
     if (clip && clip.g) clip.g.style.visibility = on ? '' : 'hidden';
   }
-  /** 换帧/换页会把 `<g>` 的子节点整个重建 —— 动效壳与点击区要补回来。 */
+  // 换帧/换页会把 <g> 子节点整个重建，动效壳与点击区要补回来。
   function refreshShell(clip) {
     const t = T();
     if (!t || !clip || !clip.g) return;
@@ -241,7 +125,7 @@
     const shell = clip.g.querySelector(':scope > g.uc-pop');
     if (shell) t.wirePopPress(shell);
   }
-  /** 把元件接成"可点"（常态帧 / 悬停帧 / 点击回调）。与状态页同一套写法，见 ui-status.js。 */
+  // 与状态页同一套写法，见 ui-status.js。
   function wireClickable(clip, spec) {
     const t = T();
     if (!t || !clip || !clip.g) return;
@@ -253,10 +137,7 @@
     clip.__chAfter = spec.after || null;
     clip.__chHover = Number(spec.hover) || 0;
     clip.__chPress = Number(spec.press) || 0;
-    /* `onHover`：**指针一进来就执行**的回调（原版是键盘光标走到哪就选到哪，
-     * 复刻用鼠标等价物）。与 `hover`（拨帧）分开：挑战页那一列行要的是
-     * "换选中项"（`selectRow`，顺带换右侧立绘），不是给行自己拨一档画稿。
-     * ⚠ 回调每次 `wireClickable` 都刷新（闭包捕获的行号会变），监听只挂一次。 */
+    // 回调每次 wireClickable 都刷新（闭包里的行号会变），监听只挂一次。
     clip.__chHoverCb = spec.onHover || null;
     if (!clip.__chListeners) {
       clip.__chListeners = true;
@@ -279,10 +160,8 @@
         if (clip.__chFire) clip.__chFire();
       });
     }
-    /* ⚠ 下面这一段**每次调用都要跑**：`unwire()` 会把元件从点击路由里摘掉，
-     * 而"随机"页第 4 行是**先被当成空槽注销、再被重新接上**的（`fillRows` 只填 3 行）
-     * —— 以前这里写成"接过线就直接 return"，于是「刷新玩家」再也收不到点击
-     * （用户 2026-10 报的"刷新玩家按钮无法正常刷新"）。 */
+    // 下面这段每次调用都要跑：unwire() 会把元件从点击路由摘掉，而随机页第 4 行
+    // 是先被当空槽注销、再重新接上的；写成“接过线就 return”会让「刷新玩家」收不到点击。
     stopAt(clip, idleOf());
     clip.g.style.cursor = 'pointer';
     clip.g.style.pointerEvents = 'auto';
@@ -292,8 +171,7 @@
     if (shell) t.wirePopPress(shell);
     if (clip.__chAfter) clip.__chAfter();
   }
-  /** 换页（`view.gotoAndStop`）会把整棵子树重建，热区登记表里会留下一堆已经不在树上的元件。
-   *  清空重来 —— 判定时虽然会跳过 `isConnected === false` 的，但表会一直长。 */
+  // 换页会重建子树，热区登记表里会留下已不在树上的元件；清空重来，否则表会一直长。
   function resetHits(svg) {
     const t = T();
     if (!t || !svg) return;
@@ -302,20 +180,6 @@
     r.hovered = null;
   }
 
-  /* ============================================================
-   * 右侧那块「对手展示」（`rightBg` = 7232）
-   * ------------------------------------------------------------
-   * 原版 `showUserPic(mc, k, user)`（MainMovie.as:17522）：
-   *   · user == null      → `gotoAndStop(4)`（木桩）
-   *   · user.relation == 4 → `gotoAndStop(3)`（"添加好友会跳转 WAP…"那段介绍）
-   *   · 其余              → `gotoAndStop(1)` + `showPic2`（力/敏/速/命**文本**）
-   *                          + `showFace`（按部位贴对手的装备）+ `showNumber(user.totalharm,…,5)`
-   * `showRandomFriends`/`showMyFriends` 进页时都先 `rightBg.gotoAndStop(4)`。
-   *
-   * ⚠ 复刻之前**从没给 rightBg 拨过帧**、也没把它钉住（它在 `skip` 名单里，不参与静默），
-   *   于是它按自己的时间轴一直播 —— 表现就是"右侧的敌人展示会不停切换为敌人、木桩与介绍"
-   *   （用户 2026-10 报的）。现在按原版的三档语义拨帧并停住。
-   * ========================================================== */
   const FACE_PARTS = [
     { type: 0, cells: [['mc_head', 0]] },
     { type: 1, cells: [['mc_fistL', 0], ['mc_fistR', 1]] },   // 外拳套 / 内拳套
@@ -325,16 +189,14 @@
   let gearTables = null;
   async function loadGearTables() {
     if (gearTables) return gearTables;
-    const B = 'images/ssfight/ui/';
-    const j = (f) => fetch(B + f, { cache: 'force-cache' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const j = (f) => SfRender.loadTable(f).catch(() => null);
     const [frames, slots] = await Promise.all([j('gear-frames.json'), j('gear-slots.json')]);
     if (!frames || !slots) return null;
     const cont = {};
-    /* showFace 的 mc_head/mc_hand 等挂点使用非 B 立绘容器；B 容器服务战斗骨骼，
-     * 注册原点不同，不能共用。缺失立绘表时不拿战斗稿补位。 */
+    // showFace 的挂点用非 B 立绘容器；B 容器服务战斗骨骼，注册原点不同，不能共用。
     for (const c of slots.portraitContainer || []) cont[c.type] = c.ids;
-    /* 橙装现在有原版 q4 id；旧档的实例 `orange:true` 仍兼容。橙稿帧按同部位同名字的 q4 帧查，
-     * 与状态页 / 战斗 `planSide` 同一条规则。 */
+    // 橙装有原版 q4 id；只带 orange:true 的实例仍兼容。橙稿帧按同部位同名字的 q4 帧查，
+    // 与状态页 / 战斗 planSide 同一条规则。
     const keyOf = (g) => Number(g.type) + '|' + String(g.name || '');
     const q4 = new Map();
     for (const g of frames.gear || []) if (Number(g.quality) === 4) q4.set(keyOf(g), g.frame);
@@ -347,7 +209,6 @@
     gearTables = { frameById: new Map((frames.gear || []).map((g) => [Number(g.id), g.frame])), orangeFrameById, cont: cont };
     return gearTables;
   }
-  /** 原版 `showFace(mc, wearlist)` 的等价物：按部位把对手的装备贴到立绘上。 */
   function showFace(bg, byType) {
     if (!bg || !gearTables) return 0;
     let n = 0;
@@ -358,8 +219,7 @@
         ? ((orange && gearTables.orangeFrameById && gearTables.orangeFrameById.get(Number(g.id))) ||
            gearTables.frameById.get(Number(g.id)))
         : 0;
-      /* 与状态页同源：附加属性是数组，只对头/拳套应用最大强化档；
-       * 衣服/鞋子跨档会变成另一套画稿，不能一起加偏移。 */
+      // 附加属性是数组，只对头/拳套用最大强化档；衣服/鞋子跨档会变另一套画稿，不能加偏移。
       const raw = g && g.ext;
       const extMax = Math.max(0, Math.min(3, Array.isArray(raw)
         ? raw.reduce((m, e) => Math.max(m, Number(e && e.level) || 0), 0)
@@ -378,7 +238,7 @@
     }
     return n;
   }
-  /** 战力（原版 `user.totalharm`）：对手所有武器的伤害上限之和 —— 与战斗里用的同一份数据。 */
+  // 战力（原版 user.totalharm）：对手所有武器伤害上限之和，与战斗里用的同一份数据。
   function totalHarm(foe) {
     let sum = 0;
     for (const w of (foe && foe.weapons) || []) {
@@ -386,8 +246,7 @@
     }
     return sum;
   }
-  /** 右面板的四个数值：原版 `showPic2` 用的是 **setText**（这四个是文本字段 7220-7223），
-   *  不是位图数字精灵 —— 复刻之前误用 `showNumber`，写不进去，屏幕上一直是素材占位串。 */
+  // 四维是文本字段 7220-7223，原版 showPic2 用 setText；不能用 showNumber（数字精灵写不进去）。
   function paintStats(view, foe) {
     const bg = clipOf(view, 'rightBg');
     if (!bg || !bg.byName) return;
@@ -405,23 +264,10 @@
     if (!hasField) return;
     paintStats(view, foe || null);
   }
-  /** 原版 `showUserPic` 的三档语义（`null` → 木桩；有对手 → 立绘 + 装备 + 数值）。 */
   function showUserPic(view, foe) {
     const bg = clipOf(view, 'rightBg');
     if (!bg) return;
-    /* ⚠ **测攻击木头人那一行也得走木桩那一档**（用户 2026-10 口径："好友页面的测攻击木头人，
-     *  它右侧展示的图像目前为松鼠，将其替换为木头人"）。
-     *  以前判据只有 `foe ? 1 : 4` —— 木人是**一行真实数据**（`{kind:'dummy', relation:4}`），
-     *  于是它被当成"有对手"，停在**第 1 帧**（那套装扮好的松鼠立绘），右侧就画出一只松鼠。
-     *  ------------------------------------------------------------
-     *  `rightBg`（7232）的导出流是**增量**的（61 条标签 / 6 帧，逐帧实测）：
-     *    f1 = 松鼠立绘 + `num1..5`（战斗力）—— 每帧都先 `rm` 掉上一帧那一批；
-     *    f2 = `7225` 木桩底座 + `7226`（"点击【邀请】好友…"那段说明，压在木桩上）；
-     *    **f3 = `7227`（木架）+ `7229`（木桩小人，内部 3195+7228）＝ 干净的木桩**；
-     *    f4 = 再加 `7230`（木桩轮廓线）；f5/f6 = 再叠 `7231`（"添加好友功能会跳转至 WAP 页面"）。
-     *  ⚠ 我最初按"每一帧都是从第 1 帧累积"去读，误以为 f4 才是木桩 —— 那是错的：
-     *    f4 会把 `7230` 那条轮廓叠在木桩上（看起来就是一块**灰色剪影**盖住整只松鼠）。
-     *    正确的木桩档是 **f3**，也是画面最干净的一帧。 */
+    // 测攻击木头人是真实一行数据（kind:'dummy', relation:4），也必须走木桩档，否则停 f1 画成松鼠。
     const dummy = !!(foe && (foe.dummy || foe.kind === 'dummy' || foe.kind === 'wood'));
     stopAt(bg, dummy ? 3 : (foe ? 1 : 3));
     refreshShell(bg);
@@ -443,10 +289,6 @@
     paintStats(view, foe);
   }
 
-  /* ============================================================
-   * 存档侧的取值（复刻自己的数据模型；原版这些都由服务端下发）
-   * ========================================================== */
-  /** 随机对手：复刻的 `State.genAI` 在玩家等级附近抽 3 位（与原版一页 3 行一致）。 */
   function rollRoster() {
     const s = S();
     const out = [];
@@ -458,10 +300,8 @@
   }
   function friendRoster() {
     const list = (State.friendList ? State.friendList() : []) || [];
-    /* `gears` / `weapons` 是 `State.addFriend` 存下来的**好友自己那套**（原版由服务端下发）：
-     * 右侧立绘按它贴装备、战斗力按它的武器伤害上限求和。
-     * 老档里的好友没有这两个字段 → `ensureFriendLoadout()` 按等级就地补一份并写回存档，
-     * 免得"好友页右侧永远是空立绘 + 战斗力 0"。 */
+    // gears / weapons 是 State.addFriend 存下的好友自己那套（原版服务端下发）；
+    // 缺字段的老档由 ensureFriendLoadout 按等级就地补并写回存档，否则右侧空立绘 + 战力 0。
     const friends = list.map((f) => {
       const fr = (State.ensureFriendLoadout ? State.ensureFriendLoadout(f) : f) || f;
       return {
@@ -469,11 +309,7 @@
         gears: fr.gears || [], weapons: fr.weapons || [], kind: 'friend', friend: true,
       };
     });
-    /* 用户 2026-10 口径（好友页）："首先显示的是师徒，然后是木头人（参考 ssfight 完善与木头人的
-     * 战斗系统，并可以查看个人记录），然后是已经添加的好友。"
-     * 所以这一页的名单 = **师徒 → 木头人 → 好友** 三段拼起来的（原版这一页来自服务端的
-     * `friendsArray`，里面本来就按 relation 排：师父 / 徒弟排在好友前面，木头人则是
-     * 原版"练功房"里那颗 npcType='wood' 的木桩）。 */
+    // 好友页名单顺序 = 师徒 → 木头人 → 好友（原版 friendsArray 也把师徒排在好友前，
     const out = [];
     const s = (S() || {});
     const seen = new Set();
@@ -487,27 +323,18 @@
     if (s.master && s.master.name) push(foeRow(s.master, 'master'));
     for (const p of (s.prentices || [])) push(foeRow(p, 'prentice'));
     push(dummyRow(s));
-    /* 师徒 / 木人已经排在最前面：好友里若有同名条目（老档、或先加好友后拜师），
-     * 这里直接跳过 —— 否则它会在**第二页**再出现一次，和第一页的师徒重复。
-     * 用户 2026-10-24 口径："不希望师徒除了在第一页显示，还会在之后的页面中再显示一次"。 */
+    // 师徒 / 木人已在最前：好友里同名的（先加好友后拜师）直接跳过，
+    // 否则会在第二页再出现一次。
     for (const f of friends) push(f);
     return out;
   }
-  /** 师徒条目 → 一行的数据。
-   *  ⚠ 这里以前有两个真 bug（用户 2026-10 报的"在随机与好友之间切换后，敌我数据全变成 1"）：
-   *    ① `State.ensureFriendLoadout({name, level})` 传进去的是**新造的壳对象**，它返回的
-   *       也就是那个壳（只有 name / level）—— 三维全 `undefined`，落到下面的 `|| 1` 就成了 1；
-   *    ② 就算不补装备，原写法也**只**保留了 `power/agility/speed/hp` 四个数，
-   *       `weapons` / `skills` / `gears` 都没带出来 → 「查看」里武器技能是空的、右侧立绘不穿装备。
-   *  现在：先用 `State.ensureFriendLoadout` 就地把装备补到**原对象**上（它会保留三维），
-   *  再把整套字段（含 `gears` 与装备容器要的 `type`）取出来。 */
+  // 师徒条目 → 一行数据：ensureFriendLoadout 要作用在**原对象**上（新造的壳只有 name/level，
+  // 三维会全 undefined 落到 ||1）；返回的整套字段（含 weapons/skills/gears）都要带出来。
   function foeRow(src, kind) {
     if (!src || !src.name) return null;
     const s = S() || {};
     const lv = Math.max(1, Math.round(Number(src.level) || Number(s.level) || 1));
-    /* 师父 / 徒弟是老档里可能只有 `{name, level}` —— 那种情况才现算一份三维
-     * （**不写回存档**：师徒的三维在拜师 / 收徒那一刻就定下来了，
-     *   后来补出来的这份只用于显示，不能反过来覆盖存档）。 */
+    // 只有 {name, level} 的师徒：三维现算一份用于显示，不写回存档（拜师/收徒时已定）。
     if (src.power == null) {
       const rolled = (State.ensureFriendLoadout
         ? State.ensureFriendLoadout({ name: src.name, level: lv })
@@ -518,7 +345,7 @@
         gears: (rolled.gears || []).slice(),
       });
     }
-    /* 有三维（正常路径）：装备按需就地补 —— 补齐的是**同一个对象**，返回的也是它。 */
+    // 有三维（正常路径）：ensureFriendLoadout 就地补装备，补的是**同一个对象**，返回的也是它。
     const full = (State.ensureFriendLoadout ? State.ensureFriendLoadout(src) : src) || src;
     return {
       name: src.name, level: lv,
@@ -529,21 +356,8 @@
       kind: kind, friend: kind !== 'dummy', row: src,
     };
   }
-  /* ---------- 「木头人」那一行 ----------
-   * 原版那一行就叫 **测攻击木头人**（`showLevelUp` :7045-7059 在 5 级时塞进好友表）：
-   *   `{id: 400, name: "测攻击木头人", level: 1, relation: 4, fightable: "true",
-   *     countObj.count: 10000, power: 0, agility: 15, speed: 0, maxHp: 800, wearsList: null}`
-   * 打它走 `fightType = 8`（`flash/exercise.do`）+ `Stakes` 木桩类：只有待机与挨打两个动作，
-   * **力量 0 / 速度 0**（打不动你），**敏捷 15**（有闪避），**800 血**。
-   * ⚠ 血量口径：真实抓包 `friends.do` 里是 **800**；`exercise.do` 里的 200 是本地 stub
-   *   生成器（`_analysis/tools/gen_battle*.py`）伪造的示例，不是原版战斗数据。
-   * ⚠ 回合口径：原版 `maxRounds` 是 **60**（全局战斗上限），但 `Stakes.reduceBlood`
-   *   重写后**不调用 checkDead** —— 木桩不会被打死，实际就是「固定回合 + 每回合回满」。
-   *   2026-10 用户口径：每攻击一回合后血量恢复 100%；生命最低保留 1，伤害照真实数值记录，
-   *   下一回合先回满，再显示本回合扣血。60 回合对练习太长，
-   *   这里按用户口径固定成 `rounds`（改这一个常量即可切回 60）。
-   * 打完给的是「战斗统计」那一页（手/武/技三段伤害 + 历史最高 + 排名），不是普通战果。
-   * ⚠ 原版那一行有 `countObj.count = 10000`（无限次）与 `wearsList = null`（不穿装备）。 */
+  // 走 Stakes 木桩类，不判死亡、每回合回满，所以是固定回合训练场；生命最低保留 1，
+  // 伤害按真实数值记录；回合数见 DUMMY.rounds（原版全局 maxRounds=60，这里固定 10）。
   const DUMMY = {
     id: 400, name: '测攻击木头人', level: 1,
     power: 0, agility: 15, speed: 0, hp: 800,
@@ -563,10 +377,8 @@
     };
   }
 
-  /** 原版的文本字段**不会自动折行**（SVG 的 `<text>` 更不会）—— 导出数据里每个字段的
-   *  `bd` 给了框宽（例：`info1`=4730 宽 127、`desc`=7276 宽 271），字是按框宽排的。
-   *  原版那些文案是服务端按框宽断好行下发的，复刻得自己断，否则长句会直接冲出对话框。
-   *  `wrap(text, per)` 是"每行 N 个字"的硬断（中文等宽，够用），**保留已有的 `\n`**。 */
+  // 原版文本字段不会自动折行（SVG <text> 也不会）：字段框宽见 __textBox.meta.bd
+  // （例：info1=4730 宽 127、desc=7276 宽 271），原版文案由服务端断好，这里必须自己断。
   function wrap(text, per) {
     const out = [];
     for (const para of String(text == null ? '' : text).split('\n')) {
@@ -579,29 +391,17 @@
     }
     return out.join('\n');
   }
-  /* ============================================================
-   * 按**字段框的真实宽度**断行（`fitText`）
-   * ------------------------------------------------------------
-   * `wrap(text, N)` 的 N 是手写的、只能靠"实测一下感觉差不多"——
-   * 用户 2026-10 报的"关卡界面点挑战后的介绍文字排版有大问题，严重超出屏幕范围"就是它：
-   * `info1`（4730）框宽 127 个舞台单位，原来的 `wrap(..., 10)` 按 10 个**全角字**断，
-   * 而那句话里混着"经验3/4/20、金松果25"这种半角，实际一行能放 15~17 个字符 ——
-   * 断得过窄 → 行数翻倍 → 纵向一路画到对话框外（`render.js` 只按框**宽**裁，纵向是放开的）。
-   * 现在改成：用 canvas 量一次这个字段的**每单位字号的字符宽**（只量一次、缓存在字段上），
-   * 再按 `(框宽 − 左右边距) / 字符宽` 算每行能放几个**字符**（中文算 1 个、ASCII 按实宽折算）。
-   * 这样换字号 / 换框宽都不用再回来改魔数。 */
+  // 纵向画到框外（render.js 只裁宽、不裁高）。fitText 用 canvas 量一次单位字号字宽并缓存，
   const charWCache = new WeakMap();
   let measureCtx = null;
-  /** 某个文本容器 `clip` 的字符宽度（**单位字号**，即"字号 1 时一个汉字多宽"）。 */
   function charUnit(clip) {
     const tb = clip && clip.__textBox;
     if (!tb || !tb.meta || !tb.meta.bd) return null;
     if (charWCache.has(clip)) return charWCache.get(clip);
     let w = 1, font = '', fontSize = 12;
     try {
-      /* 字体/字号**从画出来的那个 `<text>` 上读**（`getComputedStyle` 会把
-       * `font-family:"SimHei",…` 解析成最终列表），这样量出来的宽度与渲染完全一致；
-       * 读不到再退回导出里的 `h` / 默认字体。 */
+      // 字体/字号从画出来的 <text> 上读（getComputedStyle 会解析成最终字体列表），
+      // 量出来的宽度与渲染一致；读不到再退回导出里的 h / 默认字体。
       const t = clip.g && clip.g.querySelector ? clip.g.querySelector('text') : null;
       if (t && window.getComputedStyle) {
         const cs = getComputedStyle(t);
@@ -620,23 +420,21 @@
         measureCtx.font = font;
         w = measureCtx.measureText('国').width / fontSize;
       }
-    } catch (e) { /* 量不到就用 1（= 全角）退回老行为 */ }
+    } catch (e) { /* 量不到就按 1em（全角）估 */ }
     if (!(w > 0.2 && w < 3)) w = 1;
     charWCache.set(clip, w);
     return w;
   }
-  /** 字段框的可用宽度（舞台单位）；量不到就返回 null。 */
   function fieldWidth(clip) {
     const tb = clip && clip.__textBox;
     if (!tb || !tb.meta || !tb.meta.bd) return null;
     const w = tb.meta.bd[1] - tb.meta.bd[0] - (tb.meta.lm || 0) - (tb.meta.rm || 0);
     return w > 8 ? w : null;
   }
-  /** 把一个文本容器当尺子：按它的框宽把 `text` 断行（**保留已有的 `\n`**，也保留超长英文词）。 */
   function fitText(clip, text) {
     const W = fieldWidth(clip);
     const u = charUnit(clip);
-    if (!W || !u) return wrap(text, 12);              // 量不到就退回老口径
+    if (!W || !u) return wrap(text, 12);              // 量不到退回按 12 字硬断
     const tb = clip.__textBox;
     const fontSize = (tb.lines[0] && tb.lines[0].h) || tb.meta.fh || 12;
     const per = Math.max(4, Math.floor(W / (u * fontSize)));
@@ -644,7 +442,6 @@
     for (const para of String(text == null ? '' : text).split('\n')) {
       let line = '', wid = 0;
       for (const ch of para) {
-        /* 全角算 1、半角按 0.55 折算（与实测的 15~17 字符/行一致）。 */
         const adv = ch.charCodeAt(0) < 0x2E80 ? 0.55 : 1;
         if (wid + adv > per && line) { out.push(line); line = ''; wid = 0; }
         line += ch; wid += adv;
@@ -653,9 +450,8 @@
     }
     return out.join('\n');
   }
-  /** 按指定字号重排一个原版文本字段：不改原字体/框宽，只把行高、行距、首行基线缩到 `size`。
-   *  用于 4756 的 `info1`/`info2` —— 原版字号 12 时 5 行就顶到框底，缩到 11 后同样行数
-   *  仍落在原框内（4756 的两个框高分别只有 86 / 44 舞台单位）。 */
+  // 4756 的 info1/info2 框高只有 86 / 44：原版字号 12 时 5 行就顶到框底，
+  // 缩到 11 后同样行数仍落在原框内；只改行高/行距/首行基线，不动字体与框宽。
   function setFieldText(clip, text, size) {
     if (!clip || !clip.__textBox || !size) return setText(clip, text);
     const tb = clip.__textBox;
@@ -665,23 +461,18 @@
     return setText(clip, fitText(clip, text));
   }
 
-  /* ============================================================
-   * 页壳：顶栏 / 体力 / 页码 / 返回
-   * ========================================================== */
   function fillChrome(view) {
     const s = S(), t = T();
     if (!s || !t) return;
-    /* `showFirendsMain` :12991-12994：体力两颗数字 + 体力条蒙版。 */
+    // showFirendsMain :12991-12994：体力两颗数字 + 体力条蒙版。
     SfUiMain.showNumber(s.energy, clipOf(view, 'energy'), 0, 0, 'right');
     SfUiMain.showNumber(s.maxEnergy, clipOf(view, 'maxEnergy'), 0, 0, 'left');
     fitEnergy(view);
     const pct = Math.ceil(s.energy * 100 / Math.max(1, s.maxEnergy));
     stopAt(clipOf(view, 'energyMc'), Math.max(1, Math.min(101, pct + 1)));
   }
-  /* 原版4315数字与7254斜线一起排版，不换字体或素材。条内沿为
-   * x249.7..307.9、y16.25..24.66；保留边距，按局部画稿框居中。
-   * 数字最大缩放0.405 = 原放置0.74 × 既有缩小档0.546（四舍五入）；
-   * 原斜线也缩到同一字高，避免只缩数字、斜线仍高出体力槽。 */
+  // 原版 4315 数字与 7254 斜线一起排版：条内沿 x249.7..307.9 / y16.25..24.66，
+  // 数字最大缩放 0.405（原放置 0.74 × 缩小档 0.546），斜线缩到同一字高。
   const ENERGY_FIT = { left: 255, right: 303, centerY: 20.45, height: 5.1, scale: 0.405, gap: 1.15 };
   function fitEnergy(view) {
     const energy = clipOf(view, 'energy'), max = clipOf(view, 'maxEnergy');
@@ -701,7 +492,7 @@
     let x = (f.left+f.right-widths.reduce((a, b) => a+b, 0)-2*f.gap) / 2;
     nodes.forEach((g, i) => {
       const b = boxes[i], k = scales[i];
-      /* getBBox不含自身放置矩阵，因此重复刷新不会累计缩小，也不依赖窗口偏移。 */
+      // getBBox 不含自身放置矩阵，所以重复刷新不会累计缩小，也不依赖窗口偏移。
       applyMatrix(g, {
         a: k, b: 0, c: 0, d: k,
         e: x-b.x*k, f: f.centerY-(b.y+b.height/2)*k,
@@ -712,7 +503,7 @@
   function applyMatrix(g, m) {
     g.setAttribute('transform', 'matrix(' + m.a + ',' + m.b + ',' + m.c + ',' + m.d + ',' + m.e + ',' + m.f + ')');
   }
-  /** `matrix(a,b,c,d,e,f)` → `{a,b,c,d,e,f}`；不是这个写法就返回 null（不动它，宁可不动也不要画歪）。 */
+  // matrix(a,b,c,d,e,f)；不是这个写法就返回 null（宁可不动也不要画歪）。
   function parseMatrix(str) {
     const m = /matrix\(\s*([-\d.eE]+)[,\s]+([-\d.eE]+)[,\s]+([-\d.eE]+)[,\s]+([-\d.eE]+)[,\s]+([-\d.eE]+)[,\s]+([-\d.eE]+)\s*\)/.exec(String(str || ''));
     if (!m) return null;
@@ -723,16 +514,13 @@
   }
   function wireChrome(view, host) {
     const t = T();
-    /* 返回（`showRandomFriends` 的 mc.back.onFire / `showMyFriends` 的 _loc2.back.onFire）：
-     * 原版回主界面 `gotoAndStop("main")`。
-     * ⚠ 竞技场那几帧（f4/f6/f7/f8）的「返回」是**回上一级竞技页**，所以由各自的分支
-     *   先接一次、这里只在"页根上真有 back"时兜底接线（`wireClickable` 每次都重设回调）。 */
+    // 返回：原版回主界面 gotoAndStop("main")。竞技场 f4/f6/f7/f8 的「返回」是回上一级，
+    // 由各自分支先接；这里只对“页根上真有 back”的页兜底（wireClickable 每次都重设回调）。
     wireClickable(clipOf(view, 'back'), { hover: 2, onFire: () => { destroy(); if (window.UI && UI.runAction) UI.runAction('home'); } });
     for (const row of TABS) {
       const key = row[1];
       wireClickable(tabClip(view, row[0]), {
-        /* 悬停 = 原版"键盘光标停在 tab 那一行" → 第 3 帧（浅奶油底），与状态页同一套口径，
-         * 见 ui-status.js 的 wireTabs 注释（原版 `myDraw()` MainMovie.as:21113-21151）。 */
+        // 悬停 = 原版“键盘光标停在 tab 那一行” → 第 3 帧，与状态页同一套口径（见 ui-status.js）。
         hover: 3, press: 0,
         idle: () => (current && current.tab === key ? 2 : 1),
         onFire: () => showTab(key),
@@ -741,12 +529,7 @@
     void t;
   }
 
-  /* ============================================================
-   * 一级页：随机 / 我的好友 / 关卡
-   * ========================================================== */
-  /** 把一个元件从"可点"摘掉（换页之后空槽位不该还接着上一次的对手）。
-   *  ⚠ **不动** `__chListeners`：监听器留着（只是什么都不做），否则之后再 `wireClickable`
-   *  同一个实例时会因为"已接过线"而接不上回调（「刷新玩家」就是这么坏的）。 */
+  // 否则之后对同一实例 wireClickable 会接不上回调（「刷新玩家」就这么坏过）。
   function unwire(clip) {
     const t = T();
     if (!t || !clip) return;
@@ -755,20 +538,15 @@
     if (clip.g && clip.g.style) clip.g.style.cursor = 'default';
     t.unregisterHit(clip);
   }
-  /** 把一页的行文字写进去（并做落点校正）。 */
   function setRowTexts(row, item) {
     if (!row || !row.byName) return;
     const nameClip = row.byName('friendname');
     setText(nameClip, item ? item.name : '');
-    /* 7 个汉字（84 单位）本来放得下 88.2 的框；但昵称规则允许 21 个英文字母
-     * （按 1/3 汉字计 = 7 个字），SimHei 下约 126 单位。只在放不下时缩字号，
-     * 不裁字、也不横向压扁（用户 2026-10 的口径仍然保留）。 */
+    // 7 个汉字（84 单位）放得下 88.2 的框；21 个英文字母约 126 单位。
     if (item && window.SfRender && SfRender.fitTextWidth) SfRender.fitTextWidth(nameClip, { ascii: 0.5, min: 7 });
     setText(row.byName('flevel'), item ? item.level : '');
     alignRowText(row);
   }
-  /** 换帧会**重建**行里的文本节点（导出数据里这两条放置带 `rp`），重建出来的是素材里的
-   *  占位串（"大力松鼠鼠" / "99"）—— 所以任何一次 `stopAt(行)` 之后都要重写一遍。 */
   function repaintRows() {
     if (!current || !current.view) return;
     const rows = current.rows || [];
@@ -777,9 +555,6 @@
       setRowTexts(clipOf(current.view, 'f' + (i + 1)), rows[i] || null);
     }
   }
-  /** 把一页的 4 行按 `doShowFriends`（:13327）的规则填好。
-   *  `rows` = [{name, level}]，缺的槽位按原版"清空文本 + 拳套卡停到末帧"处理。
-   *  `pageOff` = 这一页第一行在**整份名单**里的下标（拳套卡那枚"关系标志"按整份名单算）。 */
   function fillRows(view, rows, sel, pageOff) {
     const off = Number(pageOff) || 0;
     if (current) {
@@ -793,38 +568,23 @@
       const card = clipOf(view, 's' + (i + 1));
       const item = rows[i];
       setRowTexts(row, item || null);
-      /* 拳套卡：原版按 `relation` 切 1~5 帧，末帧 = 空白（`_totalframes`，见 §relationFrame）。
-       * 木人是第 4 帧 —— 这一档原版是 `relation == 4` 专用，少了它木人那一行没有标志。
-       * ⚠ 复刻多一个原版没有的坑：**随机页只有 3 行**，第 4 行那颗 `s4` 不归 `fillRows` 管
-       * （那一行是「刷新玩家」按钮）—— 于是它停在上一页留下的帧上（从好友页切回随机时
-       * 会挂着"师父 / 徒弟 / 木人"的标志，用户 2026-10 报的就是这个）。
-       * 原版不会这样：`doShowFriends`（:13353）**每一行都先无条件**
-       * `s{i}.gotoAndStop(_totalframes)` 清空，再按 `relation` 拨回来。
-       * 所以这里也照原版：没内容（或这一行根本不归本页管）就清到末帧。 */
+      // 拳套卡按 relation 切 1~5 帧，末帧空白。随机页只有 3 行，第 4 行是「刷新玩家」，
       const blank = card && card.frameCount ? card.frameCount() : 1;
       if (card) stopAt(card, item ? relationFrame(item) : blank);
-      /* `vip1..vip4`（7252）是服务端下发的 VIP 角标；复刻没有 → **整颗藏掉**。 */
+      // vip1..vip4(7252) 是服务端 VIP 角标；没有数据，整颗藏掉。
       const vip = clipOf(view, 'vip' + (i + 1));
       if (vip) { stopAt(vip, 1); setVisible(vip, false); }
       if (!item) { unwire(row); unwire(card); continue; }
       const idx = i;
-      /* 行的选中态：`f{i}`（7237）4 帧 —— 1 常态 / 2 选中（绿胶囊）/ 3、4 空。
-       * 原版靠 `setButtons` 拨选中那颗。 */
       const idleFrame = () => (current && current.sel === idx ? 2 : 1);
-      /* `onHover`：**鼠标一进来就选中这一行**（绿胶囊 + 右侧立绘/数值都跟着换），
-       * 不必先点一下 —— 用户 2026-10 口径见 `selectRow` 的注释。
-       * ⚠ 拳套卡 `s{i}` 也算这一行的命中面（原版点立绘 = 点这一行），所以它也要挂同一个回调。 */
+      // 这一行的命中面（原版点立绘 = 点这一行），挂同一个回调。
       const hoverSelect = () => { if (current && current.sel !== idx) selectRow(idx); };
       wireClickable(row, {
         hover: 0, press: 0,
         idle: idleFrame,
         after: repaintRows,          // 换帧重建文本 → 补回名字与等级
         onHover: hoverSelect,
-        /* 原版是键盘"选中 + Fire"两步：行 `f{i}` 的 onFire 进的是好友动作菜单（`seeFriend`
-         * → `showActionWin` :23381：挂库元件「挑战1」= 4756 的**第 1 帧**，四颗键）。
-         * 复刻换成鼠标：**点行 = 打开这个对手的动作菜单**（挑战Ta! / 查看 / 加好友 / 返回），
-         * 不再"点第二下直接开打"——用户 2026-10 口径："在点击想要挑战的敌人后并不是立即进入战斗，
-         * 而是先展示一个二级界面"。 */
+        // showActionWin :23381，挂「挑战1」4756 第 1 帧）。复刻点行 = 打开动作菜单，
         onFire: () => { selectRow(idx); openFriendMenu(idx); },
       });
       wireClickable(card, {
@@ -836,16 +596,8 @@
     }
     showUserPic(view, rows[sel] || null);
   }
-  /** 选中一行：右面板 `rightBg` 换成这位对手的立绘 + 装备 + 力/敏/速/命
-   *  （原版 `seeFriendEquip` → `showUserPic(tiaozhan.rightBg, 1.5, this.friend)`）。
-   *  ------------------------------------------------------------
-   *  ⚠ 用户 2026-10 口径（本批）："选择敌人高亮的绿条会直接随着鼠标移动而移动，而不是点击后才切换，
-   *    同时右侧的敌人显示也会随着改变。"
-   *  原版这两件事本来就是**一件事**：`jiantou_WZ_Y1`（键盘光标）一动，`myDraw()` 就把那一行拨到
-   *  选中帧（`f{i}` 第 2 帧 = 绿胶囊）、`seeFriendEquip()` 同步换右侧（原版也是"光标到哪就显示谁"）。
-   *  复刻以前只把它接在**点击**上，于是要按一下才换 —— 现在 `fillRows` 把 `selectRow(idx)` 也挂到
-   *  行的 `mouseenter`（见 `wireClickable` 的 `onHover`），鼠标扫过谁就选谁。
-   *  换帧会把行里那两段文本与 `.uc-pop` 壳一起重建，所以这里补 `refreshShell` + `repaintRows`。 */
+  // 原版键盘光标一动就选中并换右侧，所以这里挂在 mouseenter 上，而不是只在点击时。
+  // 换帧会重建行文本与 .uc-pop 壳，所以补 refreshShell + repaintRows。
   function selectRow(i) {
     if (!current) return;
     current.sel = i;
@@ -860,27 +612,12 @@
   function fightRow(i) {
     const foe = foeAt(i);
     if (!foe) return;
-    /* 木头人有自己的一套（练功木桩：不计经验不掉东西，见 `startDummyFight`）。 */
     if (foe.dummy) { startDummyFight(foe); return; }
-    /* **好友页里打人 = 切磋**（不扣体力、不结算奖励，见 `startFight` 的文件头）；
-     * 随机页仍然是原版那套"主动挑战"（10 体力 + 经验 + 金松果 + 掉落）。
-     * 判据用**当前 tab**而不是 `foe.kind`：师徒/好友/陌生人三种行都带各自的 kind，
-     * 但它们都只在好友页里出现，按"玩家现在站在哪一页"判才和界面一致
-     * （原版也是按 `tab_wz` 分的：`tiaozhan.tab1` = 好友 / `tab` = 随机）。 */
+    // 好友页里打人 = 切磋（不扣体力、不结算奖励）；随机页才是主动挑战（10 体力 + 奖励）。
     startFight(foe, (current && current.tab === 'friends') ? 'friend' : 'challenge');
   }
-  /* ---------- 木头人（练功木桩）----------
-   * 原版那一行（`showLevelUp` :7045-7059）：
-   *   `{id: 400, name: "测攻击木头人", level: 1, relation: 4, fightable: "true",
-   *     countObj.count: 10000, power: 0, agility: 15, speed: 0, maxHp: 800, wearsList: null}`
-   * 打它走 `fightType = 8`（`flash/exercise.do`，:2871-2884），战斗里挂的是 `Stakes` 木桩类：
-   * `attack()` 等七个小节**全是空的** —— 它只站着挨打，所以力量 0 / 速度 0 是**故意**的
-   * （打不动你），敏捷 15 让它偶尔闪避；800 血是抓包里的显示值，但 `Stakes` 不判死亡，
-   * 所以实战是「每回合回满 800 + 固定回合」的训练场，生命最低保留 1，真实伤害照记
-   *（回合口径见 `DUMMY.rounds`）。
-   * 打完给的是「战斗统计」那一页（`getRecord()` :3252 → `showDeadManWin` :18218：
-   * 手 / 武 / 技三段伤害 + 历史最高 + 同级排名），**不是**普通战果。
-   * `State.recordWoodBattle` 保存总伤害与三类分项最佳；`woodRecord` 只保留给旧档读取。 */
+  // 打完是「战斗统计」页（手 / 武 / 技三段伤害 + 历史最高 + 排名），不是普通战果。
+  // State.recordWoodBattle 保存总伤害与分项最佳；woodRecord 只保留给旧档读取。
   function startDummyFight(foe) {
     const s = S();
     if (!s || !window.Main || !Main.startBattle) return;
@@ -892,16 +629,14 @@
       /* 每回合回满 800；生命锁 1，但伤害不封顶。固定 practiceRounds 次出手收尾。 */
       practice: true, practiceRounds: DUMMY.rounds,
     });
-    /* 回**好友**页（原版打完回的是 `tiaozhan` 的当前 tab）。 */
     const back = () => { SfChallenge.openAt('friends'); if (window.UI && UI.runAction) UI.runAction('challenge'); };
     Main.startBattle(dummy, {
       cost: 0, kind: 'wood', useProps: false, keepScreen: true,
-      /* 木桩战：不飘奖励、不开宝箱（用户 2026-11 口径）。 */
+      // 木桩战：不飘奖励、不开宝箱。
       collectDrops: false, skipChest: true,
-      /* 木桩战给的是「战斗统计」弹窗，不是奖励 CG；别让原版战果页先闪一遍（它还会写
-       * "本关经验已在上次掉线前获得"这种与木桩无关的话）。 */
+      // 木桩战给的是「战斗统计」弹窗，不是奖励 CG；skipResultPanel 避免原版战果页先闪一遍
       skipResultPanel: true,
-      /* 经典/现代两套播放器的剩余回合数都按这一场自己的上限显示（默认 60）。 */
+      // 经典/现代两套播放器的剩余回合数都按这一场自己的上限显示（默认 60）。
       maxRounds: DUMMY.rounds,
       onEnd: (winner, result) => {
         const record = State.recordWoodBattle(result);
@@ -920,59 +655,8 @@
       onError: () => { back(); },
     }).catch(() => { back(); });
   }
-  /* ============================================================
-   * 对手的二级界面：动作菜单 + 查看
-   * ------------------------------------------------------------
-   * 用户 2026-10 口径："在点击想要挑战的敌人后并不是立即进入战斗，而是先展示一个二级界面
-   * 显示 挑战Ta / 查看 / 加好友 / 返回（ui 从 ssfight 里面找），同时点击查看可以像查看
-   * 自己的界面一样查看敌人的具体状态页面、获得的武器技能及其等级，并可以查看其装备。"
-   *
-   * 原版就是 `seeFriend()` → `showActionWin()`（:23381，挂库元件「挑战1」= 4756 的**第 1 帧**，
-   * `subframe` 按 relation 拨帧）：好友（relation 0）那一档第四颗是「收为徒弟」，
-   * 陌生人（relation 3）那一档第四颗才是「加好友」。随机页的对手在原版**一律是陌生人**
-   * （`getFriends("random")` 强制 `relation = 3`），复刻以前把它们落到默认好友档 → 菜单
-   * 显示成「收为徒弟」。现在 `relOf` 按当前 tab 补回原版关系（随机页 = 陌生人）；
-   * 但陌生人档的面板底部有 uid 留白，所以随机页改用好友档的紧凑面板，只把第四颗
-   * 字形换成原版「加好友」（见 `captureAddFriendGlyph`）。
-   * ========================================================== */
-  const ROW_NAMES = ['f1', 'f2', 'f3', 'f4'];
-  /* ============================================================
-   * 动作菜单 —— 用**原版那一页**（库元件「挑战1」= 4756 的**第 1 帧**）
-   * ------------------------------------------------------------
-   * 原版 `showActionWin()`（:23381）：
-   *   `loadMcs([["挑战1","tiaozhanSub",currentFrame]]); tiaozhanSub.gotoAndStop(1); myDraw();`
-   * 第 1 帧里只有两颗东西：铺满舞台的底图 `3142` 与 `subframe`（= **4723，29 帧**）。
-   * `myDraw()`（:22318-22357）按 "`actionType` + `jiantou_WZ_Y2`（1-based 行号）" 给 `subframe`
-   * 拨帧 —— 每个帧号是**一整张菜单画稿**（含全部行文与那颗绿色高亮），所以菜单长相完全来自原版素材。
-   * ⚠ 帧表要按 **`actionType`**（= `seeFriend` :23228-23257 由 `relation` 翻出来的那一档）读，
-   *   不能按关系自己的编号排（复刻以前就是这么错的，见 `MENU_CASE` 的注释）：
-   *   actionType 1 好友 → 帧 1..4（挑战Ta! / 返回 / 查看 / 收为徒弟）
-   *   actionType 2 师父 → 帧 20..22 + 23（查看）/ 24（返回）＝ 挑战 / 为师父加油 / 退出师门 / 查看·返回
-   *   actionType 3 徒弟 → 帧 6..9（挑战Ta! / 返回 / 查看 / 逐出师门）
-   *   actionType 4 陪练 → 帧 15,16（挑战Ta! / 返回）
-   *   actionType 5 陌生人 → 帧 11..14（挑战Ta! / 返回 / 查看 / 加好友）
-   *   actionType 6 木人 → 帧 26..28（测攻击 / 查看记录 / 关闭）
-   * 原版是键盘驱动（上下选、Fire 确认），复刻换成鼠标：**每行一块透明热区**，
-   * 悬停就把 `subframe` 拨到"那一行被选中"的帧（于是绿高亮跟着鼠标走），点下去执行。
-   * 行落点由实测（无头 Chrome 探针，量 `subframe` 各帧里那几颗画稿的舞台矩形）量出：
-   * 菜单面板宽 79.25..240.75（好友 / 徒弟档 y 29..167；陌生人档更高，见下表）；
-   * 行高 23.9，3 行版首行中心 y=53.3、4 行版首行中心 y=53.3 / 82.1 / 110.9 / 139.8。
-   * ========================================================== */
-  /* ============================================================
-   * 菜单行的落点（**舞台单位**）
-   * ------------------------------------------------------------
-   * 全部由实测得出（探针：挂库元件 4756 第 1 帧 → 拨 `subframe` 到各分支帧 →
-   * 把每一行按钮的屏幕矩形用 `getScreenCTM` 换算回舞台坐标）。实测值：
-   *   · 面板底图（4693）舞台 x 79.25..240.75 / y 29..167，菜单键位 x 88.4..231.8；
-   *   · 好友（帧 1..4）行 y = 42..64.55 / 70.15..94.05 / 99..122.9 / 127.85..151.75；
-   *   · 徒弟（帧 6..9）同上；
-   *   · 陌生人（帧 11..14）面板更高，四行 y = 31.9 / 61.6 / 95.2 / 127.1；
-   *   · 陪练（帧 15、16）两行 y = 62.3 / 108.9；
-   *   · 师父（帧 20..24）前 3 行 y = 41.9 / 70.6 / 99.0，第 4 行是**左右两颗**（查看 / 返回）y = 127.9；
-   *   · 木人（帧 26..28）三行 y = 41.9 / 82.6 / 123.2（行距更大，面板只有 3 项）。
-   * `d` = **行内偏移**（0 = 第 1 行选中，写进 `subframe.gotoAndStop(base + d)`）；
-   * `box` = `[x0, y0, x1, y1]`（DOM 热区就铺在这一块上）。
-   * ========================================================== */
+  // 3 徒弟 6..9 / 4 陪练 15·16 / 5 陌生人 11..14 / 6 木人 26..28。鼠标用透明热区。
+  // box = [x0, y0, x1, y1]，DOM 热区铺在这一块上（舞台单位）。
   const MENU_LAYOUT = {
     /* case 1（actionType 1）：关系 0 好友（4 项：挑战 / 返回 / 查看 / 收为徒弟）。
      * 随机页也借用这一档的紧凑面板（第四颗字形换成「加好友」，见 `captureAddFriendGlyph`）。 */
@@ -998,25 +682,17 @@
       { d: 2, box: [88.4, 99.0, 231.8, 122.9], act: 'view', key: 'view', label: '查看' },
       { d: 3, box: [88.4, 127.9, 231.8, 151.8], act: 'eject', key: 'eject', label: '逐出师门' },
     ] },
-    /* case 4（actionType 4）：关系 null 陪练（2 项：挑战 / 关闭），帧 15、16。
-     *  复刻没有"陪练"这一档（木人走 case 6），保留它只为对齐原版的表。 */
     4: { base: 15, rows: [
       { d: 0, box: [88.4, 62.3, 231.8, 86.2], act: 'fight', key: 'fight', label: '挑战Ta！' },
       { d: 1, box: [88.4, 108.9, 231.8, 132.8], act: 'back', key: 'back', label: '返回' },
     ] },
-    /* case 5（actionType 5）：关系 3 陌生人（4 项，面板更高：x 80.5..241.8 / y 17.5..180.6），
-     * 帧 11..14。这一档的菜单里原版还有一行 `uid`（`showActionWin` :23386-23389 写 "UID:…"），
-     * 复刻没有服务端 uid，不写；底部因此空一块 —— 随机页改用 case 1 面板 + 这里的「加好友」字形。 */
     5: { base: 11, rows: [
       { d: 0, box: [88.4, 31.9, 231.8, 55.8], act: 'fight', key: 'fight', label: '挑战Ta！' },
       { d: 1, box: [88.4, 61.6, 231.8, 85.5], act: 'back', key: 'back', label: '返回' },
       { d: 2, box: [88.4, 95.2, 231.8, 119.1], act: 'view', key: 'view', label: '查看' },
       { d: 3, box: [88.4, 127.1, 231.8, 151.0], act: 'add', key: 'add', label: '加好友' },
     ] },
-    /* case 6（actionType 6）：关系 4（木人 / 练功木桩）—— 只有 3 项：测攻击 / 查看记录 / 关闭。
-     * ⚠ 这一档**没有「加好友」**（用户 2026-10 口径："点开测攻击木头人不应该出现加好友选项"）——
-     *   原版木人的 `relation = 4` 走的就是这一个 case（`myDraw` 的 case 6）。
-     *   帧 26..28，行距更大（41.9 / 82.6 / 123.2）。 */
+    // case 6：木人（relation 4）只有 3 项：测攻击 / 查看记录 / 关闭，没有「加好友」。
     6: { base: 26, rows: [
       { d: 0, box: [88.4, 41.9, 231.8, 65.8], act: 'fight', key: 'fight', label: '测攻击' },
       { d: 1, box: [88.4, 82.6, 231.8, 106.5], act: 'record', key: 'record', label: '查看记录' },
@@ -1038,33 +714,14 @@
   function currentFoe() {
     return foeAt(Number(current && current.sel) || 0);
   }
-  /* ============================================================
-   * 「界面上第 i 行是谁」——**唯一**的取件口径
-   * ------------------------------------------------------------
-   * ⚠ 这里以前是各写各的：`fillRows` 用 `rows[sel]` 填右侧展示，
-   * 而 `openFriendMenu` / `fightRow` 却去读 `current.roster[i]`（**整份名单**）。
-   * 好友页的 roster 是**整份**、界面只显示其中 4 行，于是"点好友页第 1 行"
-   * 实际取到的是整份名单里的第 1 位 —— 名字对得上、动作菜单与开战对象对不上，
-   * 再叠加"随机 / 好友来回切"就表现成**敌我数据全乱、全变成 1**
-   * （用户 2026-10 报的正是这个）。现在只留这一个函数，两处再也不会分叉。 */
+  // 「界面上第 i 行是谁」的唯一取件口径：只查 current.rows（这一页显示的 4 行）。
+  // 不要用 current.roster[i]（整份名单）——好友页只显示其中 4 行，会取到别的对手。
   function foeAt(i) {
     if (!current) return null;
-    /* `current.rows` 就是**这一页显示的那 4 行**（`fillRows` 写的），界面行号直接查它。
-     * ⚠ 不要在这里再加 `pageOff`：`fillRows` 已经按页偏移切过一刀，
-     *   再加一次就成了"偏移两遍"—— 第 2 页点第 1 行会落到名单第 3 位（用户 2026-10 报的
-     *   "好友界面点哪一行都对不上人"）。 */
+    // current.rows 已经是按页偏移切过的 4 行；不要再加 pageOff（会偏移两遍）。
     return (current.rows || [])[Number(i) || 0] || null;
   }
-  /* ---------- ① 动作菜单（原版 4756 帧 1）---------- */
-  /* ============================================================
-   * 二级页开着的时候，**底页那根点击路由要停用**
-   * ------------------------------------------------------------
-   * 用户 2026-10 口径（本批 ②-其一）："我希望在这个页面下，上一级界面不会对鼠标的移动做出反馈。"
-   * 二级页是另一层 `<section>`，它那棵 `<svg>` 只铺满舞台矩形那块，四周透明区域不挡指针 ——
-   * 指针落在菜单画稿之外时事件照样打到挑战页那棵 svg 上，底页的 `pointermove` 继续切行帧，
-   * 表现就是"菜单开着，底下的敌人行还在跟着鼠标亮"。
-   * 只关底页那一根（`host` 那张 svg），二级页自己那棵照常工作。
-   * ========================================================== */
+  // 二级页开着时停用底页的点击路由：二级页 svg 只铺满舞台矩形，四周透明区不挡指针，
   function routerOfHost(host) {
     const t = T();
     const svg = host && host.querySelector ? host.querySelector('svg') : null;
@@ -1078,16 +735,12 @@
   }
 
   function openFriendMenu(i) {
-    /* 先把"选中哪一行"定下来（原版 `seeFriend()` 里也是先写 `jiantou_WZ_Y1` 再开菜单）：
-     * 差这一步会让"右侧展示的那位"和"菜单/开战那位"分叉 —— 见 `foeAt` 的注释。 */
     current.sel = Number(i) || 0;
     if (current.tab === 'random' && randomCache && randomCache.state === S()) randomCache.sel = current.sel;
     const foe = foeAt(current.sel);
     if (!foe) return;
     const host = menuHost();
     if (!host) return;
-    /* 复用已经挂好的二级页容器：它此刻可能停在别的帧（关卡三级页 / 查看装备）。
-     * 菜单与"查看装备"共用同一颗库元件（原版也是同一颗 `tiaozhanSub`）。 */
     guard(showFriendMenu(host, foe, current.sel));
   }
   async function showFriendMenu(host, foe, rowIndex) {
@@ -1097,12 +750,6 @@
     resetHits(view.g.ownerSVGElement);
     page.sub.menu = true;
     const rel = relOf(foe);
-    /* `MENU_CASE` 是原版 `myDraw` 的 case 号；`MENU_LAYOUT` 的键就是它（见上面两张表的注释）。
-     * 随机页的 `relOf` 是陌生人 → case 5，那条画稿的第四颗本来就写着「加好友」，
-     * 但它的面板比好友档高一截（底下是原版的 uid 行，复刻没有 uid → 一片留白）。
-     * 用户 2026-10 口径："这个界面下部的留白太多了，参考好友中这个二级界面的格式调整。"
-     * 所以随机页仍用好友档的**紧凑面板 / 行位**，只把第四颗字形换成原版「加好友」
-     * （`captureAddFriendGlyph` / `paintAddFriendGlyph`）。 */
     const c = MENU_CASE(rel);
     const sub = clipOf(view, 'subframe');
     let compactRandom = c === 5 && page.tab === 'random';
@@ -1115,7 +762,6 @@
           rows: fr.rows.map((row, i) => (i === 3 ? Object.assign({}, row, { label: '加好友' }) : row)),
         });
       } else {
-        /* 抄不到字形就退回陌生人档（至少文案是对的，只是面板高一点）。 */
         compactRandom = false;
       }
     }
@@ -1124,15 +770,9 @@
       if (compactRandom) paintAddFriendGlyph(sub);
     };
     /* 行热区铺在**DOM 层**（不动原版显示列表）：悬停就把 `subframe` 拨到"那一行被选中"的帧
-     * —— 原版绿高亮跟着键盘光标走，这里跟着鼠标走；点下去执行。
      * ⚠ 菜单一出生就**先拨到第 1 行被选中**的那一帧：原版进来时 `jiantou_WZ_Y2 = 1`
-     *   （`seeFriend` :23214-23215 把两个光标都置 1）再 `myDraw()`，所以第一行的绿高亮
-     *   一开始就在「挑战Ta!」上（复刻以前停在"没有任何高亮"的那一帧，观感是"一圈都不亮"）。
-     * ------------------------------------------------------------
      * ⚠⚠ 用户 2026-10 口径（本批 ②-其二）："不要设 挑战ta 为默认选中……直接固定最后一个
      *   悬停的对象亮就行，我不希望一直切换到挑战ta亮。"
-     *   所以**鼠标移开某一项之后不再拨回第 1 行**（老写法是 `mouseleave` → `menuSetFrame(…, 0)`），
-     *   而是**留住最后悬停那一行的高亮**；只有"还从没有悬停过任何一行"时才停在第 1 行
      *   （原版出生态）。这样高亮永远只在"指针真正到过的那一行"上来回，不会再自己跳回挑战Ta。 */
     let lastD = 0;
     host.querySelectorAll('.sf-mrow').forEach((n) => n.remove());
@@ -1158,7 +798,6 @@
     }
     setFrame(lastD);
     /* 原版只有「收为徒弟 / 加好友」，没有主动拜师按钮（师父是服务端 relation）。
-     * 用户 2026-10 口径：只在**我的好友**页的动作菜单保留「拜师」，放右下角；
      * 随机挑战页不显示。已经有师父、或对象本身就是师父/徒弟/木人时也不显示。 */
     host.querySelectorAll('.sf-master-btn').forEach((n) => n.remove());
     const me = S() || {};
@@ -1204,21 +843,11 @@
       go();
     }
   }
-  /* ============================================================
-   * 菜单热区的坐标换算：**舞台单位 → 宿主里的设计像素**
-   * ------------------------------------------------------------
-   * 二级页那一层 `<svg>` 用的 viewBox 是按库元件 4756 的舞台矩形裁出来的
-   * （见 `ui-main.js` 的 mountSymbol 默认 viewBox），所以它的左上角**不是**舞台 0,0 ——
-   * 光按 `svg 宽 / 320` 缩放再加一个写死的偏移（老代码里的 `56`）在别的窗口尺寸下会整体错位。
-   * 这里改成从**实时的 svg 屏幕矩形**反算（与 `ui-status.js` 的 `stageMapper` 同一套算法），
-   * 两级缩放（舞台 → svg，svg → 宿主设计像素）一次算清。
-   * ========================================================== */
   function menuMap(view, host) {
     const svg = view && view.root;
     const r = svg && svg.getBoundingClientRect ? svg.getBoundingClientRect() : null;
     const vb = svg ? String(svg.getAttribute('viewBox') || '0 0 320 196').split(/[\s,]+/).map(Number) : null;
     const box = host && host.getBoundingClientRect ? host.getBoundingClientRect() : null;
-    /* 宿主可能被 `--uiscale` 整体缩过：设计像素 = 屏幕像素 / 这个倍数。 */
     const hs = host ? (Number(getComputedStyle(host).getPropertyValue('--uiscale')) || 1) : 1;
     const k = (r && r.width && vb && vb[2]) ? r.width / vb[2] : 3.577;
     const ox = r && box ? (r.left - box.left) / hs : 0;
@@ -1231,29 +860,12 @@
       s: (n) => n * k / hs,
     };
   }
-  /** 拨菜单那一档：`layout.base + d`，**d 是行内偏移**（0 = 第 1 行被选中）。
-   *  与 `myDraw`（:22318-22357）逐条对应：`gotoAndStop(jiantou_WZ_Y2 + 偏移)`，
-   *  而 `jiantou_WZ_Y2 = 1` 时那一档正好是"第 1 行绿高亮"，所以要 `base + (行号 - 1)`
-   *  = `base + d`。 */
   function menuSetFrame(sub, layout, d) {
     if (!sub || !layout) return;
     const n = sub.frameCount ? sub.frameCount() : 29;
     const off = Math.max(0, Number(d) || 0);
     try { sub.gotoAndStop(Math.max(1, Math.min(n, layout.base + off))); } catch (e) {}
   }
-  /* ============================================================
-   * 随机页第四颗：「好友档紧凑面板」+「陌生人档的原版加好友字形」
-   * ------------------------------------------------------------
-   * 陌生人档（case 5，帧 11..14）的面板比好友档高 25 个舞台单位：多出来的部分
-   * 在原版是 `subframe.uid` 那一行（`showActionWin` :23386-23389 写 "UID:…"），
-   * 复刻没有服务端 uid → 底下空出一大块。用户 2026-10 口径：
-   *   "这个界面下部的留白太多了，参考好友中这个二级界面的格式进行调整。"
-   * 所以随机页仍用好友档（case 1：帧 1..4，四行等距、没有 uid 行）的面板与行位，
-   * 只把第四颗「收为徒弟」的字形换成陌生人档第四颗那份原版「加好友」字形。
-   * 两档的字形都是**扁平填充的 path**（没有渐变引用），外层组 transform 都是 identity，
-   * 且都在 `subframe` 的同一套局部坐标里 —— 直接克隆 path 不会错位、也不会丢材质。
-   * 行底板 / 绿高亮都比字形高（23.9 / 22.55 vs 15 左右），所以按高度就能挑出字形。
-   * ========================================================== */
   let addFriendGlyph = null;
   /** 第四行那颗字的 path（`getBBox()` 的局部坐标：y≈79、高 15 左右）。 */
   function fourthRowGlyphPaths(sub) {
@@ -1281,8 +893,6 @@
   }
   /** 每次拨帧后重贴：好友档画稿自带「收为徒弟」，先藏掉再把「加好友」贴到同一层。
    *  ⚠ 必须**先复原上一次**再重新找原字形：真实点击打开菜单后，指针落在菜单首行上会再
-   *    触发一次同帧 `setFrame`；`showFrame` 复用同一批 path（`display:none` 不会被洗掉），
-   *    第二次如果量不到被藏起来的原字形，就会"只删克隆、不补新字"，第四行直接空白
    *    （用户 2026-10 报的"点最上面一行敌人时加好友异常隐形"）。 */
   function paintAddFriendGlyph(sub) {
     if (!addFriendGlyph || !addFriendGlyph.length || !sub || !sub.g) return false;
@@ -1305,16 +915,6 @@
     }
     return true;
   }
-  /* ============================================================
-   * 收徒挑战（原版 `showGetStuWin` / `getStudent`）
-   * ------------------------------------------------------------
-   * 好友动作菜单的「收为徒弟」不是直接 `addPrentice`：
-   *   `doAction(4)` → `tiaozhanSub.gotoAndStop(2)`（4756 f2）确认
-   *   → `getStudent` 检查名额/体力/10 金松果 → 打一场 `fightType=2` 的收徒挑战
-   *   → 赢了才把对手记成徒弟；输赢都扣 10 金松果。
-   * 复刻把这场挑战交给 `State.beginRecruitChallenge` / `finishRecruitChallenge`
-   * （与师徒页同一条本地实现），经典页只负责原版确认帧和战后回挑战页。
-   * ========================================================== */
   function openRecruitConfirm(foe) {
     const page = current;
     if (!page || !foe) return;
@@ -1394,7 +994,6 @@
     } catch (e) { interrupted(); }
   }
 
-  /** 菜单某一项被点：语义照 `doAction`（:17273）与 state==1 的 keyAction（:22731-22776）。 */
   function menuFire(action, foe, rowIndex) {
     switch (action) {
       case 'fight':
@@ -1408,7 +1007,6 @@
       case 'add': {
         /* relation 0（好友）那一档原版是「收为徒弟」（`doAction(4)` → `showGetStuWin`），
          * 陌生人（relation 3）那一档才是「加好友」。
-         * 收徒不是白收：原版先弹 4756 第 2 帧确认（「收徒成功与否都要花费10个金松果」），
          * 确认后 `getStudent` 扣 10 金松果并打一场收徒挑战；复刻不能直接 `addPrentice`。 */
         if (foe.dummy) { closeSub(); return; }
         if (foe.kind === 'friend' && !foe.stranger) { openRecruitConfirm(foe); return; }
@@ -1418,11 +1016,9 @@
         return;
       }
       case 'cheer':
-        /* 原版 `doAction(5)` → `fighting()`：给师父加油，只出一行字（`:3237`）。 */
         if (window.UI && UI.toast) UI.toast('加油！加油！师父必胜！');
         return;
       case 'quitmaster': {
-        /* 原版 `showQuitWin()` 的原文：退出师门需要花费 20 个金松果（:23400）。 */
         const cost = 20;
         if (window.UI && UI.classic && UI.classic.modal) {
           UI.classic.modal('退出师门', '<p>退出师门需要花费 ' + cost + ' 个金松果，是否确定？</p>', [
@@ -1452,8 +1048,6 @@
         closeSub();
     }
   }
-  /** 「查看」：原版 `doAction(3)` → `getPlayInfo(wz)` → **玩家自己那一页**（`zhuangtai`）。
-   *  用户 2026-10 口径点名要对齐这里，所以复刻也走同一条路：`SfStatus.openFriend()`。 */
   function openFriendDetail(foe) {
     closeSub();
     if (foe && foe.dummy) { openDummyRecord(foe); return; }
@@ -1479,8 +1073,6 @@
     }
     openFriendGears(foe);
   }
-  /** 「查看装备」（原版 `friendEquipsInfo` → 库元件「状态1」第 7 帧；那一颗还没提取）
-   *  与木人的「查看记录」：都用**复刻自己的说明面板**画，数据是真的。 */
   function openFriendGears(foe) {
     const host = menuHost();
     if (!host || !foe) return;
@@ -1529,8 +1121,6 @@
       if (best < 100000) {
         T().showNumber(best, view, 0, 0, 'left', 5);
       } else {
-        // The original art has only five digit slots. Measure that exact region
-        // in SVG coordinates, then fit the complete value instead of truncating.
         T().showNumber(88888, view, 0, 0, 'left', 5);
         const digits = Array.from({ length: 5 }, (_, i) => clipOf(view, 'num' + (i + 1)));
         const svg = view.g.ownerSVGElement || view.g;
@@ -1560,7 +1150,6 @@
       }
       setText(clipOf(view, 'text4'), fitText(clipOf(view, 'text4'),
         '最高总伤害 ' + best + '；训练 ' + n + ' 次\n三项为各场分项最佳，可能来自不同场次'));
-      // The exported mobile layout has an unnamed Back button (3152 + 3190).
       const back = document.createElementNS('http://www.w3.org/2000/svg', 'g');
       back.setAttribute('data-name', 'recordBack');
       for (const rec of view.nodes.values()) {
@@ -1577,13 +1166,9 @@
     void foe;
   }
   /** 「查看装备」—— 由**状态页**上的那一颗（`b_change` 第 4/5 帧，原版 `friendEquipsInfo()`
-   *  :13821 = 库元件「状态1」第 7 帧）调过来。
-   *  ------------------------------------------------------------
    *  ⚠ 这里以前**根本没有这个函数**：`ui-status.js` 的 `openFriendGears()` 是
    *    `if (window.SfChallenge && SfChallenge.showFriendGears) { … }` + 兜底
-   *    `UI.runAction('challenge')`。于是点「查看装备」= 状态页被 destroy、挑战页被重挂到
    *    随机页，装备一件都看不到 —— 用户 2026-10 报的"点开查看装备时会闪退、完善这个页面"。
-   *  现在的语义照原版那一页：**他穿了什么**（四件，带部位与强化等级）+ 他的四维与战斗力，
    *  返回回**他的状态页**（原版 `状态1` 第 7 帧的返回就是回状态页，不是回挑战页）。 */
   function showFriendGears(foe) {
     const target = foe || currentFoe();
@@ -1608,7 +1193,6 @@
     destroy();
     if (window.UI && UI.runAction) UI.runAction('challenge');
   }
-  /** 在一个小方框里挂一颗原版图标元件（viewBox 只框住卡片那一块）。 */
   async function mountMiniIcon(box, sym) {
     try {
       await SfRender.loadExtra('tags-wsicon.json');
@@ -1617,25 +1201,16 @@
     } catch (e) { /* 挂不上就留空框，不影响这一页其它内容 */ }
   }
   /** 开战：走复刻的战斗调度（与原版 `fightType` + "temp" 帧等价的那一段）。
-   *  ------------------------------------------------------------
    * `kind` 两档，**结算规则完全不同**：
    *   · `'challenge'` = 随机挑战：扣 10 体力、吃药品加成、有随机掉落、打赢结算经验与金松果
-   *     （原版 `fightType = 1` → `flash/fight.do`）。
-   *   · `'friend'`    = **好友页里打另一个玩家 = 切磋**：用户 2026-10 口径
    *     "在好友界面挑战人和人的时候都不会有体力消耗、经验获取、金松果获取与随机掉落获取等。"
    *     所以这一档 **不扣体力、不吃药品加成、不飘掉落、`onEnd` 不结算任何奖励**
-   *     （连胜负场次也不记 —— 那是"排位"的口径，切磋不该影响它）。
-   *     ⚠ 现代界面的好友页早就是这个口径了（`classic-ui.js` 的 `spar()`：
-   *       `{cost:0, kind:'friend', useProps:false, collectDrops:false}` + 只弹"切磋结果"），
    *       经典页这一档以前漏了，照它对齐即可 —— 两边共用 `kind:'friend'` 这一个名字。 */
   /** 战斗期间把这一页「按住」在原位（`Main.startBattle` / `SfFight.run` 会清 `#ui`，
    *  但跳过带 hold 标记的节点），打完只还原显示 —— 回来的是**同一棵 SVG**，既不重新
    *  挂载、也不触发 WebKit 对整棵子树的重新布局。随机挑战 / 切磋 / 关卡连战共用这一套。 */
   const BATTLE_HOLD_ATTR = 'data-sf-battle-hold';
   /** 战斗期间把这一页「按在原地」：不从 `#ui` 摘下，只隐藏并标记。
-   *  ------------------------------------------------------------
-   * 以前这里把整棵挑战页 `removeChild`，打完再 `appendChild`。DOM 树本身没变，但
-   * WebKit 会把它当成新插入的子树重新做样式/布局/光栅化；经典页有几千个节点，
    * 返回时就是那一下卡顿（用户 2026-10：iOS「随机战斗完回随机挑战页会卡一下」）。
    * 现在让它留在文档里，战斗页盖在上面；隐藏只关掉绘制与命中，不打散布局，
    * 返回时只 `visibility` 还原，不再重挂。`SfBattle` 清 `#ui` 时也会跳过带这个标记的节点
@@ -1666,9 +1241,6 @@
       el.style.pointerEvents = '';
     }
   }
-  /** 把战斗前按住的挑战页还原，并按 `tab` 重画这一页（不重挂 SVG）。
-   *  `opts.keepSub`：连三级页一起原样还原、**不**走 `showTab`（它内部会 `closeSub`）；
-   *  调用方随后用 `refreshGateAt()` 只更新三级页的星标/文案。 */
   function resumePageAfterBattle(hold, tab, opts) {
     if (!hold || !hold.host || !hold.page) return false;
     if (current !== hold.page || current.host !== hold.host) return false;
@@ -1747,7 +1319,6 @@
         /* 切磋既没有局内悬浮奖励，也没有战后宝箱（用户 2026-11 口径）。 */
         skipChest: friend,
         /* 原版打完回到 `tiaozhan` 的那一页（:2814-2819 `gotoAndStop("temp")` 之后由服务端
-         * 回调回到挑战页）。不传 `keepScreen` 的话 `startBattle` 会先回首页，
          * 而首页的 `renderHome()` 会把挑战页拆掉 —— 观感就是"打完跳回现代界面"。 */
         keepScreen: true,
         rewardFor: settle,
@@ -1792,9 +1363,7 @@
     current.tab = key;
     /* 页码归位第一页：`current.page` 是**跨 tab 共用**的一份状态，不重置的话
      * "好友页翻到第 3 页 → 切随机 → 再切回好友"会落在第 3 页（原版每进一次页面都是
-     * `pageNum1` 重新起算的）。
      * ⚠ `keepPage`：**翻页箭头自己**调 `showTab` 时不能再归位 —— 以前这里无条件写回 1，
-     *   于是"点右箭头 → page++ → showTab 又把它拨回 1"，翻页永远停在第一页
      *   （用户 2026-10 报的"好友界面无法正常翻页"就是这个）。 */
     if (!keepPage) current.page = 1;
     /* 战斗正在播的时候**不要重画**（见 `goArenaPage` 的注释）：这一页的显示树是给
@@ -1802,8 +1371,6 @@
     if (inBattle()) { current.tab = key; return; }
     closeSub();
     resetHits(view.g.ownerSVGElement);
-    /* 竞技场/关卡/随机/好友**各有各的页帧**（原版 showMyRacing 走 4/6/7/8、showMyGate 走 3、
-     * showRandomFriends 走 2、showMyFriends 走 1）。 */
     stopAt(view, PAGE[key] || PAGE.random);
     wireChrome(view, current.host);
     if (key === 'gates') showGates();
@@ -1811,32 +1378,19 @@
     else if (key === 'friends') showFriends();
     else showRandom();
     /* ⚠ 收尾必须**重新静音 + 重写顶栏数值**：`stopAt(view, 帧)` 会重建整棵子树，
-     * 新出生的多帧元件"出生即冻结"（见 render.js 的静态页策略），但**重新静音一次**仍然要做：
      * `settleFrame` 会把规则重新挂到新视图上，之后任何一次换帧重建都自动适用。 */
     settleFrame(view);
     fillChrome(view);
     setTabs(view, key);
   }
   /** 把左右翻页箭头摆到"名单列两侧"（舞台坐标，实测）。
-   *  ------------------------------------------------------------
-   *  · 好友帧自带的落点把右箭头压在名单中间（导出 f2 的 `right` 是 `x=200.75`，
-   *    而左箭头是 `x=12.95` —— 两颗本来都贴着**名单那一列**），
-   *    复刻以前却把两颗统一摆到"随机页那一套"（292.3 / 8.6）：右箭头因此飞到屏幕最右缘。
    *  · 用户 2026-10 口径："好友界面的翻页键向右翻页键的位置不对，太靠右了，
-   *    像左翻页键一样贴着介绍栏即可。"；下一轮又报"好友界面无法正常翻页"。
    *  · **真正的坑是箭头元件的原点不在画稿中心**：`3156` 的透明热区在局部
-   *    `x -2.5..17.15`（中心 ≈ 7.3），而画稿（那枚圆形箭头）画在 `-2.5..12.15`
    *    （中心 ≈ 4.8）—— 摆放点写的是"热区中心"，所以**热区永远比看得见的箭头偏右
-   *    一个半箭头**。摆在 199.28 时看得见的箭头落在 184.6..199.3，正压在拳套卡
-   *    （`s{i}` 画稿 172.8..190.5）上，而热区又在更右边 —— 点上去命中的是拳套卡
-   *    （开的是"挑战Ta"菜单），翻页自然"点了没反应"。
-   *  · 现在的口径：右箭头摆到名单列右沿（`f1..f4` 舞台 x 10.27..203.23）之外半个箭头宽，
-   *    与左箭头（8.6，贴名单左沿内侧）对称；这样它的热区 190.6..210.1 不再压住拳套卡
    *    （卡到 190.5 为止），画稿落在 182.4..197，鼠标一眼能看到、也点得到。 */
   const ARROW_Y = 80.8;
   const ARROW_POS = { left: { x: 8.6, y: ARROW_Y }, right: { x: 208.1, y: ARROW_Y } };
   /* 箭头元件（3156）导出实测是**两帧**：第 1 帧 = 箭头画稿，第 2 帧 = **空帧**。
-   * 复刻以前的 `wireClickable(箭头, { hover: 2 })` 于是"鼠标一移上去就消失"
    * （用户 2026-10 报的"鼠标悬停在翻页键上时翻页键会消失"）—— 那一档根本没有画稿，
    * 原版也从来没往那一帧拨过（原版是键盘操作，箭头只有"常态"）。所以悬停**不改帧**，
    * 反馈交给点击路由统一加的 `.sf-hover`（暖色光晕 + 微放大，见 css/classic-refine.css）。 */
@@ -1856,10 +1410,7 @@
   function settleFrame(view) { applySilence(view); }
   /** 把这一页"静"下来：按钮 / 箭头 / 行 / 拳套卡都是**状态精灵**，不冻住会各自循环播。
    *  ⚠ 老的写法要列两张例外表（`skip` 里"我们自己拨帧的" + `protect` 里"数字精灵不许钉"）——
-   *  那是**针对 `pinFrame` 那种机制的补丁**：`pinFrame` 每一拍强制拨回某一帧，所以
    *  "要自己拨帧的"和"数字精灵"都得躲开它。现在的静态页策略只写 `playing = false`
-   *  （不自己往前走、不碰帧号），`gotoAndStop` / `showNumber` 全部照常生效，
-   *  于是这两张表都不再需要：**整页一律冻，除了原版自带的装饰动画**（`KEEP_ANIMATED`）。
    *  换页帧会重建子树，所以每次换帧后要重来一遍（规则按名字 / 元件号写，重建也认）。 */
   function applySilence(view) {
     const t = T();
@@ -2006,7 +1557,6 @@
     });
   }
 
-  /** 我的好友（`showMyFriends` :13204）：页帧 1，一页 4 行 + 左右翻页 + 加好友。 */
   function showFriends() {
     const view = current.view;
     const all = friendRoster();
@@ -2039,23 +1589,11 @@
     showUserPic(view, slice[current.sel || 0] || null);
   }
 
-  /* ============================================================
-   * 关卡（`showGate` :1015 / `MainMovie.as:23267`）—— 一级页 = fubenSub 的 3 个门
-   * ------------------------------------------------------------
-   * ⚠ 三条都是对着原版改回来的（用户 2026-10 报的"关卡界面没有对齐"）：
-   * ⚠ 门卡（`button1..3`，4748）的帧号是**逐帧渲染实测**出来的（素材 4748 只有 3 帧）：
-   *   1 = 金「挑战他」/ 2 = 金「继续挑战」/ 3 = 灰「挑战他」。
-   * ========================================================== */
   const GATE_CARD = { open: 1, running: 2, locked: 3 };
   /* 用户 2026-10 口径（本批）："挑战界面仍然在任何情况下都是显示的继续挑战，
    *   希望能参考 ssfight 给出正确的显示逻辑。"
-   * ------------------------------------------------------------
-   * 原版这一级（`showGate`，MainMovie.as:23263-23320）**只用两帧**：
    *   `_loc2 <= getMaxGate()+1` → `gotoAndStop(1)`（金「挑战他」），否则 `gotoAndStop(3)`（灰）。
-   *   整段里**没有第 2 帧** —— 「继续挑战」那一档只出现在**下一级的六颗星**上
    *  （`showhardWin`，:23409-23438：`keep == "true"` 才 `gotoAndStop(2)`）。
-   * 复刻以前在这一级判"这一关（6 星里任意一颗）还有在途的一轮"就拨第 2 帧，
-   * 而 `stageRuns` 里只要还留着一份没打完的存档，整扇门就永远写着「继续挑战」——
    * 三扇门一起显示，就是用户看到的样子。现在照原版收成两档。 */
   function gateState(t) {
     const types = (window.GData && GData.STAGE_TYPES) || [];
@@ -2070,18 +1608,11 @@
     return gateState(t) === 'locked' ? GATE_CARD.locked : GATE_CARD.open;
   }
   function showGates() {
-    /* 另外两条也是同一批对着原版改回来的（用户 2026-10 报的"关卡界面没有对齐"）：
-     *  ① `newYearMc`（7551）是**元旦活动**角标，原版 `activity_newYear != "true"` 时
-     *     `gotoAndStop(2)`（空帧）；复刻一直没碰它 → 说明条右下角总挂着
-     *     "元旦活动：每日可挑战15次"。
-     *  ② `desc` 的文案原版是一整句（`MainMovie.as:22307` 的 `_loc3`）：
-     *     "螳螂身手敏捷…建议10-15级的玩家挑战。" —— 复刻之前自己拼了"★ 名字　建议…\n描述"。 */
     const view = current.view;
     const types = (window.GData && GData.STAGE_TYPES) || [];
     const sub = clipOf(view, 'fubenSub');
     const level = Number((S() || {}).level) || 1;
     if (!sub) return;
-    /* 原版 5 级以下 `gotoAndStop(2)`（"等级不够"那一页）。 */
     stopAt(sub, level > 4 ? 1 : 2);
     if (level <= 4) { wireClickable(clipOf(view, 'back'), { hover: 2, onFire: () => { destroy(); UI.runAction('home'); } }); return; }
     const pageCount = Math.max(1, Math.ceil(types.length / 3));
@@ -2135,37 +1666,21 @@
     wireClickable(right, { hover: 0, onFire: () => flip(1) });
     wireClickable(clipOf(view, 'back'), { hover: 2, onFire: () => { destroy(); if (window.UI && UI.runAction) UI.runAction('home'); } });
   }
-  /** `tiaozhan.fubenSub.desc`：原版 `MainMovie.as:22308` 写的是**当前选中那个门**的整句说明。 */
   function writeGateDesc(sub, types, i) {
     const type = types[i];
     const text = type ? (type.name + type.desc + '，' + type.recommend + '。') : '';
     setText(sub.byName ? sub.byName('desc') : null, wrap(text, 22));
-  }
-  function stageTypeOpen(t) {
-    for (let st = 1; st <= 6; st++) if (State.stageAccess(t * 6 + st).ok) return true;
-    return false;
   }
   function lockedNotice(t) {
     const msg = State.stageAccess(t * 6 + 1).msg;
     if (window.UI && UI.toast) UI.toast(msg);
   }
 
-  /* ============================================================
-   * 竞技场（原版 `showMyRacing` :13265 → `showRacing0/1/2` + `showRank`）
-   * ------------------------------------------------------------
-   * 原版这一套完全建立在服务端上：开房、报名、掷骰子、天梯积分排名。
-   * 复刻没有服务端，所以**界面用原版的帧（6 / 4 / 7 / 8 / 9），玩法接复刻自己的实现**
-   * （`js/classic-extras.js` 的 arena / 天梯积分）—— 这就是 §7 定下的"现代适配"口径。
-   * 用户 2026-10 报的"竞技界面完全没有对齐"：之前点「竞技」直接 `UI.runAction('arena')`
-   * 把整页换成复刻自研的 DOM 页，原版这一套界面一帧都没出现。
-   * ========================================================== */
   function arenaGo(page) {
     if (!current) return;
     current.arenaPage = page;
     showTab('arena');
   }
-  /** 从外部重新落到竞技场某一子页（`ClassicExtras.arena` / 报名 / 打完一场回来都走它）。
-   *  `page` 省略时按当前 `current.arenaPage`。 */
   function goArenaPage(page) {
     if (page) {
       arenaPage = page;
@@ -2173,8 +1688,6 @@
     }
     /* ⚠ 挑战页那一层**可能已经不在 DOM 上了**：`Main.startBattle` 一开打就
      * `$('#ui').innerHTML = ''`（把整棵显示树清掉），`current.view` 于是成了"连着但不在树上"
-     * 的孤儿。以前这里只把页码记下来、照样调 `showTab` → `stopAt` 画在孤儿树上，
-     * `#ui` 里什么都不剩：满屏墨绿、点哪都没反应（用户 2026-10 报的"战斗结束后卡死"）。
      * 现在**先看显示树还在不在**，不在就重新挂一整页（挂完由 `open()` 落到 `arenaPage`）。 */
     if (!current || !viewAttached()) {
       if (page) pendingArenaPage = page;
@@ -2186,14 +1699,12 @@
       return waitArenaView();
     }
     /* ⚠ 开打的那一瞬间也会走到这里（`fightArena` 里是 `Main.startBattle(...)` 之后紧跟
-     * `arenaMatchPage()`）：那时候战斗已经接管了 `#stage`，这一页再重画一遍纯属浪费，
      * 而且会把赛事说明那层 DOM 又盖回战斗画面上。所以**战斗中只记页码、不动显示树**
      * （赛事提示条也要收掉 —— 它压在战斗画面底部会挡住「倍速 / 跳过」两键）。 */
     if (inBattle()) { closeArenaHint(); return; }
     /* ⚠⚠ "当时正在打"和"存档里 `busy` 还是 true"（打一半关掉页面 / 刷新）是两回事：
      *   以前只按 `run.busy` 判，刷新之后 `inBattle()` 永远为真、`goArenaPage('match')`
      *   每次都在这儿 return —— 挑战页那一层**永远不重建**，`#ui` 里只剩一条赛事提示条，
-     *   满屏墨绿、点哪都没反应（用户 2026-10 报的"战斗结束后卡死"里最难查的那一档）。
      *   `busy` 只用来判"战斗画面是否还在"（见 `inBattle`），回到赛事页就把它抹掉。 */
     ClassicExtrasClearBusy();
     showTab('arena');
@@ -2210,12 +1721,10 @@
       tick();
     });
   }
-  /** 挑战页那一层还挂在 `#ui` 上吗（战斗会把 `#ui` 整个清空）。 */
   function viewAttached() {
     return !!(current && current.view && current.view.g && current.view.g.isConnected && current.host && current.host.isConnected);
   }
   /** 现在有没有一场战斗正在播。
-   *  `Main.mode` 没有对外导出，所以看两件事：赛事 `busy` **并且** `#stage` 上真有战斗那两颗键
    *  （`Battle.cornerLayout` 造的「倍速 / 跳过」，`aria-label` 是它俩的固定标识）。
    *  ⚠ 只按 `busy` 判会在"打一半刷新"之后永远为真，那一页就再也画不出来了。 */
   function inBattle() {
@@ -2225,7 +1734,6 @@
     if (!(run && run.busy)) return false;
     return battleOnStage();
   }
-  /** `#stage` 上有没有战斗操作键（= 这一场真的在播）。 */
   function battleOnStage() {
     return !!document.querySelector('[aria-label="跳过战斗"],[aria-label="切换战斗速度"]');
   }
@@ -2237,10 +1745,8 @@
   /* 竞技场报名后的"赛事页"：原版是 7638 的**第 5 帧**（`join1..4` 四个席位 + `statu`），
    * 由服务端开房后 `showRacing2` 拨过去。复刻的对手在本地生成，所以这一页照原版帧摆席位：
    *   · `join1..4`（席位卡 3385）第 1 帧 = 有人（带 `name` / `level` 两个字段），第 2 帧 = 空位；
-   *   · `statu`（7572）是"状态"两帧精灵，`7564` 是烤在图里的「决」字。
    * ⚠ 这里以前把小半个屏幕都盖成复刻自研的 DOM 面板（`.sf-arena`），
    *   战斗一结束那层还挂在赛事页上、又压住战果弹窗 —— 用户口径是"一切看齐 ssfight、不调用现代界面 ui"，
-   *   所以现在只保留一条**贴底的细提示条**（原版那一页没有任何可点的按钮，席位之外的进度
    *   只能用"下一场开始"来推进），赛事信息本身全部落在原版帧的席位与 `statu` 上。 */
   function showArenaMatch() {
     const view = current && current.view;
@@ -2255,13 +1761,10 @@
     if (run && !run.busy && !run.settled) scheduleArenaAutoFight(run);
     if (run && run.matching) return;
     if (run && !run.matching && window.SfFightResult && window.UI && UI.currentUiMode && UI.currentUiMode() === 'classic') {
-      // A battle result may already be mounting while the background page is restored.
       if (SfFightResult.isOpen()) return;
       const phase = run.phase, foe = phase === 'final' ? run.finalist : phase === 'third' ? run.consolation : run.foe;
       const title = phase === 'final' ? '决赛' : phase === 'third' ? '季军赛' : '半决赛';
       /* 用户 2026-11 口径（与联机版同步）：这一页只留「谁打谁 + 开始/返回」。
-       * 以前正文那两行（"本轮进度已保留。开始下一场比赛不再扣除体力。"）在这张对局页
-       * 上既没给出本场收益，又在赛前就说第二场不扣体力 —— 直接去掉，收益交给每场
        * 战斗后的原版战果页（局内 7772 那张：经验 + 悬浮物品三格）。 */
       SfFightResult.open({ kind: 'arena', title, neutral: phase === 'semi', win: phase === 'semi' ? null : phase !== 'third', player: S(), foe,
         actions: [{ label: '开始' + title, run: () => { destroy(); ClassicExtras.fightArena(run); } },
@@ -2272,7 +1775,6 @@
     /* 贴底的细提示条（只在赛事页出现，**不进 `menuHost()`**）。
      * ⚠ 以前这一页用的是 `menuHost()` + 整块 `.sf-arena` 面板：它是按"对手动作菜单"建的
      *   常驻层，赛事页一离开没人收，战斗画面上就一直挂着那一层（还会压住战果弹窗）——
-     *   用户 2026-10 报的"竞技场战斗结束后卡死"里，那一层是最外显的症状。
      *   现在它自己一个宿主、由 `closeArenaHint()` 在切页/开打时收干净。 */
     const ui = document.getElementById('ui');
     if (!ui) return;
@@ -2294,7 +1796,6 @@
   }
   let arenaHintHost = null;
   /* 竞技场赛事页自动进战斗的等待时间：与天梯「战斗准备中」的 3 秒一致。
-   * 匹配页 / 决赛页 / 季军赛页由 `scheduleArenaAutoFight()` 在展示完后自动推进；
    * 切页、返回、手动点「开始」都会走 `closeArenaHint()` 取消计时，避免离开页面后还开战。 */
   const ARENA_AUTO_FIGHT_MS = 3000;
   let arenaAutoTimer = null;
@@ -2325,16 +1826,12 @@
       CE.fightArena(live);
     }, ARENA_AUTO_FIGHT_MS);
   }
-  /** 收掉赛事页那条提示（切页 / 开打 / 拆页时都要调；同时取消自动开战计时）。 */
   function closeArenaHint() {
     cancelArenaAutoFight();
     if (arenaHintHost && arenaHintHost.parentNode) arenaHintHost.parentNode.removeChild(arenaHintHost);
     arenaHintHost = null;
   }
   /** 竞技场赛事页的四个席位（原版 `showRacing2` 摆 `join1..4`）。
-   *  富余的信息（谁打谁、什么阶段）写在 `statu` 上；没有的席位一律清成空位（第 2 帧）。
-   *  对位照原版那一页的排法：**左列 = 先打的那半区**（`join1` 玩家 / `join2` 他的对手）、
-   *  **右列 = 另一场**（`join3` / `join4`）。复刻每轮只知道自己这一侧，
    *  所以只填"玩家 + 已确定的对手"，其余留空位 —— 不编服务端才会有的对手数据。 */
   function paintArenaSeats(view, run) {
     const s = S() || {};
@@ -2342,7 +1839,6 @@
     if (run) {
       rows[0] = { name: s.name || '我', level: s.level };
       if (run.phase === 'semi') {
-        /* 报名后这三名对手已经一次性抽好；匹配页把四席都亮出来，别让后两席空着等待。 */
         rows[1] = run.foe || null;
         rows[2] = run.finalist || null;
         rows[3] = run.consolation || null;
@@ -2366,8 +1862,6 @@
     const statu = clipOf(view, 'statu');
     if (!statu) return;
     /* `statu`（7572）是两帧状态精灵：f1 =「匹配对手…」+ 7570 那颗 12 帧省略号动画，
-     * f2 = 匹配完成后的下一步。原版靠 f1 自己播，复刻整页冻结后 7570 停在第 1 帧，
-     * 那个省略号就是死的（用户 2026-10 口径：要和天梯匹配一样播 . .. ...）。
      * ⚠ 不能用 `setText(statu, …)`：这颗是矢量画稿，没有文本字段，写了也不会显示。 */
     if (!run) { stopAt(statu, 2); return; }
     stopAt(statu, run.matching ? 1 : 2);
@@ -2399,8 +1893,6 @@
     if (page === 'menu') return showArenaMenu();
     if (page === 'match') return showArenaMatch();
     if (page === 'ladder') return showArenaLadder();
-    /* 首屏（`showRacing0` :15111 → `gotoAndStop(6)`）：`compete`(7583) 1 = 已开启 / 2 = 未开启
-     * （原版门槛是 10 级，见 :15120）。 */
     stopAt(view, ARENA.home);
     const compete = clipOf(view, 'compete');
     stopAt(compete, lv >= 10 ? 1 : 2);
@@ -2430,10 +1922,7 @@
     stopAt(view, ARENA.rules);
     /* 说明按真实框宽断行，写清两场名次奖励与门槛；选择弹窗只放两个道具图标。
      * ⚠ 这一块是右侧圆角面板里唯一的正文（字段框 215 宽、行距 13.8、字号 12）。
-     *   面板内框约 210×119（x 93.3~303 / y 36.4~155.9）：9 行会把最后一行挤到面板下方的白卡上，
-     *   每行写到 18 个全角字还会顶出面板右弧。所以文案压到 **≤16.5 个全角字宽 / 7 行**：
      *   · 标题行用「、」分隔三类奖励并去掉斜杠两侧的空格，不再把「点」挤成孤字；
-     *   · 报名行收成「体力不足用入场券」，不再把「券」挤到下一行；
      *   · 正文起点 x 从 3 调到 7：左侧留出约 8 个舞台单位，最宽的 16 字行右侧也还剩约 9 个。 */
     const desc = clipOf(view, 'desc');
     if (desc) setText(desc, fitText(desc,
@@ -2462,8 +1951,6 @@
   }
 
   /** 天梯赛菜单（`showRacing1` :15244 的 arenaType==2 分支 → 帧 7：三颗键 + 返回）。
-   *  原版这三颗的文案烤在图里，从左到右是**金杯商店 / 开始比赛 / 排行榜**
-   *  （`button1` = 7590 / `button2` = 7592 / `button3` = 7595，见导出实测）——
    *  复刻以前把三颗都接成了"排行榜"，用户 2026-10 报的"完善天梯赛的开始比赛按钮与
    *  金杯商店的跳转"就是这一条。玩法仍接 `js/classic-extras.js` 的实现。 */
   function showArenaMenu() {
@@ -2486,8 +1973,6 @@
   function startLadderMatch() {
     const CE = window.ClassicExtras;
     if (!CE) { arenaGo('ladder'); return; }
-    /* 原版 `alertRank`（:23720）→ 二次确认 → `rank()` → `beforeRank`（:18149）的
-     * 「战斗准备中」3 秒 → 开打；`startRankFlow` 就是这套流程的经典页入口。 */
     if (CE.startRankFlow) CE.startRankFlow(() => goArenaPage('menu'));
     else if (CE.rankMatch) CE.rankMatch(() => { arenaGo('menu'); });
     else arenaGo('ladder');
@@ -2519,8 +2004,6 @@
     };
     paint();
     if (State.rankSyncWeek) State.rankSyncWeek();
-    /* 原版 `state == 15` 的 button1 是 `gainRankCup()`：直接领取 50 金杯。
-     * 2026-11 口径：本赛区前 30 名、且至少超过一个人机，一周一次。 */
     wireClickable(clipOf(view, 'button1'), {
       hover: 0, press: 0, idle: 1,
       onFire: () => {
@@ -2553,11 +2036,6 @@
     } });
     wireClickable(clipOf(view, 'back'), { hover: 0, onFire: () => arenaGo('menu') });
   }
-  /* ============================================================
-   * 二级/三级页：库元件「挑战1」= 4756（挂在独立的一层 `<svg>` 上，坐标与主页面同一套舞台系）
-   * ========================================================== */
-  // Shared original library dialogs. They keep the owning page and its state
-  // intact; closing never navigates or rebuilds the background page.
   let originalDialog = null;
   function closeOriginalDialog(owner, expected) {
     const dialog = originalDialog;
@@ -2670,7 +2148,6 @@
       page.sub.host.isConnected !== false && view.g && view.g.isConnected !== false);
   }
   /** 动作菜单（4756 第 1 帧）里有一张铺满舞台的 `3142`：黑色底 + `cx` 偏蓝 + 0.7 opacity，
-   *  在原版里是"把底页压暗"的蒙层，叠出来是一层明显的蓝滤镜（mac 上尤其显眼）。
    *  用户 2026-11 口径："多级页面不要这层可见滤镜。" 这里直接收掉这一张蒙层，
    *  菜单本体（`subframe` 4723）与底页都不动。 */
   function hideSubBackdrop(view) {
@@ -2702,16 +2179,9 @@
     current.sub = null;
   }
   /** 三级页 = 难度选择（`showhardWin` :23409：`tiaozhanSub.gotoAndStop(5)` + `style` 按门号切帧
-   *  + 六颗星按 `keep` 切 1/2/3 帧）。
-   *  ------------------------------------------------------------
    *  ⚠ 「继续挑战」**只在六级页的这一档**（用户 2026-10 口径："参考 ssfight 给出正确的显示逻辑"）。
-   *  原版逐字：
-   *    `if (_loc2.keep == "true") { gotoAndStop(2); canFight = true; continue; }`   // 金「继续挑战」
-   *    `if (_loc3 <= _loc6 + 1)   { gotoAndStop(1); canFight = true; continue; }`   // 金「挑战他」
-   *    `gotoAndStop(3); canFight = false;`                                        // 灰「挑战他」
    *  复刻的 `State.stageRun(id)` 就是那份 `keep`：**一轮打到一半还留着存档**（没通关时
    *  `stageRuns[id]` 不会被删，整轮 3 场全胜才 `delete`，见 state.js 的 `finishStageBattle`）。
-   *  以前这里把 `passed`（已通关）当第 2 帧 —— 于是**通关过的星**反而永远写着「继续挑战」，
    *  和新一轮该不该继续毫无关系。 */
   async function openGate(t) {
     const page = current;
@@ -2723,7 +2193,6 @@
     for (let st = 1; st <= 6; st++) {
       const id = t * 6 + st;
       const card = clipOf(view, 'button' + st);
-      /* 1 = 可打（金「挑战他」）/ 2 = 本轮没打完（金「继续挑战」）/ 3 = 锁定（灰） */
       stopAt(card, starFrame(id));
       wireClickable(card, {
         hover: 0, press: 0,
@@ -2734,12 +2203,8 @@
     wireClickable(clipOf(view, 'back'), { hover: 0, onFire: () => { closeSub(); showTab('gates'); } });
   }
   /** 三级页 = 出战确认（`showFightWin` :1192：`gotoAndStop(4)` + `info1`/`info2` + 两颗键）。
-   *  ------------------------------------------------------------
    *  ⚠ 用户 2026-10 口径："关卡界面点击挑战后的界面中的介绍文字排版有大问题，严重超出屏幕范围。"
-   *  根因是文案**按写死的"每行 N 个字"硬断**（`info1` 按 10 个字、`info2` 按 13 个字），
-   *  而这两句话里混着"经验3/4/20、金松果25"这种半角 —— 一行实际能放 15~17 个字符，
    *  断得过窄 → 行数翻倍，而 `render.js` 的文本容器**只按框宽横向裁、纵向是放开的**，
-   *  多出来的行就一路画到对话框外面、盖住底下那两颗键。
    *  现在改用 `fitText()`：拿字段自己的框宽 + 实际字体量出来的字符宽算每行能放几个字符。
    *  ⚠ 另外要把**行数**卡在框高里：原版那两颗键（`button1` / `button2`）就在文字正下方，
    *  再多一行就压上去。两段文案都压到"够放"的条数。 */
@@ -2769,7 +2234,6 @@
         : '连续击败3名敌人\n中途失败可用挑战书复活'), 11);
     const ok = clipOf(view, 'button1'), no = clipOf(view, 'button2');
     /* 用户 2026-10 口径：出战确认的「返回 / 战斗」位置对调（原版战斗在左、返回在右），
-     * 并且两颗键要再拉开一点（截图里换位后几乎贴在一起）。与 `openOriginalConfirm`
      * 的 swapButtons 同一套做法：只换两个 clip 的 x 位移，点击语义仍绑
      * button1=战斗 / button2=返回，且必须在 `wireClickable` 之前换，热区才会按新位置重新量。
      * 注意方向：战斗要移到右槽，返回移到左槽；`GAP` 是两颗键合计再拉开的舞台单位。 */
@@ -2803,18 +2267,11 @@
     void type;
   }
 
-  /* ============================================================
-   * 挂载与生命周期
-   * ========================================================== */
   let openTrace = '';
   /* 下一次 `open()` 直接落到哪个 tab（`openAt` 用；`open()` 是异步的，
    * 调用方没法"挂完再切"——所以让挂载自己带上目标 tab）。 */
   let pendingTab = null;
-  /* 挂载完成后要自动进的那扇门的难度页（`openGateAt` 用）。 */
   let pendingGate = null;
-  /* 挂载完成后要自动落到哪个竞技场子页（`goArenaPage` 用：挑战页被拆掉之后
-   * 竞技场打完一场要重新进来、并落在赛事页上）。`pendingArenaPage` 是"重新挂载时"的落点
-   * ——`arenaPage` 只在本实例还在树上时生效，见 `goArenaPage`。 */
   let arenaPage = null;
   let pendingArenaPage = null;
   async function open(container) {
@@ -2831,7 +2288,6 @@
       }
     }
     if (!host) { openTrace = 'no-host'; return false; }
-    /* 作废在途挂载：与状态页同一条规矩（先领号再拆树）。 */
     const mine = ++seq;
     destroyView();
     openTrace = 'destroyed mine=' + mine;
@@ -2875,7 +2331,12 @@
     closeArenaHint();
     current = null;
   }
-  function destroy() { seq++; destroyView(); }
+  function destroy() {
+    seq++;
+    destroyView();
+    const statusOpen = !!(window.SfStatus && SfStatus.current && SfStatus.current());
+    if (!statusOpen && window.SfRender && SfRender.releaseExtra) SfRender.releaseExtra('tags-challenge.json');
+  }
 
   window.SfChallenge = Object.freeze({
     open: open,
@@ -2885,16 +2346,12 @@
      *  关卡战打完之后回到「关卡」用的是它 —— 不然会掉回随机页 / 复刻自研的 DOM 关卡页。 */
     openAt: (k) => { pendingTab = k || 'random'; },
     /** 战斗前把当前挑战页从 `#ui` 摘下来、打完原样挂回去（同一棵 SVG，不重挂）。
-     *  随机页/切磋本来就用；关卡连战也从这里走 —— `Main.startBattle` 会清空 `#ui`，
-     *  不先摘下来的话战后只能重新 `open()` 整页，观感就是关卡页闪一下。
      *  `resumePageAfterBattle(hold, tab)` 返回 false 时调用方才退回重挂路径。 */
     holdPageForBattle: holdPageForBattle,
     resumePageAfterBattle: resumePageAfterBattle,
     /** 竞技场里的子页（`home` / `rules` / `menu` / `ladder`）——给回归用例与
      *  外部入口用，不用真的去点那几颗按钮。 */
     setArenaPage: (p) => { arenaGo(p || 'home'); },
-    /** 外部（`ClassicExtras` 报名 / 打完一场回来）落到竞技场某一子页；
-     *  挑战页没挂时会自己重新进挑战页再落位。 */
     goArenaPage: (p) => goArenaPage(p),
     /** 切到「关卡」tab 并直接进第 t 种类型的难度页（`backToStages(t)` 用）。
      *  页面还没挂好时先记下来，`open()` 挂完自动补上。 */
@@ -2907,7 +2364,6 @@
       guard(openGate(n));
     },
     /** 关卡连战回到**已经挂着的**难度页：只更新三级页的星标/文案，不 `showTab`
-     *  （它内部会 `closeSub()` 把刚挂回的三级页又拆掉）。用于 `holdPageForBattle`
      *  把整页原样挂回之后的刷新。 */
     refreshGateAt: (t) => {
       const n = Math.max(0, Math.min(5, Number(t) || 0));

@@ -5,10 +5,6 @@
 #   所以 .gitignore 里也不再需要为它留条目（目录都不存在了，留着只会让人以为它还在）。
 references/
 
-# images/_reference/ —— 原版截图、切图出处档案（manifest）、没采用的散图。
-# 同样只作参考：游戏运行只认 images/ui | images/atlas | images/battle。
-images/_reference/
-
 save/
 
 # 根目录的 macOS / Linux 启动器是**本机私货**：里面的原生版路径、浏览器 profile、
@@ -63,10 +59,8 @@ tools/verification/*.png
 scripts/sync/sync.config.json
 
 # AI 超分：out/ 是跑出来的中间产物与对比图，属本地产物。
-# 1x 原始按钮留档在 references/ 下（references/ 整目录上面已忽略）——只作参考，
-# 不进游戏也不进仓库；.bak-upscale/ 是原地放大前的 1x 备份（buttons / icons 都有）。
+# 1x 原始按钮留档在 references/.bak-upscale/（references/ 整目录上面已忽略）。
 out/
-images/classic/**/.bak-upscale/
 
 web-pwa/
 tools/build-web.cjs

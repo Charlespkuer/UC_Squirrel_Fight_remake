@@ -1,27 +1,9 @@
-/* ============================================================
- * state.js — 玩家状态、存档、养成系统（武器/技能/装备/道具/关卡）
- * 数值规则复刻自原版 player.js 与 GameDict.js
- * ============================================================ */
+// state.js — 玩家状态、存档、养成（武器/技能/装备/道具/关卡）；数值规则复刻原版 player.js 与 GameDict.js。
+// State 是存档与数值的唯一真值：页面只调 API，不另存一套。
 
-/* ------------------------------------------------------------
- * 目录：玩家状态 / 存档 / 养成系统
- * Ctrl+F 搜节号（如「【S1】」）直达对应代码块。
- *
- *  【S1】基础  【S2】师徒系统  【S3】存档
- *  【S4】体力  【S5】武器/技能实例  【S6】升级武器/技能
- *  【S7】真·武器 / 真·技能  【S8】装备  【S9】宝石
- *  【S10】属性合计  【S11】道具  【S12】天使果实 / 恶魔果实
- *  【S13】自由属性点  【S14】每日收益流水  【S15】经验 / 升级
- *  【S16】战斗后结算  【S17】超级松鼠  【S18】好友
- *  【S19】复仇  【S20】AI 玩家生成  【S21】关卡
- *  【S22】每日任务  【S23】导出 window.State
- * ------------------------------------------------------------ */
 (function () {
   'use strict';
 
-  /* ============================================================
-   * 【S1】基础：存档键 / 调试开关判定 / 新开局
-   * ============================================================ */
   const testMode = typeof location !== 'undefined' && /(?:^|[?&])(?:test=[12]|qa=1)(?:&|$)/.test(location.search || '');
   const SAVE_KEY = testMode ? 'ssdz_test_save_v1' : 'ssdz_save_v1';
   /* 双界面独立存档：经典/现代各一份进度，同一条文件/localStorage 记录里放两个槽位。
@@ -42,23 +24,17 @@
    * 经典槽位不动（那边有原版矢量分层外观）。 */
   const BLACK_PROP_IDS = Object.freeze([77, 78, 80, 89]);
   /* 原版 `MainMovie.as:19620` 的 `var maxLevel = 90`：1~70 级每级 +3 属性 +5 生命，
-   * 71~90 级原版只发金宝箱；本版为了保留升级手感，71~90 继续每级成长，
    * 同时每级仍发 1 个金宝箱，并把单箱上限从 16 点压到 12 点（见 rollChestReward）。 */
   const MAX_PLAYER_LEVEL = 90;
-  /* 随机挑战/竞技场/天梯的对手难度系数（成长预算同曲线，这里补 AI 不会"挑点"的差距）。 */
   const RANDOM_FOE_SCALE = 1.08;
   const FREE_POINT_RANDOM = 2;
   /* 到这一级时给玩家一次「自愿支持作者」的提示（一次性，落存档；不换取任何游戏内好处）。 */
   const SUPPORT_PROMPT_LEVEL = 30;
-  /* 自选点能加的四项，以及每一点给多少（生命一点 = 5 点血，和随机点、
-   * 永久属性道具 19 的口径一致）。 */
   const STAT_KEYS = ['power', 'agility', 'speed', 'hp'];
   const STAT_NAMES = { power: '力量', agility: '敏捷', speed: '速度', hp: '生命' };
   const STAT_FIELDS = { power: 'power', agility: 'agility', speed: 'speed', hp: 'maxHp' };
   const STAT_GAIN = { power: 1, agility: 1, speed: 1, hp: 5 };
   /* **永久属性点硬上限 651**（ssfight 90 级总账）：
-   *   22（初始）+ 89×4（1~90 每级成长）+ 20×12（71~90 金宝箱）+ 29（神迹）+ 4（天梯永久丸）= 651。
-   * 只收口 `S.power / agility / speed / maxHp` 与未分配的 `S.freePoints`；
    * 装备主属性、被动技能、套装、药丸状态、幻兽是对战斗面板的外部加成，不占这 651 点预算。
    * 它必须**高于所有正常产出**（包括旧属性书/转生记录），但任何来源——含调试——都不能越过。 */
   const STAT_HARD_CAP = 651;
@@ -66,7 +42,6 @@
    * **生命不参与三项占比**：原版 SSFight 的权重只约束力/敏/速。 */
   const HP_PER_STAT = 5;
   /* 原版 SSFight 的转化丸口径：力/敏/速任一项低于三项总和的 **25%** 时不能用。
-   * 本作把这套「三项权重」用于升级系统分配与特殊自由点；生命另有等级×9 的
    * 消耗门槛（原版道具 14/18），不进入这个占比。 */
   const SHARE_KEYS = ['power', 'agility', 'speed'];
   const STAT_SHARE_MIN = 0.25;
@@ -82,7 +57,6 @@
   ];
   const RESOLUTION_KEYS = RESOLUTIONS.map((r) => r.key);
   /* 界面模式：'classic' = 参考原版 ssfight 的经典界面（默认）；'modern' = 现在的界面。
-   * 它只决定「展示层」（window.UI.classic 由哪一套原语实现提供），
    * 不动状态层、战斗层与塔层 —— 逐屏取舍见 docs/经典模式-可行性.md。 */
   const UIMODES = [
     { key: 'modern', label: '现代' },
@@ -136,7 +110,6 @@
 
   function normalizeSave(raw) {
     const next = Object.assign(clone(GData.NEW_PLAYER), raw);
-    /* 收徒挑战中断时退回的体力；在 energy 归一化之前就要有初值（见下方 refund 块）。 */
     let recruitEnergyRefund = 0;
     next.level = Math.max(1, Math.min(MAX_PLAYER_LEVEL, integer(next.level, GData.NEW_PLAYER.level, 1)));
     for (const key of ['power', 'agility', 'speed', 'maxHp']) {
@@ -168,14 +141,12 @@
     next.energy = Math.min(ENERGY_HARD_CAP, next.energy);
     next.integral = next.integral == null ? null : integer(next.integral, 0);
     next.rankCupClaimWeek = typeof raw.rankCupClaimWeek === 'string' ? raw.rankCupClaimWeek : '';
-    /* 天梯赛区 / 周重置 / 赛区人机（2026-11）：本周标识、本周场次、人机名册。 */
     next.rankWeek = typeof raw.rankWeek === 'string' ? raw.rankWeek : '';
     next.rankWeekMatches = Math.max(0, integer(raw.rankWeekMatches, 0));
     next.rankWins = Math.max(0, integer(raw.rankWins, 0));
     next.rankLosses = Math.max(0, integer(raw.rankLosses, 0));
     next.rankBots = normalizeRankBots(raw.rankBots);
     /* 天梯商店购买次数：三本账都只收「数字 key → 非负整数」。
-     * `rankPurchases` 是按周的；`rankPurchaseTotals` 是账号累计（永久属性丸限购）；
      * `rankMonthPurchases` 是两套狂战的月度账（每月 1 号 0 点重置，见 classic-extras）。 */
     next.rankPurchases = (() => {
       const src = object(raw.rankPurchases) ? raw.rankPurchases : {};
@@ -225,11 +196,9 @@
       }
       return out;
     })();
-    // 真升级的当日次数（费用递增，24:00 清零）：换天就归零
     next.trueUpgrades = (object(raw.trueUpgrades) && raw.trueUpgrades.date === localDate())
       ? { date: raw.trueUpgrades.date, count: Math.max(0, integer(raw.trueUpgrades.count, 0)) }
       : { date: localDate(), count: 0 };
-    // 每日收益流水（徒弟日供）：只保留最近 7 天、日期合法、非负整数
     next.earnHistory = (Array.isArray(raw.earnHistory) ? raw.earnHistory : [])
       .filter((d) => object(d) && validLocalDate(d.date))
       .slice(-EARN_DAYS)
@@ -242,7 +211,6 @@
       const source = object(next[key]) ? next[key] : {};
       next[key] = {};
       for (const id of Object.keys(source)) {
-        // 8 金松果 / 15 经验 / 40 金杯是货币与经验值（原版 useType 0/3），不该出现在背包里；
         if (CURRENCY_PROP_IDS.includes(Number(id))) continue;
         const count = Math.min(PROP_HARD_CAP, integer(source[id], 0));
         if (propMap.getValue(id) && count > 0) next[key][id] = count;
@@ -303,8 +271,8 @@
       }
       next.wsPicks = picks;
     }
-    /* 天使/恶魔果实：已经抽出的三选一必须原样保留（大退重进不重抽）；
-     * 只在武技状态变化导致候选失效时过滤，绝不因为读档重新摇号。 */
+    /* 天使/恶魔果实：已经抽出的 1 个随机结果必须原样保留（大退重进不重抽）；
+     * 只在武技状态变化导致该候选失效时丢弃，绝不因为读档重新摇号。老档里的多候选只留第一个。 */
     {
       const rawFruit = object(next.fruitChoices) ? next.fruitChoices : {};
       const owned = new Set([
@@ -327,23 +295,37 @@
           if (mode === 'lose' && !owned.has(code)) continue;
           list.push({ kind: c.kind, id: num, name: def.name, remark: def.remark || '', type: def.type || '' });
         }
-        if (list.length) fruitChoices[id] = { mode, options: list, at: Number(p.at) || 0 };
+        if (list.length) fruitChoices[id] = { mode, options: list.slice(0, 1), at: Number(p.at) || 0 };
       }
       next.fruitChoices = fruitChoices;
+    }
+    {
+      const rawSeen = object(next.fruitSeen) ? next.fruitSeen : {};
+      const fruitSeen = {};
+      for (const id of [47, 48]) {
+        const list = Array.isArray(rawSeen[id]) ? rawSeen[id] : [];
+        const out = [];
+        for (const code of list) {
+          if (typeof code !== 'string' || !/^[ws]\d+$/.test(code) || out.indexOf(code) >= 0) continue;
+          out.push(code);
+          if (out.length >= 500) break;
+        }
+        fruitSeen[id] = out;
+      }
+      next.fruitSeen = fruitSeen;
     }
     const savedRuns = object(next.stageRuns) ? next.stageRuns : {};
     next.stageRuns = {};
     for (const id of Object.keys(savedRuns)) {
       const run = savedRuns[id];
       if (!npcOf(Number(id), 1) || !object(run)) continue;
-      // A page reload interrupts playback, but never charges the entry/revival twice.
       next.stageRuns[id] = { npcIndex: Math.min(3, integer(run.npcIndex, 1, 1)), revives: Math.min(2, integer(run.revives, 0)), needsRevive: run.needsRevive === true, masterOnly: run.masterOnly === true, masterFree: run.masterFree === true };
       if (Number.isFinite(Number(run.carryHp))) next.stageRuns[id].carryHp = Math.max(0, Math.min(1, Number(run.carryHp)));
+      if (run.foeCarryHp != null && Number.isFinite(Number(run.foeCarryHp))) next.stageRuns[id].foeCarryHp = Math.max(0, Math.min(1, Number(run.foeCarryHp)));
     }
     for (const id of Object.keys(next.stages)) {
       const progress = next.stages[id];
       if (!npcOf(Number(id), 1) || !object(progress)) { delete next.stages[id]; continue; }
-      // Older saves recorded only the next NPC. Preserve that already-paid run.
       if (!next.stageRuns[id] && (progress.keep === true || (!object(raw.stageRuns) && progress.passed !== true && Number(progress.npcIndex) > 1))) {
         next.stageRuns[id] = { npcIndex: Math.min(3, integer(progress.npcIndex, 1, 1)), revives: Math.min(2, integer(progress.revives, 0)), needsRevive: progress.revive === true };
       }
@@ -373,14 +355,12 @@
         speed: integer(p.speed, 0, 0), hp: integer(p.hp, 0, 0),
         weapons: Array.isArray(p.weapons) ? p.weapons.slice(0, 20) : [],
         skills: Array.isArray(p.skills) ? p.skills.slice(0, 20) : [],
-        /* 收徒时存下的装备快照：关卡「徒弟先上阵」要用它给徒弟穿装备。 */
         gears: normalizeFoeGears(p.gears),
         since: validLocalDate(p.since) ? p.since : localDate(),
         joinedAt: Number(p.joinedAt) > 0 ? Number(p.joinedAt) : localDateTime(validLocalDate(p.since) ? p.since : localDate(), 0, 0),
         lastExpDate: typeof p.lastExpDate === 'string' ? p.lastExpDate : '',
         tributeClaimedDate: validLocalDate(p.tributeClaimedDate) ? p.tributeClaimedDate : '',
       }));
-    // Reload cancels an unfinished local recruitment and returns its entry fee (gold + energy).
     if (object(next.recruitChallenge) && next.recruitChallenge.fee === 10 && typeof next.recruitChallenge.token === 'string') {
       next.goldPoint += 10;
       recruitEnergyRefund = Math.max(0, Number(next.recruitChallenge.energyFee) || 0);
@@ -389,7 +369,6 @@
     if (recruitEnergyRefund) next.energy = Math.min(next.maxEnergy || ENERGY_HARD_CAP, next.energy + recruitEnergyRefund);
     next.masterKickDate = typeof next.masterKickDate === 'string' ? next.masterKickDate : '';
     /* 村庄建筑（祭坛 / 神迹 / 幻兽牧场）：老档没有这个字段 → 按原版"每个建筑 1 级"补一份。
-     * `upgrading` + `doneAt` 是"升级中"的倒计时；`buffId` + `buffDate` 是祭坛当天的随机状态
      * （`buffDate` 不是今天就等于没有）；神迹的 `add` 是历年加出来的属性点。 */
     {
       const raw2 = object(raw.buildings) ? raw.buildings : {};
@@ -451,8 +430,6 @@
     }
     next.battles = normalizeBattleHistory(next.battles);
     /* 「消息」上的红点（new）记账：**必须落存档**（用户 2026-10 口径）。
-     * 经典主界面的红点判据是"消息列表里最新一条的时间戳 > 上次看过消息页的时间点"。
-     * 这个"看到哪了"原本写在 localStorage（`ssdz_msg_seen`）—— 桌面壳（Tauri）的
      * WebView 每次启动都是新的数据目录，localStorage 不跨次启动保留，于是**每次打开游戏
      * 红点都重新亮一次**（用户报的就是"每次打开游戏后消息必有 new"）。
      * 落进存档就跟着 save/progress.json 走，换机器同步也一致（红点不会再重复亮）。
@@ -460,7 +437,6 @@
     next.msgSeenAt = Math.min(Date.now(), integer(next.msgSeenAt, 0, 0));
     // 好友：只保留名字合法的条目，等级夹在 1~满级；500 是防滥用安全线（原版无上限，见 FRIEND_LIMIT）
     /* 同名好友只留第一位：老档 / 早期联机存档里出现过重复名字（用户 2026-10-24 口径：
-     * "我不希望可以添加具有重复名字的好友"）。这里在**读档**时就归一，
      * 已有重复项不会继续显示成两行；`addFriend` 也会在写入前再挡一次。 */
     const friendNames = new Set();
     next.friends = (Array.isArray(raw.friends) ? raw.friends : []).filter((f) => object(f) && typeof f.name === 'string' && f.name.trim())
@@ -481,9 +457,7 @@
         since: validLocalDate(f.since) ? f.since : localDate(),
       }));
     next.dailyClaimDate = typeof next.dailyClaimDate === 'string' ? next.dailyClaimDate : '';
-    /* 连续登录天数（0 = 还没领过）。日期仍以 dailyClaimDate 为准，天数只做展示与加奖。 */
     next.loginStreak = Math.max(0, integer(next.loginStreak, 0, 0));
-    /* 好友留言：只保留「好友名 → 最近 50 条 / 每条 ≤80 字」的干净结构。 */
     next.friendMessages = {};
     if (object(raw.friendMessages)) {
       for (const name of Object.keys(raw.friendMessages).slice(0, FRIEND_LIMIT)) {
@@ -501,7 +475,6 @@
     next.quests = object(raw.quests) && Array.isArray(raw.quests.list) && typeof raw.quests.date === 'string' ? raw.quests : null;
     next.dailyCounters = object(raw.dailyCounters) && typeof raw.dailyCounters.date === 'string' ? raw.dailyCounters : null;
     next.dailyStatsDate = typeof next.dailyStatsDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(next.dailyStatsDate) ? next.dailyStatsDate : '';
-    /* 常驻挑战的「当日已通关次数」（每日递增惩罚的计数，见 challengeDailyCount）。 */
     next.challengeDaily = object(raw.challengeDaily) && validLocalDate(raw.challengeDaily.date)
       ? { date: raw.challengeDaily.date, count: Math.max(0, integer(raw.challengeDaily.count, 0, 0)) }
       : null;
@@ -512,7 +485,6 @@
     }
     // 本机偏好（音乐音量/静音、分辨率、全面屏）也写进存档：换浏览器或换机器同步后设置还在。
     next.settings = normalizeSettings(raw.settings);
-    // 无尽挑战塔：浅校验（深校验在 tower.js 懒做）。进行中的战斗令牌一律作废——
     // 刷新/重进后重打该场，不重复扣挑战书、不掉层。
     {
       const runShape = (r) => {
@@ -550,14 +522,9 @@
         heroWeekBest: Math.max(0, integer(en.heroWeekBest, 0)),
         heroBestLayer: Math.max(0, integer(en.heroBestLayer, 0)),
         shieldDate: typeof en.shieldDate === 'string' ? en.shieldDate : '',
-        /* 【2026-10 第一百零三批 用户报的 bug】**剧情的「只播一次」记账必须跟着存档走**。
-         * 它是**跨局**的账：第一次遇商人 / 第一次失去烙印 / 第一次遇巡视（`patrolGate`）…
-         * 以前这里是一份显式白名单，没列到的字段一律丢掉 —— 于是「无尽塔玩到一半退出游戏再重进」
-         * 之后所有「第一次」的文案都会重播一遍（用户实测：商店 / 烙印 / 巡视全变回第一次的文案）。
-         * ⚠ 以后往 `endless()` 上加字段（尤其是各种「已经播过 / 已经给过」的计数）时，
-         * **记得一起加到这里**，否则它就是「重载即清零」的易失字段。
-         * 形状只做浅校验：保留**所有** id（旧档里可能有现在已删掉的剧情名，留着无害），
-         * 丢掉非布尔的垃圾值。 */
+        /* 剧情的「只播一次」记账必须跟着存档走（跨局）：以后往 endless() 加
+         * 「已经播过/已经给过」字段时记得一起加到这里，否则重载即清零、文案重播。
+         * 只做浅校验：保留所有 id，丢掉非布尔垃圾值。 */
         storySeen: (() => {
           const src = object(en.storySeen) ? en.storySeen : {};
           const out = {};
@@ -595,7 +562,6 @@
       backgroundRun: st.backgroundRun === true,
       /* 兼容渲染：Android 16 / Adreno 的 Vulkan 合成器丢贴图层时，整页落软件图层。
        * auto = 只对现场确认过绿屏的**整机**（K90 Pro Max / MagicPad3 Pro）自动开（默认）；
-       * 同款 SoC 的其它机型保持硬件渲染 —— 软件层满分辨率实测约 30fps，会自动变成“战斗卡”。
        * on/off 供其它机型手动逃生；没有绿屏证据的机器不要自动开。 */
       compatRender: ['auto', 'on', 'off'].includes(String(st.compatRender)) ? String(st.compatRender) : 'auto',
       uiMode: UIMODE_KEYS.includes(String(st.uiMode)) ? String(st.uiMode) : 'classic',
@@ -607,7 +573,6 @@
     if (!object(S.settings)) S.settings = normalizeSettings(null);
     return S.settings;
   }
-  /** 改一项或几项偏好并立即存盘。 */
   function setSettings(patch) {
     const st = settings();
     if (object(patch)) for (const key of Object.keys(patch)) st[key] = patch[key];
@@ -660,14 +625,12 @@
     return !!gi && Number(gi.quality) === 5;
   }
   function isBlackPropId(id) { return BLACK_PROP_IDS.includes(Number(id)); }
-  /** 可镶嵌宝石的装备：橙色（q4 或旧实例 orange）与黑色（q5）各限 1 颗。 */
   function canSocketGem(gear) {
     if (!gear) return false;
     /* 原始存档实例只有 id/orange，没有 quality；必须经 gearQuality 把 q4/q5 也从 gearMap 读出来。 */
     const q = gearQuality(gear);
     return gear.orange === true || q === 4 || q === 5 || isBlackGearId(gear.id);
   }
-  /** 现代槽位里的黑装残留一律清掉：装备、碎片/黑卡/自选箱、黑卡计数、待领取的黑装宝箱。 */
   function stripModernBlackContent(slot) {
     if (!slot || !object(slot) || !object(slot.settings) || slot.settings.uiMode !== 'modern') return slot;
     slot.gears = (Array.isArray(slot.gears) ? slot.gears : []).filter((g) => !isBlackGearId(g && g.id));
@@ -731,7 +694,6 @@
     let other = dual.slots[otherMode(mode)] || null;
     /* 当前界面槽位不见了、另一界面还有档：**直接载入另一槽**，不要停在标题页。
      * 旧行为是 S=null（显示标题/新开局），玩家会看到「初始存档」；下一次启动
-     * localStorage 里的界面偏好若恢复，又载入另一槽的进度 —— 这就是用户说的
      * 「在初始存档与有进度的存档之间横跳」。只有两槽都没有档时才返回 false。 */
     if (!target && other) {
       mode = otherMode(mode);
@@ -739,7 +701,6 @@
       other = null;
     } else if (target && other && isFreshPayload(target) && !isFreshPayload(other)) {
       /* 当前槽是 1 级空档、另一槽却是有进度的档：优先把进度救出来。
-       * 旧版把 1 级档写回顶层、把有进度的档挤到 __dualOther 后，玩家每次启动
        * 看到的是「初始存档」；下一次界面偏好变化又可能读回另一槽 —— 横跳。
        * 只在当前槽确实是空档时换，玩家真在新号上打过一场（allWins/stages）就不动。 */
       const oldTarget = target;
@@ -776,9 +737,6 @@
     saveMode = pref;
     writeUiModePref(pref);
     /* 旧版单槽存档只有这一份进度，**不能**因为 localStorage 里的界面偏好与它
-     * 当初写下的 uiMode 不一致，就把它塞进 otherSlot、让当前界面变成标题/新开局。
-     * 换包更新后 localStorage 可能丢失或与旧档不一致，旧行为会让玩家看到 1 级新档，
-     * 下一次启动又按旧档的 uiMode 读回进度 —— 正是「初始档与有进度档横跳」。
      * 单槽档直接作为当前界面的进度载入，界面观感按当前偏好走。 */
     saveMode = pref;
     legacy.settings.uiMode = pref;
@@ -825,7 +783,6 @@
   function exportPayload() {
     try { return S ? JSON.stringify(savePayload()) : ''; } catch (e) { return ''; }
   }
-  /** 把之前导出的快照重新载入内存。只做校验与解析，不写盘。 */
   function restorePayload(raw) {
     try {
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -909,7 +866,6 @@
     });
   }
   /** 写盘后核对：真正读回来的当前槽位必须和 `prepareImport` 载入的是同一份。
-   *  比的是稳定进度指纹（名字/等级/经验/四维/货币/武技/道具/关卡/装备/双槽），
    *  不是原始字节 —— 读档本身会刷新 savedAt 之类的时间戳。 */
   function verifyImport(prepared) {
     if (!prepared || !S) return false;
@@ -954,7 +910,6 @@
     return m === slotMode() ? !!S : !!otherSlot;
   }
 
-  /** 分辨率档位对应的高度（0 = 跟随窗口）。 */
   function resolutionHeight(key) {
     const row = RESOLUTIONS.find((r) => r.key === String(key));
     return row ? row.height : 0;
@@ -965,16 +920,9 @@
     try { return !!(window.Debug && window.Debug.enabled && window.Debug.enabled(key)); } catch (e) { return false; }
   }
   /* 【2026-10 用户口径】调试开关的唯一出口要**挂到 window** 上：
-   * tower.js 里那句 `typeof debugOn === 'function' && debugOn(flag)` 找的是全局，
-   * 而它以前只是这里的模块内函数 —— 于是挑战塔/无尽塔读调试开关**永远是 false**，
-   * 「无尽试炼币拉满」「爬塔不耗挑战书」这两个开关因此一直是死的（用户实测报的就是这个）。
    * 挂上之后 bare `debugOn` 在 vm/浏览器里都能解析到它，两个模式里的调试开关才真正生效。 */
   if (typeof window !== 'undefined') window.debugOn = debugOn;
 
-  /* ============================================================
-   * 【S2】师徒系统（拜师/收徒/日供）
-   * ============================================================ */
-  // ---------- 师徒系统 ----------
   // 收徒上限随师父等级变化：10 级前 1 个，10-19 级 2 个，20 级以上 3 个
   function apprenticeCap(level) {
     const lv = Number.isFinite(Number(level)) ? Number(level) : (S ? S.level : 1);
@@ -1002,7 +950,6 @@
     save();
     return { ok: true, msg: '学会【' + base.name + '】', name: base.name, level: lv, upgraded: false };
   }
-  /** 拜师：记录师父（含等级、属性快照）并自动学会师父驾到。 */
   function setMaster(master) {
     if (!master || !master.name) return { ok: false, msg: '师父信息无效' };
     S.master = {
@@ -1023,7 +970,6 @@
     save();
     return { ok: true, master: S.master, learned };
   }
-  /** 出师：解除与师父的关系（花费用由界面负责扣除）。 */
   function clearMaster() { S.master = null; save(); return true; }
   /** 收徒：把对手的三围/武器技能一并记下来，便于查看徒弟数据。 */
   function addPrentice(foe) {
@@ -1055,19 +1001,8 @@
     save();
     return true;
   }
-  /* ============================================================
-   * 【S2b】村庄建筑（祭坛 1 / 神迹 3 / 幻兽牧场 4）
-   * ------------------------------------------------------------
-   * 对齐原版 `MainMovie.as`：
-   *   · `goHomeLand` 的服务端回包给每个建筑 `{buildingId, level, upgrading, upgraded,
-   *     attrAdd, remainTime, buffId}`（:4346-4416），`buildingUnlock` 表在 :19145
-   *     （`buildingUpInfo`：等级 1~30 的 碎片/经验/金松果双倍几率 + 升级金松果 + 升级小时）；
-   *   · 「升级完成」在下次进入村庄时结算（`checkUpgraded` :9763），
-   *     神迹那一档按 `attrAdd` 给 1 点力/敏/速 或 5 点生命（:9780-9801）；
-   *   · 「领取当日随机状态」（`gainBuff` :4417）每天一次，三种之一：1 经验双倍 / 2 碎片双倍 /
-   *     3 关卡金松果双倍，持续到当天 24:00（`buffId` 存在建筑上）。
-   * 复刻没有服务端，所以这三套都落存档、用 `localDate()` 当天判定。
-   * ============================================================ */
+  /* 村庄建筑（祭坛/神迹/幻兽牧场）对齐原版 MainMovie.as：升级完成在下次进村庄结算，
+   * 复刻无服务端，三套都落存档、用 localDate() 当天判定。 */
   /** 建筑等级 1~30：`[等级, 碎片双倍%, 经验双倍%, 金松果双倍%, 升级金松果, 升级小时]`
    *  —— 逐行照抄原版 `buildingUpInfo`（MainMovie.as:19145），不要在这里手改数值。 */
   const BUILDING_UP_INFO = [
@@ -1086,9 +1021,7 @@
   const BUILDING_IDS = { altar: 1, miracle: 3, beast: 4 };
   /* 最低使用等级（原版服务端按等级放出 buildingInfo；客户端本身没有这张表，
    * 这里按原版攻略/建筑开放顺序落成常量）：
-   *   祭坛 1 级（寺庙/祭坛从村庄开放即可用；原版攻略只是建议 20 级再投资升级）
    *   幻兽牧场 25 级（原版提示“25级后至村庄幻兽牧场使用”）
-   *   神迹 30 级、征战 35 级（征战 original homeLand 的 button10 门控 level>34）。
    * `mc3/mc4/mc5` 的末帧就是原版的墓碑/关闭外观；未到等级时停在末帧，
    * 点它只提示解锁等级，不进入地点页。 */
   const BUILDING_UNLOCK_LEVEL = { altar: 1, miracle: 30, beast: 25 };
@@ -1123,13 +1056,9 @@
     const lv = integer(S && S.level, 1, 1);
     return lv >= buildingUnlockLevel(key);
   }
-  /** 建筑的"当前档位外观"：原版 `showUpgrading` 用 `ceil(level/5)` 挑立绘帧
-   *  （MainMovie.as:9687/9696/9706）。这里只算，不碰界面。 */
   function buildingTier(level) {
     return Math.max(1, Math.min(6, Math.ceil(Math.max(1, Number(level) || 1) / 5)));
   }
-  /** 升到「当前等级 + 1」需要的开销：原版取的是**当前等级那一行**（`getBuildingUpInfo(level)`，
-   *  见 `homeLandLevelUp` :10887 与 `parseUpgradeBuilding` :4707）。 */
   function buildingUpInfo(level) {
     const lv = Math.max(1, Math.min(BUILDING_MAX_LEVEL, Math.round(Number(level) || 1)));
     const row = BUILDING_UP_INFO[lv - 1] || BUILDING_UP_INFO[0];
@@ -1146,7 +1075,6 @@
     };
   }
   /** 进入村庄时结算「升级完成」：原版 `checkUpgraded`（:9763）在**下次进村庄**时把
-   *  `upgraded == "true"` 的建筑升一级，并按 `addType` 给神迹发属性点。
    *  返回本次刚完成的建筑列表（界面拿它弹提示）。 */
   function settleBuildings() {
     const done = [];
@@ -1175,13 +1103,9 @@
       }
       done.push({ key: key, id: BUILDING_IDS[key], level: b.level, addType: integer(b.addType, 0) });
     }
-    /* 神迹的属性点是**加到玩家身上的**（原版 :4374-4387 直接改 `oldMyInfo.player`），
-     * 所以这里同步写进四维基础值，`totalStats()` 一读就生效。 */
     for (const d of done) {
       if (d.key !== 'miracle') continue;
       const rec = S.buildings.miracle.add || {};
-      /* 每次完成只加**这一档**，所以按"上一个等级对应的那一项"加权：
-       * 这里直接用 settleBuildings 上面刚加过的那一项（addType）。 */
       if (d.addType === 0) S.power = integer(S.power, 1) + 1;
       else if (d.addType === 1) S.agility = integer(S.agility, 1) + 1;
       else if (d.addType === 2) S.speed = integer(S.speed, 1) + 1;
@@ -1191,7 +1115,6 @@
     if (done.length) save();
     return done;
   }
-  /** 一键/取建筑（`null` = 还没解锁）。 */
   function building(key) {
     if (!buildingUnlocked(key)) return null;
     const b = S.buildings && S.buildings[key];
@@ -1205,7 +1128,6 @@
       add: b.add || { power: 0, agility: 0, speed: 0, hp: 0 },
     };
   }
-  /** 建筑升级：扣金松果 + 起倒计时（原版 `upgradeBuilding` :4700 → `homeLandLevelUpMc` 帧 5）。 */
   function upgradeBuilding(key) {
     if (!buildingUnlocked(key)) return { ok: false, msg: '需要达到 ' + buildingUnlockLevel(key) + ' 级才能使用' + (BUILDING_LABEL[key] || '这个建筑') };
     const b = S.buildings && S.buildings[key];
@@ -1227,7 +1149,6 @@
     const b = S.buildings && S.buildings[key];
     return !!(b && b.buffDate === localDate() && integer(b.buffId, 0) > 0);
   }
-  /** 祭坛「领取当日随机状态」：三种之一，持续到当天 24:00。 */
   function claimBuildingBuff(key) {
     if (!buildingUnlocked(key)) return { ok: false, msg: '需要达到 ' + buildingUnlockLevel(key) + ' 级才能使用' + (BUILDING_LABEL[key] || '这个建筑') };
     const b = S.buildings && S.buildings[key];
@@ -1242,7 +1163,6 @@
         : '你获得了关卡特殊状态，有几率在挑战关卡时获得更多金松果！';
     return { ok: true, buffId: buffId, msg: msg };
   }
-  /** 当前生效的当日状态（0 = 没有）。`kind`：'arenaExp' / 'arenaProp' / 'stageGold'。 */
   function activeBuildingBuff(kind) {
     const want = kind === 'arenaExp' ? 1 : kind === 'arenaProp' ? 2 : kind === 'stageGold' ? 3 : 0;
     if (!want) return false;
@@ -1278,7 +1198,6 @@
     const skill = (typeof GData !== 'undefined' && GData.petSkillInfo ? GData.petSkillInfo(p.skillId, p.level) : null) ||
       PET_SKILLS[p.skillId] || { name: '未知技能', remark: '暂无说明' };
     /* 详情页的「下一级」提示：原版 `doShowSummonsDeTail` 用 `getSkillLevelupRemark(id, level+1)`
-     * 把 levelupRemark 里的 X 换成**下一级**的数值。这里把下一级数值一起交给界面，
      * 避免页面自己再按 base/step 算一遍（公式只在 GData 留一份）。 */
     const nextLevel = Math.min(Math.max(1, integer(p.maxLevel, 50, 1)), Math.max(1, integer(p.level, 1, 1) + 1));
     const nextSkill = (typeof GData !== 'undefined' && GData.petSkillInfo)
@@ -1306,7 +1225,6 @@
     if (!S || !Array.isArray(S.pets)) return { ok: false, msg: '幻兽数据还没准备好' };
     if (S.pets.length >= Math.min(PET_MAX_CAPACITY, integer(S.petsCapacity, 6, 1))) return { ok: false, msg: '幻兽存储格已满，先升级牧场或开启存储格' };
     if (integer(S.hatchPoint, 0) < 200) return { ok: false, msg: '孵化点不足（每次孵化需要200点）' };
-    /* 原版 hatch.do 的星级权重没有导出；这里按 1★55% / 2★27% / 3★13% / 4★5% 的常见权重。 */
     const roll = Math.random();
     const grade = roll < 0.55 ? 1 : roll < 0.82 ? 2 : roll < 0.95 ? 3 : 4;
     const def = randomPetDef(grade);
@@ -1485,43 +1403,27 @@
     const date = new Date(y, m - 1, d); date.setDate(date.getDate() - 1);
     return dateKey(date);
   }
-  /* ============================================================
-   * 徒弟日供：系数按「所有徒弟等级之和」**线性插值**，经验与金松果分开给
-   *
-   *   Σ = 0（没有徒弟）           → 经验 5%  金松果 5%
-   *   Σ = TRIBUTE_LEVEL_SUM_FULL  → 经验 15% 金松果 25%
-   *   中间线性：ratio = min + Σ × (max − min) / FULL
-   *
-   * 系数乘的是**我自己昨天**赚到的总经验与金松果（earnOn(昨天)），次日领取。
-   * 多个徒弟按各自等级占「等级之和」的份额分这份贡品，合计正好是 ratio × 昨日收益。
-   * Σ = 270 对应 3 个满级（90 级）徒弟。
-   * ============================================================ */
-  const TRIBUTE_EXP_MIN = 0.05, TRIBUTE_EXP_MAX = 0.15;      // 经验：前一天的 5% ~ 15%
-  const TRIBUTE_GOLD_MIN = 0.05, TRIBUTE_GOLD_MAX = 0.25;    // 金松果：前一天的 5% ~ 25%
-  const TRIBUTE_LEVEL_SUM_FULL = 270;        // 3 个满级徒弟：3 × 90
+  const TRIBUTE_EXP_MIN = 0.05, TRIBUTE_EXP_MAX = 0.15;
+  const TRIBUTE_GOLD_MIN = 0.05, TRIBUTE_GOLD_MAX = 0.25;
+  const TRIBUTE_LEVEL_SUM_FULL = 270;
   function apprenticeLevelSum(list) {
     return (Array.isArray(list) ? list : []).reduce((sum, p) => sum + Math.max(1, integer(p && p.level, 1)), 0);
   }
-  /** 线性插值：Σ 从 0 到 FULL 对应 min → max，超出封顶。 */
   function tributeLerp(sum, min, max) {
     const lo = Number(min) || 0, hi = Number(max) || 0;
     const span = (hi - lo) / TRIBUTE_LEVEL_SUM_FULL;
     const raw = lo + Math.max(0, integer(sum, 0)) * span;
     return Math.min(hi, Math.max(lo, raw));
   }
-  /** 经验日供系数（5% ~ 15%）。 */
   function apprenticeTributeExpRatio(sum) { return tributeLerp(sum, TRIBUTE_EXP_MIN, TRIBUTE_EXP_MAX); }
-  /** 金松果日供系数（5% ~ 25%）。 */
   function apprenticeTributeGoldRatio(sum) { return tributeLerp(sum, TRIBUTE_GOLD_MIN, TRIBUTE_GOLD_MAX); }
   /* 兼容旧调用：以前只有一个「总系数」，返回经验那一档（两者下限相同、口径最接近）。 */
   function apprenticeTributeRatio(sum) { return apprenticeTributeExpRatio(sum); }
-  /** 总日供 + 按等级份额的分配表。用累计取整，保证各徒弟份额之和正好等于总量（不被 floor 蚕食）。 */
   function apprenticeTributeTable(list) {
     const rows = Array.isArray(list) ? list : [];
     const date = yesterdayDate();
     const mine = earnOn(date);
     const sum = apprenticeLevelSum(rows);
-    /* 经验与金松果用各自的比例（金松果区间更宽：5%~25%）。 */
     const expRatio = apprenticeTributeExpRatio(sum);
     const goldRatio = apprenticeTributeGoldRatio(sum);
     const ratio = expRatio;                                   // 兼容字段：旧界面读它显示「系数」
@@ -1560,7 +1462,6 @@
   }
   function apprenticeDailyExp(apprentice) { return apprenticeDailyStatus(apprentice).exp; }
   function apprenticeDailyGold(apprentice) { return apprenticeDailyStatus(apprentice).gold; }
-  /** 所有徒弟今天还能领的日供合计（经验 + 金松果）。 */
   function apprenticeDailyTotal() {
     const out = { exp: 0, gold: 0 };
     for (const p of S.prentices || []) {
@@ -1619,7 +1520,6 @@
     return {ok:true,win,exp,gold:0,ups,recruited:added&&added.ok?added.apprentice:null,
       msg:win?(added.ok?'收【'+run.candidate.name+'】为徒！':added.msg):'收徒挑战失败，提升实力后再来。'};
   }
-  /** 师父每天可踢出 1 个徒弟。 */
   function canKickToday() {
     return (S.masterKickDate || '') !== localDate();
   }
@@ -1633,9 +1533,6 @@
     return { ok: true, msg: '已让【' + name + '】离开师门' };
   }
 
-  /* ============================================================
-   * 【S3】存档：读写 / 校验 / 版本迁移
-   * ============================================================ */
   // ---------- 存档 ----------
   /** 把 S.props 里超过上限的数量收口（save 前统一调用）。 */
   function clampProps() {
@@ -1680,19 +1577,8 @@
     return false;
   }
 
-  /* ============================================================
-   * 存档：**主存档 = 游戏目录下的 save/progress.json**
-   *
-   * 由本地服务器的 /__save 读写（`node serve.js`）。
-   *   · 有本地服务器：进度只写这个文件，浏览器 localStorage **不再当存档用**
-   *     （首次会把老档迁进文件，然后删掉旧的 ssdz_save_v1 键）。
-   *   · 没有本地服务器（GitHub Pages、file://）：退回 localStorage，否则无处可存；
-   *     系统页会显示当前用的是哪一种，避免「以为存在文件里」的误会。
-   *   · 自检档（?test=1 / ?qa=1）永远只写 localStorage，绝不碰正式存档文件。
-   *
-   * 冲突保护：写之前比较文件里的 savedAt，文件更新（另一台机器刚玩过）时不覆盖，
-   * 只标记冲突，由玩家在系统页点「载入文件里的存档」。
-   * ============================================================ */
+  /* 主存档 = 游戏目录 save/progress.json（本地服务器 /__save 读写）；没有服务器时退回
+   * 文件更新时只标冲突、由玩家在系统页手动载入，绝不覆盖。 */
   const SAVE_URL = '__save';
   const LEGACY_KEY = SAVE_KEY;                       // 旧的 localStorage 存档键
   const fileState = { available: false, transportReady: false, checked: false, code: 0, fileAt: 0, fileExists: false, fileLevel: 0, fileReborn: 0, fileBackup: false, lastProbe: 0, error: '', reason: '', lastWrite: 0, lastLoad: 0, lastRead: 0, lastReadErr: '', conflict: false, dirty: false, freshLocal: false, forceWrite: false, path: 'save/progress.json' };
@@ -1734,7 +1620,6 @@
     if (object(obj.stages) && Object.keys(obj.stages).length) return false;
     return true;
   }
-  /* ssdz-save-transport-ready 只广播一次（安卓桥接会被装两次，见 setSaveTransport）。 */
   let transportAnnounced = false;
   /* 存档读写通道：默认走本地服务器的 /__save；宿主（Tauri 等）可以替换成自己的实现。
    * transport = { label, path?, probe(), read(), write(json) }，全部返回 Promise。 */
@@ -1767,21 +1652,9 @@
     forgetLegacy();
     return true;
   }
-  /** **同步镜像**：文件存档模式下，除防抖写盘之外再在 localStorage 存一份当前进度。
-   *
-   *  为什么需要它：安卓上最后一次写盘走的是
-   *  `MainActivity.onPause → evaluateJavascript → __ssdzFlushSave → invoke('save_write')`，
-   *  整条链是异步的，进程被系统回收时可能只跑了一半 —— 玩家看到的就是
-   *  「有时候退出会存档，有时候不会」。localStorage 是同步写，随进程一起持久化。
-   *
-   *  它同时带一个 base 标记（写这份镜像时**文件当时的 mtime**）：下次启动只有 base 与
-   *  文件当前 mtime 相等，才能断定「文件在那之后没被别人改过，镜像就是丢掉的那一次进度」，
-   *  才允许用它恢复（见 main.js boot）；文件被同步服务/另一台机器/导入换过时 base 对不上，
-   *  一律以文件为准。文件写成功后 forgetLegacyIfRedundant() 会把它删掉 ——
-   *  于是「镜像还在」正好等于「上一次存档还没确认落到文件里」。
-   *
-   *  ⚠ 不覆盖「更强」的旧兜底档（例如同步服务留下的高等级本机档）：那种要留着给玩家
-   *  手动导入，直接覆盖就是静默删档（对应 tools/test-save-boot.cjs 的那条用例）。 */
+  /* 同步镜像：文件存档之外再在 localStorage 存一份进度（安卓上最后一次写盘是异步链，
+   * 进程回收时可能只跑一半）。带 base=写入时文件 mtime，启动时只有 mtime 未变才敢恢复（见 main.js boot）；
+   * 文件写成功后 forgetLegacyIfRedundant() 删除它。不覆盖更强的旧兜底档，避免静默删档。 */
   function writeMirror() {
     try {
       if (typeof localStorage === 'undefined' || !S) return false;
@@ -1806,15 +1679,10 @@
     fileState.checked = false;
     fileState.available = false;
     /* 移动端 `window.__TAURI__` 是异步注入的：启动早期 `fileLoad()` 可能已经因为
-     * 通道还没就绪而回落 localStorage。桥接一到位就先探一次通道：
      *   · 已经有存档文件 → 不抢写，让 Main 的 retryFileSave 读文件并重载；
      *   · 还没有文件 → 把内存里的当前进度写出第一份，避免“第一次玩完退出就没了”。
      * 这里不能直接 fileLoad：玩家可能已经在本地档上操作，读文件顶掉会丢进度。 */
     if (saveTransport) {
-      /* 通知 Main：迟到的原生桥也值得再走一次 fileProbe/fileLoad。
-       * **只通知一次**：安卓的 tauri-bridge 会在 DOMContentLoaded 与 window load 各问一次
-       * save_path，同一个通道可能被装两次；每次都发事件会让 Main 反复走
-       * 「读档成功 → location.reload()」，模拟器上实测就是启动页每 0.8 秒刷一次。 */
       if (!transportAnnounced) {
         transportAnnounced = true;
         try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('ssdz-save-transport-ready')); } catch (e) {}
@@ -1862,7 +1730,6 @@
         const meta = await saveTransport.probe();
         fileState.available = !!meta.ok;
         // 区分「通道坏了」和「通道好用、只是还没有存档文件」——
-        // 手机上第一次运行就是后者，不该弹红色报错横幅。
         fileState.transportReady = !!meta.ok;
         fileState.fileAt = Number(meta.savedAt) || 0;
         fileState.fileExists = meta.exists === true || fileState.fileAt > 0;
@@ -1958,18 +1825,14 @@
         syncDailyStats();
         /* savedAt 用服务器报的**文件时间**：它和 fileWrite() 里比较的 fileAt 是同一个时钟。
          * 以前这里用存档内部的 savedAt（游戏里的 Date.now()），一旦文件是由同步/手工恢复过来的
-         * （内部时间戳比文件 mtime 旧），fileAt 就永远大于 localAt，自动保存会被
          * 「存档文件更新，已跳过写入」永久挡住 —— 表现在玩家身上就是「打了半天进度没保存」。 */
         S.savedAt = fileState.fileAt || Number(parsed.savedAt) || Date.now();
         // 文件是主存档，旧的浏览器兜底档就此退休；
-        // 但「更新且更强」的那份要留着（见 localSaveWorthKeeping）。
         forgetLegacyIfRedundant(fileState.fileAt);
         fileState.conflict = false;
-        // 同一天读旧档时 dailyStats 不会触发保存，仍要主动把超额录像从磁盘移除。
         if (battlePayloadNeedsTrim(parsed)) save();
         return true;
       }
-      // 文件还不存在：把浏览器里的老档迁进来（只做一次）
       if (load()) {
         await fileWrite(true);   // 镜像仅由写入端按实际确认的版本清理。
         return current();
@@ -1983,7 +1846,6 @@
     }
   }
   /** 读存档文件的元信息（savedAt / exists）。**1.2 秒内复用上一次结果**：
-   *  连点几下触发的防抖写盘不再每次都先打一个 `?meta=1`；`force`（系统页「立即写入」）
    *  仍然强制重新探测，跨机器冲突保护不受影响。 */
   async function probeMeta(force) {
     const now = Date.now();
@@ -2001,11 +1863,9 @@
     return meta;
   }
   /** 把当前进度写进 save/progress.json（force=true 时不检查「文件是否更新」）。
-   *
    *  **防「1 级空档覆盖正式存档」**：iOS 换包/桥接迟到时，启动可能先走浏览器兜底档，
    *  随后一次自动保存就会把磁盘上几十级的存档写成 1 级。以前只有 HTTP 服务端有拦截，
    *  iOS 的 `save_write` 没有 —— 这就是「存档在初始档与有进度的档之间横跳」的来源之一。
-   *  现在 JS 先按 meta 里的最高等级拦一次，宿主的 save_write 还会再拦一次。
    *  `fileState.forceWrite`（只有调试面板「彻底重置账号」会设）是唯一允许主动降级的路径。 */
   function fileWrite(force, options) {
     const allowFreshOverwrite = fileState.forceWrite === true;
@@ -2058,7 +1918,6 @@
       fileState.fileExists = true;
       fileState.lastProbe = Date.now();
       fileState.lastWrite = Date.now();
-      /* 这一份就是刚写进去的内容，等价于“本次启动已经确认过文件”。 */
       if (!fileState.lastRead) fileState.lastRead = fileState.fileAt;
       fileState.conflict = false;
       fileState.dirty = saveRevision !== writtenRevision;
@@ -2158,7 +2017,6 @@
     if (fileTimer) { clearTimeout(fileTimer); fileTimer = 0; }
     if (!S) return;
     /* 先把同步镜像写掉：这一步不依赖 WebView 的异步桥（安卓上 onPause 之后的
-     * evaluateJavascript / invoke 都可能被系统打断），进程即使随后被回收，
      * 下一次启动也能从镜像恢复（见 main.js boot 里 base 那一段）。 */
     if (!fileState.dirty) return;
     if (storageMode() === 'file' || saveTransport) writeMirror();
@@ -2170,9 +2028,8 @@
    * 不能只依赖 pagehide：Tauri Android WebView 在按 Home/被系统回收时不一定派发。 */
   try { if (typeof window !== 'undefined') window.__ssdzFlushSave = flushFileWrite; } catch (e) {}
   if (typeof window !== 'undefined' && window.addEventListener) {
-    /* 只留 `pagehide` 与「页面隐藏」两个出口：`beforeunload` 与它们重复，
-     * 关页/切后台时会把同一份 360 KB 存档连发三遍（2026-10 审计）。
-     * `flushFileWrite` 自己还会判 dirty —— 没改过就不上传。 */
+    /* 只留 pagehide 与「页面隐藏」两个出口：beforeunload 与它们重复，
+     * 关页/切后台会把同一份存档连发三遍。flushFileWrite 自己还会判 dirty。 */
     window.addEventListener('pagehide', flushFileWrite);
     if (typeof document !== 'undefined' && document.addEventListener) {
       document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushFileWrite(); });
@@ -2218,10 +2075,8 @@
     save();
   }
   function state() { return S; }
-  /* ---------- 「战斗操作键」的解锁等级（2026-10 用户口径） ----------
-   * 10 级解锁 2 倍速；跳过按超级松鼠页的描述：**开通超级松鼠后 10 级**即可，
-   * 非 VIP 仍是 20 级（不再一刀切 20）。挑战塔 / 无尽塔本身要 30 级才开，
-   * 塔的「跳过」另有一条层数门槛：无尽塔 10 层起，见 Tower.skipPlaybackAllowed。 */
+  /* 战斗操作键解锁等级：10 级解锁 2 倍速；跳过要「超级松鼠 10 级」或非 VIP 20 级，
+   * 塔的跳过另有层数门槛（无尽塔 10 层，见 Tower.skipPlaybackAllowed）。 */
   const SPEED_UNLOCK_LEVEL = 10;
   const SKIP_UNLOCK_LEVEL = 20;
   const VIP_SKIP_UNLOCK_LEVEL = 10;
@@ -2237,17 +2092,13 @@
     return settings().showSkip !== false && unlockedSkip();
   }
 
-  /* ============================================================
-   * 【S4】体力（5 分钟回 1 点）
-   * ============================================================ */
-  // ---------- 体力（5分钟回1点，初始上限90，升级提升上限） ----------
+  // 体力：5 分钟回 1 点，初始上限 90，升级提升上限。
   function tickEnergy() {
     syncDailyStats();
     const now = Date.now();
     if (debugOn('infiniteEnergy')) { S.energy = S.maxEnergy; S.lastEnergyTs = now; return; }
     syncVipEnergyCap();
     tickVipDaily();
-    // 超级松鼠特权 3：体力恢复速度 1.1~1.5 倍
     const interval = ENERGY_INTERVAL / vipRegenMul();
     if (!Number.isFinite(S.lastEnergyTs) || S.lastEnergyTs <= 0 || S.lastEnergyTs > now) S.lastEnergyTs = now;
     if (S.energy >= S.maxEnergy) { S.lastEnergyTs = now; return; }
@@ -2261,8 +2112,6 @@
   function energyCountdown() {
     tickEnergy();
     if (S.energy >= S.maxEnergy) return '';
-    /* 与 tickEnergy 用同一个恢复间隔（超级松鼠特权 3 会缩短间隔）；
-     * 旧写法固定按 5 分钟算，VIP 的 1.1~1.5 倍恢复速度下倒计时会偏长。 */
     const interval = ENERGY_INTERVAL / vipRegenMul();
     const remain = Math.max(0, interval - (Date.now() - S.lastEnergyTs));
     const m = Math.floor(remain / 60000), s = Math.floor((remain % 60000) / 1000);
@@ -2278,7 +2127,6 @@
     let want = count === 'all' ? held : Math.max(1, Math.floor(Number(count) || 1));
     want = Math.min(want, held);
     if (id !== 1 && id !== 2) {
-      // 其它道具没有「批量」概念，退化成单个使用
       const one = useProp(id);
       return { ok: one.ok, used: one.ok ? 1 : 0, msg: one.msg };
     }
@@ -2297,9 +2145,6 @@
   }
   function energyHardCap() { return ENERGY_HARD_CAP; }
 
-  /* ============================================================
-   * 【S5】武器/技能实例（含等级换算）
-   * ============================================================ */
   // ---------- 武器/技能实例（含等级换算，同原版 addWeapons） ----------
   /** 原版武器表里的全部武器（按编号排序），供调试面板选择开局武器。 */
   function weaponList() {
@@ -2373,27 +2218,12 @@
   function wsLimit() { return GData.wsLimit(S.level); }
   function ownedWSCount() { return S.weapons.length + S.skills.filter(s => Number(String(s).split(':')[0]) !== MASTER_SKILL_ID).length; }
 
-  /* ============================================================
-   * 【S6】升级武器/技能（成功率/费用/失败保护）
-   * ============================================================ */
-  // ---------- 升级武器/技能（upgradeMap: 成功率/费用/卷轴/玩家等级限制） ----------
-  /* 原版 `getNeed(level)` 直接读 upgradeMap 的 `coin` / `book`：
-   * 普通升级 50 松果，10→11 那一档 100；真化标准升阶同样走这一行
-   * （`showWeaponSkill3` 的 button3 → `upgradeWeapon(...,3,1)`），不再单独造“真化金价”。
-   * `UPGRADE_COIN` 只留给旧存档/旧调用方兜底，正常路径一律用行内 coin。 */
+  /* 升级费用直接读 upgradeMap 的 coin/book（普通 50 松果、10→11 为 100；真化同表）；
+   * UPGRADE_COIN 只给旧存档/旧调用方兜底，正常路径用行内 coin。 */
   const UPGRADE_COIN = 50;
   /* 1~9 级（升到 2~10 级）保留旧版“失败涨概率”，按用户口径削弱为**每次 +2%**，
    * 封顶 100%；10→11 起的真化线不吃这条保底，仍按原表固定成功率。 */
   const UPGRADE_FAIL_BONUS = 2;
-  /* ============================================================
-   * 【S7】真·武器 / 真·技能（终局线 11~15 级）
-   * ============================================================ */
-  /* ---------- 真·武器 / 真·技能（终局线，等级 11~15 = 真1~真5） ----------
-   * 成功率沿用原表 upgradeMap 的第 10~14 行：100% / 8% / 5% / 4% / 3%
-   * （`showWeaponSkill3` → `upgradeWeapon(...,3,1)` 的 standard 路径）。
-   * 费用也走同一张表：coin = 100/50，book = 25；不额外引入 U 点。
-   * 参考里的 U 点升阶是另一条入口（`showWeaponSkill4` → `upgradeWeapon(...,3,2)`），
-   * 本版没有 U 点货币，不把两条路径混在一起。 */
   const TRUE_SKILL_MAX_LEVEL = 15;
   const isTrueLevel = (level) => (Number(level) || 0) >= 10;
   const upgradeFailKey = (kind, id) => (kind === 'weapon' ? 'w' : 's') + Number(id);
@@ -2464,10 +2294,6 @@
     };
   }
 
-  /* ============================================================
-   * 【S8】装备：穿戴/出售/融合/星标
-   * ============================================================ */
-  // ---------- 装备 ----------
   let gearKeySeq = 1;
   /* 旧档/网页版 32「龟甲术N%几率抵挡2次」在 ssfight 表里已改为 44「龟甲术防降属性效果+N%」；
    * 读档时按同星级迁移，避免旧装备的词条被 normalize 直接丢掉。 */
@@ -2477,8 +2303,7 @@
       id: LEGACY_EXT_ID[Number(e.id)] || Number(e.id), level: Math.min(3, integer(e.level, 1, 1)),
     }));
   }
-  /** 旧橙装是「紫装 id + orange:true」的实例级模拟；107 起 q4 行已按原版补齐。
-   *  读档时把旧橙装的 id 换成同部位同名的 q4 id，并把主属性改回原版 q4 基准值。
+  /** 旧橙装是「紫装 id + orange:true」的模拟；读档时换成同部位同名的 q4 id 并恢复 q4 基准主属性。
    *  必须在 gearMap 过滤前执行，否则 q4 id 还不在 map 里会被丢掉。 */
   let orangeGearLookupCache = null;
   function orangeGearLookup() {
@@ -2501,7 +2326,6 @@
     return Object.assign({}, g, { id: target, attr: gearBaseAttr(target), attrPct: 0, orange: undefined });
   }
   /** 装备主属性点的**基准值**：优先取原版 Flash 装备独立属性点表（gamedata.js 的
-   *  【GD5】GData.GEAR_BASE_ATTR，288 条），退回 gearMap.abilities 里该部位那一位
    *  —— 两者对本版已有的 128 件逐条一致，所以取不到也不会算出不同的数。 */
   function gearBaseAttr(id) {
     const table = (typeof GData !== 'undefined' && GData && GData.GEAR_BASE_ATTR) || null;
@@ -2511,19 +2335,14 @@
     return g ? parseInt(g.abilities.split(',')[parseInt(g.type)]) || 0 : 0;
   }
   /* 每件装备的主属性带 **±5%** 的小幅随机：产出时（掉落/碎片合成/融合/商店）roll 一次写进实例，
-   * 所以同名装备的数值不再完全一样。老档没有 attr 字段时按基准值算。
-   * 用四舍五入而不是取整区间：基准 1/2/3 这种小数值不会因为 ±5% 就翻倍。
    * ⚠ 2026-10 用户口径：经典界面也重新启用这条随机（此前为了对齐原版 equipsArray 关掉了），
    * 幅度从原来的 ±10% 收到 ±5% —— 两套界面现在是同一条规则。
-   *
-   * 2026-11 用户口径：随机加成同时落库为**整数百分比** `attrPct`（-5~+5）。界面写成
    * `最终值(+/-百分比)`；融合产物按三件材料 `attrPct` 的平均值取相邻两个整数。 */
   const GEAR_ATTR_PCT_MAX = 5;
   function gearAttrPctClamp(pct) {
     return Math.max(-GEAR_ATTR_PCT_MAX, Math.min(GEAR_ATTR_PCT_MAX,
       Number.isFinite(Number(pct)) ? Math.round(Number(pct)) : 0));
   }
-  /** 百分比 → 主属性点（基准 × (1 + pct/100)，四舍五入，至少 1）。 */
   function gearAttrValueOf(id, pct) {
     const base = gearBaseAttr(id);
     if (!base) return 0;
@@ -2537,7 +2356,6 @@
     if (!base || !Number.isFinite(value) || value <= 0) return 0;
     return gearAttrPctClamp(Math.round((value / base - 1) * 100));
   }
-  /** 新产出：先掷 -5~+5 的整数百分比，再折算成属性点。 */
   function rollGearAttrPct() { return Math.floor(Math.random() * (GEAR_ATTR_PCT_MAX * 2 + 1)) - GEAR_ATTR_PCT_MAX; }
   function rollGearAttr(id) { return gearAttrValueOf(id, rollGearAttrPct()); }
   function gearInst(id, ext, attr, attrPct) {
@@ -2571,7 +2389,6 @@
       return out;
     }).filter(Boolean).filter((g) => blackGearEnabled() || Number(g.quality) !== 5);
   }
-  // 穿戴位: 0头巾 1手套 2衣服 3鞋
   function wear(gearKey) {
     const g = S.gears.find((x) => x.key === gearKey);
     if (!g) return false;
@@ -2585,13 +2402,9 @@
     const g = S.gears.find((x) => x.key === gearKey);
     if (g) { g.used = false; save(); }
   }
-  /* 卖出装备的金松果：按品质分档、在区间内随机。
-   * 白 55-60 / 绿 60-65 / 蓝 65-70 / 紫 90-110 / 橙 180-220 / 黑 500-700（原版黑装 price 1400，按半价收）。
-   * 紫/橙两档由 70-75 / 75-80 上调，拉开与蓝装的差距。 */
   const GEAR_SELL_RANGE = Object.freeze([[55, 60], [60, 65], [65, 70], [90, 110], [180, 220], [500, 700]]);
   const gearSellRange = (quality) => GEAR_SELL_RANGE[Math.max(0, Math.min(GEAR_SELL_RANGE.length - 1, integer(quality, 0)))] || GEAR_SELL_RANGE[0];
   const gearSellPrice = (quality) => { const [lo, hi] = gearSellRange(quality); return lo + Math.floor(Math.random() * (hi - lo + 1)); };
-  /** 品质需要按实例算：橙装是写在实例上的 quality=4。 */
   function gearQuality(gear) { return gear && gear.orange === true ? 4 : (gearInst(gear.id) || {}).quality || 0; }
   /** 界面统一的装备主属性写法（2026-11 用户口径）：`84(+5%)` / `76(-3%)`。
    *  a = 加成后的结算值，b = 本件随机的整数百分比；`opts.name` 时前面带属性名。 */
@@ -2602,7 +2415,6 @@
     const body = value + '(' + (pct >= 0 ? '+' : '-') + Math.abs(pct) + '%)';
     return (opts && opts.name) ? ((gear.attrName ? gear.attrName + ' ' : '') + body) : body;
   }
-  /** 星标只属于现代界面；经典界面**完全没有星标**（连旧档里的 starred 也一律忽略）。 */
   function starEnabled() { return slotMode() !== 'classic'; }
   /** 切换星标：标上之后不会被误融合 / 误出售。 */
   function toggleGearStar(gearKey) {
@@ -2642,9 +2454,6 @@
       .map((item) => item.gear);
   }
   /* 背包里可以直接卖的道具（装备走 sellGear）：默认按**字典价格的一半**回收
-   * （向下取整），所以商店里买得到的、以及字典里标了价的材料都能卖。
-   * 字典里 price 为 0 或占位 1 的道具（兑换用的卷轴、碎片、礼包、属性碎片、
-   * 超级药丸、果实种子这类「不可购买」的物品）不开放回收；
    * PROP_SELL_OVERRIDES 留作个别道具单独定价的例外表。 */
   const PROP_SELL_OVERRIDES = Object.freeze({
     48: 100,   // 恶魔果实：字典无价，单独定价 100
@@ -2672,7 +2481,6 @@
     return price >= MIN_SELL_PRICE ? Math.max(1, Math.floor(price / 2)) : 0;
   }
   /* 背包里的「货币类显示项」：金杯（40）在原版就是货币字段 `S.goldCup`，不进 `S.props`
-   *（normalizeSave 会把 props 里的 8/15/40 丢掉）。2026-10 用户口径「玩家的金杯数量会同步到背包中」：
    * 背包里照样列出它、数量**直接读货币字段**（只有一个真值来源，不会出现两处对不上），
    * 但不能卖也不能使用 —— 卖价 0，动作按钮只走「查看」。 */
   const BAG_CURRENCY_PROP = Object.freeze({ 40: 'goldCup' });
@@ -2684,7 +2492,6 @@
     if (field) return Math.max(0, integer(S[field], 0));
     return Math.max(0, integer(S.props[id], 0));
   }
-  /** 当前可回收的道具编号（升序），供界面/帮助与测试使用。 */
   function sellableProps() {
     const ids = [];
     propMap.each((id) => { if (propSellPrice(id)) ids.push(Number(id)); });
@@ -2711,17 +2518,9 @@
     const item = propMap.getValue(id);
     return { ok: true, sold: n, gold, price, msg: '卖出 ' + (item ? item.name : '道具') + ' ×' + n + '，获得 ' + gold + ' 金松果' };
   }
-  /* ============================================================
-   * 【S9】宝石（45 级开启，镶嵌/拆卸）
-   * ============================================================ */
-  // ---------- 宝石（45级开启） ----------
   function gemLevel(id) { id = Number(id); return id >= 101 && id <= 107 ? id - 100 : 0; }
-  /* 橙色/黑色装备镶嵌宝石的主属性加成：沿用原版数值。
-   * 原版 MainMovie.as:45-54 getPercentById：5*(n²-n+2)，n = 宝石等级（1..7）
-   * → 10 / 20 / 40 / 70 / 110 / 160 / 220 %。 */
   function gemPercent(lv) { lv = integer(lv, 0, 0); return lv > 0 ? 5 * (lv * lv - lv + 2) : 0; }
   /* 宝石对「附加属性」的增幅：原版不是随机百分比，而是按宝石等级给 1~12 个单位的阶梯。
-   * 2013-10 的宝石加成表：1/2/3/5/7/9/12 级 → 1/2/3/5/7/9/12 个单位；
    * 客户端 `getAttachment(id, star, count-1)` 按单位数取 extraValue，与星级 ability 相加。 */
   const GEM_AFFIX_UNITS = Object.freeze([1, 2, 3, 5, 7, 9, 12]);
   function gemAffixUnits(gemId) { const lv = gemLevel(gemId); return lv ? GEM_AFFIX_UNITS[lv - 1] : 0; }
@@ -2737,9 +2536,7 @@
     const extra = unitIdx >= 0 && unitIdx < extras.length ? (Number(extras[unitIdx]) || 0) : 0;
     return { base, extra, total: base + extra };
   }
-  /* 宝石合成成功率：0.88^lv（lv = 材料宝石等级）→ 88% / 77% / 68% / 60% / 53% / 46%。 */
   const gemMergeRate = (lv) => Math.pow(0.88, Math.max(1, Math.min(6, integer(lv, 1, 1))));
-  /** 45级起，关卡通关与竞技场获胜有几率获得1级（75%）或2级（25%）宝石。 */
   function rollGemDrop(chancePct) {
     if (S.level < 45 || Math.random() * 100 >= chancePct) return null;
     const id = Math.random() < 0.25 ? 102 : 101;
@@ -2772,7 +2569,6 @@
   }
   /** 镶嵌 / 卸下各 5 金松果；每件橙色或黑色装备限 1 颗。
    *  宝石不再随机附加属性百分比，而是按原版 1/2/3/5/7/9/12 个单位抬高词条增幅。 */
-  /* 镶嵌 / 卸下宝石的金松果费用（2026-10 用户口径：装上与卸下**都要** 5 金松果）。 */
   const GEM_SOCKET_COST = 5;
   function socketGem(gearKey, gemId) {
     const g = S.gears.find((x) => x.key === gearKey);
@@ -2804,14 +2600,10 @@
     return { ok: true, msg: '已卸下宝石（−' + GEM_SOCKET_COST + ' 金松果），宝石放回背包' };
   }
 
-  /* 装备合成 / 融合的金松果费用：按参与材料的品质分档。
-   * 白 30 / 绿 40 / 蓝 50 / 紫 60 / 橙 200 / 黑 1000。
-   * 橙 200 对齐原版 composeType=2/3 的 200 金松果；黑 1000 是本版黑碎片合成的价格。 */
   const GEAR_COST_BY_QUALITY = Object.freeze([30, 40, 50, 60, 200, 1000]);
   const gearCostOf = (quality) => GEAR_COST_BY_QUALITY[
     Math.max(0, Math.min(GEAR_COST_BY_QUALITY.length - 1, integer(quality, 0)))] || GEAR_COST_BY_QUALITY[0];
 
-  // 碎片合成: 24白/25绿/26蓝 ×10 + 金松果（白30/绿40/蓝50）→ 随机装备
   function composeGear(propId) {
     propId = Number(propId);
     const blackSet = (typeof GData !== 'undefined' && GData.BLACK_SHARD_SET) ? Number(GData.BLACK_SHARD_SET[propId]) : 0;
@@ -2823,8 +2615,6 @@
       const ids = [];
       gearMap.each((k, v) => { if (Number(v.setId) === blackSet) ids.push(Number(v.id)); });
       if (ids.length !== 4) return { ok: false, msg: '黑装数据不完整' };
-      /* 防重复保底：随机到已拥有部位、且这一套还没集齐时重摇最多 2 次；
-       * 仍重复就直接从缺的部位里挑。已集齐后允许重复（用于融合洗附加属性）。 */
       const typeOf = (id) => Number((gearMap.getValue(id) || {}).type);
       const owned = new Set((S.gears || []).filter((g) => ids.includes(Number(g.id))).map((g) => typeOf(g.id)));
       let gid = ids[Math.floor(Math.random() * ids.length)];
@@ -2862,14 +2652,12 @@
     save();
     return { ok: true, gear: g };
   }
-  // 融合: 3件同品质（部位可不同）→ 高一级品质
   function gearPart(id) {
     const def = gearMap.getValue(id);
     return def ? Number(def.type) : -1;
   }
   /** 把一份对手穿戴表规整成 `[{id, ext, type}]`（`type` 缺失时按装备字典反查）。
    *  原版这些都由服务端下发；复刻的 `genAI` 抽出来的装备**没有 `type`**，
-   *  挑战页 / 状态页要把装备贴到立绘的**部位容器**上，缺了 `type` 整件都贴不上去。
    *  三处（好友 / 师父 / 徒弟）共用这一份，别再各写一遍。 */
   function normalizeFoeGears(list) {
     return (Array.isArray(list) ? list : []).map((g) => {
@@ -2911,11 +2699,7 @@
   function gearSetOf(id) { const d = gearMap.getValue(id); return d ? parseInt(d.setId) : -1; }
 
   /* ---------- 套装收益（数值表在 gamedata.js【GD6】，原版没有这套机制） ----------
-   * 家族 = 装备名去掉部位后缀 —— 「忍者护额/拳套/服/鞋」都算**忍者**家族，
-   * 所以同名跨品质（忍者绿/蓝/紫）能拼在一起，凑名的难度比凑某个 setId 低得多。
    * 阈值只有 2 件 / 4 件两档，4 件档**叠加**在 2 件档之上。
-   * 品质取所穿该家族装备里**最低**的那一件（整套成色按最差的一件算）。
-   * 属性类收益并进 totalStats；战斗类收益由 applySetBonuses 写成 fighter.setFx ——
    * **独立通道**，不复用塔 buff 的 mods（那是「本局增益」，与被脱光的装备是两回事）。 */
   const GEAR_PART_SUFFIX = /(头巾|头饰|头盔|护额|手套|拳套|拳甲|服|铠甲|衣服|鞋|短靴)$/;
   function gearSetFamily(id) {
@@ -2958,7 +2742,6 @@
     const eff = {};
     const add = (src) => {
       for (const [k, v] of Object.entries(src || {})) {
-        /* 结构值（openerRounds / lowHpAt）取大值而不是相加 —— 两档都给同一个键时不该翻倍。 */
         eff[k] = raw.includes(k)
           ? Math.max(Number(eff[k]) || 0, Number(v) || 0)
           : (Number(eff[k]) || 0) + Number(v);
@@ -3003,7 +2786,6 @@
       out.push({
         family, count: entry.count, quality: entry.quality, tier, active: tier > 0,
         text: eff ? GData.setBonusText(eff) : [],
-        /* 2 件与 4 件两档各自的实际数值（界面里分别列出来，让玩家看得到「下一档给什么」）。 */
         tiers: [2, 4].map((need) => ({
           need, on: entry.count >= need,
           text: GData.setBonusText(GData.setBonusScale(family, entry.quality, table[need])),
@@ -3013,8 +2795,6 @@
     out.sort((a, b) => (b.count - a.count) || (b.quality - a.quality) || a.family.localeCompare(b.family));
     return out;
   }
-  /** 某一件装备所属家族的套装信息（装备详情面板用）。
-   *  `viewQuality` 是**正在看的那一件**的品质：一件都还没穿时，用它来预估这一套的收益数值。 */
   function setBonusForGear(id, viewQuality) {
     if (classicSetBonusOff()) return null;
     const family = gearSetFamily(id);
@@ -3032,7 +2812,6 @@
   }
   /** 把套装收益的战斗修正写进本场 fighter（属性部分已经在 totalStats 里加过）。
    *  写在独立字段 setFx 上：sim 侧只在读 mods 的地方顺带读一次，且被真·色诱之术
-   *  脱光装备时一起失效 —— 它本来就是装备给的。
    *  `list`/`level` 不传就是玩家；对手侧走 applyFoeSetBonuses。 */
   function applySetBonuses(fighter, list, level) {
     if (!fighter || typeof fighter !== 'object') return null;
@@ -3056,23 +2835,14 @@
     return applySetBonuses(foe, gears, level);
   }
 
-  /* ---------- 融合的核心规则（2026-11 对齐联机版，数值都提在这里） ----------
-   * ① 产物部位：从三件材料里**随机取一件**的部位（不再固定首件，也不再按同套保底）。
-   * ② 产物目标：目标品质 = 材料品质 + 1（黑装封顶 5）；同部位、目标品质里
-   *    优先取「与来源材料同套」的装备；存在其它套时，2% 概率变异到变异池
-   *    （紫/蓝档狂战 51、紫→橙狂战 52、橙/黑档深海/机器猫/怒战/狂战 67~70），
-   *    否则留在同套；没有同套时才从其它套里随机。
-   * ③ 词条：按星级从高到低继承前两条，同星级按材料顺序；第三条从剩余材料词条随机。
-   *
-   * 下面 `FUSION_SAME_NAME_RATE` / `FUSION_MUTANT_RATE` / `pickMergeTarget` 等是
-   * 旧版「同名保名 / 3% 变异 / 同套保底」的规则，保留常量和函数给旧界面 / 旧档引用，
-   * 实际 `mergeGears` 已不再调用。 */
+  /* 融合规则（对齐联机版）：部位从三件材料随机取；目标品质 = 材料品质+1（黑装封顶 5）；
+   * 同部位优先同套，存在其它套时 2% 概率变异；词条按星级继承前两条、第三条随机。
+   * 下面 FUSION_SAME_NAME_RATE / pickMergeTarget 是旧规则，只留旧档/旧界面引用，mergeGears 不调。 */
   const FUSION_SAME_NAME_RATE = { 2: 0.50, 3: 0.97 };
   const FUSION_MUTANT_RATE = { 2: 0.03, 3: 0.03 };
   const FUSION_MUTANT_SET = 51;
   /* 紫→橙变异的目标是橙色狂战（set 52，ids 205-208）；紫→橙时 51 是紫狂战，不能用。 */
   const FUSION_ORANGE_MUTANT_SET = 52;
-  /* 橙装融合出黑装时，原版 helpWords 里的「深海/机器猫/怒战/狂战」变异池。 */
   const FUSION_BLACK_MUTANT_SETS = Object.freeze([67, 68, 69, 70]);
   /* 联机版融合的变异概率（三件材料都有可用目标时）。 */
   const FUSION_ONLINE_MUTANT_RATE = 0.02;
@@ -3080,18 +2850,14 @@
   const FUSION_EXT_INHERIT_RATE = 0.5;
   const FUSION_EXT_UPGRADE_RATE = 0.5;
   const FUSION_EXT_MAX_LEVEL = 3;
-  /* 产物品质 → 词条槽位数（绿 0 / 蓝 1 / 紫 2 / 橙 3 / 黑 3；黑沿用橙的条数）。 */
   const FUSION_EXT_SLOTS = { 1: 0, 2: 1, 3: 2, 4: 3 };
   const fusionSlots = (quality) => FUSION_EXT_SLOTS[Math.max(0, Math.min(4, integer(quality, 0)))] || 0;
-  /** 按目标品质随机生成词条（蓝 1 条 ≤2 星、紫/橙 2~3 条 ≤3 星）。 */
   function randomExtForQuality(quality) {
     const slots = fusionSlots(quality);
     return slots ? randomExt(slots, quality >= 3 ? 3 : 2) : [];
   }
   /** 融合产物的词条（2026-11 对齐联机版）：
    *  ① 把三件材料的词条按**星级从高到低**排列，同星级按材料顺序 / 材料内词条顺序；
-   *  ② 前两条固定继承；第三条从剩下的材料词条里随机抽；
-   *  ③ 同名词条按各自出现次数参与，不合并、不去重（两条同 id 可以同时出现）；
    *  ④ 继承后每条仍有 50% 概率升 1 星（上限 3 星）；低品质只保留对应槽位。 */
   function mergeExt(gs, targetQuality) {
     const slots = fusionSlots(targetQuality);
@@ -3102,7 +2868,6 @@
         ? entry.level + 1 : entry.level,
     });
     /* 隐藏机制：只有**黑装产物**（3 橙→黑 / 3 黑→黑）在材料里恰好有 4 个
-     * 「≥2 件共有」的不同词条时，允许突破 3 槽、生成 4 词条；四条各取材料里的
      * 最高星级。少于或不为 4 个共有词条时仍按常规槽位封顶，不对外写进帮助页。 */
     const sharedCounts = new Map(), sharedLevels = new Map(), sharedIndex = new Map();
     let cursor = 0;
@@ -3148,11 +2913,7 @@
     return out;
   }
   /** 融合产物的目标装备。名称按「三件材料的同名情况」三选一：
-   *   · 两件同名 → 50% 沿用原名 / 3% 变异狂战 / 47% 随机其它装备
-   *   · 三件同名 → 97% 沿用原名 / 3% 变异狂战
-   *   · 三件全不同名 → 完全随机（不掷变异）
    *  判定顺序 = 先掷变异、再掷保名，剩下的走随机其它；这样三段的概率就是字面值。
-   *  若该名字在目标品质不存在（例如斗斗/挑斗白装没有绿装），退回完全随机。
    *  ⚠ 三件同套的保底在 `familyUpgradeTarget` 里**先**处理；这里只服务跨套 / 无下一档的情况。
    *  返回 { id, mutant }：mutant 为 true 表示这次是狂战变异。 */
   function pickMergeTarget(gs, part, targetQuality, allow) {
@@ -3192,7 +2953,6 @@
     }
     return s;
   }
-  /** 套装 id → 家族前缀（同套四件的公共前缀）。空串 = 数据不完整，保底不生效。 */
   function fusionSetFamily(setId) {
     const key = Number(setId);
     if (!Number.isFinite(key)) return '';
@@ -3231,26 +2991,7 @@
     return null;
   }
 
-  /** 黑装融合的目标：3 件黑装 → 同部位黑装。
-   *  · 97% 留在同一家族（凤凰→凤凰 / 圣熊→圣熊），其中 3% 变异到另一套黑装
-   *    （对应原版 helpWords「融合黑装时有较低几率出现深海/机器猫/怒战/狂战」）；
-   *  · 品质 5 的池子由 gamedata 的 registerBlackGear 补出来的 46/47/67~72 组成。 */
-  function pickBlackMergeTarget(gs, part, allow) {
-    const pool = gearIdsOf(part, 5, allow);
-    if (!pool.length) return null;
-    const pick = (list) => list[Math.floor(Math.random() * list.length)];
-    const family = gearSetFamily(gs[0].id);
-    const same = pool.filter((id) => gearSetFamily(id) === family);
-    const others = pool.filter((id) => gearSetFamily(id) !== family);
-    const roll = Math.random();
-    if (others.length && roll < 0.03) return { id: pick(others), mutant: true };
-    if (same.length && roll < 0.73) return { id: pick(same), mutant: false };
-    return { id: pick(pool), mutant: false };
-  }
   /** 融合产物的主属性百分比（2026-11 用户口径）：
-   *  · 三件材料各自的整数百分比取平均；
-   *  · 非整数平均值取**最接近的两个整数**（即 floor / ceil）随机；
-   *  · 平均值恰好是整数 x 时取 **x 与 x+1** 随机；
    *  · 结果封顶 +5%（下限对称 -5%）。
    *  返回整数百分比，属性点由目标装备自己的基准值折算。 */
   function fusionAttrPctOf(pcts) {
@@ -3262,20 +3003,12 @@
     const candidates = a === b ? [a] : [a, b];
     return candidates[Math.floor(Math.random() * candidates.length)];
   }
-  /** 融合产物的 { attr, pct }：材料百分比 → 产物百分比 → 目标装备基准值。 */
   function fusionGearAttr(gs, targetId) {
     const pct = fusionAttrPctOf((gs || []).map((g) => gearAttrPctOf(g && g.id, g && g.attr, g && g.attrPct)));
     return { pct, attr: gearAttrValueOf(targetId, pct) };
   }
-  /** 两种界面统一：三件同品质装备融合，部位和名字均可不同。
-   *  2026-11 对齐联机版：
-   *   · 产物部位从三件材料里**随机取一件**（不再固定首件，也没有同套保底）；
-   *   · 目标品质 = 材料品质 + 1（黑装封顶 5）；优先取「来源材料同套」的目标，
-   *     存在其它套时 2% 概率变异（紫/蓝档狂战、紫→橙狂战、橙/黑档黑装变异池）；
-   *   · 词条按 `mergeExt` 的「星级前两条 + 第三条随机」；
-   *   · 主属性百分比仍按三件材料平均继承（单机 2026-11 口径）。
-   *  `opts.targetAllowed(id)`（可选）：产物候选过滤 —— 现代界面只允许「有贴图的装备」，
-   *  避免合出一件列表里看不到的空白装备（用户 2026-10-28 口径）。 */
+  /** 三件同品质装备融合：部位随机取一件，品质 +1（黑装封顶 5），同套优先、2% 变异；
+   *  opts.targetAllowed(id) 可过滤产物（现代界面只允许有贴图的装备，避免合出空白装备）。 */
   function mergeGears(keys, opts) {
     if (!Array.isArray(keys) || keys.length !== 3 || new Set(keys).size !== 3) return { ok: false, msg: '请选择三件不同的装备' };
     const allow = (opts && typeof opts.targetAllowed === 'function') ? opts.targetAllowed : null;
@@ -3358,7 +3091,6 @@
       return a.name.replace('N', String(v.total));
     }).filter(Boolean);
   }
-  /** 装备详情用：带上宝石增幅的拆分，例如「龟甲术防降属性效果60%（基础30%+增幅30%）」。 */
   function extTextForGear(gear, detail) {
     const units = gemAffixUnits(gear && gear.gem && gear.gem.id);
     return (gear && gear.ext ? gear.ext : []).map((e) => {
@@ -3369,7 +3101,6 @@
       return a.name.replace('N', String(v.total)) + (detail && v.extra > 0 ? '（基础' + v.base + '+增幅' + v.extra + '）' : '');
     }).filter(Boolean);
   }
-  /** 原版装备详情右列 `baseOtherExtra`：只列宝石增幅的额外值（+30% / +30点 / +3倍 / -10%）。 */
   function extExtraText(ext, units) {
     return (ext || []).map((e) => {
       const id = LEGACY_EXT_ID[Number(e.id)] || e.id;
@@ -3445,11 +3176,6 @@
     return effects;
   }
 
-  /* ============================================================
-   * 【S10】属性合计（基础+装备+药剂）
-   * ============================================================ */
-  // ---------- 属性合计（基础+装备+药剂状态） ----------
-  /** 永久属性点合计：力/敏/速各 1 点，生命 5 点折算 1 点（与升级成长、test-points 同一口径）。 */
   function permanentStatTotal(source) {
     const s = object(source) ? source : S;
     if (!s) return 0;
@@ -3461,7 +3187,6 @@
     return Math.max(0, STAT_HARD_CAP - permanentStatTotal(source));
   }
   /** 把永久属性点/待分配点收口到 651。**所有写盘与读档路径都必须经过这里**：
-   *  调试面板/控制台直接改 `S.power`、旧档里的超额数据、转生后重新加的神迹点，
    *  只要保存或重载就会被拉回上限。返回本次被收掉的点数（含待分配点）。
    *  超出时优先从数值最大的那一项扣（生命按 5 点=1 点折算），四项都保底 1 点/5 血。 */
   function clampPermanentStats(source) {
@@ -3508,8 +3233,6 @@
   }
   function totalStats(opts) {
     opts = opts || {};
-    /* 读战斗面板前也收口一次：控制台/调试如果绕过 save() 直接改了基础四维，
-     * 这里仍不会让一场战斗带着 651 以上的永久属性点开打。 */
     clampPermanentStats();
     let power = S.power, agility = S.agility, speed = S.speed, hp = S.maxHp;
     for (const g of S.gears) {
@@ -3537,7 +3260,6 @@
     if ((t = has(2))) agility += GData.passiveBonus(2, t.level) * (1 + (effects[28] || 0) / 100);
     if ((t = has(3))) speed += GData.passiveBonus(3, t.level) * (1 + (effects[29] || 0) / 100);
     if ((t = has(4))) hp += GData.passiveBonus(4, t.level) * (1 + (effects[30] || 0) / 100);
-    // 药剂状态（挑战 / 竞技场战斗生效；关卡、天梯赛不吃）
     if (opts.useProps !== false) {
       const st = S.propsStates || {};
       if (st[3] > 0) power += Math.max(Math.floor(power * 0.2), 5);
@@ -3550,21 +3272,11 @@
     return { power: Math.round(power), agility: Math.round(agility), speed: Math.round(speed), hp: Math.round(hp) };
   }
 
-  /* ============================================================
-   * 【S11】道具：使用/出售/合成
-   * ============================================================ */
-  // ---------- 道具 ----------
-  /* 每日限购：卷轴/永久属性/果实这类每天 1 件；四种普通药丸（大力丸/敏捷丸/速度丸/经验丸）
-   * 每天 3 颗；**大小体力药剂每天各 3 个**（体力是硬资源，限紧一点）；
-   * 其余消耗品 5 件。超级药丸走名字里的「永久」分支，仍是 1 件。 */
   const SHOP_DAILY_PILLS = [3, 4, 5, 7];
   const SHOP_PILL_LIMIT = 3;
-  /* 体力药剂（1 = 小、2 = 大）：每天各限购 3 个。 */
   const SHOP_DAILY_ENERGY = [1, 2];
   const SHOP_ENERGY_LIMIT = 3;
-  /* 单独点名的每日限购（覆盖上面的默认值）。2026-10 用户口径：
-   * **勇气徽章（39，碎片竞技场入场券）每天 5 个**。
-   * 注意道具行里最后一个字段是 useType，不是购买数量 —— 限购只认这里。 */
+  // 商店每日限购的单独覆盖（行里最后一个字段是 useType，不是数量）。
   const SHOP_DAILY_LIMITS = { 39: 5 };
   function shopLimit(id) {
     const key = Number(id), prop = propMap.getValue(key);
@@ -3609,22 +3321,9 @@
     save();
     return { ok: true, msg: `购买了${p.name}x${count}`, ...purchaseStatus(id) };
   }
-  /* ---------- 金宝箱 / 魔法袋（原版 Flash 的两件开箱道具）----------
-   * 原版客户端只负责「展示奖品 + 播放动画」，真正的奖品由服务端 `chest.do` 下发；
-   * 离线版在这里落一张等价的权重表。
-   *
-   * 金宝箱（90）对齐 ssfight 的 `openBox` 奖池：6/8/10/12 点基础属性 + 5/6 级宝石，
-   * 以及「黑凤凰/黑圣熊/黑狂战/黑怒战」——黑装在本版未开放，用金松果替代。
-   * **单箱最高 12 点**（原版 16 点）：因为本版 71~90 级每级仍给 4 点成长（多 80 点），
-   * 20 箱 ×12 = 240，正好与原版 20×16 = 320 减去这 80 点相等，90 级总账仍是 651。
-   * 原版单箱可重开 500 次（`reopenMaxCount`，MainMovie.as:19528），金松果逐档上涨；
-   * 这里同样实现，开出的结果先挂在 `S.chestPending`，点「确定领取」才入账。
-   *
-   * 魔法袋（79）按原版天梯商店回收（积分1300/金杯2000/金松果200，账号限 1），
-   * 且**不出属性点**：原版说明只承诺黑凤凰/黑圣熊碎片与其它稀有道具，
-   * 离线版没有黑装，用宝石/碎片/召唤证/金松果/孵化点替代。 */
+  /* 金宝箱/魔法袋：原版奖品由服务端下发，这里落等价权重表。金宝箱单箱最高 12 点基础属性
+   * 开箱结果先挂 S.chestPending，点「确定领取」才入账；魔法袋不出属性点。 */
   const CHEST_REOPEN_MAX = 500;
-  /** 原版 `getReOpenCount`（MainMovie.as:9221）：每 3 次一档，50 / 75 / 100 / 150 … */
   function chestReopenCost(count) {
     count = Math.max(0, Math.floor(Number(count) || 0));
     if (count >= CHEST_REOPEN_MAX) return 0;
@@ -3633,7 +3332,6 @@
     if (k === 1) return 75;
     return 100 + (k - 2) * 50;
   }
-  /** 金宝箱的「完整黑装」档：按原版权重 凤凰/圣熊 极低、黑狂战 低、黑怒战 普通。 */
   function rollBlackChestGear() {
     const roll = Math.random();
     let setId;
@@ -3648,7 +3346,6 @@
     return { kind: 'gear', id, count: 1, name: def ? def.name : '黑装' };
   }
   /** 只摇奖、不入账：重开要能丢掉上一份结果，所以奖励在 confirm 时才落袋。
-   *  `gold` = 首次开箱；`gold-reopen` = 花金松果重开。
    *  **完整黑装只在首开出**（2%）；重开池把这一档折成黑色卡片，避免用金松果把 20 个金宝箱
    *  逐个刷成完整黑装、绕开挑战塔/无尽塔的产出节奏。 */
   function rollChestReward(kind) {
@@ -3669,7 +3366,6 @@
         if (r < 0.76) return { kind: 'points', count: 8, name: '基础属性点' };
         return { kind: 'points', count: 6, name: '基础属性点' };
       }
-      /* 4% 6级 / 22% 5级 / 15% 金松果 / 8% 黑卡 / 2% 完整黑装（仅首开）/ 49% 属性点。 */
       if (r < 0.04) return prop(106, 1);
       if (r < 0.14) return prop(105, 2);
       if (r < 0.26) return prop(105, 1);
@@ -3681,7 +3377,6 @@
       if (r < 0.76) return { kind: 'points', count: 8, name: '基础属性点' };
       return { kind: 'points', count: 6, name: '基础属性点' };
     }
-    // 魔法袋：稀有道具 + 孵化点 / 召唤证 / 高级宝石（没有属性点）
     if (r < 0.03) return prop(106, 1);
     if (r < 0.18) return prop(105, 1);
     if (r < 0.33) return prop(26, 5 + Math.floor(Math.random() * 6));
@@ -3711,7 +3406,6 @@
     } else return false;
     return true;
   }
-  /** 当前「已开出、待领取」的金宝箱结果（没有则 null）。 */
   function chestState() { return S && S.chestPending ? clone(S.chestPending) : null; }
   /** 开一个金宝箱：消耗 1 个，结果挂在 `S.chestPending`（可重开，确认才入账）。 */
   function beginChest(id) {
@@ -3725,7 +3419,6 @@
     save();
     return { ok: true, pending: chestState(), msg: '打开金宝箱：' + S.chestPending.reward.name + ' ×' + S.chestPending.reward.count };
   }
-  /** 确认领取当前金宝箱结果。 */
   function confirmChest() {
     const p = S.chestPending;
     if (!p) return { ok: false, msg: '没有待领取的开箱结果' };
@@ -3747,7 +3440,6 @@
     if (!(opts && opts.save === false)) save();
     return ok;
   }
-  /** 花金松果重开：丢掉当前结果、重新摇一份；箱子本身不再消耗。 */
   function reopenChest() {
     const p = S.chestPending;
     if (!p) return { ok: false, msg: '没有可以重开的金宝箱' };
@@ -3760,7 +3452,6 @@
     save();
     return { ok: true, cost, pending: chestState(), msg: '重开：' + p.reward.name + ' ×' + p.reward.count };
   }
-  /** 一次性开完（调试 / 旧调用 / 测试用）：开 + 立刻领取。 */
   function openChestProp(id) {
     id = Number(id);
     if (id === 79) {
@@ -3769,8 +3460,6 @@
       if (S.props[79] <= 0) delete S.props[79];
       const reward = rollChestReward('magic');
       grantChestReward(reward);
-      /* 原版魔法袋会掉黑凤凰/黑圣熊碎片；经典界面统一折成 1 张黑色卡片
-       *（账号限 1 个魔法袋）。现代界面没有黑装，额外黑卡一并去掉。 */
       const card = blackGearEnabled() ? 1 : 0;
       if (card) S.props[80] = (S.props[80] || 0) + card;
       save();
@@ -3787,7 +3476,6 @@
   }
 
 
-  /** 黑色卡片（80）的两个可选套装：凤凰 71 / 圣熊 72。 */
   function blackCardOptions() {
     if (!blackGearEnabled()) return [];
     return [
@@ -3803,7 +3491,6 @@
     const shardId = set === 71 ? 77 : 78;
     const shards = Math.random() < 0.7 ? 1 : 2;
     const roll = Math.random();
-    /* 2026-10 用户口径：黑卡金松果期望翻倍（原 50/100/200 → 100/200/400）。 */
     const gold = roll < 0.5 ? 100 : roll < 0.85 ? 200 : 400;
     S.props[shardId] = (S.props[shardId] || 0) + shards;
     addGold(gold);
@@ -3813,7 +3500,6 @@
       msg: '打开黑色卡片：' + (def ? def.name : '黑装碎片') + ' ×' + shards + '，金松果 +' + gold,
     };
   }
-  /** 黑装自选箱（89）的候选：凤凰/圣熊各 4 个部位。 */
   function blackGearBoxOptions() {
     if (!blackGearEnabled()) return [];
     const out = [];
@@ -3825,7 +3511,6 @@
     }
     return out.sort((a, b) => (a.setId - b.setId) || (a.type - b.type));
   }
-  /** 自选一件黑装（89），随机 3 条附加属性。 */
   function applyBlackGearBox(gearId) {
     if (!blackGearEnabled()) return { ok: false, msg: '现代界面没有黑装内容' };
     const id = Number(gearId);
@@ -3836,7 +3521,6 @@
     return { ok: true, gear: g, msg: '获得' + g.name };
   }
 
-  /* ---------- 无尽塔黑卡周限（每周一 00:00 重置，最多 10 张） ---------- */
   const ENDLESS_BLACK_CARD_CAP = 10;
   /** 本周周一的本地日期键（与天梯商店的按周刷新同一口径）。 */
   function blackCardWeekKey() {
@@ -3916,7 +3600,6 @@
         if (S.level >= 50) return { ok: false, msg: '达到50级后不能转生' };
         S.level = 1; S.exp = 0; Object.assign(S, GData.initialStats());
         /* 自由属性点必须一起清掉：转生可以在 50 级以下反复用，若把没点完的自由点留下，
-         * 每轮 1→49 级都会再发一遍，等于无限属性。神迹的建筑记录不随转生消失，
          * 那 29 点要按记录重新加回去（否则会凭空少一截）。
          * 金宝箱已发数量 `levelChests` 同样不重置 —— 71~90 每级 1 个是账号累计上限。 */
         S.freePoints = 0; S.pointUndo = [];
@@ -3941,27 +3624,26 @@
         break;
       }
       case 38: { const g = 20 + Math.floor(Math.random() * 80); addGold(g); msg = `打开红包，获得${g}金松果！`; break; }
-      case 47:   // 天使果实：随机三选一（学会一个）
-      case 48: { // 恶魔果实：随机三选一（遗忘一个）
-        /* 已经抽出的候选必须原样复用：界面没有取消键，但大退 / 重开背包也不能重抽。 */
+      case 47:   // 天使果实：随机 1 个可学武技（确定=学会，取消也消耗）
+      case 48: { // 恶魔果实：随机 1 个已拥有武技（确定=遗忘，取消也消耗）
+        /* 已经抽出的结果必须原样复用：弹窗有取消键，但大退 / 重开背包不能重抽。 */
         const pending = S.fruitChoices && S.fruitChoices[id];
         if (pending && Array.isArray(pending.options) && pending.options.length) {
-          return { ok: false, needsFruitChoice: true, fruit: id, mode: pending.mode, options: pending.options, msg: '请从三个里选一个' };
+          return { ok: false, needsFruitChoice: true, fruit: id, mode: pending.mode, options: pending.options, msg: '请确认这次随机结果' };
         }
         const fruit = fruitOptions(id);
         if (!fruit) {
-          return { ok: false, msg: id === 47 ? '获得失败：可能已达上限或运气不佳' : '没有可以遗忘的武器或技能' };
+          return { ok: false, msg: id === 47 ? '获得失败：可能已达上限或没有可学的武技' : '没有可以遗忘的武器或技能' };
         }
         if (!object(S.fruitChoices)) S.fruitChoices = {};
         S.fruitChoices[id] = { mode: fruit.mode, options: fruit.options, at: Date.now() };
         save();
-        return { ok: false, needsFruitChoice: true, fruit: id, mode: fruit.mode, options: fruit.options, msg: '请从三个里选一个' };
+        return { ok: false, needsFruitChoice: true, fruit: id, mode: fruit.mode, options: fruit.options, msg: '请确认这次随机结果' };
       }
       case 28: case 29: case 30: case 31: case 32: case 49: { // 礼包
         const gift = giftMap.getValue(id);
         if (!gift) return { ok: false, msg: '礼包数据缺失' };
         if (S.level < parseInt(gift.level)) return { ok: false, msg: `需要${gift.level}级才能打开` };
-        // 1/5/10/15/20 级礼包用 GData 里的加强清单，其它礼包仍按原表
         const boosted = GData.giftPackPrize ? GData.giftPackPrize(id) : null;
         const prizes = boosted || gift.prize.split('|').map((item) => {
           const [pid, num] = item.split(':').map(Number);
@@ -4034,10 +3716,7 @@
     S[info.kind === 'weapon' ? 'weapons' : 'skills'].push(info.id + ':1');
     return info;
   }
-  /**
-   * 升级奖励的「三选一」候选：从还能学的池子里抽最多 n 个不重复的。
-   * 池子空了（已满 / 没有可学的）就返回空数组，调用方据此不发奖励。
-   */
+  // 升级奖励三选一：从还能学的池子抽最多 n 个不重复；池空返回空数组，调用方据此不发奖励。
   function wsChoices(n) {
     const pool = wsPool();
     const want = Math.min(Math.max(1, integer(n, 3, 1)), pool.length);
@@ -4047,40 +3726,52 @@
     }
     return picked.map(wsInfo).filter(Boolean);
   }
-  /* ============================================================
-   * 【S12】天使果实 / 恶魔果实（随机三选一）
-   * ============================================================ */
-  /* ---------- 天使果实 / 恶魔果实 ----------
-   * 天使果实：从「还能学」的池子里随机抽最多 3 个候选，玩家挑一个学会；
-   * 恶魔果实：从已拥有的武器/技能里随机抽最多 3 个候选，玩家挑一个遗忘。
-   * 都不再是「直接随机生效」。候选在 useProp 里只负责回传，真正改动在 applyFruitChoice。 */
-  function ownedWSChoices(n) {
-    const all = [
-      ...S.weapons.map((w) => wsInfo('w' + w.split(':')[0])),
-      ...S.skills.map((s) => wsInfo('s' + s.split(':')[0])),
-    ].filter(Boolean);
-    const pool = all.slice(), picked = [];
-    while (picked.length < Math.max(1, integer(n, 3, 1)) && pool.length) {
-      picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
-    }
-    return picked;
+  /* 果实：天使从「还能学」的池子抽 1 个并学会，恶魔从已拥有里抽 1 个遗忘（不可撤销）。
+   * 取消弹窗照样消耗果实，但记进 fruitSeen，下一轮先给没出现过的；候选只回传，
+   * 真正改动在 applyFruitChoice / cancelFruitChoice。 */
+  function fruitCode(kind, id) { return (kind === 'weapon' ? 'w' : 's') + Number(id); }
+  function fruitSeen(id) {
+    if (!object(S.fruitSeen)) S.fruitSeen = {};
+    if (!Array.isArray(S.fruitSeen[id])) S.fruitSeen[id] = [];
+    return S.fruitSeen[id];
   }
-  /** 果实的三选一候选；条件不满足（武技已满 / 只剩一个）时返回 null。 */
+  /** 果实的可抽池子（编码）：天使=还能学的，恶魔=已拥有的武器/技能。 */
+  function fruitPool(id) {
+    if (id === 47) return wsPool();
+    return [
+      ...S.weapons.map((w) => 'w' + parseInt(w, 10)),
+      ...S.skills.map((s) => 's' + parseInt(s, 10)),
+    ];
+  }
+  function fruitRoll(id, pool) {
+    let seen = fruitSeen(id).filter((code) => pool.indexOf(code) >= 0);
+    let rest = pool.filter((code) => seen.indexOf(code) < 0);
+    if (!rest.length) { seen = []; rest = pool.slice(); }
+    S.fruitSeen[id] = seen;
+    const code = rest[Math.floor(Math.random() * rest.length)];
+    return code ? wsInfo(code) : null;
+  }
+  /** 这一次的果实结果（只有 1 个候选）；条件不满足（武技已满 / 只剩一个）时返回 null。 */
   function fruitOptions(id) {
     id = Number(id);
-    if (id === 47) { const options = wsChoices(3); return options.length ? { mode: 'gain', options } : null; }
+    if (id === 47) {
+      const pool = fruitPool(47);
+      if (!pool.length) return null;
+      const info = fruitRoll(47, pool);
+      return info ? { mode: 'gain', options: [info] } : null;
+    }
     if (id === 48) {
       if (S.weapons.length + S.skills.length <= 1) return null;
-      return { mode: 'lose', options: ownedWSChoices(3) };
+      const info = fruitRoll(48, fruitPool(48));
+      return info ? { mode: 'lose', options: [info] } : null;
     }
     return null;
   }
-  /** 应用果实三选一的结果，成功后消耗掉那个果实。 */
   function applyFruitChoice(id, kind, targetId) {
     id = Number(id); targetId = Number(targetId);
     kind = kind === 'weapon' ? 'weapon' : 'skill';
     if (!(S.props[id] > 0)) return { ok: false, msg: '没有这个果实' };
-    const pending = S.fruitChoices && S.fruitChoices[id];
+    const pending = (S.fruitChoices && S.fruitChoices[id]) || (S.__onlineFruitChoices && S.__onlineFruitChoices[id]);
     if (pending && Array.isArray(pending.options)
       && !pending.options.some((c) => c && c.kind === kind && Number(c.id) === targetId)) {
       return { ok: false, msg: '请选择这次抽出的候选' };
@@ -4112,9 +3803,30 @@
     }
     return { ok: false, msg: '这个道具不能这样用' };
   }
+  function cancelFruitChoice(id) {
+    id = Number(id);
+    if (!(S.props[id] > 0)) return { ok: false, msg: '没有这个果实' };
+    const pending = (S.fruitChoices && S.fruitChoices[id]) || (S.__onlineFruitChoices && S.__onlineFruitChoices[id]);
+    const c = object(pending) && Array.isArray(pending.options) ? pending.options[0] : null;
+    if (!object(c) || (c.kind !== 'weapon' && c.kind !== 'skill')) {
+      return { ok: false, msg: '这次随机结果已经结算过了' };
+    }
+    const seen = fruitSeen(id);
+    const code = fruitCode(c.kind, c.id);
+    if (seen.indexOf(code) < 0) seen.push(code);
+    S.props[id]--; if (S.props[id] <= 0) delete S.props[id];
+    if (object(S.fruitChoices) && S.fruitChoices[id]) delete S.fruitChoices[id];
+    if (object(S.__onlineFruitChoices) && S.__onlineFruitChoices[id]) {
+      /* 换一份对象再删：runOnSave 用旧档嵌套对象算 diff，原地删会让服务端漏发这次改动。 */
+      S.__onlineFruitChoices = Object.assign({}, S.__onlineFruitChoices);
+      delete S.__onlineFruitChoices[id];
+    }
+    bumpDaily('use', 1, true);
+    save();
+    return { ok: true, msg: '已取消：这次不' + (c.kind === 'weapon' ? '获得 ' : '遗忘 ') + (c.name || '这个武技') + '（果实已消耗）' };
+  }
   /** 还没选的「三选一」：升级发下来就必须选掉（和自由属性点一样，只是会排队）。 */
   function pendingWS() { return S && Array.isArray(S.wsPicks) ? S.wsPicks.length : 0; }
-  /** 已经抽出、还没选的天使/恶魔果实候选（重开背包 / 大退后仍用同一组）。 */
   function pendingFruitChoices() {
     if (!S) return [];
     const map = {};
@@ -4128,13 +3840,6 @@
     }
     return out;
   }
-  /* ============================================================
-   * 「自愿支持作者」的一次性提示（30 级）
-   *
-   * 规则（用户口径 2026-10）：升到 30 级时弹一次；界面在**升级奖励处理完之后**才弹，
-   * 不打断三选一 / 属性点流程（见 classic-ui 的 maybeSupportPrompt）。
-   * 只做提示，不换取任何游戏内好处；关掉 / 点过之后不再出现。
-   * ============================================================ */
   function supportPromptPending() { return !!(S && S.supportPrompt) && !(S && S.supportPromptShown); }
   /** 取一次提示权（原子）：真待提示时立刻记「已提示」并返回 true，否则 false。 */
   function supportPromptTake() {
@@ -4143,7 +3848,6 @@
     save();
     return true;
   }
-  /** 调试用：把「支持作者」提示恢复成**待提示**（下一次合适的时机还会弹一次；不碰等级）。 */
   function supportPromptReset() {
     if (!S) return false;
     S.supportPrompt = true;
@@ -4152,9 +3856,7 @@
     return true;
   }
   const SUPPORT_LEVEL = SUPPORT_PROMPT_LEVEL;
-  /** 当前这一组的三个候选。 */
   function currentWSChoices() { return pendingWS() ? (S.wsPicks[0] || []) : []; }
-  /** 从当前这组里选一个（kind+id），学会它并把这组出队。 */
   function chooseWS(kind, id) {
     if (!S || !pendingWS()) return { ok: false, msg: '没有待选的武器/技能' };
     const list = S.wsPicks[0] || [];
@@ -4166,7 +3868,6 @@
     save();
     return { ok: true, kind: info.kind, id: info.id, name: info.name, remaining: pendingWS() };
   }
-  /** 手气不错：把还没选的组全部随机选掉（调试一键满级那种情况用）。 */
   function chooseWSRandom() {
     const got = [];
     if (!S || !pendingWS()) return { ok: true, got, remaining: 0 };
@@ -4190,17 +3891,11 @@
     return list.some((x) => String(x).indexOf(key) === 0);
   }
 
-  /* ============================================================
-   * 【S13】特殊自由属性点（金宝箱等，升级不再发放）
-   * ============================================================ */
-  // ---------- 特殊自由属性点（三项 25% 保底；生命不参与三项占比） ----------
-  /** 某一项按「属性点」口径的数值（生命 5 点折算 1 点）。 */
   function statPoints(source, key) {
     const s = object(source) ? source : S;
     const raw = Math.max(0, Number(s && s[STAT_FIELDS[key]]) || 0);
     return key === 'hp' ? raw / HP_PER_STAT : raw;
   }
-  /** 力/敏/速三项的占比；生命不进入原版权重口径。 */
   function statShares(source) {
     const s = object(source) ? source : S;
     let total = 0;
@@ -4220,23 +3915,19 @@
     if (!low.length) return null;
     return low.reduce((a, b) => (shares[b] < shares[a] ? b : a));
   }
-  /** 四项里数值最低的一项（生命按 5 点折算），用于「平均分配」与 AI 自选。 */
   function lowestStat(source) {
     const vals = {};
     for (const key of STAT_KEYS) vals[key] = statPoints(source, key);
     return STAT_KEYS.reduce((a, b) => (vals[b] < vals[a] ? b : a));
   }
-  /** 把一点加到某一项上（生命一点 = 5 点血）。 */
   function grantPoint(target) {
     if (!S || !STAT_KEYS.includes(target)) return false;
     if (Math.floor(statCapRoom()) < 1) return false; // 651 点硬上限
     S[STAT_FIELDS[target]] += STAT_GAIN[target];
     return true;
   }
-  /** 还没分配的特殊自由属性点（金宝箱等；升级不再发放）。 */
   function pendingPoints() { return Math.max(0, integer(S && S.freePoints, 0)); }
   /**
-   * 分配一点特殊自由属性点（力/敏/速各 +1，生命 +5）。
    * 力/敏/速占比低于 25% 时必须优先补：requested 不是它时系统直接代选，
    * 返回值里 redirected=true 供界面提示，规则不靠界面自觉。生命不参与三项占比。
    */
@@ -4247,7 +3938,6 @@
     const target = forced || attr;
     if (!grantPoint(target)) return { ok: false, msg: '永久属性点已达硬上限 ' + STAT_HARD_CAP + ' 点' };
     S.freePoints = pendingPoints() - 1;
-    // 记下这一次到底加到了哪一项，供「撤回」原样退回去（含系统代选的那一下）
     if (!Array.isArray(S.pointUndo)) S.pointUndo = [];
     S.pointUndo.push(target);
     save();
@@ -4263,7 +3953,6 @@
     };
   }
   /**
-   * 撤回上一次自由属性点分配：把那次加上的属性原样减掉、点数退回待分配。
    * 只回退「通过弹窗分配」的点（S.pointUndo 记着顺序），所以不会把成长得来的属性退掉。
    */
   function undoPoint() {
@@ -4279,7 +3968,6 @@
   }
   /** 还有几次可以撤回（界面用它决定按钮是否可用）。 */
   function undoDepth() { return Array.isArray(S.pointUndo) ? S.pointUndo.length : 0; }
-  /** 一键把待分配点铺平到四项（每次选占比最低的一项，天然满足占比门槛）。 */
   function allocateEvenly() {
     const added = { power: 0, agility: 0, speed: 0, hp: 0 };
     let guard = 0;
@@ -4291,10 +3979,6 @@
     return { ok: true, added, remaining: pendingPoints() };
   }
 
-  /* ============================================================
-   * 【S14】每日收益流水（徒弟日供数据源）
-   * ============================================================ */
-  // ---------- 每日收益流水（徒弟日供的数据源） ----------
   /* 记下「今天」自己赚到多少经验与金松果，徒弟日供按**昨天**这条流水结算。
    * 经验只有 gainExp 一个入口、金松果统一走 addGold()，所以两个钩子就能覆盖全部真实收益；
    * 退款、读档恢复与调试发放用 addGold(n,{count:false}) 明确排除，不算进收益。 */
@@ -4312,16 +3996,11 @@
     }
     row[kind] = Math.max(0, integer(row[kind], 0) + n);
   }
-  /** 某一天自己赚到的经验与金松果（徒弟日供读昨天那一天）。 */
   function earnOn(date) {
     const row = (Array.isArray(S.earnHistory) ? S.earnHistory : []).find((d) => object(d) && d.date === date);
     return { exp: row ? Math.max(0, integer(row.exp, 0)) : 0, gold: row ? Math.max(0, integer(row.gold, 0)) : 0 };
   }
   /** 【2026-10 用户口径】调试台「重置每日与体力计时」专用：把日供的**第二道门**也放开 ——
-   *  日供数额取自 `earnHistory` 的**昨天**那一条，昨天没有记录（新档 / 当天刚开始玩）时
-   *  总量恒为 0，`claimable` 永远是 false，于是「清掉今日已领标记」也白搭（界面仍报领不到）。
-   *  这里在「昨天那条不存在或全 0」时，把今天的收益复制一份当成昨天，让重置真的等价于
-   *  「回到新的一天、日供可以再领一次」。
    *  · 今天也没有收益（`today.exp/gold` 都是 0）→ 什么都不做（没有东西可结算，不凭空造收益）；
    *  · 昨天已经有非 0 记录 → 原样保留（不覆盖真实流水）；
    *  · 只服务调试台，不入正式玩法流程（正式玩法由真实日期推进时自然产生流水）。 */
@@ -4339,7 +4018,6 @@
     S.earnHistory = S.earnHistory.slice(-EARN_DAYS);
     return { seeded: true, date: y, exp: mine.exp, gold: mine.gold };
   }
-  /** 给玩家加金松果并计入当日收益流水；opts.count === false 表示这不是「赚到的」。 */
   function addGold(n, opts) {
     n = Math.round(Number(n) || 0);
     if (!S || !n) return 0;
@@ -4348,11 +4026,7 @@
     return n;
   }
 
-  /* ============================================================
-   * 【S15】经验 / 升级
-   * ============================================================ */
-  // ---------- 经验 / 升级 ----------
-  // 返回升级信息数组（可能连升）
+  // 代价是金宝箱单箱上限压到 12 点（总账与原版一致）。
   function gainExp(amount, opts) {
     const ups = [];
     amount = Number(amount);
@@ -4366,11 +4040,8 @@
       /* 到 30 级：埋一个一次性的「自愿支持作者」提示（界面在升级奖励处理完之后才弹，
        * 不会打断三选一 / 属性点流程；见 classic-ui 的 maybeSupportPrompt）。 */
       if (S.level >= SUPPORT_PROMPT_LEVEL) S.supportPrompt = true;
-      /* 1~90 级统一成长：每级 2 点随机 + 1 点系统分配（合计 3 属性）+ 5 生命。
-       * 原版 `MainMovie.as:19620` 的 maxLevel = 90；71~90 级原版只发 1 个金宝箱、
-       * 不再加属性（`showReward` 在 level > 70 时提前 return）。本版保留这 20 级的成长手感，
-       * 代价是金宝箱单箱上限从 16 点压到 12 点 —— 20×12 = 240，正好等于
-       * 「原版 20×16 = 320」减去多出来的 20×4 = 80 点成长。总账仍是 651。 */
+        /* 1~90 级统一成长：2 点随机 + 1 点系统分配 + 5 生命。原版 71~90 不再加属性，
+       * 本版保留成长手感，代价是金宝箱单箱上限从 16 压到 12（总账仍 651）。 */
       const growth = { power: 0, agility: 0, speed: 0, hp: 5 };
       for (let point = 0; point < FREE_POINT_RANDOM; point++) {
         const attr = ['power', 'agility', 'speed', 'hp'][Math.floor(Math.random() * 4)];
@@ -4378,9 +4049,8 @@
       }
       const { power: pw, agility: ag, speed: sp, hp } = growth;
       S.power += pw; S.agility += ag; S.speed += sp; S.maxHp += hp;
-      /* 第 3 点**全部由系统分配**（2026-11 用户口径）：不再发升级自由点、不再弹加点窗。
-       * 力/敏/速任一项低于 25% 时优先补最低项（原版转化丸的三项权重口径）；
-       * 三项都达标时四项随机。玩家仍可通过属性书 / 金宝箱等特殊自由点调控属性。 */
+      /* 第 3 点全部由系统分配（不再发升级自由点、不弹加点窗）：力/敏/速任一项低于 25% 时
+       * 优先补最低项，三项都达标时四项随机。 */
       let autoPoint = null;
       const forced = forcedStat();
       const pointRoom = Math.floor(statCapRoom());
@@ -4391,7 +4061,6 @@
       /* pointRoom < 1：已经顶到 651 硬上限（正常升级不会出现，只有调试/旧档超额时才会），
        * 这一点不再发放，不能让待分配点越过上限。 */
       /* 71~90 级：每级 1 个金宝箱（与原版一致；原版在这一段不再给属性，本版仍给 4 点，
-       * 所以箱子点数被压到 12 点/箱，见 rollChestReward）。
        * `levelChests` 是**账号累计**上限 20：转生回到 1 级再升上来不会重复发，
        * 否则「20 箱 ×12 点」可以被转生无限刷穿 651。 */
       const chestCap = MAX_PLAYER_LEVEL - 70;
@@ -4407,7 +4076,6 @@
       const choices = GData.WS_LEVELS.includes(S.level) ? wsChoices(3) : [];
       if (choices.length) S.wsPicks.push(choices);
       if (S.level === 5 && !S.reborn) addGold(50);
-      // 升级礼包：卷轴 / 药剂 / 丹药，逢 5 级再加一份大礼包
       const gifts = (GData.levelGift ? GData.levelGift(S.level) : []).map((g) => {
         const item = propMap.getValue(g.id);
         S.props[g.id] = (S.props[g.id] || 0) + g.count;
@@ -4431,10 +4099,7 @@
     return ups;
   }
 
-  /* ============================================================
-   * 【S16】战斗后结算（挑战玩家）
-   * ============================================================ */
-  // ---------- 战斗后结算（挑战玩家） ----------
+  // 战斗后结算（挑战玩家）。
   function consumeEnergy(n) {
     n = Number(n);
     if (!Number.isSafeInteger(n) || n < 0) return false;
@@ -4446,14 +4111,9 @@
     save();
     return true;
   }
-  /* 药丸分两类：属性丸（力/敏/速，含超级版）与经验丸。
-   * 竞技场按联机口径**只让经验丸生效**：属性丸不进竞技场面板、也不扣次数；
-   * 经验丸只在经验竞技场结算经验时扣 1 次（碎片/幻兽场不发经验就不扣）。
-   * `tickPropStates` 仍是普通挑战（一场两类全扣）与经验结算（只扣 exp）的公共入口。 */
+  // 竞技场按联机口径只让经验丸生效：属性丸不进面板、不扣次数；经验丸只在结算经验时扣 1 次。
   const STAT_PILL_IDS = [3, 4, 5, 41, 42, 43];
   const EXP_PILL = { 7: 0.4, 44: 0.6 };   // 经验丸 40% / 超级经验丸 60%
-  /** 递减药丸剩余场次。`opts.kind`：`'stat'` 只扣属性丸 / `'exp'` 只扣经验丸 / 省略 = 全扣
-   *  （普通挑战一场两样都用到了，仍是一次全扣）。 */
   function tickPropStates(opts) {
     const kind = opts && opts.kind;
     const keys = kind === 'stat' ? STAT_PILL_IDS
@@ -4463,7 +4123,6 @@
       if (Number(S.propsStates[k]) > 0) S.propsStates[k]--;
     }
   }
-  /** 当前生效的经验加成百分比（经验丸 + 超级经验丸，可叠加）。 */
   function expBoostPct() {
     let pct = 0;
     for (const id of Object.keys(EXP_PILL)) if (S.propsStates[id] > 0) pct += EXP_PILL[id] * 100;
@@ -4507,10 +4166,6 @@
     return { ok: true, msg: '合成成功：' + (item ? item.name : '转化丸'), prop: got, name: item ? item.name : '转化丸' };
   }
 
-  /* ============================================================
-   * 【S17】超级松鼠（原版 VIP）
-   * ============================================================ */
-  // ---------- 超级松鼠（原版 VIP） ----------
   const VIP_LEVELS = [   // [等级, 被动经验上限/天, 体力恢复倍率]
     [1, 150, 1.1], [2, 150, 1.2], [3, 200, 1.2], [4, 200, 1.3], [5, 250, 1.3],
     [6, 300, 1.4], [7, 300, 1.4], [8, 350, 1.5], [9, 350, 1.5], [10, 400, 1.5],
@@ -4534,7 +4189,6 @@
   function vipPassiveExpCap() { const lv = vipLevel(); return lv ? vipRow(lv)[1] : 0; }
   function vipExpNeed() { const lv = vipLevel() || 1; return VIP_LEVEL_EXP[Math.min(lv, VIP_MAX_LEVEL) - 1]; }
   function vipDaysLeft() { return Math.max(0, Math.ceil((vipUntil() - Date.now()) / 86400000)); }
-  /** 装备容量：原版特权 5 首次开通永久 +6 格。 */
   function gearCapacity() { return GEAR_CAPACITY + (vipState().capApplied ? VIP_GEAR_BONUS : 0); }
   /** VIP 生效时的体力上限 =「当前等级应有的上限」+ 60（特权 8）。 */
   function vipEnergyCap() { return energyCapForLevel(S.level) + VIP_ENERGY_BONUS; }
@@ -4561,7 +4215,6 @@
     if (S.energy > ENERGY_HARD_CAP) S.energy = ENERGY_HARD_CAP;
     return S.maxEnergy;
   }
-  /** 特权：每日首次登陆 +1 超级松鼠经验，累积自动升级。 */
   function tickVipDaily() {
     const v = vipState();
     if (!vipActive()) return { gained: false };
@@ -4590,7 +4243,6 @@
     save();
     return { ok: true, msg: '已成为超级松鼠 ' + plan.days + ' 天', until: v.until, level: v.level };
   }
-  /** 调试/验证用。 */
   function grantVip(days, level) {
     const v = vipState();
     v.until = Math.max(Date.now(), vipUntil()) + Math.max(1, Number(days) || 1) * 86400000;
@@ -4600,31 +4252,17 @@
     return { until: v.until, level: v.level };
   }
 
-  /* ============================================================
-   * 【S18】好友（离线版 NPC 好友）
-   * ============================================================ */
-  // ---------- 好友（离线版：随机 NPC 也能加） ----------
-  /* 好友只是本地保存的一份对手快照（名字 + 等级 + 三维），可以切磋，不连接真实玩家。 */
-  /* 原版 ssfight **没有好友数量上限**：`MainMovie.as` 的 `getFriends`（:2609-2705）把
-   * 服务端 `<friends>` 整份读进 `friendsArray`，`showMyFriends`（:13204）按 4 行/页翻页，
-   * `doShowFriends`（:13327）的 `pageCount1 = ceil(总人数 / 4)`，没有任何拒绝分支；
-   * 抓包 `friends.do?order=2` 里能拿到 **142 位**好友（`unpacked/05-服务器协议/抓包原文/new/023…`）。
-   * `friendsCount < 10`（:7246）是「10 位好友送 50 金松果」的奖励门槛，不是上限。
-   * 这里保留 50 是沿用联机服务端**已有的防滥用安全线**（好友页会把每个好友的战斗体
-   * 随列表下发，50 是服务端一次响应的预算），不是原版数值；单机版同一个数。 */
+  // 原版没有好友数量上限；FRIEND_LIMIT 是联机服务端一次响应的防滥用预算（单机同数）。
   const FRIEND_LIMIT = 50;
   const friendLimit = () => FRIEND_LIMIT;
   function friendList() { if (!Array.isArray(S.friends)) S.friends = []; return S.friends; }
   function friendOf(name) { return S.friends.find((f) => f.name === name) || null; }
-  /** 把一位对手（随机 NPC、师父、天梯对手都行）加为好友。 */
   function addFriend(foe) {
     const name = foe && foe.name ? String(foe.name).trim().slice(0, 20) : '';
     if (!name) return { ok: false, msg: '好友信息无效' };
     if (friendOf(name)) return { ok: false, msg: '【' + name + '】已经是好友了' };
-    /* 师徒与好友是两份名单，但经典挑战页把它们排在**同一列**里 —— 同名再加一次
-     * 就会在好友页出现第二行完全一样的条目（用户 2026-10-24 口径：
-     * "不希望师徒除了在第一页显示，还会在之后的页面中再显示一次"）。
-     * 所以重名判据要连师徒一起看，而不只是 `friendOf`。 */
+    /* 师徒与好友是两份名单但挑战页排在同一列：重名判据必须连师徒一起看，
+   * 否则好友页会出现与师父重复的第二行。 */
     if (S.master && String(S.master.name || '').trim() === name) {
       return { ok: false, msg: '【' + name + '】已经是你的师父了' };
     }
@@ -4641,9 +4279,7 @@
       /* 好友的**穿戴、武器与技能**也一起存下来：经典模式的挑战页要把好友自己的装备贴到右侧立绘上、
        * 并显示它的战斗力（原版这两项都来自服务端下发的 `wearsList` / `totalharm`）。
        * ⚠ `genAI` 抽出来的装备只有 `{id, ext, used}`、**没有 `type`** —— 这里顺手把部位补上
-       * （挑战页要给部位容器找对应装备，缺了 type 整件都贴不上去）。
        * 武器 / 技能是**切磋时的出手池**：不存的话好友切磋只能一直普攻，
-       * 就没法走和随机挑战同一套「武器 / 技能 / 普攻」权重抽取。
        * 只留必要字段，老档没有就是空数组 —— 不影响任何既有逻辑。 */
       gears: normalizeFoeGears(foe.gears),
       weapons: (foe.weapons || []).slice(0, 8),
@@ -4655,7 +4291,6 @@
   }
   /** 老档里的好友没有 `gears` / `weapons` / `skills`（这三个字段是后来才陆续落存档的）：
    *  第一次读到时就按它的等级补一份（走 `genAI` 同一条随机路，与"推荐好友"一致），并写回存档。
-   *  除了经典模式挑战页的"右侧对手展示"（装备贴图 + 战斗力），
    *  **切磋也直接读这份出手池**（见 `friendFoe`）—— 缺了武器/技能，好友就只会普攻，
    *  和随机挑战那套「武器 / 技能 / 普攻」权重抽取不一致。
    *  沿用项目里既有的"读到旧档就地补全"写法（同 `ClassicExtras.rank` 补 `integral`）。 */
@@ -4688,13 +4323,6 @@
     save();
     return { ok: true, msg: '已把【' + gone.name + '】移出好友', count: S.friends.length };
   }
-  /* ============================================================
-   * 好友留言（本地离线版）
-   * ------------------------------------------------------------
-   * 原版「查看好友 → 留言」走的是 `openWap(leaveMsgUrl + playerId)` 的外链留言板；
-   * 离线版没有服务端，这里落进存档：`friendMessages[好友名] = [{text, at}]`。
-   * 只允许给**当前好友列表里的好友**留言；删除好友时一起清掉。
-   * ============================================================ */
   const FRIEND_MESSAGE_MAX = 50;
   function friendMessages(name) {
     const who = String(name || '').trim();
@@ -4715,10 +4343,8 @@
     save();
     return { ok: true, msg: '留言已保存', list: friendMessages(who) };
   }
-  /** 把好友快照还原成可以战斗的对手对象（切磋用）。
-   *  ⚠ 武器 / 技能必须一起带进战斗：`Sim` 的出手模型是「武器 / 技能 / 普攻」三方权重竞争，
-   *  缺了这两个数组，好友就只剩普攻，和随机挑战同一只对手的表现完全不同。
-   *  老档缺字段时先走 `ensureFriendLoadout()` 就地补全（与挑战页右侧展示共用同一份快照）。 */
+  /** friendFoe：武器/技能必须一起带进战斗（Sim 是武器/技能/普攻三方权重竞争），
+   *  缺数组就只剩普攻。老档缺字段先走 ensureFriendLoadout() 就地补全。 */
   function friendFoe(friend) {
     if (!friend) return null;
     const full = ensureFriendLoadout(friend) || friend;
@@ -4730,7 +4356,6 @@
       isAI: true, effects: {}, friend: true,
     };
   }
-  /** 推荐好友：玩家等级附近的随机 NPC（不超过满级）。 */
   function rollFriendCandidates(count) {
     const n = Math.max(1, Math.min(8, Math.round(Number(count) || 3)));
     const out = [];
@@ -4741,19 +4366,6 @@
     return out;
   }
 
-  // 战斗奖励（挑战/竞技胜利）；胜利经验在基准值上下浮动，期望值随对手等级提升
-  /* 主动挑战的经验：只看「自己的等级」和「与对手的等级差」。
-   *   基准 = BASE + min(自己等级, 20) × PER_LEVEL   ← 20 级封顶，增长比以前慢
-   *   倍率 = 1 + 等级差 × STEP（对手比自己高才多给，低了就少给）
-   * 封顶后同级一场 33 点、最大等级差（+3）约 47 点，也就是 4.7 点体力，
-   * 略低于经验竞技场的 150/30 = 5.0（竞技场仍是最快的经验来源）。
-   * nextExp 每级涨得比这里快，所以每升一级需要的场次仍然越来越多。 */
-  /* 随机挑战经验（2026-10 下调）：同级收益整体降低，等级差带来的增幅也大幅收窄。
-   *   1) 同级基准：20 + 等级×0.65 → **16 + 等级×0.55**（20 级：33 → 27，−18%；1 级：21 → 17）
-   *   2) 等级差：线性 +14%/级、压实指数 0.88 → **+9%/级、压实 0.78**
-   *      同样越 3 级：倍率 1.36 → 1.22（经验 45 → 33，−27%），越级不再「滚雪球」。
-   * 竞技场（冠军 150／30 体力）保持不变 —— 它是 4 人两轮、要赢才拿满，
-   * 单位体力的**期望**仍与随机挑战同档；这轮只动随机挑战这一侧。 */
   const CHALLENGE_EXP_BASE = 16;
   const CHALLENGE_EXP_PER_LEVEL = 0.55;
   const CHALLENGE_EXP_CAP_LEVEL = 20;
@@ -4764,9 +4376,6 @@
   const ARENA_CHAMPION_EXP = 150;
   const ARENA_ENERGY_COST = 30;
   const ARENA_EXP_PER_ENERGY = ARENA_CHAMPION_EXP / ARENA_ENERGY_COST;   // 5.0
-  /** 一次主动挑战胜利的经验期望（不含随机浮动与经验丸）。
-   *  等级差只影响倍率，且被 EXP_DIFF_TIGHTEN 压实；diff = 0 时倍率恒为 1.00，
-   *  所以**同级别挑战的经验期望不变**。 */
   function challengeExp(foeLevel, myLevel) {
     const mine = Math.max(1, Math.round(Number(myLevel) || (S && S.level) || 1));
     const diff = Math.max(-15, Math.min(15, Math.round(Number(foeLevel) || mine) - mine));
@@ -4775,9 +4384,7 @@
     const mult = Math.pow(linear, EXP_DIFF_TIGHTEN);
     return Math.round(base * mult);
   }
-  /** 随机挑战实际会遇到的等级差范围（classic-ui 的 genOpponents：level-1 ~ level+3）。 */
   const CHALLENGE_DIFF_RANGE = [-1, 3];
-  /** 通关一级需要的挑战场次（用同级对手估算），用于核对「越来越难」。 */
   function challengeFightsPerLevel(level) {
     const gain = challengeExp(level, level);
     return gain > 0 ? GData.nextExp(level) / gain : Infinity;
@@ -4797,12 +4404,7 @@
     save();
     return { exp: Math.round(expBase * expMul), gold, ups };
   }
-  /* ============================================================
-   * 【S19】复仇（消息页复仇标签）
-   * ============================================================ */
   /* ---------- 复仇（消息页「复仇」标签） ----------
-   * 输掉的挑战记在 S.battles 里，玩家可以拿录像里记下的对手数据再打一次。
-   * 胜利只给「少量」经验与金松果：按同级对手赢一场能拿到的经验的
    * REVENGE_EXP_RATIO 折算 —— 算把上次失败少拿的那部分补回一点，
    * 但远低于正常赢一场，所以不会变成刷经验的入口。每条记录只能复仇成功一次。 */
   const REVENGE_EXP_RATIO = 0.35;
@@ -4816,7 +4418,6 @@
     save();
     return { exp, gold, ups };
   }
-  /** 标记某条败绩已复仇成功（false = 记录不存在或已经复仇过）。 */
   function markRevenged(id) {
     const battle = (S.battles || []).find((b) => b && b.id === id);
     if (!battle || battle.revenged) return false;
@@ -4826,7 +4427,6 @@
   }
   /** 复仇信息：第 n 次复仇要 `(n+1)*20` 金松果。
    *  **只有天梯赛（kind === 'rank'）的败绩复仇才抢金杯**，且改为 0~1 个；
-   *  普通挑战 / 竞技场等复仇只补经验与金松果，不再出现“抢夺金杯”的提示。
    *  `cups` 是上限，实际值由界面在确认时掷一次（0 或 1），确认文案与结算共用同一次结果。
    *  `ladder` 供界面决定是否显示金杯相关文案；`id` 是战斗记录 id。 */
   function revengeInfo(id) {
@@ -4843,11 +4443,6 @@
     return battle.revengeCount;
   }
 
-  /* ============================================================
-   * 【S20】AI 玩家生成
-   * ============================================================ */
-  // ---------- AI 玩家生成 ----------
-  /** AI 名字池：固定昵称池 + 前缀后缀组合，组合空间远大于固定名单。 */
   const AI_PREFIX = ['松果', '橡果', '坚果', '瓜子', '松针', '尾巴', '树梢', '森林', '飞天', '闪电', '暴躁', '萌萌',
     '快乐', '无敌', '狂战', '吃瓜', '鼠胆', '大尾', '老', '小', '铁齿', '铜牙', '旋风', '疾风'];
   const AI_CORE = ['小弟', '小鼠', '大侠', '无双', '王者', '姐姐', '妹妹', '群众', '英雄', '达人', '杀手', '猎手',
@@ -4857,9 +4452,7 @@
     '瓜子杀手', '老松鼠', '鼠门弄斧', '松间明月', '大尾巴狼', '树梢舞者', '松针小王子', '橡果终结者'];
 
   const AI_TITLE = ['', '', '', '', '的师傅', '的师兄', '的宿敌', '二世'];
-  /** 人机昵称上限：**7 个汉字**（用户 2026-11 口径）。
-   *  超过这个长度的组合名进了战斗，血条上的 `name2`（84.45 单位宽）只能显示 7 个字，
-   *  后面的字会被字段框裁掉 —— 所以不再生成 8~9 个字的「前缀+核心+称号」。 */
+  // 人机昵称上限 7 个汉字：战斗血条 name2 字段只有 84.45 单位宽，更长的字会被裁掉。
   const AI_NAME_MAX = 7;
 
   /** 按汉字个数截断（只有兜底用；正常组合在生成时就保证放得下）。 */
@@ -4867,8 +4460,6 @@
     const chars = [...String(name == null ? '' : name)];
     return chars.length > AI_NAME_MAX ? chars.slice(0, AI_NAME_MAX).join('') : chars.join('');
   }
-  /** 把称号/后缀追加到名字后面，但只在总长仍 ≤7 个汉字时追加；
-   *  不再先拼再 `slice`（那样会切出「尾巴达人的师」这种半截称号）。 */
   function fitAIName(name, suffix) {
     const base = String(name == null ? '' : name);
     const extra = String(suffix == null ? '' : suffix);
@@ -4876,31 +4467,20 @@
     return [...base + extra].length <= AI_NAME_MAX ? base + extra : base;
   }
 
-  /** 随机生成一个对手名字：固定昵称池或「前缀+核心词」，少数带称号。
-   *  两条路都保证不超过 7 个汉字（称号只在放得下时追加）。 */
   function randomAIName(rng) {
     const r = typeof rng === 'function' ? rng : Math.random;
-    // 固定昵称（已经朗朗上口，不加称号）
     if (r() < 0.3) return clipAIName(AI_NICK[Math.floor(r() * AI_NICK.length)]);
     const name = AI_PREFIX[Math.floor(r() * AI_PREFIX.length)] + AI_CORE[Math.floor(r() * AI_CORE.length)];
     const title = AI_TITLE[Math.floor(r() * AI_TITLE.length)];
     return fitAIName(name, title);
   }
 
-  /* ---------- 随机对手的总属性上下限（2026-10 用户口径） ----------
-   * 总属性 = 力量 + 敏捷 + 速度 + 生命/5（生命 5 点折算 1 点，和升级成长/测试同一口径）。
-   *   · 下限：正常成长到该等级的玩家总属性。取关卡数值模型里的玩家基准曲线
-   *     `stagePlayerStat/Hp`（三围 + 生命），它是由实测玩家均值标定的；
-   *     低等级曲线会低于初始 22 点，所以再和 `22 + 4×(等级−1)` 取大。
-   *   · 上限：同一等级一个**可达到的**高配玩家总属性：满成长 + 永久来源（金宝箱/神迹/天梯丸）
-   *     + 四件当前等级可穿的最好主属性装备（+5% 主属性浮动、按等级可用的最高宝石）
-   *     + 四个被动技能当前可升到的最高等级。不含可无限重复购买的属性道具/幻兽，
-   *     因此它是一个保守的“理论上限”，敌人不会超过真正的最深养成。
-   * 两个上下限都随等级单调增长；随机对手在生成完成后按总属性夹到 [下限, 上限]。 */
+  /* 随机对手总属性上下限：下限取关卡数值模型的玩家基准曲线，并与 22+4×(等级−1) 取大；
+   * 上限按「满成长 + 永久来源 + 当前等级最好装备/宝石/被动」估一个保守理论上限。
+   * 总属性 = 力+敏+速+生命/5，生成后夹到 [下限, 上限]。 */
   const FOE_TOTAL_HP_DIV = 5;
   const FOE_TOTAL_CACHE = new Map();
 
-  /** 随机对手的总属性（生命按 5 点折算成 1 点）。 */
   function foeTotalStats(foe) {
     if (!foe) return 0;
     return (Number(foe.power) || 0) + (Number(foe.agility) || 0)
@@ -4977,14 +4557,12 @@
   function playerMaxTotal(level) {
     const lv = Math.max(1, Math.min(MAX_PLAYER_LEVEL, Math.floor(Number(level) || 1)));
     const growth = 22 + (lv - 1) * 4;
-    /* 永久来源：71~90 每级 1 个金宝箱（单箱最高 12 点）、神迹满级 29 点、天梯永久丸 4 点。 */
     const permanent = Math.max(0, Math.min(20, lv - 70)) * 12
       + (lv >= 25 ? 29 : 0) + (lv >= 30 ? 4 : 0);
     /* 被动技能：1 力 / 2 敏 / 3 速 / 4 血，按当前可升到的最高档。 */
     const toolMax = aiToolMaxLevel(lv);
     let passive = 0;
     for (const id of [1, 2, 3, 4]) passive += Math.max(0, Number(GData.passiveBonus(id, toolMax)) || 0);
-    /* 四件当前等级可穿的最好主属性装备；宝石按 45 级解锁后每 6 级一档（45→1 … 81→7）。 */
     const gemMax = lv >= 45 ? Math.min(7, 1 + Math.floor((lv - 45) / 6)) : 0;
     const gemMul = gemMax ? 1 + gemPercent(gemMax) / 100 : 1;
     const best = [0, 0, 0, 0];
@@ -5012,7 +4590,6 @@
     FOE_TOTAL_CACHE.set(lv, hit);
     return hit;
   }
-  /** 给对手补总属性点：力/敏/速各 1 点，生命 5 点，轮换着加，保持形状。 */
   function addFoeTotalPoints(foe, points) {
     let n = Math.max(0, Math.ceil(Number(points) || 0));
     const order = ['power', 'agility', 'speed', 'hp'];
@@ -5075,22 +4652,13 @@
     return foe;
   }
 
-  /**
-   * 生成一个对手。
-   * opts.levelJitter：在 level 上下浮动的等级范围（默认 ±2）
-   * opts.minLevel：对手等级的下限（默认 1）
-   * opts.gear：是否按等级随机穿戴装备（默认按玩家等级判断）
-   * opts.gearSelfLevel：按对手自身等级装备（默认 false，用玩家等级判断解锁）
-   * opts.name：直接指定名字
-   * opts.bounds === false：跳过总属性上下限夹取（只给调试/精确测量用）
-   */
+  /** 生成对手：levelJitter 等级浮动（默认 ±2）、minLevel 下限、gear 是否随机装备、
+   *  gearSelfLevel 按对手自身等级解锁装备、name 指定名字、bounds===false 跳过总属性夹取。 */
   function genAI(level, nameSuffix, opts) {
     opts = opts || {};
     level = integer(level, 1, 1);
     const jitter = Number.isFinite(opts.levelJitter) ? Math.max(0, Math.floor(opts.levelJitter)) : 2;
     const rolled = jitter ? integer(level + Math.floor(Math.random() * (2 * jitter + 1)) - jitter, 1, 1) : level;
-    // 满级 90：挑战/天梯/竞技场都在玩家等级上下浮动，玩家接近满级时浮上去就会冒出 91 级以上的对手，
-    // 所以在出口处统一夹一次（所有对手生成都走这里）。
     const finalLevel = Math.min(MAX_PLAYER_LEVEL, Math.max(integer(opts.minLevel, 1, 1), rolled));
     /* 人机名字统一在出口收口到 7 个汉字；显式 `opts.name`（剧情/特殊 NPC）原样保留，
      * 只有随机人机才追加 `nameSuffix`（同样只加在放得下时）。 */
@@ -5101,8 +4669,6 @@
       base.maxHp += 5;
       // 与玩家共用同一套点位预算：2 点随机（1/4 概率 +5 生命）+ 1 点系统分配。
       // 对手不弹窗，系统点默认在四项里随机挑；力/敏/速占比低于 25% 时优先补
-      // （与玩家的系统分配同一口径）。opts.freePointBias 是给平衡测量用的：
-      // 'lowest' 走平均分配，force/power/agility/speed/hp 走堆单项。
       for (let point = 0; point < FREE_POINT_RANDOM; point++) {
         const key = ['power', 'agility', 'speed', 'maxHp'][Math.floor(Math.random() * 4)];
         base[key] += key === 'maxHp' ? 5 : 1;
@@ -5121,15 +4687,8 @@
     skillsMap.each((k, v) => { if (GData.canLearn('skill', v.id, finalLevel)) skPool.push(parseInt(v.id)); });
     const nWS = GData.wsLimit(finalLevel);
     const weapons = [], skills = [];
-    /* 武器/技能**总数 = GData.wsLimit(finalLevel)**（跟着敌人等级走，不是随机个数）；
-     * 只有「分到武器还是技能」和「各自几级」是随机的。一个池抽空时从另一个池补，
-     * 保证总池够时正好 nWS 个。
-     * 等级是 **[下限, 上限] 之间均匀随机**（2026-10 用户口径「中高等级随机敌人增强」）：
-     *   · 上限 = 强化表里 levelLimit ≤ 等级的最大档 —— 武器与技能**同一条线**都到 15 级。
-     *     以前技能封在 10 级（那批还没有真化线），现在满级对手也能随机出真技能，
-     *     与玩家可选的 11~15（真1~真5）一致，sim/tower 本来就认 11~15；
-     *   · 下限 = `aiToolMinLevel(finalLevel)`（90 级最低真1、50 级最低 6 级，见函数注释），
-     *     夹到最后 `Math.min(lo, hi)`，所以 6/13 这类不能升级的技能仍是 1 级。 */
+    /* 武器/技能总数 = GData.wsLimit(敌人等级)，只有分到哪类与各自几级是随机的；
+     * 等级在 [下限, 11] 之间均匀取，下限由 aiToolMinLevel 给，最终 Math.min(lo, hi)。 */
     for (let i = 0; i < nWS; i++) {
       const wantWeapon = Math.random() < 0.55;
       let pool = wantWeapon ? wsPool : skPool;
@@ -5147,7 +4706,6 @@
       hp: base.maxHp, baseStats: { power: base.power, agility: base.agility, speed: base.speed, hp: base.maxHp },
       weapons, skills, isAI: true, effects: {},
     };
-    // 装备：等级越高穿得越多、品质越好，并随机带附加属性
     const playerLevel = S && Number.isFinite(S.level) ? S.level : 1;
     const gearLevel = opts.gearSelfLevel ? finalLevel : Math.max(playerLevel, 1);
     if (opts.gear !== false) foe.gears = randomAIGears(finalLevel, gearLevel);
@@ -5175,13 +4733,6 @@
       const stat = { 1: 'power', 2: 'agility', 3: 'speed', 4: 'hp' }[skill.id];
       if (stat) foe[stat] += Math.round(GData.passiveBonus(skill.id, skill.level) * (1 + (foe.effects[26 + skill.id] || 0) / 100));
     }
-    /* 随机对手的**难度系数**（2026-11 用户口径："敌人属性略偏低"）。
-     * 成长预算与玩家完全同一条曲线（见 `test-points`），但玩家会把每级自选点堆到
-     * 力/敏、还会挑装备；AI 的随机点/随机装备打出来就偏软。这里只给**随机挑战 /
-     * 竞技场 / 天梯**那几路传 `statScale`，不动关卡/塔（它们另有自己的曲线），
-     * 也不改 `baseStats`（成长预算的断言仍按原值）。
-     * 实测（`genAI` 玩家 optimized vs 随机对手，300 场/档）：1.08 把 15~70 级的
-     * 胜率从 70~85% 压到约 57~71%，是"略偏强一点"而没到翻盘。 */
     const statScale = Number(opts.statScale);
     if (Number.isFinite(statScale) && statScale > 0 && statScale !== 1) {
       for (const key of ['power', 'agility', 'speed']) {
@@ -5190,15 +4741,13 @@
       foe.hp = Math.max(1, Math.round(foe.hp * statScale));
       foe.statScale = statScale;
     }
-    /* 随机对手是**满血生成**：把上限显式写出来。以前没有 maxHp，幻兽加血时会把上限
-     * 误设成 `1 + bonus.hp`，Sim 再把敌人当前血量夹到几十点 —— 经典血条从满血
-     * 一帧掉到 0，就是用户报的「敌人血量异常大幅降低」。 */
+    /* 随机对手必须显式写 maxHp：缺上限时幻兽加血会把上限误设成 1+bonus.hp，
+     * Sim 再把当前血量夹到几十点，经典血条会从满血一帧掉到 0。 */
     if (foe.maxHp == null) foe.maxHp = Math.max(1, Math.round(foe.hp));
     /* 【随机挑战预告 = 实战】幻兽必须在**生成对手时**就抽定并落到面板上。
      * 以前是 `Main.startBattle` 到开战前才 `randomPetLoadout` + `applyPetBonuses`：
      * 随机挑战/好友预览看到的是没加幻兽的力敏速命，进战斗后敌人却凭空多出
      * 1~3 只幻兽的属性（生命上限也一起涨），就是用户报的"预告属性和战斗内不符"。
-     * 这里提前抽好后，预览和战斗读的是同一只 foe；`applyPetBonuses` 自带
      * `__petBonusesApplied` 防重，startBattle 再调一次也不会二次加。 */
     if (opts.pets !== false && foe.isAI && !Array.isArray(foe.pets)) {
       try {
@@ -5212,20 +4761,8 @@
     return foe;
   }
 
-  /* ---------- 对手身上「狂战套」的概率（需求164/166，**只剩现代模式在用**） ----------
-   * 狂战套（set 51）2026-11 起按原版 Flash 对齐为 **30 级套**（玩家 30 级可穿）；
-   * 但随机 AI 的**狂战曲线仍从 50 级起** —— 那是配装强度口径（需求166 的 10%→50%），
-   * 与「玩家几级能穿」是两件事：50 级前普通池会把 set 51 明确剔除，见 `randomAIGears`。
-   * 以前这套**独占「最高档」**：50 级以后每件装备有 75% 落进那一档 → 随机对手几乎人人
-   * 全身狂战。改成**每个部位**掷一次：
-   *   · 50 级起：10% +（等级 − 50）× 1%  →  50 级 10%、55 级 15%、70 级 30%
-   *   · 50 级之前：0（普通池里没有狂战）
-   * 命中 → 该件穿狂战；没命中 → 该件完全避开狂战，从次高档里挑。
-   * **经典模式不再用这条曲线**（2026-10 用户口径）：黑装（60 级 8 套）加入档位池后
-   * 狂战已经不一定是「最强的一套」，而且经典普通 AI 本来就整套关闭套装收益 ——
-   * 所以经典改为**均匀分布**（见 `randomAIGears`），这组常量只服务现代模式。
-   * 曲线只影响**随机对手**（genAI 这条路：随机挑战 / 天梯 / 竞技场 / 推荐好友）；
-   * 挑战塔的狂战敌人由 tower.js 自己造（x10 层守关），不经过这里。 */
+  /* 随机对手的狂战套概率（只剩现代模式）：50 级起每部位 10% +（等级−50）×1%，等级更高更密；
+   * 只影响生成的随机对手；挑战塔敌人由 tower.js 自造。 */
   const BERSERK_SET_ID = 51;
   const BERSERK_LEVEL = 50;
   const BERSERK_CHANCE_AT_50 = 0.10;    // 50 级：**每件装备** 10%（下限，2026-10 用户口径）
@@ -5243,15 +4780,9 @@
     return Math.min(BERSERK_CHANCE_MAX, pct / 100);
   }
 
-  /* ---------- 随机对手武器/技能的**等级下限**（2026-10 用户口径） ----------
-   * 随机对手等级越高，火力的武器 / 技能档位就越不许压得太低：
-   *   · **90 级（满级）→ 最低 真1（11 级）**；
-   *   · **50 级 → 最低 6 级**；
-   *   · 中间按等级线性插值：`Math.floor((等级 − 2) / 8)`（两级锚点 50→6 / 90→11 正线穿过），
-   *     40 级 4、30 级 3、18 级 2、10 级以内 1 —— 低等级不受影响；
-   *   · 封到 **11 止**：真1 就是它的最低点，不再随等级继续顶高。
-   * 真正的夹取在 genAI 里做（`Math.min(lo, hi)`），所以 6/13 不能升级的技能仍是 1 级。 */
-  const AI_TOOL_MIN_TRUE_LEVEL = 11;    // 满级对手至少持一把 真1 武器（11 级）
+  /* 随机对手武技等级下限：90 级最低真1(11)、50 级最低 6，中间线性插值、封到 11 止；
+   * 真正的夹取在 genAI 里做（Math.min(lo, hi)），6/13 这类不能升级的仍是 1 级。 */
+  const AI_TOOL_MIN_TRUE_LEVEL = 11;
   function aiToolMinLevel(level) {
     const lv = Math.max(1, Math.floor(Number(level) || 0));
     return Math.max(1, Math.min(AI_TOOL_MIN_TRUE_LEVEL, Math.floor((lv - 2) / 8)));
@@ -5259,11 +4790,6 @@
 
   /* ---------- 随机对手装备的**档位下限 / 全套门槛**（2026-10 用户口径） ----------
    * ① **档位下限**（按套装使用等级）：等级越高，池里越不出现远古低档装——
-   *   · 60 级起 ≥ 25 档：池里只剩 25 档紫装、30 级狂战（AI 曲线 50 起、普通池仍剔除）、
-   *     60 级黑装（再往下就没有 60 级该穿的了）；
-   *   · 40 级起 ≥ 20 档：至少紫色档（蓝色及以下不再出现）；
-   *   · 40 级以下维持原来的全档池（低级别的过渡装本来就该占满）。
-   * ② **全套门槛**（AI_FULL_GEAR_LEVEL）：≥ 40 级的随机对手必定四件全穿，
    *   不再受 40 级以下那条 0.5+等级/40 的穿戴率影响（两项是同批用户口径）。 */
   const AI_FULL_GEAR_LEVEL = 40;
   function aiGearMinLevel(level) {
@@ -5274,12 +4800,8 @@
   }
 
   /* ---------- 随机对手的橙装 / 宝石期望 ----------
-   * 橙装不是靠「高 id」：和玩家融合出来的橙装一样，是**实例级** `orange: true`
-   * （底层仍是紫装 id，`gearQuality()` 会按实例算成品质 4）。
-   * 两个期望都跟**玩家等级**（`refLevel`；`gearSelfLevel` 时就是对手自身等级）挂钩：
    *   · 橙装：30 级起才可能出现，30 级每件约 1% → 50 级 8% → 70 级 25%（封顶 35%）；
    *   · 宝石：45 级（原版宝石解锁）起才可能镶，橙装每件 20% → 70 级 70%；
-   *     宝石等级期望 45 级 1 级 → 70 级 5 级（±1 抖动，夹在 1~7）。
    * 只对**紫装档（info.quality >= 3）**掷橙装 —— 白/绿/蓝装不能直接变成橙装。 */
   const AI_ORANGE_FROM_LEVEL = 30;
   const AI_GEM_FROM_LEVEL = 45;
@@ -5303,15 +4825,6 @@
     return Math.max(1, Math.min(7, base + jitter));
   }
 
-  /** 按等级随机穿装备（2026-10 用户口径，「中高等级随机敌人增强」批）：
-   *  · **档位下限**：池里只留 `aiGearMinLevel(gearLevel)` 以上的套装（两个模式都生效）；
-   *  · **全套装备**：对手等级 ≥ AI_FULL_GEAR_LEVEL 时必定四件全穿
-   *    （更低等级维持 0.5+等级/40 的穿戴率，同部位不重复照旧）；
-   *  · **经典模式不再单独掷狂战**：黑装年代狂战不一定是「最强的一套」，经典普通 AI
-   *    又整套关闭套装收益 —— 50 级起（原本狂战曲线生效的范围）改为**池里逐套均等抽样**；
-   *  · 现代模式维持旧分布：档位 75/20/5 + 狂战按部位单独掷（需求166 曲线不动）。
-   *  橙装 / 宝石仍然只掷**紫装档（quality 3）** —— 注释一直是这个口径，
-   *  以前 `quality >= 3` 会把 60 级黑装也刷成实例橙、在品质口径里被记成 4（黑装反而降档）。 */
   function randomAIGears(foeLevel, refLevel) {
     const level = Math.max(1, Math.min(foeLevel, Math.floor(refLevel || foeLevel || 1)));
     const minSetLevel = aiGearMinLevel(level);
@@ -5326,10 +4839,8 @@
     });
     if (!sets.length) return [];
     // 正常玩家闯关到10级后基本穿满当前套装，对手的穿戴率不能差太多；
-    // 40 级起按用户口径**必定四件全穿**（它吃对手等级，不吃引用等级）。
     const alwaysFull = Math.max(1, Math.floor(Number(foeLevel) || 0)) >= AI_FULL_GEAR_LEVEL;
     const wearChance = alwaysFull ? 1 : Math.min(0.95, 0.5 + level / 40);
-    /* 经典 ≥50 级（狂战曲线原本生效的范围）改均匀分布；其它情况维持档位抽样 */
     const classicUniform = slotMode() === 'classic' && level >= BERSERK_LEVEL;
     let tiers = null, berserkPool = null, normalPool = null, pieceChance = 0;
     if (!classicUniform) {
@@ -5340,9 +4851,8 @@
         if (top && top.level === set.level) top.sets.push(set);
         else tiers.push({ level: set.level, sets: [set] });
       }
-      /* 狂战套**按部位**掷（需求166：70 级每件 50%、50 级下限 10%）：
-       * 每个部位独立判一次，命中就从「狂战那一档」里挑，没命中就从**剔除狂战之后**的档位池里挑
-       *（狂战是最高档唯一的成员，不剔掉的话没命中的部位仍有 75% 落进它，等于白压）。 */
+      /* 狂战套按部位掷：命中从狂战档挑，没命中从**剔除狂战之后**的档位池挑，
+       * 否则没命中的部位仍会落进最高档、等于白压。 */
       berserkPool = tiers.filter((tier) => tier.sets.some((set) => set.id === BERSERK_SET_ID));
       normalPool = tiers.map((tier) => ({ level: tier.level, sets: tier.sets.filter((set) => set.id !== BERSERK_SET_ID) }))
         .filter((tier) => tier.sets.length);
@@ -5362,7 +4872,6 @@
         const useBerserk = berserkPool.length > 0 && Math.random() < pieceChance;
         const pool = useBerserk ? berserkPool : normalPool;
         if (!pool.length) break;                       // 两边池都空只在极端空池才发生，直接收工
-        // 75% 穿最好一档，20% 次一档，5% 随机一档旧装；同部位冲突时重选
         const roll = Math.random();
         tier = roll < 0.75 ? pool[0]
           : roll < 0.95 ? pool[Math.min(1, pool.length - 1)]
@@ -5373,7 +4882,6 @@
       gearMap.each((k, v) => { if (parseInt(v.setId) === set.id) gearsOfSet.push(parseInt(v.id)); });
       if (!gearsOfSet.length) break;
       /* 这一件**一定落在还没穿过的部位**：直接在没用过的部位里挑（每套正好 4 件 = 4 部位，
-       * 必挑得到）。以前的「随机取件 + 同部位不重复重选」有 3 次全撞墙的旁路，
        * 40 级以上按口径必须四件齐，这里就不再留空。 */
       const candidates = gearsOfSet.filter((id) => {
         const it = gearInst(id);
@@ -5384,14 +4892,10 @@
       const info = gearInst(gid);
       if (!info) continue;
       usedType.add(info.type);
-      // 原版白绿无词条，蓝装1条且最多2星，紫装2条且最多3星。
       const extSlots = fusionSlots(info.quality);
       const ext = extSlots ? randomExt(extSlots, info.quality >= 3 ? 3 : 2) : [];
       const attrPct = rollGearAttrPct();                                    // 主属性同样 ±5% 浮动
       const piece = { id: gid, used: true, ext, attr: gearAttrValueOf(gid, attrPct), attrPct };
-      /* 橙装 / 宝石：只对**紫装档（quality 3）**掷；橙装是**实例级** quality=4（不是换高 id）。
-       * 60 级黑装（quality 5）本来就是更高的一档，不再叠实例橙（叠了会被 `gearQuality`
-       * 记成 4，黑装反而在品质口径里降档 —— 注释口径一直是紫装）。 */
       const ref = Math.max(1, Math.floor(Number(refLevel) || level));
       if (info.quality === 3 && Math.random() < aiOrangeChance(ref)) {
         piece.orange = true;
@@ -5405,10 +4909,6 @@
     return out;
   }
 
-  /* ============================================================
-   * 【S21】关卡（进度/星级/扫荡）
-   * ============================================================ */
-  // ---------- 关卡 ----------
   function stageProgress(stageId) {
     return clone(S.stages[stageId] || { npcIndex: 1, passed: false });
   }
@@ -5424,8 +4924,6 @@
   }
   function npcOf(stageId, npcIndex) {
     stageId = Number(stageId); npcIndex = Number(npcIndex);
-    /* 超级大关（19-36）：字典里没有这三扇门的 NPC，按同星级「大侠」模板生成，
-     * 只保留 1 号位（原版每关 1 个敌人）。模板：超级螳螂←4-6、仙鹤←10-12、熊猫←16-18。 */
     if (stageId >= 19 && stageId <= 36) {
       if (npcIndex !== 1) return null;
       const star = ((stageId - 19) % 6) + 1;
@@ -5442,7 +4940,6 @@
     }
     let found = null;
     npcsMap.each((k, v) => {
-      // Recovered dictionary typo: #127 is 4-star crane (stage 10), not stage 4.
       const actualStage = Number(v.id) === 127 ? 10 : Number(v.stageId);
       if (actualStage === stageId && Number(v.npcIndex) === npcIndex) found = actualStage === Number(v.stageId) ? v : Object.assign({}, v, { stageId: String(actualStage) });
     });
@@ -5452,8 +4949,6 @@
     return found;
   }
 
-  // Original Mission: level 10, six sequential difficulties per master, one
-  // challenge book per three-NPC run; one extra book per revival (maximum two).
   function highestStageId() {
     let highest = 1;
     for (const id of Object.keys(S.stages)) if (S.stages[id].passed) highest = Math.max(highest, Number(id) + 1);
@@ -5464,7 +4959,6 @@
     stageId = Number(stageId);
     if (!Number.isInteger(stageId) || !npcOf(stageId, 1)) return { ok: false, msg: '没有这个关卡。' };
     if (S.level < 10) return { ok: false, msg: '没有10级，不能挑战我们盖世五侠哦，加油哦！' };
-    // A migrated old run remains resumable even if the old client let it bypass a lock.
     if (stageId > highestStageId() && !stageRun(stageId)) return { ok: false, msg: '请先通过前面关卡。' };
     return { ok: true };
   }
@@ -5477,9 +4971,7 @@
     return { exp, gold };
   }
   /** 关卡连战里「先上阵」的徒弟：原版 `fightType == 6` 时服务端把左方设成徒弟，
-   *  徒弟战败后再走一次 `stage.do` 由师父接手（`showFightStatus` → state 7 → doFight）。
    *  离线版**优先派等级最高的徒弟**出战（用户 2026-10 口径：徒弟里最强的那位上，
-   *  而不是当年先收的那位）；等级相同或读不到等级时保持原来的先来后到。
    *  没有徒弟就直接师父上阵。 */
   function stagePrentice() {
     const list = (Array.isArray(S.prentices) ? S.prentices : []).filter((p) => p && p.name);
@@ -5508,8 +5000,6 @@
     const weapons = (full.weapons || []).map((w) => typeof w === 'string' ? weaponInst(w) : w).filter(Boolean);
     const skills = (full.skills || []).map((v) => typeof v === 'string' ? skillInst(v) : v).filter(Boolean);
     /* ⚠ 必须把 `gears` 一起交出去（哪怕是空数组）。
-     * `SfFight.wearsOf(0, fighter)` 的判据是「有没有 `gears` 数组」：没有就退回
-     * `State.myGears()`（**师父自己的穿戴**）—— 徒弟代打时身上穿的是玩家的装备，
      * 用户 2026-10-24 报的就是这个。空数组 = 徒弟确实没穿，不再借用玩家的。 */
     const gears = normalizeFoeGears(full.gears || []);
     let wears = [null, null, null, null, null, null];
@@ -5539,7 +5029,6 @@
     let reviving = false;
     if (!run) run = S.stageRuns[stageId] = { npcIndex: 1, revives: 0, needsRevive: false, masterOnly: false };
     else if (run.needsRevive) { reviving = true; run.revives++; run.needsRevive = false; }
-    /* 徒弟先上阵：只在「还没输过」且不是复活局时用；徒弟输过（masterOnly）后整轮都由师父接手。 */
     const prentice = !run.masterOnly && !reviving ? stagePrentice() : null;
     run.attempt = 'stage_' + Date.now() + '_' + (++stageAttemptSeq);
     save();
@@ -5553,13 +5042,14 @@
     save();
     return true;
   }
-  /** 徒弟战败：不扣复活、不结束本轮，只把那一个 attempt 收掉并标记「师父接手」。 */
-  function stagePrenticeLost(stageId, token) {
+  function stagePrenticeLost(stageId, token, foeRatio) {
     const run = S.stageRuns && S.stageRuns[stageId];
     if (!run || run.attempt !== token) return false;
     delete run.attempt;
     run.masterOnly = true;
     delete run.carryHp;
+    if (foeRatio != null && Number.isFinite(Number(foeRatio))) run.foeCarryHp = Math.max(0, Math.min(1, Number(foeRatio)));
+    else delete run.foeCarryHp;
     save();
     return true;
   }
@@ -5568,13 +5058,14 @@
     const run = S.stageRuns && S.stageRuns[stageId];
     if (!run || run.attempt !== token) return { ok: false };
     delete run.attempt;
+    /* 每场结算后对手血量都不再保留：打赢进入下一名对手，打输复活也是满血重打。 */
+    delete run.foeCarryHp;
     if (!win) {
       run.needsRevive = true;
       delete run.carryHp;   // 复活再战回满血
       save();
       return { ok: true, win: false, complete: false, exp: 0, gold: 0, ups: [], run: stageRun(stageId) };
     }
-    // 每场胜利按攻略表发放该NPC的经验
     const fightExp = GData.stageNpcExp(stageId, run.npcIndex);
     const total = GData.stageEnemyCount ? GData.stageEnemyCount(stageId) : 3;
     const complete = run.npcIndex === total;
@@ -5583,17 +5074,13 @@
     S.stages[stageId] = { npcIndex: Math.max(old.npcIndex, nextNpc), passed: old.passed || complete };
     if (complete) {
       delete S.stageRuns[stageId];
-      /* 常驻挑战「当日已通关次数」+1：只在一整轮（3 场全胜）通关时记，
-       * 供「每通关一整次 → 敌全属性 +5%」的每日递增惩罚用（见 challengeDailyCount）。 */
       noteChallengeClear();
     }
     else {
       run.npcIndex = nextNpc;
-      // 连续挑战不回满血：下一场只继承本场剩余血量（进入时再回复25%）
       if (Number.isFinite(carryRatio)) run.carryHp = Math.max(0, Math.min(1, carryRatio));
     }
     // 关卡碎片掉落：本次击败的 NPC 就可能掉碎片（不必等到整轮通关）。
-    // 掉率与数量区间由 GData.STAGE_FRAGMENT 统一控制（掉率调高、数量区间收窄）。
     //   螳螂(1-6) 白为主 / 仙鹤(7-12) 绿为主 / 熊猫(13-18) 蓝为主（蓝为上限）。
     //   攻略.md：3星螳螂「大多白、小概率绿」，6星「绿色几率提高」——故 ★3-4 越1级、★5-6 越2级。
     const star = GData.stageStar(stageId);
@@ -5608,7 +5095,6 @@
       let id = up > 0 && Math.random() >= frag.tierUp ? step : base;
       /* 蓝色碎片（26）**除碎片竞技场外**所有掉落都小幅降期望（2026-10 用户口径）：
        *   · 熊猫关（基础就是蓝）：这一次掉落干脆不给，白/绿本来也不在这里出；
-       *   · 仙鹤关靠「越级」拿到蓝的那一支：没中就退回绿色的 base。
        * 只动「蓝」这一档，螳螂的白/绿基础掉落完全不变。 */
       if (id === 26 && Math.random() >= Number(GData.BLUE_SHARD_DROP_MUL)) id = base === 26 ? 0 : base;
       if (id) {
@@ -5619,8 +5105,6 @@
     }
     const gold = complete ? stageReward(stageId).gold : 0;
     /* 【祭坛当日状态 3】"关卡金松果双倍"：原版 `getBufRewarTips` / `parseGainBuff`
-     * （MainMovie.as:4417-4444）领到的第三种状态就是"挑战关卡时有机会获得更多金松果"，
-     * 几率 = 祭坛当前等级那一档（`buildingUpInfo`）。这里在**发放金松果的那一处**掷一次，
      * 于是界面显示的 `gold` 与实际入账永远是同一个数（不会出现"显示双倍、账上没加"）。 */
     let goldBuff = false;
     if (gold > 0 && activeBuildingBuff('stageGold')) {
@@ -5628,7 +5112,6 @@
       if (rate > 0 && Math.random() * 100 < rate) goldBuff = true;
     }
     addGold(gold * (goldBuff ? 2 : 1));
-    // 45级起通关有几率获得1-2级宝石
     const gem = complete ? rollGemDrop(20) : null;
     /* 金宝箱不再从超级关循环掉落：原版只在 71~90 级每级发 1 个（且可重开 500 次），
      * 这里同样只保留升级产出，否则「总属性点」会重新变成无上限。
@@ -5652,10 +5135,8 @@
   }
   /** 调试开关「12 小时一天」：打开后一天只有 12 小时，过了中午就算第二天。 */
   function shortDay() { return !!(window.Debug && window.Debug.enabled && window.Debug.enabled('shortDay')); }
-  /* 打开「12 小时一天」时，12:00 起换成「第二天」的日期键，于是每日礼包、免费抽奖、
-   * 每日任务、天梯今日场次、弟子日供、师父踢人、真化次数、
-   * VIP 每日、挑战塔当天刷新的 boss 等**所有每日刷新在 0 点与 12 点各来一次**。
-   * 格式仍是 YYYY-MM-DD（存档校验 validLocalDate、earnOn 按日期查表都依赖它）。 */
+  // 打开「12 小时一天」时，12:00 起换成第二天的日期键，所有每日刷新在 0 点与 12 点各来一次；
+  // 格式仍是 YYYY-MM-DD（存档校验 validLocalDate、earnOn 按日期查表都依赖它）。
   function localDate() {
     const now = new Date(Date.now());
     if (shortDay() && now.getHours() >= 12) {
@@ -5668,7 +5149,6 @@
   function syncDailyStats() {
     const date = localDate();
     if (S.dailyStatsDate === date) return;
-    // 旧档没有日期时先标记今天，保留已累计的当日数据。
     if (S.dailyStatsDate) {
       S.dailyWins = 0;
       S.dailyFails = 0;
@@ -5680,18 +5160,8 @@
     if (S.dailyCounters && S.dailyCounters.date !== date) S.dailyCounters = null;
     save();
   }
-  /* ============================================================
-   * 【S22b】常驻挑战的「当日已通关次数」
-   *
-   * 2026-10 第十五批（用户口径）：一天之内**每通关一整次常驻挑战**
-   * （3 场连战全胜 = 1 次），常驻挑战的**所有敌人**全属性（力/敏/速/血）再 +5%，
-   * 叠加无上限 —— 用来抑制「一天之内无限刷常驻挑战」。
-   *
-   * 与每日任务的 `stage` 计数区分开：那个是**每赢一场** +1（供任务「通关 N 次关卡挑战」用），
-   * 这里只在**一整轮通关**时 +1（见 finishStageBattle 的 complete 分支）。
-   * 随每日刷新（0 点 / 12 点，见 localDate）归零。
-   * 挑战塔与无尽塔走各自的敌人构建，不读这里，天然不受影响。
-   * ============================================================ */
+  // 常驻挑战当日通关次数：一整轮 3 场全胜才 +1（与每日任务的「每赢一场」分开计数），
+  // 每次通关后所有敌人全属性 +5%、可叠；随每日刷新归零。挑战塔/无尽塔不读这里。
   function challengeDaily() {
     const date = localDate();
     const cur = object(S.challengeDaily) ? S.challengeDaily : null;
@@ -5699,7 +5169,6 @@
     return { date, count: Math.max(0, Math.floor(Number(cur.count) || 0)) };
   }
   function challengeDailyCount() { return challengeDaily().count; }
-  /** 通关一整次常驻挑战（3 场连战全胜）→ 当天次数 +1。 */
   function noteChallengeClear() {
     const cur = challengeDaily();
     S.challengeDaily = { date: cur.date, count: cur.count + 1 };
@@ -5726,7 +5195,6 @@
     const claimed = S.dailyClaimDate === date;
     const days = Math.max(0, integer(S.loginStreak, 0, 0));
     /* 连续天数：今天已领 → 记的天数；昨天领过 → 今天续上；否则从 1 重新算。
-     * 金松果：第 1 天 100，连续每多一天 +10，封顶 150；附加道具按本地日期在
      * 挑战书 / 英雄帖 / 勇气徽章 / 召唤证 / 三种超级药丸之间轮换。 */
     const streak = claimed ? Math.max(1, days)
       : (S.dailyClaimDate === yesterdayDate() ? Math.max(1, days) + 1 : 1);
@@ -5751,10 +5219,6 @@
     return { day, gold: 150, propId: 2, count: 3, name: '新手福利' };
   }
 
-  /* ============================================================
-   * 【S22】每日任务
-   * ============================================================ */
-  // ---------- 每日任务 ----------
   const QUEST_TYPES = [
     { key: 'win',       name: '赢下 {n} 场对战',          steps: [2, 3, 5] },
     { key: 'fight',     name: '进行 {n} 场战斗',          steps: [4, 6, 8] },
@@ -5805,7 +5269,6 @@
     const pool = QUEST_TYPES.filter((q) => (q.minLevel || 1) <= lv);
     return hasUpgradableWS(lv) ? pool : pool.filter((q) => q.key !== 'upgrade');
   }
-  /** 当天的空计数器：键跟着 QUEST_TYPES 走，加新任务不用再改这里。 */
   function emptyCounters(date) {
     const counters = { date };
     for (const key of QUEST_KEYS) counters[key] = 0;
@@ -5840,7 +5303,6 @@
   function rollQuests() {
     const date = localDate();
     const rnd = questRng(questSeed(date));
-    // 只抽当前等级做得完的任务（等级也在种子之外单独参与：同一天升级会换掉做不了的题）
     const pool = questPoolFor(S ? S.level : 1).map((q) => q.key);
     // Fisher–Yates：同一天的抽取顺序固定，刷新页面不会换题
     for (let i = pool.length - 1; i > 0; i--) {
@@ -5874,7 +5336,6 @@
     const level = S ? S.level : 1;
     const hasList = S.quests && typeof S.quests === 'object' && Array.isArray(S.quests.list) && S.quests.list.length > 0;
     const sameDay = !!(S.quests && S.quests.date === date);
-    // 除了「换天」，「当前等级做不了的任务」也要重抽（升级后旧题失效、旧档里存的越级题也会被换掉）；
     // 「升级武器或技能」还要看手上是否真有升得动的武技——把最后一件升满之后这条当天就该消失。
     const staleLevel = hasList && S.quests.list.some((q) => !q || !questAvailableAt(q.key, level)
       || (q.key === 'upgrade' && !hasUpgradableWS()));
@@ -5892,9 +5353,8 @@
     }
     return S.quests;
   }
-  /** 记录一次当天行为，供每日任务计数。
-   *  `silent=true` 时只改内存、不落盘 —— 给「一次动作里要记好几项」的调用方用，
-   *  由外层在动作末尾统一 `save()` 一次（2026-10 审计：以前一次战斗结算最多连写 6 次存档）。 */
+  /** 记录一次当天行为供每日任务计数；silent=true 只改内存不落盘，
+   *  由外层在动作末尾统一 save() 一次（避免一次结算连写多次存档）。 */
   function bumpDaily(key, n, silent) {
     if (!QUEST_KEYS.includes(key)) return 0;
     questState();
@@ -5902,8 +5362,6 @@
     if (!silent) save();
     return S.dailyCounters[key];
   }
-  /** 战斗行为统一在这里记：一场算战斗，赢了再算胜场；再按战斗类型记各自的计数器。
-   *  **不落盘**：调用方（`recordBattle`）末尾只 `save()` 一次。 */
   function bumpBattleDaily(win, kind) {
     bumpDaily('fight', 1, true);
     if (win) bumpDaily('win', 1, true);
@@ -5951,7 +5409,6 @@
       };
     });
   }
-  /** 有可领取的东西时给首页「活动」图标加提示动效。 */
   function questClaimable() { return questStatus().filter((q) => q.claimable).length; }
   function claimQuest(index) {
     const list = questStatus();
@@ -6061,9 +5518,6 @@
   }
   function battleHistory() { return clone(S ? trimBattleHistory(S) : []); }
   /* 「消息」红点的两个出口（经典主界面 `SfUiMain.hasNewMessages` 用）：
-   *   msgSeenAt()        —— 上次看过消息页的时间戳（0 = 从没看过）
-   *   markMessagesSeen() —— 把"看到哪了"推到**当前最新一条消息的时间**并存盘
-   * 记的是**消息时间**而不是 `Date.now()`：战斗记录是按 createdAt 排的，
    * 记 Now() 在时钟回拨或列表还没刷新时会漏判。 */
   function msgSeenAt() { return Math.max(0, integer(S && S.msgSeenAt, 0, 0)); }
   function markMessagesSeen() {
@@ -6075,21 +5529,9 @@
     return S.msgSeenAt;
   }
 
-  /* ============================================================
-   * 【S22b】调试所得账本（可追溯 + 只回收调试部分）
-   *
-   * 用户口径（2026-10）：debug 发的东西要留下索引；系统页要能一次性取消所有
-   * 通过 debug 得到的物品，同时尽量不碰玩家自己打出来的东西。
-   *
-   * 做法是「第一次发放时记基线」而不是「每次操作记剩余」：
-   *   · 某道具第一次被调试发放时，记下当时**已经拥有**的数量 `before`，
-   *     之后累计 `granted`；回收量 = min(granted, 当前 - before)。
-   *     玩家花掉/用掉一部分时，最多只会少回收，不会倒扣到基线以下。
-   *   · 武器/技能记「第一次调试前的等级」：原来没有 → 回收时删除；
-   *     原来有 → 只把等级还原到 before（玩家后来自己升得更高则不动）。
-   *   · 装备按**实例 key**记：只删调试时新生成的那几件，玩家原有的 key 不动。
-   *   · 等级/经验/属性只进历史索引，不自动回退（会破坏升级链、已选武技与天赋）。
-   * ============================================================ */
+  /* 调试账本：第一次发放时记基线（before），回收量 = min(granted, 当前-before)，
+   * 花掉的部分只少收、不倒扣；武器/技能记第一次调试前等级，装备按实例 key 记。
+   * 等级/经验/属性只进历史索引、不自动回退（会破坏升级链与天赋）。 */
   const DEBUG_LEDGER_MAX_HISTORY = 200;
   function debugLedgerEnsure() {
     if (!S) return null;
@@ -6298,7 +5740,6 @@
     return { hasData: entries.length > 0 || history.length > 0, entries, history, removable: entries.length, exp, createdAt: Number(L.createdAt) || 0 };
   }
   /**
-   * 回收所有还能定位到的调试所得。
    * 等级/经验/属性不回退；已经花掉/融合掉/卖掉的调试物品无法找回，也不倒扣。
    */
   function clearDebugGains() {
@@ -6340,13 +5781,6 @@
     return { ok: true, removed, summary: debugLedgerSummary(), msg: '已清理 ' + removed.length + ' 项调试所得' };
   }
 
-  /* ============================================================
-   * 【S22b】天梯赛区 / 赛区人机 / 周结算（2026-11）
-   * ------------------------------------------------------------
-   * 原版 `text7585`：天梯 30 级起、每 10 级一个赛区；积分每周一减半。
-   * 每个赛区每个等级 3 个人机（80-90 共 33 个），人机进排行榜、也参与积分结算，
-   * 每周一回到 300 分，且积分有 50 的硬下限。单机版没有真人，人机就是唯一对手。
-   * ============================================================ */
   const RANK_DIVISIONS = Object.freeze([
     { key: 'd30', lo: 30, hi: 39, frame: 1, label: '30级-39级' },
     { key: 'd40', lo: 40, hi: 49, frame: 2, label: '40级-49级' },
@@ -6358,8 +5792,6 @@
   const RANK_BOT_BASE_SCORE = 300;
   const RANK_BOT_FLOOR = 50;
   const RANK_BOT_PER_LEVEL = 3;
-  /* 每日场次（原版客户端 `alertRank` 的口径）：一天 30 场，1-10 免费、
-   * 11-20 每场 5、21-30 每场 10 金松果。 */
   const RANK_DAILY_LIMIT = 30;
   const RANK_FREE_PLAYS = 10;
   const RANK_PAID_COST = 5;
@@ -6389,7 +5821,6 @@
     return RANK_DIVISIONS.find((d) => lv >= d.lo && lv <= d.hi) || null;
   }
 
-  /** 固定名册：每级 3 个，名字带等级后缀。 */
   function rankBotPlan() {
     const out = [];
     let idx = 0;
@@ -6426,7 +5857,6 @@
     return out;
   }
 
-  /** 两个周标识之间隔了几周（周一日期，至少按 1 周算）。 */
   function rankWeeksBetween(from, to) {
     const a = Date.parse(String(from) + 'T00:00:00Z');
     const b = Date.parse(String(to) + 'T00:00:00Z');
@@ -6434,9 +5864,8 @@
     return Math.max(1, Math.round((b - a) / (7 * 86400000)));
   }
 
-  /** 换周：玩家积分按周减半、人机全部回到 300 分并清空胜负。幂等。
-   *  第一次跑（旧档没有 `rankWeek`）只补本周标识与名册，**不动**已有积分 ——
-   *  升级不该把玩家这一周的进度直接抹掉，下一次真正的周一才开始减半。 */
+  /** 换周：玩家积分减半、人机回 300 分清空胜负，幂等。首次（无 rankWeek 的旧档）只补
+   *  本周标识与名册、不动已有积分，下一次真正的周一才开始减半。 */
   function rankSyncWeek() {
     const s = state();
     if (!s) return false;
@@ -6507,7 +5936,6 @@
 
   /** 积分档：与联机同一套（对手更高 +16；否则按分差 15/2/1/0，输了取负）。
    *  单机版没有联机版的「300 分以上只匹配真人 / 回落人机不计分」规则；
-   *  另外单机打人机有**保底收益**：传 `minWinGain` 后赢球至少 +N（分差 ≥500 的 0 分档
    *  在单机不会把收益抹成 0）。 */
   function rankIntegralDelta(myScore, foeScore, win, opts) {
     const gap = Number(foeScore) - Number(myScore);
@@ -6563,7 +5991,6 @@
     };
   }
 
-  /** 领取 50 金杯：一周一次。 */
   function claimRankCup() {
     const s = state();
     if (!s) return { ok: false, rank: 0, cups: 0, msg: '还没有存档。' };
@@ -6578,15 +6005,11 @@
     return { ok: true, rank: st.rank, cups: 50, goldCup: s.goldCup, msg: '恭喜进入赛区前30名，成功获得50个金杯奖励！' };
   }
 
-  /* ============================================================
-   * 【S23】导出 window.State
-   * ============================================================ */
   window.State = {
     saveKey: SAVE_KEY, uiModeKey: UI_MODE_KEY, testMode: !!testMode, rememberUiMode,
     save, load, newGame, state, switchMode, activeUiMode, hasModeSave, tickEnergy, energyCountdown,
     fileProbe, fileLoad, fileWrite, fileWriteNow, fileInfo, storageMode, flushFileWrite, setSaveTransport, hasFileTransport, readFileRaw, importFileRaw, exportPayload, restorePayload, prepareImport, verifyImport, importFingerprint, syncFormatTime: fmtTime, markLocalFresh: () => { fileState.freshLocal = true; },
     hasLocalSave, localSaveMeta, fileLoadedThisBoot,
-    /* 调试所得账本：快照/记录/摘要/回收（系统页「调试所得」与 debug.js 用）。 */
     debugSnapshot, debugRecordDiff, debugForgetWS, debugLedgerSummary, clearDebugGains,
     vipActive, vipLevel, vipUntil, vipDaysLeft, vipRegenMul, vipPassiveExpCap, vipExpNeed,
     vipRow, buyVip, grantVip, tickVipDaily, gearCapacity, syncVipEnergyCap,
@@ -6594,7 +6017,7 @@
     weaponInst, skillInst, myWeapons, mySkills, wsLimit, ownedWSCount,
     upgradeInfo, doUpgrade, upgradeFails, UPGRADE_COIN, UPGRADE_FAIL_BONUS,
     isTrueLevel, TRUE_SKILL_MAX_LEVEL,
-    fruitOptions, applyFruitChoice, pendingFruitChoices,
+    fruitOptions, applyFruitChoice, cancelFruitChoice, pendingFruitChoices,
     trackEarn, earnOn, ensureYesterdayEarnings, addGold,
     apprenticeTributeTable,
     TRIBUTE_LEVEL_SUM_FULL,
@@ -6621,7 +6044,6 @@
     GEM_SOCKET_COST,
     gainExp, consumeEnergy, tickPropStates, fightReward, revengeReward, markRevenged, revengeInfo, noteRevenge, REVENGE_EXP_RATIO, expBoostPct, gainExpWithBoost,
     apprenticeTributeExpRatio, apprenticeTributeGoldRatio, TRIBUTE_EXP_MIN, TRIBUTE_EXP_MAX, TRIBUTE_GOLD_MIN, TRIBUTE_GOLD_MAX,
-    // 师徒
     apprenticeCap, learnSkill, setMaster, clearMaster, addPrentice, removePrentice,
     /* 村庄建筑（祭坛 / 神迹 / 幻兽牧场）：等级 / 升级 / 当日状态 / 神迹属性点。 */
     BUILDING_UP_INFO, BUILDING_MAX_LEVEL, BUILDING_KEYS, BUILDING_IDS, BUILDING_LABEL,
@@ -6654,7 +6076,6 @@
     weaponList, skillList, setWeapon, setSkill, forgetWeapon, forgetSkill, setWS, forgetWS,
     composeConvertPill, composeSeed, challengeExp, challengeFightsPerLevel, usePropMany, energyHardCap, ENERGY_HARD_CAP, PROP_HARD_CAP,
     MAX_PLAYER_LEVEL, energyCapForLevel,
-    /* 天梯赛区 / 周重置 / 赛区人机（经典页与复刻 DOM 页共用同一份数据）。 */
     RANK_DIVISIONS, rankWeekKey, rankDivisionOf, rankBotPlan, rankSyncWeek,
     rankBoard, rankOpponent, rankIntegralDelta, rankApplyResult, rankAwardStatus, claimRankCup,
     RANK_DAILY_LIMIT, RANK_FREE_PLAYS, RANK_PAID_COST, RANK_LATE_FROM, RANK_LATE_COST, rankFeeAt,

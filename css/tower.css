@@ -1,14 +1,4 @@
-/* ============================================================
- * tower.css — 无尽挑战塔界面样式（经典 UI 壳内）
- *
- * 视觉语言对齐游戏本体的经典界面：
- *   · 奶油底 #fffdf0 / #f7edcf，棕色粗描边 #9b804c，内高光 #fffceb（同 .classic-board）
- *   · 卡片沿用 .candidate-card / .ws-choice 的 #fffaf0 + #d9bd88 3px 描边 + 大圆角
- *   · 字号跟原版正文（27~29px）一个量级：正文 20~22px、卡片标题 28~30px、页标题 34px
- *   以前塔这里用的是 12~18px 的小字和另一套配色，所以放在经典界面里显得「不是一家人」。
- * ============================================================ */
 
-/* ---------- 关卡页：下滑可见的塔入口 ---------- */
 .stages-scroll-board { overflow-y: auto; max-height: 100%; }
 
 .tower-entries { display: flex; gap: 26px; justify-content: center; flex-wrap: wrap; margin: 22px 0 8px; }
@@ -35,7 +25,6 @@
 .tower-entry.locked { opacity: .72; cursor: default; filter: grayscale(.45); }
 .tower-entry.locked:hover { transform: none; filter: grayscale(.45); }
 
-/* ---------- 爬塔页骨架 ---------- */
 .tower-board { overflow: hidden; }
 .tower-page { display: flex; gap: 24px; height: 100%; min-height: 0; padding: 4px 2px; }
 /* 第 1 项：进层页要一屏看完（x10 层 5 个对手 + 开始挑战），
@@ -44,7 +33,6 @@
 .tower-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .tower-title { margin: 0; font-size: 28px; line-height: 1.15; color: #7a4a18; }
 .tower-stats { font-size: 19px; line-height: 1.3; color: #6a4a24; margin: 0; }
-/* 无尽塔开局页的分模式纪录（经典/勇者）—— 比主行小一号，跟在「历史最高…」下面。 */
 .tower-stats-sub { display: block; margin-top: 2px; font-size: 16px; color: #8a6a3c; }
 .tower-stats.small { font-size: 18px; opacity: .9; }
 .tower-rule {
@@ -53,22 +41,15 @@
   border-radius: 16px; padding: 5px 14px;
 }
 .tower-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 8px 0 2px; }
-/* 第 1 项：入口页的「开始挑战」固定到卡片右下角（绝对定位，不挤预告区） */
 .tower-page { position: relative; }
-/* 第 6 项：塔页右上角的货币条（主塔=挑战书+金松果，无尽=试炼币+抽奖卷+金松果） */
 .tower-currency { display: flex; align-items: center; justify-content: flex-end; gap: 18px; margin: 0 0 2px; }
 .tower-currency .currency-item { display: flex; align-items: center; gap: 5px; font-size: 19px; color: #7a4a18; }
 .tower-currency img { width: 30px; height: 30px; object-fit: contain; }
-/* 第 3 项：无尽塔的货币条只留文字 */
 .tower-currency.text-only .currency-item { background: rgba(196, 158, 92, .16); border-radius: 12px; padding: 1px 12px; }
 .tower-currency b { font-size: 22px; color: #a8641c; }
-/* 上一场战斗赚到的试炼币：贴在「试炼币」数字右边的小增量（+8 这种）。 */
 .tower-currency .currency-delta { font-size: 15px; font-weight: 700; color: #2f8f3d; letter-spacing: .2px; }
 .endless-title-row .tower-currency .currency-delta { font-size: 13px; }
 .tower-page.has-footer .tower-main { padding-bottom: 46px; }
-/* 第 1 项：数量提示在按钮左边，按钮贴到卡片最右；
-   不再画那层半透明底（用户要去掉），按钮也缩小一档、再往下压一点，
-   保证第 10 层 5 个对手时按钮不会压到卡片。 */
 .tower-footer {
   position: absolute; right: 8px; bottom: 4px; margin: 0; gap: 14px;
   padding: 0; background: none;
@@ -78,16 +59,13 @@
 .tower-book-count { font-size: 19px; color: #8a6a3a; }
 .gold-text { color: #c87f0a; }
 
-/* ---------- 左侧塔身（爬塔可视化） ---------- */
 .tower-visual {
-  /* 本轮第 6 项：塔身永远不超出它的容器（高度由父级决定），内容整体纵向居中。 */
   position: relative; flex: 0 0 168px; display: flex; flex-direction: column; align-items: center;
   justify-content: center; min-height: 0; overflow: hidden;
   padding: 14px 11px 13px; border-radius: 24px;
   background: linear-gradient(180deg, #3c5273 0%, #26364f 58%, #151f2e 100%);
   box-shadow: inset 0 0 26px rgba(0, 0, 0, .55), inset 0 3px 0 rgba(255, 255, 255, .10), 0 5px 0 #0e1725;
 }
-/* 塔顶金冠 */
 .tower-visual::before {
   content: ''; width: 84px; height: 17px; margin-bottom: 9px; border-radius: 9px 9px 3px 3px;
   background: linear-gradient(180deg, #e6c46a, #a5822f);
@@ -101,31 +79,26 @@
   background: linear-gradient(180deg, #4d6484, #394a63); border: 2px solid #5f7699;
   box-shadow: inset 0 2px 0 rgba(255, 255, 255, .10), inset 0 -2px 0 rgba(0, 0, 0, .28);
 }
-/* 砖缝质感 */
 .tower-floor::after {
   content: ''; position: absolute; top:4px;right:5px;bottom:4px;left:5px;inset: 4px 5px; border-radius: 5px; pointer-events: none;
   background: repeating-linear-gradient(90deg, rgba(255, 255, 255, .07) 0 3px, transparent 3px 27px);
 }
 .tower-floor-no { position: relative; z-index: 1; font-size: 18px; font-weight: bold; color: #a9bcd6; letter-spacing: 1px; }
 .tower-floor.todo { opacity: .82; }
-/* 已通关 */
 .tower-floor.done { background: linear-gradient(180deg, #3f7a52, #2c5a3c); border-color: #6aa97e; }
 .tower-floor.done .tower-floor-no { color: #bdf0cd; }
-/* 5 的倍数层：金色标记 */
 .tower-floor.fifth-floor { border-color: #d8b95e; }
 .tower-floor.fifth-floor .tower-floor-no { color: #ffe9a8; }
 .tower-floor.fifth-floor::before {
   content: ''; position: absolute; right: 6px; top: 50%; width: 8px; height: 8px; margin-top: -4px;
   border-radius: 50%; background: #ffd966; box-shadow: 0 0 9px #ffd966;
 }
-/* 10 的倍数层：精英层（红） */
 .tower-floor.elite-floor { background: linear-gradient(180deg, #6d3f42, #4a272c); border-color: #e08573; }
 .tower-floor.elite-floor .tower-floor-no { color: #ffc9b8; }
 .tower-floor.elite-floor::before {
   content: ''; position: absolute; right: 6px; top: 50%; width: 8px; height: 8px; margin-top: -4px;
   border-radius: 50%; background: #ff9b7a; box-shadow: 0 0 10px #ff7a55;
 }
-/* 当前层 */
 .tower-floor.now {
   background: linear-gradient(180deg, #ffe89a, #efab2f); border-color: #fff3c4;
   box-shadow: 0 0 20px rgba(255, 206, 84, .85), inset 0 2px 0 #fff6cf;
@@ -144,16 +117,11 @@
 @media (prefers-reduced-motion: reduce) { .tower-marker { animation: none; } }
 .tower-visual-caption { margin-top: 12px; font-size: 19px; line-height: 1.5; color: #cfdcf0; text-align: center; }
 
-/* ---------- 血量继承条 ---------- */
 .tower-carry { display: flex; align-items: center; gap: 12px; margin: 12px 0; font-size: 21px; color: #6a4a24; }
 .tower-carry-bar { flex: 0 0 260px; height: 20px; border-radius: 10px; background: #e8d3ae; overflow: hidden; border: 3px solid #b8935a; }
 .tower-carry-bar i { display: block; height: 100%; background: linear-gradient(90deg, #8fd06a, #56a83a); }
 
-/* ---------- 本层对手预告 ----------
-   第 1 项：一行一个对手（名字 + 类型），机制文本进悬停气泡，
-   这样 4~5 行预告 + 「开始挑战」一屏放得下，不用下翻。 */
 .tower-plan-title { margin: 6px 0 4px; font-size: 21px; color: #7a4a18; }
-/* 第 1 项：对手从左到右一字排开，每格 = 小人像 + 名字 + 类型（机制走悬停气泡） */
 .tower-plan { margin: 0; padding: 0; list-style: none; display: flex; align-items: stretch; gap: 8px; }
 .tower-plan li {
   display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px;
@@ -183,11 +151,8 @@
   font-size: 17px; color: #8a6a3a; background: rgba(196, 158, 92, .18);
   border: 2px solid rgba(196, 158, 92, .45); border-radius: 10px; padding: 0 8px;
 }
-/* 卡片整体可悬停：加一圈高亮提示「这里有机制可看」 */
 .tower-plan li:hover { border-color: #c9a468; background: #fffdf4; }
 .elite-tag { font-style: normal; font-size: 17px; color: #fff; background: #c05151; border-radius: 10px; padding: 2px 10px; }
-/* 「替换第 N 场」黄标（第六十三批）已在第七十八批按用户口径删掉 —— 魔王那一场改用自己的淡红底
- *（见上面 `.tower-plan li.patrol`），不再用「它替换了谁」来说明自己。 */
 /* 悬停气泡：挂在 body 上的 fixed 层（js/tower-ui.js 定位），不会被滚动容器裁掉 */
 .tower-tip-float {
   position: fixed; z-index: 9999; display: none; max-width: 620px;
@@ -197,7 +162,6 @@
   white-space: pre-line; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); pointer-events: none;
 }
 
-/* ---------- 本层削弱（第 5 项） ---------- */
 .tower-debuffs { margin: 10px 0 4px; }
 .tower-debuffs h4 { margin: 0 0 6px; font-size: 22px; color: #8a2b22; }
 .debuff-cards { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -214,7 +178,6 @@
 .debuff-name { font-size: 20px; color: #7e2a20; }
 .debuff-text { color: #8a3a30; }
 
-/* ---------- 本局构筑标签 ---------- */
 .tower-buffs { margin: 14px 0; }
 .tower-buffs h4 { margin: 0 0 8px; font-size: 24px; color: #7a4a18; }
 .buff-tags { display: flex; flex-wrap: wrap; gap: 9px; }
@@ -228,8 +191,6 @@
 .buff-tag.r1 { border-color: #7fa6d8; color: #2f5a9e; background: #f4f9ff; }
 .buff-tag.r2 { border-color: #e0b25a; color: #a05f0a; background: #fff8e6; }
 
-/* ---------- 场间选 buff：海克斯式卡片（第 4 项） ----------
- * 卡片自己就是框，外面的 modal 做成完全透明（不套二级框），只留暗底。 */
 .classic-modal-overlay.choice-dialog.hex{background:rgba(12,22,30,.72)}
 .classic-modal-overlay.choice-dialog.hex > .classic-modal{
   width:auto; min-height:0; max-height:none; padding:0; border:0; border-radius:0;
@@ -242,7 +203,6 @@
 .hex-pick-head{text-align:center;margin-bottom:22px}
 .hex-title{margin:0;font-size:44px;color:#ffe9a8;letter-spacing:6px;text-shadow:0 3px 0 #6b4a18,0 0 22px #ffca4a80}
 .hex-sub{margin:8px 0 0;font-size:23px;color:#d9e6f2}
-/* 第 6 项：选 buff 之前先把下一场的 boss 摊开 */
 .hex-next{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:10px;margin:14px auto 0;
   max-width:1000px;padding:10px 18px;border-radius:18px;border:3px solid #b07ad0;
   background:rgba(58,32,84,.82);text-align:left}
@@ -260,9 +220,6 @@
 
 /* 需求（本轮）：4/5/6 选 1 时卡片会挤在一排。
  *   · 容器给一个不超过画布（1170）的宽度上限，卡片允许收缩 ——
- *     原来的 6×268 + 5×22 = 1718 会直接溢出屏幕；
- *   · n4 / n5 / n6 逐级减小卡片间距；
- *   · 同步缩窄卡片**左右内边距**：介绍文字到卡片边缘的距离变小，
  *     同样宽的卡片里能横向覆盖更多字。 */
 .hex-cards{display:flex;justify-content:center;align-items:stretch;gap:22px;max-width:1120px;margin:0 auto}
 .hex-cards .hex-card{flex:0 1 268px;min-width:0}
@@ -273,7 +230,6 @@
 .hex-cards.n5 .hex-card{padding-left:10px;padding-right:10px}
 .hex-cards.n6 .hex-card{padding-left:6px;padding-right:6px}
 /* 5/6 选 1 时纵向也要收一点：卡片变窄之后介绍文字换行更多，
- * 最长的那几条描述会把标题顶出画布（实测 6 选 1 + 最长描述 = 694px > 画布 690px）。
  * 只动描述字号/行高与卡片上下内边距、以及标题区的下边距，不动配色与字号层级。 */
 .hex-cards.n5 .hex-desc{font-size:21px;line-height:1.35}
 .hex-cards.n6 .hex-desc{font-size:19px;line-height:1.32}
@@ -295,7 +251,6 @@
 .hex-card .hex-name{font-size:31px;line-height:1.15;text-align:center}
 .hex-card .hex-scope{font-size:20px;color:#a9bccc;letter-spacing:1px}
 .hex-card .hex-desc{font-size:23px;line-height:1.4;text-align:center;color:#dbe6f0}
-/* 稀有度配色：普通=灰蓝，稀有=蓝，史诗=金 */
 .hex-card.r0{border-color:#8fa3b5;background:linear-gradient(180deg,#33414f,#1c242e)}
 .hex-card.r0 .hex-ribbon,.hex-card.r0 .hex-emblem{background:#b8c6d4;color:#22303c}
 .hex-card.r1{border-color:#5fb6ff;background:linear-gradient(180deg,#26456b,#16283f);
@@ -304,10 +259,6 @@
 .hex-card.r2{border-color:#ffcc4d;background:linear-gradient(180deg,#5b4318,#33240c);
   box-shadow:0 10px 26px rgba(0,0,0,.5),inset 0 0 0 3px rgba(255,220,120,.28),0 0 26px #ffbe2a66}
 .hex-card.r2 .hex-ribbon,.hex-card.r2 .hex-emblem{background:#ffe08a;color:#4a3208;text-shadow:none}
-/* 传奇档卡面（2026-10 用户口径：**传奇 buff 的配色就要是传奇**）。
- * 原来只写了 `.hex-card.r3 .hex-emblem`（徽记），卡面本身没有 r3 规则 → 掉回最普通的
- * `.hex-card` 底（暗蓝灰 + 棕框），跟普通档几乎一个样。现在与背包里的 `.buff-tag.r3`
- * （金描边 + 金渐变）同一套色彩，再加一圈金色辉光。 */
 .hex-card.r3{border-color:#d9a12a;background:linear-gradient(180deg,#5a3d08,#201400);
   box-shadow:0 12px 30px rgba(0,0,0,.58),inset 0 0 0 3px rgba(255,215,106,.34),0 0 30px #d9a12a66}
 .hex-card.r3 .hex-ribbon{background:linear-gradient(#fff6c8,#e8ae1c);color:#3a2606;text-shadow:none}
@@ -318,8 +269,6 @@
   box-shadow:0 10px 26px rgba(0,0,0,.5),inset 0 0 0 3px rgba(150,240,130,.22)}
 .hex-card.heal .hex-ribbon,.hex-card.heal .hex-emblem{background:#bdf3a8;color:#1e3d16;text-shadow:none}
 /* 传奇档徽记（用户口径 2026-10 第七十九批）：普通/稀有/史诗都是「色块 + 字形」（● / ◆ / ★），
- * 传奇档原来只能落到 ● —— 和普通档撞脸，而且是一个光秃秃的黄圆。现在给它一个专属标志：
- * **金色方框里嵌一颗钻石**。方框 = 这个 span 自己的边框；钻石 = ::before 里旋转 45° 的方块。
  * 尺寸写死 px（与上面的 46px、以及 n6 的 38px 对齐）：em 会跟着本元素的 font-size 跑，不能用。 */
 .hex-card.r3 .hex-emblem{
   position:relative;display:flex;align-items:center;justify-content:center;box-sizing:border-box;
@@ -339,7 +288,6 @@
 .choice-dialog.hex-n6 .hex-card.r3 .hex-emblem{width:38px;height:38px;border-width:2px;border-radius:6px}
 .choice-dialog.hex-n6 .hex-card.r3 .hex-emblem::before{width:15px;height:15px}
 
-/* ---------- 无尽：试炼商店 ---------- */
 .tower-shop { padding: 2px; }
 .shop-coins { float: right; font-size: 26px; color: #c87f0a; }
 .shop-shelf { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 12px 0; }
@@ -349,9 +297,6 @@
 }
 .shop-slot.r1 { border-color: #7fa6d8; background: #f6faff; }
 .shop-slot.r2 { border-color: #e0b25a; background: #fffaea; }
-/* 【2026-10 第七十七批】传奇档（r3）以前**没有自己的样式**，摆在货架上和普通档长得一样。
- * 现在与背包栏里的传奇增益（`.buff-tag.r3`）**同色**：金色描边 + 金色渐变填充 + 内圈高光，
- * 再给一点外发光，让它在五格里一眼就能认出来。 */
 .shop-slot.r3 {
   border-color: #d9a12a; background: linear-gradient(#fff6c8, #ffe08a);
   box-shadow: 0 0 0 2px #f6d98a inset, 0 0 12px #e8b93a55;
@@ -373,30 +318,24 @@
 .shop-slot em { font-style: normal; color: #999; text-align: center; font-size: 19px; }
 .shop-slot.sold { opacity: .6; }
 .shop-extra { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
-/* 刷新 / 铸币是**操作格**，不需要货架卡那么厚的留白：
- * 收紧内边距与行距，把「刷新」按钮抬进首屏（用户 2026-10 口径：商店不用往下翻就能刷新）。 */
 .shop-extra .shop-slot { padding: 8px 12px; gap: 4px; min-height: 0; }
 .shop-slot.heal { border-color: #8abf6a; background: #f6fce9; }
 .shop-slot.reroll { border-color: #a08ac0; background: #f8f5ff; }
 .shop-sell { display: flex; flex-direction: column; gap: 8px; max-height: 170px; overflow-y: auto; }
 .shop-sell-row { display: flex; align-items: center; gap: 12px; }
-/* 虚空铭文附魔过（不占位）的那几条：排在最后，给个淡提示免得玩家以为排序坏了。 */
 .shop-sell-row.slot-free { opacity: 0.86; }
 .shop-sell-row .slot-free-hint {
   padding: 1px 8px; border-radius: 999px; font-size: 17px; font-style: normal;
   color: #5a4a8a; background: #efeaff; border: 1px solid #cfc2f0;
 }
-/* 水晶铭文附魔（C60，效果 ×1.5）的行内标记：与上面那条同构，用红系配色区分。 */
 .shop-sell-row .crystal-hint {
   padding: 1px 8px; border-radius: 999px; font-size: 17px; font-style: normal;
   color: #8e2c22; background: #ffe9e4; border: 1px solid #f0c2b8;
 }
 .tower-shop h4 { margin: 12px 0 8px; font-size: 24px; color: #7a4a18; }
 
-/* ---------- 无尽：铸币商店（战后 5% 随机小店） ---------- */
 .tower-shop.mint { border-left: 6px solid #c9a227; padding-left: 10px; }
 .tower-shop.mint .shop-coins { color: #9a6b00; }
-/* 铸币商店标题上的试炼币余额（门庭若市 C59 现在进店也发试炼币，所以要能看见）。 */
 .tower-shop.mint .mint-coins { float: right; margin-right: 18px; font-size: 22px; color: #8a6a3a; }
 .mint-lead { margin: 6px 0 10px; font-size: 20px; line-height: 1.5; color: #765432; }
 .mint-flash {
@@ -406,14 +345,11 @@
 .shop-slot.ops { border-color: #c9a227; background: #fffdf2; }
 .shop-slot.ops i { color: #9a6b00; }
 .shop-slot.price { border-color: #c9a227; background: #fdf8e6; }
-/* 铸币商店第一格 / 刷新后随机洗出的「等价交换」服务卡：0 铸币，打开交换选择而非直接给增益。 */
 .shop-slot.swap { border-color: #b98a2f; background: #fff7db; box-shadow: 0 0 0 3px #fff1c4 inset; }
 .shop-slot.swap i { color: #9a6b00; }
 .mint-locked { color: #a98a5c; font-size: 18px; }
 
-/* ---------- 讨价还价（E14）：对折的货架格与待兑现提示 ---------- */
 .shop-slot.half { border-color: #4b9e6a; box-shadow: 0 0 0 3px #d6f2df inset; background: #f4fdf7; }
-/* 试炼商店的对折角标：绝对定位，不占卡面行高（见 tower-ui 的 half-badge）。 */
 .shop-slot.half { position: relative; }
 .shop-slot.half .half-badge {
   position: absolute; top: 37px; right: 8px; z-index: 1;
@@ -428,7 +364,6 @@
 }
 .pending-chip i { font-style: normal; font-size: 16px; color: #4b8a66; }
 
-/* ---------- 结算点 ---------- */
 .checkpoint-box { display: flex; flex-direction: column; gap: 14px; }
 .checkpoint-option {
   border: 3px solid #d9bd88; border-radius: 24px; padding: 14px 20px;
@@ -437,10 +372,8 @@
 .checkpoint-option b { display: block; font-size: 28px; color: #7a4a18; margin-bottom: 5px; }
 .checkpoint-option span { font-size: 21px; line-height: 1.5; color: #765432; }
 
-/* 塔身说明里的第二行小提示 */
 .tower-caption-hint { display: block; margin-top: 3px; font-size: 17px; color: #9fb3d0; }
 
-/* 第 1 项：无尽主界面的增益面板（永久 5 格 + 限次开关）与「页面上的休整点选择」 */
 .endless-buffs h4 { display: flex; align-items: center; gap: 10px; }
 .buff-slot-count { font-size: 17px; color: #8a6a3a; background: rgba(196, 158, 92, .18); border-radius: 10px; padding: 0 8px; }
 .buff-empty { font-size: 18px; color: #a98a5c; }
@@ -452,7 +385,6 @@
 .limit-tag em { font-style: normal; font-size: 15px; color: #8a6a3a; }
 .limit-tag.off { filter: grayscale(.7); opacity: .65; }
 .limit-tag.off i { color: #9a6a5a; }
-/* 王者之剑（HB04）：与传奇增益 `.buff-tag.r3` 同一套金色描边 + 金色渐变 + 内圈高光。 */
 .limit-tag.legendary { border-color: #d9a12a; color: #5a3a08;
   background: linear-gradient(180deg, #fff6c8, #f3cf66);
   box-shadow: inset 0 0 0 2px #fff3b8, 0 0 0 1px #b77d11 inset, 0 0 10px #e8b93a55; }
@@ -461,15 +393,12 @@
 .choice-onpage { background: rgba(255, 250, 235, .92); border: 3px solid #e2c68f; border-radius: 18px; padding: 6px 10px 10px; }
 .choice-onpage .hex-row { display: flex; gap: 10px; }
 
-/* 无尽主界面的紧凑对手条：主界面还要放增益面板与休整卡片，头像压低一档 */
 .tower-plan.compact .foe-portrait { height: 48px; }
 .tower-plan.compact .foe-portrait img, .tower-plan.compact .foe-portrait canvas { max-height: 48px; }
 .tower-plan.compact li { padding: 4px 4px 6px; font-size: 17px; }
 .tower-plan.compact li b { font-size: 18px; }
 .tower-plan.compact .tower-plan-type { font-size: 15px; }
 
-/* 第 1 项：无尽主界面右上角的三个属性药丸槽位 */
-/* 第 3 项：当前遭遇的机制（名字 + 具体效果） */
 .mech-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .mech-bar b { font-size: 18px; color: #7a4a18; }
 .mech-chip { display: inline-flex; align-items: baseline; gap: 6px; background: #ffe9e2; border: 2px solid #e0a99c;
@@ -478,8 +407,6 @@
 .mech-none { font-size: 17px; color: #6f8a3a; }
 .mech-note { font-size: 15px; color: #a98a5c; }
 
-/* 第 2 项：无尽主界面 —— 左列信息 + 右侧竖排对手，尽量一屏看完 */
-/* 用 grid 固定两列，避免任何一边内容过宽时把另一边挤过去/压在一起 */
 .endless-run { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 10px; align-items: start; }
 .endless-left { min-width: 0; }
 .endless-foes { min-width: 0; }
@@ -502,7 +429,6 @@
 .tower-plan.vertical .tower-plan-no { position: static; flex: none; }
 .tower-plan.vertical .tower-plan-type { font-size: 15px; padding: 0 6px; }
 
-/* 一屏放下：再压一档（药丸槽、对手行、行距） */
 .endless-left .endless-score { margin: 0; font-size: 17px; }
 .tower-plan.vertical li { padding: 2px 6px; }
 .tower-plan.vertical li b { white-space: nowrap; }
@@ -519,13 +445,10 @@
 .endless-title-row .tower-currency b { font-size: 19px; }
 .endless-title-row .tower-currency .currency-item { white-space: nowrap; }
 
-/* 按钮挪到右列（对手表下面）：左列不再被按钮挤高，一屏就能看完 */
 .endless-foes { display: flex; flex-direction: column; }
 .endless-foes .tower-actions { flex-direction: column; align-items: stretch; gap: 6px; margin-top: 8px; }
 .endless-foes .tower-actions .uc-button { min-height: 40px; font-size: 21px; padding: 3px 10px; }
 
-/* 第 2 项再调整：药丸槽横排放在「本层对手」上面；血量挪到左上、去掉「继承」两字；
-   货币紧跟标题（不再被右列遮住）；继续战斗/放弃本局单独一行，不与其它 ui 对齐。 */
 .endless-title-row { justify-content: flex-start; gap: 14px; }
 .endless-title-row .tower-currency { position: static; }
 .endless-hp { margin: 0 0 4px; }
@@ -536,7 +459,6 @@
 .endless-actions .uc-button { min-height: 46px; font-size: 24px; padding: 4px 18px; }
 .endless-left .endless-score { margin: 0 0 2px; }
 
-/* 再压一档，保证一屏 */
 .tower-plan.vertical li { padding: 1px 6px; }
 .tower-plan.vertical .foe-portrait { width: 40px; height: 40px; }
 .tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 40px; }
@@ -544,20 +466,14 @@
 .endless-actions .uc-button { min-height: 42px; font-size: 22px; padding: 3px 16px; }
 .endless-left .mech-bar { margin: 2px 0; }
 
-/* 第 3 轮 UI 微调：顶栏一行排完（标题→货币→分数框→右边缘三角药丸槽）；
-   血量上提贴标题并放大；继续战斗右下、放弃本局更小且偏左下。 */
 .endless-title-row { display: flex; align-items: center; gap: 12px; justify-content: flex-start; }
 .endless-title-row .tower-currency { position: static; margin-left: 2px; }
 .endless-score-box { display: inline-flex; align-items: baseline; gap: 6px; font-family: Georgia, 'Times New Roman', serif;
   border: 2px solid #c9a468; border-radius: 12px; background: #fff8e6; padding: 0 10px; color: #7a4a18; }
 .endless-score-box i { font-style: normal; font-size: 15px; color: #a98a5c; font-family: inherit; }
 .endless-score-box b { font-size: 24px; color: #a8641c; }
-/* 【2026-10 用户口径】「敌人成长 ×N」那个倍率框（.endless-scale-box）已从界面上去掉
- * （局内主界面与无尽开局页都不放），样式一并删除，别再挂回去。 */
-/* 商店「每页几件」的分档说明（1-20 层 5 件 / 21-40 层 4 件 / 41-100 层 3 件，每 100 层重来一轮） */
 .shop-tier { margin: 2px 0 6px; font-size: 17px; color: #7a5a2e; cursor: help; }
 .shop-tier b { font-size: 20px; color: #a8641c; }
-/* 「放弃本局」弹窗里的结算清单：本层应得 + 铸币折现 = 到手（【T9b】previewSettleTickets） */
 ul.settle-calc { list-style: none; margin: 6px 0 2px; padding: 0; font-size: 19px; }
 ul.settle-calc li { display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
   padding: 3px 2px; border-bottom: 1px dashed #d9c9a6; }
@@ -566,13 +482,10 @@ ul.settle-calc li b { font-family: Georgia, 'Times New Roman', serif; color: #a8
 ul.settle-calc li.total { border-bottom: 0; border-top: 2px solid #c9a468; margin-top: 2px; padding-top: 5px; }
 ul.settle-calc li.total span { color: #5c3a12; font-weight: bold; }
 ul.settle-calc li.total b { font-size: 22px; }
-/* 三个药丸槽：等腰三角（上 1 下 2），整体贴右上角 */
-/* 血量：贴标题、放大 */
 .endless-hp { margin: -2px 0 4px; }
 .endless-hp span { font-size: 19px; color: #7a4a18; }
 .endless-hp b { font-size: 22px; }
 .endless-hp .tower-carry-bar { width: 210px; height: 20px; }
-/* 动作：继续战斗固定右下角；放弃本局更小、在它左边偏下 */
 .endless-actions { position: relative; display: flex; align-items: flex-end; justify-content: flex-end; gap: 12px; margin: 6px 6px 0 0; }
 .endless-actions .uc-button[data-action="fight"] { min-height: 52px; font-size: 27px; padding: 4px 22px; }
 .endless-actions .uc-button[data-action="abandon"] { position: relative; top: 8px; margin-right: 4px; }
@@ -582,7 +495,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .endless-title-row { overflow: hidden; }
 .endless-title-row { white-space: nowrap; }
 
-/* 药丸槽放回右列顶部（三角、贴右边缘），不与对手行重叠 */
 .endless-foes { display: flex; flex-direction: column; align-items: flex-end; margin-right: 20px; }
 .endless-foes .tower-plan, .endless-foes .tower-plan-title { align-self: stretch; }
 
@@ -605,27 +517,22 @@ ul.settle-calc li.total b { font-size: 22px; }
 .endless-left .buff-empty { font-size: 18px; }
 .endless-left .mech-bar b, .endless-left .mech-chip { font-size: 17px; }
 
-/* 休整点的选卡在本页里整体缩一档，避免把按钮顶下去 */
 .choice-onpage { zoom: .82; }
 
-/* 第五轮：把内容区整体放大（左侧塔身收窄、页间距收紧），右上留更多空间 */
 .tower-page { gap: 14px; padding: 2px 0; }
 .tower-visual { flex: 0 0 128px; }
 .tower-main { padding-right: 2px; }
 .endless-run { grid-template-columns: minmax(0, 1fr) 236px; gap: 8px; }
-/* 力/敏/速继续往右上；对手行放大（去掉「本层对手」标题后空间更足） */
 .endless-foes { margin-right: 0; align-items: flex-end; }
 .tower-plan.vertical .foe-portrait { width: 64px; height: 64px; }
 .tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 64px; }
 .tower-plan.vertical li { padding: 2px 8px; }
-/* 试炼币/抽奖卷往右放：标题靠左、货币与分数靠右 */
 .endless-title-row { justify-content: space-between; }
 .endless-title-row .endless-score-box { margin-left: 0; }
 
 .endless-topright { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
 .endless-topright .tower-currency { position: static; }
 
-/* 第五轮收口：立绘 56px（仍清楚）+ 药丸槽 40px，保证一屏 */
 .tower-plan.vertical .foe-portrait { width: 56px; height: 56px; }
 .tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 56px; }
 .tower-plan.vertical li { padding: 0 8px; }
@@ -647,7 +554,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 72px; }
 .tower-plan.vertical li b { font-size: 22px; }
 .tower-plan.vertical .tower-plan-no { width: 28px; height: 28px; font-size: 17px; }
-/* 货币+分数：贴页面右上边缘、下移一点 */
 .endless-topright { position: absolute; top: 14px; right: 12px; display: inline-flex; align-items: center; gap: 12px; }
 .endless-title-row .endless-topright { position: static; }
 
@@ -662,20 +568,14 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-plan.vertical .foe-portrait { width: 88px; height: 66px; overflow: visible; }
 .tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { width: 100%; height: 100%; max-height: 66px; object-fit: contain; }
 
-/* 对手立绘：再放大一档，并加浅色底衬让立绘卡在奶油底上更清楚 */
 .tower-plan.vertical .foe-portrait { width: 108px; height: 82px; background: rgba(255, 248, 230, .9);
   border: 2px solid #e2c68f; border-radius: 12px; }
 .tower-plan.vertical .foe-portrait img, .tower-plan.vertical .foe-portrait canvas { max-height: 78px; height: 78px; width: auto; max-width: 104px; }
 .tower-plan.vertical li { padding: 4px 10px; }
 
-/* 第八轮微调 */
-/* 1) 力敏速：缩小、水平并排，放在试炼币左边 */
-/* 2) 塔身图像往下一点（原来看起来偏上没居中） */
 .tower-visual { margin-top: 10px; }
-/* 3) 血量：左端空两格（不与「无尽模式」对齐），纵向间距略放大 */
 .endless-hp { margin: 6px 0 8px 44px; }
 .endless-hp .tower-carry-bar { width: 190px; height: 18px; }
-/* 4) 对手：立绘略缩，类型标签挪到名字下面（格子内竖排，不横向溢出） */
 .tower-plan.vertical li { display: grid; grid-template-columns: auto auto 1fr; grid-template-rows: auto auto;
   gap: 0 8px; align-items: center; padding: 3px 10px; }
 .tower-plan.vertical li > .tower-plan-no { grid-column: 1; grid-row: 1 / span 2; }
@@ -685,7 +585,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-plan.vertical li > .tower-plan-type { grid-column: 3; grid-row: 2; justify-self: start; }
 .tower-plan.vertical li > .elite-tag { grid-column: 3; grid-row: 3; justify-self: start; }
 
-/* 第九轮：立绘框回方形、名字缩小、介绍框右移留白、去掉序号列 */
 .tower-plan.vertical li { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto auto;
   gap: 0 10px; align-items: center; padding: 3px 10px; }
 .tower-plan.vertical li > .tower-plan-no { display: none; }
@@ -696,14 +595,12 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-plan.vertical li > .elite-tag { grid-column: 2; grid-row: 3; }
 .endless-foes { margin-left: 16px; }
 
-/* 第十轮：药丸槽无文字（图标居中）、塔身楼层间距拉大、对手名字/类型上下左右居中且间距加大 */
 .tower-floors { gap: 12px; }
 .tower-plan.vertical li { align-content: center; row-gap: 6px; justify-items: center; }
 .tower-plan.vertical li > b { justify-self: center; text-align: center; }
 .tower-plan.vertical li > .tower-plan-type { justify-self: center; }
 .tower-plan.vertical li > .elite-tag { justify-self: center; }
 
-/* 第十一轮：标题下移并与血量拉开间距；塔身整体纵向居中 */
 .endless-title-row { margin-top: 12px; }
 .endless-hp { margin-top: 12px; }
 .tower-page { align-items: center; }
@@ -714,11 +611,8 @@ ul.settle-calc li.total b { font-size: 22px; }
 .endless-hp { margin-top: 24px; }
 .endless-foes { margin-top: 42px; }
 
-/* 第十三轮：血量与标题之间真正拉开（之前被 `.endless-left .tower-carry{margin:2px 0}` 顶掉了），
-   标题因此单独留在顶部、血量在其下方留出呼吸空间 */
 .endless-left .tower-carry.endless-hp { margin: 22px 0 8px 44px; }
 
-/* 第十四轮：整块内容再上移（塔页专用板子上边距与内边距收紧），对手列再上提 */
 .classic-board.tower-board { top: 92px; padding-top: 2px; }
 .endless-foes { margin-top: 32px; }
 
@@ -729,12 +623,10 @@ ul.settle-calc li.total b { font-size: 22px; }
 .endless-topright { top: 0; }
 .endless-foes { margin-top: 46px; }
 
-/* 第十五轮：这一排整体往下一点（标题、顶栏、对手列各下移约 10px） */
 .endless-title-row { margin-top: 10px; }
 .endless-topright { top: 10px; }
 .endless-foes { margin-top: 58px; }
 
-/* 第十六轮：按钮放大、血量左移、增益面板字与行距加大 */
 .endless-actions .uc-button[data-action="fight"] { min-height: 64px; font-size: 33px; padding: 6px 30px; }
 .endless-actions .uc-button[data-action="abandon"] { min-height: 46px; font-size: 23px; }
 .endless-left .tower-carry.endless-hp { margin: 22px 0 8px 26px; }
@@ -746,7 +638,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .endless-left .limit-tag em { font-size: 17px; }
 .endless-left .limit-tag i { font-size: 17px; }
 
-/* 四选一卡片：字体整体缩小一档（本页里空间紧） */
 .choice-onpage .hex-name { font-size: 22px; }
 .choice-onpage .hex-desc { font-size: 15px; }
 .choice-onpage .hex-scope { font-size: 14px; }
@@ -758,25 +649,20 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-shop::-webkit-scrollbar { width: 10px; }
 .tower-shop::-webkit-scrollbar-thumb { background: #c9a468; border-radius: 6px; }
 
-/* 已战胜的对手：整体压暗、立绘去饱和，加一个绿色的「已战胜」标记 */
 .tower-plan.vertical li.beaten { background: rgba(238, 240, 224, .72); border-color: #b9c9a0; }
 .tower-plan.vertical li.beaten .foe-portrait { filter: grayscale(.85) brightness(.96); }
 .tower-plan.vertical li.beaten > b { color: #7d8a63; }
 .beaten-tag { grid-column: 2; grid-row: 3; justify-self: center; font-style: normal; font-size: 16px;
   color: #4f7a2a; background: #e6f3d6; border: 2px solid #a9c98a; border-radius: 10px; padding: 0 8px; }
 
-/* 第 3 项：右侧标签再缩一号，5 个对手也放得下 */
 .tower-plan.vertical .tower-plan-type { font-size: 14px; padding: 0 6px; }
 .beaten-tag { font-size: 13px; padding: 0 6px; border-width: 1px; }
 .tower-plan.vertical .elite-tag { font-size: 13px; }
 .tower-plan.vertical li { row-gap: 3px; padding: 2px 8px; }
 .tower-plan.vertical .foe-portrait { width: 66px; height: 66px; }
 .tower-plan.vertical li > .foe-portrait img, .tower-plan.vertical li > .foe-portrait canvas { max-height: 60px; height: 60px; max-width: 60px; }
-/* 商店离开键（继续挑战）放大 */
 .page-footer > .uc-button[data-action="leave"] { min-height: 78px; font-size: 40px; min-width: 320px; }
 
-/* 试炼 / 铸币商店：这一页没有顶部「返回征战」栏（opts.noTabs），底板可以整体上提；
- * 同时把底栏中央的「返回」缩小到只比「继续挑战」略大，避免它压过商店的主操作。 */
 .classic-page.classic-tower.tower-shop-page > .classic-board { top: 58px; }
 .classic-page.tower-shop-page > .page-footer > .uc-button[data-action="home"] {
   width: 350px;
@@ -787,16 +673,13 @@ ul.settle-calc li.total b { font-size: 22px; }
   font-size: 43px;
 }
 
-/* 传奇（r3）配色 + 机制行里的削弱胶囊 */
 .buff-tag.r3, .limit-tag.r3, .hex-card.r3 { border-color: #d9a12a; }
 .buff-tag.r3 { background: linear-gradient(#fff6c8, #ffe08a); }
 .hex-card.r3 .hex-ribbon { background: linear-gradient(#ffd76a, #e0a316); color: #5a3c00; }
 .mech-chip.debuff-chip { background: #ffe9e2; border-color: #e0a99c; color: #8a3a30; }
-/* 挑战塔开打前的「三侠大招会留下」胶囊：带一张小头像，和进行中的削弱卡对得上 */
 .mech-chip .mech-chip-face { width: 26px; height: 26px; border-radius: 50%; object-fit: cover;
   box-shadow: 0 0 0 2px #fff8e4; align-self: center; }
 
-/* 第 1 项：进塔页的增益集锦 + BOSS 一览 */
 .catalog-row { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0; }
 .catalog-rarity { flex: none; width: 52px; text-align: center; font-size: 16px; border-radius: 10px; padding: 1px 0;
   color: #fff8e4; background: #a98a5c; }
@@ -809,19 +692,15 @@ ul.settle-calc li.total b { font-size: 22px; }
 .boss-grid .boss-layers { font-size: 14px; color: #8a6a3a; }
 .buff-catalog, .boss-catalog { margin: 6px 0; }
 
-/* 体力药等提示浮在最上层（原来会被战斗/弹窗盖住） */
 .uc-toast, .toast { z-index: 95; }
-/* BOSS 一览：一排 3 个，名字不换行，立绘放大 */
 .boss-catalog .boss-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .boss-grid li { padding: 4px 8px; gap: 8px; }
 .boss-grid .foe-portrait { width: 68px; height: 68px; }
 .boss-grid .foe-portrait img, .boss-grid .foe-portrait canvas { max-height: 64px; height: 64px; max-width: 64px; }
 .boss-grid li b { font-size: 19px; white-space: nowrap; }
 
-/* 进塔页底部给「开始冲塔」按钮留出空间（增益集锦最后一行不再被压住） */
 .tower-page.has-footer .tower-main { padding-bottom: 92px; }
 
-/* BOSS 一览：不占头像位，紧凑文字卡（一排 6 个；名字独占一行，第二行类型 + 装备稀有度） */
 .boss-catalog .boss-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
 .boss-grid li { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto;
   gap: 0; padding: 2px 6px; align-items: center; min-width: 0; }
@@ -840,47 +719,34 @@ ul.settle-calc li.total b { font-size: 22px; }
 .boss-grid li.king b { color: #8a2f2f; }
 .boss-grid .foe-portrait { display: none; }
 
-/* BOSS 一览里的分组简介（三侠 → 首领 → 四雄 → 魔王）。
- * 所有分组共用首领池的 6 列紧凑卡尺寸，不再给三侠/四雄/魔王单独加宽；
- * 三侠 / 四雄卡面不放机制文字，具体机制统一走悬停说明。 */
 .boss-group { margin: 2px 0 8px; }
 .boss-group-title { display: block; margin: 6px 0 4px; font-size: 17px; color: #7a4a18; }
 .boss-group-title i { font-style: normal; font-size: 14px; color: #8a6a3a; margin-left: 8px; }
 .boss-grid li.hero { border-color: #9dbb77; background: rgba(246, 251, 238, .95); }
 .boss-grid li.campaign { border-color: #d79a63; background: rgba(255, 246, 236, .95); }
-/* 竞技场报名页的自动喝药说明 */
 .extra-arena-hint { margin-top: 6px; padding: 4px 10px; border-radius: 12px; background: #eef7e2; border: 2px solid #b7d096; color: #3f6a1f; font-size: 17px; }
 .extra-arena-hint.warn { background: #fdeee8; border-color: #e0a99c; color: #8a3a30; }
 
 /* 三选一强化按钮：名字一行、等级一行，按钮自适应宽度 */
 .uc-button.pick-buff-btn { white-space: pre-line; line-height: 1.25; text-align: center; min-width: 200px; padding: 6px 16px; }
-/* 「已经被虚空铭文附魔过」的那张：标出来（再选一次没有额外收益），配色与可选的区分开。 */
 .uc-button.pick-buff-btn.pick-done { border-color: #7c6bb0; background: #f2eeff; color: #4a3d78; }
 
-/* ---------- 本轮第 3 / 4 / 7 项新增的小件 ---------- */
-/* 选牌弹窗里的「本段机制」一行（和 .hex-next 同一套紫色系） */
 .hex-seg-mechs{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px;margin:10px auto 0;
   max-width:1000px;padding:8px 16px;border-radius:16px;border:3px dashed #b07ad0;background:rgba(58,32,84,.62)}
 /* 「敌人生命上限 −N%」这种全局减益胶囊：比普通减益更醒目 */
 .mech-chip.enemy-down{background:#ffdede;border-color:#d98a8a;color:#8a2f2f;font-weight:700}
-/* 成长类增益的真实进度（面板上单独一行，避免看起来只有「×1」） */
 .buff-progress-list{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 2px}
 .buff-progress-item{display:inline-flex;align-items:baseline;gap:8px;background:#fff4d9;border:2px solid #e0be86;
   border-radius:12px;padding:2px 10px;font-size:16px;color:#6b4a1c}
 .buff-progress-item b{color:#8a5a18}
 
-/* 本轮第 1 项：被「虚空铭文」附魔的永久增益 —— 不占槽，用青色描边区分 */
 .buff-tag.slot-free{border-color:#3f9d9d;box-shadow:0 0 0 2px #bdf0ee inset}
 .buff-tag.slot-free i{color:#1c6f6f}
 /* 【2026-10 第七十三批】铭文附魔的三种外框（用户口径）：
- *   虚空铭文（不占位）→ 青色；水晶铭文（效果 ×1.5）→ 红色；两条同时 → 一半红一半蓝。
  * ⚠ 【第七十四批修订】双色外框**不能**用「单个 ::before + z-index:-1 画在元素背后」那套写法：
  *   父级一旦 `position:relative;z-index:0`，它自己就建了层叠上下文，
  *   负 z-index 的伪元素是在**父级背景之上**绘制的（CSS 2.1 附录 E 的绘制顺序：
  *   ① 层叠上下文的背景 → ② 负 z-index 子层 → ③ 内容），
- *   于是整块标签被渐变**铺满**、文字浮在渐变上，根本不是一圈描边。
- *   改成两个伪元素各画半圈：::before 左半红、::after 右半青，用 clip-path 各裁一半。
- *   伪元素比标签大 3px（inset:-3px）正好盖住原来 3px 边框那一圈，圆角也照旧；
  *   内圈那圈水晶色的高光（inset box-shadow）留在标签自己身上，与「只有水晶」那条一致。 */
 .buff-tag.ench-crystal{border-color:#c0392b;box-shadow:0 0 0 2px #ffdad3 inset}
 .buff-tag.ench-crystal i{color:#8e2c22}
@@ -892,8 +758,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .buff-tag.ench-both::after{border-color:#3f9d9d;clip-path:inset(0 0 0 50%)}
 .buff-tag.ench-both i{color:#7a4a2a}
 
-/* 本轮第 1 项：永久增益替换弹窗的按钮 —— 名字换行、限宽，避免 5 个选项顶出屏幕 */
-/* 本轮第 2 项：商店里已经拥有的可叠加增益 —— 高光边框 + 提示 */
 .shop-slot.owned-stack { border-color: #3f9d9d; box-shadow: 0 0 0 3px #bdf0ee inset, 0 0 10px #3f9d9d66; }
 .shop-slot .stack-hint { color: #1c6f6f; font-weight: 700; }
 
@@ -904,24 +768,11 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-visual { flex: 0 0 150px; }
 .tower-visual-caption { margin-top: 8px; font-size: 17px; }
 
-/* 环境词缀胶囊：负面偏红、正向偏绿，与段位机制胶囊区分 */
 .mech-chip.env-chip { border-radius: 10px; padding: 1px 8px; font-size: 16px; }
 .mech-chip.env-chip i { font-style: normal; opacity: .75; margin-left: 4px; font-size: 14px; }
 .mech-chip.env-chip.env-bad { background: #fdeee8; border-color: #dfa595; color: #8a3a30; }
 .mech-chip.env-chip.env-good { background: #eef7e2; border-color: #b7d096; color: #3f6a1f; }
 
-/* ============================================================
- * 塔身楼层：显示更多层（挑战塔 / 无尽塔共用）
- *
- * 原来是固定「上下各 4 层、行高 34px、间距 9px」，实际一屏只露得出 6 层左右，
- * 无尽塔看起来层数太少。现在改成：
- *   · tower-ui.js 给上下各 8 / 6 层（15 层窗口）；
- *   · 行高与间距都改成自适应（flex 收缩 + clamp），层多就自动压扁一点，永远铺满塔身；
- *   · 上下边缘加淡出，表示塔还在往上/往下延伸，不会看着像被截断。
- * ============================================================ */
-/* 塔身总高收到 470px（原 500px），层数收到 13 层、间距收到 3px，
- * 于是每层反而更高：实算 (470 − 金冠26 − 内边距27 − 间距 12×3) / 13 ≈ 29px/层。
- * 演进：15 层(约22px) → 14 层(约27px) → 13 层(约29px)。 */
 .tower-floors { gap: 3px; justify-content: flex-end; }
 .tower-floor {
   flex: 1 1 29px; min-height: 20px; max-height: 38px; height: auto;
@@ -934,11 +785,9 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-floor.elite-floor::before { right: 4px; width: 6px; height: 6px; margin-top: -3px; }
 .tower-marker { left: 4px; border-left-width: 9px; border-top-width: 5px; border-bottom-width: 5px; margin-top: -5px; }
 /* 塔身略加宽一点，两三位数的层号也不挤。
- * 关键是**给确定高度**：以前只写 flex: 0 0 150px，高度完全靠父级 flex 拉伸，
  * 而挑战塔与无尽塔的主列内容高度不同，量出来的塔身高度就不一样（无尽塔明显偏矮）。
  * 这里统一钉成同一个高度，两个塔页的塔身就完全一致了。 */
 .tower-visual { flex: 0 0 150px; height: 470px; min-height: 0; }
-/* 上下边缘淡出（需要时给不支持 mask 的老浏览器留个降级：不加也照样能看） */
 @supports ((mask-image: linear-gradient(#000, transparent)) or (-webkit-mask-image: linear-gradient(#000, transparent))) {
   .tower-floors {
     -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
@@ -946,13 +795,6 @@ ul.settle-calc li.total b { font-size: 22px; }
   }
 }
 
-/* ============================================================
- * 环境词缀（无尽塔唯一的常驻负面机制）
- *
- * 段位机制（荆棘反伤/自愈回复/吸血/护盾/吞噬成长）已并入环境，所以这里只有一套胶囊：
- *   · .env-mech 是「原机制」那几条，加一圈描边和系统原来的机制胶囊区分开；
- *   · 每条都带 data-tip，悬停/聚焦显示完整效果 + 本局实际数值 + 数值区间 + 剩余场数。
- * ============================================================ */
 .env-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; }
 .env-bar > b { flex: 0 0 auto; }
 .env-chip { cursor: help; }
@@ -964,12 +806,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .env-chip.env-bad.env-mech { border-color: #d08a6a; }
 .env-chip.env-good.env-mech { border-color: #7fae62; }
 
-/* ============================================================
- * 永久增益「满了要换掉一个」的列表（js/tower-ui.js → offerPermanentReplace）
- *
- * 旧做法：每个已有增益是一个 .modal-buttons 里的横排按钮 → 8 个就顶出屏幕。
- * 新做法：竖排、可滚动的整行按钮，点整行即选中；底部只留「取消」。
- * ============================================================ */
 .replace-pick-list {
   display: flex;
   flex-direction: column;
@@ -1007,35 +843,20 @@ ul.settle-calc li.total b { font-size: 22px; }
 .replace-pick .rp-name { grid-area: name; font-size: 22px; font-weight: 700; color: #7a4a18; }
 .replace-pick .rp-meta { grid-area: meta; font-size: 15px; color: #9a7b53; justify-self: end; }
 .replace-pick .rp-free { color: #2f6f8f; font-weight: 700; }
-/* 水晶铭文（C60）那一枚：与 rp-free 同款，红系 —— 替换/收缴列表上也要看得出这条被 ×1.5 过。 */
 .replace-pick .rp-crys { color: #a8352a; font-weight: 700; }
 .replace-pick .rp-desc { grid-area: desc; font-size: 16px; color: #8a6a3a; line-height: 1.35; }
-/* 稀有度用左侧色条区分，不再靠按钮底色堆叠 */
 .replace-pick.r0 { border-left: 7px solid #b9a06a; }
 .replace-pick.r1 { border-left: 7px solid #6f9ec4; }
 .replace-pick.r2 { border-left: 7px solid #a77bd0; }
 .replace-pick.r3 { border-left: 7px solid #e0a72e; }
 
 /* 里程碑奖励弹窗里的道具图：图集切图是 330px 的方图，这里没有容器尺寸约束，
- * 会以原始像素插在文字前面（用户 2026-10 反馈的「随机奖励贴图没缩放」同一类问题）。
  * 和 .reward-icon / .chip-icon 一个口径：给死尺寸 + contain。 */
 .milestone-reward img{width:64px;height:64px;object-fit:contain;vertical-align:-18px;margin-right:8px}
 
-/* ============================================================
- * 【U18】剧情展示模式（2026-10 用户口径）
- * 整屏只留**标题 + 文字 + 右下角「继续」**（塔身照旧在左侧）：
- *   · 文字**没有文本框**，直接浮在版面上，居中显示（区域＝塔身右侧到屏幕右侧）；
- *   · 楷体、逐行逐字打出来，字号比初版小一号，行距收紧，长剧情尽量一屏放下、不翻页；
- *   · 行内支持 **加粗** / *斜体* / {抖}抖动{/抖}（.tower-story-shake）；
- *   · 不做「第 m/n 行」进度（用户口径：要沉浸感）。
- * ============================================================ */
 .tower-story { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 4px; }
 .tower-story-text { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
   justify-content: flex-start; align-items: center; gap: 6px; padding: 4px 16px; text-align: center; }
-/* 文字装得下时仍然**垂直居中**（上下 auto 外边距自己分配空当），
- * 装不下时 auto 外边距收成 0 —— 内容从第一行开始排，整页都能滚到
- *（`justify-content:center` + 溢出会让**开头**那几行滚不上去，这是 flex 的老坑）。
- * 配合 JS 的 storyScrollToCursor：长剧情页最后一行打出来时会自动往下带。 */
 .tower-story-text > .tower-story-line:first-child { margin-top: auto; }
 .tower-story-text > .tower-story-line:last-child { margin-bottom: auto; }
 .tower-story-line { margin: 0; max-width: 100%; font-family: KaiTi, STKaiti, 'Kaiti SC', 'Kaiti TC', 楷体, 'BiauKai', 'Songti SC', serif;
@@ -1050,7 +871,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-story-line .tower-story-red b,
 .tower-story-line .tower-story-red i,
 .tower-story-line.done .tower-story-red { color: #c0281c; }
-/* {蓝}…{/蓝}（也认 {blue}）：染成暗青蓝 —— 与红色同一套写法（连里面的 b/i 一起点）。 */
 .tower-story-line .tower-story-blue,
 .tower-story-line .tower-story-blue b,
 .tower-story-line .tower-story-blue i,
@@ -1064,13 +884,7 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-story-caret { display: inline-block; width: 3px; height: 26px; margin-left: 4px;
   background: #8a6a3a; vertical-align: -4px; animation: towerStoryCaret .9s steps(1, end) infinite; }
 @keyframes towerStoryCaret { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
-/* 原来这里还有 `.tower-story-foot`（右下角那颗「继续」的容器）——
- * 2026-10 用户口径把「继续」按钮去掉了（点屏幕任意位置推进），样式一并删。 */
 
-/* ============================================================
- * 【U18】剧情 → 主界面的过渡（2026-10 用户口径：不要硬切）
- * 剧情文字快速淡出（150ms，JS 里等这段时间再重画主界面），主界面淡入（190ms）。
- * ============================================================ */
 .tower-story-leaving { animation: towerStoryOut .15s ease-in forwards; }
 @keyframes towerStoryOut { to { opacity: 0; transform: translateY(-8px); } }
 /* ⚠️ 动画只给**中间那一列**（文字 + 其它 UI）：塔身（.tower-visual）不参与，
@@ -1078,47 +892,27 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-page.tower-fade-in .tower-main { animation: towerPageIn .19s ease-out both; }
 @keyframes towerPageIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
-/* 【U18b】「剧情模式 / 挑战模式」开关：与「继续战斗」同一涂层，位置**固定挂在塔的正下方**
- * （.tower-page 是 relative，所以这里绝对定位到左下角 = 塔身那一列下方；局内也不再挤进按钮行）。 */
 .tower-page > .endless-mode-toggle { position: absolute; left: 8px; bottom: 4px; }
 .tower-page > .endless-mode-toggle .uc-button { min-height: 44px; font-size: 21px; padding: 3px 18px; }
 
-/* ============================================================
- * 【U20】镜中世界 —— 整百层「照影之境」的拾取屏与黑 / 白过场（用户口径 2026-10）
- *
- *   · 卡片**尽量居中**（flex 居中 + 固定视口高度），不跟着局内 UI 走；
- *   · 点点看：① 卡片之外的整屏慢慢变**纯白**（`.mirror-veil` 在卡片**下面**，
- *     所以变白的过程中卡片一直看得见）；② 白色满了之后，`.mirror-black-veil`
- *     （挂在 body 上、z-index 最高）连卡片一起慢慢变**纯黑**；
- *     ③ 黑幕以**稍快**的速度淡出，露出已经重画好的主界面（时序在 tower-ui.js）。
- * ============================================================ */
 /* 【2026-10 用户口径】卡片要落在**整个屏幕的正中央**。
- * `.tower-mirror` 原来只是 `.tower-main`（塔身右侧那一列）里的一个 `position:relative` 块，
- * 于是「居中」居的是右半边 → 看起来偏右。改成整屏铺开的居中层：
- *   · `position:fixed; inset:0` —— `#ui` 上有 `transform: scale(--uiscale)`，
- *     所以这里的 fixed 是相对**整个舞台**（1170×690）而不是某个右列；白幕原本就是这么做的；
  *   · `pointer-events:none` + 卡片 wrap `auto`：只有卡片吃点击，
  *     塔身 / 左下角模式开关的点击行为与以前完全一样。 */
-.tower-mirror { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+.tower-mirror { position: fixed; top:0;right:0;bottom:0;left:0; inset: 0; display: flex; align-items: center; justify-content: center;
   padding: 12px; pointer-events: none;
   /* ⚠ 整层必须自己抬到页面控件之上。`position:fixed` 会给这一层建独立层叠上下文，
-   *   里面白幕的 z-index:60 只在这个上下文里比较 —— 旧版没写这一行时，
    *   `.classic-tower-bar`（z-index:5）与 DOM 顺序更靠后的「剧情/挑战模式」开关
-   *   都压在整层外面，于是第 100 层白幕铺开时「返回征战」和模式开关**没有变白**。
    *   80 高于塔页的动作条（60）/货币条（40）/顶部返回栏（5），仍低于 body 上的黑幕（9998）。 */
   z-index: 80; }
-/* 白幕：盖住整个视口（含塔身与左下角的模式开关），但**在卡片下面**。 */
 .tower-mirror .mirror-veil { position: fixed; top:0;right:0;bottom:0;left:0;inset: 0; background: #fff; opacity: 0;
   transition: opacity 1500ms linear; z-index: 60; pointer-events: none; }
 .tower-mirror.mirror-white .mirror-veil { opacity: 1; }
 .tower-mirror .mirror-card-wrap { position: relative; z-index: 70; pointer-events: auto; }
-/* 黑幕：连卡片一起吃掉 —— 所以它挂在 body 上、z-index 比什么都高。 */
 .mirror-black-veil { position: fixed; top:0;right:0;bottom:0;left:0;inset: 0; background: #000; opacity: 0;
   transition: opacity 1500ms linear; z-index: 9998; pointer-events: none; }
 .mirror-black-veil.on { opacity: 1; }
 .mirror-black-veil.out { opacity: 0; transition-duration: 850ms; }
 
-/* 卡片：传奇配色（金框 + 深金渐变 + 金色辉光），与 `.buff-tag.r3` / `.hex-card.r3` 同一套色彩。 */
 .mirror-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px;
   width: 380px; padding: 44px 30px 26px; border-radius: 28px; cursor: pointer; font-family: inherit;
   border: 5px solid #d9a12a; color: #ffeec2;
@@ -1131,7 +925,6 @@ ul.settle-calc li.total b { font-size: 22px; }
   padding: 4px 22px; border-radius: 15px; font-size: 21px; font-weight: bold; letter-spacing: 3px;
   border: 3px solid #2b2113; color: #241a0a; }
 .mirror-card .mirror-ribbon.r3, .mirror-card.r3 .mirror-ribbon { background: linear-gradient(#fff6c8, #e8ae1c); }
-/* 传奇徽记：金色方框里嵌一颗钻石（与 .hex-card.r3 的徽记同一套画法）。 */
 .mirror-card .mirror-emblem { position: relative; display: block; width: 58px; height: 58px; box-sizing: border-box;
   border: 4px solid #ffd76a; border-radius: 9px; background: linear-gradient(180deg, #6a4708, #2b1a00);
   box-shadow: 0 0 12px rgba(217,161,42,.6), inset 0 0 9px rgba(255,215,106,.28); }
@@ -1147,17 +940,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 @keyframes mirrorPromptBlink { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
 .mirror-confirm p { margin: 0 0 6px; }
 
-/* ============================================================
- * 无尽塔 · 本局战报
- * 只接管结算页右列；塔身与其它塔页继续使用原有样式。
- *
- * 布局口径（2026-10 iOS 修复）：**只有中间的战报正文滚动**，标题 / 总分 /
- * 底部操作固定。以前整列 `overflow-y:auto`、按钮用 `position:sticky` 贴底；
- * iOS WKWebView 在「页面级滚动 + sticky + container-type」这一组合下不保证
- * sticky 生效（实测按钮会跟着正文滚走）。现在改成 flex 三段：
- *   标题 / 总分（不滚） + `.summary-body`（唯一滚动区） + `.summary-actions`（贴底）。
- * 这样不依赖 sticky，任何滚动位置按钮都在面板底部。
- * ============================================================ */
 .endless-summary-page > .tower-main {
   height: 100%; max-height: 100%; min-height: 0; box-sizing: border-box;
   padding: 2px 4px 2px 0; overflow: hidden;
@@ -1356,7 +1138,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .tower-page .endless-topright .tower-currency,
 .tower-page .endless-topright .endless-score-box { position: relative; z-index: 1; }
 .tower-page .endless-foes { position: relative; z-index: 1; }
-/* 给第 5 个对手留出滚到底的空间（底部固定按钮会占掉一截）。 */
 .classic-tower .tower-main {
   min-height: 0;
   max-height: 100%;
@@ -1372,12 +1153,8 @@ ul.settle-calc li.total b { font-size: 22px; }
 
 /* 60/70/80/90 层的最后一战是「四雄」之一，整列有 **5 张**对手卡。
  * 右下角的「继续战斗 / 放弃本局」是固定定位的，按 4 张卡的尺寸排，第 5 张正好
- * 落在按钮底下：四雄头像被「继续战斗」盖住，按钮也点不到（用户 2026-10 报的
- * 「四雄完全没有对齐头像与战斗内ui」）。5 张时才切到这一档：
  *   · 第一张从右上角货币条下方起排（货币条是绝对定位，卡片不能顶到它里面）；
  *   · 立绘收一档、名字/类型行距收紧，5 行总高留出右下角按钮的位置；
- *   · 4 张及以下的层完全不受影响。
- * `endless-page` 同时把动作条的 z-index 抬到敌人列之上（见上一条），
  * 窄高窗口里需要滚动时，按钮也不会被最后一张卡挡住。 */
 .endless-page .endless-foes.foes-many { margin-top: 50px; }
 .endless-page .endless-foes.foes-many .tower-plan.vertical { gap: 3px; }
@@ -1394,7 +1171,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 }
 .endless-page .endless-foes.foes-many .tower-plan.vertical .foe-portrait svg { width: 100%; height: 100%; }
 
-/* 勇者剧本：塔身与奶油卡面保留，勇者选取和成长用青绿色区分。 */
 .tower-footer .uc-button.hero-entry { color: #275b50; border-color: #6a9b84; background: linear-gradient(#f4fff4, #d6ead7); box-shadow: inset 0 0 0 2px #fbfff5, 0 3px 0 #8faa83; }
 
 /* 无尽塔开局：剧本选择（默认剧本 / 勇者剧本）。
@@ -1418,7 +1194,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .script-option.is-active { background: #e4efda; box-shadow: inset 0 0 0 2px #9ab394; }
 .script-option b { font-size: 21px; line-height: 1.2; }
 .script-option small { font-size: 13px; line-height: 1.25; color: #8a6b3c; }
-/* 勇者剧本仍是 demo 阶段：下拉项与当前选中按钮都带一个小标记，不抢主标题。 */
 .script-demo {
   display: inline-block;
   margin-left: 6px;
@@ -1442,11 +1217,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .hero-stat-step { width: 22px; height: 17px; padding: 0; border: 1px solid #d0bb91; border-radius: 4px; background: #fbf3df; color: #3b7255; font: 700 12px/1 "Microsoft YaHei", "PingFang SC", sans-serif; cursor: pointer; }
 .hero-stat-step:disabled { color: #b7b0a4; background: #f0ece3; border-color: #d8d2c6; cursor: not-allowed; }
 .hero-base-note { flex-shrink: 0; margin: 5px 0 8px; color: #806443; font-size: 14px; line-height: 1.35; }
-/* ============================================================
- * 勇者剧本准备页（现代界面）—— 形态对齐状态页
- * 顶栏沿用「状态 / 武器 / 技能」三颗原版页签；状态页签 = 立绘 + 出发准备 + 四维条，
- * 武器 / 技能页签 = 5×2 图标格。与经典准备页同一套信息结构，但全部是现代 DOM。
- * ============================================================ */
 .hero-prep-board { overflow: hidden; }
 .hero-prep-board [data-hero-pane][hidden], .hero-prep-board .hero-prep-stats[hidden] { display: none; }
 .hero-prep-status-pane { position: absolute; top:16px;right:26px;bottom:112px;left:20px;inset: 16px 26px 112px 20px; }
@@ -1513,20 +1283,17 @@ ul.settle-calc li.total b { font-size: 22px; }
 .hero-gear-item.is-equipped { border-color: #d2a43a; background: #fff6d8; box-shadow: inset 0 0 0 2px #f4df9f; }
 .hero-gear-icon { grid-row: 1 / span 2; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; }
 .hero-gear-icon img { width: 42px; height: 42px; object-fit: contain; }
-/* 黑装/部分橙装没有导出 PNG：用部位字占位，保证每格都看得出是什么部位。 */
 .hero-gear-icon.missing { border: 1px dashed #cdb586; border-radius: 8px; background: #f7eeda; }
 .hero-gear-icon.missing::before { content: attr(data-part); color: #8a6b3c; font-size: 18px; font-weight: 700; }
 .hero-gear-item b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #65482c; font-size: 12px; }
 .hero-gear-item i { color: #8f7658; font-size: 11px; font-style: normal; }
 .hero-gear-zero { position: absolute; right: 5px; bottom: 2px; color: #a58a5f; font-size: 10px; line-height: 1; }
 .hero-gear-item:focus-visible, .hero-story-choice:focus-visible { outline: 3px solid #83a76a; outline-offset: 2px; }
-/* 主界面左下：勇者模式的小全身照（剧情模式按钮右侧） */
 .tower-page > .endless-hero-portrait { position: absolute; left: 170px; bottom: 4px; z-index: 6; width: 88px; height: 106px; display: flex; flex-direction: column; align-items: center; padding: 1px; border: 2px solid #c9a468; border-radius: 12px; background: linear-gradient(#fffdf3, #f4e6c1); box-shadow: inset 0 0 0 2px #fffce9, 0 3px 0 #b08a4f; cursor: pointer; font: inherit; }
 .tower-page > .endless-hero-portrait:hover { border-color: #e0b64a; box-shadow: inset 0 0 0 2px #fffce9, 0 3px 0 #b08a4f, 0 0 9px #ffd76a; }
 .endless-hero-portrait-art { display: block; width: 80px; height: 84px; pointer-events: none; }
 .endless-hero-portrait-art svg { pointer-events: none; }
 .endless-hero-portrait b { color: #7a4a18; font-size: 12px; line-height: 1; }
-/* 勇者状态弹窗 */
 .hero-status-modal .modal-body { max-height: 472px; }
 .hero-status-card { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 16px; align-items: start; }
 .hero-status-side { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; }
@@ -1566,13 +1333,6 @@ ul.settle-calc li.total b { font-size: 22px; }
   .hero-status-gears, .hero-status-loadouts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-/* ============================================================
- * 勇者模式准备页 / 爬塔回看：随机挑战「查看敌人」那张原版状态页（7218）
- * ------------------------------------------------------------
- * 状态页自带的「装备融合」位置被换成「开始挑战」：复用 3911 金胶囊，
- * 只把它烤死的「返回」字形藏掉，文字由 `heroStartLabelEnsure()` 另挂一层 SVG 文本。
- * 这样悬停/按下的金色→绿色两帧仍然由原版素材提供，不必另画按钮。
- * ============================================================ */
 .sf-hero-view .sf-hero-start g[type="shape"][depth="4"] { display: none !important; }
 .sf-hero-view .sf-hero-start { cursor: pointer; }
 .hero-gear-picker { position: fixed; top:0;right:0;bottom:0;left:0;inset: 0; z-index: 9000; display: flex; align-items: center; justify-content: center; padding: 3vh 2vw; background: rgba(18, 28, 17, .6); font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif; color: #6f512f; }
@@ -1615,14 +1375,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 }
 
 
-/* ============================================================
- * 勇者页（现代界面）—— 直接用状态页壳 + 武技图鉴页
- * ------------------------------------------------------------
- * 用户 2026-10 口径：不要再自绘一套勇者工作台；状态页签走现代状态页的
- * 立绘 / 四维条，武器 / 技能页签走图鉴同款 5×2 格子。
- * 「出发准备」做成一张更挺拔的奶油卡：标题 + 三个起始武技槽 +
- * 武技 / 四维 / 外观三块进度 + 底部两键。
- * ============================================================ */
 .classic-page.hero-page .hero-board { overflow: hidden; }
 .classic-page.hero-page .hero-status-character {
   left: 10px; top: 10px; width: 468px; height: 322px;
@@ -1685,7 +1437,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .hero-sheet-foot { flex: 0 0 auto; margin: 0; color: #93764e; font-size: 11px; line-height: 1.35; }
 .hero-sheet-foot b { color: #a26a22; }
 .hero-sheet-empty { margin: 3px 0; color: #a58a5f; font-size: 12px; line-height: 1.4; }
-/* —— 爬塔中的勇者详情 —— */
 .hero-vitals { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 5px 9px; border-radius: 10px; background: #f5ead2; }
 .hero-hpbar { flex: 1; height: 11px; overflow: hidden; border-radius: 99px; background: #dcc8a6; box-shadow: inset 0 1px 2px #b59a73; }
 .hero-hpbar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #e9755b, #c73c31); }
@@ -1711,7 +1462,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .hero-log { flex: 0 0 auto; padding-top: 4px; border-top: 1px solid #e6d5b0; }
 .hero-log ol { margin: 0; padding: 0; list-style: none; max-height: 66px; overflow-y: auto; }
 .hero-log li { padding: 1px 0; color: #7c6444; font-size: 10.5px; line-height: 1.35; }
-/* —— 武技图鉴页 —— */
 .hero-page-hint { color: #8b6a3d; font-size: 14px; line-height: 1.2; }
 .hero-board-catalog .catalog-grid { padding: 0 6px; }
 .hero-ws-cell .item-icon { width: 148px; height: 148px; border-radius: 26px; }
@@ -1719,7 +1469,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .hero-ws-cell.is-locked { opacity: .48; }
 .hero-ws-cell.is-locked:hover { opacity: .7; }
 .hero-ws-cell.hero-owned .item-icon { outline: 3px solid #9bc75f; box-shadow: inset 0 0 0 5px #efffd0, 0 1px 0 #c7b489; }
-/* —— 铸币修炼 / 武技详情 —— */
 .hero-train-modal .modal-body { max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; }
 .hero-train-panel > p { margin: 0 0 8px; line-height: 1.45; }
 .hero-train-list { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 7px; }
@@ -1754,11 +1503,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .hero-coin-train-row em { grid-row: 1 / span 2; grid-column: 2; color: #a26a22; font-size: 12px; font-style: normal; white-space: nowrap; }
 @media (max-width: 760px) { .hero-coin-train-list { grid-template-columns: minmax(0, 1fr); } }
 
-/* ============================================================
- * 勇者际遇：沿用剧情模式的整屏文字界面
- * ------------------------------------------------------------
- * 不再用「事件卡」；文字仍是 `.tower-story-line`，选择键放在下方。
- * ============================================================ */
 .hero-event-page > .tower-main { padding: 8px 18px 10px; }
 .hero-story { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
 .hero-story-head { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 2px 8px 0; }
@@ -1810,7 +1554,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .classic-page.hero-page .hero-run-facts { gap: 5px; }
 .classic-page.hero-page .hero-gear-row { gap: 5px; }
 .classic-page.hero-page .hero-log ol { max-height: 54px; }
-/* 准备页：把「开始挑战」上方的内容压紧，保证三块事实与待办提示一屏可见 */
 .classic-page.hero-page .hero-sheet-setup .hero-sheet-head { padding-bottom: 1px; }
 .classic-page.hero-page .hero-sheet-setup .hero-pick-slot { min-height: 56px; grid-template-columns: 46px minmax(0, 1fr); padding: 4px 6px; }
 .classic-page.hero-page .hero-sheet-setup .hero-pick-icon { width: 44px; height: 44px; }
@@ -1835,7 +1578,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 .classic-page.hero-page .hero-sheet-setup .hero-pick-icon { width: 40px; height: 40px; }
 .classic-page.hero-page .hero-sheet-setup .hero-pick-slot { grid-template-columns: 42px minmax(0, 1fr); }
 
-/* 勇者上下文复用现代状态页：只为两颗局内动作和属性分配键预留空间。 */
 .hero-context-page .status-buttons { margin-left: 0; }
 .hero-context-page .status-buttons .uc-button { flex: 1 1 0; min-width: 0; width: auto; font-size: 34px; }
 .hero-context-page .stat-strip .hero-stat-pill { position: relative; padding-right: 40px; }
@@ -1846,9 +1588,6 @@ ul.settle-calc li.total b { font-size: 22px; }
 /* 勇者外观页：黑/橙装缺 PNG 时用部位字占位（账号装备页仍按原逻辑隐藏破图） */
 .hero-gear-modal .item-icon .hero-gear-glyph { display: none; align-items: center; justify-content: center; width: 100%; height: 100%; color: #8a6b3c; font: 700 34px/1 "Microsoft YaHei","PingFang SC",sans-serif; text-shadow: 0 1px 0 #fff8dd; }
 .hero-gear-modal .item-icon.missing .hero-gear-glyph { display: flex; }
-/* 提示文案允许折行：`.gear-note` 从全局继承 `white-space: nowrap` + 省略号，
- * 加长后的「每件装备只列一张卡，点一下穿上，再点一下脱下」在 900px 里放不下，
- * 实机上会被截成「每件装…」（2026-10-30 安卓模拟器实拍）。 */
 .hero-gear-modal .gear-note { max-width: 900px; margin: 0 auto 8px; line-height: 1.35; white-space: normal; }
 .hero-gear-modal .gear-slots .catalog-cell { cursor: pointer; }
 .hero-gear-modal .gear-slots .catalog-cell:disabled { cursor: default; }

@@ -1,32 +1,25 @@
-/* UC 松鼠大战战斗播放器。动作、装备替换位与命中帧取自原版 APK。
- * 原版时间轴已包含接近、闪避、返回的位置；松鼠朝右，NPC 默认朝左。
- */
-
-/* ------------------------------------------------------------
- * 目录：战斗播放器（按回合事件流驱动动画）
- * Ctrl+F 搜节号（如「【BT1】」）直达对应代码块。
- *
- *  【BT1】常量与素材表  【BT2】NPC 头像与动画名映射  【BT3】战斗播放主流程 run
- *  【BT4】导出 window.Battle
- * ------------------------------------------------------------ */
+// UC 松鼠大战战斗播放器。动作/装备替换位/命中帧取自原版 APK；时间轴已含接近、闪避、返回位。
+// 松鼠朝右，NPC 默认朝左。
 (function () {
   'use strict';
-  /* 战斗数字统一大数格式：1e7 起用万 / 亿 / 兆 / 京（四位有效数字），以下保持整数。 */
+  // Battle numbers use GData.formatBigNumber (万/亿/兆/京 from 1e7, integers below).
   const fmtBig = (v) => (window.GData && GData.formatBigNumber) ? GData.formatBigNumber(v) : String(Math.round(Number(v) || 0));
-  /* ============================================================
-   * 【BT1】常量与素材表（图集/特效/命中帧）
-   * ============================================================ */
   const W = 1170, H = 690, FPS = 20;
   const SQ = ['SQ_01', 'SQ_02', 'weaponAttack', 'throwweaponAttack'];
   const NPC_SHEETS = { tl: ['tl'], xh: ['xh1', 'xh2'], xm: ['xm1', 'xm2'], wood: ['woodman1', 'woodman2'] };
   const NPC_EFFECTS = { tl: ['tl_effect'], xh: ['xh_effect1', 'xh_effect2'], xm: ['xm_effect'], wood: ['woodman_effect'] };
-  /* 挑战塔 NPC：战斗行为用独立 npcType（tw_*，sim.js 里走普通 NPC 行动、不触发三侠大招），
-   * 贴图与动画复用三侠的表。优先从 TowerData 取体型指派，测试环境缺TowerData时用内联兜底。 */
-  const TOWER_NPC_ANIM = window.TowerData
-    ? Object.fromEntries(TowerData.NPCS.map((n) => ['tw_' + n.id, n.anim]))
-    : { tw_berserker: 'xm', tw_assassin: 'tl', tw_medic: 'xh', tw_ironwall: 'xm', tw_bramble: 'xh', tw_frostmage: 'xh', tw_tamer: 'tl', tw_vampire: 'tl', tw_golem: 'xm', tw_devourer: 'xm' };
-  const npcBase = (type) => TOWER_NPC_ANIM[type] || type;
-  // FightStats.js 原版先把 1024 宽场景放大 1.4355 倍，再居中裁切，不能压成 1170 × 690。
+  // Tower NPCs use npcType tw_* (plain NPC AI in sim.js, no trio ultimates); sprites reuse the trio.
+  // TowerData loads on demand, so check it at runtime — resolving the inline fallback at script load
+  // would leave new tw_* NPCs without atlases.
+  const TOWER_NPC_ANIM_FALLBACK = { tw_berserker: 'xm', tw_assassin: 'tl', tw_medic: 'xh', tw_ironwall: 'xm', tw_bramble: 'xh', tw_frostmage: 'xh', tw_tamer: 'tl', tw_vampire: 'tl', tw_golem: 'xm', tw_devourer: 'xm' };
+  let towerNpcAnim = null;
+  function npcBase(type) {
+    if (!towerNpcAnim && window.TowerData && Array.isArray(TowerData.NPCS)) {
+      towerNpcAnim = Object.fromEntries(TowerData.NPCS.map((n) => ['tw_' + n.id, n.anim]));
+    }
+    return (towerNpcAnim && towerNpcAnim[type]) || TOWER_NPC_ANIM_FALLBACK[type] || type;
+  }
+  // Original FightStats.js scales the 1024-wide scene by 1.4355 then center-crops; never squash to 1170×690.
   const BG_SCALE = 1.4355;
   const REGIONS = {
     0: { name: '水上人家', layers: [
@@ -57,39 +50,30 @@
     effect_skill_17: ['skill_17'], effect_skill_18: ['skill_18'], effect_skill_18_defend_1: ['skill_18_d_1'],
     effect_skill_18_defend_2: ['skill_18_d_2'], effect_skill_23: ['skill_23'],
   };
-  // 原版 CommonAttack / WeaponAttack / ThrowWeaponAttack / Skill_* 的回调帧。
+  // Callback frames from original CommonAttack / WeaponAttack / ThrowWeaponAttack / Skill_*.
   const HIT_FRAME = { fightCommonAttack: 8, fightWeaponAttack: 7, fightThrowWeaponAttack: 13,
     skill_8: 14, skill_9: 7, skill_13: 40, skill_14: 16, skill_15: 22, skill_17: 38, skill_18: 18, skill_23: 29,
     tl_common_attack: 6, tl_skill_attack: 10, xh_common_attack: 6, xh_skill_attack: 10,
     xm_common_attack: 6, xm_skill_attack: 8, beatBack: 4 };
   const RANGED = new Set([5, 6, 7, 8, 9, 10, 13, 14]);
   const weaponLabelFor = (id, level) => String((level > 10 ? 1200 : level > 7 ? 1100 : 1000) + Number(id));
-  /** 真武器出手辉光：真1 无 / 真2 白 / 真3 浅蓝 / 真4 黄 / 真5 红（与经典战斗同一张表）。 */
+  // True-weapon glow: true1 none / true2 white / true3 light blue / true4 yellow / true5 red (same table as classic battle).
   const weaponGlowFor = (level) => (window.GData && GData.trueWeaponGlow ? GData.trueWeaponGlow(level) : '');
   const isThrowing = (id) => RANGED.has(Number(id));
   const SKILL_DEFEND = { 8: ['skill_8_1', 'effect_skill_8_defend'], 12: ['skill_9_1', 'effect_skill_9_1'],
     15: ['skill_15_1', 'effect_skill_15_defend'], 18: ['skill_18_2', 'effect_skill_18_defend_2'] };
   let activeController = null;
-  /* 每场战斗的序号：旧战斗延迟释放画布时用它判断“画布是否已经被下一场接管”。 */
+  // Per-battle sequence id: delayed canvas release uses it to detect the next battle took over.
   let runSeq = 0;
 
-  /* ============================================================
-   * 【BT2】NPC 头像与动画名映射
-   * ============================================================ */
-  /* 右下角操作区的布局（纯函数，导出给测试直接核对）。
-   * 原版字面坐标 (983,609) 的 164x60 框会压到血条，所以基准块下移到右下角。
-   * 2026-10 用户口径：**所有**倍速 / 跳过键统一用「普通战斗的跳过键」那一档尺寸
-   * 190x70（贴住 1170x690 画布右下角，右/下各留 16px）：
-   *   · 只有倍速（挑战塔 / 无尽塔 <10 层）→ 单键 190x70；
-   *   · 只有跳过（历史上普通战斗只有跳过）→ 同样 190x70；
-   *   · 倍速 + 跳过（**普通战斗**、以及无尽塔 10 层起）→ **两个 190x70 在右下并排**
-   *     （中间留 8px 缝，**倍速键在跳过键左侧**），整块正好贴住右下角（右边缘 1170−16）。
-   * 返回 { rects: { speed, skip }, both, base }，rect 为 null 表示这个键不显示。 */
+  // Bottom-right control area (pure fn exported for tests). The original (983,609) 164×60 box
+  // overlapped the HP bar, so it moves to the corner; every speed/skip key uses the 190×70 skip-key
+  // size. With both keys they sit side by side (speed left, 8px gap), 16px from right/bottom.
   function cornerLayout(speedToggle, allowSkip) {
-    const single = { x: W - 16 - 190, y: H - 15 - 70, w: 190, h: 70 };   // = { 964, 605, 190, 70 }
+    const single = { x: W - 16 - 190, y: H - 15 - 70, w: 190, h: 70 };
     if (speedToggle && allowSkip) {
       const gap = 8, w = single.w, h = single.h;
-      const x = W - 16 - (w * 2 + gap);                                  // 两个键一起贴右下角
+      const x = W - 16 - (w * 2 + gap);
       return {
         both: true, base: { x: x, y: single.y, w: w * 2 + gap, h: h },
         rects: {
@@ -137,12 +121,8 @@
     c.closePath();
   }
 
-  /* ============================================================
-   * 【BT3】战斗播放主流程 run
-   * ============================================================ */
-    /** 把回合里的「新上限 / 当前血量」应用到血条数组上（玉石俱焚这类**压缩上限**的效果）。
-   *  独立成纯函数：一是逻辑清楚，二是单测可以直接跑它（战斗回放本体依赖 rAF，headless 里驱动不动）。
-   *  返回 { capped } —— 这一回合有没有真的压低上限（用来决定要不要飘字）。 */
+  // Apply a round's new max HP / current HP to the bars (e.g. 玉石俱焚 lowering caps). Pure fn so
+  // tests can drive it headlessly; returns { capped } to decide whether to float the new cap.
   function applyRoundCaps(maxHpArr, hpsArr, r) {
     let capped = false;
     if (Array.isArray(r.maxHp) && r.maxHp.length === 2) {
@@ -166,10 +146,9 @@
     const canvas = opts.canvas;
     let ctx = canvas.getContext('2d');
 
-    /* HUD 离屏缓存：名字 / 血条 / 血量 / 回合数 / 护盾 / 削弱 / 题面 / 角落键都是
-     * 每帧重画的静态内容，只有数值变化时才需要重绘；低端设备上反复 strokeText +
-     * createLinearGradient 是局内卡顿的显性来源。这一层只缓存**画面**，按钮热区、
-     * 飘字、倒计时仍然逐帧走。 */
+    // HUD offscreen cache: name/HP bar/numbers/rounds/shield/note/corner keys are static except
+    // values; redrawing strokeText + gradients every frame is a major low-end stutter source.
+    // Cache only the picture — hit areas, floaters and countdown still render per frame.
     const hudCanvas = document.createElement('canvas');
     hudCanvas.width = W; hudCanvas.height = H;
     const hudCtx = hudCanvas.getContext('2d');
@@ -195,8 +174,9 @@
     for (const side of wears) for (const wear of side) if (wear) load.add(wear.src);
     for (const layer of region.layers) { if (layer.id) load.add(layer.id); if (layer.fx) load.add(layer.fxSheet || layer.fx); }
     const watchIds = [...load];
-    /* 荣耀 / 华为 WebView 丢图的恢复节拍：`loadSheets` 的 5 秒截止线只保证“开打不等”，
-     * 没下来的图以前这一场就永远缺着。这里在战斗期间每秒补一次，直连失败走 blob 兜底。 */
+    // Honor/Huawei WebView image recovery: loadSheets' 5s deadline only means "start without
+    // waiting"; missing sheets would stay missing for this battle. Retry once per second during
+    // the battle, blob fallback on direct failure.
     let retryTimer = 0, lastHealth = 0, lastRecover = 0, retryTries = 0, healthTries = 0;
     const retryMissingSheets = () => {
       if (!Engine.missingSheets || !Engine.retrySheets) return;
@@ -207,75 +187,66 @@
     if (watchIds.length && Engine.missingSheets && Engine.retrySheets && typeof setInterval === 'function') {
       retryTimer = setInterval(() => {
         if (stopped) return;
-        /* 已经补全就不再空转；最多 20 次（约 24s），别让 404 素材一直重试。 */
+        // Stop retrying once complete; max 20 tries (~24s) so 404 assets don't loop forever.
         if (!Engine.missingSheets(watchIds).length || ++retryTries > 20) {
           clearInterval(retryTimer); retryTimer = 0; return;
         }
         retryMissingSheets();
       }, 1200);
     }
-    /* 角色 / 特效图集要压在场景图集之上（同名 label 只认最后一个注册的）。
-     * 启动时不再预拉这批图（见 main.js 的 BATTLE_SHEETS），所以这里补一次优先级；
-     * 首页空闲预热完成时也会由 Main.pinBattleAssets() 做同一件事，幂等。 */
+    // Character/FX sheets must sit above scene sheets (same label wins by last registration). They
+    // are not preloaded at startup (main.js BATTLE_SHEETS), so re-pin here; Main.pinBattleAssets() is idempotent.
     try { if (window.Main && Main.pinBattleAssets) Main.pinBattleAssets(); } catch (e) {}
-    /* 超级三侠（变异三侠）：原版 `*_boss.swf` 不在参考资料里，按经典精英立绘的
-     * 配色给普通图集做一层运行时换色；普通三侠不触发，仍是原版图集。 */
+    // Super trio: original *_boss.swf is not in the references, so recolor the normal atlas at
+    // runtime; the normal trio keeps its original atlas.
     for (const f of sources) {
       if (!f || !f.mutant) continue;
       const kind = f.npcType ? npcBase(f.npcType) : null;
       if (kind) { try { await Engine.ensureMutantSheets(kind); } catch (e) {} }
     }
-    /* 暴击图标：原版 `4842`（addOrReduce）第 3 帧的「暴击」字样，由 `showBlood`
-     * 在 `symbol == 0`（isBerserk）时挂出；主 canvas 这里用它 + 黄色伤害数字。 */
+    // Crit badge: original 4842 frame 3 「暴击」, shown by showBlood when symbol == 0; drawn with yellow damage numbers.
     let critBadge = null;
     try { critBadge = await Engine.loadSheetFromUrl('critBadge', 'images/battle/fx/crit.png'); } catch (e) {}
-    /* 场景层兜底：清单里没有的整片图集按 id 直接找 `images/atlas/<id>.png`
-     *（2026-10 images 重构后图集统一收在 images/atlas/，以前是 images/<id>.png）。 */
+    // Scene fallback: atlas ids missing from the manifest load from images/atlas/<id>.png
+    // (all atlases live under images/atlas/ after the images reorg).
     for (const layer of region.layers) if (layer.id && !Engine.has(layer.id)) await Engine.loadSheetFromUrl(layer.id, 'images/atlas/' + layer.id + '.png');
 
     const player = Engine.makePlayer(), scenePlayers = [];
     const fighters = sources.map((info, side) => ({ info, side, npc: info.npcType ? npcBase(info.npcType) : null,
       mutant: !!(info && info.mutant), inst: null, dead: false, wears: wears[side] }));
-    /* 变异三侠用换色图集；引擎还没换好时自动退回普通图集。 */
+    // Mutant trio uses recolored atlases; fall back to the normal atlas until the engine swaps them.
     const sheetsFor = (f) => !f.npc ? SQ
       : (f.mutant && Engine.mutantSheets ? (Engine.mutantSheets(f.npc) || NPC_SHEETS[f.npc]) : NPC_SHEETS[f.npc]);
-    // maxHp 必须用真实上限：关卡连战时 me.hp 只是按比例继承的当前血量，
-    // 拿它当上限会让血条显示成满血，并让模拟按错误的上限计算。
+    // maxHp must be the real cap: in stage chains me.hp is only the inherited current HP,
+    // so using it as the cap shows a full bar and makes the sim use the wrong max.
     const hpOf = (f) => Math.max(1, Math.round(Number(f.hp) || 1));
     const hps = sources.map((f) => Math.min(hpOf(f), Number(f.maxHp) > 0 ? Math.round(Number(f.maxHp)) : hpOf(f)));
-    /* 护盾（石像鬼机制 / 塔 buff「坚韧壁垒」）：初值取模拟的开局护盾，
-     * 之后每帧跟随事件里的 shellAfter 更新。淡蓝段压在黄色血条最左一段，
-     * 血量数字把护盾算进分子（`血量+护盾/上限`），不再单独写护盾数字标签。 */
+    // Shield (gargoyle / tower "坚韧壁垒"): starts from result.startShell, then follows event
+    // shellAfter. Light-blue segment over the left end of the yellow bar; HP text counts shield in the numerator.
     const shields = Array.isArray(result.startShell) && result.startShell.length === 2
       ? result.startShell.map((v) => Math.max(0, Math.round(Number(v) || 0)))
       : [0, 0];
     const maxHp = sources.map((f, side) => Number(f.maxHp) > 0 ? Math.max(hps[side], Math.round(Number(f.maxHp))) : hps[side]);
-    /* 特殊战斗（训练木桩）自带回合上限；普通战斗保持原有的 99 计数显示。 */
+    // Special battles (training dummy) carry a round cap; normal battles keep the 99 display.
     const maxRounds = Math.max(0, Math.floor(Number(opts.maxRounds) || 0));
     const floaters = [], sleepers = new Set();
     let stopped = false, skipped = false, skippedByButton = false, ending = false, raf = 0,
       round = maxRounds > 0 ? Math.max(0, maxRounds - 1) : 99, countdown = null;
     let last = performance.now(), shake = 0, combatStarted = false;
-    /* 右下角操作区：绘制与点击区共用同一组矩形。
-     * 原版字面坐标 (983,609) 的 164x60 框会把按钮压出血条，所以用 190x70。
-     * 2026-10：**普通战斗**与「无尽塔 10 层起」都要**同时**有倍速键与跳过键 ——
-     * 两个都在时把这块横切成两半（倍速在左、跳过在右，中间留 8px 缝），
-     * 只有一个时仍占满整块，与旧版逐像素一致。 */
     const speedToggle = !!opts.speedToggle;
     const allowSkip = opts.allowSkip !== false;
-    /* 倍速上限：默认 3（挑战塔 / 无尽塔的 1×→2×→3×）；**普通战斗由 main.js 传 2**，
-     * 于是倍速键在 1×↔2× 之间来回切，不给 3×（2026-10 用户口径）。 */
+    // Speed cap: default 3 (towers 1x→2x→3x); normal battles pass 2 from main.js so the key toggles 1x↔2x only.
     const speedMax = Math.max(1, Math.min(3, Math.floor(Number(opts.speedMax) || 3)));
     let speed = 1;
     const corner = cornerLayout(speedToggle, allowSkip);
     const cornerRects = corner.rects;
-    /* 所有倍速 / 跳过键都用「普通战斗跳过键」那一档尺寸（190x70）→ 字号统一 46。 */
+    // All speed/skip keys use the 190×70 skip-key size, so the font is fixed at 46.
     const cornerFont = 46;
     const cornerVisible = !!(cornerRects.speed || cornerRects.skip);
     const previousClick = canvas.onclick;
     const ui = document.getElementById('ui');
     const pickups = opts.collectDrops && !opts.result && window.BattleDrops ? BattleDrops.create({ root: ui, random: opts.dropRandom, kind: opts.kind }) : null;
-    // 无障碍点击层跟着矩形走，避免两处坐标各改一半而错位。
+    // Accessible click layer follows the same rects as drawing; otherwise the two coordinate sources drift.
     const rectStyleOf = (r) => ['left:' + (r.x / W * 100).toFixed(3) + '%', 'top:' + (r.y / H * 100).toFixed(3) + '%',
       'width:' + (r.w / W * 100).toFixed(3) + '%', 'height:' + (r.h / H * 100).toFixed(3) + '%'].join(';');
     const cornerDom = [];
@@ -298,15 +269,15 @@
       if (pickups) pickups.close();
       if (canvas.onclick === onClick) canvas.onclick = previousClick;
       canvas.style.cursor = '';
-      /* 安卓低内存：一场打完/取消后把两块大画布缩到 1×1，别等 GC 或下一次进战斗。
-       * 延迟一拍再缩：结算/战果页可能还要读最后一帧画面；若这一拍里已经有新战斗接管了
-       * 同一块 canvas，就不要再缩（否则新战斗会被缩成 1×1）。 */
+      // Android low memory: shrink both big canvases to 1×1 after a battle ends/cancels instead of
+      // waiting for GC. Delay one tick: the result screen may still read the last frame, and a new
+      // battle may have taken over the same canvas — do not shrink then.
       const shrinkCanvas = () => {
         if (runId !== runSeq) return;
         if (activeController && activeController !== controller) return;
         try {
-          /* 主画布可能被 `keepScreen` 收尾直接拿去画主界面（随机挑战 / 连战），
-           * 只有已经不在 DOM 里时才缩；HUD 离屏画布不会被主界面复用，总是释放。 */
+          // The main canvas may be reused by keepScreen for the home screen (random challenge/chain);
+          // only shrink when detached. The HUD offscreen canvas is never reused, always release it.
           if (!canvas.isConnected) { canvas.width = 1; canvas.height = 1; }
           hudCanvas.width = 1; hudCanvas.height = 1;
         } catch (e) {}
@@ -315,23 +286,20 @@
       for (const wake of [...sleepers]) wake();
       sleepers.clear();
     }
-    /* `skip(byButton)`：
-     *   · `byButton` = 玩家**按的是右下角「跳过」键** → 2026-10 用户口径：这一场的
-     *     战斗中悬浮奖励整场只收 2/3（已捡过的先算数，只从还没捡的里补）；
-     *   · 不传（程序化收尾 / 自动跳过 / 录像）→ 保持原版口径三份全发。
-     *   战斗胜负与回合流不受影响（结果早由 Sim.simulate 算完，跳过只是不播动画）。 */
+    // skip(byButton): only a real skip-key press caps floating drops at 2/3 (collected first,
+    // refill only uncollected). No arg (programmatic/auto/replay) awards all three as the original.
+    // Outcome/round flow are unaffected — Sim already computed the result; skip only stops playback.
     const controller = { cancel() { stopped = true; clean(); },
       skip(byButton) { if (!ending && !skipped && !stopped) { skipped = true; if (byButton) skippedByButton = true; if (pickups) pickups.skip(!!byButton); for (const wake of [...sleepers]) wake(); } }, result };
     activeController = controller;
-    /** 右下角「倍速」键：在 1×…speedMax× 之间循环（普通战斗 = 1×↔2×；塔 = 1×→2×→3×）。 */
+    // Speed key: cycles 1x…speedMax (normal battle 1x↔2x; towers 1x→2x→3x).
     function speedAction() {
       if (ending || stopped || !speedButton) return;
       speed = speed >= speedMax ? 1 : speed + 1;
       speedButton.textContent = speed + '×';
       speedButton.setAttribute('aria-label', '切换战斗速度（当前 ' + speed + '×）');
     }
-    /** 右下角「跳过」键：直接跳到结算（结果早已由模拟器算好，跳过不改变胜负）。
-     *  按它才会触发「悬浮奖励只收 2/3」（用户口径 2026-10，见 controller.skip 的说明）。 */
+    // Skip key: jump to results; pressing it is what triggers the 2/3 floating-drop cap.
     function skipAction() { controller.skip(true); }
     if (speedButton) speedButton.onclick = speedAction;
     if (skipButton) skipButton.onclick = skipAction;
@@ -355,8 +323,7 @@
     }
     function mirrorFor(side) { return fighters[side].npc ? side === 0 : side === 1; }
     function killSide(side) {
-      // An interrupted reaction must release its await, even if a newer action
-      // replaces it before the timeline reaches its final frame.
+      // An interrupted reaction must release its await even if a newer action replaced it before its final frame.
       if (fighters[side].finishAction) fighters[side].finishAction();
       for (const inst of player.list) if (inst.side === side) Engine.killInst(inst);
       fighters[side].inst = null;
@@ -394,12 +361,9 @@
         if (!play(side, name, Object.assign({}, o, { onDone: done }))) done();
       });
     }
-    /** 把一条受击动画钉在**首帧**（= 刚挨打的贴身位），并立刻 resolve。
-     *  `bjBack` / 三侠的 `hurtRunBack` 整段是“被打退”——实测 `bjBack` 首帧包围盒
-     *  中心 x≈632、末帧≈237，会一路退回原位；反击致死若照常播完再倒地，就又是
-     *  “先回去才死”（用户 2026-11 口径）。经典播放器对应的是 `dead(1)`（直接停在
-     *  挨打处），现代没有那一帧，所以这里把受击姿态停在首帧，末尾 `die` 再按首帧
-     *  的包围盒差补位移，尸体就留在挨反击的地方。 */
+    // Pin a hit reaction on its first frame (the close-range hit position) and resolve at once.
+    // bjBack/hurtRunBack end far back (x≈632 -> ≈237), so playing it fully returns the unit before
+    // dying. Classic dead(1) stops where hit, so hold frame 1 and let die() offset by its bounds.
     function holdFirstFrame(side, name) {
       if (!Engine.hasAnim(name)) return Promise.resolve();
       return new Promise((resolve) => {
@@ -412,7 +376,7 @@
         };
         inst = play(side, name, { onFrame: (frame) => { if (frame >= 1) freeze(); } });
         if (!inst) { freeze(); return; }
-        /* 只有 1 帧 / 图集没到时 onFrame 不会来；兜底不能把整场卡住。 */
+        // No onFrame when only 1 frame / atlas missing; the fallback must not stall the battle.
         void wait(600).then(freeze);
       });
     }
@@ -430,8 +394,7 @@
       floaters.push({ side, text: String(text), color: color || 'r', big: !!big, crit: !!crit,
         x: p.x, y: p.y - count * 43, age: 0 });
     }
-    /** 伤害飘字：暴击走 4842 第 3 帧图标 + 黄色数字，普通伤害仍是红色「-N」。
-     *  幻兽协战（pet）也能暴击（打兴奋剂），所以统一从这里出。 */
+    // Damage floaters: crits use 4842 frame-3 icon + yellow number, normal hits red "-N"; pets can crit too.
     function damageFloater(side, dmg, crit) {
       if (crit) { floater(side, fmtBig(dmg), 'y', true, true); shake = Math.max(shake, 12); }
       else floater(side, '-' + fmtBig(dmg), 'r');
@@ -444,8 +407,8 @@
       for (let side = 0; side < 2; side++) {
         let next = r.hpAfter[side];
         if (counterPending && before && (r.counterDmg || r.counterFakeDie || r.counterRebound || r.counterBlocked)) {
-          // hpAfter is clamped at zero. Adding an overkill counter damage back
-          // would manufacture HP, so derive this frame from the event's start.
+          // hpAfter is clamped at zero. Adding overkill counter damage back would manufacture HP,
+          // so derive this frame from the event's start.
           next = before[side] + (side === r.attacker
             ? (r.healSelf || 0) + (r.lifesteal || 0) - (r.selfBurn || 0) - (r.reboundHurt || 0)
             : -(r.dmg || 0));
@@ -483,7 +446,7 @@
       ctx.drawImage(hudCanvas, 0, 0);
     }
     function paintHud(c) {
-      // references/162442 与 162553：浅色姓名框、金黄色双向血条、居中的剩余回合。
+      // references/162442 & 162553: light name plate, gold two-way HP bar, centered rounds left.
       for (let side = 0; side < 2; side++) {
         const right = side === 1, x = right ? 634 : -20, width = 556, y = 51, height = 61;
         const nx = right ? 724 : 114;
@@ -496,14 +459,14 @@
         c.save(); c.beginPath(); roundRectPath(c, x, y, width, height, 31); c.clip();
         const gradient = c.createLinearGradient(0, y, 0, y + height); gradient.addColorStop(0, '#ffd323'); gradient.addColorStop(1, '#ffaa0e');
         c.fillStyle = gradient; c.fillRect(right ? x + width * (1 - pct) : x, y, width * pct, height);
-        /* 护盾：淡蓝色**压在黄色血条的最左一段**（条长仍按生命上限，不额外长出去）。
-         * 敌方血条是从右往左长的，它的“最左”就是黄条靠近中线的那一端。 */
+        // Shield: light-blue segment over the left end of the yellow bar (bar length stays max HP).
+        // Enemy bars grow right-to-left, so their "left end" is the middle-line end.
         if (sp > 0) {
           c.fillStyle = 'rgba(120,226,255,.95)';
           c.fillRect(right ? x + width * (1 - pct) : x, y, width * sp, height);
         }
         c.restore();
-        /* 血量数字把护盾算进分子：x = 血量 + 盾量，y = 生命上限。 */
+        // HP text counts shield in the numerator: x = hp + shield, y = max HP.
         Engine.text(c, fmtBig(hps[side] + (Number(shields[side]) || 0)) + '/' + fmtBig(maxHp[side]), x + width / 2, y + 42,
           { size: 36, align: 'center', color: '#fff8d4', bold: false, stroke: false });
       }
@@ -530,7 +493,7 @@
       }
       Engine.text(c, String(Math.max(0, round)).padStart(2, '0'), W / 2, 101,
         { size: 63, align: 'center', color: '#fff', strokeColor: '#301314', lineWidth: 6 });
-      /* 挑战塔题面：这条规则决定「什么时候该爆发」，进层前预告里读过，战斗里再贴一次备忘 */
+      // Tower trial rule: decides when to burst; also shown as a reminder during the battle.
       if (opts.trial && opts.trial.text) {
         const label = String(opts.trial.text);
         const bw = Math.min(W - 40, label.length * 21 + 44);
@@ -539,7 +502,7 @@
         roundRectPath(c, W / 2 - bw / 2, 160, bw, 40, 20); c.stroke();
         Engine.text(c, label, W / 2, 188, { size: 22, align: 'center', color: '#f4e6ff', stroke: false });
       }
-      /* 调试三维：放在题面下方，两个独立小条，实时读 Sim 每拍结算后的有效值。 */
+      // Debug 3-stat bars below the trial text; read Sim's post-tick effective values.
       if (debugBattleStats && liveStats) {
         for (let side = 0; side < 2; side++) {
           const s = liveStats[side] || { power: 1, agility: 1, speed: 1 };
@@ -556,7 +519,7 @@
         }
       }
       if (!ending && cornerVisible) {
-        /* 画一个圆角键：fast = 倍速（蓝色，>1× 时才亮）；否则是跳过（绿色）。 */
+        // Rounded key: fast = speed (blue, lit above 1x); otherwise skip (green).
         const drawKey = (b, label, fast) => {
           rounded(c,b.x, b.y + 5, b.w, b.h, 34, fast ? '#0d2a45' : '#23350a');
           const g = c.createLinearGradient(0, b.y, 0, b.y + b.h);
@@ -571,9 +534,9 @@
         if (cornerRects.skip) drawKey(cornerRects.skip, '跳过', false);
       }
     }
-    /* 荣耀 / 华为 WebView 的恢复入口：重置两块画布（GPU 表面可能已被回收）并重取图集。
-     * `canvas.width = W` 会清空当前帧，但下一帧 render 会完整重画；`ctx` 也重新取一次，
-     * 避免某些内核在表面回收后把旧上下文留成“能调用但画不出来”的状态。 */
+    // Honor/Huawei WebView recovery: reset both canvases (GPU surfaces may be reclaimed) and
+    // refetch atlases. canvas.width = W clears the frame, next render repaints fully. Re-fetch ctx
+    // too: some kernels leave an old context that accepts calls but paints nothing.
     function resetBattleSurface() {
       try {
         canvas.width = W; canvas.height = H;
@@ -585,17 +548,17 @@
     function recoverBattleImages() {
       resetBattleSurface();
       if (!Engine.recoverSheets) return;
-      /* 丢图通常是“整张 WebView 图片缓存都没了”，不只战斗那几十张。只补 watchIds 会让
-       * 战斗恢复、回首页后头像 / 图标 / 数字仍然缺。这里把当前注册过的图集全部重取一遍；
-       * 健康检查只在真的画不出来时才会走到，正常一局一次都不会触发。 */
+      // Missing images usually means the whole WebView image cache is gone; refetching only watchIds
+      // restores battle but leaves home avatars/icons missing. Refetch every registered atlas; the
+      // health check only fires when drawing actually fails.
       const all = Object.keys(Engine.SHEETS || {});
       Engine.recoverSheets(all.length ? all : watchIds).catch(() => {});
     }
     function render(now) {
       if (stopped) return;
-      /* 图集“看起来加载成功”不等于现在还能画：荣耀 WebView 会在内存回收后丢掉解码数据，
-       * `naturalWidth` 仍是原值、`drawImage` 却画不出像素。每 2 秒拿图集缩画到 2×2 验一次，
-       * 连续失败就重置画布 + 强制重取（最多 3 次，避免 404 素材无限刷）。 */
+      // "Loaded" does not mean drawable: Honor WebView drops decoded data after memory pressure
+      // (naturalWidth stays, drawImage paints nothing). Every 2s draw the atlas to 2×2; consecutive
+      // failures reset canvases + force refetch (max 3, so 404 assets don't loop).
       if (now - lastHealth > 2000) {
         lastHealth = now;
         const missingNow = Engine.missingSheets ? Engine.missingSheets(watchIds) : [];
@@ -620,8 +583,8 @@
         const h = (f.big ? 62 : 48) * scale;
         const badge = f.crit && critBadge && critBadge.img;
         if (badge) {
-          /* 暴击：左边 4842 第 3 帧的「暴击」字样，右边黄色数字，整体居中；
-           * 与 `4843` 里 `addOrReduce`（x≈0）和 `num`（x≈29）的并排关系一致。 */
+          // Crit: 4842 frame-3 「暴击」 on the left, yellow number on the right, centered together;
+          // matches 4843's addOrReduce (x≈0) + num (x≈29) side-by-side layout.
           const numW = Engine.measureNumber('fightNum_' + f.color, f.text, h) || h * 0.6;
           const badgeH = h * 0.74;
           const badgeW = badgeH * (badge.width / Math.max(1, badge.height));
@@ -641,17 +604,17 @@
       }
       raf = requestAnimationFrame(render);
     }
-    /* 安卓切后台/内存回收时 rAF 会自己停；但某些 WebView 会在不可见时继续派发少数帧，
-     * 回来时又用一个很旧的时间戳补一帧。显式取消并在回前台时重置 `last`，避免敌人
-     * 动画在后台被推着走、回前台后瞬移/重复归位。 */
+    // rAF stops itself when Android backgrounds the app, but some WebViews still dispatch a few
+    // frames while invisible and then deliver an old timestamp. Cancel explicitly and reset `last`
+    // on return, so enemies don't advance in background or teleport/replay on resume.
     function onVisibility() {
       if (document.hidden) {
         if (raf) { cancelAnimationFrame(raf); raf = 0; }
         return;
       }
       if (stopped || raf) return;
-      /* 回前台先重置画布并补图：荣耀/华为 WebView 会把后台期间的 GPU 表面和图片解码
-       * 缓存一起回收，不主动重画会停在“纯色底 + 文字”的残帧上。 */
+      // On return, reset the canvas and refetch images: Honor/Huawei reclaim GPU surfaces and the
+      // decode cache while backgrounded; without a repaint the frame stays "flat color + text".
       resetBattleSurface();
       retryMissingSheets();
       try { if (Engine.retryFailedImages) Engine.retryFailedImages(); } catch (e) {}
@@ -664,8 +627,8 @@
       const f = fighters[side];
       let name = f.npc ? npcAnim(f.npc, 'hit') : 'hitMe', fx = f.npc ? f.npc + '_effect_hitMe' : 'effect_hitMe';
       if (r.dodge) { name = f.npc ? npcAnim(f.npc, 'dodge') : 'runAround'; fx = f.npc ? f.npc + '_effect_runAround' : 'effect_runAround'; }
-      /* 装死可能由**反伤**打在出手方身上（需求143）—— 这时 fakeDieSide 指向的是出手方，
-       * 不能把装死动作套到挨打的那位身上（否则会顶掉他的「绝对防御」表现）。 */
+      // Fake death can hit the attacker via reflect (fakeDieSide) — never apply it to the defender,
+      // which would override their "absolute defense" animation.
       else if (!f.npc && r.fakeDie && (r.fakeDieSide == null || Number(r.fakeDieSide) === Number(side))) { name = 'skill_6'; fx = 'effect_skill_6'; }
       else if (!f.npc && r.jueDui) { name = 'skill_16'; fx = 'effect_skill_16'; }
       else if (!f.npc && r.guiJia) { name = 'skill_7'; fx = 'effect_skill_7'; }
@@ -677,7 +640,7 @@
       if (!Engine.hasAnim(name)) name = f.npc ? npcAnim(f.npc, 'idle') : 'hitMe';
       effect(fx, side);
       await action(side, name);
-      // APK 的松鼠闪避只有后撤帧；反向播放同一组帧平滑归位。
+      // APK dodge only has back-step frames; play them in reverse to return smoothly.
       if (r.dodge && !f.npc && !aborted()) await action(side, name, { reverse: true, fps: 30 });
     }
     async function returnHome(side, name, moved) {
@@ -689,12 +652,12 @@
       }
       idle(side);
     }
-    /** 被反击打死的出手方：末尾倒地时用它算出“倒在被反击的地方”的位移。
-     *  `hurt` 是挨反击时实际播的受击动画（它的首帧就停在攻击后的贴身位）。 */
+    // When the counter kills the attacker, death uses this to offset "die where countered"; hurt is
+    // the actually played reaction (its first frame is the close-range position).
     let counterDeath = null;
-    /** 现代 `die` 只有“原位倒地”一套；原版 `dead(distance)` 的 `distance=1` 是
-     *  “在对手那边倒下”。这里用**受击动画首帧**与 `die` 首帧的包围盒中心差换算屏幕位移：
-     *  未镜像的一侧直接相加，镜像的一侧（向右的敌人 / 向左的三侠）取反。 */
+    // Modern die only has "fall in place"; original dead(distance=1) falls on the opponent's side.
+    // Use the bounds-center delta between the reaction's first frame and die's first frame: add on
+    // unmirrored sides, negate on mirrored ones (enemies facing right / trio facing left).
     function counterDeathOffset(side, hurtName, dieName) {
       const f = fighters[side];
       if (!f || !hurtName || !dieName) return 0;
@@ -717,13 +680,12 @@
       const beforeMax = maxHp.slice();
       if (r.action === 'dot') { applyHp(r); floater(r.selfDot ? att : def, '-' + fmtBig(r.dmg), 'y'); if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y'); await wait(400); return; }
       if (r.action === 'buff') {
-        /* 塔 buff：回合开始的自增益（越战越勇 / 后发制人 / 玉石俱焚）——
-         * 没有伤害也没有治疗，只飘一行字说明，别掉进下面的攻击分支播动画。
-         * 但「玉石俱焚」会同时压低**双方的血量上限**，所以要把上限与当前血量
-         * 一起更新到血条上（否则玩家在战斗里只看到飘字、看不到上限变化）。 */
+        // Tower buff: start-of-round self-buff (越战越勇/后发制人/玉石俱焚) has no damage/heal, only
+        // a text floater — do not fall into the attack branch. 玉石俱焚 also lowers BOTH max HPs, so
+        // update caps and current HP on the bars or the player sees text but no cap change.
         const capResult = applyRoundCaps(maxHp, hps, r);
         if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y');
-        /* 上限被压下来了：两边各飘一次新上限，配合血条数字一起看得到效果。 */
+        // Caps dropped: float each side's new cap alongside the bar numbers.
         if (capResult.capped) {
           for (const side of [0, 1]) {
             if (Number(r.maxHp[side]) < beforeMax[side]) floater(side, '上限 ' + fmtBig(maxHp[side]), 'y');
@@ -732,15 +694,14 @@
         await wait(320);
         return;
       }
-      if (r.action === 'regen') {   // 塔机制/buff：回合开始回复（百草回春/活血丹/回春术）
+      if (r.action === 'regen') {   // tower mechanics/buff: start-of-round heal (百草回春/活血丹/回春术)
         applyHp(r); floater(att, '+' + fmtBig(r.heal), 'g'); if (r.noteText) floater(att, r.noteText, 'y');
         await wait(420); return;
       }
       if (r.action === 'rest' || r.action === 'stunned') {
         applyHp(r);
-        /* 方天画戟的蓄力回合（preparingWeapon=1）只让玩家看思考气泡，不再飘「休息」。
-         * 敌人没有 commonThink 动作，飘字就是头上莫名其妙闪一段文字（用户 2026-10 口径）；
-         * 普通休息/眩晕仍保留提示。 */
+        // Halberd charge rounds (preparingWeapon=1) only show a thought bubble, not 「休息」: enemies
+        // lack commonThink, so a floater would flash text over their head. Normal rest/stun still shows.
         if (r.action === 'stunned') floater(att, '眩晕', 'y');
         else if (!(Number(r.preparingWeapon) > 0)) floater(att, '休息', 'y');
         // 思考气泡里画的是方天画戟，只有蓄力方天画戟的休息回合才能播放；眩晕回合只飘字
@@ -748,14 +709,14 @@
         else await wait(500);
         return;
       }
-      /* 幻兽协战：现代 canvas 播放器没有 32 只幻兽的原版动画，只把数值/技能名飘出来，
-       * 保证 Sim 新增的 `action:'pet'` 不会掉进下面的普攻分支被当成松鼠出手。 */
+      // Pet assist: the canvas player has no 32 pet animations; float numbers/skill name so Sim's
+      // action:'pet' never falls into the normal attack branch.
       if (r.action === 'pet') {
         applyHp(r);
         if (r.dmg) {
           damageFloater(def, r.dmg, !!r.crit);
-          /* 幻兽直接伤害也要让**对方**播受击（蛮犀牛 / 逆向推倒）：以前这里只飘字，
-           * 对方站着不动（用户 2026-10-29 反馈）。装死由 `reaction` 按 fakeDieSide 处理。 */
+          // Direct pet damage also makes the target play a reaction (rhino/push); previously only
+          // text floated and the target stood still. Fake death is handled by reaction() via fakeDieSide.
           if (hps[def] > 0 && !fighters[def].dead) await reaction(def, r);
         }
         if (r.healSelf) floater(att, '+' + fmtBig(r.healSelf), 'g');
@@ -792,14 +753,14 @@
         }
         else {
           defending = reaction(def, r);
-          /* 原版 `showBlood()`：暴击时 `addOrReduce` 停在**第 3 帧（暴击字样）**，
-           * 数字换成 **font 4** 的黄色档；不再单独飘一行「暴击」。
-           * 护盾吸收的那一截也算进这次的红字伤害（用户 2026-11 口径：打到盾上不能没有红字）。 */
+          // Original showBlood(): crit stops addOrReduce at frame 3 (crit label) and switches the
+          // number to font-4 yellow; no separate 「暴击」 floater. Shield-absorbed damage is included
+          // in the red number (hitting a shield must still show red text).
           const shownDmg = (Number(r.dmg) || 0) + (Number(r.shellAbsorb) || 0);
           if (shownDmg) damageFloater(def, shownDmg, !!r.crit);
           if (r.hits > 1 || r.multiHit > 1) floater(def, (r.hits || r.multiHit) + '连击', 'y');
           if (r.fakeDie) {
-            /* 普通受击 → 挨打的那位装死；被反伤 → **出手的那位**装死（需求143）。 */
+            // Normal hit -> defender fake-dies; reflect -> the ATTACKER fake-dies (fakeDieSide).
             const who = r.fakeDieSide == null ? def : r.fakeDieSide;
             floater(who, '装死', 'y');
             if (Number(who) !== Number(def)) reflectFakeDie = true;
@@ -809,7 +770,7 @@
           if (r.lifesteal) floater(att, '+' + fmtBig(r.lifesteal), 'g');
           if (r.reboundHurt) floater(att, '-' + fmtBig(r.reboundHurt), 'r');
           if (r.selfBurn) floater(att, '-' + fmtBig(r.selfBurn), 'r');
-          // 挑战塔：护盾吸收并入上面的红字伤害；这里只留荆棘反弹 / 机制提示
+          // Tower: shield absorb is folded into the red number above; only thorns/mechanics remain here.
           if (r.thornsDmg) floater(att, '-' + fmtBig(r.thornsDmg), 'r');
           if (r.noteText) floater(r.noteSide != null ? r.noteSide : att, r.noteText, 'y');
         }
@@ -819,25 +780,25 @@
       if (!didHit && !aborted()) impact();
       await defending;
       if (aborted()) return;
-      /* 被反伤打出装死的出手方：等对方的「绝对防御」反馈播完，再补一段装死动作
-       *（与「反击装死」同一套表现；直接在 impact 里播会跟正在放的攻击动作抢帧）。 */
+      // Attacker fake-dies from reflected damage: wait for the defender's 「绝对防御」 feedback, then
+      // play the fake death (playing it in impact would fight the ongoing attack animation).
       if (reflectFakeDie && hps[r.fakeDieSide] > 0) await reaction(r.fakeDieSide, { fakeDie: true });
       if (aborted()) return;
       const moved = !f.npc ? (name === 'fightCommonAttack' || name === 'fightWeaponAttack') : name === f.npc + '_common_attack' && f.npc !== 'xh';
       let recoveredFromCounter = false;
-      // 反击原版使用 beatBack；进攻者仍停在接近后的动作末帧，不提前瞬移回待机。
+      // Counter uses original beatBack; the attacker stays at the post-approach frame, no early idle snap-back.
       if ((r.counterDmg || r.counterFakeDie || r.counterRebound || r.counterBlocked) && hps[def] > 0) {
         floater(def, '反击', 'y');
         const counterName = fighters[def].npc ? fighters[def].npc + '_beatBack' : 'beatBack';
         let counterHit = false, counterReaction = Promise.resolve(), counterHurt = '';
         const counterImpact = () => {
           if (counterHit || aborted()) return; counterHit = true; applyHp(r);
-          /* 反击打在护盾上也要红字：`counterAbsorb` 是这次反击被盾吃掉的部分。 */
+          // Counter hitting a shield also shows red text; counterAbsorb is the shield-eaten part.
           const shownCounter = (Number(r.counterDmg) || 0) + (Number(r.counterAbsorb) || 0);
           if (shownCounter) floater(att, '-' + fmtBig(shownCounter), 'r');
           else if (r.counterBlocked) floater(att, r.counterBlocked, 'y');
           if (r.counterFakeDie) {
-            /* 同样分「挨反击的那位装死」与「反击者被反伤打死装死」两种情况。 */
+            // Two cases: the countered side fake-dies, or the counter-er is killed by reflect and fake-dies.
             const who = r.counterFakeDieSide == null ? att : r.counterFakeDieSide;
             floater(who, '装死', 'y');
             counterReaction = reaction(who, { fakeDie: true });
@@ -851,9 +812,9 @@
           const hurt = moved ? (f.npc ? f.npc + '_hurtRunBack' : 'bjBack') : (f.npc ? npcAnim(f.npc, 'hit') : 'hitMe');
           counterHurt = hurt;
           if (Engine.hasAnim(hurt)) {
-            /* `applyHp(r)` 刚写上整拍终值：这一下会打死出手方时，受击/击退动画不再
-             * 整段播完（它会把角色退回原位），改钉在首帧的挨打处；收尾的 `die`
-             * 再用首帧包围盒差停在同一位置。 */
+            // applyHp(r) already wrote this round's final HP. If the hit kills the attacker, do not
+            // play the full hurt/knockback (it returns them home); pin at frame-1 hit position and
+            // let the closing die offset by that frame's bounds.
             const lethal = hps[att] <= 0;
             if (!lethal) effect(moved ? (f.npc ? f.npc + '_effect_hurtRunBack' : 'effect_hurtRunBack') : (f.npc ? f.npc + '_effect_hitMe' : 'effect_hitMe'), att);
             counterReaction = lethal ? holdFirstFrame(att, hurt) : action(att, hurt);
@@ -867,15 +828,14 @@
         if (hps[att] <= 0) counterDeath = { side: att, hurt: counterHurt };
       }
       applyHp(r);
-      /* 被打死的一侧不再走归位/待机：`returnHome` 里的 `idle` 会把它搬回原位，
-       * 刚钉住的受击姿态就白钉了（用户 2026-11：“打着打着人回去了才死”）。 */
+      // A dead side must not run returnHome/idle (it moves them back), which would undo the pinned pose.
       if (hps[att] > 0) await returnHome(att, name, moved && !recoveredFromCounter);
       idle(def);
       await wait(170);
     }
     async function perform() {
       idle(0); idle(1); raf = requestAnimationFrame(render);
-      // 原版开场为 3、2、1、GO，runAround 是闪避动画，不能拿来循环入场。
+      // Original opening is 3-2-1-GO; runAround is the dodge animation, never use it for the intro loop.
       for (const n of ['1', '2', '3', '0']) { if (aborted()) break; countdown = n; await wait(n === '0' ? 500 : 420); }
       countdown = null;
       combatStarted = true;
@@ -890,14 +850,14 @@
       ending = true; for (const b of cornerDom) b.remove();
       if (pickups) pickups.close();
       const finalRound = result.rounds[result.rounds.length - 1]; if (finalRound) applyHp(finalRound);
-      // skip 唤醒当前动作后直接完成；自然结束保留倒地末帧和胜利演出。
+      // skip wakes the current action and finishes; natural end keeps the death last frame and victory show.
       if (!skipped) {
         const winner = result.winner, loser = 1 - winner;
         fighters[loser].dead = true;
         const dead = fighters[loser].npc ? npcAnim(fighters[loser].npc, 'die') : 'die';
         effect(fighters[loser].npc ? fighters[loser].npc + '_effect_die' : 'effect_dead', loser);
-        /* 被反击打死的那一方：倒地位置留在**挨反击的贴身位**（原版 `dead(1)` 的语义），
-         * 不要先瞬移回原位再倒。 */
+        // Counter-killed side: death stays at the close-range position (original dead(1) semantics),
+        // no snap back home first.
         const dieX = (counterDeath && counterDeath.side === loser)
           ? counterDeathOffset(loser, counterDeath.hurt, dead) : 0;
         await action(loser, Engine.hasAnim(dead) ? dead : npcAnim(fighters[loser].npc, 'idle'), dieX ? { x: dieX } : undefined);
@@ -908,13 +868,13 @@
       }
       if (stopped) return;
       stopped = true; clean(); if (activeController === controller) activeController = null;
-      // 结算方需要「战斗结束时的剩余血量」（关卡连战要按比例继承）。
-      // Sim.simulate 只在逐帧 r.hpAfter 上给血量，这里把最后一帧提到 result 上。
+      // Result needs end-of-battle remaining HP (stage chains inherit by ratio); Sim only exposes
+      // per-round r.hpAfter, so lift the last round onto result.
       const hpRound = [...result.rounds].reverse().find((x) => x && Array.isArray(x.hpAfter) && x.hpAfter.length === 2);
       result.hpAfter = hpRound ? [Math.max(0, hpRound.hpAfter[0]), Math.max(0, hpRound.hpAfter[1])] : null;
       const loot = pickups ? pickups.summary() : { items: [], ups: [] };
-      /* 这一场是不是**玩家按跳过键**跳过的 —— 挑战塔 / 无尽塔的战斗没有飘物
-       *（collectDrops:false），它们的奖励按层结算，靠这个标记去扣「只收 2/3」。 */
+      // Whether the player pressed skip; tower/endless battles have no floating drops (collectDrops:
+      // false) and settle per floor, so they use this flag for the 2/3 cap.
       result.skipped = skippedByButton;
       if (loot.items.length) result.pickups = loot.items;
       if (opts.onEnd) opts.onEnd(result.winner, result, loot);
@@ -922,15 +882,11 @@
     perform().catch((error) => { controller.cancel(); console.error('[battle]', error); if (opts.onError) opts.onError(error); });
     return controller;
   }
-  /* ============================================================
-   * 【BT4】导出 window.Battle
-   * ============================================================ */
   window.Battle = {
-    /* 内部纯函数（供 tools/*.cjs 直接单测；游戏逻辑不依赖它） */
+    // Internal pure helpers for tools/*.cjs unit tests; game logic does not depend on them.
     _applyRoundCaps: applyRoundCaps, _cornerLayout: cornerLayout,
-    /* 正在播的那一场的控制器（`skip()` / `cancel()`）。给**探针与回归**用：
-     * 一场战斗要按模拟出的回合数逐帧播几十秒，等价性验证只需要"结果 + 结算链路"，
-     * 所以探针要能主动把它跳到结算（与玩家按右下角「跳过」是同一条路径）。 */
+    // Controller of the playing battle (skip()/cancel()), for probes/regression: a battle plays for
+    // tens of seconds, equivalence checks only need result + settlement, so probes jump to the end.
     active: () => activeController,
     run, makeAvatar, REGIONS, weaponLabelFor, weaponGlowFor, isThrowing };
 })();

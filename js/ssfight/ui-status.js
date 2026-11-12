@@ -1,9 +1,3 @@
-/* Classic status, weapon and skill tabs (symbol 7218, frames 1/2/3).
- * Uses SfUiMain.toolkit and extracted original assets; State supplies live values.
- * Frame transitions hydrate bitmap digits synchronously before the next paint.
- * Page API: SfStatus.open / openFriend / openHero / destroy / refresh.
- * Shared navigation and asset lookup: js/ssfight/AGENTS.md.
- */
 (function () {
   'use strict';
 
@@ -14,9 +8,7 @@
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   /* 原版四维的名字与显示顺序（第 1 帧里四个 4315 数字精灵的实例名，导出数据实测）：
-   * `power`(53.85,143.15) / `agility`(124.15,143.2) / `speed`(194.7,143.15) / `hp`(265.3,143.15)。
    * ⚠ 第 4 格画的是「命」（生命值）。原版那一行是
-   *   `showNumber(playerInfo.player.maxHp, zhuangtai.hp, 0, 0, "left")`（MainMovie.as:13991），
    *   而复刻 `State.totalStats()` 返回的四个字段就叫 `power/agility/speed/hp`
    *   （`hp` 就是最大生命，见 js/state.js:1786）—— 所以这里必须取 **`hp`**。
    *   2026-10 之前写的是 `maxHp`：`totalStats()` 根本没有这个键，取到 `undefined` → 那格恒为 0。 */
@@ -28,13 +20,6 @@
   ];
 
   /* 装备部位 ↔ 状态页立绘的"部位容器"（原版 `showFace()`，MainMovie.as:6554）。
-   * 原版这一页穿装备走的是 `showFace(zhuangtai, getMyWearList())`（:2272 / :13884 / :13930），
-   * 不是 `showWears()`（那是库元件「状态1」的"我的装备"页用的，还额外把部位压到 85%）。
-   * `showFace` 的四元组是：
-   *   [mc_head] / [mc_fistL, mc_fistR] / [mc_body, mc_handL, mc_handR] / [mc_footL, mc_footR]
-   * 对应的容器名是 头 / 外拳套·内拳套 / 衣服·手臂·手臂 / 鞋子·鞋子 ——
-   * **复刻之前把拳套贴在 mc_handL/R（那是手臂）上、容器也每种只用一个**，
-   * 所以"装备与角色外观没有贴合"（用户 2026-10 报的）。这里逐条照 `showFace` 改回来：
    * 贴到正确部位、**不缩放**（`showWears` 那 85% 不适用于这一页）。 */
   const FACE_PARTS = [
     { type: 0, cells: [['mc_head', 0]] },
@@ -63,33 +48,8 @@
   }
 
   let current = null;      // { view, container, tab, friend }
-  /* ============================================================
-   * 「查看别人的状态页」—— 原版就是**同一页**（`MainMovie.as` 的 `isViewfriend` 分支）
-   * ------------------------------------------------------------
-   * 用户 2026-10 口径："其中的查看功能在 ssfight 版本中是前往一个与玩家状态栏几乎一样的
-   * 页面进行查看属性与武器技能，查看 ssfight 中实现方式并进行对齐。"
-   * 原版的实现（读 AS 得到，逐条对得上）：
-   *   · `doAction(3)` → `getPlayInfo(wz)`（:17326）把 `isViewfriend = true` 之后
-   *     **`gotoAndStop("zhuangtai")`** —— 就是玩家自己那一页（:964-984）；
-   *   · `showMainInfo()`（:13860）只换数据源：`playerInfo = isViewfriend ? friendInfo : oldMyInfo`，
-   *     立绘走同一个 `showFace(zhuangtai, playerInfo.player.wearsList)`；
-   *   · 查看别人时**两颗功能键换档**：`b_change.gotoAndStop(4|5)`、`b_fusion.gotoAndStop(3)`
-   *     （:13881-13926）—— 第 4/5 帧上写着「查看装备」，`b_fusion` 那颗隐藏；
-   *   · 武器 / 技能两页共用（`showWeaponSkills` :22022 同样按 `isViewfriend` 换数据源），
-   *     只是**点开的详情窗口整体被 `if (!isViewfriend)` 包住**（`showWeaponSkillWin` :16658-16790）
-   *     —— 看别人时不给升级/升阶，所以复刻这里也只做"看"；
-   *   · `back` → `leavePage()`（:13800）：看完回**挑战页**（`pubSeeFrined` 那一路才回村庄）。
-   * ========================================================== */
   const friendView = () => !!(current && current.friend);
   const Friend = () => (current && current.friend) || null;
-  /* ============================================================
-   * 勇者模式：同一颗状态页 7218，换一份数据源
-   * ------------------------------------------------------------
-   * 用户 2026-10-24 口径：勇者模式的准备界面直接复用随机挑战「查看敌人」这张状态页
-   * （状态 / 武器 / 技能三个页签 + 查看/更换装备），不要另造一套 DOM。
-   *   · `mode: 'setup'` = 开局准备：武器/技能两页列出**全部可学习武技**，点亮 3 个；
-   *   · `mode: 'run'` = 爬塔中点头像：只读（武技已随本局成长固定），外观装备仍可换。
-   * 数据、回调都由 `js/tower-ui.js` 通过 `openHero()` 传进来；本文件只负责画与接线。 */
   const HERO_PICK_LIMIT = 3;
   const heroView = () => !!(current && current.hero);
   const Hero = () => (current && current.hero) || null;
@@ -106,7 +66,6 @@
     const hero = Hero();
     return !!(hero && hero.mode === 'setup' && heroPickSet().size >= HERO_PICK_LIMIT);
   }
-  /** 看完别人 → 回**挑战页**（原版 `leavePage()` :13800 的 `gotoAndStop("tiaozhan")`）。 */
   function leaveFriendView() {
     const back = (current && current.backTo) || null;
     destroy();
@@ -114,8 +73,6 @@
     if (window.UI && UI.runAction) UI.runAction('challenge');
   }
   /** 「查看装备」：原版 `friendEquipsInfo()`（:13821）= 库元件「状态1」的第 7 帧。
-   *  那一颗**还没提取**（`状态1` = 4673，见状态页文件头的"素材还没提取"说明），
-   *  所以走下面那段 `openFriendGearsOverlay()`：在**当前这一页上盖一层**复刻自己的说明面板
    *  （数据是真的，版式是复刻的）。⚠ 定义在这里（文件后段）而不是紧挨着调用点 ——
    *  `openFriendGearsOverlay` 是函数声明、靠"就近"容易看漏它与 `detailHost` 的依赖。 */
   function openFriendGears() {
@@ -123,7 +80,6 @@
     try { openFriendGearsOverlay(); } catch (e) { if (window.__errs) window.__errs.push('friendGears: ' + (e && e.message)); }
   }
 
-  /* ---------- 通用小件 ---------- */
   const clipOf = (host, name) => (host && host.byName ? host.byName(name) : null);
   /** 让元件**停在**某一帧（不自己播）。状态页的按钮/格子都是"状态精灵"，只能停帧不能 play。 */
   function stopAt(clip, n) {
@@ -145,7 +101,6 @@
     if (shell) t.wirePopPress(shell);
     t.freezeDescendants(clip);
   }
-  /** Bind a stateful button once; refresh current handlers and its stable feedback shell. */
   function wireClickable(clip, spec) {
     const t = T();
     if (!t || !clip || !clip.g) return;
@@ -177,13 +132,11 @@
     clip.g.addEventListener('mouseleave', () => { pinIdle(clip); refreshShell(clip); });
     clip.g.addEventListener('click', (e) => {
       e.stopPropagation();
-      /* 按下闪一下：闪的那一帧也要钉住，闪完回常态档（`pressFlash` 的 after 里重钉）。 */
       if (spec.press) t.pressFlash(clip, idleOf(), () => { pinIdle(clip); refreshShell(clip); },
         (f) => setPinned(clip, f));
       if (clip.__statusFire) clip.__statusFire();
     });
   }
-  /** Explicit state selection stops autoplay without a ticker-enforced frame pin. */
   function setPinned(clip, frame) {
     if (!clip || !clip.gotoAndStop) return;
     const want = Math.max(1, Math.round(Number(frame) || 1));
@@ -191,25 +144,19 @@
     if (clip.frame !== want - 1) { try { clip.gotoAndStop(want); } catch (e) {} }
     clip.playing = false;
   }
-  /** Restore the current idle/selected state. */
   function pinIdle(clip) {
     if (!clip || !clip.__statusIdle) return;
     setPinned(clip, clip.__statusIdle());
   }
-  /** Re-evaluate level-dependent button states. */
   function settleStatusButton(clip) {
     if (!clip || !clip.__statusIdle) return;
     if (clip.frame !== clip.__statusIdle() - 1) refreshShell(clip);
     pinIdle(clip);
   }
-  /** 原版的 `mc.left._visible = false`（不是切禁用帧）—— 照抄成 CSS `visibility`。 */
   function setVisible(clip, on) {
     if (clip && clip.g) clip.g.style.visibility = on ? '' : 'hidden';
   }
 
-  /* ============================================================
-   * 立绘：把玩家**穿在身上的装备**贴到部位容器上（原版 `showFace` 的等价物）
-   * ========================================================== */
   function dressParts(view, byType) {
     if (!view || !portraitContainerIds) return 0;
     let n = 0;
@@ -231,9 +178,6 @@
   /** 读 `gear-frames.json`（id→帧号）与 `gear-slots.json`（部位→容器符号）两张表。
    *  `showFace` 只做 `attachMovie(容器) + gotoAndStop(frame)`，**不动缩放** —— 照抄。 */
   let frameTable = null;
-  /** 橙装（q4 id 或旧实例 orange）对应的**原版 q4 画稿帧**：同部位同名字的 q4 套。
-   *  `狂战头盔` q3 = frame 71（紫）、q4 = frame 113（橙）—— 直接沿用原版橙稿，
-   *  不再拿紫稿硬填成"橙装也是紫的"（用户 2026-11 口径）。 */
   let orangeFrameTable = null;
   function gearToneKey(type, name) { return Number(type) + '|' + String(name || ''); }
   function wearInfo(gear) {
@@ -242,8 +186,6 @@
     if (!base) return null;
     /* 强化等级加成：原版 `_loc5 += (max(addr1Lv,addr2Lv,addr3Lv) - 1)`（有强化才加）。
      * ⚠ `gear.ext` 是**附加属性数组**（`[{id, level}]`），对它做 `Number()` 得 `NaN` ——
-     * 老写法 `Math.max(0, Number(ext) - 1)` 于是把帧号算成 NaN，`gotoAndStop(NaN)` 一路夹到
-     * **容器第 1 帧**（那是"全身稿"那一帧，画出来是一大坨盖住整页）。
      * 与 `ui-main.js` 的 `planWears.frameFor` 取齐：`NaN || 0` → 无加成。 */
     const orange = gear.orange === true || Number(gear.quality) > 3;
     const orangeFrame = orange && orangeFrameTable ? orangeFrameTable.get(Number(gear.id)) : 0;
@@ -263,12 +205,10 @@
   }
   async function loadFrameTable() {
     if (frameTable && containerIds && portraitContainerIds) return frameTable;
-    const B = 'images/ssfight/ui/';
-    const j = (f) => fetch(B + f, { cache: 'force-cache' }).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+    const j = (f) => SfRender.loadTable(f).catch(() => null);
     const [r, slots] = await Promise.all([j('gear-frames.json'), j('gear-slots.json')]);
     if (r && !frameTable) {
       frameTable = new Map(r.gear.map((g) => [Number(g.id), g.frame]));
-      /* q4 与 q3 的套名/部位一致，按这个键把橙稿帧挂到 q3 的 id 上。 */
       const q4 = new Map();
       for (const g of r.gear) if (Number(g.quality) === 4) q4.set(gearToneKey(g.type, g.name), g.frame);
       orangeFrameTable = new Map();
@@ -289,9 +229,6 @@
     return frameTable;
   }
 
-  /* ============================================================
-   * 填值：`MainMovie_frame50.as` 里那一组 `setText` / `gotoAndStop`
-   * ========================================================== */
   /** 原版 `showbigNumber()`（MainMovie.as:5896-5950）：把"战斗场次"这类可能上万的大数
    *  拆成**两个 4 位数字精灵**（`fightTimes1` 高位 / `fightTimes2` 低位）。
    *  复刻原来是把总数当**文本**写进 `fightTimes1`、把 `fightTimes2` 清空 —— 但这两个是
@@ -307,7 +244,6 @@
       return;
     }
     setVisible(mc2, true);
-    /* 高位占几位（原版按数量级选 1~4） */
     const highDigits = n > 9999999 ? 4 : n > 999999 ? 3 : n > 99999 ? 2 : 1;
     const p = Math.pow(10, highDigits);
     const low = n % p, hi = Math.floor(n / p);
@@ -322,7 +258,6 @@
     const t = T();
     if (!s || !t) return;
     /* 数据源：自己的话读存档；**查看别人**时整份换成对手那一套
-     * （原版 `playerInfo = isViewfriend ? friendInfo : oldMyInfo`，MainMovie.as:13880-13884）；
      * 勇者模式同理，只是换成这一局/这一份草稿的四维与外观。 */
     const foe = Friend();
     const hero = Hero();
@@ -336,8 +271,6 @@
       speed: Number(foe.speed) || 0, hp: Number(foe.hp) || 0,
     } : hero ? {
       name: '勇者', level: 1, exp: 0, nextExp: 0,
-      /* 准备页还没有战绩；爬塔中回看时把本局胜场写成「战斗场次」。
-       * 今日胜率沿用原版"没有败场时给 100%"的口径，不做假数据。 */
       dailyWins: Math.max(0, Number(hero.wins) || 0), dailyFails: 0,
       allWins: Math.max(0, Number(hero.wins) || 0), allFails: 0,
       power: Number(hs && hs.power) || 0,
@@ -357,7 +290,6 @@
 
     /* 今日胜率 / 战斗场次：原版 `MainMovie.as:13995-14003` ——
      * 胜率用 `showNumber`（**位图数字**，没有场次时原版给 100），
-     * 场次用 `showbigNumber` 拆成两颗。复刻之前用 `setText` 写字符串，
      * 把位图数字精灵整棵子树换掉，表现就是"所有数字都不显示"。 */
     const wins = Number(src.dailyWins) || 0, fails = Number(src.dailyFails) || 0;
     const fights = wins + fails;
@@ -384,14 +316,9 @@
     settleStatusButton(clipOf(view, 'b_change'));
     settleStatusButton(clipOf(view, 'b_fusion'));
 
-    /* 立绘：穿在身上的装备贴到部位容器上（`showFace`）。
-     * 看别人时贴的是**他自己的** `wearsList`（原版 :13884）。 */
     let worn = [];
     if (foe) worn = Array.isArray(foe.gears) ? foe.gears : [];
     else if (hero) {
-      /* 准备页传进来的是四格 `[{id,tier}]`，爬塔中传的是 run.hero.appearance。
-       * 两种都归一成 `{id,type,ext,tier}`，`dressParts` / `wearInfo` 只认这一种
-       * （`tier` = 外观差分档，头 / 拳套的画稿会 +0/+1/+2 帧）。 */
       worn = (Array.isArray(hero.appearance) ? hero.appearance : []).map((raw) => {
         const item = (raw && typeof raw === 'object') ? raw : { id: Number(raw) };
         const id = Number(item.id);
@@ -414,40 +341,10 @@
   }
 
   /* ⚠ 历史上这里有一个 `valueClips()`，作用是"把数值精灵连子树一起排除在钉帧之外"。
-   * 那条例外**只对老机制（`pinFrame`：每一拍强制拨回第 1 帧）成立** —— 现在静态页策略
-   * 只写 `playing = false`（不自己往前走、不碰帧号），`showNumber` 逐位 `gotoAndStop`
    * 完全不受影响，所以数字精灵照冻不误，这个"保护名单"没有了存在理由（已删除）。 */
 
-  /* ============================================================
-   * 武器 / 技能栏（原版页元件 7218 的第 2、3 帧）
-   * ------------------------------------------------------------
-   * 用户 2026-10 口径："状态页面中武器栏技能栏没有和状态栏同步 ui…将武器与技能页面与 ssfight 对齐"，
-   * 后续追加："武器与技能的贴图大小和位置不对，进行靠齐；贴图不要再使用旧素材，
-   * 去 ssfight 版本中捞出矢量图素材进行替换。"
-   *
-   * 原版这三页是**同一个页元件的三个帧**（1 = 状态 / 2 = 武器 / 3 = 技能）：顶栏三个 tab、
-   * 米色面板、"返回菜单"、页码 `1/2` 与左右翻页箭头都是**同一套 ui**。
-   * 格子里那 10 个图标原版是运行时 `attachMovie(weaponSkill.name, "mc", 100)` 挂的**库元件**
-   * （`MainMovie.as:16637 loadWeaponSkill`，元件名就是武器/技能名）——
-   * 所以复刻也照这条走：`tools/gen-ssfight-ui.cjs` 的 `swfSymbolIds()` 按名字把那些元件
-   * 从 SWF 里查出来、从整片导出里抠成 `tags-wsicon.json`（**37 颗，一个不缺**），
-   * 这里把它们**挂进原版的格子元件**（`cell.attachChild(符号)`），
-   * 于是图标的长相 / 大小 / 落点全部由原版素材与格位决定，不再自己画一层 DOM。
-   * ⚠ 名字→元件 id 必须走 `swfSymbolIds()`（读 SWF 自己配对）；那张
-   * `01-swf-符号表/导出符号表.tsv` 整体错位一格，用它会出现"贴图全串位"（见生成器注释）。
-   *
-   * 原版格位（导出数据实测，格元件 3636 的画稿 41.25×41.25）：
-   *   左上角 (34.1, 38.65)，列距 53.3、行距 62.7，10 格 = 5 列 × 2 行；行 2 的 y = 101.35。
-   * 每个格元件 **3 帧**：1 = 空（无内容）/ 2 = 内容帧（`zhuangtai.c{i}` 停在 2 才显示挂进来的图标）
-   * / 3 = 空。没获得的那一档原版挂"名字 + 1"的另一个元件 —— 复刻用**同一颗矢量图标 + 灰阶**
-   * （`.locked`），因为那一批在导出里连形状都没做出来。
-   * ========================================================== */
   const PAGE_FRAME = { status: 1, weapons: 2, skills: 3 };
   const GRID_CELLS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10'];
-  /* 图标元件统一停第 1 帧：第 2 帧是"真化"那一档（多一枚红色「真」印章），
-   * 但它同时带着**导出时烤进画稿的名字 + "Lv99" 占位**；卡片以下那一条我们已经切掉了，
-   * 而印章只在卡片右下角一小块 —— 为它留一整条文字不如自己画一枚（`.sf-true`）。 */
-  /** 当前停在哪个 tab（1s 重刷与接线闭包都读它）。 */
   function activeTab() { return current ? current.tab : 'status'; }
   function gridKind() { return activeTab() === 'skills' ? 'skill' : 'weapon'; }
   function gridInfo() {
@@ -462,7 +359,6 @@
   }
   /** 把对手那一串 `["id:level", …]` 摊成状态页格子要的 `{items, page, pages}`。
    *  ⚠ 图标必须**自己补**：`UI.classic.catalogItems()` 只给字典条目（id / 名字），
-   *  图标那一步在 `catalogInfo()` 里（`wsIconOf(kind, id)`）—— 这里走的是"另做一个数据源"
    *  那条路，所以要照 `catalogInfo` 的做法补一次，否则格子是空的（本批实测踩过）。 */
   function friendGridInfo(foe, kind, pg) {
     const C = window.UI && UI.classic;
@@ -481,8 +377,6 @@
         selected: false,
         label: '',
         icon: C.wsIconOf ? C.wsIconOf(kind, it.id) : null,
-        /* 没获得的那一档也挂原版「名字 + 1」那颗灰卡元件；只给 icon 不给 lockedIcon 时
-         * `paintCell` 会当成空槽（`it.has ? it.icon : it.lockedIcon` 取到 null）→ 整格空着。 */
         lockedIcon: C.wsIconOf ? C.wsIconOf(kind, it.id, true) : null,
       };
     });
@@ -491,7 +385,6 @@
     return { items: items.slice(page * 10, page * 10 + 10), page: page, pages: pages };
   }
   /** 勇者模式的武器 / 技能格：清单来自 `TowerHero.catalog()`（与准备页的可选范围同一份），
-   *  准备时点亮 = 已获得（绿卡 + 名字），爬塔中只读 = 已学（带真实等级）。
    *  ⚠ 未点亮的项也要给 `lockedIcon`：`paintCell` 只认 `it.has ? it.icon : it.lockedIcon`，
    *    漏了它整格就是空槽，玩家会以为「这一页什么都没有」。 */
   function heroGridInfo(kind, pg) {
@@ -524,7 +417,6 @@
     const page = Math.max(0, Math.min(pages - 1, pg | 0));
     return { items: items.slice(page * 10, page * 10 + 10), page: page, pages: pages };
   }
-  /** 切一格武技：点亮 / 点暗。准备页最多 3 个；爬塔中只读。 */
   function heroTogglePick(kind, id) {
     const hero = Hero();
     if (!hero || hero.mode !== 'setup') return { ok: false };
@@ -540,7 +432,6 @@
     if (list.length === HERO_PICK_LIMIT && window.UI && UI.toast) {
       UI.toast('已点亮 ' + HERO_PICK_LIMIT + ' 个武技；回「状态」页点「开始挑战」出发。');
     }
-    /* 武技页点亮时四维/被动也在变；重写一遍数值，再重画格子。 */
     try { if (current && current.view) fillValues(current.view); } catch (e) {}
     try { applyTab(); } catch (e) { if (window.__errs) window.__errs.push('hero pick: ' + (e && e.message)); }
     refreshHeroChrome();
@@ -549,25 +440,7 @@
   /** 单元格子上要显示的东西。
    *  ⚠ 顺序必须是 **先摆帧、再挂内容**：`showFrame()` 在帧号真的变了的时候会
    *  **重建 `<g>` 的全部子节点**（把上一步挂进去的图标一起清掉），所以 `stopAt` 之后才挂。
-   *
-   *  原版这一格的四档外观**全在导出素材里**（对着 `references/screen/屏幕截图 …162315.png` 实测）：
-   *   · 图标元件（如 2139）**2 帧**：1 = 常态卡片（形状 2028，米白 + 黄爆芒）；
-   *     2 = **选中卡片**（形状 2037，绿底 + 绿框）；
-   *   · 卡片下方那条（元件名 `wname1`/`wname`，符号 **2138**）**4 帧**：
    *     1 = 名字（矢量画稿 2137，深绿）/ 2 = 名字 +「真」印章 / 3 = 只有「真」印章 / 4 = 空；
-   *     「真」印章是那颗 tp39 精灵 2034，摆在自己坐标 (39.25, −34.5)（= 卡片右下角、压出格）。
-   *   · 等级文字是**真的文本字段**（占位串 "Lv99"），原版由 `loadWeaponSkill` 的
-   *     `setText(_loc1.level, "LV"+n)` 写值 —— 复刻照写。
-   *
-   *  于是四档就是"拨两层帧"：
-   *   | 选中 | 真化 | 图标帧 | 名字层帧 |
-   *   |---|---|---|---|
-   *   | ✗ | ✗ | 1 | 4（空） |
-   *   | ✗ | ✓ | 1 | 3（只有印章） |
-   *   | ✓ | ✗ | 2 | 1（只有名字） |
-   *   | ✓ | ✓ | 2 | 2（名字 + 印章） |
-   *
-   *  ⚠ **没获得的那一档**原版是另一颗 `武器名+"1"` 的库元件（导出符号表里 spriteId 全是 `None`，
    *   拿不到素材），复刻只能用**同一颗矢量图标 + `.locked` 灰阶**近似 —— 见 css。 */
   const ICON_LABEL_Y = 43;        // 卡片与"名字/印章那一条"的分界（舞台单位，实测 44.5~47.2 起）
   function localY(ma) {
@@ -591,10 +464,8 @@
     cell.detachAll();
     if (!it || !(it.has ? it.icon : it.lockedIcon)) return;
     /* ⚠ **没获得的那一档是另一颗库元件**（`it.lockedIcon` = 原版的名字 + "1"）：
-     *   `showWeaponSkills`（MainMovie.as:22050-22057）就是 `has ? attachMovie(名字) :
      *   attachMovie(名字 + "1")`。那颗自己带**灰底卡片 + 灰色的名字层**，第 2 帧才把名字显出来
      *   （第 1 帧只有灰卡片）—— 所以"悬停未获得的格子显示灰名字"走的是**和已获得完全同一套**
-     *   选帧机制，不需要另做一条 DOM 名字条。以前这里两档都挂已获得那颗、再用 CSS
      *   `filter:grayscale` 压成灰的，名字层根本没有灰版，只能靠 DOM 硬贴（用户 2026-10 口径）。 */
     const clip = cell.attachChild(it.has ? it.icon : it.lockedIcon, sel ? 2 : 1, 'icon');
     if (!clip || !clip.g) return;
@@ -604,14 +475,11 @@
     if (it.has) dressIcon(clip, it, sel);
     else { paintIconLabel(clip, false, false); writeIconLevel(clip, it, false); }
   }
-  /** 把 `attachChild` 挂上去的子元件挪到宿主 `<g>` 的末尾（= 画在最上层）。
-   *  `popWrap()` 会把可见内容搬进一层 `<g class="uc-pop">` 壳里，所以两级都要看一眼。 */
   function raiseAttached(host) {
     if (!host || !host.__attached || !host.__attached.length) return;
     const shell = host.g.querySelector(':scope > g.uc-pop') || host.g;
     for (const c of host.__attached) if (c.g && c.g.parentNode === shell) shell.appendChild(c.g);
   }
-  /** 取格子里那颗挂上去的图标元件（`attachChild(…, 'icon')` 出来的那一颗）。 */
   function cellIconClip(cell) {
     for (const c of (cell && cell.__attached) || []) {
       if (c.g && c.g.getAttribute && c.g.getAttribute('attach-name') === 'icon') return c;
@@ -628,11 +496,9 @@
     writeIconLevel(clip, it, sel);
   }
   /** 把格子的外观切到"选中 / 悬停"那一档（**只拨帧，不重建实例**）。
-   *  原版没有鼠标：它靠键盘光标选中某一项（`showButton(weaponskillLoadArray, i, 1)` →
    *  `mc.gotoAndStop(2)`），选中的那一格才显示名字、卡片才变绿。
    *  复刻把**悬停**当成那个光标位置 —— 见 `wireCell`。
    *  ⚠ **未获得的那一档同样走这条路**（用户 2026-10 口径："悬停未解锁的也显示名称，
-   *    方案与已解锁一致，只是字体是同色灰色"）：原版没获得挂的是"名字 + 1"那颗元件，
    *    它的第 2 帧 = 灰卡片 + **灰名字**，所以拨帧这一下就够了，两档共用一套。 */
   function setCellLook(cell, it, hovered) {
     if (!cell || !it) return false;
@@ -644,8 +510,6 @@
   /** 拨"卡片下方那一条"（名字 / 「真」印章）的帧，见 `paintCell` 的四档表。
    *  ⚠ 判据用**放置自己的局部 y**（写在 `__baseMa` 里），不要用"实测包围盒占整体的比例"：
    *  实测那 37 颗图标里名字层的落点是 **44.5~47.2**、等级文本是 45.7~45.9、
-   *  卡片里的图形最高只到 **28.75**，中间有一大段空白可切；而按包围盒比例切会因为
-   *  每颗名字长短不同、上下留白不同而**有的切掉有的切不掉**（用户看到的"十个格子里
    *  有八个还挂着名字"就是这么来的）。`level` 那个文本字段留着不动（`writeIconLevel` 要写它）。 */
   function paintIconLabel(clip, selected, trueForm) {
     if (!clip || !clip.nodes) return;
@@ -679,28 +543,8 @@
       if (g && g.style) g.style.display = on ? '' : 'none';
     }
   }
-  /* ============================================================
-   * 勇者模式的按钮层 —— 把「装备融合」那一位换成「开始挑战」
-   * ------------------------------------------------------------
-   * 原版自己的状态页第 1 帧里就有两颗并排的键：更换装备（`b_change`）与装备融合
-   * （`b_fusion`，实测舞台 x 222.5..300.1 / y 92.9..136）。随机挑战查看敌人时
-   * `b_fusion` 被整颗藏掉，所以那一块是空的。
-   * 勇者准备页正好把 `b_fusion` 藏掉、在原位挂一颗 **3911 金胶囊**（也就是「返回」那颗），
-   * 把「返回」字形层藏掉、自己写「开始挑战」四个字 —— 于是两颗键的版式与原版一致，
-   * 又不用另画一套现代 DOM 按钮。
-   * ⚠ 状态页只有第 1 帧有这两颗键；武器 / 技能页要 `display:none`，否则会压在卡片上。
-   * ========================================================== */
   const SVG_NS = 'http://www.w3.org/2000/svg';
-  /* 开始挑战沿用原版 3911 的皮，只把宽度收窄一点（sx < sy）。 */
   const HERO_START_AT = { x: 268, y: 112.8, s: 0.7, sx: 0.64 };
-  /* ============================================================
-   * 准备页「出发准备」卡（2026-10 用户口径：参考现代状态页的排布大幅美化）
-   * ------------------------------------------------------------
-   * 原版 7218 的右上角有一块空白（立绘右沿 x≈130、两颗键上沿 y≈98、
-   * 页签下沿 y≈31）。这里用原版奶油底 + 金边画一张小卡：
-   *   标题 / 三块事实（武技 / 四维 / 外观）/ 进度条 / 待办提示。
-   * 仍用 SVG 原生物件（不挂 DOM），所以会跟着 320×196 舞台等比缩放。
-   * ============================================================ */
   const HERO_TODO_BOX = { x: 148, y: 36, w: 150, h: 60, r: 7 };
   const HERO_TODO_FACTS = [
     { key: 'picks', x: 153, w: 43, label: '武技' },
@@ -730,7 +574,6 @@
     if (strokeWidth) rect.setAttribute('stroke-width', String(strokeWidth));
     return rect;
   }
-  /** 右上角「出发准备」卡：标题 + 三块事实 + 进度条 + 待办提示。 */
   function heroTodoEnsure(view) {
     let g = view.__heroTodo;
     if (g && g.isConnected) return g;
@@ -755,7 +598,6 @@
       g.appendChild(label); g.appendChild(value);
       facts.push({ key: f.key, value: value });
     }
-    /* 进度条：底槽 + 绿色填充。 */
     g.appendChild(heroSvgRect(box.x + 9, box.y + 38, box.w - 18, 3.6, 2, '#eadfc6', '#dccbaa', 0.6));
     const meter = heroSvgRect(box.x + 9, box.y + 38, 0, 3.6, 2, '#7fb84d', 'none', 0);
     g.appendChild(meter);
@@ -954,7 +796,6 @@
     return out;
   }
   function heroTrainLevelText(level) { return level > 10 ? '真' + (level - 10) : 'Lv.' + level; }
-  /** 点「铸币修炼」：在原版页上盖一层 DOM 选择层（与换装层同一做法，只拆自己）。 */
   function openHeroCoinTrain(hero, view) {
     if (!hero || typeof hero.onCoinTrain !== 'function') { if (window.UI && UI.toast) UI.toast('铸币修炼暂不可用。'); return; }
     if (Math.max(0, Number(hero.coins) || 0) <= 0) { if (window.UI && UI.toast) UI.toast('铸币不足（需要 1 枚）。'); return; }
@@ -989,7 +830,6 @@
   }
   /* ---------- 力 / 敏 / 速的小上下键（勇者准备页） ----------
    * 用户 2026-10-24 口径：四维可在开始界面调整，遵循 20% 下限；
-   * 力/敏/速各加一对小上下键，满额或没有可分配点时上键变灰。
    * 具体规则（预算 275 / 下限 55 / 上限 85）在 TowerHero；这里只画键与读 `hero.statState()`。 */
   const HERO_STAT_KEYS = ['power', 'agility', 'speed'];
   const HERO_STAT_NAMES = { power: '力量', agility: '敏捷', speed: '速度' };
@@ -999,7 +839,6 @@
     const hero = Hero();
     try { return (hero && typeof hero.statState === 'function') ? hero.statState() : null; } catch (e) { return null; }
   }
-  /** 把一颗小箭头切到可用 / 灰色。 */
   function setHeroStatArrow(group, dir, enabled) {
     const btn = group && group.querySelector('[data-dir="' + dir + '"]');
     if (!btn) return;
@@ -1119,10 +958,7 @@
   /** 准备页把右上角经验条 / 今日胜率 / 战斗场次这块**元素本身**收掉，
    *  不放白色补丁；文字直接落在奶油底上。返回 / 爬塔页会恢复。 */
   /** 状态页立绘（松鼠本体 + 装备挂点）在第 1 帧里的**顶层深度从 129 起**
-   *  （129 影子 / 130 脚 / 133 手 / 136 尾巴 / 138 身体 / 141·172 拳套 / 144 脚 /
    *    147 头 / 169 手；见导出数据）。准备页的「隐藏战绩区」是按**矩形**扫元素的，
-   *  立绘的右半边（右眼 / 右耳 / 右腮红 / 嘴）恰好落在右上角那块矩形里 ——
-   *  2026-10-24 用户报的「松鼠的左眼和左耳缺失」就是它们被当成战绩文字藏掉了。
    *  这里按**顶层深度**把立绘整棵子树排除，只藏真正的战绩元素。 */
   function inStatusPortrait(el, root) {
     let at = el;
@@ -1130,8 +966,6 @@
     const d = Number(at && at.getAttribute && at.getAttribute('depth'));
     return Number.isFinite(d) && d >= 129;
   }
-  /** 勇者页（准备 / 爬塔回看）把原版「Exp / 今日胜率 / 战斗场次」三块收掉。
-   *  2026-10-24 用户口径：爬塔中点头像查看**也一样**去掉这三块（原先只处理了准备页）。 */
   function hideHeroStatusFields(view, hide) {
     if (!view) return;
     const old = view.__heroFieldHidden;
@@ -1310,27 +1144,6 @@
     });
     if (heroView()) refreshHeroChrome();
   }
-  /* ============================================================
-   * 二级页：武器 / 技能详情
-   * ------------------------------------------------------------
-   * 用户 2026-10 口径："武器技能的详情页面中，对齐 需要 / 已有 / 金松果 / 成功率等 ui 素材，
-   * 以及背景贴图排布等。"
-   *
-   * 原版怎么开这一页（`MainMovie.as`）：
-   *   · `showWeaponSkillWin()` 选中某一项 → `showWeaponSkill3(weaponSkill, type)`；
-   *   · `showWeaponSkill3` 里 `loadMcs([["武器升阶", "subFrame", currentFrame]])`
-   *     —— 这一页**不是页根 7218 里的东西**，是一颗运行时挂上去的库元件；
-   *   · 右侧"需要 / 已有 / 成功率"那块是 `subFrame.requirement`（**3670**，
-   *     `showLeveupInfo` 往 need1/current1/need2/current2/rate 写值）。
-   *
-   * ⚠ 为什么改成**整页 DOM 画**（原来借库元件 4886 的第 5 帧当底板）：
-   *   4886 是**道具页**复用的那颗元件，它的 f5 自带一堆占位文本（`cost` 写的是宝石合成的串），
-   *   而真正要的 `requirement`（3670）根本不在它的闭包里 —— 于是搭出来的页面
-   *   "底板是道具页的、字段靠 DOM 硬贴"，实测与参考截图（`references/screen`）差得远：
-   *   图标位是个空黄框、需要/已有两列挤在一起。
-   *   现在按原版截图**逐块量出舞台坐标**（下面 `DETAIL`），底板、面板、按钮全部 DOM 画，
-   *   只有格子里那颗图标仍然挂**原版矢量元件**（`mountSymbol` + 只框住卡片的 viewBox）。
-   * ========================================================== */
   /** 详情页落点（舞台坐标；对着原版截图逐块量出来的，见上面那段注释）。 */
   const DETAIL = {
     panel: { x: 25, y: 8, w: 270, h: 172 },
@@ -1412,7 +1225,6 @@
       }
       own = item;
       if (kind === 'weapon' && window.TowerHero && TowerHero.heroWeapon) {
-        /* `heroWeapon` 读的是 `id:level`（不是升级 API 的 `w:id` ref）。 */
         const w = TowerHero.heroWeapon(Number(id) + ':' + item.level);
         if (w) own = Object.assign({}, w, { level: item.level });
       }
@@ -1445,21 +1257,6 @@
     }
     buildDetailDom(host, kind, id, base, own, up, row);
   }
-  /* ============================================================
-   * 「武器 / 技能详情」= **原版那一页**（4673 的第 1 帧）
-   * ------------------------------------------------------------
-   * 原版 `showWeaponSkillWin`（MainMovie.as:16658-16790，`if (!isViewfriend)` 整段）：
-   *   `loadMcs([["状态1","subFrame",currentFrame]]); subFrame.gotoAndStop(1)`
-   *   然后写 `subFrame.name / levelText / harm / type / des`，
-   *   图标位 `subFrame.c1`，两颗键 `subFrame.buttonsMc.button1 / button2`；
-   *   满 10 级走 `showWeaponSkill3`（`gotoAndStop(3)` + 右侧 `requirement`）。
-   * 那一帧的具名子元件（导出实测，逐条对上）：`c1` / `buttonsMc`（3 帧：1 升级+返回 /
-   *   2 只返回 / 3 灰）/ `des` / `name` / `harm` / `levelText` / `type` / `requirement`。
-   * `requirement`（**3670**）自己 7 帧：f1 = 需要 / 已有 / 成功率 那一块
-   *   （`need1` / `current1` / `need2` / `current2` / `rate` / `level`），
-   *   f2..f5 = 别的用途（星级之类），这里只用 f1。
-   * ⚠ 用户 2026-10 口径⑥："武器与技能详情页与ssfight版本差距甚远" —— 以前整页是复刻自绘的
-   *   DOM 面板（`.sf-detail`），现在改成挂原版帧 + 写字段。 */
   /** 武器特殊效果：原表 `remark` 是「特殊效果,每级增加…」一整句；这里只取特殊效果，
    *  成长部分由详情页的「升至下一阶…」那行负责，避免同一句写两遍。
    *  对 16 沉默之斧，按当前等级算**现在**的沉默概率（10% + 每级 4% + 真化每级 4%），
@@ -1520,13 +1317,10 @@
      *   `subFrame.gotoAndStop(1)` 武器 / `gotoAndStop(2)` 技能，MainMovie.as:16678 / 16731）。
      *   两帧各自的标题（`武器详情` / `技能详情`）、图标位（`c1` = **3636** 武器 / **4547** 技能）
      *   与两颗键（`buttonsMc` = **4539** 武器 / **4553** 技能）都是各画一套的：
-     *   4539 的 `button2` 写的是「升级武器」、4553 写的是「升级技能」。
-     *   复刻以前**恒挂第 1 帧**，于是技能页顶着"武器详情"标题、右边那颗键也是「升级武器」
      *   （用户 2026-10 报的"技能页面也显示升级武器而不是升级技能"就是这个）。 */
     const view = await SfRender.mountSymbol(host, '4673', {
       frame: isW ? 1 : 2, label: '武器技能详情',
       /* `requirement`（3670）里的 `need1`/`current1`/`need2`/`current2` 在素材里是
-       * 占位串（"900000" 之类），真值由下面几行 `setReq` 写 —— 出生先清空，
        * 免得未获得的武器那一帧闪一个 900000。 */
       blank: ['need1', 'current1', 'need2', 'current2'],
     });
@@ -1551,17 +1345,6 @@
      * 稍微往右移动一点。去掉该页面中武器或技能下方显示的等级，同时稍微下调武器或技能的贴图，
      * 当前贴图最上边超出了显示边界，没有正常显示出来。将红色的武器&道具名字改为黑色并加粗，
      * 且往左移动一点。"
-     * 这一页的坐标全在导出素材里（`name` / `levelText` / `harm` / `type` 都是**文本字段**，
-     * 落点由 `textfields.json` 的字段框公式算出来），改素材不现实，所以在**渲染后**对节点做
-     * 平移/换色 —— 与挑战页 `alignRowText` 同一套做法（改完不写回素材，每次挂载重算一次）。
-     * 常量集中在这里，改这一处就能回调。
-     * ⚠ 图标那一档（原来的 `iconScale` / `iconDrop`）**已经删掉**：用户 2026-10 下一轮口径
-     *   "武器与技能的显示 ui 过分偏下、贴图缺了上部"。原因是这两个值叠在**反例**上 ——
-     *   `transform-box:fill-box` 的原点是整棵图标 `<g>` 的包围盒中心，而那个包围盒**含卡片
-     *   下方那层名字/「真」印章**，中心比卡片中心低十几个舞台单位；再乘 0.82 的缩放，
-     *   卡片被**推下去约 18 个舞台单位**、同时缩掉一圈 —— 参照截图里卡片在 y≈52.7，
-     *   复刻实测在 y≈72（原版 4673 f1 把 `c1` 放在 `(28.8, 54.5)`，缩放 1.07）。
-     *   现在**一个像素都不动**：素材里 `c1` 的落点就是原版 `attachMovie(name,"mc",100,{_x:0,_y:0})`
      *   的落点，缩放也照 `c1` 自己的矩阵走。 */
     const DETAIL_SHIFT = {
       statsX: 3.2,      // 「等级 / 伤害 / 类型」那一列的值整体右移（舞台单位）
@@ -1585,12 +1368,9 @@
       return n;
     };
     const trueOwn = ownLv > 10;
-    /* 原版真化详情页把名字写成「真.名字」（showWeaponSkill3 的 setText(name,"真."+name)）。 */
     const shownName = base ? ((trueOwn ? '真.' : '') + base.name) : '';
     /* 等级：原版 `setText(subFrame.levelText, level)`（MainMovie.as:16681 / 16735）——
-     * 就是左列「等级」那一格的值。复刻上一批误把它当成"贴图下面那行等级"清空了，
      * 于是整页一个等级都不显示（用户 2026-10 口径："该界面所有的等级都没有正常显示"）。
-     * 真形态（11~15 级 = 真1~真5）按 `level - 10` 写，与格子里那行 `LV n`
      * （`writeIconLevel`）**同一把尺子** —— 两处显示同一个数，不会一个写 11 一个写 1。 */
     set('levelText', String(ownLv > 10 ? ownLv - 10 : ownLv));
     set('type', base && base.type ? base.type : (isW ? '近战' : '被动'));
@@ -1598,14 +1378,12 @@
      *   · 武器：`convertHarm()` = `harmLo-harmHi`（没获得就用字典里的基准串）；
      *   · **技能：原版写死的是「技能」两个字**（`setText(subFrame.harm, "技能")`，:16736）——
      *     不是技能说明！复刻以前把 `remark`（"提高力量点数,每级提高2点"）写进这一格，
-     *     比字段框（`harm`=4543 宽 52.5、一行 4 个全角字）长得多，横向顶出格子、
      *     还压住下面那行「类型」（用户 2026-10 报的"技能的伤害与类型介绍全部文本错误"）。 */
     const harm = isW
       ? (own ? (own.harmLo + '-' + own.harmHi) : (base && base.harm ? base.harm : ''))
       : '技能';
     setWrapped(view.byName('harm'), harm);
     /* 介绍：普通档写原表 `des`；真化档按原版 `getDescription` / `getDesSkill`
-     * 写**下一阶**的真化说明（`remark1Value` / `harmAdd1` 逐个取值，不是复刻自编的
      * 每级 +harmAdd）。到真5 写最高阶段；6/13 这种不可升级技能保持基础说明。 */
     let desText = isW ? weaponRemarkText(base, ownLv) : skillRemarkText(base, ownLv);
     if (own && !(up && up.fixed)) {
@@ -1642,17 +1420,13 @@
     setDetailName(view.byName('name'), shownName);
     /* 图标位：挂原版矢量元件（与格子里那 10 颗同一套素材）。
      * ⚠ 原版这里是 `subFrame.c1.attachMovie(名字, "mc", 100, {_x:0,_y:0})`
-     *   ——**图标元件自己第 1 帧就带名字层 + 等级位**（卡片 42×42 在左上角），
      *   位置与缩放**一律照素材**（`c1` 自己 1.07 的矩阵），复刻不再另加缩放/下移
      *   （见 `DETAIL_SHIFT` 那段注释：那正是"过分偏下 + 缺了上部"的来源）。 */
     const iconBox = view.byName('c1');
     if (iconBox && row && row.icon) mountDetailIconClip(iconBox, row);
     /* 右侧那一块 `requirement`（3670）—— 原版**按局面选帧**，不是永远 f1
-     * （`MainMovie.as:16686-16778`；六帧的画稿见素材，逐帧读过）：
      *   · 还没拿到   → f4「还未获得该武器」/ f5「还未获得该技能」
      *   · 技能 6 / 13（装死 / 师父驾到）→ f3「该技能不能升级」
-     *   · 已经到顶   → f6「已达顶级」
-     *   · 其余       → f1「需要 / 已有 / 成功率」（值由 `showLeveupInfo` 写）
      * ⚠ f1 里还有一格 `level`，素材占位串写的是「需要松鼠10级」——原版 `showLeveupInfo`
      *   把它清空（`:16600`），等级不够时改在点升级时给提示。复刻同样清空。 */
     const req = view.byName('requirement');
@@ -1664,8 +1438,6 @@
       const setReq = (n, v) => { const c = clipOf(req, n); if (c && t) t.setText(c, v == null ? '' : String(v)); };
       if (reqFrame === 1 && up) {
         if (heroDetail) {
-          /* 勇者武技：只展示**当前等级 + 下一级成功率**，不消耗账号金松果/卷轴，
-           * 也不提供直接升级（升级仍走本局成长 / 铸币修炼）。 */
           setReq('need1', '—');
           setReq('current1', '—');
           setReq('need2', '—');
@@ -1688,17 +1460,11 @@
     shiftText(view.byName('levelText'), DETAIL_SHIFT.statsX);
     shiftText(view.byName('harm'), DETAIL_SHIFT.statsX);
     shiftText(view.byName('type'), DETAIL_SHIFT.statsX);
-    /* 名字：红色 → **黑色 + 加粗**，并往左挪一点（用户口径见 `DETAIL_SHIFT`）。 */
     paintDetailName(view.byName('name'), base ? base.name : '', DETAIL_SHIFT.nameX);
     /* 两颗键：`buttonsMc` 在**武器页是 4539、技能页是 4553**（各 3 帧，结构一样）：
      *   f1 = `button1`(3644 返回) + `button2`(4537 / 4551 升级…)；f2 = 只有返回；
      *   f3 = 返回(绿) + 升级(深灰)。
-     * 而两颗子键自己各是 3 帧：**1 = 米白（常态）/ 2 = 绿（可用）/ 3 = 深灰（不可用）**。
      * 2026-10-19 用户口径：「返回」和「升级武器 / 升级技能」**默认是灰的（常态帧），
-     *   鼠标悬停在上面才显示绿色** —— 与状态页格子 / 首页按钮同一套操：`wireClickable`
-     *   的 `idle/hover` 拨子键帧，悬停缩放与按下回弹由 `.uc-pop` 壳（`refreshShell`）负责。
-     * 不可升级 / 满级那一档维持 f3 深灰、不可点（悬停也不拨帧）。
-     * ⚠ 父帧**必须停 f1**：只有 f1 里才有具名的 `button1` / `button2`（f2/f3 是匿名画稿），
      *   换到那两帧就再也取不到这两颗键、点击接线全断。 */
     const bm = view.byName('buttonsMc');
     if (bm) stopAt(bm, 1);
@@ -1709,7 +1475,6 @@
       onFire: () => { if (current && current.detail) closeItemDetail(); },
     });
     /* ⚠ 每一处都要判 `current && current.detail`：详情页是异步挂的，玩家可能在
-     *   挂载/setText 的间隙就点了「升级」，这时 `current.detail` 已经没了 ——
      *   不判就会抛在 `onFire` 里，把点击变成静默失败（实测"点升级/返回没反应"）。 */
     if (okBtn && !locked && !maxed && !heroDetail) {
       wireClickable(okBtn, {
@@ -1745,7 +1510,6 @@
       for (const el of node.querySelectorAll('text')) {
         if (el.__needX0 == null) {
           el.__needX0 = Number(el.getAttribute('x') || 0);
-          /* 右对齐靠的是 `text-anchor:end`；端点往右挪就是墨迹往右挪。 */
         }
         el.setAttribute('x', el.__needX0 + Number(dx));
         n++;
@@ -1772,13 +1536,11 @@
   }
   /** 详情页图标位（原版 `c1` 那个格子）里挂图标元件。
    *  ⚠ 原版 `c1` 是个**空格子**（`attachMovie(名字,"mc",100,{_x:0,_y:0})`），
-   *  图标元件自己第 1 帧就画在 `(0,0)` 起、卡片 42×42，名字层在下方 ——
    *  所以这里**不要**再传 `viewBox` 去裁切：留着元件自己的坐标系，
    *  让它在 `c1` 里面按原尺寸落位（传 viewBox 会把卡片缩放撑满整块面板、盖住两颗键，实测踩过）。 */
   async function mountDetailIconClip(clip, row) {
     try {
       /* ⚠ **没获得的那一档挂的是另一颗库元件**（原版 `showWeaponSkillWin` 的
-       *  `subFrame.c1.attachMovie(名字 + "1", "mc", 100)`，:16697 / :16750）——
        *  灰底卡片 + 灰名字那一版，和格子里用的是同一对元件。 */
       const sym = row.has ? row.icon : (row.lockedIcon || row.icon);
       /* 图标元件的画稿从 y≈-1.7 起笔（卡片上沿的白色星芒/高光在 0 以上）。`mountSymbol`
@@ -1795,12 +1557,7 @@
       /* ⚠ 详情页这一格是**空盒子**，图标元件按自己的坐标系落进来 ——
        *  ① 等级：这一格里那行 "LV2" 是 `level`（2136）文本，落在自己坐标 y≈45.75（卡片下方）；
        *     原版详情页的卡片下面**没有**这行（参照截图 `references/screen` 的技能详情页），
-       *     而它正好压在下面那块说明文字上 —— 直接清空（`hide=true` 那一档）。
        *  ② 落点/缩放：**一律照素材**。`c1` 的放置矩阵就是原版
-       *     `subFrame.c1.attachMovie(名字, "mc", 100, {_x:0,_y:0})` 的落点，
-       *     图标元件自己第 1 帧就画在 (0,0) 起、卡片 42×42。
-       *  ⚠ 上一批在这里加过 `scale(0.82) + translateY(...)`，反而把卡片推低约 18 个舞台单位、
-       *    还缩掉一圈（包围盒含卡片下方那层名字/「真」印章，`transform-origin:center` 因此偏低）。
        *    用户 2026-10 口径："显示 ui 过分偏下、贴图缺了上部" —— 现在整段删掉，不做任何 transform。 */
       writeIconLevel(v, row, true);
     } catch (e) { if (window.__errs) window.__errs.push('detail icon clip: ' + (e && e.message)); }
@@ -1824,7 +1581,6 @@
     const W = tb.meta.bd[1] - tb.meta.bd[0] - (tb.meta.lm || 0) - (tb.meta.rm || 0);
     if (!(W > 8)) return src;
     /* ⚠ 文本容器的 DOM 就是那个 `<g type="text">` **本身**（`__textBox` 挂在它上面），
-     * 不是 MovieClip —— 所以要按 DOM 元素取 `ownerSVGElement` / `querySelector`，
      * 不能按 `clip.g.…` 取（踩过：`clip.g` 为 undefined，函数直接原样返回、等于没断行）。 */
     const el = clip.g || clip;
     const svg = el.ownerSVGElement || (el.ownerDocument && el.ownerDocument.querySelector('#ui svg')) || null;
@@ -1840,7 +1596,6 @@
         const n = node && node.textContent ? node.textContent.length : 0;
         if (k && r && r.width > 1 && n > 0) unit = (r.width / k) / n;
       } catch (e) { unit = 0; }
-      /* 画出来的行是空的（占位串被清掉）时退回"字号 × 1.0"这个中文经验值。 */
       if (!(unit > 0.2 && unit < 8)) {
         const h = parseFloat(tb.meta.fh) || 12;
         unit = h > 0 ? h : 12;
@@ -1872,7 +1627,6 @@
     return clip;
   }
   /** 详情页的黑色说明文字缩一号（用户 2026-11：真·狼牙棒这类长说明会压到下方按钮）。
-   *  `setText` 已经把行断好；这里只把每个 `<text>` 的字号与行距一起压到 `factor`。
    *  以第一行的 y 为锚点向下压缩，块顶不动、块底缩短，不会整体上移。 */
   function shrinkDetailDesc(clip, factor) {
     const box = textBoxOf(clip);
@@ -1896,9 +1650,6 @@
     return n;
   }
   /** 详情页名字固定单行。
-   *  `name`=4542 框宽 75.6、13 号字，`wrapToField` 按 `floor(75.6/13)=5` 算容量；
-   *  真化名字是「真.」+ 4 个全角字 = 5.55 字宽（实际 72.15），明明放得下，
-   *  却被硬断成「真.死神镰 / 刀」两行（用户 2026-10 报的「真·死神镰刀最后一个字换行」）。
    *  这里单行写；只有真的超过框宽才按字宽缩一点字号，不裁字、不换行。 */
   function setDetailName(clip, text) {
     const t = T();
@@ -1925,13 +1676,11 @@
     if (clip.__textBox) return clip;
     const d = depth || 0;
     if (d > 3) return null;
-    /* ① 子元素里直接有 `<text type="text">` 的 `<g>`（render.js 把 `__textBox` 挂在它上面）。 */
     if (clip.g && clip.g.querySelectorAll) {
       for (const g of clip.g.querySelectorAll('g[type="text"]')) {
         if (g.__textBox) return g;
       }
     }
-    /* ② 再往下走一层子元件。 */
     if (clip.names) {
       for (const v of clip.names.values()) {
         if (v && v !== clip && v.__textBox) return v;
@@ -1967,7 +1716,6 @@
     const lvText = own ? String(trueOwn ? ownLv - 10 : ownLv) : '0';
     const harm = own && isW ? (own.harmLo + '-' + own.harmHi)
       : (isW ? (base && base.harm ? base.harm : '') : '技能');
-    /* 说明：普通档原表 des；真化档按 `getDescription` / `getDesSkill` 写下一阶。 */
     let descText = locked ? (heroDetail ? '尚未掌握——在塔内学习新的武技'
       : '尚未获得——升级、开启礼包有机会获得')
       : (isW ? weaponRemarkText(base, ownLv) : skillRemarkText(base, ownLv));
@@ -2055,14 +1803,10 @@
         frame: 1, label: '武器图标', viewBox: '-2 -3 50 50',
       });
       if (!box.isConnected) { try { v.destroy(); } catch (e) {} return; }
-      /* 记下这个子视图，收起详情页时按视图销毁它（**不碰**下面那一页的播放表，
-       * 见 `destroyItemDetailOnly`）。 */
       if (current && current.detail) current.detail.view = v;
       /* 图标也是"静态页"：它里面那颗 4 帧装饰别自己播 —— 与格子里那 10 颗同一条规则。 */
       if (v.setStaticPolicy) v.setStaticPolicy({});
       if (!row.has && v.g) v.g.classList.add('locked');
-      /* 详情页的图标位只框住卡片（viewBox 已切到卡片），名字 / 印章那一条落在框外，
-       * 但为了不让它自己播（它是 4 帧精灵），照样按"未选中"那一档拨到空帧。 */
       paintIconLabel(v, false, false);
       writeIconLevel(v, row, false);
     } catch (e) { if (window.__errs) window.__errs.push('detail icon: ' + (e && e.message)); }
@@ -2089,7 +1833,6 @@
   function destroyItemDetailOnly() {
     if (!current || !current.detail) return;
     /* ⚠ 详情页现在是**原版整页**（`SfRender.mountSymbol('4673', …)`，4673 的宿主就是 `host` 这个
-     * `<section>`）：`assetView.destroy()` 会把整棵 SVG 拆掉，所以下面那句 `host.remove()` 仍然要跑
      * ——否则留下一个空壳 `<section>` 压着状态页（点哪都没反应）。 */
     if (current.detail.view) { try { current.detail.view.destroy(); } catch (e) {} }
     if (current.detail.assetView && current.detail.assetView !== current.detail.view) {
@@ -2098,12 +1841,10 @@
     if (current.detail.host && current.detail.host.parentNode) current.detail.host.parentNode.removeChild(current.detail.host);
     current.detail = null;
     if (current.container) current.container.classList.remove('sf-detail-open');
-    /* 宿主高度回到"经典整页 320×196"，所以重量一次布局。 */
     try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
   }
   function closeItemDetail() {
     destroyItemDetailOnly();
-    /* 底层那一页没被停过，重画一遍格子就够（等级可能刚升过、真化印章要跟着走）。 */
     try { applyTab(); } catch (e) { if (window.__errs) window.__errs.push('detail close: ' + (e && e.message)); }
   }
   function refreshGridSoon() {
@@ -2115,24 +1856,13 @@
     try { await SfRender.loadExtra('tags-wsicon.json'); } catch (e) { if (window.__errs) window.__errs.push('wsicon: ' + (e && e.message)); }
   }
 
-  /* ---------- 格子的可点 / 悬停（打光 + 果冻缩放 + 名字）----------
-   * 用户 2026-10 口径："鼠标悬停在特定武器或技能上面时，进行一个打光与果冻缩放效果，
-   * 同时显示该武器的名称"。
-   *  · 果冻缩放 + 打光：复用复刻已有那套 `.uc-pop` 壳（`popWrap`：悬停缩放 +
-   *    drop-shadow 暖色光晕），另外给格子加 `.sf-cell` 让它**更明显一点**（见 css）；
-   *  · 名字：**两档共用原版那一套**（图标元件自己的名字层，见 `dressIcon`）——
-   *    已获得的是绿色名字（选中/悬停时显形），未获得的是"名字 + 1"那颗元件里的**灰色名字**。
-   *    ⚠ 复刻曾经给"未获得"单独补过一条 DOM 名字条（`.sf-cellname`），2026-10 用户口径
-   *    "显示方案要与已解锁一致、只是字体是同色灰色，ssfight 里已经实现了" → 那条整条删掉，
-   *    改回原版的第二颗元件。 */
+  /* ---------- 格子的可点 / 悬停（拨原版帧 + 名字）----------
+   * 悬停只拨原版自己的帧（绿卡 + 灰色名字，见 `setCellLook`），不走 DOM 补的缩放/光晕：
+   * 格子壳上任何 CSS `transform` / `filter` 都会在换帧之后留下旧包围盒的光栅（见 css 那一段）。 */
   /* ---------- 「真」印章与名字条 ----------
    * ⚠ 这两样**都是原版矢量元件自带的**，不需要 DOM 补：
-   *   图标元件（如 2139）第 1 帧 = 常态卡片（2028）/ 第 2 帧 = **选中卡片**（2037，绿底绿框）；
-   *   卡片下方那一层（元件名 `wname1`/`wname`、符号 2138）是个 **4 帧**精灵：
    *     1 = 名字（矢量画稿 2137，深绿） / 2 = 名字 + 「真」印章 / 3 = 只有印章 / 4 = 空。
    *   所以"哪一格显示什么"完全由**拨这两层帧**决定，见 `paintCell`。
-   *   （复刻 2026-10 之前是"CSS 切掉名字层 + DOM 盖一枚小圆牌当印章"，
-   *    实测与 `references/screen` 的原版截图差得很远：原版印章是**压出卡片右下角的大红印**、
    *    选中那格卡片是绿底，而且只有选中那一格才显示名字。） */
 
   /** 宿主自身被缩放的倍数（量一个 100px 探针；写进去的 CSS 像素会被 `--uiscale` 再乘一次）。 */
@@ -2161,8 +1891,6 @@
         const it0 = cell.__cellItem;
         if (!it0) return;
         /* 悬停 = 原版键盘光标停在那一项上（`showButton(weaponskillLoadArray, i, 1)` →
-         * `mc.gotoAndStop(2)`）：**已获得与未获得都走这一下**——
-         * 已获得那颗的第 2 帧是绿卡片 + 绿色矢量名字，未获得那颗（名字 + "1"）的第 2 帧是
          * 灰卡片 + **灰色**矢量名字。两档的显示方案完全一致，只有配色不同。 */
         setCellLook(cell, it0, true);
         cell.g.classList.add('lit');
@@ -2194,7 +1922,6 @@
          * `if (!isViewfriend)` 包住 —— 看别人的武器/技能只给看，不给升级/升阶。
          * 不拦这一下的话，点对手的武器会开出"我的"升级页，数据与权限都是错的。 */
         if (friendView()) return;
-        /* 原版：`jiantou_WZ_X1` 选中后按 Fire → `showWeaponSkillWin(chooseWz)` 开详情页。 */
         openItemDetail(cell.__cellKind, it2.id);
       });
     }
@@ -2208,18 +1935,12 @@
       const shell = cell.g.querySelector(':scope > g.uc-pop');
       if (shell) t.wirePopPress(shell);
       /* ⚠ **画序**：格子元件（3636）自己的那一帧画稿（`g[type=shape]`，卡片底 + 白色投影）
-       * 与 `attachChild` 挂进来的图标在 DOM 里是兄弟，而 SVG 是"后来者画在上面" ——
-       * 图标排在前面时会被卡片底**完全盖住**（实测：十个格子全是空卡；把卡片那层
-       * `display:none` 之后图标完整可见）。
-       * Flash 的语义正好相反：元件自己的帧画稿在 depth 1、`attachMovie(...,100)` 在 depth 100，
-       * **图标画在卡片上面**。所以这里把挂上来的子元件挪到末尾。
        * ⚠ 必须在 `popWrap()` **之后**做：`popWrap` 会把 `<g>` 的子节点整个搬进 `.uc-pop` 壳，
        * 顺序会被重排一次（踩过一次：写完 `paintCell` 里挪、结果被 `popWrap` 又挪回去了）。 */
       raiseAttached(cell);
     }
   }
 
-  /** 切到某个 tab：换页元件帧 + 重画/收掉 DOM 格子。 */
   function setTab(which) {
     if (!current) return;
     /* 新手引导 f15：切到别的页签才算完成（原版 tab1/tab2.onFire 要 tab_wz != 2/3
@@ -2229,22 +1950,17 @@
     }
     current.tab = which;
     current.gridPage = 0;
-    // Switch the root first: some instances survive, others are newly created.
     stopAt(current.view, PAGE_FRAME[which] || 1);
     wireTabs();
-    // Hydrate new bitmap digits in the same task as the root frame change.
     if (which === 'status') fillValues(current.view);
     applyTab();
   }
-  /** Gold idle / green selected / cream hover are static states, not animation. */
   function wireTabs() {
     const view = current && current.view;
     if (!view) return;
     for (const [nm, key] of [['tab', 'status'], ['tab1', 'weapons'], ['tab2', 'skills']]) {
       wireClickable(clipOf(view, nm), {
         /* 悬停 = 原版"键盘光标停在 tab 那一行"：那一档原版停在**第 3 帧（浅奶油底）**，
-         * 不是第 2 帧。原版 `myDraw()`（MainMovie.as:21113-21151）：三颗先 `gotoAndStop(1)`，
-         * 选中的那一颗在 `jiantou_WZ_Y1 == -1`（光标不在 tab 行）时 `gotoAndStop(2)`（绿底），
          * 否则 `gotoAndStop(3)`（奶油底）。`references/screen/…161800.png`（状态页，光标不在
          * tab 行 → 状态=绿）与 `…162315.png`（武器页，光标在 tab 行 → 武器=奶油）正好各拍到一档。 */
         hover: 3,
@@ -2286,9 +2002,7 @@
   }
   /** 关卡「挑战」页（4756 f5）那颗**原版 3911「返回」**。
    *  查看别人的状态页直接复用它（用户 2026-11 口径）：位置/尺寸照关卡页的
-   *  `matrix(1,0,0,1,160.3,175.5)` 原样使用 —— 比 3644 更宽、略高，落在底部中间偏左。
    *  ⚠ 3911 有 2 帧：第 1 帧是**黄色**（`3171` 黄/橙渐变），第 2 帧是**绿色**
-   *  （`3173` 绿渐变）。交互由调用方 `wireClickable({hover:2, idle:1})` 接：
    *  默认黄、悬停/按下绿。若挑战包没加载到，调用方退回原 `back` + 自绘文字。 */
   function useStageBack(view, symbol, frame, x, y, scale, name, cacheKey) {
     if (!view || !view.attachChild) return null;
@@ -2367,14 +2081,9 @@
      *   · `b_change`(7199)：`level >= 5`  → 第 1 帧（已开启）；否则第 2 帧（灰底 + "5级开启"）
      *   · `b_fusion`(7207)：`level > 19` → 第 1 帧（已开启）；否则第 2 帧（灰底 + "20级开启"）
      * **第 2 帧不是悬停高亮，而是"还没开启"那一档** —— 复刻原来把它当 hover 帧用，
-     * 于是鼠标一移上去就切出那层灰底（用户 2026-10 报的"会触发另一层 x 级开启的灰色 ui 层，
      * 而且这一层跟等级检测没同步"）。现在：状态帧按等级选、悬停只给 CSS 光晕，
      * 未开启时点它照原版 `showTips` 的**原文**给一句提示、不进页面。 */
     const lv = () => Math.max(1, Math.round(Number((S() || {}).level) || 1));
-    /* ---------- 勇者模式：同一帧里的两颗键 ----------
-     * 第 1 帧原版就有「更换装备 / 装备融合」两颗并排键（实测 b_change 158..223、
-     * b_fusion 222.5..300.1）。勇者页把 b_fusion 整颗藏掉、原位挂「开始挑战」，
-     * 所以这里只留 b_change 的「更换装备」接线。 */
     if (heroView()) {
       const hero = Hero();
       const outer = clipOf(view, 'b_change');
@@ -2400,9 +2109,7 @@
       return;
     }
     /* ---------- 查看别人时这两颗换档（原版 `showMainInfo` 的 `isViewfriend` 分支）----------
-     * `b_change`(7199)：原版 `gotoAndStop(5)`（已是好友）/ `gotoAndStop(4)`（陌生人），
      *   第 4/5 帧上写的是「查看装备」；`b_fusion`(7207)：`gotoAndStop(3)`（整颗隐藏）。
-     * 复刻这两档的文案已经烤在素材里（`b_change` 第 4/5 帧），所以**只拨帧不接线**；
      * `b_fusion` 第 3 帧是空档，拨过去就看不见了。 */
     if (friendView()) {
       /* 原版 `showMainInfo()` 的 isViewfriend 分支：`b_change` 在第 5 帧（好友）/ 第 4 帧
@@ -2435,7 +2142,6 @@
       return;
     }
     /* ⚠ 「更换装备」走**原版那一页**（库元件「状态1」= 4673 的第 3 帧，`showEquipsWin()`）：
-     * 它是盖在**本页之上**的一层，页根 7218 不动 —— 所以这里**不 `destroy()`**、也不走
      * `UI.runAction('gears')`（那是现代模式的 DOM 弹窗）。退出那一层时本页原样还在。
      * 「装备融合」暂时仍走复刻的 DOM 二级页，所以那一颗保持"先收掉本页"的老写法。 */
     wireClickable(clipOf(view, 'b_change'), {
@@ -2470,30 +2176,9 @@
       onFire: () => { destroy(); if (window.UI && UI.runAction) UI.runAction('home'); },
     });
   }
-  /* ============================================================
-   * 接线：三个 tab + 翻页箭头 + 两颗功能键 + 返回
-   * ------------------------------------------------------------
-   * ⚠ 这一页**没有"只接一次线"这回事**：三颗 tab、两颗功能键、返回菜单分别挂在页元件
-   * 7218 的**不同帧**里，而 `setTab()` 切帧会把整棵子树重建 —— 重建出来的全是新实例
-   * （旧的随帧被摘掉、从播放表里注销）。所以接线一律走 `wireTabs()` /
-   * `wireFrameButtons()`，**每次换帧后重来一遍**。
-   * 只接一次的话，从武器 / 技能切回状态之后那几颗就是"没接过线"的新实例：
-   * 既不响应鼠标、也没被钉帧，于是各自在 3~4 帧之间循环播自己的状态帧
-   * （金底 / 绿底 / 浅底 / 空），屏幕上一排 tab 忽金忽绿、内容互相错位叠着闪，
-   * 整页看起来就是花屏 —— 用户 2026-10 报的"切到武器和技能再切回状态会全屏乱码"。
-   *
-   * 原版 `myDraw()`（MainMovie.as:21113-21151）：三颗 tab 先 `gotoAndStop(1)`（常态）；
-   * 选中的那一颗，`jiantou_WZ_Y1 == -1`（光标不在 tab 那一行）时 `gotoAndStop(2)`，
-   * 否则 `gotoAndStop(3)`。导出数据实测（`tags-status.json` 的 7210/7212/7215，各 4 帧）：
-   *   **第 1 帧 = 金底常态 / 第 2 帧 = 绿底选中 / 第 3 帧 = 浅奶油底（禁用那一档）**。
-   * 所以"选中"只能停第 2 帧 —— 复刻之前把选中写成了第 3 帧（浅色），
-   * 又拿第 2 帧当悬停帧，两档正好反了。
-   * ========================================================== */
 
   /* ---------- 挂载与生命周期 ---------- */
   let seq = 0;
-  /* 调试/探针用：记录最近一次 `open()` 停在哪一步（`?ssdzdbg=1` 或探针里直接读）。
-   * 出问题时报出"哪一步之后没了"，比反复猜快得多。 */
   let openTrace = '';
   async function open(container, opts) {
     openTrace = 'start';
@@ -2511,7 +2196,6 @@
     }
     if (!host) { openTrace = 'no-host'; return false; }
     /* ⚠ 作废在途挂载用的是 `++seq`；这里必须**领号再作废旧号**：
-     * `destroy()` 只负责拆树、不动 `seq`（它会被 UI 侧当"关掉这一页"调），
      * 递增统一走 `invalidate()` —— 否则 `mine !== seq` 恒成立、函数直接返回 false，
      * 状态页就会一直空白（第一次写就是这么错的）。 */
     const mine = ++seq;
@@ -2531,7 +2215,6 @@
     if (mine !== seq) { openTrace = 'stale mine=' + mine + ' seq=' + seq; return false; }
     const view = await SfRender.mountSymbol(host, '7218', {
       frame: 1, label: '状态',
-      // Suppress the exported placeholder until real values are filled below.
       blank: ['expNum'],
     });
     if (mine !== seq || host.isConnected === false) { view.destroy(); return false; }
@@ -2548,10 +2231,7 @@
     try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
     /* 这一页是**静态页**（原版靠键盘选中才切某一项的帧）：交给统一的「静态页策略」
      * —— 子树里所有多帧元件**出生即冻结**，而且**换帧重建出来的新实例自动适用**
-     * （切 tab / 换页 / `applyTab` 重画格子 / `dressParts` 重贴装备都不再需要人管）。
      * ⚠ 老写法要在这里列一份"马上要接线的元件不许钉"的例外名单 —— 那是 `pinFrame` 时代
-     * 的补丁（冻结每一拍强制拨帧、会和 `gotoAndStop` 打架）。现在冻结只写
-     * `playing = false`（不自己走、不碰帧号），`gotoAndStop` / `showNumber` 全部照常生效，
      * 所以**一个例外都不需要**。 */
     t.freezeDescendants(view);
     try { fillValues(view); } catch (e) { if (window.__errs) window.__errs.push('status values: ' + e.message); }
@@ -2569,7 +2249,6 @@
     openTrace = 'done';
     return true;
   }
-  /** 只拆当前这棵树（**不动 `seq`**）：`open()` 每次重挂前调它，UI 侧也拿它当"关掉这一页"。 */
   function destroyView() {
     /* 「更换装备」/「装备融合」这两层都是盖在本页上的（原版 `loadMcs(subFrame)`），
      * 拆本页时一并收掉 —— 不收的话它们会留在一块已经不在页面上的宿主里，下次进状态页时变成孤儿层。 */
@@ -2588,41 +2267,21 @@
       try { overlayHost.parentNode.removeChild(overlayHost); } catch (e) {}
     }
   }
-  /** 作废所有在途的 `open()`（它们看到 `seq` 变了就自己放弃），然后拆树。 */
-  function destroy() { seq++; destroyView(); }
+  function destroy() {
+    seq++;
+    destroyView();
+    if (window.SfRender && SfRender.releaseExtra) {
+      SfRender.releaseExtra('tags-status.json');
+      /* 颜色表在途时先别放包：它完成后还会把表写回缓存，下次打开不能再依赖已释放的标签。 */
+      if (!gearColorLoading) {
+        SfRender.releaseExtra('tags-gear-color.json');
+        gearColorTable = null;
+      }
+    }
+  }
 
-  /* ============================================================
-   * 「查看装备」—— 原版 `friendEquipsInfo()`（:13821）= 库元件「状态1」第 7 帧
-   * ------------------------------------------------------------
-   * 那一颗**还没提取**（`状态1` = 4673 在导出符号表里查不到 spriteId，见
-   * `docs/经典模式-可行性.md` 第 628 行那张表），所以这一页照复刻既有那套画一层 DOM：
-   * **他穿了什么**（四件，带部位 + 强化等级）＋ 四维 + 战斗力，返回回他自己的状态页。
-   * ⚠ 以前这里根本走不通：`openFriendGears()` 先把状态页 `destroy()`、再调
-   *   `SfChallenge.showFriendGears`（**那个函数当时不存在**）→ 兜底 `UI.runAction('challenge')`，
-   *   于是点「查看装备」= 状态页没了、回到随机页，装备一件看不到 ——
-   *   用户 2026-10 报的"点开查看装备时会闪退，完善这个页面"就是这一条。
-   *   现在**不拆状态页**，只盖一层（与武器技能详情页同一套：`detailHost()` + `.sf-detail`）。
-   * ⚠ 版式用**四行**（每行一件：图标 / 名字 / 部位 / 强化）而不是"横着排四个"：
-   *   面板宽 272 个舞台单位，四件横排每件只有 62 个单位，`sf-fd-list li` 的 `width:31%`
-   *   会折成两行、名字和部位叠在一起（第一版就是那样）。一列四行最稳，也更好读。
-   * ========================================================== */
   const GEAR_PART_NAME = { 0: '头部', 1: '拳套', 2: '衣服', 3: '鞋子' };
   const FRIEND_GEAR_BOX = { x: 24, y: 18, w: 272, h: 158 };
-  /* ============================================================
-   * 「查看装备」= **原版那一页**（库元件「状态1」= **4673** 的第 7 帧）
-   * ------------------------------------------------------------
-   * 原版 `friendEquipsInfo()`（MainMovie.as:13821-13827）：
-   *   `setState(18); loadMcs([["状态1","subFrame5",currentFrame]]);`
-   *   `subFrame5.gotoAndStop(7); showFriendInfoWin(subFrame5, friendInfo.player.wearsList);`
-   * 而 `showFriendInfoWin`（:19037-19091）读的是**四个格子**：
-   *   `mc_tab1..4`，每格 `{ c1(图标位), t_base(主属性：敏捷+/力量+/生命+/速度+), t_name(装备名),
-   *                          t_addr(附加说明), stone(宝石名) }`，
-   *   `mc_tab{i}.gotoAndStop(1)` = 有装备 / `(2)` = 空位。
-   * 这四个名字**确实在 4673 的第 7 帧里**（`tools/gen-ssfight-ui.cjs` 的 `STATUS_SUB` 把它
-   * 提进了 `tags-status.json`）。所以这一页从"复刻自研的 DOM 面板"换成**挂原版帧 + 写字段**：
-   * 与②的口径一致（"对齐 ssfight 版本，当前版本的实现不是我想要的"）。
-   * ⚠ 用户 2026-10 之前这里只能用 DOM 画 —— 那时 4673 还没进素材库；
-   *   现在若素材缺失（老缓存 / 包没更新）仍退回 DOM 面板，不会白屏。 */
   function openFriendGearsAsset() {
     const host = detailHost();
     if (!host) return null;
@@ -2635,14 +2294,7 @@
     return p;
   }
   /** 把一个好友的装备写进 `mc_tab1..4`（逐条照 `showFriendInfoWin`，MainMovie.as:19037-19091）。
-   *
-   *  原版每一格做四件事，这里逐条对上：
-   *   ① `mc_tab{i}.gotoAndStop(1|2)` = 有装备 / 空位（`id == 0 || name == undefined`）；
-   *   ② `t_base` = **主属性**（"敏捷+25" 这种；按 `type` 落到对应那一格 —— 见下面的换算）；
-   *   ③ `t_addr` = **附加属性说明**（`getEquipAttachmentDes`：三条附加逐条拼成多行，空 = "无"），
    *      ⚠ 复刻以前这里写的是**部位名**（头部/拳套…），和原版那一格对不上；
-   *   ④ `c1.attachMovie(convertLink(equip), "mc", 100)` = **装备画稿** + `setEquipTextColor(t_name)`
-   *      按品质给名字上色 + `stone` = 宝石名。
    *      ⚠ 图标位以前**完全没填**：四格里只有字没有装备图（用户 2026-11 口径："查看装备页面的
    *      格式与贴图要和 ssfight 对齐"）。现在优先挂 `gearColorId` 查到的**原版预上色整卡符号**
    *      （与「我的装备」那六格同一套 `convertLink` 口径；`tags-gear-color.json` 在打开这一层前
@@ -2652,7 +2304,6 @@
     if (!view || !foe) return false;
     const byType = [];
     /* 每一件的**部位号**单独记一份：对手数据里 `type` 经常没有（只有 id），
-     * 图标位要按同一个部位号去挑容器（`containerIds`）—— 到用的时候再 `Number(g.type)` 会得 NaN、
      * `containerIds[NaN]` 取不到，四格就**只有字没有装备图**（真对手实测踩到）。 */
     const partOf = new Map();
     for (const g of (foe.gears || [])) {
@@ -2663,8 +2314,6 @@
     const C = window.UI && UI.classic;
     const gearName = (g) => (g && C && C.gearName ? C.gearName(Number(g.id)) : ('装备' + (g ? g.id : '')));
     /* 主属性**标签**：原版 `showFriendInfoWin` 按 `_loc2.type` 选"敏捷+/力量+/生命+/速度+"
-     * 的四个分支，并把文案写进 `_loc4[type]` —— 也就是**部位号同时就是那四个标签的下标**
-     * （0 头巾=敏捷 / 1 手套=力量 / 2 衣服=生命 / 3 鞋=速度，见 `State.gearInst` 的 attrName）。
      * 数值优先读 `g.attr`（实例上 roll 过 ±5% 的主属性），再退字典基准值。 */
     const GEAR_STAT_LABEL = ['敏捷', '力量', '生命', '速度'];
     const baseText = (ty, g) => {
@@ -2707,7 +2356,6 @@
       if (!tab) continue;
       any = true;
       const g = byType[i];
-      /* 1 = 有装备 / 2 = 空位（`showFriendInfoWin` 的 gotoAndStop(1|2)） */
       stopAt(tab, g ? 1 : 2);
       const set = (name, str) => { const c = clipOf(tab, name); if (c && t) t.setText(c, str == null ? '' : String(str)); };
       set('t_name', g ? gearName(g) : '');
@@ -2716,7 +2364,6 @@
       set('stone', gemText(g));
       /* 名字按品质上色（`setEquipTextColor`）—— 必须排在 `setText` 之后（见 `setGearTextColor`）。 */
       if (g) setGearTextColor(clipOf(tab, 't_name'), qualityOf(g));
-      /* 图标位 `c1`：贴原版装备画稿（容器 + 该件的帧号），等比缩到卡片里居中。 */
       const slot = clipOf(tab, 'c1');
       if (slot && slot.detachAll) {
         slot.detachAll();
@@ -2728,7 +2375,6 @@
         if (g) {
           const part = partOf.has(g) ? partOf.get(g) : Number(g.type);
           /* 原版这里也是 `attachMovie(convertLink(equip))`：符号是**整张卡**，
-           * 按 1:1 挂在格子 `(0,0)` 上。查不到预上色符号（老包 / 好友装备没 type）
            * 才退回容器画稿 + fitArtwork。 */
           const cg = Object.assign({}, g, { type: part, quality: qualityOf(g) });
           const sid = gearColorId(cg);
@@ -2756,14 +2402,11 @@
       }
       tuneFriendGearText(tab);
     }
-    /* 没有 `mc_tab` 就说明素材对不上，让调用方退回 DOM 面板。 */
     return any;
   }
   /* 「查看装备」四格里的文本位置是导出素材里定死的：名字 13 / 主属性 12 / 附加属性 11 /
    * 宝石 11，而行距只有 11.65 —— 对手的装备名和附加属性比原版占位串长，三行会压在一起，
    * 宝石右对齐的那一格还会探到右边那一格。这里只重排文本（不动卡片 / 图标 / 热区）：
-   *   · 字号收小：名字 11 / 主属性 10.2 / 附加属性 8.2 / 宝石 9.5；
-   *   · 附加属性整体右移 15、下移 12，行距从 11.65 拉到 13.4；
    *   · 宝石右对齐点左收 6，避免压到右边那一格。
    * 数值都是**舞台单位**，随整页缩放；改这一处就能继续回调。 */
   const FRIEND_GEAR_TEXT = {
@@ -2838,7 +2481,6 @@
     };
     /* 返回键换成关卡二级页（4756 f5）的原版 `back`（3911）：它和 4673 不在同一个
      * 素材包（tags-challenge），先确保那份包在，再由 wireFriendGearsBack attach。
-     * 四格里的装备要走原版 `convertLink` 的预上色符号（整张卡），所以配色表也先拉好；
      * 拉不到时 `fillFriendGearTabs` 仍退回容器画稿，不会空着。 */
     if (window.SfRender && SfRender.loadExtra) {
       Promise.all([
@@ -2855,7 +2497,6 @@
     try { applyTab(); } catch (e) {}
   }
   /** 把 4673 f7 自带那颗**绿色、无名、无点击脚本**的返回键换掉。
-   *  它其实是两颗形状（胶囊 3152@d7 + 文字 4599@d9）；这里藏掉它们，改挂关卡二级页
    *  （4756 f5）那颗原版 `back` = **3911**（金胶囊 + 「返回」），并接回上一页。
    *  `3911` 的舞台落点照 4756 f5 的放置矩阵：`(160.3, 175.5)`。 */
   function wireFriendGearsBack(view) {
@@ -2970,34 +2611,6 @@
     return sum;
   }
 
-  /* ============================================================
-   * 「更换装备」= 原版那一页（库元件「状态1」= 4673 的第 3 帧）
-   * ------------------------------------------------------------
-   * 原版 `showEquipsWin()`（MainMovie.as:22088-22094）：
-   *   `loadMcs([["状态1","subFrame",currentFrame]]); subFrame.gotoAndStop(3);
-   *    showEquips(pageNum1); showWears();`
-   * 它是**盖在状态页上面的一层** —— 页根 7218 不动，退出走 `clearCurrentWin()` 只拆这一层
-   * （`state == 4` 时按返回键 → `setState(zhuangtai.originalState); clearCurrentWin()`）。
-   * 所以复刻不复用 `js/classic-ui.js` 的 `openGears()`（那是现代模式那套 DOM 弹窗），
-   * 而是在这里按同一套覆盖层机制挂**原版帧**。
-   *
-   * 第 3 帧的具名元件（`node out/frame-raw.cjs 4673 3` 实测）：
-   *   `t_count`(4556) 容量 / `mc_body`·`mc_head`·`mc_hand`·`mc_foot` 四个部位 /
-   *   `c1`..`c6`(4547) 六个格子 / `left`·`right`(3156) 翻页 / `back`(3644) /
-   *   `icon1`..`icon6`(4563) 已穿戴的小勾 / `t_1`..`t_6`(4564-4569) 装备名。
-   *   ⚠ **`c1` 这个名字在导出里丢了**：深度 33 那条放置没有 `na`，其余 5 格都有 ——
-   *     所以第 1 格按**深度**认（`GEAR_CELL_DEPTHS`），`byName('c1')` 是取不到的。
-   * 逐条照 `showEquips(num)` / `showWears()`：
-   *   · 每格挂 `convertLink(装备)` 的容器（复刻这边 = `containerIds[type][0]` + `wearInfo` 的帧号）；
-   *   · `t_{i}` 写装备名、并**按品质改字色**（`setEquipTextColor` 的 6 档原值）；
-   *   · `icon{i}`：`gotoAndStop(1)` = 已穿戴 / `(2)` = 未穿戴（那颗 3 帧，1 是小勾、2/3 是空）；
-   *   · `t_count` = "容量N/M"；
-   *   · 四个部位**压到 85%**（`showWears()` 的 `_xscale = _yscale = 85`，与状态页 `showFace` 不同）；
-   *   · `left`/`right`：`num > 1` / `num < pageCount1` 才 `_visible = true`。
-   * ⚠ `t_1`..`t_6` 的框只有 54~57 个单位宽、字号 12 → **一行只放得下 4 个全角字**
-   *   （`textfields-index.json` 实测 `charsPerLine: 4`）。`SfRender.setText` 只按 `\n` 断行、
-   *   不管框宽，所以超过 4 个字的名字必须**自己折行**，否则会被横向裁掉。
-   * ========================================================== */
   const GEAR_FRAME_LIST = 3, GEAR_FRAME_DETAIL = 4;
   const GEAR_PAGE_SIZE = 6;
   const GEAR_CELL_DEPTHS = [33, 35, 37, 39, 41, 43];
@@ -3005,24 +2618,15 @@
    * 画稿缩放**不照抄**那一句 `_xscale = _yscale = 85`：原版真正的落地走
    * `convertMcToBp` 位图化（见 `fitArtwork` 的注释），照抄 0.85 会让装备盖住整页。 */
   const GEAR_DOLL_PARTS = [['mc_head', 0], ['mc_hand', 1], ['mc_body', 2], ['mc_foot', 3]];
-  /* `setEquipTextColor`（:16087-16113）的 6 档原值（十进制 → 十六进制）。 */
   const GEAR_QUALITY_COLOR = ['#542201', '#65a844', '#2365c9', '#6544a8', '#ff9900', '#000000'];
   /* `doShowEquipInfo`（:7926-7945）的部位文案 —— 注意这里叫「手部」，与状态页的 `GEAR_PART_NAME` 不同。 */
   const GEAR_DETAIL_PART = ['头部', '手部', '身体', '脚部'];
-  /* `t_1..t_6` 一行放得下几个全角字（见上面那段说明）。 */
   const GEAR_NAME_COLS = 4;
   let gearPage = null;      // { host, view, page, detail }
 
   /* ---- 勇者模式：经典「更换装备」页的数据源 ----
-   * 用户 2026-10-24 口径：勇者的换装页就是**玩家自己的更换装备页**（4673 第 3 帧），
    * 装备也用经典装备 UI；区别只有两点：
-   *   ① 列表是**全部外观件**（280 件；头 / 拳套再按差分档摊开，共 464 款），
-   *      按稀有度 → 套装 → 部位排，不是玩家的背包；
-   *   ② 所有装备的主属性 / 附加属性 / 宝石一律 0 加成，只改变外观。
-   * 这里把 `hero.gearList`（tower-ui 的 `heroGearCatalog()` 摊平结果）补成 `State.gearInst`
    * 那种完整对象，并把数值字段清零；列表 / 详情 / 纸娃娃都复用玩家页的绘制函数。 */
-  /** 勇者外观的四格：`[{id, tier}]`（空 = null）。`tier` 是外观差分 1~3，
-   *  也就是原版头 / 拳套画稿的强化档（见 tower-ui 的 `heroGearTierCount`）。 */
   function heroGearSlots() {
     const hero = Hero();
     const slots = [null, null, null, null];
@@ -3045,7 +2649,6 @@
   }
   function heroSlotKey(id, tier) { return 'hero:' + Number(id) + ':' + Math.max(1, Math.min(3, Number(tier) || 1)); }
   /** 外观差分总档数：头 / 拳套按原版画稿分 1~3 档，其余部位只有 1 档。
-   *  档数由 tower-ui 的 `heroGearCatalog()` 算好放在 `gearList[].tiers` 里；
    *  这里只做兜底（老数据没有 tiers 时按 1 档）。 */
   function heroRowTiers(row) {
     const list = Array.isArray(row && row.tiers) ? row.tiers.map(Number).filter((n) => n >= 1 && n <= 3) : [];
@@ -3074,7 +2677,6 @@
       g.name = String((it && it.name) || g.name || '');
       g.attrName = String((inst && inst.attrName) || g.attrName || '');
       g.useLevel = Math.max(1, Number((inst && inst.useLevel) || g.useLevel) || 1);
-      /* 勇者模式的外观件：主属性 / 附加属性 / 宝石全部 0。 */
       g.abilityVal = 0;
       g.ext = [];
       g.gem = null;
@@ -3090,7 +2692,6 @@
     return hero.__gearRows;
   }
   /** 在勇者装备页里穿 / 脱一件外观（`gear` = heroGearRows() 的一行，带 tier）；
-   *  回调把最终外观交回 tower-ui（本局草稿或 run.hero）。
    *  ⚠ 换装层盖在状态页上、底页一直开着：立绘（`fillValues`）与右上角「出发准备」卡里的
    *  **外观 X / 4**（`refreshHeroChrome`）必须当场重算，不能等切页 / `SfStatus.refresh()`。 */
   function heroGearEquip(gear, equip) {
@@ -3127,7 +2728,6 @@
     if (heroView()) return heroGearRows();
     try { return State.gearsInDisplayOrder ? State.gearsInDisplayOrder() : State.myGears() || []; } catch (e) { return []; }
   }
-  /** 身上穿的（原版 `getMyWearList()`：按类型取第一件 `isWear == "true"` 的）。 */
   function gearWornOf() {
     const out = [null, null, null, null];
     if (heroView()) {
@@ -3167,7 +2767,6 @@
   }
   /* 用户 2026-10-28 口径：勇者外观页**不标档位数字** —— 同一件装备的几张差分卡直接同名显示，
    * 挑哪张看卡面画稿 / 立绘本身。档位仍存在 `tier` 里，绘制链路照旧按档取稿。 */
-  /** 装备名折行：`t_1..t_6` 一行 4 个字，最多两行（框高 28 ≈ 两行 12 号字）。 */
   function gearNameLines(name) {
     const s = String(name == null ? '' : name);
     if (s.length <= GEAR_NAME_COLS) return s;
@@ -3183,24 +2782,6 @@
     const color = GEAR_QUALITY_COLOR[Math.max(0, Math.min(5, Number(quality) || 0))];
     for (const t of g.querySelectorAll('text')) t.setAttribute('fill', color);
   }
-  /* ============================================================
-   * **容器画稿**的兜底落地：等比缩放到格子里、居中
-   * ------------------------------------------------------------
-   * 预上色整卡符号不走这里（原版 1:1 挂；见 `gearArtIn`）。这里只处理
-   * `gearColorId` 查不到符号时退回的通用容器画稿。原版这一页/这一格的观感是
-   * "每格里那件装备一样大、居中，下面压着卡片自带的阴影"
-   * （对照 `references/screen/屏幕截图 2026-09-23 161816.png` 与 `…162302.png` 两张原版截图：
-   *  六个格子与四个部位格里，靴子/拳套/头盔/铠甲都恰好装进卡片、居中）。
-   * 原版的机制是 `constructBpData` → `convertMcToBp(容器)` 渲染成**位图** → `attachBitmap`
-   * （MainMovie.as:6643-6646 / :6790），而 `convertMcToBp` 在反编译出的 4551 个 `.as` 里
-   * **没有定义**（只在 :6646 与 :6790 被调用）—— 位图的锚点与缩放比无法从源码还原，
-   * 只能按原版截图反推。直接 `attachMovie(容器)` 是不行的：容器画稿是**按角色尺度**画的
-   *（头部容器局部包围盒约 120×76，还偏在原点左上方），贴进 34~41 个单位的卡片里会糊掉整页
-   *（2026-10 实拍：一件头饰盖住六个格子）。
-   * 做法：量出容器的**局部**包围盒，按"装进 `box` 见方"的比例缩放，再把包围盒中心平移到
-   * 卡片中心 `(cx, cy)`。`translate(c - s*m) scale(s)` —— 局部包围盒中心 `m` 正好落到 `c`。
-   * 量不到包围盒（还没进文档）时下一帧重试一次，与 `render.js` 的 `anchorToBBox` 同一套路。
-   * ========================================================== */
   function fitArtwork(clip, box, cx, cy, retry) {
     if (!clip || !clip.setExtraTransform || !clip.g) return false;
     clip.setExtraTransform('');
@@ -3219,23 +2800,16 @@
     return true;
   }
   /* 卡片自己有多大（导出实测：格子 `4547`/`3636` 都是 41.3 见方、部位格 `4559`~`4562` 是 34.1 见方，
-   * 原点都在卡片左上角）—— 所以"卡片中心"是 20.65 / 17.05。
    * 这两个数只给**容器画稿兜底**用（见 `fitArtwork`）：预上色符号自带卡面，不需要再缩。 */
   const GEAR_CARD = 41.3, GEAR_CARD_ART = 34;
   const GEAR_SLOT_CARD = 34.1, GEAR_SLOT_ART = 29;
   const GEAR_CARD_MID = GEAR_CARD / 2, GEAR_SLOT_MID = GEAR_SLOT_CARD / 2;
   /* 装备卡里的画稿 = **原版按品质预上色的库元件**（`convertLink(equip)`，MainMovie.as:16114）。
-   * 原版 `showEquips` / `showWears` / 详情 `c1` 都是 `attachMovie(convertLink(gear))` ——
    * 颜色**画在元件里**，不是拿通用容器再叠染色。复刻以前贴现代界面正面 PNG（紫/橙靠滤镜），
    * 用户 2026-11 口径："不要用现代版 UI，经典版统一调用经典版矢量图"。
    * ⚠ 这些符号是**整张卡**，不是单纯一件装备的画稿：第一层就是 41×41 见方的卡面
    * （浅色底 + 金边 + 斜光），里面才是阴影和预上色装备。原版 `showEquips` / 详情 `c1`
-   * 都按 1:1 挂在 `(0,0)` 上，正好盖住格子自己的卡面；`showWears` 只把**部位容器**
-   * 缩到 85%（所以那颗图标实际是 41×0.85≈35）。复刻 2026-11 把符号当成"装备画稿"
-   * 又 `fitArtwork` 缩到 34 / 29，等于在格子卡面上再贴一张小卡（双层卡、装备变小）。
-   * `gear-colors.json` 是生成器按原版规则算好的 `byGear[id][品质][强化档] → 元件号`，
    * 这里只查表；查不到（老包 / 缺符号）才退回原来的通用容器画稿。 */
-  const GEAR_COLOR_FILE = 'images/ssfight/ui/gear-colors.json';
   let gearColorTable = null;
   let gearColorLoading = null;
   async function loadGearColorTable() {
@@ -3246,11 +2820,8 @@
       const table = {};
       try {
         await SfRender.loadExtra('tags-gear-color.json');
-        const r = await fetch(GEAR_COLOR_FILE, { cache: 'force-cache' });
-        if (r && r.ok) {
-          const j = await r.json();
-          if (j && j.byGear) return j;
-        }
+        const j = await SfRender.loadTable('gear-colors.json').catch(() => null);
+        if (j && j.byGear) return j;
       } catch (e) { /* 素材没生成时退回通用容器 */ }
       return table;
     })();
@@ -3258,8 +2829,6 @@
     finally { gearColorLoading = null; }
     return gearColorTable;
   }
-  /** 装备实例的强化档：原版取 `max(addr1Lv,addr2Lv,addr3Lv)`（没强化按 1）。
-   *  勇者外观件没有词条，用显式的 `tier`（1~3）表达同一个档位（见 tower-ui 的 heroGearTierCount）。 */
   function gearExtMaxLevel(gear) {
     let max = 0;
     for (const e of (Array.isArray(gear && gear.ext) ? gear.ext : [])) {
@@ -3272,7 +2841,6 @@
     if (!gear || !gearColorTable || !gearColorTable.byGear) return null;
     const table = gearColorTable.byGear[String(gear.id)];
     if (!table) return null;
-    /* 橙装是实例级 quality 4；黑套装（46/47/67~72）的 quality 是 5。 */
     const q = gear.orange === true ? 4 : Math.max(0, Math.min(5, Number(gear.quality) || 0));
     const levels = table[String(q)];
     if (!levels) return null;
@@ -3283,7 +2851,6 @@
     return levels[String(lv)] || levels['0'] || levels['1'] || levels['2'] || levels['3'] || null;
   }
   /** 把一件装备的**预上色整卡**直接挂到某个格子上（1:1，不 fit）。
-   *  融合结果页（4402 f44 的 `c1`）与「我的装备」是同一颗 `convertLink` 符号；
    *  供 `ui-compose.js` 复用，查不到符号（老包 / 缺品质）时返回 false 让调用方退回 PNG。 */
   function paintGearCard(cell, gear) {
     try {
@@ -3307,7 +2874,6 @@
     return child;
   }
   /** 把一件装备的画稿放进卡片 / 部位格：优先原版预上色符号，缺符号才退回容器。
-   *  预上色符号是**整张卡**，按原版挂法 1:1 挂在 `(0,0)`（`showWears` 的四个格再乘 85%）；
    *  只有兜底的容器画稿才走 `fitArtwork` 缩进卡片。 */
   function gearArtIn(cell, gear, box, cx, cy, iconScale) {
     if (!cell || !cell.attachChild || !gear) return null;
@@ -3345,7 +2911,6 @@
     const cy = b ? b.y + b.h / 2 : h / 2;
     fitArtwork(child, ratio * Math.min(w, h), cx, cy);
   }
-  /** 第 i 格（0 基）。第 1 格没有实例名，按深度取（见上面那段注释）。 */
   function gearCell(i) {
     const view = gearPage && gearPage.view;
     if (!view) return null;
@@ -3356,8 +2921,6 @@
   }
   /* 「刚拿到的装备」焦点：融合产物是**追加**到 S.gears 末尾的，而这一页按
    * 「穿着中 > 获得顺序」排、每页只有 6 格、每次打开都从第 1 页开始 ——
-   * 于是玩家融合完再从状态页进「更换装备」时，新装备其实躺在**最后一页**，
-   * 屏幕上根本看不到，反馈就是「融合完找不到装备了」。
    * 这里记一个待聚焦的 key：下次打开这一页直接翻到它所在的那一页并高亮那一格。 */
   let pendingGearFocus = null;
 
@@ -3371,7 +2934,6 @@
     ui.appendChild(el);
     return el;
   }
-  /** 拆掉「更换装备」这一层（不动底下的状态页，也不重画它）。 */
   function destroyGearPage() {
     const rec = gearPage;
     gearPage = null;
@@ -3382,7 +2944,6 @@
     if (rec.host && rec.host.parentNode) rec.host.parentNode.removeChild(rec.host);
     try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
   }
-  /** 回状态页（原版 `clearCurrentWin()` + `setState(zhuangtai.originalState)`）。 */
   function closeGearPage() {
     destroyGearPage();
     try {
@@ -3392,10 +2953,11 @@
       if (heroView()) refreshHeroChrome();
     } catch (e) {}
   }
-  /** 挂第 3 帧（列表）或第 4 帧（详情）。两页共用同一个宿主，来回切就是"换一层"。 */
   async function mountGearFrame(frame) {
     /* 预上色装备符号包按需加载：只有真进「更换装备 / 详情」才拉（1.7 MB）。 */
     try { await loadGearColorTable(); } catch (e) {}
+    /* 4673 在 tags-status.json；状态页被并发重建/释放时这一层会直接开，先幂等补一次加载。 */
+    try { await SfRender.loadExtra('tags-status.json'); } catch (e) {}
     const host = gearPageHost();
     if (!host) return null;
     if (!gearPage) gearPage = { host: host, view: null, page: 0 };
@@ -3412,7 +2974,6 @@
     try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
     return view;
   }
-  /** 把当前页的 6 格 + 纸娃娃 + 容量 + 翻页箭头填好（逐条照 `showEquips` / `showWears`）。 */
   function fillGearPage(view) {
     if (!view || !gearPage) return;
     const t = T();
@@ -3426,18 +2987,14 @@
       const cell = gearCell(i);
       const label = clipOf(view, 't_' + (i + 1));
       const icon = clipOf(view, 'icon' + (i + 1));
-      /* 刚融合出来的那一格：金色呼吸描边（CSS `.sf-gear-new`），一眼能找到。 */
       if (cell && cell.g && cell.g.classList) {
         cell.g.classList.toggle('sf-gear-new', !!(gearPage.highlight && g && String(g.key) === String(gearPage.highlight)));
       }
-      /* `icon{i}`：第 1 帧 = 已穿戴的小勾 / 第 2 帧 = 空（`showEquips` 先把 6 格全拨到 2）。 */
       stopAt(icon, g && g.used ? 1 : 2);
       if (t && label) t.setText(label, g ? gearNameLines(gearNameText(g)) : '');
       if (label) setGearTextColor(label, g ? g.quality : 0);
       if (cell) cell.__gearKey = g ? String(g.key) : null;
       if (g) shown++;
-      /* 格子本体保持第 1 帧（卡片），有装备时把原版预上色符号挂上去
-       * （= 原版 `attachMovie(convertLink(...))`）。 */
       if (!cell || !cell.detachAll) continue;
       cell.detachAll();
       /* 热区按**卡片自己**量（挂上容器之后量会把装备轮廓算进去，
@@ -3448,11 +3005,8 @@
       gearArtIn(cell, g, GEAR_CARD_ART, GEAR_CARD_MID, GEAR_CARD_MID);
     }
     /* 纸娃娃：`showWears()` 把四件"穿着中"的**预上色符号**挂到四个部位上
-     * （原版同样是 `attachMovie(convertLink(装备))`，不是通用容器）。
      * ⚠ 部位格自己只有**一帧**（`buildFrames` 只切出 1 帧：`4558` + `tp:1` + 尾部的 remove），
-     * 卡面与「头部/手部/身体/脚部」那几个字都是**同一张 34.1 见方的画稿**烤进去的 ——
      * 所以"穿上之后不显示部位名"只能靠**画稿盖住**（原版也是这个效果：那四格只有装备、
-     * 看不到部位名）。原版 `showWears` 把部位容器 `_xscale = _yscale = 85`，符号随之是
      * 41×0.85≈35——比 34.1 的格子略大，正好盖住卡面；这里给符号乘同一个 0.85。 */
     const worn = gearWornOf();
     for (const pair of GEAR_DOLL_PARTS) {
@@ -3476,7 +3030,6 @@
         }
       }
     }
-    /* `left`/`right`：不可翻时原版是 `_visible = false`（不是切禁用帧）。 */
     const canPrev = page > 0, canNext = page < pages - 1;
     stopAt(clipOf(view, 'left'), canPrev ? 1 : 2);
     stopAt(clipOf(view, 'right'), canNext ? 1 : 2);
@@ -3510,8 +3063,6 @@
       const shell = cell.g.querySelector(':scope > g.uc-pop');
       if (shell) t.wirePopPress(shell);
       /* ⚠ 光标与 `pointer-events` 必须排在 `popWrap()` **之后**：`popWrap` 把内容搬进
-       * `g.uc-pop` 壳里时会把这颗 `g` 的 `pointer-events` 覆写成别的值，先设等于没设 ——
-       * 表现就是"格子看得见、鼠标放上去有样式，但真机点不动"。走 `dispatchEvent` 的回归用例
        * 绕过命中测试，抓不到这一类问题（2026-11 在融合材料卡上实测到同一条）。 */
       cell.g.style.cursor = 'pointer';
       cell.g.style.pointerEvents = 'auto';
@@ -3540,11 +3091,9 @@
     wireGearPage(gearPage.view);
   }
   /* ---------- 装备详情 = 4673 的第 4 帧（`showEquipInfoWin` / `doShowEquipInfo`）----------
-   * 原版把详情挂成**第二颗**库元件（`subFrame1`，:7890），盖在列表那一页上面；
    * 复刻这边两页都只占满整屏，所以直接**换这一层的时间轴**，返回时再挂回第 3 帧 —— 观感一致，
    * 也省掉"两层各自维护播放表"的复杂度。 */
   const GEAR_GEM_COST_NOTE = '宝石：镶嵌 / 卸下各 5 金松果';
-  /** 橙装 / 黑装都可镶嵌；旧的最小 State 桩没有 canSocketGem 时退回 quality>3。 */
   const canSocketGear = (gear) => (State.canSocketGem ? State.canSocketGem(gear) : Number(gear && gear.quality) > 3);
   function currentGearByKey(key) {
     if (heroView()) return heroGearRows().find((g) => String(g.key) === String(key)) || null;
@@ -3559,7 +3108,6 @@
     fillGearDetail(view, g);
     wireGearDetail(view, String(key));
   }
-  /** 逐条照 `doShowEquipInfo()`（:7895-7972）。 */
   function fillGearDetail(view, g) {
     const t = T();
     const hero = Hero();
@@ -3567,7 +3115,6 @@
     /* `b_on`：`isWear == "true"` → 第 2 帧（已穿 → 按下去是"卸下"），否则第 1 帧。 */
     stopAt(clipOf(view, 'b_on'), g.used ? 2 : 1);
     /* `b1`：橙装 / 黑装（quality > 3）才有宝石键 —— 有宝石停第 2 帧（= 已镶嵌）、没有停第 1 帧（= 镶嵌）；
-     * 非橙装停第 3 帧（原版 `showStone = false`，那一档是灰的）。
      * ⚠ 外层 `b1`（4590）的第 2 帧只是**换成另一颗带「已镶嵌」字样的按钮**（内层 4589），
      * 绿色高亮档在内层按钮自己的第 2 帧（3152 绿底）；只拨外层会得到一张灰/米色的
      * 「已镶嵌」——用户 2026-10 口径："已镶嵌那个位置选中后要变绿"。
@@ -3591,13 +3138,23 @@
     setTextByName(view, 'level', hero ? '不限' : Math.max(1, Math.round(Number(g.useLevel) || 1)));
     setTextByName(view, 'base', hero ? '0 加成'
       : State.gearAttrText(g, { name: true }));
+    /* 基础属性框只有 81.5 单位宽（原版占位串「敏捷+5」）；带 `(+10%)` 后
+     * 「生命 105(+10%)」这类三位数会右裁一截。只缩这一行，不动下面逐条词条。 */
+    if (!hero && window.SfRender && SfRender.fitTextWidth) {
+      const baseClip = clipOf(view, 'base');
+      const meta = (baseClip && baseClip.__textBox && baseClip.__textBox.meta) || null;
+      if (baseClip && meta && meta.bd) {
+        const size = SfRender.fitTextWidth(baseClip,
+          { ascii: 0.62, min: 9, width: (meta.bd[1] - meta.bd[0]) * 0.97 });
+        if (size && SfRender.layoutText) SfRender.layoutText(baseClip, { size: size });
+      }
+    }
     if (hero) {
       /* 用户 2026-10-28 口径：勇者外观页不标档位数字（「附加属性」这一列照原版留空）。 */
       setTextByName(view, 'baseExtra', '');
       setTextByName(view, 'baseOther', '');
       setTextByName(view, 'baseOtherExtra', '');
     } else {
-      /* `baseExtra`：宝石加成（原版 `if (stoneId > 100) " +N%"`）。 */
       let gemText = '';
       if (g.gem) {
         let lv = 0;
@@ -3614,7 +3171,6 @@
       setTextByName(view, 'baseOther', des.join('\n'));
       setTextByName(view, 'baseOtherExtra', desExtra.join('\n'));
     }
-    /* 图标位：`subFrame1.c1.attachMovie(convertLink(装备)).gotoAndStop(1)`。 */
     const cell = clipOf(view, 'c1');
     if (cell && cell.detachAll) {
       cell.detachAll();
@@ -3647,12 +3203,10 @@
         }
         if (g.used) { State.unwear(key); }
         else if (State.wear(key) === false) { if (window.UI && UI.toast) UI.toast('等级不足，暂时无法装备'); return; }
-        /* 原版 `showEquips(pageNum1); showWears(); showFace(zhuangtai, …)` 之后仍停在详情页。 */
         if (gearPage && gearPage.view) { fillGearDetail(gearPage.view, currentGearByKey(key) || g); wireGearDetail(gearPage.view, key); }
       },
     });
     /* 「装备 / 卸下」外层 `b_on` 的第 2 帧是**另一颗按钮**（装备 ⇄ 卸下），不能拿来做 hover；
-     * 但外层当前子元件（4575「装备」/ 4577「卸下」）自己的第 2 帧就是原版绿皮高亮档，
      * 且会保留第 1 帧的文字。所以悬停/按下只切内层帧，外层仍停在 idle 的 1/2 帧。
      * 装/卸后同一颗 `onClip` 会重新接线，所以监听只挂一次；每次事件都现取当前子元件。 */
     if (onClip && onClip.g && !onClip.__greenHoverWired) {
@@ -3721,7 +3275,6 @@
       return;
     }
     /* ⚠ 不能写 `const S = S() || {}`：局部 `S` 会遮住模块里的 `S()`，
-     * 初始化时右侧的 `S()` 落进 TDZ，直接 `ReferenceError: Cannot access 'S' before initialization`
      * —— 宝石键的点击回调在这里中断，弹窗永远不会出现（2026-10 用户报「镶嵌不上去」）。
      * 换一个名字；下面的属性读取也跟着改。 */
     const save = S() || {};
@@ -3752,9 +3305,7 @@
   /** 打开「更换装备」这一页（原版 `showEquipsWin()`）。 */
   async function openGearsPage() {
     if (!current || !current.view) return false;
-    /* 勇者模式：同一页原版换装，只是列表 / 纸娃娃 / 详情换成勇者外观；不跑新手换装引导。 */
     if (!heroView()) {
-      /* 5 级换装：先把随机白装发进背包，再挂页；教程沿用原版 13→14→15→22，不另盖层。 */
       if (window.SfGuide && SfGuide.onGears) { try { SfGuide.onGears(); } catch (e) { if (window.__errs) window.__errs.push('guide gears: ' + (e && e.message)); } }
     }
     /* 先收掉可能开着的武器 / 技能详情层，避免两层叠在一起。 */
@@ -3801,34 +3352,12 @@
     return { page: page, pages: pages };
   }
 
-  /* ============================================================
-   * 「装备融合」= 原版 4673 的第 8 / 9 / 13 帧
-   * ------------------------------------------------------------
-   * 原版链路：状态页那颗「装备融合」键（>19 级）→ `selectComposeType()` 选类型 →
-   *   `showFusionWin()`（:8135）：`loadMcs([["状态1","subFrame4",…]]); subFrame4.gotoAndStop(8)`
-   *   —— **工作台**（三个材料格 + 费用 + 提示 + 选择/帮助/融合/返回）；
-   *   `b_choose` → `showFusion(num)`（:8388）= 同一颗元件的**第 9 帧**：材料选择页
-   *     （一页 2 件、左右翻页、`cs` 勾、`mc_x` 选中档）；选第 4 件时 `selectFusionById`（:22177）会拦；
-   *   `b_fusion` → `doFusion()`（:22222）→ **第 13 帧**：二次确认（`t_tips` + `goal` + 确定/返回）。
-   * 版式逐条照 `updataFusionMain()`（:8517）：
-   *   · 三个 `c{i}`(4630) 挂 `convertLink(装备)` 的容器、并 **`_xscale = _yscale = 120`**；
-   *   · `cBack{i}` 只在**一件材料都没有**时可见（它是空格底）；
-   *   · `mc_tips`：0 件 → 按类型 1/4/5；1~2 件 → 2；满 3 件 → 3。
-   * ⚠ 复刻的融合规则与原件不同（原件按 composeType 分蓝/紫/橙三档、材料页每页 2 件；
-   *   复刻经典页是"任意 3 件**同品质** → 升一档（不要求同部位）"，2026-11 又把
-   *   产物部位/词条/变异对齐联机版：部位随机、词条按星级继承前两条、2% 变异；
-   *   费用与校验都在 `State.mergeGears`）——
-   *   所以这里**版式照原版、规则与文案走 `State`**，件数上限仍是 3 件。
-   * ========================================================== */
   const FUSION_FRAME = { work: 8, pick: 9, confirm: 13 };
   const FUSION_QUALITY_NAMES = ['普通', '优秀', '杰出', '卓越', '传说', '黑色'];
   const FUSION_PICK_PER_PAGE = 2;
   let fusionPage = null;    // { host, view, frame, sel: [key], page }
   function fusionCostOf(q) {
     try { return Number(State.gearCostOf(q)) || 0; } catch (e) { return 0; }
-  }
-  function fusionCardOf(view, i) {
-    return clipOf(view, 'c' + (i + 1));
   }
   function fusionHost() {
     if (fusionPage && fusionPage.host && fusionPage.host.isConnected) return fusionPage.host;
@@ -3849,9 +3378,6 @@
     if (rec.host && rec.host.parentNode) rec.host.parentNode.removeChild(rec.host);
     try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
   }
-  /* ---------- 融合页上面的浮层（帮助 3157）----------
-   * 原版帮助是**另挂一层**（`loadMcs([["装备融合帮助","subFrame6"]])`），不是换掉融合页本身。
-   * 融合过场已改走 4402「合成中」（与道具合成同一颗），不再用 3763「融合中」。 */
   let fusionOver = null;
   let fusionExtraLoaded = false;
   async function loadFusionExtra() {
@@ -3896,8 +3422,6 @@
   async function mountFusionFrame(frame) {
     const host = fusionHost();
     if (!host) return null;
-    /* 融合页的格子和「我的装备」一样挂原版 `convertLink` 预上色符号（整张卡），
-     * 先确保配色表在；拉不到就退回容器画稿。 */
     try { await loadGearColorTable(); } catch (e) {}
     if (!fusionPage) fusionPage = { host: host, view: null, frame: frame, sel: [], page: 0 };
     else fusionPage.host = host;
@@ -3929,7 +3453,6 @@
     fusionPage.sel = fusionPage.sel.filter((k) => all.some((g) => g.key === k));
     return fusionPage.sel;
   }
-  /* ---------- 工作台（第 8 帧，`updataFusionMain`） ---------- */
   /* 4673 f8 的「请先放入3件蓝色的装备」是拆成逐字 <text> 的画稿。
    * 融合规则早已放开到任意同品质（橙装还能合黑），把这一行改成通用提示。 */
   function rewriteFusionPrompt(view, text) {
@@ -3939,8 +3462,6 @@
      * 否则第二次调用（换材料 / 同套提示切换）会找不到这一组、提示永远停在第一句。
      * ⚠ 找过一次就把节点记在视图上：`textContent` 会把整棵子树拼成字符串，
      *  对每个 `<g>` 都调一遍是 O(n²)，移动端换一次材料就要几十毫秒。
-     * ⚠ 不能取**最外层**的 `mc_tips`：那一层带着 `matrix(...,44.65,44)`，而原画稿里的
-     *   文字还在内层 `matrix(...,5.85,-6)` 里。2026-11 用户截图里的「黄字偏下、和下一行
      *   叠在一起」就是新 `<text>` 直接挂到外层、baseline 比原稿低 6 个单位造成的。 */
     let prompt = view.__fusionPrompt;
     if (!prompt || prompt.isConnected === false || !root.contains(prompt)) {
@@ -3992,7 +3513,6 @@
         cell.detachAll();
         if (g) {
           /* 原版 `updataFusionMain()`：`attachMovie(convertLink(装备))` 后把 **c{i} 自己**
-           * 设成 146%（MainMovie.as:8535-8551）。符号是整张卡，所以直接 1:1 挂上再乘 1.46；
            * 查不到预上色符号才退回容器画稿按格子大小缩放。 */
           const sid = gearColorId(g);
           const icon = sid ? cell.attachChild(String(sid), 1, 'gear') : null;
@@ -4003,14 +3523,12 @@
             const sym = containerIds && containerIds[Number(g.type)] && containerIds[Number(g.type)][0];
             if (info && sym && cell.attachChild) {
               /* ⚠ 不能照抄原版的 `c{i}._xscale = 120`：原版 `convertLink()` 给的是**位图化**的
-               * 装备图，而这边挂的是按角色尺度画的**容器画稿**（照抄就是一颗占满全屏的球，
                * 2026-11 实拍过）。按格子实际尺寸等比缩放并居中。 */
               fitIntoCard(cell, cell.attachChild(sym, info.frame, 'wear'), back || cell, 0.85, 67);
             }
           }
         }
       }
-      /* `cBack{i}._visible = false`：只要有一件材料，三个空格底一起收掉（照原版）。 */
       setVisible(back, picked.length === 0);
     }
     const tips = clipOf(view, 'mc_tips');
@@ -4056,9 +3574,7 @@
     wireClickable(clipOf(view, 'b_back'), { hover: 2, onFire: closeFusionPage });
   }
   /** 「帮助」：原件是 `showFusionHelp()`（`MainMovie.as:8269`）→
-   *  `loadMcs([["装备融合帮助","subFrame6"]])`，我们把它拉进了 `tags-fusion.json`。
    *  原件里那一页有 `text1`(文本) + `left`/`right`(翻页) + `button1`(关闭)，分页由
-   *  `showEquipMergeHelpPage` / `showPreHelpPage` / `showNextHelpPage` 驱动；
    *  文案 `helpWords` 是服务端下发的（本地源码里没有内容），所以这里用**复刻自己的融合规则**写。 */
   /** 帮助页 `text1` 框只有 270 单位宽（字号 12），不手动断行会横向出框；
    *  按 20 个全角字一行处理，保留原文里的手工换行。 */
@@ -4127,7 +3643,6 @@
     void C;
     return true;
   }
-  /* ---------- 选材料（第 9 帧，`showFusion`） ---------- */
   function fillFusionPick(view) {
     if (!view || !fusionPage) return;
     const all = fusionMaterials();
@@ -4151,8 +3666,6 @@
       const label = clipOf(view, 't_name' + (i + 1));
       if (label) setGearTextColor(label, g ? g.quality : 0);
       /* 【2026-11-10 修重字】基础属性必须**一行**：`t_base` 是原版单行字段（框高 24、
-       * 字号 12），1.1.8 把它拆成「名字\n数值」两行后，第二行正好压在 `t_addr` 的第一条
-       * 词条上（y≈406 vs 403），玩家看到的就是「基础值 + 词条」叠成一团。
        * 框宽仍按 46.2 放开裁切，长数值照常显示。 */
       setTextByName(view, 't_base' + (i + 1), g ? State.gearAttrText(g, { name: true }) : '', { noClip: true });
       let addr = [];
@@ -4163,7 +3676,6 @@
         if (card.detachAll) {
           card.detachAll();
           if (g) {
-            /* 原版 `showFusion()`：`c{i}.attachMovie(convertLink(装备))`，1:1 挂在格子里。 */
             const sid = gearColorId(g);
             const icon = sid ? card.attachChild(String(sid), 1, 'gear') : null;
             if (!icon) {
@@ -4206,7 +3718,6 @@
         });
       }
       /* ⚠ 光标与 `pointer-events` 必须在**工具件之后**设：`popWrap()` 会把内容搬进
-       * `g.uc-pop` 壳里，搬完这颗 `g` 的 `pointer-events` 已经不是我们设的那个值了 ——
        * 先设后被覆盖的话，画面上看着能点、真机点上去毫无反应（走 `dispatchEvent` 的
        * 回归用例**发现不了**这一类问题：它绕过了命中测试）。2026-11 实测过一次。 */
       const t = T();
@@ -4273,7 +3784,6 @@
     wireFusionPick(view);
     return true;
   }
-  /* ---------- 二次确认（第 13 帧，`doFusionWin`） ---------- */
   async function openFusionConfirm() {
     const sel = fusionSelected();
     if (sel.length !== 3) return false;
@@ -4295,8 +3805,6 @@
          * 也没有星标；橙装可以继续融合成黑装）。 */
         const r = State.mergeGears(keys, { allowMixedParts: true });
         if (r.ok) {
-          /* 不叠加 3763「融合中」：直接播 4402「合成中」整段 CG（与道具合成同一颗），
-           * 播完停在 f44 结果页展示合出的装备，确认后回融合工作台。 */
           destroyFusionOverlay();
           if (fusionPage) fusionPage.sel = [];
           const backToWork = () => mountFusionFrame(FUSION_FRAME.work).then(() => {
@@ -4343,7 +3851,6 @@
   window.SfStatus = Object.freeze({
     open: open,
     /** 查看别人的状态页：与 `open()` 同一页，只是把数据源换成对手
-     *  （原版 `getPlayInfo` → `gotoAndStop("zhuangtai")`，见文件头那一段）。
      *  **盖在挑战页上**（`overlay:true`）：返回时只拆这一层，底下的好友名单 / 选中行原样保留，
      *  不会重新洗牌敌人；挑战页不在场时才退回整页挂载。 */
     openFriend: (foe, backTo) => {
@@ -4367,10 +3874,6 @@
       }
       return p;
     },
-    /** 勇者模式的状态页（准备 / 爬塔中回看）：
-     *  与 `openFriend()` 同一颗页元件 7218，数据源换成 `hero.stats / appearance / picks`。
-     *  `opts.overlay === false` = 直接从 `#ui` 另起一页（准备页）；true = 盖在当前塔页上。
-     *  `hero` 里的回调：`onPicks(list)` / `onGears()` / `onStart()` / `onBack()`。 */
     openHero: (hero, opts) => {
       const o = opts || {}, ui = document.getElementById('ui');
       if (!ui) return Promise.resolve(false);
@@ -4393,9 +3896,7 @@
       }
       return p;
     },
-    /** 当前状态页的宿主（调试 / 外部入口用）。 */
     container: () => (current ? current.container : null),
-    /** 「更换装备」这一层的视图（调试 / 探针用；没开时为 null）。 */
     gearView: () => (gearPage ? gearPage.view : null),
     /** 「查看装备」（原版 `friendEquipsInfo()`）：在**当前这一页上盖一层**，
      *  不拆状态页 —— 返回就回他的状态页。挑战页的 `SfChallenge.showFriendGears` 走这里。 */
@@ -4408,16 +3909,13 @@
      *  再按 1:1 画；查不到符号返回 false，调用方退回原来的 PNG。 */
     ensureGearColors: () => loadGearColorTable(),
     paintGearCard: (cell, gear) => paintGearCard(cell, gear),
-    /** 关掉「更换装备」那一层（调试 / 探针用）。 */
     closeGears: () => { destroyGearPage(); },
     /** 「刚拿到的装备」：下一次打开「更换装备」直接翻到它那一页并高亮（融合产物用）。
      *  返回 { page, pages }（页号从 1 开始）或 null。 */
     focusGear: (key) => { try { return focusGear(key); } catch (e) { return null; } },
-    /** 「装备融合」= 原版 4673 第 8/9/13 帧（工作台 / 选材料 / 二次确认），盖在状态页上的一层。 */
     openFusion: () => { try { return openFusionPage(); } catch (e) {
       if (window.__errs) window.__errs.push('fusion page: ' + (e && e.message)); return false; } },
     closeFusion: () => { destroyFusionPage(); },
-    /** 融合页的状态快照（回归探针：看的是"这一刻停在哪一帧、选了几件、页号多少"）。 */
     fusionDebug: () => {
       if (!fusionPage || !fusionPage.view) return null;
       const texts = {};
@@ -4433,7 +3931,6 @@
         marks: [1, 2, 3].map((i) => { const c = clipOf(fusionPage.view, 'mc_' + i) || clipOf(fusionPage.view, 'c' + i); return c ? c.frame : null; }),
         texts: texts };
     },
-    /** 「更换装备」那一层的状态快照（回归探针：看的是"这一刻画的是哪 6 件、停在第几页"）。 */
     gearsDebug: () => {
       if (!gearPage || !gearPage.view) return null;
       const list = gearListOf();
@@ -4465,9 +3962,7 @@
     refresh: () => { if (current) { fillValues(current.view); if (current.tab !== 'status') applyTab(); else if (heroView()) refreshHeroChrome(); } },
     view: () => (current ? current.view : null),
     current: () => (current ? { tab: current.tab, friend: current.friend ? { name: current.friend.name, level: current.friend.level } : null } : null),
-    /** 最近一次 open() 停在哪一步（调试 / 探针） */
     trace: () => openTrace,
-    /** 格子数据源快照（调试 / 回归探针）：看的是"这一刻要画哪 10 格"。 */
     debug: () => {
       if (!current) return null;
       const info = gridInfo();

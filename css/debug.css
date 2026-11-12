@@ -1,9 +1,5 @@
-/* 调试面板（Ctrl+Shift+D）。面板本身不参与游戏逻辑，样式也单独放，
-   不需要时删掉 js/debug.js、css/debug.css 和 index.html 里对应的两行即可。
-   入口按钮**贴内屏**（1160×690 舞台，见 js/debug.js 的 layoutDebugUi）：left/top 由
-   JS 按 `#ui` 的实际包围盒算出来写进 style，所以下面给的 right/top 只是没跑 JS 时的兜底。
-   以前写死 `right:6px;top:6px` 是贴**外框**（浏览器窗口）的：窗口比例和舞台不一致时，
-   按钮会掉在舞台外面的黑边里，甚至压到安卓的状态栏/挖孔上。 */
+/* Debug panel (Ctrl+Shift+D), independent of game logic. The gear button is pinned to the
+   pre-JS fallbacks. Fixed window coords land in the letterbox or under Android cutouts. */
 .debug-gear{position:fixed;right:6px;top:6px;z-index:9000;border:3px solid #654f2e;border-radius:22px;
   background:linear-gradient(#fff3a8,#ffc942 55%,#ec9a12);color:#5a3c1c;font:700 14px/1 "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;
   padding:7px 12px;cursor:pointer;box-shadow:inset 0 2px #fffbd0,0 2px 3px #0006}
@@ -21,8 +17,6 @@
 .debug-hint{margin-left:auto;font-size:11px;color:#7c5a2c;background:#fff6c9;border-radius:9px;padding:2px 7px}
 .debug-x{border:0;background:transparent;color:#7b5228;font-size:22px;line-height:1;cursor:pointer;padding:0 4px}
 .debug-body{padding:10px 12px 12px;overflow-y:auto}
-/* 开关一行两个：开关多了也不会长到半屏高（用户要求「不占空间」）。
-   二级描述文字已去掉，每个开关只占一行、一行一个名字；说明改挂 title 悬停提示。 */
 .debug-list{list-style:none;margin:0 0 10px;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:4px 6px}
 .debug-row{display:grid;grid-template-columns:auto 1fr;gap:0 6px;align-items:center;min-width:0;
   background:#fdf6df;border:2px solid #e2d3ab;border-radius:12px;padding:4px 9px;cursor:pointer}
@@ -37,7 +31,6 @@
 .debug-value{grid-column:3;font-size:12px;color:#8a6528;min-width:38px;text-align:right}
 .debug-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .debug-actions .uc-button{font-size:14px;min-height:34px;padding:4px 8px;letter-spacing:0;border-width:2px}
-/* 快速获取物品：一行「道具下拉 + 数量 + 获取」 */
 .debug-grant{margin:0 0 10px;padding:9px 10px;border:2px solid #cbb98a;border-radius:14px;background:#fdf6e0}
 .debug-grant-title{display:block;margin-bottom:6px;font-weight:700;color:#5c3d1b}
 .debug-grant-row{display:grid;grid-template-columns:1fr 62px auto;gap:6px;align-items:center}
@@ -46,9 +39,7 @@
 .debug-grant-row input[type="number"]{text-align:center}
 .debug-grant-row .uc-button{font-size:13px;min-height:30px;padding:3px 10px;letter-spacing:0;border-width:2px}
 .debug-grant-note{margin:7px 0 0;font-size:11.5px;line-height:1.5;color:#987a4e}
-/* 武技：获得 / 遗忘 */
 .debug-ws .debug-grant-row{grid-template-columns:auto 1fr 54px auto}
-/* 无尽塔快捷行（层数 ±1 / 手开商店）：标签 + 两个等宽按钮，按钮文字不换行 */
 .debug-quick{grid-template-columns:auto 1fr 1fr}
 .debug-quick .uc-button{white-space:nowrap}
 .debug-ws-tag{font-size:12px;font-weight:700;color:#7a5528;white-space:nowrap}
@@ -83,11 +74,6 @@
 .debug-buff .debug-grant-row select { flex: 1; }
 .debug-buff .debug-ws-owned { margin-top: 6px; }
 
-/* ============================================================
- * 调试台 · 无尽塔增益总览
- * 三块：当前实际提升（聚合后的效果清单）/ 已获得过的全部增益（含一次生效、用尽、
- * 损毁、失去）/ 获取与消失流水。目的是把「看不见的增益」全部摊开在调试台上。
- * ============================================================ */
 .debug-buff-report{margin:8px 0 0;padding:8px 9px;border:2px dashed #c3ad7c;border-radius:14px;background:#fffdf2}
 .debug-report-head{display:flex;align-items:center;justify-content:space-between;gap:8px;
   font-weight:700;color:#5c3d1b;font-size:13px;margin-bottom:6px}
@@ -96,13 +82,11 @@
 .debug-report-sec h5{margin:0 0 5px;font-size:11.5px;font-weight:700;color:#8a6a3a;letter-spacing:.5px}
 .debug-report-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:3px 0}
 .debug-report-tag{flex:0 0 auto;font-size:11px;color:#77502e;background:#efe2c0;border-radius:9px;padding:1px 7px;margin-right:3px}
-/* 效果清单：左边名字、右边数值 */
 .debug-effect-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 8px}
 .debug-effect{display:flex;align-items:baseline;justify-content:space-between;gap:6px;
   background:#f3f8e2;border:1px solid #cddc9d;border-radius:9px;padding:2px 8px;font-size:11.5px;color:#5e6b3a}
 .debug-effect i{font-style:normal;color:#6d7a44}
 .debug-effect b{font-weight:700;color:#4f872b}
-/* 流水：一条一行，按事件类型配色 */
 .debug-buff-log{list-style:none;margin:0;padding:0;max-height:168px;overflow-y:auto;font-size:11.5px}
 .debug-buff-log li{display:flex;align-items:baseline;gap:6px;padding:2px 6px;border-radius:8px;color:#5f4a2c}
 .debug-buff-log li:nth-child(odd){background:#f7f1de}
@@ -115,6 +99,5 @@
 .debug-buff-log li.gone{opacity:.72}
 .debug-buff-log li.gone b{color:#9a6a4a}
 .debug-buff-log li.broken b{color:#b3562c}
-/* 无尽塔：局内货币（试炼币 / 铸币）的「指定数量」行 —— 标签 + 数字框 + 获得 */
 .debug-num-row{grid-template-columns:auto 1fr auto}
 .debug-num-row .uc-button{white-space:nowrap}

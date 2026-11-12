@@ -1,30 +1,11 @@
-/* ============================================================
- * tower-ui.js — 无尽挑战塔界面（经典 UI 壳内）
- * 入口在「关卡」页下滑；主塔/无尽两个页面都在这里。
- * 爬塔可视化：左侧塔身楼层条 + 右侧当层对手预告/构筑。
- *
- * 目录（Ctrl+F 搜「【U编号】」直达）：
- *   【U1】基础助手              【U7】无尽页面            【U13】无尽：里程碑·重试·战败结算
- *   【U2】通用小件              【U8】战斗闭环            【U14】无尽：试炼币商店 + U14b 铸币商店
- *   【U3】对手头像与立绘        【U9】场间抉择弹窗        【U15】无尽：永久牺牲
- *   【U4】增益面板与货币条      【U10】主塔结算           【U16】无尽：结算点与结算
- *   【U5】入口图鉴与塔身可视化  【U11】选取型强化弹窗     【U17】模块导出 window.TowerUI
- *                               【U12】永久增益替换
- * ============================================================ */
 (function () {
   'use strict';
-  /* ============================================================
-   * 【U1】基础助手 —— DOM 助手 / 飘字提示 / 排序
-   * ============================================================ */
   const C = () => UI.classic;
   const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const find = (root, sel) => root.querySelector(sel);
   function on(root, action, handler) { const el = find(root, '[data-action="' + action + '"]'); if (el) el.onclick = handler; return el; }
   function back(root, handler, label) { const el = on(root, 'home', handler); if (el) el.textContent = label || '返回'; }
   /** 【2026-10 用户口径】两座塔页面（挑战塔 / 无尽塔）的「返回」都回**上一级界面** = 关卡页
-   *  （挑战塔与无尽塔本来就是关卡页里那两颗入口进来的：`[data-action="tower-entry"]` /
-   *  `[data-action="endless-entry"]`），不是直接回主界面。
-   *  `runAction` 只挂在 `window.UI` 顶层、**不在** `UI.classic` 里，测试桩里也可能没有 ——
    *  拿不到就退回 `C().home()`，免得点一下「返回」直接抛异常。 */
   function backToStages() {
     try {
@@ -48,7 +29,6 @@
   function flushAchievements(list) {
     for (const it of (list || [])) achievementToast(it);
   }
-  /** 把状态机攒下的「本局待提示」取走并飘出来（例如「碎掉的烙印失效」）。 */
   function flushRunToasts() {
     let list = [];
     try { list = Tower.takeRunToasts ? Tower.takeRunToasts() : []; } catch (e) { list = []; }
@@ -66,14 +46,11 @@
     flushAchievements(list);
   }
   /** 轻量飘字（比成就条更朴素，用于「碎烙印失效」这类过程提示）。
-   *  `hold`：停留更久（用户口径 2026-10：**第一次失去烙印**那一条要停久一点）——
    *  它紧跟着一段剧情，飘字太快闪过玩家根本来不及看。 */
   function runToast(text, hold) {
     const el = document.createElement('div');
     el.className = 'run-toast' + (hold ? ' hold' : '');
     el.textContent = String(text || '');
-    /* 同一时刻可能来好几条（例：一次碎掉多条烙印 → 每条一句「XX烙印已融入身躯」）：
-     * 往上错开一档，别全压在 120px 那一行上叠成一坨。 */
     let live = 0;
     try { live = document.querySelectorAll('[class~="run-toast"]:not(.out)').length; } catch (e) { live = 0; }
     if (live > 0) el.style.bottom = (120 + live * 56) + 'px';
@@ -84,9 +61,6 @@
   }
 
   const RARITY = TowerData.RARITY_NAME || ['普通', '稀有', '史诗', '传奇'];
-  /* 卡面副标题按 buff.kind 取词；**每种 kind 都要有一项** —— 漏了就会把 `undefined`
-   * 原样画到卡面上（2026-11 用户截图：水晶铭文 C60 的卡面就是「undefined」）。
-   * 铭文是第 4 种类型（虚空 / 水晶 / 碎裂 / 延续），不占永久栏位。 */
   const SCOPE = { limited: '限次', permanent: '永久', instant: '即时', inscription: '铭文' };
   /* 无尽塔的「环境词缀」：段位机制（荆棘反伤/自愈回复/吸血/护盾/吞噬成长）已经并进来了，
    * 所以现在只有这一个常驻负面机制来源。每条环境都带：本局摇出来的实际数值、
@@ -110,8 +84,6 @@
   let bladeOfferOpen = false;
   let bladeOfferEl = null;
   function bladeOfferVisible() {
-    /* 只认显式开关，不靠“元素还在不在”反推：`openEndless` 重画 #ui 会把弹层一起摘掉，
-     * 旧写法每次看到 isConnected=false 就清标记，于是下一次重画又开一层，献祭框一直弹。 */
     return bladeOfferOpen;
   }
   /** 勇者准备 / 回看的「更换装备」层（挂在 body 上，不跟 #ui 的等比缩放一起缩小）。 */
@@ -145,13 +117,9 @@
         window.SfStatus && typeof SfStatus.openHero === 'function');
     } catch (e) { return false; }
   }
-  /** 经典塔页背景：**纯色**。
-   *  · 挑战塔固定村庄绿；
-   *  · 无尽塔随层数从村庄绿慢慢压到 100 层的暗红，每 100 层重制（101 层回绿）。 */
   function classicTowerBackground(mode, layer) {
     if (!classicTower()) return null;
     if (mode !== 'endless') return { color: '#4c7c50', t: 0 };
-    /* 每 100 层重制：100 层暗红，101 层回到绿色，200 层再暗红。 */
     const cycle = ((Math.max(1, Number(layer) || 1) - 1) % 100) + 1;
     const t = Math.max(0, Math.min(1, (cycle - 1) / 99));
     const mix = (a, b) => Math.round(a + (b - a) * t);
@@ -160,7 +128,6 @@
       t: t,
     };
   }
-  /** 把当前页的背景色写到 `--tower-bg`（CSS 只用这一个变量，别再加渐变端点）。 */
   function applyClassicTowerBg(p, mode, layer) {
     if (!p || !p.style) return;
     const bg = classicTowerBackground(mode, layer);
@@ -174,9 +141,7 @@
     const arr = (list || []).slice();
     const isFree = (b) => !!(b && b.slotFree === true);
     /* 【U20】剧情件（`story` 标签，例：照影之境）**永远排在最前面** ——
-     * 用户口径：拾取之后它就挂在「永久增益」的第一格上。
      * ⚠ 这里用 `window.TowerData` 而不是裸的 `TowerData`：本函数的源码片段会被单测截出来
-     * 单独跑（见 test-fixes-round.cjs 的「需求64」），那个上下文里没有 TowerData ——
      * 缺了就当没有剧情件，排序与旧版完全一致。 */
     const TD = (typeof window !== 'undefined' && window && window.TowerData) ? window.TowerData : null;
     const isStory = (b) => {
@@ -188,14 +153,9 @@
       .map((x) => x.b);
   }
   /** 【2026-10 同名逐条】行引用：优先 uid（精确到那一条），没有 uid 才退回 id。
-   *  放在 orderPermanent 之后：单测会截取「orderPermanent … 通用小件」这一段来跑，
    *  定义写在片段里才能被一起带上。 */
   const rowRef = (b) => (b && b.uid != null && Number(b.uid) > 0 ? String(b.uid) : (b ? String(b.id) : ''));
 
-  /* ============================================================
-   * 【U2】通用小件 —— 血条 / 悬停提示 / 弹窗封装 / 环境词缀胶囊
-   * ============================================================ */
-  // ---------- 通用小件 ----------
 
   function carryBar(hp, maxHp, label, cls, tip) {
     const cap = Math.max(0, Math.round(Number(maxHp) || 0));
@@ -215,7 +175,6 @@
     return '当前血量 ' + hp + ' / 上限 ' + maxHp;
   }
   let tipEl = null;
-  /** 当前气泡绑在谁身上（用来判「点的是不是气泡的触发者」）。 */
   let tipAnchor = null;
   /** 触屏点开后**钉住**：再点同一颗收起，点其它地方也收起（用户 2026-10-24 口径：
    *  安卓端点开 buff 具体效果后，点其它地方必须能取消，不能只能再点一次原 buff）。 */
@@ -270,11 +229,7 @@
   }
   /** 把带 data-tip 的行绑上悬停/聚焦气泡。
    *  · 鼠标：悬停 / 聚焦显示，点击或移开收起（保持原体验）；
-   *  · 触屏（pointerType=touch）：**按下就展开并钉住**，再点同一颗或点其它地方取消。
-   *  以前触屏点开后只能再点同一颗，点空白处气泡会一直挂着，挡住半个屏幕
    *  （用户 2026-10-24 口径：安卓端点开 buff 具体效果后，点其它地方必须能取消）。
-   *  ⚠ 这里用 `addEventListener`，**不再覆盖 `el.onclick`** —— 无尽塔的永久增益卡
-   *  自身还有「选中作为要拿掉的」onclick（openEndless 后段才挂），以前会把气泡的
    *  onclick 顶掉，触屏上根本没有展开时机。 */
   function bindTips(root) {
     bindTipDismiss();
@@ -320,7 +275,6 @@
       '<i>' + (o.compact ? ('剩' + e.left) : ('剩 ' + e.left + ' 场')) + '</i></span>';
   }
   /** 环境面板：当前生效的全部环境（唯一常驻负面机制）。没有环境时给一句提示。
-   *  【100 层循环】环境按**轮内层号**开关：每轮都是「第 5 层起可能出现」，
    *  所以第 101~104 层与第 1~4 层一样没有环境（`canHaveEnv`），105 层起照旧。 */
   function envPanelHtml(run, opts) {
     const o = opts || {};
@@ -342,11 +296,7 @@
     }
     return parts.join('\n') || '没有特殊机制';
   }
-  /* ============================================================
-   * 【U3】对手头像与立绘 —— foePortraitHtml / fillFoeArt
-   * ============================================================ */
   /* ---------- 对手头像 ----------
-   * 三侠 / 机制 NPC 用现成的经典立绘卡（characters/*.json 里的整身图）；
    * 松鼠形态的 boss 要连装备一起画，所以用引擎把「待机帧 + 装备图层」渲到小 canvas 上
    * —— 这套 wears 就是战斗里真正穿的那套（tower-data 的 GEAR / wearsOf）。 */
   const CHAR_FILE = { tl: 'mantis', xh: 'crane', xm: 'panda' };
@@ -363,14 +313,10 @@
       return '<span class="foe-portrait"><span class="sf-classic-campaign" data-campaign-foe="' +
         index + '"></span></span>';
     }
-    /* 经典塔：三侠/机制 NPC 直接用关卡里那张经典立绘卡，松鼠 boss（含巡逻魔王）
-     * 一律复用随机挑战右栏的 7232 + 装备挂点，不再画现代图集 canvas。 */
     if (classicTower()) {
       const file = (info.kind === 'hero' || info.kind === 'npc') ? (CHAR_FILE[info.anim] || 'mantis') : null;
       if (file) return '<span class="foe-portrait"><img alt="" src="images/ui/characters/' + file + '-classic-card.png"></span>';
       /* 松鼠 boss 直接复用随机挑战右栏那块 7232：同一颗元件、同一套装备挂点
-       * （showFace 口径）。巡逻魔王也走这里 —— 它的黑色狂战套由 tower.js 的
-       * `gear`（181~184 / 容器帧 119）交给 attachClassicGear() 贴上去；
        * 以前单独走 Engine canvas 才会变成现代图集外观、比例也和三侠卡对不上。 */
       return '<span class="foe-portrait"><span class="sf-classic-foe" data-classic-foe="' + index + '"></span></span>';
     }
@@ -382,7 +328,6 @@
       '" data-foe-art="' + index + '" aria-hidden="true"></canvas></span>';
   }
   /* 经典塔松鼠 boss：直接复用随机挑战右栏 7232（frame1）和同一套装备挂点。
-   * 装备数据可以是 tower-data 的 `gear` key（如 fist3，由 wearsOf() 展开），
    * 也可以是现成数组（巡逻魔王的 `classicGear` = 黑狂战 181~184）。 */
   let classicGearTables = null;
   const CLASSIC_FACE_PARTS = [
@@ -395,15 +340,10 @@
     if (classicGearTables) return classicGearTables;
     try { await SfRender.loadExtra('tags-challenge.json'); } catch (e) {}
     try { await SfRender.loadExtra('tags-gear.json'); } catch (e) {}
-    const B = 'images/ssfight/ui/';
-    const j = (f) => fetch(B + f, { cache: 'force-cache' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const j = (f) => SfRender.loadTable(f).catch(() => null);
     const [frames, slots] = await Promise.all([j('gear-frames.json'), j('gear-slots.json')]);
     if (!frames || !slots) return null;
     const cont = {};
-    /* 7232 的 mc_head / mc_fistL… 是 `showFace()` 的原版挂点：原版这里 attachMovie 的是
-     * **非 B 立绘容器**（portraitContainer）。B 容器（container）是战斗骨骼用的位图化版本，
-     * 注册原点不同 —— 贴到这些挂点上会把整套装备整体推偏（无尽塔预告松鼠装备错位就是这个）。
-     * 与随机挑战 `showFace` / 状态页 `dressParts` 取同一张表。 */
     for (const c of slots.portraitContainer || []) cont[c.type] = c.ids;
     classicGearTables = { frameById: new Map((frames.gear || []).map((g) => [Number(g.id), g.frame])), cont: cont };
     return classicGearTables;
@@ -419,10 +359,6 @@
     } catch (e) {}
     return NaN;
   }
-  /** 装备画稿帧号：基础帧 + **差分档 - 1**。
-   *  与状态页 `wearInfo` / 战斗 `planSide` 完全同一口径（原版 `constructBpData`：
-   *  `frame += max(addr1Lv,addr2Lv,addr3Lv) - 1`）：勇者外观件用显式的 `tier` 表达这一档，
-   *  账号装备仍走 `ext` 数组；衣服 / 鞋子不吃这一档（原版那两张图集没有分档画稿）。 */
   function classicGearFrame(g) {
     if (!classicGearTables || !g) return 0;
     const base = classicGearTables.frameById.get(Number(g.id));
@@ -465,12 +401,21 @@
     return n;
   }
   /** 把 7232 的松鼠本体（含装备）挂到 host 上，并裁成只含人物的方图。
-   *  `info.gear` 支持 tower-data 的套装 key / 现成数组；空数组 = 不穿装备。
    *  返回 SfRender view（挂载失败会抛）；调用方负责 catch。 */
   async function mountClassicSquirrel(host, info, opts) {
     const o = opts || {};
     await loadClassicGear();
-    const v = await SfRender.mountSymbol(host, '7232', { frame: 1, label: o.label || '经典对手' });
+    /* 换包 / 首次进塔时挑战包可能还在路上：失败后补拉一次再挂，避免塔页只剩空白卡。 */
+    let v = null;
+    for (let attempt = 0; attempt < 2 && !v; attempt++) {
+      try {
+        if (attempt) await SfRender.loadExtra('tags-challenge.json');
+        v = await SfRender.mountSymbol(host, '7232', { frame: 1, label: o.label || '经典对手' });
+      } catch (e) {
+        if (attempt) throw e;
+      }
+    }
+    if (!v) return null;
     if (!host.isConnected) { try { v.destroy(); } catch (e) {} return null; }
     SfUiMain.toolkit.freezeDescendants(v);
     v.playing = false;
@@ -581,7 +526,6 @@
     const hosts = root.querySelectorAll('[data-campaign-foe]');
     if (!hosts.length) return;
     try {
-      await SfRender.loadExtra('tags-fight.json');
       await SfRender.loadExtra('tags-campaign-boss.json');
     } catch (e) {
       if (window.__errs) window.__errs.push('classic campaign art load: ' + (e && e.message));
@@ -598,7 +542,6 @@
         SfUiMain.toolkit.freezeDescendants(v);
         v.playing = false;
         const model = v.byName('playerMc');
-        /* 只保留动物模型所在的根级子树；6833 的其它层级是给战斗帧用的空白/辅助件。 */
         const keep = new Set();
         if (model && model.g) {
           let node = model.g;
@@ -675,9 +618,7 @@
     // 松鼠形态的 boss 连装备一起画；机制 NPC 用它们自己的待机帧（立绘卡和三侠重了）。
     const npc = info.kind === 'npc';
     // 注意要过一遍 Engine.wearsFor：tower-data 给的是装备 id（{id:201}），
-    // 引擎画图层时用的是 {src,label}（和战斗里 foe.wears 一样），少了这一步装备不会画出来。
     // 「巡逻」魔王在现代预告里仍优先用 info.outfit（橘色 113 的 {src,label} 图层）；
-    // 经典预告不会走到这里 —— 它走 7232 + gear 181~184 的黑色狂战套（见 foePortraitHtml）。
     const wears = npc ? null
       : info.outfit ? Engine.wearsFor(info.outfit)
         : Engine.wearsFor(TowerData.wearsOf(info.gear));
@@ -713,15 +654,7 @@
   /* 三侠大招留削弱的具体数值由 `heroDebuffPreviewHtml` 的 chips 悬停气泡给出
    *（原来这里还有一个 `heroDebuffTips()`，只服务挑战塔开局页那串规则介绍的悬停 ——
    * 规则介绍按 2026-10 用户口径整段删掉后它就没有调用点了，一并删掉）。 */
-  /* ============================================================
-   * 【U4】增益面板与货币条 —— buffPanelsHtml / currencyHtml
-   * ============================================================ */
   function buffTag(b, stacks) {
-    /* 【2026-10 第七十三批】铭文附魔的外框（用户口径）：
-     *   · 虚空铭文（C37，`slotFree`）→ **青色**外框（原有）；
-     *   · 水晶铭文（C60，`enchMul > 1`）→ **红色**外框；
-     *   · 两条同时附魔 → **一半红一半蓝**（`.ench-both`，用 ::before 画双色环）。
-     * 数据来自 buff 报告行（tower.js 的 debugBuffReport 逐条带出 `enchMul` / `slotFree`）。 */
     const mul = Number(b && b.enchMul) || 1;
     const free = !!(b && b.slotFree === true);
     const crys = mul > 1;
@@ -733,11 +666,7 @@
       '<i>' + SCOPE[b.kind] + '</i>' + (stacks > 1 ? '<em>×' + stacks + '</em>' : '') + '</span>';
   }
   /** 铭文附魔的**类名出口**（画 .buff-tag 的地方都必须走这里）：
-   *    虚空铭文（C37，不占位）→ `.slot-free`（青框）；水晶铭文（C60，×1.5）→ `.ench-crystal`（红框）；
-   *    两个都吃 → `.ench-both`（一半红一半蓝）。
    *  ⚠ 教训：无尽塔**主面板**（`buffPanelsHtml`，玩家一直盯着的那块「永久增益 / 限次增益」）
-   *  原来是**自己拼 class**、只认 `slot-free`，所以水晶的红框在它上面根本不存在 ——
-   *  第七十三批只在「本局构筑」和商店列表两处生效，用户实测「看不到效果」就是这个。
    *  现在所有渲染器共用这一个出口，新增一种附魔不会再漏掉某一块面板。 */
   function enchCls(b) {
     const free = !!(b && b.slotFree === true);
@@ -750,12 +679,11 @@
     return '<div class="tower-buffs"><h4>本局构筑</h4><div class="buff-tags">' +
       list.map((b) => buffTag(b, b.stacks)).join('') + '</div></div>';
   }
-  function permTip(b, mirrorSnapshot) {
+  function permTip(b, mirrorSnapshot, run) {
     const buff = TowerData.BUFF_BY_ID[b.id];
     if (!buff) return b.name;
     const mul = Number(b.enchMul) || 1;
     /* 【附魔后不再显示原描述】水晶铭文会放大这一条的效果，原 `buff.desc` 里写的是
-     * 基础数值（例：豪掷千金「消费 100」）。以前原描述照抄、下面再补一条附魔后的合计，
      * 两行数字互相打架 —— 用户 2026-10-24 口径："部分被水晶铭文附魔的 buff 并没有
      * 正确显示附魔后的效果。" 附魔时直接改用**按附魔值生成的完整效果清单**。 */
     const parts = [buff.name + '（' + RARITY[buff.rarity] + ' · 永久）'];
@@ -788,16 +716,11 @@
     parts.push(b.id === TowerData.MIRROR.id ? '镜界印记：×' + b.stacks
       : '当前叠层：×' + b.stacks + (b.stacks > 1 ? '（按层数累加）' : ''));
     /* 【第七十四批】本条被铭文附魔时要**写清楚**（否则悬停看到的还是没附魔的数字，
-     * 玩家会以为「附了没效果」）：水晶这一条把下面所有**效果量**乘一次，
      * 与 tower.js 实际结算用的 `k = 层数 × 全局倍率 × row.enchMul` 同一口径；
      * 而 `lowHpAt` / `lowHpRegenAt` 是**阈值**（结算里取 max、不乘 k），所以不乘。 */
     const raw = buff.mods || {};
     /* 只有**会随铭文倍率结算**的键才乘；下面这些是「获得时一次性生效 / 经济类」，
      * tower.js 的 addBuff / 成长 / 掉落走的还是基础值（悬停必须与结算一致）：
-     *   · permSlot / pickWeaponPct / pickSkillPct —— 拿到 / 选取那一刻写入，之后不再变；
-     *   · rarityBoost / epicMul / legendMul / commonMul —— 商店掉率按 `run.rarityBoost`；
-     *   · sellValue / sellGrowthPerWin / shopEnterCoins —— 经济类；
-     *   · globalMul（C15）—— 全局倍率本身，吃自己的铭文会递归；
      *   · shopSpendTiers 是数组，单独按成本口径处理。 */
     const RAW_KEYS = new Set(['lowHpAt', 'lowHpRegenAt', 'permSlot', 'pickWeaponPct', 'pickSkillPct',
       'rarityBoost', 'epicMul', 'legendMul', 'commonMul', 'sellValue', 'sellGrowthPerWin',
@@ -810,7 +733,6 @@
       const v = raw[k];
       if (typeof v === 'number') {
         if (COST_KEYS.has(k)) {
-          /* 成本类：附魔后**降价**（豪掷千金 100 → 75，见 tower.js 的 enchCost）。 */
           o[k] = (window.Tower && Tower.enchCostOf) ? Tower.enchCostOf(v, mul) : Math.max(1, Math.round(v * 0.75));
         } else if (RAW_KEYS.has(k)) o[k] = v;
         else o[k] = v * mul;
@@ -849,9 +771,6 @@
       (m.killPowerCap ? '（上限 +' + p1(m.killPowerCap * b.stacks * 100) + '%）' : ''));
     /* 原来这里还有一条 `m.killMaxHpPct` —— 那个 mod 在任何增益上都不存在（死代码），
      * 换成真正在用的「每胜利生命上限」字段（C07 吞噬成长）。 */
-    /* 狂怒：低血时攻/敏/速同时生效（阈值 + 三项一起写清楚）。
-     * 敏捷/速度这两份是**终乘**（乘在最终值上，不并进敏捷/速度面板），所以这里按 ×N 写，
-     * 免得玩家以为只是「面板 +20%」。 */
     if (m.lowHpPowerMul || m.lowHpAgilityMul || m.lowHpSpeedMul || m.lowHpFinalMul) {
       const low = '生命低于 ' + Math.round((m.lowHpAt || 0.5) * 100) + '% 时';
       const bits = [];
@@ -868,14 +787,20 @@
     if (m.revivePct) {
       parts.push('复活回血 ' + Math.round(m.revivePct * 100) + '%' +
         (m.reviveStatMul ? '，复活后本场力/敏/速 +' + Math.round(m.reviveStatMul * 100) + '%' : ''));
-      /* 涅槃可叠 2 层：本层复活机会 = 层数（第 2 层不改属性加成，只多一次机会）。 */
-      parts.push('本层复活机会：' + Math.max(1, Math.floor(Number(b.stacks) || 1)) + ' 次');
+      /* 涅槃可叠 2 层：本层复活机会 = 层数（第 2 层不改属性加成，只多一次机会），
+       * 但**用掉一次就要少一次** —— 以前这里直接写 `b.stacks`，复活用掉之后还显示
+       * 现在统一问状态机的本层剩余次数；没有 run（例如增益集锦）时才退回叠层数。 */
+      const rev = (window.Tower && Tower.reviveInfoOf) ? Tower.reviveInfoOf(run) : null;
+      const perLayer = rev ? rev.perLayer : Math.max(1, Math.floor(Number(b.stacks) || 1));
+      const left = rev ? rev.left : perLayer;
+      parts.push(left > 0
+        ? ('本层复活机会：' + left + ' 次' + (rev && rev.used > 0 ? '（本层已用 ' + rev.used + '/' + perLayer + '）' : '') +
+          '；被打死或回合耗尽判负时触发')
+        : ('本层复活机会：已用尽（' + perLayer + '/' + perLayer + '）'));
     }
     if (m.globalMul) parts.push('全局增幅 ×' + m.globalMul + '（同名多张加算，且与水晶铭文加算）');
     if (m.powerPerEmptySlot) parts.push('每个空的永久增益位 攻击 +' + Math.round(m.powerPerEmptySlot * 100) + '%');
     if (m.powerPerPermBuff) parts.push('每拥有 1 个永久增益 攻击 +' + Math.round(m.powerPerPermBuff * 100) + '%');
-    /* C36「挥金如土」是**分段门槛**（5 / 10 / 15），水晶铭文附魔后每一档都按成本口径降价
-     * （4 / 8 / 11）。只写 `shopSpendStep` 会把玩家骗去按 5 币攒进度。 */
     if (m.shopSpendStep) {
       const steps = (Array.isArray(m.shopSpendTiers) && m.shopSpendTiers.length)
         ? m.shopSpendTiers : [m.shopSpendStep];
@@ -886,7 +811,6 @@
     if (m.firstDodge) parts.push('每场战斗中敌方对我方的第一次攻击必定闪避' + (m.firstDodgeFreeTurn ? '，且我方立刻额外行动一次' : ''));
     if (m.firstHitZero) parts.push('每场战斗中我方第一次受到的伤害降低为 0' + (m.firstHitZeroFreeTurn ? '，且我方立刻额外行动一次' : ''));
     if (m.envIgnore || m.envReflect || m.envDenyGood) parts.push('无视负面环境词缀；敌方无法获得环境词缀加成');
-    /* —— 本轮新增 6 个 —— */
     if (m.roundStatPct) parts.push('战斗中每回合开始 力/敏/速 各 +' +
       (Math.round(m.roundStatPct * b.stacks * 1000) / 10) + '%' + (b.stacks > 1 ? '（可叠 ' + b.stacks + ' 层）' : '') +
       '；每场战斗结束时清零');
@@ -912,7 +836,6 @@
      * 用户 2026-10-24 口径："部分被水晶铭文附魔的 buff 并没有正确显示附魔后的效果，
      * 一个个进行测试与修改。" 以前的悬停只列了战斗里最常用的十来个键，像
      * 猎侠者 / 生命源泉 / 逢五强化 / 精英杀手 / 铜墙铁壁 / 背包扩容 / 掉落加成这些
-     * **一条合计行都没有**，附魔后自然看不到任何变化。这里逐个补上，数值与 tower.js
      * 的实际结算同口径（`m` 已乘过这一条的水晶倍率；RAW_KEYS 里的仍显示基础值）。 */
     const pctOf = (v) => Math.round(Number(v || 0) * 1000) / 10;
     if (m.emptyMaxHpMul) parts.push('每场战斗开始获得 ' + pctOf(m.emptyMaxHpMul * b.stacks) + '% 的空生命上限');
@@ -948,7 +871,6 @@
     if (buff.mods && buff.mods.shopDiscount) parts.push('下个商店 ' + Math.round((1 - buff.mods.shopDiscount) * 100) / 10 + ' 折');
     if (buff.mods && buff.mods.postBattleShop) parts.push('下一场战斗后开一次商店');
     /* 用户 2026-10-24 口径：**正常查看**增益效果时不要出现「点一下选它作为要拿掉的那个」
-     * 这种操作提示（它只在替换模式里有意义，平时只会让说明变长、还像在催玩家拆增益）。
      * 只有 ①剧情藏品（永远不能拆）②当前已经选中要拿掉的那一条（点一下取消）才写。 */
     if (TowerData.hasTag(buff, 'story')) parts.push('剧情藏品，不可替换、出售或献祭');
     else if (replaceTarget === rowRef(b)) parts.push('（当前已选为要拿掉的那个，点一下取消）');
@@ -1001,7 +923,6 @@
       '剩余 ' + b.uses + ' 场（每打完一场扣 1，扣完自动消失）',
       b.on ? '当前生效中 · 点一下可以关掉（关掉不扣次数）' : '当前已关闭 · 点一下重新开启'].join('\n');
   }
-  /** 渴血之剑的角标：阶段 / 成长 / 永续 / 强制苏醒。 */
   function bladeBadgeText(b) {
     const head = b.forced ? '强制苏醒 · ' : '';
     const stackTag = b.stacks > 1 ? '×' + b.stacks + ' 层 · ' : '';
@@ -1020,7 +941,6 @@
     const run = mode === 'tower' ? Tower.towerInfo().run : Tower.endlessInfo().run;
     if (!run || mode !== 'endless') return '';
     const list = Tower.ownedBuffs('endless');
-    /* 【2026-10 同名逐条】按每条自己的 `slotFree` 排 / 标记；`data-replace` 用 uid。 */
     const perm = orderPermanent(list.filter((b) => b.kind === 'permanent'));
     /* 渴血之剑及其变体默认置顶（用户 2026-10 口径）：先按「是不是剑」排，再保持原有顺序。 */
     const isBladeBuff = (b) => !!(b && TowerData.isBladeId && TowerData.isBladeId(b.id));
@@ -1031,7 +951,7 @@
       ? perm.map((b, i) => {
           const free = b.slotFree === true;
           const em = enchMark(b);
-          const tip = permTip(b, run.mirrorSnapshot);
+          const tip = permTip(b, run.mirrorSnapshot, run);
           const canReplace = !TowerData.hasTag(TowerData.BUFF_BY_ID[b.id], 'story');
           const nextFree = i + 1 < perm.length && perm[i + 1].slotFree === true;
           const divider = (free && !nextFree) ? '<span class="buff-sep" aria-hidden="true"></span>' : '';
@@ -1051,7 +971,6 @@
       : '';
     const limHtml = lim.length
       ? lim.map((b) => {
-          /* 王者之剑（HB04）用传奇增益的金色外观；前面几把渴血之剑仍保持原限次卡样式。 */
           const king = !!(TowerData.BLADE && b.id === TowerData.BLADE.finalId);
           return '<button type="button" class="limit-tag r' + b.rarity +
             (king ? ' legendary' : '') + (b.on ? '' : ' off') + '" data-toggle="' + esc(rowRef(b)) +
@@ -1060,8 +979,6 @@
             limitBadgeText(b) + '</em></button>';
         }).join('')
       : '<span class="buff-empty">还没有限次增益</span>';
-    /* 讨价还价（E14）：即时类不进 permanent/limited，所以在这里单独把「攒着还没兑现的份数」
-     * 摆出来 —— 不然玩家看不到自己叠了几层，进店前也预期不了。 */
     const halfPending = Math.max(0, Number(run.shopHalfPending) || 0);
     const halfHtml = halfPending > 0
       ? '<div class="buff-pending"><span class="pending-chip" data-tip="' +
@@ -1091,9 +1008,7 @@
       '</div></div>';
   }
   /* ---------- 挑战塔「开打前」的两块预告（2026-10 用户口径） ----------
-   * 进行中那一屏给的是「当前环境 / 本层已被削弱」（envPanelHtml / debuffPanel）；
    * 开打前这一屏原来只有规则行里的一句话，玩家看不到具体会遇到什么，所以补这两块：
-   *   · 本层可能的环境：按**挑战塔口径**列池子（不带试炼币那类只对无尽塔成立的收益档）；
    *   · 三侠大招会留下：每位大侠的大招会给本层留下哪种削弱（速杀可规避）。 */
   function envPreviewHtml(nextLayer) {
     const TD = window.TowerData;
@@ -1105,7 +1020,6 @@
     }
     const pool = TD.envPoolFor('tower');
     const chips = pool.map((raw) => {
-      /* 按挑战塔口径取名（贪婪裂隙 → 厚甲裂隙），免得名字里承诺一个那边没有的收益。 */
       const def = TD.envDefFor ? TD.envDefFor(raw, 'tower') : raw;
       const text = TD.envPreviewText ? TD.envPreviewText(raw, 'tower') : String(def.desc || '');
       const range = TD.envRangeText ? TD.envRangeText(raw, 'tower') : '';
@@ -1129,13 +1043,9 @@
     return chips ? '<div class="tower-rule mech-bar"><b>三侠大招会留下</b>' + chips + '</div>' : '';
   }
   /* ---------- 敌人成长倍率（【D2b】，2026-10 用户口径） ----------
-   * 无尽塔的敌人面板 = 属性基数（目标等级，40 层封顶 70 级）× 段位倍率（31 层封顶 ×10）
-   * × 深度倍率（30 层起叠加、**永不封顶**）。
    * ⚠ 用户口径：这一档**不出现在界面上**（局内主界面与开局页都不放）——
-   *   原来那个「敌人成长 ×N」刻度块（foeScaleChip）已按 2026-10 用户口径删掉；
    *   倍率的计算与口径在 js/tower-data.js 的 endlessScaleParts / 【D2b】注释里。 */
   /** 商店「这一页几件」的说明（【100 层循环】，2026-10 用户口径）：
-   *  1-20 层 5 件、21-40 层 4 件、41-100 层 3 件，第 101 层起回到 5 件。
    *  件数是规则，不写出来玩家会以为是随机变少。`count` 省略时按层算。 */
   function shopTierHint(layer, count) {
     if (!window.TowerData || !TowerData.endlessShopSlots) return '';
@@ -1177,7 +1087,6 @@
              (bk.boosts || []).map((b) => ' × ' + b.name + ' +' + Math.round((Number(b.pct) || 0) * 100) + '%').join('') +
              (bk.elite ? ' × 精英 ×' + bk.eliteMul : '') + '）')
           : (gained ? ('上一场战斗获得 ' + gained + ' 枚') : '');
-        const nowBase = Math.max(1, Math.floor(Number(run.coinBase) || 0));
         items.push({
           name: '试炼币',
           value: run.coins,
@@ -1213,31 +1122,13 @@
         (it.delta ? '<em class="currency-delta">+' + it.delta + '</em>' : '') +
         '<i>' + it.name + '</i></span>').join('') + '</div>';
     }
-    /* 金松果：**主界面之外统一用道具页那颗"橡果+金币"**（`images/ui/icons/gold-acorn.png`，
-     * 用户 2026-10 口径：把主界面之外的金松果样式换掉）。
-     * 历史：这里曾错用 prop-1.png（那是小体力药剂），后改成资源图集 resource_1 第 18 帧的单颗橡果；
-     * 现在再统一到道具页那颗 —— 首页（非 ssflight 的经典首页）保留 resource_1-18 不动。 */
-    const items = [{ icon: 'images/ui/icons/prop/prop-23.png', name: '挑战书', value: S.props[CURRENCY_PROP.book] || 0 },
-      { icon: 'images/ui/icons/gold-acorn.png', name: '金松果', value: S.goldPoint }];
+    const items = [{ icon: 'images/ui/icons/prop/prop-23.svg', name: '挑战书', value: S.props[CURRENCY_PROP.book] || 0 },
+      { icon: 'images/ui/icons/gold-acorn.svg', name: '金松果', value: S.goldPoint }];
     return '<div class="tower-currency">' + items.map((it) =>
       '<span class="currency-item" data-live-gold="' + (it.name === '金松果' ? '1' : '') + '">' +
       '<img alt="" src="' + it.icon + '"><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';
   }
-  /* ============================================================
-   * 无尽主界面右上角的「离场结算」一行：
-   *   · 离场可得 +N 抽奖卷 —— 与「结算点·结算离场 / 失败结算」同一口径
-   *     （endlessTickets(当前层)，即 Tower.endlessInfo().run.ticketsIfSettle）
-   *   · 铸币 ×M —— 失败后可回滚本场再打一次（不折现，不并进上面那个数字）
-   * 两个数字都从 endlessInfo().run 里取，纯函数（便于测试直接跑这一份实现）。
-   * ============================================================ */
-  function propName(id) {
-    try { const p = propMap.getValue(id); return p ? p.name : ('道具' + id); } catch (e) { return '道具' + id; }
-  }
-  /* ============================================================
-   * 【U5】入口图鉴与塔身可视化 —— buffCatalogHtml / towerVisual / planHtml
-   * ============================================================ */
   /* 卡片/悬停用的判据：**挑战塔专属**的「下一场战斗」限次类。
-   * 判据全部走标签（tower ∧ nextBattle）；无尽塔的 N13/N14 同样带 nextBattle 标签，
    * 但它们是 10 次限次，必须照常显示总次数。 */
   function isTowerNext(b, mode) {
     /* 「只服务下一场战斗」是**挑战塔**的口径（那里一场就是一层）。
@@ -1247,12 +1138,6 @@
       TowerData.hasTag(b, 'tower') && TowerData.hasTag(b, 'nextBattle'));
   }
   function buffCatalogHtml() {
-    /* 增益集锦 = **无尽塔的全增益展示**：只列带无尽塔标签的条目，挑战塔专属（tower-only）一条都不出现。
-     * 【2026-10 用户口径】以前是「hidden 一律不列」，于是**虚空铭文（C37）在传奇那一栏缺席**，
-     * 玩家在商店里看得到、集锦里查不到。现在口径改成：
-     *   · `catalog` 标签（选取型强化 C32/C33）→ 照列；
-     *   · `kind: 'inscription'`（铭文 C37/C60）→ 照列；
-     *   · 其余 hidden（彩蛋/特殊获取）仍然不列。 */
     const list = TowerData.BUFFS.filter((b) => TowerData.hasTag(b, 'endless') &&
       (!TowerData.hasTag(b, 'hidden') || TowerData.hasTag(b, 'catalog') || b.kind === 'inscription'));
     const byRarity = [0, 1, 2, 3].map((r) => list.filter((b) => b.rarity === r));
@@ -1268,39 +1153,8 @@
             '" title="' + esc(TowerData.descOf(b, 'endless')) + '">' + esc(b.name) + '<i>' + (kindName[b.kind] || '') + '</i></span>').join('') +
           '</div></div>' : '').join('') + '</div>';
   }
-  /** BOSS 卡的头像：用独立的 data-boss-art，渲染完由 paintBossCatalog 逐张作画（不会和同页其它画布串号）。 */
-  function bossPortraitHtml(index, info) {
-    return '<span class="foe-portrait"><canvas width="' + AVATAR_SIZE + '" height="' + AVATAR_SIZE +
-      '" data-boss-art="' + index + '" aria-hidden="true"></canvas></span>';
-  }
-  /** 进塔页渲染完成后：按池子下标逐张把 boss 立绘画进画布（canvas 是空的就退回立绘卡）。 */
-  function paintBossCatalog(root) {
-    const pool = Tower.bossPool ? Tower.bossPool() : [];
-    const nodes = Array.prototype.slice.call(root.querySelectorAll('[data-boss-art]'));
-    if (!nodes.length) return;
-    /* 进塔页往往在任何战斗之前打开：这时引擎/图集可能还没加载好，
-     * drawFoeArt 会静默返回留下空白画布（就是「boss 没有图像」的原因）。
-     * 这里做「空白就重试」：每 320ms 重画一次，最多 12 次，引擎就绪后自然补上。 */
-    const blank = (c) => {
-      try {
-        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-        for (let i = 3; i < d.length; i += 4) if (d[i] > 8) return false;
-        return true;
-      } catch (_) { return false; }
-    };
-    let tries = 0;
-    const run = () => {
-      const pending = nodes.filter((c) => c.getContext && blank(c));
-      if (!pending.length || tries++ > 12) return;
-      pending.forEach((c) => { const info = pool[Number(c.dataset.bossArt)]; if (info) drawFoeArt(c, info); });
-      setTimeout(run, 320);
-    };
-    run();
-  }
   /* ---------- 敌人图鉴的两组简介：三侠 / 征战首领 ----------
-   * 用户 2026-10 口径：BOSS 一览里要先把**每层都会遇到的三侠**与 **x0 层的征战动物首领**
    * 介绍清楚，再列首领池；顺序固定为「三侠 → 征战首领 → 首领池」。
-   * 文案全部来自 `TowerData`（`HERO_DEBUFF` / `CAMPAIGN_BOSSES` / `campaignBossFor`），
    * 这里只负责排版 —— 别在界面里另抄一份机制说明。 */
   const HERO_ORDER = ['tl', 'xh', 'xm'];
   /** 三侠：卡片只放名字 / 出场位置；大招与贯穿削弱全部收进悬停说明。
@@ -1357,7 +1211,6 @@
   }
   function bossCatalogHtml() {
     const pool = Tower.bossPool ? Tower.bossPool() : [];
-    /* 魔王单开一组：从首领池里摘出去，保留「？？？」防剧透，但不再跟普通首领混排。 */
     const king = pool.find((b) => b && b.king) || null;
     const rest = pool.filter((b) => b && !b.king);
     const heroes = heroCatalogHtml();
@@ -1376,7 +1229,6 @@
         ? '<b class="boss-group-title">首领<i>第 4 场 / 10 层守关</i></b>' +
           '<ol class="tower-plan boss-grid">' + rest.map((b, i) => {
             const tier = b.tier == null ? null : b.tier;
-            /* 普通首领池不再有魔王；保留下面的 secret 分支只是防御未来数据。 */
             const secret = !!b.secret;
             const tip = secret ? '？？？' : ((b.rarity ? '装备稀有度：' + b.rarity + '。' : '') + mechTip(b));
             const rarity = secret ? '？？？' : ((b.rarity || '') + '装备');
@@ -1390,26 +1242,15 @@
         : '') + campaigns + demon + '</div>';
   }
   /** 左侧塔身：当前层附近的一段楼层，自上而下。
-   *
-   * 层数与行高都做成自适应的：窗外（更上面/更下面）还各留一点余量，配合 CSS 的
-   * mask 淡出，看起来就是「塔还在往上/往下延伸」。以前固定只给 9 层（上下各 4），
-   * 行高 34px + 间距 9px，实际一屏只能露出 6 层左右，无尽塔看着层数太少。
-   *
    * 注意 mode==='tower' 时，历史最高层以下是「已通关」，再上面才是「待爬」；
    * 无尽塔没有上限（maxLayer 传 0），所以整列都算「待爬」，不能标成已通关。 */
   function towerVisual(layer, maxLayer, mode) {
     /* 当前层之上 / 之下各显示几层。配合 CSS 里 .tower-visual 的固定高度（470px）：
-     * 13 层 ×约 29px + 12 ×3 间距 + 金冠(26) + 上下内边距(27) ≈ 470，正好铺满。
-     * 演进过程：15 层(约22px) → 14 层(约27px) → 13 层(约29px)，
      * 塔身总高同时从 500px 收到 470px，所以每层反而更高。 */
     const ABOVE = 8, BELOW = 4;
     const top = layer + ABOVE, bottom = Math.max(1, layer - BELOW);
     let floors = '';
     for (let i = top; i >= bottom; i--) {
-      /* 已通关 = 当前层以下（i < layer）或历史最高层以内；
-       * 当前层自己一定要是 now —— 以前写成 (i < layer || i <= maxLayer)，
-       * 「正在打第 20 层、历史最高 25 层」时当前层会被判成已通关，
-       * 金色高亮和箭头一起消失，看着像卡在旧层。 */
       const done = mode === 'tower' && i !== layer && (i < layer || i <= maxLayer);
       const cls = done ? 'done' : i === layer ? 'now' : 'todo';
       floors += '<div class="tower-floor ' + cls + (i % 10 === 0 ? ' elite-floor' : i % 5 === 0 ? ' fifth-floor' : '') + '">' +
@@ -1429,9 +1270,6 @@
       '</li>').join('') + '</ol>';
   }
 
-  /* ============================================================
-   * 【U6】主塔页面 —— openTower
-   * ============================================================ */
 
   function openTower(opts) {
     setTowerOrigin(opts);
@@ -1454,11 +1292,8 @@
         currencyHtml('tower') +
         /* 【2026-10 用户口径】原来这里还有一串规则介绍（「每层 1 张挑战书 · 连战只继承血量 ·
          * 对手顺序每层随机 · 三侠大招会留削弱 · 第 5 层起有环境词缀 · 通关另补 3 场掉落」），
-         * 用户要求去掉。信息没丢：挑战书数量在下面那颗「现有挑战书 N 张」、
-         * 环境与三侠削弱各有一块自己的面板/预告、目标等级与连战场数在标题右边的 tower-stats 里。
          * 别再往这一屏加规则文字。 */
         /* 开打前就让人看清「这一层会碰上什么」：环境池（挑战塔口径）+ 三侠大招会留下什么。
-         * 预告用 `horizontal` 变体：经典外壳里它是**横向一排**（用户口径 2026-10-19，
          * 原来被 classic-refine.css 的经典覆盖压成了 1×4 纵向卡片）；
          * 卡片本体沿用 tower.css 的默认样式（立绘在上、名字/类型在下），见那边的 `:not(.horizontal)` 排除。 */
         envPreviewHtml(info.nextLayer) + heroDebuffPreviewHtml() +
@@ -1502,12 +1337,8 @@
     });
   }
 
-  /* ============================================================
-   * 【U7】无尽页面 —— openEndless
-   * ============================================================ */
 
   let heroSetupDraft = null;
-  /** 现代状态页控制器：换外观后只重画页内内容、保留当前页签。 */
   let heroPageCtrl = null;
   /* 现代准备页：跟状态页一样用「状态 / 武器 / 技能」三颗页签。
    * 页签与翻页只重画页内格子、不换整屏；离开准备页（真正开局 / 返回）时才重置。 */
@@ -1535,7 +1366,6 @@
     if (!heroSetupDraft) heroSetupDraft = { picks: [], appearance: [null, null, null, null], stats: initial, statPool: 0 };
     const draft = heroSetupDraft;
     if (!Array.isArray(draft.picks)) draft.picks = [];
-    /* 旧草稿只存 id 数组：统一折成 `[{id,tier}]`（没档位就按 1 档）。 */
     draft.appearance = heroAppearanceSlots(draft.appearance);
     const rules = heroStatRules();
     const keys = ['power', 'agility', 'speed'];
@@ -1617,7 +1447,6 @@
   function heroGearName(id) {
     try { return C().gearName(Number(id)); } catch (e) { return '装备' + Number(id); }
   }
-  /** 外观 id / 运行中 hero.appearance → 7232 穿衣链路认识的 `{id,type,ext}`。 */
   /** 外观 id → 部位（0~3）。优先 `State.gearPart`，没进 gearMap 的 q5 黑装上位 /
    *  深海·机器猫 q3 从 `GData.GEAR_BASE` 补；只用于外观，不参与数值。 */
   function heroGearTypeOf(id) {
@@ -1659,8 +1488,6 @@
       return out;
     }).filter(Boolean);
   }
-  /** 外观（id 数组或 run.hero.appearance 对象数组）→ 四格 `[{id,tier}]`（null = 没穿）。
-   *  装备选择层只认这个形状：`[头, 拳, 衣, 鞋]`。 */
   function heroAppearanceSlots(appearance) {
     const slots = [null, null, null, null];
     for (const raw of (Array.isArray(appearance) ? appearance : [])) {
@@ -1676,8 +1503,6 @@
     return slots;
   }
   /** 外观数据 → `Tower.setHeroAppearance` 要的对象数组（丢掉空格；带上差分档与品质）。
-   *  两种形状都吃：
-   *   · 四格 `[{id,tier}|null]`（本文件的选择层 / 准备页草稿，按下标就是部位）；
    *   · ui-status 交回的 `[{id,type,tier}]` 列表（空部位被跳过，不能按下标当部位）。 */
   function heroAppearancePaint(appearance) {
     const slots = [null, null, null, null];
@@ -1697,7 +1522,6 @@
       const slot = slots[part];
       if (!slot) continue;
       const item = { id: slot.id, type: part, tier: slot.tier, ext: [] };
-      /* 品质要带上：橙 / 黑装的画稿帧与卡片配色都看它（外观本身 0 加成）。 */
       const row = all.find((g) => Number(g.id) === slot.id);
       if (row) item.quality = Math.max(0, Math.min(5, Number(row.quality) || 0));
       /* 现代模式一套装备只有一张卡、一个造型：旧数据 / 外部传入的 tier 统一收成 1。 */
@@ -1750,7 +1574,6 @@
         '</span></div>';
     }).join('');
   }
-  /** 运行中勇者 → 查看状态用的“对手”快照（四维 + 武技 + 外观）。 */
   function heroFoeOf(hero) {
     if (!hero) return null;
     const fighter = window.TowerHero && TowerHero.fighter ? TowerHero.fighter(hero) : null;
@@ -1770,28 +1593,15 @@
   /** 全部装备按**稀有度 → 套装 → 部位**分组（外观 0 加成，只用于换装）。
    *  数据源优先 `GData.GEAR_BASE`（原始 288 件，含没进 APK gearMap 的 q5 黑装上位
    *  与深海 / 机器猫 q3）；`State.gearInst` 只用来补已登记装备的完整字段。
-   *  其中 46/67（黑狂战）与 47/68（黑怒战）是两套 id 不同、名字 / 属性 / 画稿完全相同的
    *  重复套装，外观页只保留 id 小的 46/47，见 `HERO_GEAR_DUP_SET_IDS`。 */
   const HERO_GEAR_PART_SUFFIX = /(头巾|头饰|头盔|护额|手套|拳套|拳甲|服|铠甲|衣服|短靴|鞋|头|拳)$/;
-  /* 原版 GEAR_BASE 的重复黑装套：46/67 = 黑狂战、47/68 = 黑怒战。
-   * 两组只是 setId / 装备 id 不同（分别来自黑卡宝箱与黑装融合的变异池），
-   * 名字、品质、属性、画稿全部一致；外观页合并成一套（保留 id 小的）。 */
   const HERO_GEAR_DUP_SET_IDS = new Set([67, 68]);
   /* ---------- 外观差分（原版的「强化档」） ----------
-   * 头 / 拳套的画稿跟着**词条最高档**变（原版 `constructBpData` 的
-   * `frame += (max(addr1Lv,addr2Lv,addr3Lv) - 1)`，MainMovie.as:6608）：
-   * 1 档 = 基础稿，2 / 3 档 = 另外两张画稿。勇者外观件没有真词条，所以用显式的
    * `tier` 记住玩家选的是哪一档（见 TowerHero.cleanAppearance / 各绘制入口）。
-   * 档数**不是一律 3 档** —— 原版有几套只画了一张：
    *   · 狂战 / 怒战 / 深海 / 机器猫 / 圣熊 / 凤凰（套装 46~53、67~72）：只有基础稿；
-   *   · 格斗手套 q4（126）与仙鹤拳套 q4（142）：只画了 2 张。
-   * 硬塞不存在的档会贴到**空帧**（头 / 拳套直接消失），所以这里按实际情况收口。
-   * 其余按品质：白 / 绿 1 档、蓝 2 档、紫 / 橙 / 黑 3 档（与 outfit 图集的
    * Head_/HandO_/HandI_ 后缀数量逐张核对过）。 */
   const HERO_GEAR_SINGLE_TIER_SETS = new Set([46, 47, 48, 49, 50, 51, 52, 53, 67, 68, 69, 70, 71, 72]);
   const HERO_GEAR_TIER_CAPS = new Map([[126, 2], [142, 2]]);
-  /** 外观 id → 套装序号（现代图集 `Head_<序号>_<档>` 里的那个序号）。
-   *  只用于「现代模式有没有这张贴图」与差分档收口；数值链路不读它。 */
   function heroGearSetIndexOf(item) {
     const row = item || {};
     const id = Math.max(0, Number(row.id) || 0);
@@ -1819,8 +1629,6 @@
   function heroGearTierCount(item) {
     const type = Number(item && item.type);
     if (type !== 0 && type !== 1) return 1;          // 衣服 / 鞋子 / 手臂的画稿不分档
-    /* 现代模式没有外观差分：一套装备只给一张卡（用户 2026-10-29 口径）。
-     * 经典 7218 仍按画稿品质给 1~3 档，卡面画稿也跟着变。 */
     if (isModernUi()) return 1;
     if (HERO_GEAR_SINGLE_TIER_SETS.has(Number(item && item.setId))) return 1;
     const cap = HERO_GEAR_TIER_CAPS.get(Number(item && item.id));
@@ -1832,20 +1640,12 @@
     const n = heroGearTierCount(item);
     return Array.from({ length: n }, (_, i) => i + 1);
   }
-  /* 现代模式**不做外观差分**：一套装备只列一张卡（用户 2026-10-29 口径）。
-   * 经典 7218 仍按原版画稿摊成 1~3 张同名卡（卡面画稿随档位变），档位存进 `tier`。 */
-  /** 现代界面「当作不存在」的装备：没有现代外观贴图的（黑装 33~40 / 深海 / 机器猫…）。
-   *  它们在外观池里会是一张空白卡、穿上也画不出来 —— 按用户 2026-10-29 口径直接不进池子；
-   *  经典界面用经典画稿画，全部保留（那边不是现代界面）。 */
   function heroGearVisible(item) {
     if (!isModernUi()) return true;
     if (window.Engine && typeof Engine.hasModernOutfit === 'function') {
       const index = heroGearSetIndexOf(item);
-      /* 套装序号没进现代图集 = 这套在现代模式里根本穿不出来。
-       * 连序号都查不到的（q5 黑装 54~66 这种没有 gearSetMap 行的）同理不进池子。 */
       return Number.isFinite(index) && Engine.hasModernOutfit(index);
     }
-    /* 没有 Engine（最小测试桩）时退回旧的图标口径。 */
     try {
       if (!(window.UI && UI.classic && typeof UI.classic.gearIconId === 'function')) return true;
       return UI.classic.gearIconId(item) > 0;
@@ -1929,7 +1729,6 @@
     const id = Math.max(0, Number(raw) || 0);
     return id > 0 ? { id: id, tier: 1 } : null;
   }
-  /** 一格外观卡（一件装备 × 一个差分档）。同名多张，卡面画稿本身不同（不再标 ②③）。 */
   function heroGearCardHtml(item, tier, equipped) {
     const title = item.name + ' · ' + (HERO_QUALITY[item.quality] || '') + '装 · ' +
       (HERO_PARTS[item.type] || '') + (tier > 1 ? ' · 外观差分 ' + tier : '') + ' · 仅外观';
@@ -1941,8 +1740,6 @@
       '<span class="hero-gear-zero">0 加成</span></button>';
   }
   /** 全部装备的分组网格（准备页的「更换装备」与爬塔中的装备选择层共用这一份）。
-   *  `slots` = `[头,拳,衣,鞋]`，每格是 `{id, tier}` 或 id / 0；每个部位只高亮当前那一格。
-   *  头 / 拳套会按**差分档**摊成 2~3 张卡（见 heroGearTierCount），其余部位一张。
    *  ⚠ 所有卡片都写「0 加成」：勇者模式的外观件不参与数值，别在这里接属性。 */
   function heroGearGroupsHtml(slots, groups) {
     const list = groups || heroGearCatalog();
@@ -1958,8 +1755,6 @@
           }).join('') + '</div></div>').join('') +
       '</section>').join('');
   }
-  /** 全部装备按「稀有度 → 套装 → 部位」摊平（给经典「更换装备」页的 6 格分页用）。
-   *  `tiers` 是这一件的差分档数组（头 / 拳套 2~3 档，其余 1 档），分页在渲染层展开。 */
   function heroAllGear() {
     const out = [];
     for (const group of heroGearCatalog()) {
@@ -2024,8 +1819,6 @@
       return null;
     }
   }
-  /** 把勇者穿好外观的立绘画进 host；同一个 host 的旧图会先销毁。
-   *  现代界面走现代战斗图集；经典界面仍复用 7232 原版元件。 */
   async function paintHeroArt(host, appearance, opts) {
     if (!host) return null;
     if (isModernUi() && window.Engine && typeof Engine.wearsFor === 'function') {
@@ -2051,8 +1844,6 @@
       return null;
     }
   }
-  /** 主界面左下「剧情模式」右边那颗小全身照（只在勇者模式出现）。
-   *  用户 2026-11 口径：点它直接进**武技页**，看本局已学武技的当前等级与下一级成功率。 */
   function heroPortraitButtonHtml(run) {
     if (!run || run.ruleset !== 'hero' || !run.hero) return '';
     return '<button type="button" class="endless-hero-portrait" data-action="hero-status" ' +
@@ -2121,8 +1912,6 @@
       /* 只读详情要显示**失败保底后的实时成功率**：context 必须带上本局失败计数，
        * 否则 TowerHero.upgradeInfoOf() 只能按基础概率算（用户 2026-11 反馈）。 */
       upgradeFails: Object.assign({}, run.hero.upgradeFails || {}),
-      /* 只把**现代图集真的画得出来**的外观交给状态页：黑装 / 深海等没有现代贴图的
-       * 在 `heroGearForPaint` 里已经剔除、差分档也收到实际张数，详情页不会画成裸装。 */
       appearance: heroGearForPaint(run.hero.appearance).map((g) => Object.assign({}, g)),
       wins: Math.max(0, Number(run.hero.wins) || 0),
       patrolWins: Math.max(0, Number(run.hero.patrolWins) || 0),
@@ -2150,8 +1939,6 @@
         }
         return out;
       },
-      /* 现代外观页直接复用「状态 → 更换装备」的纸娃娃 + 6 格列表；
-       * 这里只把四个部位的 `{id,tier}` 交给 Tower.setHeroAppearance，不碰任何属性。 */
       gearList: heroAllGear(),
       onEquip: (slots) => {
         const next = heroAppearancePaint(slots);
@@ -2198,7 +1985,6 @@
       paintHeroArt(find(m.element, '[data-hero-status-art]'), hero.appearance, { label: '勇者', pad: 8 });
     }
   }
-  /** 经典状态页的勇者版：只读武技、可换外观装备（`Tower.setHeroAppearance` 落盘）。 */
   function openHeroStatusClassic(tab) {
     const info = Tower.endlessInfo();
     const run = info && info.run;
@@ -2233,10 +2019,8 @@
         }
         return out;
       },
-      /* 经典「更换装备」页的数据源：全部 288 件，按稀有度 → 套装 → 部位；数值由 ui-status 清零。 */
       gearList: heroAllGear(),
       onEquip: (next) => {
-        /* ui-status 传回来的是四格 `[{id,tier}]`（老调用也可能是 id 数组）。 */
         const res = window.Tower && Tower.setHeroAppearance ? Tower.setHeroAppearance(heroAppearancePaint(next)) : null;
         if (!res || !res.ok) { notice((res && res.msg) || '外观保存失败。'); return null; }
         return (res.appearance || []).map((g) => Object.assign({}, g));
@@ -2264,7 +2048,6 @@
       });
     }
   }
-  /** 拆掉勇者外观选择层（状态页被关掉 / 开局 / 重开时都要清）。 */
   function closeHeroGearPicker() {
     const el = heroGearPickerEl;
     heroGearPickerEl = null;
@@ -2275,7 +2058,6 @@
     document.querySelectorAll('[data-hero-gear-picker]').forEach((node) => node.remove());
   }
   /** 勇者模式的外观装备选择层：全部装备按稀有度 → 套装 → 部位排；全部 0 加成。
-   *  头 / 拳套会按**差分档**摊成 2~3 张卡（原版画稿随词条档变化）。
    *  `slots` = `[{id,tier}]`（也兼容旧调用直接给 id 数组），`onChange` 回传同样四格。
    *  ⚠ 挂到 `document.body`、用 `position:fixed`：状态页宿主在 `#ui` 里，
    *    移动端 `#ui` 会按 390/1170 ≈ 1/3 等比缩放；挂在宿主里整层会跟着缩成一小块。 */
@@ -2330,7 +2112,6 @@
         const tier = Math.max(1, Math.min(3, Number(btn.dataset.heroTier) || 1));
         if (!(id > 0) || !Number.isInteger(part) || part < 0 || part > 3) return;
         const now = heroGearSlotOf(slots, part);
-        /* 点同一格（同 id 同档）= 脱下；点同一件的**另一档** = 换差分，不脱。 */
         slots[part] = now && now.id === id && now.tier === tier ? null : { id: id, tier: tier };
         sync();
         if (o.onChange) o.onChange(slots.map((s) => (s ? { id: s.id, tier: s.tier } : null)));
@@ -2364,7 +2145,6 @@
       picks: draft.picks.map((it) => Object.assign({}, it)),
       appearance: heroAppearancePaint(draft.appearance),
       wins: 0,
-      /* 四维分配：状态页的力/敏/速上下键读这一份，调整后只改草稿，开局时交给 TowerHero.create。 */
       statState: () => ({
         values: Object.assign({}, draft.stats),
         pool: Math.max(0, Number(draft.statPool) || 0),
@@ -2377,7 +2157,6 @@
         draft.statPool = out.pool;
         return out;
       },
-      /* 经典「更换装备」页的数据源：全部 288 件，按稀有度 → 套装 → 部位；数值由 ui-status 清零。 */
       gearList: heroAllGear(),
       onEquip: (next) => {
         /* ui-status 交回的是**扁平外观列表**（空部位被跳过，元素带 type），
@@ -2430,7 +2209,6 @@
     if (beginEndlessRun(options)) heroSetupDraft = null;
     else setTimeout(() => { if (!Tower.endlessInfo().run) openHeroSetup(); }, 30);
   }
-  /** 现代模式准备页：直接复用现代状态页 + 武技图鉴页。 */
   function openHeroSetupModern(opts) {
     if (Tower.endlessInfo().run) { openEndless(); return; }
     const draft = ensureHeroSetupDraft();
@@ -2499,8 +2277,6 @@
       else if (node.removeAttribute) node.removeAttribute('hidden');
     } catch (e) { /* 最小测试桩没有 removeAttribute */ }
   }
-  /** 准备页的状态页签：左侧勇者立绘，右侧「出发准备」进度与两个动作键；
-   *  四维条直接复用状态页的 `.stat-strip`（力/敏/速带上下键）。 */
   function heroPrepStatusHtml(draft, count) {
     const picks = Math.max(0, (draft.picks || []).length);
     const pool = Math.max(0, Number(draft.statPool) || 0);
@@ -2669,14 +2445,12 @@
         if (selected.has(key)) selected.delete(key);
         else if (selected.size < count) selected.add(key);
         else {
-          /* 状态页签的「出发准备」文案保持就绪；操作提示只落在当前图鉴页的说明条。 */
           setDesc('已点亮 ' + count + ' 个武技；先点暗一个再换。');
           return;
         }
         draft.picks = catalog.filter((item) => selected.has(item.kind + ':' + item.id))
           .map((item) => ({ kind: item.kind, id: Number(item.id) }));
         update();
-        /* 触摸设备没有 hover：点选时顺手把这一条说明留在格子下方。 */
         if (info) setDesc(info.name + (info.desc ? '：' + info.desc : ''));
       };
       if (info) {
@@ -2737,13 +2511,6 @@
     heroPrepSyncPage(p, 'skill', catalog);
     paintHeroArt(find(p, '[data-hero-setup-art]'), draft.appearance, { label: '勇者', pad: 4, zoom: 1.1 });
   }
-  /* ============================================================
-   * 勇者货品自选（HS02 / HS03）
-   * ------------------------------------------------------------
-   * 这两件是「即时类」，但效果必须由玩家点选目标。界面在真正购买前把目标收齐，
-   * 再随 `buyShopSlot / buyMintSlot` 的 opts.heroChoice 交给状态机 —— 玩家中途
-   * 取消就不扣钱、不消耗货品；不会出现「买完不知道选什么」的半截状态。
-   * ============================================================ */
   function heroRunOwned(run) {
     if (!run || !run.hero) return [];
     const out = [];
@@ -2895,29 +2662,10 @@
     });
   }
 
-  /* ============================================================
-   * 【U20】镜中世界 —— 整百层的「照影之境」拾取屏与黑白过场
-   *
-   * 用户口径 2026-10（逐条）：
-   *   · 卡片**尽量居中**在屏幕上；
-   *   · 拾取**不是**「点一下 buff 就消失进背包」：卡片留在原位，
-   *     卡片之外的**整个屏幕慢慢变成纯白**；变成纯白之后，**连卡片一起**慢慢变成纯黑；
-   *     然后以**稍快一点**的速度从黑回到游戏界面（界面侧的动画就在这里，状态在 tower.js）；
-   *   · 回到界面时它已经在「永久增益」的最前面、介绍是 `？？？`，右下角是「继续挑战」。
-   *
-   * 三层结构（顺序就是 z 序）：
-   *   ① `.mirror-veil`  —— 白色遮罩，**在卡片下面**（所以变白时卡片还在）；
-   *   ② `.mirror-card`  —— 卡片本身；
-   *   ③ `.mirror-black-veil` —— 黑色遮罩，挂在 `<body>` 上、**在一切之上**（连卡片一起变黑）；
-   *      最后它自己淡出（比变黑快），露出重画好的主界面。
-   * ⚠ 黑幕挂在 body 上而不是页面里：中间要重画一次主界面（拾取屏 → 主界面），
-   *   挂在页面里会被这次重画一起换掉，过场就断了。
-   * ============================================================ */
   const MIRROR_WHITE_MS = 1500;      // 卡片之外 → 纯白
   const MIRROR_BLACK_MS = 1500;      // 连卡片一起 → 纯黑
   const MIRROR_BACK_MS = 850;        // 黑 → 游戏界面（「较快一点」）
   let mirrorBlackVeilEl = null;
-  /** 拾取屏的整屏内容：白色遮罩 + 居中的传奇卡片。 */
   function mirrorPickupHtml(run) {
     const def = (TowerData.MIRROR && TowerData.BUFF_BY_ID[TowerData.MIRROR.id]) || null;
     const owned = Math.max(0, Number(run && run.mirrorStacks) || 0);
@@ -2926,7 +2674,6 @@
         '<div class="mirror-veil" aria-hidden="true"></div>' +
         '<div class="mirror-card-wrap">' +
           /* ⚠ 卡片必须是 `data-action="mirror-pick"`：界面的点击绑定走 `on(p, 'mirror-pick')`，
-           * 而它按 `[data-action="…"]` 找元素（用 data-mirror-pick 之类的自定义属性会绑不上，
            * 卡片就成了点不动的死按钮）。 */
           '<button type="button" class="mirror-card r' + rarity + '" data-action="mirror-pick" ' +
             'aria-label="拾取' + esc(def ? def.name : '照影之境') + '">' +
@@ -2939,7 +2686,6 @@
           '</button>' +
         '</div></div>';
   }
-  /** 黑色遮罩（挂在 body 上，跨重画存活）。`on=true` 变黑，`on=false` 淡出并移除。 */
   function mirrorBlackVeil(on) {
     if (typeof document === 'undefined' || !document || !document.body) return;
     if (on) {
@@ -2999,15 +2745,12 @@
     setTowerOrigin(opts);
     /* 这一屏会整页重画 #ui，已经挂着的献祭 / 活性弹层会随 DOM 一起消失。
      * 开关必须同步复位：否则页面末尾的 `bladeOfferVisible()` 仍为 true，
-     * 不会重开窗，玩家没有窗可点、`nextBattle` 又拒绝开战 —— 整个卡住。
      * 复位的时机只放在这里（重画开始），窗口本身仍只开一层。 */
     if (bladeOfferOpen) { bladeOfferOpen = false; bladeOfferEl = null; }
     const heroEvent = typeof Tower.heroEventInfo === 'function' ? Tower.heroEventInfo() : null;
     if (heroEvent) { openHeroEvent(heroEvent, Tower.endlessInfo()); return; }
     /* 【U18c】到这一屏就**直接触发**该播的剧情（用户口径 2026-10：不要先点一次「继续战斗」）。
      * `Tower.autoPlayStory` 是「现在该播吗」的唯一判定（判定在 tower-plot 的 `due()`）：
-     * 没剧情时它什么都不做；该播时它把 id 落到 `run.story` 上 —— 所以紧接着取到的 info
-     * 已经带着这一段，这一屏**立刻**就是剧情屏。
      * ⚠ 必须问在 `endlessInfo()` **之前**（info 是快照，问晚了这一屏还是普通界面）。
      * 这一条覆盖所有「进到这一屏」的路径：层通关推进、离店 / 结算点继续、读档重进、
      * 调试挪层，以及「巡视」那一场走到眼前 —— 都不用玩家先点一下。 */
@@ -3018,18 +2761,15 @@
      * 剧情屏、拾取屏没有，不能给它们加底部留白。 */
     let runBoard = false;
     /* 对手数：60/70/80/90 层的第 5 场是四雄，整列会有 5 张卡；
-     * 5 张时右下角动作条会压住最后一张（四雄头像被「继续战斗」盖住），
      * 页面要进入压缩布局，见 CSS 的 .foes-many。 */
     let foeCount = 0;
     /* 「还没开始」= 本局还在第 1 层、一场都没打完。
      * 这一屏**不显示抽奖卷 / 铸币**：currencyHtml 在「有对局」时显示的是**本局应得**的张数
-     * （ticketsOnExit），玩家会误以为是自己仓库里的存量；所以干脆整块不渲染。
      * 打完第一场之后恢复显示（那时右上角的数字才有意义）。 */
     const notStarted = !!(info.run && info.run.layer === 1 && !(info.run.score > 0) && !(info.run.lastCoinsGained > 0));
     if (info.run) {
       const run = info.run;
       /* 【U18】剧情优先：这一屏该走剧情模式时，**局内 UI 一个都不渲染**（增益/减益/血量/
-       * 环境/分数/铸币/试炼币/敌人预告全去掉），只留塔身 + 文字 + 右下角「继续」。
        * 剧情的文本与播片机都在 js/tower-plot.js（window.TowerPlot），这里只负责「把它画进这一屏」。 */
       const storyId = TowerPlot.pending(run);
       if (storyId) {
@@ -3045,7 +2785,6 @@
           '<p class="tower-story-line done">它从你的存在中被抹去了。</p>');
       } else if (run.mirrorPending) {
         /* 【U20】整百层「觐见魔王」打完、终章剧情也播完了 → **拾取「照影之境」**这一屏
-         *（用户口径：卡片尽量居中；点它之后卡片留在原位，整屏先白后黑再回到游戏界面）。
          * 剧情屏的优先级在它上面（刚刚那一段 `storyId`），所以顺序是：终章剧情 → 拾取屏。 */
         main = mirrorPickupHtml(run);
       } else if (run.phase === 'mirror' && !pendingMilestone &&
@@ -3080,8 +2819,6 @@
         : '休整点 · 选一张带走';
       const choicesHtml = run.choices
         ? '<div class="tower-buffs choice-onpage"><h4>' + choicesTitle + '</h4>' +
-          /* 选牌是内联在这一屏的，所以「当前环境」要贴在卡片正上方 ——
-           * 选牌时一眼能看到这一局现在顶着什么。 */
           (run.env && run.env.length
             ? '<div class="hex-seg-mechs inline"><span class="hex-next-label">当前环境</span>' +
               run.env.map((e) => envChip(e, { compact: true })).join('') + '</div>'
@@ -3091,14 +2828,9 @@
            * 注意不要写成裸 mode —— openEndless() 作用域里没有 mode，
            * 一旦 run.choices 有值就会 ReferenceError，整屏渲染不出来（战斗回来会卡住）。 */
           run.choices.map((c, i) => choiceCard(c, i, 'endless')).join('') + '</div></div>' : '';
-      /* 顶栏：标题 → 试炼币/抽奖卷 → 分数框 → 右边缘的三个药丸槽（等腰三角摆放）。
-       * 血量紧贴标题下方（分数已经挪进顶栏，所以这里整体上提），字号与血条都放大一档；
-       * 「继续战斗」在右下角，「放弃本局」更小、压在它左边偏下。 */
       runBoard = true;
       main = '<div class="endless-run">' +
         /* 右上角：药丸槽 + 试炼币/抽奖卷 + 分数框（横向一行，位置不变）。
-         * 本局还没打完第一场时不放货币条（见 notStarted 的说明），只留分数框。
-         * 【2026-10 第八十四批】这里原来还挂了一个「敌人成长 ×N」框 —— **用户口径要求去掉**
          * （主界面右上角保持干净）；倍率只在开打前那一屏保留一份「1 层 = ×1」的刻度说明。 */
         '<div class="endless-topright">' + (notStarted ? '' : currencyHtml('endless')) +
         '<span class="endless-score-box"><i>分数</i><b>' + run.score + '</b></span></div>' +
@@ -3108,7 +2840,6 @@
         carryBar(run.curHp, run.curMaxHp, '血量', 'endless-hp', hpTip(run)) +
         /* 环境词缀（唯一常驻负面机制）：
          * 段位机制已并入环境，这里只画一个面板；每条都带完整悬停说明与数值区间。
-         * 三侠削弱（贯穿本层）与挫锐/卸甲（本局全局减益）是「本局累积的减益」，
          * 不是环境，所以仍旧跟在同一行后面，方便一眼看全。 */
         envPanelHtml(run, { label: '当前环境' }) +
           (run.enemyMaxHpDown > 0 || run.enemyPowerDown > 0
@@ -3152,9 +2883,6 @@
           '<span class="tower-stats-sub">经典 ' + num(info.best) + ' 分 / ' + num(info.bestLayer) + ' 层 · 勇者 ' +
             num(info.heroBest) + ' 分 / ' + num(info.heroBestLayer) + ' 层</span></div>' +
         /* 【2026-10 用户口径】开局页**只留增益图鉴与敌人图鉴**：原来这里还有两块文字 ——
-         * ①「敌人成长 ×N」刻度行（foeScaleChip，第 1 层 ×1 那把刻度）；
-         * ②「每 100 层重来一轮，层号与机制严格对应…」的整段说明。
-         * 两块都删掉了（倍率口径仍写在 tower-data 的【D2b】注释与 endlessScaleParts 里，
          * 不占开局页版面）。别再往这一屏加规则文字 —— 用户要的就是「buff + 敌人图鉴」。 */
         buffCatalogHtml() + bossCatalogHtml();
       footer = '<div class="tower-actions tower-footer">' +
@@ -3193,7 +2921,6 @@
     back(p, towerBack, ct ? '返回征战' : '返回');
     if (ct) applyClassicTowerBg(p, 'endless', info.run ? info.run.layer : 1);
     /* 【2026-10 用户口径】剧情屏**没有「继续」按钮了**：点屏幕任意位置推进
-     *（语义就是 `TowerPlot.next()` —— 正在打字时点一下＝立刻补完这一行，打完了再点＝下一行）。
      * `TowerPlot.showing()` 同时覆盖「剧情屏」与「停留一下」的提示屏（第一次失去烙印）。
      * ⚠ 点在按钮 / 带悬停气泡的元素上**不接管**：左下的「剧情/挑战模式」开关与「返回菜单」
      * 都不该顺手推进剧情（这几颗按钮就是这一屏上仅剩的可点控件）。 */
@@ -3233,7 +2960,6 @@
     }
     on(p, 'fight', () => {
       if (info.run) {
-        /* 上一场失利的必选窗还没处理：先弹它（与读档后补弹的是同一个窗）。 */
         if (info.run.pendingRetry) { if (!retryOfferVisible()) endlessRetryOffer(info.run); return; }
         /* 渴血之剑的献祭 / 活性事件同样是必选：先处理，不能直接开下一场。 */
         if (info.run.bladeSacrificePending) { if (!bladeOfferVisible()) openBladeSacrifice(); return; }
@@ -3280,20 +3006,16 @@
       };
     });
     on(p, 'shop', () => openShop(true));
-    /* 【U20】拾取「照影之境」（整百层那一屏）：点卡片 → 白 → 黑 → 回到游戏界面。 */
     on(p, 'mirror-pick', () => pickMirror());
-    /* 待选取的强化（神兵淬炼/秘技通神）没选完时，回到主界面自动补弹一次 */
     if (info.run && info.run.pendingPick) setTimeout(() => openPickBuff(info.run.pendingPick), 60);
     /* 过程提示（「碎掉的烙印失效」这类）：**剧情屏上不飘** —— 整屏是剧情，
      * 飘字飘在它后面既看不到又浪费；留到剧情播完回主界面那次重画再飘。
-     * 第一次失去烙印那一条会走 `hold`（停久一点），见 runToast / 【U18c】。
      * 成就提示是另一条队列（对象 → 顶部成就条）；先冲过程飘字，它会顺手把旧档里
      * 混在 pendingToasts 的成就对象迁到成就队列，紧接着的 flushPendingAchievements 再取走。 */
     if (!TowerPlot.showing()) { flushRunToasts(); flushPendingAchievements(); }
     /* 渴血之剑的必选窗优先级高于里程碑 / 献祭：先把它处理完，再轮到别的弹窗。 */
     const bladeBlocking = !!(info.run && (info.run.bladeSacrificePending || info.run.bladeEventPending));
     /* 20 起每 10 层：出商店后必须放弃一个永久增益（不可取消）。
-     * 【U18c】但**献祭前要先播剧情**（第 20 层那一段：「石门天平倾斜 → 苍老的声音」）——
      * 剧情屏上不能弹这个窗，否则剧情和弹窗叠在一起。剧情播完回主界面时这里会再跑一次。 */
     if (info.run && info.run.phase === 'sacrifice' && !TowerPlot.showing() && !bladeBlocking) setTimeout(() => openPermSacrifice(), 60);
     /* 【U20】被剧情让路的「里程碑奖励」在这里补弹（同一场战斗之后的终章剧情播完才算轮到它）。 */
@@ -3303,7 +3025,6 @@
       setTimeout(() => milestoneModal(pm.rw, pm.cont), 60);
     }
     /* 上一场失利还没选「重新挑战 / 放弃本局」：这个窗是必选的（没有关闭叉）。
-     * 读档 / 退出重进后同样在这里补弹 —— 不弹的话「继续战斗」会直接白打一场。
      * 同步弹（不排 setTimeout）：界面桩 / 无头回归也能看到这一屏，且页面已经画完。 */
     if (info.run && info.run.pendingRetry && !TowerPlot.showing() && !retryOfferVisible()) {
       endlessRetryOffer();
@@ -3358,19 +3079,12 @@
     return true;
   }
 
-  /* ============================================================
-   * 【U8】战斗闭环 —— fight / winModal / afterBattle
-   * ============================================================ */
 
   function reopen(mode) { if (mode === 'tower') openTower(); else openEndless(); }
   /** 开战前的最后一道闸：现在该先播剧情 → **不开打**。
-   *
    *  【为什么必须在这里拦】入场剧情现在由进层时主动挂上（`run.story`），界面这一屏正显示剧情；
    *  玩家如果直接点「继续战斗」，`fight()` 会一路走下去把战斗开起来 —— 剧情就被跳过了。
    *  另外「巡视」那一场可能不是本层第 1 场，进层时还轮不到它，得走到那一场才播。
-   *  两种情况都靠 `Tower.storyPendingForBattle`（**纯查询、不建令牌**）判掉，
-   *  然后重画这一屏让剧情接着播；玩家读完再点一次才真开打。
-   *  ⚠ 别改成「调 nextBattle 看看有没有剧情」：那会建出一枚 attempt 令牌，
    *  没剧情时又没地方收回，第二次点击会被 `run.attempt` 挡住（实测踩过）。 */
   function pendingStoryBlocksBattle(mode) {
     let blocked = false;
@@ -3378,7 +3092,6 @@
     if (!blocked) return false;
     /* 剧情模式关掉时不该拦人（挑战模式 = 跳过所有文字剧情）。 */
     if (typeof Tower.storyEnabled === 'function' && !Tower.storyEnabled()) return false;
-    /* 该播还没落的（巡视那一场）在这里补挂上，然后重画这一屏进剧情模式。 */
     try { Tower.autoPlayStory && Tower.autoPlayStory(mode); } catch (e) { /* 忽略 */ }
     reopen(mode);
     return true;
@@ -3395,7 +3108,6 @@
     };
     /* 无尽塔 10 层起，右下角在倍速键之外**再给一个跳过键**（用户口径 2026-11，
      * 起始层由 20 下调到 10；两个键都用「普通战斗的跳过键」那一档尺寸在右下并排，
-     * 见 battle.js 的 cornerLayout）。
      * 跳过不影响胜负与收益：回合流本来就由 Sim.simulate 一次算完，跳过只是不播动画；
      * 塔内战斗本来也关了飘物（collectDrops:false），不会因为跳过丢掉落。 */
     const runNow = mode === 'tower' ? Tower.towerInfo().run : Tower.endlessInfo().run;
@@ -3406,9 +3118,7 @@
         region: nx.region, kind: mode, useProps: false,
         ...(nx.fighter ? { fighter: nx.fighter, hpRatio: 1 } : { hpRatio: nx.hpRatio, adjustMe: nx.adjustMe }),
         debuffs: nx.debuffs || [],
-        // boss 机制：贴一条在战斗画面里（进层预告 / 选 buff 页都读过，这里是备忘）
         trial: nx.info && nx.info.mechDesc ? { text: nx.info.mechDesc } : null,
-        // 塔里倍速可以到 3×（普通战斗只到 2×，见 main.js 的 startBattle）
         allowSkip: skipAllowed, speedToggle: true, speedMax: 3,
         /* 经典塔：胜利后不展示原版战果 CG。
          * 挑战塔保持原口径（只有经典村庄-征战入口藏，关卡页入口仍给原版战果页）；
@@ -3426,7 +3136,6 @@
           const abs = w === 0 && Number.isFinite(hp) ? Math.max(1, Math.round(hp)) : 0;
           /* **必须把战斗结果 `r` 一起交给状态机**：报告里的 rounds 里有 deathSave / revive 标记，
            * 涅槃（C14）的「每层 N 次」计数与隐藏成就「死而复生」都靠它。
-           * 以前这里只传了 5 个参数，于是 C14 的计数在真实战斗里永远不涨 ——
            * 表现为「每场战斗都能复活一次」（用户报的 bug），成就也从来不触发。 */
           const rw = Tower.reportBattle(mode, nx.token, w === 0, abs, cap, r);
           reopen(mode);
@@ -3453,7 +3162,6 @@
     const growthToast = [growthText, layerBonusText].filter(Boolean).join('　');
     if (growthToast) runToast(growthToast);
     /* 「巡逻」/「觐见魔王」输了**不走失败结算**（2026-10 第六十五批用户口径）：
-     * 状态机那边已经把它标成 `patrol: true` 并挂上了 `phase = 'patrolToll'`，
      * 这里必须**先**处理它 —— 否则会掉进下面的 `!rw.win` 分支，弹出失败结算
      *（用户实测：100 层的魔王战输了直接被结算，只有普通巡逻战不会）。
      * 也不给「铸币回滚」的选项：按口径，这一场只收「一个最高稀有度的增益」。 */
@@ -3478,7 +3186,6 @@
     if (mode === 'endless') {
       /* 【2026-10 用户口径】打完一场**不再自动进店**（原来「层末商店 / 铸币商店」会直接弹进店里，
        * 于是第 5 层那次「进店前的商人剧情」要等退出商店才看得到）。
-       * 现在一律先回主界面：剧情该播就播，进店交给首页那颗
        * 「进入试炼商店 / 进入铸币商店」按钮。 */
       const cont = () => openEndless();
       /* 时间回廊（E15）：这一场打完就从本层第 1 场重开 —— 必须明确告诉玩家，
@@ -3524,15 +3231,8 @@
     winModal(mode, rw);
   }
 
-  /* ============================================================
-   * 【U9】场间抉择弹窗（4 选 1） —— offerChoice / choiceCard
-   * ============================================================ */
 
   const RARITY_CLASS = ['r0', 'r1', 'r2', 'r3'];
-  /* 档位徽记（用户口径 2026-10 第七十九批）：普通 ● / 稀有 ◆ / 史诗 ★ / 传奇 ◆。
-   * 原来写的是三元表达式 `rarity === 2 ? '★' : rarity === 1 ? '◆' : '●'` —— **传奇档落进 else 也画 ●**，
-   * 既和普通档撞脸、又只是一个光秃秃的黄圆。现在传奇档有自己的字形，外面还套一圈**金色方框**
-   * （见 css 的 `.hex-card.r3 .hex-emblem`），看起来就是「方框里嵌一颗钻石」。 */
   const RARITY_EMBLEM = ['●', '◆', '★', '◆'];
   function choiceCard(c, i, mode) {
     const b = TowerData.BUFF_BY_ID[c.id];
@@ -3603,9 +3303,6 @@
     });
   }
 
-  /* ============================================================
-   * 【U10】主塔结算 —— towerClear / towerDefeat
-   * ============================================================ */
 
   function towerClear(rw) {
     const prizes = (rw.prizes && rw.prizes.items) || [];
@@ -3652,9 +3349,6 @@
        { label: '返回', run: () => C().home() }], { small: true });
   }
   /** 选取型 buff（神兵淬炼 / 秘技通神）：立即从已有武器或技能里三选一，选完立刻生效。 */
-  /* ============================================================
-   * 【U11】选取型强化弹窗 —— openPickBuff
-   * ============================================================ */
   function openPickBuff(pending) {
     const cands = Tower.pickCandidates(pending.kind);
     const isPerm = pending.kind === 'permBuff';
@@ -3662,8 +3356,6 @@
     const isLimited = pending.kind === 'limitedBuff';
     const label = isPerm ? '永久增益' : isBrand ? '烙印' : isLimited ? '限次增益' : (pending.kind === 'skill' ? '技能' : '武器');
     /* 这一次附的是哪张铭文 —— 决定文案与「已附魔」标记的口径：
-     *   · 虚空铭文 C37（免占位）：标记是「已附魔（虚空铭文·不占位）」；
-     *   · 水晶铭文 C60（效果 ×1.5）：标记是「已附魔（水晶铭文 ×1.5）」。
      * 身份优先用发牌时写进 `pending.buffId` 的那张；老档没写时退回 Tower 的共用出口
      *（`activeInscriptionId` —— 与 pickCandidates / hasPickTargets 同一口径，免得标记和候选错位）。 */
     const inscriptionId = (isPerm && pending.buffId) || (isPerm ? Tower.activeInscriptionId('permBuff', null, pending) : null) || 'C37';
@@ -3671,15 +3363,10 @@
     const inscriptionMul = isPerm ? Number(pending.mul) || 0 : 0;
     /* 【2026-10 第七十六批】「这一条已经吃过**这张**铭文了吗」必须按**铭文种类**判，
      * 不能一律看 `slotFree` —— 那是**虚空铭文自己的效果**。原来的写法是「凡是 slotFree 就标已附魔」，
-     * 于是（用户实测）水晶铭文触发的三选一里，标出来的却是被虚空附魔过的那几条，
-     * 而被水晶附魔过的反而没有任何标记。
      * 判据与 tower.js 的 `applyInscription` / `inscriptionEligible` 同一套：
-     *   · 免占位类（虚空铭文 C37，`mods.pickPermanentFree`）→ 记在行上的 `slotFree`，
-     *     **不写 `enchants`**（重复选同一条本来就是空操作）；
      *   · 倍率类（水晶铭文 C60，`mods.pickPermanentMul`）→ 记在行上的 `enchants`（铭文 id 数组）。 */
     const inscDef = TowerData.BUFF_BY_ID[inscriptionId] || {};
     const inscFreeKind = !!(inscDef.mods && inscDef.mods.pickPermanentFree);
-    /** 这一条身上**已经有哪几张铭文**（用 id 表示；虚空记在 slotFree 上，其余记在 enchants 里）。 */
     const inscIdsOf = (c) => {
       const out = [];
       const ench = (c && Array.isArray(c.enchants)) ? c.enchants : [];
@@ -3687,7 +3374,6 @@
       for (const id of ench) if (id && out.indexOf(id) < 0) out.push(id);
       return out;
     };
-    /** 这一条是否已经吃过**这次要附的那张**铭文（吃过了再选没有额外收益）。 */
     const hasThisInsc = (c) => isPerm && (inscFreeKind
       ? (c.slotFree === true || inscIdsOf(c).indexOf(inscriptionId) >= 0)
       : inscIdsOf(c).indexOf(inscriptionId) >= 0);
@@ -3705,12 +3391,9 @@
     /* 【任务2】逐条判定：同名多栏时，只有被附魔过的那**一条**才算「已附魔」。
      * 候选里带了 uid（见 pickCandidates），点击时把它交给 applyPickBuff。
      * 【2026-10 同名逐条】不再用 run.slotFreeIds 按 id 兜底 —— 那会把新拿到的同名件也标成已附魔。 */
-    /* 【2026-10 第七十六批】判据见上面的 hasThisInsc()：**只标这一张铭文附魔过的**，
-     * 别再拿 slotFree 一刀切（那是虚空铭文的效果）。 */
     const doneCount = isPerm ? cands.filter((c) => hasThisInsc(c)).length : 0;
     /* 按钮只写名字，副标题换行显示（modal 按钮是 esc() 输出，用 \n + white-space:pre-line 换行）。
      * 特殊技能（小宇宙爆发 / 绝对防御 / 龟甲术）不按 Lv 展示，而是按 pickCandidates 给的 note。
-     * 【2026-10 第七十八批 用户口径】永久增益那一支要**极简**：已经附魔过的那条只写
      * 「×N 层 · 已附魔」，不要再跟括号（哪张铭文、什么效果）与「再选没有额外收益」这类解释；
      * 别的铭文强化过的那条也不再补「另有 …」，保持列表干净。 */
     const buttons = cands.map((c) => {
@@ -3735,8 +3418,6 @@
       : isBrand ? (inscriptionName + ' · 选一个烙印')
         : isLimited ? (inscriptionName + ' · 选一个限次增益')
           : ('三选一 · ' + label + '强化');
-    /* 【2026-10 第七十八批 用户口径】永久增益那一支的说明**大幅精简** ——
-     * 只留一句「选中的这条会怎样」，候选行上的标记自己会说话。 */
     const body = isPerm
       ? (inscriptionMul
         ? '选一个永久增益：被选中的这一条本局效果 ×' + inscriptionMul + '。'
@@ -3751,13 +3432,9 @@
             : '从下面三把武器里选一个：它的伤害 +100%（本局有效）。');
     modal(title, '<p>' + esc(body) + '</p>', buttons, { small: true });
   }
-  /* ============================================================
-   * 【U12】永久增益「满了换一个」 —— offerPermanentReplace / offerReplace
-   * ============================================================ */
   const RARITY_SHORT = ['普通', '稀有', '史诗', '传奇'];
   /** 铭文附魔的**行内标记**（与 buffTag 的外框同一套数据口径）：虚空 = 不占位、水晶 = 效果 ×N。
    *  列表里（替换弹窗 / 出售列表 / 交换列表）原本只给虚空留了一句，水晶那条只画了框、
-   *  在这些「挑一条丢掉」的列表上看不出它被 ×1.5 过 —— 这里补上，两边口径一致。
    *  ⚠ 位置有约束：`test-fixes-round.cjs` 的「需求38」按两个源码锚点切一段出来单独跑
    *  （从 RARITY_SHORT 那行切到「每 10 层的里程碑奖励」那行），这个函数得落在这一段里面 ——
    *  挪到 buffTag 旁边会让那段切片缺依赖，那条用例会直接红。 */
@@ -3775,7 +3452,6 @@
   /** 永久增益替换弹窗：onPick(entry) 执行实际替换，onCancel() 返回。 */
   function offerPermanentReplace(opts) {
     const o = opts || {};
-    /* 与面板同一口径：附魔（不占位）的排在前面（按每条自己的 slotFree）。 */
     const list = orderPermanent(Tower.ownedBuffs('endless').filter((b) => b.kind === 'permanent'));
     if (!list.length) { notice('没有可以拿掉的永久增益。'); if (o.onCancel) o.onCancel(); return null; }
     const rows = list.map((b, i) => {
@@ -3803,19 +3479,11 @@
     }
     return m;
   }
-  /* ============================================================
-   * 【U12b】「巡逻」收缴（2026-10 第六十二批；第七十七批去掉翻页）
-   *   openPatrolToll    —— 挑一个**本局当前在生效的最高稀有度**条目交出去
-   *   openPatrolDiscard —— 交出虚空铭文后永久位溢出，再丢一个
-   * 两个列表都**不再分页**（用户口径：去掉右下角的左右翻页，自然上下滚动即可），
-   * 用与「替换永久增益」同一套 `.replace-pick-list`（自带 max-height + overflow-y:auto）。
-   * ============================================================ */
   /** 收缴列表的一行。`idx` 是它在整份列表（不分页）里的下标，点击时按 `data-action="pt<idx>"` 回传。 */
   function patrolRowHtml(c, idx) {
     /* 附魔状态也要标（与替换弹窗同一套标记）：这是「挑一条交出去」的列表，
      * 玩家得看得出哪一条被铭文强化过，别把 ×1.5 的那条交掉。 */
     const em = enchMark(c);
-    /* 三类的副标题不一样：背包里的行 / 只剩已损毁层的烙印 / 已附魔成功的铭文。 */
     const cat = c.cat === 'insc' ? '铭文'
       : (c.kind === 'limited' ? '限次' : '永久');
     const bits = [RARITY_SHORT[c.rarity] || '', cat];
@@ -3917,7 +3585,6 @@
       onCancel: () => openShop(true),
     });
   }
-  /** 永久增益满格时（休整点选择）—— 选一个拿掉再收下新的。 */
   function offerReplace(index, buff) {
     offerPermanentReplace({
       prompt: '要拿下【' + esc(buff.name) + '】，先拿掉下面哪一个？',
@@ -3927,9 +3594,6 @@
     });
   }
   /** 每 10 层的里程碑奖励（技能卷轴×10 / 武器卷轴×10 / 随机药丸）。 */
-  /* ============================================================
-   * 【U13】无尽：里程碑 · 重试 · 战败结算 —— milestoneModal / endlessDefeat
-   * ============================================================ */
   function milestoneModal(rw, next) {
     const m = rw.milestone;
     const icon = C().icon ? C().icon('prop', m.propId) : '';
@@ -3971,8 +3635,6 @@
             return;              // 标记还在：这一屏点「继续战斗」会重新弹同一个必选窗
           }
           /* 【2026-10-28 用户口径】铸币复活**不再直接开打**：回滚完停在开战前的准备页
-           * （敌人预告 / 血量 / 增益 / 环境 / 分数都能重新看），玩家确认构筑后再自己点
-           * 「继续战斗」；想改主意也能在那一页直接「放弃本局」。
            * ⚠ 别在这里补 `fight('endless')`：上一版就是回滚后立刻开打，玩家没有调整余地。 */
           reopen('endless');
           runToast('已回滚到本场开始前，确认敌人与构筑后再点「继续战斗」。');
@@ -3988,15 +3650,11 @@
   function endlessDefeat(rw) {
     settleResult(rw);
   }
-  /* ============================================================
-   * 【渴血之剑】献祭窗 + 51 层起的活性事件
-   * ============================================================ */
   function closeBladeOffer() {
     bladeOfferOpen = false;
     bladeOfferEl = null;
   }
   /** 战斗后的必选献祭：只列史诗+限次或永久（有铭文时优先吃铭文）。
-   *  没有祭品时**不再弹空窗**：状态机已经自动吞噬使用次数并继续；旧档如果还带着
    *  `bladeSacrificePending`，这里补做同一次自动结算，避免玩家停在没有按钮的界面上。 */
   function openBladeSacrifice() {
     if (bladeOfferVisible()) return;
@@ -4057,7 +3715,6 @@
     bladeOfferEl = (m && m.element) || null;
     if (!bladeOfferEl) bladeOfferOpen = false;
   }
-  /** 51 层起每 10 层的活性事件：抑制 / 增强二选一（连续抑制 3 次 → 涸血之剑）。 */
   function openBladeEvent() {
     if (bladeOfferVisible()) return;
     bladeOfferOpen = true;
@@ -4090,9 +3747,6 @@
     if (!bladeOfferEl) bladeOfferOpen = false;
   }
 
-  /* ============================================================
-   * 【U14】无尽：试炼币商店 —— openShop
-   * ============================================================ */
 
   /** 商店里「消费型」增益的提示（挥金如土 C36 / 豪掷千金 C58）。
    *  买货架、买铸币、刷新货架**三条路都是消费**，提示口径必须一致 ——
@@ -4120,10 +3774,7 @@
   function openShop(revisit) {
     const shop = Tower.shopState();
     if (!shop) { notice('商店还没开张：每通过 5 层开放一次。'); return; }
-    /* 铸币商店与试炼商店共用 run.shop，但界面完全两套（铸币交易 + 免费交换）—— 在这里分流。 */
     if (shop.mint) { openMintShop(); return; }
-    /* 门庭若市（C59）：进门就给试炼币 —— 由 Tower 领取并清零，保证只飘一次字
-     *（shopState() 是快照，往它上面写标记不会生效）。 */
     const enterCoins = Tower.claimShopEnterCoins ? Tower.claimShopEnterCoins() : 0;
     if (enterCoins > 0) runToast('门庭若市：进店获得 ' + enterCoins + ' 试炼币');
     const rarityCls = (r) => 'r' + r;
@@ -4143,8 +3794,6 @@
       '<span class="shop-desc" title="' + esc(s.desc) + '">' + esc(s.desc) + '</span>' +
       (stackableOwned(s) ? '<em class="stack-hint">已有 ×' + s.ownedStacks + ' · 可叠层</em>' : '') +
       (s.sold ? '<em>已购入</em>' : C().btn(s.price + ' 币', 'buy' + i, 'small gold')) + '</div>').join('');
-    /* 出售列表：**按获得先后倒序**（最新拿到的在最上，点开就能卖），被虚空铭文附魔（不占位）
-     * 的一律沉到最后 —— 排序在 Tower.sellListOf 里（跨永久/限次混排），这里只负责渲染。 */
     const owned = Tower.sellListOf('endless');
     const sellRows = owned.length ? owned.map((b) =>
       '<div class="shop-sell-row' + (b.slotFree ? ' slot-free' : '') + '">' + buffTag(b, b.stacks) +
@@ -4184,7 +3833,6 @@
       right: '<span class="footer-right">' + C().btn(revisit || shop.rest ? '返回' : '继续挑战', 'leave', 'gold') + '</span>',
     }, ct ? { noTabs: true, pageClass: 'classic-tower tower-shop-page', homeLabel: '返回' } : {}));
     back(p, () => openEndless(), '返回');
-    /* 商店是无尽塔里的二级页：底色调跟着本层走，别在纯色塔页里突然露出村庄底图。 */
     if (ct) applyClassicTowerBg(p, 'endless', shop.layer);
     const buyTrial = (i, heroChoice) => {
       const r = Tower.buyShopSlot(i, undefined, heroChoice ? { heroChoice: heroChoice } : undefined);
@@ -4223,9 +3871,7 @@
     on(p, 'leave', () => {
       /* 休整商店 / 战后立即进货（E01）/ 立即开店 —— 关掉后回去继续打这一层；
        * 只有「每 5 层」的结算商店才去结算点。判据由 Tower 给（shopState 里的标记），
-       * 界面不再自己猜层数。
        * **必须真的把店关掉**（Tower.closeShop / continueFromShop 都会收摊）：
-       * 原来这一支只 openEndless() 而没有关店，phase 还停在 'shop' →
        * 首页按钮继续写「进入试炼商店」→ 玩家点了又进同一家店，看着就像「离不开商店」
        * （用户报的 bug）。 */
       if (revisit || shop.rest || shop.postBattle || !shop.boundary) {
@@ -4249,16 +3895,7 @@
     });
   }
 
-  /* ============================================================
-   * 【U14b】无尽：铸币商店（战后 5% 随机小店） —— openMintShop
-   *
-   * 规则（用户口径）：5 层之后的 x2/x3/x4 与 x7/x8/x9 层，每场战斗结束后 5% 概率刷出；
-   * 同一组连续三层最多刷出一次。第一格固定是 **0 铸币的「等价交换」**：
-   * 买下它才展开自己的增益列表，挑一件换一件；直接买别的货也可以。任意一次成交后店就消失。
-   * 免费刷新一次；刷新之后「等价交换」不再固定首位，只会按概率洗入随机货架。
-   * ============================================================ */
 
-  /** 铸币商店：买下 / 换完之后的事（店已经收摊）。 */
   function afterMintAction(text, r) {
     openEndless();                                    // 先把首页重绘好（店没了）
     runToast(text);
@@ -4329,12 +3966,9 @@
       '<p class="mint-lead">战后偶遇的流动商人：第一格固定是 <b>0 铸币的「等价交换」</b> —— ' +
         '买下它，挑一件自己的永久 / 限次增益换一件新的；或者直接花铸币买别的货。' +
         '任意一次成交后他立刻就走（也可以直接送客）。</p>' +
-      /* E16「铸币商队」触发的那一家：写清来由（限次 1，用完这家店就没了） */
       (shop.byBuff ? '<p class="mint-flash">限次增益「铸币商队」触发的商队' +
         (shop.boundary ? '：它顶掉了这一段的结算商店，送客后照旧前往结算点' : '') + '。</p>' : '') +
       (flash ? '<p class="mint-flash">' + esc(flash) + '</p>' : '') +
-      /* 【100 层循环】铸币商店的货架件数是固定的（整百层又整层不开店），
-       * 这里只说明它与试炼商店的分档不同，免得玩家以为「这家店没变小」是 bug。 */
       '<p class="shop-tier">铸币商店货架固定 <b>' + Math.max(1, Number((TowerData.MINT_SHOP || {}).shelf) || 5) +
         '</b> 件（不吃试炼商店的按层分档）</p>' +
       '<div class="shop-shelf">' + slots + '</div>' +
@@ -4395,13 +4029,9 @@
       openMintShop('货架换了一批 —— 「等价交换」不再固定第一格，只有洗到才会出现。');
     });
     owned.forEach((b) => on(p, 'mintswap' + rowRef(b), () => confirmMintSwap(b)));
-    /* 「继续战斗」：这家店到此为止（收摊）→ 回首页继续打。 */
     on(p, 'mintleave', () => { Tower.leaveMintShop(); openEndless(); });
   }
 
-  /* ============================================================
-   * 【U15】无尽：永久牺牲（20 起每 10 层放弃一个永久增益） —— openPermSacrifice
-   * ============================================================ */
 
   function openPermSacrifice() {
     const info = Tower.endlessInfo();
@@ -4435,9 +4065,6 @@
     });
   }
 
-  /* ============================================================
-   * 【U16】无尽：结算点与结算 —— openCheckpoint / settleResult
-   * ============================================================ */
 
   function openCheckpoint() {
     const info = Tower.checkpointInfo();
@@ -4567,13 +4194,7 @@
   }
 
 
-  /* ============================================================
-   * 【U17】模块导出 —— window.TowerUI
-   * ============================================================ */
   window.TowerUI = { openTower, openEndless, openHeroSetup, openHeroStatus, openMintShop, openShop, openPickBuff, openPatrolToll, openPatrolDiscard,
-    /* 回归用：勇者外观扁平列表 → 四部位格（同部位去重）。 */
     _heroAppearanceSlots: heroAppearanceSlots };
-  /* 【U18】把「剧情播完之后回主界面」这条线接给 tower-plot.js ——
-   * 剧情模块不直接引用 tower-ui（两个文件互不 require），只认这一根线。 */
   if (window.TowerPlot && TowerPlot.setMainOpener) TowerPlot.setMainOpener(openEndless);
 })();

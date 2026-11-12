@@ -1,135 +1,55 @@
-/* ============================================================
- * sim.js — 战斗模拟器
- * 输出回合事件流（供 battle.js 播放）。武器/技能效果按原版
- * GameDict 描述与百科资料实现。
- *
- * 挑战塔扩展（tower.js 注入，普通战斗不带这些字段，行为与旧版一致）：
- *   fighter.mech: NPC 专属机制 id 数组（berserk/rhythmCrit/regen/thorns/
- *                 poison/freeze/wolf/lifesteal/shell/devour）
- *                 题面（最终位对手，玩家式 AI 也生效）：
- *                 trialCore（每过一回合 +10% 减伤、第 8 回合起封顶 70%；第 7 次行动起力敏速 +50%）
- *                 trialMoss（每回合回 6% 最大生命，配 thorns 反弹 15%）
- *                 trialDry（封死玩家治疗，每 3 次行动吸取玩家 10% 当前生命）
- *                 trialFrost（第 1/4/7… 次行动冻结玩家）
- *                 trialMirror（单次伤害 ≥20% 最大生命时反弹 45%）
- *                 trialBloodfang（每掉 25% 生命，攻击 +20%）
- *                 trialErode（玩家每次出手叠 1 层攻击 −3%，最多 RULES.erodeMax 层）
- *   fighter.mods: 玩家侧塔 buff 数值包 {dmgMul, critBonus, critDmgBonus,
- *                 dodgeBonus, dodgeMul, takenMul, regenPct, lifestealPct, shellPct,
- *                 openerPowerMul/openerRounds/fatiguePowerMul,
- *                 mustHitFirst, firstSkillFree, openStrikePct,
- *                 cosmosFirst（秘技通神抽中小宇宙爆发：第一招必定放它）,
- *                 roundStatPct, catchUpPct, roundMaxHpMul, firstDodge,
- *                 emptyMaxHpMul, lowHpTakenMul, lowHpLifestealPct, lowHpRegenPct/lowHpRegenAt,
- *                 lowHpPowerMul/lowHpAgilityMul/lowHpSpeedMul/lowHpAt}
- *   fighter.setFx: 套装收益的战斗修正包（**装备派生**，与塔 buff 的 mods 分开走一条通道，
- *                 见 gamedata.js【GD6】/ state.js 的 applySetBonuses）。键与同名 mods 键同单位：
- *                 { dmgMul, critBonus, critDmgBonus, dodgeBonus, takenMul, lifestealPct,
- *                   thornsPct, shellPct, regenPct, openerPowerMul/openerRounds,
- *                   lowHpAt, lowHpPowerMul, lowHpSpeedMul, lowHpTakenMul, lowHpLifestealPct,
- *                   lowHpFinalMul }
- *                 低血那一组用自己的 lowHpAt 判定（setLowHpActive），不会被塔 buff 的阈值覆盖；
- *                 被真·色诱之术脱光装备（stripped）时整包失效。
- * ============================================================ */
+// sim.js — 战斗模拟器：输出回合事件流（battle.js 播放）；武器/技能规则见 gamedata.js。
+// fighter.mech：tower.js 注入的 NPC 机制 id（berserk/rhythmCrit/regen/thorns/poison/freeze/wolf/
+//   lifesteal/shell/devour 与题面 trialCore/trialMoss/trialDry/trialFrost/trialMirror/trialBloodfang/trialErode）。
+// fighter.mods / fighter.setFx：塔 buff 与套装收益的战斗修正包（setFx 装备派生，脱光时失效）；
+//   键与数值见 tower-data.js 与 State.applySetBonuses；普通战斗不带这些字段。
 
-/* ------------------------------------------------------------
- * 目录：战斗模拟器（回合事件流）
- * Ctrl+F 搜节号（如「【SM1】」）直达对应代码块。
- *
- *  【SM1】随机小件与规则表 RULES  【SM2】参战者构建  【SM3】状态修正与属性工具
- *  【SM4】出手权重与武器/技能选取  【SM5】闪避 / 暴击 / 被动加成  【SM6】减伤链
- *  【SM7】主模拟循环 simulate  【SM8】导出 window.Sim
- * ------------------------------------------------------------ */
 (function () {
   'use strict';
 
-  /* ============================================================
-   * 【SM1】随机小件与规则表 RULES
-   * ============================================================ */
   function R(lo, hi) { return lo + Math.floor(Math.random() * (hi - lo + 1)); }
   function chance(pct) { return Math.random() * 100 < pct; }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-  /* 与联机版同一组「首次投掷后可再投一次」的投掷武器：联机的动态权重给它们 2 次使用额度，
-   * 单机对齐时也按这组算。 */
+  // 联机版同组「首次投掷后可再投一次」的武器：只有它们有 2 次使用额度（见 weaponWeight）。
   const DOUBLE_THROW_IDS = new Set([5, 6, 8, 9, 13, 14]);
-  // The client receives server-generated battles; no original trigger threshold
-  // survives in its dictionary. Keep these reconstruction choices explicit.
+  // 客户端拿不到服务端的触发阈值；RULES 是按原版描述重建的口径。
   const RULES = Object.freeze({
-    // 师父驾到：生命不高于 50% 时开始尝试救场（原 35%），每场至多一次
+    // 师父驾到：生命 ≤50% 才尝试救场，每场至多一次。
     masterHpRatio: 0.50, masterChance: 35,
-    /* 出手时的「二次使用」权重（%）。做法是两层池子：本场没用过的武器/技能优先，
-     * 只有这个权重才回头用旧的那把/那个，所以「用过的」实际出场率被明显压低。
-     * 2026-10 用户新口径（第二百四十九批）：
-     *   · 普通武器：用过之后一律 repeatWeapon（8）；
-     *   · 投掷武器：前两次使用 100，第三次及以后 repeatWeapon（8）；
-     *   · 其余主动技能：第二次及以后一律 repeatSkill（5）；来点松果 17 二次及以后为 1；
-     *   · 不再叠加「上一回合刚用过 ×0.3」的额外惩罚 —— 新表要求权重就是表里的数。
-     * 2026-11 用户新口径（对齐联机版）：**额度用尽后权重归 0、退出候选池** ——
-     *   · 普通/真化武器、普通/真化技能都是 1 次；
-     *   · 只有六种「可再投一次」的投掷武器保留 2 次额度。
-     *   · `repeatWeapon` / `repeatSkill` 仍保留给“未满额度时的第二次”这条旧口径
-     *     （现在只有六种投掷武器的第二次会走到 `repeatWeapon`）。 */
+    /* 两层池子：本场没用过的武器/技能优先，用过的按 repeatWeapon/repeatSkill 权重回池；
+     * 额度用尽（普通武器/技能 1 次，六种投掷武器 2 次）后权重 0、退出候选池（对齐联机版）。 */
     repeatWeapon: 8,
     repeatSkill: 5,
     repeatSpecialFirst: 5, repeatSpecialAgain: 5,
-    /* 徒手攻击的基准权重：与武器/技能的候选权重放进同一个池子竞争（不再是固定百分比）。
-     * 2026-10 用户新口径：**100**；保留 5% 的份额保底（只在工具权重极大时兜底）。 */
+    // 徒手与武器/技能的候选权重同池竞争；minCommonShare 只是份额保底（见 commonWeightFor）。
     commonAttackWeight: 100,
     minCommonShare: 0.05,
-    /* 三侠等纯 NPC 分支（没有武器池）的固定档位：30% 技能 / 70% 普攻。 */
     npcSkillChance: 30,
-    /* 绝对防御（16）与龟甲术（7）是**受击自动触发**、不进出手池的被动：
-     * 下表是每次受击的触发概率（%），按技能等级与「本场第几次触发」取。
-     *   绝对防御 1~10 级：首次 20,20.5,…,24.5；之后 0.5
-     *            11~15 级：首次 24.5；第二次 5,10,15,20,24；第三次及以后 0.5
-     *   龟甲术   1~10 级：首次 20,20.5,…,24.5；之后 1
-     *            11~15 级：首次 24.5；之后按原表 N% 多次使用（20/40/60/80/100）
-     * 投掷类攻击完全不触发绝对防御（见 dmgReduce）。 */
+    /* 绝对防御(16)/龟甲术(7) 是受击自动触发、不进出手池的被动：概率表按原版成长取。
+     * 投掷类攻击完全不触发绝对防御（见 jueDuiDecide / dmgReduce）。 */
     jueDuiFirstBase: 20, jueDuiFirstStep: 0.5, jueDuiRepeat: 0.5,
     jueDuiTrueFirst: 24.5, jueDuiTrueSecond: 5, jueDuiTrueSecondStep: 5, jueDuiTrueSecondMax: 24, jueDuiTrueRepeat: 0.5,
     shellFirstBase: 20, shellFirstStep: 0.5, shellRepeat: 1,
     shellTrueFirst: 24.5,
     xhSpeedShare: 0.35,
     skillCooldown: 2,
-    /* 题面·熔核·炽壳：**每过一回合**叠一层减伤（+10%/层），第 8 回合起封顶 70%。
-     * 层数上限 = 0.70 / 0.10 = 7（coreReduceOf 与 mechDesc 共用同一份数字）。 */
+    // 熔核·炽壳：每过一回合叠一层减伤（+10%/层），第 8 回合起封顶 70%；层数上限 7。
     coreReducePerRound: 0.10, coreReduceCap: 0.70,
-    /* 题面·蚀骨：玩家每次出手叠 1 层「攻击 −3%」，这个上限同时被代码与 NPC 文案使用 ——
-     * 抽成常量，免得一边改、另一边忘（此前 10 层写在两处）。 */
+    // 蚀骨的单层上限：代码与 NPC 题面文案共用这一份。
     erodeMax: 15,
-    /* 速度行动条的连续出手上限（用户 2026-10 口径）：速度再高、行动条攒得再快，
-     * 同一方最多连续行动 5 次；第 6 次必须轮到另一方，不能无限先手。 */
+    // 同一方最多连续行动 5 次，第 6 次强制轮到另一方（防高速无限先手）。
     maxConsecutiveActions: 5,
-    /* 闪避率的最终上限（百分点）。藏品里的 C22 闪避精通 / G03 凌波微步 / T02 烟幕
-     * 可以叠出远高于 100% 的展示值，但真正掷骰时只到这里；面板也按这个上限显示。 */
+    // 闪避率掷骰与面板显示共用这个上限（藏品可叠出更高展示值）。
     dodgeCap: 55,
-    /* 暴击率最终上限（百分点，隐藏规则）：溢出的暴击率按 1:1 加进暴击伤害。
-     * 不写进卡面 / 面板说明，属于战斗结算口径。 */
+    // 暴击率上限；溢出的百分点按 1:1 加进暴击伤害（隐藏结算口径，不写进卡面）。
     critCap: 70,
   });
-  /* ============================================================
-   * sim 真正实现了战斗效果的主动技能。
-   *
-   * 原版技能表里 2~11、13、16、19~22 大多是**被动**（力王附体/身手敏捷/龟甲术/
-   * 皮糙肉厚/绝对防御…）或空 id（原版字典里 19~22 没有名字）。
-   * 玩家只会领悟下面这 7 个主动技，但敌人模板历史上抄了一批没实现的 id ——
-   * 放出来就是「空过一回合」（元素术鼠的 5「武器好手」其实是被动、20 是空 id）。
-   * 所以出招时只从这张表里挑：数据写错的技能会被自动跳过，不会再空过。
-   * ============================================================ */
+  // sim 只实现这 7 个主动技：出招池只从这张表挑，数据里抄错的 id 会被跳过、不会空过一回合。
   const ACTIVE_SKILLS = [8, 12, 14, 15, 17, 18, 23];
-  /* ============================================================
-   * 幻兽（原版 `petsInfo` / `petsSkills`，见 MainMovie.as:19146-19148）
-   * ------------------------------------------------------------
-   * 原版客服端只负责**播**服务端下发的 `attackType 4` 回合（`Squirrel.attack` 的
-   * `attacks.gotoAndStop(29 + weaponSkillId)`），真正的触发与数值在服务端。
-   * 这里按已提交的 `petsSkills` 文案与「幻兽技能」表的 X 初始值 / 每级成长值重建：
-   *   · 行动时触发：1 / 6 / 7 / 8 / 9 / 10 / 11；
-   *   · 装死后触发：2 / 4；
-   *   · 被动：3（低血增伤）/ 5（闪避回血）。
-   * 每只幻兽的 `maxTimes` = 1 表示**一场一次**，-1 表示可反复（只有 3 / 5 两个被动）。
-   * 触发成功后统一发一条 `action:'pet'` 的独立回合，交回放层按 `29 + petId` 播原版动画；
-   * 它不占 60 手行动上限（`isRound:0`），与原版 `attackPetIds` 的「协战」语义一致。
-   * ============================================================ */
+  // 幻兽：原版 petsInfo/petsSkills 只负责播服务端下发的片段，触发与数值在服务端（MainMovie.as:19146）。
+  // 这里按 GData.PETS / PET_SKILL_RULES 重建：行动时 1/6/7/8/9/10/11，装死后 2/4，
+  // 常驻被动 3（低血增伤）/5（闪避回血）；maxTimes=1 即一场一次。
+  // 触发后发 action:'pet' 且 isRound:0，回放层按 attacks 第 29+petId 帧播原版动画，不占 60 手上限。
   const PET_INFO_BY_ID = (() => {
     const map = new Map();
     const list = (window.GData && Array.isArray(GData.PETS)) ? GData.PETS : [];
@@ -150,7 +70,6 @@
     const r = petRule(skillId);
     return r ? (r.trigger == null ? petValue(skillId, level) : r.trigger) : 0;
   };
-  /** 把调用方给的幻兽列表（State.petTeam / randomPetLoadout）收成 sim 只认的字段。 */
   function normalizePetTeam(list) {
     const out = [];
     for (let i = 0; i < (Array.isArray(list) ? list.length : 0) && out.length < 3; i++) {
@@ -170,17 +89,12 @@
     return out;
   }
 
-  /** 调试开关「无敌模式」：玩家侧不会被击倒。 */
+  // 调试开关「无敌模式」：只对玩家侧（side 0）生效。
   function godSave(def) {
     try { return !!(def && def.side === 0 && window.Debug && window.Debug.enabled('godMode')); } catch (e) { return false; }
   }
-  /* 【2026-10 用户口径】「无敌模式」必须名副其实：**玩家血量计数器不受任何掉血影响**。
-   * 以前只在几条主路径上兜到 1 点血，于是枯泉吸血（trialDry）、持续伤害、自伤、反伤这些
-   * 旁路照旧能把血打下去；血量掉到 1 之后，60 手超时会按**血量比例**判负 ——
-   * 玩家实测「开了无敌，在无尽塔里还是被打死」就是这条（塔里连战继承血量，残血进场更容易超时判负）。
-   * 现在给玩家侧装一个「只增不减」的 hp 访问器：任何赋值只要比当前值小就整段丢掉（连 0 也不写进去），
-   * 于是谁也打不动它，超时永远是我方血量比例 ≥ 对方 → `winner` 判我方胜。
-   * 用 WeakSet 记「已经装过」，不往战斗体上挂额外字段。 */
+  /* 无敌必须名副其实：60 手超时按血量比例判负，所以玩家 hp 只增不减（任何更小的赋值直接丢弃），
+   * 否则吸血/持续伤害/自伤/反伤等旁路都能把血打低、超时反而判负。WeakSet 记已装过的战斗体。 */
   const godHpGuarded = new WeakSet();
   function guardGodHp(def) {
     if (!def || def.side !== 0 || godHpGuarded.has(def)) return def;
@@ -198,18 +112,9 @@
     return def;
   }
 
-  /**
-   * fighter 输入: {name, level, power, agility, speed, hp,
-   *   weapons:[{id,level,harmLo,harmHi,type}], skills:[{id,level,type}],
-   *   baseStats?:{power,agility,speed}, masterLevel?:number,
-   *   npcType: null|'tl'|'xh'|'xm'|'wood',
-   *   mech?: string[], mods?: object}   ← 挑战塔扩展
-   */
-  /* ============================================================
-   * 【SM2】参战者构建（含塔机制注入字段）
-   * ============================================================ */
-  /** 战斗用的 mods 副本（见 makeCombatant 的注释）：只深拷 sim 会改写的 `deathSaves`，
-   *  其余键保持浅拷贝 —— 这样「同一只敌人模拟两次」也不会把命耗光、玩家与魔王的复活也不互相吃。 */
+  // fighter 输入：{name, level, power, agility, speed, hp, maxHp?, weapons[], skills[],
+  //   baseStats?, masterLevel?, npcType?, mech?, mods?, setFx?, pets?, pattern?}（塔字段见调用方）。
+  // mods 副本：只深拷 sim 会 shift() 的 deathSaves，其余浅拷贝，避免吃掉调用方的复活次数。
   function cloneModsForBattle(mods) {
     const out = Object.assign({}, mods);
     if (Array.isArray(mods.deathSaves)) {
@@ -230,7 +135,7 @@
       if (!base) return null;
       w = Object.assign({}, w, { id: Number(w.id), level: clamp(stat(w.level, 1), 1, 15) });
       let lo = w.harmLo, hi = w.harmHi;
-      if (lo == null) { // NPC/AI 直接给 id:level
+      if (lo == null) { // NPC/AI 只给 id:level 时按原版 harm 区间与成长重算。
         const [bLo, bHi] = base.harm.split('-').map(Number);
         let add = 0;
         if (w.level <= 10) add = parseInt(base.harmAdd) * (w.level - 1);
@@ -239,18 +144,14 @@
       }
       return { id: w.id, level: w.level, name: base.name, type: base.type, lo, hi };
     }).filter(Boolean);
-    // 关卡连战会带一个「入场血量比例」进来：hp 是当前血量，maxHp 才是上限。
-    // 缺少 maxHp（AI/NPC/旧录像）时，把 hp 当作满血，保持既有行为。
+    // 关卡连战会带入场血量：hp 是当前血量、maxHp 是上限；缺 maxHp（AI/NPC/旧录像）时按满血。
     const fullHp = stat(f.maxHp != null ? f.maxHp : f.hp, 1);
     const mech = Array.isArray(f.mech) ? f.mech.slice() : (f.mech ? [f.mech] : []);
-    /* ⚠ `mods` 里的 `deathSaves` 必须**拷一份**：sim 会 `shift()` 掉免死条目，
-     * 共享引用等于把调用方的数据一起吃掉了。后果就是本题：同一只敌人被模拟**第二次**时
-     * 一条命都不剩 —— 「假如我直接赢」（E17）于是又变回一击秒杀（用户实测「魔王还是直接判胜」）。
-     * 顺带也修掉「玩家与魔王的复活次数互相消耗」那个老坑（第七十四批的注释里提过，但只拷了当时的镜像包）。
-     * 只深拷这一处：sim 不写别的 mod 键，整包深拷会白白拖慢每场战斗的构建。 */
+    /* mods.deathSaves 必须拷一份：sim 会 shift() 掉条目，共享引用等于吃掉调用方数据
+     * （同一敌人第二次模拟一条命不剩、玩家与魔王的复活也互相消耗）。只深拷这一处。 */
     const mods = f.mods && typeof f.mods === 'object' ? cloneModsForBattle(f.mods) : null;
-    /* 幻兽：面板加成已由 State.applyPetBonuses 落到力/敏/速/血上，这里只接技能。
-     * 3 / 5 是常驻被动，先在这里折成两个只读数值；其余技能由主循环按回合触发。 */
+    /* 幻兽：面板加成已由 State.applyPetBonuses 落到力/敏/速/血上，这里只接技能；
+     * 3/5 是常驻被动，先折成只读数值，其余技能由主循环按回合触发。 */
     const pets = normalizePetTeam(f.pets);
     let petRagePct = 0, petDodgeHeal = 0;
     for (const p of pets) {
@@ -261,79 +162,64 @@
     }
     return {
       side, name: f.name, level: stat(f.level, 1), npcType: f.npcType || null,
-      /* 无尽塔仙鹤专用（见 tower-data 的 endlessXhTune）：缺省时技能 1×、
-       * 前期凶猛仍是原来的 1.3×；只有无尽塔 buildFoe 会写这两个字段。 */
+      // 只有无尽塔 buildFoe 会写 xhSkillMul/xhEarlyMul（tower-data endlessXhTune）；缺省技能 1×、前期 1.3×。
       xhSkillMul: Number.isFinite(Number(f.xhSkillMul)) ? Math.max(0.1, Math.min(1.5, Number(f.xhSkillMul))) : 1,
       xhEarlyMul: Number.isFinite(Number(f.xhEarlyMul)) ? Math.max(1, Math.min(1.3, Number(f.xhEarlyMul))) : null,
       power: stat(f.power, 1), agility: stat(f.agility, 1), speed: stat(f.speed, 1),
       maxHp: fullHp, hp: Math.max(1, Math.min(stat(f.hp, 1), fullHp)),
-      weapons, skills, usedWeapons: {}, weaponUseCount: {}, usedSkills: {}, /* 每个技能「本场用过几次」——野球拳（12）的快速衰减要用它。 */
+      weapons, skills, usedWeapons: {}, weaponUseCount: {}, usedSkills: {},
       skillUseCount: {}, lastWeaponId: null, lastWeaponTurn: 0, lastSkillId: null,
-      /* 完整技能表的稳定顺序（skills 是「id → 等级」的对象，不是数组！）。
-       * 原版这里写的是 skills[id] 下标访问，永远取不到东西 —— 所以固定循环的技能
-       * 只能退化成「取 actives 里最小的 id」，元素术鼠因此整场都在放来点松果。 */
-      /* 只保留 sim 真正实现的技能（数据里抄错的 id 会被丢弃，不会空过一回合）。
-       * 若一个都不剩，就用 ACTIVE_SKILLS 兜底，避免出现「完全不会放技能」的敌人。 */
+      /* skills 是「id→等级」的对象、不是数组（按下标取会永远取空）；skillOrder 只保留 sim 实现的技能，
+       * 一个都不剩时用 ACTIVE_SKILLS 兜底，避免出现完全不会放技能的敌人。 */
       skillOrder: (function () {
         const own = Array.isArray(f.castable) ? f.castable.map(Number) : Object.keys(skills).map(Number);
         const usable = own.filter((id) => ACTIVE_SKILLS.includes(id) && skills[id]);
         return (usable.length ? usable : ACTIVE_SKILLS.filter((id) => skills[id] || usable.length === 0)).sort((a, b) => a - b);
       })(),
       patternSkillIdx: 0,
-      /* 「同一回合内只能用一次」的锚点：turnId 变化 = 换了一个回合。 */
+      // turnId 变化 = 换回合；turnSkills 是「本回合已用过」的锚点，跨回合必须清空。
       turnId: 0, lastTurnId: -1, turnSkills: {},
-      /* 技能冷却（id → 还要等几次出手；见 RULES.skillCooldown）。 */
+      // 技能冷却（id → 还要等几次出手）；只对固定循环的敌人生效（见 RULES.skillCooldown）。
       skillCd: {},
       effects: f.effects || {}, masterLevel: Math.max(0, Number(f.masterLevel) || 0),
       heroTrueBase: !!f.heroTrueBase,
-      // 攻略.md 的裸属性解释与 PPT 的含装备解释冲突。本版采用前者，
-      // callers provide growth stats excluding equipment, skills and pills.
-      // Older fighter snapshots lack this field, so retain their recorded stats.
+      // baseStats 是**不含装备/技能/丹药**的成长裸属性，被真·色诱脱光时属性回落到这里；
+      // 旧录像的 fighter 没有该字段，退回记录的 power/agility/speed。
       baseStats: Object.fromEntries(['power', 'agility', 'speed'].map((key) => [key, stat(f.baseStats?.[key], stat(f[key], 1))])),
-      // 战斗内状态
       ap: 0, restNext: false, pendingWeapon: null, stun: 0, silence: 0, disarm: 0, shellCharges: 0,
       mustHitNext: !!(mods && mods.mustHitFirst), stripTurns: 0, usedFakeDie: false, usedMaster: false, shellCount: 0, usedCosmos: false, jueDuiCount: 0,
-      // 题面·枯泉：治疗量倍率（0 = 完全封疗）
-      /* 治疗量倍率（塔侧赛前写入：涌泉烙印 C52 按层给 +10%/层，损毁层 +20%）。
-       * 战斗中被「枯泉」这类机制清零 = 完全封疗。所有治疗都走 healOf()，所以只要这里读进来就全生效。 */
+      /* 治疗量倍率：塔侧赛前写入（涌泉烙印按层 +10%/层），0 = 完全封疗；
+       * 所有治疗都走 healOf()，所以读进这里就全生效。 */
       healMul: Number.isFinite(Number(f.healMul)) && Number(f.healMul) >= 0 ? Number(f.healMul) : 1,
-      /* 幻兽（见本文件 ACTIVE_SKILLS 下面的说明）。`petUsed` 按队伍槽位记「一场一次」；
-       * `petSeal*` 是**对手**的整蛊专家封住的武器/技能；`petWeakPct` 是**自己**中的虚弱
-       * （受到武器攻击额外承受的百分比）；`petDotPlus` / `petHealCut` 是中了张牙舞爪 /
-       * 三聚氰胺之后的持续标记；`petNextCrit` 是打兴奋剂给的下一次必暴。 */
+      /* petUsed 按队伍槽位记「一场一次」；petSeal* 是对手整蛊专家封住的武器/技能；
+       * petWeakPct 是自身虚弱，petDotPlus/petHealCut/petNextCrit 是张牙舞爪等持续标记。 */
       pets, petRagePct, petDodgeHeal, petUsed: {},
-      /* 濒死（装死）触发的幻兽技能**按技能 id** 记「一场一次」。
-       * 原版 `petsSkills` 每条技能的最后一列 `maxTimes` 对逆向推倒 / 回光术都是 1，
-       * 而装死是所有该技能幻兽在同一瞬间一起判定 —— 旧实现按**队伍槽位**记（`petUsed`），
-       * 带 3 只回光术就会连回 3 次。用户 2026-10-24 口径（对齐 ssfight）：
-       * 同一个濒死技能一场只结算一次，即使队伍里带多只同名幻兽。 */
+      /* 濒死幻兽技能按**技能 id** 记「一场一次」（原版 maxTimes=1），
+       * 所以带 3 只回光术只结算一次，不同技能各触发一次。 */
       petSkillUsed: {},
       petWeakPct: 0, petDotPlus: false, petHealCut: false, petNextCrit: false,
       petSealWeapons: {}, petSealSkills: {},
-      /* 装死之后要补发的幻兽协战（逆向推倒 / 回光术），在下一次循环开头结算。 */
+      // 装死后待补发的协战（逆向推倒/回光术），在下一轮循环开头结算。
       petAfterFakeDie: false,
       healMulBase: Number.isFinite(Number(f.healMul)) && Number(f.healMul) >= 0 ? Number(f.healMul) : 1,
-      /* 秘技通神（C33）的「该技能触发概率 +N%」专用通道：{ 技能id: 比例 }。
-       * 与 effects 分开，避免和装备词条/武器效果槽的编号撞车。 */
+      // 秘技通神的「该技能触发概率 +N%」专用通道；与 effects 编号空间分开，避免串味。
       skillBoost: f.skillBoost && typeof f.skillBoost === 'object' ? Object.assign({}, f.skillBoost) : {},
       usedUlt: false, acted: false, usedFreeSkill: false,
       swordDodge: 0, meteorDodge: 0, debuffs: { power: 0, agility: 0, speed: 0 },
       dot: null, // {dmg, rounds} 或 {pct, rounds}（按当前生命比例扣血）
       buffFlat: { power: 0, agility: 0, speed: 0 },
-      // —— 挑战塔扩展状态 ——
       mech, mods,
-      /* 练功木桩（practice）：生命不会耗尽，打完 `practiceRounds` 次出手就收尾。
-       * 口径来自 ssfight 的 `Stakes`：它重写了 `reduceBlood` 但**不调用 checkDead**，
-       * 所以木头人不会死；这里用固定回合 + 保底 1 血复刻这个训练场景。 */
+      /* 练功木桩：生命不会耗尽，打完 practiceRounds 次出手收尾；
+       * 原版 Stakes 重写 reduceBlood 但不调 checkDead，所以木桩不会死。 */
       practice: !!f.practice,
       practiceRounds: Math.max(0, Math.floor(Number(f.practiceRounds) || 0)),
-      /* 上一拍扣掉的血，在下一拍开头回满；回血量记在这里交给回放层显示。 */
+      // 上一拍掉的血在下一拍开头回满；回放层用它飘绿字。
       practiceHealPending: 0,
-      /* 套装收益（装备派生，独立通道；见 gamedata.js【GD6】）。 */
+      // 套装收益（装备派生，独立通道；见 gamedata.js 与 State.applySetBonuses）。
       setFx: f.setFx && typeof f.setFx === 'object' ? Object.assign({}, f.setFx) : null,
-      // 机制的可调数值（tower-data.js 里定，题面文本与判定共用一份，避免文案/数值走偏）
+      // 机制可调数值（tower-data.js 定义）：题面文本与判定共用一份。
       mechParams: f.mechParams && typeof f.mechParams === 'object' ? f.mechParams : null,
-      // 松鼠对手的固定出招循环（tower-data.js 定义）：['common'|'weapon'|'skill', …]
+      // 松鼠对手的固定出招循环（tower-data.js 定义）：['common'|'weapon'|'skill', …]。
       pattern: Array.isArray(f.pattern) && f.pattern.length ? f.pattern.slice() : null,
       patternStep: 0,
       mechState: { basePower: stat(f.power, 1), berserk: false, core: false, coreStack: 0, bfStep: 0, erode: 0 },
@@ -343,39 +229,29 @@
     };
   }
 
-  /** 任何扣血途径致死时的兜底：涅槃（复活 + 本场力/敏/速提升）/ 金蝉脱壳（保留 1 血）/ 无敌模式。
-   *  原来只有 applyDamage 里判，中毒、荆棘反弹、双刃剑自伤、枯泉吸血把人打死时
-   *  复活甲不会触发 —— 玩家会以为「buff 没生效」。 */
-  /** 塔 buff「反噬豁免」：免疫**一切**反伤（荆棘铁壁 / 荆棘之甲 / 镜鳞反噬 / 绝对防御反伤）。
-   *  判据放在被反伤的那一方（att）身上 —— 也就是「我方出手时不会被弹」。 */
-  /* ============================================================
-   * 【SM3】状态修正与属性工具
-   * ============================================================ */
-  /* 「闪亮登场」强化期内的那几次武器也免疫反伤 —— 用一次性标记挂在出手方身上，
-   * 由武器分支在出手前设置（见 weaponBoostReflectImmune）。 */
+  // 任何扣血途径致死的兜底：涅槃/金蝉脱壳/无敌模式——所有致死路径都必须走这里。
+  // 反噬豁免：免疫一切反伤（荆棘/镜鳞/绝对防御）；判据在被打的一方（att）。
+  // 「闪亮登场」强化期内的武器也免疫反伤：一次性标记挂在出手方，由武器分支设置。
   function reflectImmune(c) {
     if (!c) return false;
     if (c.weaponBoostImmune) return true;
     return !!(c.mods && Number(c.mods.reflectImmune) > 0);
   }
-  /** 触发一条免死条目（涅槃 / 涅槃plus / 金蝉脱壳）—— **两个致死判定点共用这一份**：
-   *  `tryDeathSave`（毒 / 反伤 / 开场类致死）与 `applyDamage` 里的致死分支（被打死）。
-   *  两边若各写一份，同一件涅槃在「被打死」和「被毒死」两条路上效果就会不一样。
-   *  顺序：先抬生命上限（涅槃plus 的 +20%），再按 healPct 回血（回的是抬过之后的上限），
-   *  然后记减伤（并进 mods.takenMul，applyDamage 读它）、最后加本场力/敏/速。 */
+  /* 免死条目（涅槃/涅槃plus/金蝉脱壳）的唯一结算点：tryDeathSave 与 applyDamage 共用，
+   * 顺序 = 抬上限 → 按 healPct 回血 → 减伤并进 mods.takenMul → 加本场力/敏/速；
+   * 两处各写一份会让「被打死」与「被毒死」效果不一致。 */
   function consumeDeathSave(def, sv, r) {
     const plusMax = Math.max(0, Number(sv.maxHpMul) || 0);
     if (plusMax > 0) def.maxHp = Math.max(1, Math.round((Number(def.maxHp) || 1) * (1 + plusMax)));
     const plusTaken = Number(sv.takenMul) || 0;
     if (plusTaken) {
-      /* 减伤按伤害倍率相乘，不把两条减伤直接相加（否则 60% + 60% 会变成 100% 免疫）。 */
+      // 减伤按倍率相乘，不能相加（否则 60%+60% 会变成 100% 免疫）。
       const oldTaken = Number(def.mods.takenMul) || 0;
       def.mods.takenMul = Math.max(-0.95, (1 + oldTaken) * (1 + plusTaken) - 1);
       if (r) r.reviveTakenMul = def.mods.takenMul;
     }
     def.hp = sv.healPct ? Math.max(1, Math.round(def.maxHp * sv.healPct)) : 1;
-    /* 涅槃（原不死鸟）：复活后**本场战斗**力/敏/速提升 —— 直接加到 buffFlat 上，
-     * 与「血性狂暴」等临时加成同一口径（每场战斗的 combatant 是新建的，所以只影响本场）。 */
+    // 复活后的力/敏/速加成累加到 buffFlat，只影响本场（combatant 每场新建）。
     const mul = Math.max(0, Number(sv.statMul) || 0);
     if (mul > 0) {
       for (const key of ['power', 'agility', 'speed']) {
@@ -385,8 +261,7 @@
     if (!r) return;
     r.deathSave = true;
     r.reviveStatMul = mul > 0 ? mul : undefined;
-    /* 涅槃（复活甲）与金蝉脱壳都是 deathSave，但塔里需要分开数「涅槃用掉几次」
-     *（C14 叠 2 层时每层有 2 次机会）—— 所以复活甲那一条打上显式标记。 */
+    // r.revive 只标复活甲：塔按它数「涅槃用掉几次」（C14 叠层时每层有次数）。
     r.revive = sv.revive ? 1 : undefined;
     r.noteText = (r.noteText ? r.noteText + '·' : '') + (sv.name || (sv.healPct ? '涅槃' : '金蝉脱壳'));
     r.noteSide = def.side;
@@ -401,28 +276,24 @@
     return false;
   }
 
-  /** 多段攻击汇总：装死发生在**谁**身上、是不是被反伤打出来的，也要一起带到外层回合。
-   *  （不带上 `fakeDieSide` 的话，回放会把「装死」画在挨打的那位身上 —— 见 battle.js 的 reaction。） */
+  // fakeDieSide 必须带到外层回合，否则回放把「装死」画在挨打的那位（见 battle.js）。
   function inheritFakeDie(r, rr) {
     r.fakeDie = true;
     if (rr.fakeDieSide != null) r.fakeDieSide = rr.fakeDieSide;
     if (rr.fakeDieReflect) r.fakeDieReflect = true;
   }
-  /** 真·色诱之术：被脱光装备期间，装备提供的属性与附加能力全部失效（回到裸属性）。 */
+  // 真·色诱之术：脱光期间装备属性与附加能力全部失效（回到裸属性）。
   function stripped(c) { return Number(c.stripTurns) > 0; }
   function statOf(c, key) { return stripped(c) ? c.baseStats[key] : c[key]; }
-  /** 题面·枯泉：治疗量被压制时按倍率结算（0 层完全封疗）。 */
   function healOf(c, amount) { return Math.max(0, Math.round(Number(amount) * (c.healMul == null ? 1 : c.healMul))); }
   function effPower(c) {
     let p = statOf(c, 'power') * (1 - c.debuffs.power / 100) + c.buffFlat.power;
-    // 塔 buff「狂怒」：自己血量低于阈值时攻击提升（只有进攻方结算，所以放在这里）
+    // 狂怒：低血加攻只在该战斗体作为进攻方结算，所以放在 effPower 里。
     const rage = c.mods && Number(c.mods.lowHpPowerMul) || 0;
     if (rage > 0 && lowHpActive(c)) p *= 1 + rage;
-    /* 套装收益的低血加攻（螳螂 / 狂战套）：用自己的阈值单独判一次。 */
+    // 套装低血加攻用自己的阈值单独判（setLowHpActive），不被塔 buff 的 lowHpAt 覆盖。
     if (setLowHpActive(c)) p *= 1 + setFx(c, 'lowHpPowerMul');
-    /* 塔 buff「开局狂热」：按**本次战斗的出手次数**分档 ——
-     * 前 openerRounds 次出手 ×(1+openerPowerMul)，之后 ×(1-fatiguePowerMul)。
-     * 玩家与敌人共用这段逻辑，但只有拿到该 buff 的一方 mods 里才有这两个字段。 */
+    // 开局狂热：前 openerRounds 次出手 ×(1+openerPowerMul)，之后 ×(1−fatiguePowerMul)。
     if (c.mods) {
       const boost = Number(c.mods.openerPowerMul) || 0;
       const fatigue = Number(c.mods.fatiguePowerMul) || 0;
@@ -430,13 +301,12 @@
         const rounds = Math.max(1, Number(c.mods.openerRounds) || 5);
         p *= (Number(c.acts) || 1) <= rounds ? 1 + boost : 1 - fatigue;
       }
-      /* 塔 buff「闪亮登场」：前 N 次**使用武器**时攻击 +50%（那几次单独在武器分支里加成），
-       * 次数用完之后我方所有攻击 −20%。判据是本场已用武器次数，不是出手次数。 */
+      // 闪亮登场：前 N 次用武器时另加攻击，之后 (1−weaponBoostFatigueMul)；判据是武器次数，不是出手次数。
       const wFatigue = Number(c.mods.weaponBoostFatigueMul) || 0;
       const wCap = Number(c.mods.weaponBoostUses) || 0;
       if (wFatigue > 0 && wCap > 0 && (Number(c.weaponUses) || 0) > wCap) p *= 1 - wFatigue;
     }
-    /* 套装收益的「开场强攻」（仙鹤套）：开场前 N 次出手加攻，没有疲劳段。 */
+    // 套装「开场强攻」：开场前 N 次出手加攻，没有疲劳段。
     const setOpener = setFx(c, 'openerPowerMul');
     if (setOpener > 0) {
       const rounds = Math.max(1, Number(c.setFx && c.setFx.openerRounds) || 3);
@@ -444,22 +314,14 @@
     }
     return Math.max(1, Math.round(p));
   }
-  /** 低血门槛是否成立（塔 buff「狂怒」共用一套判定：攻/敏/速同时生效）。 */
+  // 低血门槛判定：塔 buff 的攻/敏/速加成都共用它。
   function lowHpActive(c) {
     const th = c.mods && Number(c.mods.lowHpAt);
     return !!(th > 0 && c.maxHp > 0 && c.hp <= c.maxHp * th);
   }
-  /* ============================================================
-   * 回合开始类增益（塔 buff，每场战斗重置）
-   *
-   *   roundStatPct   越战越勇：力/敏/速各按「基础值 × 比例」逐回合累加（可叠层，比例里已含层数）
-   *   catchUpPct     后发制人：有一项落后对手时，把差距最大的那项补上「差距 × 比例」，
-   *                  **同时把对手那一项压下去同样的量**（镜像削弱，2026-10 用户口径）
-   *   roundMaxHpMul  玉石俱焚：双方生命上限各乘一次（向下取整），当前血量跟着裁
-   *
-   * 三者都写在 **buffFlat / maxHp** 上，而每个战斗体是 simulate() 里新建的
-   *（makeCombatant 每次都重置 buffFlat），所以「每场战斗结束时加成消失」天然成立。
-   * ============================================================ */
+  /* 回合开始类增益（塔 buff）：roundStatPct 越战越勇累加力/敏/速；catchUpPct 后发制人补差距
+   * 并把对手同项压回同样的量；roundMaxHpMul 玉石俱焚乘双方上限。
+   * 都写在 buffFlat/maxHp 上，每个 combatant 每场新建 → 战斗结束自动清零。 */
   function applyRoundAuras(actor, foe, push) {
     const m = actor.mods || {};
     const statPct = Number(m.roundStatPct) || 0;
@@ -481,10 +343,8 @@
       if (best) {
         const gain = Math.max(1, Math.round(best.gap * catchPct));
         actor.buffFlat[best.key] = (actor.buffFlat[best.key] || 0) + gain;
-        /* 需求165：**镜像削弱** —— 我方这一回合补多少，对手那一项就掉多少（只掉这一次的量）。
-         * 写进 foe.buffFlat（负数），与「越战越勇」等走同一个通道；eff 三个出口统一
-         * Math.max(1, …) 兜底，所以不会把对手压成 0 / 负数。
-         * gain ≤ 差距本身（比例 ≤100%），所以对手那一项最多被压回与我方持平。 */
+        /* 镜像削弱：我方补多少，对手那一项就掉多少（写 foe.buffFlat 负数）；
+         * gain ≤ 差距，所以对手最多被压到与我方持平，eff 出口另有 Math.max(1, …) 兜底。 */
         if (foe && foe.buffFlat) foe.buffFlat[best.key] = (foe.buffFlat[best.key] || 0) - gain;
         if (push) push({ attacker: actor.side, action: 'buff', noteText: '后发制人', noteSide: actor.side,
           aura: { key: best.key, gain: gain, drain: gain, drainSide: foe ? foe.side : null } });
@@ -497,37 +357,27 @@
         c.maxHp = Math.max(1, Math.floor(c.maxHp * hpMul));
         if (c.hp > c.maxHp) c.hp = c.maxHp;
       }
-      /* 把两边的新上限/当前血量一起写进这一回合：战斗回放要据此更新血条，
-       * 否则玩家在战斗里只看得到飘字、看不到「血量上限变化」。 */
+      // 上限/血量变化要写进这一回合事件，回放据此更新血条。
       const bySide = (pick) => (actor.side === 0 ? [pick(actor), pick(foe)] : [pick(foe), pick(actor)]);
       if (push) push({ attacker: actor.side, action: 'buff', noteText: '玉石俱焚', noteSide: actor.side,
         maxHp: bySide((c) => c.maxHp), hp: bySide((c) => c.hp) });
     }
   }
-  /**
-   * **低血减伤的即时结算**：把一次伤害按「越过 lowHpAt 阈值线」切成两段。
-   *
-   *   · 把血量打到阈值线为止的那一段（阈值以上）→ 全额；
-   *   · 越过阈值线之后的那一段 → 乘 (1 + mul)（mul 为负，例如 −0.5 = 减伤 50%）。
-   *
-   * 已经低于阈值时（整段都在阈下）退化成「全额减伤」，与旧行为一致；
-   * 这一击打不到阈值线时整段全额（原来也是这样）。多次伤害/多段武器逐段结算，
-   * 因为调用方每段都会传入「当前血量」，第二段自然就整段吃减伤了。
-   */
+  /* 低血减伤：把一次伤害按 lowHpAt 阈值线切两段，阈值以上全额、越线部分 ×(1+mul)。
+   * 已低于阈值时整段吃减伤；多段攻击由调用方逐段传当前血量，第二段自然整段吃。 */
   function lowHpTakenDamage(def, dmg, mul, at) {
     const d = Math.max(0, Number(dmg) || 0);
-    const cut = Math.max(0, 1 + (Number(mul) || 0));            // 减伤后的倍率（0~1）
-    /* 阈值默认取塔 buff 的 lowHpAt；套装收益（幕府套）传自己的 lowHpAt 进来。 */
+    const cut = Math.max(0, 1 + (Number(mul) || 0)); // 减伤后的倍率（0~1）
+    // 阈值默认取塔 buff 的 lowHpAt；套装（幕府）传自己的 lowHpAt 进来。
     const th = Number(at != null ? at : (def.mods && def.mods.lowHpAt)) || 0;
     const maxHp = Math.max(0, Number(def.maxHp) || 0);
     const hp = Math.max(0, Number(def.hp) || 0);
-    if (!(th > 0) || !(maxHp > 0)) return Math.round(d * cut);  // 没阈值：整段减伤（旧口径）
-    /* 注意：这里**不做 cut<=0 的提前返回** —— 减伤 100% 时也应该先把阈值以上那一段打完
-     *（否则「一击直接归零」，与分段口径矛盾）。cut 最小 0，越线那一段乘 0 即为 0。 */
-    const line = maxHp * th;                                    // 阈值线（绝对血量）
-    const above = Math.max(0, hp - line);                       // 打到线之前的那一段
-    if (d <= above) return d;                                   // 这一击打不到线 → 全额
-    const below = d - above;                                    // 越过线的那一段
+    if (!(th > 0) || !(maxHp > 0)) return Math.round(d * cut); // 没阈值：整段减伤
+    // 不做 cut<=0 的提前返回：减伤 100% 也要先把阈值以上那段打完，else 会变成一击归零。
+    const line = maxHp * th; // 阈值线（绝对血量）
+    const above = Math.max(0, hp - line); // 打到线之前的那一段
+    if (d <= above) return d; // 这一击打不到线 → 全额
+    const below = d - above; // 越过线的那一段
     return Math.round(above + below * cut);
   }
   function effAgility(c) {
@@ -540,31 +390,27 @@
     let v = statOf(c, 'speed') * (1 - c.debuffs.speed / 100) + c.buffFlat.speed;
     const m = c.mods && Number(c.mods.lowHpSpeedMul) || 0;
     if (m > 0 && lowHpActive(c)) v *= 1 + m;
-    if (setLowHpActive(c)) v *= 1 + setFx(c, 'lowHpSpeedMul');   // 套装收益（螳螂套）
+    if (setLowHpActive(c)) v *= 1 + setFx(c, 'lowHpSpeedMul'); // 套装低血加速
     return Math.max(1, Math.round(v));
   }
   function effect(c, id) { return stripped(c) ? 0 : Math.max(0, Number(c.effects[id]) || 0); }
-  /* ---------- 套装收益（装备派生，见 gamedata.js【GD6】） ----------
-   * 走**独立通道** `c.setFx`，不复用塔 buff 的 `c.mods`：
-   *   · 它本来就是「装备给的」，所以被真·色诱之术脱光装备（stripped）时一并失效；
-   *   · 塔 buff 的 lowHpAt / openerRounds 是本局增益的结构值，不能被套装覆盖或反向污染。
-   * 单位与同名 mods 键**完全一致**（比例用 0.06、百分点用 6），方便两边对照着调。 */
+  /* 套装收益走独立通道 c.setFx（装备派生）：被真·色诱脱光时整包失效，
+   * 也不与塔 buff 的 lowHpAt/openerRounds 互相污染；单位与同名 mods 键一致
+   *（比例 0.06、百分点 6）。 */
   function setFx(c, key) {
     if (!c || !c.setFx || stripped(c)) return 0;
     const v = Number(c.setFx[key]);
     return Number.isFinite(v) ? v : 0;
   }
-  /** 套装自己的低血阈值（与塔 buff 的 lowHpAt 各判各的）。 */
+  // 套装自己的低血阈值，与塔 buff 的 lowHpAt 各判各的。
   function setLowHpActive(c) {
     if (!c || !c.setFx || stripped(c)) return false;
     const th = Number(c.setFx.lowHpAt);
     return !!(th > 0 && c.maxHp > 0 && c.hp <= c.maxHp * th);
   }
-  /** 真级工具：等级 11~15 = 真1~真5。 */
-  const trueLvOf = (level) => (window.GData && GData.trueLevel ? GData.trueLevel(level) : Math.max(0, Math.min(5, (Number(level) || 0) - 10)));
   const trueVal = (id, level) => (window.GData && GData.trueSkillValue ? GData.trueSkillValue(id, level) : 0);
   const trueW = (w, key) => (window.GData && GData.trueWeaponBonus ? GData.trueWeaponBonus(w, key) : 0);
-  /* 勇者专属：武技真化后的白值乘数（真1~4 ×1.5，真5 ×2）。 */
+  // 勇者专属：武技真化后的白值乘数（真1~4 ×1.5，真5 ×2）。
   const trueBaseMul = (level) => {
     const lv = Math.max(1, Math.min(15, Math.floor(Number(level) || 1)));
     return lv >= 15 ? 2 : lv >= 11 ? 1.5 : 1;
@@ -572,42 +418,34 @@
   const heroBaseMul = (att, level) => att && att.heroTrueBase ? trueBaseMul(level) : 1;
   // 沉默之斧保留四项基础属性技，抑制其余主动、被动及防御技能。
   function skill(c, id) { return c.silence > 0 && id > 4 ? 0 : c.skills[id] || 0; }
-  /** 武器基础效果：1~10 级按每级增长；真化部分的追加效果由 `trueW()` **固定一次**叠加，
-   *  不再把 `des1` 当成“每真级 +N”（旧写法会重复计入，真5 明显超表）。 */
+  /** 武器基础效果：1~10 级按每级增长；真化追加由 trueW() 固定叠加一次（不能再按真级重复计入）。 */
   function weaponEffect(w, base, perLevel) {
     return base + perLevel * (Math.min(w.level, 10) - 1);
   }
-  /** 塔 buff 的暴击伤害加成（比例）＋ 套装收益的暴击伤害。 */
-  /** 暴击率原始值（未钳制）：基础 + 暴击技能 + 塔 buff + 套装。
-   *  原表写明「10 级每级增加机率 N%」：暴击技能 1~10 级成长，11 级起只加真·4 倍几率。 */
+  /** 暴击率原始值（未钳制）：基础 5 + 暴击技能 + 塔/套装；暴击技能 1~10 级成长，之后只加真·4 倍几率。 */
   function rawCritChance(att) {
     let c = 5;
-    if (skill(att, 9)) c += 2 * Math.min(10, skill(att, 9));   // 暴击
-    if (att.mods && att.mods.critBonus) c += Number(att.mods.critBonus);   // 塔 buff「鹰眼」
-    c += setFx(att, 'critBonus');                               // 套装收益（拳斗 / 狂战套）
+    if (skill(att, 9)) c += 2 * Math.min(10, skill(att, 9));
+    if (att.mods && att.mods.critBonus) c += Number(att.mods.critBonus);
+    c += setFx(att, 'critBonus');
     return c;
   }
-  /** 隐藏口径：暴击率上限 70%；超出的部分 1:1 转成暴击伤害。 */
+  // 溢出暴击率 1:1 转暴击伤害（隐藏口径）。
   function critOverflow(att) {
     return Math.max(0, rawCritChance(att) - RULES.critCap);
   }
-  /** 对某个对手的最终暴击率：基础暴击 −「真·皮糙肉厚」的百分点压制，再钳到 70%。
-   *  原表：真1~真5 = 0.5/1/2/3/5%，是**百分点**（不是把暴击率乘以 1−N）。 */
+  /** 最终暴击率 = 基础 − 真·皮糙肉厚的百分点压制，再钳到 critCap（真1~5 = 0.5/1/2/3/5 个百分点）。 */
   function critChanceAgainst(att, def) {
     const antiCrit = def && def.skills ? trueVal(10, def.skills[10]) : 0;
     return clamp(Math.max(0, critChance(att) - antiCrit), 0, RULES.critCap);
   }
   function critDmgBonus(att) {
     const base = ((att.mods && Number(att.mods.critDmgBonus) || 0) + setFx(att, 'critDmgBonus')) / 100;
-    /* 1 个百分点溢出 = +1 个百分点暴击伤害（这里统一换算成倍率的小数）。 */
     return base + critOverflow(att) / 100;
   }
 
   function pickOne(list) { return list[Math.floor(Math.random() * list.length)]; }
-  /** 「本场没用过」的基准权重；用过的按各自的二次使用概率降权，所以一用再用会被明显压掉。 */
-  /* ============================================================
-   * 【SM4】出手权重与武器/技能选取
-   * ============================================================ */
+  // 「本场没用过」的基准权重；用过的按各自的二次使用权重降权。
   const UNUSED_WEIGHT = 100;
 
   function pickWeighted(list, weightOf) {
@@ -619,17 +457,8 @@
     return list[list.length - 1];
   }
 
-  /**
-   * 出手权重（武器/技能共用口径，并导出给测试直接校验）：
-   *   - 本场没用过 → UNUSED_WEIGHT（普通武器/技能 100；投掷武器前两次也是 100）；
-   *   - 已经用过   → 它的「二次使用权重」（新表：技能 5 / 普通武器 8 / 投掷第三次起 8）；
-   *   - 2026-10 新表取消了「上一回合刚用过 ×0.3」的额外惩罚，权重就是表里的数。
-   */
-  /** 某个技能「已经用过 count 次之后，下一次再放」的权重（%）。2026-10 新表：
-   *   · 其它主动技能（含野球拳 12）：第二次及以后一律 5；
-   *   · 来点松果 17：二次及以后权重 1（仍要求非满血）。
-   *  count = 本场**已经用过**的次数（0 表示还没用过 —— 那时调用方直接用 UNUSED_WEIGHT，不走这里）。
-   *  绝对防御/龟甲术是另一套（见 jueDuiChanceOf / shellChanceOf），它们不进出手池。 */
+  // 二次使用权重：本场没用过用 UNUSED_WEIGHT（100）；用过的按 repeatWeapon/repeatSkill 回池，
+  // 额度用尽则 0（见 weaponWeight / skillWeight）。绝对防御、龟甲术不进这个池。
   function repeatRateOf(id, count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
     if (Number(id) === 17) return 1;
@@ -642,22 +471,16 @@
     return Math.max(0, Math.floor(Number(att.skillUseCount[id]) || 0));
   }
   function skillWeight(att, id) {
-    /* 与联机版对齐（用户 2026-11 口径）：普通/真化技能都用 1 次后权重归 0，
-     * 并从出手候选池里剔除；只有明确标成“可多次”的特殊机制才走别的分支。 */
+    // 对齐联机版：技能用过 1 次后权重 0、退出候选池（可多次的特殊机制另走分支）。
     if (skillUseCountOf(att, id) >= 1) return 0;
     let w = att.usedSkills[id] ? repeatRateOf(id, skillUseCountOf(att, id)) : UNUSED_WEIGHT;
-    /* 秘技通神（C33）：该技能的触发概率 ×(1+加成)。走独立的 skillBoost 通道，
-     * 不再借用 effects（那是装备词条/武器效果槽的编号空间，会造成串味）。 */
+    // 秘技通神：该技能权重 ×(1+skillBoost[id])，只走独立通道，不读 effects。
     const boost = Number(att.skillBoost && att.skillBoost[id]) || 0;
     if (boost > 0) w *= 1 + boost;
     return w;
   }
-  /** 武器权重：普通武器首次 100；六种可再投一次的投掷武器前两次 100。
-   *  例外：流星锤（10）与橡皮擦（7）虽是投掷，但第二次起按近战口径 8；
-   *  流星锤一次三连击只算**一次**武器使用（`weaponUseCount` 每次行动只 +1）。
-   *  **额度用尽后返回 0**（普通/真化武器 1 次；六种可再投的投掷武器 2 次），
-   *  由 `usableWeapons` 剔出候选池。真化不再额外给 2 次额度（用户 2026-11 口径）。
-   *  `w` 可以是武器对象（带 type/level）或武器 id；id 形式会回到 att.weapons 里找。 */
+  /* 武器权重：首次 100；六种可再投的投掷武器第二次仍 100，其余用过即 repeatWeapon；真化不额外给额度。
+   * 流星锤(10)/橡皮擦(7) 第二次起按近战口径；流星锤三连击只算一次使用。w 可传对象或 id。 */
   function weaponWeight(att, w) {
     const id = w && typeof w === 'object' ? w.id : w;
     const weapon = w && typeof w === 'object'
@@ -667,8 +490,7 @@
     const count = att.weaponUseCount && att.weaponUseCount[id] != null
       ? Math.max(0, Math.floor(Number(att.weaponUseCount[id]) || 0))
       : (used ? 1 : 0);
-    /* 与联机版对齐（用户 2026-11 口径）：普通/真化武器都用 1 次后权重归 0；
-     * 只有六种「可再投一次」的投掷武器保留 2 次额度。 */
+    // 额度用尽后返回 0，由 usableWeapons 剔出候选池（普通 1 次 / 投掷 2 次）。
     const maxUses = DOUBLE_THROW_IDS.has(Number(id)) ? 2 : 1;
     if (count >= maxUses) return 0;
     const specialThrowRepeat = Number(id) === 7 || Number(id) === 10;
@@ -678,16 +500,10 @@
     return used ? RULES.repeatWeapon : UNUSED_WEIGHT;
   }
 
-  /** 技能选择：按 skillWeight 加权 → 没用过的优先、二次使用被压掉（来点松果每场一次）。 */
-  /* ---------- 出手类型：武器 / 技能 / 徒手（权重竞争，不再是固定百分比） ----------
-   * 把两边的**实际候选权重**加总，再和「徒手」权重一起抽一次：
-   *   · 候选越多 → 工具总权重越大 → 徒手越少（持有的武技数量直接决定普攻欲望）；
-   *   · 全部用过一遍 → 技能权重掉到 5、普通武器掉到 8、投掷第三次起 8 → 徒手占比自然抬高；
-   *   · 只剩一个主动技时，它用过之后的份额就是它的二次使用概率，
-   *     不会因为「类型落在技能上」而被强行复用（修掉旧固定档位的那个副作用）。
-   * 抽签仍然只消耗一次 Math.random()，所以既有的随机序列长度不变。 */
-  /* 徒手的实际权重：基准 100；若工具权重太大导致徒手份额不足 minCommonShare（5%），
-   * 就把它抬到「刚好 5%」——份额 = w/(w+tool) ≥ r  ⟺  w ≥ tool × r/(1−r)。 */
+  // 技能选择：按 skillWeight 加权抽取（没用过的优先）。
+  // 出手类型按「候选池实际权重之和 vs 徒手权重」抽一次：武技越多徒手越少，
+  // 全部用过一遍后徒手占比自然抬高。抽签只消耗一次 Math.random()，随机序列长度不变。
+  // 徒手保底权重：份额 = w/(w+tool) ≥ minCommonShare ⟺ w ≥ tool × r/(1−r)。
   function commonWeightFor(toolWeight) {
     const r = Math.max(0, Math.min(0.9, Number(RULES.minCommonShare) || 0));
     const floor = r > 0 ? (Number(toolWeight) || 0) * (r / (1 - r)) : 0;
@@ -705,13 +521,12 @@
     if (roll < weaponSum + skillSum) return 'skill';
     return 'common';
   }
-  /** 纯 NPC（三侠）没有武器池，沿用固定档位 30% 技能 / 70% 普攻。 */
+  // 纯 NPC（三侠）没有武器池，用固定档位 30% 技能 / 70% 普攻。
   function pickNpcKind() {
     return Math.random() * 100 < RULES.npcSkillChance ? 'skill' : 'common';
   }
 
-  /** 出手类型的三份权重（武器/技能/徒手）与占比 —— 供测试直接核对
-   * 「持有的武技越多 → 徒手越少」「全部用过一遍 → 徒手变多」「徒手占比不低于 5%」。 */
+  /** 出手类型的三份权重与占比（测试直接核对徒手份额下限用）。 */
   function kindWeights(att, weapons, actives) {
     let weapon = 0;
     for (const w of weapons || []) weapon += weaponWeight(att, w);
@@ -722,10 +537,7 @@
     return { weapon, skill, common, total, weaponShare: weapon / total, skillShare: skill / total, commonShare: common / total };
   }
 
-  /** 固定循环出招：按「技能表的轮转顺序」依次放技能，缺一个就顺延到下一个能用的。
-   *  原来这里取 actives 里最小的 id，于是 5/17/20 永远只放 17（来点松果）——
-   *  元素术鼠因此整场都在吃松果，循环描述（冰霜 → 普攻 → 烈焰 → 雷击）也从来没成立过。
-   *  现在 skillOrder 固定不变（不受本场已用过滤影响），循环因此稳定可预告。 */
+  // 固定循环：按 skillOrder 轮转，缺的顺延到下一个可用；skillOrder 固定不变，循环可背板。
   function nextPatternSkill(att, actives) {
     const order = (att.skillOrder && att.skillOrder.length) ? att.skillOrder : actives.slice().sort((a, b) => a - b);
     const n = order.length;
@@ -739,11 +551,7 @@
   function pickSkill(att, actives) {
     return pickWeighted(actives, (id) => skillWeight(att, id));
   }
-  /** 武器选择：同一套口径。`pool` 给整蛊专家过滤后的可用武器。
-   *  ⚠ 用户 2026-11 木桩测试口径：**上一手用的武器，下一手不要立刻再抽到**
-   *  （大榔头连着出两次看起来像“一把武器打了两下”）。只在「上一手就是武器、
-   *  且这一手紧挨着它」时排除；中间隔了普攻/技能、或只剩这一把可用时不排除。
-   *  `lastWeaponTurn` 用出手者的 `turnId` 记，所以只数**自己的**连续出手。 */
+  // 武器选择：只在自己「上一手就是武器且紧挨着」时排除上一把，避免同一把连打两下。
   function pickWeapon(att, pool) {
     const list = (pool && pool.length ? pool : att.weapons) || [];
     const lastId = Number(att.lastWeaponId) || 0;
@@ -753,27 +561,21 @@
     return pickWeighted(alt.length ? alt : list, (w) => weaponWeight(att, w));
   }
 
-  /* ============================================================
-   * 【SM5】闪避 / 暴击 / 被动加成
-   * ============================================================ */
   function dodgeChance(att, def) {
-    /* 练功木桩不闪避：原版 `Stakes.beAttack()` 只有 `reduceBlood(currentRound.harm)`，
-     * 根本没有闪避分支；复刻以前让木桩吃通用的敏捷闪避，第二把菜刀被闪掉时
-     * 既没有闪避动作（木人只有待机/挨打两段），血条也不掉，看起来像"命中没伤害"。
-     * 这里从唯一的闪避出口挡住，武器/技能/幻兽的所有闪避判定一起生效。 */
+    /* 木桩不闪避（原版 Stakes 没有闪避分支）：从唯一闪避出口挡住，
+     * 武器/技能/幻兽的所有闪避判定一起生效。 */
     if (def && (def.practice || def.npcType === 'wood')) return 0;
-    if (att.mods && (att.mods.mustHitAll || att.mods.firstStrikeAll)) return 0;   // 「必中」类：塔 buff 百步穿杨 / 必中
+    if (att.mods && (att.mods.mustHitAll || att.mods.firstStrikeAll)) return 0; // 塔 buff 必中
     const wMust = att.mustHitNext;
     if (wMust) return 0;
     let d = 6 + 26 * effAgility(def) / (effAgility(def) + effAgility(att) * 1.2 + 40);
     const shift = skill(def, 11)
       ? (5 + 2 * (Math.min(skill(def, 11), 10) - 1) + trueVal(11, skill(def, 11))) * (1 + effect(def, 35) / 100)
       : 0;
-    // PPT问答：木剑、移形、流星锤均相对提升天生闪避率。
     d *= 1 + (shift + def.swordDodge + def.meteorDodge) / 100;
-    if (def.mods && def.mods.dodgeBonus) d += Number(def.mods.dodgeBonus);   // 塔 buff「凌波微步」（加算）
-    if (def.mods && def.mods.dodgeMul) d *= 1 + Number(def.mods.dodgeMul);   // 塔 buff「烟幕」：闪避率 ×(1+n)
-    d += setFx(def, 'dodgeBonus');                                           // 套装收益（忍者套等）
+    if (def.mods && def.mods.dodgeBonus) d += Number(def.mods.dodgeBonus);
+    if (def.mods && def.mods.dodgeMul) d *= 1 + Number(def.mods.dodgeMul);
+    d += setFx(def, 'dodgeBonus');
     return clamp(d, 0, RULES.dodgeCap);
   }
 
@@ -781,18 +583,9 @@
     return clamp(rawCritChance(att), 0, RULES.critCap);
   }
 
-  /**
-   * 「被动技能触发提升」—— 秘技通神（C33）选中绝对防御 / 龟甲术之后写进
-   * `skillBoost['技能ID']` 的加成值（例如 skillBoost['16'] = 1.5 表示 +150%）。
-   *
-   * **专用通道**：以前这里读的是 `effects['技能ID']`，但 effects 的键位同时属于
-   * 装备词条与武器效果槽（例如 effects['7'] = 投掷武器伤害 +N%、effects['16'] = 死老鼠伤害 +N%），
-   * 于是 C33 会顺带强化某把武器、装备词条也会顺带提升龟甲术触发率。现在只认 skillBoost。
-   *
-   * 绝对防御与龟甲术都是**受击自动触发**、不进出手池的技能，
-   * 所以它们不吃 skillWeight 那套权重，必须在这里单独乘一次。
-   * （C33 抽中小宇宙爆发不走这里 —— 它的收益是「第一招必放」，见 playerLikeAction
-   *   里的 forceCosmos / mods.cosmosFirst。） */
+  /* 秘技通神的被动加成值：只认 skillBoost['技能ID']（不读 effects——键位属于装备词条/武器槽）。
+   * 绝对防御/龟甲术不进出手池，所以触发判定处必须在这里单独乘一次；
+   * C33 抽中小宇宙爆发不走这里（见 mods.cosmosFirst）。 */
   function passiveSkillBoost(f, id) {
     if (!f) return 0;
     const v = Number(f.skillBoost && f.skillBoost[id]);
@@ -800,43 +593,39 @@
   }
   const BOOSTED_AGAIN_CAP = 45;
   const BOOSTED_FIRST_CAP = 90;
-  /** 题面·熔核·炽壳的减伤层数上限（= 封顶 / 每层）。 */
+  // 熔核减伤层数上限 = 封顶 / 每层。
   function coreMaxStacks() {
     const per = Math.max(0.01, Number(RULES.coreReducePerRound) || 0.10);
     return Math.max(1, Math.round((Number(RULES.coreReduceCap) || 0.70) / per));
   }
-  /** 熔核·炽壳的减伤比例：**每过一回合** +10%，第 8 回合起封顶 70%。
-   *  count = 本场已经过完的回合数（0 → 一层都没有）。纯函数，供测试直接核对曲线。 */
+  // 熔核减伤 = min(回合数 × 10%, 70%)，纯函数供测试核对曲线。
   function coreReduceOf(count) {
     const per = Math.max(0, Number(RULES.coreReducePerRound) || 0);
     const cap = Math.max(0, Number(RULES.coreReduceCap) || 0);
     const n = Math.max(0, Math.min(coreMaxStacks(), Math.floor(Number(count) || 0)));
     return Math.round(Math.min(cap, n * per) * 100) / 100;
   }
+  /* 绝对防御触发概率按原表：1~10 级首次 20+0.5×(级−1)、之后 0.5；
+   * 11~15 级首次 24.5，第二次 5/10/15/20/24，第三次起 0.5。 */
   function jueDuiChanceOf(def, count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
     const lv = Math.max(1, Math.floor(Number(def && def.skills && def.skills[16]) || 1));
     let base;
     if (lv <= 10) {
-      /* 1~10 级：首次 20,20.5,…,24.5；第二次及以后 0.5。 */
       base = n === 0 ? RULES.jueDuiFirstBase + RULES.jueDuiFirstStep * (lv - 1) : RULES.jueDuiRepeat;
     } else {
       const t = Math.max(1, Math.min(5, lv - 10));
-      /* 11~15 级（真1~真5）：首次 24.5；第二次 5/10/15/20/24；第三次及以后 0.5。 */
       base = n === 0 ? RULES.jueDuiTrueFirst
         : n === 1 ? Math.min(RULES.jueDuiTrueSecondMax, RULES.jueDuiTrueSecond + RULES.jueDuiTrueSecondStep * (t - 1))
           : RULES.jueDuiTrueRepeat;
     }
     const boost = passiveSkillBoost(def, 16);
     const out = base * (1 + boost);
-    if (!boost) return out;                                  // 没加成：原样
-    /* C33 的封顶只应压住「加成带来的溢出」，不能把原本更高的基础值压回去
-     *（真5 的二次触发本来就 0.5/100，先 ×2.5 再封 45 会越抽越弱）。 */
+    if (!boost) return out;
+    // C33 封顶只压「加成带来的溢出」，不能把本来更高的基础值压回去。
     return Math.max(base, Math.min(out, n === 0 ? BOOSTED_FIRST_CAP : BOOSTED_AGAIN_CAP));
   }
-  /** 龟甲术的单次触发概率（%）：按技能等级与「本场第几次触发」取。
-   *  1~10 级：首次 20,20.5,…,24.5；之后 1。
-   *  11~15 级：首次 24.5；之后按原表「真技有 N% 几率可多次使用」= 20/40/60/80/100。 */
+  /** 龟甲术触发概率：1~10 级首次 20+0.5/级、之后 1；真化后按原表 20/40/60/80/100 判多次使用。 */
   function shellChanceOf(def, count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
     const lv = Math.max(1, Math.floor(Number(def && def.skills && def.skills[7]) || 1));
@@ -848,33 +637,22 @@
     }
     const boost = passiveSkillBoost(def, 7);
     const out = base * (1 + boost);
-    if (!boost) return out;                                  // 没加成：原样
+    if (!boost) return out;
     return Math.max(base, Math.min(out, n === 0 ? BOOSTED_FIRST_CAP : BOOSTED_AGAIN_CAP));
   }
-  /* ============================================================
-   * 【SM6】减伤链（护盾/绝对防御/减伤）
-   * ============================================================ */
-  /** 绝对防御这一次出手是否发动 —— **一次出手只判一次**（多段攻击整段挡下 / 整段不挡）。
-   *
-   *  为什么必须「一次」：西瓜刀连击（2 段）、螳螂双击（2 段）、疾风镰刀舞（4 段）原先每一段
-   *  各判一次，于是出现「第 1 段被绝对防御挡下、第 2 段照常打在玩家身上」——
-   *  玩家看到的画面是「绝对防御发动了，我却掉血」（用户 2026-10-30 反馈的真实 bug）。
-   *  现在由出手方在循环外先判一次，把结果作为 `opts.jueDuiLock` 传给每一段。
-   *
-   *  返回：`'block'` 发动（并记一次降权）/ `'miss'` 不发动 / `null` 不适用
-   *  （没学 / 被沉默 / **投掷类根本不触发**，见需求140）。
-   *  降权计数（`def.jueDuiCount`）仍按「挡过一次」+1 —— 整段挡下只算一次。 */
+  /* 绝对防御一次出手只判一次：多段攻击（西瓜刀/螳螂双击/镰刀舞）整段挡或整段不挡，
+   * 由出手方在循环外判好、经 opts.jueDuiLock 传给每一段。返回 'block'|'miss'|null，
+   * 整段挡下 jueDuiCount 只 +1；投掷类不适用（见下）。 */
   function jueDuiDecide(def, weaponType) {
     if (!def || !def.skills || !def.skills[16]) return null;
     if (Number(def.silence) > 0) return null;
-    /* 2026-10 用户口径（需求140）：**投掷类攻击根本不触发绝对防御** —— 不挡、不反弹，
-     * 也**不计入降权计数**（直接跳过判定就等于扔过来的武器不会把后续触发率压下去）。 */
+    // 投掷类攻击完全不触发绝对防御：不挡、不反弹、也不推高降权计数。
     if (weaponType === '投掷') return null;
     if (!chance(jueDuiChanceOf(def, def.jueDuiCount || 0))) return 'miss';
     def.jueDuiCount = Math.max(0, Math.floor(Number(def.jueDuiCount) || 0)) + 1;
     return 'block';
   }
-  /** 绝对防御挡下这一段：伤害归零，按 40% + 每级 4% + 真化加成 + 词条 47 的加点反弹给出击方。 */
+  /** 挡下：伤害归零，按 40%+4%/级+真化加成+词条 47 反弹给出击方。 */
   function jueDuiBlock(def, dmg, out) {
     const pct = 40 + 4 * (Math.min(def.skills[16], 10) - 1) + trueVal(16, def.skills[16]) +
       Math.max(0, Number(effect(def, 47)) || 0);
@@ -888,17 +666,9 @@
     let out = { dmg, guiJia: 0, jueDui: 0, rebound: 0 };
     const gearReduction = opts.action === 'weapon' ? effect(def, opts.weaponType === '投掷' ? 10 : 9) : opts.action === 'skill' ? effect(def, 11) : 0;
     out.dmg = Math.round(out.dmg * (1 - clamp(gearReduction, 0, 80) / 100));
-    /* 绝对防御是受击自动触发、不进出手池的技能，所以「挡过几次」单独记：
-     * 同一场里每挡一次，下一次的触发率就按 jueDuiChanceOf 的曲线往下降
-     *（1~10 级：首次 20..24.5、之后 0.5；11~15 级：首次 24.5、第二次 5..24、第三次起 0.5）。
-     * 旧的布尔 `usedJueDui` 已被这个计数取代（它只够区分「首次/之后」两档）。
-     *
-     * `opts.jueDuiLock` = 本次出手的判定结果（多段攻击由出手方在循环外判一次，
-     * 见 jueDuiDecide）：'block' 整段挡下 / 'miss' 整段不挡 / null 不适用。
-     * **不传（undefined）才是单段调用**，这里自己判一次（与旧行为一致）。 */
-    /* 反击必中（用户 2026-10-31 口径）：`opts.counter` 时不判绝对防御。
-     * 绝对防御是“整下挡掉”的回避，反击必须落到出手方身上；否则经典回放只演归位、
-     * 不飘任何字，玩家会当成反击被闪避。 */
+    /* jueDuiCount 记「挡过几次」：每挡一次，下一次触发率按 jueDuiChanceOf 曲线下降。
+     * opts.jueDuiLock = 本次出手的判定结果（多段由出手方判一次）；undefined 才在这里自己判。
+     * opts.counter（反击）不判绝对防御，反击必须落到出手方。 */
     const jueDui = opts.counter ? 'miss' : (opts.jueDuiLock === undefined ? jueDuiDecide(def, opts.weaponType) : opts.jueDuiLock);
     if (jueDui === 'block') return jueDuiBlock(def, out.dmg, out);
     if (def.skills[7] && def.silence <= 0) {
@@ -908,29 +678,28 @@
       if (canTrigger) {
         if (def.shellCharges > 0) def.shellCharges--;
         else def.shellCount = shellCount + 1;
-        /* 原表「10 级每级增加防御 N%」：吸收率 1~10 级成长，真化只加「多次使用」几率。 */
+        // 龟甲术吸收率只到 10 级，真化只加「多次使用」几率。
         const pct = clamp(20 + 5 * (Math.min(def.skills[7], 10) - 1), 0, 100);
         out.guiJia = Math.round(out.dmg * pct / 100);
         out.dmg -= out.guiJia;
       }
     }
-    if (skill(def, 10)) {                                      // 皮糙肉厚
-      /* 原表「10 级每级减少伤害提高 N%」：减伤 1~10 级成长，真化只减对手暴击率。 */
+    if (skill(def, 10)) {
+      // 皮糙肉厚：减伤 1~10 级成长，真化只减对手暴击率。
       const pct = clamp((5 + (Math.min(skill(def, 10), 10) - 1)) * (1 + effect(def, 34) / 100), 0, 80);
       out.dmg = Math.round(out.dmg * (100 - pct) / 100);
     }
-    if (def.mods && def.mods.takenMul) out.dmg = Math.round(out.dmg * (1 + Number(def.mods.takenMul)));   // 塔 buff「铁布衫」
-    const setTaken = setFx(def, 'takenMul');                       // 套装收益（骑士/幕府减伤、诅咒增伤）
+    if (def.mods && def.mods.takenMul) out.dmg = Math.round(out.dmg * (1 + Number(def.mods.takenMul)));
+    const setTaken = setFx(def, 'takenMul');
     if (setTaken) out.dmg = Math.round(out.dmg * (1 + setTaken));
     if (def.mods && Number(def.mods.lowHpTakenMul)) {
       out.dmg = lowHpTakenDamage(def, out.dmg, Number(def.mods.lowHpTakenMul));
     }
-    /* 套装收益的低血减伤（幕府套）：沿用同一套「按阈值线切两段」的算法，阈值单独传。 */
+    // 套装低血减伤：沿用同一套分段算法，阈值单独传。
     const setLowTaken = setFx(def, 'lowHpTakenMul');
     if (setLowTaken) out.dmg = lowHpTakenDamage(def, out.dmg, setLowTaken, Number(def.setFx && def.setFx.lowHpAt) || 0);
     if (def.mech.includes('trialCore')) {
-      /* 题面·熔核·炽壳：**每过一回合**再叠一层减伤（10%/层，第 8 回合起封顶 70%）——
-       * 以前是「第 7 次行动突然 −70%」，现在是逐回合变硬，前期就该开始提速。 */
+      // 熔核：每过一回合叠一层减伤（见 coreReduceOf）。
       const dr = coreReduceOf(def.mechState.coreStack || 0);
       if (dr > 0) out.dmg = Math.round(out.dmg * (1 - dr));
     }
@@ -938,10 +707,7 @@
     return out;
   }
 
-  /** 主模拟：返回 {rounds, winner(0|1), maxHp:[a,b]} */
-  /* ============================================================
-   * 【SM7】主模拟循环 simulate
-   * ============================================================ */
+  /** 主模拟：返回 {rounds, winner(0|1), maxHp:[a,b]}。 */
   function simulate(f0, f1, options) {
     options = options || {};
     const rules = {
@@ -949,13 +715,10 @@
       masterChance: Number.isFinite(options.masterChance) ? clamp(options.masterChance, 0, 100) : RULES.masterChance,
     };
     const A = makeCombatant(f0, 0), B = makeCombatant(f1, 1);
-    /* 无敌模式（见 guardGodHp）：开战先把玩家血量顶到上限 ——
-     * 塔里连战继承进来的残血不会让它在 60 手超时里按血量比例判负；
-     * 之后血量只增不减，吸血 / 持续伤害 / 自伤 / 反伤 / 开场斩杀全都打不动它。 */
+    // 无敌模式：开战顶满血并装只增不减的 hp 访问器（见 guardGodHp）。
     if (godSave(A)) { A.hp = A.maxHp; guardGodHp(A); }
-    /* 枯泉·涸井（封疗机制）：**从战斗开始就封**，而不是等它第一次出手 ——
-     * 否则先手玩家在它出手前打出的吸血 / 回血会整段漏过去（用户报「枯泉没生效」的另一半）。
-     * 机制清单以 tower-data 的 `mechSealsHeal` 为准（塔外没有 TowerData 时退回硬编码清单）。 */
+    // 枯泉封疗从开战就生效（不等它出手），否则先手玩家在它行动前的吸血/回血会漏过去。
+    // 机制清单以 tower-data 的 mechSealsHeal 为准，塔外没有 TowerData 时退回硬编码清单。
     (function sealHealingAtStart() {
       const TD = window.TowerData;
       const seals = (mechs) => (TD && typeof TD.mechSealsHeal === 'function'
@@ -964,12 +727,10 @@
       if (seals(B.mech)) A.healMul = 0;
       if (seals(A.mech)) B.healMul = 0;
     })();
-    /* 开局护盾值（石像鬼机制 / 塔 buff「坚韧壁垒」）：给界面用 ——
-     * 战斗一开始就要能把护盾画出来，不能等第一次挨打。 */
+    // 开战护盾要能立刻画出来，不能等第一次挨打。
     const startShell = [Math.max(0, A.shell || 0), Math.max(0, B.shell || 0)];
     const rounds = [];
-    /* 原版战斗上限 60（`combat maxRounds=60`，数据表也写「战斗回合数设置上限为60」）。
-     * 这里的 rounds 是**一次出手**，与原版日志的一条记录同口径。 */
+    // 原版上限 60 手（combat maxRounds=60）；这里的 rounds 是「一次出手」，与原版日志一条记录同口径。
     const MAX_ACTIONS = 60;
     /* 训练木桩：固定 N 次出手（经典/现代两套播放器都共用这一条），到点就收尾；
      * 木桩本身不会死，见 applyDamage 的 practice 分支。 */
@@ -979,17 +740,14 @@
     let actions = 0;
 
     function pushRound(r) {
-      // Preserve the user's Debug mode in the event snapshots as well as winner.
       if (A.hp <= 0 && godSave(A)) A.hp = 1;
       if (B.hp <= 0 && godSave(B)) B.hp = 1;
-      // 机制提示挂到行动方的回合事件上（血性狂暴/寒冰禁锢/吞噬成长等）
       if (r && r.attacker != null) {
         const c = r.attacker === 0 ? A : B;
         if (c.pendingNote) { r.noteText = (r.noteText ? r.noteText + '·' : '') + c.pendingNote; c.pendingNote = null; }
       }
       r.hpAfter = [Math.max(0, A.hp), Math.max(0, B.hp)];
-      /* 调试用实时三维：只有调用方显式要才落快照，避免每场战斗都多存对象。
-       * 快照取**这一拍结算之后**的有效值（含降低属性/增益），现代战斗的调试层直接读它。 */
+      // 只有调用方要 collectStats 才落三维快照，取这一拍结算后的有效值（回放调试层读它）。
       if (options.collectStats) {
         r.effStats = [
           { power: effPower(A), agility: effAgility(A), speed: effSpeed(A) },
@@ -997,22 +755,15 @@
         ];
       }
       r.shellAfter = [Math.max(0, A.shell || 0), Math.max(0, B.shell || 0)];
-      /* 给经典播放器的换装/卸装表现用：这一拍结束时双方还剩几回合“被脱光”。
-       * 0 = 正常穿着；>0 = 装备视觉应卸下。 */
+      // stripLeft 给回放决定装备视觉：>0 要卸装，0 = 正常穿着。
       r.stripLeft = [Math.max(0, Number(A.stripTurns) || 0), Math.max(0, Number(B.stripTurns) || 0)];
-      /* 上一拍扣掉、这一拍开头补回的血量：挂到本回合事件上供回放层飘字。 */
       if (A.practiceHealPending) { r.practiceHeal = (Number(r.practiceHeal) || 0) + A.practiceHealPending; A.practiceHealPending = 0; }
       if (B.practiceHealPending) { r.practiceHeal = (Number(r.practiceHeal) || 0) + B.practiceHealPending; B.practiceHealPending = 0; }
       rounds.push(r);
     }
 
-    /* 反伤 / 反噬打到「出手方」身上时的结算：**和普通伤害走同一条致死保护链**
-     *（装死 → 涅槃 / 金蝉脱壳 → 调试图腾）。
-     * 2026-10 用户口径（需求143）：反伤打到死线时必须让**装死**正常触发 —— 以前这里只调
-     * tryDeathSave（它只认复活甲），于是有装死的角色会被绝对防御的反伤直接反死。
-     * 触发时装死的老规矩照旧：hp = 1、清掉眩晕、并**立刻获得一次行动**（同 applyDamage 那条路径）。
-     * `r.fakeDieSide` 记下装的死是谁 —— 战斗回放据此把「装死」的飘字与动作画在**正确的人**身上
-     *（普通受击时是挨打的那位，被反伤时是出手的那位）。 */
+    /* 反伤/反噬打到出手方：与普通伤害同一条致死链（装死 → 涅槃/金蝉脱壳 → 调试图腾）。
+     * fakeDieSide 记「谁装的死」，回放据此把飘字画在正确的人（被反伤时是出手方）。 */
     function reflectHurt(target, amount, r) {
       const dmg = Math.max(0, Math.round(Number(amount) || 0));
       if (!target || dmg <= 0 || target.hp <= 0) return 0;
@@ -1031,8 +782,7 @@
       tryDeathSave(target, r);
       return dmg;
     }
-    /** 木桩只锁生命，伤害事件保留完整数值（Stakes.reduceBlood 直接累计 harm）。
-     * 单次或多段打出 800+ 仍逐段计伤；血条最低 1，下一拍开头只回实际失去的血。 */
+    /** 木桩只锁生命：伤害数值完整上报，血条最低 1，下一拍只补回实际失去的血。 */
     function practiceHurt(def, dmg) {
       if (!def || !def.practice) return dmg;
       def.hp = Math.max(1, def.hp - dmg);
@@ -1040,35 +790,32 @@
     }
     function applyDamage(att, def, rawDmg, r, opts) {
       opts = opts || {};
-      /* 46「减少暴击伤害-N%」：只在挨的这一下确实是暴击时生效（按最终暴击伤害比例削减）。 */
+      // 词条 46 只在这下确实是暴击时生效。
       if (r.crit) {
         const cut = clamp(Number(effect(def, 46)) || 0, 0, 80);
         if (cut > 0) { rawDmg = Math.round(rawDmg * (1 - cut / 100)); r.critCut = cut; }
       }
       const action = opts.action || r.action;
-      /* 勇者武技真化白值：只放大该招式的基础伤害，不进入三维。
-       * 武器白值已在 TowerHero.fighter 里乘过，这里只处理技能。 */
+      // 勇者武技真化只放大技能基础伤害，不进入三维（武器白值已在 TowerHero.fighter 乘过）。
       if (att.heroTrueBase && action === 'skill') {
         rawDmg = Math.round(rawDmg * heroBaseMul(att, att.skills[Number(r.id)]));
       }
-      if (att.mods && att.mods.dmgMul) rawDmg = Math.round(rawDmg * Number(att.mods.dmgMul));   // 塔 buff 伤害乘区（猎侠者/机制破解/精英杀手等，tower.js 按对手预算好）
-      const setDmgMul = 1 + setFx(att, 'dmgMul');                                                 // 套装收益的伤害乘区（挑斗/维京/诅咒套）
+      if (att.mods && att.mods.dmgMul) rawDmg = Math.round(rawDmg * Number(att.mods.dmgMul)); // 塔 buff 伤害乘区
+      const setDmgMul = 1 + setFx(att, 'dmgMul'); // 套装伤害乘区
       if (setDmgMul !== 1) rawDmg = Math.round(rawDmg * setDmgMul);
-      /* 幻兽·狂暴：血量低于 200 时伤害额外 +X%（原版描述里的固定门槛）。 */
+      // 幻兽·狂暴的门槛是固定 200 血，不是比例。
       if (petRageActive(att) && rawDmg > 0) {
         rawDmg = Math.round(rawDmg * (1 + att.petRagePct / 100));
         r.petRage = att.petRagePct;
       }
-      /* 幻兽·虚弱：中了诅咒的一方受到**武器**攻击时额外承受 X%。 */
       if (action === 'weapon' && def.petWeakPct > 0 && rawDmg > 0) {
         rawDmg = Math.round(rawDmg * (1 + def.petWeakPct / 100));
         r.petWeak = def.petWeakPct;
       }
       if (action === 'skill') {
         rawDmg = Math.round(rawDmg * (1 + effect(att, 8) / 100));
-        /* 真·皮糙肉厚：额外压制对手的暴击率（真1~真5 = 0.5/1/2/3/5 个百分点）。 */
         const cc = critChanceAgainst(att, def);
-        /* 幻兽·打兴奋剂：下一次攻击必定暴击（技能这一支也吃）。 */
+        // 打兴奋剂：给下一次攻击必暴，技能这一支也吃。
         if (att.petNextCrit) {
           att.petNextCrit = false;
           r.crit = true; r.petCrit = true;
@@ -1081,38 +828,28 @@
           r.crit = true;
         }
       }
-      /* `opts.counter` = 反击：反击是必中的直接回应，**连绝对防御也不判**。
-       * 以前只跳过 dodgeChance / 先机预判 / 风影身法，撞上绝对防御仍会 0 伤害；
-       * 经典回放又没有「绝对防御」飘字（只演归位），玩家看到的就是“反击被闪避”。 */
+      // opts.counter = 反击：必中，连绝对防御也不判（回放没有「绝对防御」飘字会像被闪避）。
       const red = dmgReduce(def, rawDmg, { action, weaponType: opts.weaponType, jueDuiLock: opts.jueDuiLock, counter: !!opts.counter });
       let dmg = red.dmg;
-      /* 塔 buff「狂怒」：低血时的加成是**终乘** —— 在加成与减伤都算完之后，直接乘最终伤害，
-       * 所以不会被其它乘区稀释（见 tower-data.js 的 C20 注释）。 */
+      // 塔 buff 狂怒是终乘：在加成与减伤之后直接乘最终伤害，不被其它乘区稀释。
       if (dmg > 0 && att.mods && Number(att.mods.lowHpFinalMul) > 0 && lowHpActive(att)) {
         dmg = Math.round(dmg * (1 + Number(att.mods.lowHpFinalMul)));
         r.rageFinalMul = Number(att.mods.lowHpFinalMul);
       }
-      /* 套装收益的「低血终乘」（狂战套）：与塔 buff 的狂怒同一位置、同一口径，
-       * 但判据用套装自己的阈值（setLowHpActive），两者互不干扰。 */
+      // 套装低血终乘：与狂怒同位置，但用 setLowHpActive 自己的阈值，互不干扰。
       if (dmg > 0 && setLowHpActive(att)) {
         const setFinal = setFx(att, 'lowHpFinalMul');
         if (setFinal > 0) { dmg = Math.round(dmg * (1 + setFinal)); r.setLowHpFinalMul = setFinal; }
       }
-      /* 塔 buff「先机预判」：每场战斗**敌方第一次攻击必定闪避**，随后我方立刻额外行动一次。
-       * 放在这里与「风影身法」（首次伤害归零）同一处：已经把命中判完、伤害算出来了，
-       * 直接把它归零并打上闪避标记 —— 武器分支的常规闪避判定在更前面，所以那一次
-       * 天然逃掉的不消耗这个「必定闪避」额度。
-       * `opts.noDodge` 给**反击**用：反击是不可闪避的直接回应（用户 2026-10-29 口径），
-       * 不能被先机预判 / 风影身法这类“第一次攻击”机制吃掉。 */
+      /* 先机预判：敌方第一次攻击必定闪避（在伤害算完处归零，常规闪避判定在更前面，
+       * 天然逃掉的不消耗这个额度）。opts.noDodge 给反击用，不能被它吃掉。 */
       if (!opts.noDodge && dmg > 0 && def.mods && Number(def.mods.firstDodge) > 0 && !def.mods.firstDodgeUsed) {
         def.mods.firstDodgeUsed = true;
         dmg = 0;
         markDodge(r, def);
         r.firstDodge = true;
         r.noteText = (r.noteText ? r.noteText + '·' : '') + (def.mods.firstDodgeName || '先机预判'); r.noteSide = def.side;
-        /* 先机预判：闪避这一击之后，**我方立刻额外行动一次且不消耗回合**。
-         * 与「装死」同一条路径 —— 把 immediate 指给受击方，主循环下一轮直接让它出手，
-         * 不经过行动条（所以是真·不消耗回合，而不是加速）。 */
+        // 额外行动走 immediate 路径，不经过行动条 → 真·不消耗回合。
         if (def.mods.firstDodgeFreeTurn && def.hp > 0) {
           r.firstDodgeFreeTurn = true;
           if (!immediate) immediate = { actor: def, reason: 'firstDodge' };
@@ -1131,13 +868,12 @@
       }
       if (red.jueDui) { r.jueDui = true; r.rebound = red.rebound; }
       if (red.guiJia) r.guiJia = red.guiJia;
-      // 开局护盾（石像鬼机制 / 塔 buff「坚韧壁垒」）：先于血量消耗
+      // 护盾先于血量消耗（开局护盾由界面直接读，见 simulate 的 startShell）。
       if (def.shell > 0 && dmg > 0) {
         const absorbed = Math.min(def.shell, dmg);
         def.shell -= absorbed; dmg -= absorbed;
         r.shellAbsorb = absorbed;
       }
-      /* 木桩的血量保护不能截掉测得的伤害，亦不走装死 / 复活 / 倒地分支。 */
       if (def.practice) {
         dmg = practiceHurt(def, dmg);
       } else if (def.hp - dmg <= 0 && def.skills[6] && def.silence <= 0 && !def.usedFakeDie && !opts.ignoreFakeDie) {
@@ -1162,31 +898,27 @@
       att.mustHitNext = false;
       r.dmg = (r.dmg || 0) + dmg;
       if (red.rebound) {
-        /* 反击（`opts.noReflect`）：反击伤害是对出手方的直接回应，**不再让原出手方的
-         * 绝对防御 / 荆棘把它弹回反击者**。只保留“被挡住”（伤害为 0）与「绝对防御」标记，
-         * 不结算反弹伤害 —— 否则玩家会看到“我反击，掉血的却是我这边”。 */
+        // 反击（noReflect）：只记「被挡住」，不再让原出手方的绝对防御/荆棘弹回反击者。
         if (opts.noReflect) {
           r.reflectBlocked = (r.reflectBlocked || 0) + red.rebound;
         } else if (reflectImmune(att)) {
-          /* 反噬豁免：免疫反伤（包括绝对防御的反伤），但**不免疫**被挡住这件事本身。 */
+          // 反噬豁免只免反伤，不免「被挡下」这件事本身。
           r.reflectBlocked = (r.reflectBlocked || 0) + red.rebound;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '反噬豁免'; r.noteSide = att.side;
         } else {
           r.reboundHurt = red.rebound;
-          /* 需求143：绝对防御的反伤同样过装死 —— 不再「直接反死」有装死的角色。 */
+          // 绝对防御的反伤同样过装死（与普通伤害同一条致死链）。
           reflectHurt(att, red.rebound, r);
         }
       }
-      // —— 受击/命中方机制（挑战塔 NPC 池） ——
       if (dmg > 0) {
-        /* 反噬豁免 / 反击：本场免疫一切反伤 —— 直接把三种反伤一起跳过。 */
         const noReflect = !!opts.noReflect || reflectImmune(att);
         if (def.mech.includes('thorns') && att.hp > 0 && !noReflect) {   // 荆棘铁壁：反弹 15%
           const reflect = Math.max(1, Math.round(dmg * 0.15));
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
           reflectHurt(att, reflect, r);
         }
-        // 塔 buff「荆棘之甲」/ 套装反伤：玩家侧反伤（跨层类）
+        // 塔 buff「荆棘之甲」与套装反伤合并在同一乘区。
         const modThorns = def.mods && Number(def.mods.thornsPct) || 0;
         const thornsPct = modThorns + setFx(def, 'thornsPct');
         if (thornsPct > 0 && att.hp > 0 && !noReflect) {
@@ -1196,8 +928,7 @@
           if (modThorns > 0) { r.noteText = (r.noteText ? r.noteText + '·' : '') + '荆棘之甲'; r.noteSide = def.side; }
           reflectHurt(att, reflect, r);
         }
-        // 题面·镜鳞：单次伤害超过阈值（默认 20% 最大生命）时，反弹该次伤害的 45%
-        // （逼玩家压低单次伤害 / 走多段；阈值与反弹比例由 tower-data.js 注入，方便调平衡）
+        // 镜鳞：单次伤害 ≥ 阈值时按比例反弹（缺省 15% 最大生命 / 60%），逼玩家压低单次或走多段。
         const mp = (def.mechParams && def.mechParams.trialMirror) || null;
         const threshold = (mp && Number(mp.threshold)) || 0.15;
         const reflectPct = (mp && Number(mp.reflect)) || 0.6;
@@ -1205,14 +936,10 @@
           const reflect = Math.max(1, Math.round(dmg * reflectPct));
           r.thornsDmg = (r.thornsDmg || 0) + reflect;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '镜鳞·反噬'; r.noteSide = def.side;
-          /* 镜鳞原来连 tryDeathSave 都没走（复活甲也不生效）—— 一并归到同一条致死保护链。 */
           reflectHurt(att, reflect, r);
         }
-        /* 题面·沉默之壁：单次受到的伤害超过阈值（默认 25% 最大生命）时，
-         * **超出的那一截全额反弹**给出击方。
-         * 与镜鳞的区别：镜鳞按「整次伤害 × 百分比」反弹，这里只反「超出阈值的那一截」——
-         * 所以玩家可以压着阈值打（多段小伤害）来规避，是对「控伤」这一操作的奖励。
-         * 反噬豁免（reflectImmune）照常生效；阈值由 tower-data.js 注入，方便调平衡。 */
+        /* 沉默之壁：单次伤害超阈值（缺省 25% 最大生命）时只反弹超出部分；
+         * 与镜鳞（整次 × 百分比）不同，压着阈值打可以规避。reflectImmune 照常生效。 */
         const ov = (def.mechParams && def.mechParams.trialOverflow) || null;
         const ovThreshold = (ov && Number(ov.threshold)) || 0.25;
         if (def.mech.includes('trialOverflow') && att.hp > 0 && !noReflect && dmg > def.maxHp * ovThreshold) {
@@ -1227,10 +954,10 @@
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '毒藤缠绕'; r.noteSide = def.side;
         }
         let lsPct = (att.mech.includes('lifesteal') ? 0.30 : 0) + (att.mods && Number(att.mods.lifestealPct) || 0) + setFx(att, 'lifestealPct');
-        /* 低血吸血（濒死觉悟 / 狂战套）：各读各的阈值，按**攻击方当前血量**判定。 */
+        // 低血吸血：塔 buff 与套装各读各的阈值，按攻击方当前血量判定。
         if (att.mods && att.mods.lowHpLifestealPct && lowHpActive(att)) lsPct += Number(att.mods.lowHpLifestealPct) || 0;
         if (setLowHpActive(att)) lsPct += setFx(att, 'lowHpLifestealPct');
-        if (lsPct > 0 && att.hp > 0) {                              // 血之渴望 / 血饮狂刀
+        if (lsPct > 0 && att.hp > 0) {
           const heal = Math.min(att.maxHp - att.hp, healOf(att, dmg * lsPct));
           if (heal > 0) { att.hp += heal; r.lifesteal = (r.lifesteal || 0) + heal; }
         }
@@ -1238,18 +965,13 @@
       return dmg;
     }
 
-    /* ============================================================
-     * 幻兽协战（原版 attackType 4）
-     * ------------------------------------------------------------
-     * 回放层认 `action:'pet'` + `petId`，按 `attacks` 第 `29 + petId` 帧播原版
-     * 幻兽动作；`isRound:0` 表示不占 60 手行动上限。技能效果在这里结算，
-     * 事件字段只负责告诉播放器「谁、哪只、命中/回血多少」。
-     * ============================================================ */
-    /** 幻兽·狂暴：原版描述写死「血量低于 200 点」——不是比例。 */
+    /* 幻兽协战：回放层认 action:'pet' + petId，按 attacks 第 29+petId 帧播原版动作；
+     * isRound:0 表示不占 60 手行动上限。 */
+    /** 狂暴门槛是固定 200 血（原版描述），不是比例。 */
     function petRageActive(c) {
       return !!(c && Number(c.petRagePct) > 0 && c.hp > 0 && c.hp < 200);
     }
-    /** 装死之后要补发的协战（技能 2/4）。只在真的还能出手时排队。 */
+    // 装死后要补发的协战（技能 2/4），只在还能出手时排队。
     function queueFakeDiePets(c) {
       if (!c || c.hp <= 0 || c.petAfterFakeDie) return;
       for (const p of c.pets || []) {
@@ -1449,11 +1171,10 @@
     }
 
     /** NPC 大招（每场一次）：螳螂低血乱舞、仙鹤开场展翅、熊猫低血震地。 */
+    // NPC 大招每场一次：仙鹤开场展翅、螳螂低血乱舞、熊猫低血震地。
     function npcUlt(att, def) {
       const r = { attacker: att.side, action: 'skill', npcSkill: true, ult: true };
       if (att.npcType === 'tl') {
-        // 疾风镰刀舞：生命低于20%时孤注一掷的四连击（门槛与伤害都下调过：
-        // 原版 35% / 每击 0.55 倍，实战里几乎每场都放且总伤达 2.2 倍力量）
         r.ultName = '疾风镰刀舞'; r.multiHit = 4;
         if (chance(dodgeChance(att, def))) { markDodge(r, def); pushRound(r); return; }
         /* 绝对防御一次出手只判一次：四连击要么整段挡下、要么整段不挡（见 jueDuiDecide）。 */
@@ -1473,8 +1194,7 @@
       if (att.npcType === 'xh') {
         // 仙鹤展翅：开场第一次行动的重击，契合“前期凶猛”
         r.ultName = '仙鹤展翅';
-        /* 只有力量全额 + 速度的 xhSpeedShare（见 RULES 注释：敌人速度约是力量的 2.3 倍，
-         * 直接 (力量+速度) 等于白送一整条速度）。 */
+        // 只吃速度的 xhSpeedShare：敌人速度约是力量的 2.3 倍，直接加全额等于白送。
         const raw = Math.round((effPower(att) + effSpeed(att) * RULES.xhSpeedShare) * 1.35);
         if (chance(dodgeChance(att, def))) { markDodge(r, def); pushRound(r); return; }
         applyDamage(att, def, raw, r, { action: 'skill' });
@@ -1500,11 +1220,9 @@
         def.stun = Math.max(def.stun, 1);                // 寒冰禁锢：每第 3 次行动冻结玩家
         att.pendingNote = (att.pendingNote ? att.pendingNote + '·' : '') + '寒冰禁锢';
       }
-      /* ---------------- 挑战塔题面（最终位对手） ----------------
-       * 题面文本写的是「第 N 回合」；这里统一把 att.npcActs 当作它的出手次数。 */
+      // 题面文本写「第 N 回合」，这里统一按 att.npcActs（出手次数）。
       const acts = att.npcActs || 0;
-      /* 熔核·炽壳：每过一回合叠一层减伤（+10%，第 8 回合起封顶 70%）；
-       * 第 7 次行动起的「熔核成型」（力/敏/速 +50%）保留 —— 它是这只 boss 的爆发窗口另一半。 */
+      // 熔核：每过一回合叠一层减伤；第 7 次行动起力/敏/速 +50%（熔核成型）。
       if (att.mech.includes('trialCore')) {
         const stack = Math.min(coreMaxStacks(), Math.max(0, Math.floor(Number(att.mechState.coreStack) || 0)) + 1);
         if (stack !== att.mechState.coreStack) {
@@ -1569,9 +1287,7 @@
     function npcAction(att, def) {
       // 大招（每场一次）：仙鹤开场即放，螳螂/熊猫压低生命后触发
       const firstAction = !att.acted; att.acted = true;
-      att.npcActs = (att.npcActs || 0) + 1;   // 仙鹤前期凶猛：默认为前3次行动 +30%，无尽塔后期由 xhEarlyMul 逐层收回
-      /* 无尽塔仙鹤：101/201 不再被当作“前期”。buildFoe 只在无尽塔写
-       * `xhEarlyMul`（1.3→1.0）；其它模式没有该字段，继续用原来的 1.3。 */
+      att.npcActs = (att.npcActs || 0) + 1;   // 前 3 次行动 ×1.3；无尽塔由 xhEarlyMul 逐层收回
       const xhEarly = att.npcType === 'xh' && att.npcActs <= 3
         ? (att.xhEarlyMul != null ? att.xhEarlyMul : 1.3) : 1;
       npcMechTurnStart(att, def);
@@ -1595,8 +1311,7 @@
         if (att.npcType === 'tl') { raw = Math.round(effPower(att) * (0.6 + Math.random() * 0.3)); r.multiHit = 2; } // 螳螂双击
         else if (att.npcType === 'xh') {
           raw = Math.round((effPower(att) + effSpeed(att) * RULES.xhSpeedShare) * (0.9 + lv * 0.1));
-          /* 无尽塔后期收敛：只压这一条技能，不改普攻 / 大招 / 其它模式。
-           * 倍率由 tower-data 的 endlessXhTune 按**绝对层数**给出。 */
+          // 只压这一条技能，不改普攻/大招/其它模式；倍率由 endlessXhTune 按绝对层数给。
           if (att.xhSkillMul != null) raw = Math.round(raw * att.xhSkillMul);
         }
         else { raw = Math.round(effPower(att) * (1.3 + lv * 0.1)); } // 熊猫重击
@@ -1631,7 +1346,7 @@
           if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
         }
         r.dmg = total;
-        maybeCounter(att, def, r, 'skill');      // 技能不触发反击（见 maybeCounter 的口径）
+        maybeCounter(att, def, r, 'skill'); // 技能不触发反击
         pushRound(r);
         return;
       }
@@ -1647,27 +1362,17 @@
       pushRound(r);
     }
 
-    /** 反击的触发口径（2026-10 第八十批 用户口径）：
-     *   · **只有近战武器攻击（'melee'）与普通攻击（'common'）能触发反击**；
-     *   · **远程武器**（'ranged'）、**技能**（'skill'）以及其它非攻击型的伤害手段**都不触发** ——
-     *     技能包括「荆棘反伤 / 绝对防御这类防御反击型技能」：你放防御手段，对方不该反过来打你一下；
-     *   · 这一次交手**已经反伤过**（荆棘反伤 / 绝对防御反噬真的打出了伤害）时同样不再反击：
-     *     反伤本身就是对这一手的回应，不该再叠一次（同一条用户口径的后半句）。
-     *   参数 `trigger` 就是上面那四个字符串（旧代码传的是布尔，现在按语义传，规则集中在这里）。 */
+    /* 反击口径：只有近战武器（'melee'）与普攻（'common'）触发；远程、技能（含防御反击型）都不触发。
+     * 这一手已经反伤过（荆棘/绝对防御真打出伤害）也不再反击。trigger 就是这四个字符串。 */
     function maybeCounter(att, def, r, trigger) {
       if (trigger !== 'melee' && trigger !== 'common') return;
       /* 练功木桩不还手：原版 `Stakes.attackBack()` 也是空函数，不能凭空反击。 */
       if (def.practice) return;
-      /* 反击：被打方用**普攻**反击。必中类近战武器也可以被反击，只有大榔头（2）的说明
-       * 明确写“不会被反击”；死神镰刀（15）只是必中，仍可被反击。 */
+      // 被打方用普攻反击；必中近战也能被反击，只有大榔头(2)写明「不会被反击」。
       if (r.fakeDie || def.hp <= 0 || att.hp <= 0) return;
-      /* 被闪避 / 被「风影身法」归零的那一手没有“打中”，不能反被对方反击。
-       * 以前不检查 r.dodge：先机预判 / 风影身法在 applyDamage 里把主攻击判成闪避后，
-       * maybeCounter 仍按 25% 触发，回放先飘「闪避」再演反击 —— 玩家看到的就是
-       * 「反击被闪避」（2026-10-31 反馈）。真正打中后被护盾吸收/被挡下仍可反击。 */
+      // 被闪避/被归零的一手没打中，不能触发反击（否则回放先飘闪避再演反击）。
       if (r.dodge || r.firstDodge || r.firstHitZero) return;
-      /* 荆棘反伤已经回应过这一手，不再反击；**绝对防御不同**（用户 2026-10-29 口径）：
-       * 举盾挡下之后，用盾的一方仍按同样的 25%（熊猫 45%）概率反击。 */
+      // 荆棘已回应过这一手就不再反击；绝对防御挡下仍按 25%（熊猫 45%）反击。
       if (r.thornsDmg || (r.reboundHurt && !r.jueDui)) return;
       /* 49「基础反击率效果提升N%」按原版「反击几率加 N%」的加点口径叠加（25/45 基线 + N 个百分点）。 */
       let chanceBase = 25 + Math.max(0, Number(effect(def, 49)) || 0);
@@ -1675,22 +1380,14 @@
       if (!chance(clamp(chanceBase, 0, 100))) return;
       let raw = Math.round(effPower(def) * (0.6 + Math.random() * 0.4) * (1 + effect(def, 5) / 100));
       if (skill(def, 24)) raw = Math.round(raw * (1 + 0.5 + 0.06 * (Math.min(skill(def, 24), 10) - 1) + trueVal(24, skill(def, 24)) / 100)); // 致命反击
-      /* 反击**不可闪避**（用户 2026-10-29 口径）：不再走 `dodgeChance` 判定，
-       * 也不让「先机预判 / 风影身法」把这一下吃掉（传 `noDodge`）。
-       * 反击伤害只打**原出手方**：传 `noReflect` 禁止绝对防御 / 荆棘把这一下弹回反击者
-       * （以前的复用 `applyDamage` 会让某些反伤触发时，掉血的变成反击那一方）。 */
-      /* 反击**无视装死**（用户 2026-11 反馈：有玩家表示反击还是被装死救回）。
-       * 以前只有吸铁大法（18）/ 橡皮擦（7）/ 真·方天画戟带 `ignoreFakeDie`；
-       * 反击这一下也要直接打到 0 血、装死不接管（涅槃 / 金蝉脱壳仍照常判定）。 */
+      /* 反击不可闪避、不吃先机预判/风影身法（noDodge），也不被绝对防御/荆棘弹回反击者（noReflect）；
+       * 反击无视装死（直接打到 0 血），涅槃/金蝉脱壳仍照常判定。 */
       const counter = { action: 'common' };
       applyDamage(def, att, raw, counter, { noDodge: true, noReflect: true, counter: true, ignoreFakeDie: true });
       r.counterDmg = counter.dmg;
-      /* 反击被护盾吸收的量：回放要按「反击伤害 = 掉血 + 被盾吃掉」飘红字
-       *（用户 2026-11 口径：打到盾上不能没有伤害数字）。 */
+      // 反击伤害 = 掉血 + 被护盾吸收，回放按这个总和飘红字。
       if (counter.shellAbsorb) r.counterAbsorb = counter.shellAbsorb;
-      /* 只有**整下 0 伤害**才算“被挡下”（护盾全吸收 / 龟甲真把伤害吃满的极端档）；
-       * 龟甲只减一部分时仍要按正常反击伤害飘字，不能标成“被挡下”。绝对防御已在
-       * dmgReduce 的 counter 分支跳过，反击必中。 */
+      // 只有整下 0 伤害才算「被挡下」；龟甲只减一部分时仍按正常反击飘字。
       if (!(counter.dmg > 0)) {
         if (counter.jueDui || counter.guiJia) {
           r.counterBlocked = counter.jueDui ? '绝对防御' : '龟甲术';
@@ -1725,19 +1422,12 @@
         pushRound({ attacker: att.side, action: 'skill', id: 13, level: att.skills[13], healSelf: heal, noDmg: true });
         return;
       }
-      // 行动选择：武器 45% / 技能 35% / 普攻 20%
-      /* 幻兽·整蛊专家：被封住的武器/技能整场不能再用。这里先过滤，
-       * 后面的 `pickKind` / `pickWeapon` / `nextPatternSkill` 都只看可用池。 */
+      // 整蛊专家封住的武器/技能整场不可用；后面的选取只看过滤后的池子。
       const usableWeapons = att.weapons.filter((w) => w && !att.petSealWeapons[w.id] &&
         (weaponWeight(att, w) > 0 || (att.pendingWeapon && att.pendingWeapon.id === w.id)));
       const canWeapon = usableWeapons.length > 0 && att.disarm <= 0;
-      /* 来点松果不再硬性每场一次：二次及以后按 `repeatRateOf` 的 1 权重参与抽取；
-       * 野球拳也没有额外闸门，二次及以后按权重 5 参与抽取。 */
-      /* 可用技能从「这个 fighter 实际拥有的技能」里筛（att.skillOrder），
-       * 而不是原版玩家那份硬编码的 ACTIVE_SKILLS 表 ——
-       * 松鼠/题面用的技能横跨 2~23（元素术鼠是 5/17/20），
-       * 用玩家表去筛会把 5 和 20 直接漏掉，于是它一辈子只能放 17（来点松果）。
-       * 排除规则：小宇宙爆发每场一次、来点松果满血不放、本回合已用过的不能再用。 */
+      /* 可用技能从 fighter 实际拥有的技能筛（att.skillOrder），不能用玩家硬编码表（会漏 5/20）；
+       * 排除：小宇宙每场一次、来点松果满血不放、本回合已用过的不能再用。 */
       const actives = (att.skillOrder || ACTIVE_SKILLS).filter((id) => att.skills[id] &&
         !att.petSealSkills[id] &&
         !(id === 14 && att.usedCosmos) && !(id === 17 && att.hp >= att.maxHp) &&
@@ -1750,8 +1440,7 @@
       if (forceCosmos) {
         kind = 'skill';
       } else if (att.pattern) {
-        // 挑战塔的松鼠对手：按固定循环出招（玩家可以背板）。
-        // 这一步用不了就顺延到下一个能用的，不会因为缴械/沉默而卡住。
+        // 固定循环：这一步用不了就顺延到下一个能用的，不会因缴械/沉默卡住。
         const want = att.pattern[att.patternStep % att.pattern.length];
         att.patternStep++;
         if (want === 'weapon' && !canWeapon) kind = canSkill ? 'skill' : 'common';
@@ -1764,7 +1453,7 @@
 
       if (kind === 'weapon') {
         const prepared = att.pendingWeapon && !att.petSealWeapons[att.pendingWeapon.id] ? att.pendingWeapon : null;
-        // 选武器：新表口径（普通武器用过 8；投掷前两次 100、第三次起 8）。
+        // 选武器：普通武器用过 repeatWeapon；投掷前两次 100、第三次起 repeatWeapon。
         let w;
         if (prepared) w = prepared;
         else if (usableWeapons.length > 1 && !att.pattern) w = pickWeapon(att, usableWeapons);
@@ -1781,10 +1470,8 @@
           return;
         }
         r.action = 'weapon'; r.id = w.id; r.level = w.level; r.wtype = w.type;
-        /* 塔 buff 的两个「按武器次数」口径（本次算第几次用武器）：
-         *   weaponFreeUses   —— 前 N 次使用武器不消耗回合（疾风先手 / 先发制人）
-         *   weaponBoostUses  —— 前 N 次使用武器时攻击加成+必中+免疫反伤，之后攻击衰减（闪亮登场）
-         * 「蓄力」那一回合不算使用（w.id===1 在上面已经 return）。 */
+        /* 塔 buff 的「按武器次数」两个口径（蓄力那回合上面已 return，不算使用）：
+       * weaponFreeUses 前 N 次不消耗回合；weaponBoostUses 前 N 次加成+必中+免反伤，之后衰减。 */
         att.weaponUses = (Number(att.weaponUses) || 0) + 1;
         const wUse = att.weaponUses;
         const freeCap = Number(att.mods && att.mods.weaponFreeUses) || 0;
@@ -1799,7 +1486,7 @@
           r.noteSide = att.side;
         };
         let raw = R(w.lo, w.hi);
-        raw = Math.round(raw * (1 + effPower(att) / 120));       // 力量加成
+        raw = Math.round(raw * (1 + effPower(att) / 120));
         // 武器好手是额外固定伤害，不随被菜刀削弱的力量一起下降。
         if (skill(att, 5)) raw += (GData.passiveBonus(5, skill(att, 5)) * heroBaseMul(att, skill(att, 5))) * (1 + effect(att, 31) / 100);
         /* 武器专属词条：1~15 号按 id+11 取 12~26；16 沉默之斧 = 42、17 双刃剑 = 43。 */
@@ -1808,8 +1495,7 @@
         // 闪亮登场：强化期内的那几次武器，攻击再 +N%
         if (boosted) {
           raw = Math.round(raw * (1 + (Number(att.mods.weaponBoostPowerMul) || 0)));
-          /* 打上显式标记：面板上看不出「这一次到底吃没吃到强化」，
-           * 测试与战报都靠它判断（见 test-fixes-round 的需求24）。 */
+          // 面板看不出这次吃没吃到强化，测试与战报靠这个标记判断。
           r.weaponBoost = wUse;
         }
         // 命中
@@ -1857,9 +1543,8 @@
           total += rr.dmg;
           if (rr.dmg > 0) landedHits++;
           if (rr.dodge) dodgedHits++;
-          /* 「绝对防御触发了」这条标记必须**独立于反弹伤害**传播：投掷类被挡下时刻意不反弹
-           *（需求140），但战斗动画（battle.js 的 skill_16 / 「绝对防御」飘字）与塔的统计
-           * 都靠 r.jueDui 判断这次是不是被挡下的 —— 挂在 reboundHurt 上会整条丢掉。 */
+          /* r.jueDui 必须独立于 reboundHurt 传播：投掷类被挡下时刻意不反弹，
+         * 但动画（battle.js 的 skill_16）与塔统计都靠它判断这次被挡下。 */
           if (rr.jueDui) r.jueDui = true;
           if (rr.reboundHurt) r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt;
           if (rr.thornsDmg) r.thornsDmg = (r.thornsDmg || 0) + rr.thornsDmg;
@@ -1877,21 +1562,19 @@
           if (rr.fakeDie || def.hp <= 0 || att.hp <= 0) break;
         }
         r.dmg = total;
-        /* 连击/三扔**每一段都被先机预判/风影身法归零**时，这一手整体算闪避：
-         * 回放要播闪避，而且不能反过来触发对方反击（只要有一段真的打中，就不算闪避）。 */
+        /* 每一段都被归零才算闪避（回放播闪避、也不触发对方反击）；
+         * 只要有一段真的打中就不算。 */
         if (!landedHits && dodgedHits) r.dodge = true;
         // 武器特效
         if (w.id === 3 && att.hp > 0) { att.swordDodge = Math.max(att.swordDodge, weaponEffect(w, 3, 3)); r.dodgeBuff = att.swordDodge; }
-        /* 44「龟甲术防降属性效果+N%」：龟甲术真挡下这一手时，吉祥三宝的降属性按 N% 削减。
-         * 旧版口径见 2013 年坦克搭配攻略：它防的就是死老鼠/屎坨坨/菜刀的降力量/敏捷/速度。 */
+        // 词条 44：龟甲术真挡下时，吉祥三宝的降属性按 N% 削减。
         const shellAntiDrop = r.guiJia > 0 && skill(def, 7) && def.silence <= 0
           ? clamp(Number(effect(def, 44)) || 0, 0, 100) / 100 : 0;
         const dropMul = 1 - shellAntiDrop;
         if (shellAntiDrop > 0) r.debuffCut = Math.round(shellAntiDrop * 100);
         if (def.hp > 0 && !r.fakeDie) {
-          /* `debuffStat` 是给**战斗动画**用的结构化字段（`debuffText` 是给人看的中文）：
-           * 经典战斗要在挨打方头顶飘「力/敏/速下降」那颗原版状态图标（`propty` 第 4/5/6 帧），
-           * 靠中文串匹配太脆，所以这里把"降的是哪一项"显式带出来。 */
+          /* debuffStat 给战斗动画用（debuffText 是中文）：经典战斗靠它飘原版状态图标，
+         * 中文串匹配太脆，所以显式带出降的是哪一项。 */
           if (w.id === 5) { def.debuffs.agility = Math.max(def.debuffs.agility, weaponEffect(w, 10, 2) * dropMul); r.debuffText = '敏捷降低！'; r.debuffStat = 'agility'; }
           if (w.id === 6) { def.debuffs.speed = Math.max(def.debuffs.speed, weaponEffect(w, 10, 2) * dropMul); r.debuffText = '速度降低！'; r.debuffStat = 'speed'; }
           if (w.id === 8) { def.debuffs.power = Math.max(def.debuffs.power, weaponEffect(w, 10, 1) * dropMul); r.debuffText = '力量降低！'; r.debuffStat = 'power'; }
@@ -1899,10 +1582,8 @@
           if (w.id === 13 && chance(weaponEffect(w, 10, 3, 3) + trueW(w, 'stun'))) { def.stun = Math.max(def.stun, 1); r.stunApplied = true; }
           if (w.id === 16 && chance(weaponEffect(w, 10, 4, 4) + trueW(w, 'silence'))) { def.silence = Math.max(def.silence, petDotRounds(def, 4)); r.silenceApplied = true; }
         }
-        /* 忍者镖吸血按**减伤前**的武器伤害算，不是最终掉血量。
-         * 原版抓包（竞技场 065：武器 14:7，最终伤害 76，回复 42，当时缺 195 血未触顶）
-         * 正好对上 `42 / 34% ≈ 124` 的减伤前伤害；按最终 76 只会回 26。
-         * 仍然只在**真的打中**（total > 0）时触发；被打空/绝对防御挡成 0 不回血。 */
+        /* 忍者镖吸血按**减伤前**的武器伤害算（抓包 42/34%≈124，按最终值只会回更少），
+         * 只在真的打中（total > 0）时触发。 */
         if (w.id === 14 && att.hp > 0 && total > 0) {
           const pct = weaponEffect(w, 10, 4) + trueW(w, 'lifesteal');
           const heal = Math.min(att.maxHp - att.hp, healOf(att, raw * pct / 100));
@@ -2019,9 +1700,7 @@
           }
         }
         if (freeSkill) { att.usedFreeSkill = true; r.actAgain = true; }
-        /* 技能**不触发反击**（用户口径 2026-10 第八十批）：以前这里放行 `!r.noDmg && !r.dodge`，
-         * 于是「色诱 / 通灵 / 幸运一击」这些技能打完还能被对方反击，防御反击型技能（绝对防御那类）
-         * 也会反过来挨一下 —— 现在统一按技能口径挡住。 */
+          // 技能一律不触发反击（含防御反击型技能）。
         maybeCounter(att, def, r, 'skill');
         pushRound(r);
         if (r.actAgain && att.hp > 0 && def.hp > 0) {
@@ -2061,25 +1740,15 @@
       pushRound({ attacker: 0, action: 'dot', dmg, noteText: '先手制敌' });
     }
 
-    /* 塔 buff「假如我直接赢」（E17）：**开战即判胜** —— 把敌方当前生命直接清零。
-     * 口径（用户要求）：「下一场战斗开始时立即使得敌方生命值归零」，所以：
-     *   · 固定从**满血**清零，飘字写的是这一场真实被打掉的血量；
-     *   · **不走 tryDeathSave** —— 名字就是「直接赢」，敌方的装死 / 涅槃类豁免不触发；
-     *   · 放在主循环之前：血量为 0 时主循环不执行，`winner` 直接判我方胜（见函数末尾结算）。
-     *
-     * 【2026-10 第八十二批 用户口径】唯一的例外是**魔王自己的命**：x00 那只魔王额外持有的
-     * 「涅槃plus」被打上 `bossLife: true`，它**照常吃掉这一下**（只丢一条命），
-     * 于是 E17 不再是一击终结 —— 还得再真正击杀剩下两条命。
-     * 普通敌人的装死 / 涅槃**依旧无效**（这个例外只认 bossLife，不是「所有免死都算」）。 */
+    /* E17「假如我直接赢」：开战把敌方血量清零，不走免死，主循环之前执行 → winner 直接判我方胜。
+     * 例外只有魔王 bossLife 的涅槃plus（照常吃一条命），普通敌人的装死/涅槃无效。 */
     if (A.mods && A.mods.openKill && B.hp > 0) {
       const dmg = Math.max(1, Math.round(B.hp));
       const saves = (B.mods && Array.isArray(B.mods.deathSaves)) ? B.mods.deathSaves : [];
       const bossLife = saves.findIndex((sv) => sv && sv.bossLife);
       B.hp = 0;
-      /* E17 是「直接赢」，不是一次普通伤害：敌方护盾也一并作废，否则 HUD 会留下
-       * 护盾条 / 血量分子里的盾值（用户 2026-11 截图）。若魔王还有 bossLife 会复活，
-       * 则只清敌方护盾、保留玩家护盾（战斗还要继续）；真的直接结束战斗时，
-       * 玩家剩余护盾也归零，胜利画面不留盾。 */
+      /* E17 不是普通伤害：敌方护盾也作废，否则 HUD 会留盾；魔王还能复活则保留玩家护盾，
+       * 真的结束战斗时玩家护盾也归零。 */
       B.shell = 0;
       B.shellCharges = 0;
       const rr = { attacker: 0, action: 'dot', dmg: dmg, noteText: '假如我直接赢', noteSide: 0 };
@@ -2093,13 +1762,37 @@
     /* 只统计**行动条正常选出的出手**（不含小宇宙 / 装死这种 immediate 追加行动）：
      * 同一方连续 5 次后，第 6 次强制推进给另一方。 */
     let lastApActor = null, apRun = 0;
-    while (A.hp > 0 && B.hp > 0 && actions < actionCap) {
+    /* 60 手打满按血量比例判负，但整场没掉到 0 血 → 免死条目一次都不会触发；
+     * 所以玩家侧被判负且还有 deathSaves 时消耗一条（同 consumeDeathSave）、重开 60 手窗口。
+     * 只对玩家（A）生效，敌人 bossLife 与木桩战不参与。 */
+    function tryTimeoutRevive() {
+      if (practice) return false;
+      if (A.hp <= 0 || B.hp <= 0) return false;
+      if (A.hp / A.maxHp >= B.hp / B.maxHp) return false;          // 只有被判负的玩家侧才需要救
+      const saves = A.mods && Array.isArray(A.mods.deathSaves) ? A.mods.deathSaves : null;
+      if (!saves || !saves.length) return false;
+      // 走 regen 事件（两套播放器都会 applyHp 飘绿字）；isRound:0 不占剩余回合。
+      const rr = { attacker: A.side, action: 'regen', isRound: 0, timeoutRevive: 1 };
+      const before = A.hp;
+      consumeDeathSave(A, saves.shift(), rr);
+      rr.heal = Math.max(0, A.hp - before);
+      pushRound(rr);
+      return true;
+    }
+    while (A.hp > 0 && B.hp > 0) {
+      // 一个窗口 60 手；打满先补装死协战（可能改血量比例），再试涅槃加时，成功就手数归零。
+      if (actions >= actionCap) {
+        flushPetReactions(A, B, pushRound);
+        flushPetReactions(B, A, pushRound);
+        if (A.hp <= 0 || B.hp <= 0) break;
+        if (!tryTimeoutRevive()) break;
+        actions = 0;
+      }
       const followup = immediate;
       let actor = followup && followup.actor;
       immediate = null;
       if (!actor) {
-        /* 练功木桩不还手（原版 `Stakes.attack()` 是空函数）：直接让非木桩一方出手，
-         * 不让木桩靠速度条抢回合；固定回合数就是玩家的出手次数。 */
+        // 木桩不还手：直接让非木桩一方出手，固定回合数就是玩家出手次数。
         if (practice) {
           actor = practice === A ? B : A;
         } else {
@@ -2109,9 +1802,8 @@
             A.ap += elapsed * effSpeed(A); B.ap += elapsed * effSpeed(B);
           }
           let pick = A.ap >= B.ap ? A : B;
-          /* 速度领先只允许连续出手 5 次：行动条本来会继续让快的一方抢拍，
-           * 这里在连续第 5 次之后把时间推进到「另一方满 100」，并确保另一方真的出手。
-           * 先手方同一段时间内也会涨，但压在 99，避免它下一拍又立刻抢回去。 */
+          /* 连续第 5 次后把时间推进到「另一方满 100」并确保它出手；先手方压在 99，
+           * 避免下一拍又立刻抢回去。 */
           if (pick === lastApActor && apRun >= RULES.maxConsecutiveActions) {
             const other = pick === A ? B : A;
             const gap = Math.max(0, 100 - other.ap);
@@ -2136,22 +1828,19 @@
       actor.turnSkills = {};
       for (const cdId of Object.keys(actor.skillCd || {})) if (actor.skillCd[cdId] > 0) actor.skillCd[cdId]--;
       const def = actor === A ? B : A;
-      /* 练习木桩：上一拍扣掉的血在**下一拍开头**回满（回放层用 practiceHeal 飘字），
-       * 所以每回合血条都是「先满、再扣、下回合加回来」的可读节奏。 */
+      // 木桩上一拍掉的血在下一拍开头回满，回放用 practiceHeal 飘字。
       if (def.practice && def.hp < def.maxHp) {
         const heal = Math.max(0, def.maxHp - def.hp);
         def.hp = def.maxHp;
         def.practiceHealPending = (Number(def.practiceHealPending) || 0) + heal;
       }
-      /* 装死触发的幻兽协战（逆向推倒 / 回光术）先补发，再走这一回合的行动。
-       * 它们不占行动次数，也不改变当前出手者。两边都要结算（可能同归于尽/互相反打）。 */
+      // 装死触发的协战先补发再走本回合行动；它们不占行动次数、不改变出手者。
       flushPetReactions(A, B, pushRound);
       flushPetReactions(B, A, pushRound);
       if (A.hp <= 0 || B.hp <= 0) break;
       /* 回合开始类增益（越战越勇 / 后发制人 / 玉石俱焚）：每场战斗结束自动清零。 */
       applyRoundAuras(actor, def, pushRound);
-      /* 塔 buff「血蚀印记」（N17）：每回合开始时对敌人造成其**当前生命** N% 的伤害。
-       * 按「当前血」算，所以越打越少；伤害走 dot 事件（回放画在受击方身上）。 */
+      // 血蚀印记：每回合按敌人**当前生命** N% 扣血（越打越少），走 dot 事件。
       const drainPct = Math.max(0, Number(actor.mods && actor.mods.enemyHpDrainPct) || 0);
       if (drainPct > 0 && def.hp > 0) {
         const drainDmg = Math.max(1, Math.round(def.hp * Math.min(1, drainPct)));
@@ -2189,13 +1878,12 @@
         pushRound({ attacker: actor.side, action: 'regen', heal, noteText: actor.mech.includes('regen') ? '百草回春' : '回复' });
         if (B.hp <= 0 || A.hp <= 0) break;
       }
-      // 持续伤害
-      // 原攻略按中招者的四次出手计数，包括小宇宙后的追加行动。
+      // 持续伤害按中招者的出手计数（含小宇宙追加行动），共 4 次。
       if (actor.dot) {
         const dotDmg = actor.dot.pct ? Math.max(1, Math.round(actor.hp * actor.dot.pct)) : actor.dot.dmg;
         actor.hp -= dotDmg;
         const dotRound = { attacker: actor.side, action: 'dot', dmg: dotDmg, selfDot: true };
-        tryDeathSave(actor, dotRound);            // 中毒致死也要过复活甲
+        tryDeathSave(actor, dotRound); // 中毒致死也过复活甲
         pushRound(dotRound);
         actor.dot.rounds--;
         if (actor.dot.rounds <= 0) actor.dot = null;
@@ -2204,8 +1892,7 @@
       if (actor.restNext) { actor.restNext = false; pushRound({ attacker: actor.side, action: 'rest' }); if (!followup) tickRestrictions(actor); continue; }
       if (actor.stun > 0) { actor.stun--; pushRound({ attacker: actor.side, action: 'stunned' }); if (!followup) tickRestrictions(actor); continue; }
 
-      /* 幻兽协战：原版「己方行动时」的触发。每回合最多一只、不占行动次数；
-       * 触发后照常走玩家/NPC 本回合的出手（动画上是「幻兽先出手，松鼠再出手」）。 */
+      // 幻兽协战：每回合最多一只、不占行动次数，之后照常走本回合出手。
       if (petAssist(actor, def, pushRound)) {
         if (A.hp <= 0 || B.hp <= 0) {
           if (A.hp <= 0 && godSave(A)) A.hp = 1;
@@ -2216,12 +1903,11 @@
 
       if (actor.npcType) { npcAction(actor, def); npcMechAfter(actor, def); }
       else {
-        // 挑战塔的题面对手也是「玩家式」AI（无 npcType），机制要在这里补挂：
-        // 出手前先数它这一次行动，再走玩家式出招。玩家的 mech 为空数组，不受影响。
+        // 题面对手是玩家式 AI（无 npcType）：出手前先数 npcActs 再挂机制（玩家 mech 为空）。
         if (actor.mech.length) { actor.npcActs = (actor.npcActs || 0) + 1; npcMechTurnStart(actor, def); }
         playerLikeAction(actor, def);
         if (actor.mech.length) npcMechAfter(actor, def);
-        // 题面·蚀骨：玩家每次出手后叠 1 层「攻击 −3%」（层数记在对手身上，debuff 落在出手方身上）
+        // 蚀骨：玩家每次出手叠 1 层攻击 −3%，层数记在对手 mechState.erode。
         if (def.mech.includes('trialErode') && actor.hp > 0) {
           const stacks = Math.min(RULES.erodeMax, def.mechState.erode + 1);
           if (stacks > def.mechState.erode) {
@@ -2231,12 +1917,12 @@
         }
       }
       if (!followup) tickRestrictions(actor);
-      // 无敌模式兜底：吸血、自伤、反伤等旁路都不会把玩家打死
+      // 无敌兜底：吸血/自伤/反伤等旁路也不会把玩家打死。
       if (A.hp <= 0 && godSave(A)) A.hp = 1;
       if (B.hp <= 0 && godSave(B)) B.hp = 1;
     }
 
-    /* 60 手上限刚好卡在装死那一拍时，装死触发的幻兽协战仍要补发（可能改变胜负）。 */
+    // 60 手卡在装死那一拍时，装死触发的协战仍要补发（可能改变胜负）。
     flushPetReactions(A, B, pushRound);
     flushPetReactions(B, A, pushRound);
 
@@ -2244,53 +1930,43 @@
     if (A.hp <= 0 && B.hp <= 0) winner = 0;
     else if (B.hp <= 0) winner = 0;
     else if (A.hp <= 0) winner = 1;
-    else winner = A.hp / A.maxHp >= B.hp / B.maxHp ? 0 : 1; // 超时按血量比例
+    // 超时按血量比例判负（涅槃加时窗口已在上面用完）。
+    else winner = A.hp / A.maxHp >= B.hp / B.maxHp ? 0 : 1;
 
     return { rounds, winner, maxHp: [A.maxHp, B.maxHp], startShell: startShell, names: [A.name, B.name] };
   }
 
-  /* ============================================================
-   * 【SM8】导出 window.Sim
-   * ============================================================ */
   window.Sim = {
     simulate, rules: RULES,
-    /* 幻兽技能数值 / 触发几率的唯一出口（State 的牧场详情也读 GData 同一份）。 */
+    // 幻兽数值/触发概率的唯一出口（State 牧场详情读 GData 同一份）。
     petSkillValueOf: petValue, petSkillTriggerOf: petTrigger,
-    // 供 tools/test-combat-rules.cjs 直接校验出手权重（不用统计近似）
+    // 出手权重（供 tools/test-combat-rules.cjs 直接校验）。
     actionWeights: { skill: skillWeight, weapon: weaponWeight },
-    /* 三个「有效属性」的唯一出口（供测试/调参直接核对：终乘类加成到底乘在哪一层）。
-     * 传一个战斗体（至少要 stat/baseStats、buffFlat、debuffs、mods、hp/maxHp）。 */
+    // 有效属性唯一出口（测试核对终乘加成乘在哪一层）。
     effStatsOf: (c) => ({ power: effPower(c), agility: effAgility(c), speed: effSpeed(c) }),
-    /* 回合开始类增益（越战越勇 / 后发制人 / 玉石俱焚）——纯函数，供测试直接核对
-     * 「后发制人补多少、对手就掉多少」。传两个战斗体（见 effStatsOf 的要求）。 */
+    // 回合开始增益的纯函数版（测试核对后发制人的镜像削弱）。
     _applyRoundAuras: applyRoundAuras,
-    // 各技能「二次及以后」的出手概率（%），供测试与调参直接读
+    // 各技能「二次及以后」的出手概率（%）。
     repeatRateOf, skillUseCountOf,
-    /* 出手类型的三份权重（武器/技能/徒手）与占比 —— 供测试直接核对
-     * 「持有的武技越多 → 徒手越少」「全部用过一遍 → 徒手变多」。 */
+    // 出手类型的三份权重与占比（测试核对徒手份额下限）。
     kindWeights,
-    /* 武器选择的纯函数（供回归核对「上一手用过的武器不会立刻再抽到」）。 */
+    // 武器选择纯函数。
     pickWeapon,
-    /* 题面·熔核·炽壳的减伤曲线（每回合 +10%、封顶 70%）—— 纯函数，供测试直接核对 */
+    // 熔核减伤曲线（纯函数）。
     coreReduceOf, coreMaxStacks,
-    /* 防御被动的单次触发概率（%）与被动加成读取 —— 供测试/调参直接核对，
-     * 不用靠统计近似（绝对防御 16 / 龟甲术 7）。 */
+    // 防御被动的触发概率与被动加成读取（测试确定性核对）。
     jueDuiChanceOf, shellChanceOf, passiveSkillBoost,
-    /* 减伤链的即时结算（护盾 / 绝对防御 / 龟甲术 / 皮糙肉厚…）—— 纯函数，传
-     * (挨打方, 伤害, {action, weaponType})，供测试**确定性**核对触发与反弹，
-     * 不用靠统计近似（例：投掷类根本不触发绝对防御、也不推高降权计数）。 */
+    // 减伤链即时结算（纯函数），测试据此确定性命中/反弹。
     dmgReduce,
-    /* 闪避率的唯一出口（同样供测试/调参直接核对，不用统计近似）。
-     * 传两个战斗体：att = 攻击方、def = 挨打方（守方敏捷、移形换位、木剑/流星锤、
-     * 凌波微步/烟幕等全部在这一个函数里结算）。 */
+    // 闪避率唯一出口（att 攻击方 / def 挨打方）。
     dodgeChanceOf: (att, def) => dodgeChance(att, def),
-    /* 暴击率 / 暴击伤害的唯一出口（供测试直接核对 70% 上限与 1:1 溢出转化）。 */
+    // 暴击率/暴击伤害唯一出口（70% 上限 + 1:1 溢出）。
     critChanceOf: (att) => critChance(att),
-    /* 对某个对手的最终暴击率（含真·皮糙肉厚的百分点压制）—— 供测试确定性核对。 */
+    // 对某个对手的最终暴击率（含真·皮糙肉厚压制）。
     critChanceVs: critChanceAgainst,
     critDmgBonusOf: (att) => critDmgBonus(att),
     critCap: RULES.critCap,
-    /* 低血减伤的即时结算（纯函数）—— 供测试直接核对分段口径 */
+    // 低血减伤即时结算（纯函数）。
     lowHpTakenDamage,
     defenseCaps: { again: BOOSTED_AGAIN_CAP, first: BOOSTED_FIRST_CAP },
   };

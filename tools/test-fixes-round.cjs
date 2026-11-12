@@ -1263,7 +1263,7 @@ test('需求27：弹窗按钮按「主操作靠右、取消/返回靠左」排�
   const src = readSrc('js', 'classic-ui.js');
   const a = src.indexOf('const btnRank = (b, i) => {');
   assert.ok(a > 0, 'classic-ui.js 里应当有 btnRank');
-  const b = src.indexOf('/* 排序会打乱顺序', a);
+  const b = src.indexOf('const orderedIdx', a);
   assert.ok(b > a, '应当能定位 btnRank 的结尾');
   const ctx = vm.createContext({});
   /* 直接用源码里的排序规则，避免测试复制实现。 */
@@ -1622,7 +1622,7 @@ test('需求38：永久增益替换弹窗改为竖排可滚动列表（不再横
   assert.ok(/C\(\)\.bind\(m\.element, actions\)/.test(ui), '行点击要自己 bind（它们不在 .modal-buttons 里）');
 
   /* 关键回归：不许再把每个增益塞成 .modal-buttons 里的横排按钮 */
-  const comp = ui.slice(ui.indexOf('function offerPermanentReplace'), ui.indexOf('/** 每 10 层的里程碑奖励'));
+  const comp = ui.slice(ui.indexOf('function offerPermanentReplace'), ui.indexOf('function offerShopReplace'));
   assert.ok(comp.indexOf("replace-btn") < 0,
     '替换弹窗不该再用 replace-btn 横排按钮');
   assert.ok((comp.match(/buttons\.push/g) || []).length === 0,
@@ -1665,7 +1665,7 @@ test('需求38：永久增益替换弹窗改为竖排可滚动列表（不再横
   /* 用真实的 tower-ui 片段跑 offerShopReplace（只替换 C()/modal 等依赖） */
   const body = ui.slice(ui.indexOf('const RARITY_SHORT'), ui.indexOf('/** 每 10 层的里程碑奖励'));
   /* 面板/弹窗的「附魔优先」排序函数在文件更前面，片段要把它一起带上。 */
-  const ordSeg = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  // ---------- 通用小件 ----------'));
+  const ordSeg = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  function carryBar('));
   const ctx = { Tower: T, State: S, esc: (x) => String(x == null ? '' : x), notice: () => {},
     modal: classic.modal, openShop: () => {}, openEndless: () => {},
     C: () => ({ bind: (root, actions) => { binds.push(actions); } }),
@@ -2801,7 +2801,7 @@ test('需求61：放弃永久增益的弹窗必须能真的选出候选（修「
   /* ② 真跑一遍界面函数：弹窗要列出全部候选，点击要能完成放弃 */
   const ui = readSrc('js', 'tower-ui.js');
   const seg = ui.slice(ui.indexOf('  function openPermSacrifice()'), ui.indexOf('  function openCheckpoint()'));
-  const ordSeg61 = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  // ---------- 通用小件 ----------'));
+  const ordSeg61 = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  function carryBar('));
   assert.ok(seg.length > 200, '应当截到 openPermSacrifice 的实现');
   assert.ok(ordSeg61.length > 100, '应当截到 orderPermanent 的实现');
   /* 断言它**没有**把 info.run 传给 sacrificeCandidatesOf（修好的标志）。 */
@@ -2945,7 +2945,7 @@ test('需求64：被虚空铭文附魔的永久增益排在前面，与未附魔
   assert.equal(raw, 'C29,C27,C22,C07,C12,C48', '前置条件：原始顺序是这个（附魔的混在中间）：' + raw);
 
   const ui = readSrc('js', 'tower-ui.js');
-  const ordSeg = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  // ---------- 通用小件 ----------'));
+  const ordSeg = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  function carryBar('));
   assert.ok(ordSeg.length > 100, '应当截到 orderPermanent 的实现');
 
   const ctx = { Tower: T, State: S, console,
@@ -5350,7 +5350,7 @@ test('需求124：同名件的「虚空铭文附魔（不占位）」逐条判�
   assert.ok(c25Cands.every((x) => x.uid === uidA), '同名未附魔的那两条不该再进附魔候选');
   /* 界面层：orderPermanent 只按行自己的 slotFree，不再按 id 兜底 */
   const ui = readSrc('js', 'tower-ui.js');
-  const ordSeg = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  // ---------- 通用小件 ----------'));
+  const ordSeg = ui.slice(ui.indexOf('  function orderPermanent('), ui.indexOf('  function carryBar('));
   assert.ok(!/free\.indexOf\(b\.id\)/.test(ordSeg), 'orderPermanent 不该再按 id 兜底：' + ordSeg);
   /* 送掉被附魔的那一条 → 附魔记录要一起清掉，**之后**再拿到同名件也不能沾上附魔。 */
   T.debugLoseBuff(uidA);

@@ -1,28 +1,7 @@
-/* ============================================================
- * ui.js — 界面层
- *   · 主界面 HUD：用原版素材（shouyebiao / resource_1 / resource_13 /
- *     resource_16）画在 canvas 上，力求还原原版首页
- *   · 菜单按钮与功能面板：DOM 覆盖层（便于滚动与交互），配色与
- *     质感沿用原版橙色系
- * ============================================================ */
-
-/* ------------------------------------------------------------
- * 目录：界面层（legacy）：HUD / 面板 / 菜单
- * Ctrl+F 搜节号（如「【UI1】」）直达对应代码块。
- *
- *  【UI1】DOM 小件  【UI2】图标  【UI3】主界面 HUD
- *  【UI4】面板框架  【UI5】菜单动作表  【UI6】挑战
- *  【UI7】关卡  【UI8】竞技场  【UI9】天梯赛
- *  【UI10】武器 / 技能  【UI11】背包  【UI12】装备
- *  【UI13】商店  【UI14】抽奖  【UI15】师徒
- *  【UI16】帮助  【UI17】导出 window.UI
- * ------------------------------------------------------------ */
+/* ui.js — 界面层（legacy）：主界面 HUD 用原版素材画在 canvas 上；菜单按钮与功能面板是 DOM 覆盖层。 */
 (function () {
   'use strict';
 
-  /* ============================================================
-   * 【UI1】DOM 小件（$/el/esc）
-   * ============================================================ */
   function $(sel) { return document.querySelector(sel); }
   function el(tag, cls, html) {
     const e = document.createElement(tag);
@@ -33,10 +12,7 @@
   const escHtml = (value) => String(value == null ? '' : value)
     .replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  /* ============================================================
-   * 【UI2】图标（图集帧 → 小 canvas / dataURL）
-   * ============================================================ */
-  // ---------- 图标（把图集里的帧画成小 canvas / dataURL） ----------
+  // 图标：把图集里的帧画成小 canvas / dataURL
   const iconUrlCache = Object.create(null);
   function frameDataUrl(sheetId, label, size) {
     const key = sheetId + '#' + label + '@' + size;
@@ -59,7 +35,7 @@
     iconUrlCache[key] = url;
     return url;
   }
-  /** 网格图集（wuqi/jineng/daoju）取第 index 格 */
+  // 网格图集（wuqi/jineng/daoju）取第 index 格
   function gridDataUrl(sheetId, index, size) {
     const key = sheetId + '#' + index + '@' + size;
     if (iconUrlCache[key] !== undefined) return iconUrlCache[key];
@@ -83,43 +59,27 @@
   }
   function imgTag(url, cls, size) {
     if (!url) return '<span class="icon-ph"' + (size ? ' style="width:' + size + 'px;height:' + size + 'px"' : '') + '></span>';
-    /* 图标文件缺失时别把浏览器的「破图」标记摊在卡片上：隐藏掉，只留底色和名字。
-     * 黑色装备（品质 5）还有一部分 id 没导出 PNG 图标，破图会让玩家以为装备没了。 */
+    /* 图标文件缺失时隐藏破图标记，只留底色和名字：黑色装备（品质 5）还有一部分 id
+     * 没导出 PNG，破图会让玩家以为装备没了。 */
     return '<img class="' + (cls || 'icon') + '" src="' + url + '"' + (size ? ' style="width:' + size + 'px;height:' + size + 'px"' : '') +
       ' onerror="this.style.visibility=\'hidden\'">';
   }
-  function weaponIcon(id, size) { return imgTag('images/ui/icons/weapon/weapon-' + id + '.png', 'icon', size || 56); }
-  function skillIcon(id, size) { return imgTag('images/ui/icons/skill/skill-' + id + '.png', 'icon', size || 56); }
-  function propIcon(id, size) { return imgTag('images/ui/icons/prop/prop-' + id + '.png', 'icon', size || 56); }
+  function weaponIcon(id, size) { return imgTag('images/ui/icons/weapon/weapon-' + id + '.svg', 'icon', size || 56); }
+  function skillIcon(id, size) { return imgTag('images/ui/icons/skill/skill-' + id + '.svg', 'icon', size || 56); }
+  function propIcon(id, size) {
+    const classic = window.UI && window.UI.classic;
+    const url = classic && typeof classic.propIconSrc === 'function'
+      ? classic.propIconSrc(id)
+      : 'images/ui/icons/prop/prop-' + id + '.png';
+    return imgTag(url, 'icon', size || 56);
+  }
   function gearIcon(g, size) {
     return imgTag('images/ui/icons/gear/gear-' + g.id + '.png', 'icon', size || 56);
   }
-  /** 首次打开装备面板时批量加载装备图标，加载完换成 canvas 缩略图（保证缩放质量一致） */
-  let equipSheetAsked = false;
-  function ensureEquipSheet() {
-    if (equipSheetAsked) return;
-    equipSheetAsked = true;
-    const ids = Object.keys(Engine.SRC_MAP).filter((k) => /^(Head|HandO|HandI|Body|Arm|Foot)_/.test(k));
-    Engine.loadSheets(ids).then(() => {
-      // 把已渲染的 <img data-equip> 换成 canvas 缩略图
-      const list = document.querySelectorAll('#ui img[data-equip]');
-      for (const img of list) {
-        const name = img.getAttribute('data-equip');
-        const size = parseInt(img.style.width) || 56;
-        const url = frameDataUrl(name, '1', size) || frameDataUrl(name, '2', size);
-        if (url) img.src = url;
-      }
-    });
-  }
-
-  const QUALITY_NAME = ['普通', '优秀', '杰出', '卓越'];
   const QUALITY_CLS = ['q0', 'q1', 'q2', 'q3'];
 
-  /* ============================================================
-   * 【UI3】主界面 HUD（canvas）
-   * ============================================================ */
-  // ---------- 主界面 HUD（canvas） ----------
-  /** 圆角矩形路径 */
+  // 主界面 HUD（canvas）
+  // 圆角矩形路径
   function rr(ctx, x, y, w, h, r) {
     r = Math.min(r, w / 2, h / 2);
     ctx.beginPath();
@@ -130,20 +90,7 @@
     ctx.arcTo(x, y, x + w, y, r);
     ctx.closePath();
   }
-  /** 原版风格面板（深棕底 + 金边） */
-  function panelBg(ctx, x, y, w, h) {
-    ctx.save();
-    const g = ctx.createLinearGradient(0, y, 0, y + h);
-    g.addColorStop(0, 'rgba(74,47,20,.92)');
-    g.addColorStop(1, 'rgba(38,22,8,.92)');
-    rr(ctx, x, y, w, h, 14);
-    ctx.fillStyle = g; ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(255,179,46,.85)';
-    ctx.stroke();
-    ctx.restore();
-  }
-  /** 进度条 */
+  // 进度条
   function bar(ctx, x, y, w, h, pct, c0, c1) {
     ctx.save();
     rr(ctx, x, y, w, h, h / 2);
@@ -160,36 +107,11 @@
     ctx.restore();
   }
 
-  // 主界面快捷栏用的小图标（canvas 对象缓存）
-  const gridCanvasCache = Object.create(null);
-  function gridIconUrl(sheetId, index) {
-    const key = sheetId + '#' + index;
-    if (gridCanvasCache[key] !== undefined) return gridCanvasCache[key];
-    const sh = Engine.SHEETS[sheetId];
-    let cv = null;
-    const def = sh && sh.def;
-    if (sh && def && def.w) {
-      const cols = Math.max(1, Math.floor(sh.img.width / def.w));
-      const n = def.n || (cols * Math.floor(sh.img.height / def.h));
-      const i = ((index % n) + n) % n;
-      cv = document.createElement('canvas');
-      cv.width = def.w; cv.height = def.h;
-      const cx = cv.getContext('2d');
-      cx.drawImage(sh.img, (i % cols) * def.w, Math.floor(i / cols) * def.h, def.w, def.h, 0, 0, def.w, def.h);
-    }
-    gridCanvasCache[key] = cv;
-    return cv;
-  }
-
   function hitRegion(regions, x, y) {
     for (const r of regions) if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r.id;
     return null;
   }
 
-  /* ============================================================
-   * 【UI4】面板框架
-   * ============================================================ */
-  // ---------- 面板框架 ----------
   function openPanel(title, contentEl, opts) {
     opts = opts || {};
     const overlay = el('div', 'panel-overlay');
@@ -226,10 +148,6 @@
     const p = openPanel('提示', box);
   }
 
-  /* ============================================================
-   * 【UI5】菜单动作表（HUD 点击 → 面板）
-   * ============================================================ */
-  // ---------- 菜单动作表（主界面 HUD 点击 → 面板） ----------
   const ACTIONS = {
     challenge: openChallenge, stages: openStages, arena: openArena, rank: openRank,
     weapons: openWeapons, skills: openSkills, bag: openBag, gears: openGears,
@@ -243,10 +161,6 @@
     $('#ui').innerHTML = '';
   }
 
-  /* ============================================================
-   * 【UI6】挑战（PVP vs AI）
-   * ============================================================ */
-  // ---------- 挑战（PVP vs AI） ----------
   /** 现代随机战斗的「查看」：武技等级、装备主属性/附加词条/宝石、幻兽。 */
   function showEnemyLoadout(foe) {
     const d = State.foeLoadout ? State.foeLoadout(foe) : null;
@@ -347,10 +261,6 @@
     const p = openPanel('战斗结果', box);
   }
 
-  /* ============================================================
-   * 【UI7】关卡
-   * ============================================================ */
-  // ---------- 关卡 ----------
   function openStages() {
     const S = State.state();
     const box = el('div');
@@ -402,6 +312,8 @@
         const prentice = !asMaster ? State.stagePrentice() : null;
         const fighter = prentice ? State.stagePrenticeFighter() : null;
         const master = asMaster || !prentice || !fighter;
+        /* 师父接手徒弟打过的同一名对手时，对手保留剩余血量（只有这一名对手、这一场）。 */
+        const foeCarryHp = !!(master && r && Number(r.npcIndex) === idx && Number.isFinite(r.foeCarryHp)) ? r.foeCarryHp : null;
         /* 师父第一次接手（由徒弟战败触发）免费；之后的师父战斗照现代关卡原样扣书。 */
         const freeMaster = !!(master && r && r.masterFree);
         if (!freeMaster) {
@@ -412,16 +324,27 @@
         State.save();
         p.close();
         const foe = GData.stageFoe(npc, stageId, type.anim, State.challengeDailyCount ? State.challengeDailyCount() : 0);
+        if (foeCarryHp != null) {
+          const fullHp = Math.max(1, Math.round(Number(foe.maxHp || foe.hp) || 1));
+          foe.maxHp = fullHp;
+          foe.hp = Math.max(1, Math.round(fullHp * foeCarryHp));
+        }
         Main.startBattle(foe, {
           cost: 0, useProps: false, region: type.anim === 'tl' ? 3 : type.anim === 'xh' ? 4 : 1,
           fighter: fighter || undefined,
-          onEnd: (winner) => {
+          onEnd: (winner, result) => {
             const win = winner === 0;
             if (!master && !win) {
-              /* 徒弟战败：不结算、不扣复活；标记师父接手后弹原版台词。 */
+              /* 徒弟战败：不结算、不扣复活；记录对手剩余血量并标记师父接手。 */
               State.stageRuns = State.stageRuns || {};
               const rr = State.stageRuns[stageId] || (State.stageRuns[stageId] = { npcIndex: idx, revives: 0, needsRevive: false });
-              rr.masterOnly = true; rr.masterFree = true; State.save();
+              rr.npcIndex = idx;
+              rr.masterOnly = true; rr.masterFree = true;
+              const foeHp = result && Array.isArray(result.hpAfter) ? result.hpAfter[1] : null;
+              const foeCap = result && Array.isArray(result.maxHp) ? result.maxHp[1] : 0;
+              delete rr.foeCarryHp;
+              if (Number.isFinite(foeHp) && foeCap > 0) rr.foeCarryHp = Math.max(0, Math.min(1, foeHp / foeCap));
+              State.save();
               const box = el('div', 'result-box');
               box.innerHTML = '<div class="result-title lose">徒弟战败</div><p><b>徒弟无能，打不过它！该师父您亲自上阵了！</b></p>' +
                 '<p class="small-label">徒弟「' + escHtml(prentice.name) + '」已败下阵；师父接手同一名对手，不消耗挑战书，也不占用复活次数。</p>';
@@ -457,13 +380,13 @@
                 if (State.stageRuns) delete State.stageRuns[stageId];
               } else {
                 const rr = State.stageRuns && State.stageRuns[stageId];
-                if (rr) { rr.masterOnly = master; rr.masterFree = false; }
+                if (rr) { rr.masterOnly = master; rr.masterFree = false; delete rr.foeCarryHp; }
               }
               State.save();
               showResult(true, foe, { exp: exp, gold: gold, ups: ups }, extra + fragTxt);
             } else {
               const rr = State.stageRuns && State.stageRuns[stageId];
-              if (rr) { rr.masterOnly = true; rr.masterFree = false; State.save(); }
+              if (rr) { rr.masterOnly = true; rr.masterFree = false; delete rr.foeCarryHp; State.save(); }
               showResult(false, foe, { exp: 0, gold: 0, ups: [] }, '<div>提升等级、强化武器技能或穿戴装备后再来。</div>');
             }
           },
@@ -479,10 +402,6 @@
     const p = openPanel(type.name + ' ' + '★'.repeat(star), box);
   }
 
-  /* ============================================================
-   * 【UI8】竞技场
-   * ============================================================ */
-  // ---------- 竞技场 ----------
   function openArena() {
     const S = State.state();
     const box = el('div');
@@ -555,10 +474,6 @@
     }
   }
 
-  /* ============================================================
-   * 【UI9】天梯赛
-   * ============================================================ */
-  // ---------- 天梯赛 ----------
   function openRank() {
     const S = State.state();
     if (S.level < 30) { toast('未满30级不能参加天梯赛'); return; }
@@ -649,10 +564,6 @@
     const p = openPanel('🏆 金杯商店', box);
   }
 
-  /* ============================================================
-   * 【UI10】武器 / 技能
-   * ============================================================ */
-  // ---------- 武器 / 技能 ----------
   function openWeapons() { openWS('weapon'); }
   function openSkills() { openWS('skill'); }
   function openWS(kind) {
@@ -689,10 +600,6 @@
     const p = openPanel(isW ? '🗡️ 武器' : '✨ 技能', box);
   }
 
-  /* ============================================================
-   * 【UI11】背包
-   * ============================================================ */
-  // ---------- 背包 ----------
   function openBag() {
     const S = State.state();
     const box = el('div');
@@ -763,10 +670,6 @@
     const p = openPanel('🎒 背包', box);
   }
 
-  /* ============================================================
-   * 【UI12】装备
-   * ============================================================ */
-  // ---------- 装备 ----------
   function openGears() {
     const S = State.state();
     if (Number(S.level) < 5) { toast('5级后才能使用装备。多多挑战，升级后再来吧！'); return; }
@@ -810,7 +713,6 @@
         if (!State.wear(g.key)) { toast('等级不足，无法穿戴'); return; }
         p.close(); openGears();
       };
-      const sellRange = State.gearSellRange(State.gearQuality(g));
       const sellBtn = el('button', 'btn', '卖出');
       sellBtn.onclick = () => { State.sellGear(g.key); toast('已卖出'); p.close(); openGears(); };
       const selBtn = el('button', 'btn btn-sel', '选择');
@@ -856,10 +758,6 @@
     const p = openPanel('🛡️ 装备', box);
   }
 
-  /* ============================================================
-   * 【UI13】商店
-   * ============================================================ */
-  // ---------- 商店 ----------
   function openShop() {
     const S = State.state();
     const box = el('div');
@@ -882,10 +780,6 @@
     const p = openPanel('🏪 商店', box);
   }
 
-  /* ============================================================
-   * 【UI14】抽奖
-   * ============================================================ */
-  // ---------- 抽奖 ----------
   function openLottery() {
     const S = State.state();
     const today = new Date(Date.now()).toDateString();
@@ -936,10 +830,6 @@
     openPanel('🎰 每日抽奖', box, { onClose: () => { closed = true; if (spinTimer) { clearInterval(spinTimer); spinTimer = 0; } } });
   }
 
-  /* ============================================================
-   * 【UI15】师徒
-   * ============================================================ */
-  // ---------- 师徒 ----------
   function openMaster() {
     const S = State.state();
     const box = el('div');
@@ -992,10 +882,6 @@
     const p = openPanel('👥 师徒', box);
   }
 
-  /* ============================================================
-   * 【UI16】帮助
-   * ============================================================ */
-  // ---------- 帮助 ----------
   function openHelp() {
     const box = el('div', 'help-box');
     box.innerHTML =
@@ -1004,7 +890,7 @@
       '<p><b>体力</b>：每5分钟恢复1点，上限120。挑战对手消耗10点，竞技场30点。</p>' +
       '<p><b>属性</b>：力量决定伤害，敏捷决定闪避，速度决定出手频率，生命即血量。</p>' +
       '<p><b>武器/技能</b>：战斗中随机使用。升级需要金松果+卷轴，成功率随等级降低；普通1~10级失败后每次提高2%成功率，真化线不保底。</p>' +
-      '<p><b>关卡</b>：10级起挑战螳螂→仙鹤→熊猫，需要挑战书，通关可得装备碎片。带徒弟时徒弟先上阵，徒弟战败后师父免费接手同一名对手（不耗挑战书/复活次数）。</p>' +
+      '<p><b>关卡</b>：10级起挑战螳螂→仙鹤→熊猫，需要挑战书，通关可得装备碎片。带徒弟时徒弟先上阵，徒弟战败后师父免费接手同一名对手（对手保留剩余血量，不耗挑战书/复活次数）。</p>' +
       '<p><b>装备</b>：10个碎片+金松果合成（白30/绿40/蓝50）；3件同品质装备+金松果融合升品质（部位/名字可不同；白30/绿40/蓝50/紫60/橙200/黑1000）。产物部位从三件材料随机；词条按星级/材料顺序继承前两条，第三条从剩余词条随机。</p>' +
       '<p><b>转生</b>：使用转生果回到1级，属性成长更高（保留装备）。</p>' +
       '<p><b>存档</b>：自动保存在浏览器本地。</p>';
@@ -1044,9 +930,6 @@
     } catch (e) {}
   }
 
-  /* ============================================================
-   * 【UI17】导出 window.UI
-   * ============================================================ */
   window.UI = {
     renderHome: renderHome, hitRegion: hitRegion, runAction: runAction,
     openPanel: openPanel, toast: toast, confirmBox: confirmBox,

@@ -31,6 +31,8 @@
    LF 变成 CRLF，行尾多出来的 `\r` 会让锚定正则全部打空 —— 这是「本机绿、Windows 红」的经典
    原因（2026-10 `需求71` 就这么挂过一次）。另外清临时目录的 `fs.rmSync` 记得带
    `maxRetries`：Windows 上刚退出的子进程可能还占着文件。
+   **切源码段不要拿注释当锚点**（注释会按根 `AGENTS.md` 的注释规范清理）：用 `function 名字` /
+   下一个顶层函数 / 代码边界来切，否则清理注释后 `indexOf` 返回 -1，断言会把半截源码拿去 eval。
 
 ## 新增脚本的门槛（三条都满足才留下）
 
@@ -45,7 +47,7 @@
 | 类别 | 文件 |
 |---|---|
 | 构建 | `build-release.ps1`（**一键出包**：版本号 patch +1 → 清上一版旧包 → exe/安装包/APK → 清 `target\` 等 5~10 GB 缓存；`scripts\打包.cmd` / `scripts\清缓存.cmd` 是它的双击入口 —— 双击入口一律放 `scripts\`，根目录不放 `.cmd`，薄壳会自动挑 pwsh/powershell 并把参数原样转进来）、`build-tauri-app.cjs`（桌面 exe / 安装包；`--web` / `--web --check` = 生成 / 校验前端快照 `src-tauri/web`）、`build-apk.ps1`（安卓 APK；出包前对账 APK 内 versionName/versionCode，出包后 apksigner 复检 v1+v2+v3，缺档用 debug 密钥补签）、`check-android-package.cjs`（APK 原生库 ELF LOAD 对齐 / ZIP 对齐复检，不带参数检查 dist 最新 APK）、`build-ios.cjs`（iOS 未签名 IPA；`--check` 只查环境，默认出 iOS 26+ 的 `..._ios_unsigned.ipa`，`--legacy` 出 iOS 15~25 的 `..._ios_legacy_unsigned.ipa`；文件名与构建号取 `scripts/version.json` 的显示版本）、`sign-ios.cjs`（用 `src-tauri/10月20日企业证书` 给未签名 IPA 套企业签名；临时钥匙串 + WWDR G3，默认签当前版本 legacy 包）、`build-ios-release.cjs`（macOS 一键签名发版：自动 patch 版本 → modern + legacy 构建 → 企业签名 → `dist` 只留两个签名 IPA；`--dry-run` 先看计划） |
-| 回归 | `test-*.cjs`（主题套件）、`test-battle.js`、`check-asset-paths.cjs`（资源引用检查）、`check-encodings.cjs`（文本编码 / `.ps1` BOM 体检，CI 也跑） |
+| 回归 | `test-*.cjs`（主题套件）、`run-tests.cjs`（并行跑全部 `test-*.cjs`，`--jobs N` / `--serial` / `--only 名字`；CI 用它）、`test-battle.js`、`check-asset-paths.cjs`（资源引用检查）、`check-encodings.cjs`（文本编码 / `.ps1` BOM 体检，CI 也跑） |
 | 全流程对账（**不是** `test-*.cjs`，所以不进 CI：跑一次几分钟，按需手跑） | `verify.cjs` —— 三个验证合在一个入口：`story`（剧情机器人：从第 1 层爬到上千层，逐条核对 `docs/剧情触发条件.md`）、`layer100`（整百层那两段的定向回归：22 种「进层前」局面 × 轮数）、`stacking`（同名叠加审计：叠层 / 上限 / 效果随层数放大） |
 | 数值 / 数据 | `stage-balance.cjs`、`gen-vendor-data.cjs`（从 `references/orig/` 重新生成 `js/gamedict.js`；**非运行时**，缺参考目录时明确报错） |
 | 经典模式素材 + **索引** | `gen-ssfight-ui.cjs`（从原版整片导出提素材到 `images/ssfight/ui/`；**顺带产出两张索引**：`textfields-index.json` = 每个文本字段的框宽/字号/每行几个全角字，`symbol-index.json` = 具名元件 → 元件号/帧数/出现在宿主第几帧）、`gen-ssfight-textfields.cjs`（文本字段元数据 `textfields.json`，**是上面那张索引的框宽来源**）。改经典界面前先查这两张表、别开浏览器 —— 用法见 `docs/经典模式-优化与取证Skill.md` |

@@ -1,31 +1,19 @@
-/* Hero-mode profile and weapon/skill progression. No account writes, currency or save calls.
- * Upgrade rows come from upgradeMap: current levels 1..14 use
- * 100/100/100/70/60/40/25/15/10/100/8/5/4/3 percent.
- * Ordinary levels 1..9 gain +3 percentage points per failure, cleared on success.
- * Current level 10 and above use the fixed row rate; 11..15 are true levels 1..5.
- */
+/* Tower hero-mode profile, appearance and weapon/skill progression. No account writes, currency or save calls.
+ * 升级行来自 upgradeMap（当前等级 1..14），概率与失败保底口径见 HERO_FAIL_BONUS_PCT。 */
 (function () {
   'use strict';
 
   const CONFIG = Object.freeze({
     initialCount: 3, startLevel: 5, normalLimit: GData.wsLimit(90),
-    /* 每一层最后一场胜利的领悟概率由「已掌握武技数」决定，见 learnChanceForCount。
-     * 第一层最后一场固定 100%。 */
+    // 每层最后一战必判定领悟；第 1 层固定 100%，其余按已掌握数衰减（learnChanceForCount）。
     lastBattleLearn: true,
-    /* 2026-10-24 用户口径：勇者初始生命 800，力 / 敏 / 速同为 65。 */
     base: Object.freeze({ power: 65, agility: 65, speed: 65, maxHp: 800 }),
   });
-  /* 勇者武技普通级（1~9）的失败保底：每次失败 +3 个百分点，成功后清零。
-   * 账号武技仍是 State.UPGRADE_FAIL_BONUS=2；用户 2026-11 只要求勇者模式 +3。 */
+  // 勇者模式普通级（1~9）每次失败 +3 个百分点、成功后清零；
+  // 账号武技走 State.UPGRADE_FAIL_BONUS=2，两者不要合并。
   const HERO_FAIL_BONUS_PCT = 3;
-  /* ---------- 初始四维的重新分配（2026-10-24 用户口径） ----------
-   * 生命固定 800，力 / 敏 / 速三项在**总点数不变**的前提下由玩家上下调整。
-   * 「20% 下限」沿用玩家自由属性点那条口径：生命按 5 点折算 1 点属性，
-   * 四项占比任何一项低于 20% 就是越界。初始 65/65/65/800 的账：
-   *   生命 80 + 力 65 + 敏 65 + 速 65 = 275 点预算；
-   *   下限 = ceil(275 × 20%) = 55，单项上限 = 275 - 80 - 55×2 = 85。
-   * 力 / 敏 / 速初始合计 195 点；从某项扣下的点先进入「可分配池」，
-   * 再加到另一项上，所以三项合计 + 池始终 = 195。 */
+  /* 20% 下限按四项总预算（maxHp/HP_PER_STAT + 力敏速合计）计算，不是单项百分比；
+   * 三项合计 + 可分配池恒为 STAT_TOTAL，从某项扣下的点先进池。 */
   const HP_PER_STAT = 10;
   const STAT_SHARE_MIN = 0.20;
   const STAT_KEYS = ['power', 'agility', 'speed'];
@@ -47,8 +35,6 @@
   function initialStats() {
     return { power: STAT_RULES.initial.power, agility: STAT_RULES.initial.agility, speed: STAT_RULES.initial.speed };
   }
-  /** 校验一份力/敏/速分配：三项都必须在 [下限, 上限] 且合计正好 195；
-   *  不合法（含旧档 80/65/60）一律回初始 65/65/65。 */
   function cleanStats(raw) {
     const src = object(raw) ? raw : {};
     const out = {};
@@ -60,9 +46,8 @@
     }
     return sum === STAT_TOTAL ? out : initialStats();
   }
-  /** 塔内每 5 层的勇者成长（独立于开局四维分配）。
-   *  不能直接改 base：normalize 的 cleanStats 要求三项合计正好 195，改完会被回滚成 65/65/65。
-   *  这里单存一份附加成长，fighter() 再叠到白值上。 */
+  // 塔内每 5 层的勇者成长单存一份，不能并进 base：
+  // cleanStats 要求三项合计正好 STAT_TOTAL，否则会被回滚；fighter() 再叠到白值上。
   function cleanTowerBonus(raw) {
     if (!object(raw)) return null;
     const out = {
@@ -73,7 +58,6 @@
     };
     return (out.power || out.agility || out.speed || out.maxHp) ? out : null;
   }
-  /** 上 / 下调整一项：下键扣点进池、上键从池里加点；池空 / 满额 / 20% 下限都会拒绝。 */
   function adjustStat(rawValues, rawPool, key, dir) {
     if (!STAT_KEYS.includes(key)) return error('只能调整力量、敏捷和速度。');
     const values = {};
@@ -109,10 +93,7 @@
     return Number.isFinite(n) ? Math.max(0, Math.min(1 - Number.EPSILON, n)) : 0;
   }
   const pick = (pool, rng) => pool.length ? pool[Math.floor(roll(rng) * pool.length)] : null;
-  /* 每层最后一战的领悟概率（0~1），按**已掌握武技总数**反比衰减。
-   * 拟合曲线精确穿过用户给的三点：4→80%、10→50%、20→30%。
-   *   pct(n) = 8000 / (9n + 60) − 10/3
-   * 例如 4=80、10=50、20=30、24≈25.7、40≈15.7。 */
+  // 领悟概率按已掌握武技总数反比衰减，曲线穿过 4→80%、10→50%、20→30% 三个锚点。
   function learnChanceForCount(ownedCount) {
     const n = Math.max(0, Math.floor(Number(ownedCount) || 0));
     const pct = 8000 / (9 * n + 60) - 10 / 3;
@@ -151,10 +132,8 @@
   }
   const owns = (hero, it) => listOf(hero, it.kind).some((raw) => Number(String(raw).split(':')[0]) === it.id);
   const count = (hero) => hero.weapons.length + hero.skills.length;
-  /* 24 项普通上限的计数口径：**只数占上限的武技**。
-   * HS04「禁书残页」学会的武技带 `uncapped` 标记（ref 数组），
-   * 即使还没到 24 项也不占计数；普通学习达到 24 后仍可继续被 HS04 扩充。
-   * UI 上仍用 count() 显示「已掌握」，另外单独提示其中几项不占上限。 */
+  // 24 项普通上限只数未标 uncapped 的武技；HS04 学会的带 uncapped 标记，不占位，
+  // 普通学习到 24 后仍可被 HS04 扩充。UI 显示总数用 count()，免上限项另行提示。
   const uncappedRefs = (hero) => Array.isArray(hero && hero.uncapped) ? hero.uncapped : [];
   const isUncapped = (hero, ref) => uncappedRefs(hero).includes(String(ref));
   function markUncapped(hero, ref) {
@@ -178,12 +157,12 @@
     const arr = listOf(hero, it.kind), at = arr.findIndex((raw) => Number(String(raw).split(':')[0]) === it.id);
     if (at >= 0) arr[at] = it.id + ':' + level;
   }
-  /** 当前是不是现代界面（只影响「外观能不能画出来」这一层，不碰数值）。 */
+  /** 只决定外观能不能画出来，不碰数值。 */
   function modernUi() {
     try { return !!(window.State && State.settings && State.settings().uiMode === 'modern'); }
     catch (e) { return false; }
   }
-  /** 外观件 → 现代图集套装序号（`Head_<index>_<tier>`）。没有这套数据时返回 NaN。 */
+  // 外观件 setId → 现代图集序号，图集名 Head_<index>_<tier>（素材见 images/battle/outfit/）；无数据返回 NaN。
   function outfitIndexOf(setId) {
     const id = Number(setId);
     if (!(id > 0)) return NaN;
@@ -197,9 +176,8 @@
     for (const value of Array.isArray(raw) ? raw : []) {
       const item = object(value) ? value : { id: value }, id = Number(item.id);
       const def = gearMap.getValue(id);
-      /* 外观数据源接受 GData.GEAR_BASE 的原始 288 个 id（外观页展示时合并重复黑装后为 280 件）；
-       * 其中 q5 黑装上位（213~264）与深海 / 机器猫 q3（189~196）不在 APK 的 gearMap 里 ——
-       * 只做外观时按 GEAR_BASE 行补出 type / setId / quality，不把这些 id 整件丢掉。 */
+      // 外观 id 来自 GData.GEAR_BASE（原始 288 个，展示去重后 280 件）。gearMap 缺 q5 黑装上位
+      // 213~264 与深海/机器猫 q3 189~196；此时按 GEAR_BASE 行补 type/setId/quality，不能整件丢弃。
       let type, quality, setId = 0;
       if (def) {
         type = Number(def.type);
@@ -218,12 +196,10 @@
       const ext = (Array.isArray(item.ext) ? item.ext : []).filter(object).map((e) => ({
         id: integer(e.id, 0, 0, 100000), level: integer(e.level, 1, 1, 3),
       })).filter((e) => e.id > 0).slice(0, 3);
-      /* 【2026-11】外观差分（原版头 / 拳套的强化档画稿）：勇者外观件没有真词条，
-       * 玩家在换装页挑的是 1~3 档里的哪一张画稿，这里原样存下来（绘制入口都读 tier）。 */
+      // 外观件的 tier 是 1~3 档画稿选择而非词条；绘制入口都读 tier，必须原样存。
       let tier = integer(item.tier, 1, 1, 3);
-      /* 现代模式：只保留 `images/battle/outfit/` 真的画得出来的套装；且**不做外观差分**，
-       * 一套装备只有一张卡 / 一个造型，tier 统一为 1。否则详情页 / 战斗里那件（甚至整套）
-       * 会直接消失，玩家看到的就是「没穿装备」。 */
+      // 现代模式只保留 Engine.hasModernOutfit 画得出的套装，且不做外观差分（tier 统一 1）；
+      // 否则详情页 / 战斗里那件甚至整套会直接消失。
       if (modernUi() && window.Engine && typeof Engine.hasModernOutfit === 'function') {
         const index = outfitIndexOf(setId);
         if (!Number.isFinite(index) || !Engine.hasModernOutfit(index)) continue;
@@ -237,7 +213,7 @@
   }
   function normalize(raw) {
     if (!object(raw)) return null;
-    /* baseVer=1 才认玩家调过的四维；旧档（80/65/60/900）没有这个标记，回新的初始 65/65/65/800。 */
+    // baseVer=1 才认玩家调过的四维；无此标记的存档回初始 65/65/65/800。
     const base = raw.baseVer === 1 ? cleanStats(raw.base) : initialStats();
     const towerBonus = cleanTowerBonus(raw.towerBonus);
     const hero = Object.assign({}, raw, { version: 1, baseVer: 1,
@@ -266,16 +242,15 @@
         }
       }
     }
-    /* 只保留仍掌握着的「不占上限」标记：HS02 遗忘后旧标记不能在下次读档时复活。 */
+    // 只保留仍掌握的 uncapped 标记：HS02 遗忘后旧标记不能在读档时复活。
     const ownedRefs = new Set(owned(hero).map((it) => it.ref));
     for (const rawRef of (Array.isArray(raw.uncapped) ? raw.uncapped : [])) {
       let ref = String(rawRef || '');
-      if (/^\d+$/.test(ref)) ref = 'w:' + ref;             // 老/外部数据只写 id 时按武器处理
+      if (/^\d+$/.test(ref)) ref = 'w:' + ref;             // 外部数据只写数字 id 时按武器处理
       if (ownedRefs.has(ref) && uncappedRefs(hero).indexOf(ref) < 0) hero.uncapped.push(ref);
     }
-    /* 旧档兼容（2026-10 新口径）：以前 HS04 学会的武技没有 `uncapped` 标记，若总数已超过
-     * 24，把第 25 项起的武技补成「不占上限」，否则读档后会被 24 上限反向锁死。
-     * 旧 HS02 不改变总数、精英学习到 24 就停，超过 24 的来源只有 HS04，按末位补标记是安全的。 */
+    // 旧档 HS04 学到的武技可能没有 uncapped 标记：总数超过 24 时把第 25 项起补标记，
+    // 否则读档后被 24 上限反向锁死。超过 24 的来源只有 HS04，按末位补是安全的。
     const capped = owned(hero).filter((it) => !isUncapped(hero, it.ref));
     if (capped.length > CONFIG.normalLimit) {
       for (const it of capped.slice(CONFIG.normalLimit)) markUncapped(hero, it.ref);
@@ -307,12 +282,11 @@
     const label = '勇者已准备就绪：3个5级武技。';
     return { ok: true, hero, msg: label, label };
   }
-  /** 勇者专属：武技真化后的白值乘数。真1~真4 ×1.5，真5 ×2；普通等级 ×1。 */
   function trueBaseMul(level) {
     const lv = Math.max(1, Math.min(15, Math.floor(Number(level) || 1)));
     return lv >= 15 ? 2 : lv >= 11 ? 1.5 : 1;
   }
-  /** 勇者视角的武器白值：在 State.weaponInst 的基础上套真化白值乘数。 */
+  // 基于 State.weaponInst 的白值再套真化乘数；不要另建一套武器数值。
   function heroWeapon(raw) {
     const w = State.weaponInst(raw);
     if (!w) return null;
@@ -374,9 +348,8 @@
     return { ok: true, ref: item.ref, name: item.name, before, level, successes,
       attempts: results.length, success: last.success, rate: last.rate, results, msg: label, label };
   }
-  /** 只读的下一级信息（界面用）：当前等级、下一级成功率、失败保底次数、是否封顶/不可升级。
-   *  与 `upgrade()` 用同一把尺子：普通 1~9 级的成功率吃「每次失败 +3%」，
-   *  10 级及以上走真化固定行；技能 6 / 13 与 15 级封顶返回 `max: true`。 */
+  // 只读的下一级信息（界面用），必须与 upgrade() 同一把尺子：
+  // 普通 1~9 级吃「每次失败 +3%」，10 级以上走真化固定行；技能 6/13 与 15 级封顶。
   function upgradeInfoOf(hero, ref) {
     if (!repair(hero)) return null;
     const item = parseRef(ref);
@@ -402,13 +375,12 @@
     const opts = options || {}, atCap = cappedCount(hero) >= CONFIG.normalLimit;
     if (atCap && opts.special !== true) return Object.assign(error('已达到普通学习上限，仅特殊途径可以继续学习。'), { atCap: true });
     const pool = catalog().filter((it) => !owns(hero, it));
-    /* 定向学习（HS02 自选、事件/测试也可以传）：`learnRef` 形如 `w:12` / `s:7`。 */
+    // learnRef：定向学习（HS02 自选 / 事件 / 测试传），格式 w:12 / s:7。
     const want = opts.learnRef ? parseRef(opts.learnRef) : null;
     const item = want || pick(pool, opts.rng);
     if (!item) return error('已经掌握所有可学习的武技。');
     if (owns(hero, item)) return error('已经掌握【' + item.name + '】。');
-    /* 2026-10 用户口径：**所有新习得的武技都是 5 级**（精英领悟、授业事件、HS04 一致）。
-     * 仍然允许显式传 level 给回归/调试，但缺省不再是 1 级。 */
+    // 新习得武技默认 5 级（精英领悟 / 授业 / HS04 一致）；回归和调试可显式传 level。
     const level = integer(opts.level, CONFIG.startLevel, 1, 15);
     listOf(hero, item.kind).push(item.id + ':' + level);
     const ref = refOf(item.kind, item.id);
@@ -419,9 +391,8 @@
       atCap: cappedCount(hero) >= CONFIG.normalLimit, special: opts.special === true,
       msg: label, label };
   }
-  /* HS02：**自选**遗忘一个已学武技，再**自选**一个尚未掌握的武技；
-   * 新武技继承被遗忘武技的等级（用户 2026-10 口径）。没有传 learnRef 时保留
-   * 旧的随机替换行为，给调试/旧调用兜底；正常界面一定传自选目标。 */
+  // HS02：自选遗忘 + 自选替换，新武技继承被遗忘武技的等级；
+  // 未传 learnRef 时随机兜底（调试 / 旧调用），正常界面一定传自选目标。
   function replace(hero, ref, options) {
     if (!repair(hero)) return error('勇者数据无效。');
     const old = parseRef(ref), opts = options || {};
@@ -440,8 +411,7 @@
     clearUncapped(hero, old.ref);
     const nextRef = refOf(next.kind, next.id);
     listOf(hero, next.kind).push(next.id + ':' + integer(level, 1, 1, 15));
-    /* 遗忘的是 HS04 的免上限武技时，新武技继续免上限：否则「换招」会让
-     * 24 项普通上限凭空多占 1 格。 */
+    // 遗忘的是 HS04 免上限武技时，新武技继续免上限；否则换招会白占 1 格 24 上限。
     if (wasUncapped) markUncapped(hero, nextRef);
     const label = old.name + '已替换为' + next.name + '（继承' + levelLabel(integer(level, 1, 1, 15)) + '）' +
       (wasUncapped ? '，仍不占24项上限' : '') + '。';
@@ -449,7 +419,6 @@
       name: next.name, level: integer(level, 1, 1, 15), uncapped: wasUncapped,
       total: count(hero), capped: cappedCount(hero), msg: label, label };
   }
-  /* HS03：把一个选定武技直接升到满级（真5 = 15级）。 */
   function maxOut(hero, ref) {
     if (!repair(hero)) return error('勇者数据无效。');
     const item = parseRef(ref);
@@ -462,7 +431,7 @@
     const label = item.name + '直接升至真5（15级）。';
     return { ok: true, ref: item.ref, name: item.name, before, level: 15, msg: label, label };
   }
-  /* 铸币修炼：非战斗期花 1 枚铸币，把选定武技随机提升 3~5 个小级（必定成功、封顶真5）。 */
+  // 铸币修炼：调用方扣 1 枚铸币、限非战斗期；本函数只加级（默认 3，封顶真5）。
   function addLevels(hero, ref, levels) {
     if (!repair(hero)) return error('勇者数据无效。');
     const item = parseRef(ref);
@@ -489,9 +458,8 @@
     const selected = pick(candidates, opts.rng);
     const upgraded = selected ? upgrade(hero, selected.ref, { rng: opts.rng }) : null;
     let learned = null, learnChance = 0;
-    /* 每一层最后一场战斗都可能领悟新武技；第一层最后一战固定 100%。
-     * 其余层按「当前已掌握武技总数」反比衰减（learnChanceForCount）。
-     * 普通学习仍受 24 项上限限制；最后一战不再要求是精英战。 */
+    // 每层最后一战判定领悟：第 1 层固定 100%，其余按已掌握总数衰减（learnChanceForCount）；
+    // 普通学习仍受 24 项上限限制。
     if (opts.lastBattle === true && cappedCount(hero) < CONFIG.normalLimit) {
       learnChance = integer(opts.layer, 0, 0, Number.MAX_SAFE_INTEGER) === 1
         ? 1 : learnChanceForCount(count(hero));

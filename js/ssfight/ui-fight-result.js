@@ -1,4 +1,4 @@
-/* Original Flash battle-dialog containers; callers retain all settlement rules. */
+// 原版战斗对话框容器：这里只负责版式，结算规则与数值由调用方决定。
 (function () {
   'use strict';
   const NS = 'http://www.w3.org/2000/svg';
@@ -27,18 +27,15 @@
     }
     return out;
   }
-  /* ---------- 战果页（原版 `fight` 第 2/3 帧）----------
-   * 原版普通战斗结束**没有**另一层"提示"弹窗：`fight.gotoAndStop(2|3)` 那一页
-   * 就是结算（`showFightResult` :18703-18848，`getExp` + `c1/c2/c3` 三格）。
-   * 复刻以前把经验与金松果拼成一段文字塞进 4692 对话框，所以版式与原版差得很远。
-   * 这里只在**真的有奖励**时走原版 CG；切磋 / 木桩统计这类"没有奖励"的仍走 4692。 */
+  // 原版普通战斗结束没有额外提示框：`fight` 第 2/3 帧就是结算页
+  // （`showFightResult` :18703-18848，`getExp` + `c1/c2/c3` 三格）。
+  // 只有真有奖励时走这张 CG；切磋 / 木桩等无奖励结算仍走 4692。
   function hasReward(options) {
     const exp = Math.round(Number(options.exp) || 0);
     const gold = Math.round(Number(options.gold) || 0);
     return exp > 0 || gold > 0 ||
       !!(options.items && options.items.length) || !!(options.ups && options.ups.length);
   }
-  /** 升级奖励压成一行行文字（原版升级页另开；战果页只留一句提示）。 */
   function upsLines(ups) {
     return (ups || []).filter(Boolean).map((u) => {
       let text = '升到 ' + u.level + ' 级';
@@ -54,7 +51,7 @@
   }
   function rewardText(options) {
     const note = plain(options.note != null ? options.note : options.text);
-    /* 升级奖励已经有 ssfight 原版升级页（7795）专门展示，战果页不再重复列一行行文字。 */
+    // 升级奖励由原版升级页（7795）展示，战果页不再重复列文字。
     const upgrade = hasLevelUp(options) ? [] : upsLines(options.ups);
     return [note].concat(upgrade).filter((s) => String(s || '').trim()).join('\n');
   }
@@ -64,12 +61,12 @@
   function promptLevelUpChoices() {
     if (window.UI && UI.classic && UI.classic.promptLevelUpChoices) UI.classic.promptLevelUpChoices();
   }
-  /** 有升级时先挂原版升级页（7795），关掉后再接现代的武技三选一 / 自由属性点；
-   *  没有升级 / 素材没起来时保持原来的“立刻弹现代选择”。 */
+  // 有升级时先挂原版升级页（7795），关掉后再接武技三选一 / 自由属性点；
+  // 没有升级或素材没起来时直接弹现代选择。
   function showLevelUp(options) {
-    /* 新手引导：等级事件（4/5/10/15/20/25/30/35 → nowPage 21/13/23/24/17/19/20/26，
-     * 原版 showLevelUp/showLevelupTips :7160-7300）。第 5 级的 f13 要盖在升级页上，
-     * 所以先通知再挂页（引导自己是异步挂的，加上重试能等到这个页）。 */
+    // 新手引导等级事件（4/5/10/15/20/25/30/35 → nowPage 21/13/23/24/17/19/20/26，
+    // 原版 showLevelUp/showLevelupTips :7160-7300）。第 5 级 f13 要盖在升级页上，
+    // 必须先通知再挂页；引导自身异步挂载，会重试等到这个页。
     if (window.SfGuide && SfGuide.onLevelup) { try { SfGuide.onLevelup(options && options.ups); } catch (e) {} }
     if (!hasLevelUp(options)) { promptLevelUpChoices(); return false; }
     try {
@@ -88,12 +85,12 @@
   async function loadLootIcons() {
     if (lootIcons) return lootIcons;
     try {
-      const r = await fetch(SfRender.BASE + 'loot-icons.json', { cache: 'force-cache' });
-      lootIcons = (r && r.ok) ? ((await r.json()).byId || {}) : {};
+      const table = await SfRender.loadTable('loot-icons.json');
+      lootIcons = (table && table.byId) || {};
     } catch (e) { lootIcons = {}; }
     return lootIcons;
   }
-  /** 提交一次动作；旧层迟到的回调由 `current` + `host` 双重校验挡住。 */
+  // 旧层迟到的回调由 current + host 双重校验挡住。
   function commit(record, host, actions, index) {
     if (!record || record.settled || current !== record || !host.isConnected) return false;
     if (!Number.isInteger(index) || !actions[index] || actions[index].disabled === true) return false;
@@ -109,7 +106,7 @@
     if (/开始|继续|确定|确认|闯关|挑战|再战|知道了/.test(label) || action.primary === true) return 2;
     return 0;
   }
-  /** 原版空按钮 3801：量一次自身画稿再摆，避免把不对称的画稿当成居中。 */
+  // 原版空按钮 3801 的画稿不以注册点居中：先量自身画稿再摆，不能用固定中心。
   function makeButton(view, offset, record, host, label, centerX, centerY, run, name, disabled, width) {
     const clip = view.attachChild('3801', 1, name);
     const measured = clip.g.getBBox();
@@ -134,11 +131,10 @@
     clip.g.addEventListener('keydown', e => { if (!e.repeat && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); fire(e); } });
     return clip;
   }
-  /** 原版 `fight` 第 2/3 帧：经验（`getExp.exp`）+ 三格奖励（金松果 / 战利品）。 */
   async function openReward(options, host, record, mine) {
     if (!window.SfRender || !SfRender.mountSymbol) return null;
     try {
-      await SfRender.loadExtra('tags-fight.json');
+      await SfRender.loadExtra('tags-fight-core.json');
       await SfRender.loadExtra('tags-fight-result.json');
     } catch (e) { return null; }
     if (mine !== generation || !host.isConnected) return null;
@@ -150,8 +146,7 @@
     } catch (e) { return null; }
     if (mine !== generation || !host.isConnected) { view.destroy(); return null; }
     record.view = view;
-    /* 原版这页是一张 308 宽的整屏 CG，左右各留一圈舞台边；舞台外沿用黑色，
-     * 不让挑战页/首页从缝里透出来（旧版是半透明提示框，可以透）。 */
+    // 这页是 308 宽整屏 CG，舞台外沿用黑色，不能让底页从缝里透出来。
     if (host.style) host.style.background = '#000';
     const t = window.SfUiMain && SfUiMain.toolkit;
     if (t && t.freezeDescendants) t.freezeDescendants(view);
@@ -176,8 +171,8 @@
     for (const item of (options.items || [])) {
       if (!item || item.id == null) continue;
       const count = Math.max(1, Math.round(Number(item.count) || 1));
-      /* 战斗中飘到的金松果和结算金松果是两笔（`BattleDrops` 当场 `addGold`），
-       * 合在同一格里显示总数，不能因为已经有一格金松果就把飘到的这份吞掉。 */
+      // 飘到的金松果已由 BattleDrops 当场 addGold，与结算金松果是两笔；
+      // 这里并入同一格显示总数，不能吞掉已入账的那份。
       if (Number(item.id) === 8) { gold += count; continue; }
       const hit = icons[String(item.id)];
       if (!hit || !hit.id) continue;
@@ -187,8 +182,8 @@
     if (gold > 0) rewards.push({ count: gold, icon: (icons['8'] || {}).id || '3131' });
     rewards.push(...picks);
     const cells = [['c1', 'num'], ['c2', 'num1'], ['c3', 'num3']];
-    /* 胜负两帧的格子数不一样：负场（frame 3）没有 `c2/num1`，只有 `c1` + `c3`。
-     * 按**当前帧真的存在**的格子依次摆，不能因为缺一格就把后面的奖励丢掉。 */
+    // 负场（frame 3）没有 c2/num1，只有 c1 + c3；按当前帧真实存在的格子依次摆，
+    // 不能因为缺一格就把后面的奖励丢掉。
     const slots = cells.map(([cellName, numName]) => ({ cell: view.byName(cellName), num: view.byName(numName) }))
       .filter((slot) => slot.cell);
     for (let i = 0; i < slots.length; i++) {
@@ -206,8 +201,7 @@
     const prize = view.byName('prizeBackg');
     if (prize) stop(prize, rewards.length ? 1 : 2);
 
-    /* 原版战果页本身没有按钮；这里把复刻需要的续战动作放在底部，文字说明收在一条
-     * 与素材同色的奶油色横条里（超过两行给「更多」，不丢信息）。 */
+    // 原版战果页没有按钮；续战动作是这里补的，文字收在同色横条里，超两行给「更多」。
     const text = rewardText(options);
     const rows = text ? lines(text, 32) : [];
     const perPage = 2;
@@ -266,6 +260,14 @@
     if (!old) return;
     if (old.view) old.view.destroy();
     if (old.host.parentNode) old.host.parentNode.removeChild(old.host);
+    if (window.SfRender && SfRender.queueExtraRelease) {
+      SfRender.queueExtraRelease('tags-fight-result.json', 800);
+      // 低内存设备在战果关闭后回收 core；下一场会按需重载。
+      const nav = typeof navigator !== 'undefined' ? navigator : {};
+      const lowMem = /Android/i.test(nav.userAgent || '') ||
+        (Number(nav.deviceMemory) > 0 && Number(nav.deviceMemory) <= 4);
+      if (lowMem && (!window.SfFight || !SfFight.active())) SfRender.queueExtraRelease('tags-fight-core.json', 2000);
+    }
   }
   function dismiss() {
     const record = current;
@@ -287,9 +289,9 @@
     const record = { host, view: null, settled: false, options }; current = record;
     try {
       const kind = SYMBOL[options.kind] ? options.kind : 'result';
-      /* 有奖励的**普通战果** = 原版 `fight` 战果页（经验 + 金松果 / 战利品三格）；
-       * 素材缺失时才退回 4692 提示框，保证战果不会因为一张 CG 打不开。
-       * 关卡 / 竞技场 / 天梯有各自的续战容器（4839 / 3822 / 3776），不能抢走。 */
+      // 有奖励的普通战果走原版 fight 战果页；素材缺失时才退回 4692 提示框，
+      // 保证战果不会因为一张 CG 打不开。
+      // 关卡 / 竞技场 / 天梯各有续战容器（4839 / 3822 / 3776），不能抢走。
       if (kind === 'result' && hasReward(options)) {
         const reward = await openReward(options, host, record, mine);
         if (reward) return reward;
@@ -318,16 +320,14 @@
         const player = options.player || {}, foe = options.foe || {};
         set('name1', player.name || '我'); set('level1', player.level || '');
         set('name2', foe.name || ''); set('level2', foe.level || '');
-        /* 3822 的两个昵称框只有 76.2 单位宽（字号 12）：7 个汉字要 84、21 个字母要 126，
-         * 直接 `setText` 会被卡片裁掉（用户 2026-11 报的「联机决赛弹窗昵称显示不完全」，单机同一容器）。
-         * 与战斗血条的 `setNameText` 同一条口径：只在放不下时缩字号，不裁字、不横向拉扁。 */
+        // 3822 昵称框仅 76.2 宽（字号 12），直接 setText 会被卡片裁掉；
+        // 与战斗血条 setNameText 同口径：放不下只缩字号，不裁字、不横向拉扁。
         for (const field of ['name1', 'name2']) {
           const target = view.byName(field);
           if (target && window.SfRender && SfRender.fitTextWidth) SfRender.fitTextWidth(target, { ascii: 0.5, min: 6 });
         }
-        // The pill is depth 9. Its baked label is the first three paths of
-        // shape 3784 at depth 13 (bounds x139.5–176.85, y140.55–158.7), while
-        // that shape's remaining two paths draw the left avatar's card.
+        // The pill's baked label is shape 3152 and also the first three paths of shape 3784
+        // (depth 13); 3784's remaining paths draw the left avatar card.
         // 3795 is the central VS artwork and must stay visible.
         for (const rec of view.nodes.values()) {
           if (String(rec.id) === '3152') rec.node.style.display = 'none';
@@ -358,11 +358,10 @@
       const layout = {
         arena: { x: 48, y: 130, width: 21, size: 9, leading: 10, rows: 2, actionY: 154, pageY: 139 },
         rank: { x: 68, y: 69, width: 18, size: 10, leading: 12, rows: 5, actionY: 143, pageY: 128 },
-        /* 4839 的米色正文框左边沿约在 x=72；以前从 64 起排，首字会压到框外
-         * （用户 2026-10 截图「汉字超出框」）。右边界同步收一点，给两侧留白。 */
+        // 4839 米色正文框左边沿约 x=72；从 72 起排、右边界收一点，避免首字压出框。
         stage: { x: 72, y: 60, width: 18, size: 9.5, leading: 10.5, rows: 6, actionY: 140, pageY: 126 },
         result: { x: 66, y: 78, width: 19, size: 10, leading: 12, rows: 5, actionY: 158, pageY: 141 },
-        /* 4692 的通用提示：没有「战斗胜利」那行，正文从标题下方开始。 */
+        // 4692 通用提示没有胜负标题行，正文从标题下方起排。
         notice: { x: 66, y: 66, width: 19, size: 10, leading: 12, rows: 6, actionY: 158, pageY: 141 },
       }[kind];
       const rows = lines(options.text, layout.width), perPage = layout.rows;
@@ -387,8 +386,6 @@
       record.actions = actions; record.choose = choose;
       function button(label, centerX, centerY, run, name, disabled, width) {
         const clip = view.attachChild('3801', 1, name);
-        // 3801's artwork is not centred on its registration point: measure the
-        // untouched pill, then position both it and its label in that space.
         const measured = clip.g.getBBox();
         const box = measured.width > 30 && measured.height > 5 ? measured : { x: 0, y: -.02, width: 67.3, height: 19.9 };
         const midX = box.x + box.width / 2, midY = box.y + box.height / 2;
@@ -420,8 +417,8 @@
       const ordered = actions.map((action, index) => ({ action, index }))
         .sort((a, b) => rankAction(a.action) - rankAction(b.action) || a.index - b.index);
       const step = ordered.length > 2 ? 66.5 : 90;
-      /* 3776/4839 的可见米色面板中心比 320 画布中心略偏左（实测约 158，而不是 160）。
-       * 按钮组按 160 排会整体偏右；stage / rank 用面板中心 158，其余容器保持 160。 */
+      // 3776/4839 可见面板中心实测约 158（320 画布中心 160）；按 160 排会整体偏右，
+      // 所以 stage / rank 用 158，其余容器保持 160。
       const actionCX = (kind === 'stage' || kind === 'rank') ? 158 : 160;
       ordered.forEach(({ action, index }, position) => button(action.label || '确定',
         actionCX + (position - (ordered.length - 1) / 2) * step, layout.actionY,

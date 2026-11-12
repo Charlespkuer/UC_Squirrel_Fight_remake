@@ -1,4 +1,4 @@
-/* Shared UI feedback for DOM cards and SVG pop shells. No work at import time. */
+// Shared feedback for DOM cards and SVG pop shells; no work at import time.
 (function () {
   'use strict';
 
@@ -7,10 +7,9 @@
   const disabled = (node) => !live(node) || node.disabled ||
     (node.getAttribute && node.getAttribute('aria-disabled') === 'true');
   const reduced = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  /* 触屏 / 新平台没有真正的悬停：`pointerenter` 只在点下那一拍来一次，`pointerleave`
-   * 要等下一次点别处。若仍给它加 `.sf-hover`，卡片会一直停在放大 1.12 倍的状态，
-   * 页面重绘 / 再次落到同一格时又反复切换 —— 用户看到的「界面缩放不停切换」之一。
-   * 按下 / 选中反馈仍由 `.pressed` / `.picked` / `.sf-selected` 承担。 */
+  // Touch/new platforms have no real hover: pointerenter fires once, pointerleave waits for the
+  // next tap. Adding .sf-hover there leaves cards stuck at 1.12x and toggles on every repaint.
+  // Press/selected feedback stays on .pressed / .picked / .sf-selected.
   const noHover = () => !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
   function state(node) {
     let s = states.get(node);
@@ -94,7 +93,7 @@
   function tap(node, run, options) {
     if (disabled(node)) return false;
     const s = state(node);
-    if (s.pending) return false; // Repeated clicks must not commit an earlier navigation.
+    if (s.pending) return false; // Pending guard: repeated clicks must not commit an earlier navigation.
     const opts = options || {}, host = refresh(node, s);
     s.pending = true;
     if (opts.press !== false) press(node, s);

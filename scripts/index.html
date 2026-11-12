@@ -5,21 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>松鼠大战 · 怀旧单机复刻版</title>
 <style>
-/* iOS WKWebView（Tauri App / iPhone、iPad）：禁用双击缩放、长按菜单和点按灰块。
-   只在支持 -webkit-touch-callout 的 WebKit 上生效，桌面浏览器/桌面壳不受影响。 */
+/* iOS WKWebView 禁止双击缩放/长按菜单；安卓整页 touch-action:manipulation 才能把
+   click 延迟从 ~190ms 降到 ~4ms。⚠ iOS 的 body 级 touch-action 会吞点击合成，只给控件加。 */
 @supports (-webkit-touch-callout: none) {
   html, body { -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; }
   body { -webkit-touch-callout: none; }
-  /* 只给真正需要防双击缩放的控件加，不再压在 html/body 上：
-     iOS 15 的 WKWebView 在 body 上声明 touch-action 时，部分版本会吞掉点击合成。 */
   button, input { touch-action: manipulation; }
 }
-/* 安卓 / Chromium：SVG 热区和整页也要去掉「双击缩放」判定。
-   实测（Android 15 WebView / Chrome 124，真触摸）：只给 button/input 声明时，
-   经典界面的 SVG 按钮原生 click 会比 touchend 晚 ~190ms；在这段窗口里再点一下，
-   浏览器会把两下并成一次双击手势 —— 第一下的 click 直接被吞掉。整页声明
-   `touch-action: manipulation` 后 click 降到 ~4ms（见 docs/更新记录.md 第三百六十八批）。
-   ⚠ iOS 走上面那一支：WKWebView 上 body 级 touch-action 会吞掉 click 合成，这里不声明。 */
 @supports not (-webkit-touch-callout: none) {
   #app, #app * { touch-action: manipulation; }
 }
@@ -31,9 +23,7 @@
 <link rel="stylesheet" href="css/debug.css">
 <link rel="stylesheet" href="css/battle-drops.css">
 <link rel="stylesheet" href="css/classic-refine.css">
-<link rel="stylesheet" href="css/tower.css">
-<!-- 界面模式（现代/经典）：经典界面改为**用原版导出数据渲染**（images/ssfight/ui/），
-     不再用 CSS 模仿，所以 css/ui-mode.css 已删除（见 docs/更新记录.md 第一百二十五批）。 -->
+<!-- 无尽塔样式与脚本按需加载（首次进关卡页双塔入口 / 村庄「征战」时），见 js/tower-loader.js -->
 <script>
 // 运行时错误收集（供自检模式 ?test=1 报告问题，不影响正常游戏）
 window.__errs = [];
@@ -53,65 +43,49 @@ window.addEventListener('unhandledrejection', function (e) {
 </div>
 <!-- 昵称长度规则：标题页 / 修改昵称 / 存档兜底共用同一份 7 个汉字口径 -->
 <script src="js/nickname.js"></script>
-<!-- 原版数据（武器/技能/道具字典 + 素材清单 + 动画帧表）：
-     游戏数据的唯一来源，已直接提交进仓库，
-     运行时只加载这一份，游戏中不引用 references/ 下的任何文件（那些只是参考资料） -->
+<!-- 游戏数据唯一来源；运行时不引用 references/。 -->
 <script src="js/gamedict.js"></script>
-<!-- 复刻版代码 -->
 <script src="js/engine.js"></script>
 <script src="js/gamedata.js"></script>
-<script src="js/tower-data.js"></script>
+<!-- 无尽塔 5 个脚本与 tower.css 不随首屏加载：由 tower-loader 在第一次点入口时注入。 -->
+<script src="js/tower-loader.js"></script>
 <script src="js/state.js"></script>
-<!-- 桌面外壳（Tauri）里把存档通道换成 Rust 端文件读写；网页版这一句什么都不做 -->
+<!-- 桌面壳把存档通道换成 Rust 端文件读写；网页版为空操作。 -->
 <script src="js/tauri-bridge.js"></script>
 <script src="js/sim.js"></script>
-<script src="js/tower-hero.js"></script>
-<script src="js/tower.js"></script>
 <script src="js/battle.js"></script>
 <script src="js/battle-drops.js"></script>
-<!-- 经典界面 = **用原版 ssfight 导出数据渲染**（显示层移植版 + 素材库 images/ssfight/ui/）。
-     素材库由 `node tools/gen-ssfight-ui.cjs` 从原版导出生成，运行时只读它、不碰 references/。 -->
+<!-- 经典界面 = 原版 ssfight 导出数据渲染；素材由 tools/gen-ssfight-ui.cjs 生成到 images/ssfight/ui/。 -->
 <script src="js/ssfight/render.js"></script>
-<!-- 村庄主界面（main 帧）的界面代码 = 原版 MainMovie.as showMain() 的等价 JS -->
+<!-- 村庄主界面（main 帧）= 原版 MainMovie.as showMain() 的等价 JS -->
 <script src="js/ssfight/ui-main.js"></script>
 <script src="js/ssfight/ui-feedback.js"></script>
-<!-- 升级页（main 包 7795）= 原版 showLevelUp/showReward 的版式：1~29 帧大图，
-     第 30 帧「升级奖励」四格。现代升级奖励由 State.gainExp 产生，这里只负责展示。 -->
+<!-- 升级页（main 包 7795）：1~29 帧大图，第 30 帧「升级奖励」四格。 -->
 <script src="js/ssfight/ui-levelup.js"></script>
-<!-- 新手引导：原版「新手引导」=3625（25 帧，viewMission/guideMap 的 mcIndex）。
-     本批先接前 7 帧：第一场战斗 / 自动战斗 / 升级奖励 / 新消息 / 升到 3 级 / 体力 / 体力药剂。 -->
+<!-- 新手引导（原版 3625）：前 7 帧，后续帧按需接。 -->
 <script src="js/ssfight/ui-guide.js"></script>
-<!-- 村庄四个地点的场景页 = 原版 MainMovie.as showTemple/showMiracle/showSummons/showCampaign 的等价 JS
-     （素材是运行时 attachMovie 的库元件，走 SfRender.mountSymbol），依赖 ui-main.js 的 toolkit。 -->
+<!-- 村庄四个地点场景页：运行时 attachMovie 的库元件，依赖 ui-main.js 的 toolkit。 -->
 <script src="js/ssfight/ui-village.js"></script>
-<!-- 状态页（zhuangtai 帧 / 根元件 7218）= 原版 MainMovie_frame50.as 的等价 JS
-     （主角落绘 + Exp 条 + 今日胜率 + 战斗场次 + 力敏速命 + 更换装备/装备融合）。
-     素材单独成包（tags-status.json），只有真进状态页才拉。 -->
+<!-- 状态页（zhuangtai / 7218）；素材单独成包（tags-status.json）。 -->
 <script src="js/ssfight/ui-status.js"></script>
-<!-- 经典道具合成：原版 4886 f5 合成页 + 4402「合成中」过场/结果页（碎片/种子/宝石）。 -->
+<!-- 经典道具合成：4886 f5 合成页 + 4402「合成中」过场/结果页。 -->
 <script src="js/ssfight/ui-compose.js"></script>
-<!-- 经典背包「道具使用」：原版 4886 f1「道具1」弹窗（使用 / 取消位置对调）。 -->
+<!-- 经典背包「道具使用」：4886 f1「道具1」弹窗（使用 / 取消位置对调）。 -->
 <script src="js/ssfight/ui-prop-use.js"></script>
-<!-- 挑战页（tiaozhan 帧 / 根元件 7638）= 原版 MainMovie_frame60.as 的等价 JS
-     （顶栏 4 个 tab：随机 / 我的好友 / 竞技场 / 关卡；关卡的门卡与"挑战1"(4756) 二三级页）。
-     素材单独成包（tags-challenge.json），只有真进挑战页才拉。 -->
+<!-- 挑战页（tiaozhan / 7638）；素材单独成包（tags-challenge.json）。 -->
 <script src="js/ssfight/ui-challenge.js"></script>
-<!-- 消息页（message 帧 / 根元件 7819）= 原版 MainMovie_frame100.as 的等价 JS
-     （顶栏 4 个 tab：消息 / 天梯赛 / 复仇 / 留言板；一页 2 条记录 + 左右翻页）。
-     素材单独成包（tags-message.json），只有真进消息页才拉。 -->
+<!-- 消息页（message / 7819）；素材单独成包（tags-message.json）。 -->
 <script src="js/ssfight/ui-message.js"></script>
 <!-- 原版战果、竞技续战与天梯/关卡继续挑战容器。 -->
 <script src="js/ssfight/ui-fight-result.js"></script>
 <!-- 局内战斗 / 胜利失败 / 战果 / 开宝箱抽奖 = 原版 fight 帧（7772 + 7689 两个格斗者 + 松鼠 6532）。
-     素材单独成包（tags-fight.json，8.4 MB），只有真的在经典模式里开打才拉。 -->
+     素材拆成 core（tags-fight-core.json）+ 按动作加载的 tags-fight-<动作元件>.json，只有真的开打才拉。 -->
 <script src="js/ssfight/ui-fight.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/classic-ui.js"></script>
 <script src="js/classic-extras.js"></script>
 <script src="js/classic-fusion.js"></script>
-<!-- 无尽塔剧情（文本 + 播片机 + 「什么时候该播」）：要在 tower-ui.js 之前 -->
-<script src="js/tower-plot.js"></script>
-<script src="js/tower-ui.js"></script>
+<!-- 无尽塔剧情（文本 + 播片机 + 「什么时候该播」）由 tower-loader 在进塔前加载。 -->
 <script src="js/debug.js"></script>
 <script src="js/main.js"></script>
 <!-- iOS 15 WKWebView 轻点不合成 click 时的兜底；正常设备不会重复触发。 -->

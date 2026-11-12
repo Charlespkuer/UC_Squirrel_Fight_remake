@@ -107,6 +107,7 @@ test('关卡带徒弟：徒弟先上阵，战败后师父免费接手同一名�
   assert.ok(Array.isArray(fighter.wears) && fighter.weapons.length === 1 && fighter.skills.length >= 1);
   // 徒弟战败：不扣复活、不扣第二本书，只标记师父接手。
   assert.equal(State.stagePrenticeLost(1, first.token), true);
+  assert.equal(State.stageRun(1).foeCarryHp, undefined, '没有战斗结果时不能把对手当成 0 血');
   const booksAfterLoss = s.props[23];
   const second = State.beginStageBattle(1);
   assert.equal(second.ok, true, second.msg);
@@ -360,6 +361,34 @@ test('UI徒弟先上阵：战败弹窗「师父上阵」免费接手同一名对
   assert.equal(s.props[23], books, '师父接手不扣挑战书');
   g.settle(1, true);
   assert.ok(State.stageProgress(1).npcIndex >= 2, '师父打赢后正常推进');
+});
+
+test('UI徒弟战败后师父接手：同一名对手保留徒弟打掉的血量，结算后清除', () => {
+  const g = setup(), State = g.c.State, s = g.s();
+  s.level = 10; s.props[23] = 2;
+  State.addPrentice({ name: '小徒', level: 10, power: 18, agility: 16, speed: 15, hp: 220, weapons: ['1:1'], skills: ['1:1'], gears: [] });
+  g.c.stageConfirm(1); g.modalClick('开始战斗');
+  const disciple = g.battles[0];
+  const fullFoeHp = Math.max(1, Math.round(Number(disciple.foe.hp) || 1));
+  /* 徒弟败给同一名对手：对手剩 37.5% 血（[玩家, 对手]）。 */
+  disciple.opts.onEnd(1, { winner: 1, maxHp: [220, fullFoeHp], hpAfter: [0, Math.round(fullFoeHp * 0.375)], rounds: [
+    { attacker: 1, action: 'common', dmg: 220, hpAfter: [0, Math.round(fullFoeHp * 0.375)] },
+  ] });
+  const ratio = Math.round(fullFoeHp * 0.375) / fullFoeHp;
+  assert.equal(State.stageRun(1).foeCarryHp, ratio, '记下对手剩余血量比例');
+  assert.equal(State.stageRun(1).carryHp, undefined, '师父不继承徒弟自己的血量');
+  State.save(); State.load();
+  assert.equal(State.stageRun(1).foeCarryHp, ratio, '稍后继续 / 重载后仍保留对手残血');
+  g.modalClick('师父上阵');
+  const master = g.battles[1];
+  assert.equal(master.opts.fighter, undefined, '师父用自己的面板');
+  assert.equal(master.opts.hpRatio, undefined, '师父满血上阵');
+  assert.equal(master.foe.maxHp, fullFoeHp, '对手血量上限不变');
+  assert.equal(master.foe.hp, Math.max(1, Math.round(fullFoeHp * ratio)), '对手按徒弟打完后剩下的血入场');
+  master.opts.onEnd(0, { winner: 0, maxHp: [400, fullFoeHp], hpAfter: [400, 0], rounds: [
+    { attacker: 0, action: 'common', dmg: fullFoeHp, hpAfter: [400, 0] },
+  ] });
+  assert.equal(State.stageRun(1).foeCarryHp, undefined, '这一场结算后不再保留残血');
 });
 
 test('UI失败复活、结束确认、购买挑战书与错误重试都有出口', () => {

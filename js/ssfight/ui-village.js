@@ -1,36 +1,12 @@
-/* ============================================================================
- * js/ssfight/ui-village.js —— 原版**村庄里四个地点的场景页**界面代码的等价 JS【SFR3】
- *
- * 逐句对着原版 `MainMovie.as` 翻（行号写在每段注释里）：
- *   · 祭坛 = `showTemple()`            :9814   → 「家园弹出」容器（库元件 3957）**第 1 帧**
- *   · 神迹 = `showMiracle()`           :9892   → 同一容器的**第 3 帧**
- *   · 神迹记录 = `showMiracleRecord()` :9928   → 同一容器的**第 4 帧**
- *   · 幻兽牧场 = `showSummons()`       :10950  → 「幻兽牧场」容器（库元件 4381）第 1 帧
- *   · 征战 = `showCampaign()`         :12274  → 「征战」容器（库元件 3437）第 1 帧
- *
- * 这三颗都是**库元件**（原版 `loadMcs([["家园弹出", "homeLandMc", …]])` 就是
- * `_root.attachMovie`），不在根时间轴里，所以走 `SfRender.mountSymbol()`；
- * 素材包见 `tools/gen-ssfight-ui.cjs` 的 SCENES 注释。
- *
- * 当前实现范围：
- *   · 祭坛 / 神迹 / 神迹记录：页面 + 等级角标 + 当日状态领取 + 升级倒计时/完成结算；
- *     祭坛状态真的改竞技场/关卡双倍判定，神迹完成真的加四维属性点。
- *   · 幻兽牧场：页面 + 等级角标 + 升级（孵化点/存储格）+ 孵化 + 图鉴列表/翻页 + 详情 +
- *     编队（领导力限制）+ 喂养 + 进化；数据全部落在 `State`，原版 32 种幻兽/星级/技能表。
- *   · 征战：页面/左右翻页照原版；征战令与匹配仍不在本次范围。
- *
- * 用法：
- *   await SfVillage.open(container, 'village-altar');   // 也可以直接传页 id 'altar'
- *   SfVillage.openPage('miracle-record');
- *   SfVillage.destroy();
- * ========================================================================== */
+// 村庄四个地点场景页（库元件 3957/4381/3437）：祭坛/神迹/幻兽牧场/征战，串 State 数据。
+// 入口 SfVillage.open/openPage/destroy；库元件与帧号见下方 PAGES 页表。
 (function () {
   'use strict';
 
-  /** 复刻侧通用件（测热区 / 动效壳 / 按下闪一遍 / 钉帧 …），全部在 `ui-main.js` 里实现并导出。 */
+  /** ui-main.js 导出的通用件（热区/动效壳/钉帧…）。 */
   const T = () => (window.SfUiMain && window.SfUiMain.toolkit) || null;
 
-  /** 复刻侧的提示：走经典界面那套 toast，拿不到就退回 console（不能静默什么都不发生）。 */
+  /** 经典 toast；拿不到就退回 console，不能静默。 */
   function toast(msg) {
     try {
       if (window.UI && UI.classic && UI.classic.toast) { UI.classic.toast(msg); return; }
@@ -38,8 +14,8 @@
     try { console.log('[村庄场景] ' + msg); } catch (e) {}
   }
 
-  /* 建筑升级表（原版 `var buildingUpInfo`，MainMovie.as:19145）现在落在 `js/state.js` 的
-   * `BUILDING_UP_INFO` 里，界面只读 `State.buildingUpInfo(level)` —— 数值不再在界面层抄一份。 */
+  /* 建筑升级表原版是 buildingUpInfo，现落在 js/state.js 的 BUILDING_UP_INFO；
+   * 界面只读 State.buildingUpInfo(level) —— 数值不在界面层抄一份。 */
 
   /* 复刻侧说明（不是原版文案）：只给仍没接服务器数据的征战页留一句。 */
   const NOTE = {
@@ -48,14 +24,8 @@
     warRecord: '原版「战绩」是向服务器要报名与对战记录，复刻还没有这套数据。',
   };
 
-  /* ============================================================
-   * 页表：地点 → 库元件 + 帧号 + 接线函数
-   * ------------------------------------------------------------
-   * `note` = 复刻侧补在页面底部的一行说明（**不是原版内容**）：进入这一页时出现一会儿就收起，
-   * 点那些"还没接功能"的按钮会再把它叫出来。没接完的页面必须写清楚，免得看着像坏了。
-   * ⚠ 文案**尽量压到一行**：这条说明是盖在弹窗自己的按钮上的（`pointer-events:none`，
-   * 不挡点击，但占视线），能单行就别两行 —— 见 css 里 `.ssfight-note` 的注释。
-   * ========================================================== */
+  /* 页表：地点 → 库元件 + 帧号 + 接线函数。note = 复刻侧补的说明（不是原版内容），
+   * 盖在弹窗上且 pointer-events:none，文案尽量压到一行（见 .ssfight-note）。 */
   const PAGES = {
     altar: {
       scene: 'village-altar', bundle: 'tags-homeland.json', symbol: '3957', frame: 1, title: '祭坛',
@@ -131,7 +101,7 @@
       note: '页面与左右翻页照原版：「征战令 / 报名 / 战绩」这套数据复刻还没有 —— 下一批接。',
     },
   };
-  /** 村庄页那四个地点胶囊的 data-action → 默认页 id（classic-ui 的路由用）。 */
+  /** 村庄页四个地点胶囊的 data-action → 默认页 id（classic-ui 路由用）。 */
   const LOCATION_PAGE = {
     'village-altar': 'altar',
     'village-miracle': 'miracle',
@@ -145,12 +115,11 @@
   let petChooser = null;
   let teamDraft = [];
   let feedDraft = [];
-  /** 进化页的 3 个选择格：`[目标, 材料1, 材料2]`，空串 = 还没选。
-   *  原版这一页是「配方固定材料」，复刻改成玩家自己挑 3 只同星级幻兽。 */
+  /** 进化页 3 个选择格：[目标, 材料1, 材料2]，空串 = 未选。原版配方固定材料，
+   *  复刻改成玩家自己挑 3 只同星级幻兽。 */
   let evolveDraft = ['', '', ''];
-  /** 用原版「全身」元件 4280（第 id 帧就是 petsInfo 里那张）画幻兽图。
-   * 它默认按 320×196 舞台坐标摆，图很小；挂载后把 svg 的 viewBox 收缩到这只幻兽
-   * 自己的包围盒，正好铺满卡片/详情头像。 */
+  /** 用库元件 4280（第 id 帧 = petsInfo 里那张）画幻兽图。它按 320×196 舞台坐标摆、图很小；
+   *  挂载后把 viewBox 收缩到这只幻兽的包围盒，正好铺满卡片/详情头像。 */
   async function mountPetArt(host, pet) {
     if (!host || !pet || !window.SfRender || !SfRender.mountSymbol) return false;
     const seq = (host.__petArtSeq || 0) + 1;
@@ -192,15 +161,12 @@
     }
   }
   /** 宿主自身被缩放的倍数（与 ui-status / ui-main 同一个探针做法）。
-   *  `.ssfight-pet-art` 是挂在经典层里的 DOM，写进去的 CSS 像素会再被 `--uiscale`
-   *  乘一次；用屏幕 rect 直接算 left/top/宽高会整体偏右下。 */
+   *  .ssfight-pet-art 是挂在经典层里的 DOM，CSS px 会被 --uiscale 再乘一次。 */
   function layoutScale(host) {
     if (!host) return 1;
-    /* ⚠ 缓存探针必须判 `isConnected`：重挂牧场页时 `SfRender.mountSymbol(host, …)` 会把
-     * 旧宿主里的子节点清掉，`host.__petProbe` 还指着一颗已摘掉的节点 ——
-     * `getBoundingClientRect().width` 全是 0，这里退回 1，于是按"未缩放"的设计像素摆幻兽图，
-     * 新孵出的幻兽在画面上偏右偏大；退出再进（新建宿主）才恢复。
-     * 只在探针还连着时复用，否则重建一颗。 */
+    /* ⚠ 缓存探针必须判 isConnected：重挂牧场页时 mountSymbol 会清掉旧宿主子节点，
+     *  host.__petProbe 还指着已摘掉的节点 → rect.width 全是 0、退回未缩放设计像素，
+     *  新孵出的幻兽偏右偏大；只在探针还连着时复用，否则重建。 */
     let p = host.__petProbe;
     if (!p || !p.isConnected) {
       p = document.createElement('div');
@@ -211,9 +177,9 @@
     const w = p.getBoundingClientRect().width;
     return w ? w / 100 : 1;
   }
-  /** 收掉幻兽格画稿里自带的 `level` 文本（4276，占位串固定是 "lv23"）。
-   *  ⚠ 它是 tp11 文本 `<g>`，不是 MovieClip：老的 `lv.g.style.display` 对文本节点无效，
-   *  只清文案时换帧重建还会把占位串带回来。这里把整颗文本节点隐藏，并在每次换帧后重做。 */
+  /** 收掉幻兽格画稿自带的 level 文本（4276，占位串固定 "lv23"）。
+   *  ⚠ 它是 tp11 文本 <g>，不是 MovieClip：老写法 `.style.display` 对文本节点无效；
+   *  这里隐藏整颗文本节点，并在每次换帧后重做。 */
   function hidePetLevel(cell) {
     if (!cell || !cell.g) return;
     const lv = cell.byName ? cell.byName('level') : null;
@@ -230,35 +196,32 @@
     }
   }
 
-  /* ---------- 通用小件 ---------- */
-
-  /** 取直系子元件（名字表由 render.js 按 `na` 建，`byName` 只认当前帧）。 */
+  /** 取直系子元件（名字表由 render.js 按 na 建，byName 只认当前帧）。 */
   const clipOf = (host, name) => (host && host.byName ? host.byName(name) : null);
-  /** 换掉某个文本字段（tp11 的放置存的是 `<g type="text">` 元素，不是 MovieClip）。
-   *  `opts.wrap` 透传给显示层：按字段框宽自动折行（详情页的长技能说明）。 */
+  /** 换文本字段（tp11 放置存的是 <g type="text">，不是 MovieClip）；opts.wrap 按框宽折行。 */
   function setTextByName(host, name, str, opts) {
     const t = T();
     const n = clipOf(host, name);
     if (t && n) t.setText(n, str, opts);
     return n;
   }
-  /** 幻兽技能数值的显示格式：整数不带小数点，半档（10.5 这类）保留一位。 */
+  /** 幻兽技能数值格式：整数不带小数点，半档（10.5）保留一位。 */
   function skillValueText(v) {
     const n = Number(v);
     if (!Number.isFinite(n)) return '0';
     return Number.isInteger(n) ? String(n) : String(Math.round(n * 10) / 10);
   }
-  /** 把技能说明里的 X 换成该等级的实际值（原版 `getSkillRemark` 的同一件事）。 */
+  /** 把技能说明里的 X 换成该等级的实际值（原版 getSkillRemark 的同一件事）。 */
   function fillSkillValue(text, value) {
     return String(text == null ? '' : text).replace(/X/g, skillValueText(value));
   }
-  /** 让元件**停在**某一帧（不自己播）。这些按钮是"状态精灵"，只能停帧不能 play。 */
+  /** 让元件停在某一帧（不自己播）；这些按钮是状态精灵，只能停帧不能 play。 */
   function stopAt(clip, n) {
     if (!clip || !clip.gotoAndStop) return;
     try { clip.gotoAndStop(n); } catch (e) {}
   }
-  /** 换帧会把 `<g>` 的子节点整个重建 —— 动效壳（`.uc-pop`）与里面那块点击区会一起没掉，
-   *  所以每次 `gotoAndStop` 之后都要重包一遍（与 ui-main.js 的 settle 同一件事）。 */
+  /** 换帧会把 <g> 子节点整个重建，动效壳与点击区一起没掉；
+   *  每次 gotoAndStop 后都要重包（与 ui-main.js 的 settle 同一件事）。 */
   function refreshShell(clip) {
     const t = T();
     if (!t || !clip || !clip.g) return;
@@ -267,10 +230,8 @@
     if (shell) t.wirePopPress(shell);
     t.freezeDescendants(clip);          // 换帧重建出来的新子元件也一并交给静态页策略
   }
-  /** 状态帧只用于按钮两档；按下由路由反馈，click不再叠加回弹或退场。 */
-  /** `opts.hover` / `opts.idle`：悬停 / 常态停到哪一帧（默认 2 / 1）。
-   *  翻页箭头 `3156` 的第 2 帧是**空帧**（只有箭头画在第一帧），所以幻兽牧场的
-   *  left/right 必须传 `hover:1` —— 否则鼠标一移上去箭头就“隐形”，正是用户报的那条。 */
+  /** opts.hover/idle：悬停/常态停到哪一帧（默认 2/1）。翻页箭头 3156 第 2 帧是空帧，
+   *  幻兽牧场 left/right 必须传 hover:1，否则鼠标移上去箭头就隐藏。 */
   function wireClickable(clip, onFire, opts) {
     const t = T();
     if (!t || !clip || !clip.g) return;
@@ -309,22 +270,16 @@
   function setVisible(clip, on) {
     if (clip && clip.g) clip.g.style.visibility = on ? '' : 'hidden';
   }
-  /** 回村庄页：走 classic-ui 的动作表，与「回家」键同一个出口。
-   *  ⚠ 先 `destroy()` 再跳：不然 `SfVillage.current()` 会一直指着**已经被换掉的那棵树**
-   *  （调试 / 自检读到的是过期状态；`openPage()` 之后的 `destroyView()` 也会去动一个
-   *  已经脱离文档的视图）。 */
+  /** 回村庄：走 classic-ui 动作表，与「回家」键同一个出口。
+   *  ⚠ 先 destroy() 再跳，否则 SfVillage.current() 会一直指着已被换掉的那棵树。 */
   function backToVillage() {
     destroy();
     if (window.UI && UI.runAction) UI.runAction('village');
   }
-  /** 页面底部那行说明（复刻侧补的，不是原版内容）。用 DOM 盖在 SVG 上：
-   *  与礼包按钮同一个理由 —— 不动原版显示列表，也不跟 SVG 的坐标缩放打架。
-   *  ⚠ **只停一会儿就自动收起**，而且是 `pointer-events:none`（见 CSS）：
-   *  这条说明压在弹窗自己的按钮上，常驻的话既挡视线、又像"原版按钮坏了"；
-   *  自动收起之后，页面就是原版那一页，点那些"还没接"的按钮会再把它叫出来。 */
+  /** 页面底部说明（复刻侧补的）：DOM 盖在 SVG 上，pointer-events:none，只停一会儿自动收起；
+   *  它压在弹窗自己的按钮上，常驻会挡视线、像原版按钮坏了。点未接的按钮会再叫出来。 */
   const NOTE_MS = 5000;
-  /** 建筑等级角标：页面里 text1 字段在导出的 3957/4381 里被省略了，原版是
-   *  `setText(text1, "LV"+level)`；这里用 DOM 角标补上等级，不影响原版按钮/文本。 */
+  /** 建筑等级角标：3957/4381 导出里没有 text1 字段（原版 setText(text1, "LV"+level)），用 DOM 补。 */
   function showBuildingLevel(container, key, label, style) {
     if (!container) return null;
     for (const old of container.querySelectorAll('.ssfight-building-level')) old.remove();
@@ -354,7 +309,7 @@
     if (n.__hide) clearTimeout(n.__hide);
     n.__hide = setTimeout(() => { n.style.display = 'none'; n.__hide = 0; }, NOTE_MS);
   }
-  /** "这一页还没接"的按钮被点时的统一反馈：跳一句 toast + 把提示条叫回来并闪一下。 */
+  /** "这一页还没接"的按钮被点时的统一反馈：toast + 把提示条叫回来并闪一下。 */
   function pendingFlash(msg) {
     toast(msg);
     const cur = current;
@@ -371,9 +326,8 @@
     } catch (e) {}
   }
 
-  /** 所有幻兽格（4279）画稿自带的 `level` 文本统一收掉。
-   *  二三级页里这些格子不一定叫 c1（喂养页叫 `cc`、进化页叫 `toSummons`），
-   *  按元件号扫一遍最稳；主列表的格子由 `hidePetLevel` 逐格处理。 */
+  /** 所有幻兽格（4279）画稿自带的 level 文本统一收掉。
+   *  二三级页里格子不一定叫 c1（喂养 cc、进化 toSummons），按元件号扫最稳。 */
   function hideAllPetLevels(host) {
     if (!host || !host.g) return;
     for (const cell of host.g.querySelectorAll('g[sid="4279"]')) {
@@ -383,31 +337,21 @@
       }
     }
   }
-  /** 取当前建筑的快照（`State.building(key)`；没有存档或没这套数据时返回 null）。 */
+  /** 取当前建筑快照（State.building(key)）；没存档/没数据返回 null。 */
   function building(key) {
     if (!(window.State && State.building)) return null;
     try { return State.building(key); } catch (e) { return null; }
   }
 
-  /* ============================================================
-   * ① 祭坛 —— MainMovie.as:9814 `showTemple()`
-   * ------------------------------------------------------------
-   * 原版：
-   *   gotoAndStop(1)                                  // 「家园弹出」第 1 帧
-   *   setText(text1, "LV" + building.level)           // ⚠ 第 1 帧里**没有** text1 这个字段
-   *   setText(text2, 三行双倍几率说明)                 // getBuildingUpInfo(level)
-   *   button1.onFire = gainBuff                       // 领当日随机状态
-   *   button2.onFire = homeLandLevelUp                // 升级
-   *   button3.onFire = 返回村庄
-   *   showTempleBuff(building)                        // setText(text3, "本日特殊状态：…" 或 "")
-   * ========================================================== */
+  /* 祭坛（MainMovie.as:9814 showTemple）：家园弹出第 1 帧；text2 写三行双倍几率，
+   * text3 写当日状态（没有就清空）；button1 领当日状态，button2 升级，button3 回村庄。
+   * ⚠ 第 1 帧里没有 text1 字段（具名文本只有 text2/text3），等级角标用 DOM 补。 */
   function wireAltar(view, page, container) {
     const t = T();
     const b = building('altar');
     showBuildingLevel(container, 'altar', '祭坛', 'right:18px;top:64px');
-    /* text1：原版 `setText(text1, "LV" + building.level)` —— 第 1 帧里**没有**这个字段
-     * （实测 3957 f1 的具名文本只有 text2 / text3），写了也不显示，所以不写。 */
-    /* text2：三行几率说明。原版是 `getBuildingUpInfo(level)` 里那三个百分比拼的（:9827）。 */
+    // text1：原版 setText(text1, "LV"+level)，但 3957 f1 没有这个字段（只有 text2/text3），写了也不显示。
+    // text2：三行几率说明，原版由 getBuildingUpInfo(level) 的三个百分比拼成（:9827）。
     if (t && b) {
       const info = State.buildingUpInfo(b.level);
       t.setText(clipOf(view, 'text2'),
@@ -415,18 +359,14 @@
         + '2.参加竞技场时有' + info.propRate + '%几率获得双倍碎片奖励\n'
         + '3.挑战关卡时有' + info.goldRate + '%几率获得双倍金松果奖励');
     }
-    /* text3：当日状态（原版 `showTempleBuff` :9858；没有 buff 就清空）。
-     * ⚠ 必须连同 `buffDate` 一起判：buffId 是**跨天保留**的存档字段，
-     * 只判 buffId 会把昨天的状态当成今天的显示（`activeBuildingBuff` 那边按日期返回 false，
-     * 于是界面写着"本日特殊状态"、实际却不翻倍 —— 用户 2026-10 报的"祭坛效果没落实"就是这个观感）。
-     * `buildingBuffClaimed()` 已经同时判了 buffId > 0 与 buffDate === 今天。 */
+    /* text3：当日状态（原版 showTempleBuff:9858；没有就清空）。必须连同 buffDate 一起判：
+     * buffId 跨天保留，只判 buffId 会把昨天状态当今天显示（界面写着双倍、实际不翻倍）。 */
     const claimed = b ? State.buildingBuffClaimed('altar') : false;
     const buffText = !claimed ? '' : b.buffId === 1 ? '本日特殊状态：竞技场经验双倍奖励！'
       : b.buffId === 2 ? '本日特殊状态：竞技场碎片双倍奖励！'
         : b.buffId === 3 ? '本日特殊状态：关卡金松果双倍！' : '';
     setTextByName(view, 'text3', buffText);
-    /* 「领取当日状态」：原版 `gainBuff`（一天一次，服务端判定）。按钮在已经领过时
-     * 原版会 `gotoAndStop(_totalframes)`（隐藏，见 :9882-9886）。 */
+    /* 领取当日状态（原版 gainBuff，一天一次）：已领过时原版 gotoAndStop(_totalframes) 隐藏。 */
     wireClickable(clipOf(view, 'button1'), () => {
       const r = State.claimBuildingBuff('altar');
       toast(r.msg);
@@ -438,21 +378,39 @@
     showNote(container, PAGES.altar.note);
   }
 
-  /* ============================================================
-   * 通用「升级确认」页 —— 原版 `homeLandLevelUp(building)`（:10875）
-   * ------------------------------------------------------------
-   * `家园弹出.gotoAndStop(5)` + 写六个字段：
-   *   text1 = 升级金松果 / text11 = "金松果" / text2 = 升级小时 / text22 = "小时"
-   *   text3 = 这一档升级后的收益（祭坛=触发几率；神迹=1 个随机属性点；幻兽=领导力）
-   *   两颗键：button1 = 确认升级（`upgradeBuilding`）、button2 = 返回。
-   * ========================================================== */
+  /* 通用「升级确认」页（原版 homeLandLevelUp(building):10875）：家园弹出停第 5 帧，写六个字段
+   * （金松果/小时/收益），button1=确认升级、button2=返回。 */
   function buildingOf(page) {
     const key = page && page.build;
     if (!key) return null;
     return building(key);
   }
+  /** 升级页按钮交换视觉中心（缩放不同，不能只换矩阵 e），y 保持原版；
+   *  文字是素材里的矢量字，不在这里改。 */
+  function swapUpgradeButtons(view) {
+    const up = clipOf(view, 'button1'), back = clipOf(view, 'button2');
+    if (!up || !back || !up.g || !back.g || !up.setExtraTransform) return;
+    const ru = up.g.getBoundingClientRect(), rb = back.g.getBoundingClientRect();
+    if (!ru.width || !rb.width) return;
+    const svg = up.g.ownerSVGElement || back.g.ownerSVGElement;
+    const ctm = svg && svg.getScreenCTM ? svg.getScreenCTM() : null;
+    if (!ctm || !(Math.abs(ctm.a) > 1e-6)) return;
+    const sx = Math.abs(ctm.a);
+    const scaleOf = (clip) => {
+      const p = String(clip.g.__baseMa || '').split(',').map(Number);
+      return p.length === 6 && Number.isFinite(p[0]) && p[0] !== 0 ? Math.abs(p[0]) : 1;
+    };
+    const cu = ru.left + ru.width / 2, cb = rb.left + rb.width / 2;
+    const move = (clip, from, to) => {
+      const tx = ((to - from) / sx) / scaleOf(clip);
+      clip.setExtraTransform('translate(' + tx.toFixed(3) + ',0)');
+    };
+    move(up, cu, cb);
+    move(back, cb, cu);
+  }
   function wireLandLevelUp(view, page, container) {
     const t = T();
+    swapUpgradeButtons(view);
     const b = buildingOf(page);
     if (page && page.build) showBuildingLevel(container, page.build, BUILDING_LABEL[page.build], 'right:18px;top:64px');
     const key = page.build;
@@ -461,8 +419,7 @@
     const info = State.buildingUpInfo(b.level);
     const next = State.buildingUpInfo(Math.min(State.BUILDING_MAX_LEVEL, b.level + 1));
     const atMax = b.level >= State.BUILDING_MAX_LEVEL;
-    /* 幻兽牧场的三项收益都要写出来：领导力、存储格、孵化点。
-     * 原来的 text3 只写领导力，玩家在「升级」页看不到另外两项。 */
+    /* 幻兽牧场三项收益都要写：领导力、存储格、孵化点（原 text3 只写领导力）。 */
     const st = State.state() || {};
     const capNow = Math.max(1, Number(st.petsCapacity) || 6);
     const leadNow = State.petLeadership ? State.petLeadership() : (b.level * 3 + 7);
@@ -1032,9 +989,9 @@
     }
     if (!host) return false;
     const mine = ++seq;
-    destroyView();
-    await Promise.all((Array.isArray(page.bundle) ? page.bundle : [page.bundle])
-      .map((b) => SfRender.loadExtra(b)));          // 素材包按需拉（祭坛与神迹共用 homeland 那一包）
+    const nextBundle = bundleList(page);
+    destroyView(nextBundle);
+    await Promise.all(nextBundle.map((b) => SfRender.loadExtra(b)));          // 素材包按需拉（祭坛与神迹共用 homeland 那一包）
     if (mine !== seq || host.isConnected === false) return false;
     const view = await SfRender.mountSymbol(host, page.symbol, { frame: page.frame, label: page.title });
     if (mine !== seq || host.isConnected === false) {
@@ -1054,14 +1011,21 @@
     return true;
   }
 
-  /** 只摘掉当前这棵视图（不动 `current` 之外的任何东西）。 */
-  function destroyView() {
+  function bundleList(page) {
+    return Array.isArray(page && page.bundle) ? page.bundle : (page && page.bundle ? [page.bundle] : []);
+  }
+  /** 只摘掉当前这棵视图（不动 `current` 之外的任何东西）；`keepBundles` 是接下来要用的包，先不释放。 */
+  function destroyView(keepBundles) {
+    const keep = new Set(keepBundles || []);
     if (current && current.container) {
       clearPetArt(current.container);
       const note = current.container.querySelector('.ssfight-note');
       if (note && note.__hide) clearTimeout(note.__hide);
     }
     if (current && current.view) { try { current.view.destroy(); } catch (e) {} }
+    if (current && window.SfRender && SfRender.releaseExtra) {
+      for (const file of bundleList(current.page)) if (!keep.has(file)) SfRender.releaseExtra(file);
+    }
     current = null;
   }
   function destroy() {

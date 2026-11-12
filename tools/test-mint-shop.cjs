@@ -1092,10 +1092,10 @@ hr('8. 界面接线（UI 分流 / 战后自动进店 / 两套 API 不串味）')
   });
 
   check('铸币商店页面的三个出口都走铸币商店 API', () => {
-    /* 直接把 U14b 整段切出来（到下一节标题为止），避免以后页面变长把断言切掉。 */
-    const from = pageSrc.indexOf('【U14b】');
-    const to = pageSrc.indexOf('【U15】', from);
-    assert.ok(from > 0 && to > from, '找不到 U14b 那一段');
+    /* 按函数边界切铸币商店整段（含 buy/swap 辅助函数），不依赖已清理的章节锚点。 */
+    const from = pageSrc.indexOf('function offerMintReplace');
+    const to = pageSrc.indexOf('function openPermSacrifice', from + 1);
+    assert.ok(from > 0 && to > from, '找不到铸币商店那一段');
     const body = pageSrc.slice(from, to);
     for (const call of ['Tower.buyMintSlot(i', 'Tower.rerollMintShop()', 'Tower.swapMintBuff(rowRef(b))', 'Tower.leaveMintShop()']) {
       assert.ok(body.includes(call), '铸币商店页应当调用 ' + call);

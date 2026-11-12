@@ -1047,13 +1047,20 @@ async function checkConcurrentAssetLoad() {
   assert.equal(bundleA, bundleB, '后完成的基础加载不能换掉先前已完成的extra素材库');
   assert.ok((await render.load()).hash.has('A') && bundleB.hash.has('B'), '两个已成功包必须同时可被mount查到');
 
+  const retryReqs = () => requests.filter((r) => r.url.endsWith('retry.json'));
   const failed = render.loadExtra('retry.json');
   const rejection = assert.rejects(failed, /素材包缺失/);
-  await flush(); respond(requests.find(r => r.url.endsWith('retry.json')), null, false); await rejection;
+  await flush();
+  assert.equal(retryReqs().length, 1, '第一次只发一次普通请求');
+  respond(retryReqs()[0], null, false);          // 第一次失败 → fetchJsonRetry 会换 no-store 再试一次
+  await flush();
+  assert.equal(retryReqs().length, 2, '失败后要换 no-store 重试一次');
+  respond(retryReqs()[1], null, false);          // 重试也失败 → 拒绝
+  await rejection;
+
   const retry = render.loadExtra('retry.json'); await flush();
-  const retryRequests = requests.filter(r => r.url.endsWith('retry.json'));
-  assert.equal(retryRequests.length, 2, '失败Promise不能永久卡住素材包重试');
-  respond(retryRequests[1], [{ id: 'retry', tp: 39, Sf: [] }]);
+  assert.equal(retryReqs().length, 3, '失败Promise不能永久卡住素材包重试');
+  respond(retryReqs()[2], [{ id: 'retry', tp: 39, Sf: [] }]);
   assert.ok((await retry).hash.has('retry'));
 }
 
@@ -1202,6 +1209,13 @@ function checkSharedFeedbackLifecycle() {
     'DOM 名字条那一套函数（showCellName / hideCellName / cellHost）要删掉 —— 名字一律走原版矢量层');
   const css = fs.readFileSync(path.join(ROOT, 'css/classic-refine.css'), 'utf8').replace(/\r\n/g, '\n');
   assert.ok(!/\.sf-cellname/.test(css), 'CSS 里的 .sf-cellname 也要一并删掉');
+  /* 格子壳**不许挂 CSS filter**：悬停换帧后包围盒变宽，Android WebView 会沿用旧滤镜区域，
+   * 把那一格拉成一张扁宽卡片。缩放只允许等比 transform。 */
+  const cellCss = css.slice(css.indexOf('.sf-cell .uc-pop,'), css.indexOf('.sf-catalog{'));
+  assert.ok(cellCss.length > 0 && !/drop-shadow\(/.test(cellCss) &&
+    !/\.sf-cell \.uc-pop(?:[:.][\w-]+)?\s*\{[^}]*filter:(?!none)/.test(cellCss) &&
+    /\.sf-cell\.lit > \.uc-pop,\s*\.sf-cell \.uc-pop\.sf-hover\{transform:scale\(/.test(cellCss),
+    '状态格壳只能等比 transform，不能挂 filter（避免安卓滤镜光栅拉伸）');
   /* 图标表与素材包：`locked` 那一批必须真的提取出来了。 */
   const icons = JSON.parse(fs.readFileSync(path.join(ROOT, 'images/ssfight/ui/weapon-skill-icons.json'), 'utf8'));
   const lockedIds = [];
@@ -1277,7 +1291,7 @@ async function checkFightResults({ env, Node, body, flushTimeouts }) {
   assert.equal(env.SfFightResult.dismiss(), true);
   assert.equal(resumed, 1, '取消结束确认要回到原进度，不能触发结束或立即开战');
   assert.equal(env.SfFightResult.isOpen(), false);
-  assert.equal(prompts, 6, '战果层沿用升级奖励选择入口');
+  assert.equal(prompts, 7, '战果层沿用升级奖励选择入口（4 个原版容器 + 竞技场长昵称 + 旧层 + 新层各一次）');
   assert.equal(env.SfRender.viewCount(), 0, '战果退出后回收播放注册');
 
   /* 有奖励的普通战果走**原版 `fight` 第 2/3 帧**（经验 + 金松果/战利品三格），
@@ -1475,7 +1489,7 @@ async function checkClassicFight() {
   for (const [k, acts] of [['dodge', SfFight.ACTS.dodge], ['attackBack', SfFight.ACTS.attackBack]]
     .concat(Object.entries(SfFight.ACTS.comeBack)))
     assert.ok(byId.has(String(acts.sym)), k + ' 的动画元件 ' + acts.sym + ' 要在 tags-fight.json 里');
-  assert.ok(/if \(clip\.frame >= stopIdx\) \{[\s\S]{0,700}?stopAt\(clip, stopIdx \+ 1\);[\s\S]{0,700}?if \(o\.deep && !o\.keepNested\) freezeNestedAnim\(clip\);[\s\S]{0,160}?finish\(\);\s*return;\s*\}/.test(uf),
+  assert.ok(/if \(clip\.frame >= stopIdx \|\| wrapped\) \{[\s\S]{0,900}?stopAt\(clip, stopIdx \+ 1\);[\s\S]{0,900}?if \(o\.deep && !o\.keepNested\) freezeNestedAnim\(clip\);[\s\S]{0,160}?finish\(\);\s*return;\s*\}/.test(uf),
     '动作片断播到停止帧必须停住；普通 deep 动作冻结嵌套表情，倒地动作只放行 6365 灵魂');
   assert.ok(/playClip\(inner, \{\n\s*(?:deep: true, )?onFrame: \(n\) => \{\n\s*if \(acts\.guard/.test(uf),
     '出手动画要按帧脚本在起手/命中帧回调，而不是固定延时');
@@ -1512,11 +1526,27 @@ async function checkClassicFight() {
    *   sim 按协议第 15 字段发 `boomCount`，战斗层按它复制球元件、每 100ms 亮一个并分段飘字。
    *   以前两处都没有 —— 伤害一次飘完、没有多出来的球（第 257 批自标的功能缺口）。 */
   const simCase23 = fs.readFileSync(path.join(ROOT, 'js', 'sim.js'), 'utf8').replace(/\r\n/g, '\n');
-  assert.ok(/r\.boomCount = mult;/.test(simCase23) && /function boomSplit\(rec, attacker, r, side, aborted\)/.test(uf) &&
-    /boomSplit\(rec, attacker, r, def, aborted\)/.test(uf) && /\}, i \* 100\);/.test(uf) &&
+  assert.ok(/r\.boomCount = mult;/.test(simCase23) && /function boomSplit\(rec, attacker, r, side, aborted(?:, amount)?\)/.test(uf) &&
+    /boomSplit\(rec, attacker, r, def, aborted(?:, [^)]+)?\)/.test(uf) && /\}, i \* 100\);/.test(uf) &&
     /sel\.attachChild\(ballId, 1, 'boom'\)/.test(uf) && !/sel\.attachChild\(symId, 1, 'boom'\)/.test(uf),
     '幸运一击要按 boomCount 分裂，但复制的是球（6116）而不是整段出手动画（否则动画不停叠加）');
   assert.equal(SfFight._luckyBall.id, '6116', '多球分裂的球元件');
+  /* 战斗包拆包：core 常驻，动作包按本场录像/双方武器技能幻兽加载；所有文件必须在发布资源里。 */
+  {
+    const uiDir = path.join(ROOT, 'images/ssfight/ui');
+    const fightManifest = JSON.parse(fs.readFileSync(path.join(uiDir, 'fight-manifest.json'), 'utf8'));
+    assert.ok(fs.existsSync(path.join(uiDir, fightManifest.core.file)), '战斗 core 包必须存在：' + fightManifest.core.file);
+    const syms = SfFight._fightAttackSymbols({
+      me: { weapons: [{ id: 1 }], skills: [{ id: 13 }], pets: [{ id: 3 }] },
+      foe: {},
+      result: { rounds: [{ action: 'attack' }] },
+    });
+    assert.ok(syms.length > 0, '本场要能算出需要加载的攻击动作包');
+    for (const sym of syms)
+      assert.ok(fs.existsSync(path.join(uiDir, 'tags-fight-' + sym + '.json')), '动作包缺失：tags-fight-' + sym + '.json');
+    assert.ok(syms.includes(String(SfFight._attackActs({ action: 'attack' }).sym)),
+      '普通攻击动作包要按本场录像加载');
+  }
   /* 原素材在转盘第 9 帧出现数字，6091 的朝向和 6090 的结果都需要停在对应帧。 */
   for (const side of [0, 1]) for (const count of [1, 2, 3, 4, 5, 6]) {
     const number = { frame: 0, gotoAndStop(n) { this.frame = n; } };
@@ -1926,6 +1956,13 @@ async function checkClassicGearPage({ env, Node, body }) {
       attrName: '力量', useLevel: 5, orange: true, gem: { id: 103, ext: 7 } },
   ];
   env.State.myGears = () => gears;
+  /* 主属性格式是「名字 值(+N%)」（见 State.gearAttrText）；测试桩只复现这条口径。 */
+  env.State.gearAttrText = (g, opts) => {
+    const value = Math.max(0, Math.round(Number(g && g.abilityVal) || 0));
+    const pct = Number(g && g.attrPct) || 0;
+    return ((opts && opts.name && g && g.attrName) ? g.attrName + ' ' : '') +
+      value + '(' + (pct >= 0 ? '+' : '-') + Math.abs(pct) + '%)';
+  };
   env.State.gearsInDisplayOrder = () => gears;
   env.State.gearCapacity = () => 12;
   env.State.isGearStarred = () => false;
@@ -1969,7 +2006,7 @@ async function checkClassicGearPage({ env, Node, body }) {
   assert.equal(detail.texts.t_name, '装备20', '装备名没有字典条目时按「装备N」兜底');
   assert.equal(detail.texts.type, '手部', '部位文案照 doShowEquipInfo（头/手/身/脚四档）');
   assert.equal(detail.texts.level, '5', '等级那一格是使用等级');
-  assert.equal(detail.texts.base, '力量+12');
+  assert.equal(detail.texts.base, '力量 12(+0%)', '基础属性按「名字 值(+N%)」写整行');
   assert.equal(detail.texts.baseExtra, ' +40%', '橙装带宝石 → 主属性加成（3 级 = 5*(9-3+2)）');
   assert.equal(detail.texts.baseOther, '投掷武器暴击伤害-10%');
   assert.equal(detail.texts.baseOtherExtra, '', 'extraStr 那一列复刻没有数据源 → 必须留空');
@@ -1989,8 +2026,7 @@ async function checkClassicGearPage({ env, Node, body }) {
 function checkBalanceAndRewardContracts() {
   const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
   const st = read('js/ssfight/ui-status.js');
-  assert.ok(/const GEAR_COLOR_FILE = 'images\/ssfight\/ui\/gear-colors\.json'/.test(st)
-    && /SfRender\.loadExtra\('tags-gear-color\.json'\)/.test(st)
+  assert.ok(/SfRender\.loadExtra\('tags-gear-color\.json'\)/.test(st)
     && /function gearArtIn\(/.test(st) && /gearArtIn\(cell, g, GEAR_CARD_ART/.test(st),
     '换装格 / 详情 / 纸娃娃要挂原版预上色矢量符号（gear-colors.json）');
   assert.ok(/if \(sid\) \{[\s\S]{0,500}?clip\.setExtraTransform\('scale\(' \+ s \+ '\)'\)/.test(st)
@@ -2354,7 +2390,7 @@ function checkClassicGiftAttention() {
   assert.ok(/function giftIcon\(id\) \{ return Number\(id\) === 8 \? goldIcon\(\) : icon\('prop', id\); \}/.test(dailyUi)
     && /giftIcon\(g\.id\)/.test(dailyUi) && /d\.extra/.test(dailyUi) && /daily-gift-preview/.test(dailyUi),
     '经典礼包/每日奖励里的金松果要用经典 gold-acorn，并显示当天轮换道具');
-  assert.ok(/Number\(icon\.id\) === 8\) return 'images\/ui\/icons\/gold-acorn\.png'/.test(levelUp),
+  assert.ok(/Number\(icon\.id\) === 8\) return 'images\/ui\/icons\/gold-acorn\.svg'/.test(levelUp),
     '经典升级礼包四格里的金松果也要用经典图标');
 
 
@@ -2375,13 +2411,16 @@ function checkClassicSystemStyle() {
     && /border:4px solid #f4e3ba/.test(css),
     '分区标题保留棕色圆牌 + 米色描边');
   assert.ok(!/\.classic-tabs\.system-tabs/.test(css), '顶部页签不恢复 system-tabs 皮肤替换');
+  assert.ok(/const homeVector = homeLabel === '返回菜单'/.test(ui) && /installHomeVector\(p\)/.test(ui) &&
+    /\.page-home-btn\.has-vector-art \.page-home-art\{/.test(css),
+    '系统 / 道具页页脚的「返回菜单」要挂原版 3362 矢量键，不再用 return-menu.png');
 
   /* 系统分组：页签字号 / 金色未选中 / 绿色选中 / 音乐胶囊 / 公共反馈 */
   const sysAt = ui.indexOf('function openSystem()');
   const sysBody = ui.slice(sysAt, ui.indexOf('function importSave()', sysAt));
   assert.ok(sysAt > 0 && sysBody.length > 0, '找不到系统页实现');
-  assert.equal((sysBody.match(/sysBtn\(/g) || []).length, 9,
-    '游戏设置应为 9 颗键（存档导出/导入/修改昵称/跳过按钮 + 分辨率/全面屏/状态栏/后台运行 + 调试面板），界面模式单独成卡');
+  assert.equal((sysBody.match(/sysBtn\(/g) || []).length, 10,
+    '游戏设置应为 10 颗键（存档导出/导入/修改昵称/跳过按钮 + 分辨率/全面屏/状态栏/后台运行/兼容渲染 + 调试面板），界面模式单独成卡');
   assert.ok(/data-action="background-run"/.test(sysBody) && /Main\.setBackgroundRun/.test(sysBody),
     '系统页要有「后台运行」开关，并把选择同步给安卓壳');
   /* 用户 2026-10-27 口径：后台运行不要横跨整排，放 4×2 的第二排最后一格；
@@ -2391,8 +2430,8 @@ function checkClassicSystemStyle() {
   const dbgRowAt = sysBody.indexOf('settings-debug-row', bgAt);
   assert.ok(bgAt > 0 && bgCloseAt > bgAt && dbgRowAt > bgCloseAt,
     '「后台运行」应当是 4×2 网格的最后一颗，后面直接结束网格（调试面板另起一行）');
-  assert.ok(/<div class="settings-debug-row">'\+dbgBtn/.test(sysBody),
-    '调试面板要放到网格外的 settings-debug-row');
+  assert.ok(/<div class="settings-debug-row">'[\s\S]{0,300}?dbgBtn/.test(sysBody),
+    '调试面板（兼容渲染 + 调试键）要放到网格外的 settings-debug-row');
   assert.ok(/\.settings-debug-row\{[^}]*display:flex[^}]*justify-content:flex-end/.test(css),
     '调试面板要放网格外、并靠右对齐（用户 2026-10-27 口径）');
   assert.ok(!/\.uc-button\.wide\{grid-column/.test(css), '后台运行不再横跨整行');
@@ -2541,9 +2580,16 @@ function checkLevelUpStyle() {
     /\.sf-levelup-view\{[^}]*z-index:60/.test(css),
     '升级奖励要挂原版 7795 升级页，并保留现代奖励与后续三选一/加点'
   );
-  /* 天使/恶魔果实三选一：没有取消/关闭键，必须从服务器/存档给出的候选中选一个。 */
-  assert.ok(!/label: isGain \? '先不用'/.test(cu) && /\[\], \{ small: true, locked: true \}/.test(cu),
-    '果实三选一不能保留取消键（只能用本次候选提交）');
+  /* 天使/恶魔果实：一次只显示 1 个随机武技（不再是三选一），底部挂原版矢量
+   * 「取消(4419) / 确定(4399)」两颗键（取消在左、确定在右），点取消也消耗果实。 */
+  assert.ok(
+    /const c = r\.options && r\.options\[0\]/.test(cu) &&
+    /mountVectorButton\(footer, '4419', '取消'/.test(cu) &&
+    /mountVectorButton\(footer, '4399', '确定'/.test(cu) &&
+    /State\.cancelFruitChoice\(r\.fruit\)/.test(cu) &&
+    /\[\], \{ small: true, locked: true \}/.test(cu),
+    '果实弹窗要一次只显示 1 个随机武技，并挂原版矢量取消/确定键（取消也消耗）'
+  );
   /* 2026-11 联机版同步：升级页取原版舞台取景（7775 全屏 CG 不再偏右下）、
    * 四维卡改用背包里的永久属性书图标（16~19）、武技三选一不再占卡片，
    * 并且点确定后把 7775 当三选一背景保留，选完由 classic-ui 收掉。 */
@@ -3050,7 +3096,7 @@ function checkClassicPropUseFlow() {
     /setAttribute\('fill', '#000000'\)/.test(propUse) &&
     /'buy', \{ idle: 1, hover: 2 \}/.test(propUse) &&
     /paintVectorIcon\(c1, id\)/.test(propUse) && /openInfo: openInfo/.test(propUse) &&
-    /swapButtons\(buy, cancel\)/.test(propUse) &&
+    /swapButtons\(right, cancel\)/.test(propUse) &&
     !/function setBuyDescription\(/.test(propUse) &&
     !/function applyBackpackLayout\(/.test(propUse) &&
     !/function paintBuyIdle\(/.test(propUse) &&
@@ -3267,6 +3313,8 @@ async function checkDynamicMaskReuse({ env, Node, body }) {
 }
 
 async function checkStableFrameRefresh({ env, Node, body }) {
+  /* 状态页关闭会释放 tags-status；重挂状态页前必须像 ui-status.open 一样重新加载。 */
+  await env.SfRender.loadExtra('tags-status.json');
   const host = body.appendChild(new Node('section'));
   const view = await env.SfRender.mountSymbol(host, '7218', { policy: {} });
   const label = view.byName('expNum');
@@ -3383,6 +3431,38 @@ function checkMobileComposeWorkflow() {
     '融合选材料的基础属性要单行写 name+数值，不能拆成两行压住词条');
   assert.ok(!/t_base' \+ \(i \+ 1\), g \? \(String\(g\.attrName/.test(src),
     '不要再把 t_base 拆成「名字\\n数值」两行');
+}
+
+/* ---------- 合成 / 融合结果页：基础属性单行、词条逐条换行，缩字号后重算行距 ---------- */
+{
+  /* 用户 2026-11 安卓实拍：`t_temp` 把「基本属性:速度 11(+10%)」按 11 字硬折成两行，
+   * 第二行 `+10%)` 正好压住 `t_baseOther` 第一条附加属性；词条又被 " / " 拼成一段折成
+   * 5 行。这里钉住“单行基础属性 + 每条词条一行 + 字号/行距一起收”的契约。 */
+  const compose = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-compose.js'), 'utf8').replace(/\r\n/g, '\n');
+  const render = fs.readFileSync(path.join(ROOT, 'js/ssfight/render.js'), 'utf8').replace(/\r\n/g, '\n');
+  const status = fs.readFileSync(path.join(ROOT, 'js/ssfight/ui-status.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(compose, /const temp = info \? \('基本属性:' \+ State\.gearAttrText\(info, \{ name: true \}\)\) : '';/,
+    '结果页基础属性要一行写完（含百分比），不能再按 11 字硬折');
+  assert.match(compose, /const extraText = extra\.length \? '附加属性:' \+ extra\[0\] \+ \(extra\.length > 1 \? '\\n' \+ extra\.slice\(1\)\.join\('\\n'\) : ''\) : '';/,
+    '附加属性要一条一行');
+  assert.ok(!/extra\.join\(' \/ '\)/.test(compose), '词条不再用 " / " 拼成一段再硬折');
+  assert.match(compose, /function layoutResultFields\(view, tempLines, extraLines\)/,
+    '结果页要有按行数统一收字号的排版函数');
+  assert.match(compose, /SfRender\.layoutText\(f\.clip, \{ size: size \}\)/,
+    '缩字号后必须用 layoutText 重算基线与行距，否则第二行还会压到下一个字段');
+  assert.match(render, /function layoutText\(node, opts\)/, 'SfRender 要提供按字号重排行距的公共入口');
+  assert.match(render, /layoutText,/, 'SfRender.layoutText 要导出');
+  assert.match(status, /SfRender\.fitTextWidth\(baseClip,\s*\{ ascii: 0\.62, min: 9, width: \(meta\.bd\[1\] - meta\.bd\[0\]\) \* 0\.97 \}\);/,
+    '装备详情的基础属性行（81.5 单位宽）要按框宽自适应缩字号，三位数 + 百分比不再右裁');
+}
+
+/* ---------- 帮助页：黑装长段落换成装备融合机制介绍 ---------- */
+{
+  const cu = fs.readFileSync(path.join(ROOT, 'js/classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.match(cu, /<p><b>装备融合<\/b>：3 件同品质、未穿戴的装备可融合成 1 件更高品质装备/,
+    '帮助页要有装备融合机制介绍');
+  assert.ok(!/<b>黑装<\/b>：3 件橙装在「装备融合」里可合成/.test(cu),
+    '帮助页不再保留旧的「黑装」长段落');
 }
 
 (async () => {

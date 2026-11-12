@@ -24,7 +24,7 @@ description: 定位和维护松鼠大战经典界面的原版元件、文本、�
 元件名、id、宿主与出现帧查 `images/ssfight/ui/symbol-index.json`；文本框宽、字号、字体及容量估计查同目录 `textfields-index.json`。
 用 `node tools/ssfight-index.cjs --name info1,expNum` 一次查询多个名字，或 `--page challenge --id 4756` 查宿主下的元件和文本。
 代码入口用 `--code openBag,routerOf`，优先返回当前声明位置；范围为 `js/ssfight/` 与三个 `classic-ui/extras/fusion` 模块，可与素材查询合并调用。
-`elements.json` 只覆盖 main 页。索引找不到名字时先查包与宿主，不遍历所有 `tags-*.json`，也不据此宣称素材不存在。
+索引找不到名字时先查包与宿主，不遍历所有 `tags-*.json`，也不据此宣称素材不存在。
 
 同名元件可能出现在不同包：例如 `expNum` 在 status 是文本，在 main 是精灵。保留包、宿主和帧条件一起判断。
 只有必须核对原版接口或索引遗漏时才读本机 `references/`；它不属于运行时或 CI 的依赖。

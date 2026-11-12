@@ -5,10 +5,12 @@
 
 显示层 `SfRender` 解释已提交的素材；`SfUiMain.toolkit` 提供公共交互件；各 `Sf*` 页面负责接线。
 按钮/卡片的共享视觉反馈走 `SfUiFeedback`，数值或导航动作留在页面传入的回调。
-局内战斗 / 胜利失败 / 战果 / 开宝箱是 `SfFight`（`ui-fight.js`，素材包 `tags-fight.json`，
-由 `node tools/gen-ssfight-ui.cjs --fight` 生成）；战果/续战对话框是 `SfFightResult`。
+局内战斗 / 胜利失败 / 战果 / 开宝箱是 `SfFight`（`ui-fight.js`，素材拆成 `tags-fight-core.json`
++ 按动作加载的 `tags-fight-<动作元件>.json`，由 `node tools/gen-ssfight-ui.cjs --fight` 生成）；
+战果/续战对话框是 `SfFightResult`。整包 `tags-fight.json` 只作测试 oracle，运行时不要直接加载。
 实际模块及先后关系查 `scripts/index.html`，新增公共件必须先于使用它的页面加载。
 数值和持久状态走 `State` API；页面不复制建筑、道具或战斗规则。
+注释按根 `AGENTS.md` 的「注释规范（唯一口径）」写；本目录只写经典显示层特有的约束。
 
 ## 不要破坏的约定
 

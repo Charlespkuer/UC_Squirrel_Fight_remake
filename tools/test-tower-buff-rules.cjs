@@ -225,5 +225,61 @@ test('增益卡面的类型标签覆盖每种 kind（铭文不再显示 undefine
   }
 });
 
+hr('5. 涅槃：回合耗尽也会先复活，本层剩余次数要如实记账并显示');
+test('60 手打满时先复活加时；失败也扣本层次数；悬停按真实剩余显示', () => {
+  const c = setup();
+  const T = c.Tower, Sim = c.Sim;
+  /* —— ① Sim：玩家 10% 血、双方都打不死对方 → 60 手按血量比例判负；
+   *       带涅槃时先复活（回 50%）并开下一个 60 手窗口，而不是直接结束。 —— */
+  const mk = (mods) => ({ name: 'p', level: 70, power: 1, agility: 1, speed: 1, maxHp: 10000, hp: 1000,
+    baseStats: { power: 1, agility: 1, speed: 1 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0, mods });
+  const foe = () => ({ name: 'e', level: 70, power: 1, agility: 1, speed: 1, maxHp: 10000, hp: 10000,
+    baseStats: { power: 1, agility: 1, speed: 1 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 });
+  const plain = Sim.simulate(mk(null), foe());
+  assert.equal(plain.winner, 1, '没有涅槃：60 手后按血量比例判负');
+  assert.equal(plain.rounds.length, 60, '没有涅槃就是正常的 60 手');
+  const saved = Sim.simulate(mk({ deathSaves: [{ healPct: 0.5, statMul: 0.5, revive: 1 }] }), foe());
+  const revives = (saved.rounds || []).filter((r) => r.timeoutRevive);
+  assert.equal(revives.length, 1, '回合耗尽时涅槃应当先救一次，不是直接判负');
+  assert.ok(revives[0].deathSave && revives[0].revive, '这一拍要带 deathSave/revive 标记，塔侧才会计数');
+  assert.ok(revives[0].hpAfter[0] >= 5000, '复活后回到 50% 生命：' + revives[0].hpAfter[0]);
+  assert.ok(saved.rounds.length > 60, '复活后要开新的 60 手窗口继续打：' + saved.rounds.length);
+
+  /* —— ② 塔侧：失败（含巡逻失败）也要扣本层次数；剩 0 时悬停不能再写「1 次」。—— */
+  T._debugSetEndlessLayer(7);
+  const run = T._debugRun('endless');
+  run.permanent = [{ id: 'C14', stacks: 1 }];
+  run.choices = null; run.phase = null; run.env = []; run.noEnvRoll = true;
+  const infoBefore = T.reviveInfoOf(run);
+  assert.ok(infoBefore && infoBefore.perLayer === 1 && infoBefore.used === 0 && infoBefore.left === 1,
+    '开战前本层还有 1 次：' + JSON.stringify(infoBefore));
+  const nx = T.nextBattle('endless');
+  assert.ok(nx && nx.ok !== false, '应当能开战：' + ((nx && nx.msg) || ''));
+  const me = { name: 'p', level: 70, power: 100, agility: 100, speed: 100, maxHp: 1000, hp: 1000,
+    baseStats: { power: 100, agility: 100, speed: 100 }, weapons: [], skills: [], wears: [], effects: {}, masterLevel: 0 };
+  nx.adjustMe(me);
+  assert.equal((me.mods.deathSaves || []).filter((s) => s.revive).length, 1, '开战时发 1 次复活');
+  T._debugRun('endless').retryToken = 1;            // 让失败结算留在局内，好检查计数
+  T.reportBattle('endless', nx.token, false, 0, me.maxHp, { rounds: [{ deathSave: true, revive: 1, timeoutRevive: 1 }] });
+  const after = T._debugRun('endless');
+  assert.equal(after.reviveUsed, 1, '失败 / 回合耗尽判负用掉的涅槃也要记（以前只在胜利分支数）');
+  const infoAfter = T.reviveInfoOf(after);
+  assert.ok(infoAfter && infoAfter.perLayer === 1 && infoAfter.used === 1 && infoAfter.left === 0,
+    '用掉之后本层剩 0 次：' + JSON.stringify(infoAfter));
+
+  /* 悬停必须问 reviveInfoOf（写死 b.stacks 会一直显示「1 次」） */
+  const ui = fs.readFileSync(path.join(ROOT, 'js', 'tower-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  const at = ui.indexOf('本层复活机会');
+  assert.ok(at > 0, '塔页悬停里应当有「本层复活机会」这一行');
+  const tip = ui.slice(Math.max(0, at - 500), at + 300);
+  assert.ok(/Tower\.reviveInfoOf/.test(tip), '悬停要按真实剩余次数算');
+  assert.ok(!/本层复活机会：' \+ Math\.max\(1, Math\.floor\(Number\(b\.stacks\)/.test(tip), '不能再用叠层数当剩余次数');
+
+  /* 经典回放：加时那一拍要把剩余回合重置回满格（否则「回合 0 了还在打」） */
+  const fight = fs.readFileSync(path.join(ROOT, 'js', 'ssfight', 'ui-fight.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/if \(rec\.rounds\[i\] && rec\.rounds\[i\]\.timeoutRevive\) \{\s*\n\s*rec\.roundsLeft = Math\.max\(1, Math\.floor\(Number\(o\.maxRounds\) \|\| 60\)\);/.test(fight),
+    '加时要把经典 HUD 的剩余回合重置回满格');
+});
+
 console.log('\n塔增益规则回归：' + pass + ' 通过 / ' + fail + ' 失败');
 if (fail) process.exitCode = 1;

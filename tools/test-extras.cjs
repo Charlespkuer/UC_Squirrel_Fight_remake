@@ -74,7 +74,7 @@ function setup() {
     },
     btn: (label, action) => '<button data-action="' + action + '">' + label + '</button>',
     icon: (kind, id) => '<img src="images/ui/icons/' + kind + '/' + kind + '-' + id + '.png">',
-    goldIcon: () => '<img src="images/ui/icons/gold-acorn.png">',
+    goldIcon: () => '<img src="images/ui/icons/gold-acorn.svg">',
     // 升级奖励面板：这里只做最小渲染，供断言检查文本内容
     upsHtml: (ups) => (ups && ups.length)
       ? '<div class="reward-stack">' + ups.map((u) => '<div class="reward-panel">升到 ' + u.level + ' 级' +
@@ -734,7 +734,7 @@ test('每日抽奖：右上角抽奖卷角标 + 删掉底部说明 + 连抽 10 �
   /* ① 右上角标注仓库抽奖卷数量（refreshTickets 就地刷新用的就是 [data-lottery-ticket]） */
   assert.ok(/lottery-ticket-corner/.test(html), '要有右上角角标：' + html.slice(0, 200));
   /* 金松果奖格用经典统一贴图 gold-acorn，不再走现代 prop-8。 */
-  assert.ok(/images\/ui\/icons\/gold-acorn\.png/.test(html), '抽奖金松果要用经典金松果图');
+  assert.ok(/images\/ui\/icons\/gold-acorn\.svg/.test(html), '抽奖金松果要用经典金松果图');
   assert.ok(!/prop\/prop-8\.png/.test(html), '抽奖页不该再出现现代 prop-8');
   assert.ok(/lottery-ticket-corner[\s\S]*?data-lottery-ticket/.test(html), '角标里要带抽奖卷数量节点');
   assert.ok(/data-lottery-ticket>3</.test(html), '角标应当显示仓库里的 3 张：' + html.slice(0, 260));

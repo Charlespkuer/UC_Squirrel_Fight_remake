@@ -1,31 +1,12 @@
-/* ============================================================================
- * ui-guide.js —— ssfight 新手引导（原版 3625，25 帧）
- *
- * 原版 `viewMission()`（MainMovie.as:6814）在根上挂 `新手引导`，然后按
- * `guideMap[nowPage].mcIndex` 切帧；每一帧是一张整屏提示：暗色说明条 +
- * 黄色手指 + 半透明目标按钮示意。这里沿用同一颗 25 帧素材，不另画引导框。
- *
- * 步骤号 = 原版 `nowPage`（guideMap 的键，:19411），frame = 3625 的帧（=`mcIndex`）。
- * 时间与下一跳照 guideMap / viewMission：
- *   · 页 2 帧 2.6 秒、页 12 3 秒、页 21/23/24/25 4 秒后自动 doMission；
- *   · 页 7/8/9/10 由玩家的真实动作推进（开道具详情 → 点「使用」→ 点提示「确定」→
- *     点背包「返回菜单」），见 doMission(7..10) 与 useProp 成功里的 viewNextMission；
- *   · 页 11 指首页「开始挑战」，点开挑战页进 12，f12 在原版就是 3 秒自动收尾（next -1）；
- *   · 页 13 是 5 级白装：原版 showLevelUp 里 `nowPage=13` + viewMission，f13 盖在**升级页**
- *     的「确定」上（:7160）；点掉进 14（首页「状态」）→ 15（状态页两个页签）→ 22
- *     （guideMap 15→22，f22 =「赠送你一件白色装备，快去『状态』里找到并穿上它」，
- *     specailState=1：下次点击就 doMission，:21721）；
- *   · 页 17/19/20/26 在村庄页，点对应地点推进（HOME_LAND :9529-9622），
- *     20（神迹）点完先记着，回家时原版置 nowPage=25 → f24（天梯）4 秒自动收；
- *   · 页 21/23（帧 16）/24（帧 23）都是纯文字帧：4 级 / 10 级 / 15 级，4 秒自动收。
- * 原版页 16/18 没有任何触发点（guideMap 里孤立）；f16 是竞技场文案，已经在 10 级
- * step23 复用；f18 是 23 级「酒馆/pub」文案，本复刻没有酒馆界面，不接这一帧。
- * ========================================================================== */
+// ui-guide.js — 新手引导（原版 3625，25 帧）: step = guideMap nowPage, frame = 3625 mcIndex.
+// Timers/next-steps mirror original viewMission/doMission; reuse the 25-frame asset, never redraw.
+// guideMap pages 16/18 are isolated: f16 (arena) is reused by step 23; f18 (pub) is not wired
+// because this remake has no tavern screen.
 (function () {
   'use strict';
   const GUIDE_FILE = 'tags-guide.json';
   const SYMBOL = '3625';
-  /* next = 当前帧播完后自动推进的 nowPage（99 = 收工）。 */
+  // next = nowPage auto-advanced to after this frame plays (99 = finished).
   const STEPS = {
     1: { frame: 1, ms: 0 },
     2: { frame: 2, ms: 2600, next: 3, stay: false },
@@ -52,7 +33,7 @@
     25: { frame: 24, ms: 4000, next: 99 },           // 神迹回来：天梯
     26: { frame: 25, ms: 0 },                        // 村庄「征战」
   };
-  /* 原版等级事件（showLevelUp / showLevelupTips，:7160-7300）→ 步骤号。 */
+  // Original level-up events (showLevelUp / showLevelupTips) -> step number.
   const LEVEL_STEPS = { 4: 21, 5: 13, 10: 23, 15: 24, 20: 17, 25: 19, 30: 20, 35: 26 };
   let current = null;
   let generation = 0;
@@ -63,8 +44,8 @@
   function state() {
     return window.State && State.state ? State.state() : null;
   }
-  /** 新档 / 旧档的引导进度。旧档（>1 级）没有这个字段时直接视为已完成，
-   *  不把老玩家拽回新手引导。 */
+  // Tutorial progress for new/old saves: a save above level 1 without this field counts as done —
+  // never drag returning players back into the guide.
   function tutorial() {
     const S = state();
     if (!S) return null;

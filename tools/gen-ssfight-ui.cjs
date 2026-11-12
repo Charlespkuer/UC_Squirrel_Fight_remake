@@ -588,28 +588,6 @@ function extractBitmaps(tags, stats) {
   }
 }
 
-/* ---------- 主界面元件名 → 人话（只写界面代码真正寻址的那些） ---------- */
-const TEXT_NOTE = {
-  name: '昵称（唯一的真文本标签 tp11；其余"字"都是矢量形状）',
-  level: '等级数字（数字精灵，4 位）',
-  energyMc: '体力条：101 帧，靠 cD 蒙版逐帧揭开填充',
-  energy: '当前体力数字（3-4 位）',
-  maxEnergy: '体力上限数字',
-  expMc: '经验条：同体力条，cD 蒙版',
-  expNum: '经验百分比数字',
-  point: '经验条右侧的百分比装饰（0% / 100% 时换帧）',
-  num1: '金松果数字 第 1 位（8 位里最左）',
-  num8: '金松果数字 第 8 位',
-  myself: '首页主角松鼠（89 帧循环动画，装备不参与）',
-  prentices: '徒弟栏：第 1/2/3 帧摆 1/2/3 个徒弟，末帧空',
-  newMessage: '新消息红点：第 2 帧 = 隐藏（复刻固定停在隐藏态）',
-  c1: '限时道具角标槽 1（空槽帧 2）',
-  viplevel: 'VIP 标：第 2 帧 = 隐藏（复刻没有 VIP）',
-  homeButton: '村庄门（20 级起显示）',
-  button1: '底栏「道具」', button2: '底栏「状态」', button3: '底栏「开始挑战」',
-  button4: '底栏「消息」', button5: '底栏「系统」',
-};
-
 /* ---------- 主流程 ---------- */
 function main() {
   const args = process.argv.slice(2);
@@ -848,42 +826,6 @@ function main() {
     Fw: data.Fw, Fh: data.Fh, Fr: data.Fr, Bg: data.Bg, Fc: data.Fc, Ft: data.Ft,
     frameCount: tl.frameCount, labels: tl.labels, frames: tl.frames,
   }));
-
-  /* 主界面「元件索引」：把每页根精灵子树上所有带 `na`（实例名）的元件列成一张表。
-   * 界面代码寻址全靠这些名字（`main.energyMc` / `main.expNum` …），
-   * 而它们散在 tags.json 的 700 KB 里 —— 这张表让"某个名字在哪、是哪一号元件"一眼可见。
-   * 只在提取 main 页时写；别的页没有对应的界面代码，写了也没人用。 */
-  if (wanted.includes('main')) {
-    const byIdTag = new Map(tags.map((t) => [String(t.id), t]));
-    const seen = new Set();
-    const rows = [];
-    (function walk(id) {
-      const t = byIdTag.get(String(id));
-      if (!t) return;
-      for (const p of t.Sf || []) {
-        if (p.tp !== 26) continue;
-        const child = byIdTag.get(String(p.id));
-        if (!child) continue;
-        if (p.na && !seen.has(p.na)) {
-          seen.add(p.na);
-          rows.push({
-            name: p.na, id: String(p.id), depth: p.d,
-            kind: child.tp === 39 ? 'sprite' : child.tp === 11 ? 'text' : child.tp === 2 ? 'shape' : 'tp' + child.tp,
-            frames: (child.Sf || []).filter((q) => q.tp === 1).length + 1,
-            note: TEXT_NOTE[p.na] || undefined,
-          });
-        }
-        if (child.tp === 39) walk(p.id);
-      }
-    })(PAGES.main);
-    rows.sort((a, b) => (a.depth - b.depth));
-    fs.writeFileSync(path.join(OUT, 'elements.json'), JSON.stringify({
-      page: 'main', pageRootId: String(PAGES.main), source: 'tags.json（本目录）',
-      how: '界面代码用 view.byName(名字) 寻址；名字来自 SWF 放置标签的 na 字段。',
-      count: rows.length, elements: rows,
-    }, null, 1));
-    console.log('  主界面元件索引：%d 个带名字的元件 → elements.json', rows.length);
-  }
 
   /* ============================================================
    * 【索引】文本字段表（textfields-index.json）
@@ -1279,6 +1221,46 @@ function fightResultBundle() {
  * ========================================================================== */
 const FIGHT_PARTS = ['4847', '4528', '3704', '3960', '3751', '3464', '3535'];
 
+/* 战斗包拆包：`6339` 的每一帧只挂一个攻击动作元件（`na:"attack"`）。
+ * 这些动作元件是整包 7 MB 的主体；开战时只加载本场武器 / 技能 / 幻兽真正用到的几份。 */
+function fightActionRoots(tags) {
+  const attacks = tags.find((t) => String(t.id) === '6339');
+  if (!attacks || !Array.isArray(attacks.Sf)) return [];
+  const frames = [];
+  let cur = new Map();
+  const snap = () => { frames.push(new Map(cur)); };
+  for (const p of attacks.Sf) {
+    if (p.tp === 1) { snap(); continue; }
+    if (p.remove) { cur.delete(p.d); continue; }
+    if (p.id === undefined) continue;
+    cur.set(p.d, Object.assign({}, cur.get(p.d) || {}, p));
+  }
+  if (!frames.length) snap();
+  const roots = [];
+  for (const f of frames) {
+    let root = '';
+    for (const [, p] of f) if (p && p.na === 'attack' && p.id) { root = String(p.id); break; }
+    roots.push(root);
+  }
+  return { frames: roots, roots: [...new Set(roots.filter(Boolean))] };
+}
+
+function closureStopped(byId, roots, stop) {
+  const seen = new Map();
+  const stack = roots.map(String);
+  while (stack.length) {
+    const id = stack.pop();
+    if (seen.has(id)) continue;
+    const t = byId.get(id);
+    if (!t) continue;
+    seen.set(id, t);
+    if (stop && stop.has(id)) continue;
+    for (const p of t.Sf || []) if (p.id !== undefined) stack.push(String(p.id));
+    for (const r of t.rc || []) if (r.id !== undefined) stack.push(String(r.id));
+  }
+  return seen;
+}
+
 /* ---------- 开打倒计时「3 → 2 → 1 → GO」**不再现造** ----------
  * 原版那一组 3/2/1/GO **就是血条 HUD（`7703`）第 8 帧里的子元件 `3750`**（42 帧：
  * f1-6 = 3 / f7-12 = 2 / f13-19 = 1 / f19-29 = GO，f30 起是空帧、f41 `stop()`），
@@ -1320,6 +1302,30 @@ function fightBundle() {
     b.hd = cand; b.hdRefs = refs;
     hdApplied.push(cand + '（替换 ' + b.file + '，' + refs + ' 处引用）');
   }
+  /* 按攻击动作拆包。基础包保留所有非攻击标签（含受击 / 闪避 / 防御技 / HUD / 战果），
+   * 每个攻击动作只带自己的闭包；多个动作共享的标签上移到基础包，避免重复解析。 */
+  const tagsById = new Map(tags.map((t) => [String(t.id), t]));
+  const actionPlan = fightActionRoots(tags);
+  const actionSet = new Set(actionPlan.roots);
+  if (!actionSet.size) die('战斗包拆包失败：6339 没有可识别的攻击动作帧');
+  const baseSet = closureStopped(tagsById, Object.values(roots).concat(FIGHT_PARTS, lootRoots), actionSet);
+  for (const id of actionSet) baseSet.delete(id);
+  const closures = new Map();
+  for (const id of actionSet) closures.set(id, closureStopped(tagsById, [id], null));
+  const freq = new Map();
+  for (const [, set] of closures) for (const id of set.keys()) if (!baseSet.has(id)) freq.set(id, (freq.get(id) || 0) + 1);
+  for (const [id, n] of freq) if (n > 1) baseSet.set(id, tagsById.get(id));
+  const assigned = new Set();
+  const chunkTags = new Map();
+  for (const [root, set] of closures) {
+    const list = [];
+    for (const [id, t] of set) if (!baseSet.has(id)) { list.push(t); assigned.add(id); }
+    chunkTags.set(root, list.sort((a, b) => Number(a.id) - Number(b.id)));
+  }
+  for (const t of tags) if (!assigned.has(String(t.id)) && !baseSet.has(String(t.id))) baseSet.set(String(t.id), t);
+  const baseTags = [...baseSet.values()].sort((a, b) => Number(a.id) - Number(b.id));
+  const chunkBytes = [...chunkTags.values()].reduce((n, list) => n + JSON.stringify(list).length, 0);
+
   /* 与既有包重叠的 id 必须**内容一致**（`loadExtra` 先到先得，冲突会让画面随加载顺序变）。 */
   const canonical = (value, key) => {
     if (key === 'id') return String(value);
@@ -1327,9 +1333,19 @@ function fightBundle() {
     if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((k) => [k, canonical(value[k], k)]));
     return value;
   };
+  /* 预上色装备包刻意保留 SWF 的完整矩阵精度，战斗包是两位小数；运行时 gear-color 优先覆盖。
+   * 比较共享标签时只对装备包把 ma 规整到两位，避免把单纯的精度差当成内容冲突。 */
+  const canonicalMatrix = (value, key) => {
+    if (key === 'ma' && typeof value === 'string') return round2(value);
+    if (Array.isArray(value)) return value.map((v) => canonicalMatrix(v));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((k) => [k, canonicalMatrix(value[k], k)]));
+    return value;
+  };
+  const newTagObjects = new Map(tags.map((tag) => [String(tag.id), tag]));
   const newTags = new Map(tags.map((tag) => [String(tag.id), JSON.stringify(canonical(tag))]));
   const sharedTags = [];
-  for (const name of fs.readdirSync(OUT).filter((n) => /^tags(?:-[\w-]+)?\.json$/.test(n) && n !== 'tags-fight.json').sort()) {
+  for (const name of fs.readdirSync(OUT).filter((n) => /^tags(?:-[\w-]+)?\.json$/.test(n)
+    && n !== 'tags-fight.json' && !/^tags-fight-(?:core|\d+)\.json$/.test(n)).sort()) {
     const file = fs.readFileSync(path.join(OUT, name)), existing = JSON.parse(file.toString('utf8'));
     const ids = [];
     for (const tag of existing) {
@@ -1337,6 +1353,11 @@ function fightBundle() {
       if (!expected) continue;
       const actual = JSON.stringify(canonical(tag));
       if (actual !== expected) {
+        const gearPrecision = /^tags-gear(?:-color)?\.json$/.test(name)
+          && JSON.stringify(canonicalMatrix(tag)) === JSON.stringify(canonicalMatrix(newTagObjects.get(String(tag.id))));
+        // `tags.json` 是 SfRender.load() 的基础包，之后加载的战斗包不会覆盖它；原版里有
+        // 7748/7719 这种同图不同别名的历史差异，属于基础包优先的已知情况。
+        if (gearPrecision || name === 'tags.json') { ids.push(String(tag.id)); continue; }
         let at = 0;
         while (at < actual.length && at < expected.length && actual[at] === expected[at]) at++;
         die('战斗界面与现有包同ID内容冲突：' + name + ' / ' + tag.id + '\n  现有：…' + actual.slice(Math.max(0, at - 40), at + 60) +
@@ -1348,18 +1369,36 @@ function fightBundle() {
   }
   const outFile = path.join(OUT, 'tags-fight.json');
   fs.writeFileSync(outFile, JSON.stringify(tags));
+  /* 拆包文件：core 常驻，动作包按本场动作加载。旧拆包文件先清掉，避免动作表变化后留孤儿。 */
+  for (const name of fs.readdirSync(OUT)) {
+    if (/^tags-fight-(?:core|\d+)\.json$/.test(name)) fs.unlinkSync(path.join(OUT, name));
+  }
+  const coreFile = path.join(OUT, 'tags-fight-core.json');
+  fs.writeFileSync(coreFile, JSON.stringify(baseTags));
+  const chunks = {};
+  for (const [root, list] of [...chunkTags].sort((a, b) => Number(a[0]) - Number(b[0]))) {
+    const file = 'tags-fight-' + root + '.json';
+    const buf = Buffer.from(JSON.stringify(list));
+    fs.writeFileSync(path.join(OUT, file), buf);
+    chunks[root] = { file, tags: list.length, bytes: buf.length };
+  }
   fs.writeFileSync(path.join(OUT, 'fight-manifest.json'), JSON.stringify({
     generator: 'tools/gen-ssfight-ui.cjs --fight',
     source: path.relative(ROOT, SRC).split(path.sep).join('/'), sourceBytes: bytes, sourceSha256: sha,
     roots, count: tags.length, bitmaps: stats.bitmaps, hd: hdApplied, missingIds: missing, sharedTags,
-    how: '经典模式的局内战斗 / 胜利失败 / 战果 / 开宝箱抽奖：SfRender.loadExtra("tags-fight.json") 后'
-      + ' mountSymbol("7772") 是整场战斗的那一页，两个格斗者是 7689 的两个实例（原版 player1/player2），'
+    core: { file: 'tags-fight-core.json', tags: baseTags.length, bytes: fs.statSync(coreFile).size },
+    chunks, attackFrames: actionPlan.frames, attackRoots: [...actionSet],
+    how: '经典模式的局内战斗：先 loadExtra("tags-fight-core.json")，再按本场双方武器 / 技能 / 幻兽动作'
+      + ' 加载 tags-fight-<动作元件>.json；mountSymbol("7772") 是整场战斗的那一页，两个格斗者是 7689 的两个实例，'
       + '动作选择照 Squirrel.as；hero=6532 是 attachMovie 挂上去的，静态闭包走不到所以显式列出。'
       + ' 开打倒计时是血条 HUD 第 8 帧里的原版 3750，不需要现造。',
     sha256: crypto.createHash('sha256').update(fs.readFileSync(outFile)).digest('hex'),
+    coreSha256: crypto.createHash('sha256').update(fs.readFileSync(coreFile)).digest('hex'),
   }, null, 1));
-  console.log('tags-fight.json: %d tags（%s）· 位图 %d 张%s；既有包与索引未改动',
-    tags.length, (fs.statSync(outFile).size / 1048576).toFixed(2) + ' MB', stats.bitmaps.length,
+  console.log('tags-fight.json: %d tags（%s）· core %d tags（%s）· %d 个动作包（%s）· 位图 %d 张%s',
+    tags.length, (fs.statSync(outFile).size / 1048576).toFixed(2) + ' MB',
+    baseTags.length, (fs.statSync(coreFile).size / 1048576).toFixed(2) + ' MB',
+    Object.keys(chunks).length, (chunkBytes / 1048576).toFixed(2) + ' MB', stats.bitmaps.length,
     hdApplied.length ? '（HD 覆盖 ' + hdApplied.length + '）' : '');
 }
 
@@ -1377,8 +1416,8 @@ function fightBundle() {
  * 每个动物模型都有自己的 attacks / defenses / dodges / attackbacks / winPoses，
  * 部分还有 comeBacks —— 与原版 `Animals.as` 的动作选择一一对应。
  *
- * 只写这一份包；与 `tags-fight.json` 重叠的 id 不再重复写入（战斗包先加载，按先到先得），
- * 所以不会因为同一颗形状的位图别名不同而改坏既有战斗包。
+ * 只写这一份**自包含**包：6833 的完整闭包（含共享动作 / 形状）都写进来，
+ * 不再依赖 `tags-fight.json` 先加载；塔预告只拉这一份也能独立显示。
  * ========================================================================== */
 function campaignBossBundle() {
   const roots = { campaignBoss: '6833' };
@@ -1393,9 +1432,7 @@ function campaignBossBundle() {
   for (const id of ['6833', '6598', '6635', '6684', '6709', '6772', '6832']) {
     if (!byId.has(id)) die('征战 boss 模型缺失：' + id);
   }
-  const tags = rawTags.map(prune)
-    .filter((t) => !inFight.has(String(t.id)))
-    .sort((a, b) => Number(a.id) - Number(b.id));
+  const tags = rawTags.map(prune).sort((a, b) => Number(a.id) - Number(b.id));
   const stats = { bitmaps: [] };
   extractBitmaps(tags, stats);
   const outFile = path.join(OUT, 'tags-campaign-boss.json');
@@ -1408,11 +1445,11 @@ function campaignBossBundle() {
     frames: {
       '6833': '副本角色所有（1 狡兔 / 2 狼王 / 3 妖狐 / 4 猿将 / 5 豹王锁定 / 6 蜥蜴 / 7 野猪）',
     },
-    how: 'SfFight.loadExtra("tags-campaign-boss.json") 后，buildFighter 把 6833 挂到 playerMc，'
-      + ' 按 foe.campaign.mcFrame 拨动物形态；动作仍走 Animals.as 的 attacks/defenses/...。',
+    how: '自包含征战包：SfFight / 塔预告只 loadExtra("tags-campaign-boss.json") 即可；'
+      + 'buildFighter 把 6833 挂到 playerMc，按 foe.campaign.mcFrame 拨动物形态；动作走 Animals.as。',
     sha256: crypto.createHash('sha256').update(fs.readFileSync(outFile)).digest('hex'),
   }, null, 1));
-  console.log('tags-campaign-boss.json: %d tags（%s）· 与 tags-fight 共享 %d 个已加载 id',
+  console.log('tags-campaign-boss.json: %d tags（%s，自包含；其中 %d 个与战斗包同 id）',
     tags.length, (fs.statSync(outFile).size / 1048576).toFixed(2) + ' MB',
     [...inFight].filter((id) => rawTags.some((t) => String(t.id) === id)).length);
 }

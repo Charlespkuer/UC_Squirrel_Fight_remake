@@ -40,32 +40,9 @@ jobs:
       - name: 单元与集成测试
         shell: bash
         run: |
-          # 直接枚举目录里的套件，不再手写清单：以前手写的清单在测试被删/改名后
-          # 不会跟着变（例如 tools/test-balance.cjs 删了，清单还留着），
-          # 于是三个平台都会「Cannot find module」整条挂掉。
-          # 全部跑完再汇总失败，一次就能看到所有问题。
-          # 失败时额外打一条 GitHub 注解（::error::）：**哪台机器挂在哪套件**一眼可见，
-          # 不用翻几十屏日志（注解也能从 check-runs API 匿名读到，方便远程排查）。
-          # 再把该套件输出的最后 25 行写进 job summary：**具体哪条断言挂了**也能远程读到
-          #（job 日志要 admin 权限，summary 不用 —— 2026-10 就因为只有套件名、没有断言，排查只能靠猜）。
-          fail=0
-          for t in tools/test-*.cjs; do
-            echo "──── $t ────"
-            if node "$t" > "$RUNNER_TEMP/out.txt" 2>&1; then
-              tail -n 3 "$RUNNER_TEMP/out.txt"
-            else
-              fail=1
-              echo "::error title=套件失败（${{ matrix.os }}）::$t 未通过"
-              tail -n 25 "$RUNNER_TEMP/out.txt"
-              {
-                echo "### ❌ $t（${{ matrix.os }}）"
-                echo '```'
-                tail -n 25 "$RUNNER_TEMP/out.txt"
-                echo '```'
-              } >> "$GITHUB_STEP_SUMMARY"
-            fi
-          done
-          exit $fail
+          # 并行入口：枚举 tools/test-*.cjs，长套件先跑；失败时打印最后 25 行并写
+          # `::error::` 注解 + job summary（远程排查不用 admin 权限）。
+          node tools/run-tests.cjs --jobs 4
 
       # 检出的行尾也要报出来：Git for Windows 默认 core.autocrlf=true，
       # 一旦检出成 CRLF，「切行 + /^\s*\}$/ 锚定正则」那类文本断言就会全空
@@ -75,10 +52,16 @@ jobs:
         run: |
           node -e "const b=require('fs').readFileSync('js/tower-ui.js');console.log('js/tower-ui.js CRLF:', b.includes(Buffer.from('\r\n')))"
 
-      # 动画回归需要可选依赖 @napi-rs/canvas（三个平台都有预编译包）；装不上就自动 SKIP
+      # 动画回归需要可选依赖 @napi-rs/canvas（三个平台都有预编译包）；装不上就自动 SKIP。
+      # npm 缓存：这是 CI 里唯一的网络下载，命中时基本是本地解包。
+      - name: 缓存 npm（@napi-rs/canvas）
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-canvas-${{ runner.os }}-v1
       - name: 动画回归（可选依赖）
         shell: bash
         continue-on-error: true
         run: |
-          npm install --no-save --package-lock=false @napi-rs/canvas
+          npm install --no-save --package-lock=false --prefer-offline @napi-rs/canvas
           node tools/test-battle.js

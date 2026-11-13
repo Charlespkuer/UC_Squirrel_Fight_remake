@@ -386,27 +386,30 @@
     return building(key);
   }
   /** 升级页按钮交换视觉中心（缩放不同，不能只换矩阵 e），y 保持原版；
-   *  文字是素材里的矢量字，不在这里改。 */
+   *  文字是素材里的矢量字，不在这里改。
+   *  本地单位 = 屏幕位移 ÷（屏幕矩形 ÷ 本地包围盒）；部分安卓 WebView 的 getScreenCTM
+   *  混入设备像素，按它折回会让位移偏小、两颗键叠在一起（与 swapComposeButtons 同一做法）。 */
   function swapUpgradeButtons(view) {
     const up = clipOf(view, 'button1'), back = clipOf(view, 'button2');
     if (!up || !back || !up.g || !back.g || !up.setExtraTransform) return;
     const ru = up.g.getBoundingClientRect(), rb = back.g.getBoundingClientRect();
     if (!ru.width || !rb.width) return;
-    const svg = up.g.ownerSVGElement || back.g.ownerSVGElement;
-    const ctm = svg && svg.getScreenCTM ? svg.getScreenCTM() : null;
-    if (!ctm || !(Math.abs(ctm.a) > 1e-6)) return;
-    const sx = Math.abs(ctm.a);
-    const scaleOf = (clip) => {
-      const p = String(clip.g.__baseMa || '').split(',').map(Number);
-      return p.length === 6 && Number.isFinite(p[0]) && p[0] !== 0 ? Math.abs(p[0]) : 1;
+    const scaleOf = (clip, rect) => {
+      try {
+        const bb = clip.g.getBBox();
+        const local = Math.abs(bb && bb.width) > 1e-6 ? Math.abs(bb.width) : Math.abs(bb && bb.height);
+        const screen = Math.abs(rect.width) || Math.abs(rect.height);
+        const s = local > 1e-6 ? screen / local : 0;
+        return s > 1e-6 ? s : 1;
+      } catch (e) { return 1; }
     };
     const cu = ru.left + ru.width / 2, cb = rb.left + rb.width / 2;
-    const move = (clip, from, to) => {
-      const tx = ((to - from) / sx) / scaleOf(clip);
+    const move = (clip, from, to, rect) => {
+      const tx = (to - from) / scaleOf(clip, rect);
       clip.setExtraTransform('translate(' + tx.toFixed(3) + ',0)');
     };
-    move(up, cu, cb);
-    move(back, cb, cu);
+    move(up, cu, cb, ru);
+    move(back, cb, cu, rb);
   }
   function wireLandLevelUp(view, page, container) {
     const t = T();

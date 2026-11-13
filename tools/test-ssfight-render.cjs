@@ -382,6 +382,15 @@ const { buildFrames } = SfRender;
     /--nx,0px/.test(pillCss) &&
     [3, 4, 5, 7, 41, 42, 43, 44].every((id) => fs.existsSync(path.join(ROOT, 'images/ui/icons/prop/prop-' + id + '.svg'))),
     '主页药丸按联机版新版：无底板、贴图放大 1.5 倍、矢量按 --nx/--ny 校正并带齐 8 张 SVG');
+  /* WebView 83 的 HTTP SVG 图片在 GPU 冷启动时会丢渐变（勇气徽章、力/敏/速丸、属性书…），
+   * 旧 Android 把同一份 SVG 换成内联 <svg>；素材仍是纯 SVG。 */
+  const cu = fs.readFileSync(path.join(ROOT, 'js/classic-ui.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(/function installInlineSvgIcons\(\)/.test(cu)
+    && /function inlineSvgIcon\(img\)/.test(cu)
+    && /namespaceSvgIds\(svg, 'sfi'/.test(cu)
+    && /if \(OLD_ANDROID_ICONS\) installInlineSvgIcons\(\);/.test(cu)
+    && !/PROP_PNG_IDS/.test(cu),
+    '旧 Android 的 SVG 图标要走内联 <svg>，不能改成 PNG 回退');
 }
 
 /* ---------- 11. 挑战页（tiaozhan / 7638）：页包必须自带**页根**与二级/三级页库元件 ----------
@@ -2124,16 +2133,18 @@ function checkBalanceAndRewardContracts() {
   assert.ok(/function hideSubBackdrop\(view\)/.test(ch) && /hideSubBackdrop\(view\);/.test(ch),
     '动作菜单要收掉 4756 第 1 帧的 3142 蓝色蒙层');
   assert.ok(/BATTLE_HOLD_ATTR = 'data-sf-battle-hold'/.test(ch)
+    && /BATTLE_UNDERLAY_ATTR = 'data-sf-battle-underlay'/.test(ch)
     && /function holdPageForBattle\(/.test(ch) && /function resumePageAfterBattle\(/.test(ch)
-    && /setAttribute\(BATTLE_HOLD_ATTR/.test(ch) && /removeAttribute\(BATTLE_HOLD_ATTR/.test(ch)
+    && /setAttribute\(BATTLE_UNDERLAY_ATTR/.test(ch) && /removeAttribute\(BATTLE_HOLD_ATTR/.test(ch)
     && /const hold = holdPageForBattle\(\);/.test(ch) && /restore\('random'\)/.test(ch)
-    && /function clearUiForBattle\(/.test(main)
-    && /hasAttribute\('data-sf-battle-hold'\)/.test(main)
+    && /function clearUiForBattle\(keep\)/.test(main)
+    && /function hideHeldForBattle\(/.test(main)
+    && /hasAttribute\('data-sf-battle-underlay'\)/.test(main)
     && /\.ssfight-home:not\(\[data-sf-battle-hold\]\)/.test(main)
-    && /Main\.clearUiForBattle\(\)/.test(uf)
+    && /Main\.hideHeldForBattle\(\);[\s\S]{0,160}?Main\.clearUiForBattle\(host\)/.test(uf)
     && /bgmDucked/.test(main) && /bgm\.muted = bgmDucked/.test(main)
     && /if \(!audio\.paused\) return;/.test(main),
-    '挑战战斗回来不重挂整页：页面按住原位（清屏跳过 hold 节点），主 BGM 战斗内只静音不暂停，返回时直接还原');
+    '挑战战斗回来不重挂整页：加载期底页保持可见，战斗页挂好后再隐藏/清屏；主 BGM 战斗内只静音不暂停，返回时直接还原');
   assert.ok(/SfChallenge\.holdPageForBattle\(\)/.test(cu)
     && /SfChallenge\.resumePageAfterBattle\(heldPage,'gates',\{keepSub\}\)/.test(cu)
     && /SfChallenge\.refreshGateAt\(gateType\)/.test(cu)
@@ -2390,7 +2401,8 @@ function checkClassicGiftAttention() {
   assert.ok(/function giftIcon\(id\) \{ return Number\(id\) === 8 \? goldIcon\(\) : icon\('prop', id\); \}/.test(dailyUi)
     && /giftIcon\(g\.id\)/.test(dailyUi) && /d\.extra/.test(dailyUi) && /daily-gift-preview/.test(dailyUi),
     '经典礼包/每日奖励里的金松果要用经典 gold-acorn，并显示当天轮换道具');
-  assert.ok(/Number\(icon\.id\) === 8\) return 'images\/ui\/icons\/gold-acorn\.svg'/.test(levelUp),
+  assert.ok(/Number\(icon\.id\) === 8\) return \(classic && classic\.goldAcornSrc\)/.test(levelUp)
+    && /classic\.goldAcornSrc\(\) : 'images\/ui\/icons\/gold-acorn\.svg'/.test(levelUp),
     '经典升级礼包四格里的金松果也要用经典图标');
 
 
@@ -2909,6 +2921,9 @@ function checkVillageBuildings() {
    * 探针必须判 isConnected 并重建。 */
   assert.ok(/if \(!p \|\| !p\.isConnected\)/.test(vil) && /host\.__petProbe = p/.test(vil),
     '幻兽牧场重挂后缩放探针要判 isConnected 并重建，否则孵出的幻兽图会偏右偏大');
+  assert.ok(/function swapUpgradeButtons\(view\)[\s\S]{0,1400}?getBBox\(\)/.test(vil)
+    && !/const ctm = svg && svg\.getScreenCTM/.test(vil),
+    '升级页两颗键互换要按「屏幕矩形 ÷ 本地包围盒」折回（部分安卓 WebView 的 getScreenCTM 偏大，位移偏小会叠在一起）');
   assert.ok(/function wireClickable\(clip, onFire, opts\)/.test(vil)
     && /hoverFrame = \(opts && opts\.hover != null\)/.test(vil)
     && /wireClickable\(left, \(\) => \{ if \(beastPage > 1\)[^\n]*\}, \{ hover: 1 \}\)/.test(vil)
@@ -3067,6 +3082,11 @@ function checkClassicComposeFlow() {
     rootTag.Sf.some((x) => x.na === 't_name') && rootTag.Sf.some((x) => x.na === 't_temp'),
     '经典合成要走 4886 f5 合成页 + 4402「合成中」过场/结果页，并接入背包与融合结果'
   );
+  /* destroy() 会 SfRender.releaseExtra('tags-compose.json')；模块自己再记一个「已加载」标记，
+   * 第二次打开时 4402 已经不在 hash 里，合成与融合结果都会弹「界面出错」。 */
+  assert.ok(/function loadComposeExtra\(\)[\s\S]{0,240}?SfRender\.loadExtra\('tags-compose\.json'\)/.test(compose)
+    && !/composeExtraLoaded/.test(compose),
+    '合成/融合结果每次都要让 SfRender 决定是否重取 tags-compose.json，不能跨 releaseExtra 缓存');
 }
 
 /* ---------- 经典背包「道具使用」：4886 f1 原版弹窗 + 使用/取消对调 ---------- */

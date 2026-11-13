@@ -245,6 +245,9 @@
     const cornerVisible = !!(cornerRects.speed || cornerRects.skip);
     const previousClick = canvas.onclick;
     const ui = document.getElementById('ui');
+    /* 加载期间仍然留在 #ui 的底页（挑战/关卡/塔）。第一帧战斗画出来后再一次性撤掉，
+     * 否则中间会露出 canvas 首页。快照必须在创建战斗自己的 DOM（掉落、角键）之前拿。 */
+    const underlayNodes = ui ? Array.from(ui.children || []) : [];
     const pickups = opts.collectDrops && !opts.result && window.BattleDrops ? BattleDrops.create({ root: ui, random: opts.dropRandom, kind: opts.kind }) : null;
     // Accessible click layer follows the same rects as drawing; otherwise the two coordinate sources drift.
     const rectStyleOf = (r) => ['left:' + (r.x / W * 100).toFixed(3) + '%', 'top:' + (r.y / H * 100).toFixed(3) + '%',
@@ -285,6 +288,20 @@
       if (typeof setTimeout === 'function') setTimeout(shrinkCanvas, 0); else shrinkCanvas();
       for (const wake of [...sleepers]) wake();
       sleepers.clear();
+    }
+    /** 第一帧战斗已经画到 canvas 之后调用：撤掉加载期间露着的底页，并切回战斗高度。
+     *  与首帧同一个任务内完成，浏览器不会画出中间的首页帧。 */
+    function dropUnderlayForBattle() {
+      if (ui) {
+        for (const node of underlayNodes) {
+          if (!node || node.parentNode !== ui) continue;
+          if (node.nodeType === 1 && node.hasAttribute
+            && (node.hasAttribute('data-sf-battle-hold') || node.hasAttribute('data-sf-battle-underlay'))) continue;
+          ui.removeChild(node);
+        }
+      }
+      try { if (window.Main && Main.hideHeldForBattle) Main.hideHeldForBattle(); } catch (e) {}
+      try { if (window.Main && Main.resizeLayout) Main.resizeLayout(); } catch (e) {}
     }
     // skip(byButton): only a real skip-key press caps floating drops at 2/3 (collected first,
     // refill only uncollected). No arg (programmatic/auto/replay) awards all three as the original.
@@ -834,7 +851,10 @@
       await wait(170);
     }
     async function perform() {
-      idle(0); idle(1); raf = requestAnimationFrame(render);
+      idle(0); idle(1);
+      /* 先把第一帧画在 canvas 上（底页仍盖着），再撤底页；`render` 自己会排下一帧。 */
+      render(performance.now());
+      dropUnderlayForBattle();
       // Original opening is 3-2-1-GO; runAround is the dodge animation, never use it for the intro loop.
       for (const n of ['1', '2', '3', '0']) { if (aborted()) break; countdown = n; await wait(n === '0' ? 500 : 420); }
       countdown = null;

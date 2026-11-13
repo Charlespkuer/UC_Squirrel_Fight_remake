@@ -2375,8 +2375,7 @@ test('每日任务：当天固定抽取、进度来真实计数、只能领一�
     assert.ok(chance < 0.05, '超级经验丸概率应低于 5%，实际 ' + (chance * 100).toFixed(1) + '%');
     assert.ok(chance < best / total / 5, '应明显低于最高权重的奖励');
     assert.equal(pool.find((item) => item.id === 45).weight, 0.2, '天使种子每日概率减半');
-    assert.ok(pool.some((item) => item.id === 108 && item.weight === 0.06), '每日任务可出现天使果实碎片');
-    assert.ok(pool.some((item) => item.id === 109 && item.weight === 0.06), '每日任务可出现恶魔果实碎片');
+    assert.ok(!pool.some((item) => item.id === 108 || item.id === 109), '每日任务不再产出果实碎片');
     // 药丸数量固定 1（池子里就不能是区间）
     for (const item of pool) if ([3, 4, 5, 7, 44].includes(item.id)) {
       assert.equal(item.range[0], 1, '药丸数量应为 1：id ' + item.id);
@@ -3199,16 +3198,13 @@ test('果实种子合成：10 个种子 + 50 金松果换 1 个果实，材料/�
   assert.equal(S.composeSeed(46).ok, false, '没有恶魔果实种子时不能合成');
 });
 
-test('果实碎片：10 个天使/恶魔碎片 + 50 金松果合成对应果实', () => {
+test('果实碎片已移除：只有天使/恶魔种子能合成对应果实', () => {
   const g = game(), S = g.State, s = S.state();
+  assert.ok(!g.window.propMap.getValue(108) && !g.window.propMap.getValue(109), '果实碎片不再进道具表');
   s.props[108] = 10; s.props[109] = 10; s.goldPoint = 100;
-  assert.equal(S.composeSeed(108).ok, true, '天使碎片可合成');
-  assert.equal(s.props[47], 1);
-  assert.equal(s.props[108], 0);
-  assert.equal(S.composeSeed(109).ok, true, '恶魔碎片可合成');
-  assert.equal(s.props[48], 1);
-  assert.equal(s.props[109], 0);
-  assert.equal(s.goldPoint, 0);
+  assert.equal(S.composeSeed(108).ok, false, '天使碎片不能再合成');
+  assert.equal(S.composeSeed(109).ok, false, '恶魔碎片不能再合成');
+  assert.equal(s.goldPoint, 100, '拒绝时不扣金松果');
 });
 
 test('天使/恶魔果实随机结果：重开与读档都不重抽，确认后清掉待选', () => {

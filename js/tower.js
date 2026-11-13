@@ -18,7 +18,6 @@
   const HERO_NAME = { tl: '螳螂大侠', xh: '仙鹤大侠', xm: '熊猫大侠' };
   const HERO_SKILL = { tl: 19, xh: 20, xm: 22 };          // 三侠招牌技能（疾风镰刀舞/仙鹤展翅/熊掌震地）
   const HERO_REGION = { tl: 3, xh: 4, xm: 1 };            // 与关卡战一致
-  const UNLOCK_STAGES = 18;
   const TICKET_PROP = 50, BOOK_PROP = 23;
   // 即时削弱「敌人生命上限 −N%」的唯一上限；读档 / 登记 / 进战斗三处必须共用这一个值。
   const ENEMY_MAXHP_DOWN_CAP = 0.6;
@@ -674,12 +673,9 @@
   }
 
 
-  function unlocked() {
-    for (let id = 1; id <= UNLOCK_STAGES; id++) {
-      if (!State.stageProgress(id).passed) return { ok: false, msg: '通关前 ' + UNLOCK_STAGES + ' 关后解锁挑战塔。' };
-    }
-    return { ok: true };
-  }
+  /* 单机版双塔不设关卡门槛：入口只看等级（村庄征战 35 级）与剧情，不再要求先通前 18 关。
+   * 联机版有自己按周/进度的开放口径，那边保留门槛，两边不要互相覆盖。 */
+  function unlocked() { return { ok: true }; }
 
 
   function bossEntry(layer, salt, squirrelsOnly) { return D().bossFor(layer, salt, squirrelsOnly); }

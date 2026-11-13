@@ -64,8 +64,20 @@
     return '<img class="' + (cls || 'icon') + '" src="' + url + '"' + (size ? ' style="width:' + size + 'px;height:' + size + 'px"' : '') +
       ' onerror="this.style.visibility=\'hidden\'">';
   }
-  function weaponIcon(id, size) { return imgTag('images/ui/icons/weapon/weapon-' + id + '.svg', 'icon', size || 56); }
-  function skillIcon(id, size) { return imgTag('images/ui/icons/skill/skill-' + id + '.svg', 'icon', size || 56); }
+  function weaponIcon(id, size) {
+    const classic = window.UI && window.UI.classic;
+    const url = classic && typeof classic.iconSrc === 'function'
+      ? classic.iconSrc('weapon', id, false, false)
+      : 'images/ui/icons/weapon/weapon-' + id + '.svg';
+    return imgTag(url, 'icon', size || 56);
+  }
+  function skillIcon(id, size) {
+    const classic = window.UI && window.UI.classic;
+    const url = classic && typeof classic.iconSrc === 'function'
+      ? classic.iconSrc('skill', id, false, false)
+      : 'images/ui/icons/skill/skill-' + id + '.svg';
+    return imgTag(url, 'icon', size || 56);
+  }
   function propIcon(id, size) {
     const classic = window.UI && window.UI.classic;
     const url = classic && typeof classic.propIconSrc === 'function'
@@ -134,6 +146,7 @@
     $('#ui').appendChild(t);
     setTimeout(() => t.classList.add('show'), 10);
     setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, ms || 2200);
+    return t;
   }
   function confirmBox(msg, onYes) {
     const box = el('div');

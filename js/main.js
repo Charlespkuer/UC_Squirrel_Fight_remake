@@ -1119,15 +1119,28 @@
       return Battle.run(opts);
     }
   }
-  /** 清空 `#ui` 给战斗画面让位，但**保留**被挑战页按住（`data-sf-battle-hold`）的那棵树。
-   *  挑战页整页 detach 再 append 会触发 WebKit 重新布局/光栅化，返回随机挑战页时就是那一下
-   *  卡顿；按住后它一直在文档里，战斗页只是盖在它上面。没有 hold 时等价于原来的 innerHTML=''。 */
-  function clearUiForBattle() {
+  /** 战斗画面就绪时清 `#ui`，保留 `keep`（战斗页）与被按住的底页。
+   *  `data-sf-battle-underlay` 是加载期间仍可见的底页：先隐藏、再清，避免加载时露出 canvas 首页。
+   *  没有 keep 时等价于原来的 innerHTML=''。 */
+  function clearUiForBattle(keep) {
     const ui = document.getElementById('ui');
     if (!ui) return;
     for (const node of Array.from(ui.childNodes)) {
-      if (node.nodeType === 1 && node.hasAttribute && node.hasAttribute('data-sf-battle-hold')) continue;
+      if (node === keep) continue;
+      if (node.nodeType === 1 && node.hasAttribute
+        && (node.hasAttribute('data-sf-battle-hold') || node.hasAttribute('data-sf-battle-underlay'))) continue;
       ui.removeChild(node);
+    }
+  }
+  /** 战斗页已经盖上来了：把这期间一直露在外面的底页转成「按住并隐藏」。
+   *  必须在战斗页可见之后调用，否则加载期间又会露出 canvas 首页。 */
+  function hideHeldForBattle() {
+    const ui = document.getElementById('ui');
+    if (!ui) return;
+    for (const el of ui.querySelectorAll('[data-sf-battle-underlay]')) {
+      el.setAttribute('data-sf-battle-hold', '');
+      el.style.visibility = 'hidden';
+      el.style.pointerEvents = 'none';
     }
   }
   async function startBattle(foe, opts) {
@@ -1173,8 +1186,8 @@
     } catch (e) { if (window.__errs) window.__errs.push('pet battle: ' + (e && e.message)); }
     mode = 'battle';
     cancelAnimationFrame(rafId);
-    clearUiForBattle();
-    fitCanvas();
+    /* 不在开打前清 `#ui` / 改缩放：底页（挑战、关卡、塔……）继续露在加载过程中，
+     * 战斗页挂好后再由渲染器自己清屏并 `resizeLayout()`。否则中间会露出 canvas 首页。 */
     playBgm('fight');
     if (opts.region != null && foe && foe.region == null) foe.region = opts.region;
     let settled = false;
@@ -1259,7 +1272,7 @@
     if (!entry || mode === 'battle') return;
     const owner = State.state();
     let settled = false;
-    mode = 'battle'; cancelAnimationFrame(rafId); clearUiForBattle(); fitCanvas(); playBgm('fight');
+    mode = 'battle'; cancelAnimationFrame(rafId); playBgm('fight');
     const controller = await runBattle({ canvas, me: entry.me, foe: entry.foe, region: entry.region, result: entry.result, collectDrops: false,
       /* 录像回放同样遵守系统页的「跳过按钮」开关与等级/VIP 解锁，不在这里另开一套。 */
       allowSkip: State.skipButtonEnabled ? State.skipButtonEnabled() : true,
@@ -1360,7 +1373,7 @@
    *  界面请优先用 `UI.classic.openSupportModal()` —— 它带「复制链接」兜底。 */
   function openSupport() { return openExternal(SUPPORT.url); }
 
-  window.Main = { showHome, showTitle, startBattle, replayBattle, clearUiForBattle, resizeLayout:fitCanvas, setMuted, isMuted: () => muted,
+  window.Main = { showHome, showTitle, startBattle, replayBattle, clearUiForBattle, hideHeldForBattle, resizeLayout:fitCanvas, setMuted, isMuted: () => muted,
     /* 经典主页挂载失败时由 classic-ui.js 的恢复流程调用：空壳摘掉后重起 canvas 主页。
      * 只在真的还在首页时才动（战斗中/标题页返回 false），不硬塞 startHomeScene。 */
     resumeHomeScene,

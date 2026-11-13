@@ -66,6 +66,10 @@ const DICTS = [
   ['giftMap', '礼包'],
 ];
 
+/* 原版 GameDict 有、本游戏永久移除的道具：6 松鼠拳套、9 绿松果。
+ * 重生成时跳过，避免手工删掉的行又被原版数据带回来。 */
+const RETIRED_PROPS = new Set([6, 9]);
+
 /** 从 GameDict.js 源码里精确抓出每一次 put 的「原始字符串 + 真正的分隔符」。
  *  为什么不用运行时的数组反推：`"a;b;c".split(";")` 之后，分隔符就看不出来了，
  *  而原版数据里**每条的分隔符并不一样**（武器 10 用 `;`、其余用空格，remark 里还带空格），
@@ -303,6 +307,7 @@ function build() {
     const map = ctx[name];
     if (!map) { out.push('  /* ' + name + '（' + label + '）：原版数据里没有，跳过 */'); continue; }
     let { fields, rows } = dumpDict(map, name, putTable);
+    if (name === 'propMap') rows = rows.filter((r) => !RETIRED_PROPS.has(Number(r.key)));
     if (name === 'attachmentMap') {
       const ss = ssAttachmentTable();
       if (ss) ({ fields, rows } = ss);

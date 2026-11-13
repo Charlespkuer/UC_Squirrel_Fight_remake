@@ -40,7 +40,7 @@
 .item-icon>.reference-art{width:100%;height:100%;object-fit:fill}
 .collection-board .item-caption{font-family:Georgia,"SimSun","Songti SC","STSong",serif;font-size:38px;line-height:46px;color:#860d08}
 .collection-board .selected .item-caption{color:#648a28;font-family:"SimSun","Songti SC","STSong",serif;font-size:34px;font-weight:normal}
-.catalog-cell.selected .item-icon{outline:4px solid #278000;outline-offset:0;box-shadow:inset 0 0 0 6px #ecffa7;background:repeating-conic-gradient(from 15deg,#d9f788 0deg 22deg,#a2ce3e 22deg 42deg)}
+.catalog-cell.selected .item-icon{border-color:#278000;outline:0;box-shadow:0 0 0 4px #278000,inset 0 0 0 6px #ecffa7;background:repeating-conic-gradient(from 15deg,#d9f788 0deg 22deg,#a2ce3e 22deg 42deg)}
 .empty-slot{cursor:default}.collection-board .empty-slot .item-icon,.classic-bag-board .empty-slot .item-icon{background:#e6d5a9;border:0;box-shadow:none;border-radius:30px;opacity:.7}
 /* 翻页箭头保持居中偏侧的原有位置（原版字面坐标 (7,371)/(1094,371) 会把箭头压到
  * 底板边缘上，观感反而更差，故回退）。 */
@@ -515,7 +515,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
   width:194.7px;height:53.55px;border-radius:45px;background:#6c3b16;color:#fffdf0;font:38px Georgia,serif;
   display:flex;align-items:center;justify-content:flex-start;padding-left:59px}
 .bag-coins img{position:absolute;width:76.3px;height:94.75px;object-fit:contain;left:-15.2px;top:-26.6px}
-.bag-coins b{font-weight:normal;margin-left:0;-webkit-text-stroke:2.4px #57300f;paint-order:stroke fill;text-shadow:0 2px 0 #57300f}
+.bag-coins b{font-weight:normal;margin-left:0;text-shadow:0 2px 0 #57300f}
 /* 道具页仓库/商店格子：尺寸、间距、底色全部按**原版道具页渲染图逐像素量过** ——
    底色是纵向渐变 #f2f2d1 → #fdba26（不是以前那个风车状 conic 渐变）。 */
 .classic-bag-board{padding:15px 28px 19px 76px}
@@ -523,7 +523,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .bag-grid{padding:0;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:8px 22px}
 .bag-grid .catalog-cell{justify-content:flex-start;gap:5px}
 .bag-grid .item-icon{width:174px;height:167px;border:4px solid #774b32;border-radius:34px;box-shadow:inset 0 0 0 5px #fffdf4;background:repeating-conic-gradient(from 15deg at 50% 52%,#f7e9b6 0deg 18deg,#d9c087 18deg 38deg)}
-.bag-grid .selected .item-icon{background:repeating-conic-gradient(from 15deg,#d8f982 0deg 22deg,#a8d23e 22deg 42deg);border-color:#287d00}
+.bag-grid .selected .item-icon{background:repeating-conic-gradient(from 15deg,#d8f982 0deg 22deg,#a8d23e 22deg 42deg);border-color:#287d00;outline:0;box-shadow:0 0 0 4px #287d00,inset 0 0 0 5px #fffdf4}
 .bag-grid .catalog-cell.sf-feedback.sf-hover{filter:drop-shadow(0 0 6px rgba(82,150,35,.95)) brightness(1.04)}
 .bag-grid .item-caption{font:36px/44px Georgia,"SimSun","Songti SC","STSong",serif;color:#8e1006}
 .bag-grid .selected .item-caption{color:#4f7c1d;font-weight:bold}
@@ -540,7 +540,7 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
 .gold-price b{font-weight:normal;font-family:Georgia,"SimSun","Songti SC","STSong",serif;font-size:1em;line-height:1}
 .bag-detail{position:relative;border-radius:58px;background:linear-gradient(#eed4a5,#e2bf82);padding:11px 21px 16px;color:#6a3b15;display:flex;flex-direction:column;min-width:0;overflow:hidden}
 .bag-detail h3{margin:0 -2px 0;padding:7px 5px 12px;border-radius:40px;background:#cfa469;font:38px/43px "SimSun","Songti SC","STSong",serif;color:#fff9e9;text-align:center;flex-shrink:0}
-.bag-description{font-family:"SimSun","Songti SC","Microsoft YaHei",serif;font-size:39px;line-height:1.1;flex:1;margin:3px 0 7px;overflow:auto;white-space:pre-line}
+.bag-description{font-family:"SimSun","Songti SC","Microsoft YaHei",serif;font-size:39px;line-height:1.1;flex:1;min-height:0;margin:3px 0 7px;overflow:auto;white-space:pre-line}
 .bag-item-meta{font-size:22px;line-height:1.4;margin-bottom:7px;color:#80541d}
 .bag-actions{display:flex;gap:14px;justify-content:center;align-items:center;flex-shrink:0}
 .bag-actions .uc-button{align-self:auto}
@@ -580,8 +580,13 @@ html[data-ui-mode="classic"] .classic-page.classic-tower,
    页脚里依次是 [每日抽奖, 返回菜单, 金杯商店]。 */
 .classic-page[data-screen="shop"] .page-footer>.entry-pill:first-child{position:absolute;left:24px;bottom:34px}
 .classic-page[data-screen="shop"] .page-footer>.entry-pill:last-child{position:absolute;right:24px;bottom:34px}
-/* 注意要压掉 .page-footer>.uc-button 的 min-width:393px，否则 width 不起作用 */
-.uc-button.entry-pill{height:58px;width:214px;min-width:0;min-height:0;padding:0 12px;white-space:nowrap;border:4px solid #7b5220;border-radius:32px;
+/* 页码徽标默认在右下角，会和「金杯商店」那颗入口叠在一起（安卓上字体更宽时更明显）：
+   只有带两颗入口的商店页把它放到「每日抽奖」与「返回菜单」中间的空档，并按自身宽度居中 ——
+   安卓 CJK 字体比 Windows 宽 1.4 倍左右，写死 left 会把徽标顶到右边那颗键上。 */
+.classic-page.shop-entries .page-counter{left:326px;right:auto;bottom:57px;transform:translateX(-50%)}
+/* 注意要压掉 .page-footer>.uc-button 的 min-width:393px，否则 width 不起作用。
+   宽度给 min-width 而不是写死 214px：安卓 CJK 回退字体更宽，写死宽度会把最后半个字裁进圆角。 */
+.uc-button.entry-pill{height:58px;width:auto;min-width:214px;min-height:0;padding:0 16px;white-space:nowrap;border:4px solid #7b5220;border-radius:32px;
   font:700 26px/1 "Microsoft YaHei","PingFang SC","Hiragino Sans GB",sans-serif;color:#6b3f12;
   letter-spacing:2px;-webkit-text-stroke:0;text-shadow:0 1px 0 #fff7d0;
   background:linear-gradient(#fff6c6,#ffd75c 46%,#f0a81b);

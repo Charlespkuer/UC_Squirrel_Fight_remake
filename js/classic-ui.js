@@ -186,6 +186,97 @@
     return url ? '<img alt="" class="' + (cls || '') + '" src="' + url + '">' : '';
   }
   // 主界面用原版无框金松果矢量；与图集那一颗不是同一套画稿。
+  /* WebView 83 的 HTTP SVG 图片在 GPU 冷启动时会丢渐变（勇气徽章、力/敏/速丸、属性书…），
+   * 同一份 SVG 改成内联节点则正常。旧 Android 把图标 <img> 换成内联 <svg>，素材仍是纯 SVG。
+   * 每个实例给 id 加前缀，避免多个图标的渐变 id 互相覆盖。 */
+  const OLD_ANDROID_ICONS = (() => {
+    const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+    const m = /Android/.test(ua) && /Chrome\/(\d+)/.exec(ua);
+    return !!(m && Number(m[1]) < 100);
+  })();
+  const SVG_TEXT_CACHE = new Map();
+  let svgInlineSeq = 0;
+  function svgText(raw) {
+    const key = String(raw);
+    if (SVG_TEXT_CACHE.has(key)) return SVG_TEXT_CACHE.get(key);
+    const pending = fetch(key, { cache: 'force-cache' })
+      .then((r) => { if (!r || !r.ok) throw new Error('icon ' + key); return r.text(); })
+      .catch((e) => { SVG_TEXT_CACHE.delete(key); throw e; });
+    SVG_TEXT_CACHE.set(key, pending);
+    return pending;
+  }
+  function namespaceSvgIds(svg, prefix) {
+    const ids = [...svg.querySelectorAll('[id]')].map((n) => n.getAttribute('id')).filter(Boolean);
+    for (const id of ids) {
+      const safe = prefix + id.replace(/[^\w.-]/g, '_');
+      for (const node of svg.querySelectorAll('[id]')) {
+        if (node.getAttribute('id') === id) node.setAttribute('id', safe);
+      }
+      for (const node of svg.querySelectorAll('*')) {
+        for (const attr of [...node.attributes]) {
+          if (attr.value.indexOf('#' + id) < 0) continue;
+          node.setAttribute(attr.name, attr.value.split('#' + id).join('#' + safe));
+        }
+      }
+    }
+  }
+  function inlineSvgIcon(img) {
+    if (!img || img.tagName !== 'IMG' || img.dataset.svgInline) return Promise.resolve(null);
+    const raw = img.getAttribute('src');
+    if (!raw || /^(data|blob):/i.test(raw) || !/\.svg(?:$|[?#])/i.test(raw)) return Promise.resolve(null);
+    const box = img.getBoundingClientRect();
+    if (!(box.width > 1 && box.height > 1)) return Promise.resolve(null);
+    img.dataset.svgInline = '1';
+    const cs = getComputedStyle(img);
+    const prev = img.style.visibility;
+    img.style.visibility = 'hidden';
+    return svgText(raw).then((text) => {
+      if (!img.isConnected) return null;
+      const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+      const svg = doc.documentElement;
+      if (!svg || svg.nodeName.toLowerCase() !== 'svg') throw new Error('bad svg ' + raw);
+      namespaceSvgIds(svg, 'sfi' + (++svgInlineSeq) + '_');
+      svg.setAttribute('class', (img.className || '') + ' sf-inline-icon');
+      svg.setAttribute('role', 'img');
+      if (img.alt) svg.setAttribute('aria-label', img.alt);
+      svg.setAttribute('width', '100%');
+      svg.setAttribute('height', '100%');
+      svg.style.cssText = 'width:' + cs.width + ';height:' + cs.height + ';position:' + cs.position +
+        ';left:' + cs.left + ';top:' + cs.top + ';margin:' + cs.margin + ';display:' + cs.display +
+        ';opacity:' + cs.opacity + ';visibility:' + prev + ';pointer-events:' + cs.pointerEvents +
+        ';transform:' + cs.transform + ';filter:' + cs.filter + ';vertical-align:' + cs.verticalAlign + ';';
+      img.replaceWith(svg);
+      return svg;
+    }).catch(() => { if (img.isConnected) img.style.visibility = prev; return null; });
+  }
+  function installInlineSvgIcons() {
+    if (typeof document === 'undefined' || !document.documentElement) return;
+    const scan = (root) => {
+      if (!root) return;
+      if (root.tagName === 'IMG') inlineSvgIcon(root);
+      if (root.querySelectorAll) for (const img of root.querySelectorAll('img[src]')) inlineSvgIcon(img);
+    };
+    /* 等一帧再量：状态药丸的宿主尺寸是 innerHTML 之后同步写上去的，
+     * MutationObserver 的微任务阶段还量不到最终宽高。 */
+    const pending = new Set();
+    const queue = (node) => {
+      if (!node || pending.has(node)) return;
+      pending.add(node);
+      if (pending.size > 1) return;
+      requestAnimationFrame(() => {
+        const list = [...pending]; pending.clear();
+        for (const n of list) scan(n);
+      });
+    };
+    try {
+      new MutationObserver((records) => {
+        for (const rec of records) for (const node of rec.addedNodes) queue(node);
+      }).observe(document.documentElement, { childList: true, subtree: true });
+      setTimeout(() => scan(document.documentElement), 600);
+    } catch (e) {}
+    scan(document.documentElement);
+  }
+  if (OLD_ANDROID_ICONS) installInlineSvgIcons();
   const GOLD_ICON = 'images/ui/icons/gold-acorn.svg';
   function goldIcon(cls) { return '<img alt="" class="' + (cls || '') + '" src="' + GOLD_ICON + '">'; }
   // 礼包/奖励道具图标：金松果(8)统一用经典那颗，其余走经典道具图；现代 prop-8 只给现代界面。
@@ -273,9 +364,9 @@
   }
   // 原版道具库导出物：无框矢量优先，SWF 没导出的 id 才回退图集 PNG。
   const PROP_SVG_IDS = new Set([
-    1, 2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 14, 15, 21, 22, 23, 24, 25, 26,
-    28, 29, 30, 31, 32, 36, 37, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
-    79, 82, 87, 90, 101, 102, 103, 104, 105, 106, 107,
+    1, 2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23,
+    24, 25, 26, 28, 29, 30, 31, 32, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46,
+    47, 48, 49, 50, 79, 82, 87, 90, 101, 102, 103, 104, 105, 106, 107,
   ]);
   function propIconSrc(id) {
     const n = Number(id);
@@ -591,7 +682,7 @@
     return {close,element:wrap};
   }
   function notice(msg, buttons) { return modal('提示', '<p>' + esc(msg) + '</p>', buttons || [{label:'确定'}], {small:true}); }
-  function toast(msg) { legacy.toast(msg); }
+  function toast(msg, ms) { return legacy.toast(msg, ms); }
 
   function ssdzSizeText(n) {
     const v = Number(n) || 0;
@@ -1822,9 +1913,15 @@
     };
     if(window.Tower&&window.TowerUI){proceed();return;}
     if(!window.TowerLoader){notice('挑战塔系统尚未加载。');return;}
-    notice('正在加载挑战塔…');
-    window.TowerLoader.ensure().then(proceed)
-      .catch(()=>notice('挑战塔加载失败，请检查网络后重试。'));
+    // 加载期间只给飘字：模态框要玩家点掉，脚本回来后还会被压在塔页下面。
+    const tip = toast('正在加载挑战塔…');
+    window.TowerLoader.ensure().then(() => {
+      if (tip && tip.remove) tip.remove();
+      proceed();
+    }).catch(() => {
+      if (tip && tip.remove) tip.remove();
+      notice('挑战塔加载失败，请检查网络后重试。');
+    });
   }
   function stageTypeAvailable(t) {
     return [1,2,3,4,5,6].some(st=>State.stageAccess(t*6+st).ok);
@@ -1938,7 +2035,7 @@
     }
     const gateType=Math.floor((stageId-1)/6);
     const backToStage=()=>backToStages(gateType);
-    /* 战斗前把原版关卡页从 #ui 摘下（Main.startBattle 会整片清空 #ui），打完原样挂回同一棵 SVG ——
+    /* 战斗加载期把原版关卡页留在 #ui 原位（SfFight 挂好后才隐藏/清屏），打完原样还原同一棵 SVG ——
      * 不再 destroy()+重挂，那一步就是「闪一下」的来源。页面不在场/非经典模式时 heldPage 为 null。 */
     let heldPage=null;
     try { if (classicSsflight() && window.SfChallenge && SfChallenge.holdPageForBattle) heldPage=SfChallenge.holdPageForBattle(); } catch(e) {}
@@ -2108,6 +2205,38 @@
     });
   }
 
+  /* 详情栏的说明是固定高度的滚动区（.bag-description）。安卓没有宋体/雅黑，回退字体更宽，
+   * 同一段说明会多折一行、被滚动区切成半行（金杯商店的「超级大力丸」就是这样）。
+   * 这里按实际容纳行数把字号从 39 往下收到 24，收到底仍放不下才保留滚动。 */
+  function fitDetailDescription(root) {
+    const box = root && root.querySelector ? root.querySelector('.bag-detail .bag-description') : null;
+    if (!box) return;
+    let size = 39;
+    box.style.fontSize = size + 'px';
+    while (size > 24 && box.scrollHeight > box.clientHeight + 1) {
+      size -= 1;
+      box.style.fontSize = size + 'px';
+    }
+  }
+  /* 页脚两颗入口（每日抽奖 / 金杯商店）是定宽胶囊。旧安卓 WebView（Chrome<100）在页面缩得很小、
+   * 字的实际像素低于约 14px 时，会把文字按 ~1.3 倍**画**出来（布局不变），四个字就顶满胶囊。
+   * 这里按「实际渲染像素」判断要不要先除一次 1.3，再按宽/高逐级收到放得下为止。 */
+  function fitEntryPills(root) {
+    if (!root || !root.querySelectorAll) return;
+    const page = root && root.classList && root.classList.contains('classic-page')
+      ? root : (root && root.querySelector ? root.querySelector('.classic-page') : null);
+    const scale = page ? page.getBoundingClientRect().width / 1170 : 0;
+    for (const pill of root.querySelectorAll('.entry-pill')) {
+      pill.style.fontSize = '';
+      let size = parseFloat(getComputedStyle(pill).fontSize) || 26;
+      if (OLD_ANDROID_ICONS && scale > 0 && size * scale < 14) size = Math.round(size / 1.3);
+      pill.style.fontSize = size + 'px';
+      while (size > 12 && (pill.scrollWidth > pill.clientWidth + 1 || pill.scrollHeight > pill.clientHeight + 1)) {
+        size -= 1;
+        pill.style.fontSize = size + 'px';
+      }
+    }
+  }
   function openBag(shop,pg) {
     const exchange=shop==='exchange',mode=shop;shop=shop===true;bagPage=pg||0;
     const S=State.state(),items=[];
@@ -2156,7 +2285,7 @@
     const info=detailMarkup(shown.find(it=>it.id===selectedProp));
     const content='<div class="bag-layout"><div class="catalog-grid bag-grid">'+shown.map(it=>'<button class="catalog-cell '+(it.id===selectedProp?'selected':'')+'" data-prop="'+it.id+'" aria-label="'+esc(it.name)+(shop?'，'+it.price+'金松果':'，拥有'+bagCount(it.id)+'个')+'" aria-pressed="'+(it.id===selectedProp)+'"><span class="item-icon">'+icon('prop',it.id,false,it.id===selectedProp)+'</span><span class="item-caption">'+(shop?goldPrice(it.price,esc(it.name)):bagCount(it.id))+'</span></button>').join('')+Array.from({length:6-shown.length},()=>'<div class="catalog-cell empty-slot" aria-hidden="true"><span class="item-icon"></span></div>').join('')+'</div><aside class="bag-detail" aria-live="polite">'+info+'</aside></div>'+(bagPage?'<div class="page-arrow prev">'+btn('‹','prev','arrow')+'</div>':'')+(bagPage<total-1?'<div class="page-arrow bag-next">'+btn('›','next','arrow')+'</div>':'');
     const bagFooter=shop?{left:btn('每日抽奖','lottery','gold entry-pill'),right:btn('金杯商店','rank-shop','gold entry-pill')}:{};
-    const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,Object.assign({cls:'classic-bag-board'+(shop?' shop-board':''),counter:(bagPage+1)+'/'+total},bagFooter));
+    const p=page('bag',exchange?'exchange':shop?'shop':'bag',content,Object.assign({cls:'classic-bag-board'+(shop?' shop-board':''),pageClass:shop?'shop-entries':'',counter:(bagPage+1)+'/'+total},bagFooter));
     wirePopTaps(p, { tabs: true, cells: true, footer: true, arrows: true });
     installBagTabVectors(p);
     function openPropEntry(id) {
@@ -2193,6 +2322,7 @@
       }
       $('.bag-detail',p).innerHTML=detailMarkup(shown.find(it=>it.id===id));
       wireDetail();
+      fitDetailDescription(p);
     }
     $$('[data-prop]',p).forEach(b=>{
       // 鼠标移到哪格哪格变绿并同步右侧说明；单击直接打开二级窗口（不需要第一下选中）。
@@ -2237,11 +2367,13 @@
       }
       if (!nextShown.some(it=>it.id===selectedProp)) selectedProp = nextShown[0]?.id||0;
       const detail = $('.bag-detail',p);
-      if (detail) { detail.innerHTML = detailMarkup(nextShown.find(it=>it.id===selectedProp)); wireDetail(); }
+      if (detail) { detail.innerHTML = detailMarkup(nextShown.find(it=>it.id===selectedProp)); wireDetail(); fitDetailDescription(p); }
       try { refreshHeader(); } catch (e) {}
       return true;
     }
     bagRefresh = refreshBag;
+    fitDetailDescription(p);
+    fitEntryPills(p);
     $('[data-action="rank-shop"]',p)?.addEventListener('click',()=>ClassicExtras.rankShop(0,'shop'));
     $('[data-action="prev"]',p)?.addEventListener('click',(e)=>popTap(e.currentTarget,()=>openBag(mode,bagPage-1)));
     $('[data-action="next"]',p)?.addEventListener('click',(e)=>popTap(e.currentTarget,()=>openBag(mode,bagPage+1)));
@@ -2372,6 +2504,7 @@
     });
     wirePopTaps(p, { tabs: true, cells: true, arrows: true });
     installBagTabVectors(p);
+    fitDetailDescription(p);
     const leave = () => {
       destroyRankShopBack(p);
       if (backTo === 'shop') {
@@ -2395,6 +2528,7 @@
         if (window.SfUiFeedback) SfUiFeedback.bind(cell, { selected: on });
       }
       $('.bag-detail', p).innerHTML = detailMarkup(g);
+      fitDetailDescription(p);
     };
     $$('[data-rank-good]', p).forEach((b) => {
       /* 与商店页同一套：移到哪一格哪一格变绿并同步右侧说明；单击打开兑换确认。 */
@@ -2647,7 +2781,7 @@
       return;
     }
     if(id===79||id===90){ openChestDetail(id,shop); return; }
-    const isFragment=[24,25,26].includes(id),isConvertShard=id===GData.CONVERT_SHARD_ID,isSeed=[45,46,108,109].includes(id),isGem=State.gemLevel(id)>0,canUse=base.useType==='1';
+    const isFragment=[24,25,26].includes(id),isConvertShard=id===GData.CONVERT_SHARD_ID,isSeed=[45,46].includes(id),isGem=State.gemLevel(id)>0,canUse=base.useType==='1';
     /* 经典背包 useType 1 道具改用原版 4886 f1 的 SVG 弹窗，不再手搓 DOM 详情（商店/兑换页保持原样）；
      * 素材挂载失败时 openClassicUseProp 以 forceDom 回退到下面这套 DOM 弹窗。 */
     if (!shop && !exchange && canUse && !opts.forceDom && window.SfPropUse
@@ -2671,7 +2805,7 @@
     const held=S.props[id]||0,cap=State.energyHardCap();
     const batchCost=isGem?3:10;
     const batchGold=isGem?10:50;
-    const fruitId=(id===45||id===108)?47:48;
+    const fruitId=(id===45)?47:48;
     const batchName=isFragment?'装备':isSeed?propMap.getValue(fruitId).name:isConvertShard?'转化丸（随机）':'更高一级宝石';
     // 每种道具当前能不能再来一次（材料/金币/体力上限），用来说明按钮为什么变灰
     const blockReason=()=>{
@@ -3369,7 +3503,7 @@
         btn(tributeLabel, 'claim-tribute', 'small ' + (tribute.claimable ? 'gold' : 'muted')) + '</div>' +
         '<p>' + esc(tributeText) + '</p></div></div>';
     const rewardIcon = (r) => r.kind === 'gold' ? goldIcon()
-      : r.kind === 'exp' ? '<img alt="" src="images/ui/icons/prop/prop-15.svg">'
+      : r.kind === 'exp' ? '<img alt="" src="' + propIconSrc(15) + '">'
         : icon('prop', r.id);
     const rows = quests.map((q) => {
       const pct = Math.round(100 * q.progress / q.need);
@@ -4898,16 +5032,22 @@
   }
   /* 村庄「征战」：原版是四人组队 + 服务端开房（界面元件「征战」在导出里没有 spriteId），复刻不做；
    * 这里在经典村庄页上盖一个小弹窗（.classic-modal），底下村庄原样留着，两颗键直接调
-   * TowerUI.openTower() / openEndless()；门槛照现代入口 Tower.unlocked()（通关前 18 关）。 */
+   * TowerUI.openTower() / openEndless()；门槛只有村庄的 35 级（单机版不设关卡门槛）。 */
   function villageWar() {
     const S = State.state();
     const levelNeed = Number(State.WAR_UNLOCK_LEVEL) || 35;
     if (Number(S && S.level) < levelNeed) { notice('征战需要达到 ' + levelNeed + ' 级才能使用。'); return; }
     if (window.Tower && window.TowerUI) { showWarDialog(); return; }
     if (!window.TowerLoader) { notice('挑战塔系统尚未加载。'); return; }
-    notice('正在加载挑战塔…');
-    window.TowerLoader.ensure().then(showWarDialog)
-      .catch(() => notice('挑战塔加载失败，请检查网络后重试。'));
+    // 加载期间只给飘字：模态框要玩家点掉，脚本回来后还会把「征战」弹窗压住。
+    const tip = toast('正在加载挑战塔…');
+    window.TowerLoader.ensure().then(() => {
+      if (tip && tip.remove) tip.remove();
+      showWarDialog();
+    }).catch(() => {
+      if (tip && tip.remove) tip.remove();
+      notice('挑战塔加载失败，请检查网络后重试。');
+    });
   }
   function showWarDialog() {
     const lock = (window.Tower && Tower.unlocked && window.TowerUI)
@@ -5037,7 +5177,7 @@
       ? '<p><b>装备融合</b>：3 件同品质、未穿戴的装备可融合成 1 件更高品质装备（橙装→黑装；黑装可继续融合洗词条），成功率 100%，费用按品质 30～1000 金松果。产物部位从三件材料中随机、优先同套；词条按星级从高到低继承前两条，第三条随机。</p>'
       : '';
     // 帮助是「系统」分组下的正常页面（弹窗会挡住底下的界面）。
-    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能；71 级起每升 1 级会获得 1 个金宝箱。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。前 18 关每轮消耗1张挑战书、连续击败3名敌人；后 18 关（19-36）是超级三侠，每关只有1名强敌。失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件同品质装备可以融合（产物部位从三件材料随机，词条按星级/材料顺序继承前两条）。带徒弟挑战时徒弟会先上阵；徒弟战败后师父免费接手同一名对手（对手保留剩余血量，不消耗挑战书、也不占用复活次数）。</p><p><b>竞技场</b>：10级开启经验竞技场，15级开启碎片竞技场与幻兽竞技场；报名一次打完两场。经验场名次奖励 150/100/50/30 经验，碎片场 8/6/4/3 蓝片，幻兽场 40/35/30/25 孵化点。</p><p><b>幻兽</b>：村庄「幻兽牧场」孵化、编队、喂养、进化；孵化消耗 200 孵化点。幻兽竞技场用召唤证报名；召唤证可在道具商店用 10 金松果购买，也能从魔法袋中开出。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。天梯赛战斗里会飘出黄色三角的「属性碎片」，点碎片拾取；10 个属性碎片 + 50 金松果可在背包合成 1 个随机力量/敏捷/速度转化丸。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；iOS 的导出文件在「文件」App → 我的 iPhone/iPad → 松鼠大战，导入时也可以直接粘贴存档文本；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45 级后通关关卡或竞技场获胜有几率获得 1~2 级宝石；3 个同级宝石 + 10 金松果可合成高一级（可能失败降级）。宝石可镶入橙色或黑色装备，每件 1 颗，镶嵌/卸下各 5 金松果。</p><p><b>套装收益（仅现代界面）</b>：同名装备 2/4 件各一档加成，按该套最低品质计算；经典界面没有套装收益。</p><p><b>挑战塔</b>：通关前 18 关后解锁。逐层挑战，通关得金松果与碎片；第 20/50 层里程碑发黑卡，第 100 层给黑装自选箱。</p><p><b>无尽塔</b>：没有层数上限，每 100 层一轮。战斗得试炼币，可在试炼商店/铸币商店买增益；每累计 50 层 1 张黑卡，每周最多 10 张。</p>' + blackHelp + '<h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
+    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能；71 级起每升 1 级会获得 1 个金宝箱。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。前 18 关每轮消耗1张挑战书、连续击败3名敌人；后 18 关（19-36）是超级三侠，每关只有1名强敌。失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件同品质装备可以融合（产物部位从三件材料随机，词条按星级/材料顺序继承前两条）。带徒弟挑战时徒弟会先上阵；徒弟战败后师父免费接手同一名对手（对手保留剩余血量，不消耗挑战书、也不占用复活次数）。</p><p><b>竞技场</b>：10级开启经验竞技场，15级开启碎片竞技场与幻兽竞技场；报名一次打完两场。经验场名次奖励 150/100/50/30 经验，碎片场 8/6/4/3 蓝片，幻兽场 40/35/30/25 孵化点。</p><p><b>幻兽</b>：村庄「幻兽牧场」孵化、编队、喂养、进化；孵化消耗 200 孵化点。幻兽竞技场用召唤证报名；召唤证可在道具商店用 10 金松果购买，也能从魔法袋中开出。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。天梯赛战斗里会飘出黄色三角的「属性碎片」，点碎片拾取；10 个属性碎片 + 50 金松果可在背包合成 1 个随机力量/敏捷/速度转化丸。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；iOS 的导出文件在「文件」App → 我的 iPhone/iPad → 松鼠大战，导入时也可以直接粘贴存档文本；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45 级后通关关卡或竞技场获胜有几率获得 1~2 级宝石；3 个同级宝石 + 10 金松果可合成高一级（可能失败降级）。宝石可镶入橙色或黑色装备，每件 1 颗，镶嵌/卸下各 5 金松果。</p><p><b>套装收益（仅现代界面）</b>：同名装备 2/4 件各一档加成，按该套最低品质计算；经典界面没有套装收益。</p><p><b>挑战塔</b>：逐层挑战，通关得金松果与碎片；第 20/50 层里程碑发黑卡，第 100 层给黑装自选箱。</p><p><b>无尽塔</b>：没有层数上限，每 100 层一轮。战斗得试炼币，可在试炼商店/铸币商店买增益；每累计 50 层 1 张黑卡，每周最多 10 张。</p>' + blackHelp + '<h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
     $$('[data-guide]', p).forEach((b) => b.onclick = () => openGuideItem(+b.dataset.guide));
     wireSystemFeedback(p);
     return p;
@@ -5273,7 +5413,7 @@
 
   window.UI={...legacy,renderHome,drawHomeHud,drawActor,runAction,currentScreen:()=>screen,refreshHome,renderNumbers,refreshHeader,openHeroPage,
     setMode,currentUiMode,applyUiMode,nextUiMode,UI_MODE_LSKEY,layoutHeight,smokeSelectors,
-    classic:{page,modal,btn,bind,icon,spr,goldIcon,propIconSrc,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog,openSupportModal,maybeSupportPrompt,supportPanelHtml,copyText,supportMeta,wireSystemFeedback,openHeroPage,
+    classic:{page,modal,btn,bind,icon,spr,goldIcon,goldAcornSrc:()=>GOLD_ICON,propIconSrc,iconSrc:atlasIcon,statsHtml,portrait,resultModal,stageResult,home,toast,num,setNum,upgradeReward,upsHtml,pickupResult,freePointDialog,promptFreePoints,promptLevelUpChoices,wsChoiceDialog,openSupportModal,maybeSupportPrompt,supportPanelHtml,copyText,supportMeta,wireSystemFeedback,openHeroPage,inlineSvgIcon,
       /* 经典状态页的武器/技能栏（js/ssfight/ui-status.js）照着复刻这套图鉴数据画格子
        *「这一页有哪些、自己有没有、是否真形态」与「打开某一项的详情」两件事；详情页仍用复刻这套。 */
       catalogInfo, openItem, wsIconOf, openRankShop,

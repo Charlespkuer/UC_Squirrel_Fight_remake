@@ -563,10 +563,9 @@
       // 角标按药丸直径缩放（26/80 ≈ 1/3），两个数字的胶囊不会压到隔壁。
       el.style.setProperty('--u', (sideCss / 80).toFixed(4) + 'px');
       /* 矢量可见药丸不完全居中，按实测值平移回中心；药丸走 DOM 而不拨 SVG 帧：
-       * refreshValues 每秒都把 c1/c2/c3 拨回空帧。 */
-      const img = el.querySelector('img');
-      const svg = img && /\.svg(?:$|\?)/i.test(img.getAttribute('src') || '');
-      const nudge = svg ? (STATE_ICON_NUDGE[Number(el.getAttribute('data-pill'))] || [0, 0]) : [0, 0];
+       * refreshValues 每秒都把 c1/c2/c3 拨回空帧。旧 Android 的 PNG 回退与 SVG 同 viewBox，
+       * 仍需这条实测校正。 */
+      const nudge = STATE_ICON_NUDGE[Number(el.getAttribute('data-pill'))] || [0, 0];
       el.style.setProperty('--nx', (iconCss * nudge[0]).toFixed(2) + 'px');
       el.style.setProperty('--ny', (iconCss * nudge[1]).toFixed(2) + 'px');
     });
@@ -1759,12 +1758,7 @@
       if (action === 'village-war') {
         const need = Number(State.WAR_UNLOCK_LEVEL) || 35;
         if (lv < need) return 'Lv' + need + ' 解锁';
-        if (window.Tower && Tower.unlocked) {
-          const u = Tower.unlocked();
-          return u.ok ? '' : (u.msg || '通关前 18 关后解锁');
-        }
-        const passed = State.state().stages || {};
-        for (let id = 1; id <= 18; id++) if (!passed[id] || passed[id].passed !== true) return '通关前 18 关解锁';
+        /* 单机版不再要求「先通前 18 关」（用户 2026-11 口径）：塔入口只看等级。 */
         return '';
       }
       const key = action === 'village-altar' ? 'altar' : action === 'village-miracle' ? 'miracle' : action === 'village-beast' ? 'beast' : '';

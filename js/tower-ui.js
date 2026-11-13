@@ -1122,8 +1122,11 @@
         (it.delta ? '<em class="currency-delta">+' + it.delta + '</em>' : '') +
         '<i>' + it.name + '</i></span>').join('') + '</div>';
     }
-    const items = [{ icon: 'images/ui/icons/prop/prop-23.svg', name: '挑战书', value: S.props[CURRENCY_PROP.book] || 0 },
-      { icon: 'images/ui/icons/gold-acorn.svg', name: '金松果', value: S.goldPoint }];
+    const classic = window.UI && window.UI.classic;
+    const bookIcon = classic && classic.propIconSrc ? classic.propIconSrc(23) : 'images/ui/icons/prop/prop-23.svg';
+    const goldIcon = classic && classic.goldAcornSrc ? classic.goldAcornSrc() : 'images/ui/icons/gold-acorn.svg';
+    const items = [{ icon: bookIcon, name: '挑战书', value: S.props[CURRENCY_PROP.book] || 0 },
+      { icon: goldIcon, name: '金松果', value: S.goldPoint }];
     return '<div class="tower-currency">' + items.map((it) =>
       '<span class="currency-item" data-live-gold="' + (it.name === '金松果' ? '1' : '') + '">' +
       '<img alt="" src="' + it.icon + '"><b>' + it.value + '</b><i>' + it.name + '</i></span>').join('') + '</div>';

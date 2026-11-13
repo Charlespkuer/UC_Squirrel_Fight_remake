@@ -844,6 +844,28 @@
   let spinning = false, lotteryVersion = 0, lotteryBackPage = null;
   /** 经典抽奖统一图标：金松果（8）用经典道具页那颗金松果，不再用现代 prop-8。 */
   const lotteryIcon = (id) => (Number(id) === 8 && C().goldIcon) ? C().goldIcon() : C().icon('prop', id);
+  /* 奖品格里的道具图标：原版矢量的 viewBox 松紧差很多（蓝色碎片留白一半、金松果几乎贴边），
+   * 同样是 94×84 的格子会一大一小。这里把每个图标重设成「以画面实际占位为准」的正方形 viewBox，
+   * 十个奖品格视觉尺寸才一致；新旧内核走同一条路：先内联成 <svg>（旧安卓本来就是内联），再量 getBBox。 */
+  function fitPrizeArt(svg) {
+    if (!svg || String(svg.tagName).toLowerCase() !== 'svg' || svg.__artBox) return;
+    let box; try { box = svg.getBBox(); } catch (e) { return; }
+    if (!box || !(box.width > 0) || !(box.height > 0)) return;
+    svg.__artBox = 1;
+    const span = Math.max(box.width, box.height) * 1.08;
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+    svg.setAttribute('viewBox', (cx - span / 2) + ' ' + (cy - span / 2) + ' ' + span + ' ' + span);
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  }
+  function normalizePrizeArt(root) {
+    if (!root || !root.querySelectorAll) return;
+    for (const icon of root.querySelectorAll('.extra-prize > img, .extra-prize > svg, .extra-lottery-win > img, .extra-lottery-win > svg')) {
+      if (String(icon.tagName).toLowerCase() === 'svg') { fitPrizeArt(icon); continue; }
+      const api = C();
+      if (!api || !api.inlineSvgIcon) continue;
+      api.inlineSvgIcon(icon).then(fitPrizeArt).catch(() => {});
+    }
+  }
   function refreshLotteryDay() {
     const s = State.state(), today = State.localDate(), legacyToday = new Date(Date.now()).toDateString();
     if (s.lotteryDate === today) return;
@@ -920,6 +942,7 @@
      * 改挂「随机挑战 → 查看」那一页的原版 3911 返回键（与金杯商店共用同一份实现）。 */
     const p = C().page('bag', 'bag', content, { cls: 'extra-board lottery-extra-board', noFooter: true });
     lotteryBackPage = p;
+    normalizePrizeArt(p);
     if (C().installBagTabVectors) C().installBagTabVectors(p);
     if (C().wirePopTaps) C().wirePopTaps(p, { tabs: true });
     const leaveLottery = () => {
@@ -975,7 +998,8 @@
       State.save();
       animateThen(20 + got.selected, () => {
         afterDraw();
-        C().modal('\u83b7\u5f97\u5956\u52b1', '<div class="extra-lottery-win">' + lotteryIcon(got.icon) + '<strong>' + got.label + '</strong></div>' + C().upsHtml(got.ups), [{ label: '\u786e\u5b9a' }], { small: true });
+        const win = C().modal('\u83b7\u5f97\u5956\u52b1', '<div class="extra-lottery-win">' + lotteryIcon(got.icon) + '<strong>' + got.label + '</strong></div>' + C().upsHtml(got.ups), [{ label: '\u786e\u5b9a' }], { small: true });
+        normalizePrizeArt(win && win.element);
       });
     });
     spin.disabled = spinning;
@@ -999,8 +1023,9 @@
           '<span>' + g.label + '</span></div>').join('');
         const ups = [];
         for (const g of got) if (g.ups && g.ups.length) ups.push.apply(ups, g.ups);
-        C().modal('\u8fde\u62bd 10 \u6b21', '<div class="extra-lottery-win grid"><div class="lottery-result-grid">' +
+        const winTen = C().modal('\u8fde\u62bd 10 \u6b21', '<div class="extra-lottery-win grid"><div class="lottery-result-grid">' +
           cells + '</div></div>' + C().upsHtml(ups), [{ label: '\u786e\u5b9a' }], { small: true });
+        normalizePrizeArt(winTen && winTen.element);
       });
     });
     spin10.disabled = spinning;
@@ -1106,7 +1131,8 @@
     const card = (cls, art, label, value) => value > 0
       ? '<div class="reward-card ' + cls + '"><span class="reward-icon">' + art + '</span>' +
         '<span class="reward-text">' + label + ' +' + esc(value) + '</span></div>' : '';
-    const cards = card('green', '<img alt="" class="reward-icon-img" src="images/ui/icons/prop/prop-15.svg">', '经验', r.total) +
+    const expIcon = C() && C().propIconSrc ? C().propIconSrc(15) : 'images/ui/icons/prop/prop-15.svg';
+    const cards = card('green', '<img alt="" class="reward-icon-img" src="' + expIcon + '">', '经验', r.total) +
       card('gift', C().goldIcon ? C().goldIcon() : C().icon('prop', 8), '金松果', r.gold);
     const detail = rows.length
       ? '<div class="tribute-rows">' + rows.map((x) =>

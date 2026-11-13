@@ -314,20 +314,55 @@ record('js/gamedict.js 与 references/orig/ 的抽取结果一致（可重生成
   assert.equal(r.status, 0, 'gamedict.js 不是最新的：\n' + (r.stderr || r.stdout));
 });
 
-record('调试添加跳过游戏内没有的松鼠拳套/绿松果', () => {
-  /* 原始 GameDict 有 6 松鼠拳套 / 9 绿松果，但本版既没有产出途径也没有 useProp 分支；
-   * 调试面板的「快速获取物品」与「全道具 +10」都不该再发这两件死物。 */
-  const src = fs.readFileSync(path.join(ROOT, 'js', 'debug.js'), 'utf8').replace(/\r\n/g, '\n');
-  assert.match(src, /const UNUSED_PROPS = new Set\(\[6, 9\]\)/, '6/9 要集中在一个排除表里');
-  assert.match(src, /if \(\+id > 0 && !UNUSED_PROPS\.has\(\+id\)\) rows\.push/, '道具下拉要跳过 6/9');
-  assert.match(src, /!CURRENCY_PROPS\[\+id\] && !UNUSED_PROPS\.has\(\+id\)/, '全道具 +10 也要跳过 6/9');
-  assert.match(src, /if \(UNUSED_PROPS\.has\(key\)\) return '这件道具在游戏内没有产出与用途/, '直接调 grantItem 也要拒绝');
+record('道具表永久删除松鼠拳套(6)/绿松果(9)', () => {
+  /* 原版 GameDict 有这两行，但本游戏既不产出也不使用；现在从字典、图标索引、
+   * 调试面板和图片里一起删掉，旧存档里的 6/9 会在 normalizeSave 里因查不到 propMap 被清掉。 */
+  const dict = fs.readFileSync(path.join(ROOT, 'js', 'gamedict.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.doesNotMatch(dict, /^\s*\[6,\s*"6 松鼠拳套/m, '道具表里不该再有 6 松鼠拳套');
+  assert.doesNotMatch(dict, /^\s*\[9,\s*"9,绿松果/m, '道具表里不该再有 9 绿松果');
+  const debug = fs.readFileSync(path.join(ROOT, 'js', 'debug.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.doesNotMatch(debug, /UNUSED_PROPS|松鼠拳套|绿松果/, '调试面板不该再给这两件道具留分支');
+  const icons = JSON.parse(fs.readFileSync(path.join(ROOT, 'images', 'ssfight', 'ui', 'prop-icons.json'), 'utf8'));
+  assert.ok(!icons.byId['6'] && !icons.byId['9'], '道具图标索引里不该再有 6/9');
+  for (const name of ['prop-6.png', 'prop-9.png']) {
+    assert.ok(!fs.existsSync(path.join(ROOT, 'images', 'ui', 'icons', 'prop', name)), '道具图片要一起删掉：' + name);
+  }
 });
 
 /* 每个「浏览器侧模块」都必须能在最小环境下**加载成功**并挂上自己的全局。
  * 这条是补一个真实的坑：js/battle.js 曾经在模块作用域引用了一个只存在于
  * Battle.run 内部的函数 → 文件一加载就 ReferenceError → window.Battle 根本没挂上，
  * 于是「战斗完全播不了」。当时 20 个工具全绿却没抓到，因为它们都不加载 battle.js。 */
+record('红包与永久属性丸用原版矢量，抽奖卷借幸运卡片', () => {
+  /* 这几件以前被错误 alias 成礼包/属性书；SWF 实际有 3064 / 2985 / 2983 / 2979 / 2981，
+   * 抽奖卷（原版 50 是金宝箱）没有同名导出，借 2991 幸运卡片。 */
+  const icons = JSON.parse(fs.readFileSync(path.join(ROOT, 'images', 'ssfight', 'ui', 'prop-icons.json'), 'utf8')).byId;
+  for (const [id, sid] of [['16', '2985'], ['17', '2983'], ['18', '2979'], ['19', '2981'], ['38', '3064']]) {
+    assert.equal(icons[id] && icons[id].id, sid, id + ' 要用原版矢量 ' + sid);
+    assert.ok(!icons[id].aliasOf, id + ' 不该再借位');
+  }
+  assert.equal(icons['50'] && icons['50'].id, '2991');
+  assert.equal(icons['50'].aliasOf, '幸运卡片');
+  const propDir = path.join(ROOT, 'images', 'ui', 'icons', 'prop');
+  for (const id of [16, 17, 18, 19, 38, 50]) {
+    assert.ok(fs.existsSync(path.join(propDir, 'prop-' + id + '.svg')), '背包要用的无框矢量存在：prop-' + id + '.svg');
+  }
+  /* 无框矢量必须是透明美术：导出物常带一条铺满 viewBox 的底卡 rect，
+   * 它会盖住背包格的底纹（16~19/38/50 就这么白了一整块）。 */
+  for (const name of fs.readdirSync(propDir)) {
+    if (!name.endsWith('.svg')) continue;
+    const svg = fs.readFileSync(path.join(propDir, name), 'utf8');
+    const vb = ((svg.match(/viewBox="([^"]+)"/) || [])[1] || '').split(/[ ,]+/).map(Number);
+    if (vb.length < 4 || !vb[2] || !vb[3]) continue;
+    for (const [rect] of svg.matchAll(/<rect\b[^>]*>/g)) {
+      const num = (k) => Number((rect.match(new RegExp('\\b' + k + '="([^"]+)"')) || [])[1] || NaN);
+      const fill = (rect.match(/\bfill="([^"]+)"/) || [])[1] || '';
+      assert.ok(!(num('width') * num('height') >= vb[2] * vb[3] * 0.6 && fill && fill !== 'none'),
+        name + ' 不能留铺满画布的底卡 rect：' + rect.slice(0, 80));
+    }
+  }
+});
+
 record('浏览器侧模块都能加载并挂上全局（battle / tower / tower-ui / classic-ui …）', () => {
   /* 注意：debug.js / main.js 在加载期就会去建面板、绑 DOM 事件，需要真浏览器环境，
    * 这里只覆盖「纯逻辑 + 界面模块」——它们正是之前 battle.js 那种加载期引用错误的受害者。 */

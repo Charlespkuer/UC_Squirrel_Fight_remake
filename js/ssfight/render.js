@@ -360,12 +360,13 @@
     if (!b) return;
     // Numeric/status polling often repeats the same text. Keep glyphs and their clip path intact.
     const signature = JSON.stringify([b.lines, b.perRun, b.x, b.anchor, b.base, b.step,
-      b.tag && b.tag.tf, b.meta && b.meta.fh, b.box]);
+      b.tag && b.tag.tf, b.meta && b.meta.fh, b.box, b.userText]);
     if (b.renderSignature === signature && b.renderHost && b.renderHost.parentNode === g) return;
     while (g.firstChild) g.removeChild(g.firstChild);
     const host = el('g');
     b.lines.forEach((L, i) => {
-      if (isPlaceholderRun(L.tx)) return;
+      // 占位串只在首次建树时藏；界面写进来的真值即使是 11111 / 999999 也要照常显示。
+      if (b.userText !== true && isPlaceholderRun(L.tx)) return;
       const t = el('text');
       t.textContent = L.tx == null ? '' : String(L.tx);
       if (L.b) t.setAttribute('font-weight', 'bold');
@@ -431,7 +432,7 @@
       x = rs[0].x !== undefined ? rs[0].x : 0;
       base = rs[0].y !== undefined ? rs[0].y : 0;
     }
-    g.__textBox = { tag, meta, lines, perRun, box, x, anchor, base, step };
+    g.__textBox = { tag, meta, lines, perRun, box, x, anchor, base, step, userText: false };
     g.__defs = rootDefs || null;
     drawLines(g);
     return g;
@@ -505,6 +506,7 @@
   function setText(node, str, opts) {
     if (!node || !node.__textBox) return false;
     const b = node.__textBox;
+    b.userText = true;
     // noClip：战斗 HUD 血量框仅 59 宽，六位数以上生命会被裁掉；只对 refreshBlood 放开。
     if (opts && opts.noClip) { b.box = null; b.renderSignature = null; }
     const text = (opts && opts.wrap) ? wrapText(node, str) : String(str == null ? '' : str);

@@ -1,6 +1,6 @@
 {
-  "version": "1.1.9",
-  "commit": "7bc3d6f",
-  "date": "2026-11-13",
-  "note": "1.1.9：素材退役与图标 SVG 化（images 140.5→97.8 MB）、经典二级页页脚换原版 3362 矢量键、状态页武技格恢复等比悬停、装备页补 tags-status 加载；Windows / Android。"
+  "version": "1.1.10",
+  "commit": "6fbf502",
+  "date": "2026-11-14",
+  "note": "1.1.10：旧安卓商店入口/详情字号自适应、战斗加载不闪主页、二次合成与 SVG 内联贴图修复；帮助文案与占位数字显示校正；Windows / Android。"
 }

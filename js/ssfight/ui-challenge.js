@@ -1206,27 +1206,23 @@
    *     "在好友界面挑战人和人的时候都不会有体力消耗、经验获取、金松果获取与随机掉落获取等。"
    *     所以这一档 **不扣体力、不吃药品加成、不飘掉落、`onEnd` 不结算任何奖励**
    *       经典页这一档以前漏了，照它对齐即可 —— 两边共用 `kind:'friend'` 这一个名字。 */
-  /** 战斗期间把这一页「按住」在原位（`Main.startBattle` / `SfFight.run` 会清 `#ui`，
-   *  但跳过带 hold 标记的节点），打完只还原显示 —— 回来的是**同一棵 SVG**，既不重新
+  /** 战斗期间把这一页「按住」在原位，打完只还原显示 —— 回来的是**同一棵 SVG**，既不重新
    *  挂载、也不触发 WebKit 对整棵子树的重新布局。随机挑战 / 切磋 / 关卡连战共用这一套。 */
   const BATTLE_HOLD_ATTR = 'data-sf-battle-hold';
-  /** 战斗期间把这一页「按在原地」：不从 `#ui` 摘下，只隐藏并标记。
-   * 返回时就是那一下卡顿（用户 2026-10：iOS「随机战斗完回随机挑战页会卡一下」）。
-   * 现在让它留在文档里，战斗页盖在上面；隐藏只关掉绘制与命中，不打散布局，
-   * 返回时只 `visibility` 还原，不再重挂。`SfBattle` 清 `#ui` 时也会跳过带这个标记的节点
-   * （见 `Main.clearUiForBattle` / `ui-fight.js` 的 `run`）。 */
+  const BATTLE_UNDERLAY_ATTR = 'data-sf-battle-underlay';
+  /** 开战前把这一页留在原位、**保持可见**，直到战斗页挂好（`Main.hideHeldForBattle` 再隐藏并
+   *  改成 `BATTLE_HOLD_ATTR`）。加载期间 `#ui` 不能空，否则会露出 canvas 首页。 */
   function holdPageForBattle() {
     const page = current;
     const host = page && page.host;
     if (!host || !host.parentNode) return null;
     /* ⚠ **不要** `closeSub()`：关卡的三级页（难度页 / 出战确认）如果在这里拆掉，
      * 战后 `openGate()` 只能重新 mount 一颗 4756 —— 那就是"回到有继续挑战页面时卡一下"。
-     * sub host 同样留在树上，只隐藏并标记；战后按原顺序还原。 */
+     * sub host 同样留在树上，战后按原顺序还原。 */
     const sub = (page.sub && page.sub.host) ? page.sub : null;
     const mark = (el) => {
       if (!el || !el.setAttribute) return;
-      el.setAttribute(BATTLE_HOLD_ATTR, '');
-      el.style.visibility = 'hidden';
+      el.setAttribute(BATTLE_UNDERLAY_ATTR, '');
       el.style.pointerEvents = 'none';
     };
     mark(host);
@@ -1236,6 +1232,7 @@
   function unmarkHeld(el) {
     if (!el || !el.removeAttribute) return;
     el.removeAttribute(BATTLE_HOLD_ATTR);
+    el.removeAttribute(BATTLE_UNDERLAY_ATTR);
     if (el.style) {
       el.style.visibility = '';
       el.style.pointerEvents = '';

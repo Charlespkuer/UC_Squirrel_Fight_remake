@@ -32,14 +32,11 @@
   const cgStepMs = (frames) => Math.max(16, Math.round(COMPOSE_CG_MS / Math.max(1, frames - 1)));
 
   let session = null;
-  let composeExtraLoaded = false;
 
+  /* 4402 与 4886 共用 tags-compose.json；destroy() 会 releaseExtra，这里不能再记「已加载」，
+   * 否则第二次打开时 4402 已经不在 hash 里，合成与融合结果都会报错。SfRender 自己负责缓存。 */
   function loadComposeExtra() {
-    if (composeExtraLoaded) return Promise.resolve(true);
-    return Promise.resolve(SfRender.loadExtra('tags-compose.json')).then(() => {
-      composeExtraLoaded = true;
-      return true;
-    }).catch(() => false);
+    return Promise.resolve(SfRender.loadExtra('tags-compose.json')).then(() => true).catch(() => false);
   }
 
   function createHost() {
@@ -142,7 +139,7 @@
   }
 
   function isComposeProp(id) {
-    return [24, 25, 26, 45, 46, 108, 109, 77, 78].includes(id) || id === (window.GData && GData.CONVERT_SHARD_ID) || !!(window.State && State.gemLevel(id));
+    return [24, 25, 26, 45, 46, 77, 78].includes(id) || id === (window.GData && GData.CONVERT_SHARD_ID) || !!(window.State && State.gemLevel(id));
   }
 
   function costText(id) {
@@ -157,11 +154,12 @@
   }
 
   function iconSrc(kind, id) {
+    const classic = window.UI && window.UI.classic;
+    if (classic && typeof classic.iconSrc === 'function') return classic.iconSrc(kind, id);
     if (kind === 'gear') {
       if ([201, 202, 203, 204].includes(Number(id))) return 'images/ui/icons/gear/gear-' + Number(id) + '-classic.svg';
       return 'images/ui/icons/gear/gear-' + Number(id) + '.png';
     }
-    const classic = window.UI && window.UI.classic;
     if (classic && typeof classic.propIconSrc === 'function') return classic.propIconSrc(id);
     return 'images/ui/icons/prop/prop-' + Number(id) + '.png';
   }
@@ -217,7 +215,7 @@
 
   function composeAction(id) {
     if ([24, 25, 26, 77, 78].includes(id)) return State.composeGear(id);
-    if ([45, 46, 108, 109].includes(id)) return State.composeSeed(id);
+    if ([45, 46].includes(id)) return State.composeSeed(id);
     if (id === (window.GData && GData.CONVERT_SHARD_ID)) return State.composeConvertPill();
     if (State.gemLevel(id)) return State.mergeGems(id);
     return { ok: false, msg: '这个道具不能合成' };

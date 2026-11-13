@@ -79,14 +79,15 @@
   }
   function iconHref(icon) {
     if (!icon || !icon.kind || icon.id == null) return '';
+    const classic = window.UI && window.UI.classic;
     // Gift pinecone (id 8) uses the classic small pinecone (original 3867 vector), not modern
     // 330×330 prop-8; other props go through UI.classic.propIconSrc.
     if (icon.kind === 'prop') {
-      if (Number(icon.id) === 8) return 'images/ui/icons/gold-acorn.svg';
-      const classic = window.UI && window.UI.classic;
+      if (Number(icon.id) === 8) return (classic && classic.goldAcornSrc) ? classic.goldAcornSrc() : 'images/ui/icons/gold-acorn.svg';
       if (classic && typeof classic.propIconSrc === 'function') return classic.propIconSrc(icon.id);
       return 'images/ui/icons/prop/prop-' + icon.id + '.png';
     }
+    if (classic && typeof classic.iconSrc === 'function') return classic.iconSrc(icon.kind, icon.id, false, false);
     return 'images/ui/icons/' + icon.kind + '/' + icon.kind + '-' + icon.id +
       (icon.kind === 'weapon' || icon.kind === 'skill' ? '.svg' : '.png');
   }

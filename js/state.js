@@ -4138,7 +4138,7 @@
    *  经典合成的页面/动画在 `js/ssfight/ui-compose.js`，这里只留数值规则。 */
   function composeSeed(seedId) {
     seedId = Number(seedId);
-    const fruit = (seedId === 45 || seedId === 108) ? 47 : (seedId === 46 || seedId === 109) ? 48 : 0;
+    const fruit = (seedId === 45) ? 47 : (seedId === 46) ? 48 : 0;
     if (!fruit) return { ok: false, msg: '这个种子不能合成' };
     if ((S.props[seedId] || 0) < 10) return { ok: false, msg: '需要 10 个' + (propMap.getValue(seedId) || {}).name };
     if (S.goldPoint < 50) return { ok: false, msg: '合成需要 50 金松果' };
@@ -5283,8 +5283,6 @@
     { id: 1, range: [1, 2], weight: 1.0 },    // 小体力药剂
     { id: 7, range: [1, 1], weight: 0.7, pill: true },    // 经验丸
     { id: 45, range: [1, 1], weight: 0.2 },   // 天使果实种子（0.5×）
-    { id: 108, range: [1, 1], weight: 0.06 }, // 天使果实碎片（每日任务小概率）
-    { id: 109, range: [1, 1], weight: 0.06 }, // 恶魔果实碎片（每日任务小概率）
     { id: 2, range: [1, 1], weight: 0.3 },    // 大体力药剂（高级）
     { id: 44, range: [1, 1], weight: 0.06, pill: true },  // 超级经验丸（高级药丸，概率大幅下调）
   ];

@@ -159,10 +159,9 @@
     { label: '全道具 +10', run() {
         const S = State.state();
         let n = 0;
-        // Gold/cup/exp are currencies, not bag items (use the grant-item tool above);
-        // squirrel gloves and green pinecone have no source/use in this build, never grant them.
+        // Gold/cup/exp are currencies, not bag items (use the grant-item tool above).
         propMap.each((id) => {
-          if (+id > 0 && !CURRENCY_PROPS[+id] && !UNUSED_PROPS.has(+id)) {
+          if (+id > 0 && !CURRENCY_PROPS[+id]) {
             S.props[id] = (S.props[id] || 0) + 10;
             n++;
           }
@@ -250,7 +249,7 @@
   function itemOptions() {
     const rows = [];
     propMap.each((id, v) => {
-      if (+id > 0 && !UNUSED_PROPS.has(+id)) rows.push({ id: +id, name: v.name });
+      if (+id > 0) rows.push({ id: +id, name: v.name });
     });
     rows.sort((a, b) => a.id - b.id);
     return rows.map((r) => {
@@ -375,9 +374,6 @@
   // 8 gold / 15 exp / 40 gold cup are currencies in the original, not bag items (useType 0/3),
   // so grant them to the matching field instead of the bag.
   const CURRENCY_PROPS = { 8: 'gold', 40: 'goldCup', 15: 'exp' };
-  // Present in the original GameDict but with no source/use in this build: 6 squirrel gloves
-  // (+40% challenge exp), 9 green pinecone (double gold drops). Never list or grant them.
-  const UNUSED_PROPS = new Set([6, 9]);
   // Add items without charging; still respects the 9999 per-item cap. Gold/exp/gold cup go to
   // their own fields.
   function grantItem(id, count) {
@@ -385,7 +381,6 @@
     if (!S) return '还没有存档，先开始游戏';
     const n = Math.max(1, Math.min(999, Math.round(Number(count) || 1)));
     const key = Number(id);
-    if (UNUSED_PROPS.has(key)) return '这件道具在游戏内没有产出与用途，调试添加已跳过';
     const def = propMap.getValue(key);
     if (!def) return '道具表里没有编号 ' + id;
     const currency = CURRENCY_PROPS[key];

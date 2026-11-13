@@ -2324,9 +2324,8 @@
     try { await loadGearTables(); } catch (e) { /* 没表就不穿装备 */ }
     try { await loadLootIcons(); } catch (e) { /* 没表就不画战利品图标 */ }
     if (mine !== seq || rec.stopped) return null;
-    /* 素材就绪后再清底页、一次挂上战斗页；中间不给浏览器留出空 #ui 的绘制帧。 */
-    if (window.Main && typeof Main.clearUiForBattle === 'function') Main.clearUiForBattle();
-    else ui.innerHTML = '';
+    /* 素材就绪后先把（隐藏的）战斗页压上去再挂载；底页一直留到战斗页可见的那一帧，
+     * 中间不会露出 canvas 首页。 */
     ui.appendChild(host);
     /* 先建检查器集合：`mountSymbol` 期间出生的实例（例如倒地主子树 6362）也会在
      * `onClip` 里调 playClip；它们要跟后面的回合动画用同一套节拍器，不能退回 rAF。 */
@@ -2337,13 +2336,28 @@
         frame: F.scene, label: '战斗', policy: {}, onClip: onClip,
       });
     } catch (mountError) {
-      /* 挂载失败时把空壳摘掉：底页可能还按 data-sf-battle-hold 留在 #ui 里。 */
+      /* 挂载失败时把空壳摘掉：底页还在原位，玩家不会看到空屏。 */
       if (host.parentNode) host.parentNode.removeChild(host);
       throw mountError;
     }
-    if (mine !== seq || rec.stopped) { view.destroy(); return null; }
+    if (mine !== seq || rec.stopped) {
+      try { view.destroy(); } catch (e) {}
+      if (host.parentNode) host.parentNode.removeChild(host);
+      return null;
+    }
     rec.view = view;
     host.style.visibility = '';
+    /* 同一帧内隐藏底页并清掉旧的 #ui：此刻战斗页已经可见，不会闪回 canvas 首页。 */
+    if (window.Main && typeof Main.hideHeldForBattle === 'function') Main.hideHeldForBattle();
+    if (window.Main && typeof Main.clearUiForBattle === 'function') Main.clearUiForBattle(host);
+    else {
+      for (const node of Array.from(ui.childNodes)) {
+        if (node === host) continue;
+        if (node.nodeType === 1 && node.hasAttribute
+          && (node.hasAttribute('data-sf-battle-hold') || node.hasAttribute('data-sf-battle-underlay'))) continue;
+        ui.removeChild(node);
+      }
+    }
     /* 战斗动画的收尾/命中回调由渲染器节拍器驱动（见 playClip）。
      * 保留其它页面可能已经挂过的 onTick（战斗视图通常没有，但不能假设）。 */
     rec.prevTick = view.onTick;

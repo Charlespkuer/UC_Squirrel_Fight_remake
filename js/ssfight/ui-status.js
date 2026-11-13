@@ -2575,8 +2575,9 @@
       const g = byType[ty];
       const lv = g ? Math.max(1, Number(g.ext) || 1) : 0;
       const gearImg = g
-        ? ((([201, 202, 203, 204].includes(Number(g.id))) ? 'images/ui/icons/gear/gear-' + Number(g.id) + '-classic.svg'
-          : 'images/ui/icons/gear/gear-' + Number(g.id) + '.png'))
+        ? ((C && typeof C.iconSrc === 'function') ? C.iconSrc('gear', Number(g.id))
+          : (([201, 202, 203, 204].includes(Number(g.id))) ? 'images/ui/icons/gear/gear-' + Number(g.id) + '-classic.svg'
+            : 'images/ui/icons/gear/gear-' + Number(g.id) + '.png'))
         : '';
       return '<li class="' + (g ? '' : 'none') + '">' +
         '<span class="sf-fd-icon gear" data-img="' + gearImg + '"></span>' +

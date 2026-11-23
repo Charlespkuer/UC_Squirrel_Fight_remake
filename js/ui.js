@@ -336,7 +336,7 @@
         if (master && r) { r.masterFree = false; }
         State.save();
         p.close();
-        const foe = GData.stageFoe(npc, stageId, type.anim, State.challengeDailyCount ? State.challengeDailyCount() : 0);
+        const foe = GData.stageFoe(npc, stageId, type.anim, State.challengeDailyCount ? State.challengeDailyCount(stageId) : 0);
         if (foeCarryHp != null) {
           const fullHp = Math.max(1, Math.round(Number(foe.maxHp || foe.hp) || 1));
           foe.maxHp = fullHp;

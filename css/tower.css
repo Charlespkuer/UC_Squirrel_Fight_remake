@@ -850,6 +850,13 @@ ul.settle-calc li.total b { font-size: 22px; }
 .replace-pick.r2 { border-left: 7px solid #a77bd0; }
 .replace-pick.r3 { border-left: 7px solid #e0a72e; }
 
+/* 渴血之剑献祭窗里的武技祭品：同款整行按钮，换一条冷色边条与增益区分。 */
+.replace-pick.blade-skill-pick { border-left: 7px solid #7ec4b5; background: linear-gradient(#f7fbff, #eef5fb); }
+/* 献祭窗要同时装下增益和武技两排选项：允许比通用小弹窗高，避免选项落进滚动区。 */
+.classic-page~.classic-modal-overlay.blade-sacrifice-modal>.classic-modal.small-modal { max-height: 672px; }
+.classic-page~.classic-modal-overlay.blade-sacrifice-modal>.classic-modal.small-modal>.modal-body { max-height: 500px; }
+.blade-sacrifice-modal .modal-body>.small-label { margin: 4px 8px 2px; font-size: 20px; line-height: 1.32; }
+
 /* 里程碑奖励弹窗里的道具图：图集切图是 330px 的方图，这里没有容器尺寸约束，
  * 和 .reward-icon / .chip-icon 一个口径：给死尺寸 + contain。 */
 .milestone-reward img{width:64px;height:64px;object-fit:contain;vertical-align:-18px;margin-right:8px}
@@ -1283,6 +1290,8 @@ ul.settle-calc li.total b { font-size: 22px; }
 .hero-gear-item.is-equipped { border-color: #d2a43a; background: #fff6d8; box-shadow: inset 0 0 0 2px #f4df9f; }
 .hero-gear-icon { grid-row: 1 / span 2; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; }
 .hero-gear-icon img { width: 42px; height: 42px; object-fit: contain; }
+.hero-gear-art { display: block; }
+.hero-gear-art svg { display: block; width: 100%; height: 100%; }
 .hero-gear-icon.missing { border: 1px dashed #cdb586; border-radius: 8px; background: #f7eeda; }
 .hero-gear-icon.missing::before { content: attr(data-part); color: #8a6b3c; font-size: 18px; font-weight: 700; }
 .hero-gear-item b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #65482c; font-size: 12px; }

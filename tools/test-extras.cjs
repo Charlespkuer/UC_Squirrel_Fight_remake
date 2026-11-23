@@ -686,6 +686,39 @@ test('两套狂战（11-14 / 20-23）都按每月限兑一次', () => {
 });
 
 
+test('金杯商店 23 件商品都能落袋，生命转化丸可用', () => {
+  const g = setup(), s = g.c.State.state();
+  s.level = 30; s.integral = 99999; s.goldCup = 99999; s.goldPoint = 99999;
+  s.rankPurchases = {}; s.rankMonthPurchases = {}; s.rankPurchaseTotals = {}; s.rankPurchaseMonth = '';
+  const items = g.c.ClassicExtras.rankGoodsList();
+  const gears0 = s.gears.length;
+  for (const [index, item] of items.entries()) {
+    const id = Number(item.goodsId);
+    const target = item.type === '2' ? g.c.gearMap.getValue(id) : g.c.propMap.getValue(id);
+    assert.ok(target, '商品 ' + item.name + ' 的 goodsId=' + id + ' 必须有字典行');
+    const page = Math.floor(index / 6);
+    g.c.ClassicExtras.rankShop(page);
+    const button = g.page().querySelector('[data-goods="' + item.id + '"]');
+    assert.ok(button, '商品页有 data-goods=' + item.id);
+    const prop0 = Number(s.props[id]) || 0, gear0 = s.gears.length;
+    button.onclick(); g.modalClick();
+    if (item.type === '2') assert.equal(s.gears.length, gear0 + 1, item.name + ' 应进装备背包');
+    else assert.equal((Number(s.props[id]) || 0), prop0 + (Number(item.count) || 1), item.name + ' 应进道具背包');
+  }
+  assert.equal(s.gears.length - gears0, 8, '两套狂战共 8 件装备都进背包');
+  assert.equal(s.props[14], 1, '生命转化丸进入背包');
+  g.c.State.save(); g.c.State.load();
+  const loaded = g.c.State.state();
+  assert.equal(loaded.props[14], 1, '生命转化丸能存档往返');
+  loaded.maxHp = Math.max(loaded.maxHp, loaded.level * 9 + 100);
+  const hp0 = loaded.maxHp, sum0 = loaded.power + loaded.agility + loaded.speed;
+  const used = g.c.State.useProp(14);
+  assert.equal(used.ok, true, used.msg);
+  assert.equal(loaded.maxHp, hp0 - 5, '生命转化丸扣 5 点基础生命');
+  assert.equal(loaded.power + loaded.agility + loaded.speed, sum0 + 1, '随机一项 +1');
+  assert.equal(loaded.props[14], undefined, '使用后消耗 1 个');
+});
+
 test('力敏速血永久丸按账号累计限购 1 次，跨周也不重置', () => {
   /* 原版 `timesLimit=1` + 服务端 buyCounts：这四件是**账号级**限购，不是每周刷新。
    * 复刻以前把所有 timesLimit 都当周限，导致每周都能再买一个、属性无限叠。 */

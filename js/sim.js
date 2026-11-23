@@ -415,7 +415,10 @@
     const lv = Math.max(1, Math.min(15, Math.floor(Number(level) || 1)));
     return lv >= 15 ? 2 : lv >= 11 ? 1.5 : 1;
   };
-  const heroBaseMul = (att, level) => att && att.heroTrueBase ? trueBaseMul(level) : 1;
+  // 勇者真化白值：武技 真1~真4 ×1.5、真5 ×2；野球拳（12）不吃这档倍率。
+  const HERO_TRUE_BASE_SKIP_SKILLS = new Set([12]);
+  const heroBaseMul = (att, level, id) => (att && att.heroTrueBase && !HERO_TRUE_BASE_SKIP_SKILLS.has(Number(id)))
+    ? trueBaseMul(level) : 1;
   // 沉默之斧保留四项基础属性技，抑制其余主动、被动及防御技能。
   function skill(c, id) { return c.silence > 0 && id > 4 ? 0 : c.skills[id] || 0; }
   /** 武器基础效果：1~10 级按每级增长；真化追加由 trueW() 固定叠加一次（不能再按真级重复计入）。 */
@@ -640,6 +643,16 @@
     if (!boost) return out;
     return Math.max(base, Math.min(out, n === 0 ? BOOSTED_FIRST_CAP : BOOSTED_AGAIN_CAP));
   }
+  // 龟甲术一次出手只判一次：多段攻击沿用同一结果，否则每段各掷会抬高中签率、shellCount 一拍多次 +1。
+  function shellDecide(def) {
+    if (!def || !def.skills || !def.skills[7]) return null;
+    if (Number(def.silence) > 0) return null;
+    const n = Math.max(0, Math.floor(Number(def.shellCount) || 0));
+    if (!(def.shellCharges > 0) && !chance(shellChanceOf(def, n))) return 'miss';
+    if (def.shellCharges > 0) def.shellCharges--;
+    else def.shellCount = n + 1;
+    return 'block';
+  }
   /* 绝对防御一次出手只判一次：多段攻击（西瓜刀/螳螂双击/镰刀舞）整段挡或整段不挡，
    * 由出手方在循环外判好、经 opts.jueDuiLock 传给每一段。返回 'block'|'miss'|null，
    * 整段挡下 jueDuiCount 只 +1；投掷类不适用（见下）。 */
@@ -671,18 +684,12 @@
      * opts.counter（反击）不判绝对防御，反击必须落到出手方。 */
     const jueDui = opts.counter ? 'miss' : (opts.jueDuiLock === undefined ? jueDuiDecide(def, opts.weaponType) : opts.jueDuiLock);
     if (jueDui === 'block') return jueDuiBlock(def, out.dmg, out);
-    if (def.skills[7] && def.silence <= 0) {
-      const shellCount = Math.max(0, Math.floor(Number(def.shellCount) || 0));
-      const canTrigger = def.shellCharges > 0
-        || chance(shellChanceOf(def, shellCount));
-      if (canTrigger) {
-        if (def.shellCharges > 0) def.shellCharges--;
-        else def.shellCount = shellCount + 1;
-        // 龟甲术吸收率只到 10 级，真化只加「多次使用」几率。
-        const pct = clamp(20 + 5 * (Math.min(def.skills[7], 10) - 1), 0, 100);
-        out.guiJia = Math.round(out.dmg * pct / 100);
-        out.dmg -= out.guiJia;
-      }
+    const shell = opts.shellLock === undefined ? shellDecide(def) : opts.shellLock;
+    if (shell === 'block') {
+      // 龟甲术吸收率只到 10 级，真化只加「多次使用」几率。
+      const pct = clamp(20 + 5 * (Math.min(def.skills[7], 10) - 1), 0, 100);
+      out.guiJia = Math.round(out.dmg * pct / 100);
+      out.dmg -= out.guiJia;
     }
     if (skill(def, 10)) {
       // 皮糙肉厚：减伤 1~10 级成长，真化只减对手暴击率。
@@ -764,9 +771,15 @@
 
     /* 反伤/反噬打到出手方：与普通伤害同一条致死链（装死 → 涅槃/金蝉脱壳 → 调试图腾）。
      * fakeDieSide 记「谁装的死」，回放据此把飘字画在正确的人（被反伤时是出手方）。 */
-    function reflectHurt(target, amount, r) {
-      const dmg = Math.max(0, Math.round(Number(amount) || 0));
+    function reflectHurt(target, amount, r, opts) {
+      let dmg = Math.max(0, Math.round(Number(amount) || 0));
       if (!target || dmg <= 0 || target.hp <= 0) return 0;
+      // `noKill`（绝对防御）：最多留 1 血，且这一下不进装死判定 —— 不触发、不消耗技能 6。
+      if (opts && opts.noKill) {
+        dmg = Math.min(dmg, Math.max(0, Math.floor(Number(target.hp) || 0) - 1));
+        target.hp -= dmg;
+        return dmg;
+      }
       if (target.hp - dmg <= 0 && target.skills && target.skills[6] && target.silence <= 0 && !target.usedFakeDie) {
         target.usedFakeDie = true;
         target.hp = 1;
@@ -775,7 +788,7 @@
         r.fakeDieSide = target.side;
         r.fakeDieReflect = true;
         queueFakeDiePets(target);
-        if (!immediate) immediate = { actor: target, reason: 'fakeDie' };
+        queueImmediate({ actor: target, reason: 'fakeDie' });
         return dmg;
       }
       target.hp -= dmg;
@@ -798,7 +811,7 @@
       const action = opts.action || r.action;
       // 勇者武技真化只放大技能基础伤害，不进入三维（武器白值已在 TowerHero.fighter 乘过）。
       if (att.heroTrueBase && action === 'skill') {
-        rawDmg = Math.round(rawDmg * heroBaseMul(att, att.skills[Number(r.id)]));
+        rawDmg = Math.round(rawDmg * heroBaseMul(att, att.skills[Number(r.id)], r.id));
       }
       if (att.mods && att.mods.dmgMul) rawDmg = Math.round(rawDmg * Number(att.mods.dmgMul)); // 塔 buff 伤害乘区
       const setDmgMul = 1 + setFx(att, 'dmgMul'); // 套装伤害乘区
@@ -829,7 +842,7 @@
         }
       }
       // opts.counter = 反击：必中，连绝对防御也不判（回放没有「绝对防御」飘字会像被闪避）。
-      const red = dmgReduce(def, rawDmg, { action, weaponType: opts.weaponType, jueDuiLock: opts.jueDuiLock, counter: !!opts.counter });
+      const red = dmgReduce(def, rawDmg, { action, weaponType: opts.weaponType, jueDuiLock: opts.jueDuiLock, shellLock: opts.shellLock, counter: !!opts.counter });
       let dmg = red.dmg;
       // 塔 buff 狂怒是终乘：在加成与减伤之后直接乘最终伤害，不被其它乘区稀释。
       if (dmg > 0 && att.mods && Number(att.mods.lowHpFinalMul) > 0 && lowHpActive(att)) {
@@ -852,7 +865,7 @@
         // 额外行动走 immediate 路径，不经过行动条 → 真·不消耗回合。
         if (def.mods.firstDodgeFreeTurn && def.hp > 0) {
           r.firstDodgeFreeTurn = true;
-          if (!immediate) immediate = { actor: def, reason: 'firstDodge' };
+          if (!pendingImmediate.some((x) => x.actor === def)) queueImmediate({ actor: def, reason: 'firstDodge' });
         }
       }
       if (!opts.noDodge && dmg > 0 && def.mods && def.mods.firstHitZero && !def.mods.firstHitZeroUsed) {
@@ -863,7 +876,7 @@
         /* 兼容旧字段：若还有带 `firstHitZeroFreeTurn` 的来源，仍然给额外行动。 */
         if (def.mods.firstHitZeroFreeTurn && def.hp > 0) {
           r.firstHitZeroFreeTurn = true;
-          if (!immediate) immediate = { actor: def, reason: 'firstHitZero' };
+          if (!pendingImmediate.some((x) => x.actor === def)) queueImmediate({ actor: def, reason: 'firstHitZero' });
         }
       }
       if (red.jueDui) { r.jueDui = true; r.rebound = red.rebound; }
@@ -884,7 +897,7 @@
         r.fakeDieSide = def.side;
         def.stun = 0;
         queueFakeDiePets(def);
-        immediate = { actor: def, reason: 'fakeDie' };
+        queueImmediate({ actor: def, reason: 'fakeDie' });
       } else if (def.hp - dmg <= 0 && def.mods && Array.isArray(def.mods.deathSaves) && def.mods.deathSaves.length) {
         /* 与 tryDeathSave 共用同一份触发逻辑（含涅槃plus 的抬上限 / 减伤）。 */
         consumeDeathSave(def, def.mods.deathSaves.shift(), r);
@@ -906,9 +919,8 @@
           r.reflectBlocked = (r.reflectBlocked || 0) + red.rebound;
           r.noteText = (r.noteText ? r.noteText + '·' : '') + '反噬豁免'; r.noteSide = att.side;
         } else {
-          r.reboundHurt = red.rebound;
-          // 绝对防御的反伤同样过装死（与普通伤害同一条致死链）。
-          reflectHurt(att, red.rebound, r);
+          // 绝对防御的反弹只打到 1 血为止；回放用 reboundHurt 反推出手方血量，记实际扣血。
+          r.reboundHurt = reflectHurt(att, red.rebound, r, { noKill: true });
         }
       }
       if (dmg > 0) {
@@ -986,8 +998,13 @@
     }
     function petSealCandidates(target) {
       const out = [];
+      // 本局已经出手过的武技不进封印池：封了也不会再被选中，等于白封。
+      const usedWeapon = (id) => !!(target.usedWeapons && target.usedWeapons[id]) ||
+        (target.weaponUseCount && Number(target.weaponUseCount[id]) > 0);
+      const usedSkill = (id) => !!(target.usedSkills && target.usedSkills[id]) ||
+        (target.skillUseCount && Number(target.skillUseCount[id]) > 0);
       for (const w of target.weapons || []) {
-        if (!w || target.petSealWeapons[w.id]) continue;
+        if (!w || target.petSealWeapons[w.id] || usedWeapon(w.id)) continue;
         out.push({ kind: 'weapon', id: Number(w.id), name: String(w.name || ('武器' + w.id)) });
       }
       /* 优先只封「这个战斗体真的会拿出来用」的技能：玩家的 skillOrder 已经筛过主动技，
@@ -995,7 +1012,7 @@
       const usableSkills = new Set((target.skillOrder || []).map(Number));
       for (const id of Object.keys(target.skills || {})) {
         const sid = Number(id);
-        if (!sid || target.petSealSkills[sid]) continue;
+        if (!sid || target.petSealSkills[sid] || usedSkill(sid)) continue;
         if (usableSkills.size && !usableSkills.has(sid)) continue;
         let name = '技能' + sid;
         try { const d = skillsMap.getValue(sid); if (d && d.name) name = d.name; } catch (e) {}
@@ -1017,7 +1034,7 @@
         r.fakeDie = true;
         r.fakeDieSide = def.side;
         queueFakeDiePets(def);
-        if (!immediate) immediate = { actor: def, reason: 'fakeDie' };
+        queueImmediate({ actor: def, reason: 'fakeDie' });
       } else {
         def.hp = Math.max(0, def.hp - dmg);
         if (def.hp <= 0) tryDeathSave(def, r);
@@ -1320,13 +1337,14 @@
         else if (rhythm) { raw = Math.round(raw * 2.5); r.crit = true; }
         // 命中
         if (chance(dodgeChance(att, def))) { markDodge(r, def); pushRound(r); return; }
-        /* 绝对防御一次出手只判一次：螳螂双击要么整段挡下、要么整段不挡（见 jueDuiDecide）。 */
+        /* 绝对防御 / 龟甲术一次出手只判一次：螳螂双击要么整段挡下、要么整段不挡。 */
         const jueDuiLock = jueDuiDecide(def, undefined);
+        const shellLock = jueDuiLock === 'block' ? 'miss' : shellDecide(def);
         let total = 0;
         const hits = r.multiHit || 1;
         for (let i = 0; i < hits; i++) {
           const rr = { dmg: 0 };
-          applyDamage(att, def, raw, rr, { action: 'skill', jueDuiLock: jueDuiLock });
+          applyDamage(att, def, raw, rr, { action: 'skill', jueDuiLock: jueDuiLock, shellLock: shellLock });
           total += rr.dmg;
           if (rr.jueDui) r.jueDui = true;
           if (rr.reboundHurt) { r.reboundHurt = (r.reboundHurt || 0) + rr.reboundHurt; r.jueDui = true; }
@@ -1410,8 +1428,12 @@
       if (counter.thornsDmg) r.counterThorns = counter.thornsDmg;
     }
 
-    function playerLikeAction(att, def) {
+    function playerLikeAction(att, def, followup) {
       const r = { attacker: att.side };
+      // 连击追加的那一拍：同一把武器再打一次，不再掷连击（连锁最多两下）。
+      const forcedCombo = followup && followup.reason === 'combo' ? followup.weapon : null;
+      // 真·野球拳「有N%几率可多使用一次」= 同一手再打一次野球拳，不是追加一次任意行动。
+      const forcedSkill = followup && followup.reason === 'skillAgain' ? Number(followup.skill) : 0;
       // 师父只在濒危时尝试救场，每场至多一次；无师父时不能凭空治疗。
       if (att.skills[13] && !att.usedMaster && att.masterLevel > 0 && att.silence <= 0 &&
           att.hp <= att.maxHp * rules.masterHpRatio && chance(rules.masterChance)) {
@@ -1424,7 +1446,8 @@
       }
       // 整蛊专家封住的武器/技能整场不可用；后面的选取只看过滤后的池子。
       const usableWeapons = att.weapons.filter((w) => w && !att.petSealWeapons[w.id] &&
-        (weaponWeight(att, w) > 0 || (att.pendingWeapon && att.pendingWeapon.id === w.id)));
+        (weaponWeight(att, w) > 0 || (att.pendingWeapon && att.pendingWeapon.id === w.id) ||
+          (forcedCombo && forcedCombo.id === w.id)));
       const canWeapon = usableWeapons.length > 0 && att.disarm <= 0;
       /* 可用技能从 fighter 实际拥有的技能筛（att.skillOrder），不能用玩家硬编码表（会漏 5/20）；
        * 排除：小宇宙每场一次、来点松果满血不放、本回合已用过的不能再用。 */
@@ -1450,12 +1473,15 @@
         kind = pickKind(att, canWeapon ? usableWeapons : [], canSkill ? actives : []);
       }
       if (att.pendingWeapon && canWeapon && !att.petSealWeapons[att.pendingWeapon.id]) kind = 'weapon';
+      if (forcedCombo) kind = 'weapon';
+      if (forcedSkill && att.silence <= 0) kind = 'skill';
 
       if (kind === 'weapon') {
         const prepared = att.pendingWeapon && !att.petSealWeapons[att.pendingWeapon.id] ? att.pendingWeapon : null;
         // 选武器：普通武器用过 repeatWeapon；投掷前两次 100、第三次起 repeatWeapon。
         let w;
-        if (prepared) w = prepared;
+        if (forcedCombo) w = forcedCombo;
+        else if (prepared) w = prepared;
         else if (usableWeapons.length > 1 && !att.pattern) w = pickWeapon(att, usableWeapons);
         else w = usableWeapons[0];
         att.usedWeapons[w.id] = true;
@@ -1470,6 +1496,7 @@
           return;
         }
         r.action = 'weapon'; r.id = w.id; r.level = w.level; r.wtype = w.type;
+        if (forcedCombo) r.comboFollow = true;
         /* 塔 buff 的「按武器次数」两个口径（蓄力那回合上面已 return，不算使用）：
        * weaponFreeUses 前 N 次不消耗回合；weaponBoostUses 前 N 次加成+必中+免反伤，之后衰减。 */
         att.weaponUses = (Number(att.weaponUses) || 0) + 1;
@@ -1510,7 +1537,9 @@
           grantFreeTurn();
           pushRound(r);
           att.weaponBoostImmune = false;
-          if (r.actAgain && att.hp > 0 && def.hp > 0 && !immediate) immediate = { actor: att, reason: 'freeAction' };
+          if (r.actAgain && att.hp > 0 && def.hp > 0 && !pendingImmediate.some((x) => x.actor === att)) {
+            queueImmediate({ actor: att, reason: 'freeAction' });
+          }
           return;
         }
         // 暴击（真·皮糙肉厚同样按「减少 N 个百分点」压制武器暴击率）
@@ -1528,18 +1557,21 @@
           if (quad > 0 && chance(quad)) { mult = 4 + effect(att, 45) / 100 + effect(att, w.type === '投掷' ? 3 : 2) / 100 + critDmgBonus(att); r.crit4 = true; }
           raw = Math.round(raw * mult); r.crit = true;
         }
-        // 连击/三扔
+        // 连击/三扔：连击 = 这一拍打完后不消耗回合、再用同一把武器完整打一次；
+        // 追加那一拍本身不掷连击（forcedCombo），连锁最多两下。
         let hits = 1;
-        if (w.id === 4 && chance(weaponEffect(w, 10, 2, 5) + trueW(w, 'combo'))) hits = 2;   // 西瓜刀（真级 +5% 连击）
+        const combo = w.id === 4 && !forcedCombo && chance(weaponEffect(w, 10, 2, 5) + trueW(w, 'combo'));
         if (w.id === 10 && chance(weaponEffect(w, 2, 2) + trueW(w, 'triple'))) hits = 3;   // 流星锤（2% + 2%/级；真级 +3% 三扔）
         r.hits = hits;
-        /* 绝对防御一次出手只判一次：连击 / 三扔整段挡下（投掷类本来就不触发，判出来是 null）。
+        if (combo) r.combo = true;
+        /* 绝对防御 / 龟甲术一次出手只判一次：连击 / 三扔整段挡下（投掷类本来就不触发）。
          * 以前每段各判一次 —— 第 1 段被挡、第 2 段照打，玩家看到「绝对防御」却仍然掉血。 */
         const jueDuiLock = jueDuiDecide(def, w.type);
+        const shellLock = jueDuiLock === 'block' ? 'miss' : shellDecide(def);
         let total = 0, landedHits = 0, dodgedHits = 0;
         for (let i = 0; i < hits; i++) {
           const rr = { dmg: 0, crit: r.crit, crit4: r.crit4 };
-          applyDamage(att, def, raw, rr, { ignoreFakeDie: w.id === 7 || trueW(w, 'ignoreFakeDie') > 0, action: 'weapon', weaponType: w.type, jueDuiLock: jueDuiLock });
+          applyDamage(att, def, raw, rr, { ignoreFakeDie: w.id === 7 || trueW(w, 'ignoreFakeDie') > 0, action: 'weapon', weaponType: w.type, jueDuiLock: jueDuiLock, shellLock: shellLock });
           total += rr.dmg;
           if (rr.dmg > 0) landedHits++;
           if (rr.dodge) dodgedHits++;
@@ -1596,15 +1628,24 @@
         grantFreeTurn();
         pushRound(r);
         att.weaponBoostImmune = false;
-        if (r.actAgain && att.hp > 0 && def.hp > 0 && !immediate) immediate = { actor: att, reason: 'freeAction' };
+        const followupBlocked = pendingImmediate.some((x) => x.reason === 'fakeDie' && x.actor === def);
+        if (r.combo) {
+          // 装死抢到下一手时不再补这一下（与双投同口径），否则装死等于白触发。
+          if (followupBlocked || att.hp <= 0 || def.hp <= 0) r.comboCancelled = true;
+          else queueImmediate({ actor: att, reason: 'combo', weapon: w });
+        }
+        if (r.actAgain && att.hp > 0 && def.hp > 0 && !followupBlocked &&
+            !pendingImmediate.some((x) => x.actor === att)) {
+          queueImmediate({ actor: att, reason: 'freeAction' });
+        }
         return;
       }
 
       if (kind === 'skill') {
-        const sid = forceCosmos ? 14                                    // 秘技通神：第一招强制小宇宙爆发
+        const sid = forcedSkill || (forceCosmos ? 14                    // 秘技通神：第一招强制小宇宙爆发
           : (att.pattern
             ? nextPatternSkill(att, actives)                            // 固定循环：按技能表的轮转顺序出
-            : pickSkill(att, actives));
+            : pickSkill(att, actives)));
         att.usedSkills[sid] = true;
         att.skillUseCount[sid] = skillUseCountOf(att, sid) + 1;      // 野球拳（12）的衰减要用「用过几次」
         att.turnSkills[sid] = true;
@@ -1615,20 +1656,21 @@
         if (att.pattern) att.skillCd[sid] = Number(RULES.skillCooldown) + 1;
         const lv = att.skills[sid];
         r.action = 'skill'; r.id = sid; r.level = lv;
+        if (forcedSkill) r.repeatUse = true;
         // 塔 buff「疾风先手」：本局首次技能不消耗回合
         const freeSkill = att.mods && att.mods.firstSkillFree && !att.usedFreeSkill;
         switch (sid) {
           case 8: { // 色诱之术（真级：有机会脱光对手装备，持续 4 回合）
             /* 原表「10 级每级增加伤害 N 点」：伤害只到 10 级，真化只加脱装几率。 */
             const raw = Math.round((R(15, 25) + 7 * (Math.min(lv, 10) - 1)) * (1 + effect(att, 33) / 100));
+            // 不占本次行动：命中/闪避都立即追加一次行动；不再给对手挂眩晕。
+            r.actAgain = true;
             if (chance(dodgeChance(att, def))) { att.mustHitNext = false; markDodge(r, def); break; }
             applyDamage(att, def, raw, r, {});
             /* ⚠ 「先机预判」这类**在 applyDamage 里才落 r.dodge** 的闪避，上面的
              * `dodgeChance` 预判是抓不到的（那一次已经算命中并进了伤害链）。
-             * 二次判定必须再看一次 r.dodge —— 否则动画显示闪避，眩晕 / 脱装却照样挂上：
-             * 用户实测「妖狐魅惑被闪避后仍然被卸甲」就是这一条。 */
+             * 二次判定必须再看一次 r.dodge —— 否则动画显示闪避、脱装却照样挂上。 */
             if (def.hp > 0 && !r.fakeDie && !r.dodge) {
-              def.stun = Math.max(def.stun, 1); r.stunApplied = true;
               /* 原表：真1~真5 = 8/16/28/40/56（%）。trueVal 已经是百分数，不能再 ×100。 */
               const stripPct = trueVal(8, lv);
               if (stripPct > 0 && chance(stripPct)) {
@@ -1642,10 +1684,15 @@
           case 12: { // 野球拳（真级：有几率再打一次）
             /* 原表「10 级每级伤害提高 N%」：倍率只到 10 级，真化只加「再打一次」几率。 */
             const raw = Math.round((effPower(att) + effSpeed(att)) * (1.2 + 0.15 * (Math.min(lv, 10) - 1)));
-            if (chance(dodgeChance(att, def) * 0.7)) { att.mustHitNext = false; markDodge(r, def); break; }
-            applyDamage(att, def, raw, r, {});
-            const doublePct = trueVal(12, lv);
-            if (doublePct > 0 && def.hp > 0 && att.hp > 0 && chance(doublePct)) { r.actAgain = true; r.doubleHit = true; }
+            // 真阶只加「多使用一次」的几率，不加伤害；第二下是再一次野球拳（forcedSkill 那一拍不再掷）。
+            const doublePct = forcedSkill ? 0 : trueVal(12, lv);
+            // 命中判定必须先于真化判定：第一下被闪避也要补第二下。
+            const dodged = chance(dodgeChance(att, def) * 0.7);
+            if (dodged) { att.mustHitNext = false; markDodge(r, def); }
+            else applyDamage(att, def, raw, r, {});
+            if (doublePct > 0 && att.hp > 0 && (dodged || def.hp > 0) && chance(doublePct)) {
+              r.actAgain = true; r.doubleHit = true; r.repeatSkill = 12;
+            }
             break;
           }
           case 14: { // 小宇宙爆发
@@ -1703,8 +1750,15 @@
           // 技能一律不触发反击（含防御反击型技能）。
         maybeCounter(att, def, r, 'skill');
         pushRound(r);
-        if (r.actAgain && att.hp > 0 && def.hp > 0) {
-          if (!immediate) immediate = { actor: att, reason: 'freeAction' };
+        const followupBlocked = pendingImmediate.some((x) => x.reason === 'fakeDie' && x.actor === def);
+        const canFollow = att.hp > 0 && def.hp > 0 && !followupBlocked &&
+          !pendingImmediate.some((x) => x.actor === att);
+        // 装死抢到下一手时第二下野球拳作废（与双投同口径），不能留到之后的回合再补。
+        if (r.repeatSkill) {
+          if (canFollow) queueImmediate({ actor: att, reason: 'skillAgain', skill: r.repeatSkill });
+          else r.repeatCancelled = true;
+        } else if (r.actAgain && canFollow) {
+          queueImmediate({ actor: att, reason: 'freeAction' });
         }
         return;
       }
@@ -1758,7 +1812,24 @@
     }
 
     // ---- 主循环：速度行动条 ----
-    let immediate = null;
+    /* 追加行动按队列结算：装死排在最前（一方一个，排过就不再排），其它追加行动插到装死之后；
+     * 同一方只保留一个，后写替换先写。单变量会在连击 + 野球拳 + 装死同拍时互相覆盖。 */
+    const pendingImmediate = [];
+    function queueImmediate(entry) {
+      if (!entry || !entry.actor || entry.actor.hp <= 0) return;
+      const queue = pendingImmediate;
+      const same = queue.findIndex((x) => x.actor === entry.actor);
+      if (entry.reason === 'fakeDie' && same >= 0) {
+        if (queue[same].reason === 'fakeDie') return;
+        queue.splice(same, 1);
+      } else if (same >= 0) {
+        if (queue[same].reason === 'fakeDie') return;
+        queue[same] = entry;
+        return;
+      }
+      const firstOther = queue.findIndex((x) => x.reason !== 'fakeDie');
+      queue.splice(firstOther < 0 ? queue.length : firstOther, 0, entry);
+    }
     /* 只统计**行动条正常选出的出手**（不含小宇宙 / 装死这种 immediate 追加行动）：
      * 同一方连续 5 次后，第 6 次强制推进给另一方。 */
     let lastApActor = null, apRun = 0;
@@ -1788,9 +1859,10 @@
         if (!tryTimeoutRevive()) break;
         actions = 0;
       }
-      const followup = immediate;
+      const followup = pendingImmediate.shift() || null;
       let actor = followup && followup.actor;
-      immediate = null;
+      // 装死只给先手、不给行动点：这一手消耗 100 行动条，避免免费行动后再接一次正常行动。
+      if (followup && followup.reason === 'fakeDie') actor.ap = Math.max(0, Number(actor.ap || 0) - 100);
       if (!actor) {
         // 木桩不还手：直接让非木桩一方出手，固定回合数就是玩家出手次数。
         if (practice) {
@@ -1905,7 +1977,7 @@
       else {
         // 题面对手是玩家式 AI（无 npcType）：出手前先数 npcActs 再挂机制（玩家 mech 为空）。
         if (actor.mech.length) { actor.npcActs = (actor.npcActs || 0) + 1; npcMechTurnStart(actor, def); }
-        playerLikeAction(actor, def);
+        playerLikeAction(actor, def, followup);
         if (actor.mech.length) npcMechAfter(actor, def);
         // 蚀骨：玩家每次出手叠 1 层攻击 −3%，层数记在对手 mechState.erode。
         if (def.mech.includes('trialErode') && actor.hp > 0) {

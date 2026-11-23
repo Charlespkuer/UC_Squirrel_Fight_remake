@@ -1014,7 +1014,7 @@ test('读档不会重置装备：主属性 / 词条 / 宝石 / 穿戴原样保�
   assert.equal(migrated.orange, undefined);
 });
 
-test('黑装支持镶嵌/卸下宝石：扣 5 金、主属性生效、卸下返还', () => {
+test('黑装支持镶嵌/卸下宝石：镶嵌免费、卸下 5 金、主属性生效、卸下返还', () => {
   const g = game(), S = g.State;
   S.newGame('黑装宝石', { uiMode: 'classic' });
   const s = S.state();
@@ -1026,13 +1026,13 @@ test('黑装支持镶嵌/卸下宝石：扣 5 金、主属性生效、卸下返�
   const before = S.totalStats().agility;
   const r = S.socketGem(gear.key, 103);
   assert.equal(r.ok, true, '黑装镶嵌应成功：' + r.msg);
-  assert.equal(s.goldPoint, 995, '镶嵌扣 5 金松果');
+  assert.equal(s.goldPoint, 1000, '镶嵌免费，不扣金松果');
   assert.equal(s.props[103], 0, '镶嵌消耗 1 颗三级宝石');
   assert.ok(s.gears.find((x) => x.key === gear.key).gem, '黑装实例上要写入 gem');
   assert.ok(S.totalStats().agility > before, '宝石主属性加成要进入总属性');
   const un = S.unsocketGem(gear.key);
   assert.equal(un.ok, true, '黑装卸下宝石应成功：' + un.msg);
-  assert.equal(s.goldPoint, 990, '卸下再扣 5 金松果');
+  assert.equal(s.goldPoint, 995, '卸下扣 5 金松果');
   assert.equal(s.props[103], 1, '卸下后宝石回到背包');
   assert.equal(s.gears.find((x) => x.key === gear.key).gem, undefined, '卸下后不再有 gem');
 });
@@ -2374,7 +2374,7 @@ test('每日任务：当天固定抽取、进度来真实计数、只能领一�
     const chance = superPill.weight / total;
     assert.ok(chance < 0.05, '超级经验丸概率应低于 5%，实际 ' + (chance * 100).toFixed(1) + '%');
     assert.ok(chance < best / total / 5, '应明显低于最高权重的奖励');
-    assert.equal(pool.find((item) => item.id === 45).weight, 0.2, '天使种子每日概率减半');
+    assert.equal(pool.find((item) => item.id === 45).weight, 0.1, '天使种子每日概率再减半');
     assert.ok(!pool.some((item) => item.id === 108 || item.id === 109), '每日任务不再产出果实碎片');
     // 药丸数量固定 1（池子里就不能是区间）
     for (const item of pool) if ([3, 4, 5, 7, 44].includes(item.id)) {
@@ -3064,24 +3064,65 @@ test('幻兽濒死回血：带 3 只回光术一场只结算一次', () => {
   assert.ok(heals[0].healSelf > 0, '这一次要真的回血');
 });
 
-/* 色诱之术：原版描述「略过对手一回合」= 眩晕，真化才追加脱装。
- * 玩家常只看到脱装，误以为没有眩晕 —— 这里把 sim 的 stun 事件钉住。 */
-test('色诱之术：命中带眩晕（跳过对手一回合），真化才追加脱装', () => {
+/* 色诱之术：不占本次行动（命中/闪避都立即追加一次行动），不再眩晕；真化只追加脱装。 */
+test('色诱之术：不占回合、不眩晕，真化才追加脱装', () => {
   const g = game(), Sim = g.Sim;
   const me = { name: '我', level: 50, hp: 5000, maxHp: 5000, power: 50, agility: 50, speed: 10,
     weapons: [], skills: [{ id: 8, level: 15 }], castable: [8], effects: {} };
   const foe = { name: '木桩', level: 50, hp: 9999, maxHp: 9999, power: 10, agility: 1, speed: 10,
     weapons: [], skills: [], effects: {} };
-  let sawStun = false, sawStunnedTurn = false, sawStrip = false;
-  for (let i = 0; i < 20 && !(sawStun && sawStunnedTurn && sawStrip); i++) {
+  let sawAgain = false, sawStun = false, sawStunnedTurn = false, sawStrip = false;
+  for (let i = 0; i < 20 && !(sawAgain && sawStrip); i++) {
     const rounds = Sim.simulate(me, foe).rounds || [];
-    if (rounds.some((r) => r.stunApplied)) sawStun = true;
-    if (rounds.some((r) => r.action === 'stunned')) sawStunnedTurn = true;
-    if (rounds.some((r) => r.stripApplied || r.specialEffect === 1)) sawStrip = true;
+    for (const r of rounds) {
+      if (r.action === 'skill' && Number(r.id) === 8) {
+        if (r.actAgain) sawAgain = true;
+        if (r.stunApplied) sawStun = true;
+      }
+      if (r.action === 'stunned') sawStunnedTurn = true;
+      if (r.stripApplied || r.specialEffect === 1) sawStrip = true;
+    }
   }
-  assert.ok(sawStun, '色诱命中要标 stunApplied（原版「略过对手一回合」）');
-  assert.ok(sawStunnedTurn, '对手下一回合要真的被跳过（action:stunned）');
+  assert.ok(sawAgain, '色诱命中/闪避都要标 actAgain（不消耗回合）');
+  assert.equal(sawStun, false, '色诱不再标 stunApplied');
+  assert.equal(sawStunnedTurn, false, '色诱不再产生 action:stunned');
   assert.ok(sawStrip, '真·色诱 56% 脱装要在 20 场内掷中');
+});
+
+test('真·野球拳再打一次仍是野球拳，不吃真化白值倍率', () => {
+  const g = game(); g.math.random = () => 0;
+  const me = fighter({ level: 50, hp: 100000, maxHp: 100000, power: 100, agility: 100, speed: 50,
+    skills: ['12:15'], pattern: ['skill'] });
+  const foe = fighter({ level: 50, hp: 100000, maxHp: 100000, power: 1, agility: 1, speed: 1 });
+  const rounds = g.Sim.simulate(me, foe).rounds.filter((r) => r.attacker === 0 && r.id === 12);
+  assert.ok(rounds.length >= 2, '真5 野球拳应追加第二下，实际 ' + rounds.length);
+  assert.equal(rounds[1].repeatUse, true, '第二下要标 repeatUse');
+  assert.equal(rounds[1].action, 'skill');
+});
+
+test('西瓜刀连击是同一把武器再打一拍，追加拍不再连击', () => {
+  const g = game(); g.math.random = () => 0;
+  const me = fighter({ level: 50, hp: 100000, maxHp: 100000, power: 100, agility: 100, speed: 50,
+    weapons: ['4:15'], pattern: ['weapon'], mods: { mustHitAll: true } });
+  const foe = fighter({ level: 50, hp: 100000, maxHp: 100000, power: 1, agility: 1, speed: 1 });
+  const rounds = g.Sim.simulate(me, foe).rounds.filter((r) => r.attacker === 0 && r.action === 'weapon' && r.id === 4);
+  assert.ok(rounds.length >= 2, '连击应产生第二拍，实际 ' + rounds.length);
+  assert.equal(rounds[0].combo, true, '第一拍标连击');
+  assert.equal(rounds[1].comboFollow, true, '第二拍标连击追加');
+  assert.equal(rounds[1].combo, undefined, '追加拍本身不再连击');
+});
+
+test('绝对防御的反伤最多留 1 血，且不触发装死', () => {
+  const g = game(); g.math.random = () => 0;
+  const me = fighter({ level: 50, hp: 100000, maxHp: 100000, power: 1000, agility: 100, speed: 50,
+    weapons: ['1:15'], pattern: ['weapon'], mods: { mustHitAll: true } });
+  const foe = fighter({ level: 50, hp: 100, maxHp: 100, power: 1, agility: 1, speed: 1,
+    skills: ['6:15', '16:15'] });
+  const res = g.Sim.simulate(me, foe);
+  const blocked = res.rounds.find((r) => r.jueDui && r.reboundHurt > 0);
+  assert.ok(blocked, '应出现绝对防御反伤');
+  assert.ok(blocked.hpAfter[0] >= 1, '反伤不能把出手方直接反死');
+  assert.notEqual(blocked.fakeDie, true, '这一下不触发装死');
 });
 
 /* 板砖：一次投掷只晕 1 个回合。张牙舞爪（幻兽技能 11）只延长持续伤害 / 持续负面

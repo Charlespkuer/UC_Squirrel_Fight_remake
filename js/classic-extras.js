@@ -46,6 +46,26 @@
    * tools/test-extras.cjs 的「四名依次 8/6/4/3」用例守着。 */
   const ARENA_FRAGMENT_SHARDS = [8, 6, 4, 3];
   function addProp(id, count) { const s = State.state(); s.props[id] = (s.props[id] || 0) + count; }
+  /* 金杯商店所有商品共用这一个入口：先验字典 / 装备容量，失败时调用方不得先扣金杯金松果。
+   * 以前每条购买路径各写一份 addProp，生命转化丸的 goodsId 14 缺字典行时就会静默丢件。 */
+  function grantRankGood(item) {
+    if (!item) return { ok: false, msg: '没有这件商品' };
+    const id = Number(item.goodsId);
+    if (String(item.type) === '2') {
+      const s = State.state();
+      if (State.gearCapacity && s.gears.length >= State.gearCapacity()) {
+        return { ok: false, msg: '装备已满（' + s.gears.length + '/' + State.gearCapacity() + '），先卖掉或融合几件' };
+      }
+      return State.addGear(id, State.randomExt(2))
+        ? { ok: true } : { ok: false, msg: '装备数据异常，兑换失败。' };
+    }
+    if (!propMap.getValue(id)) return { ok: false, msg: '道具数据异常：' + (item.name || id) };
+    const count = Math.max(1, Math.floor(Number(item.count) || 1));
+    const s = State.state();
+    s.props[id] = (Number(s.props[id]) || 0) + count;
+    return { ok: true };
+  }
+
   function originalResult(spec) {
     if (!window.SfFightResult || !UI.currentUiMode || UI.currentUiMode() !== 'classic') return false;
     SfFightResult.open(spec).catch(error => { if (C().toast) C().toast('战果界面加载失败：' + error.message); });
@@ -767,10 +787,10 @@
           return;
         }
         if (Number(s.goldCup) < needCup || Number(s.goldPoint) < needGold) { alert('金杯或金松果不足。'); return; }
+        const grant = grantRankGood(item);
+        if (!grant.ok) { alert(grant.msg); return; }
         redeemed = true;
         s.goldCup -= needCup; s.goldPoint -= needGold;
-        if (item.type === '2') State.addGear(+item.goodsId, State.randomExt(2));
-        else addProp(+item.goodsId, +item.count);
         const bag = lim2.monthly ? s.rankMonthPurchases : lim2.account ? s.rankPurchaseTotals : s.rankPurchases;
         bag[item.id] = (bag[item.id] || 0) + 1;
         State.save();
@@ -811,13 +831,13 @@
         if (s.goldCup < +item.cup || s.goldPoint < +item.gold) { alert('\u91d1\u676f\u6216\u91d1\u677e\u679c\u4e0d\u8db3\u3002'); return; }
         const lim = rankLimitInfo(item);
         if (lim.limit > 0 && lim.bought >= lim.limit) {
-          alert(lim.monthly ? '该奖励本月只能兑换 ' + lim.limit + ' 次，下个月 1 号 0 点重置。'
-            : lim.account ? '该奖励每个账号累计只能兑换 ' + lim.limit + ' 次，已经兑换完了。' : '该奖励本周的兑换次数已用完，下周一重置后可再兑换。');
+          alert(lim.monthly ? '\u8be5\u5956\u52b1\u672c\u6708\u53ea\u80fd\u5151\u6362 ' + lim.limit + ' \u6b21\uff0c\u4e0b\u4e2a\u6708 1 \u53f7 0 \u70b9\u91cd\u7f6e\u3002' : lim.account ? '\u8be5\u5956\u52b1\u6bcf\u4e2a\u8d26\u53f7\u7d2f\u8ba1\u53ea\u80fd\u5151\u6362 ' + lim.limit + ' \u6b21\uff0c\u5df2\u7ecf\u5151\u6362\u5b8c\u4e86\u3002' : '\u8be5\u5956\u52b1\u672c\u5468\u7684\u5151\u6362\u6b21\u6570\u5df2\u7528\u5b8c\uff0c\u4e0b\u5468\u4e00\u91cd\u7f6e\u540e\u53ef\u518d\u5151\u6362\u3002');
           return;
         }
+        const grant = grantRankGood(item);
+        if (!grant.ok) { alert(grant.msg); return; }
         redeemed = true;
         s.goldCup -= +item.cup; s.goldPoint -= +item.gold;
-        if (item.type === '2') State.addGear(+item.goodsId, State.randomExt(2)); else addProp(+item.goodsId, +item.count);
         const bag = lim.monthly ? s.rankMonthPurchases : lim.account ? s.rankPurchaseTotals : s.rankPurchases;
         bag[item.id] = (bag[item.id] || 0) + 1; State.save(); C().toast('\u5151\u6362\u6210\u529f\uff1a' + item.name); rankShop(pg);
       } }, { label: '\u8fd4\u56de', cls: 'muted' }], { small: true });

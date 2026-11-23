@@ -403,6 +403,32 @@ test('存档往返保留剑的阶段 / 成长 / 次数 / 强制状态 / 待献�
   assert.equal(c.Tower.nextBattle('endless').ok, false, '标记存在时不能开下一场');
 });
 
+test('渴血之剑可以献祭 10 级以上武技：移除 + 本局永久拉黑 + 读档保留', () => {
+  const c = setup('hero');
+  grantBlade(c);
+  const run = runOf(c), H = c.TowerHero;
+  run.hero.weapons = ['1:5'];
+  run.hero.skills = ['7:12', '9:5'];
+  run.bladeSacrificePending = true;
+  const got = c.Tower.bladeSacrificeCandidates();
+  assert.ok(got.skills.some((it) => it.id === 7), '10 级武技应进祭品列表');
+  assert.equal(got.skills.some((it) => it.id === 9), false, '5 级武技不能献祭');
+  const before = c.Tower.bladeInfoOf().stacks;
+  const r = c.Tower.sacrificeBlade('s:7');
+  assert.equal(r.ok, true, r.msg || '献祭武技应成功');
+  assert.equal(run.hero.skills.some((it) => it.startsWith('7:')), false, '武技应从勇者身上移除');
+  assert.equal(H.bannedSkills(run.hero).includes(7), true, '本局应永久拉黑');
+  assert.equal(c.Tower.bladeInfoOf().stacks, before + 1, '剑应成长一层');
+  assert.equal(H.learn(run.hero, { learnRef: 's:7' }).ok, false, '不能再领悟已献祭武技');
+  assert.equal(H.replace(run.hero, 's:9', { learnRef: 's:7' }).ok, false, '换招也不能再放出');
+  c.State.save(); c.State.load();
+  assert.equal(H.bannedSkills(runOf(c).hero).includes(7), true, '读档后拉黑仍在');
+  // 只剩最后一招时不允许献祭（normalize 会把 0 件武技的档判无效）。
+  runOf(c).hero.weapons = [];
+  runOf(c).hero.skills = ['9:12'];
+  assert.equal(H.forgetSkill(runOf(c).hero, 9).ok, false, '至少要留一件武器或武技');
+});
+
 (function main() {
   console.log(fail ? ('\n' + fail + ' 项失败') : ('\n全部通过（' + pass + ' 项）'));
   process.exit(fail ? 1 : 0);

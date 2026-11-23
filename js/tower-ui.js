@@ -373,6 +373,87 @@
     const addr = (type === 0 || type === 1) && level > 0 ? level - 1 : 0;
     return base + addr;
   }
+  // 外观格画稿：`gear-frames.json` 的容器帧 → 原版矢量（头 1919 / 外拳 1915 / 身体 1909 / 鞋 1912）。
+  // 强化差分靠 `classicGearFrame` 加帧，和纸娃娃同一套 frame 口径；不再走 PNG 缩略图。
+  let heroGearArtToken = 0;
+  function stopHeroGearArt(root) {
+    heroGearArtToken++;
+    if (!root) return;
+    if (root.__heroGearArtIO) {
+      try { root.__heroGearArtIO.disconnect(); } catch (e) {}
+      root.__heroGearArtIO = null;
+    }
+    if (!root.querySelectorAll) return;
+    root.querySelectorAll('[data-hero-gear-art]').forEach((host) => {
+      const view = host.__heroGearArtView;
+      host.__heroGearArtView = null;
+      if (view && typeof view.destroy === 'function') { try { view.destroy(); } catch (e) {} }
+    });
+  }
+  async function mountHeroGearArt(host, tables, token) {
+    if (!host || host.__heroGearArtDone) return;
+    const box = host.closest ? host.closest('.hero-gear-icon') : null;
+    const fallback = () => { if (box) box.classList.add('missing'); };
+    const id = Number(host.dataset.heroGearArt);
+    const tier = Math.max(1, Math.min(3, Number(host.dataset.heroTier) || 1));
+    const type = heroGearTypeOf(id);
+    const cont = tables && tables.cont && tables.cont[type] && tables.cont[type][0];
+    if (!(id > 0) || !Number.isInteger(type) || type < 0 || type > 3 || !cont) { fallback(); return; }
+    const frame = classicGearFrame({ id: id, type: type, tier: tier, ext: [] });
+    if (!(frame > 0)) { fallback(); return; }
+    host.__heroGearArtDone = true;
+    try {
+      const view = await SfRender.mountSymbol(host, cont, { frame: frame, label: '' });
+      if (token !== heroGearArtToken || !host.isConnected) {
+        try { view.destroy(); } catch (e) {}
+        return;
+      }
+      host.__heroGearArtView = view;
+      const svg = host.querySelector('svg');
+      if (svg && view && view.g && view.g.getBBox) {
+        try {
+          const bb = view.g.getBBox();
+          if (bb && bb.width > 0 && bb.height > 0) {
+            const padX = Math.max(0.4, bb.width * 0.04);
+            const padY = Math.max(0.4, bb.height * 0.04);
+            svg.setAttribute('viewBox', (bb.x - padX) + ' ' + (bb.y - padY) + ' ' +
+              (bb.width + padX * 2) + ' ' + (bb.height + padY * 2));
+            svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+          }
+        } catch (e) {}
+      }
+    } catch (e) {
+      fallback();
+    }
+  }
+  async function hydrateHeroGearArt(root) {
+    if (!root || !window.SfRender || typeof SfRender.mountSymbol !== 'function') return;
+    const tables = await loadClassicGear().catch(() => null);
+    if (!root.isConnected) return;
+    const hosts = Array.from(root.querySelectorAll('[data-hero-gear-art]'));
+    if (!hosts.length) return;
+    if (!tables) {
+      root.querySelectorAll('.hero-gear-icon').forEach((box) => box.classList.add('missing'));
+      return;
+    }
+    const token = ++heroGearArtToken;
+    const run = (host) => { mountHeroGearArt(host, tables, token); };
+    if (typeof IntersectionObserver === 'function') {
+      const scroll = root.querySelector('.hero-gear-picker-scroll');
+      const io = new IntersectionObserver((entries) => {
+        for (const ent of entries) {
+          if (!ent.isIntersecting) continue;
+          io.unobserve(ent.target);
+          run(ent.target);
+        }
+      }, { root: scroll || null, rootMargin: '240px 0px' });
+      hosts.forEach((host) => io.observe(host));
+      root.__heroGearArtIO = io;
+    } else {
+      hosts.forEach(run);
+    }
+  }
+
   function attachClassicGear(bg, info) {
     if (!bg || !classicGearTables || !info) return 0;
     const gearList = Array.isArray(info.gear)
@@ -942,10 +1023,16 @@
     if (!run || mode !== 'endless') return '';
     const list = Tower.ownedBuffs('endless');
     const perm = orderPermanent(list.filter((b) => b.kind === 'permanent'));
-    /* 渴血之剑及其变体默认置顶（用户 2026-10 口径）：先按「是不是剑」排，再保持原有顺序。 */
+    /* 限次增益排布：关闭的沉到最底部、打开的全部在上；同组内剑系（渴血之剑）置顶。
+     * 数组顺序就是 `.buff-tags` 的排布顺序，所以关掉一条后下一次重画它自己就落到下面。 */
     const isBladeBuff = (b) => !!(b && TowerData.isBladeId && TowerData.isBladeId(b.id));
     const lim = list.filter((b) => b.kind === 'limited')
-      .sort((a, b) => Number(isBladeBuff(b)) - Number(isBladeBuff(a)));
+      .sort((a, b) => {
+        const offA = a.on === false ? 1 : 0;
+        const offB = b.on === false ? 1 : 0;
+        if (offA !== offB) return offA - offB;
+        return Number(isBladeBuff(b)) - Number(isBladeBuff(a));
+      });
     const cap = Number(run.permCap) || ((TowerData.PERMANENT_SLOTS || 5) + Math.max(0, Number(run.permSlots || 0)));   // 槽位上限含扩容类加成
     const permHtml = perm.length
       ? perm.map((b, i) => {
@@ -1432,19 +1519,12 @@
     } catch (e) { /* 素材入口没挂上也别让整页挂掉 */ }
     return '';
   }
-  function heroGearIcon(id, size) {
+  // 外观格走原版容器帧（`gear-frames.json` → 1919/1915/1909/1912 等符号），不请求静态 gear 图标。
+  function heroGearIcon(id, size, tier) {
     const n = Number(size) || 48;
-    /* 橙装 / 黑装没有独立 PNG：沿用同名紫装的图（与账号装备页同一条 `gearIconId` 规则）。 */
-    let iconId = Number(id) || 0;
-    try {
-      if (window.UI && UI.classic && typeof UI.classic.gearIconId === 'function') {
-        const hit = UI.classic.gearIconId({ id: iconId });
-        if (hit > 0) iconId = hit;
-      }
-    } catch (e) { /* 没有 classic-ui 时照旧用原 id */ }
-    return '<img alt="" loading="lazy" width="' + n + '" height="' + n +
-      '" src="images/ui/icons/gear/gear-' + iconId + '.png" ' +
-      'onerror="this.style.display=\'none\';this.parentNode.classList.add(\'missing\')">';
+    const t = Math.max(1, Math.min(3, Number(tier) || 1));
+    return '<span class="hero-gear-art" data-hero-gear-art="' + (Number(id) || 0) +
+      '" data-hero-tier="' + t + '" aria-hidden="true" style="width:' + n + 'px;height:' + n + 'px"></span>';
   }
   const HERO_PART_CHAR = ['头', '拳', '衣', '鞋'];
   function heroGearName(id) {
@@ -1738,7 +1818,7 @@
     return '<button type="button" class="hero-gear-item' + (equipped ? ' is-equipped' : '') + '"' +
       ' data-hero-gear="' + item.id + '" data-gear-part="' + item.type + '" data-hero-tier="' + tier + '"' +
       ' aria-pressed="' + (equipped ? 'true' : 'false') + '" title="' + esc(title) + '">' +
-      '<span class="hero-gear-icon" data-part="' + esc(HERO_PART_CHAR[item.type] || '装') + '">' + heroGearIcon(item.id, 48) + '</span>' +
+      '<span class="hero-gear-icon" data-part="' + esc(HERO_PART_CHAR[item.type] || '装') + '">' + heroGearIcon(item.id, 48, tier) + '</span>' +
       '<b>' + esc(item.name) + '</b><i>' + esc(HERO_PARTS[item.type] || '') + '</i>' +
       '<span class="hero-gear-zero">0 加成</span></button>';
   }
@@ -1862,7 +1942,9 @@
         const parts = String(raw).split(':'), id = Number(parts[0]), level = Math.max(1, Number(parts[1]) || 1);
         const inst = kind === 'weapon'
           ? (State.weaponInst ? State.weaponInst(id) : null) : (State.skillInst ? State.skillInst(id) : null);
-        const trueMul = window.TowerHero && TowerHero.trueBaseMul ? TowerHero.trueBaseMul(level) : 1;
+        const trueMul = window.TowerHero && TowerHero.trueBaseMulFor
+          ? TowerHero.trueBaseMulFor(kind, id, level)
+          : (window.TowerHero && TowerHero.trueBaseMul ? TowerHero.trueBaseMul(level) : 1);
         lines[kind].push('<li><span class="hero-status-ws-icon">' + heroWsIcon(kind, id, 36) + '</span>' +
           '<b>' + esc((inst && inst.name) || ((kind === 'weapon' ? '武器 ' : '技能 ') + id)) + '</b>' +
           '<em>' + esc(heroLevelText(level)) + (trueMul > 1 ? ' · 白值×' + trueMul : '') + '</em></li>');
@@ -2054,6 +2136,7 @@
   function closeHeroGearPicker() {
     const el = heroGearPickerEl;
     heroGearPickerEl = null;
+    stopHeroGearArt(el);
     if (el && typeof el.__close === 'function') el.__close();
     else if (el && el.parentNode) el.parentNode.removeChild(el);
     /* 兜底：万一外部导航把状态页整个换掉，层里那份引用已经找不到，按标记清一次。 */
@@ -2090,6 +2173,7 @@
     el.setAttribute('data-hero-gear-picker', '');
     document.body.appendChild(el);
     heroGearPickerEl = el;
+    hydrateHeroGearArt(el);
     const slotsHost = el.querySelector('[data-hero-gear-slots]');
     const paintSlots = () => {
       if (!slotsHost) return;
@@ -2122,6 +2206,7 @@
     });
     const onKey = (ev) => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); close(); } };
     const close = () => {
+      stopHeroGearArt(el);
       if (el.parentNode) el.parentNode.removeChild(el);
       if (heroGearPickerEl === el) heroGearPickerEl = null;
       document.removeEventListener('keydown', onKey, true);
@@ -2581,8 +2666,10 @@
         !(it.kind === 'skill' && [6, 13].includes(it.id)));
       openHeroGoodsPicker({
         title: '大师传承 · 选择武技',
-        note: '选中的武技会直接升到真5满级（15级）。',
-        items: pool.map((it) => Object.assign({}, it, { meta: '当前 ' + heroLevelText(it.level) + ' → 真5' })),
+        note: '选中的武技等级提高5级（最高真5 / 15级）。',
+        items: pool.map((it) => Object.assign({}, it, {
+          meta: '当前 ' + heroLevelText(it.level) + ' → ' + heroLevelText(Math.min(15, it.level + 5)),
+        })),
         empty: '没有未满级的武技可选。',
         onPick: (it) => done({ ref: it.ref }),
       });
@@ -3657,8 +3744,17 @@
     bladeOfferOpen = false;
     bladeOfferEl = null;
   }
-  /** 战斗后的必选献祭：只列史诗+限次或永久（有铭文时优先吃铭文）。
-   *  `bladeSacrificePending`，这里补做同一次自动结算，避免玩家停在没有按钮的界面上。 */
+  function bladeStarveToast(r, info) {
+    const name = (r && r.name) || (info && info.name) || '渴血之剑';
+    const msg = r && r.ok
+      ? ('没有献祭：' + name + ' 吞噬 ' + Math.max(1, Number(r.consumed) || 1) + ' 次使用次数' +
+        (r.evolved ? ('，进化为「' + r.evolved.name + '」')
+          : (r.uses > 0 ? ('（剩余 ' + r.uses + ' 场）') : '')) + '。')
+      : ((r && r.msg) || '献祭失败。');
+    notice(msg, [{ label: '继续', cls: 'gold', run: openEndless }]);
+  }
+
+  /** 战斗后的必选献祭：史诗+限次 / 任意永久 / 10 级以上勇者武技（有铭文时优先吃铭文）。 */
   function openBladeSacrifice() {
     if (bladeOfferVisible()) return;
     /* 先占坑再建弹层：`modal()` 挂到 #ui 之后，若是重画触发的第二轮 openEndless
@@ -3667,17 +3763,12 @@
     const got = Tower.bladeSacrificeCandidates();
     const list = (got && got.list) || [];
     const info = (got && got.blade) || (Tower.bladeInfoOf ? Tower.bladeInfoOf() : null) || {};
-    if (!list.length) {
-      const r = Tower.sacrificeBlade(null);
+    // 献祭武技：10 级以上、且不是最后一招；只在这里当「额外选项」。
+    const skills = (got && got.skills) || [];
+    if (!list.length && !skills.length) {
+      bladeStarveToast(Tower.sacrificeBlade(null), info);
       bladeOfferOpen = false;
       bladeOfferEl = null;
-      const msg = r && r.ok
-        ? ('没有可献祭的增益：' + (r.name || info.name || '渴血之剑') + ' 自动吞噬 ' +
-          Math.max(1, Number(r.consumed) || 1) + ' 次使用次数' +
-          (r.evolved ? ('，进化为「' + r.evolved.name + '」')
-            : (r.uses > 0 ? ('（剩余 ' + r.uses + ' 场）') : '')) + '。')
-        : ((r && r.msg) || '献祭失败。');
-      notice(msg, [{ label: '继续', cls: 'gold', run: openEndless }]);
       return;
     }
     const rows = list.map((c, i) => {
@@ -3690,16 +3781,40 @@
         (c.inscription ? '<span class="rp-desc">优先消耗铭文，增益本身保留</span>' : '') +
         '</button>';
     }).join('');
+    // 武技行与增益行同列：一块列表比两个分区省高度，也不会把某一类选项整块推到视区外。
+    const skillRows = skills.map((c, i) =>
+      '<button type="button" class="replace-pick blade-skill-pick" data-action="bs' + i + '"' +
+      ' title="' + esc(c.name + '：' + (c.meta || '')) + '">' +
+      '<span class="rp-name">' + esc(c.name) + '</span>' +
+      '<span class="rp-meta">' + esc(c.meta || '') + '</span>' +
+      '<span class="rp-desc">献祭武技：这一招从本局消失，且永远不会再被领悟</span>' +
+      '</button>').join('');
+    const offers = rows + skillRows;
+    const runHero = ((Tower.endlessInfo() || {}).run || {}).hero;
+    const bannedNames = (got && got.heroMode && runHero && window.TowerHero && TowerHero.bannedSkills
+      ? TowerHero.bannedSkills(runHero) : [])
+      .map((id) => { try { const inst = State.skillInst ? State.skillInst(Number(id)) : null; return inst && inst.name; } catch (e) { return null; } })
+      .filter(Boolean);
+    const tips = ['当前成长 ×' + Math.max(1, Number(info.stacks) || 1) + ' 层 · 剩余 ' +
+      (info.unlimited ? '永续' : (info.uses + ' 场')) + '。'];
+    if (list.length) tips.push('叠层只吃一件；带铭文的永久增益先吃铭文。');
+    if (skills.length) tips.push('武技献祭后本局永久移除。');
+    if (!list.length) tips.push('不想给就让它挨饿（吞 1 次使用次数）。');
+    if (bannedNames.length) tips.push('已献祭：' + bannedNames.join('、') + '。');
     const m = modal('渴血之剑 · 献祭',
       '<div class="result-box"><div class="result-title lose">它饿了</div>' +
-      '<p>战斗结束，剑脊上的暗红仍未褪去。它要一件祭品 —— ' +
-      '一件<b>史诗及以上的限次增益</b>，或一件<b>永久增益</b>。</p>' +
-      '<p class="gold-text">当前成长：×' + Math.max(1, Number(info.stacks) || 1) +
-      ' 层 · 剩余 ' + (info.unlimited ? '永续' : (info.uses + ' 场')) + '</p></div>' +
-      '<div class="replace-pick-list">' + rows + '</div>' +
-      '<p class="small-label">可叠加的只消耗一件；永久增益若带铭文，优先消耗水晶铭文，其次虚空铭文，增益本身不会消失。</p>',
-      [], { small: true, locked: true });
+      '<p>剑脊上的暗红仍未褪去，它要一件祭品。</p></div>' +
+      '<div class="replace-pick-list">' + offers + '</div>' +
+      '<p class="small-label">' + esc(tips.join(' ')) + '</p>',
+      (!list.length ? [{ label: '让它挨饿', cls: 'muted', run: () => {
+        const r = Tower.sacrificeBlade(null);
+        m.close();
+        closeBladeOffer();
+        bladeStarveToast(r, info);
+      } }] : []), { small: true, locked: true });
     if (m && m.element) {
+      // 这个弹窗要同时装下增益 + 武技两排选项：给足高度，别让选项落在滚动区外面。
+      m.element.classList.add('blade-sacrifice-modal');
       const actions = {};
       list.forEach((c, i) => {
         actions['bl' + i] = () => {
@@ -3710,6 +3825,17 @@
           notice('【' + c.name + '】已献祭 · 渴血之剑成长至 ×' + r.stacks + ' 层' +
             (r.used && r.used.partial ? '（消耗 ' + r.used.consumed + ' 场，剩余 ' + r.used.uses + ' 场）' : '') +
             (r.used && r.used.kind === 'inscription' ? '（铭文被吞掉，增益保留）' : '') + '。',
+            [{ label: '继续', cls: 'gold', run: openEndless }]);
+        };
+      });
+      skills.forEach((c, i) => {
+        actions['bs' + i] = () => {
+          const r = Tower.sacrificeBlade(c.ref);
+          if (!r.ok) { notice(r.msg || '献祭失败。'); return; }
+          m.close();
+          closeBladeOffer();
+          notice('武技【' + c.name + '】已献祭 · 渴血之剑成长至 ×' + r.stacks + ' 层' +
+            '。这一招已从本局移除，不会再被领悟。',
             [{ label: '继续', cls: 'gold', run: openEndless }]);
         };
       });
@@ -4198,6 +4324,6 @@
 
 
   window.TowerUI = { openTower, openEndless, openHeroSetup, openHeroStatus, openMintShop, openShop, openPickBuff, openPatrolToll, openPatrolDiscard,
-    _heroAppearanceSlots: heroAppearanceSlots };
+    _heroAppearanceSlots: heroAppearanceSlots, _openHeroGearPicker: openHeroGearPicker };
   if (window.TowerPlot && TowerPlot.setMainOpener) TowerPlot.setMainOpener(openEndless);
 })();

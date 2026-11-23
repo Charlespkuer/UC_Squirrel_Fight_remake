@@ -230,7 +230,8 @@ test('勇者专属货品真实扣费生效，剧情之剑唯一且在镜复制�
   assert.equal(training.ok, true, training.msg);
   assert.ok(training.price > 0);
   assert.equal(run.coins, 500 - training.price);
-  assert.equal(Number(run.hero.weapons.find(it => it.startsWith('1:')).split(':')[1]), 15, 'HS03 应把选定武技直接升到真5');
+  assert.equal(Number(run.hero.weapons.find(it => it.startsWith('1:')).split(':')[1]), Math.min(15, beforeW1 + 5),
+    'HS03 应把选定武技提高 5 级（封顶真5）');
   assert.ok(beforeW1 < 15);
   /* HS02：自选遗忘 + 自选学习，新武技继承旧等级；不改变总数。 */
   const beforeCount = count(run.hero);
@@ -241,7 +242,8 @@ test('勇者专属货品真实扣费生效，剧情之剑唯一且在镜复制�
   assert.equal(swap.ok, true, swap.msg);
   assert.equal(count(run.hero), beforeCount, 'HS02 不改变武技总数');
   assert.equal(run.hero.weapons.some(it => it.startsWith('1:')), false, '被遗忘的武器应移除');
-  assert.equal(run.hero.weapons.find(it => it.startsWith('2:')), '2:15', '新武器继承被遗忘武器的真5等级');
+  assert.equal(run.hero.weapons.find(it => it.startsWith('2:')), '2:' + Math.min(15, beforeW1 + 5),
+    '新武器继承被遗忘武器升级后的等级');
   for (let n = H.cappedCount(run.hero); n < 24; n++) assert.equal(H.learn(run.hero, { rng: () => 0 }).ok, true);
   const refs = () => [...run.hero.weapons.map(it => 'w:' + it), ...run.hero.skills.map(it => 's:' + it)];
   const known = new Set(refs());

@@ -156,6 +156,17 @@
   const STAGE_ROLE_STAT = Object.freeze([0.70, 0.78, 0.72]);
   const STAGE_ROLE_HP = Object.freeze([0.90, 1.05, 1.20]);
   const STAGE_TYPE_SCALE = Object.freeze({ tl: 1.15, xh: 0.92, xm: 1.02 });
+  /* 每关一个标定系数（攻/敏/速/血同乘）：按 test-stage-balance 的「推荐等级随机玩家、
+   * 三连战、每场后回 25% 血」标到约 0.6 通关率；改战斗公式后必须重跑该套件再调。 */
+  const STAGE_CAL = Object.freeze([
+    0.92, 0.899, 0.948, 0.882, 0.907, 0.890, 1.005, 1.005, 1.013, 1.071, 1.046, 1.096,
+    0.997, 1.013, 0.940, 0.923, 0.907, 0.989, 1.054, 1.046, 1.079, 1.046, 1.063, 1.087,
+    1.309, 1.260, 1.219, 1.227, 1.202, 1.276, 1.219, 1.186, 1.169, 1.137, 1.194, 1.210,
+  ]);
+  const stageCal = (stageId) => {
+    const v = STAGE_CAL[Number(stageId) - 1];
+    return Number.isFinite(v) && v > 0 ? v : 1;
+  };
   /* 超级大关单敌人：三侠的普通类型系数（tl 1.15 / xh 0.92 / xm 1.02）是按三连战调出来的，
    * 单挑时仙鹤偏弱、熊猫后几星偏强。给超级关单独一套形状系数与血量倍率。
    * ⚠ 原版 viewer 里的 `Mantis_boss.swf` / `Crane_boss.swf` / `Panda_boss.swf` 与 `Panda3.swf`
@@ -283,7 +294,7 @@
    * 只作用在**关卡模式**的敌人构建上（classic-ui 的 stageFight）；
    * 挑战塔 / 无尽塔走各自的敌人构建（tower.js 的 buildFoe），不读这里。
    * ============================================================ */
-  const CHALLENGE_DAILY_STAT_STEP = 0.05;
+  const CHALLENGE_DAILY_STAT_STEP = 0.10;
   function challengeDailyMul(count) {
     const n = Math.max(0, Math.floor(Number(count) || 0));
     return 1 + CHALLENGE_DAILY_STAT_STEP * n;
@@ -326,10 +337,11 @@
   function stageNpcHp(stageId, npcIndex) {
     const role = stageRoleOf(stageId, npcIndex);
     const regular = stageRegularMul(stageId);
+    const cal = stageCal(stageId);
     if (STAGE_USE_LEVEL_MODEL) {
       /* 超级大关：单敌人、按大侠档位再乘类型专属倍率（比普通关的 1/3 连战强度高得多）。 */
       const bossMul = isSuperStage(stageId) ? (SUPER_HP_MUL[stageTypeOf(stageId).anim] || 1.6) : 1;
-      return Math.max(1, Math.round(stagePlayerHp(stageTargetLevel(stageId)) * STAGE_ROLE_HP[role] * STAGE_HP_MUL * bossMul * regular));
+      return Math.max(1, Math.round(stagePlayerHp(stageTargetLevel(stageId)) * STAGE_ROLE_HP[role] * STAGE_HP_MUL * bossMul * regular * cal));
     }
     const row = STAGE_NPC_HP[stageStar(stageId) - 1];
     return row ? stageScale(row[role] || 0, STAGE_DIFFICULTY.hp * STAGE_HP_MUL * regular) : 0;
@@ -351,7 +363,7 @@
       const stageId = Number(raw.stageId) || 1;
       const role = stageRoleOf(stageId, raw.npcIndex);
       const typeScale = isSuperStage(stageId) ? (SUPER_TYPE_SCALE[stageTypeOf(stageId).anim] || 1) : stageTypeScale(stageId);
-      const power = Math.max(1, Math.round(stagePlayerStat(stageTargetLevel(stageId)) * STAGE_ROLE_STAT[role] * typeScale * stageRegularMul(stageId)));
+      const power = Math.max(1, Math.round(stagePlayerStat(stageTargetLevel(stageId)) * STAGE_ROLE_STAT[role] * typeScale * stageRegularMul(stageId) * stageCal(stageId)));
       // 用字典里（含熊猫 ★4-6 修正表）的比例保留同关三人的相对形状
       const shape = (key) => { const v = Number(raw[key]), p = Number(raw.power); return v > 0 && p > 0 ? v / p : 1; };
       return { power, agility: Math.max(1, Math.round(power * shape('agility'))), speed: Math.max(1, Math.round(power * shape('speed'))) };
@@ -570,6 +582,8 @@
    * （20×12 = 240，与「原版 20×16 = 320」减去 80 点成长差后的 240 完全相等）。
    * 魔法袋按原版天梯商店回收，且不再出属性点（原版说明只承诺黑装碎片与其它稀有道具）。 */
   const EXTRA_PROPS = [
+    // 原版 propsArray 有、安卓 H5 GameDict 缺的一行；金杯商店 goods 18 直接把 goodsId=14 发给背包。
+    ['14', '生命转化丸', '用5点生命随机增加1点力量/敏捷/速度，当基础生命值低于（等级*9）时不能使用。', '240', 'false', '1'],
     ['77', '黑凤凰碎片', '10个碎片可以合成1件黑色凤凰装备（顶级黑色套装）。挑战塔、无尽塔的黑色卡片、魔法袋、金宝箱与黑装融合都有几率获得。', '', 'false', '3'],
     ['78', '黑圣熊碎片', '10个碎片可以合成1件黑色圣熊装备（顶级黑色套装）。挑战塔、无尽塔的黑色卡片、魔法袋、金宝箱与黑装融合都有几率获得。', '', 'false', '3'],
     ['79', '魔法袋', '打开后随机获得一种：6级宝石3%、5级宝石15%、蓝色碎片15%（5~10个）、召唤证17%（1~2个）、金松果25%（300~500）、孵化点25%（100）；并额外获得黑色卡片×1。原版另有黑凤凰/黑圣熊碎片，离线版由黑色卡片承接。', '', 'false', '1'],
@@ -1103,6 +1117,36 @@
   }
   registerOrangeGear();
 
+  /* 原版 288 件里还有 60 件没进 gearMap / gearSetMap：深海·机器猫 q3（189~196，套装 48/49）
+   * 与普通套装的黑装上位 q5（213~264，套装 54~66）。运行期补行，融合池 / 实例 / 售价才能读到。 */
+  const RARE_GEAR_SET_IDS = Object.freeze([48, 49]);
+  const REGULAR_BLACK_SET_IDS = Object.freeze([54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66]);
+  function registerHiddenGear() {
+    const gmap = window.gearMap, smap = window.gearSetMap;
+    if (!gmap || !smap || typeof gmap.put !== 'function' || typeof smap.put !== 'function') return 0;
+    let n = 0;
+    const putSet = (id, quality, group, level, price, index) => {
+      if (smap.getValue(String(id))) return;
+      smap.put(String(id), [String(id), String(quality), String(group), String(level), '0', String(price), String(index)]);
+      n++;
+    };
+    for (const id of RARE_GEAR_SET_IDS) putSet(id, 3, id === 48 ? 23 : 24, 25, 210, id);
+    for (const id of REGULAR_BLACK_SET_IDS) putSet(id, 5, id, 60, 1400, id);
+    for (const row of GEAR_BASE) {
+      const [id, setId, quality, type, name, base] = row;
+      const rare = Number(quality) === 3 && RARE_GEAR_SET_IDS.includes(Number(setId));
+      const black = Number(quality) === 5 && REGULAR_BLACK_SET_IDS.includes(Number(setId));
+      if (!rare && !black) continue;
+      if (gmap.getValue(String(id))) continue;
+      const abilities = [0, 0, 0, 0];
+      abilities[Number(type)] = Number(base);
+      gmap.put(String(id), [String(id), abilities.join(','), String(type), name, String(setId)]);
+      n++;
+    }
+    return n;
+  }
+  registerHiddenGear();
+
   /* ============================================================
    * 【GD5b】套装使用等级按原版 Flash 校正
    * ============================================================ */
@@ -1275,7 +1319,8 @@
    * 【GD4】导出 window.GData
    * ============================================================ */
   window.GData = { EXP_TABLE, nextExp, formatBigNumber, WS_LEVELS, ATTRIBUTE_BOOK_LEVELS, wsLimit, canLearn, passiveBonus, initialStats, STAGE_TYPES, stageTypeOf, stageStar, stageEnemyCount, isSuperStage, STAGE_NPC_HP, STAGE_NPC_EXP, STAGE_DIFFICULTY, STAGE_HP_MUL, STAGE_NPC_STAT_FIX, STAGE_REWARD_MULT, STAGE_GOLD_MULT,
-    STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_REGULAR_MUL, SUPER_HP_MUL, SUPER_TYPE_SCALE, STAGE_TYPE_SCALE, STAGE_PLAYER_CURVE,
+    STAGE_USE_LEVEL_MODEL, STAGE_LEVEL_BAND, STAGE_ROLE_STAT, STAGE_ROLE_HP, STAGE_REGULAR_MUL, SUPER_HP_MUL, SUPER_TYPE_SCALE, STAGE_TYPE_SCALE, STAGE_CAL, stageCal, STAGE_PLAYER_CURVE,
+    RARE_GEAR_SET_IDS, REGULAR_BLACK_SET_IDS, registerHiddenGear,
     trueLevel, trueSkillValue, trueSkillStep, trueSkillRow, TRUE_SKILL_TABLE, TRUE_SKILL_5, TRUE_SKILL_MAX, TRUE_WEAPON_BONUS, trueWeaponBonus, TRUE_WEAPON_GLOW, trueWeaponGlow,
     stageTargetLevel, stagePlayerStat, stagePlayerHp, stageTypeScale, CHALLENGE_DAILY_STAT_STEP, challengeDailyMul, challengeDailyScale, stageFoe, STAGE_FRAGMENT, STAGE_FRAGMENT_MUL, stageFragmentChance, stageChallengeFragmentChance, stageFragmentCount, BLUE_SHARD_DROP_MUL, stageNpcHp, stageNpcExp, stageNpcStats, AI_NAMES, NEW_PLAYER, ARENA_TITLES, GEAR_BASE, GEAR_BASE_ATTR, BLACK_GEAR_SETS, BLACK_SHARD_SET, BLACK_CARD_ID, BLACK_BOX_ID, registerBlackGear, applyPropRemarkFixes, CONVERT_SHARD_ID, CONVERT_SHARD_NAME, CONVERT_SHARD_COST, CONVERT_FRUIT_ID, CONVERT_PILLS, registerLadderShard, EXTRA_RANK_GOODS, registerRankGoods, LEVEL_GIFT_SMALL, LEVEL_GIFT_BIG, LEVEL_GIFT_RARE, levelGift, GIFT_PACK_BOOST, giftPackPrize,
     PETS, PET_SKILLS, PET_SKILL_RULES, petSkillValue, petSkillTrigger, petSkillInfo, PET_GRADE_EXP, PET_GRADE_COST,

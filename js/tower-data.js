@@ -1687,7 +1687,7 @@
     { id: 'HS02', tags: ['endless', 'shop', 'hero', 'ops', 'repeatable'], name: '遗忘与新生', rarity: 2, kind: 'instant',
       desc: '自选遗忘一个已学武技，再自选学习一个尚未掌握的武技；新武技继承被遗忘武技的等级', mods: { heroReplace: 1 } },
     { id: 'HS03', tags: ['endless', 'shop', 'hero', 'ops', 'repeatable'], name: '大师传承', rarity: 2, kind: 'instant',
-      desc: '自选一个未满级的局内武技，直接升到真5满级', mods: { heroGuaranteedMax: 1 } },
+      desc: '自选一个未满级的局内武技，等级提高5级（最高真5 / 15级）', mods: { heroLevelUp: 5 } },
     { id: 'HS04', tags: ['endless', 'shop', 'hero', 'ops', 'repeatable'], name: '禁书残页', rarity: 3, kind: 'instant',
       desc: '随机学会一个尚未掌握的5级武技；该武技不占普通24项上限，即使未满24项也不计数', mods: { heroSecret: 1, repeatWeight: 0.5 } },
     { id: 'HB01', tags: ['endless', 'story', 'catalog', 'blade'], name: '渴血之剑', rarity: 3, kind: 'limited', uses: 8, maxStacks: 5,

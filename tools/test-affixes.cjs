@@ -65,8 +65,9 @@ test('ssfight 装备词条：48 条、32 空号、宝石 12 档增幅与 42~49 �
   assert.equal(a44.extra, '2.50,5,7.50,10,12.50,15,17.50,20,22.50,25,27.50,30');
   for (const id of [42, 43, 44, 45, 46, 47, 48, 49]) assert.ok(attachmentMap.hasKey(id), '缺少词条 ' + id);
 
-  /* ② 宝石单位阶梯：1/2/3/5/7/9/12；词条值 = 星级 ability + 增幅 extra。 */
-  assert.deepEqual([1, 2, 3, 4, 5, 6, 7].map((lv) => State.gemAffixUnits(100 + lv)), [1, 2, 3, 5, 7, 9, 12]);
+  /* ② 宝石总档：3/5/8/12/17/23/30，逐档随机分到各条词条、单条最多 12 档。 */
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 7].map((lv) => State.gemAffixTotal(lv)), [3, 5, 8, 12, 17, 23, 30]);
+  assert.equal(State.GEM_AFFIX_CAP, 12);
   const v0 = State.attachmentValue(44, 3, 0);
   assert.equal(v0.base, 30); assert.equal(v0.extra, 0); assert.equal(v0.total, 30);
   const v12 = State.attachmentValue(44, 3, 12);
@@ -78,10 +79,29 @@ test('ssfight 装备词条：48 条、32 空号、宝石 12 档增幅与 42~49 �
   const gear = State.addGear(205, [{ id: 44, level: 3 }]);
   assert.ok(gear && State.wear(gear.key), '橙装应能穿上');
   assert.equal(State.equipmentEffects()[44], 30, '无宝石时取三星基础 30%');
+  const goldBefore = s.goldPoint;
   assert.equal(State.socketGem(gear.key, 107).ok, true);
+  assert.equal(s.goldPoint, goldBefore, '镶嵌免费，不扣金松果');
+  assert.equal(s.gears.find((x) => x.key === gear.key).gem.units.join(','), '12', '单条词条封顶 12 档');
   assert.equal(State.equipmentEffects()[44], 60, '七级宝石 +12 档增幅后应为 60%');
   assert.equal(State.unsocketGem(gear.key).ok, true);
+  assert.equal(s.goldPoint, goldBefore - 5, '卸下扣 5 金松果');
   assert.equal(State.equipmentEffects()[44], 30);
+
+  /* ③b 补齐原版 60 件隐藏装备，融合变异池按目标品质分开。 */
+  assert.equal(g.gearMap.keys.length, 288, 'gearMap 应补齐到原版 288 件');
+  assert.equal(g.gearSetMap.keys.length, 72, 'gearSetMap 应补齐到 72 套');
+  const rare = State.gearInst(189);
+  assert.ok(rare, '深海 q3 189 应可实例化');
+  assert.equal(rare.quality, 3); assert.equal(rare.useLevel, 25); assert.equal(rare.price, 210);
+  const black = State.gearInst(213);
+  assert.ok(black, '普通黑装上位 213 应可实例化');
+  assert.equal(black.quality, 5); assert.equal(black.useLevel, 60); assert.equal(black.price, 1400);
+  assert.ok(State.gearIdsOf(0, 3).includes(189), '深海 q3 应进紫色融合池');
+  assert.ok(State.gearIdsOf(0, 5).includes(213), '普通黑装上位应进黑色融合池');
+  assert.equal(State.fusionMutantSets(3).join(','), '48,49,51');
+  assert.equal(State.fusionMutantSets(4).join(','), '45,50,52,53');
+  assert.equal(State.fusionMutantSets(5).join(','), '67,68,69,70');
 
   /* ④ 47 绝对防御：反弹加点（2012 攻略 76%+35%=111% 的同一口径）。 */
   fixedRandom(g, 0);

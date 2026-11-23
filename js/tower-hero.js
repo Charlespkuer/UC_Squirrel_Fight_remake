@@ -132,6 +132,22 @@
   }
   const owns = (hero, it) => listOf(hero, it.kind).some((raw) => Number(String(raw).split(':')[0]) === it.id);
   const count = (hero) => hero.weapons.length + hero.skills.length;
+  // 献给渴血之剑的武技：本局永久拉黑，任何「领悟 / 换招」都不能再把它们放回池子。
+  const bannedSkillIds = (hero) => (Array.isArray(hero && hero.bannedSkills) ? hero.bannedSkills : []);
+  function isBannedSkill(hero, id) {
+    const n = Number(id);
+    return n > 0 && bannedSkillIds(hero).indexOf(n) >= 0;
+  }
+  function banSkill(hero, id) {
+    const n = Math.floor(Number(id) || 0);
+    if (!(n > 0) || isBannedSkill(hero, n)) return false;
+    hero.bannedSkills = bannedSkillIds(hero).concat([n]);
+    return true;
+  }
+  // 「还能领悟什么」的唯一出口：未掌握、且不是本局献祭掉的武技。
+  function learnPool(hero) {
+    return catalog().filter((it) => !owns(hero, it) && !(it.kind === 'skill' && isBannedSkill(hero, it.id)));
+  }
   // 24 项普通上限只数未标 uncapped 的武技；HS04 学会的带 uncapped 标记，不占位，
   // 普通学习到 24 后仍可被 HS04 扩充。UI 显示总数用 count()，免上限项另行提示。
   const uncappedRefs = (hero) => Array.isArray(hero && hero.uncapped) ? hero.uncapped : [];
@@ -219,6 +235,10 @@
     const hero = Object.assign({}, raw, { version: 1, baseVer: 1,
       base: Object.assign({}, CONFIG.base, base),
       weapons: [], skills: [], appearance: cleanAppearance(raw.appearance), upgradeFails: {}, uncapped: [],
+      // 献祭掉的武技按 id 记住（只认当前目录里存在的技能，去重后原样保留）。
+      bannedSkills: (Array.isArray(raw.bannedSkills) ? raw.bannedSkills : [])
+        .map((v) => Math.floor(Number(v) || 0))
+        .filter((id, i, arr) => id > 0 && !!infoOf('skill', id) && arr.indexOf(id) === i),
       wins: integer(raw.wins, 0, 0, Number.MAX_SAFE_INTEGER),
       eliteWins: integer(raw.eliteWins, 0, 0, Number.MAX_SAFE_INTEGER),
       patrolWins: integer(raw.patrolWins, 0, 0, Number.MAX_SAFE_INTEGER),
@@ -270,7 +290,7 @@
     if (!Array.isArray(picks) || picks.length !== CONFIG.initialCount) return error('请选择恰好3个初始武器或技能。');
     const stats = cleanStats(opts.stats || opts.base);
     const hero = { version: 1, baseVer: 1, base: Object.assign({}, CONFIG.base, stats),
-      weapons: [], skills: [], uncapped: [],
+      weapons: [], skills: [], uncapped: [], bannedSkills: [],
       appearance: cleanAppearance(opts.appearance), upgradeFails: {},
       wins: 0, eliteWins: 0, patrolWins: 0, log: [] };
     for (const value of picks) {
@@ -285,6 +305,11 @@
   function trueBaseMul(level) {
     const lv = Math.max(1, Math.min(15, Math.floor(Number(level) || 1)));
     return lv >= 15 ? 2 : lv >= 11 ? 1.5 : 1;
+  }
+  // 野球拳（12）不吃真化白值倍率：与 js/sim.js 的 HERO_TRUE_BASE_SKIP_SKILLS 同口径。
+  const TRUE_BASE_SKIP_SKILLS = new Set([12]);
+  function trueBaseMulFor(kind, id, level) {
+    return kind === 'skill' && TRUE_BASE_SKIP_SKILLS.has(Number(id)) ? 1 : trueBaseMul(level);
   }
   // 基于 State.weaponInst 的白值再套真化乘数；不要另建一套武器数值。
   function heroWeapon(raw) {
@@ -305,7 +330,7 @@
       hp: baseMaxHp, maxHp: baseMaxHp,
       weapons: hero.weapons.map((s) => heroWeapon(s)).filter(Boolean),
       skills: hero.skills.map((s) => State.skillInst(s)).filter(Boolean).map((s) =>
-        Object.assign(s, { trueBaseMul: trueBaseMul(s.level) })),
+        Object.assign(s, { trueBaseMul: trueBaseMulFor('skill', s.id, s.level) })),
       effects: {}, masterLevel: 0, pets: [], npcType: null, heroTrueBase: true,
       gears: hero.appearance.map((g) => Object.assign({}, g, { ext: g.ext.map((e) => Object.assign({}, e)) })),
     };
@@ -374,9 +399,12 @@
     if (!repair(hero)) return error('勇者数据无效。');
     const opts = options || {}, atCap = cappedCount(hero) >= CONFIG.normalLimit;
     if (atCap && opts.special !== true) return Object.assign(error('已达到普通学习上限，仅特殊途径可以继续学习。'), { atCap: true });
-    const pool = catalog().filter((it) => !owns(hero, it));
+    const pool = learnPool(hero);
     // learnRef：定向学习（HS02 自选 / 事件 / 测试传），格式 w:12 / s:7。
     const want = opts.learnRef ? parseRef(opts.learnRef) : null;
+    if (want && want.kind === 'skill' && isBannedSkill(hero, want.id)) {
+      return error('【' + want.name + '】已献给渴血之剑，本局不会再领悟。');
+    }
     const item = want || pick(pool, opts.rng);
     if (!item) return error('已经掌握所有可学习的武技。');
     if (owns(hero, item)) return error('已经掌握【' + item.name + '】。');
@@ -397,9 +425,12 @@
     if (!repair(hero)) return error('勇者数据无效。');
     const old = parseRef(ref), opts = options || {};
     if (!old || !owns(hero, old)) return error('勇者尚未掌握这个武技。');
-    const pool = catalog().filter((it) => !owns(hero, it));
+    const pool = learnPool(hero);
     const want = opts.learnRef ? parseRef(opts.learnRef) : null;
     if (opts.learnRef && !want) return error('要学习的武技不在可学习池里。');
+    if (want && want.kind === 'skill' && isBannedSkill(hero, want.id)) {
+      return error('【' + want.name + '】已献给渴血之剑，本局不会再领悟。');
+    }
     const next = want || pick(pool, opts.rng);
     if (!next) return error('没有尚未掌握的武技可以替换。');
     if (owns(hero, next)) return error('已经掌握【' + next.name + '】。');
@@ -419,6 +450,26 @@
       name: next.name, level: integer(level, 1, 1, 15), uncapped: wasUncapped,
       total: count(hero), capped: cappedCount(hero), msg: label, label };
   }
+  /* 献祭武技：摘掉这一招并在本局永久拉黑。必须留一件武器/武技 —— normalize 会把
+     0 件武技的勇者判成无效档，整局就读不回来了。 */
+  function forgetSkill(hero, id) {
+    if (!repair(hero)) return error('勇者数据无效。');
+    const n = Math.floor(Number(id) || 0);
+    const info = infoOf('skill', n);
+    if (!info) return error('没有这个武技。');
+    const at = hero.skills.findIndex((raw) => Number(String(raw).split(':')[0]) === n);
+    if (at < 0) return error('勇者没有掌握【' + info.name + '】。');
+    const level = Number(String(hero.skills[at]).split(':')[1]) || 1;
+    if (level < 10) return error('只有 10 级以上的武技才能献给渴血之剑。');
+    if (count(hero) <= 1) return error('至少要留下一件武器或武技。');
+    hero.skills.splice(at, 1);
+    delete hero.upgradeFails[failKey('skill', n)];
+    clearUncapped(hero, refOf('skill', n));
+    banSkill(hero, n);
+    const label = '献祭武技【' + info.name + '】（' + levelLabel(level) + '），本局不再领悟。';
+    return { ok: true, id: n, name: info.name, level, ref: refOf('skill', n), label, msg: label };
+  }
+
   function maxOut(hero, ref) {
     if (!repair(hero)) return error('勇者数据无效。');
     const item = parseRef(ref);
@@ -476,5 +527,7 @@
 
   window.TowerHero = { CONFIG, catalog, create, normalize, fighter, grow, upgrade, upgradeInfoOf, replace, learn,
     maxOut, addLevels, cappedCount, uncappedCount: (hero) => uncappedRefs(hero).length,
-    uncappedRefs, isUncapped, trueBaseMul, heroWeapon, learnChanceForCount, statRules: () => STAT_RULES, initialStats, adjustStat };
+    uncappedRefs, isUncapped, trueBaseMul, trueBaseMulFor, heroWeapon, learnChanceForCount, statRules: () => STAT_RULES, initialStats, adjustStat,
+    // 献祭武技（渴血之剑）用：拉黑名单与「还能领悟什么」的唯一出口。
+    forgetSkill, banSkill, isBannedSkill, bannedSkills: bannedSkillIds, learnPool };
 })();

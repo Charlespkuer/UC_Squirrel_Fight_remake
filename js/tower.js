@@ -2182,7 +2182,9 @@
       /* 没有一件合格祭品时**不再弹必选窗**：自动多吞 N 次使用次数并继续。
        * 旧口径是「成长 −1、剑自行沉寂」，但那条路会弹一个只有「承受反噬」的窗；
        * 现在状态机直接结算，窗口只在**有祭品**时出现。 */
-      if (bladeSacrificeCandidates(run).list.length) {
+      // 增益和「10 级以上的武技」都能喂它；只有两边都没有时才自动挨饿。
+      const offerings = bladeSacrificeCandidates(run);
+      if (offerings.list.length || offerings.skills.length) {
         run.bladeSacrificePending = true;
         if (out) out.bladeSacrifice = true;
       } else {
@@ -2234,10 +2236,47 @@
       });
     }
     list.sort((a, b) => (a.kind === b.kind ? (b.rarity - a.rarity) : (a.kind === 'limited' ? -1 : 1)));
-    return { ok: true, list: list, blade: bladeInfoOf(run) };
+    /* 勇者武技：10 级以上、且不是身上最后一招时可以当祭品。它们只进 `skills`，
+       不进 `list` —— 不能让「有一招 10 级武技」变成剑每次都要吃人的强制条件。 */
+    const skills = [];
+    if (isHeroRun(run)) {
+      const ownedHero = heroOwned(run);
+      if (ownedHero.length > 1) {
+        for (const it of ownedHero) {
+          if (it.kind !== 'skill' || Number(it.level) < 10) continue;
+          skills.push({
+            ref: 's:' + it.id, id: Number(it.id), kind: 'skill', name: heroSkillNameOf(it.id),
+            level: Number(it.level), stacks: 1, uses: null, inscription: null,
+            meta: '武技 · ' + heroSkillLevelText(it.level),
+          });
+        }
+      }
+      skills.sort((a, b) => b.level - a.level || a.id - b.id);
+    }
+    return { ok: true, list: list, skills: skills, heroMode: isHeroRun(run), blade: bladeInfoOf(run) };
   }
+
+  // 勇者武技的显示名：与状态页同一来源（State.skillInst），取不到就退回编号。
+  function heroSkillNameOf(id) {
+    try {
+      const inst = window.State && State.skillInst ? State.skillInst(Number(id)) : null;
+      if (inst && inst.name) return String(inst.name);
+    } catch (e) {}
+    return '技能 ' + Number(id);
+  }
+  function heroSkillLevelText(level) {
+    const lv = Math.max(1, Math.round(Number(level) || 1));
+    return lv > 10 ? '真' + (lv - 10) + '级' : lv + '级';
+  }
+
   function consumeBladeOffering(run, cand) {
     if (!cand) return null;
+    if (cand.kind === 'skill') {
+      if (!window.TowerHero || typeof TowerHero.forgetSkill !== 'function') return null;
+      const out = TowerHero.forgetSkill(run.hero, cand.id);
+      if (!out || !out.ok) return null;
+      return { kind: 'skill', id: out.id, name: out.name, level: out.level, removed: true };
+    }
     if (cand.kind === 'permanent' && cand.inscription) {
       const row = (run.permanent || []).find((b) => b && Number(b.uid) === Number(cand.uid));
       if (!row) return null;
@@ -2304,14 +2343,17 @@
       return { ok: true, starved: true, name: (D().BUFF_BY_ID[row.id] || {}).name || '渴血之剑',
         uses: row.uses, consumed: s ? s.consumed : 0, evolved: s ? s.evolved : null };
     }
-    const cand = got.list.find((c) => c.ref === String(ref));
+    const cand = got.list.find((c) => c.ref === String(ref)) || (got.skills || []).find((c) => c.ref === String(ref));
     if (!cand) return { ok: false, msg: '这件祭品已经不在手里了。' };
     const used = consumeBladeOffering(run, cand);
     if (!used) return { ok: false, msg: '献祭失败，请重试。' };
     row.stacks = Math.min(D().BLADE.maxStacks, Math.max(1, Math.floor(Number(row.stacks) || 1) + 1));
     delete run.bladeSacrificePending;
+    // 武技被摘掉可能改变生命上限，成长记录 + 血上限一起刷新。
+    if (used.kind === 'skill' && isHeroRun(run)) noteHero(run, '献祭武技《' + cand.name + '》：本局不再领悟');
     logBuff(run, row.id, 'stack', { stacks: row.stacks,
-      detail: '献祭《' + cand.name + '》' + (used.kind === 'inscription' ? '（铭文）' : '') + ' · 成长 ×' + row.stacks });
+      detail: (used.kind === 'skill' ? '献祭武技《' : '献祭《') + cand.name + '》' +
+        (used.kind === 'inscription' ? '（铭文）' : '') + ' · 成长 ×' + row.stacks });
     save();
     return { ok: true, name: cand.name, used: used, stacks: row.stacks,
       blade: (D().BUFF_BY_ID[row.id] || {}).name || '渴血之剑' };
@@ -2395,11 +2437,12 @@
     const m = buff.mods || {}, choice = (opts && opts.heroChoice) || {};
     let out;
     if (m.heroTraining) out = heroTraining(run, m.heroTraining || 1, false);
-    else if (m.heroGuaranteedMax) {
+    else if (m.heroLevelUp) {
+      const levels = Math.max(1, Math.min(15, Math.floor(Number(m.heroLevelUp) || 5)));
       const pool = heroOwned(run).filter(it => it.level < 15 && !(it.kind === 'skill' && [6, 13].includes(it.id)));
       const chosen = choice.ref && pool.find(it => it.ref === String(choice.ref));
-      if (chosen) out = TowerHero.maxOut(run.hero, chosen.ref);
-      else if (pool.length) out = TowerHero.maxOut(run.hero, pool[Math.floor(Math.random() * pool.length)].ref);
+      if (chosen) out = TowerHero.addLevels(run.hero, chosen.ref, levels);
+      else if (pool.length) out = TowerHero.addLevels(run.hero, pool[Math.floor(Math.random() * pool.length)].ref, levels);
       else out = { ok: false, msg: '没有可升级的武技。' };
     } else if (m.heroGuaranteed) out = heroTraining(run, 1, true);
     else if (m.heroSecret) out = TowerHero.learn(run.hero, { special: true, level: 5, uncapped: true });
@@ -4019,9 +4062,11 @@
     if (D().hasTag(buff, 'hero') && !isHeroRun(run)) return false;
     if (D().hasTag(buff, 'hero') && buff.kind === 'instant') {
       const owned = heroOwned(run);
-      if (buff.mods.heroSecret && owned.length >= TowerHero.catalog().length) return false;
-      if (buff.mods.heroReplace && owned.length >= TowerHero.catalog().length) return false;
-      if ((buff.mods.heroTraining || buff.mods.heroGuaranteed || buff.mods.heroGuaranteedMax) && !owned.some(it => it.level < 15 && !(it.kind === 'skill' && [6, 13].includes(it.id)))) return false;
+      // 可学习池空了才算「学不了」：献祭掉的武技永远不在池里，不能靠「已掌握数 < 目录数」误判。
+      const canLearn = TowerHero.learnPool(run.hero).length > 0;
+      if (buff.mods.heroSecret && !canLearn) return false;
+      if (buff.mods.heroReplace && !canLearn) return false;
+      if ((buff.mods.heroTraining || buff.mods.heroGuaranteed || buff.mods.heroLevelUp) && !owned.some(it => it.level < 15 && !(it.kind === 'skill' && [6, 13].includes(it.id)))) return false;
     }
     const cap = D().stackCap(buff);
     /* 【2026-10 第六十一批】「烙印升华」（E20）带 `brandGate`：

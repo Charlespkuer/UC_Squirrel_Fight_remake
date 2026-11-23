@@ -235,7 +235,7 @@
       /* 星标：标记后不会被误融合 / 误出售（防止手滑把好装备合掉）。 */
       if (g.starred === true) entry.starred = true;
       const gemLv = g.gem && gemLevel(g.gem.id);
-      if (gemLv) entry.gem = { id: 100 + gemLv };
+      if (gemLv) entry.gem = { id: 100 + gemLv, units: normalizeGemUnits(g.gem.units, entry.ext, gemLv) };
       return entry;
     });
     /* 5 级换装教程的一次性白装。新档显式 false；旧档没有字段时按「已经升过 5 级 / 已有装备 /
@@ -476,7 +476,7 @@
     next.dailyCounters = object(raw.dailyCounters) && typeof raw.dailyCounters.date === 'string' ? raw.dailyCounters : null;
     next.dailyStatsDate = typeof next.dailyStatsDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(next.dailyStatsDate) ? next.dailyStatsDate : '';
     next.challengeDaily = object(raw.challengeDaily) && validLocalDate(raw.challengeDaily.date)
-      ? { date: raw.challengeDaily.date, count: Math.max(0, integer(raw.challengeDaily.count, 0, 0)) }
+      ? { date: raw.challengeDaily.date, counts: normalizeChallengeCounts(raw.challengeDaily.counts) }
       : null;
     next.shopPurchaseDate = typeof next.shopPurchaseDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(next.shopPurchaseDate) ? next.shopPurchaseDate : '';
     next.shopPurchases = {};
@@ -2385,7 +2385,7 @@
       if (!info) return null;
       const out = Object.assign(info, { used: g.used, key: g.key });
       if (g.orange === true) { out.orange = true; out.quality = 4; }   // 兼容旧档的实例级橙标记
-      if (g.gem && gemLevel(g.gem.id)) out.gem = { id: Number(g.gem.id), units: gemAffixUnits(g.gem.id) };
+      if (g.gem && gemLevel(g.gem.id)) out.gem = { id: Number(g.gem.id), units: gemUnitsForGear(g) };
       return out;
     }).filter(Boolean).filter((g) => blackGearEnabled() || Number(g.quality) !== 5);
   }
@@ -2520,10 +2520,45 @@
   }
   function gemLevel(id) { id = Number(id); return id >= 101 && id <= 107 ? id - 100 : 0; }
   function gemPercent(lv) { lv = integer(lv, 0, 0); return lv > 0 ? 5 * (lv * lv - lv + 2) : 0; }
-  /* 宝石对「附加属性」的增幅：原版不是随机百分比，而是按宝石等级给 1~12 个单位的阶梯。
-   * 客户端 `getAttachment(id, star, count-1)` 按单位数取 extraValue，与星级 ability 相加。 */
-  const GEM_AFFIX_UNITS = Object.freeze([1, 2, 3, 5, 7, 9, 12]);
-  function gemAffixUnits(gemId) { const lv = gemLevel(gemId); return lv ? GEM_AFFIX_UNITS[lv - 1] : 0; }
+  /* 宝石对「附加属性」的增幅：原版按宝石等级给一条总档（3/5/8/12/17/23/30），
+   * 镶嵌时逐档随机分到各条词条、单条最多 12 档。旧档按平均分迁移。 */
+  const GEM_AFFIX_TOTALS = Object.freeze([3, 5, 8, 12, 17, 23, 30]);
+  const GEM_AFFIX_CAP = 12;
+  function gemAffixTotal(lv) { lv = integer(lv, 0, 0); return lv > 0 ? GEM_AFFIX_TOTALS[Math.min(7, lv) - 1] : 0; }
+  function rollGemAffixUnits(lv, count) {
+    count = Math.max(0, Math.min(3, integer(count, 0, 0)));
+    const units = new Array(count).fill(0);
+    let left = gemAffixTotal(lv);
+    while (left > 0) {
+      const open = [];
+      for (let i = 0; i < count; i++) if (units[i] < GEM_AFFIX_CAP) open.push(i);
+      if (!open.length) break;
+      units[open[Math.floor(Math.random() * open.length)]] += 1;
+      left -= 1;
+    }
+    return units;
+  }
+  function evenGemAffixUnits(lv, count) {
+    count = Math.max(0, Math.min(3, integer(count, 0, 0)));
+    const units = new Array(count).fill(0);
+    const total = gemAffixTotal(lv);
+    for (let i = 0; i < total && count > 0; i++) units[i % count] += 1;
+    return units;
+  }
+  function normalizeGemUnits(units, ext, lv) {
+    const count = Math.max(0, Math.min(3, Array.isArray(ext) ? ext.length : 0));
+    if (!count) return [];
+    const total = gemAffixTotal(lv);
+    if (Array.isArray(units) && units.length === count) {
+      const clean = units.map((u) => integer(u, 0, 0));
+      if (clean.every((u) => u <= GEM_AFFIX_CAP) && clean.reduce((a, b) => a + b, 0) <= total) return clean;
+    }
+    return evenGemAffixUnits(lv, count);
+  }
+  function gemUnitsForGear(gear) {
+    const ext = normalizeExt(gear && gear.ext);
+    return normalizeGemUnits(gear && gear.gem && gear.gem.units, ext, gemLevel(gear && gear.gem && gear.gem.id));
+  }
   /** 某条词条在「星级 + 宝石增幅单位」下的实际值：ability[star-1] + extra[units-1]。 */
   function attachmentValue(id, star, units) {
     const def = attachmentMap.getValue(Number(id));
@@ -2567,9 +2602,9 @@
     save();
     return { ok: true, success: false, msg: '合成失败，宝石没有变化' };
   }
-  /** 镶嵌 / 卸下各 5 金松果；每件橙色或黑色装备限 1 颗。
-   *  宝石不再随机附加属性百分比，而是按原版 1/2/3/5/7/9/12 个单位抬高词条增幅。 */
-  const GEM_SOCKET_COST = 5;
+  /** 镶嵌免费、卸下 5 金松果；每件橙色或黑色装备限 1 颗。附加属性按总档随机分到各条。 */
+  const GEM_SOCKET_COST = 0;
+  const GEM_UNSOCKET_COST = 5;
   function socketGem(gearKey, gemId) {
     const g = S.gears.find((x) => x.key === gearKey);
     if (!g) return { ok: false, msg: '装备不存在' };
@@ -2577,27 +2612,27 @@
     if (g.gem) return { ok: false, msg: '每件装备最多镶嵌 1 颗宝石，请先卸下原有宝石' };
     const lv = gemLevel(gemId);
     if (!lv || !(S.props[gemId] > 0)) return { ok: false, msg: '没有该宝石' };
-    if (S.goldPoint < GEM_SOCKET_COST) return { ok: false, msg: '镶嵌需要 ' + GEM_SOCKET_COST + ' 金松果' };
-    S.goldPoint -= GEM_SOCKET_COST;
     S.props[gemId]--;
-    g.gem = { id: Number(gemId) };
-    const units = gemAffixUnits(gemId);
-    const first = normalizeExt(g.ext)[0];
+    const ext = normalizeExt(g.ext);
+    const units = rollGemAffixUnits(lv, ext.length);
+    g.gem = { id: Number(gemId), units: units };
+    const first = ext[0];
     const firstDef = first ? attachmentMap.getValue(first.id) : null;
-    const firstVal = first ? attachmentValue(first.id, first.level, units) : null;
+    const firstVal = first ? attachmentValue(first.id, first.level, units[0]) : null;
     const sample = firstDef && firstVal ? '，' + firstDef.name.replace('N', String(firstVal.total)) : '';
     save();
-    return { ok: true, msg: propMap.getValue(gemId).name + ' 镶嵌成功（−' + GEM_SOCKET_COST + ' 金松果）：主属性 +' + gemPercent(lv) + '%，附加属性增幅 ' + units + ' 档' + sample };
+    return { ok: true, msg: propMap.getValue(gemId).name + ' 镶嵌成功（免费）：主属性 +' + gemPercent(lv) +
+      '%，附加属性总档 ' + gemAffixTotal(lv) + ' 随机分配（单条最多 ' + GEM_AFFIX_CAP + ' 档）' + sample };
   }
   function unsocketGem(gearKey) {
     const g = S.gears.find((x) => x.key === gearKey);
     if (!g || !g.gem) return { ok: false, msg: '该装备没有镶嵌宝石' };
-    if (S.goldPoint < GEM_SOCKET_COST) return { ok: false, msg: '卸下需要 ' + GEM_SOCKET_COST + ' 金松果' };
-    S.goldPoint -= GEM_SOCKET_COST;
+    if (S.goldPoint < GEM_UNSOCKET_COST) return { ok: false, msg: '卸下需要 ' + GEM_UNSOCKET_COST + ' 金松果' };
+    S.goldPoint -= GEM_UNSOCKET_COST;
     S.props[g.gem.id] = (S.props[g.gem.id] || 0) + 1;
     delete g.gem;
     save();
-    return { ok: true, msg: '已卸下宝石（−' + GEM_SOCKET_COST + ' 金松果），宝石放回背包' };
+    return { ok: true, msg: '已卸下宝石（−' + GEM_UNSOCKET_COST + ' 金松果），宝石放回背包' };
   }
 
   const GEAR_COST_BY_QUALITY = Object.freeze([30, 40, 50, 60, 200, 1000]);
@@ -2674,7 +2709,7 @@
        * 否则挑战页立绘、查看装备、切磋时的套装收益都会退回紫装。 */
       if (g && g.orange === true) out.orange = true;
       const gemLv = g && g.gem && gemLevel(g.gem.id);
-      if (gemLv) out.gem = { id: 100 + gemLv, units: gemAffixUnits(100 + gemLv) };
+      if (gemLv) out.gem = { id: 100 + gemLv, units: normalizeGemUnits(g.gem.units, out.ext, gemLv) };
       return out;
     }).filter(Boolean);
   }
@@ -2840,10 +2875,15 @@
    * 下面 FUSION_SAME_NAME_RATE / pickMergeTarget 是旧规则，只留旧档/旧界面引用，mergeGears 不调。 */
   const FUSION_SAME_NAME_RATE = { 2: 0.50, 3: 0.97 };
   const FUSION_MUTANT_RATE = { 2: 0.03, 3: 0.03 };
-  const FUSION_MUTANT_SET = 51;
-  /* 紫→橙变异的目标是橙色狂战（set 52，ids 205-208）；紫→橙时 51 是紫狂战，不能用。 */
-  const FUSION_ORANGE_MUTANT_SET = 52;
+  /* 变异池按目标品质：紫 48/49/51、橙 45/50/52/53、黑 67~70（原版帮助「融合紫/橙/黑时有较低几率
+   * 出现深海、机器猫、怒战、狂战」）。旧单值常量只为兼容旧导出保留。 */
+  const FUSION_MUTANT_SETS = Object.freeze([48, 49, 51]);
+  const FUSION_ORANGE_MUTANT_SETS = Object.freeze([45, 50, 52, 53]);
   const FUSION_BLACK_MUTANT_SETS = Object.freeze([67, 68, 69, 70]);
+  const FUSION_MUTANT_SET = 51;
+  const FUSION_ORANGE_MUTANT_SET = 52;
+  const fusionMutantSets = (quality) => Number(quality) === 5 ? FUSION_BLACK_MUTANT_SETS
+    : Number(quality) === 4 ? FUSION_ORANGE_MUTANT_SETS : FUSION_MUTANT_SETS;
   /* 联机版融合的变异概率（三件材料都有可用目标时）。 */
   const FUSION_ONLINE_MUTANT_RATE = 0.02;
   /* 旧版逐槽继承概率；联机版改成「前两条固定 + 第三条随机」，常量只为兼容旧界面导出。 */
@@ -2925,8 +2965,7 @@
     const same = dup >= 2 ? names[0] : (names[1] === names[2] ? names[1] : null);
     if (same) {
       const hit = pool.filter((id) => gearName(id) === same);
-      const mutantSets = targetQuality === 5 ? FUSION_BLACK_MUTANT_SETS
-        : targetQuality === 4 ? [FUSION_ORANGE_MUTANT_SET] : [FUSION_MUTANT_SET];
+      const mutantSets = fusionMutantSets(targetQuality);
       const mutants = pool.filter((id) => mutantSets.includes(gearSetOf(id)));
       const others = pool.filter((id) => gearName(id) !== same);
       const key = dup === 3 ? 3 : 2;
@@ -3037,8 +3076,7 @@
      * 变异池：紫/蓝档 51（紫狂战）、紫→橙 52（橙狂战）、橙/黑档 67~70（深海/机器猫/怒战/狂战）。 */
     const family = fusionSetFamily(gearSetOf(sourceGear.id));
     const inherited = pool.filter((id) => fusionSetFamily(gearSetOf(id)) === family);
-    const mutationSets = targetQuality === 5 ? FUSION_BLACK_MUTANT_SETS
-      : targetQuality === 4 ? [FUSION_ORANGE_MUTANT_SET] : [FUSION_MUTANT_SET];
+    const mutationSets = fusionMutantSets(targetQuality);
     const alternatives = pool.filter((id) => fusionSetFamily(gearSetOf(id)) !== family);
     const special = alternatives.filter((id) => mutationSets.includes(gearSetOf(id)));
     const mutants = special.length ? special : alternatives;
@@ -3083,30 +3121,30 @@
   }
   /** 词条文本。`units` = 宝石增幅单位（0 = 不显示增幅，取星级基础值）。 */
   function extText(ext, units) {
-    return (ext || []).map((e) => {
+    return (ext || []).map((e, i) => {
       const id = LEGACY_EXT_ID[Number(e.id)] || e.id;
       const a = attachmentMap.getValue(id);
       if (!a) return '';
-      const v = attachmentValue(id, e.level, units);
+      const v = attachmentValue(id, e.level, Array.isArray(units) ? units[i] : units);
       return a.name.replace('N', String(v.total));
     }).filter(Boolean);
   }
   function extTextForGear(gear, detail) {
-    const units = gemAffixUnits(gear && gear.gem && gear.gem.id);
-    return (gear && gear.ext ? gear.ext : []).map((e) => {
+    const units = gemUnitsForGear(gear);
+    return (gear && gear.ext ? gear.ext : []).map((e, i) => {
       const id = LEGACY_EXT_ID[Number(e.id)] || e.id;
       const a = attachmentMap.getValue(id);
       if (!a) return '';
-      const v = attachmentValue(id, e.level, units);
+      const v = attachmentValue(id, e.level, units[i]);
       return a.name.replace('N', String(v.total)) + (detail && v.extra > 0 ? '（基础' + v.base + '+增幅' + v.extra + '）' : '');
     }).filter(Boolean);
   }
   function extExtraText(ext, units) {
-    return (ext || []).map((e) => {
+    return (ext || []).map((e, i) => {
       const id = LEGACY_EXT_ID[Number(e.id)] || e.id;
       const a = attachmentMap.getValue(id);
       if (!a) return '';
-      const v = attachmentValue(id, e.level, units);
+      const v = attachmentValue(id, e.level, Array.isArray(units) ? units[i] : units);
       if (!v.extra) return '';
       const name = String(a.name || '');
       const sign = name.indexOf('-N%') >= 0 ? '-' : '+';
@@ -3115,7 +3153,7 @@
     }).filter(Boolean);
   }
   function extExtraTextForGear(gear) {
-    return extExtraText(gear && gear.ext, gemAffixUnits(gear && gear.gem && gear.gem.id));
+    return extExtraText(gear && gear.ext, gemUnitsForGear(gear));
   }
   function addGear(id, ext, attr, attrPct) {
     if (!blackGearEnabled() && isBlackGearId(id)) return null;
@@ -3167,11 +3205,11 @@
       if (!blackGearEnabled() && isBlackGearId(gear.id)) continue;
       const info = gearInst(gear.id, gear.ext, gear.attr);
       if (!info || S.level < info.useLevel) continue;
-      const units = gemAffixUnits(gear.gem && gear.gem.id);
-      for (const ext of normalizeExt(gear.ext)) {
-        const v = attachmentValue(ext.id, ext.level, units);
+      const units = gemUnitsForGear(gear);
+      normalizeExt(gear.ext).forEach((ext, i) => {
+        const v = attachmentValue(ext.id, ext.level, units[i]);
         effects[ext.id] = Math.max(effects[ext.id] || 0, Math.round(v.total));
-      }
+      });
     }
     return effects;
   }
@@ -3608,6 +3646,13 @@
         S.weapons = []; S.skills = []; S.reborn++;
         for (const gear of S.gears) gear.used = false;
         msg = '转生成功！回到1级，装备保留';
+        break;
+      }
+      case 14: { // 生命转化丸：扣 5 点基础生命，随机 +1 力/敏/速（原版由服务端结算并回 index）
+        if (S.maxHp < S.level * 9) return { ok: false, msg: '基础生命低于等级×9，不能使用' };
+        const target = ['power', 'agility', 'speed'][Math.floor(Math.random() * 3)];
+        S.maxHp -= 5; S[target] += 1;
+        msg = '减少5点生命，增加1点' + ({ power: '力量', agility: '敏捷', speed: '速度' })[target];
         break;
       }
       case 16: S.power++; msg = '力量永久+1'; break;
@@ -4526,7 +4571,7 @@
         setName: set ? set.name : '',
         attrName: info.attrName, abilityVal: info.abilityVal,
         ext: extTextForGear(g),
-        gem: gemLv ? { level: gemLv, percent: gemPercent(gemLv), units: gemAffixUnits(100 + gemLv) } : null,
+        gem: gemLv ? { level: gemLv, percent: gemPercent(gemLv), units: gemUnitsForGear(g) } : null,
       };
     }).filter(Boolean);
     return {
@@ -4717,13 +4762,13 @@
       const gemLv = gear.gem ? gemLevel(gear.gem.id) : 0;
       const mainMul = gemLv ? 1 + gemPercent(gemLv) / 100 : 1;
       foe[['agility', 'power', 'hp', 'speed'][info.type]] += Math.round(info.abilityVal * mainMul);
-      const gemUnits = gemAffixUnits(gear.gem && gear.gem.id);
-      for (const ext of gear.ext || []) {
+      const gemUnits = gemUnitsForGear(gear);
+      (gear.ext || []).forEach((ext, i) => {
         const def = attachmentMap.getValue(ext.id);
-        if (!def) continue;
-        const val = Math.round(attachmentValue(ext.id, ext.level, gemUnits).total);
+        if (!def) return;
+        const val = Math.round(attachmentValue(ext.id, ext.level, gemUnits[i]).total);
         if (Number.isFinite(val)) foe.effects[ext.id] = Math.max(foe.effects[ext.id] || 0, val);
-      }
+      });
     }
     /* 套装收益：**对手也吃**（与玩家同一条数值表、同一套口径）。
      * 挑战塔 / 无尽塔的敌人不经过这里（tower.js 的 buildFoe 自己造），所以那两种模式不受影响。 */
@@ -4833,7 +4878,9 @@
       const lv = Number(set && set.level);
       /* 橙装 q4 只给玩家融合链 / 明确的掉落使用；随机 AI 继续走原来的紫装档 +
        * 实例橙色规则，避免把 q4 直接塞进 AI 池后整体难度无声上涨。 */
-      if (set && Number.isFinite(lv) && lv <= level && lv >= minSetLevel && Number(set.quality) < 4) {
+      // 48/49（深海·机器猫 q3）留给玩家融合链，不进随机 AI 池，避免胜率标定漂。
+      if (set && Number.isFinite(lv) && lv <= level && lv >= minSetLevel && Number(set.quality) < 4 &&
+          !(window.GData && GData.RARE_GEAR_SET_IDS && GData.RARE_GEAR_SET_IDS.includes(Number(id)))) {
         sets.push({ id: Number(id), level: lv, quality: parseInt(set.quality) || 0 });
       }
     });
@@ -5074,7 +5121,7 @@
     S.stages[stageId] = { npcIndex: Math.max(old.npcIndex, nextNpc), passed: old.passed || complete };
     if (complete) {
       delete S.stageRuns[stageId];
-      noteChallengeClear();
+      noteChallengeClear(stageId);
     }
     else {
       run.npcIndex = nextNpc;
@@ -5160,20 +5207,41 @@
     if (S.dailyCounters && S.dailyCounters.date !== date) S.dailyCounters = null;
     save();
   }
-  // 常驻挑战当日通关次数：一整轮 3 场全胜才 +1（与每日任务的「每赢一场」分开计数），
-  // 每次通关后所有敌人全属性 +5%、可叠；随每日刷新归零。挑战塔/无尽塔不读这里。
+  /* 常驻挑战「当日成长」按关卡各记一份：只有当天反复通关的那一关继续变强，其它 35 关不受连坐。
+   * 旧档的全局 count 直接作废 —— 它是惩罚项，不折算成 36 关一起 +10%。 */
+  function normalizeChallengeCounts(raw) {
+    const out = {};
+    if (!object(raw)) return out;
+    const max = (window.GData && GData.STAGE_TYPES ? GData.STAGE_TYPES.length : 6) * 6;
+    for (const key of Object.keys(raw)) {
+      const stageId = Math.floor(Number(key));
+      if (!(stageId >= 1 && stageId <= max)) continue;
+      const n = Math.max(0, integer(raw[key], 0));
+      if (n > 0) out[stageId] = n;
+    }
+    return out;
+  }
   function challengeDaily() {
     const date = localDate();
     const cur = object(S.challengeDaily) ? S.challengeDaily : null;
-    if (!cur || cur.date !== date) return { date, count: 0 };
-    return { date, count: Math.max(0, Math.floor(Number(cur.count) || 0)) };
+    if (!cur || cur.date !== date) return { date, counts: {} };
+    return { date, counts: normalizeChallengeCounts(cur.counts) };
   }
-  function challengeDailyCount() { return challengeDaily().count; }
-  function noteChallengeClear() {
+  function challengeDailyCount(stageId) {
+    const id = Math.floor(Number(stageId));
+    const max = (window.GData && GData.STAGE_TYPES ? GData.STAGE_TYPES.length : 6) * 6;
+    if (!(id >= 1 && id <= max)) return 0;
+    return challengeDaily().counts[id] || 0;
+  }
+  function noteChallengeClear(stageId) {
+    const id = Math.floor(Number(stageId));
+    const max = (window.GData && GData.STAGE_TYPES ? GData.STAGE_TYPES.length : 6) * 6;
+    if (!(id >= 1 && id <= max)) return 0;
     const cur = challengeDaily();
-    S.challengeDaily = { date: cur.date, count: cur.count + 1 };
+    cur.counts[id] = (cur.counts[id] || 0) + 1;
+    S.challengeDaily = { date: cur.date, counts: cur.counts };
     save();
-    return S.challengeDaily.count;
+    return S.challengeDaily.counts[id];
   }
   /* 每日礼包的「金松果之外」奖励：按本地日期轮换，每天换一种。
    * 用户 2026-10 口径：只在挑战书 / 英雄帖 / 勇气徽章 / 召唤证 / 三种超级药丸之间轮换。 */
@@ -5282,7 +5350,7 @@
     { id: 23, range: [1, 2], weight: 1.0 },   // 挑战书
     { id: 1, range: [1, 2], weight: 1.0 },    // 小体力药剂
     { id: 7, range: [1, 1], weight: 0.7, pill: true },    // 经验丸
-    { id: 45, range: [1, 1], weight: 0.2 },   // 天使果实种子（0.5×）
+    { id: 45, range: [1, 1], weight: 0.1 },   // 天使果实种子（再减半）
     { id: 2, range: [1, 1], weight: 0.3 },    // 大体力药剂（高级）
     { id: 44, range: [1, 1], weight: 0.06, pill: true },  // 超级经验丸（高级药丸，概率大幅下调）
   ];
@@ -6024,10 +6092,12 @@
     blackGearEnabled, isBlackGearId, BLACK_PROP_IDS,
     gearBaseAttr, gearAttrPctOf, gearAttrPctClamp, gearAttrValueOf, fusionAttrPctOf, rollGearAttr, rollGearAttrPct, gearCostOf,
     GEAR_ATTR_PCT_MAX, GEAR_ATTR_JITTER: GEAR_ATTR_PCT_MAX / 100,
-    FUSION_SAME_NAME_RATE, FUSION_MUTANT_RATE, FUSION_MUTANT_SET, FUSION_ORANGE_MUTANT_SET, FUSION_EXT_UPGRADE_RATE,
+    FUSION_SAME_NAME_RATE, FUSION_MUTANT_RATE, FUSION_MUTANT_SET, FUSION_ORANGE_MUTANT_SET,
+    FUSION_MUTANT_SETS, FUSION_ORANGE_MUTANT_SETS, FUSION_BLACK_MUTANT_SETS, fusionMutantSets, FUSION_EXT_UPGRADE_RATE,
     FUSION_ONLINE_MUTANT_RATE, FUSION_EXT_INHERIT_RATE, FUSION_EXT_SLOTS,
     toggleGearStar, isGearStarred, gearsInDisplayOrder,
-    gemLevel, gemPercent, gemMergeRate, rollGemDrop, mergeGems, socketGem, unsocketGem, canSocketGem, gemAffixUnits, attachmentValue, GEM_AFFIX_UNITS,
+    gemLevel, gemPercent, gemMergeRate, rollGemDrop, mergeGems, socketGem, unsocketGem, canSocketGem, attachmentValue,
+    gemAffixTotal, gemUnitsForGear, rollGemAffixUnits, normalizeGemUnits, GEM_AFFIX_TOTALS, GEM_AFFIX_CAP, GEM_UNSOCKET_COST,
     totalStats, equipmentEffects, shopLimit, purchaseStatus, buyProp, useProp, openChestProp, gainRandomWS, wsChoices, wsInfo,
     chestState, beginChest, confirmChest, reopenChest, chestReopenCost, CHEST_REOPEN_MAX, settlePendingChest,
     blackCardOptions, applyBlackCard, blackGearBoxOptions, applyBlackGearBox,

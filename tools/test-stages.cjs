@@ -167,8 +167,9 @@ test('常驻三侠在徒弟先上阵机制后再增强 6%', () => {
     for (let role = 0; role < 3; role++) {
       const raw = base * GData.STAGE_ROLE_HP[role];
       const lift = GData.stageNpcHp(id, role + 1) / raw;
-      assert.ok(lift >= expect - 0.01 && lift <= expect + 0.01,
-        id + ' 关第 ' + (role + 1) + ' 个敌人倍率 ' + lift.toFixed(3) + '，应为 ' + expect.toFixed(3));
+      const want = expect * GData.stageCal(id);
+      assert.ok(lift >= want - 0.01 && lift <= want + 0.01,
+        id + ' 关第 ' + (role + 1) + ' 个敌人倍率 ' + lift.toFixed(3) + '，应为 ' + want.toFixed(3));
       seen.push(lift);
     }
   }
@@ -177,8 +178,22 @@ test('常驻三侠在徒弟先上阵机制后再增强 6%', () => {
   const bossRole = GData.stageEnemyCount(19) === 1 ? 2 : 0;
   const bossBase = GData.stagePlayerHp(GData.stageTargetLevel(19)) * GData.STAGE_ROLE_HP[bossRole];
   const boss = GData.stageNpcHp(19, 1) / bossBase;
-  assert.ok(Math.abs(boss - GData.STAGE_HP_MUL * (GData.SUPER_HP_MUL[GData.stageTypeOf(19).anim] || 1.6)) < 0.01,
-    '超级大关不应叠加常驻三侠的 12%：' + boss.toFixed(3));
+  assert.ok(Math.abs(boss - GData.STAGE_HP_MUL * (GData.SUPER_HP_MUL[GData.stageTypeOf(19).anim] || 1.6) * GData.stageCal(19)) < 0.01,
+    '超级大关不应叠加常驻三侠的 12%，但吃关卡标定：' + boss.toFixed(3));
+});
+
+test('常驻挑战当日成长只记在被通关的那一关，步进 10%，次日归零', () => {
+  const { c } = setup();
+  const { State, GData } = c;
+  State.noteChallengeClear(1);
+  assert.equal(State.challengeDailyCount(1), 1, '通关第 1 关只记第 1 关');
+  assert.equal(State.challengeDailyCount(7), 0, '邻关不受连坐');
+  assert.equal(GData.challengeDailyScale(100, State.challengeDailyCount(1)), 110, '步进 10%');
+  assert.equal(GData.challengeDailyScale(100, State.challengeDailyCount(7)), 100);
+  State.save(); State.load();
+  assert.equal(State.challengeDailyCount(1), 1, '读档保留当日次数');
+  State.state().challengeDaily = { date: '2000-01-01', counts: { 1: 3 } };
+  assert.equal(State.challengeDailyCount(1), 0, '换天归零（旧全局 count 不折算）');
 });
 
 test('常驻挑战关卡的碎片期望比基准略低，挑战塔仍按基准', () => {

@@ -1976,10 +1976,10 @@
     const S=State.state(),type=GData.stageTypeOf(stageId),run=State.stageRun(stageId),idx=run?run.npcIndex:1,npc=State.npcOf(stageId,idx),reward=State.stageReward(stageId);
     const exhausted=run&&run.needsRevive&&run.revives>=2;
     const cost=exhausted?'复活机会已用完':run?(run.needsRevive?'复活需1个挑战书':'不消耗挑战书'):'每轮1个挑战书';
-    const dailyCount=State.challengeDailyCount?State.challengeDailyCount():0;
+    const dailyCount=State.challengeDailyCount?State.challengeDailyCount(stageId):0;
     const dailyPct=Math.round((GData.challengeDailyMul(dailyCount)-1)*100);
-    const dailyHint='<br><span class="small-label">今日已通关 '+dailyCount+' 次常驻挑战：敌人全属性（力/敏/速/血）+'+
-      (dailyPct>0?('+'+dailyPct+'%'):'+0%')+'（每通关一整次再 +5%，每日 0/12 点重置）</span>';
+    const dailyHint='<br><span class="small-label">今日已通关本关 '+dailyCount+' 次：敌人全属性（力/敏/速/血）+'+
+      (dailyPct>0?('+'+dailyPct+'%'):'+0%')+'（每通关一整次再 +10%，只加这一关；每日 0/12 点重置）</span>';
     const stagePrentice = !(run && (run.masterOnly || run.needsRevive)) ? State.stagePrentice() : null;
     const prenticeHint = stagePrentice
       ? '<br><span class="small-label">出战：徒弟「' + esc(stagePrentice.name) + '」先上阵；徒弟失败后师父再上阵（不消耗挑战书，也不占用复活次数）。</span>'
@@ -2026,7 +2026,7 @@
     /* 徒弟战败后由师父接手同一名对手：对手的剩余血量按比例带进这一场。
      * `maxHp` 必须一起给出，否则 Sim 会把当前血量当成上限、血条显示成满血。 */
     const foeCarryHp=started.role==='master'&&prevRun&&Number.isFinite(prevRun.foeCarryHp)?prevRun.foeCarryHp:null;
-    const dailyCount=State.challengeDailyCount?State.challengeDailyCount():0;
+    const dailyCount=State.challengeDailyCount?State.challengeDailyCount(stageId):0;
     const foe=GData.stageFoe(npc,stageId,type.anim,dailyCount);
     if(foeCarryHp!=null){
       const fullHp=Math.max(1,Math.round(Number(foe.maxHp||foe.hp)||1));
@@ -3322,18 +3322,16 @@
     const g=State.myGears().find(x=>x.key===key);if(!g)return;
     if (typeof gearHasArt === 'function' && !gearHasArt(g)) return;
     const socketable=State.canSocketGem(g);
-    const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+State.gemPercent(State.gemLevel(g.gem.id))+'%，附加属性增幅 '+State.gemAffixUnits(g.gem.id)+' 档）':'';
-    const gemCost=socketable?'<br><span class="small-label">宝石：镶嵌 / 卸下各 5 金松果</span>':'';
+    const gemInfo=g.gem?'<br>镶嵌宝石：'+esc(propMap.getValue(g.gem.id).name)+'（主属性 +'+State.gemPercent(State.gemLevel(g.gem.id))+'%，附加属性总档 '+State.gemAffixTotal(State.gemLevel(g.gem.id))+' 随机分配到各条）':'';
+    const gemCost=socketable?'<br><span class="small-label">宝石：镶嵌免费 / 卸下 5 金松果（总档随机分到各条，单条最多 12 档）</span>':'';
     const content='<div class="gear-detail"><div class="catalog-cell"><h3 class="detail-name q'+g.quality+'">'+esc(g.name)+'</h3><span class="item-icon">'+gearImg(g)+'</span><span class="small-label">'+['普通','优秀','杰出','卓越','传说','黑色'][g.quality]+'</span></div><div>装备类别：'+['头部','手部','身体','脚部'][g.type]+'　使用等级：'+g.useLevel+'<br>基本属性：'+esc(State.gearAttrText(g, { name: true }))+'<br>附加属性：<br>'+State.extTextForGear(g, true).map(esc).join('<br>')+gemInfo+gemCost+setBonusBlock(g)+'</div></div>';
     /* 装卸后列表会重排（穿着 > 获得顺序），要跟着这一件翻到它新位置所在的那一页，
      * 否则在后面的页上点「装备」，东西会当场跳到第一页、看不见了。 */
     const buttons=[{label:g.used?'卸下':'装备',run:()=>{const ok=g.used?State.unwear(key):State.wear(key);if(ok===false)toast('等级不足，暂时无法装备');
       const idx=State.gearsInDisplayOrder().findIndex(x=>x.key===key);
       openGears(idx<0?gearPage:Math.floor(idx/6));}}];
-    /* 宝石：装上 / 卸下都要 5 金松果（2026-10 用户口径）。只要身上有宝石就一定给「卸下」，
-     * 不再依赖 orange 标记（橙色与黑色装备都可镶嵌，这里只是把它做得更稳、更好找）。
-     * 按钮文案**不带「（5金）」**（用户口径 2026-10：四个键要排在一行里，标签越短越好排）；
-     * 费用写在详情正文的那行小字与镶嵌弹窗里，花多少钱照样一眼能看到。 */
+    /* 宝石：镶嵌免费、卸下 5 金松果。只要身上有宝石就一定给「卸下」，不依赖 orange 标记。
+     * 按钮文案不带价格，费用写在详情正文的小字与镶嵌弹窗里。 */
     if(g.gem)buttons.push({label:'卸下宝石',run:()=>{const r=State.unsocketGem(key);toast(r.msg);openGear(key);}});
     else if(socketable)buttons.push({label:'镶嵌宝石',cls:'gold',run:()=>socketGemDialog(key)});
     buttons.push({label:'出售',cls:'muted',run:()=>notice('确定以 '+(State.gearSellRange(State.gearQuality(g))[0])+'~'+(State.gearSellRange(State.gearQuality(g))[1])+' 金松果出售【'+g.name+'】吗？',[{label:'出售',run:()=>{const got=State.sellGear(key);toast('卖出【'+g.name+'】，获得 '+got+' 金松果');openGears(gearPage);}},{label:'返回',cls:'muted'}])});
@@ -5158,7 +5156,7 @@
       const lv = id - 100;
       if (lv <= 2) lines.push('45 级起：通关关卡 20% 几率、竞技场（经验/碎片）获胜 15% 几率获得（一级 75% / 二级 25%）');
       if (lv < 7) lines.push('合成：3 个同级 + 10 金松果，成功率 ' + Math.round(State.gemMergeRate(lv) * 100) + '%（失败有 50% 几率一颗材料降 1 级，1级则碎裂）');
-      lines.push('镶嵌：镶入橙色（3 件相同紫装融合而来）或黑色装备，主属性 +' + State.gemPercent(lv) + '%（沿用原版曲线 5×(n²−n+2)），附加属性效果随机提升，每件限 1 颗；镶嵌与卸下各 5 金松果');
+      lines.push('镶嵌（免费）：镶入橙色（3 件相同紫装融合而来）或黑色装备，主属性 +' + State.gemPercent(lv) + '%（沿用原版曲线 5×(n²−n+2)），附加属性效果随机提升，每件限 1 颗；镶嵌与卸下各 5 金松果');
     }
     if (!lines.length) lines.push('当前版本暂无产出途径（图鉴预留物品）');
     return lines;
@@ -5177,7 +5175,7 @@
       ? '<p><b>装备融合</b>：3 件同品质、未穿戴的装备可融合成 1 件更高品质装备（橙装→黑装；黑装可继续融合洗词条），成功率 100%，费用按品质 30～1000 金松果。产物部位从三件材料中随机、优先同套；词条按星级从高到低继承前两条，第三条随机。</p>'
       : '';
     // 帮助是「系统」分组下的正常页面（弹窗会挡住底下的界面）。
-    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能；71 级起每升 1 级会获得 1 个金宝箱。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。前 18 关每轮消耗1张挑战书、连续击败3名敌人；后 18 关（19-36）是超级三侠，每关只有1名强敌。失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件同品质装备可以融合（产物部位从三件材料随机，词条按星级/材料顺序继承前两条）。带徒弟挑战时徒弟会先上阵；徒弟战败后师父免费接手同一名对手（对手保留剩余血量，不消耗挑战书、也不占用复活次数）。</p><p><b>竞技场</b>：10级开启经验竞技场，15级开启碎片竞技场与幻兽竞技场；报名一次打完两场。经验场名次奖励 150/100/50/30 经验，碎片场 8/6/4/3 蓝片，幻兽场 40/35/30/25 孵化点。</p><p><b>幻兽</b>：村庄「幻兽牧场」孵化、编队、喂养、进化；孵化消耗 200 孵化点。幻兽竞技场用召唤证报名；召唤证可在道具商店用 10 金松果购买，也能从魔法袋中开出。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。天梯赛战斗里会飘出黄色三角的「属性碎片」，点碎片拾取；10 个属性碎片 + 50 金松果可在背包合成 1 个随机力量/敏捷/速度转化丸。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；iOS 的导出文件在「文件」App → 我的 iPhone/iPad → 松鼠大战，导入时也可以直接粘贴存档文本；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45 级后通关关卡或竞技场获胜有几率获得 1~2 级宝石；3 个同级宝石 + 10 金松果可合成高一级（可能失败降级）。宝石可镶入橙色或黑色装备，每件 1 颗，镶嵌/卸下各 5 金松果。</p><p><b>套装收益（仅现代界面）</b>：同名装备 2/4 件各一档加成，按该套最低品质计算；经典界面没有套装收益。</p><p><b>挑战塔</b>：逐层挑战，通关得金松果与碎片；第 20/50 层里程碑发黑卡，第 100 层给黑装自选箱。</p><p><b>无尽塔</b>：没有层数上限，每 100 层一轮。战斗得试炼币，可在试炼商店/铸币商店买增益；每累计 50 层 1 张黑卡，每周最多 10 张。</p>' + blackHelp + '<h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
+    const p = page('system', 'help', '<div class="help-box"><p><b>挑战</b>：选择对手，再点「挑战他」。每场消耗10体力，战斗自动进行。</p><p><b>属性</b>：力量影响伤害，敏捷影响闪避，速度影响出手次数。战斗中随机使用已获得的武器与技能。</p><p><b>成长</b>：战斗获得经验，升级有机会领悟武器与技能；71 级起每升 1 级会获得 1 个金宝箱。</p><p><b>体力</b>：每5分钟恢复1点，也可以在道具中使用体力药剂。</p><p><b>关卡</b>：10级开启，按顺序挑战。前 18 关每轮消耗1张挑战书、连续击败3名敌人；后 18 关（19-36）是超级三侠，每关只有1名强敌。失败最多复活2次，每次再消耗1张。10个装备碎片可合成装备，3件同品质装备可以融合（产物部位从三件材料随机，词条按星级/材料顺序继承前两条）。带徒弟挑战时徒弟会先上阵；徒弟战败后师父免费接手同一名对手（对手保留剩余血量，不消耗挑战书、也不占用复活次数）。</p><p><b>竞技场</b>：10级开启经验竞技场，15级开启碎片竞技场与幻兽竞技场；报名一次打完两场。经验场名次奖励 150/100/50/30 经验，碎片场 8/6/4/3 蓝片，幻兽场 40/35/30/25 孵化点。</p><p><b>幻兽</b>：村庄「幻兽牧场」孵化、编队、喂养、进化；孵化消耗 200 孵化点。幻兽竞技场用召唤证报名；召唤证可在道具商店用 10 金松果购买，也能从魔法袋中开出。</p><p><b>天梯赛</b>：30级开启，胜利得金杯与天梯积分，金杯可在金杯商店兑换稀有奖励。天梯赛战斗里会飘出黄色三角的「属性碎片」，点碎片拾取；10 个属性碎片 + 50 金松果可在背包合成 1 个随机力量/敏捷/速度转化丸。</p><p><b>录像</b>：最近50场战斗保存在消息页，回放不消耗体力，也不会重复发放奖励。</p><p><b>存档与设置</b>：自动保存。可在系统中导出、导入；iOS 的导出文件在「文件」App → 我的 iPhone/iPad → 松鼠大战，导入时也可以直接粘贴存档文本；音乐音量、静音、分辨率与全面屏这些设置也一起存进存档，换机器同步后照旧生效。</p><p><b>宝石</b>：45 级后通关关卡或竞技场获胜有几率获得 1~2 级宝石；3 个同级宝石 + 10 金松果可合成高一级（可能失败降级）。宝石可镶入橙色或黑色装备，每件 1 颗；镶嵌免费、卸下 5 金松果，附加属性总档随机分到各条（单条最多 12 档）。</p><p><b>套装收益（仅现代界面）</b>：同名装备 2/4 件各一档加成，按该套最低品质计算；经典界面没有套装收益。</p><p><b>挑战塔</b>：逐层挑战，通关得金松果与碎片；第 20/50 层里程碑发黑卡，第 100 层给黑装自选箱。</p><p><b>无尽塔</b>：没有层数上限，每 100 层一轮。战斗得试炼币，可在试炼商店/铸币商店买增益；每累计 50 层 1 张黑卡，每周最多 10 张。</p>' + blackHelp + '<h3 class="help-items-title">可获得物品一览</h3><div class="help-items">' + items + '</div><p class="small-label">点击物品可查看效果、获取方式以及具体的概率与期望；标注“暂无产出途径”的为图鉴预留物品。</p></div>', { cls: 'help-board' });
     $$('[data-guide]', p).forEach((b) => b.onclick = () => openGuideItem(+b.dataset.guide));
     wireSystemFeedback(p);
     return p;
@@ -5284,7 +5282,7 @@
   /* 版本号的最后兜底：只在拿不到 window.__SSDZ_VERSION、也 fetch 不到 scripts/version.json 时用
    *（file:// 直接打开、注入被拦）。安装包 / APK 由 tools/build-tauri-app.cjs --web 注入真实版本，
    * 正常发布包不会走到这里；发版时顺手把这一行同步成当前版本。 */
-  const VERSION_FALLBACK = '1.1.8.2';
+  const VERSION_FALLBACK = '1.2.0';
   let gameVersion = String((typeof window !== 'undefined' && window.__SSDZ_VERSION) || VERSION_FALLBACK);
   let versionRequested = false;
   function versionLabel(v) {

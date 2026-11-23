@@ -3094,7 +3094,7 @@
   /* ---------- 装备详情 = 4673 的第 4 帧（`showEquipInfoWin` / `doShowEquipInfo`）----------
    * 复刻这边两页都只占满整屏，所以直接**换这一层的时间轴**，返回时再挂回第 3 帧 —— 观感一致，
    * 也省掉"两层各自维护播放表"的复杂度。 */
-  const GEAR_GEM_COST_NOTE = '宝石：镶嵌 / 卸下各 5 金松果';
+  const GEAR_GEM_COST_NOTE = '宝石：镶嵌免费 / 卸下 5 金松果';
   const canSocketGear = (gear) => (State.canSocketGem ? State.canSocketGem(gear) : Number(gear && gear.quality) > 3);
   function currentGearByKey(key) {
     if (heroView()) return heroGearRows().find((g) => String(g.key) === String(key)) || null;
@@ -3610,7 +3610,8 @@
         ' / 紫 ' + fusionCostOf(3) + ' / 橙 ' + fusionCostOf(4) + ' / 黑 ' + fusionCostOf(5) + ' 金松果。',
       '已穿戴的装备不能作为材料；部位和名字可以完全不同。',
       '3 件同品质的紫装可以融成一件传说装备；3 件橙色装备可以融成一件黑色装备；融合成功率 100%。',
-      '产物部位从三件材料中随机选取；优先落在来源材料同套，存在可用目标时变异概率为 ' + mutant + '%。',
+      '产物部位从三件材料中随机选取；优先落在来源材料同套，存在可用目标时变异概率为 ' + mutant + '%。' +
+      '变异池：紫 狂战/深海/机器猫；橙/黑 狂战/怒战/深海/机器猫。',
       '按星级从高到低继承前两条，同星级按选取材料和词条的顺序排列。',
       '第三条从其余材料词条中随机选取；词条有机会升一星，最高三星。低品质装备按已有词条槽位继承。',
       '黑色装备可继续融合；同名词条也按各自顺序参与继承，每条继承后另有 ' + extUpgrade + '% 概率升 1 星。',

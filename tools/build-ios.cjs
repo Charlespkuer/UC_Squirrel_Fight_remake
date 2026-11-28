@@ -49,6 +49,10 @@ const TAURI = path.join(ROOT, 'src-tauri');
 const GEN = path.join(TAURI, 'gen', 'apple');
 const DIST = path.join(TAURI, 'dist');
 const CLI = path.join(TAURI, 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
+/* ios init 生成的 Xcode 工程名取自 Cargo package.name；复用别人的 gen/apple 时
+ * Tauri 会报「package name changed」并拒绝归档，必须按包名识别并清掉。 */
+const CARGO_NAME = (fs.readFileSync(path.join(TAURI, 'Cargo.toml'), 'utf8')
+  .match(/\[package\][\s\S]*?^name\s*=\s*"([^"]+)"/m) || [])[1] || '';
 /* 版本只有一个来源：`src-tauri/tauri.conf.json`。工程文件是生成物，里面的
  * `CFBundleShortVersionString` 可能是旧的（实测 1.0.4 时仍是 1.0.2），必须在
  * `xcodegen generate` 之前同步回来，否则打出来的包名是 1.0.4、包内版本却是旧值。 */
@@ -93,6 +97,14 @@ function capture(cmd, argv, opts) {
   return { ok: r.status === 0, out: (r.stdout || '') + (r.stderr || '') };
 }
 const mb = (n) => (n / 1048576).toFixed(1) + ' MB';
+/* launchd/同步服务没有 UTF-8 locale 时，Ruby 2.6 会把路径当 ASCII-8BIT，
+ * CocoaPods 在 unicode_normalize 直接崩；显式给 Ruby 设默认外部编码。 */
+if (!process.env.RUBYOPT || !/-E/.test(process.env.RUBYOPT)) {
+  process.env.RUBYOPT = [process.env.RUBYOPT, '-EUTF-8'].filter(Boolean).join(' ');
+}
+/* tauri ios init 会探测 Homebrew；自动更新在远程/慢网下会卡在 portable-ruby 下载。 */
+process.env.HOMEBREW_NO_AUTO_UPDATE = process.env.HOMEBREW_NO_AUTO_UPDATE || '1';
+process.env.HOMEBREW_NO_ENV_HINTS = '1';
 
 /* ---------- 0. 环境 ---------- */
 if (process.platform !== 'darwin') fail('iOS 包只能在 macOS 上打。');
@@ -119,6 +131,16 @@ const SYSROOT = rustc.ok ? rustc.out.trim() : '';
 const LLVM_BIN = SYSROOT ? path.join(SYSROOT, 'lib', 'rustlib', 'aarch64-apple-darwin', 'bin') : '';
 if (LLVM_BIN) process.env.PATH = LLVM_BIN + path.delimiter + process.env.PATH;
 
+/* tauri ios init 会跑 brew/gem outdated 探测依赖；远程或无网时这两条会无限等网络。
+ * 只把 outdated 变成空操作，其余子命令仍交给真实程序。 */
+const INIT_SHIM = fs.mkdtempSync(path.join(os.tmpdir(), 'sf-ios-init-'));
+for (const [name, real] of [['brew', '/opt/homebrew/bin/brew'], ['gem', '/usr/bin/gem']]) {
+  const file = path.join(INIT_SHIM, name);
+  fs.writeFileSync(file, '#!/bin/sh\ncase "$1" in outdated) exit 0;; esac\nexec ' + real + ' "$@"\n', { mode: 0o755 });
+}
+process.env.PATH = INIT_SHIM + path.delimiter + process.env.PATH;
+process.on('exit', () => { try { fs.rmSync(INIT_SHIM, { recursive: true, force: true }); } catch (e) {} });
+
 info('Xcode：' + capture('xcodebuild', ['-version']).out.split('\n')[0]);
 if (!fs.existsSync(LLVM_BIN + path.sep + 'llvm-objcopy')) {
   fail('缺 llvm-objcopy：先跑 rustup component add llvm-tools（Xcode 27 下不加会链接失败）。');
@@ -141,6 +163,13 @@ info('生成 iOS 图标（奶油底，避免透明通道）');
 run(process.execPath, [CLI, 'icon', 'app-icon.png', '--ios-color', '#FFF3DC'], { cwd: TAURI });
 
 /* ---------- 2. iOS 工程（首次 init；之后只补丁） ---------- */
+if (fs.existsSync(GEN)) {
+  const stale = fs.readdirSync(GEN).some((n) => n.endsWith('.xcodeproj') && n !== CARGO_NAME + '.xcodeproj');
+  if (stale) {
+    fs.rmSync(GEN, { recursive: true, force: true });
+    info('清掉旧包名的 iOS 工程：' + CARGO_NAME);
+  }
+}
 if (!fs.existsSync(path.join(GEN, 'project.yml'))) {
   info('首次生成 gen/apple');
   run(process.execPath, [CLI, 'ios', 'init', '--ci'], { cwd: TAURI });
@@ -150,6 +179,10 @@ function patchProjectYml() {
   const file = path.join(GEN, 'project.yml');
   let text = fs.readFileSync(file, 'utf8');
   const before = text;
+
+  /* Tauri 2.11 生成的 Xcode 构建脚本写成 `node tauri ...`，但 gen/apple 下没有这个文件；
+   * 旧工程用 `npm run -- tauri ...`（走 src-tauri/package.json 的 bin），统一成后者。 */
+  text = text.replace(/(^|\n)(\s*)\S*node tauri ios xcode-script/g, '$1$2npm run -- tauri ios xcode-script');
 
   text = text.replace(
     /(        UISupportedInterfaceOrientations:\n)(?:          - UIInterfaceOrientation[^\n]*\n)+/,
@@ -283,7 +316,18 @@ info('开始归档（' + (LEGACY ? 'legacy / iOS 15~25，无 UIScene' : 'scene /
   '；未签名；Rust + 134 MB 前端资源，首次约 5–10 分钟）');
 /* ⚠ 不要用 `tauri ios build --build-number`：它把数字拼到主版本上（1.0.4 + 104 → 1.104），
  * 不是 CFBundleVersion。构建号统一在归档后写 Info.plist（见下面的 `plutil -replace`）。 */
-run(process.execPath, [CLI, 'ios', 'build', '--no-sign', '--archive-only', '--ci'], { cwd: TAURI });
+/* 基础 tauri.conf.json 的 frontendDist 是 empty（桌面壳自带服务器）；`ios build` 对
+ * 平台配置里的 frontendDist 不生效（实测 .app/assets 为空），构建期间临时改成 web。 */
+const BASE_CONF = path.join(TAURI, 'tauri.conf.json');
+const baseConf = fs.readFileSync(BASE_CONF, 'utf8');
+const webConf = baseConf.replace(/"frontendDist"\s*:\s*"empty"/, '"frontendDist": "web"');
+if (webConf !== baseConf) {
+  fs.writeFileSync(BASE_CONF, webConf);
+  process.on('exit', () => { try { fs.writeFileSync(BASE_CONF, baseConf); } catch (e) {} });
+}
+run(process.execPath, [CLI, 'ios', 'build', '--no-sign', '--archive-only', '--ci',
+  '--config', 'tauri.ios.conf.json'], { cwd: TAURI });
+if (webConf !== baseConf) fs.writeFileSync(BASE_CONF, baseConf);
 
 /* ---------- 4. 找 .app 并封 IPA ---------- */
 const buildDir = path.join(GEN, 'build');
